@@ -15,7 +15,7 @@ const db = new Database(DB_PATH);
 db.exec(`
   CREATE TABLE IF NOT EXISTS clientes (
     telefono     TEXT PRIMARY KEY,
-    tipo         TEXT NOT NULL CHECK(tipo IN ('mayorista','mayorista_b','minorista','food_service')),
+    tipo         TEXT NOT NULL CHECK(tipo IN ('mayorista_a','mayorista_mcba','minorista_mcba','minorista_entrega','dedicados','food_service','consumidor_final','nuevo')),
     nombre       TEXT,
     empresa      TEXT,
     email        TEXT,
@@ -77,7 +77,7 @@ export function listarClientes(tipo, excluirCancelados) {
     : "";
   const query = tipo
     ? "SELECT * FROM clientes WHERE tipo = ? AND activo = 1" + condCancelado + " ORDER BY nombre"
-    : "SELECT * FROM clientes WHERE activo = 1" + condCancelado + " ORDER BY tipo, nombre";
+    : "SELECT * FROM clientes WHERE activo = 1 AND tipo != 'nuevo'" + condCancelado + " ORDER BY tipo, nombre";
   return tipo ? db.prepare(query).all(tipo) : db.prepare(query).all();
 }
 

@@ -6,6 +6,7 @@ import { routearMensaje } from "./agentes/router.js";
 import panelRouter    from "./rutas/panel.js";
 import nuevosRouter   from "./rutas/nuevos.js";
 import cobranzaRouter from "./rutas/cobranza.js";
+import ofertaRouter    from "./rutas/oferta.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -65,6 +66,7 @@ app.post("/webhook", async (req, res) => {
 app.use("/api", panelRouter);
 app.use("/api", nuevosRouter);
 app.use("/api", cobranzaRouter);
+app.use("/api", ofertaRouter);
 
 // Health check
 app.get("/", (req, res) => res.json({ status:"ok", version:"3.0", panel:"/panel" }));
