@@ -58,14 +58,14 @@ Los clientes ya saben los horarios del mercado, solo preguntar el dia.
 IMPORTANTE: Nosotros llevamos la mercaderia al puesto, ellos no buscan.
 `.trim();
 
-export const INSTRUCCIONES_RETIRO_MINORISTA_MCBA = \`
+export const INSTRUCCIONES_RETIRO_MINORISTA_MCBA = `
 RETIRO EN PUESTO:
 Los clientes Minorista MCBA vienen a buscar la mercaderia a nuestro puesto del Mercado Central de Buenos Aires, Nave 4, Puestos 2-4-6.
 Las opciones de retiro son: Domingo noche, Martes noche, Jueves noche.
 Al confirmar el pedido pregunta que dia prefiere pasar a buscar.
 Ejemplo: "Perfecto! Para cuando queres pasar a buscar al puesto? Estamos en Nave 4 puestos 2-4-6. Tenemos Domingo, Martes o Jueves a la noche."
 IMPORTANTE: Nunca digas que no tenemos puesto en el Mercado Central. SI tenemos puesto propio desde 1997.
-\`.trim();
+`.trim();
 
 export const INSTRUCCIONES_ENTREGA_DIRECTA = `
 ENTREGA A DOMICILIO:
