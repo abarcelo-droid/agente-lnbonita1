@@ -11,6 +11,11 @@ const app = express();
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 
+// Logo y archivos del panel
+app.use("/static", express.static(path.join(__dirname, ".")));
+
+app.use("/static", express.static(path.join(__dirname, ".")));
+
 // Panel web visual
 app.get("/panel", (req, res) => {
   res.sendFile(path.join(__dirname, "panel.html"));
