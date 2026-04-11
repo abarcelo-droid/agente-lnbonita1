@@ -9,6 +9,11 @@ import {
 } from "../servicios/db.js";
 import { listarCatalogo, catalogoComoTexto, upsertItem, actualizarStock, eliminarItem } from "../servicios/catalogo.js";
 
+const __dirnameP = path.dirname(fileURLToPath(import.meta.url));
+const UP = path.join(__dirnameP, "../../data/uploads/fotos");
+fs.mkdirSync(UP, { recursive: true });
+const upload = multer({ dest: UP });
+
 const router = Router();
 
 // ── Clientes ───────────────────────────────────────────────────────────────
@@ -232,7 +237,3 @@ router.get("/logistica", (req, res) => {
   res.json(resultado);
 });
 
-const __dirnameP = path.dirname(fileURLToPath(import.meta.url));
-const UP = path.join(__dirnameP, "../../data/uploads/fotos");
-fs.mkdirSync(UP, { recursive: true });
-const upload = multer({ dest: UP });
