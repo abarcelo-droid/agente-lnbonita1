@@ -39,6 +39,58 @@ Ejemplo: "Buenísimo, gracias! Te paso el pedido a los chicos para que lo armen.
 Nada corporativo — hablá como un empleado real de la distribuidora.
 `.trim();
 
+
+
+// ── Opciones de retiro/entrega ────────────────────────────────────────────
+export const DIAS_RETIRO_MAYORISTA = [
+  "Domingo noche",
+  "Martes noche",
+  "Jueves noche",
+];
+
+export const INSTRUCCIONES_RETIRO_MAYORISTA = `
+RETIRO EN CD:
+Los mayoristas retiran en nuestro Centro de Distribucion (CD).
+Las opciones de retiro son: Domingo noche, Martes noche, Jueves noche.
+Al confirmar el pedido SIEMPRE pregunta que dia prefiere retirar.
+Ejemplo: "Perfecto! Para cuando queres pasar a buscar? Tenemos Domingo, Martes o Jueves a la noche."
+Guarda el dia elegido en el resumen del pedido.
+`.trim();
+
+export const INSTRUCCIONES_ENTREGA_DIRECTA = `
+ENTREGA A DOMICILIO:
+El pedido se entrega directamente en el domicilio del cliente.
+Al confirmar el pedido confirma la direccion de entrega y coordina el horario.
+`.trim();
+
+// ── Helper: instrucciones de pago segun metodo ────────────────────────────
+export function instruccionesPago(metodoPago, tipo) {
+  const esMayorista = ['mayorista','mayorista_b','food_service'].includes(tipo);
+
+  if (metodoPago === 'cuenta_corriente' || !metodoPago) {
+    return `METODO DE PAGO: Cuenta corriente.
+El pago va a cuenta corriente — NO pidas transferencia ni link de pago. Confirma el pedido directamente.`;
+  }
+
+  if (metodoPago === 'transferencia') {
+    if (esMayorista) {
+      return `METODO DE PAGO: Transferencia previa.
+Este cliente paga con transferencia ANTES de que se arme el pedido.
+Al confirmar el pedido decile: "Perfecto! Para confirmar el pedido necesito que hagas la transferencia. Te paso los datos: Banco [completar], CBU [completar], Alias [completar], CUIT [completar]. Cuando tengas el comprobante mandamelo y enseguida arrancamos con el pedido."
+Tambien puede optar por efectivo contra entrega — si lo menciona, acepta esa opcion.`;
+    } else {
+      return `METODO DE PAGO: Transferencia previa o efectivo.
+Al confirmar el pedido ofrece dos opciones:
+1) Transferencia previa: "Te paso los datos para transferir: Banco [completar], CBU [completar], Alias [completar]. Manda el comprobante y listo."
+2) Efectivo contra entrega: "Si prefis, tambien podes pagar en efectivo cuando te llega el pedido."
+Deja que el cliente elija.`;
+    }
+  }
+
+  // fallback
+  return `METODO DE PAGO: Cuenta corriente.`;
+}
+
 // ── MAYORISTA A — Nico ────────────────────────────────────────────────────
 export function promptMayoristaA(nombreCliente, catalogo) {
   return `Sos Nico, vendedor de La Niña Bonita, una distribuidora frutihortícola familiar con más de 80 años en el mercado, producción propia en San Juan.
