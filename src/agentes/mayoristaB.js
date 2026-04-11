@@ -1,15 +1,15 @@
 import { llamarClaude } from "./base.js";
-import { obtenerCatalogo, catalogoComoTexto } from "../servicios/sheets.js";
+import { catalogoComoTexto } from "../servicios/catalogo.js";
 import { crearPedido } from "../servicios/db.js";
-import { promptMayoristaB } from "./prompts.js";
+import { promptMayoristaB , instruccionesPago, INSTRUCCIONES_RETIRO_MAYORISTA } from "./prompts.js";
 
 export async function manejarMayoristaB(telefono, mensaje, cliente) {
-  const productos = await obtenerCatalogo("mayorista_b");
-  const catalogo  = catalogoComoTexto(productos);
+  const catalogo  = catalogoComoTexto("mayorista_b");
   const nombre    = cliente?.nombre || "amigo";
 
-  const systemPrompt = promptMayoristaB(nombre, catalogo);
-  const respuesta    = await llamarClaude(telefono, mensaje, systemPrompt);
+  const metodoPago = cliente?.metodo_pago || 'cuenta_corriente';
+  const systemPrompt = promptMayoristaB(nombre, catalogo) + '\n\n' + instruccionesPago(metodoPago, 'mayorista_b') + '\n\n' + INSTRUCCIONES_RETIRO_MAYORISTA;
+  const respuesta    = await llamarClaude(telefono, mensaje, systemPrompt, cliente);
 
   const linea = respuesta.split("\n").find(l => l.startsWith("PEDIDO_MAYORISTA_B|"));
   if (!linea) return respuesta;

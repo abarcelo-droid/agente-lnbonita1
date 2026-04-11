@@ -1,9 +1,13 @@
+import multer from "multer";
+import fs from "fs";
+import path from "path";
+import { fileURLToPath } from "url";
 import { Router } from "express";
 import {
   listarClientes, crearCliente, actualizarCliente,
   listarPedidos, actualizarEstadoPedido
 } from "../servicios/db.js";
-import { obtenerCatalogo, catalogoComoTexto, invalidarCache } from "../servicios/sheets.js";
+import { listarCatalogo, catalogoComoTexto, upsertItem, actualizarStock, eliminarItem } from "../servicios/catalogo.js";
 
 const router = Router();
 
@@ -50,19 +54,35 @@ router.patch("/pedidos/:id", (req, res) => {
 // ── Catálogos ──────────────────────────────────────────────────────────────
 
 // GET /api/catalogo/:tipo  — previsualizar el catálogo cargado en Sheets
-router.get("/catalogo/:tipo", async (req, res) => {
+router.get("/catalogo/:tipo", (req, res) => {
   const { tipo } = req.params;
   if (!["mayorista","mayorista_b","minorista","food_service"].includes(tipo)) {
-    return res.status(400).json({ error: "Tipo inválido" });
+    return res.status(400).json({ error: "Tipo invalido" });
   }
-  const productos = await obtenerCatalogo(tipo);
-  res.json({ tipo, productos, texto: catalogoComoTexto(productos) });
+  const productos = listarCatalogo(tipo);
+  res.json({ tipo, productos, texto: catalogoComoTexto(tipo) });
 });
 
-// POST /api/catalogo/invalidar  — forzar recarga desde Sheets
 router.post("/catalogo/invalidar", (req, res) => {
-  invalidarCache(req.body.tipo || null);
-  res.json({ ok: true, mensaje: "Cache invalidado. Próxima consulta leerá Sheets." });
+  res.json({ ok: true, mensaje: "Catalogo integrado - no requiere recarga" });
+});
+
+// CRUD catalogo integrado
+router.post("/catalogo", upload.single("foto"), (req, res) => {
+  const datos = { ...req.body };
+  if (req.file) datos.foto_path = "/data/uploads/fotos/" + req.file.filename;
+  upsertItem(datos);
+  res.status(201).json({ ok: true });
+});
+
+router.patch("/catalogo/:id/stock", (req, res) => {
+  actualizarStock(req.params.id, req.body.stock_qty);
+  res.json({ ok: true });
+});
+
+router.delete("/catalogo/:id", (req, res) => {
+  eliminarItem(req.params.id);
+  res.json({ ok: true });
 });
 
 // ── Envío masivo de listados (botón del panel) ─────────────────────────────
@@ -72,11 +92,11 @@ router.post("/catalogo/invalidar", (req, res) => {
 // Por ahora devuelve el listado que se enviaría para que puedas verificarlo.
 router.post("/enviar-listado", async (req, res) => {
   const { tipo } = req.body;
-  if (!["mayorista","mayorista_b","food_service"].includes(tipo)) {
-    return res.status(400).json({ error: "Solo disponible para mayorista, mayorista_b y food_service" });
+  if (!["mayorista","mayorista_b","minorista","food_service"].includes(tipo)) {
+    return res.status(400).json({ error: "Tipo invalido" });
   }
 
-  const clientes  = listarClientes(tipo);
+  const clientes  = listarClientes(tipo, true); // excluir cuentas canceladas
   const productos = await obtenerCatalogo(tipo);
   const texto     = catalogoComoTexto(productos);
 
@@ -101,3 +121,118 @@ router.post("/enviar-listado", async (req, res) => {
 });
 
 export default router;
+
+// ── Conversaciones en vivo ─────────────────────────────────────────────────
+import {
+  listarConversaciones, obtenerConversacion,
+  pausarConversacion, reactivarConversacion,
+  agregarInstruccion, historialInstrucciones,
+} from "../servicios/conversaciones.js";
+import { generarResumen } from "../agentes/base.js";
+import { obtenerSesion }  from "../servicios/db.js";
+
+// GET /api/conversaciones?filtro=atencion|pausadas|todas
+router.get("/conversaciones", (req, res) => {
+  const convs = listarConversaciones(req.query.filtro || "todas");
+  res.json(convs);
+});
+
+// GET /api/conversaciones/:telefono — detalle + historial de mensajes
+router.get("/conversaciones/:telefono", (req, res) => {
+  const tel  = decodeURIComponent(req.params.telefono);
+  const conv = obtenerConversacion(tel);
+  const ses  = obtenerSesion(tel);
+  const hist = historialInstrucciones(tel);
+  res.json({ conversacion: conv, mensajes: ses.mensajes || [], instrucciones: hist });
+});
+
+// POST /api/conversaciones/:telefono/pausar
+router.post("/conversaciones/:telefono/pausar", (req, res) => {
+  const tel   = decodeURIComponent(req.params.telefono);
+  const autor = req.body.autor || "equipo";
+  pausarConversacion(tel, autor);
+  res.json({ ok: true });
+});
+
+// POST /api/conversaciones/:telefono/reactivar
+router.post("/conversaciones/:telefono/reactivar", (req, res) => {
+  const tel = decodeURIComponent(req.params.telefono);
+  reactivarConversacion(tel);
+  res.json({ ok: true });
+});
+
+// POST /api/conversaciones/:telefono/instruccion
+// body: { tipo, contenido, autor }
+// tipos: descuento | rechazo | info_extra | reclamo | libre
+router.post("/conversaciones/:telefono/instruccion", (req, res) => {
+  const tel = decodeURIComponent(req.params.telefono);
+  const { tipo, contenido, autor } = req.body;
+  if (!contenido) return res.status(400).json({ error: "contenido requerido" });
+  const id = agregarInstruccion(tel, tipo || "libre", contenido, autor || "equipo");
+  res.json({ ok: true, id });
+});
+
+// GET /api/conversaciones/:telefono/resumen — resumen IA de la charla
+router.get("/conversaciones/:telefono/resumen", async (req, res) => {
+  const tel    = decodeURIComponent(req.params.telefono);
+  const resumen = await generarResumen(tel);
+  res.json({ resumen });
+});
+
+// ── Logistica: pedidos pendientes agrupados por dia de entrega ─────────────
+router.get("/logistica", (req, res) => {
+  const fecha = req.query.fecha || new Date().toISOString().slice(0,10);
+  const todos = listarPedidos({ estado: "pendiente" });
+
+  // Agrupar por horario_entrega (dia de retiro o entrega)
+  const grupos = {};
+  const sinFecha = [];
+
+  todos.forEach(p => {
+    const esMayorista = ["mayorista","mayorista_b"].includes(p.tipo_cliente);
+    const esEntrega   = ["minorista","food_service"].includes(p.tipo_cliente);
+    const key = p.horario_entrega || null;
+
+    const item = {
+      ...p,
+      modo_entrega: esMayorista ? "retiro_cd" : "entrega_directa",
+    };
+
+    if (key) {
+      if (!grupos[key]) grupos[key] = [];
+      grupos[key].push(item);
+    } else {
+      sinFecha.push(item);
+    }
+  });
+
+  // Ordenar dias: primero Domingo, Martes, Jueves noche, luego resto
+  const ordenDias = ["Domingo noche","Martes noche","Jueves noche"];
+  const diasOrdenados = [
+    ...ordenDias.filter(d => grupos[d]),
+    ...Object.keys(grupos).filter(d => !ordenDias.includes(d))
+  ];
+
+  const resultado = diasOrdenados.map(dia => ({
+    dia,
+    pedidos: grupos[dia],
+    total_cd:      grupos[dia].filter(p => p.modo_entrega === "retiro_cd").length,
+    total_entrega: grupos[dia].filter(p => p.modo_entrega === "entrega_directa").length,
+  }));
+
+  if (sinFecha.length) {
+    resultado.push({
+      dia: "Sin fecha asignada",
+      pedidos: sinFecha,
+      total_cd:      sinFecha.filter(p => p.modo_entrega === "retiro_cd").length,
+      total_entrega: sinFecha.filter(p => p.modo_entrega === "entrega_directa").length,
+    });
+  }
+
+  res.json(resultado);
+});
+
+const __dirnameP = path.dirname(fileURLToPath(import.meta.url));
+const UP = path.join(__dirnameP, "../../data/uploads/fotos");
+fs.mkdirSync(UP, { recursive: true });
+const upload = multer({ dest: UP });

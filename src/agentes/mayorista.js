@@ -1,15 +1,15 @@
 import { llamarClaude } from "./base.js";
-import { obtenerCatalogo, catalogoComoTexto } from "../servicios/sheets.js";
+import { catalogoComoTexto } from "../servicios/catalogo.js";
 import { crearPedido } from "../servicios/db.js";
-import { promptMayoristaA } from "./prompts.js";
+import { promptMayoristaA , instruccionesPago, INSTRUCCIONES_RETIRO_MAYORISTA } from "./prompts.js";
 
 export async function manejarMayorista(telefono, mensaje, cliente) {
-  const productos = await obtenerCatalogo("mayorista");
-  const catalogo  = catalogoComoTexto(productos);
+  const catalogo  = catalogoComoTexto("mayorista");
   const nombre    = cliente?.nombre || "amigo";
 
-  const systemPrompt = promptMayoristaA(nombre, catalogo);
-  const respuesta    = await llamarClaude(telefono, mensaje, systemPrompt);
+  const metodoPago = cliente?.metodo_pago || 'cuenta_corriente';
+  const systemPrompt = promptMayoristaA(nombre, catalogo) + '\n\n' + instruccionesPago(metodoPago, 'mayorista') + '\n\n' + INSTRUCCIONES_RETIRO_MAYORISTA;
+  const respuesta    = await llamarClaude(telefono, mensaje, systemPrompt, cliente);
   return procesarPedido(respuesta, telefono, "mayorista", "PEDIDO_MAYORISTA");
 }
 
