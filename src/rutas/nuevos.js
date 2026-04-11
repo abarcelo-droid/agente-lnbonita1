@@ -78,7 +78,7 @@ router.delete("/catalogo-editable/:id", (req, res) => {
   eliminarCatalogoItem(req.params.id);
   res.json({ ok: true });
 });
-router.get("/catalogo-editable/:tipo/:codigo/foto", (req, res) => {
+router.get("/catalogo-editable/:tipo/:codigo/foto", async (req, res) => {
   const { tipo, codigo } = req.params;
   const { obtenerFotoItem } = await import("../servicios/db2.js");
   const fotoPath = obtenerFotoItem(tipo, codigo);
