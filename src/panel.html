@@ -400,6 +400,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       </div>
       <div class="fl"><label id="lbl-costo">Costo ($ por unidad)</label><input type="number" id="p-costo" placeholder="0"></div>
       <div class="fl"><label>Flete ($ por unidad)</label><input type="number" id="p-flete" placeholder="0"></div>
+      <div class="fl fg-full"><label>Nombre Retail</label><select id="p-nombre-retail"><option value="">-- Sin asignar --</option></select></div>
       <div class="fl fg-full"><label>Notas</label><input id="p-notas"></div>
       <div class="fl fg-full"><label>Foto</label><input type="file" id="p-foto" accept="image/*"></div>
       <input type="hidden" id="p-oferta">
@@ -701,6 +702,7 @@ function openModalProd(oferta) {
   document.getElementById('form-prod').reset();
   document.getElementById('p-oferta').value = ofertaAct;
   document.getElementById('lbl-costo').textContent = 'Costo ($ por unidad)';
+  cargarOpcionesRetailEnForm(null);
   document.getElementById('mb-prod').classList.add('on');
 }
 
@@ -722,7 +724,22 @@ function editarProd(id) {
     document.getElementById('p-notas').value      = p.notas||'';
     document.getElementById('p-consignacion').checked = !!p.consignacion;
     toggleConsig();
+    cargarOpcionesRetailEnForm(p.nombre_retail);
     document.getElementById('mb-prod').classList.add('on');
+  });
+}
+
+
+function cargarOpcionesRetailEnForm(valorActual) {
+  var sel = document.getElementById('p-nombre-retail');
+  if (!sel) return;
+  api('/api/retail/productos').then(function(lista) {
+    var opts = '<option value="">-- Sin asignar --</option>';
+    lista.forEach(function(r) {
+      var sel2 = valorActual === r.nombre ? ' selected' : '';
+      opts += '<option value="' + r.nombre + '"' + sel2 + '>' + (r.categoria ? '['+r.categoria+'] ' : '') + r.nombre + '</option>';
+    });
+    sel.innerHTML = opts;
   });
 }
 
@@ -749,6 +766,7 @@ function saveProd(e) {
   fd.append('flete',        elVal('p-flete'));
   fd.append('notas',        elVal('p-notas'));
   fd.append('consignacion', document.getElementById('p-consignacion').checked ? '1' : '0');
+  var nrEl = document.getElementById('p-nombre-retail'); if(nrEl) fd.append('nombre_retail', nrEl.value);
   if (foto) fd.append('foto', foto);
   fetch('/api/oferta/producto',{method:'POST',body:fd}).then(function(){
     toast('Producto guardado','ok'); closeModal('mb-prod'); loadOfertaProd(ofertaAct);
