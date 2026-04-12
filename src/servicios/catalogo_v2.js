@@ -56,6 +56,8 @@ db.exec(`
     costo       REAL DEFAULT 0,
     flete       REAL DEFAULT 0,
     consignacion INTEGER DEFAULT 0,
+    retail       INTEGER DEFAULT 0,
+    nombre_retail TEXT,
     notas       TEXT,
     activo      INTEGER DEFAULT 1,
     actualizado TEXT DEFAULT (datetime('now','localtime')),
@@ -71,6 +73,172 @@ db.exec(`
     PRIMARY KEY (producto_id, tipo_cliente)
   );
 `);
+
+// Tabla de nombres retail
+db.exec(`
+  CREATE TABLE IF NOT EXISTS retail_productos (
+    id        INTEGER PRIMARY KEY AUTOINCREMENT,
+    nombre    TEXT NOT NULL UNIQUE,
+    categoria TEXT,
+    activo    INTEGER DEFAULT 1,
+    creado_en TEXT DEFAULT (datetime('now','localtime'))
+  );
+
+  -- Matriz de gastos generales
+  CREATE TABLE IF NOT EXISTS retail_gastos (
+    id        INTEGER PRIMARY KEY AUTOINCREMENT,
+    nombre    TEXT NOT NULL,
+    monto     REAL DEFAULT 0,
+    kg_bulto  REAL DEFAULT 1,
+    activo    INTEGER DEFAULT 1
+  );
+
+  -- Precios por canal de venta
+  CREATE TABLE IF NOT EXISTS retail_precios_canal (
+    retail_producto_id INTEGER NOT NULL,
+    canal              TEXT NOT NULL,
+    precio             REAL DEFAULT 0,
+    PRIMARY KEY (retail_producto_id, canal)
+  );
+
+  -- Seleccion de proveedor y gastos por producto retail
+  CREATE TABLE IF NOT EXISTS retail_seleccion (
+    retail_producto_id INTEGER NOT NULL,
+    oferta_producto_id INTEGER NOT NULL,
+    gastos_ids         TEXT DEFAULT '[]',
+    PRIMARY KEY (retail_producto_id)
+  );
+`);
+
+// Migracion kg_bulto en retail_gastos
+(function() {
+  var cols = db.prepare("PRAGMA table_info(retail_gastos)").all().map(function(c){ return c.name; });
+  if (cols.indexOf('kg_bulto') < 0) {
+    try { db.exec("ALTER TABLE retail_gastos ADD COLUMN kg_bulto REAL DEFAULT 1"); } catch(e) {}
+  }
+})();
+
+// Migracion categoria en retail_productos
+(function() {
+  var cols = db.prepare("PRAGMA table_info(retail_productos)").all().map(function(c){ return c.name; });
+  if (cols.indexOf('categoria') < 0) {
+    try { db.exec("ALTER TABLE retail_productos ADD COLUMN categoria TEXT"); } catch(e) {}
+  }
+})();
+
+export function listarRetailProductos() {
+  return db.prepare("SELECT * FROM retail_productos WHERE activo = 1 ORDER BY categoria, nombre").all();
+}
+export function crearRetailProducto(nombre, categoria) {
+  return db.prepare("INSERT OR IGNORE INTO retail_productos (nombre, categoria) VALUES (?,?)").run(nombre, categoria||null);
+}
+export function eliminarRetailProducto(id) {
+  db.prepare("UPDATE retail_productos SET activo = 0 WHERE id = ?").run(id);
+}
+
+// Gastos generales
+export function listarGastos() {
+  return db.prepare("SELECT * FROM retail_gastos WHERE activo = 1 ORDER BY nombre").all();
+}
+export function crearGasto(nombre, monto, kg_bulto) {
+  return db.prepare("INSERT INTO retail_gastos (nombre, monto, kg_bulto) VALUES (?,?,?)").run(nombre, parseFloat(monto)||0, parseFloat(kg_bulto)||1);
+}
+export function actualizarGasto(id, nombre, monto, kg_bulto) {
+  db.prepare("UPDATE retail_gastos SET nombre=?, monto=?, kg_bulto=? WHERE id=?").run(nombre, parseFloat(monto)||0, parseFloat(kg_bulto)||1, id);
+}
+export function eliminarGasto(id) {
+  db.prepare("UPDATE retail_gastos SET activo = 0 WHERE id = ?").run(id);
+}
+
+// Seleccion proveedor y gastos por producto retail
+export function obtenerSeleccion(retailProductoId) {
+  return db.prepare("SELECT * FROM retail_seleccion WHERE retail_producto_id = ?").get(retailProductoId);
+}
+export function guardarSeleccion(retailProductoId, ofertaProductoId, gastosIds) {
+  db.prepare(`
+    INSERT INTO retail_seleccion (retail_producto_id, oferta_producto_id, gastos_ids)
+    VALUES (?,?,?)
+    ON CONFLICT(retail_producto_id) DO UPDATE SET
+      oferta_producto_id=excluded.oferta_producto_id,
+      gastos_ids=excluded.gastos_ids
+  `).run(parseInt(retailProductoId), parseInt(ofertaProductoId), JSON.stringify(gastosIds||[]));
+}
+
+export function guardarPreciosCanal(retailProductoId, precios) {
+  const stmt = db.prepare("INSERT INTO retail_precios_canal (retail_producto_id, canal, precio) VALUES (?,?,?) ON CONFLICT(retail_producto_id,canal) DO UPDATE SET precio=excluded.precio");
+  Object.keys(precios).forEach(function(canal) {
+    stmt.run(parseInt(retailProductoId), canal, parseFloat(precios[canal])||0);
+  });
+}
+
+export function obtenerPreciosCanal(retailProductoId) {
+  const rows = db.prepare("SELECT canal, precio FROM retail_precios_canal WHERE retail_producto_id = ?").all(retailProductoId);
+  const map = {};
+  rows.forEach(function(r){ map[r.canal] = r.precio; });
+  return map;
+}
+
+// Vista retail completa: productos con proveedores disponibles y precio por kilo
+export function vistaRetail() {
+  const retailProds = listarRetailProductos();
+  const gastos      = listarGastos();
+  const ofertaProds = db.prepare("SELECT * FROM oferta_productos WHERE retail = 1 AND activo = 1").all();
+
+  return retailProds.map(function(rp) {
+    const seleccion = obtenerSeleccion(rp.id);
+    const gastosSelIds = seleccion ? JSON.parse(seleccion.gastos_ids||'[]') : [];
+    const gastosSum = gastos.filter(function(g){ return gastosSelIds.indexOf(g.id) >= 0; }).reduce(function(s,g){ var kg = g.kg_bulto || 1; return s + ((g.monto||0) / kg); }, 0);
+
+    // Encontrar productos de oferta que tienen este nombre_retail
+    const proveedores = ofertaProds.filter(function(op){ return op.nombre_retail === rp.nombre; }).map(function(op) {
+      const cbase   = (parseFloat(op.costo)||0) + (parseFloat(op.flete)||0);
+      const kilos   = parseFloat((op.kilaje||'').replace(/[^0-9.]/g,'')) || 1;
+      const precioKg = kilos > 0 ? (cbase / kilos) : 0;
+      return {
+        id:          op.id,
+        codigo:      op.codigo,
+        nombre:      op.nombre,
+        proveedor:   op.proveedor||'-',
+        costo:       op.costo,
+        flete:       op.flete,
+        cbase:       cbase,
+        kilaje:      op.kilaje,
+        kilos:       kilos,
+        precio_kg:   precioKg,
+        seleccionado: seleccion && seleccion.oferta_producto_id === op.id,
+      };
+    });
+
+    const provSeleccionado = proveedores.find(function(p){ return p.seleccionado; });
+    const costoBase = provSeleccionado ? (provSeleccionado.cbase / (provSeleccionado.kilos||1)) : 0;
+    const costoTotal = costoBase + gastosSum;
+
+    const preciosCanal = obtenerPreciosCanal(rp.id);
+    return {
+      id:           rp.id,
+      nombre:       rp.nombre,
+      categoria:    rp.categoria,
+      proveedores:  proveedores,
+      gastos_seleccionados: gastosSelIds,
+      gastos_sum:   gastosSum,
+      costo_kg_base: costoBase,
+      costo_kg_total: costoTotal,
+      oferta_producto_id: seleccion ? seleccion.oferta_producto_id : null,
+      precios_canal: preciosCanal,
+    };
+  });
+}
+
+// Migracion: agregar columna retail si no existe
+(function() {
+  var cols = db.prepare("PRAGMA table_info(oferta_productos)").all().map(function(c){ return c.name; });
+  if (cols.indexOf('retail') < 0) {
+    try { db.exec("ALTER TABLE oferta_productos ADD COLUMN retail INTEGER DEFAULT 0"); } catch(e) {}
+  }
+  if (cols.indexOf('nombre_retail') < 0) {
+    try { db.exec("ALTER TABLE oferta_productos ADD COLUMN nombre_retail TEXT"); } catch(e) {}
+  }
+})();
 
 // ── Productos ──────────────────────────────────────────────────────────────
 export function listarProductos(oferta) {
@@ -100,18 +268,18 @@ export function obtenerProducto(id) {
 
 export function upsertProducto(datos) {
   const result = db.prepare(`
-    INSERT INTO oferta_productos (oferta, codigo, nombre, categoria, descripcion, origen, kilaje, marca, proveedor, costo, flete, consignacion, foto_path, notas)
-    VALUES (@oferta, @codigo, @nombre, @categoria, @descripcion, @origen, @kilaje, @marca, @proveedor, @costo, @flete, @consignacion, @foto_path, @notas)
+    INSERT INTO oferta_productos (oferta, codigo, nombre, categoria, descripcion, origen, kilaje, marca, proveedor, costo, flete, consignacion, retail, nombre_retail, foto_path, notas)
+    VALUES (@oferta, @codigo, @nombre, @categoria, @descripcion, @origen, @kilaje, @marca, @proveedor, @costo, @flete, @consignacion, @retail, @nombre_retail, @foto_path, @notas)
     ON CONFLICT(oferta, codigo) DO UPDATE SET
       nombre=excluded.nombre, categoria=excluded.categoria, descripcion=excluded.descripcion,
-      origen=excluded.origen, kilaje=excluded.kilaje, marca=excluded.marca, proveedor=excluded.proveedor, costo=excluded.costo, flete=excluded.flete, consignacion=excluded.consignacion,
+      origen=excluded.origen, kilaje=excluded.kilaje, marca=excluded.marca, proveedor=excluded.proveedor, costo=excluded.costo, flete=excluded.flete, consignacion=excluded.consignacion, retail=excluded.retail, nombre_retail=excluded.nombre_retail,
       foto_path=COALESCE(excluded.foto_path, foto_path), notas=excluded.notas,
       actualizado=datetime('now','localtime')
   `).run({
     oferta: datos.oferta, codigo: datos.codigo, nombre: datos.nombre,
     categoria: datos.categoria || '', descripcion: datos.descripcion || '',
     origen: datos.origen || '', kilaje: datos.kilaje || '', marca: datos.marca || '',
-    proveedor: datos.proveedor || '', costo: parseFloat(datos.costo) || 0, flete: parseFloat(datos.flete) || 0, consignacion: parseInt(datos.consignacion) || 0,
+    proveedor: datos.proveedor || '', costo: parseFloat(datos.costo) || 0, flete: parseFloat(datos.flete) || 0, consignacion: parseInt(datos.consignacion) || 0, retail: parseInt(datos.retail) || 0, nombre_retail: datos.nombre_retail || null,
     foto_path: datos.foto_path || null, notas: datos.notas || '',
   });
   return result.lastInsertRowid || db.prepare("SELECT id FROM oferta_productos WHERE oferta=? AND codigo=?").get(datos.oferta, datos.codigo).id;
