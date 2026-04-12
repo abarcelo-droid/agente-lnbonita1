@@ -75,13 +75,13 @@ router.delete("/retail/productos/:id", (req, res) => {
 // Archivos maestros: matriz de gastos
 router.get("/retail/gastos", (req, res) => res.json(listarGastos()));
 router.post("/retail/gastos", (req, res) => {
-  const { nombre, monto, kg_bulto } = req.body;
+  const { nombre, proveedor, monto, kg_bulto } = req.body;
   if (!nombre) return res.status(400).json({ error: "Falta nombre" });
-  crearGasto(nombre.trim(), monto, kg_bulto);
+  crearGasto(nombre.trim(), proveedor||null, monto, kg_bulto);
   res.status(201).json({ ok: true });
 });
 router.patch("/retail/gastos/:id", (req, res) => {
-  actualizarGasto(req.params.id, req.body.nombre, req.body.monto, req.body.kg_bulto);
+  actualizarGasto(req.params.id, req.body.nombre, req.body.proveedor, req.body.monto, req.body.kg_bulto);
   res.json({ ok: true });
 });
 router.delete("/retail/gastos/:id", (req, res) => {

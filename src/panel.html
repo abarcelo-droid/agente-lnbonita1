@@ -320,16 +320,17 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     <button class="btn btn-burg" onclick="openAddGasto()">+ Agregar gasto</button>
   </div>
   <div id="add-gasto-form" style="display:none;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:20px;margin-bottom:16px">
-    <div style="display:flex;gap:10px;align-items:flex-end">
-      <div class="fl" style="flex:1"><label>Nombre del gasto</label><input id="inp-gasto-nom" placeholder="ej: Embalaje, Manipuleo, Logistica"></div>
-      <div class="fl" style="width:140px"><label>Monto ($ por bulto)</label><input type="number" id="inp-gasto-monto" placeholder="0"></div>
-      <div class="fl" style="width:140px"><label>Kg por bulto</label><input type="number" id="inp-gasto-kg" placeholder="ej: 10" step="0.1"></div>
+    <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap">
+      <div class="fl" style="flex:1;min-width:180px"><label>Nombre del gasto</label><input id="inp-gasto-nom" placeholder="ej: Embalaje, Manipuleo"></div>
+      <div class="fl" style="flex:1;min-width:150px"><label>Proveedor</label><input id="inp-gasto-prov" placeholder="ej: Mario, Logistica SA"></div>
+      <div class="fl" style="width:130px"><label>$ por bulto</label><input type="number" id="inp-gasto-monto" placeholder="0"></div>
+      <div class="fl" style="width:120px"><label>Kg por bulto</label><input type="number" id="inp-gasto-kg" placeholder="ej: 10" step="0.1"></div>
       <button class="btn btn-burg" onclick="saveGasto()">Guardar</button>
       <button class="btn btn-ol" onclick="document.getElementById('add-gasto-form').style.display='none'">Cancelar</button>
     </div>
   </div>
   <div class="tw"><table>
-    <thead><tr><th>Nombre del gasto</th><th style="text-align:right">$ / Bulto</th><th style="text-align:right">Kg / Bulto</th><th style="text-align:right">$ / Kg</th><th></th></tr></thead>
+    <thead><tr><th>Nombre del gasto</th><th>Proveedor</th><th style="text-align:right">$ / Bulto</th><th style="text-align:right">Kg / Bulto</th><th></th></tr></thead>
     <tbody id="t-gastos"></tbody>
   </table></div>
 </div>
@@ -377,7 +378,6 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   <div class="mhd"><div class="mhd-t" id="mb-prod-titulo">Nuevo producto</div><button class="mcl" onclick="closeModal('mb-prod')">x</button></div>
   <form id="form-prod" onsubmit="saveProd(event)">
     <div class="fg">
-      <div class="fl" style="max-width:140px"><label>Codigo *</label><input id="p-cod" required style="font-variant-numeric:tabular-nums"></div>
       <div class="fl"><label>Nombre *</label><input id="p-nom" required></div>
       <div class="fl fg-full"><label>Categoria</label>
         <select id="p-cat">
@@ -698,7 +698,7 @@ function loadOfertaProd(oferta) {
 function openModalProd(oferta) {
   ofertaAct = oferta || ofertaAct;
   document.getElementById('p-oferta').value = ofertaAct;
-  document.getElementById('mb-prod-titulo').textContent = 'Nuevo producto - ' + (ofertaAct === 'oferta1' ? 'Oferta 1' : 'Oferta 2');
+  document.getElementById('mb-prod-titulo').textContent = 'Nuevo producto';
   document.getElementById('form-prod').reset();
   document.getElementById('p-oferta').value = ofertaAct;
   document.getElementById('lbl-costo').textContent = 'Costo ($ por unidad)';
@@ -711,7 +711,6 @@ function editarProd(id) {
     if (!p) return;
     document.getElementById('p-oferta').value    = p.oferta;
     document.getElementById('mb-prod-titulo').textContent = 'Editar producto';
-    document.getElementById('p-cod').value        = p.codigo||'';
     document.getElementById('p-nom').value        = p.nombre||'';
     document.getElementById('p-cat').value        = p.categoria||'';
     document.getElementById('p-desc').value       = p.descripcion||'';
@@ -754,7 +753,7 @@ function saveProd(e) {
   var foto = document.getElementById('p-foto').files[0];
   var fd = new FormData();
   fd.append('oferta',       elVal('p-oferta'));
-  fd.append('codigo',       elVal('p-cod'));
+  fd.append('codigo',       Date.now().toString());
   fd.append('nombre',       elVal('p-nom'));
   fd.append('categoria',    elVal('p-cat'));
   fd.append('descripcion',  elVal('p-desc'));
@@ -1098,16 +1097,13 @@ function loadGastos() {
     var rows = '';
     lista.forEach(function(g) {
       var kg = g.kg_bulto || 1;
-      var porKg = kg > 0 ? (g.monto / kg) : 0;
-      rows += '<tr>';
-      rows += '<td style="font-weight:500">' + g.nombre + '</td>';
-      rows += '<td style="font-variant-numeric:tabular-nums;text-align:right">$' + Number(g.monto||0).toLocaleString('es-AR') + ' / bulto</td>';
-      rows += '<td style="font-variant-numeric:tabular-nums;text-align:right">' + kg + ' kg</td>';
-      rows += '<td style="font-variant-numeric:tabular-nums;text-align:right;color:var(--burg-d);font-weight:500">$' + Math.round(porKg).toLocaleString('es-AR') + ' / kg</td>';
-      rows += '<td style="text-align:right">';
-      rows += '<button class="btn btn-ol btn-sm" style="margin-right:4px" onclick="editGasto(' + g.id + ',this)">Editar</button>';
-      rows += '<button class="btn btn-danger btn-sm" onclick="delGasto(' + g.id + ')">Eliminar</button>';
-      rows += '</td></tr>';
+      rows += '<tr data-gid="' + g.id + '">' ;
+      rows += '<td><input style="border:none;background:transparent;font-weight:500;width:100%;font-size:13px" value="' + (g.nombre||"") + '" onchange="actualizarGastoInline(' + g.id + ',this)"></td>';
+      rows += '<td><input style="border:none;background:transparent;color:var(--muted);width:100%;font-size:13px" value="' + (g.proveedor||"") + '" onchange="actualizarGastoInline(' + g.id + ',this)"></td>';
+      rows += '<td style="text-align:right"><input type="number" style="border:none;background:transparent;font-variant-numeric:tabular-nums;width:90px;text-align:right;font-size:13px" value="' + (g.monto||0) + '" onchange="actualizarGastoInline(' + g.id + ',this)"></td>';
+      rows += '<td style="text-align:right"><input type="number" step="0.1" style="border:none;background:transparent;font-variant-numeric:tabular-nums;width:70px;text-align:right;font-size:13px;color:var(--muted)" value="' + kg + '" onchange="actualizarGastoInline(' + g.id + ',this)"> kg</td>';
+      rows += '<td style="text-align:right"><button class="btn btn-danger btn-sm" onclick="delGasto(' + g.id + ')">Eliminar</button></td>';
+      rows += '</tr>';
     });
     document.getElementById('t-gastos').innerHTML = rows || '<tr><td colspan="5" class="empty">Sin gastos cargados</td></tr>';
   });
@@ -1122,13 +1118,28 @@ function saveGasto() {
   var nom   = document.getElementById('inp-gasto-nom').value.trim();
   var monto = document.getElementById('inp-gasto-monto').value;
   if (!nom) { toast('Escribe el nombre del gasto','err'); return; }
-  var kg = document.getElementById('inp-gasto-kg') ? parseFloat(document.getElementById('inp-gasto-kg').value) || 1 : 1;
-  api('/api/retail/gastos','POST',{nombre:nom,monto:parseFloat(monto)||0,kg_bulto:kg}).then(function(){
+  var kg   = document.getElementById('inp-gasto-kg') ? parseFloat(document.getElementById('inp-gasto-kg').value) || 1 : 1;
+  var prov = document.getElementById('inp-gasto-prov') ? document.getElementById('inp-gasto-prov').value.trim() : '';
+  api('/api/retail/gastos','POST',{nombre:nom,proveedor:prov,monto:parseFloat(monto)||0,kg_bulto:kg}).then(function(){
     document.getElementById('inp-gasto-nom').value = '';
     document.getElementById('inp-gasto-monto').value = '';
-    if(document.getElementById('inp-gasto-kg')) document.getElementById('inp-gasto-kg').value = '';
+    if(document.getElementById('inp-gasto-kg'))  document.getElementById('inp-gasto-kg').value = '';
+    if(document.getElementById('inp-gasto-prov')) document.getElementById('inp-gasto-prov').value = '';
     document.getElementById('add-gasto-form').style.display = 'none';
     toast('Gasto agregado','ok'); loadGastos();
+  });
+}
+
+
+function actualizarGastoInline(id, input) {
+  var row    = input.closest('tr');
+  var inputs = row.querySelectorAll('input');
+  var nombre = inputs[0].value.trim();
+  var prov   = inputs[1].value.trim();
+  var monto  = parseFloat(inputs[2].value) || 0;
+  var kg     = parseFloat(inputs[3].value) || 1;
+  api('/api/retail/gastos/'+id,'PATCH',{nombre:nombre,proveedor:prov,monto:monto,kg_bulto:kg}).then(function(){
+    toast('Gasto actualizado','ok');
   });
 }
 
@@ -1250,24 +1261,42 @@ function loadRetailView() {
 
 
 function calcRetailMargen(inp) {
-  var coef   = parseFloat(inp.getAttribute('data-coef')) || 1;
-  var costo  = parseFloat(inp.getAttribute('data-costo')) || 0;
   var rpid   = inp.getAttribute('data-rpid');
   var canal  = inp.getAttribute('data-canal');
-  var precio = parseFloat(inp.value) || 0;
-  var neto   = precio * coef * 1.105;
-  var margen = precio > 0 ? ((neto - costo) / precio * 100) : null;
-  var mc     = margen === null ? 'var(--muted)' : margen >= 20 ? 'var(--ok)' : margen >= 0 ? 'var(--warn)' : 'var(--danger)';
-  var netoEl = document.getElementById('neto-'+rpid+'-'+canal);
-  var mgnEl  = document.getElementById('mgn-'+rpid+'-'+canal);
+  var coef   = parseFloat(inp.getAttribute('data-coef')) || 1;
+  var costo  = parseFloat(inp.getAttribute('data-costo')) || 0;
+  var kgTot  = parseFloat(inp.getAttribute('data-kgtot')) || 0;
+  // Leer ambos inputs de la fila (precio y perdida)
+  var row    = inp.closest('tr');
+  var inputs = row ? row.querySelectorAll('input.p-inp') : [];
+  var precio  = inputs[0] ? parseFloat(inputs[0].value) || 0 : 0;
+  var perdida = inputs[1] ? parseFloat(inputs[1].value) || 0 : 0;
+  var kgReal  = kgTot > 0 ? Math.max(kgTot - perdida, 0.1) : 0;
+  var costoReal = kgReal > 0 && kgTot > 0 ? costo * (kgTot / kgReal) : costo;
+  var neto    = precio * coef * 1.105;
+  var margen  = precio > 0 ? ((neto - costoReal) / precio * 100) : null;
+  var mc      = margen === null ? 'var(--muted)' : margen >= 20 ? 'var(--ok)' : margen >= 0 ? 'var(--warn)' : 'var(--danger)';
+  var costoRealEl = document.getElementById('costoreal-'+rpid+'-'+canal);
+  var netoEl  = document.getElementById('neto-'+rpid+'-'+canal);
+  var mgnEl   = document.getElementById('mgn-'+rpid+'-'+canal);
+  if (costoRealEl) costoRealEl.textContent = '$'+Math.round(costoReal).toLocaleString('es-AR')+'/kg';
   if (netoEl) netoEl.textContent = precio > 0 ? '$'+Math.round(neto).toLocaleString('es-AR') : '-';
   if (mgnEl)  { mgnEl.textContent = margen !== null ? (margen>=0?'+':'')+margen.toFixed(1)+'%' : '-'; mgnEl.style.color = mc; }
 }
 
 function guardarPreciosCanal(rpid) {
-  var inputs = document.querySelectorAll('input[data-rpid="'+rpid+'"][data-canal]');
+  var CANALES = ['cencosud','carrefour','coto','chango','coop'];
   var precios = {};
-  inputs.forEach(function(inp){ precios[inp.getAttribute('data-canal')] = parseFloat(inp.value)||0; });
+  CANALES.forEach(function(canal) {
+    var row = document.querySelector('input[data-rpid="'+rpid+'"][data-canal="'+canal+'"]');
+    if (!row) return;
+    var tr = row.closest('tr');
+    var inputs = tr ? tr.querySelectorAll('input.p-inp') : [];
+    precios[canal] = {
+      precio:  parseFloat(inputs[0] ? inputs[0].value : 0) || 0,
+      perdida: parseFloat(inputs[1] ? inputs[1].value : 0) || 0
+    };
+  });
   api('/api/retail/precios-canal','POST',{retail_producto_id:rpid, precios:precios}).then(function(){
     toast('Precios guardados','ok');
   });

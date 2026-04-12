@@ -88,6 +88,7 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS retail_gastos (
     id        INTEGER PRIMARY KEY AUTOINCREMENT,
     nombre    TEXT NOT NULL,
+    proveedor TEXT,
     monto     REAL DEFAULT 0,
     kg_bulto  REAL DEFAULT 1,
     activo    INTEGER DEFAULT 1
@@ -98,6 +99,7 @@ db.exec(`
     retail_producto_id INTEGER NOT NULL,
     canal              TEXT NOT NULL,
     precio             REAL DEFAULT 0,
+    perdida_kg         REAL DEFAULT 0,
     PRIMARY KEY (retail_producto_id, canal)
   );
 
@@ -115,6 +117,24 @@ db.exec(`
   var cols = db.prepare("PRAGMA table_info(retail_gastos)").all().map(function(c){ return c.name; });
   if (cols.indexOf('kg_bulto') < 0) {
     try { db.exec("ALTER TABLE retail_gastos ADD COLUMN kg_bulto REAL DEFAULT 1"); } catch(e) {}
+  }
+})();
+
+// Migracion perdida_kg en retail_precios_canal
+(function() {
+  try {
+    var cols = db.prepare("PRAGMA table_info(retail_precios_canal)").all().map(function(c){ return c.name; });
+    if (cols.indexOf('perdida_kg') < 0) {
+      db.exec("ALTER TABLE retail_precios_canal ADD COLUMN perdida_kg REAL DEFAULT 0");
+    }
+  } catch(e) {}
+})();
+
+// Migracion proveedor en retail_gastos
+(function() {
+  var cols = db.prepare("PRAGMA table_info(retail_gastos)").all().map(function(c){ return c.name; });
+  if (cols.indexOf('proveedor') < 0) {
+    try { db.exec("ALTER TABLE retail_gastos ADD COLUMN proveedor TEXT"); } catch(e) {}
   }
 })();
 
@@ -140,11 +160,11 @@ export function eliminarRetailProducto(id) {
 export function listarGastos() {
   return db.prepare("SELECT * FROM retail_gastos WHERE activo = 1 ORDER BY nombre").all();
 }
-export function crearGasto(nombre, monto, kg_bulto) {
-  return db.prepare("INSERT INTO retail_gastos (nombre, monto, kg_bulto) VALUES (?,?,?)").run(nombre, parseFloat(monto)||0, parseFloat(kg_bulto)||1);
+export function crearGasto(nombre, proveedor, monto, kg_bulto) {
+  return db.prepare("INSERT INTO retail_gastos (nombre, proveedor, monto, kg_bulto) VALUES (?,?,?,?)").run(nombre, proveedor||null, parseFloat(monto)||0, parseFloat(kg_bulto)||1);
 }
-export function actualizarGasto(id, nombre, monto, kg_bulto) {
-  db.prepare("UPDATE retail_gastos SET nombre=?, monto=?, kg_bulto=? WHERE id=?").run(nombre, parseFloat(monto)||0, parseFloat(kg_bulto)||1, id);
+export function actualizarGasto(id, nombre, proveedor, monto, kg_bulto) {
+  db.prepare("UPDATE retail_gastos SET nombre=?, proveedor=?, monto=?, kg_bulto=? WHERE id=?").run(nombre, proveedor||null, parseFloat(monto)||0, parseFloat(kg_bulto)||1, id);
 }
 export function eliminarGasto(id) {
   db.prepare("UPDATE retail_gastos SET activo = 0 WHERE id = ?").run(id);
@@ -165,16 +185,19 @@ export function guardarSeleccion(retailProductoId, ofertaProductoId, gastosIds) 
 }
 
 export function guardarPreciosCanal(retailProductoId, precios) {
-  const stmt = db.prepare("INSERT INTO retail_precios_canal (retail_producto_id, canal, precio) VALUES (?,?,?) ON CONFLICT(retail_producto_id,canal) DO UPDATE SET precio=excluded.precio");
+  const stmt = db.prepare("INSERT INTO retail_precios_canal (retail_producto_id, canal, precio, perdida_kg) VALUES (?,?,?,?) ON CONFLICT(retail_producto_id,canal) DO UPDATE SET precio=excluded.precio, perdida_kg=excluded.perdida_kg");
   Object.keys(precios).forEach(function(canal) {
-    stmt.run(parseInt(retailProductoId), canal, parseFloat(precios[canal])||0);
+    const val = precios[canal];
+    const precio   = typeof val === 'object' ? (parseFloat(val.precio)||0)  : (parseFloat(val)||0);
+    const perdida  = typeof val === 'object' ? (parseFloat(val.perdida)||0) : 0;
+    stmt.run(parseInt(retailProductoId), canal, precio, perdida);
   });
 }
 
 export function obtenerPreciosCanal(retailProductoId) {
-  const rows = db.prepare("SELECT canal, precio FROM retail_precios_canal WHERE retail_producto_id = ?").all(retailProductoId);
+  const rows = db.prepare("SELECT canal, precio, perdida_kg FROM retail_precios_canal WHERE retail_producto_id = ?").all(retailProductoId);
   const map = {};
-  rows.forEach(function(r){ map[r.canal] = r.precio; });
+  rows.forEach(function(r){ map[r.canal] = { precio: r.precio, perdida: r.perdida_kg || 0 }; });
   return map;
 }
 
