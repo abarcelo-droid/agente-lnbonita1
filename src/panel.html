@@ -110,6 +110,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   <div class="ni" data-sec="min-ent"><span class="dot dc"></span>Minorista Entrega</div>
   <div class="ni" data-sec="food"><span class="dot dd"></span>Food Service</div>
   <div class="ni" data-sec="cons-final"><span class="dot db"></span>Consumidor Final</div>
+  <div class="ni" data-sec="dedicados"><span class="dot de"></span>Dedicados</div>
   <div class="ng" style="margin-top:8px">Oferta</div>
   <div class="ni" data-sec="oferta1"><span class="dot da"></span>Oferta 1 - Productos</div>
   <div class="ni" data-sec="oferta2"><span class="dot dd"></span>Oferta 2 - Productos</div>
@@ -173,6 +174,15 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
 <div class="sec" id="sec-min-ent"><div class="ph"><div><div class="ph-t">Minorista Entrega</div><div class="ph-s">Entrega directa CABA y GBA</div></div><button class="btn bb" onclick="openMC('minorista_entrega')">+ Nuevo</button></div><div class="tw"><table><thead><tr><th>Cod</th><th>Telefono</th><th>Nombre</th><th>Direccion</th><th>Pago</th><th>Estado</th><th></th><th></th></tr></thead><tbody id="t-min-ent"></tbody></table></div></div>
 <div class="sec" id="sec-food"><div class="ph"><div><div class="ph-t">Food Service</div><div class="ph-s">Restaurantes y hoteles</div></div><button class="btn bb" onclick="openMC('food_service')">+ Nuevo</button></div><div class="tw"><table><thead><tr><th>Cod</th><th>Telefono</th><th>Nombre</th><th>Empresa</th><th>Horario</th><th>Pago</th><th>Estado</th><th></th><th></th></tr></thead><tbody id="t-food"></tbody></table></div></div>
 <div class="sec" id="sec-cons-final"><div class="ph"><div><div class="ph-t">Consumidor Final</div></div><button class="btn bb" onclick="openMC('consumidor_final')">+ Nuevo</button></div><div class="tw"><table><thead><tr><th>Telefono</th><th>Nombre</th><th>Email</th><th>Direccion</th><th>Estado</th><th></th><th></th></tr></thead><tbody id="t-cons-final"></tbody></table></div></div>
+
+<!-- DEDICADOS -->
+<div class="sec" id="sec-dedicados">
+  <div class="ph">
+    <div><div class="ph-t">Dedicados</div><div class="ph-s">Clientes de venta telefonica — precios custom por cliente</div></div>
+    <button class="btn bb" id="btn-nuevo-ded">+ Nuevo cliente</button>
+  </div>
+  <div class="tw"><table><thead><tr><th>Nombre</th><th>Empresa</th><th>Telefono</th><th>Zona</th><th>Comercial</th><th></th></tr></thead><tbody id="t-ded"></tbody></table></div>
+</div>
 
 <!-- OFERTA 1 y 2 -->
 <div class="sec" id="sec-oferta1">
@@ -298,12 +308,11 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       <div class="fl" style="flex:1;min-width:180px"><label>Nombre del gasto</label><input id="inp-g-nom" placeholder="ej: Embalaje"></div>
       <div class="fl" style="flex:1;min-width:150px"><label>Proveedor</label><input id="inp-g-prov" placeholder="ej: Mario"></div>
       <div class="fl" style="width:130px"><label>$ por bulto</label><input type="number" id="inp-g-monto" placeholder="0"></div>
-      <div class="fl" style="width:120px"><label>Kg por bulto</label><input type="number" id="inp-g-kg" placeholder="10" step="0.1"></div>
       <button class="btn bb" id="btn-save-gasto">Guardar</button>
       <button class="btn bo" id="btn-cancel-gasto">Cancelar</button>
     </div>
   </div>
-  <div class="tw"><table><thead><tr><th>Nombre</th><th>Proveedor</th><th style="text-align:right">$ / Bulto</th><th style="text-align:right">Kg / Bulto</th><th></th></tr></thead><tbody id="t-gastos"></tbody></table></div>
+  <div class="tw"><table><thead><tr><th>Nombre</th><th>Proveedor</th><th style="text-align:right">$ / Bulto</th><th></th></tr></thead><tbody id="t-gastos"></tbody></table></div>
 </div>
 
 </main>
@@ -385,6 +394,60 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   <div style="margin-top:22px;display:flex;gap:10px;justify-content:flex-end">
     <button class="btn bo" id="btn-cancel-mf">Cancelar</button>
     <button class="btn bb" id="btn-save-mf">Subir factura</button>
+  </div>
+</div>
+</div>
+
+<!-- MODAL CLIENTE DEDICADO -->
+<div class="mb" id="mb-ded">
+<div class="mbox">
+  <div class="mhd"><div class="mht">Cliente Dedicado</div><button class="mcl" id="btn-cerrar-mded">x</button></div>
+  <div class="fg">
+    <div class="fl"><label>Nombre *</label><input id="ded-nom" required></div>
+    <div class="fl"><label>Empresa</label><input id="ded-emp"></div>
+    <div class="fl"><label>Telefono</label><input id="ded-tel"></div>
+    <div class="fl"><label>Email</label><input type="email" id="ded-email"></div>
+    <div class="fl"><label>Comercial</label>
+      <select id="ded-com"><option value="">— Sin asignar —</option><option value="Sofi">Sofi</option><option value="Nico">Nico</option><option value="Diego">Diego</option></select>
+    </div>
+    <div class="fl"><label>Zona</label><input id="ded-zona"></div>
+    <div class="fl ff"><label>Direccion</label><input id="ded-dir"></div>
+    <div class="fl ff"><label>Notas</label><textarea id="ded-notas" rows="2"></textarea></div>
+    <input type="hidden" id="ded-id">
+  </div>
+  <div style="margin-top:22px;display:flex;gap:10px;justify-content:flex-end">
+    <button class="btn bo" id="btn-cancel-mded">Cancelar</button>
+    <button class="btn bb" id="btn-save-mded">Guardar</button>
+  </div>
+</div>
+</div>
+
+<!-- MODAL PRECIOS DEDICADO -->
+<div class="mb" id="mb-ded-precios">
+<div class="mbox" style="width:700px">
+  <div class="mhd"><div class="mht" id="mded-p-tit">Precios</div><button class="mcl" id="btn-cerrar-mded-p">x</button></div>
+  <div style="font-size:12px;color:var(--mut);margin-bottom:14px">Ingresa el precio por kg/unidad para cada producto. Dejá vacío para no asignar precio.</div>
+  <div style="overflow-x:auto">
+    <table class="ptbl"><thead><tr><th>Producto</th><th>Presentacion</th><th class="r">Precio $</th></tr></thead><tbody id="t-ded-precios"></tbody></table>
+  </div>
+  <div style="margin-top:18px;text-align:right">
+    <button class="btn bb" id="btn-cerrar-mded-p" onclick="closeMB('mb-ded-precios')">Cerrar</button>
+  </div>
+</div>
+</div>
+
+<!-- MODAL PEDIDO DEDICADO -->
+<div class="mb" id="mb-ded-pedido">
+<div class="mbox">
+  <div class="mhd"><div class="mht" id="mded-ped-tit">Nuevo pedido</div><button class="mcl" id="btn-cerrar-mded-ped">x</button></div>
+  <div style="background:var(--bg);border:1px solid var(--bor);border-radius:8px;padding:12px;margin-bottom:16px;font-size:12px;color:var(--mut);max-height:140px;overflow-y:auto;white-space:pre-line" id="ded-ped-ref">Cargando precios...</div>
+  <div class="fg">
+    <div class="fl ff"><label>Detalle del pedido *</label><textarea id="ded-ped-det" rows="4" placeholder="ej: 2 cajas manzana red, 1 bolsa cebolla..."></textarea></div>
+    <div class="fl"><label>Total $</label><input type="number" id="ded-ped-tot" placeholder="0"></div>
+  </div>
+  <div style="margin-top:22px;display:flex;gap:10px;justify-content:flex-end">
+    <button class="btn bo" id="btn-cancel-mded-ped">Cancelar</button>
+    <button class="btn bb" id="btn-save-mded-ped">Crear pedido</button>
   </div>
 </div>
 </div>
@@ -1304,9 +1367,9 @@ eid('btn-add-gasto').addEventListener('click',function(){eid('form-add-gasto').s
 eid('btn-cancel-gasto').addEventListener('click',function(){eid('form-add-gasto').style.display='none';});
 eid('btn-save-gasto').addEventListener('click',function(){
   var nom=elv('inp-g-nom'); if(!nom){toast('Escribe el nombre','er');return;}
-  var prov=elv('inp-g-prov'); var monto=parseFloat(elv('inp-g-monto'))||0; var kg=parseFloat(elv('inp-g-kg'))||1;
-  api('/api/retail/gastos','POST',{nombre:nom,proveedor:prov,monto:monto,kg_bulto:kg}).then(function(){
-    ['inp-g-nom','inp-g-prov','inp-g-monto','inp-g-kg'].forEach(function(id){eid(id).value='';});
+  var prov=elv('inp-g-prov'); var monto=parseFloat(elv('inp-g-monto'))||0;
+  api('/api/retail/gastos','POST',{nombre:nom,proveedor:prov,monto:monto}).then(function(){
+    ['inp-g-nom','inp-g-prov','inp-g-monto'].forEach(function(id){eid(id).value='';});
     eid('form-add-gasto').style.display='none';
     toast('Gasto agregado','ok'); loadGastos();
   });
@@ -1319,16 +1382,15 @@ function loadGastos() {
       h+='<td><input style="border:none;background:transparent;font-weight:500;width:100%;font-size:13px" value="'+esc(g.nombre||'')+'" onchange="updG('+g.id+',this)"></td>';
       h+='<td><input style="border:none;background:transparent;color:var(--mut);width:100%;font-size:13px" value="'+esc(g.proveedor||'')+'" onchange="updG('+g.id+',this)"></td>';
       h+='<td style="text-align:right"><input type="number" style="border:none;background:transparent;font-variant-numeric:tabular-nums;width:90px;text-align:right;font-size:13px" value="'+(g.monto||0)+'" onchange="updG('+g.id+',this)"></td>';
-      h+='<td style="text-align:right"><input type="number" step="0.1" style="border:none;background:transparent;font-variant-numeric:tabular-nums;width:70px;text-align:right;font-size:13px;color:var(--mut)" value="'+(g.kg_bulto||1)+'" onchange="updG('+g.id+',this)"> kg</td>';
       h+='<td style="text-align:right"><button class="btn bd bs" onclick="delG('+g.id+')">Eliminar</button></td>';
       h+='</tr>';
     });
-    eid('t-gastos').innerHTML=h||'<tr><td colspan="5" class="emp">Sin gastos</td></tr>';
+    eid('t-gastos').innerHTML=h||'<tr><td colspan="4" class="emp">Sin gastos</td></tr>';
   });
 }
 function updG(id,inp) {
   var row=inp.closest('tr'); var ins=row.querySelectorAll('input');
-  api('/api/retail/gastos/'+id,'PATCH',{nombre:ins[0].value.trim(),proveedor:ins[1].value.trim(),monto:parseFloat(ins[2].value)||0,kg_bulto:parseFloat(ins[3].value)||1}).then(function(){toast('Actualizado','ok');});
+  api('/api/retail/gastos/'+id,'PATCH',{nombre:ins[0].value.trim(),proveedor:ins[1].value.trim(),monto:parseFloat(ins[2].value)||0}).then(function(){toast('Actualizado','ok');});
 }
 function delG(id){if(!confirm('Eliminar?')) return; api('/api/retail/gastos/'+id,'DELETE').then(function(){toast('Eliminado','ok');loadGastos();});}
 
@@ -1368,7 +1430,134 @@ function bPago(m){ var lm={cuenta_corriente:'Cta.Cte.',transferencia:'Transf.',c
 function closeMB(id){ var el=eid(id); if(el) el.classList.remove('on'); }
 var tT; function toast(msg,tipo){ var el=eid('toast'); el.textContent=msg; el.className='on '+(tipo||'ok'); clearTimeout(tT); tT=setTimeout(function(){el.className='';},3200); }
 function startPoll(){ setInterval(function(){if(navAct==='conv') loadConvs();},15000); }
+
+// DEDICADOS
+var dedActivo = null;
+eid('btn-nuevo-ded').addEventListener('click', function(){ openDed(null); });
+
+function loadDed() {
+  api('/api/dedicados').then(function(lista){
+    var h='';
+    lista.forEach(function(d){
+      h+='<tr>';
+      h+='<td style="font-weight:500">'+esc(d.nombre||'')+'</td>';
+      h+='<td style="color:var(--mut)">'+esc(d.empresa||'-')+'</td>';
+      h+='<td>'+esc(d.telefono||'-')+'</td>';
+      h+='<td style="color:var(--mut)">'+esc(d.zona||'-')+'</td>';
+      h+='<td style="color:var(--mut)">'+esc(d.comercial||'-')+'</td>';
+      h+='<td style="white-space:nowrap;text-align:right">';
+      h+='<button class="btn bb bs" style="margin-right:6px" onclick="openDed('+JSON.stringify(d).replace(/"/g,"&quot;")+')">Editar</button>';
+      h+='<button class="btn bo bs" style="margin-right:6px" onclick="openDedPrecios('+d.id+',\''+esc(d.nombre)+'\')">Precios</button>';
+      h+='<button class="btn bb bs" style="background:var(--ok)" onclick="openDedPedido('+d.id+',\''+esc(d.nombre)+'\')">Pedido</button>';
+      h+='</td></tr>';
+    });
+    eid('t-ded').innerHTML = h || '<tr><td colspan="6" class="emp">Sin clientes dedicados</td></tr>';
+  });
+}
+
+function openDed(d) {
+  if(typeof d === 'string') try{ d=JSON.parse(d); }catch(e){ d=null; }
+  dedActivo = d ? d.id : null;
+  eid('ded-id').value = d ? d.id : '';
+  eid('ded-nom').value = d ? (d.nombre||'') : '';
+  eid('ded-emp').value = d ? (d.empresa||'') : '';
+  eid('ded-tel').value = d ? (d.telefono||'') : '';
+  eid('ded-email').value = d ? (d.email||'') : '';
+  eid('ded-dir').value = d ? (d.direccion||'') : '';
+  eid('ded-zona').value = d ? (d.zona||'') : '';
+  eid('ded-com').value = d ? (d.comercial||'') : '';
+  eid('ded-notas').value = d ? (d.notas||'') : '';
+  eid('mb-ded').classList.add('on');
+}
+
+eid('btn-cerrar-mded').addEventListener('click', function(){ closeMB('mb-ded'); });
+eid('btn-cancel-mded').addEventListener('click', function(){ closeMB('mb-ded'); });
+eid('btn-save-mded').addEventListener('click', function(){
+  var nom = elv('ded-nom'); if(!nom){ toast('Falta nombre','er'); return; }
+  var datos = {
+    nombre: nom, empresa: elv('ded-emp'), telefono: elv('ded-tel'),
+    email: elv('ded-email'), direccion: elv('ded-dir'),
+    zona: elv('ded-zona'), comercial: elv('ded-com'), notas: elv('ded-notas')
+  };
+  var id = elv('ded-id');
+  var p = id ? api('/api/dedicados/'+id,'PATCH',datos) : api('/api/dedicados','POST',datos);
+  p.then(function(){ toast('Guardado','ok'); closeMB('mb-ded'); loadDed(); });
+});
+
+// Precios por cliente dedicado
+var dedPreciosId = null;
+function openDedPrecios(clienteId, nombre) {
+  dedPreciosId = clienteId;
+  eid('mded-p-tit').textContent = 'Precios — ' + nombre;
+  loadDedPrecios(clienteId);
+  eid('mb-ded-precios').classList.add('on');
+}
+
+function loadDedPrecios(clienteId) {
+  Promise.all([
+    api('/api/dedicados/'+clienteId+'/precios'),
+    api('/api/oferta/oferta1')
+  ]).then(function(res){
+    var precios = res[0]; var productos = res[1];
+    var precMap = {};
+    precios.forEach(function(p){ precMap[p.producto_id] = p.precio; });
+    var h = ''; var catActual = '';
+    productos.forEach(function(p){
+      if(!p.disponible_general) return;
+      if(p.categoria !== catActual){
+        catActual = p.categoria;
+        h += '<tr style="background:var(--goldl)"><td colspan="3" style="font-size:11px;font-weight:700;color:var(--burd);text-transform:uppercase;padding:7px 12px">'+esc(catActual||'Sin categoria')+'</td></tr>';
+      }
+      var precio = precMap[p.id] !== undefined ? precMap[p.id] : '';
+      h += '<tr><td style="font-weight:500">'+esc(p.nombre)+'</td>';
+      h += '<td style="color:var(--mut);font-size:12px">'+esc(p.kilaje||'')+'</td>';
+      h += '<td style="text-align:right"><input type="number" class="pinp" value="'+precio+'" placeholder="—" onchange="saveDedPrecio('+clienteId+','+p.id+',this.value)"></td></tr>';
+    });
+    eid('t-ded-precios').innerHTML = h || '<tr><td colspan="3" class="emp">Sin productos en Oferta 1</td></tr>';
+  });
+}
+
+function saveDedPrecio(clienteId, productoId, valor) {
+  if(valor === '') {
+    api('/api/dedicados/'+clienteId+'/precios/'+productoId,'DELETE').then(function(){ toast('Precio eliminado','ok'); });
+  } else {
+    api('/api/dedicados/'+clienteId+'/precios','POST',{producto_id:productoId,precio:parseFloat(valor)||0}).then(function(){ toast('Guardado','ok'); });
+  }
+}
+eid('btn-cerrar-mded-p').addEventListener('click', function(){ closeMB('mb-ded-precios'); });
+
+// Pedido dedicado
+var dedPedidoId = null;
+function openDedPedido(clienteId, nombre) {
+  dedPedidoId = clienteId;
+  eid('mded-ped-tit').textContent = 'Nuevo pedido — ' + nombre;
+  eid('ded-ped-det').value = '';
+  eid('ded-ped-tot').value = '';
+  api('/api/dedicados/'+clienteId+'/precios').then(function(precios){
+    var h = precios.length ? precios.map(function(p){
+      return p.nombre + (p.kilaje?' ('+p.kilaje+')':'') + ' — $' + nr(p.precio);
+    }).join('\n') : 'Sin precios cargados aun';
+    eid('ded-ped-ref').textContent = h;
+  });
+  eid('mb-ded-pedido').classList.add('on');
+}
+
+eid('btn-cerrar-mded-ped').addEventListener('click', function(){ closeMB('mb-ded-pedido'); });
+eid('btn-cancel-mded-ped').addEventListener('click', function(){ closeMB('mb-ded-pedido'); });
+eid('btn-save-mded-ped').addEventListener('click', function(){
+  var det = elv('ded-ped-det'); if(!det){ toast('Falta el detalle del pedido','er'); return; }
+  var tot = parseFloat(elv('ded-ped-tot'))||0;
+  api('/api/dedicados/'+dedPedidoId+'/pedido','POST',{detalle:det,total:tot}).then(function(r){
+    if(r && r.ok){ toast('Pedido #'+r.id+' creado','ok'); closeMB('mb-ded-pedido'); }
+    else toast('Error al crear pedido','er');
+  });
+});
+
 loadInicio(); startPoll();
+// Cargar dedicados cuando se navega a esa seccion
+document.querySelectorAll('.ni').forEach(function(el){
+  if(el.dataset.sec === 'dedicados') el.addEventListener('click', loadDed);
+});
 </script>
 </body>
 </html>

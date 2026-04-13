@@ -16,7 +16,9 @@ import {
   guardarSeleccion, vistaRetail,
   guardarPreciosCanal,
   obtenerEANs, guardarEAN,
-  guardarObservacionRetail
+  guardarObservacionRetail,
+  listarDedicados, crearDedicado, actualizarDedicado, eliminarDedicado,
+  obtenerPreciosDedicado, guardarPrecioDedicado, eliminarPrecioDedicado, crearPedidoDedicado
 } from "../servicios/catalogo_v2.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -98,13 +100,13 @@ router.post("/retail/ean", (req, res) => {
 // Archivos maestros: matriz de gastos
 router.get("/retail/gastos", (req, res) => res.json(listarGastos()));
 router.post("/retail/gastos", (req, res) => {
-  const { nombre, proveedor, monto, kg_bulto } = req.body;
+  const { nombre, proveedor, monto } = req.body;
   if (!nombre) return res.status(400).json({ error: "Falta nombre" });
-  crearGasto(nombre.trim(), proveedor||null, monto, kg_bulto);
+  crearGasto(nombre.trim(), proveedor||null, monto);
   res.status(201).json({ ok: true });
 });
 router.patch("/retail/gastos/:id", (req, res) => {
-  actualizarGasto(req.params.id, req.body.nombre, req.body.proveedor, req.body.monto, req.body.kg_bulto);
+  actualizarGasto(req.params.id, req.body.nombre, req.body.proveedor, req.body.monto);
   res.json({ ok: true });
 });
 router.delete("/retail/gastos/:id", (req, res) => {
@@ -235,6 +237,56 @@ router.post("/oferta/limpiar-duplicados", (req, res) => {
     borrados += result.changes;
   });
   res.json({ ok: true, borrados });
+});
+
+// ── Dedicados ────────────────────────────────────────────────────────────────
+router.get("/dedicados", (req, res) => res.json(listarDedicados()));
+
+router.post("/dedicados", (req, res) => {
+  try {
+    const id = crearDedicado(req.body);
+    res.status(201).json({ ok: true, id });
+  } catch(e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+router.patch("/dedicados/:id", (req, res) => {
+  actualizarDedicado(req.params.id, req.body);
+  res.json({ ok: true });
+});
+
+router.delete("/dedicados/:id", (req, res) => {
+  eliminarDedicado(req.params.id);
+  res.json({ ok: true });
+});
+
+// Precios custom por cliente dedicado
+router.get("/dedicados/:id/precios", (req, res) => {
+  res.json(obtenerPreciosDedicado(req.params.id));
+});
+
+router.post("/dedicados/:id/precios", (req, res) => {
+  const { producto_id, precio } = req.body;
+  guardarPrecioDedicado(req.params.id, producto_id, precio);
+  res.json({ ok: true });
+});
+
+router.delete("/dedicados/:id/precios/:productoId", (req, res) => {
+  eliminarPrecioDedicado(req.params.id, req.params.productoId);
+  res.json({ ok: true });
+});
+
+// Pedidos de clientes dedicados
+router.post("/dedicados/:id/pedido", (req, res) => {
+  try {
+    const { detalle, total } = req.body;
+    if (!detalle) return res.status(400).json({ error: "Falta detalle" });
+    const pedidoId = crearPedidoDedicado(req.params.id, detalle, total);
+    res.status(201).json({ ok: true, id: pedidoId });
+  } catch(e) {
+    res.status(400).json({ error: e.message });
+  }
 });
 
 export default router;
