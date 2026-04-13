@@ -408,7 +408,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     <div class="fl"><label>Telefono</label><input id="ded-tel"></div>
     <div class="fl"><label>Email</label><input type="email" id="ded-email"></div>
     <div class="fl"><label>Comercial</label>
-      <select id="ded-com"><option value="">— Sin asignar —</option><option value="Sofi">Sofi</option><option value="Nico">Nico</option><option value="Diego">Diego</option></select>
+      <select id="ded-com"><option value="">— Sin asignar —</option><option value="Andres Barcelo">Andres Barcelo</option><option value="Pablo Barcelo">Pablo Barcelo</option><option value="Camila Persampieri">Camila Persampieri</option><option value="Ramon Palazuelos">Ramon Palazuelos</option></select>
     </div>
     <div class="fl"><label>Zona</label><input id="ded-zona"></div>
     <div class="fl ff"><label>Direccion</label><input id="ded-dir"></div>
@@ -1037,8 +1037,9 @@ function loadRetail() {
       h+='<div style="font-size:12px;font-weight:500;color:var(--mut);margin-bottom:8px">Gastos a sumar ($/kg)</div>';
       if(!gastos.length){ h+='<div style="font-size:12px;color:var(--mut);font-style:italic">Sin gastos cargados.</div>'; }
       else {
+        var kgProd = kgBase ? kgBase.kilos : 1;
         gastos.forEach(function(g) {
-          var kg=g.kg_bulto||1; var pk=kg>0?Math.round(g.monto/kg):0;
+          var kg = kgProd > 0 ? kgProd : 1; var pk = Math.round(g.monto / kg);
           var sgsel=rp.gastos_seleccionados.indexOf(g.id)>=0;
           h+='<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--bor)">';
           h+='<input type="checkbox" value="'+g.id+'" '+(sgsel?'checked':'')+' onchange="toggleGasto('+rp.id+',this)" style="accent-color:var(--burg)">';
@@ -1056,7 +1057,7 @@ function loadRetail() {
       h+='<textarea id="obs-'+rp.id+'" rows="2" style="width:100%;font-size:13px;resize:vertical" placeholder="Notas internas...">'+(rp.observaciones||'')+'</textarea>';
       h+='<button class="btn bo bs" style="margin-top:6px;width:100%;justify-content:center" onclick="guardarObs('+rp.id+')">Guardar obs.</button>';
       // Grilla canales
-      var costoTotal=rp.costo_kg_total; var kgBase=rp.proveedores&&rp.proveedores.find(function(p){return p.seleccionado;}); var kgTot=kgBase?kgBase.kilos:0;
+      var costoTotal=rp.costo_kg_total; var kgBase=rp.proveedores&&rp.proveedores.find(function(p){return p.seleccionado;})||rp.proveedores&&rp.proveedores[0]; var kgTot=kgBase?kgBase.kilos:0;
       h+='<div style="font-size:12px;font-weight:500;color:var(--mut);margin:12px 0 8px">Pricing por canal</div>';
       h+='<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px;min-width:500px"><thead><tr style="background:var(--burd)">';
       h+='<th style="padding:7px 8px;color:#fff;text-align:left">Canal</th>';
@@ -1069,10 +1070,10 @@ function loadRetail() {
       CANALES.forEach(function(canal) {
         var pc=rp.precios_canal&&rp.precios_canal[canal.k]?rp.precios_canal[canal.k]:{};
         var precio=pc.precio||0; var perdida=pc.perdida||0;
-        var kgReal=kgTot>0?Math.max(kgTot-perdida,0.1):0;
-        var costoReal=kgReal>0&&kgTot>0?costoTotal*(kgTot/kgReal):costoTotal;
-        var neto=precio*canal.c*1.105;
-        var mgn=precio>0?((neto-costoReal)/precio*100):null;
+        var kgReal=kgTot>0?Math.max(kgTot-perdida,0.1):kgTot;
+        var costoReal=costoTotal;
+        var neto=kgTot>0?precio*canal.c*1.105*(kgReal/kgTot):precio*canal.c*1.105;
+        var mgn=neto>0?((neto-costoReal)/neto*100):null;
         var mc=mgn===null?'var(--mut)':mgn>=20?'var(--ok)':mgn>=0?'var(--warn)':'var(--err)';
         h+='<tr style="border-bottom:1px solid var(--bor)"><td style="padding:6px 8px;font-weight:500">'+canal.l+'<br><span style="font-size:9px;color:var(--mut)">x'+canal.c+' x1.105</span></td>';
         h+='<td style="padding:5px 6px;text-align:center"><div style="display:flex;align-items:center;justify-content:center;gap:3px"><span style="color:var(--mut);font-size:11px">$</span>';
@@ -1097,10 +1098,10 @@ function calcRet(inp) {
   var coef=parseFloat(inp.getAttribute('data-coef'))||1; var costo=parseFloat(inp.getAttribute('data-costo'))||0; var kgTot=parseFloat(inp.getAttribute('data-kgtot'))||0;
   var row=inp.closest('tr'); var inputs=row?row.querySelectorAll('input.pinp'):[];
   var precio=inputs[0]?parseFloat(inputs[0].value)||0:0; var perdida=inputs[1]?parseFloat(inputs[1].value)||0:0;
-  var kgReal=kgTot>0?Math.max(kgTot-perdida,0.1):0;
-  var costoReal=kgReal>0&&kgTot>0?costo*(kgTot/kgReal):costo;
-  var neto=precio*coef*1.105;
-  var mgn=precio>0?((neto-costoReal)/precio*100):null;
+  var kgReal=kgTot>0?Math.max(kgTot-perdida,0.1):kgTot;
+  var costoReal=costo;
+  var neto=kgTot>0?precio*coef*1.105*(kgReal/kgTot):precio*coef*1.105;
+  var mgn=neto>0?((neto-costoReal)/neto*100):null;
   var mc=mgn===null?'var(--mut)':mgn>=20?'var(--ok)':mgn>=0?'var(--warn)':'var(--err)';
   var ce=document.getElementById('cr-'+rpid+'-'+canal); var ne=document.getElementById('ne-'+rpid+'-'+canal); var me=document.getElementById('mg-'+rpid+'-'+canal);
   if(ce) ce.textContent='$'+Math.round(costoReal).toLocaleString('es-AR')+'/kg';
