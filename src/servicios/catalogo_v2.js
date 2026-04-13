@@ -57,6 +57,7 @@ db.exec(`
     flete       REAL DEFAULT 0,
     consignacion INTEGER DEFAULT 0,
     retail       INTEGER DEFAULT 0,
+    disponible_general INTEGER DEFAULT 1,
     nombre_retail TEXT,
     notas       TEXT,
     activo      INTEGER DEFAULT 1,
@@ -103,11 +104,20 @@ db.exec(`
     PRIMARY KEY (retail_producto_id, canal)
   );
 
+  -- EAN por supermercado para cada producto retail
+  CREATE TABLE IF NOT EXISTS retail_ean (
+    retail_producto_id INTEGER NOT NULL,
+    supermercado       TEXT NOT NULL,
+    ean                TEXT,
+    PRIMARY KEY (retail_producto_id, supermercado)
+  );
+
   -- Seleccion de proveedor y gastos por producto retail
   CREATE TABLE IF NOT EXISTS retail_seleccion (
     retail_producto_id INTEGER NOT NULL,
     oferta_producto_id INTEGER NOT NULL,
     gastos_ids         TEXT DEFAULT '[]',
+    observaciones      TEXT,
     PRIMARY KEY (retail_producto_id)
   );
 `);
@@ -118,6 +128,26 @@ db.exec(`
   if (cols.indexOf('kg_bulto') < 0) {
     try { db.exec("ALTER TABLE retail_gastos ADD COLUMN kg_bulto REAL DEFAULT 1"); } catch(e) {}
   }
+})();
+
+// Migracion observaciones en retail_seleccion
+(function() {
+  try {
+    var cols = db.prepare("PRAGMA table_info(retail_seleccion)").all().map(function(c){ return c.name; });
+    if (cols.indexOf('observaciones') < 0) {
+      db.exec("ALTER TABLE retail_seleccion ADD COLUMN observaciones TEXT");
+    }
+  } catch(e) {}
+})();
+
+// Migracion observaciones en retail_seleccion
+(function() {
+  try {
+    var cols = db.prepare("PRAGMA table_info(retail_seleccion)").all().map(function(c){ return c.name; });
+    if (cols.indexOf('observaciones') < 0) {
+      db.exec("ALTER TABLE retail_seleccion ADD COLUMN observaciones TEXT");
+    }
+  } catch(e) {}
 })();
 
 // Migracion perdida_kg en retail_precios_canal
@@ -156,6 +186,19 @@ export function eliminarRetailProducto(id) {
   db.prepare("UPDATE retail_productos SET activo = 0 WHERE id = ?").run(id);
 }
 
+export function obtenerEANs(retailProductoId) {
+  const rows = db.prepare("SELECT supermercado, ean FROM retail_ean WHERE retail_producto_id = ?").all(retailProductoId);
+  const map = {};
+  rows.forEach(function(r){ map[r.supermercado] = r.ean; });
+  return map;
+}
+export function guardarEAN(retailProductoId, supermercado, ean) {
+  db.prepare("INSERT INTO retail_ean (retail_producto_id, supermercado, ean) VALUES (?,?,?) ON CONFLICT(retail_producto_id,supermercado) DO UPDATE SET ean=excluded.ean").run(parseInt(retailProductoId), supermercado, ean||null);
+}
+export function actualizarRetailProducto(id, nombre, categoria) {
+  db.prepare("UPDATE retail_productos SET nombre=?, categoria=? WHERE id=?").run(nombre, categoria||null, id);
+}
+
 // Gastos generales
 export function listarGastos() {
   return db.prepare("SELECT * FROM retail_gastos WHERE activo = 1 ORDER BY nombre").all();
@@ -174,14 +217,24 @@ export function eliminarGasto(id) {
 export function obtenerSeleccion(retailProductoId) {
   return db.prepare("SELECT * FROM retail_seleccion WHERE retail_producto_id = ?").get(retailProductoId);
 }
-export function guardarSeleccion(retailProductoId, ofertaProductoId, gastosIds) {
+export function guardarSeleccion(retailProductoId, ofertaProductoId, gastosIds, observaciones) {
   db.prepare(`
-    INSERT INTO retail_seleccion (retail_producto_id, oferta_producto_id, gastos_ids)
-    VALUES (?,?,?)
+    INSERT INTO retail_seleccion (retail_producto_id, oferta_producto_id, gastos_ids, observaciones)
+    VALUES (?,?,?,?)
     ON CONFLICT(retail_producto_id) DO UPDATE SET
       oferta_producto_id=excluded.oferta_producto_id,
-      gastos_ids=excluded.gastos_ids
-  `).run(parseInt(retailProductoId), parseInt(ofertaProductoId), JSON.stringify(gastosIds||[]));
+      gastos_ids=excluded.gastos_ids,
+      observaciones=COALESCE(excluded.observaciones, observaciones)
+  `).run(parseInt(retailProductoId), parseInt(ofertaProductoId), JSON.stringify(gastosIds||[]), observaciones||null);
+}
+
+export function guardarObservacion(retailProductoId, observaciones) {
+  const existe = db.prepare("SELECT retail_producto_id FROM retail_seleccion WHERE retail_producto_id = ?").get(retailProductoId);
+  if (existe) {
+    db.prepare("UPDATE retail_seleccion SET observaciones = ? WHERE retail_producto_id = ?").run(observaciones||null, parseInt(retailProductoId));
+  } else {
+    db.prepare("INSERT INTO retail_seleccion (retail_producto_id, oferta_producto_id, gastos_ids, observaciones) VALUES (?,0,'[]',?)").run(parseInt(retailProductoId), observaciones||null);
+  }
 }
 
 export function guardarPreciosCanal(retailProductoId, precios) {
@@ -232,7 +285,7 @@ export function vistaRetail() {
       };
     });
 
-    const provSeleccionado = proveedores.find(function(p){ return p.seleccionado; });
+    const provSeleccionado = proveedores.find(function(p){ return p.seleccionado; }) || proveedores[0];
     const costoBase = provSeleccionado ? (provSeleccionado.cbase / (provSeleccionado.kilos||1)) : 0;
     const costoTotal = costoBase + gastosSum;
 
@@ -247,7 +300,9 @@ export function vistaRetail() {
       costo_kg_base: costoBase,
       costo_kg_total: costoTotal,
       oferta_producto_id: seleccion ? seleccion.oferta_producto_id : null,
+      observaciones: seleccion ? seleccion.observaciones : null,
       precios_canal: preciosCanal,
+      observaciones: seleccion ? seleccion.observaciones : null,
     };
   });
 }
@@ -260,6 +315,9 @@ export function vistaRetail() {
   }
   if (cols.indexOf('nombre_retail') < 0) {
     try { db.exec("ALTER TABLE oferta_productos ADD COLUMN nombre_retail TEXT"); } catch(e) {}
+  }
+  if (cols.indexOf('disponible_general') < 0) {
+    try { db.exec("ALTER TABLE oferta_productos ADD COLUMN disponible_general INTEGER DEFAULT 1"); } catch(e) {}
   }
 })();
 
