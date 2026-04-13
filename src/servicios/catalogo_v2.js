@@ -228,7 +228,7 @@ export function guardarSeleccion(retailProductoId, ofertaProductoId, gastosIds, 
   `).run(parseInt(retailProductoId), parseInt(ofertaProductoId), JSON.stringify(gastosIds||[]), observaciones||null);
 }
 
-export function guardarObservacion(retailProductoId, observaciones) {
+export function guardarObservacionRetail(retailProductoId, observaciones) {
   const existe = db.prepare("SELECT retail_producto_id FROM retail_seleccion WHERE retail_producto_id = ?").get(retailProductoId);
   if (existe) {
     db.prepare("UPDATE retail_seleccion SET observaciones = ? WHERE retail_producto_id = ?").run(observaciones||null, parseInt(retailProductoId));
