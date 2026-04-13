@@ -3,54 +3,63 @@ import { Router } from "express";
 const router = Router();
 
 // Precios mayoristas del Mercado Central (XLS oficial)
-import ExcelJS from "exceljs";
+import * as XLSX from "xlsx";
 
 async function descargarXLS(url) {
   const resp = await fetch(url, {
     headers: { 'User-Agent': 'Mozilla/5.0' },
     signal: AbortSignal.timeout(10000),
   });
-  if (!resp.ok) throw new Error('No se pudo descargar el archivo');
+  if (!resp.ok) throw new Error('No se pudo descargar: ' + resp.status);
   const buffer = await resp.arrayBuffer();
   return Buffer.from(buffer);
 }
 
 function urlXLS(tipo, fecha) {
-  // tipo: 'RH' (hortalizas) o 'RF' (frutas)
   const d = String(fecha.getDate()).padStart(2,'0');
   const m = String(fecha.getMonth()+1).padStart(2,'0');
   const y = String(fecha.getFullYear()).slice(-2);
   return `https://mercadocentral.gob.ar/sites/default/files/precios_mayoristas/${tipo}${d}${m}${y}.XLS`;
 }
 
-async function buscarEnXLS(buffer, busqueda) {
-  const wb = new ExcelJS.Workbook();
-  await wb.xlsx.load(buffer);
+function buscarEnXLS(buffer, busqueda) {
+  const wb = XLSX.read(buffer, { type: 'buffer' });
   const resultados = [];
   const termino = busqueda.toUpperCase().trim();
 
-  wb.eachSheet(function(sheet) {
-    sheet.eachRow(function(row) {
-      const vals = [];
-      row.eachCell(function(cell) { vals.push(String(cell.value||'').trim()); });
-      const linea = vals.join(' ').toUpperCase();
-      if (linea.includes(termino)) {
-        // Buscar números que parezcan precios en la fila
-        const precios = vals.filter(function(v){
-          const n = parseFloat(v.replace(/\./g,'').replace(',','.'));
-          return !isNaN(n) && n > 10;
-        }).map(function(v){ return parseFloat(v.replace(/\./g,'').replace(',','.')); });
-        if (precios.length) {
-          resultados.push({
-            descripcion: vals.filter(function(v){ return v && isNaN(parseFloat(v)); }).join(' ').trim().slice(0,80),
-            precios,
-            min: Math.min(...precios),
-            max: Math.max(...precios),
-          });
-        }
-      }
+  wb.SheetNames.forEach(function(sheetName) {
+    const sheet = wb.Sheets[sheetName];
+    const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+
+    rows.forEach(function(row) {
+      const esp = String(row[0] || '').toUpperCase().trim();
+      if (!esp.includes(termino)) return;
+
+      const vari = String(row[1] || '').trim();
+      if (vari.toUpperCase().includes('PROM')) return; // saltar promedios
+
+      const proc = String(row[2] || '').trim();
+      const kg   = parseFloat(row[4]) || null;
+      const cal  = String(row[5] || '').trim();
+      const tam  = String(row[6] || '').trim();
+
+      // Columna I (índice 8) = precio máx, columna J (índice 9) = precio mín
+      const precMax = parseFloat(row[8]) || 0;
+      const precMin = parseFloat(row[9]) || 0;
+
+      if (precMax <= 0 && precMin <= 0) return;
+
+      const desc = [esp, vari, proc, cal, tam].filter(Boolean).join(' ').trim();
+
+      resultados.push({
+        descripcion: desc.slice(0, 80),
+        min: Math.min(precMin || precMax, precMax || precMin),
+        max: Math.max(precMin || precMax, precMax || precMin),
+        kg,
+      });
     });
   });
+
   return resultados;
 }
 
@@ -71,7 +80,7 @@ router.get("/cotizacion/mcba", async (req, res) => {
       const url = urlXLS(tipo, fecha);
       try {
         const buffer = await descargarXLS(url);
-        const encontrados = await buscarEnXLS(buffer, producto);
+        const encontrados = buscarEnXLS(buffer, producto);
         if (encontrados.length) {
           resultados = encontrados;
           fuenteUrl = url;
