@@ -74,7 +74,7 @@ router.get("/cotizacion/mcba", async (req, res) => {
 
   for (const tipo of tipos) {
     // Intentar con hoy y los últimos 3 días (por si no publicaron aún)
-    for (let d = 0; d <= 3; d++) {
+    for (let d = 0; d <= 7; d++) {
       const fecha = new Date(hoy);
       fecha.setDate(fecha.getDate() - d);
       const url = urlXLS(tipo, fecha);
