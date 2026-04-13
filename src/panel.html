@@ -1032,7 +1032,8 @@ function loadRetail() {
         });
       }
       h+='</div>';
-      // Columna derecha
+      // Columna derecha — declarar kgBase acá para usarlo en gastos Y en canales
+      var kgBase=rp.proveedores&&(rp.proveedores.find(function(p){return p.seleccionado;})||rp.proveedores[0]);
       h+='<div>';
       h+='<div style="font-size:12px;font-weight:500;color:var(--mut);margin-bottom:8px">Gastos a sumar ($/kg)</div>';
       if(!gastos.length){ h+='<div style="font-size:12px;color:var(--mut);font-style:italic">Sin gastos cargados.</div>'; }
@@ -1057,7 +1058,7 @@ function loadRetail() {
       h+='<textarea id="obs-'+rp.id+'" rows="2" style="width:100%;font-size:13px;resize:vertical" placeholder="Notas internas...">'+(rp.observaciones||'')+'</textarea>';
       h+='<button class="btn bo bs" style="margin-top:6px;width:100%;justify-content:center" onclick="guardarObs('+rp.id+')">Guardar obs.</button>';
       // Grilla canales
-      var costoTotal=rp.costo_kg_total; var kgBase=rp.proveedores&&rp.proveedores.find(function(p){return p.seleccionado;})||rp.proveedores&&rp.proveedores[0]; var kgTot=kgBase?kgBase.kilos:0;
+      var costoTotal=rp.costo_kg_total; var kgTot=kgBase?kgBase.kilos:0;
       h+='<div style="font-size:12px;font-weight:500;color:var(--mut);margin:12px 0 8px">Pricing por canal</div>';
       h+='<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px;min-width:500px"><thead><tr style="background:var(--burd)">';
       h+='<th style="padding:7px 8px;color:#fff;text-align:left">Canal</th>';
