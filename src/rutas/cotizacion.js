@@ -1,9 +1,7 @@
 import { Router } from "express";
+import * as XLSX from "xlsx";
 
 const router = Router();
-
-// Precios mayoristas del Mercado Central (XLS oficial)
-import * as XLSX from "xlsx";
 
 async function descargarXLS(url) {
   const resp = await fetch(url, {
@@ -105,6 +103,49 @@ router.get("/cotizacion/mcba", async (req, res) => {
     fecha: hoy.toLocaleDateString('es-AR'),
     resultados,
   });
+});
+
+// Busqueda de precios en gondola de supermercados (VTEX)
+const SUPERS_VTEX = [
+  { key: 'jumbo',       nombre: 'Jumbo',       url: 'https://www.jumbo.com.ar' },
+  { key: 'carrefour',   nombre: 'Carrefour',   url: 'https://www.carrefour.com.ar' },
+  { key: 'abastecedor', nombre: 'Abastecedor', url: 'https://www.abastecedor.com.ar' },
+];
+
+async function buscarVTEX(baseUrl, query) {
+  const url = `${baseUrl}/api/catalog_system/pub/products/search/${encodeURIComponent(query)}?O=OrderByScoreASC&_from=0&_to=7`;
+  try {
+    const resp = await fetch(url, {
+      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36', 'Accept': 'application/json' },
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!resp.ok) return [];
+    const data = await resp.json();
+    return data.map(function(p) {
+      const item = p.items && p.items[0] ? p.items[0] : {};
+      const seller = item.sellers && item.sellers[0] ? item.sellers[0] : {};
+      const precio = seller.commertialOffer ? seller.commertialOffer.Price || 0 : 0;
+      return {
+        id: p.productId, nombre: p.productName, precio,
+        ean: item.ean || '', unidad: item.measurementUnit || '',
+        multiplicador: item.unitMultiplier || 1,
+        link: baseUrl + (p.linkText ? '/' + p.linkText + '/p' : ''),
+      };
+    }).filter(function(p){ return p.precio > 0; });
+  } catch(e) {
+    console.error('[VTEX]', baseUrl, e.message);
+    return [];
+  }
+}
+
+router.get("/cotizacion/gondola", async (req, res) => {
+  const { producto } = req.query;
+  if (!producto) return res.status(400).json({ error: "Falta parametro producto" });
+  const resultados = {};
+  await Promise.all(SUPERS_VTEX.map(async function(s) {
+    resultados[s.key] = { nombre: s.nombre, productos: await buscarVTEX(s.url, producto) };
+  }));
+  res.json({ ok: true, query: producto, fecha: new Date().toLocaleDateString('es-AR'), resultados });
 });
 
 export default router;
