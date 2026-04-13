@@ -421,3 +421,91 @@ export function catalogoParaTipo(tipoCliente) {
 
   return texto.trim();
 }
+
+// ── Dedicados ───────────────────────────────────────────────────────────────
+
+// Crear tablas si no existen
+(function() {
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS dedicados_clientes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        nombre TEXT NOT NULL,
+        empresa TEXT,
+        telefono TEXT,
+        email TEXT,
+        direccion TEXT,
+        zona TEXT,
+        comercial TEXT,
+        notas TEXT,
+        activo INTEGER DEFAULT 1,
+        creado_en TEXT DEFAULT (datetime('now','localtime'))
+      );
+      CREATE TABLE IF NOT EXISTS dedicados_precios (
+        cliente_id INTEGER NOT NULL,
+        producto_id INTEGER NOT NULL,
+        precio REAL DEFAULT 0,
+        PRIMARY KEY (cliente_id, producto_id)
+      );
+    `);
+  } catch(e) { console.error('[DB] dedicados:', e.message); }
+})();
+
+export function listarDedicados() {
+  return db.prepare("SELECT * FROM dedicados_clientes WHERE activo = 1 ORDER BY nombre").all();
+}
+
+export function crearDedicado(datos) {
+  return db.prepare(`
+    INSERT INTO dedicados_clientes (nombre, empresa, telefono, email, direccion, zona, comercial, notas)
+    VALUES (@nombre, @empresa, @telefono, @email, @direccion, @zona, @comercial, @notas)
+  `).run({
+    nombre:    datos.nombre    || '',
+    empresa:   datos.empresa   || null,
+    telefono:  datos.telefono  || null,
+    email:     datos.email     || null,
+    direccion: datos.direccion || null,
+    zona:      datos.zona      || null,
+    comercial: datos.comercial || null,
+    notas:     datos.notas     || null,
+  }).lastInsertRowid;
+}
+
+export function actualizarDedicado(id, datos) {
+  const campos = Object.keys(datos).map(k => `${k} = @${k}`).join(', ');
+  db.prepare(`UPDATE dedicados_clientes SET ${campos} WHERE id = @id`).run({ ...datos, id });
+}
+
+export function eliminarDedicado(id) {
+  db.prepare("UPDATE dedicados_clientes SET activo = 0 WHERE id = ?").run(id);
+}
+
+export function obtenerPreciosDedicado(clienteId) {
+  return db.prepare(`
+    SELECT dp.producto_id, dp.precio, op.nombre, op.categoria, op.kilaje, op.descripcion
+    FROM dedicados_precios dp
+    JOIN oferta_productos op ON op.id = dp.producto_id
+    WHERE dp.cliente_id = ?
+  `).all(clienteId);
+}
+
+export function guardarPrecioDedicado(clienteId, productoId, precio) {
+  db.prepare(`
+    INSERT INTO dedicados_precios (cliente_id, producto_id, precio)
+    VALUES (?,?,?)
+    ON CONFLICT(cliente_id, producto_id) DO UPDATE SET precio = excluded.precio
+  `).run(parseInt(clienteId), parseInt(productoId), parseFloat(precio)||0);
+}
+
+export function eliminarPrecioDedicado(clienteId, productoId) {
+  db.prepare("DELETE FROM dedicados_precios WHERE cliente_id = ? AND producto_id = ?").run(parseInt(clienteId), parseInt(productoId));
+}
+
+export function crearPedidoDedicado(clienteId, detalle, total) {
+  const cliente = db.prepare("SELECT * FROM dedicados_clientes WHERE id = ?").get(clienteId);
+  if (!cliente) throw new Error("Cliente dedicado no encontrado");
+  return db.prepare(`
+    INSERT INTO pedidos (telefono, tipo_cliente, detalle, total)
+    VALUES (?, 'dedicados', ?, ?)
+  `).run(cliente.telefono || ('ded-' + clienteId), detalle, parseFloat(total)||0).lastInsertRowid;
+}
