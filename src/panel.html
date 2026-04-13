@@ -938,8 +938,9 @@ function loadPricing(of) {
       if(p.proveedor) h+='<div style="font-size:11px;color:var(--sub)">'+p.proveedor+'</div>';
       h+='<div style="margin-top:4px;display:flex;align-items:center;gap:6px">';
       h+='<button class="btn bo" style="font-size:10px;padding:3px 8px" onclick="cotizarMCBAPricing(\''+esc(p.nombre)+'\','+p.id+')">Cot. MCBA</button>';
-      h+='<span id="mcba-'+p.id+'" style="font-size:11px;color:var(--ok);font-weight:600"></span>';
+      h+='<span id="mcba-status-'+p.id+'" style="font-size:11px;color:var(--mut)"></span>';
       h+='</div>';
+      h+='<div id="mcba-'+p.id+'" style="display:none;margin-top:6px;border:1px solid var(--bor);border-radius:7px;overflow:hidden;font-size:11px"></div>';
       h+='</td><td style="text-align:right;color:var(--burd);font-weight:500">$'+nr(cb)+'</td>';
       tipos.forEach(function(t) {
         var pr=p.precios&&p.precios[t]?p.precios[t]:{precio:0,disponible:1};
@@ -1175,21 +1176,32 @@ function cotizarMCBA(nom, rpid) {
 }
 
 function cotizarMCBAPricing(nom, pid) {
-  var sp=document.getElementById('mcba-'+pid);
-  if(sp){ sp.style.color='var(--mut)'; sp.textContent='Buscando...'; }
+  var status=document.getElementById('mcba-status-'+pid);
+  var div=document.getElementById('mcba-'+pid);
+  if(status){ status.style.color='var(--mut)'; status.textContent='Buscando...'; }
+  if(div) div.style.display='none';
   var termino=nom.split(' ')[0].toUpperCase();
   api('/api/cotizacion/mcba?producto='+encodeURIComponent(termino)).then(function(data) {
-    if(!sp) return;
+    if(status) status.textContent='';
+    if(!div) return;
     if(!data.ok||!data.resultados||!data.resultados.length){
-      sp.style.color='var(--err)'; sp.textContent='Sin cotizacion'; return;
+      status.style.color='var(--err)'; status.textContent='Sin datos MCBA'; return;
     }
-    var r=data.resultados[0];
-    sp.style.color='var(--ok)';
-    var txt='MCBA: $'+Math.round(r.min).toLocaleString('es-AR');
-    if(r.max&&r.max!==r.min) txt+=' – $'+Math.round(r.max).toLocaleString('es-AR');
-    txt+='/kg';
-    sp.textContent=txt;
-    sp.title='Archivo: '+(data.archivo||'')+' | '+data.resultados.map(function(x){return x.descripcion+' $'+Math.round(x.min).toLocaleString('es-AR')+'-$'+Math.round(x.max).toLocaleString('es-AR');}).join(' | ');
+    var h='<div style="background:var(--goldl);padding:5px 10px;font-size:10px;font-weight:600;color:var(--burd);letter-spacing:.05em">MCBA '+data.fecha+' — '+data.archivo+'</div>';
+    h+='<table style="width:100%;border-collapse:collapse">';
+    h+='<thead><tr style="background:var(--bg)"><th style="padding:4px 8px;text-align:left;font-size:10px;color:var(--mut);font-weight:500">Variedad / Procedencia</th><th style="padding:4px 8px;text-align:center;font-size:10px;color:var(--mut);font-weight:500">Kg</th><th style="padding:4px 8px;text-align:right;font-size:10px;color:var(--mut);font-weight:500">Mín</th><th style="padding:4px 8px;text-align:right;font-size:10px;color:var(--mut);font-weight:500">Máx</th></tr></thead><tbody>';
+    data.resultados.forEach(function(r, i) {
+      var bg=i%2===0?'#fff':'var(--bg)';
+      h+='<tr style="background:'+bg+';border-top:1px solid var(--bor)">';
+      h+='<td style="padding:5px 8px;font-size:11px">'+esc(r.descripcion)+'</td>';
+      h+='<td style="padding:5px 8px;text-align:center;font-size:11px;color:var(--mut)">'+(r.kg||'-')+'</td>';
+      h+='<td style="padding:5px 8px;text-align:right;font-size:11px;font-weight:600;color:var(--burd);font-variant-numeric:tabular-nums">$'+Math.round(r.min).toLocaleString('es-AR')+'</td>';
+      h+='<td style="padding:5px 8px;text-align:right;font-size:11px;font-weight:600;color:var(--burd);font-variant-numeric:tabular-nums">$'+Math.round(r.max).toLocaleString('es-AR')+'</td>';
+      h+='</tr>';
+    });
+    h+='</tbody></table>';
+    div.innerHTML=h;
+    div.style.display='block';
   });
 }
 
