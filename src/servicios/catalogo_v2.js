@@ -91,30 +91,8 @@ db.exec(`
     nombre    TEXT NOT NULL,
     proveedor TEXT,
     monto     REAL DEFAULT 0,
+    kg_bulto  REAL DEFAULT 1,
     activo    INTEGER DEFAULT 1
-  );
-
-  -- Clientes dedicados (venta telefonica, sin WhatsApp)
-  CREATE TABLE IF NOT EXISTS dedicados_clientes (
-    id        INTEGER PRIMARY KEY AUTOINCREMENT,
-    nombre    TEXT NOT NULL,
-    empresa   TEXT,
-    telefono  TEXT,
-    email     TEXT,
-    direccion TEXT,
-    zona      TEXT,
-    comercial TEXT,
-    notas     TEXT,
-    activo    INTEGER DEFAULT 1,
-    creado_en TEXT DEFAULT (datetime('now','localtime'))
-  );
-
-  -- Precios custom por cliente dedicado x producto de oferta1
-  CREATE TABLE IF NOT EXISTS dedicados_precios (
-    cliente_id  INTEGER NOT NULL,
-    producto_id INTEGER NOT NULL,
-    precio      REAL DEFAULT 0,
-    PRIMARY KEY (cliente_id, producto_id)
   );
 
   -- Precios por canal de venta
@@ -144,21 +122,12 @@ db.exec(`
   );
 `);
 
-// Migracion: crear tablas dedicados si no existen
+// Migracion kg_bulto en retail_gastos
 (function() {
-  try {
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS dedicados_clientes (
-        id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT NOT NULL, empresa TEXT,
-        telefono TEXT, email TEXT, direccion TEXT, zona TEXT, comercial TEXT,
-        notas TEXT, activo INTEGER DEFAULT 1, creado_en TEXT DEFAULT (datetime('now','localtime'))
-      );
-      CREATE TABLE IF NOT EXISTS dedicados_precios (
-        cliente_id INTEGER NOT NULL, producto_id INTEGER NOT NULL, precio REAL DEFAULT 0,
-        PRIMARY KEY (cliente_id, producto_id)
-      );
-    `);
-  } catch(e) {}
+  var cols = db.prepare("PRAGMA table_info(retail_gastos)").all().map(function(c){ return c.name; });
+  if (cols.indexOf('kg_bulto') < 0) {
+    try { db.exec("ALTER TABLE retail_gastos ADD COLUMN kg_bulto REAL DEFAULT 1"); } catch(e) {}
+  }
 })();
 
 // Migracion observaciones en retail_seleccion
@@ -234,11 +203,11 @@ export function actualizarRetailProducto(id, nombre, categoria) {
 export function listarGastos() {
   return db.prepare("SELECT * FROM retail_gastos WHERE activo = 1 ORDER BY nombre").all();
 }
-export function crearGasto(nombre, proveedor, monto) {
-  return db.prepare("INSERT INTO retail_gastos (nombre, proveedor, monto) VALUES (?,?,?)").run(nombre, proveedor||null, parseFloat(monto)||0);
+export function crearGasto(nombre, proveedor, monto, kg_bulto) {
+  return db.prepare("INSERT INTO retail_gastos (nombre, proveedor, monto, kg_bulto) VALUES (?,?,?,?)").run(nombre, proveedor||null, parseFloat(monto)||0, parseFloat(kg_bulto)||1);
 }
-export function actualizarGasto(id, nombre, proveedor, monto) {
-  db.prepare("UPDATE retail_gastos SET nombre=?, proveedor=?, monto=? WHERE id=?").run(nombre, proveedor||null, parseFloat(monto)||0, id);
+export function actualizarGasto(id, nombre, proveedor, monto, kg_bulto) {
+  db.prepare("UPDATE retail_gastos SET nombre=?, proveedor=?, monto=?, kg_bulto=? WHERE id=?").run(nombre, proveedor||null, parseFloat(monto)||0, parseFloat(kg_bulto)||1, id);
 }
 export function eliminarGasto(id) {
   db.prepare("UPDATE retail_gastos SET activo = 0 WHERE id = ?").run(id);
@@ -259,7 +228,7 @@ export function guardarSeleccion(retailProductoId, ofertaProductoId, gastosIds, 
   `).run(parseInt(retailProductoId), parseInt(ofertaProductoId), JSON.stringify(gastosIds||[]), observaciones||null);
 }
 
-export function guardarObservacionRetail(retailProductoId, observaciones) {
+export function guardarObservacion(retailProductoId, observaciones) {
   const existe = db.prepare("SELECT retail_producto_id FROM retail_seleccion WHERE retail_producto_id = ?").get(retailProductoId);
   if (existe) {
     db.prepare("UPDATE retail_seleccion SET observaciones = ? WHERE retail_producto_id = ?").run(observaciones||null, parseInt(retailProductoId));
@@ -294,12 +263,11 @@ export function vistaRetail() {
   return retailProds.map(function(rp) {
     const seleccion = obtenerSeleccion(rp.id);
     const gastosSelIds = seleccion ? JSON.parse(seleccion.gastos_ids||'[]') : [];
-    const gastosSum = gastos.filter(function(g){ return gastosSelIds.indexOf(g.id) >= 0; }).reduce(function(s,g){ var kg = g.kg_bulto || 1; return s + ((g.monto||0) / kg); }, 0);
 
     // Encontrar productos de oferta que tienen este nombre_retail
     const proveedores = ofertaProds.filter(function(op){ return op.nombre_retail === rp.nombre; }).map(function(op) {
       const cbase   = (parseFloat(op.costo)||0) + (parseFloat(op.flete)||0);
-      const kilos   = parseFloat((op.kilaje||'').replace(/[^0-9.]/g,'')) || 1;
+      const kilos   = parseFloat(op.kilaje) || parseFloat((op.kilaje||'').replace(/[^0-9.]/g,'')) || 1;
       const precioKg = kilos > 0 ? (cbase / kilos) : 0;
       return {
         id:          op.id,
@@ -317,7 +285,10 @@ export function vistaRetail() {
     });
 
     const provSeleccionado = proveedores.find(function(p){ return p.seleccionado; }) || proveedores[0];
-    const costoBase = provSeleccionado ? (provSeleccionado.cbase / (provSeleccionado.kilos||1)) : 0;
+    const kilosProveedor = provSeleccionado ? (provSeleccionado.kilos || 1) : 1;
+    // gastosSum: monto por bulto / kilos del bulto del proveedor seleccionado
+    const gastosSum = gastos.filter(function(g){ return gastosSelIds.indexOf(g.id) >= 0; }).reduce(function(s,g){ return s + ((g.monto||0) / kilosProveedor); }, 0);
+    const costoBase = provSeleccionado ? (provSeleccionado.cbase / kilosProveedor) : 0;
     const costoTotal = costoBase + gastosSum;
 
     const preciosCanal = obtenerPreciosCanal(rp.id);
@@ -449,66 +420,4 @@ export function catalogoParaTipo(tipoCliente) {
   }
 
   return texto.trim();
-}
-
-// ── Dedicados ───────────────────────────────────────────────────────────────
-export function listarDedicados() {
-  return db.prepare("SELECT * FROM dedicados_clientes WHERE activo = 1 ORDER BY nombre").all();
-}
-
-export function crearDedicado(datos) {
-  return db.prepare(`
-    INSERT INTO dedicados_clientes (nombre, empresa, telefono, email, direccion, zona, comercial, notas)
-    VALUES (@nombre, @empresa, @telefono, @email, @direccion, @zona, @comercial, @notas)
-  `).run({
-    nombre:    datos.nombre    || '',
-    empresa:   datos.empresa   || null,
-    telefono:  datos.telefono  || null,
-    email:     datos.email     || null,
-    direccion: datos.direccion || null,
-    zona:      datos.zona      || null,
-    comercial: datos.comercial || null,
-    notas:     datos.notas     || null,
-  }).lastInsertRowid;
-}
-
-export function actualizarDedicado(id, datos) {
-  const campos = Object.keys(datos).map(k => `${k} = @${k}`).join(', ');
-  db.prepare(`UPDATE dedicados_clientes SET ${campos} WHERE id = @id`).run({ ...datos, id });
-}
-
-export function eliminarDedicado(id) {
-  db.prepare("UPDATE dedicados_clientes SET activo = 0 WHERE id = ?").run(id);
-}
-
-export function obtenerPreciosDedicado(clienteId) {
-  const rows = db.prepare(`
-    SELECT dp.producto_id, dp.precio, op.nombre, op.categoria, op.kilaje, op.descripcion
-    FROM dedicados_precios dp
-    JOIN oferta_productos op ON op.id = dp.producto_id
-    WHERE dp.cliente_id = ?
-  `).all(clienteId);
-  return rows;
-}
-
-export function guardarPrecioDedicado(clienteId, productoId, precio) {
-  db.prepare(`
-    INSERT INTO dedicados_precios (cliente_id, producto_id, precio)
-    VALUES (?,?,?)
-    ON CONFLICT(cliente_id, producto_id) DO UPDATE SET precio = excluded.precio
-  `).run(parseInt(clienteId), parseInt(productoId), parseFloat(precio)||0);
-}
-
-export function eliminarPrecioDedicado(clienteId, productoId) {
-  db.prepare("DELETE FROM dedicados_precios WHERE cliente_id = ? AND producto_id = ?").run(parseInt(clienteId), parseInt(productoId));
-}
-
-export function crearPedidoDedicado(clienteId, detalle, total) {
-  const cliente = db.prepare("SELECT * FROM dedicados_clientes WHERE id = ?").get(clienteId);
-  if (!cliente) throw new Error("Cliente dedicado no encontrado");
-  // Reutilizamos la tabla pedidos con tipo_cliente = 'dedicados'
-  return db.prepare(`
-    INSERT INTO pedidos (telefono, tipo_cliente, detalle, total)
-    VALUES (?, 'dedicados', ?, ?)
-  `).run(cliente.telefono || ('ded-' + clienteId), detalle, parseFloat(total)||0).lastInsertRowid;
 }

@@ -1325,10 +1325,15 @@ eid('btn-save-rp').addEventListener('click',function(){
 });
 function loadRP() {
   api('/api/retail/productos').then(function(lista){
-    var h='';
+    var h=''; var catActual='';
     lista.forEach(function(r){
-      h+='<tr><td style="font-size:12px;color:var(--mut)">'+(r.categoria||'-')+'</td>';
-      h+='<td style="font-weight:500">'+r.nombre+'</td>';
+      var cat = r.categoria||'Sin categoria';
+      if(cat !== catActual){
+        catActual = cat;
+        h+='<tr><td colspan="3" style="background:var(--goldl);font-size:11px;font-weight:700;color:var(--burd);text-transform:uppercase;letter-spacing:.06em;padding:8px 12px">'+esc(catActual)+'</td></tr>';
+      }
+      h+='<tr><td style="font-size:12px;color:var(--mut);padding-left:20px">'+(r.categoria||'-')+'</td>';
+      h+='<td style="font-weight:500">'+esc(r.nombre)+'</td>';
       h+='<td style="text-align:right;white-space:nowrap"><button class="btn bb bs" style="margin-right:6px" onclick="editRP('+r.id+',\''+esc(r.nombre)+'\',\''+esc(r.categoria||'')+'\')">Editar</button><button class="btn bd bs" onclick="delRP('+r.id+')">Eliminar</button></td></tr>';
     });
     eid('t-rp').innerHTML=h||'<tr><td colspan="3" class="emp">Sin productos retail</td></tr>';
