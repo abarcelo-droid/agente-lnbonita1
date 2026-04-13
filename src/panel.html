@@ -186,11 +186,11 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
 
 <!-- OFERTA 1 y 2 - carga de productos -->
 <div class="sec" id="sec-oferta1">
-  <div class="ph"><div><div class="ph-title">Oferta 1 - Productos</div><div class="ph-sub">Mayorista A, MCBA, Minorista MCBA y Entrega</div></div><button class="btn btn-burg" onclick="openModalProd('oferta1')">+ Agregar producto</button></div>
+  <div class="ph"><div><div class="ph-title">Oferta 1 - Productos</div><div class="ph-sub">Mayorista A, MCBA, Minorista MCBA y Entrega</div></div><div style="display:flex;gap:8px"><button class="btn btn-ol btn-sm" onclick="limpiarDuplicados()">Limpiar duplicados</button><button class="btn btn-burg" onclick="openModalProd('oferta1')">+ Agregar producto</button></div></div>
   <div id="grid-oferta1"></div>
 </div>
 <div class="sec" id="sec-oferta2">
-  <div class="ph"><div><div class="ph-title">Oferta 2 - Productos</div><div class="ph-sub">Food Service, Consumidor Final</div></div><button class="btn btn-burg" onclick="openModalProd('oferta2')">+ Agregar producto</button></div>
+  <div class="ph"><div><div class="ph-title">Oferta 2 - Productos</div><div class="ph-sub">Food Service, Consumidor Final</div></div><div style="display:flex;gap:8px"><button class="btn btn-ol btn-sm" onclick="limpiarDuplicados()">Limpiar duplicados</button><button class="btn btn-burg" onclick="openModalProd('oferta2')">+ Agregar producto</button></div></div>
   <div id="grid-oferta2"></div>
 </div>
 
@@ -753,7 +753,7 @@ function saveProd(e) {
   var foto = document.getElementById('p-foto').files[0];
   var fd = new FormData();
   fd.append('oferta',       elVal('p-oferta'));
-  fd.append('codigo',       Date.now().toString());
+  fd.append('codigo',       elVal('p-nombre-retail') || elVal('p-nom').toLowerCase().replace(/[^a-z0-9]/g,'-').replace(/-+/g,'-').slice(0,20) + '-' + elVal('p-proveedor').toLowerCase().replace(/[^a-z0-9]/g,'-').slice(0,10));
   fd.append('nombre',       elVal('p-nom'));
   fd.append('categoria',    elVal('p-cat'));
   fd.append('descripcion',  elVal('p-desc'));
@@ -769,6 +769,18 @@ function saveProd(e) {
   if (foto) fd.append('foto', foto);
   fetch('/api/oferta/producto',{method:'POST',body:fd}).then(function(){
     toast('Producto guardado','ok'); closeModal('mb-prod'); loadOfertaProd(ofertaAct);
+  });
+}
+
+
+function limpiarDuplicados() {
+  api('/api/oferta/limpiar-duplicados','POST',{}).then(function(res){
+    if (res.borrados > 0) {
+      toast('Se eliminaron ' + res.borrados + ' duplicados', 'ok');
+    } else {
+      toast('Sin duplicados', 'ok');
+    }
+    loadOfertaProd(ofertaAct);
   });
 }
 
@@ -1187,6 +1199,7 @@ function loadRetailView() {
       if (!rp.proveedores || !rp.proveedores.length) {
         html += '<div style="font-size:12px;color:var(--muted);font-style:italic">Sin proveedores disponibles. Asociar en la Oferta usando el campo "Nombre retail".</div>';
       } else {
+        html += '<div id="cot-result-'+rp.id+'" style="display:none;margin-bottom:12px;padding:10px 14px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;font-size:12px"></div>';
         html += '<div style="font-size:12px;color:var(--muted);margin-bottom:8px;font-weight:500">Proveedores disponibles</div>';
         rp.proveedores.forEach(function(pv) {
           var sel = pv.seleccionado;
@@ -1259,6 +1272,50 @@ function loadRetailView() {
   });
 }
 
+
+
+function cotizarMCBA(nombreProducto, rpid) {
+  var btn = document.getElementById('btn-cot-'+rpid);
+  var div = document.getElementById('cot-result-'+rpid);
+  if (btn) { btn.disabled = true; btn.textContent = 'Buscando...'; }
+  if (div) div.style.display = 'none';
+
+  // Construir termino de busqueda - solo la primera palabra significativa
+  var termino = nombreProducto.split(' ')[0].toUpperCase();
+
+  api('/api/cotizacion/mcba?producto='+encodeURIComponent(termino)).then(function(data) {
+    if (btn) { btn.disabled = false; btn.textContent = 'Cotizacion MCBA'; }
+    if (!div) return;
+
+    if (!data.ok || !data.resultados || !data.resultados.length) {
+      div.style.display = 'block';
+      div.style.background = '#fef2f2';
+      div.style.borderColor = '#fca5a5';
+      div.innerHTML = '<span style="color:var(--danger)">No se encontro cotizacion para "'+nombreProducto+'" en el Mercado Central.</span>';
+      return;
+    }
+
+    div.style.display = 'block';
+    div.style.background = '#f0fdf4';
+    div.style.borderColor = '#bbf7d0';
+    var html = '<div style="font-weight:600;color:#166534;margin-bottom:6px">Cotizacion MCBA - '+data.fecha+'</div>';
+    data.resultados.forEach(function(r) {
+      html += '<div style="display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px solid #dcfce7">';
+      html += '<span style="color:var(--text)">'+r.nombre+'</span>';
+      html += '<span style="font-variant-numeric:tabular-nums;font-weight:600;color:#166534">$'+r.precio_kg.toLocaleString('es-AR')+'/kg</span>';
+      html += '</div>';
+    });
+    html += '<div style="font-size:10px;color:var(--muted);margin-top:6px">Fuente: preciosdelcentral.com.ar (precio mayorista MCBA)</div>';
+    div.innerHTML = html;
+  }).catch(function() {
+    if (btn) { btn.disabled = false; btn.textContent = 'Cotizacion MCBA'; }
+    if (div) {
+      div.style.display = 'block';
+      div.style.background = '#fef2f2';
+      div.innerHTML = '<span style="color:var(--danger)">Error al conectar con Precios del Central.</span>';
+    }
+  });
+}
 
 function calcRetailMargen(inp) {
   var rpid   = inp.getAttribute('data-rpid');
