@@ -936,6 +936,10 @@ function loadPricing(of) {
       h+='<tr><td><div style="font-weight:500">'+p.nombre+'</div>';
       if(p.descripcion) h+='<div style="font-size:11px;color:var(--mut)">'+p.descripcion+'</div>';
       if(p.proveedor) h+='<div style="font-size:11px;color:var(--sub)">'+p.proveedor+'</div>';
+      h+='<div style="margin-top:4px;display:flex;align-items:center;gap:6px">';
+      h+='<button class="btn bo" style="font-size:10px;padding:3px 8px" onclick="cotizarMCBAPricing(\''+esc(p.nombre)+'\','+p.id+')">Cot. MCBA</button>';
+      h+='<span id="mcba-'+p.id+'" style="font-size:11px;color:var(--ok);font-weight:600"></span>';
+      h+='</div>';
       h+='</td><td style="text-align:right;color:var(--burd);font-weight:500">$'+nr(cb)+'</td>';
       tipos.forEach(function(t) {
         var pr=p.precios&&p.precios[t]?p.precios[t]:{precio:0,disponible:1};
@@ -1012,12 +1016,9 @@ function loadRetail() {
       h+='<div>';
       h+='<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">';
       h+='<div style="font-size:15px;font-weight:600">'+rp.nombre+'</div>';
-      h+='<div style="display:flex;gap:6px">';
-      h+='<button class="btn bo bs" onclick="cotizarMCBA(\''+esc(rp.nombre)+'\','+rp.id+')" id="btn-cot-'+rp.id+'">Cotizacion MCBA</button>';
       h+='<button class="btn bo bs" style="background:var(--goldl);border-color:var(--gold);color:var(--burd)" onclick="verGondola(\''+esc(rp.nombre)+'\','+rp.id+')">🛒 Góndola</button>';
       h+='</div>';
-      h+='</div>';
-      h+='<div id="cot-r-'+rp.id+'" style="display:none;margin-bottom:10px;padding:10px 14px;border-radius:8px;font-size:12px"></div>';
+      h+='<div id="cot-r-'+rp.id+'" style="display:none"></div>';
       if(!rp.proveedores||!rp.proveedores.length){
         h+='<div style="font-size:12px;color:var(--mut);font-style:italic">Sin proveedores. Asociar en Oferta con campo Nombre Retail.</div>';
       } else {
@@ -1170,6 +1171,25 @@ function cotizarMCBA(nom, rpid) {
     data.resultados.forEach(function(r){ h+='<div style="display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px solid #dcfce7"><span>'+r.nombre+'</span><span style="font-weight:600;color:#166534;font-variant-numeric:tabular-nums">$'+r.precio_kg.toLocaleString('es-AR')+'/kg</span></div>'; });
     h+='<div style="font-size:10px;color:var(--mut);margin-top:6px">Fuente: preciosdelcentral.com.ar</div>';
     div.innerHTML=h;
+  });
+}
+
+function cotizarMCBAPricing(nom, pid) {
+  var sp=document.getElementById('mcba-'+pid);
+  if(sp){ sp.style.color='var(--mut)'; sp.textContent='Buscando...'; }
+  var termino=nom.split(' ')[0].toUpperCase();
+  api('/api/cotizacion/mcba?producto='+encodeURIComponent(termino)).then(function(data) {
+    if(!sp) return;
+    if(!data.ok||!data.resultados||!data.resultados.length){
+      sp.style.color='var(--err)'; sp.textContent='Sin cotizacion'; return;
+    }
+    var r=data.resultados[0];
+    sp.style.color='var(--ok)';
+    var txt='MCBA: $'+Math.round(r.min).toLocaleString('es-AR');
+    if(r.max&&r.max!==r.min) txt+=' – $'+Math.round(r.max).toLocaleString('es-AR');
+    txt+='/kg';
+    sp.textContent=txt;
+    sp.title='Archivo: '+(data.archivo||'')+' | '+data.resultados.map(function(x){return x.descripcion+' $'+Math.round(x.min).toLocaleString('es-AR')+'-$'+Math.round(x.max).toLocaleString('es-AR');}).join(' | ');
   });
 }
 
