@@ -152,33 +152,31 @@ router.get("/pricing/pdf/:tipo", async (req, res) => {
     rows += '<tr><td>' + p.nombre + '</td><td style="color:#7a6055">' + (p.descripcion||'') + '</td><td style="color:#7a6055">' + (p.origen||'') + ' ' + (p.kilaje||'') + '</td><td class="num">$' + Number(prec.precio||0).toLocaleString('es-AR') + '</td></tr>';
   });
 
-  const html = \`<!DOCTYPE html><html><head><meta charset="UTF-8">
-<style>
-  body{font-family:Arial,sans-serif;font-size:13px;color:#2c1810;margin:0;padding:32px}
-  .header{display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:24px;padding-bottom:16px;border-bottom:3px solid #6b1212}
-  .logo-text{font-size:22px;font-weight:700;color:#6b1212;letter-spacing:.02em}
-  .logo-sub{font-size:11px;color:#7a6055;margin-top:2px}
-  .meta{text-align:right;font-size:12px;color:#7a6055}
-  .meta strong{color:#2c1810;font-size:15px;display:block;margin-bottom:4px}
-  table{width:100%;border-collapse:collapse;margin-top:8px}
-  th{padding:9px 12px;background:#6b1212;color:#fff;text-align:left;font-size:11px;letter-spacing:.06em;text-transform:uppercase}
-  th.num{text-align:right}
-  td{padding:8px 12px;border-bottom:1px solid #e8ddd0;vertical-align:top}
-  td.num{text-align:right;font-weight:600;color:#6b1212;font-variant-numeric:tabular-nums}
-  tr.cat td{background:#faf3dc;font-size:11px;font-weight:700;color:#6b1212;text-transform:uppercase;letter-spacing:.07em;padding:7px 12px}
-  tr:hover td{background:#fdf8f3}
-  .footer{margin-top:32px;font-size:10px;color:#b09080;text-align:center;border-top:1px solid #e8ddd0;padding-top:12px}
-</style></head><body>
-<div class="header">
-  <div><div class="logo-text">La Nina Bonita</div><div class="logo-sub">Frutas y Hortalizas - desde 1945</div></div>
-  <div class="meta"><strong>Lista de precios - \${label}</strong>Fecha: \${fecha}</div>
-</div>
-<table>
-  <thead><tr><th>Producto</th><th>Variedad</th><th>Origen / Presentacion</th><th class="num">Precio</th></tr></thead>
-  <tbody>\${rows}</tbody>
-</table>
-<div class="footer">La Nina Bonita - Mercado Central de Buenos Aires, Nave 4, Puestos 2-4-6 | a.barcelo@lnbonita.com.ar</div>
-</body></html>\`;
+  const html = [
+    '<!DOCTYPE html><html><head><meta charset="UTF-8">',
+    '<style>',
+    'body{font-family:Arial,sans-serif;font-size:13px;color:#2c1810;margin:0;padding:32px}',
+    '.header{display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:24px;padding-bottom:16px;border-bottom:3px solid #6b1212}',
+    '.logo-text{font-size:22px;font-weight:700;color:#6b1212}',
+    'table{width:100%;border-collapse:collapse;margin-top:8px}',
+    'th{padding:9px 12px;background:#6b1212;color:#fff;text-align:left;font-size:11px;text-transform:uppercase}',
+    'th.num{text-align:right}',
+    'td{padding:8px 12px;border-bottom:1px solid #e8ddd0;vertical-align:top}',
+    'td.num{text-align:right;font-weight:600;color:#6b1212;font-variant-numeric:tabular-nums}',
+    'tr.cat td{background:#faf3dc;font-size:11px;font-weight:700;color:#6b1212;text-transform:uppercase;padding:7px 12px}',
+    '.footer{margin-top:32px;font-size:10px;color:#b09080;text-align:center;border-top:1px solid #e8ddd0;padding-top:12px}',
+    '</style></head><body>',
+    '<div class="header">',
+    '<div><div class="logo-text">La Nina Bonita</div><div style="font-size:11px;color:#7a6055">Frutas y Hortalizas - desde 1945</div></div>',
+    '<div style="text-align:right;font-size:12px;color:#7a6055"><strong style="color:#2c1810;font-size:15px;display:block;margin-bottom:4px">Lista de precios - ' + label + '</strong>Fecha: ' + fecha + '</div>',
+    '</div>',
+    '<table>',
+    '<thead><tr><th>Producto</th><th>Variedad</th><th>Origen / Presentacion</th><th class="num">Precio</th></tr></thead>',
+    '<tbody>' + rows + '</tbody>',
+    '</table>',
+    '<div class="footer">La Nina Bonita - Mercado Central de Buenos Aires, Nave 4, Puestos 2-4-6 | a.barcelo@lnbonita.com.ar</div>',
+    '</body></html>'
+  ].join('');
 
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
   res.setHeader('Content-Disposition', 'inline; filename="precios-' + tipo + '.html"');
