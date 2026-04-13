@@ -1051,8 +1051,8 @@ function loadRetail() {
       }
       h+='<div style="margin-top:12px;padding:12px;background:var(--burl);border-radius:8px;margin-bottom:14px">';
       h+='<div style="font-size:11px;color:var(--mut)">Costo base/kg: <strong>$'+Math.round(rp.costo_kg_base).toLocaleString('es-AR')+'</strong></div>';
-      h+='<div style="font-size:11px;color:var(--mut)">Gastos: <strong>$'+Math.round(rp.gastos_sum).toLocaleString('es-AR')+'</strong></div>';
-      h+='<div style="font-size:15px;font-weight:600;color:var(--burd);margin-top:6px;border-top:1px solid rgba(139,26,26,.2);padding-top:6px">Costo total: $'+Math.round(rp.costo_kg_total).toLocaleString('es-AR')+'/kg</div>';
+      h+='<div style="font-size:11px;color:var(--mut)">Gastos: <strong id="gastos-sum-'+rp.id+'">$'+Math.round(rp.gastos_sum).toLocaleString('es-AR')+'</strong></div>';
+      h+='<div style="font-size:15px;font-weight:600;color:var(--burd);margin-top:6px;border-top:1px solid rgba(139,26,26,.2);padding-top:6px">Costo total: <span id="costo-total-'+rp.id+'">$'+Math.round(rp.costo_kg_total).toLocaleString('es-AR')+'/kg</span></div>';
       h+='</div>';
       h+='<div style="font-size:12px;font-weight:500;color:var(--mut);margin-bottom:8px">Observaciones</div>';
       h+='<textarea id="obs-'+rp.id+'" rows="2" style="width:100%;font-size:13px;resize:vertical" placeholder="Notas internas...">'+(rp.observaciones||'')+'</textarea>';
@@ -1131,7 +1131,22 @@ function toggleGasto(rpid,cb) {
   var opid=radio?parseInt(radio.value):0;
   var checks=document.querySelectorAll('input[type=checkbox][onchange*="toggleGasto('+rpid+',"]');
   var gids=[]; checks.forEach(function(c){ if(c.checked) gids.push(parseInt(c.value)); });
-  api('/api/retail/seleccion','POST',{retail_producto_id:rpid,oferta_producto_id:opid,gastos_ids:gids}).then(function(){ toast('Gastos actualizados','ok'); });
+  api('/api/retail/seleccion','POST',{retail_producto_id:rpid,oferta_producto_id:opid,gastos_ids:gids}).then(function(){
+    toast('Gastos actualizados','ok');
+    // Recalcular costo total en la UI
+    api('/api/retail/vista').then(function(lista){
+      var rp=lista.find(function(x){return x.id===rpid;});
+      if(!rp) return;
+      var el=document.getElementById('costo-total-'+rpid);
+      var eg=document.getElementById('gastos-sum-'+rpid);
+      if(el) el.textContent='$'+Math.round(rp.costo_kg_total).toLocaleString('es-AR')+'/kg';
+      if(eg) eg.textContent='$'+Math.round(rp.gastos_sum).toLocaleString('es-AR');
+      // Actualizar data-costo en los inputs de canales para que calcRet use el nuevo costo
+      document.querySelectorAll('input[data-rpid="'+rpid+'"]').forEach(function(inp){
+        inp.setAttribute('data-costo', Math.round(rp.costo_kg_total));
+      });
+    });
+  });
 }
 function guardarObs(rpid) {
   var ta=document.getElementById('obs-'+rpid);
