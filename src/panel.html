@@ -1194,7 +1194,7 @@ function cotizarMCBAPricing(nom, pid) {
     if(!data.ok||!data.resultados||!data.resultados.length){
       status.style.color='var(--err)'; status.textContent='Sin datos MCBA'; return;
     }
-    var h='<div style="background:var(--goldl);padding:5px 10px;font-size:10px;font-weight:600;color:var(--burd);letter-spacing:.05em">MCBA '+data.fecha+' — '+data.archivo+'</div>';
+    var h='<div style="background:var(--goldl);padding:5px 10px;font-size:10px;font-weight:600;color:var(--burd);letter-spacing:.05em;display:flex;align-items:center;justify-content:space-between">MCBA '+data.fecha+' — '+data.archivo+'<button onclick="document.getElementById(\'mcba-'+pid+'\').style.display=\'none\'" style="background:none;border:none;cursor:pointer;color:var(--burd);font-size:14px;line-height:1;padding:0 2px">×</button></div>';
     h+='<table style="width:100%;border-collapse:collapse">';
     h+='<thead><tr style="background:var(--bg)"><th style="padding:4px 8px;text-align:left;font-size:10px;color:var(--mut);font-weight:500">Variedad / Procedencia</th><th style="padding:4px 8px;text-align:center;font-size:10px;color:var(--mut);font-weight:500">Kg</th><th style="padding:4px 8px;text-align:right;font-size:10px;color:var(--mut);font-weight:500">Mín</th><th style="padding:4px 8px;text-align:right;font-size:10px;color:var(--mut);font-weight:500">Máx</th></tr></thead><tbody>';
     data.resultados.forEach(function(r, i) {
