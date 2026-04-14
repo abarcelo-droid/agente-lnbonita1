@@ -7,21 +7,20 @@
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
 <style>
 :root{
-  --bg:#f0f4f8;--sur:#fff;--bor:#dde3ea;--bor2:#c8d2db;
-  --txt:#1a2332;--mut:#5a6a7e;--sub:#8a9bb0;
-  --burg:#1a3a5c;--burd:#0f2540;--burl:#e8f0f8;
-  --gold:#f0a500;--goldl:#fff8e6;
+  --bg:#fdf8f3;--sur:#fff;--bor:#e8ddd0;--bor2:#d4c4b0;
+  --txt:#2c1810;--mut:#7a6055;--sub:#b09080;
+  --burg:#8b1a1a;--burd:#6b1212;--burl:#fdf0e8;
+  --gold:#c9a227;--goldl:#faf3dc;
   --ok:#16a34a;--warn:#d97706;--err:#dc2626;
-  --nav:#0f2540;--nav2:#1a3a5c;
   --sans:'DM Sans',sans-serif;
 }
 *{box-sizing:border-box;margin:0;padding:0}
 body{background:var(--bg);color:var(--txt);font-family:var(--sans);font-size:14px;line-height:1.5}
 .shell{display:flex;min-height:100vh}
-nav{width:230px;flex-shrink:0;background:var(--nav);display:flex;flex-direction:column;position:sticky;top:0;height:100vh;overflow-y:auto}
-.logo{padding:0;border-bottom:1px solid rgba(255,255,255,.1);margin-bottom:8px;background:#fff}
-.logo img{width:100%;max-width:100%;display:block;padding:16px 20px 12px;filter:none;opacity:1}
-.logo-tag{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:rgba(255,255,255,.4);padding:8px 20px;background:var(--nav2)}
+nav{width:230px;flex-shrink:0;background:var(--burd);display:flex;flex-direction:column;position:sticky;top:0;height:100vh;overflow-y:auto}
+.logo{padding:16px 20px 14px;border-bottom:1px solid rgba(255,255,255,.1);margin-bottom:8px}
+.logo img{width:100%;max-width:170px;display:block;margin-bottom:8px;filter:brightness(0) invert(1);opacity:.95}
+.logo-tag{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:rgba(255,255,255,.4)}
 .ng{padding:10px 20px 3px;font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:rgba(255,255,255,.3)}
 .ni{display:flex;align-items:center;gap:10px;padding:8px 20px;cursor:pointer;color:rgba(255,255,255,.65);transition:all .15s;border-left:3px solid transparent;font-size:13px}
 .ni:hover{color:#fff;background:rgba(255,255,255,.08)}
@@ -61,8 +60,8 @@ tbody tr:hover{background:var(--burl)}
 .fl{display:flex;flex-direction:column;gap:5px}
 label{font-size:12px;color:var(--mut);letter-spacing:.05em;text-transform:uppercase}
 input,select,textarea{background:var(--sur);border:1px solid var(--bor2);border-radius:7px;color:var(--txt);font-family:var(--sans);font-size:13.5px;padding:9px 12px;outline:none;transition:border-color .15s;width:100%}
-input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 0 3px rgba(26,58,92,.12)}
-.mb{display:none;position:fixed;inset:0;background:rgba(10,20,40,.55);z-index:100;align-items:center;justify-content:center}
+input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 0 3px rgba(139,26,26,.1)}
+.mb{display:none;position:fixed;inset:0;background:rgba(15,23,42,.5);z-index:100;align-items:center;justify-content:center}
 .mb.on{display:flex}
 .mbox{background:var(--sur);border:1px solid var(--bor);border-radius:14px;padding:28px;width:620px;max-width:95vw;max-height:90vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.15)}
 .mhd{display:flex;align-items:center;justify-content:space-between;margin-bottom:22px}
@@ -1075,6 +1074,8 @@ function loadRetail() {
       h+='<th style="padding:7px 8px;color:#fff;text-align:center">Perdida kg</th>';
       h+='<th style="padding:7px 8px;color:#fff;text-align:center">Costo real</th>';
       h+='<th style="padding:7px 8px;color:#fff;text-align:center">Ingreso neto</th>';
+      h+='<th style="padding:7px 8px;color:#fff;text-align:center">Dif/kg</th>';
+      h+='<th style="padding:7px 8px;color:#fff;text-align:center">Dif/bulto</th>';
       h+='<th style="padding:7px 8px;color:#fff;text-align:center">Margen %</th>';
       h+='</tr></thead><tbody>';
       CANALES.forEach(function(canal) {
@@ -1090,7 +1091,12 @@ function loadRetail() {
         h+='<input class="pinp" type="number" data-rpid="'+rp.id+'" data-canal="'+canal.k+'" data-coef="'+canal.c+'" data-costo="'+Math.round(costoTotal)+'" data-kgtot="'+kgTot+'" value="'+precio+'" style="width:78px" oninput="calcRet(this)"></div></td>';
         h+='<td style="padding:5px 6px;text-align:center"><div style="display:flex;align-items:center;justify-content:center;gap:3px"><input type="number" class="pinp" style="width:55px;color:var(--warn)" value="'+perdida+'" min="0" step="0.5" data-rpid="'+rp.id+'" data-canal="'+canal.k+'" data-field="perdida" data-coef="'+canal.c+'" data-costo="'+Math.round(costoTotal)+'" data-kgtot="'+kgTot+'" oninput="calcRet(this)"><span style="font-size:11px;color:var(--mut)">kg</span></div></td>';
         h+='<td style="padding:6px 8px;text-align:center;font-size:11px;color:var(--burd);font-variant-numeric:tabular-nums" id="cr-'+rp.id+'-'+canal.k+'">$'+Math.round(costoReal).toLocaleString('es-AR')+'/kg</td>';
+        var dif=precio>0?neto-costoReal:null;
+        var difBulto=dif!==null&&kgTot>0?dif*kgTot:null;
+        var dc=dif===null?'var(--mut)':dif>=0?'var(--ok)':'var(--err)';
         h+='<td style="padding:6px 8px;text-align:center;font-size:11px;font-variant-numeric:tabular-nums" id="ne-'+rp.id+'-'+canal.k+'">'+(precio>0?'$'+Math.round(neto).toLocaleString('es-AR'):'-')+'</td>';
+        h+='<td style="padding:6px 8px;text-align:center;font-size:11px;font-weight:600;color:'+dc+';font-variant-numeric:tabular-nums" id="dk-'+rp.id+'-'+canal.k+'">'+(dif!==null?(dif>=0?'+':'')+Math.round(dif).toLocaleString('es-AR'):'-')+'</td>';
+        h+='<td style="padding:6px 8px;text-align:center;font-size:11px;font-weight:600;color:'+dc+';font-variant-numeric:tabular-nums" id="db-'+rp.id+'-'+canal.k+'">'+(difBulto!==null?(difBulto>=0?'+':'')+Math.round(difBulto).toLocaleString('es-AR'):'-')+'</td>';
         h+='<td style="padding:6px 8px;text-align:center;font-weight:600;color:'+mc+'" id="mg-'+rp.id+'-'+canal.k+'">'+(mgn!==null?(mgn>=0?'+':'')+mgn.toFixed(1)+'%':'-')+'</td>';
         h+='</tr>';
       });
@@ -1113,9 +1119,15 @@ function calcRet(inp) {
   var neto=kgTot>0?precio*coef*1.105*(kgReal/kgTot):precio*coef*1.105;
   var mgn=neto>0?((neto-costoReal)/neto*100):null;
   var mc=mgn===null?'var(--mut)':mgn>=20?'var(--ok)':mgn>=0?'var(--warn)':'var(--err)';
+  var dif=precio>0?neto-costoReal:null;
+  var difBulto=dif!==null&&kgTot>0?dif*kgTot:null;
+  var dc=dif===null?'var(--mut)':dif>=0?'var(--ok)':'var(--err)';
   var ce=document.getElementById('cr-'+rpid+'-'+canal); var ne=document.getElementById('ne-'+rpid+'-'+canal); var me=document.getElementById('mg-'+rpid+'-'+canal);
+  var dk=document.getElementById('dk-'+rpid+'-'+canal); var db=document.getElementById('db-'+rpid+'-'+canal);
   if(ce) ce.textContent='$'+Math.round(costoReal).toLocaleString('es-AR')+'/kg';
   if(ne) ne.textContent=precio>0?'$'+Math.round(neto).toLocaleString('es-AR'):'-';
+  if(dk){ dk.textContent=dif!==null?(dif>=0?'+':'')+Math.round(dif).toLocaleString('es-AR'):'-'; dk.style.color=dc; }
+  if(db){ db.textContent=difBulto!==null?(difBulto>=0?'+':'')+Math.round(difBulto).toLocaleString('es-AR'):'-'; db.style.color=dc; }
   if(me){ me.textContent=mgn!==null?(mgn>=0?'+':'')+mgn.toFixed(1)+'%':'-'; me.style.color=mc; }
 }
 function guardarCanal(rpid) {
@@ -1194,7 +1206,7 @@ function cotizarMCBAPricing(nom, pid) {
     if(!data.ok||!data.resultados||!data.resultados.length){
       status.style.color='var(--err)'; status.textContent='Sin datos MCBA'; return;
     }
-    var h='<div style="background:var(--goldl);padding:5px 10px;font-size:10px;font-weight:600;color:var(--burd);letter-spacing:.05em;display:flex;align-items:center;justify-content:space-between">MCBA '+data.fecha+' — '+data.archivo+'<button onclick="document.getElementById(\'mcba-'+pid+'\').style.display=\'none\'" style="background:none;border:none;cursor:pointer;color:var(--burd);font-size:14px;line-height:1;padding:0 2px">×</button></div>';
+    var h='<div style="background:var(--goldl);padding:5px 10px;font-size:10px;font-weight:600;color:var(--burd);letter-spacing:.05em">MCBA '+data.fecha+' — '+data.archivo+'</div>';
     h+='<table style="width:100%;border-collapse:collapse">';
     h+='<thead><tr style="background:var(--bg)"><th style="padding:4px 8px;text-align:left;font-size:10px;color:var(--mut);font-weight:500">Variedad / Procedencia</th><th style="padding:4px 8px;text-align:center;font-size:10px;color:var(--mut);font-weight:500">Kg</th><th style="padding:4px 8px;text-align:right;font-size:10px;color:var(--mut);font-weight:500">Mín</th><th style="padding:4px 8px;text-align:right;font-size:10px;color:var(--mut);font-weight:500">Máx</th></tr></thead><tbody>';
     data.resultados.forEach(function(r, i) {
