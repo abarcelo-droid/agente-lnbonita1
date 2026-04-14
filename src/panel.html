@@ -7,20 +7,21 @@
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
 <style>
 :root{
-  --bg:#fdf8f3;--sur:#fff;--bor:#e8ddd0;--bor2:#d4c4b0;
-  --txt:#2c1810;--mut:#7a6055;--sub:#b09080;
-  --burg:#8b1a1a;--burd:#6b1212;--burl:#fdf0e8;
-  --gold:#c9a227;--goldl:#faf3dc;
+  --bg:#f0f4f8;--sur:#fff;--bor:#dde3ea;--bor2:#c8d2db;
+  --txt:#1a2332;--mut:#5a6a7e;--sub:#8a9bb0;
+  --burg:#1a3a5c;--burd:#0f2540;--burl:#e8f0f8;
+  --gold:#f0a500;--goldl:#fff8e6;
   --ok:#16a34a;--warn:#d97706;--err:#dc2626;
+  --nav:#0f2540;--nav2:#1a3a5c;
   --sans:'DM Sans',sans-serif;
 }
 *{box-sizing:border-box;margin:0;padding:0}
 body{background:var(--bg);color:var(--txt);font-family:var(--sans);font-size:14px;line-height:1.5}
 .shell{display:flex;min-height:100vh}
-nav{width:230px;flex-shrink:0;background:var(--burd);display:flex;flex-direction:column;position:sticky;top:0;height:100vh;overflow-y:auto}
-.logo{padding:16px 20px 14px;border-bottom:1px solid rgba(255,255,255,.1);margin-bottom:8px}
-.logo img{width:100%;max-width:170px;display:block;margin-bottom:8px;filter:brightness(0) invert(1);opacity:.95}
-.logo-tag{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:rgba(255,255,255,.4)}
+nav{width:230px;flex-shrink:0;background:var(--nav);display:flex;flex-direction:column;position:sticky;top:0;height:100vh;overflow-y:auto}
+.logo{padding:0;border-bottom:1px solid rgba(255,255,255,.1);margin-bottom:8px;background:#fff}
+.logo img{width:100%;max-width:100%;display:block;padding:16px 20px 12px;filter:none;opacity:1}
+.logo-tag{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:rgba(255,255,255,.4);padding:8px 20px;background:var(--nav2)}
 .ng{padding:10px 20px 3px;font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:rgba(255,255,255,.3)}
 .ni{display:flex;align-items:center;gap:10px;padding:8px 20px;cursor:pointer;color:rgba(255,255,255,.65);transition:all .15s;border-left:3px solid transparent;font-size:13px}
 .ni:hover{color:#fff;background:rgba(255,255,255,.08)}
@@ -60,8 +61,8 @@ tbody tr:hover{background:var(--burl)}
 .fl{display:flex;flex-direction:column;gap:5px}
 label{font-size:12px;color:var(--mut);letter-spacing:.05em;text-transform:uppercase}
 input,select,textarea{background:var(--sur);border:1px solid var(--bor2);border-radius:7px;color:var(--txt);font-family:var(--sans);font-size:13.5px;padding:9px 12px;outline:none;transition:border-color .15s;width:100%}
-input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 0 3px rgba(139,26,26,.1)}
-.mb{display:none;position:fixed;inset:0;background:rgba(15,23,42,.5);z-index:100;align-items:center;justify-content:center}
+input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 0 3px rgba(26,58,92,.12)}
+.mb{display:none;position:fixed;inset:0;background:rgba(10,20,40,.55);z-index:100;align-items:center;justify-content:center}
 .mb.on{display:flex}
 .mbox{background:var(--sur);border:1px solid var(--bor);border-radius:14px;padding:28px;width:620px;max-width:95vw;max-height:90vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.15)}
 .mhd{display:flex;align-items:center;justify-content:space-between;margin-bottom:22px}
