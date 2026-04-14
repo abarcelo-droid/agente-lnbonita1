@@ -66,30 +66,29 @@ router.get("/cotizacion/mcba", async (req, res) => {
   if (!producto) return res.status(400).json({ error: "Falta parametro producto" });
 
   const hoy = new Date();
-  const tipos = ['RH', 'RF']; // hortalizas primero, luego frutas
+  const tipos = ['RH', 'RF'];
   let resultados = [];
   let fuenteUrl = '';
 
   for (const tipo of tipos) {
-    // Intentar con hoy y los últimos 3 días (por si no publicaron aún)
+    // Buscar el archivo más reciente disponible para este tipo
     for (let d = 0; d <= 7; d++) {
       const fecha = new Date(hoy);
       fecha.setDate(fecha.getDate() - d);
       const url = urlXLS(tipo, fecha);
       try {
         const buffer = await descargarXLS(url);
+        // Archivo existe — buscar el producto
         const encontrados = buscarEnXLS(buffer, producto);
         if (encontrados.length) {
-          resultados = encontrados;
-          fuenteUrl = url;
-          break;
+          resultados = [...resultados, ...encontrados];
+          if (!fuenteUrl) fuenteUrl = url;
         }
+        break; // Archivo encontrado (aunque no tenga el producto), pasar al siguiente tipo
       } catch(e) {
-        // archivo no existe para esa fecha, seguir
+        // Archivo no existe para esta fecha, probar día anterior
       }
-      if (resultados.length) break;
     }
-    if (resultados.length) break;
   }
 
   if (!resultados.length) {
