@@ -143,37 +143,43 @@ router.get("/pricing/pdf/:tipo", async (req, res) => {
       if ((!pMay||!pMay.disponible) && (!pMin||!pMin.disponible)) return;
       if (p.categoria !== catActual) {
         catActual = p.categoria;
-        rows += '<tr class="cat"><td colspan="5">' + (catActual||'Sin categoria') + '</td></tr>';
+        rows += '<tr class="cat"><td colspan="7">' + (catActual||'Sin categoria') + '</td></tr>';
       }
       rows += '<tr>';
-      rows += '<td>' + p.nombre + '</td>';
+      rows += '<td style="font-weight:500">' + p.nombre + '</td>';
       rows += '<td style="color:#7a6055">' + (p.descripcion||'') + '</td>';
-      rows += '<td style="color:#7a6055">' + (p.origen||'') + ' ' + (p.kilaje||'') + '</td>';
+      rows += '<td style="color:#7a6055">' + (p.origen||'') + '</td>';
+      rows += '<td style="color:#7a6055">' + (p.kilaje||'') + '</td>';
+      rows += '<td style="color:#7a6055">' + (p.proveedor||'') + '</td>';
       rows += '<td class="num">' + (pMay&&pMay.disponible&&pMay.precio ? '$'+Number(pMay.precio).toLocaleString('es-AR') : '-') + '</td>';
       rows += '<td class="num">' + (pMin&&pMin.disponible&&pMin.precio ? '$'+Number(pMin.precio).toLocaleString('es-AR') : '-') + '</td>';
       rows += '</tr>';
     });
 
+    const logoUrl = 'https://agente-lnbonita1-production.up.railway.app/static/logo.jpg';
+
     const html = [
       '<!DOCTYPE html><html><head><meta charset="UTF-8">',
       '<style>',
-      'body{font-family:Arial,sans-serif;font-size:13px;color:#2c1810;margin:0;padding:32px}',
-      '.header{display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:24px;padding-bottom:16px;border-bottom:3px solid #0f2540}',
-      '.logo-text{font-size:22px;font-weight:700;color:#0f2540}',
+      'body{font-family:Arial,sans-serif;font-size:12px;color:#2c1810;margin:0;padding:28px}',
+      '.header{display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;padding-bottom:14px;border-bottom:3px solid #0f2540}',
+      '.logo-img{height:56px;object-fit:contain}',
+      '.header-right{text-align:right}',
+      '.header-sub{font-size:11px;color:#7a6055;margin-top:2px}',
       'table{width:100%;border-collapse:collapse;margin-top:8px}',
-      'th{padding:9px 12px;background:#0f2540;color:#fff;text-align:left;font-size:11px;text-transform:uppercase}',
+      'th{padding:8px 10px;background:#0f2540;color:#fff;text-align:left;font-size:10px;text-transform:uppercase;white-space:nowrap}',
       'th.num{text-align:right}',
-      'td{padding:8px 12px;border-bottom:1px solid #e8ddd0;vertical-align:top}',
+      'td{padding:7px 10px;border-bottom:1px solid #e8ddd0;vertical-align:top;font-size:12px}',
       'td.num{text-align:right;font-weight:600;color:#0f2540;font-variant-numeric:tabular-nums}',
-      'tr.cat td{background:#e8f0f8;font-size:11px;font-weight:700;color:#0f2540;text-transform:uppercase;padding:7px 12px}',
-      '.footer{margin-top:32px;font-size:10px;color:#b09080;text-align:center;border-top:1px solid #e8ddd0;padding-top:12px}',
+      'tr.cat td{background:#e8f0f8;font-size:10px;font-weight:700;color:#0f2540;text-transform:uppercase;padding:6px 10px}',
+      '.footer{margin-top:28px;font-size:10px;color:#b09080;text-align:center;border-top:1px solid #e8ddd0;padding-top:10px}',
       '</style></head><body>',
       '<div class="header">',
-      '<div><div class="logo-text">La Nina Bonita</div><div style="font-size:11px;color:#7a6055">Frutas y Hortalizas - desde 1945</div></div>',
-      '<div style="text-align:right;font-size:12px;color:#7a6055"><strong style="color:#2c1810;font-size:15px;display:block;margin-bottom:4px">Disponible Piso</strong>Fecha: ' + fecha + '</div>',
+      '<img src="' + logoUrl + '" class="logo-img" alt="La Nina Bonita">',
+      '<div class="header-right"><div class="header-sub">San Geronimo SA</div><strong style="font-size:14px;color:#0f2540">Disponible Piso</strong><div class="header-sub">Fecha: ' + fecha + '</div></div>',
       '</div>',
       '<table>',
-      '<thead><tr><th>Producto</th><th>Variedad</th><th>Origen / Presentacion</th><th class="num">May. MCBA</th><th class="num">Min. MCBA</th></tr></thead>',
+      '<thead><tr><th>Producto</th><th>Variedad</th><th>Origen</th><th>Kilaje</th><th>Proveedor</th><th class="num">May. MCBA</th><th class="num">Min. MCBA</th></tr></thead>',
       '<tbody>' + rows + '</tbody>',
       '</table>',
       '<div class="footer">La Nina Bonita - Mercado Central de Buenos Aires, Nave 4, Puestos 2-4-6 | a.barcelo@lnbonita.com.ar</div>',
