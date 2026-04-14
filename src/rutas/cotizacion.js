@@ -17,7 +17,11 @@ function urlXLS(tipo, fecha) {
   const d = String(fecha.getDate()).padStart(2,'0');
   const m = String(fecha.getMonth()+1).padStart(2,'0');
   const y = String(fecha.getFullYear()).slice(-2);
-  return `https://mercadocentral.gob.ar/sites/default/files/precios_mayoristas/${tipo}${d}${m}${y}.XLS`;
+  const base = `${tipo}${d}${m}${y}`;
+  return [
+    `https://mercadocentral.gob.ar/sites/default/files/precios_mayoristas/${base}.XLS`,
+    `https://mercadocentral.gob.ar/sites/default/files/precios_mayoristas/${base}_0.XLS`,
+  ];
 }
 
 function buscarEnXLS(buffer, busqueda) {
@@ -71,23 +75,26 @@ router.get("/cotizacion/mcba", async (req, res) => {
   let fuenteUrl = '';
 
   for (const tipo of tipos) {
-    // Buscar el archivo más reciente disponible para este tipo
     for (let d = 0; d <= 7; d++) {
       const fecha = new Date(hoy);
       fecha.setDate(fecha.getDate() - d);
-      const url = urlXLS(tipo, fecha);
-      try {
-        const buffer = await descargarXLS(url);
-        // Archivo existe — buscar el producto
-        const encontrados = buscarEnXLS(buffer, producto);
-        if (encontrados.length) {
-          resultados = [...resultados, ...encontrados];
-          if (!fuenteUrl) fuenteUrl = url;
+      const urls = urlXLS(tipo, fecha);
+      let encontrado = false;
+      for (const url of urls) {
+        try {
+          const buffer = await descargarXLS(url);
+          const encontrados = buscarEnXLS(buffer, producto);
+          if (encontrados.length) {
+            resultados = [...resultados, ...encontrados];
+            if (!fuenteUrl) fuenteUrl = url;
+          }
+          encontrado = true;
+          break; // URL válida encontrada, pasar al siguiente tipo
+        } catch(e) {
+          // esta URL no existe, probar la siguiente variante
         }
-        break; // Archivo encontrado (aunque no tenga el producto), pasar al siguiente tipo
-      } catch(e) {
-        // Archivo no existe para esta fecha, probar día anterior
       }
+      if (encontrado) break; // archivo del día encontrado, no probar días anteriores
     }
   }
 
