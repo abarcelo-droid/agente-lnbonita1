@@ -7,21 +7,20 @@
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
 <style>
 :root{
-  --bg:#f0f4f8;--sur:#fff;--bor:#dde3ea;--bor2:#c8d2db;
-  --txt:#1a2332;--mut:#5a6a7e;--sub:#8a9bb0;
-  --burg:#1a3a5c;--burd:#0f2540;--burl:#e8f0f8;
-  --gold:#f0a500;--goldl:#fff8e6;
+  --bg:#fdf8f3;--sur:#fff;--bor:#e8ddd0;--bor2:#d4c4b0;
+  --txt:#2c1810;--mut:#7a6055;--sub:#b09080;
+  --burg:#8b1a1a;--burd:#6b1212;--burl:#fdf0e8;
+  --gold:#c9a227;--goldl:#faf3dc;
   --ok:#16a34a;--warn:#d97706;--err:#dc2626;
-  --nav:#0f2540;--nav2:#1a3a5c;
   --sans:'DM Sans',sans-serif;
 }
 *{box-sizing:border-box;margin:0;padding:0}
 body{background:var(--bg);color:var(--txt);font-family:var(--sans);font-size:14px;line-height:1.5}
 .shell{display:flex;min-height:100vh}
-nav{width:230px;flex-shrink:0;background:var(--nav);display:flex;flex-direction:column;position:sticky;top:0;height:100vh;overflow-y:auto}
-.logo{padding:0;border-bottom:1px solid rgba(255,255,255,.1);margin-bottom:8px;background:#fff}
-.logo img{width:100%;max-width:100%;display:block;padding:16px 20px 12px;filter:none;opacity:1}
-.logo-tag{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:rgba(255,255,255,.4);padding:8px 20px;background:var(--nav2)}
+nav{width:230px;flex-shrink:0;background:var(--burd);display:flex;flex-direction:column;position:sticky;top:0;height:100vh;overflow-y:auto}
+.logo{padding:16px 20px 14px;border-bottom:1px solid rgba(255,255,255,.1);margin-bottom:8px}
+.logo img{width:100%;max-width:170px;display:block;margin-bottom:8px;filter:brightness(0) invert(1);opacity:.95}
+.logo-tag{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:rgba(255,255,255,.4)}
 .ng{padding:10px 20px 3px;font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:rgba(255,255,255,.3)}
 .ni{display:flex;align-items:center;gap:10px;padding:8px 20px;cursor:pointer;color:rgba(255,255,255,.65);transition:all .15s;border-left:3px solid transparent;font-size:13px}
 .ni:hover{color:#fff;background:rgba(255,255,255,.08)}
@@ -61,10 +60,10 @@ tbody tr:hover{background:var(--burl)}
 .fl{display:flex;flex-direction:column;gap:5px}
 label{font-size:12px;color:var(--mut);letter-spacing:.05em;text-transform:uppercase}
 input,select,textarea{background:var(--sur);border:1px solid var(--bor2);border-radius:7px;color:var(--txt);font-family:var(--sans);font-size:13.5px;padding:9px 12px;outline:none;transition:border-color .15s;width:100%}
-input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 0 3px rgba(26,58,92,.12)}
-.mb{display:none;position:fixed;inset:0;background:rgba(10,20,40,.55);z-index:100;align-items:center;justify-content:center}
+input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 0 3px rgba(139,26,26,.1)}
+.mb{display:none;position:fixed;inset:0;background:rgba(15,23,42,.5);z-index:100;align-items:center;justify-content:center}
 .mb.on{display:flex}
-.mbox{background:var(--sur);border:1px solid var(--bor);border-radius:14px;padding:28px;width:620px;max-width:95vw;max-height:90vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.18)}
+.mbox{background:var(--sur);border:1px solid var(--bor);border-radius:14px;padding:28px;width:620px;max-width:95vw;max-height:90vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.15)}
 .mhd{display:flex;align-items:center;justify-content:space-between;margin-bottom:22px}
 .mht{font-size:17px;font-weight:600}
 .mcl{background:none;border:none;color:var(--mut);font-size:22px;cursor:pointer;padding:4px;line-height:1}
@@ -85,7 +84,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
 .ptbl th{padding:10px 12px;background:var(--burd);color:#fff;text-align:left;white-space:nowrap}
 .ptbl th.r{text-align:right}
 .ptbl td{padding:8px 12px;border-bottom:1px solid var(--bor);font-variant-numeric:tabular-nums}
-.ptbl tr:hover td{background:var(--burl)}
+.ptbl tr:hover td{background:var(--bg)}
 .ptbl .crow td{background:var(--goldl);font-size:11px;font-weight:600;color:var(--burd);text-transform:uppercase;letter-spacing:.06em}
 .pinp{width:88px;padding:5px 8px;font-size:13px;font-variant-numeric:tabular-nums;text-align:right;border:1px solid var(--bor2);border-radius:6px}
 .rb{background:var(--sur);border:1px solid var(--bor);border-radius:10px;padding:20px}
@@ -1013,16 +1012,16 @@ function loadRetail() {
         catAct=rp.categoria; if(h) h+='</div>';
         h+='<div style="margin-bottom:28px"><div style="font-size:12px;font-weight:600;color:var(--burd);text-transform:uppercase;letter-spacing:.08em;margin-bottom:12px;padding:8px 14px;background:var(--goldl);border-radius:8px">'+(catAct||'Sin categoria')+'</div>';
       }
-      h+='<div style="background:var(--sur);border:1px solid var(--bor);border-radius:10px;padding:18px;margin-bottom:12px"><div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">';
-      // Columna izquierda
-      h+='<div>';
-      h+='<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">';
+      h+='<div style="background:var(--sur);border:1px solid var(--bor);border-radius:10px;padding:18px;margin-bottom:12px">';
+      // Cabecera: nombre + botón góndola
+      h+='<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">';
       h+='<div style="font-size:15px;font-weight:600">'+rp.nombre+'</div>';
       h+='<button class="btn bo bs" style="background:var(--goldl);border-color:var(--gold);color:var(--burd)" onclick="verGondola(\''+esc(rp.nombre)+'\','+rp.id+')">🛒 Góndola</button>';
       h+='</div>';
       h+='<div id="cot-r-'+rp.id+'" style="display:none"></div>';
+      // Proveedores
       if(!rp.proveedores||!rp.proveedores.length){
-        h+='<div style="font-size:12px;color:var(--mut);font-style:italic">Sin proveedores. Asociar en Oferta con campo Nombre Retail.</div>';
+        h+='<div style="font-size:12px;color:var(--mut);font-style:italic;margin-bottom:12px">Sin proveedores. Asociar en Oferta con campo Nombre Retail.</div>';
       } else {
         h+='<div style="font-size:12px;color:var(--mut);margin-bottom:8px;font-weight:500">Proveedores disponibles</div>';
         rp.proveedores.forEach(function(pv) {
@@ -1034,36 +1033,39 @@ function loadRetail() {
           h+='</div>';
         });
       }
-      h+='</div>';
-      // Columna derecha — declarar kgBase acá para usarlo en gastos Y en canales
+      // kgBase para cálculos
       var kgBase=rp.proveedores&&(rp.proveedores.find(function(p){return p.seleccionado;})||rp.proveedores[0]);
-      h+='<div>';
+      // Gastos — en fila horizontal compacta
+      h+='<div style="margin-top:12px;padding:12px;border:1px solid var(--bor);border-radius:8px">';
       h+='<div style="font-size:12px;font-weight:500;color:var(--mut);margin-bottom:8px">Gastos a sumar ($/kg)</div>';
       if(!gastos.length){ h+='<div style="font-size:12px;color:var(--mut);font-style:italic">Sin gastos cargados.</div>'; }
       else {
         var kgProd = kgBase ? kgBase.kilos : 1;
+        h+='<div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px">';
         gastos.forEach(function(g) {
           var kg = kgProd > 0 ? kgProd : 1; var pk = Math.round(g.monto / kg);
           var sgsel=rp.gastos_seleccionados.indexOf(g.id)>=0;
-          h+='<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--bor)">';
+          h+='<label style="display:flex;align-items:center;gap:6px;padding:6px 10px;border-radius:6px;border:1px solid '+(sgsel?'var(--burg)':'var(--bor)')+';background:'+(sgsel?'var(--burl)':'var(--bg)')+';cursor:pointer;font-size:12px">';
           h+='<input type="checkbox" value="'+g.id+'" '+(sgsel?'checked':'')+' onchange="toggleGasto('+rp.id+',this)" style="accent-color:var(--burg)">';
-          h+='<span style="flex:1;font-size:13px">'+g.nombre+(g.proveedor?' ('+g.proveedor+')':'')+'</span>';
-          h+='<span style="font-size:11px;color:var(--mut);font-variant-numeric:tabular-nums">$'+pk.toLocaleString('es-AR')+'/kg</span>';
-          h+='</div>';
+          h+='<span>'+g.nombre+(g.proveedor?' ('+g.proveedor+')':'')+'</span>';
+          h+='<span style="font-weight:600;color:var(--burg);font-variant-numeric:tabular-nums">$'+pk.toLocaleString('es-AR')+'/kg</span>';
+          h+='</label>';
         });
+        h+='</div>';
       }
-      h+='<div style="margin-top:12px;padding:12px;background:var(--burl);border-radius:8px;margin-bottom:14px">';
-      h+='<div style="font-size:11px;color:var(--mut)">Costo base/kg: <strong>$'+Math.round(rp.costo_kg_base).toLocaleString('es-AR')+'</strong></div>';
-      h+='<div style="font-size:11px;color:var(--mut)">Gastos: <strong id="gastos-sum-'+rp.id+'">$'+Math.round(rp.gastos_sum).toLocaleString('es-AR')+'</strong></div>';
-      h+='<div style="font-size:15px;font-weight:600;color:var(--burd);margin-top:6px;border-top:1px solid rgba(139,26,26,.2);padding-top:6px">Costo total: <span id="costo-total-'+rp.id+'">$'+Math.round(rp.costo_kg_total).toLocaleString('es-AR')+'/kg</span></div>';
+      h+='<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 12px;background:var(--burl);border-radius:7px">';
+      h+='<div style="font-size:12px;color:var(--mut)">Base: <strong>$'+Math.round(rp.costo_kg_base).toLocaleString('es-AR')+'/kg</strong> · Gastos: <strong id="gastos-sum-'+rp.id+'">$'+Math.round(rp.gastos_sum).toLocaleString('es-AR')+'</strong></div>';
+      h+='<div style="font-size:15px;font-weight:700;color:var(--burd)">Total: <span id="costo-total-'+rp.id+'">$'+Math.round(rp.costo_kg_total).toLocaleString('es-AR')+'/kg</span></div>';
       h+='</div>';
-      h+='<div style="font-size:12px;font-weight:500;color:var(--mut);margin-bottom:8px">Observaciones</div>';
-      h+='<textarea id="obs-'+rp.id+'" rows="2" style="width:100%;font-size:13px;resize:vertical" placeholder="Notas internas...">'+(rp.observaciones||'')+'</textarea>';
-      h+='<button class="btn bo bs" style="margin-top:6px;width:100%;justify-content:center" onclick="guardarObs('+rp.id+')">Guardar obs.</button>';
+      h+='</div>';
+      // Observaciones
+      h+='<div style="margin-top:10px;display:flex;gap:8px;align-items:flex-start">';
+      h+='<textarea id="obs-'+rp.id+'" rows="2" style="flex:1;font-size:13px;resize:vertical" placeholder="Observaciones internas...">'+(rp.observaciones||'')+'</textarea>';
+      h+='<button class="btn bo bs" style="white-space:nowrap;margin-top:2px" onclick="guardarObs('+rp.id+')">Guardar obs.</button>';
+      h+='</div>';
       // Grilla canales
       var costoTotal=rp.costo_kg_total; var kgTot=kgBase?kgBase.kilos:0;
-      h+='<div style="font-size:12px;font-weight:500;color:var(--mut);margin:12px 0 8px">Pricing por canal</div>';
-      h+='<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px;min-width:500px"><thead><tr style="background:var(--burd)">';
+      h+='<div style="margin-top:12px;overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px;min-width:500px"><thead><tr style="background:var(--burd)">';
       h+='<th style="padding:7px 8px;color:#fff;text-align:left">Canal</th>';
       h+='<th style="padding:7px 8px;color:#fff;text-align:center">Precio/kg</th>';
       h+='<th style="padding:7px 8px;color:#fff;text-align:center">Perdida kg</th>';
@@ -1090,7 +1092,7 @@ function loadRetail() {
       });
       h+='</tbody></table></div>';
       h+='<button class="btn bb bs" style="margin-top:8px;width:100%;justify-content:center" onclick="guardarCanal('+rp.id+')">Guardar precios</button>';
-      h+='</div></div></div>';
+      h+='</div>';
     });
     h+='</div>';
     cont.innerHTML=h;
