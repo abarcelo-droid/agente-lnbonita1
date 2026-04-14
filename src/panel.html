@@ -1030,10 +1030,10 @@ function loadRetail() {
         h+='<div style="font-size:12px;color:var(--mut);margin-bottom:8px;font-weight:500">Proveedores disponibles</div>';
         rp.proveedores.forEach(function(pv) {
           var sel=pv.seleccionado;
-          h+='<div style="display:flex;align-items:center;gap:10px;padding:8px 12px;border-radius:8px;margin-bottom:6px;border:1.5px solid '+(sel?'var(--ok)':'var(--bor2)')+';background:'+(sel?'#f0fdf4':'var(--bg)')+'">';
-          h+='<input type="radio" name="pv-'+rp.id+'" value="'+pv.id+'" '+(sel?'checked':'')+' onchange="selProv('+rp.id+','+pv.id+')" style="accent-color:var(--ok)">';
-          h+='<div style="flex:1"><div style="font-size:13px;font-weight:500">'+pv.proveedor+'</div><div style="font-size:11px;color:var(--mut)">'+pv.nombre+' - '+pv.kilaje+'</div></div>';
-          h+='<div style="text-align:right"><div style="font-size:14px;font-weight:600;color:var(--burd)">$'+Math.round(pv.precio_kg).toLocaleString('es-AR')+'/kg</div><div style="font-size:10px;color:var(--mut)">C+F: $'+nr(pv.cbase)+'</div></div>';
+          h+='<div style="display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:8px;margin-bottom:5px;border:1.5px solid '+(sel?'var(--ok)':'var(--bor2)')+';background:'+(sel?'#f0fdf4':'var(--bg)')+';width:fit-content;min-width:280px;max-width:100%">';
+          h+='<input type="radio" name="pv-'+rp.id+'" value="'+pv.id+'" '+(sel?'checked':'')+' onchange="selProv('+rp.id+','+pv.id+')" style="accent-color:var(--ok);flex-shrink:0">';
+          h+='<div style="flex:1;min-width:0"><div style="font-size:13px;font-weight:500;white-space:nowrap">'+pv.proveedor+'</div><div style="font-size:11px;color:var(--mut);white-space:nowrap">'+pv.nombre+' · '+pv.kilaje+'</div></div>';
+          h+='<div style="text-align:right;margin-left:12px;flex-shrink:0"><div style="font-size:13px;font-weight:600;color:var(--burd)">$'+Math.round(pv.precio_kg).toLocaleString('es-AR')+'/kg</div><div style="font-size:10px;color:var(--mut)">C+F: $'+nr(pv.cbase)+'</div></div>';
           h+='</div>';
         });
       }
