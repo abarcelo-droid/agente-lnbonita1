@@ -86,7 +86,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
 .ptbl th.r{text-align:right}
 .ptbl td{padding:8px 12px;border-bottom:1px solid var(--bor);font-variant-numeric:tabular-nums}
 .ptbl tr:hover td{background:var(--bg)}
-.ptbl .crow td{background:var(--goldl);font-size:11px;font-weight:600;color:var(--burd);text-transform:uppercase;letter-spacing:.06em}
+.ptbl .crow td{background:var(--gold);font-size:11px;font-weight:700;color:#fff;text-transform:uppercase;letter-spacing:.1em;padding:9px 12px}
 .pinp{width:88px;padding:5px 8px;font-size:13px;font-variant-numeric:tabular-nums;text-align:right;border:1px solid var(--bor2);border-radius:6px}
 .rb{background:var(--sur);border:1px solid var(--bor);border-radius:10px;padding:20px}
 .ri{margin-bottom:14px;padding-bottom:14px;border-bottom:1px solid var(--bor)}
@@ -208,10 +208,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     <button class="btn bo bs" onclick="pdfP('disponible_piso')" style="background:var(--burl);border-color:var(--burg);color:var(--burd);font-weight:600">📋 Disponible Piso</button>
     <button class="btn bb bs" onclick="guardarPricing('oferta1')">Guardar todos</button>
   </div></div>
-  <div style="display:grid;grid-template-columns:1fr 260px;gap:16px;align-items:start">
-    <div style="overflow-x:auto" id="tbl-p1"></div>
-    <div id="rent1" class="rb"></div>
-  </div>
+  <div style="overflow-x:auto" id="tbl-p1"></div>
 </div>
 
 <!-- PRICING 2 -->
@@ -222,10 +219,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     <button class="btn bo bs" onclick="pdfP('consumidor_final')">PDF Cons. Final</button>
     <button class="btn bb bs" onclick="guardarPricing('oferta2')">Guardar todos</button>
   </div></div>
-  <div style="display:grid;grid-template-columns:1fr 260px;gap:16px;align-items:start">
-    <div style="overflow-x:auto" id="tbl-p2"></div>
-    <div id="rent2" class="rb"></div>
-  </div>
+  <div style="overflow-x:auto" id="tbl-p2"></div>
 </div>
 
 <!-- RETAIL -->
@@ -362,8 +356,9 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     <div class="fl"><label>Kilaje / Presentacion</label><input id="p-kil" placeholder="ej: caja 20kg"></div>
     <div class="fl"><label>Marca</label><input id="p-marca"></div>
     <div class="fl ff"><label>Ingreso</label>
-      <select id="p-ingreso"><option value="">-- Sin especificar --</option><option value="Paletizado">Paletizado</option><option value="Granel">Granel</option></select>
+      <select id="p-ingreso" onchange="toggleBXP()"><option value="">-- Sin especificar --</option><option value="Paletizado">Paletizado</option><option value="Granel">Granel</option></select>
     </div>
+    <div class="fl" id="div-bxp" style="display:none"><label>BXP — Bultos por pallet</label><input type="number" id="p-bxp" placeholder="ej: 48" min="1" style="max-width:160px"></div>
     <div class="fl ff"><label>Partida Abasto</label><input id="p-cod" placeholder="Se genera automáticamente — editá si necesitás"></div>
     <div class="fl ff" style="background:var(--bg);border:1px solid var(--bor);border-radius:8px;padding:12px;flex-direction:row;align-items:center;gap:12px">
       <input type="checkbox" id="p-cons" style="width:18px;height:18px;accent-color:var(--burg);flex-shrink:0" onchange="toggleCons()">
@@ -883,15 +878,22 @@ function editProd(id) {
     eid('p-ori').value=p.origen||''; eid('p-kil').value=p.kilaje||'';
     eid('p-marca').value=p.marca||''; eid('p-cos').value=p.costo||'';
     var notasRaw=p.notas||'';
-    var mIngreso=notasRaw.match(/^\[(Paletizado|Granel)\]\s*/);
+    var mIngreso=notasRaw.match(/^\[(Paletizado|Granel)(?:\|BXP:(\d+))?\]\s*/);
     eid('p-ingreso').value=mIngreso?mIngreso[1]:'';
-    eid('p-notas').value=notasRaw.replace(/^\[(Paletizado|Granel)\]\s*/,'');
+    eid('p-bxp').value=(mIngreso&&mIngreso[2])?mIngreso[2]:'';
+    toggleBXP();
+    eid('p-notas').value=notasRaw.replace(/^\[(Paletizado|Granel)(?:\|BXP:\d+)?\]\s*/,'');
     eid('p-flet').value=p.flete||''; eid('p-notas').value=p.notas||'';
     eid('p-cod').value=p.codigo||'';
     eid('p-cons').checked=!!p.consignacion; toggleCons();
     cargarOpsRetail(p.nombre_retail);
     eid('mb-p').classList.add('on');
   });
+}
+function toggleBXP() {
+  var v=eid('p-ingreso').value;
+  eid('div-bxp').style.display=(v==='Paletizado')?'':'none';
+  if(v!=='Paletizado') eid('p-bxp').value='';
 }
 function toggleCons() {
   var v=eid('p-cons').checked;
@@ -921,10 +923,12 @@ eid('btn-save-mp').addEventListener('click', function() {
   fd.append('origen',elv('p-ori')); fd.append('kilaje',elv('p-kil'));
   fd.append('marca',elv('p-marca')); fd.append('costo',elv('p-cos'));
   var ingreso=elv('p-ingreso');
+  var bxp=elv('p-bxp');
   var notasVal=elv('p-notas');
   // Limpiar ingreso anterior de notas si existia
-  notasVal=notasVal.replace(/\[(Paletizado|Granel)\]\s*/g,'').trim();
-  if(ingreso) notasVal=(ingreso?'['+ingreso+'] ':'')+notasVal;
+  notasVal=notasVal.replace(/\[(Paletizado|Granel)(?:\|BXP:\d+)?\]\s*/g,'').trim();
+  var ingresoTag=ingreso?(ingreso+(ingreso==='Paletizado'&&bxp?'|BXP:'+bxp:'')):'';
+  if(ingresoTag) notasVal='['+ingresoTag+'] '+notasVal;
   fd.append('notas',notasVal);
   fd.append('flete',elv('p-flet'));
   fd.append('nombre_retail',elv('p-ret'));
@@ -955,8 +959,8 @@ function loadPricing(of) {
       if(p.descripcion) h+='<div style="font-size:11px;color:var(--mut)">'+p.descripcion+'</div>';
       if(p.proveedor) h+='<div style="font-size:11px;color:var(--sub)">'+p.proveedor+'</div>';
       if(p.consignacion) h+='<span style="display:inline-block;margin-top:2px;font-size:10px;background:#fef9c3;color:#854d0e;border:1px solid #fde68a;border-radius:4px;padding:1px 6px;font-weight:600">CONSIGNACIÓN</span>';
-      var mIng=p.notas&&p.notas.match(/^\[(Paletizado|Granel)\]/);
-      if(mIng) h+='<span style="display:inline-block;margin-top:2px;margin-left:4px;font-size:10px;background:#e0f2fe;color:#075985;border:1px solid #bae6fd;border-radius:4px;padding:1px 6px;font-weight:600">'+mIng[1].toUpperCase()+'</span>';
+      var mIng=p.notas&&p.notas.match(/^\[(Paletizado|Granel)(?:\|BXP:(\d+))?\]/);
+      if(mIng) h+='<span style="display:inline-block;margin-top:2px;margin-left:4px;font-size:10px;background:#e0f2fe;color:#075985;border:1px solid #bae6fd;border-radius:4px;padding:1px 6px;font-weight:600">'+mIng[1].toUpperCase()+(mIng[2]?' · '+mIng[2]+' BXP':'')+'</span>';
       h+='<div style="margin-top:4px;display:flex;align-items:center;gap:6px">';
       h+='<button class="btn bo" style="font-size:10px;padding:3px 8px" onclick="cotizarMCBAPricing(\''+esc(p.nombre)+'\','+p.id+')">Cot. MCBA</button>';
       h+='<span id="mcba-status-'+p.id+'" style="font-size:11px;color:var(--mut)"></span>';
@@ -989,24 +993,7 @@ function onPC(inp,suf) {
   var of=suf==='1'?'oferta1':'oferta2';
   renderRent(suf,pCache[of]||[],suf==='1'?TIPOS_O1:TIPOS_O2);
 }
-function renderRent(suf,prods,tipos) {
-  var div=eid('rent'+suf);
-  if(!prods.length){ div.innerHTML='<div style="text-align:center;color:var(--mut);font-size:13px">Sin productos</div>'; return; }
-  var h='<div style="font-weight:600;font-size:14px;margin-bottom:16px;color:var(--burd)">Rentabilidad estimada</div>';
-  tipos.forEach(function(t) {
-    var inputs=document.querySelectorAll('input.pinp[data-tipo="'+t+'"]');
-    var sC=0; var sP=0; var cnt=0;
-    inputs.forEach(function(inp){ var p=parseFloat(inp.value)||0; var c=parseFloat(inp.getAttribute('data-cb'))||0; if(p>0&&c>0){sP+=p;sC+=c;cnt++;} });
-    var mgn=sC>0?((sP-sC)/sC*100):null;
-    var mc=mgn===null?'var(--mut)':mgn>=20?'var(--ok)':mgn>=0?'var(--warn)':'var(--err)';
-    h+='<div class="ri"><div style="font-size:12px;color:var(--mut);margin-bottom:4px">'+lTipo(t)+'</div>';
-    if(mgn!==null){ h+='<div style="font-size:24px;font-weight:600;color:'+mc+'">'+(mgn>=0?'+':'')+mgn.toFixed(1)+'%</div><div style="font-size:11px;color:var(--mut);margin-top:2px">promedio '+cnt+' productos</div>'; }
-    else h+='<div style="font-size:14px;color:var(--mut)">Sin precios</div>';
-    h+='</div>';
-  });
-  h+='<button class="btn bb bs" style="width:100%;justify-content:center;margin-top:8px" onclick="guardarPricing(\''+(suf==='1'?'oferta1':'oferta2')+'\')">Guardar todos</button>';
-  div.innerHTML=h;
-}
+function renderRent(suf,prods,tipos) { /* panel de rentabilidad eliminado */ }
 function guardarPricing(of) {
   var inputs=document.querySelectorAll('input.pinp[data-pid]');
   var checks={};
