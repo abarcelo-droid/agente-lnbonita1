@@ -86,7 +86,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
 .ptbl th.r{text-align:right}
 .ptbl td{padding:8px 12px;border-bottom:1px solid var(--bor);font-variant-numeric:tabular-nums}
 .ptbl tr:hover td{background:var(--bg)}
-.ptbl .crow td{background:var(--gold);font-size:11px;font-weight:700;color:#fff;text-transform:uppercase;letter-spacing:.1em;padding:9px 12px}
+.ptbl .crow td{background:#4a90b8;font-size:11px;font-weight:700;color:#fff;text-transform:uppercase;letter-spacing:.1em;padding:9px 12px}
 .pinp{width:88px;padding:5px 8px;font-size:13px;font-variant-numeric:tabular-nums;text-align:right;border:1px solid var(--bor2);border-radius:6px}
 .rb{background:var(--sur);border:1px solid var(--bor);border-radius:10px;padding:20px}
 .ri{margin-bottom:14px;padding-bottom:14px;border-bottom:1px solid var(--bor)}
@@ -948,35 +948,31 @@ function loadPricing(of) {
     pCache[of]=prods||[];
     var div=eid('tbl-p'+suf);
     if(!prods||!prods.length){ div.innerHTML='<div class="tw"><div class="emp">Sin productos disponibles.</div></div>'; renderRent(suf,[],tipos); return; }
-    var h='<div class="tw" style="overflow-x:auto"><table class="ptbl"><thead><tr><th>Producto</th><th class="r">Costo+Flete</th>';
+    var h='<div class="tw" style="overflow-x:auto"><table class="ptbl"><thead><tr><th>Producto</th><th>Proveedor</th><th class="r">Costo+Flete</th>';
     tipos.forEach(function(t){ h+='<th style="text-align:center;min-width:150px">'+lTipo(t)+'</th>'; });
-    h+='</tr></thead><tbody>';
+    h+='<th style="text-align:center;white-space:nowrap">Cot. MCBA</th></tr></thead><tbody>';
     var cat='';
     prods.forEach(function(p) {
-      if(p.categoria&&p.categoria!==cat){ cat=p.categoria; h+='<tr class="crow"><td colspan="'+(2+tipos.length)+'">'+cat+'</td></tr>'; }
+      if(p.categoria&&p.categoria!==cat){ cat=p.categoria; h+='<tr class="crow"><td colspan="'+(4+tipos.length)+'">'+cat+'</td></tr>'; }
       var cb=(parseFloat(p.costo)||0)+(parseFloat(p.flete)||0);
-      h+='<tr><td><div style="font-weight:500">'+p.nombre+'</div>';
+      h+='<tr><td style="padding:6px 10px"><div style="font-weight:500;font-size:13px">'+p.nombre+'</div>';
       if(p.descripcion) h+='<div style="font-size:11px;color:var(--mut)">'+p.descripcion+'</div>';
-      if(p.proveedor) h+='<div style="font-size:11px;color:var(--sub)">'+p.proveedor+'</div>';
       if(p.consignacion) h+='<span style="display:inline-block;margin-top:2px;font-size:10px;background:#fef9c3;color:#854d0e;border:1px solid #fde68a;border-radius:4px;padding:1px 6px;font-weight:600">CONSIGNACIÓN</span>';
-      var mIng=p.notas&&p.notas.match(/^\[(Paletizado|Granel)(?:\|BXP:(\d+))?\]/);
-      if(mIng) h+='<span style="display:inline-block;margin-top:2px;margin-left:4px;font-size:10px;background:#e0f2fe;color:#075985;border:1px solid #bae6fd;border-radius:4px;padding:1px 6px;font-weight:600">'+mIng[1].toUpperCase()+(mIng[2]?' · '+mIng[2]+' BXP':'')+'</span>';
-      h+='<div style="margin-top:4px;display:flex;align-items:center;gap:6px">';
-      h+='<button class="btn bo" style="font-size:10px;padding:3px 8px" onclick="cotizarMCBAPricing(\''+esc(p.nombre)+'\','+p.id+')">Cot. MCBA</button>';
-      h+='<span id="mcba-status-'+p.id+'" style="font-size:11px;color:var(--mut)"></span>';
-      h+='</div>';
-      h+='<div id="mcba-'+p.id+'" style="display:none;margin-top:6px;border:1px solid var(--bor);border-radius:7px;overflow:hidden;font-size:11px"></div>';
-      h+='</td><td style="text-align:right;color:var(--burd);font-weight:500">$'+nr(cb)+'</td>';
+      h+='<div id="mcba-'+p.id+'" style="display:none;margin-top:4px;border:1px solid var(--bor);border-radius:7px;overflow:hidden;font-size:11px"></div>';
+      h+='</td>';
+      h+='<td style="padding:6px 8px;font-size:12px;color:var(--sub);white-space:nowrap">'+(p.proveedor||'')+'</td>';
+      h+='<td style="text-align:right;color:var(--burd);font-weight:500;white-space:nowrap;padding:6px 10px">$'+nr(cb)+'</td>';
       tipos.forEach(function(t) {
-        var pr=p.precios&&p.precios[t]?p.precios[t]:{precio:0,disponible:1};
-        var mgn=cb>0?((pr.precio-cb)/cb*100):null;
+        var pr=p.precios&&p.precios[t]?p.precios[t]:{precio:0,disponible:0};
+        var tieneP=pr.precio>0;
+        var mgn=tieneP&&cb>0?((pr.precio-cb)/cb*100):null;
         var mc=mgn===null?'var(--mut)':mgn>=20?'var(--ok)':mgn>=0?'var(--warn)':'var(--err)';
         h+='<td style="padding:6px 8px;text-align:center"><div style="display:flex;flex-direction:column;align-items:center;gap:2px"><div style="display:flex;align-items:center;gap:4px"><span style="color:var(--mut);font-size:12px">$</span>';
         h+='<input class="pinp" type="number" data-pid="'+p.id+'" data-tipo="'+t+'" data-cb="'+cb+'" value="'+pr.precio+'" oninput="onPC(this,\''+suf+'\')">';
-        h+='<input type="checkbox" data-pid="'+p.id+'" data-tipo="'+t+'" '+(pr.disponible?'checked':'')+' style="width:16px;height:16px;accent-color:var(--burg)" title="Disponible">';
+        h+='<input type="checkbox" data-pid="'+p.id+'" data-tipo="'+t+'" '+(tieneP?'checked':'')+' style="width:16px;height:16px;accent-color:var(--burg)" title="Disponible">';
         h+='</div><span class="mg-'+p.id+'-'+t+'" style="font-size:11px;font-weight:500;color:'+mc+'">'+(mgn!==null?(mgn>=0?'+':'')+mgn.toFixed(1)+'%':'')+'</span></div></td>';
       });
-      h+='</tr>';
+      h+='<td style="padding:6px 8px;text-align:center;white-space:nowrap"><button class="btn bo" style="font-size:10px;padding:2px 7px" onclick="cotizarMCBAPricing(\''+esc(p.nombre)+'\','+p.id+')">Cot. MCBA</button><span id="mcba-status-'+p.id+'" style="display:block;font-size:10px;color:var(--mut)"></span></td></tr>';
     });
     h+='</tbody></table></div>';
     div.innerHTML=h;
@@ -986,10 +982,13 @@ function loadPricing(of) {
 function onPC(inp,suf) {
   var pid=inp.getAttribute('data-pid'); var tipo=inp.getAttribute('data-tipo'); var cb=parseFloat(inp.getAttribute('data-cb'))||0;
   var precio=parseFloat(inp.value)||0;
-  var mgn=cb>0?((precio-cb)/cb*100):null;
+  var mgn=precio>0&&cb>0?((precio-cb)/cb*100):null;
   var mc=mgn===null?'var(--mut)':mgn>=20?'var(--ok)':mgn>=0?'var(--warn)':'var(--err)';
   var sp=document.querySelector('.mg-'+pid+'-'+tipo);
   if(sp){ sp.style.color=mc; sp.textContent=mgn!==null?(mgn>=0?'+':'')+mgn.toFixed(1)+'%':''; }
+  // Auto-toggle disponible según precio
+  var chk=document.querySelector('input[type=checkbox][data-pid="'+pid+'"][data-tipo="'+tipo+'"]');
+  if(chk) chk.checked=(precio>0);
   var of=suf==='1'?'oferta1':'oferta2';
   renderRent(suf,pCache[of]||[],suf==='1'?TIPOS_O1:TIPOS_O2);
 }
