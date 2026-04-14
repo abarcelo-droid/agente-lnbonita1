@@ -360,6 +360,9 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     <div class="fl"><label>Origen</label><input id="p-ori" placeholder="ej: San Juan"></div>
     <div class="fl"><label>Kilaje / Presentacion</label><input id="p-kil" placeholder="ej: caja 20kg"></div>
     <div class="fl"><label>Marca</label><input id="p-marca"></div>
+    <div class="fl ff"><label>Ingreso</label>
+      <select id="p-ingreso"><option value="">-- Sin especificar --</option><option value="Paletizado">Paletizado</option><option value="Granel">Granel</option></select>
+    </div>
     <div class="fl ff"><label>Partida Abasto</label><input id="p-cod" placeholder="Se genera automáticamente — editá si necesitás"></div>
     <div class="fl ff" style="background:var(--bg);border:1px solid var(--bor);border-radius:8px;padding:12px;flex-direction:row;align-items:center;gap:12px">
       <input type="checkbox" id="p-cons" style="width:18px;height:18px;accent-color:var(--burg);flex-shrink:0" onchange="toggleCons()">
@@ -878,6 +881,10 @@ function editProd(id) {
     eid('p-cat').value=p.categoria||''; eid('p-desc').value=p.descripcion||'';
     eid('p-ori').value=p.origen||''; eid('p-kil').value=p.kilaje||'';
     eid('p-marca').value=p.marca||''; eid('p-cos').value=p.costo||'';
+    var notasRaw=p.notas||'';
+    var mIngreso=notasRaw.match(/^\[(Paletizado|Granel)\]\s*/);
+    eid('p-ingreso').value=mIngreso?mIngreso[1]:'';
+    eid('p-notas').value=notasRaw.replace(/^\[(Paletizado|Granel)\]\s*/,'');
     eid('p-flet').value=p.flete||''; eid('p-notas').value=p.notas||'';
     eid('p-cod').value=p.codigo||'';
     eid('p-cons').checked=!!p.consignacion; toggleCons();
@@ -912,7 +919,13 @@ eid('btn-save-mp').addEventListener('click', function() {
   fd.append('categoria',elv('p-cat')); fd.append('descripcion',elv('p-desc'));
   fd.append('origen',elv('p-ori')); fd.append('kilaje',elv('p-kil'));
   fd.append('marca',elv('p-marca')); fd.append('costo',elv('p-cos'));
-  fd.append('flete',elv('p-flet')); fd.append('notas',elv('p-notas'));
+  var ingreso=elv('p-ingreso');
+  var notasVal=elv('p-notas');
+  // Limpiar ingreso anterior de notas si existia
+  notasVal=notasVal.replace(/\[(Paletizado|Granel)\]\s*/g,'').trim();
+  if(ingreso) notasVal=(ingreso?'['+ingreso+'] ':'')+notasVal;
+  fd.append('notas',notasVal);
+  fd.append('flete',elv('p-flet'));
   fd.append('nombre_retail',elv('p-ret'));
   fd.append('consignacion',eid('p-cons').checked?'1':'0');
   if(foto) fd.append('foto',foto);
@@ -940,6 +953,9 @@ function loadPricing(of) {
       h+='<tr><td><div style="font-weight:500">'+p.nombre+'</div>';
       if(p.descripcion) h+='<div style="font-size:11px;color:var(--mut)">'+p.descripcion+'</div>';
       if(p.proveedor) h+='<div style="font-size:11px;color:var(--sub)">'+p.proveedor+'</div>';
+      if(p.consignacion) h+='<span style="display:inline-block;margin-top:2px;font-size:10px;background:#fef9c3;color:#854d0e;border:1px solid #fde68a;border-radius:4px;padding:1px 6px;font-weight:600">CONSIGNACIÓN</span>';
+      var mIng=p.notas&&p.notas.match(/^\[(Paletizado|Granel)\]/);
+      if(mIng) h+='<span style="display:inline-block;margin-top:2px;margin-left:4px;font-size:10px;background:#e0f2fe;color:#075985;border:1px solid #bae6fd;border-radius:4px;padding:1px 6px;font-weight:600">'+mIng[1].toUpperCase()+'</span>';
       h+='<div style="margin-top:4px;display:flex;align-items:center;gap:6px">';
       h+='<button class="btn bo" style="font-size:10px;padding:3px 8px" onclick="cotizarMCBAPricing(\''+esc(p.nombre)+'\','+p.id+')">Cot. MCBA</button>';
       h+='<span id="mcba-status-'+p.id+'" style="font-size:11px;color:var(--mut)"></span>';
@@ -1207,7 +1223,7 @@ function cotizarMCBAPricing(nom, pid) {
     if(!data.ok||!data.resultados||!data.resultados.length){
       status.style.color='var(--err)'; status.textContent='Sin datos MCBA'; return;
     }
-    var h='<div style="background:var(--goldl);padding:5px 10px;font-size:10px;font-weight:600;color:var(--burd);letter-spacing:.05em">MCBA '+data.fecha+' — '+data.archivo+'</div>';
+    var h='<div style="background:var(--goldl);padding:5px 10px;font-size:10px;font-weight:600;color:var(--burd);letter-spacing:.05em;display:flex;align-items:center;justify-content:space-between">MCBA '+data.fecha+' — '+data.archivo+'<button onclick="document.getElementById(\'mcba-'+pid+'\').style.display=\'none\'" style="background:none;border:none;cursor:pointer;color:var(--burd);font-size:16px;line-height:1;padding:0 2px;font-weight:400">×</button></div>';
     h+='<table style="width:100%;border-collapse:collapse">';
     h+='<thead><tr style="background:var(--bg)"><th style="padding:4px 8px;text-align:left;font-size:10px;color:var(--mut);font-weight:500">Variedad / Procedencia</th><th style="padding:4px 8px;text-align:center;font-size:10px;color:var(--mut);font-weight:500">Kg</th><th style="padding:4px 8px;text-align:right;font-size:10px;color:var(--mut);font-weight:500">Mín</th><th style="padding:4px 8px;text-align:right;font-size:10px;color:var(--mut);font-weight:500">Máx</th></tr></thead><tbody>';
     data.resultados.forEach(function(r, i) {

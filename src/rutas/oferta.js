@@ -161,8 +161,9 @@ router.get("/pricing/pdf/:tipo", async (req, res) => {
     const html = [
       '<!DOCTYPE html><html><head><meta charset="UTF-8">',
       '<style>',
-      'body{font-family:Arial,sans-serif;font-size:12px;color:#2c1810;margin:0;padding:28px}',
-      '@page{size:A4 portrait;margin:20mm}',
+      '@page{size:A4 portrait!important;margin:15mm}',
+      'html,body{width:100%;max-width:210mm}',
+      'body{font-family:Arial,sans-serif;font-size:11px;color:#2c1810;margin:0;padding:0}',
       '.header{display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;padding-bottom:14px;border-bottom:3px solid #0f2540}',
       '.logo-img{height:56px;object-fit:contain}',
       '.header-right{text-align:right}',
