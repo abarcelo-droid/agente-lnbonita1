@@ -350,7 +350,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
 <div class="mbox">
   <div class="mhd"><div class="mht" id="mb-p-tit">Nuevo producto</div><button class="mcl" id="btn-cerrar-mp">x</button></div>
   <div class="fg">
-    <div class="fl"><label>Nombre *</label><input id="p-nom" required></div>
+    <div class="fl"><label>Producto *</label><input id="p-nom" required></div>
     <div class="fl"><label>Proveedor</label><input id="p-prov"></div>
     <div class="fl ff"><label>Categoria</label>
       <select id="p-cat"><option value="">Sin categoria</option><option value="Frutas Nacionales">Frutas Nacionales</option><option value="Frutas Importadas">Frutas Importadas</option><option value="Hortalizas Livianas">Hortalizas Livianas</option><option value="Hortalizas Pesadas">Hortalizas Pesadas</option><option value="Otros">Otros</option></select>
@@ -359,6 +359,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     <div class="fl"><label>Origen</label><input id="p-ori" placeholder="ej: San Juan"></div>
     <div class="fl"><label>Kilaje / Presentacion</label><input id="p-kil" placeholder="ej: caja 20kg"></div>
     <div class="fl"><label>Marca</label><input id="p-marca"></div>
+    <div class="fl ff"><label>Partida Abasto</label><input id="p-cod" placeholder="Se genera automáticamente — editá si necesitás"></div>
     <div class="fl ff" style="background:var(--bg);border:1px solid var(--bor);border-radius:8px;padding:12px;flex-direction:row;align-items:center;gap:12px">
       <input type="checkbox" id="p-cons" style="width:18px;height:18px;accent-color:var(--burg);flex-shrink:0" onchange="toggleCons()">
       <div><div style="font-weight:500;font-size:13px">Consignacion</div><div style="font-size:12px;color:var(--mut)">Sin costo propio - precio de referencia</div></div>
@@ -877,6 +878,7 @@ function editProd(id) {
     eid('p-ori').value=p.origen||''; eid('p-kil').value=p.kilaje||'';
     eid('p-marca').value=p.marca||''; eid('p-cos').value=p.costo||'';
     eid('p-flet').value=p.flete||''; eid('p-notas').value=p.notas||'';
+    eid('p-cod').value=p.codigo||'';
     eid('p-cons').checked=!!p.consignacion; toggleCons();
     cargarOpsRetail(p.nombre_retail);
     eid('mb-p').classList.add('on');
@@ -899,9 +901,10 @@ function cargarOpsRetail(val) {
 eid('btn-cerrar-mp').addEventListener('click',function(){ closeMB('mb-p'); });
 eid('btn-cancel-mp').addEventListener('click',function(){ closeMB('mb-p'); });
 eid('btn-save-mp').addEventListener('click', function() {
-  var nom=elv('p-nom'); if(!nom){ toast('Nombre es obligatorio','er'); return; }
+  var nom=elv('p-nom'); if(!nom){ toast('Producto es obligatorio','er'); return; }
   var foto=eid('p-foto').files[0];
-  var codigo = (elv('p-ret')||nom).toLowerCase().replace(/[^a-z0-9]/g,'-').replace(/-+/g,'-').slice(0,20)+'-'+(elv('p-prov')||'').toLowerCase().replace(/[^a-z0-9]/g,'-').slice(0,10);
+  var codManual = elv('p-cod').trim();
+  var codigo = codManual || ((elv('p-ret')||nom).toLowerCase().replace(/[^a-z0-9]/g,'-').replace(/-+/g,'-').slice(0,20)+'-'+(elv('p-prov')||'').toLowerCase().replace(/[^a-z0-9]/g,'-').slice(0,10));
   var fd=new FormData();
   fd.append('oferta',eid('p-oferta').value); fd.append('codigo',codigo);
   fd.append('nombre',nom); fd.append('proveedor',elv('p-prov'));
