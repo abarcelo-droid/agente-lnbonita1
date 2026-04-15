@@ -9,6 +9,20 @@ import cobranzaRouter     from "./rutas/cobranza.js";
 import ofertaRouter       from "./rutas/oferta.js";
 import cotizacionRouter   from "./rutas/cotizacion.js";
 import crmRouter          from "./rutas/crm.js";
+import { guardarSnapshotCRM } from "./servicios/db.js";
+
+// Scheduler: snapshot CRM a medianoche
+function programarSnapshotCRM() {
+  const ahora = new Date();
+  const medianoche = new Date(ahora);
+  medianoche.setHours(24, 0, 0, 0);
+  const msHastaMedianoche = medianoche - ahora;
+  console.log(`[CRM] Snapshot programado en ${Math.round(msHastaMedianoche/1000/60)} minutos`);
+  setTimeout(function() {
+    guardarSnapshotCRM();
+    setInterval(guardarSnapshotCRM, 24 * 60 * 60 * 1000);
+  }, msHastaMedianoche);
+}
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -78,4 +92,5 @@ app.listen(PORT, () => {
   console.log(`\n Servidor en http://localhost:${PORT}`);
   console.log(`   Panel:   http://localhost:${PORT}/panel`);
   console.log(`   Webhook: POST http://localhost:${PORT}/webhook\n`);
+  programarSnapshotCRM();
 });

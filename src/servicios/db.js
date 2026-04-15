@@ -312,3 +312,36 @@ export function actualizarSituacionCRM(id, situacion, nota) {
 export function obtenerCRM(telefono) {
   return db.prepare("SELECT * FROM crm_clientes WHERE telefono = ?").get(telefono);
 }
+
+// ── CRM Historial ──────────────────────────────────────────────────────────
+db.exec(`
+  CREATE TABLE IF NOT EXISTS crm_historial (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    crm_id      INTEGER NOT NULL,
+    telefono    TEXT,
+    comercial   TEXT,
+    situacion   TEXT,
+    nota        TEXT,
+    fecha       TEXT DEFAULT (date('now','localtime')),
+    creado_en   TEXT DEFAULT (datetime('now','localtime'))
+  );
+`);
+
+export function guardarSnapshotCRM() {
+  const fecha = new Date().toLocaleDateString('es-AR', {day:'2-digit',month:'2-digit',year:'numeric'});
+  const clientes = db.prepare("SELECT * FROM crm_clientes").all();
+  let guardados = 0;
+  clientes.forEach(function(c) {
+    // Solo guardar si tuvo actividad hoy (ultima_gestion = hoy) o si está en enviado/venta/fallido
+    if (c.situacion !== 'pendiente' || c.ultima_gestion === new Date().toISOString().slice(0,10)) {
+      const yaExiste = db.prepare("SELECT id FROM crm_historial WHERE crm_id=? AND fecha=date('now','localtime')").get(c.id);
+      if (!yaExiste) {
+        db.prepare("INSERT INTO crm_historial (crm_id, telefono, comercial, situacion, nota, fecha) VALUES (?,?,?,?,?,date('now','localtime'))")
+          .run(c.id, c.telefono, c.comercial, c.situacion, c.notas||null);
+        guardados++;
+      }
+    }
+  });
+  console.log(`[CRM] Snapshot medianoche: ${guardados} registros guardados`);
+  return guardados;
+}
