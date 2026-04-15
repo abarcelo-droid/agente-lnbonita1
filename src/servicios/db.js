@@ -299,9 +299,14 @@ export function upsertCRM(datos) {
   }
 }
 
-export function actualizarSituacionCRM(id, situacion) {
+export function actualizarSituacionCRM(id, situacion, nota) {
   const hoy = new Date().toISOString().slice(0,10);
-  db.prepare("UPDATE crm_clientes SET situacion=?, ultima_gestion=? WHERE id=?").run(situacion, hoy, id);
+  if (nota) {
+    db.prepare("UPDATE crm_clientes SET situacion=?, ultima_gestion=?, notas=COALESCE(notas||char(10)||?,?) WHERE id=?")
+      .run(situacion, hoy, nota, nota, id);
+  } else {
+    db.prepare("UPDATE crm_clientes SET situacion=?, ultima_gestion=? WHERE id=?").run(situacion, hoy, id);
+  }
 }
 
 export function obtenerCRM(telefono) {

@@ -20,10 +20,10 @@ router.post("/crm", (req, res) => {
 
 // Cambiar situación
 router.patch("/crm/:id/situacion", (req, res) => {
-  const { situacion } = req.body;
+  const { situacion, nota } = req.body;
   const validos = ['pendiente','enviado','venta','fallido'];
   if (!validos.includes(situacion)) return res.status(400).json({ error: "Situacion invalida" });
-  actualizarSituacionCRM(parseInt(req.params.id), situacion);
+  actualizarSituacionCRM(parseInt(req.params.id), situacion, nota||null);
   res.json({ ok: true });
 });
 

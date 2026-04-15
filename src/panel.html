@@ -144,11 +144,25 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     <div class="stat"><div class="sl">Clientes activos</div><div class="sv" id="st3">--</div></div>
     <div class="stat"><div class="sl">Pedidos mes</div><div class="sv" id="st4">--</div></div>
   </div>
+  <div style="font-weight:600;margin-bottom:12px;margin-top:20px">CRM Dedicados — Hoy</div>
+  <div id="crm-resumen-inicio" style="margin-bottom:20px"></div>
   <div style="font-weight:600;margin-bottom:14px">Ultimos pedidos</div>
   <div class="tw"><table><thead><tr><th>ID</th><th>Cliente</th><th>Tipo</th><th>Total</th><th>Estado</th><th>Hora</th><th></th></tr></thead><tbody id="t-rec"></tbody></table></div>
 </div>
 
 <!-- PEDIDOS -->
+<!-- MODAL TRANSICION CRM -->
+<div class="mb" id="mb-crm-trans">
+<div class="mbox" style="width:480px">
+  <div class="mhd"><div class="mht" id="mb-crm-trans-tit">Confirmar cambio</div><button class="mcl" onclick="closeMB('mb-crm-trans')">×</button></div>
+  <div id="mb-crm-trans-body" style="padding:4px 0 16px"></div>
+  <div style="display:flex;gap:10px;justify-content:flex-end">
+    <button class="btn bo" onclick="closeMB('mb-crm-trans')">Cancelar</button>
+    <button class="btn bb" id="btn-crm-trans-ok">Confirmar</button>
+  </div>
+</div>
+</div>
+
 <!-- CRM DEDICADOS -->
 <div class="sec" id="sec-crm">
   <div class="ph">
@@ -629,23 +643,59 @@ document.getElementById('fecha-hoy').textContent = new Date().toLocaleDateString
 
 // INICIO
 function loadInicio() {
-  Promise.all([api('/api/pedidos'), api('/api/clientes')]).then(function(r) {
-    var ped = r[0]; var cli = r[1];
+  Promise.all([api('/api/pedidos'), api('/api/clientes'), api('/api/crm')]).then(function(r) {
+    var ped = r[0]; var cli = r[1]; var crm = r[2]||[];
     var hoy = new Date().toISOString().slice(0,10);
     var mes = new Date().toISOString().slice(0,7);
     eid('st1').textContent = ped.filter(function(p){ return p.creado_en && p.creado_en.slice(0,10)===hoy; }).length;
     eid('st2').textContent = ped.filter(function(p){ return p.estado==='pendiente'; }).length;
     eid('st3').textContent = cli.length;
     eid('st4').textContent = ped.filter(function(p){ return p.creado_en && p.creado_en.slice(0,7)===mes; }).length;
-    var h = '';
-    ped.slice(0,8).forEach(function(p) {
-      h += '<tr><td style="color:var(--mut)">#'+p.id+'</td><td style="font-size:12px">'+p.telefono+'</td><td>'+bTipo(p.tipo_cliente)+'</td>';
-      h += '<td style="font-weight:500">'+(p.total ? '$'+nr(p.total) : '-')+'</td>';
-      h += '<td><span class="bdg b'+ecl(p.estado)+'">'+p.estado+'</span></td>';
-      h += '<td style="color:var(--mut);font-size:12px">'+(p.creado_en ? p.creado_en.slice(11,16) : '-')+'</td>';
-      h += '<td><a href="/api/pedidos/'+p.id+'/orden/pdf" target="_blank" class="btn bo bs" style="text-decoration:none">PDF</a></td></tr>';
+
+    // Resumen CRM
+    var comerciales=['Andres Barcelo','Pablo Barcelo','Camila Persampieri','Ramon Palazuelos'];
+    var cols={pendiente:{color:'#ef4444',bg:'#fef2f2'},enviado:{color:'#f59e0b',bg:'#fffbeb'},venta:{color:'#10b981',bg:'#f0fdf4'},fallido:{color:'#6b7280',bg:'#f9fafb'}};
+    var totalPend=crm.filter(function(c){return c.situacion==='pendiente';}).length;
+    var totalVenta=crm.filter(function(c){return c.situacion==='venta';}).length;
+    var totalEnv=crm.filter(function(c){return c.situacion==='enviado';}).length;
+    var totalFall=crm.filter(function(c){return c.situacion==='fallido';}).length;
+    var h='<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">';
+    [{k:'pendiente',l:'Pendiente',n:totalPend},{k:'enviado',l:'Enviado',n:totalEnv},{k:'venta',l:'Venta',n:totalVenta},{k:'fallido',l:'Fallido',n:totalFall}].forEach(function(s){
+      h+='<div style="background:'+cols[s.k].bg+';border:1px solid '+cols[s.k].color+'40;border-radius:8px;padding:10px 16px;display:flex;align-items:center;gap:10px">';
+      h+='<span style="font-size:20px;font-weight:700;color:'+cols[s.k].color+'">'+s.n+'</span>';
+      h+='<span style="font-size:12px;color:'+cols[s.k].color+';font-weight:600">'+s.l+'</span></div>';
     });
-    eid('t-rec').innerHTML = h || '<tr><td colspan="7" class="emp">Sin pedidos aun</td></tr>';
+    h+='</div>';
+    // Por comercial
+    h+='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:8px">';
+    comerciales.forEach(function(com){
+      var mios=crm.filter(function(c){return c.comercial===com;});
+      if(!mios.length) return;
+      var pend=mios.filter(function(c){return c.situacion==='pendiente';}).length;
+      var env=mios.filter(function(c){return c.situacion==='enviado';}).length;
+      var vta=mios.filter(function(c){return c.situacion==='venta';}).length;
+      var fall=mios.filter(function(c){return c.situacion==='fallido';}).length;
+      h+='<div style="background:var(--sur);border:1px solid var(--bor);border-radius:8px;padding:10px 14px">';
+      h+='<div style="font-size:12px;font-weight:600;margin-bottom:6px">'+com.split(' ')[0]+'</div>';
+      h+='<div style="display:flex;gap:6px;flex-wrap:wrap">';
+      if(pend) h+='<span style="font-size:11px;background:#fef2f2;color:#ef4444;border-radius:8px;padding:2px 8px;font-weight:600">'+pend+' pend.</span>';
+      if(env)  h+='<span style="font-size:11px;background:#fffbeb;color:#f59e0b;border-radius:8px;padding:2px 8px;font-weight:600">'+env+' env.</span>';
+      if(vta)  h+='<span style="font-size:11px;background:#f0fdf4;color:#10b981;border-radius:8px;padding:2px 8px;font-weight:600">'+vta+' venta</span>';
+      if(fall) h+='<span style="font-size:11px;background:#f9fafb;color:#6b7280;border-radius:8px;padding:2px 8px;font-weight:600">'+fall+' fall.</span>';
+      h+='</div></div>';
+    });
+    h+='</div>';
+    eid('crm-resumen-inicio').innerHTML=h;
+
+    var hp = '';
+    ped.slice(0,8).forEach(function(p) {
+      hp += '<tr><td style="color:var(--mut)">#'+p.id+'</td><td style="font-size:12px">'+p.telefono+'</td><td>'+bTipo(p.tipo_cliente)+'</td>';
+      hp += '<td style="font-weight:500">'+(p.total ? '$'+nr(p.total) : '-')+'</td>';
+      hp += '<td><span class="bdg b'+ecl(p.estado)+'">'+p.estado+'</span></td>';
+      hp += '<td style="color:var(--mut);font-size:12px">'+(p.creado_en ? p.creado_en.slice(11,16) : '-')+'</td>';
+      hp += '<td><a href="/api/pedidos/'+p.id+'/orden/pdf" target="_blank" class="btn bo bs" style="text-decoration:none">PDF</a></td></tr>';
+    });
+    eid('t-rec').innerHTML = hp || '<tr><td colspan="7" class="emp">Sin pedidos aun</td></tr>';
   });
 }
 
@@ -1687,7 +1737,7 @@ function loadCRM() {
       h+='</div>';
       grupos[col.key].forEach(function(c) {
         var dias=JSON.parse(c.dias_contacto||'[]').join(', ')||'Sin días';
-        h+='<div draggable="true" ondragstart="dragCRM(event,'+c.id+')" onclick="abrirFichaCRM(\''+esc(c.telefono||c.tel)+'\')" ';
+        h+='<div draggable="true" ondragstart="dragCRM(event,'+c.id+',\''+c.situacion+'\')" onclick="abrirFichaCRM(\''+esc(c.telefono||c.tel)+'\')" ';
         h+='style="background:#fff;border:1px solid '+col.border+';border-radius:8px;padding:10px 12px;margin-bottom:8px;cursor:pointer;box-shadow:0 1px 4px rgba(0,0,0,.06);transition:box-shadow .15s" ';
         h+='onmouseenter="this.style.boxShadow=\'0 3px 10px rgba(0,0,0,.12)\'" onmouseleave="this.style.boxShadow=\'0 1px 4px rgba(0,0,0,.06)\'">';
         h+='<div style="font-weight:600;font-size:13px;margin-bottom:2px">'+(c.nombre||c.tel||'-')+'</div>';
@@ -1704,15 +1754,52 @@ function loadCRM() {
 }
 
 var _dragCRMid=null;
-function dragCRM(ev,id){ _dragCRMid=id; ev.dataTransfer.effectAllowed='move'; }
+var _dragCRMsit=null; // situacion actual del card dragging
+function dragCRM(ev,id,sit){ _dragCRMid=id; _dragCRMsit=sit; ev.dataTransfer.effectAllowed='move'; }
 function dropCRM(ev,situacion) {
   ev.preventDefault();
   if(!_dragCRMid) return;
-  api('/api/crm/'+_dragCRMid+'/situacion','PATCH',{situacion:situacion}).then(function(){
+  var id=_dragCRMid; var sitActual=_dragCRMsit;
+  _dragCRMid=null; _dragCRMsit=null;
+  if(sitActual===situacion) return;
+  abrirTransicionCRM(id, sitActual, situacion);
+}
+
+function abrirTransicionCRM(id, desde, hacia) {
+  var tit={'enviado':'Enviado','venta':'Venta','fallido':'Fallido','pendiente':'Pendiente'};
+  eid('mb-crm-trans-tit').textContent='Mover a '+tit[hacia];
+  var body='';
+  if(desde==='pendiente' && hacia==='enviado') {
+    body='<div style="margin-bottom:12px;font-size:13px;color:var(--mut)">Pegá el mensaje que le enviaste al cliente:</div>';
+    body+='<textarea id="crm-trans-txt" rows="4" style="width:100%;font-size:13px;border-radius:7px;border:1px solid var(--bor);padding:8px 10px;box-sizing:border-box" placeholder="Ej: Buen día, te envío la lista de precios de hoy..."></textarea>';
+  } else if(desde==='enviado' && hacia==='venta') {
+    body='<div style="margin-bottom:12px;font-size:13px;color:var(--mut)">Detalle del pedido: <span style="color:var(--err)">*obligatorio</span></div>';
+    body+='<textarea id="crm-trans-txt" rows="3" style="width:100%;font-size:13px;border-radius:7px;border:1px solid var(--bor);padding:8px 10px;box-sizing:border-box" placeholder="Ej: 3 cajones palta, 2 cajones mango - $45.000"></textarea>';
+  } else if(desde==='enviado' && hacia==='fallido') {
+    body='<div style="margin-bottom:12px;font-size:13px;color:var(--mut)">Motivo: <span style="color:var(--err)">*obligatorio</span></div>';
+    body+='<input id="crm-trans-txt" style="width:100%;font-size:13px;border-radius:7px;border:1px solid var(--bor);padding:8px 10px;box-sizing:border-box" placeholder="Ej: No necesita esta semana, compró a otro proveedor...">';
+  } else {
+    // Transición sin requisitos
+    ejecutarTransicionCRM(id, hacia, '');
+    return;
+  }
+  eid('mb-crm-trans-body').innerHTML=body;
+  eid('btn-crm-trans-ok').onclick=function(){
+    var txt=eid('crm-trans-txt').value.trim();
+    if((hacia==='venta'||hacia==='fallido') && !txt){ toast('Campo obligatorio','er'); return; }
+    ejecutarTransicionCRM(id, hacia, txt);
+  };
+  eid('mb-crm-trans').classList.add('on');
+  setTimeout(function(){ var el=eid('crm-trans-txt'); if(el) el.focus(); },100);
+}
+
+function ejecutarTransicionCRM(id, situacion, nota) {
+  api('/api/crm/'+id+'/situacion','PATCH',{situacion:situacion,nota:nota}).then(function(){
+    closeMB('mb-crm-trans');
+    closeMB('mb-crm');
     loadCRM();
     toast('Movido a '+situacion,'ok');
   });
-  _dragCRMid=null;
 }
 
 function abrirFichaCRM(telefono) {
@@ -1731,7 +1818,7 @@ function abrirFichaCRM(telefono) {
     h+='<div style="display:flex;gap:6px;flex-wrap:wrap">';
     CRM_COLS.forEach(function(c){
       var act=c.key===crm.situacion;
-      h+='<button onclick="cambiarSituacionFicha('+crm.id+',\''+c.key+'\')" style="font-size:11px;padding:3px 10px;border-radius:12px;border:1.5px solid '+c.color+';background:'+(act?c.color:'transparent')+';color:'+(act?'#fff':c.color)+';cursor:pointer;font-weight:600">'+c.label+'</button>';
+      h+='<button onclick="cambiarSituacionFicha('+crm.id+',\''+c.key+'\',\''+crm.situacion+'\')" style="font-size:11px;padding:3px 10px;border-radius:12px;border:1.5px solid '+c.color+';background:'+(act?c.color:'transparent')+';color:'+(act?'#fff':c.color)+';cursor:pointer;font-weight:600">'+c.label+'</button>';
     });
     h+='</div></div>';
     // Días contacto
@@ -1790,20 +1877,8 @@ function toggleDiaCRM(btn, dia) {
   btn.style.color=btn.style.color==='#fff'?'var(--txt)':'#fff';
 }
 
-function cambiarSituacionFicha(id, situacion) {
-  api('/api/crm/'+id+'/situacion','PATCH',{situacion:situacion}).then(function(){
-    toast('Situación actualizada','ok');
-    loadCRM();
-    // Re-render botones
-    var btns=document.querySelectorAll('[onclick^="cambiarSituacionFicha"]');
-    btns.forEach(function(b){
-      var col=CRM_COLS.find(function(c){return b.getAttribute('onclick').includes("'"+c.key+"'");});
-      if(!col) return;
-      var act=c.key===situacion;
-      b.style.background=act?col.color:'transparent';
-      b.style.color=act?'#fff':col.color;
-    });
-  });
+function cambiarSituacionFicha(id, hacia, desde) {
+  abrirTransicionCRM(id, desde, hacia);
 }
 
 function guardarConfigCRM(telefono, id) {
