@@ -488,6 +488,25 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       </div>
     </div>
     <div class="fl ff"><label>Direccion</label><input id="ded-dir"></div>
+    <div class="fl ff"><label>Oferta en CRM</label>
+      <select id="ded-tipo-oferta" onchange="toggleRetailCats()" style="font-size:13px">
+        <option value="mayorista_a">Mayorista A</option>
+        <option value="mayorista_mcba" selected>Mayorista MCBA</option>
+        <option value="minorista_mcba">Minorista MCBA</option>
+        <option value="minorista_entrega">Minorista Entrega</option>
+        <option value="food_service">Food Service</option>
+        <option value="retail">Retail</option>
+      </select>
+    </div>
+    <div class="fl ff" id="div-retail-cats" style="display:none"><label>Categorías retail a mostrar</label>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:4px">
+        <label style="display:flex;align-items:center;gap:5px;font-size:13px;cursor:pointer"><input type="checkbox" class="retail-cat-chk" value="Frutas Nacionales" style="accent-color:var(--burg)"> Frutas Nacionales</label>
+        <label style="display:flex;align-items:center;gap:5px;font-size:13px;cursor:pointer"><input type="checkbox" class="retail-cat-chk" value="Frutas Importadas" style="accent-color:var(--burg)"> Frutas Importadas</label>
+        <label style="display:flex;align-items:center;gap:5px;font-size:13px;cursor:pointer"><input type="checkbox" class="retail-cat-chk" value="Hortalizas Pesadas" style="accent-color:var(--burg)"> Hortalizas Pesadas</label>
+        <label style="display:flex;align-items:center;gap:5px;font-size:13px;cursor:pointer"><input type="checkbox" class="retail-cat-chk" value="Hortalizas Livianas" style="accent-color:var(--burg)"> Hortalizas Livianas</label>
+        <label style="display:flex;align-items:center;gap:5px;font-size:13px;cursor:pointer"><input type="checkbox" class="retail-cat-chk" value="Otros" style="accent-color:var(--burg)"> Otros</label>
+      </div>
+    </div>
     <div class="fl ff"><label>Notas</label><textarea id="ded-notas" rows="2"></textarea></div>
     <input type="hidden" id="ded-id">
   </div>
@@ -1962,6 +1981,13 @@ function openDed(d) {
   eid('ded-zona').value = d ? (d.zona||'') : '';
   eid('ded-com').value = d ? (d.comercial||'') : '';
   eid('ded-notas').value = d ? (d.notas||'') : '';
+  // Tipo oferta CRM
+  var tipoOf = d && d.tipo_oferta ? d.tipo_oferta : 'mayorista_mcba';
+  eid('ded-tipo-oferta').value = tipoOf;
+  toggleRetailCats();
+  // Retail cats
+  var retailCats = d && d.retail_cats ? JSON.parse(d.retail_cats) : [];
+  document.querySelectorAll('.retail-cat-chk').forEach(function(c){ c.checked=retailCats.includes(c.value); });
   // Cargar días seleccionados
   var diasSel = d && d.dias_venta ? JSON.parse(d.dias_venta) : [];
   document.querySelectorAll('#ded-dias-wrap .dia-btn').forEach(function(b){
@@ -1980,6 +2006,11 @@ function toggleDiaBtn(btn) {
   btn.style.borderColor = active ? 'var(--bor)' : 'var(--burg)';
 }
 
+function toggleRetailCats() {
+  var v=eid('ded-tipo-oferta').value;
+  eid('div-retail-cats').style.display=v==='retail'?'':'none';
+}
+
 eid('btn-cerrar-mded').addEventListener('click', function(){ closeMB('mb-ded'); });
 eid('btn-cancel-mded').addEventListener('click', function(){ closeMB('mb-ded'); });
 eid('btn-save-mded').addEventListener('click', function(){
@@ -1992,14 +2023,15 @@ eid('btn-save-mded').addEventListener('click', function(){
     nombre: nom, empresa: elv('ded-emp'), telefono: elv('ded-tel'),
     email: elv('ded-email'), direccion: elv('ded-dir'),
     zona: elv('ded-zona'), comercial: elv('ded-com'), notas: elv('ded-notas'),
-    dias_venta: JSON.stringify(dias)
+    dias_venta: JSON.stringify(dias),
+    tipo_oferta: eid('ded-tipo-oferta').value||'mayorista_mcba',
+    retail_cats: JSON.stringify(Array.from(document.querySelectorAll('.retail-cat-chk:checked')).map(function(c){return c.value;}))
   };
   var id = elv('ded-id');
   var p = id ? api('/api/dedicados/'+id,'PATCH',datos) : api('/api/dedicados','POST',datos);
   p.then(function(){
-    // Si tiene teléfono, sincronizar con CRM
     if(datos.telefono && datos.comercial) {
-      api('/api/crm','POST',{telefono:datos.telefono,comercial:datos.comercial,dias_contacto:dias,tipo_oferta:'mayorista_mcba',notas:datos.notas||''});
+      api('/api/crm','POST',{telefono:datos.telefono,comercial:datos.comercial,dias_contacto:dias,tipo_oferta:datos.tipo_oferta,notas:''});
     }
     toast('Guardado','ok'); closeMB('mb-ded'); loadDed();
   });

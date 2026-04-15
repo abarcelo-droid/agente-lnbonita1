@@ -469,6 +469,14 @@ export function catalogoParaTipo(tipoCliente) {
       db.exec("ALTER TABLE dedicados_clientes ADD COLUMN dias_venta TEXT DEFAULT '[]'");
       console.log("[DB] dias_venta agregado en dedicados_clientes");
     }
+    if (!colsDed.includes('tipo_oferta')) {
+      db.exec("ALTER TABLE dedicados_clientes ADD COLUMN tipo_oferta TEXT DEFAULT 'mayorista_mcba'");
+      console.log("[DB] tipo_oferta agregado en dedicados_clientes");
+    }
+    if (!colsDed.includes('retail_cats')) {
+      db.exec("ALTER TABLE dedicados_clientes ADD COLUMN retail_cats TEXT DEFAULT '[]'");
+      console.log("[DB] retail_cats agregado en dedicados_clientes");
+    }
   } catch(e) { console.error('[DB] dedicados:', e.message); }
 })();
 
@@ -478,18 +486,20 @@ export function listarDedicados() {
 
 export function crearDedicado(datos) {
   return db.prepare(`
-    INSERT INTO dedicados_clientes (nombre, empresa, telefono, email, direccion, zona, comercial, notas, dias_venta)
-    VALUES (@nombre, @empresa, @telefono, @email, @direccion, @zona, @comercial, @notas, @dias_venta)
+    INSERT INTO dedicados_clientes (nombre, empresa, telefono, email, direccion, zona, comercial, notas, dias_venta, tipo_oferta, retail_cats)
+    VALUES (@nombre, @empresa, @telefono, @email, @direccion, @zona, @comercial, @notas, @dias_venta, @tipo_oferta, @retail_cats)
   `).run({
-    nombre:    datos.nombre    || '',
-    empresa:   datos.empresa   || null,
-    telefono:  datos.telefono  || null,
-    email:     datos.email     || null,
-    direccion: datos.direccion || null,
-    zona:      datos.zona      || null,
-    comercial: datos.comercial || null,
-    notas:     datos.notas     || null,
+    nombre:     datos.nombre    || '',
+    empresa:    datos.empresa   || null,
+    telefono:   datos.telefono  || null,
+    email:      datos.email     || null,
+    direccion:  datos.direccion || null,
+    zona:       datos.zona      || null,
+    comercial:  datos.comercial || null,
+    notas:      datos.notas     || null,
     dias_venta: datos.dias_venta || '[]',
+    tipo_oferta: datos.tipo_oferta || 'mayorista_mcba',
+    retail_cats: datos.retail_cats || '[]',
   }).lastInsertRowid;
 }
 
