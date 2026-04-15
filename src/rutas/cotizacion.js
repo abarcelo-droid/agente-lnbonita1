@@ -21,6 +21,8 @@ function urlXLS(tipo, fecha) {
   return [
     `https://mercadocentral.gob.ar/sites/default/files/precios_mayoristas/${base}.XLS`,
     `https://mercadocentral.gob.ar/sites/default/files/precios_mayoristas/${base}_0.XLS`,
+    `https://mercadocentral.gob.ar/sites/default/files/precios_mayoristas/${base}[1].XLS`,
+    `https://mercadocentral.gob.ar/sites/default/files/precios_mayoristas/${base}_1.XLS`,
   ];
 }
 
