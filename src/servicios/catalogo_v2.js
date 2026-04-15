@@ -168,6 +168,17 @@ db.exec(`
   }
 })();
 
+// Migracion tipo en retail_gastos (ingreso / salida)
+(function() {
+  var cols = db.prepare("PRAGMA table_info(retail_gastos)").all().map(function(c){ return c.name; });
+  if (cols.indexOf('tipo') < 0) {
+    try {
+      db.exec("ALTER TABLE retail_gastos ADD COLUMN tipo TEXT DEFAULT 'salida'");
+      console.log("[DB] Columna tipo agregada en retail_gastos");
+    } catch(e) {}
+  }
+})();
+
 // Migracion categoria en retail_productos
 (function() {
   var cols = db.prepare("PRAGMA table_info(retail_productos)").all().map(function(c){ return c.name; });
@@ -201,13 +212,13 @@ export function actualizarRetailProducto(id, nombre, categoria) {
 
 // Gastos generales
 export function listarGastos() {
-  return db.prepare("SELECT * FROM retail_gastos WHERE activo = 1 ORDER BY nombre").all();
+  return db.prepare("SELECT * FROM retail_gastos WHERE activo = 1 ORDER BY tipo, nombre").all();
 }
-export function crearGasto(nombre, proveedor, monto, kg_bulto) {
-  return db.prepare("INSERT INTO retail_gastos (nombre, proveedor, monto, kg_bulto) VALUES (?,?,?,?)").run(nombre, proveedor||null, parseFloat(monto)||0, parseFloat(kg_bulto)||1);
+export function crearGasto(nombre, proveedor, monto, kg_bulto, tipo) {
+  return db.prepare("INSERT INTO retail_gastos (nombre, proveedor, monto, kg_bulto, tipo) VALUES (?,?,?,?,?)").run(nombre, proveedor||null, parseFloat(monto)||0, parseFloat(kg_bulto)||1, tipo||'salida');
 }
-export function actualizarGasto(id, nombre, proveedor, monto, kg_bulto) {
-  db.prepare("UPDATE retail_gastos SET nombre=?, proveedor=?, monto=?, kg_bulto=? WHERE id=?").run(nombre, proveedor||null, parseFloat(monto)||0, parseFloat(kg_bulto)||1, id);
+export function actualizarGasto(id, nombre, proveedor, monto, kg_bulto, tipo) {
+  db.prepare("UPDATE retail_gastos SET nombre=?, proveedor=?, monto=?, kg_bulto=?, tipo=? WHERE id=?").run(nombre, proveedor||null, parseFloat(monto)||0, parseFloat(kg_bulto)||1, tipo||'salida', id);
 }
 export function eliminarGasto(id) {
   db.prepare("UPDATE retail_gastos SET activo = 0 WHERE id = ?").run(id);

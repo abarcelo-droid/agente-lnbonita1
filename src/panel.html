@@ -304,11 +304,17 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       <div class="fl" style="flex:1;min-width:180px"><label>Nombre del gasto</label><input id="inp-g-nom" placeholder="ej: Embalaje"></div>
       <div class="fl" style="flex:1;min-width:150px"><label>Proveedor</label><input id="inp-g-prov" placeholder="ej: Mario"></div>
       <div class="fl" style="width:130px"><label>$ por bulto</label><input type="number" id="inp-g-monto" placeholder="0"></div>
+      <div class="fl" style="width:160px"><label>Tipo de gasto</label>
+        <select id="inp-g-tipo" style="font-size:12px">
+          <option value="salida">📤 Salida de mercadería</option>
+          <option value="ingreso">📥 Ingreso de mercadería</option>
+        </select>
+      </div>
       <button class="btn bb" id="btn-save-gasto">Guardar</button>
       <button class="btn bo" id="btn-cancel-gasto">Cancelar</button>
     </div>
   </div>
-  <div class="tw"><table><thead><tr><th>Nombre</th><th>Proveedor</th><th style="text-align:right">$ / Bulto</th><th></th></tr></thead><tbody id="t-gastos"></tbody></table></div>
+  <div class="tw"><table><thead><tr><th>Nombre</th><th>Proveedor</th><th style="text-align:right">$ / Bulto</th><th style="text-align:center">Tipo</th><th></th></tr></thead><tbody id="t-gastos"></tbody></table></div>
 </div>
 
 </main>
@@ -1476,8 +1482,10 @@ eid('btn-cancel-gasto').addEventListener('click',function(){eid('form-add-gasto'
 eid('btn-save-gasto').addEventListener('click',function(){
   var nom=elv('inp-g-nom'); if(!nom){toast('Escribe el nombre','er');return;}
   var prov=elv('inp-g-prov'); var monto=parseFloat(elv('inp-g-monto'))||0;
-  api('/api/retail/gastos','POST',{nombre:nom,proveedor:prov,monto:monto}).then(function(){
+  var tipo=eid('inp-g-tipo').value||'salida';
+  api('/api/retail/gastos','POST',{nombre:nom,proveedor:prov,monto:monto,tipo:tipo}).then(function(){
     ['inp-g-nom','inp-g-prov','inp-g-monto'].forEach(function(id){eid(id).value='';});
+    eid('inp-g-tipo').value='salida';
     eid('form-add-gasto').style.display='none';
     toast('Gasto agregado','ok'); loadGastos();
   });
@@ -1485,20 +1493,37 @@ eid('btn-save-gasto').addEventListener('click',function(){
 function loadGastos() {
   api('/api/retail/gastos').then(function(lista){
     var h='';
+    var secActual='';
+    var secLabel={'ingreso':'📥 Ingreso de mercadería','salida':'📤 Salida de mercadería'};
+    var secColor={'ingreso':'#dbeafe','salida':'#dcfce7'};
+    var secText={'ingreso':'#1e40af','salida':'#166534'};
     lista.forEach(function(g){
+      var tipo=g.tipo||'salida';
+      if(tipo!==secActual){
+        secActual=tipo;
+        h+='<tr><td colspan="5" style="background:'+secColor[tipo]+';color:'+secText[tipo]+';font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;padding:6px 12px">'+secLabel[tipo]+'</td></tr>';
+      }
+      var badgeBg=tipo==='ingreso'?'#dbeafe':'#dcfce7';
+      var badgeColor=tipo==='ingreso'?'#1e40af':'#166534';
       h+='<tr>';
       h+='<td><input style="border:none;background:transparent;font-weight:500;width:100%;font-size:13px" value="'+esc(g.nombre||'')+'" onchange="updG('+g.id+',this)"></td>';
       h+='<td><input style="border:none;background:transparent;color:var(--mut);width:100%;font-size:13px" value="'+esc(g.proveedor||'')+'" onchange="updG('+g.id+',this)"></td>';
       h+='<td style="text-align:right"><input type="number" style="border:none;background:transparent;font-variant-numeric:tabular-nums;width:90px;text-align:right;font-size:13px" value="'+(g.monto||0)+'" onchange="updG('+g.id+',this)"></td>';
+      h+='<td style="text-align:center"><select onchange="updGTipo('+g.id+',this.value)" style="font-size:10px;padding:2px 6px;border-radius:4px;border:none;background:'+badgeBg+';color:'+badgeColor+';font-weight:600;cursor:pointer"><option value="salida"'+(tipo==='salida'?' selected':'')+'>📤 Salida</option><option value="ingreso"'+(tipo==='ingreso'?' selected':'')+'>📥 Ingreso</option></select></td>';
       h+='<td style="text-align:right"><button class="btn bd bs" onclick="delG('+g.id+')">Eliminar</button></td>';
       h+='</tr>';
     });
-    eid('t-gastos').innerHTML=h||'<tr><td colspan="4" class="emp">Sin gastos</td></tr>';
+    eid('t-gastos').innerHTML=h||'<tr><td colspan="5" class="emp">Sin gastos</td></tr>';
   });
 }
 function updG(id,inp) {
   var row=inp.closest('tr'); var ins=row.querySelectorAll('input');
-  api('/api/retail/gastos/'+id,'PATCH',{nombre:ins[0].value.trim(),proveedor:ins[1].value.trim(),monto:parseFloat(ins[2].value)||0}).then(function(){toast('Actualizado','ok');});
+  var tipoSel=row.querySelector('select');
+  var tipo=tipoSel?tipoSel.value:'salida';
+  api('/api/retail/gastos/'+id,'PATCH',{nombre:ins[0].value.trim(),proveedor:ins[1].value.trim(),monto:parseFloat(ins[2].value)||0,tipo:tipo}).then(function(){toast('Actualizado','ok');});
+}
+function updGTipo(id,tipo) {
+  api('/api/retail/gastos/'+id,'PATCH',{tipo:tipo}).then(function(){ toast('Tipo actualizado','ok'); loadGastos(); });
 }
 function delG(id){if(!confirm('Eliminar?')) return; api('/api/retail/gastos/'+id,'DELETE').then(function(){toast('Eliminado','ok');loadGastos();});}
 
