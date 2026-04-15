@@ -33,14 +33,14 @@ router.get("/crm/cliente/:telefono", (req, res) => {
   if (!crm) return res.status(404).json({ error: "No encontrado" });
 
   // Enriquecer con nombre desde dedicados_clientes
-  const ded = db.prepare("SELECT nombre, empresa, tipo_oferta, retail_cats FROM dedicados_clientes WHERE telefono = ? OR id = ?").get(
+  const ded = db.prepare("SELECT nombre, empresa, tipo_oferta, retail_cats, supermercado FROM dedicados_clientes WHERE telefono = ? OR id = ?").get(
     crm.telefono,
     crm.telefono && crm.telefono.startsWith('ded-') ? parseInt(crm.telefono.slice(4)) : -1
   );
 
-  // Usar tipo_oferta del dedicado (más actualizado) si existe
   const tipoOferta = (ded && ded.tipo_oferta) || crm.tipo_oferta || 'mayorista_mcba';
   const retailCats = ded && ded.retail_cats ? JSON.parse(ded.retail_cats) : [];
+  const supermercado = (ded && ded.supermercado) || null;
 
   let productos = [];
 
@@ -96,7 +96,8 @@ router.get("/crm/cliente/:telefono", (req, res) => {
     crm: { ...crm, nombre: (ded && ded.nombre) || crm.nombre, tipo_oferta: tipoOferta },
     productos,
     es_retail: tipoOferta === 'retail',
-    retail_cats: retailCats
+    retail_cats: retailCats,
+    supermercado
   });
 });
 

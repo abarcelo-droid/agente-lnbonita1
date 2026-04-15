@@ -507,6 +507,16 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
         <label style="display:flex;align-items:center;gap:5px;font-size:13px;cursor:pointer"><input type="checkbox" class="retail-cat-chk" value="Otros" style="accent-color:var(--burg)"> Otros</label>
       </div>
     </div>
+    <div class="fl" id="div-retail-super" style="display:none"><label>Supermercado</label>
+      <select id="ded-super" style="font-size:13px">
+        <option value="">— Sin especificar —</option>
+        <option value="cencosud">Cencosud</option>
+        <option value="carrefour">Carrefour</option>
+        <option value="coto">Coto</option>
+        <option value="chango">Chango Más</option>
+        <option value="coop">Coop Obrera</option>
+      </select>
+    </div>
     <div class="fl ff"><label>Notas</label><textarea id="ded-notas" rows="2"></textarea></div>
     <input type="hidden" id="ded-id">
   </div>
@@ -1859,21 +1869,22 @@ function abrirFichaCRM(telefono) {
     if(!prods.length){
       h+='<div style="color:var(--mut);font-size:12px;font-style:italic">Sin productos disponibles para este tipo de oferta.</div>';
     } else if(esRetail) {
+      var super_=data.supermercado;
+      var superLabels={cencosud:'Cencosud',carrefour:'Carrefour',coto:'Coto',chango:'Chango Más',coop:'Coop Obrera'};
+      var canales=super_?[super_]:['cencosud','carrefour','coto','chango','coop'];
       var catAct='';
-      h+='<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="background:var(--burd)"><th style="padding:6px 8px;color:#fff;text-align:left">Producto</th><th style="padding:6px 8px;color:#fff;text-align:right">Cencosud</th><th style="padding:6px 8px;color:#fff;text-align:right">Carrefour</th><th style="padding:6px 8px;color:#fff;text-align:right">Coto</th><th style="padding:6px 8px;color:#fff;text-align:right">Chango</th><th style="padding:6px 8px;color:#fff;text-align:right">Coop</th></tr></thead><tbody>';
+      h+='<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="background:var(--burd)"><th style="padding:6px 8px;color:#fff;text-align:left">Producto</th>';
+      canales.forEach(function(k){ h+='<th style="padding:6px 8px;color:#fff;text-align:right">'+superLabels[k]+'</th>'; });
+      h+='</tr></thead><tbody>';
       prods.forEach(function(p){
         if(p.categoria!==catAct){
           catAct=p.categoria;
-          h+='<tr><td colspan="6" style="background:#4a90b8;color:#fff;font-size:10px;font-weight:700;text-transform:uppercase;padding:5px 8px;letter-spacing:.06em">'+(catAct||'Sin categoria')+'</td></tr>';
+          h+='<tr><td colspan="'+(1+canales.length)+'" style="background:#4a90b8;color:#fff;font-size:10px;font-weight:700;text-transform:uppercase;padding:5px 8px;letter-spacing:.06em">'+(catAct||'Sin categoria')+'</td></tr>';
         }
         var pc=p.precios_canal||{};
         var fmt=function(v){return v?'$'+Math.round(v).toLocaleString('es-AR'):'-';};
         h+='<tr style="border-bottom:1px solid var(--bor)"><td style="padding:5px 8px;font-weight:500">'+p.nombre+'</td>';
-        h+='<td style="padding:5px 8px;text-align:right;font-size:11px">'+fmt(pc.cencosud)+'</td>';
-        h+='<td style="padding:5px 8px;text-align:right;font-size:11px">'+fmt(pc.carrefour)+'</td>';
-        h+='<td style="padding:5px 8px;text-align:right;font-size:11px">'+fmt(pc.coto)+'</td>';
-        h+='<td style="padding:5px 8px;text-align:right;font-size:11px">'+fmt(pc.chango)+'</td>';
-        h+='<td style="padding:5px 8px;text-align:right;font-size:11px">'+fmt(pc.coop)+'</td>';
+        canales.forEach(function(k){ h+='<td style="padding:5px 8px;text-align:right;font-size:12px;font-weight:600;color:var(--burd)">'+fmt(pc[k])+'</td>'; });
         h+='</tr>';
       });
       h+='</tbody></table>';
@@ -2009,6 +2020,7 @@ function openDed(d) {
   // Retail cats
   var retailCats = d && d.retail_cats ? JSON.parse(d.retail_cats) : [];
   document.querySelectorAll('.retail-cat-chk').forEach(function(c){ c.checked=retailCats.includes(c.value); });
+  eid('ded-super').value = d && d.supermercado ? d.supermercado : '';
   // Cargar días seleccionados
   var diasSel = d && d.dias_venta ? JSON.parse(d.dias_venta) : [];
   document.querySelectorAll('#ded-dias-wrap .dia-btn').forEach(function(b){
@@ -2029,7 +2041,9 @@ function toggleDiaBtn(btn) {
 
 function toggleRetailCats() {
   var v=eid('ded-tipo-oferta').value;
-  eid('div-retail-cats').style.display=v==='retail'?'':'none';
+  var isRetail=v==='retail';
+  eid('div-retail-cats').style.display=isRetail?'':'none';
+  eid('div-retail-super').style.display=isRetail?'':'none';
 }
 
 eid('btn-cerrar-mded').addEventListener('click', function(){ closeMB('mb-ded'); });
@@ -2046,7 +2060,8 @@ eid('btn-save-mded').addEventListener('click', function(){
     zona: elv('ded-zona'), comercial: elv('ded-com'), notas: elv('ded-notas'),
     dias_venta: JSON.stringify(dias),
     tipo_oferta: eid('ded-tipo-oferta').value||'mayorista_mcba',
-    retail_cats: JSON.stringify(Array.from(document.querySelectorAll('.retail-cat-chk:checked')).map(function(c){return c.value;}))
+    retail_cats: JSON.stringify(Array.from(document.querySelectorAll('.retail-cat-chk:checked')).map(function(c){return c.value;})),
+    supermercado: eid('ded-super').value||null
   };
   var id = elv('ded-id');
   var p = id ? api('/api/dedicados/'+id,'PATCH',datos) : api('/api/dedicados','POST',datos);
