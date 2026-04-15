@@ -1076,59 +1076,75 @@ function loadRetail() {
         h+='<div style="margin-bottom:28px"><div style="font-size:12px;font-weight:600;color:var(--burd);text-transform:uppercase;letter-spacing:.08em;margin-bottom:12px;padding:8px 14px;background:var(--goldl);border-radius:8px">'+(catAct||'Sin categoria')+'</div>';
       }
       h+='<div style="background:var(--sur);border:1px solid var(--bor);border-radius:10px;padding:18px;margin-bottom:12px">';
-      // Cabecera: nombre + botón góndola
-      h+='<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">';
+      h+='<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">';
       h+='<div style="font-size:15px;font-weight:600">'+rp.nombre+'</div>';
-      h+='<button class="btn bo bs" style="background:var(--goldl);border-color:var(--gold);color:var(--burd)" onclick="verGondola(\''+esc(rp.nombre)+'\','+rp.id+')">🛒 Góndola</button>';
+      h+='<button class="btn bo bs" style="background:var(--goldl);border-color:var(--gold);color:var(--burd)" onclick="verGondola(''+esc(rp.nombre)+'','+rp.id+')">🛒 Góndola</button>';
       h+='</div>';
       h+='<div id="cot-r-'+rp.id+'" style="display:none"></div>';
-      // Proveedores
+      var provSel=rp.proveedores&&(rp.proveedores.find(function(p){return p.seleccionado;})||rp.proveedores[0]);
+      // Fila de controles
+      h+='<div style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap;margin-bottom:14px">';
+      // Select proveedor
+      h+='<div style="flex:1;min-width:200px">';
+      h+='<div style="font-size:11px;font-weight:600;color:var(--mut);text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px">Proveedor</div>';
       if(!rp.proveedores||!rp.proveedores.length){
-        h+='<div style="font-size:12px;color:var(--mut);font-style:italic;margin-bottom:12px">Sin proveedores. Asociar en Oferta con campo Nombre Retail.</div>';
+        h+='<div style="font-size:12px;color:var(--mut);font-style:italic;padding:8px 0">Sin proveedores asociados</div>';
       } else {
-        h+='<div style="font-size:12px;color:var(--mut);margin-bottom:8px;font-weight:500">Proveedores disponibles</div>';
-        rp.proveedores.forEach(function(pv) {
-          var sel=pv.seleccionado;
-          h+='<div style="display:inline-flex;align-items:center;gap:10px;padding:8px 14px;border-radius:8px;margin-bottom:5px;border:1.5px solid '+(sel?'var(--ok)':'var(--bor2)')+';background:'+(sel?'#f0fdf4':'var(--bg)')+'">';
-          h+='<input type="radio" name="pv-'+rp.id+'" value="'+pv.id+'" '+(sel?'checked':'')+' onchange="selProv('+rp.id+','+pv.id+')" style="accent-color:var(--ok);flex-shrink:0">';
-          h+='<div><div style="font-size:13px;font-weight:500">'+pv.proveedor+'</div><div style="font-size:11px;color:var(--mut)">'+pv.nombre+' · '+pv.kilaje+'</div></div>';
-          h+='<div style="text-align:right;margin-left:16px"><div style="font-size:13px;font-weight:600;color:var(--burd)">$'+Math.round(pv.precio_kg).toLocaleString('es-AR')+'/kg</div><div style="font-size:10px;color:var(--mut)">C+F: $'+nr(pv.cbase)+'</div></div>';
-          h+='</div>';
+        h+='<select style="width:100%;font-size:13px;padding:7px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg)" onchange="selProv('+rp.id+',parseInt(this.value))">';
+        rp.proveedores.forEach(function(pv){
+          var label=pv.proveedor+' — '+pv.nombre+' ('+pv.kilaje+') $'+Math.round(pv.precio_kg).toLocaleString('es-AR')+'/kg';
+          h+='<option value="'+pv.id+'"'+(pv.seleccionado?' selected':'')+'>'+label+'</option>';
         });
+        h+='</select>';
       }
-      // kgBase para cálculos
-      var kgBase=rp.proveedores&&(rp.proveedores.find(function(p){return p.seleccionado;})||rp.proveedores[0]);
-      // Gastos — en fila horizontal compacta
-      h+='<div style="margin-top:12px;padding:12px;border:1px solid var(--bor);border-radius:8px">';
-      h+='<div style="font-size:12px;font-weight:500;color:var(--mut);margin-bottom:8px">Gastos a sumar ($/kg)</div>';
-      if(!gastos.length){ h+='<div style="font-size:12px;color:var(--mut);font-style:italic">Sin gastos cargados.</div>'; }
-      else {
-        var kgProd = kgBase ? kgBase.kilos : 1;
-        h+='<div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px">';
-        gastos.forEach(function(g) {
-          var kg = kgProd > 0 ? kgProd : 1; var pk = Math.round(g.monto / kg);
-          var sgsel=rp.gastos_seleccionados.indexOf(g.id)>=0;
-          h+='<label style="display:flex;align-items:center;gap:6px;padding:6px 10px;border-radius:6px;border:1px solid '+(sgsel?'var(--burg)':'var(--bor)')+';background:'+(sgsel?'var(--burl)':'var(--bg)')+';cursor:pointer;font-size:12px">';
-          h+='<input type="checkbox" value="'+g.id+'" '+(sgsel?'checked':'')+' onchange="toggleGasto('+rp.id+',this)" style="accent-color:var(--burg)">';
-          h+='<span>'+g.nombre+(g.proveedor?' ('+g.proveedor+')':'')+'</span>';
-          h+='<span style="font-weight:600;color:var(--burg);font-variant-numeric:tabular-nums">$'+pk.toLocaleString('es-AR')+'/kg</span>';
-          h+='</label>';
-        });
-        h+='</div>';
+      h+='</div>';
+      // Dropdown gastos
+      h+='<div style="flex:1;min-width:200px;position:relative">';
+      h+='<div style="font-size:11px;font-weight:600;color:var(--mut);text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px">Gastos</div>';
+      var nGastosSel=rp.gastos_seleccionados.length;
+      h+='<div style="position:relative">';
+      h+='<button type="button" onclick="toggleGastosDD('+rp.id+')" style="width:100%;text-align:left;font-size:13px;padding:7px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg);cursor:pointer;display:flex;align-items:center;justify-content:space-between">';
+      h+='<span id="gasto-label-'+rp.id+'">'+( nGastosSel?nGastosSel+' gasto'+(nGastosSel>1?'s':'')+' seleccionado'+(nGastosSel>1?'s':''):'Sin gastos')+'</span>';
+      h+='<span style="color:var(--mut)">▾</span></button>';
+      h+='<div id="gastos-dd-'+rp.id+'" style="display:none;position:absolute;z-index:100;top:calc(100% + 4px);left:0;right:0;background:var(--sur);border:1px solid var(--bor);border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,.12);padding:8px;max-height:260px;overflow-y:auto">';
+      if(!gastos.length){
+        h+='<div style="font-size:12px;color:var(--mut);padding:6px">Sin gastos cargados</div>';
+      } else {
+        var kgProd=provSel?provSel.kilos:1;
+        var gIngreso=gastos.filter(function(g){return g.tipo==='ingreso';});
+        var gSalida=gastos.filter(function(g){return g.tipo==='salida';});
+        var renderGrp=function(lista,titulo){
+          if(!lista.length) return;
+          h+='<div style="font-size:10px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.06em;padding:4px 6px 2px">'+titulo+'</div>';
+          lista.forEach(function(g){
+            var kg=kgProd>0?kgProd:1; var pk=Math.round(g.monto/kg);
+            var sgsel=rp.gastos_seleccionados.indexOf(g.id)>=0;
+            h+='<label style="display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:6px;cursor:pointer;font-size:12px;'+(sgsel?'background:var(--burl)':'')+'">';
+            h+='<input type="checkbox" value="'+g.id+'" '+(sgsel?'checked':'')+' onchange="toggleGasto('+rp.id+',this)" style="accent-color:var(--burg);width:14px;height:14px">';
+            h+='<span style="flex:1">'+g.nombre+(g.proveedor?' <span style="color:var(--mut)">('+g.proveedor+')</span>':'')+'</span>';
+            h+='<span style="font-weight:600;color:var(--burg);white-space:nowrap">$'+pk.toLocaleString('es-AR')+'/kg</span>';
+            h+='</label>';
+          });
+        };
+        renderGrp(gIngreso,'📥 Ingreso');
+        renderGrp(gSalida,'📤 Salida');
       }
-      h+='<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 12px;background:var(--burl);border-radius:7px">';
-      h+='<div style="font-size:12px;color:var(--mut)">Base: <strong>$'+Math.round(rp.costo_kg_base).toLocaleString('es-AR')+'/kg</strong> · Gastos: <strong id="gastos-sum-'+rp.id+'">$'+Math.round(rp.gastos_sum).toLocaleString('es-AR')+'</strong></div>';
-      h+='<div style="font-size:15px;font-weight:700;color:var(--burd)">Total: <span id="costo-total-'+rp.id+'">$'+Math.round(rp.costo_kg_total).toLocaleString('es-AR')+'/kg</span></div>';
+      h+='</div></div></div>';
+      // Resumen costo
+      h+='<div style="min-width:180px;padding:8px 14px;background:var(--burl);border-radius:8px;text-align:right">';
+      h+='<div style="font-size:11px;color:var(--mut)">Base: <strong>$'+Math.round(rp.costo_kg_base).toLocaleString('es-AR')+'/kg</strong></div>';
+      h+='<div style="font-size:11px;color:var(--mut)">Gastos: <strong id="gastos-sum-'+rp.id+'">$'+Math.round(rp.gastos_sum).toLocaleString('es-AR')+'</strong></div>';
+      h+='<div style="font-size:16px;font-weight:700;color:var(--burd)">Total: <span id="costo-total-'+rp.id+'">$'+Math.round(rp.costo_kg_total).toLocaleString('es-AR')+'</span>/kg</div>';
       h+='</div>';
-      h+='</div>';
+      h+='</div>'; // fin fila controles
       // Observaciones
-      h+='<div style="margin-top:10px;display:flex;gap:8px;align-items:flex-start">';
+      h+='<div style="display:flex;gap:8px;align-items:flex-start;margin-bottom:12px">';
       h+='<textarea id="obs-'+rp.id+'" rows="2" style="flex:1;font-size:13px;resize:vertical" placeholder="Observaciones internas...">'+(rp.observaciones||'')+'</textarea>';
       h+='<button class="btn bo bs" style="white-space:nowrap;margin-top:2px" onclick="guardarObs('+rp.id+')">Guardar obs.</button>';
       h+='</div>';
       // Grilla canales
-      var costoTotal=rp.costo_kg_total; var kgTot=kgBase?kgBase.kilos:0;
-      h+='<div style="margin-top:12px;overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px;min-width:500px"><thead><tr style="background:var(--burd)">';
+      var costoTotal=rp.costo_kg_total; var kgTot=provSel?provSel.kilos:0;
+      h+='<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px;min-width:500px"><thead><tr style="background:var(--burd)">';
       h+='<th style="padding:7px 8px;color:#fff;text-align:left">Canal</th>';
       h+='<th style="padding:7px 8px;color:#fff;text-align:center">Precio/kg</th>';
       h+='<th style="padding:7px 8px;color:#fff;text-align:center">Perdida kg</th>';
@@ -1150,14 +1166,14 @@ function loadRetail() {
         h+='<td style="padding:5px 6px;text-align:center"><div style="display:flex;align-items:center;justify-content:center;gap:3px"><span style="color:var(--mut);font-size:11px">$</span>';
         h+='<input class="pinp" type="number" data-rpid="'+rp.id+'" data-canal="'+canal.k+'" data-coef="'+canal.c+'" data-costo="'+Math.round(costoTotal)+'" data-kgtot="'+kgTot+'" value="'+precio+'" style="width:78px" oninput="calcRet(this)"></div></td>';
         h+='<td style="padding:5px 6px;text-align:center"><div style="display:flex;align-items:center;justify-content:center;gap:3px"><input type="number" class="pinp" style="width:55px;color:var(--warn)" value="'+perdida+'" min="0" step="0.5" data-rpid="'+rp.id+'" data-canal="'+canal.k+'" data-field="perdida" data-coef="'+canal.c+'" data-costo="'+Math.round(costoTotal)+'" data-kgtot="'+kgTot+'" oninput="calcRet(this)"><span style="font-size:11px;color:var(--mut)">kg</span></div></td>';
-        h+='<td style="padding:6px 8px;text-align:center;font-size:11px;color:var(--burd);font-variant-numeric:tabular-nums" id="cr-'+rp.id+'-'+canal.k+'">$'+Math.round(costoReal).toLocaleString('es-AR')+'/kg</td>';
+        h+='<td style="padding:6px 8px;text-align:center;font-size:11px;color:var(--burd);font-variant-numeric:tabular-nums" id="cr-'+rp.id+'-'+canal.k+'">'+( costoReal?'$'+Math.round(costoReal).toLocaleString('es-AR')+'/kg':'-')+'</td>';
         var dif=precio>0?neto-costoReal:null;
         var difBulto=dif!==null&&kgTot>0?dif*kgTot:null;
         var dc=dif===null?'var(--mut)':dif>=0?'var(--ok)':'var(--err)';
-        h+='<td style="padding:6px 8px;text-align:center;font-size:11px;font-variant-numeric:tabular-nums" id="ne-'+rp.id+'-'+canal.k+'">'+(precio>0?'$'+Math.round(neto).toLocaleString('es-AR'):'-')+'</td>';
-        h+='<td style="padding:6px 8px;text-align:center;font-size:11px;font-weight:600;color:'+dc+';font-variant-numeric:tabular-nums" id="dk-'+rp.id+'-'+canal.k+'">'+(dif!==null?(dif>=0?'+':'')+Math.round(dif).toLocaleString('es-AR'):'-')+'</td>';
-        h+='<td style="padding:6px 8px;text-align:center;font-size:11px;font-weight:600;color:'+dc+';font-variant-numeric:tabular-nums" id="db-'+rp.id+'-'+canal.k+'">'+(difBulto!==null?(difBulto>=0?'+':'')+Math.round(difBulto).toLocaleString('es-AR'):'-')+'</td>';
-        h+='<td style="padding:6px 8px;text-align:center;font-weight:600;color:'+mc+'" id="mg-'+rp.id+'-'+canal.k+'">'+(mgn!==null?(mgn>=0?'+':'')+mgn.toFixed(1)+'%':'-')+'</td>';
+        h+='<td style="padding:6px 8px;text-align:center;font-size:11px;font-variant-numeric:tabular-nums" id="ne-'+rp.id+'-'+canal.k+'">'+( precio>0?'$'+Math.round(neto).toLocaleString('es-AR'):'-')+'</td>';
+        h+='<td style="padding:6px 8px;text-align:center;font-size:11px;font-weight:600;color:'+dc+';font-variant-numeric:tabular-nums" id="dk-'+rp.id+'-'+canal.k+'">'+( dif!==null?(dif>=0?'+':'')+Math.round(dif).toLocaleString('es-AR'):'-')+'</td>';
+        h+='<td style="padding:6px 8px;text-align:center;font-size:11px;font-weight:600;color:'+dc+';font-variant-numeric:tabular-nums" id="db-'+rp.id+'-'+canal.k+'">'+( difBulto!==null?(difBulto>=0?'+':'')+Math.round(difBulto).toLocaleString('es-AR'):'-')+'</td>';
+        h+='<td style="padding:6px 8px;text-align:center;font-weight:600;color:'+mc+'" id="mg-'+rp.id+'-'+canal.k+'">'+( mgn!==null?(mgn>=0?'+':'')+mgn.toFixed(1)+'%':'-')+'</td>';
         h+='</tr>';
       });
       h+='</tbody></table></div>';
@@ -1166,9 +1182,19 @@ function loadRetail() {
     });
     h+='</div>';
     cont.innerHTML=h;
+    document.addEventListener('click',function(e){
+      if(!e.target.closest('[id^="gastos-dd-"]')&&!e.target.closest('button[onclick^="toggleGastosDD"]'))
+        document.querySelectorAll('[id^="gastos-dd-"]').forEach(function(d){d.style.display='none';});
+    });
   });
 }
-
+function toggleGastosDD(rpid) {
+  var dd=eid('gastos-dd-'+rpid);
+  if(!dd) return;
+  var isOpen=dd.style.display!=='none';
+  document.querySelectorAll('[id^="gastos-dd-"]').forEach(function(d){d.style.display='none';});
+  if(!isOpen) dd.style.display='block';
+}
 function calcRet(inp) {
   var rpid=inp.getAttribute('data-rpid'); var canal=inp.getAttribute('data-canal');
   var coef=parseFloat(inp.getAttribute('data-coef'))||1; var costo=parseFloat(inp.getAttribute('data-costo'))||0; var kgTot=parseFloat(inp.getAttribute('data-kgtot'))||0;
