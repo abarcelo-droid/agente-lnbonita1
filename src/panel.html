@@ -1807,43 +1807,34 @@ function abrirFichaCRM(telefono) {
     if(!data||!data.crm){ toast('Sin datos','er'); return; }
     var crm=data.crm; var prods=data.productos||[];
     var dias=JSON.parse(crm.dias_contacto||'[]');
-    var col=CRM_COLS.find(function(c){return c.key===crm.situacion;})||CRM_COLS[0];
     var h='<div style="padding:4px 0 16px">';
-    // Info cliente
-    h+='<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px">';
-    h+='<div style="flex:1;min-width:180px;background:var(--bg);border-radius:8px;padding:12px">';
-    h+='<div style="font-size:11px;font-weight:700;color:var(--mut);text-transform:uppercase;margin-bottom:8px">Configuración</div>';
     // Situacion
-    h+='<div style="margin-bottom:8px"><div style="font-size:11px;color:var(--mut);margin-bottom:3px">Situación</div>';
+    h+='<div style="margin-bottom:14px">';
+    h+='<div style="font-size:11px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">Situaci\u00f3n</div>';
     h+='<div style="display:flex;gap:6px;flex-wrap:wrap">';
     CRM_COLS.forEach(function(c){
       var act=c.key===crm.situacion;
-      h+='<button onclick="cambiarSituacionFicha('+crm.id+',\''+c.key+'\',\''+crm.situacion+'\')" style="font-size:11px;padding:3px 10px;border-radius:12px;border:1.5px solid '+c.color+';background:'+(act?c.color:'transparent')+';color:'+(act?'#fff':c.color)+';cursor:pointer;font-weight:600">'+c.label+'</button>';
+      h+='<button onclick="cambiarSituacionFicha('+crm.id+',\''+c.key+'\',\''+crm.situacion+'\')" style="font-size:12px;padding:5px 14px;border-radius:12px;border:1.5px solid '+c.color+';background:'+(act?c.color:'transparent')+';color:'+(act?'#fff':c.color)+';cursor:pointer;font-weight:600">'+c.label+'</button>';
     });
     h+='</div></div>';
-    // Días contacto
-    var todosLosDias=['lunes','martes','miercoles','jueves','viernes','sabado','domingo'];
-    h+='<div style="margin-bottom:8px"><div style="font-size:11px;color:var(--mut);margin-bottom:3px">Días de contacto</div>';
-    h+='<div style="display:flex;gap:4px;flex-wrap:wrap">';
-    todosLosDias.forEach(function(d){
-      var sel=dias.includes(d);
-      h+='<button onclick="toggleDiaCRM(this,\''+d+'\')" data-dia="'+d+'" style="font-size:10px;padding:3px 8px;border-radius:10px;border:1px solid var(--bor);background:'+(sel?'var(--burg)':'var(--bg)')+';color:'+(sel?'#fff':'var(--txt)')+';cursor:pointer">'+d.charAt(0).toUpperCase()+d.slice(1,3)+'</button>';
-    });
-    h+='</div></div>';
-    // Tipo oferta
-    h+='<div style="margin-bottom:8px"><div style="font-size:11px;color:var(--mut);margin-bottom:3px">Oferta a mostrar</div>';
-    h+='<select id="crm-tipo-oferta" style="font-size:12px;width:100%;padding:5px 8px;border-radius:6px;border:1px solid var(--bor)">';
-    ['mayorista_a','mayorista_mcba','minorista_mcba','minorista_entrega','food_service'].forEach(function(t){
-      h+='<option value="'+t+'"'+(crm.tipo_oferta===t?' selected':'')+'>'+lTipo(t)+'</option>';
-    });
-    h+='</select></div>';
-    // Notas
-    h+='<div><div style="font-size:11px;color:var(--mut);margin-bottom:3px">Notas</div>';
-    h+='<textarea id="crm-notas" rows="2" style="width:100%;font-size:12px;border-radius:6px;border:1px solid var(--bor);padding:6px 8px;box-sizing:border-box">'+( crm.notas||'')+'</textarea></div>';
-    h+='<button class="btn bb" style="margin-top:8px;width:100%;justify-content:center;font-size:12px" onclick="guardarConfigCRM(\''+telefono+'\','+crm.id+')">Guardar config</button>';
-    h+='</div></div>';
+    // Dias (solo lectura)
+    if(dias.length){
+      h+='<div style="margin-bottom:14px"><div style="font-size:11px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">D\u00edas de contacto</div>';
+      h+='<div style="display:flex;gap:4px;flex-wrap:wrap">';
+      dias.forEach(function(d){
+        h+='<span style="font-size:11px;padding:3px 10px;border-radius:10px;background:var(--burg);color:#fff;font-weight:500">'+d.charAt(0).toUpperCase()+d.slice(1)+'</span>';
+      });
+      h+='</div></div>';
+    }
+    // Notas/ultimo registro
+    if(crm.notas){
+      h+='<div style="margin-bottom:14px;padding:8px 12px;background:var(--bg);border-radius:8px;border-left:3px solid var(--bor)">';
+      h+='<div style="font-size:10px;font-weight:700;color:var(--mut);text-transform:uppercase;margin-bottom:4px">\u00daltimo registro</div>';
+      h+='<div style="font-size:12px;color:var(--txt);white-space:pre-wrap">'+crm.notas+'</div>';
+      h+='</div>';
+    }
     // Productos
-    h+='<div style="font-size:12px;font-weight:700;color:var(--burd);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">Productos disponibles — '+lTipo(crm.tipo_oferta)+'</div>';
+    h+='<div style="font-size:12px;font-weight:700;color:var(--burd);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">Productos disponibles \u2014 '+lTipo(crm.tipo_oferta)+'</div>';
     if(!prods.length){
       h+='<div style="color:var(--mut);font-size:12px;font-style:italic">Sin productos disponibles para este tipo de oferta.</div>';
     } else {
@@ -1864,7 +1855,7 @@ function abrirFichaCRM(telefono) {
       h+='</tbody></table>';
     }
     h+='</div>';
-    eid('mb-crm-tit').textContent=(data.crm.nombre||telefono);
+    eid('mb-crm-tit').textContent=(crm.nombre||data.crm.nombre||telefono);
     eid('mb-crm-body').innerHTML=h;
     eid('mb-crm-body')._crmId=crm.id;
     eid('mb-crm-body')._tel=telefono;
