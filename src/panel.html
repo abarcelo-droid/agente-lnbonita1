@@ -1305,13 +1305,12 @@ function loadRetail() {
         h+='</select>';
       }
       h+='</div>';
-      // Gastos dropdown
-      var nGSel=rp.gastos_seleccionados.length;
       h+='<div style="margin-bottom:10px;position:relative">';
       h+='<div style="font-size:10px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px">Gastos</div>';
       h+='<button type="button" onclick="toggleGastosDD('+rp.id+')" style="width:100%;text-align:left;font-size:12px;padding:6px 8px;border-radius:6px;border:1px solid var(--bor);background:var(--bg);cursor:pointer;display:flex;align-items:center;justify-content:space-between">';
-      h+='<span id="gasto-label-'+rp.id+'">'+(nGSel?nGSel+' gasto'+(nGSel>1?'s':'')+(nGSel>1?' seleccionados':' seleccionado'):'Sin gastos')+'</span>';
-      h+='<span style="color:var(--mut)">▾</span></button>';
+      var nGSel=rp.gastos_seleccionados.length;
+      h+='<span id="gasto-label-'+rp.id+'" style="font-size:12px">'+(nGSel?nGSel+' gasto'+(nGSel>1?'s':'') +' seleccionado'+(nGSel>1?'s':''):'Sin gastos')+'</span>';
+      h+='<span style="color:var(--mut);flex-shrink:0">▾</span></button>';
       h+='<div id="gastos-dd-'+rp.id+'" style="display:none;position:absolute;z-index:100;top:calc(100% + 4px);left:0;right:0;background:var(--sur);border:1px solid var(--bor);border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,.12);padding:8px;max-height:240px;overflow-y:auto">';
       if(!gastos.length){
         h+='<div style="font-size:12px;color:var(--mut);padding:6px">Sin gastos cargados</div>';
@@ -1338,7 +1337,16 @@ function loadRetail() {
       h+='<div style="padding:8px 12px;background:var(--burl);border-radius:8px;margin-bottom:10px">';
       h+='<div style="font-size:11px;color:var(--mut)">Base: <strong>$'+Math.round(rp.costo_kg_base).toLocaleString('es-AR')+'/kg</strong></div>';
       h+='<div style="font-size:11px;color:var(--mut)">Gastos: <strong id="gastos-sum-'+rp.id+'">$'+Math.round(rp.gastos_sum).toLocaleString('es-AR')+'</strong></div>';
-      h+='<div style="font-size:15px;font-weight:700;color:var(--burd)">Total: <span id="costo-total-'+rp.id+'">$'+Math.round(rp.costo_kg_total).toLocaleString('es-AR')+'</span>/kg</div>';
+      // Desagregado de gastos seleccionados
+      var kgDesg=provSel?provSel.kilos:1;
+      var gastosSelDesg=gastos.filter(function(g){return rp.gastos_seleccionados.indexOf(g.id)>=0;});
+      if(gastosSelDesg.length){
+        gastosSelDesg.forEach(function(g){
+          var pk=Math.round(g.monto/(kgDesg>0?kgDesg:1));
+          h+='<div style="font-size:10px;color:var(--mut);padding-left:8px">'+(g.presentacion==='pallet'?'🏗':'📦')+' '+g.nombre+': <strong>$'+pk.toLocaleString('es-AR')+'/kg</strong></div>';
+        });
+      }
+      h+='<div style="font-size:15px;font-weight:700;color:var(--burd);margin-top:4px">Total: <span id="costo-total-'+rp.id+'">$'+Math.round(rp.costo_kg_total).toLocaleString('es-AR')+'</span>/kg</div>';
       h+='</div>';
       h+='</div>'; // fin col izquierda
 
@@ -1462,6 +1470,20 @@ function toggleGasto(rpid,cb) {
       var eg=document.getElementById('gastos-sum-'+rpid);
       if(el) el.textContent='$'+Math.round(rp.costo_kg_total).toLocaleString('es-AR')+'/kg';
       if(eg) eg.textContent='$'+Math.round(rp.gastos_sum).toLocaleString('es-AR');
+      // Actualizar label del botón de gastos
+      var labelEl=document.getElementById('gasto-label-'+rpid);
+      if(labelEl) {
+        var selChecks=document.querySelectorAll('#gastos-dd-'+rpid+' input[type=checkbox]:checked');
+        if(!selChecks.length){ labelEl.textContent='Sin gastos'; }
+        else {
+          var partes=[];
+          selChecks.forEach(function(c){
+            var lbl=c.closest('label');
+            if(lbl){ var txt=lbl.textContent.trim().replace(/\s+/g,' '); partes.push(txt); }
+          });
+          labelEl.textContent=partes.join(' · ');
+        }
+      }
       // Actualizar data-costo en los inputs de canales para que calcRet use el nuevo costo
       document.querySelectorAll('input[data-rpid="'+rpid+'"]').forEach(function(inp){
         inp.setAttribute('data-costo', Math.round(rp.costo_kg_total));
