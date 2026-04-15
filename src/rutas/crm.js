@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { listarCRM, upsertCRM, actualizarSituacionCRM, obtenerCRM, listarProductos } from "../servicios/db.js";
+import { listarCRM, upsertCRM, actualizarSituacionCRM, obtenerCRM } from "../servicios/db.js";
 import db from "../servicios/db.js";
 
 const router = Router();
