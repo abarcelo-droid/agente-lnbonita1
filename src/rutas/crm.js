@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { listarCRM, upsertCRM, actualizarSituacionCRM, obtenerCRM } from "../servicios/db.js";
+import { listarCRM, upsertCRM, actualizarSituacionCRM, obtenerCRM, actualizarModoCliente } from "../servicios/db.js";
 import db from "../servicios/db.js";
 
 const router = Router();
@@ -99,6 +99,14 @@ router.get("/crm/cliente/:telefono", (req, res) => {
     retail_cats: retailCats,
     supermercado
   });
+});
+
+// Actualizar modo de cliente (crm / automatico / pausa)
+router.post("/clientes/modo", (req, res) => {
+  const { telefono, modo, comercial, dias_contacto } = req.body;
+  if (!telefono || !modo) return res.status(400).json({ error: "Faltan datos" });
+  actualizarModoCliente(telefono, modo, comercial||null, dias_contacto||[]);
+  res.json({ ok: true });
 });
 
 export default router;

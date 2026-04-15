@@ -148,6 +148,18 @@ export default db;
     db.exec("ALTER TABLE clientes ADD COLUMN metodo_pago TEXT DEFAULT 'cuenta_corriente'");
     console.log("[DB] Columna metodo_pago agregada");
   }
+  if (cols.indexOf('modo') < 0) {
+    db.exec("ALTER TABLE clientes ADD COLUMN modo TEXT DEFAULT 'pausa'");
+    console.log("[DB] Columna modo agregada");
+  }
+  if (cols.indexOf('comercial_asignado') < 0) {
+    db.exec("ALTER TABLE clientes ADD COLUMN comercial_asignado TEXT");
+    console.log("[DB] Columna comercial_asignado agregada");
+  }
+  if (cols.indexOf('dias_contacto') < 0) {
+    db.exec("ALTER TABLE clientes ADD COLUMN dias_contacto TEXT DEFAULT '[]'");
+    console.log("[DB] Columna dias_contacto agregada");
+  }
 })();
 
 // ── Facturas y cobranza ────────────────────────────────────────────────────
@@ -240,15 +252,39 @@ export function listarCRM(comercial) {
   const diaHoy = diasSemana[hoy.getDay()];
   const hoyStr = hoy.toISOString().slice(0,10);
 
-  // Auto-sync: insertar en crm_clientes los dedicados que no están aún
+  // Auto-sync: clientes WhatsApp con modo='crm'
+  try {
+    const clientesCRM = db.prepare("SELECT * FROM clientes WHERE modo='crm' AND activo=1 AND tipo != 'consumidor_final'").all();
+    clientesCRM.forEach(function(c) {
+      const existe = db.prepare("SELECT id FROM crm_clientes WHERE telefono = ?").get(c.telefono);
+      if (!existe) {
+        db.prepare("INSERT INTO crm_clientes (telefono, comercial, dias_contacto, tipo_oferta, notas) VALUES (?, ?, ?, ?, ?)")
+          .run(c.telefono, c.comercial_asignado || 'Sin asignar', c.dias_contacto || '[]', c.tipo, null);
+      } else {
+        // Actualizar comercial/dias si cambiaron
+        db.prepare("UPDATE crm_clientes SET comercial=?, dias_contacto=?, tipo_oferta=? WHERE telefono=?")
+          .run(c.comercial_asignado || 'Sin asignar', c.dias_contacto || '[]', c.tipo, c.telefono);
+      }
+    });
+    // Remover del CRM clientes que ya no tienen modo='crm' (excepto dedicados)
+    const enCRM = db.prepare("SELECT telefono FROM crm_clientes WHERE telefono NOT LIKE 'ded-%'").all();
+    enCRM.forEach(function(r) {
+      const cli = db.prepare("SELECT modo FROM clientes WHERE telefono=?").get(r.telefono);
+      if (cli && cli.modo !== 'crm') {
+        db.prepare("DELETE FROM crm_clientes WHERE telefono=?").run(r.telefono);
+      }
+    });
+  } catch(e) { console.error('[CRM] Auto-sync clientes error:', e.message); }
+
+  // Auto-sync dedicados_clientes
   try {
     const dedicados = db.prepare("SELECT * FROM dedicados_clientes WHERE activo = 1").all();
     dedicados.forEach(function(d) {
       const key = d.telefono || ('ded-' + d.id);
       const existe = db.prepare("SELECT id FROM crm_clientes WHERE telefono = ?").get(key);
       if (!existe) {
-        db.prepare("INSERT INTO crm_clientes (telefono, comercial, dias_contacto, tipo_oferta, notas) VALUES (?, ?, ?, 'mayorista_mcba', ?)")
-          .run(key, d.comercial || 'Sin asignar', d.dias_venta || '[]', d.notas || null);
+        db.prepare("INSERT INTO crm_clientes (telefono, comercial, dias_contacto, tipo_oferta, notas) VALUES (?, ?, ?, ?, ?)")
+          .run(key, d.comercial || 'Sin asignar', d.dias_venta || '[]', d.tipo_oferta || 'mayorista_mcba', d.notas || null);
       } else if (d.dias_venta && d.dias_venta !== '[]') {
         const crmRow = db.prepare("SELECT dias_contacto FROM crm_clientes WHERE telefono = ?").get(key);
         if (crmRow && (!crmRow.dias_contacto || crmRow.dias_contacto === '[]')) {
@@ -256,9 +292,7 @@ export function listarCRM(comercial) {
         }
       }
     });
-  } catch(e) { console.error('[CRM] Auto-sync error:', e.message); }
-
-  // Auto-reset
+  } catch(e) { console.error('[CRM] Auto-sync dedicados error:', e.message); }
   const todos = db.prepare("SELECT * FROM crm_clientes").all();
   todos.forEach(function(c) {
     if (c.situacion === 'venta' || c.situacion === 'fallido') {
@@ -274,15 +308,16 @@ export function listarCRM(comercial) {
     ? db.prepare("SELECT * FROM crm_clientes WHERE comercial = ? ORDER BY situacion").all(comercial)
     : db.prepare("SELECT * FROM crm_clientes ORDER BY comercial, situacion").all();
 
-  // Enriquecer con nombre/empresa desde dedicados_clientes
+  // Enriquecer con nombre/empresa desde dedicados_clientes o clientes
   return crmRows.map(function(cr) {
     var ded = db.prepare("SELECT nombre, empresa FROM dedicados_clientes WHERE telefono = ? OR id = ?").get(
       cr.telefono,
       cr.telefono && cr.telefono.startsWith('ded-') ? parseInt(cr.telefono.slice(4)) : -1
     );
+    var cli = !ded ? db.prepare("SELECT nombre, empresa, tipo FROM clientes WHERE telefono = ?").get(cr.telefono) : null;
     return Object.assign({}, cr, {
-      nombre: (ded && ded.nombre) || cr.telefono || '-',
-      empresa: (ded && ded.empresa) || '',
+      nombre: (ded && ded.nombre) || (cli && cli.nombre) || cr.telefono || '-',
+      empresa: (ded && ded.empresa) || (cli && cli.empresa) || '',
       tel: cr.telefono
     });
   });
@@ -307,6 +342,11 @@ export function actualizarSituacionCRM(id, situacion, nota) {
   } else {
     db.prepare("UPDATE crm_clientes SET situacion=?, ultima_gestion=? WHERE id=?").run(situacion, hoy, id);
   }
+}
+
+export function actualizarModoCliente(telefono, modo, comercial, dias_contacto) {
+  db.prepare("UPDATE clientes SET modo=?, comercial_asignado=?, dias_contacto=? WHERE telefono=?")
+    .run(modo||'pausa', comercial||null, JSON.stringify(dias_contacto||[]), telefono);
 }
 
 export function obtenerCRM(telefono) {
