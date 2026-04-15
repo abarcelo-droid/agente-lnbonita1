@@ -238,22 +238,61 @@ export function listarCRM(comercial) {
   const hoy = new Date();
   const diasSemana = ['domingo','lunes','martes','miercoles','jueves','viernes','sabado'];
   const diaHoy = diasSemana[hoy.getDay()];
+  const hoyStr = hoy.toISOString().slice(0,10);
+
+  // Auto-sync: insertar en crm_clientes los dedicados que no están aún
+  try {
+    const dedicados = db.prepare("SELECT * FROM dedicados_clientes WHERE activo = 1").all();
+    dedicados.forEach(function(d) {
+      if (!d.telefono && !d.nombre) return;
+      const key = d.telefono || ('ded-' + d.id);
+      const existe = db.prepare("SELECT id FROM crm_clientes WHERE telefono = ?").get(key);
+      if (!existe) {
+        db.prepare(`INSERT INTO crm_clientes (telefono, comercial, dias_contacto, tipo_oferta, notas)
+          VALUES (?, ?, ?, 'mayorista_mcba', ?)`)
+          .run(key, d.comercial || 'Sin asignar', d.dias_venta || '[]', d.notas || null);
+        console.log('[CRM] Auto-sync dedicado:', d.nombre);
+      } else if (d.dias_venta && d.dias_venta !== '[]') {
+        // Actualizar días si el dedicado los tiene y el CRM no
+        const crmRow = db.prepare("SELECT dias_contacto FROM crm_clientes WHERE telefono = ?").get(key);
+        if (crmRow && (!crmRow.dias_contacto || crmRow.dias_contacto === '[]')) {
+          db.prepare("UPDATE crm_clientes SET dias_contacto=?, comercial=COALESCE(NULLIF(comercial,'Sin asignar'),?) WHERE telefono=?")
+            .run(d.dias_venta, d.comercial || 'Sin asignar', key);
+        }
+      }
+    });
+  } catch(e) { console.error('[CRM] Auto-sync error:', e.message); }
 
   // Auto-reset: clientes que hoy les toca y están en venta/fallido → pendiente
   const todos = db.prepare("SELECT * FROM crm_clientes WHERE activo = 1 OR activo IS NULL").all();
   todos.forEach(function(c) {
     if (c.situacion === 'venta' || c.situacion === 'fallido') {
       const dias = JSON.parse(c.dias_contacto || '[]');
-      if (dias.includes(diaHoy) && c.ultima_gestion !== hoy.toISOString().slice(0,10)) {
+      if (dias.includes(diaHoy) && c.ultima_gestion !== hoyStr) {
         db.prepare("UPDATE crm_clientes SET situacion='pendiente', ultima_gestion=? WHERE id=?")
-          .run(hoy.toISOString().slice(0,10), c.id);
+          .run(hoyStr, c.id);
       }
     }
   });
 
+  // JOIN con dedicados_clientes para obtener nombre/empresa (no solo clientes WhatsApp)
   const query = comercial
-    ? "SELECT cr.*, c.nombre, c.empresa, c.telefono as tel FROM crm_clientes cr LEFT JOIN clientes c ON c.telefono = cr.telefono WHERE cr.comercial = ? ORDER BY cr.situacion, c.nombre"
-    : "SELECT cr.*, c.nombre, c.empresa, c.telefono as tel FROM crm_clientes cr LEFT JOIN clientes c ON c.telefono = cr.telefono ORDER BY cr.comercial, cr.situacion, c.nombre";
+    ? `SELECT cr.*, 
+        COALESCE(dc.nombre, c.nombre) as nombre,
+        COALESCE(dc.empresa, c.empresa) as empresa,
+        cr.telefono as tel
+       FROM crm_clientes cr
+       LEFT JOIN clientes c ON c.telefono = cr.telefono
+       LEFT JOIN dedicados_clientes dc ON (dc.telefono = cr.telefono OR ('ded-'||dc.id) = cr.telefono)
+       WHERE cr.comercial = ? ORDER BY cr.situacion, nombre`
+    : `SELECT cr.*,
+        COALESCE(dc.nombre, c.nombre) as nombre,
+        COALESCE(dc.empresa, c.empresa) as empresa,
+        cr.telefono as tel
+       FROM crm_clientes cr
+       LEFT JOIN clientes c ON c.telefono = cr.telefono
+       LEFT JOIN dedicados_clientes dc ON (dc.telefono = cr.telefono OR ('ded-'||dc.id) = cr.telefono)
+       ORDER BY cr.comercial, cr.situacion, nombre`;
   return comercial ? db.prepare(query).all(comercial) : db.prepare(query).all();
 }
 
