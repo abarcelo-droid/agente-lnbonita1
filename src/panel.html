@@ -993,8 +993,8 @@ function loadPricing(of) {
       var bxp=mIng&&mIng[2]?parseInt(mIng[2]):1;
       var kilos=parseFloat(p.kilaje)||1;
       var costoIng=0;
-      if(tipoIng==='Paletizado'&&gastoIngresoPallet) costoIng=(gastoIngresoPallet.monto||0)/bxp/kilos;
-      if(tipoIng==='Granel'&&gastoIngresoGranel) costoIng=(gastoIngresoGranel.monto||0)/kilos;
+      if(tipoIng==='Paletizado'&&gastoIngresoPallet) costoIng=(gastoIngresoPallet.monto||0)/bxp;
+      if(tipoIng==='Granel'&&gastoIngresoGranel) costoIng=(gastoIngresoGranel.monto||0);
       var cb=cf+costoIng;
       h+='<tr><td style="padding:6px 10px"><div style="font-weight:500;font-size:13px">'+p.nombre+'</div>';
       if(p.descripcion) h+='<div style="font-size:11px;color:var(--mut)">'+p.descripcion+'</div>';
