@@ -13,6 +13,27 @@ async function descargarXLS(url) {
   return Buffer.from(buffer);
 }
 
+// Obtiene los links reales de XLS desde la página del MCBA
+async function obtenerLinksXLS() {
+  try {
+    const resp = await fetch('https://mercadocentral.gob.ar/informaci%C3%B3n/precios-mayoristas', {
+      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+      signal: AbortSignal.timeout(10000),
+    });
+    if (!resp.ok) return [];
+    const html = await resp.text();
+    // Buscar todos los hrefs que apunten a archivos XLS
+    const matches = [...html.matchAll(/href="([^"]*\.XLS[^"]*)"/gi)];
+    return matches.map(m => {
+      const href = m[1];
+      return href.startsWith('http') ? href : 'https://mercadocentral.gob.ar' + href;
+    });
+  } catch(e) {
+    console.error('[MCBA] Error scrapeando links:', e.message);
+    return [];
+  }
+}
+
 function urlXLS(tipo, fecha) {
   const d = String(fecha.getDate()).padStart(2,'0');
   const m = String(fecha.getMonth()+1).padStart(2,'0');
@@ -21,9 +42,10 @@ function urlXLS(tipo, fecha) {
   return [
     `https://mercadocentral.gob.ar/sites/default/files/precios_mayoristas/${base}.XLS`,
     `https://mercadocentral.gob.ar/sites/default/files/precios_mayoristas/${base}_0.XLS`,
-    `https://mercadocentral.gob.ar/sites/default/files/precios_mayoristas/${base}[1].XLS`,
+    `https://mercadocentral.gob.ar/sites/default/files/precios_mayoristas/${base}%5B1%5D.XLS`,
     `https://mercadocentral.gob.ar/sites/default/files/precios_mayoristas/${base}_1.XLS`,
   ];
+}
 }
 
 function buscarEnXLS(buffer, busqueda) {
@@ -76,27 +98,36 @@ router.get("/cotizacion/mcba", async (req, res) => {
   let resultados = [];
   let fuenteUrl = '';
 
+  // Primero intentar obtener links reales de la página
+  const linksReales = await obtenerLinksXLS();
+
   for (const tipo of tipos) {
+    // Armar lista de URLs: primero los links reales del tipo, luego los generados
+    const linksDelTipo = linksReales.filter(l => l.toUpperCase().includes('/' + tipo));
+    const urlsGeneradas = [];
     for (let d = 0; d <= 7; d++) {
       const fecha = new Date(hoy);
       fecha.setDate(fecha.getDate() - d);
-      const urls = urlXLS(tipo, fecha);
-      let encontrado = false;
-      for (const url of urls) {
-        try {
-          const buffer = await descargarXLS(url);
-          const encontrados = buscarEnXLS(buffer, producto);
-          if (encontrados.length) {
-            resultados = [...resultados, ...encontrados];
-            if (!fuenteUrl) fuenteUrl = url;
-          }
-          encontrado = true;
-          break; // URL válida encontrada, pasar al siguiente tipo
-        } catch(e) {
-          // esta URL no existe, probar la siguiente variante
+      urlsGeneradas.push(...urlXLS(tipo, fecha));
+    }
+    const todasUrls = [...linksDelTipo, ...urlsGeneradas];
+    // Eliminar duplicados
+    const urlsUnicas = [...new Set(todasUrls)];
+
+    let encontrado = false;
+    for (const url of urlsUnicas) {
+      try {
+        const buffer = await descargarXLS(url);
+        const encontrados = buscarEnXLS(buffer, producto);
+        if (encontrados.length) {
+          resultados = [...resultados, ...encontrados];
+          if (!fuenteUrl) fuenteUrl = url;
         }
+        encontrado = true;
+        break;
+      } catch(e) {
+        // continuar con la siguiente URL
       }
-      if (encontrado) break; // archivo del día encontrado, no probar días anteriores
     }
   }
 
