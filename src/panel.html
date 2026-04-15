@@ -1077,7 +1077,7 @@ function loadRetail() {
       }
       h+='<div style="background:var(--sur);border:1px solid var(--bor);border-radius:10px;padding:18px;margin-bottom:12px">';
       h+='<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">';
-      h+='<div style="font-size:15px;font-weight:600">'+rp.nombre+'</div>';
+      h+='<div style="font-size:15px;font-weight:600;text-transform:uppercase">'+rp.nombre+'</div>';
       h+='<button class="btn bo bs" style="background:var(--goldl);border-color:var(--gold);color:var(--burd)" onclick="verGondola(\''+esc(rp.nombre)+'\','+rp.id+')">🛒 Góndola</button>';
       h+='</div>';
       h+='<div id="cot-r-'+rp.id+'" style="display:none"></div>';
@@ -1109,7 +1109,6 @@ function loadRetail() {
         h+='<div style="font-size:12px;color:var(--mut);padding:6px">Sin gastos cargados</div>';
       } else {
         var kgProd=provSel?provSel.kilos:1;
-        var gIng=gastos.filter(function(g){return g.tipo==='ingreso';});
         var gSal=gastos.filter(function(g){return g.tipo==='salida';});
         function renderGrp(lista,tit){
           if(!lista.length) return;
@@ -1117,13 +1116,13 @@ function loadRetail() {
           lista.forEach(function(g){
             var kg=kgProd>0?kgProd:1; var pk=Math.round(g.monto/kg);
             var sel=rp.gastos_seleccionados.indexOf(g.id)>=0;
+            var presIcon=g.presentacion==='pallet'?'🏗':'📦';
             h+='<label style="display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:6px;cursor:pointer;font-size:12px;'+(sel?'background:var(--burl)':'')+'">';
             h+='<input type="checkbox" value="'+g.id+'" '+(sel?'checked':'')+' onchange="toggleGasto('+rp.id+',this)" style="accent-color:var(--burg);width:14px;height:14px">';
-            h+='<span style="flex:1">'+g.nombre+(g.proveedor?' ('+g.proveedor+')':'')+' <strong style="color:var(--burg)">$'+pk.toLocaleString('es-AR')+'/kg</strong></span>';
+            h+='<span style="flex:1">'+presIcon+' '+g.nombre+(g.proveedor?' ('+g.proveedor+')':'')+' <strong style="color:var(--burg)">$'+pk.toLocaleString('es-AR')+'/kg</strong></span>';
             h+='</label>';
           });
         }
-        renderGrp(gIng,'📥 Ingreso');
         renderGrp(gSal,'📤 Salida');
       }
       h+='</div></div>';
@@ -1135,8 +1134,8 @@ function loadRetail() {
       h+='</div>';
       h+='</div>';
       // Observaciones
-      h+='<div style="display:flex;gap:8px;align-items:flex-start;margin-bottom:12px">';
-      h+='<textarea id="obs-'+rp.id+'" rows="2" style="flex:1;font-size:13px;resize:vertical" placeholder="Observaciones internas...">'+(rp.observaciones||'')+'</textarea>';
+      h+='<div style="display:flex;gap:8px;align-items:center;margin-bottom:12px">';
+      h+='<textarea id="obs-'+rp.id+'" rows="1" style="flex:1;font-size:12px;resize:none;height:34px;padding:6px 10px;line-height:1.4" placeholder="Observaciones internas...">'+(rp.observaciones||'')+'</textarea>';
       h+='<button class="btn bo bs" style="white-space:nowrap;margin-top:2px" onclick="guardarObs('+rp.id+')">Guardar obs.</button>';
       h+='</div>';
       // Grilla canales
