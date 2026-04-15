@@ -46,7 +46,6 @@ function urlXLS(tipo, fecha) {
     `https://mercadocentral.gob.ar/sites/default/files/precios_mayoristas/${base}_1.XLS`,
   ];
 }
-}
 
 function buscarEnXLS(buffer, busqueda) {
   const wb = XLSX.read(buffer, { type: 'buffer' });
