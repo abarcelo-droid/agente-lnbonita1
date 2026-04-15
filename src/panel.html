@@ -293,7 +293,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       <button class="btn bo" id="btn-cancel-rp">Cancelar</button>
     </div>
   </div>
-  <div class="tw"><table><thead><tr><th>Categoria</th><th>Nombre</th><th></th></tr></thead><tbody id="t-rp"></tbody></table></div>
+  <div class="tw"><table><thead><tr><th>Categoria</th><th>Nombre</th><th style="text-align:center">BXP Salida</th><th></th></tr></thead><tbody id="t-rp"></tbody></table></div>
 </div>
 
 <!-- ARCHIVOS MAESTROS: MATRIX DE GASTOS -->
@@ -483,6 +483,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     <div class="fl"><label>Categoria</label>
       <select id="rp-cat"><option value="">Sin categoria</option><option value="Frutas Nacionales">Frutas Nacionales</option><option value="Frutas Importadas">Frutas Importadas</option><option value="Hortalizas Livianas">Hortalizas Livianas</option><option value="Hortalizas Pesadas">Hortalizas Pesadas</option><option value="Otros">Otros</option></select>
     </div>
+    <div class="fl" style="max-width:180px"><label>🏗 BXP Salida — Bultos por pallet</label><input type="number" id="rp-bxp" placeholder="ej: 50" min="1"></div>
   </div>
   <div style="font-weight:600;font-size:14px;margin-bottom:14px;padding-bottom:10px;border-bottom:1px solid var(--bor)">EAN por supermercado</div>
   <div class="fg">
@@ -1482,17 +1483,19 @@ function loadRP() {
       var cat = r.categoria||'Sin categoria';
       if(cat !== catActual){
         catActual = cat;
-        h+='<tr><td colspan="3" style="background:var(--goldl);font-size:11px;font-weight:700;color:var(--burd);text-transform:uppercase;letter-spacing:.06em;padding:8px 12px">'+esc(catActual)+'</td></tr>';
+        h+='<tr><td colspan="4" style="background:var(--goldl);font-size:11px;font-weight:700;color:var(--burd);text-transform:uppercase;letter-spacing:.06em;padding:8px 12px">'+esc(catActual)+'</td></tr>';
       }
       h+='<tr><td style="font-size:12px;color:var(--mut);padding-left:20px">'+(r.categoria||'-')+'</td>';
       h+='<td style="font-weight:500">'+esc(r.nombre)+'</td>';
-      h+='<td style="text-align:right;white-space:nowrap"><button class="btn bb bs" style="margin-right:6px" onclick="editRP('+r.id+',\''+esc(r.nombre)+'\',\''+esc(r.categoria||'')+'\')">Editar</button><button class="btn bd bs" onclick="delRP('+r.id+')">Eliminar</button></td></tr>';
+      h+='<td style="font-size:12px;color:var(--mut);text-align:center">'+(r.bxp_salida?'🏗 '+r.bxp_salida+' BXP':'-')+'</td>';
+      h+='<td style="text-align:right;white-space:nowrap"><button class="btn bb bs" style="margin-right:6px" onclick="editRP('+r.id+',\''+esc(r.nombre)+'\',\''+esc(r.categoria||'')+'\','+(r.bxp_salida||0)+')">Editar</button><button class="btn bd bs" onclick="delRP('+r.id+')">Eliminar</button></td></tr>';
     });
-    eid('t-rp').innerHTML=h||'<tr><td colspan="3" class="emp">Sin productos retail</td></tr>';
+    eid('t-rp').innerHTML=h||'<tr><td colspan="4" class="emp">Sin productos retail</td></tr>';
   });
 }
-function editRP(id, nom, cat) {
+function editRP(id, nom, cat, bxp) {
   eid('rp-id').value=id; eid('rp-nom').value=nom; eid('rp-cat').value=cat||'';
+  eid('rp-bxp').value=bxp||'';
   ['cencosud','carrefour','coto','chango','coop'].forEach(function(s){var el=eid('ean-'+s); if(el) el.value='';});
   api('/api/retail/ean/'+id).then(function(eans){
     if(eans.cencosud) eid('ean-cencosud').value=eans.cencosud;
@@ -1507,8 +1510,9 @@ eid('btn-cerrar-mrp').addEventListener('click',function(){closeMB('mb-rp');});
 eid('btn-cancel-mrp').addEventListener('click',function(){closeMB('mb-rp');});
 eid('btn-save-mrp').addEventListener('click',function(){
   var id=elv('rp-id'); var nom=elv('rp-nom'); var cat=elv('rp-cat');
+  var bxp=parseInt(eid('rp-bxp').value)||null;
   if(!nom){toast('Escribe el nombre','er');return;}
-  api('/api/retail/productos/'+id,'PATCH',{nombre:nom,categoria:cat}).then(function(){
+  api('/api/retail/productos/'+id,'PATCH',{nombre:nom,categoria:cat,bxp_salida:bxp}).then(function(){
     var ps=[]; var ss={cencosud:'cencosud',carrefour:'carrefour',coto:'coto',chango:'chango',coop:'coop'};
     Object.keys(ss).forEach(function(k){
       var el=eid('ean-'+k); var ean=el?el.value.trim():'';

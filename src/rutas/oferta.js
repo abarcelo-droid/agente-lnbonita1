@@ -81,9 +81,9 @@ router.delete("/retail/productos/:id", (req, res) => {
 
 // Editar producto retail
 router.patch("/retail/productos/:id", (req, res) => {
-  const { nombre, categoria } = req.body;
+  const { nombre, categoria, bxp_salida } = req.body;
   if (!nombre) return res.status(400).json({ error: "Falta nombre" });
-  actualizarRetailProducto(req.params.id, nombre.trim(), categoria||null);
+  actualizarRetailProducto(req.params.id, nombre.trim(), categoria||null, bxp_salida||null);
   res.json({ ok: true });
 });
 
@@ -100,13 +100,13 @@ router.post("/retail/ean", (req, res) => {
 // Archivos maestros: matriz de gastos
 router.get("/retail/gastos", (req, res) => res.json(listarGastos()));
 router.post("/retail/gastos", (req, res) => {
-  const { nombre, proveedor, monto, tipo, presentacion } = req.body;
+  const { nombre, proveedor, monto } = req.body;
   if (!nombre) return res.status(400).json({ error: "Falta nombre" });
-  crearGasto(nombre.trim(), proveedor||null, monto, 1, tipo||'salida', presentacion||'bulto');
+  crearGasto(nombre.trim(), proveedor||null, monto);
   res.status(201).json({ ok: true });
 });
 router.patch("/retail/gastos/:id", (req, res) => {
-  actualizarGasto(req.params.id, req.body.nombre, req.body.proveedor, req.body.monto, req.body.kg_bulto||1, req.body.tipo||'salida', req.body.presentacion||'bulto');
+  actualizarGasto(req.params.id, req.body.nombre, req.body.proveedor, req.body.monto);
   res.json({ ok: true });
 });
 router.delete("/retail/gastos/:id", (req, res) => {

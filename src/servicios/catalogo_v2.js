@@ -168,28 +168,14 @@ db.exec(`
   }
 })();
 
-// Migracion tipo en retail_gastos (ingreso / salida)
-(function() {
-  var cols = db.prepare("PRAGMA table_info(retail_gastos)").all().map(function(c){ return c.name; });
-  if (cols.indexOf('tipo') < 0) {
-    try {
-      db.exec("ALTER TABLE retail_gastos ADD COLUMN tipo TEXT DEFAULT 'salida'");
-      console.log("[DB] Columna tipo agregada en retail_gastos");
-    } catch(e) {}
-  }
-  if (cols.indexOf('presentacion') < 0) {
-    try {
-      db.exec("ALTER TABLE retail_gastos ADD COLUMN presentacion TEXT DEFAULT 'bulto'");
-      console.log("[DB] Columna presentacion agregada en retail_gastos");
-    } catch(e) {}
-  }
-})();
-
 // Migracion categoria en retail_productos
 (function() {
   var cols = db.prepare("PRAGMA table_info(retail_productos)").all().map(function(c){ return c.name; });
   if (cols.indexOf('categoria') < 0) {
     try { db.exec("ALTER TABLE retail_productos ADD COLUMN categoria TEXT"); } catch(e) {}
+  }
+  if (cols.indexOf('bxp_salida') < 0) {
+    try { db.exec("ALTER TABLE retail_productos ADD COLUMN bxp_salida INTEGER"); console.log("[DB] bxp_salida agregado en retail_productos"); } catch(e) {}
   }
 })();
 
@@ -212,19 +198,19 @@ export function obtenerEANs(retailProductoId) {
 export function guardarEAN(retailProductoId, supermercado, ean) {
   db.prepare("INSERT INTO retail_ean (retail_producto_id, supermercado, ean) VALUES (?,?,?) ON CONFLICT(retail_producto_id,supermercado) DO UPDATE SET ean=excluded.ean").run(parseInt(retailProductoId), supermercado, ean||null);
 }
-export function actualizarRetailProducto(id, nombre, categoria) {
-  db.prepare("UPDATE retail_productos SET nombre=?, categoria=? WHERE id=?").run(nombre, categoria||null, id);
+export function actualizarRetailProducto(id, nombre, categoria, bxp_salida) {
+  db.prepare("UPDATE retail_productos SET nombre=?, categoria=?, bxp_salida=? WHERE id=?").run(nombre, categoria||null, bxp_salida||null, id);
 }
 
 // Gastos generales
 export function listarGastos() {
-  return db.prepare("SELECT * FROM retail_gastos WHERE activo = 1 ORDER BY tipo, nombre").all();
+  return db.prepare("SELECT * FROM retail_gastos WHERE activo = 1 ORDER BY nombre").all();
 }
-export function crearGasto(nombre, proveedor, monto, kg_bulto, tipo, presentacion) {
-  return db.prepare("INSERT INTO retail_gastos (nombre, proveedor, monto, kg_bulto, tipo, presentacion) VALUES (?,?,?,?,?,?)").run(nombre, proveedor||null, parseFloat(monto)||0, parseFloat(kg_bulto)||1, tipo||'salida', presentacion||'bulto');
+export function crearGasto(nombre, proveedor, monto, kg_bulto) {
+  return db.prepare("INSERT INTO retail_gastos (nombre, proveedor, monto, kg_bulto) VALUES (?,?,?,?)").run(nombre, proveedor||null, parseFloat(monto)||0, parseFloat(kg_bulto)||1);
 }
-export function actualizarGasto(id, nombre, proveedor, monto, kg_bulto, tipo, presentacion) {
-  db.prepare("UPDATE retail_gastos SET nombre=?, proveedor=?, monto=?, kg_bulto=?, tipo=?, presentacion=? WHERE id=?").run(nombre, proveedor||null, parseFloat(monto)||0, parseFloat(kg_bulto)||1, tipo||'salida', presentacion||'bulto', id);
+export function actualizarGasto(id, nombre, proveedor, monto, kg_bulto) {
+  db.prepare("UPDATE retail_gastos SET nombre=?, proveedor=?, monto=?, kg_bulto=? WHERE id=?").run(nombre, proveedor||null, parseFloat(monto)||0, parseFloat(kg_bulto)||1, id);
 }
 export function eliminarGasto(id) {
   db.prepare("UPDATE retail_gastos SET activo = 0 WHERE id = ?").run(id);
@@ -298,19 +284,15 @@ export function vistaRetail() {
         kilos:       kilos,
         precio_kg:   precioKg,
         seleccionado: seleccion && seleccion.oferta_producto_id === op.id,
-        notas:       op.notas||'',
       };
     });
 
     const provSeleccionado = proveedores.find(function(p){ return p.seleccionado; }) || proveedores[0];
     const kilosProveedor = provSeleccionado ? (provSeleccionado.kilos || 1) : 1;
-    // Leer BXP del proveedor seleccionado desde notas
-    const notasProv = provSeleccionado ? (provSeleccionado.notas||'') : '';
-    const mBxp = notasProv.match(/\[Paletizado\|BXP:(\d+)\]/);
-    const bxp = mBxp ? parseInt(mBxp[1]) : 1;
-    // gastosSum: pallet → monto / (kg_bulto * bxp); bulto → monto / kg_bulto
+    const bxpSalida = rp.bxp_salida || 1;
+    // gastosSum: bulto → monto/kg_bulto; pallet → monto/(kg_bulto × bxp_salida)
     const gastosSum = gastos.filter(function(g){ return gastosSelIds.indexOf(g.id) >= 0; }).reduce(function(s,g){
-      var divisor = (g.presentacion === 'pallet') ? (kilosProveedor * bxp) : kilosProveedor;
+      var divisor = g.presentacion === 'pallet' ? (kilosProveedor * bxpSalida) : kilosProveedor;
       return s + ((g.monto||0) / divisor);
     }, 0);
     const costoBase = provSeleccionado ? (provSeleccionado.cbase / kilosProveedor) : 0;
