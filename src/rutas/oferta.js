@@ -131,6 +131,7 @@ router.get("/pricing/pdf/:tipo", async (req, res) => {
   // Caso especial: Disponible Piso (May MCBA + Min MCBA en dos columnas)
   if (tipo === 'disponible_piso') {
     const prods = db.prepare("SELECT * FROM oferta_productos WHERE oferta = 'oferta1' AND activo = 1 AND disponible_general = 1 ORDER BY categoria, nombre").all();
+    const prodsMnc = db.prepare("SELECT * FROM oferta_productos WHERE oferta = 'oferta1' AND activo = 1 AND disponible_general = -1 ORDER BY categoria, nombre").all();
     const preciosMay = db.prepare("SELECT producto_id, precio, COALESCE(disponible_text, CASE WHEN disponible=1 THEN 'disponible' ELSE 'sin_stock' END) as disponible_text FROM oferta_precios WHERE tipo_cliente = 'mayorista_mcba'").all();
     const preciosMin = db.prepare("SELECT producto_id, precio, COALESCE(disponible_text, CASE WHEN disponible=1 THEN 'disponible' ELSE 'sin_stock' END) as disponible_text FROM oferta_precios WHERE tipo_cliente = 'minorista_mcba'").all();
     const mapMay = {}; preciosMay.forEach(function(p){ mapMay[p.producto_id] = p; });
@@ -139,23 +140,25 @@ router.get("/pricing/pdf/:tipo", async (req, res) => {
 
     let rows = ''; let catActual = '';
     let mncRows = '';
+
+    // Productos con disponible_general = -1 van a sección MNC
+    prodsMnc.forEach(function(p) {
+      const pMay = mapMay[p.id]; const pMin = mapMin[p.id];
+      mncRows += '<tr>';
+      mncRows += '<td style="font-weight:500">' + p.nombre + '</td>';
+      mncRows += '<td style="color:#7a6055">' + (p.descripcion||'') + '</td>';
+      mncRows += '<td style="color:#7a6055">' + (p.origen||'') + '</td>';
+      mncRows += '<td style="color:#7a6055">' + (p.kilaje||'') + '</td>';
+      mncRows += '<td style="color:#7a6055">' + (p.proveedor||'') + '</td>';
+      mncRows += '<td class="num">' + (pMay&&pMay.precio ? '$'+Number(pMay.precio).toLocaleString('es-AR') : '-') + '</td>';
+      mncRows += '<td class="num">' + (pMin&&pMin.precio ? '$'+Number(pMin.precio).toLocaleString('es-AR') : '-') + '</td>';
+      mncRows += '</tr>';
+    });
+
     prods.forEach(function(p) {
       const pMay = mapMay[p.id]; const pMin = mapMin[p.id];
       const dispMay = pMay ? pMay.disponible_text : null;
       const dispMin = pMin ? pMin.disponible_text : null;
-      // MNC: al menos uno de los dos es mnc
-      if (dispMay === 'mnc' || dispMin === 'mnc') {
-        mncRows += '<tr>';
-        mncRows += '<td style="font-weight:500">' + p.nombre + '</td>';
-        mncRows += '<td style="color:#7a6055">' + (p.descripcion||'') + '</td>';
-        mncRows += '<td style="color:#7a6055">' + (p.origen||'') + '</td>';
-        mncRows += '<td style="color:#7a6055">' + (p.kilaje||'') + '</td>';
-        mncRows += '<td style="color:#7a6055">' + (p.proveedor||'') + '</td>';
-        mncRows += '<td class="num">' + (dispMay==='mnc'&&pMay.precio ? '$'+Number(pMay.precio).toLocaleString('es-AR') : '-') + '</td>';
-        mncRows += '<td class="num">' + (dispMin==='mnc'&&pMin.precio ? '$'+Number(pMin.precio).toLocaleString('es-AR') : '-') + '</td>';
-        mncRows += '</tr>';
-        return;
-      }
       if (dispMay !== 'disponible' && dispMin !== 'disponible') return;
       if (p.categoria !== catActual) {
         catActual = p.categoria;

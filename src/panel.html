@@ -847,7 +847,7 @@ function loadOferta(of) {
       h+='<td style="text-align:right">'+(p.consignacion?'<span style="color:var(--burd)">(ref)</span> ':'' )+'$'+nr(p.costo||0)+'</td>';
       h+='<td style="text-align:right">$'+nr(p.flete||0)+'</td>';
       h+='<td style="text-align:center"><input type="checkbox" '+(p.retail?'checked':'')+' style="width:16px;height:16px;accent-color:#166634" onchange="guardarRetail('+p.id+',this.checked)"></td>';
-      h+='<td style="text-align:center"><select onchange="guardarDisp('+p.id+',this.value)" style="font-size:11px;padding:3px 7px;border-radius:6px;border:1px solid var(--bor2);background:'+(dg?'#dcfce7':'#fef2f2')+';color:'+(dg?'#166534':'#991b1b')+'"><option value="1"'+(dg?' selected':'')+'>Disponible</option><option value="0"'+(!dg?' selected':'')+'>Sin stock</option></select></td>';
+      h+='<td style="text-align:center"><select onchange="guardarDisp('+p.id+',this.value)" style="font-size:11px;padding:3px 7px;border-radius:6px;border:1px solid var(--bor2);background:'+(dg===1?'#dcfce7':dg===-1?'#fef3c7':'#fef2f2')+';color:'+(dg===1?'#166534':dg===-1?'#92400e':'#991b1b')+'"><option value="1"'+(dg===1?' selected':'')+'>Disponible</option><option value="0"'+(dg===0?' selected':'')+'>Sin stock</option><option value="-1"'+(dg===-1?' selected':'')+'>MNC</option></select></td>';
       h+='<td style="white-space:nowrap"><button class="btn bo bs" onclick="editProd('+p.id+')">Edit</button> <button class="btn bd bs" onclick="delProd('+p.id+')">X</button></td>';
       h+='</tr>';
     });
@@ -857,7 +857,7 @@ function loadOferta(of) {
 }
 
 function guardarRetail(id,v) { api('/api/oferta/producto/retail','POST',{producto_id:id,retail:v?1:0}).then(function(){ toast('Retail '+(v?'activado':'desactivado'),'ok'); }); }
-function guardarDisp(id,v) { api('/api/oferta/producto/disponibilidad','POST',{producto_id:id,disponible:parseInt(v)}).then(function(){ toast(v==='1'?'Disponible':'Sin stock','ok'); loadOferta(ofertaAct); }); }
+function guardarDisp(id,v) { api('/api/oferta/producto/disponibilidad','POST',{producto_id:id,disponible:parseInt(v)}).then(function(){ var msg=v==='1'?'Disponible':v==='-1'?'MNC':'Sin stock'; toast(msg,'ok'); loadOferta(ofertaAct); }); }
 function limpiarDups() { api('/api/oferta/limpiar-duplicados','POST',{}).then(function(r){ toast((r.borrados||0)+' duplicados eliminados','ok'); loadOferta(ofertaAct); }); }
 
 function openMP(of) {
