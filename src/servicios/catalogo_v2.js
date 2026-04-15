@@ -174,9 +174,6 @@ db.exec(`
   if (cols.indexOf('categoria') < 0) {
     try { db.exec("ALTER TABLE retail_productos ADD COLUMN categoria TEXT"); } catch(e) {}
   }
-  if (cols.indexOf('bxp_salida') < 0) {
-    try { db.exec("ALTER TABLE retail_productos ADD COLUMN bxp_salida INTEGER"); console.log("[DB] bxp_salida agregado en retail_productos"); } catch(e) {}
-  }
 })();
 
 export function listarRetailProductos() {
@@ -198,8 +195,8 @@ export function obtenerEANs(retailProductoId) {
 export function guardarEAN(retailProductoId, supermercado, ean) {
   db.prepare("INSERT INTO retail_ean (retail_producto_id, supermercado, ean) VALUES (?,?,?) ON CONFLICT(retail_producto_id,supermercado) DO UPDATE SET ean=excluded.ean").run(parseInt(retailProductoId), supermercado, ean||null);
 }
-export function actualizarRetailProducto(id, nombre, categoria, bxp_salida) {
-  db.prepare("UPDATE retail_productos SET nombre=?, categoria=?, bxp_salida=? WHERE id=?").run(nombre, categoria||null, bxp_salida||null, id);
+export function actualizarRetailProducto(id, nombre, categoria) {
+  db.prepare("UPDATE retail_productos SET nombre=?, categoria=? WHERE id=?").run(nombre, categoria||null, id);
 }
 
 // Gastos generales
@@ -289,12 +286,8 @@ export function vistaRetail() {
 
     const provSeleccionado = proveedores.find(function(p){ return p.seleccionado; }) || proveedores[0];
     const kilosProveedor = provSeleccionado ? (provSeleccionado.kilos || 1) : 1;
-    const bxpSalida = rp.bxp_salida || 1;
-    // gastosSum: bulto → monto/kg_bulto; pallet → monto/(kg_bulto × bxp_salida)
-    const gastosSum = gastos.filter(function(g){ return gastosSelIds.indexOf(g.id) >= 0; }).reduce(function(s,g){
-      var divisor = g.presentacion === 'pallet' ? (kilosProveedor * bxpSalida) : kilosProveedor;
-      return s + ((g.monto||0) / divisor);
-    }, 0);
+    // gastosSum: monto por bulto / kilos del bulto del proveedor seleccionado
+    const gastosSum = gastos.filter(function(g){ return gastosSelIds.indexOf(g.id) >= 0; }).reduce(function(s,g){ return s + ((g.monto||0) / kilosProveedor); }, 0);
     const costoBase = provSeleccionado ? (provSeleccionado.cbase / kilosProveedor) : 0;
     const costoTotal = costoBase + gastosSum;
 
@@ -459,6 +452,7 @@ export function catalogoParaTipo(tipoCliente) {
         zona TEXT,
         comercial TEXT,
         notas TEXT,
+        dias_venta TEXT DEFAULT '[]',
         activo INTEGER DEFAULT 1,
         creado_en TEXT DEFAULT (datetime('now','localtime'))
       );
@@ -469,6 +463,12 @@ export function catalogoParaTipo(tipoCliente) {
         PRIMARY KEY (cliente_id, producto_id)
       );
     `);
+    // Migrar dias_venta si no existe
+    const colsDed = db.prepare("PRAGMA table_info(dedicados_clientes)").all().map(c => c.name);
+    if (!colsDed.includes('dias_venta')) {
+      db.exec("ALTER TABLE dedicados_clientes ADD COLUMN dias_venta TEXT DEFAULT '[]'");
+      console.log("[DB] dias_venta agregado en dedicados_clientes");
+    }
   } catch(e) { console.error('[DB] dedicados:', e.message); }
 })();
 
@@ -478,8 +478,8 @@ export function listarDedicados() {
 
 export function crearDedicado(datos) {
   return db.prepare(`
-    INSERT INTO dedicados_clientes (nombre, empresa, telefono, email, direccion, zona, comercial, notas)
-    VALUES (@nombre, @empresa, @telefono, @email, @direccion, @zona, @comercial, @notas)
+    INSERT INTO dedicados_clientes (nombre, empresa, telefono, email, direccion, zona, comercial, notas, dias_venta)
+    VALUES (@nombre, @empresa, @telefono, @email, @direccion, @zona, @comercial, @notas, @dias_venta)
   `).run({
     nombre:    datos.nombre    || '',
     empresa:   datos.empresa   || null,
@@ -489,6 +489,7 @@ export function crearDedicado(datos) {
     zona:      datos.zona      || null,
     comercial: datos.comercial || null,
     notas:     datos.notas     || null,
+    dias_venta: datos.dias_venta || '[]',
   }).lastInsertRowid;
 }
 

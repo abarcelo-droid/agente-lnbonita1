@@ -462,6 +462,17 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       <select id="ded-com"><option value="">— Sin asignar —</option><option value="Andres Barcelo">Andres Barcelo</option><option value="Pablo Barcelo">Pablo Barcelo</option><option value="Camila Persampieri">Camila Persampieri</option><option value="Ramon Palazuelos">Ramon Palazuelos</option></select>
     </div>
     <div class="fl"><label>Zona</label><input id="ded-zona"></div>
+    <div class="fl ff"><label>Días de venta</label>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:4px" id="ded-dias-wrap">
+        <button type="button" data-dia="lunes"     class="dia-btn" onclick="toggleDiaBtn(this)" style="font-size:11px;padding:4px 10px;border-radius:10px;border:1px solid var(--bor);background:var(--bg);cursor:pointer">Lun</button>
+        <button type="button" data-dia="martes"    class="dia-btn" onclick="toggleDiaBtn(this)" style="font-size:11px;padding:4px 10px;border-radius:10px;border:1px solid var(--bor);background:var(--bg);cursor:pointer">Mar</button>
+        <button type="button" data-dia="miercoles" class="dia-btn" onclick="toggleDiaBtn(this)" style="font-size:11px;padding:4px 10px;border-radius:10px;border:1px solid var(--bor);background:var(--bg);cursor:pointer">Mié</button>
+        <button type="button" data-dia="jueves"    class="dia-btn" onclick="toggleDiaBtn(this)" style="font-size:11px;padding:4px 10px;border-radius:10px;border:1px solid var(--bor);background:var(--bg);cursor:pointer">Jue</button>
+        <button type="button" data-dia="viernes"   class="dia-btn" onclick="toggleDiaBtn(this)" style="font-size:11px;padding:4px 10px;border-radius:10px;border:1px solid var(--bor);background:var(--bg);cursor:pointer">Vie</button>
+        <button type="button" data-dia="sabado"    class="dia-btn" onclick="toggleDiaBtn(this)" style="font-size:11px;padding:4px 10px;border-radius:10px;border:1px solid var(--bor);background:var(--bg);cursor:pointer">Sáb</button>
+        <button type="button" data-dia="domingo"   class="dia-btn" onclick="toggleDiaBtn(this)" style="font-size:11px;padding:4px 10px;border-radius:10px;border:1px solid var(--bor);background:var(--bg);cursor:pointer">Dom</button>
+      </div>
+    </div>
     <div class="fl ff"><label>Direccion</label><input id="ded-dir"></div>
     <div class="fl ff"><label>Notas</label><textarea id="ded-notas" rows="2"></textarea></div>
     <input type="hidden" id="ded-id">
@@ -1885,21 +1896,47 @@ function openDed(d) {
   eid('ded-zona').value = d ? (d.zona||'') : '';
   eid('ded-com').value = d ? (d.comercial||'') : '';
   eid('ded-notas').value = d ? (d.notas||'') : '';
+  // Cargar días seleccionados
+  var diasSel = d && d.dias_venta ? JSON.parse(d.dias_venta) : [];
+  document.querySelectorAll('#ded-dias-wrap .dia-btn').forEach(function(b){
+    var sel = diasSel.includes(b.getAttribute('data-dia'));
+    b.style.background = sel ? 'var(--burg)' : 'var(--bg)';
+    b.style.color = sel ? '#fff' : 'var(--txt)';
+    b.style.borderColor = sel ? 'var(--burg)' : 'var(--bor)';
+  });
   eid('mb-ded').classList.add('on');
+}
+
+function toggleDiaBtn(btn) {
+  var active = btn.style.background === 'var(--burg)';
+  btn.style.background = active ? 'var(--bg)' : 'var(--burg)';
+  btn.style.color = active ? 'var(--txt)' : '#fff';
+  btn.style.borderColor = active ? 'var(--bor)' : 'var(--burg)';
 }
 
 eid('btn-cerrar-mded').addEventListener('click', function(){ closeMB('mb-ded'); });
 eid('btn-cancel-mded').addEventListener('click', function(){ closeMB('mb-ded'); });
 eid('btn-save-mded').addEventListener('click', function(){
   var nom = elv('ded-nom'); if(!nom){ toast('Falta nombre','er'); return; }
+  var dias = [];
+  document.querySelectorAll('#ded-dias-wrap .dia-btn').forEach(function(b){
+    if(b.style.background==='var(--burg)') dias.push(b.getAttribute('data-dia'));
+  });
   var datos = {
     nombre: nom, empresa: elv('ded-emp'), telefono: elv('ded-tel'),
     email: elv('ded-email'), direccion: elv('ded-dir'),
-    zona: elv('ded-zona'), comercial: elv('ded-com'), notas: elv('ded-notas')
+    zona: elv('ded-zona'), comercial: elv('ded-com'), notas: elv('ded-notas'),
+    dias_venta: JSON.stringify(dias)
   };
   var id = elv('ded-id');
   var p = id ? api('/api/dedicados/'+id,'PATCH',datos) : api('/api/dedicados','POST',datos);
-  p.then(function(){ toast('Guardado','ok'); closeMB('mb-ded'); loadDed(); });
+  p.then(function(){
+    // Si tiene teléfono, sincronizar con CRM
+    if(datos.telefono && datos.comercial) {
+      api('/api/crm','POST',{telefono:datos.telefono,comercial:datos.comercial,dias_contacto:dias,tipo_oferta:'mayorista_mcba',notas:datos.notas||''});
+    }
+    toast('Guardado','ok'); closeMB('mb-ded'); loadDed();
+  });
 });
 
 // Precios por cliente dedicado
