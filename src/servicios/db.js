@@ -208,3 +208,71 @@ export function resumenCobranza() {
     GROUP BY estado
   `).all();
 }
+
+// ── CRM Dedicados ──────────────────────────────────────────────────────────
+db.exec(`
+  CREATE TABLE IF NOT EXISTS crm_clientes (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    telefono        TEXT NOT NULL,
+    comercial       TEXT NOT NULL,
+    situacion       TEXT DEFAULT 'pendiente' CHECK(situacion IN ('pendiente','enviado','venta','fallido')),
+    dias_contacto   TEXT DEFAULT '[]',
+    tipo_oferta     TEXT DEFAULT 'mayorista_mcba',
+    notas           TEXT,
+    ultima_gestion  TEXT DEFAULT (date('now','localtime')),
+    creado_en       TEXT DEFAULT (datetime('now','localtime'))
+  );
+`);
+
+// Migracion crm_clientes
+(function() {
+  try {
+    const cols = db.prepare("PRAGMA table_info(crm_clientes)").all().map(c => c.name);
+    if (!cols.includes('tipo_oferta')) {
+      db.exec("ALTER TABLE crm_clientes ADD COLUMN tipo_oferta TEXT DEFAULT 'mayorista_mcba'");
+    }
+  } catch(e) {}
+})();
+
+export function listarCRM(comercial) {
+  const hoy = new Date();
+  const diasSemana = ['domingo','lunes','martes','miercoles','jueves','viernes','sabado'];
+  const diaHoy = diasSemana[hoy.getDay()];
+
+  // Auto-reset: clientes que hoy les toca y están en venta/fallido → pendiente
+  const todos = db.prepare("SELECT * FROM crm_clientes WHERE activo = 1 OR activo IS NULL").all();
+  todos.forEach(function(c) {
+    if (c.situacion === 'venta' || c.situacion === 'fallido') {
+      const dias = JSON.parse(c.dias_contacto || '[]');
+      if (dias.includes(diaHoy) && c.ultima_gestion !== hoy.toISOString().slice(0,10)) {
+        db.prepare("UPDATE crm_clientes SET situacion='pendiente', ultima_gestion=? WHERE id=?")
+          .run(hoy.toISOString().slice(0,10), c.id);
+      }
+    }
+  });
+
+  const query = comercial
+    ? "SELECT cr.*, c.nombre, c.empresa, c.telefono as tel FROM crm_clientes cr LEFT JOIN clientes c ON c.telefono = cr.telefono WHERE cr.comercial = ? ORDER BY cr.situacion, c.nombre"
+    : "SELECT cr.*, c.nombre, c.empresa, c.telefono as tel FROM crm_clientes cr LEFT JOIN clientes c ON c.telefono = cr.telefono ORDER BY cr.comercial, cr.situacion, c.nombre";
+  return comercial ? db.prepare(query).all(comercial) : db.prepare(query).all();
+}
+
+export function upsertCRM(datos) {
+  const existe = db.prepare("SELECT id FROM crm_clientes WHERE telefono = ?").get(datos.telefono);
+  if (existe) {
+    db.prepare(`UPDATE crm_clientes SET comercial=?, dias_contacto=?, tipo_oferta=?, notas=? WHERE telefono=?`)
+      .run(datos.comercial, JSON.stringify(datos.dias_contacto||[]), datos.tipo_oferta||'mayorista_mcba', datos.notas||null, datos.telefono);
+  } else {
+    db.prepare(`INSERT INTO crm_clientes (telefono, comercial, dias_contacto, tipo_oferta, notas) VALUES (?,?,?,?,?)`)
+      .run(datos.telefono, datos.comercial, JSON.stringify(datos.dias_contacto||[]), datos.tipo_oferta||'mayorista_mcba', datos.notas||null);
+  }
+}
+
+export function actualizarSituacionCRM(id, situacion) {
+  const hoy = new Date().toISOString().slice(0,10);
+  db.prepare("UPDATE crm_clientes SET situacion=?, ultima_gestion=? WHERE id=?").run(situacion, hoy, id);
+}
+
+export function obtenerCRM(telefono) {
+  return db.prepare("SELECT * FROM crm_clientes WHERE telefono = ?").get(telefono);
+}

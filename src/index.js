@@ -3,11 +3,12 @@ import express from "express";
 import path    from "path";
 import { fileURLToPath } from "url";
 import { routearMensaje } from "./agentes/router.js";
-import panelRouter    from "./rutas/panel.js";
-import nuevosRouter   from "./rutas/nuevos.js";
-import cobranzaRouter from "./rutas/cobranza.js";
+import panelRouter        from "./rutas/panel.js";
+import nuevosRouter       from "./rutas/nuevos.js";
+import cobranzaRouter     from "./rutas/cobranza.js";
 import ofertaRouter       from "./rutas/oferta.js";
 import cotizacionRouter   from "./rutas/cotizacion.js";
+import crmRouter          from "./rutas/crm.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -36,12 +37,10 @@ app.post("/webhook", async (req, res) => {
   try {
     const respuesta = await routearMensaje(telefono, mensaje);
 
-    // null = conversacion pausada
     if (!respuesta) {
       return res.set("Content-Type","text/xml").send("<Response></Response>");
     }
 
-    // Responder via TwiML (Twilio Markup Language)
     const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Message>
@@ -69,6 +68,7 @@ app.use("/api", nuevosRouter);
 app.use("/api", cobranzaRouter);
 app.use("/api", ofertaRouter);
 app.use("/api", cotizacionRouter);
+app.use("/api", crmRouter);
 
 // Health check
 app.get("/", (req, res) => res.json({ status:"ok", version:"3.0", panel:"/panel" }));
