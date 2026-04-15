@@ -356,7 +356,16 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     <div class="fl"><label>Kilaje / Presentacion</label><input id="p-kil" placeholder="ej: caja 20kg"></div>
     <div class="fl"><label>Marca</label><input id="p-marca"></div>
     <div class="fl ff"><label>Ingreso</label>
-      <select id="p-ingreso" onchange="toggleBXP()"><option value="">-- Sin especificar --</option><option value="Paletizado">Paletizado</option><option value="Granel">Granel</option></select>
+      <div style="display:flex;gap:10px;margin-top:2px">
+        <label style="display:flex;align-items:center;gap:8px;padding:8px 14px;border:1px solid var(--bor);border-radius:8px;cursor:pointer;flex:1;background:var(--bg);transition:all .15s" id="lbl-ing-pal">
+          <input type="radio" name="p-ingreso" id="p-ingreso-pal" value="Paletizado" onchange="toggleBXP()" style="accent-color:var(--burg);width:16px;height:16px">
+          <span style="font-size:13px;font-weight:500">🏗 Paletizado</span>
+        </label>
+        <label style="display:flex;align-items:center;gap:8px;padding:8px 14px;border:1px solid var(--bor);border-radius:8px;cursor:pointer;flex:1;background:var(--bg);transition:all .15s" id="lbl-ing-gran">
+          <input type="radio" name="p-ingreso" id="p-ingreso-gran" value="Granel" onchange="toggleBXP()" style="accent-color:var(--burg);width:16px;height:16px">
+          <span style="font-size:13px;font-weight:500">📦 Granel</span>
+        </label>
+      </div>
     </div>
     <div class="fl" id="div-bxp" style="display:none"><label>BXP — Bultos por pallet</label><input type="number" id="p-bxp" placeholder="ej: 48" min="1" style="max-width:160px"></div>
     <div class="fl ff"><label>Partida Abasto</label><input id="p-cod" placeholder="Se genera automáticamente — editá si necesitás"></div>
@@ -879,7 +888,9 @@ function editProd(id) {
     eid('p-marca').value=p.marca||''; eid('p-cos').value=p.costo||'';
     var notasRaw=p.notas||'';
     var mIngreso=notasRaw.match(/^\[(Paletizado|Granel)(?:\|BXP:(\d+))?\]\s*/);
-    eid('p-ingreso').value=mIngreso?mIngreso[1]:'';
+    var ingresoVal=mIngreso?mIngreso[1]:'';
+    if(eid('p-ingreso-pal')) eid('p-ingreso-pal').checked=(ingresoVal==='Paletizado');
+    if(eid('p-ingreso-gran')) eid('p-ingreso-gran').checked=(ingresoVal==='Granel');
     eid('p-bxp').value=(mIngreso&&mIngreso[2])?mIngreso[2]:'';
     toggleBXP();
     eid('p-notas').value=notasRaw.replace(/^\[(Paletizado|Granel)(?:\|BXP:\d+)?\]\s*/,'');
@@ -891,9 +902,13 @@ function editProd(id) {
   });
 }
 function toggleBXP() {
-  var v=eid('p-ingreso').value;
+  var pal=eid('p-ingreso-pal'); var gran=eid('p-ingreso-gran');
+  var v=pal&&pal.checked?'Paletizado':gran&&gran.checked?'Granel':'';
   eid('div-bxp').style.display=(v==='Paletizado')?'':'none';
   if(v!=='Paletizado') eid('p-bxp').value='';
+  // Highlight seleccionado
+  if(eid('lbl-ing-pal')) eid('lbl-ing-pal').style.borderColor=v==='Paletizado'?'var(--burg)':'var(--bor)';
+  if(eid('lbl-ing-gran')) eid('lbl-ing-gran').style.borderColor=v==='Granel'?'var(--burg)':'var(--bor)';
 }
 function toggleCons() {
   var v=eid('p-cons').checked;
@@ -922,7 +937,7 @@ eid('btn-save-mp').addEventListener('click', function() {
   fd.append('categoria',elv('p-cat')); fd.append('descripcion',elv('p-desc'));
   fd.append('origen',elv('p-ori')); fd.append('kilaje',elv('p-kil'));
   fd.append('marca',elv('p-marca')); fd.append('costo',elv('p-cos'));
-  var ingreso=elv('p-ingreso');
+  var ingreso=eid('p-ingreso-pal')&&eid('p-ingreso-pal').checked?'Paletizado':eid('p-ingreso-gran')&&eid('p-ingreso-gran').checked?'Granel':'';
   var bxp=elv('p-bxp');
   var notasVal=elv('p-notas');
   // Limpiar ingreso anterior de notas si existia
