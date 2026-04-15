@@ -963,13 +963,17 @@ function loadPricing(of) {
       h+='<td style="padding:6px 8px;font-size:12px;color:var(--sub);white-space:nowrap">'+(p.proveedor||'')+'</td>';
       h+='<td style="text-align:right;color:var(--burd);font-weight:500;white-space:nowrap;padding:6px 10px">$'+nr(cb)+'</td>';
       tipos.forEach(function(t) {
-        var pr=p.precios&&p.precios[t]?p.precios[t]:{precio:0,disponible:0};
-        var tieneP=pr.precio>0;
-        var mgn=tieneP&&cb>0?((pr.precio-cb)/cb*100):null;
+        var pr=p.precios&&p.precios[t]?p.precios[t]:{precio:0,disponible:'sin_stock'};
+        var disp=pr.precio>0?(pr.disponible||'disponible'):'sin_stock';
+        var mgn=disp==='disponible'&&pr.precio>0&&cb>0?((pr.precio-cb)/cb*100):null;
         var mc=mgn===null?'var(--mut)':mgn>=20?'var(--ok)':mgn>=0?'var(--warn)':'var(--err)';
-        h+='<td style="padding:6px 8px;text-align:center"><div style="display:flex;flex-direction:column;align-items:center;gap:2px"><div style="display:flex;align-items:center;gap:4px"><span style="color:var(--mut);font-size:12px">$</span>';
+        h+='<td style="padding:5px 8px;text-align:center"><div style="display:flex;flex-direction:column;align-items:center;gap:2px"><div style="display:flex;align-items:center;gap:4px"><span style="color:var(--mut);font-size:12px">$</span>';
         h+='<input class="pinp" type="number" data-pid="'+p.id+'" data-tipo="'+t+'" data-cb="'+cb+'" value="'+pr.precio+'" oninput="onPC(this,\''+suf+'\')">';
-        h+='<input type="checkbox" data-pid="'+p.id+'" data-tipo="'+t+'" '+(tieneP?'checked':'')+' style="width:16px;height:16px;accent-color:var(--burg)" title="Disponible">';
+        h+='<select class="disp-sel" data-pid="'+p.id+'" data-tipo="'+t+'" style="font-size:10px;padding:2px 3px;border-radius:4px;border:1px solid var(--bor);background:var(--sur);color:var(--tx);cursor:pointer" onchange="onDispChange(this)">';
+        h+='<option value="disponible"'+(disp==='disponible'?' selected':'')+'>✓ Disp.</option>';
+        h+='<option value="sin_stock"'+(disp==='sin_stock'?' selected':'')+'>Sin Stock</option>';
+        h+='<option value="mnc"'+(disp==='mnc'?' selected':'')+'>MNC</option>';
+        h+='</select>';
         h+='</div><span class="mg-'+p.id+'-'+t+'" style="font-size:11px;font-weight:500;color:'+mc+'">'+(mgn!==null?(mgn>=0?'+':'')+mgn.toFixed(1)+'%':'')+'</span></div></td>';
       });
       h+='<td style="padding:6px 8px;text-align:center;white-space:nowrap"><button class="btn bo" style="font-size:10px;padding:2px 7px" onclick="cotizarMCBAPricing(\''+esc(p.nombre)+'\','+p.id+')">Cot. MCBA</button><span id="mcba-status-'+p.id+'" style="display:block;font-size:10px;color:var(--mut)"></span></td></tr>';
@@ -982,26 +986,40 @@ function loadPricing(of) {
 function onPC(inp,suf) {
   var pid=inp.getAttribute('data-pid'); var tipo=inp.getAttribute('data-tipo'); var cb=parseFloat(inp.getAttribute('data-cb'))||0;
   var precio=parseFloat(inp.value)||0;
-  var mgn=precio>0&&cb>0?((precio-cb)/cb*100):null;
+  // Auto-ajustar select: si precio>0 y era sin_stock → disponible; si precio=0 → sin_stock
+  var sel=document.querySelector('select.disp-sel[data-pid="'+pid+'"][data-tipo="'+tipo+'"]');
+  if(sel){
+    if(precio>0 && sel.value==='sin_stock') sel.value='disponible';
+    if(precio===0) sel.value='sin_stock';
+  }
+  var disp=sel?sel.value:'sin_stock';
+  var mgn=disp==='disponible'&&precio>0&&cb>0?((precio-cb)/cb*100):null;
   var mc=mgn===null?'var(--mut)':mgn>=20?'var(--ok)':mgn>=0?'var(--warn)':'var(--err)';
   var sp=document.querySelector('.mg-'+pid+'-'+tipo);
   if(sp){ sp.style.color=mc; sp.textContent=mgn!==null?(mgn>=0?'+':'')+mgn.toFixed(1)+'%':''; }
-  // Auto-toggle disponible según precio
-  var chk=document.querySelector('input[type=checkbox][data-pid="'+pid+'"][data-tipo="'+tipo+'"]');
-  if(chk) chk.checked=(precio>0);
   var of=suf==='1'?'oferta1':'oferta2';
   renderRent(suf,pCache[of]||[],suf==='1'?TIPOS_O1:TIPOS_O2);
+}
+function onDispChange(sel) {
+  var pid=sel.getAttribute('data-pid'); var tipo=sel.getAttribute('data-tipo');
+  // Actualizar margen según nuevo estado
+  var inp=document.querySelector('input.pinp[data-pid="'+pid+'"][data-tipo="'+tipo+'"]');
+  if(!inp) return;
+  var precio=parseFloat(inp.value)||0; var cb=parseFloat(inp.getAttribute('data-cb'))||0;
+  var mgn=sel.value==='disponible'&&precio>0&&cb>0?((precio-cb)/cb*100):null;
+  var mc=mgn===null?'var(--mut)':mgn>=20?'var(--ok)':mgn>=0?'var(--warn)':'var(--err)';
+  var sp=document.querySelector('.mg-'+pid+'-'+tipo);
+  if(sp){ sp.style.color=mc; sp.textContent=mgn!==null?(mgn>=0?'+':'')+mgn.toFixed(1)+'%':''; }
 }
 function renderRent(suf,prods,tipos) { /* panel de rentabilidad eliminado */ }
 function guardarPricing(of) {
   var inputs=document.querySelectorAll('input.pinp[data-pid]');
-  var checks={};
-  document.querySelectorAll('input[type=checkbox][data-pid]').forEach(function(c){ checks[c.getAttribute('data-pid')+'_'+c.getAttribute('data-tipo')]=c.checked; });
   var ps=[];
   inputs.forEach(function(inp){
     var pid=inp.getAttribute('data-pid'); var tipo=inp.getAttribute('data-tipo');
-    var disp=checks[pid+'_'+tipo]!==undefined?checks[pid+'_'+tipo]:true;
-    ps.push(api('/api/oferta/precio','POST',{producto_id:parseInt(pid),tipo_cliente:tipo,precio:parseFloat(inp.value)||0,disponible:disp?1:0}));
+    var sel=document.querySelector('select.disp-sel[data-pid="'+pid+'"][data-tipo="'+tipo+'"]');
+    var disp=sel?sel.value:'sin_stock';
+    ps.push(api('/api/oferta/precio','POST',{producto_id:parseInt(pid),tipo_cliente:tipo,precio:parseFloat(inp.value)||0,disponible:disp}));
   });
   Promise.all(ps).then(function(){ toast('Precios guardados','ok'); });
 }

@@ -321,6 +321,15 @@ export function vistaRetail() {
   if (cols.indexOf('disponible_general') < 0) {
     try { db.exec("ALTER TABLE oferta_productos ADD COLUMN disponible_general INTEGER DEFAULT 1"); } catch(e) {}
   }
+  // Migrar disponible de INTEGER a TEXT en oferta_precios
+  const colsPrecios = db.prepare("PRAGMA table_info(oferta_precios)").all().map(c => c.name);
+  if (!colsPrecios.includes('disponible_text')) {
+    try {
+      db.exec("ALTER TABLE oferta_precios ADD COLUMN disponible_text TEXT DEFAULT 'disponible'");
+      db.exec("UPDATE oferta_precios SET disponible_text = CASE WHEN disponible = 1 THEN 'disponible' ELSE 'sin_stock' END");
+      console.log("[DB] Columna disponible_text agregada en oferta_precios");
+    } catch(e) { console.error("[DB] Error migrando disponible_text:", e.message); }
+  }
 })();
 
 // ── Productos ──────────────────────────────────────────────────────────────
@@ -332,7 +341,7 @@ export function listarProductos(oferta) {
   // Para cada producto traer sus precios por tipo
   return productos.map(p => {
     const precios = db.prepare(
-      "SELECT tipo_cliente, precio, disponible FROM oferta_precios WHERE producto_id = ?"
+      "SELECT tipo_cliente, precio, COALESCE(disponible_text, CASE WHEN disponible=1 THEN 'disponible' ELSE 'sin_stock' END) as disponible FROM oferta_precios WHERE producto_id = ?"
     ).all(p.id);
     const preciosMap = {};
     precios.forEach(pr => { preciosMap[pr.tipo_cliente] = { precio: pr.precio, disponible: pr.disponible }; });
@@ -343,7 +352,7 @@ export function listarProductos(oferta) {
 export function obtenerProducto(id) {
   const p = db.prepare("SELECT * FROM oferta_productos WHERE id = ?").get(id);
   if (!p) return null;
-  const precios = db.prepare("SELECT tipo_cliente, precio, disponible FROM oferta_precios WHERE producto_id = ?").all(p.id);
+  const precios = db.prepare("SELECT tipo_cliente, precio, COALESCE(disponible_text, CASE WHEN disponible=1 THEN 'disponible' ELSE 'sin_stock' END) as disponible FROM oferta_precios WHERE producto_id = ?").all(p.id);
   const preciosMap = {};
   precios.forEach(pr => { preciosMap[pr.tipo_cliente] = { precio: pr.precio, disponible: pr.disponible }; });
   return { ...p, precios: preciosMap };
@@ -369,11 +378,16 @@ export function upsertProducto(datos) {
 }
 
 export function actualizarPrecio(productoId, tipoCliente, precio, disponible) {
+  // disponible puede ser 'disponible', 'sin_stock', 'mnc' o legacy 0/1
+  const dispText = (disponible === 'disponible' || disponible === 'sin_stock' || disponible === 'mnc')
+    ? disponible
+    : (disponible ? 'disponible' : 'sin_stock');
+  const dispInt = dispText === 'disponible' ? 1 : 0;
   db.prepare(`
-    INSERT INTO oferta_precios (producto_id, tipo_cliente, precio, disponible)
-    VALUES (?, ?, ?, ?)
-    ON CONFLICT(producto_id, tipo_cliente) DO UPDATE SET precio=excluded.precio, disponible=excluded.disponible
-  `).run(productoId, tipoCliente, parseFloat(precio) || 0, disponible ? 1 : 0);
+    INSERT INTO oferta_precios (producto_id, tipo_cliente, precio, disponible, disponible_text)
+    VALUES (?, ?, ?, ?, ?)
+    ON CONFLICT(producto_id, tipo_cliente) DO UPDATE SET precio=excluded.precio, disponible=excluded.disponible, disponible_text=excluded.disponible_text
+  `).run(productoId, tipoCliente, parseFloat(precio) || 0, dispInt, dispText);
 }
 
 export function eliminarProducto(id) {
@@ -386,11 +400,11 @@ export function catalogoParaTipo(tipoCliente) {
   const productos = listarProductos(oferta);
   const disponibles = productos.filter(p => {
     const prec = p.precios[tipoCliente];
-    return prec && prec.disponible;
+    return prec && prec.disponible === 'disponible';
   });
   const agotados = productos.filter(p => {
     const prec = p.precios[tipoCliente];
-    return !prec || !prec.disponible;
+    return !prec || prec.disponible !== 'disponible';
   });
 
   if (!disponibles.length) return "Catalogo no disponible en este momento.";

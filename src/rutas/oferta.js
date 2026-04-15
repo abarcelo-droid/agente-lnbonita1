@@ -131,16 +131,32 @@ router.get("/pricing/pdf/:tipo", async (req, res) => {
   // Caso especial: Disponible Piso (May MCBA + Min MCBA en dos columnas)
   if (tipo === 'disponible_piso') {
     const prods = db.prepare("SELECT * FROM oferta_productos WHERE oferta = 'oferta1' AND activo = 1 AND disponible_general = 1 ORDER BY categoria, nombre").all();
-    const preciosMay = db.prepare("SELECT producto_id, precio, disponible FROM oferta_precios WHERE tipo_cliente = 'mayorista_mcba'").all();
-    const preciosMin = db.prepare("SELECT producto_id, precio, disponible FROM oferta_precios WHERE tipo_cliente = 'minorista_mcba'").all();
+    const preciosMay = db.prepare("SELECT producto_id, precio, COALESCE(disponible_text, CASE WHEN disponible=1 THEN 'disponible' ELSE 'sin_stock' END) as disponible_text FROM oferta_precios WHERE tipo_cliente = 'mayorista_mcba'").all();
+    const preciosMin = db.prepare("SELECT producto_id, precio, COALESCE(disponible_text, CASE WHEN disponible=1 THEN 'disponible' ELSE 'sin_stock' END) as disponible_text FROM oferta_precios WHERE tipo_cliente = 'minorista_mcba'").all();
     const mapMay = {}; preciosMay.forEach(function(p){ mapMay[p.producto_id] = p; });
     const mapMin = {}; preciosMin.forEach(function(p){ mapMin[p.producto_id] = p; });
     const fecha = new Date().toLocaleDateString('es-AR', {day:'2-digit',month:'2-digit',year:'numeric'});
 
     let rows = ''; let catActual = '';
+    let mncRows = '';
     prods.forEach(function(p) {
       const pMay = mapMay[p.id]; const pMin = mapMin[p.id];
-      if ((!pMay||!pMay.disponible) && (!pMin||!pMin.disponible)) return;
+      const dispMay = pMay ? pMay.disponible_text : null;
+      const dispMin = pMin ? pMin.disponible_text : null;
+      // MNC: al menos uno de los dos es mnc
+      if (dispMay === 'mnc' || dispMin === 'mnc') {
+        mncRows += '<tr>';
+        mncRows += '<td style="font-weight:500">' + p.nombre + '</td>';
+        mncRows += '<td style="color:#7a6055">' + (p.descripcion||'') + '</td>';
+        mncRows += '<td style="color:#7a6055">' + (p.origen||'') + '</td>';
+        mncRows += '<td style="color:#7a6055">' + (p.kilaje||'') + '</td>';
+        mncRows += '<td style="color:#7a6055">' + (p.proveedor||'') + '</td>';
+        mncRows += '<td class="num">' + (dispMay==='mnc'&&pMay.precio ? '$'+Number(pMay.precio).toLocaleString('es-AR') : '-') + '</td>';
+        mncRows += '<td class="num">' + (dispMin==='mnc'&&pMin.precio ? '$'+Number(pMin.precio).toLocaleString('es-AR') : '-') + '</td>';
+        mncRows += '</tr>';
+        return;
+      }
+      if (dispMay !== 'disponible' && dispMin !== 'disponible') return;
       if (p.categoria !== catActual) {
         catActual = p.categoria;
         rows += '<tr class="cat"><td colspan="7">' + (catActual||'Sin categoria') + '</td></tr>';
@@ -151,10 +167,30 @@ router.get("/pricing/pdf/:tipo", async (req, res) => {
       rows += '<td style="color:#7a6055">' + (p.origen||'') + '</td>';
       rows += '<td style="color:#7a6055">' + (p.kilaje||'') + '</td>';
       rows += '<td style="color:#7a6055">' + (p.proveedor||'') + '</td>';
-      rows += '<td class="num">' + (pMay&&pMay.disponible&&pMay.precio ? '$'+Number(pMay.precio).toLocaleString('es-AR') : '-') + '</td>';
-      rows += '<td class="num">' + (pMin&&pMin.disponible&&pMin.precio ? '$'+Number(pMin.precio).toLocaleString('es-AR') : '-') + '</td>';
+      rows += '<td class="num">' + (dispMay==='disponible'&&pMay.precio ? '$'+Number(pMay.precio).toLocaleString('es-AR') : '-') + '</td>';
+      rows += '<td class="num">' + (dispMin==='disponible'&&pMin.precio ? '$'+Number(pMin.precio).toLocaleString('es-AR') : '-') + '</td>';
       rows += '</tr>';
     });
+
+    // Sección MNC al final
+    const mncSection = mncRows ? `
+      <div style="margin-top:28px;page-break-inside:avoid">
+        <div style="background:#7f1d1d;color:#fff;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;padding:6px 10px;border-radius:4px 4px 0 0">
+          MNC — Precio de Remate
+        </div>
+        <table style="width:100%;border-collapse:collapse;font-size:11px">
+          <thead><tr style="background:#fee2e2">
+            <th style="padding:5px 8px;text-align:left">Producto</th>
+            <th style="padding:5px 8px;text-align:left">Variedad</th>
+            <th style="padding:5px 8px;text-align:left">Origen</th>
+            <th style="padding:5px 8px;text-align:left">Kilaje</th>
+            <th style="padding:5px 8px;text-align:left">Proveedor</th>
+            <th style="padding:5px 8px;text-align:right">May MCBA</th>
+            <th style="padding:5px 8px;text-align:right">Min MCBA</th>
+          </tr></thead>
+          <tbody>${mncRows}</tbody>
+        </table>
+      </div>` : '';
 
     const logoUrl = 'https://agente-lnbonita1-production.up.railway.app/static/logo.jpg';
 
@@ -184,6 +220,7 @@ router.get("/pricing/pdf/:tipo", async (req, res) => {
       '<thead><tr><th>Producto</th><th>Variedad</th><th>Origen</th><th>Kilaje</th><th>Proveedor</th><th class="num">May. MCBA</th><th class="num">Min. MCBA</th></tr></thead>',
       '<tbody>' + rows + '</tbody>',
       '</table>',
+      mncSection,
       '<div class="footer">La Nina Bonita - Mercado Central de Buenos Aires, Nave 4, Puestos 2-4-6 | a.barcelo@lnbonita.com.ar</div>',
       '</body></html>'
     ].join('');
@@ -201,7 +238,7 @@ router.get("/pricing/pdf/:tipo", async (req, res) => {
   const label = LABELS[tipo] || tipo;
 
   const prods = db.prepare("SELECT * FROM oferta_productos WHERE oferta = ? AND activo = 1 ORDER BY categoria, nombre").all(OFERTA);
-  const precios = db.prepare("SELECT producto_id, precio, disponible FROM oferta_precios WHERE tipo_cliente = ?").all(tipo);
+  const precios = db.prepare("SELECT producto_id, precio, COALESCE(disponible_text, CASE WHEN disponible=1 THEN 'disponible' ELSE 'sin_stock' END) as disponible_text FROM oferta_precios WHERE tipo_cliente = ?").all(tipo);
   const precMap = {};
   precios.forEach(function(p){ precMap[p.producto_id] = p; });
 
@@ -211,7 +248,7 @@ router.get("/pricing/pdf/:tipo", async (req, res) => {
   let catActual = '';
   prods.forEach(function(p) {
     const prec = precMap[p.id];
-    if (!prec || !prec.disponible) return;
+    if (!prec || prec.disponible_text !== 'disponible') return;
     if (p.categoria !== catActual) {
       catActual = p.categoria;
       rows += '<tr class="cat"><td colspan="4">' + (catActual||'Sin categoria') + '</td></tr>';
