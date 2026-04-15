@@ -1141,15 +1141,13 @@ function loadRetail() {
       h+='</div>';
       // Grilla canales
       var costoTotal=rp.costo_kg_total; var kgTot=provSel?provSel.kilos:0;
-      h+='<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px;min-width:500px"><thead><tr style="background:var(--burd)">';
+      h+='<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px;min-width:400px"><thead><tr style="background:var(--burd)">';
       h+='<th style="padding:7px 8px;color:#fff;text-align:left">Canal</th>';
       h+='<th style="padding:7px 8px;color:#fff;text-align:center">Precio/kg</th>';
       h+='<th style="padding:7px 8px;color:#fff;text-align:center">Perdida kg</th>';
       h+='<th style="padding:7px 8px;color:#fff;text-align:center">Costo real</th>';
-      h+='<th style="padding:7px 8px;color:#fff;text-align:center">Ingreso neto</th>';
-      h+='<th style="padding:7px 8px;color:#fff;text-align:center">Dif/kg</th>';
-      h+='<th style="padding:7px 8px;color:#fff;text-align:center">Dif/bulto</th>';
       h+='<th style="padding:7px 8px;color:#fff;text-align:center">Margen %</th>';
+      h+='<th style="padding:7px 8px;color:#fff;text-align:center">Dif/bulto</th>';
       h+='</tr></thead><tbody>';
       CANALES.forEach(function(canal) {
         var pc=rp.precios_canal&&rp.precios_canal[canal.k]?rp.precios_canal[canal.k]:{};
@@ -1161,15 +1159,13 @@ function loadRetail() {
         var dif=precio>0?neto-costoTotal:null;
         var difBulto=dif!==null&&kgTot>0?dif*kgTot:null;
         var dc=dif===null?'var(--mut)':dif>=0?'var(--ok)':'var(--err)';
-        h+='<tr style="border-bottom:1px solid var(--bor)"><td style="padding:6px 8px;font-weight:500">'+canal.l+'<br><span style="font-size:9px;color:var(--mut)">x'+canal.c+' x1.105</span></td>';
+        h+='<tr style="border-bottom:1px solid var(--bor)"><td style="padding:6px 8px;font-weight:500">'+canal.l+'</td>';
         h+='<td style="padding:5px 6px;text-align:center"><div style="display:flex;align-items:center;justify-content:center;gap:3px"><span style="color:var(--mut);font-size:11px">$</span>';
         h+='<input class="pinp" type="number" data-rpid="'+rp.id+'" data-canal="'+canal.k+'" data-coef="'+canal.c+'" data-costo="'+Math.round(costoTotal)+'" data-kgtot="'+kgTot+'" value="'+precio+'" style="width:78px" oninput="calcRet(this)"></div></td>';
         h+='<td style="padding:5px 6px;text-align:center"><div style="display:flex;align-items:center;justify-content:center;gap:3px"><input type="number" class="pinp" style="width:55px;color:var(--warn)" value="'+perdida+'" min="0" step="0.5" data-rpid="'+rp.id+'" data-canal="'+canal.k+'" data-field="perdida" data-coef="'+canal.c+'" data-costo="'+Math.round(costoTotal)+'" data-kgtot="'+kgTot+'" oninput="calcRet(this)"><span style="font-size:11px;color:var(--mut)">kg</span></div></td>';
         h+='<td style="padding:6px 8px;text-align:center;font-size:11px;color:var(--burd);font-variant-numeric:tabular-nums" id="cr-'+rp.id+'-'+canal.k+'">$'+Math.round(costoTotal).toLocaleString('es-AR')+'/kg</td>';
-        h+='<td style="padding:6px 8px;text-align:center;font-size:11px;font-variant-numeric:tabular-nums" id="ne-'+rp.id+'-'+canal.k+'">'+(precio>0?'$'+Math.round(neto).toLocaleString('es-AR'):'-')+'</td>';
-        h+='<td style="padding:6px 8px;text-align:center;font-size:11px;font-weight:600;color:'+dc+';font-variant-numeric:tabular-nums" id="dk-'+rp.id+'-'+canal.k+'">'+(dif!==null?(dif>=0?'+':'')+Math.round(dif).toLocaleString('es-AR'):'-')+'</td>';
-        h+='<td style="padding:6px 8px;text-align:center;font-size:11px;font-weight:600;color:'+dc+';font-variant-numeric:tabular-nums" id="db-'+rp.id+'-'+canal.k+'">'+(difBulto!==null?(difBulto>=0?'+':'')+Math.round(difBulto).toLocaleString('es-AR'):'-')+'</td>';
         h+='<td style="padding:6px 8px;text-align:center;font-weight:600;color:'+mc+'" id="mg-'+rp.id+'-'+canal.k+'">'+(mgn!==null?(mgn>=0?'+':'')+mgn.toFixed(1)+'%':'-')+'</td>';
+        h+='<td style="padding:6px 8px;text-align:center;font-size:11px;font-weight:600;color:'+dc+';font-variant-numeric:tabular-nums" id="db-'+rp.id+'-'+canal.k+'">'+(difBulto!==null?(difBulto>=0?'+':'')+Math.round(difBulto).toLocaleString('es-AR'):'-')+'</td>';
         h+='</tr>';
       });
       h+='</tbody></table></div>';
@@ -1204,11 +1200,10 @@ function calcRet(inp) {
   var dif=precio>0?neto-costoReal:null;
   var difBulto=dif!==null&&kgTot>0?dif*kgTot:null;
   var dc=dif===null?'var(--mut)':dif>=0?'var(--ok)':'var(--err)';
-  var ce=document.getElementById('cr-'+rpid+'-'+canal); var ne=document.getElementById('ne-'+rpid+'-'+canal); var me=document.getElementById('mg-'+rpid+'-'+canal);
-  var dk=document.getElementById('dk-'+rpid+'-'+canal); var db=document.getElementById('db-'+rpid+'-'+canal);
+  var ce=document.getElementById('cr-'+rpid+'-'+canal);
+  var me=document.getElementById('mg-'+rpid+'-'+canal);
+  var db=document.getElementById('db-'+rpid+'-'+canal);
   if(ce) ce.textContent='$'+Math.round(costoReal).toLocaleString('es-AR')+'/kg';
-  if(ne) ne.textContent=precio>0?'$'+Math.round(neto).toLocaleString('es-AR'):'-';
-  if(dk){ dk.textContent=dif!==null?(dif>=0?'+':'')+Math.round(dif).toLocaleString('es-AR'):'-'; dk.style.color=dc; }
   if(db){ db.textContent=difBulto!==null?(difBulto>=0?'+':'')+Math.round(difBulto).toLocaleString('es-AR'):'-'; db.style.color=dc; }
   if(me){ me.textContent=mgn!==null?(mgn>=0?'+':'')+mgn.toFixed(1)+'%':'-'; me.style.color=mc; }
 }
