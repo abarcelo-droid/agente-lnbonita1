@@ -1853,9 +1853,30 @@ function abrirFichaCRM(telefono) {
       h+='</div>';
     }
     // Productos
-    h+='<div style="font-size:12px;font-weight:700;color:var(--burd);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">Productos disponibles \u2014 '+lTipo(crm.tipo_oferta)+'</div>';
+    var esRetail=data.es_retail;
+    var tituloOferta=esRetail?'Retail':lTipo(crm.tipo_oferta);
+    h+='<div style="font-size:12px;font-weight:700;color:var(--burd);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">Productos disponibles — '+tituloOferta+'</div>';
     if(!prods.length){
       h+='<div style="color:var(--mut);font-size:12px;font-style:italic">Sin productos disponibles para este tipo de oferta.</div>';
+    } else if(esRetail) {
+      var catAct='';
+      h+='<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="background:var(--burd)"><th style="padding:6px 8px;color:#fff;text-align:left">Producto</th><th style="padding:6px 8px;color:#fff;text-align:right">Cencosud</th><th style="padding:6px 8px;color:#fff;text-align:right">Carrefour</th><th style="padding:6px 8px;color:#fff;text-align:right">Coto</th><th style="padding:6px 8px;color:#fff;text-align:right">Chango</th><th style="padding:6px 8px;color:#fff;text-align:right">Coop</th></tr></thead><tbody>';
+      prods.forEach(function(p){
+        if(p.categoria!==catAct){
+          catAct=p.categoria;
+          h+='<tr><td colspan="6" style="background:#4a90b8;color:#fff;font-size:10px;font-weight:700;text-transform:uppercase;padding:5px 8px;letter-spacing:.06em">'+(catAct||'Sin categoria')+'</td></tr>';
+        }
+        var pc=p.precios_canal||{};
+        var fmt=function(v){return v?'$'+Math.round(v).toLocaleString('es-AR'):'-';};
+        h+='<tr style="border-bottom:1px solid var(--bor)"><td style="padding:5px 8px;font-weight:500">'+p.nombre+'</td>';
+        h+='<td style="padding:5px 8px;text-align:right;font-size:11px">'+fmt(pc.cencosud)+'</td>';
+        h+='<td style="padding:5px 8px;text-align:right;font-size:11px">'+fmt(pc.carrefour)+'</td>';
+        h+='<td style="padding:5px 8px;text-align:right;font-size:11px">'+fmt(pc.coto)+'</td>';
+        h+='<td style="padding:5px 8px;text-align:right;font-size:11px">'+fmt(pc.chango)+'</td>';
+        h+='<td style="padding:5px 8px;text-align:right;font-size:11px">'+fmt(pc.coop)+'</td>';
+        h+='</tr>';
+      });
+      h+='</tbody></table>';
     } else {
       var catAct='';
       h+='<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="background:var(--burd)"><th style="padding:6px 8px;color:#fff;text-align:left">Producto</th><th style="padding:6px 8px;color:#fff;text-align:left">Proveedor</th><th style="padding:6px 8px;color:#fff;text-align:right">Precio</th></tr></thead><tbody>';
