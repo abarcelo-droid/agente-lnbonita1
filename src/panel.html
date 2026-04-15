@@ -1675,7 +1675,7 @@ function loadCRM() {
   var url='/api/crm'+(comercial?'?comercial='+encodeURIComponent(comercial):'');
   api(url).then(function(lista) {
     var board=eid('crm-board');
-    if(!lista){ board.innerHTML='<div class="emp">Error cargando</div>'; return; }
+    if(!lista || !Array.isArray(lista)){ board.innerHTML='<div class="emp">Error cargando CRM. Revisar logs del servidor.</div>'; return; }
     var grupos={pendiente:[],enviado:[],venta:[],fallido:[]};
     lista.forEach(function(c){ if(grupos[c.situacion]) grupos[c.situacion].push(c); });
     var h='';

@@ -244,56 +244,48 @@ export function listarCRM(comercial) {
   try {
     const dedicados = db.prepare("SELECT * FROM dedicados_clientes WHERE activo = 1").all();
     dedicados.forEach(function(d) {
-      if (!d.telefono && !d.nombre) return;
       const key = d.telefono || ('ded-' + d.id);
       const existe = db.prepare("SELECT id FROM crm_clientes WHERE telefono = ?").get(key);
       if (!existe) {
-        db.prepare(`INSERT INTO crm_clientes (telefono, comercial, dias_contacto, tipo_oferta, notas)
-          VALUES (?, ?, ?, 'mayorista_mcba', ?)`)
+        db.prepare("INSERT INTO crm_clientes (telefono, comercial, dias_contacto, tipo_oferta, notas) VALUES (?, ?, ?, 'mayorista_mcba', ?)")
           .run(key, d.comercial || 'Sin asignar', d.dias_venta || '[]', d.notas || null);
-        console.log('[CRM] Auto-sync dedicado:', d.nombre);
       } else if (d.dias_venta && d.dias_venta !== '[]') {
-        // Actualizar días si el dedicado los tiene y el CRM no
         const crmRow = db.prepare("SELECT dias_contacto FROM crm_clientes WHERE telefono = ?").get(key);
         if (crmRow && (!crmRow.dias_contacto || crmRow.dias_contacto === '[]')) {
-          db.prepare("UPDATE crm_clientes SET dias_contacto=?, comercial=COALESCE(NULLIF(comercial,'Sin asignar'),?) WHERE telefono=?")
-            .run(d.dias_venta, d.comercial || 'Sin asignar', key);
+          db.prepare("UPDATE crm_clientes SET dias_contacto=? WHERE telefono=?").run(d.dias_venta, key);
         }
       }
     });
   } catch(e) { console.error('[CRM] Auto-sync error:', e.message); }
 
-  // Auto-reset: clientes que hoy les toca y están en venta/fallido → pendiente
-  const todos = db.prepare("SELECT * FROM crm_clientes WHERE activo = 1 OR activo IS NULL").all();
+  // Auto-reset
+  const todos = db.prepare("SELECT * FROM crm_clientes").all();
   todos.forEach(function(c) {
     if (c.situacion === 'venta' || c.situacion === 'fallido') {
       const dias = JSON.parse(c.dias_contacto || '[]');
       if (dias.includes(diaHoy) && c.ultima_gestion !== hoyStr) {
-        db.prepare("UPDATE crm_clientes SET situacion='pendiente', ultima_gestion=? WHERE id=?")
-          .run(hoyStr, c.id);
+        db.prepare("UPDATE crm_clientes SET situacion='pendiente', ultima_gestion=? WHERE id=?").run(hoyStr, c.id);
       }
     }
   });
 
-  // JOIN con dedicados_clientes para obtener nombre/empresa (no solo clientes WhatsApp)
-  const query = comercial
-    ? `SELECT cr.*, 
-        COALESCE(dc.nombre, c.nombre) as nombre,
-        COALESCE(dc.empresa, c.empresa) as empresa,
-        cr.telefono as tel
-       FROM crm_clientes cr
-       LEFT JOIN clientes c ON c.telefono = cr.telefono
-       LEFT JOIN dedicados_clientes dc ON (dc.telefono = cr.telefono OR ('ded-'||dc.id) = cr.telefono)
-       WHERE cr.comercial = ? ORDER BY cr.situacion, nombre`
-    : `SELECT cr.*,
-        COALESCE(dc.nombre, c.nombre) as nombre,
-        COALESCE(dc.empresa, c.empresa) as empresa,
-        cr.telefono as tel
-       FROM crm_clientes cr
-       LEFT JOIN clientes c ON c.telefono = cr.telefono
-       LEFT JOIN dedicados_clientes dc ON (dc.telefono = cr.telefono OR ('ded-'||dc.id) = cr.telefono)
-       ORDER BY cr.comercial, cr.situacion, nombre`;
-  return comercial ? db.prepare(query).all(comercial) : db.prepare(query).all();
+  // Traer todos los crm con nombre desde dedicados_clientes
+  const crmRows = comercial
+    ? db.prepare("SELECT * FROM crm_clientes WHERE comercial = ? ORDER BY situacion").all(comercial)
+    : db.prepare("SELECT * FROM crm_clientes ORDER BY comercial, situacion").all();
+
+  // Enriquecer con nombre/empresa desde dedicados_clientes
+  return crmRows.map(function(cr) {
+    var ded = db.prepare("SELECT nombre, empresa FROM dedicados_clientes WHERE telefono = ? OR id = ?").get(
+      cr.telefono,
+      cr.telefono && cr.telefono.startsWith('ded-') ? parseInt(cr.telefono.slice(4)) : -1
+    );
+    return Object.assign({}, cr, {
+      nombre: (ded && ded.nombre) || cr.telefono || '-',
+      empresa: (ded && ded.empresa) || '',
+      tel: cr.telefono
+    });
+  });
 }
 
 export function upsertCRM(datos) {
