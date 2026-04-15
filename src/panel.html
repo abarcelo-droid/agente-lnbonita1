@@ -1136,9 +1136,6 @@ function loadRetail() {
       h+='<div style="font-size:11px;color:var(--mut)">Gastos: <strong id="gastos-sum-'+rp.id+'">$'+Math.round(rp.gastos_sum).toLocaleString('es-AR')+'</strong></div>';
       h+='<div style="font-size:15px;font-weight:700;color:var(--burd)">Total: <span id="costo-total-'+rp.id+'">$'+Math.round(rp.costo_kg_total).toLocaleString('es-AR')+'</span>/kg</div>';
       h+='</div>';
-      // Observaciones
-      h+='<textarea id="obs-'+rp.id+'" rows="2" style="width:100%;font-size:12px;resize:vertical;box-sizing:border-box;border-radius:6px;border:1px solid var(--bor);padding:6px 8px" placeholder="Observaciones internas...">'+(rp.observaciones||'')+'</textarea>';
-      h+='<button class="btn bo bs" style="margin-top:6px;width:100%;justify-content:center;font-size:12px" onclick="guardarObs('+rp.id+')">Guardar obs.</button>';
       h+='</div>'; // fin col izquierda
 
       // ── Columna derecha: tabla canales ──
