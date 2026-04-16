@@ -23,7 +23,7 @@ nav{width:230px;flex-shrink:0;background:var(--nav);display:flex;flex-direction:
 .logo img{width:100%;max-width:100%;display:block;padding:16px 20px 12px;filter:none;opacity:1}
 .logo-tag{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:rgba(255,255,255,.4);padding:8px 20px;background:var(--nav2)}
 .ng{padding:10px 20px 3px;font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:rgba(255,255,255,.3)}
-.ni{display:flex;align-items:center;gap:10px;padding:8px 20px;cursor:pointer;color:rgba(255,255,255,.65);transition:all .15s;border-left:3px solid transparent;font-size:13px}
+.ni{display:flex;align-items:center;gap:10px;padding:8px 20px;cursor:pointer;color:rgba(255,255,255,.65);transition:all .15s;border-left:3px solid transparent;font-size:11px;text-transform:uppercase;letter-spacing:.05em}
 .ni:hover{color:#fff;background:rgba(255,255,255,.08)}
 .ni.on{color:#fff;border-left-color:var(--gold);background:rgba(255,255,255,.12)}
 .dot{width:6px;height:6px;border-radius:50%;flex-shrink:0;background:rgba(255,255,255,.3)}
@@ -102,9 +102,15 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   </div>
   <div class="ng">General</div>
   <div class="ni on" data-sec="inicio"><span class="dot"></span>Inicio</div>
-  <div class="ni" data-sec="crm"><span class="dot dd"></span>CRM Dedicados</div>
+  <div class="ni" data-sec="crm"><span class="dot dd"></span>CRM</div>
   <div class="ni" data-sec="pedidos"><span class="dot"></span>Pedidos</div>
   <div class="ni" data-sec="logistica"><span class="dot dd"></span>Logistica</div>
+  <div class="ng" style="margin-top:8px">Oferta</div>
+  <div class="ni" data-sec="oferta1"><span class="dot da"></span>Oferta 1 - Productos</div>
+  <div class="ni" data-sec="oferta2"><span class="dot dd"></span>Oferta 2 - Productos</div>
+  <div class="ni" data-sec="pricing1"><span class="dot de"></span>Pricing 1</div>
+  <div class="ni" data-sec="pricing2"><span class="dot de"></span>Pricing 2</div>
+  <div class="ni" data-sec="retail-view"><span class="dot da"></span>Retail</div>
   <div class="ng" style="margin-top:8px">Clientes</div>
   <div class="ni" data-sec="may-a"><span class="dot da"></span>Mayorista A</div>
   <div class="ni" data-sec="may-mcba"><span class="dot da"></span>Mayorista MCBA</div>
@@ -113,12 +119,6 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   <div class="ni" data-sec="food"><span class="dot dd"></span>Food Service</div>
   <div class="ni" data-sec="cons-final"><span class="dot db"></span>Consumidor Final</div>
   <div class="ni" data-sec="dedicados"><span class="dot de"></span>Dedicados</div>
-  <div class="ng" style="margin-top:8px">Oferta</div>
-  <div class="ni" data-sec="oferta1"><span class="dot da"></span>Oferta 1 - Productos</div>
-  <div class="ni" data-sec="oferta2"><span class="dot dd"></span>Oferta 2 - Productos</div>
-  <div class="ni" data-sec="pricing1"><span class="dot de"></span>Pricing 1</div>
-  <div class="ni" data-sec="pricing2"><span class="dot de"></span>Pricing 2</div>
-  <div class="ni" data-sec="retail-view"><span class="dot da"></span>Retail</div>
   <div class="ng" style="margin-top:8px">Equipo</div>
   <div class="ni" data-sec="conv" id="nav-conv"><span class="dot" id="dot-conv"></span>Conversaciones</div>
   <div class="ni" data-sec="guardias"><span class="dot"></span>Guardias</div>
