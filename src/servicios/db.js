@@ -249,6 +249,14 @@ db.exec(`
       db.exec("ALTER TABLE crm_clientes ADD COLUMN anotador TEXT");
       console.log("[DB] Columna anotador agregada en crm_clientes");
     }
+    if (!cols.includes('retail_cats')) {
+      db.exec("ALTER TABLE crm_clientes ADD COLUMN retail_cats TEXT DEFAULT '[]'");
+      console.log("[DB] Columna retail_cats agregada en crm_clientes");
+    }
+    if (!cols.includes('supermercado')) {
+      db.exec("ALTER TABLE crm_clientes ADD COLUMN supermercado TEXT");
+      console.log("[DB] Columna supermercado agregada en crm_clientes");
+    }
   } catch(e) {}
 })();
 
@@ -289,12 +297,17 @@ export function listarCRM(comercial) {
       const key = d.telefono || ('ded-' + d.id);
       const existe = db.prepare("SELECT id FROM crm_clientes WHERE telefono = ?").get(key);
       if (!existe) {
-        db.prepare("INSERT INTO crm_clientes (telefono, comercial, dias_contacto, tipo_oferta, notas) VALUES (?, ?, ?, ?, ?)")
-          .run(key, d.comercial || 'Sin asignar', d.dias_venta || '[]', d.tipo_oferta || 'mayorista_mcba', d.notas || null);
-      } else if (d.dias_venta && d.dias_venta !== '[]') {
-        const crmRow = db.prepare("SELECT dias_contacto FROM crm_clientes WHERE telefono = ?").get(key);
-        if (crmRow && (!crmRow.dias_contacto || crmRow.dias_contacto === '[]')) {
-          db.prepare("UPDATE crm_clientes SET dias_contacto=? WHERE telefono=?").run(d.dias_venta, key);
+        db.prepare("INSERT INTO crm_clientes (telefono, comercial, dias_contacto, tipo_oferta, notas, retail_cats, supermercado) VALUES (?, ?, ?, ?, ?, ?, ?)")
+          .run(key, d.comercial || 'Sin asignar', d.dias_venta || '[]', d.tipo_oferta || 'mayorista_mcba', d.notas || null, d.retail_cats || '[]', d.supermercado || null);
+      } else {
+        // Siempre actualizar retail_cats y supermercado desde dedicados_clientes
+        db.prepare("UPDATE crm_clientes SET retail_cats=?, supermercado=? WHERE telefono=?")
+          .run(d.retail_cats || '[]', d.supermercado || null, key);
+        if (d.dias_venta && d.dias_venta !== '[]') {
+          const crmRow = db.prepare("SELECT dias_contacto FROM crm_clientes WHERE telefono = ?").get(key);
+          if (crmRow && (!crmRow.dias_contacto || crmRow.dias_contacto === '[]')) {
+            db.prepare("UPDATE crm_clientes SET dias_contacto=? WHERE telefono=?").run(d.dias_venta, key);
+          }
         }
       }
     });
@@ -356,7 +369,18 @@ export function actualizarModoCliente(telefono, modo, comercial, dias_contacto) 
 }
 
 export function obtenerCRM(telefono) {
-  return db.prepare("SELECT * FROM crm_clientes WHERE telefono = ?").get(telefono);
+  const crm = db.prepare("SELECT * FROM crm_clientes WHERE telefono = ?").get(telefono);
+  if (!crm) return null;
+  // Si es dedicado, enriquecer con retail_cats y supermercado desde dedicados_clientes
+  const ded = db.prepare("SELECT retail_cats, supermercado FROM dedicados_clientes WHERE telefono = ? OR id = ?").get(
+    telefono,
+    telefono && telefono.startsWith('ded-') ? parseInt(telefono.slice(4)) : -1
+  );
+  if (ded) {
+    crm.retail_cats = crm.retail_cats || ded.retail_cats || '[]';
+    crm.supermercado = crm.supermercado || ded.supermercado || null;
+  }
+  return crm;
 }
 
 // ── CRM Historial ──────────────────────────────────────────────────────────
