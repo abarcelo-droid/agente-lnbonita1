@@ -76,7 +76,9 @@ export function listarClientes(tipo, excluirCancelados) {
     ? " AND (metodo_pago IS NULL OR metodo_pago != 'cancelado')"
     : "";
   const query = tipo
-    ? "SELECT * FROM clientes WHERE tipo = ? AND activo = 1" + condCancelado + " ORDER BY nombre"
+    ? (tipo === 'mayorista_mcba'
+        ? "SELECT * FROM clientes WHERE tipo = ? AND activo = 1" + condCancelado + " ORDER BY zona, nombre"
+        : "SELECT * FROM clientes WHERE tipo = ? AND activo = 1" + condCancelado + " ORDER BY nombre")
     : "SELECT * FROM clientes WHERE activo = 1 AND tipo != 'nuevo'" + condCancelado + " ORDER BY tipo, nombre";
   return tipo ? db.prepare(query).all(tipo) : db.prepare(query).all();
 }
