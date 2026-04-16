@@ -286,8 +286,12 @@ export function vistaRetail() {
 
     const provSeleccionado = proveedores.find(function(p){ return p.seleccionado; }) || proveedores[0];
     const kilosProveedor = provSeleccionado ? (provSeleccionado.kilos || 1) : 1;
-    // gastosSum: monto por bulto / kilos del bulto del proveedor seleccionado
-    const gastosSum = gastos.filter(function(g){ return gastosSelIds.indexOf(g.id) >= 0; }).reduce(function(s,g){ return s + ((g.monto||0) / kilosProveedor); }, 0);
+    const bxpSalida = rp.bxp_salida || 1;
+    // gastosSum: bulto → monto/kg; pallet → monto/(kg × bxp_salida)
+    const gastosSum = gastos.filter(function(g){ return gastosSelIds.indexOf(g.id) >= 0; }).reduce(function(s,g){
+      var divisor = g.presentacion === 'pallet' ? (kilosProveedor * bxpSalida) : kilosProveedor;
+      return s + ((g.monto||0) / divisor);
+    }, 0);
     const costoBase = provSeleccionado ? (provSeleccionado.cbase / kilosProveedor) : 0;
     const costoTotal = costoBase + gastosSum;
 
@@ -296,6 +300,7 @@ export function vistaRetail() {
       id:           rp.id,
       nombre:       rp.nombre,
       categoria:    rp.categoria,
+      bxp_salida:   bxpSalida,
       proveedores:  proveedores,
       gastos_seleccionados: gastosSelIds,
       gastos_sum:   gastosSum,
@@ -304,7 +309,6 @@ export function vistaRetail() {
       oferta_producto_id: seleccion ? seleccion.oferta_producto_id : null,
       observaciones: seleccion ? seleccion.observaciones : null,
       precios_canal: preciosCanal,
-      observaciones: seleccion ? seleccion.observaciones : null,
     };
   });
 }

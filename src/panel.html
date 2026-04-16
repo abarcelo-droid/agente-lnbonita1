@@ -1339,10 +1339,12 @@ function loadRetail() {
       h+='<div style="font-size:11px;color:var(--mut)">Gastos: <strong id="gastos-sum-'+rp.id+'">$'+Math.round(rp.gastos_sum).toLocaleString('es-AR')+'</strong></div>';
       // Desagregado de gastos seleccionados
       var kgDesg=provSel?provSel.kilos:1;
+      var bxpDesg=rp.bxp_salida||1;
       var gastosSelDesg=gastos.filter(function(g){return rp.gastos_seleccionados.indexOf(g.id)>=0;});
       if(gastosSelDesg.length){
         gastosSelDesg.forEach(function(g){
-          var pk=Math.round(g.monto/(kgDesg>0?kgDesg:1));
+          var divisor=g.presentacion==='pallet'?(kgDesg*bxpDesg):kgDesg;
+          var pk=Math.round(g.monto/(divisor>0?divisor:1));
           h+='<div style="font-size:10px;color:var(--mut);padding-left:8px">'+(g.presentacion==='pallet'?'🏗':'📦')+' '+g.nombre+': <strong>$'+pk.toLocaleString('es-AR')+'/kg</strong></div>';
         });
       }
