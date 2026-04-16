@@ -212,7 +212,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
 
 <!-- CLIENTES -->
 <div class="sec" id="sec-may-a"><div class="ph"><div><div class="ph-t">Mayorista A</div><div class="ph-s">Puesteros fuera del MCBA - Entrega directa</div></div><button class="btn bb" onclick="openMC('mayorista_a')">+ Nuevo</button></div><div class="tw"><table><thead><tr><th>Cod</th><th>Telefono</th><th>Nombre</th><th>Empresa</th><th>Zona</th><th>Pago</th><th>Estado</th><th></th><th></th></tr></thead><tbody id="t-may-a"></tbody></table></div></div>
-<div class="sec" id="sec-may-mcba"><div class="ph"><div><div class="ph-t">Mayorista MCBA</div><div class="ph-s">Entregamos en MCBA en horario habitual</div></div><button class="btn bb" onclick="openMC('mayorista_mcba')">+ Nuevo</button></div><div class="tw"><table><thead><tr><th>Cod</th><th>Telefono</th><th>Nombre</th><th>Empresa</th><th>Nave</th><th>Horario</th><th>Pago</th><th>Estado</th><th></th><th></th></tr></thead><tbody id="t-may-mcba"></tbody></table></div></div>
+<div class="sec" id="sec-may-mcba"><div class="ph"><div><div class="ph-t">Mayorista MCBA</div><div class="ph-s">Entregamos en MCBA en horario habitual</div></div><button class="btn bb" onclick="openMC('mayorista_mcba')">+ Nuevo</button></div><div class="tw"><table><thead><tr><th>Nombre</th><th>Empresa</th><th>Nave</th><th>Horario</th><th>Pago</th><th></th><th></th><th></th></tr></thead><tbody id="t-may-mcba"></tbody></table></div></div>
 <div class="sec" id="sec-min-mcba"><div class="ph"><div><div class="ph-t">Minorista MCBA</div><div class="ph-s">Retiran en nuestro puesto - Nave 4 puestos 2-4-6</div></div><button class="btn bb" onclick="openMC('minorista_mcba')">+ Nuevo</button></div><div class="tw"><table><thead><tr><th>Cod</th><th>Telefono</th><th>Nombre</th><th>Empresa</th><th>Pago</th><th>Estado</th><th></th><th></th></tr></thead><tbody id="t-min-mcba"></tbody></table></div></div>
 <div class="sec" id="sec-min-ent"><div class="ph"><div><div class="ph-t">Minorista Entrega</div><div class="ph-s">Entrega directa CABA y GBA</div></div><button class="btn bb" onclick="openMC('minorista_entrega')">+ Nuevo</button></div><div class="tw"><table><thead><tr><th>Cod</th><th>Telefono</th><th>Nombre</th><th>Direccion</th><th>Pago</th><th>Estado</th><th></th><th></th></tr></thead><tbody id="t-min-ent"></tbody></table></div></div>
 <div class="sec" id="sec-food"><div class="ph"><div><div class="ph-t">Food Service</div><div class="ph-s">Restaurantes y hoteles</div></div><button class="btn bb" onclick="openMC('food_service')">+ Nuevo</button></div><div class="tw"><table><thead><tr><th>Cod</th><th>Telefono</th><th>Nombre</th><th>Empresa</th><th>Horario</th><th>Pago</th><th>Estado</th><th></th><th></th></tr></thead><tbody id="t-food"></tbody></table></div></div>
@@ -918,26 +918,30 @@ function loadCli(tipo, tbId) {
   api('/api/clientes?tipo='+tipo).then(function(cls) {
     var h='';
     var esCF=tipo==='consumidor_final';
+    var naveColors={
+      '1':'#3b82f6','2':'#10b981','3':'#f59e0b','4':'#ef4444','5':'#8b5cf6',
+      '6':'#06b6d4','7':'#f97316','8':'#84cc16','9':'#ec4899','10':'#6366f1',
+      '11':'#14b8a6','12':'#a855f7'
+    };
     cls.forEach(function(c) {
       var modo=c.modo||'pausa';
       var modoColor={crm:'#1e40af',automatico:'#166534',pausa:'#6b7280'}[modo]||'#6b7280';
       var modoBg={crm:'#dbeafe',automatico:'#dcfce7',pausa:'#f3f4f6'}[modo]||'#f3f4f6';
       h+='<tr>';
-      h+='<td style="font-size:11px;color:var(--mut)">'+(c.codigo_abasto||'-')+'</td>';
-      h+='<td style="font-size:12px">'+c.telefono+'</td>';
-      h+='<td style="font-weight:500">'+(c.nombre||'-')+'</td>';
+      h+='<td style="font-weight:700">'+(c.nombre||'-')+'</td>';
       if(tipo==='minorista_entrega') h+='<td style="font-size:12px">'+(c.direccion||'-')+'</td>';
       else if(tipo==='consumidor_final') h+='<td>'+(c.email||'-')+'</td><td style="font-size:12px">'+(c.direccion||'-')+'</td>';
       else if(tipo==='mayorista_mcba') {
         var naveVal=c.zona||'-';
-        h+='<td>'+(c.empresa||'-')+'</td>';
-        h+='<td><span style="display:inline-block;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600;background:#dbeafe;color:#1e40af">'+naveVal+'</span></td>';
+        var naveNum=(naveVal.replace(/[^0-9]/g,'')||'');
+        var naveColor=naveColors[naveNum]||'#6b7280';
+        h+='<td style="font-weight:700">'+(c.empresa||'-')+'</td>';
+        h+='<td><span style="display:inline-block;padding:2px 10px;border-radius:12px;font-size:11px;font-weight:700;background:'+naveColor+'22;color:'+naveColor+';border:1px solid '+naveColor+'55">'+naveVal+'</span></td>';
         h+='<td style="color:var(--mut)">'+(c.horario_entrega||'-')+'</td>';
       }
-      else { var extra=(tipo==='food_service') ? (c.horario_entrega||'-') : (c.zona||'-'); h+='<td>'+(c.empresa||'-')+'</td><td style="color:var(--mut)">'+extra+'</td>'; }
+      else { var extra=(tipo==='food_service') ? (c.horario_entrega||'-') : (c.zona||'-'); h+='<td style="font-weight:700">'+(c.empresa||'-')+'</td><td style="color:var(--mut)">'+extra+'</td>'; }
       if(tipo!=='consumidor_final') h+='<td>'+bPago(c.metodo_pago)+'</td>';
-      h+='<td><span class="bdg '+(c.activo?'bok':'ber')+'">'+(c.activo?'activo':'inactivo')+'</span></td>';
-      // Modo selector (no para consumidor_final)
+      // Modo selector
       if(!esCF){
         h+='<td><select onchange="cambiarModo(\''+esc(c.telefono)+'\',this)" style="font-size:11px;padding:2px 6px;border-radius:6px;border:1px solid var(--bor);background:'+modoBg+';color:'+modoColor+';font-weight:600;cursor:pointer">';
         h+='<option value="pausa"'+(modo==='pausa'?' selected':'')+'>⏸ Pausa</option>';
