@@ -923,6 +923,7 @@ function loadCli(tipo, tbId) {
       '6':'#06b6d4','7':'#f97316','8':'#84cc16','9':'#ec4899','10':'#6366f1',
       '11':'#14b8a6','12':'#a855f7'
     };
+    cls.forEach(function(c) { _cliCache[c.telefono]=c; });
     cls.forEach(function(c) {
       var modo=c.modo||'pausa';
       var modoColor={crm:'#1e40af',automatico:'#166534',pausa:'#6b7280'}[modo]||'#6b7280';
@@ -1014,9 +1015,16 @@ function openMC(tipo) {
   eid('div-c-nave').style.display=tipo==='mayorista_mcba'?'':'none';
   eid('mb-c').classList.add('on');
 }
+var _cliCache={};
 function editCli(tel) {
-  api('/api/clientes/'+encodeURIComponent(tel)).then(function(c) {
-    if(!c||!c.telefono){ toast('No encontrado','er'); return; }
+  var c=_cliCache[tel];
+  if(c){ _abrirEditCli(c); return; }
+  api('/api/clientes/'+encodeURIComponent(encodeURIComponent(tel))).then(function(c2) {
+    if(!c2||!c2.telefono){ toast('No encontrado','er'); return; }
+    _abrirEditCli(c2);
+  });
+}
+function _abrirEditCli(c) {
     eid('mb-c-tit').textContent='Editar '+lTipo(c.tipo);
     eid('c-tipo').value=c.tipo||''; eid('c-tel').value=c.telefono||'';
     eid('c-nom').value=c.nombre||''; eid('c-emp').value=c.empresa||'';
@@ -1029,7 +1037,7 @@ function editCli(tel) {
     eid('c-tel').readOnly=true; eid('c-tel').style.opacity='0.5';
     eid('div-c-nave').style.display=c.tipo==='mayorista_mcba'?'':'none';
     eid('mb-c').classList.add('on');
-  });
+  }
 }
 eid('btn-cerrar-mc').addEventListener('click',function(){ closeMB('mb-c'); });
 eid('btn-cancel-c').addEventListener('click',function(){ closeMB('mb-c'); });
