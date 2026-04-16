@@ -130,6 +130,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   <div class="ni" data-sec="envios"><span class="dot"></span>Enviar listados</div>
   <div class="ni" data-sec="repet"><span class="dot dc"></span>Repeticion compra</div>
   <div class="ng" style="margin-top:8px">Archivos Maestros</div>
+  <div class="ni" data-sec="busqueda"><span class="dot da"></span>Búsqueda Histórica</div>
   <div class="ni" data-sec="retail-prod"><span class="dot da"></span>Productos Retail</div>
   <div class="ni" data-sec="retail-gastos"><span class="dot dd"></span>Matrix de Gastos</div>
 </nav>
@@ -323,6 +324,22 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
 </div>
 
 <!-- ARCHIVOS MAESTROS: PRODUCTOS RETAIL -->
+<div class="sec" id="sec-busqueda">
+  <div class="ph">
+    <div><div class="ph-t">Búsqueda Histórica</div><div class="ph-s">Proveedores, clientes y productos desde la base de datos</div></div>
+    <button class="btn bo bs" onclick="forzarSyncSheets()" id="btn-sync-sheets">🔄 Sincronizar</button>
+  </div>
+  <div style="max-width:600px;margin-bottom:24px">
+    <div style="display:flex;gap:10px">
+      <input id="busq-input" placeholder="Buscar producto, proveedor o cliente..." style="flex:1;font-size:14px;padding:10px 14px;border-radius:8px;border:1px solid var(--bor)" onkeydown="if(event.key==='Enter') buscarHistorico()">
+      <button class="btn bb" onclick="buscarHistorico()">Buscar</button>
+    </div>
+    <div style="font-size:11px;color:var(--mut);margin-top:6px">Ejemplos: "zapallo anco", "SERGIO", "palta", "RABANITO"</div>
+  </div>
+  <div id="busq-resultados"></div>
+  <div id="busq-sync-status" style="font-size:11px;color:var(--mut);margin-top:16px"></div>
+</div>
+
 <div class="sec" id="sec-retail-prod">
   <div class="ph"><div><div class="ph-t">Productos Retail</div><div class="ph-s">Maestro de nombres para retail</div></div><button class="btn bb" id="btn-add-rp">+ Agregar</button></div>
   <div id="form-add-rp" style="display:none;background:var(--sur);border:1px solid var(--bor);border-radius:10px;padding:20px;margin-bottom:16px">
@@ -651,6 +668,7 @@ function loadSec(s) {
   var m = {
     inicio: loadInicio, pedidos: loadPedidos, logistica: loadLog,
     crm: loadCRM,
+    busqueda: function(){ if(_sectores.busqueda) _sectores.busqueda(); },
     'may-a':      function(){ loadCli('mayorista_a','t-may-a'); },
     'may-mcba':   function(){ loadCli('mayorista_mcba','t-may-mcba'); },
     'min-mcba':   function(){ loadCli('minorista_mcba','t-min-mcba'); },
@@ -2240,6 +2258,112 @@ eid('btn-save-mded-ped').addEventListener('click', function(){
 });
 
 loadInicio(); startPoll();
+
+// ── BÚSQUEDA HISTÓRICA ─────────────────────────────────────────────────────
+function buscarHistorico() {
+  var q = eid('busq-input').value.trim();
+  if (q.length < 2) { toast('Ingresá al menos 2 caracteres','er'); return; }
+  var res = eid('busq-resultados');
+  res.innerHTML = '<div style="color:var(--mut);padding:20px">Buscando...</div>';
+  api('/api/buscar?q='+encodeURIComponent(q)).then(function(data) {
+    if (data.error) { res.innerHTML='<div style="color:var(--err)">'+data.error+'</div>'; return; }
+    var h = '';
+
+    // Proveedores históricos del producto
+    if (data.proveedores && data.proveedores.length) {
+      h += '<div style="font-weight:700;font-size:13px;color:var(--burd);text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">Proveedores — "'+q+'"</div>';
+      h += '<div class="tw" style="margin-bottom:24px"><table><thead><tr><th>Proveedor</th><th>Compras</th><th>Última compra</th><th>Primera compra</th><th>Precio prom.</th><th>Total ingresado</th></tr></thead><tbody>';
+      data.proveedores.forEach(function(p) {
+        h += '<tr><td style="font-weight:600">'+p.proveedor+'</td>';
+        h += '<td>'+p.compras+'</td>';
+        h += '<td>'+p.ultima_compra+'</td>';
+        h += '<td style="color:var(--mut)">'+p.primera_compra+'</td>';
+        h += '<td style="font-weight:600;color:var(--burd)">$'+nr(p.precio_promedio)+'</td>';
+        h += '<td>'+nr(p.total_ingreso)+' u.</td></tr>';
+      });
+      h += '</tbody></table></div>';
+    }
+
+    // Artículos en ventas
+    if (data.productos && data.productos.length) {
+      h += '<div style="font-weight:700;font-size:13px;color:var(--burd);text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">Ventas históricas — "'+q+'"</div>';
+      h += '<div class="tw" style="margin-bottom:24px"><table><thead><tr><th>Artículo</th><th>Ventas</th><th>Última venta</th><th>Precio prom.</th><th>Total facturado</th><th>Cantidad total</th></tr></thead><tbody>';
+      data.productos.forEach(function(p) {
+        h += '<tr><td style="font-weight:500">'+p.articulo+'</td>';
+        h += '<td>'+p.ventas+'</td>';
+        h += '<td>'+p.ultima_venta+'</td>';
+        h += '<td style="font-weight:600;color:var(--burd)">$'+nr(p.precio_promedio)+'</td>';
+        h += '<td style="font-weight:600">$'+nr(p.total_facturado)+'</td>';
+        h += '<td>'+nr(p.total_cantidad)+'</td></tr>';
+      });
+      h += '</tbody></table></div>';
+    }
+
+    // Clientes
+    if (data.clientes && data.clientes.length) {
+      h += '<div style="font-weight:700;font-size:13px;color:var(--burd);text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">Clientes — "'+q+'"</div>';
+      h += '<div class="tw" style="margin-bottom:16px"><table><thead><tr><th>Cliente</th><th>Alias</th><th>Compras</th><th>Última compra</th><th>Primera compra</th><th>Total facturado</th><th>Productos distintos</th><th></th></tr></thead><tbody>';
+      data.clientes.forEach(function(c) {
+        h += '<tr><td style="font-weight:600">'+c.cliente+'</td>';
+        h += '<td style="color:var(--mut)">'+( c.alias||'-')+'</td>';
+        h += '<td>'+c.compras+'</td>';
+        h += '<td>'+c.ultima_compra+'</td>';
+        h += '<td style="color:var(--mut)">'+c.primera_compra+'</td>';
+        h += '<td style="font-weight:600;color:var(--burd)">$'+nr(c.total_facturado)+'</td>';
+        h += '<td>'+c.productos_distintos+'</td>';
+        h += '<td><button class="btn bo bs" onclick="verHistorialCliente(\''+esc(c.alias||c.cliente)+'\')">Ver historial</button></td></tr>';
+      });
+      h += '</tbody></table></div>';
+    }
+
+    if (!h) h = '<div class="emp">Sin resultados para "'+q+'"</div>';
+    res.innerHTML = h;
+  });
+}
+
+function verHistorialCliente(q) {
+  var res = eid('busq-resultados');
+  res.innerHTML = '<div style="color:var(--mut);padding:20px">Cargando historial...</div>';
+  api('/api/buscar/cliente?q='+encodeURIComponent(q)).then(function(data) {
+    if (!data || !data.length) { res.innerHTML='<div class="emp">Sin historial para "'+q+'"</div>'; return; }
+    var h = '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">';
+    h += '<div style="font-weight:700;font-size:13px;color:var(--burd);text-transform:uppercase;letter-spacing:.06em">Historial de '+q+' ('+data.length+' registros)</div>';
+    h += '<button class="btn bo bs" onclick="buscarHistorico()">← Volver</button></div>';
+    h += '<div class="tw"><table><thead><tr><th>Fecha</th><th>Artículo</th><th>Cantidad</th><th>Precio</th><th>Total</th><th>Vendedor</th></tr></thead><tbody>';
+    data.forEach(function(v) {
+      h += '<tr><td style="color:var(--mut)">'+v.fecha+'</td>';
+      h += '<td style="font-weight:500">'+v.articulo+'</td>';
+      h += '<td>'+v.cantidad+'</td>';
+      h += '<td>$'+nr(v.precio)+'</td>';
+      h += '<td style="font-weight:600">$'+nr(v.total)+'</td>';
+      h += '<td style="color:var(--mut)">'+( v.vendedor||'-')+'</td></tr>';
+    });
+    h += '</tbody></table></div>';
+    res.innerHTML = h;
+  });
+}
+
+function forzarSyncSheets() {
+  var btn = eid('btn-sync-sheets');
+  btn.textContent = '⏳ Sincronizando...'; btn.disabled = true;
+  api('/api/buscar/sync','POST',{}).then(function() {
+    toast('Sync iniciado — puede demorar unos minutos','ok');
+    btn.textContent = '🔄 Sincronizar'; btn.disabled = false;
+    // Mostrar estado
+    api('/api/buscar/sync').then(function(s) {
+      eid('busq-sync-status').innerHTML = '📦 Compras: '+nr(s.compras.n)+' registros · 🛒 Ventas: '+nr(s.ventas.n)+' registros · Último sync: '+(s.compras.ultimo||'nunca');
+    });
+  });
+}
+
+// Cargar estado del sync al entrar a la sección
+var _sectores = {busqueda: function() {
+  api('/api/buscar/sync').then(function(s) {
+    if (s && eid('busq-sync-status')) {
+      eid('busq-sync-status').innerHTML = '📦 Compras: '+nr(s.compras.n)+' registros · 🛒 Ventas: '+nr(s.ventas.n)+' registros · Último sync: '+(s.compras.ultimo||'nunca');
+    }
+  });
+}};
 // Cargar dedicados cuando se navega a esa seccion
 document.querySelectorAll('.ni').forEach(function(el){
   if(el.dataset.sec === 'dedicados') el.addEventListener('click', loadDed);

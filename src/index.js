@@ -9,9 +9,11 @@ import cobranzaRouter     from "./rutas/cobranza.js";
 import ofertaRouter       from "./rutas/oferta.js";
 import cotizacionRouter   from "./rutas/cotizacion.js";
 import crmRouter          from "./rutas/crm.js";
+import buscarRouter       from "./rutas/buscar.js";
 import { guardarSnapshotCRM } from "./servicios/db.js";
+import { syncSheets } from "./servicios/sheets.js";
 
-// Scheduler: snapshot CRM a medianoche
+// Scheduler: snapshot CRM + sync sheets a medianoche
 function programarSnapshotCRM() {
   const ahora = new Date();
   const medianoche = new Date(ahora);
@@ -20,9 +22,25 @@ function programarSnapshotCRM() {
   console.log(`[CRM] Snapshot programado en ${Math.round(msHastaMedianoche/1000/60)} minutos`);
   setTimeout(function() {
     guardarSnapshotCRM();
-    setInterval(guardarSnapshotCRM, 24 * 60 * 60 * 1000);
+    syncSheets();
+    setInterval(function() {
+      guardarSnapshotCRM();
+      syncSheets();
+    }, 24 * 60 * 60 * 1000);
   }, msHastaMedianoche);
 }
+
+// Sync inicial al arrancar si no hay datos
+import db from "./servicios/db.js";
+setTimeout(function() {
+  try {
+    const n = db.prepare("SELECT COUNT(*) as n FROM sheet_compras").get();
+    if (!n || n.n === 0) {
+      console.log('[Sheets] Sin datos locales, iniciando sync inicial...');
+      syncSheets().catch(e => console.error('[Sheets] Error sync inicial:', e.message));
+    }
+  } catch(e) {}
+}, 8000);
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -83,6 +101,7 @@ app.use("/api", cobranzaRouter);
 app.use("/api", ofertaRouter);
 app.use("/api", cotizacionRouter);
 app.use("/api", crmRouter);
+app.use("/api", buscarRouter);
 
 // Health check
 app.get("/", (req, res) => res.json({ status:"ok", version:"3.0", panel:"/panel" }));
