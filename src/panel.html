@@ -1464,9 +1464,25 @@ function guardarCanal(rpid) {
 }
 function selProv(rpid, opid) {
   var checks=document.querySelectorAll('input[type=checkbox][onchange*="toggleGasto('+rpid+',"]');
-  var gids=[];
-  checks.forEach(function(c){ if(c.checked) gids.push(parseInt(c.value)); });
-  api('/api/retail/seleccion','POST',{retail_producto_id:rpid,oferta_producto_id:opid,gastos_ids:gids}).then(function(){ toast('Proveedor seleccionado','ok'); });
+  var gids=[]; checks.forEach(function(c){ if(c.checked) gids.push(parseInt(c.value)); });
+  api('/api/retail/seleccion','POST',{retail_producto_id:rpid,oferta_producto_id:opid,gastos_ids:gids}).then(function(){
+    toast('Proveedor seleccionado','ok');
+    api('/api/retail/vista').then(function(lista){
+      var rp=lista.find(function(x){return x.id===rpid;});
+      if(!rp) return;
+      var el=document.getElementById('costo-total-'+rpid);
+      var eg=document.getElementById('gastos-sum-'+rpid);
+      if(el) el.textContent='$'+Math.round(rp.costo_kg_total).toLocaleString('es-AR')+'/kg';
+      if(eg) eg.textContent='$'+Math.round(rp.gastos_sum).toLocaleString('es-AR');
+      var provSel=rp.proveedores&&(rp.proveedores.find(function(p){return p.seleccionado;})||rp.proveedores[0]);
+      var kgTot=provSel?provSel.kilos:0;
+      document.querySelectorAll('input[data-rpid="'+rpid+'"]').forEach(function(inp){
+        inp.setAttribute('data-costo', Math.round(rp.costo_kg_total));
+        inp.setAttribute('data-kgtot', kgTot);
+        if(inp.getAttribute('data-canal')) calcRet(inp);
+      });
+    });
+  });
 }
 function toggleGasto(rpid,cb) {
   var radio=document.querySelector('input[type=radio][name="pv-'+rpid+'"]:checked');
