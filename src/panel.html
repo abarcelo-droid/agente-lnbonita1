@@ -932,6 +932,7 @@ function imprimirLog() {
 }
 
 // CLIENTES
+var _cliCache={};
 function loadCli(tipo, tbId) {
   api('/api/clientes?tipo='+tipo).then(function(cls) {
     var h='';
@@ -1033,7 +1034,6 @@ function openMC(tipo) {
   eid('div-c-nave').style.display=tipo==='mayorista_mcba'?'':'none';
   eid('mb-c').classList.add('on');
 }
-var _cliCache={};
 function editCli(tel) {
   var c=_cliCache[tel];
   if(c){ _abrirEditCli(c); return; }
@@ -1055,7 +1055,6 @@ function _abrirEditCli(c) {
     eid('c-tel').readOnly=true; eid('c-tel').style.opacity='0.5';
     eid('div-c-nave').style.display=c.tipo==='mayorista_mcba'?'':'none';
     eid('mb-c').classList.add('on');
-  }
 }
 eid('btn-cerrar-mc').addEventListener('click',function(){ closeMB('mb-c'); });
 eid('btn-cancel-c').addEventListener('click',function(){ closeMB('mb-c'); });
