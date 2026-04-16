@@ -627,11 +627,11 @@ var pedLins = [];
 var TIPOS_O1 = ['mayorista_a','mayorista_mcba','minorista_mcba','minorista_entrega'];
 var TIPOS_O2 = ['food_service','consumidor_final'];
 var CANALES = [
-  {k:'cencosud', l:'Cencosud',   c:0.88},
-  {k:'carrefour',l:'Carrefour',  c:0.81},
-  {k:'coto',     l:'Coto',       c:0.89},
-  {k:'chango',   l:'Chango Mas', c:0.77},
-  {k:'coop',     l:'Coop Obrera',c:0.90}
+  {k:'cencosud', l:'Cencosud',   c:0.88, img:'/static/Cencosud.js'},
+  {k:'carrefour',l:'Carrefour',  c:0.81, img:'/static/Carrefour.js'},
+  {k:'coto',     l:'Coto',       c:0.89, img:'/static/Coto.js'},
+  {k:'chango',   l:'Chango Mas', c:0.77, img:'/static/Chango Mas.js'},
+  {k:'coop',     l:'Coop Obrera',c:0.90, img:'/static/Cooperativa.js'}
 ];
 
 // NAV
@@ -1373,7 +1373,7 @@ function loadRetail() {
         var dif=precio>0?neto-costoTotal:null;
         var difBulto=dif!==null&&kgTot>0?dif*kgTot:null;
         var dc=dif===null?'var(--mut)':dif>=0?'var(--ok)':'var(--err)';
-        h+='<tr style="border-bottom:1px solid var(--bor)"><td style="padding:6px 8px;font-weight:500">'+canal.l+'</td>';
+        h+='<tr style="border-bottom:1px solid var(--bor)"><td style="padding:6px 8px;font-weight:500"><img src="'+canal.img+'" alt="'+canal.l+'" style="height:22px;object-fit:contain;vertical-align:middle" onerror="this.style.display=\'none\';this.nextSibling.style.display=\'inline\'"><span style="display:none">'+canal.l+'</span></td>';
         h+='<td style="padding:5px 6px;text-align:center"><div style="display:flex;align-items:center;justify-content:center;gap:3px"><span style="color:var(--mut);font-size:11px">$</span>';
         h+='<input class="pinp" type="number" data-rpid="'+rp.id+'" data-canal="'+canal.k+'" data-coef="'+canal.c+'" data-costo="'+Math.round(costoTotal)+'" data-kgtot="'+kgTot+'" value="'+precio+'" style="width:78px" oninput="calcRet(this)"></div></td>';
         h+='<td style="padding:5px 6px;text-align:center"><div style="display:flex;align-items:center;justify-content:center;gap:3px"><input type="number" class="pinp" style="width:50px;color:var(--warn)" value="'+perdida+'" min="0" step="0.5" data-rpid="'+rp.id+'" data-canal="'+canal.k+'" data-field="perdida" data-coef="'+canal.c+'" data-costo="'+Math.round(costoTotal)+'" data-kgtot="'+kgTot+'" oninput="calcRet(this)"><span style="font-size:11px;color:var(--mut)">kg</span></div></td>';
