@@ -100,7 +100,13 @@ async function getGoogleToken() {
     headers: {'Content-Type':'application/x-www-form-urlencoded'},
     body: `grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Ajwt-bearer&assertion=${jwt}`
   });
-  const data = await resp.json();
+  const text = await resp.text();
+  let data;
+  try { data = JSON.parse(text); } 
+  catch(e) { 
+    console.error('[Sheets] Respuesta token no es JSON:', text.slice(0,300));
+    throw new Error('Token response no es JSON: '+text.slice(0,200)); 
+  }
   if (!data.access_token) throw new Error('No se pudo obtener token: '+JSON.stringify(data));
   return data.access_token;
 }
@@ -109,7 +115,13 @@ async function getGoogleToken() {
 async function leerRango(token, rango) {
   const url = `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${encodeURIComponent(rango)}`;
   const resp = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
-  const data = await resp.json();
+  const text = await resp.text();
+  let data;
+  try { data = JSON.parse(text); }
+  catch(e) {
+    console.error('[Sheets] leerRango no es JSON:', text.slice(0,300));
+    throw new Error('Respuesta no es JSON para rango '+rango);
+  }
   if (data.error) throw new Error(`Error leyendo ${rango}: ${data.error.message}`);
   return data.values || [];
 }
