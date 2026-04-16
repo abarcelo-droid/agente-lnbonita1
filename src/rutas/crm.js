@@ -32,10 +32,40 @@ router.get("/crm/cliente/:telefono", (req, res) => {
   const crm = obtenerCRM(req.params.telefono);
   if (!crm) return res.status(404).json({ error: "No encontrado" });
 
-  // Traer productos disponibles según tipo_oferta del cliente
-  const oferta = ['mayorista_a','mayorista_mcba','minorista_mcba','minorista_entrega','food_service'].includes(crm.tipo_oferta)
-    ? (crm.tipo_oferta === 'mayorista_a' || crm.tipo_oferta === 'mayorista_mcba' || crm.tipo_oferta === 'minorista_mcba' || crm.tipo_oferta === 'minorista_entrega' ? 'oferta1' : 'oferta2')
-    : 'oferta1';
+  // ── Caso: dedicado con supermercado → traer productos retail filtrados por categoría ──
+  const retailCats = (() => {
+    try { return JSON.parse(crm.retail_cats || '[]'); } catch { return []; }
+  })();
+
+  if (crm.supermercado && retailCats.length > 0) {
+    const placeholders = retailCats.map(() => '?').join(',');
+    const retailProds = db.prepare(`
+      SELECT rp.id, rp.nombre, rp.categoria
+      FROM retail_productos rp
+      WHERE rp.activo = 1 AND rp.categoria IN (${placeholders})
+      ORDER BY rp.categoria, rp.nombre
+    `).all(...retailCats);
+
+    const prods = retailProds.map(rp => {
+      const canales = db.prepare(`
+        SELECT canal, precio FROM retail_precios_canal WHERE retail_producto_id = ?
+      `).all(rp.id);
+      const precios_canal = {};
+      canales.forEach(c => { precios_canal[c.canal] = c.precio; });
+      return { ...rp, precios_canal };
+    });
+
+    return res.json({
+      crm,
+      productos: prods,
+      es_retail: true,
+      supermercado: crm.supermercado,
+    });
+  }
+
+  // ── Caso normal: oferta 1 o 2 según tipo de cliente ──
+  const oferta = ['mayorista_a','mayorista_mcba','minorista_mcba','minorista_entrega'].includes(crm.tipo_oferta)
+    ? 'oferta1' : 'oferta2';
 
   const productos = db.prepare(`
     SELECT op.*, p.precio, p.disponible_text
@@ -45,7 +75,7 @@ router.get("/crm/cliente/:telefono", (req, res) => {
     ORDER BY op.categoria, op.nombre
   `).all(crm.tipo_oferta, oferta);
 
-  res.json({ crm, productos });
+  res.json({ crm, productos, es_retail: false });
 });
 
 // Guardar anotador del cliente CRM
