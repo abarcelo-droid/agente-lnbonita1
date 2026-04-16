@@ -245,6 +245,10 @@ db.exec(`
     if (!cols.includes('tipo_oferta')) {
       db.exec("ALTER TABLE crm_clientes ADD COLUMN tipo_oferta TEXT DEFAULT 'mayorista_mcba'");
     }
+    if (!cols.includes('anotador')) {
+      db.exec("ALTER TABLE crm_clientes ADD COLUMN anotador TEXT");
+      console.log("[DB] Columna anotador agregada en crm_clientes");
+    }
   } catch(e) {}
 })();
 

@@ -130,7 +130,6 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   <div class="ni" data-sec="envios"><span class="dot"></span>Enviar listados</div>
   <div class="ni" data-sec="repet"><span class="dot dc"></span>Repeticion compra</div>
   <div class="ng" style="margin-top:8px">Archivos Maestros</div>
-  <div class="ni" data-sec="busqueda"><span class="dot da"></span>Búsqueda Histórica</div>
   <div class="ni" data-sec="retail-prod"><span class="dot da"></span>Productos Retail</div>
   <div class="ni" data-sec="retail-gastos"><span class="dot dd"></span>Matrix de Gastos</div>
 </nav>
@@ -324,22 +323,6 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
 </div>
 
 <!-- ARCHIVOS MAESTROS: PRODUCTOS RETAIL -->
-<div class="sec" id="sec-busqueda">
-  <div class="ph">
-    <div><div class="ph-t">Búsqueda Histórica</div><div class="ph-s">Proveedores, clientes y productos desde la base de datos</div></div>
-    <button class="btn bo bs" onclick="forzarSyncSheets()" id="btn-sync-sheets">🔄 Sincronizar</button>
-  </div>
-  <div style="max-width:600px;margin-bottom:24px">
-    <div style="display:flex;gap:10px">
-      <input id="busq-input" placeholder="Buscar producto, proveedor o cliente..." style="flex:1;font-size:14px;padding:10px 14px;border-radius:8px;border:1px solid var(--bor)" onkeydown="if(event.key==='Enter') buscarHistorico()">
-      <button class="btn bb" onclick="buscarHistorico()">Buscar</button>
-    </div>
-    <div style="font-size:11px;color:var(--mut);margin-top:6px">Ejemplos: "zapallo anco", "SERGIO", "palta", "RABANITO"</div>
-  </div>
-  <div id="busq-resultados"></div>
-  <div id="busq-sync-status" style="font-size:11px;color:var(--mut);margin-top:16px"></div>
-</div>
-
 <div class="sec" id="sec-retail-prod">
   <div class="ph"><div><div class="ph-t">Productos Retail</div><div class="ph-s">Maestro de nombres para retail</div></div><button class="btn bb" id="btn-add-rp">+ Agregar</button></div>
   <div id="form-add-rp" style="display:none;background:var(--sur);border:1px solid var(--bor);border-radius:10px;padding:20px;margin-bottom:16px">
@@ -668,7 +651,6 @@ function loadSec(s) {
   var m = {
     inicio: loadInicio, pedidos: loadPedidos, logistica: loadLog,
     crm: loadCRM,
-    busqueda: function(){ if(_sectores.busqueda) _sectores.busqueda(); },
     'may-a':      function(){ loadCli('mayorista_a','t-may-a'); },
     'may-mcba':   function(){ loadCli('mayorista_mcba','t-may-mcba'); },
     'min-mcba':   function(){ loadCli('minorista_mcba','t-min-mcba'); },
@@ -932,7 +914,6 @@ function imprimirLog() {
 }
 
 // CLIENTES
-var _cliCache={};
 function loadCli(tipo, tbId) {
   api('/api/clientes?tipo='+tipo).then(function(cls) {
     var h='';
@@ -1034,6 +1015,7 @@ function openMC(tipo) {
   eid('div-c-nave').style.display=tipo==='mayorista_mcba'?'':'none';
   eid('mb-c').classList.add('on');
 }
+var _cliCache={};
 function editCli(tel) {
   var c=_cliCache[tel];
   if(c){ _abrirEditCli(c); return; }
@@ -1055,6 +1037,7 @@ function _abrirEditCli(c) {
     eid('c-tel').readOnly=true; eid('c-tel').style.opacity='0.5';
     eid('div-c-nave').style.display=c.tipo==='mayorista_mcba'?'':'none';
     eid('mb-c').classList.add('on');
+  }
 }
 eid('btn-cerrar-mc').addEventListener('click',function(){ closeMB('mb-c'); });
 eid('btn-cancel-c').addEventListener('click',function(){ closeMB('mb-c'); });
@@ -1946,37 +1929,89 @@ function ejecutarTransicionCRM(id, situacion, nota) {
 }
 
 function abrirFichaCRM(telefono) {
-  api('/api/crm/cliente/'+encodeURIComponent(telefono)).then(function(data) {
+  Promise.all([
+    api('/api/crm/cliente/'+encodeURIComponent(telefono)),
+    api('/api/retail/gastos')
+  ]).then(function(res) {
+    var data=res[0]; var gastosDisp=res[1]||[];
     if(!data||!data.crm){ toast('Sin datos','er'); return; }
     var crm=data.crm; var prods=data.productos||[];
     var dias=JSON.parse(crm.dias_contacto||'[]');
     var h='<div style="padding:4px 0 16px">';
     // Situacion
     h+='<div style="margin-bottom:14px">';
-    h+='<div style="font-size:11px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">Situaci\u00f3n</div>';
+    h+='<div style="font-size:11px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">Situación</div>';
     h+='<div style="display:flex;gap:6px;flex-wrap:wrap">';
     CRM_COLS.forEach(function(c){
       var act=c.key===crm.situacion;
       h+='<button onclick="cambiarSituacionFicha('+crm.id+',\''+c.key+'\',\''+crm.situacion+'\')" style="font-size:12px;padding:5px 14px;border-radius:12px;border:1.5px solid '+c.color+';background:'+(act?c.color:'transparent')+';color:'+(act?'#fff':c.color)+';cursor:pointer;font-weight:600">'+c.label+'</button>';
     });
     h+='</div></div>';
-    // Dias (solo lectura)
+    // Dias
     if(dias.length){
-      h+='<div style="margin-bottom:14px"><div style="font-size:11px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">D\u00edas de contacto</div>';
+      h+='<div style="margin-bottom:14px"><div style="font-size:11px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">Días de contacto</div>';
       h+='<div style="display:flex;gap:4px;flex-wrap:wrap">';
       dias.forEach(function(d){
         h+='<span style="font-size:11px;padding:3px 10px;border-radius:10px;background:var(--burg);color:#fff;font-weight:500">'+d.charAt(0).toUpperCase()+d.slice(1)+'</span>';
       });
       h+='</div></div>';
     }
-    // Notas/ultimo registro
+    // Ultimo registro
     if(crm.notas){
       h+='<div style="margin-bottom:14px;padding:8px 12px;background:var(--bg);border-radius:8px;border-left:3px solid var(--bor)">';
-      h+='<div style="font-size:10px;font-weight:700;color:var(--mut);text-transform:uppercase;margin-bottom:4px">\u00daltimo registro</div>';
+      h+='<div style="font-size:10px;font-weight:700;color:var(--mut);text-transform:uppercase;margin-bottom:4px">Último registro</div>';
       h+='<div style="font-size:12px;color:var(--txt);white-space:pre-wrap">'+crm.notas+'</div>';
       h+='</div>';
     }
-    // Productos
+
+    // ── Calculadora ──────────────────────────────────────────────────────
+    if(!data.es_retail && prods.length) {
+      h+='<div style="margin-bottom:20px;background:var(--bg);border-radius:10px;padding:14px;border:1px solid var(--bor)">';
+      h+='<div style="font-size:11px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.05em;margin-bottom:10px">🧮 Calculadora</div>';
+      // Selector de producto
+      h+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">';
+      h+='<div><div style="font-size:10px;font-weight:700;color:var(--mut);text-transform:uppercase;margin-bottom:4px">Producto</div>';
+      h+='<select id="calc-prod" onchange="calcCRM()" style="width:100%;font-size:12px;padding:6px 8px;border-radius:6px;border:1px solid var(--bor);background:white">';
+      h+='<option value="">— Elegir —</option>';
+      prods.forEach(function(p){
+        if(p.precio) h+='<option value="'+p.precio+'" data-nom="'+esc(p.nombre)+'">'+p.nombre+(p.proveedor?' ('+p.proveedor+')':'')+'</option>';
+      });
+      h+='</select></div>';
+      // Precio de venta
+      h+='<div><div style="font-size:10px;font-weight:700;color:var(--mut);text-transform:uppercase;margin-bottom:4px">Precio venta $/kg</div>';
+      h+='<input id="calc-pventa" type="number" oninput="calcCRM()" placeholder="0" style="width:100%;font-size:13px;padding:6px 8px;border-radius:6px;border:1px solid var(--bor);box-sizing:border-box"></div>';
+      h+='</div>';
+      // Gastos de salida
+      var gastosSal=gastosDisp.filter(function(g){return g.tipo==='salida';});
+      if(gastosSal.length){
+        h+='<div style="margin-bottom:10px"><div style="font-size:10px;font-weight:700;color:var(--mut);text-transform:uppercase;margin-bottom:6px">Gastos de salida</div>';
+        h+='<div style="display:flex;gap:6px;flex-wrap:wrap">';
+        gastosSal.forEach(function(g){
+          h+='<label style="display:flex;align-items:center;gap:4px;font-size:11px;cursor:pointer;background:white;border:1px solid var(--bor);padding:3px 8px;border-radius:8px">';
+          h+='<input type="checkbox" class="calc-gasto" data-monto="'+g.monto+'" data-pres="'+g.presentacion+'" onchange="calcCRM()" style="accent-color:var(--burg)">';
+          h+=(g.presentacion==='pallet'?'🏗':'📦')+' '+g.nombre+'</label>';
+        });
+        h+='</div></div>';
+      }
+      // Resultado
+      h+='<div id="calc-resultado" style="background:var(--sur);border-radius:8px;padding:10px 12px;font-size:13px;display:none">';
+      h+='<div style="display:flex;justify-content:space-between;margin-bottom:4px"><span style="color:var(--mut)">Costo base:</span><span id="calc-r-costo">-</span></div>';
+      h+='<div style="display:flex;justify-content:space-between;margin-bottom:4px"><span style="color:var(--mut)">Gastos:</span><span id="calc-r-gastos">-</span></div>';
+      h+='<div style="display:flex;justify-content:space-between;margin-bottom:4px"><span style="color:var(--mut)">Costo total:</span><span id="calc-r-ctotal">-</span></div>';
+      h+='<div style="display:flex;justify-content:space-between;border-top:1px solid var(--bor);padding-top:6px;margin-top:4px">';
+      h+='<span style="font-weight:700">Margen:</span><span id="calc-r-margen" style="font-weight:700;font-size:15px">-</span></div>';
+      h+='</div>';
+      h+='</div>';
+    }
+
+    // ── Anotador ─────────────────────────────────────────────────────────
+    h+='<div style="margin-bottom:20px">';
+    h+='<div style="font-size:11px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">📝 Anotador</div>';
+    h+='<textarea id="crm-anotador" rows="3" placeholder="Comentarios sobre este cliente..." style="width:100%;font-size:12px;border-radius:8px;border:1px solid var(--bor);padding:8px 10px;box-sizing:border-box;resize:vertical">'+(crm.anotador||'')+'</textarea>';
+    h+='<button onclick="guardarAnotador('+crm.id+')" class="btn bo bs" style="margin-top:6px;font-size:12px">Guardar nota</button>';
+    h+='</div>';
+
+    // ── Productos ─────────────────────────────────────────────────────────
     var esRetail=data.es_retail;
     var tituloOferta=esRetail?'Retail':lTipo(crm.tipo_oferta);
     h+='<div style="font-size:12px;font-weight:700;color:var(--burd);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">Productos disponibles — '+tituloOferta+'</div>';
@@ -2004,17 +2039,18 @@ function abrirFichaCRM(telefono) {
       h+='</tbody></table>';
     } else {
       var catAct='';
-      h+='<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="background:var(--burd)"><th style="padding:6px 8px;color:#fff;text-align:left">Producto</th><th style="padding:6px 8px;color:#fff;text-align:left">Proveedor</th><th style="padding:6px 8px;color:#fff;text-align:right">Precio</th></tr></thead><tbody>';
+      h+='<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="background:var(--burd)"><th style="padding:6px 8px;color:#fff;text-align:left">Producto</th><th style="padding:6px 8px;color:#fff;text-align:left">Proveedor</th><th style="padding:6px 8px;color:#fff;text-align:right">Precio</th><th style="padding:6px 8px;color:#fff;text-align:center">Calc.</th></tr></thead><tbody>';
       prods.forEach(function(p){
         if(p.categoria!==catAct){
           catAct=p.categoria;
-          h+='<tr><td colspan="3" style="background:#4a90b8;color:#fff;font-size:10px;font-weight:700;text-transform:uppercase;padding:5px 8px;letter-spacing:.06em">'+(catAct||'Sin categoria')+'</td></tr>';
+          h+='<tr><td colspan="4" style="background:#4a90b8;color:#fff;font-size:10px;font-weight:700;text-transform:uppercase;padding:5px 8px;letter-spacing:.06em">'+(catAct||'Sin categoria')+'</td></tr>';
         }
         var disp=p.disponible_text||'sin_stock';
         var dispColor=disp==='disponible'?'var(--ok)':disp==='mnc'?'var(--warn)':'var(--mut)';
         h+='<tr style="border-bottom:1px solid var(--bor)"><td style="padding:5px 8px;font-weight:500">'+p.nombre+(p.descripcion?'<div style="font-size:10px;color:var(--mut)">'+p.descripcion+'</div>':'')+'</td>';
         h+='<td style="padding:5px 8px;color:var(--mut);font-size:11px">'+(p.proveedor||'-')+'</td>';
         h+='<td style="padding:5px 8px;text-align:right;font-weight:600;color:'+dispColor+'">'+(p.precio?'$'+Math.round(p.precio).toLocaleString('es-AR'):'-')+'</td>';
+        h+='<td style="padding:5px 8px;text-align:center">'+(p.precio?'<button onclick="usarEnCalc('+p.precio+')" style="font-size:10px;padding:2px 8px;border-radius:6px;border:1px solid var(--bor);background:var(--bg);cursor:pointer">Usar</button>':'')+'</td>';
         h+='</tr>';
       });
       h+='</tbody></table>';
@@ -2025,6 +2061,42 @@ function abrirFichaCRM(telefono) {
     eid('mb-crm-body')._crmId=crm.id;
     eid('mb-crm-body')._tel=telefono;
     eid('mb-crm').classList.add('on');
+  });
+}
+
+function calcCRM() {
+  var sel=eid('calc-prod'); var pventa=parseFloat(eid('calc-pventa').value)||0;
+  if(!sel||!sel.value) return;
+  var costo=parseFloat(sel.value)||0;
+  var gastos=0;
+  document.querySelectorAll('.calc-gasto:checked').forEach(function(g){
+    gastos+=parseFloat(g.getAttribute('data-monto'))||0;
+  });
+  var costoTotal=costo+gastos;
+  var margen=pventa>0?((pventa-costoTotal)/pventa*100):0;
+  var difKg=pventa-costoTotal;
+  var res=eid('calc-resultado');
+  if(!res) return;
+  res.style.display='block';
+  eid('calc-r-costo').textContent='$'+Math.round(costo).toLocaleString('es-AR')+'/kg';
+  eid('calc-r-gastos').textContent='$'+Math.round(gastos).toLocaleString('es-AR')+'/kg';
+  eid('calc-r-ctotal').textContent='$'+Math.round(costoTotal).toLocaleString('es-AR')+'/kg';
+  var margenEl=eid('calc-r-margen');
+  margenEl.textContent=(margen>=0?'+':'')+margen.toFixed(1)+'%  ($'+Math.round(difKg).toLocaleString('es-AR')+'/kg)';
+  margenEl.style.color=margen>=15?'var(--ok)':margen>=0?'var(--warn)':'var(--err)';
+}
+
+function usarEnCalc(precio) {
+  var inp=eid('calc-pventa'); if(inp){ inp.value=precio; calcCRM(); }
+  var sel=eid('calc-prod');
+  // scroll up to calculadora
+  if(sel) sel.scrollIntoView({behavior:'smooth',block:'center'});
+}
+
+function guardarAnotador(id) {
+  var txt=eid('crm-anotador'); if(!txt) return;
+  api('/api/crm/'+id+'/anotador','PATCH',{anotador:txt.value}).then(function(){
+    toast('Nota guardada','ok');
   });
 }
 
@@ -2257,112 +2329,6 @@ eid('btn-save-mded-ped').addEventListener('click', function(){
 });
 
 loadInicio(); startPoll();
-
-// ── BÚSQUEDA HISTÓRICA ─────────────────────────────────────────────────────
-function buscarHistorico() {
-  var q = eid('busq-input').value.trim();
-  if (q.length < 2) { toast('Ingresá al menos 2 caracteres','er'); return; }
-  var res = eid('busq-resultados');
-  res.innerHTML = '<div style="color:var(--mut);padding:20px">Buscando...</div>';
-  api('/api/buscar?q='+encodeURIComponent(q)).then(function(data) {
-    if (data.error) { res.innerHTML='<div style="color:var(--err)">'+data.error+'</div>'; return; }
-    var h = '';
-
-    // Proveedores históricos del producto
-    if (data.proveedores && data.proveedores.length) {
-      h += '<div style="font-weight:700;font-size:13px;color:var(--burd);text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">Proveedores — "'+q+'"</div>';
-      h += '<div class="tw" style="margin-bottom:24px"><table><thead><tr><th>Proveedor</th><th>Compras</th><th>Última compra</th><th>Primera compra</th><th>Precio prom.</th><th>Total ingresado</th></tr></thead><tbody>';
-      data.proveedores.forEach(function(p) {
-        h += '<tr><td style="font-weight:600">'+p.proveedor+'</td>';
-        h += '<td>'+p.compras+'</td>';
-        h += '<td>'+p.ultima_compra+'</td>';
-        h += '<td style="color:var(--mut)">'+p.primera_compra+'</td>';
-        h += '<td style="font-weight:600;color:var(--burd)">$'+nr(p.precio_promedio)+'</td>';
-        h += '<td>'+nr(p.total_ingreso)+' u.</td></tr>';
-      });
-      h += '</tbody></table></div>';
-    }
-
-    // Artículos en ventas
-    if (data.productos && data.productos.length) {
-      h += '<div style="font-weight:700;font-size:13px;color:var(--burd);text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">Ventas históricas — "'+q+'"</div>';
-      h += '<div class="tw" style="margin-bottom:24px"><table><thead><tr><th>Artículo</th><th>Ventas</th><th>Última venta</th><th>Precio prom.</th><th>Total facturado</th><th>Cantidad total</th></tr></thead><tbody>';
-      data.productos.forEach(function(p) {
-        h += '<tr><td style="font-weight:500">'+p.articulo+'</td>';
-        h += '<td>'+p.ventas+'</td>';
-        h += '<td>'+p.ultima_venta+'</td>';
-        h += '<td style="font-weight:600;color:var(--burd)">$'+nr(p.precio_promedio)+'</td>';
-        h += '<td style="font-weight:600">$'+nr(p.total_facturado)+'</td>';
-        h += '<td>'+nr(p.total_cantidad)+'</td></tr>';
-      });
-      h += '</tbody></table></div>';
-    }
-
-    // Clientes
-    if (data.clientes && data.clientes.length) {
-      h += '<div style="font-weight:700;font-size:13px;color:var(--burd);text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">Clientes — "'+q+'"</div>';
-      h += '<div class="tw" style="margin-bottom:16px"><table><thead><tr><th>Cliente</th><th>Alias</th><th>Compras</th><th>Última compra</th><th>Primera compra</th><th>Total facturado</th><th>Productos distintos</th><th></th></tr></thead><tbody>';
-      data.clientes.forEach(function(c) {
-        h += '<tr><td style="font-weight:600">'+c.cliente+'</td>';
-        h += '<td style="color:var(--mut)">'+( c.alias||'-')+'</td>';
-        h += '<td>'+c.compras+'</td>';
-        h += '<td>'+c.ultima_compra+'</td>';
-        h += '<td style="color:var(--mut)">'+c.primera_compra+'</td>';
-        h += '<td style="font-weight:600;color:var(--burd)">$'+nr(c.total_facturado)+'</td>';
-        h += '<td>'+c.productos_distintos+'</td>';
-        h += '<td><button class="btn bo bs" onclick="verHistorialCliente(\''+esc(c.alias||c.cliente)+'\')">Ver historial</button></td></tr>';
-      });
-      h += '</tbody></table></div>';
-    }
-
-    if (!h) h = '<div class="emp">Sin resultados para "'+q+'"</div>';
-    res.innerHTML = h;
-  });
-}
-
-function verHistorialCliente(q) {
-  var res = eid('busq-resultados');
-  res.innerHTML = '<div style="color:var(--mut);padding:20px">Cargando historial...</div>';
-  api('/api/buscar/cliente?q='+encodeURIComponent(q)).then(function(data) {
-    if (!data || !data.length) { res.innerHTML='<div class="emp">Sin historial para "'+q+'"</div>'; return; }
-    var h = '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">';
-    h += '<div style="font-weight:700;font-size:13px;color:var(--burd);text-transform:uppercase;letter-spacing:.06em">Historial de '+q+' ('+data.length+' registros)</div>';
-    h += '<button class="btn bo bs" onclick="buscarHistorico()">← Volver</button></div>';
-    h += '<div class="tw"><table><thead><tr><th>Fecha</th><th>Artículo</th><th>Cantidad</th><th>Precio</th><th>Total</th><th>Vendedor</th></tr></thead><tbody>';
-    data.forEach(function(v) {
-      h += '<tr><td style="color:var(--mut)">'+v.fecha+'</td>';
-      h += '<td style="font-weight:500">'+v.articulo+'</td>';
-      h += '<td>'+v.cantidad+'</td>';
-      h += '<td>$'+nr(v.precio)+'</td>';
-      h += '<td style="font-weight:600">$'+nr(v.total)+'</td>';
-      h += '<td style="color:var(--mut)">'+( v.vendedor||'-')+'</td></tr>';
-    });
-    h += '</tbody></table></div>';
-    res.innerHTML = h;
-  });
-}
-
-function forzarSyncSheets() {
-  var btn = eid('btn-sync-sheets');
-  btn.textContent = '⏳ Sincronizando...'; btn.disabled = true;
-  api('/api/buscar/sync','POST',{}).then(function() {
-    toast('Sync iniciado — puede demorar unos minutos','ok');
-    btn.textContent = '🔄 Sincronizar'; btn.disabled = false;
-    // Mostrar estado
-    api('/api/buscar/sync').then(function(s) {
-      eid('busq-sync-status').innerHTML = '📦 Compras: '+nr(s.compras.n)+' registros · 🛒 Ventas: '+nr(s.ventas.n)+' registros · Último sync: '+(s.compras.ultimo||'nunca');
-    });
-  });
-}
-
-// Cargar estado del sync al entrar a la sección
-var _sectores = {busqueda: function() {
-  api('/api/buscar/sync').then(function(s) {
-    if (s && eid('busq-sync-status')) {
-      eid('busq-sync-status').innerHTML = '📦 Compras: '+nr(s.compras.n)+' registros · 🛒 Ventas: '+nr(s.ventas.n)+' registros · Último sync: '+(s.compras.ultimo||'nunca');
-    }
-  });
-}};
 // Cargar dedicados cuando se navega a esa seccion
 document.querySelectorAll('.ni').forEach(function(el){
   if(el.dataset.sec === 'dedicados') el.addEventListener('click', loadDed);
