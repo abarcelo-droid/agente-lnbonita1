@@ -44,6 +44,36 @@ db.exec(`
     precio      REAL,
     total       REAL,
     partida     TEXT,
+    partida_ok  TEXT,
+    sem         TEXT,
+    mes         TEXT,
+    anio        TEXT,
+    cod_fecha   TEXT,
+    precio_ok   REAL,
+    total_ok    REAL,
+    dol_dia     REAL,
+    prec_dol    REAL,
+    tot_dol     REAL,
+    periodo     TEXT,
+    producto    TEXT,
+    kilaje      TEXT,
+    kilos_tot   REAL,
+    categoria   TEXT,
+    costeo      REAL,
+    cate_clie   TEXT,
+    subcategoria TEXT,
+    boni        REAL,
+    proveedor   TEXT,
+    rent        REAL,
+    rent_dol    REAL,
+    mes_ok      TEXT,
+    des         REAL,
+    flete_largo REAL,
+    descargas   REAL,
+    ifco        REAL,
+    flete_super REAL,
+    pct         REAL,
+    cat_pro     TEXT,
     raw         TEXT,
     sync_fecha  TEXT DEFAULT (date('now','localtime'))
   );
@@ -58,6 +88,28 @@ db.exec(`
   );
 `);
 
+// Migración: agregar columnas nuevas si no existen
+(function() {
+  var cols = [];
+  try { cols = db.prepare("PRAGMA table_info(sheet_ventas)").all().map(function(c){ return c.name; }); } catch(e) {}
+  var nuevas = [
+    ["partida_ok","TEXT"],["sem","TEXT"],["mes","TEXT"],["anio","TEXT"],
+    ["cod_fecha","TEXT"],["precio_ok","REAL"],["total_ok","REAL"],
+    ["dol_dia","REAL"],["prec_dol","REAL"],["tot_dol","REAL"],
+    ["periodo","TEXT"],["producto","TEXT"],["kilaje","TEXT"],["kilos_tot","REAL"],
+    ["categoria","TEXT"],["costeo","REAL"],["cate_clie","TEXT"],
+    ["subcategoria","TEXT"],["boni","REAL"],["proveedor","TEXT"],
+    ["rent","REAL"],["rent_dol","REAL"],["mes_ok","TEXT"],
+    ["des","REAL"],["flete_largo","REAL"],["descargas","REAL"],
+    ["ifco","REAL"],["flete_super","REAL"],["pct","REAL"],["cat_pro","TEXT"]
+  ];
+  nuevas.forEach(function(par) {
+    if (cols.indexOf(par[0]) < 0) {
+      try { db.exec("ALTER TABLE sheet_ventas ADD COLUMN "+par[0]+" "+par[1]); } catch(e) {}
+    }
+  });
+})();
+
 // Índices para búsqueda rápida
 try {
   db.exec(`
@@ -68,7 +120,13 @@ try {
     CREATE INDEX IF NOT EXISTS idx_ventas_alias ON sheet_ventas(alias);
     CREATE INDEX IF NOT EXISTS idx_ventas_articulo ON sheet_ventas(articulo);
     CREATE INDEX IF NOT EXISTS idx_ventas_fecha ON sheet_ventas(fecha);
-  `);
+    CREATE INDEX IF NOT EXISTS idx_ventas_categoria ON sheet_ventas(categoria);
+    CREATE INDEX IF NOT EXISTS idx_ventas_cate_clie ON sheet_ventas(cate_clie);
+    CREATE INDEX IF NOT EXISTS idx_ventas_proveedor ON sheet_ventas(proveedor);
+    CREATE INDEX IF NOT EXISTS idx_ventas_producto ON sheet_ventas(producto);
+    CREATE INDEX IF NOT EXISTS idx_ventas_mes_ok ON sheet_ventas(mes_ok);
+    CREATE INDEX IF NOT EXISTS idx_ventas_vendedor ON sheet_ventas(vendedor);
+  \`);
 } catch(e) {}
 
 // ── Obtener token de Google ────────────────────────────────────────────────
@@ -193,14 +251,18 @@ async function syncVentas(token) {
   let total = 0;
   const stmt = db.prepare(`
     INSERT OR IGNORE INTO sheet_ventas
-    (id_venta,fecha,nro_comprob,cod_cli,cliente,alias,cod_vend,vendedor,cod_art,articulo,cantidad,precio,total,partida,raw)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    (id_venta,fecha,nro_comprob,cod_cli,cliente,alias,cod_vend,vendedor,cod_art,articulo,cantidad,precio,total,partida,
+     partida_ok,sem,mes,anio,cod_fecha,precio_ok,total_ok,dol_dia,prec_dol,tot_dol,periodo,producto,kilaje,kilos_tot,
+     categoria,costeo,cate_clie,subcategoria,boni,proveedor,rent,rent_dol,mes_ok,des,flete_largo,descargas,ifco,flete_super,pct,cat_pro,raw)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,
+            ?,?,?,?,?,?,?,?,?,?,?,?,?,?,
+            ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
   `);
 
   db.exec("DELETE FROM sheet_ventas");
 
   while (true) {
-    const rango = `B VENTAS!A${fila}:N${fila + BLOQUE - 1}`;
+    const rango = `B VENTAS!A${fila}:AR${fila + BLOQUE - 1}`;
     const rows = await leerRango(token, rango);
     if (!rows.length) break;
 
@@ -208,7 +270,7 @@ async function syncVentas(token) {
       for (const r of rows) {
         if (!r[0]) continue;
         stmt.run(
-          r[0]||null,  // id
+          r[0]||null,  // id_venta
           r[1]||null,  // fecha
           r[2]||null,  // nro_comprob
           r[3]||null,  // cod_cli
@@ -218,10 +280,40 @@ async function syncVentas(token) {
           r[7]||null,  // vendedor
           r[8]||null,  // cod_art
           r[9]||null,  // articulo
-          parseFloat(r[10])||0, // cantidad
-          parseFloat(r[11])||0, // precio
-          parseFloat(r[12])||0, // total
-          r[13]||null, // partida
+          parseFloat(r[10])||0,  // cantidad
+          parseFloat(r[11])||0,  // precio
+          parseFloat(r[12])||0,  // total
+          r[13]||null,           // partida
+          r[14]||null,           // partida_ok  (O)
+          r[15]||null,           // sem         (P)
+          r[16]||null,           // mes         (Q)
+          r[17]||null,           // anio        (R)
+          r[18]||null,           // cod_fecha   (S)
+          parseFloat(r[19])||0,  // precio_ok   (T)
+          parseFloat(r[20])||0,  // total_ok    (U)
+          parseFloat(r[21])||0,  // dol_dia     (V)
+          parseFloat(r[22])||0,  // prec_dol    (W)
+          parseFloat(r[23])||0,  // tot_dol     (X)
+          r[24]||null,           // periodo     (Y)
+          r[25]||null,           // producto    (Z)
+          r[26]||null,           // kilaje      (AA)
+          parseFloat(r[27])||0,  // kilos_tot   (AB)
+          r[28]||null,           // categoria   (AC)
+          parseFloat(r[29])||0,  // costeo      (AD)
+          r[30]||null,           // cate_clie   (AE)
+          r[31]||null,           // subcategoria(AF)
+          parseFloat(r[32])||0,  // boni        (AG)
+          r[33]||null,           // proveedor   (AH)
+          parseFloat(r[34])||0,  // rent        (AI)
+          parseFloat(r[35])||0,  // rent_dol    (AJ)
+          r[36]||null,           // mes_ok      (AK)
+          parseFloat(r[37])||0,  // des         (AL)
+          parseFloat(r[38])||0,  // flete_largo (AM)
+          parseFloat(r[39])||0,  // descargas   (AN)
+          parseFloat(r[40])||0,  // ifco        (AO)
+          parseFloat(r[41])||0,  // flete_super (AP)
+          parseFloat(r[42])||0,  // pct         (AQ)
+          r[43]||null,           // cat_pro     (AR)
           JSON.stringify(r)
         );
         total++;
@@ -308,6 +400,98 @@ export function historialClienteVentas(q) {
     ORDER BY fecha DESC
     LIMIT 200
   `).all(`%${q}%`, `%${q}%`);
+}
+
+// ── Funciones de informes ────────────────────────────────────────────────
+
+export function rentPorMes() {
+  return db.prepare(`
+    SELECT mes_ok,
+      ROUND(SUM(tot_dol),0) as venta_dol,
+      ROUND(SUM(rent_dol),0) as rent_dol,
+      ROUND(SUM(rent_dol)*100.0/NULLIF(SUM(tot_dol),0),1) as rent_pct,
+      COUNT(DISTINCT cliente) as clientes,
+      ROUND(SUM(kilos_tot),0) as kilos
+    FROM sheet_ventas
+    WHERE mes_ok IS NOT NULL AND mes_ok != '' AND tot_dol > 0
+    GROUP BY mes_ok
+    ORDER BY anio, mes
+  `).all();
+}
+
+export function rentPorProducto(limite) {
+  return db.prepare(`
+    SELECT producto,
+      categoria,
+      ROUND(SUM(tot_dol),0) as venta_dol,
+      ROUND(SUM(rent_dol),0) as rent_dol,
+      ROUND(SUM(rent_dol)*100.0/NULLIF(SUM(tot_dol),0),1) as rent_pct,
+      ROUND(SUM(kilos_tot),0) as kilos
+    FROM sheet_ventas
+    WHERE producto IS NOT NULL AND producto != '' AND tot_dol > 0
+    GROUP BY producto
+    ORDER BY venta_dol DESC
+    LIMIT ?
+  `).all(limite || 50);
+}
+
+export function rentPorCategoria() {
+  return db.prepare(`
+    SELECT categoria,
+      ROUND(SUM(tot_dol),0) as venta_dol,
+      ROUND(SUM(rent_dol),0) as rent_dol,
+      ROUND(SUM(rent_dol)*100.0/NULLIF(SUM(tot_dol),0),1) as rent_pct,
+      ROUND(SUM(kilos_tot),0) as kilos,
+      COUNT(DISTINCT producto) as productos
+    FROM sheet_ventas
+    WHERE categoria IS NOT NULL AND categoria != '' AND tot_dol > 0
+    GROUP BY categoria
+    ORDER BY venta_dol DESC
+  `).all();
+}
+
+export function rentPorCateCliente() {
+  return db.prepare(`
+    SELECT cate_clie,
+      ROUND(SUM(tot_dol),0) as venta_dol,
+      ROUND(SUM(rent_dol),0) as rent_dol,
+      ROUND(SUM(rent_dol)*100.0/NULLIF(SUM(tot_dol),0),1) as rent_pct,
+      COUNT(DISTINCT cliente) as clientes
+    FROM sheet_ventas
+    WHERE cate_clie IS NOT NULL AND cate_clie != '' AND tot_dol > 0
+    GROUP BY cate_clie
+    ORDER BY venta_dol DESC
+  `).all();
+}
+
+export function rentPorVendedor() {
+  return db.prepare(`
+    SELECT vendedor,
+      ROUND(SUM(tot_dol),0) as venta_dol,
+      ROUND(SUM(rent_dol),0) as rent_dol,
+      ROUND(SUM(rent_dol)*100.0/NULLIF(SUM(tot_dol),0),1) as rent_pct,
+      COUNT(DISTINCT cliente) as clientes,
+      ROUND(SUM(kilos_tot),0) as kilos
+    FROM sheet_ventas
+    WHERE vendedor IS NOT NULL AND vendedor != '' AND tot_dol > 0
+    GROUP BY vendedor
+    ORDER BY venta_dol DESC
+  `).all();
+}
+
+export function rentPorProveedor(limite) {
+  return db.prepare(`
+    SELECT proveedor,
+      ROUND(SUM(tot_dol),0) as venta_dol,
+      ROUND(SUM(rent_dol),0) as rent_dol,
+      ROUND(SUM(rent_dol)*100.0/NULLIF(SUM(tot_dol),0),1) as rent_pct,
+      ROUND(SUM(kilos_tot),0) as kilos
+    FROM sheet_ventas
+    WHERE proveedor IS NOT NULL AND proveedor != '' AND tot_dol > 0
+    GROUP BY proveedor
+    ORDER BY venta_dol DESC
+    LIMIT ?
+  `).all(limite || 30);
 }
 
 export function estadoSync() {
