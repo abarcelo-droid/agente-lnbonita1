@@ -2649,7 +2649,8 @@ Valor: U$S '+(d.valor_kg_dol||0)+'/kg'
         var clickable = d && kilos >= MIN_KILOS;
         h += '<td style="padding:3px 4px;text-align:center;border-bottom:1px solid var(--bor);border-left:1px solid var(--bor)">';
         if (clickable) {
-          h += '<div onclick="abrirDetalleCalendario(''+prod.replace(/'/g,"\'")+'',' + m + ')" title="'+titulo+'" style="cursor:pointer;border-radius:6px;background:'+col.bg+';color:'+col.fg+';padding:4px 2px;font-size:10px;font-weight:700;min-height:32px;display:flex;flex-direction:column;align-items:center;justify-content:center;transition:opacity .15s" onmouseover="this.style.opacity='.75'" onmouseout="this.style.opacity='1'">';
+          var prodEsc = prod.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+          h += '<div onclick="abrirDetalleCalendario(&quot;'+prodEsc+'&quot;,'+m+')" title="'+titulo+'" style="cursor:pointer;border-radius:6px;background:'+col.bg+';color:'+col.fg+';padding:4px 2px;font-size:10px;font-weight:700;min-height:32px;display:flex;flex-direction:column;align-items:center;justify-content:center;transition:opacity .15s" onmouseover="this.style.opacity=.75" onmouseout="this.style.opacity=1">';
           h += '<div>'+Math.round(kilos/1000)+'K</div>';
           if (d.rent_pct !== null && d.rent_pct !== undefined) {
             var rc = d.rent_pct >= 10 ? col.fg : '#ef4444';
