@@ -2641,10 +2641,7 @@ function renderCalendario(productos) {
         var kilos = d ? d.kilos : 0;
         var col = kilosColor(kilos);
         var titulo = d && kilos >= MIN_KILOS
-          ? prod+' — '+MESES_CAL[m-1]+'
-Kilos: '+Math.round(kilos).toLocaleString('es-AR')+'
-Rent: '+(d.rent_pct||0)+'%
-Valor: U$S '+(d.valor_kg_dol||0)+'/kg'
+          ? prod+' — '+MESES_CAL[m-1]+'\nKilos: '+Math.round(kilos).toLocaleString('es-AR')+'\nRent: '+(d.rent_pct||0)+'%\nValor: U$S '+(d.valor_kg_dol||0)+'/kg'
           : '';
         var clickable = d && kilos >= MIN_KILOS;
         h += '<td style="padding:3px 4px;text-align:center;border-bottom:1px solid var(--bor);border-left:1px solid var(--bor)">';
