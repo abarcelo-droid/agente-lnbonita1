@@ -105,6 +105,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   <div class="ni" data-sec="crm"><span class="dot dd"></span>CRM</div>
   <div class="ni" data-sec="pedidos"><span class="dot"></span>Pedidos</div>
   <div class="ni" data-sec="logistica"><span class="dot dd"></span>Logistica</div>
+  <div class="ni" data-sec="rent-retail"><span class="dot da"></span>Rentabilidad Retail</div>
   <div class="ng" style="margin-top:8px">Oferta</div>
   <div class="ni" data-sec="oferta1"><span class="dot da"></span>Oferta 1 - Productos</div>
   <div class="ni" data-sec="oferta2"><span class="dot dd"></span>Oferta 2 - Productos</div>
@@ -148,6 +149,18 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   <div id="crm-resumen-inicio" style="margin-bottom:20px"></div>
   <div style="font-weight:600;margin-bottom:14px">Ultimos pedidos</div>
   <div class="tw"><table><thead><tr><th>ID</th><th>Cliente</th><th>Tipo</th><th>Total</th><th>Estado</th><th>Hora</th><th></th></tr></thead><tbody id="t-rec"></tbody></table></div>
+</div>
+
+<!-- RENTABILIDAD RETAIL -->
+<div class="sec" id="sec-rent-retail">
+  <div class="ph">
+    <div><div class="ph-t">Rentabilidad Retail</div><div class="ph-s">Productos con margen bajo o en pérdida</div></div>
+    <button class="btn bb" onclick="loadRentRetail()">Actualizar</button>
+  </div>
+  <!-- Resumen por canal -->
+  <div id="rent-resumen" style="margin-bottom:24px"></div>
+  <!-- Detalle por producto -->
+  <div id="rent-detalle"></div>
 </div>
 
 <!-- PEDIDOS -->
@@ -662,6 +675,7 @@ function loadSec(s) {
     pricing1: function(){ loadPricing('oferta1'); },
     pricing2: function(){ loadPricing('oferta2'); },
     'retail-view': loadRetail,
+    'rent-retail': loadRentRetail,
     conv: loadConvs, guardias: loadGuardias, cobranza: loadCob,
     'retail-prod': loadRP, 'retail-gastos': loadGastos
   };
@@ -2337,6 +2351,150 @@ eid('btn-save-mded-ped').addEventListener('click', function(){
     else toast('Error al crear pedido','er');
   });
 });
+
+// ── Rentabilidad Retail ──────────────────────────────────────────────────
+function loadRentRetail() {
+  var UMBRALES = { excelente: 18, bueno: 10 };
+  var CANALES = [
+    {k:'cencosud',l:'Cencosud',c:0.88},
+    {k:'carrefour',l:'Carrefour',c:0.81},
+    {k:'coto',l:'Coto',c:0.89},
+    {k:'chango',l:'Chango Más',c:0.77},
+    {k:'coop',l:'Coop Obrera',c:0.90}
+  ];
+  eid('rent-resumen').innerHTML = '<div class="emp">Cargando...</div>';
+  eid('rent-detalle').innerHTML = '';
+
+  api('/api/retail/vista').then(function(lista) {
+    if (!lista||!lista.length) {
+      eid('rent-resumen').innerHTML = '<div class="emp">Sin productos retail configurados.</div>';
+      return;
+    }
+
+    // Calcular margen por producto/canal
+    var filas = [];
+    lista.forEach(function(rp) {
+      var provSel = rp.proveedores && (rp.proveedores.find(function(p){return p.seleccionado;}) || rp.proveedores[0]);
+      var kgTot = provSel ? provSel.kilos : 0;
+      var costo = rp.costo_kg_total || 0;
+      if (!costo) return; // sin costo configurado, saltar
+
+      var canalesCalc = CANALES.map(function(canal) {
+        var pc = rp.precios_canal && rp.precios_canal[canal.k] ? rp.precios_canal[canal.k] : {};
+        var precio = pc.precio || 0;
+        var perdida = pc.perdida || 0;
+        if (!precio) return { canal: canal, mgn: null, neto: 0, precio: 0 };
+        var kgReal = kgTot > 0 ? Math.max(kgTot - perdida, 0.1) : kgTot;
+        var neto = kgTot > 0 ? precio * canal.c * 1.105 * (kgReal / kgTot) : precio * canal.c * 1.105;
+        var mgn = neto > 0 ? ((neto - costo) / neto * 100) : null;
+        return { canal: canal, mgn: mgn, neto: Math.round(neto), precio: precio };
+      });
+
+      // Solo incluir si algún canal tiene margen definido y bajo (< bueno)
+      var tieneProblema = canalesCalc.some(function(c){ return c.mgn !== null && c.mgn < UMBRALES.bueno; });
+      if (!tieneProblema) return;
+
+      filas.push({ rp: rp, costo: costo, kgTot: kgTot, canales: canalesCalc });
+    });
+
+    // ── Resumen por canal ──
+    var hR = '<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:8px">';
+    CANALES.forEach(function(canal) {
+      var total = 0, bajos = 0, perdidas = 0;
+      lista.forEach(function(rp) {
+        var provSel = rp.proveedores && (rp.proveedores.find(function(p){return p.seleccionado;}) || rp.proveedores[0]);
+        var kgTot = provSel ? provSel.kilos : 0;
+        var costo = rp.costo_kg_total || 0;
+        if (!costo) return;
+        var pc = rp.precios_canal && rp.precios_canal[canal.k] ? rp.precios_canal[canal.k] : {};
+        var precio = pc.precio || 0;
+        if (!precio) return;
+        var perdida = pc.perdida || 0;
+        var kgReal = kgTot > 0 ? Math.max(kgTot - perdida, 0.1) : kgTot;
+        var neto = kgTot > 0 ? precio * canal.c * 1.105 * (kgReal / kgTot) : precio * canal.c * 1.105;
+        var mgn = neto > 0 ? ((neto - costo) / neto * 100) : null;
+        if (mgn === null) return;
+        total++;
+        if (mgn < 0) perdidas++;
+        else if (mgn < UMBRALES.bueno) bajos++;
+      });
+      var bg = perdidas > 0 ? '#fef2f2' : bajos > 0 ? '#fefce8' : '#f0fdf4';
+      var bc = perdidas > 0 ? '#fca5a5' : bajos > 0 ? '#fde68a' : '#86efac';
+      var ic = perdidas > 0 ? '🔴' : bajos > 0 ? '🟡' : '🟢';
+      hR += '<div style="flex:1;min-width:140px;background:'+bg+';border:1px solid '+bc+';border-radius:10px;padding:12px 14px">';
+      hR += '<div style="font-size:13px;font-weight:700;margin-bottom:6px">'+ic+' '+canal.l+'</div>';
+      hR += '<div style="font-size:12px;color:var(--mut)">'+total+' productos con precio</div>';
+      if (perdidas) hR += '<div style="font-size:12px;color:#991b1b;font-weight:600">'+perdidas+' en pérdida</div>';
+      if (bajos) hR += '<div style="font-size:12px;color:#92400e;font-weight:600">'+bajos+' margen bajo</div>';
+      if (!perdidas && !bajos) hR += '<div style="font-size:12px;color:#166534;font-weight:600">Todo en verde ✓</div>';
+      hR += '</div>';
+    });
+    hR += '</div>';
+    eid('rent-resumen').innerHTML = hR;
+
+    // ── Detalle por producto ──
+    if (!filas.length) {
+      eid('rent-detalle').innerHTML = '<div style="padding:20px;text-align:center;color:var(--ok);font-weight:600">✅ Todos los productos con precio están dando margen aceptable.</div>';
+      return;
+    }
+
+    function mgnColor(m) {
+      if (m === null) return 'var(--mut)';
+      if (m < 0) return '#dc2626';
+      if (m < UMBRALES.bueno) return '#d97706';
+      if (m < UMBRALES.excelente) return '#16a34a';
+      return '#7c3aed';
+    }
+    function mgnBg(m) {
+      if (m === null) return '';
+      if (m < 0) return 'background:#fef2f2';
+      if (m < UMBRALES.bueno) return 'background:#fefce8';
+      return '';
+    }
+
+    var hD = '<div style="font-size:12px;color:var(--mut);margin-bottom:10px">'+filas.length+' producto'+(filas.length>1?'s':'')+' con problemas de rentabilidad</div>';
+    hD += '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px">';
+    hD += '<thead><tr style="background:var(--burd)">';
+    hD += '<th style="padding:8px 10px;color:#fff;text-align:left">Producto</th>';
+    hD += '<th style="padding:8px 10px;color:#fff;text-align:right">Costo/kg</th>';
+    CANALES.forEach(function(c){ hD += '<th style="padding:8px 10px;color:#fff;text-align:center">'+c.l+'</th>'; });
+    hD += '</tr></thead><tbody>';
+
+    var catAct = '';
+    filas.forEach(function(f) {
+      var cat = f.rp.categoria || 'Sin categoría';
+      if (cat !== catAct) {
+        catAct = cat;
+        hD += '<tr><td colspan="'+(2+CANALES.length)+'" style="background:#4a90b8;color:#fff;font-size:10px;font-weight:700;text-transform:uppercase;padding:5px 10px;letter-spacing:.06em">'+cat+'</td></tr>';
+      }
+      hD += '<tr style="border-bottom:1px solid var(--bor)">';
+      hD += '<td style="padding:7px 10px;font-weight:600">'+f.rp.nombre+'</td>';
+      hD += '<td style="padding:7px 10px;text-align:right;color:var(--burd);font-weight:700">$'+Math.round(f.costo).toLocaleString('es-AR')+'/kg</td>';
+      f.canales.forEach(function(c) {
+        if (c.mgn === null) {
+          hD += '<td style="padding:7px 10px;text-align:center;color:var(--mut)">—</td>';
+        } else {
+          var col = mgnColor(c.mgn);
+          var bg = mgnBg(c.mgn);
+          var signo = c.mgn >= 0 ? '+' : '';
+          hD += '<td style="padding:7px 10px;text-align:center;'+bg+'">';
+          hD += '<div style="font-weight:700;color:'+col+'">'+signo+c.mgn.toFixed(1)+'%</div>';
+          hD += '<div style="font-size:10px;color:var(--mut)">$'+c.neto.toLocaleString('es-AR')+'/kg neto</div>';
+          hD += '</td>';
+        }
+      });
+      hD += '</tr>';
+    });
+    hD += '</tbody></table></div>';
+    hD += '<div style="margin-top:10px;font-size:11px;color:var(--mut);display:flex;gap:16px;flex-wrap:wrap">';
+    hD += '<span style="color:#dc2626;font-weight:600">● Pérdida</span>';
+    hD += '<span style="color:#d97706;font-weight:600">● Bajo (&lt;'+UMBRALES.bueno+'%)</span>';
+    hD += '<span style="color:#16a34a;font-weight:600">● Aceptable ('+UMBRALES.bueno+'-'+UMBRALES.excelente+'%)</span>';
+    hD += '<span style="color:#7c3aed;font-weight:600">● Excelente (&gt;'+UMBRALES.excelente+'%)</span>';
+    hD += '</div>';
+    eid('rent-detalle').innerHTML = hD;
+  });
+}
 
 loadInicio(); startPoll();
 // Cargar dedicados cuando se navega a esa seccion
