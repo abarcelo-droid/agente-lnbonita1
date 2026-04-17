@@ -34,7 +34,7 @@ router.get("/oferta/:oferta", (req, res) => {
   const soloDisponibles = req.query.disponibles === "1";
   if (!['oferta1','oferta2'].includes(oferta)) return res.status(400).json({ error: "Oferta invalida" });
   let productos = listarProductos(oferta);
-  if (soloDisponibles) productos = productos.filter(p => p.disponible_general !== 0);
+  if (soloDisponibles) productos = productos.filter(p => p.disponible_general === 1 || p.disponible_general === 2);
   res.json(productos);
 });
 

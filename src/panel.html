@@ -1072,7 +1072,7 @@ function loadOferta(of) {
       h+='<td style="color:var(--mut)">'+(p.kilaje||'-')+'</td>';
       h+='<td style="text-align:right">'+(p.consignacion?'<span style="color:var(--burd)">(ref)</span> ':'' )+'$'+nr(p.costo||0)+'</td>';
       h+='<td style="text-align:right">$'+nr(p.flete||0)+'</td>';
-      h+='<td style="text-align:center"><select onchange="guardarDisp('+p.id+',this.value)" style="font-size:11px;padding:3px 7px;border-radius:6px;border:1px solid var(--bor2);background:'+(dg===1?'#dcfce7':dg===-1?'#fef3c7':'#fef2f2')+';color:'+(dg===1?'#166534':dg===-1?'#92400e':'#991b1b')+'"><option value="1"'+(dg===1?' selected':'')+'>Disponible</option><option value="0"'+(dg===0?' selected':'')+'>Sin stock</option><option value="-1"'+(dg===-1?' selected':'')+'>MNC</option></select></td>';
+      h+='<td style="text-align:center"><select onchange="guardarDisp('+p.id+',this.value)" style="font-size:11px;padding:3px 7px;border-radius:6px;border:1px solid var(--bor2);background:'+(dg===1?'#dcfce7':dg===2?'#dbeafe':dg===-1?'#fef3c7':'#fef2f2')+';color:'+(dg===1?'#166534':dg===2?'#1d4ed8':dg===-1?'#92400e':'#991b1b')+'"><option value="1"'+(dg===1?' selected':'')+'>Disponible</option><option value="2"'+(dg===2?' selected':'')+'>Próximamente</option><option value="0"'+(dg===0?' selected':'')+'>Sin stock</option><option value="-1"'+(dg===-1?' selected':'')+'>MNC</option></select></td>';
       h+='<td style="white-space:nowrap"><button class="btn bo bs" onclick="editProd('+p.id+')">Edit</button> <button class="btn bd bs" onclick="delProd('+p.id+')">X</button></td>';
       h+='</tr>';
     });
@@ -1082,7 +1082,7 @@ function loadOferta(of) {
 }
 
 function guardarRetail(id,v) { api('/api/oferta/producto/retail','POST',{producto_id:id,retail:v?1:0}).then(function(){ toast('Retail '+(v?'activado':'desactivado'),'ok'); }); }
-function guardarDisp(id,v) { api('/api/oferta/producto/disponibilidad','POST',{producto_id:id,disponible:parseInt(v)}).then(function(){ var msg=v==='1'?'Disponible':v==='-1'?'MNC':'Sin stock'; toast(msg,'ok'); loadOferta(ofertaAct); }); }
+function guardarDisp(id,v) { api('/api/oferta/producto/disponibilidad','POST',{producto_id:id,disponible:parseInt(v)}).then(function(){ var msg=v==='1'?'Disponible':v==='2'?'Próximamente':v==='-1'?'MNC':'Sin stock'; toast(msg,'ok'); loadOferta(ofertaAct); }); }
 function limpiarDups() { api('/api/oferta/limpiar-duplicados','POST',{}).then(function(r){ toast((r.borrados||0)+' duplicados eliminados','ok'); loadOferta(ofertaAct); }); }
 
 function openMP(of) {
@@ -1200,7 +1200,10 @@ function loadPricing(of) {
       if(tipoIng==='Paletizado'&&gastoIngresoPallet) costoIng=(gastoIngresoPallet.monto||0)/bxp;
       if(tipoIng==='Granel'&&gastoIngresoGranel) costoIng=(gastoIngresoGranel.monto||0);
       var cb=cf+costoIng;
-      h+='<tr><td style="padding:6px 10px"><div style="font-weight:500;font-size:13px">'+p.nombre+'</div>';
+      var dgP=p.disponible_general!==undefined?p.disponible_general:1;
+      h+='<tr'+(dgP===2?' style="background:#eff6ff"':'')+'>'+
+        '<td style="padding:6px 10px"><div style="font-weight:500;font-size:13px">'+p.nombre+
+        (dgP===2?' <span style="font-size:10px;background:#dbeafe;color:#1d4ed8;border:1px solid #93c5fd;border-radius:4px;padding:1px 6px;font-weight:600;vertical-align:middle">PRÓXIMAMENTE</span>':'')+'</div>';
       if(p.descripcion) h+='<div style="font-size:11px;color:var(--mut)">'+p.descripcion+'</div>';
       if(p.consignacion) h+='<span style="display:inline-block;margin-top:2px;font-size:10px;background:#fef9c3;color:#854d0e;border:1px solid #fde68a;border-radius:4px;padding:1px 6px;font-weight:600">CONSIGNACIÓN</span>';
       h+='<div id="mcba-'+p.id+'" style="display:none;margin-top:4px;border:1px solid var(--bor);border-radius:7px;overflow:hidden;font-size:11px"></div>';
@@ -1309,10 +1312,19 @@ function loadRetail() {
       } else {
         h+='<select style="width:100%;font-size:12px;padding:6px 8px;border-radius:6px;border:1px solid var(--bor);background:var(--bg)" onchange="selProv('+rp.id+',parseInt(this.value))">';
         rp.proveedores.forEach(function(pv){
-          var lbl=pv.proveedor+' — '+pv.nombre+' ('+pv.kilaje+') $'+Math.round(pv.precio_kg).toLocaleString('es-AR')+'/kg';
+          var dgPv=pv.disponible_general!==undefined?pv.disponible_general:1;
+        var dgBadge=dgPv===0?' ⚠️ SIN STOCK':dgPv===2?' 🔜 PRÓX.':'';
+        var lbl=pv.proveedor+' — '+pv.nombre+' ('+pv.kilaje+') $'+Math.round(pv.precio_kg).toLocaleString('es-AR')+'/kg'+dgBadge;
           h+='<option value="'+pv.id+'"'+(pv.seleccionado?' selected':'')+'>'+lbl+'</option>';
         });
         h+='</select>';
+        // Cartel de advertencia si el proveedor seleccionado no está disponible
+        var dgProvSel=provSel?provSel.disponible_general:1;
+        if(dgProvSel===0){
+          h+='<div style="margin-top:5px;padding:5px 10px;background:#fef2f2;border:1px solid #fca5a5;border-radius:6px;font-size:11px;color:#991b1b;font-weight:600">⚠️ Este proveedor figura como SIN STOCK</div>';
+        } else if(dgProvSel===2){
+          h+='<div style="margin-top:5px;padding:5px 10px;background:#eff6ff;border:1px solid #93c5fd;border-radius:6px;font-size:11px;color:#1d4ed8;font-weight:600">🔜 Este proveedor figura como PRÓXIMAMENTE</div>';
+        }
       }
       h+='</div>';
       h+='<div style="margin-bottom:10px;position:relative">';
