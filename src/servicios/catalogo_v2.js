@@ -258,7 +258,7 @@ export function obtenerPreciosCanal(retailProductoId) {
 export function vistaRetail() {
   const retailProds = listarRetailProductos();
   const gastos      = listarGastos();
-  const ofertaProds = db.prepare("SELECT * FROM oferta_productos WHERE retail = 1 AND activo = 1").all();
+  const ofertaProds = db.prepare("SELECT * FROM oferta_productos WHERE activo = 1").all();
 
   return retailProds.map(function(rp) {
     const seleccion = obtenerSeleccion(rp.id);
@@ -316,6 +316,8 @@ export function vistaRetail() {
 
 // Migracion: agregar columna retail si no existe
 (function() {
+  // Todos los productos disponibles para retail (UPDATE masivo)
+  try { db.exec("UPDATE oferta_productos SET retail = 1"); } catch(e) {}
   var cols = db.prepare("PRAGMA table_info(oferta_productos)").all().map(function(c){ return c.name; });
   if (cols.indexOf('retail') < 0) {
     try { db.exec("ALTER TABLE oferta_productos ADD COLUMN retail INTEGER DEFAULT 0"); } catch(e) {}
