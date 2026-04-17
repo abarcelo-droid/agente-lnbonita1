@@ -1089,10 +1089,20 @@ eid('btn-save-c').addEventListener('click', function() {
   if(hor) notas+=(notas?' | ':'')+'Horario: '+hor;
   var tipo=elv('c-tipo');
   var zonaVal=tipo==='mayorista_mcba'?(elv('c-nave')||''):elv('c-zona');
-  api('/api/clientes','POST',{telefono:tel,tipo:tipo,nombre:nom,empresa:elv('c-emp'),email:elv('c-email'),direccion:elv('c-dir'),zona:zonaVal,notas:notas,codigo_abasto:elv('c-cod'),metodo_pago:elv('c-pago')}).then(function(r){
-    if(r&&r.error){ toast('Error: '+r.error,'er'); return; }
-    toast('Guardado','ok'); closeMB('mb-c'); loadSec(navAct);
-  });
+  var esEdicion=eid('c-tel').readOnly;
+  if(esEdicion) {
+    // EDITAR: PATCH con los datos actualizados
+    api('/api/clientes/'+encodeURIComponent(tel),'PATCH',{nombre:nom,empresa:elv('c-emp'),email:elv('c-email'),direccion:elv('c-dir'),zona:zonaVal,notas:notas,codigo_abasto:elv('c-cod'),metodo_pago:elv('c-pago')}).then(function(r){
+      if(r&&r.error){ toast('Error: '+r.error,'er'); return; }
+      toast('Actualizado','ok'); closeMB('mb-c'); loadSec(navAct);
+    });
+  } else {
+    // NUEVO: POST
+    api('/api/clientes','POST',{telefono:tel,tipo:tipo,nombre:nom,empresa:elv('c-emp'),email:elv('c-email'),direccion:elv('c-dir'),zona:zonaVal,notas:notas,codigo_abasto:elv('c-cod'),metodo_pago:elv('c-pago')}).then(function(r){
+      if(r&&r.error){ toast('Error: '+r.error,'er'); return; }
+      toast('Guardado','ok'); closeMB('mb-c'); loadSec(navAct);
+    });
+  }
 });
 
 // OFERTA - PRODUCTOS
