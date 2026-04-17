@@ -126,7 +126,7 @@ try {
     CREATE INDEX IF NOT EXISTS idx_ventas_producto ON sheet_ventas(producto);
     CREATE INDEX IF NOT EXISTS idx_ventas_mes_ok ON sheet_ventas(mes_ok);
     CREATE INDEX IF NOT EXISTS idx_ventas_vendedor ON sheet_ventas(vendedor);
-  \`);
+  `);
 } catch(e) {}
 
 // ── Obtener token de Google ────────────────────────────────────────────────
