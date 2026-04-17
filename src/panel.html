@@ -224,7 +224,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
 </div>
 
 <!-- CLIENTES -->
-<div class="sec" id="sec-may-a"><div class="ph"><div><div class="ph-t">Mayorista A</div><div class="ph-s">Puesteros fuera del MCBA - Entrega directa</div></div><button class="btn bb" onclick="openMC('mayorista_a')">+ Nuevo</button></div><div class="tw"><table><thead><tr><th>Cod</th><th>Telefono</th><th>Nombre</th><th>Empresa</th><th>Zona</th><th>Pago</th><th>Estado</th><th></th><th></th></tr></thead><tbody id="t-may-a"></tbody></table></div></div>
+<div class="sec" id="sec-may-a"><div class="ph"><div><div class="ph-t">Mayorista A</div><div class="ph-s">Puesteros fuera del MCBA - Entrega directa</div></div><button class="btn bb" onclick="openMC('mayorista_a')">+ Nuevo</button></div><div class="tw"><table><thead><tr><th>Nombre</th><th>Empresa</th><th>Zona</th><th style="text-align:center">Estado</th><th style="text-align:center">Comercial</th><th></th></tr></thead><tbody id="t-may-a"></tbody></table></div></div>
 <div class="sec" id="sec-may-mcba"><div class="ph"><div><div class="ph-t">Mayorista MCBA</div><div class="ph-s">Entregamos en MCBA en horario habitual</div></div><button class="btn bb" onclick="openMC('mayorista_mcba')">+ Nuevo</button></div><div class="tw"><table><thead><tr><th>Nombre</th><th>Empresa</th><th>Nave</th><th>Horario</th><th>Pago</th><th></th><th></th><th></th></tr></thead><tbody id="t-may-mcba"></tbody></table></div></div>
 <div class="sec" id="sec-min-mcba"><div class="ph"><div><div class="ph-t">Minorista MCBA</div><div class="ph-s">Retiran en nuestro puesto - Nave 4 puestos 2-4-6</div></div><button class="btn bb" onclick="openMC('minorista_mcba')">+ Nuevo</button></div><div class="tw"><table><thead><tr><th>Cod</th><th>Telefono</th><th>Nombre</th><th>Empresa</th><th>Pago</th><th>Estado</th><th></th><th></th></tr></thead><tbody id="t-min-mcba"></tbody></table></div></div>
 <div class="sec" id="sec-min-ent"><div class="ph"><div><div class="ph-t">Minorista Entrega</div><div class="ph-s">Entrega directa CABA y GBA</div></div><button class="btn bb" onclick="openMC('minorista_entrega')">+ Nuevo</button></div><div class="tw"><table><thead><tr><th>Cod</th><th>Telefono</th><th>Nombre</th><th>Direccion</th><th>Pago</th><th>Estado</th><th></th><th></th></tr></thead><tbody id="t-min-ent"></tbody></table></div></div>
@@ -943,6 +943,27 @@ function loadCli(tipo, tbId) {
       var modoColor={crm:'#1e40af',automatico:'#166534',pausa:'#6b7280'}[modo]||'#6b7280';
       var modoBg={crm:'#dbeafe',automatico:'#dcfce7',pausa:'#f3f4f6'}[modo]||'#f3f4f6';
       h+='<tr>';
+      if(tipo==='mayorista_a') {
+        // Columnas: Nombre, Empresa, Zona, Modo, Comercial, Editar
+        h+='<td style="font-weight:500">'+(c.nombre||'-')+'</td>';
+        h+='<td style="font-weight:700">'+(c.empresa||'-')+'</td>';
+        h+='<td style="color:var(--mut);font-size:12px">'+(c.zona||'-')+'</td>';
+        // Modo
+        h+='<td style="text-align:center"><select onchange="cambiarModo(\''+esc(c.telefono)+'\',this)" style="font-size:11px;padding:2px 6px;border-radius:6px;border:1px solid var(--bor);background:'+modoBg+';color:'+modoColor+';font-weight:600;cursor:pointer">';
+        h+='<option value="pausa"'+(modo==='pausa'?' selected':'')+'>⏸ Pausa</option>';
+        h+='<option value="crm"'+(modo==='crm'?' selected':'')+'>📋 CRM</option>';
+        h+='<option value="automatico"'+(modo==='automatico'?' selected':'')+'>🤖 Automático</option>';
+        h+='</select></td>';
+        // Comercial
+        var COMS=['Andres Barcelo','Pablo Barcelo','Martin Mendez','Camila Persampieri','Ramon Palazuelos'];
+        var comAct=c.comercial_asignado||'';
+        h+='<td style="text-align:center"><select onchange="cambiarComercial(\''+esc(c.telefono)+'\',this.value)" style="font-size:11px;padding:2px 6px;border-radius:6px;border:1px solid var(--bor);background:var(--bg);cursor:pointer">';
+        h+='<option value="">— Sin asignar —</option>';
+        COMS.forEach(function(com){ h+='<option value="'+com+'"'+(comAct===com?' selected':'')+'>'+com+'</option>'; });
+        h+='</select></td>';
+        h+='<td><button class="btn bb bs" onclick="editCli(\''+esc(c.telefono)+'\')">Editar</button></td>';
+        return; // saltar el resto del forEach para este tipo
+      }
       h+='<td>'+(c.nombre||'-')+'</td>';
       if(tipo==='minorista_entrega') h+='<td style="font-size:12px">'+(c.direccion||'-')+'</td>';
       else if(tipo==='consumidor_final') h+='<td>'+(c.email||'-')+'</td><td style="font-size:12px">'+(c.direccion||'-')+'</td>';
@@ -969,6 +990,11 @@ function loadCli(tipo, tbId) {
       h+='</tr>';
     });
     eid(tbId).innerHTML = h || '<tr><td colspan="9" class="emp">Sin clientes</td></tr>';
+  });
+}
+function cambiarComercial(tel, comercial) {
+  api('/api/clientes/'+encodeURIComponent(tel),'PATCH',{comercial_asignado:comercial}).then(function(){
+    toast('Comercial actualizado','ok');
   });
 }
 function toggleCli(tel,act) { api('/api/clientes/'+encodeURIComponent(tel),'PATCH',{activo:act?0:1}).then(function(){ toast(act?'Desactivado':'Activado','ok'); loadSec(navAct); }); }
