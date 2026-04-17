@@ -494,6 +494,46 @@ export function rentPorProveedor(limite) {
   `).all(limite || 30);
 }
 
+export function calendarioEstacional() {
+  // Por producto y mes numérico: kilos totales, rent%, valor/kg USD, ventas
+  return db.prepare(`
+    SELECT
+      producto,
+      categoria,
+      CAST(mes AS INTEGER) as mes_num,
+      ROUND(SUM(kilos_tot),0) as kilos,
+      ROUND(SUM(rent_dol)*100.0/NULLIF(SUM(tot_dol),0),1) as rent_pct,
+      ROUND(SUM(tot_dol)/NULLIF(SUM(kilos_tot),0),2) as valor_kg_dol,
+      COUNT(DISTINCT anio) as anios_con_datos
+    FROM sheet_ventas
+    WHERE producto IS NOT NULL AND producto != ''
+      AND mes IS NOT NULL AND mes != ''
+      AND kilos_tot > 0 AND tot_dol > 0
+    GROUP BY producto, mes_num
+    ORDER BY producto, mes_num
+  `).all();
+}
+
+export function proveedoresPorProductoMes(producto, mes) {
+  return db.prepare(`
+    SELECT
+      proveedor,
+      ROUND(SUM(kilos_tot),0) as kilos,
+      ROUND(SUM(rent_dol)*100.0/NULLIF(SUM(tot_dol),0),1) as rent_pct,
+      ROUND(SUM(tot_dol)/NULLIF(SUM(kilos_tot),0),2) as valor_kg_dol,
+      ROUND(SUM(tot_dol),0) as total_dol,
+      COUNT(DISTINCT anio) as anios,
+      MAX(anio) as ultimo_anio
+    FROM sheet_ventas
+    WHERE producto = ?
+      AND CAST(mes AS INTEGER) = ?
+      AND proveedor IS NOT NULL AND proveedor != ''
+      AND kilos_tot > 0
+    GROUP BY proveedor
+    ORDER BY kilos DESC
+  `).all(producto, parseInt(mes));
+}
+
 export function estadoSync() {
   const compras = db.prepare("SELECT COUNT(*) as n, MAX(sync_fecha) as ultimo FROM sheet_compras").get();
   const ventas  = db.prepare("SELECT COUNT(*) as n, MAX(sync_fecha) as ultimo FROM sheet_ventas").get();

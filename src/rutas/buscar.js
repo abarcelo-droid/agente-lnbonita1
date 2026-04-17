@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { buscarProductoCompras, buscarProductoVentas, buscarClienteVentas, historialClienteVentas, estadoSync, syncSheets } from '../servicios/sheets.js';
+import { buscarProductoCompras, buscarProductoVentas, buscarClienteVentas, historialClienteVentas, estadoSync, syncSheets, calendarioEstacional, proveedoresPorProductoMes } from '../servicios/sheets.js';
 
 const router = Router();
 
@@ -38,6 +38,20 @@ router.get('/buscar/sync', (req, res) => {
 router.post('/buscar/sync', async (req, res) => {
   res.json({ ok: true, mensaje: 'Sync iniciado en background' });
   syncSheets().catch(e => console.error('[Sheets] Sync manual error:', e.message));
+});
+
+// Calendario estacional
+router.get('/calendario/estacional', (req, res) => {
+  try { res.json(calendarioEstacional()); }
+  catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// Proveedores por producto y mes
+router.get('/calendario/proveedores', (req, res) => {
+  const { producto, mes } = req.query;
+  if (!producto || !mes) return res.status(400).json({ error: 'Faltan producto y mes' });
+  try { res.json(proveedoresPorProductoMes(producto, mes)); }
+  catch(e) { res.status(500).json({ error: e.message }); }
 });
 
 export default router;
