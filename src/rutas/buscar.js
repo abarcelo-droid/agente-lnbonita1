@@ -69,7 +69,26 @@ router.get('/calendario/estacional', (req, res) => {
 router.get('/calendario/proveedores', (req, res) => {
   const { producto, mes } = req.query;
   if (!producto || !mes) return res.status(400).json({ error: 'Faltan producto y mes' });
-  try { res.json(proveedoresPorProductoMes(producto, mes)); }
+  try {
+    const rows = db.prepare(`
+      SELECT
+        proveedor,
+        ROUND(SUM(kilos_tot),0) as kilos,
+        ROUND(AVG(CASE WHEN rent IS NOT NULL AND rent != 0 THEN rent ELSE NULL END),1) as rent_pct,
+        ROUND(AVG(CASE WHEN prec_dol IS NOT NULL AND prec_dol > 0 THEN prec_dol ELSE NULL END),2) as valor_kg_dol,
+        ROUND(SUM(kilos_tot),0) as total_dol,
+        COUNT(DISTINCT anio) as anios,
+        MAX(anio) as ultimo_anio
+      FROM sheet_ventas
+      WHERE producto = ?
+        AND CAST(mes AS INTEGER) = ?
+        AND proveedor IS NOT NULL AND proveedor != ''
+        AND kilos_tot > 0
+      GROUP BY proveedor
+      ORDER BY kilos DESC
+    `).all(producto, parseInt(mes));
+    res.json(rows);
+  }
   catch(e) { res.status(500).json({ error: e.message }); }
 });
 
