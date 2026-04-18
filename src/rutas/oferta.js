@@ -241,6 +241,9 @@ router.get("/pricing/pdf/:tipo", async (req, res) => {
       '.cons-badge{display:inline-block;background:#dcfce7;color:#166534;border:1px solid #86efac;border-radius:3px;font-size:9px;padding:0 4px;margin-left:4px;font-weight:700;vertical-align:middle}',
       '.prox-badge{display:inline-block;background:#dbeafe;color:#1e40af;border:1px solid #93c5fd;border-radius:3px;font-size:9px;padding:0 3px;margin-left:4px;font-weight:700;vertical-align:middle}',
       '.footer{margin-top:28px;font-size:10px;color:#b09080;text-align:center;border-top:1px solid #e8ddd0;padding-top:10px}',
+      '.btn-print{position:fixed;bottom:24px;right:24px;background:#0f2540;color:#fff;border:none;border-radius:8px;padding:12px 22px;font-size:13px;font-weight:700;cursor:pointer;box-shadow:0 4px 12px rgba(0,0,0,.2);z-index:999}',
+      '.btn-print:hover{background:#1a3a6e}',
+      '@media print{.btn-print{display:none}}',
       '.leyenda{font-size:10px;color:#7a6055;margin-bottom:12px;display:flex;gap:16px}',
       '</style></head><body>',
       '<div class="header">',
@@ -254,6 +257,7 @@ router.get("/pricing/pdf/:tipo", async (req, res) => {
       '</table>',
       mncSection,
       '<div class="footer">La Nina Bonita - Mercado Central de Buenos Aires, Nave 4, Puestos 2-4-6 | a.barcelo@lnbonita.com.ar</div>',
+      '<button class="btn-print" onclick="window.print()">🖨 Imprimir / Guardar PDF</button>',
       '</body></html>'
     ].join('');
 
@@ -312,7 +316,8 @@ router.get("/pricing/pdf/:tipo", async (req, res) => {
     '<tbody>' + rows + '</tbody>',
     '</table>',
     '<div class="footer">La Nina Bonita - Mercado Central de Buenos Aires, Nave 4, Puestos 2-4-6 | a.barcelo@lnbonita.com.ar</div>',
-    '</body></html>'
+    '<button class="btn-print" onclick="window.print()">🖨 Imprimir / Guardar PDF</button>',
+      '</body></html>'
   ].join('');
 
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
