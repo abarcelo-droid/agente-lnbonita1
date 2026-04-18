@@ -88,6 +88,36 @@ db.exec(`
   );
 `);
 
+// Migración: si la tabla sheet_ventas no tiene las columnas nuevas, la recreamos
+(function() {
+  try {
+    var cols = db.prepare("PRAGMA table_info(sheet_ventas)").all().map(function(c){ return c.name; });
+    // Si no tiene 'producto' (columna Z), la tabla es vieja → recrear
+    if (cols.indexOf('producto') < 0) {
+      console.log('[Sheets] Tabla sheet_ventas desactualizada, recreando...');
+      db.exec("DROP TABLE IF EXISTS sheet_ventas");
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS sheet_ventas (
+          id          INTEGER PRIMARY KEY AUTOINCREMENT,
+          id_venta    TEXT, fecha TEXT, nro_comprob TEXT, cod_cli TEXT,
+          cliente     TEXT, alias TEXT, cod_vend TEXT, vendedor TEXT,
+          cod_art     TEXT, articulo TEXT, cantidad REAL, precio REAL,
+          total       REAL, partida TEXT, partida_ok TEXT, sem TEXT,
+          mes         TEXT, anio TEXT, cod_fecha TEXT, precio_ok REAL,
+          total_ok    REAL, dol_dia REAL, prec_dol REAL, tot_dol REAL,
+          periodo     TEXT, producto TEXT, kilaje TEXT, kilos_tot REAL,
+          categoria   TEXT, costeo REAL, cate_clie TEXT, subcategoria TEXT,
+          boni        REAL, proveedor TEXT, rent REAL, rent_dol REAL,
+          mes_ok      TEXT, des REAL, flete_largo REAL, descargas REAL,
+          ifco        REAL, flete_super REAL, pct REAL, cat_pro TEXT,
+          raw         TEXT, sync_fecha TEXT DEFAULT (date('now','localtime'))
+        );
+      `);
+      console.log('[Sheets] Tabla sheet_ventas recreada OK');
+    }
+  } catch(e) { console.error('[Sheets] Error migrando sheet_ventas:', e.message); }
+})();
+
 // Migración: agregar columnas nuevas si no existen
 (function() {
   var cols = [];
