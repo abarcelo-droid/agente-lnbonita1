@@ -44,26 +44,52 @@ router.post('/buscar/sync', async (req, res) => {
 // Calendario estacional
 router.get('/calendario/estacional', (req, res) => {
   try {
-    // Obtener el último año con datos
-    const ultimoAnio = db.prepare("SELECT MAX(CAST(anio AS INTEGER)) as max_anio FROM sheet_ventas WHERE anio IS NOT NULL AND anio != ''").get();
-    const anio = ultimoAnio ? ultimoAnio.max_anio : new Date().getFullYear();
+    const mesActual = new Date().getMonth() + 1; // 1-12
+    const anioActual = new Date().getFullYear();
+    const anioAnterior = anioActual - 1;
 
-    const rows = db.prepare(`
-      SELECT
-        producto,
-        categoria,
-        CAST(mes AS INTEGER) as mes_num,
+    // Meses pasados + mes actual → año actual; meses futuros → año anterior
+    // Traemos ambos años y los combinamos
+    const rowsAnioActual = db.prepare(`
+      SELECT producto, categoria, CAST(mes AS INTEGER) as mes_num,
         ROUND(SUM(kilos_tot),0) as kilos,
         ROUND(AVG(CASE WHEN rent IS NOT NULL AND rent != 0 THEN rent ELSE NULL END),1) as rent_pct,
         ROUND(AVG(CASE WHEN prec_dol IS NOT NULL AND prec_dol > 0 THEN prec_dol ELSE NULL END),2) as valor_kg_dol
       FROM sheet_ventas
       WHERE producto IS NOT NULL AND producto != ''
         AND mes IS NOT NULL AND mes != '' AND mes != '0'
-        AND kilos_tot > 0
-        AND CAST(anio AS INTEGER) = ?
+        AND kilos_tot > 0 AND CAST(anio AS INTEGER) = ?
       GROUP BY producto, mes_num
-      ORDER BY mes_num
-    `).all(anio);
+    `).all(anioActual);
+
+    const rowsAnioAnterior = db.prepare(`
+      SELECT producto, categoria, CAST(mes AS INTEGER) as mes_num,
+        ROUND(SUM(kilos_tot),0) as kilos,
+        ROUND(AVG(CASE WHEN rent IS NOT NULL AND rent != 0 THEN rent ELSE NULL END),1) as rent_pct,
+        ROUND(AVG(CASE WHEN prec_dol IS NOT NULL AND prec_dol > 0 THEN prec_dol ELSE NULL END),2) as valor_kg_dol
+      FROM sheet_ventas
+      WHERE producto IS NOT NULL AND producto != ''
+        AND mes IS NOT NULL AND mes != '' AND mes != '0'
+        AND kilos_tot > 0 AND CAST(anio AS INTEGER) = ?
+      GROUP BY producto, mes_num
+    `).all(anioAnterior);
+
+    // Combinar: meses <= mesActual → año actual; meses > mesActual → año anterior
+    // Marcar mes actual como parcial
+    const rowsMap = {};
+    rowsAnioAnterior.forEach(function(r) {
+      if (r.mes_num > mesActual) {
+        var key = r.producto + '|' + r.mes_num;
+        rowsMap[key] = { ...r, fuente: 'anterior' };
+      }
+    });
+    rowsAnioActual.forEach(function(r) {
+      if (r.mes_num <= mesActual) {
+        var key = r.producto + '|' + r.mes_num;
+        rowsMap[key] = { ...r, fuente: r.mes_num === mesActual ? 'parcial' : 'actual' };
+      }
+    });
+    const rows = Object.values(rowsMap);
 
     // Calcular volumen total por producto (suma de todos los años para ese producto)
     const volumen = db.prepare(`
@@ -75,7 +101,7 @@ router.get('/calendario/estacional', (req, res) => {
     const volMap = {};
     volumen.forEach(function(v){ volMap[v.producto] = v.vol_total; });
 
-    res.json({ anio, rows, volumen: volMap });
+    res.json({ anio: anioActual, anioAnterior, mesActual, rows, volumen: volMap });
   }
   catch(e) { res.status(500).json({ error: e.message }); }
 });

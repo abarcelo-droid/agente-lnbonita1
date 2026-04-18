@@ -189,10 +189,10 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   <!-- Leyenda -->
   <div style="display:flex;gap:12px;align-items:center;margin-bottom:14px;flex-wrap:wrap">
     <span style="font-size:11px;font-weight:700;color:var(--mut);text-transform:uppercase">Intensidad:</span>
-    <span style="display:flex;align-items:center;gap:4px;font-size:11px"><span style="width:14px;height:14px;border-radius:3px;background:#d1fae5;display:inline-block"></span>Baja &lt;5K kg</span>
-    <span style="display:flex;align-items:center;gap:4px;font-size:11px"><span style="width:14px;height:14px;border-radius:3px;background:#6ee7b7;display:inline-block"></span>Media 5-20K</span>
-    <span style="display:flex;align-items:center;gap:4px;font-size:11px"><span style="width:14px;height:14px;border-radius:3px;background:#10b981;display:inline-block"></span>Alta 20-50K</span>
-    <span style="display:flex;align-items:center;gap:4px;font-size:11px"><span style="width:14px;height:14px;border-radius:3px;background:#065f46;display:inline-block"></span>Core +50K</span>
+    <span style="display:flex;align-items:center;gap:4px;font-size:11px"><span style="width:14px;height:14px;border-radius:3px;background:#d1fae5;display:inline-block"></span>Verde = año actual</span>
+    <span style="display:flex;align-items:center;gap:4px;font-size:11px"><span style="width:14px;height:14px;border-radius:3px;background:#f59e0b;display:inline-block"></span>Naranja = mes en curso (parcial)</span>
+    <span style="display:flex;align-items:center;gap:4px;font-size:11px"><span style="width:14px;height:14px;border-radius:3px;background:#3b82f6;display:inline-block"></span>Azul = año anterior (referencia)</span>
+    <span style="display:flex;align-items:center;gap:4px;font-size:11px"><span style="width:14px;height:14px;border-radius:3px;background:#065f46;display:inline-block"></span>Más oscuro = más volumen</span>
     <span style="display:flex;align-items:center;gap:4px;font-size:11px;margin-left:8px"><span style="width:14px;height:14px;border-radius:3px;background:#f3f4f6;border:1px solid #e5e7eb;display:inline-block"></span>Sin datos</span>
   </div>
   <div id="cal-container" style="overflow-x:auto"></div>
@@ -2610,8 +2610,23 @@ var MESES_CAL = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','No
 var MESES_NUM = [1,2,3,4,5,6,7,8,9,10,11,12];
 var MIN_KILOS = 2000;
 
-function kilosColor(kilos) {
+function kilosColor(kilos, fuente) {
   if (!kilos || kilos < MIN_KILOS) return { bg: '#f3f4f6', fg: '#9ca3af', nivel: 0 };
+  if (fuente === 'parcial') {
+    // Naranja — dato parcial (mes actual en curso)
+    if (kilos < 5000)  return { bg: '#fef3c7', fg: '#92400e', nivel: 1 };
+    if (kilos < 20000) return { bg: '#fde68a', fg: '#78350f', nivel: 2 };
+    if (kilos < 50000) return { bg: '#f59e0b', fg: '#fff',    nivel: 3 };
+    return               { bg: '#d97706', fg: '#fff',    nivel: 4 };
+  }
+  if (fuente === 'anterior') {
+    // Azul — dato del año anterior (meses futuros)
+    if (kilos < 5000)  return { bg: '#dbeafe', fg: '#1e40af', nivel: 1 };
+    if (kilos < 20000) return { bg: '#93c5fd', fg: '#1e3a8a', nivel: 2 };
+    if (kilos < 50000) return { bg: '#3b82f6', fg: '#fff',    nivel: 3 };
+    return               { bg: '#1d4ed8', fg: '#fff',    nivel: 4 };
+  }
+  // Verde — dato del año actual confirmado
   if (kilos < 5000)  return { bg: '#d1fae5', fg: '#065f46', nivel: 1 };
   if (kilos < 20000) return { bg: '#6ee7b7', fg: '#064e3b', nivel: 2 };
   if (kilos < 50000) return { bg: '#10b981', fg: '#fff',    nivel: 3 };
@@ -2641,12 +2656,14 @@ function loadCalendario() {
       if (sub) sub.textContent = 'Temporadas por producto — Año ' + anio;
     }
     var volMap = resp.volumen || {};
+    window._calMesActual = resp.mesActual || (new Date().getMonth()+1);
+    window._calAnioAnterior = resp.anioAnterior || (new Date().getFullYear()-1);
     var productos = {};
     rows.forEach(function(r) {
       if (!r.producto) return;
       if (!productos[r.producto]) productos[r.producto] = { categoria: r.categoria, meses: {}, vol_total: volMap[r.producto] || 0 };
       productos[r.producto].meses[r.mes_num] = {
-        kilos: r.kilos, rent_pct: r.rent_pct, valor_kg_dol: r.valor_kg_dol
+        kilos: r.kilos, rent_pct: r.rent_pct, valor_kg_dol: r.valor_kg_dol, fuente: r.fuente
       };
     });
     _calData = productos;
@@ -2666,30 +2683,15 @@ function renderCalendario(productos) {
     return;
   }
 
-  // Agrupar por categoría
-  var porCat = {};
-  keys.forEach(function(prod) {
-    var cat = productos[prod].categoria || 'Sin categoría';
-    if (!porCat[cat]) porCat[cat] = [];
-    porCat[cat].push(prod);
-  });
-
   var h = '<table style="border-collapse:collapse;min-width:100%;font-size:12px">';
-  // Header meses
   h += '<thead><tr><th style="padding:8px 12px;text-align:left;background:var(--burd);color:#fff;position:sticky;left:0;z-index:2;min-width:160px">Producto</th>';
   MESES_CAL.forEach(function(m) {
     h += '<th style="padding:8px 6px;text-align:center;background:var(--burd);color:#fff;min-width:52px">'+m+'</th>';
   });
   h += '</tr></thead><tbody>';
 
-  Object.keys(porCat).sort(function(a,b){
-    var va = porCat[a].reduce(function(s,p){ return s+(productos[p].vol_total||0); },0);
-    var vb = porCat[b].reduce(function(s,p){ return s+(productos[p].vol_total||0); },0);
-    return vb - va;
-  }).forEach(function(cat) {
-    // Fila categoría
-    h += '<tr><td colspan="13" style="background:#4a90b8;color:#fff;font-size:10px;font-weight:700;text-transform:uppercase;padding:5px 12px;letter-spacing:.06em;position:sticky;left:0">'+cat+'</td></tr>';
-    porCat[cat].forEach(function(prod) {
+  // Todos los productos sin categoría, ordenados por volumen
+  keys.forEach(function(prod) {
       var meses = productos[prod].meses;
       // Calcular max kilos del producto para intensidad relativa
       var maxKilos = Math.max.apply(null, MESES_NUM.map(function(m){ return (meses[m]&&meses[m].kilos)||0; }));
@@ -2698,7 +2700,7 @@ function renderCalendario(productos) {
       MESES_NUM.forEach(function(m) {
         var d = meses[m];
         var kilos = d ? d.kilos : 0;
-        var col = kilosColor(kilos);
+        var col = kilosColor(kilos, d ? d.fuente : null);
         var titulo = d && kilos >= MIN_KILOS
           ? prod+' — '+MESES_CAL[m-1]+'\nKilos: '+Math.round(kilos).toLocaleString('es-AR')+'\nRent: '+(d.rent_pct||0)+'%\nValor: U$S '+(d.valor_kg_dol||0)+'/kg'
           : '';
@@ -2720,7 +2722,6 @@ function renderCalendario(productos) {
         h += '</td>';
       });
       h += '</tr>';
-    });
   });
 
   h += '</tbody></table>';
