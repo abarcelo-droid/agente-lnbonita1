@@ -714,4 +714,260 @@ router.get('/resumen', (req, res) => {
   }
 });
 
+// ============================================================
+// MANDATA
+// ============================================================
+
+// Listar mandatas
+router.get('/mandatas', (req, res) => {
+  const db = getDb();
+  const { estado, deposito } = req.query;
+  let where = [];
+  let params = [];
+  if (estado) { where.push('m.estado = ?'); params.push(estado); }
+  if (deposito) { where.push('m.deposito = ?'); params.push(deposito); }
+  const w = where.length ? 'WHERE ' + where.join(' AND ') : '';
+  try {
+    const mandatas = db.prepare(`
+      SELECT m.*, COUNT(mi.id) as total_items
+      FROM mandatas m
+      LEFT JOIN mandatas_items mi ON mi.mandata_id = m.id
+      ${w}
+      GROUP BY m.id
+      ORDER BY m.fecha DESC, m.id DESC
+    `).all(...params);
+    res.json({ ok: true, data: mandatas });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// Detalle mandata
+router.get('/mandatas/:id', (req, res) => {
+  const db = getDb();
+  try {
+    const m = db.prepare('SELECT * FROM mandatas WHERE id=?').get(req.params.id);
+    if (!m) return res.status(404).json({ ok: false, error: 'No encontrada' });
+    const items = db.prepare(`
+      SELECT mi.*, pa.deposito, pa.envase,
+        COALESCE(rp.nombre, mi.producto) as producto_display
+      FROM mandatas_items mi
+      JOIN partidas pa ON pa.id = mi.partida_id
+      LEFT JOIN retail_productos rp ON rp.id = pa.producto_id
+      WHERE mi.mandata_id = ?
+    `).all(req.params.id);
+    res.json({ ok: true, data: { ...m, items } });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// Crear mandata (descuenta stock inmediatamente)
+router.post('/mandatas', (req, res) => {
+  const db = getDb();
+  const { fecha, deposito, empresa, contacto, cliente_telefono, comercial, items, notas } = req.body;
+  if (!items || !items.length) return res.status(400).json({ ok: false, error: 'Sin items' });
+  if (!empresa) return res.status(400).json({ ok: false, error: 'Cliente requerido' });
+
+  try {
+    // Generar número
+    const ultimo = db.prepare("SELECT nro_mandata FROM mandatas ORDER BY id DESC LIMIT 1").get();
+    let nroNuevo = 'M-0001';
+    if (ultimo?.nro_mandata) {
+      const num = parseInt(ultimo.nro_mandata.split('-')[1]) + 1;
+      nroNuevo = 'M-' + String(num).padStart(4, '0');
+    }
+
+    const result = db.transaction(() => {
+      // Validar stock
+      for (const item of items) {
+        const p = db.prepare('SELECT * FROM partidas WHERE id=?').get(item.partida_id);
+        if (!p) throw new Error(`Partida ${item.partida_id} no encontrada`);
+        if (p.bultos_disponibles < item.bultos) throw new Error(`Stock insuficiente: ${p.producto} (disp: ${p.bultos_disponibles})`);
+      }
+
+      // Calcular totales
+      let total_kg = 0, total_importe = 0;
+      for (const item of items) {
+        const kg = item.bultos * item.kilos_por_bulto;
+        total_kg += kg;
+        total_importe += kg * (item.precio_kg || 0);
+      }
+
+      // Crear mandata
+      const r = db.prepare(`
+        INSERT INTO mandatas (nro_mandata, fecha, deposito, empresa, contacto, cliente_telefono, comercial, estado, total_kg, total_importe, notas)
+        VALUES (?, ?, ?, ?, ?, ?, ?, 'pendiente', ?, ?, ?)
+      `).run(nroNuevo, fecha || new Date().toISOString().split('T')[0],
+        deposito || 'MCBA', empresa, contacto || null, cliente_telefono || null,
+        comercial || null, total_kg, total_importe, notas || null);
+
+      const mandata_id = r.lastInsertRowid;
+
+      // Insertar items y descontar stock
+      for (const item of items) {
+        const p = db.prepare('SELECT * FROM partidas WHERE id=?').get(item.partida_id);
+        const kg_total = item.bultos * item.kilos_por_bulto;
+        const importe = kg_total * (item.precio_kg || 0);
+
+        db.prepare(`
+          INSERT INTO mandatas_items (mandata_id, partida_id, producto, bultos, kilos_por_bulto, kilos_total, precio_kg, importe)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(mandata_id, item.partida_id, p.producto, item.bultos, item.kilos_por_bulto, kg_total, item.precio_kg || 0, importe);
+
+        // Descontar stock
+        const nuevosDisp = p.bultos_disponibles - item.bultos;
+        const estadoP = nuevosDisp === 0 ? 'cerrada' : 'parcial';
+        db.prepare('UPDATE partidas SET bultos_disponibles=?, estado=? WHERE id=?').run(nuevosDisp, estadoP, item.partida_id);
+
+        // Registrar movimiento
+        db.prepare(`
+          INSERT INTO movimientos_stock (partida_id, fecha, tipo, bultos, referencia_tipo, referencia_id, notas)
+          VALUES (?, ?, 'salida_factura', ?, 'mandata', ?, ?)
+        `).run(item.partida_id, fecha || new Date().toISOString().split('T')[0], item.bultos, mandata_id, `Mandata ${nroNuevo}`);
+      }
+
+      return { id: mandata_id, nro_mandata: nroNuevo };
+    })();
+
+    res.json({ ok: true, ...result });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// Anular mandata (devuelve stock)
+router.post('/mandatas/:id/anular', (req, res) => {
+  const db = getDb();
+  try {
+    const m = db.prepare('SELECT * FROM mandatas WHERE id=?').get(req.params.id);
+    if (!m) return res.status(404).json({ ok: false, error: 'No encontrada' });
+    if (m.estado === 'facturada') return res.status(400).json({ ok: false, error: 'No se puede anular una mandata ya facturada' });
+
+    const items = db.prepare('SELECT * FROM mandatas_items WHERE mandata_id=?').all(req.params.id);
+
+    db.transaction(() => {
+      // Devolver stock
+      for (const item of items) {
+        const p = db.prepare('SELECT * FROM partidas WHERE id=?').get(item.partida_id);
+        if (!p) continue;
+        const nuevosDisp = p.bultos_disponibles + item.bultos;
+        const estadoP = nuevosDisp >= p.bultos_ingresados ? 'activa' : 'parcial';
+        db.prepare('UPDATE partidas SET bultos_disponibles=?, estado=? WHERE id=?').run(nuevosDisp, estadoP, item.partida_id);
+        db.prepare(`
+          INSERT INTO movimientos_stock (partida_id, fecha, tipo, bultos, referencia_tipo, referencia_id, notas)
+          VALUES (?, ?, 'devolucion', ?, 'mandata', ?, 'Anulación mandata')
+        `).run(item.partida_id, new Date().toISOString().split('T')[0], item.bultos, m.id);
+      }
+      db.prepare("UPDATE mandatas SET estado='anulada' WHERE id=?").run(req.params.id);
+    })();
+
+    res.json({ ok: true });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// PDF de mandata
+router.get('/mandatas/:id/pdf', (req, res) => {
+  const db = getDb();
+  try {
+    const m = db.prepare('SELECT * FROM mandatas WHERE id=?').get(req.params.id);
+    if (!m) return res.status(404).json({ ok: false, error: 'No encontrada' });
+
+    const items = db.prepare(`
+      SELECT mi.*, COALESCE(rp.nombre, mi.producto) as producto_display, pa.envase
+      FROM mandatas_items mi
+      JOIN partidas pa ON pa.id = mi.partida_id
+      LEFT JOIN retail_productos rp ON rp.id = pa.producto_id
+      WHERE mi.mandata_id = ?
+    `).all(req.params.id);
+
+    const fecha = new Date(m.fecha + 'T12:00:00').toLocaleDateString('es-AR', { day:'2-digit', month:'2-digit', year:'numeric' });
+
+    const rowsHTML = items.map(item => `
+      <tr>
+        <td class="c">${item.bultos}</td>
+        <td>${item.producto_display.toUpperCase()}${item.envase ? ' ' + item.envase.toUpperCase() : ''}</td>
+        <td class="r">${item.kilos_total.toFixed(1)} kg</td>
+        <td class="r">${item.precio_kg > 0 ? '$' + item.precio_kg.toLocaleString('es-AR', {minimumFractionDigits:2}) : '—'}</td>
+        <td class="r">${item.importe > 0 ? '$' + item.importe.toLocaleString('es-AR', {minimumFractionDigits:2}) : '—'}</td>
+      </tr>`).join('');
+
+    const html = `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8">
+<title>Mandata ${m.nro_mandata}</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:Arial,sans-serif;font-size:11px;color:#000;background:#fff}
+.page{width:210mm;margin:0 auto;padding:6mm 8mm}
+.hdr{display:flex;align-items:stretch;border:1px solid #000;margin-bottom:4px}
+.hdr-logo{width:44mm;border-right:1px solid #000;padding:6px 8px;display:flex;flex-direction:column;align-items:center;justify-content:center}
+.logo-name{font-size:20px;font-weight:900;font-style:italic;color:#b8002a;letter-spacing:-1px;line-height:1}
+.logo-sub{font-size:9px;font-weight:700;letter-spacing:.1em;margin:2px 0 6px}
+.hdr-logo address{font-size:8px;text-align:center;font-style:normal;line-height:1.5;color:#333}
+.hdr-M{width:20mm;border-right:1px solid #000;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:4px}
+.M-box{border:3px solid #b8002a;width:26px;height:26px;display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:900;color:#b8002a;margin-bottom:3px}
+.hdr-main{flex:1;padding:6px 10px}
+.no-fiscal{font-size:9px;font-weight:700;text-transform:uppercase;color:#b8002a;margin-bottom:2px}
+.nro{font-size:16px;font-weight:900;margin-bottom:6px}
+.fecha-row{display:flex;align-items:center;gap:8px;margin-bottom:6px}
+.fecha-val{border:1px solid #000;padding:3px 10px;font-size:12px;font-weight:700}
+.hdr-datos{font-size:8.5px;line-height:1.7;color:#333}
+.cli{border:1px solid #000;border-top:none;padding:5px 8px}
+.cli-row{display:flex;align-items:baseline;gap:6px;margin-bottom:3px}
+.cli-label{font-size:9px;font-weight:700;white-space:nowrap;min-width:65px}
+.cli-val{font-size:11px;font-weight:700;border-bottom:1px solid #000;flex:1;padding-bottom:1px}
+.dep-badge{display:inline-block;padding:2px 10px;border-radius:12px;font-size:10px;font-weight:700;background:#dbeafe;color:#1e40af;margin-left:8px}
+table{width:100%;border-collapse:collapse;border:1px solid #000;border-top:none}
+thead tr{background:#0f2540}
+thead th{color:#fff;padding:6px 8px;font-size:9.5px;text-transform:uppercase;letter-spacing:.05em}
+tbody td{padding:6px 8px;border-bottom:1px solid #ddd;font-size:10.5px}
+tbody tr:last-child td{border-bottom:none}
+tfoot td{border-top:2px solid #000;padding:5px 8px;font-weight:700;font-size:11px}
+td.c,th.c{text-align:center}
+td.r,th.r{text-align:right;font-variant-numeric:tabular-nums}
+.footer{border:1px solid #000;border-top:none;display:flex;justify-content:space-between;align-items:center;padding:5px 8px}
+.footer-left{font-size:8px;color:#555;line-height:1.6}
+.footer-right{font-size:9px;font-weight:700;color:#b8002a;text-align:right}
+.estado-badge{display:inline-block;padding:2px 8px;border-radius:4px;background:#fef9c3;color:#854d0e;font-size:9px;font-weight:700;text-transform:uppercase;margin-left:6px}
+@media print{.no-print{display:none!important}.page{padding:4mm 6mm}}
+</style></head><body><div class="page">
+<div class="no-print" style="text-align:right;margin-bottom:8px">
+  <button onclick="window.print()" style="background:#1a3a5c;color:#fff;border:none;padding:8px 20px;border-radius:6px;font-size:13px;cursor:pointer">🖨 Imprimir</button>
+</div>
+<div class="hdr">
+  <div class="hdr-logo">
+    <div class="logo-name">La Niña<br>Bonita</div>
+    <div class="logo-sub">SAN GERÓNIMO S.A.</div>
+    <address>Independencia 1073 (Este)<br>Va. Huarpes | C.P 5425 | Rawson | San Juan</address>
+  </div>
+  <div class="hdr-M"><div class="M-box">M</div><div style="font-size:8px;text-align:center">MANDATA</div></div>
+  <div class="hdr-main">
+    <div class="no-fiscal">⚠ DOCUMENTO INTERNO — NO VÁLIDO COMO FACTURA</div>
+    <div class="nro">${m.nro_mandata} <span class="estado-badge">${m.estado.toUpperCase()}</span></div>
+    <div class="fecha-row"><span style="font-size:11px">Fecha</span><span class="fecha-val">${fecha}</span></div>
+    <div class="hdr-datos">C.U.I.T.: 30-67325443-4 &nbsp;·&nbsp; IVA Responsable Inscripto<br>Depósito: <strong>${m.deposito}</strong> &nbsp;·&nbsp; Comercial: ${m.comercial || '—'}</div>
+  </div>
+</div>
+<div class="cli">
+  <div class="cli-row"><span class="cli-label">Cliente:</span><span class="cli-val">${m.empresa || '—'}</span></div>
+  ${m.contacto ? `<div class="cli-row"><span class="cli-label">Contacto:</span><span class="cli-val">${m.contacto}</span></div>` : ''}
+  ${m.notas ? `<div class="cli-row"><span class="cli-label">Notas:</span><span class="cli-val" style="font-weight:400">${m.notas}</span></div>` : ''}
+</div>
+<table>
+  <thead><tr><th class="c" style="width:50px">Bultos</th><th style="text-align:left">Producto</th><th class="r" style="width:75px">Kg total</th><th class="r" style="width:80px">$/kg</th><th class="r" style="width:90px">Importe</th></tr></thead>
+  <tbody>${rowsHTML}${'<tr><td style="height:20px"></td><td></td><td></td><td></td><td></td></tr>'.repeat(Math.max(0, 6 - items.length))}</tbody>
+  <tfoot>
+    <tr>
+      <td colspan="2" style="text-align:right">TOTAL</td>
+      <td class="r">${m.total_kg.toFixed(1)} kg</td>
+      <td></td>
+      <td class="r">$${m.total_importe.toLocaleString('es-AR', {minimumFractionDigits:2})}</td>
+    </tr>
+  </tfoot>
+</table>
+<div class="footer">
+  <div class="footer-left">San Gerónimo SA · CUIT 30-67325443-4 · Documento generado el ${new Date().toLocaleString('es-AR')}</div>
+  <div class="footer-right">${m.nro_mandata} — PENDIENTE DE FACTURACIÓN</div>
+</div>
+</div></body></html>`;
+
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(html);
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
 export default router;
+

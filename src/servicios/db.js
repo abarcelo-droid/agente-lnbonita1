@@ -624,7 +624,10 @@ db.exec(`
   );
 `);
 
-// Migración: agregar columnas en partidas si no existen
+// Función requerida por src/rutas/abasto.js
+export function getDb() {
+  return db;
+}
 (function migrarPartidas() {
   try {
     const cols = db.prepare("PRAGMA table_info(partidas)").all().map(c => c.name);
@@ -647,7 +650,37 @@ db.exec(`
   } catch(e) { console.error("[DB] Error migrando partidas:", e.message); }
 })();
 
-// Función requerida por src/rutas/abasto.js
-export function getDb() {
-  return db;
-}
+// ── MÓDULO MANDATA ─────────────────────────────────────────────────────────
+db.exec(`
+  CREATE TABLE IF NOT EXISTS mandatas (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    nro_mandata       TEXT UNIQUE,
+    fecha             TEXT NOT NULL,
+    deposito          TEXT NOT NULL DEFAULT 'MCBA',
+    cliente_telefono  TEXT,
+    empresa           TEXT,
+    contacto          TEXT,
+    comercial         TEXT,
+    estado            TEXT DEFAULT 'pendiente' CHECK(estado IN ('borrador','pendiente','facturada','anulada')),
+    total_kg          REAL DEFAULT 0,
+    total_importe     REAL DEFAULT 0,
+    moneda            TEXT DEFAULT 'ARS',
+    notas             TEXT,
+    factura_venta_id  INTEGER REFERENCES facturas_venta(id),
+    creado_en         TEXT DEFAULT (datetime('now','localtime'))
+  );
+
+  CREATE TABLE IF NOT EXISTS mandatas_items (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    mandata_id      INTEGER NOT NULL REFERENCES mandatas(id),
+    partida_id      INTEGER NOT NULL REFERENCES partidas(id),
+    producto        TEXT NOT NULL,
+    bultos          REAL NOT NULL,
+    kilos_por_bulto REAL NOT NULL,
+    kilos_total     REAL NOT NULL,
+    precio_kg       REAL DEFAULT 0,
+    importe         REAL DEFAULT 0,
+    moneda          TEXT DEFAULT 'ARS'
+  );
+`);
+
