@@ -92,8 +92,11 @@ db.exec(`
 (function() {
   try {
     var cols = db.prepare("PRAGMA table_info(sheet_ventas)").all().map(function(c){ return c.name; });
-    // Si no tiene 'producto' (columna Z), la tabla es vieja → recrear
-    if (cols.indexOf('producto') < 0) {
+    // Si no tiene todas las columnas nuevas → DROP y recrear
+    var colsEsperadas = ['producto','kilos_tot','cate_clie','proveedor','rent','rent_dol','cat_pro','flete_super','ifco','descargas','flete_largo'];
+    var faltaAlguna = colsEsperadas.some(function(c){ return cols.indexOf(c) < 0; });
+    // También forzar si tiene menos de 46 columnas (id + 45 campos)
+    if (faltaAlguna || cols.length < 46) {
       console.log('[Sheets] Tabla sheet_ventas desactualizada, recreando...');
       db.exec("DROP TABLE IF EXISTS sheet_ventas");
       db.exec(`
