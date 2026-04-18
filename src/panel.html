@@ -2640,10 +2640,11 @@ function loadCalendario() {
       var sub = document.querySelector('#sec-calendario .ph-s');
       if (sub) sub.textContent = 'Temporadas por producto — Año ' + anio;
     }
+    var volMap = resp.volumen || {};
     var productos = {};
     rows.forEach(function(r) {
       if (!r.producto) return;
-      if (!productos[r.producto]) productos[r.producto] = { categoria: r.categoria, meses: {} };
+      if (!productos[r.producto]) productos[r.producto] = { categoria: r.categoria, meses: {}, vol_total: volMap[r.producto] || 0 };
       productos[r.producto].meses[r.mes_num] = {
         kilos: r.kilos, rent_pct: r.rent_pct, valor_kg_dol: r.valor_kg_dol
       };
@@ -2655,7 +2656,9 @@ function loadCalendario() {
 
 function renderCalendario(productos) {
   var filtro = (eid('cal-filtro').value || '').toLowerCase().trim();
-  var keys = Object.keys(productos).sort();
+  var keys = Object.keys(productos).sort(function(a,b){
+    return (productos[b].vol_total||0) - (productos[a].vol_total||0);
+  });
   if (filtro) keys = keys.filter(function(k){ return k.toLowerCase().includes(filtro); });
 
   if (!keys.length) {
@@ -2679,7 +2682,11 @@ function renderCalendario(productos) {
   });
   h += '</tr></thead><tbody>';
 
-  Object.keys(porCat).sort().forEach(function(cat) {
+  Object.keys(porCat).sort(function(a,b){
+    var va = porCat[a].reduce(function(s,p){ return s+(productos[p].vol_total||0); },0);
+    var vb = porCat[b].reduce(function(s,p){ return s+(productos[p].vol_total||0); },0);
+    return vb - va;
+  }).forEach(function(cat) {
     // Fila categoría
     h += '<tr><td colspan="13" style="background:#4a90b8;color:#fff;font-size:10px;font-weight:700;text-transform:uppercase;padding:5px 12px;letter-spacing:.06em;position:sticky;left:0">'+cat+'</td></tr>';
     porCat[cat].forEach(function(prod) {
@@ -2980,7 +2987,7 @@ function abrirHistorico(producto, mes, event) {
   var popup = document.createElement('div');
   popup.id = 'cal-historico-popup';
   popup.style.cssText = 'position:fixed;z-index:9999;background:var(--sur);border:1px solid var(--bor);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.15);padding:14px;min-width:220px;font-size:12px';
-  popup.innerHTML = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><strong>'+producto+' — '+MESES_CAL[mes-1]+'</strong><button onclick="document.getElementById('cal-historico-popup').remove()" style="background:none;border:none;cursor:pointer;font-size:16px;color:var(--mut)">×</button></div><div style="color:var(--mut);font-size:11px">Cargando...</div>';
+  popup.innerHTML = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><strong>'+producto+' &mdash; '+MESES_CAL[mes-1]+'</strong><button onclick="document.getElementById(&quot;cal-historico-popup&quot;).remove()" style="background:none;border:none;cursor:pointer;font-size:16px;color:var(--mut)">×</button></div><div style="color:var(--mut);font-size:11px">Cargando...</div>';
 
   // Posicionar cerca del click
   var x = event.clientX + 10;
@@ -3005,7 +3012,7 @@ function abrirHistorico(producto, mes, event) {
       h += '<td style="padding:4px 6px;text-align:right;font-weight:700;color:'+rc+'">'+(r.rent_pct!==null?(r.rent_pct>=0?'+':'')+r.rent_pct+'%':'-')+'</td></tr>';
     });
     h += '</table>';
-    popup.innerHTML = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><strong>'+producto+' — '+MESES_CAL[mes-1]+'</strong><button onclick="document.getElementById('cal-historico-popup').remove()" style="background:none;border:none;cursor:pointer;font-size:16px;color:var(--mut)">×</button></div>' + h;
+    popup.innerHTML = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><strong>'+producto+' &mdash; '+MESES_CAL[mes-1]+'</strong><button onclick="document.getElementById(&quot;cal-historico-popup&quot;).remove()" style="background:none;border:none;cursor:pointer;font-size:16px;color:var(--mut)">×</button></div>' + h;
   });
 
   // Cerrar al hacer click afuera

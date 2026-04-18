@@ -62,9 +62,20 @@ router.get('/calendario/estacional', (req, res) => {
         AND kilos_tot > 0
         AND CAST(anio AS INTEGER) = ?
       GROUP BY producto, mes_num
-      ORDER BY producto, mes_num
+      ORDER BY mes_num
     `).all(anio);
-    res.json({ anio, rows });
+
+    // Calcular volumen total por producto (suma de todos los años para ese producto)
+    const volumen = db.prepare(`
+      SELECT producto, ROUND(SUM(kilos_tot),0) as vol_total
+      FROM sheet_ventas
+      WHERE producto IS NOT NULL AND producto != '' AND kilos_tot > 0
+      GROUP BY producto
+    `).all();
+    const volMap = {};
+    volumen.forEach(function(v){ volMap[v.producto] = v.vol_total; });
+
+    res.json({ anio, rows, volumen: volMap });
   }
   catch(e) { res.status(500).json({ error: e.message }); }
 });
