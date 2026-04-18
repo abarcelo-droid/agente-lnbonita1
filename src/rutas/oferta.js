@@ -130,52 +130,68 @@ router.get("/pricing/pdf/:tipo", async (req, res) => {
 
   // Caso especial: Disponible Piso (May MCBA + Min MCBA en dos columnas)
   if (tipo === 'disponible_piso') {
-    const prods = db.prepare("SELECT * FROM oferta_productos WHERE oferta = 'oferta1' AND activo = 1 AND disponible_general = 1 ORDER BY categoria, nombre").all();
-    const prodsMnc = db.prepare("SELECT * FROM oferta_productos WHERE oferta = 'oferta1' AND activo = 1 AND disponible_general = -1 ORDER BY categoria, nombre").all();
+    // Incluir disponibles (1), próximamente (2), consignación, y MNC (-1)
+    const todosProds = db.prepare(`
+      SELECT * FROM oferta_productos
+      WHERE oferta = 'oferta1' AND activo = 1
+        AND disponible_general IN (1, 2, -1)
+      ORDER BY categoria, nombre
+    `).all();
+
     const preciosMay = db.prepare("SELECT producto_id, precio, COALESCE(disponible_text, CASE WHEN disponible=1 THEN 'disponible' ELSE 'sin_stock' END) as disponible_text FROM oferta_precios WHERE tipo_cliente = 'mayorista_mcba'").all();
     const preciosMin = db.prepare("SELECT producto_id, precio, COALESCE(disponible_text, CASE WHEN disponible=1 THEN 'disponible' ELSE 'sin_stock' END) as disponible_text FROM oferta_precios WHERE tipo_cliente = 'minorista_mcba'").all();
     const mapMay = {}; preciosMay.forEach(function(p){ mapMay[p.producto_id] = p; });
     const mapMin = {}; preciosMin.forEach(function(p){ mapMin[p.producto_id] = p; });
     const fecha = new Date().toLocaleDateString('es-AR', {day:'2-digit',month:'2-digit',year:'numeric'});
 
-    let rows = ''; let catActual = '';
-    let mncRows = '';
+    // Orden de categorías
+    const ORDEN_CAT = ['Frutas Nacionales','Frutas Importadas','Hortaliza Liviana','Hortaliza Pesada'];
 
-    // Productos con disponible_general = -1 van a sección MNC
-    prodsMnc.forEach(function(p) {
-      const pMay = mapMay[p.id]; const pMin = mapMin[p.id];
-      mncRows += '<tr>';
-      mncRows += '<td style="font-weight:500">' + p.nombre + '</td>';
-      mncRows += '<td style="color:#7a6055">' + (p.descripcion||'') + '</td>';
-      mncRows += '<td style="color:#7a6055">' + (p.origen||'') + '</td>';
-      mncRows += '<td style="color:#7a6055">' + (p.kilaje||'') + '</td>';
-      mncRows += '<td style="color:#7a6055">' + (p.proveedor||'') + '</td>';
-      mncRows += '<td class="num">' + (pMay&&pMay.precio ? '$'+Number(pMay.precio).toLocaleString('es-AR') : '-') + '</td>';
-      mncRows += '<td class="num">' + (pMin&&pMin.precio ? '$'+Number(pMin.precio).toLocaleString('es-AR') : '-') + '</td>';
-      mncRows += '</tr>';
+    // Separar MNC del resto
+    const prodsNormales = todosProds.filter(p => p.disponible_general !== -1);
+    const prodsMnc      = todosProds.filter(p => p.disponible_general === -1);
+
+    // Ordenar normales por categoría según ORDEN_CAT, resto al final
+    prodsNormales.sort(function(a,b) {
+      const ia = ORDEN_CAT.indexOf(a.categoria); const ib = ORDEN_CAT.indexOf(b.categoria);
+      const oa = ia >= 0 ? ia : 99; const ob = ib >= 0 ? ib : 99;
+      if (oa !== ob) return oa - ob;
+      return (a.nombre||'').localeCompare(b.nombre||'');
     });
 
-    prods.forEach(function(p) {
+    function fmtPrecio(pMap, id, cons) {
+      const p = pMap[id];
+      if (!p || !p.precio) return cons ? '(cons.)' : '-';
+      return '$' + Number(p.precio).toLocaleString('es-AR');
+    }
+
+    function buildRow(p) {
       const pMay = mapMay[p.id]; const pMin = mapMin[p.id];
-      const dispMay = pMay ? pMay.disponible_text : null;
-      const dispMin = pMin ? pMin.disponible_text : null;
-      if (dispMay !== 'disponible' && dispMin !== 'disponible') return;
+      const cons = p.consignacion ? ' <span class="cons-badge">©</span>' : '';
+      const prox = p.disponible_general === 2 ? ' <span class="prox-badge">⏳</span>' : '';
+      let r = '<tr>';
+      r += '<td style="font-weight:700">' + p.nombre + cons + prox + '</td>';
+      r += '<td>' + (p.kilaje||'-') + '</td>';
+      r += '<td>' + (p.proveedor||'-') + '</td>';
+      r += '<td style="color:#7a6055">' + (p.origen||'-') + '</td>';
+      r += '<td class="num">' + fmtPrecio(mapMay, p.id, p.consignacion) + '</td>';
+      r += '<td class="num">' + fmtPrecio(mapMin, p.id, p.consignacion) + '</td>';
+      r += '</tr>';
+      return r;
+    }
+
+    let rows = ''; let catActual = '';
+    prodsNormales.forEach(function(p) {
       if (p.categoria !== catActual) {
         catActual = p.categoria;
-        rows += '<tr class="cat"><td colspan="7">' + (catActual||'Sin categoria') + '</td></tr>';
+        rows += '<tr class="cat"><td colspan="6">' + (catActual||'Sin categoria') + '</td></tr>';
       }
-      rows += '<tr>';
-      rows += '<td style="font-weight:500">' + p.nombre + '</td>';
-      rows += '<td style="color:#7a6055">' + (p.descripcion||'') + '</td>';
-      rows += '<td style="color:#7a6055">' + (p.origen||'') + '</td>';
-      rows += '<td style="color:#7a6055">' + (p.kilaje||'') + '</td>';
-      rows += '<td style="color:#7a6055">' + (p.proveedor||'') + '</td>';
-      rows += '<td class="num">' + (dispMay==='disponible'&&pMay.precio ? '$'+Number(pMay.precio).toLocaleString('es-AR') : '-') + '</td>';
-      rows += '<td class="num">' + (dispMin==='disponible'&&pMin.precio ? '$'+Number(pMin.precio).toLocaleString('es-AR') : '-') + '</td>';
-      rows += '</tr>';
+      rows += buildRow(p);
     });
 
-    // Sección MNC al final
+    let mncRows = '';
+    prodsMnc.forEach(function(p) { mncRows += buildRow(p); });
+
     const mncSection = mncRows ? `
       <div style="margin-top:28px;page-break-inside:avoid">
         <div style="background:#7f1d1d;color:#fff;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;padding:6px 10px;border-radius:4px 4px 0 0">
@@ -184,10 +200,9 @@ router.get("/pricing/pdf/:tipo", async (req, res) => {
         <table style="width:100%;border-collapse:collapse;font-size:11px">
           <thead><tr style="background:#fee2e2">
             <th style="padding:5px 8px;text-align:left">Producto</th>
-            <th style="padding:5px 8px;text-align:left">Variedad</th>
-            <th style="padding:5px 8px;text-align:left">Origen</th>
-            <th style="padding:5px 8px;text-align:left">Kilaje</th>
+            <th style="padding:5px 8px;text-align:left">Kilos</th>
             <th style="padding:5px 8px;text-align:left">Proveedor</th>
+            <th style="padding:5px 8px;text-align:left">Origen</th>
             <th style="padding:5px 8px;text-align:right">May MCBA</th>
             <th style="padding:5px 8px;text-align:right">Min MCBA</th>
           </tr></thead>
@@ -212,15 +227,19 @@ router.get("/pricing/pdf/:tipo", async (req, res) => {
       'th.num{text-align:right}',
       'td{padding:7px 10px;border-bottom:1px solid #e8ddd0;vertical-align:top;font-size:12px}',
       'td.num{text-align:right;font-weight:600;color:#0f2540;font-variant-numeric:tabular-nums}',
-      'tr.cat td{background:#e8f0f8;font-size:10px;font-weight:700;color:#0f2540;text-transform:uppercase;padding:6px 10px}',
+      'tr.cat td{background:#e8f0f8;font-size:10px;font-weight:700;color:#0f2540;text-transform:uppercase;padding:6px 10px;letter-spacing:.05em}',
+      '.cons-badge{display:inline-block;background:#fef3c7;color:#92400e;border:1px solid #fde68a;border-radius:3px;font-size:9px;padding:0 3px;margin-left:4px;font-weight:700;vertical-align:middle}',
+      '.prox-badge{display:inline-block;background:#dbeafe;color:#1e40af;border:1px solid #93c5fd;border-radius:3px;font-size:9px;padding:0 3px;margin-left:4px;font-weight:700;vertical-align:middle}',
       '.footer{margin-top:28px;font-size:10px;color:#b09080;text-align:center;border-top:1px solid #e8ddd0;padding-top:10px}',
+      '.leyenda{font-size:10px;color:#7a6055;margin-bottom:12px;display:flex;gap:16px}',
       '</style></head><body>',
       '<div class="header">',
       '<img src="' + logoUrl + '" class="logo-img" alt="La Nina Bonita">',
       '<div class="header-right"><div class="header-sub">San Geronimo SA</div><strong style="font-size:14px;color:#0f2540">Disponible Piso</strong><div class="header-sub">Fecha: ' + fecha + '</div></div>',
       '</div>',
+      '<div class="leyenda"><span><span class="cons-badge">©</span> Consignación</span><span><span class="prox-badge">⏳</span> Próximamente</span></div>',
       '<table>',
-      '<thead><tr><th>Producto</th><th>Variedad</th><th>Origen</th><th>Kilaje</th><th>Proveedor</th><th class="num">May. MCBA</th><th class="num">Min. MCBA</th></tr></thead>',
+      '<thead><tr><th>Producto</th><th>Kilos</th><th>Proveedor</th><th>Origen</th><th class="num">May. MCBA</th><th class="num">Min. MCBA</th></tr></thead>',
       '<tbody>' + rows + '</tbody>',
       '</table>',
       mncSection,
