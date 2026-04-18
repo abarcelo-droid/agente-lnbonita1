@@ -157,9 +157,7 @@ router.get("/pricing/pdf/:tipo", async (req, res) => {
       return tienePrecio || esConsig;
     });
     const prodsMnc = todosProds.filter(function(p) {
-      if (p.disponible_general !== -1) return false;
-      const pMay = mapMay[p.id]; const pMin = mapMin[p.id];
-      return (pMay && pMay.precio > 0) || (pMin && pMin.precio > 0);
+      return p.disponible_general === -1;
     });
 
     // Ordenar normales por categoría según ORDEN_CAT, resto al final
@@ -183,7 +181,8 @@ router.get("/pricing/pdf/:tipo", async (req, res) => {
       let r = '<tr>';
       r += '<td style="font-weight:700">' + p.nombre + cons + prox + '</td>';
       r += '<td>' + (p.kilaje||'-') + '</td>';
-      r += '<td>' + (p.proveedor||'-') + '</td>';
+      const provText = p.proveedor ? (p.marca ? p.proveedor + ' (' + p.marca + ')' : p.proveedor) : '-';
+      r += '<td>' + provText + '</td>';
       r += '<td style="color:#7a6055">' + (p.origen||'-') + '</td>';
       r += '<td class="num">' + fmtPrecio(mapMay, p.id, p.consignacion) + '</td>';
       r += '<td class="num">' + fmtPrecio(mapMin, p.id, p.consignacion) + '</td>';
