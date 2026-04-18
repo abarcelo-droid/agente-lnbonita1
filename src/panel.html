@@ -3001,12 +3001,15 @@ function abrirHistorico(producto, mes, event) {
       return;
     }
     var h = '<table style="width:100%;border-collapse:collapse">';
-    h += '<tr style="border-bottom:1px solid var(--bor)"><th style="text-align:left;padding:3px 6px;color:var(--mut)">Año</th><th style="text-align:right;padding:3px 6px;color:var(--mut)">Kilos</th><th style="text-align:right;padding:3px 6px;color:var(--mut)">Rent%</th></tr>';
-    rows.forEach(function(r) {
-      var rc = r.rent_pct >= 10 ? 'var(--ok)' : r.rent_pct >= 0 ? 'var(--warn)' : 'var(--err)';
+    h += '<tr style="border-bottom:1px solid var(--bor)"><th style="text-align:left;padding:3px 6px;color:var(--mut)">Año</th><th style="text-align:right;padding:3px 6px;color:var(--mut)">Kilos</th><th style="text-align:right;padding:3px 6px;color:var(--mut)">Var. a/a</th></tr>';
+    rows.forEach(function(r, i) {
+      var sigAnio = rows[i+1];
+      var varpct = sigAnio && sigAnio.kilos > 0 ? ((r.kilos - sigAnio.kilos) / sigAnio.kilos * 100) : null;
+      var vc = varpct === null ? 'var(--mut)' : varpct >= 0 ? 'var(--ok)' : 'var(--err)';
+      var vtxt = varpct === null ? '-' : (varpct >= 0 ? '+' : '') + varpct.toFixed(1) + '%';
       h += '<tr style="border-bottom:1px solid var(--bor)"><td style="padding:4px 6px;font-weight:600">'+r.anio+'</td>';
       h += '<td style="padding:4px 6px;text-align:right">'+Math.round(r.kilos||0).toLocaleString('es-AR')+' kg</td>';
-      h += '<td style="padding:4px 6px;text-align:right;font-weight:700;color:'+rc+'">'+(r.rent_pct!==null?(r.rent_pct>=0?'+':'')+r.rent_pct+'%':'-')+'</td></tr>';
+      h += '<td style="padding:4px 6px;text-align:right;font-weight:700;color:'+vc+'">'+vtxt+'</td></tr>';
     });
     h += '</table>';
     popup.innerHTML = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><strong>'+producto+' &mdash; '+MESES_CAL[mes-1]+'</strong><button onclick="document.getElementById(&quot;cal-historico-popup&quot;).remove()" style="background:none;border:none;cursor:pointer;font-size:16px;color:var(--mut)">×</button></div>' + h;
