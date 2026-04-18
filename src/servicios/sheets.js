@@ -93,21 +93,7 @@ db.exec(`
   try {
     console.log('[Sheets] Recreando tabla sheet_ventas con esquema actualizado...');
     db.exec("DROP TABLE IF EXISTS sheet_ventas");
-    db.exec(`CREATE TABLE sheet_ventas (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      id_venta TEXT, fecha TEXT, nro_comprob TEXT, cod_cli TEXT,
-      cliente TEXT, alias TEXT, cod_vend TEXT, vendedor TEXT,
-      cod_art TEXT, articulo TEXT, cantidad REAL, precio REAL,
-      total REAL, partida TEXT, partida_ok TEXT, sem TEXT,
-      mes TEXT, anio TEXT, cod_fecha TEXT, precio_ok REAL,
-      total_ok REAL, dol_dia REAL, prec_dol REAL, tot_dol REAL,
-      periodo TEXT, producto TEXT, kilaje TEXT, kilos_tot REAL,
-      categoria TEXT, costeo REAL, cate_clie TEXT, subcategoria TEXT,
-      boni REAL, proveedor TEXT, rent REAL, rent_dol REAL,
-      mes_ok TEXT, des REAL, flete_largo REAL, descargas REAL,
-      ifco REAL, flete_super REAL, pct REAL, cat_pro TEXT,
-      raw TEXT, sync_fecha TEXT DEFAULT (date('now','localtime'))
-    )`);
+    db.exec("CREATE TABLE sheet_ventas (id INTEGER PRIMARY KEY AUTOINCREMENT, id_venta TEXT, fecha TEXT, nro_comprob TEXT, cod_cli TEXT, cliente TEXT, alias TEXT, cod_vend TEXT, vendedor TEXT, cod_art TEXT, articulo TEXT, cantidad REAL, precio REAL, total REAL, partida TEXT, partida_ok TEXT, sem TEXT, mes TEXT, anio TEXT, cod_fecha TEXT, precio_ok REAL, total_ok REAL, dol_dia REAL, prec_dol REAL, tot_dol REAL, periodo TEXT, producto TEXT, kilaje TEXT, kilos_tot REAL, categoria TEXT, costeo REAL, cate_clie TEXT, subcategoria TEXT, boni REAL, proveedor TEXT, rent REAL, rent_dol REAL, mes_ok TEXT, des REAL, flete_largo REAL, descargas REAL, ifco REAL, flete_super REAL, pct REAL, cat_pro TEXT, raw TEXT, sync_fecha TEXT DEFAULT (date('now','localtime')))");
     console.log('[Sheets] Tabla sheet_ventas recreada OK');
   } catch(e) { console.error('[Sheets] Error recreando sheet_ventas:', e.message); }
 })();
@@ -280,7 +266,7 @@ async function syncVentas(token) {
      categoria,costeo,cate_clie,subcategoria,boni,proveedor,rent,rent_dol,mes_ok,des,flete_largo,descargas,ifco,flete_super,pct,cat_pro,raw)
     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,
             ?,?,?,?,?,?,?,?,?,?,?,?,?,?,
-            ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
   `);
 
   db.exec("DELETE FROM sheet_ventas");
