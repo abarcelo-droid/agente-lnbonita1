@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import db from '../servicios/db.js';
 import { buscarProductoCompras, buscarProductoVentas, buscarClienteVentas, historialClienteVentas, estadoSync, syncSheets, calendarioEstacional, proveedoresPorProductoMes, debugCalendario } from '../servicios/sheets.js';
 
 const router = Router();
@@ -42,7 +43,25 @@ router.post('/buscar/sync', async (req, res) => {
 
 // Calendario estacional
 router.get('/calendario/estacional', (req, res) => {
-  try { res.json(calendarioEstacional()); }
+  try {
+    const rows = db.prepare(`
+      SELECT
+        producto,
+        categoria,
+        CAST(mes AS INTEGER) as mes_num,
+        ROUND(SUM(kilos_tot),0) as kilos,
+        ROUND(AVG(CASE WHEN rent IS NOT NULL AND rent != 0 THEN rent ELSE NULL END),1) as rent_pct,
+        ROUND(AVG(CASE WHEN prec_dol IS NOT NULL AND prec_dol > 0 THEN prec_dol ELSE NULL END),2) as valor_kg_dol,
+        COUNT(DISTINCT anio) as anios_con_datos
+      FROM sheet_ventas
+      WHERE producto IS NOT NULL AND producto != ''
+        AND mes IS NOT NULL AND mes != '' AND mes != '0'
+        AND kilos_tot > 0
+      GROUP BY producto, mes_num
+      ORDER BY producto, mes_num
+    `).all();
+    res.json(rows);
+  }
   catch(e) { res.status(500).json({ error: e.message }); }
 });
 
