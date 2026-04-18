@@ -3613,7 +3613,7 @@ function abCargarRemitos() {
     var tbody = document.getElementById('ab-remitos-tbody');
     if (!res.data.length) { tbody.innerHTML = '<tr><td colspan="9"><div class="ab-empty"><div class="ab-empty-icon">📋</div>Sin remitos</div></td></tr>'; return; }
     tbody.innerHTML = res.data.map(function(r) {
-      return '<tr><td><strong>'+(r.nro_remito||'—')+'</strong></td><td>'+abFecha(r.fecha)+'</td><td>'+(r.empresa||'—')+'</td><td>'+(r.contacto||'—')+'</td><td>'+(r.comercial||'—')+'</td><td>'+(r.total_items||0)+'</td><td>'+abFmt(r.total_bultos)+'</td><td>'+abBadgeEstado(r.estado)+'</td><td><button class="btn bo bs" onclick="abVerRemito('+r.id+')">Ver</button></td></tr>';
+      return '<tr><td><strong>'+(r.nro_remito||'—')+'</strong></td><td>'+abFecha(r.fecha)+'</td><td>'+(r.empresa||'—')+'</td><td>'+(r.contacto||'—')+'</td><td>'+(r.comercial||'—')+'</td><td>'+(r.total_items||0)+'</td><td>'+abFmt(r.total_bultos)+'</td><td>'+abBadgeEstado(r.estado)+'</td><td style="white-space:nowrap"><button class="btn bo bs" style="margin-right:4px" onclick="abVerRemito('+r.id+')">Ver</button><button class="btn bb bs" onclick="window.open(\'/api/abasto/remitos/'+r.id+'/pdf\',\'_blank\')" title="Imprimir PDF">🖨</button></td></tr>';
     }).join('');
   });
 }

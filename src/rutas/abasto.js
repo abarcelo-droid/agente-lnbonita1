@@ -385,8 +385,235 @@ router.post('/remitos', (req, res) => {
 });
 
 // ============================================================
-// GASTOS
+// PDF / IMPRESIÓN DE REMITO
 // ============================================================
+
+router.get('/remitos/:id/pdf', (req, res) => {
+  const db = getDb();
+  try {
+    const remito = db.prepare(`
+      SELECT * FROM remitos_salida WHERE id = ?
+    `).get(req.params.id);
+    if (!remito) return res.status(404).json({ ok: false, error: 'Remito no encontrado' });
+
+    const items = db.prepare(`
+      SELECT ri.*, 
+        COALESCE(rp.nombre, ri.producto) as producto_display,
+        COALESCE(rp.categoria, pa.categoria) as categoria,
+        pa.deposito,
+        pa.envase,
+        pa.iva
+      FROM remitos_items ri
+      JOIN partidas pa ON pa.id = ri.partida_id
+      LEFT JOIN retail_productos rp ON rp.id = pa.producto_id
+      WHERE ri.remito_id = ?
+    `).all(req.params.id);
+
+    const fecha = new Date(remito.fecha + 'T12:00:00').toLocaleDateString('es-AR', {
+      day: '2-digit', month: '2-digit', year: 'numeric'
+    });
+
+    const totalBultos = items.reduce((s, i) => s + i.bultos, 0);
+    const totalKilos = items.reduce((s, i) => s + (i.bultos * i.kilos_por_bulto), 0);
+    const totalImporte = items.reduce((s, i) => s + (i.precio_final > 0 ? i.bultos * i.precio_final : 0), 0);
+
+    const rowsHTML = items.map((item, idx) => {
+      const kilosTotal = (item.bultos * item.kilos_por_bulto).toFixed(1);
+      const precioStr = item.precio_final > 0
+        ? '$' + item.precio_final.toLocaleString('es-AR', { minimumFractionDigits: 2 })
+        : '—';
+      const importeStr = item.precio_final > 0
+        ? '$' + (item.bultos * item.precio_final).toLocaleString('es-AR', { minimumFractionDigits: 2 })
+        : '—';
+      return `
+        <tr>
+          <td>${idx + 1}</td>
+          <td><strong>${item.producto_display}</strong>${item.envase ? `<br><span class="det">${item.envase}</span>` : ''}</td>
+          <td class="c">${item.deposito || 'MCBA'}</td>
+          <td class="r">${item.bultos}</td>
+          <td class="r">${item.kilos_por_bulto} kg</td>
+          <td class="r">${kilosTotal} kg</td>
+          <td class="r">${precioStr}</td>
+          <td class="r">${importeStr}</td>
+        </tr>`;
+    }).join('');
+
+    const html = `<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Remito ${remito.nro_remito}</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Arial', sans-serif; font-size: 11px; color: #1a2332; background: #fff; }
+
+  .page { width: 210mm; min-height: 297mm; margin: 0 auto; padding: 12mm 14mm; }
+
+  /* HEADER */
+  .header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 3px solid #1a3a5c; padding-bottom: 10px; margin-bottom: 12px; }
+  .header-left .company { font-size: 18px; font-weight: 800; color: #0f2540; letter-spacing: -.3px; }
+  .header-left .company-sub { font-size: 10px; color: #5a6a7e; margin-top: 2px; }
+  .header-right { text-align: right; }
+  .remito-box { border: 2px solid #1a3a5c; border-radius: 6px; padding: 8px 14px; display: inline-block; }
+  .remito-label { font-size: 9px; text-transform: uppercase; letter-spacing: .08em; color: #5a6a7e; }
+  .remito-nro { font-size: 20px; font-weight: 800; color: #1a3a5c; }
+  .remito-fecha { font-size: 10px; color: #5a6a7e; margin-top: 2px; }
+
+  /* DATOS */
+  .datos-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 14px; }
+  .datos-box { border: 1px solid #dde3ea; border-radius: 6px; padding: 8px 10px; }
+  .datos-box-title { font-size: 8px; font-weight: 700; text-transform: uppercase; letter-spacing: .1em; color: #8a9bb0; margin-bottom: 5px; }
+  .datos-box p { font-size: 10.5px; color: #1a2332; margin-bottom: 2px; }
+  .datos-box strong { color: #0f2540; }
+
+  /* TABLA */
+  table { width: 100%; border-collapse: collapse; margin-bottom: 12px; }
+  thead tr { background: #0f2540; }
+  thead th { color: #fff; padding: 7px 8px; font-size: 9px; text-transform: uppercase; letter-spacing: .06em; font-weight: 600; }
+  tbody tr:nth-child(even) { background: #f0f4f8; }
+  tbody tr:last-child td { border-bottom: 2px solid #1a3a5c; }
+  td { padding: 7px 8px; border-bottom: 1px solid #dde3ea; font-size: 10.5px; vertical-align: middle; }
+  td.r { text-align: right; font-variant-numeric: tabular-nums; }
+  td.c { text-align: center; }
+  td .det { font-size: 9px; color: #5a6a7e; }
+
+  /* TOTALES */
+  .totales { display: flex; justify-content: flex-end; margin-bottom: 16px; }
+  .totales-box { border: 1px solid #dde3ea; border-radius: 6px; overflow: hidden; min-width: 220px; }
+  .totales-row { display: flex; justify-content: space-between; padding: 5px 10px; font-size: 10.5px; border-bottom: 1px solid #dde3ea; }
+  .totales-row:last-child { border-bottom: none; background: #0f2540; color: #fff; font-weight: 700; font-size: 11px; }
+  .totales-row span:first-child { color: inherit; opacity: .8; }
+
+  /* FIRMAS */
+  .firmas { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 20px; margin-top: 30px; }
+  .firma-box { text-align: center; }
+  .firma-line { border-top: 1px solid #1a2332; padding-top: 5px; font-size: 9px; color: #5a6a7e; text-transform: uppercase; letter-spacing: .06em; }
+
+  /* PIE */
+  .footer { margin-top: 20px; border-top: 1px solid #dde3ea; padding-top: 8px; display: flex; justify-content: space-between; align-items: center; }
+  .footer-left { font-size: 9px; color: #8a9bb0; }
+  .footer-right { font-size: 9px; color: #8a9bb0; text-align: right; }
+
+  /* BADGE ESTADO */
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; }
+  .badge-mcba { background: #dbeafe; color: #1e40af; }
+  .badge-finca { background: #dcfce7; color: #166534; }
+  .badge-sanpedro { background: #fef9c3; color: #854d0e; }
+
+  @media print {
+    body { margin: 0; }
+    .page { padding: 8mm 10mm; }
+    .no-print { display: none !important; }
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <!-- HEADER -->
+  <div class="header">
+    <div class="header-left">
+      <div class="company">SAN GERONIMO SA</div>
+      <div class="company-sub">CUIT: 30-67325443-4 &nbsp;·&nbsp; IVA Inscripto &nbsp;·&nbsp; Barrio Rawson, San Juan</div>
+    </div>
+    <div class="header-right">
+      <div class="remito-box">
+        <div class="remito-label">Remito</div>
+        <div class="remito-nro">${remito.nro_remito}</div>
+        <div class="remito-fecha">Fecha: ${fecha}</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- DATOS CLIENTE Y ENTREGA -->
+  <div class="datos-grid">
+    <div class="datos-box">
+      <div class="datos-box-title">Destinatario</div>
+      <p><strong>${remito.empresa || '—'}</strong></p>
+      ${remito.contacto ? `<p>${remito.contacto}</p>` : ''}
+      ${remito.direccion_entrega ? `<p>📍 ${remito.direccion_entrega}</p>` : ''}
+    </div>
+    <div class="datos-box">
+      <div class="datos-box-title">Datos del remito</div>
+      <p><strong>Comercial:</strong> ${remito.comercial || '—'}</p>
+      <p><strong>Fecha:</strong> ${fecha}</p>
+      <p><strong>Estado:</strong> ${remito.estado}</p>
+      ${remito.notas ? `<p><strong>Notas:</strong> ${remito.notas}</p>` : ''}
+    </div>
+  </div>
+
+  <!-- TABLA PRODUCTOS -->
+  <table>
+    <thead>
+      <tr>
+        <th style="width:30px">#</th>
+        <th style="text-align:left">Producto</th>
+        <th style="width:60px">Depósito</th>
+        <th style="width:55px;text-align:right">Bultos</th>
+        <th style="width:60px;text-align:right">Kg/bulto</th>
+        <th style="width:65px;text-align:right">Kg total</th>
+        <th style="width:75px;text-align:right">Precio</th>
+        <th style="width:80px;text-align:right">Importe</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${rowsHTML}
+    </tbody>
+  </table>
+
+  <!-- TOTALES -->
+  <div class="totales">
+    <div class="totales-box">
+      <div class="totales-row"><span>Total bultos</span><span><strong>${totalBultos}</strong></span></div>
+      <div class="totales-row"><span>Total kilos</span><span><strong>${totalKilos.toFixed(1)} kg</strong></span></div>
+      ${totalImporte > 0 ? `<div class="totales-row"><span>Total importe</span><span><strong>$${totalImporte.toLocaleString('es-AR', { minimumFractionDigits: 2 })}</strong></span></div>` : ''}
+    </div>
+  </div>
+
+  <!-- FIRMAS -->
+  <div class="firmas">
+    <div class="firma-box">
+      <br><br><br>
+      <div class="firma-line">Firma y aclaración emisor</div>
+    </div>
+    <div class="firma-box">
+      <br><br><br>
+      <div class="firma-line">Firma y aclaración transportista</div>
+    </div>
+    <div class="firma-box">
+      <br><br><br>
+      <div class="firma-line">Firma y aclaración receptor</div>
+    </div>
+  </div>
+
+  <!-- PIE -->
+  <div class="footer">
+    <div class="footer-left">
+      San Geronimo SA &nbsp;·&nbsp; CUIT 30-67325443-4 &nbsp;·&nbsp; IVA Inscripto<br>
+      Documento generado el ${new Date().toLocaleString('es-AR')}
+    </div>
+    <div class="footer-right">
+      ${remito.nro_remito}<br>
+      Página 1 de 1
+    </div>
+  </div>
+
+</div>
+
+<script>
+  window.onload = function() { window.print(); }
+</script>
+</body>
+</html>`;
+
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(html);
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+
 
 router.get('/gastos', (req, res) => {
   const db = getDb();
