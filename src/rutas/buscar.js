@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { buscarProductoCompras, buscarProductoVentas, buscarClienteVentas, historialClienteVentas, estadoSync, syncSheets, calendarioEstacional, proveedoresPorProductoMes } from '../servicios/sheets.js';
+import { buscarProductoCompras, buscarProductoVentas, buscarClienteVentas, historialClienteVentas, estadoSync, syncSheets, calendarioEstacional, proveedoresPorProductoMes, debugCalendario } from '../servicios/sheets.js';
 
 const router = Router();
 
@@ -51,6 +51,12 @@ router.get('/calendario/proveedores', (req, res) => {
   const { producto, mes } = req.query;
   if (!producto || !mes) return res.status(400).json({ error: 'Faltan producto y mes' });
   try { res.json(proveedoresPorProductoMes(producto, mes)); }
+  catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// Diagnóstico de sheet_ventas
+router.get('/calendario/debug', (req, res) => {
+  try { res.json(debugCalendario()); }
   catch(e) { res.status(500).json({ error: e.message }); }
 });
 

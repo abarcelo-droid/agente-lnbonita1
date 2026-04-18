@@ -522,8 +522,8 @@ export function calendarioEstacional() {
       COUNT(DISTINCT anio) as anios_con_datos
     FROM sheet_ventas
     WHERE producto IS NOT NULL AND producto != ''
-      AND mes IS NOT NULL AND mes != ''
-      AND kilos_tot > 0 AND tot_dol > 0
+      AND mes IS NOT NULL AND mes != '' AND mes != '0'
+      AND tot_dol > 0
     GROUP BY producto, mes_num
     ORDER BY producto, mes_num
   `).all();
@@ -543,10 +543,16 @@ export function proveedoresPorProductoMes(producto, mes) {
     WHERE producto = ?
       AND CAST(mes AS INTEGER) = ?
       AND proveedor IS NOT NULL AND proveedor != ''
-      AND kilos_tot > 0
+      AND tot_dol > 0
     GROUP BY proveedor
     ORDER BY kilos DESC
   `).all(producto, parseInt(mes));
+}
+
+export function debugCalendario() {
+  const sample = db.prepare("SELECT producto, mes, kilos_tot, tot_dol, proveedor FROM sheet_ventas WHERE producto IS NOT NULL AND producto != '' LIMIT 10").all();
+  const counts = db.prepare("SELECT COUNT(*) as total, SUM(CASE WHEN kilos_tot > 0 THEN 1 ELSE 0 END) as con_kilos, SUM(CASE WHEN tot_dol > 0 THEN 1 ELSE 0 END) as con_dol, SUM(CASE WHEN producto IS NOT NULL AND producto != '' THEN 1 ELSE 0 END) as con_producto FROM sheet_ventas").get();
+  return { sample, counts };
 }
 
 export function estadoSync() {
