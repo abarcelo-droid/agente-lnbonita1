@@ -151,8 +151,8 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     ondrop="event.preventDefault();this.style.borderColor='var(--bor)';handleIfDrop(event)">
     <div style="font-size:32px;margin-bottom:8px">📄</div>
     <div style="font-size:14px;font-weight:600;color:var(--txt);margin-bottom:4px">Arrastrá la foto de la factura o hacé clic para seleccionar</div>
-    <div style="font-size:12px;color:var(--mut)">JPG, PNG · Máx. 10MB</div>
-    <input id="if-file-input" type="file" accept="image/*" style="display:none" onchange="handleIfFile(this.files[0])">
+    <div style="font-size:12px;color:var(--mut)">JPG, PNG, PDF · Máx. 10MB</div>
+    <input id="if-file-input" type="file" accept="image/*,application/pdf" style="display:none" onchange="handleIfFile(this.files[0])">
   </div>
   <div id="if-preview-zone" style="display:none;margin-bottom:20px">
     <div style="display:grid;grid-template-columns:280px 1fr;gap:20px;align-items:start">
@@ -2805,10 +2805,21 @@ function handleIfFile(file) {
   reader.onload = function(e) {
     var dataUrl = e.target.result;
     _ifBase64 = dataUrl.split(',')[1];
-    eid('if-preview-img').src = dataUrl;
+    var esPDF = file.type === 'application/pdf';
+    if (esPDF) {
+      eid('if-preview-img').style.display = 'none';
+      // Mostrar ícono PDF en lugar de imagen
+      var imgEl = eid('if-preview-img');
+      imgEl.insertAdjacentHTML('beforebegin', '<div id="if-pdf-icon" style="width:100%;border-radius:8px;border:1px solid var(--bor);padding:40px;text-align:center;background:var(--sur)"><div style="font-size:48px">📄</div><div style="font-size:13px;font-weight:600;margin-top:8px">'+file.name+'</div><div style="font-size:11px;color:var(--mut);margin-top:4px">'+Math.round(file.size/1024)+' KB</div></div>');
+    } else {
+      eid('if-preview-img').style.display = '';
+      eid('if-preview-img').src = dataUrl;
+      var pdfIcon = document.getElementById('if-pdf-icon');
+      if (pdfIcon) pdfIcon.remove();
+    }
     eid('if-upload-zone').style.display = 'none';
     eid('if-preview-zone').style.display = '';
-    eid('if-estado').innerHTML = '<div style="display:flex;align-items:center;gap:8px;padding:10px 14px;background:#eff6ff;border:1px solid #93c5fd;border-radius:8px;font-size:13px"><span style="font-size:18px">🤖</span><span>Analizando factura con IA...</span></div>';
+    eid('if-estado').innerHTML = '<div style="display:flex;align-items:center;gap:8px;padding:10px 14px;background:#eff6ff;border:1px solid #93c5fd;border-radius:8px;font-size:13px"><span style="font-size:18px">🤖</span><span>Analizando '+(esPDF?'PDF':'imagen')+' con IA...</span></div>';
     eid('if-form').innerHTML = '';
     eid('if-acciones').innerHTML = '';
     analizarFactura(_ifBase64, file.type || 'image/jpeg');
@@ -2817,6 +2828,11 @@ function handleIfFile(file) {
 }
 
 function analizarFactura(base64, mediaType) {
+  var esPDF = mediaType === 'application/pdf';
+  var contenido = esPDF
+    ? { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: base64 } }
+    : { type: 'image', source: { type: 'base64', media_type: mediaType, data: base64 } };
+  var prompt = 'Sos un asistente de carga de facturas. Analizá esta factura de proveedor y extraé los datos. Respondé ÚNICAMENTE con un JSON válido, sin texto adicional, sin markdown, sin backticks. El JSON debe tener exactamente estas claves: {"razon_social": "", "cuit": "", "tipo_comprobante": "", "numero_factura": "", "fecha_emision": "", "fecha_vencimiento": "", "condicion_pago": "", "subtotal": 0, "iva": 0, "total": 0, "moneda": "ARS", "items": [{"descripcion": "", "cantidad": 0, "precio_unitario": 0, "subtotal": 0}], "notas": ""}. Si algún dato no está visible ponés null. Las fechas en formato DD/MM/YYYY. Los montos como número sin formato.';
   fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -2825,16 +2841,7 @@ function analizarFactura(base64, mediaType) {
       max_tokens: 1000,
       messages: [{
         role: 'user',
-        content: [
-          {
-            type: 'image',
-            source: { type: 'base64', media_type: mediaType, data: base64 }
-          },
-          {
-            type: 'text',
-            text: 'Sos un asistente de carga de facturas. Analizá esta factura de proveedor y extraé los datos. Respondé ÚNICAMENTE con un JSON válido, sin texto adicional, sin markdown, sin backticks. El JSON debe tener exactamente estas claves: {"razon_social": "", "cuit": "", "tipo_comprobante": "", "numero_factura": "", "fecha_emision": "", "fecha_vencimiento": "", "condicion_pago": "", "subtotal": 0, "iva": 0, "total": 0, "moneda": "ARS", "items": [{"descripcion": "", "cantidad": 0, "precio_unitario": 0, "subtotal": 0}], "notas": ""}. Si algún dato no está visible ponés null. Las fechas en formato DD/MM/YYYY. Los montos como número sin formato.'
-          }
-        ]
+        content: [ contenido, { type: 'text', text: prompt } ]
       }]
     })
   })
