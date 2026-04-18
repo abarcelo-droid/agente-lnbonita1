@@ -143,6 +143,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     <div><div class="ph-t">Calendario Estacional</div><div class="ph-s">Temporadas por producto según historial de ventas</div></div>
     <div style="display:flex;gap:8px;align-items:center">
       <input id="cal-filtro" placeholder="Filtrar producto..." style="font-size:12px;padding:6px 10px;border-radius:7px;border:1px solid var(--bor);width:180px" oninput="filtrarCalendario()">
+      <button class="btn bo" onclick="syncSheetsCalendario()">🔄 Sincronizar</button>
       <button class="btn bb" onclick="loadCalendario()">Actualizar</button>
     </div>
   </div>
@@ -2575,6 +2576,13 @@ function kilosColor(kilos) {
   if (kilos < 20000) return { bg: '#6ee7b7', fg: '#064e3b', nivel: 2 };
   if (kilos < 50000) return { bg: '#10b981', fg: '#fff',    nivel: 3 };
   return               { bg: '#065f46', fg: '#fff',    nivel: 4 };
+}
+
+function syncSheetsCalendario() {
+  toast('Sync iniciado, puede tardar varios minutos...', 'ok');
+  api('/api/buscar/sync', 'POST', {}).then(function() {
+    toast('Sync corriendo en background. Hacé clic en Actualizar cuando termine.', 'ok');
+  });
 }
 
 function loadCalendario() {
