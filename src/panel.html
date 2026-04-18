@@ -2828,36 +2828,15 @@ function handleIfFile(file) {
 }
 
 function analizarFactura(base64, mediaType) {
-  var esPDF = mediaType === 'application/pdf';
-  var contenido = esPDF
-    ? { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: base64 } }
-    : { type: 'image', source: { type: 'base64', media_type: mediaType, data: base64 } };
-  var prompt = 'Sos un asistente de carga de facturas. Analizá esta factura de proveedor y extraé los datos. Respondé ÚNICAMENTE con un JSON válido, sin texto adicional, sin markdown, sin backticks. El JSON debe tener exactamente estas claves: {"razon_social": "", "cuit": "", "tipo_comprobante": "", "numero_factura": "", "fecha_emision": "", "fecha_vencimiento": "", "condicion_pago": "", "subtotal": 0, "iva": 0, "total": 0, "moneda": "ARS", "items": [{"descripcion": "", "cantidad": 0, "precio_unitario": 0, "subtotal": 0}], "notas": ""}. Si algún dato no está visible ponés null. Las fechas en formato DD/MM/YYYY. Los montos como número sin formato.';
-  fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 1000,
-      messages: [{
-        role: 'user',
-        content: [ contenido, { type: 'text', text: prompt } ]
-      }]
+  api('/api/factura/analizar', 'POST', { base64: base64, mediaType: mediaType })
+    .then(function(data) {
+      if (!data || !data.factura) throw new Error('Sin respuesta');
+      renderIfForm(data.factura);
     })
-  })
-  .then(function(r) { return r.json(); })
-  .then(function(data) {
-    var txt = data.content && data.content[0] && data.content[0].text;
-    if (!txt) throw new Error('Sin respuesta de IA');
-    // Limpiar posibles backticks
-    txt = txt.replace(/```json|```/g, '').trim();
-    var factura = JSON.parse(txt);
-    renderIfForm(factura);
-  })
-  .catch(function(e) {
-    eid('if-estado').innerHTML = '<div style="padding:10px 14px;background:#fef2f2;border:1px solid #fca5a5;border-radius:8px;font-size:13px;color:#991b1b">❌ Error al analizar: ' + e.message + '. Podés cargar los datos manualmente.</div>';
-    renderIfForm({});
-  });
+    .catch(function(e) {
+      eid('if-estado').innerHTML = '<div style="padding:10px 14px;background:#fef2f2;border:1px solid #fca5a5;border-radius:8px;font-size:13px;color:#991b1b">❌ Error al analizar: ' + e.message + '. Podés cargar los datos manualmente.</div>';
+      renderIfForm({});
+    });
 }
 
 function renderIfForm(f) {
