@@ -450,7 +450,16 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   </div>
   <div style="margin-bottom:8px;font-size:11px;font-weight:600;color:var(--mut);text-transform:uppercase;letter-spacing:.05em">Items del remito</div>
   <div id="ab-rem-items-list" style="margin-bottom:10px"></div>
-  <button class="btn bo bs" onclick="abAgregarItemRemito()">+ Agregar producto</button>
+  <!-- Picker de partidas inline -->
+  <div id="ab-rem-picker" style="display:none;border:1px solid var(--bor2);border-radius:8px;overflow:hidden;margin-bottom:10px">
+    <div style="padding:8px 12px;background:var(--bg);border-bottom:1px solid var(--bor);display:flex;align-items:center;justify-content:space-between">
+      <span style="font-size:11px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.05em">Seleccioná una partida</span>
+      <button onclick="abCerrarPicker()" style="background:none;border:none;font-size:16px;cursor:pointer;color:var(--mut);line-height:1">×</button>
+    </div>
+    <input id="ab-rem-picker-search" class="ab-form-input" style="border:none;border-bottom:1px solid var(--bor);border-radius:0;padding:8px 12px;font-size:13px" placeholder="Filtrar por producto..." oninput="abFiltrarPicker(this.value)">
+    <div id="ab-rem-picker-list" style="max-height:220px;overflow-y:auto"></div>
+  </div>
+  <button class="btn bo bs" onclick="abAbrirPicker()">+ Agregar producto</button>
   <div class="ab-form-group" style="margin-top:14px"><label class="ab-form-label">Notas</label><textarea class="ab-form-textarea" id="ab-rem-notas" style="min-height:50px"></textarea></div>
   <div class="ab-modal-footer">
     <button class="btn bo" onclick="abCerrarModal('ab-modal-remito')">Cancelar</button>
@@ -3659,22 +3668,112 @@ function abAbrirNuevoRemito() {
 
 function abRenderRemitoItems() {
   var cont = document.getElementById('ab-rem-items-list');
-  if (!AB.remitoItems.length) { cont.innerHTML = '<div style="font-size:12px;color:var(--mut);padding:8px 0">Sin items. Agregá productos al remito.</div>'; return; }
+  if (!AB.remitoItems.length) {
+    cont.innerHTML = '<div style="font-size:12px;color:var(--mut);padding:8px 0">Sin items. Agregá productos al remito.</div>';
+    return;
+  }
   cont.innerHTML = AB.remitoItems.map(function(item, i) {
-    return '<div class="ab-remito-item"><div><div style="font-weight:600;font-size:13px">'+item.producto+'</div><div style="font-size:11px;color:var(--mut)">Partida #'+item.partida_id+' · '+item.kilos_por_bulto+' kg/bulto · disp: '+item.disponible+' bultos</div></div><div><label style="font-size:10px;color:var(--mut);display:block">Bultos</label><input style="width:70px;padding:4px 8px;border:1px solid var(--bor2);border-radius:6px;font-size:13px" type="number" min="1" max="'+item.disponible+'" value="'+item.bultos+'" onchange="AB.remitoItems['+i+'].bultos=parseInt(this.value)"></div><div><label style="font-size:10px;color:var(--mut);display:block">Precio ref.</label><input style="width:90px;padding:4px 8px;border:1px solid var(--bor2);border-radius:6px;font-size:13px" type="number" min="0" step="0.01" value="'+(item.precio_ref||'')+'" placeholder="—" onchange="AB.remitoItems['+i+'].precio_ref=parseFloat(this.value)||0"></div><button class="btn bd bs" onclick="abQuitarItemRemito('+i+')">✕</button></div>';
+    var pct = item.disponible > 0 ? Math.min(Math.round(item.bultos / item.disponible * 100), 100) : 0;
+    return '<div class="ab-remito-item">' +
+      '<div>' +
+        '<div style="font-weight:600;font-size:13px">' + (item.producto_display || item.producto) + '</div>' +
+        '<div style="font-size:11px;color:var(--mut)">Partida #' + item.partida_id + ' · ' + item.kilos_por_bulto + ' kg/bulto</div>' +
+        '<div style="display:flex;align-items:center;gap:6px;margin-top:3px">' +
+          '<div style="height:4px;width:80px;background:var(--bg);border-radius:2px;overflow:hidden"><div style="height:4px;width:' + pct + '%;background:var(--burg);border-radius:2px"></div></div>' +
+          '<span style="font-size:10px;color:var(--mut)">' + item.disponible + ' disp.</span>' +
+        '</div>' +
+      '</div>' +
+      '<div>' +
+        '<label style="font-size:10px;color:var(--mut);display:block">Bultos</label>' +
+        '<input style="width:70px;padding:4px 8px;border:1px solid var(--bor2);border-radius:6px;font-size:13px;font-family:var(--sans)" type="number" min="1" max="' + item.disponible + '" value="' + item.bultos + '" onchange="abActualizarBultosItem(' + i + ',this.value)">' +
+      '</div>' +
+      '<div>' +
+        '<label style="font-size:10px;color:var(--mut);display:block">Precio ref.</label>' +
+        '<input style="width:90px;padding:4px 8px;border:1px solid var(--bor2);border-radius:6px;font-size:13px;font-family:var(--sans)" type="number" min="0" step="0.01" value="' + (item.precio_ref || '') + '" placeholder="—" onchange="AB.remitoItems[' + i + '].precio_ref=parseFloat(this.value)||0">' +
+      '</div>' +
+      '<button class="btn bd bs" onclick="abQuitarItemRemito(' + i + ')">✕</button>' +
+    '</div>';
   }).join('');
 }
 
-function abAgregarItemRemito() {
+function abActualizarBultosItem(i, val) {
+  var v = parseInt(val) || 1;
+  var max = AB.remitoItems[i].disponible;
+  if (v > max) { v = max; toast('Máximo ' + max + ' bultos disponibles', 'er'); }
+  AB.remitoItems[i].bultos = v;
+}
+
+// ─── PICKER DE PARTIDAS ──────────────────────────────────────
+function abAbrirPicker() {
   var disponibles = AB.partidas.filter(function(p){ return p.bultos_disponibles > 0; });
   if (!disponibles.length) { toast('No hay partidas con stock disponible','er'); return; }
-  var lista = disponibles.map(function(p,i){ return (i+1)+'. '+p.producto+' — '+(p.proveedor_nombre||'sin proveedor')+' — '+p.bultos_disponibles+' bultos ('+p.kilos_por_bulto+'kg/bulto)'; }).join('\n');
-  var sel = prompt('Seleccioná una partida (número):\n\n'+lista);
-  if (!sel) return;
-  var idx = parseInt(sel) - 1;
-  if (idx < 0 || idx >= disponibles.length) { toast('Selección inválida','er'); return; }
-  var p = disponibles[idx];
-  AB.remitoItems.push({ partida_id:p.id, producto:p.producto, bultos:1, kilos_por_bulto:p.kilos_por_bulto, disponible:p.bultos_disponibles, precio_ref:0, moneda:'ARS' });
+  var picker = document.getElementById('ab-rem-picker');
+  document.getElementById('ab-rem-picker-search').value = '';
+  picker.style.display = 'block';
+  abRenderPickerList(disponibles);
+  document.getElementById('ab-rem-picker-search').focus();
+}
+
+function abCerrarPicker() {
+  document.getElementById('ab-rem-picker').style.display = 'none';
+}
+
+function abFiltrarPicker(q) {
+  var disponibles = AB.partidas.filter(function(p){
+    return p.bultos_disponibles > 0 &&
+      (!q || (p.producto_display || p.producto || '').toLowerCase().indexOf(q.toLowerCase()) >= 0 ||
+             (p.proveedor_nombre || '').toLowerCase().indexOf(q.toLowerCase()) >= 0);
+  });
+  abRenderPickerList(disponibles);
+}
+
+function abRenderPickerList(lista) {
+  var cont = document.getElementById('ab-rem-picker-list');
+  if (!lista.length) {
+    cont.innerHTML = '<div style="padding:12px;font-size:12px;color:var(--mut);text-align:center">Sin partidas que coincidan</div>';
+    return;
+  }
+  cont.innerHTML = lista.map(function(p) {
+    var nombre = p.producto_display || p.producto || '—';
+    var proveedor = p.proveedor_nombre || 'Sin proveedor';
+    var deposito = p.deposito || 'MCBA';
+    var depColor = deposito === 'MCBA' ? '#1e40af' : deposito === 'FINCA' ? '#166534' : '#854d0e';
+    var depBg = deposito === 'MCBA' ? '#dbeafe' : deposito === 'FINCA' ? '#dcfce7' : '#fef9c3';
+    return '<div onclick="abSeleccionarPartidaRemito(' + p.id + ')" ' +
+      'style="padding:10px 14px;cursor:pointer;border-bottom:1px solid var(--bor);display:flex;justify-content:space-between;align-items:center;gap:12px;transition:background .1s" ' +
+      'onmouseover="this.style.background=\'var(--burl)\'" onmouseout="this.style.background=\'\'">' +
+      '<div style="flex:1;min-width:0">' +
+        '<div style="font-weight:600;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + nombre + '</div>' +
+        '<div style="font-size:11px;color:var(--mut);margin-top:2px">' + proveedor + ' · ' + abFecha(p.fecha_ingreso) + '</div>' +
+      '</div>' +
+      '<div style="display:flex;align-items:center;gap:8px;flex-shrink:0">' +
+        '<span style="background:' + depBg + ';color:' + depColor + ';font-size:10px;font-weight:600;padding:2px 7px;border-radius:10px">' + deposito + '</span>' +
+        '<div style="text-align:right">' +
+          '<div style="font-size:13px;font-weight:700;color:var(--burd)">' + p.bultos_disponibles + ' bultos</div>' +
+          '<div style="font-size:10px;color:var(--mut)">' + p.kilos_por_bulto + ' kg/u</div>' +
+        '</div>' +
+      '</div>' +
+    '</div>';
+  }).join('');
+}
+
+function abSeleccionarPartidaRemito(id) {
+  var p = AB.partidas.find(function(x){ return x.id === id; });
+  if (!p) return;
+  // Verificar si ya está en el remito
+  var existe = AB.remitoItems.find(function(i){ return i.partida_id === id; });
+  if (existe) { toast('Esa partida ya está en el remito','er'); return; }
+  AB.remitoItems.push({
+    partida_id: p.id,
+    producto: p.producto || '',
+    producto_display: p.producto_display || p.producto || '',
+    bultos: 1,
+    kilos_por_bulto: p.kilos_por_bulto,
+    disponible: p.bultos_disponibles,
+    precio_ref: 0,
+    moneda: 'ARS'
+  });
+  abCerrarPicker();
   abRenderRemitoItems();
 }
 
