@@ -72,45 +72,6 @@ router.delete('/proveedores/:id', (req, res) => {
 });
 
 // ============================================================
-// BUSCADOR AFIP (razón social / CUIT)
-// ============================================================
-
-router.get('/afip/buscar', async (req, res) => {
-  const { q } = req.query;
-  if (!q || q.trim().length < 2) return res.status(400).json({ ok: false, error: 'Ingresá al menos 2 caracteres' });
-  try {
-    // Si es numérico, buscar por CUIT directo
-    const esCuit = /^\d[\d\-]+\d$/.test(q.trim());
-    let url;
-    if (esCuit) {
-      const cuitLimpio = q.replace(/\D/g, '');
-      url = `https://afip.facturante.com/api/padron?cuit=${cuitLimpio}`;
-    } else {
-      url = `https://afip.facturante.com/api/padron?razon=${encodeURIComponent(q.trim().toUpperCase())}`;
-    }
-    const resp = await fetch(url, { headers: { 'Accept': 'application/json' } });
-    if (!resp.ok) throw new Error('Error consultando AFIP');
-    const data = await resp.json();
-    // Normalizar respuesta — puede ser objeto único o array
-    const items = Array.isArray(data) ? data : (data.data ? (Array.isArray(data.data) ? data.data : [data.data]) : [data]);
-    const resultados = items
-      .filter(i => i && i.cuit)
-      .slice(0, 10)
-      .map(i => ({
-        cuit: i.cuit || '',
-        razon_social: i.razonSocial || i.razon_social || i.nombre || '',
-        tipo_persona: i.tipoPersona || '',
-        condicion_iva: i.condicionIva || i.opcionIva || '',
-        provincia: i.provincia || '',
-        localidad: i.localidad || ''
-      }));
-    res.json({ ok: true, data: resultados });
-  } catch (e) {
-    res.status(500).json({ ok: false, error: 'No se pudo consultar AFIP: ' + e.message });
-  }
-});
-
-// ============================================================
 // PRODUCTOS MAESTRO (retail_productos)
 // ============================================================
 

@@ -3767,31 +3767,64 @@ function abAjusteStock(id, producto, disponible) {
   });
 }
 
-// ─── BUSCADOR AFIP ──────────────────────────────────────────
+// ─── BUSCADOR AFIP (llamada directa desde browser — IP argentina) ────────────
 function afipBuscar(contexto) {
   var inputId = contexto === 'prov' ? 'afip-prov-q' : 'afip-cli-q';
   var resultsId = contexto === 'prov' ? 'afip-prov-results' : 'afip-cli-results';
   var q = document.getElementById(inputId).value.trim();
   if (!q) return;
+
+  // Limpiar CUIT — solo dígitos
+  var cuitLimpio = q.replace(/\D/g, '');
+  if (cuitLimpio.length !== 11) {
+    toast('Ingresá un CUIT de 11 dígitos (ej: 30609543430)', 'er');
+    return;
+  }
+
   var resDiv = document.getElementById(resultsId);
-  resDiv.innerHTML = '<div style="padding:10px 12px;font-size:12px;color:var(--mut)">Buscando en AFIP...</div>';
+  resDiv.innerHTML = '<div style="padding:10px 12px;font-size:12px;color:var(--mut)">🔍 Consultando AFIP...</div>';
   resDiv.classList.add('on');
-  abApi('/afip/buscar?q=' + encodeURIComponent(q)).then(function(res) {
-    if (!res.ok || !res.data || !res.data.length) {
-      resDiv.innerHTML = '<div style="padding:10px 12px;font-size:12px;color:var(--mut)">Sin resultados para "'+q+'"</div>';
-      return;
+
+  // Llamada directa desde el browser (IP argentina)
+  fetch('https://soa.afip.gob.ar/sr-padron/v2/persona/' + cuitLimpio, {
+    headers: { 'Accept': 'application/json' }
+  })
+  .then(function(resp) {
+    if (!resp.ok) throw new Error('CUIT no encontrado');
+    return resp.json();
+  })
+  .then(function(json) {
+    var p = json.data || json;
+    var razon_social = '';
+    if (p.tipoPersona === 'JURIDICA') {
+      razon_social = p.razonSocial || '';
+    } else {
+      razon_social = (p.apellido || '') + (p.nombre ? ', ' + p.nombre : '');
+      if (!razon_social.trim()) razon_social = p.razonSocial || '';
     }
-    resDiv.innerHTML = res.data.map(function(r) {
-      var det = [r.tipo_persona, r.condicion_iva, r.provincia, r.localidad].filter(Boolean).join(' · ');
-      return '<div class="afip-item" onclick="afipSeleccionar(\''+contexto+'\','+JSON.stringify(r).replace(/'/g,"&#39;")+')">' +
-        '<div class="afip-item-cuit">'+r.cuit+'</div>' +
-        '<div class="afip-item-razon">'+r.razon_social+'</div>' +
-        (det ? '<div class="afip-item-det">'+det+'</div>' : '') +
-        '</div>';
-    }).join('');
-  }).catch(function() {
-    resDiv.innerHTML = '<div style="padding:10px 12px;font-size:12px;color:var(--err)">Error consultando AFIP</div>';
+    var datos = {
+      cuit: cuitLimpio,
+      razon_social: razon_social.trim(),
+      tipo_persona: p.tipoPersona || '',
+      condicion_iva: p.estadoClave || '',
+      provincia: (p.domicilioFiscal && p.domicilioFiscal.descripcionProvincia) || '',
+      localidad: (p.domicilioFiscal && p.domicilioFiscal.localidad) || '',
+      direccion: (p.domicilioFiscal && p.domicilioFiscal.direccion) || '',
+    };
+
+    // Mostrar resultado
+    var det = [datos.tipo_persona, datos.condicion_iva, datos.provincia, datos.localidad].filter(Boolean).join(' · ');
+    resDiv.innerHTML = '<div class="afip-item" onclick="afipSeleccionar(\'' + contexto + '\',' + JSON.stringify(datos).replace(/'/g,"&#39;") + ')">' +
+      '<div class="afip-item-cuit">' + cuitLimpio + '</div>' +
+      '<div class="afip-item-razon">' + (datos.razon_social || '—') + '</div>' +
+      (det ? '<div class="afip-item-det">' + det + '</div>' : '') +
+      '<div class="afip-item-det" style="color:var(--ok);margin-top:2px">↵ Click para cargar datos</div>' +
+      '</div>';
+  })
+  .catch(function(e) {
+    resDiv.innerHTML = '<div style="padding:10px 12px;font-size:12px;color:var(--err)">❌ CUIT no encontrado en padrón AFIP</div>';
   });
+
   // Cerrar al click fuera
   setTimeout(function() {
     document.addEventListener('click', function handler(e) {
@@ -3812,15 +3845,14 @@ function afipSeleccionar(contexto, datos) {
     var zona = document.getElementById('ab-prov-zona'); if (zona && !zona.value) zona.value = [datos.provincia, datos.localidad].filter(Boolean).join(' - ');
     document.getElementById('afip-prov-results').classList.remove('on');
     document.getElementById('afip-prov-q').value = '';
-    toast('Datos de AFIP cargados', 'ok');
   } else {
     var emp = document.getElementById('c-emp'); if (emp) emp.value = datos.razon_social || '';
     var nom = document.getElementById('c-nom'); if (nom && !nom.value) nom.value = datos.razon_social || '';
     var zona2 = document.getElementById('c-zona'); if (zona2 && !zona2.value) zona2.value = [datos.provincia, datos.localidad].filter(Boolean).join(' - ');
     document.getElementById('afip-cli-results').classList.remove('on');
     document.getElementById('afip-cli-q').value = '';
-    toast('Datos de AFIP cargados', 'ok');
   }
+  toast('Datos de AFIP cargados ✓', 'ok');
 }
 
 // ─── NAV ABASTO (manejado por loadSec global) ───────────────
