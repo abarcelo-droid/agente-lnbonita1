@@ -148,8 +148,19 @@ router.get("/pricing/pdf/:tipo", async (req, res) => {
     const ORDEN_CAT = ['Frutas Nacionales','Frutas Importadas','Hortaliza Liviana','Hortaliza Pesada'];
 
     // Separar MNC del resto
-    const prodsNormales = todosProds.filter(p => p.disponible_general !== -1);
-    const prodsMnc      = todosProds.filter(p => p.disponible_general === -1);
+    // Regla: incluir si tiene precio en May o Min, O si es consignación disponible (con o sin precio)
+    const prodsNormales = todosProds.filter(function(p) {
+      if (p.disponible_general === -1) return false; // MNC va aparte
+      const pMay = mapMay[p.id]; const pMin = mapMin[p.id];
+      const tienePrecio = (pMay && pMay.precio > 0) || (pMin && pMin.precio > 0);
+      const esConsig = p.consignacion === 1;
+      return tienePrecio || esConsig;
+    });
+    const prodsMnc = todosProds.filter(function(p) {
+      if (p.disponible_general !== -1) return false;
+      const pMay = mapMay[p.id]; const pMin = mapMin[p.id];
+      return (pMay && pMay.precio > 0) || (pMin && pMin.precio > 0);
+    });
 
     // Ordenar normales por categoría según ORDEN_CAT, resto al final
     prodsNormales.sort(function(a,b) {
@@ -167,7 +178,7 @@ router.get("/pricing/pdf/:tipo", async (req, res) => {
 
     function buildRow(p) {
       const pMay = mapMay[p.id]; const pMin = mapMin[p.id];
-      const cons = p.consignacion ? ' <span class="cons-badge">©</span>' : '';
+      const cons = p.consignacion ? ' <span class="cons-badge">consignación</span>' : '';
       const prox = p.disponible_general === 2 ? ' <span class="prox-badge">⏳</span>' : '';
       let r = '<tr>';
       r += '<td style="font-weight:700">' + p.nombre + cons + prox + '</td>';
@@ -228,7 +239,7 @@ router.get("/pricing/pdf/:tipo", async (req, res) => {
       'td{padding:7px 10px;border-bottom:1px solid #e8ddd0;vertical-align:top;font-size:12px}',
       'td.num{text-align:right;font-weight:600;color:#0f2540;font-variant-numeric:tabular-nums}',
       'tr.cat td{background:#e8f0f8;font-size:10px;font-weight:700;color:#0f2540;text-transform:uppercase;padding:6px 10px;letter-spacing:.05em}',
-      '.cons-badge{display:inline-block;background:#fef3c7;color:#92400e;border:1px solid #fde68a;border-radius:3px;font-size:9px;padding:0 3px;margin-left:4px;font-weight:700;vertical-align:middle}',
+      '.cons-badge{display:inline-block;background:#dcfce7;color:#166534;border:1px solid #86efac;border-radius:3px;font-size:9px;padding:0 4px;margin-left:4px;font-weight:700;vertical-align:middle}',
       '.prox-badge{display:inline-block;background:#dbeafe;color:#1e40af;border:1px solid #93c5fd;border-radius:3px;font-size:9px;padding:0 3px;margin-left:4px;font-weight:700;vertical-align:middle}',
       '.footer{margin-top:28px;font-size:10px;color:#b09080;text-align:center;border-top:1px solid #e8ddd0;padding-top:10px}',
       '.leyenda{font-size:10px;color:#7a6055;margin-bottom:12px;display:flex;gap:16px}',
@@ -237,7 +248,7 @@ router.get("/pricing/pdf/:tipo", async (req, res) => {
       '<img src="' + logoUrl + '" class="logo-img" alt="La Nina Bonita">',
       '<div class="header-right"><div class="header-sub">San Geronimo SA</div><strong style="font-size:14px;color:#0f2540">Disponible Piso</strong><div class="header-sub">Fecha: ' + fecha + '</div></div>',
       '</div>',
-      '<div class="leyenda"><span><span class="cons-badge">©</span> Consignación</span><span><span class="prox-badge">⏳</span> Próximamente</span></div>',
+      '<div class="leyenda"><span><span class="cons-badge">consignación</span> Sin costo propio — precio de referencia</span><span style="margin-left:16px"><span class="prox-badge">⏳</span> Próximamente</span></div>',
       '<table>',
       '<thead><tr><th>Producto</th><th>Kilos</th><th>Proveedor</th><th>Origen</th><th class="num">May. MCBA</th><th class="num">Min. MCBA</th></tr></thead>',
       '<tbody>' + rows + '</tbody>',
