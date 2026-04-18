@@ -10,6 +10,7 @@ import ofertaRouter       from "./rutas/oferta.js";
 import cotizacionRouter   from "./rutas/cotizacion.js";
 import crmRouter          from "./rutas/crm.js";
 import buscarRouter       from "./rutas/buscar.js";
+import abastoRouter       from "./rutas/abasto.js";
 import { guardarSnapshotCRM } from "./servicios/db.js";
 import { syncSheets } from "./servicios/sheets.js";
 
@@ -102,6 +103,7 @@ app.use("/api", ofertaRouter);
 app.use("/api", cotizacionRouter);
 app.use("/api", crmRouter);
 app.use("/api", buscarRouter);
+app.use("/api/abasto", abastoRouter);
 
 // Health check
 app.get("/", (req, res) => res.json({ status:"ok", version:"3.0", panel:"/panel" }));

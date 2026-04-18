@@ -415,3 +415,216 @@ export function guardarSnapshotCRM() {
   console.log(`[CRM] Snapshot medianoche: ${guardados} registros guardados`);
   return guardados;
 }
+
+// ── MÓDULO ABASTO ──────────────────────────────────────────────────────────
+db.exec(`
+  CREATE TABLE IF NOT EXISTS proveedores (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    nombre          TEXT NOT NULL,
+    razon_social    TEXT,
+    cuit            TEXT,
+    telefono        TEXT,
+    email           TEXT,
+    direccion       TEXT,
+    zona            TEXT,
+    contacto        TEXT,
+    condicion_pago  TEXT DEFAULT 'contado',
+    notas           TEXT,
+    activo          INTEGER DEFAULT 1,
+    creado_en       TEXT DEFAULT (datetime('now','localtime'))
+  );
+
+  CREATE TABLE IF NOT EXISTS partidas (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    fecha_ingreso       TEXT NOT NULL,
+    producto            TEXT NOT NULL,
+    categoria           TEXT,
+    proveedor_id        INTEGER REFERENCES proveedores(id),
+    tipo_ingreso        TEXT NOT NULL CHECK(tipo_ingreso IN ('factura_compra','consignacion')),
+    bultos_ingresados   REAL NOT NULL DEFAULT 0,
+    kilos_por_bulto     REAL NOT NULL DEFAULT 0,
+    bultos_disponibles  REAL NOT NULL DEFAULT 0,
+    costo_por_bulto     REAL DEFAULT 0,
+    moneda              TEXT DEFAULT 'ARS' CHECK(moneda IN ('ARS','USD')),
+    factura_compra_id   INTEGER,
+    liquidacion_id      INTEGER,
+    estado              TEXT DEFAULT 'activa' CHECK(estado IN ('activa','parcial','cerrada','anulada')),
+    notas               TEXT,
+    creado_en           TEXT DEFAULT (datetime('now','localtime'))
+  );
+
+  CREATE TABLE IF NOT EXISTS movimientos_stock (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    partida_id      INTEGER NOT NULL REFERENCES partidas(id),
+    fecha           TEXT NOT NULL,
+    tipo            TEXT NOT NULL CHECK(tipo IN ('ingreso','salida_remito','salida_factura','ajuste','devolucion')),
+    bultos          REAL NOT NULL,
+    referencia_tipo TEXT,
+    referencia_id   INTEGER,
+    notas           TEXT,
+    creado_en       TEXT DEFAULT (datetime('now','localtime'))
+  );
+
+  CREATE TABLE IF NOT EXISTS remitos_salida (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    nro_remito        TEXT UNIQUE,
+    fecha             TEXT NOT NULL,
+    cliente_telefono  TEXT,
+    empresa           TEXT,
+    contacto          TEXT,
+    direccion_entrega TEXT,
+    comercial         TEXT,
+    estado            TEXT DEFAULT 'borrador' CHECK(estado IN ('borrador','emitido','facturado','anulado')),
+    notas             TEXT,
+    creado_en         TEXT DEFAULT (datetime('now','localtime'))
+  );
+
+  CREATE TABLE IF NOT EXISTS remitos_items (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    remito_id       INTEGER NOT NULL REFERENCES remitos_salida(id),
+    partida_id      INTEGER NOT NULL REFERENCES partidas(id),
+    producto        TEXT NOT NULL,
+    bultos          REAL NOT NULL,
+    kilos_por_bulto REAL NOT NULL,
+    precio_ref      REAL DEFAULT 0,
+    precio_final    REAL DEFAULT 0,
+    moneda          TEXT DEFAULT 'ARS'
+  );
+
+  CREATE TABLE IF NOT EXISTS facturas_compra (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    nro_factura     TEXT,
+    fecha           TEXT NOT NULL,
+    proveedor_id    INTEGER REFERENCES proveedores(id),
+    partida_id      INTEGER REFERENCES partidas(id),
+    subtotal        REAL DEFAULT 0,
+    iva             REAL DEFAULT 0,
+    total           REAL DEFAULT 0,
+    moneda          TEXT DEFAULT 'ARS',
+    condicion_pago  TEXT DEFAULT 'cta_cte',
+    estado          TEXT DEFAULT 'ingresada' CHECK(estado IN ('ingresada','pagada','cta_cte','anulada')),
+    archivo_url     TEXT,
+    notas           TEXT,
+    creado_en       TEXT DEFAULT (datetime('now','localtime'))
+  );
+
+  CREATE TABLE IF NOT EXISTS liquidaciones_consignacion (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    nro_liquidacion  TEXT UNIQUE,
+    fecha            TEXT NOT NULL,
+    proveedor_id     INTEGER REFERENCES proveedores(id),
+    partida_id       INTEGER REFERENCES partidas(id),
+    bultos_vendidos  REAL DEFAULT 0,
+    precio_promedio  REAL DEFAULT 0,
+    total            REAL DEFAULT 0,
+    moneda           TEXT DEFAULT 'ARS',
+    estado           TEXT DEFAULT 'borrador' CHECK(estado IN ('borrador','emitida','pagada','anulada')),
+    notas            TEXT,
+    creado_en        TEXT DEFAULT (datetime('now','localtime'))
+  );
+
+  CREATE TABLE IF NOT EXISTS facturas_venta (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    nro_factura       TEXT UNIQUE,
+    fecha             TEXT NOT NULL,
+    tipo_comprobante  TEXT DEFAULT 'B' CHECK(tipo_comprobante IN ('A','B','C','X')),
+    cliente_telefono  TEXT,
+    empresa           TEXT,
+    contacto          TEXT,
+    remito_id         INTEGER REFERENCES remitos_salida(id),
+    subtotal          REAL DEFAULT 0,
+    iva               REAL DEFAULT 0,
+    total             REAL DEFAULT 0,
+    moneda            TEXT DEFAULT 'ARS',
+    condicion_pago    TEXT DEFAULT 'cta_cte',
+    estado            TEXT DEFAULT 'emitida' CHECK(estado IN ('emitida','cobrada','cta_cte','anulada')),
+    notas             TEXT,
+    creado_en         TEXT DEFAULT (datetime('now','localtime'))
+  );
+
+  CREATE TABLE IF NOT EXISTS gastos (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    fecha             TEXT NOT NULL,
+    tipo              TEXT NOT NULL CHECK(tipo IN ('partida','general')),
+    partida_id        INTEGER REFERENCES partidas(id),
+    concepto          TEXT NOT NULL,
+    importe           REAL DEFAULT 0,
+    moneda            TEXT DEFAULT 'ARS',
+    estado            TEXT DEFAULT 'pendiente' CHECK(estado IN ('pendiente','facturado')),
+    factura_compra_id INTEGER REFERENCES facturas_compra(id),
+    notas             TEXT,
+    creado_en         TEXT DEFAULT (datetime('now','localtime'))
+  );
+
+  CREATE TABLE IF NOT EXISTS cta_cte_proveedores (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    proveedor_id  INTEGER NOT NULL REFERENCES proveedores(id),
+    fecha         TEXT NOT NULL,
+    tipo          TEXT NOT NULL CHECK(tipo IN ('debito','credito')),
+    concepto      TEXT NOT NULL,
+    importe       REAL DEFAULT 0,
+    moneda        TEXT DEFAULT 'ARS',
+    referencia_tipo TEXT,
+    referencia_id INTEGER,
+    saldo_acumulado REAL DEFAULT 0,
+    creado_en     TEXT DEFAULT (datetime('now','localtime'))
+  );
+
+  CREATE TABLE IF NOT EXISTS cta_cte_clientes (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    cliente_telefono TEXT NOT NULL,
+    empresa          TEXT,
+    fecha            TEXT NOT NULL,
+    tipo             TEXT NOT NULL CHECK(tipo IN ('debito','credito')),
+    concepto         TEXT NOT NULL,
+    importe          REAL DEFAULT 0,
+    moneda           TEXT DEFAULT 'ARS',
+    referencia_tipo  TEXT,
+    referencia_id    INTEGER,
+    saldo_acumulado  REAL DEFAULT 0,
+    creado_en        TEXT DEFAULT (datetime('now','localtime'))
+  );
+
+  CREATE TABLE IF NOT EXISTS caja (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    fecha           TEXT NOT NULL,
+    tipo            TEXT NOT NULL CHECK(tipo IN ('ingreso','egreso')),
+    concepto        TEXT NOT NULL,
+    importe         REAL DEFAULT 0,
+    moneda          TEXT DEFAULT 'ARS',
+    referencia_tipo TEXT,
+    referencia_id   INTEGER,
+    creado_en       TEXT DEFAULT (datetime('now','localtime'))
+  );
+
+  CREATE TABLE IF NOT EXISTS cheques_propios (
+    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    fecha_emision      TEXT NOT NULL,
+    fecha_vencimiento  TEXT NOT NULL,
+    banco              TEXT,
+    nro_cheque         TEXT,
+    beneficiario       TEXT,
+    importe            REAL DEFAULT 0,
+    estado             TEXT DEFAULT 'emitido' CHECK(estado IN ('emitido','debitado','anulado')),
+    notas              TEXT,
+    creado_en          TEXT DEFAULT (datetime('now','localtime'))
+  );
+
+  CREATE TABLE IF NOT EXISTS cheques_terceros (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    fecha_recepcion   TEXT NOT NULL,
+    fecha_vencimiento TEXT NOT NULL,
+    banco             TEXT,
+    nro_cheque        TEXT,
+    librador          TEXT,
+    importe           REAL DEFAULT 0,
+    estado            TEXT DEFAULT 'en_cartera' CHECK(estado IN ('en_cartera','depositado','endosado','rechazado')),
+    notas             TEXT,
+    creado_en         TEXT DEFAULT (datetime('now','localtime'))
+  );
+`);
+
+// Función requerida por src/rutas/abasto.js
+export function getDb() {
+  return db;
+}

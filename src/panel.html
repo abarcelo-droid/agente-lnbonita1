@@ -124,6 +124,12 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   <div class="ni" data-sec="conv" id="nav-conv"><span class="dot" id="dot-conv"></span>Conversaciones</div>
   <div class="ni" data-sec="guardias"><span class="dot"></span>Guardias</div>
   <div class="ng" style="margin-top:8px">Abasto</div>
+  <div class="ni" data-sec="ab-dashboard"><span class="dot da"></span>Dashboard</div>
+  <div class="ni" data-sec="ab-stock"><span class="dot da"></span>Stock</div>
+  <div class="ni" data-sec="ab-partidas"><span class="dot dc"></span>Ingreso Partidas</div>
+  <div class="ni" data-sec="ab-proveedores"><span class="dot db"></span>Proveedores</div>
+  <div class="ni" data-sec="ab-remitos"><span class="dot dd"></span>Remitos</div>
+  <div class="ni" data-sec="ab-gastos"><span class="dot de"></span>Gastos</div>
   <div class="ni" data-sec="ingreso-factura"><span class="dot db"></span>Ingreso de Factura</div>
   <div class="ng" style="margin-top:8px">Administracion</div>
   <div class="ni" data-sec="cobranza"><span class="dot db"></span>Facturas y cobros</div>
@@ -138,6 +144,297 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   <div class="ni" data-sec="calendario"><span class="dot da"></span>Calendario Estacional</div>
 </nav>
 <main>
+
+<!-- ==================== ESTILOS ABASTO ==================== -->
+<style>
+.ab-grid{display:grid;gap:16px}
+.ab-grid-2{grid-template-columns:1fr 1fr}
+.ab-grid-3{grid-template-columns:1fr 1fr 1fr}
+.ab-grid-4{grid-template-columns:repeat(4,1fr)}
+.ab-card{background:var(--sur);border:1px solid var(--bor);border-radius:10px;padding:20px}
+.ab-card-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px}
+.ab-card-title{font-size:11px;font-weight:600;color:var(--mut);text-transform:uppercase;letter-spacing:.5px}
+.ab-stat-value{font-size:26px;font-weight:600;color:var(--burd);line-height:1;margin:4px 0;font-variant-numeric:tabular-nums}
+.ab-stat-sub{font-size:12px;color:var(--mut)}
+.ab-badge{display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:500}
+.ab-badge-verde{background:#dcfce7;color:#166534}
+.ab-badge-azul{background:#dbeafe;color:#1e40af}
+.ab-badge-amarillo{background:#fef9c3;color:#854d0e}
+.ab-badge-rojo{background:#fef2f2;color:#991b1b}
+.ab-badge-gris{background:var(--bg);color:var(--mut)}
+.ab-table-wrap{overflow-x:auto}
+.ab-table{width:100%;border-collapse:collapse;font-size:13px}
+.ab-table th{text-align:left;padding:8px 12px;background:var(--bg);color:var(--mut);font-size:10px;font-weight:500;text-transform:uppercase;letter-spacing:.08em;border-bottom:2px solid var(--bor)}
+.ab-table td{padding:10px 12px;border-bottom:1px solid var(--bor);color:var(--txt);vertical-align:middle;font-variant-numeric:tabular-nums}
+.ab-table tbody tr:last-child td{border-bottom:none}
+.ab-table tbody tr:hover{background:var(--burl)}
+.ab-btn{display:inline-flex;align-items:center;gap:6px;padding:8px 16px;border-radius:7px;font-size:13px;font-weight:500;cursor:pointer;border:none;font-family:var(--sans);transition:all .15s}
+.ab-btn:active{transform:scale(.97)}
+.ab-btn-primary{background:var(--burg);color:#fff}.ab-btn-primary:hover{background:var(--burd)}
+.ab-btn-success{background:#16a34a;color:#fff}.ab-btn-success:hover{background:#15803d}
+.ab-btn-danger{background:#dc2626;color:#fff}
+.ab-btn-ghost{background:var(--sur);color:var(--txt);border:1px solid var(--bor2)}.ab-btn-ghost:hover{background:var(--bg)}
+.ab-btn-sm{padding:4px 10px;font-size:12px;border-radius:6px}
+.ab-form-group{margin-bottom:14px}
+.ab-form-label{display:block;font-size:11px;font-weight:600;color:var(--mut);margin-bottom:5px;text-transform:uppercase;letter-spacing:.05em}
+.ab-form-input,.ab-form-select,.ab-form-textarea{width:100%;background:var(--sur);border:1px solid var(--bor2);border-radius:7px;padding:9px 12px;color:var(--txt);font-family:var(--sans);font-size:13.5px;box-sizing:border-box;transition:border-color .15s;outline:none}
+.ab-form-input:focus,.ab-form-select:focus{border-color:var(--burg);box-shadow:0 0 0 3px rgba(26,58,92,.12)}
+.ab-form-textarea{min-height:70px;resize:vertical}
+.ab-modal-overlay{display:none;position:fixed;inset:0;background:rgba(10,20,40,.55);z-index:100;align-items:center;justify-content:center}
+.ab-modal-overlay.on{display:flex}
+.ab-modal{background:var(--sur);border:1px solid var(--bor);border-radius:14px;padding:28px;width:560px;max-width:95vw;max-height:90vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.15)}
+.ab-modal-title{font-size:17px;font-weight:600;margin-bottom:20px;color:var(--txt)}
+.ab-modal-footer{display:flex;justify-content:flex-end;gap:10px;margin-top:20px;padding-top:16px;border-top:1px solid var(--bor)}
+.ab-section-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:24px;padding-bottom:18px;border-bottom:1px solid var(--bor)}
+.ab-section-title{font-size:22px;font-weight:600;color:var(--txt)}
+.ab-empty{text-align:center;padding:40px;color:var(--mut);font-size:13px}
+.ab-empty-icon{font-size:36px;margin-bottom:10px}
+.ab-tag-tipo{display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:500}
+.ab-tag-factura{background:#dbeafe;color:#1e40af}
+.ab-tag-consignacion{background:#ede9fe;color:#5b21b6}
+.ab-kilos-bar{display:flex;align-items:center;gap:8px}
+.ab-kilos-track{flex:1;height:5px;background:var(--bg);border-radius:3px;overflow:hidden;min-width:60px}
+.ab-kilos-fill{height:100%;border-radius:3px;background:var(--burg)}
+.ab-remito-item{display:grid;grid-template-columns:1fr auto auto auto;gap:8px;align-items:center;padding:10px;background:var(--bg);border-radius:8px;border:1px solid var(--bor);margin-bottom:8px}
+@media(max-width:768px){.ab-grid-2,.ab-grid-3,.ab-grid-4{grid-template-columns:1fr}.ab-modal{padding:16px}}
+</style>
+
+<!-- ==================== DASHBOARD ABASTO ==================== -->
+<div class="sec" id="sec-ab-dashboard">
+  <div class="ab-section-header">
+    <div><div class="ab-section-title">📊 Abasto — Dashboard</div><div style="font-size:13px;color:var(--mut);margin-top:3px">Resumen operativo de stock y movimientos</div></div>
+    <button class="btn bo bs" onclick="abDashboard()">↻ Actualizar</button>
+  </div>
+  <div class="ab-grid ab-grid-4" style="margin-bottom:20px">
+    <div class="ab-card"><div class="ab-card-title">Partidas activas</div><div class="ab-stat-value" id="ab-stat-partidas">—</div><div class="ab-stat-sub">en stock</div></div>
+    <div class="ab-card"><div class="ab-card-title">Bultos disponibles</div><div class="ab-stat-value" id="ab-stat-bultos">—</div><div class="ab-stat-sub" id="ab-stat-kilos">— kg</div></div>
+    <div class="ab-card"><div class="ab-card-title">Remitos hoy</div><div class="ab-stat-value" id="ab-stat-remitos-hoy">—</div><div class="ab-stat-sub">emitidos</div></div>
+    <div class="ab-card"><div class="ab-card-title">Sin facturar</div><div class="ab-stat-value" id="ab-stat-remitos-pend">—</div><div class="ab-stat-sub">remitos pendientes</div></div>
+  </div>
+  <div class="ab-grid ab-grid-2">
+    <div class="ab-card">
+      <div class="ab-card-header"><div class="ab-card-title">Top productos en stock</div></div>
+      <div id="ab-top-productos"><div class="ab-empty">Cargando...</div></div>
+    </div>
+    <div class="ab-card">
+      <div class="ab-card-header"><div class="ab-card-title">Acciones rápidas</div></div>
+      <div style="display:flex;flex-direction:column;gap:10px">
+        <button class="btn bb" onclick="navTo('ab-partidas')">🚛 Ingresar partida</button>
+        <button class="btn bb" onclick="navTo('ab-remitos')">📋 Nuevo remito</button>
+        <button class="btn bo" onclick="navTo('ab-stock')">📦 Ver stock completo</button>
+        <button class="btn bo" onclick="navTo('ab-proveedores')">🏭 Gestionar proveedores</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== STOCK ==================== -->
+<div class="sec" id="sec-ab-stock">
+  <div class="ab-section-header">
+    <div><div class="ab-section-title">📦 Stock actual</div></div>
+    <div style="display:flex;gap:10px;align-items:center">
+      <input class="ab-form-input" style="width:200px" placeholder="Buscar producto..." oninput="abStockFiltrar(this.value)">
+      <select class="ab-form-select" style="width:150px" onchange="abStockVista(this.value)">
+        <option value="resumen">Por producto</option>
+        <option value="partidas">Por partida</option>
+      </select>
+      <button class="btn bo bs" onclick="abCargarStock()">↻</button>
+    </div>
+  </div>
+  <div class="ab-card">
+    <div class="ab-table-wrap">
+      <table class="ab-table"><thead id="ab-stock-thead"><tr><th>Producto</th><th>Proveedor</th><th>Partidas</th><th>Bultos disp.</th><th>Kilos disp.</th><th>Costo/bulto prom.</th><th>Último ingreso</th></tr></thead>
+      <tbody id="ab-stock-tbody"><tr><td colspan="7"><div class="ab-empty">Cargando...</div></td></tr></tbody></table>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== PARTIDAS ==================== -->
+<div class="sec" id="sec-ab-partidas">
+  <div class="ab-section-header">
+    <div><div class="ab-section-title">🚛 Ingreso de partidas</div></div>
+    <button class="btn bb" onclick="abAbrirNuevaPartida()">+ Nueva partida</button>
+  </div>
+  <div class="ab-card" style="margin-bottom:16px">
+    <div style="display:flex;gap:10px;flex-wrap:wrap">
+      <select class="ab-form-select" style="width:180px" id="ab-part-filtro-estado" onchange="abCargarPartidas()">
+        <option value="">Todos los estados</option>
+        <option value="activa">Activas</option>
+        <option value="parcial">Parciales</option>
+        <option value="cerrada">Cerradas</option>
+      </select>
+      <input class="ab-form-input" style="width:200px" placeholder="Buscar producto..." id="ab-part-filtro-prod" oninput="abCargarPartidas()">
+    </div>
+  </div>
+  <div class="ab-card">
+    <div class="ab-table-wrap">
+      <table class="ab-table"><thead><tr><th>Fecha</th><th>Producto</th><th>Proveedor</th><th>Tipo</th><th>Ingresado</th><th>Disponible</th><th>Ocupación</th><th>Costo/bulto</th><th>Estado</th><th></th></tr></thead>
+      <tbody id="ab-partidas-tbody"><tr><td colspan="10"><div class="ab-empty">Cargando...</div></td></tr></tbody></table>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== PROVEEDORES ==================== -->
+<div class="sec" id="sec-ab-proveedores">
+  <div class="ab-section-header">
+    <div><div class="ab-section-title">🏭 Proveedores</div></div>
+    <button class="btn bb" onclick="abAbrirNuevoProveedor()">+ Nuevo proveedor</button>
+  </div>
+  <div class="ab-grid ab-grid-3" id="ab-proveedores-grid"><div class="ab-empty" style="grid-column:1/-1">Cargando...</div></div>
+</div>
+
+<!-- ==================== REMITOS ==================== -->
+<div class="sec" id="sec-ab-remitos">
+  <div class="ab-section-header">
+    <div><div class="ab-section-title">📋 Remitos de salida</div></div>
+    <button class="btn bb" onclick="abAbrirNuevoRemito()">+ Nuevo remito</button>
+  </div>
+  <div class="ab-card" style="margin-bottom:16px">
+    <div style="display:flex;gap:10px">
+      <select class="ab-form-select" style="width:180px" id="ab-remito-filtro-estado" onchange="abCargarRemitos()">
+        <option value="">Todos</option>
+        <option value="borrador">Borrador</option>
+        <option value="emitido">Emitido</option>
+        <option value="facturado">Facturado</option>
+        <option value="anulado">Anulado</option>
+      </select>
+    </div>
+  </div>
+  <div class="ab-card">
+    <div class="ab-table-wrap">
+      <table class="ab-table"><thead><tr><th>Nro.</th><th>Fecha</th><th>Empresa</th><th>Contacto</th><th>Comercial</th><th>Items</th><th>Bultos</th><th>Estado</th><th></th></tr></thead>
+      <tbody id="ab-remitos-tbody"><tr><td colspan="9"><div class="ab-empty">Cargando...</div></td></tr></tbody></table>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== GASTOS ==================== -->
+<div class="sec" id="sec-ab-gastos">
+  <div class="ab-section-header">
+    <div><div class="ab-section-title">💸 Gastos</div></div>
+    <button class="btn bb" onclick="abAbrirNuevoGasto()">+ Nuevo gasto</button>
+  </div>
+  <div class="ab-card">
+    <div class="ab-table-wrap">
+      <table class="ab-table"><thead><tr><th>Fecha</th><th>Tipo</th><th>Concepto</th><th>Partida</th><th>Importe</th><th>Moneda</th><th>Estado</th></tr></thead>
+      <tbody id="ab-gastos-tbody"><tr><td colspan="7"><div class="ab-empty">Cargando...</div></td></tr></tbody></table>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== MODALES ABASTO ==================== -->
+
+<!-- Modal Proveedor -->
+<div class="ab-modal-overlay" id="ab-modal-proveedor">
+<div class="ab-modal">
+  <div class="ab-modal-title" id="ab-modal-prov-title">Nuevo proveedor</div>
+  <input type="hidden" id="ab-prov-id">
+  <div class="ab-grid ab-grid-2">
+    <div class="ab-form-group"><label class="ab-form-label">Nombre *</label><input class="ab-form-input" id="ab-prov-nombre" placeholder="Nombre comercial"></div>
+    <div class="ab-form-group"><label class="ab-form-label">Razón social</label><input class="ab-form-input" id="ab-prov-razon"></div>
+    <div class="ab-form-group"><label class="ab-form-label">CUIT</label><input class="ab-form-input" id="ab-prov-cuit" placeholder="20-12345678-9"></div>
+    <div class="ab-form-group"><label class="ab-form-label">Teléfono</label><input class="ab-form-input" id="ab-prov-tel"></div>
+    <div class="ab-form-group"><label class="ab-form-label">Email</label><input class="ab-form-input" id="ab-prov-email" type="email"></div>
+    <div class="ab-form-group"><label class="ab-form-label">Zona / Origen</label><input class="ab-form-input" id="ab-prov-zona"></div>
+    <div class="ab-form-group"><label class="ab-form-label">Contacto (persona)</label><input class="ab-form-input" id="ab-prov-contacto"></div>
+    <div class="ab-form-group"><label class="ab-form-label">Condición de pago</label>
+      <select class="ab-form-select" id="ab-prov-condpago">
+        <option value="contado">Contado</option><option value="7dias">7 días</option>
+        <option value="15dias">15 días</option><option value="30dias">30 días</option>
+        <option value="consignacion">Consignación</option>
+      </select>
+    </div>
+  </div>
+  <div class="ab-form-group"><label class="ab-form-label">Dirección</label><input class="ab-form-input" id="ab-prov-dir"></div>
+  <div class="ab-form-group"><label class="ab-form-label">Notas</label><textarea class="ab-form-textarea" id="ab-prov-notas"></textarea></div>
+  <div class="ab-modal-footer">
+    <button class="btn bo" onclick="abCerrarModal('ab-modal-proveedor')">Cancelar</button>
+    <button class="btn bb" onclick="abGuardarProveedor()">Guardar</button>
+  </div>
+</div>
+</div>
+
+<!-- Modal Partida -->
+<div class="ab-modal-overlay" id="ab-modal-partida">
+<div class="ab-modal">
+  <div class="ab-modal-title">Ingresar partida</div>
+  <div class="ab-grid ab-grid-2">
+    <div class="ab-form-group"><label class="ab-form-label">Fecha ingreso *</label><input class="ab-form-input" id="ab-part-fecha" type="date"></div>
+    <div class="ab-form-group"><label class="ab-form-label">Proveedor</label><select class="ab-form-select" id="ab-part-proveedor"><option value="">Sin proveedor</option></select></div>
+    <div class="ab-form-group" style="grid-column:1/-1"><label class="ab-form-label">Producto *</label><input class="ab-form-input" id="ab-part-producto" placeholder="Ej: Manzana Granny Smith"></div>
+    <div class="ab-form-group"><label class="ab-form-label">Categoría</label><input class="ab-form-input" id="ab-part-cat" placeholder="Ej: Frutas Importadas"></div>
+    <div class="ab-form-group"><label class="ab-form-label">Tipo de ingreso *</label>
+      <select class="ab-form-select" id="ab-part-tipo">
+        <option value="factura_compra">Factura de compra</option>
+        <option value="consignacion">Consignación</option>
+      </select>
+    </div>
+    <div class="ab-form-group"><label class="ab-form-label">Bultos ingresados *</label><input class="ab-form-input" id="ab-part-bultos" type="number" min="0" step="1" placeholder="0" oninput="abCalcKilos()"></div>
+    <div class="ab-form-group"><label class="ab-form-label">Kilos por bulto *</label><input class="ab-form-input" id="ab-part-kgbulto" type="number" min="0" step="0.1" placeholder="0.0" oninput="abCalcKilos()"></div>
+    <div class="ab-form-group"><label class="ab-form-label">Total kilos</label><input class="ab-form-input" id="ab-part-kgtotal" readonly placeholder="—" style="opacity:.6;background:var(--bg)"></div>
+    <div class="ab-form-group"><label class="ab-form-label">Costo por bulto</label><input class="ab-form-input" id="ab-part-costo" type="number" min="0" step="0.01" placeholder="0.00"></div>
+    <div class="ab-form-group"><label class="ab-form-label">Moneda</label>
+      <select class="ab-form-select" id="ab-part-moneda"><option value="ARS">ARS $</option><option value="USD">USD U$S</option></select>
+    </div>
+  </div>
+  <div class="ab-form-group"><label class="ab-form-label">Notas</label><textarea class="ab-form-textarea" id="ab-part-notas" placeholder="Observaciones, origen, calidad..."></textarea></div>
+  <div class="ab-modal-footer">
+    <button class="btn bo" onclick="abCerrarModal('ab-modal-partida')">Cancelar</button>
+    <button class="btn bb" onclick="abGuardarPartida()" style="background:#16a34a">Ingresar partida</button>
+  </div>
+</div>
+</div>
+
+<!-- Modal Remito -->
+<div class="ab-modal-overlay" id="ab-modal-remito">
+<div class="ab-modal" style="width:680px">
+  <div class="ab-modal-title">Nuevo remito de salida</div>
+  <div class="ab-grid ab-grid-2">
+    <div class="ab-form-group"><label class="ab-form-label">Fecha *</label><input class="ab-form-input" id="ab-rem-fecha" type="date"></div>
+    <div class="ab-form-group"><label class="ab-form-label">Comercial</label>
+      <select class="ab-form-select" id="ab-rem-comercial">
+        <option value="">—</option><option>Andres Barcelo</option><option>Pablo Barcelo</option>
+        <option>Martin Mendez</option><option>Camila Persampieri</option><option>Ramon Palazuelos</option>
+      </select>
+    </div>
+    <div class="ab-form-group"><label class="ab-form-label">Empresa</label><input class="ab-form-input" id="ab-rem-empresa" placeholder="Nombre empresa cliente" list="ab-rem-empresas-list"><datalist id="ab-rem-empresas-list"></datalist></div>
+    <div class="ab-form-group"><label class="ab-form-label">Contacto</label><input class="ab-form-input" id="ab-rem-contacto" placeholder="Nombre contacto"></div>
+    <div class="ab-form-group" style="grid-column:1/-1"><label class="ab-form-label">Dirección de entrega</label><input class="ab-form-input" id="ab-rem-dir" placeholder="Dirección"></div>
+  </div>
+  <div style="margin-bottom:8px;font-size:11px;font-weight:600;color:var(--mut);text-transform:uppercase;letter-spacing:.05em">Items del remito</div>
+  <div id="ab-rem-items-list" style="margin-bottom:10px"></div>
+  <button class="btn bo bs" onclick="abAgregarItemRemito()">+ Agregar producto</button>
+  <div class="ab-form-group" style="margin-top:14px"><label class="ab-form-label">Notas</label><textarea class="ab-form-textarea" id="ab-rem-notas" style="min-height:50px"></textarea></div>
+  <div class="ab-modal-footer">
+    <button class="btn bo" onclick="abCerrarModal('ab-modal-remito')">Cancelar</button>
+    <button class="btn bb" onclick="abGuardarRemito()">Emitir remito</button>
+  </div>
+</div>
+</div>
+
+<!-- Modal Gasto -->
+<div class="ab-modal-overlay" id="ab-modal-gasto">
+<div class="ab-modal">
+  <div class="ab-modal-title">Registrar gasto</div>
+  <div class="ab-grid ab-grid-2">
+    <div class="ab-form-group"><label class="ab-form-label">Fecha *</label><input class="ab-form-input" id="ab-gasto-fecha" type="date"></div>
+    <div class="ab-form-group"><label class="ab-form-label">Tipo</label>
+      <select class="ab-form-select" id="ab-gasto-tipo" onchange="abToggleGastoPartida()">
+        <option value="general">General</option><option value="partida">Asociado a partida</option>
+      </select>
+    </div>
+    <div class="ab-form-group" style="grid-column:1/-1;display:none" id="ab-gasto-partida-row"><label class="ab-form-label">Partida</label><select class="ab-form-select" id="ab-gasto-partida-id"><option value="">Seleccionar...</option></select></div>
+    <div class="ab-form-group" style="grid-column:1/-1"><label class="ab-form-label">Concepto *</label><input class="ab-form-input" id="ab-gasto-concepto" placeholder="Descripción del gasto"></div>
+    <div class="ab-form-group"><label class="ab-form-label">Importe *</label><input class="ab-form-input" id="ab-gasto-importe" type="number" min="0" step="0.01" placeholder="0.00"></div>
+    <div class="ab-form-group"><label class="ab-form-label">Moneda</label><select class="ab-form-select" id="ab-gasto-moneda"><option value="ARS">ARS $</option><option value="USD">USD U$S</option></select></div>
+  </div>
+  <div class="ab-form-group"><label class="ab-form-label">Notas</label><textarea class="ab-form-textarea" id="ab-gasto-notas"></textarea></div>
+  <div class="ab-modal-footer">
+    <button class="btn bo" onclick="abCerrarModal('ab-modal-gasto')">Cancelar</button>
+    <button class="btn bb" onclick="abGuardarGasto()">Guardar</button>
+  </div>
+</div>
+</div>
 
 <!-- INGRESO DE FACTURA -->
 <div class="sec" id="sec-ingreso-factura">
@@ -752,7 +1049,13 @@ function loadSec(s) {
     'ingreso-factura': loadIngresoFactura,
     'calendario': loadCalendario,
     conv: loadConvs, guardias: loadGuardias, cobranza: loadCob,
-    'retail-prod': loadRP, 'retail-gastos': loadGastos
+    'retail-prod': loadRP, 'retail-gastos': loadGastos,
+    'ab-dashboard': abDashboard,
+    'ab-stock': abCargarStock,
+    'ab-partidas': abCargarPartidas,
+    'ab-proveedores': abCargarProveedores,
+    'ab-remitos': abCargarRemitos,
+    'ab-gastos': abCargarGastos
   };
   if (m[s]) m[s]();
 }
@@ -3023,7 +3326,353 @@ function abrirHistorico(producto, mes, event) {
   }, 100);
 }
 
-loadInicio(); startPoll();
+// ── MÓDULO ABASTO ────────────────────────────────────────────
+var AB = { proveedores: [], partidas: [], stockData: [], stockVista: 'resumen', remitoItems: [] };
+
+function navTo(sec) {
+  var el = document.querySelector('.ni[data-sec="ab-'+sec+'"]');
+  if (el) el.click();
+}
+
+var abApi = function(path, opts) {
+  opts = opts || {};
+  opts.headers = opts.headers || {'Content-Type':'application/json'};
+  return fetch('/api/abasto' + path, opts).then(function(r){ return r.json(); }).catch(function(){ return {ok:false,error:'Error de red'}; });
+};
+
+function abFmt(n) { return n == null ? '—' : Number(n).toLocaleString('es-AR', {minimumFractionDigits:0,maximumFractionDigits:1}); }
+function abFmtMoney(n, m) { m = m||'ARS'; return n == null ? '—' : (m==='USD'?'U$S ':'$ ') + Number(n).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+function abFecha(d) { return d ? d.split('T')[0] : '—'; }
+function abBadgeEstado(e) {
+  var map = {activa:'verde',parcial:'azul',cerrada:'gris',anulada:'rojo',emitido:'azul',borrador:'amarillo',facturado:'verde',pendiente:'amarillo',general:'gris',partida:'azul'};
+  return '<span class="ab-badge ab-badge-'+(map[e]||'gris')+'">'+e+'</span>';
+}
+function abCerrarModal(id) { var el = document.getElementById(id); if(el) el.classList.remove('on'); }
+
+// Cerrar modales abasto al click fuera
+document.querySelectorAll('.ab-modal-overlay').forEach(function(el){
+  el.addEventListener('click', function(e){ if(e.target===el) el.classList.remove('on'); });
+});
+
+// ─── DASHBOARD ──────────────────────────────────────────────
+function abDashboard() {
+  abApi('/resumen').then(function(res) {
+    if (!res.ok) return;
+    var d = res.data;
+    document.getElementById('ab-stat-partidas').textContent = abFmt(d.stockTotal && d.stockTotal.partidas);
+    document.getElementById('ab-stat-bultos').textContent = abFmt(d.stockTotal && d.stockTotal.bultos);
+    document.getElementById('ab-stat-kilos').textContent = abFmt(d.stockTotal && d.stockTotal.kilos) + ' kg';
+    document.getElementById('ab-stat-remitos-hoy').textContent = abFmt(d.remitosHoy && d.remitosHoy.total);
+    document.getElementById('ab-stat-remitos-pend').textContent = abFmt(d.remitosEmitidos && d.remitosEmitidos.total);
+    var cont = document.getElementById('ab-top-productos');
+    if (!d.topProductos || !d.topProductos.length) {
+      cont.innerHTML = '<div class="ab-empty"><div class="ab-empty-icon">📦</div>Sin stock registrado</div>';
+      return;
+    }
+    var max = d.topProductos[0].bultos;
+    cont.innerHTML = d.topProductos.map(function(p) {
+      var pct = max > 0 ? Math.round(p.bultos/max*100) : 0;
+      return '<div style="margin-bottom:10px"><div style="display:flex;justify-content:space-between;margin-bottom:4px"><span style="font-size:13px">'+p.producto+'</span><span style="font-size:13px;font-weight:600">'+abFmt(p.bultos)+' bultos</span></div><div class="ab-kilos-bar"><div class="ab-kilos-track"><div class="ab-kilos-fill" style="width:'+pct+'%"></div></div></div></div>';
+    }).join('');
+  });
+}
+
+// ─── STOCK ──────────────────────────────────────────────────
+function abCargarStock() {
+  var endpoint = AB.stockVista === 'partidas' ? '/stock/partidas' : '/stock';
+  abApi(endpoint).then(function(res) {
+    if (!res.ok) return;
+    AB.stockData = res.data;
+    abRenderStock('');
+  });
+}
+function abStockVista(v) { AB.stockVista = v; abCargarStock(); }
+function abStockFiltrar(q) { abRenderStock(q); }
+function abRenderStock(q) {
+  q = q || '';
+  var tbody = document.getElementById('ab-stock-tbody');
+  var thead = document.getElementById('ab-stock-thead');
+  var data = AB.stockData.filter(function(r){ return !q || r.producto.toLowerCase().indexOf(q.toLowerCase()) >= 0; });
+  if (!data.length) { tbody.innerHTML = '<tr><td colspan="10"><div class="ab-empty"><div class="ab-empty-icon">📦</div>Sin stock</div></td></tr>'; return; }
+  if (AB.stockVista === 'partidas') {
+    thead.innerHTML = '<tr><th>Fecha</th><th>Producto</th><th>Proveedor</th><th>Tipo</th><th>Bultos ing.</th><th>Bultos disp.</th><th>Kg/bulto</th><th>Costo/bulto</th><th>Estado</th><th></th></tr>';
+    tbody.innerHTML = data.map(function(p) {
+      return '<tr><td>'+abFecha(p.fecha_ingreso)+'</td><td><strong>'+p.producto+'</strong>'+(p.categoria?'<br><small style="color:var(--mut)">'+p.categoria+'</small>':'')+'</td><td>'+(p.proveedor_nombre||'—')+'</td><td><span class="ab-tag-tipo ab-tag-'+(p.tipo_ingreso==='consignacion'?'consignacion':'factura')+'">'+(p.tipo_ingreso==='consignacion'?'Consig.':'Compra')+'</span></td><td>'+abFmt(p.bultos_ingresados)+'</td><td><strong>'+abFmt(p.bultos_disponibles)+'</strong></td><td>'+abFmt(p.kilos_por_bulto)+' kg</td><td>'+abFmtMoney(p.costo_por_bulto,p.moneda)+'</td><td>'+abBadgeEstado(p.estado)+'</td><td><button class="btn bo bs" onclick="abAjusteStock('+p.id+',\''+p.producto.replace(/'/g,"\\'")+'\',' +p.bultos_disponibles+')">Ajuste</button></td></tr>';
+    }).join('');
+  } else {
+    thead.innerHTML = '<tr><th>Producto</th><th>Proveedor</th><th>Partidas</th><th>Bultos disp.</th><th>Kilos disp.</th><th>Costo/bulto prom.</th><th>Último ingreso</th></tr>';
+    tbody.innerHTML = data.map(function(p) {
+      return '<tr><td><strong>'+p.producto+'</strong>'+(p.categoria?'<br><small style="color:var(--mut)">'+p.categoria+'</small>':'')+'</td><td>'+(p.proveedor||'—')+'</td><td>'+p.partidas_activas+'</td><td><strong>'+abFmt(p.bultos_totales)+'</strong></td><td>'+abFmt(p.kilos_totales)+' kg</td><td>'+abFmtMoney(p.costo_promedio_bulto,'ARS')+'</td><td>'+abFecha(p.ultimo_ingreso)+'</td></tr>';
+    }).join('');
+  }
+}
+
+// ─── PARTIDAS ───────────────────────────────────────────────
+function abCargarPartidas() {
+  var estado = (document.getElementById('ab-part-filtro-estado')||{}).value || '';
+  var prod = (document.getElementById('ab-part-filtro-prod')||{}).value || '';
+  var q = (estado?'estado='+estado:'') + (prod?(estado?'&':'')+'producto='+encodeURIComponent(prod):'');
+  abApi('/partidas'+(q?'?'+q:'')).then(function(res) {
+    if (!res.ok) return;
+    AB.partidas = res.data;
+    var tbody = document.getElementById('ab-partidas-tbody');
+    if (!res.data.length) { tbody.innerHTML = '<tr><td colspan="10"><div class="ab-empty"><div class="ab-empty-icon">🚛</div>Sin partidas</div></td></tr>'; return; }
+    tbody.innerHTML = res.data.map(function(p) {
+      var pct = p.bultos_ingresados > 0 ? Math.round(p.bultos_disponibles / p.bultos_ingresados * 100) : 0;
+      return '<tr><td>'+abFecha(p.fecha_ingreso)+'</td><td><strong>'+p.producto+'</strong></td><td>'+(p.proveedor_nombre||'—')+'</td><td><span class="ab-tag-tipo ab-tag-'+(p.tipo_ingreso==='consignacion'?'consignacion':'factura')+'">'+(p.tipo_ingreso==='consignacion'?'Consig.':'Compra')+'</span></td><td>'+abFmt(p.bultos_ingresados)+' bultos</td><td><strong>'+abFmt(p.bultos_disponibles)+'</strong> bultos<br><small style="color:var(--mut)">'+abFmt(p.kilos_disponibles)+' kg</small></td><td><div class="ab-kilos-bar"><div class="ab-kilos-track"><div class="ab-kilos-fill" style="width:'+pct+'%"></div></div><span style="font-size:11px;color:var(--mut)">'+pct+'%</span></div></td><td>'+abFmtMoney(p.costo_por_bulto,p.moneda)+'</td><td>'+abBadgeEstado(p.estado)+'</td><td><button class="btn bo bs" onclick="abAjusteStock('+p.id+',\''+p.producto.replace(/'/g,"\\'")+'\',' +p.bultos_disponibles+')">Ajuste</button></td></tr>';
+    }).join('');
+  });
+}
+
+function abCalcKilos() {
+  var bultos = parseFloat(document.getElementById('ab-part-bultos').value) || 0;
+  var kgb = parseFloat(document.getElementById('ab-part-kgbulto').value) || 0;
+  document.getElementById('ab-part-kgtotal').value = (bultos && kgb) ? (bultos * kgb).toFixed(1) + ' kg' : '';
+}
+
+async function abAbrirNuevaPartida() {
+  ['ab-part-fecha','ab-part-producto','ab-part-cat','ab-part-bultos','ab-part-kgbulto','ab-part-kgtotal','ab-part-costo','ab-part-notas'].forEach(function(id){ var el=document.getElementById(id); if(el) el.value=''; });
+  document.getElementById('ab-part-fecha').value = new Date().toISOString().split('T')[0];
+  document.getElementById('ab-part-tipo').value = 'factura_compra';
+  document.getElementById('ab-part-moneda').value = 'ARS';
+  await abCargarProveedoresSelect('ab-part-proveedor');
+  document.getElementById('ab-modal-partida').classList.add('on');
+}
+
+function abGuardarPartida() {
+  var body = {
+    fecha_ingreso: document.getElementById('ab-part-fecha').value,
+    producto: document.getElementById('ab-part-producto').value.trim(),
+    categoria: document.getElementById('ab-part-cat').value.trim(),
+    proveedor_id: document.getElementById('ab-part-proveedor').value || null,
+    tipo_ingreso: document.getElementById('ab-part-tipo').value,
+    bultos_ingresados: parseFloat(document.getElementById('ab-part-bultos').value),
+    kilos_por_bulto: parseFloat(document.getElementById('ab-part-kgbulto').value),
+    costo_por_bulto: parseFloat(document.getElementById('ab-part-costo').value) || 0,
+    moneda: document.getElementById('ab-part-moneda').value,
+    notas: document.getElementById('ab-part-notas').value
+  };
+  if (!body.producto || !body.bultos_ingresados || !body.kilos_por_bulto) { toast('Completá producto, bultos y kg/bulto','er'); return; }
+  abApi('/partidas', {method:'POST', body:JSON.stringify(body)}).then(function(res) {
+    if (res.ok) { abCerrarModal('ab-modal-partida'); abCargarPartidas(); abDashboard(); toast('Partida ingresada','ok'); }
+    else toast('Error: ' + res.error, 'er');
+  });
+}
+
+// ─── PROVEEDORES ────────────────────────────────────────────
+function abCargarProveedores() {
+  abApi('/proveedores').then(function(res) {
+    if (!res.ok) return;
+    AB.proveedores = res.data;
+    var grid = document.getElementById('ab-proveedores-grid');
+    if (!res.data.length) { grid.innerHTML = '<div class="ab-empty" style="grid-column:1/-1"><div class="ab-empty-icon">🏭</div>Sin proveedores</div>'; return; }
+    grid.innerHTML = res.data.map(function(p) {
+      return '<div class="ab-card"><div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px"><div><div style="font-weight:600;font-size:15px">'+p.nombre+'</div>'+(p.razon_social?'<div style="font-size:12px;color:var(--mut)">'+p.razon_social+'</div>':'')+'</div><button class="btn bo bs" onclick="abEditarProveedor('+p.id+')">✏️</button></div>'+(p.cuit?'<div style="font-size:12px;color:var(--mut);margin-bottom:3px">CUIT: '+p.cuit+'</div>':'')+(p.contacto?'<div style="font-size:12px;color:var(--mut);margin-bottom:3px">👤 '+p.contacto+'</div>':'')+(p.telefono?'<div style="font-size:12px;color:var(--mut);margin-bottom:3px">📱 '+p.telefono+'</div>':'')+(p.zona?'<div style="font-size:12px;color:var(--mut);margin-bottom:3px">📍 '+p.zona+'</div>':'')+'<div style="display:flex;gap:8px;margin-top:10px;padding-top:10px;border-top:1px solid var(--bor)"><span class="ab-badge ab-badge-azul">📦 '+p.total_partidas+' partidas</span>'+(p.bultos_en_stock>0?'<span class="ab-badge ab-badge-verde">'+abFmt(p.bultos_en_stock)+' bultos</span>':'')+'</div></div>';
+    }).join('');
+  });
+}
+
+function abCargarProveedoresSelect(selectId) {
+  return abApi('/proveedores').then(function(res) {
+    if (res.ok) AB.proveedores = res.data;
+    var sel = document.getElementById(selectId);
+    if (!sel) return;
+    sel.innerHTML = '<option value="">Sin proveedor</option>' + AB.proveedores.map(function(p){ return '<option value="'+p.id+'">'+p.nombre+'</option>'; }).join('');
+  });
+}
+
+function abAbrirNuevoProveedor() {
+  document.getElementById('ab-prov-id').value = '';
+  document.getElementById('ab-modal-prov-title').textContent = 'Nuevo proveedor';
+  ['ab-prov-nombre','ab-prov-razon','ab-prov-cuit','ab-prov-tel','ab-prov-email','ab-prov-zona','ab-prov-contacto','ab-prov-dir','ab-prov-notas'].forEach(function(id){ document.getElementById(id).value=''; });
+  document.getElementById('ab-prov-condpago').value = 'contado';
+  document.getElementById('ab-modal-proveedor').classList.add('on');
+}
+
+function abEditarProveedor(id) {
+  var p = AB.proveedores.find(function(x){ return x.id === id; });
+  if (!p) return;
+  document.getElementById('ab-prov-id').value = p.id;
+  document.getElementById('ab-modal-prov-title').textContent = 'Editar proveedor';
+  document.getElementById('ab-prov-nombre').value = p.nombre||'';
+  document.getElementById('ab-prov-razon').value = p.razon_social||'';
+  document.getElementById('ab-prov-cuit').value = p.cuit||'';
+  document.getElementById('ab-prov-tel').value = p.telefono||'';
+  document.getElementById('ab-prov-email').value = p.email||'';
+  document.getElementById('ab-prov-zona').value = p.zona||'';
+  document.getElementById('ab-prov-contacto').value = p.contacto||'';
+  document.getElementById('ab-prov-dir').value = p.direccion||'';
+  document.getElementById('ab-prov-condpago').value = p.condicion_pago||'contado';
+  document.getElementById('ab-prov-notas').value = p.notas||'';
+  document.getElementById('ab-modal-proveedor').classList.add('on');
+}
+
+function abGuardarProveedor() {
+  var id = document.getElementById('ab-prov-id').value;
+  var body = {
+    nombre: document.getElementById('ab-prov-nombre').value.trim(),
+    razon_social: document.getElementById('ab-prov-razon').value.trim(),
+    cuit: document.getElementById('ab-prov-cuit').value.trim(),
+    telefono: document.getElementById('ab-prov-tel').value.trim(),
+    email: document.getElementById('ab-prov-email').value.trim(),
+    direccion: document.getElementById('ab-prov-dir').value.trim(),
+    zona: document.getElementById('ab-prov-zona').value.trim(),
+    contacto: document.getElementById('ab-prov-contacto').value.trim(),
+    condicion_pago: document.getElementById('ab-prov-condpago').value,
+    notas: document.getElementById('ab-prov-notas').value
+  };
+  if (!body.nombre) { toast('El nombre es requerido','er'); return; }
+  var method = id ? 'PATCH' : 'POST';
+  var url = id ? '/proveedores/'+id : '/proveedores';
+  abApi(url, {method:method, body:JSON.stringify(body)}).then(function(res) {
+    if (res.ok) { abCerrarModal('ab-modal-proveedor'); AB.proveedores=[]; abCargarProveedores(); toast('Proveedor guardado','ok'); }
+    else toast('Error: '+res.error,'er');
+  });
+}
+
+// ─── REMITOS ────────────────────────────────────────────────
+function abCargarRemitos() {
+  var estado = (document.getElementById('ab-remito-filtro-estado')||{}).value || '';
+  abApi('/remitos'+(estado?'?estado='+estado:'')).then(function(res) {
+    if (!res.ok) return;
+    var tbody = document.getElementById('ab-remitos-tbody');
+    if (!res.data.length) { tbody.innerHTML = '<tr><td colspan="9"><div class="ab-empty"><div class="ab-empty-icon">📋</div>Sin remitos</div></td></tr>'; return; }
+    tbody.innerHTML = res.data.map(function(r) {
+      return '<tr><td><strong>'+(r.nro_remito||'—')+'</strong></td><td>'+abFecha(r.fecha)+'</td><td>'+(r.empresa||'—')+'</td><td>'+(r.contacto||'—')+'</td><td>'+(r.comercial||'—')+'</td><td>'+(r.total_items||0)+'</td><td>'+abFmt(r.total_bultos)+'</td><td>'+abBadgeEstado(r.estado)+'</td><td><button class="btn bo bs" onclick="abVerRemito('+r.id+')">Ver</button></td></tr>';
+    }).join('');
+  });
+}
+
+function abAbrirNuevoRemito() {
+  document.getElementById('ab-rem-fecha').value = new Date().toISOString().split('T')[0];
+  ['ab-rem-empresa','ab-rem-contacto','ab-rem-dir','ab-rem-notas'].forEach(function(id){ document.getElementById(id).value=''; });
+  document.getElementById('ab-rem-comercial').value = '';
+  AB.remitoItems = [];
+  abApi('/partidas?estado=activa').then(function(res){ if(res.ok) AB.partidas = res.data; });
+  // Cargar empresas datalist
+  api('/api/clientes').then(function(cd){
+    var empresas = [];
+    var vistas = {};
+    (cd.data||cd||[]).forEach(function(c){ if(c.empresa && !vistas[c.empresa]){ vistas[c.empresa]=1; empresas.push(c.empresa); } });
+    var dl = document.getElementById('ab-rem-empresas-list');
+    if(dl) dl.innerHTML = empresas.map(function(e){ return '<option value="'+e+'">'; }).join('');
+  }).catch(function(){});
+  abRenderRemitoItems();
+  document.getElementById('ab-modal-remito').classList.add('on');
+}
+
+function abRenderRemitoItems() {
+  var cont = document.getElementById('ab-rem-items-list');
+  if (!AB.remitoItems.length) { cont.innerHTML = '<div style="font-size:12px;color:var(--mut);padding:8px 0">Sin items. Agregá productos al remito.</div>'; return; }
+  cont.innerHTML = AB.remitoItems.map(function(item, i) {
+    return '<div class="ab-remito-item"><div><div style="font-weight:600;font-size:13px">'+item.producto+'</div><div style="font-size:11px;color:var(--mut)">Partida #'+item.partida_id+' · '+item.kilos_por_bulto+' kg/bulto · disp: '+item.disponible+' bultos</div></div><div><label style="font-size:10px;color:var(--mut);display:block">Bultos</label><input style="width:70px;padding:4px 8px;border:1px solid var(--bor2);border-radius:6px;font-size:13px" type="number" min="1" max="'+item.disponible+'" value="'+item.bultos+'" onchange="AB.remitoItems['+i+'].bultos=parseInt(this.value)"></div><div><label style="font-size:10px;color:var(--mut);display:block">Precio ref.</label><input style="width:90px;padding:4px 8px;border:1px solid var(--bor2);border-radius:6px;font-size:13px" type="number" min="0" step="0.01" value="'+(item.precio_ref||'')+'" placeholder="—" onchange="AB.remitoItems['+i+'].precio_ref=parseFloat(this.value)||0"></div><button class="btn bd bs" onclick="abQuitarItemRemito('+i+')">✕</button></div>';
+  }).join('');
+}
+
+function abAgregarItemRemito() {
+  var disponibles = AB.partidas.filter(function(p){ return p.bultos_disponibles > 0; });
+  if (!disponibles.length) { toast('No hay partidas con stock disponible','er'); return; }
+  var lista = disponibles.map(function(p,i){ return (i+1)+'. '+p.producto+' — '+(p.proveedor_nombre||'sin proveedor')+' — '+p.bultos_disponibles+' bultos ('+p.kilos_por_bulto+'kg/bulto)'; }).join('\n');
+  var sel = prompt('Seleccioná una partida (número):\n\n'+lista);
+  if (!sel) return;
+  var idx = parseInt(sel) - 1;
+  if (idx < 0 || idx >= disponibles.length) { toast('Selección inválida','er'); return; }
+  var p = disponibles[idx];
+  AB.remitoItems.push({ partida_id:p.id, producto:p.producto, bultos:1, kilos_por_bulto:p.kilos_por_bulto, disponible:p.bultos_disponibles, precio_ref:0, moneda:'ARS' });
+  abRenderRemitoItems();
+}
+
+function abQuitarItemRemito(i) { AB.remitoItems.splice(i,1); abRenderRemitoItems(); }
+
+function abGuardarRemito() {
+  if (!AB.remitoItems.length) { toast('Agregá al menos un producto','er'); return; }
+  var body = {
+    fecha: document.getElementById('ab-rem-fecha').value,
+    empresa: document.getElementById('ab-rem-empresa').value.trim(),
+    contacto: document.getElementById('ab-rem-contacto').value.trim(),
+    direccion_entrega: document.getElementById('ab-rem-dir').value.trim(),
+    comercial: document.getElementById('ab-rem-comercial').value,
+    notas: document.getElementById('ab-rem-notas').value,
+    items: AB.remitoItems.map(function(i){ return {partida_id:i.partida_id,bultos:i.bultos,precio_ref:i.precio_ref||0,precio_final:i.precio_ref||0,moneda:i.moneda}; })
+  };
+  abApi('/remitos', {method:'POST', body:JSON.stringify(body)}).then(function(res) {
+    if (res.ok) { abCerrarModal('ab-modal-remito'); toast('Remito '+res.nro_remito+' emitido','ok'); abCargarRemitos(); abDashboard(); }
+    else toast('Error: '+res.error,'er');
+  });
+}
+
+function abVerRemito(id) {
+  abApi('/remitos/'+id).then(function(res){
+    if(!res.ok) return;
+    var r = res.data;
+    var items = (r.items||[]).map(function(i){ return '• '+i.producto+' — '+i.bultos+' bultos ('+i.kilos_por_bulto+'kg/bulto)'; }).join('\n');
+    alert('Remito '+r.nro_remito+'\n'+abFecha(r.fecha)+' | '+r.empresa+'\nEstado: '+r.estado+'\n\n'+items);
+  });
+}
+
+// ─── GASTOS ─────────────────────────────────────────────────
+function abCargarGastos() {
+  abApi('/gastos').then(function(res) {
+    if (!res.ok) return;
+    var tbody = document.getElementById('ab-gastos-tbody');
+    if (!res.data.length) { tbody.innerHTML = '<tr><td colspan="7"><div class="ab-empty"><div class="ab-empty-icon">💸</div>Sin gastos registrados</div></td></tr>'; return; }
+    tbody.innerHTML = res.data.map(function(g) {
+      return '<tr><td>'+abFecha(g.fecha)+'</td><td>'+abBadgeEstado(g.tipo)+'</td><td>'+g.concepto+'</td><td>'+(g.partida_producto||'—')+'</td><td><strong>'+abFmtMoney(g.importe,g.moneda)+'</strong></td><td>'+g.moneda+'</td><td>'+abBadgeEstado(g.estado)+'</td></tr>';
+    }).join('');
+  });
+}
+
+function abAbrirNuevoGasto() {
+  document.getElementById('ab-gasto-fecha').value = new Date().toISOString().split('T')[0];
+  document.getElementById('ab-gasto-tipo').value = 'general';
+  ['ab-gasto-concepto','ab-gasto-importe','ab-gasto-notas'].forEach(function(id){ document.getElementById(id).value=''; });
+  document.getElementById('ab-gasto-moneda').value = 'ARS';
+  abApi('/partidas?estado=activa').then(function(res){
+    var sel = document.getElementById('ab-gasto-partida-id');
+    sel.innerHTML = '<option value="">Sin partida</option>' + (res.data||[]).map(function(p){ return '<option value="'+p.id+'">'+p.producto+' — #'+p.id+'</option>'; }).join('');
+  });
+  abToggleGastoPartida();
+  document.getElementById('ab-modal-gasto').classList.add('on');
+}
+
+function abToggleGastoPartida() {
+  var tipo = document.getElementById('ab-gasto-tipo').value;
+  var row = document.getElementById('ab-gasto-partida-row');
+  if (row) row.style.display = tipo === 'partida' ? 'block' : 'none';
+}
+
+function abGuardarGasto() {
+  var body = {
+    fecha: document.getElementById('ab-gasto-fecha').value,
+    tipo: document.getElementById('ab-gasto-tipo').value,
+    partida_id: document.getElementById('ab-gasto-partida-id').value || null,
+    concepto: document.getElementById('ab-gasto-concepto').value.trim(),
+    importe: parseFloat(document.getElementById('ab-gasto-importe').value),
+    moneda: document.getElementById('ab-gasto-moneda').value,
+    notas: document.getElementById('ab-gasto-notas').value
+  };
+  if (!body.concepto || !body.importe) { toast('Completá concepto e importe','er'); return; }
+  abApi('/gastos', {method:'POST', body:JSON.stringify(body)}).then(function(res) {
+    if (res.ok) { abCerrarModal('ab-modal-gasto'); abCargarGastos(); toast('Gasto registrado','ok'); }
+    else toast('Error: '+res.error,'er');
+  });
+}
+
+// ─── AJUSTE MANUAL STOCK ────────────────────────────────────
+function abAjusteStock(id, producto, disponible) {
+  var tipo = prompt('Ajuste de stock — '+producto+'\nDisponibles: '+disponible+' bultos\n\nTipo (ingreso / salida / ajuste):');
+  if (!tipo) return;
+  var bultos = parseFloat(prompt('Cantidad de bultos:'));
+  if (!bultos || isNaN(bultos)) return;
+  var notas = prompt('Motivo del ajuste:') || '';
+  abApi('/partidas/'+id+'/ajuste', {method:'POST', body:JSON.stringify({bultos:bultos,tipo:tipo,notas:notas})}).then(function(res) {
+    if (res.ok) { toast('Ajuste aplicado. Disponibles: '+res.bultos_disponibles+' bultos','ok'); abCargarPartidas(); abCargarStock(); abDashboard(); }
+    else toast('Error: '+res.error,'er');
+  });
+}
+
+// ─── NAV ABASTO (manejado por loadSec global) ───────────────
+
 // Cargar dedicados cuando se navega a esa seccion
 document.querySelectorAll('.ni').forEach(function(el){
   if(el.dataset.sec === 'dedicados') el.addEventListener('click', loadDed);
