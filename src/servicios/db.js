@@ -624,6 +624,33 @@ db.exec(`
   );
 `);
 
+// Tabla de envases
+db.exec(`
+  CREATE TABLE IF NOT EXISTS envases_maestro (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    nombre           TEXT NOT NULL,
+    kilos_por_unidad REAL NOT NULL DEFAULT 0,
+    descripcion      TEXT,
+    activo           INTEGER DEFAULT 1,
+    creado_en        TEXT DEFAULT (datetime('now','localtime'))
+  );
+`);
+
+// Migración: agregar columnas producto_id y envase_id a partidas si no existen
+(function migrarPartidas() {
+  try {
+    const cols = db.prepare("PRAGMA table_info(partidas)").all().map(c => c.name);
+    if (!cols.includes('producto_id')) {
+      db.exec("ALTER TABLE partidas ADD COLUMN producto_id INTEGER REFERENCES retail_productos(id)");
+      console.log("[DB] Columna producto_id agregada en partidas");
+    }
+    if (!cols.includes('envase_id')) {
+      db.exec("ALTER TABLE partidas ADD COLUMN envase_id INTEGER REFERENCES envases_maestro(id)");
+      console.log("[DB] Columna envase_id agregada en partidas");
+    }
+  } catch(e) { console.error("[DB] Error migrando partidas:", e.message); }
+})();
+
 // Función requerida por src/rutas/abasto.js
 export function getDb() {
   return db;

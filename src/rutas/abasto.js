@@ -72,6 +72,78 @@ router.delete('/proveedores/:id', (req, res) => {
 });
 
 // ============================================================
+// PRODUCTOS MAESTRO (retail_productos)
+// ============================================================
+
+router.get('/productos', (req, res) => {
+  const db = getDb();
+  try {
+    const productos = db.prepare(`
+      SELECT id, nombre, categoria FROM retail_productos
+      WHERE activo = 1 OR activo IS NULL
+      ORDER BY categoria, nombre
+    `).all();
+    res.json({ ok: true, data: productos });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+// ============================================================
+// ENVASES MAESTRO
+// ============================================================
+
+router.get('/envases', (req, res) => {
+  const db = getDb();
+  try {
+    const envases = db.prepare(`
+      SELECT * FROM envases_maestro WHERE activo = 1 ORDER BY nombre
+    `).all();
+    res.json({ ok: true, data: envases });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+router.post('/envases', (req, res) => {
+  const db = getDb();
+  const { nombre, kilos_por_unidad, descripcion } = req.body;
+  if (!nombre || !kilos_por_unidad) return res.status(400).json({ ok: false, error: 'Nombre y kilos requeridos' });
+  try {
+    const r = db.prepare(`
+      INSERT INTO envases_maestro (nombre, kilos_por_unidad, descripcion)
+      VALUES (?, ?, ?)
+    `).run(nombre.trim(), kilos_por_unidad, descripcion || null);
+    res.json({ ok: true, id: r.lastInsertRowid });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+router.patch('/envases/:id', (req, res) => {
+  const db = getDb();
+  const { nombre, kilos_por_unidad, descripcion } = req.body;
+  try {
+    db.prepare(`
+      UPDATE envases_maestro SET nombre=?, kilos_por_unidad=?, descripcion=? WHERE id=?
+    `).run(nombre, kilos_por_unidad, descripcion || null, req.params.id);
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+router.delete('/envases/:id', (req, res) => {
+  const db = getDb();
+  try {
+    db.prepare('UPDATE envases_maestro SET activo=0 WHERE id=?').run(req.params.id);
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+// ============================================================
 // PARTIDAS (INGRESO DE STOCK)
 // ============================================================
 
@@ -83,13 +155,21 @@ router.get('/partidas', (req, res) => {
   let params = [];
   if (estado) { where.push('pa.estado = ?'); params.push(estado); }
   if (proveedor_id) { where.push('pa.proveedor_id = ?'); params.push(proveedor_id); }
-  if (producto) { where.push('pa.producto LIKE ?'); params.push(`%${producto}%`); }
+  if (producto) { where.push('(pa.producto LIKE ? OR rp.nombre LIKE ?)'); params.push(`%${producto}%`, `%${producto}%`); }
   const whereStr = where.length ? 'WHERE ' + where.join(' AND ') : '';
   try {
     const partidas = db.prepare(`
-      SELECT pa.*, pr.nombre as proveedor_nombre
+      SELECT pa.*,
+        pr.nombre as proveedor_nombre,
+        rp.nombre as producto_nombre,
+        rp.categoria as producto_categoria,
+        em.nombre as envase_nombre,
+        em.kilos_por_unidad as envase_kilos,
+        COALESCE(rp.nombre, pa.producto) as producto_display
       FROM partidas pa
       LEFT JOIN proveedores pr ON pr.id = pa.proveedor_id
+      LEFT JOIN retail_productos rp ON rp.id = pa.producto_id
+      LEFT JOIN envases_maestro em ON em.id = pa.envase_id
       ${whereStr}
       ORDER BY pa.fecha_ingreso DESC, pa.id DESC
     `).all(...params);
@@ -104,17 +184,22 @@ router.get('/partidas/:id', (req, res) => {
   const db = getDb();
   try {
     const partida = db.prepare(`
-      SELECT pa.*, pr.nombre as proveedor_nombre
+      SELECT pa.*,
+        pr.nombre as proveedor_nombre,
+        rp.nombre as producto_nombre,
+        rp.categoria as producto_categoria,
+        em.nombre as envase_nombre,
+        COALESCE(rp.nombre, pa.producto) as producto_display
       FROM partidas pa
       LEFT JOIN proveedores pr ON pr.id = pa.proveedor_id
+      LEFT JOIN retail_productos rp ON rp.id = pa.producto_id
+      LEFT JOIN envases_maestro em ON em.id = pa.envase_id
       WHERE pa.id = ?
     `).get(req.params.id);
     if (!partida) return res.status(404).json({ ok: false, error: 'Partida no encontrada' });
-
     const movimientos = db.prepare(`
       SELECT * FROM movimientos_stock WHERE partida_id = ? ORDER BY fecha DESC
     `).all(req.params.id);
-
     res.json({ ok: true, data: { ...partida, movimientos } });
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message });
@@ -125,37 +210,38 @@ router.get('/partidas/:id', (req, res) => {
 router.post('/partidas', (req, res) => {
   const db = getDb();
   const {
-    fecha_ingreso, producto, categoria, proveedor_id,
+    fecha_ingreso, producto_id, proveedor_id,
     tipo_ingreso, bultos_ingresados, kilos_por_bulto,
-    costo_por_bulto, moneda, notas
+    envase_id, costo_por_bulto, notas
   } = req.body;
 
-  if (!producto || !bultos_ingresados || !kilos_por_bulto || !tipo_ingreso) {
+  if (!producto_id || !bultos_ingresados || !kilos_por_bulto || !tipo_ingreso) {
     return res.status(400).json({ ok: false, error: 'Faltan campos requeridos' });
   }
 
   try {
-    const insertPartida = db.prepare(`
-      INSERT INTO partidas 
-        (fecha_ingreso, producto, categoria, proveedor_id, tipo_ingreso,
-         bultos_ingresados, kilos_por_bulto, bultos_disponibles,
-         costo_por_bulto, moneda, notas)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
+    // Obtener nombre y categoría del producto desde el maestro
+    const prod = db.prepare('SELECT nombre, categoria FROM retail_productos WHERE id=?').get(producto_id);
+    if (!prod) return res.status(400).json({ ok: false, error: 'Producto no encontrado en el maestro' });
 
-    const insertMovimiento = db.prepare(`
-      INSERT INTO movimientos_stock (partida_id, fecha, tipo, bultos, notas)
-      VALUES (?, ?, 'ingreso', ?, ?)
-    `);
+    const fecha = fecha_ingreso || new Date().toISOString().split('T')[0];
 
     const result = db.transaction(() => {
-      const r = insertPartida.run(
-        fecha_ingreso || new Date().toISOString().split('T')[0],
-        producto, categoria, proveedor_id, tipo_ingreso,
+      const r = db.prepare(`
+        INSERT INTO partidas
+          (fecha_ingreso, producto, categoria, producto_id, envase_id, proveedor_id, tipo_ingreso,
+           bultos_ingresados, kilos_por_bulto, bultos_disponibles, costo_por_bulto, moneda, notas)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ARS', ?)
+      `).run(
+        fecha, prod.nombre, prod.categoria || null,
+        producto_id, envase_id || null, proveedor_id || null, tipo_ingreso,
         bultos_ingresados, kilos_por_bulto, bultos_ingresados,
-        costo_por_bulto || 0, moneda || 'ARS', notas
+        costo_por_bulto || 0, notas || null
       );
-      insertMovimiento.run(r.lastInsertRowid, fecha_ingreso || new Date().toISOString().split('T')[0], bultos_ingresados, 'Ingreso inicial');
+      db.prepare(`
+        INSERT INTO movimientos_stock (partida_id, fecha, tipo, bultos, notas)
+        VALUES (?, ?, 'ingreso', ?, 'Ingreso inicial')
+      `).run(r.lastInsertRowid, fecha, bultos_ingresados);
       return r.lastInsertRowid;
     })();
 
@@ -168,7 +254,7 @@ router.post('/partidas', (req, res) => {
 // Ajuste de stock manual
 router.post('/partidas/:id/ajuste', (req, res) => {
   const db = getDb();
-  const { bultos, tipo, notas } = req.body; // tipo: 'ingreso' | 'salida' | 'ajuste'
+  const { bultos, tipo, notas } = req.body;
   if (!bultos || !tipo) return res.status(400).json({ ok: false, error: 'Faltan campos' });
 
   try {
@@ -202,22 +288,23 @@ router.get('/stock', (req, res) => {
   const db = getDb();
   try {
     const stock = db.prepare(`
-      SELECT 
-        pa.producto,
-        pa.categoria,
+      SELECT
+        COALESCE(rp.nombre, pa.producto) as producto,
+        COALESCE(rp.categoria, pa.categoria) as categoria,
         pr.nombre as proveedor,
         COUNT(pa.id) as partidas_activas,
         SUM(pa.bultos_disponibles) as bultos_totales,
         AVG(pa.kilos_por_bulto) as kilos_por_bulto_prom,
-        SUM(pa.kilos_disponibles) as kilos_totales,
+        SUM(pa.bultos_disponibles * pa.kilos_por_bulto) as kilos_totales,
         AVG(pa.costo_por_bulto) as costo_promedio_bulto,
         MIN(pa.fecha_ingreso) as primer_ingreso,
         MAX(pa.fecha_ingreso) as ultimo_ingreso
       FROM partidas pa
       LEFT JOIN proveedores pr ON pr.id = pa.proveedor_id
+      LEFT JOIN retail_productos rp ON rp.id = pa.producto_id
       WHERE pa.estado IN ('activa','parcial')
-      GROUP BY pa.producto, pa.proveedor_id
-      ORDER BY pa.producto
+      GROUP BY COALESCE(rp.nombre, pa.producto), pa.proveedor_id
+      ORDER BY producto
     `).all();
     res.json({ ok: true, data: stock });
   } catch (e) {
@@ -230,11 +317,17 @@ router.get('/stock/partidas', (req, res) => {
   const db = getDb();
   try {
     const stock = db.prepare(`
-      SELECT pa.*, pr.nombre as proveedor_nombre
+      SELECT pa.*,
+        pr.nombre as proveedor_nombre,
+        COALESCE(rp.nombre, pa.producto) as producto_display,
+        COALESCE(rp.categoria, pa.categoria) as categoria_display,
+        em.nombre as envase_nombre
       FROM partidas pa
       LEFT JOIN proveedores pr ON pr.id = pa.proveedor_id
+      LEFT JOIN retail_productos rp ON rp.id = pa.producto_id
+      LEFT JOIN envases_maestro em ON em.id = pa.envase_id
       WHERE pa.estado IN ('activa','parcial')
-      ORDER BY pa.producto, pa.fecha_ingreso
+      ORDER BY producto_display, pa.fecha_ingreso
     `).all();
     res.json({ ok: true, data: stock });
   } catch (e) {
@@ -402,9 +495,11 @@ router.get('/resumen', (req, res) => {
     `).get();
 
     const productos = db.prepare(`
-      SELECT producto, SUM(bultos_disponibles) as bultos
-      FROM partidas WHERE estado IN ('activa','parcial')
-      GROUP BY producto ORDER BY bultos DESC LIMIT 10
+      SELECT COALESCE(rp.nombre, pa.producto) as producto, SUM(pa.bultos_disponibles) as bultos
+      FROM partidas pa
+      LEFT JOIN retail_productos rp ON rp.id = pa.producto_id
+      WHERE pa.estado IN ('activa','parcial')
+      GROUP BY COALESCE(rp.nombre, pa.producto) ORDER BY bultos DESC LIMIT 10
     `).all();
 
     res.json({ ok: true, data: { stockTotal, remitosHoy, remitosEmitidos, topProductos: productos } });
