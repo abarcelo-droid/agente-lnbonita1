@@ -44,6 +44,10 @@ router.post('/buscar/sync', async (req, res) => {
 // Calendario estacional
 router.get('/calendario/estacional', (req, res) => {
   try {
+    // Obtener el último año con datos
+    const ultimoAnio = db.prepare("SELECT MAX(CAST(anio AS INTEGER)) as max_anio FROM sheet_ventas WHERE anio IS NOT NULL AND anio != ''").get();
+    const anio = ultimoAnio ? ultimoAnio.max_anio : new Date().getFullYear();
+
     const rows = db.prepare(`
       SELECT
         producto,
@@ -51,16 +55,16 @@ router.get('/calendario/estacional', (req, res) => {
         CAST(mes AS INTEGER) as mes_num,
         ROUND(SUM(kilos_tot),0) as kilos,
         ROUND(AVG(CASE WHEN rent IS NOT NULL AND rent != 0 THEN rent ELSE NULL END),1) as rent_pct,
-        ROUND(AVG(CASE WHEN prec_dol IS NOT NULL AND prec_dol > 0 THEN prec_dol ELSE NULL END),2) as valor_kg_dol,
-        COUNT(DISTINCT anio) as anios_con_datos
+        ROUND(AVG(CASE WHEN prec_dol IS NOT NULL AND prec_dol > 0 THEN prec_dol ELSE NULL END),2) as valor_kg_dol
       FROM sheet_ventas
       WHERE producto IS NOT NULL AND producto != ''
         AND mes IS NOT NULL AND mes != '' AND mes != '0'
         AND kilos_tot > 0
+        AND CAST(anio AS INTEGER) = ?
       GROUP BY producto, mes_num
       ORDER BY producto, mes_num
-    `).all();
-    res.json(rows);
+    `).all(anio);
+    res.json({ anio, rows });
   }
   catch(e) { res.status(500).json({ error: e.message }); }
 });
@@ -95,6 +99,30 @@ router.get('/calendario/proveedores', (req, res) => {
 // Diagnóstico de sheet_ventas
 router.get('/calendario/debug', (req, res) => {
   try { res.json(debugCalendario()); }
+  catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// Kilos por año para un producto/mes (popup histórico)
+router.get('/calendario/historico', (req, res) => {
+  const { producto, mes } = req.query;
+  if (!producto || !mes) return res.status(400).json({ error: 'Faltan datos' });
+  try {
+    const rows = db.prepare(`
+      SELECT
+        CAST(anio AS INTEGER) as anio,
+        ROUND(SUM(kilos_tot),0) as kilos,
+        ROUND(AVG(CASE WHEN rent IS NOT NULL AND rent != 0 THEN rent ELSE NULL END),1) as rent_pct,
+        ROUND(AVG(CASE WHEN prec_dol IS NOT NULL AND prec_dol > 0 THEN prec_dol ELSE NULL END),2) as valor_kg_dol
+      FROM sheet_ventas
+      WHERE producto = ?
+        AND CAST(mes AS INTEGER) = ?
+        AND kilos_tot > 0
+        AND anio IS NOT NULL AND anio != ''
+      GROUP BY anio
+      ORDER BY anio DESC
+    `).all(producto, parseInt(mes));
+    res.json(rows);
+  }
   catch(e) { res.status(500).json({ error: e.message }); }
 });
 
