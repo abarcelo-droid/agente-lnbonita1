@@ -72,6 +72,45 @@ router.delete('/proveedores/:id', (req, res) => {
 });
 
 // ============================================================
+// BUSCADOR AFIP (razón social / CUIT)
+// ============================================================
+
+router.get('/afip/buscar', async (req, res) => {
+  const { q } = req.query;
+  if (!q || q.trim().length < 2) return res.status(400).json({ ok: false, error: 'Ingresá al menos 2 caracteres' });
+  try {
+    // Si es numérico, buscar por CUIT directo
+    const esCuit = /^\d[\d\-]+\d$/.test(q.trim());
+    let url;
+    if (esCuit) {
+      const cuitLimpio = q.replace(/\D/g, '');
+      url = `https://afip.facturante.com/api/padron?cuit=${cuitLimpio}`;
+    } else {
+      url = `https://afip.facturante.com/api/padron?razon=${encodeURIComponent(q.trim().toUpperCase())}`;
+    }
+    const resp = await fetch(url, { headers: { 'Accept': 'application/json' } });
+    if (!resp.ok) throw new Error('Error consultando AFIP');
+    const data = await resp.json();
+    // Normalizar respuesta — puede ser objeto único o array
+    const items = Array.isArray(data) ? data : (data.data ? (Array.isArray(data.data) ? data.data : [data.data]) : [data]);
+    const resultados = items
+      .filter(i => i && i.cuit)
+      .slice(0, 10)
+      .map(i => ({
+        cuit: i.cuit || '',
+        razon_social: i.razonSocial || i.razon_social || i.nombre || '',
+        tipo_persona: i.tipoPersona || '',
+        condicion_iva: i.condicionIva || i.opcionIva || '',
+        provincia: i.provincia || '',
+        localidad: i.localidad || ''
+      }));
+    res.json({ ok: true, data: resultados });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: 'No se pudo consultar AFIP: ' + e.message });
+  }
+});
+
+// ============================================================
 // PRODUCTOS MAESTRO (retail_productos)
 // ============================================================
 
@@ -96,12 +135,13 @@ router.get('/productos', (req, res) => {
 // Listar partidas (con filtros opcionales)
 router.get('/partidas', (req, res) => {
   const db = getDb();
-  const { estado, proveedor_id, producto } = req.query;
+  const { estado, proveedor_id, producto, deposito } = req.query;
   let where = [];
   let params = [];
   if (estado) { where.push('pa.estado = ?'); params.push(estado); }
   if (proveedor_id) { where.push('pa.proveedor_id = ?'); params.push(proveedor_id); }
   if (producto) { where.push('(pa.producto LIKE ? OR rp.nombre LIKE ?)'); params.push(`%${producto}%`, `%${producto}%`); }
+  if (deposito) { where.push('pa.deposito = ?'); params.push(deposito); }
   const whereStr = where.length ? 'WHERE ' + where.join(' AND ') : '';
   try {
     const partidas = db.prepare(`
@@ -109,13 +149,10 @@ router.get('/partidas', (req, res) => {
         pr.nombre as proveedor_nombre,
         rp.nombre as producto_nombre,
         rp.categoria as producto_categoria,
-        em.nombre as envase_nombre,
-        em.kilos_por_unidad as envase_kilos,
         COALESCE(rp.nombre, pa.producto) as producto_display
       FROM partidas pa
       LEFT JOIN proveedores pr ON pr.id = pa.proveedor_id
       LEFT JOIN retail_productos rp ON rp.id = pa.producto_id
-      LEFT JOIN envases_maestro em ON em.id = pa.envase_id
       ${whereStr}
       ORDER BY pa.fecha_ingreso DESC, pa.id DESC
     `).all(...params);
@@ -158,7 +195,7 @@ router.post('/partidas', (req, res) => {
   const {
     fecha_ingreso, producto_id, proveedor_id,
     tipo_ingreso, bultos_ingresados, kilos_por_bulto,
-    envase, iva, costo_por_bulto, notas
+    envase, iva, deposito, costo_por_bulto, notas
   } = req.body;
 
   if (!producto_id || !bultos_ingresados || !kilos_por_bulto || !tipo_ingreso) {
@@ -174,13 +211,13 @@ router.post('/partidas', (req, res) => {
     const result = db.transaction(() => {
       const r = db.prepare(`
         INSERT INTO partidas
-          (fecha_ingreso, producto, categoria, producto_id, envase, iva, proveedor_id, tipo_ingreso,
+          (fecha_ingreso, producto, categoria, producto_id, envase, iva, deposito, proveedor_id, tipo_ingreso,
            bultos_ingresados, kilos_por_bulto, bultos_disponibles, costo_por_bulto, moneda, notas)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ARS', ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ARS', ?)
       `).run(
         fecha, prod.nombre, prod.categoria || null,
         producto_id, envase || null, iva || 'exento',
-        proveedor_id || null, tipo_ingreso,
+        deposito || 'MCBA', proveedor_id || null, tipo_ingreso,
         bultos_ingresados, kilos_por_bulto, bultos_ingresados,
         costo_por_bulto || 0, notas || null
       );
@@ -232,12 +269,14 @@ router.post('/partidas/:id/ajuste', (req, res) => {
 
 router.get('/stock', (req, res) => {
   const db = getDb();
+  const { deposito } = req.query;
   try {
     const stock = db.prepare(`
       SELECT
         COALESCE(rp.nombre, pa.producto) as producto,
         COALESCE(rp.categoria, pa.categoria) as categoria,
         pr.nombre as proveedor,
+        pa.deposito,
         COUNT(pa.id) as partidas_activas,
         SUM(pa.bultos_disponibles) as bultos_totales,
         AVG(pa.kilos_por_bulto) as kilos_por_bulto_prom,
@@ -248,10 +287,10 @@ router.get('/stock', (req, res) => {
       FROM partidas pa
       LEFT JOIN proveedores pr ON pr.id = pa.proveedor_id
       LEFT JOIN retail_productos rp ON rp.id = pa.producto_id
-      WHERE pa.estado IN ('activa','parcial')
-      GROUP BY COALESCE(rp.nombre, pa.producto), pa.proveedor_id
+      WHERE pa.estado IN ('activa','parcial') ${deposito ? 'AND pa.deposito = ?' : ''}
+      GROUP BY COALESCE(rp.nombre, pa.producto), pa.proveedor_id, pa.deposito
       ORDER BY producto
-    `).all();
+    `).all(...(deposito ? [deposito] : []));
     res.json({ ok: true, data: stock });
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message });
@@ -261,20 +300,19 @@ router.get('/stock', (req, res) => {
 // Stock por partida (detallado)
 router.get('/stock/partidas', (req, res) => {
   const db = getDb();
+  const { deposito } = req.query;
   try {
     const stock = db.prepare(`
       SELECT pa.*,
         pr.nombre as proveedor_nombre,
         COALESCE(rp.nombre, pa.producto) as producto_display,
-        COALESCE(rp.categoria, pa.categoria) as categoria_display,
-        em.nombre as envase_nombre
+        COALESCE(rp.categoria, pa.categoria) as categoria_display
       FROM partidas pa
       LEFT JOIN proveedores pr ON pr.id = pa.proveedor_id
       LEFT JOIN retail_productos rp ON rp.id = pa.producto_id
-      LEFT JOIN envases_maestro em ON em.id = pa.envase_id
-      WHERE pa.estado IN ('activa','parcial')
+      WHERE pa.estado IN ('activa','parcial') ${deposito ? 'AND pa.deposito = ?' : ''}
       ORDER BY producto_display, pa.fecha_ingreso
-    `).all();
+    `).all(...(deposito ? [deposito] : []));
     res.json({ ok: true, data: stock });
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message });

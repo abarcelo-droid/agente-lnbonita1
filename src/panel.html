@@ -196,7 +196,19 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
 .ab-kilos-track{flex:1;height:5px;background:var(--bg);border-radius:3px;overflow:hidden;min-width:60px}
 .ab-kilos-fill{height:100%;border-radius:3px;background:var(--burg)}
 .ab-remito-item{display:grid;grid-template-columns:1fr auto auto auto;gap:8px;align-items:center;padding:10px;background:var(--bg);border-radius:8px;border:1px solid var(--bor);margin-bottom:8px}
-@media(max-width:768px){.ab-grid-2,.ab-grid-3,.ab-grid-4{grid-template-columns:1fr}.ab-modal{padding:16px}}
+/* Buscador AFIP */
+.afip-wrap { position:relative; }
+.afip-btn { position:absolute; right:0; top:0; height:100%; padding:0 12px; background:var(--burg); color:#fff; border:none; border-radius:0 7px 7px 0; cursor:pointer; font-size:12px; white-space:nowrap; }
+.afip-btn:hover { background:var(--burd); }
+.afip-results { position:absolute; left:0; right:0; top:100%; z-index:300; background:var(--sur); border:1px solid var(--bor2); border-radius:7px; box-shadow:0 4px 16px rgba(0,0,0,.12); max-height:220px; overflow-y:auto; display:none; }
+.afip-results.on { display:block; }
+.afip-item { padding:9px 12px; cursor:pointer; border-bottom:1px solid var(--bor); transition:background .1s; }
+.afip-item:last-child { border-bottom:none; }
+.afip-item:hover { background:var(--burl); }
+.afip-item-cuit { font-size:12px; font-weight:700; color:var(--burg); }
+.afip-item-razon { font-size:13px; font-weight:600; color:var(--txt); }
+.afip-item-det { font-size:11px; color:var(--mut); margin-top:2px; }
+
 </style>
 
 <!-- ==================== DASHBOARD ABASTO ==================== -->
@@ -237,6 +249,12 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       <select class="ab-form-select" style="width:150px" onchange="abStockVista(this.value)">
         <option value="resumen">Por producto</option>
         <option value="partidas">Por partida</option>
+      </select>
+      <select class="ab-form-select" style="width:130px" id="ab-stock-deposito" onchange="abCargarStock()">
+        <option value="">Todos los depósitos</option>
+        <option value="MCBA">MCBA</option>
+        <option value="FINCA">FINCA</option>
+        <option value="SAN PEDRO">SAN PEDRO</option>
       </select>
       <button class="btn bo bs" onclick="abCargarStock()">↻</button>
     </div>
@@ -329,6 +347,15 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
 <div class="ab-modal">
   <div class="ab-modal-title" id="ab-modal-prov-title">Nuevo proveedor</div>
   <input type="hidden" id="ab-prov-id">
+  <!-- Buscador AFIP -->
+  <div style="background:var(--burl);border:1px solid var(--bor);border-radius:8px;padding:12px 14px;margin-bottom:16px">
+    <div style="font-size:11px;font-weight:700;color:var(--burd);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">🔍 Buscar en AFIP</div>
+    <div class="afip-wrap">
+      <input class="ab-form-input" id="afip-prov-q" placeholder="Razón social o CUIT..." style="padding-right:90px" onkeydown="if(event.key==='Enter') afipBuscar('prov')">
+      <button class="afip-btn" onclick="afipBuscar('prov')">Buscar</button>
+      <div class="afip-results" id="afip-prov-results"></div>
+    </div>
+  </div>
   <div class="ab-grid ab-grid-2">
     <div class="ab-form-group"><label class="ab-form-label">Nombre *</label><input class="ab-form-input" id="ab-prov-nombre" placeholder="Nombre comercial"></div>
     <div class="ab-form-group"><label class="ab-form-label">Razón social</label><input class="ab-form-input" id="ab-prov-razon"></div>
@@ -378,6 +405,13 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       </select>
     </div>
     <div class="ab-form-group"><label class="ab-form-label">Envase</label><input class="ab-form-input" id="ab-part-envase" placeholder="Ej: Bin, Caja 10kg, Bolsa..."></div>
+    <div class="ab-form-group"><label class="ab-form-label">Depósito *</label>
+      <select class="ab-form-select" id="ab-part-deposito">
+        <option value="MCBA">MCBA</option>
+        <option value="FINCA">FINCA</option>
+        <option value="SAN PEDRO">SAN PEDRO</option>
+      </select>
+    </div>
     <div class="ab-form-group"><label class="ab-form-label">IVA</label>
       <select class="ab-form-select" id="ab-part-iva">
         <option value="exento">Exento</option>
@@ -768,6 +802,15 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
 <div class="mb" id="mb-c">
 <div class="mbox">
   <div class="mhd"><div class="mht" id="mb-c-tit">Nuevo cliente</div><button class="mcl" id="btn-cerrar-mc">x</button></div>
+  <!-- Buscador AFIP -->
+  <div style="background:var(--burl);border:1px solid var(--bor);border-radius:8px;padding:10px 12px;margin-bottom:14px">
+    <div style="font-size:11px;font-weight:700;color:var(--burd);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">🔍 Buscar en AFIP</div>
+    <div class="afip-wrap">
+      <input style="width:100%;padding:8px 90px 8px 10px;border:1px solid var(--bor2);border-radius:7px;font-size:13px;font-family:var(--sans)" id="afip-cli-q" placeholder="Razón social o CUIT..." onkeydown="if(event.key==='Enter') afipBuscar('cli')">
+      <button class="afip-btn" onclick="afipBuscar('cli')">Buscar</button>
+      <div class="afip-results" id="afip-cli-results"></div>
+    </div>
+  </div>
   <div class="fg">
     <div class="fl" style="max-width:150px"><label>Cod. Abasto</label><input id="c-cod"></div>
     <div class="fl"><label>Telefono *</label><input id="c-tel" required></div>
@@ -3392,7 +3435,9 @@ function abDashboard() {
 
 // ─── STOCK ──────────────────────────────────────────────────
 function abCargarStock() {
-  var endpoint = AB.stockVista === 'partidas' ? '/stock/partidas' : '/stock';
+  var vista = AB.stockVista;
+  var deposito = (document.getElementById('ab-stock-deposito')||{}).value || '';
+  var endpoint = (vista === 'partidas' ? '/stock/partidas' : '/stock') + (deposito ? '?deposito='+encodeURIComponent(deposito) : '');
   abApi(endpoint).then(function(res) {
     if (!res.ok) return;
     AB.stockData = res.data;
@@ -3408,14 +3453,16 @@ function abRenderStock(q) {
   var data = AB.stockData.filter(function(r){ return !q || r.producto.toLowerCase().indexOf(q.toLowerCase()) >= 0; });
   if (!data.length) { tbody.innerHTML = '<tr><td colspan="10"><div class="ab-empty"><div class="ab-empty-icon">📦</div>Sin stock</div></td></tr>'; return; }
   if (AB.stockVista === 'partidas') {
-    thead.innerHTML = '<tr><th>Fecha</th><th>Producto</th><th>Proveedor</th><th>Tipo</th><th>Bultos ing.</th><th>Bultos disp.</th><th>Kg/bulto</th><th>Costo/bulto</th><th>Estado</th><th></th></tr>';
+    thead.innerHTML = '<tr><th>Fecha</th><th>Producto</th><th>Proveedor</th><th>Depósito</th><th>Tipo</th><th>Bultos ing.</th><th>Bultos disp.</th><th>Kg/bulto</th><th>Costo/bulto</th><th>Estado</th><th></th></tr>';
     tbody.innerHTML = data.map(function(p) {
-      return '<tr><td>'+abFecha(p.fecha_ingreso)+'</td><td><strong>'+p.producto+'</strong>'+(p.categoria?'<br><small style="color:var(--mut)">'+p.categoria+'</small>':'')+'</td><td>'+(p.proveedor_nombre||'—')+'</td><td><span class="ab-tag-tipo ab-tag-'+(p.tipo_ingreso==='consignacion'?'consignacion':'factura')+'">'+(p.tipo_ingreso==='consignacion'?'Consig.':'Compra')+'</span></td><td>'+abFmt(p.bultos_ingresados)+'</td><td><strong>'+abFmt(p.bultos_disponibles)+'</strong></td><td>'+abFmt(p.kilos_por_bulto)+' kg</td><td>'+abFmtMoney(p.costo_por_bulto,p.moneda)+'</td><td>'+abBadgeEstado(p.estado)+'</td><td><button class="btn bo bs" onclick="abAjusteStock('+p.id+',\''+p.producto.replace(/'/g,"\\'")+'\',' +p.bultos_disponibles+')">Ajuste</button></td></tr>';
+      var depBadge = '<span class="ab-badge ab-badge-'+(p.deposito==='MCBA'?'azul':p.deposito==='FINCA'?'verde':'amarillo')+'">'+( p.deposito||'—')+'</span>';
+      return '<tr><td>'+abFecha(p.fecha_ingreso)+'</td><td><strong>'+(p.producto_display||p.producto)+'</strong>'+(p.categoria_display?'<br><small style="color:var(--mut)">'+p.categoria_display+'</small>':'')+'</td><td>'+(p.proveedor_nombre||'—')+'</td><td>'+depBadge+'</td><td><span class="ab-tag-tipo ab-tag-'+(p.tipo_ingreso==='consignacion'?'consignacion':'factura')+'">'+(p.tipo_ingreso==='consignacion'?'Consig.':'Compra')+'</span></td><td>'+abFmt(p.bultos_ingresados)+'</td><td><strong>'+abFmt(p.bultos_disponibles)+'</strong></td><td>'+abFmt(p.kilos_por_bulto)+' kg</td><td>'+abFmtMoney(p.costo_por_bulto,p.moneda)+'</td><td>'+abBadgeEstado(p.estado)+'</td><td><button class="btn bo bs" onclick="abAjusteStock('+p.id+',\''+p.producto.replace(/'/g,"\\'")+'\',' +p.bultos_disponibles+')">Ajuste</button></td></tr>';
     }).join('');
   } else {
-    thead.innerHTML = '<tr><th>Producto</th><th>Proveedor</th><th>Partidas</th><th>Bultos disp.</th><th>Kilos disp.</th><th>Costo/bulto prom.</th><th>Último ingreso</th></tr>';
+    thead.innerHTML = '<tr><th>Producto</th><th>Proveedor</th><th>Depósito</th><th>Partidas</th><th>Bultos disp.</th><th>Kilos disp.</th><th>Costo/bulto prom.</th><th>Último ingreso</th></tr>';
     tbody.innerHTML = data.map(function(p) {
-      return '<tr><td><strong>'+p.producto+'</strong>'+(p.categoria?'<br><small style="color:var(--mut)">'+p.categoria+'</small>':'')+'</td><td>'+(p.proveedor||'—')+'</td><td>'+p.partidas_activas+'</td><td><strong>'+abFmt(p.bultos_totales)+'</strong></td><td>'+abFmt(p.kilos_totales)+' kg</td><td>'+abFmtMoney(p.costo_promedio_bulto,'ARS')+'</td><td>'+abFecha(p.ultimo_ingreso)+'</td></tr>';
+      var depBadge = '<span class="ab-badge ab-badge-'+(p.deposito==='MCBA'?'azul':p.deposito==='FINCA'?'verde':'amarillo')+'">'+( p.deposito||'Todos')+'</span>';
+      return '<tr><td><strong>'+p.producto+'</strong>'+(p.categoria?'<br><small style="color:var(--mut)">'+p.categoria+'</small>':'')+'</td><td>'+(p.proveedor||'—')+'</td><td>'+depBadge+'</td><td>'+p.partidas_activas+'</td><td><strong>'+abFmt(p.bultos_totales)+'</strong></td><td>'+abFmt(p.kilos_totales)+' kg</td><td>'+abFmtMoney(p.costo_promedio_bulto,'ARS')+'</td><td>'+abFecha(p.ultimo_ingreso)+'</td></tr>';
     }).join('');
   }
 }
@@ -3478,6 +3525,7 @@ async function abAbrirNuevaPartida() {
   document.getElementById('ab-part-fecha').value = new Date().toISOString().split('T')[0];
   document.getElementById('ab-part-tipo').value = 'factura_compra';
   document.getElementById('ab-part-iva').value = 'exento';
+  document.getElementById('ab-part-deposito').value = 'MCBA';
   document.getElementById('ab-part-prod-list').style.display = 'none';
   await abCargarProveedoresSelect('ab-part-proveedor');
   await abCargarProductosMaestro();
@@ -3494,6 +3542,7 @@ function abGuardarPartida() {
     tipo_ingreso: document.getElementById('ab-part-tipo').value,
     envase: document.getElementById('ab-part-envase').value.trim() || null,
     iva: document.getElementById('ab-part-iva').value,
+    deposito: document.getElementById('ab-part-deposito').value,
     bultos_ingresados: parseFloat(document.getElementById('ab-part-bultos').value),
     kilos_por_bulto: parseFloat(document.getElementById('ab-part-kgbulto').value),
     costo_por_bulto: parseFloat(document.getElementById('ab-part-costo').value) || 0,
@@ -3716,6 +3765,62 @@ function abAjusteStock(id, producto, disponible) {
     if (res.ok) { toast('Ajuste aplicado. Disponibles: '+res.bultos_disponibles+' bultos','ok'); abCargarPartidas(); abCargarStock(); abDashboard(); }
     else toast('Error: '+res.error,'er');
   });
+}
+
+// ─── BUSCADOR AFIP ──────────────────────────────────────────
+function afipBuscar(contexto) {
+  var inputId = contexto === 'prov' ? 'afip-prov-q' : 'afip-cli-q';
+  var resultsId = contexto === 'prov' ? 'afip-prov-results' : 'afip-cli-results';
+  var q = document.getElementById(inputId).value.trim();
+  if (!q) return;
+  var resDiv = document.getElementById(resultsId);
+  resDiv.innerHTML = '<div style="padding:10px 12px;font-size:12px;color:var(--mut)">Buscando en AFIP...</div>';
+  resDiv.classList.add('on');
+  abApi('/afip/buscar?q=' + encodeURIComponent(q)).then(function(res) {
+    if (!res.ok || !res.data || !res.data.length) {
+      resDiv.innerHTML = '<div style="padding:10px 12px;font-size:12px;color:var(--mut)">Sin resultados para "'+q+'"</div>';
+      return;
+    }
+    resDiv.innerHTML = res.data.map(function(r) {
+      var det = [r.tipo_persona, r.condicion_iva, r.provincia, r.localidad].filter(Boolean).join(' · ');
+      return '<div class="afip-item" onclick="afipSeleccionar(\''+contexto+'\','+JSON.stringify(r).replace(/'/g,"&#39;")+')">' +
+        '<div class="afip-item-cuit">'+r.cuit+'</div>' +
+        '<div class="afip-item-razon">'+r.razon_social+'</div>' +
+        (det ? '<div class="afip-item-det">'+det+'</div>' : '') +
+        '</div>';
+    }).join('');
+  }).catch(function() {
+    resDiv.innerHTML = '<div style="padding:10px 12px;font-size:12px;color:var(--err)">Error consultando AFIP</div>';
+  });
+  // Cerrar al click fuera
+  setTimeout(function() {
+    document.addEventListener('click', function handler(e) {
+      if (!resDiv.contains(e.target) && e.target.id !== inputId) {
+        resDiv.classList.remove('on');
+        document.removeEventListener('click', handler);
+      }
+    });
+  }, 100);
+}
+
+function afipSeleccionar(contexto, datos) {
+  if (typeof datos === 'string') try { datos = JSON.parse(datos); } catch(e) { return; }
+  if (contexto === 'prov') {
+    var n = document.getElementById('ab-prov-nombre'); if (n && !n.value) n.value = datos.razon_social || '';
+    var rs = document.getElementById('ab-prov-razon'); if (rs) rs.value = datos.razon_social || '';
+    var cuit = document.getElementById('ab-prov-cuit'); if (cuit) cuit.value = datos.cuit || '';
+    var zona = document.getElementById('ab-prov-zona'); if (zona && !zona.value) zona.value = [datos.provincia, datos.localidad].filter(Boolean).join(' - ');
+    document.getElementById('afip-prov-results').classList.remove('on');
+    document.getElementById('afip-prov-q').value = '';
+    toast('Datos de AFIP cargados', 'ok');
+  } else {
+    var emp = document.getElementById('c-emp'); if (emp) emp.value = datos.razon_social || '';
+    var nom = document.getElementById('c-nom'); if (nom && !nom.value) nom.value = datos.razon_social || '';
+    var zona2 = document.getElementById('c-zona'); if (zona2 && !zona2.value) zona2.value = [datos.provincia, datos.localidad].filter(Boolean).join(' - ');
+    document.getElementById('afip-cli-results').classList.remove('on');
+    document.getElementById('afip-cli-q').value = '';
+    toast('Datos de AFIP cargados', 'ok');
+  }
 }
 
 // ─── NAV ABASTO (manejado por loadSec global) ───────────────

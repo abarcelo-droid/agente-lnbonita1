@@ -640,6 +640,10 @@ db.exec(`
       db.exec("ALTER TABLE partidas ADD COLUMN iva TEXT DEFAULT 'exento'");
       console.log("[DB] Columna iva agregada en partidas");
     }
+    if (!cols.includes('deposito')) {
+      db.exec("ALTER TABLE partidas ADD COLUMN deposito TEXT DEFAULT 'MCBA'");
+      console.log("[DB] Columna deposito agregada en partidas");
+    }
   } catch(e) { console.error("[DB] Error migrando partidas:", e.message); }
 })();
 
