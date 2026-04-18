@@ -90,60 +90,6 @@ router.get('/productos', (req, res) => {
 });
 
 // ============================================================
-// ENVASES MAESTRO
-// ============================================================
-
-router.get('/envases', (req, res) => {
-  const db = getDb();
-  try {
-    const envases = db.prepare(`
-      SELECT * FROM envases_maestro WHERE activo = 1 ORDER BY nombre
-    `).all();
-    res.json({ ok: true, data: envases });
-  } catch (e) {
-    res.status(500).json({ ok: false, error: e.message });
-  }
-});
-
-router.post('/envases', (req, res) => {
-  const db = getDb();
-  const { nombre, kilos_por_unidad, descripcion } = req.body;
-  if (!nombre || !kilos_por_unidad) return res.status(400).json({ ok: false, error: 'Nombre y kilos requeridos' });
-  try {
-    const r = db.prepare(`
-      INSERT INTO envases_maestro (nombre, kilos_por_unidad, descripcion)
-      VALUES (?, ?, ?)
-    `).run(nombre.trim(), kilos_por_unidad, descripcion || null);
-    res.json({ ok: true, id: r.lastInsertRowid });
-  } catch (e) {
-    res.status(500).json({ ok: false, error: e.message });
-  }
-});
-
-router.patch('/envases/:id', (req, res) => {
-  const db = getDb();
-  const { nombre, kilos_por_unidad, descripcion } = req.body;
-  try {
-    db.prepare(`
-      UPDATE envases_maestro SET nombre=?, kilos_por_unidad=?, descripcion=? WHERE id=?
-    `).run(nombre, kilos_por_unidad, descripcion || null, req.params.id);
-    res.json({ ok: true });
-  } catch (e) {
-    res.status(500).json({ ok: false, error: e.message });
-  }
-});
-
-router.delete('/envases/:id', (req, res) => {
-  const db = getDb();
-  try {
-    db.prepare('UPDATE envases_maestro SET activo=0 WHERE id=?').run(req.params.id);
-    res.json({ ok: true });
-  } catch (e) {
-    res.status(500).json({ ok: false, error: e.message });
-  }
-});
-
-// ============================================================
 // PARTIDAS (INGRESO DE STOCK)
 // ============================================================
 
@@ -212,7 +158,7 @@ router.post('/partidas', (req, res) => {
   const {
     fecha_ingreso, producto_id, proveedor_id,
     tipo_ingreso, bultos_ingresados, kilos_por_bulto,
-    envase_id, costo_por_bulto, notas
+    envase, iva, costo_por_bulto, notas
   } = req.body;
 
   if (!producto_id || !bultos_ingresados || !kilos_por_bulto || !tipo_ingreso) {
@@ -220,7 +166,6 @@ router.post('/partidas', (req, res) => {
   }
 
   try {
-    // Obtener nombre y categoría del producto desde el maestro
     const prod = db.prepare('SELECT nombre, categoria FROM retail_productos WHERE id=?').get(producto_id);
     if (!prod) return res.status(400).json({ ok: false, error: 'Producto no encontrado en el maestro' });
 
@@ -229,12 +174,13 @@ router.post('/partidas', (req, res) => {
     const result = db.transaction(() => {
       const r = db.prepare(`
         INSERT INTO partidas
-          (fecha_ingreso, producto, categoria, producto_id, envase_id, proveedor_id, tipo_ingreso,
+          (fecha_ingreso, producto, categoria, producto_id, envase, iva, proveedor_id, tipo_ingreso,
            bultos_ingresados, kilos_por_bulto, bultos_disponibles, costo_por_bulto, moneda, notas)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ARS', ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ARS', ?)
       `).run(
         fecha, prod.nombre, prod.categoria || null,
-        producto_id, envase_id || null, proveedor_id || null, tipo_ingreso,
+        producto_id, envase || null, iva || 'exento',
+        proveedor_id || null, tipo_ingreso,
         bultos_ingresados, kilos_por_bulto, bultos_ingresados,
         costo_por_bulto || 0, notas || null
       );

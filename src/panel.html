@@ -142,40 +142,8 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   <div class="ni" data-sec="retail-prod"><span class="dot da"></span>Productos Retail</div>
   <div class="ni" data-sec="retail-gastos"><span class="dot dd"></span>Matrix de Gastos</div>
   <div class="ni" data-sec="calendario"><span class="dot da"></span>Calendario Estacional</div>
-  <div class="ni" data-sec="maestro-envases"><span class="dot dc"></span>Envases</div>
 </nav>
 <main>
-
-<!-- ==================== MAESTRO DE ENVASES ==================== -->
-<div class="sec" id="sec-maestro-envases">
-  <div class="ph">
-    <div><div class="ph-t">Envases</div><div class="ph-s">Tipos de envase con kilos por unidad</div></div>
-    <button class="btn bb" onclick="envAbrirNuevo()">+ Nuevo envase</button>
-  </div>
-  <div class="tw">
-    <table>
-      <thead><tr><th>Nombre</th><th>Kilos por unidad</th><th>Descripción</th><th></th></tr></thead>
-      <tbody id="t-envases"><tr><td colspan="4" class="emp">Cargando...</td></tr></tbody>
-    </table>
-  </div>
-</div>
-
-<!-- Modal Envase -->
-<div class="mb" id="mb-envase">
-<div class="mbox" style="width:440px">
-  <div class="mhd"><div class="mht" id="mb-envase-tit">Nuevo envase</div><button class="mcl" onclick="closeMB('mb-envase')">×</button></div>
-  <input type="hidden" id="env-id">
-  <div class="fg">
-    <div class="fl ff"><label>Nombre *</label><input id="env-nombre" placeholder="Ej: Bin, Caja 10kg, Bolsa 5kg"></div>
-    <div class="fl"><label>Kilos por unidad *</label><input id="env-kilos" type="number" min="0" step="0.1" placeholder="0.0"></div>
-    <div class="fl"><label>Descripción</label><input id="env-desc" placeholder="Opcional"></div>
-  </div>
-  <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:20px">
-    <button class="btn bo" onclick="closeMB('mb-envase')">Cancelar</button>
-    <button class="btn bb" onclick="envGuardar()">Guardar</button>
-  </div>
-</div>
-</div>
 
 <!-- ==================== ESTILOS ABASTO ==================== -->
 <style>
@@ -409,14 +377,16 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
         <option value="consignacion">Consignación</option>
       </select>
     </div>
-    <div class="ab-form-group">
-      <label class="ab-form-label">Envase *</label>
-      <select class="ab-form-select" id="ab-part-envase" onchange="abSeleccionarEnvase(this)">
-        <option value="">Seleccionar envase...</option>
+    <div class="ab-form-group"><label class="ab-form-label">Envase</label><input class="ab-form-input" id="ab-part-envase" placeholder="Ej: Bin, Caja 10kg, Bolsa..."></div>
+    <div class="ab-form-group"><label class="ab-form-label">IVA</label>
+      <select class="ab-form-select" id="ab-part-iva">
+        <option value="exento">Exento</option>
+        <option value="10.5">Inscripto 10.5%</option>
+        <option value="21">Inscripto 21%</option>
       </select>
     </div>
     <div class="ab-form-group"><label class="ab-form-label">Bultos ingresados *</label><input class="ab-form-input" id="ab-part-bultos" type="number" min="0" step="1" placeholder="0" oninput="abCalcKilos()"></div>
-    <div class="ab-form-group"><label class="ab-form-label">Kilos por bulto</label><input class="ab-form-input" id="ab-part-kgbulto" type="number" min="0" step="0.1" placeholder="— del envase —" oninput="abCalcKilos()"></div>
+    <div class="ab-form-group"><label class="ab-form-label">Kilos por bulto *</label><input class="ab-form-input" id="ab-part-kgbulto" type="number" min="0" step="0.1" placeholder="0.0" oninput="abCalcKilos()"></div>
     <div class="ab-form-group"><label class="ab-form-label">Total kilos</label><input class="ab-form-input" id="ab-part-kgtotal" readonly placeholder="—" style="opacity:.6;background:var(--bg)"></div>
     <div class="ab-form-group"><label class="ab-form-label">Costo por bulto (ARS)</label><input class="ab-form-input" id="ab-part-costo" type="number" min="0" step="0.01" placeholder="0.00"></div>
   </div>
@@ -1098,8 +1068,7 @@ function loadSec(s) {
     'ab-partidas': abCargarPartidas,
     'ab-proveedores': abCargarProveedores,
     'ab-remitos': abCargarRemitos,
-    'ab-gastos': abCargarGastos,
-    'maestro-envases': envCargar
+    'ab-gastos': abCargarGastos
   };
   if (m[s]) m[s]();
 }
@@ -3502,56 +3471,29 @@ function abSeleccionarProducto(id, nombre, categoria) {
   document.getElementById('ab-part-prod-list').style.display = 'none';
 }
 
-// ─── MAESTRO ENVASES ────────────────────────────────────────
-var AB_ENVASES = [];
-function abCargarEnvasesMaestro() {
-  return abApi('/envases').then(function(res) {
-    if (res.ok) {
-      AB_ENVASES = res.data;
-      var sel = document.getElementById('ab-part-envase');
-      if (sel) {
-        sel.innerHTML = '<option value="">Seleccionar envase...</option>' +
-          res.data.map(function(e) {
-            return '<option value="'+e.id+'" data-kilos="'+e.kilos_por_unidad+'">'+e.nombre+' ('+e.kilos_por_unidad+' kg)</option>';
-          }).join('');
-      }
-    }
-  });
-}
-
-function abSeleccionarEnvase(sel) {
-  var opt = sel.options[sel.selectedIndex];
-  var kilos = opt ? opt.getAttribute('data-kilos') : '';
-  if (kilos) {
-    document.getElementById('ab-part-kgbulto').value = kilos;
-    abCalcKilos();
-  }
-}
-
 async function abAbrirNuevaPartida() {
-  // Limpiar form
   document.getElementById('ab-part-producto-id').value = '';
   document.getElementById('ab-part-producto-input').value = '';
-  ['ab-part-fecha','ab-part-cat','ab-part-bultos','ab-part-kgbulto','ab-part-kgtotal','ab-part-costo','ab-part-notas'].forEach(function(id){ var el=document.getElementById(id); if(el) el.value=''; });
+  ['ab-part-fecha','ab-part-cat','ab-part-envase','ab-part-bultos','ab-part-kgbulto','ab-part-kgtotal','ab-part-costo','ab-part-notas'].forEach(function(id){ var el=document.getElementById(id); if(el) el.value=''; });
   document.getElementById('ab-part-fecha').value = new Date().toISOString().split('T')[0];
   document.getElementById('ab-part-tipo').value = 'factura_compra';
+  document.getElementById('ab-part-iva').value = 'exento';
   document.getElementById('ab-part-prod-list').style.display = 'none';
   await abCargarProveedoresSelect('ab-part-proveedor');
   await abCargarProductosMaestro();
-  await abCargarEnvasesMaestro();
   document.getElementById('ab-modal-partida').classList.add('on');
 }
 
 function abGuardarPartida() {
   var producto_id = document.getElementById('ab-part-producto-id').value;
-  var producto_input = document.getElementById('ab-part-producto-input').value.trim();
   if (!producto_id) { toast('Seleccioná un producto del maestro','er'); document.getElementById('ab-part-producto-input').focus(); return; }
   var body = {
     fecha_ingreso: document.getElementById('ab-part-fecha').value,
     producto_id: parseInt(producto_id),
     proveedor_id: document.getElementById('ab-part-proveedor').value || null,
     tipo_ingreso: document.getElementById('ab-part-tipo').value,
-    envase_id: document.getElementById('ab-part-envase').value || null,
+    envase: document.getElementById('ab-part-envase').value.trim() || null,
+    iva: document.getElementById('ab-part-iva').value,
     bultos_ingresados: parseFloat(document.getElementById('ab-part-bultos').value),
     kilos_por_bulto: parseFloat(document.getElementById('ab-part-kgbulto').value),
     costo_por_bulto: parseFloat(document.getElementById('ab-part-costo').value) || 0,
@@ -3561,58 +3503,6 @@ function abGuardarPartida() {
   abApi('/partidas', {method:'POST', body:JSON.stringify(body)}).then(function(res) {
     if (res.ok) { abCerrarModal('ab-modal-partida'); abCargarPartidas(); abDashboard(); toast('Partida ingresada','ok'); }
     else toast('Error: ' + res.error, 'er');
-  });
-}
-
-// ─── ABM ENVASES (sección Maestros) ─────────────────────────
-function envCargar() {
-  abApi('/envases').then(function(res) {
-    if (!res.ok) return;
-    var tbody = document.getElementById('t-envases');
-    if (!res.data.length) { tbody.innerHTML = '<tr><td colspan="4" class="emp">Sin envases cargados</td></tr>'; return; }
-    tbody.innerHTML = res.data.map(function(e) {
-      return '<tr><td><strong>'+e.nombre+'</strong></td><td>'+e.kilos_por_unidad+' kg</td><td style="color:var(--mut)">'+(e.descripcion||'—')+'</td><td style="text-align:right;white-space:nowrap"><button class="btn bo bs" style="margin-right:6px" onclick="envEditar('+e.id+',\''+e.nombre.replace(/'/g,"\\'")+'\',' +e.kilos_por_unidad+',\''+( e.descripcion||'').replace(/'/g,"\\'")+'\')">Editar</button><button class="btn bd bs" onclick="envEliminar('+e.id+')">✕</button></td></tr>';
-    }).join('');
-  });
-}
-
-function envAbrirNuevo() {
-  document.getElementById('env-id').value = '';
-  document.getElementById('mb-envase-tit').textContent = 'Nuevo envase';
-  ['env-nombre','env-kilos','env-desc'].forEach(function(id){ document.getElementById(id).value=''; });
-  eid('mb-envase').classList.add('on');
-}
-
-function envEditar(id, nombre, kilos, desc) {
-  document.getElementById('env-id').value = id;
-  document.getElementById('mb-envase-tit').textContent = 'Editar envase';
-  document.getElementById('env-nombre').value = nombre;
-  document.getElementById('env-kilos').value = kilos;
-  document.getElementById('env-desc').value = desc || '';
-  eid('mb-envase').classList.add('on');
-}
-
-function envGuardar() {
-  var id = document.getElementById('env-id').value;
-  var body = {
-    nombre: document.getElementById('env-nombre').value.trim(),
-    kilos_por_unidad: parseFloat(document.getElementById('env-kilos').value),
-    descripcion: document.getElementById('env-desc').value.trim()
-  };
-  if (!body.nombre || !body.kilos_por_unidad) { toast('Nombre y kilos son requeridos','er'); return; }
-  var method = id ? 'PATCH' : 'POST';
-  var url = id ? '/envases/'+id : '/envases';
-  abApi(url, {method:method, body:JSON.stringify(body)}).then(function(res) {
-    if (res.ok) { closeMB('mb-envase'); envCargar(); toast('Envase guardado','ok'); }
-    else toast('Error: '+res.error,'er');
-  });
-}
-
-function envEliminar(id) {
-  if (!confirm('¿Eliminar este envase?')) return;
-  abApi('/envases/'+id, {method:'DELETE'}).then(function(res) {
-    if (res.ok) { envCargar(); toast('Eliminado','ok'); }
-    else toast('Error: '+res.error,'er');
   });
 }
 
