@@ -123,6 +123,8 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   <div class="ng" style="margin-top:8px">Equipo</div>
   <div class="ni" data-sec="conv" id="nav-conv"><span class="dot" id="dot-conv"></span>Conversaciones</div>
   <div class="ni" data-sec="guardias"><span class="dot"></span>Guardias</div>
+  <div class="ng" style="margin-top:8px">Abasto</div>
+  <div class="ni" data-sec="ingreso-factura"><span class="dot db"></span>Ingreso de Factura</div>
   <div class="ng" style="margin-top:8px">Administracion</div>
   <div class="ni" data-sec="cobranza"><span class="dot db"></span>Facturas y cobros</div>
   <div class="ni" data-sec="cta-cte"><span class="dot de"></span>Cta. Corriente</div>
@@ -136,6 +138,43 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   <div class="ni" data-sec="calendario"><span class="dot da"></span>Calendario Estacional</div>
 </nav>
 <main>
+
+<!-- INGRESO DE FACTURA -->
+<div class="sec" id="sec-ingreso-factura">
+  <div class="ph">
+    <div><div class="ph-t">Ingreso de Factura</div><div class="ph-s">Escaneá o fotografiá una factura de proveedor</div></div>
+  </div>
+  <div id="if-upload-zone" style="border:2px dashed var(--bor);border-radius:12px;padding:40px;text-align:center;cursor:pointer;background:var(--sur);margin-bottom:20px;transition:border-color .2s"
+    onclick="eid('if-file-input').click()"
+    ondragover="event.preventDefault();this.style.borderColor='var(--burg)'"
+    ondragleave="this.style.borderColor='var(--bor)'"
+    ondrop="event.preventDefault();this.style.borderColor='var(--bor)';handleIfDrop(event)">
+    <div style="font-size:32px;margin-bottom:8px">📄</div>
+    <div style="font-size:14px;font-weight:600;color:var(--txt);margin-bottom:4px">Arrastrá la foto de la factura o hacé clic para seleccionar</div>
+    <div style="font-size:12px;color:var(--mut)">JPG, PNG · Máx. 10MB</div>
+    <input id="if-file-input" type="file" accept="image/*" style="display:none" onchange="handleIfFile(this.files[0])">
+  </div>
+  <div id="if-preview-zone" style="display:none;margin-bottom:20px">
+    <div style="display:grid;grid-template-columns:280px 1fr;gap:20px;align-items:start">
+      <div>
+        <img id="if-preview-img" style="width:100%;border-radius:8px;border:1px solid var(--bor);max-height:400px;object-fit:contain">
+        <button class="btn bo bs" style="margin-top:8px;width:100%;justify-content:center" onclick="resetIf()">🔄 Cambiar imagen</button>
+      </div>
+      <div>
+        <div id="if-estado" style="margin-bottom:14px"></div>
+        <div id="if-form"></div>
+        <div id="if-acciones" style="margin-top:16px"></div>
+      </div>
+    </div>
+  </div>
+  <div style="margin-top:32px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <div style="font-size:13px;font-weight:700">Facturas ingresadas</div>
+      <button class="btn bo bs" onclick="exportarFacturasCSV()" style="font-size:12px">⬇ Exportar CSV</button>
+    </div>
+    <div id="if-listado"><div class="emp">Sin facturas ingresadas aún.</div></div>
+  </div>
+</div>
 
 <!-- CALENDARIO ESTACIONAL -->
 <div class="sec" id="sec-calendario">
@@ -707,6 +746,7 @@ function loadSec(s) {
     pricing2: function(){ loadPricing('oferta2'); },
     'retail-view': loadRetail,
     'rent-retail': loadRentRetail,
+    'ingreso-factura': loadIngresoFactura,
     'calendario': loadCalendario,
     conv: loadConvs, guardias: loadGuardias, cobranza: loadCob,
     'retail-prod': loadRP, 'retail-gastos': loadGastos
@@ -2733,6 +2773,211 @@ function abrirDetalleCalendario(producto, mes) {
     h += '</tbody></table>';
     body.innerHTML = h;
   });
+}
+
+// ── Ingreso de Factura ───────────────────────────────────────────────────
+var _ifFacturas = JSON.parse(localStorage.getItem('if_facturas') || '[]');
+var _ifBase64 = null;
+
+function loadIngresoFactura() {
+  renderIfListado();
+}
+
+function resetIf() {
+  _ifBase64 = null;
+  eid('if-upload-zone').style.display = '';
+  eid('if-preview-zone').style.display = 'none';
+  eid('if-estado').innerHTML = '';
+  eid('if-form').innerHTML = '';
+  eid('if-acciones').innerHTML = '';
+  eid('if-file-input').value = '';
+}
+
+function handleIfDrop(e) {
+  var file = e.dataTransfer.files[0];
+  if (file) handleIfFile(file);
+}
+
+function handleIfFile(file) {
+  if (!file) return;
+  if (file.size > 10 * 1024 * 1024) { toast('El archivo supera 10MB', 'er'); return; }
+  var reader = new FileReader();
+  reader.onload = function(e) {
+    var dataUrl = e.target.result;
+    _ifBase64 = dataUrl.split(',')[1];
+    eid('if-preview-img').src = dataUrl;
+    eid('if-upload-zone').style.display = 'none';
+    eid('if-preview-zone').style.display = '';
+    eid('if-estado').innerHTML = '<div style="display:flex;align-items:center;gap:8px;padding:10px 14px;background:#eff6ff;border:1px solid #93c5fd;border-radius:8px;font-size:13px"><span style="font-size:18px">🤖</span><span>Analizando factura con IA...</span></div>';
+    eid('if-form').innerHTML = '';
+    eid('if-acciones').innerHTML = '';
+    analizarFactura(_ifBase64, file.type || 'image/jpeg');
+  };
+  reader.readAsDataURL(file);
+}
+
+function analizarFactura(base64, mediaType) {
+  fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 1000,
+      messages: [{
+        role: 'user',
+        content: [
+          {
+            type: 'image',
+            source: { type: 'base64', media_type: mediaType, data: base64 }
+          },
+          {
+            type: 'text',
+            text: 'Sos un asistente de carga de facturas. Analizá esta factura de proveedor y extraé los datos. Respondé ÚNICAMENTE con un JSON válido, sin texto adicional, sin markdown, sin backticks. El JSON debe tener exactamente estas claves: {"razon_social": "", "cuit": "", "tipo_comprobante": "", "numero_factura": "", "fecha_emision": "", "fecha_vencimiento": "", "condicion_pago": "", "subtotal": 0, "iva": 0, "total": 0, "moneda": "ARS", "items": [{"descripcion": "", "cantidad": 0, "precio_unitario": 0, "subtotal": 0}], "notas": ""}. Si algún dato no está visible ponés null. Las fechas en formato DD/MM/YYYY. Los montos como número sin formato.'
+          }
+        ]
+      }]
+    })
+  })
+  .then(function(r) { return r.json(); })
+  .then(function(data) {
+    var txt = data.content && data.content[0] && data.content[0].text;
+    if (!txt) throw new Error('Sin respuesta de IA');
+    // Limpiar posibles backticks
+    txt = txt.replace(/```json|```/g, '').trim();
+    var factura = JSON.parse(txt);
+    renderIfForm(factura);
+  })
+  .catch(function(e) {
+    eid('if-estado').innerHTML = '<div style="padding:10px 14px;background:#fef2f2;border:1px solid #fca5a5;border-radius:8px;font-size:13px;color:#991b1b">❌ Error al analizar: ' + e.message + '. Podés cargar los datos manualmente.</div>';
+    renderIfForm({});
+  });
+}
+
+function renderIfForm(f) {
+  f = f || {};
+  eid('if-estado').innerHTML = '<div style="padding:8px 14px;background:#f0fdf4;border:1px solid #86efac;border-radius:8px;font-size:12px;color:#166534;font-weight:600">✅ Datos extraídos — revisá y confirmá</div>';
+
+  var fl = function(label, id, val, type) {
+    return '<div style="margin-bottom:10px"><div style="font-size:10px;font-weight:700;color:var(--mut);text-transform:uppercase;margin-bottom:3px">'+label+'</div><input id="'+id+'" type="'+(type||'text')+'" value="'+(val||'')+'" style="width:100%;font-size:13px;padding:7px 10px;border-radius:7px;border:1px solid var(--bor);box-sizing:border-box"></div>';
+  };
+
+  var h = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:0 16px">';
+  h += fl('Razón Social', 'if-razon', f.razon_social);
+  h += fl('CUIT', 'if-cuit', f.cuit);
+  h += fl('Tipo Comprobante', 'if-tipo', f.tipo_comprobante);
+  h += fl('Número Factura', 'if-nro', f.numero_factura);
+  h += fl('Fecha Emisión', 'if-fecha-em', f.fecha_emision);
+  h += fl('Fecha Vencimiento', 'if-fecha-venc', f.fecha_vencimiento);
+  h += fl('Condición de Pago', 'if-cond-pago', f.condicion_pago);
+  h += fl('Moneda', 'if-moneda', f.moneda || 'ARS');
+  h += '</div>';
+  h += '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:0 16px">';
+  h += fl('Subtotal', 'if-subtotal', f.subtotal, 'number');
+  h += fl('IVA', 'if-iva', f.iva, 'number');
+  h += fl('TOTAL', 'if-total', f.total, 'number');
+  h += '</div>';
+
+  // Items
+  var items = f.items || [];
+  if (items.length) {
+    h += '<div style="margin-bottom:10px"><div style="font-size:10px;font-weight:700;color:var(--mut);text-transform:uppercase;margin-bottom:6px">Detalle de ítems</div>';
+    h += '<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="background:var(--burd)"><th style="padding:5px 8px;color:#fff;text-align:left">Descripción</th><th style="padding:5px 8px;color:#fff;text-align:right">Cant.</th><th style="padding:5px 8px;color:#fff;text-align:right">P. Unit.</th><th style="padding:5px 8px;color:#fff;text-align:right">Subtotal</th></tr></thead><tbody>';
+    items.forEach(function(it) {
+      h += '<tr style="border-bottom:1px solid var(--bor)"><td style="padding:5px 8px">'+(it.descripcion||'-')+'</td><td style="padding:5px 8px;text-align:right">'+(it.cantidad||0)+'</td><td style="padding:5px 8px;text-align:right">$'+(it.precio_unitario||0).toLocaleString('es-AR')+'</td><td style="padding:5px 8px;text-align:right">$'+(it.subtotal||0).toLocaleString('es-AR')+'</td></tr>';
+    });
+    h += '</tbody></table></div>';
+  }
+
+  h += '<div style="margin-bottom:10px"><div style="font-size:10px;font-weight:700;color:var(--mut);text-transform:uppercase;margin-bottom:3px">Notas</div><textarea id="if-notas" rows="2" style="width:100%;font-size:12px;padding:7px 10px;border-radius:7px;border:1px solid var(--bor);box-sizing:border-box;resize:vertical">'+(f.notas||'')+'</textarea></div>';
+
+  eid('if-form').innerHTML = h;
+
+  // Botón confirmar
+  eid('if-acciones').innerHTML = '<button class="btn bb" onclick="confirmarFactura()" style="padding:10px 24px;font-size:13px">✅ Confirmar y guardar</button>';
+  eid('if-acciones').style.display = 'flex';
+}
+
+function confirmarFactura() {
+  var factura = {
+    id: Date.now(),
+    ingresado_en: new Date().toLocaleDateString('es-AR'),
+    razon_social: eid('if-razon').value,
+    cuit: eid('if-cuit').value,
+    tipo_comprobante: eid('if-tipo').value,
+    numero_factura: eid('if-nro').value,
+    fecha_emision: eid('if-fecha-em').value,
+    fecha_vencimiento: eid('if-fecha-venc').value,
+    condicion_pago: eid('if-cond-pago').value,
+    moneda: eid('if-moneda').value,
+    subtotal: parseFloat(eid('if-subtotal').value) || 0,
+    iva: parseFloat(eid('if-iva').value) || 0,
+    total: parseFloat(eid('if-total').value) || 0,
+    notas: eid('if-notas').value,
+  };
+  _ifFacturas.unshift(factura);
+  localStorage.setItem('if_facturas', JSON.stringify(_ifFacturas));
+  toast('Factura guardada', 'ok');
+  resetIf();
+  renderIfListado();
+}
+
+function renderIfListado() {
+  var el = eid('if-listado');
+  if (!_ifFacturas.length) { el.innerHTML = '<div class="emp">Sin facturas ingresadas aún.</div>'; return; }
+  var h = '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="background:var(--burd)">';
+  h += '<th style="padding:7px 10px;color:#fff;text-align:left">Fecha ingreso</th>';
+  h += '<th style="padding:7px 10px;color:#fff;text-align:left">Razón Social</th>';
+  h += '<th style="padding:7px 10px;color:#fff;text-align:left">CUIT</th>';
+  h += '<th style="padding:7px 10px;color:#fff;text-align:left">Comprobante</th>';
+  h += '<th style="padding:7px 10px;color:#fff;text-align:left">Número</th>';
+  h += '<th style="padding:7px 10px;color:#fff;text-align:left">F. Emisión</th>';
+  h += '<th style="padding:7px 10px;color:#fff;text-align:left">Vencimiento</th>';
+  h += '<th style="padding:7px 10px;color:#fff;text-align:left">Cond. Pago</th>';
+  h += '<th style="padding:7px 10px;color:#fff;text-align:right">Subtotal</th>';
+  h += '<th style="padding:7px 10px;color:#fff;text-align:right">IVA</th>';
+  h += '<th style="padding:7px 10px;color:#fff;text-align:right">Total</th>';
+  h += '<th style="padding:7px 10px;color:#fff;text-align:center">Moneda</th>';
+  h += '<th style="padding:7px 10px;color:#fff"></th>';
+  h += '</tr></thead><tbody>';
+  _ifFacturas.forEach(function(f, i) {
+    h += '<tr style="border-bottom:1px solid var(--bor)">';
+    h += '<td style="padding:6px 10px;color:var(--mut)">' + f.ingresado_en + '</td>';
+    h += '<td style="padding:6px 10px;font-weight:600">' + (f.razon_social||'-') + '</td>';
+    h += '<td style="padding:6px 10px;color:var(--mut)">' + (f.cuit||'-') + '</td>';
+    h += '<td style="padding:6px 10px">' + (f.tipo_comprobante||'-') + '</td>';
+    h += '<td style="padding:6px 10px">' + (f.numero_factura||'-') + '</td>';
+    h += '<td style="padding:6px 10px">' + (f.fecha_emision||'-') + '</td>';
+    h += '<td style="padding:6px 10px;color:'+(f.fecha_vencimiento?'var(--warn)':'var(--mut)')+'"><strong>' + (f.fecha_vencimiento||'-') + '</strong></td>';
+    h += '<td style="padding:6px 10px">' + (f.condicion_pago||'-') + '</td>';
+    h += '<td style="padding:6px 10px;text-align:right">$' + (f.subtotal||0).toLocaleString('es-AR') + '</td>';
+    h += '<td style="padding:6px 10px;text-align:right">$' + (f.iva||0).toLocaleString('es-AR') + '</td>';
+    h += '<td style="padding:6px 10px;text-align:right;font-weight:700;color:var(--burd)">$' + (f.total||0).toLocaleString('es-AR') + '</td>';
+    h += '<td style="padding:6px 10px;text-align:center">' + (f.moneda||'ARS') + '</td>';
+    h += '<td style="padding:6px 10px;text-align:center"><button class="btn bd bs" style="font-size:10px" onclick="eliminarFacturaIf('+i+')">✕</button></td>';
+    h += '</tr>';
+  });
+  h += '</tbody></table></div>';
+  el.innerHTML = h;
+}
+
+function eliminarFacturaIf(i) {
+  if (!confirm('¿Eliminar esta factura del listado?')) return;
+  _ifFacturas.splice(i, 1);
+  localStorage.setItem('if_facturas', JSON.stringify(_ifFacturas));
+  renderIfListado();
+}
+
+function exportarFacturasCSV() {
+  if (!_ifFacturas.length) { toast('Sin facturas para exportar', 'er'); return; }
+  var cols = ['ingresado_en','razon_social','cuit','tipo_comprobante','numero_factura','fecha_emision','fecha_vencimiento','condicion_pago','subtotal','iva','total','moneda','notas'];
+  var csv = cols.join(';') + '\n';
+  _ifFacturas.forEach(function(f) {
+    csv += cols.map(function(c){ return '"'+(f[c]||'').toString().replace(/"/g,'""')+'"'; }).join(';') + '\n';
+  });
+  var blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement('a'); a.href = url; a.download = 'facturas_'+new Date().toISOString().slice(0,10)+'.csv';
+  a.click(); URL.revokeObjectURL(url);
 }
 
 loadInicio(); startPoll();
