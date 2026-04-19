@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
+<title>La Niña Bonita — Acceso</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{min-height:100vh;background:#0f2540;display:flex;align-items:center;justify-content:center;font-family:'Arial',sans-serif}
+
+.card{background:#fff;border-radius:20px;padding:32px 28px;width:340px;max-width:95vw;box-shadow:0 20px 60px rgba(0,0,0,.4)}
+
+.logo-wrap{text-align:center;margin-bottom:24px}
+.logo-wrap img{width:200px;max-width:100%;height:auto}
+.logo-wrap .sub{font-size:11px;color:#8a9bb0;letter-spacing:.1em;text-transform:uppercase;margin-top:6px}
+
+.email-wrap{margin-bottom:20px}
+.email-wrap label{font-size:11px;font-weight:700;color:#5a6a7e;text-transform:uppercase;letter-spacing:.06em;display:block;margin-bottom:6px}
+.email-wrap input{width:100%;padding:12px 14px;border:2px solid #dde3ea;border-radius:10px;font-size:15px;font-family:Arial;outline:none;transition:border-color .15s}
+.email-wrap input:focus{border-color:#1a3a5c}
+
+.pin-label{font-size:11px;font-weight:700;color:#5a6a7e;text-transform:uppercase;letter-spacing:.06em;text-align:center;margin-bottom:14px}
+
+/* Puntos del PIN */
+.pin-dots{display:flex;justify-content:center;gap:14px;margin-bottom:24px}
+.pin-dot{width:18px;height:18px;border-radius:50%;border:2px solid #dde3ea;transition:all .15s}
+.pin-dot.filled{background:#1a3a5c;border-color:#1a3a5c}
+
+/* Teclado numérico */
+.keypad{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:20px}
+.key{background:#f0f4f8;border:none;border-radius:12px;height:60px;font-size:22px;font-weight:700;color:#1a2332;cursor:pointer;transition:all .1s;-webkit-tap-highlight-color:transparent;user-select:none}
+.key:active{background:#1a3a5c;color:#fff;transform:scale(.95)}
+.key.del{background:#fef2f2;color:#dc2626;font-size:18px}
+.key.empty{background:transparent;cursor:default}
+
+/* Botón login */
+.btn-login{width:100%;padding:16px;background:#1a3a5c;color:#fff;border:none;border-radius:12px;font-size:16px;font-weight:700;cursor:pointer;transition:all .15s;display:none}
+.btn-login.show{display:block}
+.btn-login:active{background:#0f2540;transform:scale(.98)}
+
+.error{color:#dc2626;font-size:13px;text-align:center;margin-top:12px;min-height:20px}
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="logo-wrap">
+    <img src="/static/logo.jpg" alt="La Niña Bonita" onerror="this.style.display='none';document.querySelector('.logo-name').style.display='block'">
+    <div class="logo-name" style="display:none;font-size:22px;font-weight:900;font-style:italic;color:#b8002a">La Niña Bonita</div>
+    <div class="sub">Panel de control</div>
+  </div>
+
+  <div class="email-wrap">
+    <label>Email</label>
+    <input type="email" id="email" placeholder="tu@email.com" autocomplete="email" inputmode="email"
+      onkeydown="if(event.key==='Enter') document.getElementById('pin-1').focus()">
+  </div>
+
+  <div class="pin-label">PIN de acceso</div>
+  <div class="pin-dots">
+    <div class="pin-dot" id="dot-0"></div>
+    <div class="pin-dot" id="dot-1"></div>
+    <div class="pin-dot" id="dot-2"></div>
+    <div class="pin-dot" id="dot-3"></div>
+  </div>
+
+  <div class="keypad">
+    <button class="key" onclick="pinKey('1')">1</button>
+    <button class="key" onclick="pinKey('2')">2</button>
+    <button class="key" onclick="pinKey('3')">3</button>
+    <button class="key" onclick="pinKey('4')">4</button>
+    <button class="key" onclick="pinKey('5')">5</button>
+    <button class="key" onclick="pinKey('6')">6</button>
+    <button class="key" onclick="pinKey('7')">7</button>
+    <button class="key" onclick="pinKey('8')">8</button>
+    <button class="key" onclick="pinKey('9')">9</button>
+    <button class="key empty"></button>
+    <button class="key" onclick="pinKey('0')">0</button>
+    <button class="key del" onclick="pinDel()">⌫</button>
+  </div>
+
+  <button class="btn-login" id="btn-login" onclick="doLogin()">Ingresar →</button>
+  <div class="error" id="error"></div>
+</div>
+
+<script>
+var pin = '';
+
+function pinKey(d) {
+  if (pin.length >= 4) return;
+  pin += d;
+  updateDots();
+  if (pin.length === 4) {
+    document.getElementById('btn-login').classList.add('show');
+    // Auto-login si el email ya está completo
+    var email = document.getElementById('email').value.trim();
+    if (email) setTimeout(doLogin, 200);
+  }
+}
+
+function pinDel() {
+  if (!pin.length) return;
+  pin = pin.slice(0,-1);
+  document.getElementById('btn-login').classList.remove('show');
+  updateDots();
+  document.getElementById('error').textContent = '';
+}
+
+function updateDots() {
+  for (var i=0; i<4; i++) {
+    document.getElementById('dot-'+i).classList.toggle('filled', i < pin.length);
+  }
+}
+
+function doLogin() {
+  var email = document.getElementById('email').value.trim();
+  var errEl = document.getElementById('error');
+  errEl.textContent = '';
+  if (!email) { errEl.textContent = 'Ingresá tu email'; return; }
+  if (pin.length !== 4) { errEl.textContent = 'Ingresá tu PIN de 4 dígitos'; return; }
+
+  var btn = document.getElementById('btn-login');
+  btn.textContent = 'Verificando...'; btn.disabled = true;
+
+  fetch('/api/auth/login', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ email: email, pin: pin })
+  })
+  .then(function(r){ return r.json(); })
+  .then(function(res) {
+    if (res.ok) {
+      window.location.href = '/panel';
+    } else {
+      errEl.textContent = res.error || 'Error al ingresar';
+      pin = ''; updateDots();
+      btn.textContent = 'Ingresar →'; btn.disabled = false;
+      btn.classList.remove('show');
+    }
+  })
+  .catch(function() {
+    errEl.textContent = 'Error de conexión';
+    btn.textContent = 'Ingresar →'; btn.disabled = false;
+  });
+}
+
+// También permitir teclado físico para el PIN
+document.addEventListener('keydown', function(e) {
+  if (document.activeElement === document.getElementById('email')) return;
+  if (e.key >= '0' && e.key <= '9') pinKey(e.key);
+  if (e.key === 'Backspace') pinDel();
+  if (e.key === 'Enter' && pin.length === 4) doLogin();
+});
+</script>
+</body>
+</html>

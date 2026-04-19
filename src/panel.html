@@ -143,6 +143,12 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   <div class="ni" data-sec="retail-prod"><span class="dot da"></span>Productos Retail</div>
   <div class="ni" data-sec="retail-gastos"><span class="dot dd"></span>Matrix de Gastos</div>
   <div class="ni" data-sec="calendario"><span class="dot da"></span>Calendario Estacional</div>
+  <div class="ni" data-sec="maestro-usuarios"><span class="dot db"></span>Usuarios</div>
+  <!-- Usuario actual -->
+  <div style="margin-top:auto;padding:12px 16px;border-top:1px solid rgba(255,255,255,.1)">
+    <div id="nav-usuario" style="font-size:11px;color:rgba(255,255,255,.6);margin-bottom:8px">—</div>
+    <button onclick="doLogout()" style="width:100%;padding:7px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.15);border-radius:8px;color:rgba(255,255,255,.7);font-size:11px;cursor:pointer;font-family:var(--sans)">Cerrar sesión</button>
+  </div>
 </nav>
 <main>
 
@@ -666,6 +672,54 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     </div>
     <div id="if-listado"><div class="emp">Sin facturas ingresadas aún.</div></div>
   </div>
+</div>
+
+<!-- MAESTRO USUARIOS -->
+<div class="sec" id="sec-maestro-usuarios">
+  <div class="ph">
+    <div><div class="ph-t">Usuarios</div><div class="ph-s">Accesos al panel — solo administradores</div></div>
+    <button class="btn bb" onclick="usrAbrirNuevo()">+ Nuevo usuario</button>
+  </div>
+  <div class="tw">
+    <table>
+      <thead><tr><th>Nombre</th><th>Email</th><th>Rol</th><th>Depósitos</th><th>Estado</th><th></th></tr></thead>
+      <tbody id="t-usuarios"><tr><td colspan="6" class="emp">Cargando...</td></tr></tbody>
+    </table>
+  </div>
+</div>
+
+<!-- Modal Usuario -->
+<div class="mb" id="mb-usuario">
+<div class="mbox" style="width:480px">
+  <div class="mhd"><div class="mht" id="mb-usr-tit">Nuevo usuario</div><button class="mcl" onclick="closeMB('mb-usuario')">×</button></div>
+  <input type="hidden" id="usr-id">
+  <div class="fg">
+    <div class="fl ff"><label>Nombre *</label><input id="usr-nombre" placeholder="Nombre completo"></div>
+    <div class="fl ff"><label>Email *</label><input id="usr-email" type="email" placeholder="correo@ejemplo.com"></div>
+    <div class="fl"><label>PIN (4 dígitos) *</label>
+      <input id="usr-pin" type="text" inputmode="numeric" maxlength="4" placeholder="0000"
+        style="letter-spacing:8px;font-size:20px;font-weight:700;text-align:center">
+    </div>
+    <div class="fl"><label>Rol</label>
+      <select id="usr-rol">
+        <option value="operador">Operador</option>
+        <option value="admin">Administrador</option>
+        <option value="consulta">Solo consulta</option>
+      </select>
+    </div>
+    <div class="fl ff"><label>Depósitos habilitados</label>
+      <div style="display:flex;gap:10px;margin-top:6px">
+        <label style="display:flex;align-items:center;gap:6px;font-size:13px;text-transform:none;color:var(--txt)"><input type="checkbox" id="dep-mcba" value="MCBA" checked> MCBA</label>
+        <label style="display:flex;align-items:center;gap:6px;font-size:13px;text-transform:none;color:var(--txt)"><input type="checkbox" id="dep-finca" value="FINCA" checked> FINCA</label>
+        <label style="display:flex;align-items:center;gap:6px;font-size:13px;text-transform:none;color:var(--txt)"><input type="checkbox" id="dep-sanpedro" value="SAN PEDRO" checked> SAN PEDRO</label>
+      </div>
+    </div>
+  </div>
+  <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:20px">
+    <button class="btn bo" onclick="closeMB('mb-usuario')">Cancelar</button>
+    <button class="btn bb" onclick="usrGuardar()">Guardar</button>
+  </div>
+</div>
 </div>
 
 <!-- CALENDARIO ESTACIONAL -->
@@ -1245,6 +1299,7 @@ function loadSec(s) {
     'calendario': loadCalendario,
     conv: loadConvs, guardias: loadGuardias, cobranza: loadCob,
     'retail-prod': loadRP, 'retail-gastos': loadGastos,
+    'maestro-usuarios': usrCargar,
     'ab-dashboard': abDashboard,
     'ab-stock': abCargarStock,
     'ab-partidas': abCargarPartidas,
@@ -4358,6 +4413,105 @@ function mdVerDetalle(id) {
 
 
 // ─── NAV ABASTO (manejado por loadSec global) ───────────────
+
+// ── SESIÓN Y USUARIO ────────────────────────────────────────
+var LNB_USER = null;
+
+(function initSesion() {
+  fetch('/api/auth/me')
+    .then(function(r){ return r.json(); })
+    .then(function(res) {
+      if (!res.ok) { window.location.href='/login'; return; }
+      LNB_USER = res.user;
+      var el = document.getElementById('nav-usuario');
+      if (el) {
+        el.innerHTML = '<div style="font-weight:700;color:rgba(255,255,255,.85);font-size:12px">'+LNB_USER.nombre+'</div>' +
+          '<div style="font-size:10px;opacity:.5;margin-top:1px">'+LNB_USER.rol+'</div>';
+      }
+      if (LNB_USER.rol !== 'admin') {
+        var ni = document.querySelector('.ni[data-sec="maestro-usuarios"]');
+        if (ni) ni.style.display = 'none';
+      }
+      // Arrancar el panel una vez verificada la sesión
+      loadInicio();
+      startPoll();
+    })
+    .catch(function() { window.location.href='/login'; });
+})();
+
+function doLogout() {
+  fetch('/api/auth/logout', { method:'POST' })
+    .then(function(){ window.location.href='/login'; });
+}
+
+// ── ABM USUARIOS ────────────────────────────────────────────
+function usrCargar() {
+  fetch('/api/auth/usuarios', { credentials:'include' })
+    .then(function(r){ return r.json(); })
+    .then(function(res) {
+      var tbody = document.getElementById('t-usuarios');
+      if (!res.ok) { tbody.innerHTML='<tr><td colspan="6" class="emp">Sin acceso</td></tr>'; return; }
+      var rolLabel = { admin:'Administrador', operador:'Operador', consulta:'Solo lectura' };
+      tbody.innerHTML = res.data.map(function(u) {
+        var deps = JSON.parse(u.depositos||'[]').join(', ');
+        return '<tr style="'+(u.activo?'':'opacity:.45')+'">' +
+          '<td><strong>'+u.nombre+'</strong></td>' +
+          '<td style="color:var(--mut)">'+u.email+'</td>' +
+          '<td><span class="bdg bcc" style="font-size:11px">'+(rolLabel[u.rol]||u.rol)+'</span></td>' +
+          '<td style="font-size:12px;color:var(--mut)">'+deps+'</td>' +
+          '<td>'+(u.activo?'<span class="bdg bok">Activo</span>':'<span class="bdg ber">Inactivo</span>')+'</td>' +
+          '<td style="text-align:right">' +
+            '<button class="btn bo bs" onclick=\'usrEditar('+JSON.stringify(u).replace(/'/g,"&#39;")+')\' style="margin-right:6px">Editar</button>' +
+            (u.activo?'<button class="btn bd bs" onclick="usrToggle('+u.id+',0)">Desactivar</button>':'<button class="btn bo bs" onclick="usrToggle('+u.id+',1)">Activar</button>') +
+          '</td></tr>';
+      }).join('');
+    });
+}
+
+function usrAbrirNuevo() {
+  document.getElementById('usr-id').value='';
+  document.getElementById('mb-usr-tit').textContent='Nuevo usuario';
+  ['usr-nombre','usr-email','usr-pin'].forEach(function(id){ document.getElementById(id).value=''; });
+  document.getElementById('usr-rol').value='operador';
+  ['dep-mcba','dep-finca','dep-sanpedro'].forEach(function(id){ document.getElementById(id).checked=true; });
+  eid('mb-usuario').classList.add('on');
+}
+
+function usrEditar(u) {
+  if (typeof u==='string') try{u=JSON.parse(u);}catch(e){return;}
+  document.getElementById('usr-id').value=u.id;
+  document.getElementById('mb-usr-tit').textContent='Editar usuario';
+  document.getElementById('usr-nombre').value=u.nombre||'';
+  document.getElementById('usr-email').value=u.email||'';
+  document.getElementById('usr-pin').value=u.pin||'';
+  document.getElementById('usr-rol').value=u.rol||'operador';
+  var deps=JSON.parse(u.depositos||'[]');
+  document.getElementById('dep-mcba').checked=deps.includes('MCBA');
+  document.getElementById('dep-finca').checked=deps.includes('FINCA');
+  document.getElementById('dep-sanpedro').checked=deps.includes('SAN PEDRO');
+  eid('mb-usuario').classList.add('on');
+}
+
+function usrGuardar() {
+  var id=document.getElementById('usr-id').value;
+  var pin=document.getElementById('usr-pin').value.trim();
+  if(!/^\d{4}$/.test(pin)){toast('El PIN debe tener 4 dígitos numéricos','er');return;}
+  var deps=[];
+  if(document.getElementById('dep-mcba').checked) deps.push('MCBA');
+  if(document.getElementById('dep-finca').checked) deps.push('FINCA');
+  if(document.getElementById('dep-sanpedro').checked) deps.push('SAN PEDRO');
+  var body={nombre:document.getElementById('usr-nombre').value.trim(),email:document.getElementById('usr-email').value.trim(),pin:pin,rol:document.getElementById('usr-rol').value,depositos:deps};
+  if(!body.nombre||!body.email){toast('Nombre y email son requeridos','er');return;}
+  fetch('/api/auth/usuarios'+(id?'/'+id:''),{method:id?'PATCH':'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
+    .then(function(r){return r.json();})
+    .then(function(res){if(res.ok){closeMB('mb-usuario');usrCargar();toast('Usuario guardado','ok');}else toast('Error: '+res.error,'er');});
+}
+
+function usrToggle(id,activo) {
+  fetch('/api/auth/usuarios/'+id,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({activo:activo})})
+    .then(function(r){return r.json();})
+    .then(function(res){if(res.ok){usrCargar();toast(activo?'Usuario activado':'Desactivado','ok');}});
+}
 
 // Cargar dedicados cuando se navega a esa seccion
 document.querySelectorAll('.ni').forEach(function(el){

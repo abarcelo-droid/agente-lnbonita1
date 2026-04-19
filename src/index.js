@@ -2,6 +2,7 @@ import "dotenv/config";
 import express from "express";
 import path    from "path";
 import { fileURLToPath } from "url";
+import cookieParser from "cookie-parser";
 import { routearMensaje } from "./agentes/router.js";
 import panelRouter        from "./rutas/panel.js";
 import nuevosRouter       from "./rutas/nuevos.js";
@@ -11,6 +12,7 @@ import cotizacionRouter   from "./rutas/cotizacion.js";
 import crmRouter          from "./rutas/crm.js";
 import buscarRouter       from "./rutas/buscar.js";
 import abastoRouter       from "./rutas/abasto.js";
+import authRouter         from "./rutas/auth.js";
 import { guardarSnapshotCRM } from "./servicios/db.js";
 import { syncSheets } from "./servicios/sheets.js";
 
@@ -48,14 +50,29 @@ const app = express();
 
 app.use(express.json({ limit: '20mb' }));
 app.use(express.urlencoded({ extended: false, limit: '20mb' }));
+app.use(cookieParser());
 
 // Archivos estaticos
 app.use("/static",       express.static(path.join(__dirname, ".")));
 app.use("/data/uploads", express.static(path.join(__dirname, "../data/uploads")));
 app.use("/data/conformados", express.static(path.join(__dirname, "../data/conformados")));
 
-// Panel web
-app.get("/panel", (req, res) => res.sendFile(path.join(__dirname, "panel.html")));
+// Auth
+app.use("/api/auth", authRouter);
+
+// Panel web — protegido: si no hay cookie redirige a login
+app.get("/panel", (req, res) => {
+  const cookie = req.cookies?.lnb_user;
+  if (!cookie) return res.redirect('/login');
+  res.sendFile(path.join(__dirname, "panel.html"));
+});
+
+// Login page
+app.get("/login", (req, res) => {
+  const cookie = req.cookies?.lnb_user;
+  if (cookie) return res.redirect('/panel');
+  res.sendFile(path.join(__dirname, "login.html"));
+});
 
 // Webhook WhatsApp (Twilio)
 app.post("/webhook", async (req, res) => {
