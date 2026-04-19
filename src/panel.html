@@ -4622,18 +4622,23 @@ function mdFiltrarPartidas(q) {
       (p.producto_display||p.producto||'').toLowerCase().indexOf(q.toLowerCase()) >= 0;
   });
   if (!disp.length) { list.style.display='none'; return; }
-  list.innerHTML = disp.map(function(p) {
+
+  list.innerHTML = '';
+  disp.forEach(function(p) {
     var nombre = p.producto_display || p.producto || '—';
-    return '<div onclick="mdAgregarProducto('+p.id+')" ' +
-      'style="padding:14px 16px;cursor:pointer;border-bottom:1px solid var(--bor);display:flex;justify-content:space-between;align-items:center;background:var(--sur)" ' +
-      'onmouseover="this.style.background='var(--burl)'" onmouseout="this.style.background='var(--sur)'">' +
+    var div = document.createElement('div');
+    div.style.cssText = 'padding:14px 16px;cursor:pointer;border-bottom:1px solid var(--bor);display:flex;justify-content:space-between;align-items:center;background:var(--sur)';
+    div.innerHTML =
       '<div><div style="font-weight:700;font-size:15px">'+nombre+'</div>' +
-        '<div style="font-size:11px;color:var(--mut);margin-top:2px">'+(p.proveedor_nombre||'—')+' · '+p.kilos_por_bulto+' kg/bulto</div></div>' +
+      '<div style="font-size:11px;color:var(--mut);margin-top:2px">'+(p.proveedor_nombre||'—')+' · '+p.kilos_por_bulto+' kg/bulto</div></div>' +
       '<div style="text-align:right;flex-shrink:0;margin-left:12px">' +
         '<div style="font-weight:900;font-size:16px;color:var(--burd)">'+p.bultos_disponibles+'</div>' +
-        '<div style="font-size:10px;color:var(--mut)">bultos</div></div>' +
-    '</div>';
-  }).join('');
+        '<div style="font-size:10px;color:var(--mut)">bultos</div></div>';
+    div.addEventListener('mouseenter', function(){ this.style.background='var(--burl)'; });
+    div.addEventListener('mouseleave', function(){ this.style.background='var(--sur)'; });
+    div.addEventListener('click', function(){ mdAgregarProducto(p.id); });
+    list.appendChild(div);
+  });
   list.style.display = 'block';
 }
 
