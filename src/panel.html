@@ -346,113 +346,120 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
 
 <!-- ==================== NUEVA MANDATA (pantalla completa mobile) ==================== -->
 <div class="ab-modal-overlay" id="md-modal-nueva" style="align-items:flex-start;padding:0">
-<div style="background:var(--sur);width:100%;max-width:620px;min-height:100vh;margin:0 auto;display:flex;flex-direction:column;overflow-y:auto">
+<div style="background:var(--bg);width:100%;max-width:640px;min-height:100vh;margin:0 auto;display:flex;flex-direction:column">
 
   <!-- Header fijo -->
-  <div style="background:var(--burg);color:#fff;padding:14px 16px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:10">
+  <div style="background:var(--burg);color:#fff;padding:16px 20px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:10;flex-shrink:0">
     <div>
-      <div style="font-size:16px;font-weight:700">Nueva Mandata</div>
-      <div style="font-size:11px;opacity:.8" id="md-header-dep">Depósito: —</div>
+      <div style="font-size:18px;font-weight:800;letter-spacing:-.3px">🧾 Nueva Mandata</div>
+      <div style="font-size:12px;opacity:.75;margin-top:2px" id="md-header-info">Elegí el depósito para comenzar</div>
     </div>
-    <button onclick="abCerrarModal('md-modal-nueva')" style="background:rgba(255,255,255,.2);border:none;color:#fff;border-radius:50%;width:32px;height:32px;font-size:18px;cursor:pointer;line-height:1">×</button>
+    <button onclick="abCerrarModal('md-modal-nueva')" style="background:rgba(255,255,255,.2);border:none;color:#fff;border-radius:50%;width:36px;height:36px;font-size:20px;cursor:pointer;line-height:1;flex-shrink:0">×</button>
   </div>
 
-  <!-- Paso 1: Datos básicos -->
-  <div id="md-paso1" style="padding:16px;flex:1">
-    <div style="font-size:11px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.05em;margin-bottom:12px">1 / 3 — Datos del pedido</div>
+  <!-- Indicador de pasos -->
+  <div style="background:var(--burd);display:flex;height:4px;flex-shrink:0">
+    <div id="md-progress" style="background:var(--gold);height:4px;width:25%;transition:width .3s"></div>
+  </div>
 
-    <div class="ab-form-group">
-      <label class="ab-form-label">Depósito *</label>
-      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px">
-        <button class="md-dep-btn" data-dep="MCBA" onclick="mdSelDep(this)" style="padding:12px;border:2px solid var(--bor2);border-radius:8px;background:var(--sur);font-size:13px;font-weight:600;cursor:pointer;transition:all .15s">📦 MCBA</button>
-        <button class="md-dep-btn" data-dep="FINCA" onclick="mdSelDep(this)" style="padding:12px;border:2px solid var(--bor2);border-radius:8px;background:var(--sur);font-size:13px;font-weight:600;cursor:pointer;transition:all .15s">🌿 FINCA</button>
-        <button class="md-dep-btn" data-dep="SAN PEDRO" onclick="mdSelDep(this)" style="padding:12px;border:2px solid var(--bor2);border-radius:8px;background:var(--sur);font-size:13px;font-weight:600;cursor:pointer;transition:all .15s">🏙 SAN PEDRO</button>
+  <!-- ── PASO 1: DEPÓSITO ── -->
+  <div id="md-paso1" style="padding:20px;flex:1">
+    <div style="font-size:12px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.08em;margin-bottom:20px">Paso 1 de 3 — Depósito</div>
+    <div style="display:flex;flex-direction:column;gap:12px">
+      <button class="md-dep-btn" data-dep="MCBA" onclick="mdSelDepYSiguiente(this)"
+        style="padding:22px 20px;border:2px solid var(--bor2);border-radius:14px;background:var(--sur);font-size:18px;font-weight:700;cursor:pointer;text-align:left;display:flex;align-items:center;gap:16px;transition:all .15s;box-shadow:0 2px 8px rgba(0,0,0,.06)">
+        <span style="font-size:32px">📦</span>
+        <div><div>MCBA</div><div style="font-size:12px;font-weight:400;color:var(--mut)">Mercado Central Buenos Aires</div></div>
+      </button>
+      <button class="md-dep-btn" data-dep="FINCA" onclick="mdSelDepYSiguiente(this)"
+        style="padding:22px 20px;border:2px solid var(--bor2);border-radius:14px;background:var(--sur);font-size:18px;font-weight:700;cursor:pointer;text-align:left;display:flex;align-items:center;gap:16px;transition:all .15s;box-shadow:0 2px 8px rgba(0,0,0,.06)">
+        <span style="font-size:32px">🌿</span>
+        <div><div>FINCA</div><div style="font-size:12px;font-weight:400;color:var(--mut)">Depósito en finca</div></div>
+      </button>
+      <button class="md-dep-btn" data-dep="SAN PEDRO" onclick="mdSelDepYSiguiente(this)"
+        style="padding:22px 20px;border:2px solid var(--bor2);border-radius:14px;background:var(--sur);font-size:18px;font-weight:700;cursor:pointer;text-align:left;display:flex;align-items:center;gap:16px;transition:all .15s;box-shadow:0 2px 8px rgba(0,0,0,.06)">
+        <span style="font-size:32px">🏙</span>
+        <div><div>SAN PEDRO</div><div style="font-size:12px;font-weight:400;color:var(--mut)">Depósito San Pedro</div></div>
+      </button>
+    </div>
+  </div>
+
+  <!-- ── PASO 2: CLIENTE ── -->
+  <div id="md-paso2" style="padding:20px;flex:1;display:none">
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px">
+      <button onclick="mdVolver(1)" style="background:var(--sur);border:1px solid var(--bor2);border-radius:10px;padding:10px 14px;cursor:pointer;font-size:14px;font-weight:600">← Volver</button>
+      <div style="font-size:12px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.08em">Paso 2 de 3 — Cliente</div>
+    </div>
+
+    <!-- Buscador grande -->
+    <div style="position:relative;margin-bottom:16px">
+      <input id="md-cli-search" style="width:100%;padding:16px 16px 16px 48px;border:2px solid var(--bor2);border-radius:14px;font-size:16px;font-family:var(--sans);outline:none;transition:border-color .15s;box-sizing:border-box"
+        placeholder="Buscar cliente..." oninput="mdFiltrarClientes(this.value)"
+        onfocus="this.style.borderColor='var(--burg)'" onblur="this.style.borderColor='var(--bor2)'">
+      <span style="position:absolute;left:16px;top:50%;transform:translateY(-50%);font-size:20px">🔍</span>
+    </div>
+
+    <!-- Lista de clientes -->
+    <div id="md-cli-lista" style="display:flex;flex-direction:column;gap:8px;max-height:calc(100vh - 260px);overflow-y:auto">
+      <div style="text-align:center;padding:32px;color:var(--mut)">Escribí para buscar un cliente</div>
+    </div>
+
+    <!-- Cliente seleccionado -->
+    <div id="md-cli-sel" style="display:none;position:sticky;bottom:0;background:var(--sur);border-top:1px solid var(--bor);padding:12px 0;margin-top:16px">
+      <div style="background:var(--burl);border:2px solid var(--burg);border-radius:12px;padding:12px 16px;display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+        <div>
+          <div style="font-size:11px;color:var(--mut);font-weight:600;text-transform:uppercase;letter-spacing:.05em">Cliente seleccionado</div>
+          <div style="font-size:16px;font-weight:700;color:var(--burd)" id="md-cli-sel-nombre">—</div>
+        </div>
+        <button onclick="mdLimpiarCliente()" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--mut)">×</button>
       </div>
+      <button onclick="mdIrPaso3()" style="width:100%;padding:16px;background:var(--burg);color:#fff;border:none;border-radius:12px;font-size:16px;font-weight:800;cursor:pointer">
+        Siguiente → Agregar productos
+      </button>
     </div>
-
-    <div class="ab-form-group">
-      <label class="ab-form-label">Fecha *</label>
-      <input class="ab-form-input" id="md-fecha" type="date" style="font-size:15px;padding:12px">
-    </div>
-
-    <div class="ab-form-group">
-      <label class="ab-form-label">Cliente / Empresa *</label>
-      <input class="ab-form-input" id="md-empresa" placeholder="Nombre empresa o cliente" style="font-size:15px;padding:12px" list="md-empresas-list">
-      <datalist id="md-empresas-list"></datalist>
-    </div>
-
-    <div class="ab-form-group">
-      <label class="ab-form-label">Contacto</label>
-      <input class="ab-form-input" id="md-contacto" placeholder="Nombre contacto" style="font-size:15px;padding:12px">
-    </div>
-
-    <div class="ab-form-group">
-      <label class="ab-form-label">Comercial</label>
-      <select class="ab-form-select" id="md-comercial" style="font-size:15px;padding:12px">
-        <option value="">—</option>
-        <option>Andres Barcelo</option>
-        <option>Pablo Barcelo</option>
-        <option>Martin Mendez</option>
-        <option>Camila Persampieri</option>
-        <option>Ramon Palazuelos</option>
-      </select>
-    </div>
-
-    <div class="ab-form-group">
-      <label class="ab-form-label">Notas</label>
-      <textarea class="ab-form-textarea" id="md-notas" placeholder="Observaciones..." style="font-size:14px"></textarea>
-    </div>
-
-    <button onclick="mdIrPaso2()" style="width:100%;padding:14px;background:var(--burg);color:#fff;border:none;border-radius:10px;font-size:15px;font-weight:700;cursor:pointer;margin-top:8px">
-      Siguiente → Agregar productos
-    </button>
   </div>
 
-  <!-- Paso 2: Productos -->
-  <div id="md-paso2" style="padding:16px;flex:1;display:none">
-    <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
-      <button onclick="mdVolver(1)" style="background:var(--bg);border:1px solid var(--bor2);border-radius:8px;padding:6px 12px;cursor:pointer;font-size:13px">← Volver</button>
-      <div style="font-size:11px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.05em">2 / 3 — Productos</div>
+  <!-- ── PASO 3: PRODUCTOS ── -->
+  <div id="md-paso3" style="padding:20px;flex:1;display:none">
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px">
+      <button onclick="mdVolver(2)" style="background:var(--sur);border:1px solid var(--bor2);border-radius:10px;padding:10px 14px;cursor:pointer;font-size:14px;font-weight:600">← Volver</button>
+      <div style="font-size:12px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.08em">Paso 3 de 3 — Productos</div>
+    </div>
+
+    <!-- Resumen cliente + depósito -->
+    <div style="background:var(--burl);border-radius:12px;padding:10px 14px;margin-bottom:16px;display:flex;justify-content:space-between;align-items:center">
+      <div style="font-size:14px;font-weight:700;color:var(--burd)" id="md-paso3-cliente">—</div>
+      <span class="ab-badge ab-badge-azul" id="md-paso3-dep">—</span>
     </div>
 
     <!-- Buscador de partidas -->
     <div style="position:relative;margin-bottom:12px">
-      <input class="ab-form-input" id="md-prod-search" placeholder="🔍 Buscar producto..." style="font-size:15px;padding:12px" oninput="mdFiltrarPartidas(this.value)">
-      <div id="md-prod-list" style="display:none;border:1px solid var(--bor2);border-radius:8px;overflow:hidden;margin-top:4px;max-height:280px;overflow-y:auto"></div>
+      <input id="md-prod-search" style="width:100%;padding:14px 14px 14px 46px;border:2px solid var(--bor2);border-radius:12px;font-size:16px;font-family:var(--sans);outline:none;box-sizing:border-box"
+        placeholder="Buscar producto del stock..." oninput="mdFiltrarPartidas(this.value)"
+        onfocus="this.style.borderColor='var(--burg)'" onblur="this.style.borderColor='var(--bor2)'">
+      <span style="position:absolute;left:14px;top:50%;transform:translateY(-50%);font-size:18px">🔍</span>
+      <div id="md-prod-list" style="display:none;border:2px solid var(--burg);border-top:none;border-radius:0 0 12px 12px;overflow:hidden;max-height:260px;overflow-y:auto;background:var(--sur)"></div>
     </div>
 
     <!-- Items seleccionados -->
     <div id="md-items-sel" style="margin-bottom:16px"></div>
 
-    <!-- Total parcial -->
-    <div id="md-total-parcial" style="background:var(--bg);border-radius:10px;padding:12px;margin-bottom:16px;display:none">
-      <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px">
-        <span style="color:var(--mut)">Total kg</span>
-        <span id="md-tot-kg" style="font-weight:700">—</span>
+    <!-- Total + confirmar (sticky) -->
+    <div style="position:sticky;bottom:0;background:var(--bg);padding:12px 0;border-top:1px solid var(--bor);margin-top:8px">
+      <div id="md-total-parcial" style="display:none;background:var(--sur);border-radius:12px;padding:12px 16px;margin-bottom:12px;border:1px solid var(--bor)">
+        <div style="display:flex;justify-content:space-between;font-size:13px;color:var(--mut);margin-bottom:4px">
+          <span>Total kg</span><span id="md-tot-kg" style="font-weight:700;color:var(--txt)">—</span>
+        </div>
+        <div style="display:flex;justify-content:space-between;font-size:18px">
+          <span style="color:var(--mut);font-size:14px">Total importe</span>
+          <span id="md-tot-imp" style="font-weight:900;color:var(--burd)">—</span>
+        </div>
       </div>
-      <div style="display:flex;justify-content:space-between;font-size:15px">
-        <span style="color:var(--mut)">Total importe</span>
-        <span id="md-tot-imp" style="font-weight:800;color:var(--burd)">—</span>
-      </div>
+      <button onclick="mdConfirmar()" id="md-btn-confirmar" disabled
+        style="width:100%;padding:18px;background:#16a34a;color:#fff;border:none;border-radius:14px;font-size:17px;font-weight:800;cursor:pointer;opacity:.4;transition:opacity .2s">
+        ✓ Emitir mandata
+      </button>
     </div>
-
-    <button onclick="mdIrPaso3()" id="md-btn-paso3" disabled style="width:100%;padding:14px;background:var(--burg);color:#fff;border:none;border-radius:10px;font-size:15px;font-weight:700;cursor:pointer;opacity:.4">
-      Siguiente → Confirmar
-    </button>
-  </div>
-
-  <!-- Paso 3: Confirmar -->
-  <div id="md-paso3" style="padding:16px;flex:1;display:none">
-    <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
-      <button onclick="mdVolver(2)" style="background:var(--bg);border:1px solid var(--bor2);border-radius:8px;padding:6px 12px;cursor:pointer;font-size:13px">← Volver</button>
-      <div style="font-size:11px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.05em">3 / 3 — Confirmar</div>
-    </div>
-
-    <div id="md-resumen" style="margin-bottom:20px"></div>
-
-    <button onclick="mdGuardar()" style="width:100%;padding:16px;background:#16a34a;color:#fff;border:none;border-radius:10px;font-size:16px;font-weight:800;cursor:pointer">
-      ✓ Confirmar y emitir mandata
-    </button>
   </div>
 
 </div>
@@ -4079,143 +4086,161 @@ function abAjusteStock(id, producto, disponible) {
 }
 
 // ─── MÓDULO MANDATA ──────────────────────────────────────────
-var MD = {
-  deposito: '',
-  items: [],       // { partida_id, producto, bultos, kilos_por_bulto, precio_kg }
-  partidas: []     // partidas disponibles del depósito
-};
-
+var MD = { deposito: '', empresa: '', items: [], partidas: [], clientes: [] };
 function mdFmt(n) { return n == null ? '—' : Number(n).toLocaleString('es-AR', {minimumFractionDigits:2,maximumFractionDigits:2}); }
 
-// ── Cargar lista de mandatas ─────────────────────────────────
+// ── Lista de mandatas ────────────────────────────────────────
 function mdCargar() {
   var estado = (document.getElementById('md-filtro-estado')||{}).value || '';
   var dep = (document.getElementById('md-filtro-dep')||{}).value || '';
-  var q = [estado ? 'estado='+estado : '', dep ? 'deposito='+encodeURIComponent(dep) : ''].filter(Boolean).join('&');
-  abApi('/mandatas' + (q ? '?'+q : '')).then(function(res) {
+  var q = [estado?'estado='+estado:'', dep?'deposito='+encodeURIComponent(dep):''].filter(Boolean).join('&');
+  abApi('/mandatas'+(q?'?'+q:'')).then(function(res) {
     var cont = document.getElementById('md-lista');
     if (!res.ok || !res.data.length) {
-      cont.innerHTML = '<div class="ab-empty"><div class="ab-empty-icon">🧾</div>Sin mandatas' + (estado === 'pendiente' ? ' pendientes' : '') + '</div>';
+      cont.innerHTML = '<div class="ab-empty"><div class="ab-empty-icon">🧾</div>Sin mandatas</div>';
       return;
     }
     cont.innerHTML = res.data.map(function(m) {
       var depColor = m.deposito==='MCBA'?'#1e40af':m.deposito==='FINCA'?'#166534':'#854d0e';
       var depBg = m.deposito==='MCBA'?'#dbeafe':m.deposito==='FINCA'?'#dcfce7':'#fef9c3';
-      var estColor = m.estado==='pendiente'?'#854d0e':m.estado==='facturada'?'#166534':'#5a6a7e';
-      var estBg = m.estado==='pendiente'?'#fef9c3':m.estado==='facturada'?'#dcfce7':'#f1f5f9';
-      return '<div style="background:var(--sur);border:1px solid var(--bor);border-radius:12px;padding:14px 16px;box-shadow:0 1px 4px rgba(0,0,0,.06)">' +
+      var estColor = m.estado==='pendiente'?'#854d0e':m.estado==='facturada'?'#166534':'#991b1b';
+      var estBg = m.estado==='pendiente'?'#fef9c3':m.estado==='facturada'?'#dcfce7':'#fef2f2';
+      var anulada = m.estado === 'anulada';
+      return '<div style="background:var(--sur);border:1px solid var(--bor);border-radius:12px;padding:14px 16px;box-shadow:0 1px 4px rgba(0,0,0,.06)'+(anulada?';opacity:.5':'') +'">' +
         '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px">' +
-          '<div>' +
-            '<div style="font-size:15px;font-weight:800;color:var(--burd)">' + m.nro_mandata + '</div>' +
-            '<div style="font-size:12px;color:var(--mut);margin-top:1px">' + abFecha(m.fecha) + ' · ' + (m.comercial||'—') + '</div>' +
-          '</div>' +
+          '<div><div style="font-size:15px;font-weight:800;color:var(--burd)">' + m.nro_mandata + '</div>' +
+            '<div style="font-size:12px;color:var(--mut);margin-top:1px">' + abFecha(m.fecha) + '</div></div>' +
           '<div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">' +
-            '<span style="background:'+depBg+';color:'+depColor+';font-size:10px;font-weight:700;padding:2px 8px;border-radius:10px">' + m.deposito + '</span>' +
-            '<span style="background:'+estBg+';color:'+estColor+';font-size:10px;font-weight:700;padding:2px 8px;border-radius:10px">' + m.estado.toUpperCase() + '</span>' +
+            '<span style="background:'+depBg+';color:'+depColor+';font-size:10px;font-weight:700;padding:3px 10px;border-radius:10px">' + m.deposito + '</span>' +
+            '<span style="background:'+estBg+';color:'+estColor+';font-size:10px;font-weight:700;padding:3px 10px;border-radius:10px">' + m.estado.toUpperCase() + '</span>' +
           '</div>' +
         '</div>' +
-        '<div style="font-size:14px;font-weight:700;margin-bottom:4px">' + (m.empresa||'—') + '</div>' +
-        '<div style="display:flex;justify-content:space-between;align-items:center;margin-top:10px;padding-top:10px;border-top:1px solid var(--bor)">' +
-          '<div style="font-size:12px;color:var(--mut)">' + (m.total_items||0) + ' items · ' + abFmt(m.total_kg) + ' kg</div>' +
-          '<div style="font-size:16px;font-weight:800;color:var(--burd)">$' + mdFmt(m.total_importe) + '</div>' +
+        '<div style="font-size:16px;font-weight:700;margin-bottom:6px">' + (m.empresa||'—') + '</div>' +
+        '<div style="display:flex;justify-content:space-between;align-items:center;padding-top:10px;border-top:1px solid var(--bor)">' +
+          '<div style="font-size:12px;color:var(--mut)">' + (m.total_items||0) + ' productos · ' + abFmt(m.total_kg) + ' kg</div>' +
+          '<div style="font-size:18px;font-weight:900;color:var(--burd)">$' + mdFmt(m.total_importe) + '</div>' +
         '</div>' +
         '<div style="display:flex;gap:8px;margin-top:10px">' +
-          '<button class="btn bo bs" style="flex:1;justify-content:center" onclick="mdVerDetalle(' + m.id + ')">Ver detalle</button>' +
-          '<button class="btn bb bs" onclick="window.open(\'/api/abasto/mandatas/' + m.id + '/pdf\',\'_blank\')" title="Imprimir">🖨</button>' +
-          (m.estado==='pendiente' ? '<button class="btn bd bs" onclick="mdAnular(' + m.id + ',\'' + m.nro_mandata + '\')">Anular</button>' : '') +
+          '<button class="btn bo bs" style="flex:1;justify-content:center" onclick="mdVerDetalle('+m.id+')">Ver detalle</button>' +
+          '<button class="btn bb bs" onclick="window.open(\'/api/abasto/mandatas/'+m.id+'/pdf\',\'_blank\')" title="Imprimir">🖨</button>' +
+          (!anulada ? '<button class="btn bd bs" onclick="mdAnular('+m.id+',\''+m.nro_mandata+'\')">Anular</button>' : '') +
         '</div>' +
       '</div>';
     }).join('');
   });
 }
 
-// ── Nueva mandata — pasos ────────────────────────────────────
+// ── Nueva mandata — flujo 3 pasos ────────────────────────────
 function mdAbrirNueva() {
-  MD.deposito = '';
-  MD.items = [];
-  MD.partidas = [];
-
-  // Reset form
-  var hoy = new Date().toISOString().split('T')[0];
-  document.getElementById('md-fecha').value = hoy;
-  ['md-empresa','md-contacto','md-notas'].forEach(function(id){ var el=document.getElementById(id); if(el) el.value=''; });
-  document.getElementById('md-comercial').value = '';
+  MD.deposito = ''; MD.empresa = ''; MD.items = []; MD.partidas = [];
   document.getElementById('md-prod-search').value = '';
   document.getElementById('md-prod-list').style.display = 'none';
-  document.getElementById('md-header-dep').textContent = 'Depósito: —';
-
-  // Reset botones depósito
-  document.querySelectorAll('.md-dep-btn').forEach(function(b){ b.style.borderColor='var(--bor2)'; b.style.background='var(--sur)'; b.style.color='var(--txt)'; });
-
-  // Cargar empresas datalist
-  api('/api/clientes').then(function(cd){
-    var empresas=[]; var v={};
-    (cd.data||cd||[]).forEach(function(c){ if(c.empresa&&!v[c.empresa]){v[c.empresa]=1;empresas.push(c.empresa);} });
-    var dl=document.getElementById('md-empresas-list');
-    if(dl) dl.innerHTML=empresas.map(function(e){ return '<option value="'+e+'">'; }).join('');
-  }).catch(function(){});
-
+  document.getElementById('md-cli-search').value = '';
+  document.getElementById('md-cli-lista').innerHTML = '<div style="text-align:center;padding:32px;color:var(--mut)">Escribí para buscar un cliente</div>';
+  document.getElementById('md-cli-sel').style.display = 'none';
+  document.getElementById('md-header-info').textContent = 'Elegí el depósito para comenzar';
   mdMostrarPaso(1);
   document.getElementById('md-modal-nueva').classList.add('on');
+  // Pre-cargar clientes
+  api('/api/clientes').then(function(cd){
+    MD.clientes = [];
+    var v = {};
+    (cd.data||cd||[]).forEach(function(c){
+      if (c.empresa && !v[c.empresa]) { v[c.empresa]=1; MD.clientes.push(c.empresa); }
+    });
+  }).catch(function(){});
 }
 
 function mdMostrarPaso(n) {
   [1,2,3].forEach(function(i){
     var el = document.getElementById('md-paso'+i);
-    if(el) el.style.display = i===n ? 'block' : 'none';
+    if (el) el.style.display = i===n ? 'block' : 'none';
   });
+  var pcts = {1:'25%', 2:'58%', 3:'100%'};
+  var prog = document.getElementById('md-progress');
+  if (prog) prog.style.width = pcts[n] || '25%';
 }
 
 function mdVolver(n) { mdMostrarPaso(n); }
 
-function mdSelDep(btn) {
-  document.querySelectorAll('.md-dep-btn').forEach(function(b){
-    b.style.borderColor='var(--bor2)'; b.style.background='var(--sur)'; b.style.color='var(--txt)';
-  });
-  btn.style.borderColor='var(--burg)'; btn.style.background='var(--burl)'; btn.style.color='var(--burd)';
+// Paso 1: depósito — al tocar va directo al paso 2
+function mdSelDepYSiguiente(btn) {
   MD.deposito = btn.getAttribute('data-dep');
-  document.getElementById('md-header-dep').textContent = 'Depósito: ' + MD.deposito;
+  document.getElementById('md-header-info').textContent = '📦 ' + MD.deposito + ' — Elegí el cliente';
+  mdMostrarPaso(2);
 }
 
-function mdIrPaso2() {
-  if (!MD.deposito) { toast('Seleccioná un depósito','er'); return; }
-  if (!document.getElementById('md-empresa').value.trim()) { toast('Ingresá el cliente','er'); return; }
+// Paso 2: cliente
+function mdFiltrarClientes(q) {
+  var lista = document.getElementById('md-cli-lista');
+  if (!q || q.length < 1) {
+    lista.innerHTML = '<div style="text-align:center;padding:32px;color:var(--mut)">Escribí para buscar un cliente</div>';
+    return;
+  }
+  var filtrados = MD.clientes.filter(function(c){ return c.toLowerCase().indexOf(q.toLowerCase()) >= 0; }).slice(0,12);
+  if (!filtrados.length) {
+    // Permitir cliente libre si no encuentra
+    lista.innerHTML = '<div onclick="mdSelCliente(\''+q.trim().replace(/'/g,"\\'")+'\')" style="padding:16px;border:2px dashed var(--bor2);border-radius:12px;cursor:pointer;text-align:center;color:var(--mut)">' +
+      '<div style="font-size:14px;font-weight:600;color:var(--txt)">"'+q+'"</div>' +
+      '<div style="font-size:12px;margin-top:4px">Usar este nombre →</div></div>';
+    return;
+  }
+  lista.innerHTML = filtrados.map(function(c) {
+    return '<div onclick="mdSelCliente(\''+c.replace(/'/g,"\\'")+'\') " ' +
+      'style="padding:18px 16px;background:var(--sur);border:1px solid var(--bor);border-radius:12px;cursor:pointer;font-size:16px;font-weight:600;transition:all .12s;box-shadow:0 1px 4px rgba(0,0,0,.05)" ' +
+      'onmouseover="this.style.borderColor=\'var(--burg)\';this.style.background=\'var(--burl)\'" ' +
+      'onmouseout="this.style.borderColor=\'var(--bor)\';this.style.background=\'var(--sur)\'">' +
+      c + '</div>';
+  }).join('');
+}
 
-  // Cargar partidas del depósito seleccionado
+function mdSelCliente(nombre) {
+  MD.empresa = nombre;
+  document.getElementById('md-cli-sel-nombre').textContent = nombre;
+  document.getElementById('md-cli-sel').style.display = 'block';
+  document.getElementById('md-cli-lista').innerHTML = '';
+  document.getElementById('md-cli-search').value = nombre;
+}
+
+function mdLimpiarCliente() {
+  MD.empresa = '';
+  document.getElementById('md-cli-sel').style.display = 'none';
+  document.getElementById('md-cli-search').value = '';
+  document.getElementById('md-cli-lista').innerHTML = '<div style="text-align:center;padding:32px;color:var(--mut)">Escribí para buscar un cliente</div>';
+}
+
+// Paso 3: productos
+function mdIrPaso3() {
+  if (!MD.empresa) { toast('Seleccioná un cliente','er'); return; }
+  document.getElementById('md-header-info').textContent = '📦 ' + MD.deposito + ' · ' + MD.empresa;
+  document.getElementById('md-paso3-cliente').textContent = MD.empresa;
+  document.getElementById('md-paso3-dep').textContent = MD.deposito;
+  // Cargar partidas del depósito
   abApi('/partidas?estado=activa&deposito=' + encodeURIComponent(MD.deposito)).then(function(res) {
-    if (res.ok) {
-      MD.partidas = res.data;
-      mdRenderItemsSel();
-      mdMostrarPaso(2);
-    } else toast('Error cargando stock','er');
+    MD.partidas = res.ok ? res.data : [];
+    mdRenderItemsSel();
+    mdMostrarPaso(3);
   });
 }
 
-function mdIrPaso3() {
-  if (!MD.items.length) { toast('Agregá al menos un producto','er'); return; }
-  mdRenderResumen();
-  mdMostrarPaso(3);
-}
-
-// ── Buscador de partidas ─────────────────────────────────────
 function mdFiltrarPartidas(q) {
   var list = document.getElementById('md-prod-list');
-  var disponibles = MD.partidas.filter(function(p){
+  if (!q) { list.style.display='none'; return; }
+  var disp = MD.partidas.filter(function(p){
     return p.bultos_disponibles > 0 &&
-      (!q || (p.producto_display||p.producto||'').toLowerCase().indexOf(q.toLowerCase()) >= 0);
+      (p.producto_display||p.producto||'').toLowerCase().indexOf(q.toLowerCase()) >= 0;
   });
-  if (!q || !disponibles.length) { list.style.display='none'; return; }
-
-  list.innerHTML = disponibles.map(function(p) {
+  if (!disp.length) { list.style.display='none'; return; }
+  list.innerHTML = disp.map(function(p) {
     var nombre = p.producto_display || p.producto || '—';
-    return '<div onclick="mdAgregarProducto('+p.id+')" style="padding:12px 14px;cursor:pointer;border-bottom:1px solid var(--bor);display:flex;justify-content:space-between;align-items:center" onmouseover="this.style.background=\'var(--burl)\'" onmouseout="this.style.background=\'\'">' +
-      '<div><div style="font-weight:600;font-size:14px">' + nombre + '</div>' +
-        '<div style="font-size:11px;color:var(--mut)">' + (p.proveedor_nombre||'sin proveedor') + ' · ' + p.kilos_por_bulto + ' kg/bulto</div>' +
-      '</div>' +
-      '<div style="text-align:right">' +
-        '<div style="font-weight:800;font-size:14px;color:var(--burd)">' + p.bultos_disponibles + ' bultos</div>' +
-        '<div style="font-size:10px;color:var(--mut)">' + (p.bultos_disponibles*p.kilos_por_bulto).toFixed(0) + ' kg</div>' +
-      '</div>' +
+    return '<div onclick="mdAgregarProducto('+p.id+')" ' +
+      'style="padding:14px 16px;cursor:pointer;border-bottom:1px solid var(--bor);display:flex;justify-content:space-between;align-items:center;background:var(--sur)" ' +
+      'onmouseover="this.style.background=\'var(--burl)\'" onmouseout="this.style.background=\'var(--sur)\'">' +
+      '<div><div style="font-weight:700;font-size:15px">' + nombre + '</div>' +
+        '<div style="font-size:11px;color:var(--mut);margin-top:2px">' + (p.proveedor_nombre||'sin proveedor') + ' · ' + p.kilos_por_bulto + ' kg/bulto</div></div>' +
+      '<div style="text-align:right;flex-shrink:0;margin-left:12px">' +
+        '<div style="font-weight:900;font-size:16px;color:var(--burd)">' + p.bultos_disponibles + '</div>' +
+        '<div style="font-size:10px;color:var(--mut)">bultos</div></div>' +
     '</div>';
   }).join('');
   list.style.display = 'block';
@@ -4224,7 +4249,7 @@ function mdFiltrarPartidas(q) {
 function mdAgregarProducto(id) {
   var p = MD.partidas.find(function(x){ return x.id===id; });
   if (!p) return;
-  if (MD.items.find(function(i){ return i.partida_id===id; })) { toast('Ya está agregado','er'); return; }
+  if (MD.items.find(function(i){ return i.partida_id===id; })) { toast('Ya está en la lista','er'); return; }
   MD.items.push({ partida_id:p.id, producto:p.producto, producto_display:p.producto_display||p.producto, bultos:1, kilos_por_bulto:p.kilos_por_bulto, disponible:p.bultos_disponibles, precio_kg:0 });
   document.getElementById('md-prod-search').value = '';
   document.getElementById('md-prod-list').style.display = 'none';
@@ -4233,124 +4258,104 @@ function mdAgregarProducto(id) {
 
 function mdRenderItemsSel() {
   var cont = document.getElementById('md-items-sel');
-  var btn3 = document.getElementById('md-btn-paso3');
+  var btnConf = document.getElementById('md-btn-confirmar');
   var totDiv = document.getElementById('md-total-parcial');
-
   if (!MD.items.length) {
-    cont.innerHTML = '<div style="text-align:center;padding:24px;color:var(--mut);font-size:13px">Buscá y seleccioná productos del stock</div>';
-    btn3.disabled = true; btn3.style.opacity = '.4';
-    totDiv.style.display = 'none';
+    cont.innerHTML = '<div style="text-align:center;padding:28px;color:var(--mut);font-size:14px">Buscá y tocá un producto para agregarlo</div>';
+    btnConf.disabled=true; btnConf.style.opacity='.4';
+    totDiv.style.display='none';
     return;
   }
-
-  var totKg = 0, totImp = 0;
+  var totKg=0, totImp=0;
   cont.innerHTML = MD.items.map(function(item, i) {
     var kg = item.bultos * item.kilos_por_bulto;
-    var imp = kg * (item.precio_kg || 0);
+    var imp = kg * (item.precio_kg||0);
     totKg += kg; totImp += imp;
-    return '<div style="background:var(--bg);border-radius:10px;padding:12px;margin-bottom:8px;border:1px solid var(--bor)">' +
-      '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px">' +
-        '<div style="font-weight:700;font-size:14px;flex:1">' + item.producto_display + '</div>' +
-        '<button onclick="mdQuitarItem('+i+')" style="background:none;border:none;color:var(--err);font-size:18px;cursor:pointer;padding:0 4px;line-height:1">×</button>' +
+    return '<div style="background:var(--sur);border:1px solid var(--bor);border-radius:14px;padding:14px;margin-bottom:10px;box-shadow:0 1px 4px rgba(0,0,0,.05)">' +
+      '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px">' +
+        '<div style="font-weight:700;font-size:15px;flex:1;padding-right:8px">' + item.producto_display + '</div>' +
+        '<button onclick="mdQuitarItem('+i+')" style="background:var(--bg);border:1px solid var(--bor2);color:var(--err);border-radius:8px;width:32px;height:32px;font-size:16px;cursor:pointer;flex-shrink:0;line-height:1">×</button>' +
       '</div>' +
-      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">' +
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">' +
         '<div>' +
-          '<div style="font-size:10px;color:var(--mut);margin-bottom:4px;font-weight:600;text-transform:uppercase">Bultos (max '+item.disponible+')</div>' +
-          '<input type="number" min="1" max="'+item.disponible+'" value="'+item.bultos+'" style="width:100%;padding:10px;border:1px solid var(--bor2);border-radius:8px;font-size:16px;font-weight:700;text-align:center;font-family:var(--sans)" onchange="mdActualizarItem('+i+',\'bultos\',this.value)" oninput="mdActualizarItem('+i+',\'bultos\',this.value)">' +
+          '<div style="font-size:11px;color:var(--mut);margin-bottom:6px;font-weight:600;text-transform:uppercase;letter-spacing:.04em">Bultos <span style="font-weight:400">(máx '+item.disponible+')</span></div>' +
+          '<input type="number" inputmode="numeric" min="1" max="'+item.disponible+'" value="'+item.bultos+'" ' +
+          'style="width:100%;padding:14px;border:2px solid var(--bor2);border-radius:10px;font-size:22px;font-weight:800;text-align:center;font-family:var(--sans);outline:none" ' +
+          'onchange="mdActualizarItem('+i+',\'bultos\',this.value)" oninput="mdActualizarItem('+i+',\'bultos\',this.value)" ' +
+          'onfocus="this.style.borderColor=\'var(--burg)\'" onblur="this.style.borderColor=\'var(--bor2)\'">' +
         '</div>' +
         '<div>' +
-          '<div style="font-size:10px;color:var(--mut);margin-bottom:4px;font-weight:600;text-transform:uppercase">Precio / kg ($)</div>' +
-          '<input type="number" min="0" step="0.01" value="'+(item.precio_kg||'')+'" placeholder="0.00" style="width:100%;padding:10px;border:1px solid var(--bor2);border-radius:8px;font-size:16px;font-weight:700;text-align:center;font-family:var(--sans)" onchange="mdActualizarItem('+i+',\'precio_kg\',this.value)" oninput="mdActualizarItem('+i+',\'precio_kg\',this.value)">' +
+          '<div style="font-size:11px;color:var(--mut);margin-bottom:6px;font-weight:600;text-transform:uppercase;letter-spacing:.04em">$ / kg</div>' +
+          '<input type="number" inputmode="decimal" min="0" step="0.01" value="'+(item.precio_kg||'')+'" placeholder="0.00" ' +
+          'style="width:100%;padding:14px;border:2px solid var(--bor2);border-radius:10px;font-size:22px;font-weight:800;text-align:center;font-family:var(--sans);outline:none" ' +
+          'onchange="mdActualizarItem('+i+',\'precio_kg\',this.value)" oninput="mdActualizarItem('+i+',\'precio_kg\',this.value)" ' +
+          'onfocus="this.style.borderColor=\'var(--burg)\'" onblur="this.style.borderColor=\'var(--bor2)\'">' +
         '</div>' +
       '</div>' +
-      '<div style="display:flex;justify-content:space-between;margin-top:8px;padding-top:8px;border-top:1px solid var(--bor)">' +
-        '<span style="font-size:12px;color:var(--mut)">' + kg.toFixed(1) + ' kg</span>' +
-        '<span style="font-size:13px;font-weight:700;color:var(--burd)">$' + mdFmt(imp) + '</span>' +
+      '<div style="display:flex;justify-content:space-between;margin-top:10px;padding-top:10px;border-top:1px solid var(--bor);font-size:13px">' +
+        '<span style="color:var(--mut)">' + kg.toFixed(1) + ' kg</span>' +
+        '<span style="font-weight:800;font-size:15px;color:var(--burd)">$' + mdFmt(imp) + '</span>' +
       '</div>' +
     '</div>';
   }).join('');
-
   document.getElementById('md-tot-kg').textContent = totKg.toFixed(1) + ' kg';
   document.getElementById('md-tot-imp').textContent = '$' + mdFmt(totImp);
   totDiv.style.display = 'block';
-  btn3.disabled = false; btn3.style.opacity = '1';
+  btnConf.disabled = false; btnConf.style.opacity = '1';
 }
 
 function mdActualizarItem(i, campo, val) {
   var v = campo==='bultos' ? Math.min(parseInt(val)||1, MD.items[i].disponible) : (parseFloat(val)||0);
   MD.items[i][campo] = v;
-  mdRenderItemsSel();
-}
-
-function mdQuitarItem(i) {
-  MD.items.splice(i,1);
-  mdRenderItemsSel();
-}
-
-function mdRenderResumen() {
+  // Actualizar totales sin re-render completo
   var totKg=0, totImp=0;
-  MD.items.forEach(function(i){ var kg=i.bultos*i.kilos_por_bulto; totKg+=kg; totImp+=kg*(i.precio_kg||0); });
-  var html = '<div style="background:var(--bg);border-radius:10px;padding:14px;margin-bottom:14px">' +
-    '<div style="font-size:12px;color:var(--mut);margin-bottom:2px">Cliente</div>' +
-    '<div style="font-size:16px;font-weight:700">' + document.getElementById('md-empresa').value + '</div>' +
-    '<div style="font-size:12px;color:var(--mut);margin-top:6px">Depósito: <strong>' + MD.deposito + '</strong> · ' +
-    abFecha(document.getElementById('md-fecha').value) + '</div>' +
-    '</div>';
-
-  html += MD.items.map(function(item) {
-    var kg = item.bultos*item.kilos_por_bulto;
-    return '<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--bor)">' +
-      '<div><div style="font-weight:600;font-size:13px">' + item.producto_display + '</div>' +
-        '<div style="font-size:11px;color:var(--mut)">' + item.bultos + ' bultos · ' + kg.toFixed(1) + ' kg · $' + mdFmt(item.precio_kg) + '/kg</div>' +
-      '</div>' +
-      '<div style="font-weight:700;font-size:14px;color:var(--burd)">$' + mdFmt(kg*(item.precio_kg||0)) + '</div>' +
-    '</div>';
-  }).join('');
-
-  html += '<div style="display:flex;justify-content:space-between;align-items:center;padding:14px 0;margin-top:4px">' +
-    '<div><div style="font-size:12px;color:var(--mut)">Total kg</div><div style="font-size:15px;font-weight:700">' + totKg.toFixed(1) + ' kg</div></div>' +
-    '<div style="text-align:right"><div style="font-size:12px;color:var(--mut)">Total importe</div><div style="font-size:20px;font-weight:800;color:var(--burd)">$' + mdFmt(totImp) + '</div></div>' +
-  '</div>';
-
-  document.getElementById('md-resumen').innerHTML = html;
+  MD.items.forEach(function(it){ var kg=it.bultos*it.kilos_por_bulto; totKg+=kg; totImp+=kg*(it.precio_kg||0); });
+  document.getElementById('md-tot-kg').textContent = totKg.toFixed(1) + ' kg';
+  document.getElementById('md-tot-imp').textContent = '$' + mdFmt(totImp);
+  document.getElementById('md-total-parcial').style.display = 'block';
 }
 
-function mdGuardar() {
+function mdQuitarItem(i) { MD.items.splice(i,1); mdRenderItemsSel(); }
+
+function mdConfirmar() {
+  if (!MD.items.length) { toast('Agregá al menos un producto','er'); return; }
   var body = {
-    fecha: document.getElementById('md-fecha').value,
+    fecha: new Date().toISOString().split('T')[0],
     deposito: MD.deposito,
-    empresa: document.getElementById('md-empresa').value.trim(),
-    contacto: document.getElementById('md-contacto').value.trim() || null,
-    comercial: document.getElementById('md-comercial').value || null,
-    notas: document.getElementById('md-notas').value || null,
+    empresa: MD.empresa,
     items: MD.items.map(function(i){ return { partida_id:i.partida_id, bultos:i.bultos, kilos_por_bulto:i.kilos_por_bulto, precio_kg:i.precio_kg||0 }; })
   };
+  var btn = document.getElementById('md-btn-confirmar');
+  btn.disabled = true; btn.textContent = 'Emitiendo...';
   abApi('/mandatas', { method:'POST', body:JSON.stringify(body) }).then(function(res) {
     if (res.ok) {
       abCerrarModal('md-modal-nueva');
-      toast('Mandata ' + res.nro_mandata + ' emitida ✓', 'ok');
-      mdCargar();
-      abDashboard();
-    } else toast('Error: ' + res.error, 'er');
+      toast('✓ Mandata ' + res.nro_mandata + ' emitida', 'ok');
+      mdCargar(); abDashboard();
+    } else {
+      toast('Error: ' + res.error, 'er');
+      btn.disabled=false; btn.textContent='✓ Emitir mandata';
+    }
   });
 }
 
 function mdAnular(id, nro) {
-  if (!confirm('¿Anular la mandata ' + nro + '? Esto devuelve el stock.')) return;
-  abApi('/mandatas/' + id + '/anular', { method:'POST', body:'{}' }).then(function(res) {
-    if (res.ok) { toast('Mandata anulada — stock devuelto', 'ok'); mdCargar(); abDashboard(); }
-    else toast('Error: ' + res.error, 'er');
+  if (!confirm('¿Anular la mandata ' + nro + '?\nEl stock vuelve al depósito.')) return;
+  abApi('/mandatas/'+id+'/anular', {method:'POST',body:'{}'}).then(function(res){
+    if (res.ok) { toast('Mandata anulada — stock devuelto','ok'); mdCargar(); abDashboard(); }
+    else toast('Error: '+res.error,'er');
   });
 }
 
 function mdVerDetalle(id) {
-  abApi('/mandatas/' + id).then(function(res) {
+  abApi('/mandatas/'+id).then(function(res){
     if (!res.ok) return;
     var m = res.data;
-    var items = (m.items||[]).map(function(i){ return '• ' + i.producto_display + ' — ' + i.bultos + ' bultos · ' + i.kilos_total.toFixed(1) + 'kg · $' + mdFmt(i.precio_kg) + '/kg = $' + mdFmt(i.importe); }).join('\n');
-    alert(m.nro_mandata + ' — ' + m.empresa + '\n' + abFecha(m.fecha) + ' | ' + m.deposito + '\n\n' + items + '\n\nTotal: $' + mdFmt(m.total_importe));
+    var items = (m.items||[]).map(function(i){ return '• ' + (i.producto_display||i.producto) + '\n  ' + i.bultos + ' bultos · ' + i.kilos_total.toFixed(1) + ' kg · $' + mdFmt(i.precio_kg) + '/kg = $' + mdFmt(i.importe); }).join('\n');
+    alert(m.nro_mandata + ' — ' + m.empresa + '\n' + abFecha(m.fecha) + ' | ' + m.deposito + '\n\n' + items + '\n\n─────────────────\nTotal: ' + m.total_kg.toFixed(1) + ' kg · $' + mdFmt(m.total_importe));
   });
 }
+
 
 // ─── NAV ABASTO (manejado por loadSec global) ───────────────
 
