@@ -5,7 +5,10 @@ var MD = {
 };
 
 function mdFmt(n) {
-  return n == null ? '—' : Number(n).toLocaleString('es-AR', {minimumFractionDigits:2, maximumFractionDigits:2});
+  if (n == null) return '—';
+  var num = Math.round(Number(n));
+  if (isNaN(num)) return '—';
+  return num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, '.');
 }
 
 function mdTotalImporte() {
@@ -201,7 +204,7 @@ function mdFiltrarClientes(q) {
     div.innerHTML =
       '<div style="font-size:16px;font-weight:600">' + nombre + '</div>' +
       (detalle ? '<div style="font-size:12px;color:var(--mut);margin-top:2px">' + detalle + '</div>' : '') +
-      (metodo === 'cta_cte' ? ' <span style="font-size:10px;background:#dbeafe;color:#1e40af;padding:2px 6px;border-radius:8px;font-weight:700">CTA CTE</span>' : '');
+      (metodo === 'cta_cte' || metodo === 'cuenta_corriente' ? ' <span style="font-size:10px;background:#dbeafe;color:#1e40af;padding:2px 6px;border-radius:8px;font-weight:700">CTA CTE</span>' : '');
     div.addEventListener('mouseenter', function() { this.style.borderColor = 'var(--burg)'; this.style.background = 'var(--burl)'; });
     div.addEventListener('mouseleave', function() { this.style.borderColor = 'var(--bor)';  this.style.background = 'var(--sur)'; });
     div.addEventListener('click', function() { mdSelClienteObj({ nombre: nombre, tel: tel, metodo: metodo }); });
@@ -220,7 +223,7 @@ function mdSelClienteObj(obj) {
   el = document.getElementById('md-cli-lista');      if (el) el.innerHTML     = '';
   el = document.getElementById('md-cli-search');     if (el) el.value         = obj.nombre;
   var btnCta = document.getElementById('md-btn-cta-cte');
-  if (btnCta) btnCta.style.opacity = obj.metodo === 'cta_cte' ? '1' : '.4';
+  if (btnCta) btnCta.style.opacity = obj.metodo === 'cta_cte' || obj.metodo === 'cuenta_corriente' ? '1' : '.4';
 }
 
 function mdSelCliente(nombre) {
@@ -516,7 +519,7 @@ function mdIrPaso5() {
 
 function mdSelPago(btn) {
   var pago = btn.getAttribute('data-pago');
-  if (pago === 'cta_cte' && MD.clienteMetodoPago !== 'cta_cte') {
+  if (pago === 'cta_cte' && MD.clienteMetodoPago !== 'cta_cte' && MD.clienteMetodoPago !== 'cuenta_corriente') {
     toast('Este cliente no tiene Cta. Cte. habilitada', 'er'); return;
   }
   document.querySelectorAll('.md-pago-btn').forEach(function(b) {
