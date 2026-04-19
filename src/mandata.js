@@ -556,19 +556,15 @@ function mdConfirmar() {
       return;
     }
 
-    // WhatsApp al cliente
+    // WhatsApp automático por Twilio
     if (MD.clienteTel) {
-      var tel = MD.clienteTel.replace(/\D/g, '');
-      if (tel.indexOf('54') !== 0) tel = '54' + tel;
-      var tot   = mdTotalImporte();
-      var items = MD.items.map(function(it) { return '%E2%80%A2 ' + encodeURIComponent(it.producto_display) + ' x' + it.bultos + ' bultos'; }).join('%0A');
-      var msg   = encodeURIComponent('🧾 Vale de retiro — ' + res.nro_mandata) +
-        '%0ACliente: ' + encodeURIComponent(MD.empresa) +
-        '%0A%0A' + items +
-        '%0A%0ATotal: $' + encodeURIComponent(mdFmt(tot)) +
-        '%0APago: ' + encodeURIComponent(MD.metodoPago.toUpperCase()) +
-        '%0A%0A_La Ni%C3%B1a Bonita — San Ger%C3%B3nimo SA_%0ANave 4 · Puesto 2-4-6 · Mercado Central';
-      window.open('https://wa.me/' + tel + '?text=' + msg, '_blank');
+      abApi('/mandatas/' + res.id + '/whatsapp', {
+        method: 'POST',
+        body: JSON.stringify({ telefono: MD.clienteTel })
+      }).then(function(wa) {
+        if (wa.ok) toast('📲 Vale enviado por WhatsApp', 'ok');
+        else toast('Mandata emitida (WhatsApp: ' + wa.error + ')', 'ok');
+      }).catch(function() {});
     }
 
     // Caja del operador si es efectivo

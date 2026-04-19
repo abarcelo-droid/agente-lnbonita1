@@ -895,6 +895,62 @@ router.post('/caja', (req, res) => {
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
+// Enviar vale de mandata por WhatsApp (Twilio)
+router.post('/mandatas/:id/whatsapp', async (req, res) => {
+  const db = getDb();
+  try {
+    const m = db.prepare('SELECT * FROM mandatas WHERE id=?').get(req.params.id);
+    if (!m) return res.status(404).json({ ok: false, error: 'Mandata no encontrada' });
+
+    const telefono = req.body.telefono || m.cliente_telefono;
+    if (!telefono) return res.status(400).json({ ok: false, error: 'Sin número de teléfono del cliente' });
+
+    const items = db.prepare(`
+      SELECT mi.bultos, mi.kilos_total, mi.importe,
+        COALESCE(rp.nombre, mi.producto) as producto_display
+      FROM mandatas_items mi
+      JOIN partidas pa ON pa.id = mi.partida_id
+      LEFT JOIN retail_productos rp ON rp.id = pa.producto_id
+      WHERE mi.mandata_id = ?
+    `).all(req.params.id);
+
+    const fmt = (n) => Math.round(n).toString().replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+
+    const lineas = items.map(i =>
+      `• ${i.producto_display} — ${i.bultos} bultos · ${i.kilos_total.toFixed(1)} kg · $${fmt(i.importe)}`
+    ).join('\n');
+
+    const mensaje =
+      `🧾 *Vale de retiro — ${m.nro_mandata}*\n` +
+      `Cliente: ${m.empresa}\n\n` +
+      `${lineas}\n\n` +
+      `*Total: $${fmt(m.total_importe)}*\n` +
+      `Forma de pago: ${(m.metodo_pago || '—').toUpperCase()}\n\n` +
+      `_La Niña Bonita — San Gerónimo SA_\n` +
+      `Nave 4 · Puesto 2-4-6 · Mercado Central`;
+
+    // Formatear teléfono
+    let tel = telefono.replace(/\D/g, '');
+    if (!tel.startsWith('54')) tel = '54' + tel;
+
+    const twilio = await import('twilio');
+    const client = twilio.default(
+      process.env.TWILIO_ACCOUNT_SID,
+      process.env.TWILIO_AUTH_TOKEN
+    );
+
+    await client.messages.create({
+      from: process.env.TWILIO_WHATSAPP_FROM,
+      to:   `whatsapp:+${tel}`,
+      body: mensaje
+    });
+
+    res.json({ ok: true, mensaje: `Vale enviado a +${tel}` });
+  } catch(e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
 // ============================================================
 // ETIQUETAS — Config por producto retail
 // ============================================================
