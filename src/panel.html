@@ -4695,39 +4695,107 @@ function mdIrPaso4() {
 
 function mdRenderItemsEdit() {
   var cont = document.getElementById('md-items-edit');
-  cont.innerHTML = MD.items.map(function(item, i) {
-    var imp = item.bultos * (item.precio_bulto||0);
-    return '<div style="background:var(--sur);border:1px solid var(--bor);border-radius:16px;padding:16px" id="md-edit-'+i+'">' +
-      '<div style="font-weight:700;font-size:15px;margin-bottom:14px;color:var(--txt)">'+item.producto_display+'</div>' +
-      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">' +
-        '<div>' +
-          '<div style="font-size:11px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">Bultos (máx '+item.disponible+')</div>' +
-          '<div style="display:flex;align-items:center;gap:8px">' +
-            '<button onclick="mdCambiarBultos('+i+',-1)" style="width:44px;height:44px;border:2px solid var(--bor2);border-radius:10px;background:var(--bg);font-size:22px;cursor:pointer;line-height:1;flex-shrink:0">−</button>' +
-            '<input type="number" inputmode="numeric" min="1" max="'+item.disponible+'" value="'+item.bultos+'" ' +
-            'style="flex:1;padding:10px;border:2px solid var(--bor2);border-radius:10px;font-size:22px;font-weight:800;text-align:center;font-family:var(--sans);outline:none;min-width:0" ' +
-            'id="md-bultos-'+i+'" onchange="mdActualizarItem('+i+','bultos',this.value)" oninput="mdActualizarItem('+i+','bultos',this.value)" ' +
-            'onfocus="this.style.borderColor='var(--burg)'" onblur="this.style.borderColor='var(--bor2)'">' +
-            '<button onclick="mdCambiarBultos('+i+',1)" style="width:44px;height:44px;border:2px solid var(--burg);border-radius:10px;background:var(--burg);color:#fff;font-size:22px;cursor:pointer;line-height:1;flex-shrink:0">+</button>' +
-          '</div>' +
-        '</div>' +
-        '<div>' +
-          '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px">' +
-            '<div style="font-size:11px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.05em">$ / Bulto</div>' +
-            (item.precio_bulto ? '<div style="font-size:10px;color:var(--ok);font-weight:600">✓ precio sugerido</div>' : '') +
-          '</div>' +
-          '<input type="number" inputmode="decimal" min="0" step="0.01" value="'+(item.precio_bulto||'')+'" placeholder="0.00" ' +
-          'style="width:100%;padding:10px;border:2px solid var(--bor2);border-radius:10px;font-size:22px;font-weight:800;text-align:center;font-family:var(--sans);outline:none" ' +
-          'id="md-precio-'+i+'" onchange="mdActualizarItem('+i+','precio_bulto',this.value)" oninput="mdActualizarItem('+i+','precio_bulto',this.value)" ' +
-          'onfocus="this.style.borderColor='var(--burg)'" onblur="this.style.borderColor='var(--bor2)'">' +
-        '</div>' +
-      '</div>' +
-      '<div style="display:flex;justify-content:space-between;margin-top:12px;padding-top:12px;border-top:1px solid var(--bor);font-size:14px">' +
-        '<span style="color:var(--mut)">'+(item.bultos * item.kilos_por_bulto).toFixed(1)+' kg</span>' +
-        '<span style="font-weight:800;font-size:16px;color:var(--burd)" id="md-imp-'+i+'">$'+mdFmt(imp)+'</span>' +
-      '</div>' +
-    '</div>';
-  }).join('');
+  cont.innerHTML = '';
+
+  MD.items.forEach(function(item, i) {
+    var card = document.createElement('div');
+    card.style.cssText = 'background:var(--sur);border:1px solid var(--bor);border-radius:16px;padding:16px';
+    card.id = 'md-edit-' + i;
+
+    // Título
+    var titulo = document.createElement('div');
+    titulo.style.cssText = 'font-weight:700;font-size:15px;margin-bottom:14px;color:var(--txt)';
+    titulo.textContent = item.producto_display;
+    card.appendChild(titulo);
+
+    // Grid de inputs
+    var grid = document.createElement('div');
+    grid.style.cssText = 'display:grid;grid-template-columns:1fr 1fr;gap:14px';
+
+    // ── Columna Bultos ──
+    var colBultos = document.createElement('div');
+    var lblBultos = document.createElement('div');
+    lblBultos.style.cssText = 'font-size:11px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px';
+    lblBultos.textContent = 'Bultos (máx ' + item.disponible + ')';
+    colBultos.appendChild(lblBultos);
+
+    var rowBultos = document.createElement('div');
+    rowBultos.style.cssText = 'display:flex;align-items:center;gap:8px';
+
+    var btnMenos = document.createElement('button');
+    btnMenos.style.cssText = 'width:44px;height:44px;border:2px solid var(--bor2);border-radius:10px;background:var(--bg);font-size:22px;cursor:pointer;line-height:1;flex-shrink:0';
+    btnMenos.textContent = '−';
+    btnMenos.addEventListener('click', function(){ mdCambiarBultos(i, -1); });
+
+    var inpBultos = document.createElement('input');
+    inpBultos.type = 'number';
+    inpBultos.inputMode = 'numeric';
+    inpBultos.min = 1;
+    inpBultos.max = item.disponible;
+    inpBultos.value = item.bultos;
+    inpBultos.id = 'md-bultos-' + i;
+    inpBultos.style.cssText = 'flex:1;padding:10px;border:2px solid var(--bor2);border-radius:10px;font-size:22px;font-weight:800;text-align:center;font-family:var(--sans);outline:none;min-width:0';
+    inpBultos.addEventListener('focus', function(){ this.style.borderColor='var(--burg)'; });
+    inpBultos.addEventListener('blur', function(){ this.style.borderColor='var(--bor2)'; });
+    inpBultos.addEventListener('input', function(){ mdActualizarItem(i, 'bultos', this.value); });
+    inpBultos.addEventListener('change', function(){ mdActualizarItem(i, 'bultos', this.value); });
+
+    var btnMas = document.createElement('button');
+    btnMas.style.cssText = 'width:44px;height:44px;border:2px solid var(--burg);border-radius:10px;background:var(--burg);color:#fff;font-size:22px;cursor:pointer;line-height:1;flex-shrink:0';
+    btnMas.textContent = '+';
+    btnMas.addEventListener('click', function(){ mdCambiarBultos(i, 1); });
+
+    rowBultos.appendChild(btnMenos);
+    rowBultos.appendChild(inpBultos);
+    rowBultos.appendChild(btnMas);
+    colBultos.appendChild(rowBultos);
+
+    // ── Columna Precio ──
+    var colPrecio = document.createElement('div');
+    var lblPrecioWrap = document.createElement('div');
+    lblPrecioWrap.style.cssText = 'display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px';
+    var lblPrecio = document.createElement('div');
+    lblPrecio.style.cssText = 'font-size:11px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.05em';
+    lblPrecio.textContent = '$ / Bulto';
+    lblPrecioWrap.appendChild(lblPrecio);
+    if (item.precio_bulto) {
+      var lblSug = document.createElement('div');
+      lblSug.style.cssText = 'font-size:10px;color:var(--ok);font-weight:600';
+      lblSug.textContent = '✓ precio sugerido';
+      lblPrecioWrap.appendChild(lblSug);
+    }
+    colPrecio.appendChild(lblPrecioWrap);
+
+    var inpPrecio = document.createElement('input');
+    inpPrecio.type = 'number';
+    inpPrecio.inputMode = 'decimal';
+    inpPrecio.min = 0;
+    inpPrecio.step = 0.01;
+    inpPrecio.value = item.precio_bulto || '';
+    inpPrecio.placeholder = '0.00';
+    inpPrecio.id = 'md-precio-' + i;
+    inpPrecio.style.cssText = 'width:100%;padding:10px;border:2px solid var(--bor2);border-radius:10px;font-size:22px;font-weight:800;text-align:center;font-family:var(--sans);outline:none;box-sizing:border-box';
+    inpPrecio.addEventListener('focus', function(){ this.style.borderColor='var(--burg)'; });
+    inpPrecio.addEventListener('blur', function(){ this.style.borderColor='var(--bor2)'; });
+    inpPrecio.addEventListener('input', function(){ mdActualizarItem(i, 'precio_bulto', this.value); });
+    inpPrecio.addEventListener('change', function(){ mdActualizarItem(i, 'precio_bulto', this.value); });
+    colPrecio.appendChild(inpPrecio);
+
+    grid.appendChild(colBultos);
+    grid.appendChild(colPrecio);
+    card.appendChild(grid);
+
+    // Subtotal
+    var subtotal = document.createElement('div');
+    subtotal.style.cssText = 'display:flex;justify-content:space-between;margin-top:12px;padding-top:12px;border-top:1px solid var(--bor);font-size:14px';
+    var kg = item.bultos * item.kilos_por_bulto;
+    subtotal.innerHTML = '<span style="color:var(--mut)">' + kg.toFixed(1) + ' kg</span>' +
+      '<span style="font-weight:800;font-size:16px;color:var(--burd)" id="md-imp-' + i + '">$' + mdFmt(item.bultos * (item.precio_bulto||0)) + '</span>';
+    card.appendChild(subtotal);
+
+    cont.appendChild(card);
+  });
+
   mdActualizarTotalPaso4();
 }
 
