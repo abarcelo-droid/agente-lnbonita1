@@ -4502,7 +4502,7 @@ function mdFiltrarClientes(q) {
   }).slice(0, 12);
 
   if (!filtrados.length) {
-    lista.innerHTML = '<div onclick="mdSelCliente(''+q.trim().replace(/'/g,"\\'")+'')" style="padding:16px;border:2px dashed var(--bor2);border-radius:12px;cursor:pointer;text-align:center;color:var(--mut)">' +
+    lista.innerHTML = '<div onclick="mdSelCliente(\\'' + q.trim().replace(/'/g,"\\\\'") + '\\')" style="padding:16px;border:2px dashed var(--bor2);border-radius:12px;cursor:pointer;text-align:center;color:var(--mut)">' +
       '<div style="font-size:14px;font-weight:600;color:var(--txt)">"'+q+'"</div>' +
       '<div style="font-size:12px;margin-top:4px">Usar este nombre →</div></div>';
     return;
