@@ -829,6 +829,73 @@ router.get('/resumen', (req, res) => {
 });
 
 // ============================================================
+// PRODUCTOS DESTACADOS MANDATA + PRECIO MINORISTA
+// ============================================================
+
+// Listar productos destacados para mandata con precio minorista
+router.get('/mandata/destacados', (req, res) => {
+  const db = getDb();
+  try {
+    const prods = db.prepare(`
+      SELECT id, nombre, categoria, precio_minorista_mcba, destacado_mandata
+      FROM retail_productos
+      WHERE destacado_mandata = 1 AND activo = 1
+      ORDER BY nombre
+    `).all();
+    res.json({ ok: true, data: prods });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// Precio minorista de un producto por nombre (para mandata)
+router.get('/mandata/precio', (req, res) => {
+  const db = getDb();
+  const { nombre } = req.query;
+  if (!nombre) return res.status(400).json({ ok: false, error: 'Nombre requerido' });
+  try {
+    const rp = db.prepare(`
+      SELECT id, nombre, precio_minorista_mcba
+      FROM retail_productos
+      WHERE LOWER(nombre) LIKE LOWER(?) AND activo = 1
+      LIMIT 1
+    `).get('%' + nombre.trim() + '%');
+    res.json({ ok: true, data: rp || null });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// ============================================================
+// CAJA OPERADOR
+// ============================================================
+
+router.get('/caja', (req, res) => {
+  const db = getDb();
+  const { usuario_id } = req.query;
+  try {
+    const movs = db.prepare(`
+      SELECT co.*, m.nro_mandata, m.empresa
+      FROM caja_operador co
+      LEFT JOIN mandatas m ON m.id = co.mandata_id
+      WHERE co.usuario_id = ?
+      ORDER BY co.creado_en DESC
+      LIMIT 100
+    `).all(usuario_id || 0);
+    const saldo = movs.reduce((s, m) => s + (m.tipo === 'ingreso' ? m.monto : -m.monto), 0);
+    res.json({ ok: true, data: movs, saldo });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+router.post('/caja', (req, res) => {
+  const db = getDb();
+  const { usuario_id, mandata_id, concepto, tipo, monto, metodo_pago } = req.body;
+  try {
+    const r = db.prepare(`
+      INSERT INTO caja_operador (usuario_id, mandata_id, concepto, tipo, monto, metodo_pago)
+      VALUES (?,?,?,?,?,?)
+    `).run(usuario_id, mandata_id || null, concepto, tipo, monto, metodo_pago || null);
+    res.json({ ok: true, id: r.lastInsertRowid });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// ============================================================
 // ETIQUETAS — Config por producto retail
 // ============================================================
 
@@ -947,7 +1014,7 @@ router.get('/mandatas/:id', (req, res) => {
 // Crear mandata (descuenta stock inmediatamente)
 router.post('/mandatas', (req, res) => {
   const db = getDb();
-  const { fecha, deposito, empresa, contacto, cliente_telefono, comercial, items, notas } = req.body;
+  const { fecha, deposito, empresa, contacto, cliente_telefono, comercial, items, notas, metodo_pago, precio_por_bulto } = req.body;
   if (!items || !items.length) return res.status(400).json({ ok: false, error: 'Sin items' });
   if (!empresa) return res.status(400).json({ ok: false, error: 'Cliente requerido' });
 
@@ -973,16 +1040,21 @@ router.post('/mandatas', (req, res) => {
       for (const item of items) {
         const kg = item.bultos * item.kilos_por_bulto;
         total_kg += kg;
-        total_importe += kg * (item.precio_kg || 0);
+        // precio puede venir por kg o por bulto
+        if (item.precio_bulto) {
+          total_importe += item.bultos * item.precio_bulto;
+        } else {
+          total_importe += kg * (item.precio_kg || 0);
+        }
       }
 
       // Crear mandata
       const r = db.prepare(`
-        INSERT INTO mandatas (nro_mandata, fecha, deposito, empresa, contacto, cliente_telefono, comercial, estado, total_kg, total_importe, notas)
-        VALUES (?, ?, ?, ?, ?, ?, ?, 'pendiente', ?, ?, ?)
+        INSERT INTO mandatas (nro_mandata, fecha, deposito, empresa, contacto, cliente_telefono, comercial, estado, total_kg, total_importe, notas, metodo_pago)
+        VALUES (?, ?, ?, ?, ?, ?, ?, 'pendiente', ?, ?, ?, ?)
       `).run(nroNuevo, fecha || new Date().toISOString().split('T')[0],
         deposito || 'MCBA', empresa, contacto || null, cliente_telefono || null,
-        comercial || null, total_kg, total_importe, notas || null);
+        comercial || null, total_kg, total_importe, notas || null, metodo_pago || null);
 
       const mandata_id = r.lastInsertRowid;
 

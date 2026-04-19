@@ -734,6 +734,49 @@ export function getDb() {
   } catch(e) { console.error("[DB] Error migrando remitos_salida:", e.message); }
 })();
 
+// Migración: precio_minorista_mcba en retail_productos
+(function() {
+  try {
+    const cols = db.prepare("PRAGMA table_info(retail_productos)").all().map(c => c.name);
+    if (!cols.includes('precio_minorista_mcba')) {
+      db.exec("ALTER TABLE retail_productos ADD COLUMN precio_minorista_mcba REAL DEFAULT 0");
+      console.log("[DB] precio_minorista_mcba agregado en retail_productos");
+    }
+    if (!cols.includes('destacado_mandata')) {
+      db.exec("ALTER TABLE retail_productos ADD COLUMN destacado_mandata INTEGER DEFAULT 0");
+      console.log("[DB] destacado_mandata agregado en retail_productos");
+    }
+  } catch(e) {}
+})();
+
+// Tabla caja por operador
+db.exec(`
+  CREATE TABLE IF NOT EXISTS caja_operador (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    usuario_id  INTEGER NOT NULL REFERENCES usuarios(id),
+    mandata_id  INTEGER REFERENCES mandatas(id),
+    fecha       TEXT DEFAULT (date('now','localtime')),
+    concepto    TEXT,
+    tipo        TEXT CHECK(tipo IN ('ingreso','egreso')),
+    monto       REAL NOT NULL,
+    metodo_pago TEXT,
+    creado_en   TEXT DEFAULT (datetime('now','localtime'))
+  );
+`);
+
+// Migración: columnas de pago en mandatas
+(function() {
+  try {
+    const cols = db.prepare("PRAGMA table_info(mandatas)").all().map(c => c.name);
+    if (!cols.includes('metodo_pago')) {
+      db.exec("ALTER TABLE mandatas ADD COLUMN metodo_pago TEXT");
+      db.exec("ALTER TABLE mandatas ADD COLUMN pago_estado TEXT DEFAULT 'pendiente'");
+      db.exec("ALTER TABLE mandatas ADD COLUMN cliente_telefono TEXT");
+      console.log("[DB] columnas de pago agregadas en mandatas");
+    }
+  } catch(e) {}
+})();
+
 // ── MÓDULO MANDATA ─────────────────────────────────────────────────────────
 db.exec(`
   CREATE TABLE IF NOT EXISTS mandatas (
