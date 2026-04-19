@@ -110,8 +110,9 @@ function mdAbrirNueva() {
     MD.clientes = [];
     var v = {};
     (cd.data || cd || []).forEach(function(c) {
-      var key = c.empresa || c.nombre || c.telefono;
-      if (key && !v[key]) { v[key] = 1; MD.clientes.push(c); }
+      // Deduplicar por teléfono (único), no por nombre
+      var key = c.telefono || (c.empresa + '|' + c.nombre);
+      if (!v[key]) { v[key] = 1; MD.clientes.push(c); }
     });
   }).catch(function() {});
 
@@ -175,9 +176,9 @@ function mdFiltrarClientes(q) {
     return;
   }
   var filtrados = MD.clientes.filter(function(c) {
-    var key = c.empresa || c.nombre || c.telefono || '';
-    return key.toLowerCase().indexOf(q.toLowerCase()) >= 0;
-  }).slice(0, 12);
+    var buscar = [c.empresa, c.nombre, c.telefono].filter(Boolean).join(' ').toLowerCase();
+    return buscar.indexOf(q.toLowerCase()) >= 0;
+  }).slice(0, 15);
 
   lista.innerHTML = '';
 
@@ -191,12 +192,16 @@ function mdFiltrarClientes(q) {
   }
 
   filtrados.forEach(function(c) {
-    var nombre = c.empresa || c.nombre || c.telefono || '';
-    var tel    = c.telefono || '';
-    var metodo = c.metodo_pago || '';
+    var nombre  = c.empresa || c.nombre || c.telefono || '';
+    var detalle = c.empresa && c.nombre && c.nombre !== c.empresa ? c.nombre : (c.telefono || '');
+    var tel     = c.telefono || '';
+    var metodo  = c.metodo_pago || '';
     var div = document.createElement('div');
-    div.style.cssText = 'padding:18px 16px;background:var(--sur);border:1px solid var(--bor);border-radius:12px;cursor:pointer;font-size:16px;font-weight:600;transition:all .12s;box-shadow:0 1px 4px rgba(0,0,0,.05);margin-bottom:6px';
-    div.innerHTML = nombre + (metodo === 'cta_cte' ? ' <span style="font-size:10px;background:#dbeafe;color:#1e40af;padding:2px 6px;border-radius:8px;font-weight:700">CTA CTE</span>' : '');
+    div.style.cssText = 'padding:14px 16px;background:var(--sur);border:1px solid var(--bor);border-radius:12px;cursor:pointer;transition:all .12s;box-shadow:0 1px 4px rgba(0,0,0,.05);margin-bottom:6px';
+    div.innerHTML =
+      '<div style="font-size:16px;font-weight:600">' + nombre + '</div>' +
+      (detalle ? '<div style="font-size:12px;color:var(--mut);margin-top:2px">' + detalle + '</div>' : '') +
+      (metodo === 'cta_cte' ? ' <span style="font-size:10px;background:#dbeafe;color:#1e40af;padding:2px 6px;border-radius:8px;font-weight:700">CTA CTE</span>' : '');
     div.addEventListener('mouseenter', function() { this.style.borderColor = 'var(--burg)'; this.style.background = 'var(--burl)'; });
     div.addEventListener('mouseleave', function() { this.style.borderColor = 'var(--bor)';  this.style.background = 'var(--sur)'; });
     div.addEventListener('click', function() { mdSelClienteObj({ nombre: nombre, tel: tel, metodo: metodo }); });
