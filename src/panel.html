@@ -4400,8 +4400,8 @@ function mdCargar() {
         '</div>' +
         '<div style="display:flex;gap:8px;margin-top:10px">' +
           '<button class="btn bo bs" style="flex:1;justify-content:center" onclick="mdVerDetalle('+m.id+')">Ver</button>' +
-          '<button class="btn bb bs" onclick="window.open('/api/abasto/mandatas/'+m.id+'/pdf','_blank')">🖨</button>' +
-          (!anulada ? '<button class="btn bd bs" onclick="mdAnular('+m.id+',''+m.nro_mandata+'')">Anular</button>' : '') +
+          '<button class="btn bb bs" onclick="window.open(\'/api/abasto/mandatas/'+m.id+'/pdf\',\'_blank\')">🖨</button>' +
+          (!anulada ? '<button class="btn bd bs" onclick="mdAnular('+m.id+',\''+m.nro_mandata+'\')" >Anular</button>' : '') +
         '</div>' +
       '</div>';
     }).join('');
