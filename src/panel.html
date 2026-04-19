@@ -4501,24 +4501,30 @@ function mdFiltrarClientes(q) {
     return key.toLowerCase().indexOf(q.toLowerCase()) >= 0;
   }).slice(0, 12);
 
+  lista.innerHTML = '';
+
   if (!filtrados.length) {
-    lista.innerHTML = '<div onclick="mdSelCliente(\\'' + q.trim().replace(/'/g,"\\\\'") + '\\')" style="padding:16px;border:2px dashed var(--bor2);border-radius:12px;cursor:pointer;text-align:center;color:var(--mut)">' +
-      '<div style="font-size:14px;font-weight:600;color:var(--txt)">"'+q+'"</div>' +
-      '<div style="font-size:12px;margin-top:4px">Usar este nombre →</div></div>';
+    // Opción "usar texto libre"
+    var div = document.createElement('div');
+    div.style.cssText = 'padding:16px;border:2px dashed var(--bor2);border-radius:12px;cursor:pointer;text-align:center;color:var(--mut)';
+    div.innerHTML = '<div style="font-size:14px;font-weight:600;color:var(--txt)">"' + q + '"</div><div style="font-size:12px;margin-top:4px">Usar este nombre →</div>';
+    div.addEventListener('click', function(){ mdSelCliente(q.trim()); });
+    lista.appendChild(div);
     return;
   }
-  lista.innerHTML = filtrados.map(function(c) {
-    var nombre = c.empresa || c.nombre || c.telefono;
+
+  filtrados.forEach(function(c) {
+    var nombre = c.empresa || c.nombre || c.telefono || '';
     var tel = c.telefono || '';
     var metodo = c.metodo_pago || '';
-    return '<div onclick="mdSelClienteObj('+JSON.stringify({nombre:nombre,tel:tel,metodo:metodo}).replace(/"/g,"&quot;")+')" ' +
-      'style="padding:18px 16px;background:var(--sur);border:1px solid var(--bor);border-radius:12px;cursor:pointer;font-size:16px;font-weight:600;transition:all .12s;box-shadow:0 1px 4px rgba(0,0,0,.05)" ' +
-      'onmouseover="this.style.borderColor='var(--burg)';this.style.background='var(--burl)'" ' +
-      'onmouseout="this.style.borderColor='var(--bor)';this.style.background='var(--sur)'">' +
-      nombre +
-      (metodo === 'cta_cte' ? ' <span style="font-size:10px;background:#dbeafe;color:#1e40af;padding:2px 6px;border-radius:8px;font-weight:700">CTA CTE</span>' : '') +
-    '</div>';
-  }).join('');
+    var div = document.createElement('div');
+    div.style.cssText = 'padding:18px 16px;background:var(--sur);border:1px solid var(--bor);border-radius:12px;cursor:pointer;font-size:16px;font-weight:600;transition:all .12s;box-shadow:0 1px 4px rgba(0,0,0,.05);margin-bottom:6px';
+    div.innerHTML = nombre + (metodo === 'cta_cte' ? ' <span style="font-size:10px;background:#dbeafe;color:#1e40af;padding:2px 6px;border-radius:8px;font-weight:700">CTA CTE</span>' : '');
+    div.addEventListener('mouseenter', function(){ this.style.borderColor='var(--burg)'; this.style.background='var(--burl)'; });
+    div.addEventListener('mouseleave', function(){ this.style.borderColor='var(--bor)'; this.style.background='var(--sur)'; });
+    div.addEventListener('click', function(){ mdSelClienteObj({nombre:nombre, tel:tel, metodo:metodo}); });
+    lista.appendChild(div);
+  });
 }
 
 function mdSelClienteObj(obj) {
