@@ -682,36 +682,39 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   </div>
   <div class="tw">
     <table>
-      <thead><tr><th>Nombre</th><th>Email</th><th>Rol</th><th>Depósitos</th><th>Estado</th><th></th></tr></thead>
-      <tbody id="t-usuarios"><tr><td colspan="6" class="emp">Cargando...</td></tr></tbody>
+      <thead><tr><th>Nombre</th><th>Email</th><th>Rol</th><th>Depósitos</th><th>Secciones</th><th>Estado</th><th></th></tr></thead>
+      <tbody id="t-usuarios"><tr><td colspan="7" class="emp">Cargando...</td></tr></tbody>
     </table>
   </div>
 </div>
 
 <!-- Modal Usuario -->
+
 <div class="mb" id="mb-usuario">
-<div class="mbox" style="width:480px">
+<div class="mbox" style="width:580px;max-height:90vh;overflow-y:auto">
   <div class="mhd"><div class="mht" id="mb-usr-tit">Nuevo usuario</div><button class="mcl" onclick="closeMB('mb-usuario')">×</button></div>
   <input type="hidden" id="usr-id">
   <div class="fg">
     <div class="fl ff"><label>Nombre *</label><input id="usr-nombre" placeholder="Nombre completo"></div>
     <div class="fl ff"><label>Email *</label><input id="usr-email" type="email" placeholder="correo@ejemplo.com"></div>
-    <div class="fl"><label>PIN (4 dígitos) *</label>
-      <input id="usr-pin" type="text" inputmode="numeric" maxlength="4" placeholder="0000"
-        style="letter-spacing:8px;font-size:20px;font-weight:700;text-align:center">
+    <div class="fl"><label>PIN (4 dígitos) *</label><input id="usr-pin" type="text" inputmode="numeric" maxlength="4" placeholder="0000" style="letter-spacing:8px;font-size:20px;font-weight:700;text-align:center"></div>
+    <div class="fl"><label>Rol</label><select id="usr-rol"><option value="operador">Operador</option><option value="admin">Administrador</option><option value="consulta">Solo consulta</option></select></div>
+    <div class="fl ff" style="margin-top:4px">
+      <label>Depósitos habilitados</label>
+      <div style="display:flex;gap:14px;margin-top:6px;flex-wrap:wrap">
+        <label style="display:flex;align-items:center;gap:6px;font-size:13px;text-transform:none;color:var(--txt);cursor:pointer"><input type="checkbox" id="dep-mcba" value="MCBA"> MCBA</label>
+        <label style="display:flex;align-items:center;gap:6px;font-size:13px;text-transform:none;color:var(--txt);cursor:pointer"><input type="checkbox" id="dep-finca" value="FINCA"> FINCA</label>
+        <label style="display:flex;align-items:center;gap:6px;font-size:13px;text-transform:none;color:var(--txt);cursor:pointer"><input type="checkbox" id="dep-sanpedro" value="SAN PEDRO"> SAN PEDRO</label>
+      </div>
     </div>
-    <div class="fl"><label>Rol</label>
-      <select id="usr-rol">
-        <option value="operador">Operador</option>
-        <option value="admin">Administrador</option>
-        <option value="consulta">Solo consulta</option>
-      </select>
-    </div>
-    <div class="fl ff"><label>Depósitos habilitados</label>
-      <div style="display:flex;gap:10px;margin-top:6px">
-        <label style="display:flex;align-items:center;gap:6px;font-size:13px;text-transform:none;color:var(--txt)"><input type="checkbox" id="dep-mcba" value="MCBA" checked> MCBA</label>
-        <label style="display:flex;align-items:center;gap:6px;font-size:13px;text-transform:none;color:var(--txt)"><input type="checkbox" id="dep-finca" value="FINCA" checked> FINCA</label>
-        <label style="display:flex;align-items:center;gap:6px;font-size:13px;text-transform:none;color:var(--txt)"><input type="checkbox" id="dep-sanpedro" value="SAN PEDRO" checked> SAN PEDRO</label>
+    <div class="fl ff" style="margin-top:8px">
+      <label>Acceso a secciones del panel</label>
+      <div style="margin-top:6px;background:var(--bg);border-radius:8px;padding:10px;border:1px solid var(--bor)">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+          <span style="font-size:11px;color:var(--mut)">Marcá las secciones habilitadas</span>
+          <div style="display:flex;gap:8px"><button type="button" class="btn bo bs" onclick="usrSelTodas(true)" style="font-size:11px">Todas</button><button type="button" class="btn bo bs" onclick="usrSelTodas(false)" style="font-size:11px">Ninguna</button></div>
+        </div>
+        <div id="usr-secciones-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:2px"></div>
       </div>
     </div>
   </div>
@@ -4423,16 +4426,33 @@ var LNB_USER = null;
     .then(function(res) {
       if (!res.ok) { window.location.href='/login'; return; }
       LNB_USER = res.user;
+
+      // Mostrar nombre en nav
       var el = document.getElementById('nav-usuario');
       if (el) {
         el.innerHTML = '<div style="font-weight:700;color:rgba(255,255,255,.85);font-size:12px">'+LNB_USER.nombre+'</div>' +
           '<div style="font-size:10px;opacity:.5;margin-top:1px">'+LNB_USER.rol+'</div>';
       }
-      if (LNB_USER.rol !== 'admin') {
-        var ni = document.querySelector('.ni[data-sec="maestro-usuarios"]');
-        if (ni) ni.style.display = 'none';
+
+      // Filtrar nav según secciones (si no es ["*"] ocultar lo que no tiene)
+      var secs = LNB_USER.secciones || ['*'];
+      if (!secs.includes('*')) {
+        document.querySelectorAll('.ni[data-sec]').forEach(function(ni) {
+          if (!secs.includes(ni.dataset.sec)) ni.style.display = 'none';
+        });
+        // Ocultar grupos del nav que quedaron sin items visibles
+        document.querySelectorAll('.ng').forEach(function(ng) {
+          var nextSibling = ng.nextElementSibling;
+          var tieneVisible = false;
+          while (nextSibling && nextSibling.classList.contains('ni')) {
+            if (nextSibling.style.display !== 'none') { tieneVisible = true; break; }
+            nextSibling = nextSibling.nextElementSibling;
+          }
+          if (!tieneVisible) ng.style.display = 'none';
+        });
       }
-      // Arrancar el panel una vez verificada la sesión
+
+      // Arrancar el panel
       loadInicio();
       startPoll();
     })
@@ -4445,6 +4465,85 @@ function doLogout() {
 }
 
 // ── ABM USUARIOS ────────────────────────────────────────────
+var USR_SECCIONES = [
+  { grupo: 'General', items: [
+    { id: 'inicio', label: 'Inicio / Dashboard' },
+    { id: 'crm', label: 'CRM Dedicados' },
+    { id: 'pedidos', label: 'Pedidos' },
+    { id: 'logistica', label: 'Logística' },
+    { id: 'rent-retail', label: 'Rentabilidad Retail' },
+  ]},
+  { grupo: 'Oferta', items: [
+    { id: 'oferta1', label: 'Oferta 1' },
+    { id: 'oferta2', label: 'Oferta 2' },
+    { id: 'pricing1', label: 'Pricing 1' },
+    { id: 'pricing2', label: 'Pricing 2' },
+    { id: 'retail-view', label: 'Retail' },
+  ]},
+  { grupo: 'Clientes', items: [
+    { id: 'may-a', label: 'Mayorista A' },
+    { id: 'may-mcba', label: 'Mayorista MCBA' },
+    { id: 'min-mcba', label: 'Minorista MCBA' },
+    { id: 'min-ent', label: 'Minorista Entrega' },
+    { id: 'food', label: 'Food Service' },
+    { id: 'cons-final', label: 'Consumidor Final' },
+    { id: 'dedicados', label: 'Dedicados' },
+  ]},
+  { grupo: 'Equipo', items: [
+    { id: 'conv', label: 'Conversaciones' },
+    { id: 'guardias', label: 'Guardias' },
+  ]},
+  { grupo: 'Abasto', items: [
+    { id: 'ab-dashboard', label: 'Dashboard Abasto' },
+    { id: 'ab-stock', label: 'Stock' },
+    { id: 'ab-partidas', label: 'Ingreso Partidas' },
+    { id: 'ab-proveedores', label: 'Proveedores' },
+    { id: 'ab-remitos', label: 'Remitos' },
+    { id: 'ab-mandata', label: 'Mandata' },
+    { id: 'ab-gastos', label: 'Gastos' },
+    { id: 'ingreso-factura', label: 'Ingreso de Factura' },
+  ]},
+  { grupo: 'Administración', items: [
+    { id: 'cobranza', label: 'Facturas y cobros' },
+    { id: 'cta-cte', label: 'Cta. Corriente' },
+    { id: 'remitos', label: 'Remitos Admin' },
+  ]},
+  { grupo: 'Envíos', items: [
+    { id: 'envios', label: 'Enviar listados' },
+    { id: 'repet', label: 'Repetición compra' },
+  ]},
+  { grupo: 'Maestros', items: [
+    { id: 'retail-prod', label: 'Productos Retail' },
+    { id: 'retail-gastos', label: 'Matrix Gastos' },
+    { id: 'calendario', label: 'Calendario Estacional' },
+    { id: 'maestro-usuarios', label: 'Usuarios (solo admin)' },
+  ]},
+];
+
+function usrRenderSeccionesGrid(seleccionadas) {
+  var grid = document.getElementById('usr-secciones-grid');
+  var html = '';
+  USR_SECCIONES.forEach(function(grupo) {
+    html += '<div style="grid-column:1/-1;font-size:10px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.07em;padding:8px 4px 3px;margin-top:4px;border-top:1px solid var(--bor)">' + grupo.grupo + '</div>';
+    grupo.items.forEach(function(sec) {
+      var checked = seleccionadas.includes('*') || seleccionadas.includes(sec.id);
+      html += '<label style="display:flex;align-items:center;gap:7px;padding:5px 4px;cursor:pointer;border-radius:6px;font-size:13px;color:var(--txt);text-transform:none">' +
+        '<input type="checkbox" class="usr-sec-chk" value="' + sec.id + '"' + (checked ? ' checked' : '') + '> ' + sec.label + '</label>';
+    });
+  });
+  grid.innerHTML = html;
+}
+
+function usrGetSeccionesSeleccionadas() {
+  var sels = [];
+  document.querySelectorAll('.usr-sec-chk:checked').forEach(function(c){ sels.push(c.value); });
+  return sels;
+}
+
+function usrSelTodas(todas) {
+  document.querySelectorAll('.usr-sec-chk').forEach(function(c){ c.checked = todas; });
+}
+
 function usrCargar() {
   fetch('/api/auth/usuarios', { credentials:'include' })
     .then(function(r){ return r.json(); })
@@ -4454,14 +4553,17 @@ function usrCargar() {
       var rolLabel = { admin:'Administrador', operador:'Operador', consulta:'Solo lectura' };
       tbody.innerHTML = res.data.map(function(u) {
         var deps = JSON.parse(u.depositos||'[]').join(', ');
+        var secs = JSON.parse(u.secciones||'["*"]');
+        var secsLabel = secs.includes('*') ? 'Todas' : secs.length + ' secciones';
         return '<tr style="'+(u.activo?'':'opacity:.45')+'">' +
           '<td><strong>'+u.nombre+'</strong></td>' +
           '<td style="color:var(--mut)">'+u.email+'</td>' +
           '<td><span class="bdg bcc" style="font-size:11px">'+(rolLabel[u.rol]||u.rol)+'</span></td>' +
           '<td style="font-size:12px;color:var(--mut)">'+deps+'</td>' +
+          '<td style="font-size:12px;color:var(--mut)">'+secsLabel+'</td>' +
           '<td>'+(u.activo?'<span class="bdg bok">Activo</span>':'<span class="bdg ber">Inactivo</span>')+'</td>' +
-          '<td style="text-align:right">' +
-            '<button class="btn bo bs" onclick=\'usrEditar('+JSON.stringify(u).replace(/'/g,"&#39;")+')\' style="margin-right:6px">Editar</button>' +
+          '<td style="text-align:right;white-space:nowrap">' +
+            '<button class="btn bo bs" onclick=\'usrEditar('+JSON.stringify(u).replace(/'/g,"&#39;")+')' style="margin-right:6px">Editar</button>' +
             (u.activo?'<button class="btn bd bs" onclick="usrToggle('+u.id+',0)">Desactivar</button>':'<button class="btn bo bs" onclick="usrToggle('+u.id+',1)">Activar</button>') +
           '</td></tr>';
       }).join('');
@@ -4473,14 +4575,17 @@ function usrAbrirNuevo() {
   document.getElementById('mb-usr-tit').textContent='Nuevo usuario';
   ['usr-nombre','usr-email','usr-pin'].forEach(function(id){ document.getElementById(id).value=''; });
   document.getElementById('usr-rol').value='operador';
-  ['dep-mcba','dep-finca','dep-sanpedro'].forEach(function(id){ document.getElementById(id).checked=true; });
+  document.getElementById('dep-mcba').checked=true;
+  document.getElementById('dep-finca').checked=true;
+  document.getElementById('dep-sanpedro').checked=true;
+  usrRenderSeccionesGrid([]);
   eid('mb-usuario').classList.add('on');
 }
 
 function usrEditar(u) {
   if (typeof u==='string') try{u=JSON.parse(u);}catch(e){return;}
   document.getElementById('usr-id').value=u.id;
-  document.getElementById('mb-usr-tit').textContent='Editar usuario';
+  document.getElementById('mb-usr-tit').textContent='Editar — '+u.nombre;
   document.getElementById('usr-nombre').value=u.nombre||'';
   document.getElementById('usr-email').value=u.email||'';
   document.getElementById('usr-pin').value=u.pin||'';
@@ -4489,6 +4594,8 @@ function usrEditar(u) {
   document.getElementById('dep-mcba').checked=deps.includes('MCBA');
   document.getElementById('dep-finca').checked=deps.includes('FINCA');
   document.getElementById('dep-sanpedro').checked=deps.includes('SAN PEDRO');
+  var secs=JSON.parse(u.secciones||'["*"]');
+  usrRenderSeccionesGrid(secs);
   eid('mb-usuario').classList.add('on');
 }
 
@@ -4500,7 +4607,8 @@ function usrGuardar() {
   if(document.getElementById('dep-mcba').checked) deps.push('MCBA');
   if(document.getElementById('dep-finca').checked) deps.push('FINCA');
   if(document.getElementById('dep-sanpedro').checked) deps.push('SAN PEDRO');
-  var body={nombre:document.getElementById('usr-nombre').value.trim(),email:document.getElementById('usr-email').value.trim(),pin:pin,rol:document.getElementById('usr-rol').value,depositos:deps};
+  var secs = usrGetSeccionesSeleccionadas();
+  var body={nombre:document.getElementById('usr-nombre').value.trim(),email:document.getElementById('usr-email').value.trim(),pin:pin,rol:document.getElementById('usr-rol').value,depositos:deps,secciones:secs};
   if(!body.nombre||!body.email){toast('Nombre y email son requeridos','er');return;}
   fetch('/api/auth/usuarios'+(id?'/'+id:''),{method:id?'PATCH':'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
     .then(function(r){return r.json();})
@@ -4512,6 +4620,7 @@ function usrToggle(id,activo) {
     .then(function(r){return r.json();})
     .then(function(res){if(res.ok){usrCargar();toast(activo?'Usuario activado':'Desactivado','ok');}});
 }
+
 
 // Cargar dedicados cuando se navega a esa seccion
 document.querySelectorAll('.ni').forEach(function(el){

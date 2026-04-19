@@ -634,18 +634,30 @@ db.exec(`
     pin         TEXT NOT NULL,
     rol         TEXT DEFAULT 'operador' CHECK(rol IN ('admin','operador','consulta')),
     depositos   TEXT DEFAULT '["MCBA","FINCA","SAN PEDRO"]',
+    secciones   TEXT DEFAULT '["*"]',
     activo      INTEGER DEFAULT 1,
     creado_en   TEXT DEFAULT (datetime('now','localtime'))
   );
 `);
+
+// Migración: agregar columna secciones si no existe
+(function() {
+  try {
+    const cols = db.prepare("PRAGMA table_info(usuarios)").all().map(c => c.name);
+    if (!cols.includes('secciones')) {
+      db.exec("ALTER TABLE usuarios ADD COLUMN secciones TEXT DEFAULT '[\"*\"]'");
+      console.log("[DB] Columna secciones agregada en usuarios");
+    }
+  } catch(e) {}
+})();
 
 // Usuario admin por defecto (PIN: 0000) — solo si no existe ninguno
 (function() {
   try {
     const n = db.prepare("SELECT COUNT(*) as n FROM usuarios").get();
     if (n.n === 0) {
-      db.prepare(`INSERT INTO usuarios (nombre, email, pin, rol) VALUES (?,?,?,?)`)
-        .run('Andres Barcelo', 'a.barcelo@lnbonita.com.ar', '0000', 'admin');
+      db.prepare(`INSERT INTO usuarios (nombre, email, pin, rol, secciones) VALUES (?,?,?,?,?)`)
+        .run('Andres Barcelo', 'a.barcelo@lnbonita.com.ar', '0000', 'admin', '["*"]');
       console.log('[DB] Usuario admin creado — PIN: 0000');
     }
   } catch(e) { console.error('[DB] Error creando usuario admin:', e.message); }
