@@ -241,7 +241,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
 <div class="sec" id="sec-ab-stock">
   <div class="ab-section-header">
     <div><div class="ab-section-title">📦 Stock actual</div></div>
-    <div style="display:flex;gap:10px;align-items:center">
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
       <input class="ab-form-input" style="width:200px" placeholder="Buscar producto..." oninput="abStockFiltrar(this.value)">
       <select class="ab-form-select" style="width:150px" onchange="abStockVista(this.value)">
         <option value="resumen">Por producto</option>
@@ -254,6 +254,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
         <option value="SAN PEDRO">SAN PEDRO</option>
       </select>
       <button class="btn bo bs" onclick="abCargarStock()">↻</button>
+      <button class="btn bb" onclick="mdAbrirNueva()" title="Nueva mandata desde stock">🧾 Nueva Mandata</button>
     </div>
   </div>
   <div class="ab-card">

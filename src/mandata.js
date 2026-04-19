@@ -245,7 +245,7 @@ function mdIrPaso3() {
   el = document.getElementById('md-header-info');  if (el) el.textContent = '📦 ' + MD.deposito + ' · ' + MD.empresa;
   el = document.getElementById('md-paso3-cliente'); if (el) el.textContent = MD.empresa;
   el = document.getElementById('md-paso3-dep');     if (el) el.textContent = MD.deposito;
-  abApi('/partidas?estado=activa&deposito=' + encodeURIComponent(MD.deposito)).then(function(res) {
+  abApi('/partidas?deposito=' + encodeURIComponent(MD.deposito) + '&estado=activa&estado2=parcial&disponible=1').then(function(res) {
     MD.partidas = res.ok ? res.data : [];
     mdRenderItemsSel();
     mdMostrarPaso(3);

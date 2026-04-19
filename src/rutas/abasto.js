@@ -96,13 +96,20 @@ router.get('/productos', (req, res) => {
 // Listar partidas (con filtros opcionales)
 router.get('/partidas', (req, res) => {
   const db = getDb();
-  const { estado, proveedor_id, producto, deposito } = req.query;
+  const { estado, estado2, proveedor_id, producto, deposito } = req.query;
   let where = [];
   let params = [];
-  if (estado) { where.push('pa.estado = ?'); params.push(estado); }
+  if (estado && estado2) {
+    where.push('pa.estado IN (?, ?)'); params.push(estado, estado2);
+  } else if (estado) {
+    where.push('pa.estado = ?'); params.push(estado);
+  }
   if (proveedor_id) { where.push('pa.proveedor_id = ?'); params.push(proveedor_id); }
   if (producto) { where.push('(pa.producto LIKE ? OR rp.nombre LIKE ?)'); params.push(`%${producto}%`, `%${producto}%`); }
   if (deposito) { where.push('pa.deposito = ?'); params.push(deposito); }
+  // Solo con stock disponible cuando viene de mandata
+  const soloDisponible = req.query.disponible === '1';
+  if (soloDisponible) { where.push('pa.bultos_disponibles > 0'); }
   const whereStr = where.length ? 'WHERE ' + where.join(' AND ') : '';
   try {
     const partidas = db.prepare(`
