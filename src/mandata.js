@@ -599,3 +599,291 @@ function mdVerDetalle(id) {
     alert(m.nro_mandata + ' — ' + m.empresa + '\n' + abFecha(m.fecha) + ' | ' + m.deposito + '\n\n' + items + '\n\n─────\nTotal: $' + mdFmt(m.total_importe) + (m.metodo_pago ? '\nPago: ' + m.metodo_pago : ''));
   });
 }
+
+// ─── PREPARACIÓN DE PEDIDOS ──────────────────────────────────
+var ETQ = { pedido: null, rp: null, zDevice: null };
+
+function prepCargar() {
+  var fechaEl = document.getElementById('prep-fecha');
+  if (!fechaEl.value) fechaEl.value = new Date().toISOString().split('T')[0];
+  var tipo  = document.getElementById('prep-tipo').value;
+  var fecha = fechaEl.value;
+  var url   = '/api/pedidos?estado=pendiente' + (tipo ? '&tipo_cliente=' + tipo : '') + (fecha ? '&fecha=' + fecha : '');
+
+  api(url).then(function(peds) {
+    var lista   = document.getElementById('prep-lista');
+    var resumen = document.getElementById('prep-resumen');
+
+    if (!peds || !peds.length) {
+      lista.innerHTML   = '<div class="ab-empty"><div class="ab-empty-icon">✅</div>Sin pedidos pendientes para esta fecha</div>';
+      resumen.innerHTML = '';
+      return;
+    }
+
+    var totalVal = 0, totalItems = 0;
+    peds.forEach(function(p) {
+      totalVal += p.total || 0;
+      try { totalItems += JSON.parse(p.detalle).length; } catch(e) {}
+    });
+
+    resumen.innerHTML = [
+      { label: 'Pedidos',   val: peds.length,             color: '#1e40af', bg: '#dbeafe' },
+      { label: 'Productos', val: totalItems,               color: '#166534', bg: '#dcfce7' },
+      { label: 'Total',     val: '$' + nr(totalVal),       color: '#854d0e', bg: '#fef9c3' }
+    ].map(function(r) {
+      return '<div style="background:' + r.bg + ';border-radius:10px;padding:12px 16px;text-align:center">' +
+        '<div style="font-size:22px;font-weight:900;color:' + r.color + '">' + r.val + '</div>' +
+        '<div style="font-size:11px;color:' + r.color + ';opacity:.7;font-weight:600;text-transform:uppercase;letter-spacing:.05em">' + r.label + '</div></div>';
+    }).join('');
+
+    lista.innerHTML = '';
+    peds.forEach(function(p) {
+      var lineas  = [];
+      try { lineas = JSON.parse(p.detalle); } catch(e) {}
+      var cliente = p.nombre || p.empresa || p.telefono;
+
+      var card = document.createElement('div');
+      card.style.cssText = 'background:var(--sur);border:1px solid var(--bor);border-radius:12px;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,.06);margin-bottom:10px';
+
+      var header = document.createElement('div');
+      header.style.cssText = 'padding:14px 16px;background:var(--bg);border-bottom:1px solid var(--bor);display:flex;justify-content:space-between;align-items:center';
+      header.innerHTML =
+        '<div><div style="font-size:16px;font-weight:800">' + cliente + '</div>' +
+        '<div style="font-size:12px;color:var(--mut);margin-top:2px">' + bTipo(p.tipo_cliente) + ' · #' + p.id + (p.horario_entrega ? ' · ' + p.horario_entrega : '') + '</div></div>' +
+        '<div style="text-align:right"><div style="font-size:18px;font-weight:700;color:var(--burd)">$' + nr(p.total || 0) + '</div>' +
+        '<div style="font-size:11px;color:var(--mut)">' + lineas.length + ' productos</div></div>';
+      card.appendChild(header);
+
+      var body = document.createElement('div');
+      body.style.cssText = 'padding:0 16px';
+      lineas.forEach(function(l) {
+        var row = document.createElement('div');
+        row.style.cssText = 'display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--bor)';
+        row.innerHTML =
+          '<div><div style="font-weight:600;font-size:14px">' + (l.nombre || 'Producto') + '</div>' +
+          '<div style="font-size:12px;color:var(--mut)">' + (l.cantidad || 1) + ' bultos' + (l.precio ? ' · $' + nr(l.precio) : '') + '</div></div>';
+        var btnEtq = document.createElement('button');
+        btnEtq.className = 'btn bb bs';
+        btnEtq.style.cssText = 'font-size:12px;padding:8px 14px';
+        btnEtq.textContent = '🏷 Etiquetar';
+        btnEtq.addEventListener('click', (function(linea, pedido) {
+          return function() { etqAbrir(pedido.id, linea, pedido); };
+        })(l, p));
+        row.appendChild(btnEtq);
+        body.appendChild(row);
+      });
+      card.appendChild(body);
+
+      var footer = document.createElement('div');
+      footer.style.cssText = 'padding:10px 16px;display:flex;justify-content:space-between;align-items:center';
+      var sel = document.createElement('select');
+      sel.className = 'bdg b' + ecl(p.estado);
+      sel.style.cssText = 'background:transparent;border:none;cursor:pointer;font-size:11px;color:inherit';
+      ['pendiente','entregado','facturado','cancelado'].forEach(function(e) {
+        var opt = document.createElement('option');
+        opt.value = e; opt.textContent = e;
+        if (p.estado === e) opt.selected = true;
+        sel.appendChild(opt);
+      });
+      sel.addEventListener('change', function() { cambEst(p.id, this.value); });
+      footer.appendChild(sel);
+
+      var btnPdf = document.createElement('a');
+      btnPdf.href = '/api/pedidos/' + p.id + '/orden/pdf';
+      btnPdf.target = '_blank';
+      btnPdf.className = 'btn bo bs';
+      btnPdf.style.cssText = 'text-decoration:none;font-size:12px';
+      btnPdf.textContent = 'PDF orden';
+      footer.appendChild(btnPdf);
+
+      card.appendChild(footer);
+      lista.appendChild(card);
+    });
+  });
+}
+
+// ─── EDITOR DE ETIQUETAS ZEBRA ───────────────────────────────
+var ETQ_CAMPOS_DEF = [
+  { id: 'logo',      label: '🏷 Logo La Niña Bonita' },
+  { id: 'producto',  label: '📦 Nombre producto' },
+  { id: 'ean',       label: '||| Código de barras EAN' },
+  { id: 'kilos',     label: '⚖ Kilos por bulto' },
+  { id: 'bulto_nro', label: '# Nro de bulto (1 de N)' },
+  { id: 'cliente',   label: '🏪 Nombre cliente' },
+  { id: 'fecha',     label: '📅 Fecha' },
+  { id: 'origen',    label: '📍 Origen / Depósito' }
+];
+
+function etqAbrir(pedidoId, linea, pedido) {
+  ETQ.pedido = pedido; ETQ.linea = linea; ETQ.rp = null;
+  document.getElementById('etq-titulo').textContent    = '🏷 Etiquetado — ' + (linea.nombre || 'Producto');
+  document.getElementById('etq-subtitulo').textContent = (pedido.nombre || pedido.empresa || pedido.telefono) + ' · Pedido #' + pedidoId;
+  document.getElementById('etq-cantidad').value = linea.cantidad || 1;
+  document.getElementById('etq-producto').value = linea.nombre || '';
+  document.getElementById('etq-kilos').value    = linea.peso || linea.kilos || '';
+  document.getElementById('etq-cliente').value  = pedido.nombre || pedido.empresa || '';
+  document.getElementById('etq-ean').value      = linea.ean || '';
+  document.getElementById('etq-ancho').value    = 100;
+  document.getElementById('etq-alto').value     = 150;
+  document.getElementById('etq-btn-cant').textContent = linea.cantidad || 1;
+
+  var camposDefault = ['logo','producto','ean','kilos','bulto_nro','cliente','fecha'];
+  document.getElementById('etq-campos-lista').innerHTML = ETQ_CAMPOS_DEF.map(function(c) {
+    return '<label style="display:flex;align-items:center;gap:6px;padding:5px;border-radius:6px;cursor:pointer;font-size:13px;text-transform:none;color:var(--txt)">' +
+      '<input type="checkbox" class="etq-campo-chk" value="' + c.id + '"' + (camposDefault.indexOf(c.id) >= 0 ? ' checked' : '') + ' onchange="etqActualizar()"> ' + c.label + '</label>';
+  }).join('');
+
+  var nomBuscar = (linea.nombre || '').split(' ').slice(0, 3).join(' ');
+  abApi('/etiqueta/producto?nombre=' + encodeURIComponent(nomBuscar)).then(function(res) {
+    if (!res.ok || !res.data) { etqActualizar(); return; }
+    var rp = res.data; ETQ.rp = rp;
+    document.getElementById('etq-ancho').value = rp.etiqueta_ancho || 100;
+    document.getElementById('etq-alto').value  = rp.etiqueta_alto  || 150;
+    var campos = rp.etiqueta_campos || camposDefault;
+    document.querySelectorAll('.etq-campo-chk').forEach(function(chk) { chk.checked = campos.indexOf(chk.value) >= 0; });
+    var eans = rp.eans || {};
+    var tipo = (pedido.tipo_cliente || '').toLowerCase();
+    var empresa = (pedido.empresa || '').toLowerCase();
+    var eanAuto = '';
+    if (empresa.indexOf('cencosud') >= 0 || empresa.indexOf('disco') >= 0 || empresa.indexOf('vea') >= 0) eanAuto = eans['cencosud'] || '';
+    else if (empresa.indexOf('carrefour') >= 0) eanAuto = eans['carrefour'] || '';
+    else if (empresa.indexOf('coto') >= 0)      eanAuto = eans['coto']      || '';
+    else if (empresa.indexOf('chango') >= 0)     eanAuto = eans['chango']    || '';
+    else if (empresa.indexOf('coop') >= 0)       eanAuto = eans['coop']      || '';
+    if (!eanAuto) eanAuto = Object.values(eans)[0] || linea.ean || '';
+    document.getElementById('etq-ean').value = eanAuto;
+    etqActualizar();
+  }).catch(function() { etqActualizar(); });
+
+  etqDetectarZebra();
+  eid('mb-etiqueta').classList.add('on');
+}
+
+function etqActualizar() {
+  var cant    = parseInt(document.getElementById('etq-cantidad').value) || 1;
+  var ancho   = parseInt(document.getElementById('etq-ancho').value)    || 100;
+  var alto    = parseInt(document.getElementById('etq-alto').value)     || 150;
+  var producto = document.getElementById('etq-producto').value;
+  var kilos    = document.getElementById('etq-kilos').value;
+  var cliente  = document.getElementById('etq-cliente').value;
+  var ean      = document.getElementById('etq-ean').value;
+  var fecha    = new Date().toLocaleDateString('es-AR');
+  var campos   = etqGetCampos();
+  document.getElementById('etq-btn-cant').textContent = cant;
+
+  var escala = Math.min(320 / ancho, 260 / alto);
+  var pw = Math.round(ancho * escala), ph = Math.round(alto * escala);
+  var prev = document.getElementById('etq-preview');
+  prev.style.cssText = 'background:#fff;border:1px solid #ddd;box-shadow:0 2px 8px rgba(0,0,0,.1);font-family:Arial,sans-serif;overflow:hidden;position:relative;width:' + pw + 'px;height:' + ph + 'px;font-size:' + Math.round(10 * escala) + 'px;padding:' + Math.round(6 * escala) + 'px;box-sizing:border-box';
+
+  var html = '';
+  if (campos.indexOf('logo') >= 0) html += '<div style="text-align:center;margin-bottom:' + Math.round(4*escala) + 'px"><img src="/static/logo.jpg" style="height:' + Math.round(28*escala) + 'px;max-width:100%" onerror="this.style.display=\'none\'"></div>';
+  if (campos.indexOf('producto') >= 0 && producto) html += '<div style="font-weight:900;font-size:' + Math.round(13*escala) + 'px;text-align:center;text-transform:uppercase;border-bottom:1px solid #ddd;padding-bottom:' + Math.round(3*escala) + 'px;margin-bottom:' + Math.round(3*escala) + 'px;line-height:1.2">' + producto + '</div>';
+  var midRow = '';
+  if (campos.indexOf('kilos') >= 0 && kilos)       midRow += '<span style="font-size:' + Math.round(12*escala) + 'px;font-weight:700">' + kilos + ' KG</span>';
+  if (campos.indexOf('bulto_nro') >= 0)             midRow += '<span style="font-size:' + Math.round(10*escala) + 'px;color:#666;margin-left:auto">Bulto 1/' + cant + '</span>';
+  if (midRow) html += '<div style="display:flex;align-items:center;margin-bottom:' + Math.round(3*escala) + 'px">' + midRow + '</div>';
+  if (campos.indexOf('cliente') >= 0 && cliente)    html += '<div style="font-size:' + Math.round(11*escala) + 'px;font-weight:600;color:#333;margin-bottom:' + Math.round(3*escala) + 'px">🏪 ' + cliente + '</div>';
+  if (campos.indexOf('fecha') >= 0)                 html += '<div style="font-size:' + Math.round(9*escala)  + 'px;color:#666;margin-bottom:' + Math.round(4*escala) + 'px">📅 ' + fecha + '</div>';
+  if (campos.indexOf('ean') >= 0 && ean) html += '<div style="text-align:center;margin-top:' + Math.round(4*escala) + 'px"><div style="font-family:monospace;font-size:' + Math.round(28*escala) + 'px;letter-spacing:' + Math.round(1*escala) + 'px;line-height:1;color:#000">|||||||||||||||||||</div><div style="font-size:' + Math.round(8*escala) + 'px;letter-spacing:1px;color:#333;margin-top:' + Math.round(2*escala) + 'px">' + ean + '</div></div>';
+  prev.innerHTML = html;
+}
+
+function etqGetCampos() {
+  var campos = [];
+  document.querySelectorAll('.etq-campo-chk:checked').forEach(function(c) { campos.push(c.value); });
+  return campos;
+}
+
+function etqDetectarZebra() {
+  var txt = document.getElementById('etq-zebra-txt');
+  var nom = document.getElementById('etq-zebra-nombre');
+  var bpLink = document.getElementById('etq-bp-link');
+  txt.textContent = '🔍 Buscando impresora Zebra...'; nom.textContent = ''; ETQ.zDevice = null;
+  fetch('http://localhost:9100/available', { signal: AbortSignal.timeout ? AbortSignal.timeout(2000) : undefined })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      var devices = data.printer || [];
+      if (!devices.length) throw new Error('Sin impresoras');
+      ETQ.zDevice = devices[0];
+      txt.textContent = '✅ Impresora conectada'; nom.textContent = ETQ.zDevice.name || 'Zebra';
+      if (bpLink) bpLink.style.display = 'none';
+      document.getElementById('etq-zebra-status').style.background    = '#dcfce7';
+      document.getElementById('etq-zebra-status').style.borderColor   = '#86efac';
+    })
+    .catch(function() {
+      txt.textContent = '❌ No se detectó Zebra Browser Print';
+      if (bpLink) bpLink.style.display = 'block';
+      document.getElementById('etq-zebra-status').style.background    = '#fef9c3';
+      document.getElementById('etq-zebra-status').style.borderColor   = '#fbbf24';
+    });
+}
+
+function etqGenerarZPL(nroBulto, totalBultos) {
+  var ancho   = parseInt(document.getElementById('etq-ancho').value)   || 100;
+  var alto    = parseInt(document.getElementById('etq-alto').value)    || 150;
+  var producto = document.getElementById('etq-producto').value.toUpperCase();
+  var kilos    = document.getElementById('etq-kilos').value;
+  var cliente  = document.getElementById('etq-cliente').value.toUpperCase();
+  var ean      = document.getElementById('etq-ean').value.replace(/\D/g, '');
+  var fecha    = new Date().toLocaleDateString('es-AR');
+  var campos   = etqGetCampos();
+  var dpi = 8, w = ancho * dpi, h = alto * dpi, y = 30;
+
+  var zpl = '^XA\n^PW' + w + '\n^LL' + h + '\n^CI28\n';
+  if (campos.indexOf('logo') >= 0)    { zpl += '^FO20,' + y + '^A0N,22,22^FDLA NINA BONITA^FS\n'; zpl += '^FO20,' + (y+24) + '^A0N,14,14^FDSAN GERONIMO SA^FS\n'; zpl += '^FO20,' + (y+40) + '^GB' + (w-40) + ',2,2^FS\n'; y += 55; }
+  if (campos.indexOf('producto') >= 0 && producto) { zpl += '^FO20,' + y + '^A0N,30,30^FB' + (w-40) + ',2,,^FD' + producto + '^FS\n'; y += 70; }
+  if (campos.indexOf('kilos') >= 0 && kilos)       zpl += '^FO20,' + y + '^A0N,24,24^FD' + kilos + ' KG^FS\n';
+  if (campos.indexOf('bulto_nro') >= 0)             zpl += '^FO' + (w-160) + ',' + y + '^A0N,20,20^FDBulto ' + nroBulto + '/' + totalBultos + '^FS\n';
+  y += 40;
+  if (campos.indexOf('cliente') >= 0 && cliente)    { zpl += '^FO20,' + y + '^A0N,22,22^FB' + (w-40) + ',1,,^FD' + cliente + '^FS\n'; y += 30; }
+  if (campos.indexOf('fecha') >= 0)                 { zpl += '^FO20,' + y + '^A0N,16,16^FD' + fecha + '^FS\n'; y += 24; }
+  if (campos.indexOf('ean') >= 0 && ean)            { y = Math.max(y, h-90); var tipo = ean.length===13?'E':(ean.length===12?'U':'C'); zpl += '^FO' + Math.round((w-200)/2) + ',' + y + '^BY2^B' + tipo + 'N,60,Y,N^FD' + ean + '^FS\n'; }
+  zpl += '^XZ\n';
+  return zpl;
+}
+
+function etqImprimirTodas() {
+  var cant = parseInt(document.getElementById('etq-cantidad').value) || 1;
+  if (!ETQ.zDevice) { if (!confirm('No hay impresora Zebra conectada. ¿Descargar el archivo ZPL?')) return; etqDescargarZPL(); return; }
+  var btn = document.getElementById('etq-btn-imprimir');
+  btn.disabled = true; btn.textContent = 'Imprimiendo...';
+  var i = 1;
+  function siguiente() {
+    if (i > cant) { btn.disabled = false; btn.innerHTML = 'Imprimir <span id="etq-btn-cant">' + cant + '</span> etiquetas'; toast('✅ ' + cant + ' etiquetas enviadas a la Zebra', 'ok'); return; }
+    fetch('http://localhost:9100/write', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ device: ETQ.zDevice, data: etqGenerarZPL(i, cant) }) })
+      .then(function() { i++; setTimeout(siguiente, 100); })
+      .catch(function(e) { toast('Error en etiqueta ' + i + ': ' + e.message, 'er'); btn.disabled = false; });
+  }
+  siguiente();
+}
+
+function etqTestImprimir() {
+  var zpl = etqGenerarZPL(1, 1);
+  if (!ETQ.zDevice) { var w = window.open('', '_blank'); w.document.write('<pre>' + zpl + '</pre>'); return; }
+  fetch('http://localhost:9100/write', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ device: ETQ.zDevice, data: zpl }) })
+    .then(function() { toast('Etiqueta de prueba enviada ✓', 'ok'); })
+    .catch(function(e) { toast('Error: ' + e.message, 'er'); });
+}
+
+function etqDescargarZPL() {
+  var cant = parseInt(document.getElementById('etq-cantidad').value) || 1;
+  var todo = '';
+  for (var i = 1; i <= cant; i++) todo += etqGenerarZPL(i, cant);
+  var blob = new Blob([todo], { type: 'text/plain' });
+  var a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'etiquetas_' + (document.getElementById('etq-producto').value || 'pedido').replace(/\s+/g, '_') + '.zpl';
+  a.click();
+}
+
+function etqGuardarConfig() {
+  if (!ETQ.rp) { toast('No se encontró el producto en el maestro', 'er'); return; }
+  etqGuardarEnProducto(ETQ.rp.id);
+  toast('✓ Configuración guardada para "' + ETQ.rp.nombre + '"', 'ok');
+}
+
+function etqGuardarEnProducto(rpId) {
+  if (!rpId) return;
+  abApi('/etiqueta/producto/' + rpId, { method: 'PATCH', body: JSON.stringify({ etiqueta_ancho: parseInt(document.getElementById('etq-ancho').value) || 100, etiqueta_alto: parseInt(document.getElementById('etq-alto').value) || 150, etiqueta_campos: etqGetCampos() }) }).catch(function() {});
+}
