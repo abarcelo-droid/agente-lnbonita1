@@ -650,6 +650,33 @@ export function getDb() {
   } catch(e) { console.error("[DB] Error migrando partidas:", e.message); }
 })();
 
+// Migración: columnas transporte en remitos_salida
+(function migrarRemitos() {
+  try {
+    const cols = db.prepare("PRAGMA table_info(remitos_salida)").all().map(c => c.name);
+    if (!cols.includes('chofer')) {
+      db.exec("ALTER TABLE remitos_salida ADD COLUMN chofer TEXT");
+      console.log("[DB] Columna chofer agregada en remitos_salida");
+    }
+    if (!cols.includes('tractor')) {
+      db.exec("ALTER TABLE remitos_salida ADD COLUMN tractor TEXT");
+      console.log("[DB] Columna tractor agregada en remitos_salida");
+    }
+    if (!cols.includes('semi')) {
+      db.exec("ALTER TABLE remitos_salida ADD COLUMN semi TEXT");
+      console.log("[DB] Columna semi agregada en remitos_salida");
+    }
+    if (!cols.includes('conformado_path')) {
+      db.exec("ALTER TABLE remitos_salida ADD COLUMN conformado_path TEXT");
+      console.log("[DB] Columna conformado_path agregada en remitos_salida");
+    }
+    if (!cols.includes('whatsapp_enviado')) {
+      db.exec("ALTER TABLE remitos_salida ADD COLUMN whatsapp_enviado INTEGER DEFAULT 0");
+      console.log("[DB] Columna whatsapp_enviado agregada en remitos_salida");
+    }
+  } catch(e) { console.error("[DB] Error migrando remitos_salida:", e.message); }
+})();
+
 // ── MÓDULO MANDATA ─────────────────────────────────────────────────────────
 db.exec(`
   CREATE TABLE IF NOT EXISTS mandatas (

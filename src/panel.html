@@ -584,7 +584,16 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     <div id="ab-rem-picker-list" style="max-height:220px;overflow-y:auto"></div>
   </div>
   <button class="btn bo bs" onclick="abAbrirPicker()">+ Agregar producto</button>
-  <div class="ab-form-group" style="margin-top:14px"><label class="ab-form-label">Notas</label><textarea class="ab-form-textarea" id="ab-rem-notas" style="min-height:50px"></textarea></div>
+
+  <!-- Transporte -->
+  <div style="margin-top:14px;margin-bottom:6px;font-size:11px;font-weight:600;color:var(--mut);text-transform:uppercase;letter-spacing:.05em">Transporte</div>
+  <div class="ab-grid ab-grid-3">
+    <div class="ab-form-group"><label class="ab-form-label">Chofer</label><input class="ab-form-input" id="ab-rem-chofer" placeholder="Nombre chofer"></div>
+    <div class="ab-form-group"><label class="ab-form-label">Tractor / Patente</label><input class="ab-form-input" id="ab-rem-tractor" placeholder="Ej: IYN 608"></div>
+    <div class="ab-form-group"><label class="ab-form-label">Semi / Patente</label><input class="ab-form-input" id="ab-rem-semi" placeholder="Ej: GJP 022"></div>
+  </div>
+
+  <div class="ab-form-group"><label class="ab-form-label">Observaciones</label><textarea class="ab-form-textarea" id="ab-rem-notas" placeholder="Observaciones que aparecerán en el imprimible..." style="min-height:60px"></textarea></div>
   <div class="ab-modal-footer">
     <button class="btn bo" onclick="abCerrarModal('ab-modal-remito')">Cancelar</button>
     <button class="btn bb" onclick="abGuardarRemito()">Emitir remito</button>
@@ -3759,14 +3768,34 @@ function abCargarRemitos() {
     var tbody = document.getElementById('ab-remitos-tbody');
     if (!res.data.length) { tbody.innerHTML = '<tr><td colspan="9"><div class="ab-empty"><div class="ab-empty-icon">📋</div>Sin remitos</div></td></tr>'; return; }
     tbody.innerHTML = res.data.map(function(r) {
-      return '<tr><td><strong>'+(r.nro_remito||'—')+'</strong></td><td>'+abFecha(r.fecha)+'</td><td>'+(r.empresa||'—')+'</td><td>'+(r.contacto||'—')+'</td><td>'+(r.comercial||'—')+'</td><td>'+(r.total_items||0)+'</td><td>'+abFmt(r.total_bultos)+'</td><td>'+abBadgeEstado(r.estado)+'</td><td style="white-space:nowrap"><button class="btn bo bs" style="margin-right:4px" onclick="abVerRemito('+r.id+')">Ver</button><button class="btn bb bs" onclick="window.open(\'/api/abasto/remitos/'+r.id+'/pdf\',\'_blank\')" title="Imprimir PDF">🖨</button></td></tr>';
+      var anulado = r.estado === 'anulado';
+      var rowStyle = anulado ? 'opacity:.5' : '';
+      var wpBadge = r.whatsapp_enviado ? '<span style="font-size:10px;color:#16a34a;margin-left:4px" title="WA enviado">✓WA</span>' : '';
+      var confBadge = r.conformado_path ? '<span style="font-size:10px;color:#1d4ed8;margin-left:4px" title="Conformado subido">📎</span>' : '';
+      var btns = '<div style="display:flex;gap:3px;flex-wrap:wrap">';
+      btns += '<button class="btn bo bs" onclick="abVerRemito('+r.id+')">Ver</button>';
+      if (!anulado) {
+        btns += '<button class="btn bb bs" onclick="window.open(\'/api/abasto/remitos/'+r.id+'/pdf\',\'_blank\')" title="Imprimir">🖨</button>';
+        btns += '<button class="btn bo bs" onclick="abEnviarWA('+r.id+',\''+r.nro_remito+'\',\''+( r.cliente_telefono||'')+'\',\''+( r.empresa||'').replace(/'/g,"\\'")+'\')" title="Enviar WhatsApp" style="color:#16a34a">📲</button>';
+        btns += '<button class="btn bo bs" onclick="abSubirConformado('+r.id+')" title="Subir conformado">📎</button>';
+        btns += '<button class="btn bd bs" onclick="abAnularRemito('+r.id+',\''+r.nro_remito+'\')" title="Anular">✕</button>';
+      } else {
+        btns += '<button class="btn bo bs" onclick="window.open(\'/api/abasto/remitos/'+r.id+'/pdf\',\'_blank\')" title="Ver PDF">🖨</button>';
+      }
+      btns += '</div>';
+      return '<tr style="'+rowStyle+'">' +
+        '<td><strong>'+(r.nro_remito||'—')+'</strong>'+(anulado?'<br><span style="font-size:9px;color:var(--err);font-weight:700">ANULADO</span>':'')+'</td>' +
+        '<td>'+abFecha(r.fecha)+'</td><td>'+(r.empresa||'—')+'</td><td>'+(r.contacto||'—')+'</td>' +
+        '<td>'+(r.comercial||'—')+'</td><td>'+(r.total_items||0)+'</td><td>'+abFmt(r.total_bultos)+'</td>' +
+        '<td>'+abBadgeEstado(r.estado)+wpBadge+confBadge+'</td>' +
+        '<td>'+btns+'</td></tr>';
     }).join('');
   });
 }
 
 function abAbrirNuevoRemito() {
   document.getElementById('ab-rem-fecha').value = new Date().toISOString().split('T')[0];
-  ['ab-rem-empresa','ab-rem-contacto','ab-rem-dir','ab-rem-notas'].forEach(function(id){ document.getElementById(id).value=''; });
+  ['ab-rem-empresa','ab-rem-contacto','ab-rem-dir','ab-rem-notas','ab-rem-chofer','ab-rem-tractor','ab-rem-semi'].forEach(function(id){ document.getElementById(id).value=''; });
   document.getElementById('ab-rem-comercial').value = '';
   AB.remitoItems = [];
   abApi('/partidas?estado=activa').then(function(res){ if(res.ok) AB.partidas = res.data; });
@@ -3903,6 +3932,9 @@ function abGuardarRemito() {
     contacto: document.getElementById('ab-rem-contacto').value.trim(),
     direccion_entrega: document.getElementById('ab-rem-dir').value.trim(),
     comercial: document.getElementById('ab-rem-comercial').value,
+    chofer: document.getElementById('ab-rem-chofer').value.trim() || null,
+    tractor: document.getElementById('ab-rem-tractor').value.trim() || null,
+    semi: document.getElementById('ab-rem-semi').value.trim() || null,
     notas: document.getElementById('ab-rem-notas').value,
     items: AB.remitoItems.map(function(i){ return {partida_id:i.partida_id,bultos:i.bultos,precio_ref:i.precio_ref||0,precio_final:i.precio_ref||0,moneda:i.moneda}; })
   };
@@ -3910,6 +3942,52 @@ function abGuardarRemito() {
     if (res.ok) { abCerrarModal('ab-modal-remito'); toast('Remito '+res.nro_remito+' emitido','ok'); abCargarRemitos(); abDashboard(); }
     else toast('Error: '+res.error,'er');
   });
+}
+
+function abAnularRemito(id, nro) {
+  if (!confirm('¿Anular el remito ' + nro + '?\n\nEl stock vuelve al depósito. El número queda registrado como ANULADO.')) return;
+  abApi('/remitos/' + id + '/anular', { method: 'POST', body: '{}' }).then(function(res) {
+    if (res.ok) { toast(res.mensaje || 'Remito anulado', 'ok'); abCargarRemitos(); abDashboard(); }
+    else toast('Error: ' + res.error, 'er');
+  });
+}
+
+// Modal WhatsApp
+function abEnviarWA(id, nro, telActual, empresa) {
+  var tel = prompt(
+    'Enviar remito ' + nro + ' por WhatsApp\n\n' +
+    'Cliente: ' + empresa + '\n' +
+    'Ingresá el número de WhatsApp (sin 0, sin 15):\n' +
+    'Ej: 1155667788',
+    telActual || ''
+  );
+  if (!tel) return;
+  abApi('/remitos/' + id + '/whatsapp', { method: 'POST', body: JSON.stringify({ telefono: tel }) }).then(function(res) {
+    if (res.ok) { toast('✓ Remito enviado por WhatsApp', 'ok'); abCargarRemitos(); }
+    else toast('Error: ' + res.error, 'er');
+  });
+}
+
+// Subir conformado
+function abSubirConformado(id) {
+  var input = document.createElement('input');
+  input.type = 'file';
+  input.accept = 'image/*,application/pdf';
+  input.onchange = function() {
+    var file = input.files[0];
+    if (!file) return;
+    if (file.size > 20 * 1024 * 1024) { toast('El archivo supera 20MB', 'er'); return; }
+    var fd = new FormData();
+    fd.append('archivo', file);
+    toast('Subiendo conformado...', 'ok');
+    fetch('/api/abasto/remitos/' + id + '/conformado', { method: 'POST', body: fd })
+      .then(function(r){ return r.json(); })
+      .then(function(res) {
+        if (res.ok) { toast('✓ Conformado subido correctamente', 'ok'); abCargarRemitos(); }
+        else toast('Error: ' + res.error, 'er');
+      });
+  };
+  input.click();
 }
 
 function abVerRemito(id) {

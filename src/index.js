@@ -52,6 +52,7 @@ app.use(express.urlencoded({ extended: false, limit: '20mb' }));
 // Archivos estaticos
 app.use("/static",       express.static(path.join(__dirname, ".")));
 app.use("/data/uploads", express.static(path.join(__dirname, "../data/uploads")));
+app.use("/data/conformados", express.static(path.join(__dirname, "../data/conformados")));
 
 // Panel web
 app.get("/panel", (req, res) => res.sendFile(path.join(__dirname, "panel.html")));

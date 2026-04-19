@@ -326,7 +326,7 @@ router.get('/remitos/:id', (req, res) => {
 // Crear remito
 router.post('/remitos', (req, res) => {
   const db = getDb();
-  const { fecha, cliente_telefono, empresa, contacto, direccion_entrega, comercial, items, notas } = req.body;
+  const { fecha, cliente_telefono, empresa, contacto, direccion_entrega, comercial, chofer, tractor, semi, items, notas } = req.body;
   if (!items || items.length === 0) return res.status(400).json({ ok: false, error: 'El remito debe tener al menos un ítem' });
 
   try {
@@ -348,9 +348,9 @@ router.post('/remitos', (req, res) => {
 
       // Crear remito
       const r = db.prepare(`
-        INSERT INTO remitos_salida (nro_remito, fecha, cliente_telefono, empresa, contacto, direccion_entrega, comercial, estado, notas)
-        VALUES (?, ?, ?, ?, ?, ?, ?, 'emitido', ?)
-      `).run(nroNuevo, fecha || new Date().toISOString().split('T')[0], cliente_telefono, empresa, contacto, direccion_entrega, comercial, notas);
+        INSERT INTO remitos_salida (nro_remito, fecha, cliente_telefono, empresa, contacto, direccion_entrega, comercial, chofer, tractor, semi, estado, notas)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'emitido', ?)
+      `).run(nroNuevo, fecha || new Date().toISOString().split('T')[0], cliente_telefono, empresa, contacto, direccion_entrega, comercial, chofer||null, tractor||null, semi||null, notas);
 
       const remito_id = r.lastInsertRowid;
 
@@ -604,15 +604,16 @@ router.get('/remitos/:id/pdf', (req, res) => {
   <!-- CHOFER + OBSERVACIONES -->
   <div class="extra">
     <div class="chofer-box">
-      <p>CHOFER: ${remito.notas ? remito.notas.match(/chofer[:\s]+([^\n]+)/i)?.[1] || '' : ''}</p>
-      <p>TRACTOR: &nbsp;</p>
-      <p>SEMI: &nbsp;</p>
+      <p>CHOFER: ${remito.chofer || ''}</p>
+      <p>TRACTOR: ${remito.tractor || ''}</p>
+      <p>SEMI: ${remito.semi || ''}</p>
     </div>
     <div class="obs-box">
       <div class="obs-label">Observaciones:</div>
-      <div class="obs-lines"></div>
-      <div class="obs-lines"></div>
-      <div class="obs-lines"></div>
+      ${remito.notas
+        ? `<div style="font-size:10px;line-height:1.6;margin-bottom:4px">${remito.notas}</div>`
+        : `<div class="obs-lines"></div><div class="obs-lines"></div><div class="obs-lines"></div>`
+      }
     </div>
   </div>
 
@@ -649,6 +650,118 @@ router.get('/remitos/:id/pdf', (req, res) => {
 
 
 
+
+// Anular remito (devuelve stock, mantiene número)
+router.post('/remitos/:id/anular', (req, res) => {
+  const db = getDb();
+  try {
+    const remito = db.prepare('SELECT * FROM remitos_salida WHERE id=?').get(req.params.id);
+    if (!remito) return res.status(404).json({ ok: false, error: 'Remito no encontrado' });
+    if (remito.estado === 'anulado') return res.status(400).json({ ok: false, error: 'Ya está anulado' });
+    if (remito.estado === 'facturado') return res.status(400).json({ ok: false, error: 'No se puede anular un remito facturado' });
+
+    const items = db.prepare('SELECT * FROM remitos_items WHERE remito_id=?').all(req.params.id);
+
+    db.transaction(() => {
+      // Devolver stock a cada partida
+      for (const item of items) {
+        const partida = db.prepare('SELECT * FROM partidas WHERE id=?').get(item.partida_id);
+        if (!partida) continue;
+        const nuevosDisp = partida.bultos_disponibles + item.bultos;
+        const estadoNuevo = nuevosDisp >= partida.bultos_ingresados ? 'activa' : 'parcial';
+        db.prepare('UPDATE partidas SET bultos_disponibles=?, estado=? WHERE id=?')
+          .run(nuevosDisp, estadoNuevo, item.partida_id);
+        // Registrar movimiento de devolución
+        db.prepare(`
+          INSERT INTO movimientos_stock (partida_id, fecha, tipo, bultos, referencia_tipo, referencia_id, notas)
+          VALUES (?, date('now','localtime'), 'devolucion', ?, 'remito', ?, ?)
+        `).run(item.partida_id, item.bultos, remito.id, `Anulación remito ${remito.nro_remito}`);
+      }
+      // Marcar como anulado — el número queda en la DB como constancia
+      db.prepare("UPDATE remitos_salida SET estado='anulado' WHERE id=?").run(req.params.id);
+    })();
+
+    res.json({ ok: true, mensaje: `Remito ${remito.nro_remito} anulado. Stock devuelto.` });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// Enviar remito por WhatsApp al cliente
+router.post('/remitos/:id/whatsapp', async (req, res) => {
+  const db = getDb();
+  try {
+    const remito = db.prepare('SELECT * FROM remitos_salida WHERE id=?').get(req.params.id);
+    if (!remito) return res.status(404).json({ ok: false, error: 'Remito no encontrado' });
+
+    const telefono = req.body.telefono || remito.cliente_telefono;
+    if (!telefono) return res.status(400).json({ ok: false, error: 'Se requiere número de WhatsApp del cliente' });
+
+    const baseUrl = process.env.BASE_URL || `https://agente-lnbonita1-production.up.railway.app`;
+    const pdfUrl = `${baseUrl}/api/abasto/remitos/${remito.id}/pdf`;
+
+    const mensaje = `🧾 *Remito ${remito.nro_remito}*\n` +
+      `Fecha: ${remito.fecha}\n` +
+      `Cliente: ${remito.empresa || '-'}\n\n` +
+      `Podés ver el remito en el siguiente link:\n${pdfUrl}\n\n` +
+      `_La Niña Bonita — San Gerónimo SA_`;
+
+    // Enviar via Twilio
+    const twilio = await import('twilio');
+    const client = twilio.default(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+    const telFormato = telefono.startsWith('+') ? telefono : '+54' + telefono.replace(/^0/, '');
+
+    await client.messages.create({
+      from: process.env.TWILIO_WHATSAPP_FROM,
+      to: `whatsapp:${telFormato}`,
+      body: mensaje
+    });
+
+    // Marcar como enviado
+    db.prepare('UPDATE remitos_salida SET whatsapp_enviado=1 WHERE id=?').run(req.params.id);
+
+    res.json({ ok: true, mensaje: `Remito enviado a ${telFormato}` });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// Subir remito conformado (imagen/PDF)
+import { createRequire } from 'module';
+const _require = createRequire(import.meta.url);
+const multer = _require('multer');
+import { mkdirSync } from 'fs';
+import { join, dirname } from 'path';
+import { fileURLToPath as _fileURLToPath } from 'url';
+
+const _dirname = dirname(_fileURLToPath(import.meta.url));
+const uploadDir = join(_dirname, '../../data/conformados');
+try { mkdirSync(uploadDir, { recursive: true }); } catch(e) {}
+
+const storageConformado = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, uploadDir),
+  filename: (req, file, cb) => {
+    const ext = file.originalname.split('.').pop();
+    cb(null, `remito-${req.params.id}-conformado.${ext}`);
+  }
+});
+const uploadConformado = multer({ storage: storageConformado, limits: { fileSize: 20 * 1024 * 1024 } });
+
+router.post('/remitos/:id/conformado', uploadConformado.single('archivo'), (req, res) => {
+  const db = getDb();
+  try {
+    if (!req.file) return res.status(400).json({ ok: false, error: 'No se recibió archivo' });
+    const path = `/data/conformados/${req.file.filename}`;
+    db.prepare('UPDATE remitos_salida SET conformado_path=? WHERE id=?').run(path, req.params.id);
+    res.json({ ok: true, path });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// Ver conformado
+router.get('/remitos/:id/conformado', (req, res) => {
+  const db = getDb();
+  try {
+    const r = db.prepare('SELECT conformado_path FROM remitos_salida WHERE id=?').get(req.params.id);
+    if (!r?.conformado_path) return res.status(404).json({ ok: false, error: 'Sin conformado' });
+    res.json({ ok: true, path: r.conformado_path });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
 
 router.get('/gastos', (req, res) => {
   const db = getDb();
