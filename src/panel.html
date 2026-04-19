@@ -4868,34 +4868,22 @@ function mdConfirmar() {
   var btn = document.getElementById('md-btn-confirmar');
   btn.disabled=true; btn.textContent='Emitiendo...';
   abApi('/mandatas', { method:'POST', body:JSON.stringify(body) }).then(function(res) {
-    if (!res.ok) { toast('Error: '+res.error,'er'); btn.disabled=false; btn.textContent='✓ Emitir mandata'; return; }
-    // Si hay teléfono → enviar vale por WhatsApp
+    if (!res.ok) { toast('Error: '+res.error,'er'); btn.disabled=false; btn.textContent='\u2713 Emitir mandata'; return; }
+    // Enviar vale por WhatsApp si hay teléfono
     if (MD.clienteTel) {
       var tel = MD.clienteTel.replace(/\D/g,'');
-      if (!tel.startsWith('54')) tel = '54' + tel;
+      if (tel.indexOf('54') !== 0) tel = '54' + tel;
       var tot = mdTotalImporte();
-      var items_txt = MD.items.map(function(i){ return '• '+i.producto_display+' x'+i.bultos+' bultos'; }).join('
-');
-      var msg = encodeURIComponent(
-        '🧾 *Vale de retiro — ' + res.nro_mandata + '*
-' +
-        'Cliente: ' + MD.empresa + '
-
-' +
-        items_txt + '
-
-' +
-        'Total: $' + mdFmt(tot) + '
-' +
-        'Forma de pago: ' + MD.metodoPago.toUpperCase() + '
-
-' +
-        '_La Niña Bonita — San Gerónimo SA_
-Nave 4 · Puesto 2-4-6 · Mercado Central'
-      );
+      var lineas = MD.items.map(function(it){ return '\u2022 '+it.producto_display+' x'+it.bultos+' bultos'; }).join('%0A');
+      var msg = '\uD83E\uDDFE *Vale de retiro \u2014 '+res.nro_mandata+'*%0A'
+        + 'Cliente: '+encodeURIComponent(MD.empresa)+'%0A%0A'
+        + lineas + '%0A%0A'
+        + 'Total: $'+mdFmt(tot)+'%0A'
+        + 'Pago: '+MD.metodoPago.toUpperCase()+'%0A%0A'
+        + '_La Ni\u00f1a Bonita \u2014 San Ger\u00f3nimo SA_%0ANave 4 \u00b7 Puesto 2-4-6 \u00b7 Mercado Central';
       window.open('https://wa.me/'+tel+'?text='+msg, '_blank');
     }
-    // Si es efectivo → registrar en caja del operador
+    // Registrar en caja si es efectivo
     if (MD.metodoPago === 'efectivo' && LNB_USER) {
       abApi('/caja', { method:'POST', body:JSON.stringify({
         usuario_id: LNB_USER.id,
@@ -4907,7 +4895,7 @@ Nave 4 · Puesto 2-4-6 · Mercado Central'
       })}).catch(function(){});
     }
     abCerrarModal('md-modal-nueva');
-    toast('✓ Mandata '+res.nro_mandata+' emitida', 'ok');
+    toast('\u2713 Mandata '+res.nro_mandata+' emitida', 'ok');
     mdCargar(); abDashboard();
   });
 }
@@ -4925,9 +4913,8 @@ function mdVerDetalle(id) {
   abApi('/mandatas/'+id).then(function(res){
     if (!res.ok) return;
     var m = res.data;
-    var items = (m.items||[]).map(function(i){ return '• '+(i.producto_display||i.producto)+' — '+i.bultos+' bultos · '+i.kilos_total.toFixed(1)+' kg = $'+mdFmt(i.importe); }).join('
-');
-    alert(m.nro_mandata+' — '+m.empresa+'\n'+abFecha(m.fecha)+' | '+m.deposito+'\n\n'+items+'\n\n─────\nTotal: $'+mdFmt(m.total_importe)+(m.metodo_pago?'\nPago: '+m.metodo_pago:''));
+    var items = (m.items||[]).map(function(i){ return '\u2022 '+(i.producto_display||i.producto)+' \u2014 '+i.bultos+' bultos \u00b7 '+i.kilos_total.toFixed(1)+' kg = $'+mdFmt(i.importe); }).join('\n');
+    alert(m.nro_mandata+' \u2014 '+m.empresa+'\n'+abFecha(m.fecha)+' | '+m.deposito+'\n\n'+items+'\n\n\u2014\u2014\u2014\u2014\u2014\nTotal: $'+mdFmt(m.total_importe)+(m.metodo_pago?'\nPago: '+m.metodo_pago:''));
   });
 }
 
