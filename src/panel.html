@@ -105,6 +105,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   <div class="ni" data-sec="crm"><span class="dot dd"></span>CRM</div>
   <div class="ni" data-sec="pedidos"><span class="dot"></span>Pedidos</div>
   <div class="ni" data-sec="logistica"><span class="dot dd"></span>Logistica</div>
+  <div class="ni" data-sec="preparacion"><span class="dot dc"></span>Preparación de Pedidos</div>
   <div class="ni" data-sec="rent-retail"><span class="dot da"></span>Rentabilidad Retail</div>
   <div class="ng" style="margin-top:8px">Oferta</div>
   <div class="ni" data-sec="oferta1"><span class="dot da"></span>Oferta 1 - Productos</div>
@@ -845,6 +846,124 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   <div id="log-cont"></div>
 </div>
 
+<!-- PREPARACIÓN DE PEDIDOS -->
+<div class="sec" id="sec-preparacion">
+  <div class="ph">
+    <div>
+      <div class="ph-t">📦 Preparación de Pedidos</div>
+      <div class="ph-s">Pedidos del día para preparar y etiquetar</div>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center">
+      <input type="date" id="prep-fecha" style="padding:7px 10px;border:1px solid var(--bor2);border-radius:8px;font-family:var(--sans);font-size:13px;color-scheme:light">
+      <select id="prep-tipo" style="padding:7px 10px;border:1px solid var(--bor2);border-radius:8px;font-family:var(--sans);font-size:13px">
+        <option value="">Todos los tipos</option>
+        <option value="mayorista_a">Mayorista A</option>
+        <option value="mayorista_mcba">Mayorista MCBA</option>
+        <option value="minorista_mcba">Minorista MCBA</option>
+        <option value="minorista_entrega">Minorista Entrega</option>
+        <option value="food_service">Food Service</option>
+        <option value="consumidor_final">Consumidor Final</option>
+      </select>
+      <button class="btn bo bs" onclick="prepCargar()">↻</button>
+    </div>
+  </div>
+
+  <!-- Resumen del día -->
+  <div id="prep-resumen" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:20px"></div>
+
+  <!-- Lista de pedidos por cliente -->
+  <div id="prep-lista" style="display:flex;flex-direction:column;gap:10px">
+    <div class="ab-empty"><div class="ab-empty-icon">📦</div>Cargando pedidos del día...</div>
+  </div>
+</div>
+
+<!-- MODAL ETIQUETADO -->
+<div class="mb" id="mb-etiqueta">
+<div class="mbox" style="width:900px;max-height:90vh;overflow-y:auto">
+  <div class="mhd">
+    <div>
+      <div class="mht" id="etq-titulo">Etiquetado</div>
+      <div style="font-size:12px;color:var(--mut)" id="etq-subtitulo">—</div>
+    </div>
+    <button class="mcl" onclick="closeMB('mb-etiqueta')">×</button>
+  </div>
+
+  <div style="display:grid;grid-template-columns:1fr 340px;gap:20px">
+
+    <!-- Panel izquierdo: configuración -->
+    <div>
+      <div style="font-size:11px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.05em;margin-bottom:12px">Configuración</div>
+
+      <div class="fg">
+        <div class="fl" style="max-width:130px">
+          <label>Cantidad de etiquetas</label>
+          <input type="number" id="etq-cantidad" min="1" value="1" style="font-size:18px;font-weight:700;text-align:center;padding:10px" oninput="etqActualizar()">
+        </div>
+        <div class="fl" style="max-width:110px">
+          <label>Ancho (mm)</label>
+          <input type="number" id="etq-ancho" value="100" min="50" max="200" oninput="etqActualizar()">
+        </div>
+        <div class="fl" style="max-width:110px">
+          <label>Alto (mm)</label>
+          <input type="number" id="etq-alto" value="150" min="50" max="300" oninput="etqActualizar()">
+        </div>
+      </div>
+
+      <div style="font-size:11px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.05em;margin:14px 0 10px">Campos de la etiqueta</div>
+      <div id="etq-campos-lista" style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:16px"></div>
+
+      <div style="font-size:11px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.05em;margin-bottom:10px">Datos editables</div>
+      <div class="fg">
+        <div class="fl ff"><label>Nombre producto (etiqueta)</label><input id="etq-producto" style="font-weight:600"></div>
+        <div class="fl"><label>Kilos por bulto</label><input type="number" id="etq-kilos" step="0.1" oninput="etqActualizar()"></div>
+        <div class="fl ff"><label>Cliente / Destinatario</label><input id="etq-cliente" oninput="etqActualizar()"></div>
+        <div class="fl ff"><label>EAN / Código de barras</label><input id="etq-ean" oninput="etqActualizar()"></div>
+      </div>
+
+      <!-- Estado conexión Zebra -->
+      <div id="etq-zebra-status" style="margin-top:16px;padding:10px 14px;border-radius:8px;background:var(--bg);border:1px solid var(--bor);font-size:13px">
+        <div style="display:flex;align-items:center;justify-content:space-between">
+          <span id="etq-zebra-txt">🔍 Buscando impresora Zebra...</span>
+          <button class="btn bo bs" onclick="etqDetectarZebra()" style="font-size:11px">Reconectar</button>
+        </div>
+        <div id="etq-zebra-nombre" style="font-size:11px;color:var(--mut);margin-top:4px"></div>
+      </div>
+
+      <div style="display:flex;gap:10px;margin-top:16px">
+        <button class="btn bo" style="flex:1" onclick="etqTestImprimir()">🖨 Probar 1 etiqueta</button>
+        <button class="btn bb" style="flex:2;font-size:15px;padding:12px" onclick="etqImprimirTodas()" id="etq-btn-imprimir">
+          Imprimir <span id="etq-btn-cant">0</span> etiquetas
+        </button>
+      </div>
+      <button class="btn bo bs" style="width:100%;margin-top:8px;font-size:12px" onclick="etqGuardarConfig()">
+        💾 Guardar esta configuración para el producto
+      </button>
+
+      <!-- Link descarga Browser Print si no está -->
+      <div id="etq-bp-link" style="display:none;margin-top:12px;padding:10px;background:#fef9c3;border-radius:8px;border:1px solid #fbbf24;font-size:12px">
+        ⚠ <strong>Zebra Browser Print</strong> no detectado.<br>
+        Descargalo desde <a href="https://www.zebra.com/us/en/support-downloads/software/printer-software/browser-print.html" target="_blank" style="color:var(--burd)">zebra.com</a> e instalalo en esta PC para imprimir directamente.
+        <div style="margin-top:8px;color:var(--mut)">Alternativa: podés <button class="btn bo bs" onclick="etqDescargarZPL()" style="font-size:11px">descargar el archivo ZPL</button> y enviarlo a la impresora manualmente.</div>
+      </div>
+    </div>
+
+    <!-- Panel derecho: preview de etiqueta -->
+    <div>
+      <div style="font-size:11px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.05em;margin-bottom:10px">Preview</div>
+      <div id="etq-preview-wrap" style="border:2px dashed var(--bor2);border-radius:8px;padding:8px;display:flex;align-items:center;justify-content:center;min-height:200px;background:var(--bg)">
+        <div id="etq-preview" style="background:#fff;border:1px solid #ddd;box-shadow:0 2px 8px rgba(0,0,0,.1);font-family:Arial,sans-serif;overflow:hidden;position:relative"></div>
+      </div>
+      <div style="font-size:11px;color:var(--mut);text-align:center;margin-top:6px">Vista previa (escala aprox.)</div>
+      <div style="margin-top:12px;padding:10px;background:var(--bg);border-radius:8px;font-size:12px;color:var(--mut)">
+        <strong>Bulto N° / Total:</strong><br>
+        Cada etiqueta impresa lleva automáticamente el número de bulto correspondiente (1 de N, 2 de N, etc.)
+      </div>
+    </div>
+
+  </div>
+</div>
+</div>
+
 <!-- CLIENTES -->
 <div class="sec" id="sec-may-a"><div class="ph"><div><div class="ph-t">Mayorista A</div><div class="ph-s">Puesteros fuera del MCBA - Entrega directa</div></div><button class="btn bb" onclick="openMC('mayorista_a')">+ Nuevo</button></div><div class="tw"><table><thead><tr><th>Nombre</th><th>Empresa</th><th>Zona</th><th style="text-align:center">Estado</th><th style="text-align:center">Comercial</th><th></th></tr></thead><tbody id="t-may-a"></tbody></table></div></div>
 <div class="sec" id="sec-may-mcba"><div class="ph"><div><div class="ph-t">Mayorista MCBA</div><div class="ph-s">Entregamos en MCBA en horario habitual</div></div><button class="btn bb" onclick="openMC('mayorista_mcba')">+ Nuevo</button></div><div class="tw"><table><thead><tr><th>Nombre</th><th>Empresa</th><th>Nave</th><th>Horario</th><th>Pago</th><th></th><th></th><th></th></tr></thead><tbody id="t-may-mcba"></tbody></table></div></div>
@@ -1212,6 +1331,24 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     <div class="fl"><label>Coop Obrera</label><input id="ean-coop" placeholder="7xxxxxxxxxx"></div>
   </div>
   <input type="hidden" id="rp-id">
+  <div style="font-weight:600;font-size:14px;margin:20px 0 14px;padding-top:16px;border-top:1px solid var(--bor)">🏷 Configuración de etiqueta Zebra</div>
+  <div class="fg">
+    <div class="fl" style="max-width:140px"><label>Ancho etiqueta (mm)</label><input type="number" id="rp-etq-ancho" placeholder="100" min="50" max="200" value="100"></div>
+    <div class="fl" style="max-width:140px"><label>Alto etiqueta (mm)</label><input type="number" id="rp-etq-alto" placeholder="150" min="50" max="300" value="150"></div>
+    <div class="fl ff">
+      <label>Campos a imprimir</label>
+      <div style="display:flex;flex-wrap:wrap;gap:10px;margin-top:6px">
+        <label style="display:flex;align-items:center;gap:5px;font-size:12px;text-transform:none;color:var(--txt);cursor:pointer"><input type="checkbox" class="etq-campo" value="logo" checked> Logo LNB</label>
+        <label style="display:flex;align-items:center;gap:5px;font-size:12px;text-transform:none;color:var(--txt);cursor:pointer"><input type="checkbox" class="etq-campo" value="producto" checked> Producto</label>
+        <label style="display:flex;align-items:center;gap:5px;font-size:12px;text-transform:none;color:var(--txt);cursor:pointer"><input type="checkbox" class="etq-campo" value="ean" checked> Código de barras (EAN)</label>
+        <label style="display:flex;align-items:center;gap:5px;font-size:12px;text-transform:none;color:var(--txt);cursor:pointer"><input type="checkbox" class="etq-campo" value="kilos" checked> Kilos por bulto</label>
+        <label style="display:flex;align-items:center;gap:5px;font-size:12px;text-transform:none;color:var(--txt);cursor:pointer"><input type="checkbox" class="etq-campo" value="bulto_nro" checked> Nro de bulto (1 de N)</label>
+        <label style="display:flex;align-items:center;gap:5px;font-size:12px;text-transform:none;color:var(--txt);cursor:pointer"><input type="checkbox" class="etq-campo" value="cliente" checked> Nombre cliente</label>
+        <label style="display:flex;align-items:center;gap:5px;font-size:12px;text-transform:none;color:var(--txt);cursor:pointer"><input type="checkbox" class="etq-campo" value="fecha" checked> Fecha</label>
+        <label style="display:flex;align-items:center;gap:5px;font-size:12px;text-transform:none;color:var(--txt);cursor:pointer"><input type="checkbox" class="etq-campo" value="origen"> Origen / Depósito</label>
+      </div>
+    </div>
+  </div>
   <div style="margin-top:22px;display:flex;gap:10px;justify-content:flex-end">
     <button class="btn bo" id="btn-cancel-mrp">Cancelar</button>
     <button class="btn bb" id="btn-save-mrp">Guardar</button>
@@ -1285,6 +1422,7 @@ document.querySelectorAll('.ni').forEach(function(el) {
 function loadSec(s) {
   var m = {
     inicio: loadInicio, pedidos: loadPedidos, logistica: loadLog,
+    preparacion: prepCargar,
     crm: loadCRM,
     'may-a':      function(){ loadCli('mayorista_a','t-may-a'); },
     'may-mcba':   function(){ loadCli('mayorista_mcba','t-may-mcba'); },
@@ -2464,6 +2602,14 @@ eid('btn-save-mrp').addEventListener('click',function(){
       var el=eid('ean-'+k); var ean=el?el.value.trim():'';
       ps.push(api('/api/retail/ean','POST',{retail_producto_id:parseInt(id),supermercado:k,ean:ean||null}));
     });
+    // Guardar config etiqueta
+    var etqCampos = [];
+    document.querySelectorAll('.etq-campo:checked').forEach(function(c){ etqCampos.push(c.value); });
+    ps.push(api('/api/retail/productos/'+id,'PATCH',{
+      etiqueta_ancho: parseInt(document.getElementById('rp-etq-ancho').value)||100,
+      etiqueta_alto: parseInt(document.getElementById('rp-etq-alto').value)||150,
+      etiqueta_campos: JSON.stringify(etqCampos)
+    }));
     Promise.all(ps).then(function(){toast('Guardado','ok');closeMB('mb-rp');loadRP();});
   });
 });
@@ -4415,6 +4561,426 @@ function mdVerDetalle(id) {
 }
 
 
+// ─── PREPARACIÓN DE PEDIDOS ──────────────────────────────────
+
+var ETQ = { pedido: null, rp: null, zDevice: null };
+
+function prepCargar() {
+  // Fecha por defecto: hoy
+  var fechaEl = document.getElementById('prep-fecha');
+  if (!fechaEl.value) fechaEl.value = new Date().toISOString().split('T')[0];
+  var tipo = document.getElementById('prep-tipo').value;
+  var fecha = fechaEl.value;
+
+  var url = '/api/pedidos?estado=pendiente' + (tipo ? '&tipo_cliente='+tipo : '') + (fecha ? '&fecha='+fecha : '');
+  api(url).then(function(peds) {
+    var lista = document.getElementById('prep-lista');
+    var resumen = document.getElementById('prep-resumen');
+
+    if (!peds || !peds.length) {
+      lista.innerHTML = '<div class="ab-empty"><div class="ab-empty-icon">✅</div>Sin pedidos pendientes para esta fecha</div>';
+      resumen.innerHTML = '';
+      return;
+    }
+
+    // Resumen del día
+    var totalPeds = peds.length;
+    var totalItems = 0;
+    var totalVal = 0;
+    peds.forEach(function(p) {
+      totalVal += p.total || 0;
+      try { totalItems += JSON.parse(p.detalle).length; } catch(e) {}
+    });
+    resumen.innerHTML = [
+      { label: 'Pedidos', val: totalPeds, color: '#1e40af', bg: '#dbeafe' },
+      { label: 'Productos', val: totalItems, color: '#166534', bg: '#dcfce7' },
+      { label: 'Total', val: '$' + nr(totalVal), color: '#854d0e', bg: '#fef9c3' },
+    ].map(function(r) {
+      return '<div style="background:'+r.bg+';border-radius:10px;padding:12px 16px;text-align:center">' +
+        '<div style="font-size:22px;font-weight:900;color:'+r.color+'">'+r.val+'</div>' +
+        '<div style="font-size:11px;color:'+r.color+';opacity:.7;font-weight:600;text-transform:uppercase;letter-spacing:.05em">'+r.label+'</div>' +
+      '</div>';
+    }).join('');
+
+    // Cards por pedido
+    lista.innerHTML = peds.map(function(p) {
+      var lineas = [];
+      try { lineas = JSON.parse(p.detalle); } catch(e) {}
+      var cliente = p.nombre || p.empresa || p.telefono;
+
+      var lineasHTML = lineas.map(function(l) {
+        return '<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--bor)">' +
+          '<div>' +
+            '<div style="font-weight:600;font-size:14px">' + (l.nombre||'Producto') + '</div>' +
+            '<div style="font-size:12px;color:var(--mut)">' + (l.cantidad||1) + ' bultos' + (l.precio ? ' · $'+nr(l.precio) : '') + '</div>' +
+          '</div>' +
+          '<button class="btn bb bs" onclick="etqAbrir('+p.id+','+JSON.stringify(l).replace(/"/g,'&quot;')+','+JSON.stringify(p).replace(/"/g,'&quot;')+')" ' +
+            'style="font-size:12px;padding:8px 14px">🏷 Etiquetar</button>' +
+        '</div>';
+      }).join('');
+
+      return '<div style="background:var(--sur);border:1px solid var(--bor);border-radius:12px;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,.06)">' +
+        '<div style="padding:14px 16px;background:var(--bg);border-bottom:1px solid var(--bor);display:flex;justify-content:space-between;align-items:center">' +
+          '<div>' +
+            '<div style="font-size:16px;font-weight:800">' + cliente + '</div>' +
+            '<div style="font-size:12px;color:var(--mut);margin-top:2px">' + bTipo(p.tipo_cliente) + ' · #'+p.id + (p.horario_entrega?' · '+p.horario_entrega:'') + '</div>' +
+          '</div>' +
+          '<div style="text-align:right">' +
+            '<div style="font-size:18px;font-weight:700;color:var(--burd)">$' + nr(p.total||0) + '</div>' +
+            '<div style="font-size:11px;color:var(--mut)">' + lineas.length + ' productos</div>' +
+          '</div>' +
+        '</div>' +
+        '<div style="padding:0 16px">' + lineasHTML + '</div>' +
+        '<div style="padding:10px 16px;display:flex;justify-content:space-between;align-items:center">' +
+          '<select class="bdg b'+ecl(p.estado)+'" style="background:transparent;border:none;cursor:pointer;font-size:11px;color:inherit" onchange="cambEst('+p.id+',this.value)">' +
+            ['pendiente','entregado','facturado','cancelado'].map(function(e){ return '<option value="'+e+'"'+(p.estado===e?' selected':'')+'>'+e+'</option>'; }).join('') +
+          '</select>' +
+          '<a href="/api/pedidos/'+p.id+'/orden/pdf" target="_blank" class="btn bo bs" style="text-decoration:none;font-size:12px">PDF orden</a>' +
+        '</div>' +
+      '</div>';
+    }).join('');
+  });
+}
+
+// ─── EDITOR DE ETIQUETAS ─────────────────────────────────────
+
+var ETQ_CAMPOS_DEF = [
+  { id: 'logo',      label: '🏷 Logo La Niña Bonita' },
+  { id: 'producto',  label: '📦 Nombre producto' },
+  { id: 'ean',       label: '||| Código de barras EAN' },
+  { id: 'kilos',     label: '⚖ Kilos por bulto' },
+  { id: 'bulto_nro', label: '# Nro de bulto (1 de N)' },
+  { id: 'cliente',   label: '🏪 Nombre cliente' },
+  { id: 'fecha',     label: '📅 Fecha' },
+  { id: 'origen',    label: '📍 Origen / Depósito' },
+];
+
+function etqAbrir(pedidoId, linea, pedido) {
+  ETQ.pedido = pedido;
+  ETQ.linea = linea;
+  ETQ.rp = null;
+
+  document.getElementById('etq-titulo').textContent = '🏷 Etiquetado — ' + (linea.nombre||'Producto');
+  document.getElementById('etq-subtitulo').textContent = (pedido.nombre||pedido.empresa||pedido.telefono) + ' · Pedido #' + pedidoId;
+
+  // Valores por defecto mientras carga
+  document.getElementById('etq-cantidad').value = linea.cantidad || 1;
+  document.getElementById('etq-producto').value = linea.nombre || '';
+  document.getElementById('etq-kilos').value = linea.peso || linea.kilos || '';
+  document.getElementById('etq-cliente').value = pedido.nombre || pedido.empresa || '';
+  document.getElementById('etq-ean').value = linea.ean || '';
+  document.getElementById('etq-ancho').value = 100;
+  document.getElementById('etq-alto').value = 150;
+  document.getElementById('etq-btn-cant').textContent = linea.cantidad || 1;
+
+  // Render checkboxes con defaults
+  var camposDefault = ['logo','producto','ean','kilos','bulto_nro','cliente','fecha'];
+  document.getElementById('etq-campos-lista').innerHTML = ETQ_CAMPOS_DEF.map(function(c) {
+    return '<label style="display:flex;align-items:center;gap:6px;padding:5px;border-radius:6px;cursor:pointer;font-size:13px;text-transform:none;color:var(--txt)">' +
+      '<input type="checkbox" class="etq-campo-chk" value="'+c.id+'"'+(camposDefault.includes(c.id)?' checked':'')+' onchange="etqActualizar()"> '+c.label+'</label>';
+  }).join('');
+
+  // Buscar config del producto retail en backend
+  var nomBuscar = (linea.nombre||'').split(' ').slice(0,3).join(' ');  // primeras 3 palabras
+  abApi('/etiqueta/producto?nombre=' + encodeURIComponent(nomBuscar))
+    .then(function(res) {
+      if (!res.ok || !res.data) { etqActualizar(); return; }
+      var rp = res.data;
+      ETQ.rp = rp;
+
+      // Aplicar tamaño guardado
+      document.getElementById('etq-ancho').value = rp.etiqueta_ancho || 100;
+      document.getElementById('etq-alto').value = rp.etiqueta_alto || 150;
+
+      // Aplicar campos guardados
+      var campos = rp.etiqueta_campos || camposDefault;
+      document.querySelectorAll('.etq-campo-chk').forEach(function(chk) {
+        chk.checked = campos.includes(chk.value);
+      });
+
+      // Detectar EAN para el supermercado del cliente
+      // El tipo_cliente nos da pista del supermercado (cencosud, carrefour, coto, etc.)
+      var eans = rp.eans || {};
+      var tipoCliente = (pedido.tipo_cliente||'').toLowerCase();
+      var eanAuto = '';
+      if (tipoCliente.includes('cencosud') || (pedido.empresa||'').toLowerCase().includes('disco') || (pedido.empresa||'').toLowerCase().includes('vea')) {
+        eanAuto = eans['cencosud'] || '';
+      } else if (tipoCliente.includes('carrefour') || (pedido.empresa||'').toLowerCase().includes('carrefour')) {
+        eanAuto = eans['carrefour'] || '';
+      } else if ((pedido.empresa||'').toLowerCase().includes('coto')) {
+        eanAuto = eans['coto'] || '';
+      } else if ((pedido.empresa||'').toLowerCase().includes('chango')) {
+        eanAuto = eans['chango'] || '';
+      } else if ((pedido.empresa||'').toLowerCase().includes('coop')) {
+        eanAuto = eans['coop'] || '';
+      }
+      // Si no matchea supermercado, usar el primero disponible
+      if (!eanAuto) {
+        eanAuto = Object.values(eans)[0] || linea.ean || '';
+      }
+      document.getElementById('etq-ean').value = eanAuto;
+
+      etqActualizar();
+    })
+    .catch(function() { etqActualizar(); });
+
+  etqDetectarZebra();
+  eid('mb-etiqueta').classList.add('on');
+}
+
+function etqActualizar() {
+  var cant = parseInt(document.getElementById('etq-cantidad').value) || 1;
+  document.getElementById('etq-btn-cant').textContent = cant;
+
+  var ancho = parseInt(document.getElementById('etq-ancho').value) || 100;
+  var alto = parseInt(document.getElementById('etq-alto').value) || 150;
+  var producto = document.getElementById('etq-producto').value;
+  var kilos = document.getElementById('etq-kilos').value;
+  var cliente = document.getElementById('etq-cliente').value;
+  var ean = document.getElementById('etq-ean').value;
+  var fecha = new Date().toLocaleDateString('es-AR');
+  var campos = etqGetCampos();
+
+  // Escala: max 320px de ancho en preview
+  var escala = Math.min(320 / ancho, 260 / alto);
+  var pw = Math.round(ancho * escala);
+  var ph = Math.round(alto * escala);
+
+  var prev = document.getElementById('etq-preview');
+  prev.style.width = pw + 'px';
+  prev.style.height = ph + 'px';
+  prev.style.fontSize = Math.round(10 * escala) + 'px';
+  prev.style.padding = Math.round(6 * escala) + 'px';
+
+  var html = '';
+
+  if (campos.includes('logo')) {
+    html += '<div style="text-align:center;margin-bottom:'+Math.round(4*escala)+'px">' +
+      '<img src="/static/logo.jpg" style="height:'+Math.round(28*escala)+'px;max-width:100%" onerror="this.style.display=\'none\'">' +
+    '</div>';
+  }
+
+  if (campos.includes('producto') && producto) {
+    html += '<div style="font-weight:900;font-size:'+Math.round(13*escala)+'px;text-align:center;text-transform:uppercase;border-bottom:1px solid #ddd;padding-bottom:'+Math.round(3*escala)+'px;margin-bottom:'+Math.round(3*escala)+'px;line-height:1.2">'+producto+'</div>';
+  }
+
+  var midRow = '';
+  if (campos.includes('kilos') && kilos) {
+    midRow += '<span style="font-size:'+Math.round(12*escala)+'px;font-weight:700">'+kilos+' KG</span>';
+  }
+  if (campos.includes('bulto_nro')) {
+    midRow += '<span style="font-size:'+Math.round(10*escala)+'px;color:#666;margin-left:auto">Bulto 1/'+cant+'</span>';
+  }
+  if (midRow) html += '<div style="display:flex;align-items:center;margin-bottom:'+Math.round(3*escala)+'px">'+midRow+'</div>';
+
+  if (campos.includes('cliente') && cliente) {
+    html += '<div style="font-size:'+Math.round(11*escala)+'px;font-weight:600;color:#333;margin-bottom:'+Math.round(3*escala)+'px">🏪 '+cliente+'</div>';
+  }
+
+  if (campos.includes('fecha')) {
+    html += '<div style="font-size:'+Math.round(9*escala)+'px;color:#666;margin-bottom:'+Math.round(4*escala)+'px">📅 '+fecha+'</div>';
+  }
+
+  if (campos.includes('ean') && ean) {
+    // Código de barras simulado (barras CSS)
+    html += '<div style="text-align:center;margin-top:'+Math.round(4*escala)+'px">' +
+      '<div style="font-family:monospace;font-size:'+Math.round(28*escala)+'px;letter-spacing:'+Math.round(1*escala)+'px;line-height:1;color:#000">|||||||||||||||||||</div>' +
+      '<div style="font-size:'+Math.round(8*escala)+'px;letter-spacing:1px;color:#333;margin-top:'+Math.round(2*escala)+'px">'+ean+'</div>' +
+    '</div>';
+  }
+
+  prev.innerHTML = html;
+}
+
+function etqGetCampos() {
+  var campos = [];
+  document.querySelectorAll('.etq-campo-chk:checked').forEach(function(c){ campos.push(c.value); });
+  return campos;
+}
+
+// ─── ZEBRA BROWSER PRINT ─────────────────────────────────────
+function etqDetectarZebra() {
+  var txt = document.getElementById('etq-zebra-txt');
+  var nom = document.getElementById('etq-zebra-nombre');
+  var bpLink = document.getElementById('etq-bp-link');
+  txt.textContent = '🔍 Buscando impresora Zebra...';
+  nom.textContent = '';
+  ETQ.zDevice = null;
+
+  // Zebra Browser Print usa localhost:9100
+  fetch('http://localhost:9100/available', { signal: AbortSignal.timeout(2000) })
+    .then(function(r){ return r.json(); })
+    .then(function(data) {
+      var devices = data.printer || [];
+      if (!devices.length) throw new Error('Sin impresoras');
+      ETQ.zDevice = devices[0];
+      txt.textContent = '✅ Impresora conectada';
+      nom.textContent = ETQ.zDevice.name || 'Zebra';
+      bpLink.style.display = 'none';
+      document.getElementById('etq-zebra-status').style.background = '#dcfce7';
+      document.getElementById('etq-zebra-status').style.borderColor = '#86efac';
+    })
+    .catch(function() {
+      txt.textContent = '❌ No se detectó Zebra Browser Print';
+      bpLink.style.display = 'block';
+      document.getElementById('etq-zebra-status').style.background = '#fef9c3';
+      document.getElementById('etq-zebra-status').style.borderColor = '#fbbf24';
+    });
+}
+
+function etqGenerarZPL(nroBulto, totalBultos) {
+  var ancho = parseInt(document.getElementById('etq-ancho').value) || 100;
+  var alto = parseInt(document.getElementById('etq-alto').value) || 150;
+  var producto = document.getElementById('etq-producto').value.toUpperCase();
+  var kilos = document.getElementById('etq-kilos').value;
+  var cliente = document.getElementById('etq-cliente').value.toUpperCase();
+  var ean = document.getElementById('etq-ean').value.replace(/\D/g,'');
+  var fecha = new Date().toLocaleDateString('es-AR');
+  var campos = etqGetCampos();
+
+  // Convertir mm a dots (203 dpi = ~8 dots/mm)
+  var dpi = 8;
+  var w = ancho * dpi;
+  var h = alto * dpi;
+
+  var zpl = '^XA\n';
+  zpl += '^PW' + w + '\n';    // ancho
+  zpl += '^LL' + h + '\n';    // alto (label length)
+  zpl += '^CI28\n';            // UTF-8
+
+  var y = 30;
+
+  // Logo (texto en lugar de imagen — para imagen se necesita DOWNLOAD)
+  if (campos.includes('logo')) {
+    zpl += '^FO20,' + y + '^A0N,22,22^FDLA NINA BONITA^FS\n';
+    zpl += '^FO20,' + (y+24) + '^A0N,14,14^FDSAN GERONIMO SA^FS\n';
+    zpl += '^FO20,' + (y+40) + '^GB' + (w-40) + ',2,2^FS\n';  // línea
+    y += 55;
+  }
+
+  // Producto
+  if (campos.includes('producto') && producto) {
+    zpl += '^FO20,' + y + '^A0N,30,30^FB' + (w-40) + ',2,,^FD' + producto + '^FS\n';
+    y += 70;
+  }
+
+  // Kilos y Nro bulto
+  if (campos.includes('kilos') && kilos) {
+    zpl += '^FO20,' + y + '^A0N,24,24^FD' + kilos + ' KG^FS\n';
+  }
+  if (campos.includes('bulto_nro')) {
+    zpl += '^FO' + (w-160) + ',' + y + '^A0N,20,20^FDBulto ' + nroBulto + '/' + totalBultos + '^FS\n';
+  }
+  y += 40;
+
+  // Cliente
+  if (campos.includes('cliente') && cliente) {
+    zpl += '^FO20,' + y + '^A0N,22,22^FB' + (w-40) + ',1,,^FD' + cliente + '^FS\n';
+    y += 30;
+  }
+
+  // Fecha
+  if (campos.includes('fecha')) {
+    zpl += '^FO20,' + y + '^A0N,16,16^FD' + fecha + '^FS\n';
+    y += 24;
+  }
+
+  // Código de barras EAN
+  if (campos.includes('ean') && ean) {
+    y = Math.max(y, h - 90);
+    var tipo = ean.length === 13 ? 'E' : (ean.length === 12 ? 'U' : 'C');  // EAN13, UPCA, Code128
+    zpl += '^FO' + Math.round((w-200)/2) + ',' + y + '^BY2^B' + tipo + 'N,60,Y,N^FD' + ean + '^FS\n';
+  }
+
+  zpl += '^XZ\n';
+  return zpl;
+}
+
+function etqImprimirTodas() {
+  var cant = parseInt(document.getElementById('etq-cantidad').value) || 1;
+  if (!ETQ.zDevice) {
+    if (!confirm('No hay impresora Zebra conectada. ¿Descargar el archivo ZPL para imprimir manualmente?')) return;
+    etqDescargarZPL();
+    return;
+  }
+  var btn = document.getElementById('etq-btn-imprimir');
+  btn.disabled = true;
+  btn.textContent = 'Imprimiendo...';
+
+  var i = 1;
+  function imprimirSiguiente() {
+    if (i > cant) {
+      btn.disabled = false;
+      btn.innerHTML = 'Imprimir <span id="etq-btn-cant">' + cant + '</span> etiquetas';
+      toast('✅ ' + cant + ' etiquetas enviadas a la Zebra', 'ok');
+      return;
+    }
+    var zpl = etqGenerarZPL(i, cant);
+    fetch('http://localhost:9100/write', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ device: ETQ.zDevice, data: zpl })
+    }).then(function() {
+      i++;
+      setTimeout(imprimirSiguiente, 100);
+    }).catch(function(e) {
+      toast('Error en etiqueta ' + i + ': ' + e.message, 'er');
+      btn.disabled = false;
+    });
+  }
+  imprimirSiguiente();
+}
+
+function etqTestImprimir() {
+  var zpl = etqGenerarZPL(1, 1);
+  if (!ETQ.zDevice) {
+    // Mostrar ZPL en un alert para debug
+    var w = window.open('', '_blank');
+    w.document.write('<pre style="font-family:monospace;font-size:12px;padding:20px">'+zpl+'</pre>');
+    return;
+  }
+  fetch('http://localhost:9100/write', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ device: ETQ.zDevice, data: zpl })
+  }).then(function() {
+    toast('Etiqueta de prueba enviada ✓', 'ok');
+  }).catch(function(e) {
+    toast('Error: ' + e.message, 'er');
+  });
+}
+
+function etqDescargarZPL() {
+  var cant = parseInt(document.getElementById('etq-cantidad').value) || 1;
+  var todo = '';
+  for (var i = 1; i <= cant; i++) { todo += etqGenerarZPL(i, cant); }
+  var blob = new Blob([todo], { type: 'text/plain' });
+  var a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'etiquetas_' + (document.getElementById('etq-producto').value || 'pedido').replace(/\s+/g,'_') + '.zpl';
+  a.click();
+}
+
+// Guardar configuración de etiqueta en el producto retail al cerrar
+function etqGuardarConfig() {
+  if (!ETQ.rp) { toast('No se encontró el producto en el maestro','er'); return; }
+  etqGuardarEnProducto(ETQ.rp.id);
+  toast('✓ Configuración guardada para "' + ETQ.rp.nombre + '"', 'ok');
+}
+
+function etqGuardarEnProducto(rpId) {
+  if (!rpId) return;
+  var campos = etqGetCampos();
+  abApi('/etiqueta/producto/' + rpId, {
+    method: 'PATCH',
+    body: JSON.stringify({
+      etiqueta_ancho: parseInt(document.getElementById('etq-ancho').value) || 100,
+      etiqueta_alto: parseInt(document.getElementById('etq-alto').value) || 150,
+      etiqueta_campos: campos
+    })
+  }).catch(function(){});
+}
+
 // ─── NAV ABASTO (manejado por loadSec global) ───────────────
 
 // ── SESIÓN Y USUARIO ────────────────────────────────────────
@@ -4471,6 +5037,7 @@ var USR_SECCIONES = [
     { id: 'crm', label: 'CRM Dedicados' },
     { id: 'pedidos', label: 'Pedidos' },
     { id: 'logistica', label: 'Logística' },
+    { id: 'preparacion', label: 'Preparación de Pedidos' },
     { id: 'rent-retail', label: 'Rentabilidad Retail' },
   ]},
   { grupo: 'Oferta', items: [
@@ -4563,7 +5130,7 @@ function usrCargar() {
           '<td style="font-size:12px;color:var(--mut)">'+secsLabel+'</td>' +
           '<td>'+(u.activo?'<span class="bdg bok">Activo</span>':'<span class="bdg ber">Inactivo</span>')+'</td>' +
           '<td style="text-align:right;white-space:nowrap">' +
-            '<button class="btn bo bs" onclick=\'usrEditar('+JSON.stringify(u).replace(/'/g,"&#39;")+')' style="margin-right:6px">Editar</button>' +
+            '<button class="btn bo bs" onclick=\'usrEditar('+JSON.stringify(u).replace(/'/g,"&#39;")+')\' style="margin-right:6px">Editar</button>' +
             (u.activo?'<button class="btn bd bs" onclick="usrToggle('+u.id+',0)">Desactivar</button>':'<button class="btn bo bs" onclick="usrToggle('+u.id+',1)">Activar</button>') +
           '</td></tr>';
       }).join('');
