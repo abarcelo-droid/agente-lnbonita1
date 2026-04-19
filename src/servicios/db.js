@@ -625,6 +625,25 @@ db.exec(`
 `);
 
 // Función requerida por src/rutas/abasto.js
+// Migración: columnas etiqueta en retail_productos
+(function migrarEtiquetas() {
+  try {
+    const cols = db.prepare("PRAGMA table_info(retail_productos)").all().map(c => c.name);
+    if (!cols.includes('etiqueta_ancho')) {
+      db.exec("ALTER TABLE retail_productos ADD COLUMN etiqueta_ancho INTEGER DEFAULT 100");
+      console.log("[DB] etiqueta_ancho agregado en retail_productos");
+    }
+    if (!cols.includes('etiqueta_alto')) {
+      db.exec("ALTER TABLE retail_productos ADD COLUMN etiqueta_alto INTEGER DEFAULT 150");
+      console.log("[DB] etiqueta_alto agregado en retail_productos");
+    }
+    if (!cols.includes('etiqueta_campos')) {
+      db.exec("ALTER TABLE retail_productos ADD COLUMN etiqueta_campos TEXT DEFAULT '[\"logo\",\"producto\",\"ean\",\"kilos\",\"bulto_nro\",\"cliente\",\"fecha\"]'");
+      console.log("[DB] etiqueta_campos agregado en retail_productos");
+    }
+  } catch(e) { console.error("[DB] Error migrando etiquetas:", e.message); }
+})();
+
 // ── USUARIOS ───────────────────────────────────────────────────────────────
 db.exec(`
   CREATE TABLE IF NOT EXISTS usuarios (

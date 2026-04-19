@@ -829,6 +829,78 @@ router.get('/resumen', (req, res) => {
 });
 
 // ============================================================
+// ETIQUETAS — Config por producto retail
+// ============================================================
+
+// Buscar producto retail por nombre (para cargar config al etiquetar)
+router.get('/etiqueta/producto', (req, res) => {
+  const db = getDb();
+  const { nombre } = req.query;
+  if (!nombre) return res.status(400).json({ ok: false, error: 'Nombre requerido' });
+  try {
+    // Buscar por similitud en nombre
+    const rp = db.prepare(`
+      SELECT rp.id, rp.nombre, rp.etiqueta_ancho, rp.etiqueta_alto, rp.etiqueta_campos,
+        GROUP_CONCAT(re.supermercado || ':' || re.ean) as eans
+      FROM retail_productos rp
+      LEFT JOIN retail_eans re ON re.retail_producto_id = rp.id
+      WHERE LOWER(rp.nombre) LIKE LOWER(?)
+      GROUP BY rp.id
+      LIMIT 1
+    `).get('%' + nombre.trim() + '%');
+
+    if (!rp) return res.json({ ok: false, error: 'Producto no encontrado' });
+
+    // Parsear EANs a objeto
+    const eans = {};
+    if (rp.eans) {
+      rp.eans.split(',').forEach(pair => {
+        const [sup, ean] = pair.split(':');
+        if (sup && ean) eans[sup] = ean;
+      });
+    }
+
+    res.json({
+      ok: true,
+      data: {
+        id: rp.id,
+        nombre: rp.nombre,
+        etiqueta_ancho: rp.etiqueta_ancho || 100,
+        etiqueta_alto: rp.etiqueta_alto || 150,
+        etiqueta_campos: JSON.parse(rp.etiqueta_campos || '["logo","producto","ean","kilos","bulto_nro","cliente","fecha"]'),
+        eans
+      }
+    });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// Guardar config de etiqueta en producto retail
+router.patch('/etiqueta/producto/:id', (req, res) => {
+  const db = getDb();
+  const { etiqueta_ancho, etiqueta_alto, etiqueta_campos } = req.body;
+  try {
+    const cols = db.prepare("PRAGMA table_info(retail_productos)").all().map(c => c.name);
+    // Asegurarse que las columnas existen
+    if (!cols.includes('etiqueta_ancho')) {
+      db.exec("ALTER TABLE retail_productos ADD COLUMN etiqueta_ancho INTEGER DEFAULT 100");
+      db.exec("ALTER TABLE retail_productos ADD COLUMN etiqueta_alto INTEGER DEFAULT 150");
+      db.exec("ALTER TABLE retail_productos ADD COLUMN etiqueta_campos TEXT");
+    }
+    db.prepare(`
+      UPDATE retail_productos 
+      SET etiqueta_ancho=?, etiqueta_alto=?, etiqueta_campos=?
+      WHERE id=?
+    `).run(
+      etiqueta_ancho || 100,
+      etiqueta_alto || 150,
+      typeof etiqueta_campos === 'string' ? etiqueta_campos : JSON.stringify(etiqueta_campos || []),
+      req.params.id
+    );
+    res.json({ ok: true });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// ============================================================
 // MANDATA
 // ============================================================
 
