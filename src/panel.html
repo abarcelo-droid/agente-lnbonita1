@@ -4575,20 +4575,29 @@ function mdCargarDestacados() {
       grid.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:12px;color:var(--mut);font-size:12px">Sin productos destacados configurados</div>';
       return;
     }
-    grid.innerHTML = res.data.map(function(rp) {
-      // Buscar si hay stock en el depósito actual
-      var partida = MD.partidas.find(function(p){ return (p.producto_display||p.producto||'').toLowerCase().indexOf((rp.nombre||'').toLowerCase()) >= 0; });
+    grid.innerHTML = '';
+    res.data.forEach(function(rp) {
+      var partida = MD.partidas.find(function(p){
+        return (p.producto_display||p.producto||'').toLowerCase().indexOf((rp.nombre||'').toLowerCase()) >= 0;
+      });
       var stock = partida ? partida.bultos_disponibles : 0;
       var disabled = stock === 0;
-      return '<button onclick="'+(disabled?'':'mdAgregarDestacado('+rp.id+',''+rp.nombre.replace(/'/g,"\\'")+'')')+'" ' +
-        'style="padding:16px 12px;border:2px solid '+(disabled?'var(--bor)':'var(--bor2)')+';border-radius:14px;background:'+(disabled?'var(--bg)':'var(--sur)')+';cursor:'+(disabled?'default':'pointer')+';text-align:center;transition:all .15s;opacity:'+(disabled?'.4':'1')+'" ' +
-        (disabled?'':' onmouseover="this.style.borderColor='var(--burg)';this.style.background='var(--burl)'" onmouseout="this.style.borderColor='var(--bor2)';this.style.background='var(--sur)'"')+'>'+
+
+      var btn = document.createElement('button');
+      btn.style.cssText = 'padding:16px 12px;border:2px solid '+(disabled?'var(--bor)':'var(--bor2)')+';border-radius:14px;background:'+(disabled?'var(--bg)':'var(--sur)')+';cursor:'+(disabled?'default':'pointer')+';text-align:center;transition:all .15s;opacity:'+(disabled?'.4':'1');
+      btn.innerHTML =
         '<div style="font-size:22px;margin-bottom:4px">📦</div>' +
         '<div style="font-size:13px;font-weight:700;color:var(--txt);line-height:1.2">'+rp.nombre+'</div>' +
         '<div style="font-size:11px;color:var(--mut);margin-top:4px">'+(disabled?'Sin stock':stock+' bultos')+'</div>' +
-        (rp.precio_minorista_mcba ? '<div style="font-size:12px;font-weight:700;color:var(--burd);margin-top:4px">$'+mdFmt(rp.precio_minorista_mcba)+'/bto</div>' : '') +
-      '</button>';
-    }).join('');
+        (rp.precio_minorista_mcba ? '<div style="font-size:12px;font-weight:700;color:var(--burd);margin-top:4px">$'+mdFmt(rp.precio_minorista_mcba)+'/bto</div>' : '');
+
+      if (!disabled) {
+        btn.addEventListener('mouseenter', function(){ this.style.borderColor='var(--burg)'; this.style.background='var(--burl)'; });
+        btn.addEventListener('mouseleave', function(){ this.style.borderColor='var(--bor2)'; this.style.background='var(--sur)'; });
+        btn.addEventListener('click', function(){ mdAgregarDestacado(rp.id, rp.nombre); });
+      }
+      grid.appendChild(btn);
+    });
   });
 }
 
