@@ -300,17 +300,16 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     <div style="display:flex;gap:10px">
       <select class="ab-form-select" style="width:180px" id="ab-remito-filtro-estado" onchange="abCargarRemitos()">
         <option value="">Todos</option>
-        <option value="borrador">Borrador</option>
-        <option value="emitido">Emitido</option>
-        <option value="facturado">Facturado</option>
-        <option value="anulado">Anulado</option>
+        <option value="emitido">Emitidos</option>
+        <option value="facturado">Cerrados</option>
+        <option value="anulado">Anulados</option>
       </select>
     </div>
   </div>
   <div class="ab-card">
     <div class="ab-table-wrap">
-      <table class="ab-table"><thead><tr><th>Nro.</th><th>Fecha</th><th>Empresa</th><th>Contacto</th><th>Comercial</th><th>Items</th><th>Bultos</th><th>Estado</th><th></th></tr></thead>
-      <tbody id="ab-remitos-tbody"><tr><td colspan="9"><div class="ab-empty">Cargando...</div></td></tr></tbody></table>
+      <table class="ab-table"><thead><tr><th>Nro.</th><th>Fecha</th><th>Empresa</th><th>Estado</th><th></th></tr></thead>
+      <tbody id="ab-remitos-tbody"><tr><td colspan="5"><div class="ab-empty">Cargando...</div></td></tr></tbody></table>
     </div>
   </div>
 </div>
@@ -3766,29 +3765,41 @@ function abCargarRemitos() {
   abApi('/remitos'+(estado?'?estado='+estado:'')).then(function(res) {
     if (!res.ok) return;
     var tbody = document.getElementById('ab-remitos-tbody');
-    if (!res.data.length) { tbody.innerHTML = '<tr><td colspan="9"><div class="ab-empty"><div class="ab-empty-icon">📋</div>Sin remitos</div></td></tr>'; return; }
+    if (!res.data.length) { tbody.innerHTML = '<tr><td colspan="5"><div class="ab-empty"><div class="ab-empty-icon">📋</div>Sin remitos</div></td></tr>'; return; }
     tbody.innerHTML = res.data.map(function(r) {
-      var anulado = r.estado === 'anulado';
-      var rowStyle = anulado ? 'opacity:.5' : '';
-      var wpBadge = r.whatsapp_enviado ? '<span style="font-size:10px;color:#16a34a;margin-left:4px" title="WA enviado">✓WA</span>' : '';
-      var confBadge = r.conformado_path ? '<span style="font-size:10px;color:#1d4ed8;margin-left:4px" title="Conformado subido">📎</span>' : '';
-      var btns = '<div style="display:flex;gap:3px;flex-wrap:wrap">';
-      btns += '<button class="btn bo bs" onclick="abVerRemito('+r.id+')">Ver</button>';
-      if (!anulado) {
+      // Estado display
+      var estadoMap = { emitido:'EMITIDO', facturado:'CERRADO', anulado:'ANULADO', borrador:'BORRADOR' };
+      var estadoColor = { emitido:'azul', facturado:'verde', anulado:'rojo', borrador:'amarillo' };
+      var estadoLabel = estadoMap[r.estado] || r.estado.toUpperCase();
+      var estadoBadge = '<span class="ab-badge ab-badge-'+(estadoColor[r.estado]||'gris')+'">'+estadoLabel+'</span>';
+      // Badges extras
+      if (r.whatsapp_enviado) estadoBadge += ' <span style="font-size:10px;color:#16a34a;font-weight:700">WA✓</span>';
+      if (r.conformado_path)  estadoBadge += ' <span class="ab-badge ab-badge-azul" style="background:#eff6ff">📎 CONF.</span>';
+      // Anulado — fila atenuada
+      var rowStyle = r.estado === 'anulado' ? 'opacity:.45' : '';
+      // Botones
+      var btns = '<div style="display:flex;gap:4px;flex-wrap:wrap;justify-content:flex-end">';
+      btns += '<button class="btn bo bs" onclick="abVerRemito('+r.id+')" title="Ver detalle">👁</button>';
+      if (r.estado !== 'anulado') {
         btns += '<button class="btn bb bs" onclick="window.open(\'/api/abasto/remitos/'+r.id+'/pdf\',\'_blank\')" title="Imprimir">🖨</button>';
-        btns += '<button class="btn bo bs" onclick="abEnviarWA('+r.id+',\''+r.nro_remito+'\',\''+( r.cliente_telefono||'')+'\',\''+( r.empresa||'').replace(/'/g,"\\'")+'\')" title="Enviar WhatsApp" style="color:#16a34a">📲</button>';
-        btns += '<button class="btn bo bs" onclick="abSubirConformado('+r.id+')" title="Subir conformado">📎</button>';
+        btns += '<button class="btn bo bs" onclick="abEnviarWA('+r.id+',\''+r.nro_remito+'\',\''+(r.cliente_telefono||'')+'\',\''+(r.empresa||'').replace(/'/g,"\\'")+'\')">📲</button>';
+        if (r.conformado_path) {
+          btns += '<button class="btn bo bs" onclick="window.open(\'/'+r.conformado_path.replace(/^\//,'')+'\',\'_blank\')" title="Ver conformado" style="color:#1d4ed8">📄 Ver</button>';
+        } else {
+          btns += '<button class="btn bo bs" onclick="abSubirConformado('+r.id+')" title="Subir conformado">📎</button>';
+        }
         btns += '<button class="btn bd bs" onclick="abAnularRemito('+r.id+',\''+r.nro_remito+'\')" title="Anular">✕</button>';
       } else {
-        btns += '<button class="btn bo bs" onclick="window.open(\'/api/abasto/remitos/'+r.id+'/pdf\',\'_blank\')" title="Ver PDF">🖨</button>';
+        btns += '<button class="btn bo bs" onclick="window.open(\'/api/abasto/remitos/'+r.id+'/pdf\',\'_blank\')" title="Ver PDF anulado">🖨</button>';
       }
       btns += '</div>';
       return '<tr style="'+rowStyle+'">' +
-        '<td><strong>'+(r.nro_remito||'—')+'</strong>'+(anulado?'<br><span style="font-size:9px;color:var(--err);font-weight:700">ANULADO</span>':'')+'</td>' +
-        '<td>'+abFecha(r.fecha)+'</td><td>'+(r.empresa||'—')+'</td><td>'+(r.contacto||'—')+'</td>' +
-        '<td>'+(r.comercial||'—')+'</td><td>'+(r.total_items||0)+'</td><td>'+abFmt(r.total_bultos)+'</td>' +
-        '<td>'+abBadgeEstado(r.estado)+wpBadge+confBadge+'</td>' +
-        '<td>'+btns+'</td></tr>';
+        '<td><strong>'+(r.nro_remito||'—')+'</strong></td>' +
+        '<td>'+abFecha(r.fecha)+'</td>' +
+        '<td>'+(r.empresa||'—')+'</td>' +
+        '<td>'+estadoBadge+'</td>' +
+        '<td>'+btns+'</td>' +
+      '</tr>';
     }).join('');
   });
 }
@@ -3979,12 +3990,19 @@ function abSubirConformado(id) {
     if (file.size > 20 * 1024 * 1024) { toast('El archivo supera 20MB', 'er'); return; }
     var fd = new FormData();
     fd.append('archivo', file);
-    toast('Subiendo conformado...', 'ok');
+    toast('Subiendo...', 'ok');
     fetch('/api/abasto/remitos/' + id + '/conformado', { method: 'POST', body: fd })
       .then(function(r){ return r.json(); })
       .then(function(res) {
-        if (res.ok) { toast('✓ Conformado subido correctamente', 'ok'); abCargarRemitos(); }
-        else toast('Error: ' + res.error, 'er');
+        if (res.ok) {
+          // Toast grande de conformado
+          var el = document.getElementById('toast');
+          el.innerHTML = '✅ <strong>CONFORMADO</strong> — Archivo subido correctamente';
+          el.className = 'on ok';
+          clearTimeout(window._tT);
+          window._tT = setTimeout(function(){ el.className=''; el.textContent=''; }, 4000);
+          abCargarRemitos();
+        } else toast('Error: ' + res.error, 'er');
       });
   };
   input.click();
