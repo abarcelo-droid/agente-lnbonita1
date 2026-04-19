@@ -439,20 +439,20 @@ router.get('/remitos/:id/pdf', (req, res) => {
 <title>Remito N° ${nroFormateado}</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: Arial, Helvetica, sans-serif; font-size: 11px; color: #000; background: #fff; }
-  .page { width: 210mm; margin: 0 auto; padding: 6mm 8mm; }
+  body { font-family: Arial, Helvetica, sans-serif; font-size: 11px; color: #000; background: #f5f5f5; }
+  .page { width: 210mm; min-height: 297mm; margin: 0 auto; padding: 8mm 10mm; background: #fff; box-shadow: 0 0 20px rgba(0,0,0,.15); }
 
   /* ── HEADER ── */
   .hdr { display: flex; align-items: stretch; border: 1px solid #000; margin-bottom: 4px; }
-  .hdr-logo { width: 44mm; border-right: 1px solid #000; padding: 6px 8px; display: flex; flex-direction: column; align-items: center; justify-content: center; }
-  .logo-name { font-size: 22px; font-weight: 900; font-style: italic; color: #b8002a; letter-spacing: -1px; line-height: 1; }
-  .logo-sub  { font-size: 9px; font-weight: 700; letter-spacing: .1em; margin: 2px 0 6px; }
-  .hdr-logo address { font-size: 8px; text-align: center; font-style: normal; line-height: 1.5; color: #333; }
+  .hdr-logo { width: 55mm; border-right: 1px solid #000; padding: 8px 10px; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+  .hdr-logo img { width: 100%; max-width: 130px; height: auto; display: block; margin-bottom: 6px; }
+  .logo-sub  { font-size: 9px; font-weight: 700; letter-spacing: .1em; margin: 0 0 5px; text-align:center; }
+  .hdr-logo address { font-size: 8px; text-align: center; font-style: normal; line-height: 1.6; color: #333; }
   .hdr-logo .iva-tag { margin-top: 5px; border: 1px solid #000; padding: 1px 6px; font-size: 9px; font-weight: 700; display: inline-block; }
 
-  .hdr-R { width: 20mm; border-right: 1px solid #000; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 4px; }
-  .R-box { border: 3px solid #000; width: 22px; height: 22px; display: flex; align-items: center; justify-content: center; font-size: 16px; font-weight: 900; margin-bottom: 3px; }
-  .R-cod { font-size: 8px; text-align: center; }
+  .hdr-R { width: 24mm; border-right: 1px solid #000; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 6px 4px; gap: 6px; }
+  .R-box { border: 3px solid #000; width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; font-size: 18px; font-weight: 900; }
+  .R-cod { font-size: 8.5px; text-align: center; font-weight: 600; }
 
   .hdr-main { flex: 1; padding: 6px 10px; }
   .hdr-main .no-factura { font-size: 9px; font-weight: 700; text-transform: uppercase; color: #555; margin-bottom: 2px; }
@@ -502,9 +502,10 @@ router.get('/remitos/:id/pdf', (req, res) => {
   .barcode { font-family: 'Libre Barcode 39', monospace; font-size: 28px; letter-spacing: 2px; margin-top: 2px; }
 
   @media print {
-    body { margin: 0; }
-    .page { padding: 4mm 6mm; }
+    body { margin: 0; background: #fff; }
+    .page { padding: 8mm 10mm; box-shadow: none; }
     .no-print { display: none !important; }
+    @page { size: A4; margin: 0; }
   }
 </style>
 <link href="https://fonts.googleapis.com/css2?family=Libre+Barcode+39&display=swap" rel="stylesheet">
@@ -522,7 +523,7 @@ router.get('/remitos/:id/pdf', (req, res) => {
   <!-- HEADER -->
   <div class="hdr">
     <div class="hdr-logo">
-      <div class="logo-name">La Niña<br>Bonita</div>
+      <img src="/static/logo.jpg" alt="La Niña Bonita">
       <div class="logo-sub">SAN GERÓNIMO S.A.</div>
       <address>
         Independencia 1073 (Este)<br>
