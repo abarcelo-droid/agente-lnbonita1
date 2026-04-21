@@ -936,9 +936,20 @@ router.post('/mandatas/:id/whatsapp', async (req, res) => {
       `_La Niña Bonita — San Gerónimo SA_\n` +
       `Nave 4 · Puesto 2-4-6 · Mercado Central`;
 
-    // Formatear teléfono
+    // Formatear teléfono argentino
     let tel = telefono.replace(/\D/g, '');
+    // Quitar 0 inicial si existe
+    if (tel.startsWith('0')) tel = tel.slice(1);
+    // Agregar 54 si no tiene código país
     if (!tel.startsWith('54')) tel = '54' + tel;
+    // Agregar 9 después del 54 si es móvil (formato WhatsApp Argentina)
+    if (tel.startsWith('54') && !tel.startsWith('549')) {
+      tel = '549' + tel.slice(2);
+    }
+
+    console.log(`[WA Mandata] Enviando a +${tel}`);
+    console.log(`[WA Mandata] From: ${process.env.TWILIO_WHATSAPP_FROM}`);
+    console.log(`[WA Mandata] SID: ${process.env.TWILIO_ACCOUNT_SID ? 'OK' : 'FALTA'}`);
 
     const twilio = await import('twilio');
     const client = twilio.default(
@@ -946,15 +957,23 @@ router.post('/mandatas/:id/whatsapp', async (req, res) => {
       process.env.TWILIO_AUTH_TOKEN
     );
 
-    await client.messages.create({
+    const msg = await client.messages.create({
       from: process.env.TWILIO_WHATSAPP_FROM,
       to:   `whatsapp:+${tel}`,
       body: mensaje
     });
 
-    res.json({ ok: true, mensaje: `Vale enviado a +${tel}` });
+    console.log(`[WA Mandata] Enviado OK — SID: ${msg.sid}`);
+    res.json({ ok: true, mensaje: `Vale enviado a +${tel}`, sid: msg.sid });
+
   } catch(e) {
-    res.status(500).json({ ok: false, error: e.message });
+    console.error('[WA Mandata] Error:', e.message, e.code || '');
+    res.status(500).json({
+      ok: false,
+      error: e.message,
+      code: e.code || null,
+      detalle: e.moreInfo || null
+    });
   }
 });
 
@@ -1071,6 +1090,40 @@ router.get('/mandatas/:id', (req, res) => {
       WHERE mi.mandata_id = ?
     `).all(req.params.id);
     res.json({ ok: true, data: { ...m, items } });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+
+// Guardar borrador de mandata
+router.post('/mandatas/borrador', (req, res) => {
+  const db = getDb();
+  const { fecha, deposito, empresa, cliente_telefono, items } = req.body;
+  if (!empresa) return res.status(400).json({ ok: false, error: 'Cliente requerido' });
+  try {
+    const ultimo = db.prepare("SELECT nro_mandata FROM mandatas ORDER BY id DESC LIMIT 1").get();
+    let nroNuevo = 'M-0001';
+    if (ultimo?.nro_mandata) {
+      const num = parseInt(ultimo.nro_mandata.split('-')[1]) + 1;
+      nroNuevo = 'M-' + String(num).padStart(4, '0');
+    }
+    const r = db.prepare(`
+      INSERT INTO mandatas (nro_mandata, fecha, deposito, empresa, cliente_telefono, estado, total_kg, total_importe)
+      VALUES (?, ?, ?, ?, ?, 'borrador', 0, 0)
+    `).run(nroNuevo, fecha || new Date().toISOString().split('T')[0],
+      deposito || 'MCBA', empresa, cliente_telefono || null);
+    const mandata_id = r.lastInsertRowid;
+    // Guardar items sin descontar stock
+    if (items && items.length) {
+      for (const item of items) {
+        const p = db.prepare('SELECT * FROM partidas WHERE id=?').get(item.partida_id);
+        if (!p) continue;
+        db.prepare(`INSERT INTO mandatas_items (mandata_id, partida_id, producto, bultos, kilos_por_bulto, kilos_total, precio_kg, importe)
+          VALUES (?,?,?,?,?,?,?,?)`)
+          .run(mandata_id, item.partida_id, p.producto, item.bultos, item.kilos_por_bulto,
+               item.bultos * item.kilos_por_bulto, 0, item.bultos * (item.precio_bulto || 0));
+      }
+    }
+    res.json({ ok: true, id: mandata_id, nro_mandata: nroNuevo });
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 

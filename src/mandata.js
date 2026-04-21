@@ -1,7 +1,8 @@
 // ─── MÓDULO MANDATA ──────────────────────────────────────────
 var MD = {
   deposito: '', empresa: '', clienteTel: '', clienteMetodoPago: '',
-  items: [], partidas: [], clientes: [], metodoPago: ''
+  items: [], partidas: [], clientes: [], metodoPago: '',
+  borradorId: null
 };
 
 function mdFmt(n) {
@@ -86,7 +87,7 @@ function mdCargar() {
 function mdAbrirNueva() {
   MD.deposito = ''; MD.empresa = ''; MD.clienteTel = '';
   MD.clienteMetodoPago = ''; MD.items = []; MD.partidas = [];
-  MD.clientes = []; MD.metodoPago = '';
+  MD.clientes = []; MD.metodoPago = ''; MD.borradorId = null;
 
   var el;
   el = document.getElementById('md-prod-search'); if (el) el.value = '';
@@ -153,9 +154,14 @@ function mdAbrirNueva() {
 function mdMostrarPaso(n) {
   [1, 2, 3, 4, 5].forEach(function(i) {
     var el = document.getElementById('md-paso' + i);
-    if (el) el.style.display = i === n ? 'block' : 'none';
+    if (!el) return;
+    if (i === n) {
+      el.style.display = i === 3 ? 'flex' : 'block';
+    } else {
+      el.style.display = 'none';
+    }
   });
-  var pcts = { 1: '20%', 2: '40%', 3: '60%', 4: '80%', 5: '100%' };
+  var pcts = { 1: '20%', 2: '40%', 3: '75%', 4: '75%', 5: '100%' };
   var prog = document.getElementById('md-progress');
   if (prog) prog.style.width = pcts[n] || '20%';
 }
@@ -245,55 +251,162 @@ function mdIrPaso3() {
   el = document.getElementById('md-header-info');  if (el) el.textContent = '📦 ' + MD.deposito + ' · ' + MD.empresa;
   el = document.getElementById('md-paso3-cliente'); if (el) el.textContent = MD.empresa;
   el = document.getElementById('md-paso3-dep');     if (el) el.textContent = MD.deposito;
+
   abApi('/partidas?deposito=' + encodeURIComponent(MD.deposito) + '&estado=activa&estado2=parcial&disponible=1').then(function(res) {
     MD.partidas = res.ok ? res.data : [];
-    mdRenderItemsSel();
-    mdMostrarPaso(3);
+    mdRenderStockLista();
   });
-  mdCargarDestacados();
+
+  mdMostrarPaso(3);
 }
 
-function mdCargarDestacados() {
-  abApi('/mandata/destacados').then(function(res) {
-    var grid = document.getElementById('md-destacados');
-    if (!res.ok || !res.data.length) {
-      grid.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:12px;color:var(--mut);font-size:12px">Sin productos destacados configurados</div>';
-      return;
-    }
-    grid.innerHTML = '';
-    res.data.forEach(function(rp) {
-      var partida  = MD.partidas.find(function(p) { return (p.producto_display || p.producto || '').toLowerCase().indexOf((rp.nombre || '').toLowerCase()) >= 0; });
-      var stock    = partida ? partida.bultos_disponibles : 0;
-      var disabled = stock === 0;
+// Renderiza la lista completa: stock disponible + items ya agregados
+function mdRenderStockLista() {
+  var cont = document.getElementById('md-stock-lista');
+  if (!cont) return;
+  cont.innerHTML = '';
 
-      var btn = document.createElement('button');
-      btn.style.cssText = 'padding:16px 12px;border:2px solid ' + (disabled ? 'var(--bor)' : 'var(--bor2)') + ';border-radius:14px;background:' + (disabled ? 'var(--bg)' : 'var(--sur)') + ';cursor:' + (disabled ? 'default' : 'pointer') + ';text-align:center;transition:all .15s;opacity:' + (disabled ? '.4' : '1');
-      btn.innerHTML =
-        '<div style="font-size:22px;margin-bottom:4px">📦</div>' +
-        '<div style="font-size:13px;font-weight:700;color:var(--txt);line-height:1.2">' + rp.nombre + '</div>' +
-        '<div style="font-size:11px;color:var(--mut);margin-top:4px">' + (disabled ? 'Sin stock' : stock + ' bultos') + '</div>' +
-        (rp.precio_minorista_mcba ? '<div style="font-size:12px;font-weight:700;color:var(--burd);margin-top:4px">$' + mdFmt(rp.precio_minorista_mcba) + '/bto</div>' : '');
+  // Primero mostrar items ya agregados (expandidos con inputs)
+  if (MD.items.length) {
+    var secItems = document.createElement('div');
+    secItems.style.cssText = 'margin-bottom:16px';
+    var lbl = document.createElement('div');
+    lbl.style.cssText = 'font-size:11px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px';
+    lbl.textContent = '✓ Agregados';
+    secItems.appendChild(lbl);
+    MD.items.forEach(function(item, i) { secItems.appendChild(mdCrearCardItem(item, i)); });
+    cont.appendChild(secItems);
+  }
 
-      if (!disabled) {
-        btn.addEventListener('mouseenter', function() { this.style.borderColor = 'var(--burg)'; this.style.background = 'var(--burl)'; });
-        btn.addEventListener('mouseleave', function() { this.style.borderColor = 'var(--bor2)'; this.style.background = 'var(--sur)'; });
-        btn.addEventListener('click', function() { mdAgregarDestacado(rp.id, rp.nombre); });
-      }
-      grid.appendChild(btn);
-    });
+  // Luego mostrar stock disponible (no repetir los ya agregados)
+  var disponibles = MD.partidas.filter(function(p) {
+    return !MD.items.find(function(it) { return it.partida_id === p.id; });
   });
+
+  if (disponibles.length) {
+    var secStock = document.createElement('div');
+    var lbl2 = document.createElement('div');
+    lbl2.style.cssText = 'font-size:11px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px';
+    lbl2.textContent = '📦 Stock disponible';
+    secStock.appendChild(lbl2);
+    disponibles.forEach(function(p) { secStock.appendChild(mdCrearFilaStock(p)); });
+    cont.appendChild(secStock);
+  } else if (!MD.items.length) {
+    var empty = document.createElement('div');
+    empty.style.cssText = 'text-align:center;padding:32px;color:var(--mut);font-size:14px';
+    empty.textContent = 'Sin stock disponible en ' + MD.deposito;
+    cont.appendChild(empty);
+  }
+
+  mdActualizarTotal();
 }
 
-function mdAgregarDestacado(rpId, nombre) {
-  var partida = MD.partidas.find(function(p) { return (p.producto_display || p.producto || '').toLowerCase().indexOf(nombre.toLowerCase()) >= 0; });
-  if (!partida) { toast('Sin stock disponible para ' + nombre, 'er'); return; }
-  if (MD.items.find(function(i) { return i.partida_id === partida.id; })) { toast('Ya está en la lista', 'er'); return; }
-  abApi('/mandata/precio?nombre=' + encodeURIComponent(nombre)).then(function(res) {
-    var precio = res.ok && res.data ? (res.data.precio_minorista_mcba || 0) : 0;
-    MD.items.push({ partida_id: partida.id, producto: partida.producto, producto_display: partida.producto_display || partida.producto, bultos: 1, kilos_por_bulto: partida.kilos_por_bulto, disponible: partida.bultos_disponibles, precio_bulto: precio });
-    mdRenderItemsSel();
-    toast(nombre + ' agregado', 'ok');
-  });
+// Card de item YA agregado (con inputs de cantidad y precio inline)
+function mdCrearCardItem(item, i) {
+  var card = document.createElement('div');
+  card.id = 'md-card-item-' + i;
+  card.style.cssText = 'background:var(--sur);border:2px solid var(--burg);border-radius:14px;padding:14px;margin-bottom:8px';
+
+  // Header
+  var hdr = document.createElement('div');
+  hdr.style.cssText = 'display:flex;justify-content:space-between;align-items:center;margin-bottom:12px';
+  var titulo = document.createElement('div');
+  titulo.style.cssText = 'font-weight:700;font-size:15px;color:var(--txt)';
+  titulo.textContent = item.producto_display;
+  var btnQ = document.createElement('button');
+  btnQ.style.cssText = 'background:var(--bg);border:1px solid var(--bor2);border-radius:8px;color:var(--err);font-size:18px;cursor:pointer;width:32px;height:32px;line-height:1;flex-shrink:0';
+  btnQ.textContent = '×';
+  btnQ.addEventListener('click', (function(idx) { return function() { mdQuitarItem(idx); }; })(i));
+  hdr.appendChild(titulo); hdr.appendChild(btnQ);
+  card.appendChild(hdr);
+
+  // Inputs en fila
+  var row = document.createElement('div');
+  row.style.cssText = 'display:grid;grid-template-columns:1fr 1fr;gap:10px';
+
+  // Bultos
+  var colB = document.createElement('div');
+  var lblB = document.createElement('div');
+  lblB.style.cssText = 'font-size:10px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px';
+  lblB.textContent = 'Bultos (máx ' + item.disponible + ')';
+  colB.appendChild(lblB);
+  var rowB = document.createElement('div');
+  rowB.style.cssText = 'display:flex;align-items:center;gap:6px';
+  var bM = document.createElement('button');
+  bM.style.cssText = 'width:40px;height:40px;border:2px solid var(--bor2);border-radius:8px;background:var(--bg);font-size:20px;cursor:pointer;line-height:1;flex-shrink:0';
+  bM.textContent = '−';
+  bM.addEventListener('click', (function(idx) { return function() { mdCambiarBultos(idx, -1); }; })(i));
+  var inpB = document.createElement('input');
+  inpB.type = 'number'; inpB.inputMode = 'numeric';
+  inpB.min = 1; inpB.max = item.disponible; inpB.value = item.bultos;
+  inpB.id = 'md-bultos-' + i;
+  inpB.style.cssText = 'flex:1;padding:8px;border:2px solid var(--bor2);border-radius:8px;font-size:20px;font-weight:800;text-align:center;font-family:var(--sans);outline:none;min-width:0';
+  inpB.addEventListener('focus', function() { this.style.borderColor = 'var(--burg)'; });
+  inpB.addEventListener('blur',  function() { this.style.borderColor = 'var(--bor2)'; });
+  inpB.addEventListener('input', (function(idx) { return function() { mdActualizarItem(idx, 'bultos', this.value); }; })(i));
+  var bP = document.createElement('button');
+  bP.style.cssText = 'width:40px;height:40px;border:2px solid var(--burg);border-radius:8px;background:var(--burg);color:#fff;font-size:20px;cursor:pointer;line-height:1;flex-shrink:0';
+  bP.textContent = '+';
+  bP.addEventListener('click', (function(idx) { return function() { mdCambiarBultos(idx, 1); }; })(i));
+  rowB.appendChild(bM); rowB.appendChild(inpB); rowB.appendChild(bP);
+  colB.appendChild(rowB);
+
+  // Precio
+  var colP = document.createElement('div');
+  var lblPW = document.createElement('div');
+  lblPW.style.cssText = 'display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px';
+  var lblP = document.createElement('div');
+  lblP.style.cssText = 'font-size:10px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.04em';
+  lblP.textContent = '$ / Bulto';
+  lblPW.appendChild(lblP);
+  if (item.precio_bulto) {
+    var lblSug = document.createElement('div');
+    lblSug.style.cssText = 'font-size:10px;color:var(--ok);font-weight:600';
+    lblSug.textContent = '✓ sugerido';
+    lblPW.appendChild(lblSug);
+  }
+  colP.appendChild(lblPW);
+  var inpP = document.createElement('input');
+  inpP.type = 'number'; inpP.inputMode = 'decimal';
+  inpP.min = 0; inpP.step = 1; inpP.value = item.precio_bulto || ''; inpP.placeholder = '0';
+  inpP.id = 'md-precio-' + i;
+  inpP.style.cssText = 'width:100%;padding:8px;border:2px solid var(--bor2);border-radius:8px;font-size:20px;font-weight:800;text-align:center;font-family:var(--sans);outline:none;box-sizing:border-box';
+  inpP.addEventListener('focus', function() { this.style.borderColor = 'var(--burg)'; });
+  inpP.addEventListener('blur',  function() { this.style.borderColor = 'var(--bor2)'; });
+  inpP.addEventListener('input', (function(idx) { return function() { mdActualizarItem(idx, 'precio_bulto', this.value); }; })(i));
+  colP.appendChild(inpP);
+
+  row.appendChild(colB); row.appendChild(colP);
+  card.appendChild(row);
+
+  // Subtotal
+  var sub = document.createElement('div');
+  sub.style.cssText = 'display:flex;justify-content:space-between;margin-top:10px;padding-top:10px;border-top:1px solid var(--bor);font-size:13px';
+  var kg = item.bultos * item.kilos_por_bulto;
+  sub.innerHTML = '<span style="color:var(--mut)">' + kg.toFixed(1) + ' kg</span>' +
+    '<span style="font-weight:800;font-size:15px;color:var(--burd)" id="md-imp-' + i + '">$' + mdFmt(item.bultos * (item.precio_bulto || 0)) + '</span>';
+  card.appendChild(sub);
+
+  return card;
+}
+
+// Fila de stock disponible (colapsada, toca para agregar)
+function mdCrearFilaStock(p) {
+  var nombre = p.producto_display || p.producto || '—';
+  var row = document.createElement('div');
+  row.style.cssText = 'display:flex;justify-content:space-between;align-items:center;padding:12px 14px;background:var(--sur);border:1px solid var(--bor);border-radius:12px;margin-bottom:8px;cursor:pointer;transition:all .12s';
+  row.innerHTML =
+    '<div><div style="font-weight:600;font-size:14px">' + nombre + '</div>' +
+    '<div style="font-size:11px;color:var(--mut);margin-top:2px">' + (p.proveedor_nombre || '—') + ' · ' + p.kilos_por_bulto + ' kg/bulto</div></div>' +
+    '<div style="text-align:right;flex-shrink:0;margin-left:12px">' +
+      '<div style="font-weight:900;font-size:16px;color:var(--burd)">' + p.bultos_disponibles + '</div>' +
+      '<div style="font-size:10px;color:var(--mut)">bultos</div>' +
+      '<div style="font-size:11px;color:var(--burg);font-weight:700;margin-top:2px">+ Agregar</div>' +
+    '</div>';
+  row.addEventListener('mouseenter', function() { this.style.borderColor = 'var(--burg)'; this.style.background = 'var(--burl)'; });
+  row.addEventListener('mouseleave', function() { this.style.borderColor = 'var(--bor)';  this.style.background = 'var(--sur)'; });
+  row.addEventListener('click', function() { mdAgregarProducto(p.id); });
+  return row;
 }
 
 function mdFiltrarPartidas(q) {
@@ -309,16 +422,18 @@ function mdFiltrarPartidas(q) {
   disp.forEach(function(p) {
     var nombre = p.producto_display || p.producto || '—';
     var div = document.createElement('div');
-    div.style.cssText = 'padding:14px 16px;cursor:pointer;border-bottom:1px solid var(--bor);display:flex;justify-content:space-between;align-items:center;background:var(--sur)';
+    div.style.cssText = 'padding:12px 16px;cursor:pointer;border-bottom:1px solid var(--bor);display:flex;justify-content:space-between;align-items:center;background:var(--sur)';
     div.innerHTML =
-      '<div><div style="font-weight:700;font-size:15px">' + nombre + '</div>' +
-      '<div style="font-size:11px;color:var(--mut);margin-top:2px">' + (p.proveedor_nombre || '—') + ' · ' + p.kilos_por_bulto + ' kg/bulto</div></div>' +
-      '<div style="text-align:right;flex-shrink:0;margin-left:12px">' +
-        '<div style="font-weight:900;font-size:16px;color:var(--burd)">' + p.bultos_disponibles + '</div>' +
-        '<div style="font-size:10px;color:var(--mut)">bultos</div></div>';
+      '<div><div style="font-weight:700;font-size:14px">' + nombre + '</div>' +
+      '<div style="font-size:11px;color:var(--mut)">' + p.kilos_por_bulto + ' kg/bulto</div></div>' +
+      '<div style="font-weight:900;font-size:15px;color:var(--burd)">' + p.bultos_disponibles + ' bultos</div>';
     div.addEventListener('mouseenter', function() { this.style.background = 'var(--burl)'; });
     div.addEventListener('mouseleave', function() { this.style.background = 'var(--sur)'; });
-    div.addEventListener('click', function() { mdAgregarProducto(p.id); });
+    div.addEventListener('click', function() {
+      mdAgregarProducto(p.id);
+      document.getElementById('md-prod-search').value = '';
+      list.style.display = 'none';
+    });
     list.appendChild(div);
   });
   list.style.display = 'block';
@@ -332,150 +447,41 @@ function mdAgregarProducto(id) {
   abApi('/mandata/precio?nombre=' + encodeURIComponent(nombre)).then(function(res) {
     var precio = res.ok && res.data ? (res.data.precio_minorista_mcba || 0) : 0;
     MD.items.push({ partida_id: p.id, producto: p.producto, producto_display: nombre, bultos: 1, kilos_por_bulto: p.kilos_por_bulto, disponible: p.bultos_disponibles, precio_bulto: precio });
-    var el = document.getElementById('md-prod-search'); if (el) el.value = '';
-    var list = document.getElementById('md-prod-list'); if (list) list.style.display = 'none';
-    mdRenderItemsSel();
+    mdRenderStockLista();
   });
 }
 
-function mdRenderItemsSel() {
-  var cont   = document.getElementById('md-items-sel');
-  var btnSig = document.getElementById('md-btn-paso4');
+function mdQuitarItem(i) {
+  MD.items.splice(i, 1);
+  mdRenderStockLista();
+}
+
+function mdActualizarTotal() {
+  var totImp = mdTotalImporte();
+  var totKg  = MD.items.reduce(function(s, it) { return s + it.bultos * it.kilos_por_bulto; }, 0);
   var totDiv = document.getElementById('md-total-parcial');
+  var btnSig = document.getElementById('md-btn-paso4');
 
-  if (!MD.items.length) {
-    cont.innerHTML = '<div style="text-align:center;padding:28px;color:var(--mut);font-size:14px">Tocá un producto para agregarlo</div>';
-    if (btnSig) { btnSig.disabled = true; btnSig.style.opacity = '.4'; }
+  if (MD.items.length) {
+    if (totDiv) { totDiv.style.display = 'block'; }
+    var elImp = document.getElementById('md-tot-imp');
+    var elKg  = document.getElementById('md-tot-kg');
+    if (elImp) elImp.textContent = '$' + mdFmt(totImp);
+    if (elKg)  elKg.textContent  = totKg.toFixed(1) + ' kg · ' + MD.items.length + ' producto' + (MD.items.length > 1 ? 's' : '');
+    if (btnSig) { btnSig.disabled = false; btnSig.style.opacity = '1'; }
+  } else {
     if (totDiv) totDiv.style.display = 'none';
-    return;
+    if (btnSig) { btnSig.disabled = true; btnSig.style.opacity = '.4'; }
   }
-  var totKg = 0, totImp = 0;
-  cont.innerHTML = '';
-  MD.items.forEach(function(item, i) {
-    var kg  = item.bultos * item.kilos_por_bulto;
-    var imp = item.bultos * (item.precio_bulto || 0);
-    totKg += kg; totImp += imp;
-
-    var card = document.createElement('div');
-    card.style.cssText = 'background:var(--sur);border:1px solid var(--bor);border-radius:12px;padding:12px 14px;display:flex;justify-content:space-between;align-items:center;margin-bottom:8px';
-    card.innerHTML =
-      '<div><div style="font-weight:700;font-size:14px">' + item.producto_display + '</div>' +
-      '<div style="font-size:12px;color:var(--mut)">' + item.bultos + ' bultos · ' + kg.toFixed(1) + ' kg</div></div>';
-
-    var btnQ = document.createElement('button');
-    btnQ.style.cssText = 'background:none;border:none;color:var(--err);font-size:20px;cursor:pointer;padding:4px 8px';
-    btnQ.textContent = '×';
-    btnQ.addEventListener('click', (function(idx) { return function() { mdQuitarItem(idx); }; })(i));
-    card.appendChild(btnQ);
-    cont.appendChild(card);
-  });
-
-  var el;
-  el = document.getElementById('md-tot-kg');  if (el) el.textContent = totKg.toFixed(1) + ' kg';
-  el = document.getElementById('md-tot-imp'); if (el) el.textContent = '$' + mdFmt(totImp);
-  if (totDiv) totDiv.style.display = 'block';
-  if (btnSig) { btnSig.disabled = false; btnSig.style.opacity = '1'; }
 }
 
-function mdQuitarItem(i) { MD.items.splice(i, 1); mdRenderItemsSel(); }
-
-// ── Paso 4: cantidades y precios ─────────────────────────────
-function mdIrPaso4() {
-  if (!MD.items.length) { toast('Agregá al menos un producto', 'er'); return; }
-  mdRenderItemsEdit();
-  mdMostrarPaso(4);
-}
-
-function mdRenderItemsEdit() {
-  var cont = document.getElementById('md-items-edit');
-  cont.innerHTML = '';
-
-  MD.items.forEach(function(item, i) {
-    var card = document.createElement('div');
-    card.id = 'md-edit-' + i;
-    card.style.cssText = 'background:var(--sur);border:1px solid var(--bor);border-radius:16px;padding:16px;margin-bottom:14px';
-
-    var titulo = document.createElement('div');
-    titulo.style.cssText = 'font-weight:700;font-size:15px;margin-bottom:14px;color:var(--txt)';
-    titulo.textContent = item.producto_display;
-    card.appendChild(titulo);
-
-    var grid = document.createElement('div');
-    grid.style.cssText = 'display:grid;grid-template-columns:1fr 1fr;gap:14px';
-
-    // Columna bultos
-    var colB = document.createElement('div');
-    var lblB = document.createElement('div');
-    lblB.style.cssText = 'font-size:11px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px';
-    lblB.textContent = 'Bultos (máx ' + item.disponible + ')';
-    colB.appendChild(lblB);
-
-    var rowB = document.createElement('div');
-    rowB.style.cssText = 'display:flex;align-items:center;gap:8px';
-
-    var btnM = document.createElement('button');
-    btnM.style.cssText = 'width:44px;height:44px;border:2px solid var(--bor2);border-radius:10px;background:var(--bg);font-size:22px;cursor:pointer;line-height:1;flex-shrink:0';
-    btnM.textContent = '−';
-    btnM.addEventListener('click', (function(idx) { return function() { mdCambiarBultos(idx, -1); }; })(i));
-
-    var inpB = document.createElement('input');
-    inpB.type = 'number'; inpB.inputMode = 'numeric';
-    inpB.min = 1; inpB.max = item.disponible; inpB.value = item.bultos;
-    inpB.id = 'md-bultos-' + i;
-    inpB.style.cssText = 'flex:1;padding:10px;border:2px solid var(--bor2);border-radius:10px;font-size:22px;font-weight:800;text-align:center;font-family:var(--sans);outline:none;min-width:0';
-    inpB.addEventListener('focus',  function() { this.style.borderColor = 'var(--burg)'; });
-    inpB.addEventListener('blur',   function() { this.style.borderColor = 'var(--bor2)'; });
-    inpB.addEventListener('input',  (function(idx) { return function() { mdActualizarItem(idx, 'bultos', this.value); }; })(i));
-    inpB.addEventListener('change', (function(idx) { return function() { mdActualizarItem(idx, 'bultos', this.value); }; })(i));
-
-    var btnP = document.createElement('button');
-    btnP.style.cssText = 'width:44px;height:44px;border:2px solid var(--burg);border-radius:10px;background:var(--burg);color:#fff;font-size:22px;cursor:pointer;line-height:1;flex-shrink:0';
-    btnP.textContent = '+';
-    btnP.addEventListener('click', (function(idx) { return function() { mdCambiarBultos(idx, 1); }; })(i));
-
-    rowB.appendChild(btnM); rowB.appendChild(inpB); rowB.appendChild(btnP);
-    colB.appendChild(rowB);
-
-    // Columna precio
-    var colP = document.createElement('div');
-    var lblPW = document.createElement('div');
-    lblPW.style.cssText = 'display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px';
-    var lblP = document.createElement('div');
-    lblP.style.cssText = 'font-size:11px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.05em';
-    lblP.textContent = '$ / Bulto';
-    lblPW.appendChild(lblP);
-    if (item.precio_bulto) {
-      var lblSug = document.createElement('div');
-      lblSug.style.cssText = 'font-size:10px;color:var(--ok);font-weight:600';
-      lblSug.textContent = '✓ precio sugerido';
-      lblPW.appendChild(lblSug);
-    }
-    colP.appendChild(lblPW);
-
-    var inpP = document.createElement('input');
-    inpP.type = 'number'; inpP.inputMode = 'decimal';
-    inpP.min = 0; inpP.step = 0.01; inpP.value = item.precio_bulto || ''; inpP.placeholder = '0.00';
-    inpP.id = 'md-precio-' + i;
-    inpP.style.cssText = 'width:100%;padding:10px;border:2px solid var(--bor2);border-radius:10px;font-size:22px;font-weight:800;text-align:center;font-family:var(--sans);outline:none;box-sizing:border-box';
-    inpP.addEventListener('focus',  function() { this.style.borderColor = 'var(--burg)'; });
-    inpP.addEventListener('blur',   function() { this.style.borderColor = 'var(--bor2)'; });
-    inpP.addEventListener('input',  (function(idx) { return function() { mdActualizarItem(idx, 'precio_bulto', this.value); }; })(i));
-    inpP.addEventListener('change', (function(idx) { return function() { mdActualizarItem(idx, 'precio_bulto', this.value); }; })(i));
-    colP.appendChild(inpP);
-
-    grid.appendChild(colB); grid.appendChild(colP);
-    card.appendChild(grid);
-
-    // Subtotal
-    var sub = document.createElement('div');
-    sub.style.cssText = 'display:flex;justify-content:space-between;margin-top:12px;padding-top:12px;border-top:1px solid var(--bor);font-size:14px';
-    sub.innerHTML = '<span style="color:var(--mut)">' + (item.bultos * item.kilos_por_bulto).toFixed(1) + ' kg</span>' +
-      '<span style="font-weight:800;font-size:16px;color:var(--burd)" id="md-imp-' + i + '">$' + mdFmt(item.bultos * (item.precio_bulto || 0)) + '</span>';
-    card.appendChild(sub);
-    cont.appendChild(card);
-  });
-
-  mdActualizarTotalPaso4();
+function mdActualizarItem(i, campo, val) {
+  var v = campo === 'bultos' ? Math.min(Math.max(1, parseInt(val) || 1), MD.items[i].disponible) : (parseFloat(val) || 0);
+  MD.items[i][campo] = v;
+  // Actualizar subtotal inline sin re-renderizar todo
+  var elImp = document.getElementById('md-imp-' + i);
+  if (elImp) elImp.textContent = '$' + mdFmt(MD.items[i].bultos * (MD.items[i].precio_bulto || 0));
+  mdActualizarTotal();
 }
 
 function mdCambiarBultos(i, delta) {
@@ -484,31 +490,15 @@ function mdCambiarBultos(i, delta) {
   MD.items[i].bultos = nuevo;
   var inp = document.getElementById('md-bultos-' + i);
   if (inp) inp.value = nuevo;
-  mdActualizarImpItem(i);
-  mdActualizarTotalPaso4();
+  mdActualizarItem(i, 'bultos', nuevo);
 }
 
-function mdActualizarItem(i, campo, val) {
-  var v = campo === 'bultos' ? Math.min(Math.max(1, parseInt(val) || 1), MD.items[i].disponible) : (parseFloat(val) || 0);
-  MD.items[i][campo] = v;
-  mdActualizarImpItem(i);
-  mdActualizarTotalPaso4();
+// Paso 4 ahora va directo al pago
+function mdIrPaso4() {
+  if (!MD.items.length) { toast('Agregá al menos un producto', 'er'); return; }
+  mdIrPaso5();
 }
 
-function mdActualizarImpItem(i) {
-  var item = MD.items[i];
-  var imp  = item.bultos * (item.precio_bulto || 0);
-  var el   = document.getElementById('md-imp-' + i);
-  if (el) el.textContent = '$' + mdFmt(imp);
-}
-
-function mdActualizarTotalPaso4() {
-  var tot = mdTotalImporte();
-  var el  = document.getElementById('md-tot-imp2');
-  if (el) el.textContent = '$' + mdFmt(tot);
-}
-
-// ── Paso 5: forma de pago ────────────────────────────────────
 function mdIrPaso5() {
   var tot = mdTotalImporte();
   var el;
@@ -516,6 +506,7 @@ function mdIrPaso5() {
   el = document.getElementById('md-pago-cliente'); if (el) el.textContent = MD.empresa;
   mdMostrarPaso(5);
 }
+
 
 function mdSelPago(btn) {
   var pago = btn.getAttribute('data-pago');
@@ -562,9 +553,18 @@ function mdConfirmar() {
         method: 'POST',
         body: JSON.stringify({ telefono: MD.clienteTel })
       }).then(function(wa) {
-        if (wa.ok) toast('📲 Vale enviado por WhatsApp', 'ok');
-        else toast('Mandata emitida (WhatsApp: ' + wa.error + ')', 'ok');
-      }).catch(function() {});
+        if (wa.ok) {
+          toast('📲 Vale enviado por WhatsApp', 'ok');
+        } else {
+          var msg = 'WA Error: ' + wa.error;
+          if (wa.code) msg += ' (código ' + wa.code + ')';
+          toast(msg, 'er');
+          console.error('[WA]', wa);
+        }
+      }).catch(function(e) {
+        toast('WA: Error de conexión', 'er');
+        console.error('[WA catch]', e);
+      });
     }
 
     // Caja del operador si es efectivo
@@ -582,6 +582,71 @@ function mdConfirmar() {
     abCerrarModal('md-modal-nueva');
     toast('✓ Mandata ' + res.nro_mandata + ' emitida', 'ok');
     mdCargar(); abDashboard();
+  });
+}
+
+
+// ── Borradores ───────────────────────────────────────────────
+function mdGuardarBorrador() {
+  if (!MD.empresa) { toast('Seleccioná un cliente primero', 'er'); return; }
+  var body = {
+    fecha: new Date().toISOString().split('T')[0],
+    deposito: MD.deposito, empresa: MD.empresa,
+    cliente_telefono: MD.clienteTel || null,
+    items: MD.items.map(function(i) {
+      return { partida_id: i.partida_id, bultos: i.bultos, kilos_por_bulto: i.kilos_por_bulto, precio_bulto: i.precio_bulto||0 };
+    })
+  };
+  abApi('/mandatas/borrador', { method: 'POST', body: JSON.stringify(body) }).then(function(res) {
+    if (res.ok) {
+      MD.borradorId = res.id;
+      toast('💾 Borrador guardado — ' + MD.empresa, 'ok');
+      abCerrarModal('md-modal-nueva');
+      mdCargar();
+    } else toast('Error: ' + res.error, 'er');
+  });
+}
+
+function mdContinuarBorrador(id) {
+  abApi('/mandatas/' + id).then(function(res) {
+    if (!res.ok) { toast('Error cargando borrador', 'er'); return; }
+    var m = res.data;
+    MD.deposito = m.deposito; MD.empresa = m.empresa;
+    MD.clienteTel = m.cliente_telefono || ''; MD.borradorId = id;
+    MD.items = []; MD.metodoPago = '';
+    // Reset UI
+    var el;
+    el = document.getElementById('md-prod-search'); if(el) el.value='';
+    el = document.getElementById('md-header-info'); if(el) el.textContent = m.deposito + ' · ' + m.empresa;
+    el = document.getElementById('md-paso3-cliente'); if(el) el.textContent = m.empresa;
+    el = document.getElementById('md-paso3-dep'); if(el) el.textContent = m.deposito;
+    el = document.getElementById('md-btn-borrador'); if(el) el.style.display='block';
+    abApi('/partidas?deposito=' + encodeURIComponent(m.deposito) + '&estado=activa&estado2=parcial&disponible=1').then(function(rp) {
+      MD.partidas = rp.ok ? rp.data : [];
+      (m.items || []).forEach(function(bi) {
+        var partida = MD.partidas.find(function(p) { return p.id === bi.partida_id; });
+        if (partida) {
+          MD.items.push({
+            partida_id: partida.id, producto: partida.producto,
+            producto_display: bi.producto_display || partida.producto_display || partida.producto,
+            bultos: bi.bultos, kilos_por_bulto: bi.kilos_por_bulto,
+            disponible: partida.bultos_disponibles,
+            precio_bulto: bi.precio_bulto || (bi.importe / Math.max(bi.bultos,1)) || 0
+          });
+        }
+      });
+      mdRenderStock(''); mdCargarDestacados(); mdRenderItemsSel();
+      mdMostrarPaso(3);
+      document.getElementById('md-modal-nueva').classList.add('on');
+    });
+  });
+}
+
+function mdEliminarBorrador(id, nro) {
+  if (!confirm('¿Eliminar el borrador ' + nro + '?')) return;
+  abApi('/mandatas/' + id + '/anular', { method: 'POST', body: '{}' }).then(function(res) {
+    if (res.ok) { toast('Borrador eliminado', 'ok'); mdCargar(); }
+    else toast('Error: ' + res.error, 'er');
   });
 }
 

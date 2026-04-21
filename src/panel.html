@@ -358,156 +358,150 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
 <div id="md-inner" style="background:var(--bg);width:100%;max-width:640px;min-height:100vh;margin:0 auto;display:flex;flex-direction:column">
 
   <!-- Header fijo -->
-  <div style="background:var(--burg);color:#fff;padding:16px 20px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:10;flex-shrink:0">
+  <div style="background:var(--burg);color:#fff;padding:14px 20px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:10;flex-shrink:0">
     <div>
-      <div style="font-size:18px;font-weight:800;letter-spacing:-.3px">🧾 Nueva Mandata</div>
-      <div style="font-size:12px;opacity:.75;margin-top:2px" id="md-header-info">Elegí el depósito para comenzar</div>
+      <div style="font-size:17px;font-weight:800">🧾 Nueva Mandata</div>
+      <div style="font-size:12px;opacity:.75;margin-top:1px" id="md-header-info">Elegí el depósito</div>
     </div>
-    <button onclick="abCerrarModal('md-modal-nueva')" style="background:rgba(255,255,255,.2);border:none;color:#fff;border-radius:50%;width:36px;height:36px;font-size:20px;cursor:pointer;line-height:1;flex-shrink:0">×</button>
+    <div style="display:flex;gap:8px;align-items:center">
+      <button id="md-btn-borrador" onclick="mdGuardarBorrador()" style="display:none;background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.3);color:#fff;border-radius:8px;padding:6px 12px;font-size:12px;cursor:pointer;font-family:var(--sans)">💾 Borrador</button>
+      <button onclick="abCerrarModal('md-modal-nueva')" style="background:rgba(255,255,255,.2);border:none;color:#fff;border-radius:50%;width:34px;height:34px;font-size:20px;cursor:pointer;line-height:1">×</button>
+    </div>
   </div>
-  <div style="background:var(--burd);display:flex;height:4px;flex-shrink:0">
-    <div id="md-progress" style="background:#f59e0b;height:4px;width:0%;transition:width .3s"></div>
+  <div style="background:var(--burd);height:3px;flex-shrink:0">
+    <div id="md-progress" style="background:#f59e0b;height:3px;width:0%;transition:width .3s"></div>
   </div>
 
-  <!-- PASO 1: DEPÓSITO (solo si tiene más de 1) -->
-  <div id="md-paso1" style="padding:20px;flex:1;display:none">
-    <div style="font-size:12px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.08em;margin-bottom:20px">Depósito de salida</div>
+  <!-- PASO 1: DEPÓSITO -->
+  <div id="md-paso1" style="padding:20px;display:none">
+    <div style="font-size:11px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.08em;margin-bottom:16px">Depósito de salida</div>
     <div id="md-dep-lista" style="display:flex;flex-direction:column;gap:12px"></div>
   </div>
 
   <!-- PASO 2: CLIENTE -->
-  <div id="md-paso2" style="padding:20px;flex:1;display:none">
-    <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px">
-      <button id="md-back2" onclick="mdVolver(1)" style="background:var(--sur);border:1px solid var(--bor2);border-radius:10px;padding:10px 14px;cursor:pointer;font-size:14px;font-weight:600;display:none">← Volver</button>
-      <div style="font-size:12px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.08em">Cliente</div>
+  <div id="md-paso2" style="padding:20px;display:none">
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px">
+      <button id="md-back2" onclick="mdVolver(1)" style="display:none;background:var(--sur);border:1px solid var(--bor2);border-radius:10px;padding:8px 14px;cursor:pointer;font-size:13px;font-weight:600">← Volver</button>
+      <div style="font-size:11px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.08em">Cliente</div>
     </div>
-    <div style="position:relative;margin-bottom:16px">
-      <input id="md-cli-search" style="width:100%;padding:16px 16px 16px 48px;border:2px solid var(--bor2);border-radius:14px;font-size:16px;font-family:var(--sans);outline:none;box-sizing:border-box"
+    <div style="position:relative;margin-bottom:14px">
+      <input id="md-cli-search" style="width:100%;padding:14px 14px 14px 44px;border:2px solid var(--bor2);border-radius:12px;font-size:16px;font-family:var(--sans);outline:none;box-sizing:border-box"
         placeholder="Buscar cliente..." oninput="mdFiltrarClientes(this.value)"
         onfocus="this.style.borderColor='var(--burg)'" onblur="this.style.borderColor='var(--bor2)'">
-      <span style="position:absolute;left:16px;top:50%;transform:translateY(-50%);font-size:20px">🔍</span>
+      <span style="position:absolute;left:14px;top:50%;transform:translateY(-50%);font-size:18px">🔍</span>
     </div>
-    <div id="md-cli-lista" style="display:flex;flex-direction:column;gap:8px;max-height:calc(100vh - 300px);overflow-y:auto">
-      <div style="text-align:center;padding:32px;color:var(--mut)">Escribí para buscar</div>
+    <div id="md-cli-lista" style="display:flex;flex-direction:column;gap:6px;max-height:calc(100vh - 280px);overflow-y:auto">
+      <div style="text-align:center;padding:28px;color:var(--mut)">Escribí para buscar</div>
     </div>
-    <div id="md-cli-sel" style="display:none;position:sticky;bottom:0;background:var(--sur);border-top:1px solid var(--bor);padding:12px 0;margin-top:16px">
-      <div style="background:var(--burl);border:2px solid var(--burg);border-radius:12px;padding:12px 16px;display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+    <div id="md-cli-sel" style="display:none;position:sticky;bottom:0;background:var(--sur);border-top:1px solid var(--bor);padding:12px 0;margin-top:12px">
+      <div style="background:var(--burl);border:2px solid var(--burg);border-radius:10px;padding:10px 14px;display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
         <div>
-          <div style="font-size:11px;color:var(--mut);font-weight:600;text-transform:uppercase">Cliente</div>
-          <div style="font-size:16px;font-weight:700;color:var(--burd)" id="md-cli-sel-nombre">—</div>
+          <div style="font-size:10px;color:var(--mut);font-weight:600;text-transform:uppercase">Cliente seleccionado</div>
+          <div style="font-size:15px;font-weight:700;color:var(--burd)" id="md-cli-sel-nombre">—</div>
         </div>
         <button onclick="mdLimpiarCliente()" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--mut)">×</button>
       </div>
-      <button onclick="mdIrPaso3()" style="width:100%;padding:16px;background:var(--burg);color:#fff;border:none;border-radius:12px;font-size:16px;font-weight:800;cursor:pointer">
+      <button onclick="mdIrPaso3()" style="width:100%;padding:14px;background:var(--burg);color:#fff;border:none;border-radius:12px;font-size:15px;font-weight:800;cursor:pointer">
         Siguiente → Agregar productos
       </button>
     </div>
   </div>
 
-  <!-- PASO 3: PRODUCTOS -->
-  <div id="md-paso3" style="padding:20px;flex:1;display:none">
-    <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px">
-      <button onclick="mdVolver(2)" style="background:var(--sur);border:1px solid var(--bor2);border-radius:10px;padding:10px 14px;cursor:pointer;font-size:14px;font-weight:600">← Volver</button>
-      <div style="font-size:12px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.08em">Productos</div>
-    </div>
-    <div style="background:var(--burl);border-radius:12px;padding:10px 14px;margin-bottom:16px;display:flex;justify-content:space-between;align-items:center">
+  <!-- PASO 3: PRODUCTOS + CANTIDADES (todo junto) -->
+  <div id="md-paso3" style="display:none;flex-direction:column;flex:1">
+
+    <!-- Sub-header con cliente + depósito -->
+    <div style="padding:10px 16px;background:var(--sur);border-bottom:1px solid var(--bor);display:flex;justify-content:space-between;align-items:center;flex-shrink:0">
       <div style="font-size:14px;font-weight:700;color:var(--burd)" id="md-paso3-cliente">—</div>
       <span class="ab-badge ab-badge-azul" id="md-paso3-dep">—</span>
     </div>
-    <!-- Buscador -->
-    <div style="position:relative;margin-bottom:16px">
-      <input id="md-prod-search" style="width:100%;padding:14px 14px 14px 46px;border:2px solid var(--bor2);border-radius:12px;font-size:16px;font-family:var(--sans);outline:none;box-sizing:border-box"
-        placeholder="Buscar producto del stock..." oninput="mdFiltrarPartidas(this.value)"
-        onfocus="this.style.borderColor='var(--burg)'" onblur="this.style.borderColor='var(--bor2)'">
-      <span style="position:absolute;left:14px;top:50%;transform:translateY(-50%);font-size:18px">🔍</span>
-      <div id="md-prod-list" style="display:none;border:2px solid var(--burg);border-top:none;border-radius:0 0 12px 12px;overflow:hidden;max-height:260px;overflow-y:auto;background:var(--sur)"></div>
+
+    <!-- Contenido scrolleable -->
+    <div style="flex:1;overflow-y:auto;padding:14px 16px">
+
+      <!-- DESTACADOS -->
+      <div style="margin-bottom:14px">
+        <div style="font-size:11px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">⭐ Más vendidos</div>
+        <div id="md-destacados" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:8px"></div>
+      </div>
+
+      <!-- TODO EL STOCK -->
+      <div style="margin-bottom:14px">
+        <div style="font-size:11px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">📦 Stock disponible</div>
+        <div style="position:relative;margin-bottom:8px">
+          <input id="md-prod-search" style="width:100%;padding:10px 10px 10px 36px;border:1px solid var(--bor2);border-radius:10px;font-size:14px;font-family:var(--sans);outline:none;box-sizing:border-box"
+            placeholder="Filtrar..." oninput="mdFiltrarStock(this.value)"
+            onfocus="this.style.borderColor='var(--burg)'" onblur="this.style.borderColor='var(--bor2)'">
+          <span style="position:absolute;left:10px;top:50%;transform:translateY(-50%);font-size:14px">🔍</span>
+        </div>
+        <div id="md-stock-lista" style="display:flex;flex-direction:column;gap:4px"></div>
+      </div>
+
+      <!-- PEDIDO ACTUAL -->
+      <div id="md-items-wrap" style="display:none">
+        <div style="font-size:11px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">🛒 Pedido</div>
+        <div id="md-items-sel" style="display:flex;flex-direction:column;gap:10px"></div>
+      </div>
+
     </div>
-    <!-- Productos destacados -->
-    <div style="font-size:11px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">⭐ Más vendidos</div>
-    <div id="md-destacados" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px">
-      <div style="text-align:center;padding:16px;color:var(--mut);grid-column:1/-1;font-size:13px">Cargando...</div>
-    </div>
-    <!-- Items seleccionados -->
-    <div id="md-items-sel" style="margin-bottom:16px"></div>
-    <!-- Total sticky -->
-    <div style="position:sticky;bottom:0;background:var(--bg);padding:12px 0;border-top:1px solid var(--bor)">
-      <div id="md-total-parcial" style="display:none;background:var(--sur);border-radius:12px;padding:12px 16px;margin-bottom:12px;border:1px solid var(--bor)">
-        <div style="display:flex;justify-content:space-between;font-size:13px;color:var(--mut);margin-bottom:4px">
+
+    <!-- Footer sticky: total + siguiente -->
+    <div style="padding:12px 16px;background:var(--sur);border-top:1px solid var(--bor);flex-shrink:0">
+      <div id="md-total-parcial" style="display:none;margin-bottom:10px">
+        <div style="display:flex;justify-content:space-between;font-size:13px;color:var(--mut);margin-bottom:2px">
           <span>Total kg</span><span id="md-tot-kg" style="font-weight:700;color:var(--txt)">—</span>
         </div>
         <div style="display:flex;justify-content:space-between;font-size:18px">
-          <span style="color:var(--mut);font-size:14px">Total</span>
-          <span id="md-tot-imp" style="font-weight:900;color:var(--burd)">—</span>
+          <span style="color:var(--mut);font-size:13px">Total</span>
+          <span id="md-tot-imp" style="font-weight:900;color:var(--burd)">$0</span>
         </div>
       </div>
       <button onclick="mdIrPaso4()" id="md-btn-paso4" disabled
-        style="width:100%;padding:18px;background:var(--burg);color:#fff;border:none;border-radius:14px;font-size:17px;font-weight:800;cursor:pointer;opacity:.4;transition:opacity .2s">
-        Siguiente → Confirmar cantidades
-      </button>
-    </div>
-  </div>
-
-  <!-- PASO 4: CANTIDADES Y PRECIOS -->
-  <div id="md-paso4" style="padding:20px;flex:1;display:none">
-    <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px">
-      <button onclick="mdVolver(3)" style="background:var(--sur);border:1px solid var(--bor2);border-radius:10px;padding:10px 14px;cursor:pointer;font-size:14px;font-weight:600">← Volver</button>
-      <div style="font-size:12px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.08em">Cantidades y precios</div>
-    </div>
-    <div id="md-items-edit" style="display:flex;flex-direction:column;gap:14px;margin-bottom:80px"></div>
-    <!-- Total sticky -->
-    <div style="position:sticky;bottom:0;background:var(--bg);padding:12px 0;border-top:1px solid var(--bor)">
-      <div style="background:var(--sur);border-radius:12px;padding:12px 16px;margin-bottom:12px;border:1px solid var(--bor)">
-        <div style="display:flex;justify-content:space-between;font-size:15px">
-          <span style="color:var(--mut)">Total</span>
-          <span id="md-tot-imp2" style="font-weight:900;font-size:20px;color:var(--burd)">$0,00</span>
-        </div>
-      </div>
-      <button onclick="mdIrPaso5()" style="width:100%;padding:18px;background:var(--burg);color:#fff;border:none;border-radius:14px;font-size:17px;font-weight:800;cursor:pointer">
+        style="width:100%;padding:16px;background:var(--burg);color:#fff;border:none;border-radius:12px;font-size:16px;font-weight:800;cursor:pointer;opacity:.4">
         Siguiente → Forma de pago
       </button>
     </div>
   </div>
 
+  <!-- PASO 4 (vacío, ahora es parte del 3) -->
+  <div id="md-paso4" style="display:none"></div>
+
   <!-- PASO 5: FORMA DE PAGO -->
-  <div id="md-paso5" style="padding:20px;flex:1;display:none">
-    <div style="display:flex;align-items:center;gap:12px;margin-bottom:24px">
-      <button onclick="mdVolver(4)" style="background:var(--sur);border:1px solid var(--bor2);border-radius:10px;padding:10px 14px;cursor:pointer;font-size:14px;font-weight:600">← Volver</button>
-      <div style="font-size:12px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.08em">Forma de pago</div>
+  <div id="md-paso5" style="padding:20px;display:none">
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px">
+      <button onclick="mdVolver(3)" style="background:var(--sur);border:1px solid var(--bor2);border-radius:10px;padding:8px 14px;cursor:pointer;font-size:13px;font-weight:600">← Volver</button>
+      <div style="font-size:11px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.08em">Forma de pago</div>
     </div>
-    <!-- Total grande -->
-    <div style="text-align:center;padding:20px;background:var(--sur);border-radius:16px;margin-bottom:24px;border:1px solid var(--bor)">
-      <div style="font-size:13px;color:var(--mut);margin-bottom:4px">Total a cobrar</div>
-      <div id="md-tot-pago" style="font-size:36px;font-weight:900;color:var(--burd)">$0,00</div>
+    <div style="text-align:center;padding:18px;background:var(--sur);border-radius:14px;margin-bottom:20px;border:1px solid var(--bor)">
+      <div style="font-size:12px;color:var(--mut);margin-bottom:4px">Total a cobrar</div>
+      <div id="md-tot-pago" style="font-size:34px;font-weight:900;color:var(--burd)">$0</div>
       <div id="md-pago-cliente" style="font-size:13px;color:var(--mut);margin-top:4px">—</div>
     </div>
-    <!-- Botones de pago -->
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:20px">
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:18px">
       <button class="md-pago-btn" data-pago="efectivo" onclick="mdSelPago(this)"
-        style="padding:20px;border:2px solid var(--bor2);border-radius:14px;background:var(--sur);font-size:16px;font-weight:700;cursor:pointer;text-align:center">
+        style="padding:18px;border:2px solid var(--bor2);border-radius:14px;background:var(--sur);font-size:15px;font-weight:700;cursor:pointer;text-align:center">
         💵<br>Efectivo<br><span style="font-size:11px;font-weight:400;color:var(--mut)">Mi caja</span>
       </button>
       <button class="md-pago-btn" data-pago="caja" onclick="mdSelPago(this)"
-        style="padding:20px;border:2px solid var(--bor2);border-radius:14px;background:var(--sur);font-size:16px;font-weight:700;cursor:pointer;text-align:center">
+        style="padding:18px;border:2px solid var(--bor2);border-radius:14px;background:var(--sur);font-size:15px;font-weight:700;cursor:pointer;text-align:center">
         🏪<br>Caja<br><span style="font-size:11px;font-weight:400;color:var(--mut)">Otro operador</span>
       </button>
       <button class="md-pago-btn" data-pago="transferencia" onclick="mdSelPago(this)"
-        style="padding:20px;border:2px solid var(--bor2);border-radius:14px;background:var(--sur);font-size:16px;font-weight:700;cursor:pointer;text-align:center">
+        style="padding:18px;border:2px solid var(--bor2);border-radius:14px;background:var(--sur);font-size:15px;font-weight:700;cursor:pointer;text-align:center">
         📲<br>Transferencia<br><span style="font-size:11px;font-weight:400;color:var(--mut)">MP / Banco</span>
       </button>
       <button class="md-pago-btn" data-pago="cta_cte" onclick="mdSelPago(this)" id="md-btn-cta-cte"
-        style="padding:20px;border:2px solid var(--bor2);border-radius:14px;background:var(--sur);font-size:16px;font-weight:700;cursor:pointer;text-align:center;opacity:.4">
+        style="padding:18px;border:2px solid var(--bor2);border-radius:14px;background:var(--sur);font-size:15px;font-weight:700;cursor:pointer;text-align:center;opacity:.4">
         📋<br>Cta. Cte.<br><span style="font-size:11px;font-weight:400;color:var(--mut)">Solo habilitados</span>
       </button>
     </div>
-    <!-- Info transferencia -->
-    <div id="md-info-transferencia" style="display:none;background:#eff6ff;border:1px solid #bfdbfe;border-radius:12px;padding:14px;margin-bottom:16px;text-align:center">
-      <div style="font-size:13px;color:#1e40af;margin-bottom:8px">📲 Datos para transferencia</div>
+    <div id="md-info-transferencia" style="display:none;background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;padding:12px;margin-bottom:14px;text-align:center">
+      <div style="font-size:13px;color:#1e40af;margin-bottom:6px">📲 Datos para transferencia</div>
       <div style="font-size:15px;font-weight:700;color:#1e3a8a">Alias: laniñabonita.mp</div>
-      <div style="font-size:13px;color:#1e40af;margin-top:4px">CVU: San Gerónimo SA · MP</div>
-      <div style="font-size:11px;color:#6b7280;margin-top:8px">El cliente puede escanear el QR o transferir al alias</div>
+      <div style="font-size:12px;color:#1e40af;margin-top:3px">CVU: San Gerónimo SA · MP</div>
     </div>
     <button onclick="mdConfirmar()" id="md-btn-confirmar" disabled
-      style="width:100%;padding:18px;background:#16a34a;color:#fff;border:none;border-radius:14px;font-size:17px;font-weight:800;cursor:pointer;opacity:.4;transition:opacity .2s">
+      style="width:100%;padding:16px;background:#16a34a;color:#fff;border:none;border-radius:12px;font-size:16px;font-weight:800;cursor:pointer;opacity:.4">
       ✓ Emitir mandata
     </button>
   </div>
