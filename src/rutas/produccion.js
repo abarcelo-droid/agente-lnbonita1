@@ -133,6 +133,25 @@ router.post('/lotes/importar', requireAuth, (req, res) => {
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
+// Asignar cultivo a un lote por campaña
+router.post('/lotes/cultivo', requireAuth, (req, res) => {
+  const db = getDb();
+  const { lote_id, campaña, cultivo, es_perenne } = req.body;
+  if (!lote_id || !campaña) return res.status(400).json({ ok: false, error: 'lote_id y campaña requeridos' });
+  try {
+    if (!cultivo) {
+      db.prepare("DELETE FROM pa_cultivos_lote WHERE lote_id=? AND campaña=?").run(lote_id, campaña);
+    } else {
+      db.prepare(`
+        INSERT INTO pa_cultivos_lote (lote_id, cultivo, campaña, es_perenne)
+        VALUES (?,?,?,?)
+        ON CONFLICT(lote_id, campaña) DO UPDATE SET cultivo=excluded.cultivo, es_perenne=excluded.es_perenne
+      `).run(lote_id, cultivo, campaña, es_perenne ? 1 : 0);
+    }
+    res.json({ ok: true });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
 router.patch('/lotes/:id', requireAuth, (req, res) => {
   const db = getDb();
   const { nombre, hectareas, activo, notas } = req.body;
