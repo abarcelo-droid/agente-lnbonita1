@@ -1511,7 +1511,14 @@ function loadSec(s) {
     'ab-proveedores': abCargarProveedores,
     'ab-remitos': abCargarRemitos,
     'ab-mandata': mdCargar,
-    'ab-gastos': abCargarGastos
+    'ab-gastos': abCargarGastos,
+    'pa-dashboard':  function(){ paLoadDash(); },
+    'pa-calendario': function(){ paLoadCalendario(); },
+    'pa-insumos':    function(){ paLoadInsumos(); },
+    'pa-compras':    function(){ paLoadCompras(); },
+    'pa-ordenes':    function(){ paLoadOrdenes(); },
+    'pa-costos':     function(){ paLoadCostos(); },
+    'pa-lotes':      function(){ paLoadLotes(); }
   };
   if (m[s]) m[s]();
 }
@@ -4690,7 +4697,7 @@ if(_inpGondola) _inpGondola.addEventListener('keydown', function(e){
 <!-- MÓDULO PRODUCCIÓN AGRÍCOLA — PUENTE CORDON SA               -->
 <!-- ============================================================ -->
 <style>
-.pa-verde{color:#16a34a}.pa-verde-bg{background:#dcfce7;color:#166534}
+.pa-verde-bg{background:#dcfce7;color:#166534}
 .pa-amarillo-bg{background:#fef9c3;color:#854d0e}
 .pa-rojo-bg{background:#fef2f2;color:#991b1b}
 .pa-azul-bg{background:#dbeafe;color:#1e40af}
@@ -4707,54 +4714,33 @@ if(_inpGondola) _inpGondola.addEventListener('keydown', function(e){
 .pa-tbl td{padding:9px 12px;border-bottom:1px solid var(--bor);vertical-align:middle;font-variant-numeric:tabular-nums}
 .pa-tbl tbody tr:last-child td{border-bottom:none}
 .pa-tbl tbody tr:hover{background:var(--burl)}
-.pa-tbl .pa-finca-row td{background:#1a3a5c;color:#fff;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.1em}
 .pa-wrap{background:var(--sur);border:1px solid var(--bor);border-radius:10px;overflow:hidden;margin-bottom:20px}
-/* Calendario agrícola grid */
-.cal-grid{display:grid;gap:1px;background:var(--bor);border:1px solid var(--bor);border-radius:8px;overflow:hidden;font-size:12px}
-.cal-head{background:#1a3a5c;color:#fff;padding:8px 10px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;text-align:center}
-.cal-finca{background:#0f2540;color:rgba(255,255,255,.7);padding:8px 10px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em}
-.cal-lote{background:var(--sur);padding:7px 10px;font-size:12px}
-.cal-lote:hover{background:var(--burl);cursor:pointer}
 .cal-cult{background:#dcfce7;color:#166534;border-radius:4px;padding:2px 7px;font-size:11px;font-weight:500;cursor:pointer;display:inline-block}
 .cal-cult.vacio{background:var(--bg);color:var(--mut);border:1px dashed var(--bor2)}
 .cal-cult.frutal{background:#fef9c3;color:#854d0e}
 .cal-cult.industria{background:#fee2e2;color:#991b1b}
-/* Items insumos en compra */
-.pa-item-row{display:grid;grid-template-columns:1fr 100px 100px 80px auto;gap:8px;align-items:center;padding:8px 0;border-bottom:1px solid var(--bor)}
-.pa-item-row:last-child{border-bottom:none}
 </style>
 
 <!-- ─── PA DASHBOARD ──────────────────────────────────────────── -->
 <div class="sec" id="sec-pa-dashboard">
-<div class="ph"><div><div class="ph-t">🌾 Producción Agrícola</div><div class="ph-s" id="pa-dash-campaña">Puente Cordon SA</div></div>
+<div class="ph"><div><div class="ph-t">🌾 Producción Agrícola</div><div class="ph-s" id="pa-dash-sub">Puente Cordon SA — Carpinteria, San Juan</div></div>
 <button class="btn bb" onclick="paLoadDash()">↺ Actualizar</button></div>
-<div class="pa-grid4" id="pa-dash-stats">
+<div class="pa-grid4">
   <div class="pa-card"><div class="pa-card-title">Campaña activa</div><div class="pa-stat" id="pad-campaña">—</div></div>
   <div class="pa-card"><div class="pa-card-title">Lotes totales</div><div class="pa-stat" id="pad-lotes">—</div></div>
   <div class="pa-card"><div class="pa-card-title">Órdenes pendientes</div><div class="pa-stat" id="pad-ordenes">—</div></div>
   <div class="pa-card"><div class="pa-card-title">Costo campaña</div><div class="pa-stat" id="pad-costo">—</div></div>
 </div>
 <div class="pa-grid2">
-  <div class="pa-card">
-    <div class="pa-card-title">⚠️ Insumos bajo stock mínimo</div>
-    <div id="pad-bajo-stock"><div class="emp">Cargando...</div></div>
-  </div>
-  <div class="pa-card">
-    <div class="pa-card-title">📋 Órdenes en ejecución</div>
-    <div id="pad-ordenes-lista"><div class="emp">Cargando...</div></div>
-  </div>
+  <div class="pa-card"><div class="pa-card-title">⚠️ Insumos bajo stock mínimo</div><div id="pad-bajo-stock"><div class="emp">Cargando...</div></div></div>
+  <div class="pa-card"><div class="pa-card-title">📋 Órdenes emitidas</div><div id="pad-ordenes-lista"><div class="emp">Cargando...</div></div></div>
 </div>
 </div>
 
-<!-- ─── PA CALENDARIO AGRÍCOLA ───────────────────────────────── -->
+<!-- ─── PA CALENDARIO ─────────────────────────────────────────── -->
 <div class="sec" id="sec-pa-calendario">
-<div class="ph">
-  <div><div class="ph-t">📅 Calendario Agrícola</div><div class="ph-s">Cultivos por lote y campaña</div></div>
-  <div style="display:flex;gap:10px;align-items:center">
-    <select id="cal-campaña-sel" onchange="paLoadCalendario()" style="padding:7px 12px;font-size:13px;width:auto">
-      <option value="">Campaña activa</option>
-    </select>
-  </div>
+<div class="ph"><div><div class="ph-t">📅 Calendario Agrícola</div><div class="ph-s">Cultivos por lote y campaña — rotación</div></div>
+<select id="cal-campaña-sel" onchange="paLoadCalendario()" style="padding:7px 12px;font-size:13px;width:auto"><option value="">Campaña activa</option></select>
 </div>
 <div id="pa-cal-contenido"><div class="emp">Cargando...</div></div>
 </div>
@@ -4765,11 +4751,8 @@ if(_inpGondola) _inpGondola.addEventListener('keydown', function(e){
 <button class="btn bb" onclick="paAbrirNuevoInsumo()">+ Nuevo insumo</button></div>
 <div class="filt">
   <select id="pa-ins-tipo-fil" onchange="paLoadInsumos()">
-    <option value="">Todos los tipos</option>
-    <option value="fertilizante">Fertilizantes</option>
-    <option value="agroquimico">Agroquímicos</option>
-    <option value="semilla">Semillas</option>
-    <option value="otro">Otros</option>
+    <option value="">Todos los tipos</option><option value="fertilizante">Fertilizantes</option>
+    <option value="agroquimico">Agroquímicos</option><option value="semilla">Semillas</option><option value="otro">Otros</option>
   </select>
 </div>
 <div class="pa-wrap"><div class="ab-table-wrap"><table class="pa-tbl">
@@ -4783,8 +4766,8 @@ if(_inpGondola) _inpGondola.addEventListener('keydown', function(e){
 <div class="ph"><div><div class="ph-t">🛒 Compras de Insumos</div><div class="ph-s">Registro de facturas y actualización de stock</div></div>
 <button class="btn bb" onclick="paAbrirNuevaCompra()">+ Nueva compra</button></div>
 <div class="pa-wrap"><div class="ab-table-wrap"><table class="pa-tbl">
-  <thead><tr><th>Fecha</th><th>Proveedor</th><th>N° Factura</th><th>Productos</th><th style="text-align:right">Total</th><th></th></tr></thead>
-  <tbody id="pa-comp-tbody"><tr><td colspan="6" class="emp">Cargando...</td></tr></tbody>
+  <thead><tr><th>Fecha</th><th>Proveedor</th><th>N° Factura</th><th>Productos</th><th style="text-align:right">Total</th></tr></thead>
+  <tbody id="pa-comp-tbody"><tr><td colspan="5" class="emp">Cargando...</td></tr></tbody>
 </table></div></div>
 </div>
 
@@ -4794,12 +4777,9 @@ if(_inpGondola) _inpGondola.addEventListener('keydown', function(e){
 <button class="btn bb" onclick="paAbrirNuevaOrden()">+ Nueva orden</button></div>
 <div class="filt">
   <select id="pa-ord-estado-fil" onchange="paLoadOrdenes()">
-    <option value="">Todos los estados</option>
-    <option value="emitida">Emitidas</option>
-    <option value="en_ejecucion">En ejecución</option>
-    <option value="ejecutada">Ejecutadas</option>
-    <option value="borrador">Borradores</option>
-    <option value="anulada">Anuladas</option>
+    <option value="">Todos los estados</option><option value="emitida">Emitidas</option>
+    <option value="en_ejecucion">En ejecución</option><option value="ejecutada">Ejecutadas</option>
+    <option value="borrador">Borradores</option><option value="anulada">Anuladas</option>
   </select>
 </div>
 <div class="pa-wrap"><div class="ab-table-wrap"><table class="pa-tbl">
@@ -4811,12 +4791,11 @@ if(_inpGondola) _inpGondola.addEventListener('keydown', function(e){
 <!-- ─── PA COSTOS ─────────────────────────────────────────────── -->
 <div class="sec" id="sec-pa-costos">
 <div class="ph"><div><div class="ph-t">💰 Costos por Lote</div><div class="ph-s">Resumen acumulado por lote y campaña</div></div>
-<select id="pa-cos-campaña" onchange="paLoadCostos()" style="padding:7px 12px;font-size:13px;width:auto">
-  <option value="">Campaña activa</option>
-</select></div>
+<select id="pa-cos-campaña" onchange="paLoadCostos()" style="padding:7px 12px;font-size:13px;width:auto"><option value="">Campaña activa</option></select>
+</div>
 <div class="pa-grid3" id="pa-cos-sectores"></div>
 <div class="pa-wrap"><div class="ab-table-wrap"><table class="pa-tbl">
-  <thead><tr><th>Sector</th><th>Lote</th><th>Hectáreas</th><th>Cultivo</th><th style="text-align:right">Costo total</th><th style="text-align:right">$/ha</th><th></th></tr></thead>
+  <thead><tr><th>Sector</th><th>Lote</th><th style="text-align:right">Ha</th><th>Cultivo</th><th style="text-align:right">Costo total</th><th style="text-align:right">$/ha</th><th></th></tr></thead>
   <tbody id="pa-cos-tbody"><tr><td colspan="7" class="emp">Cargando...</td></tr></tbody>
 </table></div></div>
 </div>
@@ -4826,106 +4805,90 @@ if(_inpGondola) _inpGondola.addEventListener('keydown', function(e){
 <div class="ph"><div><div class="ph-t">🗺️ Fincas y Lotes</div><div class="ph-s">182.4 ha — Carpinteria, San Juan</div></div>
 <button class="btn bb" onclick="paAbrirNuevoLote()">+ Nuevo lote</button></div>
 <div class="filt">
-  <select id="pa-lot-sector-fil" onchange="paLoadLotes()">
-    <option value="">Todas las fincas/sectores</option>
-  </select>
+  <select id="pa-lot-sector-fil" onchange="paLoadLotes()"><option value="">Todas las fincas</option></select>
 </div>
 <div class="pa-wrap"><div class="ab-table-wrap"><table class="pa-tbl">
-  <thead><tr><th>Finca / Sector</th><th>Lote (Llaves)</th><th style="text-align:right">Hectáreas</th><th>Cultivo actual</th><th>Tipo</th><th></th></tr></thead>
+  <thead><tr><th>Finca / Sector</th><th>Lote (Llaves)</th><th style="text-align:right">Ha</th><th>Cultivo actual</th><th>Tipo</th><th></th></tr></thead>
   <tbody id="pa-lot-tbody"><tr><td colspan="6" class="emp">Cargando...</td></tr></tbody>
 </table></div></div>
 </div>
 
-<!-- ================================================================ -->
-<!-- MODALES PA                                                        -->
-<!-- ================================================================ -->
+<!-- ── MODALES PA ─────────────────────────────────────────────── -->
 
-<!-- Modal nuevo insumo -->
+<!-- Modal insumo -->
 <div class="ab-modal-overlay" id="pa-mb-insumo">
 <div class="ab-modal" style="width:480px">
-  <div class="mhd"><div class="mht" id="pa-ins-modal-tit">Nuevo Insumo</div><button class="mcl" onclick="paCerrarModal('pa-mb-insumo')">×</button></div>
+  <div class="mhd"><div class="mht" id="pa-ins-modal-tit">Nuevo Insumo</div><button class="mcl" onclick="document.getElementById('pa-mb-insumo').classList.remove('on')">×</button></div>
   <input type="hidden" id="pa-ins-id">
   <div class="fg">
     <div class="fl ff"><label>Nombre</label><input id="pa-ins-nombre" placeholder="Ej: Urea 46%"></div>
-    <div class="fl"><label>Tipo</label>
-      <select id="pa-ins-tipo">
-        <option value="fertilizante">Fertilizante</option>
-        <option value="agroquimico">Agroquímico</option>
-        <option value="semilla">Semilla</option>
-        <option value="otro">Otro</option>
-      </select>
-    </div>
-    <div class="fl"><label>Unidad</label>
-      <select id="pa-ins-unidad">
-        <option value="kg">Kilogramos (kg)</option>
-        <option value="lt">Litros (lt)</option>
-        <option value="unidad">Unidad</option>
-      </select>
-    </div>
+    <div class="fl"><label>Tipo</label><select id="pa-ins-tipo"><option value="fertilizante">Fertilizante</option><option value="agroquimico">Agroquímico</option><option value="semilla">Semilla</option><option value="otro">Otro</option></select></div>
+    <div class="fl"><label>Unidad</label><select id="pa-ins-unidad"><option value="kg">kg</option><option value="lt">litros</option><option value="unidad">unidad</option></select></div>
     <div class="fl"><label>Stock mínimo</label><input type="number" id="pa-ins-stock-min" value="0" min="0"></div>
     <div class="fl ff"><label>Notas</label><textarea id="pa-ins-notas" rows="2"></textarea></div>
   </div>
   <div class="ab-modal-footer">
-    <button class="btn bo" onclick="paCerrarModal('pa-mb-insumo')">Cancelar</button>
+    <button class="btn bo" onclick="document.getElementById('pa-mb-insumo').classList.remove('on')">Cancelar</button>
     <button class="btn bb" onclick="paGuardarInsumo()">Guardar</button>
   </div>
 </div></div>
 
-<!-- Modal nueva compra -->
+<!-- Modal compra -->
 <div class="ab-modal-overlay" id="pa-mb-compra">
 <div class="ab-modal" style="width:700px">
-  <div class="mhd"><div class="mht">Nueva Compra de Insumos</div><button class="mcl" onclick="paCerrarModal('pa-mb-compra')">×</button></div>
+  <div class="mhd"><div class="mht">Nueva Compra de Insumos</div><button class="mcl" onclick="document.getElementById('pa-mb-compra').classList.remove('on')">×</button></div>
   <div class="fg">
     <div class="fl"><label>Fecha</label><input type="date" id="pa-comp-fecha"></div>
     <div class="fl"><label>N° Factura</label><input id="pa-comp-factura" placeholder="A 001-00012345"></div>
     <div class="fl ff"><label>Proveedor</label><input id="pa-comp-prov" placeholder="Nombre del proveedor"></div>
     <div class="fl ff"><label>Notas</label><textarea id="pa-comp-notas" rows="2"></textarea></div>
   </div>
-  <div style="margin:16px 0 8px;font-size:12px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.06em">Productos</div>
+  <div style="margin:14px 0 8px;font-size:12px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.06em">Productos</div>
   <div id="pa-comp-items"></div>
   <button class="btn bo" style="margin-top:8px" onclick="paAgregarItemCompra()">+ Agregar producto</button>
-  <div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--bor);display:flex;justify-content:flex-end;align-items:center;gap:20px">
+  <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--bor);display:flex;justify-content:flex-end">
     <div style="font-size:15px;font-weight:600">Total: <span id="pa-comp-total">$0</span></div>
   </div>
   <div class="ab-modal-footer">
-    <button class="btn bo" onclick="paCerrarModal('pa-mb-compra')">Cancelar</button>
+    <button class="btn bo" onclick="document.getElementById('pa-mb-compra').classList.remove('on')">Cancelar</button>
     <button class="btn bb" onclick="paGuardarCompra()">Registrar compra</button>
   </div>
 </div></div>
 
-<!-- Modal nueva orden -->
+<!-- Modal orden -->
 <div class="ab-modal-overlay" id="pa-mb-orden">
 <div class="ab-modal" style="width:740px">
-  <div class="mhd"><div class="mht">Nueva Orden de Aplicación</div><button class="mcl" onclick="paCerrarModal('pa-mb-orden')">×</button></div>
+  <div class="mhd"><div class="mht">Nueva Orden de Aplicación</div><button class="mcl" onclick="document.getElementById('pa-mb-orden').classList.remove('on')">×</button></div>
   <div class="fg">
     <div class="fl"><label>Fecha orden</label><input type="date" id="pa-ord-fecha"></div>
     <div class="fl"><label>Fecha propuesta ejecución</label><input type="date" id="pa-ord-fecha-prop"></div>
-    <div class="fl ff"><label>Tipo de aplicación</label><input id="pa-ord-tipo" placeholder="Ej: Fertilización de base, Herbicida..."></div>
+    <div class="fl ff"><label>Tipo de aplicación</label><input id="pa-ord-tipo" placeholder="Ej: Fertilización base, Herbicida..."></div>
     <div class="fl ff"><label>Objetivo / Observaciones</label><textarea id="pa-ord-objetivo" rows="2"></textarea></div>
   </div>
-  <div style="margin:14px 0 8px;font-size:12px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.06em">Lotes a tratar</div>
-  <div id="pa-ord-lotes-sel" style="max-height:200px;overflow-y:auto;border:1px solid var(--bor2);border-radius:8px;padding:8px"></div>
-  <div style="margin:14px 0 8px;font-size:12px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.06em">Productos y dosis</div>
+  <div style="margin:12px 0 8px;font-size:12px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.06em">Lotes a tratar</div>
+  <div id="pa-ord-lotes-sel" style="max-height:180px;overflow-y:auto;border:1px solid var(--bor2);border-radius:8px;padding:8px"></div>
+  <div style="margin:12px 0 8px;font-size:12px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.06em">Productos y dosis</div>
   <div id="pa-ord-items"></div>
   <button class="btn bo" style="margin-top:8px" onclick="paAgregarItemOrden()">+ Agregar producto</button>
   <div class="ab-modal-footer">
-    <button class="btn bo" onclick="paCerrarModal('pa-mb-orden')">Cancelar</button>
+    <button class="btn bo" onclick="document.getElementById('pa-mb-orden').classList.remove('on')">Cancelar</button>
     <button class="btn bb" onclick="paGuardarOrden()">Emitir orden</button>
   </div>
 </div></div>
 
-<!-- Modal detalle orden + ejecutar -->
+<!-- Modal detalle orden -->
 <div class="ab-modal-overlay" id="pa-mb-orden-det">
 <div class="ab-modal" style="width:740px">
-  <div class="mhd"><div><div class="mht" id="pa-ord-det-tit">Orden</div><div style="font-size:12px;color:var(--mut)" id="pa-ord-det-sub"></div></div>
-  <button class="mcl" onclick="paCerrarModal('pa-mb-orden-det')">×</button></div>
+  <div class="mhd">
+    <div><div class="mht" id="pa-ord-det-tit">Orden</div><div style="font-size:12px;color:var(--mut)" id="pa-ord-det-sub"></div></div>
+    <button class="mcl" onclick="document.getElementById('pa-mb-orden-det').classList.remove('on')">×</button>
+  </div>
   <div id="pa-ord-det-body"></div>
-  <!-- Registrar ejecución -->
   <div id="pa-ord-ejec-form" style="display:none;margin-top:16px;padding-top:14px;border-top:2px solid var(--bor)">
     <div style="font-size:13px;font-weight:600;margin-bottom:12px">Registrar ejecución</div>
     <div class="fg">
-      <div class="fl"><label>Lote</label><select id="pa-ej-lote" class="ab-form-select"></select></div>
-      <div class="fl"><label>Insumo</label><select id="pa-ej-insumo" class="ab-form-select"></select></div>
+      <div class="fl"><label>Lote</label><select id="pa-ej-lote"></select></div>
+      <div class="fl"><label>Insumo</label><select id="pa-ej-insumo"></select></div>
       <div class="fl"><label>Fecha real</label><input type="date" id="pa-ej-fecha"></div>
       <div class="fl"><label>Cantidad real</label><input type="number" id="pa-ej-cant" step="0.01" placeholder="0"></div>
       <div class="fl ff"><label>Ejecutado por</label><input id="pa-ej-quien" placeholder="Nombre tractorista / encargado"></div>
@@ -4933,36 +4896,30 @@ if(_inpGondola) _inpGondola.addEventListener('keydown', function(e){
     <button class="btn bb" onclick="paRegistrarEjecucion()">✓ Registrar</button>
   </div>
   <div class="ab-modal-footer">
-    <button class="btn bo" onclick="paCerrarModal('pa-mb-orden-det')">Cerrar</button>
-    <button class="btn bb" id="pa-ord-det-ejec-btn" onclick="paToggleEjecForm()">Registrar ejecución</button>
+    <button class="btn bo" onclick="document.getElementById('pa-mb-orden-det').classList.remove('on')">Cerrar</button>
+    <button class="btn bb" id="pa-ord-det-ejec-btn" onclick="paToggleEjecForm()" style="display:none">Registrar ejecución</button>
   </div>
 </div></div>
 
-<!-- Modal editar cultivo de lote -->
+<!-- Modal cultivo -->
 <div class="ab-modal-overlay" id="pa-mb-cultivo">
-<div class="ab-modal" style="width:480px">
-  <div class="mhd"><div class="mht">Asignar cultivo</div><button class="mcl" onclick="paCerrarModal('pa-mb-cultivo')">×</button></div>
+<div class="ab-modal" style="width:460px">
+  <div class="mhd"><div class="mht">Asignar cultivo</div><button class="mcl" onclick="document.getElementById('pa-mb-cultivo').classList.remove('on')">×</button></div>
   <input type="hidden" id="pa-cult-lote-id">
-  <div style="font-size:13px;color:var(--mut);margin-bottom:16px" id="pa-cult-lote-nombre"></div>
+  <div style="font-size:13px;color:var(--mut);margin-bottom:14px" id="pa-cult-lote-nombre"></div>
   <div class="fg">
-    <div class="fl"><label>Campaña</label><select id="pa-cult-campaña" class="ab-form-select"></select></div>
+    <div class="fl"><label>Campaña</label><select id="pa-cult-campaña"></select></div>
     <div class="fl"><label>Cultivo</label>
-      <select id="pa-cult-cultivo" class="ab-form-select">
+      <select id="pa-cult-cultivo">
         <option value="">— Sin cultivo —</option>
         <optgroup label="Frutales (perennes)">
-          <option value="Vid">Vid</option>
-          <option value="Damasco">Damasco</option>
-          <option value="Durazno">Durazno</option>
-          <option value="Ciruela">Ciruela</option>
-          <option value="Manzana">Manzana</option>
+          <option value="Vid">Vid</option><option value="Damasco">Damasco</option>
+          <option value="Durazno">Durazno</option><option value="Ciruela">Ciruela</option>
         </optgroup>
         <optgroup label="Chacra de Mercado">
-          <option value="Melón">Melón</option>
-          <option value="Cebolla">Cebolla</option>
-          <option value="Brócoli">Brócoli</option>
-          <option value="Ajo">Ajo</option>
-          <option value="Papa">Papa</option>
-          <option value="Zapallo">Zapallo</option>
+          <option value="Melón">Melón</option><option value="Cebolla">Cebolla</option>
+          <option value="Brócoli">Brócoli</option><option value="Ajo">Ajo</option>
+          <option value="Papa">Papa</option><option value="Zapallo">Zapallo</option>
         </optgroup>
         <optgroup label="Chacra de Industria">
           <option value="Tomate Industria">Tomate Industria</option>
@@ -4971,653 +4928,460 @@ if(_inpGondola) _inpGondola.addEventListener('keydown', function(e){
         <option value="Sin uso">Sin uso</option>
       </select>
     </div>
-    <div class="fl ff"><label>¿Es perenne? (vid, damasco, durazno...)</label>
-      <select id="pa-cult-perenne" class="ab-form-select">
-        <option value="0">No (rota cada campaña)</option>
-        <option value="1">Sí (permanente)</option>
-      </select>
+    <div class="fl ff"><label>¿Es perenne?</label>
+      <select id="pa-cult-perenne"><option value="0">No (rota cada campaña)</option><option value="1">Sí (vid, damasco, durazno...)</option></select>
     </div>
   </div>
   <div class="ab-modal-footer">
-    <button class="btn bo" onclick="paCerrarModal('pa-mb-cultivo')">Cancelar</button>
+    <button class="btn bo" onclick="document.getElementById('pa-mb-cultivo').classList.remove('on')">Cancelar</button>
     <button class="btn bb" onclick="paGuardarCultivo()">Guardar</button>
   </div>
 </div></div>
 
-<!-- Modal nuevo lote -->
+<!-- Modal lote -->
 <div class="ab-modal-overlay" id="pa-mb-lote">
-<div class="ab-modal" style="width:480px">
-  <div class="mhd"><div class="mht">Nuevo Lote</div><button class="mcl" onclick="paCerrarModal('pa-mb-lote')">×</button></div>
+<div class="ab-modal" style="width:460px">
+  <div class="mhd"><div class="mht">Nuevo Lote</div><button class="mcl" onclick="document.getElementById('pa-mb-lote').classList.remove('on')">×</button></div>
   <div class="fg">
-    <div class="fl"><label>Nombre / Llaves</label><input id="pa-lot-nombre" placeholder="Ej: 1-2, El Bajo, Cuadro 3"></div>
-    <div class="fl"><label>Finca / Sector</label><select id="pa-lot-sector" class="ab-form-select"></select></div>
+    <div class="fl"><label>Nombre / Llaves</label><input id="pa-lot-nombre" placeholder="Ej: 1-2, El Bajo"></div>
+    <div class="fl"><label>Finca / Sector</label><select id="pa-lot-sector"></select></div>
     <div class="fl"><label>Hectáreas</label><input type="number" id="pa-lot-ha" value="0.5" step="0.1" min="0.1"></div>
     <div class="fl ff"><label>Notas</label><textarea id="pa-lot-notas" rows="2"></textarea></div>
   </div>
   <div class="ab-modal-footer">
-    <button class="btn bo" onclick="paCerrarModal('pa-mb-lote')">Cancelar</button>
+    <button class="btn bo" onclick="document.getElementById('pa-mb-lote').classList.remove('on')">Cancelar</button>
     <button class="btn bb" onclick="paGuardarLote()">Guardar</button>
   </div>
 </div></div>
 
-<!-- ================================================================ -->
-<!-- JS MÓDULO PA                                                      -->
-<!-- ================================================================ -->
+<!-- ── JS PA ──────────────────────────────────────────────────── -->
 <script>
-// ─── Estado global PA ────────────────────────────────────────────
-var PA = {
-  campañas: [],
-  sectores: [],
-  insumos:  [],
-  lotes:    [],
-  compItemsCont: 0,
-  ordItemsCont: 0,
-  ordenActual: null
-};
+var PA = { campañas:[], sectores:[], insumos:[], lotes:[], compN:0, ordN:0, ordenActual:null };
 
-// ─── Helpers ─────────────────────────────────────────────────────
-function paFetch(url, opts) {
-  return fetch(url, opts).then(function(r){ return r.json(); });
+function paF(url,opts){ return fetch(url,opts).then(function(r){return r.json();}); }
+function paMoney(n){ return '$'+Math.round(n||0).toLocaleString('es-AR'); }
+function paFecha(s){ if(!s)return'—'; var p=s.slice(0,10).split('-'); return p[2]+'/'+p[1]+'/'+p[0]; }
+function paBadgeEstado(e){
+  var m={borrador:['pa-gris-bg','Borrador'],emitida:['pa-azul-bg','Emitida'],en_ejecucion:['pa-amarillo-bg','En ejecución'],ejecutada:['pa-verde-bg','Ejecutada'],parcial:['pa-amarillo-bg','Parcial'],anulada:['pa-rojo-bg','Anulada']};
+  var d=m[e]||['pa-gris-bg',e]; return '<span class="pa-badge '+d[0]+'">'+d[1]+'</span>';
 }
-function paMoney(n) {
-  return '$' + Math.round(n || 0).toLocaleString('es-AR');
-}
-function paFecha(s) {
-  if (!s) return '—';
-  var p = s.slice(0,10).split('-');
-  return p[2]+'/'+p[1]+'/'+p[0];
-}
-function paCerrarModal(id) {
-  var el = document.getElementById(id);
-  if (el) el.classList.remove('on');
-}
-function paAbrirModal(id) {
-  var el = document.getElementById(id);
-  if (el) el.classList.add('on');
-}
-function paBadgeEstado(e) {
-  var map = {
-    borrador:     ['pa-gris-bg','Borrador'],
-    emitida:      ['pa-azul-bg','Emitida'],
-    en_ejecucion: ['pa-amarillo-bg','En ejecución'],
-    ejecutada:    ['pa-verde-bg','Ejecutada'],
-    parcial:      ['pa-amarillo-bg','Parcial'],
-    anulada:      ['pa-rojo-bg','Anulada']
-  };
-  var d = map[e] || ['pa-gris-bg', e];
-  return '<span class="pa-badge '+d[0]+'">'+d[1]+'</span>';
-}
-function paBadgeTipo(t) {
-  var map = {
-    fertilizante: ['pa-verde-bg','Fertilizante'],
-    agroquimico:  ['pa-azul-bg','Agroquímico'],
-    semilla:      ['pa-amarillo-bg','Semilla'],
-    otro:         ['pa-gris-bg','Otro']
-  };
-  var d = map[t] || ['pa-gris-bg', t];
-  return '<span class="pa-badge '+d[0]+'">'+d[1]+'</span>';
+function paBadgeTipo(t){
+  var m={fertilizante:['pa-verde-bg','Fertilizante'],agroquimico:['pa-azul-bg','Agroquímico'],semilla:['pa-amarillo-bg','Semilla'],otro:['pa-gris-bg','Otro']};
+  var d=m[t]||['pa-gris-bg',t]; return '<span class="pa-badge '+d[0]+'">'+d[1]+'</span>';
 }
 
-// ─── Carga inicial campañas y sectores ───────────────────────────
-function paInit() {
-  paFetch('/api/pa/campañas').then(function(r) {
-    PA.campañas = r.data || [];
-    // Poblar selects de campaña
-    var opts = '<option value="">Campaña activa</option>';
-    PA.campañas.forEach(function(c) {
-      opts += '<option value="'+c.id+'"'+(c.activa?' selected':'')+'>'+c.nombre+'</option>';
-    });
-    ['cal-campaña-sel','pa-cos-campaña','pa-cult-campaña'].forEach(function(id) {
-      var el = document.getElementById(id);
-      if (el) el.innerHTML = (id === 'pa-cult-campaña')
-        ? PA.campañas.map(function(c){ return '<option value="'+c.id+'"'+(c.activa?' selected':'')+'>'+c.nombre+'</option>'; }).join('')
-        : opts;
-    });
+function paInit(){
+  paF('/api/pa/campañas').then(function(r){
+    PA.campañas=r.data||[];
+    var opts=PA.campañas.map(function(c){return'<option value="'+c.id+'"'+(c.activa?' selected':'')+'>'+c.nombre+'</option>';}).join('');
+    ['cal-campaña-sel','pa-cos-campaña'].forEach(function(id){var el=document.getElementById(id);if(el)el.innerHTML='<option value="">Campaña activa</option>'+opts;});
+    var cultSel=document.getElementById('pa-cult-campaña');
+    if(cultSel)cultSel.innerHTML=opts;
   });
-  paFetch('/api/pa/sectores').then(function(r) {
-    PA.sectores = r.data || [];
-    var opts = '<option value="">Todas</option>';
-    PA.sectores.forEach(function(s){ opts += '<option value="'+s.id+'">'+s.nombre+'</option>'; });
-    var fil = document.getElementById('pa-lot-sector-fil');
-    if (fil) fil.innerHTML = opts;
-    var sel = document.getElementById('pa-lot-sector');
-    if (sel) sel.innerHTML = PA.sectores.map(function(s){ return '<option value="'+s.id+'">'+s.nombre+'</option>'; }).join('');
+  paF('/api/pa/sectores').then(function(r){
+    PA.sectores=r.data||[];
+    var opts=PA.sectores.map(function(s){return'<option value="'+s.id+'">'+s.nombre+'</option>';}).join('');
+    var fil=document.getElementById('pa-lot-sector-fil');
+    if(fil)fil.innerHTML='<option value="">Todas las fincas</option>'+opts;
+    var sel=document.getElementById('pa-lot-sector');
+    if(sel)sel.innerHTML=opts;
   });
-  paFetch('/api/pa/insumos').then(function(r){
-    PA.insumos = r.data || [];
+  paF('/api/pa/insumos').then(function(r){PA.insumos=r.data||[];});
+  paF('/api/pa/lotes').then(function(r){PA.lotes=r.data||[];});
+}
+
+// ── DASHBOARD ──
+function paLoadDash(){
+  paF('/api/pa/dashboard').then(function(r){
+    if(!r.ok)return;
+    var d=r.data;
+    document.getElementById('pad-campaña').textContent=d.campaña?d.campaña.nombre:'—';
+    document.getElementById('pad-lotes').textContent=d.total_lotes||0;
+    document.getElementById('pad-ordenes').textContent=d.ordenes_pendientes||0;
+    document.getElementById('pad-costo').textContent=paMoney(d.costo_campaña);
   });
-  paFetch('/api/pa/lotes').then(function(r){
-    PA.lotes = r.data || [];
+  paF('/api/pa/stock').then(function(r){
+    var bajos=(r.data||[]).filter(function(i){return i.stock_minimo>0&&i.stock_actual<=i.stock_minimo;});
+    var el=document.getElementById('pad-bajo-stock');
+    if(!bajos.length){el.innerHTML='<div class="emp" style="padding:12px">✅ Todo en orden</div>';return;}
+    el.innerHTML=bajos.map(function(i){return'<div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--bor);font-size:13px"><span>'+i.nombre+'</span><span class="pa-badge pa-rojo-bg">'+i.stock_actual+' '+i.unidad+'</span></div>';}).join('');
+  });
+  paF('/api/pa/ordenes?estado=emitida').then(function(r){
+    var el=document.getElementById('pad-ordenes-lista');
+    var data=r.data||[];
+    if(!data.length){el.innerHTML='<div class="emp" style="padding:12px">Sin órdenes pendientes</div>';return;}
+    el.innerHTML=data.slice(0,5).map(function(o){return'<div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--bor);font-size:13px;cursor:pointer" onclick="paVerOrden('+o.id+')"><span>'+o.nro_orden+' — '+(o.tipo_aplicacion||'')+'</span><span class="pa-badge pa-azul-bg">'+paFecha(o.fecha_orden)+'</span></div>';}).join('');
   });
 }
 
-// ─── DASHBOARD ───────────────────────────────────────────────────
-function paLoadDash() {
-  paFetch('/api/pa/dashboard').then(function(r) {
-    if (!r.ok) return;
-    var d = r.data;
-    var c = d.campaña;
-    document.getElementById('pad-campaña').textContent = c ? c.nombre : '—';
-    document.getElementById('pad-lotes').textContent = d.total_lotes || 0;
-    document.getElementById('pad-ordenes').textContent = d.ordenes_pendientes || 0;
-    document.getElementById('pad-costo').textContent = paMoney(d.costo_campaña);
-    if (c) document.getElementById('pa-dash-campaña').textContent = 'Puente Cordon SA — '+c.fecha_inicio.slice(0,10)+' al '+c.fecha_fin.slice(0,10);
-  });
-  // Bajo stock
-  paFetch('/api/pa/stock').then(function(r) {
-    var bajos = (r.data||[]).filter(function(i){ return i.stock_minimo > 0 && i.stock_actual <= i.stock_minimo; });
-    var el = document.getElementById('pad-bajo-stock');
-    if (!bajos.length) { el.innerHTML = '<div class="emp" style="padding:16px">✅ Todo en orden</div>'; return; }
-    el.innerHTML = bajos.map(function(i) {
-      return '<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--bor);font-size:13px">'
-        +'<span>'+i.nombre+'</span>'
-        +'<span class="pa-badge pa-rojo-bg">'+i.stock_actual+' '+i.unidad+'</span></div>';
-    }).join('');
-  });
-  // Órdenes pendientes
-  paFetch('/api/pa/ordenes?estado=emitida').then(function(r) {
-    var el = document.getElementById('pad-ordenes-lista');
-    var data = r.data || [];
-    if (!data.length) { el.innerHTML = '<div class="emp" style="padding:16px">Sin órdenes pendientes</div>'; return; }
-    el.innerHTML = data.slice(0,5).map(function(o) {
-      return '<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--bor);font-size:13px;cursor:pointer" onclick="paVerOrden('+o.id+')">'
-        +'<span>'+o.nro_orden+' — '+o.tipo_aplicacion+'</span>'
-        +'<span class="pa-badge pa-azul-bg">'+paFecha(o.fecha_orden)+'</span></div>';
-    }).join('');
-  });
-}
-
-// ─── CALENDARIO AGRÍCOLA ─────────────────────────────────────────
-function paLoadCalendario() {
-  var campId = document.getElementById('cal-campaña-sel').value;
-  var url = '/api/pa/lotes' + (campId ? '?campaña_id='+campId : '');
-  paFetch(url).then(function(r) {
-    var lotes = r.data || [];
-    if (!lotes.length) {
-      document.getElementById('pa-cal-contenido').innerHTML = '<div class="emp">No hay lotes cargados. Agregá lotes en Fincas y Lotes.</div>';
-      return;
-    }
-    // Agrupar por sector
-    var sectores = {};
-    lotes.forEach(function(l) {
-      if (!sectores[l.sector_nombre]) sectores[l.sector_nombre] = [];
-      sectores[l.sector_nombre].push(l);
-    });
-    var html = '';
-    Object.keys(sectores).forEach(function(sec) {
-      html += '<div style="margin-bottom:20px">';
-      html += '<div style="font-size:13px;font-weight:700;color:var(--burd);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px;padding:8px 12px;background:#1a3a5c;color:#fff;border-radius:8px 8px 0 0">'+sec+'</div>';
-      html += '<div class="pa-wrap" style="margin-bottom:0;border-radius:0 0 8px 8px"><table class="pa-tbl">';
-      html += '<thead><tr><th>Lote (Llaves)</th><th style="text-align:right">Ha</th><th>Cultivo actual</th><th>Campañas anteriores</th><th></th></tr></thead><tbody>';
-      sectores[sec].forEach(function(l) {
-        var cult = l.cultivo_actual || '';
-        var esFrutal = ['Vid','Damasco','Durazno','Ciruela','Manzana'].includes(cult);
-        var esInd = cult === 'Tomate Industria';
-        var clsCult = esFrutal ? 'cal-cult frutal' : (esInd ? 'cal-cult industria' : (cult ? 'cal-cult' : 'cal-cult vacio'));
-        var cultLabel = cult || '— sin asignar —';
-        html += '<tr>';
-        html += '<td><strong>'+l.nombre+'</strong></td>';
-        html += '<td style="text-align:right">'+l.hectareas+'</td>';
-        html += '<td><span class="'+clsCult+'" onclick="paEditarCultivo('+l.id+',\''+l.nombre+'\')">'+cultLabel+'</span></td>';
-        html += '<td style="font-size:11px;color:var(--mut)">—</td>';
-        html += '<td><button class="btn bo bs" onclick="paEditarCultivo('+l.id+',\''+l.nombre+'\')">✏ Editar</button></td>';
-        html += '</tr>';
+// ── CALENDARIO ──
+function paLoadCalendario(){
+  var campId=document.getElementById('cal-campaña-sel').value;
+  paF('/api/pa/lotes'+(campId?'?sector_id=':'')).then(function(r){
+    var lotes=r.data||[];
+    if(!lotes.length){document.getElementById('pa-cal-contenido').innerHTML='<div class="emp">No hay lotes cargados. Agregá lotes en Fincas y Lotes.</div>';return;}
+    var sectores={};
+    lotes.forEach(function(l){if(!sectores[l.sector_nombre])sectores[l.sector_nombre]=[];sectores[l.sector_nombre].push(l);});
+    var html='';
+    Object.keys(sectores).forEach(function(sec){
+      html+='<div style="margin-bottom:20px">';
+      html+='<div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;padding:8px 14px;background:#1a3a5c;color:#fff;border-radius:8px 8px 0 0">'+sec+'</div>';
+      html+='<div class="pa-wrap" style="margin-bottom:0;border-radius:0 0 8px 8px"><table class="pa-tbl">';
+      html+='<thead><tr><th>Lote (Llaves)</th><th style="text-align:right">Ha</th><th>Cultivo actual</th><th></th></tr></thead><tbody>';
+      sectores[sec].forEach(function(l){
+        var cult=l.cultivo_actual||'';
+        var esFrutal=['Vid','Damasco','Durazno','Ciruela','Manzana'].includes(cult);
+        var esInd=cult==='Tomate Industria';
+        var cls=esFrutal?'cal-cult frutal':(esInd?'cal-cult industria':(cult?'cal-cult':'cal-cult vacio'));
+        html+='<tr><td><strong>'+l.nombre+'</strong></td><td style="text-align:right">'+l.hectareas+'</td>';
+        html+='<td><span class="'+cls+'" onclick="paEditarCultivo('+l.id+',\''+l.nombre.replace(/'/g,"\\'")+'\')">'+(cult||'— sin asignar —')+'</span></td>';
+        html+='<td><button class="btn bo bs" onclick="paEditarCultivo('+l.id+',\''+l.nombre.replace(/'/g,"\\'")+'\')">✏ Editar</button></td></tr>';
       });
-      html += '</tbody></table></div></div>';
+      html+='</tbody></table></div></div>';
     });
-    document.getElementById('pa-cal-contenido').innerHTML = html;
+    document.getElementById('pa-cal-contenido').innerHTML=html;
   });
 }
 
-function paEditarCultivo(loteId, loteNombre) {
-  document.getElementById('pa-cult-lote-id').value = loteId;
-  document.getElementById('pa-cult-lote-nombre').textContent = 'Lote: ' + loteNombre;
-  paAbrirModal('pa-mb-cultivo');
+function paEditarCultivo(loteId,nombre){
+  document.getElementById('pa-cult-lote-id').value=loteId;
+  document.getElementById('pa-cult-lote-nombre').textContent='Lote: '+nombre;
+  // Poblar select campaña
+  var cultSel=document.getElementById('pa-cult-campaña');
+  cultSel.innerHTML=PA.campañas.map(function(c){return'<option value="'+c.id+'"'+(c.activa?' selected':'')+'>'+c.nombre+'</option>';}).join('');
+  document.getElementById('pa-mb-cultivo').classList.add('on');
 }
 
-function paGuardarCultivo() {
-  var loteId   = document.getElementById('pa-cult-lote-id').value;
-  var campId   = document.getElementById('pa-cult-campaña').value;
-  var cultivo  = document.getElementById('pa-cult-cultivo').value;
-  var perenne  = document.getElementById('pa-cult-perenne').value;
-  if (!campId) return toast('Seleccioná una campaña','er');
-  // Buscar nombre de campaña
-  var camp = PA.campañas.find(function(c){ return String(c.id)===String(campId); });
-  if (!camp) return toast('Campaña no encontrada','er');
-  paFetch('/api/pa/lotes/cultivo', {
-    method: 'POST',
-    headers: {'Content-Type':'application/json'},
-    body: JSON.stringify({ lote_id: loteId, campaña: camp.nombre, cultivo: cultivo || null, es_perenne: Number(perenne) })
-  }).then(function(r) {
-    if (r.ok) {
-      toast('Cultivo guardado');
-      paCerrarModal('pa-mb-cultivo');
-      paLoadCalendario();
-      paFetch('/api/pa/lotes').then(function(r2){ PA.lotes = r2.data||[]; });
-    } else { toast(r.error || 'Error al guardar','er'); }
-  });
+function paGuardarCultivo(){
+  var loteId=document.getElementById('pa-cult-lote-id').value;
+  var campId=document.getElementById('pa-cult-campaña').value;
+  var cultivo=document.getElementById('pa-cult-cultivo').value;
+  var perenne=document.getElementById('pa-cult-perenne').value;
+  if(!campId)return toast('Seleccioná una campaña','er');
+  var camp=PA.campañas.find(function(c){return String(c.id)===String(campId);});
+  if(!camp)return toast('Campaña no encontrada','er');
+  paF('/api/pa/lotes/cultivo',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({lote_id:loteId,campaña:camp.nombre,cultivo:cultivo||null,es_perenne:Number(perenne)})})
+    .then(function(r){
+      if(r.ok){toast('Cultivo guardado');document.getElementById('pa-mb-cultivo').classList.remove('on');paLoadCalendario();paF('/api/pa/lotes').then(function(r2){PA.lotes=r2.data||[];});}
+      else toast(r.error||'Error al guardar','er');
+    });
 }
 
-// ─── INSUMOS ─────────────────────────────────────────────────────
-function paLoadInsumos() {
-  var tipo = document.getElementById('pa-ins-tipo-fil').value;
-  paFetch('/api/pa/insumos' + (tipo ? '?tipo='+tipo : '')).then(function(r) {
-    PA.insumos = r.data || [];
-    var tb = document.getElementById('pa-ins-tbody');
-    if (!PA.insumos.length) { tb.innerHTML = '<tr><td colspan="7" class="emp">Sin insumos registrados</td></tr>'; return; }
-    tb.innerHTML = PA.insumos.map(function(i) {
-      var bajo = i.stock_minimo > 0 && i.stock_actual <= i.stock_minimo;
-      var badge = bajo ? '<span class="pa-badge pa-rojo-bg">⚠ Bajo</span>' : '<span class="pa-badge pa-verde-bg">OK</span>';
-      return '<tr>'
-        +'<td><strong>'+i.nombre+'</strong></td>'
-        +'<td>'+paBadgeTipo(i.tipo)+'</td>'
-        +'<td>'+i.unidad+'</td>'
+// ── INSUMOS ──
+function paLoadInsumos(){
+  var tipo=document.getElementById('pa-ins-tipo-fil').value;
+  paF('/api/pa/insumos'+(tipo?'?tipo='+tipo:'')).then(function(r){
+    PA.insumos=r.data||[];
+    var tb=document.getElementById('pa-ins-tbody');
+    if(!PA.insumos.length){tb.innerHTML='<tr><td colspan="7" class="emp">Sin insumos registrados</td></tr>';return;}
+    tb.innerHTML=PA.insumos.map(function(i){
+      var bajo=i.stock_minimo>0&&i.stock_actual<=i.stock_minimo;
+      return'<tr><td><strong>'+i.nombre+'</strong></td><td>'+paBadgeTipo(i.tipo)+'</td><td>'+i.unidad+'</td>'
         +'<td style="text-align:right"><strong>'+(i.stock_actual||0)+' '+i.unidad+'</strong></td>'
         +'<td style="text-align:right">'+(i.stock_minimo||0)+' '+i.unidad+'</td>'
-        +'<td>'+badge+'</td>'
-        +'<td><button class="btn bo bs" onclick="paEditarInsumo('+i.id+')">✏</button></td>'
-        +'</tr>';
+        +'<td>'+(bajo?'<span class="pa-badge pa-rojo-bg">⚠ Bajo</span>':'<span class="pa-badge pa-verde-bg">OK</span>')+'</td>'
+        +'<td><button class="btn bo bs" onclick="paEditarInsumo('+i.id+')">✏</button></td></tr>';
     }).join('');
   });
 }
-
-function paAbrirNuevoInsumo() {
-  document.getElementById('pa-ins-id').value = '';
-  document.getElementById('pa-ins-nombre').value = '';
-  document.getElementById('pa-ins-tipo').value = 'fertilizante';
-  document.getElementById('pa-ins-unidad').value = 'kg';
-  document.getElementById('pa-ins-stock-min').value = 0;
-  document.getElementById('pa-ins-notas').value = '';
-  document.getElementById('pa-ins-modal-tit').textContent = 'Nuevo Insumo';
-  paAbrirModal('pa-mb-insumo');
+function paAbrirNuevoInsumo(){
+  document.getElementById('pa-ins-id').value='';
+  document.getElementById('pa-ins-nombre').value='';
+  document.getElementById('pa-ins-tipo').value='fertilizante';
+  document.getElementById('pa-ins-unidad').value='kg';
+  document.getElementById('pa-ins-stock-min').value=0;
+  document.getElementById('pa-ins-notas').value='';
+  document.getElementById('pa-ins-modal-tit').textContent='Nuevo Insumo';
+  document.getElementById('pa-mb-insumo').classList.add('on');
 }
-
-function paEditarInsumo(id) {
-  var ins = PA.insumos.find(function(i){ return i.id===id; });
-  if (!ins) return;
-  document.getElementById('pa-ins-id').value = ins.id;
-  document.getElementById('pa-ins-nombre').value = ins.nombre;
-  document.getElementById('pa-ins-tipo').value = ins.tipo;
-  document.getElementById('pa-ins-unidad').value = ins.unidad;
-  document.getElementById('pa-ins-stock-min').value = ins.stock_minimo||0;
-  document.getElementById('pa-ins-notas').value = ins.notas||'';
-  document.getElementById('pa-ins-modal-tit').textContent = 'Editar Insumo';
-  paAbrirModal('pa-mb-insumo');
+function paEditarInsumo(id){
+  var ins=PA.insumos.find(function(i){return i.id===id;});
+  if(!ins)return;
+  document.getElementById('pa-ins-id').value=ins.id;
+  document.getElementById('pa-ins-nombre').value=ins.nombre;
+  document.getElementById('pa-ins-tipo').value=ins.tipo;
+  document.getElementById('pa-ins-unidad').value=ins.unidad;
+  document.getElementById('pa-ins-stock-min').value=ins.stock_minimo||0;
+  document.getElementById('pa-ins-notas').value=ins.notas||'';
+  document.getElementById('pa-ins-modal-tit').textContent='Editar Insumo';
+  document.getElementById('pa-mb-insumo').classList.add('on');
 }
-
-function paGuardarInsumo() {
-  var id     = document.getElementById('pa-ins-id').value;
-  var nombre = document.getElementById('pa-ins-nombre').value.trim();
-  var tipo   = document.getElementById('pa-ins-tipo').value;
-  var unidad = document.getElementById('pa-ins-unidad').value;
-  var stMin  = parseFloat(document.getElementById('pa-ins-stock-min').value)||0;
-  var notas  = document.getElementById('pa-ins-notas').value.trim();
-  if (!nombre) return toast('Ingresá el nombre del insumo','er');
-  var url    = id ? '/api/pa/insumos/'+id : '/api/pa/insumos';
-  var method = id ? 'PATCH' : 'POST';
-  paFetch(url, { method, headers:{'Content-Type':'application/json'}, body: JSON.stringify({nombre,tipo,unidad,stock_minimo:stMin,notas}) })
-    .then(function(r) {
-      if (r.ok) { toast(id?'Insumo actualizado':'Insumo creado'); paCerrarModal('pa-mb-insumo'); paLoadInsumos(); paFetch('/api/pa/insumos').then(function(r2){PA.insumos=r2.data||[];}); }
+function paGuardarInsumo(){
+  var id=document.getElementById('pa-ins-id').value;
+  var nombre=document.getElementById('pa-ins-nombre').value.trim();
+  var tipo=document.getElementById('pa-ins-tipo').value;
+  var unidad=document.getElementById('pa-ins-unidad').value;
+  var stMin=parseFloat(document.getElementById('pa-ins-stock-min').value)||0;
+  var notas=document.getElementById('pa-ins-notas').value.trim();
+  if(!nombre)return toast('Ingresá el nombre del insumo','er');
+  paF(id?'/api/pa/insumos/'+id:'/api/pa/insumos',{method:id?'PATCH':'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({nombre,tipo,unidad,stock_minimo:stMin,notas})})
+    .then(function(r){
+      if(r.ok){toast(id?'Actualizado':'Insumo creado');document.getElementById('pa-mb-insumo').classList.remove('on');paLoadInsumos();paF('/api/pa/insumos').then(function(r2){PA.insumos=r2.data||[];});}
       else toast(r.error||'Error','er');
     });
 }
 
-// ─── COMPRAS ─────────────────────────────────────────────────────
-function paLoadCompras() {
-  paFetch('/api/pa/compras').then(function(r) {
-    var data = r.data || [];
-    var tb = document.getElementById('pa-comp-tbody');
-    if (!data.length) { tb.innerHTML = '<tr><td colspan="6" class="emp">Sin compras registradas</td></tr>'; return; }
-    tb.innerHTML = data.map(function(c) {
-      var prods = (c.items||[]).map(function(i){ return i.insumo_nombre; }).join(', ');
-      return '<tr>'
-        +'<td>'+paFecha(c.fecha)+'</td>'
-        +'<td>'+(c.proveedor_nombre||c.proveedor_txt||'—')+'</td>'
-        +'<td>'+(c.nro_factura||'—')+'</td>'
-        +'<td style="font-size:12px;color:var(--mut)">'+prods+'</td>'
-        +'<td style="text-align:right"><strong>'+paMoney(c.total)+'</strong></td>'
-        +'<td></td>'
-        +'</tr>';
+// ── COMPRAS ──
+function paLoadCompras(){
+  paF('/api/pa/compras').then(function(r){
+    var data=r.data||[];
+    var tb=document.getElementById('pa-comp-tbody');
+    if(!data.length){tb.innerHTML='<tr><td colspan="5" class="emp">Sin compras registradas</td></tr>';return;}
+    tb.innerHTML=data.map(function(c){
+      var prods=(c.items||[]).map(function(i){return i.insumo_nombre;}).join(', ');
+      return'<tr><td>'+paFecha(c.fecha)+'</td><td>'+(c.proveedor_nombre||c.proveedor_txt||'—')+'</td><td>'+(c.nro_factura||'—')+'</td><td style="font-size:12px;color:var(--mut)">'+prods+'</td><td style="text-align:right"><strong>'+paMoney(c.total)+'</strong></td></tr>';
     }).join('');
   });
 }
-
-function paAbrirNuevaCompra() {
-  PA.compItemsCont = 0;
-  document.getElementById('pa-comp-fecha').value = new Date().toISOString().slice(0,10);
-  document.getElementById('pa-comp-factura').value = '';
-  document.getElementById('pa-comp-prov').value = '';
-  document.getElementById('pa-comp-notas').value = '';
-  document.getElementById('pa-comp-items').innerHTML = '';
-  document.getElementById('pa-comp-total').textContent = '$0';
+function paAbrirNuevaCompra(){
+  PA.compN=0;
+  document.getElementById('pa-comp-fecha').value=new Date().toISOString().slice(0,10);
+  document.getElementById('pa-comp-factura').value='';
+  document.getElementById('pa-comp-prov').value='';
+  document.getElementById('pa-comp-notas').value='';
+  document.getElementById('pa-comp-items').innerHTML='';
+  document.getElementById('pa-comp-total').textContent='$0';
   paAgregarItemCompra();
-  paAbrirModal('pa-mb-compra');
+  document.getElementById('pa-mb-compra').classList.add('on');
 }
-
-function paAgregarItemCompra() {
-  var n = PA.compItemsCont++;
-  var insOpts = PA.insumos.map(function(i){ return '<option value="'+i.id+'">'+i.nombre+' ('+i.unidad+')</option>'; }).join('');
-  var row = document.createElement('div');
-  row.className = 'pa-item-row';
-  row.id = 'pa-ci-'+n;
-  row.innerHTML = '<select class="ab-form-select" id="pa-ci-ins-'+n+'">'+insOpts+'</select>'
-    +'<input type="number" class="ab-form-input" id="pa-ci-cant-'+n+'" placeholder="Cant." step="0.01" min="0" oninput="paActualizarTotalCompra()">'
-    +'<input type="number" class="ab-form-input" id="pa-ci-precio-'+n+'" placeholder="$/unit" step="0.01" min="0" oninput="paActualizarTotalCompra()">'
-    +'<span id="pa-ci-sub-'+n+'" style="font-size:12px;color:var(--mut);white-space:nowrap">$0</span>'
-    +'<button class="btn bd bs" onclick="document.getElementById(\'pa-ci-'+n+'\').remove();paActualizarTotalCompra()">✕</button>';
+function paAgregarItemCompra(){
+  var n=PA.compN++;
+  var opts=PA.insumos.map(function(i){return'<option value="'+i.id+'">'+i.nombre+' ('+i.unidad+')</option>';}).join('');
+  var row=document.createElement('div');
+  row.id='pa-ci-'+n;
+  row.style.cssText='display:grid;grid-template-columns:1fr 100px 110px 80px auto;gap:8px;align-items:center;padding:8px 0;border-bottom:1px solid var(--bor)';
+  row.innerHTML='<select id="pa-ci-ins-'+n+'">'+opts+'</select>'
+    +'<input type="number" id="pa-ci-cant-'+n+'" placeholder="Cant." step="0.01" min="0" oninput="paActTotalComp()">'
+    +'<input type="number" id="pa-ci-prec-'+n+'" placeholder="$/unit" step="0.01" min="0" oninput="paActTotalComp()">'
+    +'<span id="pa-ci-sub-'+n+'" style="font-size:12px;color:var(--mut)">$0</span>'
+    +'<button class="btn bd bs" onclick="document.getElementById(\'pa-ci-'+n+'\').remove();paActTotalComp()">✕</button>';
   document.getElementById('pa-comp-items').appendChild(row);
 }
-
-function paActualizarTotalCompra() {
-  var total = 0;
-  document.querySelectorAll('[id^=pa-ci-cant-]').forEach(function(el) {
-    var n = el.id.split('-').pop();
-    var cant = parseFloat(el.value)||0;
-    var prec = parseFloat(document.getElementById('pa-ci-precio-'+n).value)||0;
-    var sub = cant * prec;
-    var subEl = document.getElementById('pa-ci-sub-'+n);
-    if (subEl) subEl.textContent = paMoney(sub);
-    total += sub;
+function paActTotalComp(){
+  var total=0;
+  document.querySelectorAll('[id^=pa-ci-cant-]').forEach(function(el){
+    var n=el.id.split('-').pop();
+    var c=parseFloat(el.value)||0,p=parseFloat(document.getElementById('pa-ci-prec-'+n).value)||0,s=c*p;
+    var subEl=document.getElementById('pa-ci-sub-'+n);if(subEl)subEl.textContent=paMoney(s);total+=s;
   });
-  document.getElementById('pa-comp-total').textContent = paMoney(total);
+  document.getElementById('pa-comp-total').textContent=paMoney(total);
+}
+function paGuardarCompra(){
+  var fecha=document.getElementById('pa-comp-fecha').value;
+  var factura=document.getElementById('pa-comp-factura').value.trim();
+  var prov=document.getElementById('pa-comp-prov').value.trim();
+  var notas=document.getElementById('pa-comp-notas').value.trim();
+  var items=[];
+  document.querySelectorAll('[id^=pa-ci-cant-]').forEach(function(el){
+    var n=el.id.split('-').pop();
+    var insId=document.getElementById('pa-ci-ins-'+n).value;
+    var cant=parseFloat(el.value)||0,prec=parseFloat(document.getElementById('pa-ci-prec-'+n).value)||0;
+    if(insId&&cant>0&&prec>0)items.push({insumo_id:insId,cantidad:cant,precio_unit:prec});
+  });
+  if(!items.length)return toast('Agregá al menos un producto con cantidad y precio','er');
+  paF('/api/pa/compras',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fecha,nro_factura:factura,proveedor_txt:prov,notas,items})})
+    .then(function(r){
+      if(r.ok){toast('Compra registrada — stock actualizado');document.getElementById('pa-mb-compra').classList.remove('on');paLoadCompras();paF('/api/pa/insumos').then(function(r2){PA.insumos=r2.data||[];});}
+      else toast(r.error||'Error','er');
+    });
 }
 
-function paGuardarCompra() {
-  var fecha   = document.getElementById('pa-comp-fecha').value;
-  var factura = document.getElementById('pa-comp-factura').value.trim();
-  var prov    = document.getElementById('pa-comp-prov').value.trim();
-  var notas   = document.getElementById('pa-comp-notas').value.trim();
-  var items = [];
-  document.querySelectorAll('[id^=pa-ci-cant-]').forEach(function(el) {
-    var n = el.id.split('-').pop();
-    var insId = document.getElementById('pa-ci-ins-'+n).value;
-    var cant  = parseFloat(el.value)||0;
-    var prec  = parseFloat(document.getElementById('pa-ci-precio-'+n).value)||0;
-    if (insId && cant > 0 && prec > 0) items.push({ insumo_id: insId, cantidad: cant, precio_unit: prec });
-  });
-  if (!items.length) return toast('Agregá al menos un producto con cantidad y precio','er');
-  paFetch('/api/pa/compras', { method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({ fecha, nro_factura: factura, proveedor_txt: prov, notas, items })
-  }).then(function(r) {
-    if (r.ok) { toast('Compra registrada — stock actualizado'); paCerrarModal('pa-mb-compra'); paLoadCompras(); paFetch('/api/pa/insumos').then(function(r2){PA.insumos=r2.data||[];}); }
-    else toast(r.error||'Error','er');
-  });
-}
-
-// ─── ÓRDENES ─────────────────────────────────────────────────────
-function paLoadOrdenes() {
-  var estado = document.getElementById('pa-ord-estado-fil').value;
-  paFetch('/api/pa/ordenes' + (estado ? '?estado='+estado : '')).then(function(r) {
-    var data = r.data || [];
-    var tb = document.getElementById('pa-ord-tbody');
-    if (!data.length) { tb.innerHTML = '<tr><td colspan="7" class="emp">Sin órdenes</td></tr>'; return; }
-    tb.innerHTML = data.map(function(o) {
-      var lotesTxt = (o.lotes||[]).map(function(l){ return l.lote_nombre; }).join(', ');
-      var prodsTxt = (o.items||[]).map(function(i){ return i.insumo_nombre; }).join(', ');
-      return '<tr>'
-        +'<td><strong>'+o.nro_orden+'</strong></td>'
-        +'<td>'+paFecha(o.fecha_orden)+'</td>'
-        +'<td>'+(o.tipo_aplicacion||'—')+'</td>'
-        +'<td style="font-size:12px;color:var(--mut)">'+lotesTxt+'</td>'
-        +'<td style="font-size:12px;color:var(--mut)">'+prodsTxt+'</td>'
-        +'<td>'+paBadgeEstado(o.estado)+'</td>'
-        +'<td><button class="btn bo bs" onclick="paVerOrden('+o.id+')">Ver</button></td>'
-        +'</tr>';
+// ── ÓRDENES ──
+function paLoadOrdenes(){
+  var estado=document.getElementById('pa-ord-estado-fil').value;
+  paF('/api/pa/ordenes'+(estado?'?estado='+estado:'')).then(function(r){
+    var data=r.data||[];
+    var tb=document.getElementById('pa-ord-tbody');
+    if(!data.length){tb.innerHTML='<tr><td colspan="7" class="emp">Sin órdenes</td></tr>';return;}
+    tb.innerHTML=data.map(function(o){
+      var lts=(o.lotes||[]).map(function(l){return l.lote_nombre;}).join(', ');
+      var prs=(o.items||[]).map(function(i){return i.insumo_nombre;}).join(', ');
+      return'<tr><td><strong>'+o.nro_orden+'</strong></td><td>'+paFecha(o.fecha_orden)+'</td><td>'+(o.tipo_aplicacion||'—')+'</td>'
+        +'<td style="font-size:12px;color:var(--mut)">'+lts+'</td><td style="font-size:12px;color:var(--mut)">'+prs+'</td>'
+        +'<td>'+paBadgeEstado(o.estado)+'</td><td><button class="btn bo bs" onclick="paVerOrden('+o.id+')">Ver</button></td></tr>';
     }).join('');
   });
 }
-
-function paAbrirNuevaOrden() {
-  PA.ordItemsCont = 0;
-  document.getElementById('pa-ord-fecha').value = new Date().toISOString().slice(0,10);
-  document.getElementById('pa-ord-fecha-prop').value = '';
-  document.getElementById('pa-ord-tipo').value = '';
-  document.getElementById('pa-ord-objetivo').value = '';
-  document.getElementById('pa-ord-items').innerHTML = '';
-  // Poblar lotes
-  var html = PA.lotes.map(function(l) {
-    return '<label style="display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:6px;cursor:pointer;font-size:13px">'
-      +'<input type="checkbox" value="'+l.id+'" style="width:auto"> '
-      +'<span><strong>'+l.nombre+'</strong> <span style="color:var(--mut);font-size:11px">— '+l.sector_nombre+' ('+l.hectareas+' ha)</span></span></label>';
-  }).join('');
-  document.getElementById('pa-ord-lotes-sel').innerHTML = html || '<div class="emp">Sin lotes. Agregá lotes primero.</div>';
+function paAbrirNuevaOrden(){
+  PA.ordN=0;
+  document.getElementById('pa-ord-fecha').value=new Date().toISOString().slice(0,10);
+  document.getElementById('pa-ord-fecha-prop').value='';
+  document.getElementById('pa-ord-tipo').value='';
+  document.getElementById('pa-ord-objetivo').value='';
+  document.getElementById('pa-ord-items').innerHTML='';
+  var html=PA.lotes.map(function(l){return'<label style="display:flex;align-items:center;gap:8px;padding:5px 8px;border-radius:6px;cursor:pointer;font-size:13px"><input type="checkbox" value="'+l.id+'" style="width:auto"> <span><strong>'+l.nombre+'</strong> <span style="color:var(--mut);font-size:11px">'+l.sector_nombre+' ('+l.hectareas+'ha)</span></span></label>';}).join('');
+  document.getElementById('pa-ord-lotes-sel').innerHTML=html||'<div class="emp">Sin lotes. Agregá lotes primero.</div>';
   paAgregarItemOrden();
-  paAbrirModal('pa-mb-orden');
+  document.getElementById('pa-mb-orden').classList.add('on');
 }
-
-function paAgregarItemOrden() {
-  var n = PA.ordItemsCont++;
-  var insOpts = PA.insumos.map(function(i){ return '<option value="'+i.id+'">'+i.nombre+' ('+i.unidad+')</option>'; }).join('');
-  var row = document.createElement('div');
-  row.id = 'pa-oi-'+n;
-  row.style.cssText = 'display:grid;grid-template-columns:1fr 100px 140px auto;gap:8px;align-items:center;padding:8px 0;border-bottom:1px solid var(--bor)';
-  row.innerHTML = '<select class="ab-form-select" id="pa-oi-ins-'+n+'">'+insOpts+'</select>'
-    +'<input type="number" class="ab-form-input" id="pa-oi-dosis-'+n+'" placeholder="Dosis" step="0.01" min="0">'
-    +'<select class="ab-form-select" id="pa-oi-ud-'+n+'">'
-    +'<option value="kg/ha">kg/ha</option><option value="lt/ha">lt/ha</option>'
-    +'<option value="kg/lote">kg/lote</option><option value="lt/lote">lt/lote</option>'
-    +'<option value="kg_total">kg total</option><option value="lt_total">lt total</option>'
-    +'</select>'
+function paAgregarItemOrden(){
+  var n=PA.ordN++;
+  var opts=PA.insumos.map(function(i){return'<option value="'+i.id+'">'+i.nombre+' ('+i.unidad+')</option>';}).join('');
+  var row=document.createElement('div');
+  row.id='pa-oi-'+n;
+  row.style.cssText='display:grid;grid-template-columns:1fr 100px 140px auto;gap:8px;align-items:center;padding:8px 0;border-bottom:1px solid var(--bor)';
+  row.innerHTML='<select id="pa-oi-ins-'+n+'">'+opts+'</select>'
+    +'<input type="number" id="pa-oi-dosis-'+n+'" placeholder="Dosis" step="0.01" min="0">'
+    +'<select id="pa-oi-ud-'+n+'"><option value="kg/ha">kg/ha</option><option value="lt/ha">lt/ha</option><option value="kg/lote">kg/lote</option><option value="lt/lote">lt/lote</option><option value="kg_total">kg total</option><option value="lt_total">lt total</option></select>'
     +'<button class="btn bd bs" onclick="document.getElementById(\'pa-oi-'+n+'\').remove()">✕</button>';
   document.getElementById('pa-ord-items').appendChild(row);
 }
-
-function paGuardarOrden() {
-  var fecha      = document.getElementById('pa-ord-fecha').value;
-  var fechaProp  = document.getElementById('pa-ord-fecha-prop').value;
-  var tipo       = document.getElementById('pa-ord-tipo').value.trim();
-  var objetivo   = document.getElementById('pa-ord-objetivo').value.trim();
-  var lotes = [];
-  document.querySelectorAll('#pa-ord-lotes-sel input[type=checkbox]:checked').forEach(function(cb){ lotes.push(Number(cb.value)); });
-  if (!lotes.length) return toast('Seleccioná al menos un lote','er');
-  var items = [];
-  document.querySelectorAll('[id^=pa-oi-ins-]').forEach(function(el) {
-    var n = el.id.split('-').pop();
-    var insId = el.value;
-    var dosis = parseFloat(document.getElementById('pa-oi-dosis-'+n).value)||0;
-    var ud    = document.getElementById('pa-oi-ud-'+n).value;
-    if (insId && dosis > 0) items.push({ insumo_id: insId, dosis, unidad_dosis: ud });
+function paGuardarOrden(){
+  var fecha=document.getElementById('pa-ord-fecha').value;
+  var fechaProp=document.getElementById('pa-ord-fecha-prop').value;
+  var tipo=document.getElementById('pa-ord-tipo').value.trim();
+  var objetivo=document.getElementById('pa-ord-objetivo').value.trim();
+  var lotes=[];
+  document.querySelectorAll('#pa-ord-lotes-sel input:checked').forEach(function(cb){lotes.push(Number(cb.value));});
+  if(!lotes.length)return toast('Seleccioná al menos un lote','er');
+  var items=[];
+  document.querySelectorAll('[id^=pa-oi-ins-]').forEach(function(el){
+    var n=el.id.split('-').pop();
+    var insId=el.value,dosis=parseFloat(document.getElementById('pa-oi-dosis-'+n).value)||0;
+    var ud=document.getElementById('pa-oi-ud-'+n).value;
+    if(insId&&dosis>0)items.push({insumo_id:insId,dosis:dosis,unidad_dosis:ud});
   });
-  if (!items.length) return toast('Agregá al menos un producto con dosis','er');
-  paFetch('/api/pa/ordenes', { method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({ fecha_orden: fecha, fecha_propuesta: fechaProp, tipo_aplicacion: tipo, objetivo, lotes, items })
-  }).then(function(r) {
-    if (r.ok) { toast('Orden '+r.nro_orden+' emitida'); paCerrarModal('pa-mb-orden'); paLoadOrdenes(); }
-    else toast(r.error||'Error','er');
-  });
-}
-
-function paVerOrden(id) {
-  paFetch('/api/pa/ordenes/'+id).then(function(r) {
-    if (!r.ok) return toast('Error cargando orden','er');
-    var o = r.data;
-    PA.ordenActual = o;
-    document.getElementById('pa-ord-det-tit').textContent = o.nro_orden;
-    document.getElementById('pa-ord-det-sub').textContent = (o.tipo_aplicacion||'') + ' — ' + paBadgeEstado(o.estado).replace(/<[^>]+>/g,'');
-    var html = '<div class="pa-grid2">';
-    html += '<div><div style="font-size:11px;color:var(--mut);text-transform:uppercase;margin-bottom:4px">Fecha orden</div><div>'+paFecha(o.fecha_orden)+'</div></div>';
-    html += '<div><div style="font-size:11px;color:var(--mut);text-transform:uppercase;margin-bottom:4px">Ejecución propuesta</div><div>'+(o.fecha_propuesta?paFecha(o.fecha_propuesta):'—')+'</div></div>';
-    html += '<div><div style="font-size:11px;color:var(--mut);text-transform:uppercase;margin-bottom:4px">Creada por</div><div>'+(o.creada_por_nombre||'—')+'</div></div>';
-    html += '<div><div style="font-size:11px;color:var(--mut);text-transform:uppercase;margin-bottom:4px">Estado</div><div>'+paBadgeEstado(o.estado)+'</div></div>';
-    html += '</div>';
-    if (o.objetivo) html += '<div style="margin:8px 0;padding:10px;background:var(--bg);border-radius:7px;font-size:13px">'+o.objetivo+'</div>';
-    html += '<div style="font-size:11px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.06em;margin:14px 0 8px">Lotes ('+o.lotes.length+')</div>';
-    html += '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px">'+o.lotes.map(function(l){ return '<span class="pa-badge pa-azul-bg">'+l.lote_nombre+' ('+l.hectareas+' ha)</span>'; }).join('')+'</div>';
-    html += '<div style="font-size:11px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">Productos y dosis</div>';
-    html += '<table class="pa-tbl" style="margin-bottom:14px"><thead><tr><th>Producto</th><th>Dosis</th><th>Unidad</th></tr></thead><tbody>';
-    o.items.forEach(function(it){ html += '<tr><td>'+it.insumo_nombre+'</td><td>'+it.dosis+'</td><td>'+it.unidad_dosis+'</td></tr>'; });
-    html += '</tbody></table>';
-    if (o.aplicaciones && o.aplicaciones.length) {
-      html += '<div style="font-size:11px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">Ejecuciones registradas</div>';
-      html += '<table class="pa-tbl"><thead><tr><th>Lote</th><th>Insumo</th><th>Fecha</th><th style="text-align:right">Cant.</th><th>Ejecutado por</th></tr></thead><tbody>';
-      o.aplicaciones.forEach(function(a){
-        html += '<tr><td>'+a.lote_nombre+'</td><td>'+a.insumo_nombre+'</td><td>'+paFecha(a.fecha_real)+'</td><td style="text-align:right">'+a.cantidad_real+' '+a.unidad+'</td><td>'+(a.ejecutado_por_nombre||a.ejecutado_txt||'—')+'</td></tr>';
-      });
-      html += '</tbody></table>';
-    }
-    document.getElementById('pa-ord-det-body').innerHTML = html;
-    // Poblar selects del form ejecución
-    var loteOpts = o.lotes.map(function(l){ return '<option value="'+l.lote_id+'">'+l.lote_nombre+'</option>'; }).join('');
-    document.getElementById('pa-ej-lote').innerHTML = loteOpts;
-    var insOpts = o.items.map(function(i){ return '<option value="'+i.insumo_id+'">'+i.insumo_nombre+'</option>'; }).join('');
-    document.getElementById('pa-ej-insumo').innerHTML = insOpts;
-    document.getElementById('pa-ej-fecha').value = new Date().toISOString().slice(0,10);
-    document.getElementById('pa-ej-cant').value = '';
-    document.getElementById('pa-ej-quien').value = '';
-    document.getElementById('pa-ord-ejec-form').style.display = 'none';
-    var btnEjec = document.getElementById('pa-ord-det-ejec-btn');
-    btnEjec.style.display = ['emitida','en_ejecucion'].includes(o.estado) ? '' : 'none';
-    paAbrirModal('pa-mb-orden-det');
-  });
-}
-
-function paToggleEjecForm() {
-  var f = document.getElementById('pa-ord-ejec-form');
-  f.style.display = f.style.display === 'none' ? '' : 'none';
-}
-
-function paRegistrarEjecucion() {
-  var o = PA.ordenActual;
-  if (!o) return;
-  var loteId  = document.getElementById('pa-ej-lote').value;
-  var insId   = document.getElementById('pa-ej-insumo').value;
-  var fecha   = document.getElementById('pa-ej-fecha').value;
-  var cant    = parseFloat(document.getElementById('pa-ej-cant').value)||0;
-  var quien   = document.getElementById('pa-ej-quien').value.trim();
-  if (!cant) return toast('Ingresá la cantidad real','er');
-  paFetch('/api/pa/aplicaciones', { method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({ orden_id: o.id, lote_id: loteId, insumo_id: insId, fecha_real: fecha, cantidad_real: cant, ejecutado_txt: quien })
-  }).then(function(r) {
-    if (r.ok) { toast('Ejecución registrada — stock descontado'); paCerrarModal('pa-mb-orden-det'); paLoadOrdenes(); }
-    else toast(r.error||'Error','er');
-  });
-}
-
-// ─── COSTOS ──────────────────────────────────────────────────────
-function paLoadCostos() {
-  var campId = document.getElementById('pa-cos-campaña').value;
-  paFetch('/api/pa/costos' + (campId ? '?campaña_id='+campId : '')).then(function(r) {
-    var data = r.data || [];
-    var sects = r.por_sector || [];
-    // Cards por sector
-    var cardsHtml = sects.map(function(s) {
-      return '<div class="pa-card">'
-        +'<div class="pa-card-title">'+s.sector_nombre+'</div>'
-        +'<div class="pa-stat">'+paMoney(s.costo_total)+'</div>'
-        +'<div style="font-size:12px;color:var(--mut);margin-top:4px">'+s.hectareas_total+' ha — '+paMoney(s.costo_por_ha)+'/ha</div>'
-        +'</div>';
-    }).join('');
-    document.getElementById('pa-cos-sectores').innerHTML = cardsHtml || '';
-    var tb = document.getElementById('pa-cos-tbody');
-    if (!data.length) { tb.innerHTML = '<tr><td colspan="7" class="emp">Sin costos registrados para esta campaña</td></tr>'; return; }
-    tb.innerHTML = data.map(function(l) {
-      return '<tr>'
-        +'<td style="font-size:12px;color:var(--mut)">'+l.sector_nombre+'</td>'
-        +'<td><strong>'+l.lote_nombre+'</strong></td>'
-        +'<td style="text-align:right">'+l.hectareas+'</td>'
-        +'<td>'+(l.cultivo_actual||'—')+'</td>'
-        +'<td style="text-align:right"><strong>'+paMoney(l.costo_total)+'</strong></td>'
-        +'<td style="text-align:right">'+paMoney(l.costo_por_ha)+'</td>'
-        +'<td><button class="btn bo bs" onclick="paVerDetalleCosto('+l.lote_id+')">Detalle</button></td>'
-        +'</tr>';
-    }).join('');
-  });
-}
-
-function paVerDetalleCosto(loteId) {
-  paFetch('/api/pa/costos?lote_id='+loteId).then(function(r){
-    var data = r.data||[];
-    if(!data.length){toast('Sin movimientos de costo para este lote');return;}
-    var loteNombre = data[0].lote_nombre;
-    var html = '<div style="font-size:13px;font-weight:600;margin-bottom:12px">'+loteNombre+' — detalle de costos</div>';
-    html += '<table class="pa-tbl"><thead><tr><th>Fecha</th><th>Categoría</th><th>Descripción</th><th style="text-align:right">Monto</th></tr></thead><tbody>';
-    var total = 0;
-    data.forEach(function(c){
-      html += '<tr><td>'+paFecha(c.fecha)+'</td><td>'+c.categoria+'</td><td>'+(c.descripcion||'—')+'</td><td style="text-align:right">'+paMoney(c.monto)+'</td></tr>';
-      total += c.monto;
+  if(!items.length)return toast('Agregá al menos un producto con dosis','er');
+  paF('/api/pa/ordenes',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fecha_orden:fecha,fecha_propuesta:fechaProp,tipo_aplicacion:tipo,objetivo:objetivo,lotes:lotes,items:items})})
+    .then(function(r){
+      if(r.ok){toast('Orden '+r.nro_orden+' emitida');document.getElementById('pa-mb-orden').classList.remove('on');paLoadOrdenes();}
+      else toast(r.error||'Error','er');
     });
-    html += '<tr style="font-weight:700;background:var(--bg)"><td colspan="3">TOTAL</td><td style="text-align:right">'+paMoney(total)+'</td></tr>';
-    html += '</tbody></table>';
-    // Reutilizar un modal sencillo
-    document.getElementById('pa-ord-det-tit').textContent = 'Costos — '+loteNombre;
-    document.getElementById('pa-ord-det-sub').textContent = '';
-    document.getElementById('pa-ord-det-body').innerHTML = html;
+}
+function paVerOrden(id){
+  paF('/api/pa/ordenes/'+id).then(function(r){
+    if(!r.ok)return toast('Error cargando orden','er');
+    var o=r.data; PA.ordenActual=o;
+    document.getElementById('pa-ord-det-tit').textContent=o.nro_orden;
+    document.getElementById('pa-ord-det-sub').textContent=(o.tipo_aplicacion||'')+' — Estado: '+o.estado;
+    var html='<div class="pa-grid2">'
+      +'<div><div style="font-size:11px;color:var(--mut);text-transform:uppercase;margin-bottom:4px">Fecha orden</div><div>'+paFecha(o.fecha_orden)+'</div></div>'
+      +'<div><div style="font-size:11px;color:var(--mut);text-transform:uppercase;margin-bottom:4px">Ejecución propuesta</div><div>'+(o.fecha_propuesta?paFecha(o.fecha_propuesta):'—')+'</div></div>'
+      +'<div><div style="font-size:11px;color:var(--mut);text-transform:uppercase;margin-bottom:4px">Estado</div><div>'+paBadgeEstado(o.estado)+'</div></div>'
+      +'<div><div style="font-size:11px;color:var(--mut);text-transform:uppercase;margin-bottom:4px">Creada por</div><div>'+(o.creada_por_nombre||'—')+'</div></div>'
+      +'</div>';
+    if(o.objetivo)html+='<div style="margin:8px 0;padding:10px;background:var(--bg);border-radius:7px;font-size:13px">'+o.objetivo+'</div>';
+    html+='<div style="font-size:11px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.06em;margin:12px 0 8px">Lotes</div>';
+    html+='<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px">'+o.lotes.map(function(l){return'<span class="pa-badge pa-azul-bg">'+l.lote_nombre+' ('+l.hectareas+'ha)</span>';}).join('')+'</div>';
+    html+='<div style="font-size:11px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">Productos y dosis</div>';
+    html+='<table class="pa-tbl" style="margin-bottom:12px"><thead><tr><th>Producto</th><th>Dosis</th><th>Unidad</th></tr></thead><tbody>';
+    o.items.forEach(function(it){html+='<tr><td>'+it.insumo_nombre+'</td><td>'+it.dosis+'</td><td>'+it.unidad_dosis+'</td></tr>';});
+    html+='</tbody></table>';
+    if(o.aplicaciones&&o.aplicaciones.length){
+      html+='<div style="font-size:11px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">Ejecuciones</div>';
+      html+='<table class="pa-tbl"><thead><tr><th>Lote</th><th>Insumo</th><th>Fecha</th><th style="text-align:right">Cant.</th><th>Por</th></tr></thead><tbody>';
+      o.aplicaciones.forEach(function(a){html+='<tr><td>'+a.lote_nombre+'</td><td>'+a.insumo_nombre+'</td><td>'+paFecha(a.fecha_real)+'</td><td style="text-align:right">'+a.cantidad_real+' '+a.unidad+'</td><td>'+(a.ejecutado_por_nombre||a.ejecutado_txt||'—')+'</td></tr>';});
+      html+='</tbody></table>';
+    }
+    document.getElementById('pa-ord-det-body').innerHTML=html;
+    var loteOpts=o.lotes.map(function(l){return'<option value="'+l.lote_id+'">'+l.lote_nombre+'</option>';}).join('');
+    document.getElementById('pa-ej-lote').innerHTML=loteOpts;
+    var insOpts=o.items.map(function(i){return'<option value="'+i.insumo_id+'">'+i.insumo_nombre+'</option>';}).join('');
+    document.getElementById('pa-ej-insumo').innerHTML=insOpts;
+    document.getElementById('pa-ej-fecha').value=new Date().toISOString().slice(0,10);
+    document.getElementById('pa-ej-cant').value='';
+    document.getElementById('pa-ej-quien').value='';
+    document.getElementById('pa-ord-ejec-form').style.display='none';
+    var btnEjec=document.getElementById('pa-ord-det-ejec-btn');
+    btnEjec.style.display=['emitida','en_ejecucion'].includes(o.estado)?'':'none';
+    document.getElementById('pa-mb-orden-det').classList.add('on');
+  });
+}
+function paToggleEjecForm(){
+  var f=document.getElementById('pa-ord-ejec-form');f.style.display=f.style.display==='none'?'':'none';
+}
+function paRegistrarEjecucion(){
+  var o=PA.ordenActual; if(!o)return;
+  var loteId=document.getElementById('pa-ej-lote').value;
+  var insId=document.getElementById('pa-ej-insumo').value;
+  var fecha=document.getElementById('pa-ej-fecha').value;
+  var cant=parseFloat(document.getElementById('pa-ej-cant').value)||0;
+  var quien=document.getElementById('pa-ej-quien').value.trim();
+  if(!cant)return toast('Ingresá la cantidad real','er');
+  paF('/api/pa/aplicaciones',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({orden_id:o.id,lote_id:loteId,insumo_id:insId,fecha_real:fecha,cantidad_real:cant,ejecutado_txt:quien})})
+    .then(function(r){
+      if(r.ok){toast('Ejecución registrada — stock descontado');document.getElementById('pa-mb-orden-det').classList.remove('on');paLoadOrdenes();}
+      else toast(r.error||'Error','er');
+    });
+}
+
+// ── COSTOS ──
+function paLoadCostos(){
+  var campId=document.getElementById('pa-cos-campaña').value;
+  paF('/api/pa/costos'+(campId?'?campaña_id='+campId:'')).then(function(r){
+    var data=r.data||[],sects=r.por_sector||[];
+    document.getElementById('pa-cos-sectores').innerHTML=sects.map(function(s){
+      return'<div class="pa-card"><div class="pa-card-title">'+s.sector_nombre+'</div><div class="pa-stat">'+paMoney(s.costo_total)+'</div><div style="font-size:12px;color:var(--mut);margin-top:4px">'+s.hectareas_total+' ha — '+paMoney(s.costo_por_ha)+'/ha</div></div>';
+    }).join('');
+    var tb=document.getElementById('pa-cos-tbody');
+    if(!data.length){tb.innerHTML='<tr><td colspan="7" class="emp">Sin costos para esta campaña</td></tr>';return;}
+    tb.innerHTML=data.map(function(l){
+      return'<tr><td style="font-size:12px;color:var(--mut)">'+l.sector_nombre+'</td><td><strong>'+l.lote_nombre+'</strong></td><td style="text-align:right">'+l.hectareas+'</td>'
+        +'<td>'+(l.cultivo_actual||'—')+'</td><td style="text-align:right"><strong>'+paMoney(l.costo_total)+'</strong></td><td style="text-align:right">'+paMoney(l.costo_por_ha)+'</td>'
+        +'<td><button class="btn bo bs" onclick="paVerDetalleCosto('+l.lote_id+')">Detalle</button></td></tr>';
+    }).join('');
+  });
+}
+function paVerDetalleCosto(loteId){
+  paF('/api/pa/costos?lote_id='+loteId).then(function(r){
+    var data=r.data||[];
+    if(!data.length){toast('Sin movimientos de costo para este lote');return;}
+    var html='<table class="pa-tbl"><thead><tr><th>Fecha</th><th>Categoría</th><th>Descripción</th><th style="text-align:right">Monto</th></tr></thead><tbody>';
+    var total=0;
+    data.forEach(function(c){html+='<tr><td>'+paFecha(c.fecha)+'</td><td>'+c.categoria+'</td><td>'+(c.descripcion||'—')+'</td><td style="text-align:right">'+paMoney(c.monto)+'</td></tr>';total+=c.monto;});
+    html+='<tr style="font-weight:700;background:var(--bg)"><td colspan="3">TOTAL</td><td style="text-align:right">'+paMoney(total)+'</td></tr></tbody></table>';
+    document.getElementById('pa-ord-det-tit').textContent='Costos — '+data[0].lote_nombre;
+    document.getElementById('pa-ord-det-sub').textContent='';
+    document.getElementById('pa-ord-det-body').innerHTML=html;
     document.getElementById('pa-ord-ejec-form').style.display='none';
     document.getElementById('pa-ord-det-ejec-btn').style.display='none';
-    paAbrirModal('pa-mb-orden-det');
+    document.getElementById('pa-mb-orden-det').classList.add('on');
   });
 }
 
-// ─── LOTES ───────────────────────────────────────────────────────
-function paLoadLotes() {
-  var secId = document.getElementById('pa-lot-sector-fil').value;
-  paFetch('/api/pa/lotes' + (secId ? '?sector_id='+secId : '')).then(function(r) {
-    PA.lotes = r.data || [];
-    var tb = document.getElementById('pa-lot-tbody');
-    if (!PA.lotes.length) { tb.innerHTML = '<tr><td colspan="6" class="emp">Sin lotes registrados</td></tr>'; return; }
-    var tipoLabel = { frutales:'Frutal', chacra_mercado:'Chacra Mercado', chacra_industria:'Chacra Industria' };
-    tb.innerHTML = PA.lotes.map(function(l) {
-      return '<tr>'
-        +'<td style="color:var(--mut);font-size:12px">'+l.sector_nombre+'</td>'
-        +'<td><strong>'+l.nombre+'</strong></td>'
-        +'<td style="text-align:right">'+l.hectareas+'</td>'
-        +'<td>'+(l.cultivo_actual || '<span style="color:var(--mut);font-style:italic">Sin asignar</span>')+'</td>'
+// ── LOTES ──
+function paLoadLotes(){
+  var secId=document.getElementById('pa-lot-sector-fil').value;
+  paF('/api/pa/lotes'+(secId?'?sector_id='+secId:'')).then(function(r){
+    PA.lotes=r.data||[];
+    var tb=document.getElementById('pa-lot-tbody');
+    if(!PA.lotes.length){tb.innerHTML='<tr><td colspan="6" class="emp">Sin lotes registrados</td></tr>';return;}
+    var tipoLabel={frutales:'Frutal',chacra_mercado:'Chacra Mercado',chacra_industria:'Chacra Industria'};
+    tb.innerHTML=PA.lotes.map(function(l){
+      return'<tr><td style="color:var(--mut);font-size:12px">'+l.sector_nombre+'</td><td><strong>'+l.nombre+'</strong></td><td style="text-align:right">'+l.hectareas+'</td>'
+        +'<td>'+(l.cultivo_actual||'<span style="color:var(--mut);font-style:italic">Sin asignar</span>')+'</td>'
         +'<td><span class="pa-badge pa-gris-bg">'+(tipoLabel[l.sector_tipo]||l.sector_tipo)+'</span></td>'
-        +'<td><button class="btn bo bs" onclick="paEditarCultivo('+l.id+',\''+l.nombre+'\')">🌱 Cultivo</button></td>'
-        +'</tr>';
+        +'<td><button class="btn bo bs" onclick="paEditarCultivo('+l.id+',\''+l.nombre.replace(/'/g,"\\'")+'\')">🌱 Cultivo</button></td></tr>';
     }).join('');
   });
 }
-
-function paAbrirNuevoLote() {
-  document.getElementById('pa-lot-nombre').value = '';
-  document.getElementById('pa-lot-ha').value = '0.5';
-  document.getElementById('pa-lot-notas').value = '';
-  paAbrirModal('pa-mb-lote');
+function paAbrirNuevoLote(){
+  document.getElementById('pa-lot-nombre').value='';
+  document.getElementById('pa-lot-ha').value='0.5';
+  document.getElementById('pa-lot-notas').value='';
+  // Poblar sectores
+  var sel=document.getElementById('pa-lot-sector');
+  sel.innerHTML=PA.sectores.map(function(s){return'<option value="'+s.id+'">'+s.nombre+'</option>';}).join('');
+  document.getElementById('pa-mb-lote').classList.add('on');
+}
+function paGuardarLote(){
+  var nombre=document.getElementById('pa-lot-nombre').value.trim();
+  var secId=document.getElementById('pa-lot-sector').value;
+  var ha=parseFloat(document.getElementById('pa-lot-ha').value)||0.5;
+  var notas=document.getElementById('pa-lot-notas').value.trim();
+  if(!nombre)return toast('Ingresá el nombre del lote','er');
+  paF('/api/pa/lotes',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({nombre,sector_id:secId,hectareas:ha,notas})})
+    .then(function(r){
+      if(r.ok){toast('Lote creado');document.getElementById('pa-mb-lote').classList.remove('on');paLoadLotes();paF('/api/pa/lotes').then(function(r2){PA.lotes=r2.data||[];});}
+      else toast(r.error||'Error','er');
+    });
 }
 
-function paGuardarLote() {
-  var nombre = document.getElementById('pa-lot-nombre').value.trim();
-  var secId  = document.getElementById('pa-lot-sector').value;
-  var ha     = parseFloat(document.getElementById('pa-lot-ha').value)||0.5;
-  var notas  = document.getElementById('pa-lot-notas').value.trim();
-  if (!nombre) return toast('Ingresá el nombre / llaves del lote','er');
-  paFetch('/api/pa/lotes', { method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({ nombre, sector_id: secId, hectareas: ha, notas })
-  }).then(function(r) {
-    if (r.ok) { toast('Lote creado'); paCerrarModal('pa-mb-lote'); paLoadLotes(); paFetch('/api/pa/lotes').then(function(r2){PA.lotes=r2.data||[];}); }
-    else toast(r.error||'Error','er');
-  });
-}
-
-// ─── Conectar navegación al módulo PA ────────────────────────────
-var _paNavHandlers = {
-  'pa-dashboard': paLoadDash,
-  'pa-calendario': paLoadCalendario,
-  'pa-insumos':   paLoadInsumos,
-  'pa-compras':   paLoadCompras,
-  'pa-ordenes':   paLoadOrdenes,
-  'pa-costos':    paLoadCostos,
-  'pa-lotes':     paLoadLotes
-};
-
-// Hook en el sistema de navegación existente
-var _origNavClick = document.querySelector('nav').onclick;
-document.querySelector('nav').addEventListener('click', function(e) {
-  var ni = e.target.closest('.ni');
-  if (!ni) return;
-  var sec = ni.dataset.sec;
-  if (_paNavHandlers[sec]) {
-    setTimeout(function(){ _paNavHandlers[sec](); }, 50);
-  }
-});
-
-// Init al cargar
-document.addEventListener('DOMContentLoaded', function() {
-  paInit();
-});
-// También init si DOMContentLoaded ya pasó
-if (document.readyState !== 'loading') paInit();
+// ── Init ──
+(function(){
+  if(document.readyState!=='loading') paInit();
+  else document.addEventListener('DOMContentLoaded',paInit);
+})();
 </script>
 
 </body>
