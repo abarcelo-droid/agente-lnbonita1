@@ -5032,12 +5032,8 @@ if(_inpGondola) _inpGondola.addEventListener('keydown', function(e){
   <div style="font-size:12px;font-weight:700;color:var(--burg);text-transform:uppercase;letter-spacing:.06em;border-top:1px solid var(--bor);padding-top:14px;margin-bottom:10px">
     Cultivos por campaña
   </div>
-  <!-- Verano -->
-  <div style="font-size:11px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">☀️ Verano (Jul → Jun)</div>
   <div class="fg" id="pa-cult-grid-verano"></div>
-  <!-- Invierno -->
-  <div style="font-size:11px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.06em;margin:12px 0 6px">❄️ Invierno</div>
-  <div class="fg" id="pa-cult-grid-invierno"></div>
+  <div id="pa-cult-grid-invierno"></div>
   <div class="ab-modal-footer">
     <button class="btn bo" onclick="document.getElementById('pa-mb-cultivo').classList.remove('on')">Cancelar</button>
     <button class="btn bb" onclick="paGuardarEdicionLote()">Guardar todo</button>
@@ -5127,16 +5123,17 @@ function paLoadCalendario(){
   // Orden intercalado: verano + invierno del mismo año
   // Invierno solo desde 2024
   var COLS = [
-    {key:'2021/22', label:'2021/22', tipo:'verano'},
-    {key:'2022/23', label:'2022/23', tipo:'verano'},
-    {key:'2023/24', label:'2023/24', tipo:'verano'},
+    {key:'2021/22',  label:'2021/22',  tipo:'verano'},
+    {key:'Inv 2022', label:'Inv 2022', tipo:'invierno'},
+    {key:'2022/23',  label:'2022/23',  tipo:'verano'},
+    {key:'Inv 2023', label:'Inv 2023', tipo:'invierno'},
+    {key:'2023/24',  label:'2023/24',  tipo:'verano'},
     {key:'Inv 2024', label:'Inv 2024', tipo:'invierno'},
-    {key:'2024/25', label:'2024/25', tipo:'verano'},
+    {key:'2024/25',  label:'2024/25',  tipo:'verano'},
     {key:'Inv 2025', label:'Inv 2025', tipo:'invierno'},
-    {key:'2025/26', label:'2025/26', tipo:'verano'},
+    {key:'2025/26',  label:'2025/26',  tipo:'verano'},
     {key:'Inv 2026', label:'Inv 2026', tipo:'invierno'},
-    {key:'2026/27', label:'2026/27', tipo:'verano'},
-    {key:'Inv 2027', label:'Inv 2027', tipo:'invierno'},
+    {key:'2026/27',  label:'2026/27',  tipo:'verano'},
   ];
 
   // Colores por cultivo
@@ -5297,34 +5294,24 @@ function paEditarCultivo(loteId,nombre){
     document.getElementById('pa-cult-edit-agua').value=l.red_agua||'';
     document.getElementById('pa-cult-edit-mapa').value=l.poligono_maps||'';
     document.getElementById('pa-cult-edit-notas').value=l.notas||'';
-    // Construir grids de cultivo
-    var campOrdV=['2021/22','2022/23','2023/24','2024/25','2025/26','2026/27'];
-    // Verano
-    var verano=PA.campañas.filter(function(c){return!c.tipo||c.tipo==='verano';}).sort(function(a,b){return campOrdV.indexOf(a.nombre)-campOrdV.indexOf(b.nombre);});
-    var vHTML='',vRows=[];
-    verano.forEach(function(c){
+    // Construir grid de cultivos en orden intercalado
+    var campOrdV=['2021/22','Inv 2022','2022/23','Inv 2023','2023/24','Inv 2024','2024/25','Inv 2025','2025/26','Inv 2026','2026/27'];
+    // Ordenar todas las campañas según el orden correcto
+    var todasCamps=PA.campañas.slice().sort(function(a,b){
+      var ia=campOrdV.indexOf(a.nombre), ib=campOrdV.indexOf(b.nombre);
+      if(ia<0)ia=99; if(ib<0)ib=99;
+      return ia-ib;
+    });
+    var allHTML='',allRows=[];
+    todasCamps.forEach(function(c){
       var cd=l.cultivos&&l.cultivos[c.nombre]?l.cultivos[c.nombre]:null;
       if(cd&&typeof cd==='string')cd={cultivo:cd,mes_siembra:null,mes_cosecha:null};
       var row=paBuildCampRowHTML(c,cd,paCampañaEsActualOFutura(c));
-      vHTML+=row.html;vRows.push(row);
+      allHTML+=row.html; allRows.push(row);
     });
-    document.getElementById('pa-cult-grid-verano').innerHTML=vHTML;
-    vRows.forEach(function(row){
-      var s=document.getElementById('pa-ec-'+row.key);if(s&&row.cultVal)s.value=row.cultVal;
-      var ms=document.getElementById('pa-ms-'+row.key);if(ms&&row.msVal)ms.value=row.msVal;
-      var mc=document.getElementById('pa-mc-'+row.key);if(mc&&row.mcVal)mc.value=row.mcVal;
-    });
-    // Invierno
-    var invierno=PA.campañas.filter(function(c){return c.tipo==='invierno';}).sort(function(a,b){return a.nombre.localeCompare(b.nombre);});
-    var iHTML='',iRows=[];
-    invierno.forEach(function(c){
-      var cd=l.cultivos&&l.cultivos[c.nombre]?l.cultivos[c.nombre]:null;
-      if(cd&&typeof cd==='string')cd={cultivo:cd,mes_siembra:null,mes_cosecha:null};
-      var row=paBuildCampRowHTML(c,cd,paCampañaEsActualOFutura(c));
-      iHTML+=row.html;iRows.push(row);
-    });
-    document.getElementById('pa-cult-grid-invierno').innerHTML=iHTML;
-    iRows.forEach(function(row){
+    document.getElementById('pa-cult-grid-verano').innerHTML=allHTML;
+    document.getElementById('pa-cult-grid-invierno').innerHTML=''; // vaciar, todo va en verano
+    allRows.forEach(function(row){
       var s=document.getElementById('pa-ec-'+row.key);if(s&&row.cultVal)s.value=row.cultVal;
       var ms=document.getElementById('pa-ms-'+row.key);if(ms&&row.msVal)ms.value=row.msVal;
       var mc=document.getElementById('pa-mc-'+row.key);if(mc&&row.mcVal)mc.value=row.mcVal;
@@ -5619,11 +5606,11 @@ function paAbrirNuevoLote(){
   document.getElementById('pa-lot-notas').value='';
   // Poblar campañas — si ya están en memoria las usa, si no las pide
   function paRenderCampañasModal(campañas) {
-    var campOrd=['2021/22','2022/23','2023/24','2024/25','2025/26','2026/27'];
+    var campOrd=['2021/22','Inv 2022','2022/23','Inv 2023','2023/24','Inv 2024','2024/25','Inv 2025','2025/26','Inv 2026','2026/27'];
     var campDisp=campañas.slice().sort(function(a,b){return campOrd.indexOf(a.nombre)-campOrd.indexOf(b.nombre);});
     var cultivoOpts='<option value="">—</option><optgroup label="Frutales"><option value="Uva Superior">Uva Superior</option><option value="Uva Red Globe">Uva Red Globe</option><option value="Uva Cardinal">Uva Cardinal</option><option value="Uva Cereza">Uva Cereza</option><option value="Damasco">Damasco</option><option value="Durazno">Durazno</option><option value="Ciruela">Ciruela</option></optgroup><optgroup label="Chacra Mercado"><option value="Melón">Melón</option><option value="Cebolla">Cebolla</option><option value="Brócoli">Brócoli</option><option value="Ajo">Ajo</option><option value="Papa">Papa</option><option value="Zapallo">Zapallo</option></optgroup><optgroup label="Chacra Industria"><option value="Tomate Industria">Tomate Industria</option></optgroup><option value="Barbecho">Barbecho</option><option value="Sin uso">Sin uso</option>';
     document.getElementById('pa-lot-cultivos-grid').innerHTML=campDisp.map(function(c){
-      return'<div class="fl"><label>Temporada '+c.nombre+(c.activa?' ★':'')+' </label><select id="pa-lot-cult-'+c.nombre.replace('/','_')+'">'+cultivoOpts+'</select></div>';
+      return'<div class="fl"><label>Temporada '+c.nombre+(c.activa?' ★':'')+' </label><select id="pa-lot-cult-'+c.nombre.replace('/','_').replace(/ /g,'_')+'">'+cultivoOpts+'</select></div>';
     }).join('');
   }
   if(PA.campañas.length) {
@@ -5649,7 +5636,7 @@ function paGuardarLote(){
   // Recolectar cultivos por campaña
   var cultivos={};
   PA.campañas.forEach(function(c){
-    var key=c.nombre.replace('/','_');
+    var key=c.nombre.replace('/','_').replace(/ /g,'_');
     var sel=document.getElementById('pa-lot-cult-'+key);
     if(sel&&sel.value)cultivos[c.nombre]=sel.value;
   });
