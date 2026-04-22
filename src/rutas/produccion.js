@@ -21,7 +21,7 @@ function requireAuth(req, res, next) {
 // CAMPAÑAS
 // ─────────────────────────────────────────────────────────────────────────
 
-router.get('/campañas', requireAuth, (req, res) => {
+router.get('/campanas', requireAuth, (req, res) => {
   const db = getDb();
   try {
     const data = db.prepare("SELECT * FROM pa_campañas ORDER BY fecha_inicio DESC").all();
@@ -29,7 +29,7 @@ router.get('/campañas', requireAuth, (req, res) => {
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
-router.post('/campañas', requireAuth, (req, res) => {
+router.post('/campanas', requireAuth, (req, res) => {
   const db = getDb();
   const { nombre, fecha_inicio, fecha_fin } = req.body;
   if (!nombre || !fecha_inicio || !fecha_fin)
@@ -44,7 +44,7 @@ router.post('/campañas', requireAuth, (req, res) => {
   }
 });
 
-router.patch('/campañas/:id/activar', requireAuth, (req, res) => {
+router.patch('/campanas/:id/activar', requireAuth, (req, res) => {
   const db = getDb();
   try {
     db.prepare("UPDATE pa_campañas SET activa = 0").run();

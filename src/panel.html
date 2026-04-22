@@ -4981,7 +4981,7 @@ function paBadgeEstado(e){var m={borrador:['pa-gris-bg','Borrador'],emitida:['pa
 function paBadgeTipo(t){var m={fertilizante:['pa-verde-bg','Fertilizante'],agroquimico:['pa-azul-bg','Agroquímico'],semilla:['pa-amarillo-bg','Semilla'],otro:['pa-gris-bg','Otro']};var d=m[t]||['pa-gris-bg',t];return'<span class="pa-badge '+d[0]+'">'+d[1]+'</span>';}
 
 function paInit(){
-  paF('/api/pa/campañas').then(function(r){
+  paF('/api/pa/campanas').then(function(r){
     PA.campañas=r.data||[];
     var opts=PA.campañas.map(function(c){return'<option value="'+c.id+'"'+(c.activa?' selected':'')+'>'+c.nombre+'</option>';}).join('');
     ['cal-campaña-sel','pa-cos-campaña'].forEach(function(id){var el=document.getElementById(id);if(el)el.innerHTML='<option value="">Campaña activa</option>'+opts;});
@@ -5202,7 +5202,7 @@ function paAbrirNuevoLote(){
     paRenderCampañasModal(PA.campañas);
     document.getElementById('pa-mb-lote').classList.add('on');
   } else {
-    paF('/api/pa/campañas').then(function(r){
+    paF('/api/pa/campanas').then(function(r){
       PA.campañas=r.data||[];
       paRenderCampañasModal(PA.campañas);
       document.getElementById('pa-mb-lote').classList.add('on');
