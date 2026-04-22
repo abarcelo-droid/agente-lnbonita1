@@ -243,28 +243,56 @@ router.get('/insumos', requireAuth, (req, res) => {
 
 router.post('/insumos', requireAuth, (req, res) => {
   const db = getDb();
-  const { nombre, tipo, unidad, stock_minimo, notas } = req.body;
+  const { nombre, tipo, unidad, stock_minimo, componente_madre, precio_ref_usd, notas } = req.body;
   if (!nombre || !tipo || !unidad)
     return res.status(400).json({ ok: false, error: 'Nombre, tipo y unidad requeridos' });
   try {
-    const r = db.prepare("INSERT INTO pa_insumos (nombre, tipo, unidad, stock_minimo, notas) VALUES (?,?,?,?,?)")
-      .run(nombre, tipo, unidad, stock_minimo || 0, notas || null);
+    const r = db.prepare(`
+      INSERT INTO pa_insumos (nombre, tipo, unidad, stock_minimo, componente_madre, precio_ref_usd, notas)
+      VALUES (?,?,?,?,?,?,?)
+    `).run(nombre, tipo, unidad, stock_minimo||0, componente_madre||null, precio_ref_usd||null, notas||null);
     res.json({ ok: true, id: r.lastInsertRowid });
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
 router.patch('/insumos/:id', requireAuth, (req, res) => {
   const db = getDb();
-  const { nombre, tipo, unidad, stock_minimo, activo, notas } = req.body;
+  const { nombre, tipo, unidad, stock_minimo, activo, componente_madre, precio_ref_usd, notas } = req.body;
   try {
     const cur = db.prepare("SELECT * FROM pa_insumos WHERE id=?").get(req.params.id);
     if (!cur) return res.status(404).json({ ok: false, error: 'Insumo no encontrado' });
-    db.prepare("UPDATE pa_insumos SET nombre=?, tipo=?, unidad=?, stock_minimo=?, activo=?, notas=? WHERE id=?")
+    db.prepare(`UPDATE pa_insumos SET nombre=?, tipo=?, unidad=?, stock_minimo=?, activo=?,
+                componente_madre=?, precio_ref_usd=?, notas=? WHERE id=?`)
       .run(nombre||cur.nombre, tipo||cur.tipo, unidad||cur.unidad, stock_minimo??cur.stock_minimo,
-           activo!==undefined?activo:cur.activo, notas||cur.notas, req.params.id);
+           activo!==undefined?activo:cur.activo,
+           componente_madre!==undefined?componente_madre:cur.componente_madre,
+           precio_ref_usd!==undefined?precio_ref_usd:cur.precio_ref_usd,
+           notas!==undefined?notas:cur.notas, req.params.id);
     res.json({ ok: true });
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
+
+// Upload ficha técnica PDF
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+const __dirnamePA = path.dirname(fileURLToPath(import.meta.url));
+
+router.post('/insumos/:id/ficha', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const { filename, data } = req.body; // data = base64
+    if (!data) return res.status(400).json({ ok: false, error: 'Sin datos' });
+    const dir = path.join(__dirnamePA, '../../data/fichas');
+    fs.mkdirSync(dir, { recursive: true });
+    const fname = `insumo_${req.params.id}_${Date.now()}.pdf`;
+    const fpath = path.join(dir, fname);
+    fs.writeFileSync(fpath, Buffer.from(data, 'base64'));
+    db.prepare("UPDATE pa_insumos SET ficha_tecnica_path=? WHERE id=?").run('/data/fichas/'+fname, req.params.id);
+    res.json({ ok: true, path: '/data/fichas/'+fname });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
 
 // ─────────────────────────────────────────────────────────────────────────
 // PROVEEDORES DE INSUMOS

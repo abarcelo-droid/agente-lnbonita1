@@ -1201,12 +1201,17 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
 <button class="btn bb" onclick="paAbrirNuevoInsumo()">+ Nuevo insumo</button></div>
 <div class="filt">
   <select id="pa-ins-tipo-fil" onchange="paLoadInsumos()">
-    <option value="">Todos los tipos</option><option value="fertilizante">Fertilizantes</option>
-    <option value="agroquimico">Agroquímicos</option><option value="semilla">Semillas</option><option value="otro">Otros</option>
+    <option value="">Todos los tipos</option>
+    <option value="fertilizante">Fertilizantes</option>
+    <option value="fungicida">Fungicidas</option>
+    <option value="insecticida">Insecticidas</option>
+    <option value="agroquimico">Agroquímicos</option>
+    <option value="semilla">Semillas</option>
+    <option value="otro">Otros</option>
   </select>
 </div>
 <div class="pa-wrap"><div class="ab-table-wrap"><table class="pa-tbl">
-  <thead><tr><th>Nombre</th><th>Tipo</th><th>Unidad</th><th style="text-align:right">Stock actual</th><th style="text-align:right">Stock mínimo</th><th>Estado</th><th></th></tr></thead>
+  <thead><tr><th>Nombre</th><th>Componente</th><th>Tipo</th><th>Unidad</th><th style="text-align:right">Stock actual</th><th style="text-align:right">USD/unit</th><th>Estado</th><th></th></tr></thead>
   <tbody id="pa-ins-tbody"><tr><td colspan="7" class="emp">Cargando...</td></tr></tbody>
 </table></div></div>
 </div>
@@ -4821,15 +4826,43 @@ if(_inpGondola) _inpGondola.addEventListener('keydown', function(e){
 
 <!-- Modal insumo -->
 <div class="ab-modal-overlay" id="pa-mb-insumo">
-<div class="ab-modal" style="width:480px">
+<div class="ab-modal" style="width:560px">
   <div class="mhd"><div class="mht" id="pa-ins-modal-tit">Nuevo Insumo</div><button class="mcl" onclick="document.getElementById('pa-mb-insumo').classList.remove('on')">×</button></div>
   <input type="hidden" id="pa-ins-id">
   <div class="fg">
-    <div class="fl ff"><label>Nombre</label><input id="pa-ins-nombre" placeholder="Ej: Urea 46%"></div>
-    <div class="fl"><label>Tipo</label><select id="pa-ins-tipo"><option value="fertilizante">Fertilizante</option><option value="agroquimico">Agroquímico</option><option value="semilla">Semilla</option><option value="otro">Otro</option></select></div>
-    <div class="fl"><label>Unidad</label><select id="pa-ins-unidad"><option value="kg">kg</option><option value="lt">litros</option><option value="unidad">unidad</option></select></div>
+    <div class="fl ff"><label>Nombre comercial</label><input id="pa-ins-nombre" placeholder="Ej: Urea 46%, Roundup, Karate..."></div>
+    <div class="fl ff"><label>Componente madre / Principio activo</label><input id="pa-ins-componente" placeholder="Ej: Glifosato, Clorpirifos, NPK 15-15-15..."></div>
+    <div class="fl"><label>Tipo</label>
+      <select id="pa-ins-tipo">
+        <option value="fertilizante">Fertilizante</option>
+        <option value="fungicida">Fungicida</option>
+        <option value="insecticida">Insecticida</option>
+        <option value="agroquimico">Agroquímico (otro)</option>
+        <option value="semilla">Semilla</option>
+        <option value="otro">Otro</option>
+      </select>
+    </div>
+    <div class="fl"><label>Unidad</label>
+      <select id="pa-ins-unidad">
+        <option value="kg">kg</option>
+        <option value="lt">litros</option>
+        <option value="unidad">unidad</option>
+      </select>
+    </div>
     <div class="fl"><label>Stock mínimo</label><input type="number" id="pa-ins-stock-min" value="0" min="0"></div>
+    <div class="fl"><label>Precio referencia (USD / unidad)</label>
+      <div style="display:flex;align-items:center;gap:6px">
+        <span style="font-size:13px;color:var(--mut);font-weight:600">USD</span>
+        <input type="number" id="pa-ins-precio-usd" placeholder="0.00" step="0.01" min="0" style="flex:1">
+      </div>
+    </div>
     <div class="fl ff"><label>Notas</label><textarea id="pa-ins-notas" rows="2"></textarea></div>
+    <!-- Ficha técnica -->
+    <div class="fl ff" id="pa-ins-ficha-wrap">
+      <label>Ficha técnica (PDF)</label>
+      <div id="pa-ins-ficha-actual" style="display:none;margin-bottom:6px;font-size:12px;color:var(--mut)"></div>
+      <input type="file" id="pa-ins-ficha-file" accept="application/pdf" style="font-size:12px">
+    </div>
   </div>
   <div class="ab-modal-footer">
     <button class="btn bo" onclick="document.getElementById('pa-mb-insumo').classList.remove('on')">Cancelar</button>
@@ -5023,28 +5056,40 @@ function paLoadDash(){
 }
 
 function paLoadCalendario(){
-  // Orden de campañas a mostrar como columnas
-  var CAMPS_VERANO  = ['2021/22','2022/23','2023/24','2024/25','2025/26','2026/27'];
-  var CAMPS_INVIERNO= ['Inv 2022','Inv 2023','Inv 2024','Inv 2025','Inv 2026','Inv 2027'];
   var MESES = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
+
+  // Orden intercalado: verano + invierno del mismo año
+  // Invierno solo desde 2024
+  var COLS = [
+    {key:'2021/22', label:'2021/22', tipo:'verano'},
+    {key:'2022/23', label:'2022/23', tipo:'verano'},
+    {key:'2023/24', label:'2023/24', tipo:'verano'},
+    {key:'Inv 2024', label:'Inv 2024', tipo:'invierno'},
+    {key:'2024/25', label:'2024/25', tipo:'verano'},
+    {key:'Inv 2025', label:'Inv 2025', tipo:'invierno'},
+    {key:'2025/26', label:'2025/26', tipo:'verano'},
+    {key:'Inv 2026', label:'Inv 2026', tipo:'invierno'},
+    {key:'2026/27', label:'2026/27', tipo:'verano'},
+    {key:'Inv 2027', label:'Inv 2027', tipo:'invierno'},
+  ];
 
   // Colores por cultivo
   var CULT_COLOR = {
-    'Vid':             '#fef9c3|#854d0e',
-    'Damasco':         '#fef9c3|#854d0e',
-    'Durazno':         '#fef9c3|#854d0e',
-    'Ciruela':         '#fef9c3|#854d0e',
-    'Melón':           '#dcfce7|#166534',
-    'Cebolla':         '#dbeafe|#1e40af',
-    'Brócoli':         '#d1fae5|#065f46',
-    'Ajo':             '#ede9fe|#5b21b6',
-    'Papa':            '#fef3c7|#92400e',
-    'Zapallo':         '#fee2e2|#991b1b',
-    'Tomate Industria':'#fee2e2|#991b1b',
-    'Barbecho':        '#f1f5f9|#64748b',
-    'Sin uso':         '#f1f5f9|#94a3b8',
+    'Damasco':         {bg:'#fed7aa',fg:'#9a3412'},   // naranja
+    'Durazno':         {bg:'#ffedd5',fg:'#c2410c'},   // naranja suave
+    'Melón':           {bg:'#fef08a',fg:'#713f12'},   // amarillo
+    'Brócoli':         {bg:'#bbf7d0',fg:'#14532d'},   // verde
+    'Cebolla':         {bg:'#d6c5a0',fg:'#5c3d0a'},   // marrón
+    'Vid':             {bg:'#e9d5ff',fg:'#6b21a8'},   // bordo/violeta
+    'Uva':             {bg:'#e9d5ff',fg:'#6b21a8'},
+    'Tomate Industria':{bg:'#fecaca',fg:'#991b1b'},   // rojo
+    'Ajo':             {bg:'#f3e8ff',fg:'#6b21a8'},
+    'Papa':            {bg:'#fef3c7',fg:'#92400e'},
+    'Zapallo':         {bg:'#fed7aa',fg:'#9a3412'},
+    'Barbecho':        {bg:'#f1f5f9',fg:'#64748b'},
+    'Sin uso':         {bg:'#f8fafc',fg:'#94a3b8'},
   };
-  function cultColor(c){ var p=(CULT_COLOR[c]||'#e0f2fe|#075985').split('|'); return{bg:p[0],fg:p[1]}; }
+  function cultColor(c){return CULT_COLOR[c]||{bg:'#e0f2fe',fg:'#075985'};}
 
   paF('/api/pa/lotes').then(function(r){
     var lotes=r.data||[];
@@ -5058,82 +5103,57 @@ function paLoadCalendario(){
       fincas[f].push(l);
     });
 
-    // Cabecera de columnas (verano + invierno)
-    var allCamps = CAMPS_VERANO.concat(CAMPS_INVIERNO);
-    // Agregar Inv 2027 si no existe
-    if(allCamps.indexOf('Inv 2027')<0) allCamps.push('Inv 2027');
+    var html='<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px;min-width:1100px">';
 
-    var html='<div style="overflow-x:auto">';
-    html+='<table style="width:100%;border-collapse:collapse;font-size:12px;min-width:1200px">';
-
-    // Fila cabecera
+    // Cabecera
     html+='<thead><tr>';
-    html+='<th style="position:sticky;left:0;background:#1a3a5c;color:#fff;padding:10px 14px;text-align:left;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;min-width:160px;z-index:2">Finca / Lote</th>';
-    html+='<th style="background:#1a3a5c;color:rgba(255,255,255,.5);padding:8px 10px;text-align:center;font-size:10px;font-weight:500;white-space:nowrap;min-width:30px">Ha</th>';
-    // Columnas verano
-    CAMPS_VERANO.forEach(function(c){
-      html+='<th style="background:#1a3a5c;color:#fff;padding:8px 10px;text-align:center;font-size:11px;font-weight:700;min-width:90px;border-left:1px solid rgba(255,255,255,.15)">☀️ '+c+'</th>';
-    });
-    // Columnas invierno
-    CAMPS_INVIERNO.concat(['Inv 2027']).forEach(function(c){
-      html+='<th style="background:#0f3460;color:#93c5fd;padding:8px 10px;text-align:center;font-size:11px;font-weight:700;min-width:90px;border-left:1px solid rgba(255,255,255,.1)">❄️ '+c+'</th>';
+    html+='<th style="position:sticky;left:0;z-index:2;background:#1a3a5c;color:#fff;padding:10px 14px;text-align:left;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;min-width:140px">Finca / Lote</th>';
+    html+='<th style="background:#1a3a5c;color:rgba(255,255,255,.5);padding:8px 6px;text-align:center;font-size:10px;min-width:28px">Ha</th>';
+    COLS.forEach(function(c){
+      var esInv=c.tipo==='invierno';
+      html+='<th style="background:'+(esInv?'#0f3460':'#1a3a5c')+';color:'+(esInv?'#93c5fd':'#fff')+';padding:8px 6px;text-align:center;font-size:11px;font-weight:700;min-width:80px;border-left:1px solid rgba(255,255,255,.12)">'
+        +(esInv?'❄️ ':'☀️ ')+c.label+'</th>';
     });
     html+='</tr></thead><tbody>';
 
-    // Filas por finca → lote
+    // Filas
     Object.keys(fincas).sort().forEach(function(finca){
       var lotesF=fincas[finca];
-      // Fila título finca
-      var totalCols = 2 + CAMPS_VERANO.length + CAMPS_INVIERNO.length + 1;
-      html+='<tr><td colspan="'+totalCols+'" style="background:#e8f0f8;padding:6px 14px;font-size:11px;font-weight:700;color:#1a3a5c;text-transform:uppercase;letter-spacing:.06em;border-top:2px solid var(--bor2)">📍 '+finca+'</td></tr>';
+      // Separador de finca
+      html+='<tr><td colspan="'+(2+COLS.length)+'" style="background:#e8f0f8;padding:5px 14px;font-size:11px;font-weight:700;color:#1a3a5c;text-transform:uppercase;letter-spacing:.06em;border-top:2px solid #c5d5e8">📍 '+finca+'</td></tr>';
 
       lotesF.forEach(function(l){
         html+='<tr style="border-bottom:1px solid var(--bor)">';
-        // Columna finca/lote (sticky)
-        html+='<td style="position:sticky;left:0;background:var(--sur);padding:8px 14px;font-weight:600;z-index:1;border-right:2px solid var(--bor2)">'+l.nombre+'<span style="display:block;font-size:10px;color:var(--mut);font-weight:400">'+(l.red_agua?'💧 '+l.red_agua:'')+'</span></td>';
+        // Columna finca/lote (sticky) — sin red de agua
+        html+='<td style="position:sticky;left:0;background:var(--sur);padding:7px 12px;z-index:1;border-right:2px solid var(--bor2)">'
+          +'<div style="font-size:11px;color:var(--mut);font-weight:500">'+finca+'</div>'
+          +'<div style="font-weight:700;font-size:13px">'+l.nombre+'</div>'
+          +'</td>';
         // Ha
-        html+='<td style="padding:6px 10px;text-align:center;color:var(--mut);font-size:11px">'+l.hectareas+'</td>';
+        html+='<td style="padding:4px 6px;text-align:center;color:var(--mut);font-size:11px">'+l.hectareas+'</td>';
 
-        // Celdas verano
-        CAMPS_VERANO.forEach(function(c){
-          var cd=l.cultivos&&l.cultivos[c];
+        // Celdas por campaña
+        COLS.forEach(function(c){
+          var cd=l.cultivos&&l.cultivos[c.key];
           var cult=cd?cd.cultivo:'';
           var col=cultColor(cult);
+          var esInv=c.tipo==='invierno';
+          var bgCelda=esInv?'#f8fbff':'';
+          var bordeCelda=esInv?'border-left:1px solid #bfdbfe':'border-left:1px solid var(--bor)';
           var meses='';
           if(cd&&cd.mes_siembra&&cd.mes_cosecha){
-            meses='<div style="font-size:9px;margin-top:2px;opacity:.8">'+MESES[cd.mes_siembra-1]+' → '+MESES[cd.mes_cosecha-1]+'</div>';
+            meses='<div style="font-size:9px;margin-top:2px;opacity:.75">'+MESES[cd.mes_siembra-1]+' → '+MESES[cd.mes_cosecha-1]+'</div>';
           }
           if(cult){
-            html+='<td style="padding:4px 6px;text-align:center;border-left:1px solid var(--bor)">'
-              +'<div style="background:'+col.bg+';color:'+col.fg+';border-radius:5px;padding:4px 6px;font-size:11px;font-weight:500;cursor:pointer;line-height:1.3" onclick="paEditarCultivo('+l.id+',\''+l.nombre.replace(/'/g,"\\'")+'\')">'+cult+meses+'</div>'
+            html+='<td style="padding:3px 4px;text-align:center;'+bordeCelda+';background:'+bgCelda+'">'
+              +'<div style="background:'+col.bg+';color:'+col.fg+';border-radius:5px;padding:4px 5px;font-size:11px;font-weight:600;cursor:pointer;line-height:1.3;white-space:normal" onclick="paEditarCultivo('+l.id+',\''+l.nombre.replace(/'/g,"\\'")+'\')">'+cult+meses+'</div>'
               +'</td>';
           } else {
-            html+='<td style="padding:4px 6px;text-align:center;border-left:1px solid var(--bor)">'
-              +'<div style="color:var(--mut);font-size:10px;cursor:pointer;padding:4px;border:1px dashed var(--bor2);border-radius:5px" onclick="paEditarCultivo('+l.id+',\''+l.nombre.replace(/'/g,"\\'")+'\')">—</div>'
+            html+='<td style="padding:3px 4px;text-align:center;'+bordeCelda+';background:'+bgCelda+'">'
+              +'<div style="color:'+(esInv?'#bfdbfe':'var(--bor2)')+';font-size:10px;cursor:pointer;padding:3px;border:1px dashed '+(esInv?'#bfdbfe':'var(--bor2)')+';border-radius:5px" onclick="paEditarCultivo('+l.id+',\''+l.nombre.replace(/'/g,"\\'")+'\')">—</div>'
               +'</td>';
           }
         });
-
-        // Celdas invierno
-        CAMPS_INVIERNO.concat(['Inv 2027']).forEach(function(c){
-          var cd=l.cultivos&&l.cultivos[c];
-          var cult=cd?cd.cultivo:'';
-          var col=cultColor(cult);
-          var meses='';
-          if(cd&&cd.mes_siembra&&cd.mes_cosecha){
-            meses='<div style="font-size:9px;margin-top:2px;opacity:.8">'+MESES[cd.mes_siembra-1]+' → '+MESES[cd.mes_cosecha-1]+'</div>';
-          }
-          if(cult){
-            html+='<td style="padding:4px 6px;text-align:center;border-left:1px solid #dbeafe;background:#f8fbff">'
-              +'<div style="background:'+col.bg+';color:'+col.fg+';border-radius:5px;padding:4px 6px;font-size:11px;font-weight:500;cursor:pointer;line-height:1.3" onclick="paEditarCultivo('+l.id+',\''+l.nombre.replace(/'/g,"\\'")+'\')">'+cult+meses+'</div>'
-              +'</td>';
-          } else {
-            html+='<td style="padding:4px 6px;text-align:center;border-left:1px solid #dbeafe;background:#f8fbff">'
-              +'<div style="color:#bfdbfe;font-size:10px;cursor:pointer;padding:4px;border:1px dashed #bfdbfe;border-radius:5px" onclick="paEditarCultivo('+l.id+',\''+l.nombre.replace(/'/g,"\\'")+'\')">—</div>'
-              +'</td>';
-          }
-        });
-
         html+='</tr>';
       });
     });
@@ -5262,22 +5282,108 @@ function paGuardarEdicionLote(){
     });
 }
 
+function paBadgeTipo(t){
+  var m={
+    fertilizante:['pa-verde-bg','Fertilizante'],
+    fungicida:['pa-azul-bg','Fungicida'],
+    insecticida:['pa-rojo-bg','Insecticida'],
+    agroquimico:['pa-amarillo-bg','Agroquímico'],
+    semilla:['pa-amarillo-bg','Semilla'],
+    otro:['pa-gris-bg','Otro']
+  };
+  var d=m[t]||['pa-gris-bg',t];
+  return'<span class="pa-badge '+d[0]+'">'+d[1]+'</span>';
+}
 function paLoadInsumos(){
   var tipo=document.getElementById('pa-ins-tipo-fil').value;
   paF('/api/pa/insumos'+(tipo?'?tipo='+tipo:'')).then(function(r){
     PA.insumos=r.data||[];var tb=document.getElementById('pa-ins-tbody');
-    if(!PA.insumos.length){tb.innerHTML='<tr><td colspan="7" class="emp">Sin insumos</td></tr>';return;}
-    tb.innerHTML=PA.insumos.map(function(i){var bajo=i.stock_minimo>0&&i.stock_actual<=i.stock_minimo;
-      return'<tr><td><strong>'+i.nombre+'</strong></td><td>'+paBadgeTipo(i.tipo)+'</td><td>'+i.unidad+'</td><td style="text-align:right"><strong>'+(i.stock_actual||0)+' '+i.unidad+'</strong></td><td style="text-align:right">'+(i.stock_minimo||0)+' '+i.unidad+'</td><td>'+(bajo?'<span class="pa-badge pa-rojo-bg">⚠ Bajo</span>':'<span class="pa-badge pa-verde-bg">OK</span>')+'</td><td><button class="btn bo bs" onclick="paEditarInsumo('+i.id+')">✏</button></td></tr>';
+    if(!PA.insumos.length){tb.innerHTML='<tr><td colspan="8" class="emp">Sin insumos</td></tr>';return;}
+    tb.innerHTML=PA.insumos.map(function(i){
+      var bajo=i.stock_minimo>0&&i.stock_actual<=i.stock_minimo;
+      var ficha=i.ficha_tecnica_path?'<a href="'+i.ficha_tecnica_path+'" target="_blank" style="font-size:11px;color:var(--burg)">📄 Ficha</a>':'';
+      return'<tr>'
+        +'<td><strong>'+i.nombre+'</strong>'+(ficha?'<br>'+ficha:'')+'</td>'
+        +'<td style="font-size:11px;color:var(--mut)">'+(i.componente_madre||'—')+'</td>'
+        +'<td>'+paBadgeTipo(i.tipo)+'</td>'
+        +'<td>'+i.unidad+'</td>'
+        +'<td style="text-align:right"><strong>'+(i.stock_actual||0)+' '+i.unidad+'</strong></td>'
+        +'<td style="text-align:right">'+(i.precio_ref_usd?'USD '+Number(i.precio_ref_usd).toFixed(2):'—')+'</td>'
+        +'<td>'+(bajo?'<span class="pa-badge pa-rojo-bg">⚠ Bajo</span>':'<span class="pa-badge pa-verde-bg">OK</span>')+'</td>'
+        +'<td><button class="btn bo bs" onclick="paEditarInsumo('+i.id+')">✏</button></td>'
+        +'</tr>';
     }).join('');
   });
 }
-function paAbrirNuevoInsumo(){document.getElementById('pa-ins-id').value='';document.getElementById('pa-ins-nombre').value='';document.getElementById('pa-ins-tipo').value='fertilizante';document.getElementById('pa-ins-unidad').value='kg';document.getElementById('pa-ins-stock-min').value=0;document.getElementById('pa-ins-notas').value='';document.getElementById('pa-ins-modal-tit').textContent='Nuevo Insumo';document.getElementById('pa-mb-insumo').classList.add('on');}
-function paEditarInsumo(id){var ins=PA.insumos.find(function(i){return i.id===id;});if(!ins)return;document.getElementById('pa-ins-id').value=ins.id;document.getElementById('pa-ins-nombre').value=ins.nombre;document.getElementById('pa-ins-tipo').value=ins.tipo;document.getElementById('pa-ins-unidad').value=ins.unidad;document.getElementById('pa-ins-stock-min').value=ins.stock_minimo||0;document.getElementById('pa-ins-notas').value=ins.notas||'';document.getElementById('pa-ins-modal-tit').textContent='Editar Insumo';document.getElementById('pa-mb-insumo').classList.add('on');}
+function paAbrirNuevoInsumo(){
+  document.getElementById('pa-ins-id').value='';
+  document.getElementById('pa-ins-nombre').value='';
+  document.getElementById('pa-ins-componente').value='';
+  document.getElementById('pa-ins-tipo').value='fertilizante';
+  document.getElementById('pa-ins-unidad').value='kg';
+  document.getElementById('pa-ins-stock-min').value=0;
+  document.getElementById('pa-ins-precio-usd').value='';
+  document.getElementById('pa-ins-notas').value='';
+  document.getElementById('pa-ins-ficha-file').value='';
+  document.getElementById('pa-ins-ficha-actual').style.display='none';
+  document.getElementById('pa-ins-modal-tit').textContent='Nuevo Insumo';
+  document.getElementById('pa-mb-insumo').classList.add('on');
+}
+function paEditarInsumo(id){
+  var ins=PA.insumos.find(function(i){return i.id===id;});
+  if(!ins)return;
+  document.getElementById('pa-ins-id').value=ins.id;
+  document.getElementById('pa-ins-nombre').value=ins.nombre;
+  document.getElementById('pa-ins-componente').value=ins.componente_madre||'';
+  document.getElementById('pa-ins-tipo').value=ins.tipo;
+  document.getElementById('pa-ins-unidad').value=ins.unidad;
+  document.getElementById('pa-ins-stock-min').value=ins.stock_minimo||0;
+  document.getElementById('pa-ins-precio-usd').value=ins.precio_ref_usd||'';
+  document.getElementById('pa-ins-notas').value=ins.notas||'';
+  document.getElementById('pa-ins-ficha-file').value='';
+  var fichEl=document.getElementById('pa-ins-ficha-actual');
+  if(ins.ficha_tecnica_path){
+    fichEl.innerHTML='📄 <a href="'+ins.ficha_tecnica_path+'" target="_blank" style="color:var(--burg)">Ver ficha actual</a>';
+    fichEl.style.display='block';
+  } else { fichEl.style.display='none'; }
+  document.getElementById('pa-ins-modal-tit').textContent='Editar Insumo';
+  document.getElementById('pa-mb-insumo').classList.add('on');
+}
 function paGuardarInsumo(){
-  var id=document.getElementById('pa-ins-id').value,nombre=document.getElementById('pa-ins-nombre').value.trim(),tipo=document.getElementById('pa-ins-tipo').value,unidad=document.getElementById('pa-ins-unidad').value,stMin=parseFloat(document.getElementById('pa-ins-stock-min').value)||0,notas=document.getElementById('pa-ins-notas').value.trim();
+  var id=document.getElementById('pa-ins-id').value;
+  var nombre=document.getElementById('pa-ins-nombre').value.trim();
+  var componente=document.getElementById('pa-ins-componente').value.trim();
+  var tipo=document.getElementById('pa-ins-tipo').value;
+  var unidad=document.getElementById('pa-ins-unidad').value;
+  var stMin=parseFloat(document.getElementById('pa-ins-stock-min').value)||0;
+  var precioUsd=parseFloat(document.getElementById('pa-ins-precio-usd').value)||null;
+  var notas=document.getElementById('pa-ins-notas').value.trim();
+  var fichaFile=document.getElementById('pa-ins-ficha-file').files[0];
   if(!nombre)return toast('Ingresá el nombre','er');
-  paF(id?'/api/pa/insumos/'+id:'/api/pa/insumos',{method:id?'PATCH':'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({nombre,tipo,unidad,stock_minimo:stMin,notas})}).then(function(r){if(r.ok){toast(id?'Actualizado':'Insumo creado');document.getElementById('pa-mb-insumo').classList.remove('on');paLoadInsumos();paF('/api/pa/insumos').then(function(r2){PA.insumos=r2.data||[];});}else toast(r.error||'Error','er');});
+  var body={nombre,tipo,unidad,stock_minimo:stMin,componente_madre:componente||null,precio_ref_usd:precioUsd,notas};
+  paF(id?'/api/pa/insumos/'+id:'/api/pa/insumos',{method:id?'PATCH':'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
+    .then(function(r){
+      if(!r.ok)return toast(r.error||'Error','er');
+      var insId=id||r.id;
+      // Si hay PDF, subirlo
+      if(fichaFile){
+        var reader=new FileReader();
+        reader.onload=function(e){
+          var b64=e.target.result.split(',')[1];
+          paF('/api/pa/insumos/'+insId+'/ficha',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({data:b64})})
+            .then(function(rf){
+              toast(id?'Insumo actualizado + ficha subida':'Insumo creado + ficha subida');
+              document.getElementById('pa-mb-insumo').classList.remove('on');
+              paLoadInsumos();paF('/api/pa/insumos').then(function(r2){PA.insumos=r2.data||[];});
+            });
+        };
+        reader.readAsDataURL(fichaFile);
+      } else {
+        toast(id?'Insumo actualizado':'Insumo creado');
+        document.getElementById('pa-mb-insumo').classList.remove('on');
+        paLoadInsumos();paF('/api/pa/insumos').then(function(r2){PA.insumos=r2.data||[];});
+      }
+    });
 }
 
 function paLoadCompras(){

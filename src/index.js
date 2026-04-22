@@ -57,6 +57,7 @@ app.use(cookieParser());
 app.use("/static",       express.static(path.join(__dirname, ".")));
 app.use("/data/uploads", express.static(path.join(__dirname, "../data/uploads")));
 app.use("/data/conformados", express.static(path.join(__dirname, "../data/conformados")));
+app.use("/data/fichas",      express.static(path.join(__dirname, "../data/fichas")));
 
 // Auth
 app.use("/api/auth", authRouter);
@@ -123,7 +124,7 @@ app.use("/api", cotizacionRouter);
 app.use("/api", crmRouter);
 app.use("/api", buscarRouter);
 app.use("/api/abasto", abastoRouter);
-app.use("/api/pa", produccionRouter);
+app.use("/api/pa",     produccionRouter);
 
 // Health check
 app.get("/", (req, res) => res.json({ status:"ok", version:"3.0", panel:"/panel" }));

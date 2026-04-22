@@ -241,6 +241,27 @@ export function getCampañaActiva() {
   } catch(e) { console.error('[PA] Error migrando pa_lotes:', e.message); }
 })();
 
+// ── MIGRACIÓN: columnas nuevas en pa_insumos ──────────────────────────────
+(function() {
+  try {
+    const cols = db.prepare("PRAGMA table_info(pa_insumos)").all().map(c => c.name);
+    if (!cols.includes('componente_madre')) {
+      db.exec("ALTER TABLE pa_insumos ADD COLUMN componente_madre TEXT");
+      console.log("[PA] componente_madre agregado en pa_insumos");
+    }
+    if (!cols.includes('precio_ref_usd')) {
+      db.exec("ALTER TABLE pa_insumos ADD COLUMN precio_ref_usd REAL DEFAULT 0");
+      console.log("[PA] precio_ref_usd agregado en pa_insumos");
+    }
+    if (!cols.includes('ficha_tecnica_path')) {
+      db.exec("ALTER TABLE pa_insumos ADD COLUMN ficha_tecnica_path TEXT");
+      console.log("[PA] ficha_tecnica_path agregado en pa_insumos");
+    }
+    // Ampliar CHECK de tipo para incluir fungicida e insecticida
+    // SQLite no permite ALTER CHECK, se maneja a nivel aplicación
+  } catch(e) { console.error('[PA] Error migrando pa_insumos:', e.message); }
+})();
+
 // ── MIGRACIÓN: mes siembra/cosecha en pa_cultivos_lote ────────────────────
 (function() {
   try {
