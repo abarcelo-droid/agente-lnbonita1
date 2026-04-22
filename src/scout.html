@@ -130,7 +130,14 @@ input[type=file]{display:none}
 .rep-card{margin:10px 14px;background:var(--sur);border:1px solid var(--bor);border-radius:14px;overflow:hidden;transition:box-shadow .15s}
 .rep-card.alta{border-color:var(--gold);box-shadow:0 0 0 1px rgba(240,165,0,.2)}
 .rep-card.critico{border-color:var(--err);box-shadow:0 0 0 1px rgba(220,38,38,.15)}
-.rep-foto-thumb{width:100%;max-height:160px;object-fit:cover;display:block}
+.rep-foto-thumb{width:100%;max-height:160px;object-fit:cover;display:block;cursor:zoom-in}
+
+/* LIGHTBOX */
+.lightbox{position:fixed;inset:0;background:rgba(0,0,0,.95);z-index:300;display:none;align-items:center;justify-content:center;flex-direction:column}
+.lightbox.open{display:flex}
+.lightbox-img{max-width:100vw;max-height:88vh;object-fit:contain;border-radius:4px}
+.lightbox-close{position:absolute;top:16px;right:16px;background:rgba(255,255,255,.15);border:none;color:#fff;font-size:22px;width:48px;height:48px;border-radius:50%;cursor:pointer;display:flex;align-items:center;justify-content:center;line-height:1}
+.lightbox-caption{color:rgba(255,255,255,.5);font-size:12px;margin-top:10px;text-align:center;padding:0 20px}
 .rep-body{padding:14px}
 .rep-head{display:flex;align-items:flex-start;gap:10px}
 .rep-sev-badge{width:40px;height:40px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:17px;font-weight:800;flex-shrink:0;color:#fff}
@@ -293,6 +300,13 @@ input[type=file]{display:none}
 <!-- ═══════════════════════ TAB MIS TAREAS ═══════════════════════ -->
 <div class="screen" id="screen-mis-tareas">
   <div id="mis-lista"><div class="empty"><span class="empty-icon">⏳</span><div class="empty-txt">Cargando...</div></div></div>
+</div>
+
+<!-- LIGHTBOX -->
+<div class="lightbox" id="lightbox" onclick="closeLightbox()">
+  <button class="lightbox-close" onclick="closeLightbox()">×</button>
+  <img class="lightbox-img" id="lightbox-img" src="" alt="">
+  <div class="lightbox-caption" id="lightbox-caption"></div>
 </div>
 
 <div id="toast"></div>
@@ -495,7 +509,7 @@ function renderCard(rep, esAdmin) {
   var esAlta=rep.prioridad_alta||rep.creado_por_rol==='admin';
   var esCrit=rep.severidad===4;
   var cardCls='rep-card'+(esAlta?' alta':'')+(esCrit?' critico':'');
-  var foto=rep.foto_path?'<img class="rep-foto-thumb" src="'+rep.foto_path+'" loading="lazy">':'';
+  var foto=rep.foto_path?'<img class="rep-foto-thumb" src="'+rep.foto_path+'" loading="lazy" onclick="openLightbox(\''+rep.foto_path+'\',\''+rep.tipo+' — '+rep.lote_nombre+'\')" alt="">':'';
   var estadoTag=rep.estado==='pendiente'?'<span class="tag tag-pend">Pendiente</span>':rep.estado==='en_proceso'?'<span class="tag tag-proc">En proceso</span>':'<span class="tag tag-res">Resuelto</span>';
   var altaTag=esAlta?'<span class="tag tag-alta">⚡ Alta prioridad</span>':'';
   var critTag=esCrit?'<span class="tag tag-critico">🔴 Crítico</span>':'';
@@ -578,6 +592,19 @@ function fmtFecha(s) {
   var d=new Date(s);
   return d.toLocaleDateString('es-AR',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'});
 }
+
+function openLightbox(src, caption) {
+  document.getElementById('lightbox-img').src = src;
+  document.getElementById('lightbox-caption').textContent = caption || '';
+  document.getElementById('lightbox').classList.add('open');
+  document.body.style.overflow = 'hidden';
+}
+function closeLightbox() {
+  document.getElementById('lightbox').classList.remove('open');
+  document.body.style.overflow = '';
+}
+// Cerrar con tecla Escape
+document.addEventListener('keydown', function(e){ if(e.key==='Escape') closeLightbox(); });
 
 initAuth();
 </script>
