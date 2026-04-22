@@ -1192,6 +1192,8 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   <select id="cal-campaña-sel" onchange="paLoadCalendario()" style="padding:7px 12px;font-size:13px;width:auto"><option value="">Campaña activa</option></select>
 </div>
 </div>
+<!-- Resumen ha por producto -->
+<div id="pa-cal-resumen" style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:20px"></div>
 <div id="pa-cal-contenido"><div class="emp">Cargando...</div></div>
 </div>
 
@@ -5080,8 +5082,11 @@ function paLoadCalendario(){
     'Melón':           {bg:'#fef08a',fg:'#713f12'},   // amarillo
     'Brócoli':         {bg:'#bbf7d0',fg:'#14532d'},   // verde
     'Cebolla':         {bg:'#d6c5a0',fg:'#5c3d0a'},   // marrón
-    'Vid':             {bg:'#e9d5ff',fg:'#6b21a8'},   // bordo/violeta
-    'Uva':             {bg:'#e9d5ff',fg:'#6b21a8'},
+    'Uva Superior':    {bg:'#e9d5ff',fg:'#6b21a8'},
+    'Uva Red Globe':   {bg:'#ddd6fe',fg:'#4c1d95'},
+    'Uva Cardinal':    {bg:'#c4b5fd',fg:'#3b0764'},
+    'Uva Cereza':      {bg:'#f3e8ff',fg:'#6b21a8'},
+    
     'Tomate Industria':{bg:'#fecaca',fg:'#991b1b'},   // rojo
     'Ajo':             {bg:'#f3e8ff',fg:'#6b21a8'},
     'Papa':            {bg:'#fef3c7',fg:'#92400e'},
@@ -5094,6 +5099,58 @@ function paLoadCalendario(){
   paF('/api/pa/lotes').then(function(r){
     var lotes=r.data||[];
     if(!lotes.length){document.getElementById('pa-cal-contenido').innerHTML='<div class="emp">No hay lotes. Agregá lotes en Fincas y Lotes.</div>';return;}
+
+    // ── Resumen ha por producto (campaña activa o seleccionada) ──
+    var campañaSel = document.getElementById('cal-campaña-sel').value;
+    var campañaActiva = PA.campañas.find(function(c){ return c.activa; });
+    // Determinar qué campaña usar para el resumen
+    var campañaNombre = '';
+    if (campañaSel) {
+      var cf = PA.campañas.find(function(c){ return String(c.id)===String(campañaSel); });
+      if (cf) campañaNombre = cf.nombre;
+    } else if (campañaActiva) {
+      campañaNombre = campañaActiva.nombre;
+    }
+    // Sumar ha por cultivo
+    var haMap = {};
+    var totalHa = 0;
+    lotes.forEach(function(l){
+      var cd = l.cultivos && campañaNombre && l.cultivos[campañaNombre];
+      var cult = cd ? (typeof cd === 'string' ? cd : cd.cultivo) : '';
+      if (!cult || cult === 'Barbecho' || cult === 'Sin uso') {
+        if (!cult) cult = '(Sin asignar)';
+      }
+      haMap[cult] = (haMap[cult] || 0) + (l.hectareas || 0);
+      totalHa += (l.hectareas || 0);
+    });
+    // Ordenar de mayor a menor
+    var haEntries = Object.keys(haMap).sort(function(a,b){ return haMap[b]-haMap[a]; });
+    var CULT_COLOR_R = {
+      'Uva Superior':{bg:'#e9d5ff',fg:'#6b21a8'},'Uva Red Globe':{bg:'#ddd6fe',fg:'#4c1d95'},
+      'Uva Cardinal':{bg:'#c4b5fd',fg:'#3b0764'},'Uva Cereza':{bg:'#f3e8ff',fg:'#6b21a8'},
+      'Damasco':{bg:'#fed7aa',fg:'#9a3412'},'Durazno':{bg:'#ffedd5',fg:'#c2410c'},
+      'Melón':{bg:'#fef08a',fg:'#713f12'},'Brócoli':{bg:'#bbf7d0',fg:'#14532d'},
+      'Cebolla':{bg:'#d6c5a0',fg:'#5c3d0a'},'Tomate Industria':{bg:'#fecaca',fg:'#991b1b'},
+      'Ajo':{bg:'#f3e8ff',fg:'#6b21a8'},'Papa':{bg:'#fef3c7',fg:'#92400e'},
+      'Zapallo':{bg:'#fed7aa',fg:'#9a3412'},'Barbecho':{bg:'#f1f5f9',fg:'#64748b'},
+      'Sin uso':{bg:'#f8fafc',fg:'#94a3b8'},'(Sin asignar)':{bg:'#f1f5f9',fg:'#94a3b8'},
+    };
+    var resumenHtml = haEntries.map(function(cult){
+      var col = CULT_COLOR_R[cult] || {bg:'#e0f2fe',fg:'#075985'};
+      var pct = totalHa > 0 ? Math.round(haMap[cult]/totalHa*100) : 0;
+      return '<div style="background:'+col.bg+';color:'+col.fg+';border-radius:10px;padding:10px 16px;min-width:110px;flex:0 0 auto">'
+        +'<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;opacity:.8;margin-bottom:3px">'+cult+'</div>'
+        +'<div style="font-size:20px;font-weight:700;line-height:1">'+haMap[cult].toFixed(1)+' ha</div>'
+        +'<div style="font-size:11px;opacity:.7;margin-top:2px">'+pct+'% del total</div>'
+        +'</div>';
+    }).join('');
+    // Card total
+    resumenHtml = '<div style="background:#1a3a5c;color:#fff;border-radius:10px;padding:10px 16px;min-width:110px;flex:0 0 auto">'
+      +'<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;opacity:.6;margin-bottom:3px">Total'+(campañaNombre?' — '+campañaNombre:'')+'</div>'
+      +'<div style="font-size:20px;font-weight:700;line-height:1">'+totalHa.toFixed(1)+' ha</div>'
+      +'<div style="font-size:11px;opacity:.5;margin-top:2px">'+lotes.length+' lotes</div>'
+      +'</div>' + resumenHtml;
+    document.getElementById('pa-cal-resumen').innerHTML = resumenHtml;
 
     // Agrupar por finca
     var fincas={};
@@ -5213,7 +5270,7 @@ function paEditarCultivo(loteId,nombre){
 }
 
 function paCultivoOpts(){
-  return'<option value="">—</option><optgroup label="Frutales"><option value="Vid">Vid</option><option value="Damasco">Damasco</option><option value="Durazno">Durazno</option><option value="Ciruela">Ciruela</option></optgroup><optgroup label="Chacra Mercado"><option value="Melón">Melón</option><option value="Cebolla">Cebolla</option><option value="Brócoli">Brócoli</option><option value="Ajo">Ajo</option><option value="Papa">Papa</option><option value="Zapallo">Zapallo</option></optgroup><optgroup label="Chacra Industria"><option value="Tomate Industria">Tomate Industria</option></optgroup><option value="Barbecho">Barbecho</option><option value="Sin uso">Sin uso</option>';
+  return'<option value="">—</option><optgroup label="Frutales"><option value="Uva Superior">Uva Superior</option><option value="Uva Red Globe">Uva Red Globe</option><option value="Uva Cardinal">Uva Cardinal</option><option value="Uva Cereza">Uva Cereza</option><option value="Damasco">Damasco</option><option value="Durazno">Durazno</option><option value="Ciruela">Ciruela</option></optgroup><optgroup label="Chacra Mercado"><option value="Melón">Melón</option><option value="Cebolla">Cebolla</option><option value="Brócoli">Brócoli</option><option value="Ajo">Ajo</option><option value="Papa">Papa</option><option value="Zapallo">Zapallo</option></optgroup><optgroup label="Chacra Industria"><option value="Tomate Industria">Tomate Industria</option></optgroup><option value="Barbecho">Barbecho</option><option value="Sin uso">Sin uso</option>';
 }
 
 function paMesesOpts(label){
@@ -5271,7 +5328,7 @@ function paGuardarEdicionLote(){
       // Guardar cultivos por campaña
       var saves=Object.entries(cultivos).filter(function(e){return e[1].cultivo;}).map(function(e){
         var camp=e[0],cd=e[1];
-        return paF('/api/pa/lotes/cultivo',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({lote_id:loteId,campaña:camp,cultivo:cd.cultivo,es_perenne:['Vid','Damasco','Durazno','Ciruela'].includes(cd.cultivo)?1:0,mes_siembra:cd.mes_siembra||null,mes_cosecha:cd.mes_cosecha||null})});
+        return paF('/api/pa/lotes/cultivo',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({lote_id:loteId,campaña:camp,cultivo:cd.cultivo,es_perenne:['Uva Superior','Uva Red Globe','Uva Cardinal','Uva Cereza','Damasco','Durazno','Ciruela'].includes(cd.cultivo)?1:0,mes_siembra:cd.mes_siembra||null,mes_cosecha:cd.mes_cosecha||null})});
       });
       Promise.all(saves).then(function(){
         toast('Lote actualizado');
@@ -5500,7 +5557,7 @@ function paAbrirNuevoLote(){
   function paRenderCampañasModal(campañas) {
     var campOrd=['2021/22','2022/23','2023/24','2024/25','2025/26','2026/27'];
     var campDisp=campañas.slice().sort(function(a,b){return campOrd.indexOf(a.nombre)-campOrd.indexOf(b.nombre);});
-    var cultivoOpts='<option value="">—</option><optgroup label="Frutales"><option value="Vid">Vid</option><option value="Damasco">Damasco</option><option value="Durazno">Durazno</option><option value="Ciruela">Ciruela</option></optgroup><optgroup label="Chacra Mercado"><option value="Melón">Melón</option><option value="Cebolla">Cebolla</option><option value="Brócoli">Brócoli</option><option value="Ajo">Ajo</option><option value="Papa">Papa</option><option value="Zapallo">Zapallo</option></optgroup><optgroup label="Chacra Industria"><option value="Tomate Industria">Tomate Industria</option></optgroup><option value="Barbecho">Barbecho</option><option value="Sin uso">Sin uso</option>';
+    var cultivoOpts='<option value="">—</option><optgroup label="Frutales"><option value="Uva Superior">Uva Superior</option><option value="Uva Red Globe">Uva Red Globe</option><option value="Uva Cardinal">Uva Cardinal</option><option value="Uva Cereza">Uva Cereza</option><option value="Damasco">Damasco</option><option value="Durazno">Durazno</option><option value="Ciruela">Ciruela</option></optgroup><optgroup label="Chacra Mercado"><option value="Melón">Melón</option><option value="Cebolla">Cebolla</option><option value="Brócoli">Brócoli</option><option value="Ajo">Ajo</option><option value="Papa">Papa</option><option value="Zapallo">Zapallo</option></optgroup><optgroup label="Chacra Industria"><option value="Tomate Industria">Tomate Industria</option></optgroup><option value="Barbecho">Barbecho</option><option value="Sin uso">Sin uso</option>';
     document.getElementById('pa-lot-cultivos-grid').innerHTML=campDisp.map(function(c){
       return'<div class="fl"><label>Temporada '+c.nombre+(c.activa?' ★':'')+' </label><select id="pa-lot-cult-'+c.nombre.replace('/','_')+'">'+cultivoOpts+'</select></div>';
     }).join('');
