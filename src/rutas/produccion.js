@@ -2,10 +2,14 @@
 // ── API PRODUCCIÓN AGRÍCOLA — PUENTE CORDON SA ────────────────────────────
 
 import express from 'express';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import { getDb } from '../servicios/db.js';
 import '../servicios/db_pa.js'; // Asegura que las tablas existan
 
 const router = express.Router();
+const __dirnamePA = path.dirname(fileURLToPath(import.meta.url));
 
 // ── Middleware auth básico ─────────────────────────────────────────────────
 function requireAuth(req, res, next) {
@@ -273,11 +277,6 @@ router.patch('/insumos/:id', requireAuth, (req, res) => {
 });
 
 // Upload ficha técnica PDF
-import fs from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
-const __dirnamePA = path.dirname(fileURLToPath(import.meta.url));
-
 router.post('/insumos/:id/ficha', requireAuth, (req, res) => {
   const db = getDb();
   try {
@@ -319,6 +318,45 @@ router.post('/proveedores', requireAuth, (req, res) => {
 // ─────────────────────────────────────────────────────────────────────────
 // COMPRAS DE INSUMOS
 // ─────────────────────────────────────────────────────────────────────────
+
+// Historial de compras por insumo_id o por componente_madre
+router.get('/insumos/historial', requireAuth, (req, res) => {
+  const db = getDb();
+  const { insumo_id, componente } = req.query;
+  try {
+    let rows;
+    if (insumo_id) {
+      rows = db.prepare(`
+        SELECT ci.cantidad, ci.precio_unit, ci.subtotal,
+               c.fecha, c.nro_factura, c.tipo_comprobante,
+               COALESCE(p.razon_social, c.proveedor_txt, '—') as proveedor,
+               i.nombre as insumo_nombre, i.unidad, i.componente_madre
+        FROM pa_compras_items ci
+        JOIN pa_compras c ON c.id = ci.compra_id
+        JOIN pa_insumos i ON i.id = ci.insumo_id
+        LEFT JOIN pa_proveedores p ON p.id = c.proveedor_id
+        WHERE ci.insumo_id = ?
+        ORDER BY c.fecha DESC LIMIT 20
+      `).all(insumo_id);
+    } else if (componente) {
+      rows = db.prepare(`
+        SELECT ci.cantidad, ci.precio_unit, ci.subtotal,
+               c.fecha, c.nro_factura, c.tipo_comprobante,
+               COALESCE(p.razon_social, c.proveedor_txt, '—') as proveedor,
+               i.nombre as insumo_nombre, i.unidad, i.componente_madre
+        FROM pa_compras_items ci
+        JOIN pa_compras c ON c.id = ci.compra_id
+        JOIN pa_insumos i ON i.id = ci.insumo_id
+        LEFT JOIN pa_proveedores p ON p.id = c.proveedor_id
+        WHERE i.componente_madre = ?
+        ORDER BY c.fecha DESC LIMIT 20
+      `).all(componente);
+    } else {
+      return res.status(400).json({ ok: false, error: 'insumo_id o componente requerido' });
+    }
+    res.json({ ok: true, data: rows });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
 
 router.get('/compras', requireAuth, (req, res) => {
   const db = getDb();
@@ -363,7 +401,7 @@ router.post('/compras', requireAuth, (req, res) => {
     // Guardar foto remito si viene
     let remito_foto_path = null;
     if (remito_foto_b64) {
-      const dir = path.join(__dirname, '../../data/remitos_pa');
+      const dir = path.join(__dirnamePA, '../../data/remitos_pa');
       fs.mkdirSync(dir, { recursive: true });
       const fname = `remito_${Date.now()}.jpg`;
       fs.writeFileSync(path.join(dir, fname), Buffer.from(remito_foto_b64, 'base64'));
