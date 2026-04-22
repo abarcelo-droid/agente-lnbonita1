@@ -5671,7 +5671,7 @@ function paLoadCalendario(){
       fincas[f].push(l);
     });
 
-    var html='<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px;min-width:1100px">';
+    var html='<div style="overflow:auto;max-height:calc(100vh - 220px);border:1px solid var(--bor);border-radius:8px"><table style="width:100%;border-collapse:collapse;font-size:12px;min-width:1100px">';
 
     // Cabecera — sticky vertical para que quede fija al hacer scroll
     html+='<thead><tr>';
