@@ -810,4 +810,414 @@ router.get('/dashboard', requireAuth, (req, res) => {
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
+// ═════════════════════════════════════════════════════════════════════════
+// COMBUSTIBLE
+// ═════════════════════════════════════════════════════════════════════════
+
+// ── Tanques ────────────────────────────────────────────────────────────────
+router.get('/combustible/tanques', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const data = db.prepare("SELECT * FROM pa_combustible_tanques WHERE activo=1 ORDER BY tipo").all();
+    res.json({ ok: true, data });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+router.patch('/combustible/tanques/:id', requireAuth, (req, res) => {
+  const db = getDb();
+  const { capacidad_lt, ubicacion, notas } = req.body;
+  try {
+    const curr = db.prepare("SELECT * FROM pa_combustible_tanques WHERE id=?").get(req.params.id);
+    if (!curr) return res.status(404).json({ ok: false, error: 'Tanque no encontrado' });
+    db.prepare("UPDATE pa_combustible_tanques SET capacidad_lt=?, ubicacion=?, notas=? WHERE id=?")
+      .run(
+        capacidad_lt !== undefined ? capacidad_lt : curr.capacidad_lt,
+        ubicacion !== undefined ? ubicacion : curr.ubicacion,
+        notas !== undefined ? notas : curr.notas,
+        req.params.id
+      );
+    res.json({ ok: true });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// ── Vehículos ──────────────────────────────────────────────────────────────
+router.get('/combustible/vehiculos', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const { combustible, incluir_inactivos } = req.query;
+    let q = "SELECT * FROM pa_vehiculos WHERE 1=1";
+    const params = [];
+    if (!incluir_inactivos) q += " AND activo=1";
+    if (combustible) { q += " AND combustible=?"; params.push(combustible); }
+    q += " ORDER BY tipo, identificacion";
+    res.json({ ok: true, data: db.prepare(q).all(...params) });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+router.post('/combustible/vehiculos', requireAuth, (req, res) => {
+  const db = getDb();
+  const { tipo, identificacion, marca_modelo, combustible, tiene_horometro,
+          horas_actuales, km_actuales, notas } = req.body;
+  if (!tipo || !identificacion || !combustible)
+    return res.status(400).json({ ok: false, error: 'tipo, identificacion y combustible requeridos' });
+  if (!['tractor','camioneta','moto','otro'].includes(tipo))
+    return res.status(400).json({ ok: false, error: 'tipo inválido' });
+  if (!['gasoil','nafta'].includes(combustible))
+    return res.status(400).json({ ok: false, error: 'combustible inválido' });
+  try {
+    const r = db.prepare(`INSERT INTO pa_vehiculos
+        (tipo, identificacion, marca_modelo, combustible, tiene_horometro, horas_actuales, km_actuales, notas)
+        VALUES (?,?,?,?,?,?,?,?)`)
+      .run(tipo, identificacion.trim(), marca_modelo || null, combustible,
+           tiene_horometro ? 1 : 0, horas_actuales || 0, km_actuales || 0, notas || null);
+    res.json({ ok: true, id: r.lastInsertRowid });
+  } catch(e) {
+    if (e.message.includes('UNIQUE')) return res.status(400).json({ ok: false, error: 'Ya existe un vehículo con esa identificación' });
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+router.patch('/combustible/vehiculos/:id', requireAuth, (req, res) => {
+  const db = getDb();
+  const { tipo, identificacion, marca_modelo, combustible, tiene_horometro,
+          horas_actuales, km_actuales, activo, notas } = req.body;
+  try {
+    const curr = db.prepare("SELECT * FROM pa_vehiculos WHERE id=?").get(req.params.id);
+    if (!curr) return res.status(404).json({ ok: false, error: 'Vehículo no encontrado' });
+    db.prepare(`UPDATE pa_vehiculos SET
+        tipo=?, identificacion=?, marca_modelo=?, combustible=?, tiene_horometro=?,
+        horas_actuales=?, km_actuales=?, activo=?, notas=?
+        WHERE id=?`)
+      .run(
+        tipo || curr.tipo,
+        identificacion || curr.identificacion,
+        marca_modelo !== undefined ? marca_modelo : curr.marca_modelo,
+        combustible || curr.combustible,
+        tiene_horometro !== undefined ? (tiene_horometro ? 1 : 0) : curr.tiene_horometro,
+        horas_actuales !== undefined ? horas_actuales : curr.horas_actuales,
+        km_actuales !== undefined ? km_actuales : curr.km_actuales,
+        activo !== undefined ? (activo ? 1 : 0) : curr.activo,
+        notas !== undefined ? notas : curr.notas,
+        req.params.id
+      );
+    res.json({ ok: true });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+router.get('/combustible/vehiculos/:id/historial', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const data = db.prepare(`
+      SELECT m.*, l.nombre as lote_nombre, l.finca as lote_finca,
+             u.nombre as cargado_por_nombre
+      FROM pa_combustible_movimientos m
+      LEFT JOIN pa_lotes l ON l.id=m.lote_id
+      LEFT JOIN usuarios u ON u.id=m.cargado_por
+      WHERE m.vehiculo_id=?
+      ORDER BY m.fecha DESC, m.id DESC
+      LIMIT 200
+    `).all(req.params.id);
+
+    // Calcular lt/hora entre cargas con horómetro (ordenadas cronológicamente)
+    const conHoras = data.filter(d => d.horas_horometro != null).slice().sort((a,b) => a.id - b.id);
+    for (let i = 1; i < conHoras.length; i++) {
+      const deltaH = conHoras[i].horas_horometro - conHoras[i-1].horas_horometro;
+      if (deltaH > 0) {
+        const ltph = +(conHoras[i].litros / deltaH).toFixed(2);
+        const target = data.find(d => d.id === conHoras[i].id);
+        if (target) target.lt_por_hora = ltph;
+      }
+    }
+    res.json({ ok: true, data });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// ── Movimientos ────────────────────────────────────────────────────────────
+router.get('/combustible/movimientos', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const { tipo, vehiculo_id, tanque_id, estado, desde, hasta, lote_id, limit } = req.query;
+    let q = `
+      SELECT m.*,
+        v.identificacion as vehiculo_txt, v.tipo as vehiculo_tipo,
+        t.nombre as tanque_nombre,
+        l.nombre as lote_nombre, l.finca as lote_finca,
+        u.nombre as cargado_por_nombre,
+        ur.nombre as revisado_por_nombre
+      FROM pa_combustible_movimientos m
+      LEFT JOIN pa_vehiculos v ON v.id=m.vehiculo_id
+      LEFT JOIN pa_combustible_tanques t ON t.id=m.tanque_id
+      LEFT JOIN pa_lotes l ON l.id=m.lote_id
+      LEFT JOIN usuarios u ON u.id=m.cargado_por
+      LEFT JOIN usuarios ur ON ur.id=m.revisado_por
+      WHERE 1=1
+    `;
+    const params = [];
+    if (tipo) { q += " AND m.tipo_movimiento=?"; params.push(tipo); }
+    if (vehiculo_id) { q += " AND m.vehiculo_id=?"; params.push(vehiculo_id); }
+    if (tanque_id) { q += " AND m.tanque_id=?"; params.push(tanque_id); }
+    if (estado) { q += " AND m.estado_revision=?"; params.push(estado); }
+    if (lote_id) { q += " AND m.lote_id=?"; params.push(lote_id); }
+    if (desde) { q += " AND m.fecha>=?"; params.push(desde); }
+    if (hasta) { q += " AND m.fecha<=?"; params.push(hasta); }
+    q += " ORDER BY m.fecha DESC, m.id DESC LIMIT ?";
+    params.push(parseInt(limit) || 200);
+    res.json({ ok: true, data: db.prepare(q).all(...params) });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+router.post('/combustible/movimientos', requireAuth, (req, res) => {
+  const db = getDb();
+  const {
+    fecha, tipo_movimiento, tanque_id, vehiculo_id, combustible,
+    litros, precio_unitario, moneda, precio_total,
+    proveedor_id, proveedor_txt, tipo_comprobante, nro_comprobante, foto_b64,
+    lote_id, orden_id, horas_horometro, km_vehiculo, notas
+  } = req.body;
+
+  if (!tipo_movimiento || !combustible || litros == null)
+    return res.status(400).json({ ok: false, error: 'tipo_movimiento, combustible y litros requeridos' });
+  if (!['gasoil','nafta'].includes(combustible))
+    return res.status(400).json({ ok: false, error: 'combustible inválido' });
+  if (!['carga_tanque','consumo_tanque','consumo_estacion','ajuste_varilla'].includes(tipo_movimiento))
+    return res.status(400).json({ ok: false, error: 'tipo_movimiento inválido' });
+  if (tipo_movimiento !== 'ajuste_varilla' && !(litros > 0))
+    return res.status(400).json({ ok: false, error: 'litros debe ser > 0' });
+
+  try {
+    // Guardar foto si viene (dentro de data/scout para aprovechar el estático existente)
+    let fotoPath = null;
+    if (foto_b64) {
+      const dir = path.join(__dirnamePA, '../../data/scout/combustible');
+      fs.mkdirSync(dir, { recursive: true });
+      const fname = `comb_${Date.now()}_${Math.floor(Math.random()*9999)}.jpg`;
+      fs.writeFileSync(path.join(dir, fname),
+        Buffer.from(String(foto_b64).replace(/^data:.*?;base64,/,''), 'base64'));
+      fotoPath = `/data/scout/combustible/${fname}`;
+    }
+
+    // Operarios (rol 'campo') cargan como pendiente; admin/operador quedan revisados
+    const esCampo = req.user.rol === 'campo';
+    const estado = esCampo ? 'pendiente' : 'revisado';
+    const revisadoPor = esCampo ? null : req.user.id;
+    const revisadoEn = esCampo ? null : new Date().toISOString();
+
+    const tx = db.transaction(() => {
+      const ins = db.prepare(`
+        INSERT INTO pa_combustible_movimientos
+          (fecha, tipo_movimiento, tanque_id, vehiculo_id, combustible, litros,
+           precio_unitario, moneda, precio_total, proveedor_id, proveedor_txt,
+           tipo_comprobante, nro_comprobante, foto_path, lote_id, orden_id,
+           horas_horometro, km_vehiculo, cargado_por, estado_revision,
+           revisado_por, revisado_en, notas)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+      `).run(
+        fecha || new Date().toISOString().slice(0,10),
+        tipo_movimiento,
+        tanque_id || null,
+        vehiculo_id || null,
+        combustible,
+        Number(litros),
+        Number(precio_unitario) || 0,
+        moneda || 'ARS',
+        Number(precio_total) || 0,
+        proveedor_id || null,
+        proveedor_txt || null,
+        tipo_comprobante || null,
+        nro_comprobante || null,
+        fotoPath,
+        lote_id || null,
+        orden_id || null,
+        horas_horometro != null ? Number(horas_horometro) : null,
+        km_vehiculo != null ? Number(km_vehiculo) : null,
+        req.user.id,
+        estado,
+        revisadoPor,
+        revisadoEn,
+        notas || null
+      );
+      const movId = ins.lastInsertRowid;
+
+      // Stock del tanque
+      if (tipo_movimiento === 'carga_tanque' && tanque_id) {
+        db.prepare("UPDATE pa_combustible_tanques SET stock_actual = stock_actual + ? WHERE id=?").run(Number(litros), tanque_id);
+      } else if (tipo_movimiento === 'consumo_tanque' && tanque_id) {
+        db.prepare("UPDATE pa_combustible_tanques SET stock_actual = stock_actual - ? WHERE id=?").run(Number(litros), tanque_id);
+      } else if (tipo_movimiento === 'ajuste_varilla' && tanque_id) {
+        // En ajuste, 'litros' es la DIFERENCIA (+ sube stock, - baja)
+        db.prepare("UPDATE pa_combustible_tanques SET stock_actual = stock_actual + ? WHERE id=?").run(Number(litros), tanque_id);
+      }
+
+      // Horómetro / km del vehículo
+      if (vehiculo_id) {
+        if (horas_horometro != null)
+          db.prepare("UPDATE pa_vehiculos SET horas_actuales=? WHERE id=?").run(Number(horas_horometro), vehiculo_id);
+        if (km_vehiculo != null)
+          db.prepare("UPDATE pa_vehiculos SET km_actuales=? WHERE id=?").run(Number(km_vehiculo), vehiculo_id);
+      }
+
+      // Imputar costo a lote si corresponde (consumo con lote asignado)
+      if (lote_id && Number(precio_total) > 0 &&
+          ['consumo_tanque','consumo_estacion'].includes(tipo_movimiento)) {
+        const camp = db.prepare("SELECT id FROM pa_campañas WHERE activa=1 LIMIT 1").get();
+        if (camp) {
+          db.prepare(`INSERT INTO pa_costos_lote
+              (lote_id, campaña_id, categoria, referencia_id, fecha, monto, descripcion)
+              VALUES (?,?,'otros',?,?,?,?)`)
+            .run(lote_id, camp.id, movId,
+                 fecha || new Date().toISOString().slice(0,10),
+                 Number(precio_total),
+                 `Combustible ${combustible} · ${litros} lt`);
+        }
+      }
+
+      return movId;
+    });
+
+    res.json({ ok: true, id: tx() });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+router.patch('/combustible/movimientos/:id/revisar', requireAuth, (req, res) => {
+  const db = getDb();
+  const { notas_revision } = req.body;
+  try {
+    db.prepare(`UPDATE pa_combustible_movimientos
+      SET estado_revision='revisado', revisado_por=?, revisado_en=?,
+          notas_revision=COALESCE(?, notas_revision)
+      WHERE id=?`)
+      .run(req.user.id, new Date().toISOString(), notas_revision || null, req.params.id);
+    res.json({ ok: true });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+router.delete('/combustible/movimientos/:id', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const m = db.prepare("SELECT * FROM pa_combustible_movimientos WHERE id=?").get(req.params.id);
+    if (!m) return res.status(404).json({ ok: false, error: 'Movimiento no encontrado' });
+    const tx = db.transaction(() => {
+      // Revertir stock
+      if (m.tipo_movimiento === 'carga_tanque' && m.tanque_id) {
+        db.prepare("UPDATE pa_combustible_tanques SET stock_actual = stock_actual - ? WHERE id=?").run(m.litros, m.tanque_id);
+      } else if (m.tipo_movimiento === 'consumo_tanque' && m.tanque_id) {
+        db.prepare("UPDATE pa_combustible_tanques SET stock_actual = stock_actual + ? WHERE id=?").run(m.litros, m.tanque_id);
+      } else if (m.tipo_movimiento === 'ajuste_varilla' && m.tanque_id) {
+        db.prepare("UPDATE pa_combustible_tanques SET stock_actual = stock_actual - ? WHERE id=?").run(m.litros, m.tanque_id);
+      }
+      // Borrar costo imputado
+      db.prepare("DELETE FROM pa_costos_lote WHERE categoria='otros' AND referencia_id=?").run(m.id);
+      // Borrar movimiento
+      db.prepare("DELETE FROM pa_combustible_movimientos WHERE id=?").run(m.id);
+    });
+    tx();
+    res.json({ ok: true });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// ── Dashboard ──────────────────────────────────────────────────────────────
+router.get('/combustible/dashboard', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const tanques = db.prepare("SELECT * FROM pa_combustible_tanques WHERE activo=1 ORDER BY tipo").all();
+    const pendientes = db.prepare("SELECT COUNT(*) as n FROM pa_combustible_movimientos WHERE estado_revision='pendiente'").get().n;
+
+    const hoy = new Date();
+    const mesIni = new Date(hoy.getFullYear(), hoy.getMonth(), 1).toISOString().slice(0,10);
+
+    const gastoMes = db.prepare(`
+      SELECT combustible, moneda,
+             COALESCE(SUM(precio_total),0) as total,
+             COALESCE(SUM(litros),0) as litros
+      FROM pa_combustible_movimientos
+      WHERE tipo_movimiento IN ('carga_tanque','consumo_estacion')
+        AND fecha >= ?
+      GROUP BY combustible, moneda
+    `).all(mesIni);
+
+    const topVehiculos = db.prepare(`
+      SELECT v.id, v.identificacion, v.tipo, v.combustible,
+             COALESCE(SUM(m.litros),0) as litros,
+             COALESCE(SUM(m.precio_total),0) as gasto
+      FROM pa_combustible_movimientos m
+      JOIN pa_vehiculos v ON v.id=m.vehiculo_id
+      WHERE m.tipo_movimiento IN ('consumo_tanque','consumo_estacion')
+        AND m.fecha >= ?
+      GROUP BY v.id
+      ORDER BY litros DESC
+      LIMIT 5
+    `).all(mesIni);
+
+    const ultimosPendientes = db.prepare(`
+      SELECT m.id, m.fecha, m.tipo_movimiento, m.combustible, m.litros,
+             v.identificacion as vehiculo_txt, u.nombre as cargado_por_nombre
+      FROM pa_combustible_movimientos m
+      LEFT JOIN pa_vehiculos v ON v.id=m.vehiculo_id
+      LEFT JOIN usuarios u ON u.id=m.cargado_por
+      WHERE m.estado_revision='pendiente'
+      ORDER BY m.creado_en DESC
+      LIMIT 10
+    `).all();
+
+    res.json({ ok: true, data: {
+      tanques, pendientes,
+      gasto_mes: gastoMes,
+      top_vehiculos: topVehiculos,
+      ultimos_pendientes: ultimosPendientes
+    }});
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// ── Lector IA: ticket/remito de combustible ────────────────────────────────
+router.post('/combustible/leer-ticket', requireAuth, async (req, res) => {
+  const { imagen_b64, media_type } = req.body;
+  if (!imagen_b64) return res.status(400).json({ ok: false, error: 'imagen_b64 requerida' });
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) return res.status(500).json({ ok: false, error: 'API key no configurada' });
+
+  try {
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01'
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 500,
+        messages: [{
+          role: 'user',
+          content: [
+            { type: 'image', source: { type: 'base64', media_type: media_type || 'image/jpeg', data: imagen_b64 } },
+            { type: 'text', text: `Analizá este ticket, factura o remito de combustible.
+Devolvé SOLO un JSON válido sin markdown ni comentarios:
+{
+  "tipo_comprobante": "factura|remito|ticket|otro",
+  "nro_comprobante": "número o null",
+  "fecha": "YYYY-MM-DD o null",
+  "proveedor": "YPF, Shell, Axion, u otro proveedor (string o null)",
+  "combustible": "gasoil|nafta",
+  "litros": número,
+  "precio_unitario": número o null,
+  "precio_total": número o null,
+  "moneda": "ARS|USD"
+}
+Solo devolvé el JSON, sin texto adicional.` }
+          ]
+        }]
+      })
+    });
+
+    const data = await response.json();
+    if (!response.ok)
+      return res.status(500).json({ ok: false, error: data.error?.message || 'Error de API' });
+    const txt = (data.content?.[0]?.text || '').replace(/```json|```/g, '').trim();
+    let parsed;
+    try { parsed = JSON.parse(txt); }
+    catch(e) { return res.status(422).json({ ok: false, error: 'No se pudo parsear la respuesta', raw: txt }); }
+    res.json({ ok: true, data: parsed });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
 export default router;

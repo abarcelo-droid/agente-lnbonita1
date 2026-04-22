@@ -155,6 +155,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   <div class="ni" data-sec="pa-costos"><span class="dot da"></span>Costos por Lote</div>
   <div class="ni" data-sec="pa-lotes"><span class="dot db"></span>Fincas y Lotes</div>
   <div class="ni" data-sec="pa-scout"><span class="dot de"></span>Scout — Campo</div>
+  <div class="ni" data-sec="pa-combustible"><span class="dot da"></span>⛽ Combustible</div>
   <a href="/scout" class="ni" style="color:inherit;text-decoration:none;display:block;font-weight:600" title="Abrir Scout móvil en esta pestaña">
     <span class="dot da"></span>📱 Abrir Scout móvil
   </a>
@@ -1354,6 +1355,148 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
 </div>
 
 <!-- ─── PA LOTES ──────────────────────────────────────────────── -->
+</div>
+
+<!-- ─── PA COMBUSTIBLE ────────────────────────────────────────── -->
+<div class="sec" id="sec-pa-combustible">
+  <div class="ph">
+    <div><div class="ph-t">⛽ Combustible</div><div class="ph-s">Tanques, vehículos y movimientos</div></div>
+    <div style="display:flex;gap:8px">
+      <button class="btn bb" onclick="cbAbrirVehiculo()">+ Vehículo</button>
+      <button class="btn bo" onclick="cbAbrirAjuste()">📏 Ajuste varilla</button>
+    </div>
+  </div>
+
+  <!-- Sub-tabs -->
+  <div style="display:flex;gap:2px;border-bottom:1px solid var(--bor);margin-bottom:20px">
+    <div class="cb-subtab on" data-sub="dashboard" onclick="cbShowSub('dashboard')" style="padding:10px 18px;cursor:pointer;font-size:13px;font-weight:600;border-bottom:2px solid transparent">📊 Dashboard</div>
+    <div class="cb-subtab" data-sub="vehiculos" onclick="cbShowSub('vehiculos')" style="padding:10px 18px;cursor:pointer;font-size:13px;font-weight:600;border-bottom:2px solid transparent">🚜 Vehículos</div>
+    <div class="cb-subtab" data-sub="movimientos" onclick="cbShowSub('movimientos')" style="padding:10px 18px;cursor:pointer;font-size:13px;font-weight:600;border-bottom:2px solid transparent">📋 Movimientos</div>
+    <div class="cb-subtab" data-sub="tanques" onclick="cbShowSub('tanques')" style="padding:10px 18px;cursor:pointer;font-size:13px;font-weight:600;border-bottom:2px solid transparent">🛢️ Tanques</div>
+  </div>
+
+  <style>
+    .cb-subtab.on { color: var(--burg); border-bottom-color: var(--burg) !important; }
+    .cb-sub { display:none; }
+    .cb-sub.on { display:block; }
+    .cb-card { background:var(--sur); border:1px solid var(--bor); border-radius:12px; padding:16px; }
+    .cb-stat-label { font-size:11px; color:var(--mut); letter-spacing:.06em; text-transform:uppercase; font-weight:700; }
+    .cb-stat-val { font-size:24px; font-weight:800; margin-top:4px; }
+  </style>
+
+  <!-- Dashboard -->
+  <div class="cb-sub on" id="cb-sub-dashboard">
+    <div id="cb-tanques-cards" style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:20px"></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px">
+      <div class="cb-card">
+        <div class="cb-stat-label">Pendientes de revisión</div>
+        <div class="cb-stat-val" id="cb-pendientes-n" style="color:var(--err)">—</div>
+        <div style="font-size:11px;color:var(--mut);margin-top:2px">Cargas del Scout esperando validación</div>
+      </div>
+      <div class="cb-card">
+        <div class="cb-stat-label">Gasto del mes</div>
+        <div id="cb-gasto-mes" style="margin-top:4px;font-size:13px"></div>
+      </div>
+    </div>
+    <div class="cb-card" style="margin-bottom:16px">
+      <div style="font-weight:700;margin-bottom:10px">Top consumidores — últimos 30 días</div>
+      <div id="cb-top-vehiculos"></div>
+    </div>
+    <div class="cb-card">
+      <div style="font-weight:700;margin-bottom:10px">Últimas cargas pendientes</div>
+      <div id="cb-ultimos-pend"></div>
+    </div>
+  </div>
+
+  <!-- Vehículos -->
+  <div class="cb-sub" id="cb-sub-vehiculos">
+    <div class="tw"><table>
+      <thead><tr><th>Tipo</th><th>Identificación</th><th>Marca/Modelo</th><th>Comb.</th><th>Horómetro</th><th>Horas/Km</th><th>Estado</th><th></th></tr></thead>
+      <tbody id="cb-vehiculos-tbody"></tbody>
+    </table></div>
+  </div>
+
+  <!-- Movimientos -->
+  <div class="cb-sub" id="cb-sub-movimientos">
+    <div style="display:flex;gap:10px;margin-bottom:14px;align-items:center;flex-wrap:wrap">
+      <select id="cb-filt-tipo" onchange="cbLoadMovimientos()" style="padding:6px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg)">
+        <option value="">Todos los tipos</option>
+        <option value="carga_tanque">Cargas al tanque</option>
+        <option value="consumo_tanque">Consumo desde tanque</option>
+        <option value="consumo_estacion">Consumo en estación</option>
+        <option value="ajuste_varilla">Ajustes por varilla</option>
+      </select>
+      <select id="cb-filt-estado" onchange="cbLoadMovimientos()" style="padding:6px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg)">
+        <option value="">Todos los estados</option>
+        <option value="pendiente">Pendientes</option>
+        <option value="revisado">Revisados</option>
+      </select>
+      <select id="cb-filt-veh" onchange="cbLoadMovimientos()" style="padding:6px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg)">
+        <option value="">Todos los vehículos</option>
+      </select>
+    </div>
+    <div class="tw"><table>
+      <thead><tr><th>Fecha</th><th>Tipo</th><th>Vehículo / Tanque</th><th>Comb.</th><th>Litros</th><th>Gasto</th><th>Lote</th><th>Cargado por</th><th>Estado</th><th>Foto</th><th></th></tr></thead>
+      <tbody id="cb-movimientos-tbody"></tbody>
+    </table></div>
+  </div>
+
+  <!-- Tanques -->
+  <div class="cb-sub" id="cb-sub-tanques">
+    <div id="cb-tanques-list" style="display:grid;grid-template-columns:1fr 1fr;gap:16px"></div>
+  </div>
+</div>
+
+<!-- MODAL VEHÍCULO -->
+<div class="mb" id="mb-cb-veh">
+  <div class="mbox" style="width:520px">
+    <div class="mhd"><div class="mht" id="mb-cb-veh-tit">Nuevo vehículo</div><button class="mcl" onclick="document.getElementById('mb-cb-veh').classList.remove('on')">×</button></div>
+    <div class="fg">
+      <div class="fl"><label>Tipo *</label>
+        <select id="cb-veh-tipo">
+          <option value="tractor">🚜 Tractor</option>
+          <option value="camioneta">🛻 Camioneta</option>
+          <option value="moto">🏍️ Moto</option>
+          <option value="otro">🚗 Otro</option>
+        </select>
+      </div>
+      <div class="fl"><label>Identificación *</label><input id="cb-veh-id" placeholder="JD 5075 / Hilux AB123CD"></div>
+      <div class="fl"><label>Marca y modelo</label><input id="cb-veh-marca" placeholder="John Deere 5075E"></div>
+      <div class="fl"><label>Combustible *</label>
+        <select id="cb-veh-comb">
+          <option value="gasoil">Gasoil</option>
+          <option value="nafta">Nafta</option>
+        </select>
+      </div>
+      <div class="fl"><label><input type="checkbox" id="cb-veh-horometro" checked> Tiene horómetro</label></div>
+      <div class="fl"><label>Horas actuales</label><input type="number" step="0.1" id="cb-veh-horas" value="0"></div>
+      <div class="fl"><label>Km actuales</label><input type="number" step="1" id="cb-veh-km" value="0"></div>
+      <div class="fl" style="flex:1 1 100%"><label>Notas</label><textarea id="cb-veh-notas" rows="2"></textarea></div>
+    </div>
+    <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:16px">
+      <button class="btn bo" onclick="document.getElementById('mb-cb-veh').classList.remove('on')">Cancelar</button>
+      <button class="btn bb" onclick="cbGuardarVehiculo()">Guardar</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL AJUSTE VARILLA -->
+<div class="mb" id="mb-cb-aj">
+  <div class="mbox" style="width:480px">
+    <div class="mhd"><div class="mht">📏 Ajuste por varilla</div><button class="mcl" onclick="document.getElementById('mb-cb-aj').classList.remove('on')">×</button></div>
+    <div style="padding:4px 0 12px;font-size:13px;color:var(--mut)">Medí con varilla, ingresá los litros reales y el sistema calcula la diferencia.</div>
+    <div class="fg">
+      <div class="fl"><label>Tanque *</label><select id="cb-aj-tanque"></select></div>
+      <div class="fl"><label>Stock actual (sistema)</label><input id="cb-aj-stock-sys" readonly></div>
+      <div class="fl"><label>Stock real (varilla) *</label><input type="number" step="0.1" id="cb-aj-stock-real" oninput="cbCalcAjuste()"></div>
+      <div class="fl"><label>Diferencia</label><input id="cb-aj-dif" readonly></div>
+      <div class="fl" style="flex:1 1 100%"><label>Motivo / notas</label><textarea id="cb-aj-notas" rows="2" placeholder="Evaporación, pérdida, consumo no registrado..."></textarea></div>
+    </div>
+    <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:16px">
+      <button class="btn bo" onclick="document.getElementById('mb-cb-aj').classList.remove('on')">Cancelar</button>
+      <button class="btn bb" onclick="cbGuardarAjuste()">Registrar ajuste</button>
+    </div>
+  </div>
 </div>
 
 </main>
@@ -6176,6 +6319,298 @@ function scoutResolver(id) {
 }
 
 (function(){if(document.readyState!=='loading')paInit();else document.addEventListener('DOMContentLoaded',paInit);})();
+
+// ═════════════════════════════════════════════════════════════════════
+// ⛽ COMBUSTIBLE — Panel desktop
+// ═════════════════════════════════════════════════════════════════════
+var CB = { tanques: [], vehiculos: [], editVehId: null };
+
+function cbInit() {
+  cbShowSub('dashboard');
+  cbLoadVehiculos();
+}
+
+function cbShowSub(sub) {
+  document.querySelectorAll('.cb-subtab').forEach(function(t){ t.classList.toggle('on', t.dataset.sub === sub); });
+  document.querySelectorAll('.cb-sub').forEach(function(s){ s.classList.remove('on'); });
+  document.getElementById('cb-sub-'+sub).classList.add('on');
+  if (sub === 'dashboard') cbLoadDashboard();
+  if (sub === 'vehiculos') cbLoadVehiculos();
+  if (sub === 'movimientos') cbLoadMovimientos();
+  if (sub === 'tanques') cbLoadTanques();
+}
+
+function cbFmtLitros(n) { return (n||0).toFixed(0) + ' lt'; }
+function cbFmtMoney(n, mon) { return (mon||'ARS') + ' ' + (n||0).toLocaleString('es-AR', {maximumFractionDigits:0}); }
+
+// ── Dashboard ──
+function cbLoadDashboard() {
+  paF('/api/pa/combustible/dashboard').then(function(res) {
+    if (!res.ok) return;
+    var d = res.data;
+
+    // Tanques
+    var cards = (d.tanques||[]).map(function(t) {
+      var color = t.tipo==='gasoil' ? '#059669' : '#dc2626';
+      var icon = t.tipo==='gasoil' ? '⛽' : '⛽';
+      var pct = t.capacidad_lt > 0 ? Math.min(100, (t.stock_actual/t.capacidad_lt)*100) : 0;
+      var bar = t.capacidad_lt ? '<div style="margin-top:10px;height:8px;background:rgba(0,0,0,.08);border-radius:4px;overflow:hidden"><div style="height:100%;width:'+pct+'%;background:'+color+'"></div></div><div style="font-size:11px;color:var(--mut);margin-top:4px">'+pct.toFixed(0)+'% de '+t.capacidad_lt+' lt</div>' : '<div style="font-size:11px;color:var(--mut);margin-top:8px">Capacidad no definida</div>';
+      return '<div class="cb-card"><div style="display:flex;align-items:center;justify-content:space-between"><div><div class="cb-stat-label">'+icon+' '+t.nombre+'</div><div class="cb-stat-val" style="color:'+color+'">'+cbFmtLitros(t.stock_actual)+'</div></div></div>'+bar+'</div>';
+    }).join('');
+    document.getElementById('cb-tanques-cards').innerHTML = cards || '<div style="grid-column:1/-1;color:var(--mut);padding:20px;text-align:center">Sin tanques configurados</div>';
+
+    // Pendientes
+    document.getElementById('cb-pendientes-n').textContent = d.pendientes || 0;
+
+    // Gasto mes
+    var gasto = (d.gasto_mes||[]).map(function(g){
+      return '<div style="display:flex;justify-content:space-between;padding:4px 0"><span style="color:var(--mut)">'+g.combustible+' ('+g.moneda+')</span><strong>'+cbFmtMoney(g.total, g.moneda)+'</strong> <span style="color:var(--mut);font-size:11px">· '+cbFmtLitros(g.litros)+'</span></div>';
+    }).join('');
+    document.getElementById('cb-gasto-mes').innerHTML = gasto || '<div style="color:var(--mut);font-size:12px">Sin movimientos este mes</div>';
+
+    // Top vehículos
+    var top = (d.top_vehiculos||[]).map(function(v,i){
+      var ico = v.tipo==='tractor'?'🚜':v.tipo==='camioneta'?'🛻':v.tipo==='moto'?'🏍️':'🚗';
+      return '<div style="display:flex;align-items:center;gap:12px;padding:8px 0;border-bottom:1px solid var(--bor)"><span style="font-size:18px">'+ico+'</span><div style="flex:1"><div style="font-weight:600">'+v.identificacion+'</div><div style="font-size:11px;color:var(--mut)">'+v.combustible+'</div></div><div style="text-align:right"><div style="font-weight:700">'+cbFmtLitros(v.litros)+'</div></div></div>';
+    }).join('');
+    document.getElementById('cb-top-vehiculos').innerHTML = top || '<div style="color:var(--mut);font-size:12px">Sin consumos aún</div>';
+
+    // Últimos pendientes
+    var pend = (d.ultimos_pendientes||[]).map(function(m){
+      var tm = m.tipo_movimiento.replace('_',' ');
+      return '<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--bor)"><div style="flex:1"><div style="font-size:13px">'+tm+' · '+(m.vehiculo_txt||'tanque')+' · '+m.litros+' lt '+m.combustible+'</div><div style="font-size:11px;color:var(--mut)">'+m.fecha+' — '+(m.cargado_por_nombre||'—')+'</div></div><button class="btn bb bs" onclick="cbRevisar('+m.id+')" style="font-size:11px;padding:4px 10px">✓ Revisar</button></div>';
+    }).join('');
+    document.getElementById('cb-ultimos-pend').innerHTML = pend || '<div style="color:var(--mut);font-size:12px">No hay cargas pendientes</div>';
+  });
+}
+
+// ── Vehículos ──
+function cbLoadVehiculos() {
+  paF('/api/pa/combustible/vehiculos?incluir_inactivos=1').then(function(r){
+    if (!r.ok) return;
+    CB.vehiculos = r.data || [];
+    var tbody = document.getElementById('cb-vehiculos-tbody');
+    if (!CB.vehiculos.length) {
+      tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--mut);padding:20px">Sin vehículos. Agregá el primero con el botón "+ Vehículo".</td></tr>';
+    } else {
+      tbody.innerHTML = CB.vehiculos.map(function(v){
+        var ico = v.tipo==='tractor'?'🚜':v.tipo==='camioneta'?'🛻':v.tipo==='moto'?'🏍️':'🚗';
+        var estadoTxt = v.activo ? '<span style="color:var(--ok)">● Activo</span>' : '<span style="color:var(--mut)">○ Inactivo</span>';
+        var horoTxt = v.tiene_horometro ? '<span title="Con horómetro">✓</span>' : '—';
+        var horasKm = v.tipo === 'tractor' ? (v.horas_actuales||0).toFixed(1) + ' h' : (v.km_actuales||0).toFixed(0) + ' km';
+        return '<tr><td>'+ico+' '+v.tipo+'</td><td><strong>'+v.identificacion+'</strong></td><td>'+(v.marca_modelo||'—')+'</td><td>'+v.combustible+'</td><td style="text-align:center">'+horoTxt+'</td><td>'+horasKm+'</td><td>'+estadoTxt+'</td><td><button class="btn bo bs" onclick="cbEditarVehiculo('+v.id+')" style="padding:4px 10px;font-size:11px">Editar</button></td></tr>';
+      }).join('');
+    }
+    // Poblar filtro de vehículos en movimientos
+    var selF = document.getElementById('cb-filt-veh');
+    if (selF) {
+      selF.innerHTML = '<option value="">Todos los vehículos</option>' +
+        CB.vehiculos.filter(function(v){return v.activo;}).map(function(v){
+          return '<option value="'+v.id+'">'+v.identificacion+'</option>';
+        }).join('');
+    }
+  });
+}
+
+function cbAbrirVehiculo() {
+  CB.editVehId = null;
+  document.getElementById('mb-cb-veh-tit').textContent = 'Nuevo vehículo';
+  document.getElementById('cb-veh-tipo').value = 'tractor';
+  document.getElementById('cb-veh-id').value = '';
+  document.getElementById('cb-veh-marca').value = '';
+  document.getElementById('cb-veh-comb').value = 'gasoil';
+  document.getElementById('cb-veh-horometro').checked = true;
+  document.getElementById('cb-veh-horas').value = 0;
+  document.getElementById('cb-veh-km').value = 0;
+  document.getElementById('cb-veh-notas').value = '';
+  document.getElementById('mb-cb-veh').classList.add('on');
+}
+
+function cbEditarVehiculo(id) {
+  var v = CB.vehiculos.find(function(x){return x.id===id;});
+  if (!v) return;
+  CB.editVehId = id;
+  document.getElementById('mb-cb-veh-tit').textContent = 'Editar: ' + v.identificacion;
+  document.getElementById('cb-veh-tipo').value = v.tipo;
+  document.getElementById('cb-veh-id').value = v.identificacion;
+  document.getElementById('cb-veh-marca').value = v.marca_modelo || '';
+  document.getElementById('cb-veh-comb').value = v.combustible;
+  document.getElementById('cb-veh-horometro').checked = !!v.tiene_horometro;
+  document.getElementById('cb-veh-horas').value = v.horas_actuales || 0;
+  document.getElementById('cb-veh-km').value = v.km_actuales || 0;
+  document.getElementById('cb-veh-notas').value = v.notas || '';
+  document.getElementById('mb-cb-veh').classList.add('on');
+}
+
+function cbGuardarVehiculo() {
+  var body = {
+    tipo: document.getElementById('cb-veh-tipo').value,
+    identificacion: document.getElementById('cb-veh-id').value.trim(),
+    marca_modelo: document.getElementById('cb-veh-marca').value.trim() || null,
+    combustible: document.getElementById('cb-veh-comb').value,
+    tiene_horometro: document.getElementById('cb-veh-horometro').checked ? 1 : 0,
+    horas_actuales: parseFloat(document.getElementById('cb-veh-horas').value) || 0,
+    km_actuales: parseFloat(document.getElementById('cb-veh-km').value) || 0,
+    notas: document.getElementById('cb-veh-notas').value.trim() || null
+  };
+  if (!body.identificacion) return toast('La identificación es obligatoria', 'er');
+  var url = CB.editVehId ? '/api/pa/combustible/vehiculos/' + CB.editVehId : '/api/pa/combustible/vehiculos';
+  var method = CB.editVehId ? 'PATCH' : 'POST';
+  paF(url, { method:method, headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) })
+    .then(function(r){
+      if (r.ok) { toast('Vehículo guardado'); document.getElementById('mb-cb-veh').classList.remove('on'); cbLoadVehiculos(); }
+      else toast(r.error || 'Error', 'er');
+    });
+}
+
+// ── Movimientos ──
+function cbLoadMovimientos() {
+  var tipo = document.getElementById('cb-filt-tipo').value;
+  var estado = document.getElementById('cb-filt-estado').value;
+  var veh = document.getElementById('cb-filt-veh').value;
+  var qs = [];
+  if (tipo) qs.push('tipo='+tipo);
+  if (estado) qs.push('estado='+estado);
+  if (veh) qs.push('vehiculo_id='+veh);
+  var url = '/api/pa/combustible/movimientos' + (qs.length ? '?'+qs.join('&') : '');
+  paF(url).then(function(r){
+    if (!r.ok) return;
+    var TM = { carga_tanque:'🛢️ Carga tanque', consumo_tanque:'🚜 Consumo tanque', consumo_estacion:'⛽ Estación', ajuste_varilla:'📏 Ajuste' };
+    var tbody = document.getElementById('cb-movimientos-tbody');
+    if (!r.data.length) {
+      tbody.innerHTML = '<tr><td colspan="11" style="text-align:center;color:var(--mut);padding:20px">Sin movimientos con esos filtros.</td></tr>';
+      return;
+    }
+    tbody.innerHTML = r.data.map(function(m){
+      var est = m.estado_revision==='pendiente' ? '<span style="color:var(--err);font-weight:600">⏳ Pendiente</span>' :
+                m.estado_revision==='revisado' ? '<span style="color:var(--ok)">✓ Revisado</span>' : '<span>✎ Corregido</span>';
+      var foto = m.foto_path ? '<a href="'+m.foto_path+'" target="_blank" style="font-size:12px;color:var(--burg)">📄 Ver</a>' : '—';
+      var quien = m.vehiculo_txt || m.tanque_nombre || '—';
+      var lote = m.lote_nombre ? m.lote_nombre + (m.lote_finca ? ' · '+m.lote_finca : '') : '—';
+      var gasto = m.precio_total ? cbFmtMoney(m.precio_total, m.moneda) : '—';
+      var acciones = m.estado_revision==='pendiente'
+        ? '<button class="btn bb bs" onclick="cbRevisar('+m.id+')" style="padding:3px 8px;font-size:11px">✓</button> '
+        : '';
+      acciones += '<button class="btn bd bs" onclick="cbEliminarMov('+m.id+')" style="padding:3px 8px;font-size:11px">✕</button>';
+      return '<tr><td>'+paFecha(m.fecha)+'</td><td>'+(TM[m.tipo_movimiento]||m.tipo_movimiento)+'</td><td>'+quien+'</td><td>'+m.combustible+'</td><td><strong>'+(m.litros||0).toFixed(1)+'</strong></td><td>'+gasto+'</td><td>'+lote+'</td><td>'+(m.cargado_por_nombre||'—')+'</td><td>'+est+'</td><td>'+foto+'</td><td style="white-space:nowrap">'+acciones+'</td></tr>';
+    }).join('');
+  });
+}
+
+function cbRevisar(id) {
+  paF('/api/pa/combustible/movimientos/'+id+'/revisar', { method:'PATCH', headers:{'Content-Type':'application/json'}, body:JSON.stringify({}) })
+    .then(function(r){
+      if (r.ok) { toast('Revisado ✓'); cbLoadMovimientos(); cbLoadDashboard(); }
+      else toast(r.error || 'Error', 'er');
+    });
+}
+
+function cbEliminarMov(id) {
+  if (!confirm('¿Eliminar este movimiento? Se revertirá el stock y el costo.')) return;
+  paF('/api/pa/combustible/movimientos/'+id, { method:'DELETE' })
+    .then(function(r){
+      if (r.ok) { toast('Eliminado'); cbLoadMovimientos(); cbLoadDashboard(); }
+      else toast(r.error || 'Error', 'er');
+    });
+}
+
+// ── Tanques ──
+function cbLoadTanques() {
+  paF('/api/pa/combustible/tanques').then(function(r){
+    if (!r.ok) return;
+    CB.tanques = r.data || [];
+    document.getElementById('cb-tanques-list').innerHTML = CB.tanques.map(function(t){
+      var color = t.tipo==='gasoil' ? '#059669' : '#dc2626';
+      return '<div class="cb-card"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px"><div style="font-size:18px;font-weight:700;color:'+color+'">⛽ '+t.nombre+'</div><div style="font-size:24px;font-weight:800;color:'+color+'">'+cbFmtLitros(t.stock_actual)+'</div></div>' +
+        '<div class="fg">' +
+          '<div class="fl" style="flex:1 1 40%"><label>Capacidad (lt)</label><input type="number" step="1" id="cb-tq-cap-'+t.id+'" value="'+(t.capacidad_lt||0)+'"></div>' +
+          '<div class="fl" style="flex:1 1 40%"><label>Ubicación</label><input id="cb-tq-ubi-'+t.id+'" value="'+(t.ubicacion||'')+'"></div>' +
+          '<div class="fl" style="flex:1 1 100%"><label>Notas</label><textarea id="cb-tq-not-'+t.id+'" rows="2">'+(t.notas||'')+'</textarea></div>' +
+        '</div>' +
+        '<div style="margin-top:10px;display:flex;justify-content:flex-end"><button class="btn bb bs" onclick="cbGuardarTanque('+t.id+')">Guardar cambios</button></div>' +
+      '</div>';
+    }).join('');
+  });
+}
+
+function cbGuardarTanque(id) {
+  var body = {
+    capacidad_lt: parseFloat(document.getElementById('cb-tq-cap-'+id).value) || 0,
+    ubicacion: document.getElementById('cb-tq-ubi-'+id).value.trim() || null,
+    notas: document.getElementById('cb-tq-not-'+id).value.trim() || null
+  };
+  paF('/api/pa/combustible/tanques/'+id, { method:'PATCH', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) })
+    .then(function(r){ if(r.ok){toast('Actualizado');cbLoadTanques();cbLoadDashboard();} else toast(r.error||'Error','er'); });
+}
+
+// ── Ajuste por varilla ──
+function cbAbrirAjuste() {
+  paF('/api/pa/combustible/tanques').then(function(r){
+    if (!r.ok) return;
+    CB.tanques = r.data || [];
+    var sel = document.getElementById('cb-aj-tanque');
+    sel.innerHTML = CB.tanques.map(function(t){
+      return '<option value="'+t.id+'" data-stock="'+t.stock_actual+'">'+t.nombre+' ('+cbFmtLitros(t.stock_actual)+')</option>';
+    }).join('');
+    sel.onchange = cbAjusteRefresh;
+    cbAjusteRefresh();
+    document.getElementById('cb-aj-stock-real').value = '';
+    document.getElementById('cb-aj-dif').value = '';
+    document.getElementById('cb-aj-notas').value = '';
+    document.getElementById('mb-cb-aj').classList.add('on');
+  });
+}
+
+function cbAjusteRefresh() {
+  var sel = document.getElementById('cb-aj-tanque');
+  var opt = sel.selectedOptions[0];
+  if (!opt) return;
+  document.getElementById('cb-aj-stock-sys').value = cbFmtLitros(parseFloat(opt.dataset.stock));
+  cbCalcAjuste();
+}
+
+function cbCalcAjuste() {
+  var sel = document.getElementById('cb-aj-tanque');
+  var opt = sel.selectedOptions[0];
+  if (!opt) return;
+  var sys = parseFloat(opt.dataset.stock) || 0;
+  var real = parseFloat(document.getElementById('cb-aj-stock-real').value) || 0;
+  var dif = real - sys;
+  document.getElementById('cb-aj-dif').value = (dif >= 0 ? '+' : '') + dif.toFixed(1) + ' lt';
+  document.getElementById('cb-aj-dif').style.color = dif === 0 ? 'var(--mut)' : dif > 0 ? 'var(--ok)' : 'var(--err)';
+}
+
+function cbGuardarAjuste() {
+  var sel = document.getElementById('cb-aj-tanque');
+  var opt = sel.selectedOptions[0];
+  if (!opt) return toast('Elegí un tanque', 'er');
+  var realStr = document.getElementById('cb-aj-stock-real').value;
+  if (realStr === '') return toast('Ingresá el stock real', 'er');
+  var sys = parseFloat(opt.dataset.stock) || 0;
+  var real = parseFloat(realStr);
+  var dif = real - sys;
+  if (dif === 0) return toast('No hay diferencia, no hace falta ajustar', 'er');
+  var tanque = CB.tanques.find(function(t){return t.id==opt.value;});
+  var body = {
+    tipo_movimiento: 'ajuste_varilla',
+    tanque_id: parseInt(opt.value),
+    combustible: tanque.tipo,
+    litros: dif, // diferencia (puede ser negativa)
+    notas: document.getElementById('cb-aj-notas').value.trim() || null
+  };
+  paF('/api/pa/combustible/movimientos', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) })
+    .then(function(r){
+      if (r.ok) { toast('Ajuste registrado'); document.getElementById('mb-cb-aj').classList.remove('on'); cbLoadDashboard(); cbLoadTanques(); }
+      else toast(r.error || 'Error', 'er');
+    });
+}
+
+// Hook: cuando se hace click en el item del sidebar, arrancar el módulo
+document.addEventListener('click', function(e) {
+  var t = e.target.closest('[data-sec="pa-combustible"]');
+  if (t) setTimeout(cbInit, 50);
+});
+
 </script>
 
 </body>

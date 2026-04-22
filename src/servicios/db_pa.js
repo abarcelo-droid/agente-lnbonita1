@@ -376,5 +376,89 @@ export function getCampañaActiva() {
   } catch(e) { console.error('[PA] Error migrando campañas históricas:', e.message); }
 })();
 
+// ── MÓDULO COMBUSTIBLE ─────────────────────────────────────────────────────
+// Tanques (gasoil + nafta), vehículos (tractores/camionetas/motos) y
+// movimientos unificados (entradas y salidas en una sola tabla).
+
+db.exec(`
+  -- Tanques de combustible (uno por tipo)
+  CREATE TABLE IF NOT EXISTS pa_combustible_tanques (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    nombre        TEXT NOT NULL UNIQUE,
+    tipo          TEXT NOT NULL CHECK(tipo IN ('gasoil','nafta')),
+    capacidad_lt  REAL DEFAULT 0,
+    stock_actual  REAL DEFAULT 0,
+    ubicacion     TEXT,
+    activo        INTEGER DEFAULT 1,
+    notas         TEXT,
+    creado_en     TEXT DEFAULT (datetime('now','localtime'))
+  );
+
+  -- Vehículos que consumen combustible
+  CREATE TABLE IF NOT EXISTS pa_vehiculos (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    tipo            TEXT NOT NULL CHECK(tipo IN ('tractor','camioneta','moto','otro')),
+    identificacion  TEXT NOT NULL UNIQUE,
+    marca_modelo    TEXT,
+    combustible     TEXT NOT NULL CHECK(combustible IN ('gasoil','nafta')),
+    tiene_horometro INTEGER DEFAULT 0,
+    horas_actuales  REAL DEFAULT 0,
+    km_actuales     REAL DEFAULT 0,
+    activo          INTEGER DEFAULT 1,
+    notas           TEXT,
+    creado_en       TEXT DEFAULT (datetime('now','localtime'))
+  );
+
+  -- Movimientos de combustible — entradas Y salidas en una sola tabla
+  CREATE TABLE IF NOT EXISTS pa_combustible_movimientos (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    fecha             TEXT NOT NULL DEFAULT (date('now','localtime')),
+    tipo_movimiento   TEXT NOT NULL CHECK(tipo_movimiento IN ('carga_tanque','consumo_tanque','consumo_estacion','ajuste_varilla')),
+    tanque_id         INTEGER REFERENCES pa_combustible_tanques(id),
+    vehiculo_id       INTEGER REFERENCES pa_vehiculos(id),
+    combustible       TEXT NOT NULL CHECK(combustible IN ('gasoil','nafta')),
+    litros            REAL NOT NULL,
+    precio_unitario   REAL DEFAULT 0,
+    moneda            TEXT DEFAULT 'ARS' CHECK(moneda IN ('ARS','USD')),
+    precio_total      REAL DEFAULT 0,
+    proveedor_id      INTEGER REFERENCES pa_proveedores(id),
+    proveedor_txt     TEXT,
+    tipo_comprobante  TEXT,
+    nro_comprobante   TEXT,
+    foto_path         TEXT,
+    lote_id           INTEGER REFERENCES pa_lotes(id),
+    orden_id          INTEGER REFERENCES pa_ordenes(id),
+    horas_horometro   REAL,
+    km_vehiculo       REAL,
+    cargado_por       INTEGER REFERENCES usuarios(id),
+    estado_revision   TEXT DEFAULT 'pendiente' CHECK(estado_revision IN ('pendiente','revisado','corregido')),
+    revisado_por      INTEGER REFERENCES usuarios(id),
+    revisado_en       TEXT,
+    notas_revision    TEXT,
+    notas             TEXT,
+    creado_en         TEXT DEFAULT (datetime('now','localtime'))
+  );
+
+  -- Índices para queries frecuentes
+  CREATE INDEX IF NOT EXISTS idx_pa_comb_mov_fecha ON pa_combustible_movimientos(fecha);
+  CREATE INDEX IF NOT EXISTS idx_pa_comb_mov_vehiculo ON pa_combustible_movimientos(vehiculo_id);
+  CREATE INDEX IF NOT EXISTS idx_pa_comb_mov_estado ON pa_combustible_movimientos(estado_revision);
+  CREATE INDEX IF NOT EXISTS idx_pa_comb_mov_lote ON pa_combustible_movimientos(lote_id);
+`);
+
+// ── SEED: Tanque Gasoil + Tanque Nafta ─────────────────────────────────────
+(function seedTanquesCombustible() {
+  try {
+    const n = db.prepare("SELECT COUNT(*) as n FROM pa_combustible_tanques").get();
+    if (n.n === 0) {
+      db.prepare("INSERT INTO pa_combustible_tanques (nombre, tipo, capacidad_lt, stock_actual) VALUES (?,?,?,?)")
+        .run('Tanque Gasoil', 'gasoil', 0, 0);
+      db.prepare("INSERT INTO pa_combustible_tanques (nombre, tipo, capacidad_lt, stock_actual) VALUES (?,?,?,?)")
+        .run('Tanque Nafta', 'nafta', 0, 0);
+      console.log('[PA] Tanques de combustible (gasoil y nafta) creados');
+    }
+  } catch(e) { console.error('[PA] Error seed tanques combustible:', e.message); }
+})();
+
 export { db };
 export default db;

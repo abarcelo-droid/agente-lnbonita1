@@ -217,6 +217,7 @@ input[type=file]{display:none}
     <div class="tab" data-tab="mis-tareas" onclick="showTab('mis-tareas')">
       ✅ Tareas<span class="tab-badge" id="badge-mis"></span>
     </div>
+    <div class="tab" data-tab="combustible" onclick="showTab('combustible')">⛽ Combustible</div>
   </div>
 </div>
 
@@ -377,6 +378,171 @@ input[type=file]{display:none}
 <!-- ═══════════════════════ TAB MIS TAREAS ═══════════════════════ -->
 <div class="screen" id="screen-mis-tareas">
   <div id="mis-lista"><div class="empty"><span class="empty-icon">⏳</span><div class="empty-txt">Cargando...</div></div></div>
+</div>
+
+<!-- ═══════════════════════ TAB COMBUSTIBLE ═══════════════════════ -->
+<div class="screen" id="screen-combustible">
+
+  <!-- Estado tanques -->
+  <div style="padding:14px 14px 0">
+    <div style="font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--mut);margin-bottom:8px">⛽ Stock actual</div>
+    <div id="cb-tanques" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px"></div>
+  </div>
+
+  <!-- 3 acciones grandes -->
+  <div style="padding:0 14px;display:flex;flex-direction:column;gap:10px">
+    <button class="rep-btn" style="width:100%;padding:16px;background:var(--sur);border:1px solid var(--bor);border-radius:12px;text-align:left;display:flex;align-items:center;gap:12px" onclick="cbAbrirAccion('consumo_tanque')">
+      <span style="font-size:28px">🚜</span>
+      <div>
+        <div style="font-size:15px;font-weight:700;color:var(--txt)">Cargué del tanque</div>
+        <div style="font-size:12px;color:var(--mut)">A un tractor, camioneta o moto</div>
+      </div>
+    </button>
+    <button class="rep-btn" style="width:100%;padding:16px;background:var(--sur);border:1px solid var(--bor);border-radius:12px;text-align:left;display:flex;align-items:center;gap:12px" onclick="cbAbrirAccion('consumo_estacion')">
+      <span style="font-size:28px">⛽</span>
+      <div>
+        <div style="font-size:15px;font-weight:700;color:var(--txt)">Cargué en estación</div>
+        <div style="font-size:12px;color:var(--mut)">YPF, Shell, Axion... con ticket</div>
+      </div>
+    </button>
+    <button class="rep-btn" style="width:100%;padding:16px;background:var(--sur);border:1px solid var(--bor);border-radius:12px;text-align:left;display:flex;align-items:center;gap:12px" onclick="cbAbrirAccion('carga_tanque')">
+      <span style="font-size:28px">🛢️</span>
+      <div>
+        <div style="font-size:15px;font-weight:700;color:var(--txt)">Cargaron el tanque</div>
+        <div style="font-size:12px;color:var(--mut)">Vino proveedor con remito</div>
+      </div>
+    </button>
+  </div>
+
+  <!-- Últimos movimientos del usuario -->
+  <div style="padding:16px 14px 80px">
+    <div style="font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--mut);margin:8px 0 8px">Mis últimas cargas</div>
+    <div id="cb-ultimos"><div class="empty" style="padding:20px"><span class="empty-icon">⏳</span><div class="empty-txt" style="font-size:12px">Cargando...</div></div></div>
+  </div>
+</div>
+
+<!-- MODAL ACCIÓN COMBUSTIBLE -->
+<div class="lightbox" id="modal-comb" style="align-items:flex-end;padding:0">
+  <div style="background:var(--sur);width:100%;max-height:94vh;overflow-y:auto;border-radius:20px 20px 0 0;padding:20px">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+      <div>
+        <div style="font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--mut);margin-bottom:3px">Registrar carga</div>
+        <div style="font-size:18px;font-weight:700;color:var(--burg)" id="cb-modal-tit">—</div>
+      </div>
+      <button class="lightbox-close" style="position:static;width:36px;height:36px;font-size:18px;background:var(--bg)" onclick="document.getElementById('modal-comb').classList.remove('open')">×</button>
+    </div>
+
+    <!-- FOTO + LECTOR IA (visible en consumo_estacion y carga_tanque) -->
+    <div id="cb-foto-block" style="display:none;margin-bottom:14px">
+      <div style="background:var(--bg);border-radius:12px;border:1px solid var(--bor);overflow:hidden">
+        <div style="padding:12px 14px;border-bottom:1px solid var(--bor);display:flex;align-items:center;justify-content:space-between">
+          <div style="font-size:12px;font-weight:700;color:var(--txt)" id="cb-foto-titulo">📄 Foto del ticket</div>
+          <button id="cb-ia-btn" onclick="cbLeerTicket()" style="display:none;background:var(--burg);color:#fff;border:none;border-radius:20px;padding:6px 14px;font-size:12px;font-weight:700;cursor:pointer">✨ Leer</button>
+        </div>
+        <div style="padding:12px">
+          <div class="foto-area" id="cb-foto-area" style="padding:18px;text-align:center;border:2px dashed var(--bor);border-radius:10px;cursor:pointer" onclick="document.getElementById('cb-foto-inp').click()">
+            <span class="foto-icon-big" style="font-size:24px">📷</span>
+            <div class="foto-hint" style="font-size:12px;color:var(--mut);margin-top:4px">Tocar para sacar foto</div>
+          </div>
+          <input type="file" id="cb-foto-inp" accept="image/*" capture="environment" style="display:none" onchange="cbOnFoto(this)">
+          <div id="cb-ia-estado" style="display:none;margin-top:8px;padding:8px 10px;border-radius:8px;font-size:12px;text-align:center"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tanque (para carga_tanque y ajuste) -->
+    <div id="cb-tanque-row" style="display:none;margin-bottom:12px">
+      <div style="font-size:11px;color:var(--mut);margin-bottom:4px">Tanque</div>
+      <select class="scout-select" id="cb-tanque-sel"></select>
+    </div>
+
+    <!-- Combustible -->
+    <div style="margin-bottom:12px">
+      <div style="font-size:11px;color:var(--mut);margin-bottom:4px">Combustible</div>
+      <div style="display:flex;gap:8px">
+        <button type="button" class="rep-btn" id="cb-comb-gasoil" onclick="cbSetComb('gasoil')" style="flex:1;padding:12px;border-radius:10px">⛽ Gasoil</button>
+        <button type="button" class="rep-btn" id="cb-comb-nafta" onclick="cbSetComb('nafta')" style="flex:1;padding:12px;border-radius:10px">⛽ Nafta</button>
+      </div>
+    </div>
+
+    <!-- Vehículo (para consumos) -->
+    <div id="cb-vehiculo-row" style="display:none;margin-bottom:12px">
+      <div style="font-size:11px;color:var(--mut);margin-bottom:4px">Vehículo</div>
+      <select class="scout-select" id="cb-vehiculo-sel" onchange="cbOnVehiculo()"></select>
+    </div>
+
+    <!-- Litros -->
+    <div style="margin-bottom:12px">
+      <div style="font-size:11px;color:var(--mut);margin-bottom:4px">Litros</div>
+      <input type="number" step="0.1" min="0" class="scout-input" id="cb-litros" placeholder="Ej: 45.5" inputmode="decimal">
+    </div>
+
+    <!-- Horómetro (solo si vehículo es tractor con horómetro) -->
+    <div id="cb-horas-row" style="display:none;margin-bottom:12px">
+      <div style="font-size:11px;color:var(--mut);margin-bottom:4px">Horas del horómetro (actuales)</div>
+      <input type="number" step="0.1" min="0" class="scout-input" id="cb-horas" placeholder="Ej: 1240.5" inputmode="decimal">
+    </div>
+
+    <!-- Km (camioneta/moto) -->
+    <div id="cb-km-row" style="display:none;margin-bottom:12px">
+      <div style="font-size:11px;color:var(--mut);margin-bottom:4px">Km (opcional)</div>
+      <input type="number" step="1" min="0" class="scout-input" id="cb-km" placeholder="Ej: 85200" inputmode="numeric">
+    </div>
+
+    <!-- Lote (solo para tractores en consumos) -->
+    <div id="cb-lote-row" style="display:none;margin-bottom:12px">
+      <div style="font-size:11px;color:var(--mut);margin-bottom:4px">Lote trabajado (opcional)</div>
+      <select class="scout-select" id="cb-lote-sel"><option value="">— Sin lote asignado —</option></select>
+    </div>
+
+    <!-- Datos del comprobante (consumo_estacion y carga_tanque) -->
+    <div id="cb-comp-block" style="display:none;margin-bottom:12px">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
+        <div>
+          <div style="font-size:11px;color:var(--mut);margin-bottom:4px">Precio/lt</div>
+          <input type="number" step="0.01" min="0" class="scout-input" id="cb-prec-unit" placeholder="Ej: 950" inputmode="decimal">
+        </div>
+        <div>
+          <div style="font-size:11px;color:var(--mut);margin-bottom:4px">Moneda</div>
+          <select class="scout-select" id="cb-moneda">
+            <option value="ARS">ARS</option>
+            <option value="USD">USD</option>
+          </select>
+        </div>
+      </div>
+      <div style="margin-bottom:10px">
+        <div style="font-size:11px;color:var(--mut);margin-bottom:4px">Total</div>
+        <input type="number" step="0.01" min="0" class="scout-input" id="cb-prec-total" placeholder="Se calcula solo" inputmode="decimal">
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
+        <div>
+          <div style="font-size:11px;color:var(--mut);margin-bottom:4px">Proveedor</div>
+          <input class="scout-input" id="cb-prov" placeholder="YPF, Shell...">
+        </div>
+        <div>
+          <div style="font-size:11px;color:var(--mut);margin-bottom:4px">N° comprobante</div>
+          <input class="scout-input" id="cb-nro" placeholder="Ej: 0001-123">
+        </div>
+      </div>
+    </div>
+
+    <!-- Fecha -->
+    <div style="margin-bottom:12px">
+      <div style="font-size:11px;color:var(--mut);margin-bottom:4px">Fecha</div>
+      <input type="date" class="scout-input" id="cb-fecha">
+    </div>
+
+    <!-- Notas -->
+    <div style="margin-bottom:14px">
+      <div style="font-size:11px;color:var(--mut);margin-bottom:4px">Notas (opcional)</div>
+      <textarea class="scout-input" id="cb-notas" rows="2" placeholder="Observaciones..."></textarea>
+    </div>
+
+    <button class="rep-btn primary" id="cb-btn-guardar" style="width:100%;padding:16px;font-size:15px;border-radius:12px" onclick="cbGuardar()">
+      ✓ Guardar
+    </button>
+    <div style="font-size:11px;color:var(--mut);text-align:center;margin-top:8px">Queda pendiente de revisión por oficina</div>
+  </div>
 </div>
 
 <!-- MODAL EJECUTAR APLICACIÓN -->
@@ -602,6 +768,7 @@ function showTab(tab) {
   if(tab==='compras')initCompras();
   if(tab==='pendientes')cargarPendientes();
   if(tab==='mis-tareas')cargarMisTareas();
+  if(tab==='combustible')cbInit();
 }
 
 // ── RENDER REPORTES ──
@@ -1099,6 +1266,310 @@ function scoutGuardarCompra() {
       document.getElementById('comp-total-label').textContent = '$0';
       scoutAgregarItemComp();
     } else toast(r.error||'Error al guardar','er');
+  });
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// COMBUSTIBLE
+// ──────────────────────────────────────────────────────────────────────
+var CB = {
+  accion: null,          // 'consumo_tanque' | 'consumo_estacion' | 'carga_tanque'
+  combustible: null,     // 'gasoil' | 'nafta'
+  vehiculos: [],
+  tanques: [],
+  lotes: [],
+  fotoB64: null
+};
+
+function cbInit() {
+  cbCargarDatos();
+}
+
+function cbCargarDatos() {
+  Promise.all([
+    api('/api/pa/combustible/tanques').then(r => r.data || []),
+    api('/api/pa/combustible/vehiculos').then(r => r.data || []),
+    api('/api/pa/lotes').then(r => r.data || []),
+    api('/api/pa/combustible/movimientos?limit=5').then(r => r.data || [])
+  ]).then(function(arr) {
+    CB.tanques = arr[0];
+    CB.vehiculos = arr[1];
+    CB.lotes = arr[2];
+    cbRenderTanques(CB.tanques);
+    cbRenderUltimos(arr[3]);
+  });
+}
+
+function cbRenderTanques(tanques) {
+  var el = document.getElementById('cb-tanques');
+  if (!tanques.length) { el.innerHTML = '<div class="empty" style="grid-column:1/-1;padding:16px"><span class="empty-icon">🛢️</span><div class="empty-txt" style="font-size:12px">Sin tanques</div></div>'; return; }
+  el.innerHTML = tanques.map(function(t) {
+    var color = t.tipo === 'gasoil' ? '#059669' : '#dc2626';
+    var cap = t.capacidad_lt > 0 ? Math.min(100, (t.stock_actual / t.capacidad_lt) * 100) : 0;
+    var pct = cap > 0 ? '<div style="margin-top:6px;height:6px;background:rgba(0,0,0,.08);border-radius:3px;overflow:hidden"><div style="height:100%;width:'+cap+'%;background:'+color+'"></div></div>' : '';
+    return '<div style="background:var(--sur);border:1px solid var(--bor);border-radius:12px;padding:12px">' +
+      '<div style="font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--mut);margin-bottom:4px">' + (t.tipo === 'gasoil' ? '⛽ Gasoil' : '⛽ Nafta') + '</div>' +
+      '<div style="font-size:20px;font-weight:800;color:' + color + '">' + (t.stock_actual || 0).toFixed(0) + ' <span style="font-size:12px;font-weight:600;color:var(--mut)">lt</span></div>' +
+      (t.capacidad_lt ? '<div style="font-size:10px;color:var(--mut);margin-top:2px">de ' + t.capacidad_lt.toFixed(0) + ' lt</div>' + pct : '') +
+    '</div>';
+  }).join('');
+}
+
+function cbRenderUltimos(items) {
+  var el = document.getElementById('cb-ultimos');
+  if (!items.length) { el.innerHTML = '<div class="empty" style="padding:20px"><span class="empty-icon">📋</span><div class="empty-txt" style="font-size:12px">Sin cargas registradas</div></div>'; return; }
+  var ICO = { carga_tanque:'🛢️', consumo_tanque:'🚜', consumo_estacion:'⛽', ajuste_varilla:'📏' };
+  var LBL = { carga_tanque:'Carga tanque', consumo_tanque:'Tanque→vehículo', consumo_estacion:'Estación', ajuste_varilla:'Ajuste' };
+  el.innerHTML = items.map(function(m) {
+    var estado = m.estado_revision === 'pendiente' ? '<span class="tag tag-pend" style="font-size:9px">⏳ Pendiente</span>' :
+                 m.estado_revision === 'revisado' ? '<span class="tag tag-res" style="font-size:9px">✓ Revisado</span>' : '';
+    return '<div style="background:var(--sur);border:1px solid var(--bor);border-radius:10px;padding:10px 12px;margin-bottom:8px;display:flex;align-items:center;gap:10px">' +
+      '<span style="font-size:20px">' + (ICO[m.tipo_movimiento] || '•') + '</span>' +
+      '<div style="flex:1;min-width:0">' +
+      '<div style="font-size:13px;font-weight:600;color:var(--txt)">' + LBL[m.tipo_movimiento] + ' · ' + m.litros + ' lt ' + m.combustible + '</div>' +
+      '<div style="font-size:11px;color:var(--mut);margin-top:2px">' + (m.vehiculo_txt || m.tanque_nombre || '—') + ' · ' + m.fecha + '</div>' +
+      '</div>' + estado +
+    '</div>';
+  }).join('');
+}
+
+function cbAbrirAccion(accion) {
+  CB.accion = accion;
+  CB.combustible = null;
+  CB.fotoB64 = null;
+
+  // Reset form
+  document.getElementById('cb-fecha').value = new Date().toISOString().slice(0,10);
+  document.getElementById('cb-litros').value = '';
+  document.getElementById('cb-horas').value = '';
+  document.getElementById('cb-km').value = '';
+  document.getElementById('cb-prec-unit').value = '';
+  document.getElementById('cb-prec-total').value = '';
+  document.getElementById('cb-prov').value = '';
+  document.getElementById('cb-nro').value = '';
+  document.getElementById('cb-notas').value = '';
+  document.getElementById('cb-ia-estado').style.display = 'none';
+  document.getElementById('cb-ia-btn').style.display = 'none';
+  document.getElementById('cb-foto-area').innerHTML = '<span class="foto-icon-big" style="font-size:24px">📷</span><div class="foto-hint" style="font-size:12px;color:var(--mut);margin-top:4px">Tocar para sacar foto</div>';
+  document.getElementById('cb-foto-inp').value = '';
+  document.getElementById('cb-comb-gasoil').style.background = '';
+  document.getElementById('cb-comb-nafta').style.background = '';
+
+  // Mostrar/ocultar bloques según la acción
+  var tit = document.getElementById('cb-modal-tit');
+  var showFoto = accion === 'consumo_estacion' || accion === 'carga_tanque';
+  var showTanque = accion === 'carga_tanque';
+  var showVehiculo = accion === 'consumo_tanque' || accion === 'consumo_estacion';
+  var showComp = accion === 'consumo_estacion' || accion === 'carga_tanque';
+
+  if (accion === 'consumo_tanque') tit.textContent = '🚜 Cargué del tanque';
+  else if (accion === 'consumo_estacion') tit.textContent = '⛽ Cargué en estación';
+  else if (accion === 'carga_tanque') tit.textContent = '🛢️ Cargaron el tanque';
+
+  document.getElementById('cb-foto-block').style.display = showFoto ? 'block' : 'none';
+  document.getElementById('cb-tanque-row').style.display = showTanque ? 'block' : 'none';
+  document.getElementById('cb-vehiculo-row').style.display = showVehiculo ? 'block' : 'none';
+  document.getElementById('cb-comp-block').style.display = showComp ? 'block' : 'none';
+  document.getElementById('cb-foto-titulo').textContent = accion === 'carga_tanque' ? '📄 Foto del remito' : '📄 Foto del ticket';
+
+  // Popular selects
+  if (showTanque) {
+    document.getElementById('cb-tanque-sel').innerHTML =
+      '<option value="">— Elegí tanque —</option>' +
+      CB.tanques.map(function(t){ return '<option value="'+t.id+'" data-tipo="'+t.tipo+'">'+t.nombre+' ('+(t.stock_actual||0).toFixed(0)+' lt)</option>'; }).join('');
+  }
+  if (showVehiculo) {
+    document.getElementById('cb-vehiculo-sel').innerHTML =
+      '<option value="">— Elegí vehículo —</option>' +
+      CB.vehiculos.map(function(v){
+        var ico = v.tipo==='tractor'?'🚜':v.tipo==='camioneta'?'🛻':v.tipo==='moto'?'🏍️':'🚗';
+        return '<option value="'+v.id+'" data-comb="'+v.combustible+'" data-horometro="'+v.tiene_horometro+'" data-tipo="'+v.tipo+'">'+ico+' '+v.identificacion+' ('+v.combustible+')</option>';
+      }).join('');
+  }
+
+  // Hide rows dependientes del vehículo hasta que se elija
+  document.getElementById('cb-horas-row').style.display = 'none';
+  document.getElementById('cb-km-row').style.display = 'none';
+  document.getElementById('cb-lote-row').style.display = 'none';
+
+  document.getElementById('modal-comb').classList.add('open');
+}
+
+function cbSetComb(tipo) {
+  CB.combustible = tipo;
+  document.getElementById('cb-comb-gasoil').style.background = tipo === 'gasoil' ? 'var(--burg)' : '';
+  document.getElementById('cb-comb-gasoil').style.color = tipo === 'gasoil' ? '#fff' : '';
+  document.getElementById('cb-comb-nafta').style.background = tipo === 'nafta' ? 'var(--burg)' : '';
+  document.getElementById('cb-comb-nafta').style.color = tipo === 'nafta' ? '#fff' : '';
+  // Si es carga_tanque, auto-seleccionar el tanque correspondiente
+  if (CB.accion === 'carga_tanque') {
+    var sel = document.getElementById('cb-tanque-sel');
+    for (var i=0;i<sel.options.length;i++) {
+      if (sel.options[i].dataset.tipo === tipo) { sel.value = sel.options[i].value; break; }
+    }
+  }
+}
+
+function cbOnVehiculo() {
+  var sel = document.getElementById('cb-vehiculo-sel');
+  var opt = sel.selectedOptions[0];
+  if (!opt || !opt.value) {
+    document.getElementById('cb-horas-row').style.display = 'none';
+    document.getElementById('cb-km-row').style.display = 'none';
+    document.getElementById('cb-lote-row').style.display = 'none';
+    return;
+  }
+  var vTipo = opt.dataset.tipo;
+  var vComb = opt.dataset.comb;
+  var vHoro = opt.dataset.horometro === '1';
+
+  // Autoseleccionar el combustible del vehículo
+  cbSetComb(vComb);
+
+  // Horómetro si es tractor con horómetro
+  document.getElementById('cb-horas-row').style.display = (vTipo === 'tractor' && vHoro) ? 'block' : 'none';
+  // Km si es camioneta/moto
+  document.getElementById('cb-km-row').style.display = (vTipo === 'camioneta' || vTipo === 'moto') ? 'block' : 'none';
+  // Lote solo para tractores (imputación de costo)
+  var loteRow = document.getElementById('cb-lote-row');
+  if (vTipo === 'tractor' && (CB.accion === 'consumo_tanque' || CB.accion === 'consumo_estacion')) {
+    loteRow.style.display = 'block';
+    document.getElementById('cb-lote-sel').innerHTML =
+      '<option value="">— Sin lote asignado —</option>' +
+      CB.lotes.map(function(l){ return '<option value="'+l.id+'">'+l.nombre+(l.finca?' · '+l.finca:'')+'</option>'; }).join('');
+  } else {
+    loteRow.style.display = 'none';
+  }
+}
+
+function cbOnFoto(input) {
+  if (!input.files || !input.files[0]) return;
+  var reader = new FileReader();
+  reader.onload = function(e) {
+    CB.fotoB64 = e.target.result.split(',')[1];
+    var area = document.getElementById('cb-foto-area');
+    area.innerHTML = '<img src="'+e.target.result+'" style="width:100%;max-height:160px;object-fit:cover;border-radius:8px;display:block">';
+    document.getElementById('cb-ia-btn').style.display = 'inline-block';
+  };
+  reader.readAsDataURL(input.files[0]);
+}
+
+function cbLeerTicket() {
+  if (!CB.fotoB64) return;
+  var btn = document.getElementById('cb-ia-btn');
+  var est = document.getElementById('cb-ia-estado');
+  btn.disabled = true; btn.textContent = '✨ Leyendo...';
+  est.style.display = 'block';
+  est.style.background = '#eff6ff'; est.style.color = 'var(--burg)';
+  est.textContent = '🤖 Claude leyendo...';
+
+  api('/api/pa/combustible/leer-ticket', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ imagen_b64: CB.fotoB64, media_type: 'image/jpeg' })
+  }).then(function(res) {
+    btn.disabled = false; btn.textContent = '✨ Leer';
+    if (!res.ok) {
+      est.style.background = '#fef2f2'; est.style.color = 'var(--err)';
+      est.textContent = '❌ ' + (res.error || 'Error al leer');
+      return;
+    }
+    var d = res.data;
+    var aplicados = [];
+    if (d.fecha) { document.getElementById('cb-fecha').value = d.fecha; aplicados.push('fecha'); }
+    if (d.combustible && ['gasoil','nafta'].includes(d.combustible)) { cbSetComb(d.combustible); aplicados.push('combustible'); }
+    if (d.litros) { document.getElementById('cb-litros').value = d.litros; aplicados.push('litros'); }
+    if (d.precio_unitario) { document.getElementById('cb-prec-unit').value = d.precio_unitario; aplicados.push('precio/lt'); }
+    if (d.precio_total) { document.getElementById('cb-prec-total').value = d.precio_total; aplicados.push('total'); }
+    if (d.moneda && ['ARS','USD'].includes(d.moneda)) { document.getElementById('cb-moneda').value = d.moneda; aplicados.push('moneda'); }
+    if (d.proveedor) { document.getElementById('cb-prov').value = d.proveedor; aplicados.push('proveedor'); }
+    if (d.nro_comprobante) { document.getElementById('cb-nro').value = d.nro_comprobante; aplicados.push('nro'); }
+    est.style.background = '#f0fdf4'; est.style.color = 'var(--ok)';
+    est.innerHTML = '✅ ' + aplicados.join(', ') + '. <span style="color:var(--mut)">Revisá antes de guardar.</span>';
+  }).catch(function() {
+    btn.disabled = false; btn.textContent = '✨ Leer';
+    est.style.background = '#fef2f2'; est.style.color = 'var(--err)';
+    est.textContent = '❌ Error al conectar. Completá manualmente.';
+  });
+}
+
+// Cálculo automático del total si hay precio unitario y litros
+(function bindCbTotal(){
+  document.addEventListener('input', function(e) {
+    if (e.target.id === 'cb-litros' || e.target.id === 'cb-prec-unit') {
+      var l = parseFloat(document.getElementById('cb-litros').value) || 0;
+      var p = parseFloat(document.getElementById('cb-prec-unit').value) || 0;
+      if (l > 0 && p > 0) document.getElementById('cb-prec-total').value = (l * p).toFixed(2);
+    }
+  });
+})();
+
+function cbGuardar() {
+  if (!CB.accion) return;
+  if (!CB.combustible) return toast('Elegí el combustible', 'er');
+  var litros = parseFloat(document.getElementById('cb-litros').value);
+  if (!litros || litros <= 0) return toast('Ingresá los litros', 'er');
+  var fecha = document.getElementById('cb-fecha').value;
+  var notas = document.getElementById('cb-notas').value.trim();
+
+  var payload = {
+    tipo_movimiento: CB.accion,
+    combustible: CB.combustible,
+    litros: litros,
+    fecha: fecha,
+    notas: notas || null,
+    foto_b64: CB.fotoB64
+  };
+
+  if (CB.accion === 'carga_tanque') {
+    var tanqueId = document.getElementById('cb-tanque-sel').value;
+    if (!tanqueId) return toast('Elegí el tanque', 'er');
+    payload.tanque_id = parseInt(tanqueId);
+  }
+
+  if (CB.accion === 'consumo_tanque' || CB.accion === 'consumo_estacion') {
+    var vehId = document.getElementById('cb-vehiculo-sel').value;
+    if (!vehId) return toast('Elegí el vehículo', 'er');
+    payload.vehiculo_id = parseInt(vehId);
+
+    // Si es consumo_tanque, asociar el tanque del tipo de combustible
+    if (CB.accion === 'consumo_tanque') {
+      var tanqueMatch = CB.tanques.find(function(t){ return t.tipo === CB.combustible; });
+      if (tanqueMatch) payload.tanque_id = tanqueMatch.id;
+    }
+
+    var horas = document.getElementById('cb-horas').value;
+    if (horas) payload.horas_horometro = parseFloat(horas);
+    var km = document.getElementById('cb-km').value;
+    if (km) payload.km_vehiculo = parseFloat(km);
+    var lote = document.getElementById('cb-lote-sel').value;
+    if (lote) payload.lote_id = parseInt(lote);
+  }
+
+  if (CB.accion === 'consumo_estacion' || CB.accion === 'carga_tanque') {
+    payload.precio_unitario = parseFloat(document.getElementById('cb-prec-unit').value) || 0;
+    payload.precio_total = parseFloat(document.getElementById('cb-prec-total').value) || 0;
+    payload.moneda = document.getElementById('cb-moneda').value || 'ARS';
+    var prov = document.getElementById('cb-prov').value.trim();
+    var nro = document.getElementById('cb-nro').value.trim();
+    if (prov) payload.proveedor_txt = prov;
+    if (nro) payload.nro_comprobante = nro;
+    payload.tipo_comprobante = CB.accion === 'consumo_estacion' ? 'ticket' : 'remito';
+  }
+
+  var btn = document.getElementById('cb-btn-guardar');
+  btn.disabled = true; btn.textContent = 'Guardando...';
+  api('/api/pa/combustible/movimientos', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify(payload)
+  }).then(function(r) {
+    btn.disabled = false; btn.textContent = '✓ Guardar';
+    if (r.ok) {
+      toast('Carga registrada — oficina la va a revisar');
+      document.getElementById('modal-comb').classList.remove('open');
+      cbCargarDatos();
+    } else {
+      toast(r.error || 'Error al guardar', 'er');
+    }
   });
 }
 
