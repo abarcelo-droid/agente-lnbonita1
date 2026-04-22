@@ -358,6 +358,78 @@ router.get('/insumos/historial', requireAuth, (req, res) => {
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
+// ── LECTOR IA DE REMITOS (llama a Anthropic desde el servidor) ────────────
+router.post('/leer-remito', requireAuth, async (req, res) => {
+  const { imagen_b64, media_type } = req.body;
+  if (!imagen_b64) return res.status(400).json({ ok: false, error: 'imagen_b64 requerida' });
+
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) return res.status(500).json({ ok: false, error: 'API key no configurada' });
+
+  try {
+    const db = getDb();
+    const insumos = db.prepare('SELECT nombre, componente_madre FROM pa_insumos WHERE activo=1 ORDER BY nombre').all();
+    const insNombres = insumos.map(i => i.nombre).join(', ');
+
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01'
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 1000,
+        messages: [{
+          role: 'user',
+          content: [
+            {
+              type: 'image',
+              source: { type: 'base64', media_type: media_type || 'image/jpeg', data: imagen_b64 }
+            },
+            {
+              type: 'text',
+              text: `Analizá este remito o factura de insumos agrícolas.
+Devolvé SOLO un JSON válido sin markdown ni comentarios:
+{
+  "tipo_comprobante": "factura|remito|ticket|otro",
+  "nro_comprobante": "número del documento o null",
+  "fecha": "YYYY-MM-DD o null",
+  "proveedor": "nombre del proveedor o null",
+  "items": [
+    {
+      "descripcion": "nombre del producto tal como aparece",
+      "cantidad": número,
+      "unidad": "kg|lt|unidad",
+      "precio_unitario": número o null
+    }
+  ]
+}
+Insumos conocidos en el sistema (para ayudar a identificar): ${insNombres}
+Solo devolvé el JSON, sin texto adicional.`
+            }
+          ]
+        }]
+      })
+    });
+
+    const data = await response.json();
+    if (!response.ok) {
+      return res.status(500).json({ ok: false, error: data.error?.message || 'Error de API' });
+    }
+
+    const txt = (data.content?.[0]?.text || '').replace(/```json|```/g, '').trim();
+    let parsed;
+    try { parsed = JSON.parse(txt); }
+    catch(e) { return res.status(422).json({ ok: false, error: 'No se pudo parsear la respuesta', raw: txt }); }
+
+    res.json({ ok: true, data: parsed });
+  } catch(e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
 router.get('/compras', requireAuth, (req, res) => {
   const db = getDb();
   try {

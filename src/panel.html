@@ -5709,54 +5709,19 @@ function paLeerRemito(){
   // Lista de insumos conocidos para ayudar al match
   var insumosConocidos=PA.insumos.map(function(i){return i.nombre+(i.componente_madre?' ('+i.componente_madre+')':'');}).join(', ');
 
-  fetch('https://api.anthropic.com/v1/messages',{
-    method:'POST',
-    headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({
-      model:'claude-sonnet-4-20250514',
-      max_tokens:1000,
-      messages:[{
-        role:'user',
-        content:[
-          {type:'image',source:{type:'base64',media_type:'image/jpeg',data:PA._compraFotoB64}},
-          {type:'text',text:`Analizá esta foto de un remito o factura de insumos agrícolas.
-Extraé la información y devolvé SOLO un JSON válido sin comentarios ni markdown, con esta estructura exacta:
-{
-  "tipo_comprobante": "factura|remito|ticket|otro",
-  "nro_comprobante": "número del documento",
-  "fecha": "YYYY-MM-DD o null si no se ve",
-  "proveedor": "nombre del proveedor",
-  "items": [
-    {
-      "descripcion": "nombre del producto tal como aparece en el remito",
-      "cantidad": número,
-      "unidad": "kg|lt|unidad",
-      "precio_unitario": número o null,
-      "subtotal": número o null
-    }
-  ]
-}
 
-Insumos que manejamos (para ayudarte a identificar): ${insumosConocidos}
-
-Si algún campo no se puede leer con certeza, poné null. Solo devolvé el JSON, sin texto adicional.`}
-        ]
-      }]
-    })
-  })
-  .then(function(r){return r.json();})
-  .then(function(data){
+  paF('/api/pa/leer-remito',{
+    method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({imagen_b64:PA._compraFotoB64,media_type:'image/jpeg'})
+  }).then(function(data){
     btn.disabled=false;btn.innerHTML='<span>✨ Leer con IA</span>';
-    var txt=data.content&&data.content[0]?data.content[0].text:'';
-    // Limpiar posibles backticks
-    txt=txt.replace(/```json|```/g,'').trim();
-    var parsed;
-    try{ parsed=JSON.parse(txt); }
-    catch(e){
+    if(!data.ok){
       est.style.background='#fef2f2';est.style.color='var(--err)';
-      est.textContent='❌ No se pudo interpretar la respuesta. Completá el formulario manualmente.';
+      est.textContent='❌ '+(data.error||'Error al leer. Completá manualmente.');
       return;
     }
+    var parsed=data.data;
+    // Aplicar datos al formulario
     // Aplicar datos al formulario
     var aplicados=[];
     if(parsed.fecha)                { document.getElementById('pa-comp-fecha').value=parsed.fecha; aplicados.push('fecha'); }

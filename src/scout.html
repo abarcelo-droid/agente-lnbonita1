@@ -1000,30 +1000,18 @@ function scoutLeerRemito() {
 
   var insNombres = COMP.insumos.map(function(i){ return i.nombre; }).join(', ');
 
-  fetch('https://api.anthropic.com/v1/messages', {
+  api('/api/pa/leer-remito', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 1000,
-      messages: [{
-        role: 'user',
-        content: [
-          { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: COMP.fotoB64 } },
-          { type: 'text', text: 'Analizá este remito o factura de insumos agrícolas. Devolvé SOLO JSON sin markdown:\n{"tipo_comprobante":"factura|remito|ticket|otro","nro_comprobante":"número","fecha":"YYYY-MM-DD o null","proveedor":"nombre","items":[{"descripcion":"nombre producto","cantidad":número,"precio_unitario":número o null}]}\nInsumos conocidos: '+insNombres+'\nSolo JSON, sin texto adicional.' }
-        ]
-      }]
-    })
+    body: JSON.stringify({ imagen_b64: COMP.fotoB64, media_type: 'image/jpeg' })
   })
-  .then(function(r){ return r.json(); })
   .then(function(data) {
     btn.textContent = '✨ Leer'; btn.disabled = false;
-    var txt = (data.content&&data.content[0] ? data.content[0].text : '').replace(/```json|```/g,'').trim();
-    var parsed;
-    try { parsed = JSON.parse(txt); } catch(e) {
+    if(!data.ok) {
       est.style.background = '#fef2f2'; est.style.color = 'var(--err)';
-      est.textContent = '❌ No se pudo leer. Completá manualmente.'; return;
+      est.textContent = '❌ '+(data.error||'No se pudo leer. Completá manualmente.'); return;
     }
+    var parsed = data.data;
     var aplicados = [];
     if(parsed.fecha)           { document.getElementById('comp-fecha').value = parsed.fecha; aplicados.push('fecha'); }
     if(parsed.nro_comprobante) { document.getElementById('comp-nro').value = parsed.nro_comprobante; aplicados.push('número'); }
