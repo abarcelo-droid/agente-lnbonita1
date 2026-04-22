@@ -68,13 +68,23 @@ app.use("/api/auth", authRouter);
 app.get("/panel", (req, res) => {
   const cookie = req.cookies?.lnb_user;
   if (!cookie) return res.redirect('/login');
+  try {
+    const user = JSON.parse(cookie);
+    // Usuarios de campo solo pueden ir al Scout
+    if (user.rol === 'campo') return res.redirect('/scout');
+  } catch(e) {}
   res.sendFile(path.join(__dirname, "panel.html"));
 });
 
 // Login page
 app.get("/login", (req, res) => {
   const cookie = req.cookies?.lnb_user;
-  if (cookie) return res.redirect('/panel');
+  if (cookie) {
+    try {
+      const user = JSON.parse(cookie);
+      return res.redirect(user.rol === 'campo' ? '/scout' : '/panel');
+    } catch(e) {}
+  }
   res.sendFile(path.join(__dirname, "login.html"));
 });
 

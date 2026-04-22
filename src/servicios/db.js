@@ -670,6 +670,37 @@ db.exec(`
   } catch(e) {}
 })();
 
+// Migración: soporte para rol 'campo' (usuarios solo Scout)
+(function() {
+  try {
+    db.prepare("INSERT OR IGNORE INTO usuarios (nombre,email,pin,rol,secciones) VALUES ('__chk__','__chk__@x.com','0000','campo','[\"*\"]')").run();
+    db.prepare("DELETE FROM usuarios WHERE nombre='__chk__'").run();
+  } catch(e) {
+    // CHECK constraint no permite 'campo' → recrear tabla sin CHECK
+    try {
+      db.exec(`
+        BEGIN;
+        CREATE TABLE usuarios_v2 (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          nombre TEXT NOT NULL,
+          email TEXT UNIQUE NOT NULL,
+          pin TEXT NOT NULL,
+          rol TEXT DEFAULT 'operador',
+          depositos TEXT DEFAULT '["MCBA","FINCA","SAN PEDRO"]',
+          secciones TEXT DEFAULT '["*"]',
+          activo INTEGER DEFAULT 1,
+          creado_en TEXT DEFAULT (datetime('now','localtime'))
+        );
+        INSERT INTO usuarios_v2 SELECT * FROM usuarios;
+        DROP TABLE usuarios;
+        ALTER TABLE usuarios_v2 RENAME TO usuarios;
+        COMMIT;
+      `);
+      console.log("[DB] usuarios recreada — rol campo habilitado");
+    } catch(e2) { console.error("[DB] Error migrando rol campo:", e2.message); }
+  }
+})();
+
 // Usuario admin por defecto (PIN: 0000) — solo si no existe ninguno
 (function() {
   try {

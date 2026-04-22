@@ -129,7 +129,7 @@ function doLogin() {
   .then(function(r){ return r.json(); })
   .then(function(res) {
     if (res.ok) {
-      window.location.href = '/panel';
+      window.location.href = res.redirect_to || '/panel';
     } else {
       errEl.textContent = res.error || 'Error al ingresar';
       pin = ''; updateDots();

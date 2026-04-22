@@ -30,7 +30,9 @@ router.post('/login', (req, res) => {
       secciones: parseSecciones(user.secciones)
     };
     res.cookie('lnb_user', JSON.stringify(userData), { httpOnly: false, sameSite: 'lax', path: '/' });
-    res.json({ ok: true, user: userData });
+    // Usuarios de campo van directo al Scout
+    const redirectTo = userData.rol === 'campo' ? '/scout' : '/panel';
+    res.json({ ok: true, user: userData, redirect_to: redirectTo });
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 

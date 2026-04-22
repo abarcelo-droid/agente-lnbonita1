@@ -745,7 +745,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     <div class="fl ff"><label>Nombre *</label><input id="usr-nombre" placeholder="Nombre completo"></div>
     <div class="fl ff"><label>Email <span style="color:var(--sub);font-weight:400">(opcional — para usuarios de campo se puede dejar vacío)</span></label><input id="usr-email" type="email" placeholder="correo@ejemplo.com"></div>
     <div class="fl"><label>PIN (4 dígitos) *</label><input id="usr-pin" type="text" inputmode="numeric" maxlength="4" placeholder="0000" style="letter-spacing:8px;font-size:20px;font-weight:700;text-align:center"></div>
-    <div class="fl"><label>Rol</label><select id="usr-rol"><option value="operador">Operador</option><option value="admin">Administrador</option><option value="consulta">Solo consulta</option></select></div>
+    <div class="fl"><label>Rol</label><select id="usr-rol"><option value="operador">Operador</option><option value="admin">Administrador</option><option value="consulta">Solo consulta</option><option value="campo">🌿 Solo Scout (campo)</option></select></div>
     <div class="fl ff" style="margin-top:4px">
       <label>Depósitos habilitados</label>
       <div style="display:flex;gap:14px;margin-top:6px;flex-wrap:wrap">
@@ -1216,7 +1216,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   </select>
 </div>
 <div class="pa-wrap"><div class="ab-table-wrap"><table class="pa-tbl">
-  <thead><tr><th>Nombre</th><th>Componente</th><th>Tipo</th><th>Unidad</th><th style="text-align:right">Stock actual</th><th style="text-align:right">USD/unit</th><th>Estado</th><th></th></tr></thead>
+  <thead><tr><th>Nombre</th><th>Principio activo</th><th>Tipo</th><th>Unidad</th><th style="text-align:right">Stock actual</th><th style="text-align:right">Último precio</th><th>Estado</th><th></th></tr></thead>
   <tbody id="pa-ins-tbody"><tr><td colspan="7" class="emp">Cargando...</td></tr></tbody>
 </table></div></div>
 </div>
@@ -4707,7 +4707,7 @@ function usrCargar() {
     .then(function(res) {
       var tbody = document.getElementById('t-usuarios');
       if (!res.ok) { tbody.innerHTML='<tr><td colspan="6" class="emp">Sin acceso</td></tr>'; return; }
-      var rolLabel = { admin:'Administrador', operador:'Operador', consulta:'Solo lectura' };
+      var rolLabel = { admin:'Administrador', operador:'Operador', consulta:'Solo lectura', campo:'Solo Scout' };
       tbody.innerHTML = res.data.map(function(u) {
         var deps = JSON.parse(u.depositos||'[]').join(', ');
         var secs = JSON.parse(u.secciones||'["*"]');
@@ -4899,7 +4899,7 @@ if(_inpGondola) _inpGondola.addEventListener('keydown', function(e){
   <input type="hidden" id="pa-ins-id">
   <div class="fg">
     <div class="fl ff"><label>Nombre comercial</label><input id="pa-ins-nombre" placeholder="Ej: Urea 46%, Roundup, Karate..."></div>
-    <div class="fl ff"><label>Componente madre / Principio activo</label><input id="pa-ins-componente" placeholder="Ej: Glifosato, Clorpirifos, NPK 15-15-15..."></div>
+    <div class="fl ff"><label>Principio activo / Componente madre <span style="color:var(--err)">*</span></label><input id="pa-ins-componente" placeholder="Ej: Glifosato, Clorpirifos, NPK 15-15-15..." required></div>
     <div class="fl"><label>Tipo</label>
       <select id="pa-ins-tipo">
         <option value="fertilizante">Fertilizante</option>
@@ -5056,9 +5056,11 @@ if(_inpGondola) _inpGondola.addEventListener('keydown', function(e){
     <div class="fl"><label>Red de agua</label>
       <select id="pa-cult-edit-agua">
         <option value="">— Sin especificar —</option>
-        <option value="Norte">Norte</option>
-        <option value="Sur">Sur</option>
-        <option value="Ambas">Ambas</option>
+        <option value="LNB">LNB</option>
+        <option value="La Estación">La Estación</option>
+        <option value="San Isidro I">San Isidro I</option>
+        <option value="San Isidro II">San Isidro II</option>
+        <option value="La Encontrada">La Encontrada</option>
       </select>
     </div>
     <div class="fl ff"><label>Polígono Google Maps</label><input id="pa-cult-edit-mapa" placeholder="https://maps.google.com/..."></div>
@@ -5087,9 +5089,11 @@ if(_inpGondola) _inpGondola.addEventListener('keydown', function(e){
     <div class="fl"><label>Red de agua</label>
       <select id="pa-lot-agua">
         <option value="">— Sin especificar —</option>
-        <option value="Norte">Norte</option>
-        <option value="Sur">Sur</option>
-        <option value="Ambas">Ambas</option>
+        <option value="LNB">LNB</option>
+        <option value="La Estación">La Estación</option>
+        <option value="San Isidro I">San Isidro I</option>
+        <option value="San Isidro II">San Isidro II</option>
+        <option value="La Encontrada">La Encontrada</option>
       </select>
     </div>
     <div class="fl ff"><label>Polígono Google Maps (link o coordenadas)</label><input id="pa-lot-mapa" placeholder="https://maps.google.com/..."></div>
@@ -5448,17 +5452,58 @@ function paLoadInsumos(){
     tb.innerHTML=PA.insumos.map(function(i){
       var bajo=i.stock_minimo>0&&i.stock_actual<=i.stock_minimo;
       var ficha=i.ficha_tecnica_path?'<a href="'+i.ficha_tecnica_path+'" target="_blank" style="font-size:11px;color:var(--burg)">📄 Ficha</a>':'';
+      var precioUsd=i.precio_ref_usd?'USD '+Number(i.precio_ref_usd).toFixed(2):'—';
       return'<tr>'
-        +'<td><strong>'+i.nombre+'</strong>'+(ficha?'<br>'+ficha:'')+'</td>'
-        +'<td style="font-size:11px;color:var(--mut)">'+(i.componente_madre||'—')+'</td>'
+        +'<td><strong style="cursor:pointer;color:var(--burg)" onclick="paVerHistorialCompras('+i.id+',\''+i.nombre.replace(/'/g,"\\'")+'\',\'producto\')">'+i.nombre+'</strong>'+(ficha?'<br>'+ficha:'')+'</td>'
+        +'<td><span style="cursor:pointer;text-decoration:underline;text-decoration-style:dotted;color:var(--mut);font-size:12px" onclick="paVerHistorialCompras(null,\''+( i.componente_madre||'').replace(/'/g,"\\'")+'\',\'componente\')">'+(i.componente_madre||'<span style="color:var(--err);font-size:11px">⚠ Sin definir</span>')+'</span></td>'
         +'<td>'+paBadgeTipo(i.tipo)+'</td>'
         +'<td>'+i.unidad+'</td>'
         +'<td style="text-align:right"><strong>'+(i.stock_actual||0)+' '+i.unidad+'</strong></td>'
-        +'<td style="text-align:right">'+(i.precio_ref_usd?'USD '+Number(i.precio_ref_usd).toFixed(2):'—')+'</td>'
+        +'<td style="text-align:right;font-size:12px">'+precioUsd+'</td>'
         +'<td>'+(bajo?'<span class="pa-badge pa-rojo-bg">⚠ Bajo</span>':'<span class="pa-badge pa-verde-bg">OK</span>')+'</td>'
         +'<td><button class="btn bo bs" onclick="paEditarInsumo('+i.id+')">✏</button></td>'
         +'</tr>';
     }).join('');
+  });
+}
+
+function paVerHistorialCompras(insumoId, nombre, modo) {
+  var url = modo==='producto'
+    ? '/api/pa/insumos/historial?insumo_id='+insumoId
+    : '/api/pa/insumos/historial?componente='+encodeURIComponent(nombre);
+  paF(url).then(function(r){
+    var data=r.data||[];
+    var tit = modo==='producto' ? '📦 '+nombre : '🧪 Principio activo: '+nombre;
+    var html='';
+    if(!data.length){
+      html='<div class="emp">Sin compras registradas para este '+(modo==='producto'?'producto':'principio activo')+'</div>';
+    } else {
+      html='<table class="pa-tbl"><thead><tr>'
+        +(modo==='componente'?'<th>Producto</th>':'')
+        +'<th>Fecha</th><th>Proveedor</th><th>Comprobante</th>'
+        +'<th style="text-align:right">Cantidad</th>'
+        +'<th style="text-align:right">Precio/unit</th>'
+        +'<th style="text-align:right">Subtotal</th>'
+        +'</tr></thead><tbody>';
+      data.forEach(function(c){
+        html+='<tr>'
+          +(modo==='componente'?'<td style="font-size:12px;font-weight:600">'+c.insumo_nombre+'</td>':'')
+          +'<td>'+paFecha(c.fecha)+'</td>'
+          +'<td style="font-size:12px">'+c.proveedor+'</td>'
+          +'<td style="font-size:11px;color:var(--mut)">'+(c.nro_factura||'—')+'</td>'
+          +'<td style="text-align:right"><strong>'+c.cantidad+' '+c.unidad+'</strong></td>'
+          +'<td style="text-align:right"><strong style="color:var(--burg)">$'+Number(c.precio_unit).toLocaleString('es-AR')+'</strong></td>'
+          +'<td style="text-align:right">$'+Number(c.subtotal).toLocaleString('es-AR')+'</td>'
+          +'</tr>';
+      });
+      html+='</tbody></table>';
+    }
+    document.getElementById('pa-ord-det-tit').textContent=tit;
+    document.getElementById('pa-ord-det-sub').textContent='Últimas 20 compras';
+    document.getElementById('pa-ord-det-body').innerHTML=html;
+    document.getElementById('pa-ord-ejec-form').style.display='none';
+    document.getElementById('pa-ord-det-ejec-btn').style.display='none';
+    document.getElementById('pa-mb-orden-det').classList.add('on');
   });
 }
 function paAbrirNuevoInsumo(){
@@ -5499,6 +5544,7 @@ function paGuardarInsumo(){
   var id=document.getElementById('pa-ins-id').value;
   var nombre=document.getElementById('pa-ins-nombre').value.trim();
   var componente=document.getElementById('pa-ins-componente').value.trim();
+  if(!componente)return toast('El principio activo es obligatorio','er');
   var tipo=document.getElementById('pa-ins-tipo').value;
   var unidad=document.getElementById('pa-ins-unidad').value;
   var stMin=parseFloat(document.getElementById('pa-ins-stock-min').value)||0;
@@ -5634,10 +5680,19 @@ function paAbrirNuevaOrden(){
       +'<span><strong>'+l.nombre+'</strong>'+(l.finca?'<span style="color:var(--mut)"> — '+l.finca+'</span>':'')
       +' <span style="color:var(--sub);font-size:11px">('+l.hectareas+' ha)</span></span></label>';
   }).join('')||'<div class="emp">Sin lotes. Agregá lotes primero.</div>';
-  // Poblar selector de usuarios
+  // Poblar selector de usuarios — priorizar campo y operadores
   paF('/api/auth/usuarios').then(function(r){
     var sel=document.getElementById('pa-ord-asignado');
-    if(sel)sel.innerHTML='<option value="">— Sin asignar —</option>'+(r.data||[]).map(function(u){return'<option value="'+u.id+'">'+u.nombre+' ('+u.rol+')</option>';}).join('');
+    if(!sel)return;
+    var rolLabel={campo:'🌿 Campo',operador:'Panel',admin:'Admin',consulta:'Consulta'};
+    var usuarios=(r.data||[]).filter(function(u){return u.activo;});
+    // Ordenar: campo primero, luego operadores, luego el resto
+    var rolOrden={campo:0,operador:1,admin:2,consulta:3};
+    usuarios.sort(function(a,b){return (rolOrden[a.rol]||9)-(rolOrden[b.rol]||9)||a.nombre.localeCompare(b.nombre);});
+    sel.innerHTML='<option value="">— Sin asignar —</option>'
+      +usuarios.map(function(u){
+        return'<option value="'+u.id+'">'+(rolLabel[u.rol]||u.rol)+' — '+u.nombre+'</option>';
+      }).join('');
   });
   paAgregarItemOrden();
   document.getElementById('pa-mb-orden').classList.add('on');
@@ -5888,7 +5943,12 @@ function paLoadScout() {
     // Poblar selector usuarios
     paF('/api/auth/usuarios').then(function(r2) {
       var sel = document.getElementById('scout-asig-usr');
-      if (sel) sel.innerHTML = (r2.data||[]).map(function(u){ return '<option value="'+u.id+'">'+u.nombre+' ('+u.rol+')</option>'; }).join('');
+      if(!sel)return;
+      var rolLabel={campo:'🌿 Campo',operador:'Panel',admin:'Admin',consulta:'Consulta'};
+      var rolOrden={campo:0,operador:1,admin:2,consulta:3};
+      var usrs=(r2.data||[]).filter(function(u){return u.activo;});
+      usrs.sort(function(a,b){return (rolOrden[a.rol]||9)-(rolOrden[b.rol]||9)||a.nombre.localeCompare(b.nombre);});
+      sel.innerHTML='<option value="">Elegir persona...</option>'+usrs.map(function(u){return'<option value="'+u.id+'">'+(rolLabel[u.rol]||u.rol)+' — '+u.nombre+'</option>';}).join('');
     });
   });
 }
