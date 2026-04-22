@@ -84,6 +84,8 @@ body{min-height:100vh;background:#0f2540;display:flex;align-items:center;justify
 
 <script>
 var pin = '';
+// Leer ?next= de la URL para redirigir después del login (ej: /login?next=/scout)
+var nextParam = new URLSearchParams(window.location.search).get('next') || '';
 
 function pinKey(d) {
   if (pin.length >= 4) return;
@@ -124,7 +126,7 @@ function doLogin() {
   fetch('/api/auth/login', {
     method: 'POST',
     headers: {'Content-Type':'application/json'},
-    body: JSON.stringify({ email: email, pin: pin })
+    body: JSON.stringify({ email: email, pin: pin, next: nextParam })
   })
   .then(function(r){ return r.json(); })
   .then(function(res) {

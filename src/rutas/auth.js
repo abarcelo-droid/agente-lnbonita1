@@ -9,7 +9,7 @@ const parseDepositos = (s) => { try { return JSON.parse(s || '["MCBA","FINCA","S
 
 // Login por email+PIN o por nombre+PIN (para usuarios de campo sin email)
 router.post('/login', (req, res) => {
-  const { email, pin } = req.body;
+  const { email, pin, next } = req.body;
   if (!pin) return res.status(400).json({ ok: false, error: 'PIN requerido' });
   const db = getDb();
   try {
@@ -30,8 +30,27 @@ router.post('/login', (req, res) => {
       secciones: parseSecciones(user.secciones)
     };
     res.cookie('lnb_user', JSON.stringify(userData), { httpOnly: false, sameSite: 'lax', path: '/' });
-    // Usuarios de campo van directo al Scout
-    const redirectTo = userData.rol === 'campo' ? '/scout' : '/panel';
+
+    // Whitelist de rutas internas válidas para el parámetro ?next=
+    // Se aceptan rutas que empiecen con /scout o /panel (permite ?query y #hash)
+    const RUTAS_VALIDAS = ['/scout', '/panel'];
+    const esNextValido = (n) => {
+      if (!n || typeof n !== 'string') return false;
+      if (!n.startsWith('/') || n.startsWith('//')) return false;  // evita redirects externos
+      return RUTAS_VALIDAS.some(r => n === r || n.startsWith(r + '/') || n.startsWith(r + '?') || n.startsWith(r + '#'));
+    };
+
+    // Determinar destino: ?next= si es válido, si no default por rol.
+    // El rol "campo" SIEMPRE va a /scout (no puede entrar al panel).
+    let redirectTo;
+    if (userData.rol === 'campo') {
+      redirectTo = '/scout';
+    } else if (esNextValido(next)) {
+      redirectTo = next;
+    } else {
+      redirectTo = '/panel';
+    }
+
     res.json({ ok: true, user: userData, redirect_to: redirectTo });
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });

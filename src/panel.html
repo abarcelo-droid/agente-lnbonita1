@@ -155,12 +155,29 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   <div class="ni" data-sec="pa-costos"><span class="dot da"></span>Costos por Lote</div>
   <div class="ni" data-sec="pa-lotes"><span class="dot db"></span>Fincas y Lotes</div>
   <div class="ni" data-sec="pa-scout"><span class="dot de"></span>Scout — Campo</div>
+  <a href="/scout" class="ni" style="color:inherit;text-decoration:none;display:block;font-weight:600" title="Abrir Scout móvil en esta pestaña">
+    <span class="dot da"></span>📱 Abrir Scout móvil
+  </a>
   <!-- Usuario actual -->
   <div style="margin-top:auto;padding:12px 16px;border-top:1px solid rgba(255,255,255,.1)">
     <div id="nav-usuario" style="font-size:11px;color:rgba(255,255,255,.6);margin-bottom:8px">—</div>
     <button onclick="doLogout()" style="width:100%;padding:7px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.15);border-radius:8px;color:rgba(255,255,255,.7);font-size:11px;cursor:pointer;font-family:var(--sans)">Cerrar sesión</button>
   </div>
 </nav>
+
+<!-- Botón flotante "Ir al Scout" — siempre visible arriba a la derecha -->
+<a href="/scout" id="btn-goto-scout-fixed" title="Abrir Scout móvil"
+   style="position:fixed;top:16px;right:20px;z-index:1000;
+          background:linear-gradient(135deg,#059669 0%,#047857 100%);color:#fff;
+          padding:10px 16px;border-radius:10px;text-decoration:none;
+          font-weight:600;font-size:13px;font-family:var(--sans);
+          box-shadow:0 4px 12px rgba(5,150,105,.35);
+          display:flex;align-items:center;gap:8px;transition:transform .15s,box-shadow .15s"
+   onmouseover="this.style.transform='translateY(-1px)';this.style.boxShadow='0 6px 18px rgba(5,150,105,.45)'"
+   onmouseout="this.style.transform='';this.style.boxShadow='0 4px 12px rgba(5,150,105,.35)'">
+  📱 Ir al Scout
+</a>
+
 <main>
 
 <!-- ==================== ESTILOS ABASTO ==================== -->
@@ -814,6 +831,25 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     <div class="stat"><div class="sl">Clientes activos</div><div class="sv" id="st3">--</div></div>
     <div class="stat"><div class="sl">Pedidos mes</div><div class="sv" id="st4">--</div></div>
   </div>
+
+  <!-- Card destacada: Scout móvil -->
+  <a href="/scout" style="display:flex;align-items:center;justify-content:space-between;
+       margin-top:20px;padding:20px 24px;
+       background:linear-gradient(135deg,#059669 0%,#047857 100%);
+       color:#fff;border-radius:12px;text-decoration:none;
+       box-shadow:0 4px 12px rgba(5,150,105,.25);transition:transform .15s,box-shadow .15s"
+     onmouseover="this.style.transform='translateY(-2px)';this.style.boxShadow='0 8px 20px rgba(5,150,105,.35)'"
+     onmouseout="this.style.transform='';this.style.boxShadow='0 4px 12px rgba(5,150,105,.25)'">
+    <div style="display:flex;align-items:center;gap:16px">
+      <div style="font-size:32px">📱</div>
+      <div>
+        <div style="font-size:16px;font-weight:700;margin-bottom:2px">Scout móvil</div>
+        <div style="font-size:13px;opacity:.9">Reportes de campo, órdenes, compras y alertas</div>
+      </div>
+    </div>
+    <div style="font-size:24px;font-weight:300">→</div>
+  </a>
+
   <div style="font-weight:600;margin-bottom:12px;margin-top:20px">CRM Dedicados — Hoy</div>
   <div id="crm-resumen-inicio" style="margin-bottom:20px"></div>
   <div style="font-weight:600;margin-bottom:14px">Ultimos pedidos</div>
