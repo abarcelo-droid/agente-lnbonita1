@@ -4949,10 +4949,8 @@ if(_inpGondola) _inpGondola.addEventListener('keydown', function(e){
   <div class="fg">
     <div class="fl"><label>Nombre / Llaves</label><input id="pa-lot-nombre" placeholder="Ej: 1-2, 14-15, El Bajo"></div>
     <div class="fl"><label>Finca</label><input id="pa-lot-finca" placeholder="Ej: El Abuelo, San Isidro, La Encontrada"></div>
-    <div class="fl"><label>Sector productivo</label><select id="pa-lot-sector"></select></div>
     <div class="fl"><label>Hectáreas</label><input type="number" id="pa-lot-ha" value="0.5" step="0.1" min="0.1"></div>
-    <div class="fl ff"><label>Polígono Google Maps (link o coordenadas)</label><input id="pa-lot-mapa" placeholder="https://maps.google.com/..."></div>
-    <div class="fl ff"><label>Red de agua</label>
+    <div class="fl"><label>Red de agua</label>
       <select id="pa-lot-agua">
         <option value="">— Sin especificar —</option>
         <option value="Norte">Norte</option>
@@ -4960,6 +4958,7 @@ if(_inpGondola) _inpGondola.addEventListener('keydown', function(e){
         <option value="Ambas">Ambas</option>
       </select>
     </div>
+    <div class="fl ff"><label>Polígono Google Maps (link o coordenadas)</label><input id="pa-lot-mapa" placeholder="https://maps.google.com/..."></div>
   </div>
   <div style="margin:14px 0 10px;font-size:12px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.06em;border-top:1px solid var(--bor);padding-top:14px">Cultivos por campaña</div>
   <div class="fg" id="pa-lot-cultivos-grid">
@@ -5190,21 +5189,30 @@ function paAbrirNuevoLote(){
   document.getElementById('pa-lot-mapa').value='';
   document.getElementById('pa-lot-agua').value='';
   document.getElementById('pa-lot-notas').value='';
-  // Poblar sectores
-  document.getElementById('pa-lot-sector').innerHTML=PA.sectores.map(function(s){return'<option value="'+s.id+'">'+s.nombre+'</option>';}).join('');
-  // Poblar campañas para cultivos — ordenadas cronológicamente
-  var campOrd=['2021/22','2022/23','2023/24','2024/25','2025/26','2026/27'];
-  var campDisp=PA.campañas.slice().sort(function(a,b){return campOrd.indexOf(a.nombre)-campOrd.indexOf(b.nombre);});
-  var cultivoOpts='<option value="">—</option><optgroup label="Frutales"><option value="Vid">Vid</option><option value="Damasco">Damasco</option><option value="Durazno">Durazno</option><option value="Ciruela">Ciruela</option></optgroup><optgroup label="Chacra Mercado"><option value="Melón">Melón</option><option value="Cebolla">Cebolla</option><option value="Brócoli">Brócoli</option><option value="Ajo">Ajo</option><option value="Papa">Papa</option><option value="Zapallo">Zapallo</option></optgroup><optgroup label="Chacra Industria"><option value="Tomate Industria">Tomate Industria</option></optgroup><option value="Barbecho">Barbecho</option><option value="Sin uso">Sin uso</option>';
-  document.getElementById('pa-lot-cultivos-grid').innerHTML=campDisp.map(function(c){
-    return'<div class="fl"><label>Producto '+c.nombre+(c.activa?' ★':'')+' </label><select id="pa-lot-cult-'+c.nombre.replace('/','_')+'">'+cultivoOpts+'</select></div>';
-  }).join('');
-  document.getElementById('pa-mb-lote').classList.add('on');
+  // Poblar campañas — si ya están en memoria las usa, si no las pide
+  function paRenderCampañasModal(campañas) {
+    var campOrd=['2021/22','2022/23','2023/24','2024/25','2025/26','2026/27'];
+    var campDisp=campañas.slice().sort(function(a,b){return campOrd.indexOf(a.nombre)-campOrd.indexOf(b.nombre);});
+    var cultivoOpts='<option value="">—</option><optgroup label="Frutales"><option value="Vid">Vid</option><option value="Damasco">Damasco</option><option value="Durazno">Durazno</option><option value="Ciruela">Ciruela</option></optgroup><optgroup label="Chacra Mercado"><option value="Melón">Melón</option><option value="Cebolla">Cebolla</option><option value="Brócoli">Brócoli</option><option value="Ajo">Ajo</option><option value="Papa">Papa</option><option value="Zapallo">Zapallo</option></optgroup><optgroup label="Chacra Industria"><option value="Tomate Industria">Tomate Industria</option></optgroup><option value="Barbecho">Barbecho</option><option value="Sin uso">Sin uso</option>';
+    document.getElementById('pa-lot-cultivos-grid').innerHTML=campDisp.map(function(c){
+      return'<div class="fl"><label>Temporada '+c.nombre+(c.activa?' ★':'')+' </label><select id="pa-lot-cult-'+c.nombre.replace('/','_')+'">'+cultivoOpts+'</select></div>';
+    }).join('');
+  }
+  if(PA.campañas.length) {
+    paRenderCampañasModal(PA.campañas);
+    document.getElementById('pa-mb-lote').classList.add('on');
+  } else {
+    paF('/api/pa/campañas').then(function(r){
+      PA.campañas=r.data||[];
+      paRenderCampañasModal(PA.campañas);
+      document.getElementById('pa-mb-lote').classList.add('on');
+    });
+  }
 }
 function paGuardarLote(){
   var nombre=document.getElementById('pa-lot-nombre').value.trim();
   var finca=document.getElementById('pa-lot-finca').value.trim();
-  var secId=document.getElementById('pa-lot-sector').value;
+  var secId=PA.sectores.length?PA.sectores[0].id:1; // sector por defecto, se puede mejorar luego
   var ha=parseFloat(document.getElementById('pa-lot-ha').value)||0.5;
   var mapa=document.getElementById('pa-lot-mapa').value.trim();
   var agua=document.getElementById('pa-lot-agua').value;
