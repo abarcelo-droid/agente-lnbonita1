@@ -5601,6 +5601,7 @@ function paLoadCalendario(){
     'Zapallo':         {bg:'#fed7aa',fg:'#9a3412'},
     'Barbecho':        {bg:'#f1f5f9',fg:'#64748b'},
     'Sin uso':         {bg:'#f8fafc',fg:'#94a3b8'},
+    'Mejoramiento de Suelo': {bg:'#e7d6b6',fg:'#6b4423'},   // tierra, suelo en recuperación
   };
   function cultColor(c){return CULT_COLOR[c]||{bg:'#e0f2fe',fg:'#075985'};}
 
@@ -5635,16 +5636,32 @@ function paLoadCalendario(){
     if (!campañasIncluidas.length) campañasIncluidas.push(campañaNombre);
 
     // Sumar ha por cultivo considerando todas las campañas incluidas
+    // Regla: si el mismo cultivo aparece en verano e invierno del MISMO lote,
+    // es perenne (frutal) → cuenta 1 sola vez. Si son cultivos distintos,
+    // cuentan por separado (ej: Tomate verano + Cebolla invierno).
     var haMap = {};
     var haSinUsoVer = 0, haSinUsoInv = 0;
     var totalHa = 0;
     lotes.forEach(function(l){
-      campañasIncluidas.forEach(function(cname){
+      // Recolectar cultivos del lote por campaña
+      var perCamp = campañasIncluidas.map(function(cname){
         var cd = l.cultivos && l.cultivos[cname];
-        var cult = cd ? (typeof cd === 'string' ? cd : cd.cultivo) : '';
-        var esInvierno = /^Inv \d{4}$/.test(cname);
+        return {
+          cultivo: cd ? (typeof cd === 'string' ? cd : cd.cultivo) : '',
+          esInvierno: /^Inv \d{4}$/.test(cname)
+        };
+      });
+      // Deduplicar: si el mismo cultivo (no vacío) está en las 2 campañas → 1 sola vez
+      var paraContar;
+      if (perCamp.length === 2 && perCamp[0].cultivo && perCamp[0].cultivo === perCamp[1].cultivo) {
+        paraContar = [perCamp[0]];  // perenne, 1x
+      } else {
+        paraContar = perCamp;
+      }
+      paraContar.forEach(function(c){
+        var cult = c.cultivo;
         if (!cult || cult === 'Barbecho' || cult === 'Sin uso') {
-          if (esInvierno) haSinUsoInv += (l.hectareas || 0);
+          if (c.esInvierno) haSinUsoInv += (l.hectareas || 0);
           else haSinUsoVer += (l.hectareas || 0);
         } else {
           haMap[cult] = (haMap[cult] || 0) + (l.hectareas || 0);
@@ -5663,6 +5680,7 @@ function paLoadCalendario(){
       'Cebolla':{bg:'#d6c5a0',fg:'#5c3d0a'},'Tomate Industria':{bg:'#fecaca',fg:'#991b1b'},
       'Ajo':{bg:'#f3e8ff',fg:'#6b21a8'},'Papa':{bg:'#fef3c7',fg:'#92400e'},
       'Zapallo':{bg:'#fed7aa',fg:'#9a3412'},
+      'Mejoramiento de Suelo':{bg:'#e7d6b6',fg:'#6b4423'},
     };
     // Cards por cultivo — formato más compacto
     var resumenHtml = haEntries.map(function(cult){
@@ -5871,7 +5889,7 @@ function paEditarCultivo(loteId,nombre){
 }
 
 function paCultivoOpts(){
-  return'<option value="">—</option><optgroup label="Frutales"><option value="Uva Superior">Uva Superior</option><option value="Uva Red Globe">Uva Red Globe</option><option value="Uva Cardinal">Uva Cardinal</option><option value="Uva Cereza">Uva Cereza</option><option value="Damasco">Damasco</option><option value="Durazno">Durazno</option><option value="Ciruela">Ciruela</option></optgroup><optgroup label="Chacra Mercado"><option value="Melón">Melón</option><option value="Cebolla">Cebolla</option><option value="Brócoli">Brócoli</option><option value="Ajo">Ajo</option><option value="Papa">Papa</option><option value="Zapallo">Zapallo</option></optgroup><optgroup label="Chacra Industria"><option value="Tomate Industria">Tomate Industria</option></optgroup><option value="Barbecho">Barbecho</option><option value="Sin uso">Sin uso</option>';
+  return'<option value="">—</option><optgroup label="Frutales"><option value="Uva Superior">Uva Superior</option><option value="Uva Red Globe">Uva Red Globe</option><option value="Uva Cardinal">Uva Cardinal</option><option value="Uva Cereza">Uva Cereza</option><option value="Damasco">Damasco</option><option value="Durazno">Durazno</option><option value="Ciruela">Ciruela</option></optgroup><optgroup label="Chacra Mercado"><option value="Melón">Melón</option><option value="Cebolla">Cebolla</option><option value="Brócoli">Brócoli</option><option value="Ajo">Ajo</option><option value="Papa">Papa</option><option value="Zapallo">Zapallo</option></optgroup><optgroup label="Chacra Industria"><option value="Tomate Industria">Tomate Industria</option></optgroup><optgroup label="Recuperación / Sin producción"><option value="Mejoramiento de Suelo">Mejoramiento de Suelo</option><option value="Barbecho">Barbecho</option><option value="Sin uso">Sin uso</option></optgroup>';
 }
 
 function paMesesOpts(label){
@@ -5929,7 +5947,7 @@ function paGuardarEdicionLote(){
       // Guardar cultivos por campaña
       var saves=Object.entries(cultivos).filter(function(e){return e[1].cultivo;}).map(function(e){
         var camp=e[0],cd=e[1];
-        return paF('/api/pa/lotes/cultivo',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({lote_id:loteId,campaña:camp,cultivo:cd.cultivo,es_perenne:['Uva Superior','Uva Red Globe','Uva Cardinal','Uva Cereza','Damasco','Durazno','Ciruela'].includes(cd.cultivo)?1:0,mes_siembra:cd.mes_siembra||null,mes_cosecha:cd.mes_cosecha||null})});
+        return paF('/api/pa/lotes/cultivo',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({lote_id:loteId,campaña:camp,cultivo:cd.cultivo,es_perenne:['Uva Superior','Uva Red Globe','Uva Cardinal','Uva Cereza','Damasco','Durazno','Ciruela','Mejoramiento de Suelo'].includes(cd.cultivo)?1:0,mes_siembra:cd.mes_siembra||null,mes_cosecha:cd.mes_cosecha||null})});
       });
       Promise.all(saves).then(function(){
         toast('Lote actualizado');
