@@ -743,7 +743,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   <input type="hidden" id="usr-id">
   <div class="fg">
     <div class="fl ff"><label>Nombre *</label><input id="usr-nombre" placeholder="Nombre completo"></div>
-    <div class="fl ff"><label>Email *</label><input id="usr-email" type="email" placeholder="correo@ejemplo.com"></div>
+    <div class="fl ff"><label>Email <span style="color:var(--sub);font-weight:400">(opcional — para usuarios de campo se puede dejar vacío)</span></label><input id="usr-email" type="email" placeholder="correo@ejemplo.com"></div>
     <div class="fl"><label>PIN (4 dígitos) *</label><input id="usr-pin" type="text" inputmode="numeric" maxlength="4" placeholder="0000" style="letter-spacing:8px;font-size:20px;font-weight:700;text-align:center"></div>
     <div class="fl"><label>Rol</label><select id="usr-rol"><option value="operador">Operador</option><option value="admin">Administrador</option><option value="consulta">Solo consulta</option></select></div>
     <div class="fl ff" style="margin-top:4px">
@@ -4714,7 +4714,7 @@ function usrCargar() {
         var secsLabel = secs.includes('*') ? 'Todas' : secs.length + ' secciones';
         return '<tr style="'+(u.activo?'':'opacity:.45')+'">' +
           '<td><strong>'+u.nombre+'</strong></td>' +
-          '<td style="color:var(--mut)">'+u.email+'</td>' +
+          '<td style="color:var(--mut)">'+(u.email&&!u.email.includes('@interno.lnb')?u.email:'<span style="color:var(--sub);font-style:italic">Solo campo</span>')+'</td>' +
           '<td><span class="bdg bcc" style="font-size:11px">'+(rolLabel[u.rol]||u.rol)+'</span></td>' +
           '<td style="font-size:12px;color:var(--mut)">'+deps+'</td>' +
           '<td style="font-size:12px;color:var(--mut)">'+secsLabel+'</td>' +
@@ -4744,7 +4744,7 @@ function usrEditar(u) {
   document.getElementById('usr-id').value=u.id;
   document.getElementById('mb-usr-tit').textContent='Editar — '+u.nombre;
   document.getElementById('usr-nombre').value=u.nombre||'';
-  document.getElementById('usr-email').value=u.email||'';
+  document.getElementById('usr-email').value=(u.email&&!u.email.includes('@interno.lnb'))?u.email:'';
   document.getElementById('usr-pin').value=u.pin||'';
   document.getElementById('usr-rol').value=u.rol||'operador';
   var deps=JSON.parse(u.depositos||'[]');
@@ -4765,8 +4765,8 @@ function usrGuardar() {
   if(document.getElementById('dep-finca').checked) deps.push('FINCA');
   if(document.getElementById('dep-sanpedro').checked) deps.push('SAN PEDRO');
   var secs = usrGetSeccionesSeleccionadas();
-  var body={nombre:document.getElementById('usr-nombre').value.trim(),email:document.getElementById('usr-email').value.trim(),pin:pin,rol:document.getElementById('usr-rol').value,depositos:deps,secciones:secs};
-  if(!body.nombre||!body.email){toast('Nombre y email son requeridos','er');return;}
+  var body={nombre:document.getElementById('usr-nombre').value.trim(),email:document.getElementById('usr-email').value.trim()||null,pin:pin,rol:document.getElementById('usr-rol').value,depositos:deps,secciones:secs};
+  if(!body.nombre){toast('El nombre es requerido','er');return;}
   fetch('/api/auth/usuarios'+(id?'/'+id:''),{method:id?'PATCH':'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
     .then(function(r){return r.json();})
     .then(function(res){if(res.ok){closeMB('mb-usuario');usrCargar();toast('Usuario guardado','ok');}else toast('Error: '+res.error,'er');});
