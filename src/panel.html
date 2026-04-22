@@ -5135,7 +5135,13 @@ function paInit(){
   paF('/api/pa/campanas').then(function(r){
     PA.campañas=r.data||[];
     var opts=PA.campañas.map(function(c){return'<option value="'+c.id+'"'+(c.activa?' selected':'')+'>'+c.nombre+'</option>';}).join('');
-    ['cal-campaña-sel','pa-cos-campaña'].forEach(function(id){var el=document.getElementById(id);if(el)el.innerHTML='<option value="">Campaña activa</option>'+opts;});
+    ['cal-campaña-sel','pa-cos-campaña'].forEach(function(id){var el=document.getElementById(id);if(el){el.innerHTML='<option value="">Campaña activa</option>'+opts;}});
+    // En el calendario, seleccionar 2026/27 como default (la más reciente)
+    var calSel=document.getElementById('cal-campaña-sel');
+    if(calSel){
+      var opt2627=Array.from(calSel.options).find(function(o){return o.text==='2026/27';});
+      if(opt2627) calSel.value=opt2627.value;
+    }
     var cs=document.getElementById('pa-cult-campaña');if(cs)cs.innerHTML=opts;
   });
   paF('/api/pa/sectores').then(function(r){
@@ -5176,17 +5182,17 @@ function paLoadCalendario(){
   // Orden intercalado: verano + invierno del mismo año
   // Invierno solo desde 2024
   var COLS = [
-    {key:'2021/22',  label:'2021/22',  tipo:'verano'},
-    {key:'Inv 2022', label:'Inv 2022', tipo:'invierno'},
-    {key:'2022/23',  label:'2022/23',  tipo:'verano'},
-    {key:'Inv 2023', label:'Inv 2023', tipo:'invierno'},
-    {key:'2023/24',  label:'2023/24',  tipo:'verano'},
-    {key:'Inv 2024', label:'Inv 2024', tipo:'invierno'},
-    {key:'2024/25',  label:'2024/25',  tipo:'verano'},
-    {key:'Inv 2025', label:'Inv 2025', tipo:'invierno'},
-    {key:'2025/26',  label:'2025/26',  tipo:'verano'},
-    {key:'Inv 2026', label:'Inv 2026', tipo:'invierno'},
     {key:'2026/27',  label:'2026/27',  tipo:'verano'},
+    {key:'Inv 2026', label:'Inv 2026', tipo:'invierno'},
+    {key:'2025/26',  label:'2025/26',  tipo:'verano'},
+    {key:'Inv 2025', label:'Inv 2025', tipo:'invierno'},
+    {key:'2024/25',  label:'2024/25',  tipo:'verano'},
+    {key:'Inv 2024', label:'Inv 2024', tipo:'invierno'},
+    {key:'2023/24',  label:'2023/24',  tipo:'verano'},
+    {key:'Inv 2023', label:'Inv 2023', tipo:'invierno'},
+    {key:'2022/23',  label:'2022/23',  tipo:'verano'},
+    {key:'Inv 2022', label:'Inv 2022', tipo:'invierno'},
+    {key:'2021/22',  label:'2021/22',  tipo:'verano'},
   ];
 
   // Colores por cultivo
@@ -5252,17 +5258,20 @@ function paLoadCalendario(){
     var resumenHtml = haEntries.map(function(cult){
       var col = CULT_COLOR_R[cult] || {bg:'#e0f2fe',fg:'#075985'};
       var pct = totalHa > 0 ? Math.round(haMap[cult]/totalHa*100) : 0;
-      return '<div style="background:'+col.bg+';color:'+col.fg+';border-radius:10px;padding:10px 16px;min-width:110px;flex:0 0 auto">'
+      return '<div style="background:'+col.bg+';color:'+col.fg+';border-radius:10px;padding:10px 16px;min-width:110px;flex:0 0 auto;cursor:pointer;transition:all .15s;user-select:none" '
+        +'onclick="paFiltrarCalendario(\''+cult.replace(/'/g,"\\'")+'\')" '
+        +'title="Filtrar por '+cult+'">'
         +'<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;opacity:.8;margin-bottom:3px">'+cult+'</div>'
         +'<div style="font-size:20px;font-weight:700;line-height:1">'+haMap[cult].toFixed(1)+' ha</div>'
-        +'<div style="font-size:11px;opacity:.7;margin-top:2px">'+pct+'% del total</div>'
+        +'<div style="font-size:11px;opacity:.7;margin-top:2px">'+pct+'% · click para filtrar</div>'
         +'</div>';
     }).join('');
-    // Card total
-    resumenHtml = '<div style="background:#1a3a5c;color:#fff;border-radius:10px;padding:10px 16px;min-width:110px;flex:0 0 auto">'
+    // Card total — resetea el filtro
+    resumenHtml = '<div style="background:#1a3a5c;color:#fff;border-radius:10px;padding:10px 16px;min-width:110px;flex:0 0 auto;cursor:pointer" '
+      +'onclick="paFiltrarCalendario(null)" title="Mostrar todos">'
       +'<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;opacity:.6;margin-bottom:3px">Total'+(campañaNombre?' — '+campañaNombre:'')+'</div>'
       +'<div style="font-size:20px;font-weight:700;line-height:1">'+totalHa.toFixed(1)+' ha</div>'
-      +'<div style="font-size:11px;opacity:.5;margin-top:2px">'+lotes.length+' lotes</div>'
+      +'<div style="font-size:11px;opacity:.5;margin-top:2px">'+lotes.length+' lotes · ver todos</div>'
       +'</div>' + resumenHtml;
     document.getElementById('pa-cal-resumen').innerHTML = resumenHtml;
 
@@ -5290,11 +5299,14 @@ function paLoadCalendario(){
     // Filas
     Object.keys(fincas).sort().forEach(function(finca){
       var lotesF=fincas[finca];
-      // Separador de finca
-      html+='<tr><td colspan="'+(2+COLS.length)+'" style="background:#e8f0f8;padding:5px 14px;font-size:11px;font-weight:700;color:#1a3a5c;text-transform:uppercase;letter-spacing:.06em;border-top:2px solid #c5d5e8">📍 '+finca+'</td></tr>';
+      // Separador de finca — con id para mostrarlo/ocultarlo
+      var fincaId='finca-sep-'+finca.replace(/\s+/g,'-').replace(/[^a-zA-Z0-9-]/g,'');
+      html+='<tr id="'+fincaId+'"><td colspan="'+(2+COLS.length)+'" style="background:#e8f0f8;padding:5px 14px;font-size:11px;font-weight:700;color:#1a3a5c;text-transform:uppercase;letter-spacing:.06em;border-top:2px solid #c5d5e8">📍 '+finca+'</td></tr>';
 
       lotesF.forEach(function(l){
-        html+='<tr style="border-bottom:1px solid var(--bor)">';
+        // Cultivo actual = primera columna (2026/27)
+        var cultActual = l.cultivos && l.cultivos[COLS[0].key] ? l.cultivos[COLS[0].key].cultivo : '';
+        html+='<tr data-finca="'+finca+'" data-cult-actual="'+cultActual+'" style="border-bottom:1px solid var(--bor)">';
         // Columna finca/lote (sticky) — sin red de agua
         html+='<td style="position:sticky;left:0;background:var(--sur);padding:7px 12px;z-index:1;border-right:2px solid var(--bor2)">'
           +'<div style="font-size:11px;color:var(--mut);font-weight:500">'+finca+'</div>'
@@ -5333,6 +5345,62 @@ function paLoadCalendario(){
     document.getElementById('pa-cal-contenido').innerHTML=html;
   });
 }
+var _paCalFiltro = null;
+function paFiltrarCalendario(cult) {
+  _paCalFiltro = cult;
+  var tabla = document.querySelector('#pa-cal-contenido table');
+  if (!tabla) return;
+
+  // Resaltar card activa en el resumen
+  document.querySelectorAll('#pa-cal-resumen > div').forEach(function(card){
+    card.style.outline = 'none';
+    card.style.transform = 'scale(1)';
+  });
+
+  var filas = tabla.querySelectorAll('tbody tr');
+  var fincasVisibles = {};
+
+  // Si cult es null → mostrar todo
+  filas.forEach(function(tr) {
+    var cultActual = tr.getAttribute('data-cult-actual');
+    var finca = tr.getAttribute('data-finca');
+    if (finca === null) return; // es separador de finca, lo manejamos después
+
+    var mostrar = !cult || cultActual === cult;
+    tr.style.display = mostrar ? '' : 'none';
+    if (mostrar && finca) fincasVisibles[finca] = true;
+  });
+
+  // Mostrar/ocultar separadores de finca
+  filas.forEach(function(tr) {
+    if (tr.getAttribute('data-finca') !== null) return; // es fila de lote
+    // Es separador — buscar su id y comparar con fincasVisibles
+    var id = tr.id || '';
+    if (!id) return;
+    // Si no hay filtro, mostrar todo
+    if (!cult) { tr.style.display = ''; return; }
+    // Buscar si alguna fila de esa finca es visible
+    var hayVisible = false;
+    filas.forEach(function(tr2) {
+      var f2 = tr2.getAttribute('data-finca');
+      if (f2 && fincasVisibles[f2] && tr.id === 'finca-sep-'+f2.replace(/\s+/g,'-').replace(/[^a-zA-Z0-9-]/g,''))
+        hayVisible = true;
+    });
+    tr.style.display = hayVisible ? '' : 'none';
+  });
+
+  // Resaltar card seleccionada
+  if (cult) {
+    document.querySelectorAll('#pa-cal-resumen > div').forEach(function(card){
+      var titulo = card.querySelector('div');
+      if (titulo && titulo.textContent.trim().toUpperCase() === cult.toUpperCase()) {
+        card.style.outline = '3px solid #1a3a5c';
+        card.style.transform = 'scale(1.04)';
+      }
+    });
+  }
+}
+
 function paEditarCultivo(loteId,nombre){
   document.getElementById('pa-cult-lote-id').value=loteId;
   document.getElementById('pa-cult-tit').textContent='Editar — '+nombre;
