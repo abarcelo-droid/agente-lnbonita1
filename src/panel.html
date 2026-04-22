@@ -5619,18 +5619,40 @@ function paLoadCalendario(){
     } else if (campañaActiva) {
       campañaNombre = campañaActiva.nombre;
     }
-    // Sumar ha por cultivo
+    // Determinar el par de campañas a considerar (verano + invierno del mismo año base)
+    var yearBase = null;
+    if (/^\d{4}\//.test(campañaNombre)) yearBase = campañaNombre.substring(0, 4);
+    else if (/^Inv \d{4}$/.test(campañaNombre)) yearBase = campañaNombre.substring(4).trim();
+
+    var campañasIncluidas = [];
+    if (yearBase) {
+      var veranoNom = yearBase + '/' + String(parseInt(yearBase)+1).substr(-2);
+      var inviernoNom = 'Inv ' + yearBase;
+      [veranoNom, inviernoNom].forEach(function(n){
+        if (PA.campañas.some(function(c){ return c.nombre === n; })) campañasIncluidas.push(n);
+      });
+    }
+    if (!campañasIncluidas.length) campañasIncluidas.push(campañaNombre);
+
+    // Sumar ha por cultivo considerando todas las campañas incluidas
     var haMap = {};
+    var haSinUsoVer = 0, haSinUsoInv = 0;
     var totalHa = 0;
     lotes.forEach(function(l){
-      var cd = l.cultivos && campañaNombre && l.cultivos[campañaNombre];
-      var cult = cd ? (typeof cd === 'string' ? cd : cd.cultivo) : '';
-      if (!cult || cult === 'Barbecho' || cult === 'Sin uso') {
-        if (!cult) cult = '(Sin asignar)';
-      }
-      haMap[cult] = (haMap[cult] || 0) + (l.hectareas || 0);
-      totalHa += (l.hectareas || 0);
+      campañasIncluidas.forEach(function(cname){
+        var cd = l.cultivos && l.cultivos[cname];
+        var cult = cd ? (typeof cd === 'string' ? cd : cd.cultivo) : '';
+        var esInvierno = /^Inv \d{4}$/.test(cname);
+        if (!cult || cult === 'Barbecho' || cult === 'Sin uso') {
+          if (esInvierno) haSinUsoInv += (l.hectareas || 0);
+          else haSinUsoVer += (l.hectareas || 0);
+        } else {
+          haMap[cult] = (haMap[cult] || 0) + (l.hectareas || 0);
+        }
+        totalHa += (l.hectareas || 0);
+      });
     });
+
     // Ordenar de mayor a menor
     var haEntries = Object.keys(haMap).sort(function(a,b){ return haMap[b]-haMap[a]; });
     var CULT_COLOR_R = {
@@ -5640,26 +5662,45 @@ function paLoadCalendario(){
       'Melón':{bg:'#fef08a',fg:'#713f12'},'Brócoli':{bg:'#bbf7d0',fg:'#14532d'},
       'Cebolla':{bg:'#d6c5a0',fg:'#5c3d0a'},'Tomate Industria':{bg:'#fecaca',fg:'#991b1b'},
       'Ajo':{bg:'#f3e8ff',fg:'#6b21a8'},'Papa':{bg:'#fef3c7',fg:'#92400e'},
-      'Zapallo':{bg:'#fed7aa',fg:'#9a3412'},'Barbecho':{bg:'#f1f5f9',fg:'#64748b'},
-      'Sin uso':{bg:'#f8fafc',fg:'#94a3b8'},'(Sin asignar)':{bg:'#f1f5f9',fg:'#94a3b8'},
+      'Zapallo':{bg:'#fed7aa',fg:'#9a3412'},
     };
+    // Cards por cultivo — formato más compacto
     var resumenHtml = haEntries.map(function(cult){
       var col = CULT_COLOR_R[cult] || {bg:'#e0f2fe',fg:'#075985'};
       var pct = totalHa > 0 ? Math.round(haMap[cult]/totalHa*100) : 0;
-      return '<div style="background:'+col.bg+';color:'+col.fg+';border-radius:10px;padding:10px 16px;min-width:110px;flex:0 0 auto;cursor:pointer;transition:all .15s;user-select:none" '
+      return '<div style="background:'+col.bg+';color:'+col.fg+';border-radius:8px;padding:7px 11px;min-width:88px;flex:0 0 auto;cursor:pointer;transition:all .15s;user-select:none" '
         +'onclick="paFiltrarCalendario(\''+cult.replace(/'/g,"\\'")+'\')" '
         +'title="Filtrar por '+cult+'">'
-        +'<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;opacity:.8;margin-bottom:3px">'+cult+'</div>'
-        +'<div style="font-size:20px;font-weight:700;line-height:1">'+haMap[cult].toFixed(1)+' ha</div>'
-        +'<div style="font-size:11px;opacity:.7;margin-top:2px">'+pct+'% · click para filtrar</div>'
+        +'<div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;opacity:.8;margin-bottom:2px">'+cult+'</div>'
+        +'<div style="font-size:16px;font-weight:700;line-height:1.1">'+haMap[cult].toFixed(1)+' <span style="font-size:10px;font-weight:500;opacity:.7">ha</span></div>'
+        +'<div style="font-size:9px;opacity:.6;margin-top:1px">'+pct+'%</div>'
         +'</div>';
     }).join('');
-    // Card total — resetea el filtro
-    resumenHtml = '<div style="background:#1a3a5c;color:#fff;border-radius:10px;padding:10px 16px;min-width:110px;flex:0 0 auto;cursor:pointer" '
+
+    // Card Sin Uso unificada con detalle verano/invierno
+    if (haSinUsoVer > 0 || haSinUsoInv > 0) {
+      var totalSinUso = haSinUsoVer + haSinUsoInv;
+      var pctSinUso = totalHa > 0 ? Math.round(totalSinUso/totalHa*100) : 0;
+      var detalle = [];
+      if (haSinUsoVer > 0) detalle.push('☀️ '+haSinUsoVer.toFixed(1));
+      if (haSinUsoInv > 0) detalle.push('❄️ '+haSinUsoInv.toFixed(1));
+      resumenHtml += '<div style="background:#f1f5f9;color:#64748b;border-radius:8px;padding:7px 11px;min-width:88px;flex:0 0 auto;cursor:pointer" '
+        +'onclick="paFiltrarCalendario(\'Sin uso\')" title="Sin uso / sin asignar">'
+        +'<div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;opacity:.8;margin-bottom:2px">Sin uso</div>'
+        +'<div style="font-size:16px;font-weight:700;line-height:1.1">'+totalSinUso.toFixed(1)+' <span style="font-size:10px;font-weight:500;opacity:.7">ha</span></div>'
+        +'<div style="font-size:9px;opacity:.65;margin-top:1px">'+detalle.join(' · ')+'</div>'
+        +'</div>';
+    }
+
+    // Card total al principio — resetea el filtro
+    var campañasTxt = campañasIncluidas.length > 1
+      ? campañasIncluidas.join(' + ')
+      : (campañasIncluidas[0] || '');
+    resumenHtml = '<div style="background:#1a3a5c;color:#fff;border-radius:8px;padding:7px 11px;min-width:88px;flex:0 0 auto;cursor:pointer" '
       +'onclick="paFiltrarCalendario(null)" title="Mostrar todos">'
-      +'<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;opacity:.6;margin-bottom:3px">Total'+(campañaNombre?' — '+campañaNombre:'')+'</div>'
-      +'<div style="font-size:20px;font-weight:700;line-height:1">'+totalHa.toFixed(1)+' ha</div>'
-      +'<div style="font-size:11px;opacity:.5;margin-top:2px">'+lotes.length+' lotes · ver todos</div>'
+      +'<div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;opacity:.6;margin-bottom:2px">Total</div>'
+      +'<div style="font-size:16px;font-weight:700;line-height:1.1">'+totalHa.toFixed(1)+' <span style="font-size:10px;font-weight:500;opacity:.7">ha</span></div>'
+      +'<div style="font-size:9px;opacity:.5;margin-top:1px">'+campañasTxt+'</div>'
       +'</div>' + resumenHtml;
     document.getElementById('pa-cal-resumen').innerHTML = resumenHtml;
 
