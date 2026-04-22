@@ -222,5 +222,41 @@ export function getCampañaActiva() {
   return db.prepare("SELECT * FROM pa_campañas WHERE activa = 1").get();
 }
 
+// ── MIGRACIÓN: columnas nuevas en pa_lotes ────────────────────────────────
+(function migrarLotes() {
+  try {
+    const cols = db.prepare("PRAGMA table_info(pa_lotes)").all().map(c => c.name);
+    if (!cols.includes('finca')) {
+      db.exec("ALTER TABLE pa_lotes ADD COLUMN finca TEXT");
+      console.log("[PA] Columna finca agregada en pa_lotes");
+    }
+    if (!cols.includes('poligono_maps')) {
+      db.exec("ALTER TABLE pa_lotes ADD COLUMN poligono_maps TEXT");
+      console.log("[PA] Columna poligono_maps agregada en pa_lotes");
+    }
+    if (!cols.includes('red_agua')) {
+      db.exec("ALTER TABLE pa_lotes ADD COLUMN red_agua TEXT CHECK(red_agua IN ('Norte','Sur','Ambas') OR red_agua IS NULL)");
+      console.log("[PA] Columna red_agua agregada en pa_lotes");
+    }
+  } catch(e) { console.error('[PA] Error migrando pa_lotes:', e.message); }
+})();
+
+// ── MIGRACIÓN: campañas históricas ────────────────────────────────────────
+(function migrarCampañasHistoricas() {
+  try {
+    const campañas = [
+      ['2021/22', '2021-07-01', '2022-06-30'],
+      ['2022/23', '2022-07-01', '2023-06-30'],
+      ['2023/24', '2023-07-01', '2024-06-30'],
+      ['2024/25', '2024-07-01', '2025-06-30'],
+      ['2026/27', '2026-07-01', '2027-06-30'],
+    ];
+    for (const [nombre, inicio, fin] of campañas) {
+      db.prepare("INSERT OR IGNORE INTO pa_campañas (nombre, fecha_inicio, fecha_fin, activa) VALUES (?,?,?,0)")
+        .run(nombre, inicio, fin);
+    }
+  } catch(e) { console.error('[PA] Error migrando campañas históricas:', e.message); }
+})();
+
 export { db };
 export default db;

@@ -92,12 +92,33 @@ router.get('/lotes', requireAuth, (req, res) => {
 
 router.post('/lotes', requireAuth, (req, res) => {
   const db = getDb();
-  const { nombre, sector_id, hectareas, notas } = req.body;
+  const { nombre, sector_id, finca, hectareas, poligono_maps, red_agua, notas, cultivos } = req.body;
   if (!nombre || !sector_id) return res.status(400).json({ ok: false, error: 'Nombre y sector requeridos' });
   try {
-    const r = db.prepare("INSERT INTO pa_lotes (nombre, sector_id, hectareas, notas) VALUES (?,?,?,?)")
-      .run(nombre, sector_id, hectareas || 0.5, notas || null);
-    res.json({ ok: true, id: r.lastInsertRowid });
+    const crearLote = db.transaction(() => {
+      const r = db.prepare(`
+        INSERT INTO pa_lotes (nombre, sector_id, finca, hectareas, poligono_maps, red_agua, notas)
+        VALUES (?,?,?,?,?,?,?)
+      `).run(nombre, sector_id, finca||null, hectareas||0.5, poligono_maps||null, red_agua||null, notas||null);
+      const loteId = r.lastInsertRowid;
+      // Guardar cultivos por campaña si vienen
+      if (cultivos && typeof cultivos === 'object') {
+        for (const [campaña, cultivo] of Object.entries(cultivos)) {
+          if (!cultivo) continue;
+          const campData = db.prepare("SELECT nombre FROM pa_campañas WHERE nombre=?").get(campaña);
+          if (!campData) continue;
+          const esPerenne = ['Vid','Damasco','Durazno','Ciruela','Manzana'].includes(cultivo) ? 1 : 0;
+          db.prepare(`
+            INSERT INTO pa_cultivos_lote (lote_id, cultivo, campaña, es_perenne)
+            VALUES (?,?,?,?)
+            ON CONFLICT(lote_id, campaña) DO UPDATE SET cultivo=excluded.cultivo
+          `).run(loteId, cultivo, campaña, esPerenne);
+        }
+      }
+      return loteId;
+    });
+    const id = crearLote();
+    res.json({ ok: true, id });
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
