@@ -154,6 +154,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   <div class="ni" data-sec="pa-ordenes"><span class="dot de"></span>Órdenes de Aplicación</div>
   <div class="ni" data-sec="pa-costos"><span class="dot da"></span>Costos por Lote</div>
   <div class="ni" data-sec="pa-lotes"><span class="dot db"></span>Fincas y Lotes</div>
+  <div class="ni" data-sec="pa-scout"><span class="dot de"></span>Scout — Campo</div>
   <!-- Usuario actual -->
   <div style="margin-top:auto;padding:12px 16px;border-top:1px solid rgba(255,255,255,.1)">
     <div id="nav-usuario" style="font-size:11px;color:rgba(255,255,255,.6);margin-bottom:8px">—</div>
@@ -1270,6 +1271,58 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
 </table></div></div>
 </div>
 
+<!-- ─── PA SCOUT (resumen en panel desktop) ───────────────────── -->
+<div class="sec" id="sec-pa-scout">
+<div class="ph">
+  <div><div class="ph-t">🌿 Scout — Reportes de campo</div><div class="ph-s">Monitoreo y seguimiento de problemas</div></div>
+  <a href="/scout" target="_blank" class="btn bb">Abrir Scout en celular →</a>
+</div>
+<!-- Stats -->
+<div class="pa-grid4" id="scout-stats" style="margin-bottom:20px">
+  <div class="pa-card"><div class="pa-card-title">Pendientes</div><div class="pa-stat" id="sc-pend">—</div></div>
+  <div class="pa-card"><div class="pa-card-title">En proceso</div><div class="pa-stat" id="sc-proc">—</div></div>
+  <div class="pa-card"><div class="pa-card-title" style="color:var(--warn)">⚡ Alta prioridad</div><div class="pa-stat" id="sc-alta">—</div></div>
+  <div class="pa-card"><div class="pa-card-title" style="color:var(--err)">🔴 Críticos</div><div class="pa-stat" id="sc-crit">—</div></div>
+</div>
+<!-- Últimos reportes -->
+<div class="pa-wrap">
+  <div style="padding:14px 16px;border-bottom:1px solid var(--bor);font-size:12px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.06em">Reportes activos</div>
+  <div class="ab-table-wrap"><table class="pa-tbl">
+    <thead><tr><th>Lote</th><th>Tipo</th><th>Sev.</th><th>Estado</th><th>Asignado a</th><th>Reportado por</th><th>Fecha</th><th></th></tr></thead>
+    <tbody id="scout-tbody"><tr><td colspan="8" class="emp">Cargando...</td></tr></tbody>
+  </table></div>
+</div>
+<!-- Formulario asignación inline -->
+<div id="scout-asig-form" style="display:none;margin-top:16px" class="pa-card">
+  <div style="font-size:13px;font-weight:700;margin-bottom:12px">Asignar reporte <span id="scout-asig-id-txt"></span></div>
+  <input type="hidden" id="scout-asig-rep-id">
+  <div class="pa-grid2">
+    <div class="fl"><label>Asignar a</label>
+      <select id="scout-asig-usr" class="ab-form-select"></select>
+    </div>
+    <div class="fl"><label>Frecuencia seguimiento</label>
+      <select id="scout-asig-frec" class="ab-form-select">
+        <option value="semanal">Semanal</option>
+        <option value="diario">Diario</option>
+      </select>
+    </div>
+  </div>
+  <div style="display:flex;gap:10px;margin-top:12px">
+    <button class="btn bb" onclick="scoutGuardarAsig()">Asignar</button>
+    <button class="btn bo" onclick="document.getElementById('scout-asig-form').style.display='none'">Cancelar</button>
+  </div>
+</div>
+</div>
+<button class="btn bb" onclick="paAbrirNuevoLote()">+ Nuevo lote</button></div>
+<div class="filt">
+  <select id="pa-lot-sector-fil" onchange="paLoadLotes()"><option value="">Todas las fincas</option></select>
+</div>
+<div class="pa-wrap"><div class="ab-table-wrap"><table class="pa-tbl">
+  <thead><tr><th>Finca / Sector</th><th>Lote (Llaves)</th><th style="text-align:right">Ha</th><th>Cultivo actual</th><th>Tipo</th><th></th></tr></thead>
+  <tbody id="pa-lot-tbody"><tr><td colspan="6" class="emp">Cargando...</td></tr></tbody>
+</table></div></div>
+</div>
+
 </main>
 </div>
 
@@ -1624,7 +1677,8 @@ function loadSec(s) {
     'pa-compras':    function(){ paLoadCompras(); },
     'pa-ordenes':    function(){ paLoadOrdenes(); },
     'pa-costos':     function(){ paLoadCostos(); },
-    'pa-lotes':      function(){ paLoadLotes(); }
+    'pa-lotes':      function(){ paLoadLotes(); },
+    'pa-scout':      function(){ paLoadScout(); }
   };
   if (m[s]) m[s]();
 }
@@ -5601,6 +5655,75 @@ function paGuardarLote(){
         });
       } else toast(r.error||'Error','er');
     });
+}
+
+// ── SCOUT (resumen panel desktop) ────────────────────────────
+function paLoadScout() {
+  var SEV_LABEL={1:'Leve',2:'Moderado',3:'Severo',4:'Crítico'};
+  var SEV_CLS={1:'pa-verde-bg',2:'pa-amarillo-bg',3:'pa-rojo-bg',4:'pa-rojo-bg'};
+  var TIPO_ICON={Plaga:'🐛',Enfermedad:'🍂',Maleza:'🌿','Déficit hídrico':'💧','Daño por helada':'🥶','Sistema de riego':'🚿',Desorden:'⚠️'};
+  // Stats
+  paF('/api/pa/scout/resumen').then(function(r) {
+    if (!r.ok) return;
+    var d = r.data;
+    document.getElementById('sc-pend').textContent = d.pendientes;
+    document.getElementById('sc-proc').textContent = d.en_proceso;
+    document.getElementById('sc-alta').textContent = d.alta_prioridad;
+    document.getElementById('sc-crit').textContent = d.criticos;
+  });
+  // Tabla reportes
+  paF('/api/pa/scout/reportes?estado=pendiente,en_proceso').then(function(r) {
+    var data = r.data || [];
+    var tb = document.getElementById('scout-tbody');
+    if (!data.length) { tb.innerHTML = '<tr><td colspan="8" class="emp">Sin reportes activos — ✅ El campo está tranquilo</td></tr>'; return; }
+    tb.innerHTML = data.map(function(rep) {
+      var esAlta = rep.prioridad_alta || rep.creado_por_rol === 'admin';
+      var estadoBadge = rep.estado === 'pendiente'
+        ? '<span class="pa-badge pa-amarillo-bg">Pendiente</span>'
+        : '<span class="pa-badge pa-verde-bg">En proceso</span>';
+      var prio = esAlta ? '<span class="pa-badge pa-rojo-bg" style="margin-left:4px">⚡</span>' : '';
+      return '<tr style="'+(esAlta?'background:#fff8e6':'')+(rep.severidad===4?'background:#fef2f2':'')+'">'
+        +'<td><strong>'+rep.lote_nombre+'</strong><br><span style="font-size:11px;color:var(--mut)">'+(rep.lote_finca||'')+'</span></td>'
+        +'<td>'+(TIPO_ICON[rep.tipo]||'⚠️')+' '+rep.tipo+'</td>'
+        +'<td><span class="pa-badge '+SEV_CLS[rep.severidad]+'">'+rep.severidad+' — '+SEV_LABEL[rep.severidad]+'</span></td>'
+        +'<td>'+estadoBadge+prio+'</td>'
+        +'<td style="font-size:12px">'+(rep.asignado_nombre||'<span style="color:var(--mut);font-style:italic">Sin asignar</span>')+'</td>'
+        +'<td style="font-size:12px">'+rep.creado_por_nombre+'</td>'
+        +'<td style="font-size:11px;color:var(--mut)">'+paFecha(rep.creado_en)+'</td>'
+        +'<td style="display:flex;gap:6px;flex-wrap:wrap">'
+        +'<button class="btn bo bs" onclick="scoutAbrirAsig('+rep.id+',\''+rep.lote_nombre+'\')">👤 Asignar</button>'
+        +'<button class="btn bo bs" onclick="scoutResolver('+rep.id+')">✓</button>'
+        +'</td>'
+        +'</tr>';
+    }).join('');
+    // Poblar selector usuarios
+    paF('/api/auth/usuarios').then(function(r2) {
+      var sel = document.getElementById('scout-asig-usr');
+      if (sel) sel.innerHTML = (r2.data||[]).map(function(u){ return '<option value="'+u.id+'">'+u.nombre+' ('+u.rol+')</option>'; }).join('');
+    });
+  });
+}
+
+function scoutAbrirAsig(id, nombre) {
+  document.getElementById('scout-asig-rep-id').value = id;
+  document.getElementById('scout-asig-id-txt').textContent = '— ' + nombre;
+  document.getElementById('scout-asig-form').style.display = 'block';
+  document.getElementById('scout-asig-form').scrollIntoView({ behavior: 'smooth' });
+}
+function scoutGuardarAsig() {
+  var repId = document.getElementById('scout-asig-rep-id').value;
+  var usrId = document.getElementById('scout-asig-usr').value;
+  var frec  = document.getElementById('scout-asig-frec').value;
+  if (!usrId) return toast('Elegí una persona', 'er');
+  paF('/api/pa/scout/asignar', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ reporte_id: repId, usuario_id: usrId, frecuencia: frec }) })
+    .then(function(r) {
+      if (r.ok) { toast('Asignado correctamente'); document.getElementById('scout-asig-form').style.display='none'; paLoadScout(); }
+      else toast(r.error||'Error','er');
+    });
+}
+function scoutResolver(id) {
+  paF('/api/pa/scout/reportes/'+id+'/estado', { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ estado:'resuelto' }) })
+    .then(function(r){ if(r.ok){ toast('✅ Resuelto'); paLoadScout(); } });
 }
 
 (function(){if(document.readyState!=='loading')paInit();else document.addEventListener('DOMContentLoaded',paInit);})();
