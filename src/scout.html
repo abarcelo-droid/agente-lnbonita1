@@ -208,8 +208,9 @@ input[type=file]{display:none}
   <div class="tab-bar">
     <div class="tab active" data-tab="reportar" onclick="showTab('reportar')">📷 Reportar</div>
     <div class="tab" data-tab="mis-ordenes" onclick="showTab('mis-ordenes')">
-      📋 Mis órdenes<span class="tab-badge" id="badge-ord"></span>
+      📋 Órdenes<span class="tab-badge" id="badge-ord"></span>
     </div>
+    <div class="tab" data-tab="compras" onclick="showTab('compras')">🧾 Compras</div>
     <div class="tab" data-tab="pendientes" onclick="showTab('pendientes')">
       ⚠️ Alertas<span class="tab-badge" id="badge-pend"></span>
     </div>
@@ -298,6 +299,74 @@ input[type=file]{display:none}
 <!-- ═══════════════════════ TAB MIS ÓRDENES ═════════════════════ -->
 <div class="screen" id="screen-mis-ordenes">
   <div id="ord-lista"><div class="empty"><span class="empty-icon">⏳</span><div class="empty-txt">Cargando...</div></div></div>
+</div>
+
+<!-- ═══════════════════════ TAB COMPRAS ══════════════════════════ -->
+<div class="screen" id="screen-compras">
+
+  <!-- FOTO + LECTOR IA -->
+  <div style="padding:14px">
+    <div style="background:var(--sur);border-radius:14px;border:1px solid var(--bor);overflow:hidden">
+      <div style="padding:14px 16px;border-bottom:1px solid var(--bor);display:flex;align-items:center;justify-content:space-between">
+        <div>
+          <div style="font-size:13px;font-weight:700;color:var(--txt)">📄 Foto del remito / factura</div>
+          <div style="font-size:11px;color:var(--mut);margin-top:2px">Sacá foto y dejá que la IA lo complete</div>
+        </div>
+        <button id="comp-ia-btn" onclick="scoutLeerRemito()" style="display:none;background:var(--burg);color:#fff;border:none;border-radius:20px;padding:8px 16px;font-size:13px;font-weight:700;cursor:pointer">✨ Leer</button>
+      </div>
+      <div style="padding:14px">
+        <div class="foto-area" id="comp-foto-area" onclick="document.getElementById('comp-foto-inp').click()">
+          <span class="foto-icon-big">📷</span>
+          <div class="foto-hint">Tocar para sacar foto o subir imagen</div>
+        </div>
+        <input type="file" id="comp-foto-inp" accept="image/*" capture="environment" style="display:none" onchange="scoutOnFotoComp(this)">
+        <div id="comp-ia-estado" style="display:none;margin-top:10px;padding:10px 14px;border-radius:8px;font-size:13px;text-align:center"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- DATOS DEL COMPROBANTE -->
+  <div class="form-section">
+    <label class="form-label">Datos del comprobante</label>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
+      <div>
+        <div style="font-size:11px;color:var(--mut);margin-bottom:4px">Fecha</div>
+        <input type="date" class="scout-input" id="comp-fecha">
+      </div>
+      <div>
+        <div style="font-size:11px;color:var(--mut);margin-bottom:4px">Tipo</div>
+        <select class="scout-select" id="comp-tipo">
+          <option value="factura">Factura</option>
+          <option value="remito">Remito</option>
+          <option value="ticket">Ticket</option>
+          <option value="otro">Otro</option>
+        </select>
+      </div>
+    </div>
+    <div style="margin-bottom:10px">
+      <div style="font-size:11px;color:var(--mut);margin-bottom:4px">N° Comprobante</div>
+      <input class="scout-input" id="comp-nro" placeholder="R 001-00012345">
+    </div>
+    <div>
+      <div style="font-size:11px;color:var(--mut);margin-bottom:4px">Proveedor</div>
+      <input class="scout-input" id="comp-prov" placeholder="Nombre del proveedor">
+    </div>
+  </div>
+
+  <!-- PRODUCTOS -->
+  <div class="form-section">
+    <label class="form-label">Productos</label>
+    <div id="comp-items-list"></div>
+    <button class="rep-btn" style="width:100%;margin-top:8px" onclick="scoutAgregarItemComp()">+ Agregar producto</button>
+  </div>
+
+  <!-- TOTAL -->
+  <div style="margin:0 14px;padding:14px;background:var(--sur);border-radius:12px;border:1px solid var(--bor);display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+    <span style="font-size:14px;font-weight:600;color:var(--txt)">Total</span>
+    <span style="font-size:20px;font-weight:800;color:var(--burg)" id="comp-total-label">$0</span>
+  </div>
+
+  <button class="fab show" id="fab-comp" onclick="scoutGuardarCompra()" style="bottom:24px">Registrar compra →</button>
 </div>
 
 <!-- ═══════════════════════ TAB PENDIENTES ═══════════════════════ -->
@@ -530,6 +599,7 @@ function showTab(tab) {
   document.querySelectorAll('.screen').forEach(function(s){s.classList.remove('active');});
   document.getElementById('screen-'+tab).classList.add('active');
   if(tab==='mis-ordenes')cargarMisOrdenes();
+  if(tab==='compras')initCompras();
   if(tab==='pendientes')cargarPendientes();
   if(tab==='mis-tareas')cargarMisTareas();
 }
@@ -855,6 +925,192 @@ function confirmarEjecucion() {
       cargarMisOrdenes();
       actualizarBadges();
     } else toast(r.error||'Error','er');
+  });
+}
+
+// ── COMPRAS MOBILE ────────────────────────────────────────────
+var COMP = { fotoB64: null, itemN: 0, insumos: [] };
+
+function initCompras() {
+  api('/api/pa/insumos').then(function(r){ COMP.insumos = r.data||[]; });
+  document.getElementById('comp-fecha').value = new Date().toISOString().slice(0,10);
+  scoutAgregarItemComp();
+}
+
+function scoutOnFotoComp(input) {
+  var file = input.files[0]; if(!file) return;
+  var reader = new FileReader();
+  reader.onload = function(e) {
+    COMP.fotoB64 = e.target.result.split(',')[1];
+    var area = document.getElementById('comp-foto-area');
+    area.classList.add('tiene');
+    area.innerHTML = '<img src="'+e.target.result+'"><div class="foto-overlay">📷 Tocar para cambiar</div>';
+    area.onclick = function(){ document.getElementById('comp-foto-inp').click(); };
+    document.getElementById('comp-ia-btn').style.display = 'flex';
+    document.getElementById('comp-ia-estado').style.display = 'none';
+  };
+  reader.readAsDataURL(file);
+}
+
+function scoutAgregarItemComp() {
+  var n = COMP.itemN++;
+  var opts = COMP.insumos.map(function(i){
+    return '<option value="'+i.id+'">'+i.nombre+' ('+i.unidad+')</option>';
+  }).join('');
+  var div = document.createElement('div');
+  div.id = 'comp-item-'+n;
+  div.style.cssText = 'background:var(--bg);border-radius:12px;padding:12px;margin-bottom:10px';
+  div.innerHTML = '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">'
+    +'<div style="font-size:12px;font-weight:700;color:var(--mut);text-transform:uppercase">Producto '+(n+1)+'</div>'
+    +'<button onclick="document.getElementById(\'comp-item-'+n+'\').remove();scoutCalcTotal()" style="background:var(--err);color:#fff;border:none;border-radius:6px;width:24px;height:24px;font-size:14px;cursor:pointer;line-height:1">×</button>'
+    +'</div>'
+    +'<select class="scout-select" id="comp-ins-'+n+'" style="margin-bottom:8px"><option value="">— Elegir insumo —</option>'+opts+'</select>'
+    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">'
+    +'<div><div style="font-size:10px;color:var(--mut);margin-bottom:3px">Cantidad</div>'
+    +'<input type="number" class="scout-input" id="comp-cant-'+n+'" placeholder="0" step="0.01" min="0" oninput="scoutCalcTotal()"></div>'
+    +'<div><div style="font-size:10px;color:var(--mut);margin-bottom:3px">Precio / unidad</div>'
+    +'<input type="number" class="scout-input" id="comp-prec-'+n+'" placeholder="$0" step="0.01" min="0" oninput="scoutCalcTotal()"></div>'
+    +'</div>'
+    +'<div style="font-size:11px;color:var(--mut);text-align:right;margin-top:6px">Subtotal: <strong id="comp-sub-'+n+'">$0</strong></div>';
+  document.getElementById('comp-items-list').appendChild(div);
+}
+
+function scoutCalcTotal() {
+  var total = 0;
+  for(var i=0; i<COMP.itemN; i++) {
+    var cantEl = document.getElementById('comp-cant-'+i);
+    var precEl = document.getElementById('comp-prec-'+i);
+    var subEl  = document.getElementById('comp-sub-'+i);
+    if(!cantEl) continue;
+    var sub = (parseFloat(cantEl.value)||0) * (parseFloat(precEl.value)||0);
+    total += sub;
+    if(subEl) subEl.textContent = '$'+sub.toLocaleString('es-AR');
+  }
+  document.getElementById('comp-total-label').textContent = '$'+total.toLocaleString('es-AR');
+}
+
+function scoutLeerRemito() {
+  if(!COMP.fotoB64) return toast('Primero sacá una foto','er');
+  var btn = document.getElementById('comp-ia-btn');
+  var est = document.getElementById('comp-ia-estado');
+  btn.textContent = '⏳'; btn.disabled = true;
+  est.style.display = 'block';
+  est.style.cssText += ';background:#eff6ff;color:var(--burg)';
+  est.textContent = '🤖 Leyendo el remito...';
+
+  var insNombres = COMP.insumos.map(function(i){ return i.nombre; }).join(', ');
+
+  fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 1000,
+      messages: [{
+        role: 'user',
+        content: [
+          { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: COMP.fotoB64 } },
+          { type: 'text', text: 'Analizá este remito o factura de insumos agrícolas. Devolvé SOLO JSON sin markdown:\n{"tipo_comprobante":"factura|remito|ticket|otro","nro_comprobante":"número","fecha":"YYYY-MM-DD o null","proveedor":"nombre","items":[{"descripcion":"nombre producto","cantidad":número,"precio_unitario":número o null}]}\nInsumos conocidos: '+insNombres+'\nSolo JSON, sin texto adicional.' }
+        ]
+      }]
+    })
+  })
+  .then(function(r){ return r.json(); })
+  .then(function(data) {
+    btn.textContent = '✨ Leer'; btn.disabled = false;
+    var txt = (data.content&&data.content[0] ? data.content[0].text : '').replace(/```json|```/g,'').trim();
+    var parsed;
+    try { parsed = JSON.parse(txt); } catch(e) {
+      est.style.background = '#fef2f2'; est.style.color = 'var(--err)';
+      est.textContent = '❌ No se pudo leer. Completá manualmente.'; return;
+    }
+    var aplicados = [];
+    if(parsed.fecha)           { document.getElementById('comp-fecha').value = parsed.fecha; aplicados.push('fecha'); }
+    if(parsed.nro_comprobante) { document.getElementById('comp-nro').value = parsed.nro_comprobante; aplicados.push('número'); }
+    if(parsed.proveedor)       { document.getElementById('comp-prov').value = parsed.proveedor; aplicados.push('proveedor'); }
+    if(parsed.tipo_comprobante){ document.getElementById('comp-tipo').value = parsed.tipo_comprobante; }
+
+    if(parsed.items && parsed.items.length) {
+      document.getElementById('comp-items-list').innerHTML = '';
+      COMP.itemN = 0;
+      parsed.items.forEach(function(it) {
+        scoutAgregarItemComp();
+        var n = COMP.itemN - 1;
+        // Match con insumos conocidos
+        var match = COMP.insumos.find(function(ins){
+          var d = (it.descripcion||'').toLowerCase();
+          return d.includes(ins.nombre.toLowerCase()) || ins.nombre.toLowerCase().includes(d.split(' ')[0]);
+        });
+        var sel = document.getElementById('comp-ins-'+n);
+        if(match && sel) sel.value = match.id;
+        var cantEl = document.getElementById('comp-cant-'+n);
+        var precEl = document.getElementById('comp-prec-'+n);
+        if(cantEl && it.cantidad) cantEl.value = it.cantidad;
+        if(precEl && it.precio_unitario) precEl.value = it.precio_unitario;
+      });
+      scoutCalcTotal();
+      aplicados.push(parsed.items.length+' producto(s)');
+    }
+    est.style.background = '#f0fdf4'; est.style.color = 'var(--ok)';
+    est.innerHTML = '✅ Completado: <strong>'+aplicados.join(', ')+'</strong> — revisá antes de guardar';
+  })
+  .catch(function() {
+    btn.textContent = '✨ Leer'; btn.disabled = false;
+    est.style.background = '#fef2f2'; est.style.color = 'var(--err)';
+    est.textContent = '❌ Error de conexión. Completá manualmente.';
+  });
+}
+
+function scoutGuardarCompra() {
+  var fecha = document.getElementById('comp-fecha').value;
+  var tipo  = document.getElementById('comp-tipo').value;
+  var nro   = document.getElementById('comp-nro').value.trim();
+  var prov  = document.getElementById('comp-prov').value.trim();
+  var items = [];
+
+  for(var i=0; i<COMP.itemN; i++) {
+    var insEl  = document.getElementById('comp-ins-'+i);
+    var cantEl = document.getElementById('comp-cant-'+i);
+    var precEl = document.getElementById('comp-prec-'+i);
+    if(!insEl) continue;
+    var cant = parseFloat(cantEl.value)||0;
+    var prec = parseFloat(precEl.value)||0;
+    if(insEl.value && cant > 0 && prec > 0)
+      items.push({ insumo_id: insEl.value, cantidad: cant, precio_unit: prec });
+  }
+  if(!items.length) return toast('Agregá al menos un producto con cantidad y precio','er');
+
+  var btn = document.getElementById('fab-comp');
+  btn.textContent = 'Guardando...'; btn.disabled = true;
+
+  api('/api/pa/compras', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      fecha, tipo_comprobante: tipo, nro_factura: nro, proveedor_txt: prov, items,
+      remito_foto_b64: COMP.fotoB64 || null
+    })
+  }).then(function(r) {
+    btn.textContent = 'Registrar compra →'; btn.disabled = false;
+    if(r.ok) {
+      toast('✅ Compra registrada — stock actualizado');
+      // Reset form
+      COMP.fotoB64 = null; COMP.itemN = 0;
+      document.getElementById('comp-fecha').value = new Date().toISOString().slice(0,10);
+      document.getElementById('comp-tipo').value = 'factura';
+      document.getElementById('comp-nro').value = '';
+      document.getElementById('comp-prov').value = '';
+      document.getElementById('comp-items-list').innerHTML = '';
+      document.getElementById('comp-ia-estado').style.display = 'none';
+      document.getElementById('comp-ia-btn').style.display = 'none';
+      var area = document.getElementById('comp-foto-area');
+      area.classList.remove('tiene');
+      area.innerHTML = '<span class="foto-icon-big">📷</span><div class="foto-hint">Tocar para sacar foto o subir imagen</div>';
+      area.onclick = function(){ document.getElementById('comp-foto-inp').click(); };
+      document.getElementById('comp-foto-inp').value = '';
+      document.getElementById('comp-total-label').textContent = '$0';
+      scoutAgregarItemComp();
+    } else toast(r.error||'Error al guardar','er');
   });
 }
 
