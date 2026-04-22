@@ -5673,13 +5673,13 @@ function paLoadCalendario(){
 
     var html='<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px;min-width:1100px">';
 
-    // Cabecera
+    // Cabecera — sticky vertical para que quede fija al hacer scroll
     html+='<thead><tr>';
-    html+='<th style="position:sticky;left:0;z-index:2;background:#1a3a5c;color:#fff;padding:10px 14px;text-align:left;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;min-width:140px">Finca / Lote</th>';
-    html+='<th style="background:#1a3a5c;color:rgba(255,255,255,.5);padding:8px 6px;text-align:center;font-size:10px;min-width:28px">Ha</th>';
+    html+='<th style="position:sticky;left:0;top:0;z-index:4;background:#1a3a5c;color:#fff;padding:10px 14px;text-align:left;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;min-width:140px">Finca / Lote</th>';
+    html+='<th style="position:sticky;top:0;z-index:3;background:#1a3a5c;color:rgba(255,255,255,.5);padding:8px 6px;text-align:center;font-size:10px;min-width:28px">Ha</th>';
     COLS.forEach(function(c){
       var esInv=c.tipo==='invierno';
-      html+='<th style="background:'+(esInv?'#0f3460':'#1a3a5c')+';color:'+(esInv?'#93c5fd':'#fff')+';padding:8px 6px;text-align:center;font-size:11px;font-weight:700;min-width:80px;border-left:1px solid rgba(255,255,255,.12)">'
+      html+='<th style="position:sticky;top:0;z-index:3;background:'+(esInv?'#0f3460':'#1a3a5c')+';color:'+(esInv?'#93c5fd':'#fff')+';padding:8px 6px;text-align:center;font-size:11px;font-weight:700;min-width:80px;border-left:1px solid rgba(255,255,255,.12)">'
         +(esInv?'❄️ ':'☀️ ')+c.label+'</th>';
     });
     html+='</tr></thead><tbody>';
