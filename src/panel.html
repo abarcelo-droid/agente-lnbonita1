@@ -1206,8 +1206,10 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   <select id="pa-ins-tipo-fil" onchange="paLoadInsumos()">
     <option value="">Todos los tipos</option>
     <option value="fertilizante">Fertilizantes</option>
+    <option value="herbicida">Herbicidas</option>
     <option value="fungicida">Fungicidas</option>
     <option value="insecticida">Insecticidas</option>
+    <option value="abono">Abonos</option>
     <option value="agroquimico">Agroquímicos</option>
     <option value="semilla">Semillas</option>
     <option value="otro">Otros</option>
@@ -1224,7 +1226,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
 <div class="ph"><div><div class="ph-t">🛒 Compras de Insumos</div><div class="ph-s">Registro de facturas y actualización de stock</div></div>
 <button class="btn bb" onclick="paAbrirNuevaCompra()">+ Nueva compra</button></div>
 <div class="pa-wrap"><div class="ab-table-wrap"><table class="pa-tbl">
-  <thead><tr><th>Fecha</th><th>Proveedor</th><th>N° Factura</th><th>Productos</th><th style="text-align:right">Total</th></tr></thead>
+  <thead><tr><th>Fecha</th><th>Comprobante</th><th>Proveedor</th><th>Productos</th><th style="text-align:right">Total</th><th>Foto</th></tr></thead>
   <tbody id="pa-comp-tbody"><tr><td colspan="5" class="emp">Cargando...</td></tr></tbody>
 </table></div></div>
 </div>
@@ -4901,8 +4903,10 @@ if(_inpGondola) _inpGondola.addEventListener('keydown', function(e){
     <div class="fl"><label>Tipo</label>
       <select id="pa-ins-tipo">
         <option value="fertilizante">Fertilizante</option>
+        <option value="herbicida">Herbicida</option>
         <option value="fungicida">Fungicida</option>
         <option value="insecticida">Insecticida</option>
+        <option value="abono">Abono</option>
         <option value="agroquimico">Agroquímico (otro)</option>
         <option value="semilla">Semilla</option>
         <option value="otro">Otro</option>
@@ -4942,9 +4946,26 @@ if(_inpGondola) _inpGondola.addEventListener('keydown', function(e){
   <div class="mhd"><div class="mht">Nueva Compra de Insumos</div><button class="mcl" onclick="document.getElementById('pa-mb-compra').classList.remove('on')">×</button></div>
   <div class="fg">
     <div class="fl"><label>Fecha</label><input type="date" id="pa-comp-fecha"></div>
-    <div class="fl"><label>N° Factura</label><input id="pa-comp-factura" placeholder="A 001-00012345"></div>
+    <div class="fl"><label>Tipo de comprobante</label>
+      <select id="pa-comp-tipo-comp">
+        <option value="factura">Factura</option>
+        <option value="remito">Remito</option>
+        <option value="ticket">Ticket</option>
+        <option value="otro">Otro</option>
+      </select>
+    </div>
+    <div class="fl ff"><label>N° Remito / Factura</label><input id="pa-comp-factura" placeholder="Ej: R 001-00012345 / A 001-00045678"></div>
     <div class="fl ff"><label>Proveedor</label><input id="pa-comp-prov" placeholder="Nombre del proveedor"></div>
     <div class="fl ff"><label>Notas</label><textarea id="pa-comp-notas" rows="2"></textarea></div>
+    <!-- Foto remito/factura -->
+    <div class="fl ff">
+      <label>Foto del remito / factura</label>
+      <div id="pa-comp-foto-area" style="background:var(--bg);border:2px dashed var(--bor2);border-radius:10px;padding:18px;text-align:center;cursor:pointer;transition:all .15s" onclick="document.getElementById('pa-comp-foto-inp').click()">
+        <div style="font-size:28px;margin-bottom:6px">📄</div>
+        <div style="font-size:12px;color:var(--mut)">Tocar para sacar foto o subir imagen</div>
+      </div>
+      <input type="file" id="pa-comp-foto-inp" accept="image/*" capture="environment" style="display:none" onchange="paOnFotoCompra(this)">
+    </div>
   </div>
   <div style="margin:14px 0 8px;font-size:12px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.06em">Productos</div>
   <div id="pa-comp-items"></div>
@@ -4974,10 +4995,20 @@ if(_inpGondola) _inpGondola.addEventListener('keydown', function(e){
     </div>
   </div>
   <div style="margin:12px 0 8px;font-size:12px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.06em">Lotes a tratar</div>
-  <div id="pa-ord-lotes-sel" style="max-height:180px;overflow-y:auto;border:1px solid var(--bor2);border-radius:8px;padding:8px"></div>
-  <div style="margin:12px 0 8px;font-size:12px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.06em">Productos y dosis</div>
+  <div id="pa-ord-lotes-sel" style="max-height:200px;overflow-y:auto;border:1px solid var(--bor2);border-radius:8px;padding:8px"></div>
+  <div id="pa-ord-ha-total" style="font-size:12px;color:var(--mut);padding:6px 4px;display:none">Total seleccionado: <strong id="pa-ord-ha-num">0</strong> ha</div>
+  <div style="margin:12px 0 8px;font-size:12px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.06em">Productos y dosis (por hectárea)</div>
   <div id="pa-ord-items"></div>
   <button class="btn bo" style="margin-top:8px" onclick="paAgregarItemOrden()">+ Agregar producto</button>
+  <!-- Resumen costo -->
+  <div id="pa-ord-resumen" style="display:none;margin-top:16px;padding:14px;background:var(--burl);border-radius:10px;border:1px solid var(--bor2)">
+    <div style="font-size:11px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">Resumen de la orden</div>
+    <div id="pa-ord-resumen-body" style="font-size:13px"></div>
+    <div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--bor);display:flex;justify-content:space-between;align-items:center">
+      <span style="font-size:13px;font-weight:600;color:var(--txt)">Costo estimado total</span>
+      <span style="font-size:18px;font-weight:700;color:var(--burg)" id="pa-ord-costo-total">USD 0</span>
+    </div>
+  </div>
   <div class="ab-modal-footer">
     <button class="btn bo" onclick="document.getElementById('pa-mb-orden').classList.remove('on')">Cancelar</button>
     <button class="btn bb" onclick="paGuardarOrden()">Emitir orden</button>
@@ -5081,7 +5112,7 @@ function paF(url,opts){return fetch(url,opts).then(function(r){return r.json();}
 function paMoney(n){return'$'+Math.round(n||0).toLocaleString('es-AR');}
 function paFecha(s){if(!s)return'—';var p=s.slice(0,10).split('-');return p[2]+'/'+p[1]+'/'+p[0];}
 function paBadgeEstado(e){var m={borrador:['pa-gris-bg','Borrador'],emitida:['pa-azul-bg','Emitida'],en_ejecucion:['pa-amarillo-bg','En ejecución'],ejecutada:['pa-verde-bg','Ejecutada'],parcial:['pa-amarillo-bg','Parcial'],anulada:['pa-rojo-bg','Anulada']};var d=m[e]||['pa-gris-bg',e];return'<span class="pa-badge '+d[0]+'">'+d[1]+'</span>';}
-function paBadgeTipo(t){var m={fertilizante:['pa-verde-bg','Fertilizante'],agroquimico:['pa-azul-bg','Agroquímico'],semilla:['pa-amarillo-bg','Semilla'],otro:['pa-gris-bg','Otro']};var d=m[t]||['pa-gris-bg',t];return'<span class="pa-badge '+d[0]+'">'+d[1]+'</span>';}
+function paBadgeTipo(t){var m={fertilizante:['pa-verde-bg','Fertilizante'],herbicida:['pa-amarillo-bg','Herbicida'],fungicida:['pa-azul-bg','Fungicida'],insecticida:['pa-rojo-bg','Insecticida'],abono:['pa-verde-bg','Abono'],agroquimico:['pa-azul-bg','Agroquímico'],semilla:['pa-amarillo-bg','Semilla'],otro:['pa-gris-bg','Otro']};var d=m[t]||['pa-gris-bg',t];return'<span class="pa-badge '+d[0]+'">'+d[1]+'</span>';}
 
 function paInit(){
   paF('/api/pa/campanas').then(function(r){
@@ -5398,11 +5429,13 @@ function paGuardarEdicionLote(){
 function paBadgeTipo(t){
   var m={
     fertilizante:['pa-verde-bg','Fertilizante'],
-    fungicida:['pa-azul-bg','Fungicida'],
-    insecticida:['pa-rojo-bg','Insecticida'],
-    agroquimico:['pa-amarillo-bg','Agroquímico'],
-    semilla:['pa-amarillo-bg','Semilla'],
-    otro:['pa-gris-bg','Otro']
+    herbicida:   ['pa-amarillo-bg','Herbicida'],
+    fungicida:   ['pa-azul-bg','Fungicida'],
+    insecticida: ['pa-rojo-bg','Insecticida'],
+    abono:       ['pa-verde-bg','Abono'],
+    agroquimico: ['pa-azul-bg','Agroquímico'],
+    semilla:     ['pa-amarillo-bg','Semilla'],
+    otro:        ['pa-gris-bg','Otro']
   };
   var d=m[t]||['pa-gris-bg',t];
   return'<span class="pa-badge '+d[0]+'">'+d[1]+'</span>';
@@ -5502,25 +5535,80 @@ function paGuardarInsumo(){
 function paLoadCompras(){
   paF('/api/pa/compras').then(function(r){
     var data=r.data||[];var tb=document.getElementById('pa-comp-tbody');
-    if(!data.length){tb.innerHTML='<tr><td colspan="5" class="emp">Sin compras</td></tr>';return;}
-    tb.innerHTML=data.map(function(c){var prods=(c.items||[]).map(function(i){return i.insumo_nombre;}).join(', ');return'<tr><td>'+paFecha(c.fecha)+'</td><td>'+(c.proveedor_nombre||c.proveedor_txt||'—')+'</td><td>'+(c.nro_factura||'—')+'</td><td style="font-size:12px;color:var(--mut)">'+prods+'</td><td style="text-align:right"><strong>'+paMoney(c.total)+'</strong></td></tr>';}).join('');
+    if(!data.length){tb.innerHTML='<tr><td colspan="6" class="emp">Sin compras</td></tr>';return;}
+    tb.innerHTML=data.map(function(c){
+      var prods=(c.items||[]).map(function(i){return i.insumo_nombre;}).join(', ');
+      var tipoLabel={factura:'Factura',remito:'Remito',ticket:'Ticket',otro:'Otro'};
+      var foto=c.remito_foto_path?'<a href="'+c.remito_foto_path+'" target="_blank" style="color:var(--burg);font-size:11px">📄 Ver</a>':'';
+      return'<tr>'
+        +'<td>'+paFecha(c.fecha)+'</td>'
+        +'<td><span class="pa-badge pa-gris-bg" style="font-size:10px">'+(tipoLabel[c.tipo_comprobante]||'Factura')+'</span><br><span style="font-size:11px">'+(c.nro_factura||'—')+'</span></td>'
+        +'<td>'+(c.proveedor_nombre||c.proveedor_txt||'—')+'</td>'
+        +'<td style="font-size:12px;color:var(--mut)">'+prods+'</td>'
+        +'<td style="text-align:right"><strong>'+paMoney(c.total)+'</strong></td>'
+        +'<td>'+foto+'</td>'
+        +'</tr>';
+    }).join('');
   });
 }
-function paAbrirNuevaCompra(){PA.compN=0;document.getElementById('pa-comp-fecha').value=new Date().toISOString().slice(0,10);document.getElementById('pa-comp-factura').value='';document.getElementById('pa-comp-prov').value='';document.getElementById('pa-comp-notas').value='';document.getElementById('pa-comp-items').innerHTML='';document.getElementById('pa-comp-total').textContent='$0';paAgregarItemCompra();document.getElementById('pa-mb-compra').classList.add('on');}
-function paAgregarItemCompra(){
+function paOnFotoCompra(input){
+  var file=input.files[0];if(!file)return;
+  var reader=new FileReader();
+  reader.onload=function(e){
+    PA._compraFotoB64=e.target.result.split(',')[1];
+    var area=document.getElementById('pa-comp-foto-area');
+    area.style.padding='0';area.style.border='2px solid var(--burg)';
+    area.innerHTML='<img src="'+e.target.result+'" style="width:100%;max-height:160px;object-fit:cover;border-radius:8px;display:block">'
+      +'<div style="padding:6px;text-align:center;font-size:11px;color:var(--burg);font-weight:600">📄 Tocar para cambiar</div>';
+    area.onclick=function(){document.getElementById('pa-comp-foto-inp').click();};
+  };
+  reader.readAsDataURL(file);
+}
+function paAbrirNuevaCompra(){
+  PA.compN=0; PA._compraFotoB64=null;
+  document.getElementById('pa-comp-fecha').value=new Date().toISOString().slice(0,10);
+  document.getElementById('pa-comp-factura').value='';
+  document.getElementById('pa-comp-tipo-comp').value='factura';
+  document.getElementById('pa-comp-prov').value='';
+  document.getElementById('pa-comp-notas').value='';
+  document.getElementById('pa-comp-items').innerHTML='';
+  document.getElementById('pa-comp-total').textContent='$0';
+  document.getElementById('pa-comp-foto-inp').value='';
+  var area=document.getElementById('pa-comp-foto-area');
+  area.style.padding='18px'; area.style.border='2px dashed var(--bor2)';
+  area.innerHTML='<div style="font-size:28px;margin-bottom:6px">📄</div><div style="font-size:12px;color:var(--mut)">Tocar para sacar foto o subir imagen</div>';
+  area.onclick=function(){document.getElementById('pa-comp-foto-inp').click();};
+  paAgregarItemCompra();
+  document.getElementById('pa-mb-compra').classList.add('on');
+}
+function paGuardarCompra(){
+  var fecha=document.getElementById('pa-comp-fecha').value;
+  var factura=document.getElementById('pa-comp-factura').value.trim();
+  var tipoComp=document.getElementById('pa-comp-tipo-comp').value;
+  var prov=document.getElementById('pa-comp-prov').value.trim();
+  var notas=document.getElementById('pa-comp-notas').value.trim();
+  var items=[];
+  document.querySelectorAll('[id^=pa-ci-cant-]').forEach(function(el){
+    var n=el.id.split('-').pop();
+    var insId=document.getElementById('pa-ci-ins-'+n).value;
+    var cant=parseFloat(el.value)||0;
+    var prec=parseFloat(document.getElementById('pa-ci-prec-'+n).value)||0;
+    if(insId&&cant>0&&prec>0)items.push({insumo_id:insId,cantidad:cant,precio_unit:prec});
+  });
+  if(!items.length)return toast('Agregá al menos un producto','er');
+  paF('/api/pa/compras',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({fecha,nro_factura:factura,tipo_comprobante:tipoComp,proveedor_txt:prov,notas,items,remito_foto_b64:PA._compraFotoB64||null})
+  }).then(function(r){
+    if(r.ok){toast('Compra registrada — stock actualizado');document.getElementById('pa-mb-compra').classList.remove('on');paLoadCompras();paF('/api/pa/insumos').then(function(r2){PA.insumos=r2.data||[];});}
+    else toast(r.error||'Error','er');
+  });
+}function paAgregarItemCompra(){
   var n=PA.compN++;var opts=PA.insumos.map(function(i){return'<option value="'+i.id+'">'+i.nombre+' ('+i.unidad+')</option>';}).join('');
   var row=document.createElement('div');row.id='pa-ci-'+n;row.style.cssText='display:grid;grid-template-columns:1fr 100px 110px 80px auto;gap:8px;align-items:center;padding:8px 0;border-bottom:1px solid var(--bor)';
   row.innerHTML='<select id="pa-ci-ins-'+n+'">'+opts+'</select><input type="number" id="pa-ci-cant-'+n+'" placeholder="Cant." step="0.01" min="0" oninput="paActTotalComp()"><input type="number" id="pa-ci-prec-'+n+'" placeholder="$/unit" step="0.01" min="0" oninput="paActTotalComp()"><span id="pa-ci-sub-'+n+'" style="font-size:12px;color:var(--mut)">$0</span><button class="btn bd bs" onclick="document.getElementById(\'pa-ci-'+n+'\').remove();paActTotalComp()">✕</button>';
   document.getElementById('pa-comp-items').appendChild(row);
 }
 function paActTotalComp(){var total=0;document.querySelectorAll('[id^=pa-ci-cant-]').forEach(function(el){var n=el.id.split('-').pop(),c=parseFloat(el.value)||0,p=parseFloat(document.getElementById('pa-ci-prec-'+n).value)||0,s=c*p;var se=document.getElementById('pa-ci-sub-'+n);if(se)se.textContent=paMoney(s);total+=s;});document.getElementById('pa-comp-total').textContent=paMoney(total);}
-function paGuardarCompra(){
-  var fecha=document.getElementById('pa-comp-fecha').value,factura=document.getElementById('pa-comp-factura').value.trim(),prov=document.getElementById('pa-comp-prov').value.trim(),notas=document.getElementById('pa-comp-notas').value.trim(),items=[];
-  document.querySelectorAll('[id^=pa-ci-cant-]').forEach(function(el){var n=el.id.split('-').pop(),insId=document.getElementById('pa-ci-ins-'+n).value,cant=parseFloat(el.value)||0,prec=parseFloat(document.getElementById('pa-ci-prec-'+n).value)||0;if(insId&&cant>0&&prec>0)items.push({insumo_id:insId,cantidad:cant,precio_unit:prec});});
-  if(!items.length)return toast('Agregá al menos un producto','er');
-  paF('/api/pa/compras',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fecha,nro_factura:factura,proveedor_txt:prov,notas,items})}).then(function(r){if(r.ok){toast('Compra registrada — stock actualizado');document.getElementById('pa-mb-compra').classList.remove('on');paLoadCompras();paF('/api/pa/insumos').then(function(r2){PA.insumos=r2.data||[];});}else toast(r.error||'Error','er');});
-}
-
 function paLoadOrdenes(){
   var estado=document.getElementById('pa-ord-estado-fil').value;
   paF('/api/pa/ordenes'+(estado?'?estado='+estado:'')).then(function(r){
@@ -5536,7 +5624,16 @@ function paAbrirNuevaOrden(){
   document.getElementById('pa-ord-tipo').value='';
   document.getElementById('pa-ord-objetivo').value='';
   document.getElementById('pa-ord-items').innerHTML='';
-  document.getElementById('pa-ord-lotes-sel').innerHTML=PA.lotes.map(function(l){return'<label style="display:flex;align-items:center;gap:8px;padding:5px 8px;border-radius:6px;cursor:pointer;font-size:13px"><input type="checkbox" value="'+l.id+'" style="width:auto"> <span><strong>'+l.nombre+'</strong> <span style="color:var(--mut);font-size:11px">'+l.sector_nombre+' ('+l.hectareas+'ha)</span></span></label>';}).join('')||'<div class="emp">Sin lotes. Agregá lotes primero.</div>';
+  document.getElementById('pa-ord-resumen').style.display='none';
+  document.getElementById('pa-ord-ha-total').style.display='none';
+  // Lotes con formato: NOMBRE - FINCA (HA)
+  document.getElementById('pa-ord-lotes-sel').innerHTML=PA.lotes.map(function(l){
+    var label=l.nombre+(l.finca?' — '+l.finca:'')+' ('+l.hectareas+' ha)';
+    return'<label style="display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:6px;cursor:pointer;font-size:13px">'
+      +'<input type="checkbox" value="'+l.id+'" data-ha="'+l.hectareas+'" style="width:auto" onchange="paActHaTotal()"> '
+      +'<span><strong>'+l.nombre+'</strong>'+(l.finca?'<span style="color:var(--mut)"> — '+l.finca+'</span>':'')
+      +' <span style="color:var(--sub);font-size:11px">('+l.hectareas+' ha)</span></span></label>';
+  }).join('')||'<div class="emp">Sin lotes. Agregá lotes primero.</div>';
   // Poblar selector de usuarios
   paF('/api/auth/usuarios').then(function(r){
     var sel=document.getElementById('pa-ord-asignado');
@@ -5545,20 +5642,98 @@ function paAbrirNuevaOrden(){
   paAgregarItemOrden();
   document.getElementById('pa-mb-orden').classList.add('on');
 }
+
+function paActHaTotal(){
+  var total=0;
+  document.querySelectorAll('#pa-ord-lotes-sel input:checked').forEach(function(cb){total+=parseFloat(cb.dataset.ha)||0;});
+  var el=document.getElementById('pa-ord-ha-total');
+  var num=document.getElementById('pa-ord-ha-num');
+  if(total>0){el.style.display='block';num.textContent=total.toFixed(1);}else{el.style.display='none';}
+  paActualizarResumenOrden();
+}
 function paAgregarItemOrden(){
-  var n=PA.ordN++;var opts=PA.insumos.map(function(i){return'<option value="'+i.id+'">'+i.nombre+' ('+i.unidad+')</option>';}).join('');
-  var row=document.createElement('div');row.id='pa-oi-'+n;row.style.cssText='display:grid;grid-template-columns:1fr 100px 140px auto;gap:8px;align-items:center;padding:8px 0;border-bottom:1px solid var(--bor)';
-  row.innerHTML='<select id="pa-oi-ins-'+n+'">'+opts+'</select><input type="number" id="pa-oi-dosis-'+n+'" placeholder="Dosis" step="0.01" min="0"><select id="pa-oi-ud-'+n+'"><option value="kg/ha">kg/ha</option><option value="lt/ha">lt/ha</option><option value="kg/lote">kg/lote</option><option value="lt/lote">lt/lote</option><option value="kg_total">kg total</option><option value="lt_total">lt total</option></select><button class="btn bd bs" onclick="document.getElementById(\'pa-oi-'+n+'\').remove()">✕</button>';
+  var n=PA.ordN++;
+  var opts=PA.insumos.map(function(i){return'<option value="'+i.id+'" data-precio="'+(i.precio_ref_usd||0)+'" data-unidad="'+i.unidad+'">'+i.nombre+' ('+i.unidad+')</option>';}).join('');
+  var row=document.createElement('div');
+  row.id='pa-oi-'+n;
+  row.style.cssText='display:grid;grid-template-columns:1fr 110px 110px auto;gap:8px;align-items:center;padding:8px 0;border-bottom:1px solid var(--bor)';
+  row.innerHTML='<select id="pa-oi-ins-'+n+'" onchange="paActualizarResumenOrden()">'+opts+'</select>'
+    +'<div style="display:flex;flex-direction:column;gap:3px">'
+    +'<input type="number" id="pa-oi-dosis-'+n+'" placeholder="Dosis/ha" step="0.01" min="0" oninput="paActualizarResumenOrden()" style="width:100%">'
+    +'<select id="pa-oi-ud-'+n+'" onchange="paActualizarResumenOrden()" style="width:100%;font-size:11px;padding:4px 6px">'
+    +'<option value="kg/ha">kg/ha</option><option value="lt/ha">lt/ha</option>'
+    +'</select></div>'
+    +'<div style="font-size:11px;color:var(--mut);text-align:center" id="pa-oi-total-'+n+'">—</div>'
+    +'<button class="btn bd bs" onclick="document.getElementById(\'pa-oi-'+n+'\').remove();paActualizarResumenOrden()">✕</button>';
   document.getElementById('pa-ord-items').appendChild(row);
 }
+
+function paActualizarResumenOrden(){
+  var haTotal=0;
+  document.querySelectorAll('#pa-ord-lotes-sel input:checked').forEach(function(cb){haTotal+=parseFloat(cb.dataset.ha)||0;});
+
+  var filas=[];
+  var costoTotal=0;
+
+  document.querySelectorAll('[id^=pa-oi-ins-]').forEach(function(sel){
+    var n=sel.id.split('-').pop();
+    var opt=sel.options[sel.selectedIndex];
+    if(!opt)return;
+    var nombre=opt.textContent.replace(/\s*\(.*\)$/,'');
+    var precioUsd=parseFloat(opt.dataset.precio)||0;
+    var unidad=opt.dataset.unidad||'kg';
+    var dosis=parseFloat(document.getElementById('pa-oi-dosis-'+n).value)||0;
+    var ud=document.getElementById('pa-oi-ud-'+n).value;
+    var totalNecesidad=dosis*haTotal;
+    var costo=totalNecesidad*precioUsd;
+    costoTotal+=costo;
+    // Actualizar celda de total en la fila
+    var totalEl=document.getElementById('pa-oi-total-'+n);
+    if(totalEl)totalEl.innerHTML=haTotal>0
+      ?'<strong>'+totalNecesidad.toFixed(1)+'</strong><br><span style="color:var(--sub)">'+unidad+' total</span>'
+      :'—';
+    if(dosis>0)filas.push({nombre,dosis,ud,totalNecesidad,unidad,costo,precioUsd});
+  });
+
+  if(!filas.length||haTotal===0){
+    document.getElementById('pa-ord-resumen').style.display='none';
+    return;
+  }
+  document.getElementById('pa-ord-resumen').style.display='block';
+  var html=filas.map(function(f){
+    return'<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--bor);font-size:13px">'
+      +'<span>'+f.nombre+'</span>'
+      +'<span style="color:var(--mut)">'+f.dosis+' '+f.ud+' × '+haTotal.toFixed(1)+' ha</span>'
+      +'<strong>'+f.totalNecesidad.toFixed(1)+' '+f.unidad+'</strong>'
+      +(f.precioUsd>0?'<span style="color:var(--burg)">USD '+f.costo.toFixed(2)+'</span>':'')
+      +'</div>';
+  }).join('');
+  document.getElementById('pa-ord-resumen-body').innerHTML=html;
+  document.getElementById('pa-ord-costo-total').textContent='USD '+costoTotal.toFixed(2);
+}
 function paGuardarOrden(){
-  var fecha=document.getElementById('pa-ord-fecha').value,fechaProp=document.getElementById('pa-ord-fecha-prop').value,tipo=document.getElementById('pa-ord-tipo').value.trim(),objetivo=document.getElementById('pa-ord-objetivo').value.trim(),lotes=[],items=[];
+  var fecha=document.getElementById('pa-ord-fecha').value;
+  var fechaProp=document.getElementById('pa-ord-fecha-prop').value;
+  var tipo=document.getElementById('pa-ord-tipo').value.trim();
+  var objetivo=document.getElementById('pa-ord-objetivo').value.trim();
+  var lotes=[],items=[];
   document.querySelectorAll('#pa-ord-lotes-sel input:checked').forEach(function(cb){lotes.push(Number(cb.value));});
   if(!lotes.length)return toast('Seleccioná al menos un lote','er');
-  document.querySelectorAll('[id^=pa-oi-ins-]').forEach(function(el){var n=el.id.split('-').pop(),insId=el.value,dosis=parseFloat(document.getElementById('pa-oi-dosis-'+n).value)||0,ud=document.getElementById('pa-oi-ud-'+n).value;if(insId&&dosis>0)items.push({insumo_id:insId,dosis:dosis,unidad_dosis:ud});});
+  document.querySelectorAll('[id^=pa-oi-ins-]').forEach(function(el){
+    var n=el.id.split('-').pop();
+    var insId=el.value;
+    var dosis=parseFloat(document.getElementById('pa-oi-dosis-'+n).value)||0;
+    var ud=document.getElementById('pa-oi-ud-'+n).value;
+    if(insId&&dosis>0)items.push({insumo_id:insId,dosis:dosis,unidad_dosis:ud});
+  });
   if(!items.length)return toast('Agregá al menos un producto con dosis','er');
   var asignadoA=document.getElementById('pa-ord-asignado').value||null;
-  paF('/api/pa/ordenes',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fecha_orden:fecha,fecha_propuesta:fechaProp,tipo_aplicacion:tipo,objetivo:objetivo,lotes:lotes,items:items,asignado_a:asignadoA})}).then(function(r){if(r.ok){toast('Orden '+r.nro_orden+' emitida'+(asignadoA?' y asignada':''));document.getElementById('pa-mb-orden').classList.remove('on');paLoadOrdenes();}else toast(r.error||'Error','er');});
+  paF('/api/pa/ordenes',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({fecha_orden:fecha,fecha_propuesta:fechaProp,tipo_aplicacion:tipo,objetivo:objetivo,lotes:lotes,items:items,asignado_a:asignadoA})
+  }).then(function(r){
+    if(r.ok){toast('Orden '+r.nro_orden+' emitida'+(asignadoA?' y asignada':''));document.getElementById('pa-mb-orden').classList.remove('on');paLoadOrdenes();}
+    else toast(r.error||'Error','er');
+  });
 }
 function paVerOrden(id){
   paF('/api/pa/ordenes/'+id).then(function(r){

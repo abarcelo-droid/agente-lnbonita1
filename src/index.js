@@ -59,6 +59,7 @@ app.use("/static",       express.static(path.join(__dirname, ".")));
 app.use("/data/uploads", express.static(path.join(__dirname, "../data/uploads")));
 app.use("/data/conformados", express.static(path.join(__dirname, "../data/conformados")));
 app.use("/data/fichas",      express.static(path.join(__dirname, "../data/fichas")));
+app.use("/data/remitos_pa", express.static(path.join(__dirname, "../data/remitos_pa")));
 
 // Auth
 app.use("/api/auth", authRouter);

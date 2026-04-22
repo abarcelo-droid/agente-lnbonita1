@@ -241,6 +241,21 @@ export function getCampañaActiva() {
   } catch(e) { console.error('[PA] Error migrando pa_lotes:', e.message); }
 })();
 
+// ── MIGRACIÓN: remito_foto_path en pa_compras ─────────────────────────────
+(function() {
+  try {
+    const cols = db.prepare("PRAGMA table_info(pa_compras)").all().map(c => c.name);
+    if (!cols.includes('remito_foto_path')) {
+      db.exec("ALTER TABLE pa_compras ADD COLUMN remito_foto_path TEXT");
+      console.log("[PA] remito_foto_path agregado en pa_compras");
+    }
+    if (!cols.includes('tipo_comprobante')) {
+      db.exec("ALTER TABLE pa_compras ADD COLUMN tipo_comprobante TEXT DEFAULT 'factura'");
+      console.log("[PA] tipo_comprobante agregado en pa_compras");
+    }
+  } catch(e) { console.error('[PA] Error migrando pa_compras:', e.message); }
+})();
+
 // ── MIGRACIÓN: asignado_a en pa_ordenes ──────────────────────────────────
 (function() {
   try {

@@ -352,39 +352,41 @@ router.get('/compras', requireAuth, (req, res) => {
 
 router.post('/compras', requireAuth, (req, res) => {
   const db = getDb();
-  const { fecha, proveedor_id, proveedor_txt, nro_factura, campaña_id, items, notas } = req.body;
+  const { fecha, proveedor_id, proveedor_txt, nro_factura, tipo_comprobante, campaña_id, items, notas, remito_foto_b64 } = req.body;
   if (!items?.length) return res.status(400).json({ ok: false, error: 'Debe incluir al menos un item' });
   try {
-    // Calcular totales
     let subtotal = 0;
     for (const it of items) { subtotal += (it.cantidad * it.precio_unit); }
     const iva_monto = req.body.iva_monto || 0;
     const total = subtotal + Number(iva_monto);
 
+    // Guardar foto remito si viene
+    let remito_foto_path = null;
+    if (remito_foto_b64) {
+      const dir = path.join(__dirname, '../../data/remitos_pa');
+      fs.mkdirSync(dir, { recursive: true });
+      const fname = `remito_${Date.now()}.jpg`;
+      fs.writeFileSync(path.join(dir, fname), Buffer.from(remito_foto_b64, 'base64'));
+      remito_foto_path = '/data/remitos_pa/' + fname;
+    }
+
     const nuevaCompra = db.transaction(() => {
       const r = db.prepare(`
-        INSERT INTO pa_compras (fecha, proveedor_id, proveedor_txt, nro_factura, campaña_id, subtotal, iva_monto, total, notas)
-        VALUES (?,?,?,?,?,?,?,?,?)
-      `).run(fecha || new Date().toISOString().slice(0,10), proveedor_id||null, proveedor_txt||null,
-             nro_factura||null, campaña_id||null, subtotal, iva_monto, total, notas||null);
+        INSERT INTO pa_compras (fecha, proveedor_id, proveedor_txt, nro_factura, tipo_comprobante, campaña_id, subtotal, iva_monto, total, notas, remito_foto_path)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?)
+      `).run(fecha||new Date().toISOString().slice(0,10), proveedor_id||null, proveedor_txt||null,
+             nro_factura||null, tipo_comprobante||'factura', campaña_id||null, subtotal, iva_monto, total, notas||null, remito_foto_path);
       const compraId = r.lastInsertRowid;
-
       for (const it of items) {
         const sub = it.cantidad * it.precio_unit;
         db.prepare("INSERT INTO pa_compras_items (compra_id, insumo_id, cantidad, precio_unit, subtotal) VALUES (?,?,?,?,?)")
           .run(compraId, it.insumo_id, it.cantidad, it.precio_unit, sub);
-        // Actualizar stock
-        db.prepare("UPDATE pa_insumos SET stock_actual = stock_actual + ? WHERE id = ?")
-          .run(it.cantidad, it.insumo_id);
-        // Movimiento
-        db.prepare(`
-          INSERT INTO pa_movimientos_stock (fecha, insumo_id, tipo, cantidad, motivo, referencia_id)
-          VALUES (?,?,?,?,?,?)
-        `).run(fecha || new Date().toISOString().slice(0,10), it.insumo_id, 'entrada', it.cantidad, 'compra', compraId);
+        db.prepare("UPDATE pa_insumos SET stock_actual = stock_actual + ? WHERE id = ?").run(it.cantidad, it.insumo_id);
+        db.prepare("INSERT INTO pa_movimientos_stock (fecha, insumo_id, tipo, cantidad, motivo, referencia_id) VALUES (?,?,?,?,?,?)")
+          .run(fecha||new Date().toISOString().slice(0,10), it.insumo_id, 'entrada', it.cantidad, 'compra', compraId);
       }
       return compraId;
     });
-
     const id = nuevaCompra();
     res.json({ ok: true, id });
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
