@@ -1187,7 +1187,10 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
 <!-- ─── PA CALENDARIO ─────────────────────────────────────────── -->
 <div class="sec" id="sec-pa-calendario">
 <div class="ph"><div><div class="ph-t">📅 Calendario Agrícola</div><div class="ph-s">Cultivos por lote y campaña — rotación</div></div>
-<select id="cal-campaña-sel" onchange="paLoadCalendario()" style="padding:7px 12px;font-size:13px;width:auto"><option value="">Campaña activa</option></select>
+<div style="display:flex;gap:10px;align-items:center">
+  <button class="btn bo" onclick="paAbrirNuevoLote()">+ Nuevo lote</button>
+  <select id="cal-campaña-sel" onchange="paLoadCalendario()" style="padding:7px 12px;font-size:13px;width:auto"><option value="">Campaña activa</option></select>
+</div>
 </div>
 <div id="pa-cal-contenido"><div class="emp">Cargando...</div></div>
 </div>
@@ -5174,7 +5177,7 @@ function paAbrirNuevoLote(){
 function paGuardarLote(){
   var nombre=document.getElementById('pa-lot-nombre').value.trim(),secId=document.getElementById('pa-lot-sector').value,ha=parseFloat(document.getElementById('pa-lot-ha').value)||0.5,notas=document.getElementById('pa-lot-notas').value.trim();
   if(!nombre)return toast('Ingresá el nombre del lote','er');
-  paF('/api/pa/lotes',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({nombre,sector_id:secId,hectareas:ha,notas})}).then(function(r){if(r.ok){toast('Lote creado');document.getElementById('pa-mb-lote').classList.remove('on');paLoadLotes();paF('/api/pa/lotes').then(function(r2){PA.lotes=r2.data||[];});}else toast(r.error||'Error','er');});
+  paF('/api/pa/lotes',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({nombre,sector_id:secId,hectareas:ha,notas})}).then(function(r){if(r.ok){toast('Lote creado');document.getElementById('pa-mb-lote').classList.remove('on');paLoadLotes();paF('/api/pa/lotes').then(function(r2){PA.lotes=r2.data||[];if(document.getElementById('sec-pa-calendario').classList.contains('on'))paLoadCalendario();});}else toast(r.error||'Error','er');});
 }
 
 (function(){if(document.readyState!=='loading')paInit();else document.addEventListener('DOMContentLoaded',paInit);})();
