@@ -399,10 +399,12 @@ router.get('/ordenes', requireAuth, (req, res) => {
   try {
     const { estado, campaña_id } = req.query;
     let query = `
-      SELECT o.*, u.nombre as creada_por_nombre, ca.nombre as campaña_nombre
+      SELECT o.*, u.nombre as creada_por_nombre, ca.nombre as campaña_nombre,
+             ua.nombre as asignado_nombre
       FROM pa_ordenes o
       LEFT JOIN usuarios u ON u.id = o.creada_por
       LEFT JOIN pa_campañas ca ON ca.id = o.campaña_id
+      LEFT JOIN usuarios ua ON ua.id = o.asignado_a
       WHERE 1=1
     `;
     const params = [];
@@ -484,22 +486,19 @@ router.get('/ordenes/:id', requireAuth, (req, res) => {
 
 router.post('/ordenes', requireAuth, (req, res) => {
   const db = getDb();
-  const { campaña_id, fecha_orden, fecha_propuesta, tipo_aplicacion, objetivo, notas, lotes, items } = req.body;
+  const { campaña_id, fecha_orden, fecha_propuesta, tipo_aplicacion, objetivo, notas, lotes, items, asignado_a } = req.body;
   if (!lotes?.length || !items?.length)
     return res.status(400).json({ ok: false, error: 'Debe incluir lotes e items' });
   try {
     const crearOrden = db.transaction(() => {
-      // Generar número de orden
       const n = db.prepare("SELECT COUNT(*) as n FROM pa_ordenes").get().n + 1;
       const nro = `OA-${String(n).padStart(5, '0')}`;
-
       const r = db.prepare(`
-        INSERT INTO pa_ordenes (nro_orden, campaña_id, fecha_orden, fecha_propuesta, creada_por, tipo_aplicacion, objetivo, notas, estado)
-        VALUES (?,?,?,?,?,?,?,?,'emitida')
+        INSERT INTO pa_ordenes (nro_orden, campaña_id, fecha_orden, fecha_propuesta, creada_por, tipo_aplicacion, objetivo, notas, estado, asignado_a)
+        VALUES (?,?,?,?,?,?,?,?,'emitida',?)
       `).run(nro, campaña_id||null, fecha_orden||new Date().toISOString().slice(0,10),
-             fecha_propuesta||null, req.user.id, tipo_aplicacion||null, objetivo||null, notas||null);
+             fecha_propuesta||null, req.user.id, tipo_aplicacion||null, objetivo||null, notas||null, asignado_a||null);
       const ordenId = r.lastInsertRowid;
-
       for (const loteId of lotes) {
         db.prepare("INSERT INTO pa_ordenes_lotes (orden_id, lote_id) VALUES (?,?)").run(ordenId, loteId);
       }

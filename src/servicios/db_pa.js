@@ -241,6 +241,17 @@ export function getCampañaActiva() {
   } catch(e) { console.error('[PA] Error migrando pa_lotes:', e.message); }
 })();
 
+// ── MIGRACIÓN: asignado_a en pa_ordenes ──────────────────────────────────
+(function() {
+  try {
+    const cols = db.prepare("PRAGMA table_info(pa_ordenes)").all().map(c => c.name);
+    if (!cols.includes('asignado_a')) {
+      db.exec("ALTER TABLE pa_ordenes ADD COLUMN asignado_a INTEGER REFERENCES usuarios(id)");
+      console.log("[PA] Columna asignado_a agregada en pa_ordenes");
+    }
+  } catch(e) { console.error('[PA] Error migrando pa_ordenes:', e.message); }
+})();
+
 // ── MIGRACIÓN: columnas nuevas en pa_insumos ──────────────────────────────
 (function() {
   try {

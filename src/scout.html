@@ -207,11 +207,14 @@ input[type=file]{display:none}
   </div>
   <div class="tab-bar">
     <div class="tab active" data-tab="reportar" onclick="showTab('reportar')">📷 Reportar</div>
+    <div class="tab" data-tab="mis-ordenes" onclick="showTab('mis-ordenes')">
+      📋 Mis órdenes<span class="tab-badge" id="badge-ord"></span>
+    </div>
     <div class="tab" data-tab="pendientes" onclick="showTab('pendientes')">
-      ⚠️ Pendientes<span class="tab-badge" id="badge-pend"></span>
+      ⚠️ Alertas<span class="tab-badge" id="badge-pend"></span>
     </div>
     <div class="tab" data-tab="mis-tareas" onclick="showTab('mis-tareas')">
-      ✅ Mis tareas<span class="tab-badge" id="badge-mis"></span>
+      ✅ Tareas<span class="tab-badge" id="badge-mis"></span>
     </div>
   </div>
 </div>
@@ -292,6 +295,11 @@ input[type=file]{display:none}
   <button class="fab" id="fab-rep" onclick="enviarReporte()">Enviar reporte →</button>
 </div>
 
+<!-- ═══════════════════════ TAB MIS ÓRDENES ═════════════════════ -->
+<div class="screen" id="screen-mis-ordenes">
+  <div id="ord-lista"><div class="empty"><span class="empty-icon">⏳</span><div class="empty-txt">Cargando...</div></div></div>
+</div>
+
 <!-- ═══════════════════════ TAB PENDIENTES ═══════════════════════ -->
 <div class="screen" id="screen-pendientes">
   <div id="pend-lista"><div class="empty"><span class="empty-icon">⏳</span><div class="empty-txt">Cargando...</div></div></div>
@@ -302,7 +310,41 @@ input[type=file]{display:none}
   <div id="mis-lista"><div class="empty"><span class="empty-icon">⏳</span><div class="empty-txt">Cargando...</div></div></div>
 </div>
 
-<!-- LIGHTBOX -->
+<!-- MODAL EJECUTAR APLICACIÓN -->
+<div class="lightbox" id="modal-ejecutar" style="align-items:flex-end;padding:0" onclick="">
+  <div style="background:var(--sur);width:100%;max-height:92vh;overflow-y:auto;border-radius:20px 20px 0 0;padding:20px">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+      <div>
+        <div style="font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--mut);margin-bottom:3px">Registrar ejecución</div>
+        <div style="font-size:18px;font-weight:700;color:var(--burg)" id="ej-titulo">—</div>
+      </div>
+      <button class="lightbox-close" style="position:static;width:36px;height:36px;font-size:18px;background:var(--bg)" onclick="document.getElementById('modal-ejecutar').classList.remove('open')">×</button>
+    </div>
+
+    <!-- Cantidades por insumo -->
+    <div style="font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--mut);margin-bottom:10px">Cantidades aplicadas</div>
+    <div id="ej-items"></div>
+
+    <!-- Foto -->
+    <div style="font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--mut);margin:14px 0 8px">Foto de la aplicación</div>
+    <div class="foto-area" id="ej-foto-area" onclick="document.getElementById('ej-foto-input').click()">
+      <span class="foto-icon-big">📷</span>
+      <div class="foto-hint">Foto de la aplicación (opcional)</div>
+    </div>
+    <input type="file" id="ej-foto-input" accept="image/*" capture="environment" onchange="onEjFoto(this)">
+
+    <!-- Notas -->
+    <div style="font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--mut);margin:14px 0 8px">Notas</div>
+    <textarea class="scout-input" id="ej-notas" rows="3" placeholder="Observaciones, condiciones climáticas, sector tratado..."></textarea>
+
+    <!-- Botón confirmar -->
+    <button class="rep-btn primary" id="ej-btn-confirmar" style="width:100%;margin-top:16px;padding:16px;font-size:15px;border-radius:12px" onclick="confirmarEjecucion()">
+      ✓ Confirmar aplicación
+    </button>
+  </div>
+</div>
+
+<!-- LIGHTBOX FOTOS -->
 <div class="lightbox" id="lightbox" onclick="closeLightbox()">
   <button class="lightbox-close" onclick="closeLightbox()">×</button>
   <img class="lightbox-img" id="lightbox-img" src="" alt="">
@@ -410,13 +452,17 @@ function actualizarBadges() {
     if(!r.ok)return;
     var bp=document.getElementById('badge-pend');
     var n=r.data.pendientes+r.data.en_proceso;
-    if(n>0){bp.textContent=n;bp.classList.add('show');}
-    // mis tareas
-    api('/api/pa/scout/mis-tareas').then(function(r2){
-      var bm=document.getElementById('badge-mis');
-      var nm=(r2.data||[]).length;
-      if(nm>0){bm.textContent=nm;bm.classList.add('show');}
-    });
+    if(n>0){bp.textContent=n;bp.classList.add('show');}else{bp.classList.remove('show');}
+  });
+  api('/api/pa/scout/mis-tareas').then(function(r2){
+    var bm=document.getElementById('badge-mis');
+    var nm=(r2.data||[]).length;
+    if(nm>0){bm.textContent=nm;bm.classList.add('show');}else{bm.classList.remove('show');}
+  });
+  api('/api/pa/scout/mis-ordenes').then(function(r3){
+    var bo=document.getElementById('badge-ord');
+    var no=(r3.data||[]).length;
+    if(no>0){bo.textContent=no;bo.classList.add('show');}else{bo.classList.remove('show');}
   });
 }
 
@@ -477,6 +523,7 @@ function showTab(tab) {
   document.querySelectorAll('.tab').forEach(function(t){t.classList.toggle('active',t.dataset.tab===tab);});
   document.querySelectorAll('.screen').forEach(function(s){s.classList.remove('active');});
   document.getElementById('screen-'+tab).classList.add('active');
+  if(tab==='mis-ordenes')cargarMisOrdenes();
   if(tab==='pendientes')cargarPendientes();
   if(tab==='mis-tareas')cargarMisTareas();
 }
@@ -605,6 +652,156 @@ function closeLightbox() {
 }
 // Cerrar con tecla Escape
 document.addEventListener('keydown', function(e){ if(e.key==='Escape') closeLightbox(); });
+
+// ── MIS ÓRDENES ───────────────────────────────────────────────
+function cargarMisOrdenes() {
+  api('/api/pa/scout/mis-ordenes').then(function(r){
+    var el=document.getElementById('ord-lista');
+    var data=r.data||[];
+    if(!data.length){
+      el.innerHTML='<div class="empty"><span class="empty-icon">✅</span><div class="empty-txt">Sin órdenes asignadas.<br>La ingeniera te asignará cuando haya trabajo.</div></div>';
+      return;
+    }
+    el.innerHTML='<div class="rep-list">'+data.map(renderOrden).join('')+'</div>';
+  });
+}
+
+function renderOrden(o) {
+  var lotesCompletos = o.lotes.every(function(l){ return l.ejecutado>0; });
+  var lotesEjec = o.lotes.filter(function(l){ return l.ejecutado>0; }).length;
+  var progPct = o.lotes.length ? Math.round(lotesEjec/o.lotes.length*100) : 0;
+
+  var estadoColor = o.estado==='ejecutada' ? 'var(--ok)' : o.estado==='en_ejecucion' ? 'var(--warn)' : 'var(--burg)';
+  var estadoTxt   = o.estado==='ejecutada' ? '✓ Completada' : o.estado==='en_ejecucion' ? 'En ejecución' : 'Pendiente';
+
+  // Barra de progreso
+  var progBar = '<div style="margin:10px 0 4px;font-size:11px;color:var(--mut);display:flex;justify-content:space-between">'
+    +'<span>Progreso</span><span>'+lotesEjec+'/'+o.lotes.length+' lotes</span></div>'
+    +'<div style="background:var(--bor);border-radius:20px;height:6px;overflow:hidden">'
+    +'<div style="width:'+progPct+'%;background:'+estadoColor+';height:100%;border-radius:20px;transition:width .3s"></div></div>';
+
+  // Productos con dosis
+  var productos = o.items.map(function(it){
+    return '<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--bor);font-size:13px">'
+      +'<span>'+it.insumo_nombre+'</span>'
+      +'<span class="lote-chip" style="font-size:11px">'+it.dosis+' '+it.unidad_dosis+'</span>'
+      +'<span style="font-size:11px;color:var(--mut)">Stock: '+it.stock_actual+' '+it.unidad+'</span>'
+      +'</div>';
+  }).join('');
+
+  // Lotes con estado
+  var lotesBtns = o.lotes.map(function(l){
+    var hecho = l.ejecutado > 0;
+    return '<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--bor)">'
+      +'<div><div style="font-weight:600;font-size:13px">'+l.lote_nombre+'</div>'
+      +'<div style="font-size:11px;color:var(--mut)">'+(l.finca||'')+(l.cultivo_actual?' · '+l.cultivo_actual:'')+'</div></div>'
+      +(hecho
+        ? '<span style="color:var(--ok);font-size:12px;font-weight:700">✓ Ejecutado</span>'
+        : '<button class="rep-btn primary" style="min-width:80px;font-size:12px" onclick="abrirEjecutar('+o.id+','+l.lote_id+',\''+l.lote_nombre.replace(/'/g,"\\'")+'\','+JSON.stringify(o.items).replace(/'/g,"\\'")+')">Ejecutar</button>'
+      )+'</div>';
+  }).join('');
+
+  return '<div class="rep-card" id="orden-'+o.id+'">'
+    +'<div class="rep-body">'
+    +'<div class="rep-head">'
+    +'<div class="rep-sev-badge" data-s="1" style="background:var(--burg);font-size:12px;width:auto;padding:0 10px;border-radius:8px">'+o.nro_orden+'</div>'
+    +'<div class="rep-info">'
+    +'<div class="rep-tipo">'+(o.tipo_aplicacion||'Aplicación')+'</div>'
+    +'<div class="rep-lote">'+(o.objetivo||'')+'</div>'
+    +'</div></div>'
+    +progBar
+    +'<div class="rep-tags" style="margin-top:10px">'
+    +'<span class="tag" style="background:color-mix(in srgb,'+estadoColor+' 12%,white);color:'+estadoColor+'">'+estadoTxt+'</span>'
+    +(o.fecha_propuesta?'<span class="tag tag-asig">📅 '+fmtFecha(o.fecha_propuesta)+'</span>':'')
+    +'</div>'
+    +'</div>'
+    // Expandible: productos
+    +'<div class="rep-actions">'
+    +'<button class="rep-btn" onclick="toggleExpand(\'op-'+o.id+'\')">🧪 Productos y dosis</button>'
+    +'<button class="rep-btn" onclick="toggleExpand(\'ol-'+o.id+'\')">🗺️ Lotes ('+o.lotes.length+')</button>'
+    +'</div>'
+    +'<div class="rep-expand" id="op-'+o.id+'">'
+    +'<div class="expand-label">Productos a aplicar</div>'
+    +productos
+    +'</div>'
+    +'<div class="rep-expand" id="ol-'+o.id+'">'
+    +'<div class="expand-label">Lotes</div>'
+    +lotesBtns
+    +'</div>'
+    +'</div>';
+}
+
+// ── MODAL EJECUTAR APLICACIÓN ─────────────────────────────────
+var _ejecutarData = {};
+
+function abrirEjecutar(ordenId, loteId, loteNombre, items) {
+  _ejecutarData = { ordenId:ordenId, loteId:loteId, fotoB64:null };
+  document.getElementById('ej-titulo').textContent = loteNombre;
+  document.getElementById('ej-notas').value = '';
+  document.getElementById('ej-foto-input').value = '';
+  var area = document.getElementById('ej-foto-area');
+  area.classList.remove('tiene');
+  area.innerHTML = '<span class="foto-icon-big">📷</span><div class="foto-hint">Foto de la aplicación (opcional)</div>';
+  area.onclick = function(){ document.getElementById('ej-foto-input').click(); };
+  // Render cantidades por insumo
+  var html = items.map(function(it){
+    return '<div style="margin-bottom:12px">'
+      +'<div style="font-size:12px;font-weight:700;color:var(--mut);text-transform:uppercase;margin-bottom:5px">'+it.insumo_nombre+'</div>'
+      +'<div style="display:flex;align-items:center;gap:10px">'
+      +'<input type="number" class="scout-input" id="ej-cant-'+it.insumo_id+'" placeholder="Cantidad real" step="0.01" min="0" style="flex:1">'
+      +'<span style="font-size:13px;color:var(--mut);white-space:nowrap">'+it.unidad_dosis+' <span style="color:var(--sub)">(indicado: '+it.dosis+')</span></span>'
+      +'</div></div>';
+  }).join('');
+  document.getElementById('ej-items').innerHTML = html;
+  _ejecutarData.items = items;
+  document.getElementById('modal-ejecutar').classList.add('open');
+}
+
+function onEjFoto(input) {
+  var file = input.files[0]; if(!file) return;
+  var reader = new FileReader();
+  reader.onload = function(e){
+    _ejecutarData.fotoB64 = e.target.result.split(',')[1];
+    var area = document.getElementById('ej-foto-area');
+    area.classList.add('tiene');
+    area.innerHTML = '<img src="'+e.target.result+'"><div class="foto-overlay">📷 Tocar para cambiar</div>';
+    area.onclick = function(){ document.getElementById('ej-foto-input').click(); };
+  };
+  reader.readAsDataURL(file);
+}
+
+function confirmarEjecucion() {
+  var d = _ejecutarData;
+  var aplicaciones = d.items.map(function(it){
+    var cant = parseFloat(document.getElementById('ej-cant-'+it.insumo_id).value)||0;
+    return { insumo_id: it.insumo_id, cantidad_real: cant };
+  }).filter(function(ap){ return ap.cantidad_real > 0; });
+
+  if(!aplicaciones.length) return toast('Ingresá al menos una cantidad','er');
+
+  var btn = document.getElementById('ej-btn-confirmar');
+  btn.textContent = 'Registrando...'; btn.disabled = true;
+
+  api('/api/pa/scout/ejecutar-orden', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      orden_id: d.ordenId,
+      lote_id: d.loteId,
+      aplicaciones: aplicaciones,
+      notas: document.getElementById('ej-notas').value.trim(),
+      foto_b64: d.fotoB64 || null
+    })
+  }).then(function(r){
+    btn.textContent = 'Confirmar aplicación'; btn.disabled = false;
+    if(r.ok){
+      toast('✅ Aplicación registrada — stock actualizado');
+      document.getElementById('modal-ejecutar').classList.remove('open');
+      cargarMisOrdenes();
+      actualizarBadges();
+    } else toast(r.error||'Error','er');
+  });
+}
 
 initAuth();
 </script>

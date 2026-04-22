@@ -1241,7 +1241,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   </select>
 </div>
 <div class="pa-wrap"><div class="ab-table-wrap"><table class="pa-tbl">
-  <thead><tr><th>N° Orden</th><th>Fecha</th><th>Tipo</th><th>Lotes</th><th>Productos</th><th>Estado</th><th></th></tr></thead>
+  <thead><tr><th>N° Orden</th><th>Fecha</th><th>Tipo</th><th>Lotes</th><th>Productos</th><th>Asignado a</th><th>Estado</th><th></th></tr></thead>
   <tbody id="pa-ord-tbody"><tr><td colspan="7" class="emp">Cargando...</td></tr></tbody>
 </table></div></div>
 </div>
@@ -4967,6 +4967,11 @@ if(_inpGondola) _inpGondola.addEventListener('keydown', function(e){
     <div class="fl"><label>Fecha propuesta ejecución</label><input type="date" id="pa-ord-fecha-prop"></div>
     <div class="fl ff"><label>Tipo de aplicación</label><input id="pa-ord-tipo" placeholder="Ej: Fertilización base, Herbicida..."></div>
     <div class="fl ff"><label>Objetivo / Observaciones</label><textarea id="pa-ord-objetivo" rows="2"></textarea></div>
+    <div class="fl ff"><label>Asignar a (tractorista / encargado)</label>
+      <select id="pa-ord-asignado" class="ab-form-select">
+        <option value="">— Sin asignar —</option>
+      </select>
+    </div>
   </div>
   <div style="margin:12px 0 8px;font-size:12px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.06em">Lotes a tratar</div>
   <div id="pa-ord-lotes-sel" style="max-height:180px;overflow-y:auto;border:1px solid var(--bor2);border-radius:8px;padding:8px"></div>
@@ -5521,13 +5526,24 @@ function paLoadOrdenes(){
   paF('/api/pa/ordenes'+(estado?'?estado='+estado:'')).then(function(r){
     var data=r.data||[];var tb=document.getElementById('pa-ord-tbody');
     if(!data.length){tb.innerHTML='<tr><td colspan="7" class="emp">Sin órdenes</td></tr>';return;}
-    tb.innerHTML=data.map(function(o){var lts=(o.lotes||[]).map(function(l){return l.lote_nombre;}).join(', '),prs=(o.items||[]).map(function(i){return i.insumo_nombre;}).join(', ');return'<tr><td><strong>'+o.nro_orden+'</strong></td><td>'+paFecha(o.fecha_orden)+'</td><td>'+(o.tipo_aplicacion||'—')+'</td><td style="font-size:12px;color:var(--mut)">'+lts+'</td><td style="font-size:12px;color:var(--mut)">'+prs+'</td><td>'+paBadgeEstado(o.estado)+'</td><td><button class="btn bo bs" onclick="paVerOrden('+o.id+')">Ver</button></td></tr>';}).join('');
+    tb.innerHTML=data.map(function(o){var lts=(o.lotes||[]).map(function(l){return l.lote_nombre;}).join(', '),prs=(o.items||[]).map(function(i){return i.insumo_nombre;}).join(', ');return'<tr><td><strong>'+o.nro_orden+'</strong></td><td>'+paFecha(o.fecha_orden)+'</td><td>'+(o.tipo_aplicacion||'—')+'</td><td style="font-size:12px;color:var(--mut)">'+lts+'</td><td style="font-size:12px;color:var(--mut)">'+prs+'</td><td style="font-size:12px">'+(o.asignado_nombre?'<span class="pa-badge pa-azul-bg">👤 '+o.asignado_nombre+'</span>':'<span style="color:var(--sub)">—</span>')+'</td><td>'+paBadgeEstado(o.estado)+'</td><td><button class="btn bo bs" onclick="paVerOrden('+o.id+')">Ver</button></td></tr>';}).join('');
   });
 }
 function paAbrirNuevaOrden(){
-  PA.ordN=0;document.getElementById('pa-ord-fecha').value=new Date().toISOString().slice(0,10);document.getElementById('pa-ord-fecha-prop').value='';document.getElementById('pa-ord-tipo').value='';document.getElementById('pa-ord-objetivo').value='';document.getElementById('pa-ord-items').innerHTML='';
+  PA.ordN=0;
+  document.getElementById('pa-ord-fecha').value=new Date().toISOString().slice(0,10);
+  document.getElementById('pa-ord-fecha-prop').value='';
+  document.getElementById('pa-ord-tipo').value='';
+  document.getElementById('pa-ord-objetivo').value='';
+  document.getElementById('pa-ord-items').innerHTML='';
   document.getElementById('pa-ord-lotes-sel').innerHTML=PA.lotes.map(function(l){return'<label style="display:flex;align-items:center;gap:8px;padding:5px 8px;border-radius:6px;cursor:pointer;font-size:13px"><input type="checkbox" value="'+l.id+'" style="width:auto"> <span><strong>'+l.nombre+'</strong> <span style="color:var(--mut);font-size:11px">'+l.sector_nombre+' ('+l.hectareas+'ha)</span></span></label>';}).join('')||'<div class="emp">Sin lotes. Agregá lotes primero.</div>';
-  paAgregarItemOrden();document.getElementById('pa-mb-orden').classList.add('on');
+  // Poblar selector de usuarios
+  paF('/api/auth/usuarios').then(function(r){
+    var sel=document.getElementById('pa-ord-asignado');
+    if(sel)sel.innerHTML='<option value="">— Sin asignar —</option>'+(r.data||[]).map(function(u){return'<option value="'+u.id+'">'+u.nombre+' ('+u.rol+')</option>';}).join('');
+  });
+  paAgregarItemOrden();
+  document.getElementById('pa-mb-orden').classList.add('on');
 }
 function paAgregarItemOrden(){
   var n=PA.ordN++;var opts=PA.insumos.map(function(i){return'<option value="'+i.id+'">'+i.nombre+' ('+i.unidad+')</option>';}).join('');
@@ -5541,7 +5557,8 @@ function paGuardarOrden(){
   if(!lotes.length)return toast('Seleccioná al menos un lote','er');
   document.querySelectorAll('[id^=pa-oi-ins-]').forEach(function(el){var n=el.id.split('-').pop(),insId=el.value,dosis=parseFloat(document.getElementById('pa-oi-dosis-'+n).value)||0,ud=document.getElementById('pa-oi-ud-'+n).value;if(insId&&dosis>0)items.push({insumo_id:insId,dosis:dosis,unidad_dosis:ud});});
   if(!items.length)return toast('Agregá al menos un producto con dosis','er');
-  paF('/api/pa/ordenes',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fecha_orden:fecha,fecha_propuesta:fechaProp,tipo_aplicacion:tipo,objetivo:objetivo,lotes:lotes,items:items})}).then(function(r){if(r.ok){toast('Orden '+r.nro_orden+' emitida');document.getElementById('pa-mb-orden').classList.remove('on');paLoadOrdenes();}else toast(r.error||'Error','er');});
+  var asignadoA=document.getElementById('pa-ord-asignado').value||null;
+  paF('/api/pa/ordenes',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fecha_orden:fecha,fecha_propuesta:fechaProp,tipo_aplicacion:tipo,objetivo:objetivo,lotes:lotes,items:items,asignado_a:asignadoA})}).then(function(r){if(r.ok){toast('Orden '+r.nro_orden+' emitida'+(asignadoA?' y asignada':''));document.getElementById('pa-mb-orden').classList.remove('on');paLoadOrdenes();}else toast(r.error||'Error','er');});
 }
 function paVerOrden(id){
   paF('/api/pa/ordenes/'+id).then(function(r){
