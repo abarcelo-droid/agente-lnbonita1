@@ -317,30 +317,36 @@ input[type=file]{display:none}
       <div>
         <div style="font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--mut);margin-bottom:3px">Registrar ejecución</div>
         <div style="font-size:18px;font-weight:700;color:var(--burg)" id="ej-titulo">—</div>
+        <div style="font-size:12px;color:var(--mut);margin-top:2px" id="ej-subtitulo"></div>
       </div>
       <button class="lightbox-close" style="position:static;width:36px;height:36px;font-size:18px;background:var(--bg)" onclick="document.getElementById('modal-ejecutar').classList.remove('open')">×</button>
     </div>
 
+    <!-- Fecha real de ejecución -->
+    <div style="font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--mut);margin-bottom:6px">📅 Fecha de ejecución</div>
+    <input type="date" class="scout-input" id="ej-fecha" style="margin-bottom:14px">
+
     <!-- Cantidades por insumo -->
-    <div style="font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--mut);margin-bottom:10px">Cantidades aplicadas</div>
+    <div style="font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--mut);margin-bottom:10px">🧪 Cantidades reales aplicadas</div>
     <div id="ej-items"></div>
 
     <!-- Foto -->
-    <div style="font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--mut);margin:14px 0 8px">Foto de la aplicación</div>
+    <div style="font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--mut);margin:14px 0 8px">📷 Foto de la aplicación</div>
     <div class="foto-area" id="ej-foto-area" onclick="document.getElementById('ej-foto-input').click()">
       <span class="foto-icon-big">📷</span>
-      <div class="foto-hint">Foto de la aplicación (opcional)</div>
+      <div class="foto-hint">Opcional — sacar foto del trabajo realizado</div>
     </div>
     <input type="file" id="ej-foto-input" accept="image/*" capture="environment" onchange="onEjFoto(this)">
 
     <!-- Notas -->
-    <div style="font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--mut);margin:14px 0 8px">Notas</div>
-    <textarea class="scout-input" id="ej-notas" rows="3" placeholder="Observaciones, condiciones climáticas, sector tratado..."></textarea>
+    <div style="font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--mut);margin:14px 0 8px">📝 Notas</div>
+    <textarea class="scout-input" id="ej-notas" rows="3" placeholder="Condiciones climáticas, sector exacto tratado, observaciones..."></textarea>
 
     <!-- Botón confirmar -->
     <button class="rep-btn primary" id="ej-btn-confirmar" style="width:100%;margin-top:16px;padding:16px;font-size:15px;border-radius:12px" onclick="confirmarEjecucion()">
-      ✓ Confirmar aplicación
+      ✓ Confirmar — descontar stock
     </button>
+    <div style="font-size:11px;color:var(--mut);text-align:center;margin-top:8px">El stock se descuenta al confirmar</div>
   </div>
 </div>
 
@@ -639,6 +645,11 @@ function fmtFecha(s) {
   var d=new Date(s);
   return d.toLocaleDateString('es-AR',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'});
 }
+function fmtFechaCort(s) {
+  if(!s)return'';
+  var p=s.slice(0,10).split('-');
+  return p[2]+'/'+p[1]+'/'+p[0];
+}
 
 function openLightbox(src, caption) {
   document.getElementById('lightbox-img').src = src;
@@ -671,7 +682,21 @@ function renderOrden(o) {
   var lotesEjec = o.lotes.filter(function(l){ return l.ejecutado>0; }).length;
   var progPct = o.lotes.length ? Math.round(lotesEjec/o.lotes.length*100) : 0;
 
-  var estadoColor = o.estado==='ejecutada' ? 'var(--ok)' : o.estado==='en_ejecucion' ? 'var(--warn)' : 'var(--burg)';
+  // Calcular demora (días entre fecha_propuesta y primera ejecución)
+  var primerEjec = o.lotes.reduce(function(min, l){ return l.fecha_real&&(!min||l.fecha_real<min)?l.fecha_real:min; }, null);
+  var demoraHtml = '';
+  if(o.fecha_propuesta) {
+    if(primerEjec) {
+      var dias = Math.round((new Date(primerEjec)-new Date(o.fecha_propuesta))/(1000*60*60*24));
+      if(dias > 0) demoraHtml = '<span class="tag tag-alta">⏱ '+dias+' día'+(dias>1?'s':'')+' de demora</span>';
+      else if(dias < 0) demoraHtml = '<span class="tag tag-proc">⚡ Ejecutado '+Math.abs(dias)+' día'+(Math.abs(dias)>1?'s':'')+' antes</span>';
+      else demoraHtml = '<span class="tag tag-proc">✓ En fecha</span>';
+    } else {
+      var hoy = new Date(); var prop = new Date(o.fecha_propuesta);
+      var diasPend = Math.round((hoy-prop)/(1000*60*60*24));
+      if(diasPend > 0) demoraHtml = '<span class="tag tag-alta">⚠️ '+diasPend+' día'+(diasPend>1?'s':'')+' pendiente</span>';
+    }
+  }
   var estadoTxt   = o.estado==='ejecutada' ? '✓ Completada' : o.estado==='en_ejecucion' ? 'En ejecución' : 'Pendiente';
 
   // Barra de progreso
@@ -692,12 +717,16 @@ function renderOrden(o) {
   // Lotes con estado
   var lotesBtns = o.lotes.map(function(l){
     var hecho = l.ejecutado > 0;
+    var fechaEjecHtml = hecho && l.fecha_real
+      ? '<div style="font-size:11px;color:var(--ok);margin-top:2px">✓ Ejecutado el '+fmtFechaCort(l.fecha_real)+'</div>'
+      : '';
     return '<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--bor)">'
       +'<div><div style="font-weight:600;font-size:13px">'+l.lote_nombre+'</div>'
-      +'<div style="font-size:11px;color:var(--mut)">'+(l.finca||'')+(l.cultivo_actual?' · '+l.cultivo_actual:'')+'</div></div>'
+      +'<div style="font-size:11px;color:var(--mut)">'+(l.finca||'')+(l.cultivo_actual?' · '+l.cultivo_actual:'')+'</div>'
+      +fechaEjecHtml+'</div>'
       +(hecho
-        ? '<span style="color:var(--ok);font-size:12px;font-weight:700">✓ Ejecutado</span>'
-        : '<button class="rep-btn primary" style="min-width:80px;font-size:12px" onclick="abrirEjecutar('+o.id+','+l.lote_id+',\''+l.lote_nombre.replace(/'/g,"\\'")+'\','+JSON.stringify(o.items).replace(/'/g,"\\'")+')">Ejecutar</button>'
+        ? '<span style="color:var(--ok);font-size:20px">✓</span>'
+        : '<button class="rep-btn primary" style="min-width:80px;font-size:12px" onclick="abrirEjecutar('+o.id+','+l.lote_id+',\''+l.lote_nombre.replace(/'/g,"\\'")+'\','+l.hectareas+','+JSON.stringify(o.items).replace(/'/g,"\\'")+')">Ejecutar</button>'
       )+'</div>';
   }).join('');
 
@@ -712,7 +741,9 @@ function renderOrden(o) {
     +progBar
     +'<div class="rep-tags" style="margin-top:10px">'
     +'<span class="tag" style="background:color-mix(in srgb,'+estadoColor+' 12%,white);color:'+estadoColor+'">'+estadoTxt+'</span>'
-    +(o.fecha_propuesta?'<span class="tag tag-asig">📅 '+fmtFecha(o.fecha_propuesta)+'</span>':'')
+    +(o.fecha_propuesta?'<span class="tag tag-asig">📅 Propuesto: '+fmtFechaCort(o.fecha_propuesta)+'</span>':'')
+    +(primerEjec?'<span class="tag tag-asig">✓ Ejecutado: '+fmtFechaCort(primerEjec)+'</span>':'')
+    +demoraHtml
     +'</div>'
     +'</div>'
     // Expandible: productos
@@ -734,23 +765,43 @@ function renderOrden(o) {
 // ── MODAL EJECUTAR APLICACIÓN ─────────────────────────────────
 var _ejecutarData = {};
 
-function abrirEjecutar(ordenId, loteId, loteNombre, items) {
+function abrirEjecutar(ordenId, loteId, loteNombre, loteHa, items, fechaPropuesta) {
   _ejecutarData = { ordenId:ordenId, loteId:loteId, fotoB64:null };
   document.getElementById('ej-titulo').textContent = loteNombre;
+  document.getElementById('ej-subtitulo').textContent = loteHa + ' ha';
   document.getElementById('ej-notas').value = '';
   document.getElementById('ej-foto-input').value = '';
+  // Fecha: hoy por defecto
+  var hoy = new Date().toISOString().slice(0,10);
+  document.getElementById('ej-fecha').value = hoy;
   var area = document.getElementById('ej-foto-area');
   area.classList.remove('tiene');
-  area.innerHTML = '<span class="foto-icon-big">📷</span><div class="foto-hint">Foto de la aplicación (opcional)</div>';
+  area.innerHTML = '<span class="foto-icon-big">📷</span><div class="foto-hint">Opcional — sacar foto del trabajo realizado</div>';
   area.onclick = function(){ document.getElementById('ej-foto-input').click(); };
-  // Render cantidades por insumo
+
+  // Calcular cantidad sugerida: dosis/ha × hectáreas del lote
   var html = items.map(function(it){
-    return '<div style="margin-bottom:12px">'
-      +'<div style="font-size:12px;font-weight:700;color:var(--mut);text-transform:uppercase;margin-bottom:5px">'+it.insumo_nombre+'</div>'
+    var sugerido = 0;
+    if(it.unidad_dosis && (it.unidad_dosis.includes('/ha'))) {
+      sugerido = Math.round(it.dosis * loteHa * 100) / 100;
+    }
+    var unidadBase = it.unidad_dosis ? it.unidad_dosis.replace('/ha','').replace('_total','').trim() : it.unidad;
+    return '<div style="background:var(--bg);border-radius:12px;padding:14px;margin-bottom:12px">'
+      +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">'
+      +'<div style="font-size:14px;font-weight:700;color:var(--txt)">'+it.insumo_nombre+'</div>'
+      +'<div style="font-size:11px;color:var(--mut);text-align:right">'
+      +'Dosis indicada:<br><strong>'+it.dosis+' '+it.unidad_dosis+'</strong>'
+      +(sugerido>0?'<br><span style="color:var(--burg)">≈ '+sugerido+' '+unidadBase+' total</span>':'')
+      +'</div></div>'
+      +'<label style="font-size:11px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px;display:block">Cantidad real utilizada</label>'
       +'<div style="display:flex;align-items:center;gap:10px">'
-      +'<input type="number" class="scout-input" id="ej-cant-'+it.insumo_id+'" placeholder="Cantidad real" step="0.01" min="0" style="flex:1">'
-      +'<span style="font-size:13px;color:var(--mut);white-space:nowrap">'+it.unidad_dosis+' <span style="color:var(--sub)">(indicado: '+it.dosis+')</span></span>'
-      +'</div></div>';
+      +'<input type="number" class="scout-input" id="ej-cant-'+it.insumo_id
+      +'" placeholder="'+(sugerido>0?sugerido:'0')+'" step="0.01" min="0" style="flex:1;font-size:18px;font-weight:700;text-align:center"'
+      +(sugerido>0?' value="'+sugerido+'"':'')+'>'
+      +'<div style="font-size:15px;font-weight:700;color:var(--mut);min-width:30px">'+unidadBase+'</div>'
+      +'</div>'
+      +(sugerido>0?'<div style="font-size:11px;color:var(--sub);margin-top:6px;text-align:center">Podés modificar si usaste más o menos</div>':'')
+      +'</div>';
   }).join('');
   document.getElementById('ej-items').innerHTML = html;
   _ejecutarData.items = items;
@@ -772,6 +823,9 @@ function onEjFoto(input) {
 
 function confirmarEjecucion() {
   var d = _ejecutarData;
+  var fechaReal = document.getElementById('ej-fecha').value;
+  if(!fechaReal) return toast('Seleccioná la fecha de ejecución','er');
+
   var aplicaciones = d.items.map(function(it){
     var cant = parseFloat(document.getElementById('ej-cant-'+it.insumo_id).value)||0;
     return { insumo_id: it.insumo_id, cantidad_real: cant };
@@ -788,12 +842,13 @@ function confirmarEjecucion() {
     body: JSON.stringify({
       orden_id: d.ordenId,
       lote_id: d.loteId,
+      fecha_real: fechaReal,
       aplicaciones: aplicaciones,
       notas: document.getElementById('ej-notas').value.trim(),
       foto_b64: d.fotoB64 || null
     })
   }).then(function(r){
-    btn.textContent = 'Confirmar aplicación'; btn.disabled = false;
+    btn.textContent = '✓ Confirmar — descontar stock'; btn.disabled = false;
     if(r.ok){
       toast('✅ Aplicación registrada — stock actualizado');
       document.getElementById('modal-ejecutar').classList.remove('open');

@@ -196,10 +196,10 @@ router.get('/mis-ordenes', requireAuth, (req, res) => {
 
     // Enriquecer con lotes e items
     const getLotes = db.prepare(`
-      SELECT ol.lote_id, l.nombre as lote_nombre, l.finca,
+      SELECT ol.lote_id, l.nombre as lote_nombre, l.finca, l.hectareas,
              cl.cultivo as cultivo_actual,
-             -- Verificar si ya fue ejecutado este lote en esta orden
-             (SELECT COUNT(*) FROM pa_aplicaciones a WHERE a.orden_id=ol.orden_id AND a.lote_id=ol.lote_id) as ejecutado
+             (SELECT COUNT(*) FROM pa_aplicaciones a WHERE a.orden_id=ol.orden_id AND a.lote_id=ol.lote_id) as ejecutado,
+             (SELECT a.fecha_real FROM pa_aplicaciones a WHERE a.orden_id=ol.orden_id AND a.lote_id=ol.lote_id ORDER BY a.creado_en DESC LIMIT 1) as fecha_real
       FROM pa_ordenes_lotes ol
       JOIN pa_lotes l ON l.id = ol.lote_id
       LEFT JOIN pa_cultivos_lote cl ON cl.lote_id = l.id
@@ -225,12 +225,13 @@ router.get('/mis-ordenes', requireAuth, (req, res) => {
 
 // ── EJECUTAR ORDEN DESDE SCOUT ─────────────────────────────────────────────
 router.post('/ejecutar-orden', requireAuth, (req, res) => {
-  const { orden_id, lote_id, aplicaciones, foto_b64, notas } = req.body;
-  // aplicaciones = [{ insumo_id, cantidad_real }]
+  const { orden_id, lote_id, aplicaciones, foto_b64, notas, fecha_real } = req.body;
   if (!orden_id || !lote_id || !aplicaciones?.length)
     return res.status(400).json({ ok: false, error: 'Faltan datos obligatorios' });
+
+  // Usar la fecha enviada o la de hoy
+  const fechaEjecucion = fecha_real || new Date().toISOString().slice(0,10);
   try {
-    let fotoPath = null;
     if (foto_b64) {
       const dir = path.join(__dirname, '../../data/scout');
       fs.mkdirSync(dir, { recursive: true });
@@ -241,7 +242,6 @@ router.post('/ejecutar-orden', requireAuth, (req, res) => {
 
     const ejecutar = db.transaction(() => {
       for (const ap of aplicaciones) {
-        // Obtener precio unitario de última compra
         const ultimaCompra = db.prepare(`
           SELECT ci.precio_unit FROM pa_compras_items ci
           JOIN pa_compras c ON c.id = ci.compra_id
@@ -254,25 +254,25 @@ router.post('/ejecutar-orden', requireAuth, (req, res) => {
           INSERT INTO pa_aplicaciones
             (orden_id, lote_id, insumo_id, fecha_real, cantidad_real,
              ejecutado_por, costo_unitario, costo_total, notas)
-          VALUES (?,?,?,date('now','localtime'),?,?,?,?,?)
-        `).run(orden_id, lote_id, ap.insumo_id, ap.cantidad_real,
+          VALUES (?,?,?,?,?,?,?,?,?)
+        `).run(orden_id, lote_id, ap.insumo_id, fechaEjecucion, ap.cantidad_real,
                req.user.id, costoUnit, costoTotal, notas || null);
 
         // Descontar stock
         db.prepare("UPDATE pa_insumos SET stock_actual = stock_actual - ? WHERE id = ?")
           .run(ap.cantidad_real, ap.insumo_id);
 
-        // Movimiento stock
-        db.prepare(`INSERT INTO pa_movimientos_stock (fecha,insumo_id,tipo,cantidad,motivo,referencia_id) VALUES (date('now','localtime'),?,?,?,'aplicacion',?)`)
-          .run(ap.insumo_id, 'salida', ap.cantidad_real, orden_id);
+        // Movimiento stock con fecha real
+        db.prepare(`INSERT INTO pa_movimientos_stock (fecha,insumo_id,tipo,cantidad,motivo,referencia_id) VALUES (?,?,?,?,'aplicacion',?)`)
+          .run(fechaEjecucion, ap.insumo_id, 'salida', ap.cantidad_real, orden_id);
 
-        // Costo por lote
+        // Costo por lote con fecha real
         const orden = db.prepare("SELECT campaña_id FROM pa_ordenes WHERE id=?").get(orden_id);
         if (orden?.campaña_id && costoTotal > 0) {
           const ins = db.prepare("SELECT tipo, nombre FROM pa_insumos WHERE id=?").get(ap.insumo_id);
           const cat = ins?.tipo === 'fertilizante' ? 'fertilizante' : 'agroquimico';
-          db.prepare(`INSERT INTO pa_costos_lote (lote_id,campaña_id,categoria,referencia_id,fecha,monto,descripcion) VALUES (?,?,?,?,date('now','localtime'),?,?)`)
-            .run(lote_id, orden.campaña_id, cat, orden_id, costoTotal, `Aplicación ${ins?.nombre}`);
+          db.prepare(`INSERT INTO pa_costos_lote (lote_id,campaña_id,categoria,referencia_id,fecha,monto,descripcion) VALUES (?,?,?,?,?,?,?)`)
+            .run(lote_id, orden.campaña_id, cat, orden_id, fechaEjecucion, costoTotal, `Aplicación ${ins?.nombre}`);
         }
       }
 
