@@ -1261,6 +1261,8 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
 </div>
 
 <!-- ─── PA LOTES ──────────────────────────────────────────────── -->
+
+<!-- ─── PA SCOUT (resumen en panel desktop) ───────────────────── -->
 <div class="sec" id="sec-pa-lotes">
 <div class="ph"><div><div class="ph-t">🗺️ Fincas y Lotes</div><div class="ph-s">182.4 ha — Carpinteria, San Juan</div></div>
 <button class="btn bb" onclick="paAbrirNuevoLote()">+ Nuevo lote</button></div>
@@ -1271,9 +1273,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   <thead><tr><th>Finca / Sector</th><th>Lote (Llaves)</th><th style="text-align:right">Ha</th><th>Cultivo actual</th><th>Tipo</th><th></th></tr></thead>
   <tbody id="pa-lot-tbody"><tr><td colspan="6" class="emp">Cargando...</td></tr></tbody>
 </table></div></div>
-</div>
 
-<!-- ─── PA SCOUT (resumen en panel desktop) ───────────────────── -->
 <div class="sec" id="sec-pa-scout">
 <div class="ph">
   <div><div class="ph-t">🌿 Scout — Reportes de campo</div><div class="ph-s">Monitoreo y seguimiento de problemas</div></div>
@@ -1315,14 +1315,9 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   </div>
 </div>
 </div>
-<button class="btn bb" onclick="paAbrirNuevoLote()">+ Nuevo lote</button></div>
-<div class="filt">
-  <select id="pa-lot-sector-fil" onchange="paLoadLotes()"><option value="">Todas las fincas</option></select>
 </div>
-<div class="pa-wrap"><div class="ab-table-wrap"><table class="pa-tbl">
-  <thead><tr><th>Finca / Sector</th><th>Lote (Llaves)</th><th style="text-align:right">Ha</th><th>Cultivo actual</th><th>Tipo</th><th></th></tr></thead>
-  <tbody id="pa-lot-tbody"><tr><td colspan="6" class="emp">Cargando...</td></tr></tbody>
-</table></div></div>
+
+<!-- ─── PA LOTES ──────────────────────────────────────────────── -->
 </div>
 
 </main>
