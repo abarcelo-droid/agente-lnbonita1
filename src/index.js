@@ -14,6 +14,7 @@ import buscarRouter       from "./rutas/buscar.js";
 import abastoRouter       from "./rutas/abasto.js";
 import authRouter         from "./rutas/auth.js";
 import produccionRouter   from "./rutas/produccion.js";
+import scoutRouter        from "./rutas/scout.js";
 import { guardarSnapshotCRM } from "./servicios/db.js";
 import { syncSheets } from "./servicios/sheets.js";
 
@@ -125,6 +126,17 @@ app.use("/api", crmRouter);
 app.use("/api", buscarRouter);
 app.use("/api/abasto", abastoRouter);
 app.use("/api/pa",     produccionRouter);
+app.use("/api/pa/scout", scoutRouter);
+
+// Scout — app mobile para campo
+app.get("/scout", (req, res) => {
+  const cookie = req.cookies?.lnb_user;
+  if (!cookie) return res.redirect('/login?next=/scout');
+  res.sendFile(path.join(__dirname, "scout.html"));
+});
+
+// Archivos scout (fotos)
+app.use("/data/scout", express.static(path.join(__dirname, "../data/scout")));
 
 // Health check
 app.get("/", (req, res) => res.json({ status:"ok", version:"3.0", panel:"/panel" }));
