@@ -5023,26 +5023,122 @@ function paLoadDash(){
 }
 
 function paLoadCalendario(){
+  // Orden de campañas a mostrar como columnas
+  var CAMPS_VERANO  = ['2021/22','2022/23','2023/24','2024/25','2025/26','2026/27'];
+  var CAMPS_INVIERNO= ['Inv 2022','Inv 2023','Inv 2024','Inv 2025','Inv 2026','Inv 2027'];
+  var MESES = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
+
+  // Colores por cultivo
+  var CULT_COLOR = {
+    'Vid':             '#fef9c3|#854d0e',
+    'Damasco':         '#fef9c3|#854d0e',
+    'Durazno':         '#fef9c3|#854d0e',
+    'Ciruela':         '#fef9c3|#854d0e',
+    'Melón':           '#dcfce7|#166534',
+    'Cebolla':         '#dbeafe|#1e40af',
+    'Brócoli':         '#d1fae5|#065f46',
+    'Ajo':             '#ede9fe|#5b21b6',
+    'Papa':            '#fef3c7|#92400e',
+    'Zapallo':         '#fee2e2|#991b1b',
+    'Tomate Industria':'#fee2e2|#991b1b',
+    'Barbecho':        '#f1f5f9|#64748b',
+    'Sin uso':         '#f1f5f9|#94a3b8',
+  };
+  function cultColor(c){ var p=(CULT_COLOR[c]||'#e0f2fe|#075985').split('|'); return{bg:p[0],fg:p[1]}; }
+
   paF('/api/pa/lotes').then(function(r){
     var lotes=r.data||[];
     if(!lotes.length){document.getElementById('pa-cal-contenido').innerHTML='<div class="emp">No hay lotes. Agregá lotes en Fincas y Lotes.</div>';return;}
-    var sectores={};
-    lotes.forEach(function(l){if(!sectores[l.sector_nombre])sectores[l.sector_nombre]=[];sectores[l.sector_nombre].push(l);});
-    var html='';
-    Object.keys(sectores).forEach(function(sec){
-      html+='<div style="margin-bottom:20px"><div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;padding:8px 14px;background:#1a3a5c;color:#fff;border-radius:8px 8px 0 0">'+sec+'</div>';
-      html+='<div class="pa-wrap" style="margin-bottom:0;border-radius:0 0 8px 8px"><table class="pa-tbl"><thead><tr><th>Lote</th><th style="text-align:right">Ha</th><th>Cultivo actual</th><th></th></tr></thead><tbody>';
-      sectores[sec].forEach(function(l){
-        var cult=l.cultivo_actual||'';
-        var esFrutal=['Vid','Damasco','Durazno','Ciruela','Manzana'].includes(cult);
-        var esInd=cult==='Tomate Industria';
-        var cls=esFrutal?'cal-cult frutal':(esInd?'cal-cult industria':(cult?'cal-cult':'cal-cult vacio'));
-        html+='<tr><td><strong>'+l.nombre+'</strong></td><td style="text-align:right">'+l.hectareas+'</td>';
-        html+='<td><span class="'+cls+'" onclick="paEditarCultivo('+l.id+',\''+l.nombre.replace(/'/g,"\\'")+'\')">'+( cult||'— sin asignar —')+'</span></td>';
-        html+='<td><button class="btn bo bs" onclick="paEditarCultivo('+l.id+',\''+l.nombre.replace(/'/g,"\\'")+'\')">✏ Editar</button></td></tr>';
-      });
-      html+='</tbody></table></div></div>';
+
+    // Agrupar por finca
+    var fincas={};
+    lotes.forEach(function(l){
+      var f=l.finca||'Sin finca';
+      if(!fincas[f])fincas[f]=[];
+      fincas[f].push(l);
     });
+
+    // Cabecera de columnas (verano + invierno)
+    var allCamps = CAMPS_VERANO.concat(CAMPS_INVIERNO);
+    // Agregar Inv 2027 si no existe
+    if(allCamps.indexOf('Inv 2027')<0) allCamps.push('Inv 2027');
+
+    var html='<div style="overflow-x:auto">';
+    html+='<table style="width:100%;border-collapse:collapse;font-size:12px;min-width:1200px">';
+
+    // Fila cabecera
+    html+='<thead><tr>';
+    html+='<th style="position:sticky;left:0;background:#1a3a5c;color:#fff;padding:10px 14px;text-align:left;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;min-width:160px;z-index:2">Finca / Lote</th>';
+    html+='<th style="background:#1a3a5c;color:rgba(255,255,255,.5);padding:8px 10px;text-align:center;font-size:10px;font-weight:500;white-space:nowrap;min-width:30px">Ha</th>';
+    // Columnas verano
+    CAMPS_VERANO.forEach(function(c){
+      html+='<th style="background:#1a3a5c;color:#fff;padding:8px 10px;text-align:center;font-size:11px;font-weight:700;min-width:90px;border-left:1px solid rgba(255,255,255,.15)">☀️ '+c+'</th>';
+    });
+    // Columnas invierno
+    CAMPS_INVIERNO.concat(['Inv 2027']).forEach(function(c){
+      html+='<th style="background:#0f3460;color:#93c5fd;padding:8px 10px;text-align:center;font-size:11px;font-weight:700;min-width:90px;border-left:1px solid rgba(255,255,255,.1)">❄️ '+c+'</th>';
+    });
+    html+='</tr></thead><tbody>';
+
+    // Filas por finca → lote
+    Object.keys(fincas).sort().forEach(function(finca){
+      var lotesF=fincas[finca];
+      // Fila título finca
+      var totalCols = 2 + CAMPS_VERANO.length + CAMPS_INVIERNO.length + 1;
+      html+='<tr><td colspan="'+totalCols+'" style="background:#e8f0f8;padding:6px 14px;font-size:11px;font-weight:700;color:#1a3a5c;text-transform:uppercase;letter-spacing:.06em;border-top:2px solid var(--bor2)">📍 '+finca+'</td></tr>';
+
+      lotesF.forEach(function(l){
+        html+='<tr style="border-bottom:1px solid var(--bor)">';
+        // Columna finca/lote (sticky)
+        html+='<td style="position:sticky;left:0;background:var(--sur);padding:8px 14px;font-weight:600;z-index:1;border-right:2px solid var(--bor2)">'+l.nombre+'<span style="display:block;font-size:10px;color:var(--mut);font-weight:400">'+(l.red_agua?'💧 '+l.red_agua:'')+'</span></td>';
+        // Ha
+        html+='<td style="padding:6px 10px;text-align:center;color:var(--mut);font-size:11px">'+l.hectareas+'</td>';
+
+        // Celdas verano
+        CAMPS_VERANO.forEach(function(c){
+          var cd=l.cultivos&&l.cultivos[c];
+          var cult=cd?cd.cultivo:'';
+          var col=cultColor(cult);
+          var meses='';
+          if(cd&&cd.mes_siembra&&cd.mes_cosecha){
+            meses='<div style="font-size:9px;margin-top:2px;opacity:.8">'+MESES[cd.mes_siembra-1]+' → '+MESES[cd.mes_cosecha-1]+'</div>';
+          }
+          if(cult){
+            html+='<td style="padding:4px 6px;text-align:center;border-left:1px solid var(--bor)">'
+              +'<div style="background:'+col.bg+';color:'+col.fg+';border-radius:5px;padding:4px 6px;font-size:11px;font-weight:500;cursor:pointer;line-height:1.3" onclick="paEditarCultivo('+l.id+',\''+l.nombre.replace(/'/g,"\\'")+'\')">'+cult+meses+'</div>'
+              +'</td>';
+          } else {
+            html+='<td style="padding:4px 6px;text-align:center;border-left:1px solid var(--bor)">'
+              +'<div style="color:var(--mut);font-size:10px;cursor:pointer;padding:4px;border:1px dashed var(--bor2);border-radius:5px" onclick="paEditarCultivo('+l.id+',\''+l.nombre.replace(/'/g,"\\'")+'\')">—</div>'
+              +'</td>';
+          }
+        });
+
+        // Celdas invierno
+        CAMPS_INVIERNO.concat(['Inv 2027']).forEach(function(c){
+          var cd=l.cultivos&&l.cultivos[c];
+          var cult=cd?cd.cultivo:'';
+          var col=cultColor(cult);
+          var meses='';
+          if(cd&&cd.mes_siembra&&cd.mes_cosecha){
+            meses='<div style="font-size:9px;margin-top:2px;opacity:.8">'+MESES[cd.mes_siembra-1]+' → '+MESES[cd.mes_cosecha-1]+'</div>';
+          }
+          if(cult){
+            html+='<td style="padding:4px 6px;text-align:center;border-left:1px solid #dbeafe;background:#f8fbff">'
+              +'<div style="background:'+col.bg+';color:'+col.fg+';border-radius:5px;padding:4px 6px;font-size:11px;font-weight:500;cursor:pointer;line-height:1.3" onclick="paEditarCultivo('+l.id+',\''+l.nombre.replace(/'/g,"\\'")+'\')">'+cult+meses+'</div>'
+              +'</td>';
+          } else {
+            html+='<td style="padding:4px 6px;text-align:center;border-left:1px solid #dbeafe;background:#f8fbff">'
+              +'<div style="color:#bfdbfe;font-size:10px;cursor:pointer;padding:4px;border:1px dashed #bfdbfe;border-radius:5px" onclick="paEditarCultivo('+l.id+',\''+l.nombre.replace(/'/g,"\\'")+'\')">—</div>'
+              +'</td>';
+          }
+        });
+
+        html+='</tr>';
+      });
+    });
+
+    html+='</tbody></table></div>';
     document.getElementById('pa-cal-contenido').innerHTML=html;
   });
 }

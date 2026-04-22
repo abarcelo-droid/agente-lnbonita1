@@ -84,8 +84,18 @@ router.get('/lotes', requireAuth, (req, res) => {
     `;
     const params = [];
     if (sector_id) { query += " AND l.sector_id = ?"; params.push(sector_id); }
-    query += " ORDER BY s.nombre, l.nombre";
+    query += " ORDER BY l.finca NULLS LAST, l.nombre";
     const data = db.prepare(query).all(...params);
+    // Enriquecer con todos los cultivos por campaña
+    const getCultivos = db.prepare(
+      "SELECT campaña, cultivo, mes_siembra, mes_cosecha FROM pa_cultivos_lote WHERE lote_id = ?"
+    );
+    data.forEach(l => {
+      l.cultivos = {};
+      getCultivos.all(l.id).forEach(r => {
+        l.cultivos[r.campaña] = { cultivo: r.cultivo, mes_siembra: r.mes_siembra, mes_cosecha: r.mes_cosecha };
+      });
+    });
     res.json({ ok: true, data });
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
