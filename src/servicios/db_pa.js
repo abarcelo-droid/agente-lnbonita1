@@ -376,6 +376,197 @@ export function getCampañaActiva() {
   } catch(e) { console.error('[PA] Error migrando campañas históricas:', e.message); }
 })();
 
+// ── MIGRACIÓN: pa_insumos.unidad sin CHECK restrictivo ────────────────────
+// El enum original ('kg','lt','unidad') es muy acotado. Se recrea la tabla
+// para aceptar cualquier unidad (c.c, gramos, bolsa, rollos, ha, etc.).
+(function migrarUnidadInsumos() {
+  try {
+    const t = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='pa_insumos'").get();
+    if (t && t.sql && /CHECK\(unidad IN/.test(t.sql)) {
+      // Obtener columnas actuales dinámicamente para no perder datos
+      const cols = db.prepare("PRAGMA table_info(pa_insumos)").all().map(c => c.name);
+      const colsStr = cols.join(',');
+      db.exec(`
+        BEGIN;
+        CREATE TABLE pa_insumos_v2 (
+          id            INTEGER PRIMARY KEY AUTOINCREMENT,
+          nombre        TEXT NOT NULL,
+          tipo          TEXT NOT NULL,
+          unidad        TEXT NOT NULL,
+          stock_actual  REAL DEFAULT 0,
+          stock_minimo  REAL DEFAULT 0,
+          activo        INTEGER DEFAULT 1,
+          notas         TEXT,
+          creado_en     TEXT DEFAULT (datetime('now','localtime')),
+          componente_madre    TEXT,
+          precio_ref_usd      REAL DEFAULT 0,
+          ficha_tecnica_path  TEXT
+        );
+        INSERT INTO pa_insumos_v2 (${colsStr}) SELECT ${colsStr} FROM pa_insumos;
+        DROP TABLE pa_insumos;
+        ALTER TABLE pa_insumos_v2 RENAME TO pa_insumos;
+        COMMIT;
+      `);
+      console.log('[PA] pa_insumos recreada — unidad y tipo sin CHECK restrictivo');
+    }
+  } catch(e) { console.error('[PA] Error migrando pa_insumos.unidad:', e.message); }
+})();
+
+// ── SEED: Maestro de insumos desde Excel (127 productos en USD) ────────────
+(function seedInsumosMaestro() {
+  try {
+    // Solo correr si la tabla está vacía (carga inicial). Si ya se agregaron
+    // manualmente, no se pisa nada y se completa con los que falten por nombre.
+    const INSUMOS_INICIALES = [
+      // [nombre, unidad, precio_ref_usd]
+      ['Guano de Gallina', 'ha', 947.6],
+      ['Hidrocomplex x 25kg', 'bolsa', 50.37],
+      ['Semillas Cebolla Las tapias', 'kg', 35.71],
+      ['Semillas Cebolla Navideña', 'kg', 30.5],
+      ['Acido Fosforico', 'bidon', 0.0017],
+      ['Solmix', 'lt', 1.35],
+      ['Raundup', 'lt', 6.3],
+      ['MCPA', 'lt', 5.2],
+      ['Viñata', 'rollos', 3.43],
+      ['Fosfato Monoamonico x 50kg', 'bolsa', 62.54],
+      ['Potasio Nutriterra', 'lt', 0.59875],
+      ['Koltar', 'lt', 30.77],
+      ['STARANE XTRA X1lt . CORTEVA', 'lt', 60.77],
+      ['Prodigio', 'lt', 33.392],
+      ['Sol Ks', 'lt', 3.53],
+      ['Prostart Plus', 'lt', 8.103],
+      ['stoller boro', 'lt', 9.4545],
+      ['Cipermetrina', 'c.c', 0.01376],
+      ['Natural Oleo', 'lt', 3.625],
+      ['Naylon Negro 1,2 mtrs', 'rollos', 107.35],
+      ['Cinta de Riego', 'rollos', 225.0],
+      ['Carbendazin', 'lt', 7.0],
+      ['Gramoxone', 'lt', 5.764],
+      ['Aminoquelant', 'lt', 18.061],
+      ['At35', 'c.c', 0.042],
+      ['Infinito', 'c.c', 0.055],
+      ['Stimulate', 'c.c', 0.0616],
+      ['Confidor', 'c.c', 45.65],
+      ['Macrosorb foliar', 'lt', 27.92],
+      ['Fosfito de Zinc', 'lt', 0],
+      ['Karathane', 'c.c', 0.06868],
+      ['A35t', 'c.c', 0.042],
+      ['Mist', 'lt', 22.026],
+      ['CaB Stoller', 'lt', 8.856],
+      ['Plantines Brocoli', 'unidad', 0.0325],
+      ['Inicium Radicular', 'c.c', 0.01912],
+      ['Promes', 'c.c', 0.0403],
+      ['Veneno hormigas', 'kg', 1.3425],
+      ['SENCOREX 48 BAYER B x 10 ltrs', 'lt', 25.0],
+      ['Rogor Plus', 'lt', 16.406],
+      ['Bioforte', 'c.c', 0.07293],
+      ['stoller zinc', 'lt', 9.93],
+      ['Janfry', 'lt', 37.75],
+      ['Decis', 'c.c', 0.045],
+      ['stoller hierro', 'lt', 7.0],
+      ['Entrevero', 'c.c', 0.01757],
+      ['Fertilon', 'gramos', 0.0341],
+      ['Fetrilon combi Compo', 'gramos', 0.034144],
+      ['Ampligo', 'c.c', 0.2107],
+      ['Stoler Boro', 'lt', 189.09],
+      ['Mastermin', 'lt', 8.509],
+      ['Miclostar', 'c.c', 0],
+      ['Stoler zinc', 'lt', 1.35],
+      ['systhane', 'gramos', 0.1392],
+      ['intrepid', 'c.c', 0.0582],
+      ['imidaclopird', 'c.c', 0.020044],
+      ['stoller magnesio', 'lt', 8.856],
+      ['Pithog Potasio', 'lt', 0],
+      ['sunfire', 'c.c', 0.0588],
+      ['belt', 'c.c', 0.156],
+      ['Pithog zinc', 'lt', 0],
+      ['ROUNDUP FULL II 66,2 % x 20LTS', 'lt', 6.3],
+      ['movento', 'c.c', 0.118],
+      ['Plantines de Melon', 'unidades', 0.0325],
+      ['alquiler san geronimo', 'meses', 1000.0],
+      ['armetil', 'kg', 25.65],
+      ['basfoliar kelp', 'lt', 13.32],
+      ['Semillas MELON HIB. SUNDEW', 'unidad', 0.105],
+      ['Fertileader gold', 'lt', 27.783],
+      ['super one cide', 'lt', 57.542],
+      ['vertimec', 'c.c', 0.178],
+      ['Nitro Plus', 'lt', 3.6],
+      ['coragen', 'c.c', 0.31915],
+      ['giberalina', 'c.c', 18.02],
+      ['Phytogard zinc Stoller', 'lt', 9.93],
+      ['Aminoquelant K', 'lt', 17.33],
+      ['karate', 'c.c', 0.09],
+      ['sugar mover', 'lt', 15.0],
+      ['ZET', 'lt', 0],
+      ['Abamectina', 'lt', 11.76],
+      ['Aminoquelant Ca', 'lt', 11.218],
+      ['Etrel', 'c.c', 33.01],
+      ['MAP', 'lt', 1.8743],
+      ['Plantines Tomate Fitotec', 'plantines', 0.0726],
+      ['Servicios hechar guano MARTIN', 'ha', 80.0],
+      ['Servicios armar camas MARTIN', 'ha', 395.0],
+      ['Bioamino', 'lt', 8.52],
+      ['Guenta n26', 'lt', 1.1375],
+      ['Sempra', 'gramos', 0.7934],
+      ['Omite', 'lt', 37.69],
+      ['Biosmart', 'lt', 8.52],
+      ['amistar', 'lt', 16.98],
+      ['bioforge', 'lt', 0.07293],
+      ['bioamino L Zinc ARCOR', 'lt', 8.52],
+      ['Sol Mix', 'lt', 1.35],
+      ['Amin Ziman', 'lt', 0],
+      ['Amin Cuaje', 'kg', 0],
+      ['Paraquat', 'lt', 5.764],
+      ['Bio aminol', 'lt', 0],
+      ['Galant', 'lt', 15.07],
+      ['Titus', 'c.c', 0.06],
+      ['Plantines Tomate Proplanta', 'unidades', 0.240475],
+      ['Bioamino Zinc', 'lt', 8.52],
+      ['Bioil.s', 'lt', 0],
+      ['Oponente', 'lt', 0],
+      ['amino cuaje', 'kg', 0],
+      ['Bio Forge', 'lt', 0.07293],
+      ['Oxicloruro', 'kg', 0],
+      ['Minectro pro', 'lt', 0],
+      ['Mospilan', 'lt', 1.88],
+      ['Aplaud', 'kg', 0],
+      ['Biol.s', 'lt', 0],
+      ['Semilla Zapallo Victorio', 'unidades', 54.2],
+      ['Sulfato de cobre', 'kg', 8.92],
+      ['Amistar Top', 'lt', 16.98],
+      ['ROUNDUP', 'lt', 6.3],
+      ['M granulars', 'kg', 0],
+      ['Semilla Cebolla Presto', 'sobres', 447.93],
+      ['Herbadox', 'lt', 18.02],
+      ['Epigle', 'lt', 88.42],
+      ['Cebada', 'kg', 1.41],
+      ['Tifon', 'lt', 33.01],
+      ['Semilla Cebolla Serengeti', 'sobres', 447.93],
+      ['Hidroxido', 'kg', 0],
+      ['Friponil', 'c.c', 0],
+      ['Aminoquelant cacio', 'lt', 11.218],
+      ['Nitrate Balncer', 'lt', 0],
+    ];
+
+    const checkStmt = db.prepare("SELECT id FROM pa_insumos WHERE nombre = ? COLLATE NOCASE");
+    const insStmt = db.prepare(`INSERT INTO pa_insumos
+        (nombre, tipo, unidad, stock_actual, stock_minimo, precio_ref_usd, notas)
+        VALUES (?, 'otro', ?, 0, 0, ?, 'Importado del maestro inicial')`);
+
+    let nuevos = 0, existentes = 0;
+    const tx = db.transaction(() => {
+      for (const [nombre, unidad, precio] of INSUMOS_INICIALES) {
+        const ya = checkStmt.get(nombre);
+        if (ya) { existentes++; continue; }
+        insStmt.run(nombre, unidad, precio);
+        nuevos++;
+      }
+    });
+    tx();
+    if (nuevos > 0) console.log(`[PA] Maestro de insumos: ${nuevos} nuevos, ${existentes} ya existentes`);
+  } catch(e) { console.error('[PA] Error seed maestro insumos:', e.message); }
+})();
+
 // ── MÓDULO COMBUSTIBLE ─────────────────────────────────────────────────────
 // Tanques (gasoil + nafta), vehículos (tractores/camionetas/motos) y
 // movimientos unificados (entradas y salidas en una sola tabla).

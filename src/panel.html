@@ -5277,9 +5277,29 @@ if(_inpGondola) _inpGondola.addEventListener('keydown', function(e){
     </div>
     <div class="fl"><label>Unidad</label>
       <select id="pa-ins-unidad">
-        <option value="kg">kg</option>
-        <option value="lt">litros</option>
-        <option value="unidad">unidad</option>
+        <optgroup label="Peso">
+          <option value="kg">kg</option>
+          <option value="gramos">gramos</option>
+        </optgroup>
+        <optgroup label="Volumen">
+          <option value="lt">litros</option>
+          <option value="c.c">c.c</option>
+        </optgroup>
+        <optgroup label="Presentación">
+          <option value="bolsa">bolsa</option>
+          <option value="bidon">bidón</option>
+          <option value="rollos">rollos</option>
+          <option value="sobres">sobres</option>
+        </optgroup>
+        <optgroup label="Cultivo">
+          <option value="unidad">unidad</option>
+          <option value="unidades">unidades</option>
+          <option value="plantines">plantines</option>
+        </optgroup>
+        <optgroup label="Servicios / Tierra">
+          <option value="ha">hectárea</option>
+          <option value="meses">meses</option>
+        </optgroup>
       </select>
     </div>
     <div class="fl"><label>Stock mínimo</label><input type="number" id="pa-ins-stock-min" value="0" min="0"></div>
