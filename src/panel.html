@@ -4907,38 +4907,41 @@ if(_inpGondola) _inpGondola.addEventListener('keydown', function(e){
 
 <!-- Modal cultivo -->
 <div class="ab-modal-overlay" id="pa-mb-cultivo">
-<div class="ab-modal" style="width:460px">
-  <div class="mhd"><div class="mht">Asignar cultivo</div><button class="mcl" onclick="document.getElementById('pa-mb-cultivo').classList.remove('on')">×</button></div>
+<div class="ab-modal" style="width:640px">
+  <div class="mhd">
+    <div><div class="mht" id="pa-cult-tit">Editar lote</div><div style="font-size:12px;color:var(--mut)" id="pa-cult-lote-nombre"></div></div>
+    <button class="mcl" onclick="document.getElementById('pa-mb-cultivo').classList.remove('on')">×</button>
+  </div>
   <input type="hidden" id="pa-cult-lote-id">
-  <div style="font-size:13px;color:var(--mut);margin-bottom:14px" id="pa-cult-lote-nombre"></div>
-  <div class="fg">
-    <div class="fl"><label>Campaña</label><select id="pa-cult-campaña"></select></div>
-    <div class="fl"><label>Cultivo</label>
-      <select id="pa-cult-cultivo">
-        <option value="">— Sin cultivo —</option>
-        <optgroup label="Frutales (perennes)">
-          <option value="Vid">Vid</option><option value="Damasco">Damasco</option>
-          <option value="Durazno">Durazno</option><option value="Ciruela">Ciruela</option>
-        </optgroup>
-        <optgroup label="Chacra de Mercado">
-          <option value="Melón">Melón</option><option value="Cebolla">Cebolla</option>
-          <option value="Brócoli">Brócoli</option><option value="Ajo">Ajo</option>
-          <option value="Papa">Papa</option><option value="Zapallo">Zapallo</option>
-        </optgroup>
-        <optgroup label="Chacra de Industria">
-          <option value="Tomate Industria">Tomate Industria</option>
-        </optgroup>
-        <option value="Barbecho">Barbecho</option>
-        <option value="Sin uso">Sin uso</option>
+  <!-- Datos del lote -->
+  <div class="fg" style="margin-bottom:14px">
+    <div class="fl"><label>Nombre / Llaves</label><input id="pa-cult-edit-nombre" placeholder="Ej: 1-2"></div>
+    <div class="fl"><label>Finca</label><input id="pa-cult-edit-finca" placeholder="El Abuelo, San Isidro..."></div>
+    <div class="fl"><label>Hectáreas</label><input type="number" id="pa-cult-edit-ha" step="0.1" min="0.1"></div>
+    <div class="fl"><label>Red de agua</label>
+      <select id="pa-cult-edit-agua">
+        <option value="">— Sin especificar —</option>
+        <option value="Norte">Norte</option>
+        <option value="Sur">Sur</option>
+        <option value="Ambas">Ambas</option>
       </select>
     </div>
-    <div class="fl ff"><label>¿Es perenne?</label>
-      <select id="pa-cult-perenne"><option value="0">No (rota cada campaña)</option><option value="1">Sí (vid, damasco, durazno...)</option></select>
-    </div>
+    <div class="fl ff"><label>Polígono Google Maps</label><input id="pa-cult-edit-mapa" placeholder="https://maps.google.com/..."></div>
+    <div class="fl ff"><label>Notas</label><textarea id="pa-cult-edit-notas" rows="2"></textarea></div>
   </div>
+  <!-- Cultivos por campaña -->
+  <div style="font-size:12px;font-weight:700;color:var(--burg);text-transform:uppercase;letter-spacing:.06em;border-top:1px solid var(--bor);padding-top:14px;margin-bottom:10px">
+    Cultivos por campaña
+  </div>
+  <!-- Verano -->
+  <div style="font-size:11px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">☀️ Verano (Jul → Jun)</div>
+  <div class="fg" id="pa-cult-grid-verano"></div>
+  <!-- Invierno -->
+  <div style="font-size:11px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.06em;margin:12px 0 6px">❄️ Invierno</div>
+  <div class="fg" id="pa-cult-grid-invierno"></div>
   <div class="ab-modal-footer">
     <button class="btn bo" onclick="document.getElementById('pa-mb-cultivo').classList.remove('on')">Cancelar</button>
-    <button class="btn bb" onclick="paGuardarCultivo()">Guardar</button>
+    <button class="btn bb" onclick="paGuardarEdicionLote()">Guardar todo</button>
   </div>
 </div></div>
 
@@ -5045,20 +5048,122 @@ function paLoadCalendario(){
 }
 function paEditarCultivo(loteId,nombre){
   document.getElementById('pa-cult-lote-id').value=loteId;
-  document.getElementById('pa-cult-lote-nombre').textContent='Lote: '+nombre;
-  var cs=document.getElementById('pa-cult-campaña');cs.innerHTML=PA.campañas.map(function(c){return'<option value="'+c.id+'"'+(c.activa?' selected':'')+'>'+c.nombre+'</option>';}).join('');
-  document.getElementById('pa-mb-cultivo').classList.add('on');
+  document.getElementById('pa-cult-tit').textContent='Editar — '+nombre;
+  document.getElementById('pa-cult-lote-nombre').textContent='';
+  // Cargar datos del lote
+  paF('/api/pa/lotes/'+loteId).then(function(r){
+    if(!r.ok)return toast('Error cargando lote','er');
+    var l=r.data;
+    document.getElementById('pa-cult-edit-nombre').value=l.nombre||'';
+    document.getElementById('pa-cult-edit-finca').value=l.finca||'';
+    document.getElementById('pa-cult-edit-ha').value=l.hectareas||0.5;
+    document.getElementById('pa-cult-edit-agua').value=l.red_agua||'';
+    document.getElementById('pa-cult-edit-mapa').value=l.poligono_maps||'';
+    document.getElementById('pa-cult-edit-notas').value=l.notas||'';
+    // Construir grids de cultivo
+    var campOrdV=['2021/22','2022/23','2023/24','2024/25','2025/26','2026/27'];
+    // Verano
+    var verano=PA.campañas.filter(function(c){return!c.tipo||c.tipo==='verano';}).sort(function(a,b){return campOrdV.indexOf(a.nombre)-campOrdV.indexOf(b.nombre);});
+    var vHTML='',vRows=[];
+    verano.forEach(function(c){
+      var cd=l.cultivos&&l.cultivos[c.nombre]?l.cultivos[c.nombre]:null;
+      if(cd&&typeof cd==='string')cd={cultivo:cd,mes_siembra:null,mes_cosecha:null};
+      var row=paBuildCampRowHTML(c,cd,paCampañaEsActualOFutura(c));
+      vHTML+=row.html;vRows.push(row);
+    });
+    document.getElementById('pa-cult-grid-verano').innerHTML=vHTML;
+    vRows.forEach(function(row){
+      var s=document.getElementById('pa-ec-'+row.key);if(s&&row.cultVal)s.value=row.cultVal;
+      var ms=document.getElementById('pa-ms-'+row.key);if(ms&&row.msVal)ms.value=row.msVal;
+      var mc=document.getElementById('pa-mc-'+row.key);if(mc&&row.mcVal)mc.value=row.mcVal;
+    });
+    // Invierno
+    var invierno=PA.campañas.filter(function(c){return c.tipo==='invierno';}).sort(function(a,b){return a.nombre.localeCompare(b.nombre);});
+    var iHTML='',iRows=[];
+    invierno.forEach(function(c){
+      var cd=l.cultivos&&l.cultivos[c.nombre]?l.cultivos[c.nombre]:null;
+      if(cd&&typeof cd==='string')cd={cultivo:cd,mes_siembra:null,mes_cosecha:null};
+      var row=paBuildCampRowHTML(c,cd,paCampañaEsActualOFutura(c));
+      iHTML+=row.html;iRows.push(row);
+    });
+    document.getElementById('pa-cult-grid-invierno').innerHTML=iHTML;
+    iRows.forEach(function(row){
+      var s=document.getElementById('pa-ec-'+row.key);if(s&&row.cultVal)s.value=row.cultVal;
+      var ms=document.getElementById('pa-ms-'+row.key);if(ms&&row.msVal)ms.value=row.msVal;
+      var mc=document.getElementById('pa-mc-'+row.key);if(mc&&row.mcVal)mc.value=row.mcVal;
+    });
+    document.getElementById('pa-mb-cultivo').classList.add('on');
+  });
 }
-function paGuardarCultivo(){
+
+function paCultivoOpts(){
+  return'<option value="">—</option><optgroup label="Frutales"><option value="Vid">Vid</option><option value="Damasco">Damasco</option><option value="Durazno">Durazno</option><option value="Ciruela">Ciruela</option></optgroup><optgroup label="Chacra Mercado"><option value="Melón">Melón</option><option value="Cebolla">Cebolla</option><option value="Brócoli">Brócoli</option><option value="Ajo">Ajo</option><option value="Papa">Papa</option><option value="Zapallo">Zapallo</option></optgroup><optgroup label="Chacra Industria"><option value="Tomate Industria">Tomate Industria</option></optgroup><option value="Barbecho">Barbecho</option><option value="Sin uso">Sin uso</option>';
+}
+
+function paMesesOpts(label){
+  var meses=['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+  return'<option value="">'+label+'</option>'+meses.map(function(m,i){return'<option value="'+(i+1)+'">'+m+'</option>';}).join('');
+}
+
+function paCampañaEsActualOFutura(camp) {
+  // Mostrar meses para campaña activa y futuras
+  var hoy = new Date();
+  try {
+    var fin = new Date(camp.fecha_fin);
+    return fin >= hoy;
+  } catch(e) { return camp.activa; }
+}
+
+function paBuildCampRowHTML(c, cultData, mostrarMeses) {
+  var key = c.nombre.replace('/','_').replace(/ /g,'_');
+  var cultVal = cultData ? (cultData.cultivo || '') : '';
+  var msVal   = cultData ? (cultData.mes_siembra || '') : '';
+  var mcVal   = cultData ? (cultData.mes_cosecha || '') : '';
+  var html = '<div class="fl"><label>'+c.nombre+(c.activa?' ★':'')+'</label><select id="pa-ec-'+key+'">'+paCultivoOpts()+'</select></div>';
+  if (mostrarMeses) {
+    html += '<div class="fl"><label>Siembra</label><select id="pa-ms-'+key+'">'+paMesesOpts('Mes siembra')+'</select></div>';
+    html += '<div class="fl"><label>Cosecha</label><select id="pa-mc-'+key+'">'+paMesesOpts('Mes cosecha')+'</select></div>';
+    html += '<div class="fl"></div>'; // spacer para grilla de 4
+  }
+  return { html, key, cultVal, msVal, mcVal };
+}
+
+function paGuardarEdicionLote(){
   var loteId=document.getElementById('pa-cult-lote-id').value;
-  var campId=document.getElementById('pa-cult-campaña').value;
-  var cultivo=document.getElementById('pa-cult-cultivo').value;
-  var perenne=document.getElementById('pa-cult-perenne').value;
-  if(!campId)return toast('Seleccioná una campaña','er');
-  var camp=PA.campañas.find(function(c){return String(c.id)===String(campId);});
-  if(!camp)return toast('Campaña no encontrada','er');
-  paF('/api/pa/lotes/cultivo',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({lote_id:loteId,campaña:camp.nombre,cultivo:cultivo||null,es_perenne:Number(perenne)})})
-    .then(function(r){if(r.ok){toast('Cultivo guardado');document.getElementById('pa-mb-cultivo').classList.remove('on');paLoadCalendario();paF('/api/pa/lotes').then(function(r2){PA.lotes=r2.data||[];});}else toast(r.error||'Error','er');});
+  var nombre=document.getElementById('pa-cult-edit-nombre').value.trim();
+  var finca=document.getElementById('pa-cult-edit-finca').value.trim();
+  var ha=parseFloat(document.getElementById('pa-cult-edit-ha').value)||0.5;
+  var agua=document.getElementById('pa-cult-edit-agua').value;
+  var mapa=document.getElementById('pa-cult-edit-mapa').value.trim();
+  var notas=document.getElementById('pa-cult-edit-notas').value.trim();
+  if(!nombre)return toast('El nombre no puede estar vacío','er');
+  // Recolectar cultivos de todos los selects pa-ec-*
+  var cultivos={};
+  PA.campañas.forEach(function(c){
+    var key=c.nombre.replace('/','_').replace(/ /g,'_');
+    var sel=document.getElementById('pa-ec-'+key);
+    if(sel){
+      var ms=document.getElementById('pa-ms-'+key);
+      var mc=document.getElementById('pa-mc-'+key);
+      cultivos[c.nombre]={cultivo:sel.value||null,mes_siembra:ms?ms.value||null:null,mes_cosecha:mc?mc.value||null:null};
+    }
+  });
+  // Guardar datos del lote
+  paF('/api/pa/lotes/'+loteId,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({nombre,finca,hectareas:ha,red_agua:agua||null,poligono_maps:mapa||null,notas})})
+    .then(function(r){
+      if(!r.ok)return toast(r.error||'Error guardando lote','er');
+      // Guardar cultivos por campaña
+      var saves=Object.entries(cultivos).filter(function(e){return e[1].cultivo;}).map(function(e){
+        var camp=e[0],cd=e[1];
+        return paF('/api/pa/lotes/cultivo',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({lote_id:loteId,campaña:camp,cultivo:cd.cultivo,es_perenne:['Vid','Damasco','Durazno','Ciruela'].includes(cd.cultivo)?1:0,mes_siembra:cd.mes_siembra||null,mes_cosecha:cd.mes_cosecha||null})});
+      });
+      Promise.all(saves).then(function(){
+        toast('Lote actualizado');
+        document.getElementById('pa-mb-cultivo').classList.remove('on');
+        paLoadCalendario();
+        paF('/api/pa/lotes').then(function(r2){PA.lotes=r2.data||[];});
+      });
+    });
 }
 
 function paLoadInsumos(){

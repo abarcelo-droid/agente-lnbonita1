@@ -241,18 +241,57 @@ export function getCampañaActiva() {
   } catch(e) { console.error('[PA] Error migrando pa_lotes:', e.message); }
 })();
 
+// ── MIGRACIÓN: mes siembra/cosecha en pa_cultivos_lote ────────────────────
+(function() {
+  try {
+    const cols = db.prepare("PRAGMA table_info(pa_cultivos_lote)").all().map(c => c.name);
+    if (!cols.includes('mes_siembra')) {
+      db.exec("ALTER TABLE pa_cultivos_lote ADD COLUMN mes_siembra INTEGER"); // 1-12
+      console.log("[PA] Columna mes_siembra agregada en pa_cultivos_lote");
+    }
+    if (!cols.includes('mes_cosecha')) {
+      db.exec("ALTER TABLE pa_cultivos_lote ADD COLUMN mes_cosecha INTEGER"); // 1-12
+      console.log("[PA] Columna mes_cosecha agregada en pa_cultivos_lote");
+    }
+  } catch(e) { console.error('[PA] Error migrando cultivos_lote:', e.message); }
+})();
+
+// ── MIGRACIÓN: columna tipo en pa_campañas ────────────────────────────────
+(function() {
+  try {
+    const cols = db.prepare("PRAGMA table_info(pa_campañas)").all().map(c => c.name);
+    if (!cols.includes('tipo')) {
+      db.exec("ALTER TABLE pa_campañas ADD COLUMN tipo TEXT DEFAULT 'verano' CHECK(tipo IN ('verano','invierno'))");
+      console.log("[PA] Columna tipo agregada en pa_campañas");
+    }
+  } catch(e) { console.error('[PA] Error migrando tipo campaña:', e.message); }
+})();
+
 // ── MIGRACIÓN: campañas históricas ────────────────────────────────────────
 (function migrarCampañasHistoricas() {
   try {
-    const campañas = [
+    // Campañas de verano (Jul→Jun)
+    const verano = [
       ['2021/22', '2021-07-01', '2022-06-30'],
       ['2022/23', '2022-07-01', '2023-06-30'],
       ['2023/24', '2023-07-01', '2024-06-30'],
       ['2024/25', '2024-07-01', '2025-06-30'],
       ['2026/27', '2026-07-01', '2027-06-30'],
     ];
-    for (const [nombre, inicio, fin] of campañas) {
-      db.prepare("INSERT OR IGNORE INTO pa_campañas (nombre, fecha_inicio, fecha_fin, activa) VALUES (?,?,?,0)")
+    for (const [nombre, inicio, fin] of verano) {
+      db.prepare("INSERT OR IGNORE INTO pa_campañas (nombre, fecha_inicio, fecha_fin, activa, tipo) VALUES (?,?,?,0,'verano')")
+        .run(nombre, inicio, fin);
+    }
+    // Campañas de invierno (May→Oct aprox)
+    const invierno = [
+      ['Inv 2022', '2022-05-01', '2022-10-31'],
+      ['Inv 2023', '2023-05-01', '2023-10-31'],
+      ['Inv 2024', '2024-05-01', '2024-10-31'],
+      ['Inv 2025', '2025-05-01', '2025-10-31'],
+      ['Inv 2026', '2026-05-01', '2026-10-31'],
+    ];
+    for (const [nombre, inicio, fin] of invierno) {
+      db.prepare("INSERT OR IGNORE INTO pa_campañas (nombre, fecha_inicio, fecha_fin, activa, tipo) VALUES (?,?,?,0,'invierno')")
         .run(nombre, inicio, fin);
     }
   } catch(e) { console.error('[PA] Error migrando campañas históricas:', e.message); }
