@@ -4937,11 +4937,35 @@ if(_inpGondola) _inpGondola.addEventListener('keydown', function(e){
 
 <!-- Modal compra -->
 <div class="ab-modal-overlay" id="pa-mb-compra">
-<div class="ab-modal" style="width:700px">
-  <div class="mhd"><div class="mht">Nueva Compra de Insumos</div><button class="mcl" onclick="document.getElementById('pa-mb-compra').classList.remove('on')">×</button></div>
+<div class="ab-modal" style="width:720px">
+  <div class="mhd">
+    <div><div class="mht">Nueva Compra de Insumos</div><div style="font-size:12px;color:var(--mut)">Completá manualmente o usá el lector automático</div></div>
+    <button class="mcl" onclick="document.getElementById('pa-mb-compra').classList.remove('on')">×</button>
+  </div>
+
+  <!-- ZONA FOTO + LECTOR IA -->
+  <div style="background:var(--bg);border-radius:12px;padding:16px;margin-bottom:18px;border:1px solid var(--bor)">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+      <div style="font-size:12px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.06em">📄 Foto del remito / factura</div>
+      <button class="btn bb" id="pa-comp-leer-btn" onclick="paLeerRemito()" style="display:none;gap:6px">
+        <span>✨ Leer con IA</span>
+      </button>
+    </div>
+    <div id="pa-comp-foto-area" style="background:var(--sur);border:2px dashed var(--bor2);border-radius:10px;padding:20px;text-align:center;cursor:pointer;transition:all .15s" onclick="document.getElementById('pa-comp-foto-inp').click()">
+      <div style="font-size:32px;margin-bottom:6px">📷</div>
+      <div style="font-size:13px;color:var(--mut)">Tocar para sacar foto o subir imagen</div>
+      <div style="font-size:11px;color:var(--sub);margin-top:4px">El sistema puede leerla automáticamente</div>
+    </div>
+    <input type="file" id="pa-comp-foto-inp" accept="image/*" capture="environment" style="display:none" onchange="paOnFotoCompra(this)">
+    <!-- Estado del lector IA -->
+    <div id="pa-comp-ia-estado" style="display:none;margin-top:10px;padding:10px 14px;border-radius:8px;font-size:13px;text-align:center"></div>
+  </div>
+
+  <!-- DATOS DEL COMPROBANTE -->
+  <div style="font-size:12px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">Datos del comprobante</div>
   <div class="fg">
     <div class="fl"><label>Fecha</label><input type="date" id="pa-comp-fecha"></div>
-    <div class="fl"><label>Tipo de comprobante</label>
+    <div class="fl"><label>Tipo</label>
       <select id="pa-comp-tipo-comp">
         <option value="factura">Factura</option>
         <option value="remito">Remito</option>
@@ -4949,22 +4973,16 @@ if(_inpGondola) _inpGondola.addEventListener('keydown', function(e){
         <option value="otro">Otro</option>
       </select>
     </div>
-    <div class="fl ff"><label>N° Remito / Factura</label><input id="pa-comp-factura" placeholder="Ej: R 001-00012345 / A 001-00045678"></div>
+    <div class="fl ff"><label>N° Remito / Factura</label><input id="pa-comp-factura" placeholder="Ej: R 001-00012345"></div>
     <div class="fl ff"><label>Proveedor</label><input id="pa-comp-prov" placeholder="Nombre del proveedor"></div>
     <div class="fl ff"><label>Notas</label><textarea id="pa-comp-notas" rows="2"></textarea></div>
-    <!-- Foto remito/factura -->
-    <div class="fl ff">
-      <label>Foto del remito / factura</label>
-      <div id="pa-comp-foto-area" style="background:var(--bg);border:2px dashed var(--bor2);border-radius:10px;padding:18px;text-align:center;cursor:pointer;transition:all .15s" onclick="document.getElementById('pa-comp-foto-inp').click()">
-        <div style="font-size:28px;margin-bottom:6px">📄</div>
-        <div style="font-size:12px;color:var(--mut)">Tocar para sacar foto o subir imagen</div>
-      </div>
-      <input type="file" id="pa-comp-foto-inp" accept="image/*" capture="environment" style="display:none" onchange="paOnFotoCompra(this)">
-    </div>
   </div>
-  <div style="margin:14px 0 8px;font-size:12px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.06em">Productos</div>
+
+  <!-- PRODUCTOS -->
+  <div style="font-size:12px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.06em;margin:14px 0 8px">Productos</div>
   <div id="pa-comp-items"></div>
   <button class="btn bo" style="margin-top:8px" onclick="paAgregarItemCompra()">+ Agregar producto</button>
+
   <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--bor);display:flex;justify-content:flex-end">
     <div style="font-size:15px;font-weight:600">Total: <span id="pa-comp-total">$0</span></div>
   </div>
@@ -5599,11 +5617,129 @@ function paOnFotoCompra(input){
     PA._compraFotoB64=e.target.result.split(',')[1];
     var area=document.getElementById('pa-comp-foto-area');
     area.style.padding='0';area.style.border='2px solid var(--burg)';
-    area.innerHTML='<img src="'+e.target.result+'" style="width:100%;max-height:160px;object-fit:cover;border-radius:8px;display:block">'
+    area.innerHTML='<img src="'+e.target.result+'" style="width:100%;max-height:200px;object-fit:cover;border-radius:8px;display:block">'
       +'<div style="padding:6px;text-align:center;font-size:11px;color:var(--burg);font-weight:600">📄 Tocar para cambiar</div>';
     area.onclick=function(){document.getElementById('pa-comp-foto-inp').click();};
+    // Mostrar botón Leer con IA
+    var btn=document.getElementById('pa-comp-leer-btn');
+    if(btn)btn.style.display='flex';
+    // Limpiar estado IA anterior
+    var est=document.getElementById('pa-comp-ia-estado');
+    if(est)est.style.display='none';
   };
   reader.readAsDataURL(file);
+}
+
+function paLeerRemito(){
+  var btn=document.getElementById('pa-comp-leer-btn');
+  var est=document.getElementById('pa-comp-ia-estado');
+  btn.disabled=true;btn.innerHTML='<span>✨ Leyendo...</span>';
+  est.style.display='block';
+  est.style.background='#eff6ff';est.style.color='var(--burg)';
+  est.textContent='🤖 Claude está leyendo el remito...';
+
+  // Lista de insumos conocidos para ayudar al match
+  var insumosConocidos=PA.insumos.map(function(i){return i.nombre+(i.componente_madre?' ('+i.componente_madre+')':'');}).join(', ');
+
+  fetch('https://api.anthropic.com/v1/messages',{
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({
+      model:'claude-sonnet-4-20250514',
+      max_tokens:1000,
+      messages:[{
+        role:'user',
+        content:[
+          {type:'image',source:{type:'base64',media_type:'image/jpeg',data:PA._compraFotoB64}},
+          {type:'text',text:`Analizá esta foto de un remito o factura de insumos agrícolas.
+Extraé la información y devolvé SOLO un JSON válido sin comentarios ni markdown, con esta estructura exacta:
+{
+  "tipo_comprobante": "factura|remito|ticket|otro",
+  "nro_comprobante": "número del documento",
+  "fecha": "YYYY-MM-DD o null si no se ve",
+  "proveedor": "nombre del proveedor",
+  "items": [
+    {
+      "descripcion": "nombre del producto tal como aparece en el remito",
+      "cantidad": número,
+      "unidad": "kg|lt|unidad",
+      "precio_unitario": número o null,
+      "subtotal": número o null
+    }
+  ]
+}
+
+Insumos que manejamos (para ayudarte a identificar): ${insumosConocidos}
+
+Si algún campo no se puede leer con certeza, poné null. Solo devolvé el JSON, sin texto adicional.`}
+        ]
+      }]
+    })
+  })
+  .then(function(r){return r.json();})
+  .then(function(data){
+    btn.disabled=false;btn.innerHTML='<span>✨ Leer con IA</span>';
+    var txt=data.content&&data.content[0]?data.content[0].text:'';
+    // Limpiar posibles backticks
+    txt=txt.replace(/```json|```/g,'').trim();
+    var parsed;
+    try{ parsed=JSON.parse(txt); }
+    catch(e){
+      est.style.background='#fef2f2';est.style.color='var(--err)';
+      est.textContent='❌ No se pudo interpretar la respuesta. Completá el formulario manualmente.';
+      return;
+    }
+    // Aplicar datos al formulario
+    var aplicados=[];
+    if(parsed.fecha)                { document.getElementById('pa-comp-fecha').value=parsed.fecha; aplicados.push('fecha'); }
+    if(parsed.nro_comprobante)      { document.getElementById('pa-comp-factura').value=parsed.nro_comprobante; aplicados.push('número'); }
+    if(parsed.proveedor)            { document.getElementById('pa-comp-prov').value=parsed.proveedor; aplicados.push('proveedor'); }
+    if(parsed.tipo_comprobante)     { var tc=document.getElementById('pa-comp-tipo-comp'); if(tc){tc.value=parsed.tipo_comprobante;} aplicados.push('tipo'); }
+
+    // Items — agregar filas
+    if(parsed.items&&parsed.items.length){
+      // Limpiar items actuales y agregar los leídos
+      document.getElementById('pa-comp-items').innerHTML='';
+      PA.compN=0;
+      parsed.items.forEach(function(it){
+        // Buscar match en insumos conocidos
+        var matchInsumo=null;
+        var descLower=(it.descripcion||'').toLowerCase();
+        PA.insumos.forEach(function(ins){
+          if(!matchInsumo){
+            var insLower=ins.nombre.toLowerCase();
+            var compLower=(ins.componente_madre||'').toLowerCase();
+            if(descLower.includes(insLower)||insLower.includes(descLower)||
+               (compLower&&descLower.includes(compLower))){
+              matchInsumo=ins;
+            }
+          }
+        });
+        paAgregarItemCompra();
+        var n=PA.compN-1;
+        if(matchInsumo){
+          var sel=document.getElementById('pa-ci-ins-'+n);
+          if(sel)sel.value=matchInsumo.id;
+        }
+        var cantEl=document.getElementById('pa-ci-cant-'+n);
+        var precEl=document.getElementById('pa-ci-prec-'+n);
+        if(cantEl&&it.cantidad)cantEl.value=it.cantidad;
+        if(precEl&&it.precio_unitario)precEl.value=it.precio_unitario;
+      });
+      paActTotalComp();
+      aplicados.push(parsed.items.length+' producto(s)');
+    }
+
+    est.style.background='#f0fdf4';est.style.color='var(--ok)';
+    est.innerHTML='✅ Datos completados: <strong>'+aplicados.join(', ')+'</strong>. '
+      +'<span style="color:var(--mut)">Revisá y corregí lo que sea necesario antes de guardar.</span>';
+  })
+  .catch(function(err){
+    btn.disabled=false;btn.innerHTML='<span>✨ Leer con IA</span>';
+    est.style.background='#fef2f2';est.style.color='var(--err)';
+    est.textContent='❌ Error al conectar con el lector. Completá manualmente.';
+    console.error(err);
+  });
 }
 function paAbrirNuevaCompra(){
   PA.compN=0; PA._compraFotoB64=null;
