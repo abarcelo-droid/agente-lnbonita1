@@ -460,5 +460,170 @@ db.exec(`
   } catch(e) { console.error('[PA] Error seed tanques combustible:', e.message); }
 })();
 
+// ── MÓDULO PERSONAL / MANO DE OBRA ─────────────────────────────────────────
+// Cuadrillas, trabajadores, tareas, partes de trabajo y valorización por RRHH.
+// El rubro contable se sugiere automáticamente cruzando tipo_labor × cultivo.
+
+db.exec(`
+  -- Rubros contables (alineados con contabilidad)
+  CREATE TABLE IF NOT EXISTS pa_rubros_contables (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    nombre      TEXT NOT NULL UNIQUE,
+    tipo_labor  TEXT NOT NULL CHECK(tipo_labor IN ('produccion','cosecha_empaque','general','otro')),
+    cultivo     TEXT,   -- uva, durazno, damasco, brocoli, cebolla, melon, melon_tardio, tomate_industria, null
+    activo      INTEGER DEFAULT 1,
+    notas       TEXT,
+    creado_en   TEXT DEFAULT (datetime('now','localtime'))
+  );
+
+  -- Cuadrillas
+  CREATE TABLE IF NOT EXISTS pa_cuadrillas (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    nombre      TEXT NOT NULL UNIQUE,
+    capataz_id  INTEGER REFERENCES usuarios(id),
+    tipo        TEXT DEFAULT 'fija' CHECK(tipo IN ('fija','pool')),
+    activo      INTEGER DEFAULT 1,
+    notas       TEXT,
+    creado_en   TEXT DEFAULT (datetime('now','localtime'))
+  );
+
+  -- Trabajadores
+  CREATE TABLE IF NOT EXISTS pa_trabajadores (
+    id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+    nombre                TEXT NOT NULL,
+    dni                   TEXT,
+    cuadrilla_habitual_id INTEGER REFERENCES pa_cuadrillas(id),
+    tipo_relacion         TEXT NOT NULL DEFAULT 'fijo' CHECK(tipo_relacion IN ('fijo','contratista')),
+    jornal_base           REAL DEFAULT 0,
+    unidad_jornal         TEXT DEFAULT 'dia' CHECK(unidad_jornal IN ('dia','hora','ha','unidad')),
+    activo                INTEGER DEFAULT 1,
+    notas                 TEXT,
+    creado_en             TEXT DEFAULT (datetime('now','localtime'))
+  );
+
+  -- Tipos de tarea (catálogo)
+  CREATE TABLE IF NOT EXISTS pa_tareas_tipos (
+    id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+    nombre               TEXT NOT NULL UNIQUE,
+    tipo_labor           TEXT NOT NULL CHECK(tipo_labor IN ('produccion','cosecha_empaque','general','otro')),
+    rubro_contable_id    INTEGER REFERENCES pa_rubros_contables(id),
+    es_destajo           INTEGER DEFAULT 0,
+    unidad_destajo       TEXT,   -- cajon, kg, planta, ha, tacho, null
+    activo               INTEGER DEFAULT 1,
+    creado_en            TEXT DEFAULT (datetime('now','localtime'))
+  );
+
+  -- Partes de trabajo (cabecera)
+  CREATE TABLE IF NOT EXISTS pa_partes_trabajo (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    fecha             TEXT NOT NULL DEFAULT (date('now','localtime')),
+    cuadrilla_id      INTEGER REFERENCES pa_cuadrillas(id),
+    lote_id           INTEGER NOT NULL REFERENCES pa_lotes(id),
+    tarea_tipo_id     INTEGER NOT NULL REFERENCES pa_tareas_tipos(id),
+    modo_registro     TEXT NOT NULL DEFAULT 'cuadrilla' CHECK(modo_registro IN ('cuadrilla','individual')),
+    cant_trabajadores INTEGER,      -- solo si modo=cuadrilla
+    horas_total       REAL,          -- solo si modo=cuadrilla
+    observaciones     TEXT,
+    foto_path         TEXT,
+    cargado_por       INTEGER REFERENCES usuarios(id),
+    estado            TEXT DEFAULT 'pendiente_valorizar' CHECK(estado IN ('pendiente_valorizar','valorizado','anulado')),
+    creado_en         TEXT DEFAULT (datetime('now','localtime'))
+  );
+
+  -- Items de parte individual (solo si modo=individual, ej destajo)
+  CREATE TABLE IF NOT EXISTS pa_partes_trabajo_items (
+    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    parte_id           INTEGER NOT NULL REFERENCES pa_partes_trabajo(id) ON DELETE CASCADE,
+    trabajador_id      INTEGER NOT NULL REFERENCES pa_trabajadores(id),
+    horas              REAL,
+    unidades_destajo   REAL,
+    notas              TEXT
+  );
+
+  -- Valorización (la hace RRHH/oficina)
+  CREATE TABLE IF NOT EXISTS pa_partes_valorizacion (
+    id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+    parte_id             INTEGER NOT NULL UNIQUE REFERENCES pa_partes_trabajo(id),
+    monto_total          REAL NOT NULL,
+    detalle_json         TEXT,
+    rubro_contable_id    INTEGER NOT NULL REFERENCES pa_rubros_contables(id),
+    valorizado_por       INTEGER REFERENCES usuarios(id),
+    fecha_valorizacion   TEXT DEFAULT (datetime('now','localtime'))
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_pa_partes_fecha ON pa_partes_trabajo(fecha);
+  CREATE INDEX IF NOT EXISTS idx_pa_partes_lote ON pa_partes_trabajo(lote_id);
+  CREATE INDEX IF NOT EXISTS idx_pa_partes_estado ON pa_partes_trabajo(estado);
+  CREATE INDEX IF NOT EXISTS idx_pa_rubros_tipo_cult ON pa_rubros_contables(tipo_labor, cultivo);
+`);
+
+// ── SEED: 20 rubros contables (tal cual contabilidad) ──────────────────────
+(function seedRubrosContables() {
+  try {
+    const n = db.prepare("SELECT COUNT(*) as n FROM pa_rubros_contables").get();
+    if (n.n === 0) {
+      const rubros = [
+        // [nombre, tipo_labor, cultivo]
+        ['G -MO GENERALES',                  'general',         null],
+        ['G -MO PROD . INDUSTRIA',           'produccion',      'industria'],
+        ['G - MO PRODUCCION DAMASCO',        'produccion',      'damasco'],
+        ['G - MO PRODUCCION UVA',            'produccion',      'uva'],
+        ['G - MO PRODUCCION DURAZNO',        'produccion',      'durazno'],
+        ['G - MO PRODUCCION BROCOLI',        'produccion',      'brocoli'],
+        ['G - MO PRODUCCION CEBOLLA',        'produccion',      'cebolla'],
+        ['G - MO PRODUCCION MELON',          'produccion',      'melon'],
+        ['G - MO COSH Y EMP DAMASCO',        'cosecha_empaque', 'damasco'],
+        ['G - MO COSH Y EMP DURAZNO',        'cosecha_empaque', 'durazno'],
+        ['G - MO COSH Y EMP UVA',            'cosecha_empaque', 'uva'],
+        ['G - MO COSH Y EMP BROCOLI',        'cosecha_empaque', 'brocoli'],
+        ['G - MO COSH Y EMP CEBOLLA',        'cosecha_empaque', 'cebolla'],
+        ['G - MO COSH Y EMP MELON',          'cosecha_empaque', 'melon'],
+        ['G - MO COSH Y EMPAQUE GENERAL',    'cosecha_empaque', null],
+        ['SAN GERONIMO',                     'otro',            null],
+        ['INVERSION',                        'otro',            null],
+        ['G - MO PRODUCCION MELON TARDIO',   'produccion',      'melon_tardio'],
+        ['G - MO COSH TOMATE INDUSTRIA',     'cosecha_empaque', 'tomate_industria'],
+        ['G - MO COSH Y EMP MELON TARDIO',   'cosecha_empaque', 'melon_tardio'],
+      ];
+      const ins = db.prepare("INSERT INTO pa_rubros_contables (nombre, tipo_labor, cultivo) VALUES (?,?,?)");
+      for (const [nombre, tipo, cult] of rubros) ins.run(nombre, tipo, cult);
+      console.log(`[PA] ${rubros.length} rubros contables creados`);
+    }
+  } catch(e) { console.error('[PA] Error seed rubros:', e.message); }
+})();
+
+// ── SEED: catálogo inicial de tareas ───────────────────────────────────────
+(function seedTareasTipos() {
+  try {
+    const n = db.prepare("SELECT COUNT(*) as n FROM pa_tareas_tipos").get();
+    if (n.n === 0) {
+      // Rubro GENERAL para tareas sin cultivo específico
+      const gralRow = db.prepare("SELECT id FROM pa_rubros_contables WHERE nombre = 'G -MO GENERALES'").get();
+      const gralId = gralRow ? gralRow.id : null;
+
+      const tareas = [
+        // [nombre, tipo_labor, rubro_id_fijo, es_destajo, unidad_destajo]
+        // Producción — rubro se calcula por cultivo del lote
+        ['Poda verde',                'produccion',       null,   0, null],
+        ['Poda de invierno',          'produccion',       null,   0, null],
+        ['Raleo',                     'produccion',       null,   0, null],
+        ['Atado / tutorado',          'produccion',       null,   0, null],
+        ['Carpida / desmalezado',     'produccion',       null,   0, null],
+        ['Control de riego',          'produccion',       null,   0, null],
+        ['Control sanitario',         'produccion',       null,   0, null],
+        // Cosecha y empaque — rubro se calcula por cultivo
+        ['Cosecha',                   'cosecha_empaque',  null,   1, 'cajon'],
+        ['Empaque',                   'cosecha_empaque',  null,   0, null],
+        // Generales — rubro fijo
+        ['Mantenimiento general',     'general',          gralId, 0, null],
+        ['Limpieza de galpones',      'general',          gralId, 0, null],
+      ];
+      const ins = db.prepare("INSERT INTO pa_tareas_tipos (nombre, tipo_labor, rubro_contable_id, es_destajo, unidad_destajo) VALUES (?,?,?,?,?)");
+      for (const [n, t, r, d, u] of tareas) ins.run(n, t, r, d, u);
+      console.log(`[PA] ${tareas.length} tipos de tarea creados`);
+    }
+  } catch(e) { console.error('[PA] Error seed tareas:', e.message); }
+})();
+
 export { db };
 export default db;

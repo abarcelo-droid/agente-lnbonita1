@@ -156,6 +156,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   <div class="ni" data-sec="pa-lotes"><span class="dot db"></span>Fincas y Lotes</div>
   <div class="ni" data-sec="pa-scout"><span class="dot de"></span>Scout — Campo</div>
   <div class="ni" data-sec="pa-combustible"><span class="dot da"></span>⛽ Combustible</div>
+  <div class="ni" data-sec="pa-personal"><span class="dot db"></span>👷 Personal</div>
   <a href="/scout" class="ni" style="color:inherit;text-decoration:none;display:block;font-weight:600" title="Abrir Scout móvil en esta pestaña">
     <span class="dot da"></span>📱 Abrir Scout móvil
   </a>
@@ -1494,6 +1495,196 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       <button class="btn bo" onclick="document.getElementById('mb-cb-aj').classList.remove('on')">Cancelar</button>
       <button class="btn bb" onclick="cbGuardarAjuste()">Registrar ajuste</button>
     </div>
+  </div>
+</div>
+
+<!-- ─── PA PERSONAL ───────────────────────────────────────────── -->
+<div class="sec" id="sec-pa-personal">
+  <div class="ph">
+    <div><div class="ph-t">👷 Personal / Mano de Obra</div><div class="ph-s">Cuadrillas, trabajadores y valorización de partes</div></div>
+    <div style="display:flex;gap:8px">
+      <button class="btn bb" onclick="ppAbrirTrabajador()">+ Trabajador</button>
+      <button class="btn bo" onclick="ppAbrirCuadrilla()">+ Cuadrilla</button>
+      <button class="btn bo" onclick="ppAbrirTarea()">+ Tarea</button>
+    </div>
+  </div>
+
+  <style>
+    .pp-subtab.on { color: var(--burg); border-bottom-color: var(--burg) !important; }
+    .pp-sub { display:none; }
+    .pp-sub.on { display:block; }
+  </style>
+
+  <!-- Sub-tabs -->
+  <div style="display:flex;gap:2px;border-bottom:1px solid var(--bor);margin-bottom:20px;flex-wrap:wrap">
+    <div class="pp-subtab on" data-sub="valorizar" onclick="ppShowSub('valorizar')" style="padding:10px 16px;cursor:pointer;font-size:13px;font-weight:600;border-bottom:2px solid transparent">💰 Por valorizar <span id="pp-badge-val" style="background:var(--err);color:#fff;border-radius:10px;padding:1px 7px;font-size:10px;margin-left:6px"></span></div>
+    <div class="pp-subtab" data-sub="partes" onclick="ppShowSub('partes')" style="padding:10px 16px;cursor:pointer;font-size:13px;font-weight:600;border-bottom:2px solid transparent">📋 Partes</div>
+    <div class="pp-subtab" data-sub="trabajadores" onclick="ppShowSub('trabajadores')" style="padding:10px 16px;cursor:pointer;font-size:13px;font-weight:600;border-bottom:2px solid transparent">👥 Trabajadores</div>
+    <div class="pp-subtab" data-sub="cuadrillas" onclick="ppShowSub('cuadrillas')" style="padding:10px 16px;cursor:pointer;font-size:13px;font-weight:600;border-bottom:2px solid transparent">🚜 Cuadrillas</div>
+    <div class="pp-subtab" data-sub="tareas" onclick="ppShowSub('tareas')" style="padding:10px 16px;cursor:pointer;font-size:13px;font-weight:600;border-bottom:2px solid transparent">✅ Tareas</div>
+    <div class="pp-subtab" data-sub="rubros" onclick="ppShowSub('rubros')" style="padding:10px 16px;cursor:pointer;font-size:13px;font-weight:600;border-bottom:2px solid transparent">📊 Rubros</div>
+  </div>
+
+  <!-- Por valorizar -->
+  <div class="pp-sub on" id="pp-sub-valorizar">
+    <div id="pp-dash-stats" style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:20px"></div>
+    <div style="font-size:13px;font-weight:700;margin-bottom:10px">Partes pendientes de valorización</div>
+    <div class="tw"><table>
+      <thead><tr><th>Fecha</th><th>Lote</th><th>Tarea</th><th>Modo</th><th>Cuadrilla</th><th>Horas / Cant.</th><th>Cargado por</th><th></th></tr></thead>
+      <tbody id="pp-val-tbody"></tbody>
+    </table></div>
+  </div>
+
+  <!-- Partes -->
+  <div class="pp-sub" id="pp-sub-partes">
+    <div style="display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap">
+      <select id="pp-filt-estado" onchange="ppLoadPartes()" style="padding:6px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg)">
+        <option value="">Todos los estados</option>
+        <option value="pendiente_valorizar">Pendientes</option>
+        <option value="valorizado">Valorizados</option>
+        <option value="anulado">Anulados</option>
+      </select>
+      <select id="pp-filt-lote" onchange="ppLoadPartes()" style="padding:6px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg)">
+        <option value="">Todos los lotes</option>
+      </select>
+    </div>
+    <div class="tw"><table>
+      <thead><tr><th>Fecha</th><th>Lote</th><th>Tarea</th><th>Cuadrilla</th><th>Cant / Horas</th><th>Monto</th><th>Rubro</th><th>Estado</th><th></th></tr></thead>
+      <tbody id="pp-partes-tbody"></tbody>
+    </table></div>
+  </div>
+
+  <!-- Trabajadores -->
+  <div class="pp-sub" id="pp-sub-trabajadores">
+    <div class="tw"><table>
+      <thead><tr><th>Nombre</th><th>DNI</th><th>Cuadrilla</th><th>Tipo</th><th>Jornal base</th><th>Estado</th><th></th></tr></thead>
+      <tbody id="pp-trab-tbody"></tbody>
+    </table></div>
+  </div>
+
+  <!-- Cuadrillas -->
+  <div class="pp-sub" id="pp-sub-cuadrillas">
+    <div class="tw"><table>
+      <thead><tr><th>Nombre</th><th>Tipo</th><th>Capataz</th><th>Integrantes</th><th>Estado</th><th></th></tr></thead>
+      <tbody id="pp-cuad-tbody"></tbody>
+    </table></div>
+  </div>
+
+  <!-- Tareas -->
+  <div class="pp-sub" id="pp-sub-tareas">
+    <div class="tw"><table>
+      <thead><tr><th>Nombre</th><th>Tipo labor</th><th>Rubro fijo</th><th>Destajo</th><th>Unidad</th><th></th></tr></thead>
+      <tbody id="pp-tareas-tbody"></tbody>
+    </table></div>
+  </div>
+
+  <!-- Rubros -->
+  <div class="pp-sub" id="pp-sub-rubros">
+    <div class="tw"><table>
+      <thead><tr><th>Nombre (contabilidad)</th><th>Tipo</th><th>Cultivo</th><th>Estado</th></tr></thead>
+      <tbody id="pp-rub-tbody"></tbody>
+    </table></div>
+  </div>
+</div>
+
+<!-- MODAL TRABAJADOR -->
+<div class="mb" id="mb-pp-trab">
+  <div class="mbox" style="width:520px">
+    <div class="mhd"><div class="mht" id="mb-pp-trab-tit">Nuevo trabajador</div><button class="mcl" onclick="document.getElementById('mb-pp-trab').classList.remove('on')">×</button></div>
+    <div class="fg">
+      <div class="fl"><label>Nombre *</label><input id="pp-trab-nombre"></div>
+      <div class="fl"><label>DNI</label><input id="pp-trab-dni"></div>
+      <div class="fl"><label>Cuadrilla habitual</label>
+        <select id="pp-trab-cuadrilla"><option value="">— Sin cuadrilla —</option></select>
+      </div>
+      <div class="fl"><label>Tipo relación</label>
+        <select id="pp-trab-relacion">
+          <option value="fijo">Fijo (empleado)</option>
+          <option value="contratista">Contratista</option>
+        </select>
+      </div>
+      <div class="fl"><label>Jornal base</label><input type="number" step="0.01" min="0" id="pp-trab-jornal" value="0"></div>
+      <div class="fl"><label>Unidad del jornal</label>
+        <select id="pp-trab-unidad">
+          <option value="dia">por día</option>
+          <option value="hora">por hora</option>
+          <option value="ha">por hectárea</option>
+          <option value="unidad">por unidad (destajo)</option>
+        </select>
+      </div>
+      <div class="fl" style="flex:1 1 100%"><label>Notas</label><textarea id="pp-trab-notas" rows="2"></textarea></div>
+    </div>
+    <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:14px">
+      <button class="btn bo" onclick="document.getElementById('mb-pp-trab').classList.remove('on')">Cancelar</button>
+      <button class="btn bb" onclick="ppGuardarTrabajador()">Guardar</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL CUADRILLA -->
+<div class="mb" id="mb-pp-cuad">
+  <div class="mbox" style="width:480px">
+    <div class="mhd"><div class="mht" id="mb-pp-cuad-tit">Nueva cuadrilla</div><button class="mcl" onclick="document.getElementById('mb-pp-cuad').classList.remove('on')">×</button></div>
+    <div class="fg">
+      <div class="fl" style="flex:1 1 100%"><label>Nombre *</label><input id="pp-cuad-nombre" placeholder="Ej: Cuadrilla Riego"></div>
+      <div class="fl"><label>Tipo</label>
+        <select id="pp-cuad-tipo">
+          <option value="fija">Fija</option>
+          <option value="pool">Pool (cosecha)</option>
+        </select>
+      </div>
+      <div class="fl"><label>Capataz</label>
+        <select id="pp-cuad-capataz"><option value="">— Ninguno —</option></select>
+      </div>
+      <div class="fl" style="flex:1 1 100%"><label>Notas</label><textarea id="pp-cuad-notas" rows="2"></textarea></div>
+    </div>
+    <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:14px">
+      <button class="btn bo" onclick="document.getElementById('mb-pp-cuad').classList.remove('on')">Cancelar</button>
+      <button class="btn bb" onclick="ppGuardarCuadrilla()">Guardar</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL TAREA -->
+<div class="mb" id="mb-pp-tarea">
+  <div class="mbox" style="width:520px">
+    <div class="mhd"><div class="mht" id="mb-pp-tarea-tit">Nueva tarea</div><button class="mcl" onclick="document.getElementById('mb-pp-tarea').classList.remove('on')">×</button></div>
+    <div class="fg">
+      <div class="fl" style="flex:1 1 100%"><label>Nombre *</label><input id="pp-tarea-nombre"></div>
+      <div class="fl"><label>Tipo de labor</label>
+        <select id="pp-tarea-tipo" onchange="ppTareaOnTipo()">
+          <option value="produccion">Producción (rubro por cultivo)</option>
+          <option value="cosecha_empaque">Cosecha y empaque (rubro por cultivo)</option>
+          <option value="general">General (rubro fijo)</option>
+          <option value="otro">Otro (rubro fijo)</option>
+        </select>
+      </div>
+      <div class="fl" id="pp-tarea-rubro-row"><label>Rubro fijo (si aplica)</label>
+        <select id="pp-tarea-rubro"><option value="">— Automático por cultivo —</option></select>
+      </div>
+      <div class="fl"><label><input type="checkbox" id="pp-tarea-destajo" onchange="ppTareaOnDestajo()"> Es a destajo</label></div>
+      <div class="fl" id="pp-tarea-unidad-row" style="display:none"><label>Unidad destajo</label>
+        <select id="pp-tarea-unidad">
+          <option value="cajon">cajón</option>
+          <option value="kg">kg</option>
+          <option value="planta">planta</option>
+          <option value="ha">hectárea</option>
+          <option value="tacho">tacho</option>
+        </select>
+      </div>
+    </div>
+    <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:14px">
+      <button class="btn bo" onclick="document.getElementById('mb-pp-tarea').classList.remove('on')">Cancelar</button>
+      <button class="btn bb" onclick="ppGuardarTarea()">Guardar</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL VALORIZAR -->
+<div class="mb" id="mb-pp-val">
+  <div class="mbox" style="width:600px;max-height:90vh;overflow-y:auto">
+    <div class="mhd"><div class="mht">💰 Valorizar parte</div><button class="mcl" onclick="document.getElementById('mb-pp-val').classList.remove('on')">×</button></div>
+    <div id="mb-pp-val-body"></div>
   </div>
 </div>
 
@@ -6607,6 +6798,420 @@ function cbGuardarAjuste() {
 document.addEventListener('click', function(e) {
   var t = e.target.closest('[data-sec="pa-combustible"]');
   if (t) setTimeout(cbInit, 50);
+});
+
+// ═════════════════════════════════════════════════════════════════════
+// 👷 PERSONAL — Panel desktop
+// ═════════════════════════════════════════════════════════════════════
+var PP = {
+  trabajadores: [], cuadrillas: [], tareas: [], rubros: [], partes: [], lotes: [], usuarios: [],
+  editTrabajadorId: null, editCuadrillaId: null, editTareaId: null,
+  valorizandoParteId: null
+};
+
+function ppInit() {
+  ppCargarBase().then(function(){
+    ppShowSub('valorizar');
+  });
+}
+
+function ppCargarBase() {
+  return Promise.all([
+    paF('/api/pa/personal/trabajadores?incluir_inactivos=1').then(function(r){ PP.trabajadores = r.data || []; }),
+    paF('/api/pa/personal/cuadrillas').then(function(r){ PP.cuadrillas = r.data || []; }),
+    paF('/api/pa/personal/tareas-tipos').then(function(r){ PP.tareas = r.data || []; }),
+    paF('/api/pa/personal/rubros').then(function(r){ PP.rubros = r.data || []; }),
+    paF('/api/pa/lotes').then(function(r){ PP.lotes = r.data || []; }),
+    paF('/api/auth/usuarios').then(function(r){ PP.usuarios = r.data || []; })
+  ]);
+}
+
+function ppShowSub(sub) {
+  document.querySelectorAll('.pp-subtab').forEach(function(t){ t.classList.toggle('on', t.dataset.sub === sub); });
+  document.querySelectorAll('.pp-sub').forEach(function(s){ s.classList.remove('on'); });
+  document.getElementById('pp-sub-'+sub).classList.add('on');
+  if (sub === 'valorizar') ppLoadDashboard();
+  if (sub === 'partes') ppLoadPartes();
+  if (sub === 'trabajadores') ppRenderTrabajadores();
+  if (sub === 'cuadrillas') ppRenderCuadrillas();
+  if (sub === 'tareas') ppRenderTareas();
+  if (sub === 'rubros') ppRenderRubros();
+}
+
+function ppFmtARS(n) { return '$ ' + (n||0).toLocaleString('es-AR', {maximumFractionDigits:0}); }
+
+// ── Dashboard (Por valorizar) ──
+function ppLoadDashboard() {
+  paF('/api/pa/personal/dashboard').then(function(res){
+    if (!res.ok) return;
+    var d = res.data;
+    document.getElementById('pp-badge-val').textContent = d.pendientes || '';
+    document.getElementById('pp-badge-val').style.display = d.pendientes ? 'inline-block' : 'none';
+
+    var stats =
+      '<div class="cb-card"><div class="cb-stat-label">⏳ Pendientes de valorizar</div><div class="cb-stat-val" style="color:var(--err)">'+(d.pendientes||0)+'</div></div>' +
+      '<div class="cb-card"><div class="cb-stat-label">⚠️ Partes viejos (+14 días)</div><div class="cb-stat-val" style="color:var(--warn)">'+(d.partes_viejos||0)+'</div></div>' +
+      '<div class="cb-card"><div class="cb-stat-label">💰 Gasto MO del mes</div>' +
+      '<div style="margin-top:8px;font-size:12px">' +
+        (d.gasto_mes_rubro||[]).slice(0,4).map(function(g){ return '<div style="display:flex;justify-content:space-between;padding:2px 0"><span style="color:var(--mut);font-size:11px">'+g.nombre+'</span><strong>'+ppFmtARS(g.total)+'</strong></div>'; }).join('') +
+        (!d.gasto_mes_rubro || !d.gasto_mes_rubro.length ? '<div style="color:var(--mut);font-size:12px">Sin valorizaciones este mes</div>' : '') +
+      '</div></div>';
+    document.getElementById('pp-dash-stats').innerHTML = stats;
+
+    // Tabla de pendientes — viene de /partes con filtro
+    paF('/api/pa/personal/partes?estado=pendiente_valorizar&limit=50').then(function(r){
+      var tbody = document.getElementById('pp-val-tbody');
+      if (!r.data || !r.data.length) {
+        tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--mut);padding:20px">🎉 No hay partes pendientes de valorizar</td></tr>';
+        return;
+      }
+      tbody.innerHTML = r.data.map(function(p){
+        var cantHoras = p.modo_registro === 'cuadrilla'
+          ? (p.cant_trabajadores||'—') + ' × ' + (p.horas_total||'—') + 'h'
+          : '(individual)';
+        return '<tr><td>'+paFecha(p.fecha)+'</td><td>'+(p.lote_nombre||'—')+(p.lote_finca?'<div style="font-size:10px;color:var(--mut)">'+p.lote_finca+'</div>':'')+'</td><td>'+(p.tarea_nombre||'—')+'</td><td><span class="tag" style="font-size:10px">'+p.modo_registro+'</span></td><td>'+(p.cuadrilla_nombre||'—')+'</td><td>'+cantHoras+'</td><td>'+(p.cargado_por_nombre||'—')+'</td><td><button class="btn bb bs" onclick="ppAbrirValorizar('+p.id+')" style="padding:4px 12px;font-size:11px">💰 Valorizar</button></td></tr>';
+      }).join('');
+    });
+  });
+}
+
+// ── Partes (completo) ──
+function ppLoadPartes() {
+  var estado = document.getElementById('pp-filt-estado').value;
+  var lote = document.getElementById('pp-filt-lote').value;
+  var qs = [];
+  if (estado) qs.push('estado='+estado);
+  if (lote) qs.push('lote_id='+lote);
+
+  // Poblar filtro de lotes
+  var selL = document.getElementById('pp-filt-lote');
+  if (selL.options.length <= 1) {
+    selL.innerHTML = '<option value="">Todos los lotes</option>' +
+      PP.lotes.map(function(l){ return '<option value="'+l.id+'">'+l.nombre+'</option>'; }).join('');
+    if (lote) selL.value = lote;
+  }
+
+  paF('/api/pa/personal/partes?' + qs.join('&')).then(function(r){
+    var tbody = document.getElementById('pp-partes-tbody');
+    if (!r.data || !r.data.length) {
+      tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;color:var(--mut);padding:20px">Sin partes con esos filtros</td></tr>';
+      return;
+    }
+    tbody.innerHTML = r.data.map(function(p){
+      var est = p.estado==='pendiente_valorizar' ? '<span style="color:var(--err)">⏳ Pendiente</span>' :
+                p.estado==='valorizado' ? '<span style="color:var(--ok)">✓ Valorizado</span>' :
+                '<span style="color:var(--mut)">✕ Anulado</span>';
+      var monto = p.monto_total ? ppFmtARS(p.monto_total) : '—';
+      var rubro = p.rubro_final_nombre || '—';
+      var cantH = p.modo_registro === 'cuadrilla' ? (p.cant_trabajadores||'—')+' × '+(p.horas_total||'—')+'h' : '(individual)';
+      var acc = p.estado === 'pendiente_valorizar'
+        ? '<button class="btn bb bs" onclick="ppAbrirValorizar('+p.id+')" style="padding:3px 10px;font-size:11px">💰</button> <button class="btn bd bs" onclick="ppEliminarParte('+p.id+')" style="padding:3px 8px;font-size:11px">✕</button>'
+        : p.estado === 'valorizado'
+        ? '<button class="btn bo bs" onclick="ppAbrirValorizar('+p.id+')" style="padding:3px 10px;font-size:11px">Revalorizar</button> <button class="btn bd bs" onclick="ppAnularParte('+p.id+')" style="padding:3px 8px;font-size:11px">Anular</button>'
+        : '';
+      return '<tr><td>'+paFecha(p.fecha)+'</td><td>'+(p.lote_nombre||'—')+'</td><td>'+(p.tarea_nombre||'—')+'</td><td>'+(p.cuadrilla_nombre||'—')+'</td><td>'+cantH+'</td><td><strong>'+monto+'</strong></td><td style="font-size:11px">'+rubro+'</td><td>'+est+'</td><td style="white-space:nowrap">'+acc+'</td></tr>';
+    }).join('');
+  });
+}
+
+function ppEliminarParte(id) {
+  if (!confirm('¿Eliminar este parte pendiente?')) return;
+  paF('/api/pa/personal/partes/'+id, { method:'DELETE' }).then(function(r){
+    if (r.ok) { toast('Eliminado'); ppLoadPartes(); ppLoadDashboard(); }
+    else toast(r.error||'Error', 'er');
+  });
+}
+
+function ppAnularParte(id) {
+  if (!confirm('¿Anular este parte valorizado? Se revertirá el costo del lote.')) return;
+  paF('/api/pa/personal/partes/'+id+'/anular', { method:'POST' }).then(function(r){
+    if (r.ok) { toast('Anulado'); ppLoadPartes(); ppLoadDashboard(); }
+    else toast(r.error||'Error', 'er');
+  });
+}
+
+// ── Valorizar ──
+function ppAbrirValorizar(parteId) {
+  PP.valorizandoParteId = parteId;
+  paF('/api/pa/personal/partes/'+parteId).then(function(r){
+    if (!r.ok) return toast(r.error||'Error','er');
+    var p = r.data.parte;
+    var items = r.data.items;
+    var sug = r.data.rubro_sugerido;
+    var val = r.data.valorizacion;
+
+    // Calcular monto sugerido
+    var montoSugerido = 0;
+    var breakdown = '';
+    if (p.modo_registro === 'cuadrilla') {
+      // Estimación básica: sin info de trabajadores individuales, dejamos 0 y que lo complete
+      montoSugerido = val ? val.monto_total : 0;
+      breakdown = '<div style="background:var(--bg);padding:10px;border-radius:8px;margin:10px 0;font-size:12px;color:var(--mut)">Modo cuadrilla: <strong>'+(p.cant_trabajadores||0)+' personas × '+(p.horas_total||0)+' horas</strong>. Cargá el monto total que corresponde.</div>';
+    } else {
+      // Modo individual: intentar calcular con jornal_base de cada trabajador
+      var detalle = items.map(function(it){
+        var jornal = it.jornal_base || 0;
+        var base = 0;
+        if (it.unidad_jornal === 'unidad' && it.unidades_destajo) base = jornal * it.unidades_destajo;
+        else if (it.unidad_jornal === 'hora' && it.horas) base = jornal * it.horas;
+        else if (it.unidad_jornal === 'dia') base = jornal;
+        montoSugerido += base;
+        return '<div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--bor);font-size:12px"><span>'+it.trabajador_nombre+' <span style="color:var(--mut)">('+(it.unidades_destajo||it.horas||'—')+' '+(it.unidad_jornal||'')+')</span></span><strong>'+ppFmtARS(base)+'</strong></div>';
+      }).join('');
+      breakdown = '<div style="background:var(--bg);padding:10px;border-radius:8px;margin:10px 0"><div style="font-size:11px;font-weight:700;color:var(--mut);margin-bottom:6px">CÁLCULO SUGERIDO</div>'+detalle+'</div>';
+    }
+
+    var rubroId = val ? val.rubro_contable_id : (sug ? sug.id : '');
+    var monto = val ? val.monto_total : montoSugerido;
+
+    var html =
+      '<div style="padding:10px 0 0">' +
+      '<div style="margin-bottom:10px"><strong>'+p.tarea_nombre+'</strong> — '+p.lote_nombre+(p.lote_finca?' · '+p.lote_finca:'')+'<br><span style="font-size:12px;color:var(--mut)">'+paFecha(p.fecha)+' · cargado por '+(p.cargado_por_nombre||'—')+'</span></div>' +
+      (p.observaciones ? '<div style="background:#fffbeb;border:1px solid #fde68a;padding:8px;border-radius:6px;font-size:12px;margin-bottom:10px">📝 '+p.observaciones+'</div>' : '') +
+      (p.foto_path ? '<div style="margin-bottom:10px"><a href="'+p.foto_path+'" target="_blank" style="color:var(--burg);font-size:12px">📷 Ver foto</a></div>' : '') +
+      breakdown +
+      '<div class="fg">' +
+        '<div class="fl" style="flex:1 1 45%"><label>Monto total *</label><input type="number" step="0.01" min="0" id="pp-val-monto" value="'+monto+'"></div>' +
+        '<div class="fl" style="flex:1 1 45%"><label>Rubro contable *</label>' +
+          '<select id="pp-val-rubro">' +
+            PP.rubros.map(function(r){ return '<option value="'+r.id+'"'+(r.id==rubroId?' selected':'')+'>'+r.nombre+'</option>'; }).join('') +
+          '</select>' +
+          (sug ? '<div style="font-size:11px;color:var(--ok);margin-top:4px">💡 Sugerido: '+sug.nombre+'</div>' : '') +
+        '</div>' +
+      '</div>' +
+      '<div style="display:flex;gap:10px;justify-content:flex-end;margin-top:14px">' +
+        '<button class="btn bo" onclick="document.getElementById(\'mb-pp-val\').classList.remove(\'on\')">Cancelar</button>' +
+        '<button class="btn bb" onclick="ppGuardarValorizar()">'+(val?'Actualizar':'Valorizar')+'</button>' +
+      '</div>' +
+      '</div>';
+    document.getElementById('mb-pp-val-body').innerHTML = html;
+    document.getElementById('mb-pp-val').classList.add('on');
+  });
+}
+
+function ppGuardarValorizar() {
+  var monto = parseFloat(document.getElementById('pp-val-monto').value);
+  var rubro = document.getElementById('pp-val-rubro').value;
+  if (isNaN(monto) || monto < 0) return toast('Monto inválido', 'er');
+  if (!rubro) return toast('Elegí un rubro', 'er');
+  paF('/api/pa/personal/partes/'+PP.valorizandoParteId+'/valorizar', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ monto_total: monto, rubro_contable_id: parseInt(rubro) })
+  }).then(function(r){
+    if (r.ok) {
+      toast('Valorizado ✓ — costo imputado al lote');
+      document.getElementById('mb-pp-val').classList.remove('on');
+      ppLoadDashboard();
+      ppLoadPartes();
+    } else toast(r.error||'Error', 'er');
+  });
+}
+
+// ── Trabajadores ──
+function ppRenderTrabajadores() {
+  var tb = document.getElementById('pp-trab-tbody');
+  if (!PP.trabajadores.length) {
+    tb.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--mut);padding:20px">Sin trabajadores. Agregá el primero con "+ Trabajador".</td></tr>';
+    return;
+  }
+  tb.innerHTML = PP.trabajadores.map(function(t){
+    var tipo = t.tipo_relacion === 'fijo' ? '<span class="tag" style="background:#dbeafe;color:#1e40af">Fijo</span>' : '<span class="tag" style="background:#fef3c7;color:#92400e">Contratista</span>';
+    var est = t.activo ? '<span style="color:var(--ok)">● Activo</span>' : '<span style="color:var(--mut)">○ Inactivo</span>';
+    var jornal = (t.jornal_base||0).toLocaleString('es-AR') + ' / ' + (t.unidad_jornal||'dia');
+    return '<tr><td><strong>'+t.nombre+'</strong></td><td>'+(t.dni||'—')+'</td><td>'+(t.cuadrilla_nombre||'—')+'</td><td>'+tipo+'</td><td>'+jornal+'</td><td>'+est+'</td><td><button class="btn bo bs" onclick="ppEditTrab('+t.id+')" style="padding:3px 10px;font-size:11px">Editar</button></td></tr>';
+  }).join('');
+}
+
+function ppAbrirTrabajador() {
+  PP.editTrabajadorId = null;
+  document.getElementById('mb-pp-trab-tit').textContent = 'Nuevo trabajador';
+  document.getElementById('pp-trab-nombre').value = '';
+  document.getElementById('pp-trab-dni').value = '';
+  document.getElementById('pp-trab-cuadrilla').innerHTML = '<option value="">— Sin cuadrilla —</option>' + PP.cuadrillas.map(function(c){ return '<option value="'+c.id+'">'+c.nombre+'</option>'; }).join('');
+  document.getElementById('pp-trab-relacion').value = 'fijo';
+  document.getElementById('pp-trab-jornal').value = 0;
+  document.getElementById('pp-trab-unidad').value = 'dia';
+  document.getElementById('pp-trab-notas').value = '';
+  document.getElementById('mb-pp-trab').classList.add('on');
+}
+
+function ppEditTrab(id) {
+  var t = PP.trabajadores.find(function(x){return x.id===id;});
+  if (!t) return;
+  PP.editTrabajadorId = id;
+  document.getElementById('mb-pp-trab-tit').textContent = 'Editar: ' + t.nombre;
+  document.getElementById('pp-trab-nombre').value = t.nombre;
+  document.getElementById('pp-trab-dni').value = t.dni || '';
+  document.getElementById('pp-trab-cuadrilla').innerHTML = '<option value="">— Sin cuadrilla —</option>' + PP.cuadrillas.map(function(c){ return '<option value="'+c.id+'"'+(c.id==t.cuadrilla_habitual_id?' selected':'')+'>'+c.nombre+'</option>'; }).join('');
+  document.getElementById('pp-trab-relacion').value = t.tipo_relacion;
+  document.getElementById('pp-trab-jornal').value = t.jornal_base || 0;
+  document.getElementById('pp-trab-unidad').value = t.unidad_jornal || 'dia';
+  document.getElementById('pp-trab-notas').value = t.notas || '';
+  document.getElementById('mb-pp-trab').classList.add('on');
+}
+
+function ppGuardarTrabajador() {
+  var body = {
+    nombre: document.getElementById('pp-trab-nombre').value.trim(),
+    dni: document.getElementById('pp-trab-dni').value.trim() || null,
+    cuadrilla_habitual_id: document.getElementById('pp-trab-cuadrilla').value ? parseInt(document.getElementById('pp-trab-cuadrilla').value) : null,
+    tipo_relacion: document.getElementById('pp-trab-relacion').value,
+    jornal_base: parseFloat(document.getElementById('pp-trab-jornal').value) || 0,
+    unidad_jornal: document.getElementById('pp-trab-unidad').value,
+    notas: document.getElementById('pp-trab-notas').value.trim() || null
+  };
+  if (!body.nombre) return toast('Nombre requerido', 'er');
+  var url = PP.editTrabajadorId ? '/api/pa/personal/trabajadores/'+PP.editTrabajadorId : '/api/pa/personal/trabajadores';
+  var method = PP.editTrabajadorId ? 'PATCH' : 'POST';
+  paF(url, { method:method, headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) }).then(function(r){
+    if (r.ok) { toast('Guardado'); document.getElementById('mb-pp-trab').classList.remove('on'); ppCargarBase().then(ppRenderTrabajadores); }
+    else toast(r.error||'Error', 'er');
+  });
+}
+
+// ── Cuadrillas ──
+function ppRenderCuadrillas() {
+  var tb = document.getElementById('pp-cuad-tbody');
+  if (!PP.cuadrillas.length) {
+    tb.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--mut);padding:20px">Sin cuadrillas. Agregá la primera con "+ Cuadrilla".</td></tr>';
+    return;
+  }
+  tb.innerHTML = PP.cuadrillas.map(function(c){
+    var tipo = c.tipo === 'fija' ? '<span class="tag" style="background:#dbeafe;color:#1e40af">Fija</span>' : '<span class="tag" style="background:#fef3c7;color:#92400e">Pool</span>';
+    var est = c.activo ? '<span style="color:var(--ok)">● Activa</span>' : '<span style="color:var(--mut)">○ Inactiva</span>';
+    return '<tr><td><strong>'+c.nombre+'</strong></td><td>'+tipo+'</td><td>'+(c.capataz_nombre||'—')+'</td><td>'+(c.cantidad||0)+'</td><td>'+est+'</td><td><button class="btn bo bs" onclick="ppEditCuad('+c.id+')" style="padding:3px 10px;font-size:11px">Editar</button></td></tr>';
+  }).join('');
+}
+
+function ppAbrirCuadrilla() {
+  PP.editCuadrillaId = null;
+  document.getElementById('mb-pp-cuad-tit').textContent = 'Nueva cuadrilla';
+  document.getElementById('pp-cuad-nombre').value = '';
+  document.getElementById('pp-cuad-tipo').value = 'fija';
+  document.getElementById('pp-cuad-capataz').innerHTML = '<option value="">— Ninguno —</option>' + PP.usuarios.map(function(u){ return '<option value="'+u.id+'">'+u.nombre+'</option>'; }).join('');
+  document.getElementById('pp-cuad-notas').value = '';
+  document.getElementById('mb-pp-cuad').classList.add('on');
+}
+
+function ppEditCuad(id) {
+  var c = PP.cuadrillas.find(function(x){return x.id===id;});
+  if (!c) return;
+  PP.editCuadrillaId = id;
+  document.getElementById('mb-pp-cuad-tit').textContent = 'Editar: ' + c.nombre;
+  document.getElementById('pp-cuad-nombre').value = c.nombre;
+  document.getElementById('pp-cuad-tipo').value = c.tipo;
+  document.getElementById('pp-cuad-capataz').innerHTML = '<option value="">— Ninguno —</option>' + PP.usuarios.map(function(u){ return '<option value="'+u.id+'"'+(u.id==c.capataz_id?' selected':'')+'>'+u.nombre+'</option>'; }).join('');
+  document.getElementById('pp-cuad-notas').value = c.notas || '';
+  document.getElementById('mb-pp-cuad').classList.add('on');
+}
+
+function ppGuardarCuadrilla() {
+  var body = {
+    nombre: document.getElementById('pp-cuad-nombre').value.trim(),
+    tipo: document.getElementById('pp-cuad-tipo').value,
+    capataz_id: document.getElementById('pp-cuad-capataz').value ? parseInt(document.getElementById('pp-cuad-capataz').value) : null,
+    notas: document.getElementById('pp-cuad-notas').value.trim() || null
+  };
+  if (!body.nombre) return toast('Nombre requerido', 'er');
+  var url = PP.editCuadrillaId ? '/api/pa/personal/cuadrillas/'+PP.editCuadrillaId : '/api/pa/personal/cuadrillas';
+  var method = PP.editCuadrillaId ? 'PATCH' : 'POST';
+  paF(url, { method:method, headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) }).then(function(r){
+    if (r.ok) { toast('Guardado'); document.getElementById('mb-pp-cuad').classList.remove('on'); ppCargarBase().then(ppRenderCuadrillas); }
+    else toast(r.error||'Error', 'er');
+  });
+}
+
+// ── Tareas ──
+function ppRenderTareas() {
+  var tb = document.getElementById('pp-tareas-tbody');
+  if (!PP.tareas.length) {
+    tb.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--mut);padding:20px">Sin tareas.</td></tr>';
+    return;
+  }
+  tb.innerHTML = PP.tareas.map(function(t){
+    var tipo = t.tipo_labor.replace('_',' ');
+    var destajo = t.es_destajo ? '✓ ('+(t.unidad_destajo||'')+')' : '—';
+    var rubro = t.rubro_fijo_nombre || '<span style="color:var(--mut);font-size:11px">automático por cultivo</span>';
+    return '<tr><td><strong>'+t.nombre+'</strong></td><td>'+tipo+'</td><td style="font-size:11px">'+rubro+'</td><td>'+destajo+'</td><td>'+(t.unidad_destajo||'—')+'</td><td><button class="btn bo bs" onclick="ppEditTarea('+t.id+')" style="padding:3px 10px;font-size:11px">Editar</button></td></tr>';
+  }).join('');
+}
+
+function ppTareaOnTipo() {
+  var tipo = document.getElementById('pp-tarea-tipo').value;
+  var row = document.getElementById('pp-tarea-rubro-row');
+  var sel = document.getElementById('pp-tarea-rubro');
+  if (tipo === 'general' || tipo === 'otro') {
+    row.style.display = 'block';
+    sel.innerHTML = '<option value="">— Elegí rubro —</option>' + PP.rubros.filter(function(r){return r.tipo_labor===tipo;}).map(function(r){ return '<option value="'+r.id+'">'+r.nombre+'</option>'; }).join('');
+  } else {
+    row.style.display = 'block';
+    sel.innerHTML = '<option value="">— Automático por cultivo del lote —</option>';
+  }
+}
+
+function ppTareaOnDestajo() {
+  var chk = document.getElementById('pp-tarea-destajo').checked;
+  document.getElementById('pp-tarea-unidad-row').style.display = chk ? 'block' : 'none';
+}
+
+function ppAbrirTarea() {
+  PP.editTareaId = null;
+  document.getElementById('mb-pp-tarea-tit').textContent = 'Nueva tarea';
+  document.getElementById('pp-tarea-nombre').value = '';
+  document.getElementById('pp-tarea-tipo').value = 'produccion';
+  document.getElementById('pp-tarea-destajo').checked = false;
+  document.getElementById('pp-tarea-unidad').value = 'cajon';
+  ppTareaOnTipo();
+  ppTareaOnDestajo();
+  document.getElementById('mb-pp-tarea').classList.add('on');
+}
+
+function ppEditTarea(id) {
+  var t = PP.tareas.find(function(x){return x.id===id;});
+  if (!t) return;
+  PP.editTareaId = id;
+  document.getElementById('mb-pp-tarea-tit').textContent = 'Editar: ' + t.nombre;
+  document.getElementById('pp-tarea-nombre').value = t.nombre;
+  document.getElementById('pp-tarea-tipo').value = t.tipo_labor;
+  document.getElementById('pp-tarea-destajo').checked = !!t.es_destajo;
+  document.getElementById('pp-tarea-unidad').value = t.unidad_destajo || 'cajon';
+  ppTareaOnTipo();
+  ppTareaOnDestajo();
+  if (t.rubro_contable_id) setTimeout(function(){ document.getElementById('pp-tarea-rubro').value = t.rubro_contable_id; }, 50);
+  document.getElementById('mb-pp-tarea').classList.add('on');
+}
+
+function ppGuardarTarea() {
+  var body = {
+    nombre: document.getElementById('pp-tarea-nombre').value.trim(),
+    tipo_labor: document.getElementById('pp-tarea-tipo').value,
+    rubro_contable_id: document.getElementById('pp-tarea-rubro').value ? parseInt(document.getElementById('pp-tarea-rubro').value) : null,
+    es_destajo: document.getElementById('pp-tarea-destajo').checked,
+    unidad_destajo: document.getElementById('pp-tarea-destajo').checked ? document.getElementById('pp-tarea-unidad').value : null
+  };
+  if (!body.nombre) return toast('Nombre requerido', 'er');
+  var url = PP.editTareaId ? '/api/pa/personal/tareas-tipos/'+PP.editTareaId : '/api/pa/personal/tareas-tipos';
+  var method = PP.editTareaId ? 'PATCH' : 'POST';
+  paF(url, { method:method, headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) }).then(function(r){
+    if (r.ok) { toast('Guardado'); document.getElementById('mb-pp-tarea').classList.remove('on'); ppCargarBase().then(ppRenderTareas); }
+    else toast(r.error||'Error', 'er');
+  });
+}
+
+// ── Rubros ──
+function ppRenderRubros() {
+  var tb = document.getElementById('pp-rub-tbody');
+  if (!PP.rubros.length) { tb.innerHTML = '<tr><td colspan="4">Sin rubros</td></tr>'; return; }
+  tb.innerHTML = PP.rubros.map(function(r){
+    var est = r.activo ? '<span style="color:var(--ok)">● Activo</span>' : '<span style="color:var(--mut)">○ Inactivo</span>';
+    return '<tr><td><strong style="font-family:monospace;font-size:12px">'+r.nombre+'</strong></td><td>'+r.tipo_labor.replace('_',' ')+'</td><td>'+(r.cultivo||'—')+'</td><td>'+est+'</td></tr>';
+  }).join('');
+}
+
+// Hook al clickear en el item del sidebar Personal
+document.addEventListener('click', function(e) {
+  var t = e.target.closest('[data-sec="pa-personal"]');
+  if (t) setTimeout(ppInit, 50);
 });
 
 </script>

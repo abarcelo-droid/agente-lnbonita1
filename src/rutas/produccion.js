@@ -1220,4 +1220,538 @@ Solo devolvé el JSON, sin texto adicional.` }
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
+// ═════════════════════════════════════════════════════════════════════════
+// PERSONAL / MANO DE OBRA
+// ═════════════════════════════════════════════════════════════════════════
+
+// ── Rubros contables ───────────────────────────────────────────────────────
+router.get('/personal/rubros', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const data = db.prepare("SELECT * FROM pa_rubros_contables WHERE activo=1 ORDER BY nombre").all();
+    res.json({ ok: true, data });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+router.post('/personal/rubros', requireAuth, (req, res) => {
+  const db = getDb();
+  const { nombre, tipo_labor, cultivo, notas } = req.body;
+  if (!nombre || !tipo_labor) return res.status(400).json({ ok: false, error: 'nombre y tipo_labor requeridos' });
+  try {
+    const r = db.prepare("INSERT INTO pa_rubros_contables (nombre, tipo_labor, cultivo, notas) VALUES (?,?,?,?)")
+      .run(nombre, tipo_labor, cultivo || null, notas || null);
+    res.json({ ok: true, id: r.lastInsertRowid });
+  } catch(e) {
+    if (e.message.includes('UNIQUE')) return res.status(400).json({ ok: false, error: 'Ya existe un rubro con ese nombre' });
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+router.patch('/personal/rubros/:id', requireAuth, (req, res) => {
+  const db = getDb();
+  const { nombre, tipo_labor, cultivo, activo, notas } = req.body;
+  try {
+    const c = db.prepare("SELECT * FROM pa_rubros_contables WHERE id=?").get(req.params.id);
+    if (!c) return res.status(404).json({ ok: false, error: 'Rubro no encontrado' });
+    db.prepare("UPDATE pa_rubros_contables SET nombre=?, tipo_labor=?, cultivo=?, activo=?, notas=? WHERE id=?")
+      .run(nombre || c.nombre, tipo_labor || c.tipo_labor,
+           cultivo !== undefined ? cultivo : c.cultivo,
+           activo !== undefined ? (activo ? 1 : 0) : c.activo,
+           notas !== undefined ? notas : c.notas,
+           req.params.id);
+    res.json({ ok: true });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// ── Cuadrillas ─────────────────────────────────────────────────────────────
+router.get('/personal/cuadrillas', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const data = db.prepare(`
+      SELECT c.*, u.nombre as capataz_nombre,
+             (SELECT COUNT(*) FROM pa_trabajadores WHERE cuadrilla_habitual_id = c.id AND activo=1) as cantidad
+      FROM pa_cuadrillas c
+      LEFT JOIN usuarios u ON u.id = c.capataz_id
+      WHERE c.activo=1 ORDER BY c.tipo, c.nombre
+    `).all();
+    res.json({ ok: true, data });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+router.post('/personal/cuadrillas', requireAuth, (req, res) => {
+  const db = getDb();
+  const { nombre, capataz_id, tipo, notas } = req.body;
+  if (!nombre) return res.status(400).json({ ok: false, error: 'nombre requerido' });
+  try {
+    const r = db.prepare("INSERT INTO pa_cuadrillas (nombre, capataz_id, tipo, notas) VALUES (?,?,?,?)")
+      .run(nombre, capataz_id || null, tipo || 'fija', notas || null);
+    res.json({ ok: true, id: r.lastInsertRowid });
+  } catch(e) {
+    if (e.message.includes('UNIQUE')) return res.status(400).json({ ok: false, error: 'Ya existe una cuadrilla con ese nombre' });
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+router.patch('/personal/cuadrillas/:id', requireAuth, (req, res) => {
+  const db = getDb();
+  const { nombre, capataz_id, tipo, activo, notas } = req.body;
+  try {
+    const c = db.prepare("SELECT * FROM pa_cuadrillas WHERE id=?").get(req.params.id);
+    if (!c) return res.status(404).json({ ok: false, error: 'Cuadrilla no encontrada' });
+    db.prepare("UPDATE pa_cuadrillas SET nombre=?, capataz_id=?, tipo=?, activo=?, notas=? WHERE id=?")
+      .run(nombre || c.nombre,
+           capataz_id !== undefined ? capataz_id : c.capataz_id,
+           tipo || c.tipo,
+           activo !== undefined ? (activo ? 1 : 0) : c.activo,
+           notas !== undefined ? notas : c.notas,
+           req.params.id);
+    res.json({ ok: true });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// ── Trabajadores ───────────────────────────────────────────────────────────
+router.get('/personal/trabajadores', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const { cuadrilla_id, tipo_relacion, incluir_inactivos } = req.query;
+    let q = `SELECT t.*, c.nombre as cuadrilla_nombre
+             FROM pa_trabajadores t
+             LEFT JOIN pa_cuadrillas c ON c.id = t.cuadrilla_habitual_id
+             WHERE 1=1`;
+    const params = [];
+    if (!incluir_inactivos) q += " AND t.activo=1";
+    if (cuadrilla_id) { q += " AND t.cuadrilla_habitual_id=?"; params.push(cuadrilla_id); }
+    if (tipo_relacion) { q += " AND t.tipo_relacion=?"; params.push(tipo_relacion); }
+    q += " ORDER BY t.nombre";
+    res.json({ ok: true, data: db.prepare(q).all(...params) });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+router.post('/personal/trabajadores', requireAuth, (req, res) => {
+  const db = getDb();
+  const { nombre, dni, cuadrilla_habitual_id, tipo_relacion, jornal_base, unidad_jornal, notas } = req.body;
+  if (!nombre) return res.status(400).json({ ok: false, error: 'nombre requerido' });
+  try {
+    const r = db.prepare(`INSERT INTO pa_trabajadores
+        (nombre, dni, cuadrilla_habitual_id, tipo_relacion, jornal_base, unidad_jornal, notas)
+        VALUES (?,?,?,?,?,?,?)`)
+      .run(nombre, dni || null, cuadrilla_habitual_id || null,
+           tipo_relacion || 'fijo',
+           Number(jornal_base) || 0,
+           unidad_jornal || 'dia',
+           notas || null);
+    res.json({ ok: true, id: r.lastInsertRowid });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+router.patch('/personal/trabajadores/:id', requireAuth, (req, res) => {
+  const db = getDb();
+  const { nombre, dni, cuadrilla_habitual_id, tipo_relacion, jornal_base, unidad_jornal, activo, notas } = req.body;
+  try {
+    const c = db.prepare("SELECT * FROM pa_trabajadores WHERE id=?").get(req.params.id);
+    if (!c) return res.status(404).json({ ok: false, error: 'Trabajador no encontrado' });
+    db.prepare(`UPDATE pa_trabajadores SET
+        nombre=?, dni=?, cuadrilla_habitual_id=?, tipo_relacion=?,
+        jornal_base=?, unidad_jornal=?, activo=?, notas=?
+        WHERE id=?`)
+      .run(nombre || c.nombre,
+           dni !== undefined ? dni : c.dni,
+           cuadrilla_habitual_id !== undefined ? cuadrilla_habitual_id : c.cuadrilla_habitual_id,
+           tipo_relacion || c.tipo_relacion,
+           jornal_base !== undefined ? Number(jornal_base) : c.jornal_base,
+           unidad_jornal || c.unidad_jornal,
+           activo !== undefined ? (activo ? 1 : 0) : c.activo,
+           notas !== undefined ? notas : c.notas,
+           req.params.id);
+    res.json({ ok: true });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// ── Tipos de tarea ─────────────────────────────────────────────────────────
+router.get('/personal/tareas-tipos', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const data = db.prepare(`
+      SELECT t.*, r.nombre as rubro_fijo_nombre
+      FROM pa_tareas_tipos t
+      LEFT JOIN pa_rubros_contables r ON r.id = t.rubro_contable_id
+      WHERE t.activo=1 ORDER BY t.tipo_labor, t.nombre
+    `).all();
+    res.json({ ok: true, data });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+router.post('/personal/tareas-tipos', requireAuth, (req, res) => {
+  const db = getDb();
+  const { nombre, tipo_labor, rubro_contable_id, es_destajo, unidad_destajo } = req.body;
+  if (!nombre || !tipo_labor) return res.status(400).json({ ok: false, error: 'nombre y tipo_labor requeridos' });
+  try {
+    const r = db.prepare(`INSERT INTO pa_tareas_tipos
+        (nombre, tipo_labor, rubro_contable_id, es_destajo, unidad_destajo)
+        VALUES (?,?,?,?,?)`)
+      .run(nombre, tipo_labor,
+           rubro_contable_id || null,
+           es_destajo ? 1 : 0,
+           unidad_destajo || null);
+    res.json({ ok: true, id: r.lastInsertRowid });
+  } catch(e) {
+    if (e.message.includes('UNIQUE')) return res.status(400).json({ ok: false, error: 'Ya existe una tarea con ese nombre' });
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+router.patch('/personal/tareas-tipos/:id', requireAuth, (req, res) => {
+  const db = getDb();
+  const { nombre, tipo_labor, rubro_contable_id, es_destajo, unidad_destajo, activo } = req.body;
+  try {
+    const c = db.prepare("SELECT * FROM pa_tareas_tipos WHERE id=?").get(req.params.id);
+    if (!c) return res.status(404).json({ ok: false, error: 'Tarea no encontrada' });
+    db.prepare(`UPDATE pa_tareas_tipos SET nombre=?, tipo_labor=?, rubro_contable_id=?, es_destajo=?, unidad_destajo=?, activo=? WHERE id=?`)
+      .run(nombre || c.nombre, tipo_labor || c.tipo_labor,
+           rubro_contable_id !== undefined ? rubro_contable_id : c.rubro_contable_id,
+           es_destajo !== undefined ? (es_destajo ? 1 : 0) : c.es_destajo,
+           unidad_destajo !== undefined ? unidad_destajo : c.unidad_destajo,
+           activo !== undefined ? (activo ? 1 : 0) : c.activo,
+           req.params.id);
+    res.json({ ok: true });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// ── Sugerir rubro — cruza tipo_labor de la tarea con cultivo del lote ─────
+function sugerirRubroContable(db, loteId, tareaTipoId) {
+  const tarea = db.prepare("SELECT * FROM pa_tareas_tipos WHERE id=?").get(tareaTipoId);
+  if (!tarea) return null;
+
+  // Si la tarea tiene rubro fijo, usarlo directo
+  if (tarea.rubro_contable_id) {
+    return db.prepare("SELECT * FROM pa_rubros_contables WHERE id=?").get(tarea.rubro_contable_id);
+  }
+
+  // Si el tipo_labor es "general" o "otro" sin rubro fijo, fallback a GENERALES
+  if (tarea.tipo_labor === 'general' || tarea.tipo_labor === 'otro') {
+    return db.prepare("SELECT * FROM pa_rubros_contables WHERE nombre='G -MO GENERALES' OR tipo_labor='general' LIMIT 1").get();
+  }
+
+  // Tipos produccion / cosecha_empaque → buscar por cultivo del lote en campaña activa
+  const camp = db.prepare("SELECT nombre FROM pa_campañas WHERE activa=1 LIMIT 1").get();
+  if (!camp) return null;
+
+  const cult = db.prepare(`
+    SELECT cultivo FROM pa_cultivos_lote
+    WHERE lote_id=? AND campaña=?
+    LIMIT 1
+  `).get(loteId, camp.nombre);
+
+  if (!cult || !cult.cultivo) {
+    // Sin cultivo asignado → fallback a rubro general del tipo_labor
+    return db.prepare("SELECT * FROM pa_rubros_contables WHERE tipo_labor=? AND cultivo IS NULL LIMIT 1").get(tarea.tipo_labor);
+  }
+
+  // Normalizar nombre del cultivo a las keys del catálogo de rubros
+  const cultNorm = String(cult.cultivo).toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')  // quitar acentos
+    .replace(/ó|o/g, 'o');
+  // Matcheo flexible: contiene el key del rubro
+  const rubros = db.prepare("SELECT * FROM pa_rubros_contables WHERE tipo_labor=? AND cultivo IS NOT NULL").all(tarea.tipo_labor);
+  let match = rubros.find(r => cultNorm.includes(r.cultivo));
+  if (!match) {
+    // Fallback: rubro sin cultivo (ej GENERAL de ese tipo_labor)
+    match = db.prepare("SELECT * FROM pa_rubros_contables WHERE tipo_labor=? AND cultivo IS NULL LIMIT 1").get(tarea.tipo_labor);
+  }
+  return match || db.prepare("SELECT * FROM pa_rubros_contables WHERE nombre LIKE '%GENERALES%' LIMIT 1").get();
+}
+
+router.get('/personal/sugerir-rubro', requireAuth, (req, res) => {
+  const db = getDb();
+  const { lote_id, tarea_tipo_id } = req.query;
+  if (!lote_id || !tarea_tipo_id) return res.status(400).json({ ok: false, error: 'lote_id y tarea_tipo_id requeridos' });
+  try {
+    const rubro = sugerirRubroContable(db, parseInt(lote_id), parseInt(tarea_tipo_id));
+    res.json({ ok: true, data: rubro });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// ── Partes de trabajo ──────────────────────────────────────────────────────
+router.get('/personal/partes', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const { estado, lote_id, cuadrilla_id, desde, hasta, limit } = req.query;
+    let q = `
+      SELECT p.*,
+        c.nombre as cuadrilla_nombre,
+        l.nombre as lote_nombre, l.finca as lote_finca,
+        t.nombre as tarea_nombre, t.tipo_labor, t.es_destajo, t.unidad_destajo,
+        u.nombre as cargado_por_nombre,
+        v.monto_total, v.rubro_contable_id as rubro_final_id,
+        r.nombre as rubro_final_nombre
+      FROM pa_partes_trabajo p
+      LEFT JOIN pa_cuadrillas c ON c.id = p.cuadrilla_id
+      LEFT JOIN pa_lotes l ON l.id = p.lote_id
+      LEFT JOIN pa_tareas_tipos t ON t.id = p.tarea_tipo_id
+      LEFT JOIN usuarios u ON u.id = p.cargado_por
+      LEFT JOIN pa_partes_valorizacion v ON v.parte_id = p.id
+      LEFT JOIN pa_rubros_contables r ON r.id = v.rubro_contable_id
+      WHERE 1=1
+    `;
+    const params = [];
+    if (estado) { q += " AND p.estado=?"; params.push(estado); }
+    if (lote_id) { q += " AND p.lote_id=?"; params.push(lote_id); }
+    if (cuadrilla_id) { q += " AND p.cuadrilla_id=?"; params.push(cuadrilla_id); }
+    if (desde) { q += " AND p.fecha>=?"; params.push(desde); }
+    if (hasta) { q += " AND p.fecha<=?"; params.push(hasta); }
+    q += " ORDER BY p.fecha DESC, p.id DESC LIMIT ?";
+    params.push(parseInt(limit) || 200);
+    res.json({ ok: true, data: db.prepare(q).all(...params) });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+router.get('/personal/partes/:id', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const parte = db.prepare(`
+      SELECT p.*, c.nombre as cuadrilla_nombre, l.nombre as lote_nombre, l.finca as lote_finca,
+             t.nombre as tarea_nombre, t.tipo_labor, t.es_destajo, t.unidad_destajo,
+             u.nombre as cargado_por_nombre
+      FROM pa_partes_trabajo p
+      LEFT JOIN pa_cuadrillas c ON c.id=p.cuadrilla_id
+      LEFT JOIN pa_lotes l ON l.id=p.lote_id
+      LEFT JOIN pa_tareas_tipos t ON t.id=p.tarea_tipo_id
+      LEFT JOIN usuarios u ON u.id=p.cargado_por
+      WHERE p.id=?
+    `).get(req.params.id);
+    if (!parte) return res.status(404).json({ ok: false, error: 'Parte no encontrado' });
+    const items = db.prepare(`
+      SELECT i.*, tr.nombre as trabajador_nombre, tr.tipo_relacion, tr.jornal_base, tr.unidad_jornal
+      FROM pa_partes_trabajo_items i
+      JOIN pa_trabajadores tr ON tr.id = i.trabajador_id
+      WHERE i.parte_id=?
+      ORDER BY tr.nombre
+    `).all(parte.id);
+    const val = db.prepare(`
+      SELECT v.*, r.nombre as rubro_nombre, u.nombre as valorizado_por_nombre
+      FROM pa_partes_valorizacion v
+      LEFT JOIN pa_rubros_contables r ON r.id=v.rubro_contable_id
+      LEFT JOIN usuarios u ON u.id=v.valorizado_por
+      WHERE v.parte_id=?
+    `).get(parte.id);
+    const sugerido = sugerirRubroContable(db, parte.lote_id, parte.tarea_tipo_id);
+    res.json({ ok: true, data: { parte, items, valorizacion: val, rubro_sugerido: sugerido } });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+router.post('/personal/partes', requireAuth, (req, res) => {
+  const db = getDb();
+  const {
+    fecha, cuadrilla_id, lote_id, tarea_tipo_id,
+    modo_registro, cant_trabajadores, horas_total,
+    observaciones, foto_b64, items
+  } = req.body;
+
+  if (!lote_id || !tarea_tipo_id) return res.status(400).json({ ok: false, error: 'lote_id y tarea_tipo_id requeridos' });
+
+  const tarea = db.prepare("SELECT * FROM pa_tareas_tipos WHERE id=?").get(tarea_tipo_id);
+  if (!tarea) return res.status(400).json({ ok: false, error: 'Tarea inválida' });
+
+  // Validaciones según modo
+  const modo = modo_registro || (tarea.es_destajo ? 'individual' : 'cuadrilla');
+  if (modo === 'cuadrilla') {
+    if (!cant_trabajadores || cant_trabajadores <= 0) return res.status(400).json({ ok: false, error: 'cant_trabajadores requerido' });
+    if (!horas_total || horas_total <= 0) return res.status(400).json({ ok: false, error: 'horas_total requerido' });
+  } else {
+    if (!Array.isArray(items) || !items.length) return res.status(400).json({ ok: false, error: 'items requeridos para modo individual' });
+  }
+
+  try {
+    // Guardar foto si viene
+    let fotoPath = null;
+    if (foto_b64) {
+      const dir = path.join(__dirnamePA, '../../data/scout/personal');
+      fs.mkdirSync(dir, { recursive: true });
+      const fname = `parte_${Date.now()}_${Math.floor(Math.random()*9999)}.jpg`;
+      fs.writeFileSync(path.join(dir, fname),
+        Buffer.from(String(foto_b64).replace(/^data:.*?;base64,/,''), 'base64'));
+      fotoPath = `/data/scout/personal/${fname}`;
+    }
+
+    const tx = db.transaction(() => {
+      const r = db.prepare(`
+        INSERT INTO pa_partes_trabajo
+          (fecha, cuadrilla_id, lote_id, tarea_tipo_id, modo_registro,
+           cant_trabajadores, horas_total, observaciones, foto_path, cargado_por, estado)
+        VALUES (?,?,?,?,?,?,?,?,?,?,'pendiente_valorizar')
+      `).run(
+        fecha || new Date().toISOString().slice(0,10),
+        cuadrilla_id || null,
+        lote_id,
+        tarea_tipo_id,
+        modo,
+        modo === 'cuadrilla' ? Number(cant_trabajadores) : null,
+        modo === 'cuadrilla' ? Number(horas_total) : null,
+        observaciones || null,
+        fotoPath,
+        req.user.id
+      );
+      const parteId = r.lastInsertRowid;
+
+      if (modo === 'individual' && items) {
+        const insItem = db.prepare(`INSERT INTO pa_partes_trabajo_items
+            (parte_id, trabajador_id, horas, unidades_destajo, notas) VALUES (?,?,?,?,?)`);
+        for (const it of items) {
+          if (!it.trabajador_id) continue;
+          insItem.run(parteId, it.trabajador_id,
+            it.horas != null ? Number(it.horas) : null,
+            it.unidades_destajo != null ? Number(it.unidades_destajo) : null,
+            it.notas || null);
+        }
+      }
+      return parteId;
+    });
+
+    res.json({ ok: true, id: tx() });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+router.delete('/personal/partes/:id', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const p = db.prepare("SELECT * FROM pa_partes_trabajo WHERE id=?").get(req.params.id);
+    if (!p) return res.status(404).json({ ok: false, error: 'Parte no encontrado' });
+    if (p.estado === 'valorizado') return res.status(400).json({ ok: false, error: 'No se puede eliminar un parte valorizado. Anulalo primero.' });
+    const tx = db.transaction(() => {
+      db.prepare("DELETE FROM pa_partes_trabajo_items WHERE parte_id=?").run(p.id);
+      db.prepare("DELETE FROM pa_partes_trabajo WHERE id=?").run(p.id);
+    });
+    tx();
+    res.json({ ok: true });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// ── Valorización ───────────────────────────────────────────────────────────
+router.post('/personal/partes/:id/valorizar', requireAuth, (req, res) => {
+  const db = getDb();
+  const { monto_total, rubro_contable_id, detalle_json, observaciones } = req.body;
+  if (monto_total == null || monto_total < 0) return res.status(400).json({ ok: false, error: 'monto_total requerido (≥ 0)' });
+  if (!rubro_contable_id) return res.status(400).json({ ok: false, error: 'rubro_contable_id requerido' });
+
+  try {
+    const parte = db.prepare("SELECT * FROM pa_partes_trabajo WHERE id=?").get(req.params.id);
+    if (!parte) return res.status(404).json({ ok: false, error: 'Parte no encontrado' });
+    if (parte.estado === 'anulado') return res.status(400).json({ ok: false, error: 'Parte anulado' });
+
+    const rubro = db.prepare("SELECT * FROM pa_rubros_contables WHERE id=?").get(rubro_contable_id);
+    if (!rubro) return res.status(400).json({ ok: false, error: 'Rubro inválido' });
+
+    const tarea = db.prepare("SELECT nombre FROM pa_tareas_tipos WHERE id=?").get(parte.tarea_tipo_id);
+
+    const tx = db.transaction(() => {
+      // Upsert valorización (permite revalorizar si cambió algo)
+      const existente = db.prepare("SELECT id FROM pa_partes_valorizacion WHERE parte_id=?").get(parte.id);
+      if (existente) {
+        db.prepare(`UPDATE pa_partes_valorizacion SET
+            monto_total=?, rubro_contable_id=?, detalle_json=?, valorizado_por=?, fecha_valorizacion=?
+            WHERE parte_id=?`)
+          .run(Number(monto_total), rubro_contable_id, detalle_json || null,
+               req.user.id, new Date().toISOString().slice(0,19).replace('T',' '), parte.id);
+        // Borrar costo viejo y recrear
+        db.prepare("DELETE FROM pa_costos_lote WHERE categoria='otros' AND referencia_id=?").run(-parte.id);
+      } else {
+        db.prepare(`INSERT INTO pa_partes_valorizacion
+            (parte_id, monto_total, rubro_contable_id, detalle_json, valorizado_por)
+            VALUES (?,?,?,?,?)`)
+          .run(parte.id, Number(monto_total), rubro_contable_id, detalle_json || null, req.user.id);
+      }
+
+      // Cambiar estado del parte
+      db.prepare("UPDATE pa_partes_trabajo SET estado='valorizado' WHERE id=?").run(parte.id);
+
+      // Imputar costo al lote (mapear tipo_labor → categoría del enum pa_costos_lote)
+      const tipoLabor = rubro.tipo_labor;
+      let categoria = 'otros';
+      if (tipoLabor === 'cosecha_empaque') categoria = 'cosecha';
+      else if (tipoLabor === 'produccion' || tipoLabor === 'general') categoria = 'labor_propia';
+      else categoria = 'otros';
+
+      const camp = db.prepare("SELECT id FROM pa_campañas WHERE activa=1 LIMIT 1").get();
+      if (camp && Number(monto_total) > 0) {
+        // Uso referencia_id = -parte.id para no colisionar con referencias de otros módulos
+        db.prepare(`INSERT INTO pa_costos_lote
+            (lote_id, campaña_id, categoria, referencia_id, fecha, monto, descripcion)
+            VALUES (?,?,?,?,?,?,?)`)
+          .run(parte.lote_id, camp.id, categoria, -parte.id, parte.fecha,
+               Number(monto_total),
+               `MO · ${tarea ? tarea.nombre : 'Parte'} · ${rubro.nombre}${observaciones ? ' · ' + observaciones : ''}`);
+      }
+    });
+
+    tx();
+    res.json({ ok: true });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+router.post('/personal/partes/:id/anular', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const p = db.prepare("SELECT * FROM pa_partes_trabajo WHERE id=?").get(req.params.id);
+    if (!p) return res.status(404).json({ ok: false, error: 'Parte no encontrado' });
+    const tx = db.transaction(() => {
+      db.prepare("UPDATE pa_partes_trabajo SET estado='anulado' WHERE id=?").run(p.id);
+      // Revertir costo si estaba valorizado
+      db.prepare("DELETE FROM pa_costos_lote WHERE categoria IN ('labor_propia','labor_contratada','cosecha','otros') AND referencia_id=?").run(-p.id);
+      db.prepare("DELETE FROM pa_partes_valorizacion WHERE parte_id=?").run(p.id);
+    });
+    tx();
+    res.json({ ok: true });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// ── Dashboard ──────────────────────────────────────────────────────────────
+router.get('/personal/dashboard', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const pendientes = db.prepare("SELECT COUNT(*) as n FROM pa_partes_trabajo WHERE estado='pendiente_valorizar'").get().n;
+    const hoy = new Date();
+    const mesIni = new Date(hoy.getFullYear(), hoy.getMonth(), 1).toISOString().slice(0,10);
+
+    const gastoMesRubro = db.prepare(`
+      SELECT r.nombre, COALESCE(SUM(v.monto_total),0) as total, COUNT(*) as cantidad_partes
+      FROM pa_partes_valorizacion v
+      JOIN pa_rubros_contables r ON r.id=v.rubro_contable_id
+      JOIN pa_partes_trabajo p ON p.id=v.parte_id
+      WHERE p.fecha >= ?
+      GROUP BY r.id
+      ORDER BY total DESC
+    `).all(mesIni);
+
+    const partesRecientes = db.prepare(`
+      SELECT p.id, p.fecha, p.estado,
+        l.nombre as lote_nombre, l.finca as lote_finca,
+        t.nombre as tarea_nombre, c.nombre as cuadrilla_nombre,
+        p.cant_trabajadores, p.horas_total,
+        v.monto_total, r.nombre as rubro_nombre,
+        u.nombre as cargado_por_nombre
+      FROM pa_partes_trabajo p
+      LEFT JOIN pa_lotes l ON l.id=p.lote_id
+      LEFT JOIN pa_tareas_tipos t ON t.id=p.tarea_tipo_id
+      LEFT JOIN pa_cuadrillas c ON c.id=p.cuadrilla_id
+      LEFT JOIN pa_partes_valorizacion v ON v.parte_id=p.id
+      LEFT JOIN pa_rubros_contables r ON r.id=v.rubro_contable_id
+      LEFT JOIN usuarios u ON u.id=p.cargado_por
+      ORDER BY p.creado_en DESC
+      LIMIT 15
+    `).all();
+
+    const partesViejos = db.prepare(`
+      SELECT COUNT(*) as n FROM pa_partes_trabajo
+      WHERE estado='pendiente_valorizar' AND fecha < date('now','-14 days','localtime')
+    `).get().n;
+
+    res.json({ ok: true, data: {
+      pendientes,
+      partes_viejos: partesViejos,
+      gasto_mes_rubro: gastoMesRubro,
+      partes_recientes: partesRecientes
+    }});
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
 export default router;

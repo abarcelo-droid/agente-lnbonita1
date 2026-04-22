@@ -218,6 +218,7 @@ input[type=file]{display:none}
       ✅ Tareas<span class="tab-badge" id="badge-mis"></span>
     </div>
     <div class="tab" data-tab="combustible" onclick="showTab('combustible')">⛽ Combustible</div>
+    <div class="tab" data-tab="personal" onclick="showTab('personal')">👷 Personal</div>
   </div>
 </div>
 
@@ -545,6 +546,117 @@ input[type=file]{display:none}
   </div>
 </div>
 
+<!-- ═══════════════════════ TAB PERSONAL ═══════════════════════ -->
+<div class="screen" id="screen-personal">
+  <!-- Último parte del usuario -->
+  <div style="padding:14px 14px 0">
+    <div style="font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--mut);margin-bottom:8px">👷 Último parte</div>
+    <div id="pp-ultimo" style="margin-bottom:16px"></div>
+  </div>
+
+  <!-- Acción principal -->
+  <div style="padding:0 14px">
+    <button class="rep-btn primary" style="width:100%;padding:18px;font-size:15px;border-radius:12px;background:var(--burg);color:#fff" onclick="ppAbrirParte()">
+      ➕ Registrar parte de trabajo
+    </button>
+  </div>
+
+  <!-- Partes recientes -->
+  <div style="padding:16px 14px 80px">
+    <div style="font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--mut);margin:8px 0 8px">Mis últimos partes</div>
+    <div id="pp-partes"><div class="empty" style="padding:20px"><span class="empty-icon">⏳</span><div class="empty-txt" style="font-size:12px">Cargando...</div></div></div>
+  </div>
+</div>
+
+<!-- MODAL PARTE DE TRABAJO -->
+<div class="lightbox" id="modal-pp" style="align-items:flex-end;padding:0">
+  <div style="background:var(--sur);width:100%;max-height:94vh;overflow-y:auto;border-radius:20px 20px 0 0;padding:20px">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+      <div>
+        <div style="font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--mut);margin-bottom:3px">Parte de trabajo</div>
+        <div style="font-size:18px;font-weight:700;color:var(--burg)">👷 Nuevo parte</div>
+      </div>
+      <button class="lightbox-close" style="position:static;width:36px;height:36px;font-size:18px;background:var(--bg)" onclick="document.getElementById('modal-pp').classList.remove('open')">×</button>
+    </div>
+
+    <!-- Fecha -->
+    <div style="margin-bottom:12px">
+      <div style="font-size:11px;color:var(--mut);margin-bottom:4px">Fecha</div>
+      <input type="date" class="scout-input" id="pp-fecha">
+    </div>
+
+    <!-- Lote -->
+    <div style="margin-bottom:12px">
+      <div style="font-size:11px;color:var(--mut);margin-bottom:4px">Lote *</div>
+      <select class="scout-select" id="pp-lote" onchange="ppOnChange()">
+        <option value="">— Elegí lote —</option>
+      </select>
+    </div>
+
+    <!-- Tarea -->
+    <div style="margin-bottom:12px">
+      <div style="font-size:11px;color:var(--mut);margin-bottom:4px">Tarea *</div>
+      <select class="scout-select" id="pp-tarea" onchange="ppOnChange()">
+        <option value="">— Elegí tarea —</option>
+      </select>
+    </div>
+
+    <!-- Preview del rubro sugerido -->
+    <div id="pp-rubro-preview" style="display:none;margin-bottom:14px;padding:10px 12px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;font-size:12px">
+      <div style="color:var(--mut);margin-bottom:2px">Rubro contable sugerido:</div>
+      <div style="font-weight:700;color:#166534" id="pp-rubro-txt">—</div>
+    </div>
+
+    <!-- Modo CUADRILLA (default) -->
+    <div id="pp-modo-cuadrilla">
+      <div style="margin-bottom:12px">
+        <div style="font-size:11px;color:var(--mut);margin-bottom:4px">Cuadrilla (opcional)</div>
+        <select class="scout-select" id="pp-cuadrilla">
+          <option value="">— Sin cuadrilla asignada —</option>
+        </select>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px">
+        <div>
+          <div style="font-size:11px;color:var(--mut);margin-bottom:4px">Cant. trabajadores *</div>
+          <input type="number" step="1" min="1" class="scout-input" id="pp-cant" placeholder="Ej: 6" inputmode="numeric">
+        </div>
+        <div>
+          <div style="font-size:11px;color:var(--mut);margin-bottom:4px">Horas totales *</div>
+          <input type="number" step="0.5" min="0" class="scout-input" id="pp-horas" placeholder="Ej: 8" inputmode="decimal">
+        </div>
+      </div>
+    </div>
+
+    <!-- Modo INDIVIDUAL (destajo) -->
+    <div id="pp-modo-individual" style="display:none">
+      <div style="margin-bottom:8px;font-size:12px;color:var(--mut)">Cargá cada trabajador con sus <span id="pp-unidad-lbl">unidades</span>:</div>
+      <div id="pp-items-list" style="margin-bottom:8px"></div>
+      <button class="rep-btn" style="width:100%;padding:10px;border:1px dashed var(--bor);background:var(--bg);color:var(--burg);border-radius:10px;font-size:13px" onclick="ppAgregarItem()">+ Agregar trabajador</button>
+    </div>
+
+    <!-- Foto -->
+    <div style="margin-top:14px;margin-bottom:12px">
+      <div style="font-size:11px;color:var(--mut);margin-bottom:6px">Foto (opcional)</div>
+      <div class="foto-area" id="pp-foto-area" style="padding:16px;text-align:center;border:2px dashed var(--bor);border-radius:10px;cursor:pointer" onclick="document.getElementById('pp-foto-inp').click()">
+        <span class="foto-icon-big" style="font-size:22px">📷</span>
+        <div class="foto-hint" style="font-size:12px;color:var(--mut);margin-top:2px">Tocar para sacar foto</div>
+      </div>
+      <input type="file" id="pp-foto-inp" accept="image/*" capture="environment" style="display:none" onchange="ppOnFoto(this)">
+    </div>
+
+    <!-- Observaciones -->
+    <div style="margin-bottom:14px">
+      <div style="font-size:11px;color:var(--mut);margin-bottom:4px">Observaciones</div>
+      <textarea class="scout-input" id="pp-obs" rows="2" placeholder="Condiciones, detalles..."></textarea>
+    </div>
+
+    <button class="rep-btn primary" id="pp-btn-guardar" style="width:100%;padding:16px;font-size:15px;border-radius:12px" onclick="ppGuardar()">
+      ✓ Guardar parte
+    </button>
+    <div style="font-size:11px;color:var(--mut);text-align:center;margin-top:8px">Queda pendiente para que RRHH lo valorice</div>
+  </div>
+</div>
+
 <!-- MODAL EJECUTAR APLICACIÓN -->
 <div class="lightbox" id="modal-ejecutar" style="align-items:flex-end;padding:0" onclick="">
   <div style="background:var(--sur);width:100%;max-height:92vh;overflow-y:auto;border-radius:20px 20px 0 0;padding:20px">
@@ -769,6 +881,7 @@ function showTab(tab) {
   if(tab==='pendientes')cargarPendientes();
   if(tab==='mis-tareas')cargarMisTareas();
   if(tab==='combustible')cbInit();
+  if(tab==='personal')ppInit();
 }
 
 // ── RENDER REPORTES ──
@@ -1567,6 +1680,212 @@ function cbGuardar() {
       toast('Carga registrada — oficina la va a revisar');
       document.getElementById('modal-comb').classList.remove('open');
       cbCargarDatos();
+    } else {
+      toast(r.error || 'Error al guardar', 'er');
+    }
+  });
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// PERSONAL / PARTES DE TRABAJO
+// ──────────────────────────────────────────────────────────────────────
+var PP = {
+  lotes: [],
+  tareas: [],
+  cuadrillas: [],
+  trabajadores: [],
+  tareaActual: null,
+  fotoB64: null,
+  itemN: 0
+};
+
+function ppInit() {
+  ppCargarDatos();
+}
+
+function ppCargarDatos() {
+  Promise.all([
+    api('/api/pa/lotes').then(r => r.data || []),
+    api('/api/pa/personal/tareas-tipos').then(r => r.data || []),
+    api('/api/pa/personal/cuadrillas').then(r => r.data || []),
+    api('/api/pa/personal/trabajadores').then(r => r.data || []),
+    api('/api/pa/personal/partes?limit=10').then(r => r.data || [])
+  ]).then(function(arr) {
+    PP.lotes = arr[0];
+    PP.tareas = arr[1];
+    PP.cuadrillas = arr[2];
+    PP.trabajadores = arr[3];
+    ppRenderPartes(arr[4]);
+  });
+}
+
+function ppRenderPartes(partes) {
+  var el = document.getElementById('pp-partes');
+  var ult = document.getElementById('pp-ultimo');
+  if (!partes.length) {
+    el.innerHTML = '<div class="empty" style="padding:20px"><span class="empty-icon">📋</span><div class="empty-txt" style="font-size:12px">Sin partes registrados</div></div>';
+    ult.innerHTML = '<div style="padding:12px;background:var(--sur);border:1px solid var(--bor);border-radius:10px;color:var(--mut);font-size:12px;text-align:center">Sin partes aún</div>';
+    return;
+  }
+  // Último parte destacado
+  var u = partes[0];
+  var est = u.estado === 'pendiente_valorizar' ? '<span class="tag tag-pend">⏳ Pendiente</span>' :
+            u.estado === 'valorizado' ? '<span class="tag tag-res">✓ Valorizado</span>' : '<span class="tag">Anulado</span>';
+  ult.innerHTML = '<div style="background:var(--sur);border:1px solid var(--bor);border-radius:10px;padding:12px 14px">' +
+    '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px"><div style="font-size:14px;font-weight:700;color:var(--txt)">'+u.tarea_nombre+'</div>'+est+'</div>' +
+    '<div style="font-size:12px;color:var(--mut)">'+u.lote_nombre+(u.lote_finca?' · '+u.lote_finca:'')+' · '+u.fecha+'</div>' +
+    (u.cant_trabajadores ? '<div style="font-size:12px;color:var(--mut);margin-top:2px">👥 '+u.cant_trabajadores+' · 🕐 '+u.horas_total+'h</div>' : '') +
+  '</div>';
+
+  // Lista completa
+  el.innerHTML = partes.map(function(p){
+    var estC = p.estado === 'pendiente_valorizar' ? '<span class="tag tag-pend" style="font-size:9px">⏳</span>' :
+               p.estado === 'valorizado' ? '<span class="tag tag-res" style="font-size:9px">✓</span>' : '';
+    return '<div style="background:var(--sur);border:1px solid var(--bor);border-radius:10px;padding:10px 12px;margin-bottom:8px">' +
+      '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:2px"><div style="font-size:13px;font-weight:600;color:var(--txt)">'+p.tarea_nombre+'</div>'+estC+'</div>' +
+      '<div style="font-size:11px;color:var(--mut)">'+p.lote_nombre+' · '+p.fecha+'</div>' +
+    '</div>';
+  }).join('');
+}
+
+function ppAbrirParte() {
+  // Reset
+  PP.fotoB64 = null;
+  PP.itemN = 0;
+  PP.tareaActual = null;
+  document.getElementById('pp-fecha').value = new Date().toISOString().slice(0,10);
+  document.getElementById('pp-cant').value = '';
+  document.getElementById('pp-horas').value = '';
+  document.getElementById('pp-obs').value = '';
+  document.getElementById('pp-items-list').innerHTML = '';
+  document.getElementById('pp-foto-area').innerHTML = '<span class="foto-icon-big" style="font-size:22px">📷</span><div class="foto-hint" style="font-size:12px;color:var(--mut);margin-top:2px">Tocar para sacar foto</div>';
+  document.getElementById('pp-foto-inp').value = '';
+  document.getElementById('pp-rubro-preview').style.display = 'none';
+
+  // Poblar selects
+  document.getElementById('pp-lote').innerHTML = '<option value="">— Elegí lote —</option>' +
+    PP.lotes.map(function(l){ return '<option value="'+l.id+'">'+l.nombre+(l.finca?' · '+l.finca:'')+(l.cultivo_actual?' ('+l.cultivo_actual+')':'')+'</option>'; }).join('');
+  document.getElementById('pp-tarea').innerHTML = '<option value="">— Elegí tarea —</option>' +
+    PP.tareas.map(function(t){ return '<option value="'+t.id+'" data-destajo="'+t.es_destajo+'" data-unidad="'+(t.unidad_destajo||'')+'">'+t.nombre+'</option>'; }).join('');
+  document.getElementById('pp-cuadrilla').innerHTML = '<option value="">— Sin cuadrilla asignada —</option>' +
+    PP.cuadrillas.map(function(c){ return '<option value="'+c.id+'">'+c.nombre+(c.tipo==='pool'?' (pool)':'')+'</option>'; }).join('');
+
+  document.getElementById('pp-modo-cuadrilla').style.display = 'block';
+  document.getElementById('pp-modo-individual').style.display = 'none';
+
+  document.getElementById('modal-pp').classList.add('open');
+}
+
+function ppOnChange() {
+  var loteId = document.getElementById('pp-lote').value;
+  var tareaId = document.getElementById('pp-tarea').value;
+  var tareaSel = document.getElementById('pp-tarea').selectedOptions[0];
+
+  // Cambiar modo según destajo
+  if (tareaSel && tareaSel.dataset.destajo === '1') {
+    document.getElementById('pp-modo-cuadrilla').style.display = 'none';
+    document.getElementById('pp-modo-individual').style.display = 'block';
+    document.getElementById('pp-unidad-lbl').textContent = tareaSel.dataset.unidad || 'unidades';
+    if (document.getElementById('pp-items-list').children.length === 0) ppAgregarItem();
+  } else {
+    document.getElementById('pp-modo-cuadrilla').style.display = 'block';
+    document.getElementById('pp-modo-individual').style.display = 'none';
+  }
+
+  // Buscar rubro sugerido
+  if (loteId && tareaId) {
+    api('/api/pa/personal/sugerir-rubro?lote_id='+loteId+'&tarea_tipo_id='+tareaId).then(function(r){
+      if (r.ok && r.data) {
+        document.getElementById('pp-rubro-preview').style.display = 'block';
+        document.getElementById('pp-rubro-txt').textContent = r.data.nombre;
+      } else {
+        document.getElementById('pp-rubro-preview').style.display = 'none';
+      }
+    });
+  } else {
+    document.getElementById('pp-rubro-preview').style.display = 'none';
+  }
+}
+
+function ppAgregarItem() {
+  var n = PP.itemN++;
+  var tareaSel = document.getElementById('pp-tarea').selectedOptions[0];
+  var unidad = tareaSel ? (tareaSel.dataset.unidad || 'unidades') : 'unidades';
+  var opts = '<option value="">— Trabajador —</option>' +
+    PP.trabajadores.map(function(t){ return '<option value="'+t.id+'">'+t.nombre+'</option>'; }).join('');
+  var row = document.createElement('div');
+  row.id = 'pp-it-'+n;
+  row.style.cssText = 'display:grid;grid-template-columns:1fr 90px 32px;gap:6px;margin-bottom:6px;align-items:center';
+  row.innerHTML =
+    '<select class="scout-select" id="pp-it-trab-'+n+'" style="padding:8px">'+opts+'</select>' +
+    '<input type="number" step="0.1" min="0" class="scout-input" id="pp-it-ud-'+n+'" placeholder="'+unidad+'" style="padding:8px" inputmode="decimal">' +
+    '<button style="background:#fef2f2;color:#dc2626;border:none;border-radius:6px;padding:8px;cursor:pointer" onclick="document.getElementById(\'pp-it-'+n+'\').remove()">✕</button>';
+  document.getElementById('pp-items-list').appendChild(row);
+}
+
+function ppOnFoto(input) {
+  if (!input.files || !input.files[0]) return;
+  var reader = new FileReader();
+  reader.onload = function(e) {
+    PP.fotoB64 = e.target.result.split(',')[1];
+    var area = document.getElementById('pp-foto-area');
+    area.innerHTML = '<img src="'+e.target.result+'" style="width:100%;max-height:140px;object-fit:cover;border-radius:8px;display:block">';
+  };
+  reader.readAsDataURL(input.files[0]);
+}
+
+function ppGuardar() {
+  var loteId = document.getElementById('pp-lote').value;
+  var tareaId = document.getElementById('pp-tarea').value;
+  if (!loteId) return toast('Elegí el lote', 'er');
+  if (!tareaId) return toast('Elegí la tarea', 'er');
+
+  var tareaSel = document.getElementById('pp-tarea').selectedOptions[0];
+  var esDestajo = tareaSel && tareaSel.dataset.destajo === '1';
+  var modo = esDestajo ? 'individual' : 'cuadrilla';
+
+  var payload = {
+    fecha: document.getElementById('pp-fecha').value,
+    lote_id: parseInt(loteId),
+    tarea_tipo_id: parseInt(tareaId),
+    modo_registro: modo,
+    observaciones: document.getElementById('pp-obs').value.trim() || null,
+    foto_b64: PP.fotoB64
+  };
+
+  if (modo === 'cuadrilla') {
+    var cuad = document.getElementById('pp-cuadrilla').value;
+    if (cuad) payload.cuadrilla_id = parseInt(cuad);
+    var cant = parseInt(document.getElementById('pp-cant').value);
+    var horas = parseFloat(document.getElementById('pp-horas').value);
+    if (!cant || cant <= 0) return toast('Cargá la cantidad de trabajadores', 'er');
+    if (!horas || horas <= 0) return toast('Cargá las horas totales', 'er');
+    payload.cant_trabajadores = cant;
+    payload.horas_total = horas;
+  } else {
+    // items individuales
+    var items = [];
+    document.querySelectorAll('[id^=pp-it-trab-]').forEach(function(sel){
+      var n = sel.id.replace('pp-it-trab-','');
+      var trabId = sel.value;
+      var ud = parseFloat(document.getElementById('pp-it-ud-'+n).value);
+      if (trabId && ud > 0) items.push({ trabajador_id: parseInt(trabId), unidades_destajo: ud });
+    });
+    if (!items.length) return toast('Cargá al menos un trabajador con unidades', 'er');
+    payload.items = items;
+  }
+
+  var btn = document.getElementById('pp-btn-guardar');
+  btn.disabled = true; btn.textContent = 'Guardando...';
+  api('/api/pa/personal/partes', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify(payload)
+  }).then(function(r){
+    btn.disabled = false; btn.textContent = '✓ Guardar parte';
+    if (r.ok) {
+      toast('Parte registrado — RRHH lo valorizará');
+      document.getElementById('modal-pp').classList.remove('open');
+      ppCargarDatos();
     } else {
       toast(r.error || 'Error al guardar', 'er');
     }
