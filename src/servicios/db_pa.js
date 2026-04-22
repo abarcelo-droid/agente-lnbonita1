@@ -241,6 +241,38 @@ export function getCampañaActiva() {
   } catch(e) { console.error('[PA] Error migrando pa_lotes:', e.message); }
 })();
 
+// ── MIGRACIÓN: red_agua sin CHECK constraint restrictivo ─────────────────
+(function() {
+  try {
+    // Verificar si el CHECK viejo existe intentando insertar un valor nuevo
+    const db2 = getDb();
+    const test = db2.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='pa_lotes'").get();
+    if (test && test.sql && test.sql.includes("Norte")) {
+      // Recrear tabla sin el CHECK
+      db2.exec(`
+        BEGIN;
+        CREATE TABLE pa_lotes_v2 (
+          id          INTEGER PRIMARY KEY AUTOINCREMENT,
+          nombre      TEXT NOT NULL,
+          sector_id   INTEGER NOT NULL REFERENCES pa_sectores(id),
+          finca       TEXT,
+          hectareas   REAL NOT NULL DEFAULT 0.5,
+          poligono_maps TEXT,
+          red_agua    TEXT,
+          activo      INTEGER DEFAULT 1,
+          notas       TEXT,
+          creado_en   TEXT DEFAULT (datetime('now','localtime'))
+        );
+        INSERT INTO pa_lotes_v2 SELECT id,nombre,sector_id,finca,hectareas,poligono_maps,red_agua,activo,notas,creado_en FROM pa_lotes;
+        DROP TABLE pa_lotes;
+        ALTER TABLE pa_lotes_v2 RENAME TO pa_lotes;
+        COMMIT;
+      `);
+      console.log("[PA] pa_lotes recreada — red_agua sin CHECK restrictivo");
+    }
+  } catch(e) { console.error('[PA] Error migrando red_agua:', e.message); }
+})();
+
 // ── MIGRACIÓN: remito_foto_path en pa_compras ─────────────────────────────
 (function() {
   try {
