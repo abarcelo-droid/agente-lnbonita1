@@ -11,6 +11,24 @@ fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
 
 const db = new Database(DB_PATH);
 
+// ── Configuración para producción (Railway + volume) ──────────────────────
+// WAL mode: transacciones no se pierden si el proceso muere bruscamente.
+// synchronous=NORMAL: equilibrio entre velocidad y durabilidad (con WAL es seguro).
+// foreign_keys=ON: activar integridad referencial.
+// busy_timeout: esperar hasta 5s si la DB está bloqueada (evita errores de concurrencia).
+try {
+  db.pragma('journal_mode = WAL');
+  db.pragma('synchronous = NORMAL');
+  db.pragma('foreign_keys = ON');
+  db.pragma('busy_timeout = 5000');
+  console.log('[DB] Configurada con WAL mode (' + DB_PATH + ')');
+} catch(e) {
+  console.error('[DB] Error configurando pragmas:', e.message);
+}
+
+// Exportar referencia al path para que otros módulos puedan hacer checkpoint/backup
+export const dbPath = DB_PATH;
+
 // ── Esquema ────────────────────────────────────────────────────────────────
 db.exec(`
   CREATE TABLE IF NOT EXISTS clientes (

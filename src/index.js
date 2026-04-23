@@ -152,70 +152,47 @@ app.use("/data/scout", express.static(path.join(__dirname, "../data/scout")));
 // Health check
 app.get("/", (req, res) => res.json({ status:"ok", version:"3.0", panel:"/panel" }));
 
-// ⚠️ TEMPORAL — BACKUP DE LA DB — BORRAR DESPUÉS DE DESCARGAR
-// Descarga: /backup-db-lnb-2026
-app.get("/backup-db-lnb-2026", async (req, res) => {
-  const dbPath = path.join(__dirname, "../data/clientes.db");
-  const backupPath = path.join(__dirname, "../data/clientes-backup-tmp.db");
-  try {
-    const fsMod = await import("fs");
-    if (!fsMod.existsSync(dbPath)) {
-      return res.status(404).send("DB no encontrada en " + dbPath);
-    }
-    // Forzar checkpoint por si la DB está en WAL mode (vuelca cambios pendientes)
-    try { db.pragma("wal_checkpoint(TRUNCATE)"); } catch(e) {}
-
-    // Crear copia de la DB usando fs (simple, sin APIs async que fallen)
-    console.log("[BACKUP] Copiando archivo...");
-    // Si existe una copia anterior huérfana, borrarla primero
-    if (fsMod.existsSync(backupPath)) {
-      try { fsMod.unlinkSync(backupPath); } catch(e) {}
-    }
-    fsMod.copyFileSync(dbPath, backupPath);
-
-    const stats = fsMod.statSync(backupPath);
-    console.log(`[BACKUP] Enviando ${(stats.size/1024/1024).toFixed(2)} MB`);
-    res.setHeader("Content-Type", "application/x-sqlite3");
-    res.setHeader("Content-Length", stats.size);
-    res.setHeader("Content-Disposition",
-      `attachment; filename="lnb-backup-${new Date().toISOString().slice(0,10)}.db"`);
-
-    const stream = fsMod.createReadStream(backupPath);
-    stream.on("close", () => {
-      // Eliminar copia temporal cuando termine el stream
-      try { fsMod.unlinkSync(backupPath); } catch(e) {}
-      console.log("[BACKUP] Copia temporal eliminada");
-    });
-    stream.on("error", (e) => {
-      console.error("[BACKUP] Stream error:", e);
-      if (!res.headersSent) res.status(500).send("Stream error: " + e.message);
-    });
-    stream.pipe(res);
-  } catch(e) {
-    console.error("[BACKUP] Error:", e);
-    if (!res.headersSent) res.status(500).send("Error: " + e.message);
-  }
-});
-
-// ⚠️ TEMPORAL — LISTAR ARCHIVOS EN /app/data — para diagnóstico
-app.get("/backup-ls-lnb-2026", async (req, res) => {
-  try {
-    const fsMod = await import("fs");
-    const dataDir = path.join(__dirname, "../data");
-    const items = fsMod.readdirSync(dataDir, { withFileTypes: true }).map(function(d){
-      const full = path.join(dataDir, d.name);
-      let size = null;
-      try { size = d.isFile() ? fsMod.statSync(full).size : null; } catch(e) {}
-      return { name: d.name, isDirectory: d.isDirectory(), size: size };
-    });
-    res.json({ dataDir, items });
-  } catch(e) { res.status(500).json({ error: e.message }); }
-});
-
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`\n Servidor en http://localhost:${PORT}`);
   console.log(`   Panel:   http://localhost:${PORT}/panel`);
   console.log(`   Webhook: POST http://localhost:${PORT}/webhook\n`);
   programarSnapshotCRM();
 });
+
+// ── GRACEFUL SHUTDOWN ─────────────────────────────────────────────────────
+// Railway manda SIGTERM al redeployar. Si el proceso muere sin cerrar la DB
+// se corrompe el WAL y se pierden transacciones recientes. Este handler:
+//   1. Deja de aceptar conexiones nuevas.
+//   2. Hace checkpoint del WAL (vuelca todo al .db principal).
+//   3. Cierra la DB limpio.
+//   4. Sale del proceso.
+let shuttingDown = false;
+function gracefulShutdown(signal) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`\n[${signal}] Cerrando servidor...`);
+
+  // Timeout de seguridad: si algo se cuelga, forzar salida a los 10s
+  const forceExit = setTimeout(() => {
+    console.error('[SHUTDOWN] Timeout — forzando salida');
+    process.exit(1);
+  }, 10000);
+
+  server.close(() => {
+    console.log('[SHUTDOWN] Conexiones HTTP cerradas');
+    try {
+      db.pragma('wal_checkpoint(TRUNCATE)');
+      console.log('[SHUTDOWN] WAL checkpoint OK');
+    } catch(e) { console.error('[SHUTDOWN] Error en checkpoint:', e.message); }
+    try {
+      db.close();
+      console.log('[SHUTDOWN] DB cerrada OK');
+    } catch(e) { console.error('[SHUTDOWN] Error cerrando DB:', e.message); }
+    clearTimeout(forceExit);
+    process.exit(0);
+  });
+}
+
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT',  () => gracefulShutdown('SIGINT'));
