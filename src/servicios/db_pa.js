@@ -379,11 +379,17 @@ export function getCampañaActiva() {
 // ── MIGRACIÓN: pa_insumos.unidad sin CHECK restrictivo ────────────────────
 // El enum original ('kg','lt','unidad') es muy acotado. Se recrea la tabla
 // para aceptar cualquier unidad (c.c, gramos, bolsa, rollos, ha, etc.).
+// IMPORTANTE: se desactivan temporalmente las FK porque pa_compras_items,
+// pa_ordenes_items, pa_aplicaciones, pa_costos_lote, pa_movimientos_stock
+// referencian pa_insumos.id. SQLite maneja bien este patrón: al hacer ALTER
+// TABLE RENAME mantiene las referencias automáticamente.
 (function migrarUnidadInsumos() {
   try {
     const t = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='pa_insumos'").get();
     if (t && t.sql && /CHECK\(unidad IN/.test(t.sql)) {
-      // Obtener columnas actuales dinámicamente para no perder datos
+      // Desactivar FK temporalmente (NO puede estar dentro de una transacción)
+      db.pragma('foreign_keys = OFF');
+
       const cols = db.prepare("PRAGMA table_info(pa_insumos)").all().map(c => c.name);
       const colsStr = cols.join(',');
       db.exec(`
@@ -407,9 +413,21 @@ export function getCampañaActiva() {
         ALTER TABLE pa_insumos_v2 RENAME TO pa_insumos;
         COMMIT;
       `);
+
+      // Verificar integridad de FK antes de reactivar (debe estar vacío)
+      const fkCheck = db.prepare("PRAGMA foreign_key_check").all();
+      if (fkCheck.length > 0) {
+        console.error('[PA] ⚠️  FK check falló después de migrar pa_insumos:', fkCheck);
+      }
+
+      db.pragma('foreign_keys = ON');
       console.log('[PA] pa_insumos recreada — unidad y tipo sin CHECK restrictivo');
     }
-  } catch(e) { console.error('[PA] Error migrando pa_insumos.unidad:', e.message); }
+  } catch(e) {
+    console.error('[PA] Error migrando pa_insumos.unidad:', e.message);
+    // Reactivar FK aunque haya fallado, para no dejar la DB en estado inconsistente
+    try { db.pragma('foreign_keys = ON'); } catch(e2) {}
+  }
 })();
 
 // ── SEED: Maestro de insumos desde Excel (127 productos en USD) ────────────
