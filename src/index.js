@@ -162,19 +162,29 @@ app.get("/backup-db-lnb-2026", async (req, res) => {
     if (!fsMod.existsSync(dbPath)) {
       return res.status(404).send("DB no encontrada en " + dbPath);
     }
-    // Usar backup API de SQLite (crea copia consistente aun con la DB en uso)
-    console.log("[BACKUP] Creando copia consistente...");
-    await db.backup(backupPath);
+    // Forzar checkpoint por si la DB está en WAL mode (vuelca cambios pendientes)
+    try { db.pragma("wal_checkpoint(TRUNCATE)"); } catch(e) {}
+
+    // Crear copia de la DB usando fs (simple, sin APIs async que fallen)
+    console.log("[BACKUP] Copiando archivo...");
+    // Si existe una copia anterior huérfana, borrarla primero
+    if (fsMod.existsSync(backupPath)) {
+      try { fsMod.unlinkSync(backupPath); } catch(e) {}
+    }
+    fsMod.copyFileSync(dbPath, backupPath);
+
     const stats = fsMod.statSync(backupPath);
     console.log(`[BACKUP] Enviando ${(stats.size/1024/1024).toFixed(2)} MB`);
     res.setHeader("Content-Type", "application/x-sqlite3");
     res.setHeader("Content-Length", stats.size);
     res.setHeader("Content-Disposition",
       `attachment; filename="lnb-backup-${new Date().toISOString().slice(0,10)}.db"`);
+
     const stream = fsMod.createReadStream(backupPath);
-    stream.on("end", () => {
-      // Eliminar copia temporal después de enviarla
-      fsMod.unlink(backupPath, () => {});
+    stream.on("close", () => {
+      // Eliminar copia temporal cuando termine el stream
+      try { fsMod.unlinkSync(backupPath); } catch(e) {}
+      console.log("[BACKUP] Copia temporal eliminada");
     });
     stream.on("error", (e) => {
       console.error("[BACKUP] Stream error:", e);
