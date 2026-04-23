@@ -152,6 +152,44 @@ app.use("/data/scout", express.static(path.join(__dirname, "../data/scout")));
 // Health check
 app.get("/", (req, res) => res.json({ status:"ok", version:"3.0", panel:"/panel" }));
 
+// ⚠️ TEMPORAL — BACKUP DE LA DB — BORRAR DESPUÉS DE DESCARGAR
+// Descarga: /backup-db-lnb-2026
+app.get("/backup-db-lnb-2026", (req, res) => {
+  const dbPath = path.join(__dirname, "../data/clientes.db");
+  const fs2 = require ? null : null; // dejar fs ya importado arriba
+  // Validar que el archivo exista antes de intentar descargarlo
+  import("fs").then(function(fsMod){
+    if (!fsMod.existsSync(dbPath)) {
+      return res.status(404).json({
+        error: "DB no encontrada en ese path",
+        dbPath: dbPath,
+        hint: "Revisar que el proceso haya arrancado y escrito la DB"
+      });
+    }
+    const stats = fsMod.statSync(dbPath);
+    console.log(`[BACKUP] Descargando DB — ${(stats.size/1024/1024).toFixed(2)} MB — ${dbPath}`);
+    res.download(dbPath, `lnb-backup-${new Date().toISOString().slice(0,10)}.db`, function(err){
+      if (err) console.error("[BACKUP] Error enviando archivo:", err);
+    });
+  });
+});
+
+// ⚠️ TEMPORAL — LISTAR ARCHIVOS EN /app/data — para diagnóstico
+app.get("/backup-ls-lnb-2026", (req, res) => {
+  import("fs").then(function(fsMod){
+    const dataDir = path.join(__dirname, "../data");
+    try {
+      const items = fsMod.readdirSync(dataDir, { withFileTypes: true }).map(function(d){
+        const full = path.join(dataDir, d.name);
+        let size = null;
+        try { size = d.isFile() ? fsMod.statSync(full).size : null; } catch(e) {}
+        return { name: d.name, isDirectory: d.isDirectory(), size: size };
+      });
+      res.json({ dataDir, items });
+    } catch(e) { res.status(500).json({ error: e.message, dataDir }); }
+  });
+});
+
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`\n Servidor en http://localhost:${PORT}`);
