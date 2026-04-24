@@ -437,15 +437,29 @@ Devolvé SOLO un JSON válido sin markdown ni comentarios:
   "nro_comprobante": "número del documento o null",
   "fecha": "YYYY-MM-DD o null",
   "proveedor": "nombre del proveedor o null",
+  "iva_total": número o null,
+  "neto_total": número o null,
+  "total_final": número o null,
   "items": [
     {
       "descripcion": "nombre del producto tal como aparece",
       "cantidad": número,
-      "unidad": "kg|lt|unidad",
-      "precio_unitario": número o null
+      "unidad": "kg|lt|unidad|gramos|c.c|bolsa|bidon|rollos|sobres",
+      "precio_unitario": número o null,
+      "iva_porcentaje": número (ej: 21, 10.5, 0) o null si no está claro,
+      "subtotal_neto": número o null,
+      "iva_monto": número o null
     }
   ]
 }
+
+Notas importantes para el IVA:
+- En Argentina, los agroinsumos suelen estar a 21% o 10.5%.
+- Si la factura tiene una sola alícuota general, asignala a todos los items.
+- Si un item está al 0% (exento), ponelo como 0.
+- Si no podés determinar la alícuota con certeza, poné null.
+- iva_total e iva_monto son el monto en pesos, no el porcentaje.
+
 Insumos conocidos en el sistema (para ayudar a identificar): ${insNombres}
 Solo devolvé el JSON, sin texto adicional.`
             }
@@ -505,10 +519,23 @@ router.post('/compras', requireAuth, (req, res) => {
   const { fecha, proveedor_id, proveedor_txt, nro_factura, tipo_comprobante, campaña_id, items, notas, remito_foto_b64 } = req.body;
   if (!items?.length) return res.status(400).json({ ok: false, error: 'Debe incluir al menos un item' });
   try {
-    let subtotal = 0;
-    for (const it of items) { subtotal += (it.cantidad * it.precio_unit); }
-    const iva_monto = req.body.iva_monto || 0;
-    const total = subtotal + Number(iva_monto);
+    // Calcular totales netos + IVA por item
+    let neto_total = 0;
+    let iva_total = 0;
+    for (const it of items) {
+      const subNeto = Number(it.cantidad) * Number(it.precio_unit);
+      const pct = it.iva_porcentaje != null ? Number(it.iva_porcentaje) : 0;
+      const ivaItem = subNeto * (pct / 100);
+      it._subNeto = subNeto;
+      it._ivaMonto = ivaItem;
+      neto_total += subNeto;
+      iva_total += ivaItem;
+    }
+    // Compatibilidad: si viene iva_monto explícito del frontend, se prioriza
+    if (req.body.iva_monto != null && !items.some(it => it.iva_porcentaje != null)) {
+      iva_total = Number(req.body.iva_monto);
+    }
+    const total = neto_total + iva_total;
 
     // Guardar foto remito si viene
     let remito_foto_path = null;
@@ -522,15 +549,25 @@ router.post('/compras', requireAuth, (req, res) => {
 
     const nuevaCompra = db.transaction(() => {
       const r = db.prepare(`
-        INSERT INTO pa_compras (fecha, proveedor_id, proveedor_txt, nro_factura, tipo_comprobante, campaña_id, subtotal, iva_monto, total, notas, remito_foto_path)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?)
+        INSERT INTO pa_compras (fecha, proveedor_id, proveedor_txt, nro_factura, tipo_comprobante, campaña_id,
+                                subtotal, iva_monto, total, notas, remito_foto_path,
+                                iva_total, neto_total)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
       `).run(fecha||new Date().toISOString().slice(0,10), proveedor_id||null, proveedor_txt||null,
-             nro_factura||null, tipo_comprobante||'factura', campaña_id||null, subtotal, iva_monto, total, notas||null, remito_foto_path);
+             nro_factura||null, tipo_comprobante||'factura', campaña_id||null,
+             neto_total, iva_total, total, notas||null, remito_foto_path,
+             iva_total, neto_total);
       const compraId = r.lastInsertRowid;
       for (const it of items) {
-        const sub = it.cantidad * it.precio_unit;
-        db.prepare("INSERT INTO pa_compras_items (compra_id, insumo_id, cantidad, precio_unit, subtotal) VALUES (?,?,?,?,?)")
-          .run(compraId, it.insumo_id, it.cantidad, it.precio_unit, sub);
+        db.prepare(`
+          INSERT INTO pa_compras_items
+            (compra_id, insumo_id, cantidad, precio_unit, subtotal, iva_porcentaje, iva_monto, subtotal_neto)
+          VALUES (?,?,?,?,?,?,?,?)
+        `).run(compraId, it.insumo_id, it.cantidad, it.precio_unit,
+               it._subNeto + it._ivaMonto,  // subtotal = neto + iva (final del item)
+               it.iva_porcentaje != null ? Number(it.iva_porcentaje) : null,
+               it._ivaMonto,
+               it._subNeto);
         db.prepare("UPDATE pa_insumos SET stock_actual = stock_actual + ? WHERE id = ?").run(it.cantidad, it.insumo_id);
         db.prepare("INSERT INTO pa_movimientos_stock (fecha, insumo_id, tipo, cantidad, motivo, referencia_id) VALUES (?,?,?,?,?,?)")
           .run(fecha||new Date().toISOString().slice(0,10), it.insumo_id, 'entrada', it.cantidad, 'compra', compraId);
@@ -538,7 +575,7 @@ router.post('/compras', requireAuth, (req, res) => {
       return compraId;
     });
     const id = nuevaCompra();
-    res.json({ ok: true, id });
+    res.json({ ok: true, id, neto_total, iva_total, total });
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 

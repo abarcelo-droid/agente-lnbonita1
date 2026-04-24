@@ -300,7 +300,34 @@ export function getCampañaActiva() {
       db.exec("ALTER TABLE pa_compras ADD COLUMN tipo_comprobante TEXT DEFAULT 'factura'");
       console.log("[PA] tipo_comprobante agregado en pa_compras");
     }
+    if (!cols.includes('iva_total')) {
+      db.exec("ALTER TABLE pa_compras ADD COLUMN iva_total REAL");
+      console.log("[PA] iva_total agregado en pa_compras");
+    }
+    if (!cols.includes('neto_total')) {
+      db.exec("ALTER TABLE pa_compras ADD COLUMN neto_total REAL");
+      console.log("[PA] neto_total agregado en pa_compras");
+    }
   } catch(e) { console.error('[PA] Error migrando pa_compras:', e.message); }
+})();
+
+// ── MIGRACIÓN: iva_porcentaje / iva_monto en pa_compras_items ─────────────
+(function() {
+  try {
+    const cols = db.prepare("PRAGMA table_info(pa_compras_items)").all().map(c => c.name);
+    if (!cols.includes('iva_porcentaje')) {
+      db.exec("ALTER TABLE pa_compras_items ADD COLUMN iva_porcentaje REAL");
+      console.log("[PA] iva_porcentaje agregado en pa_compras_items");
+    }
+    if (!cols.includes('iva_monto')) {
+      db.exec("ALTER TABLE pa_compras_items ADD COLUMN iva_monto REAL");
+      console.log("[PA] iva_monto agregado en pa_compras_items");
+    }
+    if (!cols.includes('subtotal_neto')) {
+      db.exec("ALTER TABLE pa_compras_items ADD COLUMN subtotal_neto REAL");
+      console.log("[PA] subtotal_neto agregado en pa_compras_items");
+    }
+  } catch(e) { console.error('[PA] Error migrando pa_compras_items:', e.message); }
 })();
 
 // ── MIGRACIÓN: asignado_a en pa_ordenes ──────────────────────────────────

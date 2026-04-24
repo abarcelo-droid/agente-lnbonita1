@@ -5489,11 +5489,18 @@ if(_inpGondola) _inpGondola.addEventListener('keydown', function(e){
 
   <!-- PRODUCTOS -->
   <div style="font-size:12px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.06em;margin:14px 0 8px">Productos</div>
+  <div style="display:grid;grid-template-columns:1fr 80px 100px 70px 100px auto;gap:8px;font-size:10px;color:var(--mut);font-weight:600;text-transform:uppercase;letter-spacing:.05em;padding:0 0 4px;border-bottom:1px solid var(--bor);margin-bottom:4px">
+    <div>Insumo</div><div>Cant.</div><div>$/unit neto</div><div>IVA</div><div style="text-align:right">Subt. final</div><div></div>
+  </div>
   <div id="pa-comp-items"></div>
   <button class="btn bo" style="margin-top:8px" onclick="paAgregarItemCompra()">+ Agregar producto</button>
 
   <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--bor);display:flex;justify-content:flex-end">
-    <div style="font-size:15px;font-weight:600">Total: <span id="pa-comp-total">$0</span></div>
+    <div style="display:flex;flex-direction:column;gap:4px;align-items:flex-end;font-size:13px">
+      <div style="color:var(--mut)">Subtotal neto: <span id="pa-comp-neto" style="font-weight:600;color:var(--txt)">$0</span></div>
+      <div style="color:var(--mut)">IVA: <span id="pa-comp-iva" style="font-weight:600;color:var(--txt)">$0</span></div>
+      <div style="font-size:15px;font-weight:600;margin-top:4px;padding-top:4px;border-top:1px solid var(--bor);min-width:200px;text-align:right">Total: <span id="pa-comp-total">$0</span></div>
+    </div>
   </div>
   <div class="ab-modal-footer">
     <button class="btn bo" onclick="document.getElementById('pa-mb-compra').classList.remove('on')">Cancelar</button>
@@ -6353,11 +6360,25 @@ function paLeerRemito(){
         }
         var cantEl=document.getElementById('pa-ci-cant-'+n);
         var precEl=document.getElementById('pa-ci-prec-'+n);
+        var ivaEl=document.getElementById('pa-ci-iva-'+n);
         if(cantEl&&it.cantidad)cantEl.value=it.cantidad;
         if(precEl&&it.precio_unitario)precEl.value=it.precio_unitario;
+        // IVA detectado por la IA — si el porcentaje coincide con opciones predefinidas, lo seleccionamos
+        if(ivaEl && it.iva_porcentaje != null){
+          var pct=Number(it.iva_porcentaje);
+          // Buscar opción exacta; si no existe, dejar como 21 por default
+          var opts=Array.from(ivaEl.options).map(function(o){return o.value;});
+          if(opts.indexOf(String(pct))>=0){
+            ivaEl.value=String(pct);
+          }
+        }
       });
       paActTotalComp();
       aplicados.push(parsed.items.length+' producto(s)');
+      // Mostrar info de totales detectados si vinieron
+      if(parsed.iva_total != null || parsed.neto_total != null){
+        aplicados.push('IVA');
+      }
     }
 
     est.style.background='#f0fdf4';est.style.color='var(--ok)';
@@ -6400,7 +6421,9 @@ function paGuardarCompra(){
     var insId=document.getElementById('pa-ci-ins-'+n).value;
     var cant=parseFloat(el.value)||0;
     var prec=parseFloat(document.getElementById('pa-ci-prec-'+n).value)||0;
-    if(insId&&cant>0&&prec>0)items.push({insumo_id:insId,cantidad:cant,precio_unit:prec});
+    var ivaEl=document.getElementById('pa-ci-iva-'+n);
+    var ivaPct=ivaEl&&ivaEl.value!==''?parseFloat(ivaEl.value):null;
+    if(insId&&cant>0&&prec>0)items.push({insumo_id:insId,cantidad:cant,precio_unit:prec,iva_porcentaje:ivaPct});
   });
   if(!items.length)return toast('Agregá al menos un producto','er');
   paF('/api/pa/compras',{method:'POST',headers:{'Content-Type':'application/json'},
@@ -6409,13 +6432,48 @@ function paGuardarCompra(){
     if(r.ok){toast('Compra registrada — stock actualizado');document.getElementById('pa-mb-compra').classList.remove('on');paLoadCompras();paF('/api/pa/insumos').then(function(r2){PA.insumos=r2.data||[];});}
     else toast(r.error||'Error','er');
   });
-}function paAgregarItemCompra(){
+}
+function paAgregarItemCompra(){
   var n=PA.compN++;var opts=PA.insumos.map(function(i){return'<option value="'+i.id+'">'+i.nombre+' ('+i.unidad+')</option>';}).join('');
-  var row=document.createElement('div');row.id='pa-ci-'+n;row.style.cssText='display:grid;grid-template-columns:1fr 100px 110px 80px auto;gap:8px;align-items:center;padding:8px 0;border-bottom:1px solid var(--bor)';
-  row.innerHTML='<select id="pa-ci-ins-'+n+'">'+opts+'</select><input type="number" id="pa-ci-cant-'+n+'" placeholder="Cant." step="0.01" min="0" oninput="paActTotalComp()"><input type="number" id="pa-ci-prec-'+n+'" placeholder="$/unit" step="0.01" min="0" oninput="paActTotalComp()"><span id="pa-ci-sub-'+n+'" style="font-size:12px;color:var(--mut)">$0</span><button class="btn bd bs" onclick="document.getElementById(\'pa-ci-'+n+'\').remove();paActTotalComp()">✕</button>';
+  var row=document.createElement('div');row.id='pa-ci-'+n;
+  row.style.cssText='display:grid;grid-template-columns:1fr 80px 100px 70px 100px auto;gap:8px;align-items:center;padding:8px 0;border-bottom:1px solid var(--bor)';
+  row.innerHTML=
+    '<select id="pa-ci-ins-'+n+'">'+opts+'</select>'+
+    '<input type="number" id="pa-ci-cant-'+n+'" placeholder="Cant." step="0.01" min="0" oninput="paActTotalComp()">'+
+    '<input type="number" id="pa-ci-prec-'+n+'" placeholder="$/unit neto" step="0.01" min="0" oninput="paActTotalComp()">'+
+    '<select id="pa-ci-iva-'+n+'" oninput="paActTotalComp()" style="font-size:12px">'+
+      '<option value="21" selected>21%</option>'+
+      '<option value="10.5">10.5%</option>'+
+      '<option value="0">0% (exento)</option>'+
+      '<option value="">s/dato</option>'+
+    '</select>'+
+    '<span id="pa-ci-sub-'+n+'" style="font-size:12px;color:var(--mut)">$0</span>'+
+    '<button class="btn bd bs" onclick="document.getElementById(\'pa-ci-'+n+'\').remove();paActTotalComp()">✕</button>';
   document.getElementById('pa-comp-items').appendChild(row);
 }
-function paActTotalComp(){var total=0;document.querySelectorAll('[id^=pa-ci-cant-]').forEach(function(el){var n=el.id.split('-').pop(),c=parseFloat(el.value)||0,p=parseFloat(document.getElementById('pa-ci-prec-'+n).value)||0,s=c*p;var se=document.getElementById('pa-ci-sub-'+n);if(se)se.textContent=paMoney(s);total+=s;});document.getElementById('pa-comp-total').textContent=paMoney(total);}
+function paActTotalComp(){
+  var neto=0, iva=0;
+  document.querySelectorAll('[id^=pa-ci-cant-]').forEach(function(el){
+    var n=el.id.split('-').pop();
+    var c=parseFloat(el.value)||0;
+    var p=parseFloat(document.getElementById('pa-ci-prec-'+n).value)||0;
+    var ivaEl=document.getElementById('pa-ci-iva-'+n);
+    var ivaPct=ivaEl&&ivaEl.value!==''?parseFloat(ivaEl.value):0;
+    var sNeto=c*p;
+    var sIva=sNeto*(ivaPct/100);
+    var sTotal=sNeto+sIva;
+    var se=document.getElementById('pa-ci-sub-'+n);
+    if(se)se.textContent=paMoney(sTotal);
+    neto+=sNeto; iva+=sIva;
+  });
+  var total=neto+iva;
+  document.getElementById('pa-comp-total').textContent=paMoney(total);
+  // Mostrar también el desglose neto/IVA/total en el pie del modal
+  var netoEl=document.getElementById('pa-comp-neto');
+  var ivaEl=document.getElementById('pa-comp-iva');
+  if(netoEl)netoEl.textContent=paMoney(neto);
+  if(ivaEl)ivaEl.textContent=paMoney(iva);
+}
 function paLoadOrdenes(){
   var estado=document.getElementById('pa-ord-estado-fil').value;
   paF('/api/pa/ordenes'+(estado?'?estado='+estado:'')).then(function(r){
