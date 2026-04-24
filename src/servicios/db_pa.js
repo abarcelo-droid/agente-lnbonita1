@@ -726,6 +726,17 @@ db.exec(`
     creado_en   TEXT DEFAULT (datetime('now','localtime'))
   );
 
+  -- Grupos / Colectivos (admin de trabajadores — distinto de cuadrilla)
+  -- Cuadrilla = jornada de trabajo anónima con N personas
+  -- Grupo     = clasificación administrativa del trabajador individual
+  CREATE TABLE IF NOT EXISTS pa_grupos (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    nombre      TEXT NOT NULL UNIQUE,
+    descripcion TEXT,
+    activo      INTEGER DEFAULT 1,
+    creado_en   TEXT DEFAULT (datetime('now','localtime'))
+  );
+
   -- Trabajadores
   CREATE TABLE IF NOT EXISTS pa_trabajadores (
     id                    INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -794,7 +805,69 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_pa_partes_lote ON pa_partes_trabajo(lote_id);
   CREATE INDEX IF NOT EXISTS idx_pa_partes_estado ON pa_partes_trabajo(estado);
   CREATE INDEX IF NOT EXISTS idx_pa_rubros_tipo_cult ON pa_rubros_contables(tipo_labor, cultivo);
+
+  -- ═════════════════════════════════════════════════════════════════════
+  -- FICHAJES DE CUADRILLA (sistema mñna/tarde con GPS)
+  -- Reemplaza conceptualmente a pa_partes_trabajo. Admin asigna rubro y lote
+  -- después de que el capataz fichó desde el celular.
+  -- ═════════════════════════════════════════════════════════════════════
+  CREATE TABLE IF NOT EXISTS pa_fichajes_cuadrilla (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    capataz_id        INTEGER NOT NULL REFERENCES usuarios(id),
+    cuadrilla_id      INTEGER NOT NULL REFERENCES pa_cuadrillas(id),
+    fecha             TEXT NOT NULL DEFAULT (date('now','localtime')),
+    momento           TEXT NOT NULL CHECK(momento IN ('entrada','salida')),
+    hora_declarada    TEXT NOT NULL,  -- "HH:MM" lo que el capataz seleccionó
+    hora_real         TEXT NOT NULL DEFAULT (datetime('now','localtime')),  -- cuándo apretó el botón
+    tarea_texto       TEXT NOT NULL,  -- texto libre del capataz
+    cant_personas     INTEGER,
+    lat               REAL,
+    lng               REAL,
+    accuracy_metros   REAL,
+    gps_ok            INTEGER DEFAULT 0,  -- 1 = tomó GPS, 0 = falló/timeout
+    -- Campos que agrega admin desde el panel:
+    lote_id           INTEGER REFERENCES pa_lotes(id),
+    rubro_contable_id INTEGER REFERENCES pa_rubros_contables(id),
+    estado            TEXT DEFAULT 'pendiente' CHECK(estado IN ('pendiente','completado','anulado')),
+    notas_admin       TEXT,
+    completado_por    INTEGER REFERENCES usuarios(id),
+    fecha_completado  TEXT,
+    creado_en         TEXT DEFAULT (datetime('now','localtime'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_pa_fich_fecha ON pa_fichajes_cuadrilla(fecha DESC);
+  CREATE INDEX IF NOT EXISTS idx_pa_fich_capataz ON pa_fichajes_cuadrilla(capataz_id, fecha DESC);
+  CREATE INDEX IF NOT EXISTS idx_pa_fich_estado ON pa_fichajes_cuadrilla(estado);
 `);
+
+// ── MIGRACIÓN: agregar grupo_id a pa_trabajadores ──────────────────────────
+// Grupo es distinto de cuadrilla: admin del trabajador vs. jornada operativa.
+(function migrarTrabajadoresGrupo() {
+  try {
+    const cols = db.prepare("PRAGMA table_info(pa_trabajadores)").all().map(c => c.name);
+    if (!cols.includes('grupo_id')) {
+      db.exec("ALTER TABLE pa_trabajadores ADD COLUMN grupo_id INTEGER REFERENCES pa_grupos(id)");
+      console.log('[PA] pa_trabajadores.grupo_id agregado');
+    }
+  } catch(e) { console.error('[PA] Error migrando pa_trabajadores.grupo_id:', e.message); }
+})();
+
+// ── SEED: grupo "Sin asignar" (fallback para trabajadores sin grupo) ───────
+(function seedGrupoDefault() {
+  try {
+    const n = db.prepare("SELECT COUNT(*) as n FROM pa_grupos").get();
+    if (n.n === 0) {
+      db.prepare("INSERT INTO pa_grupos (nombre, descripcion) VALUES (?, ?)")
+        .run('Sin asignar', 'Grupo por defecto — asignar uno real cuando se pueda');
+      console.log('[PA] Grupo "Sin asignar" creado');
+    }
+    // Asignar trabajadores sin grupo al grupo "Sin asignar"
+    const sinAsignar = db.prepare("SELECT id FROM pa_grupos WHERE nombre='Sin asignar'").get();
+    if (sinAsignar) {
+      const upd = db.prepare("UPDATE pa_trabajadores SET grupo_id = ? WHERE grupo_id IS NULL").run(sinAsignar.id);
+      if (upd.changes > 0) console.log(`[PA] ${upd.changes} trabajadores asignados al grupo Sin asignar`);
+    }
+  } catch(e) { console.error('[PA] Error seed grupo default:', e.message); }
+})();
 
 // ── SEED: 20 rubros contables (tal cual contabilidad) ──────────────────────
 (function seedRubrosContables() {

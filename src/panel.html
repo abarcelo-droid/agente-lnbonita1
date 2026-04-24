@@ -1590,41 +1590,39 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
 
   <!-- Sub-tabs -->
   <div style="display:flex;gap:2px;border-bottom:1px solid var(--bor);margin-bottom:20px;flex-wrap:wrap">
-    <div class="pp-subtab on" data-sub="valorizar" onclick="ppShowSub('valorizar')" style="padding:10px 16px;cursor:pointer;font-size:13px;font-weight:600;border-bottom:2px solid transparent">💰 Por valorizar <span id="pp-badge-val" style="background:var(--err);color:#fff;border-radius:10px;padding:1px 7px;font-size:10px;margin-left:6px"></span></div>
-    <div class="pp-subtab" data-sub="partes" onclick="ppShowSub('partes')" style="padding:10px 16px;cursor:pointer;font-size:13px;font-weight:600;border-bottom:2px solid transparent">📋 Partes</div>
+    <div class="pp-subtab on" data-sub="fichajes-pend" onclick="ppShowSub('fichajes-pend')" style="padding:10px 16px;cursor:pointer;font-size:13px;font-weight:600;border-bottom:2px solid transparent">⏰ Pendientes <span id="pp-badge-fich" style="background:var(--err);color:#fff;border-radius:10px;padding:1px 7px;font-size:10px;margin-left:6px"></span></div>
+    <div class="pp-subtab" data-sub="fichajes-hist" onclick="ppShowSub('fichajes-hist')" style="padding:10px 16px;cursor:pointer;font-size:13px;font-weight:600;border-bottom:2px solid transparent">📚 Histórico</div>
     <div class="pp-subtab" data-sub="trabajadores" onclick="ppShowSub('trabajadores')" style="padding:10px 16px;cursor:pointer;font-size:13px;font-weight:600;border-bottom:2px solid transparent">👥 Trabajadores</div>
     <div class="pp-subtab" data-sub="grupos" onclick="ppShowSub('grupos')" style="padding:10px 16px;cursor:pointer;font-size:13px;font-weight:600;border-bottom:2px solid transparent">🏷️ Grupos</div>
     <div class="pp-subtab" data-sub="cuadrillas" onclick="ppShowSub('cuadrillas')" style="padding:10px 16px;cursor:pointer;font-size:13px;font-weight:600;border-bottom:2px solid transparent">🚜 Cuadrillas</div>
-    <div class="pp-subtab" data-sub="tareas" onclick="ppShowSub('tareas')" style="padding:10px 16px;cursor:pointer;font-size:13px;font-weight:600;border-bottom:2px solid transparent">✅ Tareas</div>
     <div class="pp-subtab" data-sub="rubros" onclick="ppShowSub('rubros')" style="padding:10px 16px;cursor:pointer;font-size:13px;font-weight:600;border-bottom:2px solid transparent">📊 Rubros</div>
   </div>
 
-  <!-- Por valorizar -->
-  <div class="pp-sub on" id="pp-sub-valorizar">
-    <div id="pp-dash-stats" style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:20px"></div>
-    <div style="font-size:13px;font-weight:700;margin-bottom:10px">Partes pendientes de valorización</div>
+  <!-- Fichajes Pendientes (admin asigna lote + rubro) -->
+  <div class="pp-sub on" id="pp-sub-fichajes-pend">
+    <div id="pp-fich-stats" style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:20px"></div>
+    <div style="font-size:13px;font-weight:700;margin-bottom:10px">Fichajes pendientes de asignar lote y rubro contable</div>
     <div class="tw"><table>
-      <thead><tr><th>Fecha</th><th>Lote</th><th>Tarea</th><th>Modo</th><th>Cuadrilla</th><th>Horas / Cant.</th><th>Cargado por</th><th></th></tr></thead>
-      <tbody id="pp-val-tbody"></tbody>
+      <thead><tr><th>Fecha</th><th>Capataz</th><th>Cuadrilla</th><th>M/T</th><th>Hora decl.</th><th>Hora real</th><th>Tarea</th><th>Personas</th><th>GPS</th><th>Lote</th><th>Rubro</th><th></th></tr></thead>
+      <tbody id="pp-fich-pend-tbody"><tr><td colspan="12" style="text-align:center;color:var(--mut);padding:20px">Cargando...</td></tr></tbody>
     </table></div>
   </div>
 
-  <!-- Partes -->
-  <div class="pp-sub" id="pp-sub-partes">
-    <div style="display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap">
-      <select id="pp-filt-estado" onchange="ppLoadPartes()" style="padding:6px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg)">
+  <!-- Fichajes Histórico -->
+  <div class="pp-sub" id="pp-sub-fichajes-hist">
+    <div style="display:flex;gap:10px;margin-bottom:14px;align-items:center;flex-wrap:wrap">
+      <label style="font-size:12px">Desde: <input type="date" id="pp-fich-desde" onchange="ppLoadFichHist()" style="padding:4px 8px;font-size:12px"></label>
+      <label style="font-size:12px">Hasta: <input type="date" id="pp-fich-hasta" onchange="ppLoadFichHist()" style="padding:4px 8px;font-size:12px"></label>
+      <select id="pp-fich-estado-fil" onchange="ppLoadFichHist()" style="padding:4px 8px;font-size:12px">
         <option value="">Todos los estados</option>
-        <option value="pendiente_valorizar">Pendientes</option>
-        <option value="valorizado">Valorizados</option>
-        <option value="anulado">Anulados</option>
-      </select>
-      <select id="pp-filt-lote" onchange="ppLoadPartes()" style="padding:6px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg)">
-        <option value="">Todos los lotes</option>
+        <option value="pendiente">Solo pendientes</option>
+        <option value="completado">Solo completados</option>
+        <option value="anulado">Solo anulados</option>
       </select>
     </div>
     <div class="tw"><table>
-      <thead><tr><th>Fecha</th><th>Lote</th><th>Tarea</th><th>Cuadrilla</th><th>Cant / Horas</th><th>Monto</th><th>Rubro</th><th>Estado</th><th></th></tr></thead>
-      <tbody id="pp-partes-tbody"></tbody>
+      <thead><tr><th>Fecha</th><th>Capataz</th><th>Cuadrilla</th><th>M/T</th><th>Hora</th><th>Tarea</th><th>Personas</th><th>Lote</th><th>Rubro</th><th>Estado</th><th></th></tr></thead>
+      <tbody id="pp-fich-hist-tbody"><tr><td colspan="11" style="text-align:center;color:var(--mut);padding:20px">Seleccioná rango de fechas</td></tr></tbody>
     </table></div>
   </div>
 
@@ -7081,7 +7079,7 @@ var PP = {
 
 function ppInit() {
   ppCargarBase().then(function(){
-    ppShowSub('valorizar');
+    ppShowSub('fichajes-pend');
   });
 }
 
@@ -7101,12 +7099,11 @@ function ppShowSub(sub) {
   document.querySelectorAll('.pp-subtab').forEach(function(t){ t.classList.toggle('on', t.dataset.sub === sub); });
   document.querySelectorAll('.pp-sub').forEach(function(s){ s.classList.remove('on'); });
   document.getElementById('pp-sub-'+sub).classList.add('on');
-  if (sub === 'valorizar') ppLoadDashboard();
-  if (sub === 'partes') ppLoadPartes();
+  if (sub === 'fichajes-pend') ppLoadFichPend();
+  if (sub === 'fichajes-hist') ppLoadFichHist();
   if (sub === 'trabajadores') ppRenderTrabajadores();
   if (sub === 'grupos') ppRenderGrupos();
   if (sub === 'cuadrillas') ppRenderCuadrillas();
-  if (sub === 'tareas') ppRenderTareas();
   if (sub === 'rubros') ppRenderRubros();
 }
 
@@ -7528,6 +7525,124 @@ function ppRenderRubros() {
     var est = r.activo ? '<span style="color:var(--ok)">● Activo</span>' : '<span style="color:var(--mut)">○ Inactivo</span>';
     return '<tr><td><strong style="font-family:monospace;font-size:12px">'+r.nombre+'</strong></td><td>'+r.tipo_labor.replace('_',' ')+'</td><td>'+(r.cultivo||'—')+'</td><td>'+est+'</td></tr>';
   }).join('');
+}
+
+// ═════════════════════════════════════════════════════════════════════
+// ⏰ FICHAJES DE CUADRILLA — Panel admin
+// ═════════════════════════════════════════════════════════════════════
+
+function ppLoadFichPend() {
+  paF('/api/pa/personal/fichajes-stats').then(function(st){
+    if (!st.ok) return;
+    var d = st.data;
+    document.getElementById('pp-badge-fich').textContent = d.pendientes || '';
+    document.getElementById('pp-badge-fich').style.display = d.pendientes ? 'inline-block' : 'none';
+    document.getElementById('pp-fich-stats').innerHTML =
+      '<div class="pa-card"><div class="pa-card-title">Pendientes de asignar</div><div class="pa-stat" style="color:var(--warn)">'+d.pendientes+'</div></div>'
+    + '<div class="pa-card"><div class="pa-card-title">Fichajes hoy</div><div class="pa-stat">'+d.hoy+'</div></div>'
+    + '<div class="pa-card"><div class="pa-card-title">Esta semana</div><div class="pa-stat">'+d.semana+'</div></div>';
+  });
+  paF('/api/pa/personal/fichajes?estado=pendiente').then(function(r){
+    PP.fichajesPend = r.data || [];
+    ppRenderFichPend();
+  });
+}
+
+function ppRenderFichPend() {
+  var tb = document.getElementById('pp-fich-pend-tbody');
+  if (!PP.fichajesPend.length) {
+    tb.innerHTML = '<tr><td colspan="12" style="text-align:center;color:var(--mut);padding:20px">No hay fichajes pendientes. 🎉</td></tr>';
+    return;
+  }
+  tb.innerHTML = PP.fichajesPend.map(function(f){
+    var mom = f.momento === 'entrada' ? '<span style="color:#059669;font-weight:700">🌅 ENT</span>' : '<span style="color:#ea580c;font-weight:700">🌇 SAL</span>';
+    var gps = f.gps_ok
+      ? '<a href="https://www.google.com/maps?q='+f.lat+','+f.lng+'" target="_blank" title="Ver en mapa">📍</a>'
+      : '<span title="Sin GPS">⚠️</span>';
+    var horaReal = f.hora_real ? f.hora_real.split(' ')[1] || '—' : '—';
+    // Inline selects para lote y rubro
+    var lotesOpts = '<option value="">—</option>' + (PP.lotes||[]).map(function(l){ return '<option value="'+l.id+'">'+(l.finca?l.finca+' · ':'')+l.nombre+'</option>'; }).join('');
+    var rubrosOpts = '<option value="">—</option>' + (PP.rubros||[]).filter(function(r){return r.activo;}).map(function(r){ return '<option value="'+r.id+'">'+r.nombre+'</option>'; }).join('');
+    return '<tr data-id="'+f.id+'">'
+      + '<td style="font-size:11px">'+f.fecha+'</td>'
+      + '<td>'+(f.capataz_nombre||'—')+'</td>'
+      + '<td><strong>'+f.cuadrilla_nombre+'</strong></td>'
+      + '<td>'+mom+'</td>'
+      + '<td>'+f.hora_declarada+'</td>'
+      + '<td style="font-size:11px;color:var(--mut)">'+horaReal+'</td>'
+      + '<td style="font-size:12px">'+f.tarea_texto+'</td>'
+      + '<td style="text-align:center">'+(f.cant_personas||'—')+'</td>'
+      + '<td style="text-align:center">'+gps+'</td>'
+      + '<td><select class="fich-lote" style="font-size:12px;padding:3px;max-width:150px">'+lotesOpts+'</select></td>'
+      + '<td><select class="fich-rubro" style="font-size:12px;padding:3px;max-width:180px">'+rubrosOpts+'</select></td>'
+      + '<td><button class="btn bb bs" onclick="ppAsignarFich('+f.id+')" style="padding:3px 10px;font-size:11px">💾 Asignar</button></td>'
+      + '</tr>';
+  }).join('');
+}
+
+function ppAsignarFich(id) {
+  var row = document.querySelector('tr[data-id="'+id+'"]');
+  if (!row) return;
+  var loteId = row.querySelector('.fich-lote').value;
+  var rubroId = row.querySelector('.fich-rubro').value;
+  if (!loteId || !rubroId) return toast('Seleccioná lote y rubro', 'er');
+  paF('/api/pa/personal/fichajes/'+id, {
+    method: 'PATCH', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ lote_id: parseInt(loteId), rubro_contable_id: parseInt(rubroId) })
+  }).then(function(r){
+    if (r.ok) { toast('✓ Asignado'); ppLoadFichPend(); }
+    else toast(r.error || 'Error', 'er');
+  });
+}
+
+function ppLoadFichHist() {
+  var desde = document.getElementById('pp-fich-desde').value;
+  var hasta = document.getElementById('pp-fich-hasta').value;
+  var estado = document.getElementById('pp-fich-estado-fil').value;
+  if (!desde && !hasta) {
+    // Default: últimos 7 días
+    var h = new Date(); var d = new Date(h); d.setDate(d.getDate() - 7);
+    desde = d.toISOString().slice(0,10);
+    hasta = h.toISOString().slice(0,10);
+    document.getElementById('pp-fich-desde').value = desde;
+    document.getElementById('pp-fich-hasta').value = hasta;
+  }
+  var qs = [];
+  if (desde) qs.push('fecha_desde='+desde);
+  if (hasta) qs.push('fecha_hasta='+hasta);
+  if (estado) qs.push('estado='+estado);
+  paF('/api/pa/personal/fichajes?'+qs.join('&')).then(function(r){
+    var data = r.data || [];
+    var tb = document.getElementById('pp-fich-hist-tbody');
+    if (!data.length) { tb.innerHTML = '<tr><td colspan="11" style="text-align:center;color:var(--mut);padding:20px">Sin fichajes en el rango</td></tr>'; return; }
+    tb.innerHTML = data.map(function(f){
+      var mom = f.momento === 'entrada' ? '🌅 ENT' : '🌇 SAL';
+      var est = f.estado === 'pendiente' ? '<span style="background:#fef3c7;color:#92400e;padding:1px 6px;border-radius:8px;font-size:10px">Pendiente</span>'
+              : f.estado === 'completado' ? '<span style="background:#d1fae5;color:#065f46;padding:1px 6px;border-radius:8px;font-size:10px">✓ Completado</span>'
+              : '<span style="background:#fee2e2;color:#991b1b;padding:1px 6px;border-radius:8px;font-size:10px">Anulado</span>';
+      return '<tr>'
+        + '<td style="font-size:11px">'+f.fecha+'</td>'
+        + '<td>'+(f.capataz_nombre||'—')+'</td>'
+        + '<td>'+f.cuadrilla_nombre+'</td>'
+        + '<td>'+mom+'</td>'
+        + '<td>'+f.hora_declarada+'</td>'
+        + '<td style="font-size:12px">'+f.tarea_texto+'</td>'
+        + '<td style="text-align:center">'+(f.cant_personas||'—')+'</td>'
+        + '<td>'+(f.lote_nombre?(f.lote_finca?f.lote_finca+' · ':'')+f.lote_nombre:'<span style="color:var(--mut)">—</span>')+'</td>'
+        + '<td style="font-size:11px">'+(f.rubro_nombre||'<span style="color:var(--mut)">—</span>')+'</td>'
+        + '<td>'+est+'</td>'
+        + '<td>'+(f.estado !== 'anulado' ? '<button class="btn bo bs" onclick="ppAnularFich('+f.id+')" style="padding:2px 8px;font-size:10px;color:var(--err);border-color:var(--err)">🗑</button>' : '')+'</td>'
+        + '</tr>';
+    }).join('');
+  });
+}
+
+function ppAnularFich(id) {
+  if (!confirm('¿Anular este fichaje? Esta acción se puede revertir editándolo manualmente.')) return;
+  paF('/api/pa/personal/fichajes/'+id, { method: 'DELETE' }).then(function(r){
+    if (r.ok) { toast('✓ Anulado'); ppLoadFichHist(); ppLoadFichPend(); }
+    else toast(r.error || 'Error', 'er');
+  });
 }
 
 // Hook al clickear en el item del sidebar Personal

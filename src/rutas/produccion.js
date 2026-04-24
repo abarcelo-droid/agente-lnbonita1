@@ -1359,33 +1359,85 @@ router.patch('/personal/cuadrillas/:id', requireAuth, (req, res) => {
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
+// ── Grupos / Colectivos (administrativo de trabajadores) ───────────────────
+router.get('/personal/grupos', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const data = db.prepare(`
+      SELECT g.*, (SELECT COUNT(*) FROM pa_trabajadores WHERE grupo_id = g.id AND activo=1) as cantidad
+      FROM pa_grupos g WHERE g.activo=1 ORDER BY g.nombre
+    `).all();
+    res.json({ ok: true, data });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+router.post('/personal/grupos', requireAuth, (req, res) => {
+  const db = getDb();
+  const { nombre, descripcion } = req.body;
+  if (!nombre) return res.status(400).json({ ok: false, error: 'nombre requerido' });
+  try {
+    const r = db.prepare("INSERT INTO pa_grupos (nombre, descripcion) VALUES (?,?)")
+      .run(nombre.trim(), descripcion || null);
+    res.json({ ok: true, id: r.lastInsertRowid });
+  } catch(e) {
+    if (e.message.includes('UNIQUE')) return res.status(400).json({ ok: false, error: 'Ya existe un grupo con ese nombre' });
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+router.patch('/personal/grupos/:id', requireAuth, (req, res) => {
+  const db = getDb();
+  const { nombre, descripcion, activo } = req.body;
+  try {
+    const g = db.prepare("SELECT * FROM pa_grupos WHERE id=?").get(req.params.id);
+    if (!g) return res.status(404).json({ ok: false, error: 'Grupo no encontrado' });
+    db.prepare("UPDATE pa_grupos SET nombre=?, descripcion=?, activo=? WHERE id=?")
+      .run(nombre || g.nombre,
+           descripcion !== undefined ? descripcion : g.descripcion,
+           activo !== undefined ? (activo ? 1 : 0) : g.activo,
+           req.params.id);
+    res.json({ ok: true });
+  } catch(e) {
+    if (e.message.includes('UNIQUE')) return res.status(400).json({ ok: false, error: 'Ya existe un grupo con ese nombre' });
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
 // ── Trabajadores ───────────────────────────────────────────────────────────
 router.get('/personal/trabajadores', requireAuth, (req, res) => {
   const db = getDb();
   try {
-    const { cuadrilla_id, tipo_relacion, incluir_inactivos } = req.query;
-    let q = `SELECT t.*, c.nombre as cuadrilla_nombre
+    const { cuadrilla_id, grupo_id, tipo_relacion, incluir_inactivos } = req.query;
+    let q = `SELECT t.*, c.nombre as cuadrilla_nombre, g.nombre as grupo_nombre
              FROM pa_trabajadores t
              LEFT JOIN pa_cuadrillas c ON c.id = t.cuadrilla_habitual_id
+             LEFT JOIN pa_grupos g ON g.id = t.grupo_id
              WHERE 1=1`;
     const params = [];
     if (!incluir_inactivos) q += " AND t.activo=1";
     if (cuadrilla_id) { q += " AND t.cuadrilla_habitual_id=?"; params.push(cuadrilla_id); }
+    if (grupo_id) { q += " AND t.grupo_id=?"; params.push(grupo_id); }
     if (tipo_relacion) { q += " AND t.tipo_relacion=?"; params.push(tipo_relacion); }
-    q += " ORDER BY t.nombre";
+    q += " ORDER BY g.nombre, t.nombre";
     res.json({ ok: true, data: db.prepare(q).all(...params) });
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
 router.post('/personal/trabajadores', requireAuth, (req, res) => {
   const db = getDb();
-  const { nombre, dni, cuadrilla_habitual_id, tipo_relacion, jornal_base, unidad_jornal, notas } = req.body;
+  const { nombre, dni, grupo_id, cuadrilla_habitual_id, tipo_relacion, jornal_base, unidad_jornal, notas } = req.body;
   if (!nombre) return res.status(400).json({ ok: false, error: 'nombre requerido' });
   try {
+    // Si no viene grupo_id, asignar al grupo "Sin asignar" por default
+    let gId = grupo_id ? Number(grupo_id) : null;
+    if (!gId) {
+      const sa = db.prepare("SELECT id FROM pa_grupos WHERE nombre='Sin asignar'").get();
+      if (sa) gId = sa.id;
+    }
     const r = db.prepare(`INSERT INTO pa_trabajadores
-        (nombre, dni, cuadrilla_habitual_id, tipo_relacion, jornal_base, unidad_jornal, notas)
-        VALUES (?,?,?,?,?,?,?)`)
-      .run(nombre, dni || null, cuadrilla_habitual_id || null,
+        (nombre, dni, grupo_id, cuadrilla_habitual_id, tipo_relacion, jornal_base, unidad_jornal, notas)
+        VALUES (?,?,?,?,?,?,?,?)`)
+      .run(nombre, dni || null, gId, cuadrilla_habitual_id || null,
            tipo_relacion || 'fijo',
            Number(jornal_base) || 0,
            unidad_jornal || 'dia',
@@ -1396,16 +1448,17 @@ router.post('/personal/trabajadores', requireAuth, (req, res) => {
 
 router.patch('/personal/trabajadores/:id', requireAuth, (req, res) => {
   const db = getDb();
-  const { nombre, dni, cuadrilla_habitual_id, tipo_relacion, jornal_base, unidad_jornal, activo, notas } = req.body;
+  const { nombre, dni, grupo_id, cuadrilla_habitual_id, tipo_relacion, jornal_base, unidad_jornal, activo, notas } = req.body;
   try {
     const c = db.prepare("SELECT * FROM pa_trabajadores WHERE id=?").get(req.params.id);
     if (!c) return res.status(404).json({ ok: false, error: 'Trabajador no encontrado' });
     db.prepare(`UPDATE pa_trabajadores SET
-        nombre=?, dni=?, cuadrilla_habitual_id=?, tipo_relacion=?,
+        nombre=?, dni=?, grupo_id=?, cuadrilla_habitual_id=?, tipo_relacion=?,
         jornal_base=?, unidad_jornal=?, activo=?, notas=?
         WHERE id=?`)
       .run(nombre || c.nombre,
            dni !== undefined ? dni : c.dni,
+           grupo_id !== undefined ? grupo_id : c.grupo_id,
            cuadrilla_habitual_id !== undefined ? cuadrilla_habitual_id : c.cuadrilla_habitual_id,
            tipo_relacion || c.tipo_relacion,
            jornal_base !== undefined ? Number(jornal_base) : c.jornal_base,
@@ -1801,6 +1854,145 @@ router.get('/personal/dashboard', requireAuth, (req, res) => {
       gasto_mes_rubro: gastoMesRubro,
       partes_recientes: partesRecientes
     }});
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// FICHAJES DE CUADRILLA (mñna/tarde con GPS)
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Capataz ficha entrada o salida desde el Scout
+router.post('/personal/fichajes', requireAuth, (req, res) => {
+  const db = getDb();
+  const u = req.user || {};
+  const { cuadrilla_id, momento, hora_declarada, tarea_texto, cant_personas, lat, lng, accuracy_metros, gps_ok } = req.body;
+
+  // Validaciones
+  if (!cuadrilla_id) return res.status(400).json({ ok: false, error: 'cuadrilla_id requerido' });
+  if (!['entrada','salida'].includes(momento)) return res.status(400).json({ ok: false, error: 'momento debe ser entrada o salida' });
+  if (!hora_declarada || !/^\d{2}:\d{2}$/.test(hora_declarada)) return res.status(400).json({ ok: false, error: 'hora_declarada debe tener formato HH:MM' });
+  if (!tarea_texto || !tarea_texto.trim()) return res.status(400).json({ ok: false, error: 'tarea_texto requerido' });
+
+  // Verificar que la cuadrilla existe
+  const cuad = db.prepare("SELECT id, capataz_id FROM pa_cuadrillas WHERE id = ? AND activo = 1").get(cuadrilla_id);
+  if (!cuad) return res.status(404).json({ ok: false, error: 'Cuadrilla no encontrada' });
+
+  try {
+    const r = db.prepare(`
+      INSERT INTO pa_fichajes_cuadrilla
+        (capataz_id, cuadrilla_id, momento, hora_declarada, tarea_texto, cant_personas, lat, lng, accuracy_metros, gps_ok)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      u.id || cuad.capataz_id,
+      cuadrilla_id,
+      momento,
+      hora_declarada,
+      tarea_texto.trim(),
+      cant_personas != null ? Number(cant_personas) : null,
+      lat != null ? Number(lat) : null,
+      lng != null ? Number(lng) : null,
+      accuracy_metros != null ? Number(accuracy_metros) : null,
+      gps_ok ? 1 : 0
+    );
+    res.json({ ok: true, id: r.lastInsertRowid });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// Lista de fichajes (filtros: estado, fecha_desde, fecha_hasta, capataz_id)
+router.get('/personal/fichajes', requireAuth, (req, res) => {
+  const db = getDb();
+  const { estado, fecha_desde, fecha_hasta, capataz_id } = req.query;
+  try {
+    let sql = `
+      SELECT f.*,
+             c.nombre as cuadrilla_nombre,
+             u.nombre as capataz_nombre,
+             l.nombre as lote_nombre, l.finca as lote_finca,
+             r.nombre as rubro_nombre
+      FROM pa_fichajes_cuadrilla f
+      JOIN pa_cuadrillas c ON c.id = f.cuadrilla_id
+      LEFT JOIN usuarios u ON u.id = f.capataz_id
+      LEFT JOIN pa_lotes l ON l.id = f.lote_id
+      LEFT JOIN pa_rubros_contables r ON r.id = f.rubro_contable_id
+      WHERE 1=1
+    `;
+    const params = [];
+    if (estado) { sql += " AND f.estado = ?"; params.push(estado); }
+    if (fecha_desde) { sql += " AND f.fecha >= ?"; params.push(fecha_desde); }
+    if (fecha_hasta) { sql += " AND f.fecha <= ?"; params.push(fecha_hasta); }
+    if (capataz_id) { sql += " AND f.capataz_id = ?"; params.push(capataz_id); }
+    sql += " ORDER BY f.fecha DESC, f.hora_real DESC";
+    const data = db.prepare(sql).all(...params);
+    res.json({ ok: true, data });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// Admin completa fichaje con lote + rubro (y cambia a estado=completado)
+router.patch('/personal/fichajes/:id', requireAuth, (req, res) => {
+  const db = getDb();
+  const u = req.user || {};
+  const { lote_id, rubro_contable_id, estado, notas_admin, cant_personas, tarea_texto } = req.body;
+  try {
+    const cur = db.prepare("SELECT * FROM pa_fichajes_cuadrilla WHERE id = ?").get(req.params.id);
+    if (!cur) return res.status(404).json({ ok: false, error: 'Fichaje no encontrado' });
+
+    // Si se está completando (asignando lote + rubro), marcar completado_por y fecha
+    let nuevoEstado = estado != null ? estado : cur.estado;
+    const asignandoLoteYRubro = (lote_id != null || rubro_contable_id != null);
+    if (asignandoLoteYRubro && nuevoEstado === 'pendiente') {
+      // Solo se marca completado si quedaron ambos asignados
+      const loteFinal = lote_id != null ? lote_id : cur.lote_id;
+      const rubroFinal = rubro_contable_id != null ? rubro_contable_id : cur.rubro_contable_id;
+      if (loteFinal && rubroFinal) nuevoEstado = 'completado';
+    }
+    const marcaCompletado = nuevoEstado === 'completado' && cur.estado !== 'completado';
+
+    db.prepare(`
+      UPDATE pa_fichajes_cuadrilla SET
+        lote_id = ?, rubro_contable_id = ?, estado = ?, notas_admin = ?,
+        cant_personas = ?, tarea_texto = ?,
+        completado_por = ?, fecha_completado = ?
+      WHERE id = ?
+    `).run(
+      lote_id != null ? lote_id : cur.lote_id,
+      rubro_contable_id != null ? rubro_contable_id : cur.rubro_contable_id,
+      nuevoEstado,
+      notas_admin != null ? notas_admin : cur.notas_admin,
+      cant_personas != null ? cant_personas : cur.cant_personas,
+      tarea_texto != null ? tarea_texto : cur.tarea_texto,
+      marcaCompletado ? (u.id || null) : cur.completado_por,
+      marcaCompletado ? new Date().toISOString().slice(0,19).replace('T',' ') : cur.fecha_completado,
+      req.params.id
+    );
+    res.json({ ok: true });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// Eliminar / anular fichaje
+router.delete('/personal/fichajes/:id', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    db.prepare("UPDATE pa_fichajes_cuadrilla SET estado='anulado' WHERE id=?").run(req.params.id);
+    res.json({ ok: true });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// Stats para el dashboard admin de fichajes
+router.get('/personal/fichajes-stats', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const pendientes = db.prepare("SELECT COUNT(*) as n FROM pa_fichajes_cuadrilla WHERE estado='pendiente'").get().n;
+    const hoy = db.prepare("SELECT COUNT(*) as n FROM pa_fichajes_cuadrilla WHERE fecha = date('now','localtime') AND estado != 'anulado'").get().n;
+    const semana = db.prepare("SELECT COUNT(*) as n FROM pa_fichajes_cuadrilla WHERE fecha >= date('now','localtime','-7 days') AND estado != 'anulado'").get().n;
+    const ultimos = db.prepare(`
+      SELECT f.*, c.nombre as cuadrilla_nombre, u.nombre as capataz_nombre
+      FROM pa_fichajes_cuadrilla f
+      JOIN pa_cuadrillas c ON c.id = f.cuadrilla_id
+      LEFT JOIN usuarios u ON u.id = f.capataz_id
+      WHERE f.estado != 'anulado'
+      ORDER BY f.creado_en DESC LIMIT 5
+    `).all();
+    res.json({ ok: true, data: { pendientes, hoy, semana, ultimos } });
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 

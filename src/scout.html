@@ -535,23 +535,72 @@ input[type=file]{display:none}
 
 <!-- ═══════════════════════ TAB PERSONAL ═══════════════════════ -->
 <div class="screen" id="screen-personal">
-  <!-- Último parte del usuario -->
-  <div style="padding:14px 14px 0">
-    <div style="font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--mut);margin-bottom:8px">👷 Último parte</div>
-    <div id="pp-ultimo" style="margin-bottom:16px"></div>
+  <!-- Header con última actividad -->
+  <div style="padding:16px 14px 0">
+    <div style="font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--mut);margin-bottom:6px">⏰ Fichaje de cuadrilla</div>
+    <div id="fi-status" style="background:var(--sur);border:1px solid var(--bor);border-radius:12px;padding:12px;font-size:12px;color:var(--mut);margin-bottom:18px">
+      Cargando...
+    </div>
   </div>
 
-  <!-- Acción principal -->
-  <div style="padding:0 14px">
-    <button class="rep-btn primary" style="width:100%;padding:18px;font-size:15px;border-radius:12px;background:var(--burg);color:#fff" onclick="ppAbrirParte()">
-      ➕ Registrar parte de trabajo
+  <!-- Botones grandes de fichaje -->
+  <div style="padding:0 14px;display:flex;flex-direction:column;gap:12px">
+    <button class="rep-btn primary" style="width:100%;padding:22px;font-size:17px;border-radius:14px;background:#059669;color:#fff;border:none;display:flex;align-items:center;justify-content:center;gap:10px" onclick="fiAbrir('entrada')">
+      <span style="font-size:30px">🌅</span>
+      <span>Fichar ENTRADA</span>
+    </button>
+    <button class="rep-btn primary" style="width:100%;padding:22px;font-size:17px;border-radius:14px;background:#ea580c;color:#fff;border:none;display:flex;align-items:center;justify-content:center;gap:10px" onclick="fiAbrir('salida')">
+      <span style="font-size:30px">🌇</span>
+      <span>Fichar SALIDA</span>
     </button>
   </div>
 
-  <!-- Partes recientes -->
-  <div style="padding:16px 14px 80px">
-    <div style="font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--mut);margin:8px 0 8px">Mis últimos partes</div>
-    <div id="pp-partes"><div class="empty" style="padding:20px"><span class="empty-icon">⏳</span><div class="empty-txt" style="font-size:12px">Cargando...</div></div></div>
+  <!-- Mis fichajes de hoy -->
+  <div style="padding:20px 14px 80px">
+    <div style="font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--mut);margin:8px 0 8px">Mis fichajes de hoy</div>
+    <div id="fi-hoy"><div class="empty" style="padding:20px"><span class="empty-icon">⏳</span><div class="empty-txt" style="font-size:12px">Cargando...</div></div></div>
+  </div>
+</div>
+
+<!-- MODAL FICHAJE -->
+<div class="lightbox" id="modal-fi" style="align-items:flex-end;padding:0">
+  <div style="background:var(--sur);width:100%;max-height:94vh;overflow-y:auto;border-radius:20px 20px 0 0;padding:20px">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+      <div>
+        <div style="font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--mut);margin-bottom:3px">Fichaje de cuadrilla</div>
+        <div id="fi-modal-tit" style="font-size:18px;font-weight:700">—</div>
+      </div>
+      <button onclick="document.getElementById('modal-fi').classList.remove('open')" style="background:none;border:none;font-size:26px;color:var(--mut);cursor:pointer">×</button>
+    </div>
+
+    <!-- GPS status -->
+    <div id="fi-gps-status" style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;padding:8px 12px;font-size:12px;margin-bottom:14px;color:#166534">
+      📍 Obteniendo ubicación...
+    </div>
+
+    <div style="margin-bottom:12px">
+      <div style="font-size:11px;color:var(--mut);margin-bottom:4px">Cuadrilla</div>
+      <select class="scout-select" id="fi-cuadrilla"></select>
+    </div>
+
+    <div style="margin-bottom:12px">
+      <div style="font-size:11px;color:var(--mut);margin-bottom:4px">Hora</div>
+      <input type="time" class="scout-input" id="fi-hora">
+    </div>
+
+    <div style="margin-bottom:12px">
+      <div style="font-size:11px;color:var(--mut);margin-bottom:4px">Tarea / Actividad</div>
+      <textarea class="scout-input" id="fi-tarea" rows="2" placeholder="Ej: Poda de uva, riego, limpieza, cosecha..."></textarea>
+    </div>
+
+    <div style="margin-bottom:16px">
+      <div style="font-size:11px;color:var(--mut);margin-bottom:4px">Cantidad de personas <span style="font-size:10px;color:var(--mut)">(opcional)</span></div>
+      <input type="number" class="scout-input" id="fi-cant" min="0" placeholder="Ej: 15" inputmode="numeric">
+    </div>
+
+    <button class="rep-btn primary" id="fi-btn-guardar" style="width:100%;padding:16px;font-size:15px;border-radius:12px" onclick="fiGuardar()">
+      Guardar fichaje
+    </button>
   </div>
 </div>
 
@@ -868,7 +917,7 @@ function showTab(tab) {
   if(tab==='pendientes')cargarPendientes();
   if(tab==='mis-tareas')cargarMisTareas();
   if(tab==='combustible')cbInit();
-  if(tab==='personal')ppInit();
+  if(tab==='personal')fiInit();
 }
 
 // ── RENDER REPORTES ──
@@ -1894,6 +1943,174 @@ function ppGuardar() {
       toast('Parte registrado — RRHH lo valorizará');
       document.getElementById('modal-pp').classList.remove('open');
       ppCargarDatos();
+    } else {
+      toast(r.error || 'Error al guardar', 'er');
+    }
+  });
+}
+
+// ═════════════════════════════════════════════════════════════════════
+// ⏰ FICHAJE DE CUADRILLA (mñna/tarde con GPS)
+// ═════════════════════════════════════════════════════════════════════
+var FI = {
+  momento: null,      // 'entrada' | 'salida'
+  cuadrillas: [],
+  gpsData: null,      // {lat, lng, accuracy, ok}
+  hoy: [],
+};
+
+function fiInit() {
+  // Cargar cuadrillas y fichajes del día
+  Promise.all([
+    api('/api/pa/personal/cuadrillas').then(r => r.data || []),
+    api('/api/pa/personal/fichajes?fecha_desde=' + new Date().toISOString().slice(0,10) + '&fecha_hasta=' + new Date().toISOString().slice(0,10)).then(r => r.data || [])
+  ]).then(function(arr) {
+    FI.cuadrillas = arr[0];
+    FI.hoy = arr[1];
+    fiRenderStatus();
+    fiRenderHoy();
+  });
+}
+
+function fiRenderStatus() {
+  var st = document.getElementById('fi-status');
+  if (!FI.hoy.length) {
+    st.innerHTML = '<span style="color:var(--mut)">Todavía no fichaste hoy. Arrancá con ENTRADA.</span>';
+    return;
+  }
+  var entradas = FI.hoy.filter(function(f){ return f.momento === 'entrada'; }).length;
+  var salidas = FI.hoy.filter(function(f){ return f.momento === 'salida'; }).length;
+  st.innerHTML = '<strong>Hoy:</strong> '+entradas+' entrada(s), '+salidas+' salida(s) registradas.';
+}
+
+function fiRenderHoy() {
+  var el = document.getElementById('fi-hoy');
+  if (!FI.hoy.length) {
+    el.innerHTML = '<div class="empty" style="padding:20px"><span class="empty-icon">📋</span><div class="empty-txt" style="font-size:12px">Sin fichajes hoy</div></div>';
+    return;
+  }
+  el.innerHTML = FI.hoy.map(function(f){
+    var icono = f.momento === 'entrada' ? '🌅' : '🌇';
+    var color = f.momento === 'entrada' ? '#059669' : '#ea580c';
+    var estadoBadge = f.estado === 'pendiente'
+      ? '<span style="background:#fef3c7;color:#92400e;padding:1px 8px;border-radius:10px;font-size:10px">⏳ Pendiente admin</span>'
+      : f.estado === 'completado'
+        ? '<span style="background:#d1fae5;color:#065f46;padding:1px 8px;border-radius:10px;font-size:10px">✓ Completado</span>'
+        : '<span style="background:#fee2e2;color:#991b1b;padding:1px 8px;border-radius:10px;font-size:10px">✗ Anulado</span>';
+    var gpsIcon = f.gps_ok ? '📍' : '⚠️ Sin GPS';
+    return '<div style="background:var(--sur);border:1px solid var(--bor);border-radius:12px;padding:12px;margin-bottom:8px">'
+      + '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">'
+        + '<div style="display:flex;align-items:center;gap:8px"><span style="font-size:20px">'+icono+'</span><strong style="color:'+color+'">'+(f.momento==='entrada'?'ENTRADA':'SALIDA')+'</strong><span style="color:var(--mut);font-size:12px">'+f.hora_declarada+'</span></div>'
+        + estadoBadge
+      + '</div>'
+      + '<div style="font-size:13px;margin-bottom:4px"><strong>'+(f.cuadrilla_nombre||'—')+'</strong>'+(f.cant_personas?' · '+f.cant_personas+' personas':'')+'</div>'
+      + '<div style="font-size:12px;color:var(--mut);margin-bottom:4px">🔧 '+f.tarea_texto+'</div>'
+      + '<div style="font-size:10px;color:var(--mut)">'+gpsIcon+' · Cargado a las '+(f.hora_real||'').split(' ')[1]||'—'+'</div>'
+    + '</div>';
+  }).join('');
+}
+
+function fiAbrir(momento) {
+  FI.momento = momento;
+  FI.gpsData = null;
+  document.getElementById('fi-modal-tit').textContent = momento === 'entrada' ? '🌅 Fichar ENTRADA' : '🌇 Fichar SALIDA';
+  // Precompletar hora con la actual
+  var now = new Date();
+  var hh = String(now.getHours()).padStart(2,'0');
+  var mm = String(now.getMinutes()).padStart(2,'0');
+  document.getElementById('fi-hora').value = hh+':'+mm;
+  document.getElementById('fi-tarea').value = '';
+  document.getElementById('fi-cant').value = '';
+  // Poblar cuadrillas
+  var selC = document.getElementById('fi-cuadrilla');
+  if (!FI.cuadrillas.length) {
+    selC.innerHTML = '<option value="">— No hay cuadrillas disponibles —</option>';
+  } else {
+    selC.innerHTML = '<option value="">— Elegí cuadrilla —</option>' +
+      FI.cuadrillas.map(function(c){ return '<option value="'+c.id+'">'+c.nombre+'</option>'; }).join('');
+  }
+  // Intentar obtener GPS con timeout de 5s
+  fiObtenerGPS();
+  document.getElementById('modal-fi').classList.add('open');
+}
+
+function fiObtenerGPS() {
+  var stat = document.getElementById('fi-gps-status');
+  stat.style.background = '#fef3c7'; stat.style.borderColor = '#fde68a'; stat.style.color = '#92400e';
+  stat.textContent = '📍 Obteniendo ubicación...';
+
+  if (!navigator.geolocation) {
+    stat.style.background = '#fee2e2'; stat.style.borderColor = '#fecaca'; stat.style.color = '#991b1b';
+    stat.innerHTML = '⚠️ GPS no disponible en este dispositivo';
+    FI.gpsData = { lat: null, lng: null, accuracy: null, ok: false };
+    return;
+  }
+
+  var timeout = setTimeout(function(){
+    if (!FI.gpsData) {
+      FI.gpsData = { lat: null, lng: null, accuracy: null, ok: false };
+      stat.style.background = '#fee2e2'; stat.style.borderColor = '#fecaca'; stat.style.color = '#991b1b';
+      stat.innerHTML = '⚠️ Sin GPS — el fichaje se guardará igual';
+    }
+  }, 5000);
+
+  navigator.geolocation.getCurrentPosition(
+    function(pos){
+      clearTimeout(timeout);
+      FI.gpsData = {
+        lat: pos.coords.latitude,
+        lng: pos.coords.longitude,
+        accuracy: pos.coords.accuracy,
+        ok: true
+      };
+      stat.style.background = '#f0fdf4'; stat.style.borderColor = '#bbf7d0'; stat.style.color = '#166534';
+      stat.innerHTML = '✓ Ubicación obtenida (precisión ±' + Math.round(pos.coords.accuracy) + 'm)';
+    },
+    function(err){
+      clearTimeout(timeout);
+      FI.gpsData = { lat: null, lng: null, accuracy: null, ok: false };
+      stat.style.background = '#fee2e2'; stat.style.borderColor = '#fecaca'; stat.style.color = '#991b1b';
+      stat.innerHTML = '⚠️ GPS bloqueado — se guardará sin ubicación';
+    },
+    { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
+  );
+}
+
+function fiGuardar() {
+  var cuadId = document.getElementById('fi-cuadrilla').value;
+  var hora = document.getElementById('fi-hora').value;
+  var tarea = document.getElementById('fi-tarea').value.trim();
+  var cant = document.getElementById('fi-cant').value;
+
+  if (!cuadId) return toast('Elegí una cuadrilla', 'er');
+  if (!hora) return toast('Ingresá la hora', 'er');
+  if (!tarea) return toast('Ingresá la tarea', 'er');
+
+  var btn = document.getElementById('fi-btn-guardar');
+  btn.textContent = 'Enviando...'; btn.disabled = true;
+
+  // Si GPS aún no está listo, esperar hasta 2s más
+  var body = {
+    cuadrilla_id: parseInt(cuadId),
+    momento: FI.momento,
+    hora_declarada: hora,
+    tarea_texto: tarea,
+    cant_personas: cant ? parseInt(cant) : null,
+    lat: FI.gpsData ? FI.gpsData.lat : null,
+    lng: FI.gpsData ? FI.gpsData.lng : null,
+    accuracy_metros: FI.gpsData ? FI.gpsData.accuracy : null,
+    gps_ok: FI.gpsData ? FI.gpsData.ok : false
+  };
+
+  api('/api/pa/personal/fichajes', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify(body)
+  }).then(function(r){
+    btn.textContent = 'Guardar fichaje'; btn.disabled = false;
+    if (r.ok) {
+      toast('✓ Fichaje guardado');
+      document.getElementById('modal-fi').classList.remove('open');
+      fiInit();
     } else {
       toast(r.error || 'Error al guardar', 'er');
     }
