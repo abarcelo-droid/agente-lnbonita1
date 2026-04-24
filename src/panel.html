@@ -65,6 +65,12 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
 .mb{display:none;position:fixed;inset:0;background:rgba(10,20,40,.55);z-index:100;align-items:center;justify-content:center}
 .mb.on{display:flex}
 .mbox{background:var(--sur);border:1px solid var(--bor);border-radius:14px;padding:28px;width:620px;max-width:95vw;max-height:90vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.15)}
+/* Modal mapa: sin padding para que el mapa ocupe todo */
+#mb-poligono .mbox{padding:0;overflow:hidden}
+#mb-poligono .mhd{padding:16px 18px;margin-bottom:0;border-bottom:1px solid var(--bor)}
+/* Z-index Leaflet debajo del modal pero visible */
+.leaflet-container{z-index:1}
+.pa-map-tooltip{background:rgba(26,58,92,.95);color:#fff;border:none;padding:4px 8px;font-size:11px;font-weight:600;border-radius:4px}
 .mhd{display:flex;align-items:center;justify-content:space-between;margin-bottom:22px}
 .mht{font-size:17px;font-weight:600}
 .mcl{background:none;border:none;color:var(--mut);font-size:22px;cursor:pointer;padding:4px;line-height:1}
@@ -92,6 +98,11 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
 .ri{margin-bottom:14px;padding-bottom:14px;border-bottom:1px solid var(--bor)}
 .ri:last-child{border-bottom:none;margin-bottom:0;padding-bottom:0}
 </style>
+<!-- Leaflet + leaflet-draw para editor de polígonos (mapa satelital Esri) -->
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<link rel="stylesheet" href="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" defer></script>
+<script src="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.js" defer></script>
 <script src="/static/mandata.js" defer></script>
 </head>
 <body>
@@ -1314,14 +1325,28 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
 <!-- ─── PA SCOUT (resumen en panel desktop) ───────────────────── -->
 <div class="sec" id="sec-pa-lotes">
 <div class="ph"><div><div class="ph-t">🗺️ Fincas y Lotes</div><div class="ph-s">182.4 ha — Carpinteria, San Juan</div></div>
-<button class="btn bb" onclick="paAbrirNuevoLote()">+ Nuevo lote</button></div>
+<div style="display:flex;gap:8px">
+  <button class="btn bo" id="pa-lot-vista-tabla" onclick="paLotesVista('tabla')" style="border-color:var(--burg);color:var(--burg)">📋 Tabla</button>
+  <button class="btn bo" id="pa-lot-vista-mapa" onclick="paLotesVista('mapa')">🗺️ Mapa</button>
+  <button class="btn bb" onclick="paAbrirNuevoLote()">+ Nuevo lote</button>
+</div>
+</div>
 <div class="filt">
   <select id="pa-lot-sector-fil" onchange="paLoadLotes()"><option value="">Todas las fincas</option></select>
 </div>
-<div class="pa-wrap"><div class="ab-table-wrap"><table class="pa-tbl">
-  <thead><tr><th>Finca / Sector</th><th>Lote (Llaves)</th><th style="text-align:right">Ha</th><th>Cultivo actual</th><th>Tipo</th><th></th></tr></thead>
-  <tbody id="pa-lot-tbody"><tr><td colspan="6" class="emp">Cargando...</td></tr></tbody>
+<!-- Vista: Tabla -->
+<div id="pa-lot-vista-tabla-cont" class="pa-wrap"><div class="ab-table-wrap"><table class="pa-tbl">
+  <thead><tr><th>Finca / Sector</th><th>Lote (Llaves)</th><th style="text-align:right">Ha</th><th>Cultivo actual</th><th>Tipo</th><th>Polígono</th><th></th></tr></thead>
+  <tbody id="pa-lot-tbody"><tr><td colspan="7" class="emp">Cargando...</td></tr></tbody>
 </table></div></div>
+<!-- Vista: Mapa general -->
+<div id="pa-lot-vista-mapa-cont" style="display:none">
+  <div id="pa-map-general" style="height:calc(100vh - 260px);min-height:500px;border:1px solid var(--bor);border-radius:8px;position:relative"></div>
+  <div style="display:flex;gap:12px;margin-top:8px;font-size:11px;color:var(--mut);flex-wrap:wrap;align-items:center">
+    <span><strong>Leyenda:</strong></span>
+    <span id="pa-map-leyenda"></span>
+  </div>
+</div>
 </div>
 <!-- ─── PA SCOUT (resumen en panel desktop) ───────────────────── -->
 
@@ -1454,6 +1479,43 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   <!-- Tanques -->
   <div class="cb-sub" id="cb-sub-tanques">
     <div id="cb-tanques-list" style="display:grid;grid-template-columns:1fr 1fr;gap:16px"></div>
+  </div>
+</div>
+
+<!-- MODAL EDITOR DE POLÍGONO (Leaflet + Esri) -->
+<div class="mb" id="mb-poligono">
+  <div class="mbox" style="width:900px;max-width:95vw;max-height:94vh;display:flex;flex-direction:column">
+    <div class="mhd">
+      <div>
+        <div class="mht" id="pa-pol-tit">🗺️ Dibujar polígono</div>
+        <div style="font-size:12px;color:var(--mut);margin-top:2px" id="pa-pol-sub">—</div>
+      </div>
+      <button class="mcl" onclick="paCerrarEditorPoligono()">×</button>
+    </div>
+    <div style="padding:8px 14px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;background:var(--bg);border-bottom:1px solid var(--bor);font-size:12px">
+      <div><strong>Ha del lote:</strong> <span id="pa-pol-ha-lote">—</span></div>
+      <div><strong>Ha calculadas:</strong> <span id="pa-pol-ha-calc" style="color:var(--burg)">—</span></div>
+      <div id="pa-pol-diff" style="font-size:11px;color:var(--mut)"></div>
+      <div style="flex:1"></div>
+      <label style="display:flex;align-items:center;gap:4px;font-size:11px">
+        <input type="radio" name="pa-map-layer" value="satellite" checked onchange="paCambiarCapa(this.value)"> Satélite
+      </label>
+      <label style="display:flex;align-items:center;gap:4px;font-size:11px">
+        <input type="radio" name="pa-map-layer" value="hybrid" onchange="paCambiarCapa(this.value)"> Satélite + calles
+      </label>
+      <label style="display:flex;align-items:center;gap:4px;font-size:11px">
+        <input type="radio" name="pa-map-layer" value="street" onchange="paCambiarCapa(this.value)"> Calles
+      </label>
+    </div>
+    <div id="pa-pol-mapa" style="flex:1;min-height:500px;position:relative"></div>
+    <div style="padding:12px 16px;display:flex;gap:10px;justify-content:space-between;align-items:center;border-top:1px solid var(--bor);background:var(--sur)">
+      <div style="font-size:11px;color:var(--mut)" id="pa-pol-hint">🖱️ Usá la herramienta de polígono (izquierda) para dibujar. Click por vértice, doble click para cerrar.</div>
+      <div style="display:flex;gap:10px">
+        <button class="btn bo" onclick="paEliminarPoligono()" id="pa-pol-btn-del" style="display:none">🗑️ Eliminar polígono</button>
+        <button class="btn bo" onclick="paCerrarEditorPoligono()">Cancelar</button>
+        <button class="btn bb" onclick="paGuardarPoligono()" id="pa-pol-btn-save" disabled>💾 Guardar polígono</button>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -6517,9 +6579,14 @@ function paLoadLotes(){
   var secId=document.getElementById('pa-lot-sector-fil').value;
   paF('/api/pa/lotes'+(secId?'?sector_id='+secId:'')).then(function(r){
     PA.lotes=r.data||[];var tb=document.getElementById('pa-lot-tbody');
-    if(!PA.lotes.length){tb.innerHTML='<tr><td colspan="6" class="emp">Sin lotes</td></tr>';return;}
+    if(!PA.lotes.length){tb.innerHTML='<tr><td colspan="7" class="emp">Sin lotes</td></tr>';return;}
     var tl={frutales:'Frutal',chacra_mercado:'Chacra Mercado',chacra_industria:'Chacra Industria'};
-    tb.innerHTML=PA.lotes.map(function(l){return'<tr><td style="color:var(--mut);font-size:12px">'+l.sector_nombre+'</td><td><strong>'+l.nombre+'</strong></td><td style="text-align:right">'+l.hectareas+'</td><td>'+(l.cultivo_actual||'<span style="color:var(--mut);font-style:italic">Sin asignar</span>')+'</td><td><span class="pa-badge pa-gris-bg">'+(tl[l.sector_tipo]||l.sector_tipo)+'</span></td><td><button class="btn bo bs" onclick="paEditarCultivo('+l.id+',\''+l.nombre.replace(/'/g,"\\'")+'\')">🌱 Cultivo</button></td></tr>';}).join('');
+    tb.innerHTML=PA.lotes.map(function(l){
+      var polBtn = l.poligono_geojson
+        ? '<button class="btn bo bs" onclick="paAbrirEditorPoligono('+l.id+')" title="Editar polígono" style="color:var(--ok);border-color:var(--ok)">✓ Ver</button>'
+        : '<button class="btn bo bs" onclick="paAbrirEditorPoligono('+l.id+')" title="Dibujar polígono">🗺️ Dibujar</button>';
+      return '<tr><td style="color:var(--mut);font-size:12px">'+l.sector_nombre+'</td><td><strong>'+l.nombre+'</strong></td><td style="text-align:right">'+l.hectareas+'</td><td>'+(l.cultivo_actual||'<span style="color:var(--mut);font-style:italic">Sin asignar</span>')+'</td><td><span class="pa-badge pa-gris-bg">'+(tl[l.sector_tipo]||l.sector_tipo)+'</span></td><td>'+polBtn+'</td><td><button class="btn bo bs" onclick="paEditarCultivo('+l.id+',\''+l.nombre.replace(/'/g,"\\'")+'\')">🌱 Cultivo</button></td></tr>';
+    }).join('');
   });
 }
 function paAbrirNuevoLote(){
@@ -7359,6 +7426,259 @@ document.addEventListener('click', function(e) {
   var t = e.target.closest('[data-sec="pa-personal"]');
   if (t) setTimeout(ppInit, 50);
 });
+
+// ═════════════════════════════════════════════════════════════════════
+// 🗺️ EDITOR DE POLÍGONOS (Leaflet + Esri) — Fincas y Lotes
+// ═════════════════════════════════════════════════════════════════════
+var PAMAP = {
+  editor: null, general: null, drawnLayer: null, drawControl: null,
+  loteEdit: null, capaSatellite: null, capaStreet: null, capaLabels: null,
+};
+
+var PA_MAP_COLORS = {
+  'Uva Superior':'#a855f7','Uva Red Globe':'#7c3aed','Uva Cardinal':'#6d28d9','Uva Cereza':'#c084fc',
+  'Damasco':'#f97316','Durazno':'#fb923c','Ciruela':'#a3a3a3',
+  'Melón':'#eab308','Brócoli':'#22c55e','Cebolla':'#a16207','Tomate Industria':'#dc2626',
+  'Ajo':'#a855f7','Papa':'#eab308','Zapallo':'#f97316',
+  'Mejoramiento de Suelo':'#a16207','Barbecho':'#94a3b8','Sin uso':'#cbd5e1',
+};
+function paColorCultivo(c) { return PA_MAP_COLORS[c] || '#0ea5e9'; }
+
+function paLotesVista(v) {
+  var tabla = document.getElementById('pa-lot-vista-tabla-cont');
+  var mapa = document.getElementById('pa-lot-vista-mapa-cont');
+  var btnT = document.getElementById('pa-lot-vista-tabla');
+  var btnM = document.getElementById('pa-lot-vista-mapa');
+  if (v === 'tabla') {
+    tabla.style.display = ''; mapa.style.display = 'none';
+    btnT.style.borderColor='var(--burg)'; btnT.style.color='var(--burg)';
+    btnM.style.borderColor=''; btnM.style.color='';
+  } else {
+    tabla.style.display = 'none'; mapa.style.display = '';
+    btnM.style.borderColor='var(--burg)'; btnM.style.color='var(--burg)';
+    btnT.style.borderColor=''; btnT.style.color='';
+    paRenderMapaGeneral();
+  }
+}
+
+function paRenderMapaGeneral() {
+  if (typeof L === 'undefined') { setTimeout(paRenderMapaGeneral, 300); return; }
+  var lotes = (PA.lotes||[]).filter(function(l){ return l.poligono_geojson; });
+  if (!PAMAP.general) {
+    PAMAP.general = L.map('pa-map-general', { zoomControl: true }).setView([-31.58, -68.52], 13);
+    paAgregarCapas(PAMAP.general, 'hybrid');
+  } else {
+    PAMAP.general.eachLayer(function(layer){
+      if (layer._isPaPoly) PAMAP.general.removeLayer(layer);
+    });
+  }
+  var campAct = (PA.campañas||[]).find(function(c){return c.activa==1;});
+  var campañaNom = campAct ? campAct.nombre : null;
+  var bounds = [];
+  var cultivosUsados = {};
+  lotes.forEach(function(l){
+    try {
+      var geo = typeof l.poligono_geojson === 'string' ? JSON.parse(l.poligono_geojson) : l.poligono_geojson;
+      var cultActual = '';
+      if (campañaNom && l.cultivos && l.cultivos[campañaNom]) {
+        var cd = l.cultivos[campañaNom];
+        cultActual = typeof cd === 'string' ? cd : (cd.cultivo || '');
+      }
+      if (!cultActual) cultActual = l.cultivo_actual || 'Sin uso';
+      cultivosUsados[cultActual] = true;
+      var color = paColorCultivo(cultActual);
+      var layer = L.geoJSON(geo, {
+        style: { color: color, weight: 2, fillOpacity: 0.45, fillColor: color }
+      }).bindTooltip(
+        '<strong>'+l.nombre+'</strong><br>'+(l.finca||'')+'<br>'+(l.hectareas||'?')+' ha — '+cultActual,
+        { className:'pa-map-tooltip', sticky: true }
+      ).on('click', function(){ paAbrirEditorPoligono(l.id); });
+      layer._isPaPoly = true;
+      layer.addTo(PAMAP.general);
+      var b = layer.getBounds();
+      if (b.isValid()) bounds.push(b);
+    } catch(e) { console.warn('Poligono invalido lote', l.id, e); }
+  });
+  if (bounds.length) {
+    var all = bounds[0];
+    bounds.slice(1).forEach(function(b){ all.extend(b); });
+    PAMAP.general.fitBounds(all, { padding: [30, 30] });
+  }
+  var leyEl = document.getElementById('pa-map-leyenda');
+  if (leyEl) {
+    leyEl.innerHTML = Object.keys(cultivosUsados).map(function(c){
+      return '<span style="display:inline-flex;align-items:center;gap:4px;margin-right:12px"><span style="width:12px;height:12px;background:'+paColorCultivo(c)+';border-radius:3px;display:inline-block"></span>'+c+'</span>';
+    }).join('') || '<span style="color:var(--mut)">Sin polígonos dibujados todavía. Editá un lote para agregar su polígono.</span>';
+  }
+  setTimeout(function(){ if(PAMAP.general)PAMAP.general.invalidateSize(); }, 100);
+}
+
+function paAgregarCapas(map, tipo) {
+  if (PAMAP.capaSatellite && map.hasLayer(PAMAP.capaSatellite)) map.removeLayer(PAMAP.capaSatellite);
+  if (PAMAP.capaStreet && map.hasLayer(PAMAP.capaStreet)) map.removeLayer(PAMAP.capaStreet);
+  if (PAMAP.capaLabels && map.hasLayer(PAMAP.capaLabels)) map.removeLayer(PAMAP.capaLabels);
+  var sat = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { attribution: 'Tiles © Esri', maxZoom: 19 });
+  var street = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© OpenStreetMap', maxZoom: 19 });
+  var labels = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}', { attribution: '', maxZoom: 19 });
+  PAMAP.capaSatellite = sat; PAMAP.capaStreet = street; PAMAP.capaLabels = labels;
+  if (tipo === 'satellite') sat.addTo(map);
+  else if (tipo === 'street') street.addTo(map);
+  else { sat.addTo(map); labels.addTo(map); }
+}
+
+function paCambiarCapa(tipo) { if (PAMAP.editor) paAgregarCapas(PAMAP.editor, tipo); }
+
+function paAbrirEditorPoligono(loteId) {
+  var lote = (PA.lotes||[]).find(function(l){return l.id===loteId;});
+  if (!lote) return;
+  PAMAP.loteEdit = lote;
+  document.getElementById('pa-pol-tit').textContent = '🗺️ ' + lote.nombre;
+  document.getElementById('pa-pol-sub').textContent = (lote.finca||'') + (lote.sector_nombre?' · '+lote.sector_nombre:'');
+  document.getElementById('pa-pol-ha-lote').textContent = (lote.hectareas||'?') + ' ha';
+  document.getElementById('pa-pol-ha-calc').textContent = '—';
+  document.getElementById('pa-pol-diff').textContent = '';
+  document.getElementById('pa-pol-btn-save').disabled = true;
+  document.getElementById('pa-pol-btn-del').style.display = lote.poligono_geojson ? '' : 'none';
+  document.getElementById('mb-poligono').classList.add('on');
+
+  setTimeout(function(){
+    if (typeof L === 'undefined') { toast('Leaflet no cargó aún, refrescá la página','er'); return; }
+    if (PAMAP.editor) { PAMAP.editor.off(); PAMAP.editor.remove(); PAMAP.editor = null; }
+    var center = [-31.58, -68.52];
+    if (lote.centroide_lat && lote.centroide_lng) center = [lote.centroide_lat, lote.centroide_lng];
+    PAMAP.editor = L.map('pa-pol-mapa', { zoomControl: true }).setView(center, lote.poligono_geojson ? 17 : 15);
+    paAgregarCapas(PAMAP.editor, 'hybrid');
+
+    PAMAP.drawnLayer = new L.FeatureGroup();
+    PAMAP.editor.addLayer(PAMAP.drawnLayer);
+
+    if (lote.poligono_geojson) {
+      try {
+        var geo = typeof lote.poligono_geojson === 'string' ? JSON.parse(lote.poligono_geojson) : lote.poligono_geojson;
+        var layer = L.geoJSON(geo, { style: { color:'#dc2626', weight: 3, fillOpacity: 0.3 } });
+        layer.eachLayer(function(l){ PAMAP.drawnLayer.addLayer(l); });
+        PAMAP.editor.fitBounds(PAMAP.drawnLayer.getBounds(), { padding: [30,30] });
+        paActualizarHa();
+        document.getElementById('pa-pol-btn-save').disabled = false;
+      } catch(e) { console.warn('Polígono inválido:', e); }
+    }
+
+    PAMAP.drawControl = new L.Control.Draw({
+      position: 'topleft',
+      draw: {
+        polygon: { allowIntersection: false, showArea: true, shapeOptions: { color: '#dc2626', weight: 3, fillOpacity: 0.3 } },
+        polyline: false, rectangle: false, circle: false, marker: false, circlemarker: false
+      },
+      edit: { featureGroup: PAMAP.drawnLayer, remove: true }
+    });
+    PAMAP.editor.addControl(PAMAP.drawControl);
+
+    PAMAP.editor.on(L.Draw.Event.CREATED, function(e){
+      PAMAP.drawnLayer.clearLayers();
+      PAMAP.drawnLayer.addLayer(e.layer);
+      paActualizarHa();
+      document.getElementById('pa-pol-btn-save').disabled = false;
+    });
+    PAMAP.editor.on(L.Draw.Event.EDITED, paActualizarHa);
+    PAMAP.editor.on(L.Draw.Event.DELETED, function(){
+      paActualizarHa();
+      document.getElementById('pa-pol-btn-save').disabled = PAMAP.drawnLayer.getLayers().length === 0;
+    });
+
+    setTimeout(function(){ PAMAP.editor.invalidateSize(); }, 100);
+  }, 150);
+}
+
+function paAreaPoligonoHa(latlngs) {
+  if (!latlngs || latlngs.length < 3) return 0;
+  var R = 6378137;
+  var latRef = latlngs[0].lat * Math.PI / 180;
+  var pts = latlngs.map(function(ll){
+    return { x: (ll.lng * Math.PI/180) * R * Math.cos(latRef), y: (ll.lat * Math.PI/180) * R };
+  });
+  var area = 0;
+  for (var i=0; i<pts.length; i++) {
+    var j = (i+1) % pts.length;
+    area += pts[i].x * pts[j].y;
+    area -= pts[j].x * pts[i].y;
+  }
+  return Math.abs(area / 2) / 10000;
+}
+
+function paActualizarHa() {
+  if (!PAMAP.drawnLayer || !PAMAP.drawnLayer.getLayers().length) {
+    document.getElementById('pa-pol-ha-calc').textContent = '—';
+    document.getElementById('pa-pol-diff').textContent = '';
+    return;
+  }
+  var layer = PAMAP.drawnLayer.getLayers()[0];
+  if (!layer.getLatLngs) return;
+  var rings = layer.getLatLngs();
+  var latlngs = Array.isArray(rings[0]) ? rings[0] : rings;
+  var ha = paAreaPoligonoHa(latlngs);
+  document.getElementById('pa-pol-ha-calc').textContent = ha.toFixed(2) + ' ha';
+  var haLote = PAMAP.loteEdit ? PAMAP.loteEdit.hectareas : 0;
+  if (haLote > 0) {
+    var diff = ha - haLote;
+    var pct = (diff / haLote) * 100;
+    var color = Math.abs(pct) > 10 ? 'var(--err)' : Math.abs(pct) > 5 ? 'var(--warn)' : 'var(--ok)';
+    document.getElementById('pa-pol-diff').innerHTML =
+      '<span style="color:'+color+'">' + (diff>=0?'+':'') + diff.toFixed(2) + ' ha ('+(pct>=0?'+':'')+pct.toFixed(1)+'%)</span>';
+  }
+}
+
+function paCentroidePoligono(latlngs) {
+  var sumLat=0, sumLng=0;
+  latlngs.forEach(function(ll){ sumLat += ll.lat; sumLng += ll.lng; });
+  return { lat: sumLat/latlngs.length, lng: sumLng/latlngs.length };
+}
+
+function paGuardarPoligono() {
+  if (!PAMAP.loteEdit || !PAMAP.drawnLayer.getLayers().length) return;
+  var layer = PAMAP.drawnLayer.getLayers()[0];
+  var geojson = layer.toGeoJSON();
+  var rings = layer.getLatLngs();
+  var latlngs = Array.isArray(rings[0]) ? rings[0] : rings;
+  var ha = paAreaPoligonoHa(latlngs);
+  var centro = paCentroidePoligono(latlngs);
+
+  var haLote = PAMAP.loteEdit.hectareas || 0;
+  var actualizarHa = false;
+  if (haLote > 0 && Math.abs(ha - haLote)/haLote > 0.15) {
+    actualizarHa = confirm('Las hectáreas calculadas ('+ha.toFixed(2)+' ha) difieren bastante de las cargadas ('+haLote+' ha).\n\n¿Actualizar las hectáreas del lote con el valor calculado?');
+  } else if (!haLote) {
+    actualizarHa = true;
+  }
+
+  var body = { geojson: geojson, centroide_lat: centro.lat, centroide_lng: centro.lng };
+  if (actualizarHa) body.hectareas_calculadas = ha;
+
+  paF('/api/pa/lotes/'+PAMAP.loteEdit.id+'/poligono', {
+    method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body)
+  }).then(function(r){
+    if (!r.ok) return toast(r.error||'Error al guardar','er');
+    toast('✓ Polígono guardado' + (actualizarHa ? ' · ha actualizadas' : ''));
+    paCerrarEditorPoligono();
+    paLoadLotes();
+  });
+}
+
+function paEliminarPoligono() {
+  if (!PAMAP.loteEdit) return;
+  if (!confirm('¿Eliminar el polígono de este lote?')) return;
+  paF('/api/pa/lotes/'+PAMAP.loteEdit.id+'/poligono', { method:'DELETE' }).then(function(r){
+    if (!r.ok) return toast(r.error||'Error','er');
+    toast('✓ Polígono eliminado');
+    paCerrarEditorPoligono();
+    paLoadLotes();
+  });
+}
+
+function paCerrarEditorPoligono() {
+  document.getElementById('mb-poligono').classList.remove('on');
+  if (PAMAP.editor) { PAMAP.editor.off(); PAMAP.editor.remove(); PAMAP.editor = null; }
+  PAMAP.loteEdit = null;
+}
 
 </script>
 

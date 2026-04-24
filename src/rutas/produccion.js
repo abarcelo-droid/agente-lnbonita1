@@ -229,6 +229,42 @@ router.patch('/lotes/:id', requireAuth, (req, res) => {
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
+// ── Guardar polígono dibujado en Leaflet ──
+// body: { geojson, centroide_lat, centroide_lng, hectareas_calculadas (opcional) }
+router.post('/lotes/:id/poligono', requireAuth, (req, res) => {
+  const db = getDb();
+  const { geojson, centroide_lat, centroide_lng, hectareas_calculadas } = req.body;
+  if (!geojson) return res.status(400).json({ ok: false, error: 'geojson requerido' });
+  try {
+    const cur = db.prepare("SELECT id, hectareas FROM pa_lotes WHERE id=?").get(req.params.id);
+    if (!cur) return res.status(404).json({ ok: false, error: 'Lote no encontrado' });
+    // Validar geojson mínimamente
+    let parsed;
+    try { parsed = typeof geojson === 'string' ? JSON.parse(geojson) : geojson; }
+    catch(e) { return res.status(400).json({ ok: false, error: 'geojson inválido' }); }
+    const geoStr = JSON.stringify(parsed);
+    // Si vino hectáreas calculadas, la actualiza también (opcional)
+    const haFinal = (hectareas_calculadas != null && hectareas_calculadas > 0) ? Number(hectareas_calculadas) : cur.hectareas;
+    db.prepare(`UPDATE pa_lotes SET poligono_geojson=?, centroide_lat=?, centroide_lng=?, hectareas=? WHERE id=?`)
+      .run(geoStr,
+           centroide_lat != null ? Number(centroide_lat) : null,
+           centroide_lng != null ? Number(centroide_lng) : null,
+           haFinal,
+           req.params.id);
+    res.json({ ok: true });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// ── Eliminar polígono ──
+router.delete('/lotes/:id/poligono', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    db.prepare("UPDATE pa_lotes SET poligono_geojson=NULL, centroide_lat=NULL, centroide_lng=NULL WHERE id=?")
+      .run(req.params.id);
+    res.json({ ok: true });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
 // ─────────────────────────────────────────────────────────────────────────
 // INSUMOS (FERTILIZANTES, AGROQUÍMICOS, ETC.)
 // ─────────────────────────────────────────────────────────────────────────

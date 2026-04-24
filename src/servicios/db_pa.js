@@ -234,6 +234,19 @@ export function getCampañaActiva() {
       db.exec("ALTER TABLE pa_lotes ADD COLUMN poligono_maps TEXT");
       console.log("[PA] Columna poligono_maps agregada en pa_lotes");
     }
+    // Campos nuevos para el editor de polígonos integrado (Leaflet + Esri)
+    if (!cols.includes('poligono_geojson')) {
+      db.exec("ALTER TABLE pa_lotes ADD COLUMN poligono_geojson TEXT");
+      console.log("[PA] Columna poligono_geojson agregada en pa_lotes");
+    }
+    if (!cols.includes('centroide_lat')) {
+      db.exec("ALTER TABLE pa_lotes ADD COLUMN centroide_lat REAL");
+      console.log("[PA] Columna centroide_lat agregada en pa_lotes");
+    }
+    if (!cols.includes('centroide_lng')) {
+      db.exec("ALTER TABLE pa_lotes ADD COLUMN centroide_lng REAL");
+      console.log("[PA] Columna centroide_lng agregada en pa_lotes");
+    }
     if (!cols.includes('red_agua')) {
       db.exec("ALTER TABLE pa_lotes ADD COLUMN red_agua TEXT CHECK(red_agua IN ('Norte','Sur','Ambas') OR red_agua IS NULL)");
       console.log("[PA] Columna red_agua agregada en pa_lotes");
