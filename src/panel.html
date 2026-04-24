@@ -1274,10 +1274,14 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     <option value="repuesto">Repuestos</option>
     <option value="otro">Otros</option>
   </select>
+  <label style="margin-left:14px;font-size:12px;color:var(--mut);display:inline-flex;align-items:center;gap:6px;cursor:pointer">
+    <input type="checkbox" id="pa-ins-ver-inact" onchange="paLoadInsumos()" style="width:auto">
+    Ver desactivados
+  </label>
 </div>
 <div class="pa-wrap"><div class="ab-table-wrap"><table class="pa-tbl">
   <thead><tr><th>Nombre</th><th>Principio activo</th><th>Tipo</th><th>Unidad</th><th style="text-align:right">Stock actual</th><th style="text-align:right">Último precio</th><th>Estado</th><th></th></tr></thead>
-  <tbody id="pa-ins-tbody"><tr><td colspan="7" class="emp">Cargando...</td></tr></tbody>
+  <tbody id="pa-ins-tbody"><tr><td colspan="8" class="emp">Cargando...</td></tr></tbody>
 </table></div></div>
 </div>
 
@@ -1285,9 +1289,15 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
 <div class="sec" id="sec-pa-compras">
 <div class="ph"><div><div class="ph-t">🛒 Compras de Insumos</div><div class="ph-s">Registro de facturas y actualización de stock</div></div>
 <button class="btn bb" onclick="paAbrirNuevaCompra()">+ Nueva compra</button></div>
+<div class="filt">
+  <label style="font-size:12px;color:var(--mut);display:inline-flex;align-items:center;gap:6px;cursor:pointer">
+    <input type="checkbox" id="pa-comp-ver-inact" onchange="paLoadCompras()" style="width:auto">
+    Ver desactivadas
+  </label>
+</div>
 <div class="pa-wrap"><div class="ab-table-wrap"><table class="pa-tbl">
-  <thead><tr><th>Fecha</th><th>Comprobante</th><th>Proveedor</th><th>Productos</th><th style="text-align:right">Total</th><th>Foto</th></tr></thead>
-  <tbody id="pa-comp-tbody"><tr><td colspan="5" class="emp">Cargando...</td></tr></tbody>
+  <thead><tr><th>Fecha</th><th>Comprobante</th><th>Proveedor</th><th>Productos</th><th style="text-align:right">Total</th><th>Foto</th><th></th></tr></thead>
+  <tbody id="pa-comp-tbody"><tr><td colspan="7" class="emp">Cargando...</td></tr></tbody>
 </table></div></div>
 </div>
 
@@ -1333,11 +1343,15 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
 </div>
 <div class="filt">
   <select id="pa-lot-finca-fil" onchange="paLoadLotes()"><option value="">Todas las fincas</option></select>
+  <label style="margin-left:14px;font-size:12px;color:var(--mut);display:inline-flex;align-items:center;gap:6px;cursor:pointer">
+    <input type="checkbox" id="pa-lot-ver-inact" onchange="paLoadLotes()" style="width:auto">
+    Ver desactivados
+  </label>
 </div>
 <!-- Vista: Tabla -->
 <div id="pa-lot-vista-tabla-cont" class="pa-wrap"><div class="ab-table-wrap"><table class="pa-tbl">
-  <thead><tr><th>Finca</th><th>Lote</th><th style="text-align:right">Hectáreas</th><th>Cultivo 2026/27</th><th>Polígono</th><th></th></tr></thead>
-  <tbody id="pa-lot-tbody"><tr><td colspan="6" class="emp">Cargando...</td></tr></tbody>
+  <thead><tr><th>Finca</th><th>Lote</th><th style="text-align:right">Hectáreas</th><th>Cultivo 2026/27</th><th>Polígono</th><th>Cultivos</th><th></th></tr></thead>
+  <tbody id="pa-lot-tbody"><tr><td colspan="7" class="emp">Cargando...</td></tr></tbody>
 </table></div></div>
 <!-- Vista: Mapa general -->
 <div id="pa-lot-vista-mapa-cont" style="display:none">
@@ -1666,7 +1680,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   <!-- Rubros -->
   <div class="pp-sub" id="pp-sub-rubros">
     <div class="tw"><table>
-      <thead><tr><th>Nombre (contabilidad)</th><th>Tipo</th><th>Cultivo</th><th>Estado</th></tr></thead>
+      <thead><tr><th>Nombre (contabilidad)</th><th>Tipo</th><th>Cultivo</th><th>Estado</th><th></th></tr></thead>
       <tbody id="pp-rub-tbody"></tbody>
     </table></div>
   </div>
@@ -6110,7 +6124,9 @@ function paBadgeTipo(t){
 function paLoadInsumos(){
   var tipo=document.getElementById('pa-ins-tipo-fil').value;
   var cat=document.getElementById('pa-ins-cat-fil').value;
+  var verInact=document.getElementById('pa-ins-ver-inact');
   var qs=[]; if(tipo)qs.push('tipo='+tipo); if(cat)qs.push('categoria_principal='+cat);
+  if(verInact && verInact.checked) qs.push('incluir_inactivos=1');
   paF('/api/pa/insumos'+(qs.length?'?'+qs.join('&'):'')).then(function(r){
     PA.insumos=r.data||[];var tb=document.getElementById('pa-ins-tbody');
     if(!PA.insumos.length){tb.innerHTML='<tr><td colspan="8" class="emp">Sin insumos</td></tr>';return;}
@@ -6133,17 +6149,41 @@ function paLoadInsumos(){
         stockTxt += '<br><span style="font-size:10px;color:var(--mut)">≈ '+bultosStr+' × '+i.presentacion_base+' '+i.unidad+'</span>';
       }
 
-      return'<tr>'
+      var estadoBadge = i.activo
+        ? (bajo ? '<span class="pa-badge pa-rojo-bg">⚠ Bajo</span>' : '<span class="pa-badge pa-verde-bg">OK</span>')
+        : '<span class="pa-badge pa-gris-bg">○ Desactivado</span>';
+      var accionBtn = i.activo
+        ? '<button class="btn bd bs" onclick="paDesactivarInsumo('+i.id+',\''+i.nombre.replace(/'/g,"\\'")+'\')" title="Desactivar" style="padding:3px 8px;font-size:11px">🗑</button>'
+        : '<button class="btn bo bs" onclick="paReactivarInsumo('+i.id+')" title="Reactivar" style="padding:3px 8px;font-size:11px;color:var(--ok);border-color:var(--ok)">↺</button>';
+      var rowStyle = i.activo ? '' : ' style="opacity:0.5"';
+      return'<tr'+rowStyle+'>'
         +'<td><span title="'+(i.categoria_principal||'agroinsumos')+'" style="margin-right:4px">'+catIco+'</span><strong style="cursor:pointer;color:var(--burg)" onclick="paVerHistorialCompras('+i.id+',\''+i.nombre.replace(/'/g,"\\'")+'\',\'producto\')">'+i.nombre+'</strong>'+(ficha?'<br>'+ficha:'')+'</td>'
         +'<td>'+princip+'</td>'
         +'<td>'+paBadgeTipo(i.tipo)+'</td>'
         +'<td>'+i.unidad+'</td>'
         +'<td style="text-align:right">'+stockTxt+'</td>'
         +'<td style="text-align:right;font-size:12px">'+precioUsd+'</td>'
-        +'<td>'+(bajo?'<span class="pa-badge pa-rojo-bg">⚠ Bajo</span>':'<span class="pa-badge pa-verde-bg">OK</span>')+'</td>'
-        +'<td><button class="btn bo bs" onclick="paEditarInsumo('+i.id+')">✏</button></td>'
+        +'<td>'+estadoBadge+'</td>'
+        +'<td style="white-space:nowrap">'
+          +'<button class="btn bo bs" onclick="paEditarInsumo('+i.id+')" title="Editar" style="margin-right:4px">✏</button>'
+          +accionBtn
+        +'</td>'
         +'</tr>';
     }).join('');
+  });
+}
+
+function paDesactivarInsumo(id, nombre){
+  if(!confirm('¿Desactivar "'+nombre+'"?\n\nNo se verá en la lista pero queda el historial. Podés reactivarlo después.'))return;
+  paF('/api/pa/insumos/'+id, {method:'DELETE'}).then(function(r){
+    if(r.ok){ toast('✓ Desactivado'); paLoadInsumos(); }
+    else toast(r.error||'Error','er');
+  });
+}
+function paReactivarInsumo(id){
+  paF('/api/pa/insumos/'+id+'/reactivar', {method:'POST'}).then(function(r){
+    if(r.ok){ toast('✓ Reactivado'); paLoadInsumos(); }
+    else toast(r.error||'Error','er');
   });
 }
 
@@ -6289,22 +6329,47 @@ function paGuardarInsumo(){
 }
 
 function paLoadCompras(){
-  paF('/api/pa/compras').then(function(r){
+  var verInact=document.getElementById('pa-comp-ver-inact');
+  var qs = (verInact && verInact.checked) ? '?incluir_inactivos=1' : '';
+  paF('/api/pa/compras'+qs).then(function(r){
     var data=r.data||[];var tb=document.getElementById('pa-comp-tbody');
-    if(!data.length){tb.innerHTML='<tr><td colspan="6" class="emp">Sin compras</td></tr>';return;}
+    if(!data.length){tb.innerHTML='<tr><td colspan="7" class="emp">Sin compras</td></tr>';return;}
     tb.innerHTML=data.map(function(c){
       var prods=(c.items||[]).map(function(i){return i.insumo_nombre;}).join(', ');
       var tipoLabel={factura:'Factura',remito:'Remito',ticket:'Ticket',otro:'Otro'};
       var foto=c.remito_foto_path?'<a href="'+c.remito_foto_path+'" target="_blank" style="color:var(--burg);font-size:11px">📄 Ver</a>':'';
-      return'<tr>'
+      var activa = c.activo === null || c.activo === undefined || c.activo === 1;
+      var rowStyle = activa ? '' : ' style="opacity:0.5;text-decoration:line-through"';
+      var accionBtn = activa
+        ? '<button class="btn bd bs" onclick="paDesactivarCompra('+c.id+')" title="Desactivar (revierte stock)" style="padding:3px 8px;font-size:11px">🗑</button>'
+        : '<button class="btn bo bs" onclick="paReactivarCompra('+c.id+')" title="Reactivar (suma stock)" style="padding:3px 8px;font-size:11px;color:var(--ok);border-color:var(--ok)">↺</button>';
+      return'<tr'+rowStyle+'>'
         +'<td>'+paFecha(c.fecha)+'</td>'
         +'<td><span class="pa-badge pa-gris-bg" style="font-size:10px">'+(tipoLabel[c.tipo_comprobante]||'Factura')+'</span><br><span style="font-size:11px">'+(c.nro_factura||'—')+'</span></td>'
         +'<td>'+(c.proveedor_nombre||c.proveedor_txt||'—')+'</td>'
         +'<td style="font-size:12px;color:var(--mut)">'+prods+'</td>'
         +'<td style="text-align:right"><strong>'+paMoney(c.total)+'</strong></td>'
         +'<td>'+foto+'</td>'
+        +'<td style="white-space:nowrap">'+accionBtn+'</td>'
         +'</tr>';
     }).join('');
+  });
+}
+
+function paDesactivarCompra(id){
+  if(!confirm('¿Desactivar esta compra?\n\n⚠️ Se va a REVERTIR el stock agregado por esta compra y se borrarán los movimientos asociados.\n\nLa compra queda en el histórico (podés reactivarla después).'))return;
+  paF('/api/pa/compras/'+id, {method:'DELETE'}).then(function(r){
+    if(r.ok){ toast('✓ '+(r.msg||'Desactivada')); paLoadCompras();
+      paF('/api/pa/insumos').then(function(r2){PA.insumos=r2.data||[];}); }
+    else toast(r.error||'Error','er');
+  });
+}
+function paReactivarCompra(id){
+  if(!confirm('¿Reactivar esta compra?\n\nSe va a sumar nuevamente al stock.'))return;
+  paF('/api/pa/compras/'+id+'/reactivar', {method:'POST'}).then(function(r){
+    if(r.ok){ toast('✓ '+(r.msg||'Reactivada')); paLoadCompras();
+      paF('/api/pa/insumos').then(function(r2){PA.insumos=r2.data||[];}); }
+    else toast(r.error||'Error','er');
   });
 }
 function paOnFotoCompra(input){
@@ -6846,7 +6911,9 @@ function paVerDetalleCosto(loteId){
 
 function paLoadLotes(){
   var fincaFil=document.getElementById('pa-lot-finca-fil').value;
-  paF('/api/pa/lotes').then(function(r){
+  var verInact=document.getElementById('pa-lot-ver-inact');
+  var qs = (verInact && verInact.checked) ? '?incluir_inactivos=1' : '';
+  paF('/api/pa/lotes'+qs).then(function(r){
     PA.lotes=r.data||[];
 
     // Poblar el filtro de fincas con las únicas
@@ -6867,7 +6934,7 @@ function paLoadLotes(){
     if (fincaFil) lotesMostrar = PA.lotes.filter(function(l){ return l.finca === fincaFil; });
 
     var tb=document.getElementById('pa-lot-tbody');
-    if(!lotesMostrar.length){tb.innerHTML='<tr><td colspan="6" class="emp">Sin lotes</td></tr>';return;}
+    if(!lotesMostrar.length){tb.innerHTML='<tr><td colspan="7" class="emp">Sin lotes</td></tr>';return;}
     tb.innerHTML=lotesMostrar.map(function(l){
       // Obtener cultivo específico de campaña 2026/27 si existe
       var cult = '';
@@ -6881,15 +6948,35 @@ function paLoadLotes(){
       var polBtn = l.poligono_geojson
         ? '<button class="btn bo bs" onclick="paAbrirEditorPoligono('+l.id+')" title="Ver/editar polígono" style="color:var(--ok);border-color:var(--ok)">✓ Ver</button>'
         : '<button class="btn bo bs" onclick="paAbrirEditorPoligono('+l.id+')" title="Dibujar polígono">🗺️ Dibujar</button>';
-      return '<tr>'
+      var activo = l.activo === null || l.activo === undefined || l.activo === 1;
+      var rowStyle = activo ? '' : ' style="opacity:0.5"';
+      var accionBtn = activo
+        ? '<button class="btn bd bs" onclick="paDesactivarLote('+l.id+',\''+l.nombre.replace(/'/g,"\\'")+'\')" title="Desactivar" style="padding:3px 8px;font-size:11px">🗑</button>'
+        : '<button class="btn bo bs" onclick="paReactivarLote('+l.id+')" title="Reactivar" style="padding:3px 8px;font-size:11px;color:var(--ok);border-color:var(--ok)">↺</button>';
+      return '<tr'+rowStyle+'>'
         +'<td>'+(l.finca||'<span style="color:var(--mut)">—</span>')+'</td>'
         +'<td><strong>'+l.nombre+'</strong></td>'
         +'<td style="text-align:right">'+l.hectareas+'</td>'
         +'<td>'+cultCell+'</td>'
         +'<td>'+polBtn+'</td>'
         +'<td><button class="btn bo bs" onclick="paEditarCultivo('+l.id+',\''+l.nombre.replace(/'/g,"\\'")+'\')">🌱 Cultivos</button></td>'
+        +'<td style="white-space:nowrap">'+accionBtn+'</td>'
       +'</tr>';
     }).join('');
+  });
+}
+
+function paDesactivarLote(id, nombre){
+  if(!confirm('¿Desactivar lote "'+nombre+'"?\n\nNo se verá en listados pero los datos históricos (aplicaciones, costos) se mantienen.'))return;
+  paF('/api/pa/lotes/'+id, {method:'DELETE'}).then(function(r){
+    if(r.ok){ toast('✓ Desactivado'); paLoadLotes(); }
+    else toast(r.error||'Error','er');
+  });
+}
+function paReactivarLote(id){
+  paF('/api/pa/lotes/'+id+'/reactivar', {method:'POST'}).then(function(r){
+    if(r.ok){ toast('✓ Reactivado'); paLoadLotes(); }
+    else toast(r.error||'Error','er');
   });
 }
 function paAbrirNuevoLote(){
@@ -7103,7 +7190,23 @@ function cbLoadVehiculos() {
         var estadoTxt = v.activo ? '<span style="color:var(--ok)">● Activo</span>' : '<span style="color:var(--mut)">○ Inactivo</span>';
         var horoTxt = v.tiene_horometro ? '<span title="Con horómetro">✓</span>' : '—';
         var horasKm = v.tipo === 'tractor' ? (v.horas_actuales||0).toFixed(1) + ' h' : (v.km_actuales||0).toFixed(0) + ' km';
-        return '<tr><td>'+ico+' '+v.tipo+'</td><td><strong>'+v.identificacion+'</strong></td><td>'+(v.marca_modelo||'—')+'</td><td>'+v.combustible+'</td><td style="text-align:center">'+horoTxt+'</td><td>'+horasKm+'</td><td>'+estadoTxt+'</td><td><button class="btn bo bs" onclick="cbEditarVehiculo('+v.id+')" style="padding:4px 10px;font-size:11px">Editar</button></td></tr>';
+        var rowStyle = v.activo ? '' : ' style="opacity:0.5"';
+        var accionBtn = v.activo
+          ? '<button class="btn bd bs" onclick="cbDesactivarVehiculo('+v.id+',\''+v.identificacion.replace(/'/g,"\\'")+'\')" title="Desactivar" style="padding:3px 8px;font-size:11px">🗑</button>'
+          : '<button class="btn bo bs" onclick="cbReactivarVehiculo('+v.id+')" title="Reactivar" style="padding:3px 8px;font-size:11px;color:var(--ok);border-color:var(--ok)">↺</button>';
+        return '<tr'+rowStyle+'>'
+          +'<td>'+ico+' '+v.tipo+'</td>'
+          +'<td><strong>'+v.identificacion+'</strong></td>'
+          +'<td>'+(v.marca_modelo||'—')+'</td>'
+          +'<td>'+v.combustible+'</td>'
+          +'<td style="text-align:center">'+horoTxt+'</td>'
+          +'<td>'+horasKm+'</td>'
+          +'<td>'+estadoTxt+'</td>'
+          +'<td style="white-space:nowrap">'
+            +'<button class="btn bo bs" onclick="cbEditarVehiculo('+v.id+')" style="padding:4px 8px;font-size:11px;margin-right:4px">✏</button>'
+            +accionBtn
+          +'</td>'
+        +'</tr>';
       }).join('');
     }
     // Poblar filtro de vehículos en movimientos
@@ -7114,6 +7217,20 @@ function cbLoadVehiculos() {
           return '<option value="'+v.id+'">'+v.identificacion+'</option>';
         }).join('');
     }
+  });
+}
+
+function cbDesactivarVehiculo(id, ident){
+  if(!confirm('¿Desactivar vehículo "'+ident+'"?\n\nNo va a aparecer en las listas para cargar combustible. Las cargas históricas se mantienen.'))return;
+  paF('/api/pa/combustible/vehiculos/'+id, {method:'DELETE'}).then(function(r){
+    if(r.ok){ toast('✓ Desactivado'); cbLoadVehiculos(); }
+    else toast(r.error||'Error','er');
+  });
+}
+function cbReactivarVehiculo(id){
+  paF('/api/pa/combustible/vehiculos/'+id+'/reactivar', {method:'POST'}).then(function(r){
+    if(r.ok){ toast('✓ Reactivado'); cbLoadVehiculos(); }
+    else toast(r.error||'Error','er');
   });
 }
 
@@ -7535,8 +7652,27 @@ function ppRenderTrabajadores() {
     var tipo = t.tipo_relacion === 'fijo' ? '<span class="tag" style="background:#dbeafe;color:#1e40af">Fijo</span>' : '<span class="tag" style="background:#fef3c7;color:#92400e">Contratista</span>';
     var est = t.activo ? '<span style="color:var(--ok)">● Activo</span>' : '<span style="color:var(--mut)">○ Inactivo</span>';
     var grupo = t.grupo_nombre || '<span style="color:var(--mut);font-size:11px">Sin asignar</span>';
-    return '<tr><td><strong>'+t.nombre+'</strong></td><td>'+(t.dni||'—')+'</td><td>'+grupo+'</td><td>'+tipo+'</td><td>'+est+'</td><td><button class="btn bo bs" onclick="ppEditTrab('+t.id+')" style="padding:3px 10px;font-size:11px">Editar</button></td></tr>';
+    var rowStyle = t.activo ? '' : ' style="opacity:0.5"';
+    var accionBtn = t.activo
+      ? '<button class="btn bd bs" onclick="ppDesactivarTrab('+t.id+',\''+t.nombre.replace(/'/g,"\\'")+'\')" title="Desactivar" style="padding:3px 8px;font-size:11px">🗑</button>'
+      : '<button class="btn bo bs" onclick="ppReactivarTrab('+t.id+')" title="Reactivar" style="padding:3px 8px;font-size:11px;color:var(--ok);border-color:var(--ok)">↺</button>';
+    return '<tr'+rowStyle+'><td><strong>'+t.nombre+'</strong></td><td>'+(t.dni||'—')+'</td><td>'+grupo+'</td><td>'+tipo+'</td><td>'+est+'</td>'
+      +'<td style="white-space:nowrap"><button class="btn bo bs" onclick="ppEditTrab('+t.id+')" style="padding:3px 8px;font-size:11px;margin-right:4px">✏</button>'+accionBtn+'</td></tr>';
   }).join('');
+}
+
+function ppDesactivarTrab(id, nombre){
+  if(!confirm('¿Desactivar "'+nombre+'"?\n\nQueda en el histórico pero no aparece en nuevas asignaciones.'))return;
+  paF('/api/pa/personal/trabajadores/'+id, {method:'DELETE'}).then(function(r){
+    if(r.ok){ toast('✓ Desactivado'); ppCargarBase().then(ppRenderTrabajadores); }
+    else toast(r.error||'Error','er');
+  });
+}
+function ppReactivarTrab(id){
+  paF('/api/pa/personal/trabajadores/'+id+'/reactivar', {method:'POST'}).then(function(r){
+    if(r.ok){ toast('✓ Reactivado'); ppCargarBase().then(ppRenderTrabajadores); }
+    else toast(r.error||'Error','er');
+  });
 }
 
 function ppAbrirTrabajador() {
@@ -7590,10 +7726,28 @@ function ppRenderCuadrillas() {
   tb.innerHTML = PP.cuadrillas.map(function(c){
     var est = c.activo ? '<span style="color:var(--ok)">● Activa</span>' : '<span style="color:var(--mut)">○ Inactiva</span>';
     var notas = c.notas || '';
-    // Quitar legado [cant_habitual=X] si todavía existe en DB
     notas = notas.replace(/^\[cant_habitual=\d+\]\s*/, '');
-    return '<tr><td><strong>'+c.nombre+'</strong></td><td>'+(c.capataz_nombre||'<span style="color:var(--mut)">—</span>')+'</td><td style="font-size:12px;color:var(--mut)">'+(notas||'—')+'</td><td>'+est+'</td><td><button class="btn bo bs" onclick="ppEditCuad('+c.id+')" style="padding:3px 10px;font-size:11px">Editar</button></td></tr>';
+    var rowStyle = c.activo ? '' : ' style="opacity:0.5"';
+    var accionBtn = c.activo
+      ? '<button class="btn bd bs" onclick="ppDesactivarCuad('+c.id+',\''+c.nombre.replace(/'/g,"\\'")+'\')" title="Desactivar" style="padding:3px 8px;font-size:11px">🗑</button>'
+      : '<button class="btn bo bs" onclick="ppReactivarCuad('+c.id+')" title="Reactivar" style="padding:3px 8px;font-size:11px;color:var(--ok);border-color:var(--ok)">↺</button>';
+    return '<tr'+rowStyle+'><td><strong>'+c.nombre+'</strong></td><td>'+(c.capataz_nombre||'<span style="color:var(--mut)">—</span>')+'</td><td style="font-size:12px;color:var(--mut)">'+(notas||'—')+'</td><td>'+est+'</td>'
+      +'<td style="white-space:nowrap"><button class="btn bo bs" onclick="ppEditCuad('+c.id+')" style="padding:3px 8px;font-size:11px;margin-right:4px">✏</button>'+accionBtn+'</td></tr>';
   }).join('');
+}
+
+function ppDesactivarCuad(id, nombre){
+  if(!confirm('¿Desactivar cuadrilla "'+nombre+'"?\n\nNo aparecerá para nuevos fichajes. Los históricos se mantienen.'))return;
+  paF('/api/pa/personal/cuadrillas/'+id, {method:'DELETE'}).then(function(r){
+    if(r.ok){ toast('✓ Desactivada'); ppCargarBase().then(ppRenderCuadrillas); }
+    else toast(r.error||'Error','er');
+  });
+}
+function ppReactivarCuad(id){
+  paF('/api/pa/personal/cuadrillas/'+id+'/reactivar', {method:'POST'}).then(function(r){
+    if(r.ok){ toast('✓ Reactivada'); ppCargarBase().then(ppRenderCuadrillas); }
+    else toast(r.error||'Error','er');
+  });
 }
 
 function ppAbrirCuadrilla() {
@@ -7648,8 +7802,32 @@ function ppRenderGrupos() {
   tb.innerHTML = PP.grupos.map(function(g){
     var est = g.activo ? '<span style="color:var(--ok)">● Activo</span>' : '<span style="color:var(--mut)">○ Inactivo</span>';
     var cnt = conteo[g.id] || 0;
-    return '<tr><td><strong>'+g.nombre+'</strong></td><td style="font-size:12px;color:var(--mut)">'+(g.descripcion||'—')+'</td><td style="text-align:center">'+cnt+'</td><td>'+est+'</td><td><button class="btn bo bs" onclick="ppEditGrupo('+g.id+')" style="padding:3px 10px;font-size:11px">Editar</button></td></tr>';
+    var rowStyle = g.activo ? '' : ' style="opacity:0.5"';
+    var accionBtn;
+    if (g.id === 1) {
+      accionBtn = '<span title="Grupo base, no se puede desactivar" style="color:var(--mut);font-size:11px">🔒</span>';
+    } else if (g.activo) {
+      accionBtn = '<button class="btn bd bs" onclick="ppDesactivarGrupo('+g.id+',\''+g.nombre.replace(/'/g,"\\'")+'\')" title="Desactivar" style="padding:3px 8px;font-size:11px">🗑</button>';
+    } else {
+      accionBtn = '<button class="btn bo bs" onclick="ppReactivarGrupo('+g.id+')" title="Reactivar" style="padding:3px 8px;font-size:11px;color:var(--ok);border-color:var(--ok)">↺</button>';
+    }
+    return '<tr'+rowStyle+'><td><strong>'+g.nombre+'</strong></td><td style="font-size:12px;color:var(--mut)">'+(g.descripcion||'—')+'</td><td style="text-align:center">'+cnt+'</td><td>'+est+'</td>'
+      +'<td style="white-space:nowrap"><button class="btn bo bs" onclick="ppEditGrupo('+g.id+')" style="padding:3px 8px;font-size:11px;margin-right:4px">✏</button>'+accionBtn+'</td></tr>';
   }).join('');
+}
+
+function ppDesactivarGrupo(id, nombre){
+  if(!confirm('¿Desactivar grupo "'+nombre+'"?\n\nLos trabajadores asociados seguirán existiendo pero quedarán sin grupo visible. Podés reactivarlo después.'))return;
+  paF('/api/pa/personal/grupos/'+id, {method:'DELETE'}).then(function(r){
+    if(r.ok){ toast('✓ Desactivado'); ppCargarBase().then(function(){ ppRenderGrupos(); ppRenderTrabajadores(); }); }
+    else toast(r.error||'Error','er');
+  });
+}
+function ppReactivarGrupo(id){
+  paF('/api/pa/personal/grupos/'+id+'/reactivar', {method:'POST'}).then(function(r){
+    if(r.ok){ toast('✓ Reactivado'); ppCargarBase().then(function(){ ppRenderGrupos(); ppRenderTrabajadores(); }); }
+    else toast(r.error||'Error','er');
+  });
 }
 
 function ppAbrirGrupo() {
@@ -7768,11 +7946,30 @@ function ppGuardarTarea() {
 // ── Rubros ──
 function ppRenderRubros() {
   var tb = document.getElementById('pp-rub-tbody');
-  if (!PP.rubros.length) { tb.innerHTML = '<tr><td colspan="4">Sin rubros</td></tr>'; return; }
+  if (!PP.rubros.length) { tb.innerHTML = '<tr><td colspan="5">Sin rubros</td></tr>'; return; }
   tb.innerHTML = PP.rubros.map(function(r){
     var est = r.activo ? '<span style="color:var(--ok)">● Activo</span>' : '<span style="color:var(--mut)">○ Inactivo</span>';
-    return '<tr><td><strong style="font-family:monospace;font-size:12px">'+r.nombre+'</strong></td><td>'+r.tipo_labor.replace('_',' ')+'</td><td>'+(r.cultivo||'—')+'</td><td>'+est+'</td></tr>';
+    var rowStyle = r.activo ? '' : ' style="opacity:0.5"';
+    var accionBtn = r.activo
+      ? '<button class="btn bd bs" onclick="ppDesactivarRubro('+r.id+',\''+r.nombre.replace(/'/g,"\\'")+'\')" title="Desactivar" style="padding:3px 8px;font-size:11px">🗑</button>'
+      : '<button class="btn bo bs" onclick="ppReactivarRubro('+r.id+')" title="Reactivar" style="padding:3px 8px;font-size:11px;color:var(--ok);border-color:var(--ok)">↺</button>';
+    return '<tr'+rowStyle+'><td><strong style="font-family:monospace;font-size:12px">'+r.nombre+'</strong></td><td>'+r.tipo_labor.replace('_',' ')+'</td><td>'+(r.cultivo||'—')+'</td><td>'+est+'</td>'
+      +'<td style="white-space:nowrap">'+accionBtn+'</td></tr>';
   }).join('');
+}
+
+function ppDesactivarRubro(id, nombre){
+  if(!confirm('¿Desactivar rubro "'+nombre+'"?\n\nNo aparecerá para nuevas asignaciones de fichajes. Los históricos se mantienen.'))return;
+  paF('/api/pa/personal/rubros/'+id, {method:'DELETE'}).then(function(r){
+    if(r.ok){ toast('✓ Desactivado'); ppCargarBase().then(ppRenderRubros); }
+    else toast(r.error||'Error','er');
+  });
+}
+function ppReactivarRubro(id){
+  paF('/api/pa/personal/rubros/'+id+'/reactivar', {method:'POST'}).then(function(r){
+    if(r.ok){ toast('✓ Reactivado'); ppCargarBase().then(ppRenderRubros); }
+    else toast(r.error||'Error','er');
+  });
 }
 
 // ═════════════════════════════════════════════════════════════════════

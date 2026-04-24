@@ -76,7 +76,7 @@ router.get('/sectores', requireAuth, (req, res) => {
 router.get('/lotes', requireAuth, (req, res) => {
   const db = getDb();
   try {
-    const { sector_id } = req.query;
+    const { sector_id, incluir_inactivos } = req.query;
     let query = `
       SELECT l.*, s.nombre as sector_nombre, s.tipo as sector_tipo,
              cl.cultivo as cultivo_actual
@@ -84,9 +84,10 @@ router.get('/lotes', requireAuth, (req, res) => {
       JOIN pa_sectores s ON s.id = l.sector_id
       LEFT JOIN pa_cultivos_lote cl ON cl.lote_id = l.id
         AND cl.campaña = (SELECT nombre FROM pa_campañas WHERE activa = 1 LIMIT 1)
-      WHERE l.activo = 1
+      WHERE 1=1
     `;
     const params = [];
+    if (!incluir_inactivos) { query += " AND (l.activo IS NULL OR l.activo = 1)"; }
     if (sector_id) { query += " AND l.sector_id = ?"; params.push(sector_id); }
     query += " ORDER BY l.finca NULLS LAST, l.nombre";
     const data = db.prepare(query).all(...params);
@@ -272,9 +273,10 @@ router.delete('/lotes/:id/poligono', requireAuth, (req, res) => {
 router.get('/insumos', requireAuth, (req, res) => {
   const db = getDb();
   try {
-    const { tipo, categoria_principal } = req.query;
-    let query = "SELECT * FROM pa_insumos WHERE activo = 1";
+    const { tipo, categoria_principal, incluir_inactivos } = req.query;
+    let query = "SELECT * FROM pa_insumos WHERE 1=1";
     const params = [];
+    if (!incluir_inactivos) { query += " AND activo = 1"; }
     if (categoria_principal) { query += " AND categoria_principal = ?"; params.push(categoria_principal); }
     if (tipo) { query += " AND tipo = ?"; params.push(tipo); }
     query += " ORDER BY categoria_principal, tipo, nombre";
@@ -453,11 +455,9 @@ Devolvé SOLO un JSON válido sin markdown ni comentarios:
       "descripcion": "nombre del producto tal como aparece",
       "cantidad": número (cantidad principal, ver abajo),
       "unidad": "kg|lt|unidad|gramos|c.c|bolsa|bidon|rollos|sobres",
-      "presentacion_tipo": "lata|bidón|bolsa|caja|tambor|pote... o null si el producto se compra suelto",
       "presentacion_base": número (lt/kg por bulto, ej: 20 si son latas de 20lt) o null,
       "cant_bultos": número (si se ve claro cuántos bultos) o null,
-      "precio_unitario": número o null,
-      "precio_modo": "bulto|base" (si el precio es por bulto o por lt/kg),
+      "precio_unitario": número o null (si hay bultos, es el precio POR BULTO),
       "iva_porcentaje": número (ej: 21, 10.5, 0) o null si no está claro,
       "subtotal_neto": número o null,
       "iva_monto": número o null
@@ -499,7 +499,7 @@ Solo devolvé el JSON, sin texto adicional.`
 router.get('/compras', requireAuth, (req, res) => {
   const db = getDb();
   try {
-    const { campaña_id, desde, hasta } = req.query;
+    const { campaña_id, desde, hasta, incluir_inactivos } = req.query;
     let query = `
       SELECT c.*, p.razon_social as proveedor_nombre,
              ca.nombre as campaña_nombre
@@ -509,6 +509,7 @@ router.get('/compras', requireAuth, (req, res) => {
       WHERE 1=1
     `;
     const params = [];
+    if (!incluir_inactivos) { query += " AND (c.activo IS NULL OR c.activo = 1)"; }
     if (campaña_id) { query += " AND c.campaña_id = ?"; params.push(campaña_id); }
     if (desde) { query += " AND c.fecha >= ?"; params.push(desde); }
     if (hasta) { query += " AND c.fecha <= ?"; params.push(hasta); }
@@ -531,25 +532,30 @@ router.post('/compras', requireAuth, (req, res) => {
   const { fecha, proveedor_id, proveedor_txt, nro_factura, tipo_comprobante, campaña_id, items, notas, remito_foto_b64 } = req.body;
   if (!items?.length) return res.status(400).json({ ok: false, error: 'Debe incluir al menos un item' });
   try {
-    // ── Normalizar items: calcular cantidad_base (para stock) y precio_unit_base
-    // Cada item puede venir con:
-    //   - cantidad: directo en unidad base (kg/lt/u) — flujo simple
-    //   - O bien: cant_bultos + presentacion_base (lt/kg por bulto) + precio_modo ('bulto' o 'base')
-    // Al final dejamos en it.cantidad y it.precio_unit los valores en unidad BASE.
+    // ── Normalizar items
+    //
+    // Modo "presentacion": se compra por bultos. Ej: 4 latas × 20 lt a $120.000/lata
+    //   - cant_bultos = 4
+    //   - presentacion_base = 20
+    //   - precio_unit = 120000 (por bulto, tal cual aparece en la factura)
+    //   - MONTO de la compra = 4 × 120.000 = $480.000  (cant_bultos × precio_unit)
+    //   - STOCK que se suma    = 4 × 20 = 80 lt        (cant_bultos × presentacion_base)
+    //
+    // Modo "base": se compra directo en unidad base. Ej: 80 lt a $6.000/lt
+    //   - cantidad = 80, precio_unit = 6000
+    //   - MONTO = 80 × 6.000 = $480.000  (cantidad × precio_unit)
+    //   - STOCK = 80 lt (= cantidad)
     for (const it of items) {
-      const cantBultos = it.cant_bultos != null ? Number(it.cant_bultos) : null;
-      const presBase = it.presentacion_base != null ? Number(it.presentacion_base) : null;
-      // Si vino cant_bultos y presentacion_base, calcular cantidad en unidad base
-      if (cantBultos != null && cantBultos > 0 && presBase != null && presBase > 0) {
-        it.cantidad = cantBultos * presBase;
-        // Si el precio vino por bulto, convertirlo a precio por unidad base
-        if (it.precio_modo === 'bulto' && it.precio_unit != null) {
-          it.precio_unit = Number(it.precio_unit) / presBase;
-        }
-      }
-      // Si faltan datos básicos rechazo
-      if (!(it.cantidad > 0) || !(it.precio_unit > 0)) {
-        // deja seguir — la validación de arriba (items vacíos) ya chequeó mínimo
+      const modoPres = (it.cant_bultos != null && it.presentacion_base != null);
+      if (modoPres) {
+        const cantBultos = Number(it.cant_bultos);
+        const presBase   = Number(it.presentacion_base);
+        it._stockASumar   = cantBultos * presBase;    // unidad base (lt/kg)
+        it._montoNeto     = cantBultos * Number(it.precio_unit); // cant_bultos × precio directo
+      } else {
+        // Modo simple: cantidad directo en unidad base
+        it._stockASumar = Number(it.cantidad);
+        it._montoNeto   = Number(it.cantidad) * Number(it.precio_unit);
       }
     }
 
@@ -557,7 +563,7 @@ router.post('/compras', requireAuth, (req, res) => {
     let neto_total = 0;
     let iva_total = 0;
     for (const it of items) {
-      const subNeto = Number(it.cantidad) * Number(it.precio_unit);
+      const subNeto = it._montoNeto;
       const pct = it.iva_porcentaje != null ? Number(it.iva_porcentaje) : 0;
       const ivaItem = subNeto * (pct / 100);
       it._subNeto = subNeto;
@@ -565,7 +571,6 @@ router.post('/compras', requireAuth, (req, res) => {
       neto_total += subNeto;
       iva_total += ivaItem;
     }
-    // Compatibilidad: si viene iva_monto explícito del frontend, se prioriza
     if (req.body.iva_monto != null && !items.some(it => it.iva_porcentaje != null)) {
       iva_total = Number(req.body.iva_monto);
     }
@@ -593,35 +598,45 @@ router.post('/compras', requireAuth, (req, res) => {
              iva_total, neto_total);
       const compraId = r.lastInsertRowid;
       for (const it of items) {
+        // En pa_compras_items guardamos:
+        //   - cantidad: el total en UNIDAD BASE (el que se suma al stock)
+        //   - precio_unit: precio en unidad base ($/lt o $/kg)
+        //   - cant_bultos / presentacion_base: info original para trazabilidad
+        const cantidadBase = it._stockASumar;
+        // Precio unitario en unidad base (para reportes, ranking proveedores, etc.)
+        const precioBase = cantidadBase > 0 ? (it._montoNeto / cantidadBase) : Number(it.precio_unit);
+
         db.prepare(`
           INSERT INTO pa_compras_items
             (compra_id, insumo_id, cantidad, precio_unit, subtotal, iva_porcentaje, iva_monto, subtotal_neto,
-             presentacion_tipo, presentacion_base, cant_bultos, precio_modo)
-          VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
-        `).run(compraId, it.insumo_id, it.cantidad, it.precio_unit,
+             presentacion_base, cant_bultos, precio_modo)
+          VALUES (?,?,?,?,?,?,?,?,?,?,?)
+        `).run(compraId, it.insumo_id,
+               cantidadBase,
+               precioBase,
                it._subNeto + it._ivaMonto,
                it.iva_porcentaje != null ? Number(it.iva_porcentaje) : null,
                it._ivaMonto,
                it._subNeto,
-               it.presentacion_tipo || null,
                it.presentacion_base != null ? Number(it.presentacion_base) : null,
                it.cant_bultos != null ? Number(it.cant_bultos) : null,
-               it.precio_modo || 'base');
+               it.precio_modo || 'bulto');
 
-        // Actualizar stock del insumo — siempre en unidad BASE (lt, kg, u)
-        db.prepare("UPDATE pa_insumos SET stock_actual = stock_actual + ? WHERE id = ?").run(it.cantidad, it.insumo_id);
+        // Actualizar stock del insumo en unidad base
+        db.prepare("UPDATE pa_insumos SET stock_actual = stock_actual + ? WHERE id = ?")
+          .run(cantidadBase, it.insumo_id);
 
-        // Si en la compra se informó una presentación y el insumo no la tenía cargada, la fijamos como default
-        if (it.presentacion_base != null && it.presentacion_tipo) {
-          const ins = db.prepare("SELECT presentacion_tipo, presentacion_base FROM pa_insumos WHERE id = ?").get(it.insumo_id);
-          if (ins && (!ins.presentacion_tipo || !ins.presentacion_base)) {
-            db.prepare("UPDATE pa_insumos SET presentacion_tipo = ?, presentacion_base = ? WHERE id = ?")
-              .run(it.presentacion_tipo, Number(it.presentacion_base), it.insumo_id);
+        // Aprender la presentación default si el insumo no la tenía (solo base numérica, sin tipo)
+        if (it.presentacion_base != null) {
+          const ins = db.prepare("SELECT presentacion_base FROM pa_insumos WHERE id = ?").get(it.insumo_id);
+          if (ins && !ins.presentacion_base) {
+            db.prepare("UPDATE pa_insumos SET presentacion_base = ? WHERE id = ?")
+              .run(Number(it.presentacion_base), it.insumo_id);
           }
         }
 
         db.prepare("INSERT INTO pa_movimientos_stock (fecha, insumo_id, tipo, cantidad, motivo, referencia_id) VALUES (?,?,?,?,?,?)")
-          .run(fecha||new Date().toISOString().slice(0,10), it.insumo_id, 'entrada', it.cantidad, 'compra', compraId);
+          .run(fecha||new Date().toISOString().slice(0,10), it.insumo_id, 'entrada', cantidadBase, 'compra', compraId);
       }
       return compraId;
     });
@@ -2081,6 +2096,191 @@ router.get('/personal/fichajes-stats', requireAuth, (req, res) => {
       ORDER BY f.creado_en DESC LIMIT 5
     `).all();
     res.json({ ok: true, data: { pendientes, hoy, semana, ultimos } });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SOFT DELETE — DESACTIVAR registros sin borrarlos de DB
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Desactivar / reactivar COMPRA (revierte stock y movimientos si desactiva)
+router.delete('/compras/:id', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const cur = db.prepare("SELECT id, activo FROM pa_compras WHERE id = ?").get(req.params.id);
+    if (!cur) return res.status(404).json({ ok: false, error: 'Compra no encontrada' });
+    if (!cur.activo) return res.json({ ok: true, msg: 'Ya estaba desactivada' });
+
+    // Revertir stock y borrar movimientos generados por esta compra
+    const revertir = db.transaction(() => {
+      const items = db.prepare("SELECT insumo_id, cantidad FROM pa_compras_items WHERE compra_id = ?").all(req.params.id);
+      for (const it of items) {
+        db.prepare("UPDATE pa_insumos SET stock_actual = stock_actual - ? WHERE id = ?")
+          .run(it.cantidad, it.insumo_id);
+      }
+      db.prepare("DELETE FROM pa_movimientos_stock WHERE motivo = 'compra' AND referencia_id = ?")
+        .run(req.params.id);
+      db.prepare("UPDATE pa_compras SET activo = 0 WHERE id = ?").run(req.params.id);
+    });
+    revertir();
+    res.json({ ok: true, msg: 'Compra desactivada y stock revertido' });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// Reactivar compra
+router.post('/compras/:id/reactivar', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const cur = db.prepare("SELECT id, activo, fecha FROM pa_compras WHERE id = ?").get(req.params.id);
+    if (!cur) return res.status(404).json({ ok: false, error: 'Compra no encontrada' });
+    if (cur.activo) return res.json({ ok: true, msg: 'Ya estaba activa' });
+
+    const reactivar = db.transaction(() => {
+      const items = db.prepare("SELECT insumo_id, cantidad FROM pa_compras_items WHERE compra_id = ?").all(req.params.id);
+      for (const it of items) {
+        db.prepare("UPDATE pa_insumos SET stock_actual = stock_actual + ? WHERE id = ?")
+          .run(it.cantidad, it.insumo_id);
+        db.prepare("INSERT INTO pa_movimientos_stock (fecha, insumo_id, tipo, cantidad, motivo, referencia_id) VALUES (?,?,?,?,?,?)")
+          .run(cur.fecha, it.insumo_id, 'entrada', it.cantidad, 'compra', req.params.id);
+      }
+      db.prepare("UPDATE pa_compras SET activo = 1 WHERE id = ?").run(req.params.id);
+    });
+    reactivar();
+    res.json({ ok: true, msg: 'Compra reactivada y stock sumado' });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// Desactivar insumo (soft delete)
+router.delete('/insumos/:id', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const cur = db.prepare("SELECT id, activo FROM pa_insumos WHERE id = ?").get(req.params.id);
+    if (!cur) return res.status(404).json({ ok: false, error: 'Insumo no encontrado' });
+    db.prepare("UPDATE pa_insumos SET activo = 0 WHERE id = ?").run(req.params.id);
+    res.json({ ok: true });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// Reactivar insumo
+router.post('/insumos/:id/reactivar', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    db.prepare("UPDATE pa_insumos SET activo = 1 WHERE id = ?").run(req.params.id);
+    res.json({ ok: true });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// Desactivar vehículo (soft delete)
+router.delete('/combustible/vehiculos/:id', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const cur = db.prepare("SELECT id FROM pa_vehiculos WHERE id = ?").get(req.params.id);
+    if (!cur) return res.status(404).json({ ok: false, error: 'Vehículo no encontrado' });
+    db.prepare("UPDATE pa_vehiculos SET activo = 0 WHERE id = ?").run(req.params.id);
+    res.json({ ok: true });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// Reactivar vehículo
+router.post('/combustible/vehiculos/:id/reactivar', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    db.prepare("UPDATE pa_vehiculos SET activo = 1 WHERE id = ?").run(req.params.id);
+    res.json({ ok: true });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// ── Trabajadores / Grupos / Cuadrillas / Rubros / Proveedores / Lotes ──
+
+router.delete('/personal/trabajadores/:id', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    db.prepare("UPDATE pa_trabajadores SET activo = 0 WHERE id = ?").run(req.params.id);
+    res.json({ ok: true });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+router.post('/personal/trabajadores/:id/reactivar', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    db.prepare("UPDATE pa_trabajadores SET activo = 1 WHERE id = ?").run(req.params.id);
+    res.json({ ok: true });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+router.delete('/personal/grupos/:id', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    // No se puede desactivar el grupo "Sin asignar" (id=1)
+    if (Number(req.params.id) === 1) return res.status(400).json({ ok: false, error: 'No se puede desactivar el grupo "Sin asignar"' });
+    db.prepare("UPDATE pa_grupos SET activo = 0 WHERE id = ?").run(req.params.id);
+    res.json({ ok: true });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+router.post('/personal/grupos/:id/reactivar', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    db.prepare("UPDATE pa_grupos SET activo = 1 WHERE id = ?").run(req.params.id);
+    res.json({ ok: true });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+router.delete('/personal/cuadrillas/:id', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    db.prepare("UPDATE pa_cuadrillas SET activo = 0 WHERE id = ?").run(req.params.id);
+    res.json({ ok: true });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+router.post('/personal/cuadrillas/:id/reactivar', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    db.prepare("UPDATE pa_cuadrillas SET activo = 1 WHERE id = ?").run(req.params.id);
+    res.json({ ok: true });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+router.delete('/personal/rubros/:id', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    db.prepare("UPDATE pa_rubros_contables SET activo = 0 WHERE id = ?").run(req.params.id);
+    res.json({ ok: true });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+router.post('/personal/rubros/:id/reactivar', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    db.prepare("UPDATE pa_rubros_contables SET activo = 1 WHERE id = ?").run(req.params.id);
+    res.json({ ok: true });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+router.delete('/proveedores/:id', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    db.prepare("UPDATE pa_proveedores SET activo = 0 WHERE id = ?").run(req.params.id);
+    res.json({ ok: true });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+router.post('/proveedores/:id/reactivar', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    db.prepare("UPDATE pa_proveedores SET activo = 1 WHERE id = ?").run(req.params.id);
+    res.json({ ok: true });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+router.delete('/lotes/:id', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    db.prepare("UPDATE pa_lotes SET activo = 0 WHERE id = ?").run(req.params.id);
+    res.json({ ok: true });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+router.post('/lotes/:id/reactivar', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    db.prepare("UPDATE pa_lotes SET activo = 1 WHERE id = ?").run(req.params.id);
+    res.json({ ok: true });
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 

@@ -288,6 +288,28 @@ export function getCampañaActiva() {
   } catch(e) { console.error('[PA] Error migrando red_agua:', e.message); }
 })();
 
+// ── MIGRACIÓN: activo en pa_compras (soft delete) ──────────────────────────
+(function() {
+  try {
+    const cols = db.prepare("PRAGMA table_info(pa_compras)").all().map(c => c.name);
+    if (!cols.includes('activo')) {
+      db.exec("ALTER TABLE pa_compras ADD COLUMN activo INTEGER DEFAULT 1");
+      console.log("[PA] activo agregado en pa_compras (default 1)");
+    }
+  } catch(e) { console.error('[PA] Error migrando pa_compras activo:', e.message); }
+})();
+
+// ── MIGRACIÓN: activo en pa_lotes (soft delete) ────────────────────────────
+(function() {
+  try {
+    const cols = db.prepare("PRAGMA table_info(pa_lotes)").all().map(c => c.name);
+    if (!cols.includes('activo')) {
+      db.exec("ALTER TABLE pa_lotes ADD COLUMN activo INTEGER DEFAULT 1");
+      console.log("[PA] activo agregado en pa_lotes (default 1)");
+    }
+  } catch(e) { console.error('[PA] Error migrando pa_lotes activo:', e.message); }
+})();
+
 // ── MIGRACIÓN: remito_foto_path en pa_compras ─────────────────────────────
 (function() {
   try {
