@@ -327,7 +327,39 @@ export function getCampañaActiva() {
       db.exec("ALTER TABLE pa_compras_items ADD COLUMN subtotal_neto REAL");
       console.log("[PA] subtotal_neto agregado en pa_compras_items");
     }
+    // Presentación por compra (sobrescribe el default del producto si hace falta)
+    if (!cols.includes('presentacion_tipo')) {
+      db.exec("ALTER TABLE pa_compras_items ADD COLUMN presentacion_tipo TEXT");
+      console.log("[PA] presentacion_tipo agregado en pa_compras_items");
+    }
+    if (!cols.includes('presentacion_base')) {
+      db.exec("ALTER TABLE pa_compras_items ADD COLUMN presentacion_base REAL");
+      console.log("[PA] presentacion_base agregado en pa_compras_items");
+    }
+    if (!cols.includes('cant_bultos')) {
+      db.exec("ALTER TABLE pa_compras_items ADD COLUMN cant_bultos REAL");
+      console.log("[PA] cant_bultos agregado en pa_compras_items");
+    }
+    if (!cols.includes('precio_modo')) {
+      db.exec("ALTER TABLE pa_compras_items ADD COLUMN precio_modo TEXT DEFAULT 'base'");
+      console.log("[PA] precio_modo agregado en pa_compras_items");
+    }
   } catch(e) { console.error('[PA] Error migrando pa_compras_items:', e.message); }
+})();
+
+// ── MIGRACIÓN: presentación default en pa_insumos ─────────────────────────
+(function() {
+  try {
+    const cols = db.prepare("PRAGMA table_info(pa_insumos)").all().map(c => c.name);
+    if (!cols.includes('presentacion_tipo')) {
+      db.exec("ALTER TABLE pa_insumos ADD COLUMN presentacion_tipo TEXT");
+      console.log("[PA] presentacion_tipo agregado en pa_insumos (default presentación)");
+    }
+    if (!cols.includes('presentacion_base')) {
+      db.exec("ALTER TABLE pa_insumos ADD COLUMN presentacion_base REAL");
+      console.log("[PA] presentacion_base agregado en pa_insumos (lt/kg por bulto)");
+    }
+  } catch(e) { console.error('[PA] Error migrando pa_insumos presentacion:', e.message); }
 })();
 
 // ── MIGRACIÓN: asignado_a en pa_ordenes ──────────────────────────────────

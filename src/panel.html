@@ -5367,7 +5367,7 @@ if(_inpGondola) _inpGondola.addEventListener('keydown', function(e){
         <option value="otros">📦 OTROS (Construcción / Repuestos)</option>
       </select>
     </div>
-    <div class="fl ff" id="pa-ins-componente-row"><label>Principio activo / Componente madre <span style="color:var(--err)">*</span></label><input id="pa-ins-componente" placeholder="Ej: Glifosato, Clorpirifos, NPK 15-15-15..."></div>
+    <div class="fl ff" id="pa-ins-componente-row"><label>Principio activo / Componente madre <span style="color:var(--mut);font-weight:400;font-size:11px">(opcional)</span></label><input id="pa-ins-componente" placeholder="Ej: Glifosato, Clorpirifos, NPK 15-15-15... (si aplica)"></div>
     <div class="fl"><label>Tipo</label>
       <select id="pa-ins-tipo">
         <optgroup label="Agroinsumos" id="optg-agroinsumos">
@@ -5424,6 +5424,15 @@ if(_inpGondola) _inpGondola.addEventListener('keydown', function(e){
       </select>
     </div>
     <div class="fl"><label>Stock mínimo</label><input type="number" id="pa-ins-stock-min" value="0" min="0"></div>
+    <!-- Presentación default (se sugiere al comprar este producto) -->
+    <div class="fl ff" style="background:#f8fafc;border:1px solid var(--bor);border-radius:8px;padding:10px 12px;margin-top:4px">
+      <label style="font-size:11px;color:var(--mut);font-weight:600;text-transform:uppercase;letter-spacing:.05em">Presentación default <span style="font-weight:400;text-transform:none;letter-spacing:0">(opcional · se usa al comprar)</span></label>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:4px">
+        <input type="text" id="pa-ins-pres-tipo" placeholder="Tipo bulto: lata, bidón, bolsa, caja..." style="font-size:13px">
+        <input type="number" id="pa-ins-pres-base" placeholder="lt/kg por bulto (ej: 20)" step="0.01" min="0" style="font-size:13px">
+      </div>
+      <div style="font-size:10px;color:var(--mut);margin-top:4px">Ej: "lata" + "20" → se entiende que vienen latas de 20 lt</div>
+    </div>
     <div class="fl"><label>Precio referencia (USD / unidad)</label>
       <div style="display:flex;align-items:center;gap:6px">
         <span style="font-size:13px;color:var(--mut);font-weight:600">USD</span>
@@ -5488,9 +5497,9 @@ if(_inpGondola) _inpGondola.addEventListener('keydown', function(e){
   </div>
 
   <!-- PRODUCTOS -->
-  <div style="font-size:12px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.06em;margin:14px 0 8px">Productos</div>
-  <div style="display:grid;grid-template-columns:1fr 80px 100px 70px 100px auto;gap:8px;font-size:10px;color:var(--mut);font-weight:600;text-transform:uppercase;letter-spacing:.05em;padding:0 0 4px;border-bottom:1px solid var(--bor);margin-bottom:4px">
-    <div>Insumo</div><div>Cant.</div><div>$/unit neto</div><div>IVA</div><div style="text-align:right">Subt. final</div><div></div>
+  <div style="font-size:12px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.06em;margin:14px 0 4px">Productos</div>
+  <div style="font-size:11px;color:var(--mut);margin-bottom:8px">
+    💡 Si comprás por bultos/latas/bolsas, usá el modo "Por bultos" para registrar cuántos × cuánto contiene cada uno. El stock se convierte a unidad base automáticamente.
   </div>
   <div id="pa-comp-items"></div>
   <button class="btn bo" style="margin-top:8px" onclick="paAgregarItemCompra()">+ Agregar producto</button>
@@ -6113,12 +6122,26 @@ function paLoadInsumos(){
       var ficha=i.ficha_tecnica_path?'<a href="'+i.ficha_tecnica_path+'" target="_blank" style="font-size:11px;color:var(--burg)">📄 Ficha</a>':'';
       var precioUsd=i.precio_ref_usd?'USD '+Number(i.precio_ref_usd).toFixed(2):'—';
       var catIco = i.categoria_principal==='herramientas'?'🔧':i.categoria_principal==='otros'?'📦':'🌱';
+
+      // Principio activo ahora opcional: sin "⚠ Sin definir" en rojo, solo un guión discreto
+      var princip = i.componente_madre
+        ? '<span style="cursor:pointer;text-decoration:underline;text-decoration-style:dotted;color:var(--mut);font-size:12px" onclick="paVerHistorialCompras(null,\''+i.componente_madre.replace(/'/g,"\\'")+'\',\'componente\')">'+i.componente_madre+'</span>'
+        : '<span style="color:var(--mut);font-size:12px">—</span>';
+
+      // Stock: si hay presentacion_base, mostrar también cuántos bultos equivalen
+      var stockTxt = '<strong>'+(i.stock_actual||0)+' '+i.unidad+'</strong>';
+      if (i.presentacion_base && i.presentacion_base > 0 && i.stock_actual > 0) {
+        var bultos = (i.stock_actual / i.presentacion_base);
+        var bultosStr = (bultos % 1 === 0) ? bultos.toString() : bultos.toFixed(2);
+        stockTxt += '<br><span style="font-size:10px;color:var(--mut)">≈ '+bultosStr+' '+(i.presentacion_tipo||'bulto')+(bultos>1?'s':'')+' × '+i.presentacion_base+' '+i.unidad+'</span>';
+      }
+
       return'<tr>'
         +'<td><span title="'+(i.categoria_principal||'agroinsumos')+'" style="margin-right:4px">'+catIco+'</span><strong style="cursor:pointer;color:var(--burg)" onclick="paVerHistorialCompras('+i.id+',\''+i.nombre.replace(/'/g,"\\'")+'\',\'producto\')">'+i.nombre+'</strong>'+(ficha?'<br>'+ficha:'')+'</td>'
-        +'<td><span style="cursor:pointer;text-decoration:underline;text-decoration-style:dotted;color:var(--mut);font-size:12px" onclick="paVerHistorialCompras(null,\''+( i.componente_madre||'').replace(/'/g,"\\'")+'\',\'componente\')">'+(i.componente_madre||'<span style="color:var(--err);font-size:11px">⚠ Sin definir</span>')+'</span></td>'
+        +'<td>'+princip+'</td>'
         +'<td>'+paBadgeTipo(i.tipo)+'</td>'
         +'<td>'+i.unidad+'</td>'
-        +'<td style="text-align:right"><strong>'+(i.stock_actual||0)+' '+i.unidad+'</strong></td>'
+        +'<td style="text-align:right">'+stockTxt+'</td>'
         +'<td style="text-align:right;font-size:12px">'+precioUsd+'</td>'
         +'<td>'+(bajo?'<span class="pa-badge pa-rojo-bg">⚠ Bajo</span>':'<span class="pa-badge pa-verde-bg">OK</span>')+'</td>'
         +'<td><button class="btn bo bs" onclick="paEditarInsumo('+i.id+')">✏</button></td>'
@@ -6197,6 +6220,8 @@ function paAbrirNuevoInsumo(){
   document.getElementById('pa-ins-notas').value='';
   document.getElementById('pa-ins-ficha-file').value='';
   document.getElementById('pa-ins-ficha-actual').style.display='none';
+  var ptEl=document.getElementById('pa-ins-pres-tipo');if(ptEl)ptEl.value='';
+  var pbEl=document.getElementById('pa-ins-pres-base');if(pbEl)pbEl.value='';
   document.getElementById('pa-ins-modal-tit').textContent='Nuevo Insumo';
   paOnCategoriaCambio();
   document.getElementById('pa-mb-insumo').classList.add('on');
@@ -6214,6 +6239,8 @@ function paEditarInsumo(id){
   document.getElementById('pa-ins-precio-usd').value=ins.precio_ref_usd||'';
   document.getElementById('pa-ins-notas').value=ins.notas||'';
   document.getElementById('pa-ins-ficha-file').value='';
+  var ptEl=document.getElementById('pa-ins-pres-tipo');if(ptEl)ptEl.value=ins.presentacion_tipo||'';
+  var pbEl=document.getElementById('pa-ins-pres-base');if(pbEl)pbEl.value=ins.presentacion_base||'';
   var fichEl=document.getElementById('pa-ins-ficha-actual');
   if(ins.ficha_tecnica_path){
     fichEl.innerHTML='📄 <a href="'+ins.ficha_tecnica_path+'" target="_blank" style="color:var(--burg)">Ver ficha actual</a>';
@@ -6228,16 +6255,21 @@ function paGuardarInsumo(){
   var nombre=document.getElementById('pa-ins-nombre').value.trim();
   var categoria=document.getElementById('pa-ins-categoria').value;
   var componente=document.getElementById('pa-ins-componente').value.trim();
-  // Principio activo solo obligatorio para agroinsumos
-  if(categoria==='agroinsumos' && !componente)return toast('El principio activo es obligatorio para agroinsumos','er');
+  // Principio activo siempre opcional (no todos los insumos lo tienen)
   var tipo=document.getElementById('pa-ins-tipo').value;
   var unidad=document.getElementById('pa-ins-unidad').value;
   var stMin=parseFloat(document.getElementById('pa-ins-stock-min').value)||0;
   var precioUsd=parseFloat(document.getElementById('pa-ins-precio-usd').value)||null;
   var notas=document.getElementById('pa-ins-notas').value.trim();
   var fichaFile=document.getElementById('pa-ins-ficha-file').files[0];
+  // Presentación default (opcional)
+  var presTipoEl=document.getElementById('pa-ins-pres-tipo');
+  var presBaseEl=document.getElementById('pa-ins-pres-base');
+  var presTipo=presTipoEl?presTipoEl.value.trim()||null:null;
+  var presBase=presBaseEl?parseFloat(presBaseEl.value)||null:null;
   if(!nombre)return toast('Ingresá el nombre','er');
-  var body={nombre,tipo,unidad,stock_minimo:stMin,categoria_principal:categoria,componente_madre:componente||null,precio_ref_usd:precioUsd,notas};
+  var body={nombre,tipo,unidad,stock_minimo:stMin,categoria_principal:categoria,componente_madre:componente||null,precio_ref_usd:precioUsd,notas,
+            presentacion_tipo:presTipo, presentacion_base:presBase};
   paF(id?'/api/pa/insumos/'+id:'/api/pa/insumos',{method:id?'PATCH':'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
     .then(function(r){
       if(!r.ok)return toast(r.error||'Error','er');
@@ -6356,17 +6388,37 @@ function paLeerRemito(){
         var n=PA.compN-1;
         if(matchInsumo){
           var sel=document.getElementById('pa-ci-ins-'+n);
-          if(sel)sel.value=matchInsumo.id;
+          if(sel){sel.value=matchInsumo.id; paOnInsumoChange(n);}
         }
-        var cantEl=document.getElementById('pa-ci-cant-'+n);
+        // Modo de carga: si la IA detectó presentacion_base, usamos "Por bultos"
+        var modoSel=document.getElementById('pa-ci-modo-'+n);
+        var usaPres = (it.presentacion_base && it.cant_bultos);
+        if(modoSel){modoSel.value = usaPres ? 'presentacion' : 'base'; paOnModoCambio(n);}
+
+        var cantbEl=document.getElementById('pa-ci-cantb-'+n);
+        var prestEl=document.getElementById('pa-ci-prest-'+n);
+        var presbEl=document.getElementById('pa-ci-presb-'+n);
         var precEl=document.getElementById('pa-ci-prec-'+n);
+        var precmEl=document.getElementById('pa-ci-precm-'+n);
         var ivaEl=document.getElementById('pa-ci-iva-'+n);
-        if(cantEl&&it.cantidad)cantEl.value=it.cantidad;
-        if(precEl&&it.precio_unitario)precEl.value=it.precio_unitario;
+
+        if(usaPres){
+          if(cantbEl && it.cant_bultos) cantbEl.value = it.cant_bultos;
+          if(prestEl && it.presentacion_tipo) prestEl.value = it.presentacion_tipo;
+          if(presbEl && it.presentacion_base) presbEl.value = it.presentacion_base;
+          if(precEl && it.precio_unitario) precEl.value = it.precio_unitario;
+          if(precmEl && it.precio_modo){
+            precmEl.value = it.precio_modo === 'bulto' ? 'bulto' : 'base';
+          }
+        } else {
+          // Modo simple — cargamos directo la cantidad
+          if(cantbEl && it.cantidad) cantbEl.value = it.cantidad;
+          if(precEl && it.precio_unitario) precEl.value = it.precio_unitario;
+        }
+
         // IVA detectado por la IA — si el porcentaje coincide con opciones predefinidas, lo seleccionamos
         if(ivaEl && it.iva_porcentaje != null){
           var pct=Number(it.iva_porcentaje);
-          // Buscar opción exacta; si no existe, dejar como 21 por default
           var opts=Array.from(ivaEl.options).map(function(o){return o.value;});
           if(opts.indexOf(String(pct))>=0){
             ivaEl.value=String(pct);
@@ -6375,7 +6427,6 @@ function paLeerRemito(){
       });
       paActTotalComp();
       aplicados.push(parsed.items.length+' producto(s)');
-      // Mostrar info de totales detectados si vinieron
       if(parsed.iva_total != null || parsed.neto_total != null){
         aplicados.push('IVA');
       }
@@ -6416,14 +6467,37 @@ function paGuardarCompra(){
   var prov=document.getElementById('pa-comp-prov').value.trim();
   var notas=document.getElementById('pa-comp-notas').value.trim();
   var items=[];
-  document.querySelectorAll('[id^=pa-ci-cant-]').forEach(function(el){
-    var n=el.id.split('-').pop();
-    var insId=document.getElementById('pa-ci-ins-'+n).value;
-    var cant=parseFloat(el.value)||0;
-    var prec=parseFloat(document.getElementById('pa-ci-prec-'+n).value)||0;
+  document.querySelectorAll('[id^=pa-ci-row-]').forEach(function(row){
+    var n=row.dataset.n;
+    var insEl=document.getElementById('pa-ci-ins-'+n);
+    var insId=insEl?insEl.value:null;
+    if(!insId)return;
+    var modo=document.getElementById('pa-ci-modo-'+n).value;
+    var cantBul=parseFloat(document.getElementById('pa-ci-cantb-'+n).value)||0;
+    var presBase=parseFloat(document.getElementById('pa-ci-presb-'+n).value)||0;
+    var presTipo=document.getElementById('pa-ci-prest-'+n).value.trim()||null;
+    var precio=parseFloat(document.getElementById('pa-ci-prec-'+n).value)||0;
     var ivaEl=document.getElementById('pa-ci-iva-'+n);
     var ivaPct=ivaEl&&ivaEl.value!==''?parseFloat(ivaEl.value):null;
-    if(insId&&cant>0&&prec>0)items.push({insumo_id:insId,cantidad:cant,precio_unit:prec,iva_porcentaje:ivaPct});
+    var precModo=document.getElementById('pa-ci-precm-'+n).value; // 'bulto' o 'base'
+
+    if(cantBul<=0||precio<=0)return;
+    // En modo 'presentacion' necesitamos presBase>0
+    if(modo==='presentacion' && presBase<=0)return;
+
+    var item={insumo_id:insId, iva_porcentaje:ivaPct, precio_modo:precModo};
+    if(modo==='presentacion'){
+      item.cant_bultos=cantBul;
+      item.presentacion_tipo=presTipo;
+      item.presentacion_base=presBase;
+      item.precio_unit=precio;  // el backend lo convierte si es 'bulto'
+    } else {
+      // modo simple: cantidad directo en unidad base, precio por unidad base
+      item.cantidad=cantBul;
+      item.precio_unit=precio;
+      item.precio_modo='base';
+    }
+    items.push(item);
   });
   if(!items.length)return toast('Agregá al menos un producto','er');
   paF('/api/pa/compras',{method:'POST',headers:{'Content-Type':'application/json'},
@@ -6434,45 +6508,143 @@ function paGuardarCompra(){
   });
 }
 function paAgregarItemCompra(){
-  var n=PA.compN++;var opts=PA.insumos.map(function(i){return'<option value="'+i.id+'">'+i.nombre+' ('+i.unidad+')</option>';}).join('');
-  var row=document.createElement('div');row.id='pa-ci-'+n;
-  row.style.cssText='display:grid;grid-template-columns:1fr 80px 100px 70px 100px auto;gap:8px;align-items:center;padding:8px 0;border-bottom:1px solid var(--bor)';
+  var n=PA.compN++;
+  var opts=PA.insumos.map(function(i){return'<option value="'+i.id+'" data-prest="'+(i.presentacion_tipo||'')+'" data-presb="'+(i.presentacion_base||'')+'" data-unidad="'+i.unidad+'">'+i.nombre+' ('+i.unidad+')</option>';}).join('');
+  var row=document.createElement('div');row.id='pa-ci-row-'+n;row.dataset.n=n;
+  row.style.cssText='padding:10px;border:1px solid var(--bor);border-radius:8px;margin-bottom:8px;background:var(--sur)';
   row.innerHTML=
-    '<select id="pa-ci-ins-'+n+'">'+opts+'</select>'+
-    '<input type="number" id="pa-ci-cant-'+n+'" placeholder="Cant." step="0.01" min="0" oninput="paActTotalComp()">'+
-    '<input type="number" id="pa-ci-prec-'+n+'" placeholder="$/unit neto" step="0.01" min="0" oninput="paActTotalComp()">'+
-    '<select id="pa-ci-iva-'+n+'" oninput="paActTotalComp()" style="font-size:12px">'+
-      '<option value="21" selected>21%</option>'+
-      '<option value="10.5">10.5%</option>'+
-      '<option value="0">0% (exento)</option>'+
-      '<option value="">s/dato</option>'+
-    '</select>'+
-    '<span id="pa-ci-sub-'+n+'" style="font-size:12px;color:var(--mut)">$0</span>'+
-    '<button class="btn bd bs" onclick="document.getElementById(\'pa-ci-'+n+'\').remove();paActTotalComp()">✕</button>';
+    // Línea 1: producto + modo de carga + ✕
+    '<div style="display:grid;grid-template-columns:1fr 180px auto;gap:8px;align-items:center;margin-bottom:8px">'
+      +'<select id="pa-ci-ins-'+n+'" onchange="paOnInsumoChange('+n+')"><option value="">— Elegí producto —</option>'+opts+'</select>'
+      +'<select id="pa-ci-modo-'+n+'" onchange="paOnModoCambio('+n+')" style="font-size:12px">'
+        +'<option value="presentacion">Por bultos/latas</option>'
+        +'<option value="base">En unidad base directo</option>'
+      +'</select>'
+      +'<button class="btn bd bs" onclick="document.getElementById(\'pa-ci-row-'+n+'\').remove();paActTotalComp()">✕</button>'
+    +'</div>'
+    // Línea 2: grilla con cantidad, tipo, presentación, precio con modo, IVA, subtotal
+    +'<div id="pa-ci-grid-'+n+'" style="display:grid;grid-template-columns:80px 1fr 80px 110px 70px 80px 90px;gap:8px;align-items:center;font-size:12px">'
+      +'<div>'
+        +'<div style="font-size:10px;color:var(--mut);margin-bottom:2px">Cant.</div>'
+        +'<input type="number" id="pa-ci-cantb-'+n+'" placeholder="Ej: 4" step="0.01" min="0" oninput="paActTotalComp()" style="width:100%">'
+      +'</div>'
+      +'<div class="pa-ci-pres-col" data-n="'+n+'">'
+        +'<div style="font-size:10px;color:var(--mut);margin-bottom:2px">Tipo bulto</div>'
+        +'<input type="text" id="pa-ci-prest-'+n+'" placeholder="lata, bidón, bolsa..." style="width:100%">'
+      +'</div>'
+      +'<div class="pa-ci-pres-col" data-n="'+n+'">'
+        +'<div style="font-size:10px;color:var(--mut);margin-bottom:2px">lt/kg por bulto</div>'
+        +'<input type="number" id="pa-ci-presb-'+n+'" placeholder="Ej: 20" step="0.01" min="0" oninput="paActTotalComp()" style="width:100%">'
+      +'</div>'
+      +'<div>'
+        +'<div style="font-size:10px;color:var(--mut);margin-bottom:2px">Precio neto</div>'
+        +'<input type="number" id="pa-ci-prec-'+n+'" placeholder="0.00" step="0.01" min="0" oninput="paActTotalComp()" style="width:100%">'
+      +'</div>'
+      +'<div>'
+        +'<div style="font-size:10px;color:var(--mut);margin-bottom:2px">Por</div>'
+        +'<select id="pa-ci-precm-'+n+'" onchange="paActTotalComp()" style="width:100%;font-size:12px">'
+          +'<option value="bulto">bulto</option>'
+          +'<option value="base">unidad</option>'
+        +'</select>'
+      +'</div>'
+      +'<div>'
+        +'<div style="font-size:10px;color:var(--mut);margin-bottom:2px">IVA</div>'
+        +'<select id="pa-ci-iva-'+n+'" oninput="paActTotalComp()" style="width:100%;font-size:12px">'
+          +'<option value="21" selected>21%</option>'
+          +'<option value="10.5">10.5%</option>'
+          +'<option value="0">0%</option>'
+          +'<option value="">s/dato</option>'
+        +'</select>'
+      +'</div>'
+      +'<div style="text-align:right">'
+        +'<div style="font-size:10px;color:var(--mut);margin-bottom:2px">Subtotal</div>'
+        +'<span id="pa-ci-sub-'+n+'" style="font-weight:600">$0</span>'
+      +'</div>'
+    +'</div>'
+    // Mini texto auxiliar con el total en unidad base
+    +'<div id="pa-ci-hint-'+n+'" style="font-size:11px;color:var(--mut);margin-top:6px;font-style:italic"></div>';
   document.getElementById('pa-comp-items').appendChild(row);
 }
+
+// Cuando se elige un producto, auto-completar presentación default si el producto la tiene
+function paOnInsumoChange(n){
+  var sel=document.getElementById('pa-ci-ins-'+n);
+  var opt=sel.selectedOptions[0];
+  if(!opt)return;
+  var presTipo=opt.dataset.prest||'';
+  var presB=opt.dataset.presb||'';
+  var elT=document.getElementById('pa-ci-prest-'+n);
+  var elB=document.getElementById('pa-ci-presb-'+n);
+  // Solo autocompletar si el usuario todavía no tipeó nada
+  if(elT && !elT.value)elT.value=presTipo;
+  if(elB && !elB.value)elB.value=presB;
+  paActTotalComp();
+}
+
+// Mostrar/ocultar columnas de presentación según el modo
+function paOnModoCambio(n){
+  var modo=document.getElementById('pa-ci-modo-'+n).value;
+  var presCols=document.querySelectorAll('.pa-ci-pres-col[data-n="'+n+'"]');
+  var precM=document.getElementById('pa-ci-precm-'+n);
+  if(modo==='base'){
+    presCols.forEach(function(el){el.style.visibility='hidden';});
+    // En modo base, el precio es SIEMPRE por unidad
+    if(precM){precM.value='base';precM.disabled=true;}
+  } else {
+    presCols.forEach(function(el){el.style.visibility='';});
+    if(precM)precM.disabled=false;
+  }
+  paActTotalComp();
+}
+
 function paActTotalComp(){
   var neto=0, iva=0;
-  document.querySelectorAll('[id^=pa-ci-cant-]').forEach(function(el){
-    var n=el.id.split('-').pop();
-    var c=parseFloat(el.value)||0;
-    var p=parseFloat(document.getElementById('pa-ci-prec-'+n).value)||0;
+  document.querySelectorAll('[id^=pa-ci-row-]').forEach(function(row){
+    var n=row.dataset.n;
+    var modo=document.getElementById('pa-ci-modo-'+n).value;
+    var cantBul=parseFloat(document.getElementById('pa-ci-cantb-'+n).value)||0;
+    var presB=parseFloat(document.getElementById('pa-ci-presb-'+n).value)||0;
+    var prec=parseFloat(document.getElementById('pa-ci-prec-'+n).value)||0;
     var ivaEl=document.getElementById('pa-ci-iva-'+n);
     var ivaPct=ivaEl&&ivaEl.value!==''?parseFloat(ivaEl.value):0;
-    var sNeto=c*p;
-    var sIva=sNeto*(ivaPct/100);
-    var sTotal=sNeto+sIva;
+    var precModo=document.getElementById('pa-ci-precm-'+n).value;
+
+    var cantBase=0, precUnitBase=0;
+    if(modo==='presentacion' && presB>0){
+      cantBase = cantBul * presB;
+      precUnitBase = precModo==='bulto' ? (prec / presB) : prec;
+    } else if(modo==='base'){
+      cantBase = cantBul;
+      precUnitBase = prec;
+    }
+
+    var sNeto = cantBase * precUnitBase;
+    var sIva  = sNeto * (ivaPct/100);
+    var sTotal= sNeto + sIva;
+
     var se=document.getElementById('pa-ci-sub-'+n);
     if(se)se.textContent=paMoney(sTotal);
+    var hint=document.getElementById('pa-ci-hint-'+n);
+    if(hint){
+      if(modo==='presentacion' && cantBul>0 && presB>0){
+        var insSel=document.getElementById('pa-ci-ins-'+n);
+        var unidad=insSel&&insSel.selectedOptions[0]?(insSel.selectedOptions[0].dataset.unidad||''):'';
+        hint.textContent='→ Total en stock: '+cantBase.toFixed(2)+' '+unidad+' ('+cantBul+' × '+presB+' '+unidad+' por bulto)';
+      } else if(modo==='base' && cantBul>0){
+        hint.textContent='→ Se suman '+cantBul.toFixed(2)+' unidades directamente al stock';
+      } else {
+        hint.textContent='';
+      }
+    }
+
     neto+=sNeto; iva+=sIva;
   });
   var total=neto+iva;
   document.getElementById('pa-comp-total').textContent=paMoney(total);
-  // Mostrar también el desglose neto/IVA/total en el pie del modal
   var netoEl=document.getElementById('pa-comp-neto');
-  var ivaEl=document.getElementById('pa-comp-iva');
+  var ivaEl2=document.getElementById('pa-comp-iva');
   if(netoEl)netoEl.textContent=paMoney(neto);
-  if(ivaEl)ivaEl.textContent=paMoney(iva);
+  if(ivaEl2)ivaEl2.textContent=paMoney(iva);
 }
 function paLoadOrdenes(){
   var estado=document.getElementById('pa-ord-estado-fil').value;
@@ -7903,9 +8075,11 @@ function paActualizarHa() {
   if (haLote > 0) {
     var diff = ha - haLote;
     var pct = (diff / haLote) * 100;
-    var color = Math.abs(pct) > 10 ? 'var(--err)' : Math.abs(pct) > 5 ? 'var(--warn)' : 'var(--ok)';
+    // Informativo — las ha cargadas se respetan siempre, no se alerta por diferencia
     document.getElementById('pa-pol-diff').innerHTML =
-      '<span style="color:'+color+'">' + (diff>=0?'+':'') + diff.toFixed(2) + ' ha ('+(pct>=0?'+':'')+pct.toFixed(1)+'%)</span>';
+      '<span style="color:var(--mut);font-style:italic">Δ ' + (diff>=0?'+':'') + diff.toFixed(2) + ' ha vs. cargadas (solo referencia)</span>';
+  } else {
+    document.getElementById('pa-pol-diff').innerHTML = '<span style="color:var(--mut);font-style:italic">Se registrarán '+ha.toFixed(2)+' ha (el lote no tenía valor)</span>';
   }
 }
 
@@ -7924,13 +8098,10 @@ function paGuardarPoligono() {
   var ha = paAreaPoligonoHa(latlngs);
   var centro = paCentroidePoligono(latlngs);
 
+  // Respetar SIEMPRE las ha cargadas manualmente.
+  // Solo actualizamos si el lote nunca tuvo valor (creado sin ha).
   var haLote = PAMAP.loteEdit.hectareas || 0;
-  var actualizarHa = false;
-  if (haLote > 0 && Math.abs(ha - haLote)/haLote > 0.15) {
-    actualizarHa = confirm('Las hectáreas calculadas ('+ha.toFixed(2)+' ha) difieren bastante de las cargadas ('+haLote+' ha).\n\n¿Actualizar las hectáreas del lote con el valor calculado?');
-  } else if (!haLote) {
-    actualizarHa = true;
-  }
+  var actualizarHa = !haLote;
 
   var body = { geojson: geojson, centroide_lat: centro.lat, centroide_lng: centro.lng };
   if (actualizarHa) body.hectareas_calculadas = ha;
@@ -7939,7 +8110,7 @@ function paGuardarPoligono() {
     method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body)
   }).then(function(r){
     if (!r.ok) return toast(r.error||'Error al guardar','er');
-    toast('✓ Polígono guardado' + (actualizarHa ? ' · ha actualizadas' : ''));
+    toast('✓ Polígono guardado' + (actualizarHa ? ' · ha registradas: '+ha.toFixed(2) : ''));
     paCerrarEditorPoligono();
     paLoadLotes();
   });

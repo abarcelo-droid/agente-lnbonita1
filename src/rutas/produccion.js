@@ -284,33 +284,41 @@ router.get('/insumos', requireAuth, (req, res) => {
 
 router.post('/insumos', requireAuth, (req, res) => {
   const db = getDb();
-  const { nombre, tipo, unidad, stock_minimo, componente_madre, precio_ref_usd, notas, categoria_principal } = req.body;
+  const { nombre, tipo, unidad, stock_minimo, componente_madre, precio_ref_usd, notas, categoria_principal,
+          presentacion_tipo, presentacion_base } = req.body;
   if (!nombre || !tipo || !unidad)
     return res.status(400).json({ ok: false, error: 'Nombre, tipo y unidad requeridos' });
   try {
     const r = db.prepare(`
-      INSERT INTO pa_insumos (nombre, tipo, unidad, stock_minimo, componente_madre, precio_ref_usd, notas, categoria_principal)
-      VALUES (?,?,?,?,?,?,?,?)
+      INSERT INTO pa_insumos (nombre, tipo, unidad, stock_minimo, componente_madre, precio_ref_usd, notas, categoria_principal,
+                              presentacion_tipo, presentacion_base)
+      VALUES (?,?,?,?,?,?,?,?,?,?)
     `).run(nombre, tipo, unidad, stock_minimo||0, componente_madre||null, precio_ref_usd||null, notas||null,
-           categoria_principal || 'agroinsumos');
+           categoria_principal || 'agroinsumos',
+           presentacion_tipo || null,
+           presentacion_base != null ? Number(presentacion_base) : null);
     res.json({ ok: true, id: r.lastInsertRowid });
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
 router.patch('/insumos/:id', requireAuth, (req, res) => {
   const db = getDb();
-  const { nombre, tipo, unidad, stock_minimo, activo, componente_madre, precio_ref_usd, notas, categoria_principal } = req.body;
+  const { nombre, tipo, unidad, stock_minimo, activo, componente_madre, precio_ref_usd, notas, categoria_principal,
+          presentacion_tipo, presentacion_base } = req.body;
   try {
     const cur = db.prepare("SELECT * FROM pa_insumos WHERE id=?").get(req.params.id);
     if (!cur) return res.status(404).json({ ok: false, error: 'Insumo no encontrado' });
     db.prepare(`UPDATE pa_insumos SET nombre=?, tipo=?, unidad=?, stock_minimo=?, activo=?,
-                componente_madre=?, precio_ref_usd=?, notas=?, categoria_principal=? WHERE id=?`)
+                componente_madre=?, precio_ref_usd=?, notas=?, categoria_principal=?,
+                presentacion_tipo=?, presentacion_base=? WHERE id=?`)
       .run(nombre||cur.nombre, tipo||cur.tipo, unidad||cur.unidad, stock_minimo??cur.stock_minimo,
            activo!==undefined?activo:cur.activo,
            componente_madre!==undefined?componente_madre:cur.componente_madre,
            precio_ref_usd!==undefined?precio_ref_usd:cur.precio_ref_usd,
            notas!==undefined?notas:cur.notas,
            categoria_principal || cur.categoria_principal,
+           presentacion_tipo!==undefined?presentacion_tipo:cur.presentacion_tipo,
+           presentacion_base!==undefined?(presentacion_base!=null?Number(presentacion_base):null):cur.presentacion_base,
            req.params.id);
     res.json({ ok: true });
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
@@ -443,9 +451,13 @@ Devolvé SOLO un JSON válido sin markdown ni comentarios:
   "items": [
     {
       "descripcion": "nombre del producto tal como aparece",
-      "cantidad": número,
+      "cantidad": número (cantidad principal, ver abajo),
       "unidad": "kg|lt|unidad|gramos|c.c|bolsa|bidon|rollos|sobres",
+      "presentacion_tipo": "lata|bidón|bolsa|caja|tambor|pote... o null si el producto se compra suelto",
+      "presentacion_base": número (lt/kg por bulto, ej: 20 si son latas de 20lt) o null,
+      "cant_bultos": número (si se ve claro cuántos bultos) o null,
       "precio_unitario": número o null,
+      "precio_modo": "bulto|base" (si el precio es por bulto o por lt/kg),
       "iva_porcentaje": número (ej: 21, 10.5, 0) o null si no está claro,
       "subtotal_neto": número o null,
       "iva_monto": número o null
@@ -519,6 +531,28 @@ router.post('/compras', requireAuth, (req, res) => {
   const { fecha, proveedor_id, proveedor_txt, nro_factura, tipo_comprobante, campaña_id, items, notas, remito_foto_b64 } = req.body;
   if (!items?.length) return res.status(400).json({ ok: false, error: 'Debe incluir al menos un item' });
   try {
+    // ── Normalizar items: calcular cantidad_base (para stock) y precio_unit_base
+    // Cada item puede venir con:
+    //   - cantidad: directo en unidad base (kg/lt/u) — flujo simple
+    //   - O bien: cant_bultos + presentacion_base (lt/kg por bulto) + precio_modo ('bulto' o 'base')
+    // Al final dejamos en it.cantidad y it.precio_unit los valores en unidad BASE.
+    for (const it of items) {
+      const cantBultos = it.cant_bultos != null ? Number(it.cant_bultos) : null;
+      const presBase = it.presentacion_base != null ? Number(it.presentacion_base) : null;
+      // Si vino cant_bultos y presentacion_base, calcular cantidad en unidad base
+      if (cantBultos != null && cantBultos > 0 && presBase != null && presBase > 0) {
+        it.cantidad = cantBultos * presBase;
+        // Si el precio vino por bulto, convertirlo a precio por unidad base
+        if (it.precio_modo === 'bulto' && it.precio_unit != null) {
+          it.precio_unit = Number(it.precio_unit) / presBase;
+        }
+      }
+      // Si faltan datos básicos rechazo
+      if (!(it.cantidad > 0) || !(it.precio_unit > 0)) {
+        // deja seguir — la validación de arriba (items vacíos) ya chequeó mínimo
+      }
+    }
+
     // Calcular totales netos + IVA por item
     let neto_total = 0;
     let iva_total = 0;
@@ -561,14 +595,31 @@ router.post('/compras', requireAuth, (req, res) => {
       for (const it of items) {
         db.prepare(`
           INSERT INTO pa_compras_items
-            (compra_id, insumo_id, cantidad, precio_unit, subtotal, iva_porcentaje, iva_monto, subtotal_neto)
-          VALUES (?,?,?,?,?,?,?,?)
+            (compra_id, insumo_id, cantidad, precio_unit, subtotal, iva_porcentaje, iva_monto, subtotal_neto,
+             presentacion_tipo, presentacion_base, cant_bultos, precio_modo)
+          VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
         `).run(compraId, it.insumo_id, it.cantidad, it.precio_unit,
-               it._subNeto + it._ivaMonto,  // subtotal = neto + iva (final del item)
+               it._subNeto + it._ivaMonto,
                it.iva_porcentaje != null ? Number(it.iva_porcentaje) : null,
                it._ivaMonto,
-               it._subNeto);
+               it._subNeto,
+               it.presentacion_tipo || null,
+               it.presentacion_base != null ? Number(it.presentacion_base) : null,
+               it.cant_bultos != null ? Number(it.cant_bultos) : null,
+               it.precio_modo || 'base');
+
+        // Actualizar stock del insumo — siempre en unidad BASE (lt, kg, u)
         db.prepare("UPDATE pa_insumos SET stock_actual = stock_actual + ? WHERE id = ?").run(it.cantidad, it.insumo_id);
+
+        // Si en la compra se informó una presentación y el insumo no la tenía cargada, la fijamos como default
+        if (it.presentacion_base != null && it.presentacion_tipo) {
+          const ins = db.prepare("SELECT presentacion_tipo, presentacion_base FROM pa_insumos WHERE id = ?").get(it.insumo_id);
+          if (ins && (!ins.presentacion_tipo || !ins.presentacion_base)) {
+            db.prepare("UPDATE pa_insumos SET presentacion_tipo = ?, presentacion_base = ? WHERE id = ?")
+              .run(it.presentacion_tipo, Number(it.presentacion_base), it.insumo_id);
+          }
+        }
+
         db.prepare("INSERT INTO pa_movimientos_stock (fecha, insumo_id, tipo, cantidad, motivo, referencia_id) VALUES (?,?,?,?,?,?)")
           .run(fecha||new Date().toISOString().slice(0,10), it.insumo_id, 'entrada', it.cantidad, 'compra', compraId);
       }
