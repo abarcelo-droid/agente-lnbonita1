@@ -2,9 +2,20 @@
 <html lang="es">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<meta name="theme-color" content="#ffffff">
-<title>Scout — La Niña Bonita</title>
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="theme-color" content="#059669">
+<title>LNB App — Puente Cordon</title>
+<!-- PWA — Progressive Web App -->
+<link rel="manifest" href="/manifest.json">
+<link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png">
+<link rel="apple-touch-icon" href="/icon-apple.png">
+<!-- iOS: modo app, status bar translúcida -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="LNB App">
+<!-- Android: ícono y color al minimizar -->
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="application-name" content="LNB App">
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <style>
 :root {
@@ -742,6 +753,11 @@ input[type=file]{display:none}
 
 <div id="toast"></div>
 
+<!-- PWA Install Button (aparece solo si el navegador puede instalar) -->
+<button id="pwa-install-btn" onclick="pwaInstalar()" style="display:none;position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:#059669;color:#fff;border:none;border-radius:24px;padding:12px 22px;font-size:14px;font-weight:600;box-shadow:0 4px 12px rgba(5,150,105,0.35);z-index:9999;align-items:center;gap:8px;cursor:pointer">
+  📲 Instalar LNB App
+</button>
+
 <script>
 var S = { user:null, loteId:null, loteNombre:'', lat:null, lng:null, tipo:null, sev:null, fotoB64:null, lotes:[], usuarios:[], frecMap:{} };
 
@@ -866,15 +882,47 @@ function selSev(el) {
 }
 function onFoto(input) {
   var file=input.files[0]; if(!file)return;
-  var reader=new FileReader();
-  reader.onload=function(e){
-    S.fotoB64=e.target.result.split(',')[1];
+  comprimirImagenScout(file, 1600, 0.85).then(function(result){
+    S.fotoB64 = result.b64;
     var area=document.getElementById('foto-area');
     area.classList.add('tiene');
-    area.innerHTML='<img src="'+e.target.result+'"><div class="foto-overlay">📷 Tocar para cambiar</div>';
+    area.innerHTML='<img src="'+result.dataUrl+'"><div class="foto-overlay">📷 Tocar para cambiar</div>';
     area.onclick=function(){document.getElementById('foto-input').click();};
-  };
-  reader.readAsDataURL(file);
+  }).catch(function(err){ toast('Error al procesar la imagen: '+err.message, 'er'); });
+}
+
+// Compresor genérico de imágenes para el Scout.
+// Redimensiona a maxSide máximo y comprime como JPEG para evitar límite de 5MB de API.
+function comprimirImagenScout(file, maxSide, quality){
+  return new Promise(function(resolve, reject){
+    var reader = new FileReader();
+    reader.onerror = function(){ reject(new Error('No se pudo leer')); };
+    reader.onload = function(e){
+      var img = new Image();
+      img.onerror = function(){ reject(new Error('No es imagen válida')); };
+      img.onload = function(){
+        var w = img.width, h = img.height;
+        if (w > maxSide || h > maxSide) {
+          if (w > h) { h = Math.round(h * maxSide / w); w = maxSide; }
+          else       { w = Math.round(w * maxSide / h); h = maxSide; }
+        }
+        var canvas = document.createElement('canvas');
+        canvas.width = w; canvas.height = h;
+        canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+        var q = quality || 0.85;
+        var dataUrl = canvas.toDataURL('image/jpeg', q);
+        var tries = 4;
+        while (dataUrl.length > 4500000 && tries > 0) {
+          q = q * 0.8;
+          dataUrl = canvas.toDataURL('image/jpeg', q);
+          tries--;
+        }
+        resolve({ b64: dataUrl.split(',')[1], dataUrl: dataUrl });
+      };
+      img.src = e.target.result;
+    };
+    reader.readAsDataURL(file);
+  });
 }
 
 function enviarReporte() {
@@ -1196,15 +1244,13 @@ function abrirEjecutar(ordenId, loteId, loteNombre, loteHa, items, fechaPropuest
 
 function onEjFoto(input) {
   var file = input.files[0]; if(!file) return;
-  var reader = new FileReader();
-  reader.onload = function(e){
-    _ejecutarData.fotoB64 = e.target.result.split(',')[1];
+  comprimirImagenScout(file, 1600, 0.85).then(function(result){
+    _ejecutarData.fotoB64 = result.b64;
     var area = document.getElementById('ej-foto-area');
     area.classList.add('tiene');
-    area.innerHTML = '<img src="'+e.target.result+'"><div class="foto-overlay">📷 Tocar para cambiar</div>';
+    area.innerHTML = '<img src="'+result.dataUrl+'"><div class="foto-overlay">📷 Tocar para cambiar</div>';
     area.onclick = function(){ document.getElementById('ej-foto-input').click(); };
-  };
-  reader.readAsDataURL(file);
+  }).catch(function(err){ toast('Error al procesar: '+err.message, 'er'); });
 }
 
 function confirmarEjecucion() {
@@ -1255,17 +1301,15 @@ function initCompras() {
 
 function scoutOnFotoComp(input) {
   var file = input.files[0]; if(!file) return;
-  var reader = new FileReader();
-  reader.onload = function(e) {
-    COMP.fotoB64 = e.target.result.split(',')[1];
+  comprimirImagenScout(file, 1600, 0.85).then(function(result){
+    COMP.fotoB64 = result.b64;
     var area = document.getElementById('comp-foto-area');
     area.classList.add('tiene');
-    area.innerHTML = '<img src="'+e.target.result+'"><div class="foto-overlay">📷 Tocar para cambiar</div>';
+    area.innerHTML = '<img src="'+result.dataUrl+'"><div class="foto-overlay">📷 Tocar para cambiar</div>';
     area.onclick = function(){ document.getElementById('comp-foto-inp').click(); };
     document.getElementById('comp-ia-btn').style.display = 'flex';
     document.getElementById('comp-ia-estado').style.display = 'none';
-  };
-  reader.readAsDataURL(file);
+  }).catch(function(err){ toast('Error al procesar: '+err.message, 'er'); });
 }
 
 function scoutAgregarItemComp() {
@@ -1614,14 +1658,12 @@ function cbOnVehiculo() {
 
 function cbOnFoto(input) {
   if (!input.files || !input.files[0]) return;
-  var reader = new FileReader();
-  reader.onload = function(e) {
-    CB.fotoB64 = e.target.result.split(',')[1];
+  comprimirImagenScout(input.files[0], 1600, 0.85).then(function(result){
+    CB.fotoB64 = result.b64;
     var area = document.getElementById('cb-foto-area');
-    area.innerHTML = '<img src="'+e.target.result+'" style="width:100%;max-height:160px;object-fit:cover;border-radius:8px;display:block">';
+    area.innerHTML = '<img src="'+result.dataUrl+'" style="width:100%;max-height:160px;object-fit:cover;border-radius:8px;display:block">';
     document.getElementById('cb-ia-btn').style.display = 'inline-block';
-  };
-  reader.readAsDataURL(input.files[0]);
+  }).catch(function(err){ toast('Error al procesar: '+err.message, 'er'); });
 }
 
 function cbLeerTicket() {
@@ -1882,13 +1924,11 @@ function ppAgregarItem() {
 
 function ppOnFoto(input) {
   if (!input.files || !input.files[0]) return;
-  var reader = new FileReader();
-  reader.onload = function(e) {
-    PP.fotoB64 = e.target.result.split(',')[1];
+  comprimirImagenScout(input.files[0], 1600, 0.85).then(function(result){
+    PP.fotoB64 = result.b64;
     var area = document.getElementById('pp-foto-area');
-    area.innerHTML = '<img src="'+e.target.result+'" style="width:100%;max-height:140px;object-fit:cover;border-radius:8px;display:block">';
-  };
-  reader.readAsDataURL(input.files[0]);
+    area.innerHTML = '<img src="'+result.dataUrl+'" style="width:100%;max-height:140px;object-fit:cover;border-radius:8px;display:block">';
+  }).catch(function(err){ toast('Error al procesar: '+err.message, 'er'); });
 }
 
 function ppGuardar() {
@@ -2118,6 +2158,71 @@ function fiGuardar() {
 }
 
 initAuth();
+
+// ═════════════════════════════════════════════════════════════════════
+// PWA — Registro del Service Worker + prompt de instalación
+// ═════════════════════════════════════════════════════════════════════
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', function(){
+    navigator.serviceWorker.register('/sw.js', { scope: '/' })
+      .then(function(reg){
+        console.log('[PWA] Service Worker registrado:', reg.scope);
+        // Detectar nuevas versiones del SW y preguntar al usuario si actualiza
+        reg.addEventListener('updatefound', function(){
+          var nw = reg.installing;
+          nw.addEventListener('statechange', function(){
+            if (nw.state === 'installed' && navigator.serviceWorker.controller) {
+              // Hay una nueva versión esperando
+              if (confirm('Hay una nueva versión de LNB App. ¿Actualizar ahora?')) {
+                nw.postMessage({ type: 'SKIP_WAITING' });
+                window.location.reload();
+              }
+            }
+          });
+        });
+      })
+      .catch(function(err){ console.warn('[PWA] SW no registrado:', err); });
+  });
+}
+
+// Prompt de instalación (Chrome/Edge Android principalmente)
+var _deferredInstallPrompt = null;
+window.addEventListener('beforeinstallprompt', function(e){
+  e.preventDefault();
+  _deferredInstallPrompt = e;
+  // Mostrar el botón flotante de instalar
+  var btn = document.getElementById('pwa-install-btn');
+  if (btn) btn.style.display = 'flex';
+});
+
+window.addEventListener('appinstalled', function(){
+  console.log('[PWA] App instalada');
+  _deferredInstallPrompt = null;
+  var btn = document.getElementById('pwa-install-btn');
+  if (btn) btn.style.display = 'none';
+});
+
+function pwaInstalar(){
+  if (!_deferredInstallPrompt) {
+    // Fallback: instrucciones para iOS (no tiene prompt automático)
+    var esIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
+    if (esIOS) {
+      alert('Para instalar en iPhone:\n\n1. Tocá el botón Compartir ⬆\n2. Bajá y elegí "Agregar a pantalla de inicio"\n3. Confirmá con "Agregar"');
+    } else {
+      alert('Para instalar esta app:\n\n• Chrome/Edge: menú ⋮ → "Instalar app"\n• O buscá el ícono ⊕ en la barra de direcciones');
+    }
+    return;
+  }
+  _deferredInstallPrompt.prompt();
+  _deferredInstallPrompt.userChoice.then(function(choice){
+    if (choice.outcome === 'accepted') {
+      console.log('[PWA] Usuario aceptó instalar');
+    }
+    _deferredInstallPrompt = null;
+    var btn = document.getElementById('pwa-install-btn');
+    if (btn) btn.style.display = 'none';
+  });
+}
 </script>
 </body>
 </html>

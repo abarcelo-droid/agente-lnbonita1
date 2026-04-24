@@ -1,0 +1,48 @@
+{
+  "name": "LNB App - Puente Cordon",
+  "short_name": "LNB App",
+  "description": "App de campo para PUENTE CORDON SA — fichaje, combustible y reportes de cuadrilla",
+  "start_url": "/scout",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#ffffff",
+  "theme_color": "#059669",
+  "lang": "es-AR",
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Fichar Entrada",
+      "short_name": "Entrada",
+      "description": "Registrar entrada de cuadrilla",
+      "url": "/scout#personal",
+      "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Cargar Combustible",
+      "short_name": "Combustible",
+      "description": "Registrar carga de combustible",
+      "url": "/scout#combustible",
+      "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }]
+    }
+  ]
+}
