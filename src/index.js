@@ -149,6 +149,41 @@ app.get("/scout", (req, res) => {
 // Archivos scout (fotos)
 app.use("/data/scout", express.static(path.join(__dirname, "../data/scout")));
 
+// ═════════════════════════════════════════════════════════════════════════
+// PWA — Progressive Web App para Scout (instalable en celular)
+// ═════════════════════════════════════════════════════════════════════════
+app.get("/manifest.json", (req, res) => {
+  res.sendFile(path.join(__dirname, "manifest.json"));
+});
+app.get("/sw.js", (req, res) => {
+  res.set('Service-Worker-Allowed', '/');
+  res.sendFile(path.join(__dirname, "sw.js"));
+});
+app.get("/icon-192.png", (req, res) => {
+  res.sendFile(path.join(__dirname, "icon-192.png"));
+});
+app.get("/icon-512.png", (req, res) => {
+  res.sendFile(path.join(__dirname, "icon-512.png"));
+});
+app.get("/icon-apple.png", (req, res) => {
+  res.sendFile(path.join(__dirname, "icon-apple.png"));
+});
+app.get("/icon-apple-152.png", (req, res) => {
+  res.sendFile(path.join(__dirname, "icon-apple-152.png"));
+});
+app.get("/icon-apple-167.png", (req, res) => {
+  res.sendFile(path.join(__dirname, "icon-apple-167.png"));
+});
+app.get("/icon-apple-120.png", (req, res) => {
+  res.sendFile(path.join(__dirname, "icon-apple-120.png"));
+});
+app.get("/icon-32.png", (req, res) => {
+  res.sendFile(path.join(__dirname, "icon-32.png"));
+});
+app.get("/favicon.ico", (req, res) => {
+  res.sendFile(path.join(__dirname, "icon-32.png"));
+});
+
 // Health check
 app.get("/", (req, res) => res.json({ status:"ok", version:"3.0", panel:"/panel" }));
 
