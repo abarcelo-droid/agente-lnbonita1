@@ -3,15 +3,21 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
-<meta name="theme-color" content="#059669">
+<meta name="theme-color" content="#942a2e">
 <title>LNB App — Puente Cordon</title>
 <!-- PWA — Progressive Web App -->
 <link rel="manifest" href="/manifest.json">
-<link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png">
-<link rel="apple-touch-icon" href="/icon-apple.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/icon-32.png?v=3">
+<link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png?v=3">
+<!-- Apple Touch Icon — iOS usa el de mayor tamaño que encuentre -->
+<link rel="apple-touch-icon" href="/icon-apple.png?v=3">
+<link rel="apple-touch-icon" sizes="120x120" href="/icon-apple-120.png?v=3">
+<link rel="apple-touch-icon" sizes="152x152" href="/icon-apple-152.png?v=3">
+<link rel="apple-touch-icon" sizes="167x167" href="/icon-apple-167.png?v=3">
+<link rel="apple-touch-icon" sizes="180x180" href="/icon-apple.png?v=3">
 <!-- iOS: modo app, status bar translúcida -->
 <meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="LNB App">
 <!-- Android: ícono y color al minimizar -->
 <meta name="mobile-web-app-capable" content="yes">
@@ -45,7 +51,7 @@
 body{background:var(--bg);color:var(--txt);font-family:var(--sans);font-size:14px;line-height:1.5;min-height:100vh}
 
 /* TOP BAR */
-.topbar{background:#fff;padding:0;display:flex;flex-direction:column;position:sticky;top:0;z-index:50;box-shadow:0 2px 12px rgba(0,0,0,.08);border-bottom:1px solid var(--bor)}
+.topbar{background:#fff;padding:0;display:flex;flex-direction:column;position:sticky;top:0;z-index:50;box-shadow:0 2px 12px rgba(0,0,0,.08);border-bottom:1px solid var(--bor);padding-top:env(safe-area-inset-top,0)}
 .topbar-main{display:flex;align-items:center;justify-content:space-between;padding:12px 18px}
 .topbar-logo{display:flex;align-items:center;gap:12px}
 .topbar-logo img{height:40px;width:auto}
@@ -132,7 +138,7 @@ input[type=file]{display:none}
 .scout-select:focus{border-color:var(--burg)}
 
 /* FAB */
-.fab{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--burg);color:#fff;font-family:var(--sans);font-size:15px;font-weight:700;padding:16px 40px;border-radius:50px;border:none;cursor:pointer;box-shadow:0 6px 24px rgba(26,58,92,.35);z-index:40;transition:all .15s;display:none;align-items:center;gap:8px;white-space:nowrap}
+.fab{position:fixed;bottom:calc(24px + env(safe-area-inset-bottom,0));left:50%;transform:translateX(-50%);background:var(--burg);color:#fff;font-family:var(--sans);font-size:15px;font-weight:700;padding:16px 40px;border-radius:50px;border:none;cursor:pointer;box-shadow:0 6px 24px rgba(26,58,92,.35);z-index:40;transition:all .15s;display:none;align-items:center;gap:8px;white-space:nowrap}
 .fab:active{transform:translateX(-50%) scale(.97)}
 .fab.show{display:flex}
 
@@ -754,7 +760,7 @@ input[type=file]{display:none}
 <div id="toast"></div>
 
 <!-- PWA Install Button (aparece solo si el navegador puede instalar) -->
-<button id="pwa-install-btn" onclick="pwaInstalar()" style="display:none;position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:#059669;color:#fff;border:none;border-radius:24px;padding:12px 22px;font-size:14px;font-weight:600;box-shadow:0 4px 12px rgba(5,150,105,0.35);z-index:9999;align-items:center;gap:8px;cursor:pointer">
+<button id="pwa-install-btn" onclick="pwaInstalar()" style="display:none;position:fixed;bottom:calc(18px + env(safe-area-inset-bottom,0));left:50%;transform:translateX(-50%);background:#942a2e;color:#fff;border:none;border-radius:24px;padding:12px 22px;font-size:14px;font-weight:600;box-shadow:0 4px 12px rgba(148,42,46,0.35);z-index:9999;align-items:center;gap:8px;cursor:pointer">
   📲 Instalar LNB App
 </button>
 
@@ -775,11 +781,57 @@ function initAuth() {
     S.user=r.user;
     var el=document.getElementById('topbar-user');
     el.innerHTML='<strong>'+r.user.nombre.split(' ')[0]+'</strong>'+r.user.rol;
+    aplicarPermisosTabs();  // ocultar tabs según secciones del usuario
     initGPS();
     cargarLotes();
     cargarUsuarios();
     actualizarBadges();
   });
+}
+
+// Oculta tabs de la top bar que el usuario no tiene permiso de ver.
+// Permisos configurables desde Panel → Usuarios → checkboxes "Scout — App móvil (tabs)".
+// Si secciones incluye "*" (wildcard) → ve todo.
+function aplicarPermisosTabs() {
+  var secs = (S.user && S.user.secciones) || [];
+  var esAdmin = S.user && (S.user.rol === 'admin' || secs.includes('*'));
+
+  // Mapeo tab → permiso requerido
+  var PERMISOS_TAB = {
+    'reportar':    'scout-reportar',
+    'mis-ordenes': 'scout-mis-ordenes',
+    'compras':     'scout-compras',
+    'pendientes':  'scout-pendientes',
+    'mis-tareas':  'scout-mis-tareas',
+    'combustible': 'scout-combustible',
+    'personal':    'scout-personal',
+  };
+
+  var tabsVisibles = [];
+  document.querySelectorAll('.tab-bar .tab').forEach(function(t){
+    var tabId = t.dataset.tab;
+    var permisoReq = PERMISOS_TAB[tabId];
+    // Si no está en el mapa, dejarlo visible (tabs sin restricción)
+    if (!permisoReq) { tabsVisibles.push(tabId); return; }
+    // Admin o con wildcard ve todo
+    if (esAdmin || secs.includes(permisoReq)) {
+      tabsVisibles.push(tabId);
+    } else {
+      t.style.display = 'none';
+    }
+  });
+
+  // Si el tab activo quedó oculto, activar el primero visible
+  var tabActivo = document.querySelector('.tab-bar .tab.active');
+  if (tabActivo && tabActivo.style.display === 'none' && tabsVisibles.length > 0) {
+    showTab(tabsVisibles[0]);
+  }
+
+  // Si no hay ningún tab visible, avisar
+  if (tabsVisibles.length === 0) {
+    var tb = document.querySelector('.tab-bar');
+    if (tb) tb.innerHTML = '<div style="padding:20px;text-align:center;color:var(--mut);font-size:13px;width:100%">Sin secciones habilitadas.<br>Pedile a un administrador que te asigne permisos.</div>';
+  }
 }
 
 // ── GPS ──
