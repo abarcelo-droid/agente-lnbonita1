@@ -3,6 +3,8 @@
 // Todas las tablas usan prefijo pa_ para no colisionar con La Niña Bonita
 
 import db from './db.js';
+import fs from 'fs';
+import path from 'path';
 
 // ── TABLAS MAESTRAS ────────────────────────────────────────────────────────
 
@@ -860,6 +862,163 @@ db.exec(`
       console.log(`[PA] ${tareas.length} tipos de tarea creados`);
     }
   } catch(e) { console.error('[PA] Error seed tareas:', e.message); }
+})();
+
+// ── SEED: Tractores iniciales (todos gasoleros, con horómetro) ─────────────
+(function seedTractoresIniciales() {
+  try {
+    const TRACTORES = [
+      'NEW HOLLAND N°6',
+      'MASSEY N°7',
+      'NEW HOLLAND N°2 (A)',
+      'NEW HOLLAND N°2 (B)',
+      'NEW HOLLAND N°1',
+      'DEUTZ N°3',
+      'AGCO ALLIS N°5',
+      'NEW HOLLAND N°4 (A)',
+      'DEUTZ N°8',
+      'NEW HOLLAND N°4 (B)',
+    ];
+
+    // Parser de marca: extrae la marca del inicio del nombre
+    function marcaDelNombre(n) {
+      const up = n.toUpperCase();
+      if (up.startsWith('NEW HOLLAND')) return 'New Holland';
+      if (up.startsWith('MASSEY')) return 'Massey Ferguson';
+      if (up.startsWith('DEUTZ')) return 'Deutz';
+      if (up.startsWith('AGCO ALLIS')) return 'AGCO Allis';
+      return null;
+    }
+
+    const check = db.prepare("SELECT id FROM pa_vehiculos WHERE identificacion = ?");
+    const ins = db.prepare(`INSERT INTO pa_vehiculos
+      (tipo, identificacion, marca_modelo, combustible, tiene_horometro, horas_actuales, notas)
+      VALUES ('tractor', ?, ?, 'gasoil', 1, 0, ?)`);
+
+    let nuevos = 0;
+    for (const nombre of TRACTORES) {
+      if (check.get(nombre)) continue;  // ya existe, no duplicar
+      ins.run(nombre, marcaDelNombre(nombre), 'Importado desde planilla inicial');
+      nuevos++;
+    }
+    if (nuevos > 0) console.log(`[PA] ${nuevos} tractores creados`);
+  } catch(e) { console.error('[PA] Error seed tractores:', e.message); }
+})();
+
+// ═════════════════════════════════════════════════════════════════════════
+// RESET ÚNICO: vaciar insumos / compras / costos / movimientos / combustible
+//              / personal (transaccional). Usa flag en sistema_flags para
+//              ejecutarse UNA SOLA VEZ, sin importar cuántos deploys vengan.
+// ═════════════════════════════════════════════════════════════════════════
+(function resetInsumosComprasV1() {
+  const FLAG_KEY = 'reset_insumos_compras_v1';
+  try {
+    // Crear tabla de flags si no existe
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS sistema_flags (
+        key         TEXT PRIMARY KEY,
+        valor       TEXT,
+        ejecutado_en TEXT DEFAULT (datetime('now','localtime'))
+      );
+    `);
+
+    // Si la flag ya existe, salir en silencio — ya se ejecutó antes
+    const existe = db.prepare("SELECT key FROM sistema_flags WHERE key = ?").get(FLAG_KEY);
+    if (existe) return;
+
+    console.log('[RESET] Ejecutando reset de insumos/compras/costos (flag: ' + FLAG_KEY + ')');
+
+    // Backup de seguridad antes del borrado — en el mismo volume de Railway
+    try {
+      const dbPathVal = '/app/data/clientes.db';
+      const backupDir = '/app/data/backups';
+      if (fs.existsSync(dbPathVal)) {
+        fs.mkdirSync(backupDir, { recursive: true });
+        const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+        const backupPath = path.join(backupDir, 'pre-reset-' + stamp + '.db');
+        fs.copyFileSync(dbPathVal, backupPath);
+        console.log('[RESET] Backup creado en ' + backupPath);
+      }
+    } catch(e) {
+      console.warn('[RESET] No se pudo crear backup (continuando igual):', e.message);
+    }
+
+    // Tablas a vaciar — en orden seguro (hijas primero para evitar FK issues)
+    const TABLAS_A_VACIAR = [
+      // Personal — orden hijas → padres
+      'pa_partes_valorizacion',
+      'pa_partes_trabajo_items',
+      'pa_partes_trabajo',
+      // Combustible
+      'pa_combustible_movimientos',
+      // Stock y órdenes — hijas → padres
+      'pa_aplicaciones',
+      'pa_ordenes_items',
+      'pa_ordenes_lotes',
+      'pa_ordenes',
+      'pa_movimientos_stock',
+      'pa_costos_lote',
+      // Compras
+      'pa_compras_items',
+      'pa_compras',
+      // Maestro de insumos (al final porque muchas tablas lo referenciaban)
+      'pa_insumos',
+    ];
+
+    // Desactivar FK temporalmente por seguridad
+    db.pragma('foreign_keys = OFF');
+
+    const tx = db.transaction(() => {
+      let totalFilas = 0;
+      let tablasOk = 0;
+      const contados = {};
+
+      for (const t of TABLAS_A_VACIAR) {
+        try {
+          // Chequear que la tabla exista (por si se deploya en DB sin alguna tabla)
+          const exists = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name=?").get(t);
+          if (!exists) continue;
+          const n = db.prepare(`SELECT COUNT(*) as n FROM ${t}`).get().n;
+          db.prepare(`DELETE FROM ${t}`).run();
+          // Reset autoincrement para que los IDs vuelvan a empezar desde 1
+          try { db.prepare("DELETE FROM sqlite_sequence WHERE name = ?").run(t); } catch(e) {}
+          contados[t] = n;
+          totalFilas += n;
+          tablasOk++;
+        } catch(e) {
+          console.error(`[RESET] Error vaciando ${t}:`, e.message);
+          throw e; // aborta la transacción entera
+        }
+      }
+
+      // Resetear stock de tanques de combustible a 0 (sin borrar los tanques)
+      try {
+        const nTanq = db.prepare("SELECT COUNT(*) as n FROM pa_combustible_tanques WHERE stock_actual != 0").get().n;
+        if (nTanq > 0) {
+          db.prepare("UPDATE pa_combustible_tanques SET stock_actual = 0").run();
+          console.log(`[RESET] ${nTanq} tanque(s) con stock reseteado a 0`);
+        }
+      } catch(e) { /* tabla puede no existir */ }
+
+      // Resetear stock de insumos (por si algún INSERT futuro trae stock) — ya está vacía igual
+      // Marcar la flag como ejecutada
+      db.prepare("INSERT INTO sistema_flags (key, valor) VALUES (?, ?)")
+        .run(FLAG_KEY, JSON.stringify({ total_filas: totalFilas, tablas: contados }));
+
+      console.log(`[RESET] Vaciadas ${tablasOk} tablas. Total filas eliminadas: ${totalFilas}`);
+      for (const [t, n] of Object.entries(contados)) {
+        if (n > 0) console.log(`[RESET]   · ${t}: ${n} filas`);
+      }
+    });
+
+    tx();
+    db.pragma('foreign_keys = ON');
+    console.log('[RESET] Completado — flag grabada, no se vuelve a ejecutar');
+
+  } catch(e) {
+    console.error('[RESET] ERROR, datos NO fueron borrados (transacción revertida):', e.message);
+    try { db.pragma('foreign_keys = ON'); } catch(e2) {}
+  }
 })();
 
 export { db };
