@@ -1332,12 +1332,12 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
 </div>
 </div>
 <div class="filt">
-  <select id="pa-lot-sector-fil" onchange="paLoadLotes()"><option value="">Todas las fincas</option></select>
+  <select id="pa-lot-finca-fil" onchange="paLoadLotes()"><option value="">Todas las fincas</option></select>
 </div>
 <!-- Vista: Tabla -->
 <div id="pa-lot-vista-tabla-cont" class="pa-wrap"><div class="ab-table-wrap"><table class="pa-tbl">
-  <thead><tr><th>Finca / Sector</th><th>Lote (Llaves)</th><th style="text-align:right">Ha</th><th>Cultivo actual</th><th>Tipo</th><th>Polígono</th><th></th></tr></thead>
-  <tbody id="pa-lot-tbody"><tr><td colspan="7" class="emp">Cargando...</td></tr></tbody>
+  <thead><tr><th>Finca</th><th>Lote</th><th style="text-align:right">Hectáreas</th><th>Cultivo 2026/27</th><th>Polígono</th><th></th></tr></thead>
+  <tbody id="pa-lot-tbody"><tr><td colspan="6" class="emp">Cargando...</td></tr></tbody>
 </table></div></div>
 <!-- Vista: Mapa general -->
 <div id="pa-lot-vista-mapa-cont" style="display:none">
@@ -5636,7 +5636,8 @@ function paInit(){
   paF('/api/pa/sectores').then(function(r){
     PA.sectores=r.data||[];
     var opts=PA.sectores.map(function(s){return'<option value="'+s.id+'">'+s.nombre+'</option>';}).join('');
-    var fil=document.getElementById('pa-lot-sector-fil');if(fil)fil.innerHTML='<option value="">Todas las fincas</option>'+opts;
+    // El filtro pa-lot-finca-fil se pobla solo desde paLoadLotes() con las fincas reales.
+    // Acá solo poblamos el select del modal de nuevo lote (por si existe).
     var sel=document.getElementById('pa-lot-sector');if(sel)sel.innerHTML=opts;
   });
   paF('/api/pa/insumos').then(function(r){PA.insumos=r.data||[];});
@@ -6576,16 +6577,50 @@ function paVerDetalleCosto(loteId){
 }
 
 function paLoadLotes(){
-  var secId=document.getElementById('pa-lot-sector-fil').value;
-  paF('/api/pa/lotes'+(secId?'?sector_id='+secId:'')).then(function(r){
-    PA.lotes=r.data||[];var tb=document.getElementById('pa-lot-tbody');
-    if(!PA.lotes.length){tb.innerHTML='<tr><td colspan="7" class="emp">Sin lotes</td></tr>';return;}
-    var tl={frutales:'Frutal',chacra_mercado:'Chacra Mercado',chacra_industria:'Chacra Industria'};
-    tb.innerHTML=PA.lotes.map(function(l){
+  var fincaFil=document.getElementById('pa-lot-finca-fil').value;
+  paF('/api/pa/lotes').then(function(r){
+    PA.lotes=r.data||[];
+
+    // Poblar el filtro de fincas con las únicas
+    var fincasUnicas = {};
+    PA.lotes.forEach(function(l){ if(l.finca) fincasUnicas[l.finca] = true; });
+    var fincaFilEl = document.getElementById('pa-lot-finca-fil');
+    if (fincaFilEl) {
+      var actual = fincaFilEl.value;
+      fincaFilEl.innerHTML = '<option value="">Todas las fincas</option>' +
+        Object.keys(fincasUnicas).sort().map(function(f){
+          return '<option value="'+f.replace(/"/g,'&quot;')+'">'+f+'</option>';
+        }).join('');
+      fincaFilEl.value = actual;
+    }
+
+    // Filtrar lotes si hay finca seleccionada
+    var lotesMostrar = PA.lotes;
+    if (fincaFil) lotesMostrar = PA.lotes.filter(function(l){ return l.finca === fincaFil; });
+
+    var tb=document.getElementById('pa-lot-tbody');
+    if(!lotesMostrar.length){tb.innerHTML='<tr><td colspan="6" class="emp">Sin lotes</td></tr>';return;}
+    tb.innerHTML=lotesMostrar.map(function(l){
+      // Obtener cultivo específico de campaña 2026/27 si existe
+      var cult = '';
+      if (l.cultivos && l.cultivos['2026/27']) {
+        var cd = l.cultivos['2026/27'];
+        cult = typeof cd === 'string' ? cd : (cd.cultivo || '');
+      }
+      var cultCell = cult
+        ? '<span>'+cult+'</span>'
+        : '<span style="color:var(--mut);font-style:italic">Sin asignar</span>';
       var polBtn = l.poligono_geojson
-        ? '<button class="btn bo bs" onclick="paAbrirEditorPoligono('+l.id+')" title="Editar polígono" style="color:var(--ok);border-color:var(--ok)">✓ Ver</button>'
+        ? '<button class="btn bo bs" onclick="paAbrirEditorPoligono('+l.id+')" title="Ver/editar polígono" style="color:var(--ok);border-color:var(--ok)">✓ Ver</button>'
         : '<button class="btn bo bs" onclick="paAbrirEditorPoligono('+l.id+')" title="Dibujar polígono">🗺️ Dibujar</button>';
-      return '<tr><td style="color:var(--mut);font-size:12px">'+l.sector_nombre+'</td><td><strong>'+l.nombre+'</strong></td><td style="text-align:right">'+l.hectareas+'</td><td>'+(l.cultivo_actual||'<span style="color:var(--mut);font-style:italic">Sin asignar</span>')+'</td><td><span class="pa-badge pa-gris-bg">'+(tl[l.sector_tipo]||l.sector_tipo)+'</span></td><td>'+polBtn+'</td><td><button class="btn bo bs" onclick="paEditarCultivo('+l.id+',\''+l.nombre.replace(/'/g,"\\'")+'\')">🌱 Cultivo</button></td></tr>';
+      return '<tr>'
+        +'<td>'+(l.finca||'<span style="color:var(--mut)">—</span>')+'</td>'
+        +'<td><strong>'+l.nombre+'</strong></td>'
+        +'<td style="text-align:right">'+l.hectareas+'</td>'
+        +'<td>'+cultCell+'</td>'
+        +'<td>'+polBtn+'</td>'
+        +'<td><button class="btn bo bs" onclick="paEditarCultivo('+l.id+',\''+l.nombre.replace(/'/g,"\\'")+'\')">🌱 Cultivos</button></td>'
+      +'</tr>';
     }).join('');
   });
 }
