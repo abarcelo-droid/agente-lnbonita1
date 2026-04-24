@@ -5426,12 +5426,9 @@ if(_inpGondola) _inpGondola.addEventListener('keydown', function(e){
     <div class="fl"><label>Stock mínimo</label><input type="number" id="pa-ins-stock-min" value="0" min="0"></div>
     <!-- Presentación default (se sugiere al comprar este producto) -->
     <div class="fl ff" style="background:#f8fafc;border:1px solid var(--bor);border-radius:8px;padding:10px 12px;margin-top:4px">
-      <label style="font-size:11px;color:var(--mut);font-weight:600;text-transform:uppercase;letter-spacing:.05em">Presentación default <span style="font-weight:400;text-transform:none;letter-spacing:0">(opcional · se usa al comprar)</span></label>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:4px">
-        <input type="text" id="pa-ins-pres-tipo" placeholder="Tipo bulto: lata, bidón, bolsa, caja..." style="font-size:13px">
-        <input type="number" id="pa-ins-pres-base" placeholder="lt/kg por bulto (ej: 20)" step="0.01" min="0" style="font-size:13px">
-      </div>
-      <div style="font-size:10px;color:var(--mut);margin-top:4px">Ej: "lata" + "20" → se entiende que vienen latas de 20 lt</div>
+      <label style="font-size:11px;color:var(--mut);font-weight:600;text-transform:uppercase;letter-spacing:.05em">Presentación default <span style="font-weight:400;text-transform:none;letter-spacing:0">(opcional · se sugiere al comprar)</span></label>
+      <input type="number" id="pa-ins-pres-base" placeholder="lt/kg por bulto (ej: 20)" step="0.01" min="0" style="font-size:13px;margin-top:4px;width:100%">
+      <div style="font-size:10px;color:var(--mut);margin-top:4px">Ej: si viene en latas de 20 lt, poner 20. Al cargar compras se va a precompletar.</div>
     </div>
     <div class="fl"><label>Precio referencia (USD / unidad)</label>
       <div style="display:flex;align-items:center;gap:6px">
@@ -6133,7 +6130,7 @@ function paLoadInsumos(){
       if (i.presentacion_base && i.presentacion_base > 0 && i.stock_actual > 0) {
         var bultos = (i.stock_actual / i.presentacion_base);
         var bultosStr = (bultos % 1 === 0) ? bultos.toString() : bultos.toFixed(2);
-        stockTxt += '<br><span style="font-size:10px;color:var(--mut)">≈ '+bultosStr+' '+(i.presentacion_tipo||'bulto')+(bultos>1?'s':'')+' × '+i.presentacion_base+' '+i.unidad+'</span>';
+        stockTxt += '<br><span style="font-size:10px;color:var(--mut)">≈ '+bultosStr+' × '+i.presentacion_base+' '+i.unidad+'</span>';
       }
 
       return'<tr>'
@@ -6220,7 +6217,6 @@ function paAbrirNuevoInsumo(){
   document.getElementById('pa-ins-notas').value='';
   document.getElementById('pa-ins-ficha-file').value='';
   document.getElementById('pa-ins-ficha-actual').style.display='none';
-  var ptEl=document.getElementById('pa-ins-pres-tipo');if(ptEl)ptEl.value='';
   var pbEl=document.getElementById('pa-ins-pres-base');if(pbEl)pbEl.value='';
   document.getElementById('pa-ins-modal-tit').textContent='Nuevo Insumo';
   paOnCategoriaCambio();
@@ -6239,7 +6235,6 @@ function paEditarInsumo(id){
   document.getElementById('pa-ins-precio-usd').value=ins.precio_ref_usd||'';
   document.getElementById('pa-ins-notas').value=ins.notas||'';
   document.getElementById('pa-ins-ficha-file').value='';
-  var ptEl=document.getElementById('pa-ins-pres-tipo');if(ptEl)ptEl.value=ins.presentacion_tipo||'';
   var pbEl=document.getElementById('pa-ins-pres-base');if(pbEl)pbEl.value=ins.presentacion_base||'';
   var fichEl=document.getElementById('pa-ins-ficha-actual');
   if(ins.ficha_tecnica_path){
@@ -6263,13 +6258,11 @@ function paGuardarInsumo(){
   var notas=document.getElementById('pa-ins-notas').value.trim();
   var fichaFile=document.getElementById('pa-ins-ficha-file').files[0];
   // Presentación default (opcional)
-  var presTipoEl=document.getElementById('pa-ins-pres-tipo');
   var presBaseEl=document.getElementById('pa-ins-pres-base');
-  var presTipo=presTipoEl?presTipoEl.value.trim()||null:null;
   var presBase=presBaseEl?parseFloat(presBaseEl.value)||null:null;
   if(!nombre)return toast('Ingresá el nombre','er');
   var body={nombre,tipo,unidad,stock_minimo:stMin,categoria_principal:categoria,componente_madre:componente||null,precio_ref_usd:precioUsd,notas,
-            presentacion_tipo:presTipo, presentacion_base:presBase};
+            presentacion_base:presBase};
   paF(id?'/api/pa/insumos/'+id:'/api/pa/insumos',{method:id?'PATCH':'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
     .then(function(r){
       if(!r.ok)return toast(r.error||'Error','er');
@@ -6316,13 +6309,17 @@ function paLoadCompras(){
 }
 function paOnFotoCompra(input){
   var file=input.files[0];if(!file)return;
-  var reader=new FileReader();
-  reader.onload=function(e){
-    PA._compraFotoB64=e.target.result.split(',')[1];
+  paComprimirImagen(file, 1600, 0.85).then(function(result){
+    // result = { b64: string, dataUrl: string, originalSize: number, newSize: number }
+    PA._compraFotoB64 = result.b64;
     var area=document.getElementById('pa-comp-foto-area');
     area.style.padding='0';area.style.border='2px solid var(--burg)';
-    area.innerHTML='<img src="'+e.target.result+'" style="width:100%;max-height:200px;object-fit:cover;border-radius:8px;display:block">'
-      +'<div style="padding:6px;text-align:center;font-size:11px;color:var(--burg);font-weight:600">📄 Tocar para cambiar</div>';
+    var ratio = (result.originalSize / result.newSize).toFixed(1);
+    var infoTxt = result.originalSize > result.newSize * 1.5
+      ? '📄 Tocar para cambiar · Optimizada de '+paFmtBytes(result.originalSize)+' a '+paFmtBytes(result.newSize)+' ('+ratio+'×)'
+      : '📄 Tocar para cambiar · '+paFmtBytes(result.newSize);
+    area.innerHTML='<img src="'+result.dataUrl+'" style="width:100%;max-height:200px;object-fit:cover;border-radius:8px;display:block">'
+      +'<div style="padding:6px;text-align:center;font-size:11px;color:var(--burg);font-weight:600">'+infoTxt+'</div>';
     area.onclick=function(){document.getElementById('pa-comp-foto-inp').click();};
     // Mostrar botón Leer con IA
     var btn=document.getElementById('pa-comp-leer-btn');
@@ -6330,8 +6327,60 @@ function paOnFotoCompra(input){
     // Limpiar estado IA anterior
     var est=document.getElementById('pa-comp-ia-estado');
     if(est)est.style.display='none';
-  };
-  reader.readAsDataURL(file);
+  }).catch(function(err){
+    toast('Error al procesar la imagen: '+err.message, 'er');
+  });
+}
+
+// Redimensiona una imagen a maxSide x maxSide máximo y la comprime como JPEG.
+// Funciona con imágenes de hasta decenas de MB (lo procesa en el canvas, sin cargarlo todo a memoria al enviar).
+function paComprimirImagen(file, maxSide, quality){
+  return new Promise(function(resolve, reject){
+    var reader = new FileReader();
+    reader.onerror = function(){ reject(new Error('No se pudo leer el archivo')); };
+    reader.onload = function(e){
+      var img = new Image();
+      img.onerror = function(){ reject(new Error('Archivo no es una imagen válida')); };
+      img.onload = function(){
+        // Calcular nuevas dimensiones manteniendo proporción
+        var w = img.width, h = img.height;
+        if (w > maxSide || h > maxSide) {
+          if (w > h) { h = Math.round(h * maxSide / w); w = maxSide; }
+          else       { w = Math.round(w * maxSide / h); h = maxSide; }
+        }
+        var canvas = document.createElement('canvas');
+        canvas.width = w; canvas.height = h;
+        var ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, w, h);
+        // Iterativamente bajar calidad si sigue muy grande (>4.5 MB base64 ~= 3.4 MB bin)
+        var q = quality || 0.85;
+        var dataUrl = canvas.toDataURL('image/jpeg', q);
+        var triesRemaining = 4;
+        while (dataUrl.length > 4_500_000 && triesRemaining > 0) {
+          q = q * 0.8;
+          dataUrl = canvas.toDataURL('image/jpeg', q);
+          triesRemaining--;
+        }
+        var b64 = dataUrl.split(',')[1];
+        // Tamaño real en bytes (aprox) = b64.length * 0.75
+        var newSize = Math.round(b64.length * 0.75);
+        resolve({
+          b64: b64,
+          dataUrl: dataUrl,
+          originalSize: file.size,
+          newSize: newSize
+        });
+      };
+      img.src = e.target.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+function paFmtBytes(n){
+  if (n < 1024) return n + ' B';
+  if (n < 1024*1024) return (n/1024).toFixed(0) + ' KB';
+  return (n/1024/1024).toFixed(1) + ' MB';
 }
 
 function paLeerRemito(){
@@ -6396,27 +6445,21 @@ function paLeerRemito(){
         if(modoSel){modoSel.value = usaPres ? 'presentacion' : 'base'; paOnModoCambio(n);}
 
         var cantbEl=document.getElementById('pa-ci-cantb-'+n);
-        var prestEl=document.getElementById('pa-ci-prest-'+n);
         var presbEl=document.getElementById('pa-ci-presb-'+n);
         var precEl=document.getElementById('pa-ci-prec-'+n);
-        var precmEl=document.getElementById('pa-ci-precm-'+n);
         var ivaEl=document.getElementById('pa-ci-iva-'+n);
 
         if(usaPres){
           if(cantbEl && it.cant_bultos) cantbEl.value = it.cant_bultos;
-          if(prestEl && it.presentacion_tipo) prestEl.value = it.presentacion_tipo;
           if(presbEl && it.presentacion_base) presbEl.value = it.presentacion_base;
           if(precEl && it.precio_unitario) precEl.value = it.precio_unitario;
-          if(precmEl && it.precio_modo){
-            precmEl.value = it.precio_modo === 'bulto' ? 'bulto' : 'base';
-          }
         } else {
           // Modo simple — cargamos directo la cantidad
           if(cantbEl && it.cantidad) cantbEl.value = it.cantidad;
           if(precEl && it.precio_unitario) precEl.value = it.precio_unitario;
         }
 
-        // IVA detectado por la IA — si el porcentaje coincide con opciones predefinidas, lo seleccionamos
+        // IVA detectado por la IA
         if(ivaEl && it.iva_porcentaje != null){
           var pct=Number(it.iva_porcentaje);
           var opts=Array.from(ivaEl.options).map(function(o){return o.value;});
@@ -6475,24 +6518,23 @@ function paGuardarCompra(){
     var modo=document.getElementById('pa-ci-modo-'+n).value;
     var cantBul=parseFloat(document.getElementById('pa-ci-cantb-'+n).value)||0;
     var presBase=parseFloat(document.getElementById('pa-ci-presb-'+n).value)||0;
-    var presTipo=document.getElementById('pa-ci-prest-'+n).value.trim()||null;
     var precio=parseFloat(document.getElementById('pa-ci-prec-'+n).value)||0;
     var ivaEl=document.getElementById('pa-ci-iva-'+n);
     var ivaPct=ivaEl&&ivaEl.value!==''?parseFloat(ivaEl.value):null;
-    var precModo=document.getElementById('pa-ci-precm-'+n).value; // 'bulto' o 'base'
 
     if(cantBul<=0||precio<=0)return;
-    // En modo 'presentacion' necesitamos presBase>0
     if(modo==='presentacion' && presBase<=0)return;
 
-    var item={insumo_id:insId, iva_porcentaje:ivaPct, precio_modo:precModo};
+    var item={insumo_id:insId, iva_porcentaje:ivaPct};
     if(modo==='presentacion'){
+      // Por bultos: cant_bultos × presentacion_base = stock (base)
+      // Monto = cant_bultos × precio
       item.cant_bultos=cantBul;
-      item.presentacion_tipo=presTipo;
       item.presentacion_base=presBase;
-      item.precio_unit=precio;  // el backend lo convierte si es 'bulto'
+      item.precio_unit=precio;  // precio por bulto
+      item.precio_modo='bulto';
     } else {
-      // modo simple: cantidad directo en unidad base, precio por unidad base
+      // Modo base: cantidad directo en unidad base, precio por unidad base
       item.cantidad=cantBul;
       item.precio_unit=precio;
       item.precio_modo='base';
@@ -6509,7 +6551,7 @@ function paGuardarCompra(){
 }
 function paAgregarItemCompra(){
   var n=PA.compN++;
-  var opts=PA.insumos.map(function(i){return'<option value="'+i.id+'" data-prest="'+(i.presentacion_tipo||'')+'" data-presb="'+(i.presentacion_base||'')+'" data-unidad="'+i.unidad+'">'+i.nombre+' ('+i.unidad+')</option>';}).join('');
+  var opts=PA.insumos.map(function(i){return'<option value="'+i.id+'" data-presb="'+(i.presentacion_base||'')+'" data-unidad="'+i.unidad+'">'+i.nombre+' ('+i.unidad+')</option>';}).join('');
   var row=document.createElement('div');row.id='pa-ci-row-'+n;row.dataset.n=n;
   row.style.cssText='padding:10px;border:1px solid var(--bor);border-radius:8px;margin-bottom:8px;background:var(--sur)';
   row.innerHTML=
@@ -6522,30 +6564,19 @@ function paAgregarItemCompra(){
       +'</select>'
       +'<button class="btn bd bs" onclick="document.getElementById(\'pa-ci-row-'+n+'\').remove();paActTotalComp()">✕</button>'
     +'</div>'
-    // Línea 2: grilla con cantidad, tipo, presentación, precio con modo, IVA, subtotal
-    +'<div id="pa-ci-grid-'+n+'" style="display:grid;grid-template-columns:80px 1fr 80px 110px 70px 80px 90px;gap:8px;align-items:center;font-size:12px">'
+    // Línea 2: cantidad, contenido por bulto, precio por bulto, IVA, subtotal
+    +'<div id="pa-ci-grid-'+n+'" style="display:grid;grid-template-columns:100px 140px 140px 80px 120px;gap:8px;align-items:center;font-size:12px">'
       +'<div>'
         +'<div style="font-size:10px;color:var(--mut);margin-bottom:2px">Cant.</div>'
         +'<input type="number" id="pa-ci-cantb-'+n+'" placeholder="Ej: 4" step="0.01" min="0" oninput="paActTotalComp()" style="width:100%">'
-      +'</div>'
-      +'<div class="pa-ci-pres-col" data-n="'+n+'">'
-        +'<div style="font-size:10px;color:var(--mut);margin-bottom:2px">Tipo bulto</div>'
-        +'<input type="text" id="pa-ci-prest-'+n+'" placeholder="lata, bidón, bolsa..." style="width:100%">'
       +'</div>'
       +'<div class="pa-ci-pres-col" data-n="'+n+'">'
         +'<div style="font-size:10px;color:var(--mut);margin-bottom:2px">lt/kg por bulto</div>'
         +'<input type="number" id="pa-ci-presb-'+n+'" placeholder="Ej: 20" step="0.01" min="0" oninput="paActTotalComp()" style="width:100%">'
       +'</div>'
       +'<div>'
-        +'<div style="font-size:10px;color:var(--mut);margin-bottom:2px">Precio neto</div>'
+        +'<div style="font-size:10px;color:var(--mut);margin-bottom:2px"><span class="pa-ci-precio-lbl" data-n="'+n+'">$ por bulto</span></div>'
         +'<input type="number" id="pa-ci-prec-'+n+'" placeholder="0.00" step="0.01" min="0" oninput="paActTotalComp()" style="width:100%">'
-      +'</div>'
-      +'<div>'
-        +'<div style="font-size:10px;color:var(--mut);margin-bottom:2px">Por</div>'
-        +'<select id="pa-ci-precm-'+n+'" onchange="paActTotalComp()" style="width:100%;font-size:12px">'
-          +'<option value="bulto">bulto</option>'
-          +'<option value="base">unidad</option>'
-        +'</select>'
       +'</div>'
       +'<div>'
         +'<div style="font-size:10px;color:var(--mut);margin-bottom:2px">IVA</div>'
@@ -6561,7 +6592,6 @@ function paAgregarItemCompra(){
         +'<span id="pa-ci-sub-'+n+'" style="font-weight:600">$0</span>'
       +'</div>'
     +'</div>'
-    // Mini texto auxiliar con el total en unidad base
     +'<div id="pa-ci-hint-'+n+'" style="font-size:11px;color:var(--mut);margin-top:6px;font-style:italic"></div>';
   document.getElementById('pa-comp-items').appendChild(row);
 }
@@ -6571,12 +6601,8 @@ function paOnInsumoChange(n){
   var sel=document.getElementById('pa-ci-ins-'+n);
   var opt=sel.selectedOptions[0];
   if(!opt)return;
-  var presTipo=opt.dataset.prest||'';
   var presB=opt.dataset.presb||'';
-  var elT=document.getElementById('pa-ci-prest-'+n);
   var elB=document.getElementById('pa-ci-presb-'+n);
-  // Solo autocompletar si el usuario todavía no tipeó nada
-  if(elT && !elT.value)elT.value=presTipo;
   if(elB && !elB.value)elB.value=presB;
   paActTotalComp();
 }
@@ -6585,14 +6611,13 @@ function paOnInsumoChange(n){
 function paOnModoCambio(n){
   var modo=document.getElementById('pa-ci-modo-'+n).value;
   var presCols=document.querySelectorAll('.pa-ci-pres-col[data-n="'+n+'"]');
-  var precM=document.getElementById('pa-ci-precm-'+n);
+  var lblSpan=document.querySelector('.pa-ci-precio-lbl[data-n="'+n+'"]');
   if(modo==='base'){
     presCols.forEach(function(el){el.style.visibility='hidden';});
-    // En modo base, el precio es SIEMPRE por unidad
-    if(precM){precM.value='base';precM.disabled=true;}
+    if(lblSpan)lblSpan.textContent='$ por unidad';
   } else {
     presCols.forEach(function(el){el.style.visibility='';});
-    if(precM)precM.disabled=false;
+    if(lblSpan)lblSpan.textContent='$ por bulto';
   }
   paActTotalComp();
 }
@@ -6607,29 +6632,22 @@ function paActTotalComp(){
     var prec=parseFloat(document.getElementById('pa-ci-prec-'+n).value)||0;
     var ivaEl=document.getElementById('pa-ci-iva-'+n);
     var ivaPct=ivaEl&&ivaEl.value!==''?parseFloat(ivaEl.value):0;
-    var precModo=document.getElementById('pa-ci-precm-'+n).value;
 
-    var cantBase=0, precUnitBase=0;
-    if(modo==='presentacion' && presB>0){
-      cantBase = cantBul * presB;
-      precUnitBase = precModo==='bulto' ? (prec / presB) : prec;
-    } else if(modo==='base'){
-      cantBase = cantBul;
-      precUnitBase = prec;
-    }
-
-    var sNeto = cantBase * precUnitBase;
+    // MONTO: siempre es cant × precio (sin multiplicar por presentación)
+    var sNeto = cantBul * prec;
     var sIva  = sNeto * (ivaPct/100);
     var sTotal= sNeto + sIva;
 
     var se=document.getElementById('pa-ci-sub-'+n);
     if(se)se.textContent=paMoney(sTotal);
+
     var hint=document.getElementById('pa-ci-hint-'+n);
     if(hint){
       if(modo==='presentacion' && cantBul>0 && presB>0){
         var insSel=document.getElementById('pa-ci-ins-'+n);
         var unidad=insSel&&insSel.selectedOptions[0]?(insSel.selectedOptions[0].dataset.unidad||''):'';
-        hint.textContent='→ Total en stock: '+cantBase.toFixed(2)+' '+unidad+' ('+cantBul+' × '+presB+' '+unidad+' por bulto)';
+        var stockTotal = cantBul * presB;
+        hint.textContent='→ Stock que se suma: '+stockTotal.toFixed(2)+' '+unidad+' ('+cantBul+' bultos × '+presB+' '+unidad+')';
       } else if(modo==='base' && cantBul>0){
         hint.textContent='→ Se suman '+cantBul.toFixed(2)+' unidades directamente al stock';
       } else {
