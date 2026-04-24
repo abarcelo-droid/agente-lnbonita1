@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<meta name="theme-color" content="#1a3a5c">
+<meta name="theme-color" content="#ffffff">
 <title>Scout — La Niña Bonita</title>
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <style>
@@ -34,19 +34,19 @@
 body{background:var(--bg);color:var(--txt);font-family:var(--sans);font-size:14px;line-height:1.5;min-height:100vh}
 
 /* TOP BAR */
-.topbar{background:var(--nav);padding:0;display:flex;flex-direction:column;position:sticky;top:0;z-index:50;box-shadow:0 2px 12px rgba(0,0,0,.2)}
-.topbar-main{display:flex;align-items:center;justify-content:space-between;padding:14px 18px}
-.topbar-logo{display:flex;align-items:center;gap:10px}
-.topbar-logo img{height:36px;width:auto}
-.topbar-logo-txt{font-size:12px;font-weight:600;color:rgba(255,255,255,.5);letter-spacing:.1em;text-transform:uppercase}
-.topbar-scout{font-size:13px;font-weight:700;color:var(--gold);letter-spacing:.08em;text-transform:uppercase}
-.topbar-user{font-size:12px;color:rgba(255,255,255,.5);text-align:right;line-height:1.4}
-.topbar-user strong{display:block;color:#fff;font-size:13px}
+.topbar{background:#fff;padding:0;display:flex;flex-direction:column;position:sticky;top:0;z-index:50;box-shadow:0 2px 12px rgba(0,0,0,.08);border-bottom:1px solid var(--bor)}
+.topbar-main{display:flex;align-items:center;justify-content:space-between;padding:12px 18px}
+.topbar-logo{display:flex;align-items:center;gap:12px}
+.topbar-logo img{height:40px;width:auto}
+.topbar-logo-txt{font-size:11px;font-weight:600;color:var(--mut);letter-spacing:.1em;text-transform:uppercase}
+.topbar-scout{font-size:14px;font-weight:800;color:var(--burg);letter-spacing:.08em;text-transform:uppercase}
+.topbar-user{font-size:12px;color:var(--mut);text-align:right;line-height:1.4}
+.topbar-user strong{display:block;color:var(--txt);font-size:13px}
 
 /* TAB BAR */
-.tab-bar{display:flex;background:var(--nav2);border-bottom:1px solid rgba(255,255,255,.08)}
-.tab{flex:1;padding:12px 6px;text-align:center;font-size:11px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:rgba(255,255,255,.4);cursor:pointer;border-bottom:2px solid transparent;transition:all .15s;position:relative}
-.tab.active{color:#fff;border-bottom-color:var(--gold)}
+.tab-bar{display:flex;background:#f8fafc;border-bottom:1px solid var(--bor);overflow-x:auto}
+.tab{flex:1;padding:12px 6px;text-align:center;font-size:11px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--mut);cursor:pointer;border-bottom:2px solid transparent;transition:all .15s;position:relative;white-space:nowrap;min-width:fit-content}
+.tab.active{color:var(--burg);border-bottom-color:var(--burg);background:#fff}
 .tab-badge{position:absolute;top:6px;right:calc(50% - 24px);background:var(--err);color:#fff;border-radius:20px;font-size:9px;font-weight:700;padding:1px 5px;min-width:16px;display:none}
 .tab-badge.show{display:block}
 
@@ -200,7 +200,7 @@ input[type=file]{display:none}
       <img src="/static/logo.jpg" alt="LNB" onerror="this.style.display='none'">
       <div>
         <div class="topbar-logo-txt">La Niña Bonita</div>
-        <div class="topbar-scout">🌿 Scout</div>
+        <div class="topbar-scout">LNB APP</div>
       </div>
     </div>
     <div class="topbar-user" id="topbar-user">—</div>
@@ -257,35 +257,25 @@ input[type=file]{display:none}
   <div id="form-reporte" style="display:none">
 
     <div class="form-section">
-      <label class="form-label">Tipo de problema</label>
-      <div class="tipo-grid">
-        <div class="tipo-btn" data-tipo="Plaga" onclick="selTipo(this)"><span class="tipo-icon">🐛</span><span class="tipo-label">Plaga</span></div>
-        <div class="tipo-btn" data-tipo="Enfermedad" onclick="selTipo(this)"><span class="tipo-icon">🍂</span><span class="tipo-label">Enfermedad</span></div>
-        <div class="tipo-btn" data-tipo="Maleza" onclick="selTipo(this)"><span class="tipo-icon">🌿</span><span class="tipo-label">Maleza</span></div>
-        <div class="tipo-btn" data-tipo="Déficit hídrico" onclick="selTipo(this)"><span class="tipo-icon">💧</span><span class="tipo-label">Déficit hídrico</span></div>
-        <div class="tipo-btn" data-tipo="Daño por helada" onclick="selTipo(this)"><span class="tipo-icon">🥶</span><span class="tipo-label">Daño por helada</span></div>
-        <div class="tipo-btn" data-tipo="Sistema de riego" onclick="selTipo(this)"><span class="tipo-icon">🚿</span><span class="tipo-label">Sistema de riego</span></div>
-        <div class="tipo-btn full" data-tipo="Desorden" onclick="selTipo(this)"><span class="tipo-icon">⚠️</span><span class="tipo-label">Desorden / Otro</span></div>
-      </div>
-    </div>
-
-    <div class="form-section">
-      <label class="form-label">Severidad</label>
-      <div class="sev-grid">
-        <div class="sev-btn" data-sev="1" onclick="selSev(this)"><span class="sev-num" style="color:var(--sev1)">1</span><div class="sev-txt">Leve</div></div>
-        <div class="sev-btn" data-sev="2" onclick="selSev(this)"><span class="sev-num" style="color:var(--sev2)">2</span><div class="sev-txt">Moderado</div></div>
-        <div class="sev-btn" data-sev="3" onclick="selSev(this)"><span class="sev-num" style="color:var(--sev3)">3</span><div class="sev-txt">Severo</div></div>
-        <div class="sev-btn" data-sev="4" onclick="selSev(this)"><span class="sev-num" style="color:var(--sev4)">4</span><div class="sev-txt">Crítico</div></div>
-      </div>
-    </div>
-
-    <div class="form-section">
       <label class="form-label">Foto del problema</label>
       <div class="foto-area" id="foto-area" onclick="document.getElementById('foto-input').click()">
         <span class="foto-icon-big">📷</span>
         <div class="foto-hint">Tocar para sacar foto</div>
       </div>
       <input type="file" id="foto-input" accept="image/*" capture="environment" onchange="onFoto(this)">
+    </div>
+
+    <div class="form-section">
+      <label class="form-label">Tipo de problema</label>
+      <div class="tipo-grid">
+        <div class="tipo-btn" data-tipo="Sistema de riego" onclick="selTipo(this)"><span class="tipo-icon">🚿</span><span class="tipo-label">Riego roto</span></div>
+        <div class="tipo-btn" data-tipo="Maleza" onclick="selTipo(this)"><span class="tipo-icon">🌿</span><span class="tipo-label">Maleza</span></div>
+        <div class="tipo-btn" data-tipo="Déficit hídrico" onclick="selTipo(this)"><span class="tipo-icon">💧</span><span class="tipo-label">Déficit hídrico</span></div>
+        <div class="tipo-btn" data-tipo="Desorden" onclick="selTipo(this)"><span class="tipo-icon">⚠️</span><span class="tipo-label">Desorden</span></div>
+        <div class="tipo-btn" data-tipo="Plaga" onclick="selTipo(this)"><span class="tipo-icon">🐛</span><span class="tipo-label">Plaga</span></div>
+        <div class="tipo-btn" data-tipo="Enfermedad" onclick="selTipo(this)"><span class="tipo-icon">🍂</span><span class="tipo-label">Enfermedad</span></div>
+        <div class="tipo-btn full" data-tipo="Daño por helada" onclick="selTipo(this)"><span class="tipo-icon">🥶</span><span class="tipo-label">Daño por helada</span></div>
+      </div>
     </div>
 
     <div class="form-section">
@@ -399,7 +389,7 @@ input[type=file]{display:none}
         <div style="font-size:12px;color:var(--mut)">A un tractor, camioneta o moto</div>
       </div>
     </button>
-    <button class="rep-btn" style="width:100%;padding:16px;background:var(--sur);border:1px solid var(--bor);border-radius:12px;text-align:left;display:flex;align-items:center;gap:12px" onclick="cbAbrirAccion('consumo_estacion')">
+    <button class="rep-btn" id="cb-btn-estacion" style="width:100%;padding:16px;background:var(--sur);border:1px solid var(--bor);border-radius:12px;text-align:left;display:flex;align-items:center;gap:12px;display:none" onclick="cbAbrirAccion('consumo_estacion')">
       <span style="font-size:28px">⛽</span>
       <div>
         <div style="font-size:15px;font-weight:700;color:var(--txt)">Cargué en estación</div>
@@ -457,13 +447,10 @@ input[type=file]{display:none}
       <select class="scout-select" id="cb-tanque-sel"></select>
     </div>
 
-    <!-- Combustible -->
-    <div style="margin-bottom:12px">
-      <div style="font-size:11px;color:var(--mut);margin-bottom:4px">Combustible</div>
-      <div style="display:flex;gap:8px">
-        <button type="button" class="rep-btn" id="cb-comb-gasoil" onclick="cbSetComb('gasoil')" style="flex:1;padding:12px;border-radius:10px">⛽ Gasoil</button>
-        <button type="button" class="rep-btn" id="cb-comb-nafta" onclick="cbSetComb('nafta')" style="flex:1;padding:12px;border-radius:10px">⛽ Nafta</button>
-      </div>
+    <!-- Combustible (se calcula automáticamente según vehículo o tanque) -->
+    <div id="cb-comb-display" style="display:none;margin-bottom:12px;padding:10px 14px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;font-size:13px">
+      <span style="color:var(--mut);font-size:11px">Combustible detectado:</span>
+      <strong id="cb-comb-txt" style="margin-left:6px;color:#166534">—</strong>
     </div>
 
     <!-- Vehículo (para consumos) -->
@@ -844,12 +831,12 @@ function onFoto(input) {
 function enviarReporte() {
   if(!S.loteId)return toast('Seleccioná un lote','er');
   if(!S.tipo)return toast('Elegí el tipo de problema','er');
-  if(!S.sev)return toast('Elegí la severidad','er');
   var btn=document.getElementById('fab-rep');
   btn.textContent='Enviando...'; btn.disabled=true;
+  // Severidad fija en 2 (moderado) — el backend la usa para prioridad pero ya no se pide al usuario
   api('/api/pa/scout/reportes',{
     method:'POST', headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({lote_id:S.loteId,tipo:S.tipo,severidad:S.sev,descripcion:document.getElementById('rep-desc').value.trim(),lat:S.lat,lng:S.lng,foto_b64:S.fotoB64||null})
+    body:JSON.stringify({lote_id:S.loteId,tipo:S.tipo,severidad:2,descripcion:document.getElementById('rep-desc').value.trim(),lat:S.lat,lng:S.lng,foto_b64:S.fotoB64||null})
   }).then(function(r){
     btn.textContent='Enviar reporte →'; btn.disabled=false;
     if(r.ok){
@@ -861,8 +848,8 @@ function enviarReporte() {
 }
 
 function resetForm() {
-  S.tipo=null;S.sev=null;S.fotoB64=null;
-  document.querySelectorAll('.tipo-btn,.sev-btn').forEach(function(b){b.classList.remove('sel');});
+  S.tipo=null;S.fotoB64=null;
+  document.querySelectorAll('.tipo-btn').forEach(function(b){b.classList.remove('sel');});
   document.getElementById('rep-desc').value='';
   var area=document.getElementById('foto-area');
   area.classList.remove('tiene');
@@ -1395,6 +1382,9 @@ var CB = {
 };
 
 function cbInit() {
+  // Mostrar botón "Cargué en estación" solo a usuarios con permiso
+  var btnEst = document.getElementById('cb-btn-estacion');
+  if (btnEst) btnEst.style.display = cbTienePermisoEstacion() ? 'flex' : 'none';
   cbCargarDatos();
 }
 
@@ -1447,6 +1437,11 @@ function cbRenderUltimos(items) {
 }
 
 function cbAbrirAccion(accion) {
+  // Verificación de permiso para consumo_estacion
+  if (accion === 'consumo_estacion' && !cbTienePermisoEstacion()) {
+    return toast('No tenés permiso para cargar en estación. Contactá al administrador.', 'er');
+  }
+
   CB.accion = accion;
   CB.combustible = null;
   CB.fotoB64 = null;
@@ -1465,8 +1460,7 @@ function cbAbrirAccion(accion) {
   document.getElementById('cb-ia-btn').style.display = 'none';
   document.getElementById('cb-foto-area').innerHTML = '<span class="foto-icon-big" style="font-size:24px">📷</span><div class="foto-hint" style="font-size:12px;color:var(--mut);margin-top:4px">Tocar para sacar foto</div>';
   document.getElementById('cb-foto-inp').value = '';
-  document.getElementById('cb-comb-gasoil').style.background = '';
-  document.getElementById('cb-comb-nafta').style.background = '';
+  document.getElementById('cb-comb-display').style.display = 'none';
 
   // Mostrar/ocultar bloques según la acción
   var tit = document.getElementById('cb-modal-tit');
@@ -1487,9 +1481,16 @@ function cbAbrirAccion(accion) {
 
   // Popular selects
   if (showTanque) {
-    document.getElementById('cb-tanque-sel').innerHTML =
+    var selT = document.getElementById('cb-tanque-sel');
+    selT.innerHTML =
       '<option value="">— Elegí tanque —</option>' +
       CB.tanques.map(function(t){ return '<option value="'+t.id+'" data-tipo="'+t.tipo+'">'+t.nombre+' ('+(t.stock_actual||0).toFixed(0)+' lt)</option>'; }).join('');
+    // Auto-detectar combustible al elegir tanque
+    selT.onchange = function() {
+      var opt = selT.selectedOptions[0];
+      if (opt && opt.dataset.tipo) cbSetComb(opt.dataset.tipo);
+      else cbSetComb(null);
+    };
   }
   if (showVehiculo) {
     document.getElementById('cb-vehiculo-sel').innerHTML =
@@ -1508,19 +1509,26 @@ function cbAbrirAccion(accion) {
   document.getElementById('modal-comb').classList.add('open');
 }
 
+// Verifica si el usuario logueado tiene permiso para cargar en estación
+function cbTienePermisoEstacion() {
+  try {
+    var cookie = document.cookie.split(';').find(function(c){ return c.trim().startsWith('lnb_user='); });
+    if (!cookie) return false;
+    var u = JSON.parse(decodeURIComponent(cookie.split('=')[1]));
+    // Admin y operador siempre pueden; campo requiere permiso específico
+    if (u.rol === 'admin' || u.rol === 'operador') return true;
+    if (Array.isArray(u.secciones) && (u.secciones.includes('*') || u.secciones.includes('combustible_estacion'))) return true;
+    return false;
+  } catch(e) { return false; }
+}
+
 function cbSetComb(tipo) {
   CB.combustible = tipo;
-  document.getElementById('cb-comb-gasoil').style.background = tipo === 'gasoil' ? 'var(--burg)' : '';
-  document.getElementById('cb-comb-gasoil').style.color = tipo === 'gasoil' ? '#fff' : '';
-  document.getElementById('cb-comb-nafta').style.background = tipo === 'nafta' ? 'var(--burg)' : '';
-  document.getElementById('cb-comb-nafta').style.color = tipo === 'nafta' ? '#fff' : '';
-  // Si es carga_tanque, auto-seleccionar el tanque correspondiente
-  if (CB.accion === 'carga_tanque') {
-    var sel = document.getElementById('cb-tanque-sel');
-    for (var i=0;i<sel.options.length;i++) {
-      if (sel.options[i].dataset.tipo === tipo) { sel.value = sel.options[i].value; break; }
-    }
-  }
+  var disp = document.getElementById('cb-comb-display');
+  var txt = document.getElementById('cb-comb-txt');
+  if (tipo === 'gasoil') { disp.style.display = 'block'; txt.textContent = '⛽ Gasoil'; }
+  else if (tipo === 'nafta') { disp.style.display = 'block'; txt.textContent = '⛽ Nafta'; }
+  else { disp.style.display = 'none'; }
 }
 
 function cbOnVehiculo() {

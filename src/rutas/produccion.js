@@ -988,6 +988,16 @@ router.post('/combustible/movimientos', requireAuth, (req, res) => {
   if (tipo_movimiento !== 'ajuste_varilla' && !(litros > 0))
     return res.status(400).json({ ok: false, error: 'litros debe ser > 0' });
 
+  // Permiso específico para "consumo_estacion": solo admin/operador o usuarios con la sección
+  if (tipo_movimiento === 'consumo_estacion') {
+    const u = req.user || {};
+    const rolOk = u.rol === 'admin' || u.rol === 'operador';
+    const seccOk = Array.isArray(u.secciones) && (u.secciones.includes('*') || u.secciones.includes('combustible_estacion'));
+    if (!rolOk && !seccOk) {
+      return res.status(403).json({ ok: false, error: 'No tenés permiso para registrar cargas en estación' });
+    }
+  }
+
   try {
     // Guardar foto si viene (dentro de data/scout para aprovechar el estático existente)
     let fotoPath = null;
