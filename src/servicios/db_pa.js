@@ -585,6 +585,21 @@ export function getCampañaActiva() {
   } catch(e) { console.error('[PA] Error seed maestro insumos:', e.message); }
 })();
 
+// ── MIGRACIÓN: agregar categoría principal a pa_insumos ───────────────────
+// Clasificación de nivel superior: AGROINSUMOS / HERRAMIENTAS / OTROS.
+// Los 127 agroinsumos que ya vienen del Excel quedan bajo 'agroinsumos' por
+// defecto — la reclasificación fina del `tipo` (fertilizante, herbicida, etc.)
+// se hace desde el panel después.
+(function agregarCategoriaPrincipal() {
+  try {
+    const cols = db.prepare("PRAGMA table_info(pa_insumos)").all().map(c => c.name);
+    if (!cols.includes('categoria_principal')) {
+      db.exec("ALTER TABLE pa_insumos ADD COLUMN categoria_principal TEXT NOT NULL DEFAULT 'agroinsumos'");
+      console.log('[PA] pa_insumos.categoria_principal agregada (default: agroinsumos)');
+    }
+  } catch(e) { console.error('[PA] Error agregando categoria_principal:', e.message); }
+})();
+
 // ── MÓDULO COMBUSTIBLE ─────────────────────────────────────────────────────
 // Tanques (gasoil + nafta), vehículos (tractores/camionetas/motos) y
 // movimientos unificados (entradas y salidas en una sola tabla).

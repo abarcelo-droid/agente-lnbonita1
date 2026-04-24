@@ -1241,6 +1241,12 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
 <div class="ph"><div><div class="ph-t">🧪 Fertilizantes e Insumos</div><div class="ph-s">Stock actual y maestro de productos</div></div>
 <button class="btn bb" onclick="paAbrirNuevoInsumo()">+ Nuevo insumo</button></div>
 <div class="filt">
+  <select id="pa-ins-cat-fil" onchange="paLoadInsumos()" style="margin-right:8px">
+    <option value="">Todas las categorías</option>
+    <option value="agroinsumos">🌱 AGROINSUMOS</option>
+    <option value="herramientas">🔧 HERRAMIENTAS</option>
+    <option value="otros">📦 OTROS</option>
+  </select>
   <select id="pa-ins-tipo-fil" onchange="paLoadInsumos()">
     <option value="">Todos los tipos</option>
     <option value="fertilizante">Fertilizantes</option>
@@ -1250,6 +1256,11 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     <option value="abono">Abonos</option>
     <option value="agroquimico">Agroquímicos</option>
     <option value="semilla">Semillas</option>
+    <option value="manual">Herram. Manual</option>
+    <option value="electrica">Herram. Eléctrica</option>
+    <option value="riego">Riego</option>
+    <option value="construccion">Construcción</option>
+    <option value="repuesto">Repuestos</option>
     <option value="otro">Otros</option>
   </select>
 </div>
@@ -5262,17 +5273,40 @@ if(_inpGondola) _inpGondola.addEventListener('keydown', function(e){
   <input type="hidden" id="pa-ins-id">
   <div class="fg">
     <div class="fl ff"><label>Nombre comercial</label><input id="pa-ins-nombre" placeholder="Ej: Urea 46%, Roundup, Karate..."></div>
-    <div class="fl ff"><label>Principio activo / Componente madre <span style="color:var(--err)">*</span></label><input id="pa-ins-componente" placeholder="Ej: Glifosato, Clorpirifos, NPK 15-15-15..." required></div>
+    <div class="fl ff"><label>Categoría principal <span style="color:var(--err)">*</span></label>
+      <select id="pa-ins-categoria" onchange="paOnCategoriaCambio()">
+        <option value="agroinsumos">🌱 AGROINSUMOS</option>
+        <option value="herramientas">🔧 HERRAMIENTAS</option>
+        <option value="otros">📦 OTROS (Construcción / Repuestos)</option>
+      </select>
+    </div>
+    <div class="fl ff" id="pa-ins-componente-row"><label>Principio activo / Componente madre <span style="color:var(--err)">*</span></label><input id="pa-ins-componente" placeholder="Ej: Glifosato, Clorpirifos, NPK 15-15-15..."></div>
     <div class="fl"><label>Tipo</label>
       <select id="pa-ins-tipo">
-        <option value="fertilizante">Fertilizante</option>
-        <option value="herbicida">Herbicida</option>
-        <option value="fungicida">Fungicida</option>
-        <option value="insecticida">Insecticida</option>
-        <option value="abono">Abono</option>
-        <option value="agroquimico">Agroquímico (otro)</option>
-        <option value="semilla">Semilla</option>
-        <option value="otro">Otro</option>
+        <optgroup label="Agroinsumos" id="optg-agroinsumos">
+          <option value="fertilizante">Fertilizante</option>
+          <option value="herbicida">Herbicida</option>
+          <option value="fungicida">Fungicida</option>
+          <option value="insecticida">Insecticida</option>
+          <option value="abono">Abono</option>
+          <option value="agroquimico">Agroquímico (otro)</option>
+          <option value="semilla">Semilla</option>
+        </optgroup>
+        <optgroup label="Herramientas" id="optg-herramientas">
+          <option value="manual">Manual</option>
+          <option value="electrica">Eléctrica</option>
+          <option value="riego">Riego</option>
+          <option value="medicion">Medición</option>
+          <option value="proteccion">Protección</option>
+        </optgroup>
+        <optgroup label="Otros" id="optg-otros">
+          <option value="construccion">Construcción</option>
+          <option value="repuesto">Repuesto</option>
+          <option value="combustible-insumo">Combustible / Lubricante</option>
+          <option value="limpieza">Limpieza</option>
+          <option value="oficina">Oficina</option>
+        </optgroup>
+        <option value="otro">Otro (sin clasificar)</option>
       </select>
     </div>
     <div class="fl"><label>Unidad</label>
@@ -5974,15 +6008,18 @@ function paBadgeTipo(t){
 }
 function paLoadInsumos(){
   var tipo=document.getElementById('pa-ins-tipo-fil').value;
-  paF('/api/pa/insumos'+(tipo?'?tipo='+tipo:'')).then(function(r){
+  var cat=document.getElementById('pa-ins-cat-fil').value;
+  var qs=[]; if(tipo)qs.push('tipo='+tipo); if(cat)qs.push('categoria_principal='+cat);
+  paF('/api/pa/insumos'+(qs.length?'?'+qs.join('&'):'')).then(function(r){
     PA.insumos=r.data||[];var tb=document.getElementById('pa-ins-tbody');
     if(!PA.insumos.length){tb.innerHTML='<tr><td colspan="8" class="emp">Sin insumos</td></tr>';return;}
     tb.innerHTML=PA.insumos.map(function(i){
       var bajo=i.stock_minimo>0&&i.stock_actual<=i.stock_minimo;
       var ficha=i.ficha_tecnica_path?'<a href="'+i.ficha_tecnica_path+'" target="_blank" style="font-size:11px;color:var(--burg)">📄 Ficha</a>':'';
       var precioUsd=i.precio_ref_usd?'USD '+Number(i.precio_ref_usd).toFixed(2):'—';
+      var catIco = i.categoria_principal==='herramientas'?'🔧':i.categoria_principal==='otros'?'📦':'🌱';
       return'<tr>'
-        +'<td><strong style="cursor:pointer;color:var(--burg)" onclick="paVerHistorialCompras('+i.id+',\''+i.nombre.replace(/'/g,"\\'")+'\',\'producto\')">'+i.nombre+'</strong>'+(ficha?'<br>'+ficha:'')+'</td>'
+        +'<td><span title="'+(i.categoria_principal||'agroinsumos')+'" style="margin-right:4px">'+catIco+'</span><strong style="cursor:pointer;color:var(--burg)" onclick="paVerHistorialCompras('+i.id+',\''+i.nombre.replace(/'/g,"\\'")+'\',\'producto\')">'+i.nombre+'</strong>'+(ficha?'<br>'+ficha:'')+'</td>'
         +'<td><span style="cursor:pointer;text-decoration:underline;text-decoration-style:dotted;color:var(--mut);font-size:12px" onclick="paVerHistorialCompras(null,\''+( i.componente_madre||'').replace(/'/g,"\\'")+'\',\'componente\')">'+(i.componente_madre||'<span style="color:var(--err);font-size:11px">⚠ Sin definir</span>')+'</span></td>'
         +'<td>'+paBadgeTipo(i.tipo)+'</td>'
         +'<td>'+i.unidad+'</td>'
@@ -5993,6 +6030,25 @@ function paLoadInsumos(){
         +'</tr>';
     }).join('');
   });
+}
+
+// Muestra solo los tipos válidos según la categoría principal seleccionada
+function paOnCategoriaCambio(){
+  var cat=document.getElementById('pa-ins-categoria').value;
+  var grupos={'agroinsumos':'optg-agroinsumos','herramientas':'optg-herramientas','otros':'optg-otros'};
+  Object.keys(grupos).forEach(function(k){
+    var el=document.getElementById(grupos[k]);
+    if(el)el.style.display = (cat===k?'':'none');
+  });
+  // Auto-seleccionar primer tipo válido si el actual no corresponde
+  var sel=document.getElementById('pa-ins-tipo');
+  var currentInGroup = sel.selectedOptions[0] && sel.selectedOptions[0].parentElement.id===grupos[cat];
+  if(!currentInGroup){
+    var defaults={'agroinsumos':'fertilizante','herramientas':'manual','otros':'construccion'};
+    sel.value=defaults[cat];
+  }
+  // Principio activo solo tiene sentido para agroinsumos
+  document.getElementById('pa-ins-componente-row').style.display = (cat==='agroinsumos'?'':'none');
 }
 
 function paVerHistorialCompras(insumoId, nombre, modo) {
@@ -6038,6 +6094,7 @@ function paAbrirNuevoInsumo(){
   document.getElementById('pa-ins-id').value='';
   document.getElementById('pa-ins-nombre').value='';
   document.getElementById('pa-ins-componente').value='';
+  document.getElementById('pa-ins-categoria').value='agroinsumos';
   document.getElementById('pa-ins-tipo').value='fertilizante';
   document.getElementById('pa-ins-unidad').value='kg';
   document.getElementById('pa-ins-stock-min').value=0;
@@ -6046,6 +6103,7 @@ function paAbrirNuevoInsumo(){
   document.getElementById('pa-ins-ficha-file').value='';
   document.getElementById('pa-ins-ficha-actual').style.display='none';
   document.getElementById('pa-ins-modal-tit').textContent='Nuevo Insumo';
+  paOnCategoriaCambio();
   document.getElementById('pa-mb-insumo').classList.add('on');
 }
 function paEditarInsumo(id){
@@ -6054,6 +6112,7 @@ function paEditarInsumo(id){
   document.getElementById('pa-ins-id').value=ins.id;
   document.getElementById('pa-ins-nombre').value=ins.nombre;
   document.getElementById('pa-ins-componente').value=ins.componente_madre||'';
+  document.getElementById('pa-ins-categoria').value=ins.categoria_principal||'agroinsumos';
   document.getElementById('pa-ins-tipo').value=ins.tipo;
   document.getElementById('pa-ins-unidad').value=ins.unidad;
   document.getElementById('pa-ins-stock-min').value=ins.stock_minimo||0;
@@ -6066,13 +6125,16 @@ function paEditarInsumo(id){
     fichEl.style.display='block';
   } else { fichEl.style.display='none'; }
   document.getElementById('pa-ins-modal-tit').textContent='Editar Insumo';
+  paOnCategoriaCambio();
   document.getElementById('pa-mb-insumo').classList.add('on');
 }
 function paGuardarInsumo(){
   var id=document.getElementById('pa-ins-id').value;
   var nombre=document.getElementById('pa-ins-nombre').value.trim();
+  var categoria=document.getElementById('pa-ins-categoria').value;
   var componente=document.getElementById('pa-ins-componente').value.trim();
-  if(!componente)return toast('El principio activo es obligatorio','er');
+  // Principio activo solo obligatorio para agroinsumos
+  if(categoria==='agroinsumos' && !componente)return toast('El principio activo es obligatorio para agroinsumos','er');
   var tipo=document.getElementById('pa-ins-tipo').value;
   var unidad=document.getElementById('pa-ins-unidad').value;
   var stMin=parseFloat(document.getElementById('pa-ins-stock-min').value)||0;
@@ -6080,7 +6142,7 @@ function paGuardarInsumo(){
   var notas=document.getElementById('pa-ins-notas').value.trim();
   var fichaFile=document.getElementById('pa-ins-ficha-file').files[0];
   if(!nombre)return toast('Ingresá el nombre','er');
-  var body={nombre,tipo,unidad,stock_minimo:stMin,componente_madre:componente||null,precio_ref_usd:precioUsd,notas};
+  var body={nombre,tipo,unidad,stock_minimo:stMin,categoria_principal:categoria,componente_madre:componente||null,precio_ref_usd:precioUsd,notas};
   paF(id?'/api/pa/insumos/'+id:'/api/pa/insumos',{method:id?'PATCH':'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
     .then(function(r){
       if(!r.ok)return toast(r.error||'Error','er');

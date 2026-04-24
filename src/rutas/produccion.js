@@ -236,42 +236,46 @@ router.patch('/lotes/:id', requireAuth, (req, res) => {
 router.get('/insumos', requireAuth, (req, res) => {
   const db = getDb();
   try {
-    const { tipo } = req.query;
+    const { tipo, categoria_principal } = req.query;
     let query = "SELECT * FROM pa_insumos WHERE activo = 1";
     const params = [];
+    if (categoria_principal) { query += " AND categoria_principal = ?"; params.push(categoria_principal); }
     if (tipo) { query += " AND tipo = ?"; params.push(tipo); }
-    query += " ORDER BY tipo, nombre";
+    query += " ORDER BY categoria_principal, tipo, nombre";
     res.json({ ok: true, data: db.prepare(query).all(...params) });
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
 router.post('/insumos', requireAuth, (req, res) => {
   const db = getDb();
-  const { nombre, tipo, unidad, stock_minimo, componente_madre, precio_ref_usd, notas } = req.body;
+  const { nombre, tipo, unidad, stock_minimo, componente_madre, precio_ref_usd, notas, categoria_principal } = req.body;
   if (!nombre || !tipo || !unidad)
     return res.status(400).json({ ok: false, error: 'Nombre, tipo y unidad requeridos' });
   try {
     const r = db.prepare(`
-      INSERT INTO pa_insumos (nombre, tipo, unidad, stock_minimo, componente_madre, precio_ref_usd, notas)
-      VALUES (?,?,?,?,?,?,?)
-    `).run(nombre, tipo, unidad, stock_minimo||0, componente_madre||null, precio_ref_usd||null, notas||null);
+      INSERT INTO pa_insumos (nombre, tipo, unidad, stock_minimo, componente_madre, precio_ref_usd, notas, categoria_principal)
+      VALUES (?,?,?,?,?,?,?,?)
+    `).run(nombre, tipo, unidad, stock_minimo||0, componente_madre||null, precio_ref_usd||null, notas||null,
+           categoria_principal || 'agroinsumos');
     res.json({ ok: true, id: r.lastInsertRowid });
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
 router.patch('/insumos/:id', requireAuth, (req, res) => {
   const db = getDb();
-  const { nombre, tipo, unidad, stock_minimo, activo, componente_madre, precio_ref_usd, notas } = req.body;
+  const { nombre, tipo, unidad, stock_minimo, activo, componente_madre, precio_ref_usd, notas, categoria_principal } = req.body;
   try {
     const cur = db.prepare("SELECT * FROM pa_insumos WHERE id=?").get(req.params.id);
     if (!cur) return res.status(404).json({ ok: false, error: 'Insumo no encontrado' });
     db.prepare(`UPDATE pa_insumos SET nombre=?, tipo=?, unidad=?, stock_minimo=?, activo=?,
-                componente_madre=?, precio_ref_usd=?, notas=? WHERE id=?`)
+                componente_madre=?, precio_ref_usd=?, notas=?, categoria_principal=? WHERE id=?`)
       .run(nombre||cur.nombre, tipo||cur.tipo, unidad||cur.unidad, stock_minimo??cur.stock_minimo,
            activo!==undefined?activo:cur.activo,
            componente_madre!==undefined?componente_madre:cur.componente_madre,
            precio_ref_usd!==undefined?precio_ref_usd:cur.precio_ref_usd,
-           notas!==undefined?notas:cur.notas, req.params.id);
+           notas!==undefined?notas:cur.notas,
+           categoria_principal || cur.categoria_principal,
+           req.params.id);
     res.json({ ok: true });
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
