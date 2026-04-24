@@ -5464,6 +5464,17 @@ if(_inpGondola) _inpGondola.addEventListener('keydown', function(e){
   </div>
 </div></div>
 
+<!-- Modal lateral: detalle de compra -->
+<div class="ab-modal-overlay" id="pa-mb-compra-det" style="align-items:stretch;justify-content:flex-end">
+  <div class="ab-modal" style="width:520px;max-width:95vw;height:100vh;max-height:100vh;border-radius:0;display:flex;flex-direction:column;overflow:hidden">
+    <div class="mhd" style="flex-shrink:0">
+      <div><div class="mht" id="pa-comp-det-tit">Detalle de compra</div><div style="font-size:12px;color:var(--mut)" id="pa-comp-det-sub">—</div></div>
+      <button class="mcl" onclick="document.getElementById('pa-mb-compra-det').classList.remove('on')">×</button>
+    </div>
+    <div id="pa-comp-det-body" style="flex:1;overflow-y:auto;padding:16px">Cargando...</div>
+  </div>
+</div>
+
 <!-- Modal compra -->
 <div class="ab-modal-overlay" id="pa-mb-compra">
 <div class="ab-modal" style="width:720px">
@@ -6350,7 +6361,10 @@ function paLoadCompras(){
         +'<td style="font-size:12px;color:var(--mut)">'+prods+'</td>'
         +'<td style="text-align:right"><strong>'+paMoney(c.total)+'</strong></td>'
         +'<td>'+foto+'</td>'
-        +'<td style="white-space:nowrap">'+accionBtn+'</td>'
+        +'<td style="white-space:nowrap">'
+          +'<button class="btn bo bs" onclick="paVerDetalleCompra('+c.id+')" title="Ver detalle" style="padding:3px 8px;font-size:11px;margin-right:4px">👁️</button>'
+          +accionBtn
+        +'</td>'
         +'</tr>';
     }).join('');
   });
@@ -6370,6 +6384,115 @@ function paReactivarCompra(id){
     if(r.ok){ toast('✓ '+(r.msg||'Reactivada')); paLoadCompras();
       paF('/api/pa/insumos').then(function(r2){PA.insumos=r2.data||[];}); }
     else toast(r.error||'Error','er');
+  });
+}
+
+function paVerDetalleCompra(id){
+  // Buscar en memoria primero (PA.compras no existe, vamos directo)
+  var m = document.getElementById('pa-mb-compra-det');
+  document.getElementById('pa-comp-det-body').innerHTML = '<div style="text-align:center;color:var(--mut);padding:20px">Cargando...</div>';
+  document.getElementById('pa-comp-det-tit').textContent = 'Detalle de compra';
+  document.getElementById('pa-comp-det-sub').textContent = '—';
+  m.classList.add('on');
+
+  // Pedir con incluir_inactivos=1 por si la compra está desactivada
+  paF('/api/pa/compras?incluir_inactivos=1').then(function(r){
+    var c = (r.data||[]).find(function(x){return x.id===id;});
+    if(!c){
+      document.getElementById('pa-comp-det-body').innerHTML = '<div style="color:var(--err)">Compra no encontrada</div>';
+      return;
+    }
+    var tipoLabel = {factura:'Factura', remito:'Remito', ticket:'Ticket', otro:'Otro'};
+    var activa = c.activo === null || c.activo === undefined || c.activo === 1;
+
+    document.getElementById('pa-comp-det-tit').innerHTML = (tipoLabel[c.tipo_comprobante]||'Factura') + ' ' + (c.nro_factura || '<span style="color:var(--mut)">sin número</span>');
+    document.getElementById('pa-comp-det-sub').innerHTML = paFecha(c.fecha) + ' · ' + (c.proveedor_nombre || c.proveedor_txt || '<span style="color:var(--mut)">Sin proveedor</span>')
+      + (!activa ? ' <span style="color:var(--err);margin-left:8px">● DESACTIVADA</span>' : '');
+
+    var html = '';
+
+    // Encabezado con info general
+    html += '<div style="background:var(--bg);border:1px solid var(--bor);border-radius:8px;padding:12px;margin-bottom:14px;font-size:12px">'
+      +'<div style="display:grid;grid-template-columns:90px 1fr;gap:4px 10px">'
+        +'<div style="color:var(--mut)">Fecha:</div><div>'+paFecha(c.fecha)+'</div>'
+        +'<div style="color:var(--mut)">Tipo:</div><div>'+(tipoLabel[c.tipo_comprobante]||'Factura')+'</div>'
+        +'<div style="color:var(--mut)">Número:</div><div>'+(c.nro_factura||'—')+'</div>'
+        +'<div style="color:var(--mut)">Proveedor:</div><div>'+(c.proveedor_nombre||c.proveedor_txt||'—')+'</div>'
+        +'<div style="color:var(--mut)">Campaña:</div><div>'+(c.campaña_nombre||'—')+'</div>'
+      +'</div>';
+    if(c.remito_foto_path){
+      html += '<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--bor)">'
+        +'<a href="'+c.remito_foto_path+'" target="_blank" style="color:var(--burg);font-size:12px">📄 Ver foto del comprobante</a>'
+      +'</div>';
+    }
+    if(c.notas){
+      html += '<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--bor);color:var(--mut);font-style:italic">📝 '+c.notas+'</div>';
+    }
+    html += '</div>';
+
+    // Items — cada uno como tarjeta detallada
+    html += '<div style="font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--mut);margin:12px 0 8px">Productos ('+(c.items||[]).length+')</div>';
+
+    if(!c.items || !c.items.length){
+      html += '<div style="color:var(--mut);font-style:italic;text-align:center;padding:20px">Sin items</div>';
+    } else {
+      c.items.forEach(function(it, idx){
+        var cantBase = Number(it.cantidad)||0;
+        var precUnitBase = Number(it.precio_unit)||0;
+        var pct = it.iva_porcentaje;
+        var ivaMonto = Number(it.iva_monto)||0;
+        var subNeto = Number(it.subtotal_neto)||0;
+        var subTotal = Number(it.subtotal)||0;
+
+        // ¿Se cargó por bultos?
+        var porBultos = it.cant_bultos && it.presentacion_base;
+        var modoTxt;
+        if(porBultos){
+          modoTxt = '<span style="font-size:11px;color:var(--mut)">Cargado por bultos: <strong>'
+            + it.cant_bultos + ' × ' + it.presentacion_base + ' ' + it.unidad + '</strong></span>';
+        } else {
+          modoTxt = '<span style="font-size:11px;color:var(--mut)">Cargado directo en ' + it.unidad + '</span>';
+        }
+
+        html += '<div style="border:1px solid var(--bor);border-radius:8px;padding:12px;margin-bottom:8px;background:var(--sur)">'
+          +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">'
+            +'<div><strong style="font-size:14px">'+(it.insumo_nombre||'—')+'</strong></div>'
+            +'<div style="font-weight:700;color:var(--burg)">'+paMoney(subTotal)+'</div>'
+          +'</div>'
+          +'<div style="margin-bottom:6px">'+modoTxt+'</div>'
+          +'<div style="display:grid;grid-template-columns:auto 1fr;gap:2px 8px;font-size:12px;padding:8px;background:var(--bg);border-radius:6px">';
+
+        if(porBultos){
+          html += '<div style="color:var(--mut)">Cant. bultos:</div><div><strong>'+it.cant_bultos+'</strong></div>'
+            +'<div style="color:var(--mut)">Contenido:</div><div>'+it.presentacion_base+' '+it.unidad+' por bulto</div>'
+            +'<div style="color:var(--mut)">Precio por bulto:</div><div>'+paMoney(precUnitBase * it.presentacion_base)+'</div>';
+        }
+        html += '<div style="color:var(--mut)">Stock sumado:</div><div><strong>'+cantBase+' '+it.unidad+'</strong></div>'
+          +'<div style="color:var(--mut)">Precio unit. ($/'+it.unidad+'):</div><div>'+paMoney(precUnitBase)+'</div>'
+          +'<div style="color:var(--mut)">Subtotal neto:</div><div>'+paMoney(subNeto)+'</div>';
+        if(pct != null){
+          html += '<div style="color:var(--mut)">IVA ('+pct+'%):</div><div>'+paMoney(ivaMonto)+'</div>';
+        } else {
+          html += '<div style="color:var(--mut)">IVA:</div><div style="color:var(--mut);font-style:italic">sin dato</div>';
+        }
+        html += '<div style="color:var(--mut);font-weight:600;padding-top:4px;border-top:1px solid var(--bor);margin-top:2px">Total item:</div>'
+          +'<div style="font-weight:700;padding-top:4px;border-top:1px solid var(--bor);margin-top:2px">'+paMoney(subTotal)+'</div>'
+        +'</div>'
+        +'</div>';
+      });
+    }
+
+    // Totales al final
+    html += '<div style="margin-top:16px;padding:14px;background:#f0f9ff;border:1px solid #bae6fd;border-radius:8px">'
+      +'<div style="display:grid;grid-template-columns:1fr auto;gap:6px;font-size:13px">'
+        +'<div style="color:var(--mut)">Subtotal neto:</div><div style="text-align:right">'+paMoney(c.neto_total || c.subtotal || 0)+'</div>'
+        +'<div style="color:var(--mut)">IVA:</div><div style="text-align:right">'+paMoney(c.iva_total || c.iva_monto || 0)+'</div>'
+        +'<div style="font-weight:700;font-size:15px;padding-top:6px;border-top:1px solid #bae6fd;margin-top:4px">TOTAL:</div>'
+        +'<div style="font-weight:700;font-size:15px;text-align:right;padding-top:6px;border-top:1px solid #bae6fd;margin-top:4px;color:var(--burg)">'+paMoney(c.total||0)+'</div>'
+      +'</div>'
+    +'</div>';
+
+    document.getElementById('pa-comp-det-body').innerHTML = html;
   });
 }
 function paOnFotoCompra(input){
@@ -8134,7 +8257,8 @@ function paRenderMapaGeneral() {
   if (typeof L === 'undefined') { setTimeout(paRenderMapaGeneral, 300); return; }
   var lotes = (PA.lotes||[]).filter(function(l){ return l.poligono_geojson; });
   if (!PAMAP.general) {
-    PAMAP.general = L.map('pa-map-general', { zoomControl: true }).setView([-31.58, -68.52], 13);
+    // Default: La Niña Bonita (Carpinteria San Juan), zoom 17 para ver la finca completa
+    PAMAP.general = L.map('pa-map-general', { zoomControl: true }).setView([-31.799506, -68.5617667], 17);
     paAgregarCapas(PAMAP.general, 'hybrid');
   } else {
     PAMAP.general.eachLayer(function(layer){
@@ -8213,9 +8337,14 @@ function paAbrirEditorPoligono(loteId) {
   setTimeout(function(){
     if (typeof L === 'undefined') { toast('Leaflet no cargó aún, refrescá la página','er'); return; }
     if (PAMAP.editor) { PAMAP.editor.off(); PAMAP.editor.remove(); PAMAP.editor = null; }
-    var center = [-31.58, -68.52];
-    if (lote.centroide_lat && lote.centroide_lng) center = [lote.centroide_lat, lote.centroide_lng];
-    PAMAP.editor = L.map('pa-pol-mapa', { zoomControl: true }).setView(center, lote.poligono_geojson ? 17 : 15);
+    // Default: La Niña Bonita (Carpinteria San Juan) — zoom 18 ≈ 185m altura
+    var center = [-31.799506, -68.5617667];
+    var zoom = 18;
+    if (lote.centroide_lat && lote.centroide_lng) {
+      center = [lote.centroide_lat, lote.centroide_lng];
+      zoom = lote.poligono_geojson ? 17 : 18;
+    }
+    PAMAP.editor = L.map('pa-pol-mapa', { zoomControl: true }).setView(center, zoom);
     paAgregarCapas(PAMAP.editor, 'hybrid');
 
     PAMAP.drawnLayer = new L.FeatureGroup();
