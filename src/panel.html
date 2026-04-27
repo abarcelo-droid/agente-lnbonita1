@@ -5868,6 +5868,7 @@ function paLoadCalendario(){
     'Zapallo':         {bg:'#fed7aa',fg:'#9a3412'},
     'Barbecho':        {bg:'#f1f5f9',fg:'#64748b'},
     'Sin uso':         {bg:'#f8fafc',fg:'#94a3b8'},
+    'Sin riego':       {bg:'#dbeafe',fg:'#1e40af'},   // azul, sin agua
     'Mejoramiento de Suelo': {bg:'#e7d6b6',fg:'#6b4423'},   // tierra, suelo en recuperación
   };
   function cultColor(c){return CULT_COLOR[c]||{bg:'#e0f2fe',fg:'#075985'};}
@@ -5908,6 +5909,7 @@ function paLoadCalendario(){
     // cuentan por separado (ej: Tomate verano + Cebolla invierno).
     var haMap = {};
     var haSinUsoVer = 0, haSinUsoInv = 0;
+    var haSinRiegoVer = 0, haSinRiegoInv = 0;
     var totalHa = 0;
     lotes.forEach(function(l){
       // Recolectar cultivos del lote por campaña
@@ -5927,7 +5929,11 @@ function paLoadCalendario(){
       }
       paraContar.forEach(function(c){
         var cult = c.cultivo;
-        if (!cult || cult === 'Barbecho' || cult === 'Sin uso') {
+        if (cult === 'Sin riego') {
+          // Categoría aparte: inversión a futuro (no produce, pero no es "sin uso")
+          if (c.esInvierno) haSinRiegoInv += (l.hectareas || 0);
+          else haSinRiegoVer += (l.hectareas || 0);
+        } else if (!cult || cult === 'Barbecho' || cult === 'Sin uso') {
           if (c.esInvierno) haSinUsoInv += (l.hectareas || 0);
           else haSinUsoVer += (l.hectareas || 0);
         } else {
@@ -5948,6 +5954,7 @@ function paLoadCalendario(){
       'Ajo':{bg:'#f3e8ff',fg:'#6b21a8'},'Papa':{bg:'#fef3c7',fg:'#92400e'},
       'Zapallo':{bg:'#fed7aa',fg:'#9a3412'},
       'Mejoramiento de Suelo':{bg:'#e7d6b6',fg:'#6b4423'},
+      'Sin riego':{bg:'#dbeafe',fg:'#1e40af'},
     };
     // Cards por cultivo — formato más compacto
     var resumenHtml = haEntries.map(function(cult){
@@ -5974,6 +5981,20 @@ function paLoadCalendario(){
         +'<div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;opacity:.8;margin-bottom:2px">Sin uso</div>'
         +'<div style="font-size:16px;font-weight:700;line-height:1.1">'+totalSinUso.toFixed(1)+' <span style="font-size:10px;font-weight:500;opacity:.7">ha</span></div>'
         +'<div style="font-size:9px;opacity:.65;margin-top:1px">'+detalle.join(' · ')+'</div>'
+        +'</div>';
+    }
+
+    // Card Sin Riego — categoría aparte: inversión a futuro (no produce, no es sin uso)
+    if (haSinRiegoVer > 0 || haSinRiegoInv > 0) {
+      var totalSinRiego = haSinRiegoVer + haSinRiegoInv;
+      var detSR = [];
+      if (haSinRiegoVer > 0) detSR.push('☀️ '+haSinRiegoVer.toFixed(1));
+      if (haSinRiegoInv > 0) detSR.push('❄️ '+haSinRiegoInv.toFixed(1));
+      resumenHtml += '<div style="background:#dbeafe;color:#1e40af;border-radius:8px;padding:7px 11px;min-width:88px;flex:0 0 auto;cursor:pointer" '
+        +'onclick="paFiltrarCalendario(\'Sin riego\')" title="Sin riego — inversión a futuro">'
+        +'<div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;opacity:.8;margin-bottom:2px">💧 Sin riego</div>'
+        +'<div style="font-size:16px;font-weight:700;line-height:1.1">'+totalSinRiego.toFixed(1)+' <span style="font-size:10px;font-weight:500;opacity:.7">ha</span></div>'
+        +'<div style="font-size:9px;opacity:.65;margin-top:1px">'+detSR.join(' · ')+'</div>'
         +'</div>';
     }
 
@@ -6156,7 +6177,7 @@ function paEditarCultivo(loteId,nombre){
 }
 
 function paCultivoOpts(){
-  return'<option value="">—</option><optgroup label="Frutales"><option value="Uva Superior">Uva Superior</option><option value="Uva Red Globe">Uva Red Globe</option><option value="Uva Cardinal">Uva Cardinal</option><option value="Uva Cereza">Uva Cereza</option><option value="Damasco">Damasco</option><option value="Durazno">Durazno</option><option value="Ciruela">Ciruela</option></optgroup><optgroup label="Chacra Mercado"><option value="Melón">Melón</option><option value="Cebolla">Cebolla</option><option value="Brócoli">Brócoli</option><option value="Ajo">Ajo</option><option value="Papa">Papa</option><option value="Zapallo">Zapallo</option></optgroup><optgroup label="Chacra Industria"><option value="Tomate Industria">Tomate Industria</option></optgroup><optgroup label="Recuperación / Sin producción"><option value="Mejoramiento de Suelo">Mejoramiento de Suelo</option><option value="Barbecho">Barbecho</option><option value="Sin uso">Sin uso</option></optgroup>';
+  return'<option value="">—</option><optgroup label="Frutales"><option value="Uva Superior">Uva Superior</option><option value="Uva Red Globe">Uva Red Globe</option><option value="Uva Cardinal">Uva Cardinal</option><option value="Uva Cereza">Uva Cereza</option><option value="Damasco">Damasco</option><option value="Durazno">Durazno</option><option value="Ciruela">Ciruela</option></optgroup><optgroup label="Chacra Mercado"><option value="Melón">Melón</option><option value="Cebolla">Cebolla</option><option value="Brócoli">Brócoli</option><option value="Ajo">Ajo</option><option value="Papa">Papa</option><option value="Zapallo">Zapallo</option></optgroup><optgroup label="Chacra Industria"><option value="Tomate Industria">Tomate Industria</option></optgroup><optgroup label="Recuperación / Sin producción"><option value="Mejoramiento de Suelo">Mejoramiento de Suelo</option><option value="Barbecho">Barbecho</option><option value="Sin uso">Sin uso</option><option value="Sin riego">Sin riego</option></optgroup>';
 }
 
 function paMesesOpts(label){
@@ -6214,7 +6235,7 @@ function paGuardarEdicionLote(){
       // Guardar cultivos por campaña
       var saves=Object.entries(cultivos).filter(function(e){return e[1].cultivo;}).map(function(e){
         var camp=e[0],cd=e[1];
-        return paF('/api/pa/lotes/cultivo',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({lote_id:loteId,campaña:camp,cultivo:cd.cultivo,es_perenne:['Uva Superior','Uva Red Globe','Uva Cardinal','Uva Cereza','Damasco','Durazno','Ciruela','Mejoramiento de Suelo'].includes(cd.cultivo)?1:0,mes_siembra:cd.mes_siembra||null,mes_cosecha:cd.mes_cosecha||null})});
+        return paF('/api/pa/lotes/cultivo',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({lote_id:loteId,campaña:camp,cultivo:cd.cultivo,es_perenne:['Uva Superior','Uva Red Globe','Uva Cardinal','Uva Cereza','Damasco','Durazno','Ciruela','Mejoramiento de Suelo','Sin riego'].includes(cd.cultivo)?1:0,mes_siembra:cd.mes_siembra||null,mes_cosecha:cd.mes_cosecha||null})});
       });
       Promise.all(saves).then(function(){
         toast('Lote actualizado');
@@ -7220,7 +7241,7 @@ function paAbrirNuevoLote(){
   function paRenderCampañasModal(campañas) {
     var campOrd=['2021/22','Inv 2022','2022/23','Inv 2023','2023/24','Inv 2024','2024/25','Inv 2025','2025/26','Inv 2026','2026/27'];
     var campDisp=campañas.slice().sort(function(a,b){return campOrd.indexOf(a.nombre)-campOrd.indexOf(b.nombre);});
-    var cultivoOpts='<option value="">—</option><optgroup label="Frutales"><option value="Uva Superior">Uva Superior</option><option value="Uva Red Globe">Uva Red Globe</option><option value="Uva Cardinal">Uva Cardinal</option><option value="Uva Cereza">Uva Cereza</option><option value="Damasco">Damasco</option><option value="Durazno">Durazno</option><option value="Ciruela">Ciruela</option></optgroup><optgroup label="Chacra Mercado"><option value="Melón">Melón</option><option value="Cebolla">Cebolla</option><option value="Brócoli">Brócoli</option><option value="Ajo">Ajo</option><option value="Papa">Papa</option><option value="Zapallo">Zapallo</option></optgroup><optgroup label="Chacra Industria"><option value="Tomate Industria">Tomate Industria</option></optgroup><option value="Barbecho">Barbecho</option><option value="Sin uso">Sin uso</option>';
+    var cultivoOpts='<option value="">—</option><optgroup label="Frutales"><option value="Uva Superior">Uva Superior</option><option value="Uva Red Globe">Uva Red Globe</option><option value="Uva Cardinal">Uva Cardinal</option><option value="Uva Cereza">Uva Cereza</option><option value="Damasco">Damasco</option><option value="Durazno">Durazno</option><option value="Ciruela">Ciruela</option></optgroup><optgroup label="Chacra Mercado"><option value="Melón">Melón</option><option value="Cebolla">Cebolla</option><option value="Brócoli">Brócoli</option><option value="Ajo">Ajo</option><option value="Papa">Papa</option><option value="Zapallo">Zapallo</option></optgroup><optgroup label="Chacra Industria"><option value="Tomate Industria">Tomate Industria</option></optgroup><option value="Barbecho">Barbecho</option><option value="Sin uso">Sin uso</option><option value="Sin riego">Sin riego</option>';
     document.getElementById('pa-lot-cultivos-grid').innerHTML=campDisp.map(function(c){
       return'<div class="fl"><label>Temporada '+c.nombre+(c.activa?' ★':'')+' </label><select id="pa-lot-cult-'+c.nombre.replace('/','_').replace(/ /g,'_')+'">'+cultivoOpts+'</select></div>';
     }).join('');
