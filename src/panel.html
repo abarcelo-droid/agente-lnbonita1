@@ -1687,6 +1687,32 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   </div>
 </div>
 
+<!-- ─── PA PLAN DE CUENTAS ───────────────────────────────────── -->
+<div class="sec" id="sec-pa-cuentas">
+  <div class="ph">
+    <div>
+      <div class="ph-t">📊 Plan de Cuentas</div>
+      <div class="ph-s">Maestro contable. Las cuentas con 🔒 son del sistema y no se pueden desactivar</div>
+    </div>
+    <div style="display:flex;gap:8px">
+      <button class="btn bb" onclick="paCuAbrirNuevaCuenta()">+ Nueva cuenta</button>
+      <button class="btn bo" onclick="paCuAbrirNuevaSeccion()">+ Sección</button>
+      <button class="btn bo" onclick="paCuAbrirLogGeneral()">📜 Ver log</button>
+    </div>
+  </div>
+  <div class="filt">
+    <input id="pa-cu-busc" type="text" placeholder="🔍 Buscar por código o nombre…" oninput="paCuLoad()" style="flex:1;min-width:240px;margin-right:8px">
+    <select id="pa-cu-sec-fil" onchange="paCuLoad()" style="margin-right:8px">
+      <option value="">Todas las secciones</option>
+    </select>
+    <label style="margin-left:6px;font-size:12px;color:var(--mut);display:inline-flex;align-items:center;gap:6px;cursor:pointer">
+      <input type="checkbox" id="pa-cu-ver-inact" onchange="paCuLoad()" style="width:auto">
+      Ver desactivadas
+    </label>
+  </div>
+  <div id="pa-cu-lista"></div>
+</div>
+
 <!-- MODAL TRABAJADOR -->
 <div class="mb" id="mb-pp-trab">
   <div class="mbox" style="width:520px">
@@ -5348,32 +5374,6 @@ if(_inpGondola) _inpGondola.addEventListener('keydown', function(e){
     <div class="emp" style="grid-column:1/-1">Ingresá el nombre del producto y buscá</div>
   </div>
 </div>
-</div>
-
-<!-- ─── PA PLAN DE CUENTAS ───────────────────────────────────── -->
-<div class="sec" id="sec-pa-cuentas">
-  <div class="ph">
-    <div>
-      <div class="ph-t">📊 Plan de Cuentas</div>
-      <div class="ph-s">Maestro contable. Las cuentas con 🔒 son del sistema y no se pueden desactivar</div>
-    </div>
-    <div style="display:flex;gap:8px">
-      <button class="btn bb" onclick="paCuAbrirNuevaCuenta()">+ Nueva cuenta</button>
-      <button class="btn bo" onclick="paCuAbrirNuevaSeccion()">+ Sección</button>
-      <button class="btn bo" onclick="paCuAbrirLogGeneral()">📜 Ver log</button>
-    </div>
-  </div>
-  <div class="filt">
-    <input id="pa-cu-busc" type="text" placeholder="🔍 Buscar por código o nombre…" oninput="paCuLoad()" style="flex:1;min-width:240px;margin-right:8px">
-    <select id="pa-cu-sec-fil" onchange="paCuLoad()" style="margin-right:8px">
-      <option value="">Todas las secciones</option>
-    </select>
-    <label style="margin-left:6px;font-size:12px;color:var(--mut);display:inline-flex;align-items:center;gap:6px;cursor:pointer">
-      <input type="checkbox" id="pa-cu-ver-inact" onchange="paCuLoad()" style="width:auto">
-      Ver desactivadas
-    </label>
-  </div>
-  <div id="pa-cu-lista"></div>
 </div>
 
 <!-- ── ESTILOS PA ─────────────────────────────────────────────── -->
