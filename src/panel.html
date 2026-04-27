@@ -6071,26 +6071,56 @@ function paLoadCalendario(){
         // Ha
         html+='<td style="padding:4px 6px;text-align:center;color:var(--mut);font-size:11px">'+l.hectareas+'</td>';
 
-        // Celdas por campaña
-        COLS.forEach(function(c){
-          var cd=l.cultivos&&l.cultivos[c.key];
-          var cult=cd?cd.cultivo:'';
-          var col=cultColor(cult);
-          var esInv=c.tipo==='invierno';
-          var bgCelda=esInv?'#f8fbff':'';
-          var bordeCelda=esInv?'border-left:1px solid #bfdbfe':'border-left:1px solid var(--bor)';
-          var meses='';
-          if(cd&&cd.mes_siembra&&cd.mes_cosecha){
-            meses='<div style="font-size:9px;margin-top:2px;opacity:.75">'+MESES[cd.mes_siembra-1]+' → '+MESES[cd.mes_cosecha-1]+'</div>';
+        // Celdas por campaña — agrupando columnas consecutivas con el mismo cultivo
+        // (mismo nombre + mismos meses) en una sola celda con colspan, para
+        // que los frutales perennes se vean prolijos como un solo bloque.
+        var celdasInfo = COLS.map(function(c){
+          var cd = l.cultivos && l.cultivos[c.key];
+          return {
+            col: c,
+            cd: cd,
+            cult: cd ? cd.cultivo : '',
+            mes_s: cd ? (cd.mes_siembra || null) : null,
+            mes_c: cd ? (cd.mes_cosecha || null) : null,
+          };
+        });
+        var grupos = [];
+        celdasInfo.forEach(function(ci, i){
+          if (i === 0) { grupos.push({ celdas:[ci], span:1 }); return; }
+          var prev = grupos[grupos.length-1];
+          var primera = prev.celdas[0];
+          // Solo combinar si el cultivo NO está vacío y coincide con el del grupo
+          var combinable = ci.cult &&
+                           ci.cult === primera.cult &&
+                           ci.mes_s === primera.mes_s &&
+                           ci.mes_c === primera.mes_c;
+          if (combinable) { prev.celdas.push(ci); prev.span++; }
+          else { grupos.push({ celdas:[ci], span:1 }); }
+        });
+
+        grupos.forEach(function(g){
+          var ci = g.celdas[0];
+          var cult = ci.cult;
+          var col = cultColor(cult);
+          // Si todo el grupo es invierno: bg azulado. Si es mezcla o verano: blanco.
+          var todosInv = g.celdas.every(function(x){ return x.col.tipo === 'invierno'; });
+          var bgCelda = todosInv ? '#f8fbff' : '';
+          var bordeCelda = todosInv ? 'border-left:1px solid #bfdbfe' : 'border-left:1px solid var(--bor)';
+          var meses = '';
+          if (ci.cd && ci.cd.mes_siembra && ci.cd.mes_cosecha) {
+            meses = '<div style="font-size:9px;margin-top:2px;opacity:.75">'+MESES[ci.cd.mes_siembra-1]+' → '+MESES[ci.cd.mes_cosecha-1]+'</div>';
           }
-          if(cult){
-            html+='<td style="padding:3px 4px;text-align:center;'+bordeCelda+';background:'+bgCelda+'">'
-              +'<div style="background:'+col.bg+';color:'+col.fg+';border-radius:5px;padding:4px 5px;font-size:11px;font-weight:600;cursor:pointer;line-height:1.3;white-space:normal" onclick="paEditarCultivo('+l.id+',\''+l.nombre.replace(/'/g,"\\'")+'\')">'+cult+meses+'</div>'
-              +'</td>';
+          var spanAttr = g.span > 1 ? ' colspan="'+g.span+'"' : '';
+          if (cult) {
+            html += '<td'+spanAttr+' style="padding:3px 4px;text-align:center;'+bordeCelda+';background:'+bgCelda+'">'
+              + '<div style="background:'+col.bg+';color:'+col.fg+';border-radius:5px;padding:4px 5px;font-size:11px;font-weight:600;cursor:pointer;line-height:1.3;white-space:normal" onclick="paEditarCultivo('+l.id+',\''+l.nombre.replace(/'/g,"\\'")+'\')">'+cult+meses+'</div>'
+              + '</td>';
           } else {
-            html+='<td style="padding:3px 4px;text-align:center;'+bordeCelda+';background:'+bgCelda+'">'
-              +'<div style="color:'+(esInv?'#bfdbfe':'var(--bor2)')+';font-size:10px;cursor:pointer;padding:3px;border:1px dashed '+(esInv?'#bfdbfe':'var(--bor2)')+';border-radius:5px" onclick="paEditarCultivo('+l.id+',\''+l.nombre.replace(/'/g,"\\'")+'\')">—</div>'
-              +'</td>';
+            // Vacío: cada columna queda separada (no tiene sentido fusionar vacíos)
+            var esInv = ci.col.tipo === 'invierno';
+            html += '<td style="padding:3px 4px;text-align:center;'+bordeCelda+';background:'+bgCelda+'">'
+              + '<div style="color:'+(esInv?'#bfdbfe':'var(--bor2)')+';font-size:10px;cursor:pointer;padding:3px;border:1px dashed '+(esInv?'#bfdbfe':'var(--bor2)')+';border-radius:5px" onclick="paEditarCultivo('+l.id+',\''+l.nombre.replace(/'/g,"\\'")+'\')">—</div>'
+              + '</td>';
           }
         });
         html+='</tr>';
