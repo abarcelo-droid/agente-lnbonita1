@@ -5592,6 +5592,7 @@ if(_inpGondola) _inpGondola.addEventListener('keydown', function(e){
     </div>
   </div>
   <div style="margin:12px 0 8px;font-size:12px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.06em">Lotes a tratar</div>
+  <input type="text" id="pa-ord-lotes-busc" placeholder="🔍 Buscar lote, finca o cultivo…" oninput="paFiltrarLotesOrden()" style="width:100%;padding:7px 10px;font-size:13px;border:1px solid var(--bor2);border-radius:6px;margin-bottom:6px">
   <div id="pa-ord-lotes-sel" style="max-height:200px;overflow-y:auto;border:1px solid var(--bor2);border-radius:8px;padding:8px"></div>
   <div id="pa-ord-ha-total" style="font-size:12px;color:var(--mut);padding:6px 4px;display:none">Total seleccionado: <strong id="pa-ord-ha-num">0</strong> ha</div>
   <div style="margin:12px 0 8px;font-size:12px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.06em">Productos y dosis (por hectárea)</div>
@@ -7048,15 +7049,29 @@ function paAbrirNuevaOrden(){
   document.getElementById('pa-ord-items').innerHTML='';
   document.getElementById('pa-ord-resumen').style.display='none';
   document.getElementById('pa-ord-ha-total').style.display='none';
-  // Lotes con formato: NOMBRE - FINCA (HA)
+  // Reset buscador
+  var buscEl=document.getElementById('pa-ord-lotes-busc');
+  if(buscEl)buscEl.value='';
+  // Detectar campaña activa para mostrar el cultivo actual al lado del lote
+  var campAct=(PA.campañas||[]).find(function(c){return c.activa;});
+  var campAciActNombre=campAct?campAct.nombre:'2026/27';
+  // Lotes con formato: NOMBRE - FINCA (HA) + Cultivo de campaña activa
   document.getElementById('pa-ord-lotes-sel').innerHTML=PA.lotes.map(function(l){
-    var label=l.nombre+(l.finca?' — '+l.finca:'')+' ('+l.hectareas+' ha)';
-    return'<label style="display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:6px;cursor:pointer;font-size:13px">'
+    var cd=l.cultivos&&l.cultivos[campAciActNombre];
+    var cult=cd?(typeof cd==='string'?cd:cd.cultivo):'';
+    var col=typeof cultColor==='function'?cultColor(cult):{bg:'#e0f2fe',fg:'#075985'};
+    var cultBadge=cult
+      ? ' <span style="background:'+col.bg+';color:'+col.fg+';padding:1px 7px;border-radius:10px;font-size:10px;font-weight:600;margin-left:4px">'+cult+'</span>'
+      : ' <span style="color:var(--mut);font-size:10px;font-style:italic;margin-left:4px">sin cultivo</span>';
+    // data-search para el filtro: nombre + finca + cultivo en lowercase
+    var searchText=((l.nombre||'')+' '+(l.finca||'')+' '+cult).toLowerCase();
+    return'<label class="pa-ord-lote-row" data-search="'+searchText.replace(/"/g,'&quot;')+'" style="display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:6px;cursor:pointer;font-size:13px">'
       +'<input type="checkbox" value="'+l.id+'" data-ha="'+l.hectareas+'" style="width:auto" onchange="paActHaTotal()"> '
       +'<span><strong>'+l.nombre+'</strong>'+(l.finca?'<span style="color:var(--mut)"> — '+l.finca+'</span>':'')
-      +' <span style="color:var(--sub);font-size:11px">('+l.hectareas+' ha)</span></span></label>';
+      +' <span style="color:var(--sub);font-size:11px">('+l.hectareas+' ha)</span>'
+      +cultBadge+'</span></label>';
   }).join('')||'<div class="emp">Sin lotes. Agregá lotes primero.</div>';
-  // Poblar selector de usuarios — priorizar campo y operadores
+  // Poblar selector de usuarios — priorizar campo y operadores, default Alejandro Aracena
   paF('/api/auth/usuarios').then(function(r){
     var sel=document.getElementById('pa-ord-asignado');
     if(!sel)return;
@@ -7069,9 +7084,24 @@ function paAbrirNuevaOrden(){
       +usuarios.map(function(u){
         return'<option value="'+u.id+'">'+(rolLabel[u.rol]||u.rol)+' — '+u.nombre+'</option>';
       }).join('');
+    // Default: Alejandro Aracena (búsqueda case-insensitive, tolerante a tildes)
+    var defaultUser=usuarios.find(function(u){
+      var n=(u.nombre||'').toLowerCase();
+      return n.indexOf('alejandro')!==-1 && n.indexOf('aracena')!==-1;
+    });
+    if(defaultUser)sel.value=defaultUser.id;
   });
   paAgregarItemOrden();
   document.getElementById('pa-mb-orden').classList.add('on');
+}
+
+// Filtra el listado de lotes en el modal de nueva orden por texto
+function paFiltrarLotesOrden(){
+  var q=(document.getElementById('pa-ord-lotes-busc').value||'').trim().toLowerCase();
+  document.querySelectorAll('#pa-ord-lotes-sel .pa-ord-lote-row').forEach(function(row){
+    var s=row.getAttribute('data-search')||'';
+    row.style.display=(!q||s.indexOf(q)!==-1)?'flex':'none';
+  });
 }
 
 function paActHaTotal(){
