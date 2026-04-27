@@ -8735,130 +8735,140 @@ function paCalRefrescarMapa() {
 function paCalRenderMapa() {
   if (typeof L === 'undefined') { setTimeout(paCalRenderMapa, 300); return; }
 
-  // Recargar lotes para tener datos frescos (cultivos, polígonos)
-  paF('/api/pa/lotes').then(function(r){
-    var lotes = r.data || [];
-    PA.lotes = lotes; // mantener cache PA.lotes consistente
-
-    // Determinar campaña a mostrar: la del selector o la activa
-    var campSelVal = document.getElementById('cal-campaña-sel').value;
-    var campañaNom;
-    if (campSelVal) {
-      var cs = (PA.campañas||[]).find(function(c){return c.id==campSelVal;});
-      campañaNom = cs ? cs.nombre : null;
-    } else {
-      var ca = (PA.campañas||[]).find(function(c){return c.activa==1;});
-      campañaNom = ca ? ca.nombre : null;
-    }
-
-    var conPoly = lotes.filter(function(l){ return l.poligono_geojson; });
-    var sinPoly = lotes.filter(function(l){ return !l.poligono_geojson; });
-
-    // Crear/limpiar mapa
-    if (!PAMAP.calMap) {
-      PAMAP.calMap = L.map('pa-cal-map', { zoomControl: true }).setView([-31.799506, -68.5617667], 17);
-      paAgregarCapas(PAMAP.calMap, 'hybrid');
-    } else {
-      // Quitar polígonos previos
-      PAMAP.calMap.eachLayer(function(layer){
-        if (layer._isPaCalPoly) PAMAP.calMap.removeLayer(layer);
-      });
-      // Quitar tooltips permanentes previos
-      (PAMAP.calLabels||[]).forEach(function(tt){ try { PAMAP.calMap.removeLayer(tt); } catch(e){} });
-      PAMAP.calLabels = [];
-    }
-
-    var bounds = [];
-    var cultivosUsados = {};
-
-    conPoly.forEach(function(l){
-      try {
-        var geo = typeof l.poligono_geojson === 'string' ? JSON.parse(l.poligono_geojson) : l.poligono_geojson;
-        // Cultivo en la campaña seleccionada
-        var cultActual = '';
-        if (campañaNom && l.cultivos && l.cultivos[campañaNom]) {
-          var cd = l.cultivos[campañaNom];
-          cultActual = typeof cd === 'string' ? cd : (cd.cultivo || '');
-        }
-        var displayCult = cultActual || 'Sin cultivo';
-        cultivosUsados[displayCult] = true;
-
-        // Color: paleta del calendario (cultColor); si no hay cultivo, gris
-        var col = cultActual ? cultColor(cultActual) : { bg:'#f1f5f9', fg:'#64748b' };
-
-        var layer = L.geoJSON(geo, {
-          style: {
-            color: col.fg,
-            weight: 2,
-            fillOpacity: 0.55,
-            fillColor: col.bg
-          }
-        });
-        layer._isPaCalPoly = true;
-        layer.on('click', function(){ paEditarCultivo(l.id, l.nombre); });
-        layer.bindTooltip(
-          '<strong>'+l.nombre+'</strong><br>'+(l.finca||'')+'<br>'+displayCult+' · '+(l.hectareas||'?')+' ha<br><span style="color:#94a3b8;font-size:10px">Click para editar cultivo</span>',
-          { className:'pa-map-tooltip', sticky: true }
-        );
-        layer.addTo(PAMAP.calMap);
-
-        // Label permanente con nombre + cultivo + ha en el centroide
-        var b = layer.getBounds();
-        if (b.isValid()) {
-          bounds.push(b);
-          var centro = b.getCenter();
-          var labelHtml = '<div style="background:rgba(255,255,255,.92);border:1px solid '+col.fg+';color:'+col.fg+';padding:2px 7px;border-radius:5px;font-size:10px;font-weight:700;line-height:1.25;text-align:center;white-space:nowrap;box-shadow:0 1px 3px rgba(0,0,0,.18);pointer-events:none">'
-            +l.nombre+'<div style="font-weight:500;font-size:9px;opacity:.85">'+displayCult+' · '+(l.hectareas||'?')+' ha</div></div>';
-          var marker = L.marker(centro, {
-            icon: L.divIcon({ className:'pa-cal-label', html: labelHtml, iconSize:[1,1], iconAnchor:[0,0] }),
-            interactive: false,
-            keyboard: false
-          }).addTo(PAMAP.calMap);
-          PAMAP.calLabels.push(marker);
-        }
-      } catch(e) { console.warn('Polígono inválido lote', l.id, e); }
+  // Si PA.lotes está vacío (caso raro: usuario abrió Calendario sin pasar por nada que lo cargue),
+  // hacemos una recarga; si no, usamos lo que ya hay (igual que paRenderMapaGeneral).
+  if (!PA.lotes || !PA.lotes.length) {
+    paF('/api/pa/lotes').then(function(r){
+      PA.lotes = r.data || [];
+      paCalRenderMapaCore();
     });
+  } else {
+    paCalRenderMapaCore();
+  }
+}
 
-    if (bounds.length) {
-      var all = bounds[0];
-      bounds.slice(1).forEach(function(b){ all.extend(b); });
-      PAMAP.calMap.fitBounds(all, { padding: [40, 40] });
-    }
+function paCalRenderMapaCore() {
+  // Determinar campaña a mostrar: la del selector o la activa
+  var campSelVal = document.getElementById('cal-campaña-sel').value;
+  var campañaNom;
+  if (campSelVal) {
+    var cs = (PA.campañas||[]).find(function(c){return c.id==campSelVal;});
+    campañaNom = cs ? cs.nombre : null;
+  } else {
+    var ca = (PA.campañas||[]).find(function(c){return c.activa==1;});
+    campañaNom = ca ? ca.nombre : null;
+  }
 
-    // Leyenda
-    var leyEl = document.getElementById('pa-cal-leyenda');
-    if (leyEl) {
-      var keys = Object.keys(cultivosUsados).sort();
-      if (!keys.length) {
-        leyEl.innerHTML = '<span style="color:var(--mut)">No hay polígonos dibujados todavía. Editá un lote para agregar su polígono.</span>';
-      } else {
-        leyEl.innerHTML = '<strong style="color:var(--mut);font-size:11px;text-transform:uppercase;letter-spacing:.06em;margin-right:6px">'+(campañaNom||'Sin campaña')+':</strong>'
-          + keys.map(function(c){
-              var col = c==='Sin cultivo' ? {bg:'#f1f5f9',fg:'#64748b'} : cultColor(c);
-              return '<span style="display:inline-flex;align-items:center;gap:5px"><span style="width:14px;height:14px;background:'+col.bg+';border:1.5px solid '+col.fg+';border-radius:3px"></span>'+c+'</span>';
-            }).join('');
+  var conPoly = (PA.lotes||[]).filter(function(l){ return l.poligono_geojson; });
+  var sinPoly = (PA.lotes||[]).filter(function(l){ return !l.poligono_geojson; });
+
+  // Crear/limpiar mapa
+  if (!PAMAP.calMap) {
+    PAMAP.calMap = L.map('pa-cal-map', { zoomControl: true }).setView([-31.799506, -68.5617667], 17);
+    paAgregarCapas(PAMAP.calMap, 'hybrid');
+  } else {
+    PAMAP.calMap.eachLayer(function(layer){
+      if (layer._isPaCalPoly) PAMAP.calMap.removeLayer(layer);
+    });
+    (PAMAP.calLabels||[]).forEach(function(tt){ try { PAMAP.calMap.removeLayer(tt); } catch(e){} });
+    PAMAP.calLabels = [];
+  }
+
+  var bounds = [];
+  var cultivosUsados = {};
+
+  conPoly.forEach(function(l){
+    try {
+      var geo = typeof l.poligono_geojson === 'string' ? JSON.parse(l.poligono_geojson) : l.poligono_geojson;
+      // Cultivo en la campaña seleccionada
+      var cultActual = '';
+      if (campañaNom && l.cultivos && l.cultivos[campañaNom]) {
+        var cd = l.cultivos[campañaNom];
+        cultActual = typeof cd === 'string' ? cd : (cd.cultivo || '');
       }
-    }
+      var displayCult = cultActual || 'Sin cultivo';
+      cultivosUsados[displayCult] = true;
 
-    // Lotes sin polígono
-    var sinEl = document.getElementById('pa-cal-sin-poligono');
-    if (sinEl) {
-      if (!sinPoly.length) {
-        sinEl.innerHTML = '';
-      } else {
-        sinEl.innerHTML = '<div style="background:#fef9c3;border:1px solid #fde047;border-radius:8px;padding:10px 14px">'
-          + '<div style="font-size:12px;font-weight:700;color:#854d0e;margin-bottom:6px">⚠️ Lotes sin polígono ('+sinPoly.length+')</div>'
-          + '<div style="display:flex;flex-wrap:wrap;gap:6px">'
-          + sinPoly.map(function(l){
-              return '<button onclick="paAbrirEditorPoligono('+l.id+')" style="background:#fff;border:1px solid #fde047;border-radius:6px;padding:4px 10px;font-size:11px;cursor:pointer;color:#854d0e">'
-                +'<strong>'+l.nombre+'</strong>'+(l.finca?' — '+l.finca:'')+' · ✏️ Dibujar</button>';
-            }).join('')
-          + '</div></div>';
+      // Color: paleta del calendario (cultColor); si no hay cultivo, gris
+      var col = cultActual ? cultColor(cultActual) : { bg:'#f1f5f9', fg:'#64748b' };
+
+      var layer = L.geoJSON(geo, {
+        style: {
+          color: col.fg,
+          weight: 2,
+          fillOpacity: 0.55,
+          fillColor: col.bg
+        }
+      });
+      layer._isPaCalPoly = true;
+      layer.on('click', function(){ paEditarCultivo(l.id, l.nombre); });
+      layer.bindTooltip(
+        '<strong>'+l.nombre+'</strong><br>'+(l.finca||'')+'<br>'+displayCult+' · '+(l.hectareas||'?')+' ha<br><span style="color:#94a3b8;font-size:10px">Click para editar cultivo</span>',
+        { className:'pa-map-tooltip', sticky: true }
+      );
+      layer.addTo(PAMAP.calMap);
+
+      // Label permanente con nombre + cultivo + ha en el centroide
+      var b = layer.getBounds();
+      if (b.isValid()) {
+        bounds.push(b);
+        var centro = b.getCenter();
+        var labelHtml = '<div style="background:rgba(255,255,255,.92);border:1px solid '+col.fg+';color:'+col.fg+';padding:2px 7px;border-radius:5px;font-size:10px;font-weight:700;line-height:1.25;text-align:center;white-space:nowrap;box-shadow:0 1px 3px rgba(0,0,0,.18);pointer-events:none">'
+          +l.nombre+'<div style="font-weight:500;font-size:9px;opacity:.85">'+displayCult+' · '+(l.hectareas||'?')+' ha</div></div>';
+        var marker = L.marker(centro, {
+          icon: L.divIcon({ className:'pa-cal-label', html: labelHtml, iconSize:[1,1], iconAnchor:[0,0] }),
+          interactive: false,
+          keyboard: false
+        }).addTo(PAMAP.calMap);
+        PAMAP.calLabels.push(marker);
       }
-    }
-
-    setTimeout(function(){ if(PAMAP.calMap)PAMAP.calMap.invalidateSize(); }, 100);
+    } catch(e) { console.warn('Polígono inválido lote', l.id, e); }
   });
+
+  // invalidateSize ANTES de fitBounds para asegurar que el contenedor tenga sus dimensiones reales
+  // (importante porque el div venía display:none y Leaflet pudo medir mal el tamaño)
+  PAMAP.calMap.invalidateSize();
+
+  if (bounds.length) {
+    var all = bounds[0];
+    bounds.slice(1).forEach(function(b){ all.extend(b); });
+    PAMAP.calMap.fitBounds(all, { padding: [40, 40] });
+  }
+
+  // Leyenda
+  var leyEl = document.getElementById('pa-cal-leyenda');
+  if (leyEl) {
+    var keys = Object.keys(cultivosUsados).sort();
+    if (!keys.length) {
+      leyEl.innerHTML = '<span style="color:var(--mut)">No hay polígonos dibujados todavía. Editá un lote para agregar su polígono.</span>';
+    } else {
+      leyEl.innerHTML = '<strong style="color:var(--mut);font-size:11px;text-transform:uppercase;letter-spacing:.06em;margin-right:6px">'+(campañaNom||'Sin campaña')+':</strong>'
+        + keys.map(function(c){
+            var col = c==='Sin cultivo' ? {bg:'#f1f5f9',fg:'#64748b'} : cultColor(c);
+            return '<span style="display:inline-flex;align-items:center;gap:5px"><span style="width:14px;height:14px;background:'+col.bg+';border:1.5px solid '+col.fg+';border-radius:3px"></span>'+c+'</span>';
+          }).join('');
+    }
+  }
+
+  // Lotes sin polígono
+  var sinEl = document.getElementById('pa-cal-sin-poligono');
+  if (sinEl) {
+    if (!sinPoly.length) {
+      sinEl.innerHTML = '';
+    } else {
+      sinEl.innerHTML = '<div style="background:#fef9c3;border:1px solid #fde047;border-radius:8px;padding:10px 14px">'
+        + '<div style="font-size:12px;font-weight:700;color:#854d0e;margin-bottom:6px">⚠️ Lotes sin polígono ('+sinPoly.length+')</div>'
+        + '<div style="display:flex;flex-wrap:wrap;gap:6px">'
+        + sinPoly.map(function(l){
+            return '<button onclick="paAbrirEditorPoligono('+l.id+')" style="background:#fff;border:1px solid #fde047;border-radius:6px;padding:4px 10px;font-size:11px;cursor:pointer;color:#854d0e">'
+              +'<strong>'+l.nombre+'</strong>'+(l.finca?' — '+l.finca:'')+' · ✏️ Dibujar</button>';
+          }).join('')
+        + '</div></div>';
+    }
+  }
+
+  // Segundo invalidateSize por si el contenedor cambió tamaño después del primer cálculo
+  setTimeout(function(){ if(PAMAP.calMap)PAMAP.calMap.invalidateSize(); }, 100);
 }
 
 // ═════════════════════════════════════════════════════════════════════
