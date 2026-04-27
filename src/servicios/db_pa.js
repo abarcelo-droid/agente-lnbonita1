@@ -1410,5 +1410,20 @@ db.exec(`
   console.log(`[PA] Plan de cuentas: ${secciones.length} secciones + ${cuentas.length} cuentas cargadas`);
 })();
 
+// ── MIGRACIÓN: rename "Mejoramiento de Suelo" → "Mejor. Suelo" ─────────────
+// Idempotente: solo actualiza si encuentra registros con el nombre viejo.
+(function migrarRenameMejorSuelo() {
+  try {
+    const existe = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='pa_cultivos_lote'").get();
+    if (!existe) return;
+    const r = db.prepare("UPDATE pa_cultivos_lote SET cultivo = 'Mejor. Suelo' WHERE cultivo = 'Mejoramiento de Suelo'").run();
+    if (r.changes > 0) {
+      console.log(`[PA] Renombrados ${r.changes} cultivos: 'Mejoramiento de Suelo' → 'Mejor. Suelo'`);
+    }
+  } catch(e) {
+    console.warn('[PA] Error migrando rename Mejor. Suelo:', e.message);
+  }
+})();
+
 export { db };
 export default db;

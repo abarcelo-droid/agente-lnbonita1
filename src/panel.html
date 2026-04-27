@@ -5861,6 +5861,7 @@ function paLoadCalendario(){
     'Uva Red Globe':   {bg:'#ddd6fe',fg:'#4c1d95'},
     'Uva Cardinal':    {bg:'#c4b5fd',fg:'#3b0764'},
     'Uva Cereza':      {bg:'#f3e8ff',fg:'#6b21a8'},
+    'Uva Vitoria':     {bg:'#a78bfa',fg:'#2e1065'},
     
     'Tomate Industria':{bg:'#fecaca',fg:'#991b1b'},   // rojo
     'Ajo':             {bg:'#f3e8ff',fg:'#6b21a8'},
@@ -5869,7 +5870,7 @@ function paLoadCalendario(){
     'Barbecho':        {bg:'#f1f5f9',fg:'#64748b'},
     'Sin uso':         {bg:'#f8fafc',fg:'#94a3b8'},
     'Sin riego':       {bg:'#dbeafe',fg:'#1e40af'},   // azul, sin agua
-    'Mejoramiento de Suelo': {bg:'#e7d6b6',fg:'#6b4423'},   // tierra, suelo en recuperación
+    'Mejor. Suelo':    {bg:'#e7d6b6',fg:'#6b4423'},   // tierra, suelo en recuperación
   };
   function cultColor(c){return CULT_COLOR[c]||{bg:'#e0f2fe',fg:'#075985'};}
 
@@ -5910,6 +5911,7 @@ function paLoadCalendario(){
     var haMap = {};
     var haSinUsoVer = 0, haSinUsoInv = 0;
     var haSinRiegoVer = 0, haSinRiegoInv = 0;
+    var haMejorSueloVer = 0, haMejorSueloInv = 0;
     var totalHa = 0;
     lotes.forEach(function(l){
       // Recolectar cultivos del lote por campaña
@@ -5933,6 +5935,10 @@ function paLoadCalendario(){
           // Categoría aparte: inversión a futuro (no produce, pero no es "sin uso")
           if (c.esInvierno) haSinRiegoInv += (l.hectareas || 0);
           else haSinRiegoVer += (l.hectareas || 0);
+        } else if (cult === 'Mejor. Suelo' || cult === 'Mejoramiento de Suelo') {
+          // Categoría aparte: inversión a futuro (suelo en recuperación)
+          if (c.esInvierno) haMejorSueloInv += (l.hectareas || 0);
+          else haMejorSueloVer += (l.hectareas || 0);
         } else if (!cult || cult === 'Barbecho' || cult === 'Sin uso') {
           if (c.esInvierno) haSinUsoInv += (l.hectareas || 0);
           else haSinUsoVer += (l.hectareas || 0);
@@ -5948,12 +5954,13 @@ function paLoadCalendario(){
     var CULT_COLOR_R = {
       'Uva Superior':{bg:'#e9d5ff',fg:'#6b21a8'},'Uva Red Globe':{bg:'#ddd6fe',fg:'#4c1d95'},
       'Uva Cardinal':{bg:'#c4b5fd',fg:'#3b0764'},'Uva Cereza':{bg:'#f3e8ff',fg:'#6b21a8'},
+      'Uva Vitoria':{bg:'#a78bfa',fg:'#2e1065'},
       'Damasco':{bg:'#fed7aa',fg:'#9a3412'},'Durazno':{bg:'#ffedd5',fg:'#c2410c'},
       'Melón':{bg:'#fef08a',fg:'#713f12'},'Brócoli':{bg:'#bbf7d0',fg:'#14532d'},
       'Cebolla':{bg:'#d6c5a0',fg:'#5c3d0a'},'Tomate Industria':{bg:'#fecaca',fg:'#991b1b'},
       'Ajo':{bg:'#f3e8ff',fg:'#6b21a8'},'Papa':{bg:'#fef3c7',fg:'#92400e'},
       'Zapallo':{bg:'#fed7aa',fg:'#9a3412'},
-      'Mejoramiento de Suelo':{bg:'#e7d6b6',fg:'#6b4423'},
+      'Mejor. Suelo':{bg:'#e7d6b6',fg:'#6b4423'},
       'Sin riego':{bg:'#dbeafe',fg:'#1e40af'},
     };
     // Cards por cultivo — formato más compacto
@@ -5995,6 +6002,20 @@ function paLoadCalendario(){
         +'<div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;opacity:.8;margin-bottom:2px">💧 Sin riego</div>'
         +'<div style="font-size:16px;font-weight:700;line-height:1.1">'+totalSinRiego.toFixed(1)+' <span style="font-size:10px;font-weight:500;opacity:.7">ha</span></div>'
         +'<div style="font-size:9px;opacity:.65;margin-top:1px">'+detSR.join(' · ')+'</div>'
+        +'</div>';
+    }
+
+    // Card Mejor. Suelo — categoría aparte: inversión a futuro (suelo en recuperación)
+    if (haMejorSueloVer > 0 || haMejorSueloInv > 0) {
+      var totalMS = haMejorSueloVer + haMejorSueloInv;
+      var detMS = [];
+      if (haMejorSueloVer > 0) detMS.push('☀️ '+haMejorSueloVer.toFixed(1));
+      if (haMejorSueloInv > 0) detMS.push('❄️ '+haMejorSueloInv.toFixed(1));
+      resumenHtml += '<div style="background:#e7d6b6;color:#6b4423;border-radius:8px;padding:7px 11px;min-width:88px;flex:0 0 auto;cursor:pointer" '
+        +'onclick="paFiltrarCalendario(\'Mejor. Suelo\')" title="Mejor. Suelo — inversión a futuro">'
+        +'<div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;opacity:.8;margin-bottom:2px">🌱 Mejor. Suelo</div>'
+        +'<div style="font-size:16px;font-weight:700;line-height:1.1">'+totalMS.toFixed(1)+' <span style="font-size:10px;font-weight:500;opacity:.7">ha</span></div>'
+        +'<div style="font-size:9px;opacity:.65;margin-top:1px">'+detMS.join(' · ')+'</div>'
         +'</div>';
     }
 
@@ -6177,7 +6198,7 @@ function paEditarCultivo(loteId,nombre){
 }
 
 function paCultivoOpts(){
-  return'<option value="">—</option><optgroup label="Frutales"><option value="Uva Superior">Uva Superior</option><option value="Uva Red Globe">Uva Red Globe</option><option value="Uva Cardinal">Uva Cardinal</option><option value="Uva Cereza">Uva Cereza</option><option value="Damasco">Damasco</option><option value="Durazno">Durazno</option><option value="Ciruela">Ciruela</option></optgroup><optgroup label="Chacra Mercado"><option value="Melón">Melón</option><option value="Cebolla">Cebolla</option><option value="Brócoli">Brócoli</option><option value="Ajo">Ajo</option><option value="Papa">Papa</option><option value="Zapallo">Zapallo</option></optgroup><optgroup label="Chacra Industria"><option value="Tomate Industria">Tomate Industria</option></optgroup><optgroup label="Recuperación / Sin producción"><option value="Mejoramiento de Suelo">Mejoramiento de Suelo</option><option value="Barbecho">Barbecho</option><option value="Sin uso">Sin uso</option><option value="Sin riego">Sin riego</option></optgroup>';
+  return'<option value="">—</option><optgroup label="Frutales"><option value="Uva Superior">Uva Superior</option><option value="Uva Red Globe">Uva Red Globe</option><option value="Uva Cardinal">Uva Cardinal</option><option value="Uva Cereza">Uva Cereza</option><option value="Uva Vitoria">Uva Vitoria</option><option value="Damasco">Damasco</option><option value="Durazno">Durazno</option><option value="Ciruela">Ciruela</option></optgroup><optgroup label="Chacra Mercado"><option value="Melón">Melón</option><option value="Cebolla">Cebolla</option><option value="Brócoli">Brócoli</option><option value="Ajo">Ajo</option><option value="Papa">Papa</option><option value="Zapallo">Zapallo</option></optgroup><optgroup label="Chacra Industria"><option value="Tomate Industria">Tomate Industria</option></optgroup><optgroup label="Recuperación / Sin producción"><option value="Mejor. Suelo">Mejor. Suelo</option><option value="Barbecho">Barbecho</option><option value="Sin uso">Sin uso</option><option value="Sin riego">Sin riego</option></optgroup>';
 }
 
 function paMesesOpts(label){
@@ -6235,7 +6256,7 @@ function paGuardarEdicionLote(){
       // Guardar cultivos por campaña
       var saves=Object.entries(cultivos).filter(function(e){return e[1].cultivo;}).map(function(e){
         var camp=e[0],cd=e[1];
-        return paF('/api/pa/lotes/cultivo',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({lote_id:loteId,campaña:camp,cultivo:cd.cultivo,es_perenne:['Uva Superior','Uva Red Globe','Uva Cardinal','Uva Cereza','Damasco','Durazno','Ciruela','Mejoramiento de Suelo','Sin riego'].includes(cd.cultivo)?1:0,mes_siembra:cd.mes_siembra||null,mes_cosecha:cd.mes_cosecha||null})});
+        return paF('/api/pa/lotes/cultivo',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({lote_id:loteId,campaña:camp,cultivo:cd.cultivo,es_perenne:['Uva Superior','Uva Red Globe','Uva Cardinal','Uva Cereza','Uva Vitoria','Damasco','Durazno','Ciruela','Mejor. Suelo','Sin riego'].includes(cd.cultivo)?1:0,mes_siembra:cd.mes_siembra||null,mes_cosecha:cd.mes_cosecha||null})});
       });
       Promise.all(saves).then(function(){
         toast('Lote actualizado');
@@ -7241,7 +7262,7 @@ function paAbrirNuevoLote(){
   function paRenderCampañasModal(campañas) {
     var campOrd=['2021/22','Inv 2022','2022/23','Inv 2023','2023/24','Inv 2024','2024/25','Inv 2025','2025/26','Inv 2026','2026/27'];
     var campDisp=campañas.slice().sort(function(a,b){return campOrd.indexOf(a.nombre)-campOrd.indexOf(b.nombre);});
-    var cultivoOpts='<option value="">—</option><optgroup label="Frutales"><option value="Uva Superior">Uva Superior</option><option value="Uva Red Globe">Uva Red Globe</option><option value="Uva Cardinal">Uva Cardinal</option><option value="Uva Cereza">Uva Cereza</option><option value="Damasco">Damasco</option><option value="Durazno">Durazno</option><option value="Ciruela">Ciruela</option></optgroup><optgroup label="Chacra Mercado"><option value="Melón">Melón</option><option value="Cebolla">Cebolla</option><option value="Brócoli">Brócoli</option><option value="Ajo">Ajo</option><option value="Papa">Papa</option><option value="Zapallo">Zapallo</option></optgroup><optgroup label="Chacra Industria"><option value="Tomate Industria">Tomate Industria</option></optgroup><option value="Barbecho">Barbecho</option><option value="Sin uso">Sin uso</option><option value="Sin riego">Sin riego</option>';
+    var cultivoOpts='<option value="">—</option><optgroup label="Frutales"><option value="Uva Superior">Uva Superior</option><option value="Uva Red Globe">Uva Red Globe</option><option value="Uva Cardinal">Uva Cardinal</option><option value="Uva Cereza">Uva Cereza</option><option value="Uva Vitoria">Uva Vitoria</option><option value="Damasco">Damasco</option><option value="Durazno">Durazno</option><option value="Ciruela">Ciruela</option></optgroup><optgroup label="Chacra Mercado"><option value="Melón">Melón</option><option value="Cebolla">Cebolla</option><option value="Brócoli">Brócoli</option><option value="Ajo">Ajo</option><option value="Papa">Papa</option><option value="Zapallo">Zapallo</option></optgroup><optgroup label="Chacra Industria"><option value="Tomate Industria">Tomate Industria</option></optgroup><option value="Barbecho">Barbecho</option><option value="Sin uso">Sin uso</option><option value="Sin riego">Sin riego</option>';
     document.getElementById('pa-lot-cultivos-grid').innerHTML=campDisp.map(function(c){
       return'<div class="fl"><label>Temporada '+c.nombre+(c.activa?' ★':'')+' </label><select id="pa-lot-cult-'+c.nombre.replace('/','_').replace(/ /g,'_')+'">'+cultivoOpts+'</select></div>';
     }).join('');
@@ -8356,11 +8377,11 @@ var PAMAP = {
 };
 
 var PA_MAP_COLORS = {
-  'Uva Superior':'#a855f7','Uva Red Globe':'#7c3aed','Uva Cardinal':'#6d28d9','Uva Cereza':'#c084fc',
+  'Uva Superior':'#a855f7','Uva Red Globe':'#7c3aed','Uva Cardinal':'#6d28d9','Uva Cereza':'#c084fc','Uva Vitoria':'#7e22ce',
   'Damasco':'#f97316','Durazno':'#fb923c','Ciruela':'#a3a3a3',
   'Melón':'#eab308','Brócoli':'#22c55e','Cebolla':'#a16207','Tomate Industria':'#dc2626',
   'Ajo':'#a855f7','Papa':'#eab308','Zapallo':'#f97316',
-  'Mejoramiento de Suelo':'#a16207','Barbecho':'#94a3b8','Sin uso':'#cbd5e1',
+  'Mejor. Suelo':'#a16207','Barbecho':'#94a3b8','Sin uso':'#cbd5e1','Sin riego':'#3b82f6',
 };
 function paColorCultivo(c) { return PA_MAP_COLORS[c] || '#0ea5e9'; }
 
