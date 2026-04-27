@@ -15,6 +15,7 @@ import abastoRouter       from "./rutas/abasto.js";
 import authRouter         from "./rutas/auth.js";
 import produccionRouter   from "./rutas/produccion.js";
 import scoutRouter        from "./rutas/scout.js";
+import cuentasRouter      from "./rutas/cuentas.js";
 import { guardarSnapshotCRM } from "./servicios/db.js";
 import { syncSheets } from "./servicios/sheets.js";
 
@@ -136,6 +137,7 @@ app.use("/api", cotizacionRouter);
 app.use("/api", crmRouter);
 app.use("/api", buscarRouter);
 app.use("/api/abasto", abastoRouter);
+app.use("/api/pa/cuentas", cuentasRouter);
 app.use("/api/pa",     produccionRouter);
 app.use("/api/pa/scout", scoutRouter);
 

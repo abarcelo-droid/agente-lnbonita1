@@ -168,6 +168,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   <div class="ni" data-sec="pa-scout"><span class="dot de"></span>Scout — Campo</div>
   <div class="ni" data-sec="pa-combustible"><span class="dot da"></span>⛽ Combustible</div>
   <div class="ni" data-sec="pa-personal"><span class="dot db"></span>👷 Personal</div>
+  <div class="ni" data-sec="pa-cuentas"><span class="dot dc"></span>📊 Plan de Cuentas</div>
   <a href="/scout" class="ni" style="color:inherit;text-decoration:none;display:block;font-weight:600" title="Abrir Scout móvil en esta pestaña">
     <span class="dot da"></span>📱 Abrir Scout móvil
   </a>
@@ -2150,7 +2151,8 @@ function loadSec(s) {
     'pa-ordenes':    function(){ paLoadOrdenes(); },
     'pa-costos':     function(){ paLoadCostos(); },
     'pa-lotes':      function(){ paLoadLotes(); },
-    'pa-scout':      function(){ paLoadScout(); }
+    'pa-scout':      function(){ paLoadScout(); },
+    'pa-cuentas':    function(){ paCuLoad(); }
   };
   if (m[s]) m[s]();
 }
@@ -5348,6 +5350,32 @@ if(_inpGondola) _inpGondola.addEventListener('keydown', function(e){
 </div>
 </div>
 
+<!-- ─── PA PLAN DE CUENTAS ───────────────────────────────────── -->
+<div class="sec" id="sec-pa-cuentas">
+  <div class="ph">
+    <div>
+      <div class="ph-t">📊 Plan de Cuentas</div>
+      <div class="ph-s">Maestro contable. Las cuentas con 🔒 son del sistema y no se pueden desactivar</div>
+    </div>
+    <div style="display:flex;gap:8px">
+      <button class="btn bb" onclick="paCuAbrirNuevaCuenta()">+ Nueva cuenta</button>
+      <button class="btn bo" onclick="paCuAbrirNuevaSeccion()">+ Sección</button>
+      <button class="btn bo" onclick="paCuAbrirLogGeneral()">📜 Ver log</button>
+    </div>
+  </div>
+  <div class="filt">
+    <input id="pa-cu-busc" type="text" placeholder="🔍 Buscar por código o nombre…" oninput="paCuLoad()" style="flex:1;min-width:240px;margin-right:8px">
+    <select id="pa-cu-sec-fil" onchange="paCuLoad()" style="margin-right:8px">
+      <option value="">Todas las secciones</option>
+    </select>
+    <label style="margin-left:6px;font-size:12px;color:var(--mut);display:inline-flex;align-items:center;gap:6px;cursor:pointer">
+      <input type="checkbox" id="pa-cu-ver-inact" onchange="paCuLoad()" style="width:auto">
+      Ver desactivadas
+    </label>
+  </div>
+  <div id="pa-cu-lista"></div>
+</div>
+
 <!-- ── ESTILOS PA ─────────────────────────────────────────────── -->
 <style>
 .pa-verde-bg{background:#dcfce7;color:#166534}
@@ -5676,6 +5704,76 @@ if(_inpGondola) _inpGondola.addEventListener('keydown', function(e){
     <button class="btn bo" onclick="document.getElementById('pa-mb-lote').classList.remove('on')">Cancelar</button>
     <button class="btn bb" onclick="paGuardarLote()">Guardar</button>
   </div>
+</div></div>
+
+<!-- ─── MODALES PA-CUENTAS ────────────────────────────────────── -->
+
+<!-- Modal Cuenta -->
+<div class="ab-modal-overlay" id="pa-mb-cuenta">
+<div class="ab-modal" style="width:520px">
+  <div class="mhd"><div class="mht" id="pa-cu-modal-tit">Nueva cuenta</div><button class="mcl" onclick="document.getElementById('pa-mb-cuenta').classList.remove('on')">×</button></div>
+  <input type="hidden" id="pa-cu-id">
+  <div class="fg">
+    <div class="fl ff"><label>Sección <span style="color:var(--err)">*</span></label>
+      <select id="pa-cu-seccion" onchange="paCuSugerirCodigo()"></select>
+    </div>
+    <div class="fl"><label>Código <span style="color:var(--err)">*</span></label>
+      <input id="pa-cu-codigo" placeholder="1.05">
+      <div id="pa-cu-codigo-sug" style="font-size:10px;color:var(--mut);margin-top:3px"></div>
+    </div>
+    <div class="fl ff"><label>Nombre <span style="color:var(--err)">*</span></label>
+      <input id="pa-cu-nombre" placeholder="Ej: ABONOS Y FERTILIZANTES">
+    </div>
+    <div class="fl"><label>Tipo</label>
+      <select id="pa-cu-tipo">
+        <option value="resultado">Resultado (va al ER)</option>
+        <option value="patrimonial">Patrimonial</option>
+      </select>
+    </div>
+    <div class="fl ff" style="display:flex;gap:18px;align-items:center;padding-top:8px">
+      <label style="display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--mut);cursor:pointer">
+        <input type="checkbox" id="pa-cu-permite-lote" style="width:auto">
+        Permite asignar a Lote
+      </label>
+      <label style="display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--mut);cursor:pointer">
+        <input type="checkbox" id="pa-cu-permite-camp" style="width:auto">
+        Permite asignar a Campaña
+      </label>
+    </div>
+    <div id="pa-cu-sistema-warn" style="display:none;background:#fef9c3;border:1px solid #facc15;color:#854d0e;padding:8px 10px;border-radius:6px;font-size:12px;margin-top:4px">
+      🔒 Esta cuenta es del sistema. Podés cambiar nombre y flags, pero no se puede desactivar.
+    </div>
+  </div>
+  <div class="ab-modal-footer">
+    <button class="btn bo" onclick="document.getElementById('pa-mb-cuenta').classList.remove('on')">Cancelar</button>
+    <button class="btn bb" onclick="paCuGuardarCuenta()">Guardar</button>
+  </div>
+</div></div>
+
+<!-- Modal Sección -->
+<div class="ab-modal-overlay" id="pa-mb-seccion">
+<div class="ab-modal" style="width:420px">
+  <div class="mhd"><div class="mht" id="pa-cu-sec-modal-tit">Nueva sección</div><button class="mcl" onclick="document.getElementById('pa-mb-seccion').classList.remove('on')">×</button></div>
+  <input type="hidden" id="pa-cu-sec-id">
+  <div class="fg">
+    <div class="fl"><label>Código <span style="color:var(--err)">*</span></label>
+      <input type="number" id="pa-cu-sec-codigo" min="1">
+    </div>
+    <div class="fl ff"><label>Nombre <span style="color:var(--err)">*</span></label>
+      <input id="pa-cu-sec-nombre" placeholder="Ej: COSTOS DE PRODUCCION">
+    </div>
+  </div>
+  <div class="ab-modal-footer">
+    <button class="btn bo" onclick="document.getElementById('pa-mb-seccion').classList.remove('on')">Cancelar</button>
+    <button class="btn bb" onclick="paCuGuardarSeccion()">Guardar</button>
+  </div>
+</div></div>
+
+<!-- Modal Log -->
+<div class="ab-modal-overlay" id="pa-mb-cu-log">
+<div class="ab-modal" style="width:820px;max-height:90vh;overflow:auto">
+  <div class="mhd"><div class="mht" id="pa-cu-log-tit">📜 Log de auditoría</div><button class="mcl" onclick="document.getElementById('pa-mb-cu-log').classList.remove('on')">×</button></div>
+  <div id="pa-cu-log-body" style="font-size:12px;padding:6px 0"></div>
 </div></div>
 
 <!-- ── JS PA ──────────────────────────────────────────────────── -->
@@ -8484,6 +8582,312 @@ function paCerrarEditorPoligono() {
   document.getElementById('mb-poligono').classList.remove('on');
   if (PAMAP.editor) { PAMAP.editor.off(); PAMAP.editor.remove(); PAMAP.editor = null; }
   PAMAP.loteEdit = null;
+}
+
+// ═════════════════════════════════════════════════════════════════════
+// 📊 PLAN DE CUENTAS — Maestro contable
+// ═════════════════════════════════════════════════════════════════════
+var PACU = { secciones: [], cuentas: [] };
+
+function paCuLoad() {
+  // Cargar secciones (siempre, incluyendo inactivas para selectores)
+  paF('/api/pa/cuentas/secciones?incluir_inactivas=1').then(function(rs){
+    PACU.secciones = (rs.data || []);
+    var fil = document.getElementById('pa-cu-sec-fil');
+    if (fil) {
+      var actual = fil.value;
+      fil.innerHTML = '<option value="">Todas las secciones</option>' +
+        PACU.secciones.filter(function(s){return s.activo;})
+          .map(function(s){return '<option value="'+s.id+'">'+s.codigo+' — '+s.nombre+'</option>';}).join('');
+      fil.value = actual;
+    }
+
+    // Cargar cuentas con filtros actuales
+    var q = (document.getElementById('pa-cu-busc') || {}).value || '';
+    var secId = (document.getElementById('pa-cu-sec-fil') || {}).value || '';
+    var verInact = (document.getElementById('pa-cu-ver-inact') || {}).checked ? '1' : '0';
+    var qs = [];
+    if (q) qs.push('q=' + encodeURIComponent(q));
+    if (secId) qs.push('seccion_id=' + encodeURIComponent(secId));
+    if (verInact === '1') qs.push('incluir_inactivas=1');
+    paF('/api/pa/cuentas' + (qs.length ? '?' + qs.join('&') : '')).then(function(rc){
+      PACU.cuentas = rc.data || [];
+      paCuRender();
+    });
+  });
+}
+
+function paCuRender() {
+  var cont = document.getElementById('pa-cu-lista');
+  if (!cont) return;
+  if (!PACU.cuentas.length) {
+    cont.innerHTML = '<div class="emp" style="padding:32px;text-align:center">Sin resultados</div>';
+    return;
+  }
+  // Agrupar por sección
+  var porSec = {};
+  PACU.cuentas.forEach(function(c){
+    if (!porSec[c.seccion_id]) porSec[c.seccion_id] = { sec: { id:c.seccion_id, codigo:c.seccion_codigo, nombre:c.seccion_nombre }, cuentas: [] };
+    porSec[c.seccion_id].cuentas.push(c);
+  });
+  var grupos = Object.values(porSec).sort(function(a,b){ return a.sec.codigo - b.sec.codigo; });
+
+  cont.innerHTML = grupos.map(function(g){
+    return '<div class="pa-wrap" style="margin-bottom:16px">' +
+      '<div style="background:#f0d9da;padding:10px 14px;display:flex;justify-content:space-between;align-items:center">' +
+        '<strong style="color:var(--burg);font-size:14px">'+g.sec.codigo+' — '+g.sec.nombre+'</strong>' +
+        '<div style="display:flex;gap:6px">' +
+          '<button class="btn bo" style="padding:4px 9px;font-size:11px" onclick="paCuEditarSeccion('+g.sec.id+')">✏️</button>' +
+          '<button class="btn bo" style="padding:4px 9px;font-size:11px" onclick="paCuEliminarSeccion('+g.sec.id+')">🗑</button>' +
+        '</div>' +
+      '</div>' +
+      '<div class="ab-table-wrap"><table class="pa-tbl">' +
+        '<thead><tr>' +
+          '<th style="width:80px">Código</th>' +
+          '<th>Nombre</th>' +
+          '<th style="width:60px;text-align:center">Lote</th>' +
+          '<th style="width:80px;text-align:center">Campaña</th>' +
+          '<th style="width:70px;text-align:center">Tipo</th>' +
+          '<th style="width:230px;text-align:right">Acciones</th>' +
+        '</tr></thead>' +
+        '<tbody>' +
+          g.cuentas.map(function(c){
+            return '<tr style="'+(c.activo?'':'opacity:.5')+'">' +
+              '<td style="font-family:monospace;font-size:12px">'+c.codigo+'</td>' +
+              '<td>'+c.nombre +
+                (c.es_sistema ? ' <span title="Cuenta del sistema" style="color:#b88600">🔒</span>' : '') +
+                (c.activo ? '' : ' <span style="color:var(--mut);font-style:italic;font-size:11px">(desactivada)</span>') +
+              '</td>' +
+              '<td style="text-align:center">'+(c.permite_lote?'✓':'—')+'</td>' +
+              '<td style="text-align:center">'+(c.permite_campania?'✓':'—')+'</td>' +
+              '<td style="text-align:center;font-size:11px;color:var(--mut)">'+(c.tipo==='resultado'?'ER':'Patr.')+'</td>' +
+              '<td style="text-align:right;white-space:nowrap">' +
+                '<button class="btn bo" style="padding:3px 7px;font-size:11px" onclick="paCuMover('+c.id+',\'arriba\')" title="Subir">⬆</button> ' +
+                '<button class="btn bo" style="padding:3px 7px;font-size:11px" onclick="paCuMover('+c.id+',\'abajo\')" title="Bajar">⬇</button> ' +
+                '<button class="btn bo" style="padding:3px 7px;font-size:11px" onclick="paCuEditarCuenta('+c.id+')" title="Editar">✏️</button> ' +
+                '<button class="btn bo" style="padding:3px 7px;font-size:11px" onclick="paCuVerLog('+c.id+')" title="Ver log">📜</button> ' +
+                (c.activo
+                  ? '<button class="btn bo" style="padding:3px 7px;font-size:11px" onclick="paCuDesactivarCuenta('+c.id+','+(c.es_sistema?1:0)+')" title="Desactivar">🗑</button>'
+                  : '<button class="btn bb" style="padding:3px 7px;font-size:11px" onclick="paCuReactivarCuenta('+c.id+')" title="Reactivar">↺</button>'
+                ) +
+              '</td>' +
+            '</tr>';
+          }).join('') +
+        '</tbody>' +
+      '</table></div>' +
+    '</div>';
+  }).join('');
+}
+
+// ── Modal cuenta ────────────────────────────────────────────────────
+function paCuAbrirNuevaCuenta() {
+  document.getElementById('pa-cu-id').value = '';
+  document.getElementById('pa-cu-modal-tit').textContent = 'Nueva cuenta';
+  document.getElementById('pa-cu-codigo').value = '';
+  document.getElementById('pa-cu-codigo').disabled = false;
+  document.getElementById('pa-cu-nombre').value = '';
+  document.getElementById('pa-cu-tipo').value = 'resultado';
+  document.getElementById('pa-cu-permite-lote').checked = false;
+  document.getElementById('pa-cu-permite-camp').checked = false;
+  document.getElementById('pa-cu-sistema-warn').style.display = 'none';
+  // Poblar select secciones (solo activas)
+  var sel = document.getElementById('pa-cu-seccion');
+  sel.innerHTML = PACU.secciones.filter(function(s){return s.activo;})
+    .map(function(s){return '<option value="'+s.id+'">'+s.codigo+' — '+s.nombre+'</option>';}).join('');
+  paCuSugerirCodigo();
+  document.getElementById('pa-mb-cuenta').classList.add('on');
+}
+
+function paCuSugerirCodigo() {
+  var sId = parseInt(document.getElementById('pa-cu-seccion').value, 10);
+  if (!sId) return;
+  var sec = PACU.secciones.find(function(s){return s.id === sId;});
+  if (!sec) return;
+  var cuentasSec = PACU.cuentas.filter(function(c){return c.seccion_id === sId;});
+  var max = 0;
+  cuentasSec.forEach(function(c){
+    var sub = parseInt(String(c.codigo).split('.')[1], 10);
+    if (sub > max) max = sub;
+  });
+  var sub = String(max + 5).padStart(2, '0');
+  var sugerido = sec.codigo + '.' + sub;
+  document.getElementById('pa-cu-codigo-sug').textContent = 'Sugerido: ' + sugerido;
+  // Auto-completar solo si es nueva cuenta (no editar)
+  if (!document.getElementById('pa-cu-id').value) {
+    document.getElementById('pa-cu-codigo').value = sugerido;
+  }
+}
+
+function paCuEditarCuenta(id) {
+  paF('/api/pa/cuentas/' + id).then(function(r){
+    if (!r.ok) { toast(r.error || 'Error', 'err'); return; }
+    var c = r.data;
+    document.getElementById('pa-cu-id').value = c.id;
+    document.getElementById('pa-cu-modal-tit').textContent = 'Editar cuenta ' + c.codigo;
+    var sel = document.getElementById('pa-cu-seccion');
+    sel.innerHTML = PACU.secciones.filter(function(s){return s.activo;})
+      .map(function(s){return '<option value="'+s.id+'"'+(s.id===c.seccion_id?' selected':'')+'>'+s.codigo+' — '+s.nombre+'</option>';}).join('');
+    document.getElementById('pa-cu-codigo').value = c.codigo;
+    document.getElementById('pa-cu-codigo').disabled = false;
+    document.getElementById('pa-cu-nombre').value = c.nombre;
+    document.getElementById('pa-cu-tipo').value = c.tipo;
+    document.getElementById('pa-cu-permite-lote').checked = !!c.permite_lote;
+    document.getElementById('pa-cu-permite-camp').checked = !!c.permite_campania;
+    document.getElementById('pa-cu-sistema-warn').style.display = c.es_sistema ? 'block' : 'none';
+    document.getElementById('pa-cu-codigo-sug').textContent = '';
+    document.getElementById('pa-mb-cuenta').classList.add('on');
+  });
+}
+
+function paCuGuardarCuenta() {
+  var id = document.getElementById('pa-cu-id').value;
+  var body = {
+    codigo: document.getElementById('pa-cu-codigo').value.trim(),
+    nombre: document.getElementById('pa-cu-nombre').value.trim(),
+    seccion_id: parseInt(document.getElementById('pa-cu-seccion').value, 10),
+    tipo: document.getElementById('pa-cu-tipo').value,
+    permite_lote: document.getElementById('pa-cu-permite-lote').checked ? 1 : 0,
+    permite_campania: document.getElementById('pa-cu-permite-camp').checked ? 1 : 0,
+  };
+  if (!body.codigo || !body.nombre || !body.seccion_id) {
+    toast('Completá código, nombre y sección', 'err');
+    return;
+  }
+  var url = id ? '/api/pa/cuentas/' + id : '/api/pa/cuentas';
+  paF(url, {
+    method: id ? 'PUT' : 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  }).then(function(r){
+    if (!r.ok) { toast(r.error || 'Error', 'err'); return; }
+    toast(id ? '✓ Cuenta actualizada' : '✓ Cuenta creada', 'ok');
+    document.getElementById('pa-mb-cuenta').classList.remove('on');
+    paCuLoad();
+  });
+}
+
+function paCuDesactivarCuenta(id, esSistema) {
+  if (esSistema) { toast('Cuenta del sistema, no se puede desactivar', 'err'); return; }
+  if (!confirm('¿Desactivar esta cuenta?')) return;
+  paF('/api/pa/cuentas/' + id, { method: 'DELETE' }).then(function(r){
+    if (!r.ok) { toast(r.error || 'Error', 'err'); return; }
+    toast('✓ Desactivada', 'ok');
+    paCuLoad();
+  });
+}
+
+function paCuReactivarCuenta(id) {
+  paF('/api/pa/cuentas/' + id + '/reactivar', { method: 'POST' }).then(function(r){
+    if (!r.ok) { toast(r.error || 'Error', 'err'); return; }
+    toast('✓ Reactivada', 'ok');
+    paCuLoad();
+  });
+}
+
+function paCuMover(id, direccion) {
+  paF('/api/pa/cuentas/' + id + '/mover', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ direccion: direccion }),
+  }).then(function(r){
+    if (!r.ok) { toast(r.error || 'Error', 'err'); return; }
+    paCuLoad();
+  });
+}
+
+// ── Modal sección ───────────────────────────────────────────────────
+function paCuAbrirNuevaSeccion() {
+  document.getElementById('pa-cu-sec-id').value = '';
+  document.getElementById('pa-cu-sec-modal-tit').textContent = 'Nueva sección';
+  var max = PACU.secciones.reduce(function(m, s){ return Math.max(m, s.codigo); }, 0);
+  document.getElementById('pa-cu-sec-codigo').value = max + 1;
+  document.getElementById('pa-cu-sec-nombre').value = '';
+  document.getElementById('pa-mb-seccion').classList.add('on');
+}
+
+function paCuEditarSeccion(id) {
+  var s = PACU.secciones.find(function(x){return x.id === id;});
+  if (!s) return;
+  document.getElementById('pa-cu-sec-id').value = s.id;
+  document.getElementById('pa-cu-sec-modal-tit').textContent = 'Editar sección ' + s.codigo;
+  document.getElementById('pa-cu-sec-codigo').value = s.codigo;
+  document.getElementById('pa-cu-sec-nombre').value = s.nombre;
+  document.getElementById('pa-mb-seccion').classList.add('on');
+}
+
+function paCuGuardarSeccion() {
+  var id = document.getElementById('pa-cu-sec-id').value;
+  var body = {
+    codigo: parseInt(document.getElementById('pa-cu-sec-codigo').value, 10),
+    nombre: document.getElementById('pa-cu-sec-nombre').value.trim(),
+  };
+  if (!body.codigo || !body.nombre) {
+    toast('Completá código y nombre', 'err');
+    return;
+  }
+  var url = id ? '/api/pa/cuentas/secciones/' + id : '/api/pa/cuentas/secciones';
+  paF(url, {
+    method: id ? 'PUT' : 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  }).then(function(r){
+    if (!r.ok) { toast(r.error || 'Error', 'err'); return; }
+    toast(id ? '✓ Sección actualizada' : '✓ Sección creada', 'ok');
+    document.getElementById('pa-mb-seccion').classList.remove('on');
+    paCuLoad();
+  });
+}
+
+function paCuEliminarSeccion(id) {
+  if (!confirm('¿Desactivar esta sección? (debe estar vacía)')) return;
+  paF('/api/pa/cuentas/secciones/' + id, { method: 'DELETE' }).then(function(r){
+    if (!r.ok) { toast(r.error || 'Error', 'err'); return; }
+    toast('✓ Desactivada', 'ok');
+    paCuLoad();
+  });
+}
+
+// ── Log ─────────────────────────────────────────────────────────────
+function paCuVerLog(id) {
+  paF('/api/pa/cuentas/' + id + '/log').then(function(r){
+    document.getElementById('pa-cu-log-tit').textContent = '📜 Log de cuenta';
+    paCuRenderLog(r.data || []);
+  });
+}
+
+function paCuAbrirLogGeneral() {
+  paF('/api/pa/cuentas/log/general').then(function(r){
+    document.getElementById('pa-cu-log-tit').textContent = '📜 Log general — Plan de Cuentas';
+    paCuRenderLog(r.data || []);
+  });
+}
+
+function paCuRenderLog(log) {
+  var cont = document.getElementById('pa-cu-log-body');
+  if (!log.length) {
+    cont.innerHTML = '<div class="emp" style="padding:24px;text-align:center">Sin movimientos</div>';
+  } else {
+    cont.innerHTML =
+      '<table class="pa-tbl">' +
+        '<thead><tr>' +
+          '<th>Fecha</th><th>Acción</th><th>Cuenta / Sección</th><th>Usuario</th><th>Detalle</th>' +
+        '</tr></thead><tbody>' +
+        log.map(function(l){
+          var detalleStr = l.detalle ? String(l.detalle).substring(0, 80).replace(/"/g,'&quot;').replace(/</g,'&lt;') : '—';
+          var detalleFull = l.detalle ? String(l.detalle).replace(/"/g,'&quot;').replace(/</g,'&lt;') : '';
+          var refTxt = l.cuenta_codigo ? (l.cuenta_codigo + ' ' + (l.cuenta_nombre||'')) : (l.seccion_nombre || '—');
+          return '<tr>' +
+            '<td style="white-space:nowrap;font-family:monospace;font-size:11px">'+l.creado_en+'</td>' +
+            '<td><span class="pa-badge pa-azul-bg">'+l.accion+'</span></td>' +
+            '<td>'+refTxt+'</td>' +
+            '<td>'+(l.usuario_nombre || '—')+'</td>' +
+            '<td style="font-family:monospace;font-size:11px;color:var(--mut);max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+detalleFull+'">'+detalleStr+'</td>' +
+          '</tr>';
+        }).join('') +
+        '</tbody>' +
+      '</table>';
+  }
+  document.getElementById('pa-mb-cu-log').classList.add('on');
 }
 
 </script>

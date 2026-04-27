@@ -1175,5 +1175,240 @@ db.exec(`
   }
 })();
 
+// ── PLAN DE CUENTAS — schema + seed + log auditoría ────────────────────────
+// Maestro contable jerárquico (secciones → cuentas) + tabla central de
+// movimientos contables + log de cambios. Usado por el módulo de costos.
+// Idempotente: el seed solo se ejecuta si no hay secciones cargadas.
+(function migrarPlanDeCuentas() {
+  // 1) Secciones del plan de cuentas
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS pa_cuentas_secciones (
+      id              INTEGER PRIMARY KEY AUTOINCREMENT,
+      codigo          INTEGER NOT NULL UNIQUE,
+      nombre          TEXT NOT NULL,
+      orden           INTEGER NOT NULL DEFAULT 0,
+      activo          INTEGER NOT NULL DEFAULT 1,
+      creado_en       TEXT DEFAULT (datetime('now','localtime')),
+      actualizado_en  TEXT DEFAULT (datetime('now','localtime'))
+    );
+  `);
+
+  // 2) Plan de cuentas
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS pa_cuentas (
+      id                INTEGER PRIMARY KEY AUTOINCREMENT,
+      codigo            TEXT NOT NULL UNIQUE,
+      nombre            TEXT NOT NULL,
+      seccion_id        INTEGER NOT NULL REFERENCES pa_cuentas_secciones(id),
+      tipo              TEXT NOT NULL DEFAULT 'resultado',
+      permite_lote      INTEGER NOT NULL DEFAULT 0,
+      permite_campania  INTEGER NOT NULL DEFAULT 0,
+      es_sistema        INTEGER NOT NULL DEFAULT 0,
+      orden             INTEGER NOT NULL DEFAULT 0,
+      activo            INTEGER NOT NULL DEFAULT 1,
+      creado_en         TEXT DEFAULT (datetime('now','localtime')),
+      actualizado_en    TEXT DEFAULT (datetime('now','localtime'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_pa_cuentas_seccion ON pa_cuentas(seccion_id);
+    CREATE INDEX IF NOT EXISTS idx_pa_cuentas_codigo  ON pa_cuentas(codigo);
+  `);
+
+  // 3) Movimientos contables (fuente única de verdad para reportes)
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS pa_movimientos_contables (
+      id            INTEGER PRIMARY KEY AUTOINCREMENT,
+      fecha         TEXT NOT NULL,
+      cuenta_id     INTEGER NOT NULL REFERENCES pa_cuentas(id),
+      lote_id       INTEGER,
+      campania_id   INTEGER,
+      cultivo_id    INTEGER,
+      monto         REAL NOT NULL,
+      descripcion   TEXT,
+      origen_tipo   TEXT NOT NULL,
+      origen_id     INTEGER,
+      usuario_id    INTEGER,
+      anulado       INTEGER NOT NULL DEFAULT 0,
+      creado_en     TEXT DEFAULT (datetime('now','localtime'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_mov_fecha     ON pa_movimientos_contables(fecha);
+    CREATE INDEX IF NOT EXISTS idx_mov_cuenta    ON pa_movimientos_contables(cuenta_id);
+    CREATE INDEX IF NOT EXISTS idx_mov_lote      ON pa_movimientos_contables(lote_id);
+    CREATE INDEX IF NOT EXISTS idx_mov_campania  ON pa_movimientos_contables(campania_id);
+    CREATE INDEX IF NOT EXISTS idx_mov_origen    ON pa_movimientos_contables(origen_tipo, origen_id);
+    CREATE INDEX IF NOT EXISTS idx_mov_anulado   ON pa_movimientos_contables(anulado);
+  `);
+
+  // 4) Log de auditoría del plan de cuentas
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS pa_cuentas_log (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      cuenta_id   INTEGER,
+      seccion_id  INTEGER,
+      accion      TEXT NOT NULL,
+      detalle     TEXT,
+      usuario_id  INTEGER,
+      creado_en   TEXT DEFAULT (datetime('now','localtime'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_cuentas_log_cuenta  ON pa_cuentas_log(cuenta_id);
+    CREATE INDEX IF NOT EXISTS idx_cuentas_log_seccion ON pa_cuentas_log(seccion_id);
+    CREATE INDEX IF NOT EXISTS idx_cuentas_log_fecha   ON pa_cuentas_log(creado_en);
+  `);
+
+  // 5) ALTERs en pa_insumos: cuenta_id + flags de mapeo automático
+  const colsInsumos = db.prepare("PRAGMA table_info(pa_insumos)").all().map(c => c.name);
+  if (!colsInsumos.includes('cuenta_id')) {
+    db.exec("ALTER TABLE pa_insumos ADD COLUMN cuenta_id INTEGER REFERENCES pa_cuentas(id)");
+    console.log('[PA] pa_insumos.cuenta_id agregada');
+  }
+  if (!colsInsumos.includes('es_fertilizante')) {
+    db.exec("ALTER TABLE pa_insumos ADD COLUMN es_fertilizante INTEGER DEFAULT 0");
+    console.log('[PA] pa_insumos.es_fertilizante agregada');
+  }
+  if (!colsInsumos.includes('es_semilla')) {
+    db.exec("ALTER TABLE pa_insumos ADD COLUMN es_semilla INTEGER DEFAULT 0");
+    console.log('[PA] pa_insumos.es_semilla agregada');
+  }
+  if (!colsInsumos.includes('es_cinta_manguera')) {
+    db.exec("ALTER TABLE pa_insumos ADD COLUMN es_cinta_manguera INTEGER DEFAULT 0");
+    console.log('[PA] pa_insumos.es_cinta_manguera agregada');
+  }
+
+  // 6) Seed inicial — solo si está vacío
+  const cantSec = db.prepare('SELECT COUNT(*) as c FROM pa_cuentas_secciones').get().c;
+  if (cantSec > 0) return;
+
+  const secciones = [
+    [1, 'COSTO DE PRODUCCION'],
+    [2, 'COSTO ASOCIADO A VENTAS - MERCADO'],
+    [3, 'COSTO ASOCIADO A VENTAS - INDUSTRIA'],
+    [4, 'COSTOS FIJOS'],
+    [5, 'COSTOS FINANCIEROS'],
+    [6, 'COSTOS IMPOSITIVOS'],
+    [7, 'INVERSIONES'],
+  ];
+
+  const insSec = db.prepare(`
+    INSERT INTO pa_cuentas_secciones (codigo, nombre, orden, activo)
+    VALUES (?, ?, ?, 1)
+  `);
+  const seccionIds = {};
+  for (const [codigo, nombre] of secciones) {
+    const r = insSec.run(codigo, nombre, codigo);
+    seccionIds[codigo] = r.lastInsertRowid;
+  }
+
+  // [seccion, codigo, nombre, permite_lote, permite_camp, tipo, es_sistema]
+  const cuentas = [
+    // SECCION 1 — COSTO DE PRODUCCION
+    [1, '1.01', 'MO PRODUCCION GENERAL',          1, 1, 'resultado', 1],
+    [1, '1.05', 'MO PRODUCCION UVA',              1, 1, 'resultado', 0],
+    [1, '1.10', 'MO PRODUCCION MELON',            1, 1, 'resultado', 0],
+    [1, '1.15', 'MO PRODUCCION MELON TARDIO',     1, 1, 'resultado', 0],
+    [1, '1.20', 'MO PRODUCCION DAMASCO',          1, 1, 'resultado', 0],
+    [1, '1.25', 'MO PRODUCCION DURAZNO',          1, 1, 'resultado', 0],
+    [1, '1.30', 'MO PRODUCCION CEBOLLA',          1, 1, 'resultado', 0],
+    [1, '1.35', 'MO PRODUCCION BROCOLI',          1, 1, 'resultado', 0],
+    [1, '1.40', 'MO PRODUCCION INDUSTRIA',        1, 1, 'resultado', 0],
+    [1, '1.50', 'ABONOS Y FERTILIZANTES',         1, 1, 'resultado', 1],
+    [1, '1.55', 'COMPRA DE SEMILLAS',             1, 1, 'resultado', 1],
+    [1, '1.60', 'PLANTINES - CONFECCION',         1, 1, 'resultado', 0],
+    [1, '1.65', 'INSUMOS',                        1, 1, 'resultado', 1],
+    [1, '1.70', 'CINTAS Y MANGUERAS',             1, 1, 'resultado', 1],
+    [1, '1.75', 'ALQUILER DE MAQUINARIA',         1, 1, 'resultado', 0],
+    [1, '1.80', 'Electricidad',                   1, 1, 'resultado', 0],
+    [1, '1.85', 'Combustibles y Lubricantes',     1, 1, 'resultado', 1],
+
+    // SECCION 2 — COSTO ASOCIADO A VENTAS - MERCADO
+    [2, '2.01', 'MO COSH Y EMP GENERAL',          1, 1, 'resultado', 1],
+    [2, '2.05', 'MO COSH Y EMP UVA',              1, 1, 'resultado', 0],
+    [2, '2.10', 'MO COSH Y EMP MELON',            1, 1, 'resultado', 0],
+    [2, '2.15', 'MO COSH Y EMP MELON TARDIO',     1, 1, 'resultado', 0],
+    [2, '2.20', 'MO COSH Y EMP DAMASCO',          1, 1, 'resultado', 0],
+    [2, '2.25', 'MO COSH Y EMP CEBOLLA',          1, 1, 'resultado', 0],
+    [2, '2.40', 'ENVASES',                        1, 1, 'resultado', 0],
+    [2, '2.45', 'INSUMOS EMPAQUE',                1, 1, 'resultado', 0],
+    [2, '2.50', 'CUADRILLAS EMPAQUE',             1, 1, 'resultado', 0],
+    [2, '2.55', 'ALQUILER MAQUINARIA EMPAQUE',    1, 1, 'resultado', 0],
+    [2, '2.60', 'REPARACION Y MANT. EMPAQUE',     1, 1, 'resultado', 0],
+    [2, '2.70', 'Fletes',                         1, 1, 'resultado', 0],
+    [2, '2.75', 'Fletes de Importacion',          1, 1, 'resultado', 0],
+
+    // SECCION 3 — COSTO ASOCIADO A VENTAS - INDUSTRIA
+    [3, '3.01', 'MO COSH TOMATE INDUSTRIA',       1, 1, 'resultado', 0],
+    [3, '3.05', 'COSECHA MEC Y GASTOS INDUSTRIA', 1, 1, 'resultado', 0],
+
+    // SECCION 4 — COSTOS FIJOS
+    [4, '4.01', 'MO GENERALES',                       0, 0, 'resultado', 0],
+    [4, '4.05', 'CUADRILLAS',                         0, 0, 'resultado', 0],
+    [4, '4.10', 'HONORARIOS',                         0, 0, 'resultado', 0],
+    [4, '4.15', 'CONTRIBUCIONES SOCIALES',            0, 0, 'resultado', 0],
+    [4, '4.20', 'ART',                                0, 0, 'resultado', 0],
+    [4, '4.25', 'Contribucion Renatre',               0, 0, 'resultado', 0],
+    [4, '4.30', 'Seguro colectivo de vida',           0, 0, 'resultado', 0],
+    [4, '4.35', 'Indemnizaciones y Despidos',         0, 0, 'resultado', 0],
+    [4, '4.40', 'SEGUROS',                            0, 0, 'resultado', 0],
+    [4, '4.45', 'ALQUILER FINCAS',                    0, 0, 'resultado', 0],
+    [4, '4.50', 'GASTOS REPARACION Y MANTENIMIENTO',  0, 0, 'resultado', 0],
+    [4, '4.55', 'Gastos mantenimiento vehiculos',     0, 0, 'resultado', 0],
+    [4, '4.60', 'Gasto Hidraulica',                   0, 0, 'resultado', 0],
+    [4, '4.65', 'GASTOS GENERALES',                   0, 0, 'resultado', 0],
+    [4, '4.70', 'GASTOS OFICINA',                     0, 0, 'resultado', 0],
+    [4, '4.75', 'Gastos Articulos de limpieza',       0, 0, 'resultado', 0],
+    [4, '4.80', 'Gastos Movilidad y Viaticos',        0, 0, 'resultado', 0],
+    [4, '4.85', 'Conceptos No Gravados',              0, 0, 'resultado', 0],
+    [4, '4.90', 'Gastos Varios',                      0, 0, 'resultado', 0],
+
+    // SECCION 5 — COSTOS FINANCIEROS
+    [5, '5.01', 'Interes Prestam p/ capital de Trab', 0, 0, 'resultado', 0],
+    [5, '5.05', 'Interes Prestamos p/ Inversiones',   0, 0, 'resultado', 0],
+    [5, '5.10', 'Intereses por Descubierto',          0, 0, 'resultado', 0],
+    [5, '5.15', 'Intereses dsto Valores',             0, 0, 'resultado', 0],
+    [5, '5.20', 'Intereses Resarcitorios',            0, 0, 'resultado', 0],
+    [5, '5.25', 'Intereses Planes de Pagos Afip',     0, 0, 'resultado', 0],
+    [5, '5.30', 'Gastos de Financiacion',             0, 0, 'resultado', 0],
+    [5, '5.35', 'Gastos Bancarios',                   0, 0, 'resultado', 0],
+    [5, '5.40', 'Gastos Bancarios Cierre de Cam',     0, 0, 'resultado', 0],
+    [5, '5.45', 'Comision x Nominadas pago Impor',    0, 0, 'resultado', 0],
+    [5, '5.50', 'Fondo Comun Inver - Santander',      0, 0, 'resultado', 0],
+
+    // SECCION 6 — COSTOS IMPOSITIVOS
+    [6, '6.01', 'Imp. Sellos',                                     0, 0, 'resultado', 0],
+    [6, '6.05', 'Impuesto sobre los Ingresos Br',                  0, 0, 'resultado', 0],
+    [6, '6.10', 'Impuesto pais',                                   0, 0, 'resultado', 0],
+    [6, '6.15', 'Adicional LH',                                    0, 0, 'resultado', 0],
+    [6, '6.20', 'Gasto Aduanero - Arancel ss extraor',             0, 0, 'resultado', 0],
+    [6, '6.25', 'IMPUESTO INMOBILIARIO',                           0, 0, 'resultado', 0],
+    [6, '6.30', 'Patentes',                                        0, 0, 'resultado', 0],
+    [6, '6.35', 'Tasa Maria',                                      0, 0, 'resultado', 0],
+    [6, '6.40', 'Multas Afip',                                     0, 0, 'resultado', 0],
+    [6, '6.45', 'Detraccion art 23 ley 27541 / Dto 438-23',        0, 0, 'resultado', 0],
+    [6, '6.50', 'Desc obtenidos IIBB',                             0, 0, 'resultado', 0],
+    [6, '6.55', 'Decreto 814',                                     0, 0, 'resultado', 0],
+    [6, '6.60', 'VENTAS',                                          0, 0, 'resultado', 0],
+    [6, '6.65', 'DDJJ IGA 2024',                                   0, 0, 'resultado', 0],
+    [6, '6.70', 'BIENES ACCIONES Y PARTICIPACIONES 2024',          0, 0, 'resultado', 0],
+
+    // SECCION 7 — INVERSIONES (patrimonial)
+    [7, '7.01', 'INVERSIONES',                                     0, 0, 'patrimonial', 0],
+  ];
+
+  const insCuenta = db.prepare(`
+    INSERT INTO pa_cuentas
+      (codigo, nombre, seccion_id, tipo, permite_lote, permite_campania, es_sistema, orden, activo)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)
+  `);
+
+  let orden = 0;
+  const tx = db.transaction(() => {
+    for (const [seccion, codigo, nombre, lote, camp, tipo, sistema] of cuentas) {
+      orden += 10;
+      insCuenta.run(codigo, nombre, seccionIds[seccion], tipo, lote, camp, sistema, orden);
+    }
+  });
+  tx();
+
+  console.log(`[PA] Plan de cuentas: ${secciones.length} secciones + ${cuentas.length} cuentas cargadas`);
+})();
+
 export { db };
 export default db;
