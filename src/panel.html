@@ -5793,6 +5793,33 @@ if(_inpGondola) _inpGondola.addEventListener('keydown', function(e){
 <!-- ── JS PA ──────────────────────────────────────────────────── -->
 <script>
 var PA={campañas:[],sectores:[],insumos:[],lotes:[],compN:0,ordN:0,ordenActual:null};
+
+// Paleta global de cultivos — usada por calendario (tabla y mapa), modal de orden,
+// resúmenes, etc. Antes vivía local en paLoadCalendario, lo que causaba
+// ReferenceError al usarse desde otros scopes (como el mapa del calendario).
+var PA_CULT_COLOR = {
+  'Damasco':         {bg:'#fed7aa',fg:'#9a3412'},
+  'Durazno':         {bg:'#ffedd5',fg:'#c2410c'},
+  'Ciruela':         {bg:'#fce7f3',fg:'#9d174d'},
+  'Melón':           {bg:'#fef08a',fg:'#713f12'},
+  'Brócoli':         {bg:'#bbf7d0',fg:'#14532d'},
+  'Cebolla':         {bg:'#d6c5a0',fg:'#5c3d0a'},
+  'Uva Superior':    {bg:'#e9d5ff',fg:'#6b21a8'},
+  'Uva Red Globe':   {bg:'#ddd6fe',fg:'#4c1d95'},
+  'Uva Cardinal':    {bg:'#c4b5fd',fg:'#3b0764'},
+  'Uva Cereza':      {bg:'#f3e8ff',fg:'#6b21a8'},
+  'Uva Victoria':    {bg:'#a78bfa',fg:'#2e1065'},
+  'Tomate Industria':{bg:'#fecaca',fg:'#991b1b'},
+  'Ajo':             {bg:'#f3e8ff',fg:'#6b21a8'},
+  'Papa':            {bg:'#fef3c7',fg:'#92400e'},
+  'Zapallo':         {bg:'#fed7aa',fg:'#9a3412'},
+  'Barbecho':        {bg:'#f1f5f9',fg:'#64748b'},
+  'Sin uso':         {bg:'#f8fafc',fg:'#94a3b8'},
+  'Sin riego':       {bg:'#dbeafe',fg:'#1e40af'},
+  'Mejor. Suelo':    {bg:'#e7d6b6',fg:'#6b4423'}
+};
+function cultColor(c){ return PA_CULT_COLOR[c] || {bg:'#e0f2fe',fg:'#075985'}; }
+
 function paF(url,opts){return fetch(url,opts).then(function(r){return r.json();});}
 function paMoney(n){return'$'+Math.round(n||0).toLocaleString('es-AR');}
 function paFecha(s){if(!s)return'—';var p=s.slice(0,10).split('-');return p[2]+'/'+p[1]+'/'+p[0];}
@@ -5864,29 +5891,7 @@ function paLoadCalendario(){
     {key:'2021/22',  label:'2021/22',  tipo:'verano'},
   ];
 
-  // Colores por cultivo
-  var CULT_COLOR = {
-    'Damasco':         {bg:'#fed7aa',fg:'#9a3412'},   // naranja
-    'Durazno':         {bg:'#ffedd5',fg:'#c2410c'},   // naranja suave
-    'Melón':           {bg:'#fef08a',fg:'#713f12'},   // amarillo
-    'Brócoli':         {bg:'#bbf7d0',fg:'#14532d'},   // verde
-    'Cebolla':         {bg:'#d6c5a0',fg:'#5c3d0a'},   // marrón
-    'Uva Superior':    {bg:'#e9d5ff',fg:'#6b21a8'},
-    'Uva Red Globe':   {bg:'#ddd6fe',fg:'#4c1d95'},
-    'Uva Cardinal':    {bg:'#c4b5fd',fg:'#3b0764'},
-    'Uva Cereza':      {bg:'#f3e8ff',fg:'#6b21a8'},
-    'Uva Victoria':     {bg:'#a78bfa',fg:'#2e1065'},
-    
-    'Tomate Industria':{bg:'#fecaca',fg:'#991b1b'},   // rojo
-    'Ajo':             {bg:'#f3e8ff',fg:'#6b21a8'},
-    'Papa':            {bg:'#fef3c7',fg:'#92400e'},
-    'Zapallo':         {bg:'#fed7aa',fg:'#9a3412'},
-    'Barbecho':        {bg:'#f1f5f9',fg:'#64748b'},
-    'Sin uso':         {bg:'#f8fafc',fg:'#94a3b8'},
-    'Sin riego':       {bg:'#dbeafe',fg:'#1e40af'},   // azul, sin agua
-    'Mejor. Suelo':    {bg:'#e7d6b6',fg:'#6b4423'},   // tierra, suelo en recuperación
-  };
-  function cultColor(c){return CULT_COLOR[c]||{bg:'#e0f2fe',fg:'#075985'};}
+  // Colores por cultivo: usan la paleta global PA_CULT_COLOR / cultColor()
 
   paF('/api/pa/lotes').then(function(r){
     var lotes=r.data||[];
