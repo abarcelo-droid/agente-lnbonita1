@@ -93,7 +93,7 @@ router.get('/lotes', requireAuth, (req, res) => {
     const data = db.prepare(query).all(...params);
     // Enriquecer con todos los cultivos por campaña
     const getCultivos = db.prepare(
-      "SELECT campaña, cultivo, mes_siembra, mes_cosecha, hectareas_sembradas FROM pa_cultivos_lote WHERE lote_id = ?"
+      "SELECT campaña, cultivo, mes_siembra, mes_cosecha, hectareas_sembradas, en_desarrollo, productividad_pct FROM pa_cultivos_lote WHERE lote_id = ?"
     );
     data.forEach(l => {
       l.cultivos = {};
@@ -102,7 +102,9 @@ router.get('/lotes', requireAuth, (req, res) => {
           cultivo: r.cultivo,
           mes_siembra: r.mes_siembra,
           mes_cosecha: r.mes_cosecha,
-          hectareas_sembradas: r.hectareas_sembradas
+          hectareas_sembradas: r.hectareas_sembradas,
+          en_desarrollo: r.en_desarrollo,
+          productividad_pct: r.productividad_pct
         };
       });
     });
@@ -122,14 +124,16 @@ router.get('/lotes/:id', requireAuth, (req, res) => {
     `).get(req.params.id);
     if (!lote) return res.status(404).json({ ok: false, error: 'Lote no encontrado' });
     // Traer todos los cultivos por campaña
-    const cultRows = db.prepare("SELECT campaña, cultivo, mes_siembra, mes_cosecha, hectareas_sembradas FROM pa_cultivos_lote WHERE lote_id = ?").all(req.params.id);
+    const cultRows = db.prepare("SELECT campaña, cultivo, mes_siembra, mes_cosecha, hectareas_sembradas, en_desarrollo, productividad_pct FROM pa_cultivos_lote WHERE lote_id = ?").all(req.params.id);
     lote.cultivos = {};
     cultRows.forEach(r => {
       lote.cultivos[r.campaña] = {
         cultivo: r.cultivo,
         mes_siembra: r.mes_siembra,
         mes_cosecha: r.mes_cosecha,
-        hectareas_sembradas: r.hectareas_sembradas
+        hectareas_sembradas: r.hectareas_sembradas,
+        en_desarrollo: r.en_desarrollo,
+        productividad_pct: r.productividad_pct
       };
     });
     res.json({ ok: true, data: lote });
@@ -138,14 +142,14 @@ router.get('/lotes/:id', requireAuth, (req, res) => {
 
 router.post('/lotes', requireAuth, (req, res) => {
   const db = getDb();
-  const { nombre, sector_id, finca, hectareas, poligono_maps, red_agua, notas, cultivos } = req.body;
+  const { nombre, sector_id, finca, hectareas, poligono_maps, red_agua, notas, año_plantacion, cultivos } = req.body;
   if (!nombre || !sector_id) return res.status(400).json({ ok: false, error: 'Nombre y sector requeridos' });
   try {
     const crearLote = db.transaction(() => {
       const r = db.prepare(`
-        INSERT INTO pa_lotes (nombre, sector_id, finca, hectareas, poligono_maps, red_agua, notas)
-        VALUES (?,?,?,?,?,?,?)
-      `).run(nombre, sector_id, finca||null, hectareas||0.5, poligono_maps||null, red_agua||null, notas||null);
+        INSERT INTO pa_lotes (nombre, sector_id, finca, hectareas, poligono_maps, red_agua, notas, año_plantacion)
+        VALUES (?,?,?,?,?,?,?,?)
+      `).run(nombre, sector_id, finca||null, hectareas||0.5, poligono_maps||null, red_agua||null, notas||null, año_plantacion||null);
       const loteId = r.lastInsertRowid;
       // Guardar cultivos por campaña si vienen
       if (cultivos && typeof cultivos === 'object') {
@@ -203,7 +207,7 @@ router.post('/lotes/importar', requireAuth, (req, res) => {
 // Asignar cultivo a un lote por campaña
 router.post('/lotes/cultivo', requireAuth, (req, res) => {
   const db = getDb();
-  const { lote_id, campaña, cultivo, es_perenne, mes_siembra, mes_cosecha, hectareas_sembradas } = req.body;
+  const { lote_id, campaña, cultivo, es_perenne, mes_siembra, mes_cosecha, hectareas_sembradas, en_desarrollo, productividad_pct } = req.body;
   if (!lote_id || !campaña) return res.status(400).json({ ok: false, error: 'lote_id y campaña requeridos' });
   try {
     if (!cultivo) {
@@ -215,15 +219,24 @@ router.post('/lotes/cultivo', requireAuth, (req, res) => {
         const n = parseFloat(hectareas_sembradas);
         if (!isNaN(n) && n > 0) haSemb = n;
       }
+      // en_desarrollo: 0/1; productividad_pct: 0-100 entero, NULL si en_desarrollo=0
+      const enDes = en_desarrollo ? 1 : 0;
+      let prodPct = null;
+      if (enDes && productividad_pct !== undefined && productividad_pct !== null && productividad_pct !== '') {
+        const p = parseInt(productividad_pct, 10);
+        if (!isNaN(p)) prodPct = Math.max(0, Math.min(100, p));
+      }
       db.prepare(`
-        INSERT INTO pa_cultivos_lote (lote_id, cultivo, campaña, es_perenne, mes_siembra, mes_cosecha, hectareas_sembradas)
-        VALUES (?,?,?,?,?,?,?)
+        INSERT INTO pa_cultivos_lote (lote_id, cultivo, campaña, es_perenne, mes_siembra, mes_cosecha, hectareas_sembradas, en_desarrollo, productividad_pct)
+        VALUES (?,?,?,?,?,?,?,?,?)
         ON CONFLICT(lote_id, campaña) DO UPDATE SET
           cultivo=excluded.cultivo, es_perenne=excluded.es_perenne,
           mes_siembra=excluded.mes_siembra, mes_cosecha=excluded.mes_cosecha,
-          hectareas_sembradas=excluded.hectareas_sembradas
+          hectareas_sembradas=excluded.hectareas_sembradas,
+          en_desarrollo=excluded.en_desarrollo,
+          productividad_pct=excluded.productividad_pct
       `).run(lote_id, cultivo, campaña, es_perenne ? 1 : 0,
-             mes_siembra || null, mes_cosecha || null, haSemb);
+             mes_siembra || null, mes_cosecha || null, haSemb, enDes, prodPct);
     }
     res.json({ ok: true });
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
@@ -231,11 +244,20 @@ router.post('/lotes/cultivo', requireAuth, (req, res) => {
 
 router.patch('/lotes/:id', requireAuth, (req, res) => {
   const db = getDb();
-  const { nombre, hectareas, activo, notas, finca, poligono_maps, red_agua } = req.body;
+  const { nombre, hectareas, activo, notas, finca, poligono_maps, red_agua, año_plantacion } = req.body;
   try {
     const cur = db.prepare("SELECT * FROM pa_lotes WHERE id=?").get(req.params.id);
     if (!cur) return res.status(404).json({ ok: false, error: 'Lote no encontrado' });
-    db.prepare(`UPDATE pa_lotes SET nombre=?, hectareas=?, activo=?, notas=?, finca=?, poligono_maps=?, red_agua=? WHERE id=?`)
+    // año_plantacion: null explícito permitido (limpia el campo); undefined deja como estaba
+    let anioPlant = cur.año_plantacion;
+    if (año_plantacion !== undefined) {
+      if (año_plantacion === null || año_plantacion === '') anioPlant = null;
+      else {
+        const n = parseInt(año_plantacion, 10);
+        anioPlant = (!isNaN(n) && n > 1900 && n < 2200) ? n : null;
+      }
+    }
+    db.prepare(`UPDATE pa_lotes SET nombre=?, hectareas=?, activo=?, notas=?, finca=?, poligono_maps=?, red_agua=?, año_plantacion=? WHERE id=?`)
       .run(
         nombre||cur.nombre, hectareas||cur.hectareas,
         activo!==undefined?activo:cur.activo,
@@ -243,6 +265,7 @@ router.patch('/lotes/:id', requireAuth, (req, res) => {
         finca!==undefined?finca:cur.finca,
         poligono_maps!==undefined?poligono_maps:cur.poligono_maps,
         red_agua!==undefined?red_agua:cur.red_agua,
+        anioPlant,
         req.params.id
       );
     res.json({ ok: true });

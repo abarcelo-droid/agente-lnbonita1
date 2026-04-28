@@ -5676,6 +5676,10 @@ if(_inpGondola) _inpGondola.addEventListener('keydown', function(e){
     </div>
     <div class="fl ff"><label>Polígono Google Maps</label><input id="pa-cult-edit-mapa" placeholder="https://maps.google.com/..."></div>
     <div class="fl ff"><label>Notas</label><textarea id="pa-cult-edit-notas" rows="2"></textarea></div>
+    <div class="fl" id="pa-cult-edit-anioplant-cont" style="display:none">
+      <label title="Solo aplica a lotes frutales">🌳 Año de plantación</label>
+      <input type="number" id="pa-cult-edit-anioplant" step="1" min="1900" max="2200" placeholder="Ej: 2018">
+    </div>
   </div>
   <!-- Cultivos por campaña -->
   <div style="font-size:12px;font-weight:700;color:var(--burg);text-transform:uppercase;letter-spacing:.06em;border-top:1px solid var(--bor);padding-top:14px;margin-bottom:10px">
@@ -5848,6 +5852,11 @@ var PA_CULT_EMOJI = {
   'Mejor. Suelo':    '🌱'
 };
 function cultEmoji(c){ return PA_CULT_EMOJI[c] || '🌿'; }
+
+// Lista de cultivos frutales — usada para mostrar/ocultar campos de
+// "Año de plantación" y "En desarrollo" en el modal de editar lote.
+var PA_FRUTALES = ['Uva Superior','Uva Red Globe','Uva Cardinal','Uva Cereza','Uva Victoria','Damasco','Durazno','Ciruela'];
+function esFrutal(c){ return PA_FRUTALES.indexOf(c) !== -1; }
 
 function paF(url,opts){return fetch(url,opts).then(function(r){return r.json();});}
 function paMoney(n){return'$'+Math.round(n||0).toLocaleString('es-AR');}
@@ -6174,10 +6183,22 @@ function paLoadCalendario(){
             haInfo = '<div style="font-size:9px;margin-top:1px;font-weight:700;opacity:.85">'
               + parseFloat(hsValues[0]).toFixed(1) + '/' + totalLote.toFixed(1) + ' ha</div>';
           }
+          // En desarrollo: mostrar "🌱 dev N%" si todas las celdas del grupo coinciden
+          var desInfo = '';
+          var bordeExtra = '';
+          var edValues = g.celdas.map(function(x){ return x.cd && x.cd.en_desarrollo ? 1 : 0; });
+          var ppValues = g.celdas.map(function(x){ return x.cd && x.cd.productividad_pct != null ? parseInt(x.cd.productividad_pct,10) : null; });
+          var edConsistente = edValues.every(function(v){ return v === edValues[0]; });
+          var ppConsistente = ppValues.every(function(v){ return v === ppValues[0]; });
+          if (edConsistente && edValues[0] === 1 && ppConsistente) {
+            var pctTxt = ppValues[0] != null ? ppValues[0]+'%' : 'sin %';
+            desInfo = '<div style="font-size:9px;margin-top:1px;font-weight:700;background:rgba(255,255,255,.45);border-radius:3px;padding:1px 4px;display:inline-block">🌱 desarr. '+pctTxt+'</div>';
+            bordeExtra = ';border:1.5px dashed '+col.fg;
+          }
           var spanAttr = g.span > 1 ? ' colspan="'+g.span+'"' : '';
           if (cult) {
             html += '<td'+spanAttr+' style="padding:3px 4px;text-align:center;'+bordeCelda+';background:'+bgCelda+'">'
-              + '<div style="background:'+col.bg+';color:'+col.fg+';border-radius:5px;padding:4px 5px;font-size:11px;font-weight:600;cursor:pointer;line-height:1.3;white-space:normal" onclick="paEditarCultivo('+l.id+',\''+l.nombre.replace(/'/g,"\\'")+'\')">'+cult+haInfo+meses+'</div>'
+              + '<div style="background:'+col.bg+';color:'+col.fg+';border-radius:5px;padding:4px 5px;font-size:11px;font-weight:600;cursor:pointer;line-height:1.3;white-space:normal'+bordeExtra+'" onclick="paEditarCultivo('+l.id+',\''+l.nombre.replace(/'/g,"\\'")+'\')">'+cult+haInfo+desInfo+meses+'</div>'
               + '</td>';
           } else {
             // Vacío: cada columna queda separada (no tiene sentido fusionar vacíos)
@@ -6268,6 +6289,16 @@ function paEditarCultivo(loteId,nombre){
     document.getElementById('pa-cult-edit-agua').value=l.red_agua||'';
     document.getElementById('pa-cult-edit-mapa').value=l.poligono_maps||'';
     document.getElementById('pa-cult-edit-notas').value=l.notas||'';
+    document.getElementById('pa-cult-edit-anioplant').value=l.año_plantacion||'';
+    // Mostrar campo "Año de plantación" si el lote tiene algún cultivo frutal en alguna campaña
+    var tieneFrutal=false;
+    if(l.cultivos){
+      Object.values(l.cultivos).forEach(function(cd){
+        var c=typeof cd==='string'?cd:(cd&&cd.cultivo);
+        if(esFrutal(c)) tieneFrutal=true;
+      });
+    }
+    document.getElementById('pa-cult-edit-anioplant-cont').style.display=tieneFrutal?'':'none';
     // Construir grid de cultivos en orden intercalado
     var campOrdV=['2021/22','Inv 2022','2022/23','Inv 2023','2023/24','Inv 2024','2024/25','Inv 2025','2025/26','Inv 2026','2026/27'];
     // Ordenar todas las campañas según el orden correcto
@@ -6290,6 +6321,8 @@ function paEditarCultivo(loteId,nombre){
       var ms=document.getElementById('pa-ms-'+row.key);if(ms&&row.msVal)ms.value=row.msVal;
       var mc=document.getElementById('pa-mc-'+row.key);if(mc&&row.mcVal)mc.value=row.mcVal;
       // hsVal ya quedó seteado en el value del input al construir el HTML
+      // Disparar toggle para que la fila "En desarrollo" se muestre/oculte según el cultivo
+      paToggleDesarrolloFrutal(row.key);
     });
     document.getElementById('pa-mb-cultivo').classList.add('on');
   });
@@ -6319,9 +6352,11 @@ function paBuildCampRowHTML(c, cultData, mostrarMeses) {
   var msVal   = cultData ? (cultData.mes_siembra || '') : '';
   var mcVal   = cultData ? (cultData.mes_cosecha || '') : '';
   var hsVal   = cultData && cultData.hectareas_sembradas != null ? cultData.hectareas_sembradas : '';
+  var edVal   = cultData && cultData.en_desarrollo ? 1 : 0;
+  var ppVal   = cultData && cultData.productividad_pct != null ? cultData.productividad_pct : '';
   // Solo mostrar input "ha sembradas" en campañas activas/futuras especificadas
   var permiteHaSemb = (c.nombre === '2026/27' || c.nombre === 'Inv 2026');
-  var html = '<div class="fl"><label>'+c.nombre+(c.activa?' ★':'')+'</label><select id="pa-ec-'+key+'">'+paCultivoOpts()+'</select></div>';
+  var html = '<div class="fl"><label>'+c.nombre+(c.activa?' ★':'')+'</label><select id="pa-ec-'+key+'" onchange="paToggleDesarrolloFrutal(\''+key+'\')">'+paCultivoOpts()+'</select></div>';
   if (mostrarMeses) {
     html += '<div class="fl"><label>Siembra</label><select id="pa-ms-'+key+'">'+paMesesOpts('Mes siembra')+'</select></div>';
     html += '<div class="fl"><label>Cosecha</label><select id="pa-mc-'+key+'">'+paMesesOpts('Mes cosecha')+'</select></div>';
@@ -6338,7 +6373,53 @@ function paBuildCampRowHTML(c, cultData, mostrarMeses) {
     html += '<div class="fl"><label title="Hectáreas efectivamente sembradas en esta campaña. Vacío = usar el total del lote.">Ha sembradas</label>'
       + '<input type="number" step="0.1" min="0" id="pa-hs-'+key+'" placeholder="(usar total del lote)" value="'+hsVal+'"></div>';
   }
-  return { html, key, cultVal, msVal, mcVal, hsVal };
+  // Fila extra "En desarrollo + %" — solo se muestra si el cultivo es frutal.
+  // Empieza oculta y se toggle desde paToggleDesarrolloFrutal según el select.
+  var edChecked = edVal ? ' checked' : '';
+  var ppHidden  = edVal ? '' : 'display:none';
+  var visFrutal = esFrutal(cultVal) ? '' : 'display:none';
+  html += '<div class="fl ff" id="pa-fd-'+key+'" style="'+visFrutal+';margin-top:-6px;padding:6px 8px;background:#faf5ff;border:1px dashed #c4b5fd;border-radius:6px;font-size:12px">'
+    + '<label style="display:flex;align-items:center;gap:6px;cursor:pointer;color:#6b21a8;font-weight:600">'
+    +   '<input type="checkbox" id="pa-ed-'+key+'"'+edChecked+' onchange="paToggleProdPct(\''+key+'\')" style="width:16px;height:16px;margin:0">'
+    +   '🌱 En desarrollo (no productivo al 100%)'
+    + '</label>'
+    + '<div id="pa-pp-cont-'+key+'" style="margin-top:6px;'+ppHidden+';display:'+(edVal?'flex':'none')+';align-items:center;gap:8px">'
+    +   '<label style="font-size:11px;color:#6b21a8;margin:0;font-weight:500">% productividad esperada:</label>'
+    +   '<input type="number" id="pa-pp-'+key+'" min="0" max="100" step="5" value="'+ppVal+'" placeholder="0-100" style="width:80px">'
+    +   '<span style="font-size:11px;color:#6b21a8">%</span>'
+    + '</div>'
+  + '</div>';
+  return { html, key, cultVal, msVal, mcVal, hsVal, edVal, ppVal };
+}
+
+// Toggle de la fila "En desarrollo" cuando cambia el cultivo del select
+function paToggleDesarrolloFrutal(key){
+  var sel = document.getElementById('pa-ec-'+key);
+  var cont = document.getElementById('pa-fd-'+key);
+  if(!sel || !cont) return;
+  var visible = esFrutal(sel.value);
+  cont.style.display = visible ? '' : 'none';
+  if (!visible) {
+    // Si el cultivo deja de ser frutal, des-tildar y limpiar para no persistir basura
+    var cb = document.getElementById('pa-ed-'+key);
+    if (cb) cb.checked = false;
+    var pp = document.getElementById('pa-pp-'+key);
+    if (pp) pp.value = '';
+    var ppC = document.getElementById('pa-pp-cont-'+key);
+    if (ppC) ppC.style.display = 'none';
+  }
+}
+
+// Toggle del input de % cuando se tilda/destilda "en desarrollo"
+function paToggleProdPct(key){
+  var cb = document.getElementById('pa-ed-'+key);
+  var ppC = document.getElementById('pa-pp-cont-'+key);
+  if (!cb || !ppC) return;
+  ppC.style.display = cb.checked ? 'flex' : 'none';
+  if (!cb.checked) {
+    var pp = document.getElementById('pa-pp-'+key);
+    if (pp) pp.value = '';
+  }
 }
 
 function paGuardarEdicionLote(){
@@ -6349,6 +6430,9 @@ function paGuardarEdicionLote(){
   var agua=document.getElementById('pa-cult-edit-agua').value;
   var mapa=document.getElementById('pa-cult-edit-mapa').value.trim();
   var notas=document.getElementById('pa-cult-edit-notas').value.trim();
+  var anioPlantInput=document.getElementById('pa-cult-edit-anioplant');
+  var anioPlantVal=anioPlantInput && anioPlantInput.value!=='' ? parseInt(anioPlantInput.value,10) : null;
+  if(anioPlantVal!=null && (isNaN(anioPlantVal) || anioPlantVal<1900 || anioPlantVal>2200)) anioPlantVal=null;
   if(!nombre)return toast('El nombre no puede estar vacío','er');
   // Recolectar cultivos de todos los selects pa-ec-*
   var cultivos={};
@@ -6359,23 +6443,40 @@ function paGuardarEdicionLote(){
       var ms=document.getElementById('pa-ms-'+key);
       var mc=document.getElementById('pa-mc-'+key);
       var hs=document.getElementById('pa-hs-'+key);
+      var ed=document.getElementById('pa-ed-'+key);
+      var pp=document.getElementById('pa-pp-'+key);
       // hectareas_sembradas: sólo se envía si el input existe (campañas habilitadas) y tiene valor
       var hsVal=null;
       if(hs && hs.value!==''){
         var hsNum=parseFloat(hs.value);
         if(!isNaN(hsNum) && hsNum>0) hsVal=hsNum;
       }
-      cultivos[c.nombre]={cultivo:sel.value||null,mes_siembra:ms?ms.value||null:null,mes_cosecha:mc?mc.value||null:null,hectareas_sembradas:hsVal};
+      // en_desarrollo + productividad_pct: solo aplican a frutales
+      var esF=esFrutal(sel.value);
+      var edVal=(esF && ed && ed.checked)?1:0;
+      var ppVal=null;
+      if(edVal && pp && pp.value!==''){
+        var ppNum=parseInt(pp.value,10);
+        if(!isNaN(ppNum)) ppVal=Math.max(0,Math.min(100,ppNum));
+      }
+      cultivos[c.nombre]={
+        cultivo:sel.value||null,
+        mes_siembra:ms?ms.value||null:null,
+        mes_cosecha:mc?mc.value||null:null,
+        hectareas_sembradas:hsVal,
+        en_desarrollo:edVal,
+        productividad_pct:ppVal
+      };
     }
   });
   // Guardar datos del lote
-  paF('/api/pa/lotes/'+loteId,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({nombre,finca,hectareas:ha,red_agua:agua||null,poligono_maps:mapa||null,notas})})
+  paF('/api/pa/lotes/'+loteId,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({nombre,finca,hectareas:ha,red_agua:agua||null,poligono_maps:mapa||null,notas,año_plantacion:anioPlantVal})})
     .then(function(r){
       if(!r.ok)return toast(r.error||'Error guardando lote','er');
       // Guardar cultivos por campaña
       var saves=Object.entries(cultivos).filter(function(e){return e[1].cultivo;}).map(function(e){
         var camp=e[0],cd=e[1];
-        return paF('/api/pa/lotes/cultivo',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({lote_id:loteId,campaña:camp,cultivo:cd.cultivo,es_perenne:['Uva Superior','Uva Red Globe','Uva Cardinal','Uva Cereza','Uva Victoria','Damasco','Durazno','Ciruela','Mejor. Suelo','Sin riego'].includes(cd.cultivo)?1:0,mes_siembra:cd.mes_siembra||null,mes_cosecha:cd.mes_cosecha||null,hectareas_sembradas:cd.hectareas_sembradas})});
+        return paF('/api/pa/lotes/cultivo',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({lote_id:loteId,campaña:camp,cultivo:cd.cultivo,es_perenne:['Uva Superior','Uva Red Globe','Uva Cardinal','Uva Cereza','Uva Victoria','Damasco','Durazno','Ciruela','Mejor. Suelo','Sin riego'].includes(cd.cultivo)?1:0,mes_siembra:cd.mes_siembra||null,mes_cosecha:cd.mes_cosecha||null,hectareas_sembradas:cd.hectareas_sembradas,en_desarrollo:cd.en_desarrollo,productividad_pct:cd.productividad_pct})});
       });
       Promise.all(saves).then(function(){
         toast('Lote actualizado');
@@ -8928,6 +9029,8 @@ function paCalRenderMapaCore() {
       // Cultivo en la campaña seleccionada
       var cultActual = '';
       var hsActual = null;
+      var enDesarrollo = false;
+      var prodPct = null;
       if (campañaNom && l.cultivos && l.cultivos[campañaNom]) {
         var cd = l.cultivos[campañaNom];
         if (typeof cd === 'string') {
@@ -8935,6 +9038,8 @@ function paCalRenderMapaCore() {
         } else {
           cultActual = cd.cultivo || '';
           hsActual = cd.hectareas_sembradas != null ? cd.hectareas_sembradas : null;
+          enDesarrollo = !!cd.en_desarrollo;
+          prodPct = cd.productividad_pct != null ? parseInt(cd.productividad_pct,10) : null;
         }
       }
       var displayCult = cultActual || 'Sin cultivo';
@@ -8949,18 +9054,26 @@ function paCalRenderMapaCore() {
       // Color: paleta del calendario (cultColor); si no hay cultivo, gris
       var col = cultActual ? cultColor(cultActual) : { bg:'#f1f5f9', fg:'#64748b' };
 
-      var layer = L.geoJSON(geo, {
-        style: {
-          color: col.fg,
-          weight: 2.5,
-          fillOpacity: 0.65,
-          fillColor: col.bg
-        }
-      });
+      // Estilo del polígono: dasheado si está "en desarrollo"
+      var polyStyle = {
+        color: col.fg,
+        weight: 2.5,
+        fillOpacity: enDesarrollo ? 0.45 : 0.65,
+        fillColor: col.bg
+      };
+      if (enDesarrollo) polyStyle.dashArray = '8,5';
+
+      var layer = L.geoJSON(geo, { style: polyStyle });
       layer._isPaCalPoly = true;
       layer.on('click', function(){ paEditarCultivo(l.id, l.nombre); });
+      var tooltipDev = enDesarrollo
+        ? '<br><span style="color:#a78bfa;font-weight:700">🌱 En desarrollo'+(prodPct!=null?' · '+prodPct+'% productividad':'')+'</span>'
+        : '';
+      var tooltipAnio = (l.año_plantacion && esFrutal(cultActual))
+        ? '<br><span style="color:#94a3b8;font-size:10px">Plantado en '+l.año_plantacion+'</span>'
+        : '';
       layer.bindTooltip(
-        '<strong>'+l.nombre+'</strong><br>'+(l.finca||'')+'<br>'+displayCult+' · '+haTxt+'<br><span style="color:#94a3b8;font-size:10px">Click para editar cultivo</span>',
+        '<strong>'+l.nombre+'</strong><br>'+(l.finca||'')+'<br>'+displayCult+' · '+haTxt+tooltipDev+tooltipAnio+'<br><span style="color:#94a3b8;font-size:10px">Click para editar cultivo</span>',
         { className:'pa-map-tooltip', sticky: true }
       );
       layer.addTo(PAMAP.calMap);
@@ -8976,9 +9089,13 @@ function paCalRenderMapaCore() {
         var lblBg = cultActual ? col.bg : '#f1f5f9';
         var lblFg = cultActual ? col.fg : '#64748b';
         var lblBorder = cultActual ? col.fg : '#94a3b8';
+        var lblBorderStyle = enDesarrollo ? 'dashed' : 'solid';
+        var devBadge = enDesarrollo
+          ? '<div style="font-weight:700;font-size:9px;margin-top:2px;background:rgba(255,255,255,.55);border-radius:3px;padding:1px 4px;display:inline-block">🌱 desarr.'+(prodPct!=null?' '+prodPct+'%':'')+'</div>'
+          : '';
         var labelHtml = '<div style="'
           + 'background:'+lblBg+';'
-          + 'border:1.5px solid '+lblBorder+';'
+          + 'border:1.5px '+lblBorderStyle+' '+lblBorder+';'
           + 'color:'+lblFg+';'
           + 'padding:3px 8px;'
           + 'border-radius:6px;'
@@ -8993,6 +9110,7 @@ function paCalRenderMapaCore() {
           + '<div style="font-size:14px;line-height:1">'+emoji+'</div>'
           + '<div style="font-weight:800;font-size:11px;margin-top:1px">'+displayCult+'</div>'
           + '<div style="font-weight:500;font-size:9px;opacity:.8;margin-top:1px">'+l.nombre+' · '+haTxt+'</div>'
+          + devBadge
         +'</div>';
         var marker = L.marker(centro, {
           icon: L.divIcon({ className:'pa-cal-label', html: labelHtml, iconSize:[1,1], iconAnchor:[0,0] }),

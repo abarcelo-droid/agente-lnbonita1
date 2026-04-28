@@ -310,6 +310,18 @@ export function getCampañaActiva() {
   } catch(e) { console.error('[PA] Error migrando pa_lotes activo:', e.message); }
 })();
 
+// ── MIGRACIÓN: año_plantacion en pa_lotes ──────────────────────────────────
+// Solo aplica a lotes con cultivo frutal. NULL = sin info.
+(function() {
+  try {
+    const cols = db.prepare("PRAGMA table_info(pa_lotes)").all().map(c => c.name);
+    if (!cols.includes('año_plantacion')) {
+      db.exec("ALTER TABLE pa_lotes ADD COLUMN año_plantacion INTEGER");
+      console.log("[PA] año_plantacion agregado en pa_lotes");
+    }
+  } catch(e) { console.error('[PA] Error migrando año_plantacion:', e.message); }
+})();
+
 // ── MIGRACIÓN: remito_foto_path en pa_compras ─────────────────────────────
 (function() {
   try {
@@ -1455,6 +1467,28 @@ db.exec(`
     }
   } catch(e) {
     console.warn('[PA] Error migrando hectareas_sembradas:', e.message);
+  }
+})();
+
+// ── MIGRACIÓN: en_desarrollo + productividad_pct en pa_cultivos_lote ──────
+// Solo aplica a frutales. en_desarrollo=1 indica que el lote no está al 100%
+// productivo en esa campaña. productividad_pct (0-100) es la expectativa
+// productiva relativa a un lote maduro. NULL/0 = maduro al 100%.
+(function migrarEnDesarrollo() {
+  try {
+    const existe = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='pa_cultivos_lote'").get();
+    if (!existe) return;
+    const cols = db.prepare("PRAGMA table_info(pa_cultivos_lote)").all().map(c => c.name);
+    if (!cols.includes('en_desarrollo')) {
+      db.exec("ALTER TABLE pa_cultivos_lote ADD COLUMN en_desarrollo INTEGER DEFAULT 0");
+      console.log("[PA] Columna en_desarrollo agregada en pa_cultivos_lote");
+    }
+    if (!cols.includes('productividad_pct')) {
+      db.exec("ALTER TABLE pa_cultivos_lote ADD COLUMN productividad_pct INTEGER");
+      console.log("[PA] Columna productividad_pct agregada en pa_cultivos_lote");
+    }
+  } catch(e) {
+    console.warn('[PA] Error migrando en_desarrollo/productividad_pct:', e.message);
   }
 })();
 
