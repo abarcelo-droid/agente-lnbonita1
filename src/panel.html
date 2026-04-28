@@ -5813,6 +5813,7 @@ var PA_CULT_COLOR = {
   'Uva Cereza':      {bg:'#f3e8ff',fg:'#6b21a8'},
   'Uva Victoria':    {bg:'#a78bfa',fg:'#2e1065'},
   'Tomate Industria':{bg:'#fecaca',fg:'#991b1b'},
+  'Tomate Mercado':  {bg:'#fda4af',fg:'#881337'},
   'Ajo':             {bg:'#f3e8ff',fg:'#6b21a8'},
   'Papa':            {bg:'#fef3c7',fg:'#92400e'},
   'Zapallo':         {bg:'#fed7aa',fg:'#9a3412'},
@@ -5835,6 +5836,7 @@ var PA_CULT_EMOJI = {
   'Papa':            '🥔',
   'Zapallo':         '🎃',
   'Tomate Industria':'🍅',
+  'Tomate Mercado':  '🍅',
   'Uva Superior':    '🍇',
   'Uva Red Globe':   '🍇',
   'Uva Cardinal':    '🍇',
@@ -6010,6 +6012,7 @@ function paLoadCalendario(){
       'Damasco':{bg:'#fed7aa',fg:'#9a3412'},'Durazno':{bg:'#ffedd5',fg:'#c2410c'},
       'Melón':{bg:'#fef08a',fg:'#713f12'},'Brócoli':{bg:'#bbf7d0',fg:'#14532d'},
       'Cebolla':{bg:'#d6c5a0',fg:'#5c3d0a'},'Tomate Industria':{bg:'#fecaca',fg:'#991b1b'},
+      'Tomate Mercado':{bg:'#fda4af',fg:'#881337'},
       'Ajo':{bg:'#f3e8ff',fg:'#6b21a8'},'Papa':{bg:'#fef3c7',fg:'#92400e'},
       'Zapallo':{bg:'#fed7aa',fg:'#9a3412'},
       'Mejor. Suelo':{bg:'#e7d6b6',fg:'#6b4423'},
@@ -6293,7 +6296,7 @@ function paEditarCultivo(loteId,nombre){
 }
 
 function paCultivoOpts(){
-  return'<option value="">—</option><optgroup label="Frutales"><option value="Uva Superior">Uva Superior</option><option value="Uva Red Globe">Uva Red Globe</option><option value="Uva Cardinal">Uva Cardinal</option><option value="Uva Cereza">Uva Cereza</option><option value="Uva Victoria">Uva Victoria</option><option value="Damasco">Damasco</option><option value="Durazno">Durazno</option><option value="Ciruela">Ciruela</option></optgroup><optgroup label="Chacra Mercado"><option value="Melón">Melón</option><option value="Cebolla">Cebolla</option><option value="Brócoli">Brócoli</option><option value="Ajo">Ajo</option><option value="Papa">Papa</option><option value="Zapallo">Zapallo</option></optgroup><optgroup label="Chacra Industria"><option value="Tomate Industria">Tomate Industria</option></optgroup><optgroup label="Recuperación / Sin producción"><option value="Mejor. Suelo">Mejor. Suelo</option><option value="Barbecho">Barbecho</option><option value="Sin uso">Sin uso</option><option value="Sin riego">Sin riego</option></optgroup>';
+  return'<option value="">—</option><optgroup label="Frutales"><option value="Uva Superior">Uva Superior</option><option value="Uva Red Globe">Uva Red Globe</option><option value="Uva Cardinal">Uva Cardinal</option><option value="Uva Cereza">Uva Cereza</option><option value="Uva Victoria">Uva Victoria</option><option value="Damasco">Damasco</option><option value="Durazno">Durazno</option><option value="Ciruela">Ciruela</option></optgroup><optgroup label="Chacra Mercado"><option value="Melón">Melón</option><option value="Cebolla">Cebolla</option><option value="Brócoli">Brócoli</option><option value="Ajo">Ajo</option><option value="Papa">Papa</option><option value="Zapallo">Zapallo</option><option value="Tomate Mercado">Tomate Mercado</option></optgroup><optgroup label="Chacra Industria"><option value="Tomate Industria">Tomate Industria</option></optgroup><optgroup label="Recuperación / Sin producción"><option value="Mejor. Suelo">Mejor. Suelo</option><option value="Barbecho">Barbecho</option><option value="Sin uso">Sin uso</option><option value="Sin riego">Sin riego</option></optgroup>';
 }
 
 function paMesesOpts(label){
@@ -7468,7 +7471,7 @@ function paAbrirNuevoLote(){
   function paRenderCampañasModal(campañas) {
     var campOrd=['2021/22','Inv 2022','2022/23','Inv 2023','2023/24','Inv 2024','2024/25','Inv 2025','2025/26','Inv 2026','2026/27'];
     var campDisp=campañas.slice().sort(function(a,b){return campOrd.indexOf(a.nombre)-campOrd.indexOf(b.nombre);});
-    var cultivoOpts='<option value="">—</option><optgroup label="Frutales"><option value="Uva Superior">Uva Superior</option><option value="Uva Red Globe">Uva Red Globe</option><option value="Uva Cardinal">Uva Cardinal</option><option value="Uva Cereza">Uva Cereza</option><option value="Uva Victoria">Uva Victoria</option><option value="Damasco">Damasco</option><option value="Durazno">Durazno</option><option value="Ciruela">Ciruela</option></optgroup><optgroup label="Chacra Mercado"><option value="Melón">Melón</option><option value="Cebolla">Cebolla</option><option value="Brócoli">Brócoli</option><option value="Ajo">Ajo</option><option value="Papa">Papa</option><option value="Zapallo">Zapallo</option></optgroup><optgroup label="Chacra Industria"><option value="Tomate Industria">Tomate Industria</option></optgroup><option value="Barbecho">Barbecho</option><option value="Sin uso">Sin uso</option><option value="Sin riego">Sin riego</option>';
+    var cultivoOpts='<option value="">—</option><optgroup label="Frutales"><option value="Uva Superior">Uva Superior</option><option value="Uva Red Globe">Uva Red Globe</option><option value="Uva Cardinal">Uva Cardinal</option><option value="Uva Cereza">Uva Cereza</option><option value="Uva Victoria">Uva Victoria</option><option value="Damasco">Damasco</option><option value="Durazno">Durazno</option><option value="Ciruela">Ciruela</option></optgroup><optgroup label="Chacra Mercado"><option value="Melón">Melón</option><option value="Cebolla">Cebolla</option><option value="Brócoli">Brócoli</option><option value="Ajo">Ajo</option><option value="Papa">Papa</option><option value="Zapallo">Zapallo</option><option value="Tomate Mercado">Tomate Mercado</option></optgroup><optgroup label="Chacra Industria"><option value="Tomate Industria">Tomate Industria</option></optgroup><option value="Barbecho">Barbecho</option><option value="Sin uso">Sin uso</option><option value="Sin riego">Sin riego</option>';
     document.getElementById('pa-lot-cultivos-grid').innerHTML=campDisp.map(function(c){
       return'<div class="fl"><label>Temporada '+c.nombre+(c.activa?' ★':'')+' </label><select id="pa-lot-cult-'+c.nombre.replace('/','_').replace(/ /g,'_')+'">'+cultivoOpts+'</select></div>';
     }).join('');
@@ -8585,7 +8588,7 @@ var PAMAP = {
 var PA_MAP_COLORS = {
   'Uva Superior':'#a855f7','Uva Red Globe':'#7c3aed','Uva Cardinal':'#6d28d9','Uva Cereza':'#c084fc','Uva Victoria':'#7e22ce',
   'Damasco':'#f97316','Durazno':'#fb923c','Ciruela':'#a3a3a3',
-  'Melón':'#eab308','Brócoli':'#22c55e','Cebolla':'#a16207','Tomate Industria':'#dc2626',
+  'Melón':'#eab308','Brócoli':'#22c55e','Cebolla':'#a16207','Tomate Industria':'#dc2626','Tomate Mercado':'#e11d48',
   'Ajo':'#a855f7','Papa':'#eab308','Zapallo':'#f97316',
   'Mejor. Suelo':'#a16207','Barbecho':'#94a3b8','Sin uso':'#cbd5e1','Sin riego':'#3b82f6',
 };
