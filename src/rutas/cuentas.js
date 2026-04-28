@@ -359,5 +359,117 @@ router.get('/:id(\\d+)/log', (req, res) => {
   `).all(id);
   res.json({ ok: true, data: log });
 });
+// ═══════════════════════════════════════════════════════════════════════════
+// ASIENTOS CONTABLES — partida doble manual
+// ═══════════════════════════════════════════════════════════════════════════
 
+// GET /api/pa/cuentas/asientos?desde=&hasta=&anulados=1
+router.get('/asientos', (req, res) => {
+  const { desde, hasta } = req.query;
+  const incluirAnulados = req.query.anulados === '1';
+  const params = [];
+  let sql = `
+    SELECT a.*, u.nombre AS usuario_nombre
+      FROM pa_asientos a
+      LEFT JOIN usuarios u ON u.id = a.usuario_id
+     WHERE 1 = 1
+  `;
+  if (!incluirAnulados) { sql += ' AND a.anulado = 0'; }
+  if (desde) { sql += ' AND a.fecha >= ?'; params.push(desde); }
+  if (hasta) { sql += ' AND a.fecha <= ?'; params.push(hasta); }
+  sql += ' ORDER BY a.fecha DESC, a.id DESC LIMIT 200';
+  res.json({ ok: true, data: db.prepare(sql).all(...params) });
+});
+
+// GET /api/pa/cuentas/asientos/:id — detalle con líneas
+router.get('/asientos/:id(\\d+)', (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const asiento = db.prepare(`
+    SELECT a.*, u.nombre AS usuario_nombre
+      FROM pa_asientos a
+      LEFT JOIN usuarios u ON u.id = a.usuario_id
+     WHERE a.id = ?
+  `).get(id);
+  if (!asiento) return res.status(404).json({ error: 'asiento no encontrado' });
+  const lineas = db.prepare(`
+    SELECT l.*, c.codigo AS cuenta_codigo, c.nombre AS cuenta_nombre
+      FROM pa_asientos_lineas l
+      JOIN pa_cuentas c ON c.id = l.cuenta_id
+     WHERE l.asiento_id = ?
+     ORDER BY l.id
+  `).all(id);
+  res.json({ ok: true, data: { ...asiento, lineas } });
+});
+
+// POST /api/pa/cuentas/asientos — crear asiento
+router.post('/asientos', requireAdmin, (req, res) => {
+  const { fecha, descripcion, lineas } = req.body || {};
+
+  if (!descripcion) return res.status(400).json({ error: 'descripcion es requerida' });
+  if (!Array.isArray(lineas) || lineas.length < 2) {
+    return res.status(400).json({ error: 'el asiento debe tener al menos 2 líneas' });
+  }
+
+  // Validar partida doble: suma debe == suma haber
+  const totalDebe  = lineas.reduce((s, l) => s + (parseFloat(l.debe)  || 0), 0);
+  const totalHaber = lineas.reduce((s, l) => s + (parseFloat(l.haber) || 0), 0);
+  if (Math.abs(totalDebe - totalHaber) > 0.01) {
+    return res.status(400).json({
+      error: `partida doble no cuadra: debe=${totalDebe.toFixed(2)} haber=${totalHaber.toFixed(2)}`
+    });
+  }
+
+  // Validar que cada línea tenga cuenta válida
+  for (const l of lineas) {
+    if (!l.cuenta_id) return res.status(400).json({ error: 'cada línea debe tener cuenta_id' });
+    const c = db.prepare('SELECT id FROM pa_cuentas WHERE id = ? AND activo = 1').get(l.cuenta_id);
+    if (!c) return res.status(400).json({ error: `cuenta_id ${l.cuenta_id} no existe o está inactiva` });
+  }
+
+  try {
+    const tx = db.transaction(() => {
+      const r = db.prepare(`
+        INSERT INTO pa_asientos (fecha, descripcion, usuario_id)
+        VALUES (?, ?, ?)
+      `).run(
+        fecha || new Date().toISOString().slice(0, 10),
+        String(descripcion).trim(),
+        req._user?.id ?? null
+      );
+      const asientoId = r.lastInsertRowid;
+      const insLinea = db.prepare(`
+        INSERT INTO pa_asientos_lineas (asiento_id, cuenta_id, debe, haber, descripcion)
+        VALUES (?, ?, ?, ?, ?)
+      `);
+      for (const l of lineas) {
+        insLinea.run(
+          asientoId,
+          l.cuenta_id,
+          parseFloat(l.debe)  || 0,
+          parseFloat(l.haber) || 0,
+          l.descripcion ?? null
+        );
+      }
+      return asientoId;
+    });
+    const asientoId = tx();
+    res.json({ ok: true, id: asientoId });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /api/pa/cuentas/asientos/:id/anular
+router.post('/asientos/:id(\\d+)/anular', requireAdmin, (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const asiento = db.prepare('SELECT * FROM pa_asientos WHERE id = ?').get(id);
+  if (!asiento) return res.status(404).json({ error: 'asiento no encontrado' });
+  if (asiento.anulado) return res.status(400).json({ error: 'el asiento ya está anulado' });
+  db.prepare(`
+    UPDATE pa_asientos
+       SET anulado = 1, anulado_por = ?, anulado_en = datetime('now','localtime')
+     WHERE id = ?
+  `).run(req._user?.id ?? null, id);
+  res.json({ ok: true });
+});
 export default router;
