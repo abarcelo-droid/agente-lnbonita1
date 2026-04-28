@@ -5820,6 +5820,30 @@ var PA_CULT_COLOR = {
 };
 function cultColor(c){ return PA_CULT_COLOR[c] || {bg:'#e0f2fe',fg:'#075985'}; }
 
+// Emoji por cultivo — usado en labels del mapa, leyendas, etc.
+var PA_CULT_EMOJI = {
+  'Damasco':         '🍑',
+  'Durazno':         '🍑',
+  'Ciruela':         '🟣',
+  'Melón':           '🍈',
+  'Brócoli':         '🥦',
+  'Cebolla':         '🧅',
+  'Ajo':             '🧄',
+  'Papa':            '🥔',
+  'Zapallo':         '🎃',
+  'Tomate Industria':'🍅',
+  'Uva Superior':    '🍇',
+  'Uva Red Globe':   '🍇',
+  'Uva Cardinal':    '🍇',
+  'Uva Cereza':      '🍇',
+  'Uva Victoria':    '🍇',
+  'Barbecho':        '🌾',
+  'Sin uso':         '⚪',
+  'Sin riego':       '💧',
+  'Mejor. Suelo':    '🌱'
+};
+function cultEmoji(c){ return PA_CULT_EMOJI[c] || '🌿'; }
+
 function paF(url,opts){return fetch(url,opts).then(function(r){return r.json();});}
 function paMoney(n){return'$'+Math.round(n||0).toLocaleString('es-AR');}
 function paFecha(s){if(!s)return'—';var p=s.slice(0,10).split('-');return p[2]+'/'+p[1]+'/'+p[0];}
@@ -8887,8 +8911,8 @@ function paCalRenderMapaCore() {
       var layer = L.geoJSON(geo, {
         style: {
           color: col.fg,
-          weight: 2,
-          fillOpacity: 0.55,
+          weight: 2.5,
+          fillOpacity: 0.65,
           fillColor: col.bg
         }
       });
@@ -8900,13 +8924,35 @@ function paCalRenderMapaCore() {
       );
       layer.addTo(PAMAP.calMap);
 
-      // Label permanente con nombre + cultivo + ha en el centroide
+      // Label permanente con emoji + cultivo + lote + ha en el centroide.
+      // Diseño: fondo del color del cultivo (suave), borde y texto del color oscuro.
       var b = layer.getBounds();
       if (b.isValid()) {
         bounds.push(b);
         var centro = b.getCenter();
-        var labelHtml = '<div style="background:rgba(255,255,255,.92);border:1px solid '+col.fg+';color:'+col.fg+';padding:2px 7px;border-radius:5px;font-size:10px;font-weight:700;line-height:1.25;text-align:center;white-space:nowrap;box-shadow:0 1px 3px rgba(0,0,0,.18);pointer-events:none">'
-          +l.nombre+'<div style="font-weight:500;font-size:9px;opacity:.85">'+displayCult+' · '+haTxt+'</div></div>';
+        var emoji = cultActual ? cultEmoji(cultActual) : '·';
+        // Si no hay cultivo, usar tonos neutros
+        var lblBg = cultActual ? col.bg : '#f1f5f9';
+        var lblFg = cultActual ? col.fg : '#64748b';
+        var lblBorder = cultActual ? col.fg : '#94a3b8';
+        var labelHtml = '<div style="'
+          + 'background:'+lblBg+';'
+          + 'border:1.5px solid '+lblBorder+';'
+          + 'color:'+lblFg+';'
+          + 'padding:3px 8px;'
+          + 'border-radius:6px;'
+          + 'font-size:11px;'
+          + 'line-height:1.2;'
+          + 'text-align:center;'
+          + 'white-space:nowrap;'
+          + 'box-shadow:0 1px 4px rgba(0,0,0,.25);'
+          + 'pointer-events:none;'
+          + 'font-family:system-ui,sans-serif;'
+        +'">'
+          + '<div style="font-size:14px;line-height:1">'+emoji+'</div>'
+          + '<div style="font-weight:800;font-size:11px;margin-top:1px">'+displayCult+'</div>'
+          + '<div style="font-weight:500;font-size:9px;opacity:.8;margin-top:1px">'+l.nombre+' · '+haTxt+'</div>'
+        +'</div>';
         var marker = L.marker(centro, {
           icon: L.divIcon({ className:'pa-cal-label', html: labelHtml, iconSize:[1,1], iconAnchor:[0,0] }),
           interactive: false,
