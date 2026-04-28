@@ -8803,13 +8803,19 @@ function paCalRenderMapa() {
 
   // SIEMPRE recargar /api/pa/lotes (no confiar en PA.lotes, que puede estar
   // incompleto si el user filtró por finca en otra pestaña, o desactualizado).
-  // El endpoint es rápido (SQLite local) y garantiza que veamos todos los polígonos.
   paF('/api/pa/lotes').then(function(r){
     PA.lotes = r.data || [];
+    var conPoly = PA.lotes.filter(function(l){ return l.poligono_geojson; });
+    console.log('[paCalRenderMapa] Lotes totales:', PA.lotes.length,
+                '| Con polígono:', conPoly.length,
+                '| Sin polígono:', PA.lotes.length - conPoly.length);
+    if (conPoly.length === 0 && PA.lotes.length > 0) {
+      console.warn('[paCalRenderMapa] Ningún lote trae poligono_geojson. Muestra de lote:',
+                   PA.lotes[0]);
+    }
     paCalRenderMapaCore();
   }).catch(function(e){
     console.warn('Error recargando lotes para mapa calendario:', e);
-    // Fallback: usar lo que haya en cache
     if (PA.lotes && PA.lotes.length) paCalRenderMapaCore();
   });
 }
@@ -8829,17 +8835,19 @@ function paCalRenderMapaCore() {
   var conPoly = (PA.lotes||[]).filter(function(l){ return l.poligono_geojson; });
   var sinPoly = (PA.lotes||[]).filter(function(l){ return !l.poligono_geojson; });
 
-  // Crear/limpiar mapa
-  if (!PAMAP.calMap) {
-    PAMAP.calMap = L.map('pa-cal-map', { zoomControl: true }).setView([-31.799506, -68.5617667], 17);
-    paAgregarCapas(PAMAP.calMap, 'hybrid');
-  } else {
-    PAMAP.calMap.eachLayer(function(layer){
-      if (layer._isPaCalPoly) PAMAP.calMap.removeLayer(layer);
-    });
-    (PAMAP.calLabels||[]).forEach(function(tt){ try { PAMAP.calMap.removeLayer(tt); } catch(e){} });
+  // Re-inicializar mapa siempre (garantiza dimensiones correctas, evita estados sucios).
+  // Si ya existe, lo destruimos y creamos uno nuevo.
+  if (PAMAP.calMap) {
+    try { PAMAP.calMap.remove(); } catch(e) { console.warn('Error destruyendo calMap previo:', e); }
+    PAMAP.calMap = null;
     PAMAP.calLabels = [];
   }
+  // El div tiene que estar visible (display:block) para que Leaflet calcule dimensiones bien.
+  var contMapa = document.getElementById('pa-cal-vista-mapa-cont');
+  if (contMapa) contMapa.style.display = 'block';
+  PAMAP.calMap = L.map('pa-cal-map', { zoomControl: true }).setView([-31.799506, -68.5617667], 17);
+  paAgregarCapas(PAMAP.calMap, 'hybrid');
+  PAMAP.calLabels = PAMAP.calLabels || [];
 
   var bounds = [];
   var cultivosUsados = {};
