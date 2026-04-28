@@ -93,12 +93,17 @@ router.get('/lotes', requireAuth, (req, res) => {
     const data = db.prepare(query).all(...params);
     // Enriquecer con todos los cultivos por campaña
     const getCultivos = db.prepare(
-      "SELECT campaña, cultivo, mes_siembra, mes_cosecha FROM pa_cultivos_lote WHERE lote_id = ?"
+      "SELECT campaña, cultivo, mes_siembra, mes_cosecha, hectareas_sembradas FROM pa_cultivos_lote WHERE lote_id = ?"
     );
     data.forEach(l => {
       l.cultivos = {};
       getCultivos.all(l.id).forEach(r => {
-        l.cultivos[r.campaña] = { cultivo: r.cultivo, mes_siembra: r.mes_siembra, mes_cosecha: r.mes_cosecha };
+        l.cultivos[r.campaña] = {
+          cultivo: r.cultivo,
+          mes_siembra: r.mes_siembra,
+          mes_cosecha: r.mes_cosecha,
+          hectareas_sembradas: r.hectareas_sembradas
+        };
       });
     });
     res.json({ ok: true, data });
@@ -117,9 +122,16 @@ router.get('/lotes/:id', requireAuth, (req, res) => {
     `).get(req.params.id);
     if (!lote) return res.status(404).json({ ok: false, error: 'Lote no encontrado' });
     // Traer todos los cultivos por campaña
-    const cultRows = db.prepare("SELECT campaña, cultivo, mes_siembra, mes_cosecha FROM pa_cultivos_lote WHERE lote_id = ?").all(req.params.id);
+    const cultRows = db.prepare("SELECT campaña, cultivo, mes_siembra, mes_cosecha, hectareas_sembradas FROM pa_cultivos_lote WHERE lote_id = ?").all(req.params.id);
     lote.cultivos = {};
-    cultRows.forEach(r => { lote.cultivos[r.campaña] = { cultivo: r.cultivo, mes_siembra: r.mes_siembra, mes_cosecha: r.mes_cosecha }; });
+    cultRows.forEach(r => {
+      lote.cultivos[r.campaña] = {
+        cultivo: r.cultivo,
+        mes_siembra: r.mes_siembra,
+        mes_cosecha: r.mes_cosecha,
+        hectareas_sembradas: r.hectareas_sembradas
+      };
+    });
     res.json({ ok: true, data: lote });
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
@@ -191,20 +203,27 @@ router.post('/lotes/importar', requireAuth, (req, res) => {
 // Asignar cultivo a un lote por campaña
 router.post('/lotes/cultivo', requireAuth, (req, res) => {
   const db = getDb();
-  const { lote_id, campaña, cultivo, es_perenne, mes_siembra, mes_cosecha } = req.body;
+  const { lote_id, campaña, cultivo, es_perenne, mes_siembra, mes_cosecha, hectareas_sembradas } = req.body;
   if (!lote_id || !campaña) return res.status(400).json({ ok: false, error: 'lote_id y campaña requeridos' });
   try {
     if (!cultivo) {
       db.prepare("DELETE FROM pa_cultivos_lote WHERE lote_id=? AND campaña=?").run(lote_id, campaña);
     } else {
+      // hectareas_sembradas: NULL si no viene o es <=0; valor numérico si viene válido
+      let haSemb = null;
+      if (hectareas_sembradas !== undefined && hectareas_sembradas !== null && hectareas_sembradas !== '') {
+        const n = parseFloat(hectareas_sembradas);
+        if (!isNaN(n) && n > 0) haSemb = n;
+      }
       db.prepare(`
-        INSERT INTO pa_cultivos_lote (lote_id, cultivo, campaña, es_perenne, mes_siembra, mes_cosecha)
-        VALUES (?,?,?,?,?,?)
+        INSERT INTO pa_cultivos_lote (lote_id, cultivo, campaña, es_perenne, mes_siembra, mes_cosecha, hectareas_sembradas)
+        VALUES (?,?,?,?,?,?,?)
         ON CONFLICT(lote_id, campaña) DO UPDATE SET
           cultivo=excluded.cultivo, es_perenne=excluded.es_perenne,
-          mes_siembra=excluded.mes_siembra, mes_cosecha=excluded.mes_cosecha
+          mes_siembra=excluded.mes_siembra, mes_cosecha=excluded.mes_cosecha,
+          hectareas_sembradas=excluded.hectareas_sembradas
       `).run(lote_id, cultivo, campaña, es_perenne ? 1 : 0,
-             mes_siembra || null, mes_cosecha || null);
+             mes_siembra || null, mes_cosecha || null, haSemb);
     }
     res.json({ ok: true });
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }

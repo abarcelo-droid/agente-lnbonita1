@@ -1425,5 +1425,38 @@ db.exec(`
   }
 })();
 
+// ── MIGRACIÓN: rename "Uva Vitoria" → "Uva Victoria" ──────────────────────
+// Idempotente: solo actualiza si encuentra registros con el nombre viejo.
+(function migrarRenameUvaVictoria() {
+  try {
+    const existe = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='pa_cultivos_lote'").get();
+    if (!existe) return;
+    const r = db.prepare("UPDATE pa_cultivos_lote SET cultivo = 'Uva Victoria' WHERE cultivo = 'Uva Vitoria'").run();
+    if (r.changes > 0) {
+      console.log(`[PA] Renombrados ${r.changes} cultivos: 'Uva Vitoria' → 'Uva Victoria'`);
+    }
+  } catch(e) {
+    console.warn('[PA] Error migrando rename Uva Victoria:', e.message);
+  }
+})();
+
+// ── MIGRACIÓN: hectareas_sembradas en pa_cultivos_lote ────────────────────
+// Permite override de las hectáreas del lote para una campaña específica
+// (ej: lote de 10ha pero solo se siembran 6ha de melón en 26/27).
+// NULL = usar lote.hectareas (comportamiento default histórico).
+(function migrarHectareasSembradas() {
+  try {
+    const existe = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='pa_cultivos_lote'").get();
+    if (!existe) return;
+    const cols = db.prepare("PRAGMA table_info(pa_cultivos_lote)").all().map(c => c.name);
+    if (!cols.includes('hectareas_sembradas')) {
+      db.exec("ALTER TABLE pa_cultivos_lote ADD COLUMN hectareas_sembradas REAL");
+      console.log("[PA] Columna hectareas_sembradas agregada en pa_cultivos_lote");
+    }
+  } catch(e) {
+    console.warn('[PA] Error migrando hectareas_sembradas:', e.message);
+  }
+})();
+
 export { db };
 export default db;

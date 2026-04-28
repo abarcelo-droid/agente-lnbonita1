@@ -5875,7 +5875,7 @@ function paLoadCalendario(){
     'Uva Red Globe':   {bg:'#ddd6fe',fg:'#4c1d95'},
     'Uva Cardinal':    {bg:'#c4b5fd',fg:'#3b0764'},
     'Uva Cereza':      {bg:'#f3e8ff',fg:'#6b21a8'},
-    'Uva Vitoria':     {bg:'#a78bfa',fg:'#2e1065'},
+    'Uva Victoria':     {bg:'#a78bfa',fg:'#2e1065'},
     
     'Tomate Industria':{bg:'#fecaca',fg:'#991b1b'},   // rojo
     'Ajo':             {bg:'#f3e8ff',fg:'#6b21a8'},
@@ -5931,8 +5931,10 @@ function paLoadCalendario(){
       // Recolectar cultivos del lote por campaña
       var perCamp = campañasIncluidas.map(function(cname){
         var cd = l.cultivos && l.cultivos[cname];
+        var cdObj = cd && typeof cd === 'object' ? cd : null;
         return {
           cultivo: cd ? (typeof cd === 'string' ? cd : cd.cultivo) : '',
+          hectareas_sembradas: cdObj ? cdObj.hectareas_sembradas : null,
           esInvierno: /^Inv \d{4}$/.test(cname)
         };
       });
@@ -5945,21 +5947,25 @@ function paLoadCalendario(){
       }
       paraContar.forEach(function(c){
         var cult = c.cultivo;
+        // Hectáreas efectivas: override si vino con valor válido, sino del lote
+        var ha = (c.hectareas_sembradas != null && c.hectareas_sembradas > 0)
+          ? c.hectareas_sembradas
+          : (l.hectareas || 0);
         if (cult === 'Sin riego') {
           // Categoría aparte: inversión a futuro (no produce, pero no es "sin uso")
-          if (c.esInvierno) haSinRiegoInv += (l.hectareas || 0);
-          else haSinRiegoVer += (l.hectareas || 0);
+          if (c.esInvierno) haSinRiegoInv += ha;
+          else haSinRiegoVer += ha;
         } else if (cult === 'Mejor. Suelo' || cult === 'Mejoramiento de Suelo') {
           // Categoría aparte: inversión a futuro (suelo en recuperación)
-          if (c.esInvierno) haMejorSueloInv += (l.hectareas || 0);
-          else haMejorSueloVer += (l.hectareas || 0);
+          if (c.esInvierno) haMejorSueloInv += ha;
+          else haMejorSueloVer += ha;
         } else if (!cult || cult === 'Barbecho' || cult === 'Sin uso') {
-          if (c.esInvierno) haSinUsoInv += (l.hectareas || 0);
-          else haSinUsoVer += (l.hectareas || 0);
+          if (c.esInvierno) haSinUsoInv += ha;
+          else haSinUsoVer += ha;
         } else {
-          haMap[cult] = (haMap[cult] || 0) + (l.hectareas || 0);
+          haMap[cult] = (haMap[cult] || 0) + ha;
         }
-        totalHa += (l.hectareas || 0);
+        totalHa += ha;
       });
     });
 
@@ -5968,7 +5974,7 @@ function paLoadCalendario(){
     var CULT_COLOR_R = {
       'Uva Superior':{bg:'#e9d5ff',fg:'#6b21a8'},'Uva Red Globe':{bg:'#ddd6fe',fg:'#4c1d95'},
       'Uva Cardinal':{bg:'#c4b5fd',fg:'#3b0764'},'Uva Cereza':{bg:'#f3e8ff',fg:'#6b21a8'},
-      'Uva Vitoria':{bg:'#a78bfa',fg:'#2e1065'},
+      'Uva Victoria':{bg:'#a78bfa',fg:'#2e1065'},
       'Damasco':{bg:'#fed7aa',fg:'#9a3412'},'Durazno':{bg:'#ffedd5',fg:'#c2410c'},
       'Melón':{bg:'#fef08a',fg:'#713f12'},'Brócoli':{bg:'#bbf7d0',fg:'#14532d'},
       'Cebolla':{bg:'#d6c5a0',fg:'#5c3d0a'},'Tomate Industria':{bg:'#fecaca',fg:'#991b1b'},
@@ -6124,10 +6130,19 @@ function paLoadCalendario(){
           if (ci.cd && ci.cd.mes_siembra && ci.cd.mes_cosecha) {
             meses = '<div style="font-size:9px;margin-top:2px;opacity:.75">'+MESES[ci.cd.mes_siembra-1]+' → '+MESES[ci.cd.mes_cosecha-1]+'</div>';
           }
+          // Hectáreas parciales: mostrar "X/Y ha" solo si todas las celdas del grupo coinciden en el mismo override
+          var haInfo = '';
+          var totalLote = parseFloat(l.hectareas) || 0;
+          var hsValues = g.celdas.map(function(x){ return x.cd && x.cd.hectareas_sembradas != null ? parseFloat(x.cd.hectareas_sembradas) : null; });
+          var hsConsistente = hsValues.every(function(v){ return v === hsValues[0]; });
+          if (hsConsistente && hsValues[0] != null && hsValues[0] > 0 && totalLote > 0 && Math.abs(hsValues[0] - totalLote) > 0.01) {
+            haInfo = '<div style="font-size:9px;margin-top:1px;font-weight:700;opacity:.85">'
+              + parseFloat(hsValues[0]).toFixed(1) + '/' + totalLote.toFixed(1) + ' ha</div>';
+          }
           var spanAttr = g.span > 1 ? ' colspan="'+g.span+'"' : '';
           if (cult) {
             html += '<td'+spanAttr+' style="padding:3px 4px;text-align:center;'+bordeCelda+';background:'+bgCelda+'">'
-              + '<div style="background:'+col.bg+';color:'+col.fg+';border-radius:5px;padding:4px 5px;font-size:11px;font-weight:600;cursor:pointer;line-height:1.3;white-space:normal" onclick="paEditarCultivo('+l.id+',\''+l.nombre.replace(/'/g,"\\'")+'\')">'+cult+meses+'</div>'
+              + '<div style="background:'+col.bg+';color:'+col.fg+';border-radius:5px;padding:4px 5px;font-size:11px;font-weight:600;cursor:pointer;line-height:1.3;white-space:normal" onclick="paEditarCultivo('+l.id+',\''+l.nombre.replace(/'/g,"\\'")+'\')">'+cult+haInfo+meses+'</div>'
               + '</td>';
           } else {
             // Vacío: cada columna queda separada (no tiene sentido fusionar vacíos)
@@ -6236,13 +6251,14 @@ function paEditarCultivo(loteId,nombre){
       var s=document.getElementById('pa-ec-'+row.key);if(s&&row.cultVal)s.value=row.cultVal;
       var ms=document.getElementById('pa-ms-'+row.key);if(ms&&row.msVal)ms.value=row.msVal;
       var mc=document.getElementById('pa-mc-'+row.key);if(mc&&row.mcVal)mc.value=row.mcVal;
+      // hsVal ya quedó seteado en el value del input al construir el HTML
     });
     document.getElementById('pa-mb-cultivo').classList.add('on');
   });
 }
 
 function paCultivoOpts(){
-  return'<option value="">—</option><optgroup label="Frutales"><option value="Uva Superior">Uva Superior</option><option value="Uva Red Globe">Uva Red Globe</option><option value="Uva Cardinal">Uva Cardinal</option><option value="Uva Cereza">Uva Cereza</option><option value="Uva Vitoria">Uva Vitoria</option><option value="Damasco">Damasco</option><option value="Durazno">Durazno</option><option value="Ciruela">Ciruela</option></optgroup><optgroup label="Chacra Mercado"><option value="Melón">Melón</option><option value="Cebolla">Cebolla</option><option value="Brócoli">Brócoli</option><option value="Ajo">Ajo</option><option value="Papa">Papa</option><option value="Zapallo">Zapallo</option></optgroup><optgroup label="Chacra Industria"><option value="Tomate Industria">Tomate Industria</option></optgroup><optgroup label="Recuperación / Sin producción"><option value="Mejor. Suelo">Mejor. Suelo</option><option value="Barbecho">Barbecho</option><option value="Sin uso">Sin uso</option><option value="Sin riego">Sin riego</option></optgroup>';
+  return'<option value="">—</option><optgroup label="Frutales"><option value="Uva Superior">Uva Superior</option><option value="Uva Red Globe">Uva Red Globe</option><option value="Uva Cardinal">Uva Cardinal</option><option value="Uva Cereza">Uva Cereza</option><option value="Uva Victoria">Uva Victoria</option><option value="Damasco">Damasco</option><option value="Durazno">Durazno</option><option value="Ciruela">Ciruela</option></optgroup><optgroup label="Chacra Mercado"><option value="Melón">Melón</option><option value="Cebolla">Cebolla</option><option value="Brócoli">Brócoli</option><option value="Ajo">Ajo</option><option value="Papa">Papa</option><option value="Zapallo">Zapallo</option></optgroup><optgroup label="Chacra Industria"><option value="Tomate Industria">Tomate Industria</option></optgroup><optgroup label="Recuperación / Sin producción"><option value="Mejor. Suelo">Mejor. Suelo</option><option value="Barbecho">Barbecho</option><option value="Sin uso">Sin uso</option><option value="Sin riego">Sin riego</option></optgroup>';
 }
 
 function paMesesOpts(label){
@@ -6264,13 +6280,27 @@ function paBuildCampRowHTML(c, cultData, mostrarMeses) {
   var cultVal = cultData ? (cultData.cultivo || '') : '';
   var msVal   = cultData ? (cultData.mes_siembra || '') : '';
   var mcVal   = cultData ? (cultData.mes_cosecha || '') : '';
+  var hsVal   = cultData && cultData.hectareas_sembradas != null ? cultData.hectareas_sembradas : '';
+  // Solo mostrar input "ha sembradas" en campañas activas/futuras especificadas
+  var permiteHaSemb = (c.nombre === '2026/27' || c.nombre === 'Inv 2026');
   var html = '<div class="fl"><label>'+c.nombre+(c.activa?' ★':'')+'</label><select id="pa-ec-'+key+'">'+paCultivoOpts()+'</select></div>';
   if (mostrarMeses) {
     html += '<div class="fl"><label>Siembra</label><select id="pa-ms-'+key+'">'+paMesesOpts('Mes siembra')+'</select></div>';
     html += '<div class="fl"><label>Cosecha</label><select id="pa-mc-'+key+'">'+paMesesOpts('Mes cosecha')+'</select></div>';
-    html += '<div class="fl"></div>'; // spacer para grilla de 4
+    if (permiteHaSemb) {
+      html += '<div class="fl"><label title="Hectáreas efectivamente sembradas en esta campaña. Vacío = usar el total del lote.">Ha sembradas</label>'
+        + '<input type="number" step="0.1" min="0" id="pa-hs-'+key+'" placeholder="(usar total del lote)" value="'+hsVal+'"></div>';
+    } else {
+      html += '<div class="fl"></div>'; // spacer para grilla de 4
+    }
+  } else if (permiteHaSemb) {
+    // Excepción: aunque no muestre meses, sí mostrar ha sembradas para esas campañas
+    html += '<div class="fl"></div>'; // spacer
+    html += '<div class="fl"></div>'; // spacer
+    html += '<div class="fl"><label title="Hectáreas efectivamente sembradas en esta campaña. Vacío = usar el total del lote.">Ha sembradas</label>'
+      + '<input type="number" step="0.1" min="0" id="pa-hs-'+key+'" placeholder="(usar total del lote)" value="'+hsVal+'"></div>';
   }
-  return { html, key, cultVal, msVal, mcVal };
+  return { html, key, cultVal, msVal, mcVal, hsVal };
 }
 
 function paGuardarEdicionLote(){
@@ -6290,7 +6320,14 @@ function paGuardarEdicionLote(){
     if(sel){
       var ms=document.getElementById('pa-ms-'+key);
       var mc=document.getElementById('pa-mc-'+key);
-      cultivos[c.nombre]={cultivo:sel.value||null,mes_siembra:ms?ms.value||null:null,mes_cosecha:mc?mc.value||null:null};
+      var hs=document.getElementById('pa-hs-'+key);
+      // hectareas_sembradas: sólo se envía si el input existe (campañas habilitadas) y tiene valor
+      var hsVal=null;
+      if(hs && hs.value!==''){
+        var hsNum=parseFloat(hs.value);
+        if(!isNaN(hsNum) && hsNum>0) hsVal=hsNum;
+      }
+      cultivos[c.nombre]={cultivo:sel.value||null,mes_siembra:ms?ms.value||null:null,mes_cosecha:mc?mc.value||null:null,hectareas_sembradas:hsVal};
     }
   });
   // Guardar datos del lote
@@ -6300,7 +6337,7 @@ function paGuardarEdicionLote(){
       // Guardar cultivos por campaña
       var saves=Object.entries(cultivos).filter(function(e){return e[1].cultivo;}).map(function(e){
         var camp=e[0],cd=e[1];
-        return paF('/api/pa/lotes/cultivo',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({lote_id:loteId,campaña:camp,cultivo:cd.cultivo,es_perenne:['Uva Superior','Uva Red Globe','Uva Cardinal','Uva Cereza','Uva Vitoria','Damasco','Durazno','Ciruela','Mejor. Suelo','Sin riego'].includes(cd.cultivo)?1:0,mes_siembra:cd.mes_siembra||null,mes_cosecha:cd.mes_cosecha||null})});
+        return paF('/api/pa/lotes/cultivo',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({lote_id:loteId,campaña:camp,cultivo:cd.cultivo,es_perenne:['Uva Superior','Uva Red Globe','Uva Cardinal','Uva Cereza','Uva Victoria','Damasco','Durazno','Ciruela','Mejor. Suelo','Sin riego'].includes(cd.cultivo)?1:0,mes_siembra:cd.mes_siembra||null,mes_cosecha:cd.mes_cosecha||null,hectareas_sembradas:cd.hectareas_sembradas})});
       });
       Promise.all(saves).then(function(){
         toast('Lote actualizado');
@@ -7364,7 +7401,7 @@ function paAbrirNuevoLote(){
   function paRenderCampañasModal(campañas) {
     var campOrd=['2021/22','Inv 2022','2022/23','Inv 2023','2023/24','Inv 2024','2024/25','Inv 2025','2025/26','Inv 2026','2026/27'];
     var campDisp=campañas.slice().sort(function(a,b){return campOrd.indexOf(a.nombre)-campOrd.indexOf(b.nombre);});
-    var cultivoOpts='<option value="">—</option><optgroup label="Frutales"><option value="Uva Superior">Uva Superior</option><option value="Uva Red Globe">Uva Red Globe</option><option value="Uva Cardinal">Uva Cardinal</option><option value="Uva Cereza">Uva Cereza</option><option value="Uva Vitoria">Uva Vitoria</option><option value="Damasco">Damasco</option><option value="Durazno">Durazno</option><option value="Ciruela">Ciruela</option></optgroup><optgroup label="Chacra Mercado"><option value="Melón">Melón</option><option value="Cebolla">Cebolla</option><option value="Brócoli">Brócoli</option><option value="Ajo">Ajo</option><option value="Papa">Papa</option><option value="Zapallo">Zapallo</option></optgroup><optgroup label="Chacra Industria"><option value="Tomate Industria">Tomate Industria</option></optgroup><option value="Barbecho">Barbecho</option><option value="Sin uso">Sin uso</option><option value="Sin riego">Sin riego</option>';
+    var cultivoOpts='<option value="">—</option><optgroup label="Frutales"><option value="Uva Superior">Uva Superior</option><option value="Uva Red Globe">Uva Red Globe</option><option value="Uva Cardinal">Uva Cardinal</option><option value="Uva Cereza">Uva Cereza</option><option value="Uva Victoria">Uva Victoria</option><option value="Damasco">Damasco</option><option value="Durazno">Durazno</option><option value="Ciruela">Ciruela</option></optgroup><optgroup label="Chacra Mercado"><option value="Melón">Melón</option><option value="Cebolla">Cebolla</option><option value="Brócoli">Brócoli</option><option value="Ajo">Ajo</option><option value="Papa">Papa</option><option value="Zapallo">Zapallo</option></optgroup><optgroup label="Chacra Industria"><option value="Tomate Industria">Tomate Industria</option></optgroup><option value="Barbecho">Barbecho</option><option value="Sin uso">Sin uso</option><option value="Sin riego">Sin riego</option>';
     document.getElementById('pa-lot-cultivos-grid').innerHTML=campDisp.map(function(c){
       return'<div class="fl"><label>Temporada '+c.nombre+(c.activa?' ★':'')+' </label><select id="pa-lot-cult-'+c.nombre.replace('/','_').replace(/ /g,'_')+'">'+cultivoOpts+'</select></div>';
     }).join('');
@@ -8479,7 +8516,7 @@ var PAMAP = {
 };
 
 var PA_MAP_COLORS = {
-  'Uva Superior':'#a855f7','Uva Red Globe':'#7c3aed','Uva Cardinal':'#6d28d9','Uva Cereza':'#c084fc','Uva Vitoria':'#7e22ce',
+  'Uva Superior':'#a855f7','Uva Red Globe':'#7c3aed','Uva Cardinal':'#6d28d9','Uva Cereza':'#c084fc','Uva Victoria':'#7e22ce',
   'Damasco':'#f97316','Durazno':'#fb923c','Ciruela':'#a3a3a3',
   'Melón':'#eab308','Brócoli':'#22c55e','Cebolla':'#a16207','Tomate Industria':'#dc2626',
   'Ajo':'#a855f7','Papa':'#eab308','Zapallo':'#f97316',
@@ -8764,16 +8801,17 @@ function paCalRefrescarMapa() {
 function paCalRenderMapa() {
   if (typeof L === 'undefined') { setTimeout(paCalRenderMapa, 300); return; }
 
-  // Si PA.lotes está vacío (caso raro: usuario abrió Calendario sin pasar por nada que lo cargue),
-  // hacemos una recarga; si no, usamos lo que ya hay (igual que paRenderMapaGeneral).
-  if (!PA.lotes || !PA.lotes.length) {
-    paF('/api/pa/lotes').then(function(r){
-      PA.lotes = r.data || [];
-      paCalRenderMapaCore();
-    });
-  } else {
+  // SIEMPRE recargar /api/pa/lotes (no confiar en PA.lotes, que puede estar
+  // incompleto si el user filtró por finca en otra pestaña, o desactualizado).
+  // El endpoint es rápido (SQLite local) y garantiza que veamos todos los polígonos.
+  paF('/api/pa/lotes').then(function(r){
+    PA.lotes = r.data || [];
     paCalRenderMapaCore();
-  }
+  }).catch(function(e){
+    console.warn('Error recargando lotes para mapa calendario:', e);
+    // Fallback: usar lo que haya en cache
+    if (PA.lotes && PA.lotes.length) paCalRenderMapaCore();
+  });
 }
 
 function paCalRenderMapaCore() {
@@ -8811,12 +8849,24 @@ function paCalRenderMapaCore() {
       var geo = typeof l.poligono_geojson === 'string' ? JSON.parse(l.poligono_geojson) : l.poligono_geojson;
       // Cultivo en la campaña seleccionada
       var cultActual = '';
+      var hsActual = null;
       if (campañaNom && l.cultivos && l.cultivos[campañaNom]) {
         var cd = l.cultivos[campañaNom];
-        cultActual = typeof cd === 'string' ? cd : (cd.cultivo || '');
+        if (typeof cd === 'string') {
+          cultActual = cd;
+        } else {
+          cultActual = cd.cultivo || '';
+          hsActual = cd.hectareas_sembradas != null ? cd.hectareas_sembradas : null;
+        }
       }
       var displayCult = cultActual || 'Sin cultivo';
       cultivosUsados[displayCult] = true;
+      // Texto de hectáreas: "X/Y ha" si es parcial; "Y ha" si es total
+      var totalLote = parseFloat(l.hectareas) || 0;
+      var haTxt = (l.hectareas || '?') + ' ha';
+      if (hsActual != null && hsActual > 0 && totalLote > 0 && Math.abs(hsActual - totalLote) > 0.01) {
+        haTxt = parseFloat(hsActual).toFixed(1) + '/' + totalLote.toFixed(1) + ' ha';
+      }
 
       // Color: paleta del calendario (cultColor); si no hay cultivo, gris
       var col = cultActual ? cultColor(cultActual) : { bg:'#f1f5f9', fg:'#64748b' };
@@ -8832,7 +8882,7 @@ function paCalRenderMapaCore() {
       layer._isPaCalPoly = true;
       layer.on('click', function(){ paEditarCultivo(l.id, l.nombre); });
       layer.bindTooltip(
-        '<strong>'+l.nombre+'</strong><br>'+(l.finca||'')+'<br>'+displayCult+' · '+(l.hectareas||'?')+' ha<br><span style="color:#94a3b8;font-size:10px">Click para editar cultivo</span>',
+        '<strong>'+l.nombre+'</strong><br>'+(l.finca||'')+'<br>'+displayCult+' · '+haTxt+'<br><span style="color:#94a3b8;font-size:10px">Click para editar cultivo</span>',
         { className:'pa-map-tooltip', sticky: true }
       );
       layer.addTo(PAMAP.calMap);
@@ -8843,7 +8893,7 @@ function paCalRenderMapaCore() {
         bounds.push(b);
         var centro = b.getCenter();
         var labelHtml = '<div style="background:rgba(255,255,255,.92);border:1px solid '+col.fg+';color:'+col.fg+';padding:2px 7px;border-radius:5px;font-size:10px;font-weight:700;line-height:1.25;text-align:center;white-space:nowrap;box-shadow:0 1px 3px rgba(0,0,0,.18);pointer-events:none">'
-          +l.nombre+'<div style="font-weight:500;font-size:9px;opacity:.85">'+displayCult+' · '+(l.hectareas||'?')+' ha</div></div>';
+          +l.nombre+'<div style="font-weight:500;font-size:9px;opacity:.85">'+displayCult+' · '+haTxt+'</div></div>';
         var marker = L.marker(centro, {
           icon: L.divIcon({ className:'pa-cal-label', html: labelHtml, iconSize:[1,1], iconAnchor:[0,0] }),
           interactive: false,
