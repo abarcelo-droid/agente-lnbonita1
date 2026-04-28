@@ -1,7 +1,11 @@
 # deploy.ps1 — Smart deploy LNB APP
 # Detecta archivos del repo en Downloads, los copia, hace commit + push.
 
+# Forzar UTF-8 en todos los streams (entrada, salida, default de PowerShell)
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+[Console]::InputEncoding  = [System.Text.Encoding]::UTF8
+$OutputEncoding = [System.Text.Encoding]::UTF8
+$PSDefaultParameterValues['*:Encoding'] = 'utf8'
 $ErrorActionPreference = 'Stop'
 
 # === Configuración ===
@@ -107,7 +111,7 @@ if ($stale.Count -gt 0) {
 
 Write-Host ""
 $confirm = Read-Host "¿Copiar y deployar estos archivos? (s/N)"
-if ($confirm -ne 's' -and $confirm -ne 'S') {
+if ($confirm -notmatch '^[sSyY]') {
     Write-Host "Cancelado." -ForegroundColor Yellow
     Read-Host "Enter para cerrar"
     exit 0
