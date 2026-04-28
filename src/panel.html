@@ -1328,7 +1328,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
 </div>
 <div class="pa-wrap"><div class="ab-table-wrap"><table class="pa-tbl">
   <thead><tr><th>N° Orden</th><th>Fecha</th><th>Tipo</th><th>Lotes</th><th>Productos</th><th>Asignado a</th><th>Estado</th><th></th></tr></thead>
-  <tbody id="pa-ord-tbody"><tr><td colspan="7" class="emp">Cargando...</td></tr></tbody>
+  <tbody id="pa-ord-tbody"><tr><td colspan="8" class="emp">Cargando...</td></tr></tbody>
 </table></div></div>
 </div>
 
@@ -7049,9 +7049,38 @@ function paLoadOrdenes(){
   var estado=document.getElementById('pa-ord-estado-fil').value;
   paF('/api/pa/ordenes'+(estado?'?estado='+estado:'')).then(function(r){
     var data=r.data||[];var tb=document.getElementById('pa-ord-tbody');
-    if(!data.length){tb.innerHTML='<tr><td colspan="7" class="emp">Sin órdenes</td></tr>';return;}
-    tb.innerHTML=data.map(function(o){var lts=(o.lotes||[]).map(function(l){return l.lote_nombre;}).join(', '),prs=(o.items||[]).map(function(i){return i.insumo_nombre;}).join(', ');return'<tr><td><strong>'+o.nro_orden+'</strong></td><td>'+paFecha(o.fecha_orden)+'</td><td>'+(o.tipo_aplicacion||'—')+'</td><td style="font-size:12px;color:var(--mut)">'+lts+'</td><td style="font-size:12px;color:var(--mut)">'+prs+'</td><td style="font-size:12px">'+(o.asignado_nombre?'<span class="pa-badge pa-azul-bg">👤 '+o.asignado_nombre+'</span>':'<span style="color:var(--sub)">—</span>')+'</td><td>'+paBadgeEstado(o.estado)+'</td><td><button class="btn bo bs" onclick="paVerOrden('+o.id+')">Ver</button></td></tr>';}).join('');
+    if(!data.length){tb.innerHTML='<tr><td colspan="8" class="emp">Sin órdenes</td></tr>';return;}
+    var esAdmin=LNB_USER&&LNB_USER.rol==='admin';
+    tb.innerHTML=data.map(function(o){var lts=(o.lotes||[]).map(function(l){return l.lote_nombre;}).join(', '),prs=(o.items||[]).map(function(i){return i.insumo_nombre;}).join(', ');var btnDel=esAdmin?' <button class="btn bs" style="background:#dc2626;color:#fff;border-color:#dc2626;margin-left:4px" onclick="paEliminarOrden('+o.id+',\''+(o.nro_orden||'').replace(/\'/g,"\\'")+'\')" title="Eliminar orden">🗑</button>':'';return'<tr><td><strong>'+o.nro_orden+'</strong></td><td>'+paFecha(o.fecha_orden)+'</td><td>'+(o.tipo_aplicacion||'—')+'</td><td style="font-size:12px;color:var(--mut)">'+lts+'</td><td style="font-size:12px;color:var(--mut)">'+prs+'</td><td style="font-size:12px">'+(o.asignado_nombre?'<span class="pa-badge pa-azul-bg">👤 '+o.asignado_nombre+'</span>':'<span style="color:var(--sub)">—</span>')+'</td><td>'+paBadgeEstado(o.estado)+'</td><td style="white-space:nowrap"><button class="btn bo bs" onclick="paVerOrden('+o.id+')">Ver</button>'+btnDel+'</td></tr>';}).join('');
   });
+}
+function paEliminarOrden(id,nro){
+  var msg='¿Eliminar la orden '+nro+'?\n\n'
+    +'Esta acción es PERMANENTE y NO se puede deshacer.\n\n'
+    +'Se borrarán:\n'
+    +'  • La orden y sus lotes/productos\n'
+    +'  • Las aplicaciones ejecutadas (si las hay)\n'
+    +'  • Los costos por lote derivados\n'
+    +'  • Los movimientos de stock derivados\n\n'
+    +'Se revertirá el stock descontado en los insumos.\n\n'
+    +'Los movimientos de combustible vinculados a esta orden NO se borran, solo se desvinculan.\n\n'
+    +'¿Continuar?';
+  if(!confirm(msg))return;
+  paF('/api/pa/ordenes/'+id,{method:'DELETE'}).then(function(r){
+    if(r&&r.ok){
+      var d=r.eliminada||{};
+      var resumen='Orden '+nro+' eliminada.\n\n'
+        +'• Aplicaciones borradas: '+(d.aplicaciones||0)+'\n'
+        +'• Stock revertido en insumos: '+(d.stock_revertido||0)+'\n'
+        +'• Movimientos de stock borrados: '+(d.movimientos_stock_borrados||0)+'\n'
+        +'• Costos por lote borrados: '+(d.costos_lote_borrados||0)+'\n'
+        +'• Movimientos de combustible desvinculados: '+(d.combustible_desvinculado||0);
+      alert(resumen);
+      paLoadOrdenes();
+    }else{
+      alert('Error al eliminar: '+(r&&r.error?r.error:'desconocido'));
+    }
+  }).catch(function(e){alert('Error: '+e.message);});
 }
 function paAbrirNuevaOrden(){
   PA.ordN=0;

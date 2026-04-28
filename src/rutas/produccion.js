@@ -780,6 +780,80 @@ router.patch('/ordenes/:id/estado', requireAuth, (req, res) => {
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
+// DELETE — eliminar orden de aplicación (HARD DELETE, solo admin).
+// Limpia: pa_aplicaciones, pa_ordenes_items, pa_ordenes_lotes, pa_ordenes.
+// Revierte: stock descontado en pa_insumos, pa_movimientos_stock (motivo=aplicacion),
+//           pa_costos_lote (referencia_id de las aplicaciones borradas).
+// Desvincula (NO borra): pa_combustible_movimientos.orden_id -> NULL.
+router.delete('/ordenes/:id', requireAuth, (req, res) => {
+  if (req.user.rol !== 'admin') {
+    return res.status(403).json({ ok: false, error: 'Solo admin puede eliminar órdenes' });
+  }
+  const db = getDb();
+  const ordenId = req.params.id;
+  try {
+    const orden = db.prepare("SELECT * FROM pa_ordenes WHERE id=?").get(ordenId);
+    if (!orden) return res.status(404).json({ ok: false, error: 'Orden no encontrada' });
+
+    const tx = db.transaction(() => {
+      // 1) Leer aplicaciones para revertir efectos colaterales
+      const aplicaciones = db.prepare(
+        "SELECT id, insumo_id, cantidad_real FROM pa_aplicaciones WHERE orden_id=?"
+      ).all(ordenId);
+
+      let stockRevertido = 0;
+      let movStockBorrados = 0;
+      let costosLoteBorrados = 0;
+
+      for (const a of aplicaciones) {
+        // Restaurar stock del insumo
+        if (a.insumo_id && a.cantidad_real) {
+          db.prepare("UPDATE pa_insumos SET stock_actual = stock_actual + ? WHERE id = ?")
+            .run(a.cantidad_real, a.insumo_id);
+          stockRevertido++;
+        }
+        // Borrar movimiento de stock asociado a esta aplicación
+        movStockBorrados += db.prepare(
+          "DELETE FROM pa_movimientos_stock WHERE motivo='aplicacion' AND referencia_id=?"
+        ).run(a.id).changes;
+        // Borrar costo por lote asociado a esta aplicación
+        costosLoteBorrados += db.prepare(
+          "DELETE FROM pa_costos_lote WHERE categoria IN ('fertilizante','agroquimico') AND referencia_id=?"
+        ).run(a.id).changes;
+      }
+
+      // 2) Desvincular movimientos de combustible (no borrar)
+      const combDesvinc = db.prepare(
+        "UPDATE pa_combustible_movimientos SET orden_id=NULL WHERE orden_id=?"
+      ).run(ordenId).changes;
+
+      // 3) Borrar dependencias directas
+      const aplicsBorradas = db.prepare("DELETE FROM pa_aplicaciones WHERE orden_id=?").run(ordenId).changes;
+      const itemsBorrados  = db.prepare("DELETE FROM pa_ordenes_items WHERE orden_id=?").run(ordenId).changes;
+      const lotesBorrados  = db.prepare("DELETE FROM pa_ordenes_lotes WHERE orden_id=?").run(ordenId).changes;
+
+      // 4) Borrar la orden
+      db.prepare("DELETE FROM pa_ordenes WHERE id=?").run(ordenId);
+
+      return {
+        nro_orden: orden.nro_orden,
+        aplicaciones: aplicsBorradas,
+        items: itemsBorrados,
+        lotes: lotesBorrados,
+        stock_revertido: stockRevertido,
+        movimientos_stock_borrados: movStockBorrados,
+        costos_lote_borrados: costosLoteBorrados,
+        combustible_desvinculado: combDesvinc
+      };
+    });
+
+    const detalle = tx();
+    res.json({ ok: true, eliminada: detalle });
+  } catch(e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
 // ─────────────────────────────────────────────────────────────────────────
 // APLICACIONES (ejecución real de una orden)
 // ─────────────────────────────────────────────────────────────────────────
