@@ -1569,6 +1569,32 @@ db.exec(`
     }
   } catch(e) { console.warn('[PA] Error seeding pa_panol_categorias:', e.message); }
 })();
+// ── MÓDULO ASIENTOS CONTABLES (partida doble manual) ──────────────────────
+db.exec(`
+  -- Cabecera del asiento
+  CREATE TABLE IF NOT EXISTS pa_asientos (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    fecha       TEXT NOT NULL DEFAULT (date('now','localtime')),
+    descripcion TEXT NOT NULL,
+    usuario_id  INTEGER REFERENCES usuarios(id),
+    anulado     INTEGER DEFAULT 0,
+    anulado_por INTEGER REFERENCES usuarios(id),
+    anulado_en  TEXT,
+    creado_en   TEXT DEFAULT (datetime('now','localtime'))
+  );
 
+  -- Líneas del asiento (partida doble)
+  CREATE TABLE IF NOT EXISTS pa_asientos_lineas (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    asiento_id  INTEGER NOT NULL REFERENCES pa_asientos(id),
+    cuenta_id   INTEGER NOT NULL REFERENCES pa_cuentas(id),
+    debe        REAL NOT NULL DEFAULT 0,
+    haber       REAL NOT NULL DEFAULT 0,
+    descripcion TEXT
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_pa_asientos_fecha ON pa_asientos(fecha);
+  CREATE INDEX IF NOT EXISTS idx_pa_asientos_lineas ON pa_asientos_lineas(asiento_id);
+`);
 export { db };
 export default db;
