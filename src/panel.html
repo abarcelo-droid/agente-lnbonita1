@@ -6381,8 +6381,8 @@ function paBuildCampRowHTML(c, cultData, mostrarMeses) {
   var permiteHaSemb = (c.nombre === '2026/27' || c.nombre === 'Inv 2026');
   var html = '<div class="fl"><label>'+c.nombre+(c.activa?' ★':'')+'</label><select id="pa-ec-'+key+'" onchange="paToggleDesarrolloFrutal(\''+key+'\')">'+paCultivoOpts()+'</select></div>';
   if (mostrarMeses) {
-    html += '<div class="fl"><label>Siembra</label><select id="pa-ms-'+key+'">'+paMesesOpts('Mes siembra')+'</select></div>';
-    html += '<div class="fl"><label>Cosecha</label><select id="pa-mc-'+key+'">'+paMesesOpts('Mes cosecha')+'</select></div>';
+    html += '<div class="fl" id="pa-ms-w-'+key+'"><label>Siembra</label><select id="pa-ms-'+key+'">'+paMesesOpts('Mes siembra')+'</select></div>';
+    html += '<div class="fl" id="pa-mc-w-'+key+'"><label>Cosecha</label><select id="pa-mc-'+key+'">'+paMesesOpts('Mes cosecha')+'</select></div>';
     if (permiteHaSemb) {
       html += '<div class="fl"><label title="Hectáreas efectivamente sembradas en esta campaña. Vacío = usar el total del lote.">Ha sembradas</label>'
         + '<input type="number" step="0.1" min="0" id="pa-hs-'+key+'" placeholder="(usar total del lote)" value="'+hsVal+'"></div>';
@@ -6424,6 +6424,16 @@ function paToggleDesarrolloFrutal(key){
   if(!sel || !cont) return;
   var visible = esFrutal(sel.value);
   cont.style.display = visible ? '' : 'none';
+  // Frutales no usan mes siembra / mes cosecha (perennes; cosecha implícita por cultivo)
+  var msW=document.getElementById('pa-ms-w-'+key);
+  var mcW=document.getElementById('pa-mc-w-'+key);
+  if(msW) msW.style.display=visible?'none':'';
+  if(mcW) mcW.style.display=visible?'none':'';
+  if(visible){
+    // Limpiar valores de meses al pasar a frutal para no persistir basura
+    var ms=document.getElementById('pa-ms-'+key); if(ms) ms.value='';
+    var mc=document.getElementById('pa-mc-'+key); if(mc) mc.value='';
+  }
   if (!visible) {
     // Si el cultivo deja de ser frutal, des-tildar y limpiar para no persistir basura
     var cb = document.getElementById('pa-ed-'+key);
