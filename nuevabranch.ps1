@@ -1,4 +1,4 @@
-# nuevabranch.ps1 — Crea una nueva branch desde main actualizado.
+﻿# nuevabranch.ps1 — Crea una nueva branch desde main actualizado.
 # Uso: nuevabranch andy/feat-loquesea
 # Si no se pasa nombre, lo pide.
 
