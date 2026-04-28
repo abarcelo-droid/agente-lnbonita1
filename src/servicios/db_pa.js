@@ -1492,5 +1492,83 @@ db.exec(`
   }
 })();
 
+// ─────────────────────────────────────────────────────────────────────────
+// PAÑOL — herramientas durables identificadas por unidad
+// (no son consumibles; se prestan/devuelven en lugar de gastarse)
+// ─────────────────────────────────────────────────────────────────────────
+db.exec(`
+  -- Categorías para agrupar herramientas (Eléctricas, Manuales, Medición, etc.)
+  CREATE TABLE IF NOT EXISTS pa_panol_categorias (
+    id     INTEGER PRIMARY KEY AUTOINCREMENT,
+    nombre TEXT NOT NULL UNIQUE,
+    icono  TEXT,                       -- emoji opcional para UI
+    activo INTEGER DEFAULT 1,
+    creado_en TEXT DEFAULT (datetime('now','localtime'))
+  );
+
+  -- Cada herramienta es UNA unidad física identificable
+  CREATE TABLE IF NOT EXISTS pa_panol_unidades (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    codigo_interno  TEXT NOT NULL UNIQUE,             -- ej: PAÑ-0042 o AMOL-001
+    nombre          TEXT NOT NULL,                    -- ej: Amoladora 4½'' Bosch
+    categoria_id    INTEGER REFERENCES pa_panol_categorias(id),
+    marca           TEXT,
+    modelo          TEXT,
+    numero_serie    TEXT,                             -- serial del fabricante (no único, puede faltar)
+    compra_id       INTEGER REFERENCES pa_compras(id),-- vínculo opcional con factura origen
+    precio_compra   REAL,                             -- pesos al momento de compra
+    fecha_alta      TEXT DEFAULT (date('now','localtime')),
+    fecha_baja      TEXT,
+    estado          TEXT NOT NULL DEFAULT 'disponible'
+                      CHECK(estado IN ('disponible','prestada','en_reparacion','dada_de_baja','extraviada')),
+    ubicacion_actual TEXT,                            -- texto libre: "Estante A2", "Con Juan", etc.
+    trabajador_actual_id INTEGER REFERENCES pa_trabajadores(id), -- FK denormalizada para query rápido
+    notas           TEXT,
+    activo          INTEGER DEFAULT 1,
+    creado_en       TEXT DEFAULT (datetime('now','localtime'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_panol_unidades_estado ON pa_panol_unidades(estado);
+  CREATE INDEX IF NOT EXISTS idx_panol_unidades_trab ON pa_panol_unidades(trabajador_actual_id);
+
+  -- Movimientos: préstamo, devolución, reparación, baja, alta
+  CREATE TABLE IF NOT EXISTS pa_panol_movimientos (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    unidad_id       INTEGER NOT NULL REFERENCES pa_panol_unidades(id),
+    tipo            TEXT NOT NULL
+                      CHECK(tipo IN ('alta','prestamo','devolucion','reparacion_inicio','reparacion_fin','baja','extravio')),
+    fecha           TEXT DEFAULT (datetime('now','localtime')),
+    trabajador_id   INTEGER REFERENCES pa_trabajadores(id),  -- a quién (en préstamo/devolución)
+    quien_registra  INTEGER REFERENCES users(id),            -- usuario que carga el movimiento
+    condicion       TEXT,                                    -- 'nueva','buena','regular','rota' (al prestar o devolver)
+    motivo          TEXT,                                    -- para baja/extravio: motivo libre
+    notas           TEXT,
+    lat REAL, lng REAL                                       -- captura GPS si vino del Scout
+  );
+  CREATE INDEX IF NOT EXISTS idx_panol_mov_unidad ON pa_panol_movimientos(unidad_id);
+  CREATE INDEX IF NOT EXISTS idx_panol_mov_fecha ON pa_panol_movimientos(fecha);
+`);
+
+// Seed de categorías base si tabla está vacía
+(function seedPanolCategorias() {
+  try {
+    const n = db.prepare("SELECT COUNT(*) as n FROM pa_panol_categorias").get().n;
+    if (n === 0) {
+      const ins = db.prepare("INSERT INTO pa_panol_categorias (nombre, icono) VALUES (?, ?)");
+      const seeds = [
+        ['Eléctricas', '⚡'],
+        ['Manuales',   '🔧'],
+        ['Medición',   '📏'],
+        ['Corte',      '✂️'],
+        ['Seguridad',  '🦺'],
+        ['Jardinería', '🌿'],
+        ['Otros',      '🔩']
+      ];
+      const tx = db.transaction(() => seeds.forEach(s => ins.run(...s)));
+      tx();
+      console.log('[PA] Seed de categorías de pañol cargado:', seeds.length);
+    }
+  } catch(e) { console.warn('[PA] Error seeding pa_panol_categorias:', e.message); }
+})();
+
 export { db };
 export default db;

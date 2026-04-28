@@ -2400,4 +2400,322 @@ router.post('/lotes/:id/reactivar', requireAuth, (req, res) => {
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
+// ─────────────────────────────────────────────────────────────────────────
+// PAÑOL — herramientas durables identificadas por unidad
+// ─────────────────────────────────────────────────────────────────────────
+
+// CATEGORÍAS
+router.get('/panol/categorias', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const incluirInactivas = req.query.incluir_inactivos === '1';
+    const where = incluirInactivas ? '' : 'WHERE activo = 1';
+    const data = db.prepare(`SELECT * FROM pa_panol_categorias ${where} ORDER BY nombre`).all();
+    res.json({ ok: true, data });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+router.post('/panol/categorias', requireAuth, (req, res) => {
+  const db = getDb();
+  const { nombre, icono } = req.body;
+  if (!nombre || !nombre.trim()) return res.status(400).json({ ok: false, error: 'Nombre requerido' });
+  try {
+    const r = db.prepare("INSERT INTO pa_panol_categorias (nombre, icono) VALUES (?, ?)")
+      .run(nombre.trim(), icono || null);
+    res.json({ ok: true, id: r.lastInsertRowid });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+router.patch('/panol/categorias/:id', requireAuth, (req, res) => {
+  const db = getDb();
+  const { nombre, icono } = req.body;
+  try {
+    const cur = db.prepare("SELECT * FROM pa_panol_categorias WHERE id=?").get(req.params.id);
+    if (!cur) return res.status(404).json({ ok: false, error: 'No encontrada' });
+    db.prepare("UPDATE pa_panol_categorias SET nombre=?, icono=? WHERE id=?")
+      .run(nombre || cur.nombre, icono !== undefined ? icono : cur.icono, req.params.id);
+    res.json({ ok: true });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+router.delete('/panol/categorias/:id', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    db.prepare("UPDATE pa_panol_categorias SET activo = 0 WHERE id = ?").run(req.params.id);
+    res.json({ ok: true });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+router.post('/panol/categorias/:id/reactivar', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    db.prepare("UPDATE pa_panol_categorias SET activo = 1 WHERE id = ?").run(req.params.id);
+    res.json({ ok: true });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// UNIDADES — listar (enriquece con categoría y trabajador actual)
+router.get('/panol/unidades', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const incluirInactivas = req.query.incluir_inactivos === '1';
+    const filtroEstado = req.query.estado || null;
+    const filtroCategoria = req.query.categoria_id ? parseInt(req.query.categoria_id, 10) : null;
+    const filtroTrabajador = req.query.trabajador_id ? parseInt(req.query.trabajador_id, 10) : null;
+
+    const conds = [];
+    const args = [];
+    if (!incluirInactivas) conds.push('u.activo = 1');
+    if (filtroEstado) { conds.push('u.estado = ?'); args.push(filtroEstado); }
+    if (filtroCategoria) { conds.push('u.categoria_id = ?'); args.push(filtroCategoria); }
+    if (filtroTrabajador) { conds.push('u.trabajador_actual_id = ?'); args.push(filtroTrabajador); }
+    const where = conds.length ? `WHERE ${conds.join(' AND ')}` : '';
+
+    const data = db.prepare(`
+      SELECT u.*,
+        c.nombre AS categoria_nombre,
+        c.icono  AS categoria_icono,
+        t.nombre AS trabajador_actual_nombre
+      FROM pa_panol_unidades u
+      LEFT JOIN pa_panol_categorias c ON c.id = u.categoria_id
+      LEFT JOIN pa_trabajadores t ON t.id = u.trabajador_actual_id
+      ${where}
+      ORDER BY u.codigo_interno
+    `).all(...args);
+    res.json({ ok: true, data });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// UNIDADES — detalle con historial de movimientos
+router.get('/panol/unidades/:id', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const u = db.prepare(`
+      SELECT u.*,
+        c.nombre AS categoria_nombre,
+        c.icono  AS categoria_icono,
+        t.nombre AS trabajador_actual_nombre
+      FROM pa_panol_unidades u
+      LEFT JOIN pa_panol_categorias c ON c.id = u.categoria_id
+      LEFT JOIN pa_trabajadores t ON t.id = u.trabajador_actual_id
+      WHERE u.id = ?
+    `).get(req.params.id);
+    if (!u) return res.status(404).json({ ok: false, error: 'No encontrada' });
+    const movimientos = db.prepare(`
+      SELECT m.*,
+        t.nombre AS trabajador_nombre,
+        usr.nombre AS quien_registra_nombre
+      FROM pa_panol_movimientos m
+      LEFT JOIN pa_trabajadores t ON t.id = m.trabajador_id
+      LEFT JOIN users usr ON usr.id = m.quien_registra
+      WHERE m.unidad_id = ?
+      ORDER BY m.fecha DESC, m.id DESC
+    `).all(req.params.id);
+    res.json({ ok: true, data: u, movimientos });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// UNIDADES — crear (alta manual; también deja un movimiento 'alta')
+router.post('/panol/unidades', requireAuth, (req, res) => {
+  const db = getDb();
+  const {
+    codigo_interno, nombre, categoria_id, marca, modelo, numero_serie,
+    compra_id, precio_compra, ubicacion_actual, notas
+  } = req.body;
+  if (!codigo_interno || !codigo_interno.trim())
+    return res.status(400).json({ ok: false, error: 'Código interno requerido' });
+  if (!nombre || !nombre.trim())
+    return res.status(400).json({ ok: false, error: 'Nombre requerido' });
+  try {
+    const tx = db.transaction(() => {
+      const r = db.prepare(`
+        INSERT INTO pa_panol_unidades
+          (codigo_interno, nombre, categoria_id, marca, modelo, numero_serie,
+           compra_id, precio_compra, ubicacion_actual, notas, estado)
+        VALUES (?,?,?,?,?,?,?,?,?,?,'disponible')
+      `).run(
+        codigo_interno.trim(), nombre.trim(),
+        categoria_id || null, marca || null, modelo || null, numero_serie || null,
+        compra_id || null, precio_compra || null, ubicacion_actual || null, notas || null
+      );
+      const unidadId = r.lastInsertRowid;
+      // Registrar movimiento de alta
+      db.prepare(`
+        INSERT INTO pa_panol_movimientos (unidad_id, tipo, quien_registra, notas)
+        VALUES (?, 'alta', ?, ?)
+      `).run(unidadId, req.user.id, 'Alta inicial de la herramienta');
+      return unidadId;
+    });
+    const id = tx();
+    res.json({ ok: true, id });
+  } catch(e) {
+    if (e.message.includes('UNIQUE')) {
+      return res.status(409).json({ ok: false, error: 'Ya existe una unidad con ese código interno' });
+    }
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+// UNIDADES — actualizar (datos descriptivos, NO estado/ubicación que van por movimientos)
+router.patch('/panol/unidades/:id', requireAuth, (req, res) => {
+  const db = getDb();
+  const { codigo_interno, nombre, categoria_id, marca, modelo, numero_serie,
+          compra_id, precio_compra, ubicacion_actual, notas } = req.body;
+  try {
+    const cur = db.prepare("SELECT * FROM pa_panol_unidades WHERE id=?").get(req.params.id);
+    if (!cur) return res.status(404).json({ ok: false, error: 'No encontrada' });
+    db.prepare(`
+      UPDATE pa_panol_unidades SET
+        codigo_interno=?, nombre=?, categoria_id=?, marca=?, modelo=?, numero_serie=?,
+        compra_id=?, precio_compra=?, ubicacion_actual=?, notas=?
+      WHERE id=?
+    `).run(
+      codigo_interno||cur.codigo_interno, nombre||cur.nombre,
+      categoria_id!==undefined?categoria_id:cur.categoria_id,
+      marca!==undefined?marca:cur.marca, modelo!==undefined?modelo:cur.modelo,
+      numero_serie!==undefined?numero_serie:cur.numero_serie,
+      compra_id!==undefined?compra_id:cur.compra_id,
+      precio_compra!==undefined?precio_compra:cur.precio_compra,
+      ubicacion_actual!==undefined?ubicacion_actual:cur.ubicacion_actual,
+      notas!==undefined?notas:cur.notas,
+      req.params.id
+    );
+    res.json({ ok: true });
+  } catch(e) {
+    if (e.message.includes('UNIQUE')) {
+      return res.status(409).json({ ok: false, error: 'Código interno ya en uso' });
+    }
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+router.delete('/panol/unidades/:id', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    db.prepare("UPDATE pa_panol_unidades SET activo = 0 WHERE id = ?").run(req.params.id);
+    res.json({ ok: true });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+router.post('/panol/unidades/:id/reactivar', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    db.prepare("UPDATE pa_panol_unidades SET activo = 1 WHERE id = ?").run(req.params.id);
+    res.json({ ok: true });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// MOVIMIENTOS — registrar préstamo, devolución, reparación, baja, etc.
+// Endpoint único que adapta la lógica según `tipo`.
+router.post('/panol/unidades/:id/movimiento', requireAuth, (req, res) => {
+  const db = getDb();
+  const unidadId = parseInt(req.params.id, 10);
+  const { tipo, trabajador_id, condicion, motivo, notas, fecha, lat, lng } = req.body;
+  const tiposValidos = ['prestamo','devolucion','reparacion_inicio','reparacion_fin','baja','extravio'];
+  if (!tiposValidos.includes(tipo))
+    return res.status(400).json({ ok: false, error: 'Tipo de movimiento inválido' });
+  try {
+    const u = db.prepare("SELECT * FROM pa_panol_unidades WHERE id=?").get(unidadId);
+    if (!u) return res.status(404).json({ ok: false, error: 'Unidad no encontrada' });
+
+    // Validaciones según tipo
+    if (tipo === 'prestamo') {
+      if (u.estado !== 'disponible')
+        return res.status(400).json({ ok: false, error: `No se puede prestar: estado actual '${u.estado}'` });
+      if (!trabajador_id)
+        return res.status(400).json({ ok: false, error: 'Trabajador requerido para préstamo' });
+    }
+    if (tipo === 'devolucion') {
+      if (u.estado !== 'prestada')
+        return res.status(400).json({ ok: false, error: `No se puede devolver: estado actual '${u.estado}'` });
+    }
+    if (tipo === 'reparacion_inicio') {
+      if (u.estado === 'dada_de_baja' || u.estado === 'extraviada')
+        return res.status(400).json({ ok: false, error: `No se puede mandar a reparación: estado '${u.estado}'` });
+    }
+    if (tipo === 'reparacion_fin') {
+      if (u.estado !== 'en_reparacion')
+        return res.status(400).json({ ok: false, error: `No está en reparación` });
+    }
+
+    const tx = db.transaction(() => {
+      // Insertar movimiento
+      db.prepare(`
+        INSERT INTO pa_panol_movimientos
+          (unidad_id, tipo, fecha, trabajador_id, quien_registra, condicion, motivo, notas, lat, lng)
+        VALUES (?, ?, COALESCE(?, datetime('now','localtime')), ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        unidadId, tipo, fecha || null,
+        trabajador_id || null, req.user.id,
+        condicion || null, motivo || null, notas || null,
+        lat || null, lng || null
+      );
+
+      // Actualizar estado/ubicación de la unidad según tipo
+      let nuevoEstado = u.estado;
+      let nuevoTrab = u.trabajador_actual_id;
+      let nuevaUbic = u.ubicacion_actual;
+      let fechaBaja = u.fecha_baja;
+      switch (tipo) {
+        case 'prestamo':
+          nuevoEstado = 'prestada';
+          nuevoTrab = trabajador_id;
+          // Resolver nombre del trabajador para ubicacion textual
+          const t = db.prepare("SELECT nombre FROM pa_trabajadores WHERE id=?").get(trabajador_id);
+          nuevaUbic = t ? `Con ${t.nombre}` : 'Prestada';
+          break;
+        case 'devolucion':
+          nuevoEstado = 'disponible';
+          nuevoTrab = null;
+          nuevaUbic = 'Pañol';
+          break;
+        case 'reparacion_inicio':
+          nuevoEstado = 'en_reparacion';
+          nuevoTrab = null;
+          nuevaUbic = 'En reparación';
+          break;
+        case 'reparacion_fin':
+          nuevoEstado = 'disponible';
+          nuevaUbic = 'Pañol';
+          break;
+        case 'baja':
+          nuevoEstado = 'dada_de_baja';
+          nuevoTrab = null;
+          fechaBaja = fechaBaja || new Date().toISOString().slice(0,10);
+          break;
+        case 'extravio':
+          nuevoEstado = 'extraviada';
+          nuevoTrab = null;
+          break;
+      }
+      db.prepare(`
+        UPDATE pa_panol_unidades
+        SET estado=?, trabajador_actual_id=?, ubicacion_actual=?, fecha_baja=?
+        WHERE id=?
+      `).run(nuevoEstado, nuevoTrab, nuevaUbic, fechaBaja, unidadId);
+    });
+    tx();
+    res.json({ ok: true });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// MOVIMIENTOS — listar últimos N (para timeline general)
+router.get('/panol/movimientos', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const limit = Math.min(parseInt(req.query.limit, 10) || 100, 500);
+    const data = db.prepare(`
+      SELECT m.*,
+        u.codigo_interno, u.nombre AS unidad_nombre,
+        t.nombre AS trabajador_nombre,
+        usr.nombre AS quien_registra_nombre
+      FROM pa_panol_movimientos m
+      JOIN pa_panol_unidades u ON u.id = m.unidad_id
+      LEFT JOIN pa_trabajadores t ON t.id = m.trabajador_id
+      LEFT JOIN users usr ON usr.id = m.quien_registra
+      ORDER BY m.fecha DESC, m.id DESC
+      LIMIT ?
+    `).all(limit);
+    res.json({ ok: true, data });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
 export default router;

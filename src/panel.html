@@ -168,6 +168,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   <div class="ni" data-sec="pa-scout"><span class="dot de"></span>Scout — Campo</div>
   <div class="ni" data-sec="pa-combustible"><span class="dot da"></span>⛽ Combustible</div>
   <div class="ni" data-sec="pa-personal"><span class="dot db"></span>👷 Personal</div>
+  <div class="ni" data-sec="pa-panol"><span class="dot dd"></span>🔧 Pañol</div>
   <div class="ni" data-sec="pa-cuentas"><span class="dot dc"></span>📊 Plan de Cuentas</div>
   <a href="/scout" class="ni" style="color:inherit;text-decoration:none;display:block;font-weight:600" title="Abrir Scout móvil en esta pestaña">
     <span class="dot da"></span>📱 Abrir Scout móvil
@@ -1696,6 +1697,95 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     <div class="tw"><table>
       <thead><tr><th>Nombre (contabilidad)</th><th>Tipo</th><th>Cultivo</th><th>Estado</th><th></th></tr></thead>
       <tbody id="pp-rub-tbody"></tbody>
+    </table></div>
+  </div>
+</div>
+
+<!-- ─── PA PAÑOL ──────────────────────────────────────────────── -->
+<div class="sec" id="sec-pa-panol">
+  <div class="ph">
+    <div>
+      <div class="ph-t">🔧 Pañol — Herramientas durables</div>
+      <div class="ph-s">Inventario individual de herramientas con préstamos, devoluciones y reparaciones</div>
+    </div>
+    <div style="display:flex;gap:8px">
+      <button class="btn bb" onclick="pnAbrirNuevaUnidad()">+ Herramienta</button>
+      <button class="btn bo" onclick="pnAbrirCategorias()">🏷️ Categorías</button>
+    </div>
+  </div>
+
+  <style>
+    .pn-subtab.on { color: var(--burg); border-bottom-color: var(--burg) !important; }
+    .pn-sub { display:none; }
+    .pn-sub.on { display:block; }
+    .pn-estado { display:inline-block; padding:2px 8px; border-radius:10px; font-size:11px; font-weight:600 }
+    .pn-est-disponible    { background:#dcfce7; color:#166534 }
+    .pn-est-prestada      { background:#fef3c7; color:#92400e }
+    .pn-est-en_reparacion { background:#dbeafe; color:#1e40af }
+    .pn-est-dada_de_baja  { background:#f1f5f9; color:#64748b }
+    .pn-est-extraviada    { background:#fee2e2; color:#991b1b }
+  </style>
+
+  <!-- Sub-tabs -->
+  <div style="display:flex;border-bottom:1px solid var(--bor);margin-bottom:14px">
+    <div class="pn-subtab on" data-pn="inventario" onclick="pnSubtab('inventario')"
+         style="padding:10px 16px;cursor:pointer;border-bottom:2px solid transparent;color:var(--mut);font-weight:600">📦 Inventario</div>
+    <div class="pn-subtab" data-pn="prestamos" onclick="pnSubtab('prestamos')"
+         style="padding:10px 16px;cursor:pointer;border-bottom:2px solid transparent;color:var(--mut);font-weight:600">📤 Préstamos activos</div>
+    <div class="pn-subtab" data-pn="historial" onclick="pnSubtab('historial')"
+         style="padding:10px 16px;cursor:pointer;border-bottom:2px solid transparent;color:var(--mut);font-weight:600">📜 Movimientos</div>
+  </div>
+
+  <!-- INVENTARIO -->
+  <div class="pn-sub on" id="pn-sub-inventario">
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px;align-items:center">
+      <input id="pn-inv-buscar" placeholder="🔍 Buscar por código o nombre..." style="flex:1;min-width:200px" oninput="pnFiltrarInventario()">
+      <select id="pn-inv-cat" onchange="pnFiltrarInventario()" style="min-width:160px">
+        <option value="">Todas las categorías</option>
+      </select>
+      <select id="pn-inv-est" onchange="pnFiltrarInventario()" style="min-width:160px">
+        <option value="">Todos los estados</option>
+        <option value="disponible">Disponible</option>
+        <option value="prestada">Prestada</option>
+        <option value="en_reparacion">En reparación</option>
+        <option value="dada_de_baja">Dada de baja</option>
+        <option value="extraviada">Extraviada</option>
+      </select>
+      <label style="display:flex;align-items:center;gap:4px;font-size:12px;color:var(--mut)">
+        <input type="checkbox" id="pn-inv-inactivas" onchange="pnLoadInventario()"> Ver desactivadas
+      </label>
+    </div>
+    <div class="tw"><table>
+      <thead><tr>
+        <th>Código</th><th>Herramienta</th><th>Categoría</th><th>Estado</th><th>Ubicación / Quién</th><th>Acciones</th>
+      </tr></thead>
+      <tbody id="pn-inv-tbody"><tr><td colspan="6" class="emp">Cargando...</td></tr></tbody>
+    </table></div>
+  </div>
+
+  <!-- PRÉSTAMOS ACTIVOS -->
+  <div class="pn-sub" id="pn-sub-prestamos">
+    <div style="margin-bottom:10px;color:var(--mut);font-size:13px">
+      Herramientas que están actualmente fuera del pañol. Ordenadas por antigüedad del préstamo.
+    </div>
+    <div class="tw"><table>
+      <thead><tr>
+        <th>Código</th><th>Herramienta</th><th>Quién la tiene</th><th>Desde</th><th>Días</th><th>Acciones</th>
+      </tr></thead>
+      <tbody id="pn-prest-tbody"><tr><td colspan="6" class="emp">Cargando...</td></tr></tbody>
+    </table></div>
+  </div>
+
+  <!-- HISTORIAL DE MOVIMIENTOS -->
+  <div class="pn-sub" id="pn-sub-historial">
+    <div style="margin-bottom:10px;color:var(--mut);font-size:13px">
+      Últimos 100 movimientos del pañol.
+    </div>
+    <div class="tw"><table>
+      <thead><tr>
+        <th>Fecha</th><th>Tipo</th><th>Herramienta</th><th>Trabajador</th><th>Registró</th><th>Notas</th>
+      </tr></thead>
+      <tbody id="pn-hist-tbody"><tr><td colspan="6" class="emp">Cargando...</td></tr></tbody>
     </table></div>
   </div>
 </div>
@@ -5187,6 +5277,7 @@ var USR_SECCIONES = [
     { id: 'pa-scout', label: 'Scout — Campo' },
     { id: 'pa-combustible', label: '⛽ Combustible' },
     { id: 'pa-personal', label: '👷 Personal / MO' },
+    { id: 'pa-panol', label: '🔧 Pañol' },
   ]},
   { grupo: 'Scout — App móvil (tabs)', items: [
     { id: 'scout-reportar', label: '📷 Reportar problema' },
@@ -5730,6 +5821,149 @@ if(_inpGondola) _inpGondola.addEventListener('keydown', function(e){
 <!-- ─── MODALES PA-CUENTAS ────────────────────────────────────── -->
 
 <!-- Modal Cuenta -->
+<!-- ─── MODALES PAÑOL ────────────────────────────────────────── -->
+
+<!-- Modal: Nueva/editar herramienta -->
+<div class="ab-modal-overlay" id="pn-mb-unidad">
+<div class="ab-modal" style="width:560px">
+  <div class="mhd"><div class="mht" id="pn-un-tit">Nueva herramienta</div><button class="mcl" onclick="document.getElementById('pn-mb-unidad').classList.remove('on')">×</button></div>
+  <input type="hidden" id="pn-un-id">
+  <div class="fg">
+    <div class="fl"><label>Código interno <span style="color:var(--err)">*</span></label>
+      <input id="pn-un-codigo" placeholder="PAÑ-0001">
+    </div>
+    <div class="fl"><label>Categoría</label>
+      <select id="pn-un-cat"><option value="">— Sin categoría —</option></select>
+    </div>
+    <div class="fl ff"><label>Nombre <span style="color:var(--err)">*</span></label>
+      <input id="pn-un-nombre" placeholder="Amoladora 4½'' Bosch">
+    </div>
+    <div class="fl"><label>Marca</label><input id="pn-un-marca" placeholder="Bosch"></div>
+    <div class="fl"><label>Modelo</label><input id="pn-un-modelo" placeholder="GWS 850"></div>
+    <div class="fl ff"><label>Número de serie del fabricante</label>
+      <input id="pn-un-serie" placeholder="SN12345 (opcional)">
+    </div>
+    <div class="fl"><label>Precio de compra</label>
+      <input type="number" step="0.01" id="pn-un-precio" placeholder="0.00">
+    </div>
+    <div class="fl"><label>Ubicación inicial</label>
+      <input id="pn-un-ubic" placeholder="Pañol - Estante A2">
+    </div>
+    <div class="fl ff"><label>Notas</label><textarea id="pn-un-notas" rows="2"></textarea></div>
+  </div>
+  <div class="ab-modal-footer">
+    <button class="btn bo" onclick="document.getElementById('pn-mb-unidad').classList.remove('on')">Cancelar</button>
+    <button class="btn bb" onclick="pnGuardarUnidad()">Guardar</button>
+  </div>
+</div></div>
+
+<!-- Modal: Préstamo -->
+<div class="ab-modal-overlay" id="pn-mb-prestamo">
+<div class="ab-modal" style="width:480px">
+  <div class="mhd"><div class="mht">📤 Prestar herramienta</div><button class="mcl" onclick="document.getElementById('pn-mb-prestamo').classList.remove('on')">×</button></div>
+  <input type="hidden" id="pn-pr-unidad-id">
+  <div id="pn-pr-info" style="background:#fef3c7;border-left:3px solid #f59e0b;padding:8px 12px;margin-bottom:12px;border-radius:4px;font-size:13px"></div>
+  <div class="fg">
+    <div class="fl ff"><label>Trabajador <span style="color:var(--err)">*</span></label>
+      <select id="pn-pr-trab"><option value="">— Seleccionar —</option></select>
+    </div>
+    <div class="fl"><label>Condición al entregar</label>
+      <select id="pn-pr-cond">
+        <option value="buena">Buena</option>
+        <option value="nueva">Nueva</option>
+        <option value="regular">Regular</option>
+      </select>
+    </div>
+    <div class="fl ff"><label>Notas</label><textarea id="pn-pr-notas" rows="2" placeholder="Trabajo de poda en La Niña Bonita..."></textarea></div>
+  </div>
+  <div class="ab-modal-footer">
+    <button class="btn bo" onclick="document.getElementById('pn-mb-prestamo').classList.remove('on')">Cancelar</button>
+    <button class="btn bb" onclick="pnConfirmarPrestamo()">Prestar</button>
+  </div>
+</div></div>
+
+<!-- Modal: Devolución -->
+<div class="ab-modal-overlay" id="pn-mb-devolucion">
+<div class="ab-modal" style="width:480px">
+  <div class="mhd"><div class="mht">📥 Recibir devolución</div><button class="mcl" onclick="document.getElementById('pn-mb-devolucion').classList.remove('on')">×</button></div>
+  <input type="hidden" id="pn-dv-unidad-id">
+  <div id="pn-dv-info" style="background:#dbeafe;border-left:3px solid #3b82f6;padding:8px 12px;margin-bottom:12px;border-radius:4px;font-size:13px"></div>
+  <div class="fg">
+    <div class="fl"><label>Condición al volver</label>
+      <select id="pn-dv-cond">
+        <option value="buena">Buena</option>
+        <option value="regular">Regular</option>
+        <option value="rota">Rota / dañada</option>
+      </select>
+    </div>
+    <div class="fl ff"><label>Notas (si está rota, qué falla)</label>
+      <textarea id="pn-dv-notas" rows="2"></textarea>
+    </div>
+    <div class="fl ff" style="background:#fef9c3;border-radius:4px;padding:8px">
+      <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-weight:600;color:#854d0e">
+        <input type="checkbox" id="pn-dv-rep" style="width:16px;height:16px">
+        🔧 Mandar a reparación al recibirla
+      </label>
+    </div>
+  </div>
+  <div class="ab-modal-footer">
+    <button class="btn bo" onclick="document.getElementById('pn-mb-devolucion').classList.remove('on')">Cancelar</button>
+    <button class="btn bb" onclick="pnConfirmarDevolucion()">Confirmar</button>
+  </div>
+</div></div>
+
+<!-- Modal: Acción genérica (baja, extravío, reparación) -->
+<div class="ab-modal-overlay" id="pn-mb-accion">
+<div class="ab-modal" style="width:480px">
+  <div class="mhd"><div class="mht" id="pn-ac-tit">Acción</div><button class="mcl" onclick="document.getElementById('pn-mb-accion').classList.remove('on')">×</button></div>
+  <input type="hidden" id="pn-ac-unidad-id">
+  <input type="hidden" id="pn-ac-tipo">
+  <div id="pn-ac-info" style="padding:8px 12px;margin-bottom:12px;border-radius:4px;font-size:13px"></div>
+  <div class="fg">
+    <div class="fl ff" id="pn-ac-motivo-cont"><label>Motivo</label>
+      <input id="pn-ac-motivo" placeholder="Se rompió el motor / robada / etc.">
+    </div>
+    <div class="fl ff"><label>Notas</label><textarea id="pn-ac-notas" rows="2"></textarea></div>
+  </div>
+  <div class="ab-modal-footer">
+    <button class="btn bo" onclick="document.getElementById('pn-mb-accion').classList.remove('on')">Cancelar</button>
+    <button class="btn bb" id="pn-ac-btn" onclick="pnConfirmarAccion()">Confirmar</button>
+  </div>
+</div></div>
+
+<!-- Modal: Detalle / historial de unidad -->
+<div class="ab-modal-overlay" id="pn-mb-detalle">
+<div class="ab-modal" style="width:640px">
+  <div class="mhd"><div class="mht" id="pn-dt-tit">Detalle</div><button class="mcl" onclick="document.getElementById('pn-mb-detalle').classList.remove('on')">×</button></div>
+  <div id="pn-dt-info" style="margin-bottom:12px"></div>
+  <div style="font-weight:600;margin-bottom:6px">📜 Historial de movimientos</div>
+  <div class="tw" style="max-height:340px;overflow:auto"><table>
+    <thead><tr><th>Fecha</th><th>Tipo</th><th>Trabajador</th><th>Registró</th><th>Notas</th></tr></thead>
+    <tbody id="pn-dt-mov-tbody"></tbody>
+  </table></div>
+  <div class="ab-modal-footer">
+    <button class="btn bo" onclick="document.getElementById('pn-mb-detalle').classList.remove('on')">Cerrar</button>
+  </div>
+</div></div>
+
+<!-- Modal: ABM Categorías -->
+<div class="ab-modal-overlay" id="pn-mb-cats">
+<div class="ab-modal" style="width:520px">
+  <div class="mhd"><div class="mht">🏷️ Categorías de pañol</div><button class="mcl" onclick="document.getElementById('pn-mb-cats').classList.remove('on')">×</button></div>
+  <div style="display:flex;gap:8px;margin-bottom:12px">
+    <input id="pn-cat-nombre-nuevo" placeholder="Nombre nueva categoría" style="flex:1">
+    <input id="pn-cat-icono-nuevo" placeholder="🔧" maxlength="2" style="width:60px;text-align:center">
+    <button class="btn bb" onclick="pnAgregarCategoria()">+ Agregar</button>
+  </div>
+  <div class="tw"><table>
+    <thead><tr><th></th><th>Nombre</th><th>Estado</th><th>Acciones</th></tr></thead>
+    <tbody id="pn-cat-tbody"></tbody>
+  </table></div>
+  <div class="ab-modal-footer">
+    <button class="btn bo" onclick="document.getElementById('pn-mb-cats').classList.remove('on')">Cerrar</button>
+  </div>
+</div></div>
+
 <div class="ab-modal-overlay" id="pa-mb-cuenta">
 <div class="ab-modal" style="width:520px">
   <div class="mhd"><div class="mht" id="pa-cu-modal-tit">Nueva cuenta</div><button class="mcl" onclick="document.getElementById('pa-mb-cuenta').classList.remove('on')">×</button></div>
@@ -8757,6 +8991,500 @@ function ppAnularFich(id) {
 document.addEventListener('click', function(e) {
   var t = e.target.closest('[data-sec="pa-personal"]');
   if (t) setTimeout(ppInit, 50);
+});
+
+// ═════════════════════════════════════════════════════════════════════
+// 🔧 PAÑOL — Herramientas durables identificadas por unidad
+// ═════════════════════════════════════════════════════════════════════
+var PN = {
+  unidades: [],
+  categorias: [],
+  trabajadores: [],
+  filtroBuscar: '',
+  filtroCat: '',
+  filtroEst: ''
+};
+
+function pnInit(){
+  // Cargar trabajadores y categorías en paralelo
+  Promise.all([
+    paF('/api/pa/panol/categorias').then(function(r){ PN.categorias = r.data || []; }),
+    paF('/api/pa/personal/trabajadores').then(function(r){ PN.trabajadores = r.data || []; })
+  ]).then(function(){
+    pnPoblarSelectoresCategorias();
+    pnLoadInventario();
+  });
+}
+
+function pnPoblarSelectoresCategorias(){
+  var optsHtml = '<option value="">Todas las categorías</option>'
+    + PN.categorias.filter(function(c){return c.activo;}).map(function(c){
+        return '<option value="'+c.id+'">'+(c.icono?c.icono+' ':'')+c.nombre+'</option>';
+      }).join('');
+  var sel = document.getElementById('pn-inv-cat');
+  if (sel) sel.innerHTML = optsHtml;
+  // Selector del modal de unidad
+  var selUn = document.getElementById('pn-un-cat');
+  if (selUn) {
+    selUn.innerHTML = '<option value="">— Sin categoría —</option>'
+      + PN.categorias.filter(function(c){return c.activo;}).map(function(c){
+          return '<option value="'+c.id+'">'+(c.icono?c.icono+' ':'')+c.nombre+'</option>';
+        }).join('');
+  }
+}
+
+function pnSubtab(tab){
+  document.querySelectorAll('.pn-subtab').forEach(function(el){ el.classList.toggle('on', el.dataset.pn === tab); });
+  document.querySelectorAll('.pn-sub').forEach(function(el){ el.classList.toggle('on', el.id === 'pn-sub-'+tab); });
+  if (tab === 'inventario') pnLoadInventario();
+  else if (tab === 'prestamos') pnLoadPrestamos();
+  else if (tab === 'historial') pnLoadHistorial();
+}
+
+function pnLoadInventario(){
+  var incl = document.getElementById('pn-inv-inactivas').checked ? '?incluir_inactivos=1' : '';
+  paF('/api/pa/panol/unidades'+incl).then(function(r){
+    PN.unidades = r.data || [];
+    pnRenderInventario();
+  });
+}
+
+function pnFiltrarInventario(){
+  PN.filtroBuscar = (document.getElementById('pn-inv-buscar').value || '').toLowerCase();
+  PN.filtroCat = document.getElementById('pn-inv-cat').value;
+  PN.filtroEst = document.getElementById('pn-inv-est').value;
+  pnRenderInventario();
+}
+
+function pnRenderInventario(){
+  var data = PN.unidades.filter(function(u){
+    if (PN.filtroBuscar) {
+      var hay = (u.codigo_interno||'').toLowerCase().indexOf(PN.filtroBuscar) >= 0
+             || (u.nombre||'').toLowerCase().indexOf(PN.filtroBuscar) >= 0
+             || (u.marca||'').toLowerCase().indexOf(PN.filtroBuscar) >= 0;
+      if (!hay) return false;
+    }
+    if (PN.filtroCat && String(u.categoria_id) !== String(PN.filtroCat)) return false;
+    if (PN.filtroEst && u.estado !== PN.filtroEst) return false;
+    return true;
+  });
+  var tb = document.getElementById('pn-inv-tbody');
+  if (!data.length) {
+    tb.innerHTML = '<tr><td colspan="6" class="emp">Sin herramientas '+(PN.filtroBuscar||PN.filtroCat||PN.filtroEst?'que coincidan con los filtros':'cargadas')+'</td></tr>';
+    return;
+  }
+  var esAdmin = LNB_USER && LNB_USER.rol === 'admin';
+  tb.innerHTML = data.map(function(u){
+    var rowStyle = u.activo ? '' : ' style="opacity:.5"';
+    var estLabel = u.estado.replace(/_/g,' ');
+    var estBadge = '<span class="pn-estado pn-est-'+u.estado+'">'+estLabel+'</span>';
+    var ubicTxt = u.estado === 'prestada' && u.trabajador_actual_nombre
+      ? '👤 '+u.trabajador_actual_nombre
+      : (u.ubicacion_actual || '—');
+    var catTxt = u.categoria_nombre ? (u.categoria_icono?u.categoria_icono+' ':'')+u.categoria_nombre : '<span style="color:var(--mut)">—</span>';
+    var nombreCol = '<strong>'+u.nombre+'</strong>'+(u.marca?'<div style="font-size:11px;color:var(--mut)">'+u.marca+(u.modelo?' '+u.modelo:'')+'</div>':'');
+    // Acciones según estado
+    var acciones = '';
+    if (u.activo) {
+      acciones += '<button class="btn bo bs" onclick="pnVerDetalle('+u.id+')" title="Ver detalle" style="padding:3px 8px">👁</button> ';
+      if (u.estado === 'disponible') {
+        acciones += '<button class="btn bs" style="background:#f59e0b;color:#fff;border-color:#f59e0b;padding:3px 8px" onclick="pnAbrirPrestamo('+u.id+')" title="Prestar">📤</button> ';
+        acciones += '<button class="btn bo bs" onclick="pnAbrirAccion('+u.id+',\'reparacion_inicio\')" title="Mandar a reparación" style="padding:3px 8px">🔧</button> ';
+      }
+      if (u.estado === 'prestada') {
+        acciones += '<button class="btn bs" style="background:#3b82f6;color:#fff;border-color:#3b82f6;padding:3px 8px" onclick="pnAbrirDevolucion('+u.id+')" title="Recibir devolución">📥</button> ';
+      }
+      if (u.estado === 'en_reparacion') {
+        acciones += '<button class="btn bs" style="background:var(--ok);color:#fff;border-color:var(--ok);padding:3px 8px" onclick="pnAbrirAccion('+u.id+',\'reparacion_fin\')" title="Volvió de reparación">✓</button> ';
+      }
+      if (u.estado !== 'dada_de_baja' && u.estado !== 'extraviada') {
+        acciones += '<button class="btn bo bs" onclick="pnEditarUnidad('+u.id+')" title="Editar" style="padding:3px 8px">✏️</button> ';
+      }
+      if (esAdmin) {
+        acciones += '<button class="btn bs" style="background:#dc2626;color:#fff;border-color:#dc2626;padding:3px 8px" onclick="pnAbrirAccion('+u.id+',\'baja\')" title="Dar de baja">🗑</button>';
+      }
+    } else {
+      acciones += '<button class="btn bo bs" onclick="pnReactivarUnidad('+u.id+')" title="Reactivar" style="padding:3px 8px;color:var(--ok);border-color:var(--ok)">↺</button>';
+    }
+    return '<tr'+rowStyle+'>'
+      + '<td><strong style="font-family:monospace;font-size:12px">'+u.codigo_interno+'</strong></td>'
+      + '<td>'+nombreCol+'</td>'
+      + '<td>'+catTxt+'</td>'
+      + '<td>'+estBadge+'</td>'
+      + '<td style="font-size:12px">'+ubicTxt+'</td>'
+      + '<td style="white-space:nowrap">'+acciones+'</td>'
+      + '</tr>';
+  }).join('');
+}
+
+function pnLoadPrestamos(){
+  paF('/api/pa/panol/unidades?estado=prestada').then(function(r){
+    var data = r.data || [];
+    var tb = document.getElementById('pn-prest-tbody');
+    if (!data.length) {
+      tb.innerHTML = '<tr><td colspan="6" class="emp">No hay herramientas prestadas en este momento.</td></tr>';
+      return;
+    }
+    // Para saber "desde cuándo", necesitamos el último movimiento de tipo prestamo de cada unidad.
+    // Por simplicidad, traemos los movimientos por unidad sucesivamente. Para una primera versión está OK.
+    var hoy = new Date();
+    Promise.all(data.map(function(u){
+      return paF('/api/pa/panol/unidades/'+u.id).then(function(rr){
+        var ultPrest = (rr.movimientos||[]).find(function(m){return m.tipo==='prestamo';});
+        return Object.assign({}, u, { fecha_prestamo: ultPrest ? ultPrest.fecha : null });
+      });
+    })).then(function(filas){
+      // Ordenar por fecha de préstamo asc (más viejas primero)
+      filas.sort(function(a,b){
+        if (!a.fecha_prestamo) return 1;
+        if (!b.fecha_prestamo) return -1;
+        return a.fecha_prestamo.localeCompare(b.fecha_prestamo);
+      });
+      tb.innerHTML = filas.map(function(u){
+        var fechaStr = u.fecha_prestamo ? paFecha(u.fecha_prestamo.split(' ')[0]) : '—';
+        var dias = '—';
+        if (u.fecha_prestamo) {
+          var d = new Date(u.fecha_prestamo);
+          dias = Math.max(0, Math.floor((hoy - d) / (1000*60*60*24)));
+        }
+        var diasColor = (typeof dias === 'number' && dias > 7) ? '#dc2626' : 'var(--txt)';
+        return '<tr>'
+          + '<td><strong style="font-family:monospace;font-size:12px">'+u.codigo_interno+'</strong></td>'
+          + '<td>'+u.nombre+'</td>'
+          + '<td>👤 '+(u.trabajador_actual_nombre||'—')+'</td>'
+          + '<td style="font-size:12px">'+fechaStr+'</td>'
+          + '<td style="color:'+diasColor+';font-weight:600">'+dias+'</td>'
+          + '<td style="white-space:nowrap"><button class="btn bs" style="background:#3b82f6;color:#fff;border-color:#3b82f6;padding:3px 8px" onclick="pnAbrirDevolucion('+u.id+')" title="Recibir">📥 Devolver</button></td>'
+          + '</tr>';
+      }).join('');
+    });
+  });
+}
+
+function pnLoadHistorial(){
+  paF('/api/pa/panol/movimientos?limit=100').then(function(r){
+    var data = r.data || [];
+    var tb = document.getElementById('pn-hist-tbody');
+    if (!data.length) {
+      tb.innerHTML = '<tr><td colspan="6" class="emp">Sin movimientos registrados.</td></tr>';
+      return;
+    }
+    var iconos = {
+      alta: '✨ Alta', prestamo: '📤 Préstamo', devolucion: '📥 Devolución',
+      reparacion_inicio: '🔧 A reparación', reparacion_fin: '✓ De reparación',
+      baja: '🗑 Baja', extravio: '❓ Extravío'
+    };
+    tb.innerHTML = data.map(function(m){
+      var fechaStr = m.fecha ? paFecha(m.fecha.split(' ')[0])+' '+(m.fecha.split(' ')[1]||'').slice(0,5) : '—';
+      return '<tr>'
+        + '<td style="font-size:12px">'+fechaStr+'</td>'
+        + '<td>'+(iconos[m.tipo]||m.tipo)+'</td>'
+        + '<td><strong style="font-family:monospace;font-size:11px">'+m.codigo_interno+'</strong> '+m.unidad_nombre+'</td>'
+        + '<td>'+(m.trabajador_nombre?'👤 '+m.trabajador_nombre:'—')+'</td>'
+        + '<td style="font-size:12px;color:var(--mut)">'+(m.quien_registra_nombre||'—')+'</td>'
+        + '<td style="font-size:12px">'+(m.notas||'')+(m.motivo?(m.notas?' · ':'')+m.motivo:'')+(m.condicion?(m.notas||m.motivo?' · ':'')+'cond: '+m.condicion:'')+'</td>'
+        + '</tr>';
+    }).join('');
+  });
+}
+
+// ── Modales: Nueva/Editar unidad ──
+function pnAbrirNuevaUnidad(){
+  document.getElementById('pn-un-tit').textContent = 'Nueva herramienta';
+  document.getElementById('pn-un-id').value = '';
+  document.getElementById('pn-un-codigo').value = '';
+  document.getElementById('pn-un-nombre').value = '';
+  document.getElementById('pn-un-cat').value = '';
+  document.getElementById('pn-un-marca').value = '';
+  document.getElementById('pn-un-modelo').value = '';
+  document.getElementById('pn-un-serie').value = '';
+  document.getElementById('pn-un-precio').value = '';
+  document.getElementById('pn-un-ubic').value = 'Pañol';
+  document.getElementById('pn-un-notas').value = '';
+  // Sugerir un código siguiente: PAÑ-NNNN
+  var maxN = 0;
+  PN.unidades.forEach(function(u){
+    var m = /PA[ÑN]-(\d+)/i.exec(u.codigo_interno||'');
+    if (m) { var n = parseInt(m[1],10); if (n > maxN) maxN = n; }
+  });
+  document.getElementById('pn-un-codigo').value = 'PAÑ-' + String(maxN+1).padStart(4,'0');
+  document.getElementById('pn-mb-unidad').classList.add('on');
+}
+
+function pnEditarUnidad(id){
+  var u = PN.unidades.find(function(x){return x.id===id;});
+  if (!u) return;
+  document.getElementById('pn-un-tit').textContent = 'Editar — '+u.codigo_interno;
+  document.getElementById('pn-un-id').value = u.id;
+  document.getElementById('pn-un-codigo').value = u.codigo_interno||'';
+  document.getElementById('pn-un-nombre').value = u.nombre||'';
+  document.getElementById('pn-un-cat').value = u.categoria_id||'';
+  document.getElementById('pn-un-marca').value = u.marca||'';
+  document.getElementById('pn-un-modelo').value = u.modelo||'';
+  document.getElementById('pn-un-serie').value = u.numero_serie||'';
+  document.getElementById('pn-un-precio').value = u.precio_compra||'';
+  document.getElementById('pn-un-ubic').value = u.ubicacion_actual||'';
+  document.getElementById('pn-un-notas').value = u.notas||'';
+  document.getElementById('pn-mb-unidad').classList.add('on');
+}
+
+function pnGuardarUnidad(){
+  var id = document.getElementById('pn-un-id').value;
+  var body = {
+    codigo_interno: document.getElementById('pn-un-codigo').value.trim(),
+    nombre: document.getElementById('pn-un-nombre').value.trim(),
+    categoria_id: document.getElementById('pn-un-cat').value || null,
+    marca: document.getElementById('pn-un-marca').value.trim() || null,
+    modelo: document.getElementById('pn-un-modelo').value.trim() || null,
+    numero_serie: document.getElementById('pn-un-serie').value.trim() || null,
+    precio_compra: parseFloat(document.getElementById('pn-un-precio').value) || null,
+    ubicacion_actual: document.getElementById('pn-un-ubic').value.trim() || null,
+    notas: document.getElementById('pn-un-notas').value.trim() || null
+  };
+  if (!body.codigo_interno) return toast('Código interno requerido','er');
+  if (!body.nombre) return toast('Nombre requerido','er');
+  var url = id ? '/api/pa/panol/unidades/'+id : '/api/pa/panol/unidades';
+  var method = id ? 'PATCH' : 'POST';
+  paF(url, {method:method, headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)}).then(function(r){
+    if (r.ok) {
+      toast(id ? 'Herramienta actualizada' : '✓ Herramienta agregada');
+      document.getElementById('pn-mb-unidad').classList.remove('on');
+      pnLoadInventario();
+    } else toast(r.error||'Error','er');
+  });
+}
+
+function pnReactivarUnidad(id){
+  paF('/api/pa/panol/unidades/'+id+'/reactivar', {method:'POST'}).then(function(r){
+    if (r.ok) { toast('✓ Reactivada'); pnLoadInventario(); }
+    else toast(r.error||'Error','er');
+  });
+}
+
+// ── Préstamo ──
+function pnAbrirPrestamo(id){
+  var u = PN.unidades.find(function(x){return x.id===id;});
+  if (!u) return;
+  document.getElementById('pn-pr-unidad-id').value = u.id;
+  document.getElementById('pn-pr-info').innerHTML = '<strong>'+u.codigo_interno+'</strong> — '+u.nombre;
+  // Poblar trabajadores
+  var sel = document.getElementById('pn-pr-trab');
+  sel.innerHTML = '<option value="">— Seleccionar —</option>'
+    + PN.trabajadores.filter(function(t){return t.activo!==0;}).map(function(t){
+        return '<option value="'+t.id+'">'+t.nombre+'</option>';
+      }).join('');
+  document.getElementById('pn-pr-cond').value = 'buena';
+  document.getElementById('pn-pr-notas').value = '';
+  document.getElementById('pn-mb-prestamo').classList.add('on');
+}
+function pnConfirmarPrestamo(){
+  var id = document.getElementById('pn-pr-unidad-id').value;
+  var trab = document.getElementById('pn-pr-trab').value;
+  if (!trab) return toast('Seleccioná un trabajador','er');
+  var body = {
+    tipo: 'prestamo',
+    trabajador_id: parseInt(trab,10),
+    condicion: document.getElementById('pn-pr-cond').value,
+    notas: document.getElementById('pn-pr-notas').value.trim() || null
+  };
+  paF('/api/pa/panol/unidades/'+id+'/movimiento',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(function(r){
+    if (r.ok) {
+      toast('📤 Herramienta entregada');
+      document.getElementById('pn-mb-prestamo').classList.remove('on');
+      pnLoadInventario();
+    } else toast(r.error||'Error','er');
+  });
+}
+
+// ── Devolución ──
+function pnAbrirDevolucion(id){
+  var u = PN.unidades.find(function(x){return x.id===id;});
+  if (!u) return;
+  document.getElementById('pn-dv-unidad-id').value = u.id;
+  document.getElementById('pn-dv-info').innerHTML =
+    '<strong>'+u.codigo_interno+'</strong> — '+u.nombre
+    + (u.trabajador_actual_nombre ? '<br>Quien la tiene: 👤 '+u.trabajador_actual_nombre : '');
+  document.getElementById('pn-dv-cond').value = 'buena';
+  document.getElementById('pn-dv-notas').value = '';
+  document.getElementById('pn-dv-rep').checked = false;
+  document.getElementById('pn-mb-devolucion').classList.add('on');
+}
+function pnConfirmarDevolucion(){
+  var id = document.getElementById('pn-dv-unidad-id').value;
+  var cond = document.getElementById('pn-dv-cond').value;
+  var notas = document.getElementById('pn-dv-notas').value.trim() || null;
+  var mandarRep = document.getElementById('pn-dv-rep').checked;
+  // 1) Devolución
+  paF('/api/pa/panol/unidades/'+id+'/movimiento',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({tipo:'devolucion', condicion: cond, notas: notas})}).then(function(r){
+    if (!r.ok) { toast(r.error||'Error','er'); return; }
+    if (!mandarRep) {
+      toast('📥 Recibida');
+      document.getElementById('pn-mb-devolucion').classList.remove('on');
+      pnLoadInventario();
+      return;
+    }
+    // 2) Si tilda "mandar a reparación", hacer movimiento adicional
+    paF('/api/pa/panol/unidades/'+id+'/movimiento',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({tipo:'reparacion_inicio', notas:'Detectada al volver: '+(notas||'sin detalles')})}).then(function(r2){
+      if (r2.ok) toast('📥 Recibida y mandada a reparación');
+      else toast(r2.error||'Error en reparación','er');
+      document.getElementById('pn-mb-devolucion').classList.remove('on');
+      pnLoadInventario();
+    });
+  });
+}
+
+// ── Acción genérica (baja, extravío, reparación) ──
+function pnAbrirAccion(id, tipo){
+  var u = PN.unidades.find(function(x){return x.id===id;});
+  if (!u) return;
+  document.getElementById('pn-ac-unidad-id').value = u.id;
+  document.getElementById('pn-ac-tipo').value = tipo;
+  var configs = {
+    baja: {
+      tit:'🗑 Dar de baja', infoColor:'#fee2e2', infoBorder:'#dc2626',
+      btnTxt:'Dar de baja', btnClass:'background:#dc2626;color:#fff;border-color:#dc2626',
+      mostrarMotivo:true, infoText:'Esta acción marca la herramienta como dada de baja y la saca del inventario activo.'
+    },
+    extravio: {
+      tit:'❓ Marcar como extraviada', infoColor:'#fef3c7', infoBorder:'#f59e0b',
+      btnTxt:'Marcar extraviada', btnClass:'background:#f59e0b;color:#fff;border-color:#f59e0b',
+      mostrarMotivo:true, infoText:'La herramienta queda registrada como extraviada. Se puede revertir si aparece.'
+    },
+    reparacion_inicio: {
+      tit:'🔧 Mandar a reparación', infoColor:'#dbeafe', infoBorder:'#3b82f6',
+      btnTxt:'A reparación', btnClass:'',
+      mostrarMotivo:true, infoText:'La herramienta queda fuera del inventario disponible mientras está en reparación.'
+    },
+    reparacion_fin: {
+      tit:'✓ Volvió de reparación', infoColor:'#dcfce7', infoBorder:'#16a34a',
+      btnTxt:'Marcar reparada', btnClass:'background:var(--ok);color:#fff;border-color:var(--ok)',
+      mostrarMotivo:false, infoText:'La herramienta vuelve al pañol como disponible.'
+    }
+  };
+  var c = configs[tipo] || configs.baja;
+  document.getElementById('pn-ac-tit').textContent = c.tit;
+  document.getElementById('pn-ac-info').style.background = c.infoColor;
+  document.getElementById('pn-ac-info').style.borderLeft = '3px solid '+c.infoBorder;
+  document.getElementById('pn-ac-info').innerHTML = '<strong>'+u.codigo_interno+'</strong> — '+u.nombre+'<br>'+c.infoText;
+  document.getElementById('pn-ac-motivo-cont').style.display = c.mostrarMotivo ? '' : 'none';
+  document.getElementById('pn-ac-motivo').value = '';
+  document.getElementById('pn-ac-notas').value = '';
+  var btn = document.getElementById('pn-ac-btn');
+  btn.textContent = c.btnTxt;
+  btn.setAttribute('style', c.btnClass);
+  document.getElementById('pn-mb-accion').classList.add('on');
+}
+function pnConfirmarAccion(){
+  var id = document.getElementById('pn-ac-unidad-id').value;
+  var tipo = document.getElementById('pn-ac-tipo').value;
+  var body = {
+    tipo: tipo,
+    motivo: document.getElementById('pn-ac-motivo').value.trim() || null,
+    notas: document.getElementById('pn-ac-notas').value.trim() || null
+  };
+  paF('/api/pa/panol/unidades/'+id+'/movimiento',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(function(r){
+    if (r.ok) {
+      toast('✓ Hecho');
+      document.getElementById('pn-mb-accion').classList.remove('on');
+      pnLoadInventario();
+    } else toast(r.error||'Error','er');
+  });
+}
+
+// ── Detalle de unidad con historial ──
+function pnVerDetalle(id){
+  paF('/api/pa/panol/unidades/'+id).then(function(r){
+    if (!r.ok) return toast(r.error||'Error','er');
+    var u = r.data;
+    document.getElementById('pn-dt-tit').textContent = u.codigo_interno + ' — ' + u.nombre;
+    var info = '';
+    info += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:13px">';
+    info += '<div><strong>Estado:</strong> <span class="pn-estado pn-est-'+u.estado+'">'+u.estado.replace(/_/g,' ')+'</span></div>';
+    info += '<div><strong>Categoría:</strong> '+(u.categoria_nombre?(u.categoria_icono?u.categoria_icono+' ':'')+u.categoria_nombre:'—')+'</div>';
+    if (u.marca||u.modelo) info += '<div><strong>Marca/Modelo:</strong> '+(u.marca||'')+' '+(u.modelo||'')+'</div>';
+    if (u.numero_serie) info += '<div><strong>N° serie:</strong> <code>'+u.numero_serie+'</code></div>';
+    info += '<div><strong>Ubicación:</strong> '+(u.ubicacion_actual||'—')+'</div>';
+    if (u.precio_compra) info += '<div><strong>Precio compra:</strong> $'+u.precio_compra+'</div>';
+    info += '<div><strong>Alta:</strong> '+(u.fecha_alta||'—')+'</div>';
+    if (u.fecha_baja) info += '<div><strong>Baja:</strong> '+u.fecha_baja+'</div>';
+    info += '</div>';
+    if (u.notas) info += '<div style="margin-top:6px;font-size:12px;color:var(--mut)"><strong>Notas:</strong> '+u.notas+'</div>';
+    document.getElementById('pn-dt-info').innerHTML = info;
+    var iconos = {
+      alta: '✨ Alta', prestamo: '📤 Préstamo', devolucion: '📥 Devolución',
+      reparacion_inicio: '🔧 A reparación', reparacion_fin: '✓ De reparación',
+      baja: '🗑 Baja', extravio: '❓ Extravío'
+    };
+    var movs = r.movimientos || [];
+    var tb = document.getElementById('pn-dt-mov-tbody');
+    if (!movs.length) {
+      tb.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--mut);padding:14px">Sin movimientos.</td></tr>';
+    } else {
+      tb.innerHTML = movs.map(function(m){
+        var fechaStr = m.fecha ? paFecha(m.fecha.split(' ')[0])+' '+(m.fecha.split(' ')[1]||'').slice(0,5) : '—';
+        var nota = (m.notas||'') + (m.motivo?(m.notas?' · ':'')+m.motivo:'') + (m.condicion?(m.notas||m.motivo?' · ':'')+'cond: '+m.condicion:'');
+        return '<tr><td style="font-size:11px">'+fechaStr+'</td><td>'+(iconos[m.tipo]||m.tipo)+'</td><td>'+(m.trabajador_nombre||'—')+'</td><td style="font-size:11px;color:var(--mut)">'+(m.quien_registra_nombre||'—')+'</td><td style="font-size:11px">'+nota+'</td></tr>';
+      }).join('');
+    }
+    document.getElementById('pn-mb-detalle').classList.add('on');
+  });
+}
+
+// ── ABM Categorías ──
+function pnAbrirCategorias(){
+  pnRenderCategorias();
+  document.getElementById('pn-cat-nombre-nuevo').value = '';
+  document.getElementById('pn-cat-icono-nuevo').value = '';
+  document.getElementById('pn-mb-cats').classList.add('on');
+}
+function pnRenderCategorias(){
+  paF('/api/pa/panol/categorias?incluir_inactivos=1').then(function(r){
+    PN.categorias = r.data || [];
+    pnPoblarSelectoresCategorias();
+    var tb = document.getElementById('pn-cat-tbody');
+    if (!PN.categorias.length) {
+      tb.innerHTML = '<tr><td colspan="4" class="emp">Sin categorías</td></tr>';
+      return;
+    }
+    tb.innerHTML = PN.categorias.map(function(c){
+      var rowStyle = c.activo ? '' : ' style="opacity:.5"';
+      var est = c.activo ? '<span style="color:var(--ok)">● Activa</span>' : '<span style="color:var(--mut)">○ Inactiva</span>';
+      var btn = c.activo
+        ? '<button class="btn bd bs" onclick="pnDesactivarCategoria('+c.id+',\''+(c.nombre||'').replace(/\'/g,"\\'")+'\')" title="Desactivar" style="padding:3px 8px">🗑</button>'
+        : '<button class="btn bo bs" onclick="pnReactivarCategoria('+c.id+')" title="Reactivar" style="padding:3px 8px;color:var(--ok);border-color:var(--ok)">↺</button>';
+      return '<tr'+rowStyle+'><td style="font-size:18px;text-align:center">'+(c.icono||'')+'</td><td>'+c.nombre+'</td><td>'+est+'</td><td>'+btn+'</td></tr>';
+    }).join('');
+  });
+}
+function pnAgregarCategoria(){
+  var nom = document.getElementById('pn-cat-nombre-nuevo').value.trim();
+  var ico = document.getElementById('pn-cat-icono-nuevo').value.trim();
+  if (!nom) return toast('Nombre requerido','er');
+  paF('/api/pa/panol/categorias',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({nombre:nom, icono:ico||null})}).then(function(r){
+    if (r.ok) { toast('✓ Categoría agregada'); document.getElementById('pn-cat-nombre-nuevo').value=''; document.getElementById('pn-cat-icono-nuevo').value=''; pnRenderCategorias(); }
+    else toast(r.error||'Error','er');
+  });
+}
+function pnDesactivarCategoria(id, nombre){
+  if (!confirm('¿Desactivar categoría "'+nombre+'"?')) return;
+  paF('/api/pa/panol/categorias/'+id, {method:'DELETE'}).then(function(r){
+    if (r.ok) { toast('✓ Desactivada'); pnRenderCategorias(); }
+    else toast(r.error||'Error','er');
+  });
+}
+function pnReactivarCategoria(id){
+  paF('/api/pa/panol/categorias/'+id+'/reactivar', {method:'POST'}).then(function(r){
+    if (r.ok) { toast('✓ Reactivada'); pnRenderCategorias(); }
+    else toast(r.error||'Error','er');
+  });
+}
+
+// Hook al clickear en el item del sidebar Pañol
+document.addEventListener('click', function(e) {
+  var t = e.target.closest('[data-sec="pa-panol"]');
+  if (t) setTimeout(pnInit, 50);
 });
 
 // ═════════════════════════════════════════════════════════════════════
