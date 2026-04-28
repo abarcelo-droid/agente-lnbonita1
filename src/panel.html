@@ -6307,6 +6307,29 @@ function paEditarCultivo(loteId,nombre){
       if(ia<0)ia=99; if(ib<0)ib=99;
       return ia-ib;
     });
+    // Si los veranos adyacentes a un invierno son frutales (en este lote),
+    // ocultamos el invierno: un frutal ocupa el lote todo el año.
+    // Ej: si 2022/23 es Durazno o 2023/24 es Durazno, oculto Inv 2023.
+    function _cultDe(campNom){
+      var cd=l.cultivos&&l.cultivos[campNom];
+      if(!cd) return '';
+      return typeof cd==='string'?cd:(cd.cultivo||'');
+    }
+    todasCamps=todasCamps.filter(function(c){
+      var m=/^Inv (\d{4})$/.exec(c.nombre);
+      if(!m) return true; // verano: siempre se muestra
+      var año=parseInt(m[1],10);
+      // Verano anterior: (año-1)/(añoYY)  -- ej: Inv 2023 → 2022/23
+      // Verano siguiente: año/(año+1 YY)  -- ej: Inv 2023 → 2023/24
+      var yyPrev=String((año)%100).padStart(2,'0');
+      var yyNext=String((año+1)%100).padStart(2,'0');
+      var verPrev=(año-1)+'/'+yyPrev;
+      var verNext=año+'/'+yyNext;
+      var prevCult=_cultDe(verPrev), nextCult=_cultDe(verNext);
+      // Ocultar si CUALQUIER verano adyacente es frutal
+      if(esFrutal(prevCult)||esFrutal(nextCult)) return false;
+      return true;
+    });
     var allHTML='',allRows=[];
     todasCamps.forEach(function(c){
       var cd=l.cultivos&&l.cultivos[c.nombre]?l.cultivos[c.nombre]:null;
@@ -6392,7 +6415,9 @@ function paBuildCampRowHTML(c, cultData, mostrarMeses) {
   return { html, key, cultVal, msVal, mcVal, hsVal, edVal, ppVal };
 }
 
-// Toggle de la fila "En desarrollo" cuando cambia el cultivo del select
+// Toggle de la fila "En desarrollo" cuando cambia el cultivo del select.
+// Además: si el cambio fue en un verano y volvió/dejó de ser frutal,
+// ocultamos/mostramos el invierno asociado (un frutal ocupa todo el año).
 function paToggleDesarrolloFrutal(key){
   var sel = document.getElementById('pa-ec-'+key);
   var cont = document.getElementById('pa-fd-'+key);
@@ -6408,6 +6433,52 @@ function paToggleDesarrolloFrutal(key){
     var ppC = document.getElementById('pa-pp-cont-'+key);
     if (ppC) ppC.style.display = 'none';
   }
+  // Re-evaluar visibilidad de inviernos del lote según el estado actual de los selects
+  paRecalcInviernosVisibles();
+}
+
+// Para cada Inv YYYY presente en el modal, lo oculta si alguno de los veranos
+// adyacentes (verano anterior YYYY-1/YY o verano siguiente YYYY/YY+1) está
+// asignado a un frutal en los selects abiertos. Lee el estado actual del DOM.
+function paRecalcInviernosVisibles(){
+  // Helper: lee el cultivo actualmente seleccionado para una campaña dada.
+  // Si no existe el select (porque el invierno está oculto/no se renderizó),
+  // hace fallback al valor guardado en la última carga del lote.
+  function _vivo(campNom){
+    var k=campNom.replace('/','_').replace(/ /g,'_');
+    var s=document.getElementById('pa-ec-'+k);
+    if(s) return s.value || '';
+    return '';
+  }
+  // Recorrer todas las campañas que existen en PA y, si son inviernos, evaluar
+  PA.campañas.forEach(function(c){
+    var m=/^Inv (\d{4})$/.exec(c.nombre);
+    if(!m) return;
+    var año=parseInt(m[1],10);
+    var yyPrev=String((año)%100).padStart(2,'0');
+    var yyNext=String((año+1)%100).padStart(2,'0');
+    var prevCult=_vivo((año-1)+'/'+yyPrev);
+    var nextCult=_vivo(año+'/'+yyNext);
+    var ocultar=esFrutal(prevCult)||esFrutal(nextCult);
+    var keyInv=c.nombre.replace(/ /g,'_');
+    var selInv=document.getElementById('pa-ec-'+keyInv);
+    if(!selInv) return; // no estaba renderizado (caso default ya filtrado al abrir)
+    // El "row" del invierno son los siblings hasta el próximo label de campaña.
+    // En la práctica, el contenedor más cercano `.fl` que envuelve el label es
+    // suficiente; lo ocultamos junto con su fila de "en desarrollo" si existiera.
+    var flLabel=selInv.closest('.fl');
+    if(!flLabel) return;
+    flLabel.style.display=ocultar?'none':'';
+    var fdInv=document.getElementById('pa-fd-'+keyInv);
+    if(fdInv) fdInv.style.display=ocultar?'none':(esFrutal(selInv.value)?'':'none');
+    if(ocultar){
+      // Limpiar valores para que al guardar no persistan
+      selInv.value='';
+      var msInv=document.getElementById('pa-ms-'+keyInv); if(msInv) msInv.value='';
+      var mcInv=document.getElementById('pa-mc-'+keyInv); if(mcInv) mcInv.value='';
+      var hsInv=document.getElementById('pa-hs-'+keyInv); if(hsInv) hsInv.value='';
+    }
+  });
 }
 
 // Toggle del input de % cuando se tilda/destilda "en desarrollo"
