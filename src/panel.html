@@ -5683,9 +5683,12 @@ if(_inpGondola) _inpGondola.addEventListener('keydown', function(e){
   </div>
   <div class="fg" id="pa-cult-grid-verano"></div>
   <div id="pa-cult-grid-invierno"></div>
-  <div class="ab-modal-footer">
-    <button class="btn bo" onclick="document.getElementById('pa-mb-cultivo').classList.remove('on')">Cancelar</button>
-    <button class="btn bb" onclick="paGuardarEdicionLote()">Guardar todo</button>
+  <div class="ab-modal-footer" style="justify-content:space-between">
+    <button class="btn" id="pa-cult-btn-del" style="background:#dc2626;color:#fff;border-color:#dc2626;display:none" onclick="paEliminarLoteDesdeModal()">🗑 Eliminar lote</button>
+    <div style="display:flex;gap:8px">
+      <button class="btn bo" onclick="document.getElementById('pa-mb-cultivo').classList.remove('on')">Cancelar</button>
+      <button class="btn bb" onclick="paGuardarEdicionLote()">Guardar todo</button>
+    </div>
   </div>
 </div></div>
 
@@ -6249,6 +6252,9 @@ function paEditarCultivo(loteId,nombre){
   document.getElementById('pa-cult-lote-id').value=loteId;
   document.getElementById('pa-cult-tit').textContent='Editar — '+nombre;
   document.getElementById('pa-cult-lote-nombre').textContent='';
+  // Botón eliminar visible solo para admin
+  var btnDel=document.getElementById('pa-cult-btn-del');
+  if(btnDel) btnDel.style.display=(LNB_USER&&LNB_USER.rol==='admin')?'inline-flex':'none';
   // Cargar datos del lote
   paF('/api/pa/lotes/'+loteId).then(function(r){
     if(!r.ok)return toast('Error cargando lote','er');
@@ -6375,6 +6381,38 @@ function paGuardarEdicionLote(){
         paF('/api/pa/lotes').then(function(r2){PA.lotes=r2.data||[];});
       });
     });
+}
+
+// Eliminar (soft delete) el lote actualmente abierto en el modal de edición.
+// Solo admin. Lote se marca activo=0 y queda oculto de listados (recuperable
+// con ?incluir_inactivos=1 desde el panel de Lotes si hace falta).
+function paEliminarLoteDesdeModal(){
+  if(!LNB_USER || LNB_USER.rol!=='admin'){
+    return toast('Solo admin puede eliminar lotes','er');
+  }
+  var loteId=document.getElementById('pa-cult-lote-id').value;
+  var nombre=document.getElementById('pa-cult-edit-nombre').value || ('lote '+loteId);
+  if(!loteId)return;
+  var msg='¿Eliminar el lote "'+nombre+'"?\n\n'
+    +'El lote se desactivará y dejará de aparecer en:\n'
+    +'  • Calendario agrícola\n'
+    +'  • Listas de lotes (Fincas y Lotes, órdenes, fichajes, etc.)\n'
+    +'  • Mapa\n\n'
+    +'Sus datos históricos (cultivos por campaña, polígono, hectáreas) se conservan '
+    +'y el lote se puede reactivar más adelante desde Fincas y Lotes activando '
+    +'"Ver desactivados".\n\n'
+    +'¿Continuar?';
+  if(!confirm(msg))return;
+  paF('/api/pa/lotes/'+loteId,{method:'DELETE'}).then(function(r){
+    if(r&&r.ok){
+      toast('Lote "'+nombre+'" eliminado');
+      document.getElementById('pa-mb-cultivo').classList.remove('on');
+      paLoadCalendario();
+      paF('/api/pa/lotes').then(function(r2){PA.lotes=r2.data||[];});
+    }else{
+      toast('Error al eliminar: '+(r&&r.error?r.error:'desconocido'),'er');
+    }
+  }).catch(function(e){toast('Error: '+e.message,'er');});
 }
 
 function paBadgeTipo(t){
