@@ -43,6 +43,34 @@ if (-not (Test-Path $Downloads)) {
     exit 1
 }
 
+# === Chequeo de branch ===
+# Workflow colaborativo: nadie pushea directo a main. Siempre branch + PR.
+$currentBranch = (git rev-parse --abbrev-ref HEAD 2>$null).Trim()
+if ([string]::IsNullOrWhiteSpace($currentBranch)) {
+    Write-Host "[ERROR] No pude leer la branch actual (¿el repo está OK?)" -ForegroundColor Red
+    Read-Host "Enter para cerrar"
+    exit 1
+}
+if ($currentBranch -eq 'main' -or $currentBranch -eq 'master') {
+    Write-Host ""
+    Write-Host "===========================================================" -ForegroundColor Red
+    Write-Host " Estás parado en la branch '$currentBranch'." -ForegroundColor Red
+    Write-Host " No se puede deployar directamente a main en el workflow" -ForegroundColor Red
+    Write-Host " colaborativo. Creá una branch primero:" -ForegroundColor Red
+    Write-Host ""
+    Write-Host "    nuevabranch andy/feat-loquesea" -ForegroundColor Yellow
+    Write-Host ""
+    Write-Host " (o reemplazá 'andy' por tu prefijo y 'feat-loquesea'" -ForegroundColor Red
+    Write-Host "  por una descripción corta de qué estás haciendo)" -ForegroundColor Red
+    Write-Host "===========================================================" -ForegroundColor Red
+    Write-Host ""
+    Read-Host "Enter para cerrar"
+    exit 1
+}
+Write-Host ""
+Write-Host "Branch actual: " -NoNewline -ForegroundColor DarkGray
+Write-Host $currentBranch -ForegroundColor Cyan
+
 # === Detección de archivos ===
 $cutoff = (Get-Date).AddMinutes(-$MaxAgeMinutes)
 $found = @()
@@ -194,14 +222,38 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 Write-Host "git push..." -ForegroundColor Cyan
-git push
+# -u set-upstream para que la primera vez en una branch nueva sepa a dónde pushear
+git push -u origin $currentBranch
 if ($LASTEXITCODE -ne 0) {
     Write-Host "[ERROR] git push falló. El commit ya está local; resolvé el problema y pusheá manualmente." -ForegroundColor Red
     Read-Host "Enter para cerrar"
     exit 1
 }
 
+# Detectar URL del repo en GitHub para mostrar el link de creación de PR
+$remoteUrl = (git config --get remote.origin.url 2>$null).Trim()
+$prUrl = $null
+if ($remoteUrl -match 'github\.com[:/](.+?)(\.git)?$') {
+    $repoPath = $matches[1]
+    $prUrl = "https://github.com/$repoPath/pull/new/$currentBranch"
+}
+
 Write-Host ""
-Write-Host "=== [OK] Deploy disparado. Railway hará el resto. ===" -ForegroundColor Green
+Write-Host "===========================================================" -ForegroundColor Green
+Write-Host " [OK] Push hecho a la branch '$currentBranch'" -ForegroundColor Green
+Write-Host ""
+Write-Host " Próximo paso: crear el Pull Request en GitHub" -ForegroundColor Green
+if ($prUrl) {
+    Write-Host ""
+    Write-Host "    $prUrl" -ForegroundColor Cyan
+    Write-Host ""
+    $abrir = Read-Host "¿Abrir esta URL en el navegador? (s/N)"
+    if ($abrir -match '^[sSyY]') {
+        Start-Process $prUrl
+    }
+}
+Write-Host ""
+Write-Host " Cuando se mergee el PR, Railway hará el deploy a producción." -ForegroundColor DarkGray
+Write-Host "===========================================================" -ForegroundColor Green
 Write-Host ""
 Read-Host "Enter para cerrar"
