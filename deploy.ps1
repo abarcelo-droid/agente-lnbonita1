@@ -120,13 +120,34 @@ if ($confirm -notmatch '^[sSyY]') {
 # === Copiar ===
 Write-Host ""
 Write-Host "Copiando..." -ForegroundColor Cyan
+$copiedSources = @()  # paths originales en Downloads que se copiaron OK
 foreach ($f in $found) {
     $destDir = Split-Path $f.Dest -Parent
     if ($destDir -and -not (Test-Path $destDir)) {
         New-Item -ItemType Directory -Path $destDir -Force | Out-Null
     }
-    Copy-Item -Path $f.Source -Destination $f.Dest -Force
-    Write-Host "  [OK] $($f.Name)" -ForegroundColor Green
+    try {
+        Copy-Item -Path $f.Source -Destination $f.Dest -Force -ErrorAction Stop
+        Write-Host "  [OK] $($f.Name)" -ForegroundColor Green
+        $copiedSources += $f.Source
+    } catch {
+        Write-Host "  [ERR] $($f.Name): $_" -ForegroundColor Red
+    }
+}
+
+# === Borrar de Downloads (los que se copiaron OK) ===
+# Esto evita que la próxima descarga del navegador genere "panel (1).html" etc.
+if ($copiedSources.Count -gt 0) {
+    Write-Host ""
+    Write-Host "Limpiando Downloads..." -ForegroundColor Cyan
+    foreach ($src in $copiedSources) {
+        try {
+            Remove-Item -Path $src -Force -ErrorAction Stop
+            Write-Host "  [DEL] $(Split-Path $src -Leaf)" -ForegroundColor DarkGray
+        } catch {
+            Write-Host "  [WARN] No se pudo borrar $(Split-Path $src -Leaf): $_" -ForegroundColor Yellow
+        }
+    }
 }
 
 # === Verificar que hay cambios reales ===
