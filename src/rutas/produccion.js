@@ -326,21 +326,64 @@ router.get('/insumos', requireAuth, (req, res) => {
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
+// ─────────────────────────────────────────────────────────────────────────
+// FASE A — Taxonomía: maestro de subcategorías + cuentas mapeadas
+// ─────────────────────────────────────────────────────────────────────────
+router.get('/subcategorias', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const incluirInactivas = req.query.incluir_inactivos === '1';
+    const where = incluirInactivas ? '' : 'WHERE s.activo = 1';
+    const rows = db.prepare(`
+      SELECT s.*,
+        cd.nombre AS cuenta_default_nombre,
+        ca.nombre AS cuenta_alt_nombre
+      FROM pa_subcategorias s
+      LEFT JOIN pa_cuentas cd ON cd.codigo = s.cuenta_codigo_default
+      LEFT JOIN pa_cuentas ca ON ca.codigo = s.cuenta_codigo_alt
+      ${where}
+      ORDER BY s.categoria, s.orden, s.subcategoria
+    `).all();
+
+    // Agrupar por categoría para que el frontend lo arme directo en cascada
+    const cats = {};
+    for (const r of rows) {
+      if (!cats[r.categoria]) cats[r.categoria] = { categoria: r.categoria, subcategorias: [] };
+      cats[r.categoria].subcategorias.push(r);
+    }
+    res.json({ ok: true, data: rows, agrupado: Object.values(cats) });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
 router.post('/insumos', requireAuth, (req, res) => {
   const db = getDb();
   const { nombre, tipo, unidad, stock_minimo, componente_madre, precio_ref_usd, notas, categoria_principal,
-          presentacion_tipo, presentacion_base } = req.body;
+          presentacion_tipo, presentacion_base,
+          categoria_v2, subcategoria, cuenta_codigo } = req.body;
   if (!nombre || !tipo || !unidad)
     return res.status(400).json({ ok: false, error: 'Nombre, tipo y unidad requeridos' });
   try {
+    // Si vino categoria_v2/subcategoria pero NO cuenta_codigo, autocompletar
+    // con la cuenta default del maestro de subcategorías (excepto Pañol/Herramientas)
+    let cuentaFinal = cuenta_codigo || null;
+    if (!cuentaFinal && categoria_v2 && subcategoria) {
+      const sub = db.prepare("SELECT cuenta_codigo_default, cuenta_codigo_alt FROM pa_subcategorias WHERE categoria=? AND subcategoria=?")
+                    .get(categoria_v2, subcategoria);
+      if (sub && !sub.cuenta_codigo_alt) cuentaFinal = sub.cuenta_codigo_default;
+      // si tiene alt, queda en NULL (el frontend tiene que pedirla al user)
+    }
     const r = db.prepare(`
       INSERT INTO pa_insumos (nombre, tipo, unidad, stock_minimo, componente_madre, precio_ref_usd, notas, categoria_principal,
-                              presentacion_tipo, presentacion_base)
-      VALUES (?,?,?,?,?,?,?,?,?,?)
+                              presentacion_tipo, presentacion_base,
+                              categoria_v2, subcategoria, cuenta_codigo)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
     `).run(nombre, tipo, unidad, stock_minimo||0, componente_madre||null, precio_ref_usd||null, notas||null,
            categoria_principal || 'agroinsumos',
            presentacion_tipo || null,
-           presentacion_base != null ? Number(presentacion_base) : null);
+           presentacion_base != null ? Number(presentacion_base) : null,
+           categoria_v2 || null,
+           subcategoria || null,
+           cuentaFinal);
     res.json({ ok: true, id: r.lastInsertRowid });
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
@@ -348,13 +391,15 @@ router.post('/insumos', requireAuth, (req, res) => {
 router.patch('/insumos/:id', requireAuth, (req, res) => {
   const db = getDb();
   const { nombre, tipo, unidad, stock_minimo, activo, componente_madre, precio_ref_usd, notas, categoria_principal,
-          presentacion_tipo, presentacion_base } = req.body;
+          presentacion_tipo, presentacion_base,
+          categoria_v2, subcategoria, cuenta_codigo } = req.body;
   try {
     const cur = db.prepare("SELECT * FROM pa_insumos WHERE id=?").get(req.params.id);
     if (!cur) return res.status(404).json({ ok: false, error: 'Insumo no encontrado' });
     db.prepare(`UPDATE pa_insumos SET nombre=?, tipo=?, unidad=?, stock_minimo=?, activo=?,
                 componente_madre=?, precio_ref_usd=?, notas=?, categoria_principal=?,
-                presentacion_tipo=?, presentacion_base=? WHERE id=?`)
+                presentacion_tipo=?, presentacion_base=?,
+                categoria_v2=?, subcategoria=?, cuenta_codigo=? WHERE id=?`)
       .run(nombre||cur.nombre, tipo||cur.tipo, unidad||cur.unidad, stock_minimo??cur.stock_minimo,
            activo!==undefined?activo:cur.activo,
            componente_madre!==undefined?componente_madre:cur.componente_madre,
@@ -363,6 +408,9 @@ router.patch('/insumos/:id', requireAuth, (req, res) => {
            categoria_principal || cur.categoria_principal,
            presentacion_tipo!==undefined?presentacion_tipo:cur.presentacion_tipo,
            presentacion_base!==undefined?(presentacion_base!=null?Number(presentacion_base):null):cur.presentacion_base,
+           categoria_v2!==undefined?categoria_v2:cur.categoria_v2,
+           subcategoria!==undefined?subcategoria:cur.subcategoria,
+           cuenta_codigo!==undefined?cuenta_codigo:cur.cuenta_codigo,
            req.params.id);
     res.json({ ok: true });
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
