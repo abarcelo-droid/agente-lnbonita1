@@ -170,6 +170,9 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   <div class="ni" data-sec="pa-personal"><span class="dot db"></span>👷 Personal</div>
   <div class="ni" data-sec="pa-panol"><span class="dot dd"></span>🔧 Pañol</div>
   <div class="ni" data-sec="pa-cuentas"><span class="dot dc"></span>📊 Plan de Cuentas</div>
+  <div class="ng" style="margin-top:8px;color:rgba(251,191,36,.5)">Administración</div>
+  <div class="ni" data-sec="adm-asientos"><span class="dot db"></span>📒 Asientos Contables</div>
+  <div class="ni" data-sec="adm-plan-cuentas"><span class="dot dc"></span>📊 Plan de Cuentas ADM</div>
   <a href="/scout" class="ni" style="color:inherit;text-decoration:none;display:block;font-weight:600" title="Abrir Scout móvil en esta pestaña">
     <span class="dot da"></span>📱 Abrir Scout móvil
   </a>
@@ -5205,7 +5208,463 @@ var LNB_USER = null;
     })
     .catch(function() { window.location.href='/login'; });
 })();
+// ═════════════════════════════════════════════════════════════════════
+// 📒 ADMINISTRACIÓN — Asientos Contables + Plan de Cuentas
+// ═════════════════════════════════════════════════════════════════════
+var ADM = { lineasN: 0, cuentas: [], secciones: [], asientoActualId: null, grupoActual: 'activo' };
 
+function admApi(path, opts) {
+  opts = opts || {};
+  opts.headers = opts.headers || { 'Content-Type': 'application/json' };
+  return fetch('/api/pa/cuentas' + path, opts)
+    .then(function(r){ return r.json(); })
+    .catch(function(){ return { ok: false, error: 'Error de red' }; });
+}
+
+function admMoney(n) {
+  return '$ ' + Number(n||0).toLocaleString('es-AR', { minimumFractionDigits:2, maximumFractionDigits:2 });
+}
+
+// ── Cargar cuentas en memoria ──────────────────────────────────────
+function admCargarCuentas() {
+  return Promise.all([
+    admApi('?incluir_inactivas=0').then(function(r){ ADM.cuentas = r.data || []; }),
+    admApi('/secciones').then(function(r){ ADM.secciones = r.data || []; })
+  ]);
+}
+
+// ═════════════════════════════════════════════════════════════════════
+// ASIENTOS CONTABLES
+// ═════════════════════════════════════════════════════════════════════
+
+function admLoadAsientos() {
+  var desde  = document.getElementById('adm-as-desde').value;
+  var hasta  = document.getElementById('adm-as-hasta').value;
+  var anulados = document.getElementById('adm-as-anulados').checked ? '1' : '0';
+  var qs = [];
+  if (desde)   qs.push('desde=' + desde);
+  if (hasta)   qs.push('hasta=' + hasta);
+  if (anulados === '1') qs.push('anulados=1');
+  admApi('/asientos' + (qs.length ? '?' + qs.join('&') : '')).then(function(r) {
+    var data = r.data || [];
+    var tb = document.getElementById('adm-as-tbody');
+    if (!data.length) {
+      tb.innerHTML = '<tr><td colspan="8" class="emp">Sin asientos en el período</td></tr>';
+      return;
+    }
+    tb.innerHTML = data.map(function(a) {
+      var totalDebe  = 0, totalHaber = 0;
+      (a.lineas || []).forEach(function(l){ totalDebe += l.debe||0; totalHaber += l.haber||0; });
+      var estado = a.anulado
+        ? '<span class="pa-badge pa-rojo-bg">Anulado</span>'
+        : '<span class="pa-badge pa-verde-bg">Vigente</span>';
+      var rowStyle = a.anulado ? ' style="opacity:.5;text-decoration:line-through"' : '';
+      return '<tr'+rowStyle+'>'
+        + '<td style="font-family:monospace;font-size:11px;color:var(--mut)">#'+a.id+'</td>'
+        + '<td style="font-size:12px">'+paFecha(a.fecha)+'</td>'
+        + '<td><strong>'+a.descripcion+'</strong></td>'
+        + '<td style="text-align:right;font-variant-numeric:tabular-nums">'+admMoney(totalDebe)+'</td>'
+        + '<td style="text-align:right;font-variant-numeric:tabular-nums">'+admMoney(totalHaber)+'</td>'
+        + '<td style="text-align:center">'+estado+'</td>'
+        + '<td style="font-size:11px;color:var(--mut);text-align:center">'+(a.usuario_nombre||'—')+'</td>'
+        + '<td style="text-align:right"><button class="btn bo bs" onclick="admVerAsiento('+a.id+')" style="padding:3px 8px;font-size:11px">Ver</button></td>'
+        + '</tr>';
+    }).join('');
+  });
+}
+
+function admAbrirNuevoAsiento() {
+  ADM.lineasN = 0;
+  document.getElementById('adm-as-fecha').value = new Date().toISOString().slice(0,10);
+  document.getElementById('adm-as-desc').value = '';
+  document.getElementById('adm-as-lineas').innerHTML = '';
+  document.getElementById('adm-as-tot-debe').textContent = '$0';
+  document.getElementById('adm-as-tot-haber').textContent = '$0';
+  document.getElementById('adm-as-balance').textContent = '—';
+  document.getElementById('adm-as-balance').style.color = 'var(--mut)';
+  admCargarCuentas().then(function(){
+    admAgregarLinea();
+    admAgregarLinea();
+    document.getElementById('adm-mb-asiento').classList.add('on');
+  });
+}
+
+function admCuentasOpts(seleccionado) {
+  if (!ADM.cuentas.length) return '<option value="">— Sin cuentas —</option>';
+  // Agrupar por sección
+  var porSec = {};
+  ADM.cuentas.forEach(function(c){
+    if (!porSec[c.seccion_id]) porSec[c.seccion_id] = { nombre: c.seccion_nombre, codigo: c.seccion_codigo, items: [] };
+    porSec[c.seccion_id].items.push(c);
+  });
+  var html = '<option value="">— Elegí cuenta —</option>';
+  Object.values(porSec).sort(function(a,b){ return a.codigo - b.codigo; }).forEach(function(g){
+    html += '<optgroup label="'+g.codigo+' — '+g.nombre+'">';
+    g.items.forEach(function(c){
+      html += '<option value="'+c.id+'"'+(c.id==seleccionado?' selected':'')+'>'+c.codigo+' — '+c.nombre+'</option>';
+    });
+    html += '</optgroup>';
+  });
+  return html;
+}
+
+function admAgregarLinea() {
+  var n = ADM.lineasN++;
+  var row = document.createElement('div');
+  row.id = 'adm-lin-' + n;
+  row.style.cssText = 'display:grid;grid-template-columns:1fr 130px 130px auto;gap:8px;align-items:center;padding:6px 0;border-bottom:1px solid var(--bor)';
+  row.innerHTML =
+    '<select id="adm-li-cu-'+n+'" style="font-size:13px">'+admCuentasOpts()+'</select>'
+    + '<input type="number" id="adm-li-debe-'+n+'" placeholder="0.00" step="0.01" min="0" oninput="admCalcTotales()" style="text-align:right;font-size:13px">'
+    + '<input type="number" id="adm-li-haber-'+n+'" placeholder="0.00" step="0.01" min="0" oninput="admCalcTotales()" style="text-align:right;font-size:13px">'
+    + '<button class="btn bd bs" onclick="document.getElementById(\'adm-lin-'+n+'\').remove();admCalcTotales()" style="padding:3px 8px">✕</button>';
+  document.getElementById('adm-as-lineas').appendChild(row);
+}
+
+function admCalcTotales() {
+  var debe = 0, haber = 0;
+  document.querySelectorAll('[id^="adm-lin-"]').forEach(function(row){
+    var n = row.id.split('-')[2];
+    debe  += parseFloat(document.getElementById('adm-li-debe-'+n).value)  || 0;
+    haber += parseFloat(document.getElementById('adm-li-haber-'+n).value) || 0;
+  });
+  document.getElementById('adm-as-tot-debe').textContent  = admMoney(debe);
+  document.getElementById('adm-as-tot-haber').textContent = admMoney(haber);
+  var bal = document.getElementById('adm-as-balance');
+  var dif = Math.abs(debe - haber);
+  if (dif < 0.01) {
+    bal.textContent = '✓ Cuadra';
+    bal.style.color = 'var(--ok)';
+  } else {
+    bal.textContent = '⚠ Diferencia: ' + admMoney(dif);
+    bal.style.color = 'var(--err)';
+  }
+}
+
+function admGuardarAsiento() {
+  var fecha = document.getElementById('adm-as-fecha').value;
+  var desc  = document.getElementById('adm-as-desc').value.trim();
+  if (!fecha || !desc) return toast('Completá fecha y descripción', 'er');
+  var lineas = [];
+  document.querySelectorAll('[id^="adm-lin-"]').forEach(function(row){
+    var n  = row.id.split('-')[2];
+    var cu = document.getElementById('adm-li-cu-'+n).value;
+    var db = parseFloat(document.getElementById('adm-li-debe-'+n).value)  || 0;
+    var hb = parseFloat(document.getElementById('adm-li-haber-'+n).value) || 0;
+    if (cu && (db > 0 || hb > 0)) lineas.push({ cuenta_id: parseInt(cu), debe: db, haber: hb });
+  });
+  if (lineas.length < 2) return toast('El asiento necesita al menos 2 líneas', 'er');
+  var totD = lineas.reduce(function(s,l){ return s+l.debe; }, 0);
+  var totH = lineas.reduce(function(s,l){ return s+l.haber; }, 0);
+  if (Math.abs(totD - totH) > 0.01) return toast('El debe y haber no cuadran', 'er');
+  admApi('/asientos', {
+    method: 'POST',
+    body: JSON.stringify({ fecha: fecha, descripcion: desc, lineas: lineas })
+  }).then(function(r){
+    if (r.ok) {
+      toast('✓ Asiento registrado', 'ok');
+      document.getElementById('adm-mb-asiento').classList.remove('on');
+      admLoadAsientos();
+    } else toast('Error: ' + (r.error||'desconocido'), 'er');
+  });
+}
+
+function admVerAsiento(id) {
+  admApi('/asientos/' + id).then(function(r){
+    if (!r.ok) return toast(r.error||'Error', 'er');
+    var a = r.data;
+    ADM.asientoActualId = a.id;
+    document.getElementById('adm-as-det-tit').textContent = 'Asiento #' + a.id;
+    document.getElementById('adm-as-det-sub').textContent = paFecha(a.fecha) + ' — ' + a.descripcion;
+    var totD = 0, totH = 0;
+    var rows = (a.lineas||[]).map(function(l){
+      totD += l.debe||0; totH += l.haber||0;
+      return '<tr>'
+        + '<td style="font-family:monospace;font-size:12px">'+l.cuenta_codigo+'</td>'
+        + '<td>'+l.cuenta_nombre+'</td>'
+        + '<td style="text-align:right;font-variant-numeric:tabular-nums">'+(l.debe>0 ? admMoney(l.debe) : '—')+'</td>'
+        + '<td style="text-align:right;font-variant-numeric:tabular-nums">'+(l.haber>0 ? admMoney(l.haber) : '—')+'</td>'
+        + '</tr>';
+    }).join('');
+    var html = '<table class="pa-tbl" style="margin-bottom:14px">'
+      + '<thead><tr><th style="width:80px">Código</th><th>Cuenta</th><th style="text-align:right;width:130px">Debe</th><th style="text-align:right;width:130px">Haber</th></tr></thead>'
+      + '<tbody>' + rows + '</tbody>'
+      + '<tfoot><tr style="font-weight:700;background:var(--bg)">'
+      + '<td colspan="2" style="text-align:right;padding:8px 12px">TOTALES</td>'
+      + '<td style="text-align:right;padding:8px 12px">'+admMoney(totD)+'</td>'
+      + '<td style="text-align:right;padding:8px 12px">'+admMoney(totH)+'</td>'
+      + '</tr></tfoot>'
+      + '</table>'
+      + (a.anulado ? '<div style="background:#fef2f2;border:1px solid #fca5a5;border-radius:8px;padding:10px 14px;font-size:13px;color:#991b1b">⚠ Asiento anulado el '+(a.anulado_en||'').slice(0,10)+'</div>' : '');
+    document.getElementById('adm-as-det-body').innerHTML = html;
+    document.getElementById('adm-as-det-anular-btn').style.display = a.anulado ? 'none' : '';
+    document.getElementById('adm-mb-asiento-det').classList.add('on');
+  });
+}
+
+function admAnularAsientoActual() {
+  if (!ADM.asientoActualId) return;
+  if (!confirm('¿Anular este asiento? La operación queda registrada en el historial.')) return;
+  admApi('/asientos/' + ADM.asientoActualId + '/anular', { method: 'POST', body: '{}' }).then(function(r){
+    if (r.ok) {
+      toast('✓ Asiento anulado', 'ok');
+      document.getElementById('adm-mb-asiento-det').classList.remove('on');
+      admLoadAsientos();
+    } else toast('Error: ' + (r.error||'desconocido'), 'er');
+  });
+}
+
+// ═════════════════════════════════════════════════════════════════════
+// PLAN DE CUENTAS — 5 grupos
+// ═════════════════════════════════════════════════════════════════════
+
+var ADM_GRUPOS = {
+  activo:         { label: '🏦 Activo',          color: '#1d4ed8', bg: '#dbeafe' },
+  pasivo:         { label: '💳 Pasivo',           color: '#9a3412', bg: '#fed7aa' },
+  patrimonio_neto:{ label: '🏛️ Patrimonio Neto', color: '#6b21a8', bg: '#e9d5ff' },
+  ingresos:       { label: '📈 Ingresos',         color: '#166534', bg: '#dcfce7' },
+  gastos:         { label: '📉 Gastos',           color: '#991b1b', bg: '#fee2e2' },
+};
+
+function admPcTab(el) {
+  document.querySelectorAll('.adm-pc-tab').forEach(function(t){
+    t.style.borderBottomColor = 'transparent';
+    t.style.color = 'var(--mut)';
+  });
+  var grupo = el.getAttribute('data-grupo');
+  var col = ADM_GRUPOS[grupo] ? ADM_GRUPOS[grupo].color : 'var(--burg)';
+  el.style.borderBottomColor = col;
+  el.style.color = col;
+  ADM.grupoActual = grupo;
+  admPcLoadGrupo(grupo);
+}
+
+function admPcLoadGrupo(grupo) {
+  admCargarCuentas().then(function(){
+    var secciones = ADM.secciones.filter(function(s){ return s.grupo === grupo; });
+    var cont = document.getElementById('adm-pc-contenido');
+    var g = ADM_GRUPOS[grupo] || {};
+    if (!secciones.length) {
+      cont.innerHTML = '<div style="text-align:center;padding:40px;color:var(--mut)">'
+        + '<div style="font-size:32px;margin-bottom:10px">'+(g.label||grupo)+'</div>'
+        + '<div style="font-size:13px;margin-bottom:16px">No hay secciones en este grupo todavía.</div>'
+        + '<button class="btn bb" onclick="admPcAbrirNuevaSeccion()">+ Agregar primera sección</button>'
+        + '</div>';
+      return;
+    }
+    cont.innerHTML = secciones.map(function(s){
+      var cuentas = ADM.cuentas.filter(function(c){ return c.seccion_id === s.id; });
+      return '<div class="pa-wrap" style="margin-bottom:16px">'
+        + '<div style="background:'+g.bg+';padding:10px 14px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--bor)">'
+          + '<div style="display:flex;align-items:center;gap:10px">'
+            + '<strong style="color:'+g.color+';font-size:14px">'+s.codigo+' — '+s.nombre+'</strong>'
+            + (s.activo ? '' : '<span style="font-size:11px;color:var(--mut);font-style:italic">(inactiva)</span>')
+          + '</div>'
+          + '<div style="display:flex;gap:6px">'
+            + '<button class="btn bo" style="padding:3px 9px;font-size:11px" onclick="admPcEditarSeccion('+s.id+')">✏️ Editar</button>'
+            + '<button class="btn bo" style="padding:3px 9px;font-size:11px" onclick="admPcEliminarSeccion('+s.id+')">🗑</button>'
+          + '</div>'
+        + '</div>'
+        + (cuentas.length
+          ? '<div class="ab-table-wrap"><table class="pa-tbl">'
+            + '<thead><tr><th style="width:80px">Código</th><th>Nombre</th><th style="width:80px;text-align:center">Tipo</th><th style="width:60px;text-align:center">Lote</th><th style="width:80px;text-align:center">Campaña</th><th style="width:160px;text-align:right"></th></tr></thead>'
+            + '<tbody>'
+            + cuentas.map(function(c){
+                var rowStyle = c.activo ? '' : ' style="opacity:.5"';
+                return '<tr'+rowStyle+'>'
+                  + '<td style="font-family:monospace;font-size:12px">'+c.codigo+'</td>'
+                  + '<td>'+c.nombre+(c.es_sistema?' <span title="Sistema" style="color:#b88600">🔒</span>':'')+'</td>'
+                  + '<td style="text-align:center;font-size:11px;color:var(--mut)">'+(c.tipo==='resultado'?'ER':'Patr.')+'</td>'
+                  + '<td style="text-align:center">'+(c.permite_lote?'✓':'—')+'</td>'
+                  + '<td style="text-align:center">'+(c.permite_campania?'✓':'—')+'</td>'
+                  + '<td style="text-align:right;white-space:nowrap">'
+                    + '<button class="btn bo" style="padding:2px 7px;font-size:11px;margin-right:4px" onclick="admPcEditarCuenta('+c.id+')">✏️</button>'
+                    + (c.activo && !c.es_sistema
+                      ? '<button class="btn bo" style="padding:2px 7px;font-size:11px;color:var(--err);border-color:var(--err)" onclick="admPcDesactivarCuenta('+c.id+')">🗑</button>'
+                      : (!c.activo ? '<button class="btn bo" style="padding:2px 7px;font-size:11px;color:var(--ok);border-color:var(--ok)" onclick="admPcReactivarCuenta('+c.id+')">↺</button>' : ''))
+                  + '</td>'
+                  + '</tr>';
+              }).join('')
+            + '</tbody></table></div>'
+          : '<div style="padding:16px;color:var(--mut);font-size:13px;font-style:italic;text-align:center">Sin cuentas — <button class="btn bo bs" onclick="admPcAbrirNuevaCuenta(\''+s.id+'\')" style="font-size:12px">+ Agregar cuenta</button></div>')
+        + '</div>';
+    }).join('');
+  });
+}
+
+// ── Secciones ──────────────────────────────────────────────────────
+function admPcAbrirNuevaSeccion() {
+  document.getElementById('adm-sec-id').value = '';
+  document.getElementById('adm-sec-tit').textContent = 'Nueva sección';
+  document.getElementById('adm-sec-codigo').value = '';
+  document.getElementById('adm-sec-nombre').value = '';
+  document.getElementById('adm-sec-grupo').value = ADM.grupoActual;
+  document.getElementById('adm-mb-seccion').classList.add('on');
+}
+
+function admPcEditarSeccion(id) {
+  var s = ADM.secciones.find(function(x){ return x.id === id; });
+  if (!s) return;
+  document.getElementById('adm-sec-id').value = s.id;
+  document.getElementById('adm-sec-tit').textContent = 'Editar sección';
+  document.getElementById('adm-sec-codigo').value = s.codigo;
+  document.getElementById('adm-sec-nombre').value = s.nombre;
+  document.getElementById('adm-sec-grupo').value = s.grupo || ADM.grupoActual;
+  document.getElementById('adm-mb-seccion').classList.add('on');
+}
+
+function admPcGuardarSeccion() {
+  var id     = document.getElementById('adm-sec-id').value;
+  var codigo = parseInt(document.getElementById('adm-sec-codigo').value, 10);
+  var nombre = document.getElementById('adm-sec-nombre').value.trim();
+  var grupo  = document.getElementById('adm-sec-grupo').value;
+  if (!codigo || !nombre) return toast('Completá código y nombre', 'er');
+  var url    = id ? '/secciones/' + id : '/secciones';
+  var method = id ? 'PUT' : 'POST';
+  admApi(url, { method: method, body: JSON.stringify({ codigo: codigo, nombre: nombre, grupo: grupo }) })
+    .then(function(r){
+      if (r.ok) {
+        // Actualizar grupo si es edición (el endpoint de secciones existente no tiene grupo, lo patcheamos directo)
+        if (id) {
+          admApi('/secciones/' + id, { method: 'PUT', body: JSON.stringify({ nombre: nombre, grupo: grupo }) });
+        }
+        toast('✓ Sección guardada', 'ok');
+        document.getElementById('adm-mb-seccion').classList.remove('on');
+        admPcLoadGrupo(ADM.grupoActual);
+      } else toast('Error: ' + (r.error||'desconocido'), 'er');
+    });
+}
+
+function admPcEliminarSeccion(id) {
+  if (!confirm('¿Desactivar esta sección? Debe estar vacía.')) return;
+  admApi('/secciones/' + id, { method: 'DELETE' }).then(function(r){
+    if (r.ok) { toast('✓ Desactivada', 'ok'); admPcLoadGrupo(ADM.grupoActual); }
+    else toast('Error: ' + (r.error||'desconocido'), 'er');
+  });
+}
+
+// ── Cuentas ────────────────────────────────────────────────────────
+function admPcAbrirNuevaCuenta(seccionId) {
+  document.getElementById('adm-cu-id').value = '';
+  document.getElementById('adm-cu-tit').textContent = 'Nueva cuenta';
+  document.getElementById('adm-cu-codigo').value = '';
+  document.getElementById('adm-cu-nombre').value = '';
+  document.getElementById('adm-cu-tipo').value = 'resultado';
+  document.getElementById('adm-cu-lote').checked = false;
+  document.getElementById('adm-cu-camp').checked = false;
+  document.getElementById('adm-cu-codigo-sug').textContent = '';
+  var secs = ADM.secciones.filter(function(s){ return s.grupo === ADM.grupoActual && s.activo; });
+  document.getElementById('adm-cu-seccion').innerHTML =
+    secs.map(function(s){ return '<option value="'+s.id+'"'+(s.id==seccionId?' selected':'')+'>'+s.codigo+' — '+s.nombre+'</option>'; }).join('');
+  admPcSugerirCodigo();
+  document.getElementById('adm-mb-cuenta').classList.add('on');
+}
+
+function admPcSugerirCodigo() {
+  var sId = parseInt(document.getElementById('adm-cu-seccion').value, 10);
+  if (!sId) return;
+  var sec = ADM.secciones.find(function(s){ return s.id === sId; });
+  if (!sec) return;
+  var cuentasSec = ADM.cuentas.filter(function(c){ return c.seccion_id === sId; });
+  var max = 0;
+  cuentasSec.forEach(function(c){
+    var sub = parseInt(String(c.codigo).split('.')[1]||'0', 10);
+    if (sub > max) max = sub;
+  });
+  var sugerido = sec.codigo + '.' + String(max + 5).padStart(2,'0');
+  document.getElementById('adm-cu-codigo-sug').textContent = 'Sugerido: ' + sugerido;
+  if (!document.getElementById('adm-cu-id').value) document.getElementById('adm-cu-codigo').value = sugerido;
+}
+
+function admPcEditarCuenta(id) {
+  var c = ADM.cuentas.find(function(x){ return x.id === id; });
+  if (!c) return;
+  document.getElementById('adm-cu-id').value = c.id;
+  document.getElementById('adm-cu-tit').textContent = 'Editar cuenta ' + c.codigo;
+  var secs = ADM.secciones.filter(function(s){ return s.activo; });
+  document.getElementById('adm-cu-seccion').innerHTML =
+    secs.map(function(s){ return '<option value="'+s.id+'"'+(s.id===c.seccion_id?' selected':'')+'>'+s.codigo+' — '+s.nombre+'</option>'; }).join('');
+  document.getElementById('adm-cu-codigo').value = c.codigo;
+  document.getElementById('adm-cu-nombre').value = c.nombre;
+  document.getElementById('adm-cu-tipo').value   = c.tipo;
+  document.getElementById('adm-cu-lote').checked = !!c.permite_lote;
+  document.getElementById('adm-cu-camp').checked = !!c.permite_campania;
+  document.getElementById('adm-cu-codigo-sug').textContent = '';
+  document.getElementById('adm-mb-cuenta').classList.add('on');
+}
+
+function admPcGuardarCuenta() {
+  var id   = document.getElementById('adm-cu-id').value;
+  var body = {
+    codigo:          document.getElementById('adm-cu-codigo').value.trim(),
+    nombre:          document.getElementById('adm-cu-nombre').value.trim(),
+    seccion_id:      parseInt(document.getElementById('adm-cu-seccion').value, 10),
+    tipo:            document.getElementById('adm-cu-tipo').value,
+    permite_lote:    document.getElementById('adm-cu-lote').checked ? 1 : 0,
+    permite_campania:document.getElementById('adm-cu-camp').checked ? 1 : 0,
+  };
+  if (!body.codigo || !body.nombre || !body.seccion_id) return toast('Completá código, nombre y sección', 'er');
+  var url    = id ? '/' + id : '';
+  var method = id ? 'PUT' : 'POST';
+  admApi(url, { method: method, body: JSON.stringify(body) }).then(function(r){
+    if (r.ok) {
+      toast('✓ Cuenta guardada', 'ok');
+      document.getElementById('adm-mb-cuenta').classList.remove('on');
+      admPcLoadGrupo(ADM.grupoActual);
+    } else toast('Error: ' + (r.error||'desconocido'), 'er');
+  });
+}
+
+function admPcDesactivarCuenta(id) {
+  if (!confirm('¿Desactivar esta cuenta?')) return;
+  admApi('/' + id, { method: 'DELETE' }).then(function(r){
+    if (r.ok) { toast('✓ Desactivada', 'ok'); admPcLoadGrupo(ADM.grupoActual); }
+    else toast('Error: ' + (r.error||'desconocido'), 'er');
+  });
+}
+
+function admPcReactivarCuenta(id) {
+  admApi('/' + id + '/reactivar', { method: 'POST' }).then(function(r){
+    if (r.ok) { toast('✓ Reactivada', 'ok'); admPcLoadGrupo(ADM.grupoActual); }
+    else toast('Error: ' + (r.error||'desconocido'), 'er');
+  });
+}
+
+// ── Hook navegación ────────────────────────────────────────────────
+// Registrar las secciones nuevas en el loadSec del nav existente
+var _loadSecOriginal = loadSec;
+loadSec = function(s) {
+  if (s === 'adm-asientos') {
+    // Default: últimos 30 días
+    var hoy = new Date();
+    var hace30 = new Date(hoy); hace30.setDate(hoy.getDate() - 30);
+    var desdeEl = document.getElementById('adm-as-desde');
+    var hastaEl = document.getElementById('adm-as-hasta');
+    if (desdeEl && !desdeEl.value) desdeEl.value = hace30.toISOString().slice(0,10);
+    if (hastaEl && !hastaEl.value) hastaEl.value = hoy.toISOString().slice(0,10);
+    admLoadAsientos();
+    return;
+  }
+  if (s === 'adm-plan-cuentas') {
+    admCargarCuentas().then(function(){
+      // Activar el tab actual
+      var tabActivo = document.querySelector('.adm-pc-tab.on');
+      if (tabActivo) admPcLoadGrupo(tabActivo.getAttribute('data-grupo'));
+      else admPcLoadGrupo('activo');
+    });
+    // Estilos iniciales de tabs
+    document.querySelectorAll('.adm-pc-tab').forEach(function(t){
+      var g = t.getAttribute('data-grupo');
+      var col = ADM_GRUPOS[g] ? ADM_GRUPOS[g].color : 'var(--mut)';
+      if (t.classList.contains('on')) {
+        t.style.borderBottomColor = col;
+        t.style.color = col;
+      }
+    });
+    return;
+  }
+  _loadSecOriginal(s);
+};
 function doLogout() {
   fetch('/api/auth/logout', { method:'POST' })
     .then(function(){ window.location.href='/login'; });
@@ -5479,7 +5938,113 @@ if(_inpGondola) _inpGondola.addEventListener('keydown', function(e){
   </div>
 </div>
 </div>
+<!-- ==================== MÓDULO ADMINISTRACIÓN ==================== -->
 
+<!-- ─── ADM: ASIENTOS CONTABLES ──────────────────────────────────── -->
+<div class="sec" id="sec-adm-asientos">
+<div class="ph">
+  <div>
+    <div class="ph-t">📒 Asientos Contables</div>
+    <div class="ph-s">Partida doble — debe siempre igual a haber</div>
+  </div>
+  <button class="btn bb" onclick="admAbrirNuevoAsiento()">+ Nuevo asiento</button>
+</div>
+
+<!-- Filtros -->
+<div class="filt" style="margin-bottom:16px">
+  <label style="font-size:12px;color:var(--mut)">Desde: <input type="date" id="adm-as-desde" onchange="admLoadAsientos()" style="padding:5px 8px;font-size:12px"></label>
+  <label style="font-size:12px;color:var(--mut)">Hasta: <input type="date" id="adm-as-hasta" onchange="admLoadAsientos()" style="padding:5px 8px;font-size:12px"></label>
+  <label style="display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--mut);cursor:pointer">
+    <input type="checkbox" id="adm-as-anulados" onchange="admLoadAsientos()" style="width:auto">
+    Ver anulados
+  </label>
+  <button class="btn bo bs" onclick="admLoadAsientos()">↻ Actualizar</button>
+</div>
+
+<!-- Tabla asientos -->
+<div class="pa-wrap">
+  <div class="ab-table-wrap">
+    <table class="pa-tbl">
+      <thead><tr>
+        <th style="width:40px">#</th>
+        <th style="width:90px">Fecha</th>
+        <th>Descripción</th>
+        <th style="text-align:right;width:120px">Debe</th>
+        <th style="text-align:right;width:120px">Haber</th>
+        <th style="width:80px;text-align:center">Estado</th>
+        <th style="width:80px;text-align:center">Cargado por</th>
+        <th style="width:100px"></th>
+      </tr></thead>
+      <tbody id="adm-as-tbody">
+        <tr><td colspan="8" class="emp">Cargando...</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+</div>
+
+<!-- ─── ADM: PLAN DE CUENTAS ─────────────────────────────────────── -->
+<div class="sec" id="sec-adm-plan-cuentas">
+<div class="ph">
+  <div>
+    <div class="ph-t">📊 Plan de Cuentas</div>
+    <div class="ph-s">5 grupos: Activo · Pasivo · Patrimonio Neto · Ingresos · Gastos</div>
+  </div>
+  <div style="display:flex;gap:8px">
+    <button class="btn bb" onclick="admPcAbrirNuevaCuenta()">+ Cuenta</button>
+    <button class="btn bo" onclick="admPcAbrirNuevaSeccion()">+ Sección</button>
+  </div>
+</div>
+
+<!-- Tabs por grupo -->
+<div style="display:flex;gap:2px;border-bottom:2px solid var(--bor);margin-bottom:20px;flex-wrap:wrap" id="adm-pc-tabs">
+  <div class="adm-pc-tab on" data-grupo="activo"         onclick="admPcTab(this)" style="padding:10px 18px;cursor:pointer;font-size:13px;font-weight:700;border-bottom:3px solid transparent;color:var(--mut)">🏦 Activo</div>
+  <div class="adm-pc-tab"    data-grupo="pasivo"          onclick="admPcTab(this)" style="padding:10px 18px;cursor:pointer;font-size:13px;font-weight:700;border-bottom:3px solid transparent;color:var(--mut)">💳 Pasivo</div>
+  <div class="adm-pc-tab"    data-grupo="patrimonio_neto" onclick="admPcTab(this)" style="padding:10px 18px;cursor:pointer;font-size:13px;font-weight:700;border-bottom:3px solid transparent;color:var(--mut)">🏛️ Patrimonio Neto</div>
+  <div class="adm-pc-tab"    data-grupo="ingresos"        onclick="admPcTab(this)" style="padding:10px 18px;cursor:pointer;font-size:13px;font-weight:700;border-bottom:3px solid transparent;color:var(--mut)">📈 Ingresos</div>
+  <div class="adm-pc-tab"    data-grupo="gastos"          onclick="admPcTab(this)" style="padding:10px 18px;cursor:pointer;font-size:13px;font-weight:700;border-bottom:3px solid transparent;color:var(--mut)">📉 Gastos</div>
+</div>
+
+<div id="adm-pc-contenido">
+  <div class="emp">Seleccioná un grupo para ver las cuentas</div>
+</div>
+</div>
+
+<!-- ─── MODAL: Nuevo/editar asiento ─────────────────────────────── -->
+<div class="ab-modal-overlay" id="adm-mb-asiento">
+<div class="ab-modal" style="width:780px">
+  <div class="mhd">
+    <div>
+      <div class="mht">📒 Asiento contable</div>
+      <div style="font-size:12px;color:var(--mut)">El debe debe ser igual al haber</div>
+    </div>
+    <button class="mcl" onclick="document.getElementById('adm-mb-asiento').classList.remove('on')">×</button>
+  </div>
+
+  <!-- Cabecera -->
+  <div class="fg" style="margin-bottom:14px">
+    <div class="fl"><label>Fecha *</label><input type="date" id="adm-as-fecha"></div>
+    <div class="fl ff"><label>Descripción *</label><input id="adm-as-desc" placeholder="Ej: Pago factura proveedor Solmix"></div>
+  </div>
+
+  <!-- Líneas -->
+  <div style="font-size:11px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">
+    Líneas del asiento
+  </div>
+  <div style="font-size:11px;color:var(--mut);margin-bottom:10px">
+    💡 Cada línea tiene una cuenta, un importe en <strong>Debe</strong> o en <strong>Haber</strong> (no los dos). El total debe cuadrar.
+  </div>
+
+  <!-- Cabecera de columnas -->
+  <div style="display:grid;grid-template-columns:1fr 130px 130px auto;gap:8px;padding:0 0 6px;border-bottom:1px solid var(--bor);font-size:10px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.06em">
+    <div>Cuenta</div>
+    <div style="text-align:right">Debe $</div>
+    <div style="text-align:right">Haber $</div>
+    <div></div>
+  </div>
+
+  <div id="adm-as-lineas" style="margin:8px 0"></div>
+  <button
 <!-- ── ESTILOS PA ─────────────────────────────────────────────── -->
 <style>
 .pa-verde-bg{background:#dcfce7;color:#166534}
