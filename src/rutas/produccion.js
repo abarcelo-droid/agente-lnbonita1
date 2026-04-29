@@ -639,13 +639,29 @@ router.post('/compras', requireAuth, (req, res) => {
              neto_total, iva_total, total, notas||null, remito_foto_path,
              iva_total, neto_total);
       const compraId = r.lastInsertRowid;
+
+      // Helper: detectar si un insumo es de la categoría pañol
+      const getCatInsumo = db.prepare("SELECT categoria_principal, nombre FROM pa_insumos WHERE id = ?");
+
+      // Para autogenerar códigos de pañol secuenciales si el cliente no los pasó
+      const getMaxCodigo = db.prepare(`
+        SELECT codigo_interno FROM pa_panol_unidades
+        WHERE codigo_interno LIKE 'PAÑ-%'
+        ORDER BY id DESC LIMIT 1
+      `);
+      function siguienteCodigoPanol() {
+        const last = getMaxCodigo.get();
+        let n = 0;
+        if (last && last.codigo_interno) {
+          const m = /PAÑ-(\d+)/.exec(last.codigo_interno);
+          if (m) n = parseInt(m[1], 10);
+        }
+        // Buscar siguientes consecutivos disponibles (en transacción se vería el estado actual)
+        return 'PAÑ-' + String(n + 1).padStart(4, '0');
+      }
+
       for (const it of items) {
-        // En pa_compras_items guardamos:
-        //   - cantidad: el total en UNIDAD BASE (el que se suma al stock)
-        //   - precio_unit: precio en unidad base ($/lt o $/kg)
-        //   - cant_bultos / presentacion_base: info original para trazabilidad
         const cantidadBase = it._stockASumar;
-        // Precio unitario en unidad base (para reportes, ranking proveedores, etc.)
         const precioBase = cantidadBase > 0 ? (it._montoNeto / cantidadBase) : Number(it.precio_unit);
 
         db.prepare(`
@@ -664,21 +680,71 @@ router.post('/compras', requireAuth, (req, res) => {
                it.cant_bultos != null ? Number(it.cant_bultos) : null,
                it.precio_modo || 'bulto');
 
-        // Actualizar stock del insumo en unidad base
-        db.prepare("UPDATE pa_insumos SET stock_actual = stock_actual + ? WHERE id = ?")
-          .run(cantidadBase, it.insumo_id);
+        // Determinar si el insumo es de pañol (en cuyo caso NO se suma stock,
+        // se crean N unidades en pa_panol_unidades en su lugar)
+        const insumoInfo = getCatInsumo.get(it.insumo_id);
+        const esPanol = insumoInfo && insumoInfo.categoria_principal === 'herramientas_panol';
 
-        // Aprender la presentación default si el insumo no la tenía (solo base numérica, sin tipo)
-        if (it.presentacion_base != null) {
-          const ins = db.prepare("SELECT presentacion_base FROM pa_insumos WHERE id = ?").get(it.insumo_id);
-          if (ins && !ins.presentacion_base) {
-            db.prepare("UPDATE pa_insumos SET presentacion_base = ? WHERE id = ?")
-              .run(Number(it.presentacion_base), it.insumo_id);
+        if (esPanol) {
+          // Cantidad de unidades a crear (en pañol cantidadBase = N enteras)
+          const nUnidades = Math.max(1, Math.round(cantidadBase));
+          // Precio por unidad = monto neto del item / N
+          const precioPorUnidad = nUnidades > 0 ? (it._montoNeto / nUnidades) : Number(it.precio_unit);
+          // Códigos: si el cliente envía it.panol_codigos = ['PAÑ-0042', ...], se respetan
+          // (uno por unidad). Si no, se autogeneran secuencialmente.
+          const codigosCliente = Array.isArray(it.panol_codigos) ? it.panol_codigos : [];
+          const codigosUsados = new Set();
+          for (let i = 0; i < nUnidades; i++) {
+            let codigo = (codigosCliente[i] || '').trim();
+            if (!codigo) codigo = siguienteCodigoPanol();
+            // Evitar duplicados dentro del mismo lote (si el cliente pasó algo ambiguo)
+            while (codigosUsados.has(codigo)) {
+              const m = /^(.*?-)(\d+)$/.exec(codigo);
+              if (m) codigo = m[1] + String(parseInt(m[2], 10) + 1).padStart(m[2].length, '0');
+              else codigo = codigo + '-' + (i + 1);
+            }
+            codigosUsados.add(codigo);
+            // Insertar unidad
+            const ru = db.prepare(`
+              INSERT INTO pa_panol_unidades
+                (codigo_interno, nombre, categoria_id, marca, modelo,
+                 compra_id, precio_compra, ubicacion_actual, estado, notas)
+              VALUES (?,?,?,?,?,?,?,?,'disponible',?)
+            `).run(
+              codigo,
+              insumoInfo.nombre,
+              it.panol_categoria_id || null,
+              it.panol_marca || null,
+              it.panol_modelo || null,
+              compraId,
+              precioPorUnidad,
+              'Pañol',
+              `Alta automática desde factura ${nro_factura||'(sin nro)'}`
+            );
+            // Movimiento de alta
+            db.prepare(`
+              INSERT INTO pa_panol_movimientos
+                (unidad_id, tipo, quien_registra, notas)
+              VALUES (?, 'alta', ?, ?)
+            `).run(ru.lastInsertRowid, req.user.id, `Alta desde compra #${compraId}`);
           }
-        }
+        } else {
+          // Comportamiento histórico: sumar stock al insumo + movimiento de stock
+          db.prepare("UPDATE pa_insumos SET stock_actual = stock_actual + ? WHERE id = ?")
+            .run(cantidadBase, it.insumo_id);
 
-        db.prepare("INSERT INTO pa_movimientos_stock (fecha, insumo_id, tipo, cantidad, motivo, referencia_id) VALUES (?,?,?,?,?,?)")
-          .run(fecha||new Date().toISOString().slice(0,10), it.insumo_id, 'entrada', cantidadBase, 'compra', compraId);
+          // Aprender la presentación default si el insumo no la tenía
+          if (it.presentacion_base != null) {
+            const ins = db.prepare("SELECT presentacion_base FROM pa_insumos WHERE id = ?").get(it.insumo_id);
+            if (ins && !ins.presentacion_base) {
+              db.prepare("UPDATE pa_insumos SET presentacion_base = ? WHERE id = ?")
+                .run(Number(it.presentacion_base), it.insumo_id);
+            }
+          }
+
+          db.prepare("INSERT INTO pa_movimientos_stock (fecha, insumo_id, tipo, cantidad, motivo, referencia_id) VALUES (?,?,?,?,?,?)")
+            .run(fecha||new Date().toISOString().slice(0,10), it.insumo_id, 'entrada', cantidadBase, 'compra', compraId);
+        }
       }
       return compraId;
     });

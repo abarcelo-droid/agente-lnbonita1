@@ -1638,5 +1638,22 @@ db.exec(`
     console.log('[PA] Grupos contables asignados a secciones');
   } catch(e) { console.error('[PA] Error migrando grupos secciones:', e.message); }
 })();
+
+// ── MIGRACIÓN: 'herramientas' → 'herramientas_consumibles' en pa_insumos ──
+// Antes había 3 categorías (agroinsumos / herramientas / otros). Con la
+// llegada del módulo Pañol se subdivide 'herramientas' en consumibles vs
+// pañol. Las herramientas existentes son TODAS consumibles porque el módulo
+// Pañol no existía cuando se cargaron — se rebautizan en silencio.
+(function migrarHerramientasConsumibles() {
+  try {
+    const r = db.prepare(
+      "UPDATE pa_insumos SET categoria_principal = 'herramientas_consumibles' WHERE categoria_principal = 'herramientas'"
+    ).run();
+    if (r.changes > 0) {
+      console.log(`[PA] Migrados ${r.changes} insumos: 'herramientas' → 'herramientas_consumibles'`);
+    }
+  } catch(e) { console.warn('[PA] Error migrando categoria herramientas:', e.message); }
+})();
+
 export { db };
 export default db;
