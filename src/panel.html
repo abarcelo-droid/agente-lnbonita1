@@ -6047,8 +6047,102 @@ if(_inpGondola) _inpGondola.addEventListener('keydown', function(e){
     <div></div>
   </div>
 
-  <div id="adm-as-lineas" style="margin:8px 0"></div>
-  <button
+<div id="adm-as-lineas" style="margin:8px 0"></div>
+  <button class="btn bo bs" onclick="admAgregarLinea()" style="margin-bottom:16px">+ Agregar línea</button>
+
+  <!-- Totales -->
+  <div style="background:var(--bg);border:1px solid var(--bor);border-radius:8px;padding:12px 14px;display:flex;justify-content:flex-end;gap:32px;font-size:14px;margin-bottom:16px">
+    <div>Total Debe: <strong id="adm-as-tot-debe" style="font-size:16px;color:var(--burd)">$0</strong></div>
+    <div>Total Haber: <strong id="adm-as-tot-haber" style="font-size:16px;color:var(--burd)">$0</strong></div>
+    <div id="adm-as-balance" style="font-weight:700;font-size:16px;color:var(--ok)">✓ Cuadra</div>
+  </div>
+
+  <div class="ab-modal-footer">
+    <button class="btn bo" onclick="document.getElementById('adm-mb-asiento').classList.remove('on')">Cancelar</button>
+    <button class="btn bb" onclick="admGuardarAsiento()">Registrar asiento</button>
+  </div>
+</div>
+</div>
+
+<!-- ─── MODAL: Detalle asiento ───────────────────────────────────── -->
+<div class="ab-modal-overlay" id="adm-mb-asiento-det">
+<div class="ab-modal" style="width:680px">
+  <div class="mhd">
+    <div><div class="mht" id="adm-as-det-tit">Asiento</div><div style="font-size:12px;color:var(--mut)" id="adm-as-det-sub"></div></div>
+    <button class="mcl" onclick="document.getElementById('adm-mb-asiento-det').classList.remove('on')">×</button>
+  </div>
+  <div id="adm-as-det-body"></div>
+  <div class="ab-modal-footer" style="justify-content:space-between">
+    <button class="btn bd" id="adm-as-det-anular-btn" onclick="admAnularAsientoActual()">Anular asiento</button>
+    <button class="btn bo" onclick="document.getElementById('adm-mb-asiento-det').classList.remove('on')">Cerrar</button>
+  </div>
+</div>
+</div>
+
+<!-- ─── MODAL: Nueva sección plan de cuentas ADM ────────────────── -->
+<div class="ab-modal-overlay" id="adm-mb-seccion">
+<div class="ab-modal" style="width:460px">
+  <div class="mhd">
+    <div><div class="mht" id="adm-sec-tit">Nueva sección</div></div>
+    <button class="mcl" onclick="document.getElementById('adm-mb-seccion').classList.remove('on')">×</button>
+  </div>
+  <input type="hidden" id="adm-sec-id">
+  <div class="fg">
+    <div class="fl"><label>Código *</label><input type="number" id="adm-sec-codigo" min="1" placeholder="Ej: 20"></div>
+    <div class="fl ff"><label>Nombre *</label><input id="adm-sec-nombre" placeholder="Ej: CAJA Y BANCOS"></div>
+    <div class="fl ff"><label>Grupo *</label>
+      <select id="adm-sec-grupo">
+        <option value="activo">🏦 Activo</option>
+        <option value="pasivo">💳 Pasivo</option>
+        <option value="patrimonio_neto">🏛️ Patrimonio Neto</option>
+        <option value="ingresos">📈 Ingresos</option>
+        <option value="gastos">📉 Gastos</option>
+      </select>
+    </div>
+  </div>
+  <div class="ab-modal-footer">
+    <button class="btn bo" onclick="document.getElementById('adm-mb-seccion').classList.remove('on')">Cancelar</button>
+    <button class="btn bb" onclick="admPcGuardarSeccion()">Guardar</button>
+  </div>
+</div>
+</div>
+
+<!-- ─── MODAL: Nueva cuenta plan de cuentas ADM ─────────────────── -->
+<div class="ab-modal-overlay" id="adm-mb-cuenta">
+<div class="ab-modal" style="width:520px">
+  <div class="mhd">
+    <div><div class="mht" id="adm-cu-tit">Nueva cuenta</div></div>
+    <button class="mcl" onclick="document.getElementById('adm-mb-cuenta').classList.remove('on')">×</button>
+  </div>
+  <input type="hidden" id="adm-cu-id">
+  <div class="fg">
+    <div class="fl ff"><label>Sección *</label><select id="adm-cu-seccion" onchange="admPcSugerirCodigo()"></select></div>
+    <div class="fl"><label>Código *</label>
+      <input id="adm-cu-codigo" placeholder="Ej: 10.01">
+      <div id="adm-cu-codigo-sug" style="font-size:10px;color:var(--mut);margin-top:3px"></div>
+    </div>
+    <div class="fl ff"><label>Nombre *</label><input id="adm-cu-nombre" placeholder="Ej: Caja pesos"></div>
+    <div class="fl"><label>Tipo</label>
+      <select id="adm-cu-tipo">
+        <option value="resultado">Resultado (ER)</option>
+        <option value="patrimonial">Patrimonial</option>
+      </select>
+    </div>
+    <div class="fl ff" style="display:flex;gap:18px;align-items:center;padding-top:8px">
+      <label style="display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--mut);cursor:pointer">
+        <input type="checkbox" id="adm-cu-lote" style="width:auto"> Permite lote
+      </label>
+      <label style="display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--mut);cursor:pointer">
+        <input type="checkbox" id="adm-cu-camp" style="width:auto"> Permite campaña
+      </label>
+    </div>
+  </div>
+  <div class="ab-modal-footer">
+    <button class="btn bo" onclick="document.getElementById('adm-mb-cuenta').classList.remove('on')">Cancelar</button>
+    <button class="btn bb" onclick="admPcGuardarCuenta()">Guardar</button>
+  </div>
+</div>
+</div>
 <!-- ── ESTILOS PA ─────────────────────────────────────────────── -->
 <style>
 .pa-verde-bg{background:#dcfce7;color:#166534}
