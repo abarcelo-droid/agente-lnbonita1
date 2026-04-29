@@ -1596,5 +1596,47 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_pa_asientos_fecha ON pa_asientos(fecha);
   CREATE INDEX IF NOT EXISTS idx_pa_asientos_lineas ON pa_asientos_lineas(asiento_id);
 `);
+// ── MIGRACIÓN: grupo contable en pa_cuentas_secciones ─────────────────────
+// Agrupa las secciones en los 5 grandes grupos del plan de cuentas clásico.
+// Los valores válidos: 'activo' | 'pasivo' | 'patrimonio_neto' | 'ingresos' | 'gastos'
+(function migrarGrupoSecciones() {
+  try {
+    const cols = db.prepare("PRAGMA table_info(pa_cuentas_secciones)").all().map(c => c.name);
+    if (!cols.includes('grupo')) {
+      db.exec("ALTER TABLE pa_cuentas_secciones ADD COLUMN grupo TEXT DEFAULT 'gastos'");
+      console.log('[PA] pa_cuentas_secciones.grupo agregada (default: gastos)');
+    }
+    // Asignar grupos a las secciones existentes de Andy
+    const asignaciones = [
+      // [codigo_seccion, grupo]
+      [1, 'gastos'],   // COSTO DE PRODUCCION
+      [2, 'gastos'],   // COSTO ASOCIADO A VENTAS - MERCADO
+      [3, 'gastos'],   // COSTO ASOCIADO A VENTAS - INDUSTRIA
+      [4, 'gastos'],   // COSTOS FIJOS
+      [5, 'gastos'],   // COSTOS FINANCIEROS
+      [6, 'gastos'],   // COSTOS IMPOSITIVOS
+      [7, 'patrimonio_neto'], // INVERSIONES
+    ];
+    const upd = db.prepare("UPDATE pa_cuentas_secciones SET grupo = ? WHERE codigo = ? AND grupo = 'gastos'");
+    for (const [codigo, grupo] of asignaciones) {
+      upd.run(grupo, codigo);
+    }
+
+    // Crear secciones de los grupos nuevos si no existen
+    const nuevasSecciones = [
+      [10, 'ACTIVO',         'activo'],
+      [11, 'PASIVO',         'pasivo'],
+      [12, 'INGRESOS',       'ingresos'],
+    ];
+    const insSeccion = db.prepare(`
+      INSERT OR IGNORE INTO pa_cuentas_secciones (codigo, nombre, orden, activo, grupo)
+      VALUES (?, ?, ?, 1, ?)
+    `);
+    for (const [codigo, nombre, grupo] of nuevasSecciones) {
+      insSeccion.run(codigo, nombre, codigo, grupo);
+    }
+    console.log('[PA] Grupos contables asignados a secciones');
+  } catch(e) { console.error('[PA] Error migrando grupos secciones:', e.message); }
+})();
 export { db };
 export default db;
