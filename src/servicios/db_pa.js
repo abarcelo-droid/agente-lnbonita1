@@ -1846,5 +1846,81 @@ db.exec(`
   } catch(e) { console.warn('[PA] Error migrando insumos a nueva taxonomía:', e.message); }
 })();
 
+// ─────────────────────────────────────────────────────────────────────────
+// FASE C — Facturas de SERVICIO (mismo modelo pa_compras + flag tipo_factura)
+//
+// Una factura de servicio tiene items que NO son insumos físicos sino
+// conceptos (alquiler de maquinaria, fletes, mano de obra externa…). Cada
+// concepto puede:
+//   - tener una descripción libre (campo "concepto")
+//   - estar imputado a una cuenta contable específica
+//   - estar asignado opcionalmente a un lote
+// La columna `insumo_id` queda en NULL para items de servicio.
+// ─────────────────────────────────────────────────────────────────────────
+(function migrarFacturasServicio() {
+  try {
+    // 1. tipo_factura en pa_compras
+    const colsCompras = db.prepare("PRAGMA table_info(pa_compras)").all().map(c => c.name);
+    if (!colsCompras.includes('tipo_factura')) {
+      db.exec("ALTER TABLE pa_compras ADD COLUMN tipo_factura TEXT NOT NULL DEFAULT 'compra'");
+      console.log("[PA] pa_compras.tipo_factura agregada (default 'compra')");
+    }
+    // 2. concepto, lote_id, cuenta_codigo en pa_compras_items
+    const colsItemsRaw = db.prepare("PRAGMA table_info(pa_compras_items)").all();
+    const colsItems = colsItemsRaw.map(c => c.name);
+    if (!colsItems.includes('concepto')) {
+      db.exec("ALTER TABLE pa_compras_items ADD COLUMN concepto TEXT");
+      console.log("[PA] pa_compras_items.concepto agregada");
+    }
+    if (!colsItems.includes('lote_id')) {
+      db.exec("ALTER TABLE pa_compras_items ADD COLUMN lote_id INTEGER REFERENCES pa_lotes(id)");
+      console.log("[PA] pa_compras_items.lote_id agregada");
+    }
+    if (!colsItems.includes('cuenta_codigo')) {
+      db.exec("ALTER TABLE pa_compras_items ADD COLUMN cuenta_codigo TEXT");
+      console.log("[PA] pa_compras_items.cuenta_codigo agregada");
+    }
+
+    // 3. Permitir insumo_id NULL en items de servicio. SQLite no soporta cambiar
+    // NOT NULL con ALTER COLUMN — hay que recrear la tabla. Solo lo hacemos si
+    // la tabla actual tiene insumo_id NOT NULL.
+    const insumoCol = colsItemsRaw.find(c => c.name === 'insumo_id');
+    if (insumoCol && insumoCol.notnull === 1) {
+      console.log('[PA] Recreando pa_compras_items para permitir insumo_id NULL en servicios...');
+      const recrearItems = db.transaction(() => {
+        // Renombrar tabla actual para preservar datos
+        db.exec("ALTER TABLE pa_compras_items RENAME TO pa_compras_items_old");
+        // Crear tabla nueva con insumo_id NULLABLE + las columnas nuevas
+        db.exec(`
+          CREATE TABLE pa_compras_items (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            compra_id INTEGER NOT NULL REFERENCES pa_compras(id),
+            insumo_id INTEGER REFERENCES pa_insumos(id),
+            cantidad REAL NOT NULL,
+            precio_unit REAL NOT NULL,
+            subtotal REAL NOT NULL,
+            iva_porcentaje REAL,
+            iva_monto REAL,
+            subtotal_neto REAL,
+            presentacion_base REAL,
+            cant_bultos REAL,
+            precio_modo TEXT DEFAULT 'bulto',
+            concepto TEXT,
+            lote_id INTEGER REFERENCES pa_lotes(id),
+            cuenta_codigo TEXT
+          )
+        `);
+        // Copiar datos viejos a la nueva (todas las columnas que existían)
+        const colsExistentes = colsItems.filter(c => c !== 'concepto' && c !== 'lote_id' && c !== 'cuenta_codigo');
+        const colsCopiar = colsExistentes.join(', ');
+        db.exec(`INSERT INTO pa_compras_items (${colsCopiar}) SELECT ${colsCopiar} FROM pa_compras_items_old`);
+        db.exec("DROP TABLE pa_compras_items_old");
+      });
+      recrearItems();
+      console.log('[PA] pa_compras_items recreada con insumo_id NULLABLE — datos preservados');
+    }
+  } catch(e) { console.warn('[PA] Error migrando facturas de servicio:', e.message); }
+})();
+
 export { db };
 export default db;

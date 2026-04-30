@@ -589,7 +589,7 @@ Solo devolvé el JSON, sin texto adicional.`
 router.get('/compras', requireAuth, (req, res) => {
   const db = getDb();
   try {
-    const { campaña_id, desde, hasta, incluir_inactivos } = req.query;
+    const { campaña_id, desde, hasta, incluir_inactivos, tipo_factura } = req.query;
     let query = `
       SELECT c.*, p.razon_social as proveedor_nombre,
              ca.nombre as campaña_nombre
@@ -603,13 +603,20 @@ router.get('/compras', requireAuth, (req, res) => {
     if (campaña_id) { query += " AND c.campaña_id = ?"; params.push(campaña_id); }
     if (desde) { query += " AND c.fecha >= ?"; params.push(desde); }
     if (hasta) { query += " AND c.fecha <= ?"; params.push(hasta); }
+    if (tipo_factura) { query += " AND c.tipo_factura = ?"; params.push(tipo_factura); }
     query += " ORDER BY c.fecha DESC";
     const compras = db.prepare(query).all(...params);
-    // Agregar items a cada compra
+    // Agregar items a cada compra. LEFT JOIN con pa_insumos porque los items de
+    // servicio tienen insumo_id NULL. JOIN extra con lotes y cuentas para enriquecer.
     const getItems = db.prepare(`
-      SELECT ci.*, i.nombre as insumo_nombre, i.unidad
+      SELECT ci.*,
+        i.nombre as insumo_nombre, i.unidad,
+        l.nombre AS lote_nombre,
+        cu.nombre AS cuenta_nombre
       FROM pa_compras_items ci
-      JOIN pa_insumos i ON i.id = ci.insumo_id
+      LEFT JOIN pa_insumos i ON i.id = ci.insumo_id
+      LEFT JOIN pa_lotes l ON l.id = ci.lote_id
+      LEFT JOIN pa_cuentas cu ON cu.codigo = ci.cuenta_codigo
       WHERE ci.compra_id = ?
     `);
     const data = compras.map(c => ({ ...c, items: getItems.all(c.id) }));
@@ -619,9 +626,28 @@ router.get('/compras', requireAuth, (req, res) => {
 
 router.post('/compras', requireAuth, (req, res) => {
   const db = getDb();
-  const { fecha, proveedor_id, proveedor_txt, nro_factura, tipo_comprobante, campaña_id, items, notas, remito_foto_b64 } = req.body;
+  const { fecha, proveedor_id, proveedor_txt, nro_factura, tipo_comprobante, campaña_id, items, notas, remito_foto_b64,
+          tipo_factura } = req.body;
   if (!items?.length) return res.status(400).json({ ok: false, error: 'Debe incluir al menos un item' });
+  const esServicio = (tipo_factura === 'servicio');
   try {
+    // ── Validaciones específicas por tipo
+    if (esServicio) {
+      // En facturas de servicio, cada item debe traer concepto + cuenta_codigo + monto
+      for (const it of items) {
+        if (!it.concepto || !String(it.concepto).trim()) {
+          return res.status(400).json({ ok: false, error: 'Cada concepto de servicio requiere descripción' });
+        }
+        if (!it.cuenta_codigo) {
+          return res.status(400).json({ ok: false, error: 'Cada concepto de servicio requiere una cuenta contable' });
+        }
+        const monto = Number(it.monto_neto || it.precio_unit || 0);
+        if (!monto || monto <= 0) {
+          return res.status(400).json({ ok: false, error: 'Cada concepto de servicio requiere un monto > 0' });
+        }
+      }
+    }
+
     // ── Normalizar items
     //
     // Modo "presentacion": se compra por bultos. Ej: 4 latas × 20 lt a $120.000/lata
@@ -635,7 +661,20 @@ router.post('/compras', requireAuth, (req, res) => {
     //   - cantidad = 80, precio_unit = 6000
     //   - MONTO = 80 × 6.000 = $480.000  (cantidad × precio_unit)
     //   - STOCK = 80 lt (= cantidad)
+    //
+    // Modo "servicio": no hay stock ni presentación, solo monto neto del concepto.
+    //   - it.monto_neto = monto sin IVA (también podemos recibir precio_unit como sinónimo)
+    //   - cantidad = 1, precio_unit = monto
     for (const it of items) {
+      if (esServicio) {
+        const monto = Number(it.monto_neto || it.precio_unit || 0);
+        it._stockASumar = 0;
+        it._montoNeto   = monto;
+        // Para INSERT en pa_compras_items: cantidad=1, precio_unit=monto
+        it.cantidad = 1;
+        it.precio_unit = monto;
+        continue;
+      }
       const modoPres = (it.cant_bultos != null && it.presentacion_base != null);
       if (modoPres) {
         const cantBultos = Number(it.cant_bultos);
@@ -680,12 +719,13 @@ router.post('/compras', requireAuth, (req, res) => {
       const r = db.prepare(`
         INSERT INTO pa_compras (fecha, proveedor_id, proveedor_txt, nro_factura, tipo_comprobante, campaña_id,
                                 subtotal, iva_monto, total, notas, remito_foto_path,
-                                iva_total, neto_total)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+                                iva_total, neto_total, tipo_factura)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
       `).run(fecha||new Date().toISOString().slice(0,10), proveedor_id||null, proveedor_txt||null,
              nro_factura||null, tipo_comprobante||'factura', campaña_id||null,
              neto_total, iva_total, total, notas||null, remito_foto_path,
-             iva_total, neto_total);
+             iva_total, neto_total,
+             esServicio ? 'servicio' : 'compra');
       const compraId = r.lastInsertRowid;
 
       // Helper: detectar si un insumo es de la categoría pañol
@@ -709,24 +749,34 @@ router.post('/compras', requireAuth, (req, res) => {
       }
 
       for (const it of items) {
+        // En servicio: cantidadBase=0 (no toca stock), pero el monto neto es _montoNeto.
+        // En compra: cantidadBase = stock que se va a sumar, precioBase es por unidad.
         const cantidadBase = it._stockASumar;
         const precioBase = cantidadBase > 0 ? (it._montoNeto / cantidadBase) : Number(it.precio_unit);
 
         db.prepare(`
           INSERT INTO pa_compras_items
             (compra_id, insumo_id, cantidad, precio_unit, subtotal, iva_porcentaje, iva_monto, subtotal_neto,
-             presentacion_base, cant_bultos, precio_modo)
-          VALUES (?,?,?,?,?,?,?,?,?,?,?)
-        `).run(compraId, it.insumo_id,
-               cantidadBase,
-               precioBase,
+             presentacion_base, cant_bultos, precio_modo,
+             concepto, lote_id, cuenta_codigo)
+          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        `).run(compraId,
+               esServicio ? null : it.insumo_id,
+               esServicio ? 1 : cantidadBase,
+               esServicio ? it._montoNeto : precioBase,
                it._subNeto + it._ivaMonto,
                it.iva_porcentaje != null ? Number(it.iva_porcentaje) : null,
                it._ivaMonto,
                it._subNeto,
                it.presentacion_base != null ? Number(it.presentacion_base) : null,
                it.cant_bultos != null ? Number(it.cant_bultos) : null,
-               it.precio_modo || 'bulto');
+               esServicio ? 'servicio' : (it.precio_modo || 'bulto'),
+               esServicio ? String(it.concepto).trim() : null,
+               (esServicio || it.lote_id) ? (it.lote_id || null) : null,
+               (esServicio || it.cuenta_codigo) ? (it.cuenta_codigo || null) : null);
+
+        // En servicios no toca stock ni crea pañol — saltar el resto del loop
+        if (esServicio) continue;
 
         // Determinar si el insumo es de pañol (en cuyo caso NO se suma stock,
         // se crean N unidades en pa_panol_unidades en su lugar)
