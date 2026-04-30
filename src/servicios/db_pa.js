@@ -1639,287 +1639,32 @@ db.exec(`
   } catch(e) { console.error('[PA] Error migrando grupos secciones:', e.message); }
 })();
 
-// ── MIGRACIÓN: 'herramientas' → 'herramientas_consumibles' en pa_insumos ──
-// Antes había 3 categorías (agroinsumos / herramientas / otros). Con la
-// llegada del módulo Pañol se subdivide 'herramientas' en consumibles vs
-// pañol. Las herramientas existentes son TODAS consumibles porque el módulo
-// Pañol no existía cuando se cargaron — se rebautizan en silencio.
-(function migrarHerramientasConsumibles() {
+// ── MIGRACIÓN: padrón de proveedores contables ───────────────────────────
+(function migrarAdmProveedores() {
   try {
-    const r = db.prepare(
-      "UPDATE pa_insumos SET categoria_principal = 'herramientas_consumibles' WHERE categoria_principal = 'herramientas'"
-    ).run();
-    if (r.changes > 0) {
-      console.log(`[PA] Migrados ${r.changes} insumos: 'herramientas' → 'herramientas_consumibles'`);
-    }
-  } catch(e) { console.warn('[PA] Error migrando categoria herramientas:', e.message); }
-})();
-
-// ─────────────────────────────────────────────────────────────────────────
-// FASE A — TAXONOMÍA DE CATEGORÍAS / SUBCATEGORÍAS PARA INSUMOS
-//
-// Reemplaza el modelo simple categoria_principal + tipo por un modelo
-// jerárquico con metadata que define para cada subcategoría:
-//   - si lleva STOCK (sí/no)
-//   - cómo "AFECTA" (orden de aplicación / plantinera / panel combustible /
-//                    préstamo / despachos / —)
-//   - el código de cuenta contable mapeado por defecto (puede ser elegible
-//     en el caso de herramientas pañol, donde hay 2 alternativas)
-//
-// IMPORTANTE: la columna categoria_principal sigue existiendo en pa_insumos
-// (no se borra) para no romper código actual. Las nuevas columnas
-// categoria_v2 / subcategoria conviven con la vieja.
-// ─────────────────────────────────────────────────────────────────────────
-
-// Agregar la cuenta 1.90 BIENES DE USO - HERRAMIENTAS si no existe.
-// Se hace siempre en startup (idempotente) porque es independiente del seed
-// inicial — el seed solo se ejecuta si la tabla está vacía.
-(function agregarCuenta190BienesUso() {
-  try {
-    const tabla = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='pa_cuentas'").get();
-    if (!tabla) return; // Plan de cuentas todavía no inicializado
-    const yaExiste = db.prepare("SELECT id FROM pa_cuentas WHERE codigo = '1.90'").get();
-    if (yaExiste) return;
-    const seccion1 = db.prepare("SELECT id FROM pa_cuentas_secciones WHERE codigo = 1").get();
-    if (!seccion1) return;
-    db.prepare(`
-      INSERT INTO pa_cuentas (codigo, nombre, seccion_id, tipo, permite_lote, permite_campania, es_sistema, orden, activo)
-      VALUES (?, ?, ?, 'resultado', 0, 0, 0, ?, 1)
-    `).run('1.90', 'BIENES DE USO - HERRAMIENTAS', seccion1.id, 90);
-    console.log('[PA] Cuenta 1.90 BIENES DE USO - HERRAMIENTAS creada');
-  } catch(e) { console.warn('[PA] Error creando cuenta 1.90:', e.message); }
-})();
-
-// Tabla maestro de categorías/subcategorías (jerarquía + metadata).
-// La poblamos al startup sin sobreescribir lo que ya esté para que el usuario
-// pueda renombrar / agregar subcategorías sin perder cambios.
-db.exec(`
-  CREATE TABLE IF NOT EXISTS pa_subcategorias (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    categoria       TEXT NOT NULL,             -- agroinsumos, combustibles, panol, embalajes, otros
-    subcategoria    TEXT NOT NULL,             -- Fertilizantes, Herbicidas, ...
-    requiere_stock  INTEGER NOT NULL DEFAULT 1,
-    afecta          TEXT NOT NULL DEFAULT '',  -- '', 'orden_aplicacion', 'plantinera', 'panel_combustible', 'prestamo', 'despachos'
-    cuenta_codigo_default  TEXT,               -- código de cuenta contable que se usa por defecto
-    cuenta_codigo_alt      TEXT,               -- código alternativo (caso panol→herramientas: usuario elige)
-    icono           TEXT,                      -- emoji opcional
-    orden           INTEGER NOT NULL DEFAULT 0,
-    activo          INTEGER NOT NULL DEFAULT 1,
-    UNIQUE(categoria, subcategoria)
-  );
-  CREATE INDEX IF NOT EXISTS idx_pa_subcat_categoria ON pa_subcategorias(categoria);
-`);
-
-// Seed de subcategorías. Solo inserta las que no existan (no pisa cambios manuales).
-(function seedPaSubcategorias() {
-  try {
-    const ins = db.prepare(`
-      INSERT OR IGNORE INTO pa_subcategorias
-        (categoria, subcategoria, requiere_stock, afecta, cuenta_codigo_default, cuenta_codigo_alt, icono, orden)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS adm_proveedores (
+        id               INTEGER PRIMARY KEY AUTOINCREMENT,
+        razon_social     TEXT NOT NULL,
+        nombre_comercial TEXT,
+        cuit             TEXT,
+        condicion_iva    TEXT DEFAULT 'responsable_inscripto',
+        direccion        TEXT,
+        telefono         TEXT,
+        email            TEXT,
+        rubro            TEXT,
+        cbu              TEXT,
+        alias_cbu        TEXT,
+        condicion_pago   TEXT,
+        contacto         TEXT,
+        notas            TEXT,
+        activo           INTEGER DEFAULT 1,
+        creado_en        TEXT DEFAULT (datetime('now','localtime')),
+        actualizado_en   TEXT DEFAULT (datetime('now','localtime'))
+      )
     `);
-    // [categoria, subcategoria, stock, afecta, cuenta_default, cuenta_alt, icono, orden]
-    const filas = [
-      // AGROINSUMOS
-      ['agroinsumos', 'Fertilizantes', 1, 'orden_aplicacion', '1.50', null, '🌱', 10],
-      ['agroinsumos', 'Herbicidas',    1, 'orden_aplicacion', '1.50', null, '🌿', 20],
-      ['agroinsumos', 'Fungicidas',    1, 'orden_aplicacion', '1.50', null, '🍄', 30],
-      ['agroinsumos', 'Insecticidas',  1, 'orden_aplicacion', '1.50', null, '🐛', 40],
-      ['agroinsumos', 'Abonos',        1, 'orden_aplicacion', '1.50', null, '🪴', 50],
-      ['agroinsumos', 'Agroquímicos',  1, 'orden_aplicacion', '1.50', null, '⚗️', 60],
-      ['agroinsumos', 'Semillas',      1, 'plantinera',       '1.55', null, '🌾', 70],
-      ['agroinsumos', 'Riego',         1, 'orden_aplicacion', '1.70', null, '💧', 80],
-      // COMBUSTIBLES
-      ['combustibles', 'Gasoil',       1, 'panel_combustible', '1.85', null, '⛽', 10],
-      ['combustibles', 'Nafta',        1, 'panel_combustible', '1.85', null, '⛽', 20],
-      // PAÑOL — Herramientas tiene 2 cuentas a elección
-      ['panol', 'Herramientas',         1, 'prestamo', '4.50', '1.90', '🛠️', 10],
-      ['panol', 'Insumos herramienta',  0, '',         '4.50', null,   '🔧', 20],
-      ['panol', 'Repuesto',             0, '',         '4.50', null,   '⚙️', 30],
-      // EMBALAJES
-      ['embalajes', 'Logísticos',  1, 'despachos', '2.40', null, '📦', 10],
-      ['embalajes', 'Primario',    1, 'despachos', '2.40', null, '📦', 20],
-      ['embalajes', 'Secundarios', 1, 'despachos', '2.45', null, '📦', 30],
-      // OTROS
-      ['otros', 'Gastos Generales',     0, '', '4.65', null, '📋', 10],
-      ['otros', 'Movilidad y Viáticos', 0, '', '4.80', null, '🚗', 20],
-      ['otros', 'Oficina',              0, '', '4.70', null, '🖇️', 30],
-      ['otros', 'Varios',               0, '', '4.90', null, '📦', 40],
-      ['otros', 'Limpieza',             0, '', '4.75', null, '🧽', 50],
-    ];
-    let n = 0;
-    for (const f of filas) { const r = ins.run(...f); if (r.changes > 0) n++; }
-    if (n > 0) console.log(`[PA] Seed de pa_subcategorias: ${n} subcategorías nuevas`);
-  } catch(e) { console.warn('[PA] Error seeding pa_subcategorias:', e.message); }
-})();
-
-// Migración de pa_insumos: agregar columnas categoria_v2, subcategoria, cuenta_codigo
-// y poblarlas en base a categoria_principal + tipo existentes.
-(function migrarInsumosNuevaTaxonomia() {
-  try {
-    const cols = db.prepare("PRAGMA table_info(pa_insumos)").all().map(c => c.name);
-    let agrego = false;
-    if (!cols.includes('categoria_v2')) {
-      db.exec("ALTER TABLE pa_insumos ADD COLUMN categoria_v2 TEXT");
-      console.log('[PA] pa_insumos.categoria_v2 agregada');
-      agrego = true;
-    }
-    if (!cols.includes('subcategoria')) {
-      db.exec("ALTER TABLE pa_insumos ADD COLUMN subcategoria TEXT");
-      console.log('[PA] pa_insumos.subcategoria agregada');
-      agrego = true;
-    }
-    if (!cols.includes('cuenta_codigo')) {
-      db.exec("ALTER TABLE pa_insumos ADD COLUMN cuenta_codigo TEXT");
-      console.log('[PA] pa_insumos.cuenta_codigo agregada');
-      agrego = true;
-    }
-
-    // Poblar valores nuevos solo donde estén NULL (no pisa lo que el user editó)
-    // Mapeo categoría/tipo viejos → nuevas categoría/subcategoría:
-    //   tipo=fertilizante → Agroinsumos / Fertilizantes
-    //   tipo=herbicida    → Agroinsumos / Herbicidas
-    //   tipo=fungicida    → Agroinsumos / Fungicidas
-    //   tipo=insecticida  → Agroinsumos / Insecticidas
-    //   tipo=abono        → Agroinsumos / Abonos
-    //   tipo=agroquimico  → Agroinsumos / Agroquímicos
-    //   tipo=semilla      → Agroinsumos / Semillas
-    //   categoria_principal=herramientas_panol         → Pañol / Herramientas
-    //   categoria_principal=herramientas_consumibles   → Pañol / Repuesto (sigue vivo, como pediste)
-    //   categoria_principal=otros                      → Otros / Varios
-    const mapeoTipo = {
-      'fertilizante': ['agroinsumos', 'Fertilizantes'],
-      'herbicida':    ['agroinsumos', 'Herbicidas'],
-      'fungicida':    ['agroinsumos', 'Fungicidas'],
-      'insecticida':  ['agroinsumos', 'Insecticidas'],
-      'abono':        ['agroinsumos', 'Abonos'],
-      'agroquimico':  ['agroinsumos', 'Agroquímicos'],
-      'semilla':      ['agroinsumos', 'Semillas']
-    };
-    const setSubcat = db.prepare("UPDATE pa_insumos SET categoria_v2=?, subcategoria=? WHERE id=? AND (categoria_v2 IS NULL OR subcategoria IS NULL)");
-    let migrados = 0;
-    const insumos = db.prepare("SELECT id, tipo, categoria_principal FROM pa_insumos WHERE categoria_v2 IS NULL OR subcategoria IS NULL").all();
-    const tx = db.transaction(() => {
-      for (const it of insumos) {
-        let cat, subcat;
-        if (mapeoTipo[it.tipo]) {
-          [cat, subcat] = mapeoTipo[it.tipo];
-        } else if (it.categoria_principal === 'herramientas_panol') {
-          cat = 'panol'; subcat = 'Herramientas';
-        } else if (it.categoria_principal === 'herramientas_consumibles') {
-          cat = 'panol'; subcat = 'Repuesto';
-        } else if (it.categoria_principal === 'otros') {
-          cat = 'otros'; subcat = 'Varios';
-        } else {
-          // Fallback razonable: agroinsumos / Fertilizantes (raro, pero no nulo)
-          cat = 'agroinsumos'; subcat = 'Fertilizantes';
-        }
-        const r = setSubcat.run(cat, subcat, it.id);
-        if (r.changes > 0) migrados++;
-      }
-    });
-    tx();
-    if (migrados > 0) console.log(`[PA] Migrados ${migrados} insumos a la nueva taxonomía categoria_v2/subcategoria`);
-
-    // Poblar cuenta_codigo en base a la subcategoría (default).
-    // Para herramientas pañol queda en NULL si nunca el usuario eligió, así
-    // el frontend puede preguntar al cargar la factura.
-    const findCuenta = db.prepare(`
-      SELECT cuenta_codigo_default FROM pa_subcategorias
-      WHERE categoria = ? AND subcategoria = ?
-    `);
-    const setCuenta = db.prepare("UPDATE pa_insumos SET cuenta_codigo=? WHERE id=? AND cuenta_codigo IS NULL");
-    let nCuentas = 0;
-    const insumos2 = db.prepare("SELECT id, categoria_v2, subcategoria FROM pa_insumos WHERE cuenta_codigo IS NULL AND categoria_v2 IS NOT NULL").all();
-    const tx2 = db.transaction(() => {
-      for (const it of insumos2) {
-        const cat = findCuenta.get(it.categoria_v2, it.subcategoria);
-        // Para Pañol/Herramientas dejamos cuenta_codigo en NULL (es elegible)
-        if (cat && cat.cuenta_codigo_default && !(it.categoria_v2 === 'panol' && it.subcategoria === 'Herramientas')) {
-          const r = setCuenta.run(cat.cuenta_codigo_default, it.id);
-          if (r.changes > 0) nCuentas++;
-        }
-      }
-    });
-    tx2();
-    if (nCuentas > 0) console.log(`[PA] Asignada cuenta_codigo automática a ${nCuentas} insumos`);
-  } catch(e) { console.warn('[PA] Error migrando insumos a nueva taxonomía:', e.message); }
-})();
-
-// ─────────────────────────────────────────────────────────────────────────
-// FASE C — Facturas de SERVICIO (mismo modelo pa_compras + flag tipo_factura)
-//
-// Una factura de servicio tiene items que NO son insumos físicos sino
-// conceptos (alquiler de maquinaria, fletes, mano de obra externa…). Cada
-// concepto puede:
-//   - tener una descripción libre (campo "concepto")
-//   - estar imputado a una cuenta contable específica
-//   - estar asignado opcionalmente a un lote
-// La columna `insumo_id` queda en NULL para items de servicio.
-// ─────────────────────────────────────────────────────────────────────────
-(function migrarFacturasServicio() {
-  try {
-    // 1. tipo_factura en pa_compras
-    const colsCompras = db.prepare("PRAGMA table_info(pa_compras)").all().map(c => c.name);
-    if (!colsCompras.includes('tipo_factura')) {
-      db.exec("ALTER TABLE pa_compras ADD COLUMN tipo_factura TEXT NOT NULL DEFAULT 'compra'");
-      console.log("[PA] pa_compras.tipo_factura agregada (default 'compra')");
-    }
-    // 2. concepto, lote_id, cuenta_codigo en pa_compras_items
-    const colsItemsRaw = db.prepare("PRAGMA table_info(pa_compras_items)").all();
-    const colsItems = colsItemsRaw.map(c => c.name);
-    if (!colsItems.includes('concepto')) {
-      db.exec("ALTER TABLE pa_compras_items ADD COLUMN concepto TEXT");
-      console.log("[PA] pa_compras_items.concepto agregada");
-    }
-    if (!colsItems.includes('lote_id')) {
-      db.exec("ALTER TABLE pa_compras_items ADD COLUMN lote_id INTEGER REFERENCES pa_lotes(id)");
-      console.log("[PA] pa_compras_items.lote_id agregada");
-    }
-    if (!colsItems.includes('cuenta_codigo')) {
-      db.exec("ALTER TABLE pa_compras_items ADD COLUMN cuenta_codigo TEXT");
-      console.log("[PA] pa_compras_items.cuenta_codigo agregada");
-    }
-
-    // 3. Permitir insumo_id NULL en items de servicio. SQLite no soporta cambiar
-    // NOT NULL con ALTER COLUMN — hay que recrear la tabla. Solo lo hacemos si
-    // la tabla actual tiene insumo_id NOT NULL.
-    const insumoCol = colsItemsRaw.find(c => c.name === 'insumo_id');
-    if (insumoCol && insumoCol.notnull === 1) {
-      console.log('[PA] Recreando pa_compras_items para permitir insumo_id NULL en servicios...');
-      const recrearItems = db.transaction(() => {
-        // Renombrar tabla actual para preservar datos
-        db.exec("ALTER TABLE pa_compras_items RENAME TO pa_compras_items_old");
-        // Crear tabla nueva con insumo_id NULLABLE + las columnas nuevas
-        db.exec(`
-          CREATE TABLE pa_compras_items (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            compra_id INTEGER NOT NULL REFERENCES pa_compras(id),
-            insumo_id INTEGER REFERENCES pa_insumos(id),
-            cantidad REAL NOT NULL,
-            precio_unit REAL NOT NULL,
-            subtotal REAL NOT NULL,
-            iva_porcentaje REAL,
-            iva_monto REAL,
-            subtotal_neto REAL,
-            presentacion_base REAL,
-            cant_bultos REAL,
-            precio_modo TEXT DEFAULT 'bulto',
-            concepto TEXT,
-            lote_id INTEGER REFERENCES pa_lotes(id),
-            cuenta_codigo TEXT
-          )
-        `);
-        // Copiar datos viejos a la nueva (todas las columnas que existían)
-        const colsExistentes = colsItems.filter(c => c !== 'concepto' && c !== 'lote_id' && c !== 'cuenta_codigo');
-        const colsCopiar = colsExistentes.join(', ');
-        db.exec(`INSERT INTO pa_compras_items (${colsCopiar}) SELECT ${colsCopiar} FROM pa_compras_items_old`);
-        db.exec("DROP TABLE pa_compras_items_old");
-      });
-      recrearItems();
-      console.log('[PA] pa_compras_items recreada con insumo_id NULLABLE — datos preservados');
-    }
-  } catch(e) { console.warn('[PA] Error migrando facturas de servicio:', e.message); }
+    console.log('[ADM] Tabla adm_proveedores lista');
+  } catch(e) { console.error('[ADM] Error creando adm_proveedores:', e.message); }
 })();
 
 export { db };
