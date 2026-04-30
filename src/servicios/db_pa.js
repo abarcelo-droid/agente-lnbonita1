@@ -1638,5 +1638,34 @@ db.exec(`
     console.log('[PA] Grupos contables asignados a secciones');
   } catch(e) { console.error('[PA] Error migrando grupos secciones:', e.message); }
 })();
+
+// ── MIGRACIÓN: padrón de proveedores contables ───────────────────────────
+(function migrarAdmProveedores() {
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS adm_proveedores (
+        id               INTEGER PRIMARY KEY AUTOINCREMENT,
+        razon_social     TEXT NOT NULL,
+        nombre_comercial TEXT,
+        cuit             TEXT,
+        condicion_iva    TEXT DEFAULT 'responsable_inscripto',
+        direccion        TEXT,
+        telefono         TEXT,
+        email            TEXT,
+        rubro            TEXT,
+        cbu              TEXT,
+        alias_cbu        TEXT,
+        condicion_pago   TEXT,
+        contacto         TEXT,
+        notas            TEXT,
+        activo           INTEGER DEFAULT 1,
+        creado_en        TEXT DEFAULT (datetime('now','localtime')),
+        actualizado_en   TEXT DEFAULT (datetime('now','localtime'))
+      )
+    `);
+    console.log('[ADM] Tabla adm_proveedores lista');
+  } catch(e) { console.error('[ADM] Error creando adm_proveedores:', e.message); }
+})();
+
 export { db };
 export default db;
