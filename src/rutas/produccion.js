@@ -326,21 +326,64 @@ router.get('/insumos', requireAuth, (req, res) => {
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
+// ─────────────────────────────────────────────────────────────────────────
+// FASE A — Taxonomía: maestro de subcategorías + cuentas mapeadas
+// ─────────────────────────────────────────────────────────────────────────
+router.get('/subcategorias', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const incluirInactivas = req.query.incluir_inactivos === '1';
+    const where = incluirInactivas ? '' : 'WHERE s.activo = 1';
+    const rows = db.prepare(`
+      SELECT s.*,
+        cd.nombre AS cuenta_default_nombre,
+        ca.nombre AS cuenta_alt_nombre
+      FROM pa_subcategorias s
+      LEFT JOIN pa_cuentas cd ON cd.codigo = s.cuenta_codigo_default
+      LEFT JOIN pa_cuentas ca ON ca.codigo = s.cuenta_codigo_alt
+      ${where}
+      ORDER BY s.categoria, s.orden, s.subcategoria
+    `).all();
+
+    // Agrupar por categoría para que el frontend lo arme directo en cascada
+    const cats = {};
+    for (const r of rows) {
+      if (!cats[r.categoria]) cats[r.categoria] = { categoria: r.categoria, subcategorias: [] };
+      cats[r.categoria].subcategorias.push(r);
+    }
+    res.json({ ok: true, data: rows, agrupado: Object.values(cats) });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
 router.post('/insumos', requireAuth, (req, res) => {
   const db = getDb();
   const { nombre, tipo, unidad, stock_minimo, componente_madre, precio_ref_usd, notas, categoria_principal,
-          presentacion_tipo, presentacion_base } = req.body;
+          presentacion_tipo, presentacion_base,
+          categoria_v2, subcategoria, cuenta_codigo } = req.body;
   if (!nombre || !tipo || !unidad)
     return res.status(400).json({ ok: false, error: 'Nombre, tipo y unidad requeridos' });
   try {
+    // Si vino categoria_v2/subcategoria pero NO cuenta_codigo, autocompletar
+    // con la cuenta default del maestro de subcategorías (excepto Pañol/Herramientas)
+    let cuentaFinal = cuenta_codigo || null;
+    if (!cuentaFinal && categoria_v2 && subcategoria) {
+      const sub = db.prepare("SELECT cuenta_codigo_default, cuenta_codigo_alt FROM pa_subcategorias WHERE categoria=? AND subcategoria=?")
+                    .get(categoria_v2, subcategoria);
+      if (sub && !sub.cuenta_codigo_alt) cuentaFinal = sub.cuenta_codigo_default;
+      // si tiene alt, queda en NULL (el frontend tiene que pedirla al user)
+    }
     const r = db.prepare(`
       INSERT INTO pa_insumos (nombre, tipo, unidad, stock_minimo, componente_madre, precio_ref_usd, notas, categoria_principal,
-                              presentacion_tipo, presentacion_base)
-      VALUES (?,?,?,?,?,?,?,?,?,?)
+                              presentacion_tipo, presentacion_base,
+                              categoria_v2, subcategoria, cuenta_codigo)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
     `).run(nombre, tipo, unidad, stock_minimo||0, componente_madre||null, precio_ref_usd||null, notas||null,
            categoria_principal || 'agroinsumos',
            presentacion_tipo || null,
-           presentacion_base != null ? Number(presentacion_base) : null);
+           presentacion_base != null ? Number(presentacion_base) : null,
+           categoria_v2 || null,
+           subcategoria || null,
+           cuentaFinal);
     res.json({ ok: true, id: r.lastInsertRowid });
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
@@ -348,13 +391,15 @@ router.post('/insumos', requireAuth, (req, res) => {
 router.patch('/insumos/:id', requireAuth, (req, res) => {
   const db = getDb();
   const { nombre, tipo, unidad, stock_minimo, activo, componente_madre, precio_ref_usd, notas, categoria_principal,
-          presentacion_tipo, presentacion_base } = req.body;
+          presentacion_tipo, presentacion_base,
+          categoria_v2, subcategoria, cuenta_codigo } = req.body;
   try {
     const cur = db.prepare("SELECT * FROM pa_insumos WHERE id=?").get(req.params.id);
     if (!cur) return res.status(404).json({ ok: false, error: 'Insumo no encontrado' });
     db.prepare(`UPDATE pa_insumos SET nombre=?, tipo=?, unidad=?, stock_minimo=?, activo=?,
                 componente_madre=?, precio_ref_usd=?, notas=?, categoria_principal=?,
-                presentacion_tipo=?, presentacion_base=? WHERE id=?`)
+                presentacion_tipo=?, presentacion_base=?,
+                categoria_v2=?, subcategoria=?, cuenta_codigo=? WHERE id=?`)
       .run(nombre||cur.nombre, tipo||cur.tipo, unidad||cur.unidad, stock_minimo??cur.stock_minimo,
            activo!==undefined?activo:cur.activo,
            componente_madre!==undefined?componente_madre:cur.componente_madre,
@@ -363,6 +408,9 @@ router.patch('/insumos/:id', requireAuth, (req, res) => {
            categoria_principal || cur.categoria_principal,
            presentacion_tipo!==undefined?presentacion_tipo:cur.presentacion_tipo,
            presentacion_base!==undefined?(presentacion_base!=null?Number(presentacion_base):null):cur.presentacion_base,
+           categoria_v2!==undefined?categoria_v2:cur.categoria_v2,
+           subcategoria!==undefined?subcategoria:cur.subcategoria,
+           cuenta_codigo!==undefined?cuenta_codigo:cur.cuenta_codigo,
            req.params.id);
     res.json({ ok: true });
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
@@ -541,7 +589,7 @@ Solo devolvé el JSON, sin texto adicional.`
 router.get('/compras', requireAuth, (req, res) => {
   const db = getDb();
   try {
-    const { campaña_id, desde, hasta, incluir_inactivos } = req.query;
+    const { campaña_id, desde, hasta, incluir_inactivos, tipo_factura } = req.query;
     let query = `
       SELECT c.*, p.razon_social as proveedor_nombre,
              ca.nombre as campaña_nombre
@@ -555,13 +603,20 @@ router.get('/compras', requireAuth, (req, res) => {
     if (campaña_id) { query += " AND c.campaña_id = ?"; params.push(campaña_id); }
     if (desde) { query += " AND c.fecha >= ?"; params.push(desde); }
     if (hasta) { query += " AND c.fecha <= ?"; params.push(hasta); }
+    if (tipo_factura) { query += " AND c.tipo_factura = ?"; params.push(tipo_factura); }
     query += " ORDER BY c.fecha DESC";
     const compras = db.prepare(query).all(...params);
-    // Agregar items a cada compra
+    // Agregar items a cada compra. LEFT JOIN con pa_insumos porque los items de
+    // servicio tienen insumo_id NULL. JOIN extra con lotes y cuentas para enriquecer.
     const getItems = db.prepare(`
-      SELECT ci.*, i.nombre as insumo_nombre, i.unidad
+      SELECT ci.*,
+        i.nombre as insumo_nombre, i.unidad,
+        l.nombre AS lote_nombre,
+        cu.nombre AS cuenta_nombre
       FROM pa_compras_items ci
-      JOIN pa_insumos i ON i.id = ci.insumo_id
+      LEFT JOIN pa_insumos i ON i.id = ci.insumo_id
+      LEFT JOIN pa_lotes l ON l.id = ci.lote_id
+      LEFT JOIN pa_cuentas cu ON cu.codigo = ci.cuenta_codigo
       WHERE ci.compra_id = ?
     `);
     const data = compras.map(c => ({ ...c, items: getItems.all(c.id) }));
@@ -571,9 +626,28 @@ router.get('/compras', requireAuth, (req, res) => {
 
 router.post('/compras', requireAuth, (req, res) => {
   const db = getDb();
-  const { fecha, proveedor_id, proveedor_txt, nro_factura, tipo_comprobante, campaña_id, items, notas, remito_foto_b64 } = req.body;
+  const { fecha, proveedor_id, proveedor_txt, nro_factura, tipo_comprobante, campaña_id, items, notas, remito_foto_b64,
+          tipo_factura } = req.body;
   if (!items?.length) return res.status(400).json({ ok: false, error: 'Debe incluir al menos un item' });
+  const esServicio = (tipo_factura === 'servicio');
   try {
+    // ── Validaciones específicas por tipo
+    if (esServicio) {
+      // En facturas de servicio, cada item debe traer concepto + cuenta_codigo + monto
+      for (const it of items) {
+        if (!it.concepto || !String(it.concepto).trim()) {
+          return res.status(400).json({ ok: false, error: 'Cada concepto de servicio requiere descripción' });
+        }
+        if (!it.cuenta_codigo) {
+          return res.status(400).json({ ok: false, error: 'Cada concepto de servicio requiere una cuenta contable' });
+        }
+        const monto = Number(it.monto_neto || it.precio_unit || 0);
+        if (!monto || monto <= 0) {
+          return res.status(400).json({ ok: false, error: 'Cada concepto de servicio requiere un monto > 0' });
+        }
+      }
+    }
+
     // ── Normalizar items
     //
     // Modo "presentacion": se compra por bultos. Ej: 4 latas × 20 lt a $120.000/lata
@@ -587,7 +661,20 @@ router.post('/compras', requireAuth, (req, res) => {
     //   - cantidad = 80, precio_unit = 6000
     //   - MONTO = 80 × 6.000 = $480.000  (cantidad × precio_unit)
     //   - STOCK = 80 lt (= cantidad)
+    //
+    // Modo "servicio": no hay stock ni presentación, solo monto neto del concepto.
+    //   - it.monto_neto = monto sin IVA (también podemos recibir precio_unit como sinónimo)
+    //   - cantidad = 1, precio_unit = monto
     for (const it of items) {
+      if (esServicio) {
+        const monto = Number(it.monto_neto || it.precio_unit || 0);
+        it._stockASumar = 0;
+        it._montoNeto   = monto;
+        // Para INSERT en pa_compras_items: cantidad=1, precio_unit=monto
+        it.cantidad = 1;
+        it.precio_unit = monto;
+        continue;
+      }
       const modoPres = (it.cant_bultos != null && it.presentacion_base != null);
       if (modoPres) {
         const cantBultos = Number(it.cant_bultos);
@@ -632,53 +719,137 @@ router.post('/compras', requireAuth, (req, res) => {
       const r = db.prepare(`
         INSERT INTO pa_compras (fecha, proveedor_id, proveedor_txt, nro_factura, tipo_comprobante, campaña_id,
                                 subtotal, iva_monto, total, notas, remito_foto_path,
-                                iva_total, neto_total)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+                                iva_total, neto_total, tipo_factura)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
       `).run(fecha||new Date().toISOString().slice(0,10), proveedor_id||null, proveedor_txt||null,
              nro_factura||null, tipo_comprobante||'factura', campaña_id||null,
              neto_total, iva_total, total, notas||null, remito_foto_path,
-             iva_total, neto_total);
+             iva_total, neto_total,
+             esServicio ? 'servicio' : 'compra');
       const compraId = r.lastInsertRowid;
+
+      // Helper: detectar si un insumo es de la categoría pañol
+      const getCatInsumo = db.prepare("SELECT categoria_principal, nombre FROM pa_insumos WHERE id = ?");
+
+      // Para autogenerar códigos de pañol secuenciales si el cliente no los pasó
+      const getMaxCodigo = db.prepare(`
+        SELECT codigo_interno FROM pa_panol_unidades
+        WHERE codigo_interno LIKE 'PAÑ-%'
+        ORDER BY id DESC LIMIT 1
+      `);
+      function siguienteCodigoPanol() {
+        const last = getMaxCodigo.get();
+        let n = 0;
+        if (last && last.codigo_interno) {
+          const m = /PAÑ-(\d+)/.exec(last.codigo_interno);
+          if (m) n = parseInt(m[1], 10);
+        }
+        // Buscar siguientes consecutivos disponibles (en transacción se vería el estado actual)
+        return 'PAÑ-' + String(n + 1).padStart(4, '0');
+      }
+
       for (const it of items) {
-        // En pa_compras_items guardamos:
-        //   - cantidad: el total en UNIDAD BASE (el que se suma al stock)
-        //   - precio_unit: precio en unidad base ($/lt o $/kg)
-        //   - cant_bultos / presentacion_base: info original para trazabilidad
+        // En servicio: cantidadBase=0 (no toca stock), pero el monto neto es _montoNeto.
+        // En compra: cantidadBase = stock que se va a sumar, precioBase es por unidad.
         const cantidadBase = it._stockASumar;
-        // Precio unitario en unidad base (para reportes, ranking proveedores, etc.)
         const precioBase = cantidadBase > 0 ? (it._montoNeto / cantidadBase) : Number(it.precio_unit);
 
         db.prepare(`
           INSERT INTO pa_compras_items
             (compra_id, insumo_id, cantidad, precio_unit, subtotal, iva_porcentaje, iva_monto, subtotal_neto,
-             presentacion_base, cant_bultos, precio_modo)
-          VALUES (?,?,?,?,?,?,?,?,?,?,?)
-        `).run(compraId, it.insumo_id,
-               cantidadBase,
-               precioBase,
+             presentacion_base, cant_bultos, precio_modo,
+             concepto, lote_id, cuenta_codigo)
+          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        `).run(compraId,
+               esServicio ? null : it.insumo_id,
+               esServicio ? 1 : cantidadBase,
+               esServicio ? it._montoNeto : precioBase,
                it._subNeto + it._ivaMonto,
                it.iva_porcentaje != null ? Number(it.iva_porcentaje) : null,
                it._ivaMonto,
                it._subNeto,
                it.presentacion_base != null ? Number(it.presentacion_base) : null,
                it.cant_bultos != null ? Number(it.cant_bultos) : null,
-               it.precio_modo || 'bulto');
+               esServicio ? 'servicio' : (it.precio_modo || 'bulto'),
+               esServicio ? String(it.concepto).trim() : null,
+               (esServicio || it.lote_id) ? (it.lote_id || null) : null,
+               (esServicio || it.cuenta_codigo) ? (it.cuenta_codigo || null) : null);
 
-        // Actualizar stock del insumo en unidad base
-        db.prepare("UPDATE pa_insumos SET stock_actual = stock_actual + ? WHERE id = ?")
-          .run(cantidadBase, it.insumo_id);
+        // En servicios no toca stock ni crea pañol — saltar el resto del loop
+        if (esServicio) continue;
 
-        // Aprender la presentación default si el insumo no la tenía (solo base numérica, sin tipo)
-        if (it.presentacion_base != null) {
-          const ins = db.prepare("SELECT presentacion_base FROM pa_insumos WHERE id = ?").get(it.insumo_id);
-          if (ins && !ins.presentacion_base) {
-            db.prepare("UPDATE pa_insumos SET presentacion_base = ? WHERE id = ?")
-              .run(Number(it.presentacion_base), it.insumo_id);
-          }
+        // Determinar si el insumo es de pañol (en cuyo caso NO se suma stock,
+        // se crean N unidades en pa_panol_unidades en su lugar)
+        const insumoInfo = getCatInsumo.get(it.insumo_id);
+        const esPanol = insumoInfo && insumoInfo.categoria_principal === 'herramientas_panol';
+
+        // Si el cliente pasó cuenta_codigo (caso Pañol > Herramientas con 2 alternativas),
+        // persistirla en el insumo para que la próxima vez ya esté pre-seleccionada.
+        if (it.cuenta_codigo) {
+          db.prepare("UPDATE pa_insumos SET cuenta_codigo = ? WHERE id = ?")
+            .run(it.cuenta_codigo, it.insumo_id);
         }
 
-        db.prepare("INSERT INTO pa_movimientos_stock (fecha, insumo_id, tipo, cantidad, motivo, referencia_id) VALUES (?,?,?,?,?,?)")
-          .run(fecha||new Date().toISOString().slice(0,10), it.insumo_id, 'entrada', cantidadBase, 'compra', compraId);
+        if (esPanol) {
+          // Cantidad de unidades a crear (en pañol cantidadBase = N enteras)
+          const nUnidades = Math.max(1, Math.round(cantidadBase));
+          // Precio por unidad = monto neto del item / N
+          const precioPorUnidad = nUnidades > 0 ? (it._montoNeto / nUnidades) : Number(it.precio_unit);
+          // Códigos: si el cliente envía it.panol_codigos = ['PAÑ-0042', ...], se respetan
+          // (uno por unidad). Si no, se autogeneran secuencialmente.
+          const codigosCliente = Array.isArray(it.panol_codigos) ? it.panol_codigos : [];
+          const codigosUsados = new Set();
+          for (let i = 0; i < nUnidades; i++) {
+            let codigo = (codigosCliente[i] || '').trim();
+            if (!codigo) codigo = siguienteCodigoPanol();
+            // Evitar duplicados dentro del mismo lote (si el cliente pasó algo ambiguo)
+            while (codigosUsados.has(codigo)) {
+              const m = /^(.*?-)(\d+)$/.exec(codigo);
+              if (m) codigo = m[1] + String(parseInt(m[2], 10) + 1).padStart(m[2].length, '0');
+              else codigo = codigo + '-' + (i + 1);
+            }
+            codigosUsados.add(codigo);
+            // Insertar unidad
+            const ru = db.prepare(`
+              INSERT INTO pa_panol_unidades
+                (codigo_interno, nombre, categoria_id, marca, modelo,
+                 compra_id, precio_compra, ubicacion_actual, estado, notas)
+              VALUES (?,?,?,?,?,?,?,?,'disponible',?)
+            `).run(
+              codigo,
+              insumoInfo.nombre,
+              it.panol_categoria_id || null,
+              it.panol_marca || null,
+              it.panol_modelo || null,
+              compraId,
+              precioPorUnidad,
+              'Pañol',
+              `Alta automática desde factura ${nro_factura||'(sin nro)'}`
+            );
+            // Movimiento de alta
+            db.prepare(`
+              INSERT INTO pa_panol_movimientos
+                (unidad_id, tipo, quien_registra, notas)
+              VALUES (?, 'alta', ?, ?)
+            `).run(ru.lastInsertRowid, req.user.id, `Alta desde compra #${compraId}`);
+          }
+        } else {
+          // Comportamiento histórico: sumar stock al insumo + movimiento de stock
+          db.prepare("UPDATE pa_insumos SET stock_actual = stock_actual + ? WHERE id = ?")
+            .run(cantidadBase, it.insumo_id);
+
+          // Aprender la presentación default si el insumo no la tenía
+          if (it.presentacion_base != null) {
+            const ins = db.prepare("SELECT presentacion_base FROM pa_insumos WHERE id = ?").get(it.insumo_id);
+            if (ins && !ins.presentacion_base) {
+              db.prepare("UPDATE pa_insumos SET presentacion_base = ? WHERE id = ?")
+                .run(Number(it.presentacion_base), it.insumo_id);
+            }
+          }
+
+          db.prepare("INSERT INTO pa_movimientos_stock (fecha, insumo_id, tipo, cantidad, motivo, referencia_id) VALUES (?,?,?,?,?,?)")
+            .run(fecha||new Date().toISOString().slice(0,10), it.insumo_id, 'entrada', cantidadBase, 'compra', compraId);
+        }
       }
       return compraId;
     });

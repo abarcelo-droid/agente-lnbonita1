@@ -22,10 +22,17 @@ nav{width:230px;flex-shrink:0;background:var(--nav);display:flex;flex-direction:
 .logo{padding:0;border-bottom:1px solid rgba(255,255,255,.1);margin-bottom:8px;background:#fff}
 .logo img{width:100%;max-width:100%;display:block;padding:16px 20px 12px;filter:none;opacity:1}
 .logo-tag{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:rgba(255,255,255,.4);padding:8px 20px;background:var(--nav2)}
-.ng{padding:10px 20px 3px;font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:rgba(255,255,255,.3)}
-.ni{display:flex;align-items:center;gap:10px;padding:8px 20px;cursor:pointer;color:rgba(255,255,255,.65);transition:all .15s;border-left:3px solid transparent;font-size:11px;text-transform:uppercase;letter-spacing:.05em}
+.ng{padding:10px 20px 3px;font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:rgba(255,255,255,.3);flex-shrink:0}
+.ni{display:flex;align-items:center;gap:10px;padding:8px 20px;cursor:pointer;color:rgba(255,255,255,.65);transition:all .15s;border-left:3px solid transparent;font-size:11px;text-transform:uppercase;letter-spacing:.05em;flex-shrink:0}
 .ni:hover{color:#fff;background:rgba(255,255,255,.08)}
 .ni.on{color:#fff;border-left-color:var(--gold);background:rgba(255,255,255,.12)}
+.ni-grp{display:flex;align-items:center;justify-content:space-between;padding:8px 20px;cursor:pointer;color:rgba(255,255,255,.85);transition:all .15s;font-size:11px;text-transform:uppercase;letter-spacing:.05em;font-weight:600;user-select:none;flex-shrink:0}
+.ni-grp:hover{color:#fff;background:rgba(255,255,255,.05)}
+.ni-caret{font-size:9px;transition:transform .2s;color:rgba(255,255,255,.4);margin-left:6px}
+.ni-grp.collapsed .ni-caret{transform:rotate(-90deg)}
+.ni-grp-items{flex-shrink:0}
+.ni-grp.collapsed + .ni-grp-items{display:none}
+.ni-grp-items .ni{padding-left:36px;font-size:10.5px;color:rgba(255,255,255,.55)}
 .dot{width:6px;height:6px;border-radius:50%;flex-shrink:0;background:rgba(255,255,255,.3)}
 .da{background:#4ade80}.db{background:#a78bfa}.dc{background:#38bdf8}.dd{background:#fb923c}.de{background:#fca5a5}
 main{flex:1;padding:28px 32px;min-width:0}
@@ -112,7 +119,47 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     <img src="/static/logo.jpg" alt="La Nina Bonita">
     <div class="logo-tag">Panel de control</div>
   </div>
-  <div class="ng">General</div>
+  <div class="ng" style="color:rgba(74,222,128,.5)">Producción Agrícola</div>
+  <div class="ni" data-sec="pa-dashboard"><span class="dot da"></span>Inicio</div>
+
+  <div class="ni-grp" data-grp="pa-informes">Informes<span class="ni-caret">▾</span></div>
+  <div class="ni-grp-items">
+    <div class="ni" data-sec="pa-calendario"><span class="dot dc"></span>Calendario Agrícola</div>
+    <div class="ni" data-sec="pa-costos"><span class="dot da"></span>Costos por Lote</div>
+  </div>
+
+  <div class="ni" data-sec="pa-scout"><span class="dot de"></span>Scout</div>
+
+  <div class="ni-grp" data-grp="pa-manejos">Manejos<span class="ni-caret">▾</span></div>
+  <div class="ni-grp-items">
+    <div class="ni" data-sec="pa-insumos"><span class="dot db"></span>Fertilizantes / Insumos</div>
+    <div class="ni" data-sec="pa-ordenes"><span class="dot de"></span>Órdenes de Aplicación</div>
+    <div class="ni" data-sec="pa-combustible"><span class="dot da"></span>⛽ Combustible</div>
+    <div class="ni" data-sec="pa-panol"><span class="dot dd"></span>🔧 Pañol</div>
+  </div>
+
+  <div class="ni" data-sec="pa-personal"><span class="dot db"></span>👷 Personal</div>
+
+  <div class="ni-grp" data-grp="pa-admin">Administración<span class="ni-caret">▾</span></div>
+  <div class="ni-grp-items">
+    <div class="ni" data-sec="pa-compras"><span class="dot dd"></span>Ingreso de Factura</div>
+    <div class="ni" data-sec="pa-electricidad"><span class="dot da"></span>⚡ Electricidad</div>
+  </div>
+
+  <div class="ni-grp" data-grp="pa-comerc">Comercialización<span class="ni-caret">▾</span></div>
+  <div class="ni-grp-items">
+    <div class="ni" data-sec="pa-despachos"><span class="dot dc"></span>🚚 Despachos</div>
+  </div>
+
+  <div class="ni-grp" data-grp="pa-maestros">Maestros<span class="ni-caret">▾</span></div>
+  <div class="ni-grp-items">
+    <div class="ni" data-sec="pa-cuentas"><span class="dot dc"></span>📊 Plan de Cuentas</div>
+    <div class="ni" data-sec="adm-asientos"><span class="dot db"></span>📒 Asientos Contables</div>
+    <div class="ni" data-sec="adm-plan-cuentas"><span class="dot dc"></span>📊 Plan de Cuentas Contable</div>
+    <div class="ni" data-sec="pa-lotes"><span class="dot db"></span>Fincas y Lotes</div>
+  </div>
+
+  <div class="ng" style="margin-top:8px">General</div>
   <div class="ni on" data-sec="inicio"><span class="dot"></span>Inicio</div>
   <div class="ni" data-sec="crm"><span class="dot dd"></span>CRM</div>
   <div class="ni" data-sec="pedidos"><span class="dot"></span>Pedidos</div>
@@ -1234,6 +1281,16 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   <div class="pa-card"><div class="pa-card-title">Órdenes pendientes</div><div class="pa-stat" id="pad-ordenes">—</div></div>
   <div class="pa-card"><div class="pa-card-title">Costo campaña</div><div class="pa-stat" id="pad-costo">—</div></div>
 </div>
+
+<!-- Clima Carpinteria -->
+<div class="pa-card" style="margin-bottom:16px" id="pad-clima-card">
+  <div class="pa-card-title" style="display:flex;justify-content:space-between;align-items:center">
+    <span>🌤️ Clima — Carpinteria, San Juan</span>
+    <span id="pad-clima-update" style="font-size:11px;color:var(--mut);font-weight:400"></span>
+  </div>
+  <div id="pad-clima-cont"><div class="emp" style="padding:16px">Cargando clima...</div></div>
+</div>
+
 <div class="pa-grid2">
   <div class="pa-card"><div class="pa-card-title">⚠️ Insumos bajo stock mínimo</div><div id="pad-bajo-stock"><div class="emp">Cargando...</div></div></div>
   <div class="pa-card"><div class="pa-card-title">📋 Órdenes emitidas</div><div id="pad-ordenes-lista"><div class="emp">Cargando...</div></div></div>
@@ -1299,24 +1356,29 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   </label>
 </div>
 <div class="pa-wrap"><div class="ab-table-wrap"><table class="pa-tbl">
-  <thead><tr><th>Nombre</th><th>Principio activo</th><th>Tipo</th><th>Unidad</th><th style="text-align:right">Stock actual</th><th style="text-align:right">Último precio</th><th>Estado</th><th></th></tr></thead>
+  <thead><tr><th>Nombre</th><th>Principio activo</th><th>Categoría</th><th>Unidad</th><th style="text-align:right">Stock actual</th><th style="text-align:right">Último precio</th><th>Estado</th><th></th></tr></thead>
   <tbody id="pa-ins-tbody"><tr><td colspan="8" class="emp">Cargando...</td></tr></tbody>
 </table></div></div>
 </div>
 
 <!-- ─── PA COMPRAS ────────────────────────────────────────────── -->
 <div class="sec" id="sec-pa-compras">
-<div class="ph"><div><div class="ph-t">🛒 Compras de Insumos</div><div class="ph-s">Registro de facturas y actualización de stock</div></div>
-<button class="btn bb" onclick="paAbrirNuevaCompra()">+ Nueva compra</button></div>
+<div class="ph"><div><div class="ph-t">📥 Ingreso de Factura</div><div class="ph-s">Registro de facturas (agroinsumos, herramientas, otros) y actualización de stock / pañol</div></div>
+<button class="btn bb" onclick="paAbrirNuevaCompra()">+ Nueva factura</button></div>
 <div class="filt">
-  <label style="font-size:12px;color:var(--mut);display:inline-flex;align-items:center;gap:6px;cursor:pointer">
+  <select id="pa-comp-fil-tipo" onchange="paLoadCompras()" style="font-size:12px">
+    <option value="">Todas las facturas</option>
+    <option value="compra">🛒 Compras de bienes</option>
+    <option value="servicio">🛠️ Servicios</option>
+  </select>
+  <label style="font-size:12px;color:var(--mut);display:inline-flex;align-items:center;gap:6px;cursor:pointer;margin-left:12px">
     <input type="checkbox" id="pa-comp-ver-inact" onchange="paLoadCompras()" style="width:auto">
     Ver desactivadas
   </label>
 </div>
 <div class="pa-wrap"><div class="ab-table-wrap"><table class="pa-tbl">
-  <thead><tr><th>Fecha</th><th>Comprobante</th><th>Proveedor</th><th>Productos</th><th style="text-align:right">Total</th><th>Foto</th><th></th></tr></thead>
-  <tbody id="pa-comp-tbody"><tr><td colspan="7" class="emp">Cargando...</td></tr></tbody>
+  <thead><tr><th>Fecha</th><th>Tipo</th><th>Comprobante</th><th>Proveedor</th><th>Detalle</th><th style="text-align:right">Total</th><th>Foto</th><th></th></tr></thead>
+  <tbody id="pa-comp-tbody"><tr><td colspan="8" class="emp">Cargando...</td></tr></tbody>
 </table></div></div>
 </div>
 
@@ -1791,6 +1853,55 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       </tr></thead>
       <tbody id="pn-hist-tbody"><tr><td colspan="6" class="emp">Cargando...</td></tr></tbody>
     </table></div>
+  </div>
+</div>
+
+<!-- ─── PA ELECTRICIDAD (placeholder) ─────────────────────────── -->
+<div class="sec" id="sec-pa-electricidad">
+  <div class="ph">
+    <div>
+      <div class="ph-t">⚡ Módulo Electricidad</div>
+      <div class="ph-s">Gestión de consumo eléctrico, facturas de luz, medidores y proyección por sector</div>
+    </div>
+  </div>
+  <div style="background:var(--sur);border:1px dashed var(--bor);border-radius:12px;padding:40px 20px;text-align:center;margin-top:20px">
+    <div style="font-size:48px;margin-bottom:12px">🔌</div>
+    <div style="font-size:18px;font-weight:600;margin-bottom:8px">Módulo en construcción</div>
+    <div style="color:var(--mut);max-width:520px;margin:0 auto;line-height:1.5">
+      Este módulo va a manejar el seguimiento de consumo eléctrico, carga de facturas de luz por
+      medidor / sector, alertas por sobreconsumo y reportes mensuales.
+      Por ahora dejamos el espacio reservado en el menú.
+    </div>
+    <div style="margin-top:20px;font-size:12px;color:var(--mut);font-style:italic">
+      🚧 Próximamente
+    </div>
+  </div>
+</div>
+
+<!-- ─── PA DESPACHOS (placeholder) ────────────────────────────── -->
+<div class="sec" id="sec-pa-despachos">
+  <div class="ph">
+    <div>
+      <div class="ph-t">🚚 Despachos</div>
+      <div class="ph-s">Salidas de embalajes y productos terminados a clientes / mercado</div>
+    </div>
+  </div>
+  <div style="background:var(--sur);border:1px dashed var(--bor);border-radius:12px;padding:40px 20px;text-align:center;margin-top:20px">
+    <div style="font-size:48px;margin-bottom:12px">📦</div>
+    <div style="font-size:18px;font-weight:600;margin-bottom:8px">Módulo en construcción</div>
+    <div style="color:var(--mut);max-width:520px;margin:0 auto;line-height:1.5">
+      Acá va a vivir la gestión de despachos: descarga de stock de embalajes
+      (cajas, bandejas, films, etiquetas), salida de productos terminados, vinculación
+      con clientes y registro de fletes.
+    </div>
+    <div style="margin-top:16px;font-size:13px;color:var(--mut)">
+      Por ahora los embalajes se cargan como insumos con stock simple desde
+      <strong>Ingreso de Factura</strong> y se pueden ver en
+      <strong>Fertilizantes / Insumos</strong>.
+    </div>
+    <div style="margin-top:20px;font-size:12px;color:var(--mut);font-style:italic">
+      🚧 Próximamente
+    </div>
   </div>
 </div>
 
@@ -2546,6 +2657,13 @@ document.querySelectorAll('.ni').forEach(function(el) {
     el.classList.add('on');
     navAct = sec;
     loadSec(sec);
+  });
+});
+
+// NAV — submenús (toggle expand/collapse)
+document.querySelectorAll('.ni-grp').forEach(function(el){
+  el.addEventListener('click', function(){
+    el.classList.toggle('collapsed');
   });
 });
 
@@ -6193,7 +6311,7 @@ var USR_SECCIONES = [
     { id: 'pa-dashboard', label: 'Dashboard PA' },
     { id: 'pa-calendario', label: 'Calendario Agrícola' },
     { id: 'pa-insumos', label: 'Fertilizantes / Insumos' },
-    { id: 'pa-compras', label: 'Compras Insumos' },
+    { id: 'pa-compras', label: 'Ingreso de Factura' },
     { id: 'pa-ordenes', label: 'Órdenes de Aplicación' },
     { id: 'pa-costos', label: 'Costos por Lote' },
     { id: 'pa-lotes', label: 'Fincas y Lotes' },
@@ -6201,6 +6319,8 @@ var USR_SECCIONES = [
     { id: 'pa-combustible', label: '⛽ Combustible' },
     { id: 'pa-personal', label: '👷 Personal / MO' },
 { id: 'pa-panol', label: '🔧 Pañol' },
+    { id: 'pa-electricidad', label: '⚡ Electricidad' },
+    { id: 'pa-despachos', label: '🚚 Despachos' },
   ]},
   { grupo: 'Administración', items: [
     { id: 'adm-asientos',     label: '📒 Asientos Contables' },
@@ -6448,35 +6568,21 @@ if(_inpGondola) _inpGondola.addEventListener('keydown', function(e){
         <option value="otros">📦 OTROS (Construcción / Repuestos)</option>
       </select>
     </div>
-    <div class="fl ff" id="pa-ins-componente-row"><label>Principio activo / Componente madre <span style="color:var(--mut);font-weight:400;font-size:11px">(opcional)</span></label><input id="pa-ins-componente" placeholder="Ej: Glifosato, Clorpirifos, NPK 15-15-15... (si aplica)"></div>
-    <div class="fl"><label>Tipo</label>
-      <select id="pa-ins-tipo">
-        <optgroup label="Agroinsumos" id="optg-agroinsumos">
-          <option value="fertilizante">Fertilizante</option>
-          <option value="herbicida">Herbicida</option>
-          <option value="fungicida">Fungicida</option>
-          <option value="insecticida">Insecticida</option>
-          <option value="abono">Abono</option>
-          <option value="agroquimico">Agroquímico (otro)</option>
-          <option value="semilla">Semilla</option>
-        </optgroup>
-        <optgroup label="Herramientas" id="optg-herramientas">
-          <option value="manual">Manual</option>
-          <option value="electrica">Eléctrica</option>
-          <option value="riego">Riego</option>
-          <option value="medicion">Medición</option>
-          <option value="proteccion">Protección</option>
-        </optgroup>
-        <optgroup label="Otros" id="optg-otros">
-          <option value="construccion">Construcción</option>
-          <option value="repuesto">Repuesto</option>
-          <option value="combustible-insumo">Combustible / Lubricante</option>
-          <option value="limpieza">Limpieza</option>
-          <option value="oficina">Oficina</option>
-        </optgroup>
-        <option value="otro">Otro (sin clasificar)</option>
+    <!-- Cuenta contable: solo lectura por defecto, dropdown si la subcategoría tiene 2 opciones -->
+    <div class="fl ff" id="pa-ins-cuenta-row" style="display:none">
+      <label>Cuenta contable <span style="color:var(--mut);font-weight:400;font-size:11px">(asignada automáticamente)</span></label>
+      <div id="pa-ins-cuenta-fija" style="padding:8px 10px;background:var(--bg);border:1px dashed var(--bor);border-radius:6px;font-size:13px;color:var(--mut)">—</div>
+      <select id="pa-ins-cuenta-elegir" style="display:none">
+        <option value="">— Elegí cuenta —</option>
       </select>
     </div>
+
+    <!-- ── LEGACY: campos viejos que mantenemos para no romper compatibilidad ── -->
+    <!-- categoria_principal queda oculta pero se sigue mandando al backend -->
+    <input type="hidden" id="pa-ins-categoria" value="agroinsumos">
+    <div class="fl ff" id="pa-ins-componente-row"><label>Principio activo / Componente madre <span style="color:var(--mut);font-weight:400;font-size:11px">(opcional)</span></label><input id="pa-ins-componente" placeholder="Ej: Glifosato, Clorpirifos, NPK 15-15-15... (si aplica)"></div>
+    <!-- Tipo legacy: queda oculto, se setea automáticamente desde la subcategoría -->
+    <input type="hidden" id="pa-ins-tipo" value="otro">
     <div class="fl"><label>Unidad</label>
       <select id="pa-ins-unidad">
         <optgroup label="Peso">
@@ -6531,14 +6637,14 @@ if(_inpGondola) _inpGondola.addEventListener('keydown', function(e){
   </div>
 </div></div>
 
-<!-- Modal lateral: detalle de compra -->
-<div class="ab-modal-overlay" id="pa-mb-compra-det" style="align-items:stretch;justify-content:flex-end">
-  <div class="ab-modal" style="width:520px;max-width:95vw;height:100vh;max-height:100vh;border-radius:0;display:flex;flex-direction:column;overflow:hidden">
+<!-- Modal: detalle de compra (estilo factura) -->
+<div class="ab-modal-overlay" id="pa-mb-compra-det">
+  <div class="ab-modal" style="width:780px;max-width:96vw;max-height:92vh;display:flex;flex-direction:column;overflow:hidden">
     <div class="mhd" style="flex-shrink:0">
-      <div><div class="mht" id="pa-comp-det-tit">Detalle de compra</div><div style="font-size:12px;color:var(--mut)" id="pa-comp-det-sub">—</div></div>
+      <div><div class="mht" id="pa-comp-det-tit">Detalle de factura</div><div style="font-size:12px;color:var(--mut)" id="pa-comp-det-sub">—</div></div>
       <button class="mcl" onclick="document.getElementById('pa-mb-compra-det').classList.remove('on')">×</button>
     </div>
-    <div id="pa-comp-det-body" style="flex:1;overflow-y:auto;padding:16px">Cargando...</div>
+    <div id="pa-comp-det-body" style="flex:1;overflow-y:auto;padding:8px 4px">Cargando...</div>
   </div>
 </div>
 
@@ -6546,8 +6652,22 @@ if(_inpGondola) _inpGondola.addEventListener('keydown', function(e){
 <div class="ab-modal-overlay" id="pa-mb-compra">
 <div class="ab-modal" style="width:720px">
   <div class="mhd">
-    <div><div class="mht">Nueva Compra de Insumos</div><div style="font-size:12px;color:var(--mut)">Completá manualmente o usá el lector automático</div></div>
+    <div><div class="mht" id="pa-comp-modal-tit">Nueva Factura</div><div style="font-size:12px;color:var(--mut)" id="pa-comp-modal-sub">Completá manualmente o usá el lector automático</div></div>
     <button class="mcl" onclick="document.getElementById('pa-mb-compra').classList.remove('on')">×</button>
+  </div>
+
+  <!-- TABS Compra / Servicio -->
+  <div style="display:flex;gap:6px;margin-bottom:14px;background:var(--bg);padding:4px;border-radius:8px;border:1px solid var(--bor)">
+    <button type="button" id="pa-comp-tab-compra"
+      onclick="paCambiarTipoFactura('compra')"
+      style="flex:1;padding:8px 10px;border:none;border-radius:6px;background:var(--sur);font-weight:700;cursor:pointer;font-size:13px;color:var(--burg)">
+      🛒 Compra de bienes
+    </button>
+    <button type="button" id="pa-comp-tab-servicio"
+      onclick="paCambiarTipoFactura('servicio')"
+      style="flex:1;padding:8px 10px;border:none;border-radius:6px;background:transparent;font-weight:600;cursor:pointer;font-size:13px;color:var(--mut)">
+      🛠️ Servicio
+    </button>
   </div>
 
   <!-- ZONA FOTO + LECTOR IA -->
@@ -6585,13 +6705,25 @@ if(_inpGondola) _inpGondola.addEventListener('keydown', function(e){
     <div class="fl ff"><label>Notas</label><textarea id="pa-comp-notas" rows="2"></textarea></div>
   </div>
 
-  <!-- PRODUCTOS -->
-  <div style="font-size:12px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.06em;margin:14px 0 4px">Productos</div>
-  <div style="font-size:11px;color:var(--mut);margin-bottom:8px">
-    💡 Si comprás por bultos/latas/bolsas, usá el modo "Por bultos" para registrar cuántos × cuánto contiene cada uno. El stock se convierte a unidad base automáticamente.
+  <!-- PRODUCTOS (compra de bienes) -->
+  <div id="pa-comp-zona-productos">
+    <div style="font-size:12px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.06em;margin:14px 0 4px">Productos</div>
+    <div style="font-size:11px;color:var(--mut);margin-bottom:8px">
+      💡 Si comprás por bultos/latas/bolsas, usá el modo "Por bultos" para registrar cuántos × cuánto contiene cada uno. El stock se convierte a unidad base automáticamente.
+    </div>
+    <div id="pa-comp-items"></div>
+    <button class="btn bo" style="margin-top:8px" onclick="paAgregarItemCompra()">+ Agregar producto</button>
   </div>
-  <div id="pa-comp-items"></div>
-  <button class="btn bo" style="margin-top:8px" onclick="paAgregarItemCompra()">+ Agregar producto</button>
+
+  <!-- CONCEPTOS DE SERVICIO -->
+  <div id="pa-comp-zona-servicios" style="display:none">
+    <div style="font-size:12px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.06em;margin:14px 0 4px">Conceptos de servicio</div>
+    <div style="font-size:11px;color:var(--mut);margin-bottom:8px">
+      💡 Cargá uno o más conceptos. Cada concepto va a una cuenta contable y opcionalmente a un lote.
+    </div>
+    <div id="pa-comp-items-srv"></div>
+    <button class="btn bo" style="margin-top:8px" onclick="paAgregarItemServicio()">+ Agregar concepto</button>
+  </div>
 
   <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--bor);display:flex;justify-content:flex-end">
     <div style="display:flex;flex-direction:column;gap:4px;align-items:flex-end;font-size:13px">
@@ -6602,7 +6734,7 @@ if(_inpGondola) _inpGondola.addEventListener('keydown', function(e){
   </div>
   <div class="ab-modal-footer">
     <button class="btn bo" onclick="document.getElementById('pa-mb-compra').classList.remove('on')">Cancelar</button>
-    <button class="btn bb" onclick="paGuardarCompra()">Registrar compra</button>
+    <button class="btn bb" id="pa-comp-btn-guardar" onclick="paGuardarCompra()">Registrar compra</button>
   </div>
 </div></div>
 
@@ -7067,6 +7199,104 @@ function paLoadDash(){
     var el=document.getElementById('pad-ordenes-lista');var data=r.data||[];
     if(!data.length){el.innerHTML='<div class="emp" style="padding:12px">Sin órdenes pendientes</div>';return;}
     el.innerHTML=data.slice(0,5).map(function(o){return'<div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--bor);font-size:13px;cursor:pointer" onclick="paVerOrden('+o.id+')"><span>'+o.nro_orden+' — '+(o.tipo_aplicacion||'')+'</span><span class="pa-badge pa-azul-bg">'+paFecha(o.fecha_orden)+'</span></div>';}).join('');
+  });
+  paLoadClima();
+}
+
+// ── CLIMA Carpinteria, San Juan (Open-Meteo, gratis sin API key) ──
+function paClimaIcon(code){
+  if(code===0)return'☀️';
+  if(code===1)return'🌤️';
+  if(code===2)return'⛅';
+  if(code===3)return'☁️';
+  if(code===45||code===48)return'🌫️';
+  if(code>=51&&code<=57)return'🌦️';
+  if(code>=61&&code<=67)return'🌧️';
+  if(code>=71&&code<=77)return'❄️';
+  if(code>=80&&code<=82)return'🌧️';
+  if(code>=85&&code<=86)return'🌨️';
+  if(code>=95)return'⛈️';
+  return'🌡️';
+}
+function paClimaDesc(code){
+  var m={0:'Despejado',1:'Mayormente despejado',2:'Parcialmente nublado',3:'Nublado',
+    45:'Niebla',48:'Niebla con escarcha',51:'Llovizna leve',53:'Llovizna',55:'Llovizna intensa',
+    56:'Llovizna helada',57:'Llovizna helada intensa',61:'Lluvia leve',63:'Lluvia',65:'Lluvia intensa',
+    66:'Lluvia helada',67:'Lluvia helada intensa',71:'Nieve leve',73:'Nieve',75:'Nieve intensa',
+    77:'Granos de nieve',80:'Chubascos leves',81:'Chubascos',82:'Chubascos intensos',
+    85:'Chubascos de nieve',86:'Chubascos de nieve intensos',95:'Tormenta',96:'Tormenta con granizo',99:'Tormenta con granizo intenso'};
+  return m[code]||'—';
+}
+function paClimaDirViento(deg){
+  if(deg==null)return'';
+  var dirs=['N','NE','E','SE','S','SO','O','NO'];
+  return dirs[Math.round(((deg%360)/45))%8];
+}
+function paClimaDia(iso){
+  var d=new Date(iso+'T12:00:00');
+  var hoy=new Date();hoy.setHours(0,0,0,0);
+  var diff=Math.round((d-hoy)/86400000);
+  if(diff===0)return'Hoy';
+  if(diff===1)return'Mañ.';
+  var dias=['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'];
+  return dias[d.getDay()];
+}
+
+function paLoadClima(){
+  var el=document.getElementById('pad-clima-cont');
+  if(!el)return;
+  var url='https://api.open-meteo.com/v1/forecast?latitude=-31.7995&longitude=-68.5618'
+    +'&current=temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m,wind_direction_10m'
+    +'&daily=temperature_2m_max,temperature_2m_min,precipitation_sum,precipitation_probability_max,weather_code,wind_speed_10m_max'
+    +'&timezone=America%2FArgentina%2FBuenos_Aires&forecast_days=5';
+  fetch(url).then(function(r){return r.json();}).then(function(d){
+    if(!d||!d.current||!d.daily){el.innerHTML='<div class="emp" style="padding:16px">No se pudo cargar el clima</div>';return;}
+    var c=d.current,dl=d.daily;
+    var actual=
+      '<div style="display:flex;align-items:center;gap:14px;padding:6px 0">'
+      +'<div style="font-size:44px;line-height:1">'+paClimaIcon(c.weather_code)+'</div>'
+      +'<div style="flex:1">'
+        +'<div style="font-size:30px;font-weight:600;line-height:1.1">'+Math.round(c.temperature_2m)+'°<span style="font-size:14px;color:var(--mut);font-weight:400;margin-left:6px">'+paClimaDesc(c.weather_code)+'</span></div>'
+        +'<div style="font-size:12px;color:var(--mut);margin-top:6px">Sensación '+Math.round(c.apparent_temperature)+'° · Humedad '+c.relative_humidity_2m+'% · 💨 '+Math.round(c.wind_speed_10m)+' km/h '+paClimaDirViento(c.wind_direction_10m)+'</div>'
+      +'</div>'
+      +'</div>';
+    var diasHtml='';
+    for(var i=1;i<dl.time.length;i++){
+      var prob=dl.precipitation_probability_max[i]||0;
+      var mm=dl.precipitation_sum[i]||0;
+      var probColor=prob>=70?'#dc2626':prob>=40?'#f59e0b':'var(--mut)';
+      diasHtml+=
+        '<div style="flex:1;text-align:center;padding:10px 6px;background:var(--bg);border:1px solid var(--bor);border-radius:8px">'
+        +'<div style="font-size:11px;color:var(--mut);text-transform:uppercase;letter-spacing:.05em;font-weight:600">'+paClimaDia(dl.time[i])+'</div>'
+        +'<div style="font-size:24px;margin:4px 0">'+paClimaIcon(dl.weather_code[i])+'</div>'
+        +'<div style="font-size:13px;font-weight:600">'+Math.round(dl.temperature_2m_max[i])+'°<span style="color:var(--mut);font-weight:400">/'+Math.round(dl.temperature_2m_min[i])+'°</span></div>'
+        +'<div style="font-size:10px;color:'+probColor+';margin-top:3px">💧 '+prob+'%'+(mm>0?' · '+mm.toFixed(1)+'mm':'')+'</div>'
+        +'</div>';
+    }
+    // Alertas
+    var alertas=[];
+    for(var j=0;j<dl.time.length;j++){
+      if(dl.temperature_2m_min[j]<=3){
+        alertas.push('🥶 <b>Riesgo de helada</b> '+paClimaDia(dl.time[j])+' (mín. '+Math.round(dl.temperature_2m_min[j])+'°)');
+      }
+      if(dl.wind_speed_10m_max[j]>=30){
+        alertas.push('💨 <b>Viento fuerte</b> '+paClimaDia(dl.time[j])+' ('+Math.round(dl.wind_speed_10m_max[j])+' km/h) — limitar aplicaciones');
+      }
+    }
+    var alertasHtml=alertas.length
+      ?'<div style="margin-top:12px;padding:10px 12px;background:#fef3c7;border-left:3px solid #f59e0b;border-radius:4px;font-size:12px;color:#78350f">'+alertas.slice(0,3).join('<br>')+'</div>'
+      :'';
+    el.innerHTML=
+      '<div style="display:grid;grid-template-columns:minmax(220px,1fr) 2fr;gap:16px;align-items:center">'
+      +'<div>'+actual+'</div>'
+      +'<div style="display:flex;gap:8px">'+diasHtml+'</div>'
+      +'</div>'+alertasHtml;
+    // Hora de actualización
+    var hh=new Date();
+    var pad=function(n){return n<10?'0'+n:n;};
+    document.getElementById('pad-clima-update').textContent='Actualizado '+pad(hh.getHours())+':'+pad(hh.getMinutes());
+  }).catch(function(){
+    el.innerHTML='<div class="emp" style="padding:16px">No se pudo conectar al servicio de clima</div>';
   });
 }
 
@@ -7787,7 +8017,27 @@ function paLoadInsumos(){
       var bajo=i.stock_minimo>0&&i.stock_actual<=i.stock_minimo;
       var ficha=i.ficha_tecnica_path?'<a href="'+i.ficha_tecnica_path+'" target="_blank" style="font-size:11px;color:var(--burg)">📄 Ficha</a>':'';
       var precioUsd=i.precio_ref_usd?'USD '+Number(i.precio_ref_usd).toFixed(2):'—';
-      var catIco = i.categoria_principal==='herramientas'?'🔧':i.categoria_principal==='otros'?'📦':'🌱';
+      // Icono de categoría preferentemente desde categoria_v2 (taxonomía nueva),
+      // fallback a categoria_principal (legacy) por si el insumo no migró.
+      var iconosV2 = { agroinsumos:'🌱', combustibles:'⛽', panol:'🛠️', embalajes:'📦', otros:'📋' };
+      var catIco;
+      if (i.categoria_v2 && iconosV2[i.categoria_v2]) {
+        catIco = iconosV2[i.categoria_v2];
+      } else {
+        catIco = i.categoria_principal==='herramientas_panol'?'🛠️'
+               : i.categoria_principal==='herramientas_consumibles'?'🔧'
+               : i.categoria_principal==='herramientas'?'🔧'
+               : i.categoria_principal==='otros'?'📦':'🌱';
+      }
+      // Texto de categoría: "Categoría / Subcategoría" si la taxonomía nueva está, sino caemos al tipo viejo.
+      var catTxt;
+      if (i.categoria_v2 && i.subcategoria) {
+        var catLabel = { agroinsumos:'Agroinsumos', combustibles:'Combustibles', panol:'Pañol', embalajes:'Embalajes', otros:'Otros' };
+        catTxt = '<div style="font-size:12px"><strong>'+(catLabel[i.categoria_v2]||i.categoria_v2)+'</strong></div>'
+              + '<div style="font-size:11px;color:var(--mut)">'+i.subcategoria+'</div>';
+      } else {
+        catTxt = paBadgeTipo(i.tipo);
+      }
 
       // Principio activo ahora opcional: sin "⚠ Sin definir" en rojo, solo un guión discreto
       var princip = i.componente_madre
@@ -7806,19 +8056,19 @@ function paLoadInsumos(){
         ? (bajo ? '<span class="pa-badge pa-rojo-bg">⚠ Bajo</span>' : '<span class="pa-badge pa-verde-bg">OK</span>')
         : '<span class="pa-badge pa-gris-bg">○ Desactivado</span>';
       var accionBtn = i.activo
-        ? '<button class="btn bd bs" onclick="paDesactivarInsumo('+i.id+',\''+i.nombre.replace(/'/g,"\\'")+'\')" title="Desactivar" style="padding:3px 8px;font-size:11px">🗑</button>'
-        : '<button class="btn bo bs" onclick="paReactivarInsumo('+i.id+')" title="Reactivar" style="padding:3px 8px;font-size:11px;color:var(--ok);border-color:var(--ok)">↺</button>';
+        ? '<button class="btn bd bs" onclick="paDesactivarInsumo('+i.id+',\''+i.nombre.replace(/'/g,"\\'")+'\')" title="Desactivar" style="padding:4px 10px;font-size:11px">🗑 Borrar</button>'
+        : '<button class="btn bo bs" onclick="paReactivarInsumo('+i.id+')" title="Reactivar" style="padding:4px 10px;font-size:11px;color:var(--ok);border-color:var(--ok)">↺ Reactivar</button>';
       var rowStyle = i.activo ? '' : ' style="opacity:0.5"';
       return'<tr'+rowStyle+'>'
-        +'<td><span title="'+(i.categoria_principal||'agroinsumos')+'" style="margin-right:4px">'+catIco+'</span><strong style="cursor:pointer;color:var(--burg)" onclick="paVerHistorialCompras('+i.id+',\''+i.nombre.replace(/'/g,"\\'")+'\',\'producto\')">'+i.nombre+'</strong>'+(ficha?'<br>'+ficha:'')+'</td>'
+        +'<td><span title="'+(i.categoria_v2||i.categoria_principal||'agroinsumos')+'" style="margin-right:4px">'+catIco+'</span><strong style="cursor:pointer;color:var(--burg)" onclick="paVerHistorialCompras('+i.id+',\''+i.nombre.replace(/'/g,"\\'")+'\',\'producto\')">'+i.nombre+'</strong>'+(ficha?'<br>'+ficha:'')+'</td>'
         +'<td>'+princip+'</td>'
-        +'<td>'+paBadgeTipo(i.tipo)+'</td>'
+        +'<td>'+catTxt+'</td>'
         +'<td>'+i.unidad+'</td>'
         +'<td style="text-align:right">'+stockTxt+'</td>'
         +'<td style="text-align:right;font-size:12px">'+precioUsd+'</td>'
         +'<td>'+estadoBadge+'</td>'
         +'<td style="white-space:nowrap">'
-          +'<button class="btn bo bs" onclick="paEditarInsumo('+i.id+')" title="Editar" style="margin-right:4px">✏</button>'
+          +'<button class="btn bo bs" onclick="paEditarInsumo('+i.id+')" title="Editar" style="margin-right:4px;padding:4px 10px;font-size:11px">✏️ Editar</button>'
           +accionBtn
         +'</td>'
         +'</tr>';
@@ -7841,22 +8091,86 @@ function paReactivarInsumo(id){
 }
 
 // Muestra solo los tipos válidos según la categoría principal seleccionada
+// ── Lógica vieja (compatibilidad) — la dejamos viva por si la llaman desde otro lado.
+//    En el modal nuevo de Insumo ya no se usa: la categoría/tipo se determinan
+//    desde la cascada categoria_v2 → subcategoria.
 function paOnCategoriaCambio(){
-  var cat=document.getElementById('pa-ins-categoria').value;
-  var grupos={'agroinsumos':'optg-agroinsumos','herramientas':'optg-herramientas','otros':'optg-otros'};
-  Object.keys(grupos).forEach(function(k){
-    var el=document.getElementById(grupos[k]);
-    if(el)el.style.display = (cat===k?'':'none');
-  });
-  // Auto-seleccionar primer tipo válido si el actual no corresponde
-  var sel=document.getElementById('pa-ins-tipo');
-  var currentInGroup = sel.selectedOptions[0] && sel.selectedOptions[0].parentElement.id===grupos[cat];
-  if(!currentInGroup){
-    var defaults={'agroinsumos':'fertilizante','herramientas':'manual','otros':'construccion'};
-    sel.value=defaults[cat];
+  // No-op: la categoria_principal ahora es derivada del campo nuevo (oculto).
+  // Mantenida por compatibilidad con código que la siga llamando.
+}
+
+// ── Cascada nueva: Categoría (5) → Subcategoría → Cuenta contable
+// PA.subcategorias se carga al abrir el modal de Insumo (paAbrirNuevoInsumo /
+// paEditarInsumo). Lo cacheamos en PA para no traerlo en cada cambio.
+function paOnCatV2Cambio(){
+  var cat = document.getElementById('pa-ins-cat-v2').value;
+  var selSub = document.getElementById('pa-ins-subcat');
+  if (!cat) {
+    selSub.innerHTML = '<option value="">— Elegí categoría primero —</option>';
+    document.getElementById('pa-ins-cuenta-row').style.display = 'none';
+    return;
   }
+  var subs = (PA.subcategorias||[]).filter(function(s){ return s.categoria === cat; });
+  selSub.innerHTML = '<option value="">— Elegí subcategoría —</option>'
+    + subs.map(function(s){ return '<option value="'+s.subcategoria+'">'+(s.icono?s.icono+' ':'')+s.subcategoria+'</option>'; }).join('');
+  document.getElementById('pa-ins-cuenta-row').style.display = 'none';
+
+  // Sincronizar la categoría LEGACY (categoria_principal) con la nueva, así no rompemos
+  // código existente que filtra/lee por categoria_principal.
+  var mapeoLegacy = {
+    'agroinsumos':  'agroinsumos',
+    'combustibles': 'agroinsumos',     // los combustibles legacy estaban como agroinsumos genéricos
+    'panol':        'herramientas_panol',
+    'embalajes':    'otros',
+    'otros':        'otros'
+  };
+  document.getElementById('pa-ins-categoria').value = mapeoLegacy[cat] || 'otros';
   // Principio activo solo tiene sentido para agroinsumos
-  document.getElementById('pa-ins-componente-row').style.display = (cat==='agroinsumos'?'':'none');
+  document.getElementById('pa-ins-componente-row').style.display = (cat === 'agroinsumos' ? '' : 'none');
+}
+
+function paOnSubcatCambio(){
+  var cat = document.getElementById('pa-ins-cat-v2').value;
+  var subcat = document.getElementById('pa-ins-subcat').value;
+  var row = document.getElementById('pa-ins-cuenta-row');
+  if (!cat || !subcat) { row.style.display = 'none'; return; }
+
+  var meta = (PA.subcategorias||[]).find(function(s){ return s.categoria===cat && s.subcategoria===subcat; });
+  if (!meta) { row.style.display = 'none'; return; }
+  row.style.display = '';
+
+  var fija = document.getElementById('pa-ins-cuenta-fija');
+  var elegir = document.getElementById('pa-ins-cuenta-elegir');
+
+  if (meta.cuenta_codigo_alt) {
+    // Caso especial: hay 2 cuentas, el usuario elige
+    fija.style.display = 'none';
+    elegir.style.display = '';
+    elegir.innerHTML =
+       '<option value="">— Elegí cuenta —</option>'
+      +'<option value="'+meta.cuenta_codigo_default+'">'+meta.cuenta_codigo_default+' — '+(meta.cuenta_default_nombre||'')+'</option>'
+      +'<option value="'+meta.cuenta_codigo_alt+'">'+meta.cuenta_codigo_alt+' — '+(meta.cuenta_alt_nombre||'')+'</option>';
+  } else {
+    // Cuenta única automática (solo lectura)
+    elegir.style.display = 'none';
+    fija.style.display = '';
+    fija.innerHTML = meta.cuenta_codigo_default
+      ? '<strong style="color:var(--burg)">'+meta.cuenta_codigo_default+'</strong> — '+(meta.cuenta_default_nombre || '')
+      : '<span style="font-style:italic">— sin cuenta asignada —</span>';
+  }
+
+  // Setear el campo TIPO legacy (oculto) al subcategoría sin acentos en lowercase
+  // — preservamos compatibilidad con queries antiguas.
+  var mapTipoLegacy = {
+    'Fertilizantes':'fertilizante','Herbicidas':'herbicida','Fungicidas':'fungicida',
+    'Insecticidas':'insecticida','Abonos':'abono','Agroquímicos':'agroquimico','Semillas':'semilla',
+    'Riego':'riego',
+    'Gasoil':'combustible-insumo','Nafta':'combustible-insumo',
+    'Herramientas':'manual','Insumos herramienta':'repuesto','Repuesto':'repuesto',
+    'Logísticos':'otro','Primario':'otro','Secundarios':'otro',
+    'Gastos Generales':'otro','Movilidad y Viáticos':'otro','Oficina':'otro','Varios':'otro','Limpieza':'otro'
+  };
+  document.getElementById('pa-ins-tipo').value = mapTipoLegacy[subcat] || 'otro';
 }
 
 function paVerHistorialCompras(insumoId, nombre, modo) {
@@ -7898,69 +8212,119 @@ function paVerHistorialCompras(insumoId, nombre, modo) {
     document.getElementById('pa-mb-orden-det').classList.add('on');
   });
 }
-function paAbrirNuevoInsumo(){
-  document.getElementById('pa-ins-id').value='';
-  document.getElementById('pa-ins-nombre').value='';
-  document.getElementById('pa-ins-componente').value='';
-  document.getElementById('pa-ins-categoria').value='agroinsumos';
-  document.getElementById('pa-ins-tipo').value='fertilizante';
-  document.getElementById('pa-ins-unidad').value='kg';
-  document.getElementById('pa-ins-stock-min').value=0;
-  document.getElementById('pa-ins-precio-usd').value='';
-  document.getElementById('pa-ins-notas').value='';
-  document.getElementById('pa-ins-ficha-file').value='';
-  document.getElementById('pa-ins-ficha-actual').style.display='none';
-  var pbEl=document.getElementById('pa-ins-pres-base');if(pbEl)pbEl.value='';
-  document.getElementById('pa-ins-modal-tit').textContent='Nuevo Insumo';
-  paOnCategoriaCambio();
-  document.getElementById('pa-mb-insumo').classList.add('on');
+
+// Helper: garantiza que PA.subcategorias esté cargado antes de abrir el modal
+function paAsegurarSubcategoriasCargadas(){
+  if (PA.subcategorias && PA.subcategorias.length) return Promise.resolve();
+  return paF('/api/pa/subcategorias').then(function(r){
+    PA.subcategorias = r.data || [];
+  });
 }
+
+function paAbrirNuevoInsumo(){
+  paAsegurarSubcategoriasCargadas().then(function(){
+    document.getElementById('pa-ins-id').value='';
+    document.getElementById('pa-ins-nombre').value='';
+    document.getElementById('pa-ins-componente').value='';
+    document.getElementById('pa-ins-categoria').value='agroinsumos';
+    document.getElementById('pa-ins-tipo').value='fertilizante';
+    document.getElementById('pa-ins-cat-v2').value='';
+    document.getElementById('pa-ins-subcat').innerHTML='<option value="">— Elegí categoría primero —</option>';
+    document.getElementById('pa-ins-cuenta-row').style.display='none';
+    document.getElementById('pa-ins-unidad').value='kg';
+    document.getElementById('pa-ins-stock-min').value=0;
+    document.getElementById('pa-ins-precio-usd').value='';
+    document.getElementById('pa-ins-notas').value='';
+    document.getElementById('pa-ins-ficha-file').value='';
+    document.getElementById('pa-ins-ficha-actual').style.display='none';
+    var pbEl=document.getElementById('pa-ins-pres-base');if(pbEl)pbEl.value='';
+    document.getElementById('pa-ins-modal-tit').textContent='Nuevo Insumo';
+    paOnCatV2Cambio();
+    document.getElementById('pa-mb-insumo').classList.add('on');
+  });
+}
+
 function paEditarInsumo(id){
   var ins=PA.insumos.find(function(i){return i.id===id;});
   if(!ins)return;
-  document.getElementById('pa-ins-id').value=ins.id;
-  document.getElementById('pa-ins-nombre').value=ins.nombre;
-  document.getElementById('pa-ins-componente').value=ins.componente_madre||'';
-  document.getElementById('pa-ins-categoria').value=ins.categoria_principal||'agroinsumos';
-  document.getElementById('pa-ins-tipo').value=ins.tipo;
-  document.getElementById('pa-ins-unidad').value=ins.unidad;
-  document.getElementById('pa-ins-stock-min').value=ins.stock_minimo||0;
-  document.getElementById('pa-ins-precio-usd').value=ins.precio_ref_usd||'';
-  document.getElementById('pa-ins-notas').value=ins.notas||'';
-  document.getElementById('pa-ins-ficha-file').value='';
-  var pbEl=document.getElementById('pa-ins-pres-base');if(pbEl)pbEl.value=ins.presentacion_base||'';
-  var fichEl=document.getElementById('pa-ins-ficha-actual');
-  if(ins.ficha_tecnica_path){
-    fichEl.innerHTML='📄 <a href="'+ins.ficha_tecnica_path+'" target="_blank" style="color:var(--burg)">Ver ficha actual</a>';
-    fichEl.style.display='block';
-  } else { fichEl.style.display='none'; }
-  document.getElementById('pa-ins-modal-tit').textContent='Editar Insumo';
-  paOnCategoriaCambio();
-  document.getElementById('pa-mb-insumo').classList.add('on');
+  paAsegurarSubcategoriasCargadas().then(function(){
+    document.getElementById('pa-ins-id').value=ins.id;
+    document.getElementById('pa-ins-nombre').value=ins.nombre;
+    document.getElementById('pa-ins-componente').value=ins.componente_madre||'';
+    document.getElementById('pa-ins-categoria').value=ins.categoria_principal||'agroinsumos';
+    document.getElementById('pa-ins-tipo').value=ins.tipo;
+    document.getElementById('pa-ins-unidad').value=ins.unidad;
+    document.getElementById('pa-ins-stock-min').value=ins.stock_minimo||0;
+    document.getElementById('pa-ins-precio-usd').value=ins.precio_ref_usd||'';
+    document.getElementById('pa-ins-notas').value=ins.notas||'';
+    document.getElementById('pa-ins-ficha-file').value='';
+    var pbEl=document.getElementById('pa-ins-pres-base');if(pbEl)pbEl.value=ins.presentacion_base||'';
+    var fichEl=document.getElementById('pa-ins-ficha-actual');
+    if(ins.ficha_tecnica_path){
+      fichEl.innerHTML='📄 <a href="'+ins.ficha_tecnica_path+'" target="_blank" style="color:var(--burg)">Ver ficha actual</a>';
+      fichEl.style.display='block';
+    } else { fichEl.style.display='none'; }
+    document.getElementById('pa-ins-modal-tit').textContent='Editar Insumo';
+    // Setear cascada nueva si el insumo ya está migrado
+    document.getElementById('pa-ins-cat-v2').value = ins.categoria_v2 || '';
+    paOnCatV2Cambio();
+    if (ins.subcategoria) {
+      document.getElementById('pa-ins-subcat').value = ins.subcategoria;
+      paOnSubcatCambio();
+      // Si tenía cuenta_codigo elegida (caso panol/herramientas), preservarla
+      if (ins.cuenta_codigo) {
+        var elegir = document.getElementById('pa-ins-cuenta-elegir');
+        if (elegir && elegir.style.display !== 'none') elegir.value = ins.cuenta_codigo;
+      }
+    }
+    document.getElementById('pa-mb-insumo').classList.add('on');
+  });
 }
+
 function paGuardarInsumo(){
   var id=document.getElementById('pa-ins-id').value;
   var nombre=document.getElementById('pa-ins-nombre').value.trim();
   var categoria=document.getElementById('pa-ins-categoria').value;
   var componente=document.getElementById('pa-ins-componente').value.trim();
-  // Principio activo siempre opcional (no todos los insumos lo tienen)
   var tipo=document.getElementById('pa-ins-tipo').value;
   var unidad=document.getElementById('pa-ins-unidad').value;
   var stMin=parseFloat(document.getElementById('pa-ins-stock-min').value)||0;
   var precioUsd=parseFloat(document.getElementById('pa-ins-precio-usd').value)||null;
   var notas=document.getElementById('pa-ins-notas').value.trim();
   var fichaFile=document.getElementById('pa-ins-ficha-file').files[0];
-  // Presentación default (opcional)
   var presBaseEl=document.getElementById('pa-ins-pres-base');
   var presBase=presBaseEl?parseFloat(presBaseEl.value)||null:null;
+
+  // Nuevos campos de la cascada
+  var catV2  = document.getElementById('pa-ins-cat-v2').value;
+  var subcat = document.getElementById('pa-ins-subcat').value;
+  var cuentaElegir = document.getElementById('pa-ins-cuenta-elegir');
+  var cuentaCodigo = (cuentaElegir && cuentaElegir.style.display !== 'none') ? cuentaElegir.value : null;
+
   if(!nombre)return toast('Ingresá el nombre','er');
-  var body={nombre,tipo,unidad,stock_minimo:stMin,categoria_principal:categoria,componente_madre:componente||null,precio_ref_usd:precioUsd,notas,
-            presentacion_base:presBase};
+  if(!catV2)return toast('Elegí una categoría','er');
+  if(!subcat)return toast('Elegí una subcategoría','er');
+  // Validar que si la subcategoría requiere elegir cuenta, esté elegida
+  var meta = (PA.subcategorias||[]).find(function(s){ return s.categoria===catV2 && s.subcategoria===subcat; });
+  if (meta && meta.cuenta_codigo_alt && !cuentaCodigo) {
+    return toast('Elegí una cuenta contable','er');
+  }
+
+  var body={
+    nombre, tipo, unidad,
+    stock_minimo: stMin,
+    categoria_principal: categoria,
+    componente_madre: componente||null,
+    precio_ref_usd: precioUsd, notas,
+    presentacion_base: presBase,
+    categoria_v2: catV2,
+    subcategoria: subcat,
+    cuenta_codigo: cuentaCodigo
+  };
   paF(id?'/api/pa/insumos/'+id:'/api/pa/insumos',{method:id?'PATCH':'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
     .then(function(r){
       if(!r.ok)return toast(r.error||'Error','er');
       var insId=id||r.id;
-      // Si hay PDF, subirlo
       if(fichaFile){
         var reader=new FileReader();
         reader.onload=function(e){
@@ -7983,24 +8347,39 @@ function paGuardarInsumo(){
 
 function paLoadCompras(){
   var verInact=document.getElementById('pa-comp-ver-inact');
-  var qs = (verInact && verInact.checked) ? '?incluir_inactivos=1' : '';
+  var filTipo=document.getElementById('pa-comp-fil-tipo');
+  var params = [];
+  if (verInact && verInact.checked) params.push('incluir_inactivos=1');
+  if (filTipo && filTipo.value) params.push('tipo_factura='+encodeURIComponent(filTipo.value));
+  var qs = params.length ? '?'+params.join('&') : '';
   paF('/api/pa/compras'+qs).then(function(r){
     var data=r.data||[];var tb=document.getElementById('pa-comp-tbody');
-    if(!data.length){tb.innerHTML='<tr><td colspan="7" class="emp">Sin compras</td></tr>';return;}
+    if(!data.length){tb.innerHTML='<tr><td colspan="8" class="emp">Sin facturas</td></tr>';return;}
     tb.innerHTML=data.map(function(c){
-      var prods=(c.items||[]).map(function(i){return i.insumo_nombre;}).join(', ');
+      var esServicio = c.tipo_factura === 'servicio';
+      // Detalle: si es servicio, mostrar conceptos; si compra, mostrar productos
+      var detalle;
+      if (esServicio) {
+        detalle = (c.items||[]).map(function(i){return i.concepto||'(sin concepto)';}).join('; ');
+      } else {
+        detalle = (c.items||[]).map(function(i){return i.insumo_nombre||'(item)';}).join(', ');
+      }
       var tipoLabel={factura:'Factura',remito:'Remito',ticket:'Ticket',otro:'Otro'};
       var foto=c.remito_foto_path?'<a href="'+c.remito_foto_path+'" target="_blank" style="color:var(--burg);font-size:11px">📄 Ver</a>':'';
       var activa = c.activo === null || c.activo === undefined || c.activo === 1;
       var rowStyle = activa ? '' : ' style="opacity:0.5;text-decoration:line-through"';
+      var tipoBadge = esServicio
+        ? '<span class="pa-badge" style="background:#ede9fe;color:#6b21a8;font-size:10px;padding:2px 6px;border-radius:10px">🛠️ Servicio</span>'
+        : '<span class="pa-badge" style="background:#dbeafe;color:#1e40af;font-size:10px;padding:2px 6px;border-radius:10px">🛒 Compra</span>';
       var accionBtn = activa
         ? '<button class="btn bd bs" onclick="paDesactivarCompra('+c.id+')" title="Desactivar (revierte stock)" style="padding:3px 8px;font-size:11px">🗑</button>'
         : '<button class="btn bo bs" onclick="paReactivarCompra('+c.id+')" title="Reactivar (suma stock)" style="padding:3px 8px;font-size:11px;color:var(--ok);border-color:var(--ok)">↺</button>';
       return'<tr'+rowStyle+'>'
         +'<td>'+paFecha(c.fecha)+'</td>'
+        +'<td>'+tipoBadge+'</td>'
         +'<td><span class="pa-badge pa-gris-bg" style="font-size:10px">'+(tipoLabel[c.tipo_comprobante]||'Factura')+'</span><br><span style="font-size:11px">'+(c.nro_factura||'—')+'</span></td>'
         +'<td>'+(c.proveedor_nombre||c.proveedor_txt||'—')+'</td>'
-        +'<td style="font-size:12px;color:var(--mut)">'+prods+'</td>'
+        +'<td style="font-size:12px;color:var(--mut)">'+detalle+'</td>'
         +'<td style="text-align:right"><strong>'+paMoney(c.total)+'</strong></td>'
         +'<td>'+foto+'</td>'
         +'<td style="white-space:nowrap">'
@@ -8030,109 +8409,206 @@ function paReactivarCompra(id){
 }
 
 function paVerDetalleCompra(id){
-  // Buscar en memoria primero (PA.compras no existe, vamos directo)
   var m = document.getElementById('pa-mb-compra-det');
   document.getElementById('pa-comp-det-body').innerHTML = '<div style="text-align:center;color:var(--mut);padding:20px">Cargando...</div>';
-  document.getElementById('pa-comp-det-tit').textContent = 'Detalle de compra';
+  document.getElementById('pa-comp-det-tit').textContent = 'Detalle de factura';
   document.getElementById('pa-comp-det-sub').textContent = '—';
   m.classList.add('on');
 
-  // Pedir con incluir_inactivos=1 por si la compra está desactivada
   paF('/api/pa/compras?incluir_inactivos=1').then(function(r){
     var c = (r.data||[]).find(function(x){return x.id===id;});
     if(!c){
-      document.getElementById('pa-comp-det-body').innerHTML = '<div style="color:var(--err)">Compra no encontrada</div>';
+      document.getElementById('pa-comp-det-body').innerHTML = '<div style="color:var(--err);padding:16px">Compra no encontrada</div>';
       return;
     }
-    var tipoLabel = {factura:'Factura', remito:'Remito', ticket:'Ticket', otro:'Otro'};
+    var tipoLabel = {factura:'FACTURA', remito:'REMITO', ticket:'TICKET', otro:'COMPROBANTE'};
     var activa = c.activo === null || c.activo === undefined || c.activo === 1;
+    var nroTxt = c.nro_factura || 'sin número';
+    var proveedorTxt = c.proveedor_nombre || c.proveedor_txt || 'Sin proveedor';
 
-    document.getElementById('pa-comp-det-tit').innerHTML = (tipoLabel[c.tipo_comprobante]||'Factura') + ' ' + (c.nro_factura || '<span style="color:var(--mut)">sin número</span>');
-    document.getElementById('pa-comp-det-sub').innerHTML = paFecha(c.fecha) + ' · ' + (c.proveedor_nombre || c.proveedor_txt || '<span style="color:var(--mut)">Sin proveedor</span>')
-      + (!activa ? ' <span style="color:var(--err);margin-left:8px">● DESACTIVADA</span>' : '');
+    document.getElementById('pa-comp-det-tit').textContent = (c.tipo_factura === 'servicio' ? 'SERVICIO' : (tipoLabel[c.tipo_comprobante]||'FACTURA')) + ' · N° ' + nroTxt;
+    document.getElementById('pa-comp-det-sub').innerHTML = paFecha(c.fecha) + ' · ' + proveedorTxt
+      + (!activa ? ' <span style="color:var(--err);margin-left:8px;font-weight:700">● DESACTIVADA</span>' : '');
+
+    // Calcular IVA agrupado por alícuota (estilo factura)
+    var ivaPorAlicuota = {};
+    var subtotalNetoSum = 0;
+    var ivaSum = 0;
+    (c.items||[]).forEach(function(it){
+      var subN = Number(it.subtotal_neto)||0;
+      var pct = it.iva_porcentaje;
+      var ivaM = Number(it.iva_monto)||0;
+      subtotalNetoSum += subN;
+      ivaSum += ivaM;
+      if (pct != null) {
+        var k = Number(pct).toFixed(1);
+        if (!ivaPorAlicuota[k]) ivaPorAlicuota[k] = { neto:0, iva:0 };
+        ivaPorAlicuota[k].neto += subN;
+        ivaPorAlicuota[k].iva  += ivaM;
+      }
+    });
 
     var html = '';
 
-    // Encabezado con info general
-    html += '<div style="background:var(--bg);border:1px solid var(--bor);border-radius:8px;padding:12px;margin-bottom:14px;font-size:12px">'
-      +'<div style="display:grid;grid-template-columns:90px 1fr;gap:4px 10px">'
-        +'<div style="color:var(--mut)">Fecha:</div><div>'+paFecha(c.fecha)+'</div>'
-        +'<div style="color:var(--mut)">Tipo:</div><div>'+(tipoLabel[c.tipo_comprobante]||'Factura')+'</div>'
-        +'<div style="color:var(--mut)">Número:</div><div>'+(c.nro_factura||'—')+'</div>'
-        +'<div style="color:var(--mut)">Proveedor:</div><div>'+(c.proveedor_nombre||c.proveedor_txt||'—')+'</div>'
-        +'<div style="color:var(--mut)">Campaña:</div><div>'+(c.campaña_nombre||'—')+'</div>'
-      +'</div>';
-    if(c.remito_foto_path){
-      html += '<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--bor)">'
-        +'<a href="'+c.remito_foto_path+'" target="_blank" style="color:var(--burg);font-size:12px">📄 Ver foto del comprobante</a>'
-      +'</div>';
-    }
-    if(c.notas){
-      html += '<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--bor);color:var(--mut);font-style:italic">📝 '+c.notas+'</div>';
-    }
-    html += '</div>';
+    // ENCABEZADO ESTILO FACTURA
+    html += '<div style="background:#fff;border:2px solid var(--burg);border-radius:10px;padding:18px;margin:0 4px 14px;font-family:system-ui,sans-serif">';
 
-    // Items — cada uno como tarjeta detallada
-    html += '<div style="font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--mut);margin:12px 0 8px">Productos ('+(c.items||[]).length+')</div>';
+    // Banner superior
+    html += '<div style="display:flex;justify-content:space-between;align-items:flex-start;padding-bottom:14px;border-bottom:2px solid var(--burg);margin-bottom:14px">'
+      +'<div>'
+        +'<div style="font-size:11px;color:var(--mut);font-weight:600;letter-spacing:.1em;text-transform:uppercase">Comprobante</div>'
+        +'<div style="font-size:22px;font-weight:800;color:var(--burg);line-height:1.1;margin-top:2px">'+(tipoLabel[c.tipo_comprobante]||'FACTURA')+'</div>'
+        +'<div style="font-size:13px;color:var(--txt);margin-top:2px">N° <strong>'+nroTxt+'</strong></div>'
+      +'</div>'
+      +'<div style="text-align:right">'
+        +'<div style="font-size:11px;color:var(--mut);font-weight:600;letter-spacing:.1em;text-transform:uppercase">Fecha</div>'
+        +'<div style="font-size:18px;font-weight:700;margin-top:2px">'+paFecha(c.fecha)+'</div>'
+        +(c.campaña_nombre?'<div style="font-size:11px;color:var(--mut);margin-top:2px">Campaña: '+c.campaña_nombre+'</div>':'')
+      +'</div>'
+    +'</div>';
+
+    // Datos del proveedor
+    html += '<div style="margin-bottom:14px">'
+      +'<div style="font-size:11px;color:var(--mut);font-weight:600;letter-spacing:.1em;text-transform:uppercase;margin-bottom:4px">Proveedor</div>'
+      +'<div style="font-size:16px;font-weight:600">'+proveedorTxt+'</div>'
+    +'</div>';
+
+    var esServicio = c.tipo_factura === 'servicio';
+
+    if (esServicio) {
+      // ── Tabla de CONCEPTOS DE SERVICIO ──
+      html += '<div style="font-size:11px;color:var(--mut);font-weight:600;letter-spacing:.1em;text-transform:uppercase;margin-bottom:6px">Conceptos de servicio</div>';
+      html += '<table style="width:100%;border-collapse:collapse;font-size:13px;margin-bottom:14px">'
+        +'<thead><tr style="background:#f8f5f0;border-bottom:2px solid var(--burg)">'
+          +'<th style="padding:8px 10px;text-align:left;font-size:11px;font-weight:700;color:var(--txt);letter-spacing:.05em">CONCEPTO</th>'
+          +'<th style="padding:8px 10px;text-align:left;font-size:11px;font-weight:700;color:var(--txt);letter-spacing:.05em;width:130px">CUENTA</th>'
+          +'<th style="padding:8px 10px;text-align:left;font-size:11px;font-weight:700;color:var(--txt);letter-spacing:.05em;width:130px">LOTE</th>'
+          +'<th style="padding:8px 10px;text-align:right;font-size:11px;font-weight:700;color:var(--txt);letter-spacing:.05em;width:70px">IVA</th>'
+          +'<th style="padding:8px 10px;text-align:right;font-size:11px;font-weight:700;color:var(--txt);letter-spacing:.05em;width:130px">SUBTOTAL</th>'
+        +'</tr></thead><tbody>';
+      if (!c.items || !c.items.length) {
+        html += '<tr><td colspan="5" style="padding:18px;text-align:center;color:var(--mut);font-style:italic">Sin conceptos</td></tr>';
+      } else {
+        c.items.forEach(function(it, idx){
+          var pct = it.iva_porcentaje;
+          var subNeto = Number(it.subtotal_neto)||0;
+          var ivaTxt = pct != null ? pct + '%' : '<span style="color:var(--mut);font-style:italic">s/d</span>';
+          var rowBg = idx % 2 === 0 ? '' : 'background:#fafafa;';
+          var cuentaTxt = it.cuenta_codigo
+            ? '<strong style="font-family:monospace">'+it.cuenta_codigo+'</strong>'+(it.cuenta_nombre?'<br><span style="font-size:10px;color:var(--mut)">'+it.cuenta_nombre+'</span>':'')
+            : '<span style="color:var(--mut);font-style:italic">—</span>';
+          var loteTxt = it.lote_id
+            ? '<span style="font-size:11px">'+(it.lote_nombre||('#'+it.lote_id))+'</span>'
+            : '<span style="color:var(--mut);font-style:italic;font-size:11px">general</span>';
+          html += '<tr style="border-bottom:1px solid #e5e7eb;'+rowBg+'">'
+            +'<td style="padding:10px 10px;vertical-align:top"><strong>'+(it.concepto||'(sin concepto)')+'</strong></td>'
+            +'<td style="padding:10px 10px;vertical-align:top">'+cuentaTxt+'</td>'
+            +'<td style="padding:10px 10px;vertical-align:top">'+loteTxt+'</td>'
+            +'<td style="padding:10px 10px;text-align:right;vertical-align:top">'+ivaTxt+'</td>'
+            +'<td style="padding:10px 10px;text-align:right;vertical-align:top;font-weight:600">'+paMoney(subNeto)+'</td>'
+          +'</tr>';
+        });
+      }
+      html += '</tbody></table>';
+    } else {
+      // ── Tabla de PRODUCTOS estilo factura (compra de bienes) ──
+      html += '<div style="font-size:11px;color:var(--mut);font-weight:600;letter-spacing:.1em;text-transform:uppercase;margin-bottom:6px">Productos</div>';
+    html += '<table style="width:100%;border-collapse:collapse;font-size:13px;margin-bottom:14px">'
+      +'<thead><tr style="background:#f8f5f0;border-bottom:2px solid var(--burg)">'
+        +'<th style="padding:8px 10px;text-align:left;font-size:11px;font-weight:700;color:var(--txt);letter-spacing:.05em">DETALLE</th>'
+        +'<th style="padding:8px 10px;text-align:right;font-size:11px;font-weight:700;color:var(--txt);letter-spacing:.05em;width:90px">CANT.</th>'
+        +'<th style="padding:8px 10px;text-align:right;font-size:11px;font-weight:700;color:var(--txt);letter-spacing:.05em;width:130px">P. UNIT.</th>'
+        +'<th style="padding:8px 10px;text-align:right;font-size:11px;font-weight:700;color:var(--txt);letter-spacing:.05em;width:80px">IVA</th>'
+        +'<th style="padding:8px 10px;text-align:right;font-size:11px;font-weight:700;color:var(--txt);letter-spacing:.05em;width:140px">SUBTOTAL</th>'
+      +'</tr></thead><tbody>';
 
     if(!c.items || !c.items.length){
-      html += '<div style="color:var(--mut);font-style:italic;text-align:center;padding:20px">Sin items</div>';
+      html += '<tr><td colspan="5" style="padding:18px;text-align:center;color:var(--mut);font-style:italic">Sin items</td></tr>';
     } else {
       c.items.forEach(function(it, idx){
         var cantBase = Number(it.cantidad)||0;
         var precUnitBase = Number(it.precio_unit)||0;
         var pct = it.iva_porcentaje;
-        var ivaMonto = Number(it.iva_monto)||0;
         var subNeto = Number(it.subtotal_neto)||0;
-        var subTotal = Number(it.subtotal)||0;
-
-        // ¿Se cargó por bultos?
         var porBultos = it.cant_bultos && it.presentacion_base;
-        var modoTxt;
-        if(porBultos){
-          modoTxt = '<span style="font-size:11px;color:var(--mut)">Cargado por bultos: <strong>'
-            + it.cant_bultos + ' × ' + it.presentacion_base + ' ' + it.unidad + '</strong></span>';
-        } else {
-          modoTxt = '<span style="font-size:11px;color:var(--mut)">Cargado directo en ' + it.unidad + '</span>';
+
+        // Detalle del producto: nombre + nota de bultos si aplica
+        var detalleProd = '<strong>'+(it.insumo_nombre||'—')+'</strong>';
+        if (porBultos) {
+          detalleProd += '<div style="font-size:10px;color:var(--mut);margin-top:2px;font-style:italic">'
+            + it.cant_bultos + ' × ' + it.presentacion_base + ' ' + it.unidad + ' por bulto</div>';
         }
 
-        html += '<div style="border:1px solid var(--bor);border-radius:8px;padding:12px;margin-bottom:8px;background:var(--sur)">'
-          +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">'
-            +'<div><strong style="font-size:14px">'+(it.insumo_nombre||'—')+'</strong></div>'
-            +'<div style="font-weight:700;color:var(--burg)">'+paMoney(subTotal)+'</div>'
-          +'</div>'
-          +'<div style="margin-bottom:6px">'+modoTxt+'</div>'
-          +'<div style="display:grid;grid-template-columns:auto 1fr;gap:2px 8px;font-size:12px;padding:8px;background:var(--bg);border-radius:6px">';
-
-        if(porBultos){
-          html += '<div style="color:var(--mut)">Cant. bultos:</div><div><strong>'+it.cant_bultos+'</strong></div>'
-            +'<div style="color:var(--mut)">Contenido:</div><div>'+it.presentacion_base+' '+it.unidad+' por bulto</div>'
-            +'<div style="color:var(--mut)">Precio por bulto:</div><div>'+paMoney(precUnitBase * it.presentacion_base)+'</div>';
-        }
-        html += '<div style="color:var(--mut)">Stock sumado:</div><div><strong>'+cantBase+' '+it.unidad+'</strong></div>'
-          +'<div style="color:var(--mut)">Precio unit. ($/'+it.unidad+'):</div><div>'+paMoney(precUnitBase)+'</div>'
-          +'<div style="color:var(--mut)">Subtotal neto:</div><div>'+paMoney(subNeto)+'</div>';
-        if(pct != null){
-          html += '<div style="color:var(--mut)">IVA ('+pct+'%):</div><div>'+paMoney(ivaMonto)+'</div>';
+        // Cantidad: si es por bultos mostrar "4 bultos" sino la cantidad base
+        var cantTxt;
+        if (porBultos) {
+          cantTxt = '<strong>'+it.cant_bultos+'</strong> bultos<div style="font-size:10px;color:var(--mut)">('+cantBase+' '+it.unidad+')</div>';
         } else {
-          html += '<div style="color:var(--mut)">IVA:</div><div style="color:var(--mut);font-style:italic">sin dato</div>';
+          cantTxt = '<strong>'+cantBase+'</strong> '+it.unidad;
         }
-        html += '<div style="color:var(--mut);font-weight:600;padding-top:4px;border-top:1px solid var(--bor);margin-top:2px">Total item:</div>'
-          +'<div style="font-weight:700;padding-top:4px;border-top:1px solid var(--bor);margin-top:2px">'+paMoney(subTotal)+'</div>'
-        +'</div>'
-        +'</div>';
+
+        // Precio unitario: si es por bultos, mostrar el de bulto; si no, el de unidad base
+        var precUnitTxt;
+        if (porBultos) {
+          var precPorBulto = precUnitBase * Number(it.presentacion_base);
+          precUnitTxt = paMoney(precPorBulto)+'<div style="font-size:10px;color:var(--mut)">('+paMoney(precUnitBase)+'/'+it.unidad+')</div>';
+        } else {
+          precUnitTxt = paMoney(precUnitBase);
+        }
+
+        var ivaTxt = pct != null ? pct + '%' : '<span style="color:var(--mut);font-style:italic">s/d</span>';
+        var rowBg = idx % 2 === 0 ? '' : 'background:#fafafa;';
+
+        html += '<tr style="border-bottom:1px solid #e5e7eb;'+rowBg+'">'
+          +'<td style="padding:10px 10px;vertical-align:top">'+detalleProd+'</td>'
+          +'<td style="padding:10px 10px;text-align:right;vertical-align:top">'+cantTxt+'</td>'
+          +'<td style="padding:10px 10px;text-align:right;vertical-align:top">'+precUnitTxt+'</td>'
+          +'<td style="padding:10px 10px;text-align:right;vertical-align:top">'+ivaTxt+'</td>'
+          +'<td style="padding:10px 10px;text-align:right;vertical-align:top;font-weight:600">'+paMoney(subNeto)+'</td>'
+        +'</tr>';
       });
     }
+    html += '</tbody></table>';
+    } // fin else (compra de bienes vs servicio)
 
-    // Totales al final
-    html += '<div style="margin-top:16px;padding:14px;background:#f0f9ff;border:1px solid #bae6fd;border-radius:8px">'
-      +'<div style="display:grid;grid-template-columns:1fr auto;gap:6px;font-size:13px">'
-        +'<div style="color:var(--mut)">Subtotal neto:</div><div style="text-align:right">'+paMoney(c.neto_total || c.subtotal || 0)+'</div>'
-        +'<div style="color:var(--mut)">IVA:</div><div style="text-align:right">'+paMoney(c.iva_total || c.iva_monto || 0)+'</div>'
-        +'<div style="font-weight:700;font-size:15px;padding-top:6px;border-top:1px solid #bae6fd;margin-top:4px">TOTAL:</div>'
-        +'<div style="font-weight:700;font-size:15px;text-align:right;padding-top:6px;border-top:1px solid #bae6fd;margin-top:4px;color:var(--burg)">'+paMoney(c.total||0)+'</div>'
-      +'</div>'
-    +'</div>';
+    // TOTALES estilo factura — alineados a la derecha
+    html += '<div style="display:flex;justify-content:flex-end;margin-top:6px">'
+      +'<table style="border-collapse:collapse;font-size:13px;min-width:340px">';
+    html += '<tr><td style="padding:4px 12px 4px 0;color:var(--mut);text-align:right">Subtotal neto:</td>'
+      +'<td style="padding:4px 0;text-align:right;font-weight:600;min-width:120px">'+paMoney(subtotalNetoSum)+'</td></tr>';
+
+    // Desglose de IVA por alícuota
+    var alicuotas = Object.keys(ivaPorAlicuota).sort(function(a,b){return Number(b)-Number(a);});
+    alicuotas.forEach(function(k){
+      var pct = Number(k);
+      if (pct === 0) return; // no mostrar IVA 0% en totales
+      html += '<tr><td style="padding:4px 12px 4px 0;color:var(--mut);text-align:right">IVA '+pct+'%:</td>'
+        +'<td style="padding:4px 0;text-align:right;font-weight:600">'+paMoney(ivaPorAlicuota[k].iva)+'</td></tr>';
+    });
+    if (!alicuotas.length && (Number(c.iva_total) || Number(c.iva_monto))) {
+      // Fallback: mostrar IVA total agregado si no había desglose por item
+      html += '<tr><td style="padding:4px 12px 4px 0;color:var(--mut);text-align:right">IVA:</td>'
+        +'<td style="padding:4px 0;text-align:right;font-weight:600">'+paMoney(c.iva_total||c.iva_monto||0)+'</td></tr>';
+    }
+
+    html += '<tr style="border-top:2px solid var(--burg)">'
+      +'<td style="padding:8px 12px 4px 0;font-size:14px;font-weight:700;text-align:right;color:var(--burg)">TOTAL:</td>'
+      +'<td style="padding:8px 0 4px;font-size:18px;font-weight:800;text-align:right;color:var(--burg)">'+paMoney(c.total||0)+'</td></tr>';
+    html += '</table></div>';
+
+    // PIE — notas y foto
+    if (c.notas || c.remito_foto_path) {
+      html += '<div style="margin-top:16px;padding-top:12px;border-top:1px dashed var(--bor);font-size:12px;display:flex;flex-wrap:wrap;gap:14px;align-items:center">';
+      if (c.notas) {
+        html += '<div style="flex:1;min-width:200px;color:var(--mut);font-style:italic">📝 '+c.notas+'</div>';
+      }
+      if (c.remito_foto_path) {
+        html += '<a href="'+c.remito_foto_path+'" target="_blank" style="color:var(--burg);font-weight:600;text-decoration:none;border:1px solid var(--burg);padding:6px 12px;border-radius:6px">📄 Ver foto del comprobante</a>';
+      }
+      html += '</div>';
+    }
+
+    html += '</div>'; // cierre del card-factura
 
     document.getElementById('pa-comp-det-body').innerHTML = html;
   });
@@ -8317,21 +8793,144 @@ function paLeerRemito(){
   });
 }
 function paAbrirNuevaCompra(){
-  PA.compN=0; PA._compraFotoB64=null;
+  PA.compN=0; PA.compNSrv=0; PA._compraFotoB64=null;
+  PA.tipoFacturaActual = 'compra';
+  // Cache de códigos PAÑ-NNNN ya existentes para sugerir el siguiente correlativo.
+  PA.panolCodigos = [];
+  paF('/api/pa/panol/unidades?incluir_inactivos=1').then(function(r){
+    PA.panolCodigos = (r.data||[]).map(function(u){ return u.codigo_interno; });
+  }).catch(function(){ PA.panolCodigos = []; });
+  // Cache de subcategorías para mostrar info contable de cada item.
+  if (!PA.subcategorias || !PA.subcategorias.length) {
+    paF('/api/pa/subcategorias').then(function(r){
+      PA.subcategorias = r.data || [];
+    }).catch(function(){ PA.subcategorias = []; });
+  }
+  // Cache de cuentas contables sección 4 (gastos) — usado por items de servicio
+  if (!PA.cuentasGastos) {
+    PA.cuentasGastos = [];
+    paF('/api/pa/cuentas').then(function(r){
+      // Filtramos en frontend: queremos solo las cuentas activas de sección 4
+      // (la API devuelve seccion_codigo numérico).
+      PA.cuentasGastos = (r.data||[]).filter(function(c){
+        return c.activo !== 0 && Number(c.seccion_codigo) === 4;
+      });
+    }).catch(function(){ PA.cuentasGastos = []; });
+  }
+  // Cache de lotes (para asignar items de servicio a un lote)
+  if (!PA.lotesCache) {
+    PA.lotesCache = [];
+    paF('/api/pa/lotes').then(function(r){
+      PA.lotesCache = (r.data||[]).filter(function(l){ return l.activo !== 0; });
+    }).catch(function(){ PA.lotesCache = []; });
+  }
+
   document.getElementById('pa-comp-fecha').value=new Date().toISOString().slice(0,10);
   document.getElementById('pa-comp-factura').value='';
   document.getElementById('pa-comp-tipo-comp').value='factura';
   document.getElementById('pa-comp-prov').value='';
   document.getElementById('pa-comp-notas').value='';
   document.getElementById('pa-comp-items').innerHTML='';
+  var srvCont = document.getElementById('pa-comp-items-srv');
+  if (srvCont) srvCont.innerHTML = '';
   document.getElementById('pa-comp-total').textContent='$0';
   document.getElementById('pa-comp-foto-inp').value='';
   var area=document.getElementById('pa-comp-foto-area');
   area.style.padding='18px'; area.style.border='2px dashed var(--bor2)';
   area.innerHTML='<div style="font-size:28px;margin-bottom:6px">📄</div><div style="font-size:12px;color:var(--mut)">Tocar para sacar foto o subir imagen</div>';
   area.onclick=function(){document.getElementById('pa-comp-foto-inp').click();};
+  paCambiarTipoFactura('compra');
   paAgregarItemCompra();
   document.getElementById('pa-mb-compra').classList.add('on');
+}
+
+// Cambia el tab del modal de Nueva Factura entre 'compra' y 'servicio'.
+// Esconde/muestra las zonas correspondientes y actualiza estilos de tabs.
+function paCambiarTipoFactura(tipo){
+  PA.tipoFacturaActual = tipo;
+  var tabC = document.getElementById('pa-comp-tab-compra');
+  var tabS = document.getElementById('pa-comp-tab-servicio');
+  var zonaP = document.getElementById('pa-comp-zona-productos');
+  var zonaS = document.getElementById('pa-comp-zona-servicios');
+  var btn   = document.getElementById('pa-comp-btn-guardar');
+  var titulo = document.getElementById('pa-comp-modal-tit');
+  if (tipo === 'servicio') {
+    tabC.style.background='transparent'; tabC.style.color='var(--mut)'; tabC.style.fontWeight='600';
+    tabS.style.background='var(--sur)'; tabS.style.color='var(--burg)'; tabS.style.fontWeight='700';
+    if (zonaP) zonaP.style.display = 'none';
+    if (zonaS) zonaS.style.display = '';
+    if (btn) btn.textContent = 'Registrar factura de servicio';
+    if (titulo) titulo.textContent = 'Nueva Factura de Servicio';
+    // Si todavía no hay items de servicio, agregar uno por defecto
+    var srvCont = document.getElementById('pa-comp-items-srv');
+    if (srvCont && !srvCont.children.length) paAgregarItemServicio();
+  } else {
+    tabS.style.background='transparent'; tabS.style.color='var(--mut)'; tabS.style.fontWeight='600';
+    tabC.style.background='var(--sur)'; tabC.style.color='var(--burg)'; tabC.style.fontWeight='700';
+    if (zonaP) zonaP.style.display = '';
+    if (zonaS) zonaS.style.display = 'none';
+    if (btn) btn.textContent = 'Registrar compra';
+    if (titulo) titulo.textContent = 'Nueva Factura';
+  }
+  paActTotalComp();
+}
+
+// Agrega un nuevo concepto de servicio al modal de Nueva Factura.
+// Cada concepto tiene: descripción, monto neto, IVA, cuenta contable y lote opcional.
+function paAgregarItemServicio(){
+  var n = PA.compNSrv++;
+  var optsCuentas = '<option value="">— Elegí cuenta —</option>'
+    + (PA.cuentasGastos||[]).map(function(c){
+        return '<option value="'+c.codigo+'">'+c.codigo+' — '+c.nombre+'</option>';
+      }).join('');
+  var optsLotes = '<option value="">— Sin lote / general —</option>'
+    + (PA.lotesCache||[]).map(function(l){
+        return '<option value="'+l.id+'">'+(l.finca_nombre?l.finca_nombre+' / ':'')+l.nombre+'</option>';
+      }).join('');
+  var row = document.createElement('div');
+  row.id = 'pa-cs-row-'+n;
+  row.dataset.n = n;
+  row.style.cssText = 'padding:10px;border:1px solid var(--bor);border-radius:8px;margin-bottom:8px;background:var(--sur)';
+  row.innerHTML =
+    // Línea 1: descripción + ✕
+    '<div style="display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center;margin-bottom:8px">'
+      +'<input type="text" id="pa-cs-concepto-'+n+'" placeholder="Concepto del servicio (ej: Cosecha mecánica del lote A2, Flete a Buenos Aires...)" oninput="paActTotalComp()">'
+      +'<button class="btn bd bs" onclick="document.getElementById(\'pa-cs-row-'+n+'\').remove();paActTotalComp()">✕</button>'
+    +'</div>'
+    // Línea 2: monto, IVA, subtotal
+    +'<div style="display:grid;grid-template-columns:160px 100px 1fr 140px;gap:8px;align-items:center;font-size:12px;margin-bottom:8px">'
+      +'<div>'
+        +'<div style="font-size:10px;color:var(--mut);margin-bottom:2px">Monto neto</div>'
+        +'<input type="number" id="pa-cs-monto-'+n+'" step="0.01" min="0" placeholder="0.00" oninput="paActTotalComp()" style="width:100%">'
+      +'</div>'
+      +'<div>'
+        +'<div style="font-size:10px;color:var(--mut);margin-bottom:2px">IVA</div>'
+        +'<select id="pa-cs-iva-'+n+'" oninput="paActTotalComp()" style="width:100%;font-size:12px">'
+          +'<option value="21" selected>21%</option>'
+          +'<option value="10.5">10.5%</option>'
+          +'<option value="0">0%</option>'
+          +'<option value="">s/dato</option>'
+        +'</select>'
+      +'</div>'
+      +'<div></div>'
+      +'<div style="text-align:right">'
+        +'<div style="font-size:10px;color:var(--mut);margin-bottom:2px">Subtotal</div>'
+        +'<span id="pa-cs-sub-'+n+'" style="font-weight:600">$0</span>'
+      +'</div>'
+    +'</div>'
+    // Línea 3: cuenta + lote
+    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:12px">'
+      +'<div>'
+        +'<div style="font-size:10px;color:var(--mut);margin-bottom:2px">Cuenta contable <span style="color:var(--err)">*</span></div>'
+        +'<select id="pa-cs-cuenta-'+n+'" style="width:100%;font-size:12px">'+optsCuentas+'</select>'
+      +'</div>'
+      +'<div>'
+        +'<div style="font-size:10px;color:var(--mut);margin-bottom:2px">Lote afectado <span style="color:var(--mut);font-weight:400">(opcional)</span></div>'
+        +'<select id="pa-cs-lote-'+n+'" style="width:100%;font-size:12px">'+optsLotes+'</select>'
+      +'</div>'
+    +'</div>';
+  document.getElementById('pa-comp-items-srv').appendChild(row);
+  paActTotalComp();
 }
 function paGuardarCompra(){
   var fecha=document.getElementById('pa-comp-fecha').value;
@@ -8340,7 +8939,10 @@ function paGuardarCompra(){
   var prov=document.getElementById('pa-comp-prov').value.trim();
   var notas=document.getElementById('pa-comp-notas').value.trim();
   var items=[];
+  var codigosTodos = []; // para detectar duplicados entre items distintos del mismo modal
+  var errorValidacion = null;
   document.querySelectorAll('[id^=pa-ci-row-]').forEach(function(row){
+    if (errorValidacion) return;
     var n=row.dataset.n;
     var insEl=document.getElementById('pa-ci-ins-'+n);
     var insId=insEl?insEl.value:null;
@@ -8369,36 +8971,149 @@ function paGuardarCompra(){
       item.precio_unit=precio;
       item.precio_modo='base';
     }
+
+    // Si la zona pañol está visible (insumo de tipo herramientas_panol),
+    // recolectar los códigos editados por el usuario.
+    var zonaPanol = document.getElementById('pa-ci-panol-'+n);
+    if (zonaPanol && zonaPanol.style.display !== 'none') {
+      var codigos = Array.prototype.map.call(
+        zonaPanol.querySelectorAll('input.pa-ci-panol-cod'),
+        function(inp){ return (inp.value||'').trim(); }
+      );
+      // Validar: ningún vacío, ningún duplicado
+      for (var ci = 0; ci < codigos.length; ci++) {
+        var c = codigos[ci];
+        if (!c) { errorValidacion = 'Hay un código de pañol vacío'; return; }
+        if (codigosTodos.indexOf(c) >= 0) { errorValidacion = 'Código duplicado en esta factura: '+c; return; }
+        if ((PA.panolCodigos||[]).indexOf(c) >= 0) { errorValidacion = 'Código ya existe: '+c; return; }
+        codigosTodos.push(c);
+      }
+      item.panol_codigos = codigos;
+    }
+
+    // Si la zona "elegir cuenta" está visible (caso Pañol > Herramientas con 2 opciones),
+    // validar que el user haya elegido y mandar la cuenta_codigo elegida al backend.
+    var zonaCuenta = document.getElementById('pa-ci-cuenta-'+n);
+    if (zonaCuenta && zonaCuenta.style.display !== 'none') {
+      var selCu = document.getElementById('pa-ci-cuenta-sel-'+n);
+      var cuentaSel = selCu ? selCu.value : '';
+      if (!cuentaSel) {
+        errorValidacion = 'Elegí la cuenta contable para el item del pañol (línea '+(items.length+1)+')';
+        return;
+      }
+      item.cuenta_codigo = cuentaSel;
+    }
     items.push(item);
   });
-  if(!items.length)return toast('Agregá al menos un producto','er');
+
+  // Si está en modo SERVICIO, no usamos los items del bucle anterior — usamos
+  // los conceptos de servicio. Reseteamos `items` y validamos cada concepto.
+  var esServicio = (PA.tipoFacturaActual === 'servicio');
+  if (esServicio) {
+    items = [];
+    document.querySelectorAll('[id^=pa-cs-row-]').forEach(function(row){
+      if (errorValidacion) return;
+      var n = row.dataset.n;
+      var concepto = (document.getElementById('pa-cs-concepto-'+n).value || '').trim();
+      var monto = parseFloat(document.getElementById('pa-cs-monto-'+n).value)||0;
+      var ivaEl = document.getElementById('pa-cs-iva-'+n);
+      var ivaPct = ivaEl && ivaEl.value !== '' ? parseFloat(ivaEl.value) : null;
+      var cuenta = document.getElementById('pa-cs-cuenta-'+n).value;
+      var lote = document.getElementById('pa-cs-lote-'+n).value;
+      // Saltear items vacíos (el user puede haber agregado uno y dejarlo en blanco)
+      if (!concepto && monto === 0 && !cuenta) return;
+      if (!concepto) { errorValidacion = 'Concepto requerido en línea '+(items.length+1); return; }
+      if (monto <= 0) { errorValidacion = 'Monto requerido en concepto: '+concepto; return; }
+      if (!cuenta)   { errorValidacion = 'Cuenta contable requerida en concepto: '+concepto; return; }
+      items.push({
+        concepto: concepto,
+        monto_neto: monto,
+        iva_porcentaje: ivaPct,
+        cuenta_codigo: cuenta,
+        lote_id: lote ? parseInt(lote, 10) : null
+      });
+    });
+  }
+
+  if (errorValidacion) return toast(errorValidacion, 'er');
+  if(!items.length) return toast(esServicio ? 'Agregá al menos un concepto' : 'Agregá al menos un producto','er');
+
+  var body = { fecha, nro_factura:factura, tipo_comprobante:tipoComp, proveedor_txt:prov, notas, items, remito_foto_b64: PA._compraFotoB64||null };
+  if (esServicio) body.tipo_factura = 'servicio';
+
   paF('/api/pa/compras',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({fecha,nro_factura:factura,tipo_comprobante:tipoComp,proveedor_txt:prov,notas,items,remito_foto_b64:PA._compraFotoB64||null})
+    body:JSON.stringify(body)
   }).then(function(r){
-    if(r.ok){toast('Compra registrada — stock actualizado');document.getElementById('pa-mb-compra').classList.remove('on');paLoadCompras();paF('/api/pa/insumos').then(function(r2){PA.insumos=r2.data||[];});}
-    else toast(r.error||'Error','er');
+    if(r.ok){
+      toast(esServicio ? '✓ Factura de servicio registrada' : '✓ Factura registrada — stock y/o pañol actualizados');
+      document.getElementById('pa-mb-compra').classList.remove('on');
+      paLoadCompras();
+      if (!esServicio) paF('/api/pa/insumos').then(function(r2){PA.insumos=r2.data||[];});
+    } else toast(r.error||'Error','er');
   });
 }
 function paAgregarItemCompra(){
   var n=PA.compN++;
-  var opts=PA.insumos.map(function(i){return'<option value="'+i.id+'" data-presb="'+(i.presentacion_base||'')+'" data-unidad="'+i.unidad+'">'+i.nombre+' ('+i.unidad+')</option>';}).join('');
+  var opts=PA.insumos.map(function(i){
+    return '<option value="'+i.id
+      +'" data-presb="'+(i.presentacion_base||'')
+      +'" data-unidad="'+i.unidad
+      +'" data-cat="'+(i.categoria_principal||'agroinsumos')
+      +'">'+i.nombre+' ('+i.unidad+')</option>';
+  }).join('');
   var row=document.createElement('div');row.id='pa-ci-row-'+n;row.dataset.n=n;
   row.style.cssText='padding:10px;border:1px solid var(--bor);border-radius:8px;margin-bottom:8px;background:var(--sur)';
   row.innerHTML=
     // Línea 1: producto + modo de carga + ✕
     '<div style="display:grid;grid-template-columns:1fr 180px auto;gap:8px;align-items:center;margin-bottom:8px">'
-      +'<select id="pa-ci-ins-'+n+'" onchange="paOnInsumoChange('+n+')"><option value="">— Elegí producto —</option>'+opts+'</select>'
+      +'<select id="pa-ci-ins-'+n+'" onchange="paOnInsumoChange('+n+')">'
+        +'<option value="">— Elegí producto —</option>'
+        +'<option value="__new__" style="font-weight:700;color:#6b21a8">➕ Crear producto nuevo...</option>'
+        +opts
+      +'</select>'
       +'<select id="pa-ci-modo-'+n+'" onchange="paOnModoCambio('+n+')" style="font-size:12px">'
         +'<option value="presentacion">Por bultos/latas</option>'
         +'<option value="base">En unidad base directo</option>'
       +'</select>'
       +'<button class="btn bd bs" onclick="document.getElementById(\'pa-ci-row-'+n+'\').remove();paActTotalComp()">✕</button>'
     +'</div>'
+    // Mini-form inline para crear un producto nuevo (oculto por default)
+    +'<div id="pa-ci-newprod-'+n+'" style="display:none;margin-bottom:10px;padding:10px;background:#f0fdf4;border:1px dashed #16a34a;border-radius:6px">'
+      +'<div style="font-weight:700;color:#166534;font-size:12px;margin-bottom:6px">➕ Crear producto nuevo</div>'
+      +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:12px">'
+        +'<div><div style="font-size:10px;color:#166534;margin-bottom:2px">Nombre <span style="color:var(--err)">*</span></div>'
+          +'<input id="pa-ci-np-nombre-'+n+'" placeholder="Ej: Amoladora Bosch GWS 850" style="width:100%"></div>'
+        +'<div><div style="font-size:10px;color:#166534;margin-bottom:2px">Categoría</div>'
+          +'<select id="pa-ci-np-cat-'+n+'" onchange="paNewProdCatCambio('+n+')" style="width:100%">'
+            +'<option value="herramientas_panol">🛠️ Herramientas — Pañol (durables)</option>'
+            +'<option value="herramientas_consumibles">🔧 Herramientas — Consumibles</option>'
+            +'<option value="otros">📦 Otros (Construcción / Repuestos)</option>'
+            +'<option value="agroinsumos">🌱 Agroinsumos / Fertilizantes</option>'
+          +'</select></div>'
+        +'<div><div style="font-size:10px;color:#166534;margin-bottom:2px">Tipo</div>'
+          +'<select id="pa-ci-np-tipo-'+n+'" style="width:100%"></select></div>'
+        +'<div><div style="font-size:10px;color:#166534;margin-bottom:2px">Unidad</div>'
+          +'<select id="pa-ci-np-unidad-'+n+'" style="width:100%">'
+            +'<option value="unidad">unidad</option>'
+            +'<option value="lt">lt</option>'
+            +'<option value="kg">kg</option>'
+            +'<option value="m">m</option>'
+            +'<option value="m2">m²</option>'
+            +'<option value="m3">m³</option>'
+            +'<option value="bolsa">bolsa</option>'
+            +'<option value="caja">caja</option>'
+          +'</select></div>'
+      +'</div>'
+      +'<div style="display:flex;gap:6px;margin-top:8px;justify-content:flex-end">'
+        +'<button class="btn bo bs" style="padding:4px 10px;font-size:11px" onclick="paCancelarNuevoProducto('+n+')">Cancelar</button>'
+        +'<button class="btn bb bs" style="padding:4px 10px;font-size:11px" onclick="paCrearProductoInline('+n+')">✓ Crear y usar</button>'
+      +'</div>'
+    +'</div>'
     // Línea 2: cantidad, contenido por bulto, precio por bulto, IVA, subtotal
     +'<div id="pa-ci-grid-'+n+'" style="display:grid;grid-template-columns:100px 140px 140px 80px 120px;gap:8px;align-items:center;font-size:12px">'
       +'<div>'
         +'<div style="font-size:10px;color:var(--mut);margin-bottom:2px">Cant.</div>'
-        +'<input type="number" id="pa-ci-cantb-'+n+'" placeholder="Ej: 4" step="0.01" min="0" oninput="paActTotalComp()" style="width:100%">'
+        +'<input type="number" id="pa-ci-cantb-'+n+'" placeholder="Ej: 4" step="0.01" min="0" oninput="paActTotalComp();paActPanolCodigos('+n+')" style="width:100%">'
       +'</div>'
       +'<div class="pa-ci-pres-col" data-n="'+n+'">'
         +'<div style="font-size:10px;color:var(--mut);margin-bottom:2px">lt/kg por bulto</div>'
@@ -8422,19 +9137,303 @@ function paAgregarItemCompra(){
         +'<span id="pa-ci-sub-'+n+'" style="font-weight:600">$0</span>'
       +'</div>'
     +'</div>'
-    +'<div id="pa-ci-hint-'+n+'" style="font-size:11px;color:var(--mut);margin-top:6px;font-style:italic"></div>';
+    +'<div id="pa-ci-hint-'+n+'" style="font-size:11px;color:var(--mut);margin-top:6px;font-style:italic"></div>'
+    // Zona INFO CONTABLE: se llena cuando se elige un insumo. Muestra cuenta + impactos.
+    +'<div id="pa-ci-info-'+n+'" data-n="'+n+'" style="display:none;margin-top:8px;padding:8px 10px;background:var(--bg);border-left:3px solid var(--burg);border-radius:4px;font-size:12px"></div>'
+    // Zona PAÑOL: oculta por default, se muestra cuando el insumo es de tipo pañol
+    +'<div id="pa-ci-panol-'+n+'" data-n="'+n+'" style="display:none;margin-top:10px;padding:10px;background:#faf5ff;border:1px dashed #c4b5fd;border-radius:6px;font-size:12px">'
+      +'<div style="font-weight:700;color:#6b21a8;margin-bottom:6px">🛠️ Pañol — Códigos de las nuevas unidades</div>'
+      +'<div style="font-size:11px;color:#6b21a8;margin-bottom:6px">Se va a crear una unidad por cada cantidad. Podés editar los códigos sugeridos.</div>'
+      +'<div id="pa-ci-panol-codigos-'+n+'" style="display:flex;flex-wrap:wrap;gap:6px"></div>'
+    +'</div>'
+    // Zona elegir cuenta contable (caso Pañol > Herramientas con 2 alternativas)
+    +'<div id="pa-ci-cuenta-'+n+'" data-n="'+n+'" style="display:none;margin-top:8px;padding:8px 10px;background:#fef3c7;border-left:3px solid #f59e0b;border-radius:4px;font-size:12px">'
+      +'<div style="font-weight:700;color:#92400e;margin-bottom:4px">💰 Elegí la cuenta contable</div>'
+      +'<select id="pa-ci-cuenta-sel-'+n+'" style="width:100%;font-size:12px"><option value="">— Elegí —</option></select>'
+    +'</div>';
   document.getElementById('pa-comp-items').appendChild(row);
+  // Inicializar tipos según la categoría default (herramientas_panol)
+  paNewProdCatCambio(n);
+}
+
+// Mapeo de tipos según categoría — usado por el mini-form de creación inline.
+// Es la misma lista que ya se usa en el modal completo de Insumo, pero compacto.
+var PA_TIPOS_POR_CATEGORIA = {
+  'agroinsumos': [
+    ['fertilizante','Fertilizante'],['herbicida','Herbicida'],['fungicida','Fungicida'],
+    ['insecticida','Insecticida'],['abono','Abono'],['agroquimico','Agroquímico'],
+    ['semilla','Semilla']
+  ],
+  'herramientas_consumibles': [
+    ['manual','Manual'],['electrica','Eléctrica'],['medicion','Medición'],
+    ['corte','Corte'],['seguridad','Seguridad'],['otro','Otro']
+  ],
+  'herramientas_panol': [
+    ['manual','Manual'],['electrica','Eléctrica'],['medicion','Medición'],
+    ['corte','Corte'],['seguridad','Seguridad'],['otro','Otro']
+  ],
+  'otros': [
+    ['construccion','Construcción'],['repuesto','Repuesto'],['otro','Otro']
+  ]
+};
+
+// Repoblar el select de Tipo cuando cambia la Categoría en el mini-form
+function paNewProdCatCambio(n){
+  var cat = document.getElementById('pa-ci-np-cat-'+n).value;
+  var tipos = PA_TIPOS_POR_CATEGORIA[cat] || PA_TIPOS_POR_CATEGORIA['otros'];
+  var sel = document.getElementById('pa-ci-np-tipo-'+n);
+  sel.innerHTML = tipos.map(function(t){return '<option value="'+t[0]+'">'+t[1]+'</option>';}).join('');
+  // Para herramientas/otros, default a "unidad". Para agroinsumos, "lt".
+  var unidadSel = document.getElementById('pa-ci-np-unidad-'+n);
+  if (unidadSel && !unidadSel._touched) {
+    unidadSel.value = (cat === 'agroinsumos') ? 'lt' : 'unidad';
+  }
+}
+
+// Cancelar el alta inline: volver al estado "elegí producto" del select
+function paCancelarNuevoProducto(n){
+  document.getElementById('pa-ci-newprod-'+n).style.display = 'none';
+  document.getElementById('pa-ci-ins-'+n).value = '';
+  // Limpiar el form
+  document.getElementById('pa-ci-np-nombre-'+n).value = '';
+}
+
+// Crear el producto en pa_insumos y dejarlo seleccionado en el dropdown
+function paCrearProductoInline(n){
+  var nombre = document.getElementById('pa-ci-np-nombre-'+n).value.trim();
+  var cat = document.getElementById('pa-ci-np-cat-'+n).value;
+  var tipo = document.getElementById('pa-ci-np-tipo-'+n).value;
+  var unidad = document.getElementById('pa-ci-np-unidad-'+n).value;
+  if (!nombre) return toast('Nombre requerido','er');
+  paF('/api/pa/insumos', {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ nombre: nombre, tipo: tipo, unidad: unidad, categoria_principal: cat })
+  }).then(function(r){
+    if (!r.ok) return toast(r.error||'Error al crear','er');
+    // Recargar maestro de insumos y agregar el nuevo al dropdown del item actual
+    paF('/api/pa/insumos').then(function(r2){
+      PA.insumos = r2.data || [];
+      // Reconstruir el select de productos para TODOS los items abiertos en el modal,
+      // preservando la selección actual de cada uno.
+      document.querySelectorAll('[id^=pa-ci-row-]').forEach(function(otherRow){
+        var on = otherRow.dataset.n;
+        var sel = document.getElementById('pa-ci-ins-'+on);
+        if (!sel) return;
+        var prevVal = sel.value;
+        var newOpts = PA.insumos.map(function(i){
+          return '<option value="'+i.id
+            +'" data-presb="'+(i.presentacion_base||'')
+            +'" data-unidad="'+i.unidad
+            +'" data-cat="'+(i.categoria_principal||'agroinsumos')
+            +'">'+i.nombre+' ('+i.unidad+')</option>';
+        }).join('');
+        sel.innerHTML = '<option value="">— Elegí producto —</option>'
+          +'<option value="__new__" style="font-weight:700;color:#6b21a8">➕ Crear producto nuevo...</option>'
+          +newOpts;
+        // En el item donde acabamos de crear, seleccionar el nuevo. En los otros, mantener.
+        if (on === String(n)) {
+          sel.value = String(r.id);
+          paOnInsumoChange(n);
+        } else {
+          sel.value = prevVal;
+        }
+      });
+      // Cerrar el form inline
+      document.getElementById('pa-ci-newprod-'+n).style.display = 'none';
+      toast('✓ Producto creado: '+nombre);
+    });
+  }).catch(function(e){ toast('Error: '+e.message,'er'); });
 }
 
 // Cuando se elige un producto, auto-completar presentación default si el producto la tiene
+// + mostrar/ocultar la zona pañol según la categoría del insumo elegido.
+// Caso especial: si el usuario elige "__new__" (➕ Crear producto nuevo), abrimos el
+// mini-form inline de creación.
 function paOnInsumoChange(n){
   var sel=document.getElementById('pa-ci-ins-'+n);
+  if (!sel) return;
+  // Caso: el user eligió "Crear producto nuevo"
+  if (sel.value === '__new__') {
+    var formNew = document.getElementById('pa-ci-newprod-'+n);
+    if (formNew) {
+      formNew.style.display = '';
+      // Foco en el nombre
+      var inpNombre = document.getElementById('pa-ci-np-nombre-'+n);
+      if (inpNombre) setTimeout(function(){ inpNombre.focus(); }, 50);
+    }
+    // Ocultar zona pañol y info mientras tanto (todavía no hay producto elegido)
+    paLimpiarZonasItem(n);
+    return;
+  }
+  // Si el user volvió a "" (sin selección), también ocultar form de creación si estaba abierto
+  if (!sel.value) {
+    var formNew2 = document.getElementById('pa-ci-newprod-'+n);
+    if (formNew2) formNew2.style.display = 'none';
+    paLimpiarZonasItem(n);
+    return;
+  }
+  // Caso normal: producto del maestro elegido
+  var formNew3 = document.getElementById('pa-ci-newprod-'+n);
+  if (formNew3) formNew3.style.display = 'none';
   var opt=sel.selectedOptions[0];
   if(!opt)return;
   var presB=opt.dataset.presb||'';
   var elB=document.getElementById('pa-ci-presb-'+n);
   if(elB && !elB.value)elB.value=presB;
+  // Buscar el insumo completo en cache para tener categoria_v2 y subcategoria
+  var insumoId = parseInt(sel.value, 10);
+  var insumo = (PA.insumos||[]).find(function(i){ return i.id === insumoId; });
+  // ¿Es pañol? (mantenemos compatibilidad con categoria_principal viejo)
+  var catLegacy = opt.dataset.cat || 'agroinsumos';
+  var catV2 = insumo ? insumo.categoria_v2 : null;
+  var subcat = insumo ? insumo.subcategoria : null;
+  var esPanol = (catLegacy === 'herramientas_panol') || (catV2 === 'panol' && subcat === 'Herramientas');
+  var zona = document.getElementById('pa-ci-panol-'+n);
+  if (zona) zona.style.display = esPanol ? '' : 'none';
+  if (esPanol) {
+    // Forzar modo "base" para pañol (cantidad = N unidades enteras, sin presentación de bultos)
+    var modoSel = document.getElementById('pa-ci-modo-'+n);
+    if (modoSel && modoSel.value !== 'base') {
+      modoSel.value = 'base';
+      paOnModoCambio(n);
+    }
+    paActPanolCodigos(n);
+  }
+
+  // Render de info contable (cuenta, impacto en stock, qué afecta)
+  paRenderInfoContable(n, insumo, catV2, subcat);
+
   paActTotalComp();
+}
+
+// Helper: limpiar todas las zonas extras del item cuando no hay insumo elegido
+function paLimpiarZonasItem(n){
+  ['pa-ci-panol-','pa-ci-info-','pa-ci-cuenta-'].forEach(function(prefix){
+    var el = document.getElementById(prefix+n);
+    if (el) el.style.display = 'none';
+  });
+}
+
+// Renderiza la zona de info contable: cuenta + qué impacta (stock, orden, etc.)
+function paRenderInfoContable(n, insumo, catV2, subcat){
+  var info = document.getElementById('pa-ci-info-'+n);
+  var elegir = document.getElementById('pa-ci-cuenta-'+n);
+  if (!info) return;
+  if (!insumo || !catV2 || !subcat) {
+    info.style.display = 'none';
+    if (elegir) elegir.style.display = 'none';
+    return;
+  }
+  // Buscar metadata de la subcategoría en PA.subcategorias (cache cargado al abrir el modal)
+  var meta = (PA.subcategorias||[]).find(function(s){ return s.categoria===catV2 && s.subcategoria===subcat; });
+  if (!meta) {
+    info.style.display = 'none';
+    if (elegir) elegir.style.display = 'none';
+    return;
+  }
+
+  // Etiquetas legibles del campo "afecta"
+  var afectaLabels = {
+    'orden_aplicacion': '📋 Sale por <strong>Orden de Aplicación</strong>',
+    'plantinera':       '🌾 Sale por <strong>Plantinera</strong> (a un lote)',
+    'panel_combustible':'⛽ Se gestiona desde <strong>Panel Combustible</strong>',
+    'prestamo':         '🤝 Se entrega por <strong>Préstamo a trabajador</strong>',
+    'despachos':        '🚚 Sale por <strong>Despachos</strong> (módulo a desarrollar)',
+    '':                 '💸 Gasto directo (sin movimiento de stock)'
+  };
+
+  var html = '';
+  // Línea 1: cuenta contable
+  if (meta.cuenta_codigo_alt) {
+    // 2 cuentas → mostrar dropdown editable, ocultar la línea fija
+    html += '<div style="color:var(--mut)">Hay <strong>2 cuentas posibles</strong> para esta subcategoría — elegila abajo</div>';
+    if (elegir) {
+      elegir.style.display = '';
+      var selCu = document.getElementById('pa-ci-cuenta-sel-'+n);
+      if (selCu) {
+        selCu.innerHTML = '<option value="">— Elegí cuenta —</option>'
+          +'<option value="'+meta.cuenta_codigo_default+'">'+meta.cuenta_codigo_default+' — '+(meta.cuenta_default_nombre||'')+'</option>'
+          +'<option value="'+meta.cuenta_codigo_alt+'">'+meta.cuenta_codigo_alt+' — '+(meta.cuenta_alt_nombre||'')+'</option>';
+        // Si el insumo ya tiene cuenta_codigo guardada, usarla como default
+        if (insumo.cuenta_codigo) selCu.value = insumo.cuenta_codigo;
+      }
+    }
+  } else {
+    if (elegir) elegir.style.display = 'none';
+    var cuentaTxt = meta.cuenta_codigo_default
+      ? '<strong>'+meta.cuenta_codigo_default+'</strong> — '+(meta.cuenta_default_nombre||'')
+      : '<em>sin cuenta asignada</em>';
+    html += '<div>📊 Cuenta contable: '+cuentaTxt+'</div>';
+  }
+  // Línea 2: stock + qué afecta
+  var stockTxt = meta.requiere_stock
+    ? (catV2 === 'panol' ? '🛠️ Crea unidades en <strong>Pañol</strong>' : '✅ Suma a <strong>Stock</strong>')
+    : '⊘ <em>No suma stock</em>';
+  html += '<div style="margin-top:3px">'+stockTxt+' · '+(afectaLabels[meta.afecta||'']||'')+'</div>';
+  // Avisos especiales
+  if (meta.afecta === 'panel_combustible') {
+    html += '<div style="margin-top:4px;color:#92400e;background:#fef3c7;padding:4px 6px;border-radius:4px;font-size:11px">'
+         +  '⚠ Los combustibles normalmente se cargan desde el <strong>Panel Combustible</strong>. Asegurate de que la carga acá no genere doble registro.'
+         +  '</div>';
+  }
+  if (meta.afecta === 'despachos') {
+    html += '<div style="margin-top:4px;color:#1e40af;background:#dbeafe;padding:4px 6px;border-radius:4px;font-size:11px">'
+         +  'ℹ El módulo de Despachos todavía está en desarrollo. Por ahora suma al stock simple.'
+         +  '</div>';
+  }
+
+  info.innerHTML = html;
+  info.style.display = '';
+}
+
+// Regenerar los inputs de códigos de pañol según la cantidad ingresada.
+// Se invoca cuando: cambia el insumo (a pañol), cambia la cantidad, o se monta el item.
+function paActPanolCodigos(n){
+  var zona = document.getElementById('pa-ci-panol-'+n);
+  if (!zona || zona.style.display === 'none') return;
+  var cantInp = document.getElementById('pa-ci-cantb-'+n);
+  var cant = parseInt(cantInp ? cantInp.value : '0', 10);
+  if (isNaN(cant) || cant < 1) cant = 0;
+  if (cant > 50) cant = 50; // límite de seguridad para no generar miles de inputs por accidente
+  var cont = document.getElementById('pa-ci-panol-codigos-'+n);
+  if (!cont) return;
+  // Preservar valores ya tipeados por el user
+  var existentes = Array.prototype.map.call(
+    cont.querySelectorAll('input.pa-ci-panol-cod'),
+    function(inp){ return inp.value; }
+  );
+  if (cant === 0) { cont.innerHTML = '<span style="color:var(--mut)">Ingresá la cantidad arriba</span>'; return; }
+  // Calcular siguiente código sugerido a partir del set global ya existente en el modal + DB local
+  var maxN = paProximoNumeroPanol();
+  var html = '';
+  for (var i = 0; i < cant; i++) {
+    var codigo = (existentes[i] !== undefined && existentes[i] !== '')
+      ? existentes[i]
+      : ('PAÑ-' + String(maxN + i).padStart(4, '0'));
+    html += '<input type="text" class="pa-ci-panol-cod" value="'+codigo+'" '
+         + 'style="width:120px;font-family:monospace;font-size:12px;text-align:center;'
+         + 'background:#fff;border:1px solid #c4b5fd;border-radius:4px;padding:4px 6px">';
+  }
+  cont.innerHTML = html;
+}
+
+// Calcular el próximo número correlativo PAÑ-NNNN considerando lo que ya está en
+// el cache PA.panolCodigos (lo cargamos al abrir el modal) + los códigos ya tipeados
+// en otros items del mismo modal.
+function paProximoNumeroPanol(){
+  var max = 0;
+  // Códigos existentes en DB (cargados al abrir el modal)
+  (PA.panolCodigos || []).forEach(function(c){
+    var m = /^PAÑ-(\d+)$/.exec(c||'');
+    if (m) { var v = parseInt(m[1],10); if (v > max) max = v; }
+  });
+  // Códigos tipeados en cualquier input del modal en este momento
+  document.querySelectorAll('#pa-comp-items input.pa-ci-panol-cod').forEach(function(inp){
+    var m = /^PAÑ-(\d+)$/.exec(inp.value||'');
+    if (m) { var v = parseInt(m[1],10); if (v > max) max = v; }
+  });
+  return max + 1;
 }
 
 // Mostrar/ocultar columnas de presentación según el modo
@@ -8486,6 +9485,18 @@ function paActTotalComp(){
     }
 
     neto+=sNeto; iva+=sIva;
+  });
+  // Items de servicio (zona pa-comp-items-srv): cada uno tiene monto neto + IVA
+  document.querySelectorAll('[id^=pa-cs-row-]').forEach(function(row){
+    var n = row.dataset.n;
+    var monto = parseFloat(document.getElementById('pa-cs-monto-'+n).value)||0;
+    var ivaEl = document.getElementById('pa-cs-iva-'+n);
+    var ivaPct = ivaEl && ivaEl.value !== '' ? parseFloat(ivaEl.value) : 0;
+    var sIva = monto * (ivaPct/100);
+    var sTotal = monto + sIva;
+    var sub = document.getElementById('pa-cs-sub-'+n);
+    if (sub) sub.textContent = paMoney(sTotal);
+    neto += monto; iva += sIva;
   });
   var total=neto+iva;
   document.getElementById('pa-comp-total').textContent=paMoney(total);
