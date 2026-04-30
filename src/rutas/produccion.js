@@ -733,6 +733,13 @@ router.post('/compras', requireAuth, (req, res) => {
         const insumoInfo = getCatInsumo.get(it.insumo_id);
         const esPanol = insumoInfo && insumoInfo.categoria_principal === 'herramientas_panol';
 
+        // Si el cliente pasó cuenta_codigo (caso Pañol > Herramientas con 2 alternativas),
+        // persistirla en el insumo para que la próxima vez ya esté pre-seleccionada.
+        if (it.cuenta_codigo) {
+          db.prepare("UPDATE pa_insumos SET cuenta_codigo = ? WHERE id = ?")
+            .run(it.cuenta_codigo, it.insumo_id);
+        }
+
         if (esPanol) {
           // Cantidad de unidades a crear (en pañol cantidadBase = N enteras)
           const nUnidades = Math.max(1, Math.round(cantidadBase));

@@ -171,6 +171,8 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   <div class="ni" data-sec="pa-combustible"><span class="dot da"></span>⛽ Combustible</div>
   <div class="ni" data-sec="pa-personal"><span class="dot db"></span>👷 Personal</div>
   <div class="ni" data-sec="pa-panol"><span class="dot dd"></span>🔧 Pañol</div>
+  <div class="ni" data-sec="pa-electricidad"><span class="dot da"></span>⚡ Electricidad</div>
+  <div class="ni" data-sec="pa-despachos"><span class="dot dc"></span>🚚 Despachos</div>
   <div class="ni" data-sec="pa-cuentas"><span class="dot dc"></span>📊 Plan de Cuentas</div>
   <div class="ni" data-sec="adm-asientos"><span class="dot db"></span>📒 Asientos Contables</div>
   <div class="ni" data-sec="adm-plan-cuentas"><span class="dot dc"></span>📊 Plan de Cuentas Contable</div>
@@ -1791,6 +1793,55 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       </tr></thead>
       <tbody id="pn-hist-tbody"><tr><td colspan="6" class="emp">Cargando...</td></tr></tbody>
     </table></div>
+  </div>
+</div>
+
+<!-- ─── PA ELECTRICIDAD (placeholder) ─────────────────────────── -->
+<div class="sec" id="sec-pa-electricidad">
+  <div class="ph">
+    <div>
+      <div class="ph-t">⚡ Módulo Electricidad</div>
+      <div class="ph-s">Gestión de consumo eléctrico, facturas de luz, medidores y proyección por sector</div>
+    </div>
+  </div>
+  <div style="background:var(--sur);border:1px dashed var(--bor);border-radius:12px;padding:40px 20px;text-align:center;margin-top:20px">
+    <div style="font-size:48px;margin-bottom:12px">🔌</div>
+    <div style="font-size:18px;font-weight:600;margin-bottom:8px">Módulo en construcción</div>
+    <div style="color:var(--mut);max-width:520px;margin:0 auto;line-height:1.5">
+      Este módulo va a manejar el seguimiento de consumo eléctrico, carga de facturas de luz por
+      medidor / sector, alertas por sobreconsumo y reportes mensuales.
+      Por ahora dejamos el espacio reservado en el menú.
+    </div>
+    <div style="margin-top:20px;font-size:12px;color:var(--mut);font-style:italic">
+      🚧 Próximamente
+    </div>
+  </div>
+</div>
+
+<!-- ─── PA DESPACHOS (placeholder) ────────────────────────────── -->
+<div class="sec" id="sec-pa-despachos">
+  <div class="ph">
+    <div>
+      <div class="ph-t">🚚 Despachos</div>
+      <div class="ph-s">Salidas de embalajes y productos terminados a clientes / mercado</div>
+    </div>
+  </div>
+  <div style="background:var(--sur);border:1px dashed var(--bor);border-radius:12px;padding:40px 20px;text-align:center;margin-top:20px">
+    <div style="font-size:48px;margin-bottom:12px">📦</div>
+    <div style="font-size:18px;font-weight:600;margin-bottom:8px">Módulo en construcción</div>
+    <div style="color:var(--mut);max-width:520px;margin:0 auto;line-height:1.5">
+      Acá va a vivir la gestión de despachos: descarga de stock de embalajes
+      (cajas, bandejas, films, etiquetas), salida de productos terminados, vinculación
+      con clientes y registro de fletes.
+    </div>
+    <div style="margin-top:16px;font-size:13px;color:var(--mut)">
+      Por ahora los embalajes se cargan como insumos con stock simple desde
+      <strong>Ingreso de Factura</strong> y se pueden ver en
+      <strong>Fertilizantes / Insumos</strong>.
+    </div>
+    <div style="margin-top:20px;font-size:12px;color:var(--mut);font-style:italic">
+      🚧 Próximamente
+    </div>
   </div>
 </div>
 
@@ -5952,6 +6003,8 @@ var USR_SECCIONES = [
     { id: 'pa-combustible', label: '⛽ Combustible' },
     { id: 'pa-personal', label: '👷 Personal / MO' },
 { id: 'pa-panol', label: '🔧 Pañol' },
+    { id: 'pa-electricidad', label: '⚡ Electricidad' },
+    { id: 'pa-despachos', label: '🚚 Despachos' },
   ]},
   { grupo: 'Administración', items: [
     { id: 'adm-asientos',     label: '📒 Asientos Contables' },
@@ -8263,6 +8316,13 @@ function paAbrirNuevaCompra(){
   paF('/api/pa/panol/unidades?incluir_inactivos=1').then(function(r){
     PA.panolCodigos = (r.data||[]).map(function(u){ return u.codigo_interno; });
   }).catch(function(){ PA.panolCodigos = []; });
+  // Cache de subcategorías para mostrar info contable de cada item.
+  // Si ya se cargó antes (modal Insumo), evitamos doble fetch.
+  if (!PA.subcategorias || !PA.subcategorias.length) {
+    paF('/api/pa/subcategorias').then(function(r){
+      PA.subcategorias = r.data || [];
+    }).catch(function(){ PA.subcategorias = []; });
+  }
 
   document.getElementById('pa-comp-fecha').value=new Date().toISOString().slice(0,10);
   document.getElementById('pa-comp-factura').value='';
@@ -8336,6 +8396,19 @@ function paGuardarCompra(){
         codigosTodos.push(c);
       }
       item.panol_codigos = codigos;
+    }
+
+    // Si la zona "elegir cuenta" está visible (caso Pañol > Herramientas con 2 opciones),
+    // validar que el user haya elegido y mandar la cuenta_codigo elegida al backend.
+    var zonaCuenta = document.getElementById('pa-ci-cuenta-'+n);
+    if (zonaCuenta && zonaCuenta.style.display !== 'none') {
+      var selCu = document.getElementById('pa-ci-cuenta-sel-'+n);
+      var cuentaSel = selCu ? selCu.value : '';
+      if (!cuentaSel) {
+        errorValidacion = 'Elegí la cuenta contable para el item del pañol (línea '+(items.length+1)+')';
+        return;
+      }
+      item.cuenta_codigo = cuentaSel;
     }
     items.push(item);
   });
@@ -8438,11 +8511,18 @@ function paAgregarItemCompra(){
       +'</div>'
     +'</div>'
     +'<div id="pa-ci-hint-'+n+'" style="font-size:11px;color:var(--mut);margin-top:6px;font-style:italic"></div>'
+    // Zona INFO CONTABLE: se llena cuando se elige un insumo. Muestra cuenta + impactos.
+    +'<div id="pa-ci-info-'+n+'" data-n="'+n+'" style="display:none;margin-top:8px;padding:8px 10px;background:var(--bg);border-left:3px solid var(--burg);border-radius:4px;font-size:12px"></div>'
     // Zona PAÑOL: oculta por default, se muestra cuando el insumo es de tipo pañol
     +'<div id="pa-ci-panol-'+n+'" data-n="'+n+'" style="display:none;margin-top:10px;padding:10px;background:#faf5ff;border:1px dashed #c4b5fd;border-radius:6px;font-size:12px">'
       +'<div style="font-weight:700;color:#6b21a8;margin-bottom:6px">🛠️ Pañol — Códigos de las nuevas unidades</div>'
       +'<div style="font-size:11px;color:#6b21a8;margin-bottom:6px">Se va a crear una unidad por cada cantidad. Podés editar los códigos sugeridos.</div>'
       +'<div id="pa-ci-panol-codigos-'+n+'" style="display:flex;flex-wrap:wrap;gap:6px"></div>'
+    +'</div>'
+    // Zona elegir cuenta contable (caso Pañol > Herramientas con 2 alternativas)
+    +'<div id="pa-ci-cuenta-'+n+'" data-n="'+n+'" style="display:none;margin-top:8px;padding:8px 10px;background:#fef3c7;border-left:3px solid #f59e0b;border-radius:4px;font-size:12px">'
+      +'<div style="font-weight:700;color:#92400e;margin-bottom:4px">💰 Elegí la cuenta contable</div>'
+      +'<select id="pa-ci-cuenta-sel-'+n+'" style="width:100%;font-size:12px"><option value="">— Elegí —</option></select>'
     +'</div>';
   document.getElementById('pa-comp-items').appendChild(row);
   // Inicializar tipos según la categoría default (herramientas_panol)
@@ -8555,17 +8635,15 @@ function paOnInsumoChange(n){
       var inpNombre = document.getElementById('pa-ci-np-nombre-'+n);
       if (inpNombre) setTimeout(function(){ inpNombre.focus(); }, 50);
     }
-    // Ocultar zona pañol mientras tanto (todavía no hay producto elegido)
-    var zonaPanol0 = document.getElementById('pa-ci-panol-'+n);
-    if (zonaPanol0) zonaPanol0.style.display = 'none';
+    // Ocultar zona pañol y info mientras tanto (todavía no hay producto elegido)
+    paLimpiarZonasItem(n);
     return;
   }
   // Si el user volvió a "" (sin selección), también ocultar form de creación si estaba abierto
   if (!sel.value) {
     var formNew2 = document.getElementById('pa-ci-newprod-'+n);
     if (formNew2) formNew2.style.display = 'none';
-    var zonaPanol1 = document.getElementById('pa-ci-panol-'+n);
-    if (zonaPanol1) zonaPanol1.style.display = 'none';
+    paLimpiarZonasItem(n);
     return;
   }
   // Caso normal: producto del maestro elegido
@@ -8576,9 +8654,14 @@ function paOnInsumoChange(n){
   var presB=opt.dataset.presb||'';
   var elB=document.getElementById('pa-ci-presb-'+n);
   if(elB && !elB.value)elB.value=presB;
-  // ¿Es pañol?
-  var cat = opt.dataset.cat || 'agroinsumos';
-  var esPanol = (cat === 'herramientas_panol');
+  // Buscar el insumo completo en cache para tener categoria_v2 y subcategoria
+  var insumoId = parseInt(sel.value, 10);
+  var insumo = (PA.insumos||[]).find(function(i){ return i.id === insumoId; });
+  // ¿Es pañol? (mantenemos compatibilidad con categoria_principal viejo)
+  var catLegacy = opt.dataset.cat || 'agroinsumos';
+  var catV2 = insumo ? insumo.categoria_v2 : null;
+  var subcat = insumo ? insumo.subcategoria : null;
+  var esPanol = (catLegacy === 'herramientas_panol') || (catV2 === 'panol' && subcat === 'Herramientas');
   var zona = document.getElementById('pa-ci-panol-'+n);
   if (zona) zona.style.display = esPanol ? '' : 'none';
   if (esPanol) {
@@ -8590,7 +8673,91 @@ function paOnInsumoChange(n){
     }
     paActPanolCodigos(n);
   }
+
+  // Render de info contable (cuenta, impacto en stock, qué afecta)
+  paRenderInfoContable(n, insumo, catV2, subcat);
+
   paActTotalComp();
+}
+
+// Helper: limpiar todas las zonas extras del item cuando no hay insumo elegido
+function paLimpiarZonasItem(n){
+  ['pa-ci-panol-','pa-ci-info-','pa-ci-cuenta-'].forEach(function(prefix){
+    var el = document.getElementById(prefix+n);
+    if (el) el.style.display = 'none';
+  });
+}
+
+// Renderiza la zona de info contable: cuenta + qué impacta (stock, orden, etc.)
+function paRenderInfoContable(n, insumo, catV2, subcat){
+  var info = document.getElementById('pa-ci-info-'+n);
+  var elegir = document.getElementById('pa-ci-cuenta-'+n);
+  if (!info) return;
+  if (!insumo || !catV2 || !subcat) {
+    info.style.display = 'none';
+    if (elegir) elegir.style.display = 'none';
+    return;
+  }
+  // Buscar metadata de la subcategoría en PA.subcategorias (cache cargado al abrir el modal)
+  var meta = (PA.subcategorias||[]).find(function(s){ return s.categoria===catV2 && s.subcategoria===subcat; });
+  if (!meta) {
+    info.style.display = 'none';
+    if (elegir) elegir.style.display = 'none';
+    return;
+  }
+
+  // Etiquetas legibles del campo "afecta"
+  var afectaLabels = {
+    'orden_aplicacion': '📋 Sale por <strong>Orden de Aplicación</strong>',
+    'plantinera':       '🌾 Sale por <strong>Plantinera</strong> (a un lote)',
+    'panel_combustible':'⛽ Se gestiona desde <strong>Panel Combustible</strong>',
+    'prestamo':         '🤝 Se entrega por <strong>Préstamo a trabajador</strong>',
+    'despachos':        '🚚 Sale por <strong>Despachos</strong> (módulo a desarrollar)',
+    '':                 '💸 Gasto directo (sin movimiento de stock)'
+  };
+
+  var html = '';
+  // Línea 1: cuenta contable
+  if (meta.cuenta_codigo_alt) {
+    // 2 cuentas → mostrar dropdown editable, ocultar la línea fija
+    html += '<div style="color:var(--mut)">Hay <strong>2 cuentas posibles</strong> para esta subcategoría — elegila abajo</div>';
+    if (elegir) {
+      elegir.style.display = '';
+      var selCu = document.getElementById('pa-ci-cuenta-sel-'+n);
+      if (selCu) {
+        selCu.innerHTML = '<option value="">— Elegí cuenta —</option>'
+          +'<option value="'+meta.cuenta_codigo_default+'">'+meta.cuenta_codigo_default+' — '+(meta.cuenta_default_nombre||'')+'</option>'
+          +'<option value="'+meta.cuenta_codigo_alt+'">'+meta.cuenta_codigo_alt+' — '+(meta.cuenta_alt_nombre||'')+'</option>';
+        // Si el insumo ya tiene cuenta_codigo guardada, usarla como default
+        if (insumo.cuenta_codigo) selCu.value = insumo.cuenta_codigo;
+      }
+    }
+  } else {
+    if (elegir) elegir.style.display = 'none';
+    var cuentaTxt = meta.cuenta_codigo_default
+      ? '<strong>'+meta.cuenta_codigo_default+'</strong> — '+(meta.cuenta_default_nombre||'')
+      : '<em>sin cuenta asignada</em>';
+    html += '<div>📊 Cuenta contable: '+cuentaTxt+'</div>';
+  }
+  // Línea 2: stock + qué afecta
+  var stockTxt = meta.requiere_stock
+    ? (catV2 === 'panol' ? '🛠️ Crea unidades en <strong>Pañol</strong>' : '✅ Suma a <strong>Stock</strong>')
+    : '⊘ <em>No suma stock</em>';
+  html += '<div style="margin-top:3px">'+stockTxt+' · '+(afectaLabels[meta.afecta||'']||'')+'</div>';
+  // Avisos especiales
+  if (meta.afecta === 'panel_combustible') {
+    html += '<div style="margin-top:4px;color:#92400e;background:#fef3c7;padding:4px 6px;border-radius:4px;font-size:11px">'
+         +  '⚠ Los combustibles normalmente se cargan desde el <strong>Panel Combustible</strong>. Asegurate de que la carga acá no genere doble registro.'
+         +  '</div>';
+  }
+  if (meta.afecta === 'despachos') {
+    html += '<div style="margin-top:4px;color:#1e40af;background:#dbeafe;padding:4px 6px;border-radius:4px;font-size:11px">'
+         +  'ℹ El módulo de Despachos todavía está en desarrollo. Por ahora suma al stock simple.'
+         +  '</div>';
+  }
+
+  info.innerHTML = html;
+  info.style.display = '';
 }
 
 // Regenerar los inputs de códigos de pañol según la cantidad ingresada.
