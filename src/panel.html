@@ -22,15 +22,15 @@ nav{width:230px;flex-shrink:0;background:var(--nav);display:flex;flex-direction:
 .logo{padding:0;border-bottom:1px solid rgba(255,255,255,.1);margin-bottom:8px;background:#fff}
 .logo img{width:100%;max-width:100%;display:block;padding:16px 20px 12px;filter:none;opacity:1}
 .logo-tag{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:rgba(255,255,255,.4);padding:8px 20px;background:var(--nav2)}
-.ng{padding:10px 20px 3px;font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:rgba(255,255,255,.3)}
-.ni{display:flex;align-items:center;gap:10px;padding:8px 20px;cursor:pointer;color:rgba(255,255,255,.65);transition:all .15s;border-left:3px solid transparent;font-size:11px;text-transform:uppercase;letter-spacing:.05em}
+.ng{padding:10px 20px 3px;font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:rgba(255,255,255,.3);flex-shrink:0}
+.ni{display:flex;align-items:center;gap:10px;padding:8px 20px;cursor:pointer;color:rgba(255,255,255,.65);transition:all .15s;border-left:3px solid transparent;font-size:11px;text-transform:uppercase;letter-spacing:.05em;flex-shrink:0}
 .ni:hover{color:#fff;background:rgba(255,255,255,.08)}
 .ni.on{color:#fff;border-left-color:var(--gold);background:rgba(255,255,255,.12)}
-.ni-grp{display:flex;align-items:center;justify-content:space-between;padding:8px 20px;cursor:pointer;color:rgba(255,255,255,.85);transition:all .15s;font-size:11px;text-transform:uppercase;letter-spacing:.05em;font-weight:600;user-select:none}
+.ni-grp{display:flex;align-items:center;justify-content:space-between;padding:8px 20px;cursor:pointer;color:rgba(255,255,255,.85);transition:all .15s;font-size:11px;text-transform:uppercase;letter-spacing:.05em;font-weight:600;user-select:none;flex-shrink:0}
 .ni-grp:hover{color:#fff;background:rgba(255,255,255,.05)}
 .ni-caret{font-size:9px;transition:transform .2s;color:rgba(255,255,255,.4);margin-left:6px}
 .ni-grp.collapsed .ni-caret{transform:rotate(-90deg)}
-.ni-grp-items{overflow:hidden}
+.ni-grp-items{flex-shrink:0}
 .ni-grp.collapsed + .ni-grp-items{display:none}
 .ni-grp-items .ni{padding-left:36px;font-size:10.5px;color:rgba(255,255,255,.55)}
 .dot{width:6px;height:6px;border-radius:50%;flex-shrink:0;background:rgba(255,255,255,.3)}
@@ -1276,6 +1276,17 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   <div class="pa-card"><div class="pa-card-title">Órdenes pendientes</div><div class="pa-stat" id="pad-ordenes">—</div></div>
   <div class="pa-card"><div class="pa-card-title">Costo campaña</div><div class="pa-stat" id="pad-costo">—</div></div>
 </div>
+
+<!-- Clima Carpinteria -->
+<div class="pa-card" style="margin-bottom:16px" id="pad-clima-card">
+  <div class="pa-card-title" style="display:flex;justify-content:space-between;align-items:center">
+    <span>🌤️ Clima — Carpinteria, San Juan</span>
+    <span id="pad-clima-update" style="font-size:11px;color:var(--mut);font-weight:400"></span>
+  </div>
+  <div id="pad-clima-cont"><div class="emp" style="padding:16px">Cargando clima...</div></div>
+  <div id="pad-clima-smn-cont"></div>
+</div>
+
 <div class="pa-grid2">
   <div class="pa-card"><div class="pa-card-title">⚠️ Insumos bajo stock mínimo</div><div id="pad-bajo-stock"><div class="emp">Cargando...</div></div></div>
   <div class="pa-card"><div class="pa-card-title">📋 Órdenes emitidas</div><div id="pad-ordenes-lista"><div class="emp">Cargando...</div></div></div>
@@ -6945,6 +6956,143 @@ function paLoadDash(){
     var el=document.getElementById('pad-ordenes-lista');var data=r.data||[];
     if(!data.length){el.innerHTML='<div class="emp" style="padding:12px">Sin órdenes pendientes</div>';return;}
     el.innerHTML=data.slice(0,5).map(function(o){return'<div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--bor);font-size:13px;cursor:pointer" onclick="paVerOrden('+o.id+')"><span>'+o.nro_orden+' — '+(o.tipo_aplicacion||'')+'</span><span class="pa-badge pa-azul-bg">'+paFecha(o.fecha_orden)+'</span></div>';}).join('');
+  });
+  paLoadClima();
+}
+
+// ── CLIMA Carpinteria, San Juan (Open-Meteo, gratis sin API key) ──
+function paClimaIcon(code){
+  if(code===0)return'☀️';
+  if(code===1)return'🌤️';
+  if(code===2)return'⛅';
+  if(code===3)return'☁️';
+  if(code===45||code===48)return'🌫️';
+  if(code>=51&&code<=57)return'🌦️';
+  if(code>=61&&code<=67)return'🌧️';
+  if(code>=71&&code<=77)return'❄️';
+  if(code>=80&&code<=82)return'🌧️';
+  if(code>=85&&code<=86)return'🌨️';
+  if(code>=95)return'⛈️';
+  return'🌡️';
+}
+function paClimaDesc(code){
+  var m={0:'Despejado',1:'Mayormente despejado',2:'Parcialmente nublado',3:'Nublado',
+    45:'Niebla',48:'Niebla con escarcha',51:'Llovizna leve',53:'Llovizna',55:'Llovizna intensa',
+    56:'Llovizna helada',57:'Llovizna helada intensa',61:'Lluvia leve',63:'Lluvia',65:'Lluvia intensa',
+    66:'Lluvia helada',67:'Lluvia helada intensa',71:'Nieve leve',73:'Nieve',75:'Nieve intensa',
+    77:'Granos de nieve',80:'Chubascos leves',81:'Chubascos',82:'Chubascos intensos',
+    85:'Chubascos de nieve',86:'Chubascos de nieve intensos',95:'Tormenta',96:'Tormenta con granizo',99:'Tormenta con granizo intenso'};
+  return m[code]||'—';
+}
+function paClimaDirViento(deg){
+  if(deg==null)return'';
+  var dirs=['N','NE','E','SE','S','SO','O','NO'];
+  return dirs[Math.round(((deg%360)/45))%8];
+}
+function paClimaDia(iso){
+  var d=new Date(iso+'T12:00:00');
+  var hoy=new Date();hoy.setHours(0,0,0,0);
+  var diff=Math.round((d-hoy)/86400000);
+  if(diff===0)return'Hoy';
+  if(diff===1)return'Mañ.';
+  var dias=['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'];
+  return dias[d.getDay()];
+}
+
+function paLoadClima(){
+  var el=document.getElementById('pad-clima-cont');
+  if(!el)return;
+  var url='https://api.open-meteo.com/v1/forecast?latitude=-31.7995&longitude=-68.5618'
+    +'&current=temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m,wind_direction_10m'
+    +'&daily=temperature_2m_max,temperature_2m_min,precipitation_sum,precipitation_probability_max,weather_code,wind_speed_10m_max'
+    +'&timezone=America%2FArgentina%2FBuenos_Aires&forecast_days=5';
+  fetch(url).then(function(r){return r.json();}).then(function(d){
+    if(!d||!d.current||!d.daily){el.innerHTML='<div class="emp" style="padding:16px">No se pudo cargar el clima</div>';return;}
+    var c=d.current,dl=d.daily;
+    var actual=
+      '<div style="display:flex;align-items:center;gap:14px;padding:6px 0">'
+      +'<div style="font-size:44px;line-height:1">'+paClimaIcon(c.weather_code)+'</div>'
+      +'<div style="flex:1">'
+        +'<div style="font-size:30px;font-weight:600;line-height:1.1">'+Math.round(c.temperature_2m)+'°<span style="font-size:14px;color:var(--mut);font-weight:400;margin-left:6px">'+paClimaDesc(c.weather_code)+'</span></div>'
+        +'<div style="font-size:12px;color:var(--mut);margin-top:6px">Sensación '+Math.round(c.apparent_temperature)+'° · Humedad '+c.relative_humidity_2m+'% · 💨 '+Math.round(c.wind_speed_10m)+' km/h '+paClimaDirViento(c.wind_direction_10m)+'</div>'
+      +'</div>'
+      +'</div>';
+    var diasHtml='';
+    for(var i=1;i<dl.time.length;i++){
+      var prob=dl.precipitation_probability_max[i]||0;
+      var mm=dl.precipitation_sum[i]||0;
+      var probColor=prob>=70?'#dc2626':prob>=40?'#f59e0b':'var(--mut)';
+      diasHtml+=
+        '<div style="flex:1;text-align:center;padding:10px 6px;background:var(--bg);border:1px solid var(--bor);border-radius:8px">'
+        +'<div style="font-size:11px;color:var(--mut);text-transform:uppercase;letter-spacing:.05em;font-weight:600">'+paClimaDia(dl.time[i])+'</div>'
+        +'<div style="font-size:24px;margin:4px 0">'+paClimaIcon(dl.weather_code[i])+'</div>'
+        +'<div style="font-size:13px;font-weight:600">'+Math.round(dl.temperature_2m_max[i])+'°<span style="color:var(--mut);font-weight:400">/'+Math.round(dl.temperature_2m_min[i])+'°</span></div>'
+        +'<div style="font-size:10px;color:'+probColor+';margin-top:3px">💧 '+prob+'%'+(mm>0?' · '+mm.toFixed(1)+'mm':'')+'</div>'
+        +'</div>';
+    }
+    // Alertas
+    var alertas=[];
+    for(var j=0;j<dl.time.length;j++){
+      if(dl.temperature_2m_min[j]<=3){
+        alertas.push('🥶 <b>Riesgo de helada</b> '+paClimaDia(dl.time[j])+' (mín. '+Math.round(dl.temperature_2m_min[j])+'°)');
+      }
+      if(dl.wind_speed_10m_max[j]>=30){
+        alertas.push('💨 <b>Viento fuerte</b> '+paClimaDia(dl.time[j])+' ('+Math.round(dl.wind_speed_10m_max[j])+' km/h) — limitar aplicaciones');
+      }
+    }
+    var alertasHtml=alertas.length
+      ?'<div style="margin-top:12px;padding:10px 12px;background:#fef3c7;border-left:3px solid #f59e0b;border-radius:4px;font-size:12px;color:#78350f">'+alertas.slice(0,3).join('<br>')+'</div>'
+      :'';
+    el.innerHTML=
+      '<div style="display:grid;grid-template-columns:minmax(220px,1fr) 2fr;gap:16px;align-items:center">'
+      +'<div>'+actual+'</div>'
+      +'<div style="display:flex;gap:8px">'+diasHtml+'</div>'
+      +'</div>'+alertasHtml;
+    // Hora de actualización
+    var hh=new Date();
+    var pad=function(n){return n<10?'0'+n:n;};
+    document.getElementById('pad-clima-update').textContent='Actualizado '+pad(hh.getHours())+':'+pad(hh.getMinutes());
+  }).catch(function(){
+    el.innerHTML='<div class="emp" style="padding:16px">No se pudo conectar al servicio de clima</div>';
+  });
+  // Estación SMN en paralelo (vía proxy del backend)
+  paLoadClimaSMN();
+}
+
+// ── SMN: estación oficial más cercana (proxy en /api/pa/clima/smn) ──
+function paClimaFechaSMN(ts){
+  if(!ts) return '';
+  var d = new Date(ts*1000);
+  var pad=function(n){return n<10?'0'+n:n;};
+  return pad(d.getDate())+'/'+pad(d.getMonth()+1)+' '+pad(d.getHours())+':'+pad(d.getMinutes());
+}
+function paLoadClimaSMN(){
+  var el = document.getElementById('pad-clima-smn-cont');
+  if(!el) return;
+  paF('/api/pa/clima/smn').then(function(r){
+    if(!r || !r.ok || !r.data) { el.innerHTML=''; return; }
+    var d = r.data, w = d.weather || {};
+    var staleTag = r.stale ? '<span style="color:#dc2626;font-size:10px;margin-left:6px">⚠️ datos posiblemente desactualizados</span>' : '';
+    var medido = d.updated ? ' · Medido '+paClimaFechaSMN(d.updated) : '';
+    var tempStr = (w.temp!=null) ? Math.round(w.temp)+'°' : '—';
+    var partes = [];
+    if (w.description) partes.push(w.description);
+    if (w.humidity!=null) partes.push('Hum '+w.humidity+'%');
+    if (w.wind_speed!=null) partes.push('💨 '+w.wind_speed+' km/h'+(w.wing_deg?' '+w.wing_deg:''));
+    if (w.pressure!=null) partes.push('P '+w.pressure+' hPa');
+    el.innerHTML =
+      '<div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--bor)">'
+      +'<div style="font-size:11px;color:var(--mut);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">'
+      +'📍 Estación oficial SMN: <b style="color:var(--txt)">'+d.estacion+'</b> <span style="font-weight:400">(a ~'+d.distancia_km+' km)</span>'
+      +staleTag+'</div>'
+      +'<div style="font-size:13px;color:var(--txt)">'
+      +'<span style="font-size:18px;font-weight:600">'+tempStr+'</span>'
+      +'<span style="color:var(--mut);margin-left:10px">'+partes.join(' · ')+'</span>'
+      +'<span style="color:var(--mut);font-size:11px;margin-left:10px">'+medido+'</span>'
+      +'</div>'
+      +'</div>';
+  }).catch(function(){
+    el.innerHTML = '';  // si falla, simplemente no mostramos nada
   });
 }
 
