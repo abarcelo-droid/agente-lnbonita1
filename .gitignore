@@ -2,9 +2,3 @@ desktop.ini
 Thumbs.db 
 .DS_Store 
 *.tmp
-.env
-.env.local
-.env.*.local
-node_modules/
-*.log
-data/
