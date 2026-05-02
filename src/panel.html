@@ -7164,15 +7164,119 @@ function paIrAClima(){
 
 // Cache de forecast en memoria del frontend (evita llamadas duplicadas
 // cuando widget + dashboard + sección piden lo mismo en pocos segundos).
+// Helpers para describir clima sin depender del backend
+// Códigos WMO: https://open-meteo.com/en/docs
+function paClimaWMO(code){
+  if (code === 0) return { txt: 'Despejado', emoji: '☀️' };
+  if (code === 1) return { txt: 'Mayormente despejado', emoji: '🌤️' };
+  if (code === 2) return { txt: 'Parcialmente nublado', emoji: '⛅' };
+  if (code === 3) return { txt: 'Nublado', emoji: '☁️' };
+  if (code === 45 || code === 48) return { txt: 'Niebla', emoji: '🌫️' };
+  if (code >= 51 && code <= 57) return { txt: 'Llovizna', emoji: '🌦️' };
+  if (code >= 61 && code <= 67) return { txt: 'Lluvia', emoji: '🌧️' };
+  if (code >= 71 && code <= 77) return { txt: 'Nieve', emoji: '🌨️' };
+  if (code >= 80 && code <= 82) return { txt: 'Chubascos', emoji: '🌧️' };
+  if (code >= 85 && code <= 86) return { txt: 'Chubascos de nieve', emoji: '🌨️' };
+  if (code >= 95 && code <= 99) return { txt: 'Tormenta', emoji: '⛈️' };
+  return { txt: '—', emoji: '🌤️' };
+}
+function paClimaDir(deg){
+  if (deg == null) return '';
+  return ['N','NE','E','SE','S','SO','O','NO'][Math.round(((deg % 360) / 45)) % 8];
+}
+
+// Pega directo a Open-Meteo (sin backend). Mismo formato que el endpoint
+// del backend para mantener compatibilidad con widget/sección/tooltip.
 function paFetchForecast(forzar){
   if (!forzar && PA._climaForecast && (Date.now() - PA._climaForecastTs) < 5*60*1000) {
     return Promise.resolve(PA._climaForecast);
   }
-  return paF('/api/pa/clima/forecast').then(function(r){
-    if (!r.ok) throw new Error(r.error||'no clima');
-    PA._climaForecast = r.data;
+  var url = 'https://api.open-meteo.com/v1/forecast'
+    + '?latitude=-31.7995&longitude=-68.5618'
+    + '&current=temperature_2m,relative_humidity_2m,apparent_temperature,is_day,weather_code,wind_speed_10m,wind_direction_10m,precipitation'
+    + '&hourly=temperature_2m,precipitation_probability,precipitation,weather_code,wind_speed_10m'
+    + '&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_sum,precipitation_probability_max,wind_speed_10m_max,et0_fao_evapotranspiration'
+    + '&timezone=America%2FArgentina%2FBuenos_Aires&forecast_days=7';
+  return fetch(url).then(function(r){ return r.json(); }).then(function(j){
+    if (!j || !j.current) throw new Error('Open-Meteo respuesta inválida');
+    var cur = j.current;
+    var w = paClimaWMO(cur.weather_code);
+    var actual = {
+      temp: cur.temperature_2m,
+      sensacion: cur.apparent_temperature,
+      humedad: cur.relative_humidity_2m,
+      viento_kmh: cur.wind_speed_10m,
+      viento_dir: paClimaDir(cur.wind_direction_10m),
+      lluvia_mm: cur.precipitation,
+      es_dia: cur.is_day === 1,
+      codigo: cur.weather_code,
+      descripcion: w.txt,
+      emoji: w.emoji
+    };
+    // Hourly: próximas 24 hs desde ahora
+    var ahora = new Date();
+    var hourly = [];
+    if (j.hourly && j.hourly.time) {
+      for (var i = 0; i < j.hourly.time.length && hourly.length < 24; i++) {
+        var t = new Date(j.hourly.time[i]);
+        if (t < ahora) continue;
+        hourly.push({
+          hora: j.hourly.time[i],
+          temp: j.hourly.temperature_2m[i],
+          prob: j.hourly.precipitation_probability[i],
+          mm: j.hourly.precipitation[i],
+          emoji: paClimaWMO(j.hourly.weather_code[i]).emoji,
+          viento_kmh: j.hourly.wind_speed_10m[i]
+        });
+      }
+    }
+    // Daily: 7 días
+    var dias = [];
+    if (j.daily && j.daily.time) {
+      for (var k = 0; k < j.daily.time.length; k++) {
+        var wmo = paClimaWMO(j.daily.weather_code[k]);
+        dias.push({
+          fecha: j.daily.time[k],
+          codigo: j.daily.weather_code[k],
+          descripcion: wmo.txt,
+          emoji: wmo.emoji,
+          tmax: j.daily.temperature_2m_max[k],
+          tmin: j.daily.temperature_2m_min[k],
+          lluvia_mm: j.daily.precipitation_sum[k],
+          lluvia_prob: j.daily.precipitation_probability_max[k],
+          viento_max: j.daily.wind_speed_10m_max[k],
+          et0: j.daily.et0_fao_evapotranspiration[k]
+        });
+      }
+    }
+    // Alertas: heladas <3°, viento >30 km/h, lluvia >10mm
+    var alertas = [];
+    dias.forEach(function(d, idx){
+      var fechaTxt = idx === 0 ? 'hoy'
+                   : idx === 1 ? 'mañana'
+                   : new Date(d.fecha + 'T12:00:00').toLocaleDateString('es-AR', { weekday: 'long' });
+      if (d.tmin <= 3) {
+        alertas.push({ tipo: 'helada', nivel: 'critica',
+          texto: '🥶 Helada ' + fechaTxt + ' — mínima ' + d.tmin.toFixed(1) + '°C', dia: idx });
+      }
+      if (d.viento_max >= 30) {
+        alertas.push({ tipo: 'viento', nivel: 'media',
+          texto: '💨 Viento fuerte ' + fechaTxt + ' — hasta ' + d.viento_max.toFixed(0) + ' km/h (mala para aplicaciones)', dia: idx });
+      }
+      if (d.lluvia_mm >= 10) {
+        alertas.push({ tipo: 'lluvia', nivel: 'info',
+          texto: '🌧️ Lluvia ' + fechaTxt + ' — ' + d.lluvia_mm.toFixed(0) + ' mm esperados', dia: idx });
+      }
+    });
+    var data = {
+      localidad: 'Carpintería, San Juan',
+      lat: -31.7995, lng: -68.5618,
+      actualizado: new Date().toISOString(),
+      actual: actual, hourly: hourly, dias: dias, alertas: alertas
+    };
+    PA._climaForecast = data;
     PA._climaForecastTs = Date.now();
-    return r.data;
+    return data;
   });
 }
 
@@ -7180,6 +7284,7 @@ function paFetchSMN(forzar){
   if (!forzar && PA._climaSMN && (Date.now() - PA._climaSMNTs) < 5*60*1000) {
     return Promise.resolve(PA._climaSMN);
   }
+  // El endpoint /smn sí funciona en el backend
   return paF('/api/pa/clima/smn').then(function(r){
     if (!r.ok) throw new Error(r.error||'no smn');
     PA._climaSMN = r.data;
