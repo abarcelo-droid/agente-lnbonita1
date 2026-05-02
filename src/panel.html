@@ -119,11 +119,26 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     <img src="/static/logo.jpg" alt="La Nina Bonita">
     <div class="logo-tag">Panel de control</div>
   </div>
+
+  <!-- Widget de clima arriba del sidebar (siempre visible). Click → sección Clima -->
+  <div id="sb-clima" onclick="paIrAClima()" title="Ver clima detallado"
+       style="margin:6px 12px 8px;padding:8px 10px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.08);border-radius:8px;cursor:pointer;display:flex;align-items:center;gap:8px;color:rgba(255,255,255,.85);transition:background .15s"
+       onmouseover="this.style.background='rgba(255,255,255,.10)'"
+       onmouseout="this.style.background='rgba(255,255,255,.06)'">
+    <div id="sb-clima-emoji" style="font-size:22px;line-height:1">🌤️</div>
+    <div style="flex:1;min-width:0">
+      <div id="sb-clima-temp" style="font-size:13px;font-weight:700;color:#fff;line-height:1.1">—°</div>
+      <div id="sb-clima-sub" style="font-size:10px;color:rgba(255,255,255,.55);line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Carpintería</div>
+    </div>
+    <div id="sb-clima-alert" style="display:none;font-size:14px" title="Hay alertas activas">⚠️</div>
+  </div>
+
   <div class="ng" style="color:rgba(74,222,128,.5)">Producción Agrícola</div>
   <div class="ni" data-sec="pa-dashboard"><span class="dot da"></span>Inicio</div>
 
   <div class="ni-grp" data-grp="pa-informes">Informes<span class="ni-caret">▾</span></div>
   <div class="ni-grp-items">
+    <div class="ni" data-sec="pa-clima"><span class="dot da"></span>🌤️ Clima</div>
     <div class="ni" data-sec="pa-calendario"><span class="dot dc"></span>Calendario Agrícola</div>
     <div class="ni" data-sec="pa-costos"><span class="dot da"></span>Costos por Lote</div>
   </div>
@@ -1291,6 +1306,42 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   <div class="pa-card"><div class="pa-card-title">⚠️ Insumos bajo stock mínimo</div><div id="pad-bajo-stock"><div class="emp">Cargando...</div></div></div>
   <div class="pa-card"><div class="pa-card-title">📋 Órdenes emitidas</div><div id="pad-ordenes-lista"><div class="emp">Cargando...</div></div></div>
 </div>
+</div>
+
+<!-- ─── PA CLIMA ─────────────────────────────────────────────── -->
+<div class="sec" id="sec-pa-clima">
+  <div class="ph">
+    <div>
+      <div class="ph-t">🌤️ Clima</div>
+      <div class="ph-s">Carpintería, San Juan — Open-Meteo + estación SMN oficial</div>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center">
+      <span id="pa-clima-actualizado" style="font-size:11px;color:var(--mut)">—</span>
+      <button class="btn bo bs" onclick="paLoadClimaSeccion()" style="padding:6px 10px;font-size:12px">🔄 Actualizar</button>
+    </div>
+  </div>
+
+  <!-- ALERTAS -->
+  <div id="pa-clima-alertas" style="margin:8px 0 14px"></div>
+
+  <!-- HOY (card grande) -->
+  <div id="pa-clima-hoy" style="background:linear-gradient(135deg,#f0f4ff 0%,#fef3c7 100%);border:1px solid var(--bor);border-radius:12px;padding:18px;margin-bottom:18px">
+    <div class="emp" style="text-align:center">Cargando clima…</div>
+  </div>
+
+  <!-- 7 DÍAS -->
+  <div style="font-size:11px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.06em;margin:10px 0 6px">Pronóstico 7 días</div>
+  <div id="pa-clima-dias" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;margin-bottom:18px"></div>
+
+  <!-- HORAS -->
+  <div style="font-size:11px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.06em;margin:10px 0 6px">Próximas 24 horas</div>
+  <div id="pa-clima-horas" style="display:flex;gap:6px;overflow-x:auto;padding-bottom:8px;margin-bottom:18px"></div>
+
+  <!-- ESTACIÓN SMN -->
+  <div style="font-size:11px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.06em;margin:10px 0 6px">Estación oficial SMN</div>
+  <div id="pa-clima-smn" style="background:var(--sur);border:1px solid var(--bor);border-radius:10px;padding:14px">
+    <div class="emp">Cargando…</div>
+  </div>
 </div>
 
 <!-- ─── PA CALENDARIO ─────────────────────────────────────────── -->
@@ -2593,6 +2644,7 @@ function loadSec(s) {
     'ab-mandata': mdCargar,
     'ab-gastos': abCargarGastos,
     'pa-dashboard':  function(){ paLoadDash(); },
+    'pa-clima':      function(){ paLoadClimaSeccion(); },
     'pa-calendario': function(){ paLoadCalendario(); },
     'pa-insumos':    function(){ paLoadInsumos(); },
     'pa-compras':    function(){ paLoadCompras(); },
@@ -6935,6 +6987,10 @@ function paInit(){
   });
   paF('/api/pa/insumos').then(function(r){PA.insumos=r.data||[];});
   paF('/api/pa/lotes').then(function(r){PA.lotes=r.data||[];});
+
+  // Widget de clima del sidebar: cargar inmediato + refresh cada 30 min
+  paActualizarWidgetClima();
+  setInterval(paActualizarWidgetClima, 30 * 60 * 1000);
 }
 
 function paLoadDash(){
@@ -7093,6 +7149,166 @@ function paLoadClimaSMN(){
       +'</div>';
   }).catch(function(){
     el.innerHTML = '';  // si falla, simplemente no mostramos nada
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// CLIMA — Widget arriba sidebar + Sección dedicada + Tooltip mapa lotes.
+// Reusa el endpoint /api/pa/clima/forecast del backend (cache en server).
+// ─────────────────────────────────────────────────────────────────────────
+function paIrAClima(){
+  var item = document.querySelector('.ni[data-sec="pa-clima"]');
+  if (item) item.click();
+  else if (typeof loadSec === 'function') loadSec('pa-clima');
+}
+
+// Cache de forecast en memoria del frontend (evita llamadas duplicadas
+// cuando widget + dashboard + sección piden lo mismo en pocos segundos).
+function paFetchForecast(forzar){
+  if (!forzar && PA._climaForecast && (Date.now() - PA._climaForecastTs) < 5*60*1000) {
+    return Promise.resolve(PA._climaForecast);
+  }
+  return paF('/api/pa/clima/forecast').then(function(r){
+    if (!r.ok) throw new Error(r.error||'no clima');
+    PA._climaForecast = r.data;
+    PA._climaForecastTs = Date.now();
+    return r.data;
+  });
+}
+
+function paFetchSMN(forzar){
+  if (!forzar && PA._climaSMN && (Date.now() - PA._climaSMNTs) < 5*60*1000) {
+    return Promise.resolve(PA._climaSMN);
+  }
+  return paF('/api/pa/clima/smn').then(function(r){
+    if (!r.ok) throw new Error(r.error||'no smn');
+    PA._climaSMN = r.data;
+    PA._climaSMNTs = Date.now();
+    return r.data;
+  });
+}
+
+// Widget arriba del sidebar
+function paActualizarWidgetClima(){
+  paFetchForecast().then(function(d){
+    var a = d.actual || {};
+    var emoji = a.emoji || '🌤️';
+    var temp = a.temp != null ? Math.round(a.temp) + '°' : '—°';
+    var sub = (a.descripcion || 'Carpintería') + (a.viento_kmh != null ? ' · 💨 ' + Math.round(a.viento_kmh) : '');
+    var elE = document.getElementById('sb-clima-emoji');
+    var elT = document.getElementById('sb-clima-temp');
+    var elS = document.getElementById('sb-clima-sub');
+    var elA = document.getElementById('sb-clima-alert');
+    if (elE) elE.textContent = emoji;
+    if (elT) elT.textContent = temp;
+    if (elS) elS.textContent = sub;
+    if (elA) elA.style.display = (d.alertas && d.alertas.length > 0) ? '' : 'none';
+  }).catch(function(){
+    // Silencio: si falla, el widget queda con el placeholder
+  });
+}
+
+// Sección Clima completa
+function paLoadClimaSeccion(){
+  var elHoy = document.getElementById('pa-clima-hoy');
+  var elDias = document.getElementById('pa-clima-dias');
+  var elHoras = document.getElementById('pa-clima-horas');
+  var elAl = document.getElementById('pa-clima-alertas');
+  var elSMN = document.getElementById('pa-clima-smn');
+  if (elHoy) elHoy.innerHTML = '<div class="emp" style="text-align:center;padding:20px">Cargando…</div>';
+  if (elDias) elDias.innerHTML = '';
+  if (elHoras) elHoras.innerHTML = '';
+  if (elAl) elAl.innerHTML = '';
+  if (elSMN) elSMN.innerHTML = '<div class="emp">Cargando…</div>';
+
+  paFetchForecast(true).then(function(d){
+    var a = d.actual || {};
+
+    if (elHoy) elHoy.innerHTML =
+      '<div style="display:flex;align-items:flex-start;gap:24px;flex-wrap:wrap">'
+        +'<div style="text-align:center">'
+          +'<div style="font-size:72px;line-height:1">'+(a.emoji||'🌤️')+'</div>'
+          +'<div style="font-size:13px;color:var(--mut);margin-top:4px">'+(a.descripcion||'')+'</div>'
+        +'</div>'
+        +'<div style="flex:1;min-width:160px">'
+          +'<div style="font-size:56px;font-weight:700;line-height:1">'+(a.temp!=null?Math.round(a.temp)+'°':'—')+'</div>'
+          +'<div style="font-size:13px;color:var(--mut);margin-top:6px">Sensación '+(a.sensacion!=null?Math.round(a.sensacion)+'°':'—')+'</div>'
+        +'</div>'
+        +'<div style="display:grid;grid-template-columns:repeat(2,auto);gap:6px 18px;font-size:13px;align-content:start">'
+          +'<div style="color:var(--mut)">💧 Humedad</div><div><strong>'+(a.humedad!=null?a.humedad+'%':'—')+'</strong></div>'
+          +'<div style="color:var(--mut)">💨 Viento</div><div><strong>'+(a.viento_kmh!=null?Math.round(a.viento_kmh)+' km/h':'—')+'</strong> '+(a.viento_dir||'')+'</div>'
+          +'<div style="color:var(--mut)">🌧️ Lluvia ahora</div><div><strong>'+(a.lluvia_mm!=null?a.lluvia_mm.toFixed(1)+' mm':'—')+'</strong></div>'
+          +'<div style="color:var(--mut)">📍 Localidad</div><div><strong>Carpintería, SJ</strong></div>'
+        +'</div>'
+      +'</div>';
+
+    if (elAl) {
+      if (d.alertas && d.alertas.length > 0) {
+        elAl.innerHTML = d.alertas.map(function(al){
+          var bg = al.nivel === 'critica' ? '#fee2e2'
+                 : al.nivel === 'media'   ? '#fef3c7'
+                 :                          '#dbeafe';
+          var bd = al.nivel === 'critica' ? '#dc2626'
+                 : al.nivel === 'media'   ? '#f59e0b'
+                 :                          '#3b82f6';
+          return '<div style="background:'+bg+';border-left:3px solid '+bd+';padding:8px 12px;margin-bottom:6px;border-radius:6px;font-size:13px">'+al.texto+'</div>';
+        }).join('');
+      } else {
+        elAl.innerHTML = '<div style="color:var(--mut);font-size:12px;font-style:italic;padding:4px 0">✅ Sin alertas activas</div>';
+      }
+    }
+
+    if (elDias) elDias.innerHTML = (d.dias||[]).map(function(dia, idx){
+      var fecha = new Date(dia.fecha + 'T12:00:00');
+      var nom = idx === 0 ? 'HOY' : ['DOM','LUN','MAR','MIÉ','JUE','VIE','SÁB'][fecha.getDay()];
+      var fechaTxt = String(fecha.getDate()).padStart(2,'0')+'/'+String(fecha.getMonth()+1).padStart(2,'0');
+      return '<div style="background:var(--sur);border:1px solid var(--bor);border-radius:10px;padding:10px;text-align:center">'
+        +'<div style="font-size:11px;color:var(--mut);font-weight:700">'+nom+'</div>'
+        +'<div style="font-size:10px;color:var(--mut);margin-bottom:4px">'+fechaTxt+'</div>'
+        +'<div style="font-size:34px;line-height:1.1;margin:4px 0">'+dia.emoji+'</div>'
+        +'<div style="font-size:13px;margin-top:4px"><strong>'+Math.round(dia.tmax)+'°</strong> <span style="color:var(--mut)">/ '+Math.round(dia.tmin)+'°</span></div>'
+        +'<div style="font-size:10px;color:#1e40af;margin-top:3px">💧 '+(dia.lluvia_prob||0)+'%'+(dia.lluvia_mm>0?' · '+dia.lluvia_mm.toFixed(1)+'mm':'')+'</div>'
+        +(dia.viento_max>=20?'<div style="font-size:10px;color:#92400e;margin-top:1px">💨 '+Math.round(dia.viento_max)+' km/h</div>':'')
+        +(dia.et0!=null?'<div style="font-size:10px;color:var(--mut);margin-top:2px">ET₀ '+dia.et0.toFixed(1)+' mm</div>':'')
+        +'</div>';
+    }).join('');
+
+    if (elHoras) elHoras.innerHTML = (d.hourly||[]).map(function(h){
+      var hh = new Date(h.hora);
+      return '<div style="flex-shrink:0;background:var(--sur);border:1px solid var(--bor);border-radius:8px;padding:8px;min-width:64px;text-align:center">'
+        +'<div style="font-size:10px;color:var(--mut);font-weight:600">'+String(hh.getHours()).padStart(2,'0')+':00</div>'
+        +'<div style="font-size:18px;line-height:1.1;margin:3px 0">'+h.emoji+'</div>'
+        +'<div style="font-size:12px;font-weight:600">'+Math.round(h.temp)+'°</div>'
+        +(h.prob>10?'<div style="font-size:9px;color:#1e40af;margin-top:1px">💧'+h.prob+'%</div>':'')
+        +'</div>';
+    }).join('');
+
+    var ts = new Date(d.actualizado);
+    var actualizadoEl = document.getElementById('pa-clima-actualizado');
+    if (actualizadoEl) actualizadoEl.textContent = 'Actualizado ' + ts.toLocaleTimeString('es-AR', {hour:'2-digit',minute:'2-digit'});
+  }).catch(function(e){
+    if (elHoy) elHoy.innerHTML = '<div class="emp" style="text-align:center;padding:20px;color:var(--err)">Error al cargar el clima: '+(e.message||'')+'</div>';
+  });
+
+  // SMN aparte
+  paFetchSMN(true).then(function(s){
+    var w = s.weather || {};
+    if (elSMN) elSMN.innerHTML =
+      '<div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">'
+        +'<div>'
+          +'<div style="font-size:13px;font-weight:700">📍 '+s.estacion+' <span style="font-size:11px;color:var(--mut);font-weight:400">('+s.provincia+', a ~'+s.distancia_km+' km)</span></div>'
+          +'<div style="font-size:11px;color:var(--mut);margin-top:2px">'+(s.updated||'')+'</div>'
+        +'</div>'
+        +'<div style="margin-left:auto;display:flex;gap:14px;font-size:13px;flex-wrap:wrap">'
+          +(w.temp!=null?'<div><strong>'+Math.round(w.temp)+'°</strong></div>':'')
+          +(w.descripcion?'<div style="color:var(--mut)">'+w.descripcion+'</div>':'')
+          +(w.humedad!=null?'<div>💧 '+w.humedad+'%</div>':'')
+          +(w.viento_kmh!=null?'<div>💨 '+w.viento_kmh+' km/h '+(w.viento_dir||'')+'</div>':'')
+          +(w.presion!=null?'<div>📊 '+w.presion+' hPa</div>':'')
+        +'</div>'
+      +'</div>';
+  }).catch(function(){
+    if (elSMN) elSMN.innerHTML = '<div class="emp" style="padding:8px">SMN no disponible</div>';
   });
 }
 
@@ -11270,6 +11486,26 @@ function paRenderMapaGeneral() {
   var campañaNom = campAct ? campAct.nombre : null;
   var bounds = [];
   var cultivosUsados = {};
+
+  // Pre-cargar clima en background. Como todos los lotes están en la misma
+  // finca (Carpintería), usamos un único dato de clima compartido para los
+  // tooltips. Si todavía no llegó, se renderiza sin clima y al llegar se re-renderiza.
+  var climaTxt = '';
+  if (PA._climaForecast && PA._climaForecast.actual) {
+    var aClima = PA._climaForecast.actual;
+    climaTxt = '<div style="margin-top:4px;padding-top:4px;border-top:1px dashed rgba(255,255,255,.3);font-size:11px">'
+      + (aClima.emoji||'🌤️') + ' ' + (aClima.temp!=null?Math.round(aClima.temp)+'°':'')
+      + ' · ' + (aClima.descripcion||'')
+      + (aClima.viento_kmh!=null?' · 💨 '+Math.round(aClima.viento_kmh)+' km/h':'')
+      + '</div>';
+  } else {
+    paFetchForecast().then(function(){
+      if (document.getElementById('sec-pa-lotes') && document.getElementById('sec-pa-lotes').classList.contains('on')) {
+        paRenderMapaGeneral();
+      }
+    }).catch(function(){});
+  }
+
   lotes.forEach(function(l){
     try {
       var geo = typeof l.poligono_geojson === 'string' ? JSON.parse(l.poligono_geojson) : l.poligono_geojson;
@@ -11284,7 +11520,7 @@ function paRenderMapaGeneral() {
       var layer = L.geoJSON(geo, {
         style: { color: color, weight: 2, fillOpacity: 0.45, fillColor: color }
       }).bindTooltip(
-        '<strong>'+l.nombre+'</strong><br>'+(l.finca||'')+'<br>'+(l.hectareas||'?')+' ha — '+cultActual,
+        '<strong>'+l.nombre+'</strong><br>'+(l.finca||'')+'<br>'+(l.hectareas||'?')+' ha — '+cultActual + climaTxt,
         { className:'pa-map-tooltip', sticky: true }
       ).on('click', function(){ paAbrirEditorPoligono(l.id); });
       layer._isPaPoly = true;
