@@ -159,6 +159,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   <div class="ni-grp-items">
     <div class="ni" data-sec="pa-compras"><span class="dot dd"></span>Ingreso de Factura</div>
     <div class="ni" data-sec="pa-electricidad"><span class="dot da"></span>⚡ Electricidad</div>
+    <div class="ni" data-sec="adm-proveedores"><span class="dot da"></span>📋 Padrón Proveedores</div>
   </div>
 
   <div class="ni-grp" data-grp="pa-comerc">Comercialización<span class="ni-caret">▾</span></div>
@@ -2156,6 +2157,105 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
 
 <div id="adm-pc-contenido">
   <div class="emp">Seleccioná un grupo para ver las cuentas</div>
+</div>
+</div>
+
+<!-- ─── ADM: PADRÓN DE PROVEEDORES ──────────────────────────────────── -->
+<div class="sec" id="sec-adm-proveedores">
+<div class="ph">
+  <div>
+    <div class="ph-t">📋 Padrón de Proveedores</div>
+    <div class="ph-s">Maestro de proveedores habilitados para facturación</div>
+  </div>
+  <button class="btn bb" onclick="admProvAbrirNuevo()">+ Nuevo proveedor</button>
+</div>
+<div class="filt" style="margin-bottom:16px">
+  <input type="text" id="adm-prov-buscar" placeholder="🔍 Razón social, CUIT..." oninput="admProvCargar()" style="min-width:240px">
+  <select id="adm-prov-rubro" onchange="admProvCargar()" style="width:auto">
+    <option value="">Todos los rubros</option>
+    <option value="insumos">Insumos agrícolas</option>
+    <option value="servicios">Servicios</option>
+    <option value="transporte">Transporte</option>
+    <option value="construccion">Construcción</option>
+    <option value="combustible">Combustible</option>
+    <option value="otro">Otro</option>
+  </select>
+  <label style="display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--mut);cursor:pointer">
+    <input type="checkbox" id="adm-prov-ver-inact" onchange="admProvCargar()" style="width:auto"> Ver inactivos
+  </label>
+  <button class="btn bo bs" onclick="admProvCargar()">↻</button>
+</div>
+<div class="pa-wrap">
+  <div class="ab-table-wrap">
+    <table class="pa-tbl">
+      <thead><tr>
+        <th>Razón Social</th><th style="width:130px">CUIT</th>
+        <th style="width:100px">Cond. IVA</th><th style="width:110px">Rubro</th>
+        <th style="width:120px">Teléfono</th><th style="width:100px">Cond. Pago</th>
+        <th style="width:70px;text-align:center">Estado</th>
+        <th style="width:110px;text-align:right"></th>
+      </tr></thead>
+      <tbody id="adm-prov-tbody">
+        <tr><td colspan="8" class="emp">Cargando...</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+</div>
+
+<!-- ─── MODAL: Proveedor ADM ─────────────────────────────────────────── -->
+<div class="ab-modal-overlay" id="adm-mb-proveedor">
+<div class="ab-modal" style="width:660px">
+  <div class="mhd">
+    <div><div class="mht" id="adm-prov-modal-tit">Nuevo proveedor</div></div>
+    <button class="mcl" onclick="document.getElementById('adm-mb-proveedor').classList.remove('on')">×</button>
+  </div>
+  <input type="hidden" id="adm-prov-id">
+  <div class="fg">
+    <div class="fl ff"><label>Razón Social *</label><input id="adm-prov-razon" placeholder="Ej: SOLMIX SA"></div>
+    <div class="fl ff"><label>Nombre Comercial</label><input id="adm-prov-nombre-com" placeholder="Ej: Solmix"></div>
+    <div class="fl"><label>CUIT</label><input id="adm-prov-cuit" placeholder="20-12345678-9"></div>
+    <div class="fl"><label>Condición IVA</label>
+      <select id="adm-prov-cond-iva">
+        <option value="responsable_inscripto">Resp. Inscripto</option>
+        <option value="monotributista">Monotributista</option>
+        <option value="exento">Exento</option>
+        <option value="no_responsable">No Responsable</option>
+      </select>
+    </div>
+    <div class="fl ff"><label>Dirección</label><input id="adm-prov-dir" placeholder="Av. Libertador 1234, CABA"></div>
+    <div class="fl"><label>Teléfono</label><input id="adm-prov-tel" placeholder="011 1234-5678"></div>
+    <div class="fl"><label>Email</label><input type="email" id="adm-prov-email" placeholder="contacto@proveedor.com"></div>
+    <div class="fl"><label>Rubro</label>
+      <select id="adm-prov-rubro-modal">
+        <option value="">— Sin especificar —</option>
+        <option value="insumos">Insumos agrícolas</option>
+        <option value="servicios">Servicios</option>
+        <option value="transporte">Transporte</option>
+        <option value="construccion">Construcción</option>
+        <option value="combustible">Combustible</option>
+        <option value="otro">Otro</option>
+      </select>
+    </div>
+    <div class="fl"><label>CBU</label><input id="adm-prov-cbu" placeholder="0000000000000000000000"></div>
+    <div class="fl"><label>Alias CBU</label><input id="adm-prov-alias" placeholder="alias.banco.ejemplo"></div>
+    <div class="fl"><label>Condición de Pago</label>
+      <select id="adm-prov-cond-pago">
+        <option value="">— Sin especificar —</option>
+        <option value="contado">Contado</option>
+        <option value="15_dias">15 días</option>
+        <option value="30_dias">30 días</option>
+        <option value="60_dias">60 días</option>
+        <option value="90_dias">90 días</option>
+      </select>
+    </div>
+    <div class="fl ff"><label>Contacto (persona)</label><input id="adm-prov-contacto" placeholder="Ej: Juan Pérez"></div>
+    <div class="fl ff"><label>Notas</label><textarea id="adm-prov-notas" rows="2"></textarea></div>
+  </div>
+  <div class="ab-modal-footer">
+    <button class="btn bo" onclick="document.getElementById('adm-mb-proveedor').classList.remove('on')">Cancelar</button>
+    <button class="btn bb" onclick="admProvGuardar()">Guardar</button>
+  </div>
 </div>
 </div>
 
@@ -6013,8 +6113,24 @@ function admPcReactivarCuenta(id) {
   + '<div class="ab-modal-overlay" id="adm-mb-cuenta"><div class="ab-modal" style="width:520px"><div class="mhd"><div><div class="mht" id="adm-cu-tit">Nueva cuenta</div></div><button class="mcl" onclick="document.getElementById(\'adm-mb-cuenta\').classList.remove(\'on\')">×</button></div><input type="hidden" id="adm-cu-id"><div class="fg"><div class="fl ff"><label>Sección *</label><select id="adm-cu-seccion" onchange="admPcSugerirCodigo()"></select></div><div class="fl"><label>Código *</label><input id="adm-cu-codigo" placeholder="Ej: 10.01"><div id="adm-cu-codigo-sug" style="font-size:10px;color:var(--mut);margin-top:3px"></div></div><div class="fl ff"><label>Nombre *</label><input id="adm-cu-nombre" placeholder="Ej: Caja pesos"></div><div class="fl"><label>Tipo</label><select id="adm-cu-tipo"><option value="resultado">Resultado (ER)</option><option value="patrimonial">Patrimonial</option></select></div><div class="fl ff" style="display:flex;gap:18px;align-items:center;padding-top:8px"><label style="display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--mut);cursor:pointer"><input type="checkbox" id="adm-cu-lote" style="width:auto"> Permite lote</label><label style="display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--mut);cursor:pointer"><input type="checkbox" id="adm-cu-camp" style="width:auto"> Permite campaña</label></div></div><div class="ab-modal-footer"><button class="btn bo" onclick="document.getElementById(\'adm-mb-cuenta\').classList.remove(\'on\')">Cancelar</button><button class="btn bb" onclick="admPcGuardarCuenta()">Guardar</button></div></div></div>';
   document.body.appendChild(div);
 })();
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 📋 PADRÓN DE PROVEEDORES
+// ═══════════════════════════════════════════════════════════════════════════
+var ADM_PROV_CB = null;
+function admProvApi(path,opts){opts=opts||{};opts.headers=opts.headers||{'Content-Type':'application/json'};return fetch('/api/pa/proveedores'+path,opts).then(function(r){return r.json();}).catch(function(){return{ok:false,error:'Error de red'};});}
+function admProvCargar(){var q=(document.getElementById('adm-prov-buscar')||{}).value||'';var rubro=(document.getElementById('adm-prov-rubro')||{}).value||'';var verInact=(document.getElementById('adm-prov-ver-inact')||{}).checked;var qs=[];if(q)qs.push('q='+encodeURIComponent(q));if(rubro)qs.push('rubro='+encodeURIComponent(rubro));if(verInact)qs.push('activo=todos');admProvApi('?'+qs.join('&')).then(function(r){var data=r.data||[];var tb=document.getElementById('adm-prov-tbody');if(!data.length){tb.innerHTML='<tr><td colspan="8" class="emp">Sin proveedores. <button class="btn bo bs" onclick="admProvAbrirNuevo()">+ Agregar el primero</button></td></tr>';return;}var ivaL={responsable_inscripto:'RI',monotributista:'Monotrib.',exento:'Exento',no_responsable:'No Resp.'};var rubL={insumos:'Insumos',servicios:'Servicios',transporte:'Transporte',construccion:'Construcción',combustible:'Combustible',otro:'Otro'};var pagL={contado:'Contado','15_dias':'15 días','30_dias':'30 días','60_dias':'60 días','90_dias':'90 días'};tb.innerHTML=data.map(function(p){var rs=p.activo?'':' style="opacity:.5"';var est=p.activo?'<span class="pa-badge pa-verde-bg">Activo</span>':'<span class="pa-badge pa-gris-bg">Inactivo</span>';var btn=p.activo?'<button class="btn bd bs" onclick="admProvDesactivar('+p.id+')" style="padding:3px 8px;font-size:11px">🗑</button>':'<button class="btn bo bs" onclick="admProvReactivar('+p.id+')" style="padding:3px 8px;font-size:11px;color:var(--ok);border-color:var(--ok)">↺</button>';return'<tr'+rs+'><td><strong>'+(p.razon_social||'—')+'</strong>'+(p.nombre_comercial?'<div style="font-size:11px;color:var(--mut)">'+p.nombre_comercial+'</div>':'')+(p.contacto?'<div style="font-size:10px;color:var(--sub)">👤 '+p.contacto+'</div>':'')+'</td><td style="font-family:monospace;font-size:12px">'+(p.cuit||'—')+'</td><td><span class="pa-badge pa-azul-bg" style="font-size:10px">'+(ivaL[p.condicion_iva]||p.condicion_iva||'—')+'</span></td><td style="font-size:12px;color:var(--mut)">'+(rubL[p.rubro]||p.rubro||'—')+'</td><td style="font-size:12px">'+(p.telefono||'—')+(p.email?'<div style="font-size:10px;color:var(--mut)">'+p.email+'</div>':'')+'</td><td style="font-size:12px;color:var(--mut)">'+(pagL[p.condicion_pago]||p.condicion_pago||'—')+'</td><td style="text-align:center">'+est+'</td><td style="text-align:right;white-space:nowrap"><button class="btn bo bs" onclick="admProvEditar('+p.id+')" style="padding:3px 8px;font-size:11px;margin-right:4px">✏️</button>'+btn+'</td></tr>';}).join('');});}
+function admProvAbrirNuevo(cb){ADM_PROV_CB=cb||null;document.getElementById('adm-prov-id').value='';document.getElementById('adm-prov-modal-tit').textContent='Nuevo proveedor';['adm-prov-razon','adm-prov-nombre-com','adm-prov-cuit','adm-prov-dir','adm-prov-tel','adm-prov-email','adm-prov-cbu','adm-prov-alias','adm-prov-contacto','adm-prov-notas'].forEach(function(id){var el=document.getElementById(id);if(el)el.value='';});document.getElementById('adm-prov-cond-iva').value='responsable_inscripto';document.getElementById('adm-prov-rubro-modal').value='';document.getElementById('adm-prov-cond-pago').value='';document.getElementById('adm-mb-proveedor').classList.add('on');}
+function admProvEditar(id){admProvApi('/'+id).then(function(r){if(!r.ok)return toast(r.error||'Error','er');var p=r.data;document.getElementById('adm-prov-id').value=p.id;document.getElementById('adm-prov-modal-tit').textContent='Editar — '+p.razon_social;document.getElementById('adm-prov-razon').value=p.razon_social||'';document.getElementById('adm-prov-nombre-com').value=p.nombre_comercial||'';document.getElementById('adm-prov-cuit').value=p.cuit||'';document.getElementById('adm-prov-cond-iva').value=p.condicion_iva||'responsable_inscripto';document.getElementById('adm-prov-dir').value=p.direccion||'';document.getElementById('adm-prov-tel').value=p.telefono||'';document.getElementById('adm-prov-email').value=p.email||'';document.getElementById('adm-prov-rubro-modal').value=p.rubro||'';document.getElementById('adm-prov-cbu').value=p.cbu||'';document.getElementById('adm-prov-alias').value=p.alias_cbu||'';document.getElementById('adm-prov-cond-pago').value=p.condicion_pago||'';document.getElementById('adm-prov-contacto').value=p.contacto||'';document.getElementById('adm-prov-notas').value=p.notas||'';document.getElementById('adm-mb-proveedor').classList.add('on');});}
+function admProvGuardar(){var id=document.getElementById('adm-prov-id').value;var body={razon_social:document.getElementById('adm-prov-razon').value.trim(),nombre_comercial:document.getElementById('adm-prov-nombre-com').value.trim()||null,cuit:document.getElementById('adm-prov-cuit').value.trim()||null,condicion_iva:document.getElementById('adm-prov-cond-iva').value,direccion:document.getElementById('adm-prov-dir').value.trim()||null,telefono:document.getElementById('adm-prov-tel').value.trim()||null,email:document.getElementById('adm-prov-email').value.trim()||null,rubro:document.getElementById('adm-prov-rubro-modal').value||null,cbu:document.getElementById('adm-prov-cbu').value.trim()||null,alias_cbu:document.getElementById('adm-prov-alias').value.trim()||null,condicion_pago:document.getElementById('adm-prov-cond-pago').value||null,contacto:document.getElementById('adm-prov-contacto').value.trim()||null,notas:document.getElementById('adm-prov-notas').value.trim()||null};if(!body.razon_social)return toast('La razón social es requerida','er');var url=id?'/'+id:'';var method=id?'PUT':'POST';admProvApi(url,{method:method,body:JSON.stringify(body)}).then(function(r){if(r.ok){toast('✓ Proveedor guardado','ok');document.getElementById('adm-mb-proveedor').classList.remove('on');admProvCargar();if(ADM_PROV_CB){ADM_PROV_CB(id?parseInt(id):r.id);ADM_PROV_CB=null;}}else toast('Error: '+(r.error||'desconocido'),'er');});}
+function admProvDesactivar(id){if(!confirm('¿Desactivar este proveedor?'))return;admProvApi('/'+id,{method:'DELETE'}).then(function(r){if(r.ok){toast('✓ Desactivado','ok');admProvCargar();}else toast(r.error||'Error','er');});}
+function admProvReactivar(id){admProvApi('/'+id+'/reactivar',{method:'POST'}).then(function(r){if(r.ok){toast('✓ Reactivado','ok');admProvCargar();}else toast(r.error||'Error','er');});}
 var _loadSecOriginal = loadSec;
 loadSec = function(s) {
+  if (s === 'adm-proveedores') {
+    admProvCargar();
+    return;
+  }
   if (s === 'adm-asientos') {
     // Default: últimos 30 días
     var hoy = new Date();
@@ -6119,6 +6235,7 @@ var USR_SECCIONES = [
     { id: 'pa-personal', label: '👷 Personal / MO' },
 { id: 'pa-panol', label: '🔧 Pañol' },
     { id: 'pa-electricidad', label: '⚡ Electricidad' },
+    { id: 'adm-proveedores', label: '📋 Padrón de Proveedores' },
     { id: 'pa-despachos', label: '🚚 Despachos' },
   ]},
   { grupo: 'Administración', items: [
