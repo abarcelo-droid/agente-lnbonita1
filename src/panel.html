@@ -6125,6 +6125,34 @@ function admProvEditar(id){admProvApi('/'+id).then(function(r){if(!r.ok)return t
 function admProvGuardar(){var id=document.getElementById('adm-prov-id').value;var body={razon_social:document.getElementById('adm-prov-razon').value.trim(),nombre_comercial:document.getElementById('adm-prov-nombre-com').value.trim()||null,cuit:document.getElementById('adm-prov-cuit').value.trim()||null,condicion_iva:document.getElementById('adm-prov-cond-iva').value,direccion:document.getElementById('adm-prov-dir').value.trim()||null,telefono:document.getElementById('adm-prov-tel').value.trim()||null,email:document.getElementById('adm-prov-email').value.trim()||null,rubro:document.getElementById('adm-prov-rubro-modal').value||null,cbu:document.getElementById('adm-prov-cbu').value.trim()||null,alias_cbu:document.getElementById('adm-prov-alias').value.trim()||null,condicion_pago:document.getElementById('adm-prov-cond-pago').value||null,contacto:document.getElementById('adm-prov-contacto').value.trim()||null,notas:document.getElementById('adm-prov-notas').value.trim()||null};if(!body.razon_social)return toast('La razón social es requerida','er');var url=id?'/'+id:'';var method=id?'PUT':'POST';admProvApi(url,{method:method,body:JSON.stringify(body)}).then(function(r){if(r.ok){toast('✓ Proveedor guardado','ok');document.getElementById('adm-mb-proveedor').classList.remove('on');admProvCargar();if(ADM_PROV_CB){ADM_PROV_CB(id?parseInt(id):r.id);ADM_PROV_CB=null;}}else toast('Error: '+(r.error||'desconocido'),'er');});}
 function admProvDesactivar(id){if(!confirm('¿Desactivar este proveedor?'))return;admProvApi('/'+id,{method:'DELETE'}).then(function(r){if(r.ok){toast('✓ Desactivado','ok');admProvCargar();}else toast(r.error||'Error','er');});}
 function admProvReactivar(id){admProvApi('/'+id+'/reactivar',{method:'POST'}).then(function(r){if(r.ok){toast('✓ Reactivado','ok');admProvCargar();}else toast(r.error||'Error','er');});}
+
+// ── Helpers proveedor en ingreso de factura ────────────────────────────
+function paCompRecargarProveedores(seleccionarId) {
+  admProvApi('').then(function(r) {
+    var data = (r.data || []).filter(function(p){ return p.activo; });
+    var sel = document.getElementById('pa-comp-prov-id');
+    if (!sel) return;
+    sel.innerHTML = '<option value="">— Seleccioná un proveedor del padrón —</option>'
+      + data.map(function(p){
+          return '<option value="'+p.id+'"'+(p.id==seleccionarId?' selected':'')+'>'+p.razon_social+(p.nombre_comercial?' ('+p.nombre_comercial+')':'')+'</option>';
+        }).join('');
+    if (seleccionarId) sel.value = seleccionarId;
+  });
+}
+function paCompOnProveedorChange() {
+  var warn = document.getElementById('pa-comp-prov-warn');
+  if (warn) warn.style.display = 'none';
+}
+function paCompBuscarProveedorIA(nombre) {
+  // Intentar pre-seleccionar el proveedor detectado por IA
+  admProvApi('?q='+encodeURIComponent(nombre)).then(function(r) {
+    var data = r.data || [];
+    if (data.length === 1) {
+      var sel = document.getElementById('pa-comp-prov-id');
+      if (sel) sel.value = data[0].id;
+    }
+  });
+}
 var _loadSecOriginal = loadSec;
 loadSec = function(s) {
   if (s === 'adm-proveedores') {
@@ -6627,7 +6655,20 @@ if(_inpGondola) _inpGondola.addEventListener('keydown', function(e){
       </select>
     </div>
     <div class="fl ff"><label>N° Remito / Factura</label><input id="pa-comp-factura" placeholder="Ej: R 001-00012345"></div>
-    <div class="fl ff"><label>Proveedor</label><input id="pa-comp-prov" placeholder="Nombre del proveedor"></div>
+    <div class="fl ff">
+      <label>Proveedor <span style="color:var(--err)">*</span></label>
+      <div style="display:flex;gap:6px;align-items:center">
+        <select id="pa-comp-prov-id" style="flex:1" onchange="paCompOnProveedorChange()">
+          <option value="">— Seleccioná un proveedor del padrón —</option>
+        </select>
+        <button type="button" class="btn bo bs" title="Agregar nuevo proveedor al padrón"
+          onclick="admProvAbrirNuevo(function(id){ paCompRecargarProveedores(id); })"
+          style="white-space:nowrap;flex-shrink:0">+ Nuevo</button>
+      </div>
+      <div id="pa-comp-prov-warn" style="display:none;font-size:11px;color:var(--err);margin-top:4px">
+        ⚠ Debés seleccionar un proveedor del padrón para registrar la factura.
+      </div>
+    </div>
     <div class="fl ff"><label>Notas</label><textarea id="pa-comp-notas" rows="2"></textarea></div>
   </div>
 
@@ -8951,7 +8992,7 @@ function paLeerRemito(){
     var aplicados=[];
     if(parsed.fecha)                { document.getElementById('pa-comp-fecha').value=parsed.fecha; aplicados.push('fecha'); }
     if(parsed.nro_comprobante)      { document.getElementById('pa-comp-factura').value=parsed.nro_comprobante; aplicados.push('número'); }
-    if(parsed.proveedor)            { document.getElementById('pa-comp-prov').value=parsed.proveedor; aplicados.push('proveedor'); }
+    if(parsed.proveedor)            { paCompBuscarProveedorIA(parsed.proveedor); aplicados.push('proveedor (verificar)'); }
     if(parsed.tipo_comprobante)     { var tc=document.getElementById('pa-comp-tipo-comp'); if(tc){tc.value=parsed.tipo_comprobante;} aplicados.push('tipo'); }
 
     // Items — agregar filas
@@ -9062,7 +9103,7 @@ function paAbrirNuevaCompra(){
   document.getElementById('pa-comp-fecha').value=new Date().toISOString().slice(0,10);
   document.getElementById('pa-comp-factura').value='';
   document.getElementById('pa-comp-tipo-comp').value='factura';
-  document.getElementById('pa-comp-prov').value='';
+  paCompRecargarProveedores(null);
   document.getElementById('pa-comp-notas').value='';
   document.getElementById('pa-comp-items').innerHTML='';
   var srvCont = document.getElementById('pa-comp-items-srv');
@@ -9170,7 +9211,10 @@ function paGuardarCompra(){
   var fecha=document.getElementById('pa-comp-fecha').value;
   var factura=document.getElementById('pa-comp-factura').value.trim();
   var tipoComp=document.getElementById('pa-comp-tipo-comp').value;
-  var prov=document.getElementById('pa-comp-prov').value.trim();
+  var provId=document.getElementById('pa-comp-prov-id').value;
+  if(!provId){ document.getElementById('pa-comp-prov-warn').style.display=''; toast('Seleccioná un proveedor del padrón','er'); return; }
+  document.getElementById('pa-comp-prov-warn').style.display='none';
+  var prov=provId;
   var notas=document.getElementById('pa-comp-notas').value.trim();
   var items=[];
   var codigosTodos = []; // para detectar duplicados entre items distintos del mismo modal
@@ -9272,7 +9316,7 @@ function paGuardarCompra(){
   if (errorValidacion) return toast(errorValidacion, 'er');
   if(!items.length) return toast(esServicio ? 'Agregá al menos un concepto' : 'Agregá al menos un producto','er');
 
-  var body = { fecha, nro_factura:factura, tipo_comprobante:tipoComp, proveedor_txt:prov, notas, items, remito_foto_b64: PA._compraFotoB64||null };
+  var body = { fecha, nro_factura:factura, tipo_comprobante:tipoComp, proveedor_id:parseInt(prov), notas, items, remito_foto_b64: PA._compraFotoB64||null };
   if (esServicio) body.tipo_factura = 'servicio';
 
   paF('/api/pa/compras',{method:'POST',headers:{'Content-Type':'application/json'},
