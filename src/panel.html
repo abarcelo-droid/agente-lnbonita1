@@ -22,15 +22,15 @@ nav{width:230px;flex-shrink:0;background:var(--nav);display:flex;flex-direction:
 .logo{padding:0;border-bottom:1px solid rgba(255,255,255,.1);margin-bottom:8px;background:#fff}
 .logo img{width:100%;max-width:100%;display:block;padding:16px 20px 12px;filter:none;opacity:1}
 .logo-tag{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:rgba(255,255,255,.4);padding:8px 20px;background:var(--nav2)}
-.ng{padding:10px 20px 3px;font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:rgba(255,255,255,.3)}
-.ni{display:flex;align-items:center;gap:10px;padding:8px 20px;cursor:pointer;color:rgba(255,255,255,.65);transition:all .15s;border-left:3px solid transparent;font-size:11px;text-transform:uppercase;letter-spacing:.05em}
+.ng{padding:10px 20px 3px;font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:rgba(255,255,255,.3);flex-shrink:0}
+.ni{display:flex;align-items:center;gap:10px;padding:8px 20px;cursor:pointer;color:rgba(255,255,255,.65);transition:all .15s;border-left:3px solid transparent;font-size:11px;text-transform:uppercase;letter-spacing:.05em;flex-shrink:0}
 .ni:hover{color:#fff;background:rgba(255,255,255,.08)}
 .ni.on{color:#fff;border-left-color:var(--gold);background:rgba(255,255,255,.12)}
-.ni-grp{display:flex;align-items:center;justify-content:space-between;padding:8px 20px;cursor:pointer;color:rgba(255,255,255,.85);transition:all .15s;font-size:11px;text-transform:uppercase;letter-spacing:.05em;font-weight:600;user-select:none}
+.ni-grp{display:flex;align-items:center;justify-content:space-between;padding:8px 20px;cursor:pointer;color:rgba(255,255,255,.85);transition:all .15s;font-size:11px;text-transform:uppercase;letter-spacing:.05em;font-weight:600;user-select:none;flex-shrink:0}
 .ni-grp:hover{color:#fff;background:rgba(255,255,255,.05)}
 .ni-caret{font-size:9px;transition:transform .2s;color:rgba(255,255,255,.4);margin-left:6px}
 .ni-grp.collapsed .ni-caret{transform:rotate(-90deg)}
-.ni-grp-items{overflow:hidden}
+.ni-grp-items{flex-shrink:0}
 .ni-grp.collapsed + .ni-grp-items{display:none}
 .ni-grp-items .ni{padding-left:36px;font-size:10.5px;color:rgba(255,255,255,.55)}
 .dot{width:6px;height:6px;border-radius:50%;flex-shrink:0;background:rgba(255,255,255,.3)}
@@ -119,11 +119,26 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     <img src="/static/logo.jpg" alt="La Nina Bonita">
     <div class="logo-tag">Panel de control</div>
   </div>
+
+  <!-- Widget de clima arriba del sidebar (siempre visible). Click → sección Clima -->
+  <div id="sb-clima" onclick="paIrAClima()" title="Ver clima detallado"
+       style="margin:6px 12px 8px;padding:8px 10px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.08);border-radius:8px;cursor:pointer;display:flex;align-items:center;gap:8px;color:rgba(255,255,255,.85);transition:background .15s"
+       onmouseover="this.style.background='rgba(255,255,255,.10)'"
+       onmouseout="this.style.background='rgba(255,255,255,.06)'">
+    <div id="sb-clima-emoji" style="font-size:22px;line-height:1">🌤️</div>
+    <div style="flex:1;min-width:0">
+      <div id="sb-clima-temp" style="font-size:13px;font-weight:700;color:#fff;line-height:1.1">—°</div>
+      <div id="sb-clima-sub" style="font-size:10px;color:rgba(255,255,255,.55);line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Carpintería</div>
+    </div>
+    <div id="sb-clima-alert" style="display:none;font-size:14px" title="Hay alertas activas">⚠️</div>
+  </div>
+
   <div class="ng" style="color:rgba(74,222,128,.5)">Producción Agrícola</div>
   <div class="ni" data-sec="pa-dashboard"><span class="dot da"></span>Inicio</div>
 
   <div class="ni-grp" data-grp="pa-informes">Informes<span class="ni-caret">▾</span></div>
   <div class="ni-grp-items">
+    <div class="ni" data-sec="pa-clima"><span class="dot da"></span>🌤️ Clima</div>
     <div class="ni" data-sec="pa-calendario"><span class="dot dc"></span>Calendario Agrícola</div>
     <div class="ni" data-sec="pa-costos"><span class="dot da"></span>Costos por Lote</div>
   </div>
@@ -1276,10 +1291,57 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   <div class="pa-card"><div class="pa-card-title">Órdenes pendientes</div><div class="pa-stat" id="pad-ordenes">—</div></div>
   <div class="pa-card"><div class="pa-card-title">Costo campaña</div><div class="pa-stat" id="pad-costo">—</div></div>
 </div>
+
+<!-- Clima Carpinteria -->
+<div class="pa-card" style="margin-bottom:16px" id="pad-clima-card">
+  <div class="pa-card-title" style="display:flex;justify-content:space-between;align-items:center">
+    <span>🌤️ Clima — Carpinteria, San Juan</span>
+    <span id="pad-clima-update" style="font-size:11px;color:var(--mut);font-weight:400"></span>
+  </div>
+  <div id="pad-clima-cont"><div class="emp" style="padding:16px">Cargando clima...</div></div>
+  <div id="pad-clima-smn-cont"></div>
+</div>
+
 <div class="pa-grid2">
   <div class="pa-card"><div class="pa-card-title">⚠️ Insumos bajo stock mínimo</div><div id="pad-bajo-stock"><div class="emp">Cargando...</div></div></div>
   <div class="pa-card"><div class="pa-card-title">📋 Órdenes emitidas</div><div id="pad-ordenes-lista"><div class="emp">Cargando...</div></div></div>
 </div>
+</div>
+
+<!-- ─── PA CLIMA ─────────────────────────────────────────────── -->
+<div class="sec" id="sec-pa-clima">
+  <div class="ph">
+    <div>
+      <div class="ph-t">🌤️ Clima</div>
+      <div class="ph-s">Carpintería, San Juan — Open-Meteo + estación SMN oficial</div>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center">
+      <span id="pa-clima-actualizado" style="font-size:11px;color:var(--mut)">—</span>
+      <button class="btn bo bs" onclick="paLoadClimaSeccion()" style="padding:6px 10px;font-size:12px">🔄 Actualizar</button>
+    </div>
+  </div>
+
+  <!-- ALERTAS -->
+  <div id="pa-clima-alertas" style="margin:8px 0 14px"></div>
+
+  <!-- HOY (card grande) -->
+  <div id="pa-clima-hoy" style="background:linear-gradient(135deg,#f0f4ff 0%,#fef3c7 100%);border:1px solid var(--bor);border-radius:12px;padding:18px;margin-bottom:18px">
+    <div class="emp" style="text-align:center">Cargando clima…</div>
+  </div>
+
+  <!-- 7 DÍAS -->
+  <div style="font-size:11px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.06em;margin:10px 0 6px">Pronóstico 7 días</div>
+  <div id="pa-clima-dias" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;margin-bottom:18px"></div>
+
+  <!-- HORAS -->
+  <div style="font-size:11px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.06em;margin:10px 0 6px">Próximas 24 horas</div>
+  <div id="pa-clima-horas" style="display:flex;gap:6px;overflow-x:auto;padding-bottom:8px;margin-bottom:18px"></div>
+
+  <!-- ESTACIÓN SMN -->
+  <div style="font-size:11px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.06em;margin:10px 0 6px">Estación oficial SMN</div>
+  <div id="pa-clima-smn" style="background:var(--sur);border:1px solid var(--bor);border-radius:10px;padding:14px">
+    <div class="emp">Cargando…</div>
+  </div>
 </div>
 
 <!-- ─── PA CALENDARIO ─────────────────────────────────────────── -->
@@ -2582,6 +2644,7 @@ function loadSec(s) {
     'ab-mandata': mdCargar,
     'ab-gastos': abCargarGastos,
     'pa-dashboard':  function(){ paLoadDash(); },
+    'pa-clima':      function(){ paLoadClimaSeccion(); },
     'pa-calendario': function(){ paLoadCalendario(); },
     'pa-insumos':    function(){ paLoadInsumos(); },
     'pa-compras':    function(){ paLoadCompras(); },
@@ -6924,6 +6987,10 @@ function paInit(){
   });
   paF('/api/pa/insumos').then(function(r){PA.insumos=r.data||[];});
   paF('/api/pa/lotes').then(function(r){PA.lotes=r.data||[];});
+
+  // Widget de clima del sidebar: cargar inmediato + refresh cada 30 min
+  paActualizarWidgetClima();
+  setInterval(paActualizarWidgetClima, 30 * 60 * 1000);
 }
 
 function paLoadDash(){
@@ -6945,6 +7012,408 @@ function paLoadDash(){
     var el=document.getElementById('pad-ordenes-lista');var data=r.data||[];
     if(!data.length){el.innerHTML='<div class="emp" style="padding:12px">Sin órdenes pendientes</div>';return;}
     el.innerHTML=data.slice(0,5).map(function(o){return'<div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--bor);font-size:13px;cursor:pointer" onclick="paVerOrden('+o.id+')"><span>'+o.nro_orden+' — '+(o.tipo_aplicacion||'')+'</span><span class="pa-badge pa-azul-bg">'+paFecha(o.fecha_orden)+'</span></div>';}).join('');
+  });
+  paLoadClima();
+}
+
+// ── CLIMA Carpinteria, San Juan (Open-Meteo, gratis sin API key) ──
+function paClimaIcon(code){
+  if(code===0)return'☀️';
+  if(code===1)return'🌤️';
+  if(code===2)return'⛅';
+  if(code===3)return'☁️';
+  if(code===45||code===48)return'🌫️';
+  if(code>=51&&code<=57)return'🌦️';
+  if(code>=61&&code<=67)return'🌧️';
+  if(code>=71&&code<=77)return'❄️';
+  if(code>=80&&code<=82)return'🌧️';
+  if(code>=85&&code<=86)return'🌨️';
+  if(code>=95)return'⛈️';
+  return'🌡️';
+}
+function paClimaDesc(code){
+  var m={0:'Despejado',1:'Mayormente despejado',2:'Parcialmente nublado',3:'Nublado',
+    45:'Niebla',48:'Niebla con escarcha',51:'Llovizna leve',53:'Llovizna',55:'Llovizna intensa',
+    56:'Llovizna helada',57:'Llovizna helada intensa',61:'Lluvia leve',63:'Lluvia',65:'Lluvia intensa',
+    66:'Lluvia helada',67:'Lluvia helada intensa',71:'Nieve leve',73:'Nieve',75:'Nieve intensa',
+    77:'Granos de nieve',80:'Chubascos leves',81:'Chubascos',82:'Chubascos intensos',
+    85:'Chubascos de nieve',86:'Chubascos de nieve intensos',95:'Tormenta',96:'Tormenta con granizo',99:'Tormenta con granizo intenso'};
+  return m[code]||'—';
+}
+function paClimaDirViento(deg){
+  if(deg==null)return'';
+  var dirs=['N','NE','E','SE','S','SO','O','NO'];
+  return dirs[Math.round(((deg%360)/45))%8];
+}
+function paClimaDia(iso){
+  var d=new Date(iso+'T12:00:00');
+  var hoy=new Date();hoy.setHours(0,0,0,0);
+  var diff=Math.round((d-hoy)/86400000);
+  if(diff===0)return'Hoy';
+  if(diff===1)return'Mañ.';
+  var dias=['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'];
+  return dias[d.getDay()];
+}
+
+function paLoadClima(){
+  var el=document.getElementById('pad-clima-cont');
+  if(!el)return;
+  var url='https://api.open-meteo.com/v1/forecast?latitude=-31.7995&longitude=-68.5618'
+    +'&current=temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m,wind_direction_10m'
+    +'&daily=temperature_2m_max,temperature_2m_min,precipitation_sum,precipitation_probability_max,weather_code,wind_speed_10m_max'
+    +'&timezone=America%2FArgentina%2FBuenos_Aires&forecast_days=5';
+  fetch(url).then(function(r){return r.json();}).then(function(d){
+    if(!d||!d.current||!d.daily){el.innerHTML='<div class="emp" style="padding:16px">No se pudo cargar el clima</div>';return;}
+    var c=d.current,dl=d.daily;
+    var actual=
+      '<div style="display:flex;align-items:center;gap:14px;padding:6px 0">'
+      +'<div style="font-size:44px;line-height:1">'+paClimaIcon(c.weather_code)+'</div>'
+      +'<div style="flex:1">'
+        +'<div style="font-size:30px;font-weight:600;line-height:1.1">'+Math.round(c.temperature_2m)+'°<span style="font-size:14px;color:var(--mut);font-weight:400;margin-left:6px">'+paClimaDesc(c.weather_code)+'</span></div>'
+        +'<div style="font-size:12px;color:var(--mut);margin-top:6px">Sensación '+Math.round(c.apparent_temperature)+'° · Humedad '+c.relative_humidity_2m+'% · 💨 '+Math.round(c.wind_speed_10m)+' km/h '+paClimaDirViento(c.wind_direction_10m)+'</div>'
+      +'</div>'
+      +'</div>';
+    var diasHtml='';
+    for(var i=1;i<dl.time.length;i++){
+      var prob=dl.precipitation_probability_max[i]||0;
+      var mm=dl.precipitation_sum[i]||0;
+      var probColor=prob>=70?'#dc2626':prob>=40?'#f59e0b':'var(--mut)';
+      diasHtml+=
+        '<div style="flex:1;text-align:center;padding:10px 6px;background:var(--bg);border:1px solid var(--bor);border-radius:8px">'
+        +'<div style="font-size:11px;color:var(--mut);text-transform:uppercase;letter-spacing:.05em;font-weight:600">'+paClimaDia(dl.time[i])+'</div>'
+        +'<div style="font-size:24px;margin:4px 0">'+paClimaIcon(dl.weather_code[i])+'</div>'
+        +'<div style="font-size:13px;font-weight:600">'+Math.round(dl.temperature_2m_max[i])+'°<span style="color:var(--mut);font-weight:400">/'+Math.round(dl.temperature_2m_min[i])+'°</span></div>'
+        +'<div style="font-size:10px;color:'+probColor+';margin-top:3px">💧 '+prob+'%'+(mm>0?' · '+mm.toFixed(1)+'mm':'')+'</div>'
+        +'</div>';
+    }
+    // Alertas
+    var alertas=[];
+    for(var j=0;j<dl.time.length;j++){
+      if(dl.temperature_2m_min[j]<=3){
+        alertas.push('🥶 <b>Riesgo de helada</b> '+paClimaDia(dl.time[j])+' (mín. '+Math.round(dl.temperature_2m_min[j])+'°)');
+      }
+      if(dl.wind_speed_10m_max[j]>=30){
+        alertas.push('💨 <b>Viento fuerte</b> '+paClimaDia(dl.time[j])+' ('+Math.round(dl.wind_speed_10m_max[j])+' km/h) — limitar aplicaciones');
+      }
+    }
+    var alertasHtml=alertas.length
+      ?'<div style="margin-top:12px;padding:10px 12px;background:#fef3c7;border-left:3px solid #f59e0b;border-radius:4px;font-size:12px;color:#78350f">'+alertas.slice(0,3).join('<br>')+'</div>'
+      :'';
+    el.innerHTML=
+      '<div style="display:grid;grid-template-columns:minmax(220px,1fr) 2fr;gap:16px;align-items:center">'
+      +'<div>'+actual+'</div>'
+      +'<div style="display:flex;gap:8px">'+diasHtml+'</div>'
+      +'</div>'+alertasHtml;
+    // Hora de actualización
+    var hh=new Date();
+    var pad=function(n){return n<10?'0'+n:n;};
+    document.getElementById('pad-clima-update').textContent='Actualizado '+pad(hh.getHours())+':'+pad(hh.getMinutes());
+  }).catch(function(){
+    el.innerHTML='<div class="emp" style="padding:16px">No se pudo conectar al servicio de clima</div>';
+  });
+  // Estación SMN en paralelo (vía proxy del backend)
+  paLoadClimaSMN();
+}
+
+// ── SMN: estación oficial más cercana (proxy en /api/pa/clima/smn) ──
+function paClimaFechaSMN(ts){
+  if(!ts) return '';
+  var d = new Date(ts*1000);
+  var pad=function(n){return n<10?'0'+n:n;};
+  return pad(d.getDate())+'/'+pad(d.getMonth()+1)+' '+pad(d.getHours())+':'+pad(d.getMinutes());
+}
+function paLoadClimaSMN(){
+  var el = document.getElementById('pad-clima-smn-cont');
+  if(!el) return;
+  paF('/api/pa/clima/smn').then(function(r){
+    if(!r || !r.ok || !r.data) { el.innerHTML=''; return; }
+    var d = r.data, w = d.weather || {};
+    var staleTag = r.stale ? '<span style="color:#dc2626;font-size:10px;margin-left:6px">⚠️ datos posiblemente desactualizados</span>' : '';
+    var medido = d.updated ? ' · Medido '+paClimaFechaSMN(d.updated) : '';
+    var tempStr = (w.temp!=null) ? Math.round(w.temp)+'°' : '—';
+    var partes = [];
+    if (w.description) partes.push(w.description);
+    if (w.humidity!=null) partes.push('Hum '+w.humidity+'%');
+    if (w.wind_speed!=null) partes.push('💨 '+w.wind_speed+' km/h'+(w.wing_deg?' '+w.wing_deg:''));
+    if (w.pressure!=null) partes.push('P '+w.pressure+' hPa');
+    el.innerHTML =
+      '<div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--bor)">'
+      +'<div style="font-size:11px;color:var(--mut);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">'
+      +'📍 Estación oficial SMN: <b style="color:var(--txt)">'+d.estacion+'</b> <span style="font-weight:400">(a ~'+d.distancia_km+' km)</span>'
+      +staleTag+'</div>'
+      +'<div style="font-size:13px;color:var(--txt)">'
+      +'<span style="font-size:18px;font-weight:600">'+tempStr+'</span>'
+      +'<span style="color:var(--mut);margin-left:10px">'+partes.join(' · ')+'</span>'
+      +'<span style="color:var(--mut);font-size:11px;margin-left:10px">'+medido+'</span>'
+      +'</div>'
+      +'</div>';
+  }).catch(function(){
+    el.innerHTML = '';  // si falla, simplemente no mostramos nada
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// CLIMA — Widget arriba sidebar + Sección dedicada + Tooltip mapa lotes.
+// Reusa el endpoint /api/pa/clima/forecast del backend (cache en server).
+// ─────────────────────────────────────────────────────────────────────────
+function paIrAClima(){
+  var item = document.querySelector('.ni[data-sec="pa-clima"]');
+  if (item) item.click();
+  else if (typeof loadSec === 'function') loadSec('pa-clima');
+}
+
+// Cache de forecast en memoria del frontend (evita llamadas duplicadas
+// cuando widget + dashboard + sección piden lo mismo en pocos segundos).
+// Helpers para describir clima sin depender del backend
+// Códigos WMO: https://open-meteo.com/en/docs
+function paClimaWMO(code){
+  if (code === 0) return { txt: 'Despejado', emoji: '☀️' };
+  if (code === 1) return { txt: 'Mayormente despejado', emoji: '🌤️' };
+  if (code === 2) return { txt: 'Parcialmente nublado', emoji: '⛅' };
+  if (code === 3) return { txt: 'Nublado', emoji: '☁️' };
+  if (code === 45 || code === 48) return { txt: 'Niebla', emoji: '🌫️' };
+  if (code >= 51 && code <= 57) return { txt: 'Llovizna', emoji: '🌦️' };
+  if (code >= 61 && code <= 67) return { txt: 'Lluvia', emoji: '🌧️' };
+  if (code >= 71 && code <= 77) return { txt: 'Nieve', emoji: '🌨️' };
+  if (code >= 80 && code <= 82) return { txt: 'Chubascos', emoji: '🌧️' };
+  if (code >= 85 && code <= 86) return { txt: 'Chubascos de nieve', emoji: '🌨️' };
+  if (code >= 95 && code <= 99) return { txt: 'Tormenta', emoji: '⛈️' };
+  return { txt: '—', emoji: '🌤️' };
+}
+function paClimaDir(deg){
+  if (deg == null) return '';
+  return ['N','NE','E','SE','S','SO','O','NO'][Math.round(((deg % 360) / 45)) % 8];
+}
+
+// Pega directo a Open-Meteo (sin backend). Mismo formato que el endpoint
+// del backend para mantener compatibilidad con widget/sección/tooltip.
+function paFetchForecast(forzar){
+  if (!forzar && PA._climaForecast && (Date.now() - PA._climaForecastTs) < 5*60*1000) {
+    return Promise.resolve(PA._climaForecast);
+  }
+  var url = 'https://api.open-meteo.com/v1/forecast'
+    + '?latitude=-31.7995&longitude=-68.5618'
+    + '&current=temperature_2m,relative_humidity_2m,apparent_temperature,is_day,weather_code,wind_speed_10m,wind_direction_10m,precipitation'
+    + '&hourly=temperature_2m,precipitation_probability,precipitation,weather_code,wind_speed_10m'
+    + '&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_sum,precipitation_probability_max,wind_speed_10m_max,et0_fao_evapotranspiration'
+    + '&timezone=America%2FArgentina%2FBuenos_Aires&forecast_days=7';
+  return fetch(url).then(function(r){ return r.json(); }).then(function(j){
+    if (!j || !j.current) throw new Error('Open-Meteo respuesta inválida');
+    var cur = j.current;
+    var w = paClimaWMO(cur.weather_code);
+    var actual = {
+      temp: cur.temperature_2m,
+      sensacion: cur.apparent_temperature,
+      humedad: cur.relative_humidity_2m,
+      viento_kmh: cur.wind_speed_10m,
+      viento_dir: paClimaDir(cur.wind_direction_10m),
+      lluvia_mm: cur.precipitation,
+      es_dia: cur.is_day === 1,
+      codigo: cur.weather_code,
+      descripcion: w.txt,
+      emoji: w.emoji
+    };
+    // Hourly: próximas 24 hs desde ahora
+    var ahora = new Date();
+    var hourly = [];
+    if (j.hourly && j.hourly.time) {
+      for (var i = 0; i < j.hourly.time.length && hourly.length < 24; i++) {
+        var t = new Date(j.hourly.time[i]);
+        if (t < ahora) continue;
+        hourly.push({
+          hora: j.hourly.time[i],
+          temp: j.hourly.temperature_2m[i],
+          prob: j.hourly.precipitation_probability[i],
+          mm: j.hourly.precipitation[i],
+          emoji: paClimaWMO(j.hourly.weather_code[i]).emoji,
+          viento_kmh: j.hourly.wind_speed_10m[i]
+        });
+      }
+    }
+    // Daily: 7 días
+    var dias = [];
+    if (j.daily && j.daily.time) {
+      for (var k = 0; k < j.daily.time.length; k++) {
+        var wmo = paClimaWMO(j.daily.weather_code[k]);
+        dias.push({
+          fecha: j.daily.time[k],
+          codigo: j.daily.weather_code[k],
+          descripcion: wmo.txt,
+          emoji: wmo.emoji,
+          tmax: j.daily.temperature_2m_max[k],
+          tmin: j.daily.temperature_2m_min[k],
+          lluvia_mm: j.daily.precipitation_sum[k],
+          lluvia_prob: j.daily.precipitation_probability_max[k],
+          viento_max: j.daily.wind_speed_10m_max[k],
+          et0: j.daily.et0_fao_evapotranspiration[k]
+        });
+      }
+    }
+    // Alertas: heladas <3°, viento >30 km/h, lluvia >10mm
+    var alertas = [];
+    dias.forEach(function(d, idx){
+      var fechaTxt = idx === 0 ? 'hoy'
+                   : idx === 1 ? 'mañana'
+                   : new Date(d.fecha + 'T12:00:00').toLocaleDateString('es-AR', { weekday: 'long' });
+      if (d.tmin <= 3) {
+        alertas.push({ tipo: 'helada', nivel: 'critica',
+          texto: '🥶 Helada ' + fechaTxt + ' — mínima ' + d.tmin.toFixed(1) + '°C', dia: idx });
+      }
+      if (d.viento_max >= 30) {
+        alertas.push({ tipo: 'viento', nivel: 'media',
+          texto: '💨 Viento fuerte ' + fechaTxt + ' — hasta ' + d.viento_max.toFixed(0) + ' km/h (mala para aplicaciones)', dia: idx });
+      }
+      if (d.lluvia_mm >= 10) {
+        alertas.push({ tipo: 'lluvia', nivel: 'info',
+          texto: '🌧️ Lluvia ' + fechaTxt + ' — ' + d.lluvia_mm.toFixed(0) + ' mm esperados', dia: idx });
+      }
+    });
+    var data = {
+      localidad: 'Carpintería, San Juan',
+      lat: -31.7995, lng: -68.5618,
+      actualizado: new Date().toISOString(),
+      actual: actual, hourly: hourly, dias: dias, alertas: alertas
+    };
+    PA._climaForecast = data;
+    PA._climaForecastTs = Date.now();
+    return data;
+  });
+}
+
+function paFetchSMN(forzar){
+  if (!forzar && PA._climaSMN && (Date.now() - PA._climaSMNTs) < 5*60*1000) {
+    return Promise.resolve(PA._climaSMN);
+  }
+  // El endpoint /smn sí funciona en el backend
+  return paF('/api/pa/clima/smn').then(function(r){
+    if (!r.ok) throw new Error(r.error||'no smn');
+    PA._climaSMN = r.data;
+    PA._climaSMNTs = Date.now();
+    return r.data;
+  });
+}
+
+// Widget arriba del sidebar
+function paActualizarWidgetClima(){
+  paFetchForecast().then(function(d){
+    var a = d.actual || {};
+    var emoji = a.emoji || '🌤️';
+    var temp = a.temp != null ? Math.round(a.temp) + '°' : '—°';
+    var sub = (a.descripcion || 'Carpintería') + (a.viento_kmh != null ? ' · 💨 ' + Math.round(a.viento_kmh) : '');
+    var elE = document.getElementById('sb-clima-emoji');
+    var elT = document.getElementById('sb-clima-temp');
+    var elS = document.getElementById('sb-clima-sub');
+    var elA = document.getElementById('sb-clima-alert');
+    if (elE) elE.textContent = emoji;
+    if (elT) elT.textContent = temp;
+    if (elS) elS.textContent = sub;
+    if (elA) elA.style.display = (d.alertas && d.alertas.length > 0) ? '' : 'none';
+  }).catch(function(){
+    // Silencio: si falla, el widget queda con el placeholder
+  });
+}
+
+// Sección Clima completa
+function paLoadClimaSeccion(){
+  var elHoy = document.getElementById('pa-clima-hoy');
+  var elDias = document.getElementById('pa-clima-dias');
+  var elHoras = document.getElementById('pa-clima-horas');
+  var elAl = document.getElementById('pa-clima-alertas');
+  var elSMN = document.getElementById('pa-clima-smn');
+  if (elHoy) elHoy.innerHTML = '<div class="emp" style="text-align:center;padding:20px">Cargando…</div>';
+  if (elDias) elDias.innerHTML = '';
+  if (elHoras) elHoras.innerHTML = '';
+  if (elAl) elAl.innerHTML = '';
+  if (elSMN) elSMN.innerHTML = '<div class="emp">Cargando…</div>';
+
+  paFetchForecast(true).then(function(d){
+    var a = d.actual || {};
+
+    if (elHoy) elHoy.innerHTML =
+      '<div style="display:flex;align-items:flex-start;gap:24px;flex-wrap:wrap">'
+        +'<div style="text-align:center">'
+          +'<div style="font-size:72px;line-height:1">'+(a.emoji||'🌤️')+'</div>'
+          +'<div style="font-size:13px;color:var(--mut);margin-top:4px">'+(a.descripcion||'')+'</div>'
+        +'</div>'
+        +'<div style="flex:1;min-width:160px">'
+          +'<div style="font-size:56px;font-weight:700;line-height:1">'+(a.temp!=null?Math.round(a.temp)+'°':'—')+'</div>'
+          +'<div style="font-size:13px;color:var(--mut);margin-top:6px">Sensación '+(a.sensacion!=null?Math.round(a.sensacion)+'°':'—')+'</div>'
+        +'</div>'
+        +'<div style="display:grid;grid-template-columns:repeat(2,auto);gap:6px 18px;font-size:13px;align-content:start">'
+          +'<div style="color:var(--mut)">💧 Humedad</div><div><strong>'+(a.humedad!=null?a.humedad+'%':'—')+'</strong></div>'
+          +'<div style="color:var(--mut)">💨 Viento</div><div><strong>'+(a.viento_kmh!=null?Math.round(a.viento_kmh)+' km/h':'—')+'</strong> '+(a.viento_dir||'')+'</div>'
+          +'<div style="color:var(--mut)">🌧️ Lluvia ahora</div><div><strong>'+(a.lluvia_mm!=null?a.lluvia_mm.toFixed(1)+' mm':'—')+'</strong></div>'
+          +'<div style="color:var(--mut)">📍 Localidad</div><div><strong>Carpintería, SJ</strong></div>'
+        +'</div>'
+      +'</div>';
+
+    if (elAl) {
+      if (d.alertas && d.alertas.length > 0) {
+        elAl.innerHTML = d.alertas.map(function(al){
+          var bg = al.nivel === 'critica' ? '#fee2e2'
+                 : al.nivel === 'media'   ? '#fef3c7'
+                 :                          '#dbeafe';
+          var bd = al.nivel === 'critica' ? '#dc2626'
+                 : al.nivel === 'media'   ? '#f59e0b'
+                 :                          '#3b82f6';
+          return '<div style="background:'+bg+';border-left:3px solid '+bd+';padding:8px 12px;margin-bottom:6px;border-radius:6px;font-size:13px">'+al.texto+'</div>';
+        }).join('');
+      } else {
+        elAl.innerHTML = '<div style="color:var(--mut);font-size:12px;font-style:italic;padding:4px 0">✅ Sin alertas activas</div>';
+      }
+    }
+
+    if (elDias) elDias.innerHTML = (d.dias||[]).map(function(dia, idx){
+      var fecha = new Date(dia.fecha + 'T12:00:00');
+      var nom = idx === 0 ? 'HOY' : ['DOM','LUN','MAR','MIÉ','JUE','VIE','SÁB'][fecha.getDay()];
+      var fechaTxt = String(fecha.getDate()).padStart(2,'0')+'/'+String(fecha.getMonth()+1).padStart(2,'0');
+      return '<div style="background:var(--sur);border:1px solid var(--bor);border-radius:10px;padding:10px;text-align:center">'
+        +'<div style="font-size:11px;color:var(--mut);font-weight:700">'+nom+'</div>'
+        +'<div style="font-size:10px;color:var(--mut);margin-bottom:4px">'+fechaTxt+'</div>'
+        +'<div style="font-size:34px;line-height:1.1;margin:4px 0">'+dia.emoji+'</div>'
+        +'<div style="font-size:13px;margin-top:4px"><strong>'+Math.round(dia.tmax)+'°</strong> <span style="color:var(--mut)">/ '+Math.round(dia.tmin)+'°</span></div>'
+        +'<div style="font-size:10px;color:#1e40af;margin-top:3px">💧 '+(dia.lluvia_prob||0)+'%'+(dia.lluvia_mm>0?' · '+dia.lluvia_mm.toFixed(1)+'mm':'')+'</div>'
+        +(dia.viento_max>=20?'<div style="font-size:10px;color:#92400e;margin-top:1px">💨 '+Math.round(dia.viento_max)+' km/h</div>':'')
+        +(dia.et0!=null?'<div style="font-size:10px;color:var(--mut);margin-top:2px">ET₀ '+dia.et0.toFixed(1)+' mm</div>':'')
+        +'</div>';
+    }).join('');
+
+    if (elHoras) elHoras.innerHTML = (d.hourly||[]).map(function(h){
+      var hh = new Date(h.hora);
+      return '<div style="flex-shrink:0;background:var(--sur);border:1px solid var(--bor);border-radius:8px;padding:8px;min-width:64px;text-align:center">'
+        +'<div style="font-size:10px;color:var(--mut);font-weight:600">'+String(hh.getHours()).padStart(2,'0')+':00</div>'
+        +'<div style="font-size:18px;line-height:1.1;margin:3px 0">'+h.emoji+'</div>'
+        +'<div style="font-size:12px;font-weight:600">'+Math.round(h.temp)+'°</div>'
+        +(h.prob>10?'<div style="font-size:9px;color:#1e40af;margin-top:1px">💧'+h.prob+'%</div>':'')
+        +'</div>';
+    }).join('');
+
+    var ts = new Date(d.actualizado);
+    var actualizadoEl = document.getElementById('pa-clima-actualizado');
+    if (actualizadoEl) actualizadoEl.textContent = 'Actualizado ' + ts.toLocaleTimeString('es-AR', {hour:'2-digit',minute:'2-digit'});
+  }).catch(function(e){
+    if (elHoy) elHoy.innerHTML = '<div class="emp" style="text-align:center;padding:20px;color:var(--err)">Error al cargar el clima: '+(e.message||'')+'</div>';
+  });
+
+  // SMN aparte
+  paFetchSMN(true).then(function(s){
+    var w = s.weather || {};
+    if (elSMN) elSMN.innerHTML =
+      '<div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">'
+        +'<div>'
+          +'<div style="font-size:13px;font-weight:700">📍 '+s.estacion+' <span style="font-size:11px;color:var(--mut);font-weight:400">('+s.provincia+', a ~'+s.distancia_km+' km)</span></div>'
+          +'<div style="font-size:11px;color:var(--mut);margin-top:2px">'+(s.updated||'')+'</div>'
+        +'</div>'
+        +'<div style="margin-left:auto;display:flex;gap:14px;font-size:13px;flex-wrap:wrap">'
+          +(w.temp!=null?'<div><strong>'+Math.round(w.temp)+'°</strong></div>':'')
+          +(w.descripcion?'<div style="color:var(--mut)">'+w.descripcion+'</div>':'')
+          +(w.humedad!=null?'<div>💧 '+w.humedad+'%</div>':'')
+          +(w.viento_kmh!=null?'<div>💨 '+w.viento_kmh+' km/h '+(w.viento_dir||'')+'</div>':'')
+          +(w.presion!=null?'<div>📊 '+w.presion+' hPa</div>':'')
+        +'</div>'
+      +'</div>';
+  }).catch(function(){
+    if (elSMN) elSMN.innerHTML = '<div class="emp" style="padding:8px">SMN no disponible</div>';
   });
 }
 
@@ -11122,6 +11591,26 @@ function paRenderMapaGeneral() {
   var campañaNom = campAct ? campAct.nombre : null;
   var bounds = [];
   var cultivosUsados = {};
+
+  // Pre-cargar clima en background. Como todos los lotes están en la misma
+  // finca (Carpintería), usamos un único dato de clima compartido para los
+  // tooltips. Si todavía no llegó, se renderiza sin clima y al llegar se re-renderiza.
+  var climaTxt = '';
+  if (PA._climaForecast && PA._climaForecast.actual) {
+    var aClima = PA._climaForecast.actual;
+    climaTxt = '<div style="margin-top:4px;padding-top:4px;border-top:1px dashed rgba(255,255,255,.3);font-size:11px">'
+      + (aClima.emoji||'🌤️') + ' ' + (aClima.temp!=null?Math.round(aClima.temp)+'°':'')
+      + ' · ' + (aClima.descripcion||'')
+      + (aClima.viento_kmh!=null?' · 💨 '+Math.round(aClima.viento_kmh)+' km/h':'')
+      + '</div>';
+  } else {
+    paFetchForecast().then(function(){
+      if (document.getElementById('sec-pa-lotes') && document.getElementById('sec-pa-lotes').classList.contains('on')) {
+        paRenderMapaGeneral();
+      }
+    }).catch(function(){});
+  }
+
   lotes.forEach(function(l){
     try {
       var geo = typeof l.poligono_geojson === 'string' ? JSON.parse(l.poligono_geojson) : l.poligono_geojson;
@@ -11136,7 +11625,7 @@ function paRenderMapaGeneral() {
       var layer = L.geoJSON(geo, {
         style: { color: color, weight: 2, fillOpacity: 0.45, fillColor: color }
       }).bindTooltip(
-        '<strong>'+l.nombre+'</strong><br>'+(l.finca||'')+'<br>'+(l.hectareas||'?')+' ha — '+cultActual,
+        '<strong>'+l.nombre+'</strong><br>'+(l.finca||'')+'<br>'+(l.hectareas||'?')+' ha — '+cultActual + climaTxt,
         { className:'pa-map-tooltip', sticky: true }
       ).on('click', function(){ paAbrirEditorPoligono(l.id); });
       layer._isPaPoly = true;
