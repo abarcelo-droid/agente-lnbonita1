@@ -17,6 +17,7 @@ import produccionRouter   from "./rutas/produccion.js";
 import scoutRouter        from "./rutas/scout.js";
 import cuentasRouter      from "./rutas/cuentas.js";
 import climaRouter        from "./rutas/clima.js";
+import ifcoRouter         from "./rutas/ifco.js";
 import { guardarSnapshotCRM } from "./servicios/db.js";
 import { syncSheets } from "./servicios/sheets.js";
 
@@ -62,6 +63,7 @@ app.use("/data/uploads", express.static(path.join(__dirname, "../data/uploads"))
 app.use("/data/conformados", express.static(path.join(__dirname, "../data/conformados")));
 app.use("/data/fichas",      express.static(path.join(__dirname, "../data/fichas")));
 app.use("/data/remitos_pa", express.static(path.join(__dirname, "../data/remitos_pa")));
+app.use("/data/ifco",       express.static(path.join(__dirname, "../data/ifco")));
 
 // Auth
 app.use("/api/auth", authRouter);
@@ -138,6 +140,7 @@ app.use("/api", cotizacionRouter);
 app.use("/api", crmRouter);
 app.use("/api", buscarRouter);
 app.use("/api/abasto", abastoRouter);
+app.use("/api/ifco",   ifcoRouter);
 app.use("/api/pa/cuentas", cuentasRouter);
 app.use("/api/pa/clima",   climaRouter);
 app.use("/api/pa",     produccionRouter);

@@ -860,3 +860,137 @@ db.exec(`
   );
 `);
 
+
+// ════════════════════════════════════════════════════════════════════════════
+// MÓDULO IFCO — Control de cajones retornables (panel General > Abasto)
+// Tablas:
+//   ifco_talonarios        — talonarios físicos (CAI, rango, vencimiento)
+//   ifco_remitos_super     — un remito IFCO por cada despacho a supermercado
+//   ifco_envios_proveedor  — envíos PISO → proveedor (con n° interno SG-P-AAAA-NNNN)
+//   ifco_movimientos       — eventos puntuales (retiros del depósito IFCO, pérdidas)
+// ════════════════════════════════════════════════════════════════════════════
+db.exec(`
+  CREATE TABLE IF NOT EXISTS ifco_talonarios (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    serie           TEXT NOT NULL,
+    numero_desde    INTEGER NOT NULL,
+    numero_hasta    INTEGER NOT NULL,
+    cai             TEXT,
+    vto_cai         TEXT,
+    activo          INTEGER NOT NULL DEFAULT 1,
+    notas           TEXT,
+    creado_en       TEXT DEFAULT (datetime('now','localtime'))
+  );
+
+  CREATE TABLE IF NOT EXISTS ifco_remitos_super (
+    id                          INTEGER PRIMARY KEY AUTOINCREMENT,
+    n_remito_ifco               TEXT NOT NULL UNIQUE,
+    fecha_emision               TEXT NOT NULL,
+    cliente_id                  INTEGER REFERENCES dedicados_clientes(id),
+    cliente_telefono            TEXT,
+    empresa                     TEXT,
+    sucursal                    TEXT,
+    modelo                      TEXT DEFAULT '6420',
+    cantidad_despachada         INTEGER NOT NULL,
+    producto                    TEXT,
+    transportista               TEXT,
+    encargado_prov_apellido     TEXT,
+    encargado_prov_nombre       TEXT,
+    encargado_prov_dni          TEXT,
+    talonario_id                INTEGER REFERENCES ifco_talonarios(id),
+    estado                      TEXT NOT NULL DEFAULT 'despachado'
+                                  CHECK(estado IN ('despachado','sellado','presentado','anulado')),
+    fecha_sellado               TEXT,
+    encargado_super_apellido    TEXT,
+    encargado_super_nombre      TEXT,
+    encargado_super_dni         TEXT,
+    cantidad_recibida           INTEGER,
+    cantidad_rechazada          INTEGER,
+    escaneo_path                TEXT,
+    fecha_presentado            TEXT,
+    email_enviado_a             TEXT,
+    notas                       TEXT,
+    usuario_id                  INTEGER REFERENCES usuarios(id),
+    creado_en                   TEXT DEFAULT (datetime('now','localtime')),
+    actualizado_en              TEXT DEFAULT (datetime('now','localtime'))
+  );
+
+  CREATE INDEX IF NOT EXISTS ifco_remitos_super_estado_idx   ON ifco_remitos_super(estado);
+  CREATE INDEX IF NOT EXISTS ifco_remitos_super_cliente_idx  ON ifco_remitos_super(cliente_id);
+  CREATE INDEX IF NOT EXISTS ifco_remitos_super_sellado_idx  ON ifco_remitos_super(fecha_sellado);
+
+  CREATE TABLE IF NOT EXISTS ifco_envios_proveedor (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    n_remito_interno    TEXT NOT NULL UNIQUE,
+    fecha_envio         TEXT NOT NULL,
+    proveedor_id        INTEGER NOT NULL REFERENCES proveedores(id),
+    cantidad_enviada    INTEGER NOT NULL,
+    modelo              TEXT DEFAULT '6420',
+    estado              TEXT NOT NULL DEFAULT 'enviado'
+                          CHECK(estado IN ('enviado','recibido','parcial','anulado')),
+    fecha_recepcion     TEXT,
+    cantidad_recibida   INTEGER,
+    notas               TEXT,
+    usuario_id          INTEGER REFERENCES usuarios(id),
+    creado_en           TEXT DEFAULT (datetime('now','localtime')),
+    actualizado_en      TEXT DEFAULT (datetime('now','localtime'))
+  );
+
+  CREATE INDEX IF NOT EXISTS ifco_envios_proveedor_estado_idx    ON ifco_envios_proveedor(estado);
+  CREATE INDEX IF NOT EXISTS ifco_envios_proveedor_proveedor_idx ON ifco_envios_proveedor(proveedor_id);
+
+  CREATE TABLE IF NOT EXISTS ifco_movimientos (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    fecha           TEXT NOT NULL,
+    tipo            TEXT NOT NULL CHECK(tipo IN ('retiro','perdida')),
+    cantidad        INTEGER NOT NULL,
+    modelo          TEXT DEFAULT '6420',
+    n_remito        TEXT,
+    costo_total     REAL DEFAULT 0,
+    moneda          TEXT DEFAULT 'ARS',
+    notas           TEXT,
+    usuario_id      INTEGER REFERENCES usuarios(id),
+    creado_en       TEXT DEFAULT (datetime('now','localtime'))
+  );
+
+  CREATE INDEX IF NOT EXISTS ifco_movimientos_tipo_idx  ON ifco_movimientos(tipo);
+  CREATE INDEX IF NOT EXISTS ifco_movimientos_fecha_idx ON ifco_movimientos(fecha);
+`);
+
+// Migraciones IFCO — agregan columnas nuevas a tablas existentes sin romper data
+(function migrarIfco() {
+  try {
+    // ── ifco_remitos_super: foto del remito al despacho (input para OCR)
+    const colsRem = db.prepare("PRAGMA table_info(ifco_remitos_super)").all().map(c => c.name);
+    if (!colsRem.includes('escaneo_original_path')) {
+      db.exec("ALTER TABLE ifco_remitos_super ADD COLUMN escaneo_original_path TEXT");
+      console.log("[DB] ifco_remitos_super.escaneo_original_path agregada");
+    }
+
+    // ── ifco_envios_proveedor: foto del remito firmado por el proveedor al recepcionar
+    const colsEnv = db.prepare("PRAGMA table_info(ifco_envios_proveedor)").all().map(c => c.name);
+    if (!colsEnv.includes('escaneo_recepcion_path')) {
+      db.exec("ALTER TABLE ifco_envios_proveedor ADD COLUMN escaneo_recepcion_path TEXT");
+      console.log("[DB] ifco_envios_proveedor.escaneo_recepcion_path agregada");
+    }
+
+    // ── ifco_movimientos: datos del retiro (sucursal IFCO + persona que retiró)
+    const colsMov = db.prepare("PRAGMA table_info(ifco_movimientos)").all().map(c => c.name);
+    if (!colsMov.includes('sucursal_ifco')) {
+      db.exec("ALTER TABLE ifco_movimientos ADD COLUMN sucursal_ifco TEXT");
+      console.log("[DB] ifco_movimientos.sucursal_ifco agregada");
+    }
+    if (!colsMov.includes('encargado_apellido')) {
+      db.exec("ALTER TABLE ifco_movimientos ADD COLUMN encargado_apellido TEXT");
+      console.log("[DB] ifco_movimientos.encargado_apellido agregada");
+    }
+    if (!colsMov.includes('encargado_nombre')) {
+      db.exec("ALTER TABLE ifco_movimientos ADD COLUMN encargado_nombre TEXT");
+      console.log("[DB] ifco_movimientos.encargado_nombre agregada");
+    }
+    if (!colsMov.includes('encargado_dni')) {
+      db.exec("ALTER TABLE ifco_movimientos ADD COLUMN encargado_dni TEXT");
+      console.log("[DB] ifco_movimientos.encargado_dni agregada");
+    }
+  } catch(e) { console.error("[DB] Error migrando IFCO:", e.message); }
+})();
