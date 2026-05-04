@@ -1667,5 +1667,43 @@ db.exec(`
   } catch(e) { console.error('[ADM] Error creando adm_proveedores:', e.message); }
 })();
 
+
+// ── MIGRACIÓN: Asientos Modelo ────────────────────────────────────────────
+(function migrarAsientosModelo() {
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS adm_asientos_modelo (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        nombre      TEXT NOT NULL,
+        descripcion TEXT,
+        activo      INTEGER DEFAULT 1,
+        creado_en   TEXT DEFAULT (datetime('now','localtime'))
+      );
+      CREATE TABLE IF NOT EXISTS adm_asientos_modelo_lineas (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        modelo_id   INTEGER NOT NULL REFERENCES adm_asientos_modelo(id) ON DELETE CASCADE,
+        cuenta_id   INTEGER NOT NULL REFERENCES pa_cuentas(id),
+        lado        TEXT NOT NULL CHECK(lado IN ('debe','haber')),
+        descripcion TEXT,
+        orden       INTEGER DEFAULT 0
+      );
+    `);
+    // Agregar columna asiento_modelo_id a adm_proveedores si no existe
+    const cols = db.prepare("PRAGMA table_info(adm_proveedores)").all();
+    if (!cols.find(c => c.name === 'asiento_modelo_id')) {
+      db.exec('ALTER TABLE adm_proveedores ADD COLUMN asiento_modelo_id INTEGER REFERENCES adm_asientos_modelo(id)');
+    }
+    // Agregar columna ref_compra_id a pa_asientos si no existe
+    const colsA = db.prepare("PRAGMA table_info(pa_asientos)").all();
+    if (!colsA.find(c => c.name === 'ref_compra_id')) {
+      db.exec('ALTER TABLE pa_asientos ADD COLUMN ref_compra_id INTEGER');
+    }
+    if (!colsA.find(c => c.name === 'ref_codigo')) {
+      db.exec("ALTER TABLE pa_asientos ADD COLUMN ref_codigo TEXT");
+    }
+    console.log('[ADM] Tablas asientos_modelo listas');
+  } catch(e) { console.error('[ADM] Error migrando asientos_modelo:', e.message); }
+})();
+
 export { db };
 export default db;

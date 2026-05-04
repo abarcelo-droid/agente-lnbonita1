@@ -168,6 +168,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     <div style="padding:6px 20px 2px 36px;font-size:9px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:rgba(255,255,255,.3)">Contabilidad</div>
     <div class="ni" data-sec="adm-asientos"><span class="dot db"></span>📒 Asientos Contables</div>
     <div class="ni" data-sec="adm-plan-cuentas"><span class="dot dc"></span>📊 Plan de Cuentas Contable</div>
+    <div class="ni" data-sec="adm-modelos"><span class="dot da"></span>📐 Asiento Modelo</div>
   </div>
 
   <div class="ni-grp" data-grp="pa-comerc">Comercialización<span class="ni-caret">▾</span></div>
@@ -2263,6 +2264,117 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   <div class="ab-modal-footer">
     <button class="btn bo" onclick="document.getElementById('adm-mb-proveedor').classList.remove('on')">Cancelar</button>
     <button class="btn bb" onclick="admProvGuardar()">Guardar</button>
+  </div>
+</div>
+</div>
+
+<!-- ─── ADM: ASIENTO MODELO ──────────────────────────────────────────── -->
+<div class="sec" id="sec-adm-modelos">
+<div class="ph">
+  <div>
+    <div class="ph-t">📐 Asiento Modelo</div>
+    <div class="ph-s">Plantillas contables por proveedor</div>
+  </div>
+  <button class="btn bb" onclick="admModAbrirNuevo()">+ Nuevo modelo</button>
+</div>
+<div class="pa-wrap">
+  <div class="ab-table-wrap">
+    <table class="pa-tbl">
+      <thead><tr>
+        <th>Nombre</th>
+        <th style="width:80px;text-align:center">Líneas</th>
+        <th style="width:200px">Descripción</th>
+        <th style="width:120px;text-align:right"></th>
+      </tr></thead>
+      <tbody id="adm-mod-tbody">
+        <tr><td colspan="4" class="emp">Cargando...</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+</div>
+
+<!-- ─── MODAL: Nuevo/Editar Asiento Modelo ───────────────────────────── -->
+<div class="ab-modal-overlay" id="adm-mb-modelo">
+<div class="ab-modal" style="width:720px;max-height:90vh;overflow-y:auto">
+  <div class="mhd">
+    <div><div class="mht" id="adm-mod-tit">Nuevo Asiento Modelo</div></div>
+    <button class="mcl" onclick="document.getElementById('adm-mb-modelo').classList.remove('on')">×</button>
+  </div>
+  <input type="hidden" id="adm-mod-id">
+  <div class="fg">
+    <div class="fl ff"><label>Nombre del modelo *</label><input id="adm-mod-nombre" placeholder="Ej: Factura Insumos Agrícolas"></div>
+    <div class="fl ff"><label>Descripción</label><input id="adm-mod-desc" placeholder="Descripción opcional"></div>
+  </div>
+
+  <!-- Tabla de líneas -->
+  <div style="margin-top:16px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+      <div style="font-size:12px;font-weight:600;color:var(--txt)">Líneas del modelo</div>
+      <button class="btn bo bs" onclick="admModAgregarLinea()" style="font-size:11px;padding:4px 10px">+ Línea</button>
+    </div>
+    <table class="pa-tbl" style="font-size:12px">
+      <thead><tr>
+        <th>Cuenta Contable</th>
+        <th style="width:100px;text-align:center">Lado</th>
+        <th style="width:180px">Descripción</th>
+        <th style="width:40px"></th>
+      </tr></thead>
+      <tbody id="adm-mod-lineas"></tbody>
+    </table>
+
+    <!-- Validación partida doble -->
+    <div id="adm-mod-doble" style="margin-top:10px;padding:8px 12px;border-radius:6px;font-size:12px;font-weight:600;display:none"></div>
+  </div>
+
+  <div class="ab-modal-footer">
+    <button class="btn bo" onclick="document.getElementById('adm-mb-modelo').classList.remove('on')">Cancelar</button>
+    <button class="btn bb" onclick="admModGuardar()">Guardar modelo</button>
+  </div>
+</div>
+</div>
+
+<!-- ─── MODAL: Asiento desde Factura ─────────────────────────────────── -->
+<div class="ab-modal-overlay" id="adm-mb-asiento-fac">
+<div class="ab-modal" style="width:740px;max-height:90vh;overflow-y:auto">
+  <div class="mhd">
+    <div>
+      <div class="mht">Asiento Contable</div>
+      <div style="font-size:11px;color:var(--mut)" id="adm-af-subtit"></div>
+    </div>
+    <button class="mcl" onclick="document.getElementById('adm-mb-asiento-fac').classList.remove('on')">×</button>
+  </div>
+  <input type="hidden" id="adm-af-compra-id">
+
+  <table class="pa-tbl" style="font-size:12px;margin-bottom:12px">
+    <thead><tr>
+      <th>Cuenta Contable</th>
+      <th style="width:120px;text-align:right">Debe</th>
+      <th style="width:120px;text-align:right">Haber</th>
+      <th style="width:180px">Descripción</th>
+      <th style="width:40px"></th>
+    </tr></thead>
+    <tbody id="adm-af-lineas"></tbody>
+    <tfoot>
+      <tr style="font-weight:600;font-size:13px">
+        <td>Totales</td>
+        <td style="text-align:right" id="adm-af-total-debe">$ 0.00</td>
+        <td style="text-align:right" id="adm-af-total-haber">$ 0.00</td>
+        <td colspan="2"></td>
+      </tr>
+    </tfoot>
+  </table>
+
+  <!-- Indicador partida doble -->
+  <div id="adm-af-doble" style="padding:8px 12px;border-radius:6px;font-size:13px;font-weight:700;margin-bottom:12px"></div>
+
+  <div style="font-size:11px;color:var(--mut);margin-bottom:8px">
+    Podés cambiar las cuentas si es necesario. Los montos vienen de la factura.
+  </div>
+
+  <div class="ab-modal-footer">
+    <button class="btn bo" onclick="document.getElementById('adm-mb-asiento-fac').classList.remove('on')">Cancelar</button>
+    <button class="btn bb" id="adm-af-btn-confirmar" onclick="admAfConfirmar()">✓ Confirmar asiento</button>
   </div>
 </div>
 </div>
@@ -6838,8 +6950,274 @@ function paCompBuscarProveedorIA(nombre) {
     }
   });
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 📐 ASIENTOS MODELO
+// ═══════════════════════════════════════════════════════════════════════════
+var ADM_MOD_CUENTAS = [];  // cache de cuentas contables
+
+function admModApi(path, opts) {
+  opts = opts || {};
+  opts.headers = opts.headers || { 'Content-Type': 'application/json' };
+  return fetch('/api/pa/cuentas' + path, opts)
+    .then(function(r){ return r.json(); })
+    .catch(function(){ return { ok: false, error: 'Error de red' }; });
+}
+
+function admModCargarCuentas(cb) {
+  if (ADM_MOD_CUENTAS.length) { cb(); return; }
+  admModApi('/cuentas').then(function(r) {
+    ADM_MOD_CUENTAS = (r.data || []).filter(function(c){ return c.activo; });
+    cb();
+  });
+}
+
+function admModCargar() {
+  admModApi('/modelos').then(function(r) {
+    var data = r.data || [];
+    var tb = document.getElementById('adm-mod-tbody');
+    if (!data.length) {
+      tb.innerHTML = '<tr><td colspan="4" class="emp">Sin modelos. <button class="btn bo bs" onclick="admModAbrirNuevo()">+ Crear el primero</button></td></tr>';
+      return;
+    }
+    tb.innerHTML = data.map(function(m) {
+      return '<tr>'
+        + '<td><strong>' + m.nombre + '</strong></td>'
+        + '<td style="text-align:center"><span class="pa-badge pa-azul-bg">' + (m.cant_lineas||0) + ' líneas</span></td>'
+        + '<td style="font-size:12px;color:var(--mut)">' + (m.descripcion||'—') + '</td>'
+        + '<td style="text-align:right">'
+          + '<button class="btn bo bs" onclick="admModEditar(' + m.id + ')" style="padding:3px 8px;font-size:11px;margin-right:4px">✏️</button>'
+          + '<button class="btn bd bs" onclick="admModEliminar(' + m.id + ')" style="padding:3px 8px;font-size:11px">🗑</button>'
+        + '</td></tr>';
+    }).join('');
+  });
+}
+
+function admModAbrirNuevo() {
+  document.getElementById('adm-mod-id').value = '';
+  document.getElementById('adm-mod-tit').textContent = 'Nuevo Asiento Modelo';
+  document.getElementById('adm-mod-nombre').value = '';
+  document.getElementById('adm-mod-desc').value = '';
+  document.getElementById('adm-mod-lineas').innerHTML = '';
+  document.getElementById('adm-mod-doble').style.display = 'none';
+  admModCargarCuentas(function() {
+    admModAgregarLinea('debe');
+    admModAgregarLinea('haber');
+    document.getElementById('adm-mb-modelo').classList.add('on');
+  });
+}
+
+function admModEditar(id) {
+  admModCargarCuentas(function() {
+    admModApi('/modelos/' + id).then(function(r) {
+      if (!r.ok) return toast(r.error || 'Error', 'er');
+      var m = r.data;
+      document.getElementById('adm-mod-id').value = m.id;
+      document.getElementById('adm-mod-tit').textContent = 'Editar — ' + m.nombre;
+      document.getElementById('adm-mod-nombre').value = m.nombre || '';
+      document.getElementById('adm-mod-desc').value = m.descripcion || '';
+      document.getElementById('adm-mod-lineas').innerHTML = '';
+      (m.lineas || []).forEach(function(l) { admModAgregarLinea(l.lado, l.cuenta_id, l.descripcion); });
+      admModValidarDoble();
+      document.getElementById('adm-mb-modelo').classList.add('on');
+    });
+  });
+}
+
+function admModAgregarLinea(lado, cuentaId, desc) {
+  lado = lado || 'debe';
+  var tbody = document.getElementById('adm-mod-lineas');
+  var idx = tbody.children.length;
+  var opts = ADM_MOD_CUENTAS.map(function(c) {
+    return '<option value="' + c.id + '"' + (c.id == cuentaId ? ' selected' : '') + '>'
+      + (c.codigo ? '[' + c.codigo + '] ' : '') + c.nombre + '</option>';
+  }).join('');
+  var tr = document.createElement('tr');
+  tr.innerHTML = '<td><select class="adm-mod-cuenta" onchange="admModValidarDoble()" style="width:100%">'
+    + '<option value="">— Seleccioná cuenta —</option>' + opts + '</select></td>'
+    + '<td style="text-align:center"><select class="adm-mod-lado" onchange="admModValidarDoble()" style="width:90px">'
+    + '<option value="debe"' + (lado==='debe'?' selected':'') + '>DEBE</option>'
+    + '<option value="haber"' + (lado==='haber'?' selected':'') + '>HABER</option>'
+    + '</select></td>'
+    + '<td><input class="adm-mod-linea-desc" placeholder="Descripción" value="' + (desc||'') + '" style="width:100%"></td>'
+    + '<td><button class="btn bd bs" onclick="this.closest('tr').remove();admModValidarDoble()" style="padding:2px 6px;font-size:11px">✕</button></td>';
+  tbody.appendChild(tr);
+  admModValidarDoble();
+}
+
+function admModValidarDoble() {
+  var lineas = admModLeerLineas();
+  var debeCant = lineas.filter(function(l){ return l.lado === 'debe'; }).length;
+  var haberCant = lineas.filter(function(l){ return l.lado === 'haber'; }).length;
+  var div = document.getElementById('adm-mod-doble');
+  if (lineas.length < 2) { div.style.display = 'none'; return; }
+  var ok = debeCant >= 1 && haberCant >= 1;
+  div.style.display = '';
+  if (ok) {
+    div.style.background = 'rgba(74,222,128,.12)';
+    div.style.color = 'var(--ok)';
+    div.textContent = '✅ Modelo válido — tiene líneas en el debe y en el haber';
+  } else {
+    div.style.background = 'rgba(239,68,68,.12)';
+    div.style.color = 'var(--err)';
+    div.textContent = '❌ El modelo necesita al menos 1 línea en el DEBE y 1 en el HABER';
+  }
+}
+
+function admModLeerLineas() {
+  var rows = document.querySelectorAll('#adm-mod-lineas tr');
+  var lineas = [];
+  rows.forEach(function(tr) {
+    var cuenta_id = tr.querySelector('.adm-mod-cuenta')?.value;
+    var lado = tr.querySelector('.adm-mod-lado')?.value;
+    var desc = tr.querySelector('.adm-mod-linea-desc')?.value?.trim();
+    if (cuenta_id && lado) lineas.push({ cuenta_id: parseInt(cuenta_id), lado: lado, descripcion: desc || null });
+  });
+  return lineas;
+}
+
+function admModGuardar() {
+  var id = document.getElementById('adm-mod-id').value;
+  var nombre = document.getElementById('adm-mod-nombre').value.trim();
+  var descripcion = document.getElementById('adm-mod-desc').value.trim() || null;
+  if (!nombre) return toast('El nombre es requerido', 'er');
+  var lineas = admModLeerLineas();
+  if (lineas.length < 2) return toast('El modelo necesita al menos 2 líneas', 'er');
+  var body = { nombre: nombre, descripcion: descripcion, lineas: lineas };
+  var url = id ? '/modelos/' + id : '/modelos';
+  var method = id ? 'PUT' : 'POST';
+  admModApi(url, { method: method, body: JSON.stringify(body) }).then(function(r) {
+    if (r.ok) {
+      toast('✓ Modelo guardado', 'ok');
+      document.getElementById('adm-mb-modelo').classList.remove('on');
+      admModCargar();
+    } else toast('Error: ' + (r.error || 'desconocido'), 'er');
+  });
+}
+
+function admModEliminar(id) {
+  if (!confirm('¿Eliminar este modelo?')) return;
+  admModApi('/modelos/' + id, { method: 'DELETE' }).then(function(r) {
+    if (r.ok) { toast('✓ Eliminado', 'ok'); admModCargar(); }
+    else toast(r.error || 'Error', 'er');
+  });
+}
+
+// ── Asiento desde Factura ──────────────────────────────────────────────
+var ADM_AF_LINEAS_DATA = [];
+
+function admAfAbrir(compraId, proveedorId, items, total, fecha, nroFac) {
+  document.getElementById('adm-af-compra-id').value = compraId;
+  document.getElementById('adm-af-subtit').textContent = 'Factura ' + (nroFac||'S/N') + ' — ' + (fecha||'');
+  ADM_AF_LINEAS_DATA = [];
+  admModCargarCuentas(function() {
+    // Cargar modelo del proveedor
+    admModApi('/cuentas?incluir_inactivas=0').then(function() {
+      fetch('/api/pa/proveedores/' + proveedorId)
+        .then(function(r){ return r.json(); })
+        .then(function(rp) {
+          var modeloId = rp.data?.asiento_modelo_id;
+          if (modeloId) {
+            admModApi('/modelos/' + modeloId).then(function(rm) {
+              var lineasModelo = rm.data?.lineas || [];
+              // Generar una línea por ítem según el modelo
+              var lineas = [];
+              items.forEach(function(item, i) {
+                var monto = parseFloat(item.precio_total || item.total || 0);
+                // Línea debe (primera del modelo que sea debe)
+                var lDebe = lineasModelo.find(function(l){ return l.lado === 'debe'; });
+                var lHaber = lineasModelo.find(function(l){ return l.lado === 'haber'; });
+                if (lDebe) lineas.push({ cuenta_id: lDebe.cuenta_id, cuenta_nombre: lDebe.cuenta_nombre, cuenta_codigo: lDebe.cuenta_codigo, debe: monto, haber: 0, descripcion: item.concepto || item.nombre || ('Ítem ' + (i+1)) });
+                if (lHaber) lineas.push({ cuenta_id: lHaber.cuenta_id, cuenta_nombre: lHaber.cuenta_nombre, cuenta_codigo: lHaber.cuenta_codigo, debe: 0, haber: monto, descripcion: item.concepto || item.nombre || ('Ítem ' + (i+1)) });
+              });
+              admAfRenderLineas(lineas);
+            });
+          } else {
+            // Sin modelo: líneas vacías con total
+            admAfRenderLineas([
+              { cuenta_id: '', cuenta_nombre: '', debe: total, haber: 0, descripcion: 'Total factura' },
+              { cuenta_id: '', cuenta_nombre: '', debe: 0, haber: total, descripcion: 'Total factura' }
+            ]);
+            toast('⚠ Este proveedor no tiene asiento modelo asignado', 'warn');
+          }
+          document.getElementById('adm-mb-asiento-fac').classList.add('on');
+        });
+    });
+  });
+}
+
+function admAfRenderLineas(lineas) {
+  ADM_AF_LINEAS_DATA = lineas;
+  var tbody = document.getElementById('adm-af-lineas');
+  var opts = ADM_MOD_CUENTAS.map(function(c) {
+    return '<option value="' + c.id + '">[' + (c.codigo||'') + '] ' + c.nombre + '</option>';
+  }).join('');
+  tbody.innerHTML = lineas.map(function(l, i) {
+    var selOpts = '<option value="">— Cuenta —</option>' + ADM_MOD_CUENTAS.map(function(c) {
+      return '<option value="' + c.id + '"' + (c.id == l.cuenta_id ? ' selected' : '') + '>[' + (c.codigo||'') + '] ' + c.nombre + '</option>';
+    }).join('');
+    return '<tr>'
+      + '<td><select onchange="admAfActualizar()" style="width:100%;font-size:11px">' + selOpts + '</select></td>'
+      + '<td style="text-align:right;font-family:monospace;font-size:12px">' + (l.debe > 0 ? '$ ' + l.debe.toFixed(2) : '—') + '</td>'
+      + '<td style="text-align:right;font-family:monospace;font-size:12px">' + (l.haber > 0 ? '$ ' + l.haber.toFixed(2) : '—') + '</td>'
+      + '<td><input value="' + (l.descripcion||'') + '" placeholder="Descripción" style="width:100%;font-size:11px" onchange="admAfActualizar()"></td>'
+      + '<td><button class="btn bd bs" onclick="this.closest('tr').remove();admAfActualizar()" style="padding:2px 6px;font-size:10px">✕</button></td>'
+      + '</tr>';
+  }).join('');
+  admAfActualizar();
+}
+
+function admAfActualizar() {
+  var rows = document.querySelectorAll('#adm-af-lineas tr');
+  var totalDebe = 0, totalHaber = 0;
+  rows.forEach(function(tr) {
+    var montoTd = tr.querySelectorAll('td');
+    var debe = parseFloat((montoTd[1]?.textContent||'').replace(/[^0-9.]/g,'')) || 0;
+    var haber = parseFloat((montoTd[2]?.textContent||'').replace(/[^0-9.]/g,'')) || 0;
+    totalDebe += debe; totalHaber += haber;
+  });
+  document.getElementById('adm-af-total-debe').textContent = '$ ' + totalDebe.toFixed(2);
+  document.getElementById('adm-af-total-haber').textContent = '$ ' + totalHaber.toFixed(2);
+  var div = document.getElementById('adm-af-doble');
+  var btn = document.getElementById('adm-af-btn-confirmar');
+  var ok = Math.abs(totalDebe - totalHaber) < 0.01 && totalDebe > 0;
+  if (ok) {
+    div.style.background = 'rgba(74,222,128,.12)'; div.style.color = 'var(--ok)';
+    div.textContent = '✅ Partida doble OK — Debe = Haber = $ ' + totalDebe.toFixed(2);
+    btn.disabled = false; btn.style.opacity = '';
+  } else {
+    div.style.background = 'rgba(239,68,68,.12)'; div.style.color = 'var(--err)';
+    div.textContent = '❌ No cuadra — Debe: $ ' + totalDebe.toFixed(2) + ' | Haber: $ ' + totalHaber.toFixed(2);
+    btn.disabled = true; btn.style.opacity = '.5';
+  }
+}
+
+function admAfConfirmar() {
+  var compraId = document.getElementById('adm-af-compra-id').value;
+  var rows = document.querySelectorAll('#adm-af-lineas tr');
+  var lineas = [];
+  rows.forEach(function(tr) {
+    var cuentaId = tr.querySelector('select')?.value;
+    var tds = tr.querySelectorAll('td');
+    var debe  = parseFloat((tds[1]?.textContent||'').replace(/[^0-9.]/g,'')) || 0;
+    var haber = parseFloat((tds[2]?.textContent||'').replace(/[^0-9.]/g,'')) || 0;
+    var desc  = tr.querySelector('input')?.value?.trim() || null;
+    if (cuentaId) lineas.push({ cuenta_id: parseInt(cuentaId), debe: debe, haber: haber, descripcion: desc });
+  });
+  admModApi('/modelos/desde-factura', { method: 'POST', body: JSON.stringify({ compra_id: parseInt(compraId), lineas: lineas }) })
+    .then(function(r) {
+      if (r.ok) {
+        toast('✅ Asiento ' + r.ref_codigo + ' generado correctamente', 'ok');
+        document.getElementById('adm-mb-asiento-fac').classList.remove('on');
+      } else toast('Error: ' + (r.error || 'desconocido'), 'er');
+    });
+}
 var _loadSecOriginal = loadSec;
 loadSec = function(s) {
+  if (s === 'adm-modelos') {
+    admModCargar();
+    return;
+  }
   if (s === 'adm-proveedores') {
     admProvCargar();
     return;
@@ -6954,6 +7332,7 @@ var USR_SECCIONES = [
   { grupo: 'Administración', items: [
     { id: 'adm-asientos',     label: '📒 Asientos Contables' },
     { id: 'adm-plan-cuentas', label: '📊 Plan de Cuentas ADM' },
+    { id: 'adm-modelos', label: '📐 Asiento Modelo' },
   ]},
   { grupo: 'Scout — App móvil (tabs)', items: [
     { id: 'scout-reportar', label: '📷 Reportar problema' },
