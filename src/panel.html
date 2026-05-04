@@ -2552,6 +2552,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
         <thead><tr>
           <th>Fecha</th><th>Tipo</th>
           <th style="text-align:right">Cantidad</th>
+          <th>Sucursal IFCO</th>
           <th>N° Remito</th>
           <th style="text-align:right">Costo</th>
           <th>Notas</th><th></th>
@@ -2589,10 +2590,34 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       <div class="mht">📥 Nuevo despacho a supermercado</div>
       <button class="mcl" onclick="document.getElementById('ifco-mb-remito').classList.remove('on')">x</button>
     </div>
-    <div style="background:var(--bg);border-radius:8px;padding:10px 12px;margin-bottom:14px;font-size:11px;color:var(--mut)">
-      Datos obligatorios para IFCO: <b>fecha</b>, <b>productor</b> (San Gerónimo SA), <b>destino</b> (cadena + sucursal), <b>total cajas</b>.
+
+    <!-- PASO 1: subir foto del remito (B-estricto) -->
+    <div id="ifco-r-step1">
+      <div style="background:var(--bg);border-radius:8px;padding:14px 16px;margin-bottom:14px;font-size:13px;color:var(--txt)">
+        📸 <b>Sacale foto al remito IFCO</b> antes de despacharlo. La foto se archiva y la IA prelee los campos por vos.
+      </div>
+      <div style="text-align:center;padding:30px 20px;border:2px dashed var(--bor);border-radius:10px;background:var(--bg)">
+        <input id="ifco-r-foto-input" type="file" accept="image/jpeg,image/png,image/webp" style="display:none" onchange="ifcoOnFotoDespacho(event)">
+        <button class="btn bb" style="font-size:14px;padding:10px 22px" onclick="document.getElementById('ifco-r-foto-input').click()">📷 Subir foto del remito</button>
+        <div style="margin-top:10px;font-size:11px;color:var(--mut)">JPG / PNG / WebP — hasta 10 MB</div>
+        <div style="margin-top:18px">
+          <a href="#" onclick="ifcoSaltarOcrDespacho();return false" style="font-size:12px;color:var(--mut);text-decoration:underline">Cargar manualmente sin foto</a>
+        </div>
+      </div>
+      <div id="ifco-r-loading" style="display:none;text-align:center;padding:20px;color:var(--burg);font-size:13px">
+        <div style="margin-bottom:8px">⏳ Leyendo el remito con IA…</div>
+        <div style="font-size:11px;color:var(--mut)">Esto suele tardar 5-10 segundos</div>
+      </div>
+      <div id="ifco-r-ocr-error" style="display:none;background:#fee2e2;border:1px solid #fca5a5;color:#991b1b;border-radius:8px;padding:10px 14px;margin-top:10px;font-size:12px"></div>
+      <div id="ifco-r-foto-preview" style="display:none;margin-top:12px;text-align:center"><img style="max-width:100%;max-height:200px;border-radius:8px;border:1px solid var(--bor)"></div>
     </div>
-    <div class="ab-grid ab-grid-2" style="gap:10px">
+
+    <!-- PASO 2: formulario con campos (pre-cargados desde OCR si aplica) -->
+    <div id="ifco-r-step2" style="display:none">
+      <div id="ifco-r-ocr-aviso" style="display:none;background:#d1fae5;border:1px solid #6ee7b7;border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:12px;color:#065f46">
+        ✓ Campos prellenados por la IA. <b>Revisá cada uno</b> antes de guardar.
+      </div>
+      <div class="ab-grid ab-grid-2" style="gap:10px">
       <div>
         <label style="font-size:11px;color:var(--mut);text-transform:uppercase">N° Remito IFCO *</label>
         <input id="ifco-r-numero" type="text" placeholder="00015-01639431"
@@ -2605,12 +2630,16 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
         <input id="ifco-r-fecha" type="date" style="width:100%;padding:8px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg)">
       </div>
       <div>
-        <label style="font-size:11px;color:var(--mut);text-transform:uppercase">Cadena / Cliente *</label>
-        <select id="ifco-r-cliente" onchange="ifcoOnClienteChange()" style="width:100%;padding:8px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg)">
-          <option value="">— Seleccionar dedicado —</option>
+        <label style="font-size:11px;color:var(--mut);text-transform:uppercase">Cadena *</label>
+        <select id="ifco-r-cliente" style="width:100%;padding:8px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg)">
+          <option value="">— Seleccionar —</option>
+          <option value="CENCOSUD">CENCOSUD</option>
+          <option value="CARREFOUR (INC SA)">CARREFOUR (INC SA)</option>
+          <option value="COTO">COTO</option>
+          <option value="LA COOPERATIVA OBRERA">LA COOPERATIVA OBRERA</option>
+          <option value="LA ANONIMA">LA ANONIMA</option>
+          <option value="CHANGO MAS (DORINKA)">CHANGO MAS (DORINKA)</option>
         </select>
-        <input id="ifco-r-empresa" type="text" placeholder="o escribir empresa libre"
-               style="width:100%;padding:8px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg);margin-top:6px">
       </div>
       <div>
         <label style="font-size:11px;color:var(--mut);text-transform:uppercase">Sucursal / Centro distribución</label>
@@ -2621,10 +2650,6 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
         <input id="ifco-r-cantidad" type="number" min="1" placeholder="50" style="width:100%;padding:8px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg)">
       </div>
       <div>
-        <label style="font-size:11px;color:var(--mut);text-transform:uppercase">Modelo</label>
-        <input id="ifco-r-modelo" type="text" value="6420" style="width:100%;padding:8px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg)">
-      </div>
-      <div style="grid-column:span 2">
         <label style="font-size:11px;color:var(--mut);text-transform:uppercase">Producto</label>
         <input id="ifco-r-producto" type="text" placeholder="Ej: mandarina malvina, naranja..." style="width:100%;padding:8px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg)">
       </div>
@@ -2648,15 +2673,23 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
         <label style="font-size:11px;color:var(--mut);text-transform:uppercase">Notas</label>
         <input id="ifco-r-notas" type="text" style="width:100%;padding:8px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg)">
       </div>
+      </div>
     </div>
-    <div class="ab-modal-footer" style="margin-top:18px;display:flex;justify-content:flex-end;gap:8px">
-      <button class="btn bo" onclick="document.getElementById('ifco-mb-remito').classList.remove('on')">Cancelar</button>
-      <button class="btn bb" onclick="ifcoGuardarRemito()">Guardar despacho</button>
+
+    <div class="ab-modal-footer" style="margin-top:18px;display:flex;justify-content:space-between;gap:8px;align-items:center">
+      <div id="ifco-r-volver" style="display:none">
+        <button class="btn bo" onclick="ifcoVolverPaso1Despacho()" style="font-size:12px">← Cambiar foto</button>
+      </div>
+      <div style="display:flex;gap:8px;margin-left:auto">
+        <button class="btn bo" onclick="document.getElementById('ifco-mb-remito').classList.remove('on')">Cancelar</button>
+        <button class="btn bb" id="ifco-r-btn-guardar" onclick="ifcoGuardarRemito()" style="display:none">Guardar despacho</button>
+      </div>
     </div>
   </div>
 </div>
 
-<!-- Modal: Sellar remito (con upload de foto) -->
+
+<!-- Modal: Sellar remito (con upload de foto + OCR) -->
 <div class="mb" id="ifco-mb-sellar">
   <div class="mbox">
     <div class="mhd">
@@ -2664,7 +2697,34 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       <button class="mcl" onclick="document.getElementById('ifco-mb-sellar').classList.remove('on')">x</button>
     </div>
     <div id="ifco-sellar-info" style="background:var(--bg);border-radius:8px;padding:10px 12px;margin-bottom:14px;font-size:12px;color:var(--mut)"></div>
-    <div class="ab-grid ab-grid-2" style="gap:10px">
+
+    <!-- PASO 1: subir foto del remito sellado -->
+    <div id="ifco-s-step1">
+      <div style="background:var(--bg);border-radius:8px;padding:14px 16px;margin-bottom:14px;font-size:13px;color:var(--txt)">
+        📸 <b>Subí la foto del remito ya sellado por el súper</b>. La IA prelee fecha, cantidades y datos del encargado.
+      </div>
+      <div style="text-align:center;padding:30px 20px;border:2px dashed var(--bor);border-radius:10px;background:var(--bg)">
+        <input id="ifco-s-foto-input" type="file" accept="image/jpeg,image/png,image/webp" style="display:none" onchange="ifcoOnFotoSellado(event)">
+        <button class="btn bb" style="font-size:14px;padding:10px 22px" onclick="document.getElementById('ifco-s-foto-input').click()">📷 Subir foto del remito sellado</button>
+        <div style="margin-top:10px;font-size:11px;color:var(--mut)">JPG / PNG / WebP — hasta 10 MB</div>
+        <div style="margin-top:18px">
+          <a href="#" onclick="ifcoSaltarOcrSellado();return false" style="font-size:12px;color:var(--mut);text-decoration:underline">Cargar manualmente sin foto</a>
+        </div>
+      </div>
+      <div id="ifco-s-loading" style="display:none;text-align:center;padding:20px;color:var(--burg);font-size:13px">
+        <div style="margin-bottom:8px">⏳ Leyendo el remito con IA…</div>
+        <div style="font-size:11px;color:var(--mut)">Esto suele tardar 5-10 segundos</div>
+      </div>
+      <div id="ifco-s-ocr-error" style="display:none;background:#fee2e2;border:1px solid #fca5a5;color:#991b1b;border-radius:8px;padding:10px 14px;margin-top:10px;font-size:12px"></div>
+      <div id="ifco-s-foto-preview" style="display:none;margin-top:12px;text-align:center"><img style="max-width:100%;max-height:200px;border-radius:8px;border:1px solid var(--bor)"></div>
+    </div>
+
+    <!-- PASO 2: formulario -->
+    <div id="ifco-s-step2" style="display:none">
+      <div id="ifco-s-ocr-aviso" style="display:none;background:#d1fae5;border:1px solid #6ee7b7;border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:12px;color:#065f46">
+        ✓ Campos prellenados por la IA. <b>Revisá cada uno</b> antes de guardar.
+      </div>
+      <div class="ab-grid ab-grid-2" style="gap:10px">
       <div>
         <label style="font-size:11px;color:var(--mut);text-transform:uppercase">Fecha sellado *</label>
         <input id="ifco-s-fecha" type="date" style="width:100%;padding:8px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg)">
@@ -2690,16 +2750,17 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
         <label style="font-size:11px;color:var(--mut);text-transform:uppercase">DNI</label>
         <input id="ifco-s-dni" type="text" style="width:100%;padding:8px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg)">
       </div>
-      <div></div>
-      <div style="grid-column:span 2">
-        <label style="font-size:11px;color:var(--mut);text-transform:uppercase">Foto del remito sellado (copia celeste)</label>
-        <input id="ifco-s-foto" type="file" accept="image/*,application/pdf" style="width:100%;padding:8px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg);font-size:13px">
-        <div style="font-size:11px;color:var(--mut);margin-top:4px">Necesario para presentar a IFCO. Sacale foto al remito sellado y subila acá.</div>
       </div>
     </div>
-    <div class="ab-modal-footer" style="margin-top:18px;display:flex;justify-content:flex-end;gap:8px">
-      <button class="btn bo" onclick="document.getElementById('ifco-mb-sellar').classList.remove('on')">Cancelar</button>
-      <button class="btn bb" onclick="ifcoGuardarSellado()">Guardar sellado</button>
+
+    <div class="ab-modal-footer" style="margin-top:18px;display:flex;justify-content:space-between;gap:8px;align-items:center">
+      <div id="ifco-s-volver" style="display:none">
+        <button class="btn bo" onclick="ifcoVolverPaso1Sellado()" style="font-size:12px">← Cambiar foto</button>
+      </div>
+      <div style="display:flex;gap:8px;margin-left:auto">
+        <button class="btn bo" onclick="document.getElementById('ifco-mb-sellar').classList.remove('on')">Cancelar</button>
+        <button class="btn bb" id="ifco-s-btn-guardar" onclick="ifcoGuardarSellado()" style="display:none">Guardar sellado</button>
+      </div>
     </div>
   </div>
 </div>
@@ -2752,10 +2813,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
         <label style="font-size:11px;color:var(--mut);text-transform:uppercase">Cantidad enviada *</label>
         <input id="ifco-e-cant" type="number" min="1" style="width:100%;padding:8px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg)">
       </div>
-      <div>
-        <label style="font-size:11px;color:var(--mut);text-transform:uppercase">Modelo</label>
-        <input id="ifco-e-modelo" type="text" value="6420" style="width:100%;padding:8px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg)">
-      </div>
+      <div></div>
       <div style="grid-column:span 2">
         <label style="font-size:11px;color:var(--mut);text-transform:uppercase">Notas</label>
         <input id="ifco-e-notas" type="text" style="width:100%;padding:8px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg)">
@@ -2789,6 +2847,11 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
         <label style="font-size:11px;color:var(--mut);text-transform:uppercase">Notas</label>
         <input id="ifco-rcp-notas" type="text" placeholder="Ej: faltaron 3 que se rompieron en el transporte" style="width:100%;padding:8px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg)">
       </div>
+      <div style="grid-column:span 2">
+        <label style="font-size:11px;color:var(--mut);text-transform:uppercase">Foto del remito firmado por el proveedor</label>
+        <input id="ifco-rcp-foto" type="file" accept="image/jpeg,image/png,image/webp" style="width:100%;padding:8px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg);font-size:13px">
+        <div style="font-size:11px;color:var(--mut);margin-top:4px">Subí la foto del remito SG-P firmado por quien recibió en el proveedor.</div>
+      </div>
     </div>
     <div class="ab-modal-footer" style="margin-top:18px;display:flex;justify-content:flex-end;gap:8px">
       <button class="btn bo" onclick="document.getElementById('ifco-mb-recep').classList.remove('on')">Cancelar</button>
@@ -2817,9 +2880,32 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
         <label style="font-size:11px;color:var(--mut);text-transform:uppercase">N° Remito IFCO</label>
         <input id="ifco-m-nrem" type="text" placeholder="del documento de retiro" style="width:100%;padding:8px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg);font-family:monospace">
       </div>
-      <div>
+      <!-- Solo para RETIRO: sucursal IFCO -->
+      <div class="ifco-mov-retiro-only">
+        <label style="font-size:11px;color:var(--mut);text-transform:uppercase">Sucursal IFCO *</label>
+        <select id="ifco-m-sucursal" style="width:100%;padding:8px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg)">
+          <option value="">— Seleccionar —</option>
+          <option value="Buenos Aires">Buenos Aires</option>
+          <option value="Mendoza">Mendoza</option>
+        </select>
+      </div>
+      <!-- Solo para PÉRDIDA: costo -->
+      <div class="ifco-mov-perdida-only">
         <label style="font-size:11px;color:var(--mut);text-transform:uppercase">Costo total</label>
         <input id="ifco-m-costo" type="number" step="0.01" min="0" placeholder="0" style="width:100%;padding:8px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg)">
+      </div>
+      <!-- Solo para RETIRO: encargado -->
+      <div class="ifco-mov-retiro-only">
+        <label style="font-size:11px;color:var(--mut);text-transform:uppercase">Quien retiró — apellido</label>
+        <input id="ifco-m-enc-ap" type="text" style="width:100%;padding:8px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg)">
+      </div>
+      <div class="ifco-mov-retiro-only">
+        <label style="font-size:11px;color:var(--mut);text-transform:uppercase">Quien retiró — nombre</label>
+        <input id="ifco-m-enc-nom" type="text" style="width:100%;padding:8px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg)">
+      </div>
+      <div class="ifco-mov-retiro-only">
+        <label style="font-size:11px;color:var(--mut);text-transform:uppercase">Quien retiró — DNI</label>
+        <input id="ifco-m-enc-dni" type="text" style="width:100%;padding:8px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg)">
       </div>
       <div style="grid-column:span 2">
         <label style="font-size:11px;color:var(--mut);text-transform:uppercase">Notas</label>
@@ -13016,7 +13102,8 @@ function paCuRenderLog(log) {
 // MÓDULO IFCO — Frontend (panel General > Abasto > IFCOs)
 // ════════════════════════════════════════════════════════════════════════════
 
-const IFCO = { _provs: [], _cli: [], _talonActivo: null, _selRemito: null, _selEnvio: null };
+const IFCO = { _provs: [], _cli: [], _talonActivo: null, _selRemito: null, _selEnvio: null,
+  _ocr: { enabled: false }, _fotoDespachoPath: null, _fotoSelladoPath: null, _movTipo: null };
 
 function _ifcoFmt(n)     { return (n == null ? '0' : Number(n).toLocaleString('es-AR')); }
 function _ifcoFecha(s)   { if (!s) return '—'; const d = new Date(s); if (isNaN(d)) return s; return d.toLocaleDateString('es-AR'); }
@@ -13040,6 +13127,8 @@ async function ifcoCargar() {
   // Cargar catálogos auxiliares (cache)
   try { IFCO._provs = await _ifcoFetch('/api/ifco/proveedores'); } catch(e) { IFCO._provs = []; }
   try { IFCO._cli   = await _ifcoFetch('/api/ifco/clientes-dedicados'); } catch(e) { IFCO._cli = []; }
+  // Estado del OCR (bandera OCR_ENABLED en backend)
+  try { IFCO._ocr = await _ifcoFetch('/api/ifco/ocr/status'); } catch(e) { IFCO._ocr = { enabled: false }; }
   // Tab por defecto
   ifcoTab('resumen');
 }
@@ -13182,21 +13271,124 @@ async function ifcoCargarRemitos() {
 }
 
 function ifcoAbrirNuevoRemito() {
-  // Reset
-  ['ifco-r-numero','ifco-r-empresa','ifco-r-sucursal','ifco-r-cantidad','ifco-r-producto','ifco-r-transp','ifco-r-encprov-ap','ifco-r-encprov-nom','ifco-r-encprov-dni','ifco-r-notas']
+  // Reset campos
+  ['ifco-r-numero','ifco-r-sucursal','ifco-r-cantidad','ifco-r-producto','ifco-r-transp','ifco-r-encprov-ap','ifco-r-encprov-nom','ifco-r-encprov-dni','ifco-r-notas']
     .forEach(function(id){ const el = document.getElementById(id); if (el) el.value = ''; });
   document.getElementById('ifco-r-fecha').value = _ifcoToday();
-  document.getElementById('ifco-r-modelo').value = '6420';
+  document.getElementById('ifco-r-cliente').value = '';
   document.getElementById('ifco-r-sugerencia').textContent = '';
-  // Llenar select de clientes dedicados
-  const sel = document.getElementById('ifco-r-cliente');
-  sel.innerHTML = '<option value="">— Seleccionar dedicado —</option>' +
-    IFCO._cli.map(function(c){
-      return '<option value="'+c.id+'" data-empresa="'+_ifcoEsc(c.empresa||c.supermercado||'')+'" data-tel="'+_ifcoEsc(c.telefono||'')+'">'+_ifcoEsc(c.empresa||c.supermercado||c.nombre)+'</option>';
-    }).join('');
+  // Reset state foto
+  IFCO._fotoDespachoPath = null;
+  document.getElementById('ifco-r-foto-input').value = '';
+  // Reset paneles
+  document.getElementById('ifco-r-step1').style.display = 'block';
+  document.getElementById('ifco-r-step2').style.display = 'none';
+  document.getElementById('ifco-r-loading').style.display = 'none';
+  document.getElementById('ifco-r-ocr-error').style.display = 'none';
+  document.getElementById('ifco-r-foto-preview').style.display = 'none';
+  document.getElementById('ifco-r-ocr-aviso').style.display = 'none';
+  document.getElementById('ifco-r-volver').style.display = 'none';
+  document.getElementById('ifco-r-btn-guardar').style.display = 'none';
   document.getElementById('ifco-mb-remito').classList.add('on');
-  // Sugerir n° automáticamente
+}
+
+function ifcoVolverPaso1Despacho() {
+  document.getElementById('ifco-r-step1').style.display = 'block';
+  document.getElementById('ifco-r-step2').style.display = 'none';
+  document.getElementById('ifco-r-volver').style.display = 'none';
+  document.getElementById('ifco-r-btn-guardar').style.display = 'none';
+  document.getElementById('ifco-r-foto-input').value = '';
+  document.getElementById('ifco-r-foto-preview').style.display = 'none';
+  document.getElementById('ifco-r-ocr-error').style.display = 'none';
+}
+
+function ifcoSaltarOcrDespacho() {
+  // Mostrar form sin OCR ni foto
+  IFCO._fotoDespachoPath = null;
+  document.getElementById('ifco-r-step1').style.display = 'none';
+  document.getElementById('ifco-r-step2').style.display = 'block';
+  document.getElementById('ifco-r-volver').style.display = 'block';
+  document.getElementById('ifco-r-btn-guardar').style.display = 'inline-block';
+  document.getElementById('ifco-r-ocr-aviso').style.display = 'none';
+  // Sugerir n° del talonario activo
   ifcoSugerirNumero(document.getElementById('ifco-r-numero'));
+}
+
+async function ifcoOnFotoDespacho(ev) {
+  const file = ev.target.files[0];
+  if (!file) return;
+  // Preview
+  const prev = document.getElementById('ifco-r-foto-preview');
+  prev.style.display = 'block';
+  prev.querySelector('img').src = URL.createObjectURL(file);
+
+  // Si OCR está habilitado: subir, leer, prellenar
+  if (IFCO._ocr && IFCO._ocr.enabled) {
+    document.getElementById('ifco-r-loading').style.display = 'block';
+    document.getElementById('ifco-r-ocr-error').style.display = 'none';
+    try {
+      const fd = new FormData();
+      fd.append('foto', file);
+      fd.append('tipo', 'despacho');
+      const r = await fetch('/api/ifco/ocr/remito-super', { method: 'POST', credentials: 'include', body: fd });
+      const data = await r.json();
+      document.getElementById('ifco-r-loading').style.display = 'none';
+      if (!r.ok || !data.datos) {
+        const msg = (data && data.error) || ('HTTP ' + r.status);
+        document.getElementById('ifco-r-ocr-error').textContent = '⚠️ La IA no pudo leer la foto: ' + msg + '. Cargá los campos manualmente.';
+        document.getElementById('ifco-r-ocr-error').style.display = 'block';
+        // Igual avanzamos al paso 2 con la foto guardada
+        IFCO._fotoDespachoPath = data && data.escaneo_path ? data.escaneo_path : null;
+        ifcoSaltarOcrDespacho();
+        document.getElementById('ifco-r-ocr-aviso').style.display = 'none';
+        return;
+      }
+      IFCO._fotoDespachoPath = data.escaneo_path;
+      const d = data.datos;
+      // Prellenar
+      if (d.n_remito_ifco)           document.getElementById('ifco-r-numero').value = d.n_remito_ifco;
+      if (d.fecha_emision)           document.getElementById('ifco-r-fecha').value = d.fecha_emision;
+      if (d.empresa)                 document.getElementById('ifco-r-cliente').value = _ifcoMatchCadena(d.empresa);
+      if (d.sucursal)                document.getElementById('ifco-r-sucursal').value = d.sucursal;
+      if (d.cantidad_despachada)     document.getElementById('ifco-r-cantidad').value = d.cantidad_despachada;
+      if (d.producto)                document.getElementById('ifco-r-producto').value = d.producto;
+      if (d.transportista)           document.getElementById('ifco-r-transp').value = d.transportista;
+      if (d.encargado_prov_apellido) document.getElementById('ifco-r-encprov-ap').value = d.encargado_prov_apellido;
+      if (d.encargado_prov_nombre)   document.getElementById('ifco-r-encprov-nom').value = d.encargado_prov_nombre;
+      if (d.encargado_prov_dni)      document.getElementById('ifco-r-encprov-dni').value = d.encargado_prov_dni;
+      // Avanzar paso 2 con aviso
+      document.getElementById('ifco-r-step1').style.display = 'none';
+      document.getElementById('ifco-r-step2').style.display = 'block';
+      document.getElementById('ifco-r-volver').style.display = 'block';
+      document.getElementById('ifco-r-btn-guardar').style.display = 'inline-block';
+      document.getElementById('ifco-r-ocr-aviso').style.display = 'block';
+    } catch(e) {
+      document.getElementById('ifco-r-loading').style.display = 'none';
+      document.getElementById('ifco-r-ocr-error').textContent = '⚠️ Error: ' + e.message + '. Cargá los campos manualmente.';
+      document.getElementById('ifco-r-ocr-error').style.display = 'block';
+      ifcoSaltarOcrDespacho();
+    }
+  } else {
+    // OCR off: igual subir la foto al guardar (no acá). Solo avanzar al paso 2.
+    // Guardamos el File object en una variable temporal para el POST final
+    IFCO._fotoDespachoFile = file;
+    ifcoSaltarOcrDespacho();
+  }
+}
+
+// Match best-effort de la empresa devuelta por OCR contra la lista hardcoded
+function _ifcoMatchCadena(textoOcr) {
+  if (!textoOcr) return '';
+  const opts = ['CENCOSUD','CARREFOUR (INC SA)','COTO','LA COOPERATIVA OBRERA','LA ANONIMA','CHANGO MAS (DORINKA)'];
+  if (opts.indexOf(textoOcr) >= 0) return textoOcr;
+  const t = String(textoOcr).toUpperCase();
+  if (t.indexOf('CENCOSUD') >= 0 || t.indexOf('CONCOSUD') >= 0 || t.indexOf('JUMBO') >= 0 || t.indexOf('DISCO') >= 0 || t.indexOf('VEA') >= 0) return 'CENCOSUD';
+  if (t.indexOf('CARREFOUR') >= 0 || t.indexOf('INC SA') >= 0) return 'CARREFOUR (INC SA)';
+  if (t.indexOf('COTO') >= 0) return 'COTO';
+  if (t.indexOf('COOPERATIVA OBRERA') >= 0 || t.indexOf('LA COOPE') >= 0) return 'LA COOPERATIVA OBRERA';
+  if (t.indexOf('ANONIMA') >= 0 || t.indexOf('ANÓNIMA') >= 0) return 'LA ANONIMA';
+  if (t.indexOf('CHANGO MAS') >= 0 || t.indexOf('CHANGOMAS') >= 0 || t.indexOf('DORINKA') >= 0 || t.indexOf('WALMART') >= 0) return 'CHANGO MAS (DORINKA)';
+  return '';
 }
 
 async function ifcoSugerirNumero(input) {
@@ -13218,38 +13410,43 @@ async function ifcoSugerirNumero(input) {
   } catch(e) { /* silent */ }
 }
 
-function ifcoOnClienteChange() {
-  const sel = document.getElementById('ifco-r-cliente');
-  const opt = sel.options[sel.selectedIndex];
-  if (opt && opt.value) {
-    document.getElementById('ifco-r-empresa').value = opt.getAttribute('data-empresa') || '';
-  }
-}
+function ifcoOnClienteChange() { /* placeholder, ya no se usa */ }
 
 async function ifcoGuardarRemito() {
-  const body = {
-    n_remito_ifco:           document.getElementById('ifco-r-numero').value.trim(),
-    fecha_emision:           document.getElementById('ifco-r-fecha').value,
-    cliente_id:              document.getElementById('ifco-r-cliente').value || null,
-    cliente_telefono:        null,
-    empresa:                 document.getElementById('ifco-r-empresa').value.trim() || null,
-    sucursal:                document.getElementById('ifco-r-sucursal').value.trim() || null,
-    modelo:                  document.getElementById('ifco-r-modelo').value.trim() || '6420',
-    cantidad_despachada:     parseInt(document.getElementById('ifco-r-cantidad').value),
-    producto:                document.getElementById('ifco-r-producto').value.trim() || null,
-    transportista:           document.getElementById('ifco-r-transp').value.trim() || null,
-    encargado_prov_apellido: document.getElementById('ifco-r-encprov-ap').value.trim() || null,
-    encargado_prov_nombre:   document.getElementById('ifco-r-encprov-nom').value.trim() || null,
-    encargado_prov_dni:      document.getElementById('ifco-r-encprov-dni').value.trim() || null,
-    talonario_id:            IFCO._talonActivo || null,
-    notas:                   document.getElementById('ifco-r-notas').value.trim() || null
-  };
+  const cadena = document.getElementById('ifco-r-cliente').value;
+  if (!cadena) { alert('Elegí la cadena (CENCOSUD, CARREFOUR, etc.)'); return; }
+  const numero = document.getElementById('ifco-r-numero').value.trim();
+  if (!numero) { alert('Falta el N° de remito IFCO'); return; }
+  const cant = parseInt(document.getElementById('ifco-r-cantidad').value);
+  if (!cant || cant <= 0) { alert('Cantidad inválida'); return; }
+
+  const fd = new FormData();
+  fd.append('n_remito_ifco', numero);
+  fd.append('fecha_emision', document.getElementById('ifco-r-fecha').value);
+  fd.append('empresa', cadena);
+  fd.append('sucursal', document.getElementById('ifco-r-sucursal').value.trim());
+  fd.append('cantidad_despachada', String(cant));
+  fd.append('producto', document.getElementById('ifco-r-producto').value.trim());
+  fd.append('transportista', document.getElementById('ifco-r-transp').value.trim());
+  fd.append('encargado_prov_apellido', document.getElementById('ifco-r-encprov-ap').value.trim());
+  fd.append('encargado_prov_nombre', document.getElementById('ifco-r-encprov-nom').value.trim());
+  fd.append('encargado_prov_dni', document.getElementById('ifco-r-encprov-dni').value.trim());
+  fd.append('notas', document.getElementById('ifco-r-notas').value.trim());
+  if (IFCO._talonActivo) fd.append('talonario_id', String(IFCO._talonActivo));
+
+  // Foto: prioridad 1) archivo nuevo (OCR off), 2) path ya conocida (OCR on)
+  if (IFCO._fotoDespachoFile) {
+    fd.append('escaneo_original', IFCO._fotoDespachoFile);
+  } else if (IFCO._fotoDespachoPath) {
+    fd.append('escaneo_original_path', IFCO._fotoDespachoPath);
+  }
+
   try {
-    await _ifcoFetch('/api/ifco/remitos', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body)
-    });
+    const r = await fetch('/api/ifco/remitos', { method: 'POST', credentials: 'include', body: fd });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Error');
+    IFCO._fotoDespachoFile = null;
+    IFCO._fotoDespachoPath = null;
     document.getElementById('ifco-mb-remito').classList.remove('on');
     ifcoTab('remitos');
   } catch(e) {
@@ -13270,9 +13467,97 @@ async function ifcoAbrirSellar(id) {
     document.getElementById('ifco-s-ap').value    = r.encargado_super_apellido || '';
     document.getElementById('ifco-s-nom').value   = r.encargado_super_nombre   || '';
     document.getElementById('ifco-s-dni').value   = r.encargado_super_dni      || '';
-    document.getElementById('ifco-s-foto').value  = '';
+    // Reset state foto sellado
+    IFCO._fotoSelladoPath = null;
+    IFCO._fotoSelladoFile = null;
+    document.getElementById('ifco-s-foto-input').value = '';
+    document.getElementById('ifco-s-step1').style.display = 'block';
+    document.getElementById('ifco-s-step2').style.display = 'none';
+    document.getElementById('ifco-s-loading').style.display = 'none';
+    document.getElementById('ifco-s-ocr-error').style.display = 'none';
+    document.getElementById('ifco-s-foto-preview').style.display = 'none';
+    document.getElementById('ifco-s-ocr-aviso').style.display = 'none';
+    document.getElementById('ifco-s-volver').style.display = 'none';
+    document.getElementById('ifco-s-btn-guardar').style.display = 'none';
     document.getElementById('ifco-mb-sellar').classList.add('on');
   } catch(e) { alert('Error: ' + e.message); }
+}
+
+function ifcoVolverPaso1Sellado() {
+  document.getElementById('ifco-s-step1').style.display = 'block';
+  document.getElementById('ifco-s-step2').style.display = 'none';
+  document.getElementById('ifco-s-volver').style.display = 'none';
+  document.getElementById('ifco-s-btn-guardar').style.display = 'none';
+  document.getElementById('ifco-s-foto-input').value = '';
+  document.getElementById('ifco-s-foto-preview').style.display = 'none';
+  document.getElementById('ifco-s-ocr-error').style.display = 'none';
+}
+
+function ifcoSaltarOcrSellado() {
+  IFCO._fotoSelladoPath = null;
+  IFCO._fotoSelladoFile = null;
+  document.getElementById('ifco-s-step1').style.display = 'none';
+  document.getElementById('ifco-s-step2').style.display = 'block';
+  document.getElementById('ifco-s-volver').style.display = 'block';
+  document.getElementById('ifco-s-btn-guardar').style.display = 'inline-block';
+  document.getElementById('ifco-s-ocr-aviso').style.display = 'none';
+}
+
+async function ifcoOnFotoSellado(ev) {
+  const file = ev.target.files[0];
+  if (!file) return;
+  const prev = document.getElementById('ifco-s-foto-preview');
+  prev.style.display = 'block';
+  prev.querySelector('img').src = URL.createObjectURL(file);
+
+  if (IFCO._ocr && IFCO._ocr.enabled) {
+    document.getElementById('ifco-s-loading').style.display = 'block';
+    document.getElementById('ifco-s-ocr-error').style.display = 'none';
+    try {
+      const fd = new FormData();
+      fd.append('foto', file);
+      fd.append('tipo', 'sellado');
+      const r = await fetch('/api/ifco/ocr/remito-super', { method: 'POST', credentials: 'include', body: fd });
+      const data = await r.json();
+      document.getElementById('ifco-s-loading').style.display = 'none';
+      if (!r.ok || !data.datos) {
+        const msg = (data && data.error) || ('HTTP ' + r.status);
+        document.getElementById('ifco-s-ocr-error').textContent = '⚠️ La IA no pudo leer la foto: ' + msg + '. Cargá los campos manualmente.';
+        document.getElementById('ifco-s-ocr-error').style.display = 'block';
+        IFCO._fotoSelladoPath = data && data.escaneo_path ? data.escaneo_path : null;
+        ifcoSaltarOcrSellado();
+        document.getElementById('ifco-s-ocr-aviso').style.display = 'none';
+        return;
+      }
+      IFCO._fotoSelladoPath = data.escaneo_path;
+      const d = data.datos;
+      if (d.fecha_sellado)            document.getElementById('ifco-s-fecha').value = d.fecha_sellado;
+      if (d.cantidad_recibida != null) document.getElementById('ifco-s-recib').value = d.cantidad_recibida;
+      if (d.cantidad_rechazada != null) document.getElementById('ifco-s-rech').value = d.cantidad_rechazada;
+      if (d.encargado_super_apellido) document.getElementById('ifco-s-ap').value = d.encargado_super_apellido;
+      if (d.encargado_super_nombre)   document.getElementById('ifco-s-nom').value = d.encargado_super_nombre;
+      if (d.encargado_super_dni)      document.getElementById('ifco-s-dni').value = d.encargado_super_dni;
+      // Si la IA devolvió n° de remito, validamos que coincida con el seleccionado
+      if (d.n_remito_ifco && IFCO._selRemito && d.n_remito_ifco !== IFCO._selRemito.n_remito_ifco) {
+        document.getElementById('ifco-s-ocr-error').textContent =
+          '⚠️ La foto parece ser de otro remito (' + d.n_remito_ifco + '). Verificá que estés sellando el correcto (' + IFCO._selRemito.n_remito_ifco + ').';
+        document.getElementById('ifco-s-ocr-error').style.display = 'block';
+      }
+      document.getElementById('ifco-s-step1').style.display = 'none';
+      document.getElementById('ifco-s-step2').style.display = 'block';
+      document.getElementById('ifco-s-volver').style.display = 'block';
+      document.getElementById('ifco-s-btn-guardar').style.display = 'inline-block';
+      document.getElementById('ifco-s-ocr-aviso').style.display = 'block';
+    } catch(e) {
+      document.getElementById('ifco-s-loading').style.display = 'none';
+      document.getElementById('ifco-s-ocr-error').textContent = '⚠️ Error: ' + e.message + '. Cargá los campos manualmente.';
+      document.getElementById('ifco-s-ocr-error').style.display = 'block';
+      ifcoSaltarOcrSellado();
+    }
+  } else {
+    IFCO._fotoSelladoFile = file;
+    ifcoSaltarOcrSellado();
+  }
 }
 
 async function ifcoGuardarSellado() {
@@ -13284,14 +13569,20 @@ async function ifcoGuardarSellado() {
   fd.append('encargado_super_apellido', document.getElementById('ifco-s-ap').value);
   fd.append('encargado_super_nombre',   document.getElementById('ifco-s-nom').value);
   fd.append('encargado_super_dni',      document.getElementById('ifco-s-dni').value);
-  const file = document.getElementById('ifco-s-foto').files[0];
-  if (file) fd.append('escaneo', file);
+  // Foto: prioridad 1) archivo subido manualmente (OCR off), 2) ya en disco vía OCR
+  if (IFCO._fotoSelladoFile) {
+    fd.append('escaneo', IFCO._fotoSelladoFile);
+  } else if (IFCO._fotoSelladoPath) {
+    fd.append('escaneo_path', IFCO._fotoSelladoPath);
+  }
   try {
     const r = await fetch('/api/ifco/remitos/' + IFCO._selRemito.id + '/sellar', {
       method: 'PATCH', credentials: 'include', body: fd
     });
     const data = await r.json();
     if (!r.ok) throw new Error(data.error || 'Error');
+    IFCO._fotoSelladoFile = null;
+    IFCO._fotoSelladoPath = null;
     document.getElementById('ifco-mb-sellar').classList.remove('on');
     ifcoCargarRemitos();
   } catch(e) {
@@ -13394,7 +13685,6 @@ async function ifcoCargarEnvios() {
 function ifcoAbrirNuevoEnvio() {
   document.getElementById('ifco-e-fecha').value = _ifcoToday();
   document.getElementById('ifco-e-cant').value = '';
-  document.getElementById('ifco-e-modelo').value = '6420';
   document.getElementById('ifco-e-notas').value = '';
   const sel = document.getElementById('ifco-e-prov');
   sel.innerHTML = '<option value="">— Seleccionar —</option>' +
@@ -13409,7 +13699,7 @@ async function ifcoGuardarEnvio() {
     fecha_envio:      document.getElementById('ifco-e-fecha').value,
     proveedor_id:     document.getElementById('ifco-e-prov').value,
     cantidad_enviada: parseInt(document.getElementById('ifco-e-cant').value),
-    modelo:           document.getElementById('ifco-e-modelo').value.trim() || '6420',
+    modelo:           '6420',
     notas:            document.getElementById('ifco-e-notas').value.trim() || null
   };
   if (!body.proveedor_id) { alert('Elegí un proveedor'); return; }
@@ -13429,6 +13719,11 @@ async function ifcoGuardarEnvio() {
 async function ifcoImprimirEnvio(id) {
   try {
     const e = await _ifcoFetch('/api/ifco/envios/' + id);
+    let saldoTotal = e.cantidad_enviada;
+    try {
+      const s = await _ifcoFetch('/api/ifco/saldo-proveedor/' + e.proveedor_id);
+      saldoTotal = s.pendiente || 0;
+    } catch(err) { /* fallback al envío actual */ }
     const w = window.open('', '_blank', 'width=800,height=900');
     const html = `
 <!DOCTYPE html>
@@ -13444,6 +13739,9 @@ async function ifcoImprimirEnvio(id) {
   .field-val{font-size:14px}
   .big{background:#f5f5f5;font-size:18px}
   .big .field-val{font-size:24px;font-weight:bold;font-variant-numeric:tabular-nums}
+  .saldo-box{background:#fef3c7;border:2px solid #f59e0b;border-radius:6px;padding:12px 16px;margin-bottom:20px;display:flex;justify-content:space-between;align-items:center}
+  .saldo-lbl{font-size:11px;color:#92400e;text-transform:uppercase;letter-spacing:.06em}
+  .saldo-val{font-size:28px;font-weight:bold;color:#92400e;font-variant-numeric:tabular-nums}
   .firmas{display:grid;grid-template-columns:1fr 1fr;gap:40px;margin-top:50px}
   .firma{border-top:1px solid #000;padding-top:6px;text-align:center;font-size:11px;color:#666}
   .nota{margin-top:20px;padding:10px 14px;background:#fffbe5;border:1px solid #fbbf24;border-radius:4px;font-size:12px}
@@ -13467,14 +13765,22 @@ async function ifcoImprimirEnvio(id) {
       ${e.proveedor_cuit ? '<div style="font-size:11px;color:#666">CUIT: '+_ifcoEsc(e.proveedor_cuit)+'</div>' : ''}
     </div>
     <div class="field big">
-      <div class="field-lbl">Cantidad de cajones</div>
+      <div class="field-lbl">Cantidad de cajones de este envío</div>
       <div class="field-val">${_ifcoFmt(e.cantidad_enviada)}</div>
     </div>
     <div class="field">
       <div class="field-lbl">Modelo</div>
-      <div class="field-val">${_ifcoEsc(e.modelo||'6420')}</div>
+      <div class="field-val">6420</div>
     </div>
     ${e.notas ? '<div class="field" style="grid-column:span 2"><div class="field-lbl">Notas</div><div class="field-val">'+_ifcoEsc(e.notas)+'</div></div>' : ''}
+  </div>
+
+  <div class="saldo-box">
+    <div>
+      <div class="saldo-lbl">Saldo total bajo responsabilidad del proveedor</div>
+      <div style="font-size:11px;color:#92400e;margin-top:2px">cajones IFCO sin volver, incluyendo este envío</div>
+    </div>
+    <div class="saldo-val">${_ifcoFmt(saldoTotal)}</div>
   </div>
 
   <div class="nota">
@@ -13503,23 +13809,25 @@ async function ifcoAbrirRecepcion(envioId) {
     document.getElementById('ifco-rcp-fecha').value = _ifcoToday();
     document.getElementById('ifco-rcp-cant').value = e.cantidad_enviada;
     document.getElementById('ifco-rcp-notas').value = '';
+    document.getElementById('ifco-rcp-foto').value = '';
     document.getElementById('ifco-mb-recep').classList.add('on');
   } catch(e) { alert('Error: ' + e.message); }
 }
 
 async function ifcoGuardarRecepcion() {
   if (!IFCO._selEnvio) return;
-  const body = {
-    fecha_recepcion:   document.getElementById('ifco-rcp-fecha').value,
-    cantidad_recibida: parseInt(document.getElementById('ifco-rcp-cant').value),
-    notas:             document.getElementById('ifco-rcp-notas').value.trim() || null
-  };
+  const fd = new FormData();
+  fd.append('fecha_recepcion',   document.getElementById('ifco-rcp-fecha').value);
+  fd.append('cantidad_recibida', document.getElementById('ifco-rcp-cant').value);
+  fd.append('notas',             document.getElementById('ifco-rcp-notas').value.trim());
+  const file = document.getElementById('ifco-rcp-foto').files[0];
+  if (file) fd.append('escaneo_recepcion', file);
   try {
-    await _ifcoFetch('/api/ifco/envios/' + IFCO._selEnvio.id + '/recepcionar', {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body)
+    const r = await fetch('/api/ifco/envios/' + IFCO._selEnvio.id + '/recepcionar', {
+      method: 'PATCH', credentials: 'include', body: fd
     });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Error');
     document.getElementById('ifco-mb-recep').classList.remove('on');
     ifcoCargarEnvios();
   } catch(e) { alert('Error: ' + e.message); }
@@ -13534,7 +13842,7 @@ async function ifcoCargarMovimientos() {
     const rows = await _ifcoFetch('/api/ifco/movimientos?' + params.toString());
     const tb = document.querySelector('#ifco-tbl-movs tbody');
     if (rows.length === 0) {
-      tb.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:20px;color:var(--mut)">Sin movimientos</td></tr>';
+      tb.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:20px;color:var(--mut)">Sin movimientos</td></tr>';
       return;
     }
     tb.innerHTML = rows.map(function(r){
@@ -13542,10 +13850,12 @@ async function ifcoCargarMovimientos() {
         ? '<span class="ifco-badge" style="background:#dbeafe;color:#1e40af">Retiro</span>'
         : '<span class="ifco-badge" style="background:#fee2e2;color:#991b1b">Pérdida</span>';
       const costo = r.costo_total > 0 ? (r.moneda||'ARS') + ' ' + _ifcoFmt(r.costo_total) : '—';
+      const sucursal = r.tipo === 'retiro' ? _ifcoEsc(r.sucursal_ifco || '—') : '—';
       return '<tr>' +
         '<td>'+_ifcoFecha(r.fecha)+'</td>' +
         '<td>'+tipoBadge+'</td>' +
         '<td style="text-align:right;font-variant-numeric:tabular-nums"><b>'+_ifcoFmt(r.cantidad)+'</b></td>' +
+        '<td>'+sucursal+'</td>' +
         '<td style="font-family:monospace;font-size:12px">'+_ifcoEsc(r.n_remito||'—')+'</td>' +
         '<td style="text-align:right">'+costo+'</td>' +
         '<td style="font-size:12px;color:var(--mut)">'+_ifcoEsc(r.notas||'')+'</td>' +
@@ -13563,6 +13873,15 @@ function ifcoAbrirNuevoMovimiento(tipo) {
   document.getElementById('ifco-m-nrem').value = '';
   document.getElementById('ifco-m-costo').value = '';
   document.getElementById('ifco-m-notas').value = '';
+  document.getElementById('ifco-m-sucursal').value = '';
+  document.getElementById('ifco-m-enc-ap').value = '';
+  document.getElementById('ifco-m-enc-nom').value = '';
+  document.getElementById('ifco-m-enc-dni').value = '';
+  // Mostrar/ocultar campos según tipo
+  const showRetiro  = tipo === 'retiro'  ? '' : 'none';
+  const showPerdida = tipo === 'perdida' ? '' : 'none';
+  document.querySelectorAll('.ifco-mov-retiro-only').forEach(function(el){ el.style.display = showRetiro; });
+  document.querySelectorAll('.ifco-mov-perdida-only').forEach(function(el){ el.style.display = showPerdida; });
   document.getElementById('ifco-mb-mov').classList.add('on');
 }
 
@@ -13572,9 +13891,18 @@ async function ifcoGuardarMovimiento() {
     tipo:        IFCO._movTipo,
     cantidad:    parseInt(document.getElementById('ifco-m-cant').value),
     n_remito:    document.getElementById('ifco-m-nrem').value.trim() || null,
-    costo_total: parseFloat(document.getElementById('ifco-m-costo').value) || 0,
     notas:       document.getElementById('ifco-m-notas').value.trim() || null
   };
+  if (IFCO._movTipo === 'retiro') {
+    body.sucursal_ifco       = document.getElementById('ifco-m-sucursal').value || null;
+    body.encargado_apellido  = document.getElementById('ifco-m-enc-ap').value.trim() || null;
+    body.encargado_nombre    = document.getElementById('ifco-m-enc-nom').value.trim() || null;
+    body.encargado_dni       = document.getElementById('ifco-m-enc-dni').value.trim() || null;
+    if (!body.sucursal_ifco) { alert('Falta la sucursal IFCO'); return; }
+    body.costo_total = 0;
+  } else {
+    body.costo_total = parseFloat(document.getElementById('ifco-m-costo').value) || 0;
+  }
   try {
     await _ifcoFetch('/api/ifco/movimientos', {
       method: 'POST',

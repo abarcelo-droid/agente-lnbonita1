@@ -957,15 +957,40 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS ifco_movimientos_fecha_idx ON ifco_movimientos(fecha);
 `);
 
-// Migraciones IFCO — para columnas que se agreguen en el futuro.
-// (Por ahora vacío; queda el patrón listo.)
+// Migraciones IFCO — agregan columnas nuevas a tablas existentes sin romper data
 (function migrarIfco() {
   try {
-    // Ej: si más adelante se agrega una columna, va acá con el patrón:
-    // const cols = db.prepare("PRAGMA table_info(ifco_remitos_super)").all().map(c => c.name);
-    // if (!cols.includes('xxx')) {
-    //   db.exec("ALTER TABLE ifco_remitos_super ADD COLUMN xxx TEXT");
-    //   console.log("[DB] xxx agregada en ifco_remitos_super");
-    // }
+    // ── ifco_remitos_super: foto del remito al despacho (input para OCR)
+    const colsRem = db.prepare("PRAGMA table_info(ifco_remitos_super)").all().map(c => c.name);
+    if (!colsRem.includes('escaneo_original_path')) {
+      db.exec("ALTER TABLE ifco_remitos_super ADD COLUMN escaneo_original_path TEXT");
+      console.log("[DB] ifco_remitos_super.escaneo_original_path agregada");
+    }
+
+    // ── ifco_envios_proveedor: foto del remito firmado por el proveedor al recepcionar
+    const colsEnv = db.prepare("PRAGMA table_info(ifco_envios_proveedor)").all().map(c => c.name);
+    if (!colsEnv.includes('escaneo_recepcion_path')) {
+      db.exec("ALTER TABLE ifco_envios_proveedor ADD COLUMN escaneo_recepcion_path TEXT");
+      console.log("[DB] ifco_envios_proveedor.escaneo_recepcion_path agregada");
+    }
+
+    // ── ifco_movimientos: datos del retiro (sucursal IFCO + persona que retiró)
+    const colsMov = db.prepare("PRAGMA table_info(ifco_movimientos)").all().map(c => c.name);
+    if (!colsMov.includes('sucursal_ifco')) {
+      db.exec("ALTER TABLE ifco_movimientos ADD COLUMN sucursal_ifco TEXT");
+      console.log("[DB] ifco_movimientos.sucursal_ifco agregada");
+    }
+    if (!colsMov.includes('encargado_apellido')) {
+      db.exec("ALTER TABLE ifco_movimientos ADD COLUMN encargado_apellido TEXT");
+      console.log("[DB] ifco_movimientos.encargado_apellido agregada");
+    }
+    if (!colsMov.includes('encargado_nombre')) {
+      db.exec("ALTER TABLE ifco_movimientos ADD COLUMN encargado_nombre TEXT");
+      console.log("[DB] ifco_movimientos.encargado_nombre agregada");
+    }
+    if (!colsMov.includes('encargado_dni')) {
+      db.exec("ALTER TABLE ifco_movimientos ADD COLUMN encargado_dni TEXT");
+      console.log("[DB] ifco_movimientos.encargado_dni agregada");
+    }
   } catch(e) { console.error("[DB] Error migrando IFCO:", e.message); }
 })();
