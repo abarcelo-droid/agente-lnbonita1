@@ -156,19 +156,36 @@ router.delete('/talonarios/:id', function(req, res) {
 
 router.get('/remitos', function(req, res) {
   const f = req.query;
-  let q = "SELECT * FROM ifco_remitos_super WHERE 1=1";
+  const papelera = f.papelera === '1' || f.incluir_eliminados === '1';
+  let q = `SELECT r.*,
+                  pori.nombre AS proveedor_origen_nombre,
+                  u.username  AS eliminado_por_username
+           FROM ifco_remitos_super r
+           LEFT JOIN proveedores pori ON pori.id = r.proveedor_origen_id
+           LEFT JOIN usuarios u ON u.id = r.eliminado_por_id
+           WHERE 1=1`;
   const p = [];
-  if (f.estado)     { q += " AND estado = ?";        p.push(f.estado); }
-  if (f.cliente_id) { q += " AND cliente_id = ?";    p.push(f.cliente_id); }
-  if (f.desde)      { q += " AND fecha_emision >= ?"; p.push(f.desde); }
-  if (f.hasta)      { q += " AND fecha_emision <= ?"; p.push(f.hasta); }
-  if (f.search)     { q += " AND (n_remito_ifco LIKE ? OR empresa LIKE ?)"; p.push('%'+f.search+'%','%'+f.search+'%'); }
-  q += " ORDER BY fecha_emision DESC, id DESC LIMIT 500";
+  if (papelera) {
+    q += " AND r.eliminado_en IS NOT NULL";
+  } else {
+    q += " AND r.eliminado_en IS NULL";
+  }
+  if (f.estado)     { q += " AND r.estado = ?";        p.push(f.estado); }
+  if (f.cliente_id) { q += " AND r.cliente_id = ?";    p.push(f.cliente_id); }
+  if (f.desde)      { q += " AND r.fecha_emision >= ?"; p.push(f.desde); }
+  if (f.hasta)      { q += " AND r.fecha_emision <= ?"; p.push(f.hasta); }
+  if (f.search)     { q += " AND (r.n_remito_ifco LIKE ? OR r.empresa LIKE ?)"; p.push('%'+f.search+'%','%'+f.search+'%'); }
+  q += " ORDER BY r.fecha_emision DESC, r.id DESC LIMIT 500";
   res.json(db.prepare(q).all(...p));
 });
 
 router.get('/remitos/:id', function(req, res) {
-  const r = db.prepare("SELECT * FROM ifco_remitos_super WHERE id = ?").get(req.params.id);
+  const r = db.prepare(`
+    SELECT r.*, pori.nombre AS proveedor_origen_nombre
+    FROM ifco_remitos_super r
+    LEFT JOIN proveedores pori ON pori.id = r.proveedor_origen_id
+    WHERE r.id = ?
+  `).get(req.params.id);
   if (!r) return res.status(404).json({ error: 'No encontrado' });
   res.json(r);
 });
@@ -183,11 +200,22 @@ router.post('/remitos', upload.single('escaneo_original'), function(req, res) {
   if (!d.cliente_id && !d.empresa) {
     return res.status(400).json({ error: 'Cliente (Dedicado) o empresa requeridos' });
   }
-  const dup = db.prepare("SELECT id FROM ifco_remitos_super WHERE n_remito_ifco = ?").get(d.n_remito_ifco);
-  if (dup) return res.status(409).json({ error: 'Ya existe un remito con ese número' });
 
-  // Foto: si el cliente la subió ahora con multer, esa gana. Si no, puede venir
-  // en el body como escaneo_original_path (cuando ya se subió antes vía /ocr).
+  // Origen: san_geronimo (default) o proveedor_directo (con proveedor_id)
+  const origen = (d.origen === 'proveedor_directo') ? 'proveedor_directo' : 'san_geronimo';
+  let proveedor_origen_id = null;
+  if (origen === 'proveedor_directo') {
+    proveedor_origen_id = parseInt(d.proveedor_origen_id) || null;
+    if (!proveedor_origen_id) return res.status(400).json({ error: 'Origen "directo desde proveedor" requiere proveedor_origen_id' });
+    const exProv = db.prepare("SELECT id FROM proveedores WHERE id = ?").get(proveedor_origen_id);
+    if (!exProv) return res.status(400).json({ error: 'Proveedor de origen inexistente' });
+  }
+
+  // Unicidad: solo entre activos (no cuenta papelera)
+  const dup = db.prepare("SELECT id FROM ifco_remitos_super WHERE n_remito_ifco = ? AND eliminado_en IS NULL").get(d.n_remito_ifco);
+  if (dup) return res.status(409).json({ error: 'Ya existe un remito con ese número (activo). Si está en papelera, restauralo o usá otro número.' });
+
+  // Foto: file > body path
   let escaneo_original_path = null;
   if (req.file) {
     escaneo_original_path = '/data/ifco/' + req.file.filename;
@@ -201,12 +229,14 @@ router.post('/remitos', upload.single('escaneo_original'), function(req, res) {
         n_remito_ifco, fecha_emision, cliente_id, cliente_telefono, empresa, sucursal,
         modelo, cantidad_despachada, producto, transportista,
         encargado_prov_apellido, encargado_prov_nombre, encargado_prov_dni,
-        talonario_id, notas, usuario_id, estado, escaneo_original_path
+        talonario_id, notas, usuario_id, estado, escaneo_original_path,
+        origen, proveedor_origen_id
       ) VALUES (
         @n_remito_ifco, @fecha_emision, @cliente_id, @cliente_telefono, @empresa, @sucursal,
         @modelo, @cantidad_despachada, @producto, @transportista,
         @encargado_prov_apellido, @encargado_prov_nombre, @encargado_prov_dni,
-        @talonario_id, @notas, @usuario_id, 'despachado', @escaneo_original_path
+        @talonario_id, @notas, @usuario_id, 'despachado', @escaneo_original_path,
+        @origen, @proveedor_origen_id
       )
     `).run({
       n_remito_ifco:           d.n_remito_ifco,
@@ -225,9 +255,11 @@ router.post('/remitos', upload.single('escaneo_original'), function(req, res) {
       talonario_id:            d.talonario_id || null,
       notas:                   d.notas || null,
       usuario_id:              req.user.id || null,
-      escaneo_original_path:   escaneo_original_path
+      escaneo_original_path:   escaneo_original_path,
+      origen:                  origen,
+      proveedor_origen_id:     proveedor_origen_id
     });
-    res.json({ id: r.lastInsertRowid, n_remito_ifco: d.n_remito_ifco, escaneo_original_path: escaneo_original_path });
+    res.json({ id: r.lastInsertRowid, n_remito_ifco: d.n_remito_ifco, escaneo_original_path: escaneo_original_path, origen: origen });
   } catch(e) {
     res.status(500).json({ error: e.message });
   }
@@ -310,9 +342,91 @@ router.post('/remitos/presentar', function(req, res) {
   res.json({ ok: true, presentados: r.changes, remitos: remitos });
 });
 
+// PATCH /remitos/:id — editar (solo si estado='despachado')
+router.patch('/remitos/:id', function(req, res) {
+  const r = db.prepare("SELECT * FROM ifco_remitos_super WHERE id = ?").get(req.params.id);
+  if (!r) return res.status(404).json({ error: 'No encontrado' });
+  if (r.eliminado_en) return res.status(400).json({ error: 'Está eliminado. Restauralo primero.' });
+  if (r.estado !== 'despachado') {
+    return res.status(400).json({ error: 'Solo se puede editar mientras está en estado "despachado". Estado actual: ' + r.estado });
+  }
+  const d = req.body || {};
+
+  // Si cambian el n_remito, validar unicidad entre activos
+  if (d.n_remito_ifco && d.n_remito_ifco !== r.n_remito_ifco) {
+    const dup = db.prepare("SELECT id FROM ifco_remitos_super WHERE n_remito_ifco = ? AND eliminado_en IS NULL AND id != ?").get(d.n_remito_ifco, req.params.id);
+    if (dup) return res.status(409).json({ error: 'Ya existe otro remito activo con ese número' });
+  }
+
+  // Origen: si cambia a directo, validar proveedor
+  let origen = d.origen || r.origen;
+  let proveedor_origen_id = r.proveedor_origen_id;
+  if (origen === 'proveedor_directo') {
+    if (d.proveedor_origen_id !== undefined) proveedor_origen_id = parseInt(d.proveedor_origen_id) || null;
+    if (!proveedor_origen_id) return res.status(400).json({ error: 'Origen directo requiere proveedor_origen_id' });
+  } else {
+    origen = 'san_geronimo';
+    proveedor_origen_id = null;
+  }
+
+  db.prepare(`
+    UPDATE ifco_remitos_super SET
+      n_remito_ifco           = COALESCE(?, n_remito_ifco),
+      fecha_emision           = COALESCE(?, fecha_emision),
+      cliente_id              = ?,
+      empresa                 = COALESCE(?, empresa),
+      sucursal                = ?,
+      cantidad_despachada     = COALESCE(?, cantidad_despachada),
+      producto                = ?,
+      transportista           = ?,
+      encargado_prov_apellido = ?,
+      encargado_prov_nombre   = ?,
+      encargado_prov_dni      = ?,
+      notas                   = ?,
+      origen                  = ?,
+      proveedor_origen_id     = ?,
+      actualizado_en          = datetime('now','localtime')
+    WHERE id = ?
+  `).run(
+    d.n_remito_ifco || null,
+    d.fecha_emision || null,
+    d.cliente_id || null,
+    d.empresa || null,
+    d.sucursal || null,
+    d.cantidad_despachada ? parseInt(d.cantidad_despachada) : null,
+    d.producto || null,
+    d.transportista || null,
+    d.encargado_prov_apellido || null,
+    d.encargado_prov_nombre || null,
+    d.encargado_prov_dni || null,
+    d.notas || null,
+    origen,
+    proveedor_origen_id,
+    req.params.id
+  );
+  res.json({ ok: true });
+});
+
+// DELETE /remitos/:id — soft delete (todos)
 router.delete('/remitos/:id', function(req, res) {
-  if (req.user.rol !== 'admin') return res.status(403).json({ error: 'Solo admin' });
-  db.prepare("UPDATE ifco_remitos_super SET estado = 'anulado' WHERE id = ?").run(req.params.id);
+  const r = db.prepare("SELECT id FROM ifco_remitos_super WHERE id = ? AND eliminado_en IS NULL").get(req.params.id);
+  if (!r) return res.status(404).json({ error: 'No encontrado o ya eliminado' });
+  db.prepare(`UPDATE ifco_remitos_super
+              SET eliminado_en = datetime('now','localtime'),
+                  eliminado_por_id = ?
+              WHERE id = ?`).run(req.user.id || null, req.params.id);
+  res.json({ ok: true });
+});
+
+// POST /remitos/:id/restaurar — recuperar de papelera
+router.post('/remitos/:id/restaurar', function(req, res) {
+  const r = db.prepare("SELECT * FROM ifco_remitos_super WHERE id = ?").get(req.params.id);
+  if (!r) return res.status(404).json({ error: 'No encontrado' });
+  if (!r.eliminado_en) return res.status(400).json({ error: 'No está en papelera' });
+  // Validar unicidad antes de restaurar
+  const dup = db.prepare("SELECT id FROM ifco_remitos_super WHERE n_remito_ifco = ? AND eliminado_en IS NULL AND id != ?").get(r.n_remito_ifco, req.params.id);
+  if (dup) return res.status(409).json({ error: 'Hay otro remito activo con ese mismo número (' + r.n_remito_ifco + '). Eliminá ese o renombrá este antes de restaurar.' });
+  db.prepare("UPDATE ifco_remitos_super SET eliminado_en = NULL, eliminado_por_id = NULL WHERE id = ?").run(req.params.id);
   res.json({ ok: true });
 });
 
@@ -322,13 +436,18 @@ router.delete('/remitos/:id', function(req, res) {
 
 router.get('/envios', function(req, res) {
   const f = req.query;
+  const papelera = f.papelera === '1' || f.incluir_eliminados === '1';
   let q = `
-    SELECT e.*, p.nombre AS proveedor_nombre, p.razon_social AS proveedor_razon
+    SELECT e.*, p.nombre AS proveedor_nombre, p.razon_social AS proveedor_razon,
+           u.username AS eliminado_por_username
     FROM ifco_envios_proveedor e
     LEFT JOIN proveedores p ON p.id = e.proveedor_id
+    LEFT JOIN usuarios u ON u.id = e.eliminado_por_id
     WHERE 1=1
   `;
   const p = [];
+  if (papelera) q += " AND e.eliminado_en IS NOT NULL";
+  else          q += " AND e.eliminado_en IS NULL";
   if (f.estado)       { q += " AND e.estado = ?";       p.push(f.estado); }
   if (f.proveedor_id) { q += " AND e.proveedor_id = ?"; p.push(f.proveedor_id); }
   q += " ORDER BY e.fecha_envio DESC, e.id DESC LIMIT 500";
@@ -410,9 +529,48 @@ router.patch('/envios/:id/recepcionar', upload.single('escaneo_recepcion'), func
   res.json({ ok: true, estado: estado, cantidad_recibida: recib, escaneo_recepcion_path: escaneo_recepcion_path });
 });
 
+// PATCH /envios/:id — editar (solo si estado='enviado', no parcial/recibido)
+router.patch('/envios/:id', function(req, res) {
+  const e = db.prepare("SELECT * FROM ifco_envios_proveedor WHERE id = ?").get(req.params.id);
+  if (!e) return res.status(404).json({ error: 'No encontrado' });
+  if (e.eliminado_en) return res.status(400).json({ error: 'Está eliminado. Restauralo primero.' });
+  if (e.estado !== 'enviado') {
+    return res.status(400).json({ error: 'Solo se puede editar mientras está en estado "enviado". Estado actual: ' + e.estado });
+  }
+  const d = req.body || {};
+  db.prepare(`
+    UPDATE ifco_envios_proveedor SET
+      fecha_envio      = COALESCE(?, fecha_envio),
+      proveedor_id     = COALESCE(?, proveedor_id),
+      cantidad_enviada = COALESCE(?, cantidad_enviada),
+      notas            = ?,
+      actualizado_en   = datetime('now','localtime')
+    WHERE id = ?
+  `).run(
+    d.fecha_envio || null,
+    d.proveedor_id ? parseInt(d.proveedor_id) : null,
+    d.cantidad_enviada ? parseInt(d.cantidad_enviada) : null,
+    d.notas || null,
+    req.params.id
+  );
+  res.json({ ok: true });
+});
+
 router.delete('/envios/:id', function(req, res) {
-  if (req.user.rol !== 'admin') return res.status(403).json({ error: 'Solo admin' });
-  db.prepare("UPDATE ifco_envios_proveedor SET estado = 'anulado' WHERE id = ?").run(req.params.id);
+  const e = db.prepare("SELECT id FROM ifco_envios_proveedor WHERE id = ? AND eliminado_en IS NULL").get(req.params.id);
+  if (!e) return res.status(404).json({ error: 'No encontrado o ya eliminado' });
+  db.prepare(`UPDATE ifco_envios_proveedor
+              SET eliminado_en = datetime('now','localtime'),
+                  eliminado_por_id = ?
+              WHERE id = ?`).run(req.user.id || null, req.params.id);
+  res.json({ ok: true });
+});
+
+router.post('/envios/:id/restaurar', function(req, res) {
+  const e = db.prepare("SELECT * FROM ifco_envios_proveedor WHERE id = ?").get(req.params.id);
+  if (!e) return res.status(404).json({ error: 'No encontrado' });
+  if (!e.eliminado_en) return res.status(400).json({ error: 'No está en papelera' });
+  db.prepare("UPDATE ifco_envios_proveedor SET eliminado_en = NULL, eliminado_por_id = NULL WHERE id = ?").run(req.params.id);
   res.json({ ok: true });
 });
 
@@ -422,13 +580,25 @@ router.delete('/envios/:id', function(req, res) {
 
 router.get('/movimientos', function(req, res) {
   const f = req.query;
-  let q = "SELECT * FROM ifco_movimientos WHERE 1=1";
+  const papelera = f.papelera === '1' || f.incluir_eliminados === '1';
+  let q = `SELECT m.*, u.username AS eliminado_por_username
+           FROM ifco_movimientos m
+           LEFT JOIN usuarios u ON u.id = m.eliminado_por_id
+           WHERE 1=1`;
   const p = [];
-  if (f.tipo)  { q += " AND tipo = ?";   p.push(f.tipo); }
-  if (f.desde) { q += " AND fecha >= ?"; p.push(f.desde); }
-  if (f.hasta) { q += " AND fecha <= ?"; p.push(f.hasta); }
-  q += " ORDER BY fecha DESC, id DESC LIMIT 500";
+  if (papelera) q += " AND m.eliminado_en IS NOT NULL";
+  else          q += " AND m.eliminado_en IS NULL";
+  if (f.tipo)  { q += " AND m.tipo = ?";   p.push(f.tipo); }
+  if (f.desde) { q += " AND m.fecha >= ?"; p.push(f.desde); }
+  if (f.hasta) { q += " AND m.fecha <= ?"; p.push(f.hasta); }
+  q += " ORDER BY m.fecha DESC, m.id DESC LIMIT 500";
   res.json(db.prepare(q).all(...p));
+});
+
+router.get('/movimientos/:id', function(req, res) {
+  const m = db.prepare("SELECT * FROM ifco_movimientos WHERE id = ?").get(req.params.id);
+  if (!m) return res.status(404).json({ error: 'No encontrado' });
+  res.json(m);
 });
 
 router.post('/movimientos', function(req, res) {
@@ -459,9 +629,57 @@ router.post('/movimientos', function(req, res) {
   res.json({ id: r.lastInsertRowid });
 });
 
+// PATCH /movimientos/:id — editar (siempre permitido)
+router.patch('/movimientos/:id', function(req, res) {
+  const m = db.prepare("SELECT * FROM ifco_movimientos WHERE id = ?").get(req.params.id);
+  if (!m) return res.status(404).json({ error: 'No encontrado' });
+  if (m.eliminado_en) return res.status(400).json({ error: 'Está eliminado. Restauralo primero.' });
+  const d = req.body || {};
+  if (d.sucursal_ifco && ['Buenos Aires','Mendoza'].indexOf(d.sucursal_ifco) < 0) {
+    return res.status(400).json({ error: 'sucursal_ifco inválida' });
+  }
+  db.prepare(`
+    UPDATE ifco_movimientos SET
+      fecha              = COALESCE(?, fecha),
+      cantidad           = COALESCE(?, cantidad),
+      n_remito           = ?,
+      costo_total        = COALESCE(?, costo_total),
+      notas              = ?,
+      sucursal_ifco      = ?,
+      encargado_apellido = ?,
+      encargado_nombre   = ?,
+      encargado_dni      = ?
+    WHERE id = ?
+  `).run(
+    d.fecha || null,
+    d.cantidad ? parseInt(d.cantidad) : null,
+    d.n_remito || null,
+    d.costo_total != null ? parseFloat(d.costo_total) : null,
+    d.notas || null,
+    d.sucursal_ifco || null,
+    d.encargado_apellido || null,
+    d.encargado_nombre || null,
+    d.encargado_dni || null,
+    req.params.id
+  );
+  res.json({ ok: true });
+});
+
 router.delete('/movimientos/:id', function(req, res) {
-  if (req.user.rol !== 'admin') return res.status(403).json({ error: 'Solo admin' });
-  db.prepare("DELETE FROM ifco_movimientos WHERE id = ?").run(req.params.id);
+  const m = db.prepare("SELECT id FROM ifco_movimientos WHERE id = ? AND eliminado_en IS NULL").get(req.params.id);
+  if (!m) return res.status(404).json({ error: 'No encontrado o ya eliminado' });
+  db.prepare(`UPDATE ifco_movimientos
+              SET eliminado_en = datetime('now','localtime'),
+                  eliminado_por_id = ?
+              WHERE id = ?`).run(req.user.id || null, req.params.id);
+  res.json({ ok: true });
+});
+
+router.post('/movimientos/:id/restaurar', function(req, res) {
+  const m = db.prepare("SELECT * FROM ifco_movimientos WHERE id = ?").get(req.params.id);
+  if (!m) return res.status(404).json({ error: 'No encontrado' });
+  if (!m.eliminado_en) return res.status(400).json({ error: 'No está en papelera' });
+  db.prepare("UPDATE ifco_movimientos SET eliminado_en = NULL, eliminado_por_id = NULL WHERE id = ?").run(req.params.id);
   res.json({ ok: true });
 });
 
@@ -473,63 +691,82 @@ router.get('/resumen', function(req, res) {
   const get = function(sql, ...p) { return (db.prepare(sql).get(...p) || {}).total || 0; };
 
   // Movimientos puntuales
-  const retirado = get("SELECT COALESCE(SUM(cantidad),0) AS total FROM ifco_movimientos WHERE tipo='retiro'");
-  const perdido  = get("SELECT COALESCE(SUM(cantidad),0) AS total FROM ifco_movimientos WHERE tipo='perdida'");
+  const retirado = get("SELECT COALESCE(SUM(cantidad),0) AS total FROM ifco_movimientos WHERE tipo='retiro' AND eliminado_en IS NULL");
+  const perdido  = get("SELECT COALESCE(SUM(cantidad),0) AS total FROM ifco_movimientos WHERE tipo='perdida' AND eliminado_en IS NULL");
 
-  // Envíos a proveedor — totales y pendientes
+  // Envíos a proveedor — totales y pendientes (excluyendo eliminados)
   const envios_totales = get(`
     SELECT COALESCE(SUM(cantidad_enviada),0) AS total
-    FROM ifco_envios_proveedor WHERE estado IN ('enviado','parcial','recibido')
+    FROM ifco_envios_proveedor
+    WHERE estado IN ('enviado','parcial','recibido') AND eliminado_en IS NULL
   `);
-  const recepciones_prov = get(`
+  const recepciones_envios = get(`
     SELECT COALESCE(SUM(cantidad_recibida),0) AS total
-    FROM ifco_envios_proveedor WHERE estado IN ('recibido','parcial')
+    FROM ifco_envios_proveedor
+    WHERE estado IN ('recibido','parcial') AND eliminado_en IS NULL
+  `);
+  // Recepciones de mercadería (cajones que vuelven con producto, entidad nueva)
+  const recepciones_merc = get(`
+    SELECT COALESCE(SUM(cantidad),0) AS total
+    FROM ifco_recepciones_proveedor
+    WHERE eliminado_en IS NULL
   `);
   const en_proveedores = get(`
     SELECT COALESCE(SUM(cantidad_enviada - COALESCE(cantidad_recibida,0)),0) AS total
-    FROM ifco_envios_proveedor WHERE estado IN ('enviado','parcial')
-  `);
+    FROM ifco_envios_proveedor
+    WHERE estado IN ('enviado','parcial') AND eliminado_en IS NULL
+  `) - recepciones_merc;  // los que volvieron físicamente bajan el saldo
 
-  // Despachos a súper — totales y rechazos vueltos
-  const despachos_totales = get(`
+  // Despachos a súper — totales y rechazos vueltos. Solo despachos origen=SG cuentan
+  // contra el stock SG. Los "directo desde proveedor" no salieron del piso de SG.
+  const despachos_sg = get(`
     SELECT COALESCE(SUM(cantidad_despachada),0) AS total
-    FROM ifco_remitos_super WHERE estado IN ('despachado','sellado','presentado')
+    FROM ifco_remitos_super
+    WHERE estado IN ('despachado','sellado','presentado')
+      AND origen = 'san_geronimo'
+      AND eliminado_en IS NULL
   `);
-  const rechazos_vueltos = get(`
+  const rechazos_vueltos_sg = get(`
     SELECT COALESCE(SUM(cantidad_rechazada),0) AS total
-    FROM ifco_remitos_super WHERE estado IN ('sellado','presentado')
+    FROM ifco_remitos_super
+    WHERE estado IN ('sellado','presentado')
+      AND origen = 'san_geronimo'
+      AND eliminado_en IS NULL
   `);
-  const en_transito = get(`
+  const en_transito_sg = get(`
     SELECT COALESCE(SUM(cantidad_despachada),0) AS total
-    FROM ifco_remitos_super WHERE estado = 'despachado'
+    FROM ifco_remitos_super
+    WHERE estado = 'despachado'
+      AND origen = 'san_geronimo'
+      AND eliminado_en IS NULL
   `);
 
-  // PISO actual — balance de entradas y salidas en planta
-  const piso = retirado - envios_totales + recepciones_prov - despachos_totales + rechazos_vueltos;
-  const bajo_responsabilidad = piso + en_proveedores + en_transito;
+  // PISO actual = retiros - envíos a prov + recepciones (ambas: de envíos + mercadería) - despachos SG + rechazos vueltos
+  const piso = retirado - envios_totales + recepciones_envios + recepciones_merc - despachos_sg + rechazos_vueltos_sg;
+  const bajo_responsabilidad = piso + en_proveedores + en_transito_sg;
 
-  // Alertas — sellados >= 25 días sin presentar (urgente, vence a los 30)
+  // Alertas — sellados >= 25 días sin presentar
   const urgentes_presentar = db.prepare(`
     SELECT id, n_remito_ifco, fecha_sellado, empresa, sucursal,
       cantidad_recibida, cantidad_rechazada,
       CAST(julianday('now','localtime') - julianday(fecha_sellado) AS INTEGER) AS dias
     FROM ifco_remitos_super
     WHERE estado = 'sellado'
+      AND eliminado_en IS NULL
       AND julianday('now','localtime') - julianday(fecha_sellado) >= 25
     ORDER BY fecha_sellado ASC
   `).all();
 
-  // Despachos >= 30 días sin sellar
   const sin_sellar = db.prepare(`
     SELECT id, n_remito_ifco, fecha_emision, empresa, sucursal, cantidad_despachada,
       CAST(julianday('now','localtime') - julianday(fecha_emision) AS INTEGER) AS dias
     FROM ifco_remitos_super
     WHERE estado = 'despachado'
+      AND eliminado_en IS NULL
       AND julianday('now','localtime') - julianday(fecha_emision) >= 30
     ORDER BY fecha_emision ASC
   `).all();
 
-  // Envíos a proveedor >= 15 días sin recibir
   const envios_vencidos = db.prepare(`
     SELECT e.id, e.n_remito_interno, e.fecha_envio, e.cantidad_enviada,
       p.nombre AS proveedor_nombre,
@@ -537,6 +774,7 @@ router.get('/resumen', function(req, res) {
     FROM ifco_envios_proveedor e
     LEFT JOIN proveedores p ON p.id = e.proveedor_id
     WHERE e.estado = 'enviado'
+      AND e.eliminado_en IS NULL
       AND julianday('now','localtime') - julianday(e.fecha_envio) >= 15
     ORDER BY e.fecha_envio ASC
   `).all();
@@ -547,7 +785,7 @@ router.get('/resumen', function(req, res) {
   if (tal) {
     const u = db.prepare(`
       SELECT n_remito_ifco FROM ifco_remitos_super
-      WHERE talonario_id = ? ORDER BY id DESC LIMIT 1
+      WHERE talonario_id = ? AND eliminado_en IS NULL ORDER BY id DESC LIMIT 1
     `).get(tal.id);
     let proxNum = tal.numero_desde;
     if (u) {
@@ -570,38 +808,33 @@ router.get('/resumen', function(req, res) {
     }
   }
 
-  // Saldos por cliente (qué supermercado tiene cuántos en tránsito o sin presentar)
+  // Saldos por cliente
   const por_cliente = db.prepare(`
     SELECT
       cliente_id, empresa,
       SUM(CASE WHEN estado='despachado' THEN cantidad_despachada ELSE 0 END) AS en_transito,
       SUM(CASE WHEN estado='sellado' THEN 1 ELSE 0 END) AS sellados_pendientes_count
     FROM ifco_remitos_super
-    WHERE estado IN ('despachado','sellado')
+    WHERE estado IN ('despachado','sellado') AND eliminado_en IS NULL
     GROUP BY cliente_id, empresa
     HAVING en_transito > 0 OR sellados_pendientes_count > 0
     ORDER BY en_transito DESC, sellados_pendientes_count DESC
   `).all();
 
-  // Saldos por proveedor (envíos pendientes)
+  // Saldos por proveedor — usa el cálculo unificado
   const por_proveedor = db.prepare(`
-    SELECT
-      e.proveedor_id, p.nombre AS proveedor_nombre,
-      SUM(e.cantidad_enviada - COALESCE(e.cantidad_recibida,0)) AS pendiente,
-      MIN(e.fecha_envio) AS desde
-    FROM ifco_envios_proveedor e
-    LEFT JOIN proveedores p ON p.id = e.proveedor_id
-    WHERE e.estado IN ('enviado','parcial')
-    GROUP BY e.proveedor_id, p.nombre
-    HAVING pendiente > 0
-    ORDER BY pendiente DESC
-  `).all();
+    SELECT id, nombre AS proveedor_nombre FROM proveedores
+  `).all().map(function(p){
+    const pendiente = _calcSaldoProveedor(p.id);
+    return { proveedor_id: p.id, proveedor_nombre: p.proveedor_nombre, pendiente: pendiente };
+  }).filter(function(x){ return x.pendiente > 0; })
+    .sort(function(a,b){ return b.pendiente - a.pendiente; });
 
   res.json({
     stock: {
       piso: piso,
       en_proveedores: en_proveedores,
-      en_transito: en_transito,
+      en_transito: en_transito_sg,
       bajo_responsabilidad: bajo_responsabilidad,
       perdidas_acumuladas: perdido,
       retirado_total: retirado
@@ -649,15 +882,166 @@ router.get('/clientes-dedicados', function(req, res) {
 // SALDO POR PROVEEDOR (para vista imprimible del envío)
 // ════════════════════════════════════════════════════════════════════════════
 
+// Saldo del proveedor:
+//   + cajones que SG envió al proveedor (pendientes de devolución, vía envíos parcial/enviado)
+//   - cajones que SG recibió del proveedor en su depósito (recepciones de mercadería)
+//   - cajones despachados a súper como "directo desde este proveedor" Y SELLADOS
+//
+// Todos los cálculos excluyen registros eliminados (papelera).
+function _calcSaldoProveedor(provId) {
+  const enviado = db.prepare(`
+    SELECT COALESCE(SUM(cantidad_enviada - COALESCE(cantidad_recibida,0)), 0) AS total
+    FROM ifco_envios_proveedor
+    WHERE proveedor_id = ? AND eliminado_en IS NULL
+      AND estado IN ('enviado','parcial')
+  `).get(provId).total || 0;
+
+  const recibidoEnSG = db.prepare(`
+    SELECT COALESCE(SUM(cantidad), 0) AS total
+    FROM ifco_recepciones_proveedor
+    WHERE proveedor_id = ? AND eliminado_en IS NULL
+  `).get(provId).total || 0;
+
+  const directosSellados = db.prepare(`
+    SELECT COALESCE(SUM(COALESCE(cantidad_recibida, cantidad_despachada)), 0) AS total
+    FROM ifco_remitos_super
+    WHERE proveedor_origen_id = ?
+      AND origen = 'proveedor_directo'
+      AND estado IN ('sellado','presentado')
+      AND eliminado_en IS NULL
+  `).get(provId).total || 0;
+
+  return enviado - recibidoEnSG - directosSellados;
+}
+
 router.get('/saldo-proveedor/:id', function(req, res) {
   const provId = parseInt(req.params.id);
   if (!provId) return res.status(400).json({ error: 'ID proveedor inválido' });
+  const pendiente = _calcSaldoProveedor(provId);
+  res.json({ proveedor_id: provId, pendiente: pendiente });
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// RECEPCIONES DE MERCADERÍA DEL PROVEEDOR
+// (cajones IFCO que vuelven a SG con producto cargado, opcionalmente atado a un envío)
+// ════════════════════════════════════════════════════════════════════════════
+
+router.get('/recepciones-proveedor', function(req, res) {
+  const f = req.query;
+  const papelera = f.papelera === '1' || f.incluir_eliminados === '1';
+  let q = `SELECT r.*,
+                  p.nombre  AS proveedor_nombre,
+                  p.razon_social AS proveedor_razon,
+                  u.username AS eliminado_por_username
+           FROM ifco_recepciones_proveedor r
+           LEFT JOIN proveedores p ON p.id = r.proveedor_id
+           LEFT JOIN usuarios u ON u.id = r.eliminado_por_id
+           WHERE 1=1`;
+  const p = [];
+  if (papelera) q += " AND r.eliminado_en IS NOT NULL";
+  else          q += " AND r.eliminado_en IS NULL";
+  if (f.proveedor_id) { q += " AND r.proveedor_id = ?"; p.push(f.proveedor_id); }
+  if (f.desde)        { q += " AND r.fecha_recepcion >= ?"; p.push(f.desde); }
+  if (f.hasta)        { q += " AND r.fecha_recepcion <= ?"; p.push(f.hasta); }
+  q += " ORDER BY r.fecha_recepcion DESC, r.id DESC LIMIT 500";
+  res.json(db.prepare(q).all(...p));
+});
+
+router.get('/recepciones-proveedor/:id', function(req, res) {
   const r = db.prepare(`
-    SELECT COALESCE(SUM(cantidad_enviada - COALESCE(cantidad_recibida,0)), 0) AS pendiente
-    FROM ifco_envios_proveedor
-    WHERE proveedor_id = ? AND estado IN ('enviado','parcial')
-  `).get(provId);
-  res.json({ proveedor_id: provId, pendiente: r.pendiente || 0 });
+    SELECT r.*, p.nombre AS proveedor_nombre, p.razon_social AS proveedor_razon
+    FROM ifco_recepciones_proveedor r
+    LEFT JOIN proveedores p ON p.id = r.proveedor_id
+    WHERE r.id = ?
+  `).get(req.params.id);
+  if (!r) return res.status(404).json({ error: 'No encontrado' });
+  res.json(r);
+});
+
+router.post('/recepciones-proveedor', upload.single('escaneo'), function(req, res) {
+  const d = req.body || {};
+  if (!d.fecha_recepcion) return res.status(400).json({ error: 'Fecha requerida' });
+  if (!d.proveedor_id)    return res.status(400).json({ error: 'Proveedor requerido' });
+  const cant = parseInt(d.cantidad);
+  if (!cant || cant <= 0) return res.status(400).json({ error: 'Cantidad inválida' });
+
+  const exProv = db.prepare("SELECT id FROM proveedores WHERE id = ?").get(d.proveedor_id);
+  if (!exProv) return res.status(400).json({ error: 'Proveedor inexistente' });
+
+  let escaneo_path = null;
+  if (req.file) {
+    escaneo_path = '/data/ifco/' + req.file.filename;
+  } else if (d.escaneo_path && /^\/data\/ifco\//.test(d.escaneo_path)) {
+    escaneo_path = d.escaneo_path;
+  }
+
+  const r = db.prepare(`
+    INSERT INTO ifco_recepciones_proveedor
+      (fecha_recepcion, proveedor_id, cantidad, producto, n_remito_proveedor, escaneo_path, notas, usuario_id)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    d.fecha_recepcion, parseInt(d.proveedor_id), cant,
+    d.producto || null, d.n_remito_proveedor || null,
+    escaneo_path, d.notas || null, req.user.id || null
+  );
+
+  // Saldo actualizado (informativo para feedback al usuario)
+  const saldo = _calcSaldoProveedor(parseInt(d.proveedor_id));
+  res.json({ id: r.lastInsertRowid, escaneo_path: escaneo_path, saldo_proveedor_actual: saldo });
+});
+
+router.patch('/recepciones-proveedor/:id', upload.single('escaneo'), function(req, res) {
+  const r = db.prepare("SELECT * FROM ifco_recepciones_proveedor WHERE id = ?").get(req.params.id);
+  if (!r) return res.status(404).json({ error: 'No encontrado' });
+  if (r.eliminado_en) return res.status(400).json({ error: 'Está eliminado. Restauralo primero.' });
+  const d = req.body || {};
+
+  let escaneo_path = r.escaneo_path;
+  if (req.file) {
+    escaneo_path = '/data/ifco/' + req.file.filename;
+  } else if (d.escaneo_path && /^\/data\/ifco\//.test(d.escaneo_path)) {
+    escaneo_path = d.escaneo_path;
+  }
+
+  db.prepare(`
+    UPDATE ifco_recepciones_proveedor SET
+      fecha_recepcion    = COALESCE(?, fecha_recepcion),
+      proveedor_id       = COALESCE(?, proveedor_id),
+      cantidad           = COALESCE(?, cantidad),
+      producto           = ?,
+      n_remito_proveedor = ?,
+      escaneo_path       = ?,
+      notas              = ?
+    WHERE id = ?
+  `).run(
+    d.fecha_recepcion || null,
+    d.proveedor_id ? parseInt(d.proveedor_id) : null,
+    d.cantidad ? parseInt(d.cantidad) : null,
+    d.producto || null,
+    d.n_remito_proveedor || null,
+    escaneo_path,
+    d.notas || null,
+    req.params.id
+  );
+  res.json({ ok: true });
+});
+
+router.delete('/recepciones-proveedor/:id', function(req, res) {
+  const r = db.prepare("SELECT id FROM ifco_recepciones_proveedor WHERE id = ? AND eliminado_en IS NULL").get(req.params.id);
+  if (!r) return res.status(404).json({ error: 'No encontrado o ya eliminado' });
+  db.prepare(`UPDATE ifco_recepciones_proveedor
+              SET eliminado_en = datetime('now','localtime'),
+                  eliminado_por_id = ?
+              WHERE id = ?`).run(req.user.id || null, req.params.id);
+  res.json({ ok: true });
+});
+
+router.post('/recepciones-proveedor/:id/restaurar', function(req, res) {
+  const r = db.prepare("SELECT * FROM ifco_recepciones_proveedor WHERE id = ?").get(req.params.id);
+  if (!r) return res.status(404).json({ error: 'No encontrado' });
+  if (!r.eliminado_en) return res.status(400).json({ error: 'No está en papelera' });
+  db.prepare("UPDATE ifco_recepciones_proveedor SET eliminado_en = NULL, eliminado_por_id = NULL WHERE id = ?").run(req.params.id);
+  res.json({ ok: true });
 });
 
 // ════════════════════════════════════════════════════════════════════════════

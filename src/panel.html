@@ -168,7 +168,6 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     <div style="padding:6px 20px 2px 36px;font-size:9px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:rgba(255,255,255,.3)">Contabilidad</div>
     <div class="ni" data-sec="adm-asientos"><span class="dot db"></span>📒 Asientos Contables</div>
     <div class="ni" data-sec="adm-plan-cuentas"><span class="dot dc"></span>📊 Plan de Cuentas Contable</div>
-    <div class="ni" data-sec="adm-modelos"><span class="dot da"></span>📐 Asiento Modelo</div>
   </div>
 
   <div class="ni-grp" data-grp="pa-comerc">Comercialización<span class="ni-caret">▾</span></div>
@@ -2268,117 +2267,6 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
 </div>
 </div>
 
-<!-- ─── ADM: ASIENTO MODELO ──────────────────────────────────────────── -->
-<div class="sec" id="sec-adm-modelos">
-<div class="ph">
-  <div>
-    <div class="ph-t">📐 Asiento Modelo</div>
-    <div class="ph-s">Plantillas contables por proveedor</div>
-  </div>
-  <button class="btn bb" onclick="admModAbrirNuevo()">+ Nuevo modelo</button>
-</div>
-<div class="pa-wrap">
-  <div class="ab-table-wrap">
-    <table class="pa-tbl">
-      <thead><tr>
-        <th>Nombre</th>
-        <th style="width:80px;text-align:center">Líneas</th>
-        <th style="width:200px">Descripción</th>
-        <th style="width:120px;text-align:right"></th>
-      </tr></thead>
-      <tbody id="adm-mod-tbody">
-        <tr><td colspan="4" class="emp">Cargando...</td></tr>
-      </tbody>
-    </table>
-  </div>
-</div>
-</div>
-
-<!-- ─── MODAL: Nuevo/Editar Asiento Modelo ───────────────────────────── -->
-<div class="ab-modal-overlay" id="adm-mb-modelo">
-<div class="ab-modal" style="width:720px;max-height:90vh;overflow-y:auto">
-  <div class="mhd">
-    <div><div class="mht" id="adm-mod-tit">Nuevo Asiento Modelo</div></div>
-    <button class="mcl" onclick="document.getElementById('adm-mb-modelo').classList.remove('on')">×</button>
-  </div>
-  <input type="hidden" id="adm-mod-id">
-  <div class="fg">
-    <div class="fl ff"><label>Nombre del modelo *</label><input id="adm-mod-nombre" placeholder="Ej: Factura Insumos Agrícolas"></div>
-    <div class="fl ff"><label>Descripción</label><input id="adm-mod-desc" placeholder="Descripción opcional"></div>
-  </div>
-
-  <!-- Tabla de líneas -->
-  <div style="margin-top:16px">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-      <div style="font-size:12px;font-weight:600;color:var(--txt)">Líneas del modelo</div>
-      <button class="btn bo bs" onclick="admModAgregarLinea()" style="font-size:11px;padding:4px 10px">+ Línea</button>
-    </div>
-    <table class="pa-tbl" style="font-size:12px">
-      <thead><tr>
-        <th>Cuenta Contable</th>
-        <th style="width:100px;text-align:center">Lado</th>
-        <th style="width:180px">Descripción</th>
-        <th style="width:40px"></th>
-      </tr></thead>
-      <tbody id="adm-mod-lineas"></tbody>
-    </table>
-
-    <!-- Validación partida doble -->
-    <div id="adm-mod-doble" style="margin-top:10px;padding:8px 12px;border-radius:6px;font-size:12px;font-weight:600;display:none"></div>
-  </div>
-
-  <div class="ab-modal-footer">
-    <button class="btn bo" onclick="document.getElementById('adm-mb-modelo').classList.remove('on')">Cancelar</button>
-    <button class="btn bb" onclick="admModGuardar()">Guardar modelo</button>
-  </div>
-</div>
-</div>
-
-<!-- ─── MODAL: Asiento desde Factura ─────────────────────────────────── -->
-<div class="ab-modal-overlay" id="adm-mb-asiento-fac">
-<div class="ab-modal" style="width:740px;max-height:90vh;overflow-y:auto">
-  <div class="mhd">
-    <div>
-      <div class="mht">Asiento Contable</div>
-      <div style="font-size:11px;color:var(--mut)" id="adm-af-subtit"></div>
-    </div>
-    <button class="mcl" onclick="document.getElementById('adm-mb-asiento-fac').classList.remove('on')">×</button>
-  </div>
-  <input type="hidden" id="adm-af-compra-id">
-
-  <table class="pa-tbl" style="font-size:12px;margin-bottom:12px">
-    <thead><tr>
-      <th>Cuenta Contable</th>
-      <th style="width:120px;text-align:right">Debe</th>
-      <th style="width:120px;text-align:right">Haber</th>
-      <th style="width:180px">Descripción</th>
-      <th style="width:40px"></th>
-    </tr></thead>
-    <tbody id="adm-af-lineas"></tbody>
-    <tfoot>
-      <tr style="font-weight:600;font-size:13px">
-        <td>Totales</td>
-        <td style="text-align:right" id="adm-af-total-debe">$ 0.00</td>
-        <td style="text-align:right" id="adm-af-total-haber">$ 0.00</td>
-        <td colspan="2"></td>
-      </tr>
-    </tfoot>
-  </table>
-
-  <!-- Indicador partida doble -->
-  <div id="adm-af-doble" style="padding:8px 12px;border-radius:6px;font-size:13px;font-weight:700;margin-bottom:12px"></div>
-
-  <div style="font-size:11px;color:var(--mut);margin-bottom:8px">
-    Podés cambiar las cuentas si es necesario. Los montos vienen de la factura.
-  </div>
-
-  <div class="ab-modal-footer">
-    <button class="btn bo" onclick="document.getElementById('adm-mb-asiento-fac').classList.remove('on')">Cancelar</button>
-    <button class="btn bb" id="adm-af-btn-confirmar" onclick="admAfConfirmar()">✓ Confirmar asiento</button>
-  </div>
-</div>
-</div>
-
 <!-- ─── MODAL: Nuevo/editar asiento ─────────────────────────────── -->
 <div class="ab-modal-overlay" id="adm-mb-asiento">
 <div class="ab-modal" style="width:780px">
@@ -2529,8 +2417,10 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     <button class="ifco-tab on" data-tab="resumen"   onclick="ifcoTab('resumen')">📊 Resumen</button>
     <button class="ifco-tab"     data-tab="remitos"  onclick="ifcoTab('remitos')">🛒 Remitos súper</button>
     <button class="ifco-tab"     data-tab="envios"   onclick="ifcoTab('envios')">🚚 Envíos a proveedor</button>
+    <button class="ifco-tab"     data-tab="recep"    onclick="ifcoTab('recep')">📥 Recepciones de proveedor</button>
     <button class="ifco-tab"     data-tab="movs"     onclick="ifcoTab('movs')">🔁 Retiros y pérdidas</button>
     <button class="ifco-tab"     data-tab="talons"   onclick="ifcoTab('talons')">📋 Talonarios</button>
+    <button class="ifco-tab"     data-tab="papelera" onclick="ifcoTab('papelera')">🗑️ Papelera</button>
   </div>
 
   <style>
@@ -2618,7 +2508,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     <div class="ab-table-wrap">
       <table class="ab-table" id="ifco-tbl-remitos">
         <thead><tr>
-          <th>N° Remito</th><th>Fecha</th><th>Cadena / Sucursal</th>
+          <th>N° Remito</th><th>Fecha</th><th>Cadena / Sucursal</th><th>Origen</th>
           <th style="text-align:right">Despachado</th><th style="text-align:right">Recibido</th>
           <th style="text-align:right">Rech.</th><th>Estado</th><th>Sellado</th><th></th>
         </tr></thead>
@@ -2691,9 +2581,95 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       </table>
     </div>
   </div>
+
+  <!-- Tab: Recepciones de proveedor (cajones IFCO + producto que vuelven al depósito SG) -->
+  <div class="ifco-pane" id="ifco-pane-recep">
+    <div style="display:flex;gap:8px;margin-bottom:12px;align-items:center">
+      <button class="btn bb" onclick="ifcoAbrirNuevaRecepcionMerc()">+ Nueva recepción</button>
+      <div style="font-size:11px;color:var(--mut);margin-left:auto">
+        Carga cajones IFCO recibidos en el depósito de SG (con producto)
+      </div>
+    </div>
+    <div class="ab-table-wrap">
+      <table class="ab-table" id="ifco-tbl-recep">
+        <thead><tr>
+          <th>Fecha</th>
+          <th>Proveedor</th>
+          <th style="text-align:right">Cantidad</th>
+          <th>Producto</th>
+          <th>N° Remito prov.</th>
+          <th>Foto</th>
+          <th>Notas</th>
+          <th></th>
+        </tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Tab: Papelera (todo lo eliminado, con restaurar) -->
+  <div class="ifco-pane" id="ifco-pane-papelera">
+    <div style="display:flex;gap:6px;margin-bottom:12px">
+      <button class="ifco-tab on" data-pap="remitos" onclick="ifcoPapTab('remitos')" style="font-size:12px;padding:5px 12px">🛒 Remitos súper</button>
+      <button class="ifco-tab"    data-pap="envios"  onclick="ifcoPapTab('envios')"  style="font-size:12px;padding:5px 12px">🚚 Envíos</button>
+      <button class="ifco-tab"    data-pap="recep"   onclick="ifcoPapTab('recep')"   style="font-size:12px;padding:5px 12px">📥 Recepciones</button>
+      <button class="ifco-tab"    data-pap="movs"    onclick="ifcoPapTab('movs')"    style="font-size:12px;padding:5px 12px">🔁 Movimientos</button>
+    </div>
+    <div id="ifco-pap-content" style="font-size:13px"></div>
+  </div>
+
 </div>
 
 <!-- ============ MODALES IFCO ============ -->
+
+<!-- Modal: Nueva recepción de mercadería -->
+<div class="mb" id="ifco-mb-recmerc">
+  <div class="mbox" style="width:640px">
+    <div class="mhd">
+      <div class="mht" id="ifco-recmerc-tit">📥 Nueva recepción de mercadería</div>
+      <button class="mcl" onclick="document.getElementById('ifco-mb-recmerc').classList.remove('on')">x</button>
+    </div>
+    <div style="background:var(--bg);border-radius:8px;padding:10px 12px;margin-bottom:14px;font-size:12px;color:var(--mut)">
+      Cajones IFCO con producto que vuelven al depósito SG. Suma stock SG y descuenta saldo del proveedor.
+    </div>
+    <div class="ab-grid ab-grid-2" style="gap:10px">
+      <div>
+        <label style="font-size:11px;color:var(--mut);text-transform:uppercase">Fecha *</label>
+        <input id="ifco-rm-fecha" type="date" style="width:100%;padding:8px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg)">
+      </div>
+      <div>
+        <label style="font-size:11px;color:var(--mut);text-transform:uppercase">Proveedor *</label>
+        <select id="ifco-rm-prov" style="width:100%;padding:8px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg)">
+          <option value="">— Seleccionar —</option>
+        </select>
+      </div>
+      <div>
+        <label style="font-size:11px;color:var(--mut);text-transform:uppercase">Cantidad cajones *</label>
+        <input id="ifco-rm-cant" type="number" min="1" style="width:100%;padding:8px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg)">
+      </div>
+      <div>
+        <label style="font-size:11px;color:var(--mut);text-transform:uppercase">N° Remito proveedor</label>
+        <input id="ifco-rm-nrem" type="text" placeholder="del remito que trajo el proveedor" style="width:100%;padding:8px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg);font-family:monospace;font-size:13px">
+      </div>
+      <div style="grid-column:span 2">
+        <label style="font-size:11px;color:var(--mut);text-transform:uppercase">Producto *</label>
+        <input id="ifco-rm-producto" type="text" placeholder="Ej: mandarina malvina, naranja, etc." style="width:100%;padding:8px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg)">
+      </div>
+      <div style="grid-column:span 2">
+        <label style="font-size:11px;color:var(--mut);text-transform:uppercase">Notas</label>
+        <input id="ifco-rm-notas" type="text" style="width:100%;padding:8px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg)">
+      </div>
+      <div style="grid-column:span 2">
+        <label style="font-size:11px;color:var(--mut);text-transform:uppercase">Foto del remito (opcional)</label>
+        <input id="ifco-rm-foto" type="file" accept="image/jpeg,image/png,image/webp" style="width:100%;padding:8px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg);font-size:13px">
+      </div>
+    </div>
+    <div class="ab-modal-footer" style="margin-top:18px;display:flex;justify-content:flex-end;gap:8px">
+      <button class="btn bo" onclick="document.getElementById('ifco-mb-recmerc').classList.remove('on')">Cancelar</button>
+      <button class="btn bb" onclick="ifcoGuardarRecepcionMerc()">Guardar</button>
+    </div>
+  </div>
+</div>
 
 <!-- Modal: Nuevo despacho a súper -->
 <div class="mb" id="ifco-mb-remito">
@@ -2703,14 +2679,32 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       <button class="mcl" onclick="document.getElementById('ifco-mb-remito').classList.remove('on')">x</button>
     </div>
 
-    <!-- PASO 1: subir foto del remito (B-estricto) -->
+    <!-- PASO 1: elegir origen + subir foto del remito (B-estricto) -->
     <div id="ifco-r-step1">
+      <!-- Selector de origen -->
+      <div style="background:var(--bg);border-radius:8px;padding:12px 14px;margin-bottom:14px">
+        <div style="font-size:11px;color:var(--mut);text-transform:uppercase;margin-bottom:8px">Origen de los cajones</div>
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;padding:6px 0">
+          <input type="radio" name="ifco-r-origen" value="san_geronimo" checked onchange="ifcoOnOrigenChange()">
+          <span><b>San Gerónimo</b> — los cajones salen del piso de SG</span>
+        </label>
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;padding:6px 0">
+          <input type="radio" name="ifco-r-origen" value="proveedor_directo" onchange="ifcoOnOrigenChange()">
+          <span><b>Directo desde proveedor</b> — los cajones van del proveedor al súper sin pasar por SG</span>
+        </label>
+        <div id="ifco-r-prov-origen-wrap" style="display:none;margin-top:10px;padding-top:10px;border-top:1px solid var(--bor)">
+          <label style="font-size:11px;color:var(--mut);text-transform:uppercase">Proveedor de origen *</label>
+          <select id="ifco-r-prov-origen" style="width:100%;padding:8px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg)">
+            <option value="">— Seleccionar proveedor —</option>
+          </select>
+        </div>
+      </div>
       <div style="background:var(--bg);border-radius:8px;padding:14px 16px;margin-bottom:14px;font-size:13px;color:var(--txt)">
         📸 <b>Sacale foto al remito IFCO</b> antes de despacharlo. La foto se archiva y la IA prelee los campos por vos.
       </div>
       <div style="text-align:center;padding:30px 20px;border:2px dashed var(--bor);border-radius:10px;background:var(--bg)">
         <input id="ifco-r-foto-input" type="file" accept="image/jpeg,image/png,image/webp" style="display:none" onchange="ifcoOnFotoDespacho(event)">
-        <button class="btn bb" style="font-size:14px;padding:10px 22px" onclick="document.getElementById('ifco-r-foto-input').click()">📷 Subir foto del remito</button>
+        <button class="btn bb" style="font-size:14px;padding:10px 22px" onclick="ifcoIniciarFotoDespacho()">📷 Subir foto del remito</button>
         <div style="margin-top:10px;font-size:11px;color:var(--mut)">JPG / PNG / WebP — hasta 10 MB</div>
         <div style="margin-top:18px">
           <a href="#" onclick="ifcoSaltarOcrDespacho();return false" style="font-size:12px;color:var(--mut);text-decoration:underline">Cargar manualmente sin foto</a>
@@ -6844,274 +6838,8 @@ function paCompBuscarProveedorIA(nombre) {
     }
   });
 }
-
-// ═══════════════════════════════════════════════════════════════════════════
-// 📐 ASIENTOS MODELO
-// ═══════════════════════════════════════════════════════════════════════════
-var ADM_MOD_CUENTAS = [];  // cache de cuentas contables
-
-function admModApi(path, opts) {
-  opts = opts || {};
-  opts.headers = opts.headers || { 'Content-Type': 'application/json' };
-  return fetch('/api/pa/cuentas' + path, opts)
-    .then(function(r){ return r.json(); })
-    .catch(function(){ return { ok: false, error: 'Error de red' }; });
-}
-
-function admModCargarCuentas(cb) {
-  if (ADM_MOD_CUENTAS.length) { cb(); return; }
-  admModApi('/cuentas').then(function(r) {
-    ADM_MOD_CUENTAS = (r.data || []).filter(function(c){ return c.activo; });
-    cb();
-  });
-}
-
-function admModCargar() {
-  admModApi('/modelos').then(function(r) {
-    var data = r.data || [];
-    var tb = document.getElementById('adm-mod-tbody');
-    if (!data.length) {
-      tb.innerHTML = '<tr><td colspan="4" class="emp">Sin modelos. <button class="btn bo bs" onclick="admModAbrirNuevo()">+ Crear el primero</button></td></tr>';
-      return;
-    }
-    tb.innerHTML = data.map(function(m) {
-      return '<tr>'
-        + '<td><strong>' + m.nombre + '</strong></td>'
-        + '<td style="text-align:center"><span class="pa-badge pa-azul-bg">' + (m.cant_lineas||0) + ' líneas</span></td>'
-        + '<td style="font-size:12px;color:var(--mut)">' + (m.descripcion||'—') + '</td>'
-        + '<td style="text-align:right">'
-          + '<button class="btn bo bs" onclick="admModEditar(' + m.id + ')" style="padding:3px 8px;font-size:11px;margin-right:4px">✏️</button>'
-          + '<button class="btn bd bs" onclick="admModEliminar(' + m.id + ')" style="padding:3px 8px;font-size:11px">🗑</button>'
-        + '</td></tr>';
-    }).join('');
-  });
-}
-
-function admModAbrirNuevo() {
-  document.getElementById('adm-mod-id').value = '';
-  document.getElementById('adm-mod-tit').textContent = 'Nuevo Asiento Modelo';
-  document.getElementById('adm-mod-nombre').value = '';
-  document.getElementById('adm-mod-desc').value = '';
-  document.getElementById('adm-mod-lineas').innerHTML = '';
-  document.getElementById('adm-mod-doble').style.display = 'none';
-  admModCargarCuentas(function() {
-    admModAgregarLinea('debe');
-    admModAgregarLinea('haber');
-    document.getElementById('adm-mb-modelo').classList.add('on');
-  });
-}
-
-function admModEditar(id) {
-  admModCargarCuentas(function() {
-    admModApi('/modelos/' + id).then(function(r) {
-      if (!r.ok) return toast(r.error || 'Error', 'er');
-      var m = r.data;
-      document.getElementById('adm-mod-id').value = m.id;
-      document.getElementById('adm-mod-tit').textContent = 'Editar — ' + m.nombre;
-      document.getElementById('adm-mod-nombre').value = m.nombre || '';
-      document.getElementById('adm-mod-desc').value = m.descripcion || '';
-      document.getElementById('adm-mod-lineas').innerHTML = '';
-      (m.lineas || []).forEach(function(l) { admModAgregarLinea(l.lado, l.cuenta_id, l.descripcion); });
-      admModValidarDoble();
-      document.getElementById('adm-mb-modelo').classList.add('on');
-    });
-  });
-}
-
-function admModAgregarLinea(lado, cuentaId, desc) {
-  lado = lado || 'debe';
-  var tbody = document.getElementById('adm-mod-lineas');
-  var idx = tbody.children.length;
-  var opts = ADM_MOD_CUENTAS.map(function(c) {
-    return '<option value="' + c.id + '"' + (c.id == cuentaId ? ' selected' : '') + '>'
-      + (c.codigo ? '[' + c.codigo + '] ' : '') + c.nombre + '</option>';
-  }).join('');
-  var tr = document.createElement('tr');
-  tr.innerHTML = '<td><select class="adm-mod-cuenta" onchange="admModValidarDoble()" style="width:100%">'
-    + '<option value="">— Seleccioná cuenta —</option>' + opts + '</select></td>'
-    + '<td style="text-align:center"><select class="adm-mod-lado" onchange="admModValidarDoble()" style="width:90px">'
-    + '<option value="debe"' + (lado==='debe'?' selected':'') + '>DEBE</option>'
-    + '<option value="haber"' + (lado==='haber'?' selected':'') + '>HABER</option>'
-    + '</select></td>'
-    + '<td><input class="adm-mod-linea-desc" placeholder="Descripción" value="' + (desc||'') + '" style="width:100%"></td>'
-    + '<td><button class="btn bd bs" onclick="this.closest('tr').remove();admModValidarDoble()" style="padding:2px 6px;font-size:11px">✕</button></td>';
-  tbody.appendChild(tr);
-  admModValidarDoble();
-}
-
-function admModValidarDoble() {
-  var lineas = admModLeerLineas();
-  var debeCant = lineas.filter(function(l){ return l.lado === 'debe'; }).length;
-  var haberCant = lineas.filter(function(l){ return l.lado === 'haber'; }).length;
-  var div = document.getElementById('adm-mod-doble');
-  if (lineas.length < 2) { div.style.display = 'none'; return; }
-  var ok = debeCant >= 1 && haberCant >= 1;
-  div.style.display = '';
-  if (ok) {
-    div.style.background = 'rgba(74,222,128,.12)';
-    div.style.color = 'var(--ok)';
-    div.textContent = '✅ Modelo válido — tiene líneas en el debe y en el haber';
-  } else {
-    div.style.background = 'rgba(239,68,68,.12)';
-    div.style.color = 'var(--err)';
-    div.textContent = '❌ El modelo necesita al menos 1 línea en el DEBE y 1 en el HABER';
-  }
-}
-
-function admModLeerLineas() {
-  var rows = document.querySelectorAll('#adm-mod-lineas tr');
-  var lineas = [];
-  rows.forEach(function(tr) {
-    var cuenta_id = tr.querySelector('.adm-mod-cuenta')?.value;
-    var lado = tr.querySelector('.adm-mod-lado')?.value;
-    var desc = tr.querySelector('.adm-mod-linea-desc')?.value?.trim();
-    if (cuenta_id && lado) lineas.push({ cuenta_id: parseInt(cuenta_id), lado: lado, descripcion: desc || null });
-  });
-  return lineas;
-}
-
-function admModGuardar() {
-  var id = document.getElementById('adm-mod-id').value;
-  var nombre = document.getElementById('adm-mod-nombre').value.trim();
-  var descripcion = document.getElementById('adm-mod-desc').value.trim() || null;
-  if (!nombre) return toast('El nombre es requerido', 'er');
-  var lineas = admModLeerLineas();
-  if (lineas.length < 2) return toast('El modelo necesita al menos 2 líneas', 'er');
-  var body = { nombre: nombre, descripcion: descripcion, lineas: lineas };
-  var url = id ? '/modelos/' + id : '/modelos';
-  var method = id ? 'PUT' : 'POST';
-  admModApi(url, { method: method, body: JSON.stringify(body) }).then(function(r) {
-    if (r.ok) {
-      toast('✓ Modelo guardado', 'ok');
-      document.getElementById('adm-mb-modelo').classList.remove('on');
-      admModCargar();
-    } else toast('Error: ' + (r.error || 'desconocido'), 'er');
-  });
-}
-
-function admModEliminar(id) {
-  if (!confirm('¿Eliminar este modelo?')) return;
-  admModApi('/modelos/' + id, { method: 'DELETE' }).then(function(r) {
-    if (r.ok) { toast('✓ Eliminado', 'ok'); admModCargar(); }
-    else toast(r.error || 'Error', 'er');
-  });
-}
-
-// ── Asiento desde Factura ──────────────────────────────────────────────
-var ADM_AF_LINEAS_DATA = [];
-
-function admAfAbrir(compraId, proveedorId, items, total, fecha, nroFac) {
-  document.getElementById('adm-af-compra-id').value = compraId;
-  document.getElementById('adm-af-subtit').textContent = 'Factura ' + (nroFac||'S/N') + ' — ' + (fecha||'');
-  ADM_AF_LINEAS_DATA = [];
-  admModCargarCuentas(function() {
-    // Cargar modelo del proveedor
-    admModApi('/cuentas?incluir_inactivas=0').then(function() {
-      fetch('/api/pa/proveedores/' + proveedorId)
-        .then(function(r){ return r.json(); })
-        .then(function(rp) {
-          var modeloId = rp.data?.asiento_modelo_id;
-          if (modeloId) {
-            admModApi('/modelos/' + modeloId).then(function(rm) {
-              var lineasModelo = rm.data?.lineas || [];
-              // Generar una línea por ítem según el modelo
-              var lineas = [];
-              items.forEach(function(item, i) {
-                var monto = parseFloat(item.precio_total || item.total || 0);
-                // Línea debe (primera del modelo que sea debe)
-                var lDebe = lineasModelo.find(function(l){ return l.lado === 'debe'; });
-                var lHaber = lineasModelo.find(function(l){ return l.lado === 'haber'; });
-                if (lDebe) lineas.push({ cuenta_id: lDebe.cuenta_id, cuenta_nombre: lDebe.cuenta_nombre, cuenta_codigo: lDebe.cuenta_codigo, debe: monto, haber: 0, descripcion: item.concepto || item.nombre || ('Ítem ' + (i+1)) });
-                if (lHaber) lineas.push({ cuenta_id: lHaber.cuenta_id, cuenta_nombre: lHaber.cuenta_nombre, cuenta_codigo: lHaber.cuenta_codigo, debe: 0, haber: monto, descripcion: item.concepto || item.nombre || ('Ítem ' + (i+1)) });
-              });
-              admAfRenderLineas(lineas);
-            });
-          } else {
-            // Sin modelo: líneas vacías con total
-            admAfRenderLineas([
-              { cuenta_id: '', cuenta_nombre: '', debe: total, haber: 0, descripcion: 'Total factura' },
-              { cuenta_id: '', cuenta_nombre: '', debe: 0, haber: total, descripcion: 'Total factura' }
-            ]);
-            toast('⚠ Este proveedor no tiene asiento modelo asignado', 'warn');
-          }
-          document.getElementById('adm-mb-asiento-fac').classList.add('on');
-        });
-    });
-  });
-}
-
-function admAfRenderLineas(lineas) {
-  ADM_AF_LINEAS_DATA = lineas;
-  var tbody = document.getElementById('adm-af-lineas');
-  var opts = ADM_MOD_CUENTAS.map(function(c) {
-    return '<option value="' + c.id + '">[' + (c.codigo||'') + '] ' + c.nombre + '</option>';
-  }).join('');
-  tbody.innerHTML = lineas.map(function(l, i) {
-    var selOpts = '<option value="">— Cuenta —</option>' + ADM_MOD_CUENTAS.map(function(c) {
-      return '<option value="' + c.id + '"' + (c.id == l.cuenta_id ? ' selected' : '') + '>[' + (c.codigo||'') + '] ' + c.nombre + '</option>';
-    }).join('');
-    return '<tr>'
-      + '<td><select onchange="admAfActualizar()" style="width:100%;font-size:11px">' + selOpts + '</select></td>'
-      + '<td style="text-align:right;font-family:monospace;font-size:12px">' + (l.debe > 0 ? '$ ' + l.debe.toFixed(2) : '—') + '</td>'
-      + '<td style="text-align:right;font-family:monospace;font-size:12px">' + (l.haber > 0 ? '$ ' + l.haber.toFixed(2) : '—') + '</td>'
-      + '<td><input value="' + (l.descripcion||'') + '" placeholder="Descripción" style="width:100%;font-size:11px" onchange="admAfActualizar()"></td>'
-      + '<td><button class="btn bd bs" onclick="this.closest('tr').remove();admAfActualizar()" style="padding:2px 6px;font-size:10px">✕</button></td>'
-      + '</tr>';
-  }).join('');
-  admAfActualizar();
-}
-
-function admAfActualizar() {
-  var rows = document.querySelectorAll('#adm-af-lineas tr');
-  var totalDebe = 0, totalHaber = 0;
-  rows.forEach(function(tr) {
-    var montoTd = tr.querySelectorAll('td');
-    var debe = parseFloat((montoTd[1]?.textContent||'').replace(/[^0-9.]/g,'')) || 0;
-    var haber = parseFloat((montoTd[2]?.textContent||'').replace(/[^0-9.]/g,'')) || 0;
-    totalDebe += debe; totalHaber += haber;
-  });
-  document.getElementById('adm-af-total-debe').textContent = '$ ' + totalDebe.toFixed(2);
-  document.getElementById('adm-af-total-haber').textContent = '$ ' + totalHaber.toFixed(2);
-  var div = document.getElementById('adm-af-doble');
-  var btn = document.getElementById('adm-af-btn-confirmar');
-  var ok = Math.abs(totalDebe - totalHaber) < 0.01 && totalDebe > 0;
-  if (ok) {
-    div.style.background = 'rgba(74,222,128,.12)'; div.style.color = 'var(--ok)';
-    div.textContent = '✅ Partida doble OK — Debe = Haber = $ ' + totalDebe.toFixed(2);
-    btn.disabled = false; btn.style.opacity = '';
-  } else {
-    div.style.background = 'rgba(239,68,68,.12)'; div.style.color = 'var(--err)';
-    div.textContent = '❌ No cuadra — Debe: $ ' + totalDebe.toFixed(2) + ' | Haber: $ ' + totalHaber.toFixed(2);
-    btn.disabled = true; btn.style.opacity = '.5';
-  }
-}
-
-function admAfConfirmar() {
-  var compraId = document.getElementById('adm-af-compra-id').value;
-  var rows = document.querySelectorAll('#adm-af-lineas tr');
-  var lineas = [];
-  rows.forEach(function(tr) {
-    var cuentaId = tr.querySelector('select')?.value;
-    var tds = tr.querySelectorAll('td');
-    var debe  = parseFloat((tds[1]?.textContent||'').replace(/[^0-9.]/g,'')) || 0;
-    var haber = parseFloat((tds[2]?.textContent||'').replace(/[^0-9.]/g,'')) || 0;
-    var desc  = tr.querySelector('input')?.value?.trim() || null;
-    if (cuentaId) lineas.push({ cuenta_id: parseInt(cuentaId), debe: debe, haber: haber, descripcion: desc });
-  });
-  admModApi('/modelos/desde-factura', { method: 'POST', body: JSON.stringify({ compra_id: parseInt(compraId), lineas: lineas }) })
-    .then(function(r) {
-      if (r.ok) {
-        toast('✅ Asiento ' + r.ref_codigo + ' generado correctamente', 'ok');
-        document.getElementById('adm-mb-asiento-fac').classList.remove('on');
-      } else toast('Error: ' + (r.error || 'desconocido'), 'er');
-    });
-}
 var _loadSecOriginal = loadSec;
 loadSec = function(s) {
-  if (s === 'adm-modelos') {
-    admModCargar();
-    return;
-  }
   if (s === 'adm-proveedores') {
     admProvCargar();
     return;
@@ -7226,7 +6954,6 @@ var USR_SECCIONES = [
   { grupo: 'Administración', items: [
     { id: 'adm-asientos',     label: '📒 Asientos Contables' },
     { id: 'adm-plan-cuentas', label: '📊 Plan de Cuentas ADM' },
-    { id: 'adm-modelos', label: '📐 Asiento Modelo' },
   ]},
   { grupo: 'Scout — App móvil (tabs)', items: [
     { id: 'scout-reportar', label: '📷 Reportar problema' },
@@ -13482,7 +13209,9 @@ function paCuRenderLog(log) {
 // ════════════════════════════════════════════════════════════════════════════
 
 const IFCO = { _provs: [], _cli: [], _talonActivo: null, _selRemito: null, _selEnvio: null,
-  _ocr: { enabled: false }, _fotoDespachoPath: null, _fotoSelladoPath: null, _movTipo: null };
+  _ocr: { enabled: false }, _fotoDespachoPath: null, _fotoSelladoPath: null, _movTipo: null,
+  _editandoRemitoId: null, _editandoEnvioId: null, _editandoMovId: null, _editandoRecMercId: null,
+  _papTab: 'remitos' };
 
 function _ifcoFmt(n)     { return (n == null ? '0' : Number(n).toLocaleString('es-AR')); }
 function _ifcoFecha(s)   { if (!s) return '—'; const d = new Date(s); if (isNaN(d)) return s; return d.toLocaleDateString('es-AR'); }
@@ -13514,7 +13243,8 @@ async function ifcoCargar() {
 
 // ── Tabs ──────────────────────────────────────────────────────────────────
 function ifcoTab(t) {
-  document.querySelectorAll('#ifco-tabs .ifco-tab').forEach(function(el){
+  // Tabs principales (las de papelera usan data-pap, no data-tab)
+  document.querySelectorAll('#ifco-tabs .ifco-tab[data-tab]').forEach(function(el){
     el.classList.toggle('on', el.getAttribute('data-tab') === t);
   });
   document.querySelectorAll('#sec-ab-ifcos .ifco-pane').forEach(function(el){
@@ -13523,8 +13253,10 @@ function ifcoTab(t) {
   if (t === 'resumen')  ifcoCargarResumen();
   if (t === 'remitos')  ifcoCargarRemitos();
   if (t === 'envios')   ifcoCargarEnvios();
+  if (t === 'recep')    ifcoCargarRecepciones();
   if (t === 'movs')     ifcoCargarMovimientos();
   if (t === 'talons')   ifcoCargarTalonarios();
+  if (t === 'papelera') ifcoPapTab(IFCO._papTab || 'remitos');
 }
 
 // ── RESUMEN ───────────────────────────────────────────────────────────────
@@ -13615,33 +13347,47 @@ async function ifcoCargarRemitos() {
     const rows = await _ifcoFetch('/api/ifco/remitos?' + params.toString());
     const tb = document.querySelector('#ifco-tbl-remitos tbody');
     if (rows.length === 0) {
-      tb.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:20px;color:var(--mut)">Sin remitos</td></tr>';
+      tb.innerHTML = '<tr><td colspan="10" style="text-align:center;padding:20px;color:var(--mut)">Sin remitos</td></tr>';
       return;
     }
     tb.innerHTML = rows.map(function(r){
       const acciones = [];
       if (r.estado === 'despachado') {
         acciones.push('<button class="btn bb" style="font-size:11px;padding:4px 8px" onclick="ifcoAbrirSellar('+r.id+')">Sellar</button>');
+        acciones.push('<button class="btn bo" style="font-size:11px;padding:4px 8px" onclick="ifcoAbrirEditarRemito('+r.id+')">Editar</button>');
       }
       if (r.estado === 'sellado' && r.escaneo_path) {
         acciones.push('<a href="'+r.escaneo_path+'" target="_blank" style="font-size:11px;color:var(--burg)">Ver foto</a>');
       }
       if (r.estado === 'sellado') {
-        acciones.push('<button class="btn bo" style="font-size:11px;padding:4px 8px" onclick="ifcoAbrirSellar('+r.id+')">Editar</button>');
+        acciones.push('<button class="btn bo" style="font-size:11px;padding:4px 8px" onclick="ifcoAbrirSellar('+r.id+')">Re-sellar</button>');
       }
       if (r.estado === 'presentado' && r.escaneo_path) {
         acciones.push('<a href="'+r.escaneo_path+'" target="_blank" style="font-size:11px;color:var(--burg)">Foto</a>');
       }
+      // Eliminar: siempre disponible
+      acciones.push('<button class="btn bo" style="font-size:11px;padding:4px 8px;color:#991b1b" onclick="ifcoEliminarRemito('+r.id+', \''+_ifcoEsc(r.n_remito_ifco)+'\')">🗑️</button>');
+
+      // Origen: SG (texto chico) o "Directo: ProvX" (badge)
+      let origenCell;
+      if (r.origen === 'proveedor_directo') {
+        origenCell = '<span class="ifco-badge" style="background:#fef3c7;color:#92400e">Directo</span>'
+                   + '<div style="font-size:11px;color:var(--mut);margin-top:2px">'+_ifcoEsc(r.proveedor_origen_nombre||'?')+'</div>';
+      } else {
+        origenCell = '<span style="font-size:11px;color:var(--mut)">SG</span>';
+      }
+
       return '<tr>' +
         '<td style="font-family:monospace;font-size:12px"><b>'+_ifcoEsc(r.n_remito_ifco)+'</b></td>' +
         '<td>'+_ifcoFecha(r.fecha_emision)+'</td>' +
         '<td>'+_ifcoEsc(r.empresa||'—')+(r.sucursal?'<div style="font-size:11px;color:var(--mut)">'+_ifcoEsc(r.sucursal)+'</div>':'')+'</td>' +
+        '<td>'+origenCell+'</td>' +
         '<td style="text-align:right;font-variant-numeric:tabular-nums"><b>'+_ifcoFmt(r.cantidad_despachada)+'</b></td>' +
         '<td style="text-align:right;font-variant-numeric:tabular-nums">'+(r.cantidad_recibida != null ? _ifcoFmt(r.cantidad_recibida) : '—')+'</td>' +
         '<td style="text-align:right;font-variant-numeric:tabular-nums">'+(r.cantidad_rechazada != null && r.cantidad_rechazada > 0 ? _ifcoFmt(r.cantidad_rechazada) : '—')+'</td>' +
         '<td>'+_ifcoBadge(r.estado)+'</td>' +
         '<td style="font-size:11px;color:var(--mut)">'+(r.fecha_sellado?_ifcoFecha(r.fecha_sellado):'—')+'</td>' +
-        '<td>'+acciones.join(' ')+'</td>' +
+        '<td style="display:flex;gap:4px;flex-wrap:wrap">'+acciones.join('')+'</td>' +
       '</tr>';
     }).join('');
   } catch(e) {
@@ -13650,14 +13396,29 @@ async function ifcoCargarRemitos() {
 }
 
 function ifcoAbrirNuevoRemito() {
+  IFCO._editandoRemitoId = null;
+  // Título por las dudas (compartimos modal con edición)
+  const tit = document.querySelector('#ifco-mb-remito .mht');
+  if (tit) tit.textContent = '📥 Nuevo despacho a supermercado';
   // Reset campos
   ['ifco-r-numero','ifco-r-sucursal','ifco-r-cantidad','ifco-r-producto','ifco-r-transp','ifco-r-encprov-ap','ifco-r-encprov-nom','ifco-r-encprov-dni','ifco-r-notas']
     .forEach(function(id){ const el = document.getElementById(id); if (el) el.value = ''; });
   document.getElementById('ifco-r-fecha').value = _ifcoToday();
   document.getElementById('ifco-r-cliente').value = '';
   document.getElementById('ifco-r-sugerencia').textContent = '';
+  // Reset origen al default (SG)
+  document.querySelectorAll('input[name="ifco-r-origen"]').forEach(function(r){ r.checked = (r.value === 'san_geronimo'); });
+  document.getElementById('ifco-r-prov-origen-wrap').style.display = 'none';
+  // Llenar dropdown proveedores origen
+  const selProv = document.getElementById('ifco-r-prov-origen');
+  selProv.innerHTML = '<option value="">— Seleccionar proveedor —</option>' +
+    IFCO._provs.map(function(p){
+      return '<option value="'+p.id+'">'+_ifcoEsc(p.nombre)+(p.razon_social?' ('+_ifcoEsc(p.razon_social)+')':'')+'</option>';
+    }).join('');
+  selProv.value = '';
   // Reset state foto
   IFCO._fotoDespachoPath = null;
+  IFCO._fotoDespachoFile = null;
   document.getElementById('ifco-r-foto-input').value = '';
   // Reset paneles
   document.getElementById('ifco-r-step1').style.display = 'block';
@@ -13669,6 +13430,21 @@ function ifcoAbrirNuevoRemito() {
   document.getElementById('ifco-r-volver').style.display = 'none';
   document.getElementById('ifco-r-btn-guardar').style.display = 'none';
   document.getElementById('ifco-mb-remito').classList.add('on');
+}
+
+function ifcoOnOrigenChange() {
+  const v = document.querySelector('input[name="ifco-r-origen"]:checked').value;
+  document.getElementById('ifco-r-prov-origen-wrap').style.display = (v === 'proveedor_directo') ? 'block' : 'none';
+}
+
+// Antes de abrir el file picker, validamos que si el origen es directo, haya elegido proveedor
+function ifcoIniciarFotoDespacho() {
+  const origen = document.querySelector('input[name="ifco-r-origen"]:checked').value;
+  if (origen === 'proveedor_directo') {
+    const provId = document.getElementById('ifco-r-prov-origen').value;
+    if (!provId) { alert('Seleccioná el proveedor de origen primero'); return; }
+  }
+  document.getElementById('ifco-r-foto-input').click();
 }
 
 function ifcoVolverPaso1Despacho() {
@@ -13799,6 +13575,44 @@ async function ifcoGuardarRemito() {
   const cant = parseInt(document.getElementById('ifco-r-cantidad').value);
   if (!cant || cant <= 0) { alert('Cantidad inválida'); return; }
 
+  // Origen
+  const origen = document.querySelector('input[name="ifco-r-origen"]:checked').value;
+  const provOrigenId = origen === 'proveedor_directo' ? document.getElementById('ifco-r-prov-origen').value : '';
+  if (origen === 'proveedor_directo' && !provOrigenId) { alert('Falta proveedor de origen'); return; }
+
+  const editId = IFCO._editandoRemitoId;
+
+  if (editId) {
+    // EDICIÓN: PATCH con JSON
+    const body = {
+      n_remito_ifco:           numero,
+      fecha_emision:           document.getElementById('ifco-r-fecha').value,
+      empresa:                 cadena,
+      sucursal:                document.getElementById('ifco-r-sucursal').value.trim() || null,
+      cantidad_despachada:     cant,
+      producto:                document.getElementById('ifco-r-producto').value.trim() || null,
+      transportista:           document.getElementById('ifco-r-transp').value.trim() || null,
+      encargado_prov_apellido: document.getElementById('ifco-r-encprov-ap').value.trim() || null,
+      encargado_prov_nombre:   document.getElementById('ifco-r-encprov-nom').value.trim() || null,
+      encargado_prov_dni:      document.getElementById('ifco-r-encprov-dni').value.trim() || null,
+      notas:                   document.getElementById('ifco-r-notas').value.trim() || null,
+      origen:                  origen,
+      proveedor_origen_id:     provOrigenId || null
+    };
+    try {
+      await _ifcoFetch('/api/ifco/remitos/' + editId, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+      IFCO._editandoRemitoId = null;
+      document.getElementById('ifco-mb-remito').classList.remove('on');
+      ifcoTab('remitos');
+    } catch(e) { alert('Error: ' + e.message); }
+    return;
+  }
+
+  // CREACIÓN: FormData (puede llevar foto)
   const fd = new FormData();
   fd.append('n_remito_ifco', numero);
   fd.append('fecha_emision', document.getElementById('ifco-r-fecha').value);
@@ -13811,9 +13625,10 @@ async function ifcoGuardarRemito() {
   fd.append('encargado_prov_nombre', document.getElementById('ifco-r-encprov-nom').value.trim());
   fd.append('encargado_prov_dni', document.getElementById('ifco-r-encprov-dni').value.trim());
   fd.append('notas', document.getElementById('ifco-r-notas').value.trim());
+  fd.append('origen', origen);
+  if (origen === 'proveedor_directo') fd.append('proveedor_origen_id', provOrigenId);
   if (IFCO._talonActivo) fd.append('talonario_id', String(IFCO._talonActivo));
 
-  // Foto: prioridad 1) archivo nuevo (OCR off), 2) path ya conocida (OCR on)
   if (IFCO._fotoDespachoFile) {
     fd.append('escaneo_original', IFCO._fotoDespachoFile);
   } else if (IFCO._fotoDespachoPath) {
@@ -13831,6 +13646,59 @@ async function ifcoGuardarRemito() {
   } catch(e) {
     alert('Error: ' + e.message);
   }
+}
+
+// EDITAR remito existente: trae datos del backend y abre el modal en modo edición
+async function ifcoAbrirEditarRemito(id) {
+  try {
+    const r = await _ifcoFetch('/api/ifco/remitos/' + id);
+    if (r.estado !== 'despachado') {
+      alert('Solo se puede editar mientras esté en estado "despachado". Estado actual: ' + r.estado);
+      return;
+    }
+    IFCO._editandoRemitoId = id;
+    const tit = document.querySelector('#ifco-mb-remito .mht');
+    if (tit) tit.textContent = '✏️ Editar despacho — ' + r.n_remito_ifco;
+    // Cargar dropdown proveedores
+    const selProv = document.getElementById('ifco-r-prov-origen');
+    selProv.innerHTML = '<option value="">— Seleccionar proveedor —</option>' +
+      IFCO._provs.map(function(p){
+        return '<option value="'+p.id+'">'+_ifcoEsc(p.nombre)+'</option>';
+      }).join('');
+    selProv.value = r.proveedor_origen_id || '';
+    // Origen
+    document.querySelectorAll('input[name="ifco-r-origen"]').forEach(function(rd){ rd.checked = (rd.value === (r.origen || 'san_geronimo')); });
+    document.getElementById('ifco-r-prov-origen-wrap').style.display = (r.origen === 'proveedor_directo') ? 'block' : 'none';
+    // Campos
+    document.getElementById('ifco-r-numero').value         = r.n_remito_ifco || '';
+    document.getElementById('ifco-r-fecha').value          = r.fecha_emision || '';
+    document.getElementById('ifco-r-cliente').value        = r.empresa || '';
+    document.getElementById('ifco-r-sucursal').value       = r.sucursal || '';
+    document.getElementById('ifco-r-cantidad').value       = r.cantidad_despachada || '';
+    document.getElementById('ifco-r-producto').value       = r.producto || '';
+    document.getElementById('ifco-r-transp').value         = r.transportista || '';
+    document.getElementById('ifco-r-encprov-ap').value     = r.encargado_prov_apellido || '';
+    document.getElementById('ifco-r-encprov-nom').value    = r.encargado_prov_nombre || '';
+    document.getElementById('ifco-r-encprov-dni').value    = r.encargado_prov_dni || '';
+    document.getElementById('ifco-r-notas').value          = r.notas || '';
+    document.getElementById('ifco-r-sugerencia').textContent = '';
+    // Saltar al paso 2 directamente (no se vuelve a hacer OCR al editar)
+    document.getElementById('ifco-r-step1').style.display = 'none';
+    document.getElementById('ifco-r-step2').style.display = 'block';
+    document.getElementById('ifco-r-volver').style.display = 'none';
+    document.getElementById('ifco-r-btn-guardar').style.display = 'inline-block';
+    document.getElementById('ifco-r-ocr-aviso').style.display = 'none';
+    document.getElementById('ifco-mb-remito').classList.add('on');
+  } catch(e) { alert('Error: ' + e.message); }
+}
+
+// ELIMINAR remito (soft delete)
+async function ifcoEliminarRemito(id, n_remito) {
+  if (!confirm('¿Eliminar el remito ' + n_remito + '?\n\nQueda en la papelera y se puede restaurar.')) return;
+  try {
+    await _ifcoFetch('/api/ifco/remitos/' + id, { method: 'DELETE' });
+    ifcoCargarRemitos();
+  } catch(e) { alert('Error: ' + e.message); }
 }
 
 async function ifcoAbrirSellar(id) {
@@ -14043,10 +13911,17 @@ async function ifcoCargarEnvios() {
     }
     tb.innerHTML = rows.map(function(r){
       const acciones = [];
-      if (r.estado === 'enviado' || r.estado === 'parcial') {
-        acciones.push('<button class="btn bb" style="font-size:11px;padding:4px 8px" onclick="ifcoAbrirRecepcion('+r.id+')">Recibir</button>');
-      }
       acciones.push('<button class="btn bo" style="font-size:11px;padding:4px 8px" onclick="ifcoImprimirEnvio('+r.id+')">🖨️</button>');
+      // Editar solo si estado='enviado' (no parcial ni recibido)
+      if (r.estado === 'enviado') {
+        acciones.push('<button class="btn bo" style="font-size:11px;padding:4px 8px" onclick="ifcoAbrirEditarEnvio('+r.id+')">Editar</button>');
+      }
+      // Foto del remito firmado si hay
+      if (r.escaneo_recepcion_path) {
+        acciones.push('<a href="'+r.escaneo_recepcion_path+'" target="_blank" style="font-size:11px;color:var(--burg)">Foto</a>');
+      }
+      // Eliminar siempre
+      acciones.push('<button class="btn bo" style="font-size:11px;padding:4px 8px;color:#991b1b" onclick="ifcoEliminarEnvio('+r.id+', \''+_ifcoEsc(r.n_remito_interno)+'\')">🗑️</button>');
       return '<tr>' +
         '<td style="font-family:monospace;font-size:12px"><b>'+_ifcoEsc(r.n_remito_interno)+'</b></td>' +
         '<td>'+_ifcoFecha(r.fecha_envio)+'</td>' +
@@ -14055,13 +13930,46 @@ async function ifcoCargarEnvios() {
         '<td style="text-align:right;font-variant-numeric:tabular-nums">'+(r.cantidad_recibida!=null?_ifcoFmt(r.cantidad_recibida):'—')+'</td>' +
         '<td>'+_ifcoBadge(r.estado)+'</td>' +
         '<td style="font-size:11px;color:var(--mut)">'+(r.fecha_recepcion?_ifcoFecha(r.fecha_recepcion):'—')+'</td>' +
-        '<td>'+acciones.join(' ')+'</td>' +
+        '<td style="display:flex;gap:4px;flex-wrap:wrap">'+acciones.join('')+'</td>' +
       '</tr>';
     }).join('');
   } catch(e) { alert('Error: ' + e.message); }
 }
 
+async function ifcoAbrirEditarEnvio(id) {
+  try {
+    const e = await _ifcoFetch('/api/ifco/envios/' + id);
+    if (e.estado !== 'enviado') {
+      alert('Solo se puede editar mientras esté en estado "enviado". Estado actual: ' + e.estado);
+      return;
+    }
+    IFCO._editandoEnvioId = id;
+    const tit = document.querySelector('#ifco-mb-envio .mht');
+    if (tit) tit.textContent = '✏️ Editar envío — ' + e.n_remito_interno;
+    document.getElementById('ifco-e-fecha').value = e.fecha_envio || '';
+    document.getElementById('ifco-e-cant').value  = e.cantidad_enviada || '';
+    document.getElementById('ifco-e-notas').value = e.notas || '';
+    const sel = document.getElementById('ifco-e-prov');
+    sel.innerHTML = '<option value="">— Seleccionar —</option>' +
+      IFCO._provs.map(function(p){
+        return '<option value="'+p.id+'"'+(p.id == e.proveedor_id ? ' selected':'')+'>'+_ifcoEsc(p.nombre)+'</option>';
+      }).join('');
+    document.getElementById('ifco-mb-envio').classList.add('on');
+  } catch(e) { alert('Error: ' + e.message); }
+}
+
+async function ifcoEliminarEnvio(id, nro) {
+  if (!confirm('¿Eliminar el envío ' + nro + '?\n\nQueda en la papelera y se puede restaurar.')) return;
+  try {
+    await _ifcoFetch('/api/ifco/envios/' + id, { method: 'DELETE' });
+    ifcoCargarEnvios();
+  } catch(e) { alert('Error: ' + e.message); }
+}
+
 function ifcoAbrirNuevoEnvio() {
+  IFCO._editandoEnvioId = null;
+  const tit = document.querySelector('#ifco-mb-envio .mht');
+  if (tit) tit.textContent = '🚚 Nuevo envío a proveedor';
   document.getElementById('ifco-e-fecha').value = _ifcoToday();
   document.getElementById('ifco-e-cant').value = '';
   document.getElementById('ifco-e-notas').value = '';
@@ -14083,15 +13991,28 @@ async function ifcoGuardarEnvio() {
   };
   if (!body.proveedor_id) { alert('Elegí un proveedor'); return; }
   try {
-    const r = await _ifcoFetch('/api/ifco/envios', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body)
-    });
-    document.getElementById('ifco-mb-envio').classList.remove('on');
-    ifcoCargarEnvios();
-    // Abrir vista imprimible
-    setTimeout(function(){ ifcoImprimirEnvio(r.id); }, 200);
+    if (IFCO._editandoEnvioId) {
+      // EDICIÓN
+      await _ifcoFetch('/api/ifco/envios/' + IFCO._editandoEnvioId, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+      IFCO._editandoEnvioId = null;
+      document.getElementById('ifco-mb-envio').classList.remove('on');
+      ifcoCargarEnvios();
+    } else {
+      // CREACIÓN
+      const r = await _ifcoFetch('/api/ifco/envios', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+      document.getElementById('ifco-mb-envio').classList.remove('on');
+      ifcoCargarEnvios();
+      // Abrir vista imprimible
+      setTimeout(function(){ ifcoImprimirEnvio(r.id); }, 200);
+    }
   } catch(e) { alert('Error: ' + e.message); }
 }
 
@@ -14230,6 +14151,10 @@ async function ifcoCargarMovimientos() {
         : '<span class="ifco-badge" style="background:#fee2e2;color:#991b1b">Pérdida</span>';
       const costo = r.costo_total > 0 ? (r.moneda||'ARS') + ' ' + _ifcoFmt(r.costo_total) : '—';
       const sucursal = r.tipo === 'retiro' ? _ifcoEsc(r.sucursal_ifco || '—') : '—';
+      const acciones = [
+        '<button class="btn bo" style="font-size:11px;padding:4px 8px" onclick="ifcoAbrirEditarMovimiento('+r.id+')">Editar</button>',
+        '<button class="btn bo" style="font-size:11px;padding:4px 8px;color:#991b1b" onclick="ifcoEliminarMovimiento('+r.id+')">🗑️</button>'
+      ].join('');
       return '<tr>' +
         '<td>'+_ifcoFecha(r.fecha)+'</td>' +
         '<td>'+tipoBadge+'</td>' +
@@ -14238,13 +14163,14 @@ async function ifcoCargarMovimientos() {
         '<td style="font-family:monospace;font-size:12px">'+_ifcoEsc(r.n_remito||'—')+'</td>' +
         '<td style="text-align:right">'+costo+'</td>' +
         '<td style="font-size:12px;color:var(--mut)">'+_ifcoEsc(r.notas||'')+'</td>' +
-        '<td></td>' +
+        '<td style="display:flex;gap:4px">'+acciones+'</td>' +
       '</tr>';
     }).join('');
   } catch(e) { alert('Error: ' + e.message); }
 }
 
 function ifcoAbrirNuevoMovimiento(tipo) {
+  IFCO._editandoMovId = null;
   IFCO._movTipo = tipo;
   document.getElementById('ifco-mov-tit').textContent = tipo === 'retiro' ? '📥 Nuevo retiro IFCO' : '⚠️ Registrar pérdida';
   document.getElementById('ifco-m-fecha').value = _ifcoToday();
@@ -14264,10 +14190,40 @@ function ifcoAbrirNuevoMovimiento(tipo) {
   document.getElementById('ifco-mb-mov').classList.add('on');
 }
 
+async function ifcoAbrirEditarMovimiento(id) {
+  try {
+    const m = await _ifcoFetch('/api/ifco/movimientos/' + id);
+    IFCO._editandoMovId = id;
+    IFCO._movTipo = m.tipo;
+    document.getElementById('ifco-mov-tit').textContent = '✏️ Editar ' + (m.tipo === 'retiro' ? 'retiro' : 'pérdida');
+    document.getElementById('ifco-m-fecha').value = m.fecha || '';
+    document.getElementById('ifco-m-cant').value  = m.cantidad || '';
+    document.getElementById('ifco-m-nrem').value  = m.n_remito || '';
+    document.getElementById('ifco-m-costo').value = m.costo_total || '';
+    document.getElementById('ifco-m-notas').value = m.notas || '';
+    document.getElementById('ifco-m-sucursal').value = m.sucursal_ifco || '';
+    document.getElementById('ifco-m-enc-ap').value  = m.encargado_apellido || '';
+    document.getElementById('ifco-m-enc-nom').value = m.encargado_nombre || '';
+    document.getElementById('ifco-m-enc-dni').value = m.encargado_dni || '';
+    const showRetiro  = m.tipo === 'retiro'  ? '' : 'none';
+    const showPerdida = m.tipo === 'perdida' ? '' : 'none';
+    document.querySelectorAll('.ifco-mov-retiro-only').forEach(function(el){ el.style.display = showRetiro; });
+    document.querySelectorAll('.ifco-mov-perdida-only').forEach(function(el){ el.style.display = showPerdida; });
+    document.getElementById('ifco-mb-mov').classList.add('on');
+  } catch(e) { alert('Error: ' + e.message); }
+}
+
+async function ifcoEliminarMovimiento(id) {
+  if (!confirm('¿Eliminar este movimiento?\n\nQueda en la papelera y se puede restaurar.')) return;
+  try {
+    await _ifcoFetch('/api/ifco/movimientos/' + id, { method: 'DELETE' });
+    ifcoCargarMovimientos();
+  } catch(e) { alert('Error: ' + e.message); }
+}
+
 async function ifcoGuardarMovimiento() {
   const body = {
     fecha:       document.getElementById('ifco-m-fecha').value,
-    tipo:        IFCO._movTipo,
     cantidad:    parseInt(document.getElementById('ifco-m-cant').value),
     n_remito:    document.getElementById('ifco-m-nrem').value.trim() || null,
     notas:       document.getElementById('ifco-m-notas').value.trim() || null
@@ -14283,13 +14239,298 @@ async function ifcoGuardarMovimiento() {
     body.costo_total = parseFloat(document.getElementById('ifco-m-costo').value) || 0;
   }
   try {
-    await _ifcoFetch('/api/ifco/movimientos', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body)
-    });
+    if (IFCO._editandoMovId) {
+      // EDICIÓN
+      await _ifcoFetch('/api/ifco/movimientos/' + IFCO._editandoMovId, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+      IFCO._editandoMovId = null;
+    } else {
+      // CREACIÓN
+      body.tipo = IFCO._movTipo;
+      await _ifcoFetch('/api/ifco/movimientos', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+    }
     document.getElementById('ifco-mb-mov').classList.remove('on');
     ifcoCargarMovimientos();
+  } catch(e) { alert('Error: ' + e.message); }
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// RECEPCIONES DE MERCADERÍA DEL PROVEEDOR
+// ════════════════════════════════════════════════════════════════════════════
+
+async function ifcoCargarRecepciones() {
+  try {
+    const rows = await _ifcoFetch('/api/ifco/recepciones-proveedor');
+    const tb = document.querySelector('#ifco-tbl-recep tbody');
+    if (!rows || rows.length === 0) {
+      tb.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:20px;color:var(--mut)">Sin recepciones registradas</td></tr>';
+      return;
+    }
+    tb.innerHTML = rows.map(function(r){
+      const acciones = [
+        '<button class="btn bo" style="font-size:11px;padding:4px 8px" onclick="ifcoAbrirEditarRecepcionMerc('+r.id+')">Editar</button>',
+        '<button class="btn bo" style="font-size:11px;padding:4px 8px;color:#991b1b" onclick="ifcoEliminarRecepcionMerc('+r.id+')">🗑️</button>'
+      ].join('');
+      const fotoCell = r.escaneo_path
+        ? '<a href="'+r.escaneo_path+'" target="_blank" style="font-size:11px;color:var(--burg)">Ver</a>'
+        : '<span style="color:var(--mut);font-size:11px">—</span>';
+      return '<tr>' +
+        '<td>'+_ifcoFecha(r.fecha_recepcion)+'</td>' +
+        '<td>'+_ifcoEsc(r.proveedor_nombre||'?')+'</td>' +
+        '<td style="text-align:right;font-variant-numeric:tabular-nums"><b>'+_ifcoFmt(r.cantidad)+'</b></td>' +
+        '<td>'+_ifcoEsc(r.producto||'—')+'</td>' +
+        '<td style="font-family:monospace;font-size:12px">'+_ifcoEsc(r.n_remito_proveedor||'—')+'</td>' +
+        '<td>'+fotoCell+'</td>' +
+        '<td style="font-size:12px;color:var(--mut)">'+_ifcoEsc(r.notas||'')+'</td>' +
+        '<td style="display:flex;gap:4px">'+acciones+'</td>' +
+      '</tr>';
+    }).join('');
+  } catch(e) { alert('Error: ' + e.message); }
+}
+
+function ifcoAbrirNuevaRecepcionMerc() {
+  IFCO._editandoRecMercId = null;
+  document.getElementById('ifco-recmerc-tit').textContent = '📥 Nueva recepción de mercadería';
+  document.getElementById('ifco-rm-fecha').value    = _ifcoToday();
+  document.getElementById('ifco-rm-cant').value     = '';
+  document.getElementById('ifco-rm-producto').value = '';
+  document.getElementById('ifco-rm-nrem').value     = '';
+  document.getElementById('ifco-rm-notas').value    = '';
+  document.getElementById('ifco-rm-foto').value     = '';
+  const sel = document.getElementById('ifco-rm-prov');
+  sel.innerHTML = '<option value="">— Seleccionar —</option>' +
+    IFCO._provs.map(function(p){
+      return '<option value="'+p.id+'">'+_ifcoEsc(p.nombre)+'</option>';
+    }).join('');
+  document.getElementById('ifco-mb-recmerc').classList.add('on');
+}
+
+async function ifcoAbrirEditarRecepcionMerc(id) {
+  try {
+    const r = await _ifcoFetch('/api/ifco/recepciones-proveedor/' + id);
+    IFCO._editandoRecMercId = id;
+    document.getElementById('ifco-recmerc-tit').textContent = '✏️ Editar recepción';
+    document.getElementById('ifco-rm-fecha').value    = r.fecha_recepcion || '';
+    document.getElementById('ifco-rm-cant').value     = r.cantidad || '';
+    document.getElementById('ifco-rm-producto').value = r.producto || '';
+    document.getElementById('ifco-rm-nrem').value     = r.n_remito_proveedor || '';
+    document.getElementById('ifco-rm-notas').value    = r.notas || '';
+    document.getElementById('ifco-rm-foto').value     = '';
+    const sel = document.getElementById('ifco-rm-prov');
+    sel.innerHTML = '<option value="">— Seleccionar —</option>' +
+      IFCO._provs.map(function(p){
+        return '<option value="'+p.id+'"'+(p.id == r.proveedor_id ? ' selected':'')+'>'+_ifcoEsc(p.nombre)+'</option>';
+      }).join('');
+    document.getElementById('ifco-mb-recmerc').classList.add('on');
+  } catch(e) { alert('Error: ' + e.message); }
+}
+
+async function ifcoGuardarRecepcionMerc() {
+  const fecha = document.getElementById('ifco-rm-fecha').value;
+  const provId = document.getElementById('ifco-rm-prov').value;
+  const cant = parseInt(document.getElementById('ifco-rm-cant').value);
+  const producto = document.getElementById('ifco-rm-producto').value.trim();
+  if (!fecha) { alert('Falta la fecha'); return; }
+  if (!provId) { alert('Elegí un proveedor'); return; }
+  if (!cant || cant <= 0) { alert('Cantidad inválida'); return; }
+  if (!producto) { alert('Falta el producto'); return; }
+
+  const fd = new FormData();
+  fd.append('fecha_recepcion',    fecha);
+  fd.append('proveedor_id',       provId);
+  fd.append('cantidad',           String(cant));
+  fd.append('producto',           producto);
+  fd.append('n_remito_proveedor', document.getElementById('ifco-rm-nrem').value.trim());
+  fd.append('notas',              document.getElementById('ifco-rm-notas').value.trim());
+  const file = document.getElementById('ifco-rm-foto').files[0];
+  if (file) fd.append('escaneo', file);
+
+  try {
+    let url = '/api/ifco/recepciones-proveedor';
+    let method = 'POST';
+    if (IFCO._editandoRecMercId) {
+      url = '/api/ifco/recepciones-proveedor/' + IFCO._editandoRecMercId;
+      method = 'PATCH';
+    }
+    const r = await fetch(url, { method: method, credentials: 'include', body: fd });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Error');
+    IFCO._editandoRecMercId = null;
+    document.getElementById('ifco-mb-recmerc').classList.remove('on');
+    ifcoCargarRecepciones();
+    if (data.saldo_proveedor_actual !== undefined) {
+      const provNombre = (IFCO._provs.find(function(p){ return String(p.id) === String(provId); })||{}).nombre || 'el proveedor';
+      let msg = '✓ Recepción guardada. Saldo actual de ' + provNombre + ': ' + data.saldo_proveedor_actual + ' cajones.';
+      if (data.saldo_proveedor_actual < 0) {
+        msg += '\n\n⚠️ Atención: el saldo quedó negativo. Esto significa que el proveedor devolvió más de lo que se le había enviado registrado. Verificá los registros.';
+      }
+      alert(msg);
+    }
+  } catch(e) { alert('Error: ' + e.message); }
+}
+
+async function ifcoEliminarRecepcionMerc(id) {
+  if (!confirm('¿Eliminar esta recepción?\n\nQueda en la papelera y se puede restaurar.')) return;
+  try {
+    await _ifcoFetch('/api/ifco/recepciones-proveedor/' + id, { method: 'DELETE' });
+    ifcoCargarRecepciones();
+  } catch(e) { alert('Error: ' + e.message); }
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// PAPELERA — vista de eliminados con botón Restaurar
+// ════════════════════════════════════════════════════════════════════════════
+
+function ifcoPapTab(t) {
+  IFCO._papTab = t;
+  document.querySelectorAll('#ifco-pane-papelera .ifco-tab[data-pap]').forEach(function(el){
+    el.classList.toggle('on', el.getAttribute('data-pap') === t);
+  });
+  if (t === 'remitos') ifcoPapCargarRemitos();
+  if (t === 'envios')  ifcoPapCargarEnvios();
+  if (t === 'recep')   ifcoPapCargarRecep();
+  if (t === 'movs')    ifcoPapCargarMovs();
+}
+
+function _ifcoPapEliminado(r) {
+  return _ifcoFecha(r.eliminado_en) + (r.eliminado_por_username ? ' por '+_ifcoEsc(r.eliminado_por_username) : '');
+}
+
+async function ifcoPapCargarRemitos() {
+  try {
+    const rows = await _ifcoFetch('/api/ifco/remitos?papelera=1');
+    const cont = document.getElementById('ifco-pap-content');
+    if (!rows.length) {
+      cont.innerHTML = '<div style="padding:20px;text-align:center;color:var(--mut)">Sin remitos eliminados</div>';
+      return;
+    }
+    cont.innerHTML = '<div class="ab-table-wrap"><table class="ab-table"><thead><tr>' +
+      '<th>N° Remito</th><th>Fecha</th><th>Cadena</th><th style="text-align:right">Cant.</th>' +
+      '<th>Estado</th><th>Eliminado</th><th></th>' +
+      '</tr></thead><tbody>' +
+      rows.map(function(r){
+        return '<tr>' +
+          '<td style="font-family:monospace"><b>'+_ifcoEsc(r.n_remito_ifco)+'</b></td>' +
+          '<td>'+_ifcoFecha(r.fecha_emision)+'</td>' +
+          '<td>'+_ifcoEsc(r.empresa||'—')+'</td>' +
+          '<td style="text-align:right">'+_ifcoFmt(r.cantidad_despachada)+'</td>' +
+          '<td>'+_ifcoBadge(r.estado)+'</td>' +
+          '<td style="font-size:11px;color:var(--mut)">'+_ifcoPapEliminado(r)+'</td>' +
+          '<td><button class="btn bb" style="font-size:11px;padding:4px 10px" onclick="ifcoRestaurarRemito('+r.id+')">↩️ Restaurar</button></td>' +
+        '</tr>';
+      }).join('') + '</tbody></table></div>';
+  } catch(e) { alert('Error: ' + e.message); }
+}
+
+async function ifcoPapCargarEnvios() {
+  try {
+    const rows = await _ifcoFetch('/api/ifco/envios?papelera=1');
+    const cont = document.getElementById('ifco-pap-content');
+    if (!rows.length) {
+      cont.innerHTML = '<div style="padding:20px;text-align:center;color:var(--mut)">Sin envíos eliminados</div>';
+      return;
+    }
+    cont.innerHTML = '<div class="ab-table-wrap"><table class="ab-table"><thead><tr>' +
+      '<th>N° interno</th><th>Fecha</th><th>Proveedor</th><th style="text-align:right">Cant.</th>' +
+      '<th>Estado</th><th>Eliminado</th><th></th>' +
+      '</tr></thead><tbody>' +
+      rows.map(function(r){
+        return '<tr>' +
+          '<td style="font-family:monospace"><b>'+_ifcoEsc(r.n_remito_interno)+'</b></td>' +
+          '<td>'+_ifcoFecha(r.fecha_envio)+'</td>' +
+          '<td>'+_ifcoEsc(r.proveedor_nombre||'?')+'</td>' +
+          '<td style="text-align:right">'+_ifcoFmt(r.cantidad_enviada)+'</td>' +
+          '<td>'+_ifcoBadge(r.estado)+'</td>' +
+          '<td style="font-size:11px;color:var(--mut)">'+_ifcoPapEliminado(r)+'</td>' +
+          '<td><button class="btn bb" style="font-size:11px;padding:4px 10px" onclick="ifcoRestaurarEnvio('+r.id+')">↩️ Restaurar</button></td>' +
+        '</tr>';
+      }).join('') + '</tbody></table></div>';
+  } catch(e) { alert('Error: ' + e.message); }
+}
+
+async function ifcoPapCargarRecep() {
+  try {
+    const rows = await _ifcoFetch('/api/ifco/recepciones-proveedor?papelera=1');
+    const cont = document.getElementById('ifco-pap-content');
+    if (!rows.length) {
+      cont.innerHTML = '<div style="padding:20px;text-align:center;color:var(--mut)">Sin recepciones eliminadas</div>';
+      return;
+    }
+    cont.innerHTML = '<div class="ab-table-wrap"><table class="ab-table"><thead><tr>' +
+      '<th>Fecha</th><th>Proveedor</th><th style="text-align:right">Cant.</th><th>Producto</th>' +
+      '<th>Eliminado</th><th></th>' +
+      '</tr></thead><tbody>' +
+      rows.map(function(r){
+        return '<tr>' +
+          '<td>'+_ifcoFecha(r.fecha_recepcion)+'</td>' +
+          '<td>'+_ifcoEsc(r.proveedor_nombre||'?')+'</td>' +
+          '<td style="text-align:right">'+_ifcoFmt(r.cantidad)+'</td>' +
+          '<td>'+_ifcoEsc(r.producto||'—')+'</td>' +
+          '<td style="font-size:11px;color:var(--mut)">'+_ifcoPapEliminado(r)+'</td>' +
+          '<td><button class="btn bb" style="font-size:11px;padding:4px 10px" onclick="ifcoRestaurarRecepcionMerc('+r.id+')">↩️ Restaurar</button></td>' +
+        '</tr>';
+      }).join('') + '</tbody></table></div>';
+  } catch(e) { alert('Error: ' + e.message); }
+}
+
+async function ifcoPapCargarMovs() {
+  try {
+    const rows = await _ifcoFetch('/api/ifco/movimientos?papelera=1');
+    const cont = document.getElementById('ifco-pap-content');
+    if (!rows.length) {
+      cont.innerHTML = '<div style="padding:20px;text-align:center;color:var(--mut)">Sin movimientos eliminados</div>';
+      return;
+    }
+    cont.innerHTML = '<div class="ab-table-wrap"><table class="ab-table"><thead><tr>' +
+      '<th>Fecha</th><th>Tipo</th><th style="text-align:right">Cant.</th><th>N° Remito</th>' +
+      '<th>Eliminado</th><th></th>' +
+      '</tr></thead><tbody>' +
+      rows.map(function(r){
+        return '<tr>' +
+          '<td>'+_ifcoFecha(r.fecha)+'</td>' +
+          '<td>'+_ifcoEsc(r.tipo)+'</td>' +
+          '<td style="text-align:right">'+_ifcoFmt(r.cantidad)+'</td>' +
+          '<td style="font-family:monospace;font-size:12px">'+_ifcoEsc(r.n_remito||'—')+'</td>' +
+          '<td style="font-size:11px;color:var(--mut)">'+_ifcoPapEliminado(r)+'</td>' +
+          '<td><button class="btn bb" style="font-size:11px;padding:4px 10px" onclick="ifcoRestaurarMovimiento('+r.id+')">↩️ Restaurar</button></td>' +
+        '</tr>';
+      }).join('') + '</tbody></table></div>';
+  } catch(e) { alert('Error: ' + e.message); }
+}
+
+async function ifcoRestaurarRemito(id) {
+  if (!confirm('¿Restaurar este remito?')) return;
+  try {
+    await _ifcoFetch('/api/ifco/remitos/' + id + '/restaurar', { method: 'POST' });
+    ifcoPapCargarRemitos();
+  } catch(e) { alert('Error: ' + e.message); }
+}
+async function ifcoRestaurarEnvio(id) {
+  if (!confirm('¿Restaurar este envío?')) return;
+  try {
+    await _ifcoFetch('/api/ifco/envios/' + id + '/restaurar', { method: 'POST' });
+    ifcoPapCargarEnvios();
+  } catch(e) { alert('Error: ' + e.message); }
+}
+async function ifcoRestaurarRecepcionMerc(id) {
+  if (!confirm('¿Restaurar esta recepción?')) return;
+  try {
+    await _ifcoFetch('/api/ifco/recepciones-proveedor/' + id + '/restaurar', { method: 'POST' });
+    ifcoPapCargarRecep();
+  } catch(e) { alert('Error: ' + e.message); }
+}
+async function ifcoRestaurarMovimiento(id) {
+  if (!confirm('¿Restaurar este movimiento?')) return;
+  try {
+    await _ifcoFetch('/api/ifco/movimientos/' + id + '/restaurar', { method: 'POST' });
+    ifcoPapCargarMovs();
   } catch(e) { alert('Error: ' + e.message); }
 }
 
