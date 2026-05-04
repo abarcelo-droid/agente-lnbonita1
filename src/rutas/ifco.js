@@ -159,7 +159,7 @@ router.get('/remitos', function(req, res) {
   const papelera = f.papelera === '1' || f.incluir_eliminados === '1';
   let q = `SELECT r.*,
                   pori.nombre AS proveedor_origen_nombre,
-                  u.username  AS eliminado_por_username
+                  u.nombre AS eliminado_por_username
            FROM ifco_remitos_super r
            LEFT JOIN proveedores pori ON pori.id = r.proveedor_origen_id
            LEFT JOIN usuarios u ON u.id = r.eliminado_por_id
@@ -439,7 +439,7 @@ router.get('/envios', function(req, res) {
   const papelera = f.papelera === '1' || f.incluir_eliminados === '1';
   let q = `
     SELECT e.*, p.nombre AS proveedor_nombre, p.razon_social AS proveedor_razon,
-           u.username AS eliminado_por_username
+           u.nombre AS eliminado_por_username
     FROM ifco_envios_proveedor e
     LEFT JOIN proveedores p ON p.id = e.proveedor_id
     LEFT JOIN usuarios u ON u.id = e.eliminado_por_id
@@ -581,7 +581,7 @@ router.post('/envios/:id/restaurar', function(req, res) {
 router.get('/movimientos', function(req, res) {
   const f = req.query;
   const papelera = f.papelera === '1' || f.incluir_eliminados === '1';
-  let q = `SELECT m.*, u.username AS eliminado_por_username
+  let q = `SELECT m.*, u.nombre AS eliminado_por_username
            FROM ifco_movimientos m
            LEFT JOIN usuarios u ON u.id = m.eliminado_por_id
            WHERE 1=1`;
@@ -932,7 +932,7 @@ router.get('/recepciones-proveedor', function(req, res) {
   let q = `SELECT r.*,
                   p.nombre  AS proveedor_nombre,
                   p.razon_social AS proveedor_razon,
-                  u.username AS eliminado_por_username
+                  u.nombre AS eliminado_por_username
            FROM ifco_recepciones_proveedor r
            LEFT JOIN proveedores p ON p.id = r.proveedor_id
            LEFT JOIN usuarios u ON u.id = r.eliminado_por_id
