@@ -629,6 +629,10 @@ router.post('/compras', requireAuth, (req, res) => {
   const { fecha, proveedor_id, proveedor_txt, nro_factura, tipo_comprobante, campaña_id, items, notas, remito_foto_b64,
           tipo_factura } = req.body;
   if (!items?.length) return res.status(400).json({ ok: false, error: 'Debe incluir al menos un item' });
+  // Validar que el proveedor esté en el padrón ADM
+  if (!proveedor_id) return res.status(400).json({ ok: false, error: 'Debe seleccionar un proveedor del padrón' });
+  const proveedorPadron = db.prepare('SELECT id FROM adm_proveedores WHERE id = ? AND activo = 1').get(parseInt(proveedor_id));
+  if (!proveedorPadron) return res.status(400).json({ ok: false, error: 'El proveedor no está en el padrón o está inactivo' });
   const esServicio = (tipo_factura === 'servicio');
   try {
     // ── Validaciones específicas por tipo
