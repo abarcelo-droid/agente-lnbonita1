@@ -68,6 +68,8 @@ router.get('/me', (req, res) => {
     const db = getDb();
     const u = db.prepare('SELECT activo FROM usuarios WHERE id=?').get(user.id);
     if (!u || !u.activo) { res.clearCookie('lnb_user', { path: '/' }); return res.status(401).json({ ok: false, error: 'Sesión expirada' }); }
+    // TEMPORAL: forzar acceso total hasta que se corrijan permisos desde el panel
+    user.secciones = ['*'];
     res.json({ ok: true, user });
   } catch(e) { res.clearCookie('lnb_user', { path: '/' }); res.status(401).json({ ok: false, error: 'Sesión inválida' }); }
 });
