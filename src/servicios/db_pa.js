@@ -1718,5 +1718,39 @@ db.exec(`
   } catch(e) { console.error('[ADM] Error migrando asientos_modelo:', e.message); }
 })();
 
+// ── MIGRACIÓN: tablas cuenta corriente y pagos a proveedores ─────────────────
+(function() {
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS pa_pagos_proveedores (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        fecha         TEXT NOT NULL DEFAULT (date('now','localtime')),
+        proveedor_id  INTEGER NOT NULL REFERENCES adm_proveedores(id),
+        monto         REAL NOT NULL,
+        forma_pago    TEXT NOT NULL DEFAULT 'transferencia',
+        banco         TEXT,
+        referencia    TEXT,
+        notas         TEXT,
+        usuario_id    INTEGER,
+        anulado       INTEGER DEFAULT 0,
+        creado_en     TEXT DEFAULT (datetime('now','localtime'))
+      );
+      CREATE TABLE IF NOT EXISTS pa_pagos_compras (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        pago_id     INTEGER NOT NULL REFERENCES pa_pagos_proveedores(id),
+        compra_id   INTEGER NOT NULL REFERENCES pa_compras(id),
+        monto       REAL NOT NULL
+      );
+    `);
+    // Agregar columna saldo_pagado en pa_compras si no existe
+    const colsC = db.prepare("PRAGMA table_info(pa_compras)").all().map(c => c.name);
+    if (!colsC.includes('saldo_pagado')) {
+      db.exec('ALTER TABLE pa_compras ADD COLUMN saldo_pagado REAL DEFAULT 0');
+      console.log('[PA] saldo_pagado agregado en pa_compras');
+    }
+    console.log('[PA] Tablas pagos proveedores listas');
+  } catch(e) { console.error('[PA] Error migrando pagos_proveedores:', e.message); }
+})();
+
 export { db };
 export default db;
