@@ -879,8 +879,25 @@ db.exec(`
     vto_cai         TEXT,
     activo          INTEGER NOT NULL DEFAULT 1,
     notas           TEXT,
+    dueno_tipo      TEXT NOT NULL DEFAULT 'san_geronimo'
+                      CHECK(dueno_tipo IN ('san_geronimo','proveedor')),
+    proveedor_id    INTEGER REFERENCES proveedores(id),
     creado_en       TEXT DEFAULT (datetime('now','localtime'))
   );
+
+  -- Auditoría de transferencias de talonarios entre dueños
+  CREATE TABLE IF NOT EXISTS ifco_talonarios_log (
+    id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+    talonario_id          INTEGER NOT NULL REFERENCES ifco_talonarios(id),
+    fecha                 TEXT DEFAULT (datetime('now','localtime')),
+    dueno_anterior_tipo   TEXT,
+    dueno_anterior_id     INTEGER,
+    dueno_nuevo_tipo      TEXT NOT NULL,
+    dueno_nuevo_id        INTEGER,
+    usuario_id            INTEGER REFERENCES usuarios(id),
+    notas                 TEXT
+  );
+  CREATE INDEX IF NOT EXISTS ifco_talonarios_log_tal_idx ON ifco_talonarios_log(talonario_id);
 
   CREATE TABLE IF NOT EXISTS ifco_remitos_super (
     id                          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1040,6 +1057,17 @@ db.exec(`
     if (!colsMov.includes('eliminado_por_id')) {
       db.exec("ALTER TABLE ifco_movimientos ADD COLUMN eliminado_por_id INTEGER REFERENCES usuarios(id)");
       console.log("[DB] ifco_movimientos.eliminado_por_id agregada");
+    }
+
+    // ── ifco_talonarios — dueño (SG o proveedor)
+    const colsTal = db.prepare("PRAGMA table_info(ifco_talonarios)").all().map(c => c.name);
+    if (!colsTal.includes('dueno_tipo')) {
+      db.exec("ALTER TABLE ifco_talonarios ADD COLUMN dueno_tipo TEXT NOT NULL DEFAULT 'san_geronimo'");
+      console.log("[DB] ifco_talonarios.dueno_tipo agregada");
+    }
+    if (!colsTal.includes('proveedor_id')) {
+      db.exec("ALTER TABLE ifco_talonarios ADD COLUMN proveedor_id INTEGER REFERENCES proveedores(id)");
+      console.log("[DB] ifco_talonarios.proveedor_id agregada");
     }
 
     // ── índice único parcial: n_remito_ifco solo entre activos (no eliminados)

@@ -2546,6 +2546,21 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     .ifco-stat-lbl{font-size:11px;color:var(--mut);text-transform:uppercase;letter-spacing:.06em}
     .ifco-stat-val{font-size:26px;font-weight:600;color:var(--txt);font-variant-numeric:tabular-nums}
     .ifco-stat-sub{font-size:11px;color:var(--mut)}
+    /* N° de remito IFCO: tipografía monoespaciada de sistema (SF Mono / Menlo / Consolas) */
+    .ifco-nremito{font-family:'SF Mono',Menlo,Consolas,'Liberation Mono',monospace;font-size:12.5px;letter-spacing:.02em;font-weight:500}
+    /* Sort headers en tablas IFCO */
+    .ifco-sort-th{cursor:pointer;user-select:none;white-space:nowrap}
+    .ifco-sort-th:hover{color:var(--burg)}
+    .ifco-sort-arr{display:inline-block;width:10px;color:var(--burg);font-size:10px;margin-left:2px}
+    /* Lightbox visor de fotos */
+    .ifco-lightbox{display:none;position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:9999;align-items:center;justify-content:center;cursor:zoom-out}
+    .ifco-lightbox.on{display:flex}
+    .ifco-lightbox img{max-width:92vw;max-height:92vh;border-radius:6px;box-shadow:0 10px 40px rgba(0,0,0,.5)}
+    .ifco-lightbox-close{position:absolute;top:18px;right:24px;color:#fff;font-size:32px;cursor:pointer;background:none;border:none;line-height:1}
+    /* Galería de fotos en modal detalle */
+    .ifco-foto-thumb{cursor:zoom-in;border-radius:8px;border:1px solid var(--bor);width:100%;max-height:220px;object-fit:cover;background:var(--bg);transition:opacity .15s}
+    .ifco-foto-thumb:hover{opacity:.85}
+    .ifco-foto-empty{border:2px dashed var(--bor);border-radius:8px;padding:30px 16px;text-align:center;color:var(--mut);font-size:12px;background:var(--bg)}
     .ifco-badge{display:inline-block;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.05em}
     .ifco-badge-despachado{background:#e5e7eb;color:#374151}
     .ifco-badge-sellado{background:#fef3c7;color:#92400e}
@@ -2620,9 +2635,16 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     <div class="ab-table-wrap">
       <table class="ab-table" id="ifco-tbl-remitos">
         <thead><tr>
-          <th>N° Remito</th><th>Fecha</th><th>Cadena / Sucursal</th><th>Origen</th>
-          <th style="text-align:right">Despachado</th><th style="text-align:right">Recibido</th>
-          <th style="text-align:right">Rech.</th><th>Estado</th><th>Sellado</th><th></th>
+          <th class="ifco-sort-th" data-sort="n_remito_ifco" onclick="ifcoSortRem('n_remito_ifco')">N° Remito <span class="ifco-sort-arr" data-arr="n_remito_ifco"></span></th>
+          <th class="ifco-sort-th" data-sort="fecha_emision" onclick="ifcoSortRem('fecha_emision')">Fecha <span class="ifco-sort-arr" data-arr="fecha_emision">↓</span></th>
+          <th class="ifco-sort-th" data-sort="empresa" onclick="ifcoSortRem('empresa')">Cadena / Sucursal <span class="ifco-sort-arr" data-arr="empresa"></span></th>
+          <th class="ifco-sort-th" data-sort="origen" onclick="ifcoSortRem('origen')">Origen <span class="ifco-sort-arr" data-arr="origen"></span></th>
+          <th class="ifco-sort-th" data-sort="cantidad_despachada" onclick="ifcoSortRem('cantidad_despachada')" style="text-align:right">Despachado <span class="ifco-sort-arr" data-arr="cantidad_despachada"></span></th>
+          <th class="ifco-sort-th" data-sort="cantidad_recibida" onclick="ifcoSortRem('cantidad_recibida')" style="text-align:right">Recibido <span class="ifco-sort-arr" data-arr="cantidad_recibida"></span></th>
+          <th class="ifco-sort-th" data-sort="cantidad_rechazada" onclick="ifcoSortRem('cantidad_rechazada')" style="text-align:right">Rech. <span class="ifco-sort-arr" data-arr="cantidad_rechazada"></span></th>
+          <th class="ifco-sort-th" data-sort="estado" onclick="ifcoSortRem('estado')">Estado <span class="ifco-sort-arr" data-arr="estado"></span></th>
+          <th class="ifco-sort-th" data-sort="fecha_sellado" onclick="ifcoSortRem('fecha_sellado')">Sellado <span class="ifco-sort-arr" data-arr="fecha_sellado"></span></th>
+          <th></th>
         </tr></thead>
         <tbody></tbody>
       </table>
@@ -2685,7 +2707,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     <div class="ab-table-wrap">
       <table class="ab-table" id="ifco-tbl-talons">
         <thead><tr>
-          <th>Serie</th><th>Rango</th><th>CAI</th><th>Vto. CAI</th>
+          <th>Serie</th><th>Rango</th><th>Asignado a</th><th>CAI</th><th>Vto. CAI</th>
           <th style="text-align:right">Usados</th><th style="text-align:right">Disponibles</th>
           <th>Estado</th><th></th>
         </tr></thead>
@@ -2838,8 +2860,8 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       <div class="ab-grid ab-grid-2" style="gap:10px">
       <div>
         <label style="font-size:11px;color:var(--mut);text-transform:uppercase">N° Remito IFCO *</label>
-        <input id="ifco-r-numero" type="text" placeholder="00015-01639431"
-               style="width:100%;padding:8px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg);font-family:monospace;font-size:14px"
+        <input id="ifco-r-numero" type="text" placeholder="00015-01639431" class="ifco-nremito"
+               style="width:100%;padding:8px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg);font-size:14px"
                onfocus="ifcoSugerirNumero(this)">
         <div id="ifco-r-sugerencia" style="font-size:11px;color:var(--mut);margin-top:3px"></div>
       </div>
@@ -3144,29 +3166,47 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       <div class="mht">📋 Nuevo talonario</div>
       <button class="mcl" onclick="document.getElementById('ifco-mb-talon').classList.remove('on')">x</button>
     </div>
+    <!-- Dueño del talonario -->
+    <div style="background:var(--bg);border-radius:8px;padding:12px 14px;margin-bottom:12px">
+      <div style="font-size:11px;color:var(--mut);text-transform:uppercase;margin-bottom:8px">Quién administra el talonario</div>
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;padding:6px 0">
+        <input type="radio" name="ifco-t-dueno" value="san_geronimo" checked onchange="ifcoOnTalonDuenoChange()">
+        <span><b>🏠 San Gerónimo</b> — talonario en uso por SG</span>
+      </label>
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;padding:6px 0">
+        <input type="radio" name="ifco-t-dueno" value="proveedor" onchange="ifcoOnTalonDuenoChange()">
+        <span><b>🚚 Proveedor</b> — administrado por un proveedor</span>
+      </label>
+      <div id="ifco-t-prov-wrap" style="display:none;margin-top:10px;padding-top:10px;border-top:1px solid var(--bor)">
+        <label style="font-size:11px;color:var(--mut);text-transform:uppercase">Proveedor *</label>
+        <select id="ifco-t-prov-id" style="width:100%;padding:8px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg)">
+          <option value="">— Seleccionar proveedor —</option>
+        </select>
+      </div>
+    </div>
     <div class="ab-grid ab-grid-2" style="gap:10px">
       <div>
         <label style="font-size:11px;color:var(--mut);text-transform:uppercase">Serie *</label>
-        <input id="ifco-t-serie" type="text" placeholder="00015" style="width:100%;padding:8px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg);font-family:monospace">
+        <input id="ifco-t-serie" type="text" placeholder="00015" class="ifco-nremito" style="width:100%;padding:8px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg)">
       </div>
       <div>
         <label style="font-size:11px;color:var(--mut);text-transform:uppercase">Activo</label>
         <select id="ifco-t-activo" style="width:100%;padding:8px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg)">
-          <option value="1">Sí (desactiva los demás)</option>
+          <option value="1">Sí (desactiva los demás de este dueño)</option>
           <option value="0">No</option>
         </select>
       </div>
       <div>
         <label style="font-size:11px;color:var(--mut);text-transform:uppercase">Número desde *</label>
-        <input id="ifco-t-desde" type="number" placeholder="1637751" style="width:100%;padding:8px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg);font-family:monospace">
+        <input id="ifco-t-desde" type="number" placeholder="1637751" class="ifco-nremito" style="width:100%;padding:8px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg)">
       </div>
       <div>
         <label style="font-size:11px;color:var(--mut);text-transform:uppercase">Número hasta *</label>
-        <input id="ifco-t-hasta" type="number" placeholder="1677750" style="width:100%;padding:8px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg);font-family:monospace">
+        <input id="ifco-t-hasta" type="number" placeholder="1677750" class="ifco-nremito" style="width:100%;padding:8px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg)">
       </div>
       <div>
         <label style="font-size:11px;color:var(--mut);text-transform:uppercase">CAI</label>
-        <input id="ifco-t-cai" type="text" style="width:100%;padding:8px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg);font-family:monospace">
+        <input id="ifco-t-cai" type="text" class="ifco-nremito" style="width:100%;padding:8px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg)">
       </div>
       <div>
         <label style="font-size:11px;color:var(--mut);text-transform:uppercase">Vencimiento CAI</label>
@@ -3182,6 +3222,82 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       <button class="btn bb" onclick="ifcoGuardarTalonario()">Guardar talonario</button>
     </div>
   </div>
+</div>
+
+<!-- Modal: Detalle del talonario (estado de cada N°) -->
+<div class="mb" id="ifco-mb-talon-det">
+  <div class="mbox" style="width:780px;max-height:90vh;overflow-y:auto">
+    <div class="mhd">
+      <div class="mht" id="ifco-td-tit">📋 Detalle del talonario</div>
+      <button class="mcl" onclick="document.getElementById('ifco-mb-talon-det').classList.remove('on')">x</button>
+    </div>
+    <div id="ifco-td-info" style="background:var(--bg);border-radius:8px;padding:12px 14px;margin-bottom:14px;font-size:13px"></div>
+    <div style="font-size:11px;color:var(--mut);text-transform:uppercase;margin-bottom:8px">Números del talonario</div>
+    <div id="ifco-td-nums" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:6px;margin-bottom:18px"></div>
+    <div id="ifco-td-log-wrap" style="display:none">
+      <div style="font-size:11px;color:var(--mut);text-transform:uppercase;margin-bottom:6px">Historial de transferencias</div>
+      <div id="ifco-td-log" style="font-size:12px"></div>
+    </div>
+    <div class="ab-modal-footer" style="margin-top:18px;display:flex;justify-content:flex-end;gap:8px">
+      <button class="btn bo" id="ifco-td-btn-transferir" onclick="ifcoAbrirTransferirTalon()">↔ Transferir talonario</button>
+      <button class="btn bb" onclick="document.getElementById('ifco-mb-talon-det').classList.remove('on')">Cerrar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: Transferir talonario -->
+<div class="mb" id="ifco-mb-talon-trans">
+  <div class="mbox">
+    <div class="mhd">
+      <div class="mht">↔ Transferir talonario</div>
+      <button class="mcl" onclick="document.getElementById('ifco-mb-talon-trans').classList.remove('on')">x</button>
+    </div>
+    <div id="ifco-tt-actual" style="background:var(--bg);border-radius:8px;padding:10px 14px;margin-bottom:12px;font-size:13px"></div>
+    <div style="font-size:11px;color:var(--mut);text-transform:uppercase;margin-bottom:8px">Nuevo dueño</div>
+    <label style="display:flex;align-items:center;gap:8px;cursor:pointer;padding:6px 0">
+      <input type="radio" name="ifco-tt-dueno" value="san_geronimo" checked onchange="ifcoOnTransDuenoChange()">
+      <span><b>🏠 San Gerónimo</b></span>
+    </label>
+    <label style="display:flex;align-items:center;gap:8px;cursor:pointer;padding:6px 0">
+      <input type="radio" name="ifco-tt-dueno" value="proveedor" onchange="ifcoOnTransDuenoChange()">
+      <span><b>🚚 Proveedor</b></span>
+    </label>
+    <div id="ifco-tt-prov-wrap" style="display:none;margin:10px 0">
+      <label style="font-size:11px;color:var(--mut);text-transform:uppercase">Proveedor destino *</label>
+      <select id="ifco-tt-prov-id" style="width:100%;padding:8px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg)">
+        <option value="">— Seleccionar —</option>
+      </select>
+    </div>
+    <div style="margin-top:10px">
+      <label style="font-size:11px;color:var(--mut);text-transform:uppercase">Notas (opcional)</label>
+      <input id="ifco-tt-notas" type="text" placeholder="Motivo de la transferencia" style="width:100%;padding:8px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg)">
+    </div>
+    <div style="margin-top:10px;font-size:11px;color:var(--mut)">El talonario queda <b>inactivo</b> tras la transferencia. El nuevo dueño puede activarlo después.</div>
+    <div class="ab-modal-footer" style="margin-top:18px;display:flex;justify-content:flex-end;gap:8px">
+      <button class="btn bo" onclick="document.getElementById('ifco-mb-talon-trans').classList.remove('on')">Cancelar</button>
+      <button class="btn bb" onclick="ifcoConfirmarTransferirTalon()">Transferir</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: Detalle del remito (con visor de fotos despacho/sellado) -->
+<div class="mb" id="ifco-mb-rem-det">
+  <div class="mbox" style="width:780px;max-height:90vh;overflow-y:auto">
+    <div class="mhd">
+      <div class="mht" id="ifco-rd-tit">📄 Detalle del remito</div>
+      <button class="mcl" onclick="document.getElementById('ifco-mb-rem-det').classList.remove('on')">x</button>
+    </div>
+    <div id="ifco-rd-body"></div>
+    <div class="ab-modal-footer" style="margin-top:18px;display:flex;justify-content:flex-end;gap:8px">
+      <button class="btn bb" onclick="document.getElementById('ifco-mb-rem-det').classList.remove('on')">Cerrar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Lightbox: foto en grande -->
+<div class="ifco-lightbox" id="ifco-lightbox" onclick="ifcoCerrarLightbox()">
+  <button class="ifco-lightbox-close" onclick="ifcoCerrarLightbox()">×</button>
+  <img id="ifco-lightbox-img" alt="" onclick="event.stopPropagation()">
 </div>
 
 </main>
@@ -13827,6 +13943,99 @@ async function ifcoCargarResumen() {
 }
 
 // ── REMITOS A SÚPER ───────────────────────────────────────────────────────
+// Estado de sort para tabla remitos súper (default: fecha desc)
+if (typeof IFCO !== 'undefined') {
+  IFCO._sortRem = IFCO._sortRem || { col: 'fecha_emision', dir: 'desc' };
+  IFCO._remitosCache = IFCO._remitosCache || [];
+}
+
+function ifcoSortRem(col) {
+  if (!IFCO._sortRem) IFCO._sortRem = { col: 'fecha_emision', dir: 'desc' };
+  if (IFCO._sortRem.col === col) {
+    IFCO._sortRem.dir = (IFCO._sortRem.dir === 'asc') ? 'desc' : 'asc';
+  } else {
+    IFCO._sortRem.col = col;
+    IFCO._sortRem.dir = 'desc';
+  }
+  ifcoRenderRemitos();
+}
+
+function _ifcoSortFn(arr, col, dir) {
+  const m = (dir === 'asc') ? 1 : -1;
+  // Helpers para extraer valor comparable según columna
+  const getVal = function(r) {
+    switch (col) {
+      case 'cantidad_despachada':
+      case 'cantidad_recibida':
+      case 'cantidad_rechazada':
+        return r[col] == null ? -Infinity : Number(r[col]);
+      case 'empresa':
+        return ((r.empresa || '') + ' ' + (r.sucursal || '')).toLowerCase();
+      case 'fecha_emision':
+      case 'fecha_sellado':
+        return r[col] || '';
+      default:
+        return (r[col] == null) ? '' : String(r[col]).toLowerCase();
+    }
+  };
+  return arr.slice().sort(function(a, b) {
+    const va = getVal(a), vb = getVal(b);
+    if (va < vb) return -1 * m;
+    if (va > vb) return  1 * m;
+    return 0;
+  });
+}
+
+function ifcoRenderRemitos() {
+  const rows = IFCO._remitosCache || [];
+  const sort = IFCO._sortRem || { col: 'fecha_emision', dir: 'desc' };
+  // Refrescar flechas de sort en headers
+  document.querySelectorAll('#ifco-tbl-remitos .ifco-sort-arr').forEach(function(el){
+    const c = el.getAttribute('data-arr');
+    el.textContent = (c === sort.col) ? (sort.dir === 'asc' ? '↑' : '↓') : '';
+  });
+  const tb = document.querySelector('#ifco-tbl-remitos tbody');
+  if (rows.length === 0) {
+    tb.innerHTML = '<tr><td colspan="10" style="text-align:center;padding:20px;color:var(--mut)">Sin remitos</td></tr>';
+    return;
+  }
+  const sorted = _ifcoSortFn(rows, sort.col, sort.dir);
+  tb.innerHTML = sorted.map(function(r){
+    const acciones = [];
+    // Botón Ver detalle (siempre visible) — abre modal con datos + fotos
+    acciones.push('<button class="btn bo" style="font-size:11px;padding:4px 8px" onclick="ifcoVerDetalleRemito('+r.id+')">👁 Ver</button>');
+    if (r.estado === 'despachado') {
+      acciones.push('<button class="btn bb" style="font-size:11px;padding:4px 8px" onclick="ifcoAbrirSellar('+r.id+')">Sellar</button>');
+      acciones.push('<button class="btn bo" style="font-size:11px;padding:4px 8px" onclick="ifcoAbrirEditarRemito('+r.id+')">Editar</button>');
+    }
+    if (r.estado === 'sellado') {
+      acciones.push('<button class="btn bo" style="font-size:11px;padding:4px 8px" onclick="ifcoAbrirSellar('+r.id+')">Re-sellar</button>');
+    }
+    acciones.push('<button class="btn bo" style="font-size:11px;padding:4px 8px;color:#991b1b" onclick="ifcoEliminarRemito('+r.id+', \''+_ifcoEsc(r.n_remito_ifco)+'\')">🗑️</button>');
+
+    let origenCell;
+    if (r.origen === 'proveedor_directo') {
+      origenCell = '<span class="ifco-badge" style="background:#fef3c7;color:#92400e">Directo</span>'
+                 + '<div style="font-size:11px;color:var(--mut);margin-top:2px">'+_ifcoEsc(r.proveedor_origen_nombre||'?')+'</div>';
+    } else {
+      origenCell = '<span style="font-size:11px;color:var(--mut)">SG</span>';
+    }
+
+    return '<tr>' +
+      '<td><b class="ifco-nremito">'+_ifcoEsc(r.n_remito_ifco)+'</b></td>' +
+      '<td>'+_ifcoFecha(r.fecha_emision)+'</td>' +
+      '<td>'+_ifcoEsc(r.empresa||'—')+(r.sucursal?'<div style="font-size:11px;color:var(--mut)">'+_ifcoEsc(r.sucursal)+'</div>':'')+'</td>' +
+      '<td>'+origenCell+'</td>' +
+      '<td style="text-align:right;font-variant-numeric:tabular-nums"><b>'+_ifcoFmt(r.cantidad_despachada)+'</b></td>' +
+      '<td style="text-align:right;font-variant-numeric:tabular-nums">'+(r.cantidad_recibida != null ? _ifcoFmt(r.cantidad_recibida) : '—')+'</td>' +
+      '<td style="text-align:right;font-variant-numeric:tabular-nums">'+(r.cantidad_rechazada != null && r.cantidad_rechazada > 0 ? _ifcoFmt(r.cantidad_rechazada) : '—')+'</td>' +
+      '<td>'+_ifcoBadge(r.estado)+'</td>' +
+      '<td style="font-size:11px;color:var(--mut)">'+(r.fecha_sellado?_ifcoFecha(r.fecha_sellado):'—')+'</td>' +
+      '<td style="display:flex;gap:4px;flex-wrap:wrap">'+acciones.join('')+'</td>' +
+    '</tr>';
+  }).join('');
+}
+
 async function ifcoCargarRemitos() {
   const estado = document.getElementById('ifco-flt-rem-estado').value;
   const search = document.getElementById('ifco-flt-rem-search').value;
@@ -13835,51 +14044,8 @@ async function ifcoCargarRemitos() {
   if (search) params.set('search', search);
   try {
     const rows = await _ifcoFetch('/api/ifco/remitos?' + params.toString());
-    const tb = document.querySelector('#ifco-tbl-remitos tbody');
-    if (rows.length === 0) {
-      tb.innerHTML = '<tr><td colspan="10" style="text-align:center;padding:20px;color:var(--mut)">Sin remitos</td></tr>';
-      return;
-    }
-    tb.innerHTML = rows.map(function(r){
-      const acciones = [];
-      if (r.estado === 'despachado') {
-        acciones.push('<button class="btn bb" style="font-size:11px;padding:4px 8px" onclick="ifcoAbrirSellar('+r.id+')">Sellar</button>');
-        acciones.push('<button class="btn bo" style="font-size:11px;padding:4px 8px" onclick="ifcoAbrirEditarRemito('+r.id+')">Editar</button>');
-      }
-      if (r.estado === 'sellado' && r.escaneo_path) {
-        acciones.push('<a href="'+r.escaneo_path+'" target="_blank" style="font-size:11px;color:var(--burg)">Ver foto</a>');
-      }
-      if (r.estado === 'sellado') {
-        acciones.push('<button class="btn bo" style="font-size:11px;padding:4px 8px" onclick="ifcoAbrirSellar('+r.id+')">Re-sellar</button>');
-      }
-      if (r.estado === 'presentado' && r.escaneo_path) {
-        acciones.push('<a href="'+r.escaneo_path+'" target="_blank" style="font-size:11px;color:var(--burg)">Foto</a>');
-      }
-      // Eliminar: siempre disponible
-      acciones.push('<button class="btn bo" style="font-size:11px;padding:4px 8px;color:#991b1b" onclick="ifcoEliminarRemito('+r.id+', \''+_ifcoEsc(r.n_remito_ifco)+'\')">🗑️</button>');
-
-      // Origen: SG (texto chico) o "Directo: ProvX" (badge)
-      let origenCell;
-      if (r.origen === 'proveedor_directo') {
-        origenCell = '<span class="ifco-badge" style="background:#fef3c7;color:#92400e">Directo</span>'
-                   + '<div style="font-size:11px;color:var(--mut);margin-top:2px">'+_ifcoEsc(r.proveedor_origen_nombre||'?')+'</div>';
-      } else {
-        origenCell = '<span style="font-size:11px;color:var(--mut)">SG</span>';
-      }
-
-      return '<tr>' +
-        '<td style="font-family:monospace;font-size:12px"><b>'+_ifcoEsc(r.n_remito_ifco)+'</b></td>' +
-        '<td>'+_ifcoFecha(r.fecha_emision)+'</td>' +
-        '<td>'+_ifcoEsc(r.empresa||'—')+(r.sucursal?'<div style="font-size:11px;color:var(--mut)">'+_ifcoEsc(r.sucursal)+'</div>':'')+'</td>' +
-        '<td>'+origenCell+'</td>' +
-        '<td style="text-align:right;font-variant-numeric:tabular-nums"><b>'+_ifcoFmt(r.cantidad_despachada)+'</b></td>' +
-        '<td style="text-align:right;font-variant-numeric:tabular-nums">'+(r.cantidad_recibida != null ? _ifcoFmt(r.cantidad_recibida) : '—')+'</td>' +
-        '<td style="text-align:right;font-variant-numeric:tabular-nums">'+(r.cantidad_rechazada != null && r.cantidad_rechazada > 0 ? _ifcoFmt(r.cantidad_rechazada) : '—')+'</td>' +
-        '<td>'+_ifcoBadge(r.estado)+'</td>' +
-        '<td style="font-size:11px;color:var(--mut)">'+(r.fecha_sellado?_ifcoFecha(r.fecha_sellado):'—')+'</td>' +
-        '<td style="display:flex;gap:4px;flex-wrap:wrap">'+acciones.join('')+'</td>' +
-      '</tr>';
-    }).join('');
+    IFCO._remitosCache = rows || [];
+    ifcoRenderRemitos();
   } catch(e) {
     alert('Error: ' + e.message);
   }
@@ -14039,10 +14205,25 @@ function _ifcoMatchCadena(textoOcr) {
 async function ifcoSugerirNumero(input) {
   if (input.value) return; // ya hay algo escrito, no pisamos
   try {
-    const r = await _ifcoFetch('/api/ifco/talonarios/activo');
+    // Filtrar talonario activo según origen del despacho
+    const origen = (document.querySelector('input[name="ifco-r-origen"]:checked') || {}).value || 'san_geronimo';
+    let url = '/api/ifco/talonarios/activo';
+    if (origen === 'proveedor_directo') {
+      const provId = document.getElementById('ifco-r-prov-origen').value;
+      if (provId) url += '?proveedor_id=' + encodeURIComponent(provId);
+    } else {
+      url += '?dueno=san_geronimo';
+    }
+    const r = await _ifcoFetch(url);
     if (r.proximo) {
       input.value = r.proximo;
-      let txt = '✓ Próximo del talonario activo. Quedan '+r.disponibles+' disponibles.';
+      let txt = '✓ Próximo del talonario activo';
+      if (r.talonario && r.talonario.dueno_tipo === 'proveedor') {
+        txt += ' (administrado por ' + (r.talonario.proveedor_nombre || 'proveedor') + ')';
+      } else if (origen === 'proveedor_directo') {
+        txt += ' (de SG)';
+      }
+      txt += '. Quedan '+r.disponibles+' disponibles.';
       if (r.cai_alerta) txt += ' ⚠️ CAI vence en '+r.dias_cai+' días.';
       if (r.pocos_remitos) txt += ' ⚠️ ¡Quedan pocos remitos!';
       document.getElementById('ifco-r-sugerencia').textContent = txt;
@@ -14050,7 +14231,10 @@ async function ifcoSugerirNumero(input) {
     } else if (r.agotado) {
       document.getElementById('ifco-r-sugerencia').textContent = '⚠️ Talonario agotado. Cargá uno nuevo.';
     } else {
-      document.getElementById('ifco-r-sugerencia').textContent = 'No hay talonario activo. Cargá uno en la pestaña Talonarios.';
+      const msg = (origen === 'proveedor_directo')
+        ? 'No hay talonario activo asignado a ese proveedor. Cargá uno o transferí uno existente.'
+        : 'No hay talonario activo de SG. Cargá uno en la pestaña Talonarios.';
+      document.getElementById('ifco-r-sugerencia').textContent = msg;
     }
   } catch(e) { /* silent */ }
 }
@@ -15025,21 +15209,109 @@ async function ifcoRestaurarMovimiento(id) {
 }
 
 // ── TALONARIOS ────────────────────────────────────────────────────────────
+// ════════════════════════════════════════════════════════════════════════════
+// LIGHTBOX (visor grande de fotos)
+// ════════════════════════════════════════════════════════════════════════════
+function ifcoAbrirLightbox(src) {
+  if (!src) return;
+  const img = document.getElementById('ifco-lightbox-img');
+  img.src = src;
+  document.getElementById('ifco-lightbox').classList.add('on');
+  document.body.style.overflow = 'hidden';
+}
+function ifcoCerrarLightbox() {
+  document.getElementById('ifco-lightbox').classList.remove('on');
+  document.body.style.overflow = '';
+}
+document.addEventListener('keydown', function(ev){
+  if (ev.key === 'Escape' && document.getElementById('ifco-lightbox')?.classList.contains('on')) {
+    ifcoCerrarLightbox();
+  }
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// DETALLE DE REMITO (modal con datos + fotos despacho/sellado)
+// ════════════════════════════════════════════════════════════════════════════
+async function ifcoVerDetalleRemito(id) {
+  try {
+    const r = await _ifcoFetch('/api/ifco/remitos/' + id);
+    document.getElementById('ifco-rd-tit').innerHTML =
+      '📄 Remito <span class="ifco-nremito">' + _ifcoEsc(r.n_remito_ifco) + '</span>';
+
+    let origenHtml;
+    if (r.origen === 'proveedor_directo') {
+      origenHtml = '<span class="ifco-badge" style="background:#fef3c7;color:#92400e">Directo desde proveedor</span>' +
+                   ' <span style="color:var(--mut)">— ' + _ifcoEsc(r.proveedor_origen_nombre || '?') + '</span>';
+    } else {
+      origenHtml = '<span style="color:var(--mut)">San Gerónimo</span>';
+    }
+
+    const fotoDespHtml = r.escaneo_original_path
+      ? '<img class="ifco-foto-thumb" src="' + r.escaneo_original_path + '" onclick="ifcoAbrirLightbox(\'' + r.escaneo_original_path + '\')" alt="Foto despacho">'
+      : '<div class="ifco-foto-empty">Sin foto del despacho</div>';
+    const fotoSellHtml = r.escaneo_path
+      ? '<img class="ifco-foto-thumb" src="' + r.escaneo_path + '" onclick="ifcoAbrirLightbox(\'' + r.escaneo_path + '\')" alt="Foto sellado">'
+      : '<div class="ifco-foto-empty">Sin foto del sellado' + (r.estado === 'despachado' ? ' (aún no se selló)' : '') + '</div>';
+
+    const html =
+      '<div class="ab-grid ab-grid-2" style="gap:10px;margin-bottom:14px;font-size:13px">' +
+        '<div><div style="font-size:11px;color:var(--mut);text-transform:uppercase">Estado</div>' + _ifcoBadge(r.estado) + '</div>' +
+        '<div><div style="font-size:11px;color:var(--mut);text-transform:uppercase">Fecha emisión</div>' + _ifcoFecha(r.fecha_emision) + '</div>' +
+        '<div><div style="font-size:11px;color:var(--mut);text-transform:uppercase">Cadena / Sucursal</div>' + _ifcoEsc(r.empresa || '—') + (r.sucursal ? '<div style="font-size:11px;color:var(--mut)">' + _ifcoEsc(r.sucursal) + '</div>' : '') + '</div>' +
+        '<div><div style="font-size:11px;color:var(--mut);text-transform:uppercase">Origen</div>' + origenHtml + '</div>' +
+        '<div><div style="font-size:11px;color:var(--mut);text-transform:uppercase">Cantidad despachada</div><b>' + _ifcoFmt(r.cantidad_despachada) + '</b></div>' +
+        '<div><div style="font-size:11px;color:var(--mut);text-transform:uppercase">Cantidad recibida</div>' + (r.cantidad_recibida != null ? '<b>' + _ifcoFmt(r.cantidad_recibida) + '</b>' : '—') + '</div>' +
+        (r.cantidad_rechazada != null && r.cantidad_rechazada > 0 ? '<div><div style="font-size:11px;color:var(--mut);text-transform:uppercase">Rechazadas</div><b style="color:#991b1b">' + _ifcoFmt(r.cantidad_rechazada) + '</b></div>' : '') +
+        (r.fecha_sellado ? '<div><div style="font-size:11px;color:var(--mut);text-transform:uppercase">Fecha sellado</div>' + _ifcoFecha(r.fecha_sellado) + '</div>' : '') +
+        (r.producto ? '<div style="grid-column:span 2"><div style="font-size:11px;color:var(--mut);text-transform:uppercase">Producto</div>' + _ifcoEsc(r.producto) + '</div>' : '') +
+        (r.transportista ? '<div style="grid-column:span 2"><div style="font-size:11px;color:var(--mut);text-transform:uppercase">Transportista</div>' + _ifcoEsc(r.transportista) + '</div>' : '') +
+        (r.notas ? '<div style="grid-column:span 2"><div style="font-size:11px;color:var(--mut);text-transform:uppercase">Notas</div>' + _ifcoEsc(r.notas) + '</div>' : '') +
+      '</div>' +
+      '<div style="font-size:11px;color:var(--mut);text-transform:uppercase;margin-bottom:8px">📎 Fotos</div>' +
+      '<div class="ab-grid ab-grid-2" style="gap:12px">' +
+        '<div>' +
+          '<div style="font-size:11px;color:var(--mut);margin-bottom:4px">Foto del despacho</div>' +
+          fotoDespHtml +
+        '</div>' +
+        '<div>' +
+          '<div style="font-size:11px;color:var(--mut);margin-bottom:4px">Foto del sellado</div>' +
+          fotoSellHtml +
+        '</div>' +
+      '</div>';
+
+    document.getElementById('ifco-rd-body').innerHTML = html;
+    document.getElementById('ifco-mb-rem-det').classList.add('on');
+  } catch(e) {
+    alert('Error: ' + e.message);
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// TALONARIOS
+// ════════════════════════════════════════════════════════════════════════════
 async function ifcoCargarTalonarios() {
   try {
     const rows = await _ifcoFetch('/api/ifco/talonarios');
     const tb = document.querySelector('#ifco-tbl-talons tbody');
     if (rows.length === 0) {
-      tb.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:20px;color:var(--mut)">No hay talonarios cargados — agregá uno con el botón de arriba</td></tr>';
+      tb.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:20px;color:var(--mut)">No hay talonarios cargados — agregá uno con el botón de arriba</td></tr>';
       document.getElementById('ifco-talon-info').textContent = 'Sin talonarios';
       return;
     }
-    const activo = rows.find(function(r){ return r.activo === 1; });
+    // El "activo principal" mostrado arriba: el de SG si existe, si no el primero activo
+    const activoSg = rows.find(function(r){ return r.activo === 1 && r.dueno_tipo === 'san_geronimo'; });
+    const activoFallback = rows.find(function(r){ return r.activo === 1; });
+    const activo = activoSg || activoFallback;
     if (activo) {
       const disp = (activo.numero_hasta - activo.numero_desde + 1) - activo.usados_count;
+      const dueno = (activo.dueno_tipo === 'proveedor')
+        ? '🚚 ' + _ifcoEsc(activo.proveedor_nombre || 'Proveedor')
+        : '🏠 SG';
       document.getElementById('ifco-talon-info').innerHTML =
-        'Activo: <b>'+_ifcoEsc(activo.serie)+'</b> · ' + disp + ' disponibles' +
+        'Activo: <b>'+_ifcoEsc(activo.serie)+'</b> ('+dueno+') · ' + disp + ' disponibles' +
         (activo.vto_cai ? ' · CAI vence '+_ifcoFecha(activo.vto_cai) : '');
+    } else {
+      document.getElementById('ifco-talon-info').textContent = 'Ningún talonario activo';
     }
     tb.innerHTML = rows.map(function(t){
       const total = t.numero_hasta - t.numero_desde + 1;
@@ -15047,29 +15319,56 @@ async function ifcoCargarTalonarios() {
       const estado = t.activo ? '<span class="ifco-badge ifco-badge-presentado">Activo</span>' : '<span class="ifco-badge ifco-badge-despachado">Inactivo</span>';
       const accion = t.activo
         ? ''
-        : '<button class="btn bo" style="font-size:11px;padding:4px 8px" onclick="ifcoActivarTalonario('+t.id+')">Activar</button>';
-      return '<tr>' +
-        '<td style="font-family:monospace"><b>'+_ifcoEsc(t.serie)+'</b></td>' +
-        '<td style="font-family:monospace;font-size:12px">'+t.numero_desde+' → '+t.numero_hasta+'</td>' +
-        '<td style="font-family:monospace;font-size:12px">'+_ifcoEsc(t.cai||'—')+'</td>' +
+        : '<button class="btn bo" style="font-size:11px;padding:4px 8px" onclick="event.stopPropagation();ifcoActivarTalonario('+t.id+')">Activar</button>';
+      const asignadoCell = (t.dueno_tipo === 'proveedor')
+        ? '<span class="ifco-badge" style="background:#fef3c7;color:#92400e">🚚 ' + _ifcoEsc(t.proveedor_nombre || 'Proveedor') + '</span>'
+        : '<span class="ifco-badge" style="background:#e5e7eb;color:#374151">🏠 San Gerónimo</span>';
+      return '<tr style="cursor:pointer" onclick="ifcoVerDetalleTalonario('+t.id+')">' +
+        '<td><b class="ifco-nremito">'+_ifcoEsc(t.serie)+'</b></td>' +
+        '<td><span class="ifco-nremito">'+t.numero_desde+' → '+t.numero_hasta+'</span></td>' +
+        '<td>'+asignadoCell+'</td>' +
+        '<td><span class="ifco-nremito">'+_ifcoEsc(t.cai||'—')+'</span></td>' +
         '<td>'+_ifcoFecha(t.vto_cai)+'</td>' +
         '<td style="text-align:right">'+t.usados_count+'</td>' +
         '<td style="text-align:right"><b>'+disp+'</b></td>' +
         '<td>'+estado+'</td>' +
-        '<td>'+accion+'</td>' +
+        '<td onclick="event.stopPropagation()">'+accion+'</td>' +
       '</tr>';
     }).join('');
   } catch(e) { alert('Error: ' + e.message); }
 }
 
-function ifcoAbrirNuevoTalonario() {
+function ifcoOnTalonDuenoChange() {
+  const v = document.querySelector('input[name="ifco-t-dueno"]:checked')?.value || 'san_geronimo';
+  document.getElementById('ifco-t-prov-wrap').style.display = (v === 'proveedor') ? 'block' : 'none';
+}
+
+async function ifcoAbrirNuevoTalonario() {
   ['ifco-t-serie','ifco-t-desde','ifco-t-hasta','ifco-t-cai','ifco-t-vto','ifco-t-notas']
     .forEach(function(id){ document.getElementById(id).value = ''; });
   document.getElementById('ifco-t-activo').value = '1';
+  // Reset dueño
+  const radioSg = document.querySelector('input[name="ifco-t-dueno"][value="san_geronimo"]');
+  if (radioSg) radioSg.checked = true;
+  document.getElementById('ifco-t-prov-wrap').style.display = 'none';
+  // Cargar proveedores
+  try {
+    const provs = await _ifcoFetch('/api/ifco/proveedores');
+    const sel = document.getElementById('ifco-t-prov-id');
+    sel.innerHTML = '<option value="">— Seleccionar proveedor —</option>' +
+      (provs || []).map(function(p){
+        return '<option value="'+p.id+'">'+_ifcoEsc(p.nombre)+'</option>';
+      }).join('');
+  } catch(e) { /* no romper si falla la lista */ }
   document.getElementById('ifco-mb-talon').classList.add('on');
 }
 
 async function ifcoGuardarTalonario() {
+  const dueno = document.querySelector('input[name="ifco-t-dueno"]:checked')?.value || 'san_geronimo';
+  const provId = (dueno === 'proveedor') ? parseInt(document.getElementById('ifco-t-prov-id').value) : null;
+  if (dueno === 'proveedor' && !provId) {
+    alert('Seleccioná el proveedor que administra el talonario'); return;
+  }
   const body = {
     serie:        document.getElementById('ifco-t-serie').value.trim(),
     numero_desde: parseInt(document.getElementById('ifco-t-desde').value),
@@ -15077,7 +15376,9 @@ async function ifcoGuardarTalonario() {
     cai:          document.getElementById('ifco-t-cai').value.trim() || null,
     vto_cai:      document.getElementById('ifco-t-vto').value || null,
     activo:       document.getElementById('ifco-t-activo').value === '1' ? 1 : 0,
-    notas:        document.getElementById('ifco-t-notas').value.trim() || null
+    notas:        document.getElementById('ifco-t-notas').value.trim() || null,
+    dueno_tipo:   dueno,
+    proveedor_id: provId
   };
   try {
     await _ifcoFetch('/api/ifco/talonarios', {
@@ -15097,6 +15398,126 @@ async function ifcoActivarTalonario(id) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ activo: 1 })
     });
+    ifcoCargarTalonarios();
+  } catch(e) { alert('Error: ' + e.message); }
+}
+
+// Detalle del talonario: ver cada N° con su estado
+async function ifcoVerDetalleTalonario(id) {
+  try {
+    const data = await _ifcoFetch('/api/ifco/talonarios/' + id + '/detalle');
+    IFCO._talonActualId = id;
+    IFCO._talonActual = data.talonario;
+    const t = data.talonario;
+    const total = t.numero_hasta - t.numero_desde + 1;
+    const usados = (data.numeros || []).filter(function(n){ return n.estado !== 'disponible'; }).length;
+    const disp = total - usados;
+    const dueno = (t.dueno_tipo === 'proveedor')
+      ? '🚚 ' + _ifcoEsc(t.proveedor_nombre || 'Proveedor')
+      : '🏠 San Gerónimo';
+    document.getElementById('ifco-td-tit').innerHTML =
+      '📋 Talonario <span class="ifco-nremito">'+_ifcoEsc(t.serie)+'</span> — ' + dueno;
+    document.getElementById('ifco-td-info').innerHTML =
+      '<div style="display:flex;gap:18px;flex-wrap:wrap">' +
+        '<div><b>Rango:</b> <span class="ifco-nremito">'+t.numero_desde+' → '+t.numero_hasta+'</span></div>' +
+        '<div><b>CAI:</b> <span class="ifco-nremito">'+_ifcoEsc(t.cai||'—')+'</span></div>' +
+        '<div><b>Vto. CAI:</b> '+_ifcoFecha(t.vto_cai)+'</div>' +
+        '<div><b>Total:</b> '+total+'</div>' +
+        '<div><b>Usados:</b> '+usados+'</div>' +
+        '<div><b>Disponibles:</b> '+disp+'</div>' +
+        '<div><b>Estado:</b> '+(t.activo ? '<span class="ifco-badge ifco-badge-presentado">Activo</span>' : '<span class="ifco-badge ifco-badge-despachado">Inactivo</span>')+'</div>' +
+      '</div>';
+
+    // Render de números (badge clickeable si tiene remito)
+    const colorByEstado = {
+      'disponible':  { bg: 'transparent',  fg: 'var(--mut)',     bd: 'var(--bor)',     lab: 'Disponible' },
+      'despachado':  { bg: '#e5e7eb',      fg: '#374151',        bd: '#d1d5db',        lab: 'Despachado' },
+      'sellado':     { bg: '#fef3c7',      fg: '#92400e',        bd: '#fcd34d',        lab: 'Sellado' },
+      'presentado':  { bg: '#d1fae5',      fg: '#065f46',        bd: '#6ee7b7',        lab: 'Presentado' },
+      'anulado':     { bg: '#fee2e2',      fg: '#991b1b',        bd: '#fca5a5',        lab: 'Anulado' }
+    };
+    document.getElementById('ifco-td-nums').innerHTML = (data.numeros || []).map(function(n){
+      const c = colorByEstado[n.estado] || colorByEstado['disponible'];
+      const click = n.remito_id ? 'onclick="ifcoVerDetalleRemito('+n.remito_id+');document.getElementById(\'ifco-mb-talon-det\').classList.remove(\'on\');" style="cursor:pointer"' : '';
+      const meta = n.empresa ? '<div style="font-size:10px;color:var(--mut);margin-top:2px">'+_ifcoEsc(n.empresa)+(n.sucursal?' — '+_ifcoEsc(n.sucursal):'')+'</div>' : '';
+      const tachado = n.estado === 'anulado' ? 'text-decoration:line-through;' : '';
+      return '<div ' + click + ' style="padding:8px 10px;border:1px solid '+c.bd+';border-radius:8px;background:'+c.bg+';color:'+c.fg+';"><div class="ifco-nremito" style="font-size:12px;'+tachado+'">'+_ifcoEsc(n.n_remito_ifco)+'</div><div style="font-size:10px;font-weight:600;text-transform:uppercase;margin-top:3px">'+c.lab+'</div>'+meta+'</div>';
+    }).join('');
+
+    // Log de transferencias (si hay más de una entrada)
+    if (data.log && data.log.length > 1) {
+      document.getElementById('ifco-td-log-wrap').style.display = 'block';
+      document.getElementById('ifco-td-log').innerHTML = data.log.map(function(l){
+        const desd = l.dueno_anterior_tipo === 'proveedor' ? '🚚 ' + _ifcoEsc(l.prov_anterior_nombre || '?') : (l.dueno_anterior_tipo ? '🏠 SG' : '—');
+        const haci = l.dueno_nuevo_tipo === 'proveedor' ? '🚚 ' + _ifcoEsc(l.prov_nuevo_nombre || '?') : '🏠 SG';
+        return '<div style="padding:6px 0;border-bottom:1px solid var(--bor)">' +
+          '<span style="color:var(--mut)">'+_ifcoFecha(l.fecha)+'</span> — ' +
+          desd + ' → ' + haci +
+          (l.usuario_nombre ? ' <span style="color:var(--mut)">por '+_ifcoEsc(l.usuario_nombre)+'</span>' : '') +
+          (l.notas ? '<div style="font-size:11px;color:var(--mut);margin-top:2px">'+_ifcoEsc(l.notas)+'</div>' : '') +
+          '</div>';
+      }).join('');
+    } else {
+      document.getElementById('ifco-td-log-wrap').style.display = 'none';
+    }
+
+    document.getElementById('ifco-mb-talon-det').classList.add('on');
+  } catch(e) { alert('Error: ' + e.message); }
+}
+
+// Transferir talonario
+async function ifcoAbrirTransferirTalon() {
+  const t = IFCO._talonActual;
+  if (!t) return;
+  const dueno = (t.dueno_tipo === 'proveedor')
+    ? '🚚 ' + _ifcoEsc(t.proveedor_nombre || 'Proveedor')
+    : '🏠 San Gerónimo';
+  document.getElementById('ifco-tt-actual').innerHTML =
+    '<div style="font-size:11px;color:var(--mut);text-transform:uppercase">Talonario</div>' +
+    '<div><b class="ifco-nremito">'+_ifcoEsc(t.serie)+'</b> · rango <span class="ifco-nremito">'+t.numero_desde+' → '+t.numero_hasta+'</span></div>' +
+    '<div style="font-size:12px;color:var(--mut);margin-top:4px">Dueño actual: <b>' + dueno + '</b></div>';
+  // Reset
+  document.querySelector('input[name="ifco-tt-dueno"][value="san_geronimo"]').checked = true;
+  document.getElementById('ifco-tt-notas').value = '';
+  document.getElementById('ifco-tt-prov-wrap').style.display = 'none';
+  // Cargar proveedores
+  try {
+    const provs = await _ifcoFetch('/api/ifco/proveedores');
+    const sel = document.getElementById('ifco-tt-prov-id');
+    sel.innerHTML = '<option value="">— Seleccionar —</option>' +
+      (provs || []).map(function(p){
+        return '<option value="'+p.id+'">'+_ifcoEsc(p.nombre)+'</option>';
+      }).join('');
+  } catch(e) { /* no romper */ }
+  document.getElementById('ifco-mb-talon-trans').classList.add('on');
+}
+
+function ifcoOnTransDuenoChange() {
+  const v = document.querySelector('input[name="ifco-tt-dueno"]:checked')?.value || 'san_geronimo';
+  document.getElementById('ifco-tt-prov-wrap').style.display = (v === 'proveedor') ? 'block' : 'none';
+}
+
+async function ifcoConfirmarTransferirTalon() {
+  const id = IFCO._talonActualId;
+  if (!id) return;
+  const dueno = document.querySelector('input[name="ifco-tt-dueno"]:checked')?.value || 'san_geronimo';
+  const provId = (dueno === 'proveedor') ? parseInt(document.getElementById('ifco-tt-prov-id').value) : null;
+  if (dueno === 'proveedor' && !provId) {
+    alert('Seleccioná el proveedor destino'); return;
+  }
+  const body = {
+    dueno_tipo: dueno,
+    proveedor_id: provId,
+    notas: document.getElementById('ifco-tt-notas').value.trim() || null
+  };
+  try {
+    await _ifcoFetch('/api/ifco/talonarios/' + id + '/transferir', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    document.getElementById('ifco-mb-talon-trans').classList.remove('on');
+    document.getElementById('ifco-mb-talon-det').classList.remove('on');
     ifcoCargarTalonarios();
   } catch(e) { alert('Error: ' + e.message); }
 }
