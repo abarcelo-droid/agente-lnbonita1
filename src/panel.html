@@ -6966,21 +6966,15 @@ function paCompAsientoCargar(provId) {
     fetch('/api/pa/proveedores/' + provId)
       .then(function(r){ return r.json(); })
       .then(function(rp) {
+        var neto  = PA._compraНето  || 0;
+        var iva   = PA._compraIva   || 0;
         var total = PA._compraTotal || 0;
         wrap.style.display = '';
         var modeloId = rp.data && rp.data.asiento_modelo_id;
         if (modeloId) {
           admModApi('/modelos/' + modeloId).then(function(rm) {
             var lineasModelo = (rm.data && rm.data.lineas) || [];
-            var lDebe  = lineasModelo.find(function(l){ return l.lado === 'debe'; });
-            var lHaber = lineasModelo.find(function(l){ return l.lado === 'haber'; });
-            var lineas = [];
-            if (lDebe)  lineas.push({ cuenta_id: lDebe.cuenta_id,  debe: total, haber: 0,     descripcion: 'Total factura' });
-            if (lHaber) lineas.push({ cuenta_id: lHaber.cuenta_id, debe: 0,     haber: total, descripcion: 'Total factura' });
-            if (!lineas.length) lineas = [
-              { cuenta_id: '', debe: total, haber: 0,     descripcion: 'Total factura' },
-              { cuenta_id: '', debe: 0,     haber: total, descripcion: 'Total factura' }
-            ];
+            var lineas = paCompAsientoGenerarLineas(lineasModelo, neto, iva, total);
             paCompAsientoRender(lineas);
           });
         } else {
@@ -6992,6 +6986,40 @@ function paCompAsientoCargar(provId) {
         }
       });
   });
+}
+
+// Genera las líneas del asiento a partir del modelo y los montos reales
+function paCompAsientoGenerarLineas(lineasModelo, neto, iva, total) {
+  // Clasificar las líneas del modelo por tipo de descripción
+  var lineas = [];
+  lineasModelo.forEach(function(l) {
+    var desc = (l.descripcion || '').toLowerCase();
+    var monto = 0;
+    if (desc.includes('iva') || desc.includes('crédito fiscal') || desc.includes('credito fiscal')) {
+      monto = iva;
+    } else if (desc.includes('percep') || desc.includes('iibb') || desc.includes('ganancias') || desc.includes('ingresos brutos')) {
+      monto = 0; // percepciones: el usuario las completa manualmente
+    } else if (l.lado === 'haber') {
+      monto = total; // proveedores/pasivo: total
+    } else {
+      monto = neto; // compras/gastos: neto
+    }
+    lineas.push({
+      cuenta_id:   l.cuenta_id,
+      debe:        l.lado === 'debe'  ? monto : 0,
+      haber:       l.lado === 'haber' ? monto : 0,
+      descripcion: l.descripcion || ''
+    });
+  });
+  // Si no hay líneas del modelo, usar defaults
+  if (!lineas.length) {
+    lineas = [
+      { cuenta_id: '', debe: neto,  haber: 0,     descripcion: 'Compras neto' },
+      { cuenta_id: '', debe: iva,   haber: 0,     descripcion: 'IVA Crédito Fiscal' },
+      { cuenta_id: '', debe: 0,     haber: total, descripcion: 'Proveedores' }
+    ];
+  }
+  return lineas;
 }
 
 function paCompAsientoRender(lineas) {
@@ -7049,18 +7077,30 @@ function paCompAsientoAgregarLinea() {
   paCompAsientoActualizar();
 }
 
-function paCompAsientoSincronizarTotal(total) {
+function paCompAsientoSincronizarTotal(total, neto, iva) {
+  neto  = neto  !== undefined ? neto  : (PA._compraНето  || total);
+  iva   = iva   !== undefined ? iva   : (PA._compraIva   || 0);
   var rows = document.querySelectorAll('#pa-comp-asiento-lineas tr');
-  var debeRows = [], haberRows = [];
   rows.forEach(function(tr) {
-    var nums = tr.querySelectorAll('input[type=number]');
+    var nums   = tr.querySelectorAll('input[type=number]');
+    var descEl = tr.querySelector('input:not([type=number])');
+    var desc   = descEl ? descEl.value.toLowerCase() : '';
     var d = parseFloat((nums[0] && nums[0].value) || 0);
     var h = parseFloat((nums[1] && nums[1].value) || 0);
-    if (d > 0 && h === 0) debeRows.push(nums[0]);
-    if (h > 0 && d === 0) haberRows.push(nums[1]);
+    // Actualizar solo líneas simples (no percepciones que el user completa a mano)
+    var esPercep = desc.includes('percep') || desc.includes('iibb') || desc.includes('ganancias') || desc.includes('ingresos brutos');
+    if (!esPercep) {
+      if (d > 0 && h === 0) {
+        // línea de debe: iva o neto según descripción
+        var esIva = desc.includes('iva') || desc.includes('crédito') || desc.includes('credito');
+        nums[0].value = esIva ? iva.toFixed(2) : neto.toFixed(2);
+      }
+      if (h > 0 && d === 0) {
+        // línea de haber: siempre total
+        nums[1].value = total.toFixed(2);
+      }
+    }
   });
-  if (debeRows.length === 1)  debeRows[0].value  = total.toFixed(2);
-  if (haberRows.length === 1) haberRows[0].value = total.toFixed(2);
   paCompAsientoActualizar();
 }
 
@@ -7141,6 +7181,7 @@ function admModAbrirNuevo() {
   document.getElementById('adm-mod-desc').value = '';
   document.getElementById('adm-mod-lineas').innerHTML = '';
   document.getElementById('adm-mod-doble').style.display = 'none';
+  ADM_MOD_CUENTAS = []; // forzar recarga para incluir cuentas recién creadas
   admModCargarCuentas(function() {
     admModAgregarLinea('debe');
     admModAgregarLinea('haber');
@@ -7149,6 +7190,7 @@ function admModAbrirNuevo() {
 }
 
 function admModEditar(id) {
+  ADM_MOD_CUENTAS = []; // forzar recarga para incluir cuentas recién creadas
   admModCargarCuentas(function() {
     admModApi('/modelos/' + id).then(function(r) {
       if (!r.ok) return toast(r.error || 'Error', 'er');
@@ -7901,6 +7943,18 @@ if(_inpGondola) _inpGondola.addEventListener('keydown', function(e){
     <div style="display:flex;flex-direction:column;gap:4px;align-items:flex-end;font-size:13px">
       <div style="color:var(--mut)">Subtotal neto: <span id="pa-comp-neto" style="font-weight:600;color:var(--txt)">$0</span></div>
       <div style="color:var(--mut)">IVA: <span id="pa-comp-iva" style="font-weight:600;color:var(--txt)">$0</span></div>
+      <div style="color:var(--mut);display:flex;align-items:center;gap:8px;margin-top:4px">
+        <label style="font-size:12px;white-space:nowrap">Percep. IVA:</label>
+        <input type="number" id="pa-comp-percep-iva" step="0.01" min="0" value="0" oninput="paActTotalComp()" style="width:90px;font-size:12px;text-align:right;padding:3px 6px;border:1px solid var(--bor2);border-radius:5px">
+      </div>
+      <div style="color:var(--mut);display:flex;align-items:center;gap:8px;margin-top:4px">
+        <label style="font-size:12px;white-space:nowrap">Percep. Ganancias:</label>
+        <input type="number" id="pa-comp-percep-gan" step="0.01" min="0" value="0" oninput="paActTotalComp()" style="width:90px;font-size:12px;text-align:right;padding:3px 6px;border:1px solid var(--bor2);border-radius:5px">
+      </div>
+      <div style="color:var(--mut);display:flex;align-items:center;gap:8px;margin-top:4px">
+        <label style="font-size:12px;white-space:nowrap">Percep. IIBB:</label>
+        <input type="number" id="pa-comp-percep-iibb" step="0.01" min="0" value="0" oninput="paActTotalComp()" style="width:90px;font-size:12px;text-align:right;padding:3px 6px;border:1px solid var(--bor2);border-radius:5px">
+      </div>
       <div style="font-size:15px;font-weight:600;margin-top:4px;padding-top:4px;border-top:1px solid var(--bor);min-width:200px;text-align:right">Total: <span id="pa-comp-total">$0</span></div>
     </div>
   </div>
@@ -10344,7 +10398,11 @@ function paAbrirNuevaCompra(){
   var srvCont = document.getElementById('pa-comp-items-srv');
   if (srvCont) srvCont.innerHTML = '';
   document.getElementById('pa-comp-total').textContent='$0';
-  PA._compraTotal = 0;
+  PA._compraTotal = 0; PA._compraНето = 0; PA._compraIva = 0;
+  PA._compraPercep = { iva: 0, gan: 0, iibb: 0 };
+  ['pa-comp-percep-iva','pa-comp-percep-gan','pa-comp-percep-iibb'].forEach(function(id){
+    var el = document.getElementById(id); if(el) el.value = '0';
+  });
   var asWrap = document.getElementById('pa-comp-asiento-wrap');
   if (asWrap) { asWrap.style.display = 'none'; document.getElementById('pa-comp-asiento-lineas').innerHTML = ''; }
   document.getElementById('pa-comp-foto-inp').value='';
@@ -11034,14 +11092,23 @@ function paActTotalComp(){
     neto += monto; iva += sIva;
   });
   var total=neto+iva;
-  PA._compraTotal = total;
+  // Sumar percepciones
+  var percepIva  = parseFloat((document.getElementById('pa-comp-percep-iva')  || {}).value || 0);
+  var percepGan  = parseFloat((document.getElementById('pa-comp-percep-gan')  || {}).value || 0);
+  var percepIibb = parseFloat((document.getElementById('pa-comp-percep-iibb') || {}).value || 0);
+  var percepciones = percepIva + percepGan + percepIibb;
+  total += percepciones;
+  PA._compraTotal   = total;
+  PA._compraНето    = neto;
+  PA._compraIva     = iva;
+  PA._compraPercep  = { iva: percepIva, gan: percepGan, iibb: percepIibb };
   document.getElementById('pa-comp-total').textContent=paMoney(total);
   var netoEl=document.getElementById('pa-comp-neto');
   var ivaEl2=document.getElementById('pa-comp-iva');
   if(netoEl)netoEl.textContent=paMoney(neto);
   if(ivaEl2)ivaEl2.textContent=paMoney(iva);
   var asWrap = document.getElementById('pa-comp-asiento-wrap');
-  if (asWrap && asWrap.style.display !== 'none') paCompAsientoSincronizarTotal(total);
+  if (asWrap && asWrap.style.display !== 'none') paCompAsientoSincronizarTotal(total, neto, iva);
 }
 function paLoadOrdenes(){
   var estado=document.getElementById('pa-ord-estado-fil').value;
