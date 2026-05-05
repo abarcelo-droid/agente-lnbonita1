@@ -119,26 +119,11 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     <img src="/static/logo.jpg" alt="La Nina Bonita">
     <div class="logo-tag">Panel de control</div>
   </div>
-
-  <!-- Widget de clima arriba del sidebar (siempre visible). Click → sección Clima -->
-  <div id="sb-clima" onclick="paIrAClima()" title="Ver clima detallado"
-       style="margin:6px 12px 8px;padding:8px 10px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.08);border-radius:8px;cursor:pointer;display:flex;align-items:center;gap:8px;color:rgba(255,255,255,.85);transition:background .15s"
-       onmouseover="this.style.background='rgba(255,255,255,.10)'"
-       onmouseout="this.style.background='rgba(255,255,255,.06)'">
-    <div id="sb-clima-emoji" style="font-size:22px;line-height:1">🌤️</div>
-    <div style="flex:1;min-width:0">
-      <div id="sb-clima-temp" style="font-size:13px;font-weight:700;color:#fff;line-height:1.1">—°</div>
-      <div id="sb-clima-sub" style="font-size:10px;color:rgba(255,255,255,.55);line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Carpintería</div>
-    </div>
-    <div id="sb-clima-alert" style="display:none;font-size:14px" title="Hay alertas activas">⚠️</div>
-  </div>
-
   <div class="ng" style="color:rgba(74,222,128,.5)">Producción Agrícola</div>
   <div class="ni" data-sec="pa-dashboard"><span class="dot da"></span>Inicio</div>
 
   <div class="ni-grp" data-grp="pa-informes">Informes<span class="ni-caret">▾</span></div>
   <div class="ni-grp-items">
-    <div class="ni" data-sec="pa-clima"><span class="dot da"></span>🌤️ Clima</div>
     <div class="ni" data-sec="pa-calendario"><span class="dot dc"></span>Calendario Agrícola</div>
     <div class="ni" data-sec="pa-costos"><span class="dot da"></span>Costos por Lote</div>
   </div>
@@ -157,18 +142,8 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
 
   <div class="ni-grp" data-grp="pa-admin">Administración<span class="ni-caret">▾</span></div>
   <div class="ni-grp-items">
-
-    <div style="padding:6px 20px 2px 36px;font-size:9px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:rgba(255,255,255,.3)">Adm. de Ventas</div>
-
-    <div style="padding:6px 20px 2px 36px;font-size:9px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:rgba(255,255,255,.3)">Adm. de Compras</div>
     <div class="ni" data-sec="pa-compras"><span class="dot dd"></span>Ingreso de Factura</div>
     <div class="ni" data-sec="pa-electricidad"><span class="dot da"></span>⚡ Electricidad</div>
-    <div class="ni" data-sec="adm-proveedores"><span class="dot da"></span>📋 Padrón Proveedores</div>
-
-    <div style="padding:6px 20px 2px 36px;font-size:9px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:rgba(255,255,255,.3)">Contabilidad</div>
-    <div class="ni" data-sec="adm-asientos"><span class="dot db"></span>📒 Asientos Contables</div>
-    <div class="ni" data-sec="adm-plan-cuentas"><span class="dot dc"></span>📊 Plan de Cuentas Contable</div>
-    <div class="ni" data-sec="adm-modelos"><span class="dot da"></span>📐 Asiento Modelo</div>
   </div>
 
   <div class="ni-grp" data-grp="pa-comerc">Comercialización<span class="ni-caret">▾</span></div>
@@ -179,6 +154,8 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   <div class="ni-grp" data-grp="pa-maestros">Maestros<span class="ni-caret">▾</span></div>
   <div class="ni-grp-items">
     <div class="ni" data-sec="pa-cuentas"><span class="dot dc"></span>📊 Plan de Cuentas</div>
+    <div class="ni" data-sec="adm-asientos"><span class="dot db"></span>📒 Asientos Contables</div>
+    <div class="ni" data-sec="adm-plan-cuentas"><span class="dot dc"></span>📊 Plan de Cuentas Contable</div>
     <div class="ni" data-sec="pa-lotes"><span class="dot db"></span>Fincas y Lotes</div>
   </div>
 
