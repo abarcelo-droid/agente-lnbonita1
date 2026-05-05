@@ -401,6 +401,142 @@ router.get('/asientos/:id(\\d+)', (req, res) => {
   res.json({ ok: true, data: { ...asiento, lineas } });
 });
 
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ASIENTOS MODELO — CRUD
+// ═══════════════════════════════════════════════════════════════════════════
+
+// GET /api/pa/cuentas/modelos
+router.get('/modelos', (req, res) => {
+  const modelos = db.prepare(`
+    SELECT m.*, COUNT(l.id) as cant_lineas
+    FROM adm_asientos_modelo m
+    LEFT JOIN adm_asientos_modelo_lineas l ON l.modelo_id = m.id
+    WHERE m.activo = 1
+    GROUP BY m.id ORDER BY m.nombre
+  `).all();
+  res.json({ ok: true, data: modelos });
+});
+
+// GET /api/pa/cuentas/modelos/:id — con líneas
+router.get('/modelos/:id', (req, res) => {
+  const id = parseInt(req.params.id);
+  const modelo = db.prepare('SELECT * FROM adm_asientos_modelo WHERE id = ?').get(id);
+  if (!modelo) return res.status(404).json({ error: 'modelo no encontrado' });
+  const lineas = db.prepare(`
+    SELECT l.*, c.nombre as cuenta_nombre, c.codigo as cuenta_codigo
+    FROM adm_asientos_modelo_lineas l
+    JOIN pa_cuentas c ON c.id = l.cuenta_id
+    WHERE l.modelo_id = ? ORDER BY l.orden, l.id
+  `).all(id);
+  res.json({ ok: true, data: { ...modelo, lineas } });
+});
+
+// POST /api/pa/cuentas/modelos
+router.post('/modelos', requireAdmin, (req, res) => {
+  const { nombre, descripcion, lineas } = req.body || {};
+  if (!nombre) return res.status(400).json({ error: 'nombre es requerido' });
+  if (!Array.isArray(lineas) || lineas.length < 2)
+    return res.status(400).json({ error: 'El modelo debe tener al menos 2 líneas' });
+  const tieneDebе = lineas.some(l => l.lado === 'debe');
+  const tieneHaber = lineas.some(l => l.lado === 'haber');
+  if (!tieneDebе || !tieneHaber)
+    return res.status(400).json({ error: 'El modelo debe tener al menos 1 línea en el debe y 1 en el haber' });
+  try {
+    const tx = db.transaction(() => {
+      const r = db.prepare(`INSERT INTO adm_asientos_modelo (nombre, descripcion) VALUES (?, ?)`)
+        .run(String(nombre).trim(), descripcion || null);
+      const modeloId = r.lastInsertRowid;
+      const ins = db.prepare(`INSERT INTO adm_asientos_modelo_lineas (modelo_id, cuenta_id, lado, descripcion, orden) VALUES (?, ?, ?, ?, ?)`);
+      lineas.forEach((l, i) => ins.run(modeloId, l.cuenta_id, l.lado, l.descripcion || null, i));
+      return modeloId;
+    });
+    res.json({ ok: true, id: tx() });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// PUT /api/pa/cuentas/modelos/:id
+router.put('/modelos/:id', requireAdmin, (req, res) => {
+  const id = parseInt(req.params.id);
+  const { nombre, descripcion, lineas } = req.body || {};
+  const existe = db.prepare('SELECT id FROM adm_asientos_modelo WHERE id = ?').get(id);
+  if (!existe) return res.status(404).json({ error: 'modelo no encontrado' });
+  if (!nombre) return res.status(400).json({ error: 'nombre es requerido' });
+  if (!Array.isArray(lineas) || lineas.length < 2)
+    return res.status(400).json({ error: 'El modelo debe tener al menos 2 líneas' });
+  const tieneDebе = lineas.some(l => l.lado === 'debe');
+  const tieneHaber = lineas.some(l => l.lado === 'haber');
+  if (!tieneDebе || !tieneHaber)
+    return res.status(400).json({ error: 'El modelo debe tener al menos 1 línea en el debe y 1 en el haber' });
+  try {
+    db.transaction(() => {
+      db.prepare('UPDATE adm_asientos_modelo SET nombre=?, descripcion=? WHERE id=?')
+        .run(String(nombre).trim(), descripcion || null, id);
+      db.prepare('DELETE FROM adm_asientos_modelo_lineas WHERE modelo_id = ?').run(id);
+      const ins = db.prepare(`INSERT INTO adm_asientos_modelo_lineas (modelo_id, cuenta_id, lado, descripcion, orden) VALUES (?, ?, ?, ?, ?)`);
+      lineas.forEach((l, i) => ins.run(id, l.cuenta_id, l.lado, l.descripcion || null, i));
+    })();
+    res.json({ ok: true });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// DELETE /api/pa/cuentas/modelos/:id (soft)
+router.delete('/modelos/:id', requireAdmin, (req, res) => {
+  db.prepare("UPDATE adm_asientos_modelo SET activo = 0 WHERE id = ?").run(parseInt(req.params.id));
+  res.json({ ok: true });
+});
+
+// POST /api/pa/cuentas/modelos/desde-factura
+// Genera asiento contable real desde una factura, usando el modelo del proveedor
+router.post('/modelos/desde-factura', requireAdmin, (req, res) => {
+  const { compra_id, lineas } = req.body || {};
+  if (!compra_id) return res.status(400).json({ error: 'compra_id requerido' });
+
+  const compra = db.prepare(`
+    SELECT c.*, p.razon_social as prov_nombre
+    FROM pa_compras c
+    LEFT JOIN adm_proveedores p ON p.id = c.proveedor_id
+    WHERE c.id = ?
+  `).get(parseInt(compra_id));
+  if (!compra) return res.status(404).json({ error: 'compra no encontrada' });
+
+  if (!Array.isArray(lineas) || lineas.length < 2)
+    return res.status(400).json({ error: 'El asiento debe tener al menos 2 líneas' });
+
+  const totalDebe  = lineas.reduce((s, l) => s + (parseFloat(l.debe)  || 0), 0);
+  const totalHaber = lineas.reduce((s, l) => s + (parseFloat(l.haber) || 0), 0);
+  if (Math.abs(totalDebe - totalHaber) > 0.01)
+    return res.status(400).json({ error: `Partida doble no cuadra: debe=${totalDebe.toFixed(2)} haber=${totalHaber.toFixed(2)}` });
+
+  // Generar código FAC-YYYY-NNNN
+  const año = new Date().getFullYear();
+  const ultimo = db.prepare(`SELECT ref_codigo FROM pa_asientos WHERE ref_codigo LIKE 'FAC-${año}-%' ORDER BY id DESC LIMIT 1`).get();
+  let seq = 1;
+  if (ultimo?.ref_codigo) {
+    const partes = ultimo.ref_codigo.split('-');
+    seq = (parseInt(partes[2]) || 0) + 1;
+  }
+  const refCodigo = `FAC-${año}-${String(seq).padStart(4, '0')}`;
+  const descripcion = `${refCodigo} | ${compra.prov_nombre || 'Proveedor'} | ${compra.nro_factura || 'S/N'}`;
+
+  try {
+    const tx = db.transaction(() => {
+      const r = db.prepare(`
+        INSERT INTO pa_asientos (fecha, descripcion, usuario_id, ref_compra_id, ref_codigo)
+        VALUES (?, ?, ?, ?, ?)
+      `).run(compra.fecha, descripcion, req._user?.id ?? null, compra_id, refCodigo);
+      const asientoId = r.lastInsertRowid;
+      const ins = db.prepare(`INSERT INTO pa_asientos_lineas (asiento_id, cuenta_id, debe, haber, descripcion) VALUES (?, ?, ?, ?, ?)`);
+      for (const l of lineas) {
+        ins.run(asientoId, l.cuenta_id, parseFloat(l.debe)||0, parseFloat(l.haber)||0, l.descripcion||null);
+      }
+      return { asientoId, refCodigo };
+    });
+    const { asientoId, refCodigo: codigo } = tx();
+    res.json({ ok: true, id: asientoId, ref_codigo: codigo });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
 // POST /api/pa/cuentas/asientos — crear asiento
 router.post('/asientos', requireAdmin, (req, res) => {
   const { fecha, descripcion, lineas } = req.body || {};
