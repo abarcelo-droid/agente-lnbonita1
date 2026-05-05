@@ -901,7 +901,7 @@ db.exec(`
 
   CREATE TABLE IF NOT EXISTS ifco_remitos_super (
     id                          INTEGER PRIMARY KEY AUTOINCREMENT,
-    n_remito_ifco               TEXT NOT NULL UNIQUE,
+    n_remito_ifco               TEXT NOT NULL,
     fecha_emision               TEXT NOT NULL,
     cliente_id                  INTEGER REFERENCES dedicados_clientes(id),
     cliente_telefono            TEXT,
@@ -1072,6 +1072,103 @@ db.exec(`
 
     // ── índice único parcial: n_remito_ifco solo entre activos (no eliminados)
     db.exec("CREATE UNIQUE INDEX IF NOT EXISTS ifco_remitos_super_nremito_unique ON ifco_remitos_super(n_remito_ifco) WHERE eliminado_en IS NULL");
+
+    // ── Migración estructural: si la tabla ifco_remitos_super todavía tiene
+    //    el UNIQUE inline en n_remito_ifco, hay que recrear la tabla sin él.
+    //    El partial index de arriba es lo único que necesitamos para unicidad
+    //    entre activos (los que están en papelera no cuentan).
+    //    SQLite no permite DROP CONSTRAINT, así que toca recrear la tabla.
+    try {
+      const tabSql = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='ifco_remitos_super'").get()?.sql || '';
+      const tieneUniqueInline = /n_remito_ifco\s+TEXT\s+NOT\s+NULL\s+UNIQUE/i.test(tabSql);
+      if (tieneUniqueInline) {
+        console.log("[DB] ifco_remitos_super: detectado UNIQUE inline, recreando tabla sin ese constraint…");
+        // Apagar FK durante el rename (recomendado por SQLite docs)
+        db.pragma('foreign_keys = OFF');
+        const recrear = db.transaction(() => {
+          // 1) Tabla nueva con TODAS las columnas (originales + agregadas por migraciones), en el mismo orden
+          db.exec(`
+            CREATE TABLE ifco_remitos_super_new (
+              id                          INTEGER PRIMARY KEY AUTOINCREMENT,
+              n_remito_ifco               TEXT NOT NULL,
+              fecha_emision               TEXT NOT NULL,
+              cliente_id                  INTEGER REFERENCES dedicados_clientes(id),
+              cliente_telefono            TEXT,
+              empresa                     TEXT,
+              sucursal                    TEXT,
+              modelo                      TEXT DEFAULT '6420',
+              cantidad_despachada         INTEGER NOT NULL,
+              producto                    TEXT,
+              transportista               TEXT,
+              encargado_prov_apellido     TEXT,
+              encargado_prov_nombre       TEXT,
+              encargado_prov_dni          TEXT,
+              talonario_id                INTEGER REFERENCES ifco_talonarios(id),
+              estado                      TEXT NOT NULL DEFAULT 'despachado'
+                                            CHECK(estado IN ('despachado','sellado','presentado','anulado')),
+              fecha_sellado               TEXT,
+              encargado_super_apellido    TEXT,
+              encargado_super_nombre      TEXT,
+              encargado_super_dni         TEXT,
+              cantidad_recibida           INTEGER,
+              cantidad_rechazada          INTEGER,
+              escaneo_path                TEXT,
+              fecha_presentado            TEXT,
+              email_enviado_a             TEXT,
+              notas                       TEXT,
+              usuario_id                  INTEGER REFERENCES usuarios(id),
+              creado_en                   TEXT DEFAULT (datetime('now','localtime')),
+              actualizado_en              TEXT DEFAULT (datetime('now','localtime')),
+              escaneo_original_path       TEXT,
+              origen                      TEXT DEFAULT 'san_geronimo',
+              proveedor_origen_id         INTEGER REFERENCES proveedores(id),
+              eliminado_en                TEXT,
+              eliminado_por_id            INTEGER REFERENCES usuarios(id)
+            )
+          `);
+          // 2) Copiar datos respetando el orden de columnas
+          db.exec(`
+            INSERT INTO ifco_remitos_super_new (
+              id, n_remito_ifco, fecha_emision, cliente_id, cliente_telefono, empresa, sucursal,
+              modelo, cantidad_despachada, producto, transportista,
+              encargado_prov_apellido, encargado_prov_nombre, encargado_prov_dni,
+              talonario_id, estado, fecha_sellado,
+              encargado_super_apellido, encargado_super_nombre, encargado_super_dni,
+              cantidad_recibida, cantidad_rechazada, escaneo_path, fecha_presentado,
+              email_enviado_a, notas, usuario_id, creado_en, actualizado_en,
+              escaneo_original_path, origen, proveedor_origen_id, eliminado_en, eliminado_por_id
+            )
+            SELECT
+              id, n_remito_ifco, fecha_emision, cliente_id, cliente_telefono, empresa, sucursal,
+              modelo, cantidad_despachada, producto, transportista,
+              encargado_prov_apellido, encargado_prov_nombre, encargado_prov_dni,
+              talonario_id, estado, fecha_sellado,
+              encargado_super_apellido, encargado_super_nombre, encargado_super_dni,
+              cantidad_recibida, cantidad_rechazada, escaneo_path, fecha_presentado,
+              email_enviado_a, notas, usuario_id, creado_en, actualizado_en,
+              escaneo_original_path, origen, proveedor_origen_id, eliminado_en, eliminado_por_id
+            FROM ifco_remitos_super
+          `);
+          // 3) Drop tabla vieja y rename
+          db.exec("DROP TABLE ifco_remitos_super");
+          db.exec("ALTER TABLE ifco_remitos_super_new RENAME TO ifco_remitos_super");
+          // 4) Recrear índices (los normales no UNIQUE se perdieron al hacer drop)
+          db.exec("CREATE INDEX IF NOT EXISTS ifco_remitos_super_estado_idx   ON ifco_remitos_super(estado)");
+          db.exec("CREATE INDEX IF NOT EXISTS ifco_remitos_super_cliente_idx  ON ifco_remitos_super(cliente_id)");
+          db.exec("CREATE INDEX IF NOT EXISTS ifco_remitos_super_sellado_idx  ON ifco_remitos_super(fecha_sellado)");
+          // 5) Partial unique index
+          db.exec("CREATE UNIQUE INDEX IF NOT EXISTS ifco_remitos_super_nremito_unique ON ifco_remitos_super(n_remito_ifco) WHERE eliminado_en IS NULL");
+        });
+        recrear();
+        // Verificación de integridad referencial
+        const fkErrors = db.prepare("PRAGMA foreign_key_check").all();
+        if (fkErrors.length) {
+          console.error("[DB] ¡FK violadas tras la migración!", fkErrors);
+        }
+        db.pragma('foreign_keys = ON');
+        console.log("[DB] ifco_remitos_super: recreada sin UNIQUE inline. Reuso de N° en papelera habilitado.");
+      }
+    } catch(e) { console.error("[DB] Error recreando ifco_remitos_super:", e.message); }
 
   } catch(e) { console.error("[DB] Error migrando IFCO:", e.message); }
 })();
