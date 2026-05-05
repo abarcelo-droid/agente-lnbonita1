@@ -1170,5 +1170,43 @@ db.exec(`
       }
     } catch(e) { console.error("[DB] Error recreando ifco_remitos_super:", e.message); }
 
+    // ── Migración: re-asociar remitos que quedaron sin talonario_id.
+    //    Recorre cada remito huérfano y le asigna el talonario que contiene su N°.
+    //    Idempotente: la próxima vez no encuentra ninguno y no hace nada.
+    try {
+      const huerfanos = db.prepare(`
+        SELECT id, n_remito_ifco
+        FROM ifco_remitos_super
+        WHERE talonario_id IS NULL AND eliminado_en IS NULL
+      `).all();
+      if (huerfanos.length > 0) {
+        const findTal = db.prepare(`
+          SELECT id FROM ifco_talonarios
+          WHERE serie = ? AND numero_desde <= ? AND numero_hasta >= ?
+          ORDER BY activo DESC, id DESC
+          LIMIT 1
+        `);
+        const updTal = db.prepare("UPDATE ifco_remitos_super SET talonario_id = ? WHERE id = ?");
+        const tx = db.transaction(() => {
+          let asociados = 0;
+          for (const r of huerfanos) {
+            const m = String(r.n_remito_ifco || '').match(/^([^-\s]+)-(\d+)$/);
+            if (!m) continue;
+            const serie = m[1];
+            const numero = parseInt(m[2], 10);
+            if (!Number.isFinite(numero)) continue;
+            const t = findTal.get(serie, numero, numero);
+            if (t) {
+              updTal.run(t.id, r.id);
+              asociados++;
+            }
+          }
+          return asociados;
+        });
+        const n = tx();
+        if (n > 0) console.log(`[DB] ifco_remitos_super: ${n} remitos huérfanos re-asociados a su talonario.`);
+      }
+    } catch(e) { console.error("[DB] Error re-asociando remitos a talonarios:", e.message); }
+
   } catch(e) { console.error("[DB] Error migrando IFCO:", e.message); }
 })();
