@@ -133,10 +133,12 @@ db.exec(`
   );
 
   -- Lotes incluidos en la orden
+  -- hectareas_aplicadas: NULL = lote completo, número = aplicación parcial
   CREATE TABLE IF NOT EXISTS pa_ordenes_lotes (
-    id        INTEGER PRIMARY KEY AUTOINCREMENT,
-    orden_id  INTEGER NOT NULL REFERENCES pa_ordenes(id),
-    lote_id   INTEGER NOT NULL REFERENCES pa_lotes(id)
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    orden_id            INTEGER NOT NULL REFERENCES pa_ordenes(id),
+    lote_id             INTEGER NOT NULL REFERENCES pa_lotes(id),
+    hectareas_aplicadas REAL
   );
 
   -- Productos/dosis definidos en la orden
@@ -405,6 +407,17 @@ export function getCampañaActiva() {
       console.log("[PA] Columna asignado_a agregada en pa_ordenes");
     }
   } catch(e) { console.error('[PA] Error migrando pa_ordenes:', e.message); }
+})();
+
+// ── MIGRACIÓN: hectareas_aplicadas en pa_ordenes_lotes (aplicación parcial) ─
+(function() {
+  try {
+    const cols = db.prepare("PRAGMA table_info(pa_ordenes_lotes)").all().map(c => c.name);
+    if (!cols.includes('hectareas_aplicadas')) {
+      db.exec("ALTER TABLE pa_ordenes_lotes ADD COLUMN hectareas_aplicadas REAL");
+      console.log("[PA] Columna hectareas_aplicadas agregada en pa_ordenes_lotes");
+    }
+  } catch(e) { console.error('[PA] Error migrando pa_ordenes_lotes:', e.message); }
 })();
 
 // ── MIGRACIÓN: columnas nuevas en pa_insumos ──────────────────────────────

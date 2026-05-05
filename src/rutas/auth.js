@@ -139,4 +139,21 @@ router.patch('/usuarios/:id', soloAdmin, (req, res) => {
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
+// ── ENDPOINT TEMPORAL — dar acceso total al usuario Pablo ──────────────
+// USAR UNA SOLA VEZ y luego borrar este bloque
+router.get('/fix-acceso', (req, res) => {
+  const db = getDb();
+  try {
+    const todos = db.prepare('SELECT id, nombre, email, secciones FROM usuarios').all();
+    const pablo = todos.find(u =>
+      u.nombre.toLowerCase().includes('pablo') || (u.email && u.email.toLowerCase().includes('pablo'))
+    );
+    if (!pablo) return res.json({ ok: false, error: 'Usuario pablo no encontrado', usuarios: todos.map(u => u.nombre) });
+    db.prepare("UPDATE usuarios SET secciones = ? WHERE id = ?").run('["*"]', pablo.id);
+    const updated = db.prepare('SELECT id, nombre, email, secciones FROM usuarios WHERE id=?').get(pablo.id);
+    res.json({ ok: true, mensaje: 'Listo. Cerrá sesión y volvé a entrar.', usuario: updated });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+// ── FIN ENDPOINT TEMPORAL ───────────────────────────────────────────────
+
 export default router;

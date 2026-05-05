@@ -955,26 +955,67 @@ db.exec(`
 
   CREATE INDEX IF NOT EXISTS ifco_movimientos_tipo_idx  ON ifco_movimientos(tipo);
   CREATE INDEX IF NOT EXISTS ifco_movimientos_fecha_idx ON ifco_movimientos(fecha);
+
+  CREATE TABLE IF NOT EXISTS ifco_recepciones_proveedor (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    fecha_recepcion     TEXT NOT NULL,
+    proveedor_id        INTEGER NOT NULL REFERENCES proveedores(id),
+    cantidad            INTEGER NOT NULL,
+    producto            TEXT,
+    n_remito_proveedor  TEXT,
+    escaneo_path        TEXT,
+    notas               TEXT,
+    usuario_id          INTEGER REFERENCES usuarios(id),
+    eliminado_en        TEXT,
+    eliminado_por_id    INTEGER REFERENCES usuarios(id),
+    creado_en           TEXT DEFAULT (datetime('now','localtime'))
+  );
+  CREATE INDEX IF NOT EXISTS ifco_recepciones_prov_idx  ON ifco_recepciones_proveedor(proveedor_id);
+  CREATE INDEX IF NOT EXISTS ifco_recepciones_fecha_idx ON ifco_recepciones_proveedor(fecha_recepcion);
 `);
 
 // Migraciones IFCO — agregan columnas nuevas a tablas existentes sin romper data
 (function migrarIfco() {
   try {
-    // ── ifco_remitos_super: foto del remito al despacho (input para OCR)
+    // ── ifco_remitos_super
     const colsRem = db.prepare("PRAGMA table_info(ifco_remitos_super)").all().map(c => c.name);
     if (!colsRem.includes('escaneo_original_path')) {
       db.exec("ALTER TABLE ifco_remitos_super ADD COLUMN escaneo_original_path TEXT");
       console.log("[DB] ifco_remitos_super.escaneo_original_path agregada");
     }
+    if (!colsRem.includes('origen')) {
+      db.exec("ALTER TABLE ifco_remitos_super ADD COLUMN origen TEXT DEFAULT 'san_geronimo'");
+      console.log("[DB] ifco_remitos_super.origen agregada");
+    }
+    if (!colsRem.includes('proveedor_origen_id')) {
+      db.exec("ALTER TABLE ifco_remitos_super ADD COLUMN proveedor_origen_id INTEGER REFERENCES proveedores(id)");
+      console.log("[DB] ifco_remitos_super.proveedor_origen_id agregada");
+    }
+    if (!colsRem.includes('eliminado_en')) {
+      db.exec("ALTER TABLE ifco_remitos_super ADD COLUMN eliminado_en TEXT");
+      console.log("[DB] ifco_remitos_super.eliminado_en agregada");
+    }
+    if (!colsRem.includes('eliminado_por_id')) {
+      db.exec("ALTER TABLE ifco_remitos_super ADD COLUMN eliminado_por_id INTEGER REFERENCES usuarios(id)");
+      console.log("[DB] ifco_remitos_super.eliminado_por_id agregada");
+    }
 
-    // ── ifco_envios_proveedor: foto del remito firmado por el proveedor al recepcionar
+    // ── ifco_envios_proveedor
     const colsEnv = db.prepare("PRAGMA table_info(ifco_envios_proveedor)").all().map(c => c.name);
     if (!colsEnv.includes('escaneo_recepcion_path')) {
       db.exec("ALTER TABLE ifco_envios_proveedor ADD COLUMN escaneo_recepcion_path TEXT");
       console.log("[DB] ifco_envios_proveedor.escaneo_recepcion_path agregada");
     }
+    if (!colsEnv.includes('eliminado_en')) {
+      db.exec("ALTER TABLE ifco_envios_proveedor ADD COLUMN eliminado_en TEXT");
+      console.log("[DB] ifco_envios_proveedor.eliminado_en agregada");
+    }
+    if (!colsEnv.includes('eliminado_por_id')) {
+      db.exec("ALTER TABLE ifco_envios_proveedor ADD COLUMN eliminado_por_id INTEGER REFERENCES usuarios(id)");
+      console.log("[DB] ifco_envios_proveedor.eliminado_por_id agregada");
+    }
 
-    // ── ifco_movimientos: datos del retiro (sucursal IFCO + persona que retiró)
+    // ── ifco_movimientos
     const colsMov = db.prepare("PRAGMA table_info(ifco_movimientos)").all().map(c => c.name);
     if (!colsMov.includes('sucursal_ifco')) {
       db.exec("ALTER TABLE ifco_movimientos ADD COLUMN sucursal_ifco TEXT");
@@ -992,5 +1033,17 @@ db.exec(`
       db.exec("ALTER TABLE ifco_movimientos ADD COLUMN encargado_dni TEXT");
       console.log("[DB] ifco_movimientos.encargado_dni agregada");
     }
+    if (!colsMov.includes('eliminado_en')) {
+      db.exec("ALTER TABLE ifco_movimientos ADD COLUMN eliminado_en TEXT");
+      console.log("[DB] ifco_movimientos.eliminado_en agregada");
+    }
+    if (!colsMov.includes('eliminado_por_id')) {
+      db.exec("ALTER TABLE ifco_movimientos ADD COLUMN eliminado_por_id INTEGER REFERENCES usuarios(id)");
+      console.log("[DB] ifco_movimientos.eliminado_por_id agregada");
+    }
+
+    // ── índice único parcial: n_remito_ifco solo entre activos (no eliminados)
+    db.exec("CREATE UNIQUE INDEX IF NOT EXISTS ifco_remitos_super_nremito_unique ON ifco_remitos_super(n_remito_ifco) WHERE eliminado_en IS NULL");
+
   } catch(e) { console.error("[DB] Error migrando IFCO:", e.message); }
 })();
