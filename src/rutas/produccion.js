@@ -2440,6 +2440,13 @@ router.delete('/compras/:id', requireAuth, (req, res) => {
       db.prepare("DELETE FROM pa_movimientos_stock WHERE motivo = 'compra' AND referencia_id = ?")
         .run(req.params.id);
       db.prepare("UPDATE pa_compras SET activo = 0 WHERE id = ?").run(req.params.id);
+      // Anular el asiento contable asociado a esta compra (si existe)
+      const asiento = db.prepare("SELECT id FROM pa_asientos WHERE ref_compra_id = ? AND anulado = 0").get(req.params.id);
+      if (asiento) {
+        const usuario = req.cookies?.lnb_user ? JSON.parse(req.cookies.lnb_user).id : null;
+        db.prepare("UPDATE pa_asientos SET anulado = 1, anulado_por = ?, anulado_en = datetime('now','localtime') WHERE id = ?")
+          .run(usuario, asiento.id);
+      }
     });
     revertir();
     res.json({ ok: true, msg: 'Compra desactivada y stock revertido' });
