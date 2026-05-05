@@ -67,20 +67,37 @@ router.use(requireAuth);
 router.get('/talonarios', function(req, res) {
   const rows = db.prepare(`
     SELECT t.*,
-      (SELECT COUNT(*) FROM ifco_remitos_super r WHERE r.talonario_id = t.id) AS usados_count
+      p.nombre AS proveedor_nombre,
+      (SELECT COUNT(*) FROM ifco_remitos_super r WHERE r.talonario_id = t.id AND r.eliminado_en IS NULL) AS usados_count
     FROM ifco_talonarios t
+    LEFT JOIN proveedores p ON p.id = t.proveedor_id
     ORDER BY t.activo DESC, t.creado_en DESC
   `).all();
   res.json(rows);
 });
 
 router.get('/talonarios/activo', function(req, res) {
-  const t = db.prepare("SELECT * FROM ifco_talonarios WHERE activo = 1 LIMIT 1").get();
+  // Filtro por dueño:
+  //   ?dueno=san_geronimo  → activo de SG
+  //   ?proveedor_id=X      → activo asignado a ese proveedor
+  //   sin params           → primer activo (compatibilidad)
+  const dueno = req.query.dueno;
+  const provId = req.query.proveedor_id ? parseInt(req.query.proveedor_id) : null;
+  let q = "SELECT t.*, p.nombre AS proveedor_nombre FROM ifco_talonarios t LEFT JOIN proveedores p ON p.id = t.proveedor_id WHERE t.activo = 1";
+  const params = [];
+  if (dueno === 'san_geronimo') {
+    q += " AND t.dueno_tipo = 'san_geronimo'";
+  } else if (provId) {
+    q += " AND t.dueno_tipo = 'proveedor' AND t.proveedor_id = ?";
+    params.push(provId);
+  }
+  q += " ORDER BY t.creado_en DESC LIMIT 1";
+  const t = db.prepare(q).get(...params);
   if (!t) return res.json({ talonario: null, proximo: null, disponibles: 0 });
 
   const ultimo = db.prepare(`
     SELECT n_remito_ifco FROM ifco_remitos_super
-    WHERE talonario_id = ? ORDER BY id DESC LIMIT 1
+    WHERE talonario_id = ? AND eliminado_en IS NULL ORDER BY id DESC LIMIT 1
   `).get(t.id);
 
   let proximoNum = t.numero_desde;
@@ -117,21 +134,54 @@ router.post('/talonarios', function(req, res) {
   if (parseInt(d.numero_hasta) < parseInt(d.numero_desde)) {
     return res.status(400).json({ error: 'numero_hasta debe ser mayor o igual a numero_desde' });
   }
-  if (d.activo) db.prepare("UPDATE ifco_talonarios SET activo = 0").run();
+  // Dueño
+  const dueno_tipo = (d.dueno_tipo === 'proveedor') ? 'proveedor' : 'san_geronimo';
+  let proveedor_id = null;
+  if (dueno_tipo === 'proveedor') {
+    proveedor_id = parseInt(d.proveedor_id) || null;
+    if (!proveedor_id) return res.status(400).json({ error: 'Si el talonario lo administra un proveedor, hay que indicar cuál' });
+    const exProv = db.prepare("SELECT id FROM proveedores WHERE id = ?").get(proveedor_id);
+    if (!exProv) return res.status(400).json({ error: 'Proveedor inexistente' });
+  }
+  // Activación: solo desactivar otros del MISMO dueño
+  if (d.activo) {
+    if (dueno_tipo === 'san_geronimo') {
+      db.prepare("UPDATE ifco_talonarios SET activo = 0 WHERE dueno_tipo = 'san_geronimo'").run();
+    } else {
+      db.prepare("UPDATE ifco_talonarios SET activo = 0 WHERE dueno_tipo = 'proveedor' AND proveedor_id = ?").run(proveedor_id);
+    }
+  }
   const r = db.prepare(`
-    INSERT INTO ifco_talonarios (serie, numero_desde, numero_hasta, cai, vto_cai, activo, notas)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO ifco_talonarios (serie, numero_desde, numero_hasta, cai, vto_cai, activo, notas, dueno_tipo, proveedor_id)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(d.serie, parseInt(d.numero_desde), parseInt(d.numero_hasta),
-         d.cai || null, d.vto_cai || null, d.activo ? 1 : 0, d.notas || null);
+         d.cai || null, d.vto_cai || null, d.activo ? 1 : 0, d.notas || null,
+         dueno_tipo, proveedor_id);
+  // Log inicial: creación con su dueño
+  db.prepare(`
+    INSERT INTO ifco_talonarios_log
+      (talonario_id, dueno_anterior_tipo, dueno_anterior_id, dueno_nuevo_tipo, dueno_nuevo_id, usuario_id, notas)
+    VALUES (?, NULL, NULL, ?, ?, ?, 'Alta del talonario')
+  `).run(r.lastInsertRowid, dueno_tipo, proveedor_id, req.user.id || null);
   res.json({ id: r.lastInsertRowid });
 });
 
 router.patch('/talonarios/:id', function(req, res) {
   const d = req.body || {};
+  const id = req.params.id;
+  const actual = db.prepare("SELECT * FROM ifco_talonarios WHERE id = ?").get(id);
+  if (!actual) return res.status(404).json({ error: 'Talonario no encontrado' });
+
+  // Activación scoped: solo desactivar otros del mismo dueño
   if (d.activo === 1 || d.activo === true) {
-    db.prepare("UPDATE ifco_talonarios SET activo = 0").run();
+    if (actual.dueno_tipo === 'san_geronimo') {
+      db.prepare("UPDATE ifco_talonarios SET activo = 0 WHERE dueno_tipo = 'san_geronimo' AND id != ?").run(id);
+    } else {
+      db.prepare("UPDATE ifco_talonarios SET activo = 0 WHERE dueno_tipo = 'proveedor' AND proveedor_id = ? AND id != ?")
+        .run(actual.proveedor_id, id);
+    }
   }
-  const sets = [], params = { id: req.params.id };
+  const sets = [], params = { id };
   if (d.activo !== undefined) { sets.push("activo = @activo"); params.activo = d.activo ? 1 : 0; }
   if (d.cai     !== undefined) { sets.push("cai = @cai");         params.cai     = d.cai; }
   if (d.vto_cai !== undefined) { sets.push("vto_cai = @vto_cai"); params.vto_cai = d.vto_cai; }
@@ -139,6 +189,104 @@ router.patch('/talonarios/:id', function(req, res) {
   if (sets.length === 0) return res.json({ ok: true });
   db.prepare(`UPDATE ifco_talonarios SET ${sets.join(", ")} WHERE id = @id`).run(params);
   res.json({ ok: true });
+});
+
+// Transferir un talonario a otro dueño (SG ↔ Proveedor o entre proveedores)
+router.post('/talonarios/:id/transferir', function(req, res) {
+  const id = req.params.id;
+  const d = req.body || {};
+  const actual = db.prepare("SELECT * FROM ifco_talonarios WHERE id = ?").get(id);
+  if (!actual) return res.status(404).json({ error: 'Talonario no encontrado' });
+
+  const nuevo_tipo = (d.dueno_tipo === 'proveedor') ? 'proveedor' : 'san_geronimo';
+  let nuevo_prov_id = null;
+  if (nuevo_tipo === 'proveedor') {
+    nuevo_prov_id = parseInt(d.proveedor_id) || null;
+    if (!nuevo_prov_id) return res.status(400).json({ error: 'Indicá el proveedor destino' });
+    const exProv = db.prepare("SELECT id FROM proveedores WHERE id = ?").get(nuevo_prov_id);
+    if (!exProv) return res.status(400).json({ error: 'Proveedor destino inexistente' });
+  }
+  // Si el destino es igual al origen, no hacemos nada
+  if (actual.dueno_tipo === nuevo_tipo && (actual.proveedor_id || null) === (nuevo_prov_id || null)) {
+    return res.status(400).json({ error: 'El destino es igual al origen' });
+  }
+
+  const tx = db.transaction(() => {
+    // Al transferir, lo dejamos inactivo: el receptor decide si lo activa.
+    db.prepare("UPDATE ifco_talonarios SET dueno_tipo = ?, proveedor_id = ?, activo = 0 WHERE id = ?")
+      .run(nuevo_tipo, nuevo_prov_id, id);
+    db.prepare(`
+      INSERT INTO ifco_talonarios_log
+        (talonario_id, dueno_anterior_tipo, dueno_anterior_id, dueno_nuevo_tipo, dueno_nuevo_id, usuario_id, notas)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run(id, actual.dueno_tipo, actual.proveedor_id || null,
+           nuevo_tipo, nuevo_prov_id, req.user.id || null, d.notas || null);
+  });
+  tx();
+  res.json({ ok: true });
+});
+
+// Detalle del talonario: estado de cada n° del rango
+router.get('/talonarios/:id/detalle', function(req, res) {
+  const id = req.params.id;
+  const t = db.prepare(`
+    SELECT t.*, p.nombre AS proveedor_nombre
+    FROM ifco_talonarios t
+    LEFT JOIN proveedores p ON p.id = t.proveedor_id
+    WHERE t.id = ?
+  `).get(id);
+  if (!t) return res.status(404).json({ error: 'Talonario no encontrado' });
+
+  // Todos los remitos asociados (incluye papelera, marcados)
+  const remitos = db.prepare(`
+    SELECT r.id, r.n_remito_ifco, r.fecha_emision, r.estado, r.cantidad_despachada,
+           r.empresa, r.sucursal, r.eliminado_en
+    FROM ifco_remitos_super r
+    WHERE r.talonario_id = ?
+  `).all(id);
+  // Index por número final
+  const byNum = {};
+  for (const r of remitos) {
+    const m = String(r.n_remito_ifco).match(/-(\d+)$/);
+    if (m) byNum[parseInt(m[1], 10)] = r;
+  }
+
+  // Construir lista del rango
+  const numeros = [];
+  for (let n = t.numero_desde; n <= t.numero_hasta; n++) {
+    const r = byNum[n];
+    const numStr = t.serie + '-' + String(n).padStart(8, '0');
+    if (!r) {
+      numeros.push({ numero: n, n_remito_ifco: numStr, estado: 'disponible' });
+    } else if (r.eliminado_en) {
+      numeros.push({
+        numero: n, n_remito_ifco: numStr, estado: 'anulado',
+        remito_id: r.id, fecha_emision: r.fecha_emision, empresa: r.empresa, sucursal: r.sucursal,
+        cantidad_despachada: r.cantidad_despachada
+      });
+    } else {
+      numeros.push({
+        numero: n, n_remito_ifco: numStr, estado: r.estado,
+        remito_id: r.id, fecha_emision: r.fecha_emision, empresa: r.empresa, sucursal: r.sucursal,
+        cantidad_despachada: r.cantidad_despachada
+      });
+    }
+  }
+
+  // Log de transferencias
+  const log = db.prepare(`
+    SELECT l.*, u.nombre AS usuario_nombre,
+           pa.nombre AS prov_anterior_nombre,
+           pn.nombre AS prov_nuevo_nombre
+    FROM ifco_talonarios_log l
+    LEFT JOIN usuarios u ON u.id = l.usuario_id
+    LEFT JOIN proveedores pa ON pa.id = l.dueno_anterior_id
+    LEFT JOIN proveedores pn ON pn.id = l.dueno_nuevo_id
+    WHERE l.talonario_id = ?
+    ORDER BY l.fecha DESC
+  `).all(id);
+
+  res.json({ talonario: t, numeros: numeros, log: log });
 });
 
 router.delete('/talonarios/:id', function(req, res) {
