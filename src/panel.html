@@ -10900,6 +10900,7 @@ function paAbrirNuevaOrden(){
   var campAct=(PA.campañas||[]).find(function(c){return c.activa;});
   var campAciActNombre=campAct?campAct.nombre:'2026/27';
   // Lotes con formato: NOMBRE - FINCA (HA) + Cultivo de campaña activa
+  // Cada lote incluye un sub-row con "Aplicar parcial" (ha < ha del lote)
   document.getElementById('pa-ord-lotes-sel').innerHTML=PA.lotes.map(function(l){
     var cd=l.cultivos&&l.cultivos[campAciActNombre];
     var cult=cd?(typeof cd==='string'?cd:cd.cultivo):'';
@@ -10909,11 +10910,22 @@ function paAbrirNuevaOrden(){
       : ' <span style="color:var(--mut);font-size:10px;font-style:italic;margin-left:4px">sin cultivo</span>';
     // data-search para el filtro: nombre + finca + cultivo en lowercase
     var searchText=((l.nombre||'')+' '+(l.finca||'')+' '+cult).toLowerCase();
-    return'<label class="pa-ord-lote-row" data-search="'+searchText.replace(/"/g,'&quot;')+'" style="display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:6px;cursor:pointer;font-size:13px">'
-      +'<input type="checkbox" value="'+l.id+'" data-ha="'+l.hectareas+'" style="width:auto" onchange="paActHaTotal()"> '
+    return'<div class="pa-ord-lote-row" data-search="'+searchText.replace(/"/g,'&quot;')+'" data-lote-id="'+l.id+'" style="border-radius:6px">'
+      +'<label style="display:flex;align-items:center;gap:8px;padding:6px 8px;cursor:pointer;font-size:13px">'
+      +'<input type="checkbox" class="pa-ord-lote-cb" value="'+l.id+'" data-ha="'+l.hectareas+'" style="width:auto" onchange="paOrdLoteToggle(this)"> '
       +'<span><strong>'+l.nombre+'</strong>'+(l.finca?'<span style="color:var(--mut)"> — '+l.finca+'</span>':'')
       +' <span style="color:var(--sub);font-size:11px">('+l.hectareas+' ha)</span>'
-      +cultBadge+'</span></label>';
+      +cultBadge+'</span></label>'
+      +'<div class="pa-ord-lote-extra" id="pa-ord-extra-'+l.id+'" style="display:none;padding:0 8px 8px 32px">'
+        +'<label style="display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--mut);cursor:pointer">'
+          +'<input type="checkbox" class="pa-ord-parc-cb" data-lote-id="'+l.id+'" data-ha="'+l.hectareas+'" style="width:auto" onchange="paOrdParcToggle(this)"> Aplicar parcial'
+        +'</label>'
+        +'<div class="pa-ord-parc-input" id="pa-ord-parc-input-'+l.id+'" style="display:none;margin-top:4px">'
+          +'<input type="number" class="pa-ord-parc-ha" id="pa-ord-parc-ha-'+l.id+'" data-lote-id="'+l.id+'" data-ha-max="'+l.hectareas+'" step="0.1" min="0.1" max="'+l.hectareas+'" value="'+l.hectareas+'" oninput="paOrdParcInput(this)" style="width:90px;padding:4px 8px;font-size:12px"> '
+          +'<span style="font-size:11px;color:var(--sub)">ha (de '+l.hectareas+' ha totales)</span>'
+        +'</div>'
+      +'</div>'
+      +'</div>';
   }).join('')||'<div class="emp">Sin lotes. Agregá lotes primero.</div>';
   // Poblar selector de usuarios — priorizar campo y operadores, default Alejandro Aracena
   paF('/api/auth/usuarios').then(function(r){
@@ -10944,13 +10956,69 @@ function paFiltrarLotesOrden(){
   var q=(document.getElementById('pa-ord-lotes-busc').value||'').trim().toLowerCase();
   document.querySelectorAll('#pa-ord-lotes-sel .pa-ord-lote-row').forEach(function(row){
     var s=row.getAttribute('data-search')||'';
-    row.style.display=(!q||s.indexOf(q)!==-1)?'flex':'none';
+    row.style.display=(!q||s.indexOf(q)!==-1)?'':'none';
   });
 }
 
+// Toggle del checkbox principal del lote: muestra/oculta sub-row "Aplicar parcial"
+// Si se desmarca el lote, también limpia el parcial.
+function paOrdLoteToggle(cb){
+  var loteId=cb.value;
+  var extra=document.getElementById('pa-ord-extra-'+loteId);
+  if(extra) extra.style.display=cb.checked?'block':'none';
+  if(!cb.checked){
+    var parcCb=document.querySelector('.pa-ord-parc-cb[data-lote-id="'+loteId+'"]');
+    if(parcCb){ parcCb.checked=false; }
+    var parcInput=document.getElementById('pa-ord-parc-input-'+loteId);
+    if(parcInput) parcInput.style.display='none';
+  }
+  paActHaTotal();
+}
+
+// Toggle del checkbox "Aplicar parcial" dentro del sub-row
+function paOrdParcToggle(cb){
+  var loteId=cb.dataset.loteId;
+  var inp=document.getElementById('pa-ord-parc-input-'+loteId);
+  if(inp) inp.style.display=cb.checked?'block':'none';
+  // Al activar parcial, default = ha del lote (ya está seteado en value); al desactivar, no toco
+  paActHaTotal();
+}
+
+// Cambio del input de ha parciales: clamp y recalcular
+function paOrdParcInput(inp){
+  var max=parseFloat(inp.dataset.haMax)||0;
+  var v=parseFloat(inp.value);
+  if(isNaN(v)||v<=0){ /* dejar como está mientras tipea */ }
+  else if(v>max){ inp.value=max; }
+  paActHaTotal();
+}
+
+// Devuelve [{lote_id, hectareas_aplicadas}] con los lotes seleccionados
+// hectareas_aplicadas = null si es lote completo, número si es parcial
+function paOrdLotesSeleccionados(){
+  var out=[];
+  document.querySelectorAll('#pa-ord-lotes-sel input.pa-ord-lote-cb:checked').forEach(function(cb){
+    var loteId=Number(cb.value);
+    var haTotal=parseFloat(cb.dataset.ha)||0;
+    var parcCb=document.querySelector('.pa-ord-parc-cb[data-lote-id="'+loteId+'"]');
+    var haAplicadas=null;
+    var haEfectivas=haTotal;
+    if(parcCb&&parcCb.checked){
+      var inp=document.getElementById('pa-ord-parc-ha-'+loteId);
+      var v=parseFloat(inp&&inp.value)||0;
+      if(v>0&&v<=haTotal+1e-6){
+        haAplicadas=Math.min(v,haTotal);
+        haEfectivas=haAplicadas;
+      }
+    }
+    out.push({lote_id:loteId, hectareas_aplicadas:haAplicadas, ha_efectivas:haEfectivas, ha_total:haTotal});
+  });
+  return out;
+}
+
 function paActHaTotal(){
-  var total=0;
-  document.querySelectorAll('#pa-ord-lotes-sel input:checked').forEach(function(cb){total+=parseFloat(cb.dataset.ha)||0;});
+  var sel=paOrdLotesSeleccionados();
+  var total=sel.reduce(function(s,x){return s+(x.ha_efectivas||0);},0);
   var el=document.getElementById('pa-ord-ha-total');
   var num=document.getElementById('pa-ord-ha-num');
   if(total>0){el.style.display='block';num.textContent=total.toFixed(1);}else{el.style.display='none';}
@@ -10974,8 +11042,8 @@ function paAgregarItemOrden(){
 }
 
 function paActualizarResumenOrden(){
-  var haTotal=0;
-  document.querySelectorAll('#pa-ord-lotes-sel input:checked').forEach(function(cb){haTotal+=parseFloat(cb.dataset.ha)||0;});
+  var sel=paOrdLotesSeleccionados();
+  var haTotal=sel.reduce(function(s,x){return s+(x.ha_efectivas||0);},0);
 
   var filas=[];
   var costoTotal=0;
@@ -11021,9 +11089,18 @@ function paGuardarOrden(){
   var fechaProp=document.getElementById('pa-ord-fecha-prop').value;
   var tipo=document.getElementById('pa-ord-tipo').value.trim();
   var objetivo=document.getElementById('pa-ord-objetivo').value.trim();
-  var lotes=[],items=[];
-  document.querySelectorAll('#pa-ord-lotes-sel input:checked').forEach(function(cb){lotes.push(Number(cb.value));});
-  if(!lotes.length)return toast('Seleccioná al menos un lote','er');
+  var sel=paOrdLotesSeleccionados();
+  if(!sel.length)return toast('Seleccioná al menos un lote','er');
+  // Validación de parciales: ha > 0 y ≤ ha_total
+  for(var i=0;i<sel.length;i++){
+    var s=sel[i];
+    if(s.hectareas_aplicadas!==null){
+      if(!(s.hectareas_aplicadas>0)) return toast('Hectáreas aplicadas inválidas','er');
+      if(s.hectareas_aplicadas>s.ha_total+1e-6) return toast('Las ha aplicadas exceden el lote','er');
+    }
+  }
+  var lotes=sel.map(function(s){return {lote_id:s.lote_id, hectareas_aplicadas:s.hectareas_aplicadas};});
+  var items=[];
   document.querySelectorAll('[id^=pa-oi-ins-]').forEach(function(el){
     var n=el.id.split('-').pop();
     var insId=el.value;
@@ -11046,17 +11123,51 @@ function paVerOrden(id){
     document.getElementById('pa-ord-det-tit').textContent=o.nro_orden;document.getElementById('pa-ord-det-sub').textContent=(o.tipo_aplicacion||'')+' — '+o.estado;
     var html='<div class="pa-grid2"><div><div style="font-size:11px;color:var(--mut);text-transform:uppercase;margin-bottom:4px">Fecha</div><div>'+paFecha(o.fecha_orden)+'</div></div><div><div style="font-size:11px;color:var(--mut);text-transform:uppercase;margin-bottom:4px">Estado</div><div>'+paBadgeEstado(o.estado)+'</div></div></div>';
     if(o.objetivo)html+='<div style="margin:8px 0;padding:10px;background:var(--bg);border-radius:7px;font-size:13px">'+o.objetivo+'</div>';
-    html+='<div style="font-size:11px;font-weight:700;color:var(--mut);text-transform:uppercase;margin:12px 0 8px">Lotes</div><div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px">'+o.lotes.map(function(l){return'<span class="pa-badge pa-azul-bg">'+l.lote_nombre+'</span>';}).join('')+'</div>';
+    html+='<div style="font-size:11px;font-weight:700;color:var(--mut);text-transform:uppercase;margin:12px 0 8px">Lotes</div><div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px">'+o.lotes.map(function(l){
+      var esParcial=l.hectareas_aplicadas!=null;
+      var haTxt=esParcial?(l.hectareas_aplicadas+' / '+l.hectareas+' ha'):(l.hectareas+' ha');
+      var bg=esParcial?'background:#fef3c7;color:#92400e;border:1px solid #fcd34d;':'';
+      var marca=esParcial?' 🔸':'';
+      return'<span class="pa-badge pa-azul-bg" style="'+bg+'">'+l.lote_nombre+' <span style="font-size:10px;opacity:.85">('+haTxt+')</span>'+marca+'</span>';
+    }).join('')+'</div>';
     html+='<div style="font-size:11px;font-weight:700;color:var(--mut);text-transform:uppercase;margin-bottom:8px">Productos y dosis</div><table class="pa-tbl" style="margin-bottom:12px"><thead><tr><th>Producto</th><th>Dosis</th><th>Unidad</th></tr></thead><tbody>';
     o.items.forEach(function(it){html+='<tr><td>'+it.insumo_nombre+'</td><td>'+it.dosis+'</td><td>'+it.unidad_dosis+'</td></tr>';});html+='</tbody></table>';
     if(o.aplicaciones&&o.aplicaciones.length){html+='<div style="font-size:11px;font-weight:700;color:var(--mut);text-transform:uppercase;margin-bottom:8px">Ejecuciones</div><table class="pa-tbl"><thead><tr><th>Lote</th><th>Insumo</th><th>Fecha</th><th style="text-align:right">Cant.</th><th>Por</th></tr></thead><tbody>';o.aplicaciones.forEach(function(a){html+='<tr><td>'+a.lote_nombre+'</td><td>'+a.insumo_nombre+'</td><td>'+paFecha(a.fecha_real)+'</td><td style="text-align:right">'+a.cantidad_real+' '+a.unidad+'</td><td>'+(a.ejecutado_por_nombre||a.ejecutado_txt||'—')+'</td></tr>';});html+='</tbody></table>';}
     document.getElementById('pa-ord-det-body').innerHTML=html;
-    document.getElementById('pa-ej-lote').innerHTML=o.lotes.map(function(l){return'<option value="'+l.lote_id+'">'+l.lote_nombre+'</option>';}).join('');
-    document.getElementById('pa-ej-insumo').innerHTML=o.items.map(function(i){return'<option value="'+i.insumo_id+'">'+i.insumo_nombre+'</option>';}).join('');
+    // Selectores de ejecución: codifico ha efectivas en el option para precargar cantidad
+    document.getElementById('pa-ej-lote').innerHTML=o.lotes.map(function(l){
+      var haEf=(l.hectareas_aplicadas!=null)?l.hectareas_aplicadas:l.hectareas;
+      var marca=(l.hectareas_aplicadas!=null)?' 🔸 ('+l.hectareas_aplicadas+' / '+l.hectareas+' ha)':' ('+l.hectareas+' ha)';
+      return'<option value="'+l.lote_id+'" data-ha-ef="'+haEf+'">'+l.lote_nombre+marca+'</option>';
+    }).join('');
+    document.getElementById('pa-ej-insumo').innerHTML=o.items.map(function(i){
+      return'<option value="'+i.insumo_id+'" data-dosis="'+i.dosis+'" data-unidad-dosis="'+i.unidad_dosis+'">'+i.insumo_nombre+' ('+i.dosis+' '+i.unidad_dosis+')</option>';
+    }).join('');
+    // Wire: al cambiar lote o insumo, sugiero cantidad = dosis × ha efectivas
+    var fnPrec=function(){paPrecargarCantEjec();};
+    document.getElementById('pa-ej-lote').onchange=fnPrec;
+    document.getElementById('pa-ej-insumo').onchange=fnPrec;
     document.getElementById('pa-ej-fecha').value=new Date().toISOString().slice(0,10);document.getElementById('pa-ej-cant').value='';document.getElementById('pa-ej-quien').value='';document.getElementById('pa-ord-ejec-form').style.display='none';
+    paPrecargarCantEjec();
     document.getElementById('pa-ord-det-ejec-btn').style.display=['emitida','en_ejecucion'].includes(o.estado)?'':'none';
     document.getElementById('pa-mb-orden-det').classList.add('on');
   });
+}
+// Sugerencia de cantidad real = dosis (kg|lt /ha) × ha efectivas (parciales o totales)
+function paPrecargarCantEjec(){
+  var loteSel=document.getElementById('pa-ej-lote');
+  var insSel=document.getElementById('pa-ej-insumo');
+  var cant=document.getElementById('pa-ej-cant');
+  if(!loteSel||!insSel||!cant)return;
+  var loteOpt=loteSel.options[loteSel.selectedIndex];
+  var insOpt=insSel.options[insSel.selectedIndex];
+  if(!loteOpt||!insOpt)return;
+  var haEf=parseFloat(loteOpt.dataset.haEf)||0;
+  var dosis=parseFloat(insOpt.dataset.dosis)||0;
+  if(haEf>0&&dosis>0){
+    cant.value=(haEf*dosis).toFixed(2);
+    cant.placeholder='Sugerido: '+(haEf*dosis).toFixed(2);
+  }
 }
 function paToggleEjecForm(){var f=document.getElementById('pa-ord-ejec-form');f.style.display=f.style.display==='none'?'':'none';}
 function paRegistrarEjecucion(){

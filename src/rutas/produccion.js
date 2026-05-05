@@ -887,7 +887,7 @@ router.get('/ordenes', requireAuth, (req, res) => {
 
     // Enriquecer cada orden con lotes e items
     const getLotes = db.prepare(`
-      SELECT ol.lote_id, l.nombre as lote_nombre, l.hectareas,
+      SELECT ol.lote_id, ol.hectareas_aplicadas, l.nombre as lote_nombre, l.hectareas,
              s.nombre as sector_nombre
       FROM pa_ordenes_lotes ol
       JOIN pa_lotes l ON l.id = ol.lote_id
@@ -923,7 +923,7 @@ router.get('/ordenes/:id', requireAuth, (req, res) => {
     if (!orden) return res.status(404).json({ ok: false, error: 'Orden no encontrada' });
 
     orden.lotes = db.prepare(`
-      SELECT ol.lote_id, l.nombre as lote_nombre, l.hectareas,
+      SELECT ol.lote_id, ol.hectareas_aplicadas, l.nombre as lote_nombre, l.hectareas,
              s.nombre as sector_nombre,
              cl.cultivo as cultivo
       FROM pa_ordenes_lotes ol
@@ -961,6 +961,33 @@ router.post('/ordenes', requireAuth, (req, res) => {
   const { campaña_id, fecha_orden, fecha_propuesta, tipo_aplicacion, objetivo, notas, lotes, items, asignado_a } = req.body;
   if (!lotes?.length || !items?.length)
     return res.status(400).json({ ok: false, error: 'Debe incluir lotes e items' });
+
+  // Normalizar lotes: acepta array de números (formato viejo, todo completo)
+  // o array de objetos {lote_id, hectareas_aplicadas} (formato nuevo).
+  const lotesNorm = lotes.map(l => {
+    if (typeof l === 'number' || typeof l === 'string') {
+      return { lote_id: Number(l), hectareas_aplicadas: null };
+    }
+    const ha = l.hectareas_aplicadas;
+    return {
+      lote_id: Number(l.lote_id),
+      hectareas_aplicadas: (ha === null || ha === undefined || ha === '') ? null : Number(ha)
+    };
+  });
+
+  // Validar parciales: 0 < ha_aplicadas <= ha_total del lote
+  for (const ln of lotesNorm) {
+    if (!ln.lote_id) return res.status(400).json({ ok: false, error: 'lote_id inválido' });
+    if (ln.hectareas_aplicadas !== null) {
+      if (!(ln.hectareas_aplicadas > 0))
+        return res.status(400).json({ ok: false, error: 'Hectáreas aplicadas debe ser mayor a 0' });
+      const lote = db.prepare("SELECT hectareas, nombre FROM pa_lotes WHERE id=?").get(ln.lote_id);
+      if (!lote) return res.status(400).json({ ok: false, error: `Lote ${ln.lote_id} no existe` });
+      if (ln.hectareas_aplicadas > lote.hectareas + 1e-6)
+        return res.status(400).json({ ok: false, error: `Lote ${lote.nombre}: ${ln.hectareas_aplicadas} ha excede las ${lote.hectareas} ha del lote` });
+    }
+  }
+
   try {
     const crearOrden = db.transaction(() => {
       const n = db.prepare("SELECT COUNT(*) as n FROM pa_ordenes").get().n + 1;
@@ -971,8 +998,9 @@ router.post('/ordenes', requireAuth, (req, res) => {
       `).run(nro, campaña_id||null, fecha_orden||new Date().toISOString().slice(0,10),
              fecha_propuesta||null, req.user.id, tipo_aplicacion||null, objetivo||null, notas||null, asignado_a||null);
       const ordenId = r.lastInsertRowid;
-      for (const loteId of lotes) {
-        db.prepare("INSERT INTO pa_ordenes_lotes (orden_id, lote_id) VALUES (?,?)").run(ordenId, loteId);
+      const insLote = db.prepare("INSERT INTO pa_ordenes_lotes (orden_id, lote_id, hectareas_aplicadas) VALUES (?,?,?)");
+      for (const ln of lotesNorm) {
+        insLote.run(ordenId, ln.lote_id, ln.hectareas_aplicadas);
       }
       for (const it of items) {
         db.prepare("INSERT INTO pa_ordenes_items (orden_id, insumo_id, dosis, unidad_dosis, notas) VALUES (?,?,?,?,?)")
