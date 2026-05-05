@@ -40,7 +40,7 @@ router.post('/', (req, res) => {
   const {
     razon_social, nombre_comercial, cuit, condicion_iva,
     direccion, telefono, email, rubro,
-    cbu, alias_cbu, condicion_pago, contacto, notas
+    cbu, alias_cbu, condicion_pago, contacto, notas, asiento_modelo_id
   } = req.body || {};
   if (!razon_social) return res.status(400).json({ error: 'razon_social es requerida' });
   try {
@@ -48,8 +48,8 @@ router.post('/', (req, res) => {
       INSERT INTO adm_proveedores
         (razon_social, nombre_comercial, cuit, condicion_iva,
          direccion, telefono, email, rubro,
-         cbu, alias_cbu, condicion_pago, contacto, notas)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         cbu, alias_cbu, condicion_pago, contacto, notas, asiento_modelo_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       String(razon_social).trim(),
       nombre_comercial || null,
@@ -63,7 +63,8 @@ router.post('/', (req, res) => {
       alias_cbu || null,
       condicion_pago || null,
       contacto || null,
-      notas || null
+      notas || null,
+      asiento_modelo_id ? parseInt(asiento_modelo_id) : null
     );
     res.json({ ok: true, id: r.lastInsertRowid });
   } catch(e) {
@@ -79,7 +80,7 @@ router.put('/:id', (req, res) => {
   const {
     razon_social, nombre_comercial, cuit, condicion_iva,
     direccion, telefono, email, rubro,
-    cbu, alias_cbu, condicion_pago, contacto, notas
+    cbu, alias_cbu, condicion_pago, contacto, notas, asiento_modelo_id
   } = req.body || {};
   if (razon_social !== undefined && !razon_social)
     return res.status(400).json({ error: 'razon_social no puede estar vacía' });
@@ -99,6 +100,7 @@ router.put('/:id', (req, res) => {
         condicion_pago  = ?,
         contacto        = ?,
         notas           = ?,
+        asiento_modelo_id = ?,
         actualizado_en  = datetime('now','localtime')
       WHERE id = ?
     `).run(
@@ -115,6 +117,7 @@ router.put('/:id', (req, res) => {
       condicion_pago || null,
       contacto || null,
       notas || null,
+      asiento_modelo_id ? parseInt(asiento_modelo_id) : null,
       id
     );
     res.json({ ok: true });
