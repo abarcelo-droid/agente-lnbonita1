@@ -6939,6 +6939,133 @@ function paCompRecargarProveedores(seleccionarId) {
 function paCompOnProveedorChange() {
   var warn = document.getElementById('pa-comp-prov-warn');
   if (warn) warn.style.display = 'none';
+  var provId = document.getElementById('pa-comp-prov-id').value;
+  if (provId) {
+    paCompAsientoCargar(provId);
+  } else {
+    var wrap = document.getElementById('pa-comp-asiento-wrap');
+    if (wrap) wrap.style.display = 'none';
+  }
+}
+
+function paCompAsientoCargar(provId) {
+  var wrap = document.getElementById('pa-comp-asiento-wrap');
+  if (!wrap) return;
+  admModCargarCuentas(function() {
+    fetch('/api/pa/proveedores/' + provId)
+      .then(function(r){ return r.json(); })
+      .then(function(rp) {
+        var total = PA._compraTotal || 0;
+        wrap.style.display = '';
+        var modeloId = rp.data && rp.data.asiento_modelo_id;
+        if (modeloId) {
+          admModApi('/modelos/' + modeloId).then(function(rm) {
+            var lineasModelo = (rm.data && rm.data.lineas) || [];
+            var lDebe  = lineasModelo.find(function(l){ return l.lado === 'debe'; });
+            var lHaber = lineasModelo.find(function(l){ return l.lado === 'haber'; });
+            var lineas = [];
+            if (lDebe)  lineas.push({ cuenta_id: lDebe.cuenta_id,  debe: total, haber: 0,     descripcion: 'Total factura' });
+            if (lHaber) lineas.push({ cuenta_id: lHaber.cuenta_id, debe: 0,     haber: total, descripcion: 'Total factura' });
+            if (!lineas.length) lineas = [
+              { cuenta_id: '', debe: total, haber: 0,     descripcion: 'Total factura' },
+              { cuenta_id: '', debe: 0,     haber: total, descripcion: 'Total factura' }
+            ];
+            paCompAsientoRender(lineas);
+          });
+        } else {
+          paCompAsientoRender([
+            { cuenta_id: '', debe: total, haber: 0,     descripcion: 'Total factura' },
+            { cuenta_id: '', debe: 0,     haber: total, descripcion: 'Total factura' }
+          ]);
+          toast('⚠ Este proveedor no tiene asiento modelo asignado', 'warn');
+        }
+      });
+  });
+}
+
+function paCompAsientoRender(lineas) {
+  var tbody = document.getElementById('pa-comp-asiento-lineas');
+  if (!tbody) return;
+  tbody.innerHTML = lineas.map(function(l) {
+    var opts = '<option value="">— Cuenta —</option>' + ADM_MOD_CUENTAS.map(function(c) {
+      return '<option value="' + c.id + '"' + (c.id == l.cuenta_id ? ' selected' : '') + '>[' + (c.codigo||'') + '] ' + c.nombre + '</option>';
+    }).join('');
+    return '<tr>'
+      + '<td style="padding:5px 10px"><select onchange="paCompAsientoActualizar()" style="width:100%;font-size:11px">' + opts + '</select></td>'
+      + '<td style="padding:5px 8px"><input type="number" step="0.01" min="0" value="' + (l.debe||0).toFixed(2) + '" oninput="paCompAsientoActualizar()" style="width:100px;font-size:12px;text-align:right;padding:4px 6px;border:1px solid var(--bor2);border-radius:5px"></td>'
+      + '<td style="padding:5px 8px"><input type="number" step="0.01" min="0" value="' + (l.haber||0).toFixed(2) + '" oninput="paCompAsientoActualizar()" style="width:100px;font-size:12px;text-align:right;padding:4px 6px;border:1px solid var(--bor2);border-radius:5px"></td>'
+      + '<td style="padding:5px 8px"><input value="' + (l.descripcion||'').replace(/"/g,'&quot;') + '" placeholder="Descripción" style="width:100%;font-size:11px;padding:4px 6px;border:1px solid var(--bor2);border-radius:5px"></td>'
+      + '<td style="padding:4px 6px"><button class="btn bd bs" onclick="this.closest(\'tr\').remove();paCompAsientoActualizar()" style="padding:2px 6px;font-size:10px">✕</button></td>'
+      + '</tr>';
+  }).join('');
+  paCompAsientoActualizar();
+}
+
+function paCompAsientoActualizar() {
+  var rows = document.querySelectorAll('#pa-comp-asiento-lineas tr');
+  var totalDebe = 0, totalHaber = 0;
+  rows.forEach(function(tr) {
+    var nums = tr.querySelectorAll('input[type=number]');
+    totalDebe  += parseFloat((nums[0] && nums[0].value) || 0);
+    totalHaber += parseFloat((nums[1] && nums[1].value) || 0);
+  });
+  var debeEl   = document.getElementById('pa-comp-as-debe');
+  var haberEl  = document.getElementById('pa-comp-as-haber');
+  var estadoEl = document.getElementById('pa-comp-asiento-estado');
+  if (debeEl)  debeEl.textContent  = '$ ' + totalDebe.toFixed(2);
+  if (haberEl) haberEl.textContent = '$ ' + totalHaber.toFixed(2);
+  if (estadoEl) {
+    var ok = Math.abs(totalDebe - totalHaber) < 0.01 && totalDebe > 0;
+    if (ok) { estadoEl.style.color = 'var(--ok)'; estadoEl.textContent = '✅ Cuadra'; }
+    else if (totalDebe === 0 && totalHaber === 0) { estadoEl.style.color = 'var(--mut)'; estadoEl.textContent = '—'; }
+    else { estadoEl.style.color = 'var(--err)'; estadoEl.textContent = '❌ No cuadra'; }
+  }
+}
+
+function paCompAsientoAgregarLinea() {
+  var tbody = document.getElementById('pa-comp-asiento-lineas');
+  if (!tbody) return;
+  var opts = '<option value="">— Cuenta —</option>' + ADM_MOD_CUENTAS.map(function(c) {
+    return '<option value="' + c.id + '">[' + (c.codigo||'') + '] ' + c.nombre + '</option>';
+  }).join('');
+  var tr = document.createElement('tr');
+  tr.innerHTML = '<td style="padding:5px 10px"><select onchange="paCompAsientoActualizar()" style="width:100%;font-size:11px">' + opts + '</select></td>'
+    + '<td style="padding:5px 8px"><input type="number" step="0.01" min="0" value="0.00" oninput="paCompAsientoActualizar()" style="width:100px;font-size:12px;text-align:right;padding:4px 6px;border:1px solid var(--bor2);border-radius:5px"></td>'
+    + '<td style="padding:5px 8px"><input type="number" step="0.01" min="0" value="0.00" oninput="paCompAsientoActualizar()" style="width:100px;font-size:12px;text-align:right;padding:4px 6px;border:1px solid var(--bor2);border-radius:5px"></td>'
+    + '<td style="padding:5px 8px"><input placeholder="Descripción" style="width:100%;font-size:11px;padding:4px 6px;border:1px solid var(--bor2);border-radius:5px"></td>'
+    + '<td style="padding:4px 6px"><button class="btn bd bs" onclick="this.closest(\'tr\').remove();paCompAsientoActualizar()" style="padding:2px 6px;font-size:10px">✕</button></td>';
+  tbody.appendChild(tr);
+  paCompAsientoActualizar();
+}
+
+function paCompAsientoSincronizarTotal(total) {
+  var rows = document.querySelectorAll('#pa-comp-asiento-lineas tr');
+  var debeRows = [], haberRows = [];
+  rows.forEach(function(tr) {
+    var nums = tr.querySelectorAll('input[type=number]');
+    var d = parseFloat((nums[0] && nums[0].value) || 0);
+    var h = parseFloat((nums[1] && nums[1].value) || 0);
+    if (d > 0 && h === 0) debeRows.push(nums[0]);
+    if (h > 0 && d === 0) haberRows.push(nums[1]);
+  });
+  if (debeRows.length === 1)  debeRows[0].value  = total.toFixed(2);
+  if (haberRows.length === 1) haberRows[0].value = total.toFixed(2);
+  paCompAsientoActualizar();
+}
+
+function paCompAsientoGetLineas() {
+  var lineas = [];
+  document.querySelectorAll('#pa-comp-asiento-lineas tr').forEach(function(tr) {
+    var sel    = tr.querySelector('select');
+    var nums   = tr.querySelectorAll('input[type=number]');
+    var descEl = tr.querySelector('input:not([type=number])');
+    var cuentaId = sel && sel.value ? parseInt(sel.value) : null;
+    var debe   = parseFloat((nums[0] && nums[0].value) || 0);
+    var haber  = parseFloat((nums[1] && nums[1].value) || 0);
+    var desc   = descEl && descEl.value.trim() || null;
+    if (cuentaId || debe || haber) lineas.push({ cuenta_id: cuentaId, debe: debe, haber: haber, descripcion: desc });
+  });
+  return lineas;
 }
 function paCompBuscarProveedorIA(nombre) {
   // Intentar pre-seleccionar el proveedor detectado por IA
@@ -7763,6 +7890,36 @@ if(_inpGondola) _inpGondola.addEventListener('keydown', function(e){
       <div style="font-size:15px;font-weight:600;margin-top:4px;padding-top:4px;border-top:1px solid var(--bor);min-width:200px;text-align:right">Total: <span id="pa-comp-total">$0</span></div>
     </div>
   </div>
+
+  <!-- ── ASIENTO CONTABLE INLINE ──────────────────────────────────── -->
+  <div id="pa-comp-asiento-wrap" style="display:none;margin-top:16px;border:1px solid var(--bor);border-radius:10px;overflow:hidden">
+    <div style="background:var(--bg);padding:9px 14px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--bor)">
+      <div style="font-size:11px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.07em">📒 Asiento contable</div>
+      <div id="pa-comp-asiento-estado" style="font-size:12px;font-weight:700;color:var(--mut)">—</div>
+    </div>
+    <div style="overflow-x:auto">
+      <table style="width:100%;border-collapse:collapse">
+        <thead>
+          <tr style="background:var(--bg);border-bottom:1px solid var(--bor)">
+            <th style="padding:7px 10px;text-align:left;font-size:10px;color:var(--mut);text-transform:uppercase;letter-spacing:.06em">Cuenta</th>
+            <th style="padding:7px 10px;text-align:right;font-size:10px;color:var(--mut);text-transform:uppercase;letter-spacing:.06em;width:110px">Debe $</th>
+            <th style="padding:7px 10px;text-align:right;font-size:10px;color:var(--mut);text-transform:uppercase;letter-spacing:.06em;width:110px">Haber $</th>
+            <th style="padding:7px 10px;text-align:left;font-size:10px;color:var(--mut);text-transform:uppercase;letter-spacing:.06em">Descripción</th>
+            <th style="width:32px"></th>
+          </tr>
+        </thead>
+        <tbody id="pa-comp-asiento-lineas"></tbody>
+      </table>
+    </div>
+    <div style="padding:8px 12px;border-top:1px solid var(--bor);display:flex;justify-content:space-between;align-items:center;background:var(--bg)">
+      <button class="btn bo bs" onclick="paCompAsientoAgregarLinea()" style="font-size:11px">+ Línea</button>
+      <div style="display:flex;gap:20px;font-size:12px;font-family:monospace;color:var(--mut)">
+        <span>Debe: <strong id="pa-comp-as-debe" style="color:var(--txt)">$0.00</strong></span>
+        <span>Haber: <strong id="pa-comp-as-haber" style="color:var(--txt)">$0.00</strong></span>
+      </div>
+    </div>
+  </div>
+
   <div class="ab-modal-footer">
     <button class="btn bo" onclick="document.getElementById('pa-mb-compra').classList.remove('on')">Cancelar</button>
     <button class="btn bb" id="pa-comp-btn-guardar" onclick="paGuardarCompra()">Registrar compra</button>
@@ -10173,6 +10330,9 @@ function paAbrirNuevaCompra(){
   var srvCont = document.getElementById('pa-comp-items-srv');
   if (srvCont) srvCont.innerHTML = '';
   document.getElementById('pa-comp-total').textContent='$0';
+  PA._compraTotal = 0;
+  var asWrap = document.getElementById('pa-comp-asiento-wrap');
+  if (asWrap) { asWrap.style.display = 'none'; document.getElementById('pa-comp-asiento-lineas').innerHTML = ''; }
   document.getElementById('pa-comp-foto-inp').value='';
   var area=document.getElementById('pa-comp-foto-area');
   area.style.padding='18px'; area.style.border='2px dashed var(--bor2)';
@@ -10380,6 +10540,18 @@ function paGuardarCompra(){
   if (errorValidacion) return toast(errorValidacion, 'er');
   if(!items.length) return toast(esServicio ? 'Agregá al menos un concepto' : 'Agregá al menos un producto','er');
 
+  // Asiento inline — validar si está visible
+  var asWrap = document.getElementById('pa-comp-asiento-wrap');
+  var asientoLineas = null;
+  if (asWrap && asWrap.style.display !== 'none') {
+    asientoLineas = paCompAsientoGetLineas();
+    if (asientoLineas.length) {
+      var asDebe = 0, asHaber = 0;
+      asientoLineas.forEach(function(l){ asDebe += l.debe; asHaber += l.haber; });
+      if (Math.abs(asDebe - asHaber) >= 0.01) return toast('❌ El asiento contable no cuadra. Corregilo antes de guardar.', 'er');
+    }
+  }
+
   var body = { fecha, nro_factura:factura, tipo_comprobante:tipoComp, proveedor_id:parseInt(prov), notas, items, remito_foto_b64: PA._compraFotoB64||null };
   if (esServicio) body.tipo_factura = 'servicio';
 
@@ -10391,6 +10563,13 @@ function paGuardarCompra(){
       document.getElementById('pa-mb-compra').classList.remove('on');
       paLoadCompras();
       if (!esServicio) paF('/api/pa/insumos').then(function(r2){PA.insumos=r2.data||[];});
+      if (asientoLineas && asientoLineas.length && r.id) {
+        admModApi('/modelos/desde-factura', { method: 'POST', body: JSON.stringify({ compra_id: r.id, lineas: asientoLineas }) })
+          .then(function(ra) {
+            if (ra.ok) toast('📒 Asiento ' + ra.ref_codigo + ' generado', 'ok');
+            else toast('⚠ Factura guardada pero asiento falló: ' + (ra.error||''), 'warn');
+          });
+      }
     } else toast(r.error||'Error','er');
   });
 }
@@ -10841,11 +11020,14 @@ function paActTotalComp(){
     neto += monto; iva += sIva;
   });
   var total=neto+iva;
+  PA._compraTotal = total;
   document.getElementById('pa-comp-total').textContent=paMoney(total);
   var netoEl=document.getElementById('pa-comp-neto');
   var ivaEl2=document.getElementById('pa-comp-iva');
   if(netoEl)netoEl.textContent=paMoney(neto);
   if(ivaEl2)ivaEl2.textContent=paMoney(iva);
+  var asWrap = document.getElementById('pa-comp-asiento-wrap');
+  if (asWrap && asWrap.style.display !== 'none') paCompAsientoSincronizarTotal(total);
 }
 function paLoadOrdenes(){
   var estado=document.getElementById('pa-ord-estado-fil').value;
