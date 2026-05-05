@@ -7040,7 +7040,7 @@ function admModAgregarLinea(lado, cuentaId, desc) {
     + '<option value="haber"' + (lado==='haber'?' selected':'') + '>HABER</option>'
     + '</select></td>'
     + '<td><input class="adm-mod-linea-desc" placeholder="Descripción" value="' + (desc||'') + '" style="width:100%"></td>'
-    + '<td><button class="btn bd bs" onclick="this.closest('tr').remove();admModValidarDoble()" style="padding:2px 6px;font-size:11px">✕</button></td>';
+    + '<td><button class="btn bd bs" onclick="this.closest(\'tr\').remove();admModValidarDoble()" style="padding:2px 6px;font-size:11px">✕</button></td>';
   tbody.appendChild(tr);
   admModValidarDoble();
 }
@@ -7161,7 +7161,7 @@ function admAfRenderLineas(lineas) {
       + '<td style="text-align:right;font-family:monospace;font-size:12px">' + (l.debe > 0 ? '$ ' + l.debe.toFixed(2) : '—') + '</td>'
       + '<td style="text-align:right;font-family:monospace;font-size:12px">' + (l.haber > 0 ? '$ ' + l.haber.toFixed(2) : '—') + '</td>'
       + '<td><input value="' + (l.descripcion||'') + '" placeholder="Descripción" style="width:100%;font-size:11px" onchange="admAfActualizar()"></td>'
-      + '<td><button class="btn bd bs" onclick="this.closest('tr').remove();admAfActualizar()" style="padding:2px 6px;font-size:10px">✕</button></td>'
+      + '<td><button class="btn bd bs" onclick="this.closest(\'tr\').remove();admAfActualizar()" style="padding:2px 6px;font-size:10px">✕</button></td>'
       + '</tr>';
   }).join('');
   admAfActualizar();
