@@ -164,6 +164,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     <div class="ni" data-sec="pa-compras"><span class="dot dd"></span>Ingreso de Factura</div>
     <div class="ni" data-sec="pa-electricidad"><span class="dot da"></span>⚡ Electricidad</div>
     <div class="ni" data-sec="adm-proveedores"><span class="dot da"></span>📋 Padrón Proveedores</div>
+    <div class="ni" data-sec="adm-cc-proveedores"><span class="dot da"></span>💳 Cuenta Corriente</div>
 
     <div style="padding:6px 20px 2px 36px;font-size:9px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:rgba(255,255,255,.3)">Contabilidad</div>
     <div class="ni" data-sec="adm-asientos"><span class="dot db"></span>📒 Asientos Contables</div>
@@ -2270,7 +2271,127 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
 </div>
 
 <!-- ─── ADM: ASIENTO MODELO ──────────────────────────────────────────── -->
-<div class="sec" id="sec-adm-modelos">
+<div class="sec" id="sec-adm-cc-proveedores">
+  <div class="ph">
+    <div>
+      <div class="ph-t">💳 Cuenta Corriente Proveedores</div>
+      <div class="ph-s">Saldos pendientes y pagos registrados</div>
+    </div>
+  </div>
+
+  <!-- Selector de proveedor -->
+  <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:16px">
+    <select id="cc-prov-sel" onchange="ccProvCargar()" style="flex:1;min-width:220px;font-size:13px">
+      <option value="">— Seleccioná un proveedor —</option>
+    </select>
+    <button class="btn bb" onclick="ccNuevoPago()" id="cc-btn-pago" style="display:none">+ Nuevo Pago</button>
+  </div>
+
+  <!-- Resumen de saldos -->
+  <div id="cc-resumen" style="display:none;display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:20px">
+    <div style="background:var(--bg);border:1px solid var(--bor);border-radius:10px;padding:14px;text-align:center">
+      <div style="font-size:11px;color:var(--mut);text-transform:uppercase;margin-bottom:4px">Total Compras</div>
+      <div id="cc-total-compras" style="font-size:20px;font-weight:700">$0</div>
+    </div>
+    <div style="background:var(--bg);border:1px solid var(--bor);border-radius:10px;padding:14px;text-align:center">
+      <div style="font-size:11px;color:var(--mut);text-transform:uppercase;margin-bottom:4px">Total Pagado</div>
+      <div id="cc-total-pagado" style="font-size:20px;font-weight:700;color:var(--ok)">$0</div>
+    </div>
+    <div style="background:var(--bg);border:1px solid var(--bor);border-radius:10px;padding:14px;text-align:center">
+      <div style="font-size:11px;color:var(--mut);text-transform:uppercase;margin-bottom:4px">Saldo Pendiente</div>
+      <div id="cc-total-pendiente" style="font-size:20px;font-weight:700;color:var(--err)">$0</div>
+    </div>
+  </div>
+
+  <!-- Tabla de facturas -->
+  <div id="cc-facturas-wrap" style="display:none">
+    <div style="font-size:12px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.07em;margin-bottom:8px">Facturas</div>
+    <div style="overflow-x:auto;border:1px solid var(--bor);border-radius:10px">
+      <table style="width:100%;border-collapse:collapse;font-size:13px">
+        <thead>
+          <tr style="background:var(--bg);border-bottom:1px solid var(--bor)">
+            <th style="padding:9px 12px;text-align:left;font-size:10px;color:var(--mut);text-transform:uppercase">Fecha</th>
+            <th style="padding:9px 12px;text-align:left;font-size:10px;color:var(--mut);text-transform:uppercase">Nro. Factura</th>
+            <th style="padding:9px 12px;text-align:right;font-size:10px;color:var(--mut);text-transform:uppercase">Total</th>
+            <th style="padding:9px 12px;text-align:right;font-size:10px;color:var(--mut);text-transform:uppercase">Pagado</th>
+            <th style="padding:9px 12px;text-align:right;font-size:10px;color:var(--mut);text-transform:uppercase">Pendiente</th>
+            <th style="padding:9px 12px;text-align:center;font-size:10px;color:var(--mut);text-transform:uppercase">Estado</th>
+          </tr>
+        </thead>
+        <tbody id="cc-facturas-tbody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Historial de pagos -->
+  <div id="cc-pagos-wrap" style="display:none;margin-top:20px">
+    <div style="font-size:12px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.07em;margin-bottom:8px">Pagos registrados</div>
+    <div style="overflow-x:auto;border:1px solid var(--bor);border-radius:10px">
+      <table style="width:100%;border-collapse:collapse;font-size:13px">
+        <thead>
+          <tr style="background:var(--bg);border-bottom:1px solid var(--bor)">
+            <th style="padding:9px 12px;text-align:left;font-size:10px;color:var(--mut);text-transform:uppercase">Fecha</th>
+            <th style="padding:9px 12px;text-align:left;font-size:10px;color:var(--mut);text-transform:uppercase">Forma de Pago</th>
+            <th style="padding:9px 12px;text-align:left;font-size:10px;color:var(--mut);text-transform:uppercase">Referencia</th>
+            <th style="padding:9px 12px;text-align:right;font-size:10px;color:var(--mut);text-transform:uppercase">Monto</th>
+            <th style="width:40px"></th>
+          </tr>
+        </thead>
+        <tbody id="cc-pagos-tbody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- ── MODAL: Nuevo Pago ──────────────────────────────────────────────────── -->
+<div class="ab-modal" id="cc-mb-pago">
+  <div class="ab-modal-box" style="max-width:560px">
+    <div class="mht">Nueva Orden de Pago</div>
+    <div style="display:flex;flex-direction:column;gap:12px;margin-top:16px">
+      <div class="fl ff"><label>Proveedor</label><div id="cc-pago-prov-nombre" style="font-weight:600;padding:8px 0"></div></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+        <div class="fl"><label>Fecha</label><input type="date" id="cc-pago-fecha"></div>
+        <div class="fl"><label>Monto Total</label><input type="number" id="cc-pago-monto" step="0.01" min="0" placeholder="0.00" oninput="ccPagoActualizarMonto()"></div>
+      </div>
+      <div class="fl ff"><label>Forma de Pago</label>
+        <select id="cc-pago-forma" onchange="ccPagoFormaChange()">
+          <option value="transferencia">Transferencia Bancaria</option>
+          <option value="efectivo">Efectivo</option>
+          <option value="cheque_propio">Cheque Propio</option>
+          <option value="cheque_tercero">Cheque de Tercero</option>
+        </select>
+      </div>
+      <div class="fl ff" id="cc-pago-banco-wrap"><label>Banco / Cuenta</label><input type="text" id="cc-pago-banco" placeholder="Ej: Santander cta. 123456"></div>
+      <div class="fl ff"><label>Referencia / Nro. Operación</label><input type="text" id="cc-pago-ref" placeholder="Nro. transferencia, cheque, etc."></div>
+      <div class="fl ff"><label>Notas</label><textarea id="cc-pago-notas" rows="2"></textarea></div>
+
+      <!-- Facturas a cancelar -->
+      <div>
+        <div style="font-size:12px;font-weight:700;color:var(--mut);text-transform:uppercase;margin-bottom:8px">Facturas a cancelar</div>
+        <div id="cc-pago-facturas" style="border:1px solid var(--bor);border-radius:8px;overflow:hidden">
+          <table style="width:100%;border-collapse:collapse;font-size:12px">
+            <thead>
+              <tr style="background:var(--bg);border-bottom:1px solid var(--bor)">
+                <th style="padding:7px 10px;width:32px"></th>
+                <th style="padding:7px 10px;text-align:left;color:var(--mut)">Factura</th>
+                <th style="padding:7px 10px;text-align:right;color:var(--mut)">Pendiente</th>
+                <th style="padding:7px 10px;text-align:right;color:var(--mut)">Pagar</th>
+              </tr>
+            </thead>
+            <tbody id="cc-pago-facturas-tbody"></tbody>
+          </table>
+        </div>
+        <div style="margin-top:8px;text-align:right;font-size:13px;color:var(--mut)">
+          Total asignado: <strong id="cc-pago-asignado" style="color:var(--txt)">$0.00</strong>
+        </div>
+      </div>
+    </div>
+    <div class="ab-modal-footer">
+      <button class="btn bo" onclick="document.getElementById('cc-mb-pago').classList.remove('on')">Cancelar</button>
+      <button class="btn bb" onclick="ccPagoGuardar()">Registrar Pago</button>
+    </div>
+  </div>
+</div>
 <div class="ph">
   <div>
     <div class="ph-t">📐 Asiento Modelo</div>
@@ -7409,6 +7530,10 @@ loadSec = function(s) {
     admProvCargar();
     return;
   }
+  if (s === 'adm-cc-proveedores') {
+    ccProvIniciar();
+    return;
+  }
   if (s === 'adm-asientos') {
     // Default: últimos 30 días
     var hoy = new Date();
@@ -7513,7 +7638,8 @@ var USR_SECCIONES = [
     { id: 'pa-personal', label: '👷 Personal / MO' },
 { id: 'pa-panol', label: '🔧 Pañol' },
     { id: 'pa-electricidad', label: '⚡ Electricidad' },
-    { id: 'adm-proveedores', label: '📋 Padrón de Proveedores' },
+    { id: 'adm-proveedores',    label: '📋 Padrón de Proveedores' },
+    { id: 'adm-cc-proveedores', label: '💳 Cuenta Corriente Proveedores' },
     { id: 'pa-despachos', label: '🚚 Despachos' },
   ]},
   { grupo: 'Administración', items: [
@@ -15367,6 +15493,174 @@ async function ifcoActivarTalonario(id) {
     });
     ifcoCargarTalonarios();
   } catch(e) { alert('Error: ' + e.message); }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// CUENTA CORRIENTE PROVEEDORES
+// ══════════════════════════════════════════════════════════════════════════════
+
+var CC = { proveedores: [], facturas: [], provId: null };
+
+function ccApi(path, opts) {
+  opts = opts || {};
+  opts.headers = opts.headers || { 'Content-Type': 'application/json' };
+  return fetch('/api/pa/pagos' + path, opts).then(function(r){ return r.json(); });
+}
+
+function ccProvIniciar() {
+  fetch('/api/pa/proveedores')
+    .then(function(r){ return r.json(); })
+    .then(function(r) {
+      CC.proveedores = r.data || [];
+      var sel = document.getElementById('cc-prov-sel');
+      sel.innerHTML = '<option value="">— Seleccioná un proveedor —</option>'
+        + CC.proveedores.map(function(p) {
+          return '<option value="' + p.id + '">' + p.razon_social + '</option>';
+        }).join('');
+      if (CC.provId) { sel.value = CC.provId; ccProvCargar(); }
+    });
+}
+
+function ccProvCargar() {
+  var sel = document.getElementById('cc-prov-sel');
+  CC.provId = sel.value ? parseInt(sel.value) : null;
+  var btnPago = document.getElementById('cc-btn-pago');
+  if (!CC.provId) {
+    document.getElementById('cc-resumen').style.display = 'none';
+    document.getElementById('cc-facturas-wrap').style.display = 'none';
+    document.getElementById('cc-pagos-wrap').style.display = 'none';
+    if (btnPago) btnPago.style.display = 'none';
+    return;
+  }
+  if (btnPago) btnPago.style.display = '';
+  ccApi('/cc/' + CC.provId).then(function(r) {
+    if (!r.ok) return toast(r.error || 'Error', 'er');
+    CC.facturas = r.data || [];
+    document.getElementById('cc-resumen').style.display = 'grid';
+    document.getElementById('cc-total-compras').textContent   = paMoney(r.totales.total);
+    document.getElementById('cc-total-pagado').textContent    = paMoney(r.totales.pagado);
+    document.getElementById('cc-total-pendiente').textContent = paMoney(r.totales.pendiente);
+    document.getElementById('cc-facturas-wrap').style.display = '';
+    var tbody = document.getElementById('cc-facturas-tbody');
+    if (!CC.facturas.length) {
+      tbody.innerHTML = '<tr><td colspan="6" class="emp">Sin facturas registradas</td></tr>';
+    } else {
+      tbody.innerHTML = CC.facturas.map(function(f) {
+        var pendiente = f.saldo_pendiente;
+        var estado = pendiente <= 0 ? '<span class="bdg bok" style="font-size:10px">Pagado</span>'
+          : f.saldo_pagado > 0 ? '<span class="bdg bwarn" style="font-size:10px">Parcial</span>'
+          : '<span class="bdg ber" style="font-size:10px">Pendiente</span>';
+        return '<tr style="border-bottom:1px solid var(--bor)">'
+          + '<td style="padding:9px 12px;color:var(--mut)">' + f.fecha + '</td>'
+          + '<td style="padding:9px 12px">' + (f.nro_factura || '—') + '</td>'
+          + '<td style="padding:9px 12px;text-align:right">' + paMoney(f.total) + '</td>'
+          + '<td style="padding:9px 12px;text-align:right;color:var(--ok)">' + paMoney(f.saldo_pagado) + '</td>'
+          + '<td style="padding:9px 12px;text-align:right;color:' + (pendiente > 0 ? 'var(--err)' : 'var(--ok)') + '">' + paMoney(pendiente) + '</td>'
+          + '<td style="padding:9px 12px;text-align:center">' + estado + '</td>'
+          + '</tr>';
+      }).join('');
+    }
+  });
+  ccApi('?proveedorId=' + CC.provId).then(function(r) {
+    if (!r.ok) return;
+    var pagos = r.data || [];
+    document.getElementById('cc-pagos-wrap').style.display = pagos.length ? '' : 'none';
+    var tbody = document.getElementById('cc-pagos-tbody');
+    var formas = { transferencia:'Transferencia', efectivo:'Efectivo', cheque_propio:'Cheque Propio', cheque_tercero:'Cheque Tercero' };
+    tbody.innerHTML = pagos.map(function(p) {
+      return '<tr style="border-bottom:1px solid var(--bor)">'
+        + '<td style="padding:9px 12px;color:var(--mut)">' + p.fecha + '</td>'
+        + '<td style="padding:9px 12px">' + (formas[p.forma_pago] || p.forma_pago) + '</td>'
+        + '<td style="padding:9px 12px;color:var(--mut)">' + (p.referencia || '—') + '</td>'
+        + '<td style="padding:9px 12px;text-align:right;font-weight:600">' + paMoney(p.monto) + '</td>'
+        + '<td style="padding:9px 12px;text-align:center"><button class="btn bd bs" onclick="ccAnularPago(' + p.id + ')" style="font-size:10px;padding:2px 7px">✕</button></td>'
+        + '</tr>';
+    }).join('');
+  });
+}
+
+function ccNuevoPago() {
+  if (!CC.provId) return toast('Seleccioná un proveedor primero', 'er');
+  var prov = CC.proveedores.find(function(p){ return p.id == CC.provId; });
+  document.getElementById('cc-pago-prov-nombre').textContent = prov ? prov.razon_social : '';
+  document.getElementById('cc-pago-fecha').value = new Date().toISOString().split('T')[0];
+  document.getElementById('cc-pago-monto').value = '';
+  document.getElementById('cc-pago-forma').value = 'transferencia';
+  document.getElementById('cc-pago-banco').value = '';
+  document.getElementById('cc-pago-ref').value = '';
+  document.getElementById('cc-pago-notas').value = '';
+  document.getElementById('cc-pago-banco-wrap').style.display = '';
+  var pendientes = CC.facturas.filter(function(f){ return f.saldo_pendiente > 0; });
+  var tbody = document.getElementById('cc-pago-facturas-tbody');
+  tbody.innerHTML = pendientes.map(function(f) {
+    return '<tr style="border-bottom:1px solid var(--bor)">'
+      + '<td style="padding:7px 10px"><input type="checkbox" data-id="' + f.id + '" data-pendiente="' + f.saldo_pendiente + '" onchange="ccPagoActualizarMonto()"></td>'
+      + '<td style="padding:7px 10px">' + (f.nro_factura || 'Fac. ' + f.id) + ' <span style="color:var(--mut);font-size:11px">' + f.fecha + '</span></td>'
+      + '<td style="padding:7px 10px;text-align:right">' + paMoney(f.saldo_pendiente) + '</td>'
+      + '<td style="padding:7px 10px"><input type="number" step="0.01" min="0" max="' + f.saldo_pendiente + '" value="' + f.saldo_pendiente.toFixed(2) + '" data-compra="' + f.id + '" oninput="ccPagoActualizarMonto()" style="width:100px;font-size:12px;text-align:right;padding:3px 6px;border:1px solid var(--bor2);border-radius:5px" disabled></td>'
+      + '</tr>';
+  }).join('');
+  if (!pendientes.length) tbody.innerHTML = '<tr><td colspan="4" class="emp">Sin facturas pendientes</td></tr>';
+  ccPagoActualizarMonto();
+  document.getElementById('cc-mb-pago').classList.add('on');
+}
+
+function ccPagoFormaChange() {
+  var forma = document.getElementById('cc-pago-forma').value;
+  document.getElementById('cc-pago-banco-wrap').style.display = (forma === 'efectivo') ? 'none' : '';
+}
+
+function ccPagoActualizarMonto() {
+  var checks = document.querySelectorAll('#cc-pago-facturas-tbody input[type=checkbox]');
+  var total = 0;
+  checks.forEach(function(chk) {
+    var row = chk.closest('tr');
+    var inp = row.querySelector('input[type=number]');
+    if (inp) {
+      inp.disabled = !chk.checked;
+      if (chk.checked) total += parseFloat(inp.value || 0);
+    }
+  });
+  document.getElementById('cc-pago-asignado').textContent = '$ ' + total.toFixed(2);
+  var montoEl = document.getElementById('cc-pago-monto');
+  if (!montoEl.dataset.manual) montoEl.value = total.toFixed(2);
+}
+
+function ccPagoGuardar() {
+  var fecha  = document.getElementById('cc-pago-fecha').value;
+  var monto  = parseFloat(document.getElementById('cc-pago-monto').value || 0);
+  var forma  = document.getElementById('cc-pago-forma').value;
+  var banco  = document.getElementById('cc-pago-banco').value.trim();
+  var ref    = document.getElementById('cc-pago-ref').value.trim();
+  var notas  = document.getElementById('cc-pago-notas').value.trim();
+  if (!fecha) return toast('Ingresá la fecha', 'er');
+  if (!monto || monto <= 0) return toast('Ingresá un monto válido', 'er');
+  var compras = [];
+  document.querySelectorAll('#cc-pago-facturas-tbody input[type=checkbox]:checked').forEach(function(chk) {
+    var row = chk.closest('tr');
+    var inp = row.querySelector('input[type=number]');
+    var m = parseFloat(inp ? inp.value : 0);
+    if (m > 0) compras.push({ id: parseInt(chk.dataset.id), monto: m });
+  });
+  if (!compras.length) return toast('Seleccioná al menos una factura', 'er');
+  ccApi('', {
+    method: 'POST',
+    body: JSON.stringify({ proveedor_id: CC.provId, fecha, monto, forma_pago: forma, banco: banco||null, referencia: ref||null, notas: notas||null, compras })
+  }).then(function(r) {
+    if (r.ok) {
+      toast('✓ Pago registrado', 'ok');
+      document.getElementById('cc-mb-pago').classList.remove('on');
+      ccProvCargar();
+    } else toast(r.error || 'Error', 'er');
+  });
+}
+
+function ccAnularPago(id) {
+  if (!confirm('¿Anular este pago? Se revertirán los saldos.')) return;
+  ccApi('/' + id, { method: 'DELETE' }).then(function(r) {
+    if (r.ok) { toast('Pago anulado', 'ok'); ccProvCargar(); }
+    else toast(r.error || 'Error', 'er');
+  });
 }
 
 </script>
