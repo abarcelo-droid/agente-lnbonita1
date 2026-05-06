@@ -3140,6 +3140,27 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   </div>
 </div>
 
+<!-- Modal: Detalle del remito (vista de solo lectura con fotos) -->
+<div class="mb" id="ifco-mb-detalle-remito">
+  <div class="mbox" style="max-width:760px">
+    <div class="mhd">
+      <div class="mht" id="ifco-det-tit">👁 Detalle del remito</div>
+      <button class="mcl" onclick="document.getElementById('ifco-mb-detalle-remito').classList.remove('on')">x</button>
+    </div>
+    <div id="ifco-det-body" style="font-size:13px;color:var(--txt)">
+      <div style="text-align:center;padding:30px;color:var(--mut)">Cargando…</div>
+    </div>
+    <div style="margin-top:18px;display:flex;justify-content:flex-end;gap:8px">
+      <button class="btn bo" onclick="document.getElementById('ifco-mb-detalle-remito').classList.remove('on')">Cerrar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Lightbox para fotos IFCO -->
+<div id="ifco-lightbox" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:9999;cursor:zoom-out;align-items:center;justify-content:center;padding:30px" onclick="ifcoCerrarLightbox()">
+  <img id="ifco-lightbox-img" style="max-width:95%;max-height:95vh;border-radius:6px;box-shadow:0 10px 40px rgba(0,0,0,0.5)" alt="Foto remito">
+</div>
+
 <!-- Modal: Nuevo envío a proveedor -->
 <div class="mb" id="ifco-mb-envio">
   <div class="mbox">
@@ -14481,18 +14502,14 @@ async function ifcoCargarRemitos() {
     }
     tb.innerHTML = rows.map(function(r){
       const acciones = [];
+      // Ver detalle: siempre disponible (todos los estados)
+      acciones.push('<button class="btn bo" style="font-size:11px;padding:4px 8px" onclick="ifcoVerRemito('+r.id+')">👁 Ver</button>');
       if (r.estado === 'despachado') {
         acciones.push('<button class="btn bb" style="font-size:11px;padding:4px 8px" onclick="ifcoAbrirSellar('+r.id+')">Sellar</button>');
         acciones.push('<button class="btn bo" style="font-size:11px;padding:4px 8px" onclick="ifcoAbrirEditarRemito('+r.id+')">Editar</button>');
       }
-      if (r.estado === 'sellado' && r.escaneo_path) {
-        acciones.push('<a href="'+r.escaneo_path+'" target="_blank" style="font-size:11px;color:var(--burg)">Ver foto</a>');
-      }
       if (r.estado === 'sellado') {
         acciones.push('<button class="btn bo" style="font-size:11px;padding:4px 8px" onclick="ifcoAbrirSellar('+r.id+')">Re-sellar</button>');
-      }
-      if (r.estado === 'presentado' && r.escaneo_path) {
-        acciones.push('<a href="'+r.escaneo_path+'" target="_blank" style="font-size:11px;color:var(--burg)">Foto</a>');
       }
       // Eliminar: siempre disponible
       acciones.push('<button class="btn bo" style="font-size:11px;padding:4px 8px;color:#991b1b" onclick="ifcoEliminarRemito('+r.id+', \''+_ifcoEsc(r.n_remito_ifco)+'\')">🗑️</button>');
@@ -14829,6 +14846,150 @@ async function ifcoEliminarRemito(id, n_remito) {
     ifcoCargarRemitos();
   } catch(e) { alert('Error: ' + e.message); }
 }
+
+// VER detalle del remito (modal de solo lectura con fotos despacho/sellado)
+async function ifcoVerRemito(id) {
+  const modal = document.getElementById('ifco-mb-detalle-remito');
+  const body = document.getElementById('ifco-det-body');
+  const tit = document.getElementById('ifco-det-tit');
+  body.innerHTML = '<div style="text-align:center;padding:30px;color:var(--mut)">Cargando…</div>';
+  modal.classList.add('on');
+  try {
+    const r = await _ifcoFetch('/api/ifco/remitos/' + id);
+    tit.textContent = '👁 Detalle del remito — ' + (r.n_remito_ifco || '');
+
+    // Origen
+    let origenHtml;
+    if (r.origen === 'proveedor_directo') {
+      origenHtml = '<span class="ifco-badge" style="background:#fef3c7;color:#92400e">Directo desde proveedor</span>'
+                 + ' <span style="color:var(--mut)">·</span> '
+                 + '<b>'+_ifcoEsc(r.proveedor_origen_nombre||'?')+'</b>';
+    } else {
+      origenHtml = '<span class="ifco-badge" style="background:#e5e7eb;color:#374151">San Gerónimo</span>';
+    }
+
+    // Cantidades
+    const desp = _ifcoFmt(r.cantidad_despachada || 0);
+    const reci = (r.cantidad_recibida != null) ? _ifcoFmt(r.cantidad_recibida) : '—';
+    const rech = (r.cantidad_rechazada != null && r.cantidad_rechazada > 0) ? _ifcoFmt(r.cantidad_rechazada) : '—';
+    const dif = (r.cantidad_recibida != null) ? (Number(r.cantidad_despachada||0) - Number(r.cantidad_recibida||0) - Number(r.cantidad_rechazada||0)) : null;
+
+    // Helper fila info
+    function fila(label, valor) {
+      if (valor == null || valor === '') return '';
+      return '<div style="display:flex;gap:12px;padding:6px 0;border-bottom:1px solid var(--bor)">' +
+               '<div style="flex:0 0 160px;color:var(--mut);font-size:11px;text-transform:uppercase">'+label+'</div>' +
+               '<div style="flex:1">'+valor+'</div>' +
+             '</div>';
+    }
+
+    // Fotos
+    function fotoBlock(label, path, fallback) {
+      if (path) {
+        return '<div style="flex:1;min-width:0">' +
+                 '<div style="font-size:11px;color:var(--mut);text-transform:uppercase;margin-bottom:6px">'+label+'</div>' +
+                 '<img src="'+_ifcoEsc(path)+'" onclick="ifcoAbrirLightbox(\''+_ifcoEsc(path)+'\')" ' +
+                   'style="width:100%;max-height:240px;object-fit:contain;border-radius:8px;border:1px solid var(--bor);background:var(--bg);cursor:zoom-in" ' +
+                   'alt="'+label+'">' +
+               '</div>';
+      }
+      return '<div style="flex:1;min-width:0">' +
+               '<div style="font-size:11px;color:var(--mut);text-transform:uppercase;margin-bottom:6px">'+label+'</div>' +
+               '<div style="height:120px;display:flex;align-items:center;justify-content:center;border:1px dashed var(--bor);border-radius:8px;color:var(--mut);font-size:12px;background:var(--bg)">'+fallback+'</div>' +
+             '</div>';
+    }
+
+    // Encargados
+    const encProv = [r.encargado_prov_apellido, r.encargado_prov_nombre].filter(Boolean).join(' ');
+    const encProvFull = encProv ? (encProv + (r.encargado_prov_dni ? ' (DNI '+_ifcoEsc(r.encargado_prov_dni)+')' : '')) : '';
+    const encSup = [r.encargado_super_apellido, r.encargado_super_nombre].filter(Boolean).join(' ');
+    const encSupFull = encSup ? (encSup + (r.encargado_super_dni ? ' (DNI '+_ifcoEsc(r.encargado_super_dni)+')' : '')) : '';
+
+    // Talonario
+    let talonHtml = '';
+    if (r.talonario_serie || r.talonario_numero_inicial) {
+      const serie = r.talonario_serie || '';
+      const rango = (r.talonario_numero_inicial && r.talonario_numero_final)
+        ? (' (' + r.talonario_numero_inicial + '–' + r.talonario_numero_final + ')')
+        : '';
+      talonHtml = _ifcoEsc(serie) + rango;
+    }
+
+    body.innerHTML =
+      // Header con N° remito + estado + origen
+      '<div style="display:flex;align-items:center;gap:12px;padding:12px 14px;background:var(--bg);border-radius:8px;margin-bottom:14px;flex-wrap:wrap">' +
+        '<div style="font-family:monospace;font-size:16px;font-weight:600">'+_ifcoEsc(r.n_remito_ifco||'')+'</div>' +
+        '<div>'+_ifcoBadge(r.estado)+'</div>' +
+        '<div style="margin-left:auto">'+origenHtml+'</div>' +
+      '</div>' +
+
+      // Cantidades en tarjetas
+      '<div style="display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap">' +
+        '<div style="flex:1;min-width:120px;background:var(--bg);border-radius:8px;padding:10px 12px;border:1px solid var(--bor)">' +
+          '<div style="font-size:10px;color:var(--mut);text-transform:uppercase">Despachado</div>' +
+          '<div style="font-size:20px;font-weight:600;font-variant-numeric:tabular-nums">'+desp+'</div>' +
+        '</div>' +
+        '<div style="flex:1;min-width:120px;background:var(--bg);border-radius:8px;padding:10px 12px;border:1px solid var(--bor)">' +
+          '<div style="font-size:10px;color:var(--mut);text-transform:uppercase">Recibido</div>' +
+          '<div style="font-size:20px;font-weight:600;font-variant-numeric:tabular-nums">'+reci+'</div>' +
+        '</div>' +
+        '<div style="flex:1;min-width:120px;background:var(--bg);border-radius:8px;padding:10px 12px;border:1px solid var(--bor)">' +
+          '<div style="font-size:10px;color:var(--mut);text-transform:uppercase">Rechazado</div>' +
+          '<div style="font-size:20px;font-weight:600;font-variant-numeric:tabular-nums">'+rech+'</div>' +
+        '</div>' +
+        (dif != null && dif !== 0
+          ? '<div style="flex:1;min-width:120px;background:'+(dif>0?'#fee2e2':'#d1fae5')+';border-radius:8px;padding:10px 12px;border:1px solid '+(dif>0?'#fca5a5':'#6ee7b7')+'">' +
+              '<div style="font-size:10px;color:var(--mut);text-transform:uppercase">Diferencia</div>' +
+              '<div style="font-size:20px;font-weight:600;font-variant-numeric:tabular-nums;color:'+(dif>0?'#991b1b':'#065f46')+'">'+(dif>0?'+':'')+_ifcoFmt(dif)+'</div>' +
+            '</div>'
+          : '') +
+      '</div>' +
+
+      // Fotos lado a lado
+      '<div style="display:flex;gap:12px;margin-bottom:16px;flex-wrap:wrap">' +
+        fotoBlock('📸 Foto despacho', r.escaneo_original_path, 'Sin foto de despacho') +
+        fotoBlock('🔏 Foto sellado', r.escaneo_path, r.estado === 'despachado' ? 'Aún no sellado' : 'Sin foto de sellado') +
+      '</div>' +
+
+      // Datos generales
+      '<div style="background:var(--bg);border-radius:8px;padding:4px 14px">' +
+        fila('Fecha emisión', _ifcoFecha(r.fecha_emision)) +
+        fila('Cliente', _ifcoEsc(r.empresa||'')) +
+        fila('Sucursal', _ifcoEsc(r.sucursal||'')) +
+        fila('Producto', _ifcoEsc(r.producto||'')) +
+        fila('Transportista', _ifcoEsc(r.transportista||'')) +
+        fila('Encargado proveedor', _ifcoEsc(encProvFull)) +
+        fila('Talonario', talonHtml) +
+        fila('Fecha sellado', r.fecha_sellado ? _ifcoFecha(r.fecha_sellado) : '') +
+        fila('Encargado súper', _ifcoEsc(encSupFull)) +
+        fila('Fecha presentación', r.fecha_presentacion ? _ifcoFecha(r.fecha_presentacion) : '') +
+        fila('Notas', r.notas ? _ifcoEsc(r.notas).replace(/\n/g,'<br>') : '') +
+      '</div>';
+  } catch(e) {
+    body.innerHTML = '<div style="color:#991b1b;padding:14px">Error: ' + _ifcoEsc(e.message) + '</div>';
+  }
+}
+
+// Lightbox: abrir/cerrar foto a tamaño completo
+function ifcoAbrirLightbox(src) {
+  const lb = document.getElementById('ifco-lightbox');
+  const img = document.getElementById('ifco-lightbox-img');
+  img.src = src;
+  lb.style.display = 'flex';
+}
+function ifcoCerrarLightbox() {
+  const lb = document.getElementById('ifco-lightbox');
+  lb.style.display = 'none';
+  document.getElementById('ifco-lightbox-img').src = '';
+}
+// Esc cierra lightbox y modal de detalle
+document.addEventListener('keydown', function(ev){
+  if (ev.key !== 'Escape') return;
+  const lb = document.getElementById('ifco-lightbox');
+  if (lb && lb.style.display === 'flex') { ifcoCerrarLightbox(); return; }
+  const md = document.getElementById('ifco-mb-detalle-remito');
+  if (md && md.classList.contains('on')) md.classList.remove('on');
+});
 
 async function ifcoAbrirSellar(id) {
   try {
