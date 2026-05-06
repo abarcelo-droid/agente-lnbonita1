@@ -157,6 +157,14 @@ app.get("/scout", (req, res) => {
   res.sendFile(path.join(__dirname, "scout.html"));
 });
 
+// IFCO Mobile — app mobile para cargar despachos a súper y sellados
+app.get("/m/ifco", (req, res) => {
+  const cookie = req.cookies?.lnb_user;
+  if (!cookie) return res.redirect('/login?next=/m/ifco');
+  res.sendFile(path.join(__dirname, "mifco.html"));
+});
+app.get("/m", (req, res) => res.redirect('/m/ifco'));
+
 // Archivos scout (fotos)
 app.use("/data/scout", express.static(path.join(__dirname, "../data/scout")));
 
