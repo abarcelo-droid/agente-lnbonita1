@@ -129,6 +129,8 @@ db.exec(`
     tipo_aplicacion TEXT,
     objetivo      TEXT,
     notas         TEXT,
+    eliminada_en      TEXT,
+    eliminada_por_id  INTEGER REFERENCES usuarios(id),
     creado_en     TEXT DEFAULT (datetime('now','localtime'))
   );
 
@@ -418,6 +420,21 @@ export function getCampañaActiva() {
       console.log("[PA] Columna hectareas_aplicadas agregada en pa_ordenes_lotes");
     }
   } catch(e) { console.error('[PA] Error migrando pa_ordenes_lotes:', e.message); }
+})();
+
+// ── MIGRACIÓN: soft delete en pa_ordenes (eliminada_en, eliminada_por_id) ──
+(function() {
+  try {
+    const cols = db.prepare("PRAGMA table_info(pa_ordenes)").all().map(c => c.name);
+    if (!cols.includes('eliminada_en')) {
+      db.exec("ALTER TABLE pa_ordenes ADD COLUMN eliminada_en TEXT");
+      console.log("[PA] Columna eliminada_en agregada en pa_ordenes");
+    }
+    if (!cols.includes('eliminada_por_id')) {
+      db.exec("ALTER TABLE pa_ordenes ADD COLUMN eliminada_por_id INTEGER REFERENCES usuarios(id)");
+      console.log("[PA] Columna eliminada_por_id agregada en pa_ordenes");
+    }
+  } catch(e) { console.error('[PA] Error migrando soft delete pa_ordenes:', e.message); }
 })();
 
 // ── MIGRACIÓN: columnas nuevas en pa_insumos ──────────────────────────────

@@ -877,7 +877,7 @@ router.get('/ordenes', requireAuth, (req, res) => {
       LEFT JOIN usuarios u ON u.id = o.creada_por
       LEFT JOIN pa_campañas ca ON ca.id = o.campaña_id
       LEFT JOIN usuarios ua ON ua.id = o.asignado_a
-      WHERE 1=1
+      WHERE o.eliminada_en IS NULL
     `;
     const params = [];
     if (estado) { query += " AND o.estado = ?"; params.push(estado); }
@@ -918,7 +918,7 @@ router.get('/ordenes/:id', requireAuth, (req, res) => {
       FROM pa_ordenes o
       LEFT JOIN usuarios u ON u.id = o.creada_por
       LEFT JOIN pa_campañas ca ON ca.id = o.campaña_id
-      WHERE o.id = ?
+      WHERE o.id = ? AND o.eliminada_en IS NULL
     `).get(req.params.id);
     if (!orden) return res.status(404).json({ ok: false, error: 'Orden no encontrada' });
 
@@ -1030,9 +1030,119 @@ router.patch('/ordenes/:id/estado', requireAuth, (req, res) => {
 // Revierte: stock descontado en pa_insumos, pa_movimientos_stock (motivo=aplicacion),
 //           pa_costos_lote (referencia_id de las aplicaciones borradas).
 // Desvincula (NO borra): pa_combustible_movimientos.orden_id -> NULL.
+// PATCH /ordenes/:id — editar orden (solo si estado = emitida y no eliminada)
+// Permite modificar: fecha_orden, fecha_propuesta, tipo_aplicacion, objetivo, notas,
+// asignado_a, lotes (con sus parciales), items (productos y dosis).
+router.patch('/ordenes/:id', requireAuth, (req, res) => {
+  const db = getDb();
+  const ordenId = req.params.id;
+  const { fecha_orden, fecha_propuesta, tipo_aplicacion, objetivo, notas,
+          asignado_a, lotes, items } = req.body;
+
+  try {
+    const orden = db.prepare("SELECT * FROM pa_ordenes WHERE id = ? AND eliminada_en IS NULL").get(ordenId);
+    if (!orden) return res.status(404).json({ ok: false, error: 'Orden no encontrada' });
+    if (orden.estado !== 'emitida') {
+      return res.status(400).json({ ok: false, error: 'Solo se pueden editar órdenes en estado "emitida"' });
+    }
+
+    // Normalizar lotes (mismo formato que POST)
+    let lotesNorm = null;
+    if (Array.isArray(lotes)) {
+      lotesNorm = lotes.map(l => {
+        if (typeof l === 'number' || typeof l === 'string') {
+          return { lote_id: Number(l), hectareas_aplicadas: null };
+        }
+        const ha = l.hectareas_aplicadas;
+        return {
+          lote_id: Number(l.lote_id),
+          hectareas_aplicadas: (ha === null || ha === undefined || ha === '') ? null : Number(ha)
+        };
+      });
+      if (lotesNorm.length === 0) {
+        return res.status(400).json({ ok: false, error: 'Debe haber al menos un lote' });
+      }
+      // Validar parciales
+      for (const ln of lotesNorm) {
+        if (!ln.lote_id) return res.status(400).json({ ok: false, error: 'lote_id inválido' });
+        if (ln.hectareas_aplicadas !== null) {
+          if (!(ln.hectareas_aplicadas > 0))
+            return res.status(400).json({ ok: false, error: 'Hectáreas aplicadas debe ser mayor a 0' });
+          const lote = db.prepare("SELECT hectareas, nombre FROM pa_lotes WHERE id=?").get(ln.lote_id);
+          if (!lote) return res.status(400).json({ ok: false, error: `Lote ${ln.lote_id} no existe` });
+          if (ln.hectareas_aplicadas > lote.hectareas + 1e-6)
+            return res.status(400).json({ ok: false, error: `Lote ${lote.nombre}: ${ln.hectareas_aplicadas} ha excede las ${lote.hectareas} ha del lote` });
+        }
+      }
+    }
+
+    if (Array.isArray(items) && items.length === 0) {
+      return res.status(400).json({ ok: false, error: 'Debe haber al menos un producto' });
+    }
+
+    const tx = db.transaction(() => {
+      // Campos simples
+      const sets = [], params = { id: ordenId };
+      if (fecha_orden     !== undefined) { sets.push("fecha_orden = @fecha_orden");         params.fecha_orden     = fecha_orden; }
+      if (fecha_propuesta !== undefined) { sets.push("fecha_propuesta = @fecha_propuesta"); params.fecha_propuesta = fecha_propuesta || null; }
+      if (tipo_aplicacion !== undefined) { sets.push("tipo_aplicacion = @tipo_aplicacion"); params.tipo_aplicacion = tipo_aplicacion || null; }
+      if (objetivo        !== undefined) { sets.push("objetivo = @objetivo");               params.objetivo        = objetivo        || null; }
+      if (notas           !== undefined) { sets.push("notas = @notas");                     params.notas           = notas           || null; }
+      if (asignado_a      !== undefined) { sets.push("asignado_a = @asignado_a");           params.asignado_a      = asignado_a      || null; }
+      if (sets.length > 0) {
+        db.prepare(`UPDATE pa_ordenes SET ${sets.join(", ")} WHERE id = @id`).run(params);
+      }
+
+      // Reemplazar lotes si vinieron en el body
+      if (lotesNorm) {
+        db.prepare("DELETE FROM pa_ordenes_lotes WHERE orden_id = ?").run(ordenId);
+        const insLote = db.prepare("INSERT INTO pa_ordenes_lotes (orden_id, lote_id, hectareas_aplicadas) VALUES (?,?,?)");
+        for (const ln of lotesNorm) {
+          insLote.run(ordenId, ln.lote_id, ln.hectareas_aplicadas);
+        }
+      }
+
+      // Reemplazar items si vinieron en el body
+      if (Array.isArray(items)) {
+        db.prepare("DELETE FROM pa_ordenes_items WHERE orden_id = ?").run(ordenId);
+        const insItem = db.prepare("INSERT INTO pa_ordenes_items (orden_id, insumo_id, dosis, unidad_dosis, notas) VALUES (?,?,?,?,?)");
+        for (const it of items) {
+          insItem.run(ordenId, it.insumo_id, it.dosis, it.unidad_dosis, it.notas || null);
+        }
+      }
+    });
+    tx();
+    res.json({ ok: true });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// DELETE /ordenes/:id — soft delete. Solo si estado = emitida (no tiene ejecuciones).
+// Para borrado físico con revert de stock, ver /ordenes/:id/hard (admin).
 router.delete('/ordenes/:id', requireAuth, (req, res) => {
+  const db = getDb();
+  const ordenId = req.params.id;
+  try {
+    const orden = db.prepare("SELECT * FROM pa_ordenes WHERE id = ?").get(ordenId);
+    if (!orden) return res.status(404).json({ ok: false, error: 'Orden no encontrada' });
+    if (orden.eliminada_en) return res.json({ ok: true, msg: 'Ya estaba eliminada' });
+    if (orden.estado !== 'emitida') {
+      return res.status(400).json({
+        ok: false,
+        error: 'Solo se pueden eliminar órdenes en estado "emitida". Esta orden está "' + orden.estado + '" y tiene ejecuciones registradas.'
+      });
+    }
+    db.prepare("UPDATE pa_ordenes SET eliminada_en = datetime('now','localtime'), eliminada_por_id = ? WHERE id = ?")
+      .run(req.user.id, ordenId);
+    res.json({ ok: true, nro_orden: orden.nro_orden });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// DELETE /ordenes/:id/hard — borrado físico con revert de stock. Solo admin.
+// Esta es la lógica antigua: revertir todas las aplicaciones (devolver stock,
+// borrar movimientos y costos), desvincular combustible, y borrar la orden.
+router.delete('/ordenes/:id/hard', requireAuth, (req, res) => {
   if (req.user.rol !== 'admin') {
-    return res.status(403).json({ ok: false, error: 'Solo admin puede eliminar órdenes' });
+    return res.status(403).json({ ok: false, error: 'Solo admin puede hacer borrado físico' });
   }
   const db = getDb();
   const ordenId = req.params.id;
@@ -1041,7 +1151,6 @@ router.delete('/ordenes/:id', requireAuth, (req, res) => {
     if (!orden) return res.status(404).json({ ok: false, error: 'Orden no encontrada' });
 
     const tx = db.transaction(() => {
-      // 1) Leer aplicaciones para revertir efectos colaterales
       const aplicaciones = db.prepare(
         "SELECT id, insumo_id, cantidad_real FROM pa_aplicaciones WHERE orden_id=?"
       ).all(ordenId);
@@ -1051,33 +1160,27 @@ router.delete('/ordenes/:id', requireAuth, (req, res) => {
       let costosLoteBorrados = 0;
 
       for (const a of aplicaciones) {
-        // Restaurar stock del insumo
         if (a.insumo_id && a.cantidad_real) {
           db.prepare("UPDATE pa_insumos SET stock_actual = stock_actual + ? WHERE id = ?")
             .run(a.cantidad_real, a.insumo_id);
           stockRevertido++;
         }
-        // Borrar movimiento de stock asociado a esta aplicación
         movStockBorrados += db.prepare(
           "DELETE FROM pa_movimientos_stock WHERE motivo='aplicacion' AND referencia_id=?"
         ).run(a.id).changes;
-        // Borrar costo por lote asociado a esta aplicación
         costosLoteBorrados += db.prepare(
           "DELETE FROM pa_costos_lote WHERE categoria IN ('fertilizante','agroquimico') AND referencia_id=?"
         ).run(a.id).changes;
       }
 
-      // 2) Desvincular movimientos de combustible (no borrar)
       const combDesvinc = db.prepare(
         "UPDATE pa_combustible_movimientos SET orden_id=NULL WHERE orden_id=?"
       ).run(ordenId).changes;
 
-      // 3) Borrar dependencias directas
       const aplicsBorradas = db.prepare("DELETE FROM pa_aplicaciones WHERE orden_id=?").run(ordenId).changes;
       const itemsBorrados  = db.prepare("DELETE FROM pa_ordenes_items WHERE orden_id=?").run(ordenId).changes;
       const lotesBorrados  = db.prepare("DELETE FROM pa_ordenes_lotes WHERE orden_id=?").run(ordenId).changes;
 
-      // 4) Borrar la orden
       db.prepare("DELETE FROM pa_ordenes WHERE id=?").run(ordenId);
 
       return {
