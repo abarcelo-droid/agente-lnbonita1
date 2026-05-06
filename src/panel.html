@@ -3022,29 +3022,19 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
         <div style="font-size:11px;color:#92400e;text-transform:uppercase;font-weight:600;margin-bottom:10px">🔏 Datos del sellado</div>
         <div class="ab-grid ab-grid-2" style="gap:10px">
           <div>
-            <label style="font-size:11px;color:var(--mut);text-transform:uppercase">Fecha sellado *</label>
-            <input id="ifco-r-fecha-sellado" type="date" style="width:100%;padding:8px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--card)">
-          </div>
-          <div></div>
-          <div>
             <label style="font-size:11px;color:var(--mut);text-transform:uppercase">Cantidad recibida</label>
             <input id="ifco-r-recib" type="number" min="0" placeholder="(default = despachada)" style="width:100%;padding:8px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--card)">
           </div>
           <div>
             <label style="font-size:11px;color:var(--mut);text-transform:uppercase">Cantidad rechazada</label>
-            <input id="ifco-r-rech" type="number" min="0" value="0" style="width:100%;padding:8px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--card)">
+            <input id="ifco-r-rech" type="number" min="0" value="0" oninput="ifcoToggleRechDestRemito()" style="width:100%;padding:8px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--card)">
           </div>
-          <div>
-            <label style="font-size:11px;color:var(--mut);text-transform:uppercase">Encargado súper — apellido</label>
-            <input id="ifco-r-encsup-ap" type="text" style="width:100%;padding:8px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--card)">
-          </div>
-          <div>
-            <label style="font-size:11px;color:var(--mut);text-transform:uppercase">Encargado súper — nombre</label>
-            <input id="ifco-r-encsup-nom" type="text" style="width:100%;padding:8px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--card)">
-          </div>
-          <div>
-            <label style="font-size:11px;color:var(--mut);text-transform:uppercase">Encargado súper — DNI</label>
-            <input id="ifco-r-encsup-dni" type="text" style="width:100%;padding:8px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--card)">
+          <div id="ifco-r-rech-dest-wrap" style="display:none;grid-column:span 2">
+            <label style="font-size:11px;color:#92400e;text-transform:uppercase;font-weight:600">⚠ Destino de los cajones rechazados *</label>
+            <select id="ifco-r-rech-dest" style="width:100%;padding:8px 10px;border-radius:7px;border:1px solid #fcd34d;background:var(--card)">
+              <option value="san_geronimo">Volvieron al piso de San Gerónimo</option>
+              <option value="proveedor">Volvieron al piso del proveedor</option>
+            </select>
           </div>
         </div>
       </div>
@@ -3110,7 +3100,14 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       </div>
       <div>
         <label style="font-size:11px;color:var(--mut);text-transform:uppercase">Cantidad rechazada</label>
-        <input id="ifco-s-rech" type="number" min="0" value="0" style="width:100%;padding:8px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg)">
+        <input id="ifco-s-rech" type="number" min="0" value="0" oninput="ifcoToggleRechDestSellar()" style="width:100%;padding:8px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg)">
+      </div>
+      <div id="ifco-s-rech-dest-wrap" style="display:none;grid-column:span 2">
+        <label style="font-size:11px;color:#92400e;text-transform:uppercase;font-weight:600">⚠ Destino de los cajones rechazados *</label>
+        <select id="ifco-s-rech-dest" style="width:100%;padding:8px 10px;border-radius:7px;border:1px solid #fcd34d;background:#fef3c7">
+          <option value="san_geronimo">Volvieron al piso de San Gerónimo</option>
+          <option value="proveedor">Volvieron al piso del proveedor</option>
+        </select>
       </div>
       <div>
         <label style="font-size:11px;color:var(--mut);text-transform:uppercase">Encargado súper — apellido</label>
@@ -14682,10 +14679,10 @@ function ifcoAbrirNuevoRemito() {
   const tit = document.querySelector('#ifco-mb-remito .mht');
   if (tit) tit.textContent = '📥 Nuevo despacho a supermercado';
   // Reset campos
-  ['ifco-r-numero','ifco-r-cantidad','ifco-r-producto',
-   'ifco-r-fecha-sellado','ifco-r-recib','ifco-r-encsup-ap','ifco-r-encsup-nom','ifco-r-encsup-dni']
+  ['ifco-r-numero','ifco-r-cantidad','ifco-r-producto','ifco-r-recib']
     .forEach(function(id){ const el = document.getElementById(id); if (el) el.value = ''; });
   const rech = document.getElementById('ifco-r-rech'); if (rech) rech.value = '0';
+  const rechDest = document.getElementById('ifco-r-rech-dest'); if (rechDest) rechDest.value = 'san_geronimo';
   // Reset checkbox "Ya viene sellado"
   const ckYa = document.getElementById('ifco-r-ya-sellado');
   if (ckYa) { ckYa.checked = false; ifcoOnYaSelladoChange(); }
@@ -14738,11 +14735,6 @@ function ifcoOnYaSelladoChange() {
   }
   // Mostrar/ocultar campos extra del sellado en el paso 2
   document.getElementById('ifco-r-sellado-fields').style.display = ck ? 'block' : 'none';
-  // Default fecha sellado = hoy
-  if (ck) {
-    const fs = document.getElementById('ifco-r-fecha-sellado');
-    if (!fs.value) fs.value = _ifcoToday();
-  }
   // Cambiar texto del botón Guardar
   const btnGuardar = document.getElementById('ifco-r-btn-guardar');
   if (btnGuardar) btnGuardar.textContent = ck ? 'Guardar como sellado' : 'Guardar despacho';
@@ -14751,6 +14743,18 @@ function ifcoOnYaSelladoChange() {
     const tit = document.querySelector('#ifco-mb-remito .mht');
     if (tit) tit.textContent = ck ? '🔏 Cargar despacho ya sellado' : '📥 Nuevo despacho a supermercado';
   }
+  // Re-evaluar visibilidad del dropdown de rechazo destino
+  ifcoToggleRechDestRemito();
+}
+
+// Mostrar/ocultar dropdown "destino del rechazo" según si la cant. rechazada es > 0
+function ifcoToggleRechDestSellar() {
+  const v = parseInt(document.getElementById('ifco-s-rech').value || '0');
+  document.getElementById('ifco-s-rech-dest-wrap').style.display = (v > 0) ? 'block' : 'none';
+}
+function ifcoToggleRechDestRemito() {
+  const v = parseInt(document.getElementById('ifco-r-rech').value || '0');
+  document.getElementById('ifco-r-rech-dest-wrap').style.display = (v > 0) ? 'block' : 'none';
 }
 
 // Antes de abrir el file picker, validamos que si el origen es directo, haya elegido proveedor
@@ -14825,12 +14829,8 @@ async function ifcoOnFotoDespacho(ev) {
       if (d.producto)                document.getElementById('ifco-r-producto').value = d.producto;
       // Prellenar datos del sellado (solo si tipo=completo y vinieron)
       if (yaSellado) {
-        if (d.fecha_sellado)             document.getElementById('ifco-r-fecha-sellado').value = d.fecha_sellado;
         if (d.cantidad_recibida != null) document.getElementById('ifco-r-recib').value         = d.cantidad_recibida;
-        if (d.cantidad_rechazada != null)document.getElementById('ifco-r-rech').value          = d.cantidad_rechazada;
-        if (d.encargado_super_apellido)  document.getElementById('ifco-r-encsup-ap').value     = d.encargado_super_apellido;
-        if (d.encargado_super_nombre)    document.getElementById('ifco-r-encsup-nom').value    = d.encargado_super_nombre;
-        if (d.encargado_super_dni)       document.getElementById('ifco-r-encsup-dni').value    = d.encargado_super_dni;
+        if (d.cantidad_rechazada != null){ document.getElementById('ifco-r-rech').value          = d.cantidad_rechazada; ifcoToggleRechDestRemito(); }
       }
       // Avanzar paso 2 con aviso
       document.getElementById('ifco-r-step1').style.display = 'none';
@@ -14942,8 +14942,9 @@ async function ifcoGuardarRemito() {
   let endpoint;
   if (yaSellado) {
     // Sellado directo: validar campos extra y mandar al endpoint nuevo
-    const fechaSell = document.getElementById('ifco-r-fecha-sellado').value;
-    if (!fechaSell) { alert('Falta la fecha de sellado'); return; }
+    // La fecha de sellado va por default = fecha de emisión (el usuario no la carga acá)
+    const fechaSell = document.getElementById('ifco-r-fecha').value;
+    if (!fechaSell) { alert('Falta la fecha de emisión (se usa también como fecha de sellado)'); return; }
     const recibValRaw = document.getElementById('ifco-r-recib').value;
     const recibVal = recibValRaw === '' ? cant : parseInt(recibValRaw);
     const rechVal = parseInt(document.getElementById('ifco-r-rech').value || '0');
@@ -14952,9 +14953,9 @@ async function ifcoGuardarRemito() {
     fd.append('fecha_sellado', fechaSell);
     fd.append('cantidad_recibida', String(recibVal));
     fd.append('cantidad_rechazada', String(rechVal));
-    fd.append('encargado_super_apellido', document.getElementById('ifco-r-encsup-ap').value.trim());
-    fd.append('encargado_super_nombre',   document.getElementById('ifco-r-encsup-nom').value.trim());
-    fd.append('encargado_super_dni',      document.getElementById('ifco-r-encsup-dni').value.trim());
+    if (rechVal > 0) {
+      fd.append('rechazo_destino', document.getElementById('ifco-r-rech-dest').value || 'san_geronimo');
+    }
     // La foto en este flujo es del sellado
     if (IFCO._fotoDespachoFile)      fd.append('escaneo', IFCO._fotoDespachoFile);
     else if (IFCO._fotoDespachoPath) fd.append('escaneo_path', IFCO._fotoDespachoPath);
@@ -15145,6 +15146,11 @@ async function ifcoVerRemito(id) {
         fila('Talonario', talonHtml) +
         fila('Fecha sellado', r.fecha_sellado ? _ifcoFecha(r.fecha_sellado) : '') +
         fila('Encargado súper', _ifcoEsc(encSupFull)) +
+        fila('Destino del rechazo', r.cantidad_rechazada > 0
+          ? (r.rechazo_destino === 'proveedor' ? '<span class="ifco-badge" style="background:#fef3c7;color:#92400e">Volvió al proveedor</span>'
+            : r.rechazo_destino === 'san_geronimo' ? '<span class="ifco-badge" style="background:#dbeafe;color:#1e40af">Volvió a San Gerónimo</span>'
+            : '<span class="ifco-badge" style="background:#e5e7eb;color:#374151">Sin asignar</span>')
+          : '') +
         fila('Fecha presentación', r.fecha_presentacion ? _ifcoFecha(r.fecha_presentacion) : '') +
         fila('Notas', r.notas ? _ifcoEsc(r.notas).replace(/\n/g,'<br>') : '') +
       '</div>';
@@ -15188,6 +15194,8 @@ async function ifcoAbrirSellar(id) {
     document.getElementById('ifco-s-fecha').value = r.fecha_sellado || _ifcoToday();
     document.getElementById('ifco-s-recib').value = r.cantidad_recibida != null ? r.cantidad_recibida : r.cantidad_despachada;
     document.getElementById('ifco-s-rech').value  = r.cantidad_rechazada != null ? r.cantidad_rechazada : 0;
+    document.getElementById('ifco-s-rech-dest').value = r.rechazo_destino || 'san_geronimo';
+    ifcoToggleRechDestSellar();
     document.getElementById('ifco-s-ap').value    = r.encargado_super_apellido || '';
     document.getElementById('ifco-s-nom').value   = r.encargado_super_nombre   || '';
     document.getElementById('ifco-s-dni').value   = r.encargado_super_dni      || '';
@@ -15290,6 +15298,10 @@ async function ifcoGuardarSellado() {
   fd.append('fecha_sellado',            document.getElementById('ifco-s-fecha').value);
   fd.append('cantidad_recibida',        document.getElementById('ifco-s-recib').value);
   fd.append('cantidad_rechazada',       document.getElementById('ifco-s-rech').value || '0');
+  const rechSellar = parseInt(document.getElementById('ifco-s-rech').value || '0');
+  if (rechSellar > 0) {
+    fd.append('rechazo_destino', document.getElementById('ifco-s-rech-dest').value || 'san_geronimo');
+  }
   fd.append('encargado_super_apellido', document.getElementById('ifco-s-ap').value);
   fd.append('encargado_super_nombre',   document.getElementById('ifco-s-nom').value);
   fd.append('encargado_super_dni',      document.getElementById('ifco-s-dni').value);
