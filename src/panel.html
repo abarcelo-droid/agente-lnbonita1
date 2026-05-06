@@ -3200,6 +3200,22 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   <img id="ifco-lightbox-img" style="max-width:95%;max-height:95vh;border-radius:6px;box-shadow:0 10px 40px rgba(0,0,0,0.5)" alt="Foto remito">
 </div>
 
+<!-- Modal: Detalle del talonario (grilla de N° con estado) -->
+<div class="mb" id="ifco-mb-talon-detalle">
+  <div class="mbox" style="max-width:820px">
+    <div class="mhd">
+      <div class="mht" id="ifco-td-tit">📒 Detalle del talonario</div>
+      <button class="mcl" onclick="document.getElementById('ifco-mb-talon-detalle').classList.remove('on')">x</button>
+    </div>
+    <div id="ifco-td-body" style="font-size:13px;color:var(--txt)">
+      <div style="text-align:center;padding:30px;color:var(--mut)">Cargando…</div>
+    </div>
+    <div style="margin-top:18px;display:flex;justify-content:flex-end;gap:8px">
+      <button class="btn bo" onclick="document.getElementById('ifco-mb-talon-detalle').classList.remove('on')">Cerrar</button>
+    </div>
+  </div>
+</div>
+
 <!-- Modal: Nuevo envío a proveedor -->
 <div class="mb" id="ifco-mb-envio">
   <div class="mbox">
@@ -15098,7 +15114,9 @@ document.addEventListener('keydown', function(ev){
   const lb = document.getElementById('ifco-lightbox');
   if (lb && lb.style.display === 'flex') { ifcoCerrarLightbox(); return; }
   const md = document.getElementById('ifco-mb-detalle-remito');
-  if (md && md.classList.contains('on')) md.classList.remove('on');
+  if (md && md.classList.contains('on')) { md.classList.remove('on'); return; }
+  const mt = document.getElementById('ifco-mb-talon-detalle');
+  if (mt && mt.classList.contains('on')) mt.classList.remove('on');
 });
 
 async function ifcoAbrirSellar(id) {
@@ -15955,10 +15973,11 @@ async function ifcoCargarTalonarios() {
       const total = t.numero_hasta - t.numero_desde + 1;
       const disp = total - t.usados_count;
       const estado = t.activo ? '<span class="ifco-badge ifco-badge-presentado">Activo</span>' : '<span class="ifco-badge ifco-badge-despachado">Inactivo</span>';
-      const accion = t.activo
-        ? ''
-        : '<button class="btn bo" style="font-size:11px;padding:4px 8px" onclick="ifcoActivarTalonario('+t.id+')">Activar</button>';
-      return '<tr>' +
+      const acciones = ['<button class="btn bo" style="font-size:11px;padding:4px 8px" onclick="event.stopPropagation();ifcoVerTalonario('+t.id+')">👁 Ver</button>'];
+      if (!t.activo) {
+        acciones.push('<button class="btn bo" style="font-size:11px;padding:4px 8px" onclick="event.stopPropagation();ifcoActivarTalonario('+t.id+')">Activar</button>');
+      }
+      return '<tr style="cursor:pointer" onclick="ifcoVerTalonario('+t.id+')">' +
         '<td style="font-family:monospace"><b>'+_ifcoEsc(t.serie)+'</b></td>' +
         '<td style="font-family:monospace;font-size:12px">'+t.numero_desde+' → '+t.numero_hasta+'</td>' +
         '<td style="font-family:monospace;font-size:12px">'+_ifcoEsc(t.cai||'—')+'</td>' +
@@ -15966,7 +15985,7 @@ async function ifcoCargarTalonarios() {
         '<td style="text-align:right">'+t.usados_count+'</td>' +
         '<td style="text-align:right"><b>'+disp+'</b></td>' +
         '<td>'+estado+'</td>' +
-        '<td>'+accion+'</td>' +
+        '<td style="display:flex;gap:4px;flex-wrap:wrap">'+acciones.join('')+'</td>' +
       '</tr>';
     }).join('');
   } catch(e) { alert('Error: ' + e.message); }
@@ -15977,6 +15996,145 @@ function ifcoAbrirNuevoTalonario() {
     .forEach(function(id){ document.getElementById(id).value = ''; });
   document.getElementById('ifco-t-activo').value = '1';
   document.getElementById('ifco-mb-talon').classList.add('on');
+}
+
+// VER detalle del talonario: grilla de los 25 N° con estado y click → remito
+async function ifcoVerTalonario(id) {
+  const modal = document.getElementById('ifco-mb-talon-detalle');
+  const body = document.getElementById('ifco-td-body');
+  const tit = document.getElementById('ifco-td-tit');
+  body.innerHTML = '<div style="text-align:center;padding:30px;color:var(--mut)">Cargando…</div>';
+  modal.classList.add('on');
+  try {
+    const data = await _ifcoFetch('/api/ifco/talonarios/' + id + '/detalle');
+    const t = data.talonario;
+    const numeros = data.numeros || [];
+    const log = data.log || [];
+
+    tit.textContent = '📒 Detalle del talonario — ' + (t.serie || '');
+
+    // Conteos por estado
+    const cuenta = { disponible:0, despachado:0, sellado:0, presentado:0, anulado:0 };
+    numeros.forEach(function(n){ if (cuenta[n.estado] != null) cuenta[n.estado]++; });
+
+    // Dueño
+    let duenoHtml;
+    if (t.dueno_tipo === 'proveedor') {
+      duenoHtml = '<span class="ifco-badge" style="background:#fef3c7;color:#92400e">Proveedor</span> '
+                + '<b>'+_ifcoEsc(t.proveedor_nombre||'?')+'</b>';
+    } else {
+      duenoHtml = '<span class="ifco-badge" style="background:#e5e7eb;color:#374151">San Gerónimo</span>';
+    }
+
+    // Colores por estado para celdas de la grilla
+    function colorEstado(est) {
+      switch(est) {
+        case 'disponible': return { bg:'#f3f4f6', border:'#d1d5db', txt:'#6b7280', label:'Disponible' };
+        case 'despachado': return { bg:'#dbeafe', border:'#93c5fd', txt:'#1e40af', label:'Despachado' };
+        case 'sellado':    return { bg:'#fef3c7', border:'#fcd34d', txt:'#92400e', label:'Sellado' };
+        case 'presentado': return { bg:'#d1fae5', border:'#6ee7b7', txt:'#065f46', label:'Presentado' };
+        case 'anulado':    return { bg:'#fee2e2', border:'#fca5a5', txt:'#991b1b', label:'Anulado' };
+        default:           return { bg:'#f3f4f6', border:'#d1d5db', txt:'#6b7280', label:est };
+      }
+    }
+
+    // Render de cada celda
+    function celda(n) {
+      const c = colorEstado(n.estado);
+      const clickable = !!n.remito_id;
+      const cursor = clickable ? 'cursor:pointer' : 'cursor:default';
+      const handler = clickable
+        ? 'onclick="document.getElementById(\'ifco-mb-talon-detalle\').classList.remove(\'on\');ifcoVerRemito('+n.remito_id+')"'
+        : '';
+      const tooltip = clickable
+        ? 'title="Click para ver el remito"'
+        : 'title="Disponible — sin uso"';
+      const subtxt = n.empresa
+        ? '<div style="font-size:9px;color:'+c.txt+';opacity:0.85;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+_ifcoEsc(n.empresa.length>14?n.empresa.substring(0,12)+'…':n.empresa)+'</div>'
+        : '';
+      return '<div ' + handler + ' ' + tooltip +
+        ' style="background:'+c.bg+';border:1px solid '+c.border+';border-radius:6px;padding:8px 6px;'+cursor+';transition:transform .1s" ' +
+        (clickable ? 'onmouseover="this.style.transform=\'scale(1.04)\'" onmouseout="this.style.transform=\'scale(1)\'"' : '') +
+        '>' +
+          '<div style="font-family:monospace;font-size:11px;font-weight:600;color:'+c.txt+'">'+_ifcoEsc(n.n_remito_ifco)+'</div>' +
+          '<div style="font-size:10px;color:'+c.txt+';text-transform:uppercase;letter-spacing:0.3px;margin-top:2px">'+c.label+'</div>' +
+          subtxt +
+        '</div>';
+    }
+
+    // Historial de transferencias
+    let logHtml = '';
+    if (log.length > 0) {
+      logHtml =
+        '<div style="margin-top:18px">' +
+          '<div style="font-size:11px;color:var(--mut);text-transform:uppercase;font-weight:600;margin-bottom:8px">Historial de transferencias</div>' +
+          '<div style="background:var(--bg);border-radius:8px;padding:8px 12px">' +
+            log.map(function(l){
+              const desde = l.dueno_anterior_tipo === 'proveedor' ? (l.prov_anterior_nombre||'?') : 'San Gerónimo';
+              const hasta = l.dueno_nuevo_tipo === 'proveedor' ? (l.prov_nuevo_nombre||'?') : 'San Gerónimo';
+              return '<div style="padding:6px 0;border-bottom:1px solid var(--bor);font-size:12px">' +
+                '<b>'+_ifcoEsc(desde)+'</b> → <b>'+_ifcoEsc(hasta)+'</b>' +
+                ' <span style="color:var(--mut)">·</span> ' +
+                '<span style="color:var(--mut);font-size:11px">'+_ifcoFecha(l.fecha)+(l.usuario_nombre?' · por '+_ifcoEsc(l.usuario_nombre):'')+'</span>' +
+                (l.notas?'<div style="font-size:11px;color:var(--mut);margin-top:2px">'+_ifcoEsc(l.notas)+'</div>':'') +
+              '</div>';
+            }).join('') +
+          '</div>' +
+        '</div>';
+    }
+
+    body.innerHTML =
+      // Header
+      '<div style="display:flex;align-items:center;gap:12px;padding:12px 14px;background:var(--bg);border-radius:8px;margin-bottom:14px;flex-wrap:wrap">' +
+        '<div style="font-family:monospace;font-size:16px;font-weight:600">'+_ifcoEsc(t.serie)+'</div>' +
+        '<div style="color:var(--mut);font-size:12px">'+t.numero_desde+' → '+t.numero_hasta+'</div>' +
+        '<div>'+(t.activo ? '<span class="ifco-badge ifco-badge-presentado">Activo</span>' : '<span class="ifco-badge ifco-badge-despachado">Inactivo</span>')+'</div>' +
+        '<div style="margin-left:auto">'+duenoHtml+'</div>' +
+      '</div>' +
+
+      // CAI / vencimiento
+      '<div style="display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap;font-size:12px;color:var(--mut)">' +
+        '<div><span style="text-transform:uppercase;font-size:10px">CAI:</span> <span style="font-family:monospace;color:var(--txt)">'+_ifcoEsc(t.cai||'—')+'</span></div>' +
+        '<div><span style="text-transform:uppercase;font-size:10px">Vto:</span> <span style="color:var(--txt)">'+(t.vto_cai?_ifcoFecha(t.vto_cai):'—')+'</span></div>' +
+        (t.notas ? '<div style="margin-left:auto"><span style="text-transform:uppercase;font-size:10px">Notas:</span> <span style="color:var(--txt)">'+_ifcoEsc(t.notas)+'</span></div>' : '') +
+      '</div>' +
+
+      // Resumen de cantidades
+      '<div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">' +
+        '<div style="flex:1;min-width:90px;background:#f3f4f6;border:1px solid #d1d5db;border-radius:6px;padding:8px 10px;text-align:center">' +
+          '<div style="font-size:18px;font-weight:600;color:#6b7280">'+cuenta.disponible+'</div>' +
+          '<div style="font-size:10px;color:#6b7280;text-transform:uppercase">Disponibles</div>' +
+        '</div>' +
+        '<div style="flex:1;min-width:90px;background:#dbeafe;border:1px solid #93c5fd;border-radius:6px;padding:8px 10px;text-align:center">' +
+          '<div style="font-size:18px;font-weight:600;color:#1e40af">'+cuenta.despachado+'</div>' +
+          '<div style="font-size:10px;color:#1e40af;text-transform:uppercase">Despachados</div>' +
+        '</div>' +
+        '<div style="flex:1;min-width:90px;background:#fef3c7;border:1px solid #fcd34d;border-radius:6px;padding:8px 10px;text-align:center">' +
+          '<div style="font-size:18px;font-weight:600;color:#92400e">'+cuenta.sellado+'</div>' +
+          '<div style="font-size:10px;color:#92400e;text-transform:uppercase">Sellados</div>' +
+        '</div>' +
+        '<div style="flex:1;min-width:90px;background:#d1fae5;border:1px solid #6ee7b7;border-radius:6px;padding:8px 10px;text-align:center">' +
+          '<div style="font-size:18px;font-weight:600;color:#065f46">'+cuenta.presentado+'</div>' +
+          '<div style="font-size:10px;color:#065f46;text-transform:uppercase">Presentados</div>' +
+        '</div>' +
+        (cuenta.anulado > 0
+          ? '<div style="flex:1;min-width:90px;background:#fee2e2;border:1px solid #fca5a5;border-radius:6px;padding:8px 10px;text-align:center">' +
+              '<div style="font-size:18px;font-weight:600;color:#991b1b">'+cuenta.anulado+'</div>' +
+              '<div style="font-size:10px;color:#991b1b;text-transform:uppercase">Anulados</div>' +
+            '</div>'
+          : '') +
+      '</div>' +
+
+      // Grilla de números
+      '<div style="font-size:11px;color:var(--mut);text-transform:uppercase;font-weight:600;margin-bottom:8px">Estado de cada número</div>' +
+      '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:8px">' +
+        numeros.map(celda).join('') +
+      '</div>' +
+
+      logHtml;
+  } catch(e) {
+    body.innerHTML = '<div style="color:#991b1b;padding:14px">Error: ' + _ifcoEsc(e.message) + '</div>';
+  }
 }
 
 async function ifcoGuardarTalonario() {
