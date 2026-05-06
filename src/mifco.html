@@ -5,6 +5,15 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#0f2540">
 <title>La Niña Bonita - IFCO</title>
+
+<!-- PWA -->
+<link rel="manifest" href="/manifest-mifco.json">
+<link rel="icon" type="image/png" sizes="32x32" href="/mifco-icon-32.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/mifco-icon-apple.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="LNB IFCO">
+<meta name="mobile-web-app-capable" content="yes">
 <style>
 :root{
   --bg:#f0f4f8;--sur:#fff;--bor:#dde3ea;--bor2:#c8d2db;
@@ -793,6 +802,14 @@ function matchCadena(s) {
     if (up.indexOf(o.toUpperCase()) >= 0 || o.toUpperCase().indexOf(up) >= 0) return o;
   }
   return '';
+}
+
+// Registrar el Service Worker (PWA instalable)
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/mifco-sw.js', { scope: '/m/' })
+      .catch((e) => console.warn('SW no registrado:', e));
+  });
 }
 </script>
 </body>

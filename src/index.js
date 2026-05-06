@@ -165,6 +165,19 @@ app.get("/m/ifco", (req, res) => {
 });
 app.get("/m", (req, res) => res.redirect('/m/ifco'));
 
+// PWA assets para IFCO mobile
+app.get("/manifest-mifco.json", (req, res) => {
+  res.sendFile(path.join(__dirname, "manifest-mifco.json"));
+});
+app.get("/mifco-sw.js", (req, res) => {
+  res.set('Service-Worker-Allowed', '/');
+  res.sendFile(path.join(__dirname, "mifco-sw.js"));
+});
+app.get("/mifco-icon-192.png",   (req, res) => res.sendFile(path.join(__dirname, "mifco-icon-192.png")));
+app.get("/mifco-icon-512.png",   (req, res) => res.sendFile(path.join(__dirname, "mifco-icon-512.png")));
+app.get("/mifco-icon-apple.png", (req, res) => res.sendFile(path.join(__dirname, "mifco-icon-apple.png")));
+app.get("/mifco-icon-32.png",    (req, res) => res.sendFile(path.join(__dirname, "mifco-icon-32.png")));
+
 // Archivos scout (fotos)
 app.use("/data/scout", express.static(path.join(__dirname, "../data/scout")));
 
