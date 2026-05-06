@@ -16277,6 +16277,8 @@ async function ifcoVerMovimientosProveedor(provId) {
 // El endpoint GET /api/ifco/proveedores/:id/movimientos.xlsx + el botón en el modal de movimientos
 // están sacados temporalmente. Para reactivar: descomentar el endpoint en src/rutas/ifco.js,
 // agregar el botón ⬇ Descargar Excel al footer del modal ifco-mb-prov-mov, y restaurar esta función.
+
+async function ifcoGuardarTalonario() {
   const body = {
     serie:        document.getElementById('ifco-t-serie').value.trim(),
     numero_desde: parseInt(document.getElementById('ifco-t-desde').value),
