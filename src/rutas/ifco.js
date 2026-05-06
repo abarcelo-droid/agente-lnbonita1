@@ -12,6 +12,14 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const UPLOAD_DIR = path.join(__dirname, "../../data/ifco");
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 
+// ── Migración inline: agregar columna rechazo_destino si no existe ─────────
+// 'san_geronimo' → cajones rechazados volvieron al piso de SG
+// 'proveedor'    → cajones rechazados se quedaron con el proveedor (solo directo)
+// NULL           → sin asignar (remitos viejos: impacto cero)
+try {
+  db.exec("ALTER TABLE ifco_remitos_super ADD COLUMN rechazo_destino TEXT");
+} catch(e) { /* columna ya existe */ }
+
 // ── Configuración OCR vía Claude API ───────────────────────────────────────
 const OCR_ENABLED = String(process.env.IFCO_OCR_ENABLED || '').toLowerCase() === 'true';
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || '';
@@ -460,6 +468,15 @@ router.post('/remitos/sellado-directo', upload.single('escaneo'), function(req, 
     escaneo_path = d.escaneo_path;
   }
 
+  // Destino del rechazo: si hay rechazo > 0, debe especificarse
+  let rechazo_destino = null;
+  if (rechazada > 0) {
+    rechazo_destino = d.rechazo_destino || 'san_geronimo';
+    if (['san_geronimo','proveedor'].indexOf(rechazo_destino) < 0) {
+      return res.status(400).json({ error: 'rechazo_destino debe ser "san_geronimo" o "proveedor"' });
+    }
+  }
+
   try {
     const r = db.prepare(`
       INSERT INTO ifco_remitos_super (
@@ -470,7 +487,7 @@ router.post('/remitos/sellado-directo', upload.single('escaneo'), function(req, 
         encargado_super_apellido, encargado_super_nombre, encargado_super_dni,
         talonario_id, notas, usuario_id, estado,
         escaneo_path, fecha_sellado,
-        origen, proveedor_origen_id
+        origen, proveedor_origen_id, rechazo_destino
       ) VALUES (
         @n_remito_ifco, @fecha_emision, @cliente_id, @cliente_telefono, @empresa, @sucursal,
         @modelo, @cantidad_despachada, @cantidad_recibida, @cantidad_rechazada,
@@ -479,7 +496,7 @@ router.post('/remitos/sellado-directo', upload.single('escaneo'), function(req, 
         @encargado_super_apellido, @encargado_super_nombre, @encargado_super_dni,
         @talonario_id, @notas, @usuario_id, 'sellado',
         @escaneo_path, @fecha_sellado,
-        @origen, @proveedor_origen_id
+        @origen, @proveedor_origen_id, @rechazo_destino
       )
     `).run({
       n_remito_ifco:           d.n_remito_ifco,
@@ -506,7 +523,8 @@ router.post('/remitos/sellado-directo', upload.single('escaneo'), function(req, 
       escaneo_path:            escaneo_path,
       fecha_sellado:           d.fecha_sellado,
       origen:                  origen,
-      proveedor_origen_id:     proveedor_origen_id
+      proveedor_origen_id:     proveedor_origen_id,
+      rechazo_destino:         rechazo_destino
     });
     res.json({ id: r.lastInsertRowid, n_remito_ifco: d.n_remito_ifco, escaneo_path: escaneo_path, estado: 'sellado', origen: origen });
   } catch(e) {
@@ -540,6 +558,15 @@ router.patch('/remitos/:id/sellar', upload.single('escaneo'), function(req, res)
     escaneo_path = d.escaneo_path;
   }
 
+  // Destino del rechazo: si hay rechazo > 0, debe especificarse
+  let rechazo_destino = null;
+  if (rechazada > 0) {
+    rechazo_destino = d.rechazo_destino || 'san_geronimo';
+    if (['san_geronimo','proveedor'].indexOf(rechazo_destino) < 0) {
+      return res.status(400).json({ error: 'rechazo_destino debe ser "san_geronimo" o "proveedor"' });
+    }
+  }
+
   db.prepare(`
     UPDATE ifco_remitos_super SET
       estado = 'sellado',
@@ -549,6 +576,7 @@ router.patch('/remitos/:id/sellar', upload.single('escaneo'), function(req, res)
       encargado_super_dni      = @encargado_super_dni,
       cantidad_recibida        = @cantidad_recibida,
       cantidad_rechazada       = @cantidad_rechazada,
+      rechazo_destino          = @rechazo_destino,
       escaneo_path             = @escaneo_path,
       actualizado_en           = datetime('now','localtime')
     WHERE id = @id
@@ -560,6 +588,7 @@ router.patch('/remitos/:id/sellar', upload.single('escaneo'), function(req, res)
     encargado_super_dni:      d.encargado_super_dni      || null,
     cantidad_recibida:        recibida,
     cantidad_rechazada:       rechazada,
+    rechazo_destino:          rechazo_destino,
     escaneo_path:             escaneo_path
   });
 
@@ -979,7 +1008,7 @@ router.get('/resumen', function(req, res) {
     SELECT COALESCE(SUM(cantidad_rechazada),0) AS total
     FROM ifco_remitos_super
     WHERE estado IN ('sellado','presentado')
-      AND origen = 'san_geronimo'
+      AND rechazo_destino = 'san_geronimo'
       AND eliminado_en IS NULL
   `);
   const en_transito_sg = get(`
@@ -1152,7 +1181,10 @@ function _calcSaldoProveedor(provId) {
   `).get(provId).total || 0;
 
   const directosSellados = db.prepare(`
-    SELECT COALESCE(SUM(COALESCE(cantidad_recibida, cantidad_despachada)), 0) AS total
+    SELECT COALESCE(SUM(
+      COALESCE(cantidad_recibida, cantidad_despachada) +
+      CASE WHEN rechazo_destino = 'san_geronimo' THEN COALESCE(cantidad_rechazada, 0) ELSE 0 END
+    ), 0) AS total
     FROM ifco_remitos_super
     WHERE proveedor_origen_id = ?
       AND origen = 'proveedor_directo'
@@ -1204,7 +1236,8 @@ function _movimientosProveedor(provId) {
   const directos = db.prepare(`
     SELECT 'despacho_directo' AS tipo, id, fecha_emision AS fecha,
            (n_remito_ifco || ' → ' || COALESCE(empresa,'?')) AS detalle,
-           cantidad_despachada AS cantidad, cantidad_recibida, estado, fecha_sellado, sucursal
+           cantidad_despachada AS cantidad, cantidad_recibida, cantidad_rechazada,
+           estado, fecha_sellado, sucursal, rechazo_destino
     FROM ifco_remitos_super
     WHERE proveedor_origen_id = ? AND origen = 'proveedor_directo' AND eliminado_en IS NULL
   `).all(provId);
@@ -1229,7 +1262,15 @@ function _movimientosProveedor(provId) {
       delta = -m.cantidad;
     } else if (m.tipo === 'despacho_directo') {
       if (m.estado === 'sellado' || m.estado === 'presentado') {
-        delta = -(m.cantidad_recibida != null ? m.cantidad_recibida : m.cantidad);
+        const recib = m.cantidad_recibida != null ? m.cantidad_recibida : m.cantidad;
+        const rech  = m.cantidad_rechazada || 0;
+        // Si el rechazo volvió a SG, también sale del proveedor (= todo lo despachado)
+        // Si el rechazo se quedó con el proveedor (o NULL), solo sale lo recibido por el súper
+        if (m.rechazo_destino === 'san_geronimo') {
+          delta = -(recib + rech);
+        } else {
+          delta = -recib;
+        }
       } else {
         delta = 0; // 'despachado' (en tránsito) no afecta saldo todavía
       }
@@ -1465,7 +1506,7 @@ router.post('/ocr/remito-super', upload.single('foto'), async function(req, res)
   const promptCompleto = [
     'Sos un asistente que lee remitos IFCO emitidos por SAN GERONIMO SA en Argentina.',
     'Esta foto es de un remito QUE YA VOLVIÓ SELLADO del supermercado, pero nunca se cargó al sistema cuando salió.',
-    'Tenés que extraer en una sola pasada los datos esenciales del despacho + los del sellado posterior.',
+    'Tenés que extraer en una sola pasada los datos esenciales del despacho + las cantidades del sellado.',
     'Devolvé un JSON con estos campos. Si un campo no se ve o no estás seguro, dejalo en null.',
     '— Datos del DESPACHO (preimpreso o tipeado):',
     '  "n_remito_ifco": string con formato "00015-XXXXXXXX" (preimpreso, esquina superior derecha)',
@@ -1475,14 +1516,10 @@ router.post('/ocr/remito-super', upload.single('foto'), async function(req, res)
     '    Si lo que ves se parece a uno de esos pero está abreviado o mal escrito, devolvé el de la lista que mejor matchea. Si no matchea ninguno, devolvé el texto literal.',
     '  "cantidad_despachada": número entero — total de cajones (campo "TOTAL CAJAS" o equivalente)',
     '  "producto": string — descripción del producto cargado',
-    '— Datos del SELLADO (manuscritos o sello del súper):',
-    '  "fecha_sellado": string ISO "YYYY-MM-DD" — fecha de RECEPCIÓN del supermercado',
+    '— Cantidades del SELLADO (manuscritos o sello del súper):',
     '  "cantidad_recibida": número entero — cuántos cajones aceptó el súper (si no se aclara y no hay rechazo, asumí cantidad_despachada)',
     '  "cantidad_rechazada": número entero (0 si no hay rechazo)',
-    '  "encargado_super_apellido": string — quien recibió en el súper',
-    '  "encargado_super_nombre": string',
-    '  "encargado_super_dni": string',
-    'NO leas ni extraigas: sucursal, transportista, encargado del proveedor, ni otros datos del despacho.',
+    'NO leas ni extraigas: sucursal, transportista, encargado del proveedor, encargado del súper, fecha de sellado, ni otros datos adicionales.',
     'Respondé SOLO el objeto JSON, sin texto adicional ni markdown.'
   ].join('\n');
 
