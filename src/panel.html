@@ -8159,7 +8159,7 @@ if(_inpGondola) _inpGondola.addEventListener('keydown', function(e){
   </div>
   <div class="ab-modal-footer">
     <button class="btn bo" onclick="document.getElementById('pa-mb-orden').classList.remove('on')">Cancelar</button>
-    <button class="btn bb" onclick="paGuardarOrden()">Emitir orden</button>
+    <button class="btn bb" id="pa-ord-btn-guardar" onclick="paGuardarOrden()">Emitir orden</button>
   </div>
 </div></div>
 
@@ -11249,40 +11249,48 @@ function paLoadOrdenes(){
   paF('/api/pa/ordenes'+(estado?'?estado='+estado:'')).then(function(r){
     var data=r.data||[];var tb=document.getElementById('pa-ord-tbody');
     if(!data.length){tb.innerHTML='<tr><td colspan="8" class="emp">Sin órdenes</td></tr>';return;}
-    var esAdmin=LNB_USER&&LNB_USER.rol==='admin';
-    tb.innerHTML=data.map(function(o){var lts=(o.lotes||[]).map(function(l){return l.lote_nombre;}).join(', '),prs=(o.items||[]).map(function(i){return i.insumo_nombre;}).join(', ');var btnDel=esAdmin?' <button class="btn bs" style="background:#dc2626;color:#fff;border-color:#dc2626;margin-left:4px" onclick="paEliminarOrden('+o.id+',\''+(o.nro_orden||'').replace(/\'/g,"\\'")+'\')" title="Eliminar orden">🗑</button>':'';return'<tr><td><strong>'+o.nro_orden+'</strong></td><td>'+paFecha(o.fecha_orden)+'</td><td>'+(o.tipo_aplicacion||'—')+'</td><td style="font-size:12px;color:var(--mut)">'+lts+'</td><td style="font-size:12px;color:var(--mut)">'+prs+'</td><td style="font-size:12px">'+(o.asignado_nombre?'<span class="pa-badge pa-azul-bg">👤 '+o.asignado_nombre+'</span>':'<span style="color:var(--sub)">—</span>')+'</td><td>'+paBadgeEstado(o.estado)+'</td><td style="white-space:nowrap"><button class="btn bo bs" onclick="paVerOrden('+o.id+')">Ver</button>'+btnDel+'</td></tr>';}).join('');
+    tb.innerHTML=data.map(function(o){
+      var lts=(o.lotes||[]).map(function(l){return l.lote_nombre;}).join(', ');
+      var prs=(o.items||[]).map(function(i){return i.insumo_nombre;}).join(', ');
+      // Editar y eliminar solo si la orden está en estado "emitida"
+      var btnEdit='', btnDel='';
+      if(o.estado==='emitida'){
+        btnEdit=' <button class="btn bo bs" onclick="paAbrirEditarOrden('+o.id+')" title="Editar orden">✏️</button>';
+        btnDel =' <button class="btn bs" style="background:#dc2626;color:#fff;border-color:#dc2626" onclick="paEliminarOrden('+o.id+',\''+(o.nro_orden||'').replace(/\'/g,"\\'")+'\')" title="Eliminar orden">🗑</button>';
+      }
+      return '<tr>'
+        +'<td><strong>'+o.nro_orden+'</strong></td>'
+        +'<td>'+paFecha(o.fecha_orden)+'</td>'
+        +'<td>'+(o.tipo_aplicacion||'—')+'</td>'
+        +'<td style="font-size:12px;color:var(--mut)">'+lts+'</td>'
+        +'<td style="font-size:12px;color:var(--mut)">'+prs+'</td>'
+        +'<td style="font-size:12px">'+(o.asignado_nombre?'<span class="pa-badge pa-azul-bg">👤 '+o.asignado_nombre+'</span>':'<span style="color:var(--sub)">—</span>')+'</td>'
+        +'<td>'+paBadgeEstado(o.estado)+'</td>'
+        +'<td style="white-space:nowrap"><button class="btn bo bs" onclick="paVerOrden('+o.id+')">Ver</button>'+btnEdit+btnDel+'</td>'
+      +'</tr>';
+    }).join('');
   });
 }
+
 function paEliminarOrden(id,nro){
-  var msg='¿Eliminar la orden '+nro+'?\n\n'
-    +'Esta acción es PERMANENTE y NO se puede deshacer.\n\n'
-    +'Se borrarán:\n'
-    +'  • La orden y sus lotes/productos\n'
-    +'  • Las aplicaciones ejecutadas (si las hay)\n'
-    +'  • Los costos por lote derivados\n'
-    +'  • Los movimientos de stock derivados\n\n'
-    +'Se revertirá el stock descontado en los insumos.\n\n'
-    +'Los movimientos de combustible vinculados a esta orden NO se borran, solo se desvinculan.\n\n'
-    +'¿Continuar?';
-  if(!confirm(msg))return;
+  if(!confirm('¿Eliminar la orden '+nro+'?\n\nLa orden quedará oculta pero los datos se preservan en la base.'))return;
   paF('/api/pa/ordenes/'+id,{method:'DELETE'}).then(function(r){
     if(r&&r.ok){
-      var d=r.eliminada||{};
-      var resumen='Orden '+nro+' eliminada.\n\n'
-        +'• Aplicaciones borradas: '+(d.aplicaciones||0)+'\n'
-        +'• Stock revertido en insumos: '+(d.stock_revertido||0)+'\n'
-        +'• Movimientos de stock borrados: '+(d.movimientos_stock_borrados||0)+'\n'
-        +'• Costos por lote borrados: '+(d.costos_lote_borrados||0)+'\n'
-        +'• Movimientos de combustible desvinculados: '+(d.combustible_desvinculado||0);
-      alert(resumen);
+      toast('Orden '+nro+' eliminada');
       paLoadOrdenes();
     }else{
-      alert('Error al eliminar: '+(r&&r.error?r.error:'desconocido'));
+      alert(r&&r.error?r.error:'Error al eliminar');
     }
   }).catch(function(e){alert('Error: '+e.message);});
 }
 function paAbrirNuevaOrden(){
   PA.ordN=0;
+  PA._ordenEditId=null;
+  // Resetear título y botón del modal a modo "nueva"
+  var titEl=document.querySelector('#pa-mb-orden .mht');
+  if(titEl) titEl.textContent='Nueva Orden de Aplicación';
+  var btnSav=document.getElementById('pa-ord-btn-guardar');
+  if(btnSav) btnSav.textContent='✓ Emitir orden';
   document.getElementById('pa-ord-fecha').value=new Date().toISOString().slice(0,10);
   document.getElementById('pa-ord-fecha-prop').value='';
   document.getElementById('pa-ord-tipo').value='';
@@ -11507,11 +11515,92 @@ function paGuardarOrden(){
   });
   if(!items.length)return toast('Agregá al menos un producto con dosis','er');
   var asignadoA=document.getElementById('pa-ord-asignado').value||null;
-  paF('/api/pa/ordenes',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({fecha_orden:fecha,fecha_propuesta:fechaProp,tipo_aplicacion:tipo,objetivo:objetivo,lotes:lotes,items:items,asignado_a:asignadoA})
-  }).then(function(r){
-    if(r.ok){toast('Orden '+r.nro_orden+' emitida'+(asignadoA?' y asignada':''));document.getElementById('pa-mb-orden').classList.remove('on');paLoadOrdenes();}
-    else toast(r.error||'Error','er');
+  var body={fecha_orden:fecha,fecha_propuesta:fechaProp,tipo_aplicacion:tipo,objetivo:objetivo,lotes:lotes,items:items,asignado_a:asignadoA};
+
+  if(PA._ordenEditId){
+    // Modo edición: PATCH
+    var editId=PA._ordenEditId;
+    paF('/api/pa/ordenes/'+editId,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
+      .then(function(r){
+        if(r.ok){toast('Orden actualizada');document.getElementById('pa-mb-orden').classList.remove('on');PA._ordenEditId=null;paLoadOrdenes();}
+        else toast(r.error||'Error','er');
+      });
+  } else {
+    // Modo creación: POST
+    paF('/api/pa/ordenes',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
+      .then(function(r){
+        if(r.ok){toast('Orden '+r.nro_orden+' emitida'+(asignadoA?' y asignada':''));document.getElementById('pa-mb-orden').classList.remove('on');paLoadOrdenes();}
+        else toast(r.error||'Error','er');
+      });
+  }
+}
+
+// Abre el modal de orden en modo EDICIÓN, precargado con los datos existentes
+function paAbrirEditarOrden(id){
+  paF('/api/pa/ordenes/'+id).then(function(r){
+    if(!r.ok)return toast(r.error||'Error','er');
+    var o=r.data;
+    if(o.estado!=='emitida'){
+      return toast('Solo se pueden editar órdenes emitidas','er');
+    }
+    // Primero abrir el modal en modo "nuevo" (resetea todo, carga la lista de lotes/usuarios)
+    paAbrirNuevaOrden();
+    // Cambiar a modo edición
+    PA._ordenEditId=id;
+    var titEl=document.querySelector('#pa-mb-orden .mht');
+    if(titEl) titEl.textContent='Editar Orden — '+(o.nro_orden||'');
+    var btnSav=document.getElementById('pa-ord-btn-guardar');
+    if(btnSav) btnSav.textContent='✓ Guardar cambios';
+    // Pre-cargar campos simples
+    document.getElementById('pa-ord-fecha').value=(o.fecha_orden||'').slice(0,10);
+    document.getElementById('pa-ord-fecha-prop').value=(o.fecha_propuesta||'').slice(0,10);
+    document.getElementById('pa-ord-tipo').value=o.tipo_aplicacion||'';
+    document.getElementById('pa-ord-objetivo').value=o.objetivo||'';
+    // Asignado a (puede que el fetch de usuarios todavía no haya terminado, hacemos retry corto)
+    var setAsig=function(){
+      var sel=document.getElementById('pa-ord-asignado');
+      if(sel && sel.options.length>1){
+        sel.value=o.asignado_a||'';
+      } else {
+        setTimeout(setAsig, 80);
+      }
+    };
+    setAsig();
+    // Pre-cargar lotes seleccionados
+    (o.lotes||[]).forEach(function(l){
+      var cb=document.querySelector('.pa-ord-lote-cb[value="'+l.lote_id+'"]');
+      if(!cb) return;
+      cb.checked=true;
+      paOrdLoteToggle(cb);
+      if(l.hectareas_aplicadas!=null){
+        var parcCb=document.querySelector('.pa-ord-parc-cb[data-lote-id="'+l.lote_id+'"]');
+        if(parcCb){
+          parcCb.checked=true;
+          paOrdParcToggle(parcCb);
+          var inp=document.getElementById('pa-ord-parc-ha-'+l.lote_id);
+          if(inp) inp.value=l.hectareas_aplicadas;
+        }
+      }
+    });
+    // Pre-cargar productos: el primer item ya está renderizado por paAgregarItemOrden(),
+    // así que rellenamos el primero y agregamos más si hace falta.
+    var itemsCont=document.getElementById('pa-ord-items');
+    if(itemsCont) itemsCont.innerHTML=''; // limpiar el item por defecto
+    (o.items||[]).forEach(function(it){
+      paAgregarItemOrden();
+      // El último item agregado tiene el id pa-oi-ins-{N} más alto
+      var allIns=document.querySelectorAll('[id^=pa-oi-ins-]');
+      var lastEl=allIns[allIns.length-1];
+      if(!lastEl) return;
+      var n=lastEl.id.split('-').pop();
+      lastEl.value=it.insumo_id;
+      var dosisEl=document.getElementById('pa-oi-dosis-'+n);
+      if(dosisEl) dosisEl.value=it.dosis;
+      var udEl=document.getElementById('pa-oi-ud-'+n);
+      if(udEl) udEl.value=it.unidad_dosis;
+    });
+    if(!o.items || !o.items.length) paAgregarItemOrden();
+    paActHaTotal();
   });
 }
 function paVerOrden(id){
