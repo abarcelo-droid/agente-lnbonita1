@@ -44,6 +44,131 @@ async function _getAnthropic() {
   }
 }
 
+// ── Lazy load de la librería xlsx (SheetJS) para import/export Excel ──────
+let _xlsxLib = null;
+async function _getXlsx() {
+  if (_xlsxLib) return _xlsxLib;
+  try {
+    const mod = await import('xlsx');
+    _xlsxLib = mod.default || mod;
+    return _xlsxLib;
+  } catch(e) {
+    console.warn('[IFCO] Librería xlsx no disponible:', e.message);
+    return null;
+  }
+}
+
+// ── Helpers para consolidación con archivo IFCO ───────────────────────────
+// Normaliza un N° de remito tomando los últimos 8 dígitos (key de match)
+// Ejemplos: "00015-01508545" → "01508545"; "0015R01508545" → "01508545"
+function _normalizarNumeroRemito(s) {
+  if (s == null) return null;
+  const digits = String(s).replace(/[^0-9]/g, '');
+  if (digits.length < 8) return null;
+  return digits.slice(-8);
+}
+
+// Convierte el formato del archivo IFCO al formato canónico del sistema
+// "0015R01508545" → "00015-01508545"
+function _archivoANumeroSistema(s) {
+  if (!s) return null;
+  const m = String(s).trim().match(/^(\d+)R(\d+)$/);
+  if (m) return m[1].padStart(5, '0') + '-' + m[2];
+  return null;
+}
+
+// Matchea el "Detalle" del archivo IFCO contra las cadenas hardcoded del sistema
+// Devuelve la cadena canónica o null si no matchea
+function _matchCadenaIFCO(detalle) {
+  if (!detalle) return null;
+  const s = String(detalle).toLowerCase();
+  if (s.includes('vea') || s.includes('cencosud')) return 'CENCOSUD';
+  if (s.includes('carrefour'))                     return 'CARREFOUR (INC SA)';
+  if (s.includes('coto'))                          return 'COTO';
+  if (s.includes('dorinka') || s.includes('chango')) return 'CHANGO MAS (DORINKA)';
+  if (s.includes('cooperativa obrera'))            return 'LA COOPERATIVA OBRERA';
+  if (s.includes('anonima') || s.includes('anónima')) return 'LA ANONIMA';
+  return null;
+}
+
+// Parsea el Excel de IFCO buscando la sección "Entregas a Cadenas"
+// Devuelve { remitos: [{ n_remito_archivo, n_remito_sistema, n_remito_normalizado, fecha, cliente, detalle, cantidad }] }
+async function _parsearExcelIFCO(buffer) {
+  const XLSX = await _getXlsx();
+  if (!XLSX) throw new Error('Librería xlsx no disponible. Falta instalar la dependencia.');
+
+  const wb = XLSX.read(buffer, { type: 'buffer', cellDates: true });
+  // Hoja "Cronologico" o la primera disponible
+  const sheetName = wb.SheetNames.find(s => s.toLowerCase().startsWith('cronologico')) || wb.SheetNames[0];
+  if (!sheetName) throw new Error('El archivo no tiene hojas');
+  const ws = wb.Sheets[sheetName];
+  // Convertir a array de filas (cada fila es array de celdas)
+  const filas = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: null });
+
+  // Buscar el inicio de "Entregas a Cadenas"
+  let inicio = -1;
+  for (let i = 0; i < filas.length; i++) {
+    const c0 = (filas[i][0] || '').toString().trim().toLowerCase();
+    if (c0 === 'entregas a cadenas') { inicio = i + 1; break; }
+  }
+  if (inicio < 0) throw new Error('No se encontró la sección "Entregas a Cadenas" en el archivo');
+
+  // Recorrer hasta el fin (línea vacía consecutiva o nueva sección)
+  const remitos = [];
+  let vaciasSeguidas = 0;
+  for (let i = inicio; i < filas.length; i++) {
+    const row = filas[i];
+    if (!row || row.every(c => c == null || String(c).trim() === '')) {
+      vaciasSeguidas++;
+      if (vaciasSeguidas >= 3) break; // 3 filas vacías → corta
+      continue;
+    }
+    vaciasSeguidas = 0;
+    // Si la fila parece un subtítulo (texto en columna 0 sin fecha real, sin valores en otras), saltamos sección
+    const c0 = row[0];
+    const c1 = row[1];
+    if (c0 && !c1 && (typeof c0 === 'string') && !/^\d/.test(c0.toString().trim()) && !c0.toString().match(/\d{4}/)) {
+      // Es probablemente un subtítulo de otra sección → terminamos
+      break;
+    }
+    if (!c1) continue; // sin N° de remito, saltar
+
+    const nRemitoArchivo = String(c1).trim();
+    const normalizado = _normalizarNumeroRemito(nRemitoArchivo);
+    if (!normalizado) continue;
+
+    // Fecha: puede venir como Date o como string
+    let fechaIso = null;
+    if (c0 instanceof Date) {
+      fechaIso = c0.toISOString().slice(0, 10);
+    } else if (c0 != null) {
+      const txt = String(c0);
+      // "DD/MM/YYYY" → "YYYY-MM-DD"
+      const m = txt.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})$/);
+      if (m) {
+        const yyyy = m[3].length === 2 ? '20' + m[3] : m[3];
+        fechaIso = yyyy + '-' + m[2].padStart(2, '0') + '-' + m[1].padStart(2, '0');
+      }
+    }
+
+    // Salidas (columna F, índice 5) — vienen negativas
+    const salidas = parseInt(row[5] || 0);
+    const cantidad = salidas < 0 ? -salidas : (parseInt(row[4] || 0) || Math.abs(salidas));
+
+    remitos.push({
+      n_remito_archivo:    nRemitoArchivo,
+      n_remito_sistema:    _archivoANumeroSistema(nRemitoArchivo),
+      n_remito_normalizado: normalizado,
+      fecha:               fechaIso,
+      cliente:             row[2] ? String(row[2]).trim() : null,
+      detalle:             row[3] ? String(row[3]).trim() : null,
+      cantidad:            cantidad
+    });
+  }
+
+  return { remitos };
+}
+
 const router = express.Router();
 
 // ── Upload para escaneos del remito sellado ───────────────────────────────
@@ -1679,6 +1804,172 @@ router.post('/ocr/match-sellado', upload.single('foto'), async function(req, res
     remito: remito,
     escaneo_path: escaneo_path
   });
+});
+
+// ═════════════════════════════════════════════════════════════════════════
+// CONSOLIDAR CON ARCHIVO IFCO
+// ═════════════════════════════════════════════════════════════════════════
+
+// POST /consolidar/preview — recibe el .xlsx, parsea y matchea contra la DB
+// Devuelve un preview clasificado por categoría (sin tocar nada)
+router.post('/consolidar/preview', upload.single('archivo'), async function(req, res) {
+  if (!req.file) return res.status(400).json({ error: 'Falta el archivo "archivo"' });
+  const filePath = path.join(UPLOAD_DIR, req.file.filename);
+  let parsed;
+  try {
+    const buf = fs.readFileSync(filePath);
+    parsed = await _parsearExcelIFCO(buf);
+  } catch(e) {
+    try { fs.unlinkSync(filePath); } catch(_){}
+    return res.status(400).json({ error: e.message });
+  } finally {
+    // Borrar el archivo subido (no lo necesitamos persistido)
+    try { fs.unlinkSync(filePath); } catch(_){}
+  }
+
+  if (!parsed.remitos || parsed.remitos.length === 0) {
+    return res.json({ ok: true, total_archivo: 0, a_presentar: [], ya_presentados: [], no_encontrados: [] });
+  }
+
+  // Cargar todos los remitos vivos del sistema y armar índice por N° normalizado
+  const enSistema = db.prepare(`
+    SELECT id, n_remito_ifco, n_remito_sg, fecha_emision, fecha_sellado, fecha_presentacion,
+           empresa, sucursal, cantidad_despachada, cantidad_recibida, cantidad_rechazada,
+           estado, origen, proveedor_origen_id
+    FROM ifco_remitos_super
+    WHERE eliminado_en IS NULL
+  `).all();
+  const indice = {};
+  enSistema.forEach(function(r) {
+    const k = _normalizarNumeroRemito(r.n_remito_ifco);
+    if (k) indice[k] = r;
+  });
+
+  // Clasificar cada remito del archivo
+  const aPresentar = [];     // existe en sistema en estado despachado o sellado
+  const yaPresentados = [];  // existe en sistema, ya estaba presentado
+  const noEncontrados = [];  // no existe en sistema
+
+  parsed.remitos.forEach(function(arch) {
+    const sis = indice[arch.n_remito_normalizado];
+    if (!sis) {
+      noEncontrados.push({
+        n_remito_archivo:  arch.n_remito_archivo,
+        n_remito_sistema:  arch.n_remito_sistema,
+        fecha:             arch.fecha,
+        detalle:           arch.detalle,
+        cantidad:          arch.cantidad,
+        cadena_sugerida:   _matchCadenaIFCO(arch.detalle)
+      });
+    } else if (sis.estado === 'presentado') {
+      yaPresentados.push({ archivo: arch, sistema: sis });
+    } else {
+      aPresentar.push({ archivo: arch, sistema: sis });
+    }
+  });
+
+  res.json({
+    ok: true,
+    total_archivo:   parsed.remitos.length,
+    a_presentar:     aPresentar,
+    ya_presentados:  yaPresentados,
+    no_encontrados:  noEncontrados
+  });
+});
+
+// POST /consolidar/aplicar — aplica los cambios elegidos por el usuario
+// Body JSON: {
+//   ids_marcar_presentados: [int],          // IDs del sistema a marcar como presentados (toman fecha_archivo del map)
+//   fechas_por_id:          { id: 'YYYY-MM-DD' },  // fecha de cada uno (= fecha del archivo)
+//   crear:                  [{ n_remito_sistema, fecha, empresa, cantidad }]
+// }
+router.post('/consolidar/aplicar', express.json(), function(req, res) {
+  const ids = (req.body && req.body.ids_marcar_presentados) || [];
+  const fechasPorId = (req.body && req.body.fechas_por_id) || {};
+  const crear = (req.body && req.body.crear) || [];
+
+  let actualizados = 0;
+  let creados = 0;
+  const errores = [];
+
+  const tx = db.transaction(function() {
+    // 1. Marcar como presentados los seleccionados
+    for (const id of ids) {
+      try {
+        const r = db.prepare("SELECT * FROM ifco_remitos_super WHERE id = ? AND eliminado_en IS NULL").get(id);
+        if (!r) { errores.push({ id: id, error: 'No encontrado' }); continue; }
+        if (r.estado === 'presentado') continue; // ya estaba
+        const fechaArchivo = fechasPorId[id] || r.fecha_emision;
+
+        if (r.estado === 'despachado') {
+          // Setear cantidades default y fecha sellado si están en NULL, después pasar a presentado
+          db.prepare(`
+            UPDATE ifco_remitos_super
+            SET estado             = 'presentado',
+                cantidad_recibida  = COALESCE(cantidad_recibida, cantidad_despachada),
+                cantidad_rechazada = COALESCE(cantidad_rechazada, 0),
+                fecha_sellado      = COALESCE(fecha_sellado, ?),
+                fecha_presentacion = ?,
+                actualizado_en     = datetime('now','localtime')
+            WHERE id = ?
+          `).run(fechaArchivo, fechaArchivo, id);
+        } else {
+          // sellado → presentado
+          db.prepare(`
+            UPDATE ifco_remitos_super
+            SET estado             = 'presentado',
+                fecha_presentacion = ?,
+                actualizado_en     = datetime('now','localtime')
+            WHERE id = ?
+          `).run(fechaArchivo, id);
+        }
+        actualizados++;
+      } catch(e) {
+        errores.push({ id: id, error: e.message });
+      }
+    }
+
+    // 2. Crear remitos nuevos (los que el usuario marcó en "no encontrados")
+    for (const nuevo of crear) {
+      try {
+        if (!nuevo.n_remito_sistema || !nuevo.cantidad) {
+          errores.push({ n_remito: nuevo.n_remito_sistema, error: 'Faltan datos' });
+          continue;
+        }
+        // Verificar que no exista
+        const existe = db.prepare("SELECT id FROM ifco_remitos_super WHERE n_remito_ifco = ? AND eliminado_en IS NULL").get(nuevo.n_remito_sistema);
+        if (existe) { errores.push({ n_remito: nuevo.n_remito_sistema, error: 'Ya existe' }); continue; }
+
+        db.prepare(`
+          INSERT INTO ifco_remitos_super (
+            n_remito_ifco, fecha_emision, empresa,
+            cantidad_despachada, cantidad_recibida, cantidad_rechazada,
+            estado, fecha_sellado, fecha_presentacion,
+            origen, usuario_id, notas
+          ) VALUES (?, ?, ?, ?, ?, 0, 'presentado', ?, ?, 'san_geronimo', ?, 'Importado del archivo IFCO')
+        `).run(
+          nuevo.n_remito_sistema,
+          nuevo.fecha || null,
+          nuevo.empresa || null,
+          parseInt(nuevo.cantidad),
+          parseInt(nuevo.cantidad),
+          nuevo.fecha || null,
+          nuevo.fecha || null,
+          (req.user && req.user.id) || null
+        );
+        creados++;
+      } catch(e) {
+        errores.push({ n_remito: nuevo.n_remito_sistema, error: e.message });
+      }
+    }
+  });
+
+  try {
+    tx();
+    res.json({ ok: true, actualizados: actualizados, creados: creados, errores: errores });
+  } catch(e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
 });
 
 export default router;

@@ -2759,7 +2759,8 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
         <option value="anulado">Anulados</option>
       </select>
       <input type="text" id="ifco-flt-rem-search" placeholder="Buscar por n° o empresa…" oninput="ifcoCargarRemitos()" style="font-size:13px;padding:6px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg);min-width:240px">
-      <div style="margin-left:auto">
+      <div style="margin-left:auto;display:flex;gap:6px">
+        <button class="btn bo" onclick="ifcoAbrirConsolidar()" title="Marcar como presentados los remitos del archivo IFCO">🔄 Consolidar con IFCO</button>
         <button class="btn bb" onclick="ifcoAbrirPresentar()" id="ifco-btn-presentar">📧 Presentar a IFCO</button>
       </div>
     </div>
@@ -3149,6 +3150,94 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
         <button class="btn bo" onclick="document.getElementById('ifco-mb-sellar').classList.remove('on')">Cancelar</button>
         <button class="btn bb" id="ifco-s-btn-guardar" onclick="ifcoGuardarSellado()" style="display:none">Guardar sellado</button>
       </div>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: Consolidar con archivo IFCO -->
+<div class="mb" id="ifco-mb-consolidar">
+  <div class="mbox" style="max-width:780px;max-height:90vh;display:flex;flex-direction:column">
+    <div class="mhd">
+      <div class="mht">🔄 Consolidar con archivo IFCO</div>
+      <button class="mcl" onclick="document.getElementById('ifco-mb-consolidar').classList.remove('on')">x</button>
+    </div>
+    <div style="flex:1;overflow-y:auto;padding-right:4px">
+      <!-- Paso 1: subir archivo -->
+      <div id="ifco-cs2-step1">
+        <div style="background:var(--bg);border-radius:8px;padding:14px 16px;margin-bottom:14px;font-size:13px;line-height:1.6">
+          📋 Subí el <b>Excel que te manda IFCO</b> con la sección "Entregas a Cadenas".<br>
+          El sistema busca cada remito por su número y te muestra qué se va a marcar como <b>presentado</b>.<br>
+          <span style="color:var(--mut)">Los remitos que no estén en el sistema se listan para que decidas si crearlos.</span>
+        </div>
+        <div style="text-align:center;padding:30px 20px;border:2px dashed var(--bor);border-radius:10px;background:var(--bg)">
+          <input id="ifco-cs2-file" type="file" accept=".xlsx,.xls" style="display:none" onchange="ifcoConsolidarPreview(event)">
+          <button class="btn bb" style="font-size:14px;padding:10px 22px" onclick="document.getElementById('ifco-cs2-file').click()">📁 Subir archivo .xlsx</button>
+          <div style="margin-top:8px;font-size:11px;color:var(--mut)">Solo archivos .xlsx</div>
+        </div>
+      </div>
+      <!-- Paso 2: loading -->
+      <div id="ifco-cs2-loading" style="display:none;text-align:center;padding:40px 20px">
+        <div style="font-size:14px;color:var(--mut)">📂 Procesando archivo y matcheando con la base…</div>
+      </div>
+      <!-- Paso 3: preview -->
+      <div id="ifco-cs2-preview" style="display:none">
+        <div style="background:var(--burl);border:1px solid #bcd1e8;border-radius:8px;padding:12px 14px;margin-bottom:14px;font-size:13px">
+          <span id="ifco-cs2-resumen"></span>
+        </div>
+        <!-- Sección: A presentar -->
+        <div id="ifco-cs2-sec-pres" style="margin-bottom:14px;display:none">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+            <div style="font-weight:600;color:var(--ok)">✓ A presentar (<span id="ifco-cs2-cnt-pres"></span>)</div>
+            <label style="font-size:12px;cursor:pointer"><input type="checkbox" id="ifco-cs2-pres-all" checked onchange="ifcoConsolidarToggleAll('pres')"> Todos</label>
+          </div>
+          <div style="background:var(--sur);border:1px solid var(--bor);border-radius:8px;max-height:280px;overflow-y:auto">
+            <table style="width:100%;font-size:12px">
+              <thead style="position:sticky;top:0;background:var(--bg)"><tr>
+                <th style="padding:6px 8px;text-align:left;width:30px"></th>
+                <th style="padding:6px 8px;text-align:left">N° Remito</th>
+                <th style="padding:6px 8px;text-align:left">Fecha archivo</th>
+                <th style="padding:6px 8px;text-align:left">Cadena</th>
+                <th style="padding:6px 8px;text-align:right">Cant.</th>
+                <th style="padding:6px 8px;text-align:left">Estado actual</th>
+              </tr></thead>
+              <tbody id="ifco-cs2-tbl-pres"></tbody>
+            </table>
+          </div>
+        </div>
+        <!-- Sección: Ya presentados -->
+        <div id="ifco-cs2-sec-ya" style="margin-bottom:14px;display:none">
+          <div style="font-weight:600;color:var(--mut);margin-bottom:6px">✓ Ya estaban presentados (<span id="ifco-cs2-cnt-ya"></span>) — no se tocan</div>
+        </div>
+        <!-- Sección: No encontrados -->
+        <div id="ifco-cs2-sec-no" style="margin-bottom:14px;display:none">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+            <div style="font-weight:600;color:var(--warn)">⚠ No están en el sistema (<span id="ifco-cs2-cnt-no"></span>)</div>
+            <label style="font-size:12px;cursor:pointer"><input type="checkbox" id="ifco-cs2-no-all" onchange="ifcoConsolidarToggleAll('no')"> Crear todos</label>
+          </div>
+          <div style="background:var(--sur);border:1px solid var(--bor);border-radius:8px;max-height:280px;overflow-y:auto">
+            <table style="width:100%;font-size:12px">
+              <thead style="position:sticky;top:0;background:var(--bg)"><tr>
+                <th style="padding:6px 8px;text-align:left;width:30px"></th>
+                <th style="padding:6px 8px;text-align:left">N° Remito</th>
+                <th style="padding:6px 8px;text-align:left">Fecha</th>
+                <th style="padding:6px 8px;text-align:left">Cadena</th>
+                <th style="padding:6px 8px;text-align:right">Cant.</th>
+              </tr></thead>
+              <tbody id="ifco-cs2-tbl-no"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+      <!-- Paso 4: resultado -->
+      <div id="ifco-cs2-result" style="display:none;text-align:center;padding:30px 20px">
+        <div style="font-size:48px;margin-bottom:10px">✅</div>
+        <div style="font-size:16px;font-weight:600;margin-bottom:6px">Consolidación completa</div>
+        <div id="ifco-cs2-result-detalle" style="color:var(--mut);font-size:14px"></div>
+      </div>
+    </div>
+    <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--bor);display:flex;justify-content:flex-end;gap:8px" id="ifco-cs2-footer">
+      <button class="btn bo" onclick="document.getElementById('ifco-mb-consolidar').classList.remove('on')">Cerrar</button>
+      <button class="btn bb" id="ifco-cs2-btn-aplicar" style="display:none" onclick="ifcoConsolidarAplicar()">✓ Aplicar cambios</button>
     </div>
   </div>
 </div>
@@ -15263,6 +15352,172 @@ async function ifcoVerRemito(id) {
 
 // === CARGAR SELLADO (flujo unificado) ====================================
 // Abre el modal y resetea estados
+// === CONSOLIDAR CON ARCHIVO IFCO ==========================================
+let _ifcoCs2Data = null;  // payload de preview
+let _ifcoCs2Sel  = { pres: {}, no: {} };  // selecciones por id (pres) o por idx (no)
+
+function ifcoAbrirConsolidar() {
+  _ifcoCs2Data = null;
+  _ifcoCs2Sel  = { pres: {}, no: {} };
+  document.getElementById('ifco-cs2-step1').style.display   = 'block';
+  document.getElementById('ifco-cs2-loading').style.display = 'none';
+  document.getElementById('ifco-cs2-preview').style.display = 'none';
+  document.getElementById('ifco-cs2-result').style.display  = 'none';
+  document.getElementById('ifco-cs2-btn-aplicar').style.display = 'none';
+  document.getElementById('ifco-cs2-file').value = '';
+  document.getElementById('ifco-mb-consolidar').classList.add('on');
+}
+
+async function ifcoConsolidarPreview(ev) {
+  const file = ev.target.files && ev.target.files[0];
+  if (!file) return;
+  document.getElementById('ifco-cs2-step1').style.display   = 'none';
+  document.getElementById('ifco-cs2-loading').style.display = 'block';
+  try {
+    const fd = new FormData();
+    fd.append('archivo', file);
+    const r = await fetch('/api/ifco/consolidar/preview', { method:'POST', credentials:'include', body:fd });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Error '+r.status);
+
+    _ifcoCs2Data = data;
+    // Pre-seleccionar todos los "a presentar"
+    _ifcoCs2Sel.pres = {};
+    (data.a_presentar || []).forEach(function(it){ _ifcoCs2Sel.pres[it.sistema.id] = true; });
+    _ifcoCs2Sel.no = {}; // ninguno por default
+
+    // Resumen
+    document.getElementById('ifco-cs2-resumen').innerHTML =
+      'Archivo procesado: <b>'+data.total_archivo+'</b> remitos. ' +
+      '<b>'+(data.a_presentar||[]).length+'</b> a presentar · ' +
+      '<b>'+(data.ya_presentados||[]).length+'</b> ya presentados · ' +
+      '<b>'+(data.no_encontrados||[]).length+'</b> no encontrados.';
+
+    // Sección "A presentar"
+    const secP = document.getElementById('ifco-cs2-sec-pres');
+    if ((data.a_presentar||[]).length > 0) {
+      secP.style.display = 'block';
+      document.getElementById('ifco-cs2-cnt-pres').textContent = data.a_presentar.length;
+      document.getElementById('ifco-cs2-tbl-pres').innerHTML = data.a_presentar.map(function(it){
+        const sis = it.sistema, arch = it.archivo;
+        const estadoColor = sis.estado === 'sellado' ? '#1e40af' : '#b45309';
+        return '<tr style="border-top:1px solid var(--bor)">' +
+          '<td style="padding:5px 8px"><input type="checkbox" checked onchange="ifcoConsolidarToggle(\'pres\','+sis.id+',this.checked)"></td>' +
+          '<td style="padding:5px 8px;font-family:monospace">'+_ifcoEsc(sis.n_remito_ifco)+'</td>' +
+          '<td style="padding:5px 8px">'+_ifcoFecha(arch.fecha)+'</td>' +
+          '<td style="padding:5px 8px">'+_ifcoEsc(sis.empresa||'—')+'</td>' +
+          '<td style="padding:5px 8px;text-align:right">'+arch.cantidad+'</td>' +
+          '<td style="padding:5px 8px;color:'+estadoColor+';font-weight:600">'+sis.estado+'</td>' +
+        '</tr>';
+      }).join('');
+    } else {
+      secP.style.display = 'none';
+    }
+
+    // Sección "Ya presentados"
+    const secY = document.getElementById('ifco-cs2-sec-ya');
+    if ((data.ya_presentados||[]).length > 0) {
+      secY.style.display = 'block';
+      document.getElementById('ifco-cs2-cnt-ya').textContent = data.ya_presentados.length;
+    } else {
+      secY.style.display = 'none';
+    }
+
+    // Sección "No encontrados"
+    const secN = document.getElementById('ifco-cs2-sec-no');
+    if ((data.no_encontrados||[]).length > 0) {
+      secN.style.display = 'block';
+      document.getElementById('ifco-cs2-cnt-no').textContent = data.no_encontrados.length;
+      document.getElementById('ifco-cs2-tbl-no').innerHTML = data.no_encontrados.map(function(it, idx){
+        return '<tr style="border-top:1px solid var(--bor)">' +
+          '<td style="padding:5px 8px"><input type="checkbox" onchange="ifcoConsolidarToggle(\'no\','+idx+',this.checked)"></td>' +
+          '<td style="padding:5px 8px;font-family:monospace">'+_ifcoEsc(it.n_remito_sistema||it.n_remito_archivo)+'</td>' +
+          '<td style="padding:5px 8px">'+_ifcoFecha(it.fecha||'')+'</td>' +
+          '<td style="padding:5px 8px">'+(_ifcoEsc(it.cadena_sugerida||'')||'<span style="color:var(--err)">?</span>')+'</td>' +
+          '<td style="padding:5px 8px;text-align:right">'+it.cantidad+'</td>' +
+        '</tr>';
+      }).join('');
+    } else {
+      secN.style.display = 'none';
+    }
+
+    document.getElementById('ifco-cs2-loading').style.display = 'none';
+    document.getElementById('ifco-cs2-preview').style.display = 'block';
+    document.getElementById('ifco-cs2-btn-aplicar').style.display = 'inline-block';
+  } catch(e) {
+    document.getElementById('ifco-cs2-loading').style.display = 'none';
+    document.getElementById('ifco-cs2-step1').style.display = 'block';
+    alert('Error: ' + e.message);
+  }
+}
+
+function ifcoConsolidarToggle(tipo, key, checked) {
+  if (checked) _ifcoCs2Sel[tipo][key] = true;
+  else delete _ifcoCs2Sel[tipo][key];
+}
+function ifcoConsolidarToggleAll(tipo) {
+  const ck = document.getElementById('ifco-cs2-'+tipo+'-all').checked;
+  const tbl = document.getElementById('ifco-cs2-tbl-'+tipo);
+  tbl.querySelectorAll('input[type=checkbox]').forEach(function(c){ c.checked = ck; });
+  if (tipo === 'pres') {
+    _ifcoCs2Sel.pres = {};
+    if (ck) (_ifcoCs2Data.a_presentar||[]).forEach(function(it){ _ifcoCs2Sel.pres[it.sistema.id] = true; });
+  } else {
+    _ifcoCs2Sel.no = {};
+    if (ck) (_ifcoCs2Data.no_encontrados||[]).forEach(function(_, idx){ _ifcoCs2Sel.no[idx] = true; });
+  }
+}
+
+async function ifcoConsolidarAplicar() {
+  if (!_ifcoCs2Data) return;
+  const idsPresentar = Object.keys(_ifcoCs2Sel.pres).map(Number);
+  const fechasPorId = {};
+  (_ifcoCs2Data.a_presentar||[]).forEach(function(it){
+    if (_ifcoCs2Sel.pres[it.sistema.id]) fechasPorId[it.sistema.id] = it.archivo.fecha;
+  });
+  const crear = Object.keys(_ifcoCs2Sel.no).map(function(idx){
+    const it = _ifcoCs2Data.no_encontrados[parseInt(idx)];
+    return {
+      n_remito_sistema: it.n_remito_sistema,
+      fecha:            it.fecha,
+      empresa:          it.cadena_sugerida,
+      cantidad:         it.cantidad
+    };
+  }).filter(function(it){ return it.n_remito_sistema && it.cantidad; });
+
+  if (idsPresentar.length === 0 && crear.length === 0) {
+    alert('No seleccionaste nada para aplicar');
+    return;
+  }
+  if (!confirm('Vas a marcar '+idsPresentar.length+' como presentados y crear '+crear.length+' nuevos. ¿Confirmás?')) return;
+
+  const btn = document.getElementById('ifco-cs2-btn-aplicar');
+  btn.disabled = true; btn.textContent = 'Aplicando…';
+  try {
+    const r = await fetch('/api/ifco/consolidar/aplicar', {
+      method:'POST', credentials:'include',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ ids_marcar_presentados: idsPresentar, fechas_por_id: fechasPorId, crear: crear })
+    });
+    const data = await r.json();
+    if (!r.ok || !data.ok) throw new Error(data.error || 'Error '+r.status);
+
+    document.getElementById('ifco-cs2-preview').style.display = 'none';
+    document.getElementById('ifco-cs2-btn-aplicar').style.display = 'none';
+    document.getElementById('ifco-cs2-result').style.display = 'block';
+    document.getElementById('ifco-cs2-result-detalle').innerHTML =
+      '<b>'+data.actualizados+'</b> remitos marcados como presentados<br>' +
+      '<b>'+data.creados+'</b> remitos creados desde el archivo' +
+      (data.errores && data.errores.length ? '<br><span style="color:var(--err)">Errores: '+data.errores.length+'</span>' : '');
+    // Recargar lista de remitos
+    if (typeof ifcoCargarRemitos === 'function') ifcoCargarRemitos();
+    if (typeof ifcoCargarResumen === 'function') ifcoCargarResumen();
+  } catch(e) {
+    alert('Error: ' + e.message);
+    btn.disabled = false; btn.textContent = '✓ Aplicar cambios';
+  }
+}
+
 function ifcoAbrirCargarSellado() {
   document.getElementById('ifco-cs-step-foto').style.display = 'block';
   document.getElementById('ifco-cs-step-loading').style.display = 'none';
