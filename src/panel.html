@@ -2652,6 +2652,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     </div>
     <div style="display:flex;gap:8px;flex-wrap:wrap">
       <button class="btn bb" onclick="ifcoAbrirNuevoRemito()">+ Despacho a súper</button>
+      <button class="btn bb" onclick="ifcoAbrirCargarSellado()" style="background:#1e40af">🔏 Cargar sellado</button>
       <button class="btn bb" onclick="ifcoAbrirNuevoEnvio()">+ Envío a proveedor</button>
       <button class="btn bo" onclick="ifcoAbrirNuevoMovimiento('retiro')">+ Retiro IFCO</button>
       <button class="btn bo" onclick="ifcoAbrirNuevoMovimiento('perdida')">+ Pérdida</button>
@@ -3178,6 +3179,40 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
 <!-- Lightbox para fotos IFCO -->
 <div id="ifco-lightbox" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:9999;cursor:zoom-out;align-items:center;justify-content:center;padding:30px" onclick="ifcoCerrarLightbox()">
   <img id="ifco-lightbox-img" style="max-width:95%;max-height:95vh;border-radius:6px;box-shadow:0 10px 40px rgba(0,0,0,0.5)" alt="Foto remito">
+</div>
+
+<!-- Modal: Cargar sellado (flujo unificado) -->
+<div class="mb" id="ifco-mb-cargar-sellado">
+  <div class="mbox" style="max-width:560px">
+    <div class="mhd">
+      <div class="mht">🔏 Cargar remito sellado</div>
+      <button class="mcl" onclick="document.getElementById('ifco-mb-cargar-sellado').classList.remove('on')">x</button>
+    </div>
+    <div id="ifco-cs-body">
+      <!-- Estado 1: pedir foto -->
+      <div id="ifco-cs-step-foto">
+        <div style="background:var(--bg);border-radius:8px;padding:14px 16px;margin-bottom:14px;font-size:13px">
+          📷 <b>Subí la foto del remito sellado</b>. El sistema busca el remito por su N°.<br>
+          <span style="color:var(--mut);font-size:12px">→ Si ya estaba despachado, te lleva al sellado para confirmar.<br>→ Si no existe, abre el flujo de carga completa.</span>
+        </div>
+        <div style="text-align:center;padding:30px 20px;border:2px dashed var(--bor);border-radius:10px;background:var(--bg)">
+          <input id="ifco-cs-foto-input" type="file" accept="image/jpeg,image/png,image/webp" style="display:none" onchange="ifcoCargarSelladoFoto(event)">
+          <button class="btn bb" style="font-size:14px;padding:10px 22px" onclick="document.getElementById('ifco-cs-foto-input').click()">📷 Subir foto del remito sellado</button>
+          <div style="margin-top:8px;font-size:11px;color:var(--mut)">JPG/PNG/WEBP</div>
+        </div>
+      </div>
+      <!-- Estado 2: procesando -->
+      <div id="ifco-cs-step-loading" style="display:none;text-align:center;padding:40px 20px">
+        <div style="font-size:14px;color:var(--mut);margin-bottom:6px">🤖 Leyendo el remito…</div>
+        <div style="font-size:12px;color:var(--mut)">Extrayendo el N° y buscando en la base</div>
+      </div>
+      <!-- Estado 3: error / bloqueado -->
+      <div id="ifco-cs-step-error" style="display:none;padding:20px"></div>
+    </div>
+    <div style="margin-top:14px;display:flex;justify-content:flex-end;gap:8px">
+      <button class="btn bo" onclick="document.getElementById('ifco-mb-cargar-sellado').classList.remove('on')">Cancelar</button>
+    </div>
+  </div>
 </div>
 
 <!-- Modal: Detalle del talonario (grilla de N° con estado) -->
@@ -15159,6 +15194,107 @@ async function ifcoVerRemito(id) {
   }
 }
 
+// === CARGAR SELLADO (flujo unificado) ====================================
+// Abre el modal y resetea estados
+function ifcoAbrirCargarSellado() {
+  document.getElementById('ifco-cs-step-foto').style.display = 'block';
+  document.getElementById('ifco-cs-step-loading').style.display = 'none';
+  document.getElementById('ifco-cs-step-error').style.display = 'none';
+  document.getElementById('ifco-cs-foto-input').value = '';
+  document.getElementById('ifco-mb-cargar-sellado').classList.add('on');
+}
+
+// Recibe la foto, llama al match-sellado y rutea según el resultado
+async function ifcoCargarSelladoFoto(ev) {
+  const file = ev.target.files && ev.target.files[0];
+  if (!file) return;
+  document.getElementById('ifco-cs-step-foto').style.display = 'none';
+  document.getElementById('ifco-cs-step-loading').style.display = 'block';
+  document.getElementById('ifco-cs-step-error').style.display = 'none';
+  try {
+    const fd = new FormData();
+    fd.append('foto', file);
+    const r = await fetch('/api/ifco/ocr/match-sellado', { method:'POST', credentials:'include', body:fd });
+    const data = await r.json();
+
+    // Caso: OCR no leyó el número
+    if (data.accion === 'sin_numero' || (!data.ok && !data.accion)) {
+      _ifcoCargarSelladoMostrarError(
+        '⚠️ La IA no pudo leer el N° de remito',
+        (data.error || 'Probá con una foto más nítida o cargalo manualmente.'),
+        true
+      );
+      return;
+    }
+
+    // Caso: bloqueado (ya sellado o presentado)
+    if (data.accion === 'bloqueado') {
+      const remitoId = data.remito && data.remito.id;
+      _ifcoCargarSelladoMostrarError(
+        '🚫 No se puede sellar el remito ' + _ifcoEsc(data.n_remito_ifco),
+        'El remito ya está en estado <b>' + _ifcoEsc(data.estado) + '</b>. ' +
+        (remitoId
+          ? '<br><br><button class="btn bb" onclick="document.getElementById(\'ifco-mb-cargar-sellado\').classList.remove(\'on\');ifcoVerRemito('+remitoId+')">Ver remito existente</button>'
+          : ''),
+        false
+      );
+      return;
+    }
+
+    // Caso: hay match con remito en estado despachado → abrir modal de sellar prellenado
+    if (data.accion === 'sellar' && data.remito) {
+      // Cerramos este modal y disparamos el de sellar
+      document.getElementById('ifco-mb-cargar-sellado').classList.remove('on');
+      // Subimos la foto: la guardamos en una variable global y abrimos el modal de sellar
+      // que ya tiene su propio flujo. Le pasamos también el escaneo_path para que se use al guardar.
+      IFCO._cargarSelladoFotoFile = file;
+      IFCO._cargarSelladoEscaneoPath = data.escaneo_path;
+      ifcoAbrirSellar(data.remito.id, /*fromCargarSellado*/ true);
+      return;
+    }
+
+    // Caso: no hay match → abrir flujo de creación con OCR completo
+    // Reusamos el modal de "Nuevo despacho" con el checkbox "Ya viene sellado" prellenado
+    if (data.accion === 'crear_nuevo') {
+      document.getElementById('ifco-mb-cargar-sellado').classList.remove('on');
+      // Abrimos el modal nuevo despacho y pre-marcamos el checkbox
+      ifcoAbrirNuevoRemito();
+      const ck = document.getElementById('ifco-r-ya-sellado');
+      ck.checked = true;
+      ifcoOnYaSelladoChange();
+      // Disparamos el OCR completo automáticamente con el archivo que ya tenemos
+      // Para esto creamos un evento sintético sobre el input del modal nuevo despacho
+      const inp = document.getElementById('ifco-r-foto-input');
+      const dt = new DataTransfer();
+      dt.items.add(file);
+      inp.files = dt.files;
+      ifcoOnFotoDespacho({ target: inp });
+      return;
+    }
+
+    _ifcoCargarSelladoMostrarError('⚠️ Respuesta inesperada', JSON.stringify(data), true);
+  } catch(e) {
+    _ifcoCargarSelladoMostrarError('⚠️ Error', _ifcoEsc(e.message), true);
+  }
+}
+
+// Helper: muestra el panel de error/bloqueo dentro del modal
+// puedeReintentar: si true, ofrece botón "Probar otra foto"
+function _ifcoCargarSelladoMostrarError(titulo, mensajeHtml, puedeReintentar) {
+  document.getElementById('ifco-cs-step-loading').style.display = 'none';
+  document.getElementById('ifco-cs-step-foto').style.display = 'none';
+  const div = document.getElementById('ifco-cs-step-error');
+  div.style.display = 'block';
+  div.innerHTML =
+    '<div style="background:#fef2f2;border:1px solid #fca5a5;border-radius:8px;padding:14px 16px;color:#991b1b">' +
+      '<div style="font-weight:600;margin-bottom:6px">'+titulo+'</div>' +
+      '<div style="font-size:13px">'+mensajeHtml+'</div>' +
+      (puedeReintentar
+        ? '<div style="margin-top:12px"><button class="btn bo" onclick="ifcoAbrirCargarSellado()">↻ Probar otra foto</button></div>'
+        : '') +
+    '</div>';
+}
+
 // Lightbox: abrir/cerrar foto a tamaño completo
 function ifcoAbrirLightbox(src) {
   const lb = document.getElementById('ifco-lightbox');
@@ -15181,10 +15317,12 @@ document.addEventListener('keydown', function(ev){
   const mt = document.getElementById('ifco-mb-talon-detalle');
   if (mt && mt.classList.contains('on')) { mt.classList.remove('on'); return; }
   const mp = document.getElementById('ifco-mb-prov-mov');
-  if (mp && mp.classList.contains('on')) mp.classList.remove('on');
+  if (mp && mp.classList.contains('on')) { mp.classList.remove('on'); return; }
+  const mc = document.getElementById('ifco-mb-cargar-sellado');
+  if (mc && mc.classList.contains('on')) mc.classList.remove('on');
 });
 
-async function ifcoAbrirSellar(id) {
+async function ifcoAbrirSellar(id, fromCargarSellado) {
   try {
     const r = await _ifcoFetch('/api/ifco/remitos/' + id);
     IFCO._selRemito = r;
@@ -15203,14 +15341,37 @@ async function ifcoAbrirSellar(id) {
     IFCO._fotoSelladoPath = null;
     IFCO._fotoSelladoFile = null;
     document.getElementById('ifco-s-foto-input').value = '';
-    document.getElementById('ifco-s-step1').style.display = 'block';
-    document.getElementById('ifco-s-step2').style.display = 'none';
     document.getElementById('ifco-s-loading').style.display = 'none';
     document.getElementById('ifco-s-ocr-error').style.display = 'none';
     document.getElementById('ifco-s-foto-preview').style.display = 'none';
     document.getElementById('ifco-s-ocr-aviso').style.display = 'none';
-    document.getElementById('ifco-s-volver').style.display = 'none';
-    document.getElementById('ifco-s-btn-guardar').style.display = 'none';
+
+    // Si vinimos del flujo "Cargar sellado", saltamos directo al paso 2 con la foto ya tomada
+    if (fromCargarSellado && IFCO._cargarSelladoFotoFile) {
+      IFCO._fotoSelladoFile = IFCO._cargarSelladoFotoFile;
+      IFCO._fotoSelladoPath = IFCO._cargarSelladoEscaneoPath || null;
+      // Limpiamos las globals para que un re-sellado normal no las arrastre
+      IFCO._cargarSelladoFotoFile = null;
+      IFCO._cargarSelladoEscaneoPath = null;
+      // Preview
+      const prev = document.getElementById('ifco-s-foto-preview');
+      prev.style.display = 'block';
+      const img = prev.querySelector('img');
+      if (img && IFCO._fotoSelladoFile) img.src = URL.createObjectURL(IFCO._fotoSelladoFile);
+      // Ir al paso 2 directamente
+      document.getElementById('ifco-s-step1').style.display = 'none';
+      document.getElementById('ifco-s-step2').style.display = 'block';
+      document.getElementById('ifco-s-volver').style.display = 'inline-block';
+      document.getElementById('ifco-s-btn-guardar').style.display = 'inline-block';
+      // Aviso
+      document.getElementById('ifco-s-ocr-aviso').style.display = 'block';
+      document.getElementById('ifco-s-ocr-aviso').innerHTML = '✓ Remito identificado. Revisá las cantidades del sellado y guardá.';
+    } else {
+      document.getElementById('ifco-s-step1').style.display = 'block';
+      document.getElementById('ifco-s-step2').style.display = 'none';
+      document.getElementById('ifco-s-volver').style.display = 'none';
+      document.getElementById('ifco-s-btn-guardar').style.display = 'none';
+    }
     document.getElementById('ifco-mb-sellar').classList.add('on');
   } catch(e) { alert('Error: ' + e.message); }
 }

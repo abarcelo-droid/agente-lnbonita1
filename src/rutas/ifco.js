@@ -1566,4 +1566,110 @@ router.post('/ocr/remito-super', upload.single('foto'), async function(req, res)
   }
 });
 
+// MATCH-SELLADO: OCR de foto de remito sellado + busca en DB por N° remito
+// Devuelve uno de:
+//   { ok:true, accion:'sellar',     remito:{...}, escaneo_path, n_remito_ifco }     ← match con remito en estado 'despachado'
+//   { ok:true, accion:'crear_nuevo', datos_ocr:{...}, escaneo_path, n_remito_ifco }  ← no hay match, hacer flujo de creación completa
+//   { ok:false, accion:'bloqueado', estado:'sellado'|'presentado', remito:{...}, n_remito_ifco }  ← N° ya existe pero no se puede sellar
+//   { ok:false, error:'...' }
+router.post('/ocr/match-sellado', upload.single('foto'), async function(req, res) {
+  if (!OCR_ENABLED) return res.status(503).json({ error: 'OCR no habilitado en el servidor' });
+  if (!req.file) return res.status(400).json({ error: 'Falta el archivo "foto"' });
+  const client = await _getAnthropic();
+  if (!client) return res.status(503).json({ error: 'OCR no disponible (sin SDK o sin API key)' });
+
+  const escaneo_path = '/data/ifco/' + req.file.filename;
+  const filePath = path.join(UPLOAD_DIR, req.file.filename);
+  let dataB64, mediaType;
+  try {
+    const buf = fs.readFileSync(filePath);
+    dataB64 = buf.toString('base64');
+    mediaType = req.file.mimetype || 'image/jpeg';
+  } catch(e) {
+    return res.status(500).json({ error: 'No se pudo leer el archivo: ' + e.message });
+  }
+
+  // Prompt mínimo: solo el N° de remito
+  const promptLookup = [
+    'Sos un asistente que lee remitos IFCO emitidos por SAN GERONIMO SA en Argentina.',
+    'Necesito UN SOLO dato de esta foto: el número de remito IFCO preimpreso.',
+    'Devolvé un JSON con un único campo:',
+    '  "n_remito_ifco": string con formato "00015-XXXXXXXX" (preimpreso, esquina superior derecha del remito)',
+    'Si no podés leer el número con confianza, devolvé null en ese campo.',
+    'Respondé SOLO el objeto JSON, sin texto adicional ni markdown.'
+  ].join('\n');
+
+  let nRemito = null;
+  try {
+    const message = await client.messages.create({
+      model: OCR_MODEL,
+      max_tokens: 256,
+      messages: [{
+        role: 'user',
+        content: [
+          { type: 'image', source: { type: 'base64', media_type: mediaType, data: dataB64 } },
+          { type: 'text',  text: promptLookup }
+        ]
+      }]
+    });
+    const texto = (message.content || []).filter(b=>b.type==='text').map(b=>b.text).join('\n');
+    const datos = _extraerJson(texto);
+    nRemito = (datos && datos.n_remito_ifco) ? String(datos.n_remito_ifco).trim() : null;
+  } catch(e) {
+    console.error('[IFCO][match-sellado] Error en OCR:', e);
+    return res.status(502).json({ error: 'Error en OCR: ' + (e.message || 'desconocido'), escaneo_path: escaneo_path });
+  }
+
+  if (!nRemito) {
+    return res.json({
+      ok: false,
+      accion: 'sin_numero',
+      error: 'No se pudo leer el N° de remito de la foto',
+      escaneo_path: escaneo_path
+    });
+  }
+
+  // Buscar remito activo por número
+  const remito = db.prepare(`
+    SELECT r.*, p.nombre AS proveedor_origen_nombre
+    FROM ifco_remitos_super r
+    LEFT JOIN proveedores p ON r.proveedor_origen_id = p.id
+    WHERE r.n_remito_ifco = ? AND r.eliminado_en IS NULL
+    LIMIT 1
+  `).get(nRemito);
+
+  if (!remito) {
+    // No hay match → flujo de creación: pedir OCR completo en una segunda pasada
+    // Devolvemos solo el N° leído; el frontend va a llamar al OCR completo a continuación
+    return res.json({
+      ok: true,
+      accion: 'crear_nuevo',
+      n_remito_ifco: nRemito,
+      escaneo_path: escaneo_path
+    });
+  }
+
+  // Hay match — depende del estado
+  if (remito.estado === 'sellado' || remito.estado === 'presentado') {
+    return res.json({
+      ok: false,
+      accion: 'bloqueado',
+      estado: remito.estado,
+      n_remito_ifco: nRemito,
+      remito: remito,
+      escaneo_path: escaneo_path,
+      error: 'El remito ' + nRemito + ' ya está en estado "' + remito.estado + '". No se puede volver a sellar desde este flujo.'
+    });
+  }
+
+  // Estado 'despachado' → listo para sellar
+  return res.json({
+    ok: true,
+    accion: 'sellar',
+    n_remito_ifco: nRemito,
+    remito: remito,
+    escaneo_path: escaneo_path
+  });
+});
+
 export default router;
