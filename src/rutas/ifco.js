@@ -1194,8 +1194,9 @@ function _movimientosProveedor(provId) {
   `).all(provId);
 
   const recepciones = db.prepare(`
-    SELECT 'recepcion' AS tipo, id, fecha_recepcion AS fecha, descripcion AS detalle,
-           cantidad, envio_id, notas
+    SELECT 'recepcion' AS tipo, id, fecha_recepcion AS fecha,
+           COALESCE(producto, n_remito_proveedor, 'Recepción de mercadería') AS detalle,
+           cantidad, n_remito_proveedor, notas
     FROM ifco_recepciones_proveedor
     WHERE proveedor_id = ? AND eliminado_en IS NULL
   `).all(provId);
