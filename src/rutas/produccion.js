@@ -1413,6 +1413,11 @@ router.get('/costos', requireAuth, (req, res) => {
 
     // Resumen por lote
     const campañaFiltro = campaña_id || db.prepare("SELECT id FROM pa_campañas WHERE activa=1").get()?.id;
+    // Necesitamos el nombre de la campaña para hacer el JOIN con pa_cultivos_lote
+    // (esa tabla guarda la campaña como TEXT, no como FK)
+    const campañaNombre = campañaFiltro
+      ? db.prepare("SELECT nombre FROM pa_campañas WHERE id=?").get(campañaFiltro)?.nombre
+      : null;
     const resumen = db.prepare(`
       SELECT
         l.id as lote_id,
@@ -1421,6 +1426,7 @@ router.get('/costos', requireAuth, (req, res) => {
         s.nombre as sector_nombre,
         s.tipo as sector_tipo,
         ca.nombre as campaña_nombre,
+        cu.cultivo as cultivo_actual,
         SUM(cl.monto) as costo_total,
         SUM(cl.monto) / NULLIF(l.hectareas, 0) as costo_por_ha,
         GROUP_CONCAT(DISTINCT cl.categoria) as categorias
@@ -1428,10 +1434,11 @@ router.get('/costos', requireAuth, (req, res) => {
       JOIN pa_lotes l ON l.id = cl.lote_id
       JOIN pa_sectores s ON s.id = l.sector_id
       JOIN pa_campañas ca ON ca.id = cl.campaña_id
+      LEFT JOIN pa_cultivos_lote cu ON cu.lote_id = l.id AND cu.campaña = ?
       WHERE cl.campaña_id = ?
       GROUP BY l.id, cl.campaña_id
       ORDER BY s.nombre, l.nombre
-    `).all(campañaFiltro);
+    `).all(campañaNombre || '', campañaFiltro);
 
     // Total por sector
     const porSector = db.prepare(`
@@ -1449,7 +1456,33 @@ router.get('/costos', requireAuth, (req, res) => {
       ORDER BY s.nombre
     `).all(campañaFiltro);
 
-    res.json({ ok: true, data: resumen, por_sector: porSector });
+    // Total por cultivo: agrupamos los lotes por su cultivo de la campaña.
+    // Lotes sin cultivo asignado se agrupan en "Sin cultivo asignado".
+    // Para evitar duplicar hectáreas si un lote tiene varios costos, calculamos
+    // las ha sumando solo una vez por lote (con DISTINCT en subquery).
+    const porCultivo = db.prepare(`
+      SELECT
+        COALESCE(NULLIF(TRIM(cu.cultivo),''), '— Sin cultivo asignado —') AS cultivo,
+        SUM(t.monto)        AS costo_total,
+        SUM(t.hectareas)    AS hectareas_total,
+        SUM(t.monto) / NULLIF(SUM(t.hectareas), 0) AS costo_por_ha,
+        COUNT(*)            AS lotes_count
+      FROM (
+        SELECT
+          l.id        AS lote_id,
+          l.hectareas AS hectareas,
+          SUM(cl.monto) AS monto
+        FROM pa_costos_lote cl
+        JOIN pa_lotes l ON l.id = cl.lote_id
+        WHERE cl.campaña_id = ?
+        GROUP BY l.id
+      ) t
+      LEFT JOIN pa_cultivos_lote cu ON cu.lote_id = t.lote_id AND cu.campaña = ?
+      GROUP BY cultivo
+      ORDER BY costo_total DESC
+    `).all(campañaFiltro, campañaNombre || '');
+
+    res.json({ ok: true, data: resumen, por_sector: porSector, por_cultivo: porCultivo });
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
