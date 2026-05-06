@@ -437,6 +437,68 @@ export function getCampañaActiva() {
   } catch(e) { console.error('[PA] Error migrando soft delete pa_ordenes:', e.message); }
 })();
 
+// ── MIGRACIÓN: re-asociar órdenes huérfanas a la campaña activa
+//    + crear costos por lote para las aplicaciones existentes que se hayan
+//    saltado el insert (porque la orden no tenía campaña_id).
+//    Idempotente: la próxima vez no encuentra nada para hacer.
+(function() {
+  try {
+    const campAct = db.prepare("SELECT id FROM pa_campañas WHERE activa=1 LIMIT 1").get();
+    if (!campAct) {
+      console.log("[PA] No hay campaña activa, no se puede re-asociar costos huérfanos");
+      return;
+    }
+
+    // 1) Asociar órdenes sin campaña a la activa actual
+    const huerfanas = db.prepare("SELECT id FROM pa_ordenes WHERE campaña_id IS NULL").all();
+    if (huerfanas.length > 0) {
+      const upd = db.prepare("UPDATE pa_ordenes SET campaña_id = ? WHERE id = ?");
+      const tx = db.transaction(() => {
+        for (const o of huerfanas) upd.run(campAct.id, o.id);
+      });
+      tx();
+      console.log(`[PA] ${huerfanas.length} órdenes huérfanas asociadas a la campaña activa.`);
+    }
+
+    // 2) Detectar aplicaciones con costo > 0 que NO tienen registro en pa_costos_lote
+    //    y crearlos. El cruce es por referencia_id (id de la aplicación) y categorías
+    //    'fertilizante' o 'agroquimico' (las únicas que se crean al ejecutar).
+    const aplicsHuerfanas = db.prepare(`
+      SELECT a.id, a.orden_id, a.lote_id, a.insumo_id, a.fecha_real,
+             a.cantidad_real, a.costo_total,
+             i.nombre AS insumo_nombre, i.tipo AS insumo_tipo,
+             o.campaña_id AS orden_campaña_id
+      FROM pa_aplicaciones a
+      JOIN pa_insumos i ON i.id = a.insumo_id
+      JOIN pa_ordenes o ON o.id = a.orden_id
+      WHERE a.costo_total > 0
+        AND NOT EXISTS (
+          SELECT 1 FROM pa_costos_lote cl
+          WHERE cl.referencia_id = a.id
+            AND cl.categoria IN ('fertilizante','agroquimico')
+        )
+    `).all();
+
+    if (aplicsHuerfanas.length > 0) {
+      const insCosto = db.prepare(`
+        INSERT INTO pa_costos_lote (lote_id, campaña_id, categoria, referencia_id, fecha, monto, descripcion)
+        VALUES (?,?,?,?,?,?,?)
+      `);
+      const tx = db.transaction(() => {
+        for (const a of aplicsHuerfanas) {
+          const cat = a.insumo_tipo === 'fertilizante' ? 'fertilizante' : 'agroquimico';
+          // Si la orden ahora tiene campaña (después del paso 1), usá esa; sino la activa.
+          const camp = a.orden_campaña_id || campAct.id;
+          insCosto.run(a.lote_id, camp, cat, a.id, a.fecha_real,
+                       a.costo_total, `Aplicación OA: ${a.insumo_nombre} (recuperado)`);
+        }
+      });
+      tx();
+      console.log(`[PA] ${aplicsHuerfanas.length} costos por lote recuperados retroactivamente.`);
+    }
+  } catch(e) { console.error('[PA] Error en migración de costos huérfanos:', e.message); }
+})();
+
 // ── MIGRACIÓN: columnas nuevas en pa_insumos ──────────────────────────────
 (function() {
   try {

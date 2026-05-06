@@ -990,12 +990,18 @@ router.post('/ordenes', requireAuth, (req, res) => {
 
   try {
     const crearOrden = db.transaction(() => {
+      // Si no se especifica campaña, usar la activa
+      let campañaIdFinal = campaña_id || null;
+      if (!campañaIdFinal) {
+        const camp = db.prepare("SELECT id FROM pa_campañas WHERE activa=1 LIMIT 1").get();
+        if (camp) campañaIdFinal = camp.id;
+      }
       const n = db.prepare("SELECT COUNT(*) as n FROM pa_ordenes").get().n + 1;
       const nro = `OA-${String(n).padStart(5, '0')}`;
       const r = db.prepare(`
         INSERT INTO pa_ordenes (nro_orden, campaña_id, fecha_orden, fecha_propuesta, creada_por, tipo_aplicacion, objetivo, notas, estado, asignado_a)
         VALUES (?,?,?,?,?,?,?,?,'emitida',?)
-      `).run(nro, campaña_id||null, fecha_orden||new Date().toISOString().slice(0,10),
+      `).run(nro, campañaIdFinal, fecha_orden||new Date().toISOString().slice(0,10),
              fecha_propuesta||null, req.user.id, tipo_aplicacion||null, objetivo||null, notas||null, asignado_a||null);
       const ordenId = r.lastInsertRowid;
       const insLote = db.prepare("INSERT INTO pa_ordenes_lotes (orden_id, lote_id, hectareas_aplicadas) VALUES (?,?,?)");
@@ -1246,14 +1252,26 @@ router.post('/aplicaciones', requireAuth, (req, res) => {
       `).run(fecha_real || new Date().toISOString().slice(0,10), insumo_id, 'salida', cantidad_real, 'aplicacion', r.lastInsertRowid);
 
       // Registrar costo por lote
-      const orden = db.prepare("SELECT campaña_id FROM pa_ordenes WHERE id=?").get(orden_id);
-      if (orden?.campaña_id && costoTotal > 0) {
+      // Si la orden no tiene campaña, usamos la activa al momento como fallback
+      let campañaParaCosto = null;
+      const ordenCamp = db.prepare("SELECT campaña_id FROM pa_ordenes WHERE id=?").get(orden_id);
+      if (ordenCamp?.campaña_id) {
+        campañaParaCosto = ordenCamp.campaña_id;
+      } else {
+        const camp = db.prepare("SELECT id FROM pa_campañas WHERE activa=1 LIMIT 1").get();
+        if (camp) {
+          campañaParaCosto = camp.id;
+          // Aprovechamos para asociar la campaña a la orden huérfana
+          db.prepare("UPDATE pa_ordenes SET campaña_id = ? WHERE id = ? AND campaña_id IS NULL").run(camp.id, orden_id);
+        }
+      }
+      if (campañaParaCosto && costoTotal > 0) {
         const insumoData = db.prepare("SELECT tipo FROM pa_insumos WHERE id=?").get(insumo_id);
         const categoria = insumoData?.tipo === 'fertilizante' ? 'fertilizante' : 'agroquimico';
         db.prepare(`
           INSERT INTO pa_costos_lote (lote_id, campaña_id, categoria, referencia_id, fecha, monto, descripcion)
           VALUES (?,?,?,?,?,?,?)
-        `).run(lote_id, orden.campaña_id, categoria, r.lastInsertRowid,
+        `).run(lote_id, campañaParaCosto, categoria, r.lastInsertRowid,
                fecha_real || new Date().toISOString().slice(0,10), costoTotal,
                `Aplicación OA: ${insumo?.nombre}`);
       }
@@ -1295,6 +1313,17 @@ router.post('/aplicaciones/batch', requireAuth, (req, res) => {
     const orden = db.prepare("SELECT campaña_id FROM pa_ordenes WHERE id=?").get(orden_id);
     if (!orden) return res.status(404).json({ ok: false, error: 'Orden no encontrada' });
 
+    // Resolver la campaña: la de la orden, o la activa como fallback.
+    // Si la orden estaba huérfana (sin campaña), aprovechamos para asociarla.
+    let campañaParaCosto = orden.campaña_id;
+    if (!campañaParaCosto) {
+      const camp = db.prepare("SELECT id FROM pa_campañas WHERE activa=1 LIMIT 1").get();
+      if (camp) {
+        campañaParaCosto = camp.id;
+        db.prepare("UPDATE pa_ordenes SET campaña_id = ? WHERE id = ? AND campaña_id IS NULL").run(camp.id, orden_id);
+      }
+    }
+
     const registrar = db.transaction(() => {
       const ids = [];
       for (const ej of validas) {
@@ -1332,12 +1361,12 @@ router.post('/aplicaciones/batch', requireAuth, (req, res) => {
         `).run(fechaFinal, ej.insumo_id, 'salida', cantidad, 'aplicacion', r.lastInsertRowid);
 
         // Costo por lote
-        if (orden.campaña_id && costoTotal > 0) {
+        if (campañaParaCosto && costoTotal > 0) {
           const categoria = insumo.tipo === 'fertilizante' ? 'fertilizante' : 'agroquimico';
           db.prepare(`
             INSERT INTO pa_costos_lote (lote_id, campaña_id, categoria, referencia_id, fecha, monto, descripcion)
             VALUES (?,?,?,?,?,?,?)
-          `).run(ej.lote_id, orden.campaña_id, categoria, r.lastInsertRowid,
+          `).run(ej.lote_id, campañaParaCosto, categoria, r.lastInsertRowid,
                  fechaFinal, costoTotal,
                  `Aplicación OA: ${insumo.nombre}`);
         }
