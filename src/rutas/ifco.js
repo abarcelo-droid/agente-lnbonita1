@@ -413,6 +413,107 @@ router.post('/remitos', upload.single('escaneo_original'), function(req, res) {
   }
 });
 
+// CREACIÓN DIRECTA EN ESTADO SELLADO
+// Para casos donde nunca se cargó el remito al despacharlo y solo tenemos la foto del remito ya vuelto sellado.
+router.post('/remitos/sellado-directo', upload.single('escaneo'), function(req, res) {
+  const d = req.body || {};
+  // Validaciones del despacho
+  if (!d.n_remito_ifco)   return res.status(400).json({ error: 'N° de remito IFCO requerido' });
+  if (!d.fecha_emision)   return res.status(400).json({ error: 'Fecha de emisión requerida' });
+  if (!d.cantidad_despachada || parseInt(d.cantidad_despachada) <= 0) {
+    return res.status(400).json({ error: 'Cantidad despachada inválida' });
+  }
+  if (!d.cliente_id && !d.empresa) {
+    return res.status(400).json({ error: 'Cliente (Dedicado) o empresa requeridos' });
+  }
+  // Validaciones del sellado
+  if (!d.fecha_sellado) return res.status(400).json({ error: 'Fecha de sellado requerida' });
+  const cantDesp = parseInt(d.cantidad_despachada);
+  const recibida  = d.cantidad_recibida  != null && d.cantidad_recibida  !== '' ? parseInt(d.cantidad_recibida)  : cantDesp;
+  const rechazada = d.cantidad_rechazada != null && d.cantidad_rechazada !== '' ? parseInt(d.cantidad_rechazada) : 0;
+  if (recibida < 0 || rechazada < 0) {
+    return res.status(400).json({ error: 'Cantidades no pueden ser negativas' });
+  }
+  if (recibida + rechazada > cantDesp) {
+    return res.status(400).json({ error: 'Recibida + rechazada superan la cantidad despachada' });
+  }
+
+  // Origen
+  const origen = (d.origen === 'proveedor_directo') ? 'proveedor_directo' : 'san_geronimo';
+  let proveedor_origen_id = null;
+  if (origen === 'proveedor_directo') {
+    proveedor_origen_id = parseInt(d.proveedor_origen_id) || null;
+    if (!proveedor_origen_id) return res.status(400).json({ error: 'Origen "directo desde proveedor" requiere proveedor_origen_id' });
+    const exProv = db.prepare("SELECT id FROM proveedores WHERE id = ?").get(proveedor_origen_id);
+    if (!exProv) return res.status(400).json({ error: 'Proveedor de origen inexistente' });
+  }
+
+  // Unicidad
+  const dup = db.prepare("SELECT id FROM ifco_remitos_super WHERE n_remito_ifco = ? AND eliminado_en IS NULL").get(d.n_remito_ifco);
+  if (dup) return res.status(409).json({ error: 'Ya existe un remito con ese número (activo). Si está en papelera, restauralo o usá otro número.' });
+
+  // Foto del sellado: file > body path (no exigimos foto de despacho)
+  let escaneo_path = null;
+  if (req.file) {
+    escaneo_path = '/data/ifco/' + req.file.filename;
+  } else if (d.escaneo_path && /^\/data\/ifco\//.test(d.escaneo_path)) {
+    escaneo_path = d.escaneo_path;
+  }
+
+  try {
+    const r = db.prepare(`
+      INSERT INTO ifco_remitos_super (
+        n_remito_ifco, fecha_emision, cliente_id, cliente_telefono, empresa, sucursal,
+        modelo, cantidad_despachada, cantidad_recibida, cantidad_rechazada,
+        producto, transportista,
+        encargado_prov_apellido, encargado_prov_nombre, encargado_prov_dni,
+        encargado_super_apellido, encargado_super_nombre, encargado_super_dni,
+        talonario_id, notas, usuario_id, estado,
+        escaneo_path, fecha_sellado,
+        origen, proveedor_origen_id
+      ) VALUES (
+        @n_remito_ifco, @fecha_emision, @cliente_id, @cliente_telefono, @empresa, @sucursal,
+        @modelo, @cantidad_despachada, @cantidad_recibida, @cantidad_rechazada,
+        @producto, @transportista,
+        @encargado_prov_apellido, @encargado_prov_nombre, @encargado_prov_dni,
+        @encargado_super_apellido, @encargado_super_nombre, @encargado_super_dni,
+        @talonario_id, @notas, @usuario_id, 'sellado',
+        @escaneo_path, @fecha_sellado,
+        @origen, @proveedor_origen_id
+      )
+    `).run({
+      n_remito_ifco:           d.n_remito_ifco,
+      fecha_emision:           d.fecha_emision,
+      cliente_id:              d.cliente_id || null,
+      cliente_telefono:        d.cliente_telefono || null,
+      empresa:                 d.empresa || null,
+      sucursal:                d.sucursal || null,
+      modelo:                  d.modelo || '6420',
+      cantidad_despachada:     cantDesp,
+      cantidad_recibida:       recibida,
+      cantidad_rechazada:      rechazada,
+      producto:                d.producto || null,
+      transportista:           d.transportista || null,
+      encargado_prov_apellido: d.encargado_prov_apellido || null,
+      encargado_prov_nombre:   d.encargado_prov_nombre || null,
+      encargado_prov_dni:      d.encargado_prov_dni || null,
+      encargado_super_apellido: d.encargado_super_apellido || null,
+      encargado_super_nombre:   d.encargado_super_nombre   || null,
+      encargado_super_dni:      d.encargado_super_dni      || null,
+      talonario_id:            d.talonario_id || null,
+      notas:                   d.notas || null,
+      usuario_id:              req.user.id || null,
+      escaneo_path:            escaneo_path,
+      fecha_sellado:           d.fecha_sellado,
+      origen:                  origen,
+      proveedor_origen_id:     proveedor_origen_id
+    });
+    res.json({ id: r.lastInsertRowid, n_remito_ifco: d.n_remito_ifco, escaneo_path: escaneo_path, estado: 'sellado', origen: origen });
+  } catch(e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 router.patch('/remitos/:id/sellar', upload.single('escaneo'), function(req, res) {
   const id = req.params.id;
   const r = db.prepare("SELECT * FROM ifco_remitos_super WHERE id = ?").get(id);
@@ -1218,8 +1319,8 @@ router.post('/ocr/remito-super', upload.single('foto'), async function(req, res)
   }
   if (!req.file) return res.status(400).json({ error: 'Falta archivo "foto"' });
   const tipo = (req.body && req.body.tipo) || 'despacho';
-  if (['despacho','sellado'].indexOf(tipo) < 0) {
-    return res.status(400).json({ error: 'tipo debe ser "despacho" o "sellado"' });
+  if (['despacho','sellado','completo'].indexOf(tipo) < 0) {
+    return res.status(400).json({ error: 'tipo debe ser "despacho", "sellado" o "completo"' });
   }
   const client = await _getAnthropic();
   if (!client) return res.status(503).json({ error: 'OCR no disponible (SDK no cargado)' });
@@ -1279,7 +1380,40 @@ router.post('/ocr/remito-super', upload.single('foto'), async function(req, res)
     'Respondé SOLO el objeto JSON, sin texto adicional ni markdown.'
   ].join('\n');
 
-  const prompt = tipo === 'sellado' ? promptSellado : promptDespacho;
+  // Prompt "completo": foto del remito YA sellado donde el remito original es legible
+  // (cargas tardías donde nunca se subió la foto del despacho). Extrae todos los campos en una pasada.
+  const promptCompleto = [
+    'Sos un asistente que lee remitos IFCO emitidos por SAN GERONIMO SA en Argentina.',
+    'Esta foto es de un remito QUE YA VOLVIÓ SELLADO del supermercado, pero nunca se cargó al sistema cuando salió.',
+    'Tenés que extraer en una sola pasada TODOS los datos: los del despacho original + los del sellado posterior.',
+    'Devolvé un JSON con estos campos. Si un campo no se ve o no estás seguro, dejalo en null.',
+    '— Datos del DESPACHO (preimpreso o tipeado):',
+    '  "n_remito_ifco": string con formato "00015-XXXXXXXX" (preimpreso, esquina superior derecha)',
+    '  "fecha_emision": string ISO "YYYY-MM-DD" — fecha del despacho',
+    '  "empresa": string — la cadena de supermercado destinataria. Devolvé el valor EXACTO tal como aparece SOLO si coincide con uno de:',
+    '    "CENCOSUD", "CARREFOUR (INC SA)", "COTO", "LA COOPERATIVA OBRERA", "LA ANONIMA", "CHANGO MAS (DORINKA)".',
+    '    Si lo que ves se parece a uno de esos pero está abreviado o mal escrito, devolvé el de la lista que mejor matchea. Si no matchea ninguno, devolvé el texto literal.',
+    '  "sucursal": string — sucursal o centro de distribución',
+    '  "cantidad_despachada": número entero — total de cajones (campo "TOTAL CAJAS" o equivalente)',
+    '  "producto": string — descripción del producto cargado',
+    '  "transportista": string — nombre del transportista o empresa',
+    '  "encargado_prov_apellido": string',
+    '  "encargado_prov_nombre": string',
+    '  "encargado_prov_dni": string',
+    '— Datos del SELLADO (manuscritos o sello del súper):',
+    '  "fecha_sellado": string ISO "YYYY-MM-DD" — fecha de RECEPCIÓN del supermercado',
+    '  "cantidad_recibida": número entero — cuántos cajones aceptó el súper (si no se aclara y no hay rechazo, asumí cantidad_despachada)',
+    '  "cantidad_rechazada": número entero (0 si no hay rechazo)',
+    '  "encargado_super_apellido": string — quien recibió en el súper',
+    '  "encargado_super_nombre": string',
+    '  "encargado_super_dni": string',
+    'Respondé SOLO el objeto JSON, sin texto adicional ni markdown.'
+  ].join('\n');
+
+  let prompt;
+  if (tipo === 'sellado') prompt = promptSellado;
+  else if (tipo === 'completo') prompt = promptCompleto;
+  else prompt = promptDespacho;
   const escaneo_path = '/data/ifco/' + req.file.filename;
 
   try {

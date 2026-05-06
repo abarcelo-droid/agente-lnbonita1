@@ -2945,12 +2945,19 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
           </select>
         </div>
       </div>
-      <div style="background:var(--bg);border-radius:8px;padding:14px 16px;margin-bottom:14px;font-size:13px;color:var(--txt)">
+      <!-- Checkbox: cargar como ya sellado -->
+      <div style="background:#fef3c7;border:1px solid #fcd34d;border-radius:8px;padding:10px 14px;margin-bottom:14px">
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px">
+          <input type="checkbox" id="ifco-r-ya-sellado" onchange="ifcoOnYaSelladoChange()">
+          <span><b>Ya viene sellado por el súper</b> — cargar el remito directamente en estado sellado (cuando se olvidaron de cargarlo al despacharlo)</span>
+        </label>
+      </div>
+      <div id="ifco-r-aviso-foto" style="background:var(--bg);border-radius:8px;padding:14px 16px;margin-bottom:14px;font-size:13px;color:var(--txt)">
         📸 <b>Sacale foto al remito IFCO</b> antes de despacharlo. La foto se archiva y la IA prelee los campos por vos.
       </div>
       <div style="text-align:center;padding:30px 20px;border:2px dashed var(--bor);border-radius:10px;background:var(--bg)">
         <input id="ifco-r-foto-input" type="file" accept="image/jpeg,image/png,image/webp" style="display:none" onchange="ifcoOnFotoDespacho(event)">
-        <button class="btn bb" style="font-size:14px;padding:10px 22px" onclick="ifcoIniciarFotoDespacho()">📷 Subir foto del remito</button>
+        <button class="btn bb" id="ifco-r-btn-foto" style="font-size:14px;padding:10px 22px" onclick="ifcoIniciarFotoDespacho()">📷 Subir foto del remito</button>
         <div style="margin-top:10px;font-size:11px;color:var(--mut)">JPG / PNG / WebP — hasta 10 MB</div>
         <div style="margin-top:18px">
           <a href="#" onclick="ifcoSaltarOcrDespacho();return false" style="font-size:12px;color:var(--mut);text-decoration:underline">Cargar manualmente sin foto</a>
@@ -3025,6 +3032,38 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
         <label style="font-size:11px;color:var(--mut);text-transform:uppercase">Notas</label>
         <input id="ifco-r-notas" type="text" style="width:100%;padding:8px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg)">
       </div>
+      </div>
+
+      <!-- Campos extra: solo cuando "Ya viene sellado" está marcado -->
+      <div id="ifco-r-sellado-fields" style="display:none;margin-top:14px;padding:12px 14px;background:#fef3c7;border:1px solid #fcd34d;border-radius:8px">
+        <div style="font-size:11px;color:#92400e;text-transform:uppercase;font-weight:600;margin-bottom:10px">🔏 Datos del sellado</div>
+        <div class="ab-grid ab-grid-2" style="gap:10px">
+          <div>
+            <label style="font-size:11px;color:var(--mut);text-transform:uppercase">Fecha sellado *</label>
+            <input id="ifco-r-fecha-sellado" type="date" style="width:100%;padding:8px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--card)">
+          </div>
+          <div></div>
+          <div>
+            <label style="font-size:11px;color:var(--mut);text-transform:uppercase">Cantidad recibida</label>
+            <input id="ifco-r-recib" type="number" min="0" placeholder="(default = despachada)" style="width:100%;padding:8px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--card)">
+          </div>
+          <div>
+            <label style="font-size:11px;color:var(--mut);text-transform:uppercase">Cantidad rechazada</label>
+            <input id="ifco-r-rech" type="number" min="0" value="0" style="width:100%;padding:8px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--card)">
+          </div>
+          <div>
+            <label style="font-size:11px;color:var(--mut);text-transform:uppercase">Encargado súper — apellido</label>
+            <input id="ifco-r-encsup-ap" type="text" style="width:100%;padding:8px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--card)">
+          </div>
+          <div>
+            <label style="font-size:11px;color:var(--mut);text-transform:uppercase">Encargado súper — nombre</label>
+            <input id="ifco-r-encsup-nom" type="text" style="width:100%;padding:8px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--card)">
+          </div>
+          <div>
+            <label style="font-size:11px;color:var(--mut);text-transform:uppercase">Encargado súper — DNI</label>
+            <input id="ifco-r-encsup-dni" type="text" style="width:100%;padding:8px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--card)">
+          </div>
+        </div>
       </div>
     </div>
 
@@ -14547,8 +14586,13 @@ function ifcoAbrirNuevoRemito() {
   const tit = document.querySelector('#ifco-mb-remito .mht');
   if (tit) tit.textContent = '📥 Nuevo despacho a supermercado';
   // Reset campos
-  ['ifco-r-numero','ifco-r-sucursal','ifco-r-cantidad','ifco-r-producto','ifco-r-transp','ifco-r-encprov-ap','ifco-r-encprov-nom','ifco-r-encprov-dni','ifco-r-notas']
+  ['ifco-r-numero','ifco-r-sucursal','ifco-r-cantidad','ifco-r-producto','ifco-r-transp','ifco-r-encprov-ap','ifco-r-encprov-nom','ifco-r-encprov-dni','ifco-r-notas',
+   'ifco-r-fecha-sellado','ifco-r-recib','ifco-r-encsup-ap','ifco-r-encsup-nom','ifco-r-encsup-dni']
     .forEach(function(id){ const el = document.getElementById(id); if (el) el.value = ''; });
+  const rech = document.getElementById('ifco-r-rech'); if (rech) rech.value = '0';
+  // Reset checkbox "Ya viene sellado"
+  const ckYa = document.getElementById('ifco-r-ya-sellado');
+  if (ckYa) { ckYa.checked = false; ifcoOnYaSelladoChange(); }
   document.getElementById('ifco-r-fecha').value = _ifcoToday();
   document.getElementById('ifco-r-cliente').value = '';
   document.getElementById('ifco-r-sugerencia').textContent = '';
@@ -14581,6 +14625,36 @@ function ifcoAbrirNuevoRemito() {
 function ifcoOnOrigenChange() {
   const v = document.querySelector('input[name="ifco-r-origen"]:checked').value;
   document.getElementById('ifco-r-prov-origen-wrap').style.display = (v === 'proveedor_directo') ? 'block' : 'none';
+}
+
+// Toggle del checkbox "Ya viene sellado"
+function ifcoOnYaSelladoChange() {
+  const ck = document.getElementById('ifco-r-ya-sellado').checked;
+  // Cambiar leyenda y botón del paso 1
+  const aviso = document.getElementById('ifco-r-aviso-foto');
+  const btn = document.getElementById('ifco-r-btn-foto');
+  if (ck) {
+    aviso.innerHTML = '🔏 <b>Subí la foto del remito YA SELLADO</b>. La IA va a leer en una sola pasada los datos del despacho + los del sellado.';
+    btn.textContent = '📷 Subir foto del remito sellado';
+  } else {
+    aviso.innerHTML = '📸 <b>Sacale foto al remito IFCO</b> antes de despacharlo. La foto se archiva y la IA prelee los campos por vos.';
+    btn.textContent = '📷 Subir foto del remito';
+  }
+  // Mostrar/ocultar campos extra del sellado en el paso 2
+  document.getElementById('ifco-r-sellado-fields').style.display = ck ? 'block' : 'none';
+  // Default fecha sellado = hoy
+  if (ck) {
+    const fs = document.getElementById('ifco-r-fecha-sellado');
+    if (!fs.value) fs.value = _ifcoToday();
+  }
+  // Cambiar texto del botón Guardar
+  const btnGuardar = document.getElementById('ifco-r-btn-guardar');
+  if (btnGuardar) btnGuardar.textContent = ck ? 'Guardar como sellado' : 'Guardar despacho';
+  // Cambiar título del modal (solo si estamos creando, no editando)
+  if (!IFCO._editandoRemitoId) {
+    const tit = document.querySelector('#ifco-mb-remito .mht');
+    if (tit) tit.textContent = ck ? '🔏 Cargar despacho ya sellado' : '📥 Nuevo despacho a supermercado';
+  }
 }
 
 // Antes de abrir el file picker, validamos que si el origen es directo, haya elegido proveedor
@@ -14618,6 +14692,7 @@ function ifcoSaltarOcrDespacho() {
 async function ifcoOnFotoDespacho(ev) {
   const file = ev.target.files[0];
   if (!file) return;
+  const yaSellado = document.getElementById('ifco-r-ya-sellado').checked;
   // Preview
   const prev = document.getElementById('ifco-r-foto-preview');
   prev.style.display = 'block';
@@ -14630,7 +14705,7 @@ async function ifcoOnFotoDespacho(ev) {
     try {
       const fd = new FormData();
       fd.append('foto', file);
-      fd.append('tipo', 'despacho');
+      fd.append('tipo', yaSellado ? 'completo' : 'despacho');
       const r = await fetch('/api/ifco/ocr/remito-super', { method: 'POST', credentials: 'include', body: fd });
       const data = await r.json();
       document.getElementById('ifco-r-loading').style.display = 'none';
@@ -14646,7 +14721,7 @@ async function ifcoOnFotoDespacho(ev) {
       }
       IFCO._fotoDespachoPath = data.escaneo_path;
       const d = data.datos;
-      // Prellenar
+      // Prellenar datos del despacho
       if (d.n_remito_ifco)           document.getElementById('ifco-r-numero').value = d.n_remito_ifco;
       if (d.fecha_emision)           document.getElementById('ifco-r-fecha').value = d.fecha_emision;
       if (d.empresa)                 document.getElementById('ifco-r-cliente').value = _ifcoMatchCadena(d.empresa);
@@ -14657,6 +14732,15 @@ async function ifcoOnFotoDespacho(ev) {
       if (d.encargado_prov_apellido) document.getElementById('ifco-r-encprov-ap').value = d.encargado_prov_apellido;
       if (d.encargado_prov_nombre)   document.getElementById('ifco-r-encprov-nom').value = d.encargado_prov_nombre;
       if (d.encargado_prov_dni)      document.getElementById('ifco-r-encprov-dni').value = d.encargado_prov_dni;
+      // Prellenar datos del sellado (solo si tipo=completo y vinieron)
+      if (yaSellado) {
+        if (d.fecha_sellado)             document.getElementById('ifco-r-fecha-sellado').value = d.fecha_sellado;
+        if (d.cantidad_recibida != null) document.getElementById('ifco-r-recib').value         = d.cantidad_recibida;
+        if (d.cantidad_rechazada != null)document.getElementById('ifco-r-rech').value          = d.cantidad_rechazada;
+        if (d.encargado_super_apellido)  document.getElementById('ifco-r-encsup-ap').value     = d.encargado_super_apellido;
+        if (d.encargado_super_nombre)    document.getElementById('ifco-r-encsup-nom').value    = d.encargado_super_nombre;
+        if (d.encargado_super_dni)       document.getElementById('ifco-r-encsup-dni').value    = d.encargado_super_dni;
+      }
       // Avanzar paso 2 con aviso
       document.getElementById('ifco-r-step1').style.display = 'none';
       document.getElementById('ifco-r-step2').style.display = 'block';
@@ -14759,6 +14843,7 @@ async function ifcoGuardarRemito() {
   }
 
   // CREACIÓN: FormData (puede llevar foto)
+  const yaSellado = document.getElementById('ifco-r-ya-sellado').checked;
   const fd = new FormData();
   fd.append('n_remito_ifco', numero);
   fd.append('fecha_emision', document.getElementById('ifco-r-fecha').value);
@@ -14775,14 +14860,35 @@ async function ifcoGuardarRemito() {
   if (origen === 'proveedor_directo') fd.append('proveedor_origen_id', provOrigenId);
   if (IFCO._talonActivo) fd.append('talonario_id', String(IFCO._talonActivo));
 
-  if (IFCO._fotoDespachoFile) {
-    fd.append('escaneo_original', IFCO._fotoDespachoFile);
-  } else if (IFCO._fotoDespachoPath) {
-    fd.append('escaneo_original_path', IFCO._fotoDespachoPath);
+  let endpoint;
+  if (yaSellado) {
+    // Sellado directo: validar campos extra y mandar al endpoint nuevo
+    const fechaSell = document.getElementById('ifco-r-fecha-sellado').value;
+    if (!fechaSell) { alert('Falta la fecha de sellado'); return; }
+    const recibValRaw = document.getElementById('ifco-r-recib').value;
+    const recibVal = recibValRaw === '' ? cant : parseInt(recibValRaw);
+    const rechVal = parseInt(document.getElementById('ifco-r-rech').value || '0');
+    if (recibVal < 0 || rechVal < 0) { alert('Las cantidades no pueden ser negativas'); return; }
+    if (recibVal + rechVal > cant) { alert('Recibida + rechazada superan la cantidad despachada'); return; }
+    fd.append('fecha_sellado', fechaSell);
+    fd.append('cantidad_recibida', String(recibVal));
+    fd.append('cantidad_rechazada', String(rechVal));
+    fd.append('encargado_super_apellido', document.getElementById('ifco-r-encsup-ap').value.trim());
+    fd.append('encargado_super_nombre',   document.getElementById('ifco-r-encsup-nom').value.trim());
+    fd.append('encargado_super_dni',      document.getElementById('ifco-r-encsup-dni').value.trim());
+    // La foto en este flujo es del sellado
+    if (IFCO._fotoDespachoFile)      fd.append('escaneo', IFCO._fotoDespachoFile);
+    else if (IFCO._fotoDespachoPath) fd.append('escaneo_path', IFCO._fotoDespachoPath);
+    endpoint = '/api/ifco/remitos/sellado-directo';
+  } else {
+    // Despacho normal: foto va al campo escaneo_original
+    if (IFCO._fotoDespachoFile)      fd.append('escaneo_original', IFCO._fotoDespachoFile);
+    else if (IFCO._fotoDespachoPath) fd.append('escaneo_original_path', IFCO._fotoDespachoPath);
+    endpoint = '/api/ifco/remitos';
   }
 
   try {
-    const r = await fetch('/api/ifco/remitos', { method: 'POST', credentials: 'include', body: fd });
+    const r = await fetch(endpoint, { method: 'POST', credentials: 'include', body: fd });
     const data = await r.json();
     if (!r.ok) throw new Error(data.error || 'Error');
     IFCO._fotoDespachoFile = null;
@@ -14828,6 +14934,10 @@ async function ifcoAbrirEditarRemito(id) {
     document.getElementById('ifco-r-encprov-dni').value    = r.encargado_prov_dni || '';
     document.getElementById('ifco-r-notas').value          = r.notas || '';
     document.getElementById('ifco-r-sugerencia').textContent = '';
+    // Editar es solo en estado 'despachado' → forzar checkbox off (oculta campos del sellado)
+    const ckYa = document.getElementById('ifco-r-ya-sellado');
+    if (ckYa) { ckYa.checked = false; ifcoOnYaSelladoChange(); }
+    // El título lo seteamos después porque ifcoOnYaSelladoChange lo pisa cuando no estamos editando, acá ya marcamos editando arriba
     // Saltar al paso 2 directamente (no se vuelve a hacer OCR al editar)
     document.getElementById('ifco-r-step1').style.display = 'none';
     document.getElementById('ifco-r-step2').style.display = 'block';
