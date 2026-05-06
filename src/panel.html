@@ -832,8 +832,8 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   </div>
   <div class="tw">
     <table>
-      <thead><tr><th>Nombre</th><th>Email</th><th>Rol</th><th>Depósitos</th><th>Secciones</th><th>Estado</th><th></th></tr></thead>
-      <tbody id="t-usuarios"><tr><td colspan="7" class="emp">Cargando...</td></tr></tbody>
+      <thead><tr><th>Nombre</th><th>Email</th><th>Rol</th><th>Depósitos</th><th>Secciones</th><th>IFCO</th><th>Estado</th><th></th></tr></thead>
+      <tbody id="t-usuarios"><tr><td colspan="8" class="emp">Cargando...</td></tr></tbody>
     </table>
   </div>
 </div>
@@ -855,6 +855,17 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
         <label style="display:flex;align-items:center;gap:6px;font-size:13px;text-transform:none;color:var(--txt);cursor:pointer"><input type="checkbox" id="dep-mcba" value="MCBA"> MCBA</label>
         <label style="display:flex;align-items:center;gap:6px;font-size:13px;text-transform:none;color:var(--txt);cursor:pointer"><input type="checkbox" id="dep-finca" value="FINCA"> FINCA</label>
         <label style="display:flex;align-items:center;gap:6px;font-size:13px;text-transform:none;color:var(--txt);cursor:pointer"><input type="checkbox" id="dep-sanpedro" value="SAN PEDRO"> SAN PEDRO</label>
+      </div>
+    </div>
+    <div class="fl ff" style="margin-top:8px">
+      <label>Depósito IFCO <span style="color:var(--sub);font-weight:400">(opcional — fija el origen al cargar remitos desde mobile)</span></label>
+      <select id="usr-dep-ifco-tipo" onchange="usrToggleDepIfcoProv()" style="margin-top:4px">
+        <option value="">Sin asignar (puede elegir el origen al cargar)</option>
+        <option value="san_geronimo">San Gerónimo (siempre)</option>
+        <option value="proveedor">Proveedor específico (siempre)</option>
+      </select>
+      <div id="usr-dep-ifco-prov-wrap" style="display:none;margin-top:6px">
+        <select id="usr-dep-ifco-prov"><option value="">— Cargando proveedores —</option></select>
       </div>
     </div>
     <div class="fl ff" style="margin-top:8px">
@@ -2995,6 +3006,11 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       <div>
         <label style="font-size:11px;color:var(--mut);text-transform:uppercase">Fecha emisión *</label>
         <input id="ifco-r-fecha" type="date" style="width:100%;padding:8px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg)">
+      </div>
+      <div style="grid-column:span 2">
+        <label style="font-size:11px;color:var(--mut);text-transform:uppercase">N° remito SG <span style="color:var(--sub);font-weight:400">(opcional, para rastreo interno)</span></label>
+        <input id="ifco-r-numero-sg" type="text" placeholder="ej. 00001-00012345"
+               style="width:100%;padding:8px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg);font-family:monospace;font-size:14px">
       </div>
       <div>
         <label style="font-size:11px;color:var(--mut);text-transform:uppercase">Cadena *</label>
@@ -7809,18 +7825,28 @@ function usrCargar() {
     .then(function(r){ return r.json(); })
     .then(function(res) {
       var tbody = document.getElementById('t-usuarios');
-      if (!res.ok) { tbody.innerHTML='<tr><td colspan="6" class="emp">Sin acceso</td></tr>'; return; }
+      if (!res.ok) { tbody.innerHTML='<tr><td colspan="8" class="emp">Sin acceso</td></tr>'; return; }
       var rolLabel = { admin:'Administrador', operador:'Operador', consulta:'Solo lectura', campo:'Solo Scout' };
       tbody.innerHTML = res.data.map(function(u) {
         var deps = JSON.parse(u.depositos||'[]').join(', ');
         var secs = JSON.parse(u.secciones||'["*"]');
         var secsLabel = secs.includes('*') ? 'Todas' : secs.length + ' secciones';
+        // Depósito IFCO
+        var depIfco;
+        if (u.deposito_tipo === 'san_geronimo') {
+          depIfco = '<span style="font-size:11px;color:#1e40af">San Gerónimo</span>';
+        } else if (u.deposito_tipo === 'proveedor') {
+          depIfco = '<span style="font-size:11px;color:#92400e">'+(u.deposito_proveedor_nombre||'?')+'</span>';
+        } else {
+          depIfco = '<span style="font-size:11px;color:var(--sub)">—</span>';
+        }
         return '<tr style="'+(u.activo?'':'opacity:.45')+'">' +
           '<td><strong>'+u.nombre+'</strong></td>' +
           '<td style="color:var(--mut)">'+(u.email&&!u.email.includes('@interno.lnb')?u.email:'<span style="color:var(--sub);font-style:italic">Solo campo</span>')+'</td>' +
           '<td><span class="bdg bcc" style="font-size:11px">'+(rolLabel[u.rol]||u.rol)+'</span></td>' +
           '<td style="font-size:12px;color:var(--mut)">'+deps+'</td>' +
           '<td style="font-size:12px;color:var(--mut)">'+secsLabel+'</td>' +
+          '<td>'+depIfco+'</td>' +
           '<td>'+(u.activo?'<span class="bdg bok">Activo</span>':'<span class="bdg ber">Inactivo</span>')+'</td>' +
           '<td style="text-align:right;white-space:nowrap">' +
             '<button class="btn bo bs" onclick=\'usrEditar('+JSON.stringify(u).replace(/'/g,"&#39;")+')\' style="margin-right:6px">Editar</button>' +
@@ -7838,6 +7864,10 @@ function usrAbrirNuevo() {
   document.getElementById('dep-mcba').checked=true;
   document.getElementById('dep-finca').checked=true;
   document.getElementById('dep-sanpedro').checked=true;
+  // Depósito IFCO: por default sin asignar
+  document.getElementById('usr-dep-ifco-tipo').value='';
+  usrToggleDepIfcoProv();
+  usrCargarProveedoresIfco(null);
   usrRenderSeccionesGrid([]);
   eid('mb-usuario').classList.add('on');
 }
@@ -7854,9 +7884,34 @@ function usrEditar(u) {
   document.getElementById('dep-mcba').checked=deps.includes('MCBA');
   document.getElementById('dep-finca').checked=deps.includes('FINCA');
   document.getElementById('dep-sanpedro').checked=deps.includes('SAN PEDRO');
+  // Depósito IFCO
+  document.getElementById('usr-dep-ifco-tipo').value = u.deposito_tipo || '';
+  usrToggleDepIfcoProv();
+  usrCargarProveedoresIfco(u.deposito_proveedor_id || null);
   var secs=JSON.parse(u.secciones||'["*"]');
   usrRenderSeccionesGrid(secs);
   eid('mb-usuario').classList.add('on');
+}
+
+// Mostrar/ocultar selector de proveedor según tipo de depósito IFCO
+function usrToggleDepIfcoProv() {
+  var v = document.getElementById('usr-dep-ifco-tipo').value;
+  document.getElementById('usr-dep-ifco-prov-wrap').style.display = v === 'proveedor' ? 'block' : 'none';
+}
+
+// Cargar lista de proveedores en el select del modal usuario
+function usrCargarProveedoresIfco(seleccionado) {
+  var sel = document.getElementById('usr-dep-ifco-prov');
+  fetch('/api/ifco/proveedores', { credentials:'include' })
+    .then(function(r){return r.json();})
+    .then(function(provs){
+      sel.innerHTML = '<option value="">— Seleccionar proveedor —</option>' +
+        (provs||[]).map(function(p){
+          var selAttr = (seleccionado && parseInt(seleccionado) === p.id) ? ' selected' : '';
+          return '<option value="'+p.id+'"'+selAttr+'>'+p.nombre+'</option>';
+        }).join('');
+    })
+    .catch(function(){ sel.innerHTML = '<option value="">(error cargando proveedores)</option>'; });
 }
 
 function usrGuardar() {
@@ -7868,7 +7923,14 @@ function usrGuardar() {
   if(document.getElementById('dep-finca').checked) deps.push('FINCA');
   if(document.getElementById('dep-sanpedro').checked) deps.push('SAN PEDRO');
   var secs = usrGetSeccionesSeleccionadas();
-  var body={nombre:document.getElementById('usr-nombre').value.trim(),email:document.getElementById('usr-email').value.trim()||null,pin:pin,rol:document.getElementById('usr-rol').value,depositos:deps,secciones:secs};
+  // Depósito IFCO
+  var depTipo = document.getElementById('usr-dep-ifco-tipo').value || null;
+  var depProvId = null;
+  if (depTipo === 'proveedor') {
+    depProvId = parseInt(document.getElementById('usr-dep-ifco-prov').value || '0') || null;
+    if (!depProvId) { toast('Seleccioná el proveedor','er'); return; }
+  }
+  var body={nombre:document.getElementById('usr-nombre').value.trim(),email:document.getElementById('usr-email').value.trim()||null,pin:pin,rol:document.getElementById('usr-rol').value,depositos:deps,secciones:secs,deposito_tipo:depTipo,deposito_proveedor_id:depProvId};
   if(!body.nombre){toast('El nombre es requerido','er');return;}
   fetch('/api/auth/usuarios'+(id?'/'+id:''),{method:id?'PATCH':'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
     .then(function(r){return r.json();})
@@ -14714,7 +14776,7 @@ function ifcoAbrirNuevoRemito() {
   const tit = document.querySelector('#ifco-mb-remito .mht');
   if (tit) tit.textContent = '📥 Nuevo despacho a supermercado';
   // Reset campos
-  ['ifco-r-numero','ifco-r-cantidad','ifco-r-producto','ifco-r-recib']
+  ['ifco-r-numero','ifco-r-numero-sg','ifco-r-cantidad','ifco-r-producto','ifco-r-recib']
     .forEach(function(id){ const el = document.getElementById(id); if (el) el.value = ''; });
   const rech = document.getElementById('ifco-r-rech'); if (rech) rech.value = '0';
   const rechDest = document.getElementById('ifco-r-rech-dest'); if (rechDest) rechDest.value = 'san_geronimo';
@@ -14942,6 +15004,7 @@ async function ifcoGuardarRemito() {
     // EDICIÓN: PATCH con JSON
     const body = {
       n_remito_ifco:           numero,
+      n_remito_sg:             document.getElementById('ifco-r-numero-sg').value.trim() || null,
       fecha_emision:           document.getElementById('ifco-r-fecha').value,
       empresa:                 cadena,
       cantidad_despachada:     cant,
@@ -14966,6 +15029,8 @@ async function ifcoGuardarRemito() {
   const yaSellado = document.getElementById('ifco-r-ya-sellado').checked;
   const fd = new FormData();
   fd.append('n_remito_ifco', numero);
+  const numSG = document.getElementById('ifco-r-numero-sg').value.trim();
+  if (numSG) fd.append('n_remito_sg', numSG);
   fd.append('fecha_emision', document.getElementById('ifco-r-fecha').value);
   fd.append('empresa', cadena);
   fd.append('cantidad_despachada', String(cant));
@@ -15040,6 +15105,7 @@ async function ifcoAbrirEditarRemito(id) {
     document.getElementById('ifco-r-numero').value         = r.n_remito_ifco || '';
     document.getElementById('ifco-r-fecha').value          = r.fecha_emision || '';
     document.getElementById('ifco-r-cliente').value        = r.empresa || '';
+    document.getElementById('ifco-r-numero-sg').value      = r.n_remito_sg || '';
     document.getElementById('ifco-r-cantidad').value       = r.cantidad_despachada || '';
     document.getElementById('ifco-r-producto').value       = r.producto || '';
     document.getElementById('ifco-r-sugerencia').textContent = '';
@@ -15173,6 +15239,7 @@ async function ifcoVerRemito(id) {
       // Datos generales
       '<div style="background:var(--bg);border-radius:8px;padding:4px 14px">' +
         fila('Fecha emisión', _ifcoFecha(r.fecha_emision)) +
+        fila('N° remito SG', r.n_remito_sg ? '<span style="font-family:monospace">'+_ifcoEsc(r.n_remito_sg)+'</span>' : '') +
         fila('Cliente', _ifcoEsc(r.empresa||'')) +
         fila('Sucursal', _ifcoEsc(r.sucursal||'')) +
         fila('Producto', _ifcoEsc(r.producto||'')) +

@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#0f2540">
-<title>IFCO Mobile</title>
+<title>La Niña Bonita - IFCO</title>
 <style>
 :root{
   --bg:#f0f4f8;--sur:#fff;--bor:#dde3ea;--bor2:#c8d2db;
@@ -121,7 +121,7 @@ body{padding-bottom:env(safe-area-inset-bottom)}
 <body>
 <div class="hd">
   <button class="back" id="hd-back" onclick="back()" style="display:none">‹</button>
-  <div class="tit" id="hd-title">📦 IFCO Mobile</div>
+  <div class="tit" id="hd-title">📦 La Niña Bonita - IFCO</div>
   <button class="out" onclick="logout()">Salir</button>
 </div>
 
@@ -134,7 +134,7 @@ body{padding-bottom:env(safe-area-inset-bottom)}
   <button class="menu-btn" onclick="goCargarSellado()">
     <div class="emo">🔏</div>
     <div class="txt">
-      <div class="t1">Cargar remito sellado</div>
+      <div class="t1">SELLADOS</div>
       <div class="t2">Foto del remito firmado por el súper</div>
     </div>
     <div class="arr">›</div>
@@ -143,15 +143,11 @@ body{padding-bottom:env(safe-area-inset-bottom)}
   <button class="menu-btn" onclick="goCargarDespacho()">
     <div class="emo">📥</div>
     <div class="txt">
-      <div class="t1">Cargar despacho nuevo</div>
+      <div class="t1">DESPACHOS</div>
       <div class="t2">Antes de salir hacia el súper</div>
     </div>
     <div class="arr">›</div>
   </button>
-
-  <div style="margin-top:24px;text-align:center">
-    <a href="/panel" style="color:var(--burg);font-size:13px">Ir al panel completo →</a>
-  </div>
 </div>
 
 <!-- Pantalla LOADING (procesando OCR) -->
@@ -230,6 +226,10 @@ body{padding-bottom:env(safe-area-inset-bottom)}
     <input id="ns-numero" type="text" placeholder="00015-XXXXXXXX">
   </div>
   <div class="fld">
+    <label>N° remito SG <span style="color:var(--sub);font-weight:400;text-transform:none">(opcional)</span></label>
+    <input id="ns-numero-sg" type="text" placeholder="ej. 00001-00012345">
+  </div>
+  <div class="fld">
     <label>Fecha emisión *</label>
     <input id="ns-fecha" type="date">
   </div>
@@ -296,6 +296,10 @@ body{padding-bottom:env(safe-area-inset-bottom)}
   <div class="fld">
     <label>N° remito IFCO *</label>
     <input id="d-numero" type="text" placeholder="00015-XXXXXXXX">
+  </div>
+  <div class="fld">
+    <label>N° remito SG <span style="color:var(--sub);font-weight:400;text-transform:none">(opcional)</span></label>
+    <input id="d-numero-sg" type="text" placeholder="ej. 00001-00012345">
   </div>
   <div class="fld">
     <label>Fecha emisión *</label>
@@ -372,8 +376,30 @@ const S = {
   matchData: null,      // remito completo cuando hay match (cargar sellado)
   ocrData: null,        // datos del OCR (despacho o completo)
   proveedores: null,
-  history: ['view-home']
+  history: ['view-home'],
+  user: null            // datos del usuario logueado (incluye deposito_tipo, deposito_proveedor_id, ...)
 };
+
+// Cargar info del usuario al iniciar
+(async function() {
+  try {
+    const r = await fetch('/api/auth/me', { credentials:'include' });
+    if (!r.ok) { window.location.href = '/login?next=/m/ifco'; return; }
+    const data = await r.json();
+    if (!data.ok) { window.location.href = '/login?next=/m/ifco'; return; }
+    S.user = data.user;
+    // Si tiene depósito asignado, mostrarlo arriba como aclaración
+    if (S.user.deposito_tipo) {
+      const lbl = S.user.deposito_tipo === 'proveedor'
+        ? ('Cargando como: ' + (S.user.deposito_proveedor_nombre||'proveedor'))
+        : 'Cargando como: San Gerónimo';
+      const div = document.createElement('div');
+      div.style.cssText = 'background:#dbeafe;border-bottom:1px solid #93c5fd;padding:8px 16px;text-align:center;font-size:12px;color:#1e40af;font-weight:500';
+      div.textContent = '📍 ' + lbl;
+      document.querySelector('.hd').insertAdjacentElement('afterend', div);
+    }
+  } catch(e) { /* sigue sin info */ }
+})();
 
 function $(id){ return document.getElementById(id); }
 function fmtFecha(s){ if(!s) return '—'; const p=String(s).split('-'); return p.length===3 ? p[2]+'/'+p[1]+'/'+p[0] : s; }
@@ -385,7 +411,7 @@ function showView(id, opts) {
   $(id).classList.add('on');
   // Header
   if (id === 'view-home') {
-    $('hd-title').textContent = '📦 IFCO Mobile';
+    $('hd-title').textContent = '📦 La Niña Bonita - IFCO';
     $('hd-back').style.display = 'none';
     S.history = ['view-home'];
   } else {
@@ -402,7 +428,7 @@ function back() {
     const prev = S.history[S.history.length - 1];
     showView(prev, { push:false });
     if (prev === 'view-home') {
-      $('hd-title').textContent = '📦 IFCO Mobile';
+      $('hd-title').textContent = '📦 La Niña Bonita - IFCO';
       $('hd-back').style.display = 'none';
     }
   } else {
@@ -413,7 +439,7 @@ function back() {
 function goHome() {
   resetState();
   showView('view-home', { push:false });
-  $('hd-title').textContent = '📦 IFCO Mobile';
+  $('hd-title').textContent = '📦 La Niña Bonita - IFCO';
   $('hd-back').style.display = 'none';
   S.history = ['view-home'];
 }
@@ -548,6 +574,7 @@ async function onFotoSellado(ev) {
       $('ns-origen').value = 'san_geronimo';
       toggleProvOrigenNS();
       toggleRechNS();
+      aplicarDepositoUsuario('ns-origen', 'ns-prov-wrap', 'ns-prov');
       setFotoPrev('ns-foto-prev', file);
       showView('view-crear-sellado', { title:'Crear y sellar' });
       return;
@@ -623,6 +650,8 @@ async function confirmarCrearSellado() {
   try {
     const fd = new FormData();
     fd.append('n_remito_ifco', numero);
+    const numSG = $('ns-numero-sg').value.trim();
+    if (numSG) fd.append('n_remito_sg', numSG);
     fd.append('fecha_emision', fecha);
     fd.append('empresa', cadena);
     fd.append('cantidad_despachada', String(cant));
@@ -679,6 +708,7 @@ async function onFotoDespacho(ev) {
     $('d-prod').value   = data.datos.producto || '';
     $('d-origen').value = 'san_geronimo';
     toggleProvOrigenD();
+    aplicarDepositoUsuario('d-origen', 'd-prov-wrap', 'd-prov');
     setFotoPrev('d-foto-prev', file);
     showView('view-confirmar-despacho', { title:'Confirmar despacho' });
   } catch(e) {
@@ -690,6 +720,27 @@ function toggleProvOrigenD() {
   const v = $('d-origen').value;
   $('d-prov-wrap').style.display = v === 'proveedor_directo' ? 'block' : 'none';
   if (v === 'proveedor_directo') fillProvSelect('d-prov');
+}
+
+// Aplica el depósito del usuario al modal de confirmar despacho (o crear+sellar)
+// Si tiene depósito asignado: setea el origen y oculta el dropdown
+// Si no tiene: lo deja editable (default san_geronimo)
+function aplicarDepositoUsuario(origenSelId, provWrapId, provSelId) {
+  if (!S.user || !S.user.deposito_tipo) return; // sin depósito → comportamiento default
+  const sel = $(origenSelId);
+  if (S.user.deposito_tipo === 'san_geronimo') {
+    sel.value = 'san_geronimo';
+    $(provWrapId).style.display = 'none';
+  } else if (S.user.deposito_tipo === 'proveedor' && S.user.deposito_proveedor_id) {
+    sel.value = 'proveedor_directo';
+    $(provWrapId).style.display = 'none'; // ocultamos también el wrap (forzado)
+    // Pre-poblar el select de proveedor con el del usuario
+    $(provSelId).innerHTML = '<option value="'+S.user.deposito_proveedor_id+'" selected>'+esc(S.user.deposito_proveedor_nombre||'')+'</option>';
+  }
+  // Bloquear el dropdown de origen
+  sel.disabled = true;
+  sel.style.background = 'var(--bg)';
+  sel.style.color = 'var(--mut)';
 }
 
 async function confirmarDespacho() {
@@ -712,6 +763,8 @@ async function confirmarDespacho() {
   try {
     const fd = new FormData();
     fd.append('n_remito_ifco', numero);
+    const numSG = $('d-numero-sg').value.trim();
+    if (numSG) fd.append('n_remito_sg', numSG);
     fd.append('fecha_emision', fecha);
     fd.append('empresa', cadena);
     fd.append('cantidad_despachada', String(cant));

@@ -20,6 +20,11 @@ try {
   db.exec("ALTER TABLE ifco_remitos_super ADD COLUMN rechazo_destino TEXT");
 } catch(e) { /* columna ya existe */ }
 
+// ── Migración inline: N° de remito interno de SG (opcional, para rastreo)
+try {
+  db.exec("ALTER TABLE ifco_remitos_super ADD COLUMN n_remito_sg TEXT");
+} catch(e) { /* columna ya existe */ }
+
 // ── Configuración OCR vía Claude API ───────────────────────────────────────
 const OCR_ENABLED = String(process.env.IFCO_OCR_ENABLED || '').toLowerCase() === 'true';
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || '';
@@ -382,13 +387,13 @@ router.post('/remitos', upload.single('escaneo_original'), function(req, res) {
   try {
     const r = db.prepare(`
       INSERT INTO ifco_remitos_super (
-        n_remito_ifco, fecha_emision, cliente_id, cliente_telefono, empresa, sucursal,
+        n_remito_ifco, n_remito_sg, fecha_emision, cliente_id, cliente_telefono, empresa, sucursal,
         modelo, cantidad_despachada, producto, transportista,
         encargado_prov_apellido, encargado_prov_nombre, encargado_prov_dni,
         talonario_id, notas, usuario_id, estado, escaneo_original_path,
         origen, proveedor_origen_id
       ) VALUES (
-        @n_remito_ifco, @fecha_emision, @cliente_id, @cliente_telefono, @empresa, @sucursal,
+        @n_remito_ifco, @n_remito_sg, @fecha_emision, @cliente_id, @cliente_telefono, @empresa, @sucursal,
         @modelo, @cantidad_despachada, @producto, @transportista,
         @encargado_prov_apellido, @encargado_prov_nombre, @encargado_prov_dni,
         @talonario_id, @notas, @usuario_id, 'despachado', @escaneo_original_path,
@@ -396,6 +401,7 @@ router.post('/remitos', upload.single('escaneo_original'), function(req, res) {
       )
     `).run({
       n_remito_ifco:           d.n_remito_ifco,
+      n_remito_sg:             d.n_remito_sg ? String(d.n_remito_sg).trim() : null,
       fecha_emision:           d.fecha_emision,
       cliente_id:              d.cliente_id || null,
       cliente_telefono:        d.cliente_telefono || null,
@@ -480,7 +486,7 @@ router.post('/remitos/sellado-directo', upload.single('escaneo'), function(req, 
   try {
     const r = db.prepare(`
       INSERT INTO ifco_remitos_super (
-        n_remito_ifco, fecha_emision, cliente_id, cliente_telefono, empresa, sucursal,
+        n_remito_ifco, n_remito_sg, fecha_emision, cliente_id, cliente_telefono, empresa, sucursal,
         modelo, cantidad_despachada, cantidad_recibida, cantidad_rechazada,
         producto, transportista,
         encargado_prov_apellido, encargado_prov_nombre, encargado_prov_dni,
@@ -489,7 +495,7 @@ router.post('/remitos/sellado-directo', upload.single('escaneo'), function(req, 
         escaneo_path, fecha_sellado,
         origen, proveedor_origen_id, rechazo_destino
       ) VALUES (
-        @n_remito_ifco, @fecha_emision, @cliente_id, @cliente_telefono, @empresa, @sucursal,
+        @n_remito_ifco, @n_remito_sg, @fecha_emision, @cliente_id, @cliente_telefono, @empresa, @sucursal,
         @modelo, @cantidad_despachada, @cantidad_recibida, @cantidad_rechazada,
         @producto, @transportista,
         @encargado_prov_apellido, @encargado_prov_nombre, @encargado_prov_dni,
@@ -500,6 +506,7 @@ router.post('/remitos/sellado-directo', upload.single('escaneo'), function(req, 
       )
     `).run({
       n_remito_ifco:           d.n_remito_ifco,
+      n_remito_sg:             d.n_remito_sg ? String(d.n_remito_sg).trim() : null,
       fecha_emision:           d.fecha_emision,
       cliente_id:              d.cliente_id || null,
       cliente_telefono:        d.cliente_telefono || null,
@@ -650,6 +657,7 @@ router.patch('/remitos/:id', function(req, res) {
   db.prepare(`
     UPDATE ifco_remitos_super SET
       n_remito_ifco           = COALESCE(?, n_remito_ifco),
+      n_remito_sg             = ?,
       fecha_emision           = COALESCE(?, fecha_emision),
       cliente_id              = ?,
       empresa                 = COALESCE(?, empresa),
@@ -667,6 +675,7 @@ router.patch('/remitos/:id', function(req, res) {
     WHERE id = ?
   `).run(
     d.n_remito_ifco || null,
+    d.n_remito_sg !== undefined ? (d.n_remito_sg ? String(d.n_remito_sg).trim() : null) : null,
     d.fecha_emision || null,
     d.cliente_id || null,
     d.empresa || null,
