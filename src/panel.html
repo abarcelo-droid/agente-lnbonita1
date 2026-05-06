@@ -8173,18 +8173,19 @@ if(_inpGondola) _inpGondola.addEventListener('keydown', function(e){
   <div id="pa-ord-det-body"></div>
   <div id="pa-ord-ejec-form" style="display:none;margin-top:16px;padding-top:14px;border-top:2px solid var(--bor)">
     <div style="font-size:13px;font-weight:600;margin-bottom:12px">Registrar ejecución</div>
-    <div class="fg">
-      <div class="fl"><label>Lote</label><select id="pa-ej-lote"></select></div>
-      <div class="fl"><label>Insumo</label><select id="pa-ej-insumo"></select></div>
+    <div class="fg" style="margin-bottom:12px">
       <div class="fl"><label>Fecha real</label><input type="date" id="pa-ej-fecha"></div>
-      <div class="fl"><label>Cantidad real</label><input type="number" id="pa-ej-cant" step="0.01" placeholder="0"></div>
       <div class="fl ff"><label>Ejecutado por</label><input id="pa-ej-quien" placeholder="Nombre tractorista / encargado"></div>
     </div>
-    <button class="btn bb" onclick="paRegistrarEjecucion()">✓ Registrar</button>
+    <div style="font-size:11px;font-weight:700;color:var(--mut);text-transform:uppercase;margin-bottom:6px">Productos a ejecutar</div>
+    <div style="font-size:11px;color:var(--mut);margin-bottom:8px">Cant. real precargada con dosis × ha. Las filas con cantidad 0 o vacía se omiten.</div>
+    <div id="pa-ej-filas" style="display:flex;flex-direction:column;gap:6px;margin-bottom:10px"></div>
+    <button class="btn bo bs" onclick="paAgregarFilaEjec()" style="margin-bottom:10px">+ Agregar fila</button>
   </div>
   <div class="ab-modal-footer">
     <button class="btn bo" onclick="document.getElementById('pa-mb-orden-det').classList.remove('on')">Cerrar</button>
     <button class="btn bb" id="pa-ord-det-ejec-btn" onclick="paToggleEjecForm()" style="display:none">Registrar ejecución</button>
+    <button class="btn bb" id="pa-ord-det-ejec-confirm-btn" onclick="paRegistrarEjecucionMulti()" style="display:none">✓ Registrar ejecución</button>
   </div>
 </div></div>
 
@@ -11530,47 +11531,149 @@ function paVerOrden(id){
     o.items.forEach(function(it){html+='<tr><td>'+it.insumo_nombre+'</td><td>'+it.dosis+'</td><td>'+it.unidad_dosis+'</td></tr>';});html+='</tbody></table>';
     if(o.aplicaciones&&o.aplicaciones.length){html+='<div style="font-size:11px;font-weight:700;color:var(--mut);text-transform:uppercase;margin-bottom:8px">Ejecuciones</div><table class="pa-tbl"><thead><tr><th>Lote</th><th>Insumo</th><th>Fecha</th><th style="text-align:right">Cant.</th><th>Por</th></tr></thead><tbody>';o.aplicaciones.forEach(function(a){html+='<tr><td>'+a.lote_nombre+'</td><td>'+a.insumo_nombre+'</td><td>'+paFecha(a.fecha_real)+'</td><td style="text-align:right">'+a.cantidad_real+' '+a.unidad+'</td><td>'+(a.ejecutado_por_nombre||a.ejecutado_txt||'—')+'</td></tr>';});html+='</tbody></table>';}
     document.getElementById('pa-ord-det-body').innerHTML=html;
-    // Selectores de ejecución: codifico ha efectivas en el option para precargar cantidad
-    document.getElementById('pa-ej-lote').innerHTML=o.lotes.map(function(l){
-      var haEf=(l.hectareas_aplicadas!=null)?l.hectareas_aplicadas:l.hectareas;
-      var marca=(l.hectareas_aplicadas!=null)?' 🔸 ('+l.hectareas_aplicadas+' / '+l.hectareas+' ha)':' ('+l.hectareas+' ha)';
-      return'<option value="'+l.lote_id+'" data-ha-ef="'+haEf+'">'+l.lote_nombre+marca+'</option>';
-    }).join('');
-    document.getElementById('pa-ej-insumo').innerHTML=o.items.map(function(i){
-      return'<option value="'+i.insumo_id+'" data-dosis="'+i.dosis+'" data-unidad-dosis="'+i.unidad_dosis+'">'+i.insumo_nombre+' ('+i.dosis+' '+i.unidad_dosis+')</option>';
-    }).join('');
-    // Wire: al cambiar lote o insumo, sugiero cantidad = dosis × ha efectivas
-    var fnPrec=function(){paPrecargarCantEjec();};
-    document.getElementById('pa-ej-lote').onchange=fnPrec;
-    document.getElementById('pa-ej-insumo').onchange=fnPrec;
-    document.getElementById('pa-ej-fecha').value=new Date().toISOString().slice(0,10);document.getElementById('pa-ej-cant').value='';document.getElementById('pa-ej-quien').value='';document.getElementById('pa-ord-ejec-form').style.display='none';
-    paPrecargarCantEjec();
-    document.getElementById('pa-ord-det-ejec-btn').style.display=['emitida','en_ejecucion'].includes(o.estado)?'':'none';
+    // Guardamos data para construir filas de ejecución dinámicas
+    PA._ordenLotes = o.lotes || [];
+    PA._ordenItems = o.items || [];
+    document.getElementById('pa-ej-fecha').value = new Date().toISOString().slice(0,10);
+    document.getElementById('pa-ej-quien').value = '';
+    document.getElementById('pa-ord-ejec-form').style.display = 'none';
+    document.getElementById('pa-ord-det-ejec-btn').style.display = ['emitida','en_ejecucion'].includes(o.estado) ? '' : 'none';
+    document.getElementById('pa-ord-det-ejec-confirm-btn').style.display = 'none';
     document.getElementById('pa-mb-orden-det').classList.add('on');
   });
 }
-// Sugerencia de cantidad real = dosis (kg|lt /ha) × ha efectivas (parciales o totales)
-function paPrecargarCantEjec(){
-  var loteSel=document.getElementById('pa-ej-lote');
-  var insSel=document.getElementById('pa-ej-insumo');
-  var cant=document.getElementById('pa-ej-cant');
-  if(!loteSel||!insSel||!cant)return;
-  var loteOpt=loteSel.options[loteSel.selectedIndex];
-  var insOpt=insSel.options[insSel.selectedIndex];
-  if(!loteOpt||!insOpt)return;
-  var haEf=parseFloat(loteOpt.dataset.haEf)||0;
-  var dosis=parseFloat(insOpt.dataset.dosis)||0;
-  if(haEf>0&&dosis>0){
-    cant.value=(haEf*dosis).toFixed(2);
-    cant.placeholder='Sugerido: '+(haEf*dosis).toFixed(2);
+
+// ── Multi-ejecución ─────────────────────────────────────────────────────
+// Renderiza una fila del form de ejecución
+function paRenderFilaEjec(idx, sel) {
+  // sel = { lote_id, insumo_id } valor inicial seleccionado
+  var lotes = PA._ordenLotes || [];
+  var items = PA._ordenItems || [];
+  var loteOpts = lotes.map(function(l){
+    var haEf = (l.hectareas_aplicadas != null) ? l.hectareas_aplicadas : l.hectareas;
+    var marca = (l.hectareas_aplicadas != null)
+      ? ' 🔸 ('+l.hectareas_aplicadas+'/'+l.hectareas+' ha)'
+      : ' ('+l.hectareas+' ha)';
+    var selAttr = (sel && String(sel.lote_id) === String(l.lote_id)) ? ' selected' : '';
+    return '<option value="'+l.lote_id+'" data-ha-ef="'+haEf+'"'+selAttr+'>'+l.lote_nombre+marca+'</option>';
+  }).join('');
+  var insOpts = items.map(function(i){
+    var selAttr = (sel && String(sel.insumo_id) === String(i.insumo_id)) ? ' selected' : '';
+    return '<option value="'+i.insumo_id+'" data-dosis="'+i.dosis+'" data-unidad="'+i.unidad_dosis+'"'+selAttr+'>'+i.insumo_nombre+' ('+i.dosis+' '+i.unidad_dosis+')</option>';
+  }).join('');
+  return '<div class="pa-ej-fila" data-idx="'+idx+'" style="display:grid;grid-template-columns:1fr 1fr 110px 30px;gap:6px;align-items:end;padding:6px;background:var(--bg);border-radius:6px">'
+    +'<div><div style="font-size:10px;color:var(--mut);text-transform:uppercase;margin-bottom:2px">Lote</div><select class="pa-ej-fila-lote" onchange="paRecalcCantFila(this)" style="width:100%;padding:6px 8px;border-radius:6px;border:1px solid var(--bor);background:var(--sur);font-size:12px">'+loteOpts+'</select></div>'
+    +'<div><div style="font-size:10px;color:var(--mut);text-transform:uppercase;margin-bottom:2px">Insumo</div><select class="pa-ej-fila-ins" onchange="paRecalcCantFila(this)" style="width:100%;padding:6px 8px;border-radius:6px;border:1px solid var(--bor);background:var(--sur);font-size:12px">'+insOpts+'</select></div>'
+    +'<div><div style="font-size:10px;color:var(--mut);text-transform:uppercase;margin-bottom:2px">Cant. real</div><input type="number" class="pa-ej-fila-cant" step="0.01" min="0" placeholder="0" style="width:100%;padding:6px 8px;border-radius:6px;border:1px solid var(--bor);background:var(--sur);font-size:12px;text-align:right"></div>'
+    +'<button class="btn bo bs" onclick="paEliminarFilaEjec(this)" style="padding:6px;font-size:14px;align-self:end">×</button>'
+    +'</div>';
+}
+
+// Recalcula cantidad sugerida de la fila cuando cambia lote o insumo
+function paRecalcCantFila(el) {
+  var fila = el.closest('.pa-ej-fila');
+  if (!fila) return;
+  var loteSel = fila.querySelector('.pa-ej-fila-lote');
+  var insSel  = fila.querySelector('.pa-ej-fila-ins');
+  var cantInp = fila.querySelector('.pa-ej-fila-cant');
+  var loteOpt = loteSel.options[loteSel.selectedIndex];
+  var insOpt  = insSel.options[insSel.selectedIndex];
+  if (!loteOpt || !insOpt) return;
+  var haEf  = parseFloat(loteOpt.dataset.haEf) || 0;
+  var dosis = parseFloat(insOpt.dataset.dosis) || 0;
+  if (haEf > 0 && dosis > 0) {
+    cantInp.value = (haEf * dosis).toFixed(2);
   }
 }
-function paToggleEjecForm(){var f=document.getElementById('pa-ord-ejec-form');f.style.display=f.style.display==='none'?'':'none';}
-function paRegistrarEjecucion(){
-  var o=PA.ordenActual;if(!o)return;
-  var loteId=document.getElementById('pa-ej-lote').value,insId=document.getElementById('pa-ej-insumo').value,fecha=document.getElementById('pa-ej-fecha').value,cant=parseFloat(document.getElementById('pa-ej-cant').value)||0,quien=document.getElementById('pa-ej-quien').value.trim();
-  if(!cant)return toast('Ingresá la cantidad real','er');
-  paF('/api/pa/aplicaciones',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({orden_id:o.id,lote_id:loteId,insumo_id:insId,fecha_real:fecha,cantidad_real:cant,ejecutado_txt:quien})}).then(function(r){if(r.ok){toast('Ejecución registrada — stock descontado');document.getElementById('pa-mb-orden-det').classList.remove('on');paLoadOrdenes();}else toast(r.error||'Error','er');});
+
+// Construye TODAS las combinaciones lote × producto y precarga cant. sugerida
+function paConstruirFilasEjec() {
+  var cont = document.getElementById('pa-ej-filas');
+  if (!cont) return;
+  var lotes = PA._ordenLotes || [];
+  var items = PA._ordenItems || [];
+  var idx = 0;
+  var html = '';
+  for (var i = 0; i < lotes.length; i++) {
+    for (var j = 0; j < items.length; j++) {
+      html += paRenderFilaEjec(idx, { lote_id: lotes[i].lote_id, insumo_id: items[j].insumo_id });
+      idx++;
+    }
+  }
+  cont.innerHTML = html;
+  // Pre-cargar cantidad sugerida en cada fila
+  cont.querySelectorAll('.pa-ej-fila').forEach(function(fila){
+    var loteSel = fila.querySelector('.pa-ej-fila-lote');
+    paRecalcCantFila(loteSel);
+  });
+}
+
+function paAgregarFilaEjec() {
+  var cont = document.getElementById('pa-ej-filas');
+  if (!cont) return;
+  var idx = cont.children.length;
+  cont.insertAdjacentHTML('beforeend', paRenderFilaEjec(idx, null));
+  // Recalcular la fila recién agregada
+  var nueva = cont.lastElementChild;
+  paRecalcCantFila(nueva.querySelector('.pa-ej-fila-lote'));
+}
+
+function paEliminarFilaEjec(btn) {
+  var fila = btn.closest('.pa-ej-fila');
+  if (fila) fila.remove();
+}
+
+function paToggleEjecForm() {
+  var f = document.getElementById('pa-ord-ejec-form');
+  var btnAbrir   = document.getElementById('pa-ord-det-ejec-btn');
+  var btnConfirm = document.getElementById('pa-ord-det-ejec-confirm-btn');
+  var abierto = f.style.display !== 'none' && f.style.display !== '';
+  if (!abierto) {
+    f.style.display = 'block';
+    if (btnAbrir)   btnAbrir.style.display   = 'none';
+    if (btnConfirm) btnConfirm.style.display = '';
+    paConstruirFilasEjec();
+  } else {
+    f.style.display = 'none';
+    if (btnAbrir)   btnAbrir.style.display   = '';
+    if (btnConfirm) btnConfirm.style.display = 'none';
+  }
+}
+
+function paRegistrarEjecucionMulti() {
+  var o = PA.ordenActual;
+  if (!o) return;
+  var fecha = document.getElementById('pa-ej-fecha').value;
+  var quien = document.getElementById('pa-ej-quien').value.trim();
+  if (!fecha) return toast('Ingresá la fecha de ejecución','er');
+  var ejecuciones = [];
+  document.querySelectorAll('#pa-ej-filas .pa-ej-fila').forEach(function(fila){
+    var loteId = fila.querySelector('.pa-ej-fila-lote').value;
+    var insId  = fila.querySelector('.pa-ej-fila-ins').value;
+    var cant   = parseFloat(fila.querySelector('.pa-ej-fila-cant').value) || 0;
+    if (loteId && insId && cant > 0) {
+      ejecuciones.push({ lote_id: Number(loteId), insumo_id: Number(insId), cantidad_real: cant });
+    }
+  });
+  if (ejecuciones.length === 0) return toast('Ingresá al menos una cantidad mayor a 0','er');
+  paF('/api/pa/aplicaciones/batch', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      orden_id:      o.id,
+      fecha_real:    fecha,
+      ejecutado_txt: quien || null,
+      ejecuciones:   ejecuciones
+    })
+  }).then(function(r){
+    if (r.ok) {
+      toast(r.count + ' ejecución(es) registradas — stock descontado');
+      document.getElementById('pa-mb-orden-det').classList.remove('on');
+      paLoadOrdenes();
+    } else {
+      toast(r.error || 'Error', 'er');
+    }
+  });
 }
 
 function paLoadCostos(){
@@ -11588,7 +11691,7 @@ function paVerDetalleCosto(loteId){
     var html='<table class="pa-tbl"><thead><tr><th>Fecha</th><th>Categoría</th><th>Descripción</th><th style="text-align:right">Monto</th></tr></thead><tbody>',total=0;
     data.forEach(function(c){html+='<tr><td>'+paFecha(c.fecha)+'</td><td>'+c.categoria+'</td><td>'+(c.descripcion||'—')+'</td><td style="text-align:right">'+paMoney(c.monto)+'</td></tr>';total+=c.monto;});
     html+='<tr style="font-weight:700;background:var(--bg)"><td colspan="3">TOTAL</td><td style="text-align:right">'+paMoney(total)+'</td></tr></tbody></table>';
-    document.getElementById('pa-ord-det-tit').textContent='Costos — '+data[0].lote_nombre;document.getElementById('pa-ord-det-sub').textContent='';document.getElementById('pa-ord-det-body').innerHTML=html;document.getElementById('pa-ord-ejec-form').style.display='none';document.getElementById('pa-ord-det-ejec-btn').style.display='none';document.getElementById('pa-mb-orden-det').classList.add('on');
+    document.getElementById('pa-ord-det-tit').textContent='Costos — '+data[0].lote_nombre;document.getElementById('pa-ord-det-sub').textContent='';document.getElementById('pa-ord-det-body').innerHTML=html;document.getElementById('pa-ord-ejec-form').style.display='none';document.getElementById('pa-ord-det-ejec-btn').style.display='none';var ec=document.getElementById('pa-ord-det-ejec-confirm-btn');if(ec)ec.style.display='none';document.getElementById('pa-mb-orden-det').classList.add('on');
   });
 }
 
