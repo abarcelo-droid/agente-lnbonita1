@@ -1,0 +1,26 @@
+{
+  "name": "La Niña Bonita - IFCO",
+  "short_name": "LNB IFCO",
+  "description": "Carga de remitos IFCO desde el celular",
+  "start_url": "/m/ifco",
+  "scope": "/m/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0f2540",
+  "theme_color": "#0f2540",
+  "lang": "es-AR",
+  "icons": [
+    {
+      "src": "/mifco-icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/mifco-icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
