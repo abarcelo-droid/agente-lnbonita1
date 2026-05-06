@@ -624,14 +624,14 @@ router.patch('/remitos/:id', function(req, res) {
       fecha_emision           = COALESCE(?, fecha_emision),
       cliente_id              = ?,
       empresa                 = COALESCE(?, empresa),
-      sucursal                = ?,
+      sucursal                = COALESCE(?, sucursal),
       cantidad_despachada     = COALESCE(?, cantidad_despachada),
       producto                = ?,
-      transportista           = ?,
-      encargado_prov_apellido = ?,
-      encargado_prov_nombre   = ?,
-      encargado_prov_dni      = ?,
-      notas                   = ?,
+      transportista           = COALESCE(?, transportista),
+      encargado_prov_apellido = COALESCE(?, encargado_prov_apellido),
+      encargado_prov_nombre   = COALESCE(?, encargado_prov_nombre),
+      encargado_prov_dni      = COALESCE(?, encargado_prov_dni),
+      notas                   = COALESCE(?, notas),
       origen                  = ?,
       proveedor_origen_id     = ?,
       actualizado_en          = datetime('now','localtime')
@@ -1170,6 +1170,89 @@ router.get('/saldo-proveedor/:id', function(req, res) {
   res.json({ proveedor_id: provId, pendiente: pendiente });
 });
 
+// LISTA: todos los proveedores con su saldo actual de cajones IFCO (incluye 0 y negativos)
+router.get('/proveedores-saldos', function(req, res) {
+  const provs = db.prepare("SELECT id, nombre, razon_social FROM proveedores ORDER BY nombre").all();
+  const result = provs.map(function(p) {
+    return {
+      id: p.id,
+      nombre: p.nombre,
+      razon_social: p.razon_social,
+      saldo: _calcSaldoProveedor(p.id)
+    };
+  });
+  res.json(result);
+});
+
+// Helper: arma la lista cronológica de movimientos de un proveedor
+function _movimientosProveedor(provId) {
+  const envios = db.prepare(`
+    SELECT 'envio' AS tipo, id, fecha_envio AS fecha, n_remito_interno AS detalle,
+           cantidad_enviada AS cantidad, cantidad_recibida, estado, notas
+    FROM ifco_envios_proveedor
+    WHERE proveedor_id = ? AND eliminado_en IS NULL
+  `).all(provId);
+
+  const recepciones = db.prepare(`
+    SELECT 'recepcion' AS tipo, id, fecha_recepcion AS fecha, descripcion AS detalle,
+           cantidad, envio_id, notas
+    FROM ifco_recepciones_proveedor
+    WHERE proveedor_id = ? AND eliminado_en IS NULL
+  `).all(provId);
+
+  const directos = db.prepare(`
+    SELECT 'despacho_directo' AS tipo, id, fecha_emision AS fecha,
+           (n_remito_ifco || ' → ' || COALESCE(empresa,'?')) AS detalle,
+           cantidad_despachada AS cantidad, cantidad_recibida, estado, fecha_sellado, sucursal
+    FROM ifco_remitos_super
+    WHERE proveedor_origen_id = ? AND origen = 'proveedor_directo' AND eliminado_en IS NULL
+  `).all(provId);
+
+  const all = envios.concat(recepciones, directos);
+  // Orden cronológico ascendente (después por id como desempate)
+  all.sort(function(a,b) {
+    if (a.fecha === b.fecha) return (a.id||0) - (b.id||0);
+    return (a.fecha||'') < (b.fecha||'') ? -1 : 1;
+  });
+
+  // Calcular delta de cada movimiento (mismo criterio que _calcSaldoProveedor)
+  return all.map(function(m) {
+    let delta = 0;
+    if (m.tipo === 'envio') {
+      // Saldo: sale cantidad enviada, vuelve cantidad recibida (esa parte se descuenta abajo)
+      // Acá registramos el envío entero como +cantidad
+      // Ojo: si el envío está finalizado, su cantidad_recibida ya está computada en las recepciones (otra tabla),
+      //      por eso solo suma "cantidad_enviada" entera y las recepciones lo bajan.
+      delta = +m.cantidad;
+    } else if (m.tipo === 'recepcion') {
+      delta = -m.cantidad;
+    } else if (m.tipo === 'despacho_directo') {
+      if (m.estado === 'sellado' || m.estado === 'presentado') {
+        delta = -(m.cantidad_recibida != null ? m.cantidad_recibida : m.cantidad);
+      } else {
+        delta = 0; // 'despachado' (en tránsito) no afecta saldo todavía
+      }
+    }
+    return Object.assign({}, m, { delta: delta });
+  });
+}
+
+// MOVIMIENTOS de un proveedor (envíos + recepciones + despachos directos)
+router.get('/proveedores/:id/movimientos', function(req, res) {
+  const provId = parseInt(req.params.id);
+  if (!provId) return res.status(400).json({ error: 'ID inválido' });
+  const p = db.prepare("SELECT id, nombre, razon_social FROM proveedores WHERE id = ?").get(provId);
+  if (!p) return res.status(404).json({ error: 'Proveedor no encontrado' });
+
+  const movimientos = _movimientosProveedor(provId);
+  const saldo = _calcSaldoProveedor(provId);
+  res.json({ proveedor: p, movimientos: movimientos, saldo: saldo });
+});
+
+// EXPORTAR movimientos a Excel (.xlsx) — PENDIENTE: requiere instalar dependency `xlsx` (SheetJS)
+// Endpoint comentado hasta que se haga `npm install xlsx`. Después descomentar y reactivar el botón
+// en el modal de movimientos del proveedor (ifcoDescargarMovimientosXlsx en panel.html).
+
 // ════════════════════════════════════════════════════════════════════════════
 // RECEPCIONES DE MERCADERÍA DEL PROVEEDOR
 // (cajones IFCO que vuelven a SG con producto cargado, opcionalmente atado a un envío)
@@ -1355,13 +1438,9 @@ router.post('/ocr/remito-super', upload.single('foto'), async function(req, res)
     '  "empresa": string — la cadena de supermercado destinataria. Devolvé el valor EXACTO tal como aparece en el remito SOLO si coincide con uno de:',
     '    "CENCOSUD", "CARREFOUR (INC SA)", "COTO", "LA COOPERATIVA OBRERA", "LA ANONIMA", "CHANGO MAS (DORINKA)".',
     '    Si lo que ves se parece a uno de esos pero está abreviado o mal escrito, devolvé el de la lista que mejor matchea. Si no matchea ninguno, devolvé el texto literal del remito.',
-    '  "sucursal": string — sucursal o centro de distribución (ej. "Lugones", "CD Quilmes")',
     '  "cantidad_despachada": número entero — total de cajones (campo "TOTAL CAJAS" o equivalente)',
     '  "producto": string — descripción del producto cargado (ej. "mandarina malvina")',
-    '  "transportista": string — nombre del transportista o empresa',
-    '  "encargado_prov_apellido": string',
-    '  "encargado_prov_nombre": string',
-    '  "encargado_prov_dni": string',
+    'NO leas ni extraigas: sucursal, transportista, encargado del proveedor, ni ningún otro dato adicional.',
     'Respondé SOLO el objeto JSON, sin texto adicional ni markdown.'
   ].join('\n');
 
@@ -1385,7 +1464,7 @@ router.post('/ocr/remito-super', upload.single('foto'), async function(req, res)
   const promptCompleto = [
     'Sos un asistente que lee remitos IFCO emitidos por SAN GERONIMO SA en Argentina.',
     'Esta foto es de un remito QUE YA VOLVIÓ SELLADO del supermercado, pero nunca se cargó al sistema cuando salió.',
-    'Tenés que extraer en una sola pasada TODOS los datos: los del despacho original + los del sellado posterior.',
+    'Tenés que extraer en una sola pasada los datos esenciales del despacho + los del sellado posterior.',
     'Devolvé un JSON con estos campos. Si un campo no se ve o no estás seguro, dejalo en null.',
     '— Datos del DESPACHO (preimpreso o tipeado):',
     '  "n_remito_ifco": string con formato "00015-XXXXXXXX" (preimpreso, esquina superior derecha)',
@@ -1393,13 +1472,8 @@ router.post('/ocr/remito-super', upload.single('foto'), async function(req, res)
     '  "empresa": string — la cadena de supermercado destinataria. Devolvé el valor EXACTO tal como aparece SOLO si coincide con uno de:',
     '    "CENCOSUD", "CARREFOUR (INC SA)", "COTO", "LA COOPERATIVA OBRERA", "LA ANONIMA", "CHANGO MAS (DORINKA)".',
     '    Si lo que ves se parece a uno de esos pero está abreviado o mal escrito, devolvé el de la lista que mejor matchea. Si no matchea ninguno, devolvé el texto literal.',
-    '  "sucursal": string — sucursal o centro de distribución',
     '  "cantidad_despachada": número entero — total de cajones (campo "TOTAL CAJAS" o equivalente)',
     '  "producto": string — descripción del producto cargado',
-    '  "transportista": string — nombre del transportista o empresa',
-    '  "encargado_prov_apellido": string',
-    '  "encargado_prov_nombre": string',
-    '  "encargado_prov_dni": string',
     '— Datos del SELLADO (manuscritos o sello del súper):',
     '  "fecha_sellado": string ISO "YYYY-MM-DD" — fecha de RECEPCIÓN del supermercado',
     '  "cantidad_recibida": número entero — cuántos cajones aceptó el súper (si no se aclara y no hay rechazo, asumí cantidad_despachada)',
@@ -1407,6 +1481,7 @@ router.post('/ocr/remito-super', upload.single('foto'), async function(req, res)
     '  "encargado_super_apellido": string — quien recibió en el súper',
     '  "encargado_super_nombre": string',
     '  "encargado_super_dni": string',
+    'NO leas ni extraigas: sucursal, transportista, encargado del proveedor, ni otros datos del despacho.',
     'Respondé SOLO el objeto JSON, sin texto adicional ni markdown.'
   ].join('\n');
 
