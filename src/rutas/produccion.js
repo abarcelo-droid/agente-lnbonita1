@@ -1169,6 +1169,93 @@ router.post('/aplicaciones', requireAuth, (req, res) => {
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
+// POST /aplicaciones/batch — registrar múltiples ejecuciones en una sola transacción
+// Body: { orden_id, fecha_real, ejecutado_txt, ejecuciones: [{lote_id, insumo_id, cantidad_real, notas?}] }
+// Sólo se registran las ejecuciones con cantidad_real > 0; el resto se ignora.
+router.post('/aplicaciones/batch', requireAuth, (req, res) => {
+  const db = getDb();
+  const { orden_id, fecha_real, ejecutado_txt, notas, ejecuciones } = req.body;
+  if (!orden_id) return res.status(400).json({ ok: false, error: 'orden_id requerido' });
+  if (!Array.isArray(ejecuciones) || ejecuciones.length === 0)
+    return res.status(400).json({ ok: false, error: 'No hay ejecuciones para registrar' });
+
+  // Filtrar las que tienen cantidad > 0
+  const validas = ejecuciones.filter(e =>
+    e && e.lote_id && e.insumo_id &&
+    Number(e.cantidad_real) > 0
+  );
+  if (validas.length === 0)
+    return res.status(400).json({ ok: false, error: 'Ingresá al menos una cantidad mayor a 0' });
+
+  try {
+    const fechaFinal = fecha_real || new Date().toISOString().slice(0,10);
+    const orden = db.prepare("SELECT campaña_id FROM pa_ordenes WHERE id=?").get(orden_id);
+    if (!orden) return res.status(404).json({ ok: false, error: 'Orden no encontrada' });
+
+    const registrar = db.transaction(() => {
+      const ids = [];
+      for (const ej of validas) {
+        const insumo = db.prepare("SELECT * FROM pa_insumos WHERE id=?").get(ej.insumo_id);
+        if (!insumo) throw new Error('Insumo no encontrado: ' + ej.insumo_id);
+
+        // Costo unitario de última compra
+        const ultimaCompra = db.prepare(`
+          SELECT ci.precio_unit FROM pa_compras_items ci
+          JOIN pa_compras c ON c.id = ci.compra_id
+          WHERE ci.insumo_id = ?
+          ORDER BY c.fecha DESC LIMIT 1
+        `).get(ej.insumo_id);
+        const costoUnit = ultimaCompra?.precio_unit || 0;
+        const cantidad  = Number(ej.cantidad_real);
+        const costoTotal = costoUnit * cantidad;
+
+        const r = db.prepare(`
+          INSERT INTO pa_aplicaciones
+            (orden_id, lote_id, insumo_id, fecha_real, cantidad_real, ejecutado_por, ejecutado_txt, costo_unitario, costo_total, notas)
+          VALUES (?,?,?,?,?,?,?,?,?,?)
+        `).run(orden_id, ej.lote_id, ej.insumo_id,
+               fechaFinal, cantidad, req.user.id,
+               ejecutado_txt || null, costoUnit, costoTotal,
+               (ej.notas || notas || null));
+
+        // Stock
+        db.prepare("UPDATE pa_insumos SET stock_actual = stock_actual - ? WHERE id = ?")
+          .run(cantidad, ej.insumo_id);
+
+        // Movimiento
+        db.prepare(`
+          INSERT INTO pa_movimientos_stock (fecha, insumo_id, tipo, cantidad, motivo, referencia_id)
+          VALUES (?,?,?,?,?,?)
+        `).run(fechaFinal, ej.insumo_id, 'salida', cantidad, 'aplicacion', r.lastInsertRowid);
+
+        // Costo por lote
+        if (orden.campaña_id && costoTotal > 0) {
+          const categoria = insumo.tipo === 'fertilizante' ? 'fertilizante' : 'agroquimico';
+          db.prepare(`
+            INSERT INTO pa_costos_lote (lote_id, campaña_id, categoria, referencia_id, fecha, monto, descripcion)
+            VALUES (?,?,?,?,?,?,?)
+          `).run(ej.lote_id, orden.campaña_id, categoria, r.lastInsertRowid,
+                 fechaFinal, costoTotal,
+                 `Aplicación OA: ${insumo.nombre}`);
+        }
+
+        ids.push(r.lastInsertRowid);
+      }
+
+      // Estado de la orden — único cálculo al final, no por cada ejecución
+      const totalLotes = db.prepare("SELECT COUNT(*) as n FROM pa_ordenes_lotes WHERE orden_id=?").get(orden_id).n;
+      const lotesAplicados = db.prepare("SELECT COUNT(DISTINCT lote_id) as n FROM pa_aplicaciones WHERE orden_id=?").get(orden_id).n;
+      const nuevoEstado = lotesAplicados >= totalLotes ? 'ejecutada' : 'en_ejecucion';
+      db.prepare("UPDATE pa_ordenes SET estado=? WHERE id=?").run(nuevoEstado, orden_id);
+
+      return ids;
+    });
+
+    const ids = registrar();
+    res.json({ ok: true, ids, count: ids.length });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
 // ─────────────────────────────────────────────────────────────────────────
 // COSTOS POR LOTE (reportes)
 // ─────────────────────────────────────────────────────────────────────────
