@@ -728,6 +728,14 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
           <div id="liq-conceptos"></div>
         </div>
         <div class="ab-card">
+          <div style="font-weight:600;margin-bottom:8px">Código de barras y CAI <span style="font-size:11px;color:var(--mut);font-weight:400">(opcional, aparecen impresos al pie del PDF)</span></div>
+          <div style="display:grid;grid-template-columns:2fr 1fr 1fr;gap:10px">
+            <div class="fl"><label>Código de barras (solo dígitos)</label><input id="liq-barcode" type="text" style="font-family:monospace" placeholder="3067325443406300002615242163883604"></div>
+            <div class="fl"><label>CAI N°</label><input id="liq-cai" type="text" style="font-family:monospace" placeholder="51524216388360"></div>
+            <div class="fl"><label>Vencimiento CAI</label><input id="liq-cai-vto" type="date"></div>
+          </div>
+        </div>
+        <div class="ab-card" style="margin-top:12px">
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
             <div class="fl"><label>Neto $</label><input id="liq-neto" type="number" step="0.01" style="text-align:right"></div>
             <div class="fl"><label>Total $</label><input id="liq-total" type="number" step="0.01" style="text-align:right"></div>
@@ -6971,6 +6979,10 @@ function liqRellenarForm() {
   document.getElementById('liq-prov-cod').value = d.prov_codigo        || '';
   document.getElementById('liq-neto').value     = d.neto  != null ? d.neto  : '';
   document.getElementById('liq-total').value    = d.total != null ? d.total : '';
+  // CAI / barcode (defaults LNB si no vienen del parse)
+  document.getElementById('liq-barcode').value  = d.codigo_barras    || '3067325443406300002615242163883604';
+  document.getElementById('liq-cai').value      = d.cai_numero       || '51524216388360';
+  document.getElementById('liq-cai-vto').value  = d.cai_vencimiento  || '2026-12-26';
   liqRenderArt(d.articulos || []);
   liqRenderMermas(d.mermas || []);
   liqRenderConc(d.conceptos || []);
@@ -7069,6 +7081,9 @@ async function liqGuardar() {
     conceptos:            _liqLeerConc(),
     neto:                 parseFloat(document.getElementById('liq-neto').value)  || 0,
     total:                parseFloat(document.getElementById('liq-total').value) || 0,
+    codigo_barras:        document.getElementById('liq-barcode').value.trim() || null,
+    cai_numero:           document.getElementById('liq-cai').value.trim() || null,
+    cai_vencimiento:      document.getElementById('liq-cai-vto').value || null,
     texto_original:       (LIQ.datos && LIQ.datos._textoOriginal) || ''
   };
   if (!body.n_liquidacion) { alert('Falta el N° de liquidación'); return; }

@@ -283,6 +283,57 @@ router.delete('/:id', function(req, res) {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Code128 (subset C) — implementación mínima para dibujar el código de barras
+// ─────────────────────────────────────────────────────────────────────────────
+const _C128 = [
+  "11011001100","11001101100","11001100110","10010011000","10010001100",
+  "10001001100","10011001000","10011000100","10001100100","11001001000",
+  "11001000100","11000100100","10110011100","10011011100","10011001110",
+  "10111001100","10011101100","10011100110","11001110010","11001011100",
+  "11001001110","11011100100","11001110100","11101101110","11101001100",
+  "11100101100","11100100110","11101100100","11100110100","11100110010",
+  "11011011000","11011000110","11000110110","10100011000","10001011000",
+  "10001000110","10110001000","10001101000","10001100010","11010001000",
+  "11000101000","11000100010","10110111000","10110001110","10001101110",
+  "10111011000","10111000110","10001110110","11101110110","11010001110",
+  "11000101110","11011101000","11011100010","11011101110","11101011000",
+  "11101000110","11100010110","11101101000","11101100010","11100011010",
+  "11101111010","11001000010","11110001010","10100110000","10100001100",
+  "10010110000","10010000110","10000101100","10000100110","10110010000",
+  "10110000100","10011010000","10011000010","10000110100","10000110010",
+  "11000010010","11001010000","11110111010","11000010100","10001111010",
+  "10100111100","10010111100","10010011110","10111100100","10011110100",
+  "10011110010","11110100100","11110010100","11110010010","11011011110",
+  "11011110110","11110110110","10101111000","10100011110","10001011110",
+  "10111101000","10111100010","11110101000","11110100010","10111011110",
+  "10111101110","11101011110","11110101110","11010000100","11010010000",
+  "11010011100","1100011101011"
+];
+function _code128Cnums(s) {
+  const digits = String(s||'').replace(/\D/g,'');
+  if (!digits) return null;
+  const padded = digits.length % 2 ? '0' + digits : digits;
+  const vals = [105]; // START C
+  for (let i=0; i<padded.length; i+=2) vals.push(parseInt(padded.substr(i,2),10));
+  let chk = vals[0];
+  for (let i=1; i<vals.length; i++) chk += i * vals[i];
+  vals.push(chk % 103);
+  vals.push(106); // STOP
+  return vals;
+}
+function _drawBarcode(doc, code, x, y, moduleW, height) {
+  if (!code) return;
+  let cx = x;
+  for (const v of code) {
+    const pat = _C128[v];
+    for (let i=0; i<pat.length; i++) {
+      if (pat[i] === '1') doc.rect(cx, y, moduleW, height, 'F');
+      cx += moduleW;
+    }
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // GET /:id/pdf — genera el PDF lo más fiel al original posible
 // ─────────────────────────────────────────────────────────────────────────────
 router.get('/:id/pdf', async function(req, res) {
@@ -297,167 +348,241 @@ router.get('/:id/pdf', async function(req, res) {
     if (!jsPDF) return res.status(503).json({ error: 'jspdf no disponible' });
 
     const doc = new jsPDF({ unit: 'mm', format: 'a4' });
-    const W = 210, H = 297, M = 12;
-    const right = W - M;
+    const W = 210, H = 297;
+    const M = 8;                 // margen exterior
+    const L = M, R = W - M;      // bordes izq/der útiles
+    const innerW = R - L;
 
     // Helpers
-    const setTxt = (sz, bold) => { doc.setFontSize(sz); doc.setFont('helvetica', bold?'bold':'normal'); };
+    const setF = (sz, bold) => { doc.setFontSize(sz); doc.setFont('helvetica', bold ? 'bold' : 'normal'); };
     const fechaFmt = (s) => { if (!s) return ''; const p = String(s).split('-'); return p.length===3 ? p[2]+'/'+p[1]+'/'+p[0] : s; };
     const moneyFmt = (n) => {
       if (n == null || isNaN(n)) return '';
       const neg = n < 0;
-      const abs = Math.abs(n);
+      const abs = Math.abs(parseFloat(n));
       const s = abs.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
       return (neg ? '-' : '') + s;
     };
+    const dollarFmt = (n) => '$ ' + moneyFmt(n);
 
-    // ── HEADER (marco superior con dos columnas) ──
-    // Marco general
+    // ═══════════════════════════════════════════════════════════════════════
+    // MARCO GENERAL (bordes redondeados)
+    // ═══════════════════════════════════════════════════════════════════════
+    doc.setLineWidth(0.6);
+    doc.setDrawColor(0);
+    doc.roundedRect(L, M, innerW, H - 2*M, 3, 3);
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // HEADER — 3 columnas separadas por líneas verticales
+    // ═══════════════════════════════════════════════════════════════════════
+    const hY = M;
+    const hH = 36;
+    const hBot = hY + hH;
+    // Anchos de columnas
+    const colA_w = innerW * 0.42;     // logo + datos LNB
+    const colB_w = innerW * 0.22;     // cuadradito A + datos fiscales
+    const colA_x = L;
+    const colB_x = L + colA_w;
+    const colC_x = L + colA_w + colB_w;
+    // Líneas divisoras del header (verticales)
+    doc.setLineWidth(0.4);
+    doc.line(colB_x, hY, colB_x, hBot);
+    doc.line(colC_x, hY, colC_x, hBot);
+    // Línea horizontal bajo el header
+    doc.line(L, hBot, R, hBot);
+
+    // ── COL A: Logo + dirección
+    setF(18, true);
+    doc.text('LA NIÑA BONITA', colA_x + 3, hY + 8);
+    setF(8.5, false);
+    doc.text('SAN GERÓNIMO S.A.', colA_x + 3, hY + 12.5);
+    setF(7.2, false);
+    doc.text(LNB.domicilio_l1, colA_x + 3, hY + 19);
+    doc.text(LNB.domicilio_l2, colA_x + 3, hY + 22.5);
+    doc.text(LNB.cod_op,       colA_x + 3, hY + 26);
+    doc.text(LNB.email,        colA_x + 3, hY + 29.5);
+    setF(8.5, true);
+    doc.text(LNB.iva_cond,     colA_x + 3, hY + 34);
+
+    // ── COL B: COD N° + cuadradito A + datos fiscales
+    setF(7.5, false);
+    doc.text('COD. N° ' + LNB.cod_cliente, colB_x + 3, hY + 5);
+    // Cuadradito grande con la "A"
+    const aSz = 14;
+    const aX = colB_x + 4;
+    const aY = hY + 7;
     doc.setLineWidth(0.5);
-    doc.rect(M, M, W - 2*M, H - 2*M);
+    doc.rect(aX, aY, aSz, aSz);
+    setF(22, true);
+    doc.text(r.iva_letra || 'A', aX + aSz/2, aY + aSz - 2.5, { align: 'center' });
+    // Datos fiscales LNB (al costado del cuadradito)
+    setF(7, false);
+    const fX = aX + aSz + 2;
+    doc.text('C.U.I.T. N°: ' + LNB.cuit,            fX, aY + 4);
+    doc.text('Convenio Multilateral: ' + LNB.cm,    fX, aY + 8);
+    doc.text('Fecha Inicio de Actividades: ' + LNB.inicio_act, fX, aY + 12);
 
-    // Línea horizontal entre header y cuerpo
-    const headerH = 38;
-    doc.line(M, M + headerH, right, M + headerH);
-    // Línea vertical que divide header en dos
-    const midX = M + (W - 2*M) * 0.45;
-    doc.line(midX, M, midX, M + headerH);
-
-    // LADO IZQUIERDO HEADER: razón social + datos
-    setTxt(16, true);
-    doc.text('LA NIÑA BONITA', M + 4, M + 9);
-    setTxt(8, false);
-    doc.text('SAN GERÓNIMO S.A.', M + 4, M + 13);
-    setTxt(7, false);
-    doc.text(LNB.domicilio_l1, M + 4, M + 19);
-    doc.text(LNB.domicilio_l2, M + 4, M + 23);
-    doc.text(LNB.cod_op, M + 4, M + 27);
-    doc.text(LNB.email, M + 4, M + 31);
-    setTxt(8, true);
-    doc.text(LNB.iva_cond, M + 4, M + 36);
-
-    // CENTRO HEADER: cuadradito con la "A"
-    const ax = midX + 4, ay = M + 6;
+    // ── COL C: LIQUIDACIÓN + N° + Fecha
+    setF(20, true);
+    doc.text('LIQUIDACIÓN', R - 3, hY + 9, { align: 'right' });
+    setF(13, true);
+    doc.text('N° ' + (r.n_liquidacion || ''), R - 3, hY + 17, { align: 'right' });
+    setF(8.5, false);
+    doc.text('Fecha', R - 18, hY + 24, { align: 'center' });
     doc.setLineWidth(0.4);
-    doc.rect(ax, ay, 14, 14);
-    setTxt(20, true);
-    doc.text(r.iva_letra || 'A', ax + 5, ay + 11);
-    setTxt(7, false);
-    doc.text('COD. N° ' + LNB.cod_cliente, ax, ay - 1);
+    doc.roundedRect(R - 33, hY + 25.5, 30, 7, 1.5, 1.5);
+    setF(11, false);
+    doc.text(fechaFmt(r.fecha), R - 18, hY + 30.5, { align: 'center' });
 
-    // Datos fiscales LNB
-    const fx = midX + 22;
-    setTxt(7, false);
-    doc.text('C.U.I.T. N°: ' + LNB.cuit, fx, M + 12);
-    doc.text('Convenio Multilateral: ' + LNB.cm, fx, M + 16);
-    doc.text('Fecha Inicio de Actividades: ' + LNB.inicio_act, fx, M + 20);
+    // ═══════════════════════════════════════════════════════════════════════
+    // REMITENTE
+    // ═══════════════════════════════════════════════════════════════════════
+    let y = hBot + 5;
+    setF(9.5, true);
+    doc.text('REMITENTE:', L + 3, y);
+    y += 5.5;
+    setF(11, false);
+    doc.text((r.remitente_nombre || '').toUpperCase(), L + 18, y);
+    setF(10, false);
+    doc.text(r.remitente_iva || 'R.I.', L + innerW * 0.65, y);
+    y += 5.5;
+    setF(10, false);
+    doc.text((r.remitente_localidad || '').toUpperCase(), L + 3, y);
+    doc.text('CP: ' + (r.remitente_cp || '0'),            L + 50, y);
+    doc.text((r.remitente_provincia || '').toUpperCase(), L + 78, y);
+    doc.text(r.remitente_cuit || '',                       L + innerW * 0.65, y);
 
-    // LADO DERECHO HEADER: título LIQUIDACIÓN + N° + fecha
-    setTxt(20, true);
-    doc.text('LIQUIDACIÓN', right - 4, M + 9, { align: 'right' });
-    setTxt(13, true);
-    doc.text('N° ' + (r.n_liquidacion || ''), right - 4, M + 17, { align: 'right' });
-    setTxt(8, false);
-    doc.text('Fecha', right - 30, M + 27, { align: 'right' });
-    doc.rect(right - 28, M + 28, 24, 6);
-    setTxt(10, false);
-    doc.text(fechaFmt(r.fecha), right - 16, M + 33, { align: 'center' });
+    y += 7;
+    setF(10, false);
+    doc.text('Fecha de Ingreso :', L + 3, y);
+    doc.text(fechaFmt(r.fecha_ingreso), L + 42, y);
+    doc.text(r.prov_codigo || '', L + 80, y);
 
-    // ── REMITENTE ──
-    let y = M + headerH + 6;
-    setTxt(8, true);
-    doc.text('REMITENTE:', M + 4, y);
-    y += 5;
-    setTxt(10, false);
-    doc.text((r.remitente_nombre || '').toUpperCase(), M + 16, y);
-    y += 5;
-    doc.text((r.remitente_localidad || '').toUpperCase(), M + 4, y);
-    doc.text('CP: ' + (r.remitente_cp || '0'), M + 50, y);
-    doc.text((r.remitente_provincia || '').toUpperCase(), M + 80, y);
-    setTxt(9, false);
-    doc.text(r.remitente_iva || 'R.I.', midX + 6, y - 5);
-    doc.text(r.remitente_cuit || '', midX + 6, y);
-
-    y += 8;
-    setTxt(9, false);
-    doc.text('Fecha de Ingreso :', M + 4, y);
-    doc.text(fechaFmt(r.fecha_ingreso), M + 40, y);
-    doc.text(r.prov_codigo || '', M + 80, y);
-
-    // ── TABLA ARTÍCULOS ──
-    y += 8;
+    // ═══════════════════════════════════════════════════════════════════════
+    // TABLA DE ARTÍCULOS
+    // ═══════════════════════════════════════════════════════════════════════
+    y += 6;
     const tblTop = y;
+    const cArt  = L + 3;
+    const cCam  = L + innerW * 0.46;
+    const cCant = L + innerW * 0.62;
+    const cPre  = L + innerW * 0.76;
+    const cImp  = R - 3;
+
     doc.setLineWidth(0.4);
-    // Encabezado
-    setTxt(8, true);
-    const cols = { art: M + 4, cam: M + 100, cant: M + 130, pre: M + 152, imp: right - 4 };
-    doc.text('Artículo',     cols.art,  y);
-    doc.text('Nro Camion',   cols.cam,  y);
-    doc.text('Cantidad',     cols.cant, y);
-    doc.text('P.',           cols.pre,  y);
-    doc.text('Importe',      cols.imp,  y, { align: 'right' });
-    y += 2;
-    doc.line(M, y, right, y); // línea bajo encabezado
+    doc.line(L, y - 1, R, y - 1);   // línea superior tabla
+    setF(9, true);
+    doc.text('Articulo',   cArt,  y + 4);
+    doc.text('Nro Camion', cCam,  y + 4);
+    doc.text('Cantidad',   cCant, y + 4);
+    doc.text('P.',         cPre,  y + 4);
+    doc.text('Importe',    cImp,  y + 4, { align: 'right' });
+    y += 6;
+    doc.line(L, y, R, y);
     y += 4;
 
-    setTxt(9, false);
+    setF(10, false);
     for (const a of r.articulos) {
-      doc.text(String(a.articulo || ''),      cols.art,  y);
-      doc.text(String(a.nro_camion || ''),    cols.cam,  y);
-      doc.text(String(a.cantidad || ''),      cols.cant, y);
-      doc.text(moneyFmt(a.precio),            cols.pre,  y);
-      doc.text('$ ' + moneyFmt(a.importe),    cols.imp,  y, { align: 'right' });
+      doc.text(String(a.articulo || ''),    cArt,  y);
+      doc.text(String(a.nro_camion || ''),  cCam,  y);
+      doc.text(String(a.cantidad || ''),    cCant, y);
+      doc.text(moneyFmt(a.precio),          cPre,  y);
+      doc.text(dollarFmt(a.importe),        cImp,  y, { align: 'right' });
       y += 5;
     }
 
-    // ── NETO (fila destacada) ──
-    y += 3;
-    setTxt(9, true);
-    doc.text('Neto:', cols.pre - 4, y, { align: 'right' });
-    doc.text('$ ' + moneyFmt(r.neto || 0), cols.imp, y, { align: 'right' });
+    // NETO (alineado a la derecha)
+    y += 4;
+    setF(10.5, true);
+    doc.text('Neto:',           cPre - 5, y, { align: 'right' });
+    doc.text(dollarFmt(r.neto), cImp,     y, { align: 'right' });
 
-    // ── MERMAS ──
-    y += 8;
-    setTxt(9, true);
-    doc.text('Mermas', M + 4, y);
+    // ═══════════════════════════════════════════════════════════════════════
+    // MERMAS
+    // ═══════════════════════════════════════════════════════════════════════
+    y += 9;
+    setF(10, true);
+    doc.setLineWidth(0.2);
+    doc.text('Mermas', L + 3, y);
+    doc.line(L + 3, y + 0.5, L + 18, y + 0.5);  // subrayado
     y += 5;
-    setTxt(8, false);
+    setF(9, false);
     for (const m of r.mermas) {
-      doc.text(String(m.descripcion || ''),                M + 8, y);
-      doc.text(String(m.cantidad || ''),                   M + 90, y);
-      doc.text(fechaFmt(m.fecha),                          M + 105, y);
-      doc.text(String(m.tipo || ''),                       M + 130, y);
-      y += 4;
+      doc.text(String(m.descripcion || ''),  L + 8,  y);
+      doc.text(String(m.cantidad || ''),     L + 95, y, { align: 'right' });
+      doc.text(fechaFmt(m.fecha),            L + 105, y);
+      doc.text(String(m.tipo || ''),         L + 130, y);
+      y += 4.2;
     }
 
-    // ── CONCEPTOS ──
+    // ═══════════════════════════════════════════════════════════════════════
+    // CONCEPTOS (IVA, comisión, etc.)
+    // ═══════════════════════════════════════════════════════════════════════
     y += 6;
-    setTxt(9, false);
+    setF(10, false);
+    const cConDesc = L + 65;
+    const cConPct  = L + 130;
+    const cConImp  = R - 3;
     for (const c of r.conceptos) {
-      doc.text(String(c.concepto || ''), M + 60, y);
-      if (c.porcentaje != null) doc.text(String(c.porcentaje), M + 130, y);
-      doc.text(moneyFmt(c.importe), cols.imp, y, { align: 'right' });
+      doc.text(String(c.concepto || ''), cConDesc, y);
+      if (c.porcentaje != null && c.porcentaje !== '') {
+        doc.text(String(c.porcentaje), cConPct, y);
+      }
+      doc.text(moneyFmt(c.importe), cConImp, y, { align: 'right' });
       y += 5;
     }
 
-    // ── TOTAL (al pie del cuerpo) ──
-    const totalY = H - M - 50;
-    setTxt(11, true);
-    doc.text('TOTAL:', M + 130, totalY);
-    doc.text('$ ' + moneyFmt(r.total || 0), right - 4, totalY, { align: 'right' });
+    // ═══════════════════════════════════════════════════════════════════════
+    // TOTAL (al pie del cuerpo, antes del barcode)
+    // ═══════════════════════════════════════════════════════════════════════
+    const totalY = H - M - 60;
+    setF(13, true);
+    doc.text('TOTAL:',             cConPct, totalY);
+    doc.text(dollarFmt(r.total),   cImp,    totalY, { align: 'right' });
 
-    // ── PIE: CAI + barras (si hay) ──
-    setTxt(7, false);
-    doc.text('Original: Blanco', M + 4, H - M - 16);
-    doc.text('Duplicado: Color',  M + 4, H - M - 12);
-    doc.text('Impreso en AG Diseño e Impresiones de Analía García', M + 30, H - M - 16);
-    doc.text('B° Parque Sur casa 5 Mza E | Cel.: 2644002300 - C.P 5425', M + 30, H - M - 12);
-    doc.text('CUIT: 27-25939792-3  del 0002-00008201 al 00009200 - Imp. DIC. 2025', M + 30, H - M - 8);
+    // ═══════════════════════════════════════════════════════════════════════
+    // CÓDIGO DE BARRAS (Code128 subset C, centrado)
+    // ═══════════════════════════════════════════════════════════════════════
+    if (r.codigo_barras && /^\d+$/.test(String(r.codigo_barras).replace(/\s/g,''))) {
+      const code = _code128Cnums(r.codigo_barras);
+      if (code) {
+        const moduleW = 0.36;
+        const totalModules = code.reduce((sum, v) => sum + _C128[v].length, 0);
+        const bcW = totalModules * moduleW;
+        const bcX = L + (innerW - bcW) / 2;
+        const bcY = H - M - 38;
+        const bcH = 11;
+        doc.setFillColor(0,0,0);
+        _drawBarcode(doc, code, bcX, bcY, moduleW, bcH);
+        // Texto del número debajo
+        setF(8, false);
+        doc.text(String(r.codigo_barras), L + innerW/2, bcY + bcH + 3.5, { align: 'center' });
+      }
+    }
 
+    // ═══════════════════════════════════════════════════════════════════════
+    // PIE — datos imprenta (izq) + CAI (derecha con borde redondeado)
+    // ═══════════════════════════════════════════════════════════════════════
+    const pieY = H - M - 18;
+    // Imprenta (izquierda)
+    setF(7, true);
+    doc.text('Original: Blanco',  L + 3, pieY);
+    doc.text('Duplicado: Color',  L + 3, pieY + 3.5);
+    setF(6.5, false);
+    doc.text('Impreso en AG Diseño e Impresiones de Analía García', L + 28, pieY);
+    doc.text('B° Parque Sur casa 5 Mza E | Cel.: 2644002300 - C.P 5425', L + 28, pieY + 3.5);
+    doc.text('CUIT: 27-25939792-3  del 0002-00008201 al 00009200 - Imp. DIC. 2025', L + 28, pieY + 7);
+
+    // CAI (derecha) con borde redondeado destacado
     if (r.cai_numero) {
-      setTxt(9, true);
-      doc.text('C.A.I N° ' + r.cai_numero, right - 4, H - M - 14, { align: 'right' });
-      doc.text('Fecha Vto: ' + fechaFmt(r.cai_vencimiento), right - 4, H - M - 8, { align: 'right' });
+      const caiW = 70;
+      const caiX = R - caiW - 1;
+      const caiY = pieY - 3;
+      doc.setLineWidth(0.5);
+      doc.roundedRect(caiX, caiY, caiW, 12, 1.5, 1.5);
+      setF(10, true);
+      doc.text('C.A.I N° ' + r.cai_numero,                       caiX + caiW/2, caiY + 5, { align: 'center' });
+      doc.text('Fecha Vto: ' + fechaFmt(r.cai_vencimiento),      caiX + caiW/2, caiY + 10, { align: 'center' });
     }
 
     // Devolver PDF
