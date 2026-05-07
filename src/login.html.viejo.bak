@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
+<title>La Niña Bonita — Acceso</title>
+<link rel="icon" type="image/png" href="/static/icon-32.png">
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{font-family:'Nunito','Segoe UI',Arial,sans-serif;color:#1A1F2E;background:#FBF7EE;overflow:hidden}
+
+.shell{display:grid;grid-template-columns:1.2fr 1fr;min-height:100vh}
+
+/* ============ Panel izquierdo (branding) ============ */
+.brand{position:relative;overflow:hidden;color:#FBF7EE;padding:48px 56px;display:flex;flex-direction:column;justify-content:space-between;
+  background-image:url('/static/bg-finca.jpg');background-size:cover;background-position:center}
+.brand .overlay{position:absolute;inset:0;background:linear-gradient(180deg,rgba(15,38,71,.55) 0%,rgba(15,38,71,.78) 60%,rgba(15,38,71,.92) 100%);pointer-events:none}
+.brand>*{position:relative;z-index:1}
+
+.brand-top{position:relative;display:flex;align-items:center;gap:14px}
+.brand-top svg{display:block}
+.brand-name{font-weight:800;font-size:18px;letter-spacing:.02em;line-height:1.1}
+.brand-sub{font-size:11px;color:rgba(255,255,255,.7);letter-spacing:.18em;text-transform:uppercase;margin-top:4px}
+
+.brand-hero{position:relative;max-width:480px}
+.brand-hero .hat{margin-bottom:28px;animation:rise 900ms cubic-bezier(.2,.8,.2,1) both}
+.brand-hero h1{font-weight:800;font-size:44px;line-height:1.05;letter-spacing:-.01em;animation:rise 900ms .2s cubic-bezier(.2,.8,.2,1) both}
+.brand-hero p{font-size:15px;color:rgba(255,255,255,.78);margin-top:18px;line-height:1.5;max-width:420px;animation:rise 900ms .38s cubic-bezier(.2,.8,.2,1) both}
+
+@keyframes rise{0%{opacity:0;transform:translateY(14px)}100%{opacity:1;transform:translateY(0)}}
+
+.brand-foot{position:relative;display:flex;justify-content:space-between;align-items:center;font-size:11.5px;color:rgba(255,255,255,.55)}
+
+/* ============ Panel derecho (form) ============ */
+.form-wrap{display:flex;flex-direction:column;justify-content:center;padding:48px 64px;background:#FBF7EE}
+.form{max-width:380px;width:100%;margin:0 auto}
+
+.eyebrow{font-size:11px;font-weight:700;letter-spacing:.18em;text-transform:uppercase;color:#5B7FB0}
+.form h2{font-weight:800;font-size:30px;color:#0F2647;margin-top:6px;line-height:1.15}
+.lead{font-size:13.5px;color:#6B7283;margin-top:8px;line-height:1.5}
+
+.email-wrap{margin-top:28px}
+.email-wrap label,.pin-label{font-size:11px;font-weight:700;color:#3A4253;letter-spacing:.14em;text-transform:uppercase;display:block;margin-bottom:8px}
+.email-wrap input{width:100%;padding:11px 14px;border:1px solid #DDE2EC;background:#fff;border-radius:8px;font-size:14px;font-family:inherit;color:#1A1F2E;outline:none;transition:border-color .15s,box-shadow .15s}
+.email-wrap input:focus{border-color:#1B3A6B;box-shadow:0 0 0 3px rgba(27,58,107,.12)}
+
+.pin-block{margin-top:22px}
+.pin-dots{display:flex;justify-content:center;gap:14px;margin-bottom:20px}
+.pin-dot{width:16px;height:16px;border-radius:50%;border:1.5px solid #DDE2EC;background:#fff;transition:all .15s}
+.pin-dot.filled{background:#1B3A6B;border-color:#1B3A6B}
+
+.keypad{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.key{background:#fff;border:1px solid #DDE2EC;border-radius:10px;height:54px;font-size:20px;font-weight:700;color:#0F2647;cursor:pointer;transition:all .1s;-webkit-tap-highlight-color:transparent;user-select:none;font-family:inherit}
+.key:hover{background:#F5E9C9;border-color:#B8C0CF}
+.key:active{background:#1B3A6B;color:#fff;border-color:#1B3A6B;transform:scale(.96)}
+.key.del{background:transparent;color:#8C1A1F;border-color:transparent;font-size:18px}
+.key.del:hover{background:#F5DCDD}
+.key.empty{background:transparent;border:none;cursor:default;pointer-events:none}
+
+.btn-login{width:100%;margin-top:18px;padding:13px;background:#1B3A6B;color:#FBF7EE;border:none;border-radius:8px;font-size:14px;font-weight:800;cursor:pointer;letter-spacing:.04em;display:none;align-items:center;justify-content:center;gap:8px;font-family:inherit;transition:background .15s,transform .1s}
+.btn-login.show{display:flex}
+.btn-login:hover{background:#0F2647}
+.btn-login:active{transform:scale(.98)}
+.btn-login:disabled{opacity:.6;cursor:wait}
+
+.error{color:#8C1A1F;font-size:12.5px;text-align:center;margin-top:12px;min-height:18px;font-weight:600}
+
+.ip-card{margin-top:32px;padding:12px 14px;background:#fff;border:1px solid #DDE2EC;border-radius:10px;display:flex;align-items:center;gap:12px}
+.ip-icon{width:32px;height:32px;border-radius:8px;background:#EFE6D2;display:flex;align-items:center;justify-content:center;flex-shrink:0;color:#1B3A6B}
+.ip-text{flex:1;font-size:11.5px;color:#3A4253;line-height:1.4}
+.ip-text b{color:#1A1F2E;display:block}
+
+/* ============ Mobile ============ */
+@media(max-width:880px){
+  .shell{grid-template-columns:1fr;min-height:100vh}
+  body{overflow:auto}
+  .brand{padding:28px 24px;min-height:auto}
+  .brand-hero{margin:24px 0}
+  .brand-hero h1{font-size:30px}
+  .brand-hero .hat svg{width:80px;height:80px}
+  .brand-hero p{font-size:13.5px}
+  .brand-foot{margin-top:18px;font-size:10.5px}
+  .form-wrap{padding:32px 24px}
+  .form h2{font-size:24px}
+  .key{height:48px;font-size:18px}
+}
+</style>
+</head>
+<body>
+<div class="shell">
+
+  <!-- Panel izquierdo: branding -->
+  <div class="brand">
+    <div class="overlay"></div>
+
+    <div class="brand-top">
+      <svg viewBox="0 0 200 200" width="42" height="42"><circle cx="100" cy="115" r="34" fill="#FBF7EE"/><path d="M 10 145 Q 100 80 190 145" fill="none" stroke="#FBF7EE" stroke-width="14" stroke-linecap="round"/></svg>
+      <div>
+        <div class="brand-name">La Niña Bonita</div>
+        <div class="brand-sub">Sistema de Gestión</div>
+      </div>
+    </div>
+
+    <div class="brand-hero">
+      <div class="hat">
+        <svg viewBox="0 0 200 200" width="140" height="140"><circle cx="100" cy="115" r="34" fill="#FBF7EE"/><path d="M 10 145 Q 100 80 190 145" fill="none" stroke="#FBF7EE" stroke-width="14" stroke-linecap="round"/></svg>
+      </div>
+      <h1>De la finca<br>a nuestro cliente.</h1>
+      <p>Gestión integral de cosecha, packing, logística y ventas.<br>San Juan · Argentina.</p>
+    </div>
+
+    <div class="brand-foot">
+      <div>© 2025 La Niña Bonita S.A.</div>
+      <div>v 3.0</div>
+    </div>
+  </div>
+
+  <!-- Panel derecho: form -->
+  <div class="form-wrap">
+    <div class="form">
+      <div class="eyebrow">Bienvenido</div>
+      <h2>Ingresá a tu cuenta</h2>
+      <p class="lead">Usá tu email y tu PIN de 4 dígitos. Si no tenés acceso, hablá con administración.</p>
+
+      <div class="email-wrap">
+        <label for="email">Email</label>
+        <input type="email" id="email" placeholder="tu@email.com" autocomplete="email" inputmode="email"
+          onkeydown="if(event.key==='Enter'){event.preventDefault();document.getElementById('email').blur();}">
+      </div>
+
+      <div class="pin-block">
+        <div class="pin-label">PIN de acceso</div>
+        <div class="pin-dots">
+          <div class="pin-dot" id="dot-0"></div>
+          <div class="pin-dot" id="dot-1"></div>
+          <div class="pin-dot" id="dot-2"></div>
+          <div class="pin-dot" id="dot-3"></div>
+        </div>
+        <div class="keypad">
+          <button class="key" onclick="pinKey('1')">1</button>
+          <button class="key" onclick="pinKey('2')">2</button>
+          <button class="key" onclick="pinKey('3')">3</button>
+          <button class="key" onclick="pinKey('4')">4</button>
+          <button class="key" onclick="pinKey('5')">5</button>
+          <button class="key" onclick="pinKey('6')">6</button>
+          <button class="key" onclick="pinKey('7')">7</button>
+          <button class="key" onclick="pinKey('8')">8</button>
+          <button class="key" onclick="pinKey('9')">9</button>
+          <button class="key empty"></button>
+          <button class="key" onclick="pinKey('0')">0</button>
+          <button class="key del" onclick="pinDel()">⌫</button>
+        </div>
+      </div>
+
+      <button class="btn-login" id="btn-login" onclick="doLogin()">Ingresar →</button>
+      <div class="error" id="error"></div>
+
+      <div class="ip-card">
+        <div class="ip-icon">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3 L3 6 V21 L9 18 L15 21 L21 18 V3 L15 6 Z M9 3 V18 M15 6 V21"/></svg>
+        </div>
+        <div class="ip-text">
+          <b>Acceso seguro</b>
+          Tu sesión queda asociada a este dispositivo.
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+var pin = '';
+var nextParam = new URLSearchParams(window.location.search).get('next') || '';
+
+function pinKey(d) {
+  if (pin.length >= 4) return;
+  pin += d;
+  updateDots();
+  if (pin.length === 4) {
+    document.getElementById('btn-login').classList.add('show');
+    var email = document.getElementById('email').value.trim();
+    if (email) setTimeout(doLogin, 200);
+  }
+}
+function pinDel() {
+  if (!pin.length) return;
+  pin = pin.slice(0,-1);
+  document.getElementById('btn-login').classList.remove('show');
+  updateDots();
+  document.getElementById('error').textContent = '';
+}
+function updateDots() {
+  for (var i=0; i<4; i++) {
+    document.getElementById('dot-'+i).classList.toggle('filled', i < pin.length);
+  }
+}
+function doLogin() {
+  var email = document.getElementById('email').value.trim();
+  var errEl = document.getElementById('error');
+  errEl.textContent = '';
+  if (!email) { errEl.textContent = 'Ingresá tu email'; return; }
+  if (pin.length !== 4) { errEl.textContent = 'Ingresá tu PIN de 4 dígitos'; return; }
+
+  var btn = document.getElementById('btn-login');
+  btn.textContent = 'Verificando…'; btn.disabled = true;
+
+  fetch('/api/auth/login', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ email: email, pin: pin, next: nextParam })
+  })
+  .then(function(r){ return r.json(); })
+  .then(function(res) {
+    if (res.ok) {
+      window.location.href = res.redirect_to || '/panel';
+    } else {
+      errEl.textContent = res.error || 'Error al ingresar';
+      pin = ''; updateDots();
+      btn.textContent = 'Ingresar →'; btn.disabled = false;
+      btn.classList.remove('show');
+    }
+  })
+  .catch(function() {
+    errEl.textContent = 'Error de conexión';
+    btn.textContent = 'Ingresar →'; btn.disabled = false;
+  });
+}
+document.addEventListener('keydown', function(e) {
+  if (document.activeElement === document.getElementById('email')) return;
+  if (e.key >= '0' && e.key <= '9') pinKey(e.key);
+  if (e.key === 'Backspace') pinDel();
+  if (e.key === 'Enter' && pin.length === 4) doLogin();
+});
+</script>
+</body>
+</html>
