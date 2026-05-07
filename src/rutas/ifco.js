@@ -40,6 +40,45 @@ try {
 // Columna para guardar a quién se mandó el mail (al usar "Enviar a IFCO")
 try { db.exec("ALTER TABLE ifco_remitos_super ADD COLUMN email_enviado_a TEXT"); } catch(_){}
 
+// Migración del CHECK constraint en `estado`. La tabla original tiene CHECK que NO incluye 'enviado',
+// y por eso el UPDATE a 'enviado' (Enviar a IFCO) falla con: CHECK constraint failed.
+// Reconstruimos la tabla con el constraint actualizado. Idempotente: solo corre si detecta el constraint viejo.
+try {
+  const tblSql = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='ifco_remitos_super'").get();
+  const sqlText = tblSql && tblSql.sql ? String(tblSql.sql) : '';
+  // Si tiene constraint pero NO menciona 'enviado', hay que reconstruir
+  const tieneCheckEstado = /estado.*CHECK|CHECK.*estado/i.test(sqlText);
+  const incluyeEnviado   = /'enviado'/.test(sqlText);
+  if (tieneCheckEstado && !incluyeEnviado) {
+    console.log('[IFCO] Migrando CHECK constraint de estado para incluir "enviado"');
+    const cols = db.prepare("PRAGMA table_info(ifco_remitos_super)").all();
+    const colNames = cols.map(function(c){ return '"' + c.name + '"'; }).join(', ');
+    const colDefs = cols.map(function(c) {
+      let def = '"' + c.name + '"';
+      if (c.type) def += ' ' + c.type;
+      if (c.pk) def += ' PRIMARY KEY';
+      // Reemplazo del CHECK estado: incluir 'enviado'
+      if (c.name === 'estado') {
+        def += " CHECK (estado IN ('despachado','sellado','enviado','presentado','anulado'))";
+      } else if (c.notnull && !c.pk) {
+        def += ' NOT NULL';
+      }
+      if (c.dflt_value !== null) def += ' DEFAULT ' + c.dflt_value;
+      return def;
+    }).join(', ');
+    const tx = db.transaction(function() {
+      db.exec("ALTER TABLE ifco_remitos_super RENAME TO _old_remitos_super_v1");
+      db.exec("CREATE TABLE ifco_remitos_super (" + colDefs + ")");
+      db.exec("INSERT INTO ifco_remitos_super (" + colNames + ") SELECT " + colNames + " FROM _old_remitos_super_v1");
+      db.exec("DROP TABLE _old_remitos_super_v1");
+    });
+    tx();
+    console.log('[IFCO] Migración OK: CHECK estado ahora incluye "enviado"');
+  }
+} catch(e) {
+  console.error('[IFCO] Error migrando CHECK estado:', e.message);
+}
+
 // Estado de la recepción: 'en_viaje' (proveedor ya despachó pero SG no recibió),
 // 'recibido' (confirmada por SG, suma stock + descuenta saldo proveedor),
 // 'rechazado' (SG no aceptó la mercadería, no afecta nada).
@@ -184,7 +223,9 @@ function _cellValue(cell) {
   return v;
 }
 
-// Parsea el Excel de IFCO buscando la sección "Entregas a Cadenas"
+// Parsea el Excel de IFCO. Soporta dos formatos:
+//   FORMATO VIEJO: hoja "Cronologico" con sección "Entregas a Cadenas" y columnas Fecha|N°|Cliente|Detalle|Entradas|Salidas
+//   FORMATO NUEVO: hoja "Det. Cronologico" con header "Fecha doc|Nº Remito|cuenta|Detalle|INGRESOS|EGRESOS|STOCK"
 async function _parsearExcelIFCO(buffer) {
   const ExcelJS = await _getExcelJS();
   if (!ExcelJS) throw new Error('Librería exceljs no disponible en el servidor');
@@ -192,15 +233,106 @@ async function _parsearExcelIFCO(buffer) {
   const wb = new ExcelJS.Workbook();
   await wb.xlsx.load(buffer);
 
-  // Buscar hoja "Cronologico" (case-insensitive) o usar la primera
-  let ws = null;
-  wb.eachSheet(function(sheet) {
-    if (!ws && sheet.name.toLowerCase().startsWith('cronologico')) ws = sheet;
-  });
-  if (!ws && wb.worksheets.length > 0) ws = wb.worksheets[0];
-  if (!ws) throw new Error('El archivo no tiene hojas');
+  if (wb.worksheets.length === 0) throw new Error('El archivo no tiene hojas');
 
-  // Buscar el inicio de "Entregas a Cadenas"
+  // Probar las hojas en orden de probabilidad. Para cada una intentar primero formato viejo, después nuevo.
+  // La detección la hace cada parser internamente; si no aplica, devuelve null.
+  // Damos prioridad a la hoja cuyo nombre empiece con "cronologico" / "det. cronologico".
+  const hojasOrdenadas = [];
+  wb.eachSheet(function(sheet) {
+    const n = sheet.name.toLowerCase();
+    if (n.includes('cronologico')) hojasOrdenadas.unshift(sheet);
+    else hojasOrdenadas.push(sheet);
+  });
+
+  const errores = [];
+  for (const ws of hojasOrdenadas) {
+    try {
+      const r = _parsearFormatoNuevo(ws);
+      if (r && r.remitos.length > 0) return r;
+    } catch(e) { errores.push('[nuevo/'+ws.name+'] '+e.message); }
+    try {
+      const r = _parsearFormatoViejo(ws);
+      if (r && r.remitos.length > 0) return r;
+    } catch(e) { errores.push('[viejo/'+ws.name+'] '+e.message); }
+  }
+  throw new Error('No se pudo identificar el formato del Excel. Probá con otro archivo. Detalles: ' + errores.join(' | '));
+}
+
+// FORMATO NUEVO — header en alguna fila con columnas "Nº Remito" + "EGRESOS"
+function _parsearFormatoNuevo(ws) {
+  // Buscar la fila de header escaneando las primeras 30 filas
+  let headerRow = -1;
+  let cN = -1, cFecha = -1, cDet = -1, cEgresos = -1; // índices de columna (1-based)
+  const maxScan = Math.min(30, ws.rowCount);
+  for (let i = 1; i <= maxScan; i++) {
+    const row = ws.getRow(i);
+    let foundN = -1, foundEg = -1, foundFecha = -1, foundDet = -1;
+    for (let c = 1; c <= ws.columnCount; c++) {
+      const v = _cellValue(row.getCell(c));
+      if (v == null) continue;
+      const s = String(v).trim().toLowerCase();
+      if (foundN < 0     && (s === 'nº remito' || s === 'n° remito' || s === 'no remito' || s === 'remito')) foundN = c;
+      if (foundEg < 0    && s.startsWith('egreso'))                                                          foundEg = c;
+      if (foundFecha < 0 && (s === 'fecha doc' || s === 'fecha' || s.startsWith('fecha')))                   foundFecha = c;
+      if (foundDet < 0   && s === 'detalle')                                                                 foundDet = c;
+    }
+    if (foundN > 0 && foundEg > 0) {
+      headerRow = i; cN = foundN; cEgresos = foundEg;
+      cFecha = foundFecha; cDet = foundDet;
+      break;
+    }
+  }
+  if (headerRow < 0) return null; // no es este formato
+
+  const remitos = [];
+  for (let i = headerRow + 1; i <= ws.rowCount; i++) {
+    const row = ws.getRow(i);
+    const nRem = _cellValue(row.getCell(cN));
+    const egr  = _cellValue(row.getCell(cEgresos));
+    if (!nRem || !egr) continue;
+    const cant = parseInt(egr);
+    if (!cant || cant <= 0) continue; // Solo egresos > 0
+
+    const detalleVal = cDet > 0 ? _cellValue(row.getCell(cDet)) : null;
+    const detalleStr = detalleVal ? String(detalleVal).trim() : '';
+    // Excluir ajustes
+    if (/ajuste/i.test(detalleStr)) continue;
+    const nRemStr = String(nRem).trim();
+    if (/^IC[-\s]/i.test(nRemStr)) continue; // N° tipo "IC-20251215-1423" = ajuste interno
+    if (!/\d{4,}/.test(nRemStr)) continue;   // ignora filas sin número real (subtítulos)
+
+    const normalizado = _normalizarNumeroRemito(nRemStr);
+    if (!normalizado) continue;
+
+    let fechaIso = null;
+    if (cFecha > 0) {
+      const fv = _cellValue(row.getCell(cFecha));
+      if (fv instanceof Date) fechaIso = fv.toISOString().slice(0,10);
+      else if (fv != null) {
+        const m = String(fv).match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})/);
+        if (m) {
+          const yyyy = m[3].length === 2 ? '20' + m[3] : m[3];
+          fechaIso = yyyy + '-' + m[2].padStart(2,'0') + '-' + m[1].padStart(2,'0');
+        }
+      }
+    }
+
+    remitos.push({
+      n_remito_archivo:     nRemStr,
+      n_remito_sistema:     _archivoANumeroSistema(nRemStr),
+      n_remito_normalizado: normalizado,
+      fecha:                fechaIso,
+      cliente:              detalleStr || null,
+      detalle:              detalleStr || null,
+      cantidad:             cant
+    });
+  }
+  return { remitos: remitos };
+}
+
+// FORMATO VIEJO — busca la sección "Entregas a Cadenas" como subtítulo
+function _parsearFormatoViejo(ws) {
   let inicio = -1;
   ws.eachRow({ includeEmpty: true }, function(row, rowNumber) {
     if (inicio !== -1) return;
@@ -209,9 +341,8 @@ async function _parsearExcelIFCO(buffer) {
       inicio = rowNumber + 1;
     }
   });
-  if (inicio < 0) throw new Error('No se encontró la sección "Entregas a Cadenas" en el archivo');
+  if (inicio < 0) return null;
 
-  // Recorrer hasta el fin (3 filas vacías consecutivas o nueva sección sin N° remito)
   const remitos = [];
   let vaciasSeguidas = 0;
   const ultimaFila = ws.rowCount;
@@ -232,7 +363,6 @@ async function _parsearExcelIFCO(buffer) {
     }
     vaciasSeguidas = 0;
 
-    // Subtítulo de otra sección (texto en col A, sin N° en B)
     if (c0 && !c1 && typeof c0 === 'string' && !/^\d/.test(c0.toString().trim()) && !c0.toString().match(/\d{4}/)) {
       break;
     }
@@ -242,7 +372,6 @@ async function _parsearExcelIFCO(buffer) {
     const normalizado = _normalizarNumeroRemito(nRemitoArchivo);
     if (!normalizado) continue;
 
-    // Fecha (col A): puede ser Date o string DD/MM/YYYY
     let fechaIso = null;
     if (c0 instanceof Date) {
       fechaIso = c0.toISOString().slice(0, 10);
@@ -255,7 +384,6 @@ async function _parsearExcelIFCO(buffer) {
       }
     }
 
-    // Salidas (col F = 6) — vienen negativas. Si no hay, fallback a entradas (col E = 5)
     const salidas = parseInt(c5 || 0);
     const entradas = parseInt(c4 || 0);
     const cantidad = salidas < 0 ? -salidas : (entradas || Math.abs(salidas));
@@ -270,8 +398,7 @@ async function _parsearExcelIFCO(buffer) {
       cantidad:            cantidad
     });
   }
-
-  return { remitos };
+  return { remitos: remitos };
 }
 
 const router = express.Router();
@@ -1464,6 +1591,23 @@ router.get('/proveedores-saldos', function(req, res) {
   res.json(result);
 });
 
+// Despachos a súper agrupados por mes (últimos 12 meses)
+router.get('/despachos-por-mes', function(req, res) {
+  const rows = db.prepare(`
+    SELECT
+      strftime('%Y-%m', fecha_emision) AS mes,
+      COUNT(*) AS remitos,
+      COALESCE(SUM(cantidad_despachada), 0) AS cajones
+    FROM ifco_remitos_super
+    WHERE eliminado_en IS NULL
+      AND fecha_emision IS NOT NULL
+      AND fecha_emision >= date('now','localtime','-12 months')
+    GROUP BY mes
+    ORDER BY mes DESC
+  `).all();
+  res.json(rows);
+});
+
 // Helper: arma la lista cronológica de movimientos de un proveedor
 function _movimientosProveedor(provId) {
   const envios = db.prepare(`
@@ -1539,6 +1683,147 @@ router.get('/proveedores/:id/movimientos', function(req, res) {
   const movimientos = _movimientosProveedor(provId);
   const saldo = _calcSaldoProveedor(provId);
   res.json({ proveedor: p, movimientos: movimientos, saldo: saldo });
+});
+
+// PDF con los movimientos del proveedor (mismo contenido que el modal)
+let _ifcoJsPDF = null;
+async function _getIfcoJsPDF() {
+  if (_ifcoJsPDF) return _ifcoJsPDF;
+  try {
+    const mod = await import('jspdf');
+    _ifcoJsPDF = mod.jsPDF || mod.default || mod;
+    return _ifcoJsPDF;
+  } catch(e) { console.error('[IFCO] jspdf no disponible:', e.message); return null; }
+}
+
+router.get('/proveedores/:id/movimientos.pdf', async function(req, res) {
+  try {
+    const provId = parseInt(req.params.id);
+    if (!provId) return res.status(400).json({ error: 'ID inválido' });
+    const p = db.prepare("SELECT id, nombre, razon_social FROM proveedores WHERE id = ?").get(provId);
+    if (!p) return res.status(404).json({ error: 'Proveedor no encontrado' });
+
+    const jsPDF = await _getIfcoJsPDF();
+    if (!jsPDF) return res.status(503).json({ error: 'jspdf no disponible' });
+
+    const movimientos = _movimientosProveedor(provId);
+    const saldo = _calcSaldoProveedor(provId);
+
+    const doc = new jsPDF({ unit: 'mm', format: 'a4' });
+    const W = 210, H = 297, M = 14;
+    const L = M, R = W - M, innerW = R - L;
+    const setF = (sz, bold) => { doc.setFontSize(sz); doc.setFont('helvetica', bold ? 'bold' : 'normal'); };
+    const fechaFmt = (s) => { if (!s) return ''; const p = String(s).split(' ')[0].split('-'); return p.length===3 ? p[2]+'/'+p[1]+'/'+p[0] : s; };
+    const fmt = (n) => Number(n||0).toLocaleString('es-AR');
+
+    // Header
+    setF(16, true);
+    doc.text('Movimientos de cajones IFCO', L, M + 5);
+    setF(10, false);
+    doc.setTextColor(110);
+    doc.text('LA NIÑA BONITA — San Gerónimo S.A.', L, M + 10);
+    doc.setTextColor(0);
+
+    // Datos del proveedor + saldo (caja destacada)
+    let y = M + 18;
+    doc.setLineWidth(0.4);
+    doc.setFillColor(248, 248, 248);
+    doc.roundedRect(L, y, innerW, 18, 2, 2, 'FD');
+    setF(13, true);
+    doc.text(p.nombre || '—', L + 4, y + 7);
+    setF(9, false);
+    doc.setTextColor(110);
+    doc.text(p.razon_social || '', L + 4, y + 12);
+    doc.setTextColor(0);
+    // Saldo a la derecha
+    setF(8, false);
+    doc.setTextColor(110);
+    const saldoLabel = saldo > 0 ? 'EN PODER DEL PROVEEDOR' : (saldo < 0 ? 'EXCESO ENTREGADO AL PROVEEDOR' : 'SALDO');
+    doc.text(saldoLabel, R - 4, y + 6, { align: 'right' });
+    doc.setTextColor(saldo < 0 ? 200 : (saldo > 0 ? 30 : 110), saldo < 0 ? 30 : (saldo > 0 ? 130 : 110), saldo < 0 ? 30 : (saldo > 0 ? 60 : 110));
+    setF(16, true);
+    doc.text(fmt(saldo) + ' caj.', R - 4, y + 14, { align: 'right' });
+    doc.setTextColor(0);
+
+    y += 24;
+    setF(9, false);
+    doc.setTextColor(110);
+    doc.text(movimientos.length + ' movimientos', L, y);
+    doc.setTextColor(0);
+    y += 5;
+
+    // Encabezados de tabla
+    const cFecha  = L;
+    const cTipo   = L + 28;
+    const cDet    = L + 60;
+    const cCant   = L + innerW - 50;
+    const cEst    = L + innerW - 22;
+    setF(8.5, true);
+    doc.setLineWidth(0.3);
+    doc.line(L, y, R, y);
+    y += 4;
+    doc.text('FECHA',    cFecha, y);
+    doc.text('TIPO',     cTipo,  y);
+    doc.text('DETALLE',  cDet,   y);
+    doc.text('CANT.',    cCant + 24, y, { align: 'right' });
+    doc.text('ESTADO',   cEst,   y);
+    y += 2;
+    doc.line(L, y, R, y);
+    y += 4;
+
+    // Filas
+    setF(8.5, false);
+    const labelTipo = (t) => t === 'envio' ? 'Envío' : t === 'recepcion' ? 'Recepción' : 'Directo súper';
+    const truncar = (s, max) => { s = String(s||''); return s.length > max ? s.slice(0, max - 1) + '…' : s; };
+
+    for (const m of movimientos) {
+      // Salto de página si no entra
+      if (y > H - 25) {
+        doc.addPage();
+        y = M + 8;
+        setF(8.5, true);
+        doc.line(L, y, R, y);
+        y += 4;
+        doc.text('FECHA', cFecha, y);
+        doc.text('TIPO',  cTipo,  y);
+        doc.text('DETALLE', cDet, y);
+        doc.text('CANT.', cCant + 24, y, { align: 'right' });
+        doc.text('ESTADO', cEst, y);
+        y += 2;
+        doc.line(L, y, R, y);
+        y += 4;
+        setF(8.5, false);
+      }
+      doc.text(fechaFmt(m.fecha),         cFecha, y);
+      doc.text(labelTipo(m.tipo),         cTipo,  y);
+      doc.text(truncar(m.detalle, 55),    cDet,   y);
+      const deltaTxt = (m.delta > 0 ? '+' : '') + fmt(m.delta);
+      if (m.delta < 0) doc.setTextColor(180, 30, 30);
+      else if (m.delta > 0) doc.setTextColor(30, 130, 60);
+      doc.text(deltaTxt, cCant + 24, y, { align: 'right' });
+      doc.setTextColor(0);
+      doc.text(String(m.estado || '—'),   cEst, y);
+      y += 5;
+      // Línea separadora suave
+      doc.setDrawColor(230);
+      doc.line(L, y - 1.5, R, y - 1.5);
+      doc.setDrawColor(0);
+    }
+
+    // Pie
+    setF(7, false);
+    doc.setTextColor(140);
+    doc.text('Generado el ' + new Date().toLocaleString('es-AR'), L, H - 8);
+    doc.text('Página 1 de ' + doc.internal.getNumberOfPages(), R, H - 8, { align: 'right' });
+
+    const buf = Buffer.from(doc.output('arraybuffer'));
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', 'inline; filename="movimientos-' + (p.nombre || provId).replace(/[^a-z0-9]+/gi,'_') + '.pdf"');
+    res.send(buf);
+  } catch(e) {
+    console.error('[IFCO][movimientos.pdf] error:', e);
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // EXPORTAR movimientos a Excel (.xlsx) — PENDIENTE: requiere instalar dependency `xlsx` (SheetJS)
