@@ -20,6 +20,7 @@ import climaRouter        from "./rutas/clima.js";
 import ifcoRouter         from "./rutas/ifco.js";
 import proveedoresRouter  from "./rutas/proveedores.js";
 import pagosRouter        from "./rutas/pagos.js";
+import liquidacionesRouter from "./rutas/liquidaciones.js";
 import { guardarSnapshotCRM } from "./servicios/db.js";
 import { syncSheets } from "./servicios/sheets.js";
 
@@ -146,6 +147,7 @@ app.use("/api/ifco",   ifcoRouter);
 app.use("/api/pa/cuentas",      cuentasRouter);
 app.use("/api/pa/proveedores",  proveedoresRouter);
 app.use("/api/pa/pagos",        pagosRouter);
+app.use("/api/liquidaciones",   liquidacionesRouter);
 app.use("/api/pa/clima",        climaRouter);
 app.use("/api/pa",     produccionRouter);
 app.use("/api/pa/scout", scoutRouter);

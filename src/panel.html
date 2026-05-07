@@ -216,6 +216,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   <div class="ni" data-sec="ab-ifcos"><span class="dot da"></span>📦 IFCOs</div>
   <div class="ni" data-sec="ab-mandata"><span class="dot de"></span>Mandata</div>
   <div class="ni" data-sec="ab-gastos"><span class="dot de"></span>Gastos</div>
+  <div class="ni" data-sec="ab-liquidaciones"><span class="dot db"></span>📄 Liquidaciones</div>
   <div class="ni" data-sec="ingreso-factura"><span class="dot db"></span>Ingreso de Factura</div>
   <div class="ng" style="margin-top:8px">Administracion</div>
   <div class="ni" data-sec="cobranza"><span class="dot db"></span>Facturas y cobros</div>
@@ -631,6 +632,112 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     <div class="ab-table-wrap">
       <table class="ab-table"><thead><tr><th>Fecha</th><th>Tipo</th><th>Concepto</th><th>Partida</th><th>Importe</th><th>Moneda</th><th>Estado</th></tr></thead>
       <tbody id="ab-gastos-tbody"><tr><td colspan="7"><div class="ab-empty">Cargando...</div></td></tr></tbody></table>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== LIQUIDACIONES ==================== -->
+<div class="sec" id="sec-ab-liquidaciones">
+  <div class="ab-section-header">
+    <div>
+      <div class="ab-section-title">📄 Liquidaciones</div>
+      <div style="font-size:12px;color:var(--mut)">Pegá el texto de una liquidación, la IA la parsea, generás el PDF.</div>
+    </div>
+    <button class="btn bb" onclick="liqAbrirNueva()">+ Nueva liquidación</button>
+  </div>
+  <div class="ab-card">
+    <div class="ab-table-wrap">
+      <table class="ab-table">
+        <thead><tr>
+          <th>N°</th><th>Fecha</th><th>Remitente</th>
+          <th style="text-align:right">Neto</th><th style="text-align:right">Total</th><th></th>
+        </tr></thead>
+        <tbody id="liq-tbody"><tr><td colspan="6"><div class="ab-empty">Cargando...</div></td></tr></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: Nueva liquidación (3 pasos: pegar texto → editar → guardar) -->
+<div class="ab-modal-overlay" id="liq-modal">
+  <div class="ab-modal" style="width:920px;max-height:90vh;display:flex;flex-direction:column">
+    <div class="mhd">
+      <div class="mht">📄 Nueva liquidación</div>
+      <button class="mcl" onclick="document.getElementById('liq-modal').classList.remove('on')">×</button>
+    </div>
+    <div style="flex:1;overflow-y:auto;padding-right:6px">
+      <!-- Paso 1: pegar texto -->
+      <div id="liq-step1">
+        <div style="background:var(--bg);border-radius:8px;padding:14px 16px;margin-bottom:12px;font-size:13px;line-height:1.5">
+          📋 Pegá abajo el texto de la liquidación (escaneado/OCR/manual). La IA va a extraer automáticamente fecha, remitente, artículos, mermas y conceptos.<br>
+          <span style="color:var(--mut)">Después podés editar cualquier campo antes de guardar.</span>
+        </div>
+        <textarea id="liq-texto" placeholder="Pegá acá el texto..." style="width:100%;height:280px;padding:12px;border:1px solid var(--bor);border-radius:8px;font-family:'Courier New',monospace;font-size:12px;resize:vertical"></textarea>
+        <div style="margin-top:12px;display:flex;justify-content:flex-end;gap:8px">
+          <button class="btn bo" onclick="document.getElementById('liq-modal').classList.remove('on')">Cancelar</button>
+          <button class="btn bb" id="liq-btn-parse" onclick="liqProcesar()">Procesar texto</button>
+        </div>
+      </div>
+      <!-- Paso 2: loading -->
+      <div id="liq-step-loading" style="display:none;padding:40px;text-align:center;color:var(--mut)">
+        🤖 Leyendo el texto…
+      </div>
+      <!-- Paso 3: editar -->
+      <div id="liq-step2" style="display:none">
+        <div class="ab-card" style="margin-bottom:12px">
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
+            <div class="fl"><label>N° liquidación *</label><input id="liq-numero" type="text" style="font-family:monospace"></div>
+            <div class="fl"><label>Fecha *</label><input id="liq-fecha" type="date"></div>
+            <div class="fl"><label>Letra</label>
+              <select id="liq-letra"><option>A</option><option>B</option><option>C</option></select>
+            </div>
+          </div>
+        </div>
+        <div class="ab-card" style="margin-bottom:12px">
+          <div style="font-weight:600;margin-bottom:8px">Remitente</div>
+          <div style="display:grid;grid-template-columns:2fr 1fr;gap:10px">
+            <div class="fl"><label>Nombre</label><input id="liq-r-nombre" type="text"></div>
+            <div class="fl"><label>CUIT</label><input id="liq-r-cuit" type="text"></div>
+            <div class="fl"><label>Localidad</label><input id="liq-r-loc" type="text"></div>
+            <div class="fl"><label>Provincia</label><input id="liq-r-prov" type="text"></div>
+            <div class="fl"><label>CP</label><input id="liq-r-cp" type="text"></div>
+            <div class="fl"><label>IVA</label><input id="liq-r-iva" type="text" placeholder="R.I."></div>
+            <div class="fl"><label>Fecha ingreso</label><input id="liq-fing" type="date"></div>
+            <div class="fl"><label>Cód. Proveedor</label><input id="liq-prov-cod" type="text" style="font-family:monospace"></div>
+          </div>
+        </div>
+        <div class="ab-card" style="margin-bottom:12px">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+            <div style="font-weight:600">Artículos</div>
+            <button class="btn bo bs" onclick="liqAddArt()">+ Agregar</button>
+          </div>
+          <div id="liq-articulos"></div>
+        </div>
+        <div class="ab-card" style="margin-bottom:12px">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+            <div style="font-weight:600">Mermas</div>
+            <button class="btn bo bs" onclick="liqAddMerma()">+ Agregar</button>
+          </div>
+          <div id="liq-mermas"></div>
+        </div>
+        <div class="ab-card" style="margin-bottom:12px">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+            <div style="font-weight:600">Conceptos (IVA, comisión, etc.)</div>
+            <button class="btn bo bs" onclick="liqAddConc()">+ Agregar</button>
+          </div>
+          <div id="liq-conceptos"></div>
+        </div>
+        <div class="ab-card">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+            <div class="fl"><label>Neto $</label><input id="liq-neto" type="number" step="0.01" style="text-align:right"></div>
+            <div class="fl"><label>Total $</label><input id="liq-total" type="number" step="0.01" style="text-align:right"></div>
+          </div>
+        </div>
+        <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--bor);display:flex;justify-content:flex-end;gap:8px">
+          <button class="btn bo" onclick="document.getElementById('liq-step1').style.display='block';document.getElementById('liq-step2').style.display='none'">← Volver al texto</button>
+          <button class="btn bb" onclick="liqGuardar()">💾 Guardar y descargar PDF</button>
+        </div>
+      </div>
     </div>
   </div>
 </div>
@@ -3938,6 +4045,7 @@ function loadSec(s) {
     'ab-ifcos': function(){ ifcoCargar(); },
     'ab-mandata': mdCargar,
     'ab-gastos': abCargarGastos,
+    'ab-liquidaciones': liqCargar,
     'pa-dashboard':  function(){ paLoadDash(); },
     'pa-clima':      function(){ paLoadClimaSeccion(); },
     'pa-calendario': function(){ paLoadCalendario(); },
@@ -6778,6 +6886,205 @@ function abCargarGastos() {
       return '<tr><td>'+abFecha(g.fecha)+'</td><td>'+abBadgeEstado(g.tipo)+'</td><td>'+g.concepto+'</td><td>'+(g.partida_producto||'—')+'</td><td><strong>'+abFmtMoney(g.importe,g.moneda)+'</strong></td><td>'+g.moneda+'</td><td>'+abBadgeEstado(g.estado)+'</td></tr>';
     }).join('');
   });
+}
+
+// ═══════════════════════ LIQUIDACIONES ═══════════════════════
+const LIQ = { datos: null };
+function _liqEsc(s){ return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function _liqMoney(n){ if(n==null||isNaN(n))return ''; return '$ '+Number(n).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+function _liqFecha(s){ if(!s)return''; var p=String(s).split('-'); return p.length===3?p[2]+'/'+p[1]+'/'+p[0]:s; }
+
+function liqCargar() {
+  fetch('/api/liquidaciones', { credentials:'include' }).then(r=>r.json()).then(function(rows){
+    var tb = document.getElementById('liq-tbody');
+    if (!rows || !rows.length) { tb.innerHTML = '<tr><td colspan="6"><div class="ab-empty"><div class="ab-empty-icon">📄</div>Sin liquidaciones</div></td></tr>'; return; }
+    tb.innerHTML = rows.map(function(r){
+      return '<tr>' +
+        '<td style="font-family:monospace"><b>'+_liqEsc(r.n_liquidacion)+'</b></td>' +
+        '<td>'+_liqFecha(r.fecha)+'</td>' +
+        '<td>'+_liqEsc(r.remitente_nombre||'')+'</td>' +
+        '<td style="text-align:right;font-variant-numeric:tabular-nums">'+_liqMoney(r.neto)+'</td>' +
+        '<td style="text-align:right;font-variant-numeric:tabular-nums"><b>'+_liqMoney(r.total)+'</b></td>' +
+        '<td style="display:flex;gap:4px">' +
+          '<button class="btn bo bs" onclick="window.open(\'/api/liquidaciones/'+r.id+'/pdf\',\'_blank\')" title="Ver PDF">📄</button>' +
+          '<button class="btn bo bs" onclick="liqEliminar('+r.id+')" style="color:#991b1b" title="Eliminar">🗑️</button>' +
+        '</td>' +
+      '</tr>';
+    }).join('');
+  });
+}
+
+function liqEliminar(id) {
+  if (!confirm('¿Eliminar esta liquidación?')) return;
+  fetch('/api/liquidaciones/'+id, { method:'DELETE', credentials:'include' })
+    .then(r=>r.json()).then(_=>liqCargar());
+}
+
+async function liqAbrirNueva() {
+  document.getElementById('liq-step1').style.display = 'block';
+  document.getElementById('liq-step-loading').style.display = 'none';
+  document.getElementById('liq-step2').style.display = 'none';
+  document.getElementById('liq-texto').value = '';
+  LIQ.datos = null;
+  document.getElementById('liq-modal').classList.add('on');
+}
+
+async function liqProcesar() {
+  const texto = document.getElementById('liq-texto').value.trim();
+  if (!texto) { alert('Pegá el texto primero'); return; }
+  document.getElementById('liq-step1').style.display = 'none';
+  document.getElementById('liq-step-loading').style.display = 'block';
+  try {
+    const r = await fetch('/api/liquidaciones/parse', {
+      method:'POST', credentials:'include',
+      headers:{'Content-Type':'application/json'}, body: JSON.stringify({ texto: texto })
+    });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Error '+r.status);
+    LIQ.datos = data.datos || {};
+    LIQ.datos._textoOriginal = texto;
+    // Pedir próximo número
+    const px = await fetch('/api/liquidaciones/proximo-numero', { credentials:'include' }).then(x=>x.json()).catch(_=>({proximo:''}));
+    LIQ.datos._proximo = px.proximo;
+    liqRellenarForm();
+    document.getElementById('liq-step-loading').style.display = 'none';
+    document.getElementById('liq-step2').style.display = 'block';
+  } catch(e) {
+    alert('Error: ' + e.message);
+    document.getElementById('liq-step-loading').style.display = 'none';
+    document.getElementById('liq-step1').style.display = 'block';
+  }
+}
+
+function liqRellenarForm() {
+  const d = LIQ.datos || {};
+  document.getElementById('liq-numero').value   = d._proximo || '';
+  document.getElementById('liq-fecha').value    = d.fecha || '';
+  document.getElementById('liq-letra').value    = d.iva_letra || 'A';
+  document.getElementById('liq-r-nombre').value = d.remitente_nombre   || '';
+  document.getElementById('liq-r-cuit').value   = d.remitente_cuit     || '';
+  document.getElementById('liq-r-loc').value    = d.remitente_localidad|| '';
+  document.getElementById('liq-r-prov').value   = d.remitente_provincia|| '';
+  document.getElementById('liq-r-cp').value     = d.remitente_cp       || '';
+  document.getElementById('liq-r-iva').value    = d.remitente_iva      || 'R.I.';
+  document.getElementById('liq-fing').value     = d.fecha_ingreso      || '';
+  document.getElementById('liq-prov-cod').value = d.prov_codigo        || '';
+  document.getElementById('liq-neto').value     = d.neto  != null ? d.neto  : '';
+  document.getElementById('liq-total').value    = d.total != null ? d.total : '';
+  liqRenderArt(d.articulos || []);
+  liqRenderMermas(d.mermas || []);
+  liqRenderConc(d.conceptos || []);
+}
+
+function liqRenderArt(arts) {
+  const c = document.getElementById('liq-articulos');
+  c.innerHTML = arts.map((a,i) =>
+    '<div class="liq-art-row" style="display:grid;grid-template-columns:3fr 1fr 1fr 1fr 1.4fr 30px;gap:6px;margin-bottom:6px;align-items:center">' +
+      '<input data-k="articulo"  value="'+_liqEsc(a.articulo||'')+'" placeholder="Artículo">' +
+      '<input data-k="nro_camion" value="'+_liqEsc(a.nro_camion||'')+'" placeholder="Camión">' +
+      '<input data-k="cantidad"  type="number" value="'+(a.cantidad||'')+'" placeholder="Cant.">' +
+      '<input data-k="precio"    type="number" step="0.01" value="'+(a.precio||'')+'" placeholder="Precio">' +
+      '<input data-k="importe"   type="number" step="0.01" value="'+(a.importe||'')+'" placeholder="Importe" style="text-align:right">' +
+      '<button class="btn bo bs" onclick="this.parentNode.remove()" style="color:#991b1b">×</button>' +
+    '</div>').join('');
+}
+function liqAddArt() { liqRenderArt(_liqLeerArt().concat([{articulo:'',nro_camion:'',cantidad:'',precio:'',importe:''}])); }
+function _liqLeerArt() {
+  return Array.from(document.querySelectorAll('#liq-articulos .liq-art-row')).map(row => {
+    const o = {};
+    row.querySelectorAll('input[data-k]').forEach(inp => {
+      const k = inp.getAttribute('data-k');
+      o[k] = (k==='cantidad'||k==='precio'||k==='importe') ? (parseFloat(inp.value) || 0) : inp.value;
+    });
+    return o;
+  });
+}
+
+function liqRenderMermas(ms) {
+  const c = document.getElementById('liq-mermas');
+  c.innerHTML = ms.map(m =>
+    '<div class="liq-mer-row" style="display:grid;grid-template-columns:3fr 1fr 1.4fr 1fr 30px;gap:6px;margin-bottom:6px;align-items:center">' +
+      '<input data-k="descripcion" value="'+_liqEsc(m.descripcion||'')+'" placeholder="Descripción">' +
+      '<input data-k="cantidad" type="number" value="'+(m.cantidad||'')+'" placeholder="Cant.">' +
+      '<input data-k="fecha" type="date" value="'+(m.fecha||'')+'">' +
+      '<input data-k="tipo" value="'+_liqEsc(m.tipo||'')+'" placeholder="Tipo (REPASO)">' +
+      '<button class="btn bo bs" onclick="this.parentNode.remove()" style="color:#991b1b">×</button>' +
+    '</div>').join('');
+}
+function liqAddMerma(){ liqRenderMermas(_liqLeerMermas().concat([{descripcion:'',cantidad:'',fecha:'',tipo:''}])); }
+function _liqLeerMermas() {
+  return Array.from(document.querySelectorAll('#liq-mermas .liq-mer-row')).map(row => {
+    const o = {};
+    row.querySelectorAll('input[data-k]').forEach(inp => {
+      const k = inp.getAttribute('data-k');
+      o[k] = (k==='cantidad') ? (parseFloat(inp.value) || 0) : inp.value;
+    });
+    return o;
+  });
+}
+
+function liqRenderConc(cs) {
+  const c = document.getElementById('liq-conceptos');
+  c.innerHTML = cs.map(x =>
+    '<div class="liq-con-row" style="display:grid;grid-template-columns:3fr 1fr 1.4fr 30px;gap:6px;margin-bottom:6px;align-items:center">' +
+      '<input data-k="concepto" value="'+_liqEsc(x.concepto||'')+'" placeholder="Concepto">' +
+      '<input data-k="porcentaje" type="number" step="0.01" value="'+(x.porcentaje!=null?x.porcentaje:'')+'" placeholder="%">' +
+      '<input data-k="importe" type="number" step="0.01" value="'+(x.importe||'')+'" placeholder="Importe" style="text-align:right">' +
+      '<button class="btn bo bs" onclick="this.parentNode.remove()" style="color:#991b1b">×</button>' +
+    '</div>').join('');
+}
+function liqAddConc(){ liqRenderConc(_liqLeerConc().concat([{concepto:'',porcentaje:'',importe:''}])); }
+function _liqLeerConc() {
+  return Array.from(document.querySelectorAll('#liq-conceptos .liq-con-row')).map(row => {
+    const o = {};
+    row.querySelectorAll('input[data-k]').forEach(inp => {
+      const k = inp.getAttribute('data-k');
+      if (k === 'porcentaje') {
+        o[k] = inp.value === '' ? null : parseFloat(inp.value);
+      } else if (k === 'importe') {
+        o[k] = parseFloat(inp.value) || 0;
+      } else {
+        o[k] = inp.value;
+      }
+    });
+    return o;
+  });
+}
+
+async function liqGuardar() {
+  const body = {
+    n_liquidacion:        document.getElementById('liq-numero').value.trim(),
+    fecha:                document.getElementById('liq-fecha').value,
+    iva_letra:            document.getElementById('liq-letra').value,
+    fecha_ingreso:        document.getElementById('liq-fing').value || null,
+    prov_codigo:          document.getElementById('liq-prov-cod').value.trim() || null,
+    remitente_nombre:     document.getElementById('liq-r-nombre').value.trim() || null,
+    remitente_cuit:       document.getElementById('liq-r-cuit').value.trim() || null,
+    remitente_localidad:  document.getElementById('liq-r-loc').value.trim() || null,
+    remitente_provincia:  document.getElementById('liq-r-prov').value.trim() || null,
+    remitente_cp:         document.getElementById('liq-r-cp').value.trim() || null,
+    remitente_iva:        document.getElementById('liq-r-iva').value.trim() || null,
+    articulos:            _liqLeerArt(),
+    mermas:               _liqLeerMermas(),
+    conceptos:            _liqLeerConc(),
+    neto:                 parseFloat(document.getElementById('liq-neto').value)  || 0,
+    total:                parseFloat(document.getElementById('liq-total').value) || 0,
+    texto_original:       (LIQ.datos && LIQ.datos._textoOriginal) || ''
+  };
+  if (!body.n_liquidacion) { alert('Falta el N° de liquidación'); return; }
+  if (!body.fecha)         { alert('Falta la fecha'); return; }
+  try {
+    const r = await fetch('/api/liquidaciones', {
+      method:'POST', credentials:'include',
+      headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)
+    });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Error '+r.status);
+    document.getElementById('liq-modal').classList.remove('on');
+    liqCargar();
+    // Abrir el PDF generado
+    window.open('/api/liquidaciones/'+data.id+'/pdf', '_blank');
+  } catch(e) { alert('Error: ' + e.message); }
 }
 
 function abAbrirNuevoGasto() {
