@@ -138,6 +138,12 @@ body{padding-bottom:env(safe-area-inset-bottom)}
 
 <!-- Pantalla HOME -->
 <div class="view on" id="view-home">
+  <!-- Banner alerta jueves 10am: stock real sin cargar -->
+  <div id="banner-stock" style="display:none;background:#fef3c7;border:1px solid #f59e0b;border-radius:10px;padding:12px 14px;margin-bottom:14px;font-size:13px;color:#92400e;text-align:left">
+    ⏰ <b>Toca actualizar tu stock</b><br>
+    <span style="font-size:12px">Todos los jueves a las 10am pedimos el conteo físico de cajones.</span>
+  </div>
+
   <div class="muted" style="text-align:center;margin-bottom:18px;font-size:13px">¿Qué querés cargar?</div>
 
   <button class="menu-btn" onclick="goCargarSellado()">
@@ -167,6 +173,35 @@ body{padding-bottom:env(safe-area-inset-bottom)}
     </div>
     <div class="arr" style="color:#047857">›</div>
   </button>
+
+  <!-- Solo visible para usuarios de tipo proveedor -->
+  <button class="menu-btn" id="btn-stock-real" onclick="goCargarStockReal()" style="display:none;background:#fffbeb;border-color:#f59e0b">
+    <div class="emo">📋</div>
+    <div class="txt">
+      <div class="t1" style="color:#92400e">CONTEO FÍSICO</div>
+      <div class="t2">Cuántos cajones tenés hoy en tu depósito</div>
+    </div>
+    <div class="arr" style="color:#92400e">›</div>
+  </button>
+</div>
+
+<!-- Pantalla CARGAR STOCK REAL -->
+<div class="view" id="view-stock-real">
+  <div class="alert info">
+    📋 Contá físicamente los cajones que tenés en tu depósito y cargá la cantidad acá. <b>Pedimos esto los jueves a las 10am</b> para mantener el control.
+  </div>
+  <div class="card">
+    <label class="lbl">Cantidad de cajones contados *</label>
+    <input id="sr-cant" type="number" min="0" inputmode="numeric" placeholder="Ej: 850" style="font-size:20px;font-family:monospace">
+
+    <label class="lbl" style="margin-top:12px">Fecha del conteo *</label>
+    <input id="sr-fecha" type="date">
+
+    <label class="lbl" style="margin-top:12px">Notas (opcional)</label>
+    <input id="sr-notas" type="text" placeholder="Ej: contado por Juan, faltan los del fondo...">
+
+    <button class="btn-primary" onclick="enviarStockReal()" style="margin-top:18px;width:100%;background:#92400e">📋 Guardar conteo</button>
+  </div>
 </div>
 
 <!-- Pantalla ENVIAR A SG (formulario simple) -->
@@ -446,6 +481,17 @@ const S = {
     if (S.user.deposito_tipo === 'proveedor' && S.user.deposito_proveedor_id) {
       const btn = document.getElementById('btn-enviar-sg');
       if (btn) btn.style.display = '';
+      const btn2 = document.getElementById('btn-stock-real');
+      if (btn2) btn2.style.display = '';
+      // Chequear alerta de stock real (jueves 10am)
+      try {
+        const r = await fetch('/api/ifco/stocks-reales/alerta-mobile', { credentials:'include' });
+        const data = await r.json();
+        if (data && data.falta_cargar) {
+          const banner = document.getElementById('banner-stock');
+          if (banner) banner.style.display = 'block';
+        }
+      } catch(_){}
     }
   } catch(e) { /* sigue sin info */ }
 })();
@@ -772,6 +818,47 @@ async function enviarSG() {
     showView('view-ok', { title:'Listo' });
     $('ok-titulo').textContent = '¡Envío registrado!';
     $('ok-detalle').innerHTML = 'Quedó <b>en viaje</b>. Cuando alguien de SG confirme la recepción física, se actualizan los saldos.';
+  } catch(e) {
+    alert('Error: ' + e.message);
+  }
+}
+
+// ───── Conteo físico de stock ─────
+function goCargarStockReal() {
+  if (!S.user || S.user.deposito_tipo !== 'proveedor' || !S.user.deposito_proveedor_id) {
+    alert('Tu usuario no está asignado a un proveedor.');
+    return;
+  }
+  $('sr-cant').value = '';
+  $('sr-fecha').value = todayISO();
+  $('sr-notas').value = '';
+  showView('view-stock-real', { title:'📋 Conteo físico' });
+}
+
+async function enviarStockReal() {
+  const cant = parseInt($('sr-cant').value);
+  const fecha = $('sr-fecha').value;
+  const notas = $('sr-notas').value.trim();
+  if (isNaN(cant) || cant < 0) { alert('Cantidad inválida'); return; }
+  if (!fecha) { alert('Falta la fecha'); return; }
+  try {
+    const r = await fetch('/api/ifco/stocks-reales', {
+      method:'POST', credentials:'include',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({
+        deposito_tipo: 'proveedor',
+        proveedor_id: S.user.deposito_proveedor_id,
+        cantidad: cant, fecha: fecha, notas: notas || null
+      })
+    });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'HTTP '+r.status);
+    showView('view-ok', { title:'Listo' });
+    $('ok-titulo').textContent = '¡Conteo guardado!';
+    $('ok-detalle').innerHTML = 'Registramos <b>'+cant+' cajones</b> en tu depósito.';
+    // Ocultar el banner si estaba visible
+    const banner = document.getElementById('banner-stock');
+    if (banner) banner.style.display = 'none';
   } catch(e) {
     alert('Error: ' + e.message);
   }
