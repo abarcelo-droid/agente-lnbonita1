@@ -13,10 +13,10 @@ body{font-family:'Nunito','Segoe UI',Arial,sans-serif;color:#1A1F2E;background:#
 .shell{display:grid;grid-template-columns:1.2fr 1fr;min-height:100vh}
 
 /* ============ Panel izquierdo (branding) ============ */
-.brand{position:relative;overflow:hidden;background:#1B3A6B;color:#FBF7EE;padding:48px 56px;display:flex;flex-direction:column;justify-content:space-between}
-.brand .pattern{position:absolute;inset:0;opacity:.05;pointer-events:none;
-  background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 200' width='72' height='72'><circle cx='100' cy='115' r='34' fill='%23ffffff'/><path d='M 10 145 Q 100 80 190 145' fill='none' stroke='%23ffffff' stroke-width='14' stroke-linecap='round'/></svg>");
-  background-size:72px 72px;background-repeat:repeat}
+.brand{position:relative;overflow:hidden;color:#FBF7EE;padding:48px 56px;display:flex;flex-direction:column;justify-content:space-between;
+  background-image:url('/static/bg-finca.jpg');background-size:cover;background-position:center}
+.brand .overlay{position:absolute;inset:0;background:linear-gradient(180deg,rgba(15,38,71,.55) 0%,rgba(15,38,71,.78) 60%,rgba(15,38,71,.92) 100%);pointer-events:none}
+.brand>*{position:relative;z-index:1}
 
 .brand-top{position:relative;display:flex;align-items:center;gap:14px}
 .brand-top svg{display:block}
@@ -92,7 +92,7 @@ body{font-family:'Nunito','Segoe UI',Arial,sans-serif;color:#1A1F2E;background:#
 
   <!-- Panel izquierdo: branding -->
   <div class="brand">
-    <div class="pattern"></div>
+    <div class="overlay"></div>
 
     <div class="brand-top">
       <svg viewBox="0 0 200 200" width="42" height="42"><circle cx="100" cy="115" r="34" fill="#FBF7EE"/><path d="M 10 145 Q 100 80 190 145" fill="none" stroke="#FBF7EE" stroke-width="14" stroke-linecap="round"/></svg>
@@ -106,8 +106,8 @@ body{font-family:'Nunito','Segoe UI',Arial,sans-serif;color:#1A1F2E;background:#
       <div class="hat">
         <svg viewBox="0 0 200 200" width="140" height="140"><circle cx="100" cy="115" r="34" fill="#FBF7EE"/><path d="M 10 145 Q 100 80 190 145" fill="none" stroke="#FBF7EE" stroke-width="14" stroke-linecap="round"/></svg>
       </div>
-      <h1>Del valle a la mesa,<br>todo bajo control.</h1>
-      <p>Gestión integral de cuentas, abasto, IFCO y operaciones.<br>San Juan · Argentina · desde 1987.</p>
+      <h1>De la finca<br>a nuestro cliente.</h1>
+      <p>Gestión integral de cosecha, packing, logística y ventas.<br>San Juan · Argentina.</p>
     </div>
 
     <div class="brand-foot">
