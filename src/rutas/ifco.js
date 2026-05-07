@@ -1873,7 +1873,7 @@ router.post('/consolidar/preview', upload.single('archivo'), async function(req,
 
     // Cargar todos los remitos vivos del sistema y armar índice por N° normalizado
     const enSistema = db.prepare(`
-      SELECT id, n_remito_ifco, n_remito_sg, fecha_emision, fecha_sellado, fecha_presentacion,
+      SELECT id, n_remito_ifco, n_remito_sg, fecha_emision, fecha_sellado, fecha_presentado,
              empresa, sucursal, cantidad_despachada, cantidad_recibida, cantidad_rechazada,
              estado, origen, proveedor_origen_id
       FROM ifco_remitos_super
@@ -1956,7 +1956,7 @@ router.post('/consolidar/aplicar', express.json(), function(req, res) {
                 cantidad_recibida  = COALESCE(cantidad_recibida, cantidad_despachada),
                 cantidad_rechazada = COALESCE(cantidad_rechazada, 0),
                 fecha_sellado      = COALESCE(fecha_sellado, ?),
-                fecha_presentacion = ?,
+                fecha_presentado = ?,
                 actualizado_en     = datetime('now','localtime')
             WHERE id = ?
           `).run(fechaArchivo, fechaArchivo, id);
@@ -1965,7 +1965,7 @@ router.post('/consolidar/aplicar', express.json(), function(req, res) {
           db.prepare(`
             UPDATE ifco_remitos_super
             SET estado             = 'presentado',
-                fecha_presentacion = ?,
+                fecha_presentado = ?,
                 actualizado_en     = datetime('now','localtime')
             WHERE id = ?
           `).run(fechaArchivo, id);
@@ -1991,7 +1991,7 @@ router.post('/consolidar/aplicar', express.json(), function(req, res) {
           INSERT INTO ifco_remitos_super (
             n_remito_ifco, fecha_emision, empresa,
             cantidad_despachada, cantidad_recibida, cantidad_rechazada,
-            estado, fecha_sellado, fecha_presentacion,
+            estado, fecha_sellado, fecha_presentado,
             origen, usuario_id, notas
           ) VALUES (?, ?, ?, ?, ?, 0, 'presentado', ?, ?, 'san_geronimo', ?, 'Importado del archivo IFCO')
         `).run(
