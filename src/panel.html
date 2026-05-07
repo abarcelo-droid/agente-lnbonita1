@@ -2841,6 +2841,17 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
 
       <div id="ifco-alertas" style="margin-bottom:16px"></div>
 
+      <!-- Banner alerta jueves 10am: stocks reales sin cargar -->
+      <div id="ifco-stocks-alerta" style="display:none;background:#fef3c7;border:1px solid #f59e0b;border-radius:8px;padding:12px 16px;margin-bottom:16px;font-size:13px">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:10px">
+          <div>
+            ⏰ <b>Toca actualizar el conteo físico de stocks</b> — Todos los jueves 10am.
+            <span id="ifco-stocks-alerta-detalle" style="color:#92400e"></span>
+          </div>
+          <button class="btn bb" style="font-size:12px;padding:6px 12px" onclick="document.getElementById('ifco-stocks-card').scrollIntoView({behavior:'smooth'})">Ir a cargar →</button>
+        </div>
+      </div>
+
       <!-- Recepciones en viaje (pendientes de confirmar por SG) -->
       <div id="ifco-en-viaje-card" class="ifco-card" style="margin-bottom:16px;display:none;border-color:#f59e0b;background:#fffbeb">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
@@ -2859,6 +2870,17 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
           <div style="font-size:13px;font-weight:600;margin-bottom:10px">Despachos por mes</div>
           <div id="ifco-despachos-mes"></div>
         </div>
+      </div>
+
+      <!-- Conteo físico de stocks (real vs teórico) -->
+      <div id="ifco-stocks-card" class="ifco-card" style="margin-top:16px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+          <div>
+            <div style="font-size:13px;font-weight:600">📋 Conteo físico de stocks</div>
+            <div style="font-size:11px;color:var(--mut);margin-top:2px">Diferencia entre lo que dice el sistema (teórico) y el conteo real. Solo informativo. <b>Actualizar todos los jueves 10am.</b></div>
+          </div>
+        </div>
+        <div id="ifco-stocks-tabla"></div>
       </div>
     </div>
   </div>
@@ -3400,6 +3422,39 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
 </div>
 
 <!-- Modal: Enviar a IFCO (mailto) -->
+<!-- Modal: cargar conteo físico de stock -->
+<div class="mb" id="ifco-mb-stock-real">
+  <div class="mbox" style="max-width:520px">
+    <div class="mhd">
+      <div class="mht">📋 Cargar conteo físico</div>
+      <button class="mcl" onclick="document.getElementById('ifco-mb-stock-real').classList.remove('on')">x</button>
+    </div>
+    <div style="font-size:13px;color:var(--mut);margin-bottom:14px" id="ifco-sr-info"></div>
+    <div>
+      <label style="font-size:11px;color:var(--mut);text-transform:uppercase">Cantidad contada *</label>
+      <input id="ifco-sr-cant" type="number" min="0" inputmode="numeric" style="width:100%;padding:10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg);font-size:18px;font-family:monospace">
+    </div>
+    <div style="margin-top:12px;display:grid;grid-template-columns:1fr 1fr;gap:10px">
+      <div>
+        <label style="font-size:11px;color:var(--mut);text-transform:uppercase">Fecha del conteo *</label>
+        <input id="ifco-sr-fecha" type="date" style="width:100%;padding:8px;border-radius:7px;border:1px solid var(--bor);background:var(--bg)">
+      </div>
+      <div>
+        <label style="font-size:11px;color:var(--mut);text-transform:uppercase">Stock teórico</label>
+        <input id="ifco-sr-teorico" type="text" disabled style="width:100%;padding:8px;border-radius:7px;border:1px solid var(--bor);background:var(--bg);font-family:monospace">
+      </div>
+    </div>
+    <div style="margin-top:12px">
+      <label style="font-size:11px;color:var(--mut);text-transform:uppercase">Notas (opcional)</label>
+      <input id="ifco-sr-notas" type="text" style="width:100%;padding:8px;border-radius:7px;border:1px solid var(--bor);background:var(--bg)">
+    </div>
+    <div style="margin-top:18px;display:flex;justify-content:flex-end;gap:8px">
+      <button class="btn bo" onclick="document.getElementById('ifco-mb-stock-real').classList.remove('on')">Cancelar</button>
+      <button class="btn bb" onclick="ifcoGuardarStockReal()">Guardar conteo</button>
+    </div>
+  </div>
+</div>
+
 <div class="mb" id="ifco-mb-presentar">
   <div class="mbox" style="width:720px">
     <div class="mhd">
@@ -15145,6 +15200,97 @@ async function ifcoCargarResumen() {
       '</div>';
     }).join('');
   } catch(e) { /* silencioso */ }
+
+  // Cargar stocks reales y banner alerta
+  ifcoCargarStocksReales();
+}
+
+// === STOCKS REALES (conteo físico) ========================================
+let _ifcoStockEditando = null; // { deposito_tipo, proveedor_id, nombre, teorico }
+
+async function ifcoCargarStocksReales() {
+  try {
+    const data = await _ifcoFetch('/api/ifco/stocks-reales');
+    // Banner alerta arriba
+    const faltan = data.items.filter(function(it){ return it.falta_cargar; });
+    const banner = document.getElementById('ifco-stocks-alerta');
+    const detalle = document.getElementById('ifco-stocks-alerta-detalle');
+    if (data.es_post_jueves_10am && faltan.length > 0) {
+      banner.style.display = 'block';
+      detalle.textContent = ' Faltan ' + faltan.length + ' depósito(s): ' + faltan.map(function(x){return x.nombre;}).join(', ');
+    } else {
+      banner.style.display = 'none';
+    }
+    // Tabla de conteos
+    const tbl = document.getElementById('ifco-stocks-tabla');
+    tbl.innerHTML = '<table style="width:100%;font-size:12px;border-collapse:collapse">' +
+      '<thead><tr style="background:var(--bg);text-align:left">' +
+        '<th style="padding:8px">Depósito</th>' +
+        '<th style="padding:8px;text-align:right">Teórico</th>' +
+        '<th style="padding:8px;text-align:right">Real (último)</th>' +
+        '<th style="padding:8px;text-align:right">Diferencia</th>' +
+        '<th style="padding:8px">Cargado</th>' +
+        '<th style="padding:8px"></th>' +
+      '</tr></thead><tbody>' +
+      data.items.map(function(it){
+        const dif = it.diferencia;
+        let difCell;
+        if (it.real == null) difCell = '<span style="color:var(--mut)">—</span>';
+        else if (dif === 0)  difCell = '<span style="color:var(--ok);font-weight:600">0</span>';
+        else if (dif > 0)    difCell = '<span style="color:#1e40af;font-weight:600">+'+_ifcoFmt(dif)+'</span>';
+        else                 difCell = '<span style="color:#991b1b;font-weight:600">'+_ifcoFmt(dif)+'</span>';
+        const ult = it.ultimo_conteo;
+        const fechaCell = ult ? _ifcoFecha(ult.fecha) + ' <span style="color:var(--mut);font-size:10px">('+ult.creado_en.slice(0,10)+')</span>' : '<span style="color:#92400e;font-weight:600">⏰ sin cargar</span>';
+        const rowBg = it.falta_cargar ? 'background:#fffbeb' : '';
+        return '<tr style="border-top:1px solid var(--bor);'+rowBg+'">' +
+          '<td style="padding:8px"><b>'+_ifcoEsc(it.nombre)+'</b></td>' +
+          '<td style="padding:8px;text-align:right;font-variant-numeric:tabular-nums">'+_ifcoFmt(it.teorico)+'</td>' +
+          '<td style="padding:8px;text-align:right;font-variant-numeric:tabular-nums">'+(it.real != null ? _ifcoFmt(it.real) : '<span style="color:var(--mut)">—</span>')+'</td>' +
+          '<td style="padding:8px;text-align:right;font-variant-numeric:tabular-nums">'+difCell+'</td>' +
+          '<td style="padding:8px;font-size:11px">'+fechaCell+'</td>' +
+          '<td style="padding:8px;text-align:right"><button class="btn bb bs" style="font-size:11px;padding:4px 8px" onclick="ifcoAbrirCargarStock(\''+it.deposito_tipo+'\','+(it.proveedor_id||'null')+',\''+_ifcoEsc(it.nombre)+'\','+it.teorico+')">'+(ult ? 'Actualizar' : 'Cargar')+'</button></td>' +
+        '</tr>';
+      }).join('') +
+    '</tbody></table>';
+  } catch(e) {
+    document.getElementById('ifco-stocks-tabla').innerHTML = '<div style="color:var(--err);font-size:12px">Error: '+_ifcoEsc(e.message)+'</div>';
+  }
+}
+
+function ifcoAbrirCargarStock(deposito_tipo, proveedor_id, nombre, teorico) {
+  _ifcoStockEditando = { deposito_tipo, proveedor_id, nombre, teorico };
+  document.getElementById('ifco-sr-info').textContent = 'Conteo de: ' + nombre;
+  document.getElementById('ifco-sr-cant').value = '';
+  document.getElementById('ifco-sr-fecha').value = new Date().toISOString().slice(0,10);
+  document.getElementById('ifco-sr-teorico').value = teorico + ' caj.';
+  document.getElementById('ifco-sr-notas').value = '';
+  document.getElementById('ifco-mb-stock-real').classList.add('on');
+  setTimeout(function(){ document.getElementById('ifco-sr-cant').focus(); }, 100);
+}
+
+async function ifcoGuardarStockReal() {
+  const e = _ifcoStockEditando;
+  if (!e) return;
+  const cant = parseInt(document.getElementById('ifco-sr-cant').value);
+  const fecha = document.getElementById('ifco-sr-fecha').value;
+  const notas = document.getElementById('ifco-sr-notas').value.trim();
+  if (isNaN(cant) || cant < 0) { alert('Cantidad inválida'); return; }
+  if (!fecha) { alert('Falta la fecha'); return; }
+  try {
+    const r = await fetch('/api/ifco/stocks-reales', {
+      method: 'POST', credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        deposito_tipo: e.deposito_tipo,
+        proveedor_id: e.proveedor_id,
+        cantidad: cant, fecha: fecha, notas: notas || null
+      })
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || 'HTTP '+r.status);
+    document.getElementById('ifco-mb-stock-real').classList.remove('on');
+    ifcoCargarStocksReales();
+  } catch(err) { alert('Error: ' + err.message); }
 }
 
 async function ifcoConfirmarRecepcion(id) {

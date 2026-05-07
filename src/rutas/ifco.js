@@ -95,6 +95,23 @@ try { db.exec("UPDATE ifco_recepciones_proveedor SET estado = 'recibido' WHERE e
 try { db.exec("ALTER TABLE ifco_movimientos ADD COLUMN consolidado_en TEXT"); } catch(_){}
 try { db.exec("ALTER TABLE ifco_recepciones_proveedor ADD COLUMN consolidado_en TEXT"); } catch(_){}
 
+// Tabla de conteos físicos de stock (real, contado a mano) por depósito.
+// Solo informativo: muestra diferencia vs stock teórico, no genera ajustes.
+// Se debe actualizar todos los jueves 10am.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS ifco_stocks_reales (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    deposito_tipo   TEXT NOT NULL CHECK (deposito_tipo IN ('san_geronimo','proveedor')),
+    proveedor_id    INTEGER,
+    cantidad        INTEGER NOT NULL,
+    fecha           TEXT NOT NULL,
+    notas           TEXT,
+    usuario_id      INTEGER,
+    creado_en       TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+  )
+`);
+try { db.exec("CREATE INDEX IF NOT EXISTS idx_stocks_reales_dep ON ifco_stocks_reales(deposito_tipo, proveedor_id, fecha DESC)"); } catch(_){}
+
 if (_ifcoMigrarEnviado) {
   try {
     const r = db.prepare(`
@@ -2729,6 +2746,145 @@ router.post('/admin/importar-retiros-historicos', upload.single('archivo'), asyn
     console.error('[IFCO][import-retiros] EXCEPCION:', e);
     res.status(500).json({ error: e.message });
   }
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// STOCKS REALES (conteo físico) — informativo
+// ════════════════════════════════════════════════════════════════════════════
+
+// Helper: último jueves 10am (inclusive si hoy es jueves >=10am).
+// Devuelve un Date.
+function _ultimoJueves10am() {
+  const ahora = new Date();
+  const d = new Date(ahora);
+  // Día de la semana: 0=domingo,1=lun,...,4=jueves
+  let diff = (d.getDay() - 4 + 7) % 7; // días desde el último jueves
+  // Si hoy es jueves PERO antes de las 10:00, retroceder 7 días al jueves anterior
+  if (diff === 0 && ahora.getHours() < 10) diff = 7;
+  d.setDate(d.getDate() - diff);
+  d.setHours(10, 0, 0, 0);
+  return d;
+}
+
+// Calcula stock teórico para un depósito.
+function _stockTeoricoDeposito(deposito_tipo, proveedor_id) {
+  if (deposito_tipo === 'san_geronimo') {
+    // Reusa lógica del resumen: piso = retiros - perdidas - despachados desde SG + recepciones recibidas + rechazos a SG - envíos a proveedor
+    const get = (q, p) => { const r = db.prepare(q).get.apply(db.prepare(q), p || []); return r ? (r.total||0) : 0; };
+    const retiros     = get(`SELECT COALESCE(SUM(cantidad),0) AS total FROM ifco_movimientos WHERE tipo='retiro'  AND eliminado_en IS NULL`);
+    const perdidas    = get(`SELECT COALESCE(SUM(cantidad),0) AS total FROM ifco_movimientos WHERE tipo='perdida' AND eliminado_en IS NULL`);
+    const despachados = get(`SELECT COALESCE(SUM(cantidad_despachada),0) AS total FROM ifco_remitos_super WHERE eliminado_en IS NULL AND origen='san_geronimo'`);
+    const enviados    = get(`SELECT COALESCE(SUM(cantidad),0) AS total FROM ifco_envios_proveedor WHERE eliminado_en IS NULL`);
+    const recepciones = get(`SELECT COALESCE(SUM(cantidad),0) AS total FROM ifco_recepciones_proveedor WHERE eliminado_en IS NULL AND (estado IS NULL OR estado='recibido')`);
+    const rechazadosASG = get(`SELECT COALESCE(SUM(cantidad_rechazada),0) AS total FROM ifco_remitos_super WHERE eliminado_en IS NULL AND cantidad_rechazada>0 AND (rechazo_destino IS NULL OR rechazo_destino='san_geronimo')`);
+    return retiros - perdidas - despachados - enviados + recepciones + rechazadosASG;
+  }
+  if (deposito_tipo === 'proveedor' && proveedor_id) {
+    return _calcSaldoProveedor(proveedor_id);
+  }
+  return 0;
+}
+
+// GET /stocks-reales — lista resumen de cada depósito con su último conteo + diferencia + alerta
+router.get('/stocks-reales', function(req, res) {
+  const corte = _ultimoJueves10am().toISOString().replace('T',' ').slice(0,19);
+  // SG
+  const sgUlt = db.prepare(`
+    SELECT * FROM ifco_stocks_reales
+    WHERE deposito_tipo='san_geronimo'
+    ORDER BY fecha DESC, id DESC LIMIT 1
+  `).get();
+  const sgTeo = _stockTeoricoDeposito('san_geronimo');
+  const sgFalta = !sgUlt || (sgUlt.creado_en < corte);
+  const items = [{
+    deposito_tipo: 'san_geronimo',
+    proveedor_id: null,
+    nombre: 'San Gerónimo',
+    teorico: sgTeo,
+    real: sgUlt ? sgUlt.cantidad : null,
+    diferencia: sgUlt ? sgUlt.cantidad - sgTeo : null,
+    ultimo_conteo: sgUlt || null,
+    falta_cargar: sgFalta
+  }];
+  // Proveedores
+  const provs = db.prepare("SELECT id, nombre FROM proveedores ORDER BY nombre").all();
+  for (const p of provs) {
+    const ult = db.prepare(`
+      SELECT * FROM ifco_stocks_reales
+      WHERE deposito_tipo='proveedor' AND proveedor_id=?
+      ORDER BY fecha DESC, id DESC LIMIT 1
+    `).get(p.id);
+    const teo = _stockTeoricoDeposito('proveedor', p.id);
+    items.push({
+      deposito_tipo: 'proveedor',
+      proveedor_id: p.id,
+      nombre: p.nombre,
+      teorico: teo,
+      real: ult ? ult.cantidad : null,
+      diferencia: ult ? ult.cantidad - teo : null,
+      ultimo_conteo: ult || null,
+      falta_cargar: !ult || (ult.creado_en < corte)
+    });
+  }
+  res.json({
+    corte_jueves: corte,
+    es_post_jueves_10am: new Date() >= _ultimoJueves10am(),
+    items: items
+  });
+});
+
+// GET /stocks-reales/historico — historial completo de conteos de un depósito
+router.get('/stocks-reales/historico', function(req, res) {
+  const tipo = req.query.deposito_tipo;
+  const provId = req.query.proveedor_id ? parseInt(req.query.proveedor_id) : null;
+  let q = "SELECT s.*, u.nombre AS usuario_nombre FROM ifco_stocks_reales s LEFT JOIN usuarios u ON u.id = s.usuario_id WHERE deposito_tipo = ?";
+  const p = [tipo];
+  if (tipo === 'proveedor') { q += " AND proveedor_id = ?"; p.push(provId); }
+  q += " ORDER BY fecha DESC, id DESC LIMIT 100";
+  res.json(db.prepare(q).all(...p));
+});
+
+// POST /stocks-reales — cargar nuevo conteo
+router.post('/stocks-reales', express.json(), function(req, res) {
+  try {
+    const d = req.body || {};
+    if (!d.deposito_tipo || ['san_geronimo','proveedor'].indexOf(d.deposito_tipo) < 0) return res.status(400).json({ error: 'deposito_tipo inválido' });
+    if (d.deposito_tipo === 'proveedor' && !d.proveedor_id) return res.status(400).json({ error: 'Falta proveedor_id' });
+    const cant = parseInt(d.cantidad);
+    if (isNaN(cant) || cant < 0) return res.status(400).json({ error: 'Cantidad inválida' });
+    const fecha = d.fecha || new Date().toISOString().slice(0,10);
+    const r = db.prepare(`
+      INSERT INTO ifco_stocks_reales (deposito_tipo, proveedor_id, cantidad, fecha, notas, usuario_id)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(d.deposito_tipo,
+           d.deposito_tipo === 'proveedor' ? parseInt(d.proveedor_id) : null,
+           cant, fecha, d.notas || null,
+           (req.user && req.user.id) || null);
+    res.json({ id: r.lastInsertRowid });
+  } catch(e) {
+    console.error('[IFCO][stocks-reales POST] EXCEPCION:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /stocks-reales/alerta-mobile — para el banner del mobile (devuelve si AL USUARIO le falta cargar)
+router.get('/stocks-reales/alerta-mobile', function(req, res) {
+  const u = req.user;
+  if (!u || u.deposito_tipo !== 'proveedor' || !u.deposito_proveedor_id) {
+    return res.json({ falta_cargar: false });
+  }
+  const corte = _ultimoJueves10am().toISOString().replace('T',' ').slice(0,19);
+  const ult = db.prepare(`
+    SELECT id, creado_en FROM ifco_stocks_reales
+    WHERE deposito_tipo='proveedor' AND proveedor_id=?
+    ORDER BY fecha DESC, id DESC LIMIT 1
+  `).get(u.deposito_proveedor_id);
+  const falta = (!ult || ult.creado_en < corte) && (new Date() >= _ultimoJueves10am());
+  res.json({
+    falta_cargar: falta,
+    ultimo_conteo: ult || null,
+    corte_jueves: corte
+  });
 });
 
 export default router;
