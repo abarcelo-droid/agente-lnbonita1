@@ -89,6 +89,12 @@ try { db.exec("ALTER TABLE ifco_recepciones_proveedor ADD COLUMN confirmado_por_
 // Backfill: cualquier recepción vieja sin estado, marcar como recibido y confirmada
 try { db.exec("UPDATE ifco_recepciones_proveedor SET estado = 'recibido' WHERE estado IS NULL"); } catch(_){}
 
+// Columna consolidado_en: marca cuándo el registro fue verificado contra el archivo de IFCO.
+// Una vez consolidado, el registro queda bloqueado para edición/eliminación (rastreo limpio).
+// Aplica a: ifco_movimientos (retiros) y ifco_recepciones_proveedor (R22 e incluso recepciones normales si IFCO las marca).
+try { db.exec("ALTER TABLE ifco_movimientos ADD COLUMN consolidado_en TEXT"); } catch(_){}
+try { db.exec("ALTER TABLE ifco_recepciones_proveedor ADD COLUMN consolidado_en TEXT"); } catch(_){}
+
 if (_ifcoMigrarEnviado) {
   try {
     const r = db.prepare(`
@@ -249,59 +255,61 @@ async function _parsearExcelIFCO(buffer) {
   for (const ws of hojasOrdenadas) {
     try {
       const r = _parsearFormatoNuevo(ws);
-      if (r && r.remitos.length > 0) return r;
+      if (r && (r.despachos.length + r.ingresos.length + r.r22.length) > 0) return r;
     } catch(e) { errores.push('[nuevo/'+ws.name+'] '+e.message); }
     try {
       const r = _parsearFormatoViejo(ws);
-      if (r && r.remitos.length > 0) return r;
+      if (r && r.despachos.length > 0) return r;
     } catch(e) { errores.push('[viejo/'+ws.name+'] '+e.message); }
   }
   throw new Error('No se pudo identificar el formato del Excel. Probá con otro archivo. Detalles: ' + errores.join(' | '));
 }
 
 // FORMATO NUEVO — header en alguna fila con columnas "Nº Remito" + "EGRESOS"
+// Devuelve { despachos: [...], ingresos: [...], r22: [...] }
 function _parsearFormatoNuevo(ws) {
   // Buscar la fila de header escaneando las primeras 30 filas
   let headerRow = -1;
-  let cN = -1, cFecha = -1, cDet = -1, cEgresos = -1; // índices de columna (1-based)
+  let cN = -1, cFecha = -1, cDet = -1, cEgresos = -1, cIngresos = -1;
   const maxScan = Math.min(30, ws.rowCount);
   for (let i = 1; i <= maxScan; i++) {
     const row = ws.getRow(i);
-    let foundN = -1, foundEg = -1, foundFecha = -1, foundDet = -1;
+    let foundN = -1, foundEg = -1, foundIn = -1, foundFecha = -1, foundDet = -1;
     for (let c = 1; c <= ws.columnCount; c++) {
       const v = _cellValue(row.getCell(c));
       if (v == null) continue;
       const s = String(v).trim().toLowerCase();
       if (foundN < 0     && (s === 'nº remito' || s === 'n° remito' || s === 'no remito' || s === 'remito')) foundN = c;
       if (foundEg < 0    && s.startsWith('egreso'))                                                          foundEg = c;
+      if (foundIn < 0    && s.startsWith('ingreso'))                                                         foundIn = c;
       if (foundFecha < 0 && (s === 'fecha doc' || s === 'fecha' || s.startsWith('fecha')))                   foundFecha = c;
       if (foundDet < 0   && s === 'detalle')                                                                 foundDet = c;
     }
-    if (foundN > 0 && foundEg > 0) {
-      headerRow = i; cN = foundN; cEgresos = foundEg;
+    if (foundN > 0 && (foundEg > 0 || foundIn > 0)) {
+      headerRow = i; cN = foundN; cEgresos = foundEg; cIngresos = foundIn;
       cFecha = foundFecha; cDet = foundDet;
       break;
     }
   }
-  if (headerRow < 0) return null; // no es este formato
+  if (headerRow < 0) return null;
 
-  const remitos = [];
+  const despachos = [], ingresos = [], r22 = [];
   for (let i = headerRow + 1; i <= ws.rowCount; i++) {
     const row = ws.getRow(i);
     const nRem = _cellValue(row.getCell(cN));
-    const egr  = _cellValue(row.getCell(cEgresos));
-    if (!nRem || !egr) continue;
-    const cant = parseInt(egr);
-    if (!cant || cant <= 0) continue; // Solo egresos > 0
+    if (!nRem) continue;
+    const egr = cEgresos > 0 ? _cellValue(row.getCell(cEgresos)) : null;
+    const ing = cIngresos > 0 ? _cellValue(row.getCell(cIngresos)) : null;
+    const cantEgr = parseInt(egr) || 0;
+    const cantIng = parseInt(ing) || 0;
+    if (cantEgr <= 0 && cantIng <= 0) continue;
 
     const detalleVal = cDet > 0 ? _cellValue(row.getCell(cDet)) : null;
     const detalleStr = detalleVal ? String(detalleVal).trim() : '';
-    // Excluir ajustes
     if (/ajuste/i.test(detalleStr)) continue;
     const nRemStr = String(nRem).trim();
-    if (/^IC[-\s]/i.test(nRemStr)) continue; // N° tipo "IC-20251215-1423" = ajuste interno
-    if (!/\d{4,}/.test(nRemStr)) continue;   // ignora filas sin número real (subtítulos)
-
+    if (/^IC[-\s]/i.test(nRemStr)) continue;
+    if (!/\d{4,}/.test(nRemStr)) continue;
     const normalizado = _normalizarNumeroRemito(nRemStr);
     if (!normalizado) continue;
 
@@ -317,8 +325,8 @@ function _parsearFormatoNuevo(ws) {
         }
       }
     }
-
-    remitos.push({
+    const cant = cantEgr > 0 ? cantEgr : cantIng;
+    const item = {
       n_remito_archivo:     nRemStr,
       n_remito_sistema:     _archivoANumeroSistema(nRemStr),
       n_remito_normalizado: normalizado,
@@ -326,9 +334,19 @@ function _parsearFormatoNuevo(ws) {
       cliente:              detalleStr || null,
       detalle:              detalleStr || null,
       cantidad:             cant
-    });
+    };
+
+    // Clasificar la fila por contenido del detalle
+    if (/r22/i.test(detalleStr)) {
+      r22.push(item);
+    } else if (cantIng > 0 && /retiro/i.test(detalleStr)) {
+      ingresos.push(item);
+    } else if (cantEgr > 0) {
+      despachos.push(item);
+    }
+    // Filas que no encajan en ninguna categoría se ignoran silenciosamente
   }
-  return { remitos: remitos };
+  return { despachos: despachos, ingresos: ingresos, r22: r22, remitos: despachos /* compat */ };
 }
 
 // FORMATO VIEJO — busca la sección "Entregas a Cadenas" como subtítulo
@@ -398,7 +416,8 @@ function _parsearFormatoViejo(ws) {
       cantidad:            cantidad
     });
   }
-  return { remitos: remitos };
+  // Formato viejo: solo despachos. Devuelve mismo shape para compat con wizard.
+  return { despachos: remitos, ingresos: [], r22: [], remitos: remitos };
 }
 
 const router = express.Router();
@@ -1315,8 +1334,9 @@ router.patch('/movimientos/:id', function(req, res) {
 });
 
 router.delete('/movimientos/:id', function(req, res) {
-  const m = db.prepare("SELECT id FROM ifco_movimientos WHERE id = ? AND eliminado_en IS NULL").get(req.params.id);
+  const m = db.prepare("SELECT id, consolidado_en FROM ifco_movimientos WHERE id = ? AND eliminado_en IS NULL").get(req.params.id);
   if (!m) return res.status(404).json({ error: 'No encontrado o ya eliminado' });
+  if (m.consolidado_en) return res.status(403).json({ error: 'Este registro ya fue consolidado con el archivo IFCO y no se puede eliminar.' });
   db.prepare(`UPDATE ifco_movimientos
               SET eliminado_en = datetime('now','localtime'),
                   eliminado_por_id = ?
@@ -2015,8 +2035,9 @@ router.patch('/recepciones-proveedor/:id', upload.single('escaneo'), function(re
 });
 
 router.delete('/recepciones-proveedor/:id', function(req, res) {
-  const r = db.prepare("SELECT id FROM ifco_recepciones_proveedor WHERE id = ? AND eliminado_en IS NULL").get(req.params.id);
+  const r = db.prepare("SELECT id, consolidado_en FROM ifco_recepciones_proveedor WHERE id = ? AND eliminado_en IS NULL").get(req.params.id);
   if (!r) return res.status(404).json({ error: 'No encontrado o ya eliminado' });
+  if (r.consolidado_en) return res.status(403).json({ error: 'Este registro ya fue consolidado con el archivo IFCO y no se puede eliminar.' });
   db.prepare(`UPDATE ifco_recepciones_proveedor
               SET eliminado_en = datetime('now','localtime'),
                   eliminado_por_id = ?
@@ -2290,17 +2311,15 @@ router.post('/ocr/match-sellado', upload.single('foto'), async function(req, res
 // CONSOLIDAR CON ARCHIVO IFCO
 // ═════════════════════════════════════════════════════════════════════════
 
-// POST /consolidar/preview — recibe el .xlsx, parsea y matchea contra la DB
-// Devuelve un preview clasificado por categoría (sin tocar nada)
+// POST /consolidar/preview — recibe el .xlsx, parsea y matchea contra la DB en 3 categorías
+// Devuelve: { despachos, ingresos, r22 }, cada una con { a_marcar, ya_consolidados, no_encontrados }
 router.post('/consolidar/preview', upload.single('archivo'), async function(req, res) {
   console.log('[IFCO][consolidar/preview] inicio. file=', req.file && req.file.originalname);
   try {
     if (!req.file) return res.status(400).json({ error: 'Falta el archivo "archivo"' });
 
-    // Verificar que la librería esté disponible antes de leer el archivo
     const ExcelJS = await _getExcelJS();
     if (!ExcelJS) {
-      console.error('[IFCO][consolidar/preview] exceljs no disponible');
       try { fs.unlinkSync(path.join(UPLOAD_DIR, req.file.filename)); } catch(_){}
       return res.status(503).json({ error: 'Librería exceljs no disponible en el servidor' });
     }
@@ -2309,66 +2328,100 @@ router.post('/consolidar/preview', upload.single('archivo'), async function(req,
     let parsed;
     try {
       const buf = fs.readFileSync(filePath);
-      console.log('[IFCO][consolidar/preview] archivo leído. bytes=', buf.length);
       parsed = await _parsearExcelIFCO(buf);
-      console.log('[IFCO][consolidar/preview] parsed. remitos=', (parsed.remitos||[]).length);
+      console.log('[IFCO][consolidar/preview] parsed: despachos=', parsed.despachos.length, 'ingresos=', parsed.ingresos.length, 'r22=', parsed.r22.length);
     } catch(e) {
-      console.error('[IFCO][consolidar/preview] Error parseando:', e.message);
       try { fs.unlinkSync(filePath); } catch(_){}
       return res.status(400).json({ error: 'Error parseando el archivo: ' + e.message });
     }
-    // Borrar el archivo subido (no lo necesitamos persistido)
     try { fs.unlinkSync(filePath); } catch(_){}
 
-    if (!parsed.remitos || parsed.remitos.length === 0) {
-      return res.json({ ok: true, total_archivo: 0, a_presentar: [], ya_presentados: [], no_encontrados: [] });
-    }
-
-    // Cargar todos los remitos vivos del sistema y armar índice por N° normalizado
-    const enSistema = db.prepare(`
+    // ── DESPACHOS: matchea contra ifco_remitos_super
+    const sysDesp = db.prepare(`
       SELECT id, n_remito_ifco, n_remito_sg, fecha_emision, fecha_sellado, fecha_enviado, fecha_presentado,
              empresa, sucursal, cantidad_despachada, cantidad_recibida, cantidad_rechazada,
              estado, origen, proveedor_origen_id
-      FROM ifco_remitos_super
-      WHERE eliminado_en IS NULL
+      FROM ifco_remitos_super WHERE eliminado_en IS NULL
     `).all();
-    const indice = {};
-    enSistema.forEach(function(r) {
-      const k = _normalizarNumeroRemito(r.n_remito_ifco);
-      if (k) indice[k] = r;
-    });
-    console.log('[IFCO][consolidar/preview] sistema=', enSistema.length, 'indexados=', Object.keys(indice).length);
-
-    // Clasificar cada remito del archivo
-    const aPresentar = [];
-    const yaPresentados = [];
-    const noEncontrados = [];
-
-    parsed.remitos.forEach(function(arch) {
-      const sis = indice[arch.n_remito_normalizado];
+    const idxDesp = {};
+    sysDesp.forEach(function(r){ const k = _normalizarNumeroRemito(r.n_remito_ifco); if (k) idxDesp[k] = r; });
+    const desp = { a_marcar: [], ya_consolidados: [], no_encontrados: [] };
+    parsed.despachos.forEach(function(arch) {
+      const sis = idxDesp[arch.n_remito_normalizado];
       if (!sis) {
-        noEncontrados.push({
-          n_remito_archivo:  arch.n_remito_archivo,
-          n_remito_sistema:  arch.n_remito_sistema,
-          fecha:             arch.fecha,
-          detalle:           arch.detalle,
-          cantidad:          arch.cantidad,
-          cadena_sugerida:   _matchCadenaIFCO(arch.detalle)
+        desp.no_encontrados.push({
+          n_remito_archivo: arch.n_remito_archivo, n_remito_sistema: arch.n_remito_sistema,
+          fecha: arch.fecha, detalle: arch.detalle, cantidad: arch.cantidad,
+          cadena_sugerida: _matchCadenaIFCO(arch.detalle)
         });
       } else if (sis.estado === 'presentado') {
-        yaPresentados.push({ archivo: arch, sistema: sis });
+        desp.ya_consolidados.push({ archivo: arch, sistema: sis });
       } else {
-        aPresentar.push({ archivo: arch, sistema: sis });
+        desp.a_marcar.push({ archivo: arch, sistema: sis });
       }
     });
 
-    console.log('[IFCO][consolidar/preview] OK. aPresentar=', aPresentar.length, 'ya=', yaPresentados.length, 'no=', noEncontrados.length);
+    // ── INGRESOS: matchea contra ifco_movimientos (tipo='retiro') por n_remito_normalizado
+    const sysIng = db.prepare(`
+      SELECT id, n_remito, fecha, cantidad, sucursal_ifco, modelo, consolidado_en
+      FROM ifco_movimientos
+      WHERE eliminado_en IS NULL AND tipo = 'retiro'
+    `).all();
+    const idxIng = {};
+    sysIng.forEach(function(r){ const k = _normalizarNumeroRemito(r.n_remito); if (k) idxIng[k] = r; });
+    const ing = { a_marcar: [], ya_consolidados: [], no_encontrados: [] };
+    parsed.ingresos.forEach(function(arch) {
+      const sis = idxIng[arch.n_remito_normalizado];
+      if (!sis) {
+        ing.no_encontrados.push({
+          n_remito_archivo: arch.n_remito_archivo, n_remito_sistema: arch.n_remito_sistema,
+          fecha: arch.fecha, detalle: arch.detalle, cantidad: arch.cantidad
+        });
+      } else if (sis.consolidado_en) {
+        ing.ya_consolidados.push({ archivo: arch, sistema: sis });
+      } else {
+        ing.a_marcar.push({ archivo: arch, sistema: sis });
+      }
+    });
+
+    // ── R22: matchea contra ifco_recepciones_proveedor (es_r22=1) por n_remito_proveedor
+    const sysR22 = db.prepare(`
+      SELECT id, n_remito_proveedor, fecha_recepcion, cantidad, proveedor_id, consolidado_en
+      FROM ifco_recepciones_proveedor
+      WHERE eliminado_en IS NULL AND es_r22 = 1
+    `).all();
+    const idxR22 = {};
+    sysR22.forEach(function(r){ const k = _normalizarNumeroRemito(r.n_remito_proveedor); if (k) idxR22[k] = r; });
+    const r22out = { a_marcar: [], ya_consolidados: [], no_encontrados: [] };
+    parsed.r22.forEach(function(arch) {
+      const sis = idxR22[arch.n_remito_normalizado];
+      if (!sis) {
+        r22out.no_encontrados.push({
+          n_remito_archivo: arch.n_remito_archivo, n_remito_sistema: arch.n_remito_sistema,
+          fecha: arch.fecha, detalle: arch.detalle, cantidad: arch.cantidad
+        });
+      } else if (sis.consolidado_en) {
+        r22out.ya_consolidados.push({ archivo: arch, sistema: sis });
+      } else {
+        r22out.a_marcar.push({ archivo: arch, sistema: sis });
+      }
+    });
+
+    console.log('[IFCO][consolidar/preview] resultado:',
+      'despachos[a/ya/no]=', desp.a_marcar.length, desp.ya_consolidados.length, desp.no_encontrados.length,
+      'ingresos[a/ya/no]=', ing.a_marcar.length, ing.ya_consolidados.length, ing.no_encontrados.length,
+      'r22[a/ya/no]=', r22out.a_marcar.length, r22out.ya_consolidados.length, r22out.no_encontrados.length);
+
     res.json({
       ok: true,
-      total_archivo:   parsed.remitos.length,
-      a_presentar:     aPresentar,
-      ya_presentados:  yaPresentados,
-      no_encontrados:  noEncontrados
+      totales: {
+        despachos: parsed.despachos.length,
+        ingresos:  parsed.ingresos.length,
+        r22:       parsed.r22.length
+      },
+      despachos: desp,
+      ingresos:  ing,
+      r22:       r22out
     });
   } catch(e) {
     console.error('[IFCO][consolidar/preview] EXCEPCION:', e);
@@ -2377,98 +2430,130 @@ router.post('/consolidar/preview', upload.single('archivo'), async function(req,
   }
 });
 
-// POST /consolidar/aplicar — aplica los cambios elegidos por el usuario
+// POST /consolidar/aplicar — aplica los cambios del wizard (3 categorías)
 // Body JSON: {
-//   ids_marcar_presentados: [int],          // IDs del sistema a marcar como presentados (toman fecha_archivo del map)
-//   fechas_por_id:          { id: 'YYYY-MM-DD' },  // fecha de cada uno (= fecha del archivo)
-//   crear:                  [{ n_remito_sistema, fecha, empresa, cantidad }]
+//   despachos: { ids_marcar: [int], fechas_por_id: {id:'YYYY-MM-DD'}, crear: [{n_remito_sistema, fecha, empresa, cantidad}] },
+//   ingresos:  { ids_marcar: [int], crear: [{n_remito_sistema, fecha, cantidad, sucursal_ifco, modelo}] },
+//   r22:       { ids_marcar: [int], crear: [{n_remito_sistema, fecha, cantidad, proveedor_id?}] }
 // }
 router.post('/consolidar/aplicar', express.json(), function(req, res) {
   console.log('[IFCO][consolidar/aplicar] inicio');
-  const ids = (req.body && req.body.ids_marcar_presentados) || [];
-  const fechasPorId = (req.body && req.body.fechas_por_id) || {};
-  const crear = (req.body && req.body.crear) || [];
-  console.log('[IFCO][consolidar/aplicar] ids=', ids.length, 'crear=', crear.length);
+  const b = req.body || {};
+  const desp = b.despachos || {};
+  const ing  = b.ingresos  || {};
+  const r22  = b.r22       || {};
+  const fechasPorId = desp.fechas_por_id || {};
 
-  let actualizados = 0;
-  let creados = 0;
-  const errores = [];
+  const result = {
+    despachos: { actualizados: 0, creados: 0, errores: [] },
+    ingresos:  { actualizados: 0, creados: 0, errores: [] },
+    r22:       { actualizados: 0, creados: 0, errores: [] }
+  };
+  const userId = (req.user && req.user.id) || null;
+  const ahora = "datetime('now','localtime')";
 
   try {
     const tx = db.transaction(function() {
-      // 1. Marcar como presentados los seleccionados
-      for (const id of ids) {
+      // ───── DESPACHOS ─────
+      for (const id of (desp.ids_marcar || [])) {
         try {
           const r = db.prepare("SELECT * FROM ifco_remitos_super WHERE id = ? AND eliminado_en IS NULL").get(id);
-          if (!r) { errores.push({ id: id, error: 'No encontrado' }); continue; }
+          if (!r) { result.despachos.errores.push({ id, error: 'No encontrado' }); continue; }
           if (r.estado === 'presentado') continue;
           const fechaArchivo = fechasPorId[id] || r.fecha_emision;
-
           if (r.estado === 'despachado') {
-            db.prepare(`
-              UPDATE ifco_remitos_super
-              SET estado             = 'presentado',
-                  cantidad_recibida  = COALESCE(cantidad_recibida, cantidad_despachada),
-                  cantidad_rechazada = COALESCE(cantidad_rechazada, 0),
-                  fecha_sellado      = COALESCE(fecha_sellado, ?),
-                  fecha_presentado   = ?,
-                  actualizado_en     = datetime('now','localtime')
-              WHERE id = ?
-            `).run(fechaArchivo, fechaArchivo, id);
+            db.prepare(`UPDATE ifco_remitos_super
+              SET estado='presentado',
+                  cantidad_recibida=COALESCE(cantidad_recibida,cantidad_despachada),
+                  cantidad_rechazada=COALESCE(cantidad_rechazada,0),
+                  fecha_sellado=COALESCE(fecha_sellado,?),
+                  fecha_presentado=?,
+                  actualizado_en=datetime('now','localtime')
+              WHERE id=?`).run(fechaArchivo, fechaArchivo, id);
           } else {
-            db.prepare(`
-              UPDATE ifco_remitos_super
-              SET estado             = 'presentado',
-                  fecha_presentado   = ?,
-                  actualizado_en     = datetime('now','localtime')
-              WHERE id = ?
-            `).run(fechaArchivo, id);
+            db.prepare(`UPDATE ifco_remitos_super
+              SET estado='presentado',fecha_presentado=?,actualizado_en=datetime('now','localtime')
+              WHERE id=?`).run(fechaArchivo, id);
           }
-          actualizados++;
-        } catch(e) {
-          console.error('[IFCO][consolidar/aplicar] error update id='+id+':', e.message);
-          errores.push({ id: id, error: e.message });
-        }
+          result.despachos.actualizados++;
+        } catch(e) { result.despachos.errores.push({ id, error: e.message }); }
+      }
+      for (let i = 0; i < (desp.crear || []).length; i++) {
+        const n = desp.crear[i];
+        try {
+          if (!n.n_remito_sistema || !n.cantidad) { result.despachos.errores.push({ idx: i, error: 'Faltan datos' }); continue; }
+          const ex = db.prepare("SELECT id FROM ifco_remitos_super WHERE n_remito_ifco=? AND eliminado_en IS NULL").get(n.n_remito_sistema);
+          if (ex) { result.despachos.errores.push({ n_remito: n.n_remito_sistema, error: 'Ya existe' }); continue; }
+          db.prepare(`INSERT INTO ifco_remitos_super (
+            n_remito_ifco, fecha_emision, empresa,
+            cantidad_despachada, cantidad_recibida, cantidad_rechazada,
+            estado, fecha_sellado, fecha_presentado,
+            origen, usuario_id, notas
+          ) VALUES (?,?,?,?,?,0,'presentado',?,?, 'san_geronimo', ?, 'Importado del archivo IFCO')`)
+            .run(n.n_remito_sistema, n.fecha||null, n.empresa||null,
+                 parseInt(n.cantidad)||0, parseInt(n.cantidad)||0,
+                 n.fecha||null, n.fecha||null, userId);
+          result.despachos.creados++;
+        } catch(e) { result.despachos.errores.push({ n_remito: n.n_remito_sistema, error: e.message }); }
       }
 
-      // 2. Crear remitos nuevos
-      for (let i = 0; i < crear.length; i++) {
-        const nuevo = crear[i];
+      // ───── INGRESOS (retiros) ─────
+      for (const id of (ing.ids_marcar || [])) {
         try {
-          if (!nuevo.n_remito_sistema || !nuevo.cantidad) {
-            errores.push({ idx: i, error: 'Faltan datos (n_remito_sistema o cantidad)' });
-            continue;
+          const r = db.prepare("SELECT * FROM ifco_movimientos WHERE id=? AND eliminado_en IS NULL AND tipo='retiro'").get(id);
+          if (!r) { result.ingresos.errores.push({ id, error: 'No encontrado' }); continue; }
+          if (r.consolidado_en) continue;
+          db.prepare("UPDATE ifco_movimientos SET consolidado_en=datetime('now','localtime') WHERE id=?").run(id);
+          result.ingresos.actualizados++;
+        } catch(e) { result.ingresos.errores.push({ id, error: e.message }); }
+      }
+      for (let i = 0; i < (ing.crear || []).length; i++) {
+        const n = ing.crear[i];
+        try {
+          if (!n.n_remito_sistema || !n.cantidad || !n.sucursal_ifco) {
+            result.ingresos.errores.push({ idx: i, error: 'Faltan datos (n_remito/cantidad/sucursal)' }); continue;
           }
-          const existe = db.prepare("SELECT id FROM ifco_remitos_super WHERE n_remito_ifco = ? AND eliminado_en IS NULL").get(nuevo.n_remito_sistema);
-          if (existe) { errores.push({ n_remito: nuevo.n_remito_sistema, error: 'Ya existe' }); continue; }
+          const ex = db.prepare("SELECT id FROM ifco_movimientos WHERE n_remito=? AND tipo='retiro' AND eliminado_en IS NULL").get(n.n_remito_sistema);
+          if (ex) { result.ingresos.errores.push({ n_remito: n.n_remito_sistema, error: 'Ya existe' }); continue; }
+          db.prepare(`INSERT INTO ifco_movimientos
+            (tipo, fecha, cantidad, sucursal_ifco, n_remito, modelo, notas, usuario_id, consolidado_en)
+            VALUES ('retiro', ?, ?, ?, ?, ?, 'Importado del archivo IFCO', ?, datetime('now','localtime'))`)
+            .run(n.fecha||null, parseInt(n.cantidad)||0, n.sucursal_ifco,
+                 n.n_remito_sistema, n.modelo || null, userId);
+          result.ingresos.creados++;
+        } catch(e) { result.ingresos.errores.push({ n_remito: n.n_remito_sistema, error: e.message }); }
+      }
 
-          db.prepare(`
-            INSERT INTO ifco_remitos_super (
-              n_remito_ifco, fecha_emision, empresa,
-              cantidad_despachada, cantidad_recibida, cantidad_rechazada,
-              estado, fecha_sellado, fecha_presentado,
-              origen, usuario_id, notas
-            ) VALUES (?, ?, ?, ?, ?, 0, 'presentado', ?, ?, 'san_geronimo', ?, 'Importado del archivo IFCO')
-          `).run(
-            nuevo.n_remito_sistema,
-            nuevo.fecha || null,
-            nuevo.empresa || null,
-            parseInt(nuevo.cantidad) || 0,
-            parseInt(nuevo.cantidad) || 0,
-            nuevo.fecha || null,
-            nuevo.fecha || null,
-            (req.user && req.user.id) || null
-          );
-          creados++;
-        } catch(e) {
-          console.error('[IFCO][consolidar/aplicar] error insert idx='+i+' n='+nuevo.n_remito_sistema+':', e.message);
-          errores.push({ n_remito: nuevo.n_remito_sistema, error: e.message });
-        }
+      // ───── R22 ─────
+      for (const id of (r22.ids_marcar || [])) {
+        try {
+          const r = db.prepare("SELECT * FROM ifco_recepciones_proveedor WHERE id=? AND eliminado_en IS NULL AND es_r22=1").get(id);
+          if (!r) { result.r22.errores.push({ id, error: 'No encontrado' }); continue; }
+          if (r.consolidado_en) continue;
+          db.prepare("UPDATE ifco_recepciones_proveedor SET consolidado_en=datetime('now','localtime') WHERE id=?").run(id);
+          result.r22.actualizados++;
+        } catch(e) { result.r22.errores.push({ id, error: e.message }); }
+      }
+      for (let i = 0; i < (r22.crear || []).length; i++) {
+        const n = r22.crear[i];
+        try {
+          if (!n.n_remito_sistema || !n.cantidad) {
+            result.r22.errores.push({ idx: i, error: 'Faltan datos (n_remito/cantidad)' }); continue;
+          }
+          const ex = db.prepare("SELECT id FROM ifco_recepciones_proveedor WHERE n_remito_proveedor=? AND es_r22=1 AND eliminado_en IS NULL").get(n.n_remito_sistema);
+          if (ex) { result.r22.errores.push({ n_remito: n.n_remito_sistema, error: 'Ya existe' }); continue; }
+          db.prepare(`INSERT INTO ifco_recepciones_proveedor
+            (fecha_recepcion, proveedor_id, cantidad, n_remito_proveedor, notas, usuario_id, es_r22, estado, confirmado_en, confirmado_por_id, consolidado_en)
+            VALUES (?, ?, ?, ?, 'Importado del archivo IFCO', ?, 1, 'recibido', datetime('now','localtime'), ?, datetime('now','localtime'))`)
+            .run(n.fecha || null, n.proveedor_id || null, parseInt(n.cantidad) || 0,
+                 n.n_remito_sistema, userId, userId);
+          result.r22.creados++;
+        } catch(e) { result.r22.errores.push({ n_remito: n.n_remito_sistema, error: e.message }); }
       }
     });
     tx();
-    console.log('[IFCO][consolidar/aplicar] OK actualizados=', actualizados, 'creados=', creados, 'errores=', errores.length);
-    res.json({ ok: true, actualizados: actualizados, creados: creados, errores: errores });
+    console.log('[IFCO][consolidar/aplicar] OK', JSON.stringify(result));
+    res.json({ ok: true, resultado: result });
   } catch(e) {
     console.error('[IFCO][consolidar/aplicar] EXCEPCION:', e);
     res.status(500).json({ ok: false, error: e.message });
