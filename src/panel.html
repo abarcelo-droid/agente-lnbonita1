@@ -2858,6 +2858,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   <div class="ifco-pane" id="ifco-pane-recep">
     <div style="display:flex;gap:8px;margin-bottom:12px;align-items:center">
       <button class="btn bb" onclick="ifcoAbrirNuevaRecepcionMerc()">+ Nueva recepción</button>
+      <button class="btn bo" onclick="ifcoAbrirNuevaRecepcionR22()" title="IFCOs nuevos comprados a IFCO por el proveedor (no descuentan saldo)">+ Recepción R22</button>
       <div style="font-size:11px;color:var(--mut);margin-left:auto">
         Carga cajones IFCO recibidos en el depósito de SG (con producto)
       </div>
@@ -2939,6 +2940,59 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     <div class="ab-modal-footer" style="margin-top:18px;display:flex;justify-content:flex-end;gap:8px">
       <button class="btn bo" onclick="document.getElementById('ifco-mb-recmerc').classList.remove('on')">Cancelar</button>
       <button class="btn bb" onclick="ifcoGuardarRecepcionMerc()">Guardar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: Recepción R22 (IFCOs nuevos) -->
+<div class="mb" id="ifco-mb-recr22">
+  <div class="mbox" style="width:640px">
+    <div class="mhd">
+      <div class="mht">📥 Recepción R22 — IFCOs nuevos</div>
+      <button class="mcl" onclick="document.getElementById('ifco-mb-recr22').classList.remove('on')">x</button>
+    </div>
+    <div style="background:#fef3c7;border:1px solid #fcd34d;border-radius:8px;padding:10px 12px;margin-bottom:14px;font-size:12px;color:#92400e">
+      ⚠ R22 = cajones nuevos que el proveedor compró directo a IFCO. <b>Suma stock SG, NO descuenta saldo de ningún proveedor.</b>
+    </div>
+    <div class="ab-grid ab-grid-2" style="gap:10px">
+      <div>
+        <label style="font-size:11px;color:var(--mut);text-transform:uppercase">Fecha *</label>
+        <input id="ifco-r22-fecha" type="date" style="width:100%;padding:8px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg)">
+      </div>
+      <div>
+        <label style="font-size:11px;color:var(--mut);text-transform:uppercase">Sucursal IFCO *</label>
+        <select id="ifco-r22-sucursal" style="width:100%;padding:8px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg)">
+          <option value="">— Seleccionar —</option>
+          <option value="Buenos Aires">Buenos Aires</option>
+          <option value="Mendoza">Mendoza</option>
+        </select>
+      </div>
+      <div>
+        <label style="font-size:11px;color:var(--mut);text-transform:uppercase">Cantidad cajones *</label>
+        <input id="ifco-r22-cant" type="number" min="1" style="width:100%;padding:8px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg)">
+      </div>
+      <div>
+        <label style="font-size:11px;color:var(--mut);text-transform:uppercase">N° Remito R22 *</label>
+        <input id="ifco-r22-nrem" type="text" placeholder="ej. 0003R00180224" style="width:100%;padding:8px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg);font-family:monospace;font-size:13px">
+      </div>
+      <div style="grid-column:span 2">
+        <label style="font-size:11px;color:var(--mut);text-transform:uppercase">Proveedor que lo trajo <span style="color:var(--sub);font-weight:400;text-transform:none">(opcional)</span></label>
+        <select id="ifco-r22-prov" style="width:100%;padding:8px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg)">
+          <option value="">— Sin asignar —</option>
+        </select>
+      </div>
+      <div style="grid-column:span 2">
+        <label style="font-size:11px;color:var(--mut);text-transform:uppercase">Notas</label>
+        <input id="ifco-r22-notas" type="text" style="width:100%;padding:8px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg)">
+      </div>
+      <div style="grid-column:span 2">
+        <label style="font-size:11px;color:var(--mut);text-transform:uppercase">Foto del remito (opcional)</label>
+        <input id="ifco-r22-foto" type="file" accept="image/jpeg,image/png,image/webp" style="width:100%;padding:8px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg);font-size:13px">
+      </div>
+    </div>
+    <div class="ab-modal-footer" style="margin-top:18px;display:flex;justify-content:flex-end;gap:8px">
+      <button class="btn bo" onclick="document.getElementById('ifco-mb-recr22').classList.remove('on')">Cancelar</button>
+      <button class="btn bb" onclick="ifcoGuardarRecepcionR22()">Guardar R22</button>
     </div>
   </div>
 </div>
@@ -16305,9 +16359,13 @@ async function ifcoCargarRecepciones() {
       const fotoCell = r.escaneo_path
         ? '<a href="'+r.escaneo_path+'" target="_blank" style="font-size:11px;color:var(--burg)">Ver</a>'
         : '<span style="color:var(--mut);font-size:11px">—</span>';
+      // Si es R22, mostrar badge en lugar del nombre del proveedor (que puede ser NULL)
+      const provCell = r.es_r22
+        ? '<span class="ifco-badge" style="background:#fef3c7;color:#92400e">R22</span> <span style="color:var(--mut);font-size:11px">'+_ifcoEsc(r.sucursal_ifco||'')+(r.proveedor_nombre ? ' · vía '+_ifcoEsc(r.proveedor_nombre) : '')+'</span>'
+        : _ifcoEsc(r.proveedor_nombre||'?');
       return '<tr>' +
         '<td>'+_ifcoFecha(r.fecha_recepcion)+'</td>' +
-        '<td>'+_ifcoEsc(r.proveedor_nombre||'?')+'</td>' +
+        '<td>'+provCell+'</td>' +
         '<td style="text-align:right;font-variant-numeric:tabular-nums"><b>'+_ifcoFmt(r.cantidad)+'</b></td>' +
         '<td>'+_ifcoEsc(r.producto||'—')+'</td>' +
         '<td style="font-family:monospace;font-size:12px">'+_ifcoEsc(r.n_remito_proveedor||'—')+'</td>' +
@@ -16334,6 +16392,53 @@ function ifcoAbrirNuevaRecepcionMerc() {
       return '<option value="'+p.id+'">'+_ifcoEsc(p.nombre)+'</option>';
     }).join('');
   document.getElementById('ifco-mb-recmerc').classList.add('on');
+}
+
+// Modal Recepción R22 — IFCOs nuevos comprados a IFCO
+function ifcoAbrirNuevaRecepcionR22() {
+  document.getElementById('ifco-r22-fecha').value    = _ifcoToday();
+  document.getElementById('ifco-r22-sucursal').value = '';
+  document.getElementById('ifco-r22-cant').value     = '';
+  document.getElementById('ifco-r22-nrem').value     = '';
+  document.getElementById('ifco-r22-notas').value    = '';
+  document.getElementById('ifco-r22-foto').value     = '';
+  const sel = document.getElementById('ifco-r22-prov');
+  sel.innerHTML = '<option value="">— Sin asignar —</option>' +
+    IFCO._provs.map(function(p){
+      return '<option value="'+p.id+'">'+_ifcoEsc(p.nombre)+'</option>';
+    }).join('');
+  document.getElementById('ifco-mb-recr22').classList.add('on');
+}
+
+async function ifcoGuardarRecepcionR22() {
+  const fecha    = document.getElementById('ifco-r22-fecha').value;
+  const sucursal = document.getElementById('ifco-r22-sucursal').value;
+  const cant     = parseInt(document.getElementById('ifco-r22-cant').value);
+  const nrem     = document.getElementById('ifco-r22-nrem').value.trim();
+  const provId   = document.getElementById('ifco-r22-prov').value;
+  const notas    = document.getElementById('ifco-r22-notas').value.trim();
+  const foto     = document.getElementById('ifco-r22-foto').files[0];
+  if (!fecha)      { alert('Falta la fecha'); return; }
+  if (!sucursal)   { alert('Seleccioná la sucursal IFCO'); return; }
+  if (!cant || cant <= 0) { alert('Cantidad inválida'); return; }
+  if (!nrem)       { alert('Falta el N° de remito R22'); return; }
+  try {
+    const fd = new FormData();
+    fd.append('es_r22', '1');
+    fd.append('fecha_recepcion', fecha);
+    fd.append('sucursal_ifco', sucursal);
+    fd.append('cantidad', String(cant));
+    fd.append('n_remito_proveedor', nrem);
+    if (provId) fd.append('proveedor_id', provId);
+    if (notas)  fd.append('notas', notas);
+    if (foto)   fd.append('escaneo', foto);
+    const r = await fetch('/api/ifco/recepciones-proveedor', { method:'POST', credentials:'include', body:fd });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || ('HTTP '+r.status));
+    document.getElementById('ifco-mb-recr22').classList.remove('on');
+    ifcoCargarRecepcionesMerc();
+    if (typeof ifcoCargarResumen === 'function') ifcoCargarResumen();
+  } catch(e) { alert('Error: ' + e.message); }
 }
 
 async function ifcoAbrirEditarRecepcionMerc(id) {
