@@ -2810,12 +2810,16 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
 
   <!-- Tab: Movimientos -->
   <div class="ifco-pane" id="ifco-pane-movs">
-    <div style="display:flex;gap:8px;margin-bottom:12px">
+    <div style="display:flex;gap:8px;margin-bottom:12px;align-items:center">
       <select id="ifco-flt-mov-tipo" onchange="ifcoCargarMovimientos()" style="font-size:13px;padding:6px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg)">
         <option value="">Todos</option>
         <option value="retiro">Retiros</option>
         <option value="perdida">Pérdidas</option>
       </select>
+      <div id="ifco-import-retiros-wrap" style="margin-left:auto;display:none">
+        <input type="file" id="ifco-import-retiros-file" accept=".xlsx,.xls" style="display:none" onchange="ifcoImportarRetirosHistoricos(event)">
+        <button class="btn bo" style="font-size:12px" onclick="document.getElementById('ifco-import-retiros-file').click()" title="Carga inicial de retiros históricos desde Excel — solo admin">📥 Importar histórico</button>
+      </div>
     </div>
     <div class="ab-table-wrap">
       <table class="ab-table" id="ifco-tbl-movs">
@@ -16109,7 +16113,52 @@ async function ifcoGuardarRecepcion() {
 }
 
 // ── MOVIMIENTOS (retiro / pérdida) ────────────────────────────────────────
+// Importación one-shot de retiros históricos (solo admin)
+async function ifcoImportarRetirosHistoricos(ev) {
+  const file = ev.target.files && ev.target.files[0];
+  if (!file) return;
+  if (!confirm('¿Importar retiros históricos desde "' + file.name + '"?\n\nEs idempotente: los N° de remito que ya existan se saltan.')) {
+    ev.target.value = '';
+    return;
+  }
+  const btn = ev.target.previousElementSibling;
+  if (btn) { btn.disabled = true; btn.textContent = 'Importando…'; }
+  try {
+    const fd = new FormData();
+    fd.append('archivo', file);
+    const r = await fetch('/api/ifco/admin/importar-retiros-historicos', {
+      method: 'POST', credentials: 'include', body: fd
+    });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || ('HTTP '+r.status));
+    let msg = '✓ Importación completa\n\n';
+    msg += 'Total filas: ' + (data.total_filas || 0) + '\n';
+    msg += 'Insertados: ' + data.insertados + '\n';
+    msg += 'Saltados (ya existían): ' + data.saltados + '\n';
+    msg += 'Errores: ' + data.errores;
+    if (data.errores > 0 && data.detalle && data.detalle.errores) {
+      msg += '\n\nPrimeros errores:\n' + data.detalle.errores.slice(0, 5).map(function(e){ return '  Fila '+e.fila+': '+e.error; }).join('\n');
+    }
+    alert(msg);
+    ifcoCargarMovimientos();
+  } catch(e) {
+    alert('Error: ' + e.message);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '📥 Importar histórico'; }
+    ev.target.value = '';
+  }
+}
+
 async function ifcoCargarMovimientos() {
+  // Mostrar botón importar solo a admin
+  try {
+    const me = await fetch('/api/auth/me', { credentials:'include' }).then(r => r.json());
+    if (me && me.ok && me.user && me.user.rol === 'admin') {
+      const w = document.getElementById('ifco-import-retiros-wrap');
+      if (w) w.style.display = 'block';
+    }
+  } catch(_) {}
+
   const tipo = document.getElementById('ifco-flt-mov-tipo').value;
   const params = new URLSearchParams();
   if (tipo) params.set('tipo', tipo);
