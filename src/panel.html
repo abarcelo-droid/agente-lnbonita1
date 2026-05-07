@@ -2874,10 +2874,15 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
 
       <!-- Conteo físico de stocks (real vs teórico) -->
       <div id="ifco-stocks-card" class="ifco-card" style="margin-top:16px">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+        <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:10px;gap:16px;flex-wrap:wrap">
           <div>
             <div style="font-size:13px;font-weight:600">📋 Conteo físico de stocks</div>
             <div style="font-size:11px;color:var(--mut);margin-top:2px">Diferencia entre lo que dice el sistema (teórico) y el conteo real. Solo informativo. <b>Actualizar todos los jueves 10am.</b></div>
+          </div>
+          <div id="ifco-stocks-perdida-kpi" style="text-align:right;display:none;background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:8px 14px;min-width:180px">
+            <div style="font-size:10px;color:#991b1b;text-transform:uppercase;letter-spacing:0.5px;font-weight:600">Pérdida potencial actual</div>
+            <div id="ifco-stocks-perdida-valor" style="font-size:20px;font-weight:700;color:#991b1b;font-variant-numeric:tabular-nums;margin-top:2px">—</div>
+            <div style="font-size:10px;color:#991b1b;opacity:0.8">suma de diferencias negativas</div>
           </div>
         </div>
         <div id="ifco-stocks-tabla"></div>
@@ -3452,6 +3457,20 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       <button class="btn bo" onclick="document.getElementById('ifco-mb-stock-real').classList.remove('on')">Cancelar</button>
       <button class="btn bb" onclick="ifcoGuardarStockReal()">Guardar conteo</button>
     </div>
+  </div>
+</div>
+
+<!-- Modal: histórico de conteos de un depósito -->
+<div class="mb" id="ifco-mb-stock-historico">
+  <div class="mbox" style="width:880px;max-width:95vw">
+    <div class="mhd">
+      <div class="mht" id="ifco-shist-titulo">📈 Histórico de conteos</div>
+      <button class="mcl" onclick="document.getElementById('ifco-mb-stock-historico').classList.remove('on')">x</button>
+    </div>
+    <div style="font-size:12px;color:var(--mut);margin-bottom:14px">
+      Evolución de la diferencia teórico vs real semana a semana. La columna <b>Δ vs anterior</b> muestra cuánto cambió la pérdida potencial entre conteos consecutivos: negativo = se "perdieron" más cajones desde el conteo anterior, positivo = aparecieron.
+    </div>
+    <div id="ifco-shist-tabla" style="max-height:60vh;overflow:auto"></div>
   </div>
 </div>
 
@@ -15221,6 +15240,18 @@ async function ifcoCargarStocksReales() {
     } else {
       banner.style.display = 'none';
     }
+    // KPI de pérdida potencial total (suma de diferencias negativas del último conteo)
+    const kpi = document.getElementById('ifco-stocks-perdida-kpi');
+    const kpiVal = document.getElementById('ifco-stocks-perdida-valor');
+    if (data.perdida_actual_total != null && data.perdida_actual_total < 0) {
+      kpi.style.display = 'block';
+      kpiVal.textContent = _ifcoFmt(data.perdida_actual_total) + ' caj.';
+    } else if (data.perdida_actual_total === 0 && data.items.some(function(it){return it.real != null;})) {
+      // Hay conteos cargados pero sin diferencias negativas → ocultar (todo bien) o mostrar "0"
+      kpi.style.display = 'none';
+    } else {
+      kpi.style.display = 'none';
+    }
     // Tabla de conteos
     const tbl = document.getElementById('ifco-stocks-tabla');
     tbl.innerHTML = '<table style="width:100%;font-size:12px;border-collapse:collapse">' +
@@ -15248,7 +15279,7 @@ async function ifcoCargarStocksReales() {
           '<td style="padding:8px;text-align:right;font-variant-numeric:tabular-nums">'+(it.real != null ? _ifcoFmt(it.real) : '<span style="color:var(--mut)">—</span>')+'</td>' +
           '<td style="padding:8px;text-align:right;font-variant-numeric:tabular-nums">'+difCell+'</td>' +
           '<td style="padding:8px;font-size:11px">'+fechaCell+'</td>' +
-          '<td style="padding:8px;text-align:right"><button class="btn bb bs" style="font-size:11px;padding:4px 8px" onclick="ifcoAbrirCargarStock(\''+it.deposito_tipo+'\','+(it.proveedor_id||'null')+',\''+_ifcoEsc(it.nombre)+'\','+it.teorico+')">'+(ult ? 'Actualizar' : 'Cargar')+'</button></td>' +
+          '<td style="padding:8px;text-align:right;white-space:nowrap"><button class="btn bo bs" style="font-size:11px;padding:4px 8px;margin-right:4px" onclick="ifcoAbrirHistorialStock(\''+it.deposito_tipo+'\','+(it.proveedor_id||'null')+',\''+_ifcoEsc(it.nombre)+'\')">📈 Histórico</button><button class="btn bb bs" style="font-size:11px;padding:4px 8px" onclick="ifcoAbrirCargarStock(\''+it.deposito_tipo+'\','+(it.proveedor_id||'null')+',\''+_ifcoEsc(it.nombre)+'\','+it.teorico+')">'+(ult ? 'Actualizar' : 'Cargar')+'</button></td>' +
         '</tr>';
       }).join('') +
     '</tbody></table>';
@@ -15291,6 +15322,63 @@ async function ifcoGuardarStockReal() {
     document.getElementById('ifco-mb-stock-real').classList.remove('on');
     ifcoCargarStocksReales();
   } catch(err) { alert('Error: ' + err.message); }
+}
+
+// Abrir modal con histórico de conteos de un depósito específico
+async function ifcoAbrirHistorialStock(deposito_tipo, proveedor_id, nombre) {
+  document.getElementById('ifco-shist-titulo').textContent = '📈 Histórico — ' + nombre;
+  document.getElementById('ifco-shist-tabla').innerHTML = '<div style="text-align:center;padding:24px;color:var(--mut);font-size:12px">Cargando…</div>';
+  document.getElementById('ifco-mb-stock-historico').classList.add('on');
+  try {
+    const url = '/api/ifco/stocks-reales/historico?deposito_tipo=' + encodeURIComponent(deposito_tipo) +
+                (proveedor_id ? '&proveedor_id=' + proveedor_id : '');
+    const rows = await _ifcoFetch(url);
+    if (!rows || rows.length === 0) {
+      document.getElementById('ifco-shist-tabla').innerHTML = '<div style="text-align:center;padding:24px;color:var(--mut);font-size:13px">Aún no hay conteos cargados para este depósito.</div>';
+      return;
+    }
+    const html = '<table style="width:100%;font-size:12px;border-collapse:collapse">' +
+      '<thead><tr style="background:var(--bg);text-align:left;position:sticky;top:0">' +
+        '<th style="padding:8px">Fecha conteo</th>' +
+        '<th style="padding:8px;text-align:right">Real</th>' +
+        '<th style="padding:8px;text-align:right">Teórico</th>' +
+        '<th style="padding:8px;text-align:right">Diferencia</th>' +
+        '<th style="padding:8px;text-align:right">Δ vs anterior</th>' +
+        '<th style="padding:8px">Notas</th>' +
+        '<th style="padding:8px">Cargado por</th>' +
+      '</tr></thead><tbody>' +
+      rows.map(function(r) {
+        const dif = r.diferencia;
+        let difCell;
+        if (dif == null)     difCell = '<span style="color:var(--mut)">—</span>';
+        else if (dif === 0)  difCell = '<span style="color:var(--ok);font-weight:600">0</span>';
+        else if (dif > 0)    difCell = '<span style="color:#1e40af;font-weight:600">+'+_ifcoFmt(dif)+'</span>';
+        else                 difCell = '<span style="color:#991b1b;font-weight:600">'+_ifcoFmt(dif)+'</span>';
+        const dlt = r.delta_vs_anterior;
+        let dltCell;
+        if (dlt == null)     dltCell = '<span style="color:var(--mut)" title="Primer conteo o falta snapshot">—</span>';
+        else if (dlt === 0)  dltCell = '<span style="color:var(--ok)">0</span>';
+        else if (dlt > 0)    dltCell = '<span style="color:#1e40af" title="Aparecieron cajones desde el conteo anterior">+'+_ifcoFmt(dlt)+'</span>';
+        else                 dltCell = '<span style="color:#991b1b" title="Se perdieron cajones desde el conteo anterior">'+_ifcoFmt(dlt)+'</span>';
+        const teoCell = (r.teorico_snapshot != null)
+          ? _ifcoFmt(r.teorico_snapshot)
+          : '<span style="color:var(--mut)" title="Conteo previo a la implementación del snapshot">—</span>';
+        const creado = (r.creado_en || '').slice(0,16).replace('T',' ');
+        return '<tr style="border-top:1px solid var(--bor)">' +
+          '<td style="padding:8px"><b>'+_ifcoFecha(r.fecha)+'</b><div style="color:var(--mut);font-size:10px">'+_ifcoEsc(creado)+'</div></td>' +
+          '<td style="padding:8px;text-align:right;font-variant-numeric:tabular-nums">'+_ifcoFmt(r.cantidad)+'</td>' +
+          '<td style="padding:8px;text-align:right;font-variant-numeric:tabular-nums">'+teoCell+'</td>' +
+          '<td style="padding:8px;text-align:right;font-variant-numeric:tabular-nums">'+difCell+'</td>' +
+          '<td style="padding:8px;text-align:right;font-variant-numeric:tabular-nums">'+dltCell+'</td>' +
+          '<td style="padding:8px;font-size:11px;max-width:220px">'+_ifcoEsc(r.notas || '')+'</td>' +
+          '<td style="padding:8px;font-size:11px;color:var(--mut)">'+_ifcoEsc(r.usuario_nombre || '—')+'</td>' +
+        '</tr>';
+      }).join('') +
+    '</tbody></table>';
+    document.getElementById('ifco-shist-tabla').innerHTML = html;
+  } catch(e) {
+    document.getElementById('ifco-shist-tabla').innerHTML = '<div style="color:var(--err);padding:20px;font-size:13px">Error: '+_ifcoEsc(e.message)+'</div>';
+  }
 }
 
 async function ifcoConfirmarRecepcion(id) {
