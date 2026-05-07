@@ -1958,90 +1958,93 @@ router.post('/consolidar/preview', upload.single('archivo'), async function(req,
 //   crear:                  [{ n_remito_sistema, fecha, empresa, cantidad }]
 // }
 router.post('/consolidar/aplicar', express.json(), function(req, res) {
+  console.log('[IFCO][consolidar/aplicar] inicio');
   const ids = (req.body && req.body.ids_marcar_presentados) || [];
   const fechasPorId = (req.body && req.body.fechas_por_id) || {};
   const crear = (req.body && req.body.crear) || [];
+  console.log('[IFCO][consolidar/aplicar] ids=', ids.length, 'crear=', crear.length);
 
   let actualizados = 0;
   let creados = 0;
   const errores = [];
 
-  const tx = db.transaction(function() {
-    // 1. Marcar como presentados los seleccionados
-    for (const id of ids) {
-      try {
-        const r = db.prepare("SELECT * FROM ifco_remitos_super WHERE id = ? AND eliminado_en IS NULL").get(id);
-        if (!r) { errores.push({ id: id, error: 'No encontrado' }); continue; }
-        if (r.estado === 'presentado') continue; // ya estaba
-        const fechaArchivo = fechasPorId[id] || r.fecha_emision;
-
-        if (r.estado === 'despachado') {
-          // Setear cantidades default y fecha sellado si están en NULL, después pasar a presentado
-          db.prepare(`
-            UPDATE ifco_remitos_super
-            SET estado             = 'presentado',
-                cantidad_recibida  = COALESCE(cantidad_recibida, cantidad_despachada),
-                cantidad_rechazada = COALESCE(cantidad_rechazada, 0),
-                fecha_sellado      = COALESCE(fecha_sellado, ?),
-                fecha_presentado   = ?,
-                actualizado_en     = datetime('now','localtime')
-            WHERE id = ?
-          `).run(fechaArchivo, fechaArchivo, id);
-        } else {
-          // sellado o enviado → presentado (sin tocar cantidades, ni fechas previas)
-          db.prepare(`
-            UPDATE ifco_remitos_super
-            SET estado             = 'presentado',
-                fecha_presentado   = ?,
-                actualizado_en     = datetime('now','localtime')
-            WHERE id = ?
-          `).run(fechaArchivo, id);
-        }
-        actualizados++;
-      } catch(e) {
-        errores.push({ id: id, error: e.message });
-      }
-    }
-
-    // 2. Crear remitos nuevos (los que el usuario marcó en "no encontrados")
-    for (const nuevo of crear) {
-      try {
-        if (!nuevo.n_remito_sistema || !nuevo.cantidad) {
-          errores.push({ n_remito: nuevo.n_remito_sistema, error: 'Faltan datos' });
-          continue;
-        }
-        // Verificar que no exista
-        const existe = db.prepare("SELECT id FROM ifco_remitos_super WHERE n_remito_ifco = ? AND eliminado_en IS NULL").get(nuevo.n_remito_sistema);
-        if (existe) { errores.push({ n_remito: nuevo.n_remito_sistema, error: 'Ya existe' }); continue; }
-
-        db.prepare(`
-          INSERT INTO ifco_remitos_super (
-            n_remito_ifco, fecha_emision, empresa,
-            cantidad_despachada, cantidad_recibida, cantidad_rechazada,
-            estado, fecha_sellado, fecha_presentado,
-            origen, usuario_id, notas
-          ) VALUES (?, ?, ?, ?, ?, 0, 'presentado', ?, ?, 'san_geronimo', ?, 'Importado del archivo IFCO')
-        `).run(
-          nuevo.n_remito_sistema,
-          nuevo.fecha || null,
-          nuevo.empresa || null,
-          parseInt(nuevo.cantidad),
-          parseInt(nuevo.cantidad),
-          nuevo.fecha || null,
-          nuevo.fecha || null,
-          (req.user && req.user.id) || null
-        );
-        creados++;
-      } catch(e) {
-        errores.push({ n_remito: nuevo.n_remito_sistema, error: e.message });
-      }
-    }
-  });
-
   try {
+    const tx = db.transaction(function() {
+      // 1. Marcar como presentados los seleccionados
+      for (const id of ids) {
+        try {
+          const r = db.prepare("SELECT * FROM ifco_remitos_super WHERE id = ? AND eliminado_en IS NULL").get(id);
+          if (!r) { errores.push({ id: id, error: 'No encontrado' }); continue; }
+          if (r.estado === 'presentado') continue;
+          const fechaArchivo = fechasPorId[id] || r.fecha_emision;
+
+          if (r.estado === 'despachado') {
+            db.prepare(`
+              UPDATE ifco_remitos_super
+              SET estado             = 'presentado',
+                  cantidad_recibida  = COALESCE(cantidad_recibida, cantidad_despachada),
+                  cantidad_rechazada = COALESCE(cantidad_rechazada, 0),
+                  fecha_sellado      = COALESCE(fecha_sellado, ?),
+                  fecha_presentado   = ?,
+                  actualizado_en     = datetime('now','localtime')
+              WHERE id = ?
+            `).run(fechaArchivo, fechaArchivo, id);
+          } else {
+            db.prepare(`
+              UPDATE ifco_remitos_super
+              SET estado             = 'presentado',
+                  fecha_presentado   = ?,
+                  actualizado_en     = datetime('now','localtime')
+              WHERE id = ?
+            `).run(fechaArchivo, id);
+          }
+          actualizados++;
+        } catch(e) {
+          console.error('[IFCO][consolidar/aplicar] error update id='+id+':', e.message);
+          errores.push({ id: id, error: e.message });
+        }
+      }
+
+      // 2. Crear remitos nuevos
+      for (let i = 0; i < crear.length; i++) {
+        const nuevo = crear[i];
+        try {
+          if (!nuevo.n_remito_sistema || !nuevo.cantidad) {
+            errores.push({ idx: i, error: 'Faltan datos (n_remito_sistema o cantidad)' });
+            continue;
+          }
+          const existe = db.prepare("SELECT id FROM ifco_remitos_super WHERE n_remito_ifco = ? AND eliminado_en IS NULL").get(nuevo.n_remito_sistema);
+          if (existe) { errores.push({ n_remito: nuevo.n_remito_sistema, error: 'Ya existe' }); continue; }
+
+          db.prepare(`
+            INSERT INTO ifco_remitos_super (
+              n_remito_ifco, fecha_emision, empresa,
+              cantidad_despachada, cantidad_recibida, cantidad_rechazada,
+              estado, fecha_sellado, fecha_presentado,
+              origen, usuario_id, notas
+            ) VALUES (?, ?, ?, ?, ?, 0, 'presentado', ?, ?, 'san_geronimo', ?, 'Importado del archivo IFCO')
+          `).run(
+            nuevo.n_remito_sistema,
+            nuevo.fecha || null,
+            nuevo.empresa || null,
+            parseInt(nuevo.cantidad) || 0,
+            parseInt(nuevo.cantidad) || 0,
+            nuevo.fecha || null,
+            nuevo.fecha || null,
+            (req.user && req.user.id) || null
+          );
+          creados++;
+        } catch(e) {
+          console.error('[IFCO][consolidar/aplicar] error insert idx='+i+' n='+nuevo.n_remito_sistema+':', e.message);
+          errores.push({ n_remito: nuevo.n_remito_sistema, error: e.message });
+        }
+      }
+    });
     tx();
+    console.log('[IFCO][consolidar/aplicar] OK actualizados=', actualizados, 'creados=', creados, 'errores=', errores.length);
     res.json({ ok: true, actualizados: actualizados, creados: creados, errores: errores });
   } catch(e) {
+    console.error('[IFCO][consolidar/aplicar] EXCEPCION:', e);
     res.status(500).json({ ok: false, error: e.message });
   }
 });
