@@ -397,9 +397,9 @@ router.get('/:id/pdf', async function(req, res) {
     const hY = M;
     const hH = 36;
     const hBot = hY + hH;
-    // Anchos de columnas
-    const colA_w = innerW * 0.42;     // logo + datos LNB
-    const colB_w = innerW * 0.22;     // cuadradito A + datos fiscales
+    // Anchos de columnas (rebalanceados para que los datos fiscales no se desborden)
+    const colA_w = innerW * 0.40;     // logo + datos LNB
+    const colB_w = innerW * 0.32;     // cuadradito A + datos fiscales
     const colA_x = L;
     const colB_x = L + colA_w;
     const colC_x = L + colA_w + colB_w;
@@ -435,24 +435,24 @@ router.get('/:id/pdf', async function(req, res) {
     setF(8.5, true);
     doc.text(LNB.iva_cond,     colA_x + 3, hY + 34.5);
 
-    // ── COL B: COD N° + cuadradito A + datos fiscales (centrados)
+    // ── COL B: cuadradito A grande centrado + datos fiscales debajo
     setF(7, false);
-    doc.text('COD. N° ' + LNB.cod_cliente, colB_x + 4, hY + 4);
-    // Cuadradito grande con la "A" — alineado a la izquierda de la columna
-    const aSz = 13;
-    const aX = colB_x + 4;
-    const aY = hY + 7;
+    doc.text('COD. N° ' + LNB.cod_cliente, colB_x + 3, hY + 4);
+    // Cuadradito A — centrado horizontalmente en la columna
+    const aSz = 14;
+    const aX = colB_x + (colB_w - aSz) / 2;
+    const aY = hY + 6.5;
     doc.setLineWidth(0.5);
     doc.rect(aX, aY, aSz, aSz);
-    setF(20, true);
+    setF(22, true);
     doc.text(r.iva_letra || 'A', aX + aSz/2, aY + aSz - 2.5, { align: 'center' });
-    // Datos fiscales LNB — alineados al cuadradito, con buen espacio
+    // Datos fiscales LNB — DEBAJO del cuadradito, centrados, font compacto
     setF(7, false);
-    const fX = aX + aSz + 3;
-    const fY = aY + 2;
-    doc.text('C.U.I.T. N°: ' + LNB.cuit,            fX, fY);
-    doc.text('Convenio Multilateral: ' + LNB.cm,    fX, fY + 4);
-    doc.text('Fecha Inicio Actividades: ' + LNB.inicio_act, fX, fY + 8);
+    const fY = aY + aSz + 3;
+    const fXc = colB_x + colB_w / 2;
+    doc.text('C.U.I.T. N°: ' + LNB.cuit,            fXc, fY,     { align: 'center' });
+    doc.text('Conv. Multilateral: ' + LNB.cm,       fXc, fY + 3.5, { align: 'center' });
+    doc.text('Inicio Activ.: ' + LNB.inicio_act,    fXc, fY + 7,   { align: 'center' });
 
     // ── COL C: N° de liquidación + Fecha (sin "LIQUIDACIÓN")
     setF(16, true);
