@@ -16210,7 +16210,7 @@ async function ifcoConsolidarAplicar() {
       _ifcoCs2.sel[cat].no.forEach(function(it){
         if (!it.create) return;
         const obj = { n_remito_sistema: it.n_remito_sistema, fecha: it.fecha, cantidad: it.cantidad };
-        if (cat === 'despachos') obj.empresa = _matchCadenaIFCO ? null : null; // no enviamos cadena_sugerida; el archivo no la sabe bien
+        if (cat === 'despachos') obj.empresa = it.cadena_sugerida || null;
         else if (cat === 'ingresos') { obj.sucursal_ifco = it.sucursal_ifco; obj.modelo = it.modelo || null; }
         else if (cat === 'r22') obj.proveedor_id = it.proveedor_id || null;
         body[cat].crear.push(obj);

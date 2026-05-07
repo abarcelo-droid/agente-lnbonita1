@@ -354,12 +354,19 @@ function _parsearFormatoNuevo(ws) {
     };
 
     // Clasificar la fila por contenido del detalle
-    if (/r22/i.test(detalleStr)) {
-      r22.push(item);
-    } else if (cantIng > 0 && /retiro/i.test(detalleStr)) {
-      ingresos.push(item);
+    if (cantIng > 0) {
+      // Cualquier INGRESO: si dice "Retiros de Cajas IFCO" es nuestro retiro propio,
+      // sino lo tratamos como R22 (proveedor que compró cajones directo a IFCO).
+      // Esto cubre casos como "De Expoverde S.A", "R22 ...", etc.
+      if (/retiros?\s+de\s+cajas?\s+ifco/i.test(detalleStr)) {
+        ingresos.push(item);
+      } else {
+        r22.push(item);
+      }
     } else if (cantEgr > 0) {
-      despachos.push(item);
+      // Egreso explícito de R22 (raro): respetar
+      if (/r22/i.test(detalleStr)) r22.push(item);
+      else                         despachos.push(item);
     }
     // Filas que no encajan en ninguna categoría se ignoran silenciosamente
   }
@@ -734,7 +741,12 @@ router.delete('/talonarios/:id', function(req, res) {
     const usado = db.prepare("SELECT COUNT(*) as n FROM ifco_remitos_super WHERE talonario_id = ?")
                     .get(req.params.id);
     if (usado.n > 0) return res.status(400).json({ error: 'Talonario con ' + usado.n + ' remito(s) asociados — desactivar en su lugar' });
-    db.prepare("DELETE FROM ifco_talonarios WHERE id = ?").run(req.params.id);
+    // Borrar en transacción: primero los logs (FK), después el talonario
+    const tx = db.transaction(function(id) {
+      db.prepare("DELETE FROM ifco_talonarios_log WHERE talonario_id = ?").run(id);
+      db.prepare("DELETE FROM ifco_talonarios WHERE id = ?").run(id);
+    });
+    tx(req.params.id);
     res.json({ ok: true });
   } catch(e) {
     console.error('[IFCO][talonarios DELETE] EXCEPCION:', e);
@@ -1771,6 +1783,24 @@ async function _getIfcoJsPDF() {
   } catch(e) { console.error('[IFCO] jspdf no disponible:', e.message); return null; }
 }
 
+// Sanitiza un string para que jsPDF (Helvetica WinAnsi) lo renderice bien.
+// Reemplaza caracteres unicode no soportados por equivalentes ASCII,
+// que de otra forma aparecen como '!' o causan kerning/espaciado raro.
+function _pdfSafe(s) {
+  if (s == null) return '';
+  return String(s)
+    .replace(/→/g, '->')
+    .replace(/←/g, '<-')
+    .replace(/[“”]/g, '"')
+    .replace(/[‘’]/g, "'")
+    .replace(/–/g, '-')
+    .replace(/—/g, '-')
+    .replace(/…/g, '...')
+    .replace(/•/g, '*')
+    .replace(/✓/g, 'OK')
+    .replace(/✗/g, 'X');
+}
+
 router.get('/proveedores/:id/movimientos.pdf', async function(req, res) {
   try {
     const provId = parseInt(req.params.id);
@@ -1796,7 +1826,7 @@ router.get('/proveedores/:id/movimientos.pdf', async function(req, res) {
     doc.text('Movimientos de cajones IFCO', L, M + 5);
     setF(10, false);
     doc.setTextColor(110);
-    doc.text('LA NIÑA BONITA — San Gerónimo S.A.', L, M + 10);
+    doc.text(_pdfSafe('LA NIÑA BONITA - San Gerónimo S.A.'), L, M + 10);
     doc.setTextColor(0);
 
     // Datos del proveedor + saldo (caja destacada)
@@ -1805,10 +1835,10 @@ router.get('/proveedores/:id/movimientos.pdf', async function(req, res) {
     doc.setFillColor(248, 248, 248);
     doc.roundedRect(L, y, innerW, 18, 2, 2, 'FD');
     setF(13, true);
-    doc.text(p.nombre || '—', L + 4, y + 7);
+    doc.text(_pdfSafe(p.nombre || '-'), L + 4, y + 7);
     setF(9, false);
     doc.setTextColor(110);
-    doc.text(p.razon_social || '', L + 4, y + 12);
+    doc.text(_pdfSafe(p.razon_social || ''), L + 4, y + 12);
     doc.setTextColor(0);
     // Saldo a la derecha
     setF(8, false);
@@ -1848,8 +1878,8 @@ router.get('/proveedores/:id/movimientos.pdf', async function(req, res) {
 
     // Filas
     setF(8.5, false);
-    const labelTipo = (t) => t === 'envio' ? 'Envío' : t === 'recepcion' ? 'Recepción' : 'Directo súper';
-    const truncar = (s, max) => { s = String(s||''); return s.length > max ? s.slice(0, max - 1) + '…' : s; };
+    const labelTipo = (t) => t === 'envio' ? 'Envio' : t === 'recepcion' ? 'Recepcion' : 'Directo super';
+    const truncar = (s, max) => { s = _pdfSafe(s); return s.length > max ? s.slice(0, max - 1) + '...' : s; };
 
     for (const m of movimientos) {
       // Salto de página si no entra
@@ -1877,7 +1907,7 @@ router.get('/proveedores/:id/movimientos.pdf', async function(req, res) {
       else if (m.delta > 0) doc.setTextColor(30, 130, 60);
       doc.text(deltaTxt, cCant + 24, y, { align: 'right' });
       doc.setTextColor(0);
-      doc.text(String(m.estado || '—'),   cEst, y);
+      doc.text(_pdfSafe(m.estado || '-'),   cEst, y);
       y += 5;
       // Línea separadora suave
       doc.setDrawColor(230);
@@ -1889,7 +1919,7 @@ router.get('/proveedores/:id/movimientos.pdf', async function(req, res) {
     setF(7, false);
     doc.setTextColor(140);
     doc.text('Generado el ' + new Date().toLocaleString('es-AR'), L, H - 8);
-    doc.text('Página 1 de ' + doc.internal.getNumberOfPages(), R, H - 8, { align: 'right' });
+    doc.text('Pagina 1 de ' + doc.internal.getNumberOfPages(), R, H - 8, { align: 'right' });
 
     const buf = Buffer.from(doc.output('arraybuffer'));
     res.setHeader('Content-Type', 'application/pdf');
