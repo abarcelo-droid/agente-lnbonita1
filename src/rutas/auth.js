@@ -40,8 +40,8 @@ router.post('/login', (req, res) => {
     res.cookie('lnb_user', JSON.stringify(userData), { httpOnly: false, sameSite: 'lax', path: '/' });
 
     // Whitelist de rutas internas válidas para el parámetro ?next=
-    // Se aceptan rutas que empiecen con /scout o /panel (permite ?query y #hash)
-    const RUTAS_VALIDAS = ['/scout', '/panel'];
+    // Se aceptan rutas que empiecen con /scout, /panel o /m (mobile IFCO)
+    const RUTAS_VALIDAS = ['/scout', '/panel', '/m'];
     const esNextValido = (n) => {
       if (!n || typeof n !== 'string') return false;
       if (!n.startsWith('/') || n.startsWith('//')) return false;  // evita redirects externos
