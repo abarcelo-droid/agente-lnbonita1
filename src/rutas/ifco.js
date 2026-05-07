@@ -44,16 +44,16 @@ async function _getAnthropic() {
   }
 }
 
-// ── Lazy load de la librería xlsx (SheetJS) para import/export Excel ──────
-let _xlsxLib = null;
-async function _getXlsx() {
-  if (_xlsxLib) return _xlsxLib;
+// ── Lazy load de exceljs para parsear Excel de IFCO ──────────────────────
+let _exceljsLib = null;
+async function _getExcelJS() {
+  if (_exceljsLib) return _exceljsLib;
   try {
-    const mod = await import('xlsx');
-    _xlsxLib = mod.default || mod;
-    return _xlsxLib;
+    const mod = await import('exceljs');
+    _exceljsLib = mod.default || mod;
+    return _exceljsLib;
   } catch(e) {
-    console.warn('[IFCO] Librería xlsx no disponible:', e.message);
+    console.warn('[IFCO] Librería exceljs no disponible:', e.message);
     return null;
   }
 }
@@ -91,59 +91,85 @@ function _matchCadenaIFCO(detalle) {
   return null;
 }
 
-// Parsea el Excel de IFCO buscando la sección "Entregas a Cadenas"
-// Devuelve { remitos: [{ n_remito_archivo, n_remito_sistema, n_remito_normalizado, fecha, cliente, detalle, cantidad }] }
-async function _parsearExcelIFCO(buffer) {
-  const XLSX = await _getXlsx();
-  if (!XLSX) throw new Error('Librería xlsx no disponible. Falta instalar la dependencia.');
+// Lee el valor "plano" de una celda de exceljs (puede venir como objeto, número, string o Date)
+function _cellValue(cell) {
+  if (!cell) return null;
+  let v = cell.value;
+  if (v == null) return null;
+  // Fórmulas con resultado calculado
+  if (typeof v === 'object' && v.result !== undefined) v = v.result;
+  // Hyperlinks / rich text
+  if (typeof v === 'object' && v.text !== undefined) v = v.text;
+  if (typeof v === 'object' && Array.isArray(v.richText)) {
+    v = v.richText.map(function(p){ return p.text||''; }).join('');
+  }
+  return v;
+}
 
-  const wb = XLSX.read(buffer, { type: 'buffer', cellDates: true });
-  // Hoja "Cronologico" o la primera disponible
-  const sheetName = wb.SheetNames.find(s => s.toLowerCase().startsWith('cronologico')) || wb.SheetNames[0];
-  if (!sheetName) throw new Error('El archivo no tiene hojas');
-  const ws = wb.Sheets[sheetName];
-  // Convertir a array de filas (cada fila es array de celdas)
-  const filas = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: null });
+// Parsea el Excel de IFCO buscando la sección "Entregas a Cadenas"
+async function _parsearExcelIFCO(buffer) {
+  const ExcelJS = await _getExcelJS();
+  if (!ExcelJS) throw new Error('Librería exceljs no disponible en el servidor');
+
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.load(buffer);
+
+  // Buscar hoja "Cronologico" (case-insensitive) o usar la primera
+  let ws = null;
+  wb.eachSheet(function(sheet) {
+    if (!ws && sheet.name.toLowerCase().startsWith('cronologico')) ws = sheet;
+  });
+  if (!ws && wb.worksheets.length > 0) ws = wb.worksheets[0];
+  if (!ws) throw new Error('El archivo no tiene hojas');
 
   // Buscar el inicio de "Entregas a Cadenas"
   let inicio = -1;
-  for (let i = 0; i < filas.length; i++) {
-    const c0 = (filas[i][0] || '').toString().trim().toLowerCase();
-    if (c0 === 'entregas a cadenas') { inicio = i + 1; break; }
-  }
+  ws.eachRow({ includeEmpty: true }, function(row, rowNumber) {
+    if (inicio !== -1) return;
+    const c0 = _cellValue(row.getCell(1));
+    if (c0 && String(c0).trim().toLowerCase() === 'entregas a cadenas') {
+      inicio = rowNumber + 1;
+    }
+  });
   if (inicio < 0) throw new Error('No se encontró la sección "Entregas a Cadenas" en el archivo');
 
-  // Recorrer hasta el fin (línea vacía consecutiva o nueva sección)
+  // Recorrer hasta el fin (3 filas vacías consecutivas o nueva sección sin N° remito)
   const remitos = [];
   let vaciasSeguidas = 0;
-  for (let i = inicio; i < filas.length; i++) {
-    const row = filas[i];
-    if (!row || row.every(c => c == null || String(c).trim() === '')) {
+  const ultimaFila = ws.rowCount;
+  for (let i = inicio; i <= ultimaFila; i++) {
+    const row = ws.getRow(i);
+    const c0 = _cellValue(row.getCell(1));
+    const c1 = _cellValue(row.getCell(2));
+    const c2 = _cellValue(row.getCell(3));
+    const c3 = _cellValue(row.getCell(4));
+    const c4 = _cellValue(row.getCell(5));
+    const c5 = _cellValue(row.getCell(6));
+
+    const todasVacias = [c0,c1,c2,c3,c4,c5].every(function(v){ return v == null || String(v).trim() === ''; });
+    if (todasVacias) {
       vaciasSeguidas++;
-      if (vaciasSeguidas >= 3) break; // 3 filas vacías → corta
+      if (vaciasSeguidas >= 3) break;
       continue;
     }
     vaciasSeguidas = 0;
-    // Si la fila parece un subtítulo (texto en columna 0 sin fecha real, sin valores en otras), saltamos sección
-    const c0 = row[0];
-    const c1 = row[1];
-    if (c0 && !c1 && (typeof c0 === 'string') && !/^\d/.test(c0.toString().trim()) && !c0.toString().match(/\d{4}/)) {
-      // Es probablemente un subtítulo de otra sección → terminamos
+
+    // Subtítulo de otra sección (texto en col A, sin N° en B)
+    if (c0 && !c1 && typeof c0 === 'string' && !/^\d/.test(c0.toString().trim()) && !c0.toString().match(/\d{4}/)) {
       break;
     }
-    if (!c1) continue; // sin N° de remito, saltar
+    if (!c1) continue;
 
     const nRemitoArchivo = String(c1).trim();
     const normalizado = _normalizarNumeroRemito(nRemitoArchivo);
     if (!normalizado) continue;
 
-    // Fecha: puede venir como Date o como string
+    // Fecha (col A): puede ser Date o string DD/MM/YYYY
     let fechaIso = null;
     if (c0 instanceof Date) {
       fechaIso = c0.toISOString().slice(0, 10);
     } else if (c0 != null) {
       const txt = String(c0);
-      // "DD/MM/YYYY" → "YYYY-MM-DD"
       const m = txt.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})$/);
       if (m) {
         const yyyy = m[3].length === 2 ? '20' + m[3] : m[3];
@@ -151,17 +177,18 @@ async function _parsearExcelIFCO(buffer) {
       }
     }
 
-    // Salidas (columna F, índice 5) — vienen negativas
-    const salidas = parseInt(row[5] || 0);
-    const cantidad = salidas < 0 ? -salidas : (parseInt(row[4] || 0) || Math.abs(salidas));
+    // Salidas (col F = 6) — vienen negativas. Si no hay, fallback a entradas (col E = 5)
+    const salidas = parseInt(c5 || 0);
+    const entradas = parseInt(c4 || 0);
+    const cantidad = salidas < 0 ? -salidas : (entradas || Math.abs(salidas));
 
     remitos.push({
       n_remito_archivo:    nRemitoArchivo,
       n_remito_sistema:    _archivoANumeroSistema(nRemitoArchivo),
       n_remito_normalizado: normalizado,
       fecha:               fechaIso,
-      cliente:             row[2] ? String(row[2]).trim() : null,
-      detalle:             row[3] ? String(row[3]).trim() : null,
+      cliente:             c2 ? String(c2).trim() : null,
+      detalle:             c3 ? String(c3).trim() : null,
       cantidad:            cantidad
     });
   }
@@ -1813,68 +1840,88 @@ router.post('/ocr/match-sellado', upload.single('foto'), async function(req, res
 // POST /consolidar/preview — recibe el .xlsx, parsea y matchea contra la DB
 // Devuelve un preview clasificado por categoría (sin tocar nada)
 router.post('/consolidar/preview', upload.single('archivo'), async function(req, res) {
-  if (!req.file) return res.status(400).json({ error: 'Falta el archivo "archivo"' });
-  const filePath = path.join(UPLOAD_DIR, req.file.filename);
-  let parsed;
+  console.log('[IFCO][consolidar/preview] inicio. file=', req.file && req.file.originalname);
   try {
-    const buf = fs.readFileSync(filePath);
-    parsed = await _parsearExcelIFCO(buf);
-  } catch(e) {
-    try { fs.unlinkSync(filePath); } catch(_){}
-    return res.status(400).json({ error: e.message });
-  } finally {
+    if (!req.file) return res.status(400).json({ error: 'Falta el archivo "archivo"' });
+
+    // Verificar que la librería esté disponible antes de leer el archivo
+    const ExcelJS = await _getExcelJS();
+    if (!ExcelJS) {
+      console.error('[IFCO][consolidar/preview] exceljs no disponible');
+      try { fs.unlinkSync(path.join(UPLOAD_DIR, req.file.filename)); } catch(_){}
+      return res.status(503).json({ error: 'Librería exceljs no disponible en el servidor' });
+    }
+
+    const filePath = path.join(UPLOAD_DIR, req.file.filename);
+    let parsed;
+    try {
+      const buf = fs.readFileSync(filePath);
+      console.log('[IFCO][consolidar/preview] archivo leído. bytes=', buf.length);
+      parsed = await _parsearExcelIFCO(buf);
+      console.log('[IFCO][consolidar/preview] parsed. remitos=', (parsed.remitos||[]).length);
+    } catch(e) {
+      console.error('[IFCO][consolidar/preview] Error parseando:', e.message);
+      try { fs.unlinkSync(filePath); } catch(_){}
+      return res.status(400).json({ error: 'Error parseando el archivo: ' + e.message });
+    }
     // Borrar el archivo subido (no lo necesitamos persistido)
     try { fs.unlinkSync(filePath); } catch(_){}
-  }
 
-  if (!parsed.remitos || parsed.remitos.length === 0) {
-    return res.json({ ok: true, total_archivo: 0, a_presentar: [], ya_presentados: [], no_encontrados: [] });
-  }
-
-  // Cargar todos los remitos vivos del sistema y armar índice por N° normalizado
-  const enSistema = db.prepare(`
-    SELECT id, n_remito_ifco, n_remito_sg, fecha_emision, fecha_sellado, fecha_presentacion,
-           empresa, sucursal, cantidad_despachada, cantidad_recibida, cantidad_rechazada,
-           estado, origen, proveedor_origen_id
-    FROM ifco_remitos_super
-    WHERE eliminado_en IS NULL
-  `).all();
-  const indice = {};
-  enSistema.forEach(function(r) {
-    const k = _normalizarNumeroRemito(r.n_remito_ifco);
-    if (k) indice[k] = r;
-  });
-
-  // Clasificar cada remito del archivo
-  const aPresentar = [];     // existe en sistema en estado despachado o sellado
-  const yaPresentados = [];  // existe en sistema, ya estaba presentado
-  const noEncontrados = [];  // no existe en sistema
-
-  parsed.remitos.forEach(function(arch) {
-    const sis = indice[arch.n_remito_normalizado];
-    if (!sis) {
-      noEncontrados.push({
-        n_remito_archivo:  arch.n_remito_archivo,
-        n_remito_sistema:  arch.n_remito_sistema,
-        fecha:             arch.fecha,
-        detalle:           arch.detalle,
-        cantidad:          arch.cantidad,
-        cadena_sugerida:   _matchCadenaIFCO(arch.detalle)
-      });
-    } else if (sis.estado === 'presentado') {
-      yaPresentados.push({ archivo: arch, sistema: sis });
-    } else {
-      aPresentar.push({ archivo: arch, sistema: sis });
+    if (!parsed.remitos || parsed.remitos.length === 0) {
+      return res.json({ ok: true, total_archivo: 0, a_presentar: [], ya_presentados: [], no_encontrados: [] });
     }
-  });
 
-  res.json({
-    ok: true,
-    total_archivo:   parsed.remitos.length,
-    a_presentar:     aPresentar,
-    ya_presentados:  yaPresentados,
-    no_encontrados:  noEncontrados
-  });
+    // Cargar todos los remitos vivos del sistema y armar índice por N° normalizado
+    const enSistema = db.prepare(`
+      SELECT id, n_remito_ifco, n_remito_sg, fecha_emision, fecha_sellado, fecha_presentacion,
+             empresa, sucursal, cantidad_despachada, cantidad_recibida, cantidad_rechazada,
+             estado, origen, proveedor_origen_id
+      FROM ifco_remitos_super
+      WHERE eliminado_en IS NULL
+    `).all();
+    const indice = {};
+    enSistema.forEach(function(r) {
+      const k = _normalizarNumeroRemito(r.n_remito_ifco);
+      if (k) indice[k] = r;
+    });
+    console.log('[IFCO][consolidar/preview] sistema=', enSistema.length, 'indexados=', Object.keys(indice).length);
+
+    // Clasificar cada remito del archivo
+    const aPresentar = [];
+    const yaPresentados = [];
+    const noEncontrados = [];
+
+    parsed.remitos.forEach(function(arch) {
+      const sis = indice[arch.n_remito_normalizado];
+      if (!sis) {
+        noEncontrados.push({
+          n_remito_archivo:  arch.n_remito_archivo,
+          n_remito_sistema:  arch.n_remito_sistema,
+          fecha:             arch.fecha,
+          detalle:           arch.detalle,
+          cantidad:          arch.cantidad,
+          cadena_sugerida:   _matchCadenaIFCO(arch.detalle)
+        });
+      } else if (sis.estado === 'presentado') {
+        yaPresentados.push({ archivo: arch, sistema: sis });
+      } else {
+        aPresentar.push({ archivo: arch, sistema: sis });
+      }
+    });
+
+    console.log('[IFCO][consolidar/preview] OK. aPresentar=', aPresentar.length, 'ya=', yaPresentados.length, 'no=', noEncontrados.length);
+    res.json({
+      ok: true,
+      total_archivo:   parsed.remitos.length,
+      a_presentar:     aPresentar,
+      ya_presentados:  yaPresentados,
+      no_encontrados:  noEncontrados
+    });
+  } catch(e) {
+    console.error('[IFCO][consolidar/preview] EXCEPCION:', e);
+    if (req.file) try { fs.unlinkSync(path.join(UPLOAD_DIR, req.file.filename)); } catch(_){}
+    res.status(500).json({ error: 'Error interno: ' + e.message });
+  }
 });
 
 // POST /consolidar/aplicar — aplica los cambios elegidos por el usuario
