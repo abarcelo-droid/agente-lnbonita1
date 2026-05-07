@@ -59,6 +59,37 @@ if (_ifcoMigrarEnviado) {
 try { db.exec("ALTER TABLE ifco_recepciones_proveedor ADD COLUMN es_r22 INTEGER DEFAULT 0"); } catch(e) { /* ya existe */ }
 try { db.exec("ALTER TABLE ifco_recepciones_proveedor ADD COLUMN sucursal_ifco TEXT"); } catch(e) { /* ya existe */ }
 
+// ── Migración inline: hacer ifco_recepciones_proveedor.proveedor_id NULLABLE
+// (para que las R22 sin proveedor asignado funcionen). Idempotente: solo corre si la columna es NOT NULL.
+try {
+  const cols = db.prepare("PRAGMA table_info(ifco_recepciones_proveedor)").all();
+  const provCol = cols.find(function(c){ return c.name === 'proveedor_id'; });
+  if (provCol && provCol.notnull === 1) {
+    console.log('[IFCO] Migrando: hacer proveedor_id NULLABLE en ifco_recepciones_proveedor');
+    // Reconstruir tabla preservando todos los datos
+    const colDefs = cols.map(function(c) {
+      let def = '"' + c.name + '"';
+      if (c.type) def += ' ' + c.type;
+      if (c.pk) def += ' PRIMARY KEY';
+      // proveedor_id queda sin NOT NULL en la nueva tabla
+      if (c.notnull && c.name !== 'proveedor_id' && !c.pk) def += ' NOT NULL';
+      if (c.dflt_value !== null) def += ' DEFAULT ' + c.dflt_value;
+      return def;
+    }).join(', ');
+    const colNames = cols.map(function(c){ return '"' + c.name + '"'; }).join(', ');
+    const tx = db.transaction(function() {
+      db.exec("ALTER TABLE ifco_recepciones_proveedor RENAME TO _old_recep_prov_v1");
+      db.exec("CREATE TABLE ifco_recepciones_proveedor (" + colDefs + ")");
+      db.exec("INSERT INTO ifco_recepciones_proveedor (" + colNames + ") SELECT " + colNames + " FROM _old_recep_prov_v1");
+      db.exec("DROP TABLE _old_recep_prov_v1");
+    });
+    tx();
+    console.log('[IFCO] Migración OK: proveedor_id ahora es NULLABLE');
+  }
+} catch(e) {
+  console.error('[IFCO] Error migrando proveedor_id NULLABLE:', e.message);
+}
+
 // ── Configuración OCR vía Claude API ───────────────────────────────────────
 const OCR_ENABLED = String(process.env.IFCO_OCR_ENABLED || '').toLowerCase() === 'true';
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || '';
@@ -1530,51 +1561,56 @@ router.get('/recepciones-proveedor/:id', function(req, res) {
 });
 
 router.post('/recepciones-proveedor', upload.single('escaneo'), function(req, res) {
-  const d = req.body || {};
-  if (!d.fecha_recepcion) return res.status(400).json({ error: 'Fecha requerida' });
-  const cant = parseInt(d.cantidad);
-  if (!cant || cant <= 0) return res.status(400).json({ error: 'Cantidad inválida' });
+  try {
+    const d = req.body || {};
+    if (!d.fecha_recepcion) return res.status(400).json({ error: 'Fecha requerida' });
+    const cant = parseInt(d.cantidad);
+    if (!cant || cant <= 0) return res.status(400).json({ error: 'Cantidad inválida' });
 
-  // R22: IFCOs nuevos comprados al IFCO por el proveedor.
-  // - No requiere proveedor_id (puede ir NULL)
-  // - No afecta saldo de proveedor; sí suma a stock SG
-  const esR22 = !!(d.es_r22 && (d.es_r22 === '1' || d.es_r22 === 'true' || d.es_r22 === true));
-  let provId = null;
-  if (esR22) {
-    if (d.proveedor_id) {
+    // R22: IFCOs nuevos comprados al IFCO por el proveedor.
+    // - No requiere proveedor_id (puede ir NULL)
+    // - No afecta saldo de proveedor; sí suma a stock SG
+    const esR22 = !!(d.es_r22 && (d.es_r22 === '1' || d.es_r22 === 'true' || d.es_r22 === true));
+    let provId = null;
+    if (esR22) {
+      if (d.proveedor_id) {
+        provId = parseInt(d.proveedor_id);
+        const ex = db.prepare("SELECT id FROM proveedores WHERE id = ?").get(provId);
+        if (!ex) provId = null;
+      }
+    } else {
+      if (!d.proveedor_id) return res.status(400).json({ error: 'Proveedor requerido' });
+      const exProv = db.prepare("SELECT id FROM proveedores WHERE id = ?").get(d.proveedor_id);
+      if (!exProv) return res.status(400).json({ error: 'Proveedor inexistente' });
       provId = parseInt(d.proveedor_id);
-      const ex = db.prepare("SELECT id FROM proveedores WHERE id = ?").get(provId);
-      if (!ex) provId = null;
     }
-  } else {
-    if (!d.proveedor_id) return res.status(400).json({ error: 'Proveedor requerido' });
-    const exProv = db.prepare("SELECT id FROM proveedores WHERE id = ?").get(d.proveedor_id);
-    if (!exProv) return res.status(400).json({ error: 'Proveedor inexistente' });
-    provId = parseInt(d.proveedor_id);
+
+    let escaneo_path = null;
+    if (req.file) {
+      escaneo_path = '/data/ifco/' + req.file.filename;
+    } else if (d.escaneo_path && /^\/data\/ifco\//.test(d.escaneo_path)) {
+      escaneo_path = d.escaneo_path;
+    }
+
+    const r = db.prepare(`
+      INSERT INTO ifco_recepciones_proveedor
+        (fecha_recepcion, proveedor_id, cantidad, producto, n_remito_proveedor, escaneo_path, notas, usuario_id, es_r22)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      d.fecha_recepcion, provId, cant,
+      d.producto || null, d.n_remito_proveedor || null,
+      escaneo_path, d.notas || null, req.user.id || null,
+      esR22 ? 1 : 0
+    );
+
+    // Saldo del proveedor (informativo) — solo aplica si hay proveedor real
+    let saldo = null;
+    if (provId) saldo = _calcSaldoProveedor(provId);
+    res.json({ id: r.lastInsertRowid, escaneo_path: escaneo_path, saldo_proveedor_actual: saldo });
+  } catch(e) {
+    console.error('[IFCO][recepciones-proveedor POST] EXCEPCION:', e);
+    res.status(500).json({ error: 'Error guardando recepción: ' + e.message });
   }
-
-  let escaneo_path = null;
-  if (req.file) {
-    escaneo_path = '/data/ifco/' + req.file.filename;
-  } else if (d.escaneo_path && /^\/data\/ifco\//.test(d.escaneo_path)) {
-    escaneo_path = d.escaneo_path;
-  }
-
-  const r = db.prepare(`
-    INSERT INTO ifco_recepciones_proveedor
-      (fecha_recepcion, proveedor_id, cantidad, producto, n_remito_proveedor, escaneo_path, notas, usuario_id, es_r22)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(
-    d.fecha_recepcion, provId, cant,
-    d.producto || null, d.n_remito_proveedor || null,
-    escaneo_path, d.notas || null, req.user.id || null,
-    esR22 ? 1 : 0
-  );
-
-  // Saldo del proveedor (informativo) — solo aplica si hay proveedor real
-  let saldo = null;
-  if (provId) saldo = _calcSaldoProveedor(provId);
-  res.json({ id: r.lastInsertRowid, escaneo_path: escaneo_path, saldo_proveedor_actual: saldo });
 });
 
 router.patch('/recepciones-proveedor/:id', upload.single('escaneo'), function(req, res) {
