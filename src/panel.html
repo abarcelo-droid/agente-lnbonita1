@@ -2780,6 +2780,8 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     <button class="ifco-tab"     data-tab="remitos" onclick="ifcoTab('remitos')">🛒 Despachos</button>
     <button class="ifco-tab"     data-tab="movs"    onclick="ifcoTab('movs')">🔁 Retiros</button>
     <button class="ifco-tab"     data-tab="talons"  onclick="ifcoTab('talons')">📋 Talonarios</button>
+    <span style="border-left:1px solid var(--bor);height:24px;margin:0 6px"></span>
+    <span style="font-size:10px;color:#0369a1;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;align-self:center;padding:0 4px">Otros depósitos</span>
     <button class="ifco-tab ifco-tab-prov" data-tab="recep"  onclick="ifcoTab('recep')">📥 Ingresos</button>
     <button class="ifco-tab ifco-tab-prov" data-tab="envios" onclick="ifcoTab('envios')">📤 Salidas</button>
     <button class="ifco-tab ifco-tab-papelera" data-tab="papelera" onclick="ifcoTab('papelera')" title="Registros eliminados" style="margin-left:auto;font-size:11px;padding:6px 10px;color:var(--mut);opacity:0.7">🗑️ Papelera</button>
@@ -2848,9 +2850,15 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
         <div id="ifco-en-viaje-list"></div>
       </div>
 
-      <div class="ifco-card">
-        <div style="font-size:13px;font-weight:600;margin-bottom:10px">Saldo por proveedor</div>
-        <div id="ifco-saldos-proveedores"></div>
+      <div class="ab-grid ab-grid-2">
+        <div class="ifco-card">
+          <div style="font-size:13px;font-weight:600;margin-bottom:10px">Saldo por proveedor</div>
+          <div id="ifco-saldos-proveedores"></div>
+        </div>
+        <div class="ifco-card">
+          <div style="font-size:13px;font-weight:600;margin-bottom:10px">Despachos por mes</div>
+          <div id="ifco-despachos-mes"></div>
+        </div>
       </div>
     </div>
   </div>
@@ -3413,11 +3421,17 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       Seleccioná los remitos sellados a enviar. Al confirmar, se abre el cliente de mail con el cuerpo armado y se marcan como <b>enviados</b>. Cuando IFCO te confirme con su archivo, podés cerrar el ciclo en "🔄 Consolidar con IFCO".
     </div>
     <div id="ifco-presentar-lista" style="max-height:340px;overflow-y:auto;border:1px solid var(--bor);border-radius:8px"></div>
-    <div style="margin-top:12px">
-      <label style="font-size:11px;color:var(--mut);text-transform:uppercase">Mail destinatario</label>
-      <input id="ifco-presentar-email" type="email" placeholder="presentaciones@ifco.com" style="width:100%;padding:8px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg)">
-      <div style="font-size:11px;color:var(--mut);margin-top:3px">Se guarda en tu navegador para próximas veces.</div>
+    <div style="margin-top:12px;display:grid;grid-template-columns:1fr 1fr;gap:10px">
+      <div>
+        <label style="font-size:11px;color:var(--mut);text-transform:uppercase">Mail destinatario (IFCO) *</label>
+        <input id="ifco-presentar-email" type="email" placeholder="presentaciones@ifco.com" style="width:100%;padding:8px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg)">
+      </div>
+      <div>
+        <label style="font-size:11px;color:var(--mut);text-transform:uppercase">CC (copia interna)</label>
+        <input id="ifco-presentar-cc" type="email" placeholder="andres@laninabonita.com" style="width:100%;padding:8px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg)">
+      </div>
     </div>
+    <div style="font-size:11px;color:var(--mut);margin-top:3px">Se guardan en tu navegador para próximas veces.</div>
     <div class="ab-modal-footer" style="margin-top:18px;display:flex;justify-content:flex-end;gap:8px">
       <button class="btn bo" onclick="document.getElementById('ifco-mb-presentar').classList.remove('on')">Cancelar</button>
       <button class="btn bb" onclick="ifcoConfirmarPresentar()">Abrir mail y marcar enviados</button>
@@ -3507,6 +3521,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       <div style="text-align:center;padding:30px;color:var(--mut)">Cargando…</div>
     </div>
     <div style="margin-top:18px;display:flex;justify-content:flex-end;gap:8px;align-items:center">
+      <button class="btn bb" id="ifco-pm-pdf-btn" onclick="ifcoDescargarMovimientosPdf()" style="display:none">📄 Descargar PDF</button>
       <button class="btn bo" onclick="document.getElementById('ifco-mb-prov-mov').classList.remove('on')">Cerrar</button>
     </div>
   </div>
@@ -15075,6 +15090,38 @@ async function ifcoCargarResumen() {
       sp.innerHTML = '<div style="font-size:12px;color:#991b1b">Error: '+_ifcoEsc(err.message)+'</div>';
     }
 
+    // Despachos por mes (últimos 12 meses)
+    const dm = document.getElementById('ifco-despachos-mes');
+    dm.innerHTML = '<div style="font-size:11px;color:var(--mut)">Cargando…</div>';
+    try {
+      const meses = await _ifcoFetch('/api/ifco/despachos-por-mes');
+      if (!meses || meses.length === 0) {
+        dm.innerHTML = '<div style="font-size:12px;color:var(--mut)">Sin despachos registrados</div>';
+      } else {
+        const fmtMes = function(s) {
+          // "2026-04" → "Abr 2026"
+          const nombres = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
+          const p = String(s).split('-');
+          if (p.length !== 2) return s;
+          const m = parseInt(p[1]);
+          return nombres[m-1] + ' ' + p[0];
+        };
+        const maxCajones = Math.max.apply(null, meses.map(function(m){ return m.cajones; }));
+        dm.innerHTML = '<div style="font-size:11px;color:var(--mut);margin-bottom:6px">Últimos 12 meses · cantidad de remitos y total de cajones</div>' +
+          '<table style="width:100%;font-size:12px"><tbody>' + meses.map(function(m){
+          const pct = maxCajones > 0 ? Math.round(m.cajones / maxCajones * 100) : 0;
+          return '<tr>' +
+                   '<td style="padding:5px 0;width:80px">'+fmtMes(m.mes)+'</td>' +
+                   '<td style="padding:5px 8px"><div style="background:#e5e7eb;border-radius:3px;height:6px;position:relative"><div style="background:var(--burg);border-radius:3px;height:6px;width:'+pct+'%"></div></div></td>' +
+                   '<td style="text-align:right;padding:5px 0;font-variant-numeric:tabular-nums;width:70px"><b>'+_ifcoFmt(m.cajones)+'</b></td>' +
+                   '<td style="text-align:right;padding:5px 0;color:var(--mut);font-size:11px;width:50px">'+m.remitos+' rem.</td>' +
+                 '</tr>';
+        }).join('') + '</tbody></table>';
+      }
+    } catch(err) {
+      dm.innerHTML = '<div style="font-size:12px;color:#991b1b">Error: '+_ifcoEsc(err.message)+'</div>';
+    }
+
     document.getElementById('ifco-resumen-loading').style.display = 'none';
     document.getElementById('ifco-resumen-content').style.display = 'block';
   } catch(e) {
@@ -16238,6 +16285,7 @@ async function ifcoAbrirPresentar() {
     }
     // Email guardado
     document.getElementById('ifco-presentar-email').value = localStorage.getItem('ifco_presentar_email') || '';
+    document.getElementById('ifco-presentar-cc').value    = localStorage.getItem('ifco_presentar_cc') || '';
     document.getElementById('ifco-mb-presentar').classList.add('on');
   } catch(e) { alert('Error: ' + e.message); }
 }
@@ -16246,8 +16294,10 @@ async function ifcoConfirmarPresentar() {
   const ids = Array.from(document.querySelectorAll('.ifco-pp-cb:checked')).map(function(c){ return parseInt(c.getAttribute('data-id')); });
   if (ids.length === 0) { alert('Seleccioná al menos un remito'); return; }
   const email = document.getElementById('ifco-presentar-email').value.trim();
-  if (!email) { alert('Ingresá el mail destinatario'); return; }
+  const cc    = document.getElementById('ifco-presentar-cc').value.trim();
+  if (!email) { alert('Ingresá el mail destinatario (IFCO)'); return; }
   localStorage.setItem('ifco_presentar_email', email);
+  localStorage.setItem('ifco_presentar_cc', cc);
   try {
     const r = await _ifcoFetch('/api/ifco/remitos/presentar', {
       method: 'POST',
@@ -16262,7 +16312,8 @@ async function ifcoConfirmarPresentar() {
     }).join('\n');
     const subject = 'Presentación de remitos IFCO - SAN GERONIMO SA';
     const cuerpo  = 'Buenos días,\n\nEnvío para presentación los siguientes remitos sellados:\n\n' + lineas + '\n\nAdjunto fotos de las copias selladas.\n\nSaludos,';
-    const mailto = 'mailto:' + encodeURIComponent(email) + '?subject=' + encodeURIComponent(subject) + '&body=' + encodeURIComponent(cuerpo);
+    let mailto = 'mailto:' + encodeURIComponent(email) + '?subject=' + encodeURIComponent(subject) + '&body=' + encodeURIComponent(cuerpo);
+    if (cc) mailto += '&cc=' + encodeURIComponent(cc);
     document.getElementById('ifco-mb-presentar').classList.remove('on');
     window.location.href = mailto;
     setTimeout(ifcoCargarRemitos, 500);
@@ -17193,13 +17244,14 @@ async function ifcoVerTalonario(id) {
 // Estado del proveedor cuyo modal está abierto (para el botón Descargar)
 IFCO._provMovActualId = null;
 
-// VER movimientos de un proveedor (modal con tabla + botón descargar Excel)
+// VER movimientos de un proveedor (modal con tabla + botón descargar PDF)
 async function ifcoVerMovimientosProveedor(provId) {
   IFCO._provMovActualId = provId;
   const modal = document.getElementById('ifco-mb-prov-mov');
   const body = document.getElementById('ifco-pm-body');
   const tit = document.getElementById('ifco-pm-tit');
   body.innerHTML = '<div style="text-align:center;padding:30px;color:var(--mut)">Cargando…</div>';
+  document.getElementById('ifco-pm-pdf-btn').style.display = ''; // mostrar botón descargar
   modal.classList.add('on');
   try {
     const data = await _ifcoFetch('/api/ifco/proveedores/' + provId + '/movimientos');
@@ -17271,6 +17323,11 @@ async function ifcoVerMovimientosProveedor(provId) {
 // El endpoint GET /api/ifco/proveedores/:id/movimientos.xlsx + el botón en el modal de movimientos
 // están sacados temporalmente. Para reactivar: descomentar el endpoint en src/rutas/ifco.js,
 // agregar el botón ⬇ Descargar Excel al footer del modal ifco-mb-prov-mov, y restaurar esta función.
+
+function ifcoDescargarMovimientosPdf() {
+  if (!IFCO._provMovActualId) return;
+  window.open('/api/ifco/proveedores/' + IFCO._provMovActualId + '/movimientos.pdf', '_blank');
+}
 
 async function ifcoGuardarTalonario() {
   const body = {
