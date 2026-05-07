@@ -17722,7 +17722,13 @@ async function ifcoEliminarTalonario(id) {
   if (!confirm('¿Eliminar este talonario? Esta acción no se puede deshacer.\n\n(Solo se puede borrar si no tiene remitos asociados.)')) return;
   try {
     const r = await fetch('/api/ifco/talonarios/' + id, { method: 'DELETE', credentials: 'include' });
-    const data = await r.json();
+    let data;
+    try { data = await r.json(); }
+    catch(e) {
+      if (r.status === 403) throw new Error('No tenés permiso (solo admin)');
+      if (r.status === 404) throw new Error('Endpoint no encontrado. Probablemente falta deployar el último cambio del backend.');
+      throw new Error('Error HTTP ' + r.status + ' (respuesta no es JSON)');
+    }
     if (!r.ok) throw new Error(data.error || 'HTTP '+r.status);
     ifcoCargarTalonarios();
   } catch(e) { alert('Error: ' + e.message); }

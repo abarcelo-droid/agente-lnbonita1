@@ -727,12 +727,19 @@ router.get('/talonarios/:id/detalle', function(req, res) {
 });
 
 router.delete('/talonarios/:id', function(req, res) {
-  if (req.user.rol !== 'admin') return res.status(403).json({ error: 'Solo admin' });
-  const usado = db.prepare("SELECT COUNT(*) as n FROM ifco_remitos_super WHERE talonario_id = ?")
-                  .get(req.params.id);
-  if (usado.n > 0) return res.status(400).json({ error: 'Talonario con remitos asociados — desactivar en su lugar' });
-  db.prepare("DELETE FROM ifco_talonarios WHERE id = ?").run(req.params.id);
-  res.json({ ok: true });
+  try {
+    if (!req.user || req.user.rol !== 'admin') return res.status(403).json({ error: 'Solo admin puede eliminar talonarios' });
+    const t = db.prepare("SELECT id FROM ifco_talonarios WHERE id = ?").get(req.params.id);
+    if (!t) return res.status(404).json({ error: 'Talonario no encontrado' });
+    const usado = db.prepare("SELECT COUNT(*) as n FROM ifco_remitos_super WHERE talonario_id = ?")
+                    .get(req.params.id);
+    if (usado.n > 0) return res.status(400).json({ error: 'Talonario con ' + usado.n + ' remito(s) asociados — desactivar en su lugar' });
+    db.prepare("DELETE FROM ifco_talonarios WHERE id = ?").run(req.params.id);
+    res.json({ ok: true });
+  } catch(e) {
+    console.error('[IFCO][talonarios DELETE] EXCEPCION:', e);
+    res.status(500).json({ error: 'Error eliminando: ' + e.message });
+  }
 });
 
 // ════════════════════════════════════════════════════════════════════════════
