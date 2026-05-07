@@ -6,10 +6,29 @@
 
 import express from 'express';
 import path    from 'path';
+import fs      from 'fs';
 import { fileURLToPath } from 'url';
 import db from '../servicios/db.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+// Logo LNB — se carga una sola vez y se cachea en base64
+// undefined = no se intentó, null = falló, string = OK
+let _logoB64 = undefined;
+function _getLogo() {
+  if (_logoB64 !== undefined) return _logoB64;
+  try {
+    const p = path.join(__dirname, '..', 'logo.jpg');
+    const buf = fs.readFileSync(p);
+    _logoB64 = 'data:image/jpeg;base64,' + buf.toString('base64');
+    console.log('[LIQ] Logo cargado desde', p, '(', buf.length, 'bytes)');
+    return _logoB64;
+  } catch(e) {
+    console.error('[LIQ] No se pudo cargar logo.jpg:', e.message);
+    _logoB64 = null;
+    return null;
+  }
+}
 const router = express.Router();
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -392,47 +411,58 @@ router.get('/:id/pdf', async function(req, res) {
     doc.line(L, hBot, R, hBot);
 
     // ── COL A: Logo + dirección
-    setF(18, true);
-    doc.text('LA NIÑA BONITA', colA_x + 3, hY + 8);
+    const logoData = _getLogo();
+    if (logoData) {
+      // Logo en imagen — ancho 55mm, alto 14mm
+      try { doc.addImage(logoData, 'JPEG', colA_x + 3, hY + 1, 55, 14); }
+      catch(e) {
+        console.error('[LIQ] addImage falló:', e.message);
+        setF(18, true);
+        doc.text('LA NIÑA BONITA', colA_x + 3, hY + 8);
+      }
+    } else {
+      // Fallback al texto si no hay logo
+      setF(18, true);
+      doc.text('LA NIÑA BONITA', colA_x + 3, hY + 8);
+    }
     setF(8.5, false);
-    doc.text('SAN GERÓNIMO S.A.', colA_x + 3, hY + 12.5);
+    doc.text('SAN GERÓNIMO S.A.', colA_x + 3, hY + 17.5);
     setF(7.2, false);
-    doc.text(LNB.domicilio_l1, colA_x + 3, hY + 19);
-    doc.text(LNB.domicilio_l2, colA_x + 3, hY + 22.5);
-    doc.text(LNB.cod_op,       colA_x + 3, hY + 26);
-    doc.text(LNB.email,        colA_x + 3, hY + 29.5);
+    doc.text(LNB.domicilio_l1, colA_x + 3, hY + 21.5);
+    doc.text(LNB.domicilio_l2, colA_x + 3, hY + 24.5);
+    doc.text(LNB.cod_op,       colA_x + 3, hY + 27.5);
+    doc.text(LNB.email,        colA_x + 3, hY + 30.5);
     setF(8.5, true);
-    doc.text(LNB.iva_cond,     colA_x + 3, hY + 34);
+    doc.text(LNB.iva_cond,     colA_x + 3, hY + 34.5);
 
-    // ── COL B: COD N° + cuadradito A + datos fiscales
-    setF(7.5, false);
-    doc.text('COD. N° ' + LNB.cod_cliente, colB_x + 3, hY + 5);
-    // Cuadradito grande con la "A"
-    const aSz = 14;
+    // ── COL B: COD N° + cuadradito A + datos fiscales (centrados)
+    setF(7, false);
+    doc.text('COD. N° ' + LNB.cod_cliente, colB_x + 4, hY + 4);
+    // Cuadradito grande con la "A" — alineado a la izquierda de la columna
+    const aSz = 13;
     const aX = colB_x + 4;
     const aY = hY + 7;
     doc.setLineWidth(0.5);
     doc.rect(aX, aY, aSz, aSz);
-    setF(22, true);
-    doc.text(r.iva_letra || 'A', aX + aSz/2, aY + aSz - 2.5, { align: 'center' });
-    // Datos fiscales LNB (al costado del cuadradito)
-    setF(7, false);
-    const fX = aX + aSz + 2;
-    doc.text('C.U.I.T. N°: ' + LNB.cuit,            fX, aY + 4);
-    doc.text('Convenio Multilateral: ' + LNB.cm,    fX, aY + 8);
-    doc.text('Fecha Inicio de Actividades: ' + LNB.inicio_act, fX, aY + 12);
-
-    // ── COL C: LIQUIDACIÓN + N° + Fecha
     setF(20, true);
-    doc.text('LIQUIDACIÓN', R - 3, hY + 9, { align: 'right' });
-    setF(13, true);
-    doc.text('N° ' + (r.n_liquidacion || ''), R - 3, hY + 17, { align: 'right' });
+    doc.text(r.iva_letra || 'A', aX + aSz/2, aY + aSz - 2.5, { align: 'center' });
+    // Datos fiscales LNB — alineados al cuadradito, con buen espacio
+    setF(7, false);
+    const fX = aX + aSz + 3;
+    const fY = aY + 2;
+    doc.text('C.U.I.T. N°: ' + LNB.cuit,            fX, fY);
+    doc.text('Convenio Multilateral: ' + LNB.cm,    fX, fY + 4);
+    doc.text('Fecha Inicio Actividades: ' + LNB.inicio_act, fX, fY + 8);
+
+    // ── COL C: N° de liquidación + Fecha (sin "LIQUIDACIÓN")
+    setF(16, true);
+    doc.text('N° ' + (r.n_liquidacion || ''), R - 4, hY + 11, { align: 'right' });
     setF(8.5, false);
-    doc.text('Fecha', R - 18, hY + 24, { align: 'center' });
+    doc.text('Fecha', R - 18, hY + 22, { align: 'center' });
     doc.setLineWidth(0.4);
-    doc.roundedRect(R - 33, hY + 25.5, 30, 7, 1.5, 1.5);
+    doc.roundedRect(R - 33, hY + 23.5, 30, 7, 1.5, 1.5);
     setF(11, false);
-    doc.text(fechaFmt(r.fecha), R - 18, hY + 30.5, { align: 'center' });
+    doc.text(fechaFmt(r.fecha), R - 18, hY + 28.5, { align: 'center' });
 
     // ═══════════════════════════════════════════════════════════════════════
     // REMITENTE
@@ -540,50 +570,20 @@ router.get('/:id/pdf', async function(req, res) {
     doc.text('TOTAL:',             cConPct, totalY);
     doc.text(dollarFmt(r.total),   cImp,    totalY, { align: 'right' });
 
-    // ═══════════════════════════════════════════════════════════════════════
-    // CÓDIGO DE BARRAS (Code128 subset C, centrado)
-    // ═══════════════════════════════════════════════════════════════════════
-    if (r.codigo_barras && /^\d+$/.test(String(r.codigo_barras).replace(/\s/g,''))) {
-      const code = _code128Cnums(r.codigo_barras);
-      if (code) {
-        const moduleW = 0.36;
-        const totalModules = code.reduce((sum, v) => sum + _C128[v].length, 0);
-        const bcW = totalModules * moduleW;
-        const bcX = L + (innerW - bcW) / 2;
-        const bcY = H - M - 38;
-        const bcH = 11;
-        doc.setFillColor(0,0,0);
-        _drawBarcode(doc, code, bcX, bcY, moduleW, bcH);
-        // Texto del número debajo
-        setF(8, false);
-        doc.text(String(r.codigo_barras), L + innerW/2, bcY + bcH + 3.5, { align: 'center' });
-      }
-    }
+    // (sección de código de barras removida)
 
     // ═══════════════════════════════════════════════════════════════════════
-    // PIE — datos imprenta (izq) + CAI (derecha con borde redondeado)
+    // PIE — Cartel "documento no válido"
     // ═══════════════════════════════════════════════════════════════════════
-    const pieY = H - M - 18;
-    // Imprenta (izquierda)
-    setF(7, true);
-    doc.text('Original: Blanco',  L + 3, pieY);
-    doc.text('Duplicado: Color',  L + 3, pieY + 3.5);
-    setF(6.5, false);
-    doc.text('Impreso en AG Diseño e Impresiones de Analía García', L + 28, pieY);
-    doc.text('B° Parque Sur casa 5 Mza E | Cel.: 2644002300 - C.P 5425', L + 28, pieY + 3.5);
-    doc.text('CUIT: 27-25939792-3  del 0002-00008201 al 00009200 - Imp. DIC. 2025', L + 28, pieY + 7);
-
-    // CAI (derecha) con borde redondeado destacado
-    if (r.cai_numero) {
-      const caiW = 70;
-      const caiX = R - caiW - 1;
-      const caiY = pieY - 3;
-      doc.setLineWidth(0.5);
-      doc.roundedRect(caiX, caiY, caiW, 12, 1.5, 1.5);
-      setF(10, true);
-      doc.text('C.A.I N° ' + r.cai_numero,                       caiX + caiW/2, caiY + 5, { align: 'center' });
-      doc.text('Fecha Vto: ' + fechaFmt(r.cai_vencimiento),      caiX + caiW/2, caiY + 10, { align: 'center' });
-    }
+    const carY = H - M - 20;
+    doc.setLineWidth(0.5);
+    doc.setFillColor(245, 245, 245);
+    doc.roundedRect(L + 4, carY, innerW - 8, 14, 2, 2, 'FD');
+    setF(10, true);
+    doc.text('DOCUMENTO NO VÁLIDO PARA PRESENTACIÓN IMPOSITIVA, ES SOLO DE CARÁCTER INFORMATIVO.',
+             L + innerW/2, carY + 5.5, { align: 'center' });
+    doc.text('LAS LIQUIDACIONES SERÁN ENTREGADAS EN FÍSICO.',
+             L + innerW/2, carY + 11, { align: 'center' });
 
     // Devolver PDF
     const pdfBuffer = Buffer.from(doc.output('arraybuffer'));
