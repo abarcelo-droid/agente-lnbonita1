@@ -89,7 +89,14 @@ app.get("/login", (req, res) => {
   if (cookie) {
     try {
       const user = JSON.parse(cookie);
-      return res.redirect(user.rol === 'campo' ? '/scout' : '/panel');
+      // Si viene ?next= a una ruta interna válida, respetarlo
+      const next = req.query.next;
+      const esNextValido = (n) =>
+        typeof n === 'string' && n.startsWith('/') && !n.startsWith('//') &&
+        ['/scout', '/panel', '/m'].some(r => n === r || n.startsWith(r + '/') || n.startsWith(r + '?') || n.startsWith(r + '#'));
+      if (user.rol === 'campo') return res.redirect('/scout');
+      if (esNextValido(next))   return res.redirect(next);
+      return res.redirect('/panel');
     } catch(e) {}
   }
   res.sendFile(path.join(__dirname, "login.html"));
