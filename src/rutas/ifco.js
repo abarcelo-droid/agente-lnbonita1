@@ -2049,4 +2049,144 @@ router.post('/consolidar/aplicar', express.json(), function(req, res) {
   }
 });
 
+// ═════════════════════════════════════════════════════════════════════════
+// ADMIN — Importar retiros históricos (one-shot)
+// ═════════════════════════════════════════════════════════════════════════
+// Recibe un .xlsx con columnas: Fecha Doc | Nº Remito | NOTAS | SUCURSAL | INGRESOS
+// Idempotente: si ya existe un retiro con el mismo n_remito, lo saltea.
+// Solo admin.
+router.post('/admin/importar-retiros-historicos', upload.single('archivo'), async function(req, res) {
+  console.log('[IFCO][import-retiros] inicio');
+  try {
+    if (!req.user || req.user.rol !== 'admin') {
+      return res.status(403).json({ error: 'Solo administradores' });
+    }
+    if (!req.file) return res.status(400).json({ error: 'Falta el archivo' });
+
+    const ExcelJS = await _getExcelJS();
+    if (!ExcelJS) return res.status(503).json({ error: 'exceljs no disponible' });
+
+    const filePath = path.join(UPLOAD_DIR, req.file.filename);
+    const buf = fs.readFileSync(filePath);
+    try { fs.unlinkSync(filePath); } catch(_){}
+
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(buf);
+    const ws = wb.worksheets[0];
+    if (!ws) return res.status(400).json({ error: 'El archivo no tiene hojas' });
+
+    // Helper para extraer valor crudo de celda
+    function cellVal(cell) {
+      if (!cell) return null;
+      let v = cell.value;
+      if (v == null) return null;
+      if (typeof v === 'object' && v.result !== undefined) v = v.result;
+      if (typeof v === 'object' && v.text !== undefined) v = v.text;
+      return v;
+    }
+    // Mapear sucursal mayúsculas → forma canónica
+    function mapSucursal(s) {
+      if (!s) return null;
+      const u = String(s).trim().toUpperCase();
+      if (u === 'BUENOS AIRES') return 'Buenos Aires';
+      if (u === 'MENDOZA')      return 'Mendoza';
+      return null;
+    }
+    // Extraer modelo del campo NOTAS ("Retiro Mod 6420" → "6420")
+    function parseModelo(s) {
+      if (!s) return '6420';
+      const m = String(s).match(/mod\s*(\d+)/i);
+      return m ? m[1] : '6420';
+    }
+    // Fecha → ISO
+    function parseFecha(v) {
+      if (v instanceof Date) return v.toISOString().slice(0, 10);
+      if (v == null) return null;
+      const s = String(v);
+      const m = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})$/);
+      if (m) {
+        const yyyy = m[3].length === 2 ? '20' + m[3] : m[3];
+        return yyyy + '-' + m[2].padStart(2, '0') + '-' + m[1].padStart(2, '0');
+      }
+      // Si ya es ISO YYYY-MM-DD
+      const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+      if (iso) return iso[0];
+      return null;
+    }
+
+    // Detectar fila de header y arrancar después
+    let firstRow = 1;
+    const headerCell = cellVal(ws.getRow(1).getCell(1));
+    if (headerCell && String(headerCell).toLowerCase().includes('fecha')) firstRow = 2;
+
+    const insertados = [];
+    const saltados = [];
+    const errores = [];
+
+    const stmt = db.prepare(`
+      INSERT INTO ifco_movimientos (
+        fecha, tipo, cantidad, modelo, n_remito,
+        costo_total, moneda, notas, usuario_id, sucursal_ifco
+      ) VALUES (?, 'retiro', ?, ?, ?, 0, 'ARS', ?, ?, ?)
+    `);
+    const checkStmt = db.prepare("SELECT id FROM ifco_movimientos WHERE tipo='retiro' AND n_remito = ? AND eliminado_en IS NULL LIMIT 1");
+
+    const tx = db.transaction(function() {
+      for (let i = firstRow; i <= ws.rowCount; i++) {
+        const row = ws.getRow(i);
+        const fechaRaw = cellVal(row.getCell(1));
+        const nRemito  = cellVal(row.getCell(2));
+        const notasRaw = cellVal(row.getCell(3));
+        const sucRaw   = cellVal(row.getCell(4));
+        const cantRaw  = cellVal(row.getCell(5));
+
+        // Saltear filas vacías
+        if (!fechaRaw && !nRemito && !cantRaw) continue;
+
+        const fecha    = parseFecha(fechaRaw);
+        const cantidad = parseInt(cantRaw) || 0;
+        const sucursal = mapSucursal(sucRaw);
+        const modelo   = parseModelo(notasRaw);
+        const nRem     = nRemito ? String(nRemito).trim() : null;
+
+        if (!fecha)             { errores.push({ fila: i, error: 'Fecha inválida: '+fechaRaw }); continue; }
+        if (cantidad <= 0)      { errores.push({ fila: i, error: 'Cantidad inválida: '+cantRaw }); continue; }
+        if (!sucursal)          { errores.push({ fila: i, error: 'Sucursal inválida: '+sucRaw }); continue; }
+
+        // Idempotencia: si ya hay un retiro con ese N° remito, saltar
+        if (nRem) {
+          const yaExiste = checkStmt.get(nRem);
+          if (yaExiste) { saltados.push({ fila: i, n_remito: nRem, motivo: 'Ya existe (id '+yaExiste.id+')' }); continue; }
+        }
+
+        try {
+          const r = stmt.run(
+            fecha, cantidad, modelo, nRem,
+            notasRaw ? String(notasRaw) : null,
+            req.user.id || null,
+            sucursal
+          );
+          insertados.push({ fila: i, id: r.lastInsertRowid, n_remito: nRem, fecha: fecha, cantidad: cantidad, sucursal: sucursal });
+        } catch(e) {
+          errores.push({ fila: i, n_remito: nRem, error: e.message });
+        }
+      }
+    });
+    tx();
+
+    console.log('[IFCO][import-retiros] OK insertados=', insertados.length, 'saltados=', saltados.length, 'errores=', errores.length);
+    res.json({
+      ok: true,
+      total_filas: ws.rowCount - firstRow + 1,
+      insertados:  insertados.length,
+      saltados:    saltados.length,
+      errores:     errores.length,
+      detalle:     { insertados, saltados, errores }
+    });
+  } catch(e) {
+    console.error('[IFCO][import-retiros] EXCEPCION:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 export default router;
