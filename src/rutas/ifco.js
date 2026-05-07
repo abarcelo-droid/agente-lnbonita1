@@ -37,6 +37,19 @@ try {
   _ifcoMigrarEnviado = true; // primera vez que se crea la columna
 } catch(e) { /* columna ya existe */ }
 
+// Columna para guardar a quién se mandó el mail (al usar "Enviar a IFCO")
+try { db.exec("ALTER TABLE ifco_remitos_super ADD COLUMN email_enviado_a TEXT"); } catch(_){}
+
+// Estado de la recepción: 'en_viaje' (proveedor ya despachó pero SG no recibió),
+// 'recibido' (confirmada por SG, suma stock + descuenta saldo proveedor),
+// 'rechazado' (SG no aceptó la mercadería, no afecta nada).
+// Las recepciones viejas (sin estado) son tratadas implícitamente como 'recibido'.
+try { db.exec("ALTER TABLE ifco_recepciones_proveedor ADD COLUMN estado TEXT DEFAULT 'recibido'"); } catch(_){}
+try { db.exec("ALTER TABLE ifco_recepciones_proveedor ADD COLUMN confirmado_en TEXT"); } catch(_){}
+try { db.exec("ALTER TABLE ifco_recepciones_proveedor ADD COLUMN confirmado_por_id INTEGER"); } catch(_){}
+// Backfill: cualquier recepción vieja sin estado, marcar como recibido y confirmada
+try { db.exec("UPDATE ifco_recepciones_proveedor SET estado = 'recibido' WHERE estado IS NULL"); } catch(_){}
+
 if (_ifcoMigrarEnviado) {
   try {
     const r = db.prepare(`
@@ -58,6 +71,37 @@ if (_ifcoMigrarEnviado) {
 // sucursal_ifco: 'Buenos Aires' | 'Mendoza' (origen del remito R22, hardcoded)
 try { db.exec("ALTER TABLE ifco_recepciones_proveedor ADD COLUMN es_r22 INTEGER DEFAULT 0"); } catch(e) { /* ya existe */ }
 try { db.exec("ALTER TABLE ifco_recepciones_proveedor ADD COLUMN sucursal_ifco TEXT"); } catch(e) { /* ya existe */ }
+
+// ── Migración inline: hacer ifco_recepciones_proveedor.proveedor_id NULLABLE
+// (para que las R22 sin proveedor asignado funcionen). Idempotente: solo corre si la columna es NOT NULL.
+try {
+  const cols = db.prepare("PRAGMA table_info(ifco_recepciones_proveedor)").all();
+  const provCol = cols.find(function(c){ return c.name === 'proveedor_id'; });
+  if (provCol && provCol.notnull === 1) {
+    console.log('[IFCO] Migrando: hacer proveedor_id NULLABLE en ifco_recepciones_proveedor');
+    // Reconstruir tabla preservando todos los datos
+    const colDefs = cols.map(function(c) {
+      let def = '"' + c.name + '"';
+      if (c.type) def += ' ' + c.type;
+      if (c.pk) def += ' PRIMARY KEY';
+      // proveedor_id queda sin NOT NULL en la nueva tabla
+      if (c.notnull && c.name !== 'proveedor_id' && !c.pk) def += ' NOT NULL';
+      if (c.dflt_value !== null) def += ' DEFAULT ' + c.dflt_value;
+      return def;
+    }).join(', ');
+    const colNames = cols.map(function(c){ return '"' + c.name + '"'; }).join(', ');
+    const tx = db.transaction(function() {
+      db.exec("ALTER TABLE ifco_recepciones_proveedor RENAME TO _old_recep_prov_v1");
+      db.exec("CREATE TABLE ifco_recepciones_proveedor (" + colDefs + ")");
+      db.exec("INSERT INTO ifco_recepciones_proveedor (" + colNames + ") SELECT " + colNames + " FROM _old_recep_prov_v1");
+      db.exec("DROP TABLE _old_recep_prov_v1");
+    });
+    tx();
+    console.log('[IFCO] Migración OK: proveedor_id ahora es NULLABLE');
+  }
+} catch(e) {
+  console.error('[IFCO] Error migrando proveedor_id NULLABLE:', e.message);
+}
 
 // ── Configuración OCR vía Claude API ───────────────────────────────────────
 const OCR_ENABLED = String(process.env.IFCO_OCR_ENABLED || '').toLowerCase() === 'true';
@@ -790,27 +834,32 @@ router.patch('/remitos/:id/sellar', upload.single('escaneo'), function(req, res)
 
 // Marcar varios remitos sellados como presentados (al hacer mailto)
 router.post('/remitos/presentar', function(req, res) {
-  const ids = (req.body && req.body.ids) || [];
-  const email = (req.body && req.body.email) || null;
-  if (!Array.isArray(ids) || ids.length === 0) {
-    return res.status(400).json({ error: 'IDs requeridos' });
+  try {
+    const ids = (req.body && req.body.ids) || [];
+    const email = (req.body && req.body.email) || null;
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return res.status(400).json({ error: 'IDs requeridos' });
+    }
+    const ph = ids.map(function(){ return '?'; }).join(',');
+    const remitos = db.prepare(`
+      SELECT * FROM ifco_remitos_super WHERE id IN (${ph}) AND estado = 'sellado'
+    `).all(...ids);
+    if (remitos.length === 0) {
+      return res.status(400).json({ error: 'Ninguno de los IDs corresponde a un remito sellado' });
+    }
+    const r = db.prepare(`
+      UPDATE ifco_remitos_super
+      SET estado = 'enviado',
+          fecha_enviado = date('now','localtime'),
+          email_enviado_a = ?,
+          actualizado_en = datetime('now','localtime')
+      WHERE id IN (${ph}) AND estado = 'sellado'
+    `).run(email, ...ids);
+    res.json({ ok: true, enviados: r.changes, remitos: remitos });
+  } catch(e) {
+    console.error('[IFCO][remitos/presentar] EXCEPCION:', e);
+    res.status(500).json({ error: 'Error enviando remitos: ' + e.message });
   }
-  const ph = ids.map(function(){ return '?'; }).join(',');
-  const remitos = db.prepare(`
-    SELECT * FROM ifco_remitos_super WHERE id IN (${ph}) AND estado = 'sellado'
-  `).all(...ids);
-  if (remitos.length === 0) {
-    return res.status(400).json({ error: 'Ninguno de los IDs corresponde a un remito sellado' });
-  }
-  const r = db.prepare(`
-    UPDATE ifco_remitos_super
-    SET estado = 'enviado',
-        fecha_enviado = date('now','localtime'),
-        email_enviado_a = ?,
-        actualizado_en = datetime('now','localtime')
-    WHERE id IN (${ph}) AND estado = 'sellado'
-  `).run(email, ...ids);
-  res.json({ ok: true, enviados: r.changes, remitos: remitos });
 });
 
 // PATCH /remitos/:id — editar (solo si estado='despachado')
@@ -1179,10 +1228,12 @@ router.get('/resumen', function(req, res) {
     WHERE estado IN ('recibido','parcial') AND eliminado_en IS NULL
   `);
   // Recepciones de mercadería (cajones que vuelven con producto, entidad nueva)
+  // Solo cuentan las CONFIRMADAS por SG. Las en_viaje no impactan stock todavía.
   const recepciones_merc = get(`
     SELECT COALESCE(SUM(cantidad),0) AS total
     FROM ifco_recepciones_proveedor
     WHERE eliminado_en IS NULL
+      AND (estado IS NULL OR estado = 'recibido')
   `);
   const en_proveedores = get(`
     SELECT COALESCE(SUM(cantidad_enviada - COALESCE(cantidad_recibida,0)),0) AS total
@@ -1374,6 +1425,7 @@ function _calcSaldoProveedor(provId) {
     FROM ifco_recepciones_proveedor
     WHERE proveedor_id = ? AND eliminado_en IS NULL
       AND (es_r22 IS NULL OR es_r22 = 0)
+      AND (estado IS NULL OR estado = 'recibido')
   `).get(provId).total || 0;
 
   const directosSellados = db.prepare(`
@@ -1428,6 +1480,7 @@ function _movimientosProveedor(provId) {
     FROM ifco_recepciones_proveedor
     WHERE proveedor_id = ? AND eliminado_en IS NULL
       AND (es_r22 IS NULL OR es_r22 = 0)
+      AND (estado IS NULL OR estado = 'recibido')
   `).all(provId);
 
   const directos = db.prepare(`
@@ -1530,51 +1583,114 @@ router.get('/recepciones-proveedor/:id', function(req, res) {
 });
 
 router.post('/recepciones-proveedor', upload.single('escaneo'), function(req, res) {
-  const d = req.body || {};
-  if (!d.fecha_recepcion) return res.status(400).json({ error: 'Fecha requerida' });
-  const cant = parseInt(d.cantidad);
-  if (!cant || cant <= 0) return res.status(400).json({ error: 'Cantidad inválida' });
+  try {
+    const d = req.body || {};
+    if (!d.fecha_recepcion) return res.status(400).json({ error: 'Fecha requerida' });
+    const cant = parseInt(d.cantidad);
+    if (!cant || cant <= 0) return res.status(400).json({ error: 'Cantidad inválida' });
 
-  // R22: IFCOs nuevos comprados al IFCO por el proveedor.
-  // - No requiere proveedor_id (puede ir NULL)
-  // - No afecta saldo de proveedor; sí suma a stock SG
-  const esR22 = !!(d.es_r22 && (d.es_r22 === '1' || d.es_r22 === 'true' || d.es_r22 === true));
-  let provId = null;
-  if (esR22) {
-    if (d.proveedor_id) {
+    // R22: IFCOs nuevos comprados al IFCO por el proveedor.
+    const esR22 = !!(d.es_r22 && (d.es_r22 === '1' || d.es_r22 === 'true' || d.es_r22 === true));
+    // Envío a SG: el proveedor (vía mobile) está despachando cajones a SG. No afecta hasta que SG confirme.
+    const esEnvioSG = !!(d.es_envio_a_sg && (d.es_envio_a_sg === '1' || d.es_envio_a_sg === 'true' || d.es_envio_a_sg === true));
+    const estado = esEnvioSG ? 'en_viaje' : 'recibido';
+
+    let provId = null;
+    if (esR22) {
+      if (d.proveedor_id) {
+        provId = parseInt(d.proveedor_id);
+        const ex = db.prepare("SELECT id FROM proveedores WHERE id = ?").get(provId);
+        if (!ex) provId = null;
+      }
+    } else {
+      if (!d.proveedor_id) return res.status(400).json({ error: 'Proveedor requerido' });
+      const exProv = db.prepare("SELECT id FROM proveedores WHERE id = ?").get(d.proveedor_id);
+      if (!exProv) return res.status(400).json({ error: 'Proveedor inexistente' });
       provId = parseInt(d.proveedor_id);
-      const ex = db.prepare("SELECT id FROM proveedores WHERE id = ?").get(provId);
-      if (!ex) provId = null;
     }
-  } else {
-    if (!d.proveedor_id) return res.status(400).json({ error: 'Proveedor requerido' });
-    const exProv = db.prepare("SELECT id FROM proveedores WHERE id = ?").get(d.proveedor_id);
-    if (!exProv) return res.status(400).json({ error: 'Proveedor inexistente' });
-    provId = parseInt(d.proveedor_id);
+
+    let escaneo_path = null;
+    if (req.file) {
+      escaneo_path = '/data/ifco/' + req.file.filename;
+    } else if (d.escaneo_path && /^\/data\/ifco\//.test(d.escaneo_path)) {
+      escaneo_path = d.escaneo_path;
+    }
+
+    const r = db.prepare(`
+      INSERT INTO ifco_recepciones_proveedor
+        (fecha_recepcion, proveedor_id, cantidad, producto, n_remito_proveedor, escaneo_path, notas, usuario_id, es_r22, estado, confirmado_en, confirmado_por_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      d.fecha_recepcion, provId, cant,
+      d.producto || null, d.n_remito_proveedor || null,
+      escaneo_path, d.notas || null, req.user.id || null,
+      esR22 ? 1 : 0,
+      estado,
+      estado === 'recibido' ? new Date().toISOString().slice(0,19).replace('T',' ') : null,
+      estado === 'recibido' ? (req.user.id || null) : null
+    );
+
+    let saldo = null;
+    if (provId && estado === 'recibido') saldo = _calcSaldoProveedor(provId);
+    res.json({ id: r.lastInsertRowid, escaneo_path: escaneo_path, saldo_proveedor_actual: saldo, estado: estado });
+  } catch(e) {
+    console.error('[IFCO][recepciones-proveedor POST] EXCEPCION:', e);
+    res.status(500).json({ error: 'Error guardando recepción: ' + e.message });
   }
+});
 
-  let escaneo_path = null;
-  if (req.file) {
-    escaneo_path = '/data/ifco/' + req.file.filename;
-  } else if (d.escaneo_path && /^\/data\/ifco\//.test(d.escaneo_path)) {
-    escaneo_path = d.escaneo_path;
+// POST /recepciones-proveedor/:id/confirmar — SG confirma la recepción de cajones que estaban "en viaje"
+router.post('/recepciones-proveedor/:id/confirmar', function(req, res) {
+  try {
+    const r = db.prepare("SELECT * FROM ifco_recepciones_proveedor WHERE id = ? AND eliminado_en IS NULL").get(req.params.id);
+    if (!r) return res.status(404).json({ error: 'No encontrado' });
+    if (r.estado !== 'en_viaje') return res.status(400).json({ error: 'Solo se pueden confirmar recepciones en estado "en_viaje". Estado actual: ' + r.estado });
+    db.prepare(`
+      UPDATE ifco_recepciones_proveedor
+      SET estado = 'recibido',
+          confirmado_en = datetime('now','localtime'),
+          confirmado_por_id = ?
+      WHERE id = ?
+    `).run(req.user.id || null, req.params.id);
+    res.json({ ok: true });
+  } catch(e) {
+    console.error('[IFCO][confirmar] EXCEPCION:', e);
+    res.status(500).json({ error: e.message });
   }
+});
 
-  const r = db.prepare(`
-    INSERT INTO ifco_recepciones_proveedor
-      (fecha_recepcion, proveedor_id, cantidad, producto, n_remito_proveedor, escaneo_path, notas, usuario_id, es_r22)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(
-    d.fecha_recepcion, provId, cant,
-    d.producto || null, d.n_remito_proveedor || null,
-    escaneo_path, d.notas || null, req.user.id || null,
-    esR22 ? 1 : 0
-  );
+// POST /recepciones-proveedor/:id/rechazar — SG rechaza la recepción
+router.post('/recepciones-proveedor/:id/rechazar', function(req, res) {
+  try {
+    const r = db.prepare("SELECT * FROM ifco_recepciones_proveedor WHERE id = ? AND eliminado_en IS NULL").get(req.params.id);
+    if (!r) return res.status(404).json({ error: 'No encontrado' });
+    if (r.estado !== 'en_viaje') return res.status(400).json({ error: 'Solo se pueden rechazar recepciones en estado "en_viaje". Estado actual: ' + r.estado });
+    const motivo = (req.body && req.body.motivo) || null;
+    db.prepare(`
+      UPDATE ifco_recepciones_proveedor
+      SET estado = 'rechazado',
+          confirmado_en = datetime('now','localtime'),
+          confirmado_por_id = ?,
+          notas = COALESCE(notas, '') || CASE WHEN ? IS NOT NULL THEN ' [RECHAZO: ' || ? || ']' ELSE '' END
+      WHERE id = ?
+    `).run(req.user.id || null, motivo, motivo, req.params.id);
+    res.json({ ok: true });
+  } catch(e) {
+    console.error('[IFCO][rechazar] EXCEPCION:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
 
-  // Saldo del proveedor (informativo) — solo aplica si hay proveedor real
-  let saldo = null;
-  if (provId) saldo = _calcSaldoProveedor(provId);
-  res.json({ id: r.lastInsertRowid, escaneo_path: escaneo_path, saldo_proveedor_actual: saldo });
+// GET /recepciones-en-viaje — lista las pendientes de confirmar (para Resumen)
+router.get('/recepciones-en-viaje', function(req, res) {
+  const rows = db.prepare(`
+    SELECT r.*, p.nombre AS proveedor_nombre
+    FROM ifco_recepciones_proveedor r
+    LEFT JOIN proveedores p ON p.id = r.proveedor_id
+    WHERE r.estado = 'en_viaje' AND r.eliminado_en IS NULL
+    ORDER BY r.fecha_recepcion DESC, r.id DESC
+  `).all();
+  res.json(rows);
 });
 
 router.patch('/recepciones-proveedor/:id', upload.single('escaneo'), function(req, res) {
