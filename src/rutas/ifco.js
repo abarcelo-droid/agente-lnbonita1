@@ -52,6 +52,13 @@ if (_ifcoMigrarEnviado) {
   }
 }
 
+// ── Migración inline: recepciones tipo R22 (IFCOs nuevos comprados a IFCO por el proveedor)
+// Las recepciones R22 SUMAN al stock de SG pero NO descuentan saldo del proveedor.
+// es_r22:        flag (0 normal, 1 R22)
+// sucursal_ifco: 'Buenos Aires' | 'Mendoza' (origen del remito R22, hardcoded)
+try { db.exec("ALTER TABLE ifco_recepciones_proveedor ADD COLUMN es_r22 INTEGER DEFAULT 0"); } catch(e) { /* ya existe */ }
+try { db.exec("ALTER TABLE ifco_recepciones_proveedor ADD COLUMN sucursal_ifco TEXT"); } catch(e) { /* ya existe */ }
+
 // ── Configuración OCR vía Claude API ───────────────────────────────────────
 const OCR_ENABLED = String(process.env.IFCO_OCR_ENABLED || '').toLowerCase() === 'true';
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || '';
@@ -1366,6 +1373,7 @@ function _calcSaldoProveedor(provId) {
     SELECT COALESCE(SUM(cantidad), 0) AS total
     FROM ifco_recepciones_proveedor
     WHERE proveedor_id = ? AND eliminado_en IS NULL
+      AND (es_r22 IS NULL OR es_r22 = 0)
   `).get(provId).total || 0;
 
   const directosSellados = db.prepare(`
@@ -1419,6 +1427,7 @@ function _movimientosProveedor(provId) {
            cantidad, n_remito_proveedor, notas
     FROM ifco_recepciones_proveedor
     WHERE proveedor_id = ? AND eliminado_en IS NULL
+      AND (es_r22 IS NULL OR es_r22 = 0)
   `).all(provId);
 
   const directos = db.prepare(`
@@ -1523,12 +1532,32 @@ router.get('/recepciones-proveedor/:id', function(req, res) {
 router.post('/recepciones-proveedor', upload.single('escaneo'), function(req, res) {
   const d = req.body || {};
   if (!d.fecha_recepcion) return res.status(400).json({ error: 'Fecha requerida' });
-  if (!d.proveedor_id)    return res.status(400).json({ error: 'Proveedor requerido' });
   const cant = parseInt(d.cantidad);
   if (!cant || cant <= 0) return res.status(400).json({ error: 'Cantidad inválida' });
 
-  const exProv = db.prepare("SELECT id FROM proveedores WHERE id = ?").get(d.proveedor_id);
-  if (!exProv) return res.status(400).json({ error: 'Proveedor inexistente' });
+  // R22: IFCOs nuevos comprados al IFCO por el proveedor.
+  // - No requiere proveedor_id (puede ir NULL — el "origen" es la sucursal IFCO)
+  // - Requiere sucursal_ifco
+  // - No afecta saldo de proveedor; sí suma a stock SG
+  const esR22 = !!(d.es_r22 && (d.es_r22 === '1' || d.es_r22 === 'true' || d.es_r22 === true));
+  let provId = null;
+  let sucursalR22 = null;
+  if (esR22) {
+    sucursalR22 = String(d.sucursal_ifco || '').trim();
+    if (['Buenos Aires','Mendoza'].indexOf(sucursalR22) < 0) {
+      return res.status(400).json({ error: 'sucursal_ifco inválida (esperado: Buenos Aires | Mendoza)' });
+    }
+    if (d.proveedor_id) {
+      provId = parseInt(d.proveedor_id);
+      const ex = db.prepare("SELECT id FROM proveedores WHERE id = ?").get(provId);
+      if (!ex) provId = null;
+    }
+  } else {
+    if (!d.proveedor_id) return res.status(400).json({ error: 'Proveedor requerido' });
+    const exProv = db.prepare("SELECT id FROM proveedores WHERE id = ?").get(d.proveedor_id);
+    if (!exProv) return res.status(400).json({ error: 'Proveedor inexistente' });
+    provId = parseInt(d.proveedor_id);
+  }
 
   let escaneo_path = null;
   if (req.file) {
@@ -1539,16 +1568,18 @@ router.post('/recepciones-proveedor', upload.single('escaneo'), function(req, re
 
   const r = db.prepare(`
     INSERT INTO ifco_recepciones_proveedor
-      (fecha_recepcion, proveedor_id, cantidad, producto, n_remito_proveedor, escaneo_path, notas, usuario_id)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      (fecha_recepcion, proveedor_id, cantidad, producto, n_remito_proveedor, escaneo_path, notas, usuario_id, es_r22, sucursal_ifco)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
-    d.fecha_recepcion, parseInt(d.proveedor_id), cant,
+    d.fecha_recepcion, provId, cant,
     d.producto || null, d.n_remito_proveedor || null,
-    escaneo_path, d.notas || null, req.user.id || null
+    escaneo_path, d.notas || null, req.user.id || null,
+    esR22 ? 1 : 0, sucursalR22
   );
 
-  // Saldo actualizado (informativo para feedback al usuario)
-  const saldo = _calcSaldoProveedor(parseInt(d.proveedor_id));
+  // Saldo del proveedor (informativo) — solo aplica si hay proveedor real
+  let saldo = null;
+  if (provId) saldo = _calcSaldoProveedor(provId);
   res.json({ id: r.lastInsertRowid, escaneo_path: escaneo_path, saldo_proveedor_actual: saldo });
 });
 
