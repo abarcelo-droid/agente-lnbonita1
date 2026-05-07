@@ -483,12 +483,32 @@ router.get('/talonarios/activo', function(req, res) {
   q += " ORDER BY t.creado_en DESC LIMIT 1";
   const t = db.prepare(q).get(...params);
   if (!t) return res.json({ talonario: null, proximo: null, disponibles: 0 });
+  res.json(_calcInfoTalonario(t));
+});
 
+// /talonarios/activos — TODOS los activos del dueño (no solo el primero), cada uno con su info de próximo número
+router.get('/talonarios/activos', function(req, res) {
+  const dueno = req.query.dueno;
+  const provId = req.query.proveedor_id ? parseInt(req.query.proveedor_id) : null;
+  let q = "SELECT t.*, p.nombre AS proveedor_nombre FROM ifco_talonarios t LEFT JOIN proveedores p ON p.id = t.proveedor_id WHERE t.activo = 1";
+  const params = [];
+  if (dueno === 'san_geronimo') {
+    q += " AND t.dueno_tipo = 'san_geronimo'";
+  } else if (provId) {
+    q += " AND t.dueno_tipo = 'proveedor' AND t.proveedor_id = ?";
+    params.push(provId);
+  }
+  q += " ORDER BY t.serie ASC, t.id ASC";
+  const ts = db.prepare(q).all(...params);
+  res.json(ts.map(_calcInfoTalonario));
+});
+
+// Helper: calcula próximo número, disponibles, etc para un talonario dado
+function _calcInfoTalonario(t) {
   const ultimo = db.prepare(`
     SELECT n_remito_ifco FROM ifco_remitos_super
     WHERE talonario_id = ? AND eliminado_en IS NULL ORDER BY id DESC LIMIT 1
   `).get(t.id);
-
   let proximoNum = t.numero_desde;
   if (ultimo) {
     const m = String(ultimo.n_remito_ifco).match(/-(\d+)$/);
@@ -497,13 +517,11 @@ router.get('/talonarios/activo', function(req, res) {
   const agotado = proximoNum > t.numero_hasta;
   const disponibles = agotado ? 0 : (t.numero_hasta - proximoNum + 1);
   const proximoStr = agotado ? null : (t.serie + '-' + String(proximoNum).padStart(8, '0'));
-
   let dias_cai = null;
   if (t.vto_cai) {
     dias_cai = Math.floor((new Date(t.vto_cai) - new Date()) / (1000*60*60*24));
   }
-
-  res.json({
+  return {
     talonario: t,
     proximo: proximoStr,
     proximo_num: agotado ? null : proximoNum,
@@ -512,8 +530,11 @@ router.get('/talonarios/activo', function(req, res) {
     dias_cai: dias_cai,
     cai_alerta: dias_cai !== null && dias_cai < 60,
     pocos_remitos: disponibles > 0 && disponibles < 100
-  });
-});
+  };
+}
+
+// Endpoint viejo compat (lo dejamos como wrapper aunque el cuerpo ahora vive en _calcInfoTalonario):
+// (sin endpoint legacy adicional — la API queda con /talonarios/activo y /talonarios/activos)
 
 router.post('/talonarios', function(req, res) {
   const d = req.body || {};
@@ -532,14 +553,7 @@ router.post('/talonarios', function(req, res) {
     const exProv = db.prepare("SELECT id FROM proveedores WHERE id = ?").get(proveedor_id);
     if (!exProv) return res.status(400).json({ error: 'Proveedor inexistente' });
   }
-  // Activación: solo desactivar otros del MISMO dueño
-  if (d.activo) {
-    if (dueno_tipo === 'san_geronimo') {
-      db.prepare("UPDATE ifco_talonarios SET activo = 0 WHERE dueno_tipo = 'san_geronimo'").run();
-    } else {
-      db.prepare("UPDATE ifco_talonarios SET activo = 0 WHERE dueno_tipo = 'proveedor' AND proveedor_id = ?").run(proveedor_id);
-    }
-  }
+  // Múltiples talonarios activos por dueño están permitidos. El usuario elige cuál usar al despachar.
   const r = db.prepare(`
     INSERT INTO ifco_talonarios (serie, numero_desde, numero_hasta, cai, vto_cai, activo, notas, dueno_tipo, proveedor_id)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -561,20 +575,26 @@ router.patch('/talonarios/:id', function(req, res) {
   const actual = db.prepare("SELECT * FROM ifco_talonarios WHERE id = ?").get(id);
   if (!actual) return res.status(404).json({ error: 'Talonario no encontrado' });
 
-  // Activación scoped: solo desactivar otros del mismo dueño
-  if (d.activo === 1 || d.activo === true) {
-    if (actual.dueno_tipo === 'san_geronimo') {
-      db.prepare("UPDATE ifco_talonarios SET activo = 0 WHERE dueno_tipo = 'san_geronimo' AND id != ?").run(id);
-    } else {
-      db.prepare("UPDATE ifco_talonarios SET activo = 0 WHERE dueno_tipo = 'proveedor' AND proveedor_id = ? AND id != ?")
-        .run(actual.proveedor_id, id);
-    }
+  // Si quieren editar serie/rango, validar que no tenga remitos asociados
+  const quiereEditarRango = (d.serie !== undefined || d.numero_desde !== undefined || d.numero_hasta !== undefined);
+  if (quiereEditarRango) {
+    const usado = db.prepare("SELECT COUNT(*) as n FROM ifco_remitos_super WHERE talonario_id = ?").get(id);
+    if (usado.n > 0) return res.status(400).json({ error: 'No se puede editar serie/rango: el talonario tiene ' + usado.n + ' remito(s) asociados.' });
+    // Si vienen ambos, validar
+    const nd = d.numero_desde !== undefined ? parseInt(d.numero_desde) : actual.numero_desde;
+    const nh = d.numero_hasta !== undefined ? parseInt(d.numero_hasta) : actual.numero_hasta;
+    if (nh < nd) return res.status(400).json({ error: 'numero_hasta debe ser ≥ numero_desde' });
   }
+
+  // Múltiples talonarios activos por dueño permitidos: NO se desactivan otros automáticamente.
   const sets = [], params = { id };
-  if (d.activo !== undefined) { sets.push("activo = @activo"); params.activo = d.activo ? 1 : 0; }
-  if (d.cai     !== undefined) { sets.push("cai = @cai");         params.cai     = d.cai; }
-  if (d.vto_cai !== undefined) { sets.push("vto_cai = @vto_cai"); params.vto_cai = d.vto_cai; }
-  if (d.notas   !== undefined) { sets.push("notas = @notas");     params.notas   = d.notas; }
+  if (d.serie         !== undefined) { sets.push("serie = @serie");                 params.serie         = d.serie; }
+  if (d.numero_desde  !== undefined) { sets.push("numero_desde = @numero_desde");   params.numero_desde  = parseInt(d.numero_desde); }
+  if (d.numero_hasta  !== undefined) { sets.push("numero_hasta = @numero_hasta");   params.numero_hasta  = parseInt(d.numero_hasta); }
+  if (d.activo        !== undefined) { sets.push("activo = @activo");               params.activo        = d.activo ? 1 : 0; }
+  if (d.cai           !== undefined) { sets.push("cai = @cai");                     params.cai           = d.cai; }
+  if (d.vto_cai       !== undefined) { sets.push("vto_cai = @vto_cai");             params.vto_cai       = d.vto_cai; }
+  if (d.notas         !== undefined) { sets.push("notas = @notas");                 params.notas         = d.notas; }
   if (sets.length === 0) return res.json({ ok: true });
   db.prepare(`UPDATE ifco_talonarios SET ${sets.join(", ")} WHERE id = @id`).run(params);
   res.json({ ok: true });
@@ -616,6 +636,17 @@ router.post('/talonarios/:id/transferir', function(req, res) {
 });
 
 // Detalle del talonario: estado de cada n° del rango
+router.get('/talonarios/:id', function(req, res) {
+  const t = db.prepare(`
+    SELECT t.*, p.nombre AS proveedor_nombre,
+           (SELECT COUNT(*) FROM ifco_remitos_super r WHERE r.talonario_id = t.id AND r.eliminado_en IS NULL) AS usados_count
+    FROM ifco_talonarios t LEFT JOIN proveedores p ON p.id = t.proveedor_id
+    WHERE t.id = ?
+  `).get(req.params.id);
+  if (!t) return res.status(404).json({ error: 'No encontrado' });
+  res.json(t);
+});
+
 router.get('/talonarios/:id/detalle', function(req, res) {
   const id = req.params.id;
   const t = db.prepare(`

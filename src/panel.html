@@ -3128,7 +3128,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
         </label>
         <div id="ifco-r-prov-origen-wrap" style="display:none;margin-top:10px;padding-top:10px;border-top:1px solid var(--bor)">
           <label style="font-size:11px;color:var(--mut);text-transform:uppercase">Proveedor de origen *</label>
-          <select id="ifco-r-prov-origen" style="width:100%;padding:8px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg)">
+          <select id="ifco-r-prov-origen" onchange="ifcoCargarTalonariosActivos();document.getElementById('ifco-r-numero').value=''" style="width:100%;padding:8px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg)">
             <option value="">— Seleccionar proveedor —</option>
           </select>
         </div>
@@ -3165,6 +3165,10 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
         ✓ Campos prellenados por la IA. <b>Revisá cada uno</b> antes de guardar.
       </div>
       <div class="ab-grid ab-grid-2" style="gap:10px">
+      <div style="grid-column:span 2" id="ifco-r-talonario-wrap" style="display:none">
+        <label style="font-size:11px;color:var(--mut);text-transform:uppercase">Talonario a usar *</label>
+        <select id="ifco-r-talonario" onchange="ifcoOnTalonarioChange()" style="width:100%;padding:8px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg)"></select>
+      </div>
       <div>
         <label style="font-size:11px;color:var(--mut);text-transform:uppercase">N° Remito IFCO *</label>
         <input id="ifco-r-numero" type="text" placeholder="00015-01639431"
@@ -15335,6 +15339,9 @@ function ifcoAbrirNuevoRemito() {
 function ifcoOnOrigenChange() {
   const v = document.querySelector('input[name="ifco-r-origen"]:checked').value;
   document.getElementById('ifco-r-prov-origen-wrap').style.display = (v === 'proveedor_directo') ? 'block' : 'none';
+  // Recargar talonarios disponibles según el origen
+  document.getElementById('ifco-r-numero').value = '';
+  ifcoCargarTalonariosActivos();
 }
 
 // Toggle del checkbox "Ya viene sellado"
@@ -15485,22 +15492,80 @@ function _ifcoMatchCadena(textoOcr) {
 }
 
 async function ifcoSugerirNumero(input) {
-  if (input.value) return; // ya hay algo escrito, no pisamos
-  try {
-    const r = await _ifcoFetch('/api/ifco/talonarios/activo');
-    if (r.proximo) {
-      input.value = r.proximo;
-      let txt = '✓ Próximo del talonario activo. Quedan '+r.disponibles+' disponibles.';
-      if (r.cai_alerta) txt += ' ⚠️ CAI vence en '+r.dias_cai+' días.';
-      if (r.pocos_remitos) txt += ' ⚠️ ¡Quedan pocos remitos!';
-      document.getElementById('ifco-r-sugerencia').textContent = txt;
-      IFCO._talonActivo = r.talonario.id;
-    } else if (r.agotado) {
-      document.getElementById('ifco-r-sugerencia').textContent = '⚠️ Talonario agotado. Cargá uno nuevo.';
-    } else {
-      document.getElementById('ifco-r-sugerencia').textContent = 'No hay talonario activo. Cargá uno en la pestaña Talonarios.';
+  if (input.value) return;
+  await ifcoCargarTalonariosActivos();
+}
+
+// Carga la lista de talonarios activos según el origen actual y arma el selector
+async function ifcoCargarTalonariosActivos() {
+  const origen = document.querySelector('input[name="ifco-r-origen"]:checked').value;
+  let url = '/api/ifco/talonarios/activos';
+  if (origen === 'san_geronimo') {
+    url += '?dueno=san_geronimo';
+  } else {
+    const provId = document.getElementById('ifco-r-prov-origen').value;
+    if (!provId) {
+      document.getElementById('ifco-r-sugerencia').textContent = 'Elegí primero el proveedor de origen';
+      return;
     }
+    url += '?proveedor_id=' + encodeURIComponent(provId);
+  }
+  try {
+    const lista = await _ifcoFetch(url);
+    const wrap = document.getElementById('ifco-r-talonario-wrap');
+    const sel = document.getElementById('ifco-r-talonario');
+    const sug = document.getElementById('ifco-r-sugerencia');
+    const inp = document.getElementById('ifco-r-numero');
+    IFCO._talonariosActivos = {};
+    if (!lista || lista.length === 0) {
+      wrap.style.display = 'none';
+      sug.textContent = '⚠ No hay talonarios activos para este origen. Cargá uno en la pestaña Talonarios.';
+      return;
+    }
+    if (lista.length === 1) {
+      // Un solo activo: lo usamos directo, sin mostrar selector
+      wrap.style.display = 'none';
+      const t = lista[0];
+      IFCO._talonActivo = t.talonario.id;
+      IFCO._talonariosActivos[t.talonario.id] = t;
+      _ifcoAplicarTalonario(t);
+      return;
+    }
+    // Varios activos: mostrar selector
+    wrap.style.display = '';
+    sel.innerHTML = lista.map(function(t){
+      const txt = t.talonario.serie + (t.proximo ? ' · próx '+t.proximo+' · '+t.disponibles+' disp.' : ' · agotado');
+      IFCO._talonariosActivos[t.talonario.id] = t;
+      return '<option value="'+t.talonario.id+'">'+_ifcoEsc(txt)+'</option>';
+    }).join('');
+    // Aplicar el primero como default
+    sel.value = lista[0].talonario.id;
+    IFCO._talonActivo = lista[0].talonario.id;
+    _ifcoAplicarTalonario(lista[0]);
   } catch(e) { /* silent */ }
+}
+
+function ifcoOnTalonarioChange() {
+  const sel = document.getElementById('ifco-r-talonario');
+  const t = IFCO._talonariosActivos[sel.value];
+  if (!t) return;
+  IFCO._talonActivo = t.talonario.id;
+  _ifcoAplicarTalonario(t);
+}
+
+function _ifcoAplicarTalonario(t) {
+  const inp = document.getElementById('ifco-r-numero');
+  const sug = document.getElementById('ifco-r-sugerencia');
+  if (t.proximo) {
+    inp.value = t.proximo;
+    let txt = '✓ Próximo del talonario ' + t.talonario.serie + '. Quedan ' + t.disponibles + ' disponibles.';
+    if (t.cai_alerta)    txt += ' ⚠️ CAI vence en ' + t.dias_cai + ' días.';
+    if (t.pocos_remitos) txt += ' ⚠️ ¡Quedan pocos remitos!';
+    sug.textContent = txt;
+  } else if (t.agotado) {
+    inp.value = '';
+    sug.textContent = '⚠️ Talonario ' + t.talonario.serie + ' agotado.';
+  }
 }
 
 function ifcoOnClienteChange() { /* placeholder, ya no se usa */ }
@@ -17179,8 +17244,12 @@ async function ifcoCargarTalonarios() {
       const disp = total - t.usados_count;
       const estado = t.activo ? '<span class="ifco-badge ifco-badge-presentado">Activo</span>' : '<span class="ifco-badge ifco-badge-despachado">Inactivo</span>';
       const acciones = ['<button class="btn bo" style="font-size:11px;padding:4px 8px" onclick="event.stopPropagation();ifcoVerTalonario('+t.id+')">👁 Ver</button>'];
+      acciones.push('<button class="btn bo" style="font-size:11px;padding:4px 8px" onclick="event.stopPropagation();ifcoEditarTalonario('+t.id+')">✏️ Editar</button>');
       if (!t.activo) {
         acciones.push('<button class="btn bo" style="font-size:11px;padding:4px 8px" onclick="event.stopPropagation();ifcoActivarTalonario('+t.id+')">Activar</button>');
+      }
+      if (t.usados_count === 0) {
+        acciones.push('<button class="btn bo" style="font-size:11px;padding:4px 8px;color:#991b1b" onclick="event.stopPropagation();ifcoEliminarTalonario('+t.id+')" title="Solo se pueden eliminar talonarios sin remitos asociados">🗑️</button>');
       }
       return '<tr style="cursor:pointer" onclick="ifcoVerTalonario('+t.id+')">' +
         '<td style="font-family:monospace"><b>'+_ifcoEsc(t.serie)+'</b></td>' +
@@ -17458,6 +17527,57 @@ async function ifcoActivarTalonario(id) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ activo: 1 })
     });
+    ifcoCargarTalonarios();
+  } catch(e) { alert('Error: ' + e.message); }
+}
+
+async function ifcoEditarTalonario(id) {
+  try {
+    const t = await _ifcoFetch('/api/ifco/talonarios/' + id);
+    if (!t) { alert('Talonario no encontrado'); return; }
+    const usados = t.usados_count || 0;
+    const lockRango = usados > 0;
+
+    const serie  = prompt('Serie:', t.serie);
+    if (serie === null) return;
+    let desde = t.numero_desde, hasta = t.numero_hasta;
+    if (!lockRango) {
+      const sd = prompt('Número desde:', t.numero_desde);
+      if (sd === null) return;
+      desde = parseInt(sd);
+      const sh = prompt('Número hasta:', t.numero_hasta);
+      if (sh === null) return;
+      hasta = parseInt(sh);
+      if (!desde || !hasta || hasta < desde) { alert('Rango inválido'); return; }
+    } else {
+      alert('⚠ Este talonario tiene ' + usados + ' remito(s) asociados. Solo podés editar el CAI/vencimiento/notas, no el rango.');
+    }
+    const cai = prompt('CAI:', t.cai || '');
+    if (cai === null) return;
+    const vto = prompt('Vencimiento CAI (YYYY-MM-DD):', t.vto_cai || '');
+    if (vto === null) return;
+    const notas = prompt('Notas:', t.notas || '');
+    if (notas === null) return;
+
+    const body = { serie: serie, cai: cai || null, vto_cai: vto || null, notas: notas || null };
+    if (!lockRango) { body.numero_desde = desde; body.numero_hasta = hasta; }
+
+    const r = await fetch('/api/ifco/talonarios/' + id, {
+      method: 'PATCH', credentials: 'include',
+      headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+    });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'HTTP '+r.status);
+    ifcoCargarTalonarios();
+  } catch(e) { alert('Error: ' + e.message); }
+}
+
+async function ifcoEliminarTalonario(id) {
+  if (!confirm('¿Eliminar este talonario? Esta acción no se puede deshacer.\n\n(Solo se puede borrar si no tiene remitos asociados.)')) return;
+  try {
+    const r = await fetch('/api/ifco/talonarios/' + id, { method: 'DELETE', credentials: 'include' });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'HTTP '+r.status);
     ifcoCargarTalonarios();
   } catch(e) { alert('Error: ' + e.message); }
 }
