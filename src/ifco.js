@@ -42,41 +42,43 @@ try { db.exec("ALTER TABLE ifco_remitos_super ADD COLUMN email_enviado_a TEXT");
 
 // Migración del CHECK constraint en `estado`. La tabla original tiene CHECK que NO incluye 'enviado',
 // y por eso el UPDATE a 'enviado' (Enviar a IFCO) falla con: CHECK constraint failed.
-// Reconstruimos la tabla con el constraint actualizado. Idempotente: solo corre si detecta el constraint viejo.
+// Reconstruimos la tabla preservando el SQL original exacto y solo reemplazando la lista de estados.
+// Esto es más robusto que reconstruir columna por columna con PRAGMA, porque no pierde defaults
+// con expresiones como `DEFAULT (datetime('now','localtime'))` ni FKs.
 try {
-  const tblSql = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='ifco_remitos_super'").get();
-  const sqlText = tblSql && tblSql.sql ? String(tblSql.sql) : '';
-  // Si tiene constraint pero NO menciona 'enviado', hay que reconstruir
-  const tieneCheckEstado = /estado.*CHECK|CHECK.*estado/i.test(sqlText);
-  const incluyeEnviado   = /'enviado'/.test(sqlText);
-  if (tieneCheckEstado && !incluyeEnviado) {
-    console.log('[IFCO] Migrando CHECK constraint de estado para incluir "enviado"');
-    const cols = db.prepare("PRAGMA table_info(ifco_remitos_super)").all();
-    const colNames = cols.map(function(c){ return '"' + c.name + '"'; }).join(', ');
-    const colDefs = cols.map(function(c) {
-      let def = '"' + c.name + '"';
-      if (c.type) def += ' ' + c.type;
-      if (c.pk) def += ' PRIMARY KEY';
-      // Reemplazo del CHECK estado: incluir 'enviado'
-      if (c.name === 'estado') {
-        def += " CHECK (estado IN ('despachado','sellado','enviado','presentado','anulado'))";
-      } else if (c.notnull && !c.pk) {
-        def += ' NOT NULL';
-      }
-      if (c.dflt_value !== null) def += ' DEFAULT ' + c.dflt_value;
-      return def;
-    }).join(', ');
-    const tx = db.transaction(function() {
-      db.exec("ALTER TABLE ifco_remitos_super RENAME TO _old_remitos_super_v1");
-      db.exec("CREATE TABLE ifco_remitos_super (" + colDefs + ")");
-      db.exec("INSERT INTO ifco_remitos_super (" + colNames + ") SELECT " + colNames + " FROM _old_remitos_super_v1");
-      db.exec("DROP TABLE _old_remitos_super_v1");
-    });
-    tx();
-    console.log('[IFCO] Migración OK: CHECK estado ahora incluye "enviado"');
+  const tblRow = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='ifco_remitos_super'").get();
+  const sqlOriginal = tblRow && tblRow.sql ? String(tblRow.sql) : '';
+  if (sqlOriginal && !/'enviado'/.test(sqlOriginal)) {
+    // Reemplazar la lista de estados en el CHECK por la nueva (incluye 'enviado').
+    // Toleramos espacios/saltos de línea entre tokens.
+    const sqlNew = sqlOriginal.replace(
+      /CHECK\s*\(\s*estado\s+IN\s*\([^)]+\)\s*\)/i,
+      "CHECK (estado IN ('despachado','sellado','enviado','presentado','anulado'))"
+    );
+    if (sqlNew === sqlOriginal) {
+      console.warn('[IFCO] No se encontró CHECK estado en la tabla. SQL:', sqlOriginal.slice(0, 300));
+    } else {
+      console.log('[IFCO] Migrando CHECK constraint de estado para incluir "enviado"');
+      // Capturar índices/triggers asociados antes de renombrar
+      const idxs = db.prepare("SELECT name, sql FROM sqlite_master WHERE type='index' AND tbl_name='ifco_remitos_super' AND sql IS NOT NULL").all();
+      const cols = db.prepare("PRAGMA table_info(ifco_remitos_super)").all();
+      const colNames = cols.map(function(c){ return '"' + c.name + '"'; }).join(', ');
+      const tx = db.transaction(function() {
+        db.exec("ALTER TABLE ifco_remitos_super RENAME TO _old_remitos_super_v1");
+        db.exec(sqlNew);
+        db.exec("INSERT INTO ifco_remitos_super (" + colNames + ") SELECT " + colNames + " FROM _old_remitos_super_v1");
+        db.exec("DROP TABLE _old_remitos_super_v1");
+        // Recrear índices que SQLite no preserva al renombrar
+        for (const idx of idxs) {
+          try { db.exec(idx.sql); } catch(e) { console.warn('[IFCO] No se pudo recrear índice', idx.name, ':', e.message); }
+        }
+      });
+      tx();
+      console.log('[IFCO] Migración OK: CHECK estado ahora incluye "enviado"');
+    }
   }
 } catch(e) {
-  console.error('[IFCO] Error migrando CHECK estado:', e.message);
+  console.error('[IFCO] Error migrando CHECK estado:', e.message, e.stack);
 }
 
 // Estado de la recepción: 'en_viaje' (proveedor ya despachó pero SG no recibió),
