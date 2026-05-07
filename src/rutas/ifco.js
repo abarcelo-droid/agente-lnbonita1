@@ -1536,17 +1536,11 @@ router.post('/recepciones-proveedor', upload.single('escaneo'), function(req, re
   if (!cant || cant <= 0) return res.status(400).json({ error: 'Cantidad inválida' });
 
   // R22: IFCOs nuevos comprados al IFCO por el proveedor.
-  // - No requiere proveedor_id (puede ir NULL — el "origen" es la sucursal IFCO)
-  // - Requiere sucursal_ifco
+  // - No requiere proveedor_id (puede ir NULL)
   // - No afecta saldo de proveedor; sí suma a stock SG
   const esR22 = !!(d.es_r22 && (d.es_r22 === '1' || d.es_r22 === 'true' || d.es_r22 === true));
   let provId = null;
-  let sucursalR22 = null;
   if (esR22) {
-    sucursalR22 = String(d.sucursal_ifco || '').trim();
-    if (['Buenos Aires','Mendoza'].indexOf(sucursalR22) < 0) {
-      return res.status(400).json({ error: 'sucursal_ifco inválida (esperado: Buenos Aires | Mendoza)' });
-    }
     if (d.proveedor_id) {
       provId = parseInt(d.proveedor_id);
       const ex = db.prepare("SELECT id FROM proveedores WHERE id = ?").get(provId);
@@ -1568,13 +1562,13 @@ router.post('/recepciones-proveedor', upload.single('escaneo'), function(req, re
 
   const r = db.prepare(`
     INSERT INTO ifco_recepciones_proveedor
-      (fecha_recepcion, proveedor_id, cantidad, producto, n_remito_proveedor, escaneo_path, notas, usuario_id, es_r22, sucursal_ifco)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      (fecha_recepcion, proveedor_id, cantidad, producto, n_remito_proveedor, escaneo_path, notas, usuario_id, es_r22)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     d.fecha_recepcion, provId, cant,
     d.producto || null, d.n_remito_proveedor || null,
     escaneo_path, d.notas || null, req.user.id || null,
-    esR22 ? 1 : 0, sucursalR22
+    esR22 ? 1 : 0
   );
 
   // Saldo del proveedor (informativo) — solo aplica si hay proveedor real
