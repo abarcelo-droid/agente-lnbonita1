@@ -2770,28 +2770,29 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     </div>
     <div style="display:flex;gap:8px;flex-wrap:wrap">
       <button class="btn bb" onclick="ifcoAbrirNuevoRemito()">+ Despacho a súper</button>
-      <button class="btn bb" onclick="ifcoAbrirCargarSellado()" style="background:#1e40af">🔏 Cargar sellado</button>
-      <button class="btn bb" onclick="ifcoAbrirNuevoEnvio()">+ Envío a proveedor</button>
-      <button class="btn bo" onclick="ifcoAbrirNuevoMovimiento('retiro')">+ Retiro IFCO</button>
-      <button class="btn bo" onclick="ifcoAbrirNuevoMovimiento('perdida')">+ Pérdida</button>
+      <button class="btn bb" onclick="ifcoAbrirCargarSellado()" style="background:#047857">🔏 Cargar sellado</button>
     </div>
   </div>
 
   <!-- Tabs -->
-  <div style="display:flex;gap:4px;margin-bottom:16px;border-bottom:1px solid var(--bor);overflow-x:auto" id="ifco-tabs">
-    <button class="ifco-tab on" data-tab="resumen"   onclick="ifcoTab('resumen')">📊 Resumen</button>
-    <button class="ifco-tab"     data-tab="remitos"  onclick="ifcoTab('remitos')">🛒 Remitos súper</button>
-    <button class="ifco-tab"     data-tab="envios"   onclick="ifcoTab('envios')">🚚 Envíos a proveedor</button>
-    <button class="ifco-tab"     data-tab="recep"    onclick="ifcoTab('recep')">📥 Recepciones de proveedor</button>
-    <button class="ifco-tab"     data-tab="movs"     onclick="ifcoTab('movs')">🔁 Retiros y pérdidas</button>
-    <button class="ifco-tab"     data-tab="talons"   onclick="ifcoTab('talons')">📋 Talonarios</button>
-    <button class="ifco-tab"     data-tab="papelera" onclick="ifcoTab('papelera')">🗑️ Papelera</button>
+  <div style="display:flex;gap:4px;margin-bottom:16px;border-bottom:1px solid var(--bor);overflow-x:auto;align-items:center" id="ifco-tabs">
+    <button class="ifco-tab on" data-tab="resumen"  onclick="ifcoTab('resumen')">📊 Resumen</button>
+    <button class="ifco-tab"     data-tab="remitos" onclick="ifcoTab('remitos')">🛒 Despachos</button>
+    <button class="ifco-tab"     data-tab="movs"    onclick="ifcoTab('movs')">🔁 Retiros</button>
+    <button class="ifco-tab"     data-tab="talons"  onclick="ifcoTab('talons')">📋 Talonarios</button>
+    <button class="ifco-tab ifco-tab-prov" data-tab="recep"  onclick="ifcoTab('recep')">📥 Ingresos</button>
+    <button class="ifco-tab ifco-tab-prov" data-tab="envios" onclick="ifcoTab('envios')">📤 Salidas</button>
+    <button class="ifco-tab ifco-tab-papelera" data-tab="papelera" onclick="ifcoTab('papelera')" title="Registros eliminados" style="margin-left:auto;font-size:11px;padding:6px 10px;color:var(--mut);opacity:0.7">🗑️ Papelera</button>
   </div>
 
   <style>
     .ifco-tab{background:transparent;border:none;border-bottom:3px solid transparent;color:var(--mut);font-size:13px;font-weight:500;padding:10px 14px;cursor:pointer;font-family:var(--sans);white-space:nowrap}
     .ifco-tab:hover{color:var(--txt)}
     .ifco-tab.on{color:var(--burg);border-bottom-color:var(--burg)}
+    /* Color distintivo para los dos tabs de proveedores (Ingresos y Salidas) */
+    .ifco-tab-prov{color:#0369a1}
+    .ifco-tab-prov:hover{color:#075985}
+    .ifco-tab-prov.on{color:#075985;border-bottom-color:#0ea5e9}
     .ifco-pane{display:none}
     .ifco-pane.on{display:block}
     .ifco-card{background:var(--sur);border:1px solid var(--bor);border-radius:10px;padding:16px}
@@ -2829,11 +2830,6 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
           <div class="ifco-stat-val" id="ifco-st-prov">—</div>
           <div class="ifco-stat-sub">enviados, esperando vuelta</div>
         </div>
-        <div class="ifco-card ifco-stat">
-          <div class="ifco-stat-lbl">En tránsito a súper</div>
-          <div class="ifco-stat-val" id="ifco-st-transito">—</div>
-          <div class="ifco-stat-sub">despachados, sin sellar</div>
-        </div>
         <div class="ifco-card ifco-stat" style="background:var(--bg)">
           <div class="ifco-stat-lbl" style="color:var(--burg)">Bajo tu responsabilidad</div>
           <div class="ifco-stat-val" id="ifco-st-total">—</div>
@@ -2843,15 +2839,18 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
 
       <div id="ifco-alertas" style="margin-bottom:16px"></div>
 
-      <div class="ab-grid ab-grid-2">
-        <div class="ifco-card">
-          <div style="font-size:13px;font-weight:600;margin-bottom:10px">Saldo por cliente (súpers)</div>
-          <div id="ifco-saldos-clientes"></div>
+      <!-- Recepciones en viaje (pendientes de confirmar por SG) -->
+      <div id="ifco-en-viaje-card" class="ifco-card" style="margin-bottom:16px;display:none;border-color:#f59e0b;background:#fffbeb">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+          <div style="font-size:14px;font-weight:600;color:#92400e">🚛 Pendientes de recibir <span id="ifco-en-viaje-count" style="background:#f59e0b;color:#fff;padding:2px 8px;border-radius:10px;font-size:12px;margin-left:6px"></span></div>
+          <div style="font-size:11px;color:#92400e">Cajones que un proveedor despachó y SG todavía no confirmó.</div>
         </div>
-        <div class="ifco-card">
-          <div style="font-size:13px;font-weight:600;margin-bottom:10px">Saldo por proveedor</div>
-          <div id="ifco-saldos-proveedores"></div>
-        </div>
+        <div id="ifco-en-viaje-list"></div>
+      </div>
+
+      <div class="ifco-card">
+        <div style="font-size:13px;font-weight:600;margin-bottom:10px">Saldo por proveedor</div>
+        <div id="ifco-saldos-proveedores"></div>
       </div>
     </div>
   </div>
@@ -2878,13 +2877,12 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
         <thead><tr>
           <th style="cursor:pointer;user-select:none" onclick="ifcoSortRemitos('n_remito_ifco')">N° Remito <span id="ifco-th-n_remito_ifco" style="color:var(--mut);font-size:10px"></span></th>
           <th style="cursor:pointer;user-select:none" onclick="ifcoSortRemitos('fecha_emision')">Fecha <span id="ifco-th-fecha_emision" style="color:var(--mut);font-size:10px"></span></th>
-          <th style="cursor:pointer;user-select:none" onclick="ifcoSortRemitos('empresa')">Cadena / Sucursal <span id="ifco-th-empresa" style="color:var(--mut);font-size:10px"></span></th>
+          <th style="cursor:pointer;user-select:none" onclick="ifcoSortRemitos('empresa')">Cadena <span id="ifco-th-empresa" style="color:var(--mut);font-size:10px"></span></th>
           <th style="cursor:pointer;user-select:none" onclick="ifcoSortRemitos('origen')">Origen <span id="ifco-th-origen" style="color:var(--mut);font-size:10px"></span></th>
           <th style="text-align:right;cursor:pointer;user-select:none" onclick="ifcoSortRemitos('cantidad_despachada')">Despachado <span id="ifco-th-cantidad_despachada" style="color:var(--mut);font-size:10px"></span></th>
           <th style="text-align:right;cursor:pointer;user-select:none" onclick="ifcoSortRemitos('cantidad_recibida')">Recibido <span id="ifco-th-cantidad_recibida" style="color:var(--mut);font-size:10px"></span></th>
           <th style="text-align:right;cursor:pointer;user-select:none" onclick="ifcoSortRemitos('cantidad_rechazada')">Rech. <span id="ifco-th-cantidad_rechazada" style="color:var(--mut);font-size:10px"></span></th>
           <th style="cursor:pointer;user-select:none" onclick="ifcoSortRemitos('estado')">Estado <span id="ifco-th-estado" style="color:var(--mut);font-size:10px"></span></th>
-          <th style="cursor:pointer;user-select:none" onclick="ifcoSortRemitos('fecha_sellado')">Sellado <span id="ifco-th-fecha_sellado" style="color:var(--mut);font-size:10px"></span></th>
           <th></th>
         </tr></thead>
         <tbody></tbody>
@@ -2894,8 +2892,9 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
 
   <!-- Tab: Envíos a proveedor -->
   <div class="ifco-pane" id="ifco-pane-envios">
-    <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">
-      <select id="ifco-flt-env-estado" onchange="ifcoCargarEnvios()" style="font-size:13px;padding:6px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg)">
+    <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;align-items:center">
+      <button class="btn bb" onclick="ifcoAbrirNuevoEnvio()">+ Nueva salida (envío a proveedor)</button>
+      <select id="ifco-flt-env-estado" onchange="ifcoCargarEnvios()" style="font-size:13px;padding:6px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg);margin-left:auto">
         <option value="">Todos</option>
         <option value="enviado">Enviados</option>
         <option value="parcial">Parciales</option>
@@ -2915,10 +2914,12 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     </div>
   </div>
 
-  <!-- Tab: Movimientos -->
+  <!-- Tab: Retiros / Pérdidas -->
   <div class="ifco-pane" id="ifco-pane-movs">
-    <div style="display:flex;gap:8px;margin-bottom:12px;align-items:center">
-      <select id="ifco-flt-mov-tipo" onchange="ifcoCargarMovimientos()" style="font-size:13px;padding:6px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg)">
+    <div style="display:flex;gap:8px;margin-bottom:12px;align-items:center;flex-wrap:wrap">
+      <button class="btn bb" onclick="ifcoAbrirNuevoMovimiento('retiro')">+ Retiro IFCO</button>
+      <button class="btn bo" onclick="ifcoAbrirNuevoMovimiento('perdida')">+ Pérdida</button>
+      <select id="ifco-flt-mov-tipo" onchange="ifcoCargarMovimientos()" style="font-size:13px;padding:6px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg);margin-left:12px">
         <option value="">Todos</option>
         <option value="retiro">Retiros</option>
         <option value="perdida">Pérdidas</option>
@@ -15013,7 +15014,6 @@ async function ifcoCargarResumen() {
     const r = await _ifcoFetch('/api/ifco/resumen');
     document.getElementById('ifco-st-piso').textContent     = _ifcoFmt(r.stock.piso);
     document.getElementById('ifco-st-prov').textContent     = _ifcoFmt(r.stock.en_proveedores);
-    document.getElementById('ifco-st-transito').textContent = _ifcoFmt(r.stock.en_transito);
     document.getElementById('ifco-st-total').textContent    = _ifcoFmt(r.stock.bajo_responsabilidad);
 
     // Alertas
@@ -15048,20 +15048,6 @@ async function ifcoCargarResumen() {
     if (!html) html = '<div style="font-size:12px;color:var(--mut);padding:12px">Sin alertas. Todo bajo control.</div>';
     aBox.innerHTML = html;
 
-    // Saldos por cliente
-    const sc = document.getElementById('ifco-saldos-clientes');
-    if (r.saldos.por_cliente.length === 0) {
-      sc.innerHTML = '<div style="font-size:12px;color:var(--mut)">Sin saldos pendientes</div>';
-    } else {
-      sc.innerHTML = '<table style="width:100%;font-size:12px"><tbody>' + r.saldos.por_cliente.map(function(c){
-        return '<tr><td style="padding:4px 0">'+_ifcoEsc(c.empresa||'(sin empresa)')+'</td>' +
-               '<td style="text-align:right;padding:4px 0;font-variant-numeric:tabular-nums">'+
-                 (c.en_transito > 0 ? '<span style="color:var(--mut)">'+c.en_transito+' en tránsito</span>' : '') +
-                 (c.sellados_pendientes_count > 0 ? ' <span class="ifco-badge ifco-badge-sellado">'+c.sellados_pendientes_count+' s/presentar</span>' : '') +
-               '</td></tr>';
-      }).join('') + '</tbody></table>';
-    }
-
     // Saldos por proveedor — lista TODOS los proveedores clickeables (no filtra por > 0)
     const sp = document.getElementById('ifco-saldos-proveedores');
     sp.innerHTML = '<div style="font-size:11px;color:var(--mut)">Cargando…</div>';
@@ -15094,6 +15080,61 @@ async function ifcoCargarResumen() {
   } catch(e) {
     document.getElementById('ifco-resumen-loading').textContent = 'Error: ' + e.message;
   }
+
+  // Cargar recepciones EN VIAJE (pendientes de confirmar por SG)
+  try {
+    const pend = await _ifcoFetch('/api/ifco/recepciones-en-viaje');
+    const card = document.getElementById('ifco-en-viaje-card');
+    const list = document.getElementById('ifco-en-viaje-list');
+    const cnt  = document.getElementById('ifco-en-viaje-count');
+    if (!pend || pend.length === 0) {
+      card.style.display = 'none';
+      return;
+    }
+    card.style.display = 'block';
+    cnt.textContent = pend.length;
+    list.innerHTML = pend.map(function(r){
+      return '<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid #fde68a;font-size:13px">' +
+        '<div>' +
+          '<b>'+_ifcoEsc(r.proveedor_nombre||'(sin proveedor)')+'</b>' +
+          ' · ' + _ifcoFecha(r.fecha_recepcion) +
+          (r.n_remito_proveedor ? ' · <span style="font-family:monospace;font-size:11px;color:var(--mut)">'+_ifcoEsc(r.n_remito_proveedor)+'</span>' : '') +
+          ' · <b style="color:#92400e">'+_ifcoFmt(r.cantidad)+' cajones</b>' +
+        '</div>' +
+        '<div style="display:flex;gap:6px">' +
+          (r.escaneo_path ? '<a href="'+r.escaneo_path+'" target="_blank" class="btn bo bs">📷 Foto</a>' : '') +
+          '<button class="btn bb bs" onclick="ifcoConfirmarRecepcion('+r.id+')">✓ Confirmar</button>' +
+          '<button class="btn bo bs" style="color:#991b1b" onclick="ifcoRechazarRecepcion('+r.id+')">✗ Rechazar</button>' +
+        '</div>' +
+      '</div>';
+    }).join('');
+  } catch(e) { /* silencioso */ }
+}
+
+async function ifcoConfirmarRecepcion(id) {
+  if (!confirm('¿Confirmar la recepción? Va a sumar al stock SG y descontar el saldo del proveedor.')) return;
+  try {
+    const r = await fetch('/api/ifco/recepciones-proveedor/'+id+'/confirmar', { method:'POST', credentials:'include' });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || 'HTTP '+r.status);
+    ifcoCargarResumen();
+    if (typeof ifcoCargarRecepciones === 'function') ifcoCargarRecepciones();
+  } catch(e) { alert('Error: ' + e.message); }
+}
+
+async function ifcoRechazarRecepcion(id) {
+  const motivo = prompt('Motivo del rechazo (opcional):', '');
+  if (motivo === null) return; // canceló
+  try {
+    const r = await fetch('/api/ifco/recepciones-proveedor/'+id+'/rechazar', {
+      method:'POST', credentials:'include',
+      headers:{'Content-Type':'application/json'}, body: JSON.stringify({ motivo: motivo || null })
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || 'HTTP '+r.status);
+    ifcoCargarResumen();
+    if (typeof ifcoCargarRecepciones === 'function') ifcoCargarRecepciones();
+  } catch(e) { alert('Error: ' + e.message); }
 }
 
 // ── REMITOS A SÚPER ───────────────────────────────────────────────────────
@@ -15206,13 +15247,12 @@ function _ifcoRenderRemitos() {
     return '<tr>' +
       '<td style="font-family:monospace;font-size:12px"><b>'+_ifcoEsc(r.n_remito_ifco)+'</b></td>' +
       '<td>'+_ifcoFecha(r.fecha_emision)+'</td>' +
-      '<td>'+_ifcoEsc(r.empresa||'—')+(r.sucursal?'<div style="font-size:11px;color:var(--mut)">'+_ifcoEsc(r.sucursal)+'</div>':'')+'</td>' +
+      '<td>'+_ifcoEsc(r.empresa||'—')+'</td>' +
       '<td>'+origenCell+'</td>' +
       '<td style="text-align:right;font-variant-numeric:tabular-nums"><b>'+_ifcoFmt(r.cantidad_despachada)+'</b></td>' +
       '<td style="text-align:right;font-variant-numeric:tabular-nums">'+(r.cantidad_recibida != null ? _ifcoFmt(r.cantidad_recibida) : '—')+'</td>' +
       '<td style="text-align:right;font-variant-numeric:tabular-nums">'+(r.cantidad_rechazada != null && r.cantidad_rechazada > 0 ? _ifcoFmt(r.cantidad_rechazada) : '—')+'</td>' +
       '<td>'+_ifcoBadge(r.estado)+'</td>' +
-      '<td style="font-size:11px;color:var(--mut)">'+(r.fecha_sellado?_ifcoFecha(r.fecha_sellado):'—')+'</td>' +
       '<td style="display:flex;gap:4px;flex-wrap:wrap">'+acciones.join('')+'</td>' +
     '</tr>';
   }).join('');
@@ -16658,10 +16698,17 @@ async function ifcoCargarRecepciones() {
       const fotoCell = r.escaneo_path
         ? '<a href="'+r.escaneo_path+'" target="_blank" style="font-size:11px;color:var(--burg)">Ver</a>'
         : '<span style="color:var(--mut);font-size:11px">—</span>';
-      // Si es R22, mostrar badge en lugar del nombre del proveedor (que puede ser NULL)
-      const provCell = r.es_r22
-        ? '<span class="ifco-badge" style="background:#fef3c7;color:#92400e">R22</span>' + (r.proveedor_nombre ? ' <span style="color:var(--mut);font-size:11px">vía '+_ifcoEsc(r.proveedor_nombre)+'</span>' : '')
-        : _ifcoEsc(r.proveedor_nombre||'?');
+      // Badge según tipo: R22 (ámbar), EN VIAJE (naranja brillante), RECHAZADO (rojo), o normal
+      let provCell;
+      if (r.estado === 'en_viaje') {
+        provCell = '<span class="ifco-badge" style="background:#fed7aa;color:#9a3412">🚛 EN VIAJE</span> ' + _ifcoEsc(r.proveedor_nombre||'?');
+      } else if (r.estado === 'rechazado') {
+        provCell = '<span class="ifco-badge" style="background:#fee2e2;color:#991b1b">✗ RECHAZADO</span> ' + _ifcoEsc(r.proveedor_nombre||'?');
+      } else if (r.es_r22) {
+        provCell = '<span class="ifco-badge" style="background:#fef3c7;color:#92400e">R22</span>' + (r.proveedor_nombre ? ' <span style="color:var(--mut);font-size:11px">vía '+_ifcoEsc(r.proveedor_nombre)+'</span>' : '');
+      } else {
+        provCell = _ifcoEsc(r.proveedor_nombre||'?');
+      }
       return '<tr>' +
         '<td>'+_ifcoFecha(r.fecha_recepcion)+'</td>' +
         '<td>'+provCell+'</td>' +
@@ -16731,7 +16778,7 @@ async function ifcoGuardarRecepcionR22() {
     const data = await r.json();
     if (!r.ok) throw new Error(data.error || ('HTTP '+r.status));
     document.getElementById('ifco-mb-recr22').classList.remove('on');
-    ifcoCargarRecepcionesMerc();
+    ifcoCargarRecepciones();
     if (typeof ifcoCargarResumen === 'function') ifcoCargarResumen();
   } catch(e) { alert('Error: ' + e.message); }
 }

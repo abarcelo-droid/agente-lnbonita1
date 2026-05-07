@@ -157,6 +157,41 @@ body{padding-bottom:env(safe-area-inset-bottom)}
     </div>
     <div class="arr">›</div>
   </button>
+
+  <!-- Solo visible para usuarios de tipo proveedor -->
+  <button class="menu-btn" id="btn-enviar-sg" onclick="goEnviarSG()" style="display:none;background:#ecfdf5;border-color:#10b981">
+    <div class="emo">🚛</div>
+    <div class="txt">
+      <div class="t1" style="color:#047857">ENVIAR A SAN GERÓNIMO</div>
+      <div class="t2">Cajones que mando al depósito SG</div>
+    </div>
+    <div class="arr" style="color:#047857">›</div>
+  </button>
+</div>
+
+<!-- Pantalla ENVIAR A SG (formulario simple) -->
+<div class="view" id="view-enviar-sg">
+  <div class="alert info">
+    🚛 Cargá los cajones que vas a mandar al depósito de San Gerónimo. Quedan "en viaje" hasta que alguien de SG confirme la recepción.
+  </div>
+  <div class="card">
+    <label class="lbl">Cantidad de cajones *</label>
+    <input id="esg-cant" type="number" min="1" inputmode="numeric" placeholder="Ej: 200">
+
+    <label class="lbl" style="margin-top:12px">Fecha *</label>
+    <input id="esg-fecha" type="date">
+
+    <label class="lbl" style="margin-top:12px">N° de remito (opcional)</label>
+    <input id="esg-nrem" type="text" placeholder="Si tenés un nro. de referencia">
+
+    <label class="lbl" style="margin-top:12px">Notas (opcional)</label>
+    <input id="esg-notas" type="text" placeholder="Ej: producto, transportista...">
+
+    <label class="lbl" style="margin-top:12px">Foto del remito (opcional)</label>
+    <input id="esg-foto" type="file" accept="image/jpeg,image/png,image/webp" capture="environment">
+
+    <button class="btn-primary" onclick="enviarSG()" style="margin-top:18px;width:100%;background:#047857">📤 Enviar a SG</button>
+  </div>
 </div>
 
 <!-- Pantalla LOADING (procesando OCR) -->
@@ -406,6 +441,11 @@ const S = {
       div.style.cssText = 'background:#dbeafe;border-bottom:1px solid #93c5fd;padding:8px 16px;text-align:center;font-size:12px;color:#1e40af;font-weight:500';
       div.textContent = '📍 ' + lbl;
       document.querySelector('.hd').insertAdjacentElement('afterend', div);
+    }
+    // El botón "Enviar a SG" solo se muestra a usuarios de tipo proveedor
+    if (S.user.deposito_tipo === 'proveedor' && S.user.deposito_proveedor_id) {
+      const btn = document.getElementById('btn-enviar-sg');
+      if (btn) btn.style.display = '';
     }
   } catch(e) { /* sigue sin info */ }
 })();
@@ -689,6 +729,52 @@ async function confirmarCrearSellado() {
 function goCargarDespacho() {
   resetState();
   showView('view-foto-despacho', { title:'📥 Cargar despacho' });
+}
+
+// ───── Enviar a SG (proveedor → depósito SG) ─────
+function goEnviarSG() {
+  if (!S.user || S.user.deposito_tipo !== 'proveedor' || !S.user.deposito_proveedor_id) {
+    alert('Tu usuario no está asignado a un proveedor. Pedile a tu administrador que te asigne uno.');
+    return;
+  }
+  // Reset
+  $('esg-cant').value  = '';
+  $('esg-fecha').value = todayISO();
+  $('esg-nrem').value  = '';
+  $('esg-notas').value = '';
+  $('esg-foto').value  = '';
+  showView('view-enviar-sg', { title:'🚛 Enviar a SG' });
+}
+
+async function enviarSG() {
+  const cant  = parseInt($('esg-cant').value);
+  const fecha = $('esg-fecha').value;
+  const nrem  = $('esg-nrem').value.trim();
+  const notas = $('esg-notas').value.trim();
+  const foto  = $('esg-foto').files[0];
+  if (!cant || cant <= 0) { alert('Cantidad inválida'); return; }
+  if (!fecha)             { alert('Falta la fecha'); return; }
+  if (!S.user || !S.user.deposito_proveedor_id) {
+    alert('No tenés proveedor asignado'); return;
+  }
+  try {
+    const fd = new FormData();
+    fd.append('es_envio_a_sg', '1');
+    fd.append('proveedor_id',  String(S.user.deposito_proveedor_id));
+    fd.append('fecha_recepcion', fecha);
+    fd.append('cantidad', String(cant));
+    if (nrem)  fd.append('n_remito_proveedor', nrem);
+    if (notas) fd.append('notas', notas);
+    if (foto)  fd.append('escaneo', foto);
+    const r = await fetch('/api/ifco/recepciones-proveedor', { method:'POST', credentials:'include', body:fd });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'HTTP '+r.status);
+    showView('view-ok', { title:'Listo' });
+    $('ok-titulo').textContent = '¡Envío registrado!';
+    $('ok-detalle').innerHTML = 'Quedó <b>en viaje</b>. Cuando alguien de SG confirme la recepción física, se actualizan los saldos.';
+  } catch(e) {
+    alert('Error: ' + e.message);
+  }
 }
 
 async function onFotoDespacho(ev) {
