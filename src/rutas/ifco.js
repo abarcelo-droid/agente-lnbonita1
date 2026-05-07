@@ -25,6 +25,33 @@ try {
   db.exec("ALTER TABLE ifco_remitos_super ADD COLUMN n_remito_sg TEXT");
 } catch(e) { /* columna ya existe */ }
 
+// ── Migración inline: nuevo estado 'enviado' (intermedio entre sellado y presentado)
+// Antes: sellado → presentado (cuando se mandaba el mail a IFCO)
+// Ahora: sellado → enviado (mail) → presentado (confirmado por archivo IFCO)
+// Si la columna fecha_enviado se crea por primera vez, también pasamos los
+// remitos en estado 'presentado' viejos a 'enviado' (porque ese estado solo
+// reflejaba "se mandó el mail", no "IFCO lo confirmó realmente").
+let _ifcoMigrarEnviado = false;
+try {
+  db.exec("ALTER TABLE ifco_remitos_super ADD COLUMN fecha_enviado TEXT");
+  _ifcoMigrarEnviado = true; // primera vez que se crea la columna
+} catch(e) { /* columna ya existe */ }
+
+if (_ifcoMigrarEnviado) {
+  try {
+    const r = db.prepare(`
+      UPDATE ifco_remitos_super
+      SET fecha_enviado    = fecha_presentado,
+          fecha_presentado = NULL,
+          estado           = 'enviado'
+      WHERE estado = 'presentado' AND fecha_presentado IS NOT NULL
+    `).run();
+    console.log('[IFCO] Migración estado "presentado" → "enviado":', r.changes, 'remitos');
+  } catch(e) {
+    console.error('[IFCO] Error migrando presentados → enviados:', e.message);
+  }
+}
+
 // ── Configuración OCR vía Claude API ───────────────────────────────────────
 const OCR_ENABLED = String(process.env.IFCO_OCR_ENABLED || '').toLowerCase() === 'true';
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || '';
@@ -770,13 +797,13 @@ router.post('/remitos/presentar', function(req, res) {
   }
   const r = db.prepare(`
     UPDATE ifco_remitos_super
-    SET estado = 'presentado',
-        fecha_presentado = date('now','localtime'),
+    SET estado = 'enviado',
+        fecha_enviado = date('now','localtime'),
         email_enviado_a = ?,
         actualizado_en = datetime('now','localtime')
     WHERE id IN (${ph}) AND estado = 'sellado'
   `).run(email, ...ids);
-  res.json({ ok: true, presentados: r.changes, remitos: remitos });
+  res.json({ ok: true, enviados: r.changes, remitos: remitos });
 });
 
 // PATCH /remitos/:id — editar (solo si estado='despachado')
@@ -1161,14 +1188,14 @@ router.get('/resumen', function(req, res) {
   const despachos_sg = get(`
     SELECT COALESCE(SUM(cantidad_despachada),0) AS total
     FROM ifco_remitos_super
-    WHERE estado IN ('despachado','sellado','presentado')
+    WHERE estado IN ('despachado','sellado','enviado','presentado')
       AND origen = 'san_geronimo'
       AND eliminado_en IS NULL
   `);
   const rechazos_vueltos_sg = get(`
     SELECT COALESCE(SUM(cantidad_rechazada),0) AS total
     FROM ifco_remitos_super
-    WHERE estado IN ('sellado','presentado')
+    WHERE estado IN ('sellado','enviado','presentado')
       AND rechazo_destino = 'san_geronimo'
       AND eliminado_en IS NULL
   `);
@@ -1349,7 +1376,7 @@ function _calcSaldoProveedor(provId) {
     FROM ifco_remitos_super
     WHERE proveedor_origen_id = ?
       AND origen = 'proveedor_directo'
-      AND estado IN ('sellado','presentado')
+      AND estado IN ('sellado','enviado','presentado')
       AND eliminado_en IS NULL
   `).get(provId).total || 0;
 
@@ -1422,7 +1449,7 @@ function _movimientosProveedor(provId) {
     } else if (m.tipo === 'recepcion') {
       delta = -m.cantidad;
     } else if (m.tipo === 'despacho_directo') {
-      if (m.estado === 'sellado' || m.estado === 'presentado') {
+      if (m.estado === 'sellado' || m.estado === 'enviado' || m.estado === 'presentado') {
         const recib = m.cantidad_recibida != null ? m.cantidad_recibida : m.cantidad;
         const rech  = m.cantidad_rechazada || 0;
         // Si el rechazo volvió a SG, también sale del proveedor (= todo lo despachado)
@@ -1811,7 +1838,7 @@ router.post('/ocr/match-sellado', upload.single('foto'), async function(req, res
   }
 
   // Hay match — depende del estado
-  if (remito.estado === 'sellado' || remito.estado === 'presentado') {
+  if (remito.estado === 'sellado' || remito.estado === 'enviado' || remito.estado === 'presentado') {
     return res.json({
       ok: false,
       accion: 'bloqueado',
@@ -1873,7 +1900,7 @@ router.post('/consolidar/preview', upload.single('archivo'), async function(req,
 
     // Cargar todos los remitos vivos del sistema y armar índice por N° normalizado
     const enSistema = db.prepare(`
-      SELECT id, n_remito_ifco, n_remito_sg, fecha_emision, fecha_sellado, fecha_presentado,
+      SELECT id, n_remito_ifco, n_remito_sg, fecha_emision, fecha_sellado, fecha_enviado, fecha_presentado,
              empresa, sucursal, cantidad_despachada, cantidad_recibida, cantidad_rechazada,
              estado, origen, proveedor_origen_id
       FROM ifco_remitos_super
@@ -1956,16 +1983,16 @@ router.post('/consolidar/aplicar', express.json(), function(req, res) {
                 cantidad_recibida  = COALESCE(cantidad_recibida, cantidad_despachada),
                 cantidad_rechazada = COALESCE(cantidad_rechazada, 0),
                 fecha_sellado      = COALESCE(fecha_sellado, ?),
-                fecha_presentado = ?,
+                fecha_presentado   = ?,
                 actualizado_en     = datetime('now','localtime')
             WHERE id = ?
           `).run(fechaArchivo, fechaArchivo, id);
         } else {
-          // sellado → presentado
+          // sellado o enviado → presentado (sin tocar cantidades, ni fechas previas)
           db.prepare(`
             UPDATE ifco_remitos_super
             SET estado             = 'presentado',
-                fecha_presentado = ?,
+                fecha_presentado   = ?,
                 actualizado_en     = datetime('now','localtime')
             WHERE id = ?
           `).run(fechaArchivo, id);

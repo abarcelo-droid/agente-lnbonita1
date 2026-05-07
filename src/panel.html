@@ -2695,6 +2695,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     .ifco-badge{display:inline-block;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.05em}
     .ifco-badge-despachado{background:#e5e7eb;color:#374151}
     .ifco-badge-sellado{background:#dbeafe;color:#1e40af}
+    .ifco-badge-enviado{background:#fef3c7;color:#92400e}
     .ifco-badge-presentado{background:#d1fae5;color:#065f46}
     .ifco-badge-anulado{background:#fee2e2;color:#991b1b}
     .ifco-badge-enviado{background:#dbeafe;color:#1e40af}
@@ -2755,13 +2756,14 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
         <option value="">Todos los estados</option>
         <option value="despachado">Despachados</option>
         <option value="sellado">Sellados</option>
-        <option value="presentado">Presentados</option>
+        <option value="enviado">Enviados a IFCO</option>
+        <option value="presentado">Presentados (confirmados)</option>
         <option value="anulado">Anulados</option>
       </select>
       <input type="text" id="ifco-flt-rem-search" placeholder="Buscar por n° o empresa…" oninput="ifcoCargarRemitos()" style="font-size:13px;padding:6px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg);min-width:240px">
       <div style="margin-left:auto;display:flex;gap:6px">
         <button class="btn bo" onclick="ifcoAbrirConsolidar()" title="Marcar como presentados los remitos del archivo IFCO">🔄 Consolidar con IFCO</button>
-        <button class="btn bb" onclick="ifcoAbrirPresentar()" id="ifco-btn-presentar">📧 Presentar a IFCO</button>
+        <button class="btn bb" onclick="ifcoAbrirPresentar()" id="ifco-btn-presentar">📧 Enviar a IFCO</button>
       </div>
     </div>
     <div class="ab-table-wrap">
@@ -3166,8 +3168,8 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       <div id="ifco-cs2-step1">
         <div style="background:var(--bg);border-radius:8px;padding:14px 16px;margin-bottom:14px;font-size:13px;line-height:1.6">
           📋 Subí el <b>Excel que te manda IFCO</b> con la sección "Entregas a Cadenas".<br>
-          El sistema busca cada remito por su número y te muestra qué se va a marcar como <b>presentado</b>.<br>
-          <span style="color:var(--mut)">Los remitos que no estén en el sistema se listan para que decidas si crearlos.</span>
+          Los remitos del archivo se marcan como <b>presentados</b> (confirmados por IFCO).<br>
+          <span style="color:var(--mut)">Funciona con remitos en estado despachado, sellado o enviado. Los que no estén en el sistema se listan para que decidas si crearlos.</span>
         </div>
         <div style="text-align:center;padding:30px 20px;border:2px dashed var(--bor);border-radius:10px;background:var(--bg)">
           <input id="ifco-cs2-file" type="file" accept=".xlsx,.xls" style="display:none" onchange="ifcoConsolidarPreview(event)">
@@ -3242,15 +3244,15 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   </div>
 </div>
 
-<!-- Modal: Presentar a IFCO (mailto) -->
+<!-- Modal: Enviar a IFCO (mailto) -->
 <div class="mb" id="ifco-mb-presentar">
   <div class="mbox" style="width:720px">
     <div class="mhd">
-      <div class="mht">📧 Presentar remitos a IFCO</div>
+      <div class="mht">📧 Enviar remitos a IFCO</div>
       <button class="mcl" onclick="document.getElementById('ifco-mb-presentar').classList.remove('on')">x</button>
     </div>
     <div style="font-size:12px;color:var(--mut);margin-bottom:12px">
-      Seleccioná los remitos sellados a presentar. Al confirmar, se abre el cliente de mail con el cuerpo armado y se marcan como <b>presentados</b>. Acordate de adjuntar las fotos manualmente.
+      Seleccioná los remitos sellados a enviar. Al confirmar, se abre el cliente de mail con el cuerpo armado y se marcan como <b>enviados</b>. Cuando IFCO te confirme con su archivo, podés cerrar el ciclo en "🔄 Consolidar con IFCO".
     </div>
     <div id="ifco-presentar-lista" style="max-height:340px;overflow-y:auto;border:1px solid var(--bor);border-radius:8px"></div>
     <div style="margin-top:12px">
@@ -3260,7 +3262,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     </div>
     <div class="ab-modal-footer" style="margin-top:18px;display:flex;justify-content:flex-end;gap:8px">
       <button class="btn bo" onclick="document.getElementById('ifco-mb-presentar').classList.remove('on')">Cancelar</button>
-      <button class="btn bb" onclick="ifcoConfirmarPresentar()">Abrir mail y marcar presentados</button>
+      <button class="btn bb" onclick="ifcoConfirmarPresentar()">Abrir mail y marcar enviados</button>
     </div>
   </div>
 </div>
@@ -14780,9 +14782,9 @@ function _ifcoCmp(a, b, campo) {
     const vb = (b.origen === 'proveedor_directo' ? 'directo:' + (b.proveedor_origen_nombre||'') : 'sg');
     return va.localeCompare(vb);
   }
-  // Estado: orden lógico del flujo (despachado < sellado < presentado)
+  // Estado: orden lógico del flujo (despachado < sellado < enviado < presentado)
   if (campo === 'estado') {
-    const ord = { despachado:1, sellado:2, presentado:3 };
+    const ord = { despachado:1, sellado:2, enviado:3, presentado:4 };
     return (ord[a.estado]||99) - (ord[b.estado]||99);
   }
   const va = a[campo];
@@ -15342,7 +15344,8 @@ async function ifcoVerRemito(id) {
             : r.rechazo_destino === 'san_geronimo' ? '<span class="ifco-badge" style="background:#dbeafe;color:#1e40af">Volvió a San Gerónimo</span>'
             : '<span class="ifco-badge" style="background:#e5e7eb;color:#374151">Sin asignar</span>')
           : '') +
-        fila('Fecha presentación', r.fecha_presentacion ? _ifcoFecha(r.fecha_presentacion) : '') +
+        fila('Fecha enviado a IFCO', r.fecha_enviado ? _ifcoFecha(r.fecha_enviado) : '') +
+        fila('Fecha presentación (confirmada por IFCO)', r.fecha_presentado ? _ifcoFecha(r.fecha_presentado) : '') +
         fila('Notas', r.notas ? _ifcoEsc(r.notas).replace(/\n/g,'<br>') : '') +
       '</div>';
   } catch(e) {
