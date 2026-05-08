@@ -1704,14 +1704,25 @@ router.get('/despachos-por-mes', function(req, res) {
 });
 
 // Helper: arma la lista cronológica de movimientos de un proveedor
-function _movimientosProveedor(provId) {
+function _movimientosProveedor(provId, desde, hasta) {
+  // Filtros de fecha opcionales (formato 'YYYY-MM-DD')
+  const filtroDesde = desde ? ' AND fecha_envio >= ?' : '';
+  const filtroHasta = hasta ? ' AND fecha_envio <= ?' : '';
+  const paramsEnvios = [provId];
+  if (desde) paramsEnvios.push(desde);
+  if (hasta) paramsEnvios.push(hasta);
   const envios = db.prepare(`
     SELECT 'envio' AS tipo, id, fecha_envio AS fecha, n_remito_interno AS detalle,
            cantidad_enviada AS cantidad, cantidad_recibida, estado, notas
     FROM ifco_envios_proveedor
-    WHERE proveedor_id = ? AND eliminado_en IS NULL
-  `).all(provId);
+    WHERE proveedor_id = ? AND eliminado_en IS NULL${filtroDesde}${filtroHasta}
+  `).all(...paramsEnvios);
 
+  const filtroRDesde = desde ? ' AND fecha_recepcion >= ?' : '';
+  const filtroRHasta = hasta ? ' AND fecha_recepcion <= ?' : '';
+  const paramsRec = [provId];
+  if (desde) paramsRec.push(desde);
+  if (hasta) paramsRec.push(hasta);
   const recepciones = db.prepare(`
     SELECT 'recepcion' AS tipo, id, fecha_recepcion AS fecha,
            COALESCE(producto, n_remito_proveedor, 'Recepción de mercadería') AS detalle,
@@ -1719,17 +1730,22 @@ function _movimientosProveedor(provId) {
     FROM ifco_recepciones_proveedor
     WHERE proveedor_id = ? AND eliminado_en IS NULL
       AND (es_r22 IS NULL OR es_r22 = 0)
-      AND (estado IS NULL OR estado = 'recibido')
-  `).all(provId);
+      AND (estado IS NULL OR estado = 'recibido')${filtroRDesde}${filtroRHasta}
+  `).all(...paramsRec);
 
+  const filtroDDesde = desde ? ' AND fecha_emision >= ?' : '';
+  const filtroDHasta = hasta ? ' AND fecha_emision <= ?' : '';
+  const paramsDir = [provId];
+  if (desde) paramsDir.push(desde);
+  if (hasta) paramsDir.push(hasta);
   const directos = db.prepare(`
     SELECT 'despacho_directo' AS tipo, id, fecha_emision AS fecha,
            (n_remito_ifco || ' → ' || COALESCE(empresa,'?')) AS detalle,
            cantidad_despachada AS cantidad, cantidad_recibida, cantidad_rechazada,
            estado, fecha_sellado, sucursal, rechazo_destino
     FROM ifco_remitos_super
-    WHERE proveedor_origen_id = ? AND origen = 'proveedor_directo' AND eliminado_en IS NULL
-  `).all(provId);
+    WHERE proveedor_origen_id = ? AND origen = 'proveedor_directo' AND eliminado_en IS NULL${filtroDDesde}${filtroDHasta}
+  `).all(...paramsDir);
 
   const all = envios.concat(recepciones, directos);
   // Orden cronológico ascendente (después por id como desempate)
@@ -1816,10 +1832,14 @@ router.get('/proveedores/:id/movimientos.pdf', async function(req, res) {
     const p = db.prepare("SELECT id, nombre, razon_social FROM proveedores WHERE id = ?").get(provId);
     if (!p) return res.status(404).json({ error: 'Proveedor no encontrado' });
 
+    // Filtros de fecha opcionales (YYYY-MM-DD)
+    const desde = (req.query.desde || '').slice(0,10) || null;
+    const hasta = (req.query.hasta || '').slice(0,10) || null;
+
     const jsPDF = await _getIfcoJsPDF();
     if (!jsPDF) return res.status(503).json({ error: 'jspdf no disponible' });
 
-    const movimientos = _movimientosProveedor(provId);
+    const movimientos = _movimientosProveedor(provId, desde, hasta);
     const saldo = _calcSaldoProveedor(provId);
 
     const doc = new jsPDF({ unit: 'mm', format: 'a4' });
@@ -1835,10 +1855,16 @@ router.get('/proveedores/:id/movimientos.pdf', async function(req, res) {
     setF(10, false);
     doc.setTextColor(110);
     doc.text(_pdfSafe('LA NIÑA BONITA - San Gerónimo S.A.'), L, M + 10);
+    // Sub-header con rango si viene
+    if (desde || hasta) {
+      setF(9, false);
+      const rango = 'Período: ' + (desde ? fechaFmt(desde) : 'inicio') + ' a ' + (hasta ? fechaFmt(hasta) : 'hoy');
+      doc.text(rango, L, M + 14);
+    }
     doc.setTextColor(0);
 
     // Datos del proveedor + saldo (caja destacada)
-    let y = M + 18;
+    let y = (desde || hasta) ? M + 22 : M + 18;
     doc.setLineWidth(0.4);
     doc.setFillColor(248, 248, 248);
     doc.roundedRect(L, y, innerW, 18, 2, 2, 'FD');
@@ -1942,6 +1968,242 @@ router.get('/proveedores/:id/movimientos.pdf', async function(req, res) {
 // EXPORTAR movimientos a Excel (.xlsx) — PENDIENTE: requiere instalar dependency `xlsx` (SheetJS)
 // Endpoint comentado hasta que se haga `npm install xlsx`. Después descomentar y reactivar el botón
 // en el modal de movimientos del proveedor (ifcoDescargarMovimientosXlsx en panel.html).
+
+// ════════════════════════════════════════════════════════════════════════════
+// MOVIMIENTOS DE PLANTA SAN GERÓNIMO (todos los flujos que afectan stock SG)
+// ════════════════════════════════════════════════════════════════════════════
+
+function _movimientosSanGeronimo(desde, hasta) {
+  // Helper para construir filtros de fecha sobre una columna
+  const filtro = (col) => {
+    let where = '';
+    const params = [];
+    if (desde) { where += ' AND ' + col + ' >= ?'; params.push(desde); }
+    if (hasta) { where += ' AND ' + col + ' <= ?'; params.push(hasta); }
+    return { where, params };
+  };
+
+  // Retiros (ingreso manual a SG)
+  const fRet = filtro('fecha');
+  const retiros = db.prepare(`
+    SELECT 'retiro' AS tipo, id, fecha,
+           ('Modelo ' || COALESCE(modelo,'?') || COALESCE(' / ' || n_remito, '') || COALESCE(' / ' || sucursal_ifco, '')) AS detalle,
+           cantidad, NULL AS estado
+    FROM ifco_movimientos
+    WHERE tipo = 'retiro' AND eliminado_en IS NULL${fRet.where}
+  `).all(...fRet.params);
+
+  // Pérdidas (egreso de SG)
+  const fPer = filtro('fecha');
+  const perdidas = db.prepare(`
+    SELECT 'perdida' AS tipo, id, fecha,
+           COALESCE(notas, 'Pérdida') AS detalle,
+           cantidad, NULL AS estado
+    FROM ifco_movimientos
+    WHERE tipo = 'perdida' AND eliminado_en IS NULL${fPer.where}
+  `).all(...fPer.params);
+
+  // Envíos a proveedor (egreso de SG)
+  const fEnv = filtro('ep.fecha_envio');
+  const envios = db.prepare(`
+    SELECT 'envio' AS tipo, ep.id, ep.fecha_envio AS fecha,
+           (ep.n_remito_interno || ' → ' || COALESCE(p.nombre,'?')) AS detalle,
+           ep.cantidad_enviada AS cantidad, ep.estado
+    FROM ifco_envios_proveedor ep
+    LEFT JOIN proveedores p ON p.id = ep.proveedor_id
+    WHERE ep.eliminado_en IS NULL${fEnv.where}
+  `).all(...fEnv.params);
+
+  // Recepciones desde proveedor (ingreso a SG)
+  const fRec = filtro('rp.fecha_recepcion');
+  const recepciones = db.prepare(`
+    SELECT 'recepcion' AS tipo, rp.id, rp.fecha_recepcion AS fecha,
+           (COALESCE(p.nombre,'?') || COALESCE(' / ' || rp.n_remito_proveedor, '')) AS detalle,
+           rp.cantidad, NULL AS estado
+    FROM ifco_recepciones_proveedor rp
+    LEFT JOIN proveedores p ON p.id = rp.proveedor_id
+    WHERE rp.eliminado_en IS NULL
+      AND (rp.es_r22 IS NULL OR rp.es_r22 = 0)
+      AND (rp.estado IS NULL OR rp.estado = 'recibido')${fRec.where}
+  `).all(...fRec.params);
+
+  // Despachos al súper desde SG (egreso de SG)
+  const fDes = filtro('fecha_emision');
+  const despachos = db.prepare(`
+    SELECT 'despacho_sg' AS tipo, id, fecha_emision AS fecha,
+           (n_remito_ifco || ' → ' || COALESCE(empresa,'?')) AS detalle,
+           cantidad_despachada AS cantidad, cantidad_recibida, cantidad_rechazada,
+           estado, rechazo_destino
+    FROM ifco_remitos_super
+    WHERE origen = 'san_geronimo' AND eliminado_en IS NULL${fDes.where}
+  `).all(...fDes.params);
+
+  const all = retiros.concat(perdidas, envios, recepciones, despachos);
+  // Orden cronológico ascendente, id como desempate
+  all.sort(function(a,b) {
+    if (a.fecha === b.fecha) return (a.id||0) - (b.id||0);
+    return (a.fecha||'') < (b.fecha||'') ? -1 : 1;
+  });
+
+  // Calcular delta de cada movimiento (mismo criterio que _stockTeoricoDeposito para SG)
+  return all.map(function(m) {
+    let delta = 0;
+    if (m.tipo === 'retiro')          delta = +m.cantidad;
+    else if (m.tipo === 'perdida')    delta = -m.cantidad;
+    else if (m.tipo === 'envio')      delta = -m.cantidad;
+    else if (m.tipo === 'recepcion')  delta = +m.cantidad;
+    else if (m.tipo === 'despacho_sg') {
+      // SG: sale toda la cantidad despachada. Si hay rechazo y vuelve a SG (o destino NULL),
+      // se suma de vuelta el rechazo. Mismo criterio que el cálculo de stock teórico.
+      const desp = m.cantidad || 0;
+      const rech = m.cantidad_rechazada || 0;
+      if (m.rechazo_destino == null || m.rechazo_destino === 'san_geronimo') {
+        delta = -(desp - rech);
+      } else {
+        delta = -desp;
+      }
+    }
+    return Object.assign({}, m, { delta: delta });
+  });
+}
+
+router.get('/san-geronimo/movimientos.pdf', async function(req, res) {
+  try {
+    // Filtros de fecha opcionales (YYYY-MM-DD)
+    const desde = (req.query.desde || '').slice(0,10) || null;
+    const hasta = (req.query.hasta || '').slice(0,10) || null;
+
+    const jsPDF = await _getIfcoJsPDF();
+    if (!jsPDF) return res.status(503).json({ error: 'jspdf no disponible' });
+
+    const movimientos = _movimientosSanGeronimo(desde, hasta);
+    // Stock SG actual (siempre el total, no filtrado por fecha)
+    let stockSG = 0;
+    try { stockSG = _stockTeoricoDeposito('san_geronimo'); } catch(_) {}
+
+    const doc = new jsPDF({ unit: 'mm', format: 'a4' });
+    const W = 210, H = 297, M = 14;
+    const L = M, R = W - M, innerW = R - L;
+    const setF = (sz, bold) => { doc.setFontSize(sz); doc.setFont('helvetica', bold ? 'bold' : 'normal'); };
+    const fechaFmt = (s) => { if (!s) return ''; const p = String(s).split(' ')[0].split('-'); return p.length===3 ? p[2]+'/'+p[1]+'/'+p[0] : s; };
+    const fmt = (n) => Number(n||0).toLocaleString('es-AR');
+
+    // Header
+    setF(16, true);
+    doc.text('Movimientos planta San Gerónimo', L, M + 5);
+    setF(10, false);
+    doc.setTextColor(110);
+    doc.text(_pdfSafe('LA NIÑA BONITA - San Gerónimo S.A.'), L, M + 10);
+    if (desde || hasta) {
+      setF(9, false);
+      const rango = 'Período: ' + (desde ? fechaFmt(desde) : 'inicio') + ' a ' + (hasta ? fechaFmt(hasta) : 'hoy');
+      doc.text(rango, L, M + 14);
+    }
+    doc.setTextColor(0);
+
+    // Caja destacada con stock SG actual
+    let y = (desde || hasta) ? M + 22 : M + 18;
+    doc.setLineWidth(0.4);
+    doc.setFillColor(248, 248, 248);
+    doc.roundedRect(L, y, innerW, 18, 2, 2, 'FD');
+    setF(13, true);
+    doc.text('San Gerónimo (planta)', L + 4, y + 7);
+    setF(9, false);
+    doc.setTextColor(110);
+    doc.text('cajones en piso', L + 4, y + 12);
+    doc.setTextColor(0);
+    setF(8, false);
+    doc.setTextColor(110);
+    doc.text('STOCK PISO ACTUAL', R - 4, y + 6, { align: 'right' });
+    doc.setTextColor(stockSG > 0 ? 30 : 110, stockSG > 0 ? 130 : 110, stockSG > 0 ? 60 : 110);
+    setF(16, true);
+    doc.text(fmt(stockSG) + ' caj.', R - 4, y + 14, { align: 'right' });
+    doc.setTextColor(0);
+
+    y += 24;
+    setF(9, false);
+    doc.setTextColor(110);
+    doc.text(movimientos.length + ' movimientos', L, y);
+    doc.setTextColor(0);
+    y += 5;
+
+    // Encabezados de tabla
+    const cFecha  = L;
+    const cTipo   = L + 28;
+    const cDet    = L + 60;
+    const cCant   = L + innerW - 50;
+    const cEst    = L + innerW - 22;
+    setF(8.5, true);
+    doc.setLineWidth(0.3);
+    doc.line(L, y, R, y);
+    y += 4;
+    doc.text('FECHA',    cFecha, y);
+    doc.text('TIPO',     cTipo,  y);
+    doc.text('DETALLE',  cDet,   y);
+    doc.text('CANT.',    cCant + 24, y, { align: 'right' });
+    doc.text('ESTADO',   cEst,   y);
+    y += 2;
+    doc.line(L, y, R, y);
+    y += 4;
+
+    // Filas
+    setF(8.5, false);
+    const labelTipo = (t) => {
+      if (t === 'retiro')        return 'Retiro IFCO';
+      if (t === 'perdida')       return 'Perdida';
+      if (t === 'envio')         return 'Envio prov.';
+      if (t === 'recepcion')     return 'Recepcion';
+      if (t === 'despacho_sg')   return 'Despacho super';
+      return t;
+    };
+    const truncar = (s, max) => { s = _pdfSafe(s); return s.length > max ? s.slice(0, max - 1) + '...' : s; };
+
+    for (const m of movimientos) {
+      if (y > H - 25) {
+        doc.addPage();
+        y = M + 8;
+        setF(8.5, true);
+        doc.line(L, y, R, y);
+        y += 4;
+        doc.text('FECHA', cFecha, y);
+        doc.text('TIPO',  cTipo,  y);
+        doc.text('DETALLE', cDet, y);
+        doc.text('CANT.', cCant + 24, y, { align: 'right' });
+        doc.text('ESTADO', cEst, y);
+        y += 2;
+        doc.line(L, y, R, y);
+        y += 4;
+        setF(8.5, false);
+      }
+      doc.text(fechaFmt(m.fecha),         cFecha, y);
+      doc.text(labelTipo(m.tipo),         cTipo,  y);
+      doc.text(truncar(m.detalle, 55),    cDet,   y);
+      const deltaTxt = (m.delta > 0 ? '+' : '') + fmt(m.delta);
+      if (m.delta < 0) doc.setTextColor(180, 30, 30);
+      else if (m.delta > 0) doc.setTextColor(30, 130, 60);
+      doc.text(deltaTxt, cCant + 24, y, { align: 'right' });
+      doc.setTextColor(0);
+      doc.text(_pdfSafe(m.estado || '-'),   cEst, y);
+      y += 5;
+      doc.setDrawColor(230);
+      doc.line(L, y - 1.5, R, y - 1.5);
+      doc.setDrawColor(0);
+    }
+
+    setF(7, false);
+    doc.setTextColor(140);
+    doc.text('Generado el ' + new Date().toLocaleString('es-AR'), L, H - 8);
+    doc.text('Pagina 1 de ' + doc.internal.getNumberOfPages(), R, H - 8, { align: 'right' });
+
+    const buf = Buffer.from(doc.output('arraybuffer'));
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', 'inline; filename="movimientos-san_geronimo.pdf"');
+    res.send(buf);
+  } catch(e) {
+    console.error('[IFCO][san-geronimo/movimientos.pdf] error:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
 
 // ════════════════════════════════════════════════════════════════════════════
 // RECEPCIONES DE MERCADERÍA DEL PROVEEDOR
