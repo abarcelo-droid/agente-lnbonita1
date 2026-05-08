@@ -499,6 +499,26 @@ function requireAuth(req, res, next) {
 }
 router.use(requireAuth);
 
+// Verifica si el usuario puede acceder a los movimientos de un depósito específico.
+// - Admin (rol='admin') o sin depósito asignado: acceso total.
+// - Usuario con depósito asignado: solo puede ver el suyo.
+// Devuelve null si tiene acceso, o un mensaje de error si no.
+function _verificarAccesoDeposito(u, deposito_tipo, proveedor_id) {
+  if (!u) return 'No autenticado';
+  if (u.rol === 'admin') return null;
+  if (!u.deposito_tipo) return null; // usuarios sin depósito asignado se tratan como internos/admin
+  if (deposito_tipo === 'proveedor') {
+    if (u.deposito_tipo !== 'proveedor' || u.deposito_proveedor_id !== proveedor_id) {
+      return 'No tenés acceso a los movimientos de este proveedor';
+    }
+  } else if (deposito_tipo === 'san_geronimo') {
+    if (u.deposito_tipo !== 'san_geronimo') {
+      return 'No tenés acceso a los movimientos de San Gerónimo';
+    }
+  }
+  return null;
+}
+
 // ════════════════════════════════════════════════════════════════════════════
 // TALONARIOS
 // ════════════════════════════════════════════════════════════════════════════
@@ -820,6 +840,40 @@ router.get('/remitos/:id', function(req, res) {
   res.json(r);
 });
 
+// Infiere el talonario_id automáticamente desde el N° de remito IFCO.
+// El N° tiene formato "SERIE-NNNNNNNN" (ej: "00015-01639431").
+// Matchea por: serie + dueño (san_geronimo o proveedor) + número en rango + activo.
+// Devuelve el id del talonario, o null si no hay match.
+function _inferirTalonarioId(n_remito_ifco, origen, proveedor_origen_id) {
+  if (!n_remito_ifco) return null;
+  const partes = String(n_remito_ifco).split('-');
+  if (partes.length < 2) return null;
+  const serie = partes[0].trim();
+  const numero = parseInt(String(partes.slice(1).join('-')).replace(/\D/g, ''));
+  if (!serie || isNaN(numero)) return null;
+
+  let q = `
+    SELECT id FROM ifco_talonarios
+    WHERE serie = ? AND activo = 1
+      AND ? BETWEEN numero_desde AND numero_hasta
+  `;
+  const params = [serie, numero];
+  if (origen === 'proveedor_directo' && proveedor_origen_id) {
+    q += ' AND dueno_tipo = \'proveedor\' AND proveedor_id = ?';
+    params.push(proveedor_origen_id);
+  } else {
+    q += ' AND dueno_tipo = \'san_geronimo\'';
+  }
+  q += ' ORDER BY id ASC LIMIT 1';
+  try {
+    const row = db.prepare(q).get(...params);
+    return row ? row.id : null;
+  } catch(e) {
+    console.error('[IFCO][_inferirTalonarioId]:', e.message);
+    return null;
+  }
+}
+
 router.post('/remitos', upload.single('escaneo_original'), function(req, res) {
   const d = req.body || {};
   if (!d.n_remito_ifco)   return res.status(400).json({ error: 'N° de remito IFCO requerido' });
@@ -883,7 +937,7 @@ router.post('/remitos', upload.single('escaneo_original'), function(req, res) {
       encargado_prov_apellido: d.encargado_prov_apellido || null,
       encargado_prov_nombre:   d.encargado_prov_nombre || null,
       encargado_prov_dni:      d.encargado_prov_dni || null,
-      talonario_id:            d.talonario_id || null,
+      talonario_id:            d.talonario_id || _inferirTalonarioId(d.n_remito_ifco, origen, proveedor_origen_id),
       notas:                   d.notas || null,
       usuario_id:              req.user.id || null,
       escaneo_original_path:   escaneo_original_path,
@@ -993,7 +1047,7 @@ router.post('/remitos/sellado-directo', upload.single('escaneo'), function(req, 
       encargado_super_apellido: d.encargado_super_apellido || null,
       encargado_super_nombre:   d.encargado_super_nombre   || null,
       encargado_super_dni:      d.encargado_super_dni      || null,
-      talonario_id:            d.talonario_id || null,
+      talonario_id:            d.talonario_id || _inferirTalonarioId(d.n_remito_ifco, origen, proveedor_origen_id),
       notas:                   d.notas || null,
       usuario_id:              req.user.id || null,
       escaneo_path:            escaneo_path,
@@ -1684,6 +1738,26 @@ function _calcSaldoProveedor(provId) {
   return enviado - recibidoEnSG - directosSellados;
 }
 
+// Stock FÍSICO actual del proveedor: lo que debería estar en su depósito ahora.
+// Se descuenta del saldo oficial los despachos "sin sellar" (estado='despachado'),
+// porque esas cajas ya salieron del depósito del proveedor aunque el remito
+// todavía no esté sellado por el súper.
+function _stockFisicoProveedor(provId) {
+  const saldo = _calcSaldoProveedor(provId);
+  let sinSellar = 0;
+  try {
+    sinSellar = (db.prepare(`
+      SELECT COALESCE(SUM(cantidad_despachada), 0) AS total
+      FROM ifco_remitos_super
+      WHERE proveedor_origen_id = ?
+        AND origen = 'proveedor_directo'
+        AND estado = 'despachado'
+        AND eliminado_en IS NULL
+    `).get(provId) || {}).total || 0;
+  } catch(_) {}
+  return saldo - sinSellar;
+}
+
 router.get('/saldo-proveedor/:id', function(req, res) {
   const provId = parseInt(req.params.id);
   if (!provId) return res.status(400).json({ error: 'ID proveedor inválido' });
@@ -1814,6 +1888,9 @@ function _movimientosProveedor(provId, desde, hasta) {
 router.get('/proveedores/:id/movimientos', function(req, res) {
   const provId = parseInt(req.params.id);
   if (!provId) return res.status(400).json({ error: 'ID inválido' });
+  // Control de acceso: proveedores solo pueden ver el suyo
+  const errAcc = _verificarAccesoDeposito(req.user, 'proveedor', provId);
+  if (errAcc) return res.status(403).json({ error: errAcc });
   const p = db.prepare("SELECT id, nombre, razon_social FROM proveedores WHERE id = ?").get(provId);
   if (!p) return res.status(404).json({ error: 'Proveedor no encontrado' });
 
@@ -1855,6 +1932,9 @@ router.get('/proveedores/:id/movimientos.pdf', async function(req, res) {
   try {
     const provId = parseInt(req.params.id);
     if (!provId) return res.status(400).json({ error: 'ID inválido' });
+    // Control de acceso: proveedores solo pueden ver el suyo
+    const errAcc = _verificarAccesoDeposito(req.user, 'proveedor', provId);
+    if (errAcc) return res.status(403).json({ error: errAcc });
     const p = db.prepare("SELECT id, nombre, razon_social FROM proveedores WHERE id = ?").get(provId);
     if (!p) return res.status(404).json({ error: 'Proveedor no encontrado' });
 
@@ -1867,6 +1947,7 @@ router.get('/proveedores/:id/movimientos.pdf', async function(req, res) {
 
     const movimientos = _movimientosProveedor(provId, desde, hasta);
     const saldo = _calcSaldoProveedor(provId);
+    const stockFisico = _stockFisicoProveedor(provId);
 
     const doc = new jsPDF({ unit: 'mm', format: 'a4' });
     const W = 210, H = 297, M = 14;
@@ -1889,28 +1970,45 @@ router.get('/proveedores/:id/movimientos.pdf', async function(req, res) {
     }
     doc.setTextColor(0);
 
-    // Datos del proveedor + saldo (caja destacada)
+    // Datos del proveedor + saldo + stock fisico (caja destacada)
     let y = (desde || hasta) ? M + 22 : M + 18;
+    const boxH = 30;
     doc.setLineWidth(0.4);
     doc.setFillColor(248, 248, 248);
-    doc.roundedRect(L, y, innerW, 18, 2, 2, 'FD');
+    doc.roundedRect(L, y, innerW, boxH, 2, 2, 'FD');
+    // Lado izquierdo: nombre y razón social (centrados verticalmente en la caja)
     setF(13, true);
-    doc.text(_pdfSafe(p.nombre || '-'), L + 4, y + 7);
+    doc.text(_pdfSafe(p.nombre || '-'), L + 4, y + 12);
     setF(9, false);
     doc.setTextColor(110);
-    doc.text(_pdfSafe(p.razon_social || ''), L + 4, y + 12);
-    doc.setTextColor(0);
-    // Saldo a la derecha
-    setF(8, false);
-    doc.setTextColor(110);
-    const saldoLabel = saldo > 0 ? 'EN PODER DEL PROVEEDOR' : (saldo < 0 ? 'EXCESO ENTREGADO AL PROVEEDOR' : 'SALDO');
-    doc.text(saldoLabel, R - 4, y + 6, { align: 'right' });
-    doc.setTextColor(saldo < 0 ? 200 : (saldo > 0 ? 30 : 110), saldo < 0 ? 30 : (saldo > 0 ? 130 : 110), saldo < 0 ? 30 : (saldo > 0 ? 60 : 110));
-    setF(16, true);
-    doc.text(fmt(saldo) + ' caj.', R - 4, y + 14, { align: 'right' });
+    doc.text(_pdfSafe(p.razon_social || ''), L + 4, y + 18);
     doc.setTextColor(0);
 
-    y += 24;
+    // Lado derecho: dos valores stackeados
+    const colorRGB = (n) => n < 0 ? [200,30,30] : (n > 0 ? [30,130,60] : [110,110,110]);
+
+    // (1) EN PODER DEL PROVEEDOR (saldo oficial)
+    setF(7, false);
+    doc.setTextColor(110);
+    const saldoLabel = saldo > 0 ? 'EN PODER DEL PROVEEDOR' : (saldo < 0 ? 'EXCESO ENTREGADO AL PROVEEDOR' : 'SALDO');
+    doc.text(saldoLabel, R - 4, y + 5, { align: 'right' });
+    const cs = colorRGB(saldo);
+    doc.setTextColor(cs[0], cs[1], cs[2]);
+    setF(13, true);
+    doc.text(fmt(saldo) + ' caj.', R - 4, y + 12, { align: 'right' });
+    doc.setTextColor(0);
+
+    // (2) STOCK QUE TIENE QUE TENER (físico real, descuenta despachos sin sellar)
+    setF(7, false);
+    doc.setTextColor(110);
+    doc.text('STOCK QUE TIENE QUE TENER', R - 4, y + 19, { align: 'right' });
+    const cf = colorRGB(stockFisico);
+    doc.setTextColor(cf[0], cf[1], cf[2]);
+    setF(13, true);
+    doc.text(fmt(stockFisico) + ' caj.', R - 4, y + 26, { align: 'right' });
+    doc.setTextColor(0);
+
+    y += boxH + 6;
     setF(9, false);
     doc.setTextColor(110);
     doc.text(movimientos.length + ' movimientos', L, y);
@@ -2118,6 +2216,9 @@ function _movimientosSanGeronimo(desde, hasta) {
 
 router.get('/san-geronimo/movimientos.pdf', async function(req, res) {
   try {
+    // Control de acceso: solo admin / sin depósito / users SG
+    const errAcc = _verificarAccesoDeposito(req.user, 'san_geronimo', null);
+    if (errAcc) return res.status(403).json({ error: errAcc });
     // Filtros de fecha opcionales (YYYY-MM-DD)
     const desde = (req.query.desde || '').slice(0,10) || null;
     const hasta = (req.query.hasta || '').slice(0,10) || null;
