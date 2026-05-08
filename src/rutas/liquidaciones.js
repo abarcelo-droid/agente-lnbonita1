@@ -392,20 +392,17 @@ router.get('/:id/pdf', async function(req, res) {
     doc.roundedRect(L, M, innerW, H - 2*M, 3, 3);
 
     // ═══════════════════════════════════════════════════════════════════════
-    // HEADER — 3 columnas separadas por líneas verticales
+    // HEADER — 2 columnas separadas por línea vertical
     // ═══════════════════════════════════════════════════════════════════════
     const hY = M;
     const hH = 36;
     const hBot = hY + hH;
-    // Anchos de columnas (rebalanceados para que los datos fiscales no se desborden)
-    const colA_w = innerW * 0.40;     // logo + datos LNB
-    const colB_w = innerW * 0.32;     // cuadradito A + datos fiscales
+    // Anchos de columnas — header de 2 columnas (logo/datos a la izq, N° + fecha a la der)
+    const colA_w = innerW * 0.65;     // logo + datos LNB
     const colA_x = L;
-    const colB_x = L + colA_w;
-    const colC_x = L + colA_w + colB_w;
-    // Líneas divisoras del header (verticales)
+    const colC_x = L + colA_w;
+    // Línea divisora del header (vertical entre A y C)
     doc.setLineWidth(0.4);
-    doc.line(colB_x, hY, colB_x, hBot);
     doc.line(colC_x, hY, colC_x, hBot);
     // Línea horizontal bajo el header
     doc.line(L, hBot, R, hBot);
@@ -434,25 +431,6 @@ router.get('/:id/pdf', async function(req, res) {
     doc.text(LNB.email,        colA_x + 3, hY + 30.5);
     setF(8.5, true);
     doc.text(LNB.iva_cond,     colA_x + 3, hY + 34.5);
-
-    // ── COL B: cuadradito A grande centrado + datos fiscales debajo
-    setF(7, false);
-    doc.text('COD. N° ' + LNB.cod_cliente, colB_x + 3, hY + 4);
-    // Cuadradito A — centrado horizontalmente en la columna
-    const aSz = 14;
-    const aX = colB_x + (colB_w - aSz) / 2;
-    const aY = hY + 6.5;
-    doc.setLineWidth(0.5);
-    doc.rect(aX, aY, aSz, aSz);
-    setF(22, true);
-    doc.text(r.iva_letra || 'A', aX + aSz/2, aY + aSz - 2.5, { align: 'center' });
-    // Datos fiscales LNB — DEBAJO del cuadradito, centrados, font compacto
-    setF(7, false);
-    const fY = aY + aSz + 3;
-    const fXc = colB_x + colB_w / 2;
-    doc.text('C.U.I.T. N°: ' + LNB.cuit,            fXc, fY,     { align: 'center' });
-    doc.text('Conv. Multilateral: ' + LNB.cm,       fXc, fY + 3.5, { align: 'center' });
-    doc.text('Inicio Activ.: ' + LNB.inicio_act,    fXc, fY + 7,   { align: 'center' });
 
     // ── COL C: N° de liquidación + Fecha (sin "LIQUIDACIÓN")
     setF(16, true);
