@@ -2685,8 +2685,8 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
 <!-- ─── MODALES Caja y Bancos ─────────────────────────────────────────────── -->
 
 <!-- Modal: Nueva Cuenta -->
-<div class="ab-modal" id="fin-mb-cuenta">
-  <div class="ab-modal-box" style="max-width:480px">
+<div class="ab-modal-overlay" id="fin-mb-cuenta">
+<div class="ab-modal" style="max-width:480px">
     <div class="mht" id="fin-mb-cuenta-tit">Nueva Cuenta</div>
     <input type="hidden" id="fin-cuenta-id">
     <div style="display:flex;flex-direction:column;gap:12px;margin-top:16px">
@@ -2714,12 +2714,12 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       <button class="btn bo" onclick="document.getElementById('fin-mb-cuenta').classList.remove('on')">Cancelar</button>
       <button class="btn bb" onclick="finGuardarCuenta()">Guardar</button>
     </div>
-  </div>
+</div>
 </div>
 
 <!-- Modal: Nueva Chequera -->
-<div class="ab-modal" id="fin-mb-chequera">
-  <div class="ab-modal-box" style="max-width:420px">
+<div class="ab-modal-overlay" id="fin-mb-chequera">
+<div class="ab-modal" style="max-width:420px">
     <div class="mht">Nueva Chequera</div>
     <div style="display:flex;flex-direction:column;gap:12px;margin-top:16px">
       <div class="fl ff"><label>Cuenta *</label>
@@ -2735,12 +2735,12 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       <button class="btn bo" onclick="document.getElementById('fin-mb-chequera').classList.remove('on')">Cancelar</button>
       <button class="btn bb" onclick="finGuardarChequera()">Guardar</button>
     </div>
-  </div>
+</div>
 </div>
 
 <!-- Modal: Nuevo Cheque Propio -->
-<div class="ab-modal" id="fin-mb-cheque-p">
-  <div class="ab-modal-box" style="max-width:460px">
+<div class="ab-modal-overlay" id="fin-mb-cheque-p">
+<div class="ab-modal" style="max-width:460px">
     <div class="mht">Nuevo Cheque Propio</div>
     <div style="display:flex;flex-direction:column;gap:12px;margin-top:16px">
       <div class="fl ff"><label>Chequera *</label><select id="fin-chequep-chequera" onchange="finChequePropsCargarNro()"></select></div>
@@ -2759,12 +2759,12 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       <button class="btn bo" onclick="document.getElementById('fin-mb-cheque-p').classList.remove('on')">Cancelar</button>
       <button class="btn bb" onclick="finGuardarChequePropio()">Guardar</button>
     </div>
-  </div>
+</div>
 </div>
 
 <!-- Modal: Nuevo Cheque Tercero -->
-<div class="ab-modal" id="fin-mb-cheque-t">
-  <div class="ab-modal-box" style="max-width:460px">
+<div class="ab-modal-overlay" id="fin-mb-cheque-t">
+<div class="ab-modal" style="max-width:460px">
     <div class="mht">Nuevo Cheque de Tercero</div>
     <div style="display:flex;flex-direction:column;gap:12px;margin-top:16px">
       <div class="fl ff"><label>Librador</label><input type="text" id="fin-chequets-librador" placeholder="Nombre del emisor"></div>
@@ -2783,12 +2783,12 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       <button class="btn bo" onclick="document.getElementById('fin-mb-cheque-t').classList.remove('on')">Cancelar</button>
       <button class="btn bb" onclick="finGuardarChequeTercero()">Guardar</button>
     </div>
-  </div>
+</div>
 </div>
 
 <!-- Modal: Nuevo Movimiento -->
-<div class="ab-modal" id="fin-mb-movim">
-  <div class="ab-modal-box" style="max-width:440px">
+<div class="ab-modal-overlay" id="fin-mb-movim">
+<div class="ab-modal" style="max-width:440px">
     <div class="mht">Nuevo Movimiento</div>
     <div style="display:flex;flex-direction:column;gap:12px;margin-top:16px">
       <div class="fl ff"><label>Cuenta *</label><select id="fin-movim-cuenta"></select></div>
@@ -2809,7 +2809,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       <button class="btn bo" onclick="document.getElementById('fin-mb-movim').classList.remove('on')">Cancelar</button>
       <button class="btn bb" onclick="finGuardarMovimiento()">Guardar</button>
     </div>
-  </div>
+</div>
 </div>
 
 <!-- ─── MODAL: Nuevo/Editar Asiento Modelo ───────────────────────────── -->
