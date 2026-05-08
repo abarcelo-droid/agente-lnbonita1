@@ -142,30 +142,42 @@ try { db.exec("ALTER TABLE ifco_recepciones_proveedor ADD COLUMN sucursal_ifco T
 
 // ── Migración inline: hacer ifco_recepciones_proveedor.proveedor_id NULLABLE
 // (para que las R22 sin proveedor asignado funcionen). Idempotente: solo corre si la columna es NOT NULL.
+// Usa el approach robusto: preservar el SQL original literal y solo modificar la columna,
+// para no perder defaults con expresiones como `(datetime('now','localtime'))` ni FKs.
 try {
   const cols = db.prepare("PRAGMA table_info(ifco_recepciones_proveedor)").all();
   const provCol = cols.find(function(c){ return c.name === 'proveedor_id'; });
   if (provCol && provCol.notnull === 1) {
-    console.log('[IFCO] Migrando: hacer proveedor_id NULLABLE en ifco_recepciones_proveedor');
-    // Reconstruir tabla preservando todos los datos
-    const colDefs = cols.map(function(c) {
-      let def = '"' + c.name + '"';
-      if (c.type) def += ' ' + c.type;
-      if (c.pk) def += ' PRIMARY KEY';
-      // proveedor_id queda sin NOT NULL en la nueva tabla
-      if (c.notnull && c.name !== 'proveedor_id' && !c.pk) def += ' NOT NULL';
-      if (c.dflt_value !== null) def += ' DEFAULT ' + c.dflt_value;
-      return def;
-    }).join(', ');
-    const colNames = cols.map(function(c){ return '"' + c.name + '"'; }).join(', ');
-    const tx = db.transaction(function() {
-      db.exec("ALTER TABLE ifco_recepciones_proveedor RENAME TO _old_recep_prov_v1");
-      db.exec("CREATE TABLE ifco_recepciones_proveedor (" + colDefs + ")");
-      db.exec("INSERT INTO ifco_recepciones_proveedor (" + colNames + ") SELECT " + colNames + " FROM _old_recep_prov_v1");
-      db.exec("DROP TABLE _old_recep_prov_v1");
-    });
-    tx();
-    console.log('[IFCO] Migración OK: proveedor_id ahora es NULLABLE');
+    const tblRow = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='ifco_recepciones_proveedor'").get();
+    const sqlOriginal = tblRow && tblRow.sql ? String(tblRow.sql) : '';
+    if (!sqlOriginal) {
+      console.warn('[IFCO] No se encontró el SQL de ifco_recepciones_proveedor');
+    } else {
+      // Reemplazar la definición de proveedor_id quitando el NOT NULL.
+      // Tolera distintos tipos (INTEGER, TEXT, etc.) y orden de modificadores.
+      const sqlNew = sqlOriginal.replace(
+        /proveedor_id\s+([A-Za-z]+)(\s+NOT\s+NULL)/i,
+        'proveedor_id $1'
+      );
+      if (sqlNew === sqlOriginal) {
+        console.warn('[IFCO] No se encontró NOT NULL en proveedor_id. SQL:', sqlOriginal.slice(0, 300));
+      } else {
+        console.log('[IFCO] Migrando: hacer proveedor_id NULLABLE en ifco_recepciones_proveedor');
+        const idxs = db.prepare("SELECT name, sql FROM sqlite_master WHERE type='index' AND tbl_name='ifco_recepciones_proveedor' AND sql IS NOT NULL").all();
+        const colNames = cols.map(function(c){ return '"' + c.name + '"'; }).join(', ');
+        const tx = db.transaction(function() {
+          db.exec("ALTER TABLE ifco_recepciones_proveedor RENAME TO _old_recep_prov_v1");
+          db.exec(sqlNew);
+          db.exec("INSERT INTO ifco_recepciones_proveedor (" + colNames + ") SELECT " + colNames + " FROM _old_recep_prov_v1");
+          db.exec("DROP TABLE _old_recep_prov_v1");
+          for (const idx of idxs) {
+            try { db.exec(idx.sql); } catch(e) { console.warn('[IFCO] No se pudo recrear índice', idx.name, ':', e.message); }
+          }
+        });
+        tx();
+        console.log('[IFCO] Migración OK: proveedor_id ahora es NULLABLE');
+      }
+    }
   }
 } catch(e) {
   console.error('[IFCO] Error migrando proveedor_id NULLABLE:', e.message);
@@ -2810,23 +2822,76 @@ function _ultimoJueves10am() {
 }
 
 // Calcula stock teórico para un depósito.
+// Cada query está envuelta para que si falla (columna inexistente, tabla rara, etc.)
+// loguee qué query rompió y devuelva 0 en lugar de tirar el endpoint entero.
 function _stockTeoricoDeposito(deposito_tipo, proveedor_id) {
   if (deposito_tipo === 'san_geronimo') {
-    // Reusa lógica del resumen: piso = retiros - perdidas - despachados desde SG + recepciones recibidas + rechazos a SG - envíos a proveedor
-    const get = (q, p) => { const r = db.prepare(q).get.apply(db.prepare(q), p || []); return r ? (r.total||0) : 0; };
-    const retiros     = get(`SELECT COALESCE(SUM(cantidad),0) AS total FROM ifco_movimientos WHERE tipo='retiro'  AND eliminado_en IS NULL`);
-    const perdidas    = get(`SELECT COALESCE(SUM(cantidad),0) AS total FROM ifco_movimientos WHERE tipo='perdida' AND eliminado_en IS NULL`);
-    const despachados = get(`SELECT COALESCE(SUM(cantidad_despachada),0) AS total FROM ifco_remitos_super WHERE eliminado_en IS NULL AND origen='san_geronimo'`);
-    const enviados    = get(`SELECT COALESCE(SUM(cantidad_enviada),0) AS total FROM ifco_envios_proveedor WHERE eliminado_en IS NULL`);
-    const recepciones = get(`SELECT COALESCE(SUM(cantidad),0) AS total FROM ifco_recepciones_proveedor WHERE eliminado_en IS NULL AND (estado IS NULL OR estado='recibido')`);
-    const rechazadosASG = get(`SELECT COALESCE(SUM(cantidad_rechazada),0) AS total FROM ifco_remitos_super WHERE eliminado_en IS NULL AND cantidad_rechazada>0 AND (rechazo_destino IS NULL OR rechazo_destino='san_geronimo')`);
+    const get = (label, q) => {
+      try {
+        const r = db.prepare(q).get();
+        return r ? (r.total || 0) : 0;
+      } catch(e) {
+        console.error('[IFCO][_stockTeoricoDeposito] Falló query "' + label + '":', e.message);
+        return 0;
+      }
+    };
+    const retiros       = get('retiros',       `SELECT COALESCE(SUM(cantidad),0) AS total FROM ifco_movimientos WHERE tipo='retiro'  AND eliminado_en IS NULL`);
+    const perdidas      = get('perdidas',      `SELECT COALESCE(SUM(cantidad),0) AS total FROM ifco_movimientos WHERE tipo='perdida' AND eliminado_en IS NULL`);
+    const despachados   = get('despachados',   `SELECT COALESCE(SUM(cantidad_despachada),0) AS total FROM ifco_remitos_super WHERE eliminado_en IS NULL AND origen='san_geronimo'`);
+    const enviados      = get('enviados',      `SELECT COALESCE(SUM(cantidad_enviada),0) AS total FROM ifco_envios_proveedor WHERE eliminado_en IS NULL`);
+    const recepciones   = get('recepciones',   `SELECT COALESCE(SUM(cantidad),0) AS total FROM ifco_recepciones_proveedor WHERE eliminado_en IS NULL AND (estado IS NULL OR estado='recibido')`);
+    const rechazadosASG = get('rechazadosASG', `SELECT COALESCE(SUM(cantidad_rechazada),0) AS total FROM ifco_remitos_super WHERE eliminado_en IS NULL AND cantidad_rechazada>0 AND (rechazo_destino IS NULL OR rechazo_destino='san_geronimo')`);
     return retiros - perdidas - despachados - enviados + recepciones + rechazadosASG;
   }
   if (deposito_tipo === 'proveedor' && proveedor_id) {
-    return _calcSaldoProveedor(proveedor_id);
+    try {
+      return _calcSaldoProveedor(proveedor_id);
+    } catch(e) {
+      console.error('[IFCO][_stockTeoricoDeposito] Falló _calcSaldoProveedor para', proveedor_id, ':', e.message);
+      return 0;
+    }
   }
   return 0;
 }
+
+// ════════════════════════════════════════════════════════════════════════════
+// ENDPOINT TEMPORAL DE DEBUG — REMOVER DESPUÉS DEL DIAGNÓSTICO
+// ════════════════════════════════════════════════════════════════════════════
+// Devuelve el SQL real de las tablas IFCO en producción + cuenta de filas.
+// Sirve para diagnosticar discrepancias entre el código y el schema real de la DB.
+router.get('/_debug/schema', function(req, res) {
+  try {
+    const tablas = [
+      'ifco_movimientos',
+      'ifco_envios_proveedor',
+      'ifco_recepciones_proveedor',
+      'ifco_remitos_super',
+      'ifco_stocks_reales',
+      'ifco_talonarios',
+      'ifco_talonarios_log'
+    ];
+    const out = {};
+    for (const t of tablas) {
+      try {
+        const tblRow = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name=?").get(t);
+        const cols = db.prepare("PRAGMA table_info(" + t + ")").all();
+        const idxs = db.prepare("SELECT name, sql FROM sqlite_master WHERE type='index' AND tbl_name=?").all(t);
+        const count = db.prepare("SELECT COUNT(*) AS c FROM " + t).get();
+        out[t] = {
+          sql: tblRow ? tblRow.sql : null,
+          columnas: cols.map(c => ({ name: c.name, type: c.type, notnull: c.notnull, dflt_value: c.dflt_value, pk: c.pk })),
+          indices: idxs.map(i => i.name),
+          filas: count.c
+        };
+      } catch(e) {
+        out[t] = { error: e.message };
+      }
+    }
+    res.json(out);
+  } catch(e) {
+    res.status(500).json({ error: e.message });
+  }
+});
 
 // GET /stocks-reales — lista resumen de cada depósito con su último conteo + diferencia + alerta
 router.get('/stocks-reales', function(req, res) {
