@@ -47,26 +47,26 @@ router.get('/cuentas/:id', (req, res) => {
 
 // POST /api/fin/cuentas
 router.post('/cuentas', (req, res) => {
-  const { nombre, tipo, banco, nro_cuenta, cbu, alias, moneda, saldo_inicial } = req.body || {};
+  const { nombre, tipo, banco, nro_cuenta, cbu, alias, moneda, saldo_inicial, cuenta_contable_id } = req.body || {};
   if (!nombre) return res.status(400).json({ ok: false, error: 'Nombre requerido' });
   try {
     const r = db.prepare(`
-      INSERT INTO fin_cuentas (nombre, tipo, banco, nro_cuenta, cbu, alias, moneda, saldo_inicial)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(nombre.trim(), tipo||'cuenta_corriente', banco||null, nro_cuenta||null, cbu||null, alias||null, moneda||'ARS', parseFloat(saldo_inicial||0));
+      INSERT INTO fin_cuentas (nombre, tipo, banco, nro_cuenta, cbu, alias, moneda, saldo_inicial, cuenta_contable_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(nombre.trim(), tipo||'cuenta_corriente', banco||null, nro_cuenta||null, cbu||null, alias||null, moneda||'ARS', parseFloat(saldo_inicial||0), cuenta_contable_id?parseInt(cuenta_contable_id):null);
     res.json({ ok: true, id: r.lastInsertRowid });
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
 // PUT /api/fin/cuentas/:id
 router.put('/cuentas/:id', (req, res) => {
-  const { nombre, tipo, banco, nro_cuenta, cbu, alias, moneda, saldo_inicial } = req.body || {};
+  const { nombre, tipo, banco, nro_cuenta, cbu, alias, moneda, saldo_inicial, cuenta_contable_id } = req.body || {};
   try {
     const actual = db.prepare('SELECT * FROM fin_cuentas WHERE id=?').get(req.params.id);
     if (!actual) return res.status(404).json({ ok: false, error: 'Cuenta no encontrada' });
     db.prepare(`
-      UPDATE fin_cuentas SET nombre=?, tipo=?, banco=?, nro_cuenta=?, cbu=?, alias=?, moneda=?, saldo_inicial=? WHERE id=?
-    `).run(nombre||actual.nombre, tipo||actual.tipo, banco||null, nro_cuenta||null, cbu||null, alias||null, moneda||actual.moneda, parseFloat(saldo_inicial??actual.saldo_inicial), req.params.id);
+      UPDATE fin_cuentas SET nombre=?, tipo=?, banco=?, nro_cuenta=?, cbu=?, alias=?, moneda=?, saldo_inicial=?, cuenta_contable_id=? WHERE id=?
+    `).run(nombre||actual.nombre, tipo||actual.tipo, banco||null, nro_cuenta||null, cbu||null, alias||null, moneda||actual.moneda, parseFloat(saldo_inicial??actual.saldo_inicial), cuenta_contable_id?parseInt(cuenta_contable_id):null, req.params.id);
     res.json({ ok: true });
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
@@ -173,13 +173,14 @@ router.get('/cheques-terceros', (req, res) => {
 
 // POST /api/fin/cheques-terceros
 router.post('/cheques-terceros', (req, res) => {
-  const { banco, nro_cheque, librador, monto, fecha_recepcion, fecha_vto, notas } = req.body || {};
+  const { banco, nro_cheque, librador, monto, fecha_recepcion, fecha_vto, notas, cuenta_contable_id } = req.body || {};
   if (!monto) return res.status(400).json({ ok: false, error: 'Monto requerido' });
   try {
-    const r = db.prepare(`INSERT INTO fin_cheques_terceros (banco, nro_cheque, librador, monto, fecha_recepcion, fecha_vto, notas)
-      VALUES (?,?,?,?,?,?,?)`)
+    const r = db.prepare(`INSERT INTO fin_cheques_terceros (banco, nro_cheque, librador, monto, fecha_recepcion, fecha_vto, notas, cuenta_contable_id)
+      VALUES (?,?,?,?,?,?,?,?)`)
       .run(banco||null, nro_cheque||null, librador||null, parseFloat(monto),
-           fecha_recepcion||new Date().toISOString().split('T')[0], fecha_vto||null, notas||null);
+           fecha_recepcion||new Date().toISOString().split('T')[0], fecha_vto||null, notas||null,
+           cuenta_contable_id?parseInt(cuenta_contable_id):null);
     res.json({ ok: true, id: r.lastInsertRowid });
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });

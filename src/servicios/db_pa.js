@@ -1907,6 +1907,17 @@ db.exec(`
       );
     `);
     console.log('[FIN] Tablas caja y bancos listas');
+    // Agregar cuenta_contable_id si no existe
+    const colsFin = db.prepare("PRAGMA table_info(fin_cuentas)").all().map(c => c.name);
+    if (!colsFin.includes('cuenta_contable_id')) {
+      db.exec('ALTER TABLE fin_cuentas ADD COLUMN cuenta_contable_id INTEGER REFERENCES pa_cuentas(id)');
+      console.log('[FIN] cuenta_contable_id agregado en fin_cuentas');
+    }
+    const colsCT = db.prepare("PRAGMA table_info(fin_cheques_terceros)").all().map(c => c.name);
+    if (!colsCT.includes('cuenta_contable_id')) {
+      db.exec('ALTER TABLE fin_cheques_terceros ADD COLUMN cuenta_contable_id INTEGER REFERENCES pa_cuentas(id)');
+      console.log('[FIN] cuenta_contable_id agregado en fin_cheques_terceros');
+    }
   } catch(e) { console.error('[FIN] Error migrando caja/bancos:', e.message); }
 })();
 
