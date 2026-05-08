@@ -1831,5 +1831,84 @@ db.exec(`
   } catch(e) { console.error('[PA] Error migrando pagos_proveedores:', e.message); }
 })();
 
+// ── MÓDULO CAJA Y BANCOS ──────────────────────────────────────────────────────
+(function() {
+  try {
+    db.exec(`
+      -- Cuentas bancarias y caja
+      CREATE TABLE IF NOT EXISTS fin_cuentas (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        nombre        TEXT NOT NULL,
+        tipo          TEXT NOT NULL DEFAULT 'cuenta_corriente',
+        banco         TEXT,
+        nro_cuenta    TEXT,
+        cbu           TEXT,
+        alias         TEXT,
+        moneda        TEXT NOT NULL DEFAULT 'ARS',
+        saldo_inicial REAL NOT NULL DEFAULT 0,
+        activo        INTEGER NOT NULL DEFAULT 1,
+        creado_en     TEXT DEFAULT (datetime('now','localtime'))
+      );
+
+      -- Chequeras propias
+      CREATE TABLE IF NOT EXISTS fin_chequeras (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        cuenta_id     INTEGER NOT NULL REFERENCES fin_cuentas(id),
+        nro_chequera  TEXT,
+        desde         INTEGER NOT NULL,
+        hasta         INTEGER NOT NULL,
+        activo        INTEGER NOT NULL DEFAULT 1,
+        creado_en     TEXT DEFAULT (datetime('now','localtime'))
+      );
+
+      -- Cheques propios emitidos
+      CREATE TABLE IF NOT EXISTS fin_cheques_propios (
+        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+        chequera_id     INTEGER NOT NULL REFERENCES fin_chequeras(id),
+        nro_cheque      INTEGER NOT NULL,
+        monto           REAL NOT NULL,
+        beneficiario    TEXT,
+        fecha_emision   TEXT NOT NULL DEFAULT (date('now','localtime')),
+        fecha_vto       TEXT,
+        estado          TEXT NOT NULL DEFAULT 'emitido',
+        notas           TEXT,
+        pago_id         INTEGER REFERENCES pa_pagos_proveedores(id),
+        creado_en       TEXT DEFAULT (datetime('now','localtime'))
+      );
+
+      -- Cheques de terceros recibidos
+      CREATE TABLE IF NOT EXISTS fin_cheques_terceros (
+        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+        banco           TEXT,
+        nro_cheque      TEXT,
+        librador        TEXT,
+        monto           REAL NOT NULL,
+        fecha_recepcion TEXT NOT NULL DEFAULT (date('now','localtime')),
+        fecha_vto       TEXT,
+        estado          TEXT NOT NULL DEFAULT 'en_cartera',
+        cuenta_destino  INTEGER REFERENCES fin_cuentas(id),
+        notas           TEXT,
+        creado_en       TEXT DEFAULT (datetime('now','localtime'))
+      );
+
+      -- Movimientos de caja/bancos
+      CREATE TABLE IF NOT EXISTS fin_movimientos (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        cuenta_id     INTEGER NOT NULL REFERENCES fin_cuentas(id),
+        fecha         TEXT NOT NULL DEFAULT (date('now','localtime')),
+        tipo          TEXT NOT NULL DEFAULT 'egreso',
+        concepto      TEXT NOT NULL,
+        monto         REAL NOT NULL,
+        referencia    TEXT,
+        pago_id       INTEGER REFERENCES pa_pagos_proveedores(id),
+        cheque_id     INTEGER,
+        usuario_id    INTEGER,
+        creado_en     TEXT DEFAULT (datetime('now','localtime'))
+      );
+    `);
+    console.log('[FIN] Tablas caja y bancos listas');
+  } catch(e) { console.error('[FIN] Error migrando caja/bancos:', e.message); }
+})();
+
 export { db };
 export default db;
