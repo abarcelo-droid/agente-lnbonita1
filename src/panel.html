@@ -165,6 +165,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     <div class="ni" data-sec="pa-electricidad"><span class="dot da"></span>⚡ Electricidad</div>
     <div class="ni" data-sec="adm-proveedores"><span class="dot da"></span>📋 Padrón Proveedores</div>
     <div class="ni" data-sec="adm-cc-proveedores"><span class="dot da"></span>💳 Cuenta Corriente</div>
+    <div class="ni" data-sec="fin-ordenes-pago"><span class="dot db"></span>📄 Órdenes de Pago</div>
 
     <div style="padding:6px 20px 2px 36px;font-size:9px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:rgba(255,255,255,.3)">Contabilidad</div>
     <div class="ni" data-sec="adm-asientos"><span class="dot db"></span>📒 Asientos Contables</div>
@@ -2400,6 +2401,118 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
 </div>
 
 <!-- ─── ADM: ASIENTO MODELO ──────────────────────────────────────────── -->
+<!-- ─── SECCIÓN: Órdenes de Pago ────────────────────────────────────────── -->
+<div class="sec" id="sec-fin-ordenes-pago">
+<div class="ph">
+  <div><div class="ph-t">📄 Órdenes de Pago</div><div class="ph-s">Emisión y consulta de órdenes de pago a proveedores</div></div>
+  <button class="btn bb" onclick="opNueva()">+ Nueva Orden</button>
+</div>
+
+<!-- Filtros -->
+<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:14px">
+  <select id="op-filter-estado" onchange="opCargar()" style="font-size:12px">
+    <option value="">Emitidas y Anuladas</option>
+    <option value="emitida">Solo Emitidas</option>
+    <option value="anulada">Solo Anuladas</option>
+  </select>
+  <select id="op-filter-prov" onchange="opCargar()" style="font-size:12px;min-width:180px">
+    <option value="">Todos los proveedores</option>
+  </select>
+</div>
+
+<!-- Tabla de OPs -->
+<div style="overflow-x:auto;border:1px solid var(--bor);border-radius:10px">
+  <table style="width:100%;border-collapse:collapse;font-size:13px">
+    <thead><tr style="background:var(--bg);border-bottom:1px solid var(--bor)">
+      <th style="padding:9px 12px;text-align:left;font-size:10px;color:var(--mut);text-transform:uppercase">Nro.</th>
+      <th style="padding:9px 12px;text-align:left;font-size:10px;color:var(--mut);text-transform:uppercase">Fecha</th>
+      <th style="padding:9px 12px;text-align:left;font-size:10px;color:var(--mut);text-transform:uppercase">Proveedor</th>
+      <th style="padding:9px 12px;text-align:left;font-size:10px;color:var(--mut);text-transform:uppercase">Forma de Pago</th>
+      <th style="padding:9px 12px;text-align:right;font-size:10px;color:var(--mut);text-transform:uppercase">Monto</th>
+      <th style="padding:9px 12px;text-align:center;font-size:10px;color:var(--mut);text-transform:uppercase">Estado</th>
+      <th style="width:100px"></th>
+    </tr></thead>
+    <tbody id="op-tbody"></tbody>
+  </table>
+</div>
+</div>
+
+<!-- ─── MODAL: Nueva Orden de Pago ──────────────────────────────────────── -->
+<div class="ab-modal-overlay" id="op-mb-nueva">
+<div class="ab-modal" style="max-width:620px">
+  <div class="mht">Nueva Orden de Pago</div>
+  <div style="display:flex;flex-direction:column;gap:12px;margin-top:16px">
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div class="fl"><label>Fecha *</label><input type="date" id="op-fecha"></div>
+      <div class="fl"><label>Proveedor *</label>
+        <select id="op-prov-id" onchange="opProvChange()">
+          <option value="">— Seleccioná —</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- Facturas pendientes -->
+    <div>
+      <div style="font-size:12px;font-weight:700;color:var(--mut);text-transform:uppercase;margin-bottom:6px">Facturas a cancelar</div>
+      <div id="op-facturas-wrap" style="border:1px solid var(--bor);border-radius:8px;overflow:hidden">
+        <div class="emp" style="padding:14px">Seleccioná un proveedor</div>
+      </div>
+      <div style="margin-top:6px;text-align:right;font-size:13px;color:var(--mut)">
+        Total seleccionado: <strong id="op-total-sel" style="color:var(--txt)">$0.00</strong>
+      </div>
+    </div>
+
+    <!-- Forma de pago -->
+    <div class="fl ff"><label>Forma de Pago *</label>
+      <select id="op-forma-pago" onchange="opFormaChange()">
+        <option value="transferencia">Transferencia Bancaria</option>
+        <option value="efectivo">Efectivo</option>
+        <option value="cheque_propio">Cheque Propio</option>
+        <option value="cheque_tercero">Cheque de Tercero</option>
+      </select>
+    </div>
+
+    <!-- Cuenta bancaria/caja (transferencia/efectivo) -->
+    <div id="op-wrap-cuenta" class="fl ff"><label>Cuenta *</label>
+      <select id="op-cuenta-id">
+        <option value="">— Seleccioná cuenta —</option>
+      </select>
+    </div>
+
+    <!-- Cheque propio -->
+    <div id="op-wrap-cheque-p" style="display:none">
+      <div class="fl ff"><label>Chequera *</label>
+        <select id="op-chequera-id" onchange="opCargarChequesDisp()">
+          <option value="">— Seleccioná chequera —</option>
+        </select>
+      </div>
+      <div class="fl ff" style="margin-top:10px"><label>Cheque *</label>
+        <select id="op-cheque-prop-id">
+          <option value="">— Seleccioná cheque —</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- Cheque tercero -->
+    <div id="op-wrap-cheque-t" style="display:none" class="fl ff"><label>Cheque en Cartera *</label>
+      <select id="op-cheque-ter-id">
+        <option value="">— Seleccioná cheque —</option>
+      </select>
+    </div>
+
+    <div class="fl ff"><label>Referencia / Nro. Operación</label>
+      <input type="text" id="op-referencia" placeholder="Nro. transferencia, cheque, etc.">
+    </div>
+    <div class="fl ff"><label>Notas</label><textarea id="op-notas" rows="2"></textarea></div>
+  </div>
+  <div class="ab-modal-footer">
+    <button class="btn bo" onclick="document.getElementById('op-mb-nueva').classList.remove('on')">Cancelar</button>
+    <button class="btn bb" onclick="opGuardar()">Emitir Orden</button>
+  </div>
+</div>
+</div>
+
 <div class="sec" id="sec-adm-cc-proveedores">
   <div class="ph">
     <div>
@@ -2709,6 +2822,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       <div class="fl ff"><label>CBU</label><input type="text" id="fin-cuenta-cbu" placeholder="22 dígitos"></div>
       <div class="fl ff"><label>Alias</label><input type="text" id="fin-cuenta-alias"></div>
       <div class="fl ff"><label>Saldo Inicial</label><input type="number" id="fin-cuenta-saldo" step="0.01" value="0"></div>
+      <div class="fl ff"><label>Cuenta Contable</label><select id="fin-cuenta-contable"><option value="">— Sin asignar —</option></select></div>
     </div>
     <div class="ab-modal-footer">
       <button class="btn bo" onclick="document.getElementById('fin-mb-cuenta').classList.remove('on')">Cancelar</button>
@@ -2778,6 +2892,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       </div>
       <div class="fl ff"><label>Fecha Vto.</label><input type="date" id="fin-chequets-vto"></div>
       <div class="fl ff"><label>Notas</label><textarea id="fin-chequets-notas" rows="2"></textarea></div>
+      <div class="fl ff"><label>Cuenta Contable</label><select id="fin-chequets-contable"><option value="">— Sin asignar —</option></select></div>
     </div>
     <div class="ab-modal-footer">
       <button class="btn bo" onclick="document.getElementById('fin-mb-cheque-t').classList.remove('on')">Cancelar</button>
@@ -8467,6 +8582,10 @@ loadSec = function(s) {
     ccProvIniciar();
     return;
   }
+  if (s === 'fin-ordenes-pago') {
+    opIniciar();
+    return;
+  }
   if (s === 'fin-caja-bancos') {
     finCajaBancosIniciar();
     return;
@@ -8577,6 +8696,7 @@ var USR_SECCIONES = [
     { id: 'pa-electricidad', label: '⚡ Electricidad' },
     { id: 'adm-proveedores',    label: '📋 Padrón de Proveedores' },
     { id: 'adm-cc-proveedores', label: '💳 Cuenta Corriente Proveedores' },
+    { id: 'fin-ordenes-pago',   label: '📄 Órdenes de Pago' },
     { id: 'fin-caja-bancos',    label: '🏦 Caja y Bancos' },
     { id: 'pa-despachos', label: '🚚 Despachos' },
   ]},
@@ -18290,11 +18410,223 @@ function ccAnularPago(id) {
   });
 }
 
+function ccAnularPago(id) {
+  if (!confirm('¿Anular este pago? Se revertirán los saldos.')) return;
+  ccApi('/' + id, { method: 'DELETE' }).then(function(r) {
+    if (r.ok) { toast('Pago anulado', 'ok'); ccProvCargar(); }
+    else toast(r.error || 'Error', 'er');
+  });
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ÓRDENES DE PAGO
+// ══════════════════════════════════════════════════════════════════════════════
+
+var OP = { proveedores: [], cuentas: [], chequeras: [], facturas: [] };
+
+function opApi(path, opts) {
+  opts = opts || {};
+  opts.headers = opts.headers || { 'Content-Type': 'application/json' };
+  return fetch('/api/fin/ordenes' + path, opts).then(function(r){ return r.json(); });
+}
+
+function opIniciar() {
+  // Cargar proveedores para filtro y modal
+  fetch('/api/pa/proveedores').then(function(r){ return r.json(); }).then(function(r) {
+    OP.proveedores = r.data || [];
+    var opts = '<option value="">Todos los proveedores</option>' + OP.proveedores.map(function(p){
+      return '<option value="' + p.id + '">' + p.razon_social + '</option>';
+    }).join('');
+    document.getElementById('op-filter-prov').innerHTML = opts;
+    document.getElementById('op-prov-id').innerHTML = '<option value="">— Seleccioná —</option>' + OP.proveedores.map(function(p){
+      return '<option value="' + p.id + '">' + p.razon_social + '</option>';
+    }).join('');
+  });
+  // Cargar cuentas para select de forma de pago
+  finApi('/cuentas').then(function(r) {
+    OP.cuentas = r.data || [];
+    opActualizarCuentasSel('transferencia');
+  });
+  // Cargar chequeras
+  finApi('/chequeras').then(function(r) {
+    OP.chequeras = r.data || [];
+    var sel = document.getElementById('op-chequera-id');
+    sel.innerHTML = '<option value="">— Chequera —</option>' + OP.chequeras.map(function(ch){
+      return '<option value="' + ch.id + '">' + ch.cuenta_nombre + ' — ' + ch.desde + ' al ' + ch.hasta + '</option>';
+    }).join('');
+  });
+  // Cargar cheques de tercero en cartera
+  finApi('/cheques-terceros?estado=en_cartera').then(function(r) {
+    var data = r.data || [];
+    var sel = document.getElementById('op-cheque-ter-id');
+    sel.innerHTML = '<option value="">— Cheque —</option>' + data.map(function(c){
+      return '<option value="' + c.id + '">' + (c.librador||'—') + ' $' + c.monto.toLocaleString('es-AR') + ' vto:' + (c.fecha_vto||'—') + '</option>';
+    }).join('');
+  });
+  opCargar();
+}
+
+function opActualizarCuentasSel(forma) {
+  var sel = document.getElementById('op-cuenta-id');
+  var filtradas = OP.cuentas.filter(function(c) {
+    if (forma === 'efectivo') return c.tipo === 'caja';
+    return c.tipo !== 'caja';
+  });
+  sel.innerHTML = '<option value="">— Seleccioná cuenta —</option>' + filtradas.map(function(c){
+    return '<option value="' + c.id + '">' + c.nombre + (c.banco ? ' — ' + c.banco : '') + '</option>';
+  }).join('');
+}
+
+function opFormaChange() {
+  var forma = document.getElementById('op-forma-pago').value;
+  document.getElementById('op-wrap-cuenta').style.display   = (forma==='transferencia'||forma==='efectivo') ? '' : 'none';
+  document.getElementById('op-wrap-cheque-p').style.display = forma==='cheque_propio'  ? '' : 'none';
+  document.getElementById('op-wrap-cheque-t').style.display = forma==='cheque_tercero' ? '' : 'none';
+  opActualizarCuentasSel(forma);
+}
+
+function opCargar() {
+  var estado = document.getElementById('op-filter-estado').value;
+  var provId = document.getElementById('op-filter-prov').value;
+  var params = [];
+  if (estado) params.push('estado=' + estado);
+  if (provId) params.push('proveedorId=' + provId);
+  opApi('/' + (params.length ? '?' + params.join('&') : '')).then(function(r) {
+    var data = r.data || [];
+    var tbody = document.getElementById('op-tbody');
+    if (!data.length) { tbody.innerHTML = '<tr><td colspan="7" class="emp">Sin órdenes de pago.</td></tr>'; return; }
+    var formas = { transferencia:'Transferencia', efectivo:'Efectivo', cheque_propio:'Cheque Propio', cheque_tercero:'Cheque Tercero' };
+    tbody.innerHTML = data.map(function(op) {
+      var estadoBadge = op.estado === 'emitida'
+        ? '<span class="bdg bok" style="font-size:10px">Emitida</span>'
+        : '<span class="bdg ber" style="font-size:10px">Anulada</span>';
+      return '<tr style="border-bottom:1px solid var(--bor)">'
+        + '<td style="padding:9px 12px;font-family:monospace;font-weight:600">' + op.numero + '</td>'
+        + '<td style="padding:9px 12px;color:var(--mut)">' + op.fecha + '</td>'
+        + '<td style="padding:9px 12px">' + op.proveedor_nombre + '</td>'
+        + '<td style="padding:9px 12px;color:var(--mut)">' + (formas[op.forma_pago]||op.forma_pago) + (op.cuenta_nombre ? ' — ' + op.cuenta_nombre : '') + '</td>'
+        + '<td style="padding:9px 12px;text-align:right;font-weight:700">' + paMoney(op.monto_total) + '</td>'
+        + '<td style="padding:9px 12px;text-align:center">' + estadoBadge + '</td>'
+        + '<td style="padding:9px 12px;display:flex;gap:4px">'
+        + (op.estado === 'emitida' ? '<button class="btn bd bs" onclick="opAnular(' + op.id + ')" style="font-size:10px;padding:2px 7px">Anular</button>' : '')
+        + '</td></tr>';
+    }).join('');
+  });
+}
+
+function opNueva() {
+  document.getElementById('op-fecha').value = new Date().toISOString().split('T')[0];
+  document.getElementById('op-prov-id').value = '';
+  document.getElementById('op-forma-pago').value = 'transferencia';
+  document.getElementById('op-referencia').value = '';
+  document.getElementById('op-notas').value = '';
+  document.getElementById('op-total-sel').textContent = '$0.00';
+  document.getElementById('op-facturas-wrap').innerHTML = '<div class="emp" style="padding:14px">Seleccioná un proveedor</div>';
+  opFormaChange();
+  document.getElementById('op-mb-nueva').classList.add('on');
+}
+
+function opProvChange() {
+  var provId = document.getElementById('op-prov-id').value;
+  if (!provId) { document.getElementById('op-facturas-wrap').innerHTML = '<div class="emp" style="padding:14px">Seleccioná un proveedor</div>'; return; }
+  ccApi('/cc/' + provId).then(function(r) {
+    OP.facturas = (r.data || []).filter(function(f){ return f.saldo_pendiente > 0; });
+    var tbody = document.getElementById('op-facturas-wrap');
+    if (!OP.facturas.length) { tbody.innerHTML = '<div class="emp" style="padding:14px">Sin facturas pendientes</div>'; return; }
+    tbody.innerHTML = '<table style="width:100%;border-collapse:collapse;font-size:12px">'
+      + '<thead><tr style="background:var(--bg);border-bottom:1px solid var(--bor)">'
+      + '<th style="padding:6px 10px;width:32px"></th>'
+      + '<th style="padding:6px 10px;text-align:left;color:var(--mut)">Factura</th>'
+      + '<th style="padding:6px 10px;text-align:right;color:var(--mut)">Pendiente</th>'
+      + '<th style="padding:6px 10px;text-align:right;color:var(--mut)">Pagar</th>'
+      + '</tr></thead><tbody>'
+      + OP.facturas.map(function(f) {
+        return '<tr style="border-bottom:1px solid var(--bor)">'
+          + '<td style="padding:6px 10px"><input type="checkbox" data-id="' + f.id + '" data-pend="' + f.saldo_pendiente + '" onchange="opActualizarTotal()"></td>'
+          + '<td style="padding:6px 10px">' + (f.nro_factura||'Fac.'+f.id) + ' <span style="color:var(--mut)">' + f.fecha + '</span></td>'
+          + '<td style="padding:6px 10px;text-align:right">' + paMoney(f.saldo_pendiente) + '</td>'
+          + '<td style="padding:6px 10px"><input type="number" step="0.01" min="0" max="' + f.saldo_pendiente + '" value="' + f.saldo_pendiente.toFixed(2) + '" oninput="opActualizarTotal()" disabled style="width:90px;font-size:11px;text-align:right;padding:3px 5px;border:1px solid var(--bor2);border-radius:5px"></td>'
+          + '</tr>';
+      }).join('') + '</tbody></table>';
+    opActualizarTotal();
+  });
+}
+
+function opActualizarTotal() {
+  var total = 0;
+  document.querySelectorAll('#op-facturas-wrap input[type=checkbox]').forEach(function(chk) {
+    var row = chk.closest('tr');
+    var inp = row.querySelector('input[type=number]');
+    if (inp) { inp.disabled = !chk.checked; if (chk.checked) total += parseFloat(inp.value||0); }
+  });
+  document.getElementById('op-total-sel').textContent = '$ ' + total.toFixed(2);
+}
+
+function opCargarChequesDisp() {
+  var chequeraId = document.getElementById('op-chequera-id').value;
+  if (!chequeraId) return;
+  finApi('/cheques-propios?estado=disponible&cuentaId=').then(function(r) {
+    var data = (r.data||[]).filter(function(c){ return c.chequera_id == chequeraId; });
+    var sel = document.getElementById('op-cheque-prop-id');
+    sel.innerHTML = '<option value="">— Cheque —</option>' + data.map(function(c){
+      return '<option value="' + c.id + '">Nro. ' + c.nro_cheque + '</option>';
+    }).join('');
+  });
+}
+
+function opGuardar() {
+  var fecha    = document.getElementById('op-fecha').value;
+  var provId   = document.getElementById('op-prov-id').value;
+  var forma    = document.getElementById('op-forma-pago').value;
+  var cuentaId = document.getElementById('op-cuenta-id').value;
+  var chequePId = document.getElementById('op-cheque-prop-id').value;
+  var chequeTId = document.getElementById('op-cheque-ter-id').value;
+  var ref      = document.getElementById('op-referencia').value.trim();
+  var notas    = document.getElementById('op-notas').value.trim();
+
+  if (!provId) return toast('Seleccioná un proveedor', 'er');
+
+  var compras = [];
+  document.querySelectorAll('#op-facturas-wrap input[type=checkbox]:checked').forEach(function(chk) {
+    var inp = chk.closest('tr').querySelector('input[type=number]');
+    var m = parseFloat(inp ? inp.value : 0);
+    if (m > 0) compras.push({ id: parseInt(chk.dataset.id), monto: m });
+  });
+  if (!compras.length) return toast('Seleccioná al menos una factura', 'er');
+
+  var total = compras.reduce(function(s, c){ return s + c.monto; }, 0);
+
+  opApi('/', {
+    method: 'POST',
+    body: JSON.stringify({
+      fecha, proveedor_id: parseInt(provId), monto_total: total, forma_pago: forma,
+      cuenta_fin_id:  cuentaId  ? parseInt(cuentaId)  : null,
+      cheque_prop_id: chequePId ? parseInt(chequePId) : null,
+      cheque_ter_id:  chequeTId ? parseInt(chequeTId) : null,
+      referencia: ref||null, notas: notas||null, compras
+    })
+  }).then(function(r) {
+    if (r.ok) {
+      toast('✓ Orden ' + r.numero + ' emitida', 'ok');
+      document.getElementById('op-mb-nueva').classList.remove('on');
+      opCargar();
+    } else toast(r.error || 'Error', 'er');
+  });
+}
+
+function opAnular(id) {
+  if (!confirm('¿Anular esta orden de pago? Se revertirán los saldos y movimientos.')) return;
+  opApi('/' + id + '/anular', { method: 'PATCH', body: '{}' }).then(function(r) {
+    if (r.ok) { toast('Orden anulada', 'ok'); opCargar(); }
+    else toast(r.error || 'Error', 'er');
+  });
+}
+
 // ══════════════════════════════════════════════════════════════════════════════
 // CAJA Y BANCOS
 // ══════════════════════════════════════════════════════════════════════════════
 
-var FIN = { cuentas: [], chequeras: [], tabActual: 'cuentas' };
+var FIN = { cuentas: [], chequeras: [], tabActual: 'cuentas', cuentasContables: [] };
 
 function finApi(path, opts) {
   opts = opts || {};
@@ -18302,16 +18634,32 @@ function finApi(path, opts) {
   return fetch('/api/fin' + path, opts).then(function(r){ return r.json(); });
 }
 
+function finCargarCuentasContables(cb) {
+  if (FIN.cuentasContables.length) { if(cb) cb(); return; }
+  fetch('/api/pa/cuentas').then(function(r){ return r.json(); }).then(function(r) {
+    FIN.cuentasContables = (r.data || []).filter(function(c){ return c.activo; });
+    var opts = '<option value="">— Sin asignar —</option>' + FIN.cuentasContables.map(function(c){
+      return '<option value="' + c.id + '">[' + (c.codigo||'') + '] ' + c.nombre + '</option>';
+    }).join('');
+    ['fin-cuenta-contable','fin-chequets-contable'].forEach(function(id){
+      var el = document.getElementById(id); if(el) el.innerHTML = opts;
+    });
+    if(cb) cb();
+  }).catch(function(){ if(cb) cb(); });
+}
+
 function finCajaBancosIniciar() {
-  // Agregar CSS de tabs si no existe
   if (!document.getElementById('fin-tab-style')) {
     var s = document.createElement('style');
     s.id = 'fin-tab-style';
     s.textContent = '.fin-tab{padding:8px 16px;font-size:12px;font-weight:600;border:none;border-bottom:2px solid transparent;background:none;color:var(--mut);cursor:pointer;transition:all .15s}.fin-tab:hover{color:var(--txt)}.fin-tab-act{color:var(--acc,#3b82f6)!important;border-bottom-color:var(--acc,#3b82f6)!important}';
     document.head.appendChild(s);
   }
-  finCargarCuentas();
-  finTab('cuentas');
+  FIN.cuentasContables = []; // forzar recarga
+  finCargarCuentasContables(function() {
+    finCargarCuentas();
+    finTab('cuentas');
+  });
 }
 
 function finTab(tab) {
@@ -18371,6 +18719,7 @@ function finNuevaCuenta() {
   document.getElementById('fin-cuenta-tipo').value = 'cuenta_corriente';
   document.getElementById('fin-cuenta-moneda').value = 'ARS';
   document.getElementById('fin-cuenta-saldo').value = '0';
+  document.getElementById('fin-cuenta-contable').value = '';
   document.getElementById('fin-mb-cuenta').classList.add('on');
 }
 
@@ -18387,6 +18736,7 @@ function finEditarCuenta(id) {
   document.getElementById('fin-cuenta-cbu').value    = c.cbu    || '';
   document.getElementById('fin-cuenta-alias').value  = c.alias  || '';
   document.getElementById('fin-cuenta-saldo').value  = c.saldo_inicial || 0;
+  document.getElementById('fin-cuenta-contable').value = c.cuenta_contable_id || '';
   document.getElementById('fin-mb-cuenta').classList.add('on');
 }
 
@@ -18401,7 +18751,8 @@ function finGuardarCuenta() {
     moneda: document.getElementById('fin-cuenta-moneda').value,
     cbu:    document.getElementById('fin-cuenta-cbu').value.trim() || null,
     alias:  document.getElementById('fin-cuenta-alias').value.trim() || null,
-    saldo_inicial: parseFloat(document.getElementById('fin-cuenta-saldo').value || 0)
+    saldo_inicial: parseFloat(document.getElementById('fin-cuenta-saldo').value || 0),
+    cuenta_contable_id: document.getElementById('fin-cuenta-contable').value || null
   };
   var url    = id ? '/cuentas/' + id : '/cuentas';
   var method = id ? 'PUT' : 'POST';
@@ -18576,6 +18927,7 @@ function finNuevoChequeTer() {
   ['fin-chequets-librador','fin-chequets-banco','fin-chequets-nro','fin-chequets-monto','fin-chequets-notas'].forEach(function(id){ document.getElementById(id).value=''; });
   document.getElementById('fin-chequets-recep').value = new Date().toISOString().split('T')[0];
   document.getElementById('fin-chequets-vto').value = '';
+  document.getElementById('fin-chequets-contable').value = '';
   document.getElementById('fin-mb-cheque-t').classList.add('on');
 }
 
@@ -18587,7 +18939,8 @@ function finGuardarChequeTercero() {
     monto:           document.getElementById('fin-chequets-monto').value,
     fecha_recepcion: document.getElementById('fin-chequets-recep').value,
     fecha_vto:       document.getElementById('fin-chequets-vto').value || null,
-    notas:           document.getElementById('fin-chequets-notas').value.trim() || null
+    notas:           document.getElementById('fin-chequets-notas').value.trim() || null,
+    cuenta_contable_id: document.getElementById('fin-chequets-contable').value || null
   };
   if (!body.monto) return toast('El monto es obligatorio', 'er');
   finApi('/cheques-terceros', { method: 'POST', body: JSON.stringify(body) }).then(function(r) {
