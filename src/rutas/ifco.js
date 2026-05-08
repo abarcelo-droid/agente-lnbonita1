@@ -110,6 +110,24 @@ db.exec(`
 `);
 try { db.exec("CREATE INDEX IF NOT EXISTS idx_stocks_reales_dep ON ifco_stocks_reales(deposito_tipo, proveedor_id, fecha DESC)"); } catch(_){}
 
+// Tabla de "faltantes de stock" declarados manualmente para SAN GERONIMO.
+// Cada fila es un ajuste discreto: delta>0 aumenta el faltante, delta<0 lo reduce.
+// El faltante actual = SUM(delta) de los no eliminados. Se descuenta del piso teórico
+// para que el sistema refleje la realidad mientras se investiga la causa.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS ifco_faltantes_sg (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    fecha             TEXT NOT NULL,
+    delta             INTEGER NOT NULL,
+    motivo            TEXT,
+    usuario_id        INTEGER,
+    creado_en         TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+    eliminado_en      TEXT,
+    eliminado_por_id  INTEGER
+  )
+`);
+try { db.exec("CREATE INDEX IF NOT EXISTS idx_faltantes_sg_fecha ON ifco_faltantes_sg(fecha DESC)"); } catch(_){}
+
 if (_ifcoMigrarEnviado) {
   try {
     const r = db.prepare(`
@@ -1487,8 +1505,9 @@ router.get('/resumen', function(req, res) {
       AND eliminado_en IS NULL
   `);
 
-  // PISO actual = retiros - envíos a prov + recepciones (ambas: de envíos + mercadería) - despachos SG + rechazos vueltos
-  const piso = retirado - envios_totales + recepciones_envios + recepciones_merc - despachos_sg + rechazos_vueltos_sg;
+  // PISO actual = retiros - envíos a prov + recepciones (ambas: de envíos + mercadería) - despachos SG + rechazos vueltos - faltantes declarados
+  const faltantes_sg = _faltantesSGTotal();
+  const piso = retirado - envios_totales + recepciones_envios + recepciones_merc - despachos_sg + rechazos_vueltos_sg - faltantes_sg;
   const bajo_responsabilidad = piso + en_proveedores + en_transito_sg;
 
   // Alertas — sellados >= 25 días sin presentar
@@ -1776,11 +1795,18 @@ function _movimientosProveedor(provId, desde, hasta) {
         } else {
           delta = -recib;
         }
+      } else if (m.estado === 'despachado') {
+        // Despachado pero sin sellar todavía: las cajas físicamente ya salieron del proveedor.
+        // Restamos el total despachado. Cuando se selle se recalcula con recibida/rechazada.
+        delta = -(m.cantidad || 0);
       } else {
-        delta = 0; // 'despachado' (en tránsito) no afecta saldo todavía
+        delta = 0;
       }
     }
-    return Object.assign({}, m, { delta: delta });
+    // Etiqueta legible para el campo estado: "sin sellar" si despachado, agrega "rechazado" si hubo
+    let estado_label = (m.estado === 'despachado') ? 'sin sellar' : (m.estado || '-');
+    if ((m.cantidad_rechazada || 0) > 0) estado_label = estado_label + ' · rechazado';
+    return Object.assign({}, m, { delta: delta, estado_label: estado_label });
   });
 }
 
@@ -1941,7 +1967,7 @@ router.get('/proveedores/:id/movimientos.pdf', async function(req, res) {
       else if (m.delta > 0) doc.setTextColor(30, 130, 60);
       doc.text(deltaTxt, cCant + 24, y, { align: 'right' });
       doc.setTextColor(0);
-      doc.text(_pdfSafe(m.estado || '-'),   cEst, y);
+      doc.text(_pdfSafe(m.estado_label || m.estado || '-'),   cEst, y);
       y += 5;
       // Línea separadora suave
       doc.setDrawColor(230);
@@ -2038,7 +2064,21 @@ function _movimientosSanGeronimo(desde, hasta) {
     WHERE origen = 'san_geronimo' AND eliminado_en IS NULL${fDes.where}
   `).all(...fDes.params);
 
-  const all = retiros.concat(perdidas, envios, recepciones, despachos);
+  // Faltantes declarados (ajustes manuales que afectan el teórico SG)
+  // delta>0 = se declara faltante (sale del piso); delta<0 = se reduce el faltante (vuelve)
+  let faltantes = [];
+  try {
+    const fFal = filtro('fecha');
+    faltantes = db.prepare(`
+      SELECT 'faltante_sg' AS tipo, id, fecha,
+             COALESCE(motivo, 'Faltante declarado') AS detalle,
+             delta AS cantidad, NULL AS estado
+      FROM ifco_faltantes_sg
+      WHERE eliminado_en IS NULL${fFal.where}
+    `).all(...fFal.params);
+  } catch(_) { /* tabla no existe en bases viejas, ignorar */ }
+
+  const all = retiros.concat(perdidas, envios, recepciones, despachos, faltantes);
   // Orden cronológico ascendente, id como desempate
   all.sort(function(a,b) {
     if (a.fecha === b.fecha) return (a.id||0) - (b.id||0);
@@ -2052,6 +2092,12 @@ function _movimientosSanGeronimo(desde, hasta) {
     else if (m.tipo === 'perdida')    delta = -m.cantidad;
     else if (m.tipo === 'envio')      delta = -m.cantidad;
     else if (m.tipo === 'recepcion')  delta = +m.cantidad;
+    else if (m.tipo === 'faltante_sg') {
+      // delta de la fila ifco_faltantes_sg ya viene firmado:
+      // delta>0 = se declara faltante (sale del piso) -> impacto -delta
+      // delta<0 = se reduce el faltante (vuelve)      -> impacto +|delta|
+      delta = -(m.cantidad || 0);
+    }
     else if (m.tipo === 'despacho_sg') {
       // SG: sale toda la cantidad despachada. Si hay rechazo y vuelve a SG (o destino NULL),
       // se suma de vuelta el rechazo. Mismo criterio que el cálculo de stock teórico.
@@ -2063,7 +2109,10 @@ function _movimientosSanGeronimo(desde, hasta) {
         delta = -desp;
       }
     }
-    return Object.assign({}, m, { delta: delta });
+    // Etiqueta legible: "sin sellar" si despachado, agrega "rechazado" si hubo
+    let estado_label = (m.estado === 'despachado') ? 'sin sellar' : (m.estado || '-');
+    if ((m.cantidad_rechazada || 0) > 0) estado_label = estado_label + ' · rechazado';
+    return Object.assign({}, m, { delta: delta, estado_label: estado_label });
   });
 }
 
@@ -2154,6 +2203,7 @@ router.get('/san-geronimo/movimientos.pdf', async function(req, res) {
       if (t === 'envio')         return 'Envio prov.';
       if (t === 'recepcion')     return 'Recepcion';
       if (t === 'despacho_sg')   return 'Despacho super';
+      if (t === 'faltante_sg')   return 'Faltante decl.';
       return t;
     };
     const truncar = (s, max) => { s = _pdfSafe(s); return s.length > max ? s.slice(0, max - 1) + '...' : s; };
@@ -2183,7 +2233,7 @@ router.get('/san-geronimo/movimientos.pdf', async function(req, res) {
       else if (m.delta > 0) doc.setTextColor(30, 130, 60);
       doc.text(deltaTxt, cCant + 24, y, { align: 'right' });
       doc.setTextColor(0);
-      doc.text(_pdfSafe(m.estado || '-'),   cEst, y);
+      doc.text(_pdfSafe(m.estado_label || m.estado || '-'),   cEst, y);
       y += 5;
       doc.setDrawColor(230);
       doc.line(L, y - 1.5, R, y - 1.5);
@@ -3073,6 +3123,17 @@ function _ultimoJueves10am() {
   return d;
 }
 
+// Faltante de stock declarado manualmente para SG (suma de todos los ajustes vigentes).
+function _faltantesSGTotal() {
+  try {
+    const r = db.prepare("SELECT COALESCE(SUM(delta),0) AS total FROM ifco_faltantes_sg WHERE eliminado_en IS NULL").get();
+    return r ? (r.total || 0) : 0;
+  } catch(e) {
+    console.error('[IFCO][_faltantesSGTotal]:', e.message);
+    return 0;
+  }
+}
+
 // Calcula stock teórico para un depósito.
 // Cada query está envuelta para que si falla (columna inexistente, tabla rara, etc.)
 // loguee qué query rompió y devuelva 0 en lugar de tirar el endpoint entero.
@@ -3093,7 +3154,8 @@ function _stockTeoricoDeposito(deposito_tipo, proveedor_id) {
     const enviados      = get('enviados',      `SELECT COALESCE(SUM(cantidad_enviada),0) AS total FROM ifco_envios_proveedor WHERE eliminado_en IS NULL`);
     const recepciones   = get('recepciones',   `SELECT COALESCE(SUM(cantidad),0) AS total FROM ifco_recepciones_proveedor WHERE eliminado_en IS NULL AND (estado IS NULL OR estado='recibido')`);
     const rechazadosASG = get('rechazadosASG', `SELECT COALESCE(SUM(cantidad_rechazada),0) AS total FROM ifco_remitos_super WHERE eliminado_en IS NULL AND cantidad_rechazada>0 AND (rechazo_destino IS NULL OR rechazo_destino='san_geronimo')`);
-    return retiros - perdidas - despachados - enviados + recepciones + rechazadosASG;
+    const faltantesSG   = _faltantesSGTotal(); // se resta para que el teórico refleje la realidad
+    return retiros - perdidas - despachados - enviados + recepciones + rechazadosASG - faltantesSG;
   }
   if (deposito_tipo === 'proveedor' && proveedor_id) {
     try {
@@ -3105,6 +3167,69 @@ function _stockTeoricoDeposito(deposito_tipo, proveedor_id) {
   }
   return 0;
 }
+
+// ════════════════════════════════════════════════════════════════════════════
+// FALTANTES DE STOCK SG (declaraciones manuales para corregir el teórico)
+// Cada fila es un ajuste con delta. delta>0 declara que falta stock; delta<0
+// reduce el faltante (cajones encontrados o resolución parcial).
+// ════════════════════════════════════════════════════════════════════════════
+
+// GET /faltantes-sg — historial completo + total vigente
+router.get('/faltantes-sg', function(req, res) {
+  try {
+    const items = db.prepare(`
+      SELECT f.id, f.fecha, f.delta, f.motivo, f.usuario_id, f.creado_en,
+             u.nombre AS usuario_nombre
+      FROM ifco_faltantes_sg f
+      LEFT JOIN usuarios u ON u.id = f.usuario_id
+      WHERE f.eliminado_en IS NULL
+      ORDER BY f.fecha DESC, f.id DESC
+    `).all();
+    const total = items.reduce(function(a, r){ return a + (r.delta || 0); }, 0);
+    res.json({ total: total, items: items });
+  } catch(e) {
+    console.error('[IFCO][faltantes-sg GET]:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /faltantes-sg — agrega un ajuste (delta puede ser positivo o negativo)
+router.post('/faltantes-sg', express.json(), function(req, res) {
+  try {
+    const d = req.body || {};
+    const delta = parseInt(d.delta);
+    if (isNaN(delta) || delta === 0) return res.status(400).json({ error: 'delta debe ser un número distinto de cero' });
+    const fecha = d.fecha || new Date().toISOString().slice(0,10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha)) return res.status(400).json({ error: 'fecha inválida (YYYY-MM-DD)' });
+    const motivo = d.motivo ? String(d.motivo).trim().slice(0, 500) : null;
+    const r = db.prepare(`
+      INSERT INTO ifco_faltantes_sg (fecha, delta, motivo, usuario_id)
+      VALUES (?, ?, ?, ?)
+    `).run(fecha, delta, motivo, (req.user && req.user.id) || null);
+    res.json({ id: r.lastInsertRowid });
+  } catch(e) {
+    console.error('[IFCO][faltantes-sg POST]:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// DELETE /faltantes-sg/:id — soft delete
+router.delete('/faltantes-sg/:id', function(req, res) {
+  try {
+    const id = parseInt(req.params.id);
+    if (!id) return res.status(400).json({ error: 'id inválido' });
+    const r = db.prepare(`
+      UPDATE ifco_faltantes_sg
+         SET eliminado_en = datetime('now','localtime'),
+             eliminado_por_id = ?
+       WHERE id = ? AND eliminado_en IS NULL
+    `).run((req.user && req.user.id) || null, id);
+    res.json({ ok: true, changes: r.changes });
+  } catch(e) {
+    console.error('[IFCO][faltantes-sg DELETE]:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
 
 // GET /stocks-reales — lista resumen de cada depósito con su último conteo + diferencia + alerta
 router.get('/stocks-reales', function(req, res) {
@@ -3150,6 +3275,7 @@ router.get('/stocks-reales', function(req, res) {
   res.json({
     corte_jueves: corte,
     es_post_jueves_10am: new Date() >= _ultimoJueves10am(),
+    faltante_sg_total: _faltantesSGTotal(),
     items: items
   });
 });

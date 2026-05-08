@@ -3747,6 +3747,51 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   </div>
 </div>
 
+<!-- Modal: faltante de stock SG (declarar/ajustar + histórico) -->
+<div class="mb" id="ifco-mb-faltantes-sg">
+  <div class="mbox" style="width:760px;max-width:95vw">
+    <div class="mhd">
+      <div class="mht">⚠️ Faltante de stock SG</div>
+      <button class="mcl" onclick="document.getElementById('ifco-mb-faltantes-sg').classList.remove('on')">x</button>
+    </div>
+    <div style="font-size:12px;color:var(--mut);margin-bottom:14px">
+      Cada ajuste se suma al faltante actual. Usá <b>positivo</b> para declarar más faltante (cajones que faltan), <b>negativo</b> para reducirlo (cajones encontrados). El total se descuenta automáticamente del stock teórico SG.
+    </div>
+
+    <div id="ifco-fsg-resumen" style="background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:10px 14px;margin-bottom:14px;display:flex;justify-content:space-between;align-items:center">
+      <div>
+        <div style="font-size:10px;color:#991b1b;text-transform:uppercase;letter-spacing:0.5px;font-weight:600">Faltante actual</div>
+        <div id="ifco-fsg-total" style="font-size:22px;font-weight:700;color:#991b1b;font-variant-numeric:tabular-nums">—</div>
+      </div>
+      <div style="font-size:11px;color:#991b1b;opacity:0.8;text-align:right">cajones declarados como faltantes<br>se descuenta del piso teórico</div>
+    </div>
+
+    <div style="background:var(--bg);border:1px solid var(--bor);border-radius:8px;padding:12px;margin-bottom:14px">
+      <div style="font-size:12px;font-weight:600;margin-bottom:10px">Nuevo ajuste</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
+        <div>
+          <label style="font-size:11px;color:var(--mut);text-transform:uppercase">Cantidad (con signo) *</label>
+          <input id="ifco-fsg-delta" type="number" step="1" placeholder="ej: 50 o -20" style="width:100%;padding:8px;border-radius:7px;border:1px solid var(--bor);background:#fff;font-family:monospace">
+        </div>
+        <div>
+          <label style="font-size:11px;color:var(--mut);text-transform:uppercase">Fecha *</label>
+          <input id="ifco-fsg-fecha" type="date" style="width:100%;padding:8px;border-radius:7px;border:1px solid var(--bor);background:#fff">
+        </div>
+      </div>
+      <div>
+        <label style="font-size:11px;color:var(--mut);text-transform:uppercase">Motivo (opcional)</label>
+        <input id="ifco-fsg-motivo" type="text" placeholder="ej: faltante en conteo del 7/5, cajones encontrados en depósito C…" style="width:100%;padding:8px;border-radius:7px;border:1px solid var(--bor);background:#fff">
+      </div>
+      <div style="margin-top:10px;text-align:right">
+        <button class="btn bb bs" style="font-size:12px;padding:6px 14px" onclick="ifcoGuardarFaltanteSG()">+ Agregar ajuste</button>
+      </div>
+    </div>
+
+    <div style="font-size:12px;font-weight:600;margin-bottom:8px">Histórico de ajustes</div>
+    <div id="ifco-fsg-historial" style="max-height:40vh;overflow:auto;font-size:12px"></div>
+  </div>
+</div>
+
 <div class="mb" id="ifco-mb-presentar">
   <div class="mbox" style="width:720px">
     <div class="mhd">
@@ -15575,13 +15620,22 @@ async function ifcoCargarStocksReales() {
         const ult = it.ultimo_conteo;
         const fechaCell = ult ? _ifcoFecha(ult.fecha) + ' <span style="color:var(--mut);font-size:10px">('+ult.creado_en.slice(0,10)+')</span>' : '<span style="color:#92400e;font-weight:600">⏰ sin cargar</span>';
         const rowBg = it.falta_cargar ? 'background:#fffbeb' : '';
+        // Botón faltante solo para SG
+        const faltTotal = data.faltante_sg_total || 0;
+        const btnFaltante = (it.deposito_tipo === 'san_geronimo')
+          ? '<button class="btn bo bs" style="font-size:11px;padding:4px 8px;margin-right:4px;'
+            + (faltTotal > 0 ? 'background:#fef2f2;border-color:#fca5a5;color:#991b1b;font-weight:600' : '')
+            + '" onclick="ifcoAbrirFaltantesSG()" title="Declarar / ajustar faltante de stock SG">'
+            + (faltTotal > 0 ? '⚠️ Faltante: ' + _ifcoFmt(faltTotal) : '+ Faltante')
+            + '</button>'
+          : '';
         return '<tr style="border-top:1px solid var(--bor);'+rowBg+'">' +
           '<td style="padding:8px"><b>'+_ifcoEsc(it.nombre)+'</b></td>' +
           '<td style="padding:8px;text-align:right;font-variant-numeric:tabular-nums">'+_ifcoFmt(it.teorico)+'</td>' +
           '<td style="padding:8px;text-align:right;font-variant-numeric:tabular-nums">'+(it.real != null ? _ifcoFmt(it.real) : '<span style="color:var(--mut)">—</span>')+'</td>' +
           '<td style="padding:8px;text-align:right;font-variant-numeric:tabular-nums">'+difCell+'</td>' +
           '<td style="padding:8px;font-size:11px">'+fechaCell+'</td>' +
-          '<td style="padding:8px;text-align:right;white-space:nowrap"><button class="btn bo bs" style="font-size:11px;padding:4px 8px;margin-right:4px" onclick="ifcoDescargarMovimientosDeposito(\''+it.deposito_tipo+'\','+(it.proveedor_id||'null')+')" title="PDF de movimientos último mes">📄 PDF</button><button class="btn bo bs" style="font-size:11px;padding:4px 8px;margin-right:4px" onclick="ifcoAbrirHistorialStock(\''+it.deposito_tipo+'\','+(it.proveedor_id||'null')+',\''+_ifcoEsc(it.nombre)+'\')">📈 Histórico</button><button class="btn bb bs" style="font-size:11px;padding:4px 8px" onclick="ifcoAbrirCargarStock(\''+it.deposito_tipo+'\','+(it.proveedor_id||'null')+',\''+_ifcoEsc(it.nombre)+'\','+it.teorico+')">'+(ult ? 'Actualizar' : 'Cargar')+'</button></td>' +
+          '<td style="padding:8px;text-align:right;white-space:nowrap">' + btnFaltante + '<button class="btn bo bs" style="font-size:11px;padding:4px 8px;margin-right:4px" onclick="ifcoDescargarMovimientosDeposito(\''+it.deposito_tipo+'\','+(it.proveedor_id||'null')+')" title="PDF de movimientos último mes">📄 PDF</button><button class="btn bo bs" style="font-size:11px;padding:4px 8px;margin-right:4px" onclick="ifcoAbrirHistorialStock(\''+it.deposito_tipo+'\','+(it.proveedor_id||'null')+',\''+_ifcoEsc(it.nombre)+'\')">📈 Histórico</button><button class="btn bb bs" style="font-size:11px;padding:4px 8px" onclick="ifcoAbrirCargarStock(\''+it.deposito_tipo+'\','+(it.proveedor_id||'null')+',\''+_ifcoEsc(it.nombre)+'\','+it.teorico+')">'+(ult ? 'Actualizar' : 'Cargar')+'</button></td>' +
         '</tr>';
       }).join('') +
     '</tbody></table>';
@@ -15610,6 +15664,88 @@ function ifcoDescargarMovimientosDeposito(deposito_tipo, proveedor_id) {
     return;
   }
   window.open(url, '_blank');
+}
+
+// === FALTANTES DE STOCK SG ================================================
+async function ifcoAbrirFaltantesSG() {
+  document.getElementById('ifco-fsg-delta').value = '';
+  document.getElementById('ifco-fsg-fecha').value = new Date().toISOString().slice(0,10);
+  document.getElementById('ifco-fsg-motivo').value = '';
+  document.getElementById('ifco-mb-faltantes-sg').classList.add('on');
+  await ifcoCargarFaltantesSG();
+}
+
+async function ifcoCargarFaltantesSG() {
+  const totalEl = document.getElementById('ifco-fsg-total');
+  const histEl  = document.getElementById('ifco-fsg-historial');
+  totalEl.textContent = 'Cargando…';
+  histEl.innerHTML = '<div style="color:var(--mut);padding:10px">Cargando…</div>';
+  try {
+    const data = await _ifcoFetch('/api/ifco/faltantes-sg');
+    const total = data.total || 0;
+    totalEl.textContent = (total > 0 ? '' : '') + _ifcoFmt(total) + ' caj.';
+    if (!data.items || data.items.length === 0) {
+      histEl.innerHTML = '<div style="color:var(--mut);padding:14px;text-align:center">Sin ajustes registrados aún.</div>';
+      return;
+    }
+    histEl.innerHTML = '<table style="width:100%;border-collapse:collapse">' +
+      '<thead><tr style="background:var(--bg);text-align:left">' +
+        '<th style="padding:6px 8px">Fecha</th>' +
+        '<th style="padding:6px 8px;text-align:right">Cantidad</th>' +
+        '<th style="padding:6px 8px">Motivo</th>' +
+        '<th style="padding:6px 8px">Por</th>' +
+        '<th style="padding:6px 8px"></th>' +
+      '</tr></thead><tbody>' +
+      data.items.map(function(r){
+        const sign = r.delta > 0 ? '+' : '';
+        const color = r.delta > 0 ? '#991b1b' : '#1e40af';
+        return '<tr style="border-top:1px solid var(--bor)">' +
+          '<td style="padding:6px 8px;font-size:11px">'+_ifcoFecha(r.fecha)+'</td>' +
+          '<td style="padding:6px 8px;text-align:right;font-variant-numeric:tabular-nums;font-weight:600;color:'+color+'">'+sign+_ifcoFmt(r.delta)+'</td>' +
+          '<td style="padding:6px 8px;font-size:11px">'+_ifcoEsc(r.motivo || '—')+'</td>' +
+          '<td style="padding:6px 8px;font-size:11px;color:var(--mut)">'+_ifcoEsc(r.usuario_nombre || '—')+'</td>' +
+          '<td style="padding:6px 8px;text-align:right"><button class="btn bo bs" style="font-size:10px;padding:3px 7px;color:#991b1b" onclick="ifcoEliminarFaltanteSG('+r.id+')" title="Eliminar este ajuste">🗑</button></td>' +
+        '</tr>';
+      }).join('') +
+      '</tbody></table>';
+  } catch(e) {
+    histEl.innerHTML = '<div style="color:var(--err);padding:10px">Error: '+_ifcoEsc(e.message)+'</div>';
+  }
+}
+
+async function ifcoGuardarFaltanteSG() {
+  const delta = parseInt(document.getElementById('ifco-fsg-delta').value);
+  const fecha = document.getElementById('ifco-fsg-fecha').value;
+  const motivo = document.getElementById('ifco-fsg-motivo').value.trim();
+  if (isNaN(delta) || delta === 0) { alert('Ingresá una cantidad distinta de cero (positiva = declarar faltante, negativa = reducirlo)'); return; }
+  if (!fecha) { alert('Falta la fecha'); return; }
+  try {
+    const r = await fetch('/api/ifco/faltantes-sg', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ delta: delta, fecha: fecha, motivo: motivo || null })
+    });
+    if (!r.ok) { const j = await r.json().catch(()=>({})); throw new Error(j.error || ('HTTP '+r.status)); }
+    document.getElementById('ifco-fsg-delta').value = '';
+    document.getElementById('ifco-fsg-motivo').value = '';
+    await ifcoCargarFaltantesSG();
+    // Refrescar también la tabla principal (cambió el teórico SG)
+    if (typeof ifcoCargarStocksReales === 'function') ifcoCargarStocksReales();
+  } catch(e) {
+    alert('Error guardando ajuste: ' + e.message);
+  }
+}
+
+async function ifcoEliminarFaltanteSG(id) {
+  if (!confirm('¿Eliminar este ajuste? El faltante total se va a recalcular.')) return;
+  try {
+    const r = await fetch('/api/ifco/faltantes-sg/' + id, { method: 'DELETE' });
+    if (!r.ok) { const j = await r.json().catch(()=>({})); throw new Error(j.error || ('HTTP '+r.status)); }
+    await ifcoCargarFaltantesSG();
+    if (typeof ifcoCargarStocksReales === 'function') ifcoCargarStocksReales();
+  } catch(e) {
+    alert('Error eliminando: ' + e.message);
+  }
 }
 
 function ifcoAbrirCargarStock(deposito_tipo, proveedor_id, nombre, teorico) {
