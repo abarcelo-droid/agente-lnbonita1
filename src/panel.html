@@ -3256,6 +3256,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   <div class="ifco-pane" id="ifco-pane-talons">
     <div style="display:flex;gap:8px;margin-bottom:12px;align-items:center">
       <button class="btn bb" onclick="ifcoAbrirNuevoTalonario()">+ Nuevo talonario</button>
+      <button class="btn bo" onclick="ifcoAbrirImportTalonarios()" title="Importar talonarios históricos desde Excel + vincular despachos viejos">📥 Importar histórico</button>
       <div id="ifco-talon-info" style="font-size:12px;color:var(--mut);margin-left:auto"></div>
     </div>
     <div class="ab-table-wrap">
@@ -4074,6 +4075,42 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     <div class="ab-modal-footer" style="margin-top:18px;display:flex;justify-content:flex-end;gap:8px">
       <button class="btn bo" onclick="document.getElementById('ifco-mb-talon').classList.remove('on')">Cancelar</button>
       <button class="btn bb" onclick="ifcoGuardarTalonario()">Guardar talonario</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: Importar talonarios históricos -->
+<div class="mb" id="ifco-mb-talon-import">
+  <div class="mbox" style="width:900px;max-width:95vw">
+    <div class="mhd">
+      <div class="mht">📥 Importar talonarios históricos</div>
+      <button class="mcl" onclick="document.getElementById('ifco-mb-talon-import').classList.remove('on')">x</button>
+    </div>
+
+    <div style="background:#eef2ff;border:1px solid #c7d2fe;border-radius:8px;padding:12px 14px;margin-bottom:14px;font-size:12px;color:#3730a3">
+      <b>Cómo usar:</b> copiá las columnas desde Excel y pegá abajo. Cada línea = un talonario. La primera línea puede ser de encabezados.<br>
+      <b>Columnas reconocidas</b> (cualquier orden si pones encabezados): <code>serie</code>, <code>desde</code> (numero_desde), <code>hasta</code> (numero_hasta), <code>cai</code>, <code>vto_cai</code> (YYYY-MM-DD o DD/MM/YYYY), <code>activo</code> (1/0, default 0), <code>notas</code>, <code>proveedor_id</code> (si es de un proveedor).<br>
+      <b>Sin encabezados</b>: orden esperado → <code>serie · desde · hasta · cai · vto_cai · activo · notas · proveedor_id</code>.<br>
+      <b>Backfill automático</b>: al guardar, los despachos ya cargados que coincidan con serie + número en rango se vinculan a su talonario.
+    </div>
+
+    <div style="margin-bottom:10px">
+      <label style="font-size:11px;color:var(--mut);text-transform:uppercase;font-weight:600">Datos (TSV — pegado desde Excel)</label>
+      <textarea id="ifco-imp-textarea" rows="10" placeholder="serie&#9;desde&#9;hasta&#9;cai&#9;vto_cai&#9;activo&#9;notas&#10;00015&#9;1391926&#9;1391975&#9;&#9;&#9;0&#9;histórico&#10;00015&#9;1432651&#9;1432700&#9;&#9;2024-06-29&#9;0&#9;&#10;..." style="width:100%;font-family:monospace;font-size:12px;padding:10px;border:1px solid var(--bor);border-radius:7px;background:var(--bg);resize:vertical"></textarea>
+      <div style="margin-top:8px;text-align:right">
+        <button class="btn bo bs" style="font-size:12px;padding:6px 12px" onclick="ifcoParsearImportTalonarios()">🔍 Vista previa</button>
+      </div>
+    </div>
+
+    <div id="ifco-imp-preview" style="display:none">
+      <div style="font-size:12px;font-weight:600;margin-bottom:6px">Preview <span id="ifco-imp-resumen" style="color:var(--mut);font-weight:400"></span></div>
+      <div id="ifco-imp-tabla" style="max-height:35vh;overflow:auto;border:1px solid var(--bor);border-radius:7px"></div>
+      <div id="ifco-imp-errores" style="margin-top:8px;font-size:12px;color:#991b1b"></div>
+    </div>
+
+    <div class="ab-modal-footer" style="margin-top:18px;display:flex;justify-content:flex-end;gap:8px">
+      <button class="btn bo" onclick="document.getElementById('ifco-mb-talon-import').classList.remove('on')">Cancelar</button>
+      <button class="btn bb" id="ifco-imp-btn-go" onclick="ifcoConfirmarImportTalonarios()" disabled>Importar</button>
     </div>
   </div>
 </div>
@@ -17939,6 +17976,194 @@ function ifcoAbrirNuevoTalonario() {
     .forEach(function(id){ document.getElementById(id).value = ''; });
   document.getElementById('ifco-t-activo').value = '1';
   document.getElementById('ifco-mb-talon').classList.add('on');
+}
+
+// ────── IMPORTAR TALONARIOS HISTÓRICOS (TSV / Excel paste) ──────
+let _ifcoImpItems = []; // items parseados, listos para enviar
+
+function ifcoAbrirImportTalonarios() {
+  document.getElementById('ifco-imp-textarea').value = '';
+  document.getElementById('ifco-imp-preview').style.display = 'none';
+  document.getElementById('ifco-imp-tabla').innerHTML = '';
+  document.getElementById('ifco-imp-errores').innerHTML = '';
+  document.getElementById('ifco-imp-resumen').textContent = '';
+  document.getElementById('ifco-imp-btn-go').disabled = true;
+  _ifcoImpItems = [];
+  document.getElementById('ifco-mb-talon-import').classList.add('on');
+}
+
+// Convierte fechas DD/MM/YYYY o D/M/YYYY a YYYY-MM-DD. Si ya viene en ISO, la deja.
+function _ifcoNormalizarFecha(s) {
+  if (!s) return null;
+  s = String(s).trim();
+  if (!s) return null;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  const m = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})$/);
+  if (m) {
+    let d = m[1].padStart(2,'0');
+    let mo = m[2].padStart(2,'0');
+    let y = m[3];
+    if (y.length === 2) y = (parseInt(y) < 50 ? '20' : '19') + y;
+    return y + '-' + mo + '-' + d;
+  }
+  return s; // se manda tal cual; el backend lo va a guardar como string
+}
+
+function _ifcoEsHeader(cells) {
+  // Si en la primera línea aparece "serie" o "desde" o similar, asumimos encabezados
+  const joined = cells.map(function(c){ return String(c||'').toLowerCase().trim(); }).join('|');
+  return /\b(serie|desde|hasta|numero_desde|numero_hasta|cai|vto|activo|notas|proveedor)\b/.test(joined);
+}
+
+function _ifcoMapeoColumnas(headers) {
+  // Devuelve {serie: idx, desde: idx, ...} mapeando a las columnas del header
+  const m = {};
+  headers.forEach(function(h, i){
+    const k = String(h||'').toLowerCase().trim();
+    if (k === 'serie' || k === 'serial')                                        m.serie = i;
+    else if (k === 'desde' || k === 'numero_desde' || k === 'numerodesde' ||
+             k === 'desde_numero' || k === 'desde nro' || k === 'desde num')    m.desde = i;
+    else if (k === 'hasta' || k === 'numero_hasta' || k === 'numerohasta' ||
+             k === 'hasta_numero' || k === 'hasta nro' || k === 'hasta num')    m.hasta = i;
+    else if (k === 'cai')                                                       m.cai = i;
+    else if (k === 'vto_cai' || k === 'vto cai' || k === 'vencimiento' ||
+             k === 'vto' || k === 'vencimiento_cai')                            m.vto_cai = i;
+    else if (k === 'activo' || k === 'estado')                                  m.activo = i;
+    else if (k === 'notas' || k === 'observaciones' || k === 'obs')             m.notas = i;
+    else if (k === 'proveedor_id' || k === 'proveedor' || k === 'prov_id')      m.proveedor_id = i;
+  });
+  return m;
+}
+
+function ifcoParsearImportTalonarios() {
+  const txt = document.getElementById('ifco-imp-textarea').value.trim();
+  if (!txt) { alert('Pegá los datos primero'); return; }
+  const lineas = txt.split(/\r?\n/).filter(function(l){ return l.trim().length > 0; });
+  if (lineas.length === 0) { alert('No hay líneas válidas'); return; }
+  // Detectar separador: tab si hay alguno, sino coma, sino ;
+  const sep = lineas[0].indexOf('\t') >= 0 ? '\t' : (lineas[0].indexOf(';') >= 0 ? ';' : ',');
+  const matriz = lineas.map(function(l){ return l.split(sep).map(function(c){ return c.trim(); }); });
+
+  let mapping = null;
+  let dataStart = 0;
+  if (_ifcoEsHeader(matriz[0])) {
+    mapping = _ifcoMapeoColumnas(matriz[0]);
+    dataStart = 1;
+  } else {
+    // Sin encabezados: usar orden por defecto serie | desde | hasta | cai | vto_cai | activo | notas | proveedor_id
+    mapping = { serie:0, desde:1, hasta:2, cai:3, vto_cai:4, activo:5, notas:6, proveedor_id:7 };
+  }
+
+  const items = [];
+  const errores = [];
+  for (let i = dataStart; i < matriz.length; i++) {
+    const fila = matriz[i];
+    const linea = i + 1;
+    const get = function(key){
+      const idx = mapping[key];
+      return (idx == null || idx >= fila.length) ? null : fila[idx];
+    };
+    const serie = get('serie');
+    const desdeRaw = get('desde');
+    const hastaRaw = get('hasta');
+    if (!serie && !desdeRaw && !hastaRaw) continue; // fila vacía
+    if (!serie)  { errores.push({ fila: linea, error: 'Falta serie' }); continue; }
+    const desde = parseInt((desdeRaw||'').replace(/\D/g,''));
+    const hasta = parseInt((hastaRaw||'').replace(/\D/g,''));
+    if (isNaN(desde) || isNaN(hasta)) { errores.push({ fila: linea, error: 'desde/hasta inválidos' }); continue; }
+    if (hasta < desde)                { errores.push({ fila: linea, error: 'hasta < desde' }); continue; }
+
+    const activoRaw = get('activo');
+    const activo = activoRaw && /^(1|si|sí|true|activo|y|yes)$/i.test(activoRaw.trim()) ? 1 : 0;
+
+    items.push({
+      serie: serie.trim(),
+      numero_desde: desde,
+      numero_hasta: hasta,
+      cai: get('cai') ? get('cai').trim() : null,
+      vto_cai: _ifcoNormalizarFecha(get('vto_cai')),
+      activo: activo,
+      notas: get('notas') ? get('notas').trim() : null,
+      proveedor_id: get('proveedor_id') ? parseInt(get('proveedor_id')) || null : null,
+      dueno_tipo: get('proveedor_id') && parseInt(get('proveedor_id')) ? 'proveedor' : 'san_geronimo'
+    });
+  }
+
+  _ifcoImpItems = items;
+  document.getElementById('ifco-imp-resumen').textContent =
+    '— ' + items.length + ' válidos · ' + errores.length + ' con error';
+  document.getElementById('ifco-imp-preview').style.display = 'block';
+  document.getElementById('ifco-imp-btn-go').disabled = (items.length === 0);
+
+  // Render tabla
+  let html = '<table style="width:100%;font-size:12px;border-collapse:collapse">' +
+    '<thead><tr style="background:var(--bg);text-align:left">' +
+      '<th style="padding:6px 8px">#</th>' +
+      '<th style="padding:6px 8px">Serie</th>' +
+      '<th style="padding:6px 8px;text-align:right">Desde</th>' +
+      '<th style="padding:6px 8px;text-align:right">Hasta</th>' +
+      '<th style="padding:6px 8px">CAI</th>' +
+      '<th style="padding:6px 8px">Vto CAI</th>' +
+      '<th style="padding:6px 8px">Activo</th>' +
+      '<th style="padding:6px 8px">Dueño</th>' +
+      '<th style="padding:6px 8px">Notas</th>' +
+    '</tr></thead><tbody>';
+  items.forEach(function(it, idx){
+    html += '<tr style="border-top:1px solid var(--bor)">' +
+      '<td style="padding:4px 8px;color:var(--mut)">'+(idx+1)+'</td>' +
+      '<td style="padding:4px 8px;font-family:monospace">'+_ifcoEsc(it.serie)+'</td>' +
+      '<td style="padding:4px 8px;text-align:right;font-family:monospace">'+_ifcoFmt(it.numero_desde)+'</td>' +
+      '<td style="padding:4px 8px;text-align:right;font-family:monospace">'+_ifcoFmt(it.numero_hasta)+'</td>' +
+      '<td style="padding:4px 8px;font-family:monospace;font-size:11px">'+_ifcoEsc(it.cai||'—')+'</td>' +
+      '<td style="padding:4px 8px;font-size:11px">'+_ifcoEsc(it.vto_cai||'—')+'</td>' +
+      '<td style="padding:4px 8px">'+(it.activo ? '<span style="color:var(--ok);font-weight:600">Sí</span>' : '<span style="color:var(--mut)">No</span>')+'</td>' +
+      '<td style="padding:4px 8px;font-size:11px">'+(it.dueno_tipo === 'proveedor' ? 'Prov #'+it.proveedor_id : 'SG')+'</td>' +
+      '<td style="padding:4px 8px;font-size:11px;color:var(--mut)">'+_ifcoEsc(it.notas||'')+'</td>' +
+    '</tr>';
+  });
+  html += '</tbody></table>';
+  document.getElementById('ifco-imp-tabla').innerHTML = html;
+
+  if (errores.length > 0) {
+    document.getElementById('ifco-imp-errores').innerHTML =
+      '<b>'+errores.length+' filas con error (no se importan):</b><br>' +
+      errores.slice(0, 20).map(function(e){ return '  Fila '+e.fila+': '+_ifcoEsc(e.error); }).join('<br>') +
+      (errores.length > 20 ? '<br>… y ' + (errores.length-20) + ' más' : '');
+  } else {
+    document.getElementById('ifco-imp-errores').innerHTML = '';
+  }
+}
+
+async function ifcoConfirmarImportTalonarios() {
+  if (!_ifcoImpItems || _ifcoImpItems.length === 0) { alert('No hay items para importar. Pegá los datos y dale a Vista previa.'); return; }
+  if (!confirm('¿Importar ' + _ifcoImpItems.length + ' talonario(s)? Esto también vinculará los despachos viejos que coincidan con cada rango.')) return;
+  const btn = document.getElementById('ifco-imp-btn-go');
+  btn.disabled = true; btn.textContent = 'Importando…';
+  try {
+    const r = await fetch('/api/ifco/talonarios/import', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ items: _ifcoImpItems })
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || ('HTTP ' + r.status));
+    let msg = '✓ Importación completa\n\n' +
+      'Total enviados: ' + d.total + '\n' +
+      'Creados: ' + d.creados + '\n' +
+      'Duplicados (omitidos): ' + d.duplicados + '\n' +
+      'Errores: ' + (d.errores ? d.errores.length : 0) + '\n' +
+      'Despachos viejos vinculados: ' + d.vinculados_despachos;
+    if (d.errores && d.errores.length > 0) {
+      msg += '\n\nDetalle de errores (primeros 10):\n' +
+        d.errores.slice(0, 10).map(function(e){ return '  Fila '+e.fila+': '+e.error; }).join('\n');
+    }
+    alert(msg);
+    document.getElementById('ifco-mb-talon-import').classList.remove('on');
+    if (typeof ifcoCargarTalonarios === 'function') ifcoCargarTalonarios();
+  } catch(e) {
+    alert('Error en la importación: ' + e.message);
+    btn.disabled = false; btn.textContent = 'Importar';
+  }
 }
 
 // VER detalle del talonario: grilla de los 25 N° con estado y click → remito

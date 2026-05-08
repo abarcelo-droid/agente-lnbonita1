@@ -639,6 +639,128 @@ router.post('/talonarios', function(req, res) {
   res.json({ id: r.lastInsertRowid });
 });
 
+// IMPORTAR talonarios masivamente (carga histórica) + backfill de despachos viejos.
+// Recibe { items: [{serie, numero_desde, numero_hasta, cai?, vto_cai?, activo?, notas?, dueno_tipo?, proveedor_id?}, ...] }
+// Por cada talonario que se inserta, vincula automáticamente los despachos existentes
+// que matchean por serie + número en rango (y mismo dueño).
+router.post('/talonarios/import', express.json({ limit: '2mb' }), function(req, res) {
+  if (!req.user || req.user.rol !== 'admin') {
+    return res.status(403).json({ error: 'Solo admin puede importar talonarios masivamente' });
+  }
+  const items = (req.body && Array.isArray(req.body.items)) ? req.body.items : [];
+  if (items.length === 0) return res.status(400).json({ error: 'No hay items para importar' });
+  if (items.length > 500) return res.status(400).json({ error: 'Demasiados items en una sola importación (máx 500)' });
+
+  const result = {
+    total: items.length,
+    creados: 0,
+    duplicados: 0,
+    errores: [],
+    vinculados_despachos: 0,
+    detalle: []
+  };
+
+  const insTal = db.prepare(`
+    INSERT INTO ifco_talonarios (serie, numero_desde, numero_hasta, cai, vto_cai, activo, notas, dueno_tipo, proveedor_id)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+  const insLog = db.prepare(`
+    INSERT INTO ifco_talonarios_log
+      (talonario_id, dueno_anterior_tipo, dueno_anterior_id, dueno_nuevo_tipo, dueno_nuevo_id, usuario_id, notas)
+    VALUES (?, NULL, NULL, ?, ?, ?, 'Importación histórica masiva')
+  `);
+  const checkDup = db.prepare(`
+    SELECT id FROM ifco_talonarios
+    WHERE serie = ? AND numero_desde = ? AND numero_hasta = ? AND dueno_tipo = ?
+      AND ((proveedor_id IS NULL AND ? IS NULL) OR proveedor_id = ?)
+  `);
+
+  // Backfill: actualiza ifco_remitos_super donde talonario_id IS NULL y matchea
+  const backfillSG = db.prepare(`
+    UPDATE ifco_remitos_super
+    SET talonario_id = ?
+    WHERE talonario_id IS NULL
+      AND eliminado_en IS NULL
+      AND origen = 'san_geronimo'
+      AND substr(n_remito_ifco, 1, instr(n_remito_ifco, '-') - 1) = ?
+      AND CAST(substr(n_remito_ifco, instr(n_remito_ifco, '-') + 1) AS INTEGER) BETWEEN ? AND ?
+  `);
+  const backfillProv = db.prepare(`
+    UPDATE ifco_remitos_super
+    SET talonario_id = ?
+    WHERE talonario_id IS NULL
+      AND eliminado_en IS NULL
+      AND origen = 'proveedor_directo'
+      AND proveedor_origen_id = ?
+      AND substr(n_remito_ifco, 1, instr(n_remito_ifco, '-') - 1) = ?
+      AND CAST(substr(n_remito_ifco, instr(n_remito_ifco, '-') + 1) AS INTEGER) BETWEEN ? AND ?
+  `);
+
+  const tx = db.transaction(function(items) {
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i] || {};
+      const idx = i + 1;
+
+      // Validaciones
+      const serie = item.serie ? String(item.serie).trim() : '';
+      if (!serie) { result.errores.push({ fila: idx, error: 'Falta serie' }); continue; }
+      const desde = parseInt(item.numero_desde);
+      const hasta = parseInt(item.numero_hasta);
+      if (isNaN(desde) || isNaN(hasta)) { result.errores.push({ fila: idx, error: 'numero_desde / numero_hasta inválidos' }); continue; }
+      if (hasta < desde)               { result.errores.push({ fila: idx, error: 'numero_hasta < numero_desde' }); continue; }
+
+      const dueno_tipo = (item.dueno_tipo === 'proveedor') ? 'proveedor' : 'san_geronimo';
+      let proveedor_id = null;
+      if (dueno_tipo === 'proveedor') {
+        proveedor_id = parseInt(item.proveedor_id) || null;
+        if (!proveedor_id) { result.errores.push({ fila: idx, error: 'Falta proveedor_id (dueno=proveedor)' }); continue; }
+        const exProv = db.prepare("SELECT id FROM proveedores WHERE id = ?").get(proveedor_id);
+        if (!exProv) { result.errores.push({ fila: idx, error: 'Proveedor inexistente: ' + proveedor_id }); continue; }
+      }
+
+      // Duplicado exacto?
+      const dup = checkDup.get(serie, desde, hasta, dueno_tipo, proveedor_id, proveedor_id);
+      if (dup) { result.duplicados++; continue; }
+
+      // Insertar
+      const rIns = insTal.run(
+        serie, desde, hasta,
+        item.cai || null,
+        item.vto_cai || null,
+        item.activo ? 1 : 0,
+        item.notas || null,
+        dueno_tipo,
+        proveedor_id
+      );
+      const newId = rIns.lastInsertRowid;
+      result.creados++;
+      try { insLog.run(newId, dueno_tipo, proveedor_id, (req.user && req.user.id) || null); } catch(_){}
+
+      // Backfill de despachos viejos (ya cargados sin talonario_id)
+      let vinculados = 0;
+      try {
+        if (dueno_tipo === 'san_geronimo') {
+          vinculados = backfillSG.run(newId, serie, desde, hasta).changes || 0;
+        } else {
+          vinculados = backfillProv.run(newId, proveedor_id, serie, desde, hasta).changes || 0;
+        }
+      } catch(e) {
+        console.error('[IFCO][import backfill]:', e.message);
+      }
+      result.vinculados_despachos += vinculados;
+      result.detalle.push({ id: newId, serie, desde, hasta, dueno_tipo, proveedor_id, vinculados });
+    }
+  });
+
+  try {
+    tx(items);
+    res.json(result);
+  } catch(e) {
+    console.error('[IFCO][talonarios/import]:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 router.patch('/talonarios/:id', function(req, res) {
   const d = req.body || {};
   const id = req.params.id;

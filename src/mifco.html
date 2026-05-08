@@ -146,6 +146,16 @@ body{padding-bottom:env(safe-area-inset-bottom)}
 
   <div class="muted" style="text-align:center;margin-bottom:18px;font-size:13px">¿Qué querés cargar?</div>
 
+  <!-- Solo visible para usuarios con depósito asignado: descarga PDF de movimientos último mes -->
+  <button class="menu-btn" id="btn-ver-stock" onclick="goVerMiStock()" style="display:none;background:#eef2ff;border-color:#6366f1">
+    <div class="emo">📄</div>
+    <div class="txt">
+      <div class="t1" style="color:#3730a3">VER MI STOCK</div>
+      <div class="t2">PDF con los movimientos del último mes</div>
+    </div>
+    <div class="arr" style="color:#3730a3">›</div>
+  </button>
+
   <button class="menu-btn" onclick="goCargarSellado()">
     <div class="emo">🔏</div>
     <div class="txt">
@@ -309,8 +319,8 @@ body{padding-bottom:env(safe-area-inset-bottom)}
     <input id="ns-numero-sg" type="text" placeholder="ej. 00001-00012345">
   </div>
   <div class="fld">
-    <label>Fecha emisión *</label>
-    <input id="ns-fecha" type="date">
+    <label>Fecha emisión <span style="color:var(--sub);font-weight:400;text-transform:none;font-size:11px">(día de hoy)</span></label>
+    <input id="ns-fecha" type="date" disabled>
   </div>
   <div class="fld">
     <label>Cadena *</label>
@@ -324,15 +334,9 @@ body{padding-bottom:env(safe-area-inset-bottom)}
       <option value="CHANGO MAS (DORINKA)">CHANGO MAS (DORINKA)</option>
     </select>
   </div>
-  <div class="row2">
-    <div class="fld">
-      <label>Cantidad despachada *</label>
-      <input id="ns-cant" type="number" min="1" inputmode="numeric">
-    </div>
-    <div class="fld">
-      <label>Producto</label>
-      <input id="ns-prod" type="text" placeholder="ej. mandarina">
-    </div>
+  <div class="fld">
+    <label>Cantidad despachada *</label>
+    <input id="ns-cant" type="number" min="1" inputmode="numeric">
   </div>
   <div class="fld">
     <label>Origen</label>
@@ -381,8 +385,8 @@ body{padding-bottom:env(safe-area-inset-bottom)}
     <input id="d-numero-sg" type="text" placeholder="ej. 00001-00012345">
   </div>
   <div class="fld">
-    <label>Fecha emisión *</label>
-    <input id="d-fecha" type="date">
+    <label>Fecha emisión <span style="color:var(--sub);font-weight:400;text-transform:none;font-size:11px">(día de hoy)</span></label>
+    <input id="d-fecha" type="date" disabled>
   </div>
   <div class="fld">
     <label>Cadena *</label>
@@ -396,15 +400,9 @@ body{padding-bottom:env(safe-area-inset-bottom)}
       <option value="CHANGO MAS (DORINKA)">CHANGO MAS (DORINKA)</option>
     </select>
   </div>
-  <div class="row2">
-    <div class="fld">
-      <label>Cantidad despachada *</label>
-      <input id="d-cant" type="number" min="1" inputmode="numeric">
-    </div>
-    <div class="fld">
-      <label>Producto</label>
-      <input id="d-prod" type="text" placeholder="ej. mandarina">
-    </div>
+  <div class="fld">
+    <label>Cantidad despachada *</label>
+    <input id="d-cant" type="number" min="1" inputmode="numeric">
   </div>
   <div class="fld">
     <label>Origen</label>
@@ -476,6 +474,9 @@ const S = {
       div.style.cssText = 'background:#dbeafe;border-bottom:1px solid #93c5fd;padding:8px 16px;text-align:center;font-size:12px;color:#1e40af;font-weight:500';
       div.textContent = '📍 ' + lbl;
       document.querySelector('.hd').insertAdjacentElement('afterend', div);
+      // Botón "Ver mi stock" → PDF de movimientos del depósito asignado
+      const btnVer = document.getElementById('btn-ver-stock');
+      if (btnVer) btnVer.style.display = '';
     }
     // El botón "Enviar a SG" solo se muestra a usuarios de tipo proveedor
     if (S.user.deposito_tipo === 'proveedor' && S.user.deposito_proveedor_id) {
@@ -658,12 +659,11 @@ async function onFotoSellado(ev) {
       }
       S.escaneoPath = d2.escaneo_path;
       S.ocrData = d2.datos;
-      // Prellenar
+      // Prellenar (fecha y producto ignorados de OCR — fecha siempre = hoy, producto removido)
       $('ns-numero').value = d2.datos.n_remito_ifco || data.n_remito_ifco || '';
-      $('ns-fecha').value  = d2.datos.fecha_emision || todayISO();
+      $('ns-fecha').value  = todayISO();
       $('ns-cadena').value = matchCadena(d2.datos.empresa);
       $('ns-cant').value   = d2.datos.cantidad_despachada || '';
-      $('ns-prod').value   = d2.datos.producto || '';
       $('ns-recib').value  = d2.datos.cantidad_recibida != null ? d2.datos.cantidad_recibida : (d2.datos.cantidad_despachada || '');
       $('ns-rech').value   = d2.datos.cantidad_rechazada || 0;
       $('ns-origen').value = 'san_geronimo';
@@ -723,13 +723,12 @@ function toggleProvOrigenNS() {
 
 async function confirmarCrearSellado() {
   const numero = $('ns-numero').value.trim();
-  const fecha  = $('ns-fecha').value;
+  const fecha  = todayISO(); // fecha siempre = hoy (no se lee del input que está bloqueado)
   const cadena = $('ns-cadena').value;
   const cant   = parseInt($('ns-cant').value || '0');
   const recib  = parseInt($('ns-recib').value || '0');
   const rech   = parseInt($('ns-rech').value  || '0');
   if (!numero) return alert('Falta el N° de remito');
-  if (!fecha)  return alert('Falta la fecha');
   if (!cadena) return alert('Seleccioná la cadena');
   if (cant <= 0) return alert('Cantidad despachada inválida');
   if (recib < 0 || rech < 0) return alert('Cantidades inválidas');
@@ -750,7 +749,6 @@ async function confirmarCrearSellado() {
     fd.append('fecha_emision', fecha);
     fd.append('empresa', cadena);
     fd.append('cantidad_despachada', String(cant));
-    fd.append('producto', $('ns-prod').value.trim());
     fd.append('origen', origen);
     if (provId) fd.append('proveedor_origen_id', String(provId));
     fd.append('fecha_sellado', fecha);  // default = fecha emisión
@@ -778,6 +776,34 @@ function goCargarDespacho() {
 }
 
 // ───── Enviar a SG (proveedor → depósito SG) ─────
+function goVerMiStock() {
+  if (!S.user || !S.user.deposito_tipo) {
+    alert('Tu usuario no tiene un depósito asignado. Pedile a tu administrador que te asigne uno.');
+    return;
+  }
+  // Computa rango "últimos 30 días" en formato YYYY-MM-DD
+  const hoy = new Date();
+  const desdeD = new Date(hoy.getTime() - 30 * 24 * 60 * 60 * 1000);
+  const fmt = function(d){
+    return d.getFullYear() + '-' +
+           String(d.getMonth()+1).padStart(2,'0') + '-' +
+           String(d.getDate()).padStart(2,'0');
+  };
+  const qs = '?desde=' + fmt(desdeD) + '&hasta=' + fmt(hoy);
+  let url;
+  if (S.user.deposito_tipo === 'san_geronimo') {
+    url = '/api/ifco/san-geronimo/movimientos.pdf' + qs;
+  } else if (S.user.deposito_tipo === 'proveedor' && S.user.deposito_proveedor_id) {
+    url = '/api/ifco/proveedores/' + S.user.deposito_proveedor_id + '/movimientos.pdf' + qs;
+  } else {
+    alert('No se pudo determinar tu depósito. Contactá al administrador.');
+    return;
+  }
+  // En PWA standalone, window.open puede ser bloqueado.
+  // Usamos window.location para asegurar que se abra el PDF (en navegador interno o externo según sistema).
+  window.open(url, '_blank') || (window.location.href = url);
+}
+
 function goEnviarSG() {
   if (!S.user || S.user.deposito_tipo !== 'proveedor' || !S.user.deposito_proveedor_id) {
     alert('Tu usuario no está asignado a un proveedor. Pedile a tu administrador que te asigne uno.');
@@ -882,12 +908,11 @@ async function onFotoDespacho(ev) {
     }
     S.escaneoPath = data.escaneo_path;
     S.ocrData = data.datos;
-    // Prellenar
+    // Prellenar (fecha y producto ignorados de OCR — fecha siempre = hoy, producto removido)
     $('d-numero').value = data.datos.n_remito_ifco || '';
-    $('d-fecha').value  = data.datos.fecha_emision || todayISO();
+    $('d-fecha').value  = todayISO();
     $('d-cadena').value = matchCadena(data.datos.empresa);
     $('d-cant').value   = data.datos.cantidad_despachada || '';
-    $('d-prod').value   = data.datos.producto || '';
     $('d-origen').value = 'san_geronimo';
     toggleProvOrigenD();
     aplicarDepositoUsuario('d-origen', 'd-prov-wrap', 'd-prov');
@@ -927,11 +952,10 @@ function aplicarDepositoUsuario(origenSelId, provWrapId, provSelId) {
 
 async function confirmarDespacho() {
   const numero = $('d-numero').value.trim();
-  const fecha  = $('d-fecha').value;
+  const fecha  = todayISO(); // fecha siempre = hoy (no se lee del input que está bloqueado)
   const cadena = $('d-cadena').value;
   const cant   = parseInt($('d-cant').value || '0');
   if (!numero) return alert('Falta el N° de remito');
-  if (!fecha)  return alert('Falta la fecha');
   if (!cadena) return alert('Seleccioná la cadena');
   if (cant <= 0) return alert('Cantidad despachada inválida');
   const origen = $('d-origen').value;
@@ -950,7 +974,6 @@ async function confirmarDespacho() {
     fd.append('fecha_emision', fecha);
     fd.append('empresa', cadena);
     fd.append('cantidad_despachada', String(cant));
-    fd.append('producto', $('d-prod').value.trim());
     fd.append('origen', origen);
     if (provId) fd.append('proveedor_origen_id', String(provId));
     if (S.fotoFile) fd.append('escaneo_original', S.fotoFile);
