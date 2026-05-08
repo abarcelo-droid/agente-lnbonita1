@@ -1921,5 +1921,38 @@ db.exec(`
   } catch(e) { console.error('[FIN] Error migrando caja/bancos:', e.message); }
 })();
 
+// ── MÓDULO ÓRDENES DE PAGO ────────────────────────────────────────────────────
+(function() {
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS fin_ordenes_pago (
+        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+        numero          TEXT UNIQUE,
+        fecha           TEXT NOT NULL DEFAULT (date('now','localtime')),
+        proveedor_id    INTEGER NOT NULL REFERENCES adm_proveedores(id),
+        monto_total     REAL NOT NULL,
+        forma_pago      TEXT NOT NULL DEFAULT 'transferencia',
+        cuenta_fin_id   INTEGER REFERENCES fin_cuentas(id),
+        cheque_prop_id  INTEGER REFERENCES fin_cheques_propios(id),
+        cheque_ter_id   INTEGER REFERENCES fin_cheques_terceros(id),
+        referencia      TEXT,
+        notas           TEXT,
+        estado          TEXT NOT NULL DEFAULT 'emitida',
+        asiento_id      INTEGER,
+        movimiento_id   INTEGER,
+        usuario_id      INTEGER,
+        creado_en       TEXT DEFAULT (datetime('now','localtime'))
+      );
+      CREATE TABLE IF NOT EXISTS fin_op_compras (
+        id        INTEGER PRIMARY KEY AUTOINCREMENT,
+        op_id     INTEGER NOT NULL REFERENCES fin_ordenes_pago(id),
+        compra_id INTEGER NOT NULL REFERENCES pa_compras(id),
+        monto     REAL NOT NULL
+      );
+    `);
+    console.log('[FIN] Tablas ordenes de pago listas');
+  } catch(e) { console.error('[FIN] Error migrando ordenes_pago:', e.message); }
+})();
+
 export { db };
 export default db;
