@@ -3465,10 +3465,6 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
         ✓ Campos prellenados por la IA. <b>Revisá cada uno</b> antes de guardar.
       </div>
       <div class="ab-grid ab-grid-2" style="gap:10px">
-      <div style="grid-column:span 2" id="ifco-r-talonario-wrap" style="display:none">
-        <label style="font-size:11px;color:var(--mut);text-transform:uppercase">Talonario a usar *</label>
-        <select id="ifco-r-talonario" onchange="ifcoOnTalonarioChange()" style="width:100%;padding:8px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg)"></select>
-      </div>
       <div>
         <label style="font-size:11px;color:var(--mut);text-transform:uppercase">N° Remito IFCO *</label>
         <input id="ifco-r-numero" type="text" placeholder="00015-01639431"
@@ -3500,10 +3496,6 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       <div>
         <label style="font-size:11px;color:var(--mut);text-transform:uppercase">Cantidad despachada *</label>
         <input id="ifco-r-cantidad" type="number" min="1" placeholder="50" style="width:100%;padding:8px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg)">
-      </div>
-      <div>
-        <label style="font-size:11px;color:var(--mut);text-transform:uppercase">Producto</label>
-        <input id="ifco-r-producto" type="text" placeholder="Ej: mandarina malvina, naranja..." style="width:100%;padding:8px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg)">
       </div>
       </div>
 
@@ -15994,14 +15986,17 @@ function ifcoAbrirNuevoRemito() {
   const tit = document.querySelector('#ifco-mb-remito .mht');
   if (tit) tit.textContent = '📥 Nuevo despacho a supermercado';
   // Reset campos
-  ['ifco-r-numero','ifco-r-numero-sg','ifco-r-cantidad','ifco-r-producto','ifco-r-recib']
+  ['ifco-r-numero','ifco-r-numero-sg','ifco-r-cantidad','ifco-r-recib']
     .forEach(function(id){ const el = document.getElementById(id); if (el) el.value = ''; });
   const rech = document.getElementById('ifco-r-rech'); if (rech) rech.value = '0';
   const rechDest = document.getElementById('ifco-r-rech-dest'); if (rechDest) rechDest.value = 'san_geronimo';
   // Reset checkbox "Ya viene sellado"
   const ckYa = document.getElementById('ifco-r-ya-sellado');
   if (ckYa) { ckYa.checked = false; ifcoOnYaSelladoChange(); }
-  document.getElementById('ifco-r-fecha').value = _ifcoToday();
+  // Fecha bloqueada al día de hoy (no importa qué fecha tenga el remito real)
+  const fechaInput = document.getElementById('ifco-r-fecha');
+  fechaInput.value = _ifcoToday();
+  fechaInput.disabled = true;
   document.getElementById('ifco-r-cliente').value = '';
   document.getElementById('ifco-r-sugerencia').textContent = '';
   // Reset origen al default (SG)
@@ -16139,12 +16134,10 @@ async function ifcoOnFotoDespacho(ev) {
       }
       IFCO._fotoDespachoPath = data.escaneo_path;
       const d = data.datos;
-      // Prellenar datos del despacho
+      // Prellenar datos del despacho (fecha y producto ignorados — fecha siempre = hoy, producto removido)
       if (d.n_remito_ifco)           document.getElementById('ifco-r-numero').value = d.n_remito_ifco;
-      if (d.fecha_emision)           document.getElementById('ifco-r-fecha').value = d.fecha_emision;
       if (d.empresa)                 document.getElementById('ifco-r-cliente').value = _ifcoMatchCadena(d.empresa);
       if (d.cantidad_despachada)     document.getElementById('ifco-r-cantidad').value = d.cantidad_despachada;
-      if (d.producto)                document.getElementById('ifco-r-producto').value = d.producto;
       // Prellenar datos del sellado (solo si tipo=completo y vinieron)
       if (yaSellado) {
         if (d.cantidad_recibida != null) document.getElementById('ifco-r-recib').value         = d.cantidad_recibida;
@@ -16192,6 +16185,9 @@ async function ifcoSugerirNumero(input) {
 
 // Carga la lista de talonarios activos según el origen actual y arma el selector
 async function ifcoCargarTalonariosActivos() {
+  // Ya no hay dropdown de talonario en el UI: el backend infiere automáticamente
+  // basándose en el N° de remito ingresado. Esta función solo sirve ahora para
+  // sugerir el próximo número del primer talonario activo y mostrar info en el sub-label.
   const origen = document.querySelector('input[name="ifco-r-origen"]:checked').value;
   let url = '/api/ifco/talonarios/activos';
   if (origen === 'san_geronimo') {
@@ -16199,52 +16195,31 @@ async function ifcoCargarTalonariosActivos() {
   } else {
     const provId = document.getElementById('ifco-r-prov-origen').value;
     if (!provId) {
-      document.getElementById('ifco-r-sugerencia').textContent = 'Elegí primero el proveedor de origen';
+      const sugN = document.getElementById('ifco-r-sugerencia');
+      if (sugN) sugN.textContent = 'Elegí primero el proveedor de origen';
       return;
     }
     url += '?proveedor_id=' + encodeURIComponent(provId);
   }
   try {
     const lista = await _ifcoFetch(url);
-    const wrap = document.getElementById('ifco-r-talonario-wrap');
-    const sel = document.getElementById('ifco-r-talonario');
     const sug = document.getElementById('ifco-r-sugerencia');
-    const inp = document.getElementById('ifco-r-numero');
     IFCO._talonariosActivos = {};
+    IFCO._talonActivo = null;
     if (!lista || lista.length === 0) {
-      wrap.style.display = 'none';
-      sug.textContent = '⚠ No hay talonarios activos para este origen. Cargá uno en la pestaña Talonarios.';
+      if (sug) sug.textContent = '⚠ No hay talonarios activos para este origen. Cargá uno en la pestaña Talonarios.';
       return;
     }
-    if (lista.length === 1) {
-      // Un solo activo: lo usamos directo, sin mostrar selector
-      wrap.style.display = 'none';
-      const t = lista[0];
-      IFCO._talonActivo = t.talonario.id;
-      IFCO._talonariosActivos[t.talonario.id] = t;
-      _ifcoAplicarTalonario(t);
-      return;
-    }
-    // Varios activos: mostrar selector
-    wrap.style.display = '';
-    sel.innerHTML = lista.map(function(t){
-      const txt = t.talonario.serie + (t.proximo ? ' · próx '+t.proximo+' · '+t.disponibles+' disp.' : ' · agotado');
-      IFCO._talonariosActivos[t.talonario.id] = t;
-      return '<option value="'+t.talonario.id+'">'+_ifcoEsc(txt)+'</option>';
-    }).join('');
-    // Aplicar el primero como default
-    sel.value = lista[0].talonario.id;
-    IFCO._talonActivo = lista[0].talonario.id;
-    _ifcoAplicarTalonario(lista[0]);
+    // Tomar el primero como sugerido (el backend va a inferir el real desde el N° final).
+    const t = lista[0];
+    IFCO._talonActivo = t.talonario.id;
+    lista.forEach(function(x){ IFCO._talonariosActivos[x.talonario.id] = x; });
+    _ifcoAplicarTalonario(t);
   } catch(e) { /* silent */ }
 }
 
 function ifcoOnTalonarioChange() {
-  const sel = document.getElementById('ifco-r-talonario');
-  const t = IFCO._talonariosActivos[sel.value];
-  if (!t) return;
-  IFCO._talonActivo = t.talonario.id;
-  _ifcoAplicarTalonario(t);
+  // No-op: dropdown sacado del UI, backend infiere talonario_id solo.
 }
 
 function _ifcoAplicarTalonario(t) {
@@ -16287,7 +16262,6 @@ async function ifcoGuardarRemito() {
       fecha_emision:           document.getElementById('ifco-r-fecha').value,
       empresa:                 cadena,
       cantidad_despachada:     cant,
-      producto:                document.getElementById('ifco-r-producto').value.trim() || null,
       origen:                  origen,
       proveedor_origen_id:     provOrigenId || null
     };
@@ -16313,10 +16287,9 @@ async function ifcoGuardarRemito() {
   fd.append('fecha_emision', document.getElementById('ifco-r-fecha').value);
   fd.append('empresa', cadena);
   fd.append('cantidad_despachada', String(cant));
-  fd.append('producto', document.getElementById('ifco-r-producto').value.trim());
   fd.append('origen', origen);
   if (origen === 'proveedor_directo') fd.append('proveedor_origen_id', provOrigenId);
-  if (IFCO._talonActivo) fd.append('talonario_id', String(IFCO._talonActivo));
+  // talonario_id ya no se envía: el backend lo infiere automáticamente desde el N° de remito
 
   let endpoint;
   if (yaSellado) {
@@ -16382,11 +16355,13 @@ async function ifcoAbrirEditarRemito(id) {
     document.getElementById('ifco-r-prov-origen-wrap').style.display = (r.origen === 'proveedor_directo') ? 'block' : 'none';
     // Campos
     document.getElementById('ifco-r-numero').value         = r.n_remito_ifco || '';
-    document.getElementById('ifco-r-fecha').value          = r.fecha_emision || '';
+    // En edición permitimos cambiar la fecha (a diferencia del modo nuevo donde está bloqueada a hoy)
+    const fechaInputEdit = document.getElementById('ifco-r-fecha');
+    fechaInputEdit.disabled = false;
+    fechaInputEdit.value                                   = r.fecha_emision || '';
     document.getElementById('ifco-r-cliente').value        = r.empresa || '';
     document.getElementById('ifco-r-numero-sg').value      = r.n_remito_sg || '';
     document.getElementById('ifco-r-cantidad').value       = r.cantidad_despachada || '';
-    document.getElementById('ifco-r-producto').value       = r.producto || '';
     document.getElementById('ifco-r-sugerencia').textContent = '';
     // Editar es solo en estado 'despachado' → forzar checkbox off (oculta campos del sellado)
     const ckYa = document.getElementById('ifco-r-ya-sellado');
