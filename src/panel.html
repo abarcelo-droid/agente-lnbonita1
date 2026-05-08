@@ -2821,6 +2821,17 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   <div class="ifco-pane on" id="ifco-pane-resumen">
     <div id="ifco-resumen-loading" style="text-align:center;padding:40px;color:var(--mut)">Cargando…</div>
     <div id="ifco-resumen-content" style="display:none">
+      <!-- Banner alerta jueves 10am: stocks reales sin cargar (al top, encima de los KPIs) -->
+      <div id="ifco-stocks-alerta" style="display:none;background:#fef3c7;border:1px solid #f59e0b;border-radius:8px;padding:12px 16px;margin-bottom:16px;font-size:13px">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:10px">
+          <div>
+            ⏰ <b>Toca actualizar el conteo físico de stocks</b> — Todos los jueves 10am.
+            <span id="ifco-stocks-alerta-detalle" style="color:#92400e"></span>
+          </div>
+          <button class="btn bb" style="font-size:12px;padding:6px 12px" onclick="document.getElementById('ifco-stocks-card').scrollIntoView({behavior:'smooth'})">Ir a cargar →</button>
+        </div>
+      </div>
+
       <div class="ab-grid ab-grid-4" style="margin-bottom:16px">
         <div class="ifco-card ifco-stat">
           <div class="ifco-stat-lbl">PISO actual</div>
@@ -2837,20 +2848,14 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
           <div class="ifco-stat-val" id="ifco-st-total">—</div>
           <div class="ifco-stat-sub">total = piso + proveedores + tránsito</div>
         </div>
+        <div class="ifco-card ifco-stat">
+          <div class="ifco-stat-lbl">Diferencia total</div>
+          <div class="ifco-stat-val" id="ifco-st-dif" style="color:var(--mut)">—</div>
+          <div class="ifco-stat-sub" id="ifco-st-dif-sub">real vs teórico (cajones)</div>
+        </div>
       </div>
 
       <div id="ifco-alertas" style="margin-bottom:16px"></div>
-
-      <!-- Banner alerta jueves 10am: stocks reales sin cargar -->
-      <div id="ifco-stocks-alerta" style="display:none;background:#fef3c7;border:1px solid #f59e0b;border-radius:8px;padding:12px 16px;margin-bottom:16px;font-size:13px">
-        <div style="display:flex;align-items:center;justify-content:space-between;gap:10px">
-          <div>
-            ⏰ <b>Toca actualizar el conteo físico de stocks</b> — Todos los jueves 10am.
-            <span id="ifco-stocks-alerta-detalle" style="color:#92400e"></span>
-          </div>
-          <button class="btn bb" style="font-size:12px;padding:6px 12px" onclick="document.getElementById('ifco-stocks-card').scrollIntoView({behavior:'smooth'})">Ir a cargar →</button>
-        </div>
-      </div>
 
       <!-- Recepciones en viaje (pendientes de confirmar por SG) -->
       <div id="ifco-en-viaje-card" class="ifco-card" style="margin-bottom:16px;display:none;border-color:#f59e0b;background:#fffbeb">
@@ -15239,6 +15244,30 @@ async function ifcoCargarStocksReales() {
       detalle.textContent = ' Faltan ' + faltan.length + ' depósito(s): ' + faltan.map(function(x){return x.nombre;}).join(', ');
     } else {
       banner.style.display = 'none';
+    }
+    // KPI tarjeta "Diferencia total" — suma de diferencias de los depósitos con conteo cargado.
+    // Solo es significativo cuando todos los depósitos tienen conteo (si no, es parcial).
+    const conConteo = data.items.filter(function(it){ return it.real != null; });
+    const totalDeps = data.items.length;
+    const difEl    = document.getElementById('ifco-st-dif');
+    const difSubEl = document.getElementById('ifco-st-dif-sub');
+    if (conConteo.length === 0) {
+      difEl.textContent = '—';
+      difEl.style.color = 'var(--mut)';
+      difSubEl.textContent = 'sin conteos cargados aún';
+      difSubEl.style.color = 'var(--mut)';
+    } else {
+      const sumDif = conConteo.reduce(function(a, it){ return a + (it.diferencia || 0); }, 0);
+      const signo = sumDif > 0 ? '+' : '';
+      difEl.textContent = signo + _ifcoFmt(sumDif);
+      if (sumDif < 0)      difEl.style.color = '#991b1b'; // rojo: faltan
+      else if (sumDif > 0) difEl.style.color = '#1e40af'; // azul: sobran
+      else                 difEl.style.color = 'var(--ok)'; // verde: 0
+      const completo = (conConteo.length === totalDeps);
+      difSubEl.textContent = completo
+        ? 'real vs teórico (todos los depósitos)'
+        : 'parcial: ' + conConteo.length + ' de ' + totalDeps + ' depósitos';
+      difSubEl.style.color = completo ? 'var(--mut)' : '#92400e';
     }
     // KPI de pérdida potencial total (suma de diferencias negativas del último conteo)
     const kpi = document.getElementById('ifco-stocks-perdida-kpi');
