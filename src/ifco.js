@@ -2817,7 +2817,7 @@ function _stockTeoricoDeposito(deposito_tipo, proveedor_id) {
     const retiros     = get(`SELECT COALESCE(SUM(cantidad),0) AS total FROM ifco_movimientos WHERE tipo='retiro'  AND eliminado_en IS NULL`);
     const perdidas    = get(`SELECT COALESCE(SUM(cantidad),0) AS total FROM ifco_movimientos WHERE tipo='perdida' AND eliminado_en IS NULL`);
     const despachados = get(`SELECT COALESCE(SUM(cantidad_despachada),0) AS total FROM ifco_remitos_super WHERE eliminado_en IS NULL AND origen='san_geronimo'`);
-    const enviados    = get(`SELECT COALESCE(SUM(cantidad),0) AS total FROM ifco_envios_proveedor WHERE eliminado_en IS NULL`);
+    const enviados    = get(`SELECT COALESCE(SUM(cantidad_enviada),0) AS total FROM ifco_envios_proveedor WHERE eliminado_en IS NULL`);
     const recepciones = get(`SELECT COALESCE(SUM(cantidad),0) AS total FROM ifco_recepciones_proveedor WHERE eliminado_en IS NULL AND (estado IS NULL OR estado='recibido')`);
     const rechazadosASG = get(`SELECT COALESCE(SUM(cantidad_rechazada),0) AS total FROM ifco_remitos_super WHERE eliminado_en IS NULL AND cantidad_rechazada>0 AND (rechazo_destino IS NULL OR rechazo_destino='san_geronimo')`);
     return retiros - perdidas - despachados - enviados + recepciones + rechazadosASG;
