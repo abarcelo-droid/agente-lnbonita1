@@ -3257,14 +3257,13 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     <div style="display:flex;gap:8px;margin-bottom:12px;align-items:center">
       <button class="btn bb" onclick="ifcoAbrirNuevoTalonario()">+ Nuevo talonario</button>
       <button class="btn bo" onclick="ifcoAbrirImportTalonarios()" title="Importar talonarios históricos desde Excel + vincular despachos viejos">📥 Importar histórico</button>
-      <div id="ifco-talon-info" style="font-size:12px;color:var(--mut);margin-left:auto"></div>
     </div>
     <div class="ab-table-wrap">
       <table class="ab-table" id="ifco-tbl-talons">
         <thead><tr>
           <th>Serie</th><th>Rango</th><th>CAI</th><th>Vto. CAI</th>
           <th style="text-align:right">Usados</th><th style="text-align:right">Disponibles</th>
-          <th>Estado</th><th></th>
+          <th></th>
         </tr></thead>
         <tbody></tbody>
       </table>
@@ -3429,7 +3428,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
         </label>
         <div id="ifco-r-prov-origen-wrap" style="display:none;margin-top:10px;padding-top:10px;border-top:1px solid var(--bor)">
           <label style="font-size:11px;color:var(--mut);text-transform:uppercase">Proveedor de origen *</label>
-          <select id="ifco-r-prov-origen" onchange="ifcoCargarTalonariosActivos();document.getElementById('ifco-r-numero').value=''" style="width:100%;padding:8px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg)">
+          <select id="ifco-r-prov-origen" onchange="document.getElementById('ifco-r-numero').value=''" style="width:100%;padding:8px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg)">
             <option value="">— Seleccionar proveedor —</option>
           </select>
         </div>
@@ -3469,9 +3468,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       <div>
         <label style="font-size:11px;color:var(--mut);text-transform:uppercase">N° Remito IFCO *</label>
         <input id="ifco-r-numero" type="text" placeholder="00015-01639431"
-               style="width:100%;padding:8px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg);font-family:monospace;font-size:14px"
-               onfocus="ifcoSugerirNumero(this)">
-        <div id="ifco-r-sugerencia" style="font-size:11px;color:var(--mut);margin-top:3px"></div>
+               style="width:100%;padding:8px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg);font-family:monospace;font-size:14px">
       </div>
       <div>
         <label style="font-size:11px;color:var(--mut);text-transform:uppercase">Fecha emisión *</label>
@@ -4043,13 +4040,6 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       <div>
         <label style="font-size:11px;color:var(--mut);text-transform:uppercase">Serie *</label>
         <input id="ifco-t-serie" type="text" placeholder="00015" style="width:100%;padding:8px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg);font-family:monospace">
-      </div>
-      <div>
-        <label style="font-size:11px;color:var(--mut);text-transform:uppercase">Activo</label>
-        <select id="ifco-t-activo" style="width:100%;padding:8px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg)">
-          <option value="1">Sí (desactiva los demás)</option>
-          <option value="0">No</option>
-        </select>
       </div>
       <div>
         <label style="font-size:11px;color:var(--mut);text-transform:uppercase">Número desde *</label>
@@ -16004,17 +15994,35 @@ function _ifcoRenderRemitos() {
     }
 
     return '<tr>' +
-      '<td style="font-family:monospace;font-size:12px"><b>'+_ifcoEsc(r.n_remito_ifco)+'</b></td>' +
-      '<td>'+_ifcoFecha(r.fecha_emision)+'</td>' +
-      '<td>'+_ifcoEsc(r.empresa||'—')+'</td>' +
+      '<td style="font-family:monospace;font-size:14px;font-weight:600;letter-spacing:0.02em">'+_ifcoEsc(r.n_remito_ifco)+'</td>' +
+      '<td style="font-size:12px;color:var(--mut)">'+_ifcoFecha(r.fecha_emision)+'</td>' +
+      '<td style="font-size:12px">'+_ifcoEsc(r.empresa||'—')+'</td>' +
       '<td>'+origenCell+'</td>' +
       '<td style="text-align:right;font-variant-numeric:tabular-nums"><b>'+_ifcoFmt(r.cantidad_despachada)+'</b></td>' +
       '<td style="text-align:right;font-variant-numeric:tabular-nums">'+(r.cantidad_recibida != null ? _ifcoFmt(r.cantidad_recibida) : '—')+'</td>' +
       '<td style="text-align:right;font-variant-numeric:tabular-nums">'+(r.cantidad_rechazada != null && r.cantidad_rechazada > 0 ? _ifcoFmt(r.cantidad_rechazada) : '—')+'</td>' +
-      '<td>'+_ifcoBadge(r.estado)+'</td>' +
+      '<td>'+_ifcoEstadoBig(r.estado)+'</td>' +
       '<td style="display:flex;gap:4px;flex-wrap:wrap">'+acciones.join('')+'</td>' +
     '</tr>';
   }).join('');
+}
+
+// Badge de estado prominente para la tabla principal de despachos.
+// Más grande, más bold, colores marcados según el estado del flujo.
+function _ifcoEstadoBig(estado) {
+  const map = {
+    'despachado': { bg: '#fef3c7', txt: '#92400e', border: '#f59e0b', label: 'DESPACHADO' },
+    'sellado':    { bg: '#dbeafe', txt: '#1e3a8a', border: '#3b82f6', label: 'SELLADO' },
+    'presentado': { bg: '#dcfce7', txt: '#14532d', border: '#16a34a', label: 'PRESENTADO' },
+    'consolidado':{ bg: '#dcfce7', txt: '#14532d', border: '#16a34a', label: 'CONSOLIDADO' },
+    'anulado':    { bg: '#fee2e2', txt: '#991b1b', border: '#dc2626', label: 'ANULADO' },
+    'rechazado':  { bg: '#fee2e2', txt: '#991b1b', border: '#dc2626', label: 'RECHAZADO' }
+  };
+  const s = map[estado] || { bg: '#f3f4f6', txt: '#374151', border: '#d1d5db', label: String(estado||'—').toUpperCase() };
+  return '<span style="display:inline-block;padding:5px 12px;border-radius:6px;'
+       + 'background:'+s.bg+';color:'+s.txt+';border:1px solid '+s.border+';'
+       + 'font-size:12px;font-weight:700;letter-spacing:0.04em;text-transform:uppercase;'
+       + 'font-variant-numeric:tabular-nums">'+s.label+'</span>';
 }
 
 function ifcoAbrirNuevoRemito() {
@@ -16035,7 +16043,6 @@ function ifcoAbrirNuevoRemito() {
   fechaInput.value = _ifcoToday();
   fechaInput.disabled = true;
   document.getElementById('ifco-r-cliente').value = '';
-  document.getElementById('ifco-r-sugerencia').textContent = '';
   // Reset origen al default (SG)
   document.querySelectorAll('input[name="ifco-r-origen"]').forEach(function(r){ r.checked = (r.value === 'san_geronimo'); });
   document.getElementById('ifco-r-prov-origen-wrap').style.display = 'none';
@@ -16065,9 +16072,7 @@ function ifcoAbrirNuevoRemito() {
 function ifcoOnOrigenChange() {
   const v = document.querySelector('input[name="ifco-r-origen"]:checked').value;
   document.getElementById('ifco-r-prov-origen-wrap').style.display = (v === 'proveedor_directo') ? 'block' : 'none';
-  // Recargar talonarios disponibles según el origen
   document.getElementById('ifco-r-numero').value = '';
-  ifcoCargarTalonariosActivos();
 }
 
 // Toggle del checkbox "Ya viene sellado"
@@ -16135,8 +16140,6 @@ function ifcoSaltarOcrDespacho() {
   document.getElementById('ifco-r-volver').style.display = 'block';
   document.getElementById('ifco-r-btn-guardar').style.display = 'inline-block';
   document.getElementById('ifco-r-ocr-aviso').style.display = 'none';
-  // Sugerir n° del talonario activo
-  ifcoSugerirNumero(document.getElementById('ifco-r-numero'));
 }
 
 async function ifcoOnFotoDespacho(ev) {
@@ -16215,64 +16218,12 @@ function _ifcoMatchCadena(textoOcr) {
   return '';
 }
 
-async function ifcoSugerirNumero(input) {
-  if (input.value) return;
-  await ifcoCargarTalonariosActivos();
-}
-
-// Carga la lista de talonarios activos según el origen actual y arma el selector
-async function ifcoCargarTalonariosActivos() {
-  // Ya no hay dropdown de talonario en el UI: el backend infiere automáticamente
-  // basándose en el N° de remito ingresado. Esta función solo sirve ahora para
-  // sugerir el próximo número del primer talonario activo y mostrar info en el sub-label.
-  const origen = document.querySelector('input[name="ifco-r-origen"]:checked').value;
-  let url = '/api/ifco/talonarios/activos';
-  if (origen === 'san_geronimo') {
-    url += '?dueno=san_geronimo';
-  } else {
-    const provId = document.getElementById('ifco-r-prov-origen').value;
-    if (!provId) {
-      const sugN = document.getElementById('ifco-r-sugerencia');
-      if (sugN) sugN.textContent = 'Elegí primero el proveedor de origen';
-      return;
-    }
-    url += '?proveedor_id=' + encodeURIComponent(provId);
-  }
-  try {
-    const lista = await _ifcoFetch(url);
-    const sug = document.getElementById('ifco-r-sugerencia');
-    IFCO._talonariosActivos = {};
-    IFCO._talonActivo = null;
-    if (!lista || lista.length === 0) {
-      if (sug) sug.textContent = '⚠ No hay talonarios activos para este origen. Cargá uno en la pestaña Talonarios.';
-      return;
-    }
-    // Tomar el primero como sugerido (el backend va a inferir el real desde el N° final).
-    const t = lista[0];
-    IFCO._talonActivo = t.talonario.id;
-    lista.forEach(function(x){ IFCO._talonariosActivos[x.talonario.id] = x; });
-    _ifcoAplicarTalonario(t);
-  } catch(e) { /* silent */ }
-}
-
-function ifcoOnTalonarioChange() {
-  // No-op: dropdown sacado del UI, backend infiere talonario_id solo.
-}
-
-function _ifcoAplicarTalonario(t) {
-  const inp = document.getElementById('ifco-r-numero');
-  const sug = document.getElementById('ifco-r-sugerencia');
-  if (t.proximo) {
-    inp.value = t.proximo;
-    let txt = '✓ Próximo del talonario ' + t.talonario.serie + '. Quedan ' + t.disponibles + ' disponibles.';
-    if (t.cai_alerta)    txt += ' ⚠️ CAI vence en ' + t.dias_cai + ' días.';
-    if (t.pocos_remitos) txt += ' ⚠️ ¡Quedan pocos remitos!';
-    sug.textContent = txt;
-  } else if (t.agotado) {
-    inp.value = '';
-    sug.textContent = '⚠️ Talonario ' + t.talonario.serie + ' agotado.';
-  }
-}
+// Funciones legacy del sistema de "talonario activo" / sugerencia de próximo número.
+// Quedan como no-ops por compatibilidad con llamadas que pudieran sobrevivir.
+async function ifcoSugerirNumero(input) { /* no-op: ya no se sugieren números */ }
+async function ifcoCargarTalonariosActivos() { /* no-op: ya no hay concepto de talonario activo */ }
+function ifcoOnTalonarioChange() { /* no-op */ }
+function _ifcoAplicarTalonario(t) { /* no-op */ }
 
 function ifcoOnClienteChange() { /* placeholder, ya no se usa */ }
 
@@ -16399,7 +16350,6 @@ async function ifcoAbrirEditarRemito(id) {
     document.getElementById('ifco-r-cliente').value        = r.empresa || '';
     document.getElementById('ifco-r-numero-sg').value      = r.n_remito_sg || '';
     document.getElementById('ifco-r-cantidad').value       = r.cantidad_despachada || '';
-    document.getElementById('ifco-r-sugerencia').textContent = '';
     // Editar es solo en estado 'despachado' → forzar checkbox off (oculta campos del sellado)
     const ckYa = document.getElementById('ifco-r-ya-sellado');
     if (ckYa) { ckYa.checked = false; ifcoOnYaSelladoChange(); }
@@ -17185,8 +17135,7 @@ async function ifcoConfirmarPresentar() {
 async function ifcoCargarEnvios() {
   const estado = document.getElementById('ifco-flt-env-estado').value;
   const params = new URLSearchParams();
-  if (estado) params.set('estado', estado);
-  try {
+  if (estado) params.set('estado', estado);  try {
     const rows = await _ifcoFetch('/api/ifco/envios?' + params.toString());
     const tb = document.querySelector('#ifco-tbl-envios tbody');
     if (rows.length === 0) {
@@ -17195,7 +17144,11 @@ async function ifcoCargarEnvios() {
     }
     tb.innerHTML = rows.map(function(r){
       const acciones = [];
-      acciones.push('<button class="btn bo" style="font-size:11px;padding:4px 8px" onclick="ifcoImprimirEnvio('+r.id+')">🖨️</button>');
+      acciones.push('<button class="btn bo" style="font-size:11px;padding:4px 8px" onclick="ifcoImprimirEnvio('+r.id+')" title="Vista imprimible (versión SG)">🖨️</button>');
+      // Botón nuevo: copiar link público para el proveedor
+      if (r.aceptacion_token) {
+        acciones.push('<button class="btn bo" style="font-size:11px;padding:4px 8px" onclick="ifcoCopiarLinkEnvio(\''+_ifcoEsc(r.n_remito_interno)+'\', \''+_ifcoEsc(r.aceptacion_token)+'\')" title="Copia el link para mandar al proveedor por WhatsApp">🔗 Link</button>');
+      }
       // Editar solo si estado='enviado' (no parcial ni recibido)
       if (r.estado === 'enviado') {
         acciones.push('<button class="btn bo" style="font-size:11px;padding:4px 8px" onclick="ifcoAbrirEditarEnvio('+r.id+')">Editar</button>');
@@ -17206,13 +17159,25 @@ async function ifcoCargarEnvios() {
       }
       // Eliminar siempre
       acciones.push('<button class="btn bo" style="font-size:11px;padding:4px 8px;color:#991b1b" onclick="ifcoEliminarEnvio('+r.id+', \''+_ifcoEsc(r.n_remito_interno)+'\')">🗑️</button>');
+
+      // Badge de aceptación digital del proveedor (debajo del estado del envío)
+      let aceptHtml = '';
+      if (r.aceptado_en) {
+        const cuando = _ifcoFecha(r.aceptado_en);
+        aceptHtml = '<div style="font-size:10px;color:#15803d;margin-top:2px" title="Aceptado por '+_ifcoEsc(r.aceptado_por_nombre||'?')+' DNI '+_ifcoEsc(r.aceptado_por_dni||'?')+' el '+cuando+'">✓ Aceptado</div>';
+      } else if (r.visto_en) {
+        aceptHtml = '<div style="font-size:10px;color:#92400e;margin-top:2px" title="El proveedor abrió el link el '+_ifcoFecha(r.visto_en)+' pero todavía no confirmó">👁 Visto, sin confirmar</div>';
+      } else {
+        aceptHtml = '<div style="font-size:10px;color:var(--mut);margin-top:2px">⏳ Sin abrir</div>';
+      }
+
       return '<tr>' +
         '<td style="font-family:monospace;font-size:12px"><b>'+_ifcoEsc(r.n_remito_interno)+'</b></td>' +
         '<td>'+_ifcoFecha(r.fecha_envio)+'</td>' +
         '<td>'+_ifcoEsc(r.proveedor_nombre||'?')+'</td>' +
         '<td style="text-align:right;font-variant-numeric:tabular-nums"><b>'+_ifcoFmt(r.cantidad_enviada)+'</b></td>' +
         '<td style="text-align:right;font-variant-numeric:tabular-nums">'+(r.cantidad_recibida!=null?_ifcoFmt(r.cantidad_recibida):'—')+'</td>' +
-        '<td>'+_ifcoBadge(r.estado)+'</td>' +
+        '<td>'+_ifcoBadge(r.estado)+aceptHtml+'</td>' +
         '<td style="font-size:11px;color:var(--mut)">'+(r.fecha_recepcion?_ifcoFecha(r.fecha_recepcion):'—')+'</td>' +
         '<td style="display:flex;gap:4px;flex-wrap:wrap">'+acciones.join('')+'</td>' +
       '</tr>';
@@ -17300,6 +17265,18 @@ async function ifcoGuardarEnvio() {
   } catch(e) { alert('Error: ' + e.message); }
 }
 
+// Copia el link público de aceptación al portapapeles, para que el comercial lo pegue en WhatsApp
+async function ifcoCopiarLinkEnvio(n_remito, token) {
+  const url = window.location.origin + '/api/ifco/r/' + encodeURIComponent(n_remito) + '?t=' + encodeURIComponent(token);
+  try {
+    await navigator.clipboard.writeText(url);
+    alert('✓ Link copiado al portapapeles\n\n' + url + '\n\nPegalo en WhatsApp Web del proveedor. Cuando lo abra y confirme, vas a ver el estado actualizado en esta tabla.');
+  } catch(e) {
+    // Fallback: mostrar el link en un prompt para que lo copien manualmente
+    prompt('Copiá este link y pegalo en WhatsApp Web:', url);
+  }
+}
+
 async function ifcoImprimirEnvio(id) {
   try {
     const e = await _ifcoFetch('/api/ifco/envios/' + id);
@@ -17332,9 +17309,12 @@ async function ifcoImprimirEnvio(id) {
   @media print { body { margin: 15mm } button { display: none } }
 </style></head><body>
   <div class="head">
-    <div>
-      <h1>SAN GERÓNIMO SA — La Niña Bonita</h1>
-      <div style="color:#666;font-size:12px">Remito interno de envío de cajones IFCO</div>
+    <div style="display:flex;align-items:center;gap:14px">
+      <img src="/static/logo.jpg" alt="SAN GERÓNIMO SA" style="height:50px;width:auto" onerror="this.style.display='none'">
+      <div>
+        <h1>SAN GERÓNIMO SA</h1>
+        <div style="color:#666;font-size:12px">Remito interno de envío de cajones IFCO</div>
+      </div>
     </div>
     <div style="text-align:right">
       <div class="num">${_ifcoEsc(e.n_remito_interno)}</div>
@@ -17345,16 +17325,13 @@ async function ifcoImprimirEnvio(id) {
   <div class="grid">
     <div class="field" style="grid-column:span 2">
       <div class="field-lbl">Proveedor</div>
-      <div class="field-val"><b>${_ifcoEsc(e.proveedor_nombre||'?')}</b>${e.proveedor_razon?' — '+_ifcoEsc(e.proveedor_razon):''}</div>
-      ${e.proveedor_cuit ? '<div style="font-size:11px;color:#666">CUIT: '+_ifcoEsc(e.proveedor_cuit)+'</div>' : ''}
+      <div class="field-val"><b>${_ifcoEsc(e.proveedor_nombre||'?')}</b></div>
+      ${e.proveedor_razon ? '<div style="font-size:12px;color:#444;margin-top:3px">'+_ifcoEsc(e.proveedor_razon)+'</div>' : ''}
+      ${e.proveedor_cuit  ? '<div style="font-size:11px;color:#666;margin-top:2px">CUIT: '+_ifcoEsc(e.proveedor_cuit)+'</div>' : ''}
     </div>
-    <div class="field big">
+    <div class="field big" style="grid-column:span 2">
       <div class="field-lbl">Cantidad de cajones de este envío</div>
       <div class="field-val">${_ifcoFmt(e.cantidad_enviada)}</div>
-    </div>
-    <div class="field">
-      <div class="field-lbl">Modelo</div>
-      <div class="field-val">6420</div>
     </div>
     ${e.notas ? '<div class="field" style="grid-column:span 2"><div class="field-lbl">Notas</div><div class="field-val">'+_ifcoEsc(e.notas)+'</div></div>' : ''}
   </div>
@@ -17490,13 +17467,13 @@ async function ifcoCargarMovimientos() {
             '<button class="btn bo" style="font-size:11px;padding:4px 8px;color:#991b1b" onclick="ifcoEliminarMovimiento('+r.id+')">🗑️</button>'
           ].join('');
       return '<tr>' +
-        '<td>'+_ifcoFecha(r.fecha)+'</td>' +
-        '<td>'+tipoBadge+consoBadge+'</td>' +
-        '<td style="text-align:right;font-variant-numeric:tabular-nums"><b>'+_ifcoFmt(r.cantidad)+'</b></td>' +
-        '<td>'+sucursal+'</td>' +
-        '<td style="font-family:monospace;font-size:12px">'+_ifcoEsc(r.n_remito||'—')+'</td>' +
-        '<td style="text-align:right">'+costo+'</td>' +
-        '<td style="font-size:12px;color:var(--mut)">'+_ifcoEsc(r.notas||'')+'</td>' +
+        '<td style="font-size:14px;font-weight:600">'+_ifcoFecha(r.fecha)+'</td>' +
+        '<td style="font-size:11px">'+tipoBadge+consoBadge+'</td>' +
+        '<td style="text-align:right;font-variant-numeric:tabular-nums;font-size:16px;font-weight:700">'+_ifcoFmt(r.cantidad)+'</td>' +
+        '<td style="font-size:12px;color:var(--mut)">'+sucursal+'</td>' +
+        '<td style="font-family:monospace;font-size:11px;color:var(--mut)">'+_ifcoEsc(r.n_remito||'—')+'</td>' +
+        '<td style="text-align:right;font-size:12px;color:var(--mut)">'+costo+'</td>' +
+        '<td style="font-size:11px;color:var(--mut)">'+_ifcoEsc(r.notas||'')+'</td>' +
         '<td style="display:flex;gap:4px">'+acciones+'</td>' +
       '</tr>';
     }).join('');
@@ -17934,26 +17911,14 @@ async function ifcoCargarTalonarios() {
     const rows = await _ifcoFetch('/api/ifco/talonarios');
     const tb = document.querySelector('#ifco-tbl-talons tbody');
     if (rows.length === 0) {
-      tb.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:20px;color:var(--mut)">No hay talonarios cargados — agregá uno con el botón de arriba</td></tr>';
-      document.getElementById('ifco-talon-info').textContent = 'Sin talonarios';
+      tb.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:20px;color:var(--mut)">No hay talonarios cargados — agregá uno con el botón de arriba</td></tr>';
       return;
-    }
-    const activo = rows.find(function(r){ return r.activo === 1; });
-    if (activo) {
-      const disp = (activo.numero_hasta - activo.numero_desde + 1) - activo.usados_count;
-      document.getElementById('ifco-talon-info').innerHTML =
-        'Activo: <b>'+_ifcoEsc(activo.serie)+'</b> · ' + disp + ' disponibles' +
-        (activo.vto_cai ? ' · CAI vence '+_ifcoFecha(activo.vto_cai) : '');
     }
     tb.innerHTML = rows.map(function(t){
       const total = t.numero_hasta - t.numero_desde + 1;
       const disp = total - t.usados_count;
-      const estado = t.activo ? '<span class="ifco-badge ifco-badge-presentado">Activo</span>' : '<span class="ifco-badge ifco-badge-despachado">Inactivo</span>';
       const acciones = ['<button class="btn bo" style="font-size:11px;padding:4px 8px" onclick="event.stopPropagation();ifcoVerTalonario('+t.id+')">👁 Ver</button>'];
       acciones.push('<button class="btn bo" style="font-size:11px;padding:4px 8px" onclick="event.stopPropagation();ifcoEditarTalonario('+t.id+')">✏️ Editar</button>');
-      if (!t.activo) {
-        acciones.push('<button class="btn bo" style="font-size:11px;padding:4px 8px" onclick="event.stopPropagation();ifcoActivarTalonario('+t.id+')">Activar</button>');
-      }
       if (t.usados_count === 0) {
         acciones.push('<button class="btn bo" style="font-size:11px;padding:4px 8px;color:#991b1b" onclick="event.stopPropagation();ifcoEliminarTalonario('+t.id+')" title="Solo se pueden eliminar talonarios sin remitos asociados">🗑️</button>');
       }
@@ -17964,7 +17929,6 @@ async function ifcoCargarTalonarios() {
         '<td>'+_ifcoFecha(t.vto_cai)+'</td>' +
         '<td style="text-align:right">'+t.usados_count+'</td>' +
         '<td style="text-align:right"><b>'+disp+'</b></td>' +
-        '<td>'+estado+'</td>' +
         '<td style="display:flex;gap:4px;flex-wrap:wrap">'+acciones.join('')+'</td>' +
       '</tr>';
     }).join('');
@@ -17974,7 +17938,6 @@ async function ifcoCargarTalonarios() {
 function ifcoAbrirNuevoTalonario() {
   ['ifco-t-serie','ifco-t-desde','ifco-t-hasta','ifco-t-cai','ifco-t-vto','ifco-t-notas']
     .forEach(function(id){ document.getElementById(id).value = ''; });
-  document.getElementById('ifco-t-activo').value = '1';
   document.getElementById('ifco-mb-talon').classList.add('on');
 }
 
@@ -18104,7 +18067,6 @@ function ifcoParsearImportTalonarios() {
       '<th style="padding:6px 8px;text-align:right">Hasta</th>' +
       '<th style="padding:6px 8px">CAI</th>' +
       '<th style="padding:6px 8px">Vto CAI</th>' +
-      '<th style="padding:6px 8px">Activo</th>' +
       '<th style="padding:6px 8px">Dueño</th>' +
       '<th style="padding:6px 8px">Notas</th>' +
     '</tr></thead><tbody>';
@@ -18116,7 +18078,6 @@ function ifcoParsearImportTalonarios() {
       '<td style="padding:4px 8px;text-align:right;font-family:monospace">'+_ifcoFmt(it.numero_hasta)+'</td>' +
       '<td style="padding:4px 8px;font-family:monospace;font-size:11px">'+_ifcoEsc(it.cai||'—')+'</td>' +
       '<td style="padding:4px 8px;font-size:11px">'+_ifcoEsc(it.vto_cai||'—')+'</td>' +
-      '<td style="padding:4px 8px">'+(it.activo ? '<span style="color:var(--ok);font-weight:600">Sí</span>' : '<span style="color:var(--mut)">No</span>')+'</td>' +
       '<td style="padding:4px 8px;font-size:11px">'+(it.dueno_tipo === 'proveedor' ? 'Prov #'+it.proveedor_id : 'SG')+'</td>' +
       '<td style="padding:4px 8px;font-size:11px;color:var(--mut)">'+_ifcoEsc(it.notas||'')+'</td>' +
     '</tr>';
@@ -18256,7 +18217,6 @@ async function ifcoVerTalonario(id) {
       '<div style="display:flex;align-items:center;gap:12px;padding:12px 14px;background:var(--bg);border-radius:8px;margin-bottom:14px;flex-wrap:wrap">' +
         '<div style="font-family:monospace;font-size:16px;font-weight:600">'+_ifcoEsc(t.serie)+'</div>' +
         '<div style="color:var(--mut);font-size:12px">'+t.numero_desde+' → '+t.numero_hasta+'</div>' +
-        '<div>'+(t.activo ? '<span class="ifco-badge ifco-badge-presentado">Activo</span>' : '<span class="ifco-badge ifco-badge-despachado">Inactivo</span>')+'</div>' +
         '<div style="margin-left:auto">'+duenoHtml+'</div>' +
       '</div>' +
 
@@ -18400,7 +18360,7 @@ async function ifcoGuardarTalonario() {
     numero_hasta: parseInt(document.getElementById('ifco-t-hasta').value),
     cai:          document.getElementById('ifco-t-cai').value.trim() || null,
     vto_cai:      document.getElementById('ifco-t-vto').value || null,
-    activo:       document.getElementById('ifco-t-activo').value === '1' ? 1 : 0,
+    activo:       1,
     notas:        document.getElementById('ifco-t-notas').value.trim() || null
   };
   try {
@@ -18410,17 +18370,6 @@ async function ifcoGuardarTalonario() {
       body: JSON.stringify(body)
     });
     document.getElementById('ifco-mb-talon').classList.remove('on');
-    ifcoCargarTalonarios();
-  } catch(e) { alert('Error: ' + e.message); }
-}
-
-async function ifcoActivarTalonario(id) {
-  try {
-    await _ifcoFetch('/api/ifco/talonarios/' + id, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ activo: 1 })
-    });
     ifcoCargarTalonarios();
   } catch(e) { alert('Error: ' + e.message); }
 }

@@ -93,6 +93,31 @@ try { db.exec("UPDATE ifco_recepciones_proveedor SET estado = 'recibido' WHERE e
 try { db.exec("ALTER TABLE ifco_movimientos ADD COLUMN consolidado_en TEXT"); } catch(_){}
 try { db.exec("ALTER TABLE ifco_recepciones_proveedor ADD COLUMN consolidado_en TEXT"); } catch(_){}
 
+// Aceptación digital de envíos a proveedor: cada envío tiene un token único por el cual
+// el proveedor recibe un link público y puede confirmar la recepción (firma digital simple).
+try { db.exec("ALTER TABLE ifco_envios_proveedor ADD COLUMN aceptacion_token TEXT"); } catch(_){}
+try { db.exec("ALTER TABLE ifco_envios_proveedor ADD COLUMN visto_en TEXT"); } catch(_){}
+try { db.exec("ALTER TABLE ifco_envios_proveedor ADD COLUMN aceptado_en TEXT"); } catch(_){}
+try { db.exec("ALTER TABLE ifco_envios_proveedor ADD COLUMN aceptado_por_nombre TEXT"); } catch(_){}
+try { db.exec("ALTER TABLE ifco_envios_proveedor ADD COLUMN aceptado_por_dni TEXT"); } catch(_){}
+try { db.exec("ALTER TABLE ifco_envios_proveedor ADD COLUMN aceptado_ip TEXT"); } catch(_){}
+try { db.exec("ALTER TABLE ifco_envios_proveedor ADD COLUMN aceptado_user_agent TEXT"); } catch(_){}
+
+// Backfill: tokens para envíos viejos que no tengan
+try {
+  const sinToken = db.prepare("SELECT id FROM ifco_envios_proveedor WHERE aceptacion_token IS NULL OR aceptacion_token = ''").all();
+  if (sinToken.length > 0) {
+    const upd = db.prepare("UPDATE ifco_envios_proveedor SET aceptacion_token = ? WHERE id = ?");
+    sinToken.forEach(function(r){
+      const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
+      let s = '';
+      for (let i = 0; i < 24; i++) s += chars[Math.floor(Math.random() * chars.length)];
+      upd.run(s, r.id);
+    });
+    console.log('[IFCO] Backfilled aceptacion_token para', sinToken.length, 'envíos');
+  }
+} catch(e) { console.error('[IFCO] Backfill tokens error:', e.message); }
+
 // Tabla de conteos físicos de stock (real, contado a mano) por depósito.
 // Solo informativo: muestra diferencia vs stock teórico, no genera ajustes.
 // Se debe actualizar todos los jueves 10am.
@@ -497,6 +522,281 @@ function requireAuth(req, res, next) {
   req.user = u;
   next();
 }
+
+// ────── RUTAS PÚBLICAS (sin auth) ──────
+// Generador de token random para aceptación digital de remitos
+function _genTokenAceptacion() {
+  const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
+  let s = '';
+  for (let i = 0; i < 24; i++) s += chars[Math.floor(Math.random() * chars.length)];
+  return s;
+}
+
+// Helper de escape HTML
+function _esc(s) {
+  if (s == null) return '';
+  return String(s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+// Helper de fecha en español
+function _fechaEs(s) {
+  if (!s) return '';
+  try {
+    const d = new Date(s);
+    return d.toLocaleDateString('es-AR', { day: 'numeric', month: 'long', year: 'numeric' });
+  } catch(_) { return s; }
+}
+function _fechaCortaEs(s) {
+  if (!s) return '';
+  try {
+    const d = new Date(s);
+    return d.toLocaleDateString('es-AR') + ' ' + d.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' });
+  } catch(_) { return s; }
+}
+
+// Renderiza la vista pública del remito (HTML standalone que el proveedor abre desde WhatsApp)
+function _renderRemitoPublico(envio) {
+  const yaAceptado = !!envio.aceptado_en;
+  const cantidad   = parseInt(envio.cantidad_enviada) || 0;
+  const saldoTotal = envio.saldo_total != null ? envio.saldo_total : cantidad;
+
+  const banner = yaAceptado
+    ? `<div class="banner banner-ok">
+         <div class="banner-tit">✓ Recepción confirmada</div>
+         <div class="banner-bod">
+           <b>${_esc(envio.aceptado_por_nombre)}</b> · DNI ${_esc(envio.aceptado_por_dni)}<br>
+           ${_esc(_fechaCortaEs(envio.aceptado_en))} hs
+         </div>
+       </div>`
+    : `<div class="banner banner-pend">
+         <div class="banner-tit">⏳ Pendiente de confirmación</div>
+         <div class="banner-bod">Completá tus datos abajo para confirmar la recepción de los cajones.</div>
+       </div>`;
+
+  const formAceptacion = yaAceptado ? '' : `
+    <div class="firma-box">
+      <div class="firma-tit">✏️ Confirmar recepción</div>
+      <div class="campo">
+        <label>Tu nombre y apellido</label>
+        <input id="f-nombre" type="text" placeholder="Ej: Juan Pérez" autocomplete="name">
+      </div>
+      <div class="campo">
+        <label>DNI</label>
+        <input id="f-dni" type="text" inputmode="numeric" placeholder="Ej: 28456789" autocomplete="off">
+      </div>
+      <button id="btn-aceptar" onclick="aceptar()">✓ Confirmar recepción de ${cantidad} cajón${cantidad === 1 ? '' : 'es'}</button>
+      <div id="msg-error" class="msg-error"></div>
+    </div>
+    <div class="aviso-resp">
+      <b>Importante:</b> Al confirmar, asumís responsabilidad sobre los cajones IFCO recibidos hasta su devolución a SAN GERÓNIMO SA. Cada cajón perdido tiene un costo económico para la empresa.
+    </div>`;
+
+  const proveedorBlock =
+    `<div class="campo-box span2">
+       <div class="campo-lbl">Proveedor</div>
+       <div class="campo-val"><b>${_esc(envio.proveedor_nombre || '?')}</b></div>
+       ${envio.proveedor_razon ? '<div class="campo-sub">' + _esc(envio.proveedor_razon) + '</div>' : ''}
+       ${envio.proveedor_cuit  ? '<div class="campo-sub">CUIT: ' + _esc(envio.proveedor_cuit) + '</div>' : ''}
+     </div>`;
+
+  return `<!DOCTYPE html>
+<html lang="es"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Remito ${_esc(envio.n_remito_interno)} — SAN GERÓNIMO SA</title>
+<style>
+  *{box-sizing:border-box}
+  body{font-family:'Segoe UI',-apple-system,'Helvetica Neue',Arial,sans-serif;margin:0;background:#f3f4f6;color:#111;font-size:14px;line-height:1.5}
+  .wrap{max-width:600px;margin:0 auto;background:#fff;min-height:100vh;padding:20px;box-shadow:0 0 12px rgba(0,0,0,.05)}
+  @media (min-width:640px){ .wrap{margin:20px auto;border-radius:10px;min-height:auto} }
+  .head{display:flex;align-items:flex-start;justify-content:space-between;border-bottom:2px solid #1e3a5f;padding-bottom:14px;margin-bottom:16px;gap:12px;flex-wrap:wrap}
+  .head-left{display:flex;align-items:center;gap:10px}
+  .head-logo{height:42px;width:auto}
+  .head-tit{font-size:15px;font-weight:600;color:#1e3a5f;margin:0;line-height:1.2}
+  .head-sub{font-size:11px;color:#666;margin-top:2px}
+  .head-num{font-family:monospace;font-size:18px;font-weight:600;color:#1e3a5f}
+  .head-fecha{font-size:11px;color:#666;text-align:right;margin-top:2px}
+  .banner{padding:14px 16px;border-radius:8px;margin-bottom:16px}
+  .banner-ok{background:#dcfce7;border:1px solid #16a34a}
+  .banner-ok .banner-tit{color:#14532d;font-weight:600;font-size:14px}
+  .banner-ok .banner-bod{color:#166534;font-size:13px;margin-top:4px;line-height:1.5}
+  .banner-pend{background:#fef3c7;border:1px solid #f59e0b}
+  .banner-pend .banner-tit{color:#78350f;font-weight:600;font-size:14px}
+  .banner-pend .banner-bod{color:#92400e;font-size:13px;margin-top:4px}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px}
+  .span2{grid-column:span 2}
+  .campo-box{border:1px solid #d1d5db;border-radius:6px;padding:10px 12px}
+  .campo-lbl{font-size:10px;color:#6b7280;text-transform:uppercase;letter-spacing:.05em;margin-bottom:3px}
+  .campo-val{font-size:14px}
+  .campo-sub{font-size:11px;color:#6b7280;margin-top:2px}
+  .campo-big{background:#f9fafb}
+  .campo-big .campo-val{font-size:24px;font-weight:600;font-variant-numeric:tabular-nums}
+  .saldo-box{background:#fef3c7;border:2px solid #f59e0b;border-radius:6px;padding:12px 14px;margin-bottom:16px;display:flex;justify-content:space-between;align-items:center;gap:8px}
+  .saldo-lbl{font-size:11px;color:#92400e;text-transform:uppercase;letter-spacing:.05em}
+  .saldo-sub{font-size:10px;color:#92400e;margin-top:2px}
+  .saldo-val{font-size:28px;font-weight:700;color:#92400e;font-variant-numeric:tabular-nums}
+  .firma-box{background:#f0fdf4;border:1px solid #86efac;border-radius:8px;padding:14px;margin-bottom:14px}
+  .firma-tit{font-size:13px;font-weight:600;color:#166534;text-transform:uppercase;letter-spacing:.05em;margin-bottom:10px}
+  .campo{margin-bottom:10px}
+  .campo label{display:block;font-size:11px;color:#6b7280;text-transform:uppercase;margin-bottom:4px}
+  .campo input{width:100%;padding:10px 12px;font-size:15px;border:1px solid #d1d5db;border-radius:6px;background:#fff;font-family:inherit}
+  .campo input:focus{outline:none;border-color:#16a34a;box-shadow:0 0 0 2px rgba(22,163,74,.15)}
+  #btn-aceptar{width:100%;background:#16a34a;color:#fff;border:none;padding:13px;border-radius:6px;font-weight:600;font-size:15px;cursor:pointer;font-family:inherit;margin-top:4px}
+  #btn-aceptar:hover{background:#15803d}
+  #btn-aceptar:disabled{background:#9ca3af;cursor:wait}
+  .msg-error{color:#991b1b;font-size:12px;margin-top:8px;text-align:center;min-height:14px}
+  .aviso-resp{font-size:12px;line-height:1.5;color:#78350f;background:#fffbeb;border:1px solid #fcd34d;border-radius:6px;padding:10px 12px;margin-bottom:14px}
+  .pie{font-size:11px;color:#9ca3af;text-align:center;margin-top:24px;padding-top:16px;border-top:1px solid #e5e7eb}
+</style>
+</head><body>
+<div class="wrap">
+
+  <div class="head">
+    <div class="head-left">
+      <img src="/static/logo.jpg" alt="SAN GERÓNIMO SA" class="head-logo" onerror="this.style.display='none'">
+      <div>
+        <div class="head-tit">SAN GERÓNIMO SA</div>
+        <div class="head-sub">Remito de envío de cajones IFCO</div>
+      </div>
+    </div>
+    <div>
+      <div class="head-num">${_esc(envio.n_remito_interno)}</div>
+      <div class="head-fecha">${_esc(_fechaEs(envio.fecha_envio))}</div>
+    </div>
+  </div>
+
+  ${banner}
+
+  <div class="grid">
+    ${proveedorBlock}
+    <div class="campo-box campo-big span2">
+      <div class="campo-lbl">Cantidad de cajones de este envío</div>
+      <div class="campo-val">${cantidad}</div>
+    </div>
+    ${envio.notas ? '<div class="campo-box span2"><div class="campo-lbl">Notas</div><div class="campo-val">' + _esc(envio.notas) + '</div></div>' : ''}
+  </div>
+
+  <div class="saldo-box">
+    <div>
+      <div class="saldo-lbl">Saldo total bajo tu responsabilidad</div>
+      <div class="saldo-sub">cajones IFCO sin devolver, incluyendo este envío</div>
+    </div>
+    <div class="saldo-val">${saldoTotal}</div>
+  </div>
+
+  ${formAceptacion}
+
+  <div class="pie">
+    Este link es la constancia oficial. Podés volver a abrirlo cuando quieras.<br>
+    SAN GERÓNIMO SA
+  </div>
+</div>
+${yaAceptado ? '' : `
+<script>
+async function aceptar() {
+  const nombre = document.getElementById('f-nombre').value.trim();
+  const dni    = document.getElementById('f-dni').value.trim().replace(/\\D/g, '');
+  const err    = document.getElementById('msg-error');
+  err.textContent = '';
+  if (!nombre || nombre.length < 3) { err.textContent = 'Ingresá tu nombre completo'; return; }
+  if (!dni || dni.length < 7)        { err.textContent = 'DNI inválido'; return; }
+  const btn = document.getElementById('btn-aceptar');
+  btn.disabled = true; btn.textContent = 'Confirmando…';
+  try {
+    const r = await fetch(window.location.pathname + '/aceptar' + window.location.search, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ nombre, dni })
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || ('HTTP ' + r.status));
+    location.reload();
+  } catch(e) {
+    err.textContent = 'Error: ' + e.message;
+    btn.disabled = false;
+    btn.textContent = '✓ Confirmar recepción';
+  }
+}
+</script>`}
+</body></html>`;
+}
+
+// GET público: ver remito (con o sin token, validamos)
+router.get('/r/:numero', function(req, res) {
+  const numero = req.params.numero;
+  const token  = req.query.t;
+  if (!token) return res.status(404).type('text/html').send('<h1>Remito no encontrado</h1>');
+
+  const envio = db.prepare(`
+    SELECT e.*, p.nombre AS proveedor_nombre, p.razon_social AS proveedor_razon, p.cuit AS proveedor_cuit
+    FROM ifco_envios_proveedor e
+    LEFT JOIN proveedores p ON p.id = e.proveedor_id
+    WHERE e.n_remito_interno = ? AND e.aceptacion_token = ? AND e.eliminado_en IS NULL
+  `).get(numero, token);
+
+  if (!envio) return res.status(404).type('text/html').send('<h1>Remito no encontrado</h1><p>El link es inválido o el remito fue eliminado.</p>');
+
+  // Calcular saldo total del proveedor (sumar todos los envíos pendientes/parciales)
+  try {
+    const saldoRow = db.prepare(`
+      SELECT COALESCE(SUM(cantidad_enviada), 0) AS enviado,
+             COALESCE(SUM(CASE WHEN estado='recibido' THEN cantidad_recibida WHEN estado='parcial' THEN cantidad_recibida ELSE 0 END), 0) AS recibido
+      FROM ifco_envios_proveedor
+      WHERE proveedor_id = ? AND eliminado_en IS NULL
+    `).get(envio.proveedor_id);
+    envio.saldo_total = (saldoRow.enviado || 0) - (saldoRow.recibido || 0);
+  } catch(_) { envio.saldo_total = envio.cantidad_enviada; }
+
+  // Marcar como visto (si nunca fue visto)
+  if (!envio.visto_en) {
+    try {
+      db.prepare("UPDATE ifco_envios_proveedor SET visto_en = ? WHERE id = ?")
+        .run(new Date().toISOString(), envio.id);
+    } catch(_){}
+  }
+  res.type('text/html').send(_renderRemitoPublico(envio));
+});
+
+// POST público: confirmar recepción
+router.post('/r/:numero/aceptar', express.json(), function(req, res) {
+  const numero = req.params.numero;
+  const token  = req.query.t;
+  const d      = req.body || {};
+  if (!token)        return res.status(404).json({ error: 'Link inválido' });
+  if (!d.nombre || String(d.nombre).trim().length < 3) return res.status(400).json({ error: 'Nombre inválido' });
+  if (!d.dni    || String(d.dni).replace(/\D/g, '').length < 7) return res.status(400).json({ error: 'DNI inválido' });
+
+  const envio = db.prepare(`
+    SELECT id, aceptado_en FROM ifco_envios_proveedor
+    WHERE n_remito_interno = ? AND aceptacion_token = ? AND eliminado_en IS NULL
+  `).get(numero, token);
+  if (!envio) return res.status(404).json({ error: 'Link inválido' });
+  if (envio.aceptado_en) return res.status(400).json({ error: 'Este remito ya fue aceptado anteriormente' });
+
+  const ip = (req.headers['x-forwarded-for'] || req.connection.remoteAddress || '').split(',')[0].trim();
+  const ua = req.headers['user-agent'] || '';
+  try {
+    db.prepare(`
+      UPDATE ifco_envios_proveedor
+      SET aceptado_en = ?, aceptado_por_nombre = ?, aceptado_por_dni = ?,
+          aceptado_ip = ?, aceptado_user_agent = ?
+      WHERE id = ?
+    `).run(
+      new Date().toISOString(),
+      String(d.nombre).trim(),
+      String(d.dni).replace(/\D/g, ''),
+      ip || null, ua || null,
+      envio.id
+    );
+    res.json({ ok: true });
+  } catch(e) {
+    console.error('[IFCO][aceptar]:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 router.use(requireAuth);
 
 // Verifica si el usuario puede acceder a los movimientos de un depósito específico.
@@ -976,7 +1276,7 @@ function _inferirTalonarioId(n_remito_ifco, origen, proveedor_origen_id) {
 
   let q = `
     SELECT id FROM ifco_talonarios
-    WHERE serie = ? AND activo = 1
+    WHERE serie = ?
       AND ? BETWEEN numero_desde AND numero_hasta
   `;
   const params = [serie, numero];
@@ -1423,16 +1723,17 @@ router.post('/envios', function(req, res) {
     if (m) nro = parseInt(m[1], 10) + 1;
   }
   const n_remito_interno = 'SG-P-' + year + '-' + String(nro).padStart(4, '0');
+  const token = _genTokenAceptacion();
 
   try {
     const r = db.prepare(`
       INSERT INTO ifco_envios_proveedor
-        (n_remito_interno, fecha_envio, proveedor_id, cantidad_enviada, modelo, notas, usuario_id)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
+        (n_remito_interno, fecha_envio, proveedor_id, cantidad_enviada, modelo, notas, usuario_id, aceptacion_token)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `).run(n_remito_interno, d.fecha_envio, d.proveedor_id, cant,
-           d.modelo || '6420', d.notas || null, req.user.id || null);
+           d.modelo || '6420', d.notas || null, req.user.id || null, token);
 
-    res.json({ id: r.lastInsertRowid, n_remito_interno: n_remito_interno });
+    res.json({ id: r.lastInsertRowid, n_remito_interno: n_remito_interno, aceptacion_token: token });
   } catch(e) {
     res.status(500).json({ error: e.message });
   }
