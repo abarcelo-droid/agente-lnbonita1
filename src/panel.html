@@ -3089,51 +3089,38 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   <div class="ifco-pane on" id="ifco-pane-resumen">
     <div id="ifco-resumen-loading" style="text-align:center;padding:40px;color:var(--mut)">Cargando…</div>
     <div id="ifco-resumen-content" style="display:none">
-      <!-- Banner alerta jueves 10am: stocks reales sin cargar (al top, encima de los KPIs) -->
-      <div id="ifco-stocks-alerta" style="display:none;background:#fef3c7;border:1px solid #f59e0b;border-radius:8px;padding:12px 16px;margin-bottom:16px;font-size:13px">
-        <div style="display:flex;align-items:center;justify-content:space-between;gap:10px">
-          <div>
-            ⏰ <b>Toca actualizar el conteo físico de stocks</b> — Todos los jueves 10am.
-            <span id="ifco-stocks-alerta-detalle" style="color:#92400e"></span>
-          </div>
-          <button class="btn bb" style="font-size:12px;padding:6px 12px" onclick="document.getElementById('ifco-stocks-card').scrollIntoView({behavior:'smooth'})">Ir a cargar →</button>
-        </div>
-      </div>
 
-      <!-- 1. KPIs ARRIBA -->
+      <!-- 1. KPIs CON COLOR SEMÁNTICO -->
       <div class="ab-grid ab-grid-4" style="margin-bottom:16px">
-        <div class="ifco-card ifco-stat">
-          <div class="ifco-stat-lbl">PISO actual</div>
-          <div class="ifco-stat-val" id="ifco-st-piso">—</div>
+        <div class="ifco-card ifco-stat" style="border-top:4px solid #1e3a8a;border-top-left-radius:8px;border-top-right-radius:8px">
+          <div class="ifco-stat-lbl" style="color:#1e3a8a">📦 Piso actual</div>
+          <div class="ifco-stat-val" id="ifco-st-piso" style="color:#1e3a8a">—</div>
           <div class="ifco-stat-sub">cajones en planta SAN GERONIMO</div>
         </div>
-        <div class="ifco-card ifco-stat">
-          <div class="ifco-stat-lbl">En proveedores</div>
-          <div class="ifco-stat-val" id="ifco-st-prov">—</div>
+        <div class="ifco-card ifco-stat" style="border-top:4px solid #ca8a04;border-top-left-radius:8px;border-top-right-radius:8px">
+          <div class="ifco-stat-lbl" style="color:#92400e">🚛 En proveedores</div>
+          <div class="ifco-stat-val" id="ifco-st-prov" style="color:#92400e">—</div>
           <div class="ifco-stat-sub">enviados, esperando vuelta</div>
         </div>
-        <div class="ifco-card ifco-stat" style="background:var(--bg)">
-          <div class="ifco-stat-lbl" style="color:var(--burg)">Bajo tu responsabilidad</div>
-          <div class="ifco-stat-val" id="ifco-st-total">—</div>
-          <div class="ifco-stat-sub">total = piso + proveedores + tránsito</div>
+        <div class="ifco-card ifco-stat" style="background:var(--burg);border-color:var(--burg);box-shadow:0 2px 6px rgba(124,29,63,0.15)">
+          <div class="ifco-stat-lbl" style="color:#fbcfe8;font-weight:600">⚖️ Bajo tu responsabilidad</div>
+          <div class="ifco-stat-val" id="ifco-st-total" style="color:#fff;font-weight:700">—</div>
+          <div class="ifco-stat-sub" style="color:#fbcfe8">total = piso + proveedores + tránsito</div>
         </div>
-        <div class="ifco-card ifco-stat">
-          <div class="ifco-stat-lbl">Diferencia total</div>
-          <div class="ifco-stat-val" id="ifco-st-dif" style="color:var(--mut)">—</div>
+        <div class="ifco-card ifco-stat" id="ifco-st-dif-card" style="border-top:4px solid #dc2626;border-top-left-radius:8px;border-top-right-radius:8px">
+          <div class="ifco-stat-lbl" id="ifco-st-dif-lbl" style="color:#991b1b">📊 Diferencia total</div>
+          <div class="ifco-stat-val" id="ifco-st-dif" style="color:#991b1b">—</div>
           <div class="ifco-stat-sub" id="ifco-st-dif-sub">real vs teórico (cajones)</div>
         </div>
       </div>
 
-      <!-- 2. PANEL NOTIFICACIONES -->
-      <div id="ifco-alertas" style="margin-bottom:16px"></div>
-
-      <!-- Recepciones en viaje (pendientes de confirmar por SG) -->
-      <div id="ifco-en-viaje-card" class="ifco-card" style="margin-bottom:16px;display:none;border-color:#f59e0b;background:#fffbeb">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-          <div style="font-size:14px;font-weight:600;color:#92400e">🚛 Pendientes de recibir <span id="ifco-en-viaje-count" style="background:#f59e0b;color:#fff;padding:2px 8px;border-radius:10px;font-size:12px;margin-left:6px"></span></div>
-          <div style="font-size:11px;color:#92400e">Cajones que un proveedor despachó y SG todavía no confirmó.</div>
+      <!-- 2. PANEL DE NOTIFICACIONES CONSOLIDADO -->
+      <div id="ifco-notif-panel" class="ifco-card" style="display:none;margin-bottom:16px;padding:0;overflow:hidden">
+        <div style="padding:12px 16px;border-bottom:1px solid var(--bor);display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap">
+          <div style="font-size:13px;font-weight:600;color:var(--txt)">🔔 Notificaciones <span id="ifco-notif-count" style="background:#dc2626;color:#fff;font-size:10px;font-weight:600;padding:2px 8px;border-radius:10px;margin-left:6px">0</span></div>
+          <div style="font-size:11px;color:var(--mut)">Acciones que requieren tu atención</div>
         </div>
-        <div id="ifco-en-viaje-list"></div>
+        <div id="ifco-notif-list" style="padding:12px 16px;display:flex;flex-direction:column;gap:8px"></div>
       </div>
 
       <!-- 3. PANEL STOCK FÍSICO EN PROVEEDORES -->
@@ -3161,6 +3148,14 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
           <div style="font-size:13px;font-weight:600;margin-bottom:10px">Despachos por mes</div>
           <div id="ifco-despachos-mes"></div>
         </div>
+      </div>
+
+      <!-- Estos elementos quedan ocultos pero existen para compat con código JS legacy -->
+      <div id="ifco-stocks-alerta" style="display:none"></div>
+      <div id="ifco-alertas" style="display:none"></div>
+      <div id="ifco-en-viaje-card" style="display:none">
+        <div id="ifco-en-viaje-list"></div>
+        <span id="ifco-en-viaje-count"></span>
       </div>
     </div>
   </div>
@@ -15472,46 +15467,134 @@ function ifcoTab(t) {
 }
 
 // ── RESUMEN ───────────────────────────────────────────────────────────────
+// Sistema de notificaciones consolidadas en el panel "🔔 Notificaciones" del Resumen.
+// Cada categoría tiene una clave única; setearla con null la remueve. El panel
+// se re-renderiza completo en cada llamada.
+function _ifcoNotifSet(key, notif) {
+  if (!window.IFCO) window.IFCO = {};
+  if (!window.IFCO._notifs) window.IFCO._notifs = {};
+  if (notif === null || notif === undefined) {
+    delete window.IFCO._notifs[key];
+  } else {
+    window.IFCO._notifs[key] = notif;
+  }
+  _ifcoRenderNotifPanel();
+}
+
+function _ifcoRenderNotifPanel() {
+  const panel = document.getElementById('ifco-notif-panel');
+  const list  = document.getElementById('ifco-notif-list');
+  const cnt   = document.getElementById('ifco-notif-count');
+  if (!panel || !list || !cnt) return;
+  const ordenes = ['stocks', 'talonario', 'urgentes', 'sin_sellar', 'envios_vencidos', 'en_viaje'];
+  const all = [];
+  ordenes.forEach(function(k){
+    if (window.IFCO && window.IFCO._notifs && window.IFCO._notifs[k]) {
+      all.push(window.IFCO._notifs[k]);
+    }
+  });
+  if (all.length === 0) {
+    panel.style.display = 'none';
+    return;
+  }
+  panel.style.display = 'block';
+  cnt.textContent = all.length;
+  const colors = {
+    urgente:  { bg: '#fee2e2', border: '#dc2626', text: '#991b1b' },
+    atencion: { bg: '#fef3c7', border: '#f59e0b', text: '#78350f' },
+    info:     { bg: '#dbeafe', border: '#3b82f6', text: '#1e3a8a' }
+  };
+  list.innerHTML = all.map(function(n){
+    const c = colors[n.tipo] || colors.atencion;
+    const accionHtml = n.accion
+      ? '<button class="btn bb" style="font-size:11px;padding:5px 12px;white-space:nowrap" onclick="'+n.accion.onclick.replace(/"/g, '&quot;')+'">'+_ifcoEsc(n.accion.label)+'</button>'
+      : '';
+    return '<div style="background:'+c.bg+';border-left:3px solid '+c.border+';padding:10px 12px;border-radius:4px;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">' +
+             '<div style="font-size:12px;color:'+c.text+';flex:1;min-width:200px"><b>'+n.icon+' '+n.titulo+'</b>'+(n.detalle ? ' — '+n.detalle : '')+'</div>' +
+             accionHtml +
+           '</div>';
+  }).join('');
+}
+
 async function ifcoCargarResumen() {
   document.getElementById('ifco-resumen-loading').style.display = 'block';
   document.getElementById('ifco-resumen-content').style.display = 'none';
+  // Aseguramos que el contenedor de notificaciones existe
+  if (!window.IFCO._notifs) window.IFCO._notifs = {};
   try {
     const r = await _ifcoFetch('/api/ifco/resumen');
     document.getElementById('ifco-st-piso').textContent     = _ifcoFmt(r.stock.piso);
     document.getElementById('ifco-st-prov').textContent     = _ifcoFmt(r.stock.en_proveedores);
     document.getElementById('ifco-st-total').textContent    = _ifcoFmt(r.stock.bajo_responsabilidad);
 
-    // Alertas
-    const aBox = document.getElementById('ifco-alertas');
-    let html = '';
+    // ── PANEL DE NOTIFICACIONES CONSOLIDADO ──
+    // Cada categoría de notificación se setea con clave en window.IFCO._notifs.
+    // Se re-renderiza el panel cada vez que cambia. El orden de display es fijo
+    // (stocks → talonario → urgentes → sin_sellar → envios_vencidos → en_viaje).
     const al = r.alertas || {};
-    if (al.urgentes_presentar && al.urgentes_presentar.length > 0) {
-      html += '<div class="ifco-alert ifco-alert-urgente"><div class="ifco-alert-tit">⚠️ Urgente — '+al.urgentes_presentar.length+' remito(s) sellado(s) ≥25 días sin presentar a IFCO (vencen a los 30)</div>';
-      html += '<div style="font-size:12px">' + al.urgentes_presentar.map(function(x){
-        return '<a href="#" onclick="ifcoTab(\'remitos\');return false" style="color:#991b1b;text-decoration:none">'+_ifcoEsc(x.n_remito_ifco)+'</a> '+_ifcoEsc(x.empresa||'')+' — '+x.dias+' días';
-      }).join(' · ') + '</div></div>';
-    }
-    if (al.sin_sellar && al.sin_sellar.length > 0) {
-      html += '<div class="ifco-alert"><div class="ifco-alert-tit">📋 '+al.sin_sellar.length+' despacho(s) ≥30 días sin sellar — revisar con la cadena</div>';
-      html += '<div style="font-size:12px;color:#92400e">' + al.sin_sellar.map(function(x){
-        return _ifcoEsc(x.n_remito_ifco)+' '+_ifcoEsc(x.empresa||'')+' — '+x.dias+' días';
-      }).join(' · ') + '</div></div>';
-    }
-    if (al.envios_vencidos && al.envios_vencidos.length > 0) {
-      html += '<div class="ifco-alert"><div class="ifco-alert-tit">🚚 '+al.envios_vencidos.length+' envío(s) a proveedor ≥15 días sin recibir</div>';
-      html += '<div style="font-size:12px;color:#92400e">' + al.envios_vencidos.map(function(x){
-        return _ifcoEsc(x.n_remito_interno)+' → '+_ifcoEsc(x.proveedor_nombre||'?')+' ('+x.cantidad_enviada+' caj., '+x.dias+' días)';
-      }).join(' · ') + '</div></div>';
-    }
+
+    // Limpiamos del resumen base las claves que vamos a setear (las async se setean después)
+    _ifcoNotifSet('talonario', null);
+    _ifcoNotifSet('urgentes', null);
+    _ifcoNotifSet('sin_sellar', null);
+    _ifcoNotifSet('envios_vencidos', null);
+
+    // 2. Talonario por agotarse o CAI por vencer
     if (al.talonario) {
       const t = al.talonario;
       const msg = t.razon === 'pocos_remitos'
-        ? 'Quedan '+t.disponibles+' remitos disponibles del talonario '+t.serie+' — pedir uno nuevo a IFCO'
-        : 'CAI del talonario '+t.serie+' vence en '+t.dias_cai+' días — pedir uno nuevo a IFCO';
-      html += '<div class="ifco-alert ifco-alert-urgente"><div class="ifco-alert-tit">⚠️ '+msg+'</div></div>';
+        ? 'Quedan ' + t.disponibles + ' remitos del talonario ' + _ifcoEsc(t.serie)
+        : 'CAI del talonario ' + _ifcoEsc(t.serie) + ' vence en ' + t.dias_cai + ' días';
+      _ifcoNotifSet('talonario', {
+        tipo: 'urgente',
+        icon: '⚠️',
+        titulo: msg,
+        detalle: 'pedir uno nuevo a IFCO',
+        accion: { label: 'Ver talonarios →', onclick: "ifcoTab('talons')" }
+      });
     }
-    if (!html) html = '<div style="font-size:12px;color:var(--mut);padding:12px">Sin alertas. Todo bajo control.</div>';
-    aBox.innerHTML = html;
+
+    // 3. Urgentes presentar (≥25 días)
+    if (al.urgentes_presentar && al.urgentes_presentar.length > 0) {
+      const detalle = al.urgentes_presentar.slice(0, 5).map(function(x){
+        return _ifcoEsc(x.n_remito_ifco) + ' (' + x.dias + 'd)';
+      }).join(' · ') + (al.urgentes_presentar.length > 5 ? ' …y ' + (al.urgentes_presentar.length-5) + ' más' : '');
+      _ifcoNotifSet('urgentes', {
+        tipo: 'urgente',
+        icon: '🚨',
+        titulo: al.urgentes_presentar.length + ' remito' + (al.urgentes_presentar.length === 1 ? '' : 's') + ' sellado' + (al.urgentes_presentar.length === 1 ? '' : 's') + ' ≥25 días sin presentar a IFCO',
+        detalle: detalle + ' · vencen a los 30',
+        accion: { label: 'Ver →', onclick: "ifcoTab('remitos')" }
+      });
+    }
+
+    // 4. Sin sellar (≥30 días)
+    if (al.sin_sellar && al.sin_sellar.length > 0) {
+      const detalle = al.sin_sellar.slice(0, 4).map(function(x){
+        return _ifcoEsc(x.n_remito_ifco) + ' (' + x.dias + 'd)';
+      }).join(' · ') + (al.sin_sellar.length > 4 ? ' …y ' + (al.sin_sellar.length-4) + ' más' : '');
+      _ifcoNotifSet('sin_sellar', {
+        tipo: 'atencion',
+        icon: '📋',
+        titulo: al.sin_sellar.length + ' despacho' + (al.sin_sellar.length === 1 ? '' : 's') + ' ≥30 días sin sellar',
+        detalle: detalle,
+        accion: { label: 'Ver →', onclick: "ifcoTab('remitos')" }
+      });
+    }
+
+    // 5. Envíos a proveedor vencidos (≥15 días)
+    if (al.envios_vencidos && al.envios_vencidos.length > 0) {
+      const detalle = al.envios_vencidos.slice(0, 4).map(function(x){
+        return _ifcoEsc(x.n_remito_interno) + ' → ' + _ifcoEsc(x.proveedor_nombre||'?') + ' (' + x.dias + 'd)';
+      }).join(' · ') + (al.envios_vencidos.length > 4 ? ' …y ' + (al.envios_vencidos.length-4) + ' más' : '');
+      _ifcoNotifSet('envios_vencidos', {
+        tipo: 'atencion',
+        icon: '🚚',
+        titulo: al.envios_vencidos.length + ' envío' + (al.envios_vencidos.length === 1 ? '' : 's') + ' a proveedor ≥15 días sin recibir',
+        detalle: detalle,
+        accion: { label: 'Ver →', onclick: "ifcoTab('envios')" }
+      });
+    }
 
     // Saldos por proveedor — lista TODOS los proveedores clickeables (no filtra por > 0)
     const sp = document.getElementById('ifco-saldos-proveedores');
@@ -15578,32 +15661,23 @@ async function ifcoCargarResumen() {
     document.getElementById('ifco-resumen-loading').textContent = 'Error: ' + e.message;
   }
 
-  // Cargar recepciones EN VIAJE (pendientes de confirmar por SG)
+  // Cargar recepciones EN VIAJE → agregamos al panel de notificaciones consolidado
   try {
     const pend = await _ifcoFetch('/api/ifco/recepciones-en-viaje');
-    const card = document.getElementById('ifco-en-viaje-card');
-    const list = document.getElementById('ifco-en-viaje-list');
-    const cnt  = document.getElementById('ifco-en-viaje-count');
     if (!pend || pend.length === 0) {
-      card.style.display = 'none';
+      _ifcoNotifSet('en_viaje', null);
     } else {
-      card.style.display = 'block';
-      cnt.textContent = pend.length;
-      list.innerHTML = pend.map(function(r){
-        return '<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid #fde68a;font-size:13px">' +
-          '<div>' +
-            '<b>'+_ifcoEsc(r.proveedor_nombre||'(sin proveedor)')+'</b>' +
-            ' · ' + _ifcoFecha(r.fecha_recepcion) +
-            (r.n_remito_proveedor ? ' · <span style="font-family:monospace;font-size:11px;color:var(--mut)">'+_ifcoEsc(r.n_remito_proveedor)+'</span>' : '') +
-            ' · <b style="color:#92400e">'+_ifcoFmt(r.cantidad)+' cajones</b>' +
-          '</div>' +
-          '<div style="display:flex;gap:6px">' +
-            (r.escaneo_path ? '<a href="'+r.escaneo_path+'" target="_blank" class="btn bo bs">📷 Foto</a>' : '') +
-            '<button class="btn bb bs" onclick="ifcoConfirmarRecepcion('+r.id+')">✓ Confirmar</button>' +
-            '<button class="btn bo bs" style="color:#991b1b" onclick="ifcoRechazarRecepcion('+r.id+')">✗ Rechazar</button>' +
-          '</div>' +
-        '</div>';
-      }).join('');
+      const cantidadTotal = pend.reduce(function(a, x){ return a + (x.cantidad || 0); }, 0);
+      const detalle = pend.slice(0, 3).map(function(r){
+        return _ifcoEsc(r.proveedor_nombre||'?') + ' (' + _ifcoFmt(r.cantidad) + ' caj.)';
+      }).join(' · ') + (pend.length > 3 ? ' …y ' + (pend.length-3) + ' más' : '');
+      _ifcoNotifSet('en_viaje', {
+        tipo: 'atencion',
+        icon: '🚛',
+        titulo: pend.length + ' envío' + (pend.length === 1 ? '' : 's') + ' pendiente' + (pend.length === 1 ? '' : 's') + ' de confirmar (' + _ifcoFmt(cantidadTotal) + ' cajones)',
+        detalle: detalle,
+        accion: { label: 'Confirmar →', onclick: "ifcoTab('ingresos')" }
+      });
     }
   } catch(e) { /* silencioso */ }
 
@@ -15617,15 +15691,18 @@ let _ifcoStockEditando = null; // { deposito_tipo, proveedor_id, nombre, teorico
 async function ifcoCargarStocksReales() {
   try {
     const data = await _ifcoFetch('/api/ifco/stocks-reales');
-    // Banner alerta arriba
+    // Banner alerta del jueves → ahora notificación consolidada
     const faltan = data.items.filter(function(it){ return it.falta_cargar; });
-    const banner = document.getElementById('ifco-stocks-alerta');
-    const detalle = document.getElementById('ifco-stocks-alerta-detalle');
     if (data.es_post_jueves_10am && faltan.length > 0) {
-      banner.style.display = 'block';
-      detalle.textContent = ' Faltan ' + faltan.length + ' depósito(s): ' + faltan.map(function(x){return x.nombre;}).join(', ');
+      _ifcoNotifSet('stocks', {
+        tipo: 'atencion',
+        icon: '⏰',
+        titulo: 'Toca actualizar el conteo físico de stocks',
+        detalle: 'Faltan ' + faltan.length + ' depósito' + (faltan.length === 1 ? '' : 's') + ': ' + faltan.map(function(x){return _ifcoEsc(x.nombre);}).join(', '),
+        accion: { label: 'Ir a cargar →', onclick: "document.getElementById('ifco-stocks-card').scrollIntoView({behavior:'smooth'})" }
+      });
     } else {
-      banner.style.display = 'none';
+      _ifcoNotifSet('stocks', null);
     }
     // KPI tarjeta "Diferencia total" — suma de diferencias de los depósitos con conteo cargado.
     // Solo es significativo cuando todos los depósitos tienen conteo (si no, es parcial).
