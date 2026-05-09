@@ -118,6 +118,25 @@ try {
   }
 } catch(e) { console.error('[IFCO] Backfill tokens error:', e.message); }
 
+// Tabla de números anulados de talonarios (para casos como remito mal impreso, manchado, etc.)
+// Solo aplica a números SIN USAR — no se puede anular un remito ya cargado por esta vía
+// (para esos hay que eliminarlos del módulo Despachos, que los manda a papelera).
+try {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS ifco_numeros_anulados (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      talonario_id INTEGER NOT NULL,
+      numero INTEGER NOT NULL,
+      motivo TEXT,
+      anulado_por_id INTEGER,
+      anulado_en TEXT DEFAULT (datetime('now','localtime')),
+      UNIQUE(talonario_id, numero),
+      FOREIGN KEY (talonario_id) REFERENCES ifco_talonarios(id) ON DELETE CASCADE
+    )
+  `);
+} catch(e) { console.error('[IFCO] Crear ifco_numeros_anulados:', e.message); }
+
+
 // Tabla de conteos físicos de stock (real, contado a mano) por depósito.
 // Solo informativo: muestra diferencia vs stock teórico, no genera ajustes.
 // Se debe actualizar todos los jueves 10am.
@@ -134,6 +153,27 @@ db.exec(`
   )
 `);
 try { db.exec("CREATE INDEX IF NOT EXISTS idx_stocks_reales_dep ON ifco_stocks_reales(deposito_tipo, proveedor_id, fecha DESC)"); } catch(_){}
+
+// Tabla de consolidaciones con IFCO — histórico mes a mes.
+// Cada registro guarda el saldo que IFCO informó vs la suma de pisos reales
+// declarados, con la diferencia (= multa estimada).
+db.exec(`
+  CREATE TABLE IF NOT EXISTS ifco_consolidaciones (
+    id                       INTEGER PRIMARY KEY AUTOINCREMENT,
+    fecha                    TEXT NOT NULL,
+    saldo_ifco               INTEGER NOT NULL,
+    piso_sg_real             INTEGER NOT NULL DEFAULT 0,
+    pisos_proveedores_real   INTEGER NOT NULL DEFAULT 0,
+    en_no_presentados        INTEGER NOT NULL DEFAULT 0,
+    suma_real                INTEGER NOT NULL,
+    diferencia               INTEGER NOT NULL,
+    notas                    TEXT,
+    usuario_id               INTEGER,
+    creado_en                TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+  )
+`);
+try { db.exec("CREATE INDEX IF NOT EXISTS idx_consolidaciones_fecha ON ifco_consolidaciones(fecha DESC)"); } catch(_){}
+
 
 // Tabla de "faltantes de stock" declarados manualmente para SAN GERONIMO.
 // Cada fila es un ajuste discreto: delta>0 aumenta el faltante, delta<0 lo reduce.
@@ -827,7 +867,8 @@ router.get('/talonarios', function(req, res) {
   const rows = db.prepare(`
     SELECT t.*,
       p.nombre AS proveedor_nombre,
-      (SELECT COUNT(*) FROM ifco_remitos_super r WHERE r.talonario_id = t.id AND r.eliminado_en IS NULL) AS usados_count
+      (SELECT COUNT(*) FROM ifco_remitos_super r WHERE r.talonario_id = t.id AND r.eliminado_en IS NULL) AS usados_count,
+      (SELECT COUNT(*) FROM ifco_numeros_anulados a WHERE a.talonario_id = t.id) AS anulados_count
     FROM ifco_talonarios t
     LEFT JOIN proveedores p ON p.id = t.proveedor_id
     ORDER BY t.activo DESC, t.creado_en DESC
@@ -1163,12 +1204,31 @@ router.get('/talonarios/:id/detalle', function(req, res) {
     if (m) byNum[parseInt(m[1], 10)] = r;
   }
 
+  // Lista de números anulados manualmente (mal impresos, etc.)
+  const anulados = db.prepare(`
+    SELECT a.numero, a.motivo, a.anulado_en, u.username AS anulado_por_username
+    FROM ifco_numeros_anulados a
+    LEFT JOIN usuarios u ON u.id = a.anulado_por_id
+    WHERE a.talonario_id = ?
+  `).all(id);
+  const anuladosMap = {};
+  for (const a of anulados) anuladosMap[a.numero] = a;
+
   // Construir lista del rango
   const numeros = [];
   for (let n = t.numero_desde; n <= t.numero_hasta; n++) {
     const r = byNum[n];
     const numStr = t.serie + '-' + String(n).padStart(8, '0');
-    if (!r) {
+    const anulMan = anuladosMap[n];
+    if (anulMan) {
+      // Anulación manual prevalece sobre cualquier estado (no debería haber remito activo
+      // en un número anulado pero igual lo mostramos como anulado).
+      numeros.push({
+        numero: n, n_remito_ifco: numStr, estado: 'anulado_manual',
+        motivo: anulMan.motivo, anulado_en: anulMan.anulado_en,
+        anulado_por_username: anulMan.anulado_por_username
+      });
+    } else if (!r) {
       numeros.push({ numero: n, n_remito_ifco: numStr, estado: 'disponible' });
     } else if (r.eliminado_en) {
       numeros.push({
@@ -1199,6 +1259,65 @@ router.get('/talonarios/:id/detalle', function(req, res) {
   `).all(id);
 
   res.json({ talonario: t, numeros: numeros, log: log });
+});
+
+// Anular un número específico de un talonario (caso: mal impreso, manchado, etc.)
+// Solo se pueden anular números SIN USAR (sin remito asociado, ni eliminado).
+// El número queda registrado con motivo y usuario que lo anuló.
+router.post('/talonarios/:id/anular-numero', express.json(), function(req, res) {
+  const talonario_id = parseInt(req.params.id);
+  const numero = parseInt(req.body && req.body.numero);
+  const motivo = (req.body && req.body.motivo) ? String(req.body.motivo).trim() : null;
+  if (!numero) return res.status(400).json({ error: 'Falta numero' });
+
+  // Validar talonario existente
+  const t = db.prepare("SELECT * FROM ifco_talonarios WHERE id = ?").get(talonario_id);
+  if (!t) return res.status(404).json({ error: 'Talonario no encontrado' });
+
+  // Validar rango
+  if (numero < t.numero_desde || numero > t.numero_hasta) {
+    return res.status(400).json({ error: 'El número está fuera del rango del talonario (' + t.numero_desde + '–' + t.numero_hasta + ')' });
+  }
+
+  // Validar que no esté usado (que no haya un remito activo con ese número del mismo talonario)
+  const numStr = t.serie + '-' + String(numero).padStart(8, '0');
+  const yaUsado = db.prepare(`
+    SELECT id, estado, eliminado_en FROM ifco_remitos_super
+    WHERE talonario_id = ? AND n_remito_ifco = ? AND eliminado_en IS NULL
+  `).get(talonario_id, numStr);
+  if (yaUsado) {
+    return res.status(400).json({ error: 'Ese número ya tiene un despacho activo (estado: ' + yaUsado.estado + '). No se puede anular por esta vía — eliminá el despacho desde la pestaña Despachos.' });
+  }
+
+  // Validar que no esté ya anulado
+  const yaAnulado = db.prepare("SELECT id FROM ifco_numeros_anulados WHERE talonario_id = ? AND numero = ?").get(talonario_id, numero);
+  if (yaAnulado) return res.status(400).json({ error: 'Ese número ya está anulado' });
+
+  try {
+    const r = db.prepare(`
+      INSERT INTO ifco_numeros_anulados (talonario_id, numero, motivo, anulado_por_id)
+      VALUES (?, ?, ?, ?)
+    `).run(talonario_id, numero, motivo, (req.user && req.user.id) || null);
+    res.json({ id: r.lastInsertRowid, n_remito_ifco: numStr });
+  } catch(e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Des-anular un número (revertir, en caso de haber anulado por error)
+router.delete('/talonarios/:id/anular-numero/:numero', function(req, res) {
+  if (!req.user || req.user.rol !== 'admin') {
+    return res.status(403).json({ error: 'Solo admin puede des-anular números' });
+  }
+  const talonario_id = parseInt(req.params.id);
+  const numero = parseInt(req.params.numero);
+  try {
+    const r = db.prepare("DELETE FROM ifco_numeros_anulados WHERE talonario_id = ? AND numero = ?").run(talonario_id, numero);
+    if (r.changes === 0) return res.status(404).json({ error: 'No estaba anulado' });
+    res.json({ ok: true });
+  } catch(e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 router.delete('/talonarios/:id', function(req, res) {
@@ -1440,6 +1559,11 @@ router.post('/remitos/sellado-directo', upload.single('escaneo'), function(req, 
     }
   }
 
+  // Si TODO lo despachado fue rechazado, va directo a estado 'presentado' (no hay nada que presentar a IFCO)
+  const todoRechazadoSD = (rechazada > 0 && rechazada >= cantDesp);
+  const estadoSD = todoRechazadoSD ? 'presentado' : 'sellado';
+  const fechaPresentadoSD = todoRechazadoSD ? new Date().toISOString().slice(0,10) : null;
+
   try {
     const r = db.prepare(`
       INSERT INTO ifco_remitos_super (
@@ -1449,7 +1573,7 @@ router.post('/remitos/sellado-directo', upload.single('escaneo'), function(req, 
         encargado_prov_apellido, encargado_prov_nombre, encargado_prov_dni,
         encargado_super_apellido, encargado_super_nombre, encargado_super_dni,
         talonario_id, notas, usuario_id, estado,
-        escaneo_path, fecha_sellado,
+        escaneo_path, fecha_sellado, fecha_presentado,
         origen, proveedor_origen_id, rechazo_destino
       ) VALUES (
         @n_remito_ifco, @n_remito_sg, @fecha_emision, @cliente_id, @cliente_telefono, @empresa, @sucursal,
@@ -1457,8 +1581,8 @@ router.post('/remitos/sellado-directo', upload.single('escaneo'), function(req, 
         @producto, @transportista,
         @encargado_prov_apellido, @encargado_prov_nombre, @encargado_prov_dni,
         @encargado_super_apellido, @encargado_super_nombre, @encargado_super_dni,
-        @talonario_id, @notas, @usuario_id, 'sellado',
-        @escaneo_path, @fecha_sellado,
+        @talonario_id, @notas, @usuario_id, @estado,
+        @escaneo_path, @fecha_sellado, @fecha_presentado,
         @origen, @proveedor_origen_id, @rechazo_destino
       )
     `).run({
@@ -1484,13 +1608,15 @@ router.post('/remitos/sellado-directo', upload.single('escaneo'), function(req, 
       talonario_id:            d.talonario_id || _inferirTalonarioId(d.n_remito_ifco, origen, proveedor_origen_id),
       notas:                   d.notas || null,
       usuario_id:              req.user.id || null,
+      estado:                  estadoSD,
       escaneo_path:            escaneo_path,
       fecha_sellado:           d.fecha_sellado,
+      fecha_presentado:        fechaPresentadoSD,
       origen:                  origen,
       proveedor_origen_id:     proveedor_origen_id,
       rechazo_destino:         rechazo_destino
     });
-    res.json({ id: r.lastInsertRowid, n_remito_ifco: d.n_remito_ifco, escaneo_path: escaneo_path, estado: 'sellado', origen: origen });
+    res.json({ id: r.lastInsertRowid, n_remito_ifco: d.n_remito_ifco, escaneo_path: escaneo_path, estado: estadoSD, origen: origen, todo_rechazado: todoRechazadoSD });
   } catch(e) {
     res.status(500).json({ error: e.message });
   }
@@ -1531,10 +1657,19 @@ router.patch('/remitos/:id/sellar', upload.single('escaneo'), function(req, res)
     }
   }
 
+  // Si TODO lo despachado fue rechazado, no hay nada que presentar a IFCO:
+  // pasa directamente a estado 'presentado' con fecha_presentado = hoy.
+  // (Los cajones físicamente vuelven a SG/proveedor según rechazo_destino, pero
+  // contablemente el remito queda cerrado.)
+  const todoRechazado = (rechazada > 0 && rechazada >= r.cantidad_despachada);
+  const estadoFinal      = todoRechazado ? 'presentado' : 'sellado';
+  const fechaPresentadoF = todoRechazado ? new Date().toISOString().slice(0,10) : null;
+
   db.prepare(`
     UPDATE ifco_remitos_super SET
-      estado = 'sellado',
+      estado = @estado,
       fecha_sellado = @fecha_sellado,
+      fecha_presentado = COALESCE(@fecha_presentado, fecha_presentado),
       encargado_super_apellido = @encargado_super_apellido,
       encargado_super_nombre   = @encargado_super_nombre,
       encargado_super_dni      = @encargado_super_dni,
@@ -1546,7 +1681,9 @@ router.patch('/remitos/:id/sellar', upload.single('escaneo'), function(req, res)
     WHERE id = @id
   `).run({
     id: id,
+    estado:                   estadoFinal,
     fecha_sellado:            d.fecha_sellado,
+    fecha_presentado:         fechaPresentadoF,
     encargado_super_apellido: d.encargado_super_apellido || null,
     encargado_super_nombre:   d.encargado_super_nombre   || null,
     encargado_super_dni:      d.encargado_super_dni      || null,
@@ -1556,7 +1693,7 @@ router.patch('/remitos/:id/sellar', upload.single('escaneo'), function(req, res)
     escaneo_path:             escaneo_path
   });
 
-  res.json({ ok: true, escaneo_path: escaneo_path });
+  res.json({ ok: true, escaneo_path: escaneo_path, estado: estadoFinal, todo_rechazado: todoRechazado });
 });
 
 // Marcar varios remitos sellados como presentados (al hacer mailto)
@@ -3374,6 +3511,170 @@ router.post('/consolidar/preview', upload.single('archivo'), async function(req,
 });
 
 // POST /consolidar/aplicar — aplica los cambios del wizard (3 categorías)
+// ════════════════════════════════════════════════════════════════════════════
+// CONSOLIDACIÓN — SALDO Y DIFERENCIA (multa estimada de IFCO)
+// ────────────────────────────────────────────────────────────────────────────
+// Modelo:
+//   SALDO_IFCO   = lo que IFCO te informa (input manual del reporte de IFCO)
+//   SUMA_REAL    = piso_SG_real + pisos_proveedores_real + en_no_presentados
+//   DIFERENCIA   = SALDO_IFCO − SUMA_REAL  (si > 0 → multa)
+//
+// "en_no_presentados" = cajones que ya despachaste a una cadena pero todavía
+// no presentaste a IFCO. Estados 'despachado' (en tránsito) y 'sellado'
+// (en la cadena pero no presentado). Para los sellados se usa cantidad_recibida
+// (no cantidad_despachada) para no contar dos veces los rechazos que volvieron
+// a algún piso real.
+// ════════════════════════════════════════════════════════════════════════════
+
+// GET /consolidacion/saldos-reales — calcula la suma de pisos reales + componentes
+router.get('/consolidacion/saldos-reales', function(req, res) {
+  try {
+    // Último conteo físico de SG
+    const sgRow = db.prepare(`
+      SELECT cantidad, fecha, notas
+      FROM ifco_stocks_reales
+      WHERE deposito_tipo = 'san_geronimo'
+      ORDER BY fecha DESC, id DESC LIMIT 1
+    `).get();
+    const piso_sg_real = sgRow ? sgRow.cantidad : 0;
+    const piso_sg_fecha = sgRow ? sgRow.fecha : null;
+
+    // Último conteo físico por proveedor (todos los proveedores activos)
+    const provs = db.prepare(`
+      SELECT p.id, p.nombre,
+        (SELECT cantidad FROM ifco_stocks_reales s WHERE s.proveedor_id = p.id ORDER BY s.fecha DESC, s.id DESC LIMIT 1) AS ultimo_conteo,
+        (SELECT fecha FROM ifco_stocks_reales s WHERE s.proveedor_id = p.id ORDER BY s.fecha DESC, s.id DESC LIMIT 1) AS fecha_conteo
+      FROM proveedores p
+      WHERE p.id IN (SELECT proveedor_id FROM ifco_envios_proveedor WHERE eliminado_en IS NULL)
+         OR p.id IN (SELECT proveedor_origen_id FROM ifco_remitos_super WHERE eliminado_en IS NULL AND origen='proveedor_directo')
+      ORDER BY p.nombre
+    `).all();
+    const pisos_proveedores_real = provs.reduce(function(a, p){ return a + (p.ultimo_conteo || 0); }, 0);
+
+    // Cajones en estado 'despachado' (en tránsito) o 'sellado' (no presentado todavía)
+    // Para 'despachado' contamos cantidad_despachada (todavía no se sabe si la cadena rechazó)
+    // Para 'sellado' contamos cantidad_recibida (los rechazos ya volvieron a algún piso real)
+    const noPres = db.prepare(`
+      SELECT
+        COALESCE(SUM(CASE WHEN estado='despachado' THEN cantidad_despachada ELSE 0 END), 0) AS en_transito,
+        COALESCE(SUM(CASE WHEN estado='sellado' THEN cantidad_recibida ELSE 0 END), 0) AS sellado_sin_presentar
+      FROM ifco_remitos_super
+      WHERE eliminado_en IS NULL AND estado IN ('despachado', 'sellado')
+    `).get();
+    const en_no_presentados = (noPres.en_transito || 0) + (noPres.sellado_sin_presentar || 0);
+
+    const suma_real = piso_sg_real + pisos_proveedores_real + en_no_presentados;
+
+    // Componentes informativos (para que el user pueda chequear el saldo IFCO ingresado)
+    const get = function(q) { try { return db.prepare(q).get().total || 0; } catch(_) { return 0; } };
+    const retiros_total   = get("SELECT COALESCE(SUM(cantidad),0) AS total FROM ifco_movimientos WHERE tipo='retiro' AND eliminado_en IS NULL");
+    const perdidas_total  = get("SELECT COALESCE(SUM(cantidad),0) AS total FROM ifco_movimientos WHERE tipo='perdida' AND eliminado_en IS NULL");
+    const despachos_total = get("SELECT COALESCE(SUM(cantidad_despachada),0) AS total FROM ifco_remitos_super WHERE eliminado_en IS NULL");
+    const despachos_presentados_total = get("SELECT COALESCE(SUM(cantidad_despachada),0) AS total FROM ifco_remitos_super WHERE eliminado_en IS NULL AND estado='presentado'");
+
+    res.json({
+      piso_sg_real: piso_sg_real,
+      piso_sg_fecha: piso_sg_fecha,
+      pisos_proveedores: provs.map(function(p){
+        return { id: p.id, nombre: p.nombre, ultimo_conteo: p.ultimo_conteo, fecha_conteo: p.fecha_conteo };
+      }),
+      pisos_proveedores_total: pisos_proveedores_real,
+      en_no_presentados: en_no_presentados,
+      en_no_presentados_detalle: {
+        en_transito: noPres.en_transito || 0,
+        sellado_sin_presentar: noPres.sellado_sin_presentar || 0
+      },
+      suma_real: suma_real,
+      componentes: {
+        retiros_total: retiros_total,
+        despachos_total: despachos_total,
+        despachos_presentados_total: despachos_presentados_total,
+        perdidas_total: perdidas_total,
+        // saldo teórico nuestro: lo que IFCO debería decirnos según retiros - despachos presentados - perdidas
+        saldo_teorico_nuestro: retiros_total - despachos_presentados_total - perdidas_total
+      }
+    });
+  } catch(e) {
+    console.error('[IFCO][consolidacion/saldos-reales]', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /consolidacion — guarda una consolidación con el saldo IFCO ingresado
+router.post('/consolidacion', express.json(), function(req, res) {
+  const saldo_ifco = parseInt(req.body && req.body.saldo_ifco);
+  if (isNaN(saldo_ifco)) return res.status(400).json({ error: 'saldo_ifco requerido (entero)' });
+  const notas = req.body && req.body.notas ? String(req.body.notas).trim() : null;
+  const fecha = (req.body && req.body.fecha) || new Date().toISOString().slice(0,10);
+
+  try {
+    // Recalcular los componentes en el momento de guardar (snapshot)
+    const sgRow = db.prepare("SELECT cantidad FROM ifco_stocks_reales WHERE deposito_tipo='san_geronimo' ORDER BY fecha DESC, id DESC LIMIT 1").get();
+    const piso_sg_real = sgRow ? sgRow.cantidad : 0;
+
+    const pisos_proveedores_real = db.prepare(`
+      SELECT COALESCE(SUM(s.cantidad), 0) AS total FROM (
+        SELECT proveedor_id, MAX(fecha || '-' || id) AS k
+        FROM ifco_stocks_reales WHERE deposito_tipo='proveedor' GROUP BY proveedor_id
+      ) ult
+      JOIN ifco_stocks_reales s ON (s.fecha || '-' || s.id) = ult.k
+    `).get().total || 0;
+
+    const noPres = db.prepare(`
+      SELECT
+        COALESCE(SUM(CASE WHEN estado='despachado' THEN cantidad_despachada ELSE 0 END), 0)
+        + COALESCE(SUM(CASE WHEN estado='sellado' THEN cantidad_recibida ELSE 0 END), 0) AS total
+      FROM ifco_remitos_super
+      WHERE eliminado_en IS NULL AND estado IN ('despachado', 'sellado')
+    `).get();
+    const en_no_presentados = noPres.total || 0;
+
+    const suma_real = piso_sg_real + pisos_proveedores_real + en_no_presentados;
+    const diferencia = saldo_ifco - suma_real;
+
+    const r = db.prepare(`
+      INSERT INTO ifco_consolidaciones
+        (fecha, saldo_ifco, piso_sg_real, pisos_proveedores_real, en_no_presentados, suma_real, diferencia, notas, usuario_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(fecha, saldo_ifco, piso_sg_real, pisos_proveedores_real, en_no_presentados, suma_real, diferencia, notas, (req.user && req.user.id) || null);
+
+    res.json({ id: r.lastInsertRowid, fecha: fecha, saldo_ifco: saldo_ifco, suma_real: suma_real, diferencia: diferencia });
+  } catch(e) {
+    console.error('[IFCO][consolidacion POST]', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /consolidacion/historico — lista las consolidaciones pasadas (más recientes primero)
+router.get('/consolidacion/historico', function(req, res) {
+  try {
+    const rows = db.prepare(`
+      SELECT c.*, u.username AS usuario_username
+      FROM ifco_consolidaciones c
+      LEFT JOIN usuarios u ON u.id = c.usuario_id
+      ORDER BY c.fecha DESC, c.id DESC
+      LIMIT 50
+    `).all();
+    res.json(rows);
+  } catch(e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// DELETE /consolidacion/:id — borrar una consolidación (admin only, en caso de error)
+router.delete('/consolidacion/:id', function(req, res) {
+  if (!req.user || req.user.rol !== 'admin') {
+    return res.status(403).json({ error: 'Solo admin puede borrar consolidaciones' });
+  }
+  try {
+    const r = db.prepare("DELETE FROM ifco_consolidaciones WHERE id = ?").run(req.params.id);
+    if (r.changes === 0) return res.status(404).json({ error: 'No encontrada' });
+    res.json({ ok: true });
+  } catch(e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // Body JSON: {
 //   despachos: { ids_marcar: [int], fechas_por_id: {id:'YYYY-MM-DD'}, crear: [{n_remito_sistema, fecha, empresa, cantidad}] },
 //   ingresos:  { ids_marcar: [int], crear: [{n_remito_sistema, fecha, cantidad, sucursal_ifco, modelo}] },
