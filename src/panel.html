@@ -3031,8 +3031,10 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
 <div class="sec" id="sec-ab-ifcos">
   <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:12px">
     <div>
-      <div style="font-size:22px;font-weight:600">📦 Cajones IFCO</div>
-      <div style="font-size:12px;color:var(--mut);margin-top:2px">Control de retornables — retiros, despachos a cadena, sellado y presentación a IFCO</div>
+      <div style="font-size:22px;font-weight:600">📦 Gestión de IFCOs</div>
+      <div style="font-size:12px;color:#78350f;margin-top:4px;line-height:1.5;background:#fffbeb;border:1px solid #fcd34d;border-radius:6px;padding:8px 12px;max-width:720px">
+        💰 <b>Activo crítico de la empresa</b> — los cajones IFCO no son nuestros, los pagamos por uso. Cada cajón perdido, demora en presentación o discrepancia sin justificar genera <b>multas económicas</b>. Mantené la trazabilidad al día.
+      </div>
     </div>
     <div style="display:flex;gap:8px;flex-wrap:wrap">
       <button class="btn bb" onclick="ifcoAbrirNuevoRemito()">+ Despacho a súper</button>
@@ -3098,22 +3100,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
         </div>
       </div>
 
-      <!-- Conteo físico de stocks (real vs teórico) — movido arriba para visibilidad -->
-      <div id="ifco-stocks-card" class="ifco-card" style="margin-bottom:16px">
-        <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:10px;gap:16px;flex-wrap:wrap">
-          <div>
-            <div style="font-size:13px;font-weight:600">📋 Conteo físico de stocks</div>
-            <div style="font-size:11px;color:var(--mut);margin-top:2px">Diferencia entre lo que dice el sistema (teórico) y el conteo real. Solo informativo. <b>Actualizar todos los jueves 10am.</b></div>
-          </div>
-          <div id="ifco-stocks-perdida-kpi" style="text-align:right;display:none;background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:8px 14px;min-width:180px">
-            <div style="font-size:10px;color:#991b1b;text-transform:uppercase;letter-spacing:0.5px;font-weight:600">Pérdida potencial actual</div>
-            <div id="ifco-stocks-perdida-valor" style="font-size:20px;font-weight:700;color:#991b1b;font-variant-numeric:tabular-nums;margin-top:2px">—</div>
-            <div style="font-size:10px;color:#991b1b;opacity:0.8">suma de diferencias negativas</div>
-          </div>
-        </div>
-        <div id="ifco-stocks-tabla"></div>
-      </div>
-
+      <!-- 1. KPIs ARRIBA -->
       <div class="ab-grid ab-grid-4" style="margin-bottom:16px">
         <div class="ifco-card ifco-stat">
           <div class="ifco-stat-lbl">PISO actual</div>
@@ -3137,6 +3124,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
         </div>
       </div>
 
+      <!-- 2. PANEL NOTIFICACIONES -->
       <div id="ifco-alertas" style="margin-bottom:16px"></div>
 
       <!-- Recepciones en viaje (pendientes de confirmar por SG) -->
@@ -3146,6 +3134,22 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
           <div style="font-size:11px;color:#92400e">Cajones que un proveedor despachó y SG todavía no confirmó.</div>
         </div>
         <div id="ifco-en-viaje-list"></div>
+      </div>
+
+      <!-- 3. PANEL STOCK FÍSICO EN PROVEEDORES -->
+      <div id="ifco-stocks-card" class="ifco-card" style="margin-bottom:16px">
+        <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:10px;gap:16px;flex-wrap:wrap">
+          <div>
+            <div style="font-size:13px;font-weight:600">📋 Conteo físico de stocks</div>
+            <div style="font-size:11px;color:var(--mut);margin-top:2px">Diferencia entre lo que dice el sistema (teórico) y el conteo real. Solo informativo. <b>Actualizar todos los jueves 10am.</b></div>
+          </div>
+          <div id="ifco-stocks-perdida-kpi" style="text-align:right;display:none;background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:8px 14px;min-width:180px">
+            <div style="font-size:10px;color:#991b1b;text-transform:uppercase;letter-spacing:0.5px;font-weight:600">Pérdida potencial actual</div>
+            <div id="ifco-stocks-perdida-valor" style="font-size:20px;font-weight:700;color:#991b1b;font-variant-numeric:tabular-nums;margin-top:2px">—</div>
+            <div style="font-size:10px;color:#991b1b;opacity:0.8">suma de diferencias negativas</div>
+          </div>
+        </div>
+        <div id="ifco-stocks-tabla"></div>
       </div>
 
       <div class="ab-grid ab-grid-2">
@@ -3158,8 +3162,6 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
           <div id="ifco-despachos-mes"></div>
         </div>
       </div>
-
-      <!-- Conteo físico de stocks: ahora va arriba (antes de los KPIs) -->
     </div>
   </div>
 
@@ -3174,7 +3176,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
         <option value="presentado">Presentados (confirmados)</option>
         <option value="anulado">Anulados</option>
       </select>
-      <input type="text" id="ifco-flt-rem-search" placeholder="Buscar por n° o empresa…" oninput="ifcoCargarRemitos()" style="font-size:13px;padding:6px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg);min-width:240px">
+      <input type="text" id="ifco-flt-rem-search" placeholder="Buscar por N° (sin ceros está OK) o empresa…" oninput="ifcoCargarRemitos()" style="font-size:13px;padding:6px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg);min-width:280px">
       <div style="margin-left:auto;display:flex;gap:6px">
         <button class="btn bo" onclick="ifcoAbrirConsolidar()" title="Marcar como presentados los remitos del archivo IFCO">🔄 Consolidar con IFCO</button>
         <button class="btn bb" onclick="ifcoAbrirPresentar()" id="ifco-btn-presentar">📧 Enviar a IFCO</button>
@@ -3432,13 +3434,6 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
             <option value="">— Seleccionar proveedor —</option>
           </select>
         </div>
-      </div>
-      <!-- Checkbox: cargar como ya sellado -->
-      <div style="background:#fef3c7;border:1px solid #fcd34d;border-radius:8px;padding:10px 14px;margin-bottom:14px">
-        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px">
-          <input type="checkbox" id="ifco-r-ya-sellado" onchange="ifcoOnYaSelladoChange()">
-          <span><b>Ya viene sellado por el súper</b> — cargar el remito directamente en estado sellado (cuando se olvidaron de cargarlo al despacharlo)</span>
-        </label>
       </div>
       <div id="ifco-r-aviso-foto" style="background:var(--bg);border-radius:8px;padding:14px 16px;margin-bottom:14px;font-size:13px;color:var(--txt)">
         📸 <b>Sacale foto al remito IFCO</b> antes de despacharlo. La foto se archiva y la IA prelee los campos por vos.
@@ -3910,7 +3905,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     </div>
     <div class="ab-grid ab-grid-2" style="gap:10px">
       <div>
-        <label style="font-size:11px;color:var(--mut);text-transform:uppercase">Fecha envío *</label>
+        <label style="font-size:11px;color:var(--mut);text-transform:uppercase">Fecha envío <span id="ifco-e-fecha-hint" style="text-transform:none;font-size:10px;color:var(--mut)">(día de hoy)</span></label>
         <input id="ifco-e-fecha" type="date" style="width:100%;padding:8px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg)">
       </div>
       <div>
@@ -4101,6 +4096,56 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     <div class="ab-modal-footer" style="margin-top:18px;display:flex;justify-content:flex-end;gap:8px">
       <button class="btn bo" onclick="document.getElementById('ifco-mb-talon-import').classList.remove('on')">Cancelar</button>
       <button class="btn bb" id="ifco-imp-btn-go" onclick="ifcoConfirmarImportTalonarios()" disabled>Importar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: Transferir talonario a otro dueño -->
+<div class="mb" id="ifco-mb-talon-transferir">
+  <div class="mbox" style="width:520px;max-width:95vw">
+    <div class="mhd">
+      <div class="mht">🔄 Transferir talonario</div>
+      <button class="mcl" onclick="document.getElementById('ifco-mb-talon-transferir').classList.remove('on')">x</button>
+    </div>
+
+    <!-- Resumen del talonario actual -->
+    <div id="ifco-trans-info" style="background:var(--bg);border-radius:8px;padding:12px 14px;margin-bottom:14px;font-size:13px;line-height:1.6">
+      <div style="font-size:11px;color:var(--mut);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px">Talonario a transferir</div>
+      <div id="ifco-trans-info-cuerpo">—</div>
+    </div>
+
+    <!-- Destino nuevo -->
+    <div style="margin-bottom:12px">
+      <label style="font-size:11px;color:var(--mut);text-transform:uppercase;font-weight:600;display:block;margin-bottom:6px">Pasarlo a:</label>
+      <div style="display:flex;gap:14px;flex-wrap:wrap">
+        <label style="cursor:pointer;display:flex;align-items:center;gap:6px;font-size:13px">
+          <input type="radio" name="ifco-trans-destino" value="san_geronimo" onchange="ifcoOnTransDestinoChange()"> San Gerónimo (planta)
+        </label>
+        <label style="cursor:pointer;display:flex;align-items:center;gap:6px;font-size:13px">
+          <input type="radio" name="ifco-trans-destino" value="proveedor" checked onchange="ifcoOnTransDestinoChange()"> Proveedor
+        </label>
+      </div>
+    </div>
+
+    <div id="ifco-trans-prov-wrap" style="margin-bottom:12px">
+      <label style="font-size:11px;color:var(--mut);text-transform:uppercase">Proveedor destino *</label>
+      <select id="ifco-trans-prov" style="width:100%;padding:8px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg)">
+        <option value="">— Seleccionar proveedor —</option>
+      </select>
+    </div>
+
+    <div style="margin-bottom:12px">
+      <label style="font-size:11px;color:var(--mut);text-transform:uppercase">Notas (opcional)</label>
+      <input id="ifco-trans-notas" type="text" placeholder="Ej: entregado en mano el 9/5/2026" style="width:100%;padding:8px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg)">
+    </div>
+
+    <div style="background:#fffbeb;border:1px solid #fcd34d;border-radius:6px;padding:10px 12px;margin-bottom:14px;font-size:12px;color:#78350f;line-height:1.5">
+      ℹ️ La transferencia queda registrada en el log del talonario (se puede consultar después). Los despachos ya cargados con números de este talonario no se modifican — siguen asociados.
+    </div>
+
+    <div class="ab-modal-footer" style="margin-top:18px;display:flex;justify-content:flex-end;gap:8px">
+      <button class="btn bo" onclick="document.getElementById('ifco-mb-talon-transferir').classList.remove('on')">Cancelar</button>
+      <button class="btn bb" id="ifco-trans-btn-go" onclick="ifcoConfirmarTransferirTalonario()">Confirmar transferencia</button>
     </div>
   </div>
 </div>
@@ -16075,31 +16120,30 @@ function ifcoOnOrigenChange() {
   document.getElementById('ifco-r-numero').value = '';
 }
 
-// Toggle del checkbox "Ya viene sellado"
+// Toggle del checkbox "Ya viene sellado" — el checkbox fue removido del modal de despachos.
+// Esa funcionalidad ahora vive en el botón "Cargar sellado" del header. La función queda
+// defensiva por si todavía hay llamadas residuales en el código (ej: al editar).
 function ifcoOnYaSelladoChange() {
-  const ck = document.getElementById('ifco-r-ya-sellado').checked;
+  const ckEl = document.getElementById('ifco-r-ya-sellado');
+  const ck = ckEl ? ckEl.checked : false;
   // Cambiar leyenda y botón del paso 1
   const aviso = document.getElementById('ifco-r-aviso-foto');
   const btn = document.getElementById('ifco-r-btn-foto');
-  if (ck) {
-    aviso.innerHTML = '🔏 <b>Subí la foto del remito YA SELLADO</b>. La IA va a leer en una sola pasada los datos del despacho + los del sellado.';
-    btn.textContent = '📷 Subir foto del remito sellado';
-  } else {
-    aviso.innerHTML = '📸 <b>Sacale foto al remito IFCO</b> antes de despacharlo. La foto se archiva y la IA prelee los campos por vos.';
-    btn.textContent = '📷 Subir foto del remito';
-  }
-  // Mostrar/ocultar campos extra del sellado en el paso 2
-  document.getElementById('ifco-r-sellado-fields').style.display = ck ? 'block' : 'none';
-  // Cambiar texto del botón Guardar
+  if (aviso) aviso.innerHTML = '📸 <b>Sacale foto al remito IFCO</b> antes de despacharlo. La foto se archiva y la IA prelee los campos por vos.';
+  if (btn) btn.textContent = '📷 Subir foto del remito';
+  // Si por alguna razón los campos del sellado están en el DOM, ocultarlos
+  const sellFields = document.getElementById('ifco-r-sellado-fields');
+  if (sellFields) sellFields.style.display = ck ? 'block' : 'none';
+  // Texto del botón Guardar
   const btnGuardar = document.getElementById('ifco-r-btn-guardar');
   if (btnGuardar) btnGuardar.textContent = ck ? 'Guardar como sellado' : 'Guardar despacho';
-  // Cambiar título del modal (solo si estamos creando, no editando)
+  // Título del modal
   if (!IFCO._editandoRemitoId) {
     const tit = document.querySelector('#ifco-mb-remito .mht');
     if (tit) tit.textContent = ck ? '🔏 Cargar despacho ya sellado' : '📥 Nuevo despacho a supermercado';
   }
-  // Re-evaluar visibilidad del dropdown de rechazo destino
-  ifcoToggleRechDestRemito();
+  // Visibilidad del dropdown de rechazo
+  if (typeof ifcoToggleRechDestRemito === 'function') ifcoToggleRechDestRemito();
 }
 
 // Mostrar/ocultar dropdown "destino del rechazo" según si la cant. rechazada es > 0
@@ -16145,7 +16189,7 @@ function ifcoSaltarOcrDespacho() {
 async function ifcoOnFotoDespacho(ev) {
   const file = ev.target.files[0];
   if (!file) return;
-  const yaSellado = document.getElementById('ifco-r-ya-sellado').checked;
+  const _ckYS = document.getElementById('ifco-r-ya-sellado'); const yaSellado = _ckYS ? _ckYS.checked : false;
   // Preview
   const prev = document.getElementById('ifco-r-foto-preview');
   prev.style.display = 'block';
@@ -16267,7 +16311,7 @@ async function ifcoGuardarRemito() {
   }
 
   // CREACIÓN: FormData (puede llevar foto)
-  const yaSellado = document.getElementById('ifco-r-ya-sellado').checked;
+  const _ckYS = document.getElementById('ifco-r-ya-sellado'); const yaSellado = _ckYS ? _ckYS.checked : false;
   const fd = new FormData();
   fd.append('n_remito_ifco', numero);
   const numSG = document.getElementById('ifco-r-numero-sg').value.trim();
@@ -17195,7 +17239,11 @@ async function ifcoAbrirEditarEnvio(id) {
     IFCO._editandoEnvioId = id;
     const tit = document.querySelector('#ifco-mb-envio .mht');
     if (tit) tit.textContent = '✏️ Editar envío — ' + e.n_remito_interno;
-    document.getElementById('ifco-e-fecha').value = e.fecha_envio || '';
+    const fechaInput = document.getElementById('ifco-e-fecha');
+    fechaInput.value = e.fecha_envio || '';
+    fechaInput.disabled = false;
+    const fhint = document.getElementById('ifco-e-fecha-hint');
+    if (fhint) fhint.textContent = '';
     document.getElementById('ifco-e-cant').value  = e.cantidad_enviada || '';
     document.getElementById('ifco-e-notas').value = e.notas || '';
     const sel = document.getElementById('ifco-e-prov');
@@ -17219,7 +17267,11 @@ function ifcoAbrirNuevoEnvio() {
   IFCO._editandoEnvioId = null;
   const tit = document.querySelector('#ifco-mb-envio .mht');
   if (tit) tit.textContent = '🚚 Nuevo envío a proveedor';
-  document.getElementById('ifco-e-fecha').value = _ifcoToday();
+  const fechaInput = document.getElementById('ifco-e-fecha');
+  fechaInput.value = _ifcoToday();
+  fechaInput.disabled = true;
+  const fhint = document.getElementById('ifco-e-fecha-hint');
+  if (fhint) fhint.textContent = '(día de hoy)';
   document.getElementById('ifco-e-cant').value = '';
   document.getElementById('ifco-e-notas').value = '';
   const sel = document.getElementById('ifco-e-prov');
@@ -17231,8 +17283,11 @@ function ifcoAbrirNuevoEnvio() {
 }
 
 async function ifcoGuardarEnvio() {
+  // Si estamos creando, la fecha siempre es hoy (input está disabled, podría no enviarse)
+  const fechaInput = document.getElementById('ifco-e-fecha');
+  const fechaVal = (fechaInput.value || _ifcoToday());
   const body = {
-    fecha_envio:      document.getElementById('ifco-e-fecha').value,
+    fecha_envio:      IFCO._editandoEnvioId ? fechaInput.value : fechaVal,
     proveedor_id:     document.getElementById('ifco-e-prov').value,
     cantidad_enviada: parseInt(document.getElementById('ifco-e-cant').value),
     modelo:           '6420',
@@ -17919,6 +17974,7 @@ async function ifcoCargarTalonarios() {
       const disp = total - t.usados_count;
       const acciones = ['<button class="btn bo" style="font-size:11px;padding:4px 8px" onclick="event.stopPropagation();ifcoVerTalonario('+t.id+')">👁 Ver</button>'];
       acciones.push('<button class="btn bo" style="font-size:11px;padding:4px 8px" onclick="event.stopPropagation();ifcoEditarTalonario('+t.id+')">✏️ Editar</button>');
+      acciones.push('<button class="btn bo" style="font-size:11px;padding:4px 8px" onclick="event.stopPropagation();ifcoAbrirTransferirTalonario('+t.id+')" title="Transferir el talonario a otro dueño (proveedor o SG)">🔄 Transferir</button>');
       if (t.usados_count === 0) {
         acciones.push('<button class="btn bo" style="font-size:11px;padding:4px 8px;color:#991b1b" onclick="event.stopPropagation();ifcoEliminarTalonario('+t.id+')" title="Solo se pueden eliminar talonarios sin remitos asociados">🗑️</button>');
       }
@@ -18124,6 +18180,83 @@ async function ifcoConfirmarImportTalonarios() {
   } catch(e) {
     alert('Error en la importación: ' + e.message);
     btn.disabled = false; btn.textContent = 'Importar';
+  }
+}
+
+// ────── TRANSFERIR TALONARIO (cambio de dueño) ──────
+let _ifcoTransTalonarioId = null;
+
+async function ifcoAbrirTransferirTalonario(id) {
+  _ifcoTransTalonarioId = id;
+  // Cargar datos actuales del talonario
+  try {
+    const data = await _ifcoFetch('/api/ifco/talonarios/' + id + '/detalle');
+    const t = data.talonario;
+    const duenoActual = t.dueno_tipo === 'proveedor'
+      ? 'Proveedor: <b>' + _ifcoEsc(t.proveedor_nombre || '?') + '</b>'
+      : '<b>San Gerónimo (planta)</b>';
+    document.getElementById('ifco-trans-info-cuerpo').innerHTML =
+      '<b>Serie:</b> ' + _ifcoEsc(t.serie) + ' &nbsp;·&nbsp; ' +
+      '<b>Rango:</b> ' + t.numero_desde + ' → ' + t.numero_hasta + '<br>' +
+      '<b>Dueño actual:</b> ' + duenoActual;
+
+    // Llenar dropdown de proveedores
+    const sel = document.getElementById('ifco-trans-prov');
+    sel.innerHTML = '<option value="">— Seleccionar proveedor —</option>' +
+      (IFCO._provs || []).map(function(p){
+        // No mostrar el proveedor actual (no se puede transferir a sí mismo)
+        if (t.dueno_tipo === 'proveedor' && t.proveedor_id == p.id) return '';
+        return '<option value="'+p.id+'">'+_ifcoEsc(p.nombre)+(p.razon_social?' ('+_ifcoEsc(p.razon_social)+')':'')+'</option>';
+      }).join('');
+
+    // Default: si el talonario es de un proveedor, sugerir SG. Si es de SG, sugerir proveedor.
+    document.querySelectorAll('input[name="ifco-trans-destino"]').forEach(function(r){
+      r.checked = (t.dueno_tipo === 'proveedor' ? r.value === 'san_geronimo' : r.value === 'proveedor');
+    });
+    ifcoOnTransDestinoChange();
+
+    document.getElementById('ifco-trans-notas').value = '';
+    document.getElementById('ifco-mb-talon-transferir').classList.add('on');
+  } catch(e) { alert('Error: ' + e.message); }
+}
+
+function ifcoOnTransDestinoChange() {
+  const v = document.querySelector('input[name="ifco-trans-destino"]:checked').value;
+  document.getElementById('ifco-trans-prov-wrap').style.display = (v === 'proveedor') ? '' : 'none';
+}
+
+async function ifcoConfirmarTransferirTalonario() {
+  if (!_ifcoTransTalonarioId) return;
+  const destino = document.querySelector('input[name="ifco-trans-destino"]:checked').value;
+  const provId  = document.getElementById('ifco-trans-prov').value;
+  const notas   = document.getElementById('ifco-trans-notas').value.trim();
+
+  if (destino === 'proveedor' && !provId) {
+    alert('Elegí un proveedor destino');
+    return;
+  }
+
+  const body = { dueno_tipo: destino, notas: notas || null };
+  if (destino === 'proveedor') body.proveedor_id = parseInt(provId);
+
+  if (!confirm('¿Confirmar la transferencia del talonario?\n\nEl cambio queda registrado en el log y no se puede deshacer automáticamente (sí se puede transferir de vuelta manualmente).')) return;
+
+  const btn = document.getElementById('ifco-trans-btn-go');
+  btn.disabled = true; btn.textContent = 'Transfiriendo…';
+  try {
+    await _ifcoFetch('/api/ifco/talonarios/' + _ifcoTransTalonarioId + '/transferir', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    document.getElementById('ifco-mb-talon-transferir').classList.remove('on');
+    _ifcoTransTalonarioId = null;
+    ifcoCargarTalonarios();
+  } catch(e) {
+    alert('Error: ' + e.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Confirmar transferencia';
   }
 }
 
