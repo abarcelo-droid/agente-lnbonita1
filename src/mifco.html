@@ -226,22 +226,34 @@ body{padding-bottom:env(safe-area-inset-bottom)}
     🚛 Cargá los cajones que vas a mandar al depósito de San Gerónimo. Quedan "en viaje" hasta que alguien de SG confirme la recepción.
   </div>
   <div class="card">
-    <label class="lbl">Cantidad de cajones *</label>
-    <input id="esg-cant" type="number" min="1" inputmode="numeric" placeholder="Ej: 200">
+    <div class="row2">
+      <div class="fld">
+        <label>Cantidad de cajones *</label>
+        <input id="esg-cant" type="number" min="1" inputmode="numeric" placeholder="Ej: 200">
+      </div>
+      <div class="fld">
+        <label>Fecha *</label>
+        <input id="esg-fecha" type="date">
+      </div>
+    </div>
 
-    <label class="lbl" style="margin-top:12px">Fecha *</label>
-    <input id="esg-fecha" type="date">
+    <div class="fld">
+      <label>N° de remito (opcional)</label>
+      <input id="esg-nrem" type="text" placeholder="Si tenés un nro. de referencia">
+    </div>
 
-    <label class="lbl" style="margin-top:12px">N° de remito (opcional)</label>
-    <input id="esg-nrem" type="text" placeholder="Si tenés un nro. de referencia">
+    <div class="fld">
+      <label>Notas (opcional)</label>
+      <input id="esg-notas" type="text" placeholder="Ej: producto, transportista...">
+    </div>
 
-    <label class="lbl" style="margin-top:12px">Notas (opcional)</label>
-    <input id="esg-notas" type="text" placeholder="Ej: producto, transportista...">
+    <div class="fld">
+      <label>Foto del remito (opcional)</label>
+      <input id="esg-foto" type="file" accept="image/jpeg,image/png,image/webp" capture="environment">
+      <div class="hint">Sacá una foto clara del remito firmado, si lo tenés a mano</div>
+    </div>
 
-    <label class="lbl" style="margin-top:12px">Foto del remito (opcional)</label>
-    <input id="esg-foto" type="file" accept="image/jpeg,image/png,image/webp" capture="environment">
-
-    <button class="btn-primary" onclick="enviarSG()" style="margin-top:18px;width:100%;background:#047857">📤 Enviar a SG</button>
+    <button class="btn-primary" onclick="enviarSG()" style="margin-top:6px;width:100%;background:#047857;font-size:15px;padding:14px 18px">📤 Enviar a SG</button>
   </div>
 </div>
 

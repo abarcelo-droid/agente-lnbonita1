@@ -1246,7 +1246,19 @@ router.get('/remitos', function(req, res) {
   if (f.cliente_id) { q += " AND r.cliente_id = ?";    p.push(f.cliente_id); }
   if (f.desde)      { q += " AND r.fecha_emision >= ?"; p.push(f.desde); }
   if (f.hasta)      { q += " AND r.fecha_emision <= ?"; p.push(f.hasta); }
-  if (f.search)     { q += " AND (r.n_remito_ifco LIKE ? OR r.empresa LIKE ?)"; p.push('%'+f.search+'%','%'+f.search+'%'); }
+  if (f.search)     {
+    // Búsqueda flexible: matchea (1) el N° literal, (2) la empresa, (3) el N° sin ceros leading.
+    // Esto evita que el usuario tenga que tipear los ceros del prefijo de serie:
+    // "1579690" encuentra "00015-01579690", "15-1579" encuentra "00015-01579690", etc.
+    q += ` AND (
+      r.n_remito_ifco LIKE ?
+      OR r.empresa LIKE ?
+      OR REPLACE(r.n_remito_ifco, '-', '') LIKE ?
+      OR CAST(CAST(SUBSTR(r.n_remito_ifco, INSTR(r.n_remito_ifco,'-')+1) AS INTEGER) AS TEXT) LIKE ?
+    )`;
+    const wild = '%' + f.search + '%';
+    p.push(wild, wild, wild, wild);
+  }
   q += " ORDER BY r.fecha_emision DESC, r.id DESC LIMIT 500";
   res.json(db.prepare(q).all(...p));
 });
@@ -1982,9 +1994,11 @@ router.get('/resumen', function(req, res) {
       AND eliminado_en IS NULL
   `);
 
-  // PISO actual = retiros - envíos a prov + recepciones (ambas: de envíos + mercadería) - despachos SG + rechazos vueltos - faltantes declarados
+  // PISO actual: usa la función unificada _calcStockSG() que también consume
+  // _stockTeoricoDeposito('san_geronimo'). Garantiza que el KPI y el TEÓRICO
+  // del card "Conteo físico" muestren siempre el mismo número.
   const faltantes_sg = _faltantesSGTotal();
-  const piso = retirado - envios_totales + recepciones_envios + recepciones_merc - despachos_sg + rechazos_vueltos_sg - faltantes_sg;
+  const piso = _calcStockSG();
   const bajo_responsabilidad = piso + en_proveedores + en_transito_sg;
 
   // Alertas — sellados >= 25 días sin presentar
@@ -3663,23 +3677,7 @@ function _faltantesSGTotal() {
 // loguee qué query rompió y devuelva 0 en lugar de tirar el endpoint entero.
 function _stockTeoricoDeposito(deposito_tipo, proveedor_id) {
   if (deposito_tipo === 'san_geronimo') {
-    const get = (label, q) => {
-      try {
-        const r = db.prepare(q).get();
-        return r ? (r.total || 0) : 0;
-      } catch(e) {
-        console.error('[IFCO][_stockTeoricoDeposito] Falló query "' + label + '":', e.message);
-        return 0;
-      }
-    };
-    const retiros       = get('retiros',       `SELECT COALESCE(SUM(cantidad),0) AS total FROM ifco_movimientos WHERE tipo='retiro'  AND eliminado_en IS NULL`);
-    const perdidas      = get('perdidas',      `SELECT COALESCE(SUM(cantidad),0) AS total FROM ifco_movimientos WHERE tipo='perdida' AND eliminado_en IS NULL`);
-    const despachados   = get('despachados',   `SELECT COALESCE(SUM(cantidad_despachada),0) AS total FROM ifco_remitos_super WHERE eliminado_en IS NULL AND origen='san_geronimo'`);
-    const enviados      = get('enviados',      `SELECT COALESCE(SUM(cantidad_enviada),0) AS total FROM ifco_envios_proveedor WHERE eliminado_en IS NULL`);
-    const recepciones   = get('recepciones',   `SELECT COALESCE(SUM(cantidad),0) AS total FROM ifco_recepciones_proveedor WHERE eliminado_en IS NULL AND (estado IS NULL OR estado='recibido')`);
-    const rechazadosASG = get('rechazadosASG', `SELECT COALESCE(SUM(cantidad_rechazada),0) AS total FROM ifco_remitos_super WHERE eliminado_en IS NULL AND cantidad_rechazada>0 AND (rechazo_destino IS NULL OR rechazo_destino='san_geronimo')`);
-    const faltantesSG   = _faltantesSGTotal(); // se resta para que el teórico refleje la realidad
-    return retiros - perdidas - despachados - enviados + recepciones + rechazadosASG - faltantesSG;
+    return _calcStockSG();
   }
   if (deposito_tipo === 'proveedor' && proveedor_id) {
     try {
@@ -3690,6 +3688,52 @@ function _stockTeoricoDeposito(deposito_tipo, proveedor_id) {
     }
   }
   return 0;
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// CÁLCULO UNIFICADO DEL STOCK SG (piso)
+// ────────────────────────────────────────────────────────────────────────────
+// Fuente única de verdad. Se usa tanto en el KPI "PISO ACTUAL" del /resumen
+// como en el "TEÓRICO" del card de Conteo físico, garantizando consistencia.
+//
+// Componentes (todos los registros excluyen los eliminados):
+//   + retiros desde IFCO  (ifco_movimientos tipo='retiro')
+//   - pérdidas declaradas (ifco_movimientos tipo='perdida')
+//   - despachos a súper, SOLO origen='san_geronimo' (los directos de proveedor
+//     no salieron del piso de SG)
+//   - envíos a proveedor (cantidad_enviada, estados activos)
+//   + cantidad recibida en envíos a proveedor (cajones que volvieron al galpón)
+//   + recepciones de mercadería confirmadas (cajones con producto que llegan)
+//   + rechazos vueltos al SG (cajones rechazados por la cadena que volvieron)
+//   - faltantes SG declarados manualmente
+// ════════════════════════════════════════════════════════════════════════════
+function _calcStockSG() {
+  const get = function(label, q) {
+    try {
+      const r = db.prepare(q).get();
+      return r ? (r.total || 0) : 0;
+    } catch(e) {
+      console.error('[IFCO][_calcStockSG] Falló query "' + label + '":', e.message);
+      return 0;
+    }
+  };
+  const retirado            = get('retiros',            "SELECT COALESCE(SUM(cantidad),0) AS total FROM ifco_movimientos WHERE tipo='retiro' AND eliminado_en IS NULL");
+  const perdidas            = get('perdidas',           "SELECT COALESCE(SUM(cantidad),0) AS total FROM ifco_movimientos WHERE tipo='perdida' AND eliminado_en IS NULL");
+  const despachos_sg        = get('despachos_sg',       "SELECT COALESCE(SUM(cantidad_despachada),0) AS total FROM ifco_remitos_super WHERE estado IN ('despachado','sellado','enviado','presentado') AND origen='san_geronimo' AND eliminado_en IS NULL");
+  const envios_totales      = get('envios_totales',     "SELECT COALESCE(SUM(cantidad_enviada),0) AS total FROM ifco_envios_proveedor WHERE estado IN ('enviado','parcial','recibido') AND eliminado_en IS NULL");
+  const recepciones_envios  = get('recepciones_envios', "SELECT COALESCE(SUM(cantidad_recibida),0) AS total FROM ifco_envios_proveedor WHERE estado IN ('recibido','parcial') AND eliminado_en IS NULL");
+  const recepciones_merc    = get('recepciones_merc',   "SELECT COALESCE(SUM(cantidad),0) AS total FROM ifco_recepciones_proveedor WHERE eliminado_en IS NULL AND (estado IS NULL OR estado='recibido')");
+  const rechazos_vueltos_sg = get('rechazos_sg',        "SELECT COALESCE(SUM(cantidad_rechazada),0) AS total FROM ifco_remitos_super WHERE estado IN ('sellado','enviado','presentado') AND rechazo_destino='san_geronimo' AND eliminado_en IS NULL");
+  const faltantes_sg        = _faltantesSGTotal();
+
+  return retirado
+       - perdidas
+       - despachos_sg
+       - envios_totales
+       + recepciones_envios
+       + recepciones_merc
+       + rechazos_vueltos_sg
+       - faltantes_sg;
 }
 
 // ════════════════════════════════════════════════════════════════════════════
