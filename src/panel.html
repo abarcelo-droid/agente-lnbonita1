@@ -3048,6 +3048,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     <button class="ifco-tab"     data-tab="remitos" onclick="ifcoTab('remitos')">🛒 Despachos</button>
     <button class="ifco-tab"     data-tab="movs"    onclick="ifcoTab('movs')">🔁 Retiros</button>
     <button class="ifco-tab"     data-tab="talons"  onclick="ifcoTab('talons')">📋 Talonarios</button>
+    <button class="ifco-tab"     data-tab="consol"  onclick="ifcoTab('consol')">🧮 Consolidación</button>
     <span style="border-left:1px solid var(--bor);height:24px;margin:0 6px"></span>
     <span style="font-size:10px;color:#0369a1;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;align-self:center;padding:0 4px">Otros depósitos</span>
     <button class="ifco-tab ifco-tab-prov" data-tab="recep"  onclick="ifcoTab('recep')">📥 Ingresos</button>
@@ -3173,7 +3174,6 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       </select>
       <input type="text" id="ifco-flt-rem-search" placeholder="Buscar por N° (sin ceros está OK) o empresa…" oninput="ifcoCargarRemitos()" style="font-size:13px;padding:6px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg);min-width:280px">
       <div style="margin-left:auto;display:flex;gap:6px">
-        <button class="btn bo" onclick="ifcoAbrirConsolidar()" title="Marcar como presentados los remitos del archivo IFCO">🔄 Consolidar con IFCO</button>
         <button class="btn bb" onclick="ifcoAbrirPresentar()" id="ifco-btn-presentar">📧 Enviar a IFCO</button>
       </div>
     </div>
@@ -3264,6 +3264,157 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
         </tr></thead>
         <tbody></tbody>
       </table>
+    </div>
+  </div>
+
+  <!-- Tab: Consolidación con IFCO (wizard de 3 pasos) -->
+  <div class="ifco-pane" id="ifco-pane-consol">
+    <div id="ifco-consol-loading" style="text-align:center;padding:40px;color:var(--mut)">Cargando…</div>
+    <div id="ifco-consol-content" style="display:none">
+
+      <!-- Header explicativo -->
+      <div style="background:#fef3c7;border:1px solid #fcd34d;border-radius:8px;padding:12px 16px;margin-bottom:16px;font-size:12px;color:#78350f;line-height:1.5">
+        ⚖️ <b>Flujo de consolidación con IFCO:</b> Primero subís el Excel que IFCO te manda con los movimientos del período (despachos + ingresos). El sistema matchea cada registro contra los del sistema, los aplicás (despachos pasan a "presentados", ingresos quedan consolidados). Después declarás el saldo total que IFCO te informa y se calcula la diferencia = multa estimada.
+      </div>
+
+      <!-- ──────────── STEPPER VISUAL ──────────── -->
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:18px;background:#fff;padding:14px 20px;border-radius:10px;border:1px solid var(--bor)">
+        <div style="display:flex;align-items:center;gap:10px;flex:1">
+          <div id="ifco-step1-circle" style="width:28px;height:28px;background:#1e3a5f;color:#fff;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;flex-shrink:0">1</div>
+          <div>
+            <div style="font-size:11px;color:#1e3a5f;font-weight:600;text-transform:uppercase">Paso 1</div>
+            <div style="font-size:13px;color:#1e3a5f;font-weight:500">Subir Excel IFCO</div>
+          </div>
+        </div>
+        <div id="ifco-step12-line" style="height:2px;background:#d1d5db;flex:1;min-width:30px"></div>
+        <div style="display:flex;align-items:center;gap:10px;flex:1">
+          <div id="ifco-step2-circle" style="width:28px;height:28px;background:#d1d5db;color:#6b7280;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;flex-shrink:0">2</div>
+          <div>
+            <div id="ifco-step2-label-up" style="font-size:11px;color:#6b7280;font-weight:600;text-transform:uppercase">Paso 2</div>
+            <div id="ifco-step2-label-dn" style="font-size:13px;color:#6b7280">Aplicar consolidación</div>
+          </div>
+        </div>
+        <div id="ifco-step23-line" style="height:2px;background:#d1d5db;flex:1;min-width:30px"></div>
+        <div style="display:flex;align-items:center;gap:10px;flex:1">
+          <div id="ifco-step3-circle" style="width:28px;height:28px;background:#d1d5db;color:#6b7280;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;flex-shrink:0">3</div>
+          <div>
+            <div id="ifco-step3-label-up" style="font-size:11px;color:#6b7280;font-weight:600;text-transform:uppercase">Paso 3</div>
+            <div id="ifco-step3-label-dn" style="font-size:13px;color:#6b7280">Saldo y diferencia</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ──────────── PASO 1: SUBIR ARCHIVO ──────────── -->
+      <div id="ifco-step1-pane" class="ifco-card" style="margin-bottom:16px">
+        <div style="font-size:13px;font-weight:600;margin-bottom:6px">📥 Paso 1 — Subir Excel de IFCO</div>
+        <div style="font-size:11px;color:var(--mut);margin-bottom:14px">El archivo .xlsx que IFCO te manda con los movimientos del período. Vamos a matchear cada registro contra los despachos e ingresos del sistema.</div>
+
+        <div id="ifco-step1-upload" style="border:2px dashed var(--bor);border-radius:10px;padding:24px;text-align:center;background:var(--bg)">
+          <input id="ifco-step1-file" type="file" accept=".xlsx,.xls" style="display:none" onchange="ifcoConsolStep1Upload(event)">
+          <div style="font-size:36px;margin-bottom:8px">📄</div>
+          <div style="font-size:13px;color:var(--txt);margin-bottom:4px">Subí el .xlsx de IFCO</div>
+          <div style="font-size:11px;color:var(--mut);margin-bottom:14px">Formato: cronológico con columnas Nº Remito, Egresos, Ingresos</div>
+          <button class="btn bb" onclick="document.getElementById('ifco-step1-file').click()">📁 Elegir archivo</button>
+        </div>
+
+        <div id="ifco-step1-loading" style="display:none;text-align:center;padding:24px;color:var(--mut)">
+          <div style="font-size:13px">Procesando archivo…</div>
+        </div>
+
+        <!-- Preview del match -->
+        <div id="ifco-step1-preview" style="display:none">
+          <div style="margin-top:14px;padding:10px 14px;background:#eff6ff;border-radius:8px;border:1px solid #93c5fd;font-size:12px;color:#1e3a8a;display:flex;align-items:center;justify-content:space-between;gap:10px">
+            <div>📄 Archivo cargado: <b id="ifco-step1-filename">—</b></div>
+            <button class="btn bo bs" style="font-size:11px;padding:4px 10px" onclick="ifcoConsolStep1Reset()">← Cambiar archivo</button>
+          </div>
+          <div id="ifco-step1-resumen" style="margin-top:12px"></div>
+          <div id="ifco-step1-detalles" style="margin-top:12px"></div>
+          <div style="margin-top:14px;display:flex;justify-content:flex-end;gap:8px">
+            <button class="btn bb" onclick="ifcoConsolStep1Next()" style="background:#047857">Aplicar consolidación →</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ──────────── PASO 2: APLICAR ──────────── -->
+      <div id="ifco-step2-pane" class="ifco-card" style="margin-bottom:16px;display:none">
+        <div style="font-size:13px;font-weight:600;margin-bottom:6px">⚙️ Paso 2 — Aplicar consolidación</div>
+        <div style="font-size:11px;color:var(--mut);margin-bottom:14px">Esto va a marcar los despachos como "presentados" y los ingresos como consolidados. Es reversible (los presentados se pueden volver a sellado, los consolidados se pueden des-consolidar manualmente).</div>
+
+        <div id="ifco-step2-resumen" style="margin-bottom:14px"></div>
+
+        <div style="display:flex;justify-content:space-between;gap:8px">
+          <button class="btn bo" onclick="ifcoConsolStep2Back()">← Volver al paso 1</button>
+          <button class="btn bb" id="ifco-step2-btn-aplicar" onclick="ifcoConsolStep2Aplicar()" style="background:#047857">✓ Aplicar y continuar</button>
+        </div>
+      </div>
+
+      <!-- ──────────── PASO 3: SALDO Y DIFERENCIA (BLOQUEADO HASTA APLICAR) ──────────── -->
+      <div id="ifco-step3-pane" class="ifco-card" style="position:relative">
+        <!-- Overlay cuando está bloqueado -->
+        <div id="ifco-step3-locked" style="display:flex;flex-direction:column;align-items:center;justify-content:center;padding:40px 20px;text-align:center">
+          <div style="font-size:40px;margin-bottom:8px;opacity:0.4">🔒</div>
+          <div style="font-size:13px;font-weight:600;color:var(--mut);margin-bottom:4px">Paso 3 bloqueado</div>
+          <div style="font-size:11px;color:var(--mut);max-width:400px">Primero subí el Excel de IFCO y aplicá la consolidación (pasos 1 y 2). Después acá podés declarar el saldo total y ver la diferencia.</div>
+        </div>
+
+        <!-- Contenido del paso 3 (oculto hasta desbloquear) -->
+        <div id="ifco-step3-content" style="display:none">
+          <div style="font-size:13px;font-weight:600;margin-bottom:6px">⚖️ Paso 3 — Saldo y diferencia</div>
+          <div style="font-size:11px;color:var(--mut);margin-bottom:14px">Ingresá el saldo total que IFCO te informa en el reporte. Se calcula la diferencia con la suma de pisos reales declarados (post-consolidación).</div>
+
+          <!-- 3 cards grandes -->
+          <div class="ab-grid ab-grid-3" style="gap:12px;margin-bottom:16px">
+            <div class="ifco-card" style="border:2px solid #3b82f6;background:#eff6ff;padding:14px">
+              <div style="font-size:10px;color:#1e40af;text-transform:uppercase;font-weight:600;letter-spacing:0.05em">📥 Saldo según IFCO</div>
+              <div style="font-size:11px;color:var(--mut);margin:4px 0 8px">Cifra del reporte de IFCO</div>
+              <input id="ifco-consol-saldo-ifco" type="number" placeholder="Ej: 10000" oninput="ifcoConsolRecalcular()"
+                style="width:100%;font-size:26px;font-weight:700;color:#1e3a8a;padding:6px 10px;border:1px solid #93c5fd;border-radius:6px;font-variant-numeric:tabular-nums;background:#fff;box-sizing:border-box">
+            </div>
+            <div class="ifco-card" style="padding:14px">
+              <div style="font-size:10px;color:#047857;text-transform:uppercase;font-weight:600;letter-spacing:0.05em">🏭 Suma de pisos reales</div>
+              <div style="font-size:11px;color:var(--mut);margin:4px 0 8px">SG + proveedores + en tránsito</div>
+              <div id="ifco-consol-suma-real" style="font-size:32px;font-weight:700;color:#047857;font-variant-numeric:tabular-nums;padding:4px 0">—</div>
+              <div id="ifco-consol-suma-detalle" style="font-size:10px;color:var(--mut)">cargando…</div>
+            </div>
+            <div class="ifco-card" id="ifco-consol-dif-card" style="background:#7c1d3f;border-color:#7c1d3f;box-shadow:0 4px 12px rgba(124,29,63,0.2);padding:14px">
+              <div style="font-size:10px;color:#fbcfe8;text-transform:uppercase;font-weight:600;letter-spacing:0.05em">⚠️ Diferencia de consolidación</div>
+              <div style="font-size:11px;color:#fbcfe8;margin:4px 0 8px">Multa estimada de IFCO</div>
+              <div id="ifco-consol-dif" style="font-size:32px;font-weight:800;color:#fff;font-variant-numeric:tabular-nums;padding:4px 0">—</div>
+              <div id="ifco-consol-dif-sub" style="font-size:10px;color:#fbcfe8">esperando saldo IFCO</div>
+            </div>
+          </div>
+
+          <!-- Detalle de pisos reales -->
+          <div class="ifco-card" style="margin-bottom:16px">
+            <div style="font-size:13px;font-weight:600;margin-bottom:10px">📋 Detalle de pisos reales declarados</div>
+            <div id="ifco-consol-detalle-tabla"></div>
+          </div>
+
+          <!-- Cálculo teórico nuestro -->
+          <div class="ifco-card" style="margin-bottom:16px;background:var(--bg)">
+            <div style="font-size:11px;color:var(--mut);text-transform:uppercase;font-weight:600;letter-spacing:0.05em;margin-bottom:6px">🧮 Cálculo teórico nuestro (informativo)</div>
+            <div style="font-size:12px;color:var(--txt);line-height:1.6" id="ifco-consol-teorico"></div>
+            <div style="font-size:11px;color:var(--mut);margin-top:6px">Si hay mucha diferencia con el saldo de IFCO, revisar movimientos no consolidados.</div>
+          </div>
+
+          <!-- Guardar consolidación -->
+          <div class="ifco-card" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+            <div style="flex:1;min-width:200px">
+              <div style="font-size:13px;font-weight:600">💾 Guardar esta consolidación</div>
+              <div style="font-size:11px;color:var(--mut);margin-top:2px">Queda en histórico con la fecha, el saldo y la diferencia</div>
+            </div>
+            <input id="ifco-consol-notas" type="text" placeholder="Notas (opcional)…" style="flex:2;min-width:200px;padding:8px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg);font-size:13px">
+            <button class="btn bb" id="ifco-consol-btn-guardar" onclick="ifcoConsolGuardar()" disabled>Guardar</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Histórico (siempre visible) -->
+      <div class="ifco-card" style="margin-top:16px">
+        <div style="font-size:13px;font-weight:600;margin-bottom:10px">📅 Histórico de consolidaciones</div>
+        <div id="ifco-consol-historico"></div>
+      </div>
+
     </div>
   </div>
 
@@ -4091,6 +4242,35 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     <div class="ab-modal-footer" style="margin-top:18px;display:flex;justify-content:flex-end;gap:8px">
       <button class="btn bo" onclick="document.getElementById('ifco-mb-talon-import').classList.remove('on')">Cancelar</button>
       <button class="btn bb" id="ifco-imp-btn-go" onclick="ifcoConfirmarImportTalonarios()" disabled>Importar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: Anular un número de talonario (mal impreso, manchado, etc.) -->
+<div class="mb" id="ifco-mb-anular-numero">
+  <div class="mbox" style="width:480px;max-width:95vw">
+    <div class="mhd">
+      <div class="mht">❌ Anular número</div>
+      <button class="mcl" onclick="document.getElementById('ifco-mb-anular-numero').classList.remove('on')">x</button>
+    </div>
+
+    <div style="background:var(--bg);border-radius:8px;padding:12px 14px;margin-bottom:14px;font-size:13px">
+      <div style="font-size:11px;color:var(--mut);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px">Número a anular</div>
+      <div id="ifco-anul-num-display" style="font-family:monospace;font-size:18px;font-weight:600">—</div>
+    </div>
+
+    <div style="margin-bottom:12px">
+      <label style="font-size:11px;color:var(--mut);text-transform:uppercase">Motivo *</label>
+      <input id="ifco-anul-motivo" type="text" placeholder="Ej: mal impreso, manchado, papel rasgado…" style="width:100%;padding:8px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg)" maxlength="200">
+    </div>
+
+    <div style="background:#fffbeb;border:1px solid #fcd34d;border-radius:6px;padding:10px 12px;margin-bottom:14px;font-size:12px;color:#78350f;line-height:1.5">
+      ℹ️ Este número quedará marcado como anulado y no podrá usarse en ningún despacho. Solo admins pueden des-anularlo después.
+    </div>
+
+    <div class="ab-modal-footer" style="margin-top:18px;display:flex;justify-content:flex-end;gap:8px">
+      <button class="btn bo" onclick="document.getElementById('ifco-mb-anular-numero').classList.remove('on')">Cancelar</button>
+      <button class="btn bb" id="ifco-anul-btn-go" onclick="ifcoConfirmarAnularNumero()" style="background:#991b1b">Anular número</button>
     </div>
   </div>
 </div>
@@ -15418,7 +15598,7 @@ function paCuRenderLog(log) {
 const IFCO = { _provs: [], _cli: [], _talonActivo: null, _selRemito: null, _selEnvio: null,
   _ocr: { enabled: false }, _fotoDespachoPath: null, _fotoSelladoPath: null, _movTipo: null,
   _editandoRemitoId: null, _editandoEnvioId: null, _editandoMovId: null, _editandoRecMercId: null,
-  _papTab: 'remitos' };
+  _papTab: 'remitos', _notifs: {} };
 
 function _ifcoFmt(n)     { return (n == null ? '0' : Number(n).toLocaleString('es-AR')); }
 function _ifcoFecha(s)   { if (!s) return '—'; const d = new Date(s); if (isNaN(d)) return s; return d.toLocaleDateString('es-AR'); }
@@ -15463,6 +15643,7 @@ function ifcoTab(t) {
   if (t === 'recep')    ifcoCargarRecepciones();
   if (t === 'movs')     ifcoCargarMovimientos();
   if (t === 'talons')   ifcoCargarTalonarios();
+  if (t === 'consol')   ifcoCargarConsolidacion();
   if (t === 'papelera') ifcoPapTab(IFCO._papTab || 'remitos');
 }
 
@@ -15471,12 +15652,12 @@ function ifcoTab(t) {
 // Cada categoría tiene una clave única; setearla con null la remueve. El panel
 // se re-renderiza completo en cada llamada.
 function _ifcoNotifSet(key, notif) {
-  if (!window.IFCO) window.IFCO = {};
-  if (!window.IFCO._notifs) window.IFCO._notifs = {};
+  
+  
   if (notif === null || notif === undefined) {
-    delete window.IFCO._notifs[key];
+    delete IFCO._notifs[key];
   } else {
-    window.IFCO._notifs[key] = notif;
+    IFCO._notifs[key] = notif;
   }
   _ifcoRenderNotifPanel();
 }
@@ -15489,8 +15670,8 @@ function _ifcoRenderNotifPanel() {
   const ordenes = ['stocks', 'talonario', 'urgentes', 'sin_sellar', 'envios_vencidos', 'en_viaje'];
   const all = [];
   ordenes.forEach(function(k){
-    if (window.IFCO && window.IFCO._notifs && window.IFCO._notifs[k]) {
-      all.push(window.IFCO._notifs[k]);
+    if ( IFCO._notifs && IFCO._notifs[k]) {
+      all.push(IFCO._notifs[k]);
     }
   });
   if (all.length === 0) {
@@ -15519,8 +15700,6 @@ function _ifcoRenderNotifPanel() {
 async function ifcoCargarResumen() {
   document.getElementById('ifco-resumen-loading').style.display = 'block';
   document.getElementById('ifco-resumen-content').style.display = 'none';
-  // Aseguramos que el contenedor de notificaciones existe
-  if (!window.IFCO._notifs) window.IFCO._notifs = {};
   try {
     const r = await _ifcoFetch('/api/ifco/resumen');
     document.getElementById('ifco-st-piso').textContent     = _ifcoFmt(r.stock.piso);
@@ -15528,7 +15707,7 @@ async function ifcoCargarResumen() {
     document.getElementById('ifco-st-total').textContent    = _ifcoFmt(r.stock.bajo_responsabilidad);
 
     // ── PANEL DE NOTIFICACIONES CONSOLIDADO ──
-    // Cada categoría de notificación se setea con clave en window.IFCO._notifs.
+    // Cada categoría de notificación se setea con clave en IFCO._notifs.
     // Se re-renderiza el panel cada vez que cambia. El orden de display es fijo
     // (stocks → talonario → urgentes → sin_sellar → envios_vencidos → en_viaje).
     const al = r.alertas || {};
@@ -18038,6 +18217,439 @@ async function ifcoRestaurarMovimiento(id) {
 }
 
 // ── TALONARIOS ────────────────────────────────────────────────────────────
+// ════════════════════════════════════════════════════════════════════════════
+// CONSOLIDACIÓN CON IFCO — pestaña 🧮 (wizard de 3 pasos)
+//   Paso 1: subir Excel + ver preview de match
+//   Paso 2: aplicar (presenta despachos + consolida ingresos)
+//   Paso 3: declarar saldo IFCO + ver diferencia + guardar
+// ════════════════════════════════════════════════════════════════════════════
+const _ifcoWizard = { step: 1, preview: null, applied: false, filename: null };
+let _ifcoConsolData = null;
+
+async function ifcoCargarConsolidacion() {
+  document.getElementById('ifco-consol-loading').style.display = 'block';
+  document.getElementById('ifco-consol-content').style.display = 'none';
+  // Reset estado del wizard al entrar a la pestaña
+  _ifcoWizard.step = 1;
+  _ifcoWizard.preview = null;
+  _ifcoWizard.applied = false;
+  _ifcoWizard.filename = null;
+  ifcoConsolStep1Reset(true);
+  _ifcoUpdateStepperUI();
+
+  // Cargar siempre el histórico (es independiente del wizard)
+  ifcoConsolCargarHistorico();
+
+  document.getElementById('ifco-consol-loading').style.display = 'none';
+  document.getElementById('ifco-consol-content').style.display = 'block';
+}
+
+// Actualiza el stepper visual (números y líneas según el paso actual y si ya se aplicó)
+function _ifcoUpdateStepperUI() {
+  const setCircle = function(id, color, bg, content) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.style.background = bg;
+    el.style.color = color;
+    el.textContent = content;
+  };
+  const setLine = function(id, bg) {
+    const el = document.getElementById(id);
+    if (el) el.style.background = bg;
+  };
+  const setLabel = function(idUp, idDn, color) {
+    const elUp = document.getElementById(idUp);
+    const elDn = document.getElementById(idDn);
+    if (elUp) elUp.style.color = color;
+    if (elDn) { elDn.style.color = color; }
+  };
+
+  // Paso 1: completado si ya se generó preview
+  if (_ifcoWizard.preview) {
+    setCircle('ifco-step1-circle', '#fff', '#047857', '✓');
+    setLine('ifco-step12-line', '#047857');
+  } else {
+    setCircle('ifco-step1-circle', '#fff', _ifcoWizard.step === 1 ? '#1e3a5f' : '#d1d5db', '1');
+    if (_ifcoWizard.step === 1) {
+      // arriba a la izq color azul (paso actual)
+      const elBg = document.getElementById('ifco-step1-circle');
+      if (elBg) { elBg.style.color = '#fff'; }
+    }
+    setLine('ifco-step12-line', '#d1d5db');
+  }
+
+  // Paso 2: actual o completado
+  if (_ifcoWizard.applied) {
+    setCircle('ifco-step2-circle', '#fff', '#047857', '✓');
+    setLabel('ifco-step2-label-up', 'ifco-step2-label-dn', '#047857');
+    setLine('ifco-step23-line', '#047857');
+  } else if (_ifcoWizard.step === 2) {
+    setCircle('ifco-step2-circle', '#fff', '#1e3a5f', '2');
+    setLabel('ifco-step2-label-up', 'ifco-step2-label-dn', '#1e3a5f');
+    setLine('ifco-step23-line', '#d1d5db');
+  } else {
+    setCircle('ifco-step2-circle', '#6b7280', '#d1d5db', '2');
+    setLabel('ifco-step2-label-up', 'ifco-step2-label-dn', '#6b7280');
+    setLine('ifco-step23-line', '#d1d5db');
+  }
+
+  // Paso 3: solo activo si applied
+  if (_ifcoWizard.applied) {
+    setCircle('ifco-step3-circle', '#fff', '#1e3a5f', '3');
+    setLabel('ifco-step3-label-up', 'ifco-step3-label-dn', '#1e3a5f');
+    document.getElementById('ifco-step3-locked').style.display = 'none';
+    document.getElementById('ifco-step3-content').style.display = 'block';
+  } else {
+    setCircle('ifco-step3-circle', '#6b7280', '#d1d5db', '3');
+    setLabel('ifco-step3-label-up', 'ifco-step3-label-dn', '#6b7280');
+    document.getElementById('ifco-step3-locked').style.display = 'flex';
+    document.getElementById('ifco-step3-content').style.display = 'none';
+  }
+}
+
+// PASO 1 — Subir archivo Excel y mostrar preview de qué matchea
+async function ifcoConsolStep1Upload(ev) {
+  const file = ev.target.files[0];
+  if (!file) return;
+  _ifcoWizard.filename = file.name;
+  document.getElementById('ifco-step1-upload').style.display = 'none';
+  document.getElementById('ifco-step1-loading').style.display = 'block';
+
+  const fd = new FormData();
+  fd.append('archivo', file);
+
+  try {
+    const res = await fetch('/api/ifco/consolidar/preview', { method: 'POST', credentials: 'include', body: fd });
+    if (!res.ok) {
+      const err = await res.json().catch(function(){ return { error: 'Error ' + res.status }; });
+      throw new Error(err.error || ('Error ' + res.status));
+    }
+    const data = await res.json();
+    _ifcoWizard.preview = data;
+    _ifcoRenderStep1Preview();
+    _ifcoUpdateStepperUI();
+  } catch(e) {
+    alert('Error procesando el archivo: ' + e.message);
+    ifcoConsolStep1Reset();
+  }
+}
+
+function _ifcoRenderStep1Preview() {
+  const data = _ifcoWizard.preview;
+  if (!data) return;
+  document.getElementById('ifco-step1-loading').style.display = 'none';
+  document.getElementById('ifco-step1-preview').style.display = 'block';
+  document.getElementById('ifco-step1-filename').textContent = _ifcoWizard.filename || 'archivo';
+
+  const desp = data.despachos || { a_marcar: [], ya_consolidados: [], no_encontrados: [] };
+  const ing  = data.ingresos  || { a_marcar: [], ya_consolidados: [], no_encontrados: [] };
+  const r22  = data.r22       || { a_marcar: [], ya_consolidados: [], no_encontrados: [] };
+
+  const card = function(color, bg, lbl, val, sub) {
+    return '<div style="background:'+bg+';padding:12px;border-radius:8px;text-align:center;border:1px solid '+color+'">' +
+      '<div style="font-size:10px;color:'+color+';text-transform:uppercase;font-weight:600;letter-spacing:0.05em">'+lbl+'</div>' +
+      '<div style="font-size:24px;font-weight:700;color:'+color+';margin-top:4px;font-variant-numeric:tabular-nums">'+val+'</div>' +
+      '<div style="font-size:10px;color:'+color+';opacity:0.8">'+sub+'</div></div>';
+  };
+
+  let html = '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:8px">';
+  html += card('#065f46', '#d1fae5', 'Despachos a marcar', desp.a_marcar.length, 'pasan a "presentado"');
+  html += card('#065f46', '#d1fae5', 'Ingresos a consolidar', ing.a_marcar.length, 'retiros que matchean');
+  if (r22.a_marcar.length > 0) html += card('#065f46', '#d1fae5', 'R22 a consolidar', r22.a_marcar.length, 'recepciones de IFCOs nuevos');
+  if ((desp.ya_consolidados.length + ing.ya_consolidados.length + r22.ya_consolidados.length) > 0) {
+    html += card('#1e40af', '#dbeafe', 'Ya consolidados', desp.ya_consolidados.length + ing.ya_consolidados.length + r22.ya_consolidados.length, 'no se vuelven a marcar');
+  }
+  if ((desp.no_encontrados.length + ing.no_encontrados.length + r22.no_encontrados.length) > 0) {
+    html += card('#92400e', '#fef3c7', 'No encontrados', desp.no_encontrados.length + ing.no_encontrados.length + r22.no_encontrados.length, 'están en IFCO pero no en sistema');
+  }
+  html += '</div>';
+
+  document.getElementById('ifco-step1-resumen').innerHTML = html;
+
+  // Detalle expandible (los no encontrados son los más importantes)
+  let detHtml = '';
+  if (desp.no_encontrados.length > 0) {
+    detHtml += '<div style="margin-top:12px;background:#fef3c7;border:1px solid #fcd34d;border-radius:8px;padding:10px 12px">' +
+               '<div style="font-size:12px;font-weight:600;color:#78350f;margin-bottom:6px">⚠️ ' + desp.no_encontrados.length + ' despacho(s) en IFCO no están en el sistema</div>' +
+               '<div style="font-size:11px;color:#78350f;line-height:1.5">' +
+               desp.no_encontrados.slice(0, 5).map(function(x){
+                 return '• <b>' + _ifcoEsc(x.n_remito_archivo) + '</b> — ' + _ifcoEsc(x.detalle||'') + ' (' + _ifcoFmt(x.cantidad) + ' caj)';
+               }).join('<br>') +
+               (desp.no_encontrados.length > 5 ? '<br>…y ' + (desp.no_encontrados.length-5) + ' más' : '') +
+               '</div></div>';
+  }
+  if (ing.no_encontrados.length > 0) {
+    detHtml += '<div style="margin-top:8px;background:#fef3c7;border:1px solid #fcd34d;border-radius:8px;padding:10px 12px">' +
+               '<div style="font-size:12px;font-weight:600;color:#78350f;margin-bottom:6px">⚠️ ' + ing.no_encontrados.length + ' ingreso(s) en IFCO no están en el sistema</div>' +
+               '<div style="font-size:11px;color:#78350f;line-height:1.5">' +
+               ing.no_encontrados.slice(0, 5).map(function(x){
+                 return '• <b>' + _ifcoEsc(x.n_remito_archivo) + '</b> — ' + _ifcoFmt(x.cantidad) + ' caj';
+               }).join('<br>') +
+               (ing.no_encontrados.length > 5 ? '<br>…y ' + (ing.no_encontrados.length-5) + ' más' : '') +
+               '</div></div>';
+  }
+  if (detHtml) {
+    detHtml += '<div style="font-size:11px;color:var(--mut);margin-top:6px;padding:0 4px">Los registros "no encontrados" se pueden crear manualmente en sus pestañas correspondientes después de aplicar.</div>';
+  }
+  document.getElementById('ifco-step1-detalles').innerHTML = detHtml;
+}
+
+function ifcoConsolStep1Reset(skipUpdate) {
+  _ifcoWizard.step = 1;
+  _ifcoWizard.preview = null;
+  _ifcoWizard.applied = false;
+  _ifcoWizard.filename = null;
+  document.getElementById('ifco-step1-upload').style.display = 'block';
+  document.getElementById('ifco-step1-loading').style.display = 'none';
+  document.getElementById('ifco-step1-preview').style.display = 'none';
+  document.getElementById('ifco-step2-pane').style.display = 'none';
+  document.getElementById('ifco-step1-file').value = '';
+  if (!skipUpdate) _ifcoUpdateStepperUI();
+}
+
+// Pasar al paso 2 (mostrar el resumen final antes de aplicar)
+function ifcoConsolStep1Next() {
+  if (!_ifcoWizard.preview) return;
+  _ifcoWizard.step = 2;
+
+  // Render del resumen del paso 2
+  const data = _ifcoWizard.preview;
+  const desp = data.despachos || { a_marcar: [], ya_consolidados: [], no_encontrados: [] };
+  const ing  = data.ingresos  || { a_marcar: [], ya_consolidados: [], no_encontrados: [] };
+  const r22  = data.r22       || { a_marcar: [], ya_consolidados: [], no_encontrados: [] };
+
+  let html = '<div style="background:var(--bg);border-radius:8px;padding:14px;font-size:13px;line-height:1.7">' +
+             '<div style="font-weight:600;margin-bottom:8px">Vas a aplicar:</div>' +
+             '<div>✓ <b>' + desp.a_marcar.length + '</b> despachos pasan a estado <b>"presentado"</b></div>' +
+             '<div>✓ <b>' + ing.a_marcar.length + '</b> ingresos quedan <b>consolidados</b></div>';
+  if (r22.a_marcar.length > 0) html += '<div>✓ <b>' + r22.a_marcar.length + '</b> R22 consolidados</div>';
+  html += '<div style="margin-top:8px;font-size:11px;color:var(--mut)">Después podés volver al sistema y los registros van a aparecer marcados como consolidados (no se pueden eliminar más).</div>' +
+          '</div>';
+
+  document.getElementById('ifco-step2-resumen').innerHTML = html;
+  document.getElementById('ifco-step2-pane').style.display = 'block';
+  document.getElementById('ifco-step2-pane').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  _ifcoUpdateStepperUI();
+}
+
+function ifcoConsolStep2Back() {
+  _ifcoWizard.step = 1;
+  document.getElementById('ifco-step2-pane').style.display = 'none';
+  document.getElementById('ifco-step1-pane').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  _ifcoUpdateStepperUI();
+}
+
+// PASO 2 — Aplicar la consolidación
+async function ifcoConsolStep2Aplicar() {
+  if (!_ifcoWizard.preview) return;
+  const btn = document.getElementById('ifco-step2-btn-aplicar');
+  btn.disabled = true; btn.textContent = 'Aplicando…';
+
+  const desp = _ifcoWizard.preview.despachos || { a_marcar: [] };
+  const ing  = _ifcoWizard.preview.ingresos  || { a_marcar: [] };
+  const r22  = _ifcoWizard.preview.r22       || { a_marcar: [] };
+
+  // Construir body del POST /consolidar/aplicar
+  const body = {
+    despachos: { ids_marcar: desp.a_marcar.map(function(x){ return x.id_sistema; }).filter(Boolean), fechas_por_id: {}, crear: [] },
+    ingresos:  { ids_marcar: ing.a_marcar.map(function(x){ return x.id_sistema; }).filter(Boolean), crear: [] },
+    r22:       { ids_marcar: r22.a_marcar.map(function(x){ return x.id_sistema; }).filter(Boolean), crear: [] }
+  };
+  // Fechas por ID (para los despachos: setear fecha_presentado al match con IFCO)
+  desp.a_marcar.forEach(function(x){ if (x.id_sistema && x.fecha) body.despachos.fechas_por_id[x.id_sistema] = x.fecha; });
+
+  try {
+    const res = await fetch('/api/ifco/consolidar/aplicar', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(function(){ return { error: 'Error ' + res.status }; });
+      throw new Error(err.error || ('Error ' + res.status));
+    }
+    _ifcoWizard.applied = true;
+    _ifcoWizard.step = 3;
+    _ifcoUpdateStepperUI();
+    // Cargar saldos reales para mostrar en el paso 3 (datos POST-consolidación)
+    await _ifcoCargarSaldosReales();
+    document.getElementById('ifco-step3-pane').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  } catch(e) {
+    alert('Error aplicando: ' + e.message);
+  } finally {
+    btn.disabled = false; btn.textContent = '✓ Aplicar y continuar';
+  }
+}
+
+// Carga el saldo real (lo que antes estaba en ifcoCargarConsolidacion del paso 3)
+async function _ifcoCargarSaldosReales() {
+  try {
+    const data = await _ifcoFetch('/api/ifco/consolidacion/saldos-reales');
+    _ifcoConsolData = data;
+
+    document.getElementById('ifco-consol-suma-real').textContent = _ifcoFmt(data.suma_real);
+    const detalle =
+      'SG: ' + _ifcoFmt(data.piso_sg_real) +
+      ' · Prov: ' + _ifcoFmt(data.pisos_proveedores_total) +
+      ' · No presentados: ' + _ifcoFmt(data.en_no_presentados);
+    document.getElementById('ifco-consol-suma-detalle').textContent = detalle;
+
+    let html = '<table style="width:100%;font-size:12px;border-collapse:collapse">';
+    html += '<thead><tr style="color:var(--mut);font-size:10px;text-transform:uppercase;border-bottom:1px solid var(--bor)">' +
+            '<th style="text-align:left;padding:6px 8px">Depósito</th>' +
+            '<th style="text-align:right;padding:6px 8px">Último conteo</th>' +
+            '<th style="text-align:right;padding:6px 8px">Fecha conteo</th>' +
+            '</tr></thead><tbody>';
+    html += '<tr style="border-bottom:1px solid #f3f4f6">' +
+            '<td style="padding:8px"><b>San Gerónimo</b></td>' +
+            '<td style="text-align:right;padding:8px;font-variant-numeric:tabular-nums;font-weight:600">' + _ifcoFmt(data.piso_sg_real) + '</td>' +
+            '<td style="text-align:right;padding:8px;color:var(--mut);font-size:11px">' + (data.piso_sg_fecha ? _ifcoFecha(data.piso_sg_fecha) : '<span style="color:#991b1b">sin cargar</span>') + '</td>' +
+            '</tr>';
+    data.pisos_proveedores.forEach(function(p){
+      const sinCargar = p.ultimo_conteo == null;
+      html += '<tr style="border-bottom:1px solid #f3f4f6">' +
+              '<td style="padding:8px;' + (sinCargar?'color:#991b1b':'') + '">' + _ifcoEsc(p.nombre) + (sinCargar?' <span style="font-size:10px">(sin cargar)</span>':'') + '</td>' +
+              '<td style="text-align:right;padding:8px;font-variant-numeric:tabular-nums;font-weight:600;' + (sinCargar?'color:#991b1b':'') + '">' + (sinCargar ? '—' : _ifcoFmt(p.ultimo_conteo)) + '</td>' +
+              '<td style="text-align:right;padding:8px;color:var(--mut);font-size:11px">' + (p.fecha_conteo ? _ifcoFecha(p.fecha_conteo) : '<span style="color:#991b1b">sin cargar</span>') + '</td>' +
+              '</tr>';
+    });
+    html += '<tr style="border-bottom:1px solid #f3f4f6;background:#fef3c7">' +
+            '<td style="padding:8px;color:#78350f">📦 Cajones despachados sin presentar a IFCO</td>' +
+            '<td style="text-align:right;padding:8px;font-variant-numeric:tabular-nums;font-weight:600;color:#78350f">' + _ifcoFmt(data.en_no_presentados) + '</td>' +
+            '<td style="text-align:right;padding:8px;color:#78350f;font-size:11px">en tránsito: ' + _ifcoFmt(data.en_no_presentados_detalle.en_transito) + ' · sellados: ' + _ifcoFmt(data.en_no_presentados_detalle.sellado_sin_presentar) + '</td>' +
+            '</tr>';
+    html += '<tr style="background:#d1fae5">' +
+            '<td style="padding:8px;font-weight:700;color:#065f46">TOTAL</td>' +
+            '<td style="text-align:right;padding:8px;font-variant-numeric:tabular-nums;font-weight:700;color:#065f46;font-size:14px">' + _ifcoFmt(data.suma_real) + '</td>' +
+            '<td></td></tr>';
+    html += '</tbody></table>';
+    document.getElementById('ifco-consol-detalle-tabla').innerHTML = html;
+
+    const c = data.componentes;
+    document.getElementById('ifco-consol-teorico').innerHTML =
+      '<b>Retiros desde IFCO:</b> ' + _ifcoFmt(c.retiros_total) + ' caj.<br>' +
+      '<b>Despachos presentados:</b> &nbsp;' + _ifcoFmt(c.despachos_presentados_total) + ' caj. <span style="color:var(--mut)">(' + _ifcoFmt(c.despachos_total) + ' total despachado, incluyendo no presentados)</span><br>' +
+      '<b>Pérdidas declaradas:</b> ' + _ifcoFmt(c.perdidas_total) + ' caj.<br>' +
+      '<b style="color:#1e40af">Saldo teórico nuestro:</b> retiros − despachos presentados − pérdidas = <b style="color:#1e40af;font-size:14px">' + _ifcoFmt(c.saldo_teorico_nuestro) + '</b> caj.';
+
+    ifcoConsolRecalcular();
+  } catch(e) {
+    document.getElementById('ifco-consol-detalle-tabla').innerHTML = '<div style="color:#991b1b">Error: ' + _ifcoEsc(e.message) + '</div>';
+  }
+}
+
+function ifcoConsolRecalcular() {
+  if (!_ifcoConsolData) return;
+  const inp = document.getElementById('ifco-consol-saldo-ifco');
+  const saldoIfco = parseInt(inp.value);
+  const card = document.getElementById('ifco-consol-dif-card');
+  const dif = document.getElementById('ifco-consol-dif');
+  const difSub = document.getElementById('ifco-consol-dif-sub');
+  const btnGuardar = document.getElementById('ifco-consol-btn-guardar');
+
+  if (isNaN(saldoIfco)) {
+    dif.textContent = '—';
+    difSub.textContent = 'esperando saldo IFCO';
+    card.style.background = '#7c1d3f';
+    card.style.borderColor = '#7c1d3f';
+    btnGuardar.disabled = true;
+    return;
+  }
+
+  const diferencia = saldoIfco - _ifcoConsolData.suma_real;
+  dif.textContent = (diferencia > 0 ? '+' : '') + _ifcoFmt(diferencia);
+  if (diferencia > 0) {
+    difSub.textContent = 'cajones que IFCO va a multar (' + _ifcoFmt(saldoIfco) + ' − ' + _ifcoFmt(_ifcoConsolData.suma_real) + ')';
+    card.style.background = '#7c1d3f';
+    card.style.borderColor = '#7c1d3f';
+  } else if (diferencia < 0) {
+    difSub.textContent = 'tenés más cajones que los que IFCO cree (raro, revisá)';
+    card.style.background = '#1e40af';
+    card.style.borderColor = '#1e40af';
+  } else {
+    difSub.textContent = '✓ Saldo perfectamente balanceado';
+    card.style.background = '#047857';
+    card.style.borderColor = '#047857';
+  }
+  btnGuardar.disabled = false;
+}
+
+async function ifcoConsolGuardar() {
+  const saldoIfco = parseInt(document.getElementById('ifco-consol-saldo-ifco').value);
+  if (isNaN(saldoIfco)) { alert('Ingresá el saldo según IFCO'); return; }
+  const notas = document.getElementById('ifco-consol-notas').value.trim() || null;
+
+  if (!confirm('¿Guardar esta consolidación?\n\nSaldo IFCO: ' + _ifcoFmt(saldoIfco) + '\nSuma real: ' + _ifcoFmt(_ifcoConsolData.suma_real) + '\nDiferencia: ' + _ifcoFmt(saldoIfco - _ifcoConsolData.suma_real))) return;
+
+  const btn = document.getElementById('ifco-consol-btn-guardar');
+  btn.disabled = true; btn.textContent = 'Guardando…';
+  try {
+    await _ifcoFetch('/api/ifco/consolidacion', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ saldo_ifco: saldoIfco, notas: notas })
+    });
+    document.getElementById('ifco-consol-saldo-ifco').value = '';
+    document.getElementById('ifco-consol-notas').value = '';
+    ifcoConsolRecalcular();
+    ifcoConsolCargarHistorico();
+    alert('✓ Consolidación guardada');
+  } catch(e) {
+    alert('Error: ' + e.message);
+  } finally {
+    btn.disabled = false; btn.textContent = 'Guardar';
+  }
+}
+
+async function ifcoConsolCargarHistorico() {
+  const cont = document.getElementById('ifco-consol-historico');
+  try {
+    const rows = await _ifcoFetch('/api/ifco/consolidacion/historico');
+    if (!rows || rows.length === 0) {
+      cont.innerHTML = '<div style="font-size:12px;color:var(--mut);padding:8px">Sin consolidaciones guardadas todavía</div>';
+      return;
+    }
+    let html = '<table style="width:100%;font-size:12px;border-collapse:collapse">';
+    html += '<thead><tr style="color:var(--mut);font-size:10px;text-transform:uppercase;border-bottom:1px solid var(--bor)">' +
+            '<th style="text-align:left;padding:6px 8px">Fecha</th>' +
+            '<th style="text-align:right;padding:6px 8px">Saldo IFCO</th>' +
+            '<th style="text-align:right;padding:6px 8px">Suma real</th>' +
+            '<th style="text-align:right;padding:6px 8px">Diferencia</th>' +
+            '<th style="text-align:left;padding:6px 8px">Notas</th>' +
+            '<th style="padding:6px 8px"></th>' +
+            '</tr></thead><tbody>';
+    rows.forEach(function(r){
+      const difColor = r.diferencia > 0 ? '#991b1b' : (r.diferencia < 0 ? '#1e40af' : '#047857');
+      const difTxt = (r.diferencia > 0 ? '+' : '') + _ifcoFmt(r.diferencia);
+      const isAdmin = (LNB_USER && LNB_USER.rol === 'admin');
+      const btnDel = isAdmin
+        ? '<button class="btn bo" style="font-size:11px;padding:3px 8px;color:#991b1b" onclick="ifcoConsolBorrar('+r.id+',\''+_ifcoFecha(r.fecha)+'\')" title="Borrar (solo admin)">🗑️</button>'
+        : '';
+      html += '<tr style="border-bottom:1px solid #f3f4f6">' +
+              '<td style="padding:8px;font-weight:600">' + _ifcoFecha(r.fecha) + '</td>' +
+              '<td style="text-align:right;padding:8px;font-variant-numeric:tabular-nums">' + _ifcoFmt(r.saldo_ifco) + '</td>' +
+              '<td style="text-align:right;padding:8px;font-variant-numeric:tabular-nums">' + _ifcoFmt(r.suma_real) + '</td>' +
+              '<td style="text-align:right;padding:8px;font-variant-numeric:tabular-nums;font-weight:700;color:' + difColor + '">' + difTxt + '</td>' +
+              '<td style="padding:8px;color:var(--mut);font-size:11px">' + (r.notas ? _ifcoEsc(r.notas) : '') + '</td>' +
+              '<td style="padding:8px;text-align:right">' + btnDel + '</td>' +
+              '</tr>';
+    });
+    html += '</tbody></table>';
+    cont.innerHTML = html;
+  } catch(e) {
+    cont.innerHTML = '<div style="color:#991b1b;padding:8px">Error: ' + _ifcoEsc(e.message) + '</div>';
+  }
+}
+
+async function ifcoConsolBorrar(id, fecha) {
+  if (!confirm('¿Borrar la consolidación del ' + fecha + '?\n\nNo se puede deshacer.')) return;
+  try {
+    await _ifcoFetch('/api/ifco/consolidacion/' + id, { method: 'DELETE' });
+    ifcoConsolCargarHistorico();
+  } catch(e) { alert('Error: ' + e.message); }
+}
+
 async function ifcoCargarTalonarios() {
   try {
     const rows = await _ifcoFetch('/api/ifco/talonarios');
@@ -18048,7 +18660,8 @@ async function ifcoCargarTalonarios() {
     }
     tb.innerHTML = rows.map(function(t){
       const total = t.numero_hasta - t.numero_desde + 1;
-      const disp = total - t.usados_count;
+      const anuladosCount = t.anulados_count || 0;
+      const disp = total - t.usados_count - anuladosCount;
       const acciones = ['<button class="btn bo" style="font-size:11px;padding:4px 8px" onclick="event.stopPropagation();ifcoVerTalonario('+t.id+')">👁 Ver</button>'];
       acciones.push('<button class="btn bo" style="font-size:11px;padding:4px 8px" onclick="event.stopPropagation();ifcoEditarTalonario('+t.id+')">✏️ Editar</button>');
       acciones.push('<button class="btn bo" style="font-size:11px;padding:4px 8px" onclick="event.stopPropagation();ifcoAbrirTransferirTalonario('+t.id+')" title="Transferir el talonario a otro dueño (proveedor o SG)">🔄 Transferir</button>');
@@ -18337,6 +18950,53 @@ async function ifcoConfirmarTransferirTalonario() {
   }
 }
 
+// ────── ANULAR / DES-ANULAR NÚMEROS DE TALONARIO ──────
+let _ifcoAnulCtx = null; // { talonario_id, numero, n_remito_ifco }
+
+function ifcoAbrirAnularNumero(talonario_id, numero, n_remito_ifco) {
+  _ifcoAnulCtx = { talonario_id: talonario_id, numero: numero, n_remito_ifco: n_remito_ifco };
+  document.getElementById('ifco-anul-num-display').textContent = n_remito_ifco;
+  document.getElementById('ifco-anul-motivo').value = '';
+  document.getElementById('ifco-anul-btn-go').disabled = false;
+  document.getElementById('ifco-anul-btn-go').textContent = 'Anular número';
+  document.getElementById('ifco-mb-anular-numero').classList.add('on');
+  setTimeout(function(){ document.getElementById('ifco-anul-motivo').focus(); }, 100);
+}
+
+async function ifcoConfirmarAnularNumero() {
+  if (!_ifcoAnulCtx) return;
+  const motivo = document.getElementById('ifco-anul-motivo').value.trim();
+  if (!motivo) { alert('Ingresá un motivo (ej: mal impreso)'); return; }
+  const btn = document.getElementById('ifco-anul-btn-go');
+  btn.disabled = true; btn.textContent = 'Anulando…';
+  try {
+    await _ifcoFetch('/api/ifco/talonarios/' + _ifcoAnulCtx.talonario_id + '/anular-numero', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ numero: _ifcoAnulCtx.numero, motivo: motivo })
+    });
+    document.getElementById('ifco-mb-anular-numero').classList.remove('on');
+    // Recargar la grilla del talonario actual
+    if (typeof ifcoVerTalonario === 'function') {
+      ifcoVerTalonario(_ifcoAnulCtx.talonario_id);
+    }
+    if (typeof ifcoCargarTalonarios === 'function') ifcoCargarTalonarios();
+    _ifcoAnulCtx = null;
+  } catch(e) {
+    alert('Error: ' + e.message);
+    btn.disabled = false; btn.textContent = 'Anular número';
+  }
+}
+
+async function ifcoDesanularNumero(talonario_id, numero) {
+  if (!confirm('¿Quitar la anulación de este número?\n\nEl número volverá a estar disponible para usar.')) return;
+  try {
+    await _ifcoFetch('/api/ifco/talonarios/' + talonario_id + '/anular-numero/' + numero, { method: 'DELETE' });
+    if (typeof ifcoVerTalonario === 'function') ifcoVerTalonario(talonario_id);
+    if (typeof ifcoCargarTalonarios === 'function') ifcoCargarTalonarios();
+  } catch(e) { alert('Error: ' + e.message); }
+}
+
 // VER detalle del talonario: grilla de los 25 N° con estado y click → remito
 async function ifcoVerTalonario(id) {
   const modal = document.getElementById('ifco-mb-talon-detalle');
@@ -18352,9 +19012,12 @@ async function ifcoVerTalonario(id) {
 
     tit.textContent = '📒 Detalle del talonario — ' + (t.serie || '');
 
-    // Conteos por estado
+    // Conteos por estado (anulado_manual cuenta como anulado para el summary)
     const cuenta = { disponible:0, despachado:0, sellado:0, presentado:0, anulado:0 };
-    numeros.forEach(function(n){ if (cuenta[n.estado] != null) cuenta[n.estado]++; });
+    numeros.forEach(function(n){
+      if (n.estado === 'anulado_manual') cuenta.anulado++;
+      else if (cuenta[n.estado] != null) cuenta[n.estado]++;
+    });
 
     // Dueño
     let duenoHtml;
@@ -18372,7 +19035,8 @@ async function ifcoVerTalonario(id) {
         case 'despachado': return { bg:'#e5e7eb', border:'#d1d5db', txt:'#374151', label:'Despachado' };
         case 'sellado':    return { bg:'#dbeafe', border:'#93c5fd', txt:'#1e40af', label:'Sellado' };
         case 'presentado': return { bg:'#d1fae5', border:'#6ee7b7', txt:'#065f46', label:'Presentado' };
-        case 'anulado':    return { bg:'#fee2e2', border:'#fca5a5', txt:'#991b1b', label:'Anulado' };
+        case 'anulado':    return { bg:'#fee2e2', border:'#fca5a5', txt:'#991b1b', label:'En papelera' };
+        case 'anulado_manual': return { bg:'#fee2e2', border:'#dc2626', txt:'#991b1b', label:'❌ Anulado' };
         default:           return { bg:'#f3f4f6', border:'#d1d5db', txt:'#6b7280', label:est };
       }
     }
@@ -18380,21 +19044,46 @@ async function ifcoVerTalonario(id) {
     // Render de cada celda
     function celda(n) {
       const c = colorEstado(n.estado);
+      const isAnuladoManual = n.estado === 'anulado_manual';
+      const isDisponible = n.estado === 'disponible';
       const clickable = !!n.remito_id;
       const cursor = clickable ? 'cursor:pointer' : 'cursor:default';
       const handler = clickable
         ? 'onclick="document.getElementById(\'ifco-mb-talon-detalle\').classList.remove(\'on\');ifcoVerRemito('+n.remito_id+')"'
         : '';
-      const tooltip = clickable
-        ? 'title="Click para ver el remito"'
-        : 'title="Disponible — sin uso"';
+      let tooltip;
+      if (clickable)            tooltip = 'title="Click para ver el remito"';
+      else if (isAnuladoManual) tooltip = 'title="Anulado: '+_ifcoEsc(n.motivo||'sin motivo')+(n.anulado_por_username?' · por '+_ifcoEsc(n.anulado_por_username):'')+'"';
+      else if (isDisponible)    tooltip = 'title="Disponible — Click derecho o botón ❌ para anular si está mal impreso"';
+      else                       tooltip = 'title="Disponible — sin uso"';
       const subtxt = n.empresa
         ? '<div style="font-size:9px;color:'+c.txt+';opacity:0.85;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+_ifcoEsc(n.empresa.length>14?n.empresa.substring(0,12)+'…':n.empresa)+'</div>'
+        : isAnuladoManual && n.motivo
+          ? '<div style="font-size:9px;color:'+c.txt+';opacity:0.85;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+_ifcoEsc(n.motivo.length>14?n.motivo.substring(0,12)+'…':n.motivo)+'</div>'
+          : '';
+
+      // Botón pequeño "❌ Anular" en la esquina si el número está disponible
+      const btnAnular = isDisponible
+        ? '<button onclick="event.stopPropagation();ifcoAbrirAnularNumero('+t.id+','+n.numero+',\''+_ifcoEsc(n.n_remito_ifco)+'\')" '
+        + 'title="Anular este número (mal impreso, manchado, etc.)" '
+        + 'style="position:absolute;top:2px;right:2px;background:transparent;border:none;color:#9ca3af;cursor:pointer;font-size:11px;padding:0 3px;border-radius:3px" '
+        + 'onmouseover="this.style.background=\'#fee2e2\';this.style.color=\'#991b1b\'" '
+        + 'onmouseout="this.style.background=\'transparent\';this.style.color=\'#9ca3af\'">❌</button>'
         : '';
+
+      // Botón "Des-anular" para anulados manuales (solo admin)
+      const btnDesanular = (isAnuladoManual && window.LNB_USER && window.LNB_USER.rol === 'admin')
+        ? '<button onclick="event.stopPropagation();ifcoDesanularNumero('+t.id+','+n.numero+')" '
+        + 'title="Quitar la anulación (solo admin)" '
+        + 'style="position:absolute;top:2px;right:2px;background:transparent;border:none;color:#991b1b;cursor:pointer;font-size:10px;padding:0 3px;border-radius:3px" '
+        + 'onmouseover="this.style.background=\'#fff\'" onmouseout="this.style.background=\'transparent\'">↩</button>'
+        : '';
+
       return '<div ' + handler + ' ' + tooltip +
-        ' style="background:'+c.bg+';border:1px solid '+c.border+';border-radius:6px;padding:8px 6px;'+cursor+';transition:transform .1s" ' +
+        ' style="position:relative;background:'+c.bg+';border:1px solid '+c.border+';border-radius:6px;padding:8px 6px;'+cursor+';transition:transform .1s" ' +
         (clickable ? 'onmouseover="this.style.transform=\'scale(1.04)\'" onmouseout="this.style.transform=\'scale(1)\'"' : '') +
         '>' +
+          btnAnular + btnDesanular +
           '<div style="font-family:monospace;font-size:11px;font-weight:600;color:'+c.txt+'">'+_ifcoEsc(n.n_remito_ifco)+'</div>' +
           '<div style="font-size:10px;color:'+c.txt+';text-transform:uppercase;letter-spacing:0.3px;margin-top:2px">'+c.label+'</div>' +
           subtxt +
