@@ -1940,16 +1940,20 @@ router.post('/remitos/presentar/enviar', express.json(), async function(req, res
     `).all(...ids);
     if (remitos.length === 0) return res.status(400).json({ error: 'Ninguno de los IDs corresponde a un remito sellado' });
 
-    // Armar adjuntos físicos (paths reales en /data/ifco/...)
+    // Armar adjuntos físicos. Bug que arreglar: el escaneo_path se guarda
+    // como '/data/ifco/xxx.jpg' (no /uploads/ifco/...). Usar path.basename
+    // para extraer solo el filename y joinarlo con UPLOAD_DIR (que ya apunta
+    // a la carpeta correcta), sin importar el prefijo guardado.
     const adjuntos = [];
     remitos.forEach(function(r){
       if (!r.escaneo_path) return;
-      // El escaneo_path está como '/uploads/ifco/xxx.jpg' — convertir a path absoluto del filesystem
-      const relPath = r.escaneo_path.replace(/^\/?(?:uploads\/)?ifco\//, '');
-      const absPath = path.join(UPLOAD_DIR, relPath);
+      const filename = path.basename(r.escaneo_path);
+      const absPath = path.join(UPLOAD_DIR, filename);
       if (fs.existsSync(absPath)) {
         const ext = path.extname(absPath) || '.jpg';
         adjuntos.push({ filename: r.n_remito_ifco.replace(/[^a-zA-Z0-9-]/g, '_') + ext, path: absPath });
+      } else {
+        console.warn('[IFCO][presentar/enviar] Archivo no encontrado para remito ' + r.n_remito_ifco + ': ' + absPath);
       }
     });
 
@@ -2395,7 +2399,10 @@ router.get('/autorizaciones-retiro', function(req, res) {
     if (estado) { q += " AND a.estado = ?"; p.push(estado); }
     q += " ORDER BY a.creado_en DESC LIMIT 100";
     res.json(db.prepare(q).all(...p));
-  } catch(e) { res.status(500).json({ error: e.message }); }
+  } catch(e) {
+    console.error('[IFCO][autorizaciones-retiro GET]', e);
+    res.status(500).json({ error: e.message, stack: e.stack ? e.stack.split('\n').slice(0,3).join(' | ') : null });
+  }
 });
 
 // POST /autorizaciones-retiro — crear nueva
