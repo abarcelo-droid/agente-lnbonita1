@@ -3039,6 +3039,8 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     <div style="display:flex;gap:8px;flex-wrap:wrap">
       <button class="btn bb" onclick="ifcoAbrirNuevoRemito()">+ Despacho a súper</button>
       <button class="btn bb" onclick="ifcoAbrirCargarSellado()" style="background:#047857">🔏 Cargar sellado</button>
+      <button class="btn bo" onclick="ifcoAbrirFAQ()" title="Preguntas frecuentes" style="font-size:12px">❓ FAQ</button>
+      <button class="btn bo" onclick="ifcoDescargarManual()" title="Descargar manual del módulo" style="font-size:12px">📚 Manual</button>
     </div>
   </div>
 
@@ -3092,7 +3094,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     <div id="ifco-resumen-content" style="display:none">
 
       <!-- 1. KPIs CON COLOR SEMÁNTICO -->
-      <div class="ab-grid ab-grid-4" style="margin-bottom:16px">
+      <div class="ab-grid ab-grid-3" style="margin-bottom:16px">
         <div class="ifco-card ifco-stat" style="border-top:4px solid #1e3a8a;border-top-left-radius:8px;border-top-right-radius:8px">
           <div class="ifco-stat-lbl" style="color:#1e3a8a">📦 Piso actual</div>
           <div class="ifco-stat-val" id="ifco-st-piso" style="color:#1e3a8a">—</div>
@@ -3108,10 +3110,11 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
           <div class="ifco-stat-val" id="ifco-st-total" style="color:#fff;font-weight:700">—</div>
           <div class="ifco-stat-sub" style="color:#fbcfe8">total = piso + proveedores + tránsito</div>
         </div>
-        <div class="ifco-card ifco-stat" id="ifco-st-dif-card" style="border-top:4px solid #dc2626;border-top-left-radius:8px;border-top-right-radius:8px">
-          <div class="ifco-stat-lbl" id="ifco-st-dif-lbl" style="color:#991b1b">📊 Diferencia total</div>
-          <div class="ifco-stat-val" id="ifco-st-dif" style="color:#991b1b">—</div>
-          <div class="ifco-stat-sub" id="ifco-st-dif-sub">real vs teórico (cajones)</div>
+        <!-- KPI Diferencia total eliminado: confundía. La diferencia real está en la pestaña Consolidación. -->
+        <div id="ifco-st-dif-card" style="display:none">
+          <span id="ifco-st-dif"></span>
+          <span id="ifco-st-dif-sub"></span>
+          <span id="ifco-st-dif-lbl"></span>
         </div>
       </div>
 
@@ -3124,20 +3127,18 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
         <div id="ifco-notif-list" style="padding:12px 16px;display:flex;flex-direction:column;gap:8px"></div>
       </div>
 
-      <!-- 3. PANEL STOCK FÍSICO EN PROVEEDORES -->
-      <div id="ifco-stocks-card" class="ifco-card" style="margin-bottom:16px">
-        <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:10px;gap:16px;flex-wrap:wrap">
+      <!-- 3. ÚLTIMA CONSOLIDACIÓN + EVOLUCIÓN -->
+      <div id="ifco-consolidacion-card" class="ifco-card" style="margin-bottom:16px;border-left:4px solid #1e3a5f">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px">
           <div>
-            <div style="font-size:13px;font-weight:600">📋 Conteo físico de stocks</div>
-            <div style="font-size:11px;color:var(--mut);margin-top:2px">Diferencia entre lo que dice el sistema (teórico) y el conteo real. Solo informativo. <b>Actualizar todos los jueves 10am.</b></div>
+            <div style="font-size:13px;font-weight:600">⚖️ Última consolidación con IFCO</div>
+            <div style="font-size:11px;color:var(--mut);margin-top:2px">Resultado del último cierre con IFCO. Para hacer una nueva consolidación, ir a la pestaña 🧮 Consolidación.</div>
           </div>
-          <div id="ifco-stocks-perdida-kpi" style="text-align:right;display:none;background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:8px 14px;min-width:180px">
-            <div style="font-size:10px;color:#991b1b;text-transform:uppercase;letter-spacing:0.5px;font-weight:600">Pérdida potencial actual</div>
-            <div id="ifco-stocks-perdida-valor" style="font-size:20px;font-weight:700;color:#991b1b;font-variant-numeric:tabular-nums;margin-top:2px">—</div>
-            <div style="font-size:10px;color:#991b1b;opacity:0.8">suma de diferencias negativas</div>
-          </div>
+          <button class="btn bo bs" style="font-size:11px" onclick="ifcoTab('consol')">Ir a Consolidación →</button>
         </div>
-        <div id="ifco-stocks-tabla"></div>
+        <div id="ifco-ultima-consolidacion" style="margin-bottom:14px"></div>
+        <div style="font-size:12px;font-weight:600;color:var(--mut);text-transform:uppercase;letter-spacing:0.05em;margin:14px 0 8px">📈 Evolución (últimas consolidaciones)</div>
+        <div id="ifco-grafico-consolidaciones" style="min-height:140px"></div>
       </div>
 
       <div class="ab-grid ab-grid-2">
@@ -3151,7 +3152,11 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
         </div>
       </div>
 
-      <!-- Estos elementos quedan ocultos pero existen para compat con código JS legacy -->
+      <!-- Elementos legacy ocultos para compat con código viejo -->
+      <div id="ifco-stocks-card" style="display:none">
+        <div id="ifco-stocks-tabla"></div>
+        <div id="ifco-stocks-perdida-kpi" style="display:none"><div id="ifco-stocks-perdida-valor"></div></div>
+      </div>
       <div id="ifco-stocks-alerta" style="display:none"></div>
       <div id="ifco-alertas" style="display:none"></div>
       <div id="ifco-en-viaje-card" style="display:none">
@@ -3860,6 +3865,25 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
         <button class="btn bb" id="ifco-cs2-btn-next" style="display:none" onclick="ifcoConsolidarNext()">Siguiente →</button>
         <button class="btn bb" id="ifco-cs2-btn-aplicar" style="display:none;background:var(--ok)" onclick="ifcoConsolidarAplicar()">✓ Aplicar consolidación</button>
       </div>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: Preguntas Frecuentes (FAQ) — accesible para todos los usuarios -->
+<div class="mb" id="ifco-mb-faq">
+  <div class="mbox" style="width:760px;max-width:95vw;max-height:90vh;overflow-y:auto">
+    <div class="mhd">
+      <div class="mht">❓ Preguntas Frecuentes — Gestión de IFCOs</div>
+      <button class="mcl" onclick="document.getElementById('ifco-mb-faq').classList.remove('on')">x</button>
+    </div>
+    <div style="font-size:12px;color:var(--mut);margin-bottom:14px">
+      Las dudas más comunes sobre el módulo. Click en cada pregunta para ver la respuesta. Si tu pregunta no está acá, descargá el <a href="javascript:ifcoDescargarManual()" style="color:#1e3a8a">manual completo</a>.
+    </div>
+
+    <div id="ifco-faq-lista" style="display:flex;flex-direction:column;gap:6px"></div>
+
+    <div style="margin-top:16px;padding-top:12px;border-top:1px solid var(--bor);font-size:11px;color:var(--mut);text-align:center">
+      ¿Falta alguna pregunta? Avisale al equipo de desarrollo.
     </div>
   </div>
 </div>
@@ -15882,6 +15906,90 @@ function _ifcoRenderNotifPanel() {
   }).join('');
 }
 
+// ════════════════════════════════════════════════════════════════════════════
+// MANUAL Y FAQ — accesible para todos los usuarios desde el header del módulo
+// ════════════════════════════════════════════════════════════════════════════
+
+async function ifcoDescargarManual() {
+  // Forzar descarga del manual desde el server
+  try {
+    const res = await fetch('/api/ifco/manual', { credentials: 'include' });
+    if (!res.ok) {
+      const err = await res.json().catch(function(){ return { error: 'HTTP ' + res.status }; });
+      alert(err.error || 'No se pudo descargar el manual');
+      return;
+    }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'Manual_Modulo_IFCO.docx';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  } catch(e) { alert('Error: ' + e.message); }
+}
+
+const _IFCO_FAQ = [
+  {
+    q: '🛒 ¿Cómo cargo un despacho que ya viene sellado por la cadena?',
+    a: 'Usá el botón <b>"🔏 Cargar sellado"</b> del header del módulo (al lado de "+ Despacho a súper"). Te abre un modal único donde cargás de una sola vez todos los datos: origen, N° remito, cantidades despachada/recibida/rechazada, encargados. La IA prelee los campos de la foto. El remito se crea directamente en estado "sellado" (o "presentado" si todo se rechazó).'
+  },
+  {
+    q: '🔒 ¿Por qué no puedo eliminar un remito que está presentado?',
+    a: 'Una vez que un remito pasa al estado <b>"presentado"</b>, queda bloqueado contra cambios y eliminaciones porque ya se reportó a IFCO. Si necesitás corregirlo, hablá con el admin del sistema para que lo des-presente desde la administración avanzada.'
+  },
+  {
+    q: '📋 ¿Cómo cargo el conteo físico de stocks?',
+    a: 'Andá a la pestaña <b>🧮 Consolidación</b> y mirá el <b>paso 3 — "Detalle de pisos reales declarados"</b>. Cada fila tiene un botón "✏️ Actualizar" (o "📥 Cargar" si nunca tuvo conteo). Click → ingresar la cantidad real → guardar. El paso 3 se refresca automáticamente con el nuevo total.<br><br><i>(Antes estaba en el Resumen, pero se movió a Consolidación para que se haga justo cuando se calcula la diferencia con IFCO).</i>'
+  },
+  {
+    q: '📧 ¿Cómo autorizo a un transportista para retirar cajones de IFCO?',
+    a: 'En la pestaña <b>🔁 Retiros</b>, click en el botón <b>"📧 Solicitar autorización a IFCO"</b>. Cargás los datos del transportista (nombre, DNI, patente, fecha estimada, cantidad) → se genera un movimiento "retiro pendiente" → preview del mail → enviar desde ifco@lnbonita.com.ar. Cuando IFCO entrega los cajones, click en "✓ Completar" para confirmar con el N° de remito real y la cantidad efectiva.'
+  },
+  {
+    q: '❌ ¿Cómo anulo un número de talonario que vino mal impreso?',
+    a: 'Andá a la pestaña <b>📋 Talonarios</b>, click en "👁 Ver" del talonario, y en la grilla de números pasá el mouse sobre la celda del número que querés anular. Aparece un botón <b>❌</b> chiquito en la esquina. Click → ingresar motivo (ej. "manchado") → confirmar.<br><br>Si te equivocaste y querés des-anular, solo el admin puede (botón ↩ en celdas anuladas).'
+  },
+  {
+    q: '🔍 ¿Qué hago si en la consolidación aparecen registros "no encontrados"?',
+    a: 'En el paso 1 del wizard, cuando subís el Excel de IFCO, aparece una tabla con los registros que IFCO tiene pero no están en el sistema. <b>Para cada uno elegís una acción</b>:<br>• <b>📌 Revisar después</b>: queda en lista de pendientes (no afecta nada)<br>• <b>🗑️ Crear como pérdida</b>: si era una devolución de cajones rotos<br>• <b>📥 Crear como retiro</b>: si era un retiro que no se cargó<br>• <b>📤 Crear como despacho</b>: marca para revisar manual<br><br>También hay botones masivos para aplicar la misma acción a todos.'
+  },
+  {
+    q: '⚠️ ¿Por qué creció "Bajo tu responsabilidad" sin razón aparente?',
+    a: 'Ese KPI suma piso + proveedores + tránsito. Si crece, las causas más comunes son:<br>• <b>Despachos sin sellar</b> hace mucho tiempo (la cadena no devolvió el remito)<br>• <b>Sellados sin presentar</b> a IFCO (vencen a los 30 días)<br>• <b>Envíos a proveedor</b> sin recibir confirmación<br>• <b>Conteos físicos desactualizados</b><br><br>Revisá el panel <b>🔔 Notificaciones</b> del Resumen, agrupa todas las alertas con el botón de acción para resolver cada una.'
+  },
+  {
+    q: '🔗 ¿Cómo le mando el link de aceptación a un proveedor?',
+    a: 'En la pestaña <b>📤 Salidas</b>, en cada fila de un envío hay un botón <b>"🔗 Link"</b>. Click → el sistema copia automáticamente la URL al portapapeles. Después abrís WhatsApp Web (o el mail) y la pegás. El proveedor recibe el link, lo abre desde el celular, completa nombre + DNI y confirma. La fila va a cambiar de estado automáticamente: ⏳ Sin abrir → 👁 Visto → ✓ Aceptado.'
+  },
+  {
+    q: '🗑️ ¿Cómo cargo una pérdida cuando rompo cajones?',
+    a: 'Andá a la pestaña <b>🔁 Retiros</b>, click en <b>"+ Pérdida"</b>. Completá: fecha, cantidad, motivo (obligatorio: "rotos en planta", "devueltos a IFCO", "perdidos en transporte", etc.), notas opcional, guardar.<br><br>El movimiento resta del stock de SG inmediatamente y queda en el log con tu usuario.<br><br><b>Recordá:</b> las pérdidas tienen penalidad económica para la empresa, así que solo las cargan operadores de SG.'
+  },
+  {
+    q: '📈 ¿Cómo veo el histórico de movimientos de un proveedor?',
+    a: 'En la pestaña <b>📊 Resumen</b>, en el card "Saldo por proveedor", click en el nombre del proveedor. Te abre el detalle con todos los movimientos: envíos a su galpón, recepciones desde su galpón, conteos físicos cargados.<br><br>También podés ver los <b>movimientos de los últimos 30 días en PDF</b> (botón con ícono de descarga en la app móvil) si necesitás compartirlo con el proveedor para conciliación.'
+  }
+];
+
+function ifcoAbrirFAQ() {
+  const cont = document.getElementById('ifco-faq-lista');
+  let html = '';
+  _IFCO_FAQ.forEach(function(item, i){
+    html += '<details style="background:var(--bg);border:1px solid var(--bor);border-radius:8px;padding:0;overflow:hidden">' +
+            '<summary style="padding:12px 16px;font-size:13px;font-weight:500;cursor:pointer;color:var(--txt);list-style:none;display:flex;justify-content:space-between;align-items:center;gap:10px">' +
+              '<span>' + item.q + '</span>' +
+              '<span style="color:var(--mut);font-size:14px">▾</span>' +
+            '</summary>' +
+            '<div style="padding:8px 16px 14px;font-size:13px;color:var(--txt);line-height:1.6;border-top:1px solid var(--bor);background:#fff">' + item.a + '</div>' +
+            '</details>';
+  });
+  cont.innerHTML = html;
+  document.getElementById('ifco-mb-faq').classList.add('on');
+}
+
 async function ifcoCargarResumen() {
   document.getElementById('ifco-resumen-loading').style.display = 'block';
   document.getElementById('ifco-resumen-content').style.display = 'none';
@@ -16045,8 +16153,122 @@ async function ifcoCargarResumen() {
     }
   } catch(e) { /* silencioso */ }
 
-  // Cargar stocks reales y banner alerta
-  ifcoCargarStocksReales();
+  // Cargar última consolidación + gráfico de evolución
+  ifcoCargarUltimaConsolidacion();
+}
+
+// === ÚLTIMA CONSOLIDACIÓN + EVOLUCIÓN HISTÓRICA ===========================
+async function ifcoCargarUltimaConsolidacion() {
+  try {
+    const rows = await _ifcoFetch('/api/ifco/consolidacion/historico');
+
+    const cardCont = document.getElementById('ifco-ultima-consolidacion');
+    const grafCont = document.getElementById('ifco-grafico-consolidaciones');
+
+    if (!rows || rows.length === 0) {
+      cardCont.innerHTML = '<div style="text-align:center;padding:24px;color:var(--mut);font-size:13px">Sin consolidaciones todavía. <a href="javascript:ifcoTab(\'consol\')" style="color:#1e3a5f">Ir a Consolidación →</a></div>';
+      grafCont.innerHTML = '';
+      // Notificación: nunca consolidaron
+      _ifcoNotifSet('sin_consolidar', {
+        nivel: 'amber',
+        titulo: 'Nunca se hizo una consolidación con IFCO',
+        mensaje: 'Cargá el primer reporte para empezar a trackear el saldo.',
+        accion: { label: 'Ir →', onclick: "ifcoTab('consol')" }
+      });
+      return;
+    }
+
+    // Última (la más reciente)
+    const u = rows[0];
+    const difColor = u.diferencia > 0 ? '#7c1d3f' : (u.diferencia < 0 ? '#1e40af' : '#047857');
+    const difBg    = u.diferencia > 0 ? '#fce7f3' : (u.diferencia < 0 ? '#dbeafe' : '#d1fae5');
+    const difTxt   = (u.diferencia > 0 ? '+' : '') + _ifcoFmt(u.diferencia);
+    const diasDesde = Math.floor((Date.now() - new Date(u.fecha)) / (1000*60*60*24));
+
+    cardCont.innerHTML =
+      '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px">' +
+        '<div style="padding:10px 12px;background:var(--bg);border-radius:7px">' +
+          '<div style="font-size:10px;color:var(--mut);text-transform:uppercase;font-weight:600">Fecha</div>' +
+          '<div style="font-size:18px;font-weight:600;margin-top:2px">' + _ifcoFecha(u.fecha) + '</div>' +
+          '<div style="font-size:11px;color:var(--mut);margin-top:2px">hace ' + diasDesde + ' día' + (diasDesde===1?'':'s') + '</div>' +
+        '</div>' +
+        '<div style="padding:10px 12px;background:var(--bg);border-radius:7px">' +
+          '<div style="font-size:10px;color:var(--mut);text-transform:uppercase;font-weight:600">Saldo IFCO</div>' +
+          '<div style="font-size:18px;font-weight:600;margin-top:2px;font-variant-numeric:tabular-nums">' + _ifcoFmt(u.saldo_ifco) + '</div>' +
+          '<div style="font-size:11px;color:var(--mut);margin-top:2px">cajones informados</div>' +
+        '</div>' +
+        '<div style="padding:10px 12px;background:var(--bg);border-radius:7px">' +
+          '<div style="font-size:10px;color:var(--mut);text-transform:uppercase;font-weight:600">Suma real</div>' +
+          '<div style="font-size:18px;font-weight:600;margin-top:2px;font-variant-numeric:tabular-nums">' + _ifcoFmt(u.suma_real) + '</div>' +
+          '<div style="font-size:11px;color:var(--mut);margin-top:2px">declarada nuestra</div>' +
+        '</div>' +
+        '<div style="padding:10px 12px;background:' + difBg + ';border-radius:7px">' +
+          '<div style="font-size:10px;color:' + difColor + ';text-transform:uppercase;font-weight:600">⚠️ Multa estimada</div>' +
+          '<div style="font-size:20px;font-weight:700;margin-top:2px;font-variant-numeric:tabular-nums;color:' + difColor + '">' + difTxt + '</div>' +
+          '<div style="font-size:11px;color:' + difColor + ';margin-top:2px">' + (u.diferencia > 0 ? 'cajones' : (u.diferencia < 0 ? 'a favor' : 'balanceado')) + '</div>' +
+        '</div>' +
+      '</div>' +
+      (u.notas ? '<div style="margin-top:8px;padding:6px 10px;background:#fffbeb;border-left:3px solid #fcd34d;border-radius:4px;font-size:11px;color:#78350f"><b>Notas:</b> ' + _ifcoEsc(u.notas) + '</div>' : '');
+
+    // Notificación si hace mucho que no consolida
+    if (diasDesde >= 7) {
+      _ifcoNotifSet('sin_consolidar', {
+        nivel: diasDesde >= 14 ? 'red' : 'amber',
+        titulo: 'Hace ' + diasDesde + ' días que no consolidás con IFCO',
+        mensaje: 'Última consolidación: ' + _ifcoFecha(u.fecha) + '.',
+        accion: { label: 'Ir →', onclick: "ifcoTab('consol')" }
+      });
+    } else {
+      _ifcoNotifSet('sin_consolidar', null);
+    }
+
+    // === Gráfico de evolución (últimas 8 consolidaciones) ===
+    const hist = rows.slice(0, 8).reverse(); // cronológico
+    if (hist.length < 2) {
+      grafCont.innerHTML = '<div style="font-size:11px;color:var(--mut);padding:8px;text-align:center">Hace falta al menos 2 consolidaciones para mostrar la evolución.</div>';
+      return;
+    }
+    const W = 600, H = 130, P = { l: 30, r: 16, t: 12, b: 22 };
+    const dwh = W - P.l - P.r;
+    const dh  = H - P.t - P.b;
+    const dvals = hist.map(function(x){ return x.diferencia; });
+    const minV = Math.min.apply(null, dvals.concat([0]));
+    const maxV = Math.max.apply(null, dvals.concat([0]));
+    const rng = (maxV - minV) || 1;
+
+    const xAt = function(i){ return P.l + (i * dwh / Math.max(1, hist.length-1)); };
+    const yAt = function(v){ return P.t + dh - ((v - minV) / rng) * dh; };
+    const yZero = yAt(0);
+
+    const points = hist.map(function(h, i){ return xAt(i) + ',' + yAt(h.diferencia); }).join(' ');
+
+    let svg = '<svg viewBox="0 0 ' + W + ' ' + H + '" style="width:100%;height:140px">';
+    // Línea de cero
+    svg += '<line x1="' + P.l + '" y1="' + yZero + '" x2="' + (W-P.r) + '" y2="' + yZero + '" stroke="#94a3b8" stroke-width="1" stroke-dasharray="3,3"/>';
+    // Línea de valores
+    svg += '<polyline points="' + points + '" fill="none" stroke="#7c1d3f" stroke-width="2"/>';
+    // Puntos
+    hist.forEach(function(h, i){
+      const x = xAt(i), y = yAt(h.diferencia);
+      const last = i === hist.length - 1;
+      svg += '<circle cx="' + x + '" cy="' + y + '" r="' + (last ? 4 : 3) + '" fill="#7c1d3f"' + (last ? ' stroke="#fff" stroke-width="1.5"' : '') + '><title>' + _ifcoFecha(h.fecha) + ': ' + (h.diferencia>0?'+':'') + _ifcoFmt(h.diferencia) + '</title></circle>';
+    });
+    // Labels eje X (fechas)
+    hist.forEach(function(h, i){
+      const x = xAt(i);
+      const f = new Date(h.fecha);
+      const lbl = f.getDate() + '/' + (f.getMonth()+1);
+      svg += '<text x="' + x + '" y="' + (H-6) + '" font-size="9" text-anchor="middle" fill="#6b7280">' + lbl + '</text>';
+    });
+    // Label eje Y: max + min
+    svg += '<text x="' + (P.l-4) + '" y="' + (P.t+8) + '" font-size="9" text-anchor="end" fill="#6b7280">' + (maxV>0?'+':'') + _ifcoFmt(maxV) + '</text>';
+    svg += '<text x="' + (P.l-4) + '" y="' + (H-P.b+4) + '" font-size="9" text-anchor="end" fill="#6b7280">' + _ifcoFmt(minV) + '</text>';
+    svg += '</svg>';
+    svg += '<div style="font-size:11px;color:var(--mut);margin-top:4px;text-align:center">Línea: diferencia (multa) por consolidación. Última destacada con borde blanco.</div>';
+    grafCont.innerHTML = svg;
+  } catch(e) {
+    document.getElementById('ifco-ultima-consolidacion').innerHTML = '<div style="color:#991b1b;padding:8px;font-size:12px">Error: ' + _ifcoEsc(e.message) + '</div>';
+  }
 }
 
 // === STOCKS REALES (conteo físico) ========================================
@@ -16055,19 +16277,8 @@ let _ifcoStockEditando = null; // { deposito_tipo, proveedor_id, nombre, teorico
 async function ifcoCargarStocksReales() {
   try {
     const data = await _ifcoFetch('/api/ifco/stocks-reales');
-    // Banner alerta del jueves → ahora notificación consolidada
-    const faltan = data.items.filter(function(it){ return it.falta_cargar; });
-    if (data.es_post_jueves_10am && faltan.length > 0) {
-      _ifcoNotifSet('stocks', {
-        tipo: 'atencion',
-        icon: '⏰',
-        titulo: 'Toca actualizar el conteo físico de stocks',
-        detalle: 'Faltan ' + faltan.length + ' depósito' + (faltan.length === 1 ? '' : 's') + ': ' + faltan.map(function(x){return _ifcoEsc(x.nombre);}).join(', '),
-        accion: { label: 'Ir a cargar →', onclick: "document.getElementById('ifco-stocks-card').scrollIntoView({behavior:'smooth'})" }
-      });
-    } else {
-      _ifcoNotifSet('stocks', null);
-    }
+    // La notificación del jueves ya no aplica: el conteo se hace al consolidar (no semanal aislado)
+    _ifcoNotifSet('stocks', null);
     // KPI tarjeta "Diferencia total" — suma de diferencias de los depósitos con conteo cargado.
     // Solo es significativo cuando todos los depósitos tienen conteo (si no, es parcial).
     const conConteo = data.items.filter(function(it){ return it.real != null; });
@@ -16286,6 +16497,10 @@ async function ifcoGuardarStockReal() {
     if (!r.ok) throw new Error(d.error || 'HTTP '+r.status);
     document.getElementById('ifco-mb-stock-real').classList.remove('on');
     ifcoCargarStocksReales();
+    // Si la pestaña Consolidación está activa y el paso 3 desbloqueado, refrescar también
+    if (typeof _ifcoCargarSaldosReales === 'function' && _ifcoWizard && _ifcoWizard.applied) {
+      _ifcoCargarSaldosReales();
+    }
   } catch(err) { alert('Error: ' + err.message); }
 }
 
@@ -19128,30 +19343,34 @@ async function _ifcoCargarSaldosReales() {
     html += '<thead><tr style="color:var(--mut);font-size:10px;text-transform:uppercase;border-bottom:1px solid var(--bor)">' +
             '<th style="text-align:left;padding:6px 8px">Depósito</th>' +
             '<th style="text-align:right;padding:6px 8px">Último conteo</th>' +
-            '<th style="text-align:right;padding:6px 8px">Fecha conteo</th>' +
+            '<th style="text-align:left;padding:6px 8px">Fecha conteo</th>' +
+            '<th style="text-align:right;padding:6px 8px">Acción</th>' +
             '</tr></thead><tbody>';
+    const sgSinCargar = data.piso_sg_fecha == null;
     html += '<tr style="border-bottom:1px solid #f3f4f6">' +
             '<td style="padding:8px"><b>San Gerónimo</b></td>' +
             '<td style="text-align:right;padding:8px;font-variant-numeric:tabular-nums;font-weight:600">' + _ifcoFmt(data.piso_sg_real) + '</td>' +
-            '<td style="text-align:right;padding:8px;color:var(--mut);font-size:11px">' + (data.piso_sg_fecha ? _ifcoFecha(data.piso_sg_fecha) : '<span style="color:#991b1b">sin cargar</span>') + '</td>' +
+            '<td style="padding:8px;color:var(--mut);font-size:11px">' + (data.piso_sg_fecha ? _ifcoFecha(data.piso_sg_fecha) : '<span style="color:#991b1b">sin cargar</span>') + '</td>' +
+            '<td style="text-align:right;padding:8px"><button class="btn ' + (sgSinCargar?'bb':'bo') + ' bs" style="font-size:11px;padding:3px 8px" onclick="ifcoAbrirCargarStock(\'san_geronimo\',null,\'San Gerónimo\',' + (data.piso_sg_real || 0) + ')">' + (sgSinCargar ? '📥 Cargar' : '✏️ Actualizar') + '</button></td>' +
             '</tr>';
     data.pisos_proveedores.forEach(function(p){
       const sinCargar = p.ultimo_conteo == null;
       html += '<tr style="border-bottom:1px solid #f3f4f6">' +
               '<td style="padding:8px;' + (sinCargar?'color:#991b1b':'') + '">' + _ifcoEsc(p.nombre) + (sinCargar?' <span style="font-size:10px">(sin cargar)</span>':'') + '</td>' +
               '<td style="text-align:right;padding:8px;font-variant-numeric:tabular-nums;font-weight:600;' + (sinCargar?'color:#991b1b':'') + '">' + (sinCargar ? '—' : _ifcoFmt(p.ultimo_conteo)) + '</td>' +
-              '<td style="text-align:right;padding:8px;color:var(--mut);font-size:11px">' + (p.fecha_conteo ? _ifcoFecha(p.fecha_conteo) : '<span style="color:#991b1b">sin cargar</span>') + '</td>' +
+              '<td style="padding:8px;color:var(--mut);font-size:11px">' + (p.fecha_conteo ? _ifcoFecha(p.fecha_conteo) : '<span style="color:#991b1b">sin cargar</span>') + '</td>' +
+              '<td style="text-align:right;padding:8px"><button class="btn ' + (sinCargar?'bb':'bo') + ' bs" style="font-size:11px;padding:3px 8px" onclick="ifcoAbrirCargarStock(\'proveedor\',' + p.proveedor_id + ',\'' + _ifcoEsc(p.nombre).replace(/'/g, "\\'") + '\',' + (p.ultimo_conteo || 0) + ')">' + (sinCargar ? '📥 Cargar' : '✏️ Actualizar') + '</button></td>' +
               '</tr>';
     });
     html += '<tr style="border-bottom:1px solid #f3f4f6;background:#fef3c7">' +
             '<td style="padding:8px;color:#78350f">📦 Cajones despachados sin presentar a IFCO</td>' +
             '<td style="text-align:right;padding:8px;font-variant-numeric:tabular-nums;font-weight:600;color:#78350f">' + _ifcoFmt(data.en_no_presentados) + '</td>' +
-            '<td style="text-align:right;padding:8px;color:#78350f;font-size:11px">en tránsito: ' + _ifcoFmt(data.en_no_presentados_detalle.en_transito) + ' · sellados: ' + _ifcoFmt(data.en_no_presentados_detalle.sellado_sin_presentar) + '</td>' +
+            '<td colspan="2" style="padding:8px;color:#78350f;font-size:11px">en tránsito: ' + _ifcoFmt(data.en_no_presentados_detalle.en_transito) + ' · sellados: ' + _ifcoFmt(data.en_no_presentados_detalle.sellado_sin_presentar) + '</td>' +
             '</tr>';
     html += '<tr style="background:#d1fae5">' +
             '<td style="padding:8px;font-weight:700;color:#065f46">TOTAL</td>' +
             '<td style="text-align:right;padding:8px;font-variant-numeric:tabular-nums;font-weight:700;color:#065f46;font-size:14px">' + _ifcoFmt(data.suma_real) + '</td>' +
-            '<td></td></tr>';
+            '<td colspan="2"></td></tr>';
     html += '</tbody></table>';
     document.getElementById('ifco-consol-detalle-tabla').innerHTML = html;
 
