@@ -253,7 +253,9 @@ function _getTransporter() {
     host: process.env.SMTP_HOST,
     port: port,
     secure: secure,
-    auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS }
+    auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
+    // Forzar IPv4 (Railway no rutea IPv6 hacia Gmail por default → ENETUNREACH)
+    family: 4
   });
   return _smtpTransporter;
 }
