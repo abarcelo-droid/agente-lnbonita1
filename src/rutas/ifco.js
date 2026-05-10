@@ -240,27 +240,19 @@ try { db.exec("CREATE INDEX IF NOT EXISTS idx_autoriz_retiro_estado ON ifco_auto
 // Columna nueva: marca movimientos pendientes (no impactan en stock hasta confirmar)
 try { db.exec("ALTER TABLE ifco_movimientos ADD COLUMN pendiente INTEGER NOT NULL DEFAULT 0"); } catch(_){}
 
-// Helper: crear transporter SMTP (lazy, solo cuando hace falta)
-let _smtpTransporter = null;
-function _getTransporter() {
-  if (_smtpTransporter) return _smtpTransporter;
-  if (!process.env.SMTP_HOST || !process.env.SMTP_USER || !process.env.SMTP_PASS) {
-    throw new Error('SMTP no configurado: faltan SMTP_HOST, SMTP_USER o SMTP_PASS en variables de entorno');
-  }
-  const port = parseInt(process.env.SMTP_PORT || '587');
-  const secure = process.env.SMTP_SECURE === 'true' || port === 465;
-  _smtpTransporter = nodemailer.createTransport({
-    host: process.env.SMTP_HOST,
-    port: port,
-    secure: secure,
-    auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
-    // Forzar IPv4 (Railway no rutea IPv6 hacia Gmail por default → ENETUNREACH)
-    family: 4
-  });
-  return _smtpTransporter;
-}
+// ════════════════════════════════════════════════════════════════════════════
+// MAIL HELPER — usa la API HTTP de Brevo (puerto 443) en vez de SMTP
+// ────────────────────────────────────────────────────────────────────────────
+// Por qué API HTTP en vez de SMTP: Railway bloquea los puertos SMTP salientes
+// (25/465/587) como política antispam. La API HTTP de Brevo va por puerto 443
+// (HTTPS estándar), que siempre está abierto.
+//
+// Variables de entorno requeridas:
+//   BREVO_API_KEY  — API key de Brevo (empieza con xkeysib-)
+//   SMTP_FROM      — opcional, default: ifco@lnbonita.com.ar
+// ════════════════════════════════════════════════════════════════════════════
 
-// Helper: enviar mail desde ifco@lnbonita.com.ar y registrar en log
+// Helper: enviar mail vía API HTTP de Brevo y registrar en log
 // opts: { tipo, to, cc?, asunto, cuerpo_html, cuerpo_texto, adjuntos: [{filename, path}], related_ids?, usuario_id? }
 async function _enviarMailIFCO(opts) {
   const log = {
@@ -274,24 +266,62 @@ async function _enviarMailIFCO(opts) {
     related_ids: opts.related_ids ? JSON.stringify(opts.related_ids) : null
   };
   try {
-    const transporter = _getTransporter();
-    const from = process.env.SMTP_FROM || process.env.SMTP_USER;
-    const info = await transporter.sendMail({
-      from: '"Gestión IFCO - SAN GERONIMO SA" <' + from + '>',
-      to: opts.to,
-      cc: opts.cc || undefined,
-      subject: opts.asunto,
-      text: opts.cuerpo_texto,
-      html: opts.cuerpo_html,
-      attachments: (opts.adjuntos || []).map(function(a){
-        return { filename: a.filename, path: a.path };
-      })
+    if (!process.env.BREVO_API_KEY) {
+      throw new Error('BREVO_API_KEY no configurada en variables de entorno de Railway');
+    }
+    const from = process.env.SMTP_FROM || 'ifco@lnbonita.com.ar';
+
+    // Convertir destinatarios al formato que espera Brevo: [{ email: '...', name?: '...' }]
+    const toRaw = Array.isArray(opts.to) ? opts.to : String(opts.to || '').split(',');
+    const toList = toRaw.map(function(x){ return String(x).trim(); }).filter(Boolean).map(function(e){ return { email: e }; });
+    if (toList.length === 0) throw new Error('Destinatario requerido');
+
+    const ccRaw = opts.cc ? (Array.isArray(opts.cc) ? opts.cc : String(opts.cc).split(',')) : [];
+    const ccList = ccRaw.map(function(x){ return String(x).trim(); }).filter(Boolean).map(function(e){ return { email: e }; });
+
+    // Convertir adjuntos a base64 (Brevo los acepta así)
+    const attachments = [];
+    (opts.adjuntos || []).forEach(function(a){
+      try {
+        const content = fs.readFileSync(a.path).toString('base64');
+        attachments.push({ name: a.filename, content: content });
+      } catch(e) {
+        console.warn('[IFCO][_enviarMailIFCO] No se pudo leer adjunto:', a.path, e.message);
+      }
     });
+
+    const payload = {
+      sender: { name: 'Gestión IFCO - SAN GERONIMO SA', email: from },
+      to: toList,
+      subject: opts.asunto || '(sin asunto)'
+    };
+    if (opts.cuerpo_html)  payload.htmlContent = opts.cuerpo_html;
+    if (opts.cuerpo_texto) payload.textContent = opts.cuerpo_texto;
+    if (ccList.length > 0) payload.cc = ccList;
+    if (attachments.length > 0) payload.attachment = attachments;
+
+    const res = await fetch('https://api.brevo.com/v3/smtp/email', {
+      method: 'POST',
+      headers: {
+        'api-key': process.env.BREVO_API_KEY,
+        'content-type': 'application/json',
+        'accept': 'application/json'
+      },
+      body: JSON.stringify(payload)
+    });
+
+    if (!res.ok) {
+      const errText = await res.text().catch(function(){ return ''; });
+      throw new Error('Brevo API HTTP ' + res.status + ': ' + errText.slice(0, 300));
+    }
+    const data = await res.json().catch(function(){ return {}; });
+    const messageId = data.messageId || null;
+
     db.prepare(`
       INSERT INTO ifco_mails_log (tipo, enviado_por_id, destinatarios_to, destinatarios_cc, asunto, cuerpo, adjuntos_count, status, message_id, related_ids)
       VALUES (@tipo, @enviado_por_id, @destinatarios_to, @destinatarios_cc, @asunto, @cuerpo, @adjuntos_count, 'success', @message_id, @related_ids)
-    `).run(Object.assign(log, { message_id: info.messageId || null }));
-    return { success: true, messageId: info.messageId };
+    `).run(Object.assign(log, { message_id: messageId }));
+    return { success: true, messageId: messageId };
   } catch(err) {
     db.prepare(`
       INSERT INTO ifco_mails_log (tipo, enviado_por_id, destinatarios_to, destinatarios_cc, asunto, cuerpo, adjuntos_count, status, error_msg, related_ids)
