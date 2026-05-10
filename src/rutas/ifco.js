@@ -7,6 +7,7 @@ import path    from "path";
 import fs      from "fs";
 import { fileURLToPath } from "url";
 import db from "../servicios/db.js";
+import nodemailer from "nodemailer";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const UPLOAD_DIR = path.join(__dirname, "../../data/ifco");
@@ -173,6 +174,132 @@ db.exec(`
   )
 `);
 try { db.exec("CREATE INDEX IF NOT EXISTS idx_consolidaciones_fecha ON ifco_consolidaciones(fecha DESC)"); } catch(_){}
+
+// ════════════════════════════════════════════════════════════════════════════
+// MAILS — infraestructura SMTP centralizada para ifco@lnbonita.com.ar
+// ────────────────────────────────────────────────────────────────────────────
+// Variables de entorno requeridas (configurar en Railway):
+//   SMTP_HOST    — ej. smtp.gmail.com
+//   SMTP_PORT    — ej. 587 (TLS) o 465 (SSL)
+//   SMTP_USER    — ej. ifco@lnbonita.com.ar
+//   SMTP_PASS    — App Password de 16 caracteres (Gmail) o password normal
+//   SMTP_FROM    — opcional, default: SMTP_USER
+//   SMTP_SECURE  — opcional, 'true' fuerza SSL en 465
+// ════════════════════════════════════════════════════════════════════════════
+
+// Tabla de log de mails enviados (trazabilidad completa)
+try {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS ifco_mails_log (
+      id              INTEGER PRIMARY KEY AUTOINCREMENT,
+      tipo            TEXT NOT NULL CHECK (tipo IN ('presentacion','autorizacion_retiro','aviso_proveedor','otro')),
+      enviado_en      TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+      enviado_por_id  INTEGER,
+      destinatarios_to TEXT NOT NULL,
+      destinatarios_cc TEXT,
+      asunto          TEXT NOT NULL,
+      cuerpo          TEXT,
+      adjuntos_count  INTEGER DEFAULT 0,
+      status          TEXT NOT NULL CHECK (status IN ('success','error')),
+      error_msg       TEXT,
+      message_id      TEXT,
+      related_ids     TEXT
+    )
+  `);
+} catch(e) { console.error('[IFCO] Crear ifco_mails_log:', e.message); }
+try { db.exec("CREATE INDEX IF NOT EXISTS idx_mails_log_tipo ON ifco_mails_log(tipo, enviado_en DESC)"); } catch(_){}
+
+// Tabla de autorizaciones de retiro (mails que mandamos a IFCO autorizando un transportista)
+try {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS ifco_autorizaciones_retiro (
+      id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+      fecha_autorizada        TEXT NOT NULL,
+      transportista_nombre    TEXT NOT NULL,
+      transportista_dni       TEXT NOT NULL,
+      transportista_patente   TEXT NOT NULL,
+      cantidad_estimada       INTEGER NOT NULL,
+      estado                  TEXT NOT NULL DEFAULT 'pendiente_envio' CHECK (estado IN ('pendiente_envio','enviada','completada','cancelada')),
+      mail_enviado_a          TEXT,
+      mail_enviado_en         TEXT,
+      mail_message_id         TEXT,
+      movimiento_pendiente_id INTEGER,
+      cantidad_real           INTEGER,
+      completada_en           TEXT,
+      completada_por_id       INTEGER,
+      notas                   TEXT,
+      usuario_id              INTEGER,
+      creado_en               TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+      eliminado_en            TEXT,
+      FOREIGN KEY (movimiento_pendiente_id) REFERENCES ifco_movimientos(id)
+    )
+  `);
+} catch(e) { console.error('[IFCO] Crear ifco_autorizaciones_retiro:', e.message); }
+try { db.exec("CREATE INDEX IF NOT EXISTS idx_autoriz_retiro_estado ON ifco_autorizaciones_retiro(estado, creado_en DESC)"); } catch(_){}
+
+// Columna nueva: marca movimientos pendientes (no impactan en stock hasta confirmar)
+try { db.exec("ALTER TABLE ifco_movimientos ADD COLUMN pendiente INTEGER NOT NULL DEFAULT 0"); } catch(_){}
+
+// Helper: crear transporter SMTP (lazy, solo cuando hace falta)
+let _smtpTransporter = null;
+function _getTransporter() {
+  if (_smtpTransporter) return _smtpTransporter;
+  if (!process.env.SMTP_HOST || !process.env.SMTP_USER || !process.env.SMTP_PASS) {
+    throw new Error('SMTP no configurado: faltan SMTP_HOST, SMTP_USER o SMTP_PASS en variables de entorno');
+  }
+  const port = parseInt(process.env.SMTP_PORT || '587');
+  const secure = process.env.SMTP_SECURE === 'true' || port === 465;
+  _smtpTransporter = nodemailer.createTransport({
+    host: process.env.SMTP_HOST,
+    port: port,
+    secure: secure,
+    auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS }
+  });
+  return _smtpTransporter;
+}
+
+// Helper: enviar mail desde ifco@lnbonita.com.ar y registrar en log
+// opts: { tipo, to, cc?, asunto, cuerpo_html, cuerpo_texto, adjuntos: [{filename, path}], related_ids?, usuario_id? }
+async function _enviarMailIFCO(opts) {
+  const log = {
+    tipo: opts.tipo || 'otro',
+    enviado_por_id: opts.usuario_id || null,
+    destinatarios_to: Array.isArray(opts.to) ? opts.to.join(', ') : (opts.to || ''),
+    destinatarios_cc: Array.isArray(opts.cc) ? opts.cc.join(', ') : (opts.cc || null),
+    asunto: opts.asunto || '(sin asunto)',
+    cuerpo: opts.cuerpo_texto || opts.cuerpo_html || null,
+    adjuntos_count: (opts.adjuntos || []).length,
+    related_ids: opts.related_ids ? JSON.stringify(opts.related_ids) : null
+  };
+  try {
+    const transporter = _getTransporter();
+    const from = process.env.SMTP_FROM || process.env.SMTP_USER;
+    const info = await transporter.sendMail({
+      from: '"Gestión IFCO - SAN GERONIMO SA" <' + from + '>',
+      to: opts.to,
+      cc: opts.cc || undefined,
+      subject: opts.asunto,
+      text: opts.cuerpo_texto,
+      html: opts.cuerpo_html,
+      attachments: (opts.adjuntos || []).map(function(a){
+        return { filename: a.filename, path: a.path };
+      })
+    });
+    db.prepare(`
+      INSERT INTO ifco_mails_log (tipo, enviado_por_id, destinatarios_to, destinatarios_cc, asunto, cuerpo, adjuntos_count, status, message_id, related_ids)
+      VALUES (@tipo, @enviado_por_id, @destinatarios_to, @destinatarios_cc, @asunto, @cuerpo, @adjuntos_count, 'success', @message_id, @related_ids)
+    `).run(Object.assign(log, { message_id: info.messageId || null }));
+    return { success: true, messageId: info.messageId };
+  } catch(err) {
+    db.prepare(`
+      INSERT INTO ifco_mails_log (tipo, enviado_por_id, destinatarios_to, destinatarios_cc, asunto, cuerpo, adjuntos_count, status, error_msg, related_ids)
+      VALUES (@tipo, @enviado_por_id, @destinatarios_to, @destinatarios_cc, @asunto, @cuerpo, @adjuntos_count, 'error', @error_msg, @related_ids)
+    `).run(Object.assign(log, { error_msg: String(err.message || err).slice(0, 500) }));
+    console.error('[IFCO][_enviarMailIFCO]', err);
+    return { success: false, error: err.message };
+  }
+}
+
 
 
 // Tabla de "faltantes de stock" declarados manualmente para SAN GERONIMO.
@@ -1697,6 +1824,143 @@ router.patch('/remitos/:id/sellar', upload.single('escaneo'), function(req, res)
 });
 
 // Marcar varios remitos sellados como presentados (al hacer mailto)
+// Preview del mail de presentación (cuerpo sugerido + lista de adjuntos)
+router.post('/remitos/presentar/preview', express.json(), function(req, res) {
+  try {
+    const ids = (req.body && req.body.ids) || [];
+    if (!Array.isArray(ids) || ids.length === 0) return res.status(400).json({ error: 'IDs requeridos' });
+    const ph = ids.map(function(){ return '?'; }).join(',');
+    const remitos = db.prepare(`
+      SELECT id, n_remito_ifco, fecha_sellado, empresa, sucursal, cantidad_recibida, cantidad_rechazada, escaneo_path, estado
+      FROM ifco_remitos_super WHERE id IN (${ph}) AND estado = 'sellado' AND eliminado_en IS NULL
+    `).all(...ids);
+    if (remitos.length === 0) return res.status(400).json({ error: 'Ninguno de los IDs corresponde a un remito sellado' });
+
+    // Asunto sugerido
+    const hoy = new Date().toISOString().slice(0,10);
+    const asunto = 'Presentación de remitos IFCO - SAN GERONIMO SA - ' + hoy;
+
+    // Cuerpo sugerido (HTML para mail)
+    const total_recibidos = remitos.reduce(function(a,r){ return a + (r.cantidad_recibida||0); }, 0);
+    let html = '<p>Buenos días,</p>';
+    html += '<p>Envío para presentación los siguientes remitos sellados:</p>';
+    html += '<table style="border-collapse:collapse;font-family:Arial,sans-serif;font-size:13px"><thead>';
+    html += '<tr style="background:#1e3a5f;color:#fff"><th style="padding:8px 12px;text-align:left">N° Remito</th><th style="padding:8px 12px">Sellado</th><th style="padding:8px 12px;text-align:left">Cadena</th><th style="padding:8px 12px;text-align:right">Recibidos</th><th style="padding:8px 12px;text-align:right">Rechazados</th></tr>';
+    html += '</thead><tbody>';
+    remitos.forEach(function(r, i){
+      const bg = i % 2 === 0 ? '#f9fafb' : '#fff';
+      html += '<tr style="background:' + bg + '"><td style="padding:6px 12px;font-family:monospace">' + r.n_remito_ifco + '</td>';
+      html += '<td style="padding:6px 12px;text-align:center">' + (r.fecha_sellado || '—') + '</td>';
+      html += '<td style="padding:6px 12px">' + (r.empresa || '') + (r.sucursal ? ' - ' + r.sucursal : '') + '</td>';
+      html += '<td style="padding:6px 12px;text-align:right">' + (r.cantidad_recibida || 0) + '</td>';
+      html += '<td style="padding:6px 12px;text-align:right">' + (r.cantidad_rechazada || 0) + '</td></tr>';
+    });
+    html += '<tr style="background:#d1fae5;font-weight:bold"><td colspan="3" style="padding:8px 12px;text-align:right">TOTAL CAJONES PRESENTADOS:</td><td style="padding:8px 12px;text-align:right">' + total_recibidos + '</td><td></td></tr>';
+    html += '</tbody></table>';
+    html += '<p>Adjunto fotos de las copias selladas.</p>';
+    html += '<p>Saludos cordiales,<br><b>SAN GERONIMO SA</b></p>';
+
+    // Cuerpo texto plano (fallback)
+    let texto = 'Buenos días,\n\nEnvío para presentación los siguientes remitos sellados:\n\n';
+    remitos.forEach(function(r){
+      texto += '• ' + r.n_remito_ifco + ' — ' + (r.empresa||'') + (r.sucursal?' '+r.sucursal:'') +
+               ' — sellado ' + (r.fecha_sellado||'') +
+               ' — ' + (r.cantidad_recibida||0) + ' recibidos, ' + (r.cantidad_rechazada||0) + ' rechazados\n';
+    });
+    texto += '\nTOTAL: ' + total_recibidos + ' cajones presentados.\n\nAdjunto fotos de las copias selladas.\n\nSaludos cordiales,\nSAN GERONIMO SA';
+
+    // Adjuntos disponibles
+    const adjuntos = remitos.filter(function(r){ return r.escaneo_path; }).map(function(r){
+      return { remito_id: r.id, n_remito: r.n_remito_ifco, path: r.escaneo_path };
+    });
+    const sin_foto = remitos.filter(function(r){ return !r.escaneo_path; }).map(function(r){ return r.n_remito_ifco; });
+
+    res.json({
+      asunto: asunto,
+      cuerpo_html: html,
+      cuerpo_texto: texto,
+      adjuntos: adjuntos,
+      sin_foto: sin_foto,
+      total_remitos: remitos.length,
+      total_cajones: total_recibidos
+    });
+  } catch(e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Enviar el mail (server-side con SMTP) y marcar remitos como 'enviado'
+router.post('/remitos/presentar/enviar', express.json(), async function(req, res) {
+  try {
+    const ids = (req.body && req.body.ids) || [];
+    const to = (req.body && req.body.to) || null;
+    const cc = (req.body && req.body.cc) || null;
+    const asunto = (req.body && req.body.asunto) || 'Presentación de remitos IFCO';
+    const cuerpo_html = (req.body && req.body.cuerpo_html) || '';
+    const cuerpo_texto = (req.body && req.body.cuerpo_texto) || '';
+    if (!Array.isArray(ids) || ids.length === 0) return res.status(400).json({ error: 'IDs requeridos' });
+    if (!to) return res.status(400).json({ error: 'Destinatario requerido' });
+
+    const ph = ids.map(function(){ return '?'; }).join(',');
+    const remitos = db.prepare(`
+      SELECT id, n_remito_ifco, escaneo_path
+      FROM ifco_remitos_super WHERE id IN (${ph}) AND estado = 'sellado' AND eliminado_en IS NULL
+    `).all(...ids);
+    if (remitos.length === 0) return res.status(400).json({ error: 'Ninguno de los IDs corresponde a un remito sellado' });
+
+    // Armar adjuntos físicos (paths reales en /data/ifco/...)
+    const adjuntos = [];
+    remitos.forEach(function(r){
+      if (!r.escaneo_path) return;
+      // El escaneo_path está como '/uploads/ifco/xxx.jpg' — convertir a path absoluto del filesystem
+      const relPath = r.escaneo_path.replace(/^\/?(?:uploads\/)?ifco\//, '');
+      const absPath = path.join(UPLOAD_DIR, relPath);
+      if (fs.existsSync(absPath)) {
+        const ext = path.extname(absPath) || '.jpg';
+        adjuntos.push({ filename: r.n_remito_ifco.replace(/[^a-zA-Z0-9-]/g, '_') + ext, path: absPath });
+      }
+    });
+
+    // Mandar mail
+    const mailRes = await _enviarMailIFCO({
+      tipo: 'presentacion',
+      to: to,
+      cc: cc,
+      asunto: asunto,
+      cuerpo_html: cuerpo_html,
+      cuerpo_texto: cuerpo_texto,
+      adjuntos: adjuntos,
+      related_ids: ids,
+      usuario_id: req.user && req.user.id
+    });
+
+    if (!mailRes.success) {
+      return res.status(500).json({ error: 'Error enviando mail: ' + mailRes.error });
+    }
+
+    // Marcar remitos como 'enviado'
+    db.prepare(`
+      UPDATE ifco_remitos_super
+      SET estado = 'enviado',
+          fecha_enviado = date('now','localtime'),
+          email_enviado_a = ?,
+          actualizado_en = datetime('now','localtime')
+      WHERE id IN (${ph}) AND estado = 'sellado'
+    `).run(to, ...ids);
+
+    res.json({
+      ok: true,
+      enviados: remitos.length,
+      adjuntos_count: adjuntos.length,
+      message_id: mailRes.messageId
+    });
+  } catch(e) {
+    console.error('[IFCO][remitos/presentar/enviar]', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// LEGACY: mantengo el endpoint viejo (mailto) para no romper código que pueda quedar
 router.post('/remitos/presentar', function(req, res) {
   try {
     const ids = (req.body && req.body.ids) || [];
@@ -2072,6 +2336,254 @@ router.post('/movimientos/:id/restaurar', function(req, res) {
 });
 
 // ════════════════════════════════════════════════════════════════════════════
+// AUTORIZACIONES DE RETIRO — mail a IFCO autorizando un transportista
+// ────────────────────────────────────────────────────────────────────────────
+// Flujo:
+//   1. Operador crea autorización con datos del transportista
+//      → se genera un movimiento 'retiro' con pendiente=1 (no impacta stock)
+//   2. Genera preview del mail
+//   3. Confirma envío → mail real con SMTP, autorización pasa a 'enviada'
+//   4. Cuando IFCO entrega → operador completa con cantidad real
+//      → movimiento pasa a pendiente=0 con cantidad ajustada
+//   5. Si se cancela → se elimina el movimiento pendiente
+// ════════════════════════════════════════════════════════════════════════════
+
+// GET /autorizaciones-retiro — listar (ordenadas por más reciente)
+router.get('/autorizaciones-retiro', function(req, res) {
+  try {
+    const estado = req.query.estado;
+    let q = `
+      SELECT a.*, u.username AS usuario_username, uc.username AS completada_por_username
+      FROM ifco_autorizaciones_retiro a
+      LEFT JOIN usuarios u ON u.id = a.usuario_id
+      LEFT JOIN usuarios uc ON uc.id = a.completada_por_id
+      WHERE a.eliminado_en IS NULL
+    `;
+    const p = [];
+    if (estado) { q += " AND a.estado = ?"; p.push(estado); }
+    q += " ORDER BY a.creado_en DESC LIMIT 100";
+    res.json(db.prepare(q).all(...p));
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /autorizaciones-retiro — crear nueva
+router.post('/autorizaciones-retiro', express.json(), function(req, res) {
+  try {
+    const d = req.body || {};
+    if (!d.transportista_nombre || !d.transportista_dni || !d.transportista_patente) {
+      return res.status(400).json({ error: 'Faltan datos del transportista (nombre, DNI, patente)' });
+    }
+    const cantidad = parseInt(d.cantidad_estimada);
+    if (isNaN(cantidad) || cantidad <= 0) return res.status(400).json({ error: 'Cantidad estimada debe ser un número positivo' });
+    if (!d.fecha_autorizada) return res.status(400).json({ error: 'Fecha autorizada requerida' });
+
+    // Crear movimiento pendiente (tipo='retiro', pendiente=1)
+    const movR = db.prepare(`
+      INSERT INTO ifco_movimientos (fecha, tipo, cantidad, modelo, notas, usuario_id, pendiente)
+      VALUES (?, 'retiro', ?, ?, ?, ?, 1)
+    `).run(
+      d.fecha_autorizada,
+      cantidad,
+      d.modelo || '6420',
+      'Pendiente: autorización a ' + d.transportista_nombre + ' (DNI ' + d.transportista_dni + ', patente ' + d.transportista_patente + ')',
+      (req.user && req.user.id) || null
+    );
+
+    const autR = db.prepare(`
+      INSERT INTO ifco_autorizaciones_retiro
+        (fecha_autorizada, transportista_nombre, transportista_dni, transportista_patente,
+         cantidad_estimada, estado, movimiento_pendiente_id, notas, usuario_id)
+      VALUES (?, ?, ?, ?, ?, 'pendiente_envio', ?, ?, ?)
+    `).run(
+      d.fecha_autorizada,
+      String(d.transportista_nombre).trim(),
+      String(d.transportista_dni).trim(),
+      String(d.transportista_patente).trim(),
+      cantidad,
+      movR.lastInsertRowid,
+      d.notas ? String(d.notas).trim() : null,
+      (req.user && req.user.id) || null
+    );
+
+    res.json({ id: autR.lastInsertRowid, movimiento_pendiente_id: movR.lastInsertRowid });
+  } catch(e) {
+    console.error('[IFCO][autorizaciones-retiro POST]', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /autorizaciones-retiro/:id/preview — preview del mail
+router.get('/autorizaciones-retiro/:id/preview', function(req, res) {
+  try {
+    const a = db.prepare("SELECT * FROM ifco_autorizaciones_retiro WHERE id = ? AND eliminado_en IS NULL").get(req.params.id);
+    if (!a) return res.status(404).json({ error: 'Autorización no encontrada' });
+
+    // Asunto
+    const asunto = 'Autorización de retiro de cajones IFCO - SAN GERONIMO SA';
+
+    // HTML
+    let html = '<p>Buenos días,</p>';
+    html += '<p>Por la presente <b>autorizamos al siguiente transportista</b> a retirar cajones IFCO modelo 6420 desde el centro de IFCO en nombre de <b>SAN GERONIMO SA</b>:</p>';
+    html += '<table style="border-collapse:collapse;font-family:Arial,sans-serif;font-size:13px;margin:14px 0">';
+    html += '<tr><td style="padding:6px 14px;font-weight:600;background:#f3f4f6;border:1px solid #e5e7eb">Transportista</td><td style="padding:6px 14px;border:1px solid #e5e7eb">' + a.transportista_nombre + '</td></tr>';
+    html += '<tr><td style="padding:6px 14px;font-weight:600;background:#f3f4f6;border:1px solid #e5e7eb">DNI</td><td style="padding:6px 14px;border:1px solid #e5e7eb">' + a.transportista_dni + '</td></tr>';
+    html += '<tr><td style="padding:6px 14px;font-weight:600;background:#f3f4f6;border:1px solid #e5e7eb">Patente del vehículo</td><td style="padding:6px 14px;border:1px solid #e5e7eb">' + a.transportista_patente + '</td></tr>';
+    html += '<tr><td style="padding:6px 14px;font-weight:600;background:#f3f4f6;border:1px solid #e5e7eb">Fecha estimada de retiro</td><td style="padding:6px 14px;border:1px solid #e5e7eb">' + a.fecha_autorizada + '</td></tr>';
+    html += '<tr><td style="padding:6px 14px;font-weight:600;background:#f3f4f6;border:1px solid #e5e7eb">Cantidad estimada</td><td style="padding:6px 14px;border:1px solid #e5e7eb"><b>' + a.cantidad_estimada + ' cajones</b></td></tr>';
+    html += '</table>';
+    if (a.notas) html += '<p><i>Observaciones: ' + a.notas + '</i></p>';
+    html += '<p>Cualquier consulta, responder a este mail.</p>';
+    html += '<p>Saludos cordiales,<br><b>SAN GERONIMO SA</b></p>';
+
+    // Texto plano
+    let texto = 'Buenos días,\n\nPor la presente AUTORIZAMOS al siguiente transportista a retirar cajones IFCO modelo 6420 desde el centro de IFCO en nombre de SAN GERONIMO SA:\n\n';
+    texto += '  Transportista: ' + a.transportista_nombre + '\n';
+    texto += '  DNI: ' + a.transportista_dni + '\n';
+    texto += '  Patente: ' + a.transportista_patente + '\n';
+    texto += '  Fecha estimada: ' + a.fecha_autorizada + '\n';
+    texto += '  Cantidad estimada: ' + a.cantidad_estimada + ' cajones\n';
+    if (a.notas) texto += '\nObservaciones: ' + a.notas + '\n';
+    texto += '\nCualquier consulta, responder a este mail.\n\nSaludos cordiales,\nSAN GERONIMO SA';
+
+    res.json({ asunto: asunto, cuerpo_html: html, cuerpo_texto: texto });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /autorizaciones-retiro/:id/enviar — manda el mail con SMTP
+router.post('/autorizaciones-retiro/:id/enviar', express.json(), async function(req, res) {
+  try {
+    const a = db.prepare("SELECT * FROM ifco_autorizaciones_retiro WHERE id = ? AND eliminado_en IS NULL").get(req.params.id);
+    if (!a) return res.status(404).json({ error: 'Autorización no encontrada' });
+    if (a.estado === 'enviada' || a.estado === 'completada') {
+      return res.status(400).json({ error: 'Esta autorización ya fue enviada (estado: ' + a.estado + ')' });
+    }
+    if (a.estado === 'cancelada') return res.status(400).json({ error: 'Esta autorización fue cancelada' });
+
+    const to = (req.body && req.body.to) || null;
+    const cc = (req.body && req.body.cc) || null;
+    const asunto = (req.body && req.body.asunto) || 'Autorización de retiro de cajones IFCO';
+    const cuerpo_html = (req.body && req.body.cuerpo_html) || '';
+    const cuerpo_texto = (req.body && req.body.cuerpo_texto) || '';
+    if (!to) return res.status(400).json({ error: 'Destinatario requerido' });
+
+    const mailRes = await _enviarMailIFCO({
+      tipo: 'autorizacion_retiro',
+      to: to, cc: cc, asunto: asunto,
+      cuerpo_html: cuerpo_html, cuerpo_texto: cuerpo_texto,
+      related_ids: [a.id],
+      usuario_id: req.user && req.user.id
+    });
+    if (!mailRes.success) return res.status(500).json({ error: 'Error enviando mail: ' + mailRes.error });
+
+    db.prepare(`
+      UPDATE ifco_autorizaciones_retiro
+      SET estado = 'enviada', mail_enviado_a = ?, mail_enviado_en = datetime('now','localtime'), mail_message_id = ?
+      WHERE id = ?
+    `).run(to, mailRes.messageId || null, a.id);
+
+    res.json({ ok: true, message_id: mailRes.messageId });
+  } catch(e) {
+    console.error('[IFCO][autorizaciones-retiro/enviar]', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /autorizaciones-retiro/:id/completar — registra la entrega real con cantidad ajustada
+router.post('/autorizaciones-retiro/:id/completar', express.json(), function(req, res) {
+  try {
+    const a = db.prepare("SELECT * FROM ifco_autorizaciones_retiro WHERE id = ? AND eliminado_en IS NULL").get(req.params.id);
+    if (!a) return res.status(404).json({ error: 'Autorización no encontrada' });
+    if (a.estado !== 'enviada' && a.estado !== 'pendiente_envio') {
+      return res.status(400).json({ error: 'Solo se pueden completar autorizaciones en estado "enviada" o "pendiente_envio". Estado actual: ' + a.estado });
+    }
+    const cantidadReal = parseInt(req.body && req.body.cantidad_real);
+    if (isNaN(cantidadReal) || cantidadReal < 0) {
+      return res.status(400).json({ error: 'Cantidad real debe ser un número >= 0' });
+    }
+
+    // Pasar el movimiento de pendiente=1 a pendiente=0 con cantidad ajustada
+    if (a.movimiento_pendiente_id) {
+      db.prepare(`
+        UPDATE ifco_movimientos
+        SET cantidad = ?, pendiente = 0, notas = COALESCE(notas, '') || ' [Confirmado: ' || ? || ' cajones reales]'
+        WHERE id = ?
+      `).run(cantidadReal, cantidadReal, a.movimiento_pendiente_id);
+    } else {
+      // Si por alguna razón no había movimiento pendiente, crearlo ahora
+      const movR = db.prepare(`
+        INSERT INTO ifco_movimientos (fecha, tipo, cantidad, modelo, notas, usuario_id, pendiente)
+        VALUES (date('now','localtime'), 'retiro', ?, '6420', ?, ?, 0)
+      `).run(cantidadReal, 'Retiro confirmado por autorización #' + a.id, (req.user && req.user.id) || null);
+      db.prepare("UPDATE ifco_autorizaciones_retiro SET movimiento_pendiente_id = ? WHERE id = ?").run(movR.lastInsertRowid, a.id);
+    }
+
+    db.prepare(`
+      UPDATE ifco_autorizaciones_retiro
+      SET estado = 'completada', cantidad_real = ?, completada_en = datetime('now','localtime'), completada_por_id = ?
+      WHERE id = ?
+    `).run(cantidadReal, (req.user && req.user.id) || null, a.id);
+
+    res.json({ ok: true, cantidad_real: cantidadReal, diferencia: cantidadReal - a.cantidad_estimada });
+  } catch(e) {
+    console.error('[IFCO][autorizaciones-retiro/completar]', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /autorizaciones-retiro/:id/cancelar — cancela la autorización (elimina movimiento pendiente)
+router.post('/autorizaciones-retiro/:id/cancelar', express.json(), function(req, res) {
+  try {
+    const a = db.prepare("SELECT * FROM ifco_autorizaciones_retiro WHERE id = ? AND eliminado_en IS NULL").get(req.params.id);
+    if (!a) return res.status(404).json({ error: 'Autorización no encontrada' });
+    if (a.estado === 'completada') return res.status(400).json({ error: 'No se puede cancelar una autorización ya completada' });
+
+    if (a.movimiento_pendiente_id) {
+      db.prepare("UPDATE ifco_movimientos SET eliminado_en = datetime('now','localtime') WHERE id = ?").run(a.movimiento_pendiente_id);
+    }
+    db.prepare(`
+      UPDATE ifco_autorizaciones_retiro
+      SET estado = 'cancelada', notas = COALESCE(notas, '') || ' [Cancelada: ' || COALESCE(?, 'sin motivo') || ']'
+      WHERE id = ?
+    `).run(req.body && req.body.motivo ? String(req.body.motivo).trim() : null, a.id);
+
+    res.json({ ok: true });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// DELETE /autorizaciones-retiro/:id — eliminar (admin only, manda a papelera)
+router.delete('/autorizaciones-retiro/:id', function(req, res) {
+  if (!req.user || req.user.rol !== 'admin') {
+    return res.status(403).json({ error: 'Solo admin puede eliminar autorizaciones' });
+  }
+  try {
+    const a = db.prepare("SELECT * FROM ifco_autorizaciones_retiro WHERE id = ?").get(req.params.id);
+    if (!a) return res.status(404).json({ error: 'No encontrada' });
+    if (a.movimiento_pendiente_id) {
+      db.prepare("UPDATE ifco_movimientos SET eliminado_en = datetime('now','localtime') WHERE id = ?").run(a.movimiento_pendiente_id);
+    }
+    db.prepare("UPDATE ifco_autorizaciones_retiro SET eliminado_en = datetime('now','localtime') WHERE id = ?").run(a.id);
+    res.json({ ok: true });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /mails-log — historial de mails enviados (últimos 100)
+router.get('/mails-log', function(req, res) {
+  try {
+    const tipo = req.query.tipo;
+    let q = `
+      SELECT l.*, u.username AS enviado_por_username
+      FROM ifco_mails_log l
+      LEFT JOIN usuarios u ON u.id = l.enviado_por_id
+      WHERE 1=1
+    `;
+    const p = [];
+    if (tipo) { q += " AND l.tipo = ?"; p.push(tipo); }
+    q += " ORDER BY l.enviado_en DESC LIMIT 100";
+    res.json(db.prepare(q).all(...p));
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// ════════════════════════════════════════════════════════════════════════════
 // RESUMEN — stocks calculados + alertas + saldos por contraparte
 // ════════════════════════════════════════════════════════════════════════════
 
@@ -2079,8 +2591,8 @@ router.get('/resumen', function(req, res) {
   const get = function(sql, ...p) { return (db.prepare(sql).get(...p) || {}).total || 0; };
 
   // Movimientos puntuales
-  const retirado = get("SELECT COALESCE(SUM(cantidad),0) AS total FROM ifco_movimientos WHERE tipo='retiro' AND eliminado_en IS NULL");
-  const perdido  = get("SELECT COALESCE(SUM(cantidad),0) AS total FROM ifco_movimientos WHERE tipo='perdida' AND eliminado_en IS NULL");
+  const retirado = get("SELECT COALESCE(SUM(cantidad),0) AS total FROM ifco_movimientos WHERE tipo='retiro' AND eliminado_en IS NULL AND pendiente=0");
+  const perdido  = get("SELECT COALESCE(SUM(cantidad),0) AS total FROM ifco_movimientos WHERE tipo='perdida' AND eliminado_en IS NULL AND pendiente=0");
 
   // Envíos a proveedor — totales y pendientes (excluyendo eliminados)
   const envios_totales = get(`
@@ -3567,8 +4079,8 @@ router.get('/consolidacion/saldos-reales', function(req, res) {
 
     // Componentes informativos (para que el user pueda chequear el saldo IFCO ingresado)
     const get = function(q) { try { return db.prepare(q).get().total || 0; } catch(_) { return 0; } };
-    const retiros_total   = get("SELECT COALESCE(SUM(cantidad),0) AS total FROM ifco_movimientos WHERE tipo='retiro' AND eliminado_en IS NULL");
-    const perdidas_total  = get("SELECT COALESCE(SUM(cantidad),0) AS total FROM ifco_movimientos WHERE tipo='perdida' AND eliminado_en IS NULL");
+    const retiros_total   = get("SELECT COALESCE(SUM(cantidad),0) AS total FROM ifco_movimientos WHERE tipo='retiro' AND eliminado_en IS NULL AND pendiente=0");
+    const perdidas_total  = get("SELECT COALESCE(SUM(cantidad),0) AS total FROM ifco_movimientos WHERE tipo='perdida' AND eliminado_en IS NULL AND pendiente=0");
     const despachos_total = get("SELECT COALESCE(SUM(cantidad_despachada),0) AS total FROM ifco_remitos_super WHERE eliminado_en IS NULL");
     const despachos_presentados_total = get("SELECT COALESCE(SUM(cantidad_despachada),0) AS total FROM ifco_remitos_super WHERE eliminado_en IS NULL AND estado='presentado'");
 
@@ -4018,8 +4530,8 @@ function _calcStockSG() {
       return 0;
     }
   };
-  const retirado            = get('retiros',            "SELECT COALESCE(SUM(cantidad),0) AS total FROM ifco_movimientos WHERE tipo='retiro' AND eliminado_en IS NULL");
-  const perdidas            = get('perdidas',           "SELECT COALESCE(SUM(cantidad),0) AS total FROM ifco_movimientos WHERE tipo='perdida' AND eliminado_en IS NULL");
+  const retirado            = get('retiros',            "SELECT COALESCE(SUM(cantidad),0) AS total FROM ifco_movimientos WHERE tipo='retiro' AND eliminado_en IS NULL AND pendiente=0");
+  const perdidas            = get('perdidas',           "SELECT COALESCE(SUM(cantidad),0) AS total FROM ifco_movimientos WHERE tipo='perdida' AND eliminado_en IS NULL AND pendiente=0");
   const despachos_sg        = get('despachos_sg',       "SELECT COALESCE(SUM(cantidad_despachada),0) AS total FROM ifco_remitos_super WHERE estado IN ('despachado','sellado','enviado','presentado') AND origen='san_geronimo' AND eliminado_en IS NULL");
   const envios_totales      = get('envios_totales',     "SELECT COALESCE(SUM(cantidad_enviada),0) AS total FROM ifco_envios_proveedor WHERE estado IN ('enviado','parcial','recibido') AND eliminado_en IS NULL");
   const recepciones_envios  = get('recepciones_envios', "SELECT COALESCE(SUM(cantidad_recibida),0) AS total FROM ifco_envios_proveedor WHERE estado IN ('recibido','parcial') AND eliminado_en IS NULL");

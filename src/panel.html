@@ -3224,6 +3224,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     <div style="display:flex;gap:8px;margin-bottom:12px;align-items:center;flex-wrap:wrap">
       <button class="btn bb" onclick="ifcoAbrirNuevoMovimiento('retiro')">+ Retiro IFCO</button>
       <button class="btn bo" onclick="ifcoAbrirNuevoMovimiento('perdida')">+ Pérdida</button>
+      <button class="btn bo" onclick="ifcoAbrirAutorizacion()" style="border-color:#3b82f6;color:#1e3a8a">📧 Solicitar autorización a IFCO</button>
       <select id="ifco-flt-mov-tipo" onchange="ifcoCargarMovimientos()" style="font-size:13px;padding:6px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg);margin-left:12px">
         <option value="">Todos</option>
         <option value="retiro">Retiros</option>
@@ -3234,6 +3235,25 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
         <button class="btn bo" style="font-size:12px" onclick="document.getElementById('ifco-import-retiros-file').click()" title="Carga inicial de retiros históricos desde Excel — solo admin">📥 Importar histórico</button>
       </div>
     </div>
+
+    <!-- Sección: autorizaciones pendientes / activas -->
+    <div id="ifco-autoriz-section" class="ifco-card" style="margin-bottom:14px;display:none">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px">
+        <div>
+          <div style="font-size:13px;font-weight:600">📧 Autorizaciones de retiro</div>
+          <div style="font-size:11px;color:var(--mut);margin-top:2px">Mails que mandamos a IFCO autorizando un transportista a retirar cajones. Cuando se completa, se genera el retiro real.</div>
+        </div>
+        <select id="ifco-flt-autoriz" onchange="ifcoCargarAutorizaciones()" style="font-size:12px;padding:5px 9px;border-radius:7px;border:1px solid var(--bor);background:var(--bg)">
+          <option value="">Todas</option>
+          <option value="pendiente_envio">Pendientes de enviar</option>
+          <option value="enviada">Enviadas (esperando retiro)</option>
+          <option value="completada">Completadas</option>
+          <option value="cancelada">Canceladas</option>
+        </select>
+      </div>
+      <div id="ifco-autoriz-tabla"></div>
+    </div>
+
     <div class="ab-table-wrap">
       <table class="ab-table" id="ifco-tbl-movs">
         <thead><tr>
@@ -3924,29 +3944,175 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
 </div>
 
 <div class="mb" id="ifco-mb-presentar">
-  <div class="mbox" style="width:720px">
+  <div class="mbox" style="width:760px;max-width:95vw">
     <div class="mhd">
       <div class="mht">📧 Enviar remitos a IFCO</div>
       <button class="mcl" onclick="document.getElementById('ifco-mb-presentar').classList.remove('on')">x</button>
     </div>
-    <div style="font-size:12px;color:var(--mut);margin-bottom:12px">
-      Seleccioná los remitos sellados a enviar. Al confirmar, se abre el cliente de mail con el cuerpo armado y se marcan como <b>enviados</b>. Cuando IFCO te confirme con su archivo, podés cerrar el ciclo en "🔄 Consolidar con IFCO".
+
+    <!-- PASO 1: Selección de remitos -->
+    <div id="ifco-pres-step1">
+      <div style="font-size:12px;color:var(--mut);margin-bottom:12px">
+        Seleccioná los remitos sellados a enviar. En el siguiente paso vas a poder revisar el cuerpo del mail antes de confirmar el envío. El mail sale desde <b>ifco@lnbonita.com.ar</b> con las fotos adjuntas.
+      </div>
+      <div id="ifco-presentar-lista" style="max-height:320px;overflow-y:auto;border:1px solid var(--bor);border-radius:8px"></div>
+      <div style="margin-top:12px;display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div>
+          <label style="font-size:11px;color:var(--mut);text-transform:uppercase">Mail destinatario (IFCO) *</label>
+          <input id="ifco-presentar-email" type="email" placeholder="presentaciones@ifco.com" style="width:100%;padding:8px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg)">
+        </div>
+        <div>
+          <label style="font-size:11px;color:var(--mut);text-transform:uppercase">CC (copia interna)</label>
+          <input id="ifco-presentar-cc" type="email" placeholder="andres@laninabonita.com" style="width:100%;padding:8px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg)">
+        </div>
+      </div>
+      <div style="font-size:11px;color:var(--mut);margin-top:3px">Se guardan en tu navegador para próximas veces.</div>
+      <div class="ab-modal-footer" style="margin-top:18px;display:flex;justify-content:flex-end;gap:8px">
+        <button class="btn bo" onclick="document.getElementById('ifco-mb-presentar').classList.remove('on')">Cancelar</button>
+        <button class="btn bb" onclick="ifcoPresentarPreview()">Preview del mail →</button>
+      </div>
     </div>
-    <div id="ifco-presentar-lista" style="max-height:340px;overflow-y:auto;border:1px solid var(--bor);border-radius:8px"></div>
-    <div style="margin-top:12px;display:grid;grid-template-columns:1fr 1fr;gap:10px">
+
+    <!-- PASO 2: Preview del mail (editable) -->
+    <div id="ifco-pres-step2" style="display:none">
+      <div style="font-size:12px;color:var(--mut);margin-bottom:10px">
+        ✉️ <b>Revisá el mail antes de enviar.</b> Podés editar el asunto y el cuerpo. Las fotos se adjuntan automáticamente. El mail sale desde <b>ifco@lnbonita.com.ar</b>.
+      </div>
+
+      <div id="ifco-pres-info" style="background:#eff6ff;border:1px solid #93c5fd;border-radius:8px;padding:10px 14px;margin-bottom:10px;font-size:12px;color:#1e3a8a"></div>
+
+      <div style="margin-bottom:10px">
+        <label style="font-size:11px;color:var(--mut);text-transform:uppercase">Asunto</label>
+        <input id="ifco-pres-asunto" type="text" style="width:100%;padding:8px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg);font-size:13px">
+      </div>
+
+      <div style="margin-bottom:10px">
+        <label style="font-size:11px;color:var(--mut);text-transform:uppercase">Cuerpo del mail</label>
+        <div id="ifco-pres-cuerpo-preview" style="background:#fff;border:1px solid var(--bor);border-radius:7px;padding:12px;max-height:280px;overflow-y:auto;font-family:Arial,sans-serif;font-size:13px"></div>
+        <details style="margin-top:6px">
+          <summary style="font-size:11px;color:var(--mut);cursor:pointer">Editar HTML manualmente (avanzado)</summary>
+          <textarea id="ifco-pres-cuerpo-html" style="width:100%;height:140px;padding:8px;border:1px solid var(--bor);border-radius:7px;font-family:monospace;font-size:11px;margin-top:6px;background:var(--bg)"></textarea>
+        </details>
+      </div>
+
+      <div id="ifco-pres-adjuntos" style="margin-bottom:10px"></div>
+
+      <div class="ab-modal-footer" style="margin-top:18px;display:flex;justify-content:space-between;gap:8px">
+        <button class="btn bo" onclick="ifcoPresentarBack()">← Volver a selección</button>
+        <button class="btn bb" id="ifco-pres-btn-enviar" onclick="ifcoPresentarEnviar()" style="background:#047857">📧 Enviar mail desde ifco@lnbonita.com.ar</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: Crear nueva autorización de retiro -->
+<div class="mb" id="ifco-mb-autoriz-nuevo">
+  <div class="mbox" style="width:560px;max-width:95vw">
+    <div class="mhd">
+      <div class="mht">📧 Solicitar autorización de retiro</div>
+      <button class="mcl" onclick="document.getElementById('ifco-mb-autoriz-nuevo').classList.remove('on')">x</button>
+    </div>
+    <div style="font-size:12px;color:var(--mut);margin-bottom:12px">
+      Datos del transportista que va a ir a IFCO a buscar los cajones. Después del envío, podés completar con la cantidad real cuando IFCO entregue.
+    </div>
+    <div style="margin-bottom:10px">
+      <label style="font-size:11px;color:var(--mut);text-transform:uppercase">Nombre del transportista *</label>
+      <input id="ifco-aut-nombre" type="text" placeholder="Ej: Juan Pérez" style="width:100%;padding:8px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg)">
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
+      <div>
+        <label style="font-size:11px;color:var(--mut);text-transform:uppercase">DNI *</label>
+        <input id="ifco-aut-dni" type="text" placeholder="Ej: 28456789" style="width:100%;padding:8px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg)">
+      </div>
+      <div>
+        <label style="font-size:11px;color:var(--mut);text-transform:uppercase">Patente del vehículo *</label>
+        <input id="ifco-aut-patente" type="text" placeholder="Ej: AB123CD" style="width:100%;padding:8px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg);text-transform:uppercase">
+      </div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
+      <div>
+        <label style="font-size:11px;color:var(--mut);text-transform:uppercase">Fecha estimada de retiro *</label>
+        <input id="ifco-aut-fecha" type="date" style="width:100%;padding:8px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg)">
+      </div>
+      <div>
+        <label style="font-size:11px;color:var(--mut);text-transform:uppercase">Cantidad estimada *</label>
+        <input id="ifco-aut-cantidad" type="number" min="1" placeholder="Ej: 500" style="width:100%;padding:8px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg)">
+      </div>
+    </div>
+    <div style="margin-bottom:12px">
+      <label style="font-size:11px;color:var(--mut);text-transform:uppercase">Notas / Observaciones (opcional)</label>
+      <input id="ifco-aut-notas" type="text" placeholder="Ej: Camión grande, retira temprano" style="width:100%;padding:8px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg)">
+    </div>
+    <div style="background:#dbeafe;border:1px solid #93c5fd;border-radius:6px;padding:10px 12px;margin-bottom:12px;font-size:12px;color:#1e3a8a;line-height:1.5">
+      ℹ️ Al guardar se crea un <b>movimiento de retiro pendiente</b> (no impacta en el stock). En el siguiente paso vas a poder mandar el mail a IFCO. Cuando IFCO entregue los cajones, se completa con la cantidad real y se ajusta automáticamente.
+    </div>
+    <div class="ab-modal-footer" style="display:flex;justify-content:flex-end;gap:8px">
+      <button class="btn bo" onclick="document.getElementById('ifco-mb-autoriz-nuevo').classList.remove('on')">Cancelar</button>
+      <button class="btn bb" id="ifco-aut-btn-guardar" onclick="ifcoGuardarAutorizacion()">Guardar y armar mail →</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: Preview + envío del mail de autorización -->
+<div class="mb" id="ifco-mb-autoriz-mail">
+  <div class="mbox" style="width:720px;max-width:95vw">
+    <div class="mhd">
+      <div class="mht">📧 Enviar autorización a IFCO</div>
+      <button class="mcl" onclick="document.getElementById('ifco-mb-autoriz-mail').classList.remove('on')">x</button>
+    </div>
+    <div style="font-size:12px;color:var(--mut);margin-bottom:12px">
+      Revisá el cuerpo del mail antes de enviar. El mail sale desde <b>ifco@lnbonita.com.ar</b>. Editá si necesitás.
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
       <div>
         <label style="font-size:11px;color:var(--mut);text-transform:uppercase">Mail destinatario (IFCO) *</label>
-        <input id="ifco-presentar-email" type="email" placeholder="presentaciones@ifco.com" style="width:100%;padding:8px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg)">
+        <input id="ifco-autm-to" type="email" placeholder="autorizaciones@ifco.com" style="width:100%;padding:8px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg)">
       </div>
       <div>
         <label style="font-size:11px;color:var(--mut);text-transform:uppercase">CC (copia interna)</label>
-        <input id="ifco-presentar-cc" type="email" placeholder="andres@laninabonita.com" style="width:100%;padding:8px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg)">
+        <input id="ifco-autm-cc" type="email" style="width:100%;padding:8px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg)">
       </div>
     </div>
-    <div style="font-size:11px;color:var(--mut);margin-top:3px">Se guardan en tu navegador para próximas veces.</div>
-    <div class="ab-modal-footer" style="margin-top:18px;display:flex;justify-content:flex-end;gap:8px">
-      <button class="btn bo" onclick="document.getElementById('ifco-mb-presentar').classList.remove('on')">Cancelar</button>
-      <button class="btn bb" onclick="ifcoConfirmarPresentar()">Abrir mail y marcar enviados</button>
+    <div style="margin-bottom:10px">
+      <label style="font-size:11px;color:var(--mut);text-transform:uppercase">Asunto</label>
+      <input id="ifco-autm-asunto" type="text" style="width:100%;padding:8px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg);font-size:13px">
+    </div>
+    <div style="margin-bottom:12px">
+      <label style="font-size:11px;color:var(--mut);text-transform:uppercase">Cuerpo del mail (preview)</label>
+      <div id="ifco-autm-cuerpo-preview" style="background:#fff;border:1px solid var(--bor);border-radius:7px;padding:12px;max-height:280px;overflow-y:auto;font-family:Arial,sans-serif;font-size:13px"></div>
+      <details style="margin-top:6px">
+        <summary style="font-size:11px;color:var(--mut);cursor:pointer">Editar HTML manualmente (avanzado)</summary>
+        <textarea id="ifco-autm-cuerpo-html" style="width:100%;height:120px;padding:8px;border:1px solid var(--bor);border-radius:7px;font-family:monospace;font-size:11px;margin-top:6px;background:var(--bg)"></textarea>
+      </details>
+    </div>
+    <div class="ab-modal-footer" style="display:flex;justify-content:flex-end;gap:8px">
+      <button class="btn bo" onclick="document.getElementById('ifco-mb-autoriz-mail').classList.remove('on')">Cerrar (sin enviar)</button>
+      <button class="btn bb" id="ifco-autm-btn-enviar" onclick="ifcoEnviarMailAutorizacion()" style="background:#047857">📧 Enviar mail desde ifco@lnbonita.com.ar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: Completar autorización (cantidad real entregada) -->
+<div class="mb" id="ifco-mb-autoriz-completar">
+  <div class="mbox" style="width:480px;max-width:95vw">
+    <div class="mhd">
+      <div class="mht">✓ Completar autorización (retiro confirmado)</div>
+      <button class="mcl" onclick="document.getElementById('ifco-mb-autoriz-completar').classList.remove('on')">x</button>
+    </div>
+    <div style="font-size:12px;color:var(--mut);margin-bottom:12px">
+      IFCO ya entregó los cajones. Ingresá la cantidad real para que el sistema ajuste el movimiento pendiente y se sumen al stock de SG.
+    </div>
+    <div id="ifco-autc-info" style="background:var(--bg);border-radius:8px;padding:12px 14px;margin-bottom:14px;font-size:13px;line-height:1.6"></div>
+    <div style="margin-bottom:12px">
+      <label style="font-size:11px;color:var(--mut);text-transform:uppercase">Cantidad real entregada por IFCO *</label>
+      <input id="ifco-autc-cantidad" type="number" min="0" placeholder="Cajones efectivamente recibidos" style="width:100%;padding:8px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg);font-size:18px;font-weight:600">
+    </div>
+    <div style="background:#fef3c7;border:1px solid #fcd34d;border-radius:6px;padding:10px 12px;margin-bottom:12px;font-size:12px;color:#78350f;line-height:1.5">
+      ℹ️ Al confirmar, el movimiento pendiente se actualiza con la cantidad real (deja de estar pendiente) y los cajones se suman al stock de SG.
+    </div>
+    <div class="ab-modal-footer" style="display:flex;justify-content:flex-end;gap:8px">
+      <button class="btn bo" onclick="document.getElementById('ifco-mb-autoriz-completar').classList.remove('on')">Cancelar</button>
+      <button class="btn bb" id="ifco-autc-btn" onclick="ifcoConfirmarCompletarAutorizacion()" style="background:#047857">✓ Confirmar retiro</button>
     </div>
   </div>
 </div>
@@ -17401,7 +17567,10 @@ async function ifcoAbrirPresentar() {
   } catch(e) { alert('Error: ' + e.message); }
 }
 
-async function ifcoConfirmarPresentar() {
+// Estado del wizard de presentación (modo híbrido)
+let _ifcoPresState = { ids: [], to: null, cc: null, preview: null };
+
+async function ifcoPresentarPreview() {
   const ids = Array.from(document.querySelectorAll('.ifco-pp-cb:checked')).map(function(c){ return parseInt(c.getAttribute('data-id')); });
   if (ids.length === 0) { alert('Seleccioná al menos un remito'); return; }
   const email = document.getElementById('ifco-presentar-email').value.trim();
@@ -17409,26 +17578,97 @@ async function ifcoConfirmarPresentar() {
   if (!email) { alert('Ingresá el mail destinatario (IFCO)'); return; }
   localStorage.setItem('ifco_presentar_email', email);
   localStorage.setItem('ifco_presentar_cc', cc);
+  _ifcoPresState = { ids: ids, to: email, cc: cc };
+
   try {
-    const r = await _ifcoFetch('/api/ifco/remitos/presentar', {
+    const data = await _ifcoFetch('/api/ifco/remitos/presentar/preview', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ids: ids, email: email })
+      body: JSON.stringify({ ids: ids })
     });
-    // Armar mailto:
-    const lineas = r.remitos.map(function(x){
-      return '• ' + x.n_remito_ifco + ' — ' + (x.empresa||'') + ' ' + (x.sucursal||'') +
-             ' — sellado ' + _ifcoFecha(x.fecha_sellado) +
-             ' — ' + x.cantidad_recibida + ' cajones';
-    }).join('\n');
-    const subject = 'Presentación de remitos IFCO - SAN GERONIMO SA';
-    const cuerpo  = 'Buenos días,\n\nEnvío para presentación los siguientes remitos sellados:\n\n' + lineas + '\n\nAdjunto fotos de las copias selladas.\n\nSaludos,';
-    let mailto = 'mailto:' + encodeURIComponent(email) + '?subject=' + encodeURIComponent(subject) + '&body=' + encodeURIComponent(cuerpo);
-    if (cc) mailto += '&cc=' + encodeURIComponent(cc);
+    _ifcoPresState.preview = data;
+
+    // Mostrar paso 2
+    document.getElementById('ifco-pres-step1').style.display = 'none';
+    document.getElementById('ifco-pres-step2').style.display = 'block';
+
+    // Info box
+    document.getElementById('ifco-pres-info').innerHTML =
+      '📊 <b>' + data.total_remitos + '</b> remitos · <b>' + _ifcoFmt(data.total_cajones) + '</b> cajones presentados · ' +
+      '📎 <b>' + data.adjuntos.length + '</b> fotos adjuntas' +
+      (data.sin_foto.length > 0 ? ' · ⚠️ <b style="color:#991b1b">' + data.sin_foto.length + '</b> remito(s) sin foto' : '');
+
+    // Asunto y cuerpo (editables)
+    document.getElementById('ifco-pres-asunto').value = data.asunto;
+    document.getElementById('ifco-pres-cuerpo-html').value = data.cuerpo_html;
+    document.getElementById('ifco-pres-cuerpo-preview').innerHTML = data.cuerpo_html;
+    // Sincronizar preview cuando se edita el HTML
+    document.getElementById('ifco-pres-cuerpo-html').oninput = function(){
+      document.getElementById('ifco-pres-cuerpo-preview').innerHTML = this.value;
+    };
+
+    // Lista de adjuntos
+    let adjHtml = '<div style="font-size:11px;color:var(--mut);text-transform:uppercase;margin-bottom:6px">Fotos a adjuntar (' + data.adjuntos.length + ')</div>';
+    if (data.adjuntos.length === 0) {
+      adjHtml += '<div style="color:#991b1b;font-size:12px;padding:8px;background:#fee2e2;border-radius:6px">⚠️ Ningún remito tiene foto. El mail va a salir sin adjuntos.</div>';
+    } else {
+      adjHtml += '<div style="display:flex;flex-wrap:wrap;gap:6px">';
+      data.adjuntos.forEach(function(a){
+        adjHtml += '<span style="background:#dbeafe;color:#1e3a8a;font-size:11px;padding:3px 8px;border-radius:10px;font-family:monospace">📎 ' + _ifcoEsc(a.n_remito) + '</span>';
+      });
+      adjHtml += '</div>';
+    }
+    if (data.sin_foto.length > 0) {
+      adjHtml += '<div style="margin-top:8px;font-size:11px;color:#991b1b">⚠️ Sin foto: ' + data.sin_foto.map(_ifcoEsc).join(', ') + '</div>';
+    }
+    document.getElementById('ifco-pres-adjuntos').innerHTML = adjHtml;
+  } catch(e) {
+    alert('Error generando preview: ' + e.message);
+  }
+}
+
+function ifcoPresentarBack() {
+  document.getElementById('ifco-pres-step1').style.display = 'block';
+  document.getElementById('ifco-pres-step2').style.display = 'none';
+}
+
+async function ifcoPresentarEnviar() {
+  if (!_ifcoPresState.ids || _ifcoPresState.ids.length === 0) return;
+  const asunto = document.getElementById('ifco-pres-asunto').value.trim();
+  const cuerpo_html = document.getElementById('ifco-pres-cuerpo-html').value;
+  if (!asunto) { alert('El asunto no puede estar vacío'); return; }
+
+  if (!confirm('¿Enviar el mail a ' + _ifcoPresState.to + '?\n\nDespués no se puede deshacer (los remitos se marcan como enviados).')) return;
+
+  const btn = document.getElementById('ifco-pres-btn-enviar');
+  btn.disabled = true; btn.textContent = 'Enviando…';
+  try {
+    const r = await _ifcoFetch('/api/ifco/remitos/presentar/enviar', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ids: _ifcoPresState.ids,
+        to: _ifcoPresState.to,
+        cc: _ifcoPresState.cc || undefined,
+        asunto: asunto,
+        cuerpo_html: cuerpo_html,
+        cuerpo_texto: _ifcoPresState.preview.cuerpo_texto
+      })
+    });
     document.getElementById('ifco-mb-presentar').classList.remove('on');
-    window.location.href = mailto;
+    alert('✓ Mail enviado a ' + _ifcoPresState.to + '\n\n' + r.enviados + ' remito(s) marcados como enviados\n' + r.adjuntos_count + ' foto(s) adjuntas');
     setTimeout(ifcoCargarRemitos, 500);
-  } catch(e) { alert('Error: ' + e.message); }
+  } catch(e) {
+    alert('Error enviando mail: ' + e.message + '\n\nLos remitos NO se marcaron como enviados.');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '📧 Enviar mail desde ifco@lnbonita.com.ar';
+  }
+}
+
+// LEGACY: mantengo la función vieja por si algo la llama
+async function ifcoConfirmarPresentar() {
+  return ifcoPresentarPreview();
 }
 
 // ── ENVÍOS A PROVEEDOR ────────────────────────────────────────────────────
@@ -17742,7 +17982,242 @@ async function ifcoImportarRetirosHistoricos(ev) {
   }
 }
 
+// ════════════════════════════════════════════════════════════════════════════
+// AUTORIZACIONES DE RETIRO — UI
+// ════════════════════════════════════════════════════════════════════════════
+let _ifcoAutCtx = null;
+
+function ifcoAbrirAutorizacion() {
+  document.getElementById('ifco-aut-nombre').value = '';
+  document.getElementById('ifco-aut-dni').value = '';
+  document.getElementById('ifco-aut-patente').value = '';
+  document.getElementById('ifco-aut-cantidad').value = '';
+  document.getElementById('ifco-aut-notas').value = '';
+  // Default fecha: día de hoy
+  const today = new Date().toISOString().slice(0, 10);
+  document.getElementById('ifco-aut-fecha').value = today;
+  document.getElementById('ifco-mb-autoriz-nuevo').classList.add('on');
+}
+
+async function ifcoGuardarAutorizacion() {
+  const data = {
+    transportista_nombre: document.getElementById('ifco-aut-nombre').value.trim(),
+    transportista_dni: document.getElementById('ifco-aut-dni').value.trim(),
+    transportista_patente: document.getElementById('ifco-aut-patente').value.trim().toUpperCase(),
+    fecha_autorizada: document.getElementById('ifco-aut-fecha').value,
+    cantidad_estimada: parseInt(document.getElementById('ifco-aut-cantidad').value),
+    notas: document.getElementById('ifco-aut-notas').value.trim() || null
+  };
+  if (!data.transportista_nombre || !data.transportista_dni || !data.transportista_patente) {
+    alert('Completá todos los datos del transportista'); return;
+  }
+  if (!data.fecha_autorizada) { alert('Falta fecha'); return; }
+  if (isNaN(data.cantidad_estimada) || data.cantidad_estimada <= 0) { alert('Cantidad inválida'); return; }
+
+  const btn = document.getElementById('ifco-aut-btn-guardar');
+  btn.disabled = true; btn.textContent = 'Guardando…';
+  try {
+    const r = await _ifcoFetch('/api/ifco/autorizaciones-retiro', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    });
+    document.getElementById('ifco-mb-autoriz-nuevo').classList.remove('on');
+    // Recargar la sección de autorizaciones y abrir el modal de mail
+    if (typeof ifcoCargarAutorizaciones === 'function') ifcoCargarAutorizaciones();
+    if (typeof ifcoCargarMovimientos === 'function') ifcoCargarMovimientos();
+    // Abrir directo el modal de mail con preview
+    setTimeout(function(){ ifcoAbrirMailAutorizacion(r.id); }, 200);
+  } catch(e) {
+    alert('Error: ' + e.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Guardar y armar mail →';
+  }
+}
+
+async function ifcoAbrirMailAutorizacion(id) {
+  _ifcoAutCtx = { id: id };
+  try {
+    const data = await _ifcoFetch('/api/ifco/autorizaciones-retiro/' + id + '/preview');
+    document.getElementById('ifco-autm-asunto').value = data.asunto;
+    document.getElementById('ifco-autm-cuerpo-html').value = data.cuerpo_html;
+    document.getElementById('ifco-autm-cuerpo-preview').innerHTML = data.cuerpo_html;
+    _ifcoAutCtx.cuerpo_texto = data.cuerpo_texto;
+    // Sincronizar preview cuando se edita
+    document.getElementById('ifco-autm-cuerpo-html').oninput = function(){
+      document.getElementById('ifco-autm-cuerpo-preview').innerHTML = this.value;
+    };
+    // Mail destinatario guardado
+    document.getElementById('ifco-autm-to').value = localStorage.getItem('ifco_autoriz_email') || '';
+    document.getElementById('ifco-autm-cc').value = localStorage.getItem('ifco_autoriz_cc') || '';
+    document.getElementById('ifco-mb-autoriz-mail').classList.add('on');
+  } catch(e) { alert('Error: ' + e.message); }
+}
+
+async function ifcoEnviarMailAutorizacion() {
+  if (!_ifcoAutCtx || !_ifcoAutCtx.id) return;
+  const to = document.getElementById('ifco-autm-to').value.trim();
+  const cc = document.getElementById('ifco-autm-cc').value.trim();
+  const asunto = document.getElementById('ifco-autm-asunto').value.trim();
+  const cuerpo_html = document.getElementById('ifco-autm-cuerpo-html').value;
+  if (!to) { alert('Ingresá el mail destinatario (IFCO)'); return; }
+  if (!asunto) { alert('El asunto no puede estar vacío'); return; }
+
+  if (!confirm('¿Enviar el mail a ' + to + '?')) return;
+
+  localStorage.setItem('ifco_autoriz_email', to);
+  if (cc) localStorage.setItem('ifco_autoriz_cc', cc);
+
+  const btn = document.getElementById('ifco-autm-btn-enviar');
+  btn.disabled = true; btn.textContent = 'Enviando…';
+  try {
+    const r = await _ifcoFetch('/api/ifco/autorizaciones-retiro/' + _ifcoAutCtx.id + '/enviar', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        to: to, cc: cc || undefined, asunto: asunto,
+        cuerpo_html: cuerpo_html, cuerpo_texto: _ifcoAutCtx.cuerpo_texto
+      })
+    });
+    document.getElementById('ifco-mb-autoriz-mail').classList.remove('on');
+    alert('✓ Mail enviado a ' + to);
+    if (typeof ifcoCargarAutorizaciones === 'function') ifcoCargarAutorizaciones();
+  } catch(e) {
+    alert('Error enviando: ' + e.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '📧 Enviar mail desde ifco@lnbonita.com.ar';
+  }
+}
+
+async function ifcoCargarAutorizaciones() {
+  const filtro = document.getElementById('ifco-flt-autoriz');
+  const estado = filtro ? filtro.value : '';
+  const cont = document.getElementById('ifco-autoriz-tabla');
+  const section = document.getElementById('ifco-autoriz-section');
+  if (!cont || !section) return;
+  try {
+    const url = '/api/ifco/autorizaciones-retiro' + (estado ? '?estado=' + encodeURIComponent(estado) : '');
+    const rows = await _ifcoFetch(url);
+    if (!rows || rows.length === 0) {
+      // Solo mostrar la sección si hay alguna autorización (o filtro activo)
+      if (estado) {
+        section.style.display = 'block';
+        cont.innerHTML = '<div style="font-size:12px;color:var(--mut);padding:8px;text-align:center">Sin autorizaciones que matcheen el filtro</div>';
+      } else {
+        section.style.display = 'none';
+      }
+      return;
+    }
+    section.style.display = 'block';
+
+    let html = '<table style="width:100%;font-size:12px;border-collapse:collapse">';
+    html += '<thead><tr style="color:var(--mut);font-size:10px;text-transform:uppercase;border-bottom:1px solid var(--bor)">' +
+            '<th style="text-align:left;padding:6px 8px">Fecha</th>' +
+            '<th style="text-align:left;padding:6px 8px">Transportista</th>' +
+            '<th style="text-align:left;padding:6px 8px">Patente</th>' +
+            '<th style="text-align:right;padding:6px 8px">Estim. / Real</th>' +
+            '<th style="text-align:left;padding:6px 8px">Estado</th>' +
+            '<th style="padding:6px 8px"></th>' +
+            '</tr></thead><tbody>';
+    rows.forEach(function(a){
+      const estadoMap = {
+        'pendiente_envio': { label: '⏳ Pendiente envío', color: '#92400e', bg: '#fef3c7' },
+        'enviada':         { label: '📧 Enviada', color: '#1e40af', bg: '#dbeafe' },
+        'completada':      { label: '✓ Completada', color: '#065f46', bg: '#d1fae5' },
+        'cancelada':       { label: '✗ Cancelada', color: '#6b7280', bg: '#f3f4f6' }
+      };
+      const e = estadoMap[a.estado] || { label: a.estado, color: '#6b7280', bg: '#f3f4f6' };
+      const cantidades = a.cantidad_real != null
+        ? '<b>' + _ifcoFmt(a.cantidad_real) + '</b> <span style="color:var(--mut);font-size:11px">(estim. ' + _ifcoFmt(a.cantidad_estimada) + ')</span>'
+        : _ifcoFmt(a.cantidad_estimada);
+      const acciones = [];
+      if (a.estado === 'pendiente_envio') {
+        acciones.push('<button class="btn bb bs" style="font-size:11px" onclick="ifcoAbrirMailAutorizacion(' + a.id + ')">📧 Enviar</button>');
+        acciones.push('<button class="btn bo bs" style="font-size:11px;color:#991b1b" onclick="ifcoCancelarAutorizacion(' + a.id + ')">✗ Cancelar</button>');
+      } else if (a.estado === 'enviada') {
+        acciones.push('<button class="btn bb bs" style="font-size:11px;background:#047857" onclick="ifcoAbrirCompletarAutorizacion(' + a.id + ',' + a.cantidad_estimada + ',\'' + _ifcoEsc(a.transportista_nombre) + '\')">✓ Completar</button>');
+        acciones.push('<button class="btn bo bs" style="font-size:11px" onclick="ifcoAbrirMailAutorizacion(' + a.id + ')">Re-enviar mail</button>');
+        acciones.push('<button class="btn bo bs" style="font-size:11px;color:#991b1b" onclick="ifcoCancelarAutorizacion(' + a.id + ')">✗ Cancelar</button>');
+      }
+      html += '<tr style="border-bottom:1px solid #f3f4f6">' +
+              '<td style="padding:8px;font-weight:600">' + _ifcoFecha(a.fecha_autorizada) + '</td>' +
+              '<td style="padding:8px"><b>' + _ifcoEsc(a.transportista_nombre) + '</b><div style="font-size:11px;color:var(--mut)">DNI ' + _ifcoEsc(a.transportista_dni) + '</div></td>' +
+              '<td style="padding:8px;font-family:monospace">' + _ifcoEsc(a.transportista_patente) + '</td>' +
+              '<td style="text-align:right;padding:8px;font-variant-numeric:tabular-nums">' + cantidades + '</td>' +
+              '<td style="padding:8px"><span style="background:' + e.bg + ';color:' + e.color + ';padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600">' + e.label + '</span>' +
+                (a.mail_enviado_a ? '<div style="font-size:10px;color:var(--mut);margin-top:2px">→ ' + _ifcoEsc(a.mail_enviado_a) + '</div>' : '') +
+              '</td>' +
+              '<td style="padding:8px;text-align:right"><div style="display:flex;gap:4px;justify-content:flex-end;flex-wrap:wrap">' + acciones.join('') + '</div></td>' +
+              '</tr>';
+    });
+    html += '</tbody></table>';
+    cont.innerHTML = html;
+  } catch(e) {
+    cont.innerHTML = '<div style="color:#991b1b">Error: ' + _ifcoEsc(e.message) + '</div>';
+  }
+}
+
+function ifcoAbrirCompletarAutorizacion(id, estim, transportista) {
+  _ifcoAutCtx = { id: id };
+  document.getElementById('ifco-autc-info').innerHTML =
+    '<b>Transportista:</b> ' + _ifcoEsc(transportista) + '<br>' +
+    '<b>Cantidad estimada:</b> ' + _ifcoFmt(estim) + ' cajones';
+  document.getElementById('ifco-autc-cantidad').value = estim;
+  document.getElementById('ifco-mb-autoriz-completar').classList.add('on');
+  setTimeout(function(){ document.getElementById('ifco-autc-cantidad').focus(); }, 100);
+}
+
+async function ifcoConfirmarCompletarAutorizacion() {
+  if (!_ifcoAutCtx || !_ifcoAutCtx.id) return;
+  const cantidadReal = parseInt(document.getElementById('ifco-autc-cantidad').value);
+  if (isNaN(cantidadReal) || cantidadReal < 0) { alert('Cantidad inválida'); return; }
+
+  const btn = document.getElementById('ifco-autc-btn');
+  btn.disabled = true; btn.textContent = 'Confirmando…';
+  try {
+    const r = await _ifcoFetch('/api/ifco/autorizaciones-retiro/' + _ifcoAutCtx.id + '/completar', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ cantidad_real: cantidadReal })
+    });
+    document.getElementById('ifco-mb-autoriz-completar').classList.remove('on');
+    const dif = r.diferencia;
+    let msg = '✓ Retiro confirmado: ' + _ifcoFmt(cantidadReal) + ' cajones';
+    if (dif !== 0) {
+      msg += '\nDiferencia con la estimación: ' + (dif > 0 ? '+' : '') + _ifcoFmt(dif) + ' cajones';
+    }
+    alert(msg);
+    if (typeof ifcoCargarAutorizaciones === 'function') ifcoCargarAutorizaciones();
+    if (typeof ifcoCargarMovimientos === 'function') ifcoCargarMovimientos();
+    if (typeof ifcoCargarResumen === 'function') ifcoCargarResumen();
+  } catch(e) {
+    alert('Error: ' + e.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '✓ Confirmar retiro';
+  }
+}
+
+async function ifcoCancelarAutorizacion(id) {
+  const motivo = prompt('Motivo de la cancelación (opcional):');
+  if (motivo === null) return; // canceló el prompt
+  if (!confirm('¿Cancelar esta autorización?\n\nEl movimiento de retiro pendiente se elimina.')) return;
+  try {
+    await _ifcoFetch('/api/ifco/autorizaciones-retiro/' + id + '/cancelar', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ motivo: motivo || null })
+    });
+    if (typeof ifcoCargarAutorizaciones === 'function') ifcoCargarAutorizaciones();
+    if (typeof ifcoCargarMovimientos === 'function') ifcoCargarMovimientos();
+  } catch(e) { alert('Error: ' + e.message); }
+}
+
 async function ifcoCargarMovimientos() {
+  // Cargar autorizaciones de retiro en paralelo
+  if (typeof ifcoCargarAutorizaciones === 'function') ifcoCargarAutorizaciones();
   // Mostrar botón importar solo a admin
   try {
     const me = await fetch('/api/auth/me', { credentials:'include' }).then(r => r.json());
