@@ -249,7 +249,7 @@ body{padding-bottom:env(safe-area-inset-bottom)}
 
     <div class="fld">
       <label>Foto del remito (opcional)</label>
-      <input id="esg-foto" type="file" accept="image/jpeg,image/png,image/webp" capture="environment">
+      <input id="esg-foto" type="file" accept="image/jpeg,image/png,image/webp">
       <div class="hint">Sacá una foto clara del remito firmado, si lo tenés a mano</div>
     </div>
 
@@ -271,7 +271,7 @@ body{padding-bottom:env(safe-area-inset-bottom)}
   <div class="alert info">
     📸 Sacale foto al remito YA SELLADO. El sistema busca por el N° si ya estaba despachado, o lo crea nuevo.
   </div>
-  <input id="inp-foto-sellado" type="file" accept="image/*" capture="environment" style="display:none" onchange="onFotoSellado(event)">
+  <input id="inp-foto-sellado" type="file" accept="image/*" style="display:none" onchange="onFotoSellado(event)">
   <button class="cam-btn" onclick="document.getElementById('inp-foto-sellado').click()">
     <div class="ico">📷</div>
     <div>Tomar foto</div>
@@ -284,7 +284,7 @@ body{padding-bottom:env(safe-area-inset-bottom)}
   <div class="alert info">
     📸 Sacale foto al remito ANTES de despacharlo. La IA prelee los datos.
   </div>
-  <input id="inp-foto-despacho" type="file" accept="image/*" capture="environment" style="display:none" onchange="onFotoDespacho(event)">
+  <input id="inp-foto-despacho" type="file" accept="image/*" style="display:none" onchange="onFotoDespacho(event)">
   <button class="cam-btn" onclick="document.getElementById('inp-foto-despacho').click()">
     <div class="ico">📷</div>
     <div>Tomar foto</div>
