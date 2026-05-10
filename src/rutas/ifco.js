@@ -175,6 +175,28 @@ db.exec(`
 `);
 try { db.exec("CREATE INDEX IF NOT EXISTS idx_consolidaciones_fecha ON ifco_consolidaciones(fecha DESC)"); } catch(_){}
 
+// Tabla de registros del archivo de IFCO marcados como "revisar después"
+// (no encontrados en el sistema, no se crean ni se consolidan ahora)
+try {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS ifco_consolidacion_revisar (
+      id              INTEGER PRIMARY KEY AUTOINCREMENT,
+      n_remito        TEXT,
+      cantidad        INTEGER,
+      detalle         TEXT,
+      tipo_origen     TEXT NOT NULL CHECK (tipo_origen IN ('despacho','ingreso','r22')),
+      fecha_archivo   TEXT,
+      marcado_en      TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+      marcado_por_id  INTEGER,
+      resuelto_en     TEXT,
+      resuelto_por_id INTEGER,
+      resolucion      TEXT,
+      notas           TEXT
+    )
+  `);
+} catch(e) { console.error('[IFCO] Crear ifco_consolidacion_revisar:', e.message); }
+try { db.exec("CREATE INDEX IF NOT EXISTS idx_consol_revisar_resuelto ON ifco_consolidacion_revisar(resuelto_en, marcado_en DESC)"); } catch(_){}
+
 // ════════════════════════════════════════════════════════════════════════════
 // MAILS — infraestructura SMTP centralizada para ifco@lnbonita.com.ar
 // ────────────────────────────────────────────────────────────────────────────
@@ -2527,7 +2549,7 @@ router.post('/autorizaciones-retiro/:id/enviar', express.json(), async function(
   }
 });
 
-// POST /autorizaciones-retiro/:id/completar — registra la entrega real con cantidad ajustada
+// POST /autorizaciones-retiro/:id/completar — registra la entrega real con cantidad ajustada + n_remito
 router.post('/autorizaciones-retiro/:id/completar', express.json(), function(req, res) {
   try {
     const a = db.prepare("SELECT * FROM ifco_autorizaciones_retiro WHERE id = ? AND eliminado_en IS NULL").get(req.params.id);
@@ -2539,20 +2561,23 @@ router.post('/autorizaciones-retiro/:id/completar', express.json(), function(req
     if (isNaN(cantidadReal) || cantidadReal < 0) {
       return res.status(400).json({ error: 'Cantidad real debe ser un número >= 0' });
     }
+    const n_remito = req.body && req.body.n_remito ? String(req.body.n_remito).trim() : null;
+    if (!n_remito) return res.status(400).json({ error: 'N° de remito IFCO es requerido al completar' });
 
-    // Pasar el movimiento de pendiente=1 a pendiente=0 con cantidad ajustada
+    // Pasar el movimiento de pendiente=1 a pendiente=0 con cantidad ajustada + n_remito
     if (a.movimiento_pendiente_id) {
       db.prepare(`
         UPDATE ifco_movimientos
-        SET cantidad = ?, pendiente = 0, notas = COALESCE(notas, '') || ' [Confirmado: ' || ? || ' cajones reales]'
+        SET cantidad = ?, n_remito = ?, pendiente = 0,
+            notas = COALESCE(notas, '') || ' [Confirmado: ' || ? || ' cajones reales | Remito: ' || ? || ']'
         WHERE id = ?
-      `).run(cantidadReal, cantidadReal, a.movimiento_pendiente_id);
+      `).run(cantidadReal, n_remito, cantidadReal, n_remito, a.movimiento_pendiente_id);
     } else {
       // Si por alguna razón no había movimiento pendiente, crearlo ahora
       const movR = db.prepare(`
-        INSERT INTO ifco_movimientos (fecha, tipo, cantidad, modelo, notas, usuario_id, pendiente)
-        VALUES (date('now','localtime'), 'retiro', ?, '6420', ?, ?, 0)
-      `).run(cantidadReal, 'Retiro confirmado por autorización #' + a.id, (req.user && req.user.id) || null);
+        INSERT INTO ifco_movimientos (fecha, tipo, cantidad, modelo, n_remito, notas, usuario_id, pendiente)
+        VALUES (date('now','localtime'), 'retiro', ?, '6420', ?, ?, ?, 0)
+      `).run(cantidadReal, n_remito, 'Retiro confirmado por autorización #' + a.id, (req.user && req.user.id) || null);
       db.prepare("UPDATE ifco_autorizaciones_retiro SET movimiento_pendiente_id = ? WHERE id = ?").run(movR.lastInsertRowid, a.id);
     }
 
@@ -2562,7 +2587,7 @@ router.post('/autorizaciones-retiro/:id/completar', express.json(), function(req
       WHERE id = ?
     `).run(cantidadReal, (req.user && req.user.id) || null, a.id);
 
-    res.json({ ok: true, cantidad_real: cantidadReal, diferencia: cantidadReal - a.cantidad_estimada });
+    res.json({ ok: true, cantidad_real: cantidadReal, diferencia: cantidadReal - a.cantidad_estimada, n_remito: n_remito });
   } catch(e) {
     console.error('[IFCO][autorizaciones-retiro/completar]', e);
     res.status(500).json({ error: e.message });
@@ -4224,6 +4249,88 @@ router.delete('/consolidacion/:id', function(req, res) {
   } catch(e) {
     res.status(500).json({ error: e.message });
   }
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// CONSOLIDACIÓN — items para revisar después
+// (registros del archivo IFCO que no están en el sistema y no se procesan ahora)
+// ════════════════════════════════════════════════════════════════════════════
+
+// POST /consolidacion-revisar — marcar varios registros para revisar después
+// Body: { items: [{ n_remito, cantidad, detalle, tipo_origen, fecha_archivo }] }
+router.post('/consolidacion-revisar', express.json(), function(req, res) {
+  try {
+    const items = (req.body && req.body.items) || [];
+    if (!Array.isArray(items) || items.length === 0) return res.status(400).json({ error: 'items requeridos' });
+    const userId = (req.user && req.user.id) || null;
+    const stmt = db.prepare(`
+      INSERT INTO ifco_consolidacion_revisar (n_remito, cantidad, detalle, tipo_origen, fecha_archivo, marcado_por_id)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `);
+    let creados = 0;
+    const tx = db.transaction(function(){
+      items.forEach(function(it){
+        try {
+          stmt.run(
+            it.n_remito || null,
+            parseInt(it.cantidad) || 0,
+            it.detalle || null,
+            it.tipo_origen || 'despacho',
+            it.fecha_archivo || null,
+            userId
+          );
+          creados++;
+        } catch(e) { console.error('[IFCO][consolidacion-revisar]', e.message); }
+      });
+    });
+    tx();
+    res.json({ ok: true, creados: creados });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /consolidacion-revisar — listar pendientes
+router.get('/consolidacion-revisar', function(req, res) {
+  try {
+    const incluir_resueltos = req.query.incluir_resueltos === 'true';
+    let q = `
+      SELECT r.*, u.username AS marcado_por_username, ur.username AS resuelto_por_username
+      FROM ifco_consolidacion_revisar r
+      LEFT JOIN usuarios u ON u.id = r.marcado_por_id
+      LEFT JOIN usuarios ur ON ur.id = r.resuelto_por_id
+    `;
+    if (!incluir_resueltos) q += " WHERE r.resuelto_en IS NULL";
+    q += " ORDER BY r.marcado_en DESC LIMIT 200";
+    res.json(db.prepare(q).all());
+  } catch(e) {
+    console.error('[IFCO][consolidacion-revisar GET]', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /consolidacion-revisar/:id/resolver — marcarlo como resuelto
+router.post('/consolidacion-revisar/:id/resolver', express.json(), function(req, res) {
+  try {
+    const r = db.prepare("SELECT * FROM ifco_consolidacion_revisar WHERE id = ?").get(req.params.id);
+    if (!r) return res.status(404).json({ error: 'No encontrado' });
+    db.prepare(`
+      UPDATE ifco_consolidacion_revisar
+      SET resuelto_en = datetime('now','localtime'),
+          resuelto_por_id = ?,
+          resolucion = ?
+      WHERE id = ?
+    `).run((req.user && req.user.id) || null, (req.body && req.body.resolucion) || null, r.id);
+    res.json({ ok: true });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// DELETE /consolidacion-revisar/:id — eliminar (admin only)
+router.delete('/consolidacion-revisar/:id', function(req, res) {
+  if (!req.user || req.user.rol !== 'admin') return res.status(403).json({ error: 'Solo admin' });
+  try {
+    const r = db.prepare("DELETE FROM ifco_consolidacion_revisar WHERE id = ?").run(req.params.id);
+    if (r.changes === 0) return res.status(404).json({ error: 'No encontrado' });
+    res.json({ ok: true });
+  } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
 // Body JSON: {
