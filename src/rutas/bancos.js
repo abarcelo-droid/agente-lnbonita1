@@ -236,4 +236,98 @@ router.delete('/movimientos/:id', (req, res) => {
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
+// ────────────────────────────────────────────────────────────────────────────
+// CONCILIACIÓN BANCARIA
+// ────────────────────────────────────────────────────────────────────────────
+
+// GET /api/fin/conciliacion?cuentaId=&periodo=
+router.get('/conciliacion', (req, res) => {
+  try {
+    const { cuentaId, periodo } = req.query;
+    if (!cuentaId) return res.status(400).json({ ok: false, error: 'cuentaId requerido' });
+
+    // Movimientos propios del período
+    let sqlMov = `SELECT m.*, 'libro' as origen FROM fin_movimientos m WHERE m.cuenta_id=?`;
+    const params = [parseInt(cuentaId)];
+    if (periodo) { sqlMov += ` AND strftime('%Y-%m', m.fecha)=?`; params.push(periodo); }
+    sqlMov += ' ORDER BY m.fecha, m.id';
+    const movimientos = db.prepare(sqlMov).all(...params);
+
+    // Líneas del extracto del período
+    let sqlExt = `SELECT * FROM fin_extracto_lineas WHERE cuenta_id=?`;
+    const paramsExt = [parseInt(cuentaId)];
+    if (periodo) { sqlExt += ` AND strftime('%Y-%m', fecha)=?`; paramsExt.push(periodo); }
+    sqlExt += ' ORDER BY fecha, id';
+    const extracto = db.prepare(sqlExt).all(...paramsExt);
+
+    // Saldo libro = saldo_inicial + movimientos hasta fin del período
+    const cuenta = db.prepare('SELECT * FROM fin_cuentas WHERE id=?').get(parseInt(cuentaId));
+    const saldoLibro = movimientos.reduce((s, m) => s + (m.tipo === 'ingreso' ? m.monto : -m.monto),
+      parseFloat(cuenta?.saldo_inicial || 0));
+    const saldoExtracto = extracto.reduce((s, e) => s + (e.tipo === 'ingreso' ? e.monto : -e.monto), 0);
+
+    res.json({ ok: true, movimientos, extracto, saldo_libro: saldoLibro, saldo_extracto: saldoExtracto,
+      diferencia: saldoLibro - saldoExtracto });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// POST /api/fin/conciliacion/extracto — cargar líneas del extracto
+router.post('/conciliacion/extracto', (req, res) => {
+  const { cuenta_id, periodo, lineas } = req.body || {};
+  if (!cuenta_id || !lineas?.length) return res.status(400).json({ ok: false, error: 'cuenta_id y lineas requeridos' });
+  try {
+    const ins = db.prepare(`INSERT INTO fin_extracto_lineas (cuenta_id, fecha, concepto, monto, tipo, referencia, periodo)
+      VALUES (?,?,?,?,?,?,?)`);
+    const tx = db.transaction(() => {
+      for (const l of lineas) {
+        ins.run(parseInt(cuenta_id), l.fecha, l.concepto||null, Math.abs(parseFloat(l.monto)),
+          l.tipo || (parseFloat(l.monto) >= 0 ? 'ingreso' : 'egreso'),
+          l.referencia||null, periodo||null);
+      }
+    });
+    tx();
+    res.json({ ok: true, insertadas: lineas.length });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// PATCH /api/fin/conciliacion/conciliar — marcar línea extracto como conciliada con movimiento
+router.patch('/conciliacion/conciliar', (req, res) => {
+  const { extracto_id, movimiento_id } = req.body || {};
+  if (!extracto_id) return res.status(400).json({ ok: false, error: 'extracto_id requerido' });
+  try {
+    db.prepare('UPDATE fin_extracto_lineas SET conciliado=1, movimiento_id=? WHERE id=?')
+      .run(movimiento_id ? parseInt(movimiento_id) : null, parseInt(extracto_id));
+    if (movimiento_id) {
+      db.prepare('UPDATE fin_movimientos SET conciliado=1 WHERE id=?').run(parseInt(movimiento_id));
+    }
+    res.json({ ok: true });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// PATCH /api/fin/conciliacion/desconciliar
+router.patch('/conciliacion/desconciliar', (req, res) => {
+  const { extracto_id } = req.body || {};
+  if (!extracto_id) return res.status(400).json({ ok: false, error: 'extracto_id requerido' });
+  try {
+    const linea = db.prepare('SELECT * FROM fin_extracto_lineas WHERE id=?').get(parseInt(extracto_id));
+    if (linea?.movimiento_id) {
+      db.prepare('UPDATE fin_movimientos SET conciliado=0 WHERE id=?').run(linea.movimiento_id);
+    }
+    db.prepare('UPDATE fin_extracto_lineas SET conciliado=0, movimiento_id=NULL WHERE id=?').run(parseInt(extracto_id));
+    res.json({ ok: true });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// DELETE /api/fin/conciliacion/extracto/:id
+router.delete('/conciliacion/extracto/:id', (req, res) => {
+  try {
+    const linea = db.prepare('SELECT * FROM fin_extracto_lineas WHERE id=?').get(req.params.id);
+    if (linea?.movimiento_id) {
+      db.prepare('UPDATE fin_movimientos SET conciliado=0 WHERE id=?').run(linea.movimiento_id);
+    }
+    db.prepare('DELETE FROM fin_extracto_lineas WHERE id=?').run(req.params.id);
+    res.json({ ok: true });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
 export default router;

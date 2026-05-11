@@ -1919,6 +1919,11 @@ db.exec(`
       db.exec('ALTER TABLE fin_cuentas ADD COLUMN cuenta_contable_id INTEGER REFERENCES pa_cuentas(id)');
       console.log('[FIN] cuenta_contable_id agregado en fin_cuentas');
     }
+    const colsMov = db.prepare("PRAGMA table_info(fin_movimientos)").all().map(c => c.name);
+    if (!colsMov.includes('conciliado')) {
+      db.exec('ALTER TABLE fin_movimientos ADD COLUMN conciliado INTEGER NOT NULL DEFAULT 0');
+      console.log('[FIN] conciliado agregado en fin_movimientos');
+    }
     const colsCT = db.prepare("PRAGMA table_info(fin_cheques_terceros)").all().map(c => c.name);
     if (!colsCT.includes('cuenta_contable_id')) {
       db.exec('ALTER TABLE fin_cheques_terceros ADD COLUMN cuenta_contable_id INTEGER REFERENCES pa_cuentas(id)');
@@ -1964,6 +1969,41 @@ db.exec(`
     }
     console.log('[FIN] Tablas órdenes de pago listas');
   } catch(e) { console.error('[FIN] Error migrando órdenes de pago:', e.message); }
+})();
+
+// ── MÓDULO CONCILIACIÓN BANCARIA ──────────────────────────────────────────────
+(function migrarConciliacion() {
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS fin_extracto_lineas (
+        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+        cuenta_id       INTEGER NOT NULL REFERENCES fin_cuentas(id),
+        fecha           TEXT NOT NULL,
+        concepto        TEXT,
+        monto           REAL NOT NULL,
+        tipo            TEXT NOT NULL DEFAULT 'egreso' CHECK(tipo IN ('ingreso','egreso')),
+        referencia      TEXT,
+        conciliado      INTEGER NOT NULL DEFAULT 0,
+        movimiento_id   INTEGER REFERENCES fin_movimientos(id),
+        periodo         TEXT,
+        creado_en       TEXT DEFAULT (datetime('now','localtime'))
+      );
+      CREATE TABLE IF NOT EXISTS fin_conciliaciones (
+        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+        cuenta_id       INTEGER NOT NULL REFERENCES fin_cuentas(id),
+        periodo         TEXT NOT NULL,
+        fecha_cierre    TEXT,
+        saldo_extracto  REAL,
+        saldo_libros    REAL,
+        diferencia      REAL,
+        estado          TEXT NOT NULL DEFAULT 'abierta' CHECK(estado IN ('abierta','cerrada')),
+        notas           TEXT,
+        usuario_id      INTEGER,
+        creado_en       TEXT DEFAULT (datetime('now','localtime'))
+      );
+    `);
+    console.log('[FIN] Tablas conciliación listas');
+  } catch(e) { console.error('[FIN] Error migrando conciliación:', e.message); }
 })();
 
 export { db };
