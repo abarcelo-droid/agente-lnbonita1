@@ -474,7 +474,7 @@ router.get('/insumos/historial', requireAuth, (req, res) => {
         FROM pa_compras_items ci
         JOIN pa_compras c ON c.id = ci.compra_id
         JOIN pa_insumos i ON i.id = ci.insumo_id
-        LEFT JOIN pa_proveedores p ON p.id = c.proveedor_id
+        LEFT JOIN adm_proveedores p ON p.id = c.proveedor_id
         WHERE ci.insumo_id = ?
         ORDER BY c.fecha DESC LIMIT 20
       `).all(insumo_id);
@@ -487,7 +487,7 @@ router.get('/insumos/historial', requireAuth, (req, res) => {
         FROM pa_compras_items ci
         JOIN pa_compras c ON c.id = ci.compra_id
         JOIN pa_insumos i ON i.id = ci.insumo_id
-        LEFT JOIN pa_proveedores p ON p.id = c.proveedor_id
+        LEFT JOIN adm_proveedores p ON p.id = c.proveedor_id
         WHERE i.componente_madre = ?
         ORDER BY c.fecha DESC LIMIT 20
       `).all(componente);
@@ -594,7 +594,7 @@ router.get('/compras', requireAuth, (req, res) => {
       SELECT c.*, p.razon_social as proveedor_nombre,
              ca.nombre as campaña_nombre
       FROM pa_compras c
-      LEFT JOIN pa_proveedores p ON p.id = c.proveedor_id
+      LEFT JOIN adm_proveedores p ON p.id = c.proveedor_id
       LEFT JOIN pa_campañas ca ON ca.id = c.campaña_id
       WHERE 1=1
     `;
