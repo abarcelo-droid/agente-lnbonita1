@@ -103,6 +103,10 @@ try { db.exec("ALTER TABLE ifco_envios_proveedor ADD COLUMN aceptado_por_nombre 
 try { db.exec("ALTER TABLE ifco_envios_proveedor ADD COLUMN aceptado_por_dni TEXT"); } catch(_){}
 try { db.exec("ALTER TABLE ifco_envios_proveedor ADD COLUMN aceptado_ip TEXT"); } catch(_){}
 try { db.exec("ALTER TABLE ifco_envios_proveedor ADD COLUMN aceptado_user_agent TEXT"); } catch(_){}
+// origen_proveedor_id: NULL = envío desde SG (caso clásico). Si tiene valor, es un
+// traspaso entre galpones (de origen_proveedor_id → proveedor_id). El destino sigue
+// firmando con DNI. La fórmula del piso SG ignora estos envíos.
+try { db.exec("ALTER TABLE ifco_envios_proveedor ADD COLUMN origen_proveedor_id INTEGER"); } catch(_){}
 
 // Backfill: tokens para envíos viejos que no tengan
 try {
@@ -814,13 +818,21 @@ function _renderRemitoPublico(envio) {
       <b>Importante:</b> Al confirmar, asumís responsabilidad sobre los cajones IFCO recibidos hasta su devolución a SAN GERÓNIMO SA. Cada cajón perdido tiene un costo económico para la empresa.
     </div>`;
 
+  const esTraspaso = !!envio.origen_proveedor_id;
   const proveedorBlock =
     `<div class="campo-box span2">
-       <div class="campo-lbl">Proveedor</div>
+       <div class="campo-lbl">${esTraspaso ? 'Galpón Destino (vos)' : 'Proveedor'}</div>
        <div class="campo-val"><b>${_esc(envio.proveedor_nombre || '?')}</b></div>
        ${envio.proveedor_razon ? '<div class="campo-sub">' + _esc(envio.proveedor_razon) + '</div>' : ''}
        ${envio.proveedor_cuit  ? '<div class="campo-sub">CUIT: ' + _esc(envio.proveedor_cuit) + '</div>' : ''}
-     </div>`;
+     </div>` +
+    (esTraspaso ?
+      `<div class="campo-box span2" style="background:#eff6ff;border-color:#93c5fd">
+         <div class="campo-lbl" style="color:#1e40af">🔄 Remitente (otro galpón)</div>
+         <div class="campo-val"><b>${_esc(envio.origen_proveedor_nombre || '?')}</b></div>
+         ${envio.origen_proveedor_razon ? '<div class="campo-sub">' + _esc(envio.origen_proveedor_razon) + '</div>' : ''}
+         <div class="campo-sub" style="margin-top:4px">Traspaso entre galpones autorizado por SG. Confirmando esta recepción, los cajones quedan a tu cargo.</div>
+       </div>` : '');
 
   return `<!DOCTYPE html>
 <html lang="es"><head>
@@ -951,9 +963,11 @@ router.get('/r/:numero', function(req, res) {
   if (!token) return res.status(404).type('text/html').send('<h1>Remito no encontrado</h1>');
 
   const envio = db.prepare(`
-    SELECT e.*, p.nombre AS proveedor_nombre, p.razon_social AS proveedor_razon, p.cuit AS proveedor_cuit
+    SELECT e.*, p.nombre AS proveedor_nombre, p.razon_social AS proveedor_razon, p.cuit AS proveedor_cuit,
+           porig.nombre AS origen_proveedor_nombre, porig.razon_social AS origen_proveedor_razon
     FROM ifco_envios_proveedor e
     LEFT JOIN proveedores p ON p.id = e.proveedor_id
+    LEFT JOIN proveedores porig ON porig.id = e.origen_proveedor_id
     WHERE e.n_remito_interno = ? AND e.aceptacion_token = ? AND e.eliminado_en IS NULL
   `).get(numero, token);
 
@@ -1387,7 +1401,7 @@ router.get('/talonarios/:id/detalle', function(req, res) {
 
   // Lista de números anulados manualmente (mal impresos, etc.)
   const anulados = db.prepare(`
-    SELECT a.numero, a.motivo, a.anulado_en, u.username AS anulado_por_username
+    SELECT a.numero, a.motivo, a.anulado_en, u.nombre AS anulado_por_username
     FROM ifco_numeros_anulados a
     LEFT JOIN usuarios u ON u.id = a.anulado_por_id
     WHERE a.talonario_id = ?
@@ -2147,9 +2161,11 @@ router.get('/envios', function(req, res) {
   const papelera = f.papelera === '1' || f.incluir_eliminados === '1';
   let q = `
     SELECT e.*, p.nombre AS proveedor_nombre, p.razon_social AS proveedor_razon,
-           u.nombre AS eliminado_por_username
+           u.nombre AS eliminado_por_username,
+           porig.nombre AS origen_proveedor_nombre
     FROM ifco_envios_proveedor e
     LEFT JOIN proveedores p ON p.id = e.proveedor_id
+    LEFT JOIN proveedores porig ON porig.id = e.origen_proveedor_id
     LEFT JOIN usuarios u ON u.id = e.eliminado_por_id
     WHERE 1=1
   `;
@@ -2164,9 +2180,11 @@ router.get('/envios', function(req, res) {
 
 router.get('/envios/:id', function(req, res) {
   const e = db.prepare(`
-    SELECT e.*, p.nombre AS proveedor_nombre, p.razon_social AS proveedor_razon, p.cuit AS proveedor_cuit
+    SELECT e.*, p.nombre AS proveedor_nombre, p.razon_social AS proveedor_razon, p.cuit AS proveedor_cuit,
+           porig.nombre AS origen_proveedor_nombre, porig.razon_social AS origen_proveedor_razon
     FROM ifco_envios_proveedor e
     LEFT JOIN proveedores p ON p.id = e.proveedor_id
+    LEFT JOIN proveedores porig ON porig.id = e.origen_proveedor_id
     WHERE e.id = ?
   `).get(req.params.id);
   if (!e) return res.status(404).json({ error: 'No encontrado' });
@@ -2181,30 +2199,41 @@ router.post('/envios', function(req, res) {
   const cant = parseInt(d.cantidad_enviada);
   if (cant <= 0) return res.status(400).json({ error: 'Cantidad inválida' });
 
-  // Genera n° interno SG-P-AAAA-NNNN, correlativo por año
+  // Origen del envío: NULL = SG, valor = traspaso desde otro galpón
+  let origen_proveedor_id = null;
+  if (d.origen_proveedor_id) {
+    origen_proveedor_id = parseInt(d.origen_proveedor_id);
+    if (isNaN(origen_proveedor_id)) return res.status(400).json({ error: 'origen_proveedor_id inválido' });
+    if (origen_proveedor_id === parseInt(d.proveedor_id)) {
+      return res.status(400).json({ error: 'El galpón origen y destino no pueden ser el mismo' });
+    }
+  }
+
+  // Genera n° interno: SG-P-AAAA-NNNN (envío desde SG) o TR-AAAA-NNNN (traspaso entre galpones)
   const year = new Date(d.fecha_envio).getFullYear();
+  const prefix = origen_proveedor_id ? 'TR-' : 'SG-P-';
   const ultimo = db.prepare(`
     SELECT n_remito_interno FROM ifco_envios_proveedor
     WHERE n_remito_interno LIKE ? ORDER BY id DESC LIMIT 1
-  `).get('SG-P-' + year + '-%');
+  `).get(prefix + year + '-%');
 
   let nro = 1;
   if (ultimo) {
     const m = String(ultimo.n_remito_interno).match(/-(\d+)$/);
     if (m) nro = parseInt(m[1], 10) + 1;
   }
-  const n_remito_interno = 'SG-P-' + year + '-' + String(nro).padStart(4, '0');
+  const n_remito_interno = prefix + year + '-' + String(nro).padStart(4, '0');
   const token = _genTokenAceptacion();
 
   try {
     const r = db.prepare(`
       INSERT INTO ifco_envios_proveedor
-        (n_remito_interno, fecha_envio, proveedor_id, cantidad_enviada, modelo, notas, usuario_id, aceptacion_token)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        (n_remito_interno, fecha_envio, proveedor_id, cantidad_enviada, modelo, notas, usuario_id, aceptacion_token, origen_proveedor_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(n_remito_interno, d.fecha_envio, d.proveedor_id, cant,
-           d.modelo || '6420', d.notas || null, req.user.id || null, token);
+           d.modelo || '6420', d.notas || null, req.user.id || null, token, origen_proveedor_id);
 
-    res.json({ id: r.lastInsertRowid, n_remito_interno: n_remito_interno, aceptacion_token: token });
+    res.json({ id: r.lastInsertRowid, n_remito_interno: n_remito_interno, aceptacion_token: token, origen_proveedor_id: origen_proveedor_id });
   } catch(e) {
     res.status(500).json({ error: e.message });
   }
@@ -2411,7 +2440,7 @@ router.get('/autorizaciones-retiro', function(req, res) {
   try {
     const estado = req.query.estado;
     let q = `
-      SELECT a.*, u.username AS usuario_username, uc.username AS completada_por_username
+      SELECT a.*, u.nombre AS usuario_username, uc.nombre AS completada_por_username
       FROM ifco_autorizaciones_retiro a
       LEFT JOIN usuarios u ON u.id = a.usuario_id
       LEFT JOIN usuarios uc ON uc.id = a.completada_por_id
@@ -2635,7 +2664,7 @@ router.get('/mails-log', function(req, res) {
   try {
     const tipo = req.query.tipo;
     let q = `
-      SELECT l.*, u.username AS enviado_por_username
+      SELECT l.*, u.nombre AS enviado_por_username
       FROM ifco_mails_log l
       LEFT JOIN usuarios u ON u.id = l.enviado_por_id
       WHERE 1=1
@@ -2723,10 +2752,9 @@ router.get('/resumen', function(req, res) {
       AND eliminado_en IS NULL
   `);
 
-  // PISO actual: usa la función unificada _calcStockSG() que también consume
-  // _stockTeoricoDeposito('san_geronimo'). Garantiza que el KPI y el TEÓRICO
-  // del card "Conteo físico" muestren siempre el mismo número.
-  const faltantes_sg = _faltantesSGTotal();
+  // PISO actual: usa la función unificada _calcStockSG()
+  // (los faltantes manuales históricos ya NO se restan; la fuente oficial de
+  // diferencias es la consolidación semanal contra IFCO)
   const piso = _calcStockSG();
   const bajo_responsabilidad = piso + en_proveedores + en_transito_sg;
 
@@ -2874,6 +2902,8 @@ router.get('/clientes-dedicados', function(req, res) {
 //
 // Todos los cálculos excluyen registros eliminados (papelera).
 function _calcSaldoProveedor(provId) {
+  // Cajones que tiene en su galpón (saldo positivo):
+  // = lo que SG le envió + lo que recibió de traspasos (es destino)
   const enviado = db.prepare(`
     SELECT COALESCE(SUM(cantidad_enviada - COALESCE(cantidad_recibida,0)), 0) AS total
     FROM ifco_envios_proveedor
@@ -2881,6 +2911,7 @@ function _calcSaldoProveedor(provId) {
       AND estado IN ('enviado','parcial')
   `).get(provId).total || 0;
 
+  // Cajones que devolvió con mercadería a SG (resta)
   const recibidoEnSG = db.prepare(`
     SELECT COALESCE(SUM(cantidad), 0) AS total
     FROM ifco_recepciones_proveedor
@@ -2889,6 +2920,7 @@ function _calcSaldoProveedor(provId) {
       AND (estado IS NULL OR estado = 'recibido')
   `).get(provId).total || 0;
 
+  // Cajones despachados directos desde su galpón a una cadena (resta)
   const directosSellados = db.prepare(`
     SELECT COALESCE(SUM(
       COALESCE(cantidad_recibida, cantidad_despachada) +
@@ -2901,7 +2933,16 @@ function _calcSaldoProveedor(provId) {
       AND eliminado_en IS NULL
   `).get(provId).total || 0;
 
-  return enviado - recibidoEnSG - directosSellados;
+  // Cajones que envió a OTRO galpón (traspasos donde este proveedor es origen). Resta.
+  // Solo cuenta cuando ya se aceptaron o están en tránsito (no canceladas).
+  const traspasosEnviados = db.prepare(`
+    SELECT COALESCE(SUM(cantidad_enviada), 0) AS total
+    FROM ifco_envios_proveedor
+    WHERE origen_proveedor_id = ? AND eliminado_en IS NULL
+      AND estado IN ('enviado','parcial','recibido')
+  `).get(provId).total || 0;
+
+  return enviado - recibidoEnSG - directosSellados - traspasosEnviados;
 }
 
 // Stock FÍSICO actual del proveedor: lo que debería estar en su depósito ahora.
@@ -4241,7 +4282,7 @@ router.post('/consolidacion', express.json(), function(req, res) {
 router.get('/consolidacion/historico', function(req, res) {
   try {
     const rows = db.prepare(`
-      SELECT c.*, u.username AS usuario_username
+      SELECT c.*, u.nombre AS usuario_username
       FROM ifco_consolidaciones c
       LEFT JOIN usuarios u ON u.id = c.usuario_id
       ORDER BY c.fecha DESC, c.id DESC
@@ -4309,7 +4350,7 @@ router.get('/consolidacion-revisar', function(req, res) {
   try {
     const incluir_resueltos = req.query.incluir_resueltos === 'true';
     let q = `
-      SELECT r.*, u.username AS marcado_por_username, ur.username AS resuelto_por_username
+      SELECT r.*, u.nombre AS marcado_por_username, ur.nombre AS resuelto_por_username
       FROM ifco_consolidacion_revisar r
       LEFT JOIN usuarios u ON u.id = r.marcado_por_id
       LEFT JOIN usuarios ur ON ur.id = r.resuelto_por_id
@@ -4695,11 +4736,15 @@ function _calcStockSG() {
   const retirado            = get('retiros',            "SELECT COALESCE(SUM(cantidad),0) AS total FROM ifco_movimientos WHERE tipo='retiro' AND eliminado_en IS NULL AND pendiente=0");
   const perdidas            = get('perdidas',           "SELECT COALESCE(SUM(cantidad),0) AS total FROM ifco_movimientos WHERE tipo='perdida' AND eliminado_en IS NULL AND pendiente=0");
   const despachos_sg        = get('despachos_sg',       "SELECT COALESCE(SUM(cantidad_despachada),0) AS total FROM ifco_remitos_super WHERE estado IN ('despachado','sellado','enviado','presentado') AND origen='san_geronimo' AND eliminado_en IS NULL");
-  const envios_totales      = get('envios_totales',     "SELECT COALESCE(SUM(cantidad_enviada),0) AS total FROM ifco_envios_proveedor WHERE estado IN ('enviado','parcial','recibido') AND eliminado_en IS NULL");
-  const recepciones_envios  = get('recepciones_envios', "SELECT COALESCE(SUM(cantidad_recibida),0) AS total FROM ifco_envios_proveedor WHERE estado IN ('recibido','parcial') AND eliminado_en IS NULL");
+  const envios_totales      = get('envios_totales',     "SELECT COALESCE(SUM(cantidad_enviada),0) AS total FROM ifco_envios_proveedor WHERE estado IN ('enviado','parcial','recibido') AND eliminado_en IS NULL AND origen_proveedor_id IS NULL");
+  const recepciones_envios  = get('recepciones_envios', "SELECT COALESCE(SUM(cantidad_recibida),0) AS total FROM ifco_envios_proveedor WHERE estado IN ('recibido','parcial') AND eliminado_en IS NULL AND origen_proveedor_id IS NULL");
   const recepciones_merc    = get('recepciones_merc',   "SELECT COALESCE(SUM(cantidad),0) AS total FROM ifco_recepciones_proveedor WHERE eliminado_en IS NULL AND (estado IS NULL OR estado='recibido')");
   const rechazos_vueltos_sg = get('rechazos_sg',        "SELECT COALESCE(SUM(cantidad_rechazada),0) AS total FROM ifco_remitos_super WHERE estado IN ('sellado','enviado','presentado') AND rechazo_destino='san_geronimo' AND eliminado_en IS NULL");
-  const faltantes_sg        = _faltantesSGTotal();
+
+  // NOTA: los faltantes manuales (+ Faltante) ya NO se restan del piso.
+  // Antes eran necesarios para "ajustar" el teórico, pero ahora con la consolidación
+  // semanal contra IFCO, las diferencias reales surgen de ahí (que es la fuente oficial).
+  // Los faltantes manuales históricos siguen en la base pero no afectan el cálculo.
 
   return retirado
        - perdidas
@@ -4707,9 +4752,40 @@ function _calcStockSG() {
        - envios_totales
        + recepciones_envios
        + recepciones_merc
-       + rechazos_vueltos_sg
-       - faltantes_sg;
+       + rechazos_vueltos_sg;
 }
+
+// GET /diagnostico-stock-sg — desglose detallado del cálculo del piso SG
+// para diagnosticar diferencias o stocks negativos
+router.get('/diagnostico-stock-sg', function(req, res) {
+  try {
+    const get = function(q) {
+      try { const r = db.prepare(q).get(); return r ? (r.total || 0) : 0; } catch(e) { return 0; }
+    };
+    const componentes = [
+      { signo: '+', label: 'Retiros confirmados',       valor: get("SELECT COALESCE(SUM(cantidad),0) AS total FROM ifco_movimientos WHERE tipo='retiro' AND eliminado_en IS NULL AND pendiente=0"),
+        ayuda: 'Cajones que IFCO entregó (autorizaciones completadas). Solo cuenta los pendiente=0.' },
+      { signo: '-', label: 'Pérdidas',                  valor: get("SELECT COALESCE(SUM(cantidad),0) AS total FROM ifco_movimientos WHERE tipo='perdida' AND eliminado_en IS NULL AND pendiente=0"),
+        ayuda: 'Cajones rotos, perdidos, devueltos a IFCO.' },
+      { signo: '-', label: 'Despachos a cadenas desde SG', valor: get("SELECT COALESCE(SUM(cantidad_despachada),0) AS total FROM ifco_remitos_super WHERE estado IN ('despachado','sellado','enviado','presentado') AND origen='san_geronimo' AND eliminado_en IS NULL"),
+        ayuda: 'Cajones que salieron de SG con destino cadena (despachados o sellados o presentados).' },
+      { signo: '-', label: 'Envíos a galpones de proveedores', valor: get("SELECT COALESCE(SUM(cantidad_enviada),0) AS total FROM ifco_envios_proveedor WHERE estado IN ('enviado','parcial','recibido') AND eliminado_en IS NULL AND origen_proveedor_id IS NULL"),
+        ayuda: 'Cajones que SG envió a un galpón de proveedor (no incluye traspasos entre galpones).' },
+      { signo: '+', label: 'Recepciones de envíos (vueltos)', valor: get("SELECT COALESCE(SUM(cantidad_recibida),0) AS total FROM ifco_envios_proveedor WHERE estado IN ('recibido','parcial') AND eliminado_en IS NULL AND origen_proveedor_id IS NULL"),
+        ayuda: 'Envíos a proveedor que volvieron (ej. cajones llenos con producto que retornan).' },
+      { signo: '+', label: 'Recepciones de mercadería',  valor: get("SELECT COALESCE(SUM(cantidad),0) AS total FROM ifco_recepciones_proveedor WHERE eliminado_en IS NULL AND (estado IS NULL OR estado='recibido')"),
+        ayuda: 'Cajones con mercadería que el proveedor envió a SG.' },
+      { signo: '+', label: 'Rechazos vueltos a SG',     valor: get("SELECT COALESCE(SUM(cantidad_rechazada),0) AS total FROM ifco_remitos_super WHERE estado IN ('sellado','enviado','presentado') AND rechazo_destino='san_geronimo' AND eliminado_en IS NULL"),
+        ayuda: 'Cajones que la cadena rechazó y volvieron a SG (no a proveedor).' }
+    ];
+    let total = 0;
+    componentes.forEach(function(c){ total += (c.signo === '+' ? c.valor : -c.valor); });
+    res.json({ total: total, componentes: componentes });
+  } catch(e) {
+    console.error('[IFCO][diagnostico-stock-sg]', e);
+    res.status(500).json({ error: e.message });
+  }
+});
 
 // ════════════════════════════════════════════════════════════════════════════
 // FALTANTES DE STOCK SG (declaraciones manuales para corregir el teórico)

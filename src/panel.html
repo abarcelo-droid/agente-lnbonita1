@@ -3095,8 +3095,8 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
 
       <!-- 1. KPIs CON COLOR SEMÁNTICO -->
       <div class="ab-grid ab-grid-3" style="margin-bottom:16px">
-        <div class="ifco-card ifco-stat" style="border-top:4px solid #1e3a8a;border-top-left-radius:8px;border-top-right-radius:8px">
-          <div class="ifco-stat-lbl" style="color:#1e3a8a">📦 Piso actual</div>
+        <div class="ifco-card ifco-stat" style="border-top:4px solid #1e3a8a;border-top-left-radius:8px;border-top-right-radius:8px;cursor:pointer" onclick="ifcoAbrirDiagnosticoStock()" title="Click para ver el desglose del cálculo">
+          <div class="ifco-stat-lbl" style="color:#1e3a8a">📦 Piso actual <span style="font-size:10px;font-weight:400;opacity:0.6">🔍</span></div>
           <div class="ifco-stat-val" id="ifco-st-piso" style="color:#1e3a8a">—</div>
           <div class="ifco-stat-sub">cajones en planta SAN GERONIMO</div>
         </div>
@@ -3227,9 +3227,11 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   <!-- Tab: Retiros / Pérdidas -->
   <div class="ifco-pane" id="ifco-pane-movs">
     <div style="display:flex;gap:8px;margin-bottom:12px;align-items:center;flex-wrap:wrap">
-      <button class="btn bb" onclick="ifcoAbrirNuevoMovimiento('retiro')">+ Retiro IFCO</button>
-      <button class="btn bo" onclick="ifcoAbrirNuevoMovimiento('perdida')">+ Pérdida</button>
-      <button class="btn bo" onclick="ifcoAbrirAutorizacion()" style="border-color:#3b82f6;color:#1e3a8a">📧 Solicitar autorización a IFCO</button>
+      <button class="btn bb" onclick="ifcoAbrirAutorizacion()" style="background:#1e40af">📧 Solicitar autorización a IFCO</button>
+      <button class="btn bo" onclick="ifcoAbrirNuevoMovimiento('perdida')">🗑️ + Pérdida</button>
+      <div style="font-size:11px;color:var(--mut);margin-left:8px;max-width:340px;line-height:1.4">
+        ℹ️ Los retiros se gestionan <b>solo por autorización vía mail</b>. El retiro queda <b>pendiente</b> hasta que el operador lo confirma con N° de remito y cantidad real.
+      </div>
       <select id="ifco-flt-mov-tipo" onchange="ifcoCargarMovimientos()" style="font-size:13px;padding:6px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg);margin-left:12px">
         <option value="">Todos</option>
         <option value="retiro">Retiros</option>
@@ -3869,6 +3871,20 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   </div>
 </div>
 
+<!-- Modal: Diagnóstico del Piso SG — desglose del cálculo -->
+<div class="mb" id="ifco-mb-diagnostico">
+  <div class="mbox" style="width:720px;max-width:95vw;max-height:90vh;overflow-y:auto">
+    <div class="mhd">
+      <div class="mht">🔍 Diagnóstico del Piso SG</div>
+      <button class="mcl" onclick="document.getElementById('ifco-mb-diagnostico').classList.remove('on')">x</button>
+    </div>
+    <div style="font-size:12px;color:var(--mut);margin-bottom:14px">
+      Desglose de cada componente del cálculo del piso de San Gerónimo. Sirve para detectar diferencias o entender por qué da un valor inesperado (ej. negativo).
+    </div>
+    <div id="ifco-diag-cont"></div>
+  </div>
+</div>
+
 <!-- Modal: Preguntas Frecuentes (FAQ) — accesible para todos los usuarios -->
 <div class="mb" id="ifco-mb-faq">
   <div class="mbox" style="width:760px;max-width:95vw;max-height:90vh;overflow-y:auto">
@@ -3878,6 +3894,60 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     </div>
     <div style="font-size:12px;color:var(--mut);margin-bottom:14px">
       Las dudas más comunes sobre el módulo. Click en cada pregunta para ver la respuesta. Si tu pregunta no está acá, descargá el <a href="javascript:ifcoDescargarManual()" style="color:#1e3a8a">manual completo</a>.
+    </div>
+
+    <!-- Cheatsheet: estados de los remitos / envíos -->
+    <div style="background:#f8fafc;border:1px solid var(--bor);border-radius:10px;padding:14px;margin-bottom:16px">
+      <div style="font-size:13px;font-weight:600;margin-bottom:4px">📌 Glosario rápido: estados</div>
+      <div style="font-size:11px;color:var(--mut);margin-bottom:10px">Lo más importante de todo: qué significa cada estado en el sistema.</div>
+
+      <div style="font-size:11px;font-weight:600;color:#1e3a8a;text-transform:uppercase;letter-spacing:0.04em;margin:8px 0 6px">🛒 Despachos a cadenas (Carrefour, Cencosud, Coto)</div>
+      <table style="width:100%;font-size:12px;border-collapse:collapse;background:#fff;border-radius:6px;overflow:hidden">
+        <tr style="border-bottom:1px solid #f3f4f6">
+          <td style="padding:8px 10px;width:130px"><span style="background:#dbeafe;color:#1e40af;font-size:11px;padding:2px 8px;border-radius:6px;font-weight:600">🟦 Despachado</span></td>
+          <td style="padding:8px 10px;line-height:1.4">El remito salió del puesto (o del galpón) hacia la cadena. Está <b>en tránsito</b>. Todavía no se firmó.</td>
+        </tr>
+        <tr style="border-bottom:1px solid #f3f4f6">
+          <td style="padding:8px 10px"><span style="background:#fef3c7;color:#92400e;font-size:11px;padding:2px 8px;border-radius:6px;font-weight:600">🟨 Sellado</span></td>
+          <td style="padding:8px 10px;line-height:1.4">La cadena firmó el remito y lo devolvió. Quedan registradas cuántos cajones <b>recibieron</b> y cuántos <b>rechazaron</b>. Falta presentarlo a IFCO.</td>
+        </tr>
+        <tr>
+          <td style="padding:8px 10px"><span style="background:#fce7f3;color:#7c1d3f;font-size:11px;padding:2px 8px;border-radius:6px;font-weight:600">🟪 Presentado</span></td>
+          <td style="padding:8px 10px;line-height:1.4">El remito se mostró a IFCO en la consolidación. <b>Queda cerrado</b>: no se puede modificar ni eliminar. IFCO descontó esos cajones de tu saldo.</td>
+        </tr>
+      </table>
+
+      <div style="font-size:11px;font-weight:600;color:#047857;text-transform:uppercase;letter-spacing:0.04em;margin:14px 0 6px">📤 Salidas a galpones de proveedores</div>
+      <table style="width:100%;font-size:12px;border-collapse:collapse;background:#fff;border-radius:6px;overflow:hidden">
+        <tr style="border-bottom:1px solid #f3f4f6">
+          <td style="padding:8px 10px;width:130px"><span style="background:#f3f4f6;color:#6b7280;font-size:11px;padding:2px 8px;border-radius:6px;font-weight:600">⏳ Sin abrir</span></td>
+          <td style="padding:8px 10px;line-height:1.4">El comercial mandó el link, pero el proveedor todavía no lo abrió.</td>
+        </tr>
+        <tr style="border-bottom:1px solid #f3f4f6">
+          <td style="padding:8px 10px"><span style="background:#fed7aa;color:#9a3412;font-size:11px;padding:2px 8px;border-radius:6px;font-weight:600">👁 Visto</span></td>
+          <td style="padding:8px 10px;line-height:1.4">El proveedor abrió el link pero todavía no firmó digitalmente.</td>
+        </tr>
+        <tr>
+          <td style="padding:8px 10px"><span style="background:#dcfce7;color:#166534;font-size:11px;padding:2px 8px;border-radius:6px;font-weight:600">✓ Aceptado</span></td>
+          <td style="padding:8px 10px;line-height:1.4">El proveedor confirmó con nombre + DNI. Quedan registrados timestamp e IP. Ya no se puede modificar.</td>
+        </tr>
+      </table>
+
+      <div style="font-size:11px;font-weight:600;color:#92400e;text-transform:uppercase;letter-spacing:0.04em;margin:14px 0 6px">📧 Autorizaciones de retiro (mail a IFCO)</div>
+      <table style="width:100%;font-size:12px;border-collapse:collapse;background:#fff;border-radius:6px;overflow:hidden">
+        <tr style="border-bottom:1px solid #f3f4f6">
+          <td style="padding:8px 10px;width:130px"><span style="background:#fef3c7;color:#92400e;font-size:11px;padding:2px 8px;border-radius:6px;font-weight:600">⏳ Pendiente envío</span></td>
+          <td style="padding:8px 10px;line-height:1.4">La autorización se creó pero todavía no se envió el mail.</td>
+        </tr>
+        <tr style="border-bottom:1px solid #f3f4f6">
+          <td style="padding:8px 10px"><span style="background:#dbeafe;color:#1e40af;font-size:11px;padding:2px 8px;border-radius:6px;font-weight:600">📧 Enviada</span></td>
+          <td style="padding:8px 10px;line-height:1.4">El mail se mandó a IFCO. Se está esperando que el transportista retire los cajones.</td>
+        </tr>
+        <tr>
+          <td style="padding:8px 10px"><span style="background:#dcfce7;color:#166534;font-size:11px;padding:2px 8px;border-radius:6px;font-weight:600">✓ Completada</span></td>
+          <td style="padding:8px 10px;line-height:1.4">El operador SG confirmó con N° de remito y cantidad real. El retiro impactó el stock.</td>
+        </tr>
+      </table>
     </div>
 
     <div id="ifco-faq-lista" style="display:flex;flex-direction:column;gap:6px"></div>
@@ -4256,15 +4326,31 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       <button class="mcl" onclick="document.getElementById('ifco-mb-envio').classList.remove('on')">x</button>
     </div>
     <div style="background:var(--bg);border-radius:8px;padding:10px 12px;margin-bottom:14px;font-size:11px;color:var(--mut)">
-      El sistema genera un n° interno SG-P-AAAA-NNNN. Cuando guardes, te abre la vista imprimible para que acompañe los cajones.
+      El sistema genera un n° interno SG-P-AAAA-NNNN (envío de SG) o TR-AAAA-NNNN (traspaso entre galpones). Cuando guardes, te abre la vista imprimible.
     </div>
+
+    <!-- Toggle traspaso -->
+    <div style="background:#f1f5f9;border:1px solid var(--bor);border-radius:8px;padding:10px 12px;margin-bottom:14px">
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px">
+        <input type="checkbox" id="ifco-e-traspaso" onchange="_ifcoToggleTraspaso()">
+        <span>🔄 <b>Traspaso entre galpones</b> (sale de otro galpón, no de SG)</span>
+      </label>
+      <div id="ifco-e-origen-wrap" style="display:none;margin-top:10px">
+        <label style="font-size:11px;color:var(--mut);text-transform:uppercase">Galpón ORIGEN (de dónde salen) *</label>
+        <select id="ifco-e-origen" style="width:100%;padding:8px 10px;border-radius:7px;border:1px solid var(--bor);background:#fff">
+          <option value="">— Seleccionar origen —</option>
+        </select>
+        <div style="font-size:10px;color:var(--mut);margin-top:4px">El destino igual tiene que firmar digitalmente para confirmar la recepción.</div>
+      </div>
+    </div>
+
     <div class="ab-grid ab-grid-2" style="gap:10px">
       <div>
         <label style="font-size:11px;color:var(--mut);text-transform:uppercase">Fecha envío <span id="ifco-e-fecha-hint" style="text-transform:none;font-size:10px;color:var(--mut)">(día de hoy)</span></label>
         <input id="ifco-e-fecha" type="date" style="width:100%;padding:8px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg)">
       </div>
       <div>
-        <label style="font-size:11px;color:var(--mut);text-transform:uppercase">Proveedor *</label>
+        <label style="font-size:11px;color:var(--mut);text-transform:uppercase"><span id="ifco-e-prov-label">Proveedor</span> (destino) *</label>
         <select id="ifco-e-prov" style="width:100%;padding:8px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg)">
           <option value="">— Seleccionar —</option>
         </select>
@@ -15910,8 +15996,68 @@ function _ifcoRenderNotifPanel() {
 // MANUAL Y FAQ — accesible para todos los usuarios desde el header del módulo
 // ════════════════════════════════════════════════════════════════════════════
 
+async function ifcoAbrirDiagnosticoStock() {
+  document.getElementById('ifco-mb-diagnostico').classList.add('on');
+  const cont = document.getElementById('ifco-diag-cont');
+  cont.innerHTML = '<div style="text-align:center;padding:24px;color:var(--mut)">Calculando…</div>';
+  try {
+    const data = await _ifcoFetch('/api/ifco/diagnostico-stock-sg');
+    let pos = 0, neg = 0;
+    data.componentes.forEach(function(c){ if (c.signo==='+') pos += c.valor; else neg += c.valor; });
+
+    let html = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px">' +
+      '<div style="padding:10px 12px;background:#dcfce7;border-radius:7px">' +
+        '<div style="font-size:10px;color:#065f46;text-transform:uppercase;font-weight:600">Suma positiva</div>' +
+        '<div style="font-size:20px;font-weight:700;color:#065f46;font-variant-numeric:tabular-nums">+' + _ifcoFmt(pos) + '</div>' +
+      '</div>' +
+      '<div style="padding:10px 12px;background:#fee2e2;border-radius:7px">' +
+        '<div style="font-size:10px;color:#991b1b;text-transform:uppercase;font-weight:600">Suma negativa</div>' +
+        '<div style="font-size:20px;font-weight:700;color:#991b1b;font-variant-numeric:tabular-nums">−' + _ifcoFmt(neg) + '</div>' +
+      '</div>' +
+    '</div>';
+
+    html += '<table style="width:100%;font-size:12px;border-collapse:collapse">';
+    html += '<thead><tr style="color:var(--mut);font-size:10px;text-transform:uppercase;border-bottom:1px solid var(--bor)">' +
+            '<th style="padding:6px 8px;width:30px">Signo</th>' +
+            '<th style="text-align:left;padding:6px 8px">Componente</th>' +
+            '<th style="text-align:right;padding:6px 8px">Cajones</th>' +
+            '</tr></thead><tbody>';
+    data.componentes.forEach(function(c){
+      const color = c.signo === '+' ? '#065f46' : '#991b1b';
+      html += '<tr style="border-bottom:1px solid #f3f4f6">' +
+              '<td style="padding:8px;text-align:center;font-weight:700;font-size:16px;color:' + color + '">' + c.signo + '</td>' +
+              '<td style="padding:8px">' +
+                '<div style="font-weight:500">' + _ifcoEsc(c.label) + '</div>' +
+                '<div style="font-size:11px;color:var(--mut);margin-top:2px">' + _ifcoEsc(c.ayuda) + '</div>' +
+              '</td>' +
+              '<td style="padding:8px;text-align:right;font-variant-numeric:tabular-nums;font-weight:600;color:' + color + '">' + _ifcoFmt(c.valor) + '</td>' +
+              '</tr>';
+    });
+    const totalColor = data.total < 0 ? '#991b1b' : (data.total === 0 ? '#6b7280' : '#065f46');
+    html += '<tr style="background:#f9fafb;border-top:2px solid var(--bor)">' +
+            '<td colspan="2" style="padding:10px 8px;font-weight:700;font-size:14px">= TOTAL PISO SG</td>' +
+            '<td style="padding:10px 8px;text-align:right;font-variant-numeric:tabular-nums;font-weight:800;font-size:18px;color:' + totalColor + '">' + _ifcoFmt(data.total) + '</td>' +
+            '</tr>';
+    html += '</tbody></table>';
+
+    if (data.total < 0) {
+      html += '<div style="margin-top:14px;background:#fee2e2;border:1px solid #fca5a5;border-radius:8px;padding:12px 14px;font-size:12px;color:#7f1d1d;line-height:1.5">' +
+              '<b>⚠️ Piso negativo detectado.</b> Las causas más comunes:' +
+              '<ul style="margin:6px 0 0 18px;padding:0">' +
+                '<li>Faltan <b>retiros históricos</b> cargados (sumás despachos viejos pero no los retiros que los respaldaban).</li>' +
+                '<li>Algún despacho tiene <b>origen=san_geronimo</b> incorrectamente (capaz salió de un galpón pero quedó marcado como SG).</li>' +
+                '<li>Algún envío a galpón fue cargado pero el retiro que lo abastecía no.</li>' +
+              '</ul>' +
+              '<div style="margin-top:8px"><b>Próximos pasos:</b> revisar el componente con el número más grande del lado negativo y cruzarlo con los datos físicos.</div>' +
+              '</div>';
+    }
+    cont.innerHTML = html;
+  } catch(e) {
+    cont.innerHTML = '<div style="color:#991b1b;padding:12px">Error: ' + _ifcoEsc(e.message) + '</div>';
+  }
+}
+
 async function ifcoDescargarManual() {
-  // Forzar descarga del manual desde el server
   try {
     const res = await fetch('/api/ifco/manual', { credentials: 'include' });
     if (!res.ok) {
@@ -15937,8 +16083,16 @@ const _IFCO_FAQ = [
     a: 'Usá el botón <b>"🔏 Cargar sellado"</b> del header del módulo (al lado de "+ Despacho a súper"). Te abre un modal único donde cargás de una sola vez todos los datos: origen, N° remito, cantidades despachada/recibida/rechazada, encargados. La IA prelee los campos de la foto. El remito se crea directamente en estado "sellado" (o "presentado" si todo se rechazó).'
   },
   {
-    q: '🔒 ¿Por qué no puedo eliminar un remito que está presentado?',
-    a: 'Una vez que un remito pasa al estado <b>"presentado"</b>, queda bloqueado contra cambios y eliminaciones porque ya se reportó a IFCO. Si necesitás corregirlo, hablá con el admin del sistema para que lo des-presente desde la administración avanzada.'
+    q: '📤 ¿Cómo registro el envío de cajones a un proveedor?',
+    a: 'Andá a la pestaña <b>📤 Salidas</b>, click en <b>"+ Nueva salida (envío a proveedor)"</b>. Completá: proveedor, cantidad, notas opcionales. La fecha queda bloqueada en el día de hoy. Guardar.<br><br>El envío se crea en estado <b>"Sin abrir"</b> y se genera automáticamente un <b>link único</b>. En la fila del envío hacés click en <b>"🔗 Link"</b> → se copia al clipboard → lo pegás en WhatsApp para el proveedor.<br><br>Apenas el proveedor lo confirme con DNI desde su celular, el estado cambia a <b>"✓ Aceptado"</b> y los cajones se descuentan del piso de SG.<br><br><b>🔴 Recordá:</b> mandar el link es obligatorio para los comerciales.'
+  },
+  {
+    q: '📥 ¿Cómo ingreso IFCOs que me envía un proveedor?',
+    a: 'Hay dos formas:<br><br><b>Caso A — El proveedor cargó el envío desde la app móvil:</b><br>Te llega una notificación amber en el Resumen: "X envíos pendientes de confirmar". Click en "Confirmar →". Para cada envío, ver foto + datos, y elegir <b>✓ Confirmar</b> (acepta los cajones, suman al stock de SG) o <b>✗ Rechazar</b> (lo cancela).<br><br><b>Caso B — Carga manual (proveedor no usa la app):</b><br>Andá a la pestaña <b>📥 Ingresos</b> → click <b>"+ Nueva recepción"</b>. Completá: fecha, proveedor, cantidad, modelo (default 6420). Opcional: N° de remito del proveedor + foto. Guardar.<br><br><b>Importante:</b> distinguí entre:<br>• <b>Recepción de mercadería</b>: cajones IFCO con producto que el proveedor manda. Suma stock a SG y descuenta saldo del proveedor.<br>• <b>Recepción R22</b>: IFCOs nuevos que el proveedor compró directamente a IFCO. Solo suma al stock (no descuenta saldo).'
+  },
+  {
+    q: '🔗 ¿Cómo le mando el link de aceptación a un proveedor?',
+    a: 'En la pestaña <b>📤 Salidas</b>, en cada fila de un envío hay un botón <b>"🔗 Link"</b>. Click → el sistema copia automáticamente la URL al portapapeles. Después abrís WhatsApp Web (o el mail) y la pegás. El proveedor recibe el link, lo abre desde el celular, completa nombre + DNI y confirma.<br><br>La fila va a cambiar de estado automáticamente: ⏳ Sin abrir → 👁 Visto → ✓ Aceptado.'
   },
   {
     q: '📋 ¿Cómo cargo el conteo físico de stocks?',
@@ -15946,27 +16100,15 @@ const _IFCO_FAQ = [
   },
   {
     q: '📧 ¿Cómo autorizo a un transportista para retirar cajones de IFCO?',
-    a: 'En la pestaña <b>🔁 Retiros</b>, click en el botón <b>"📧 Solicitar autorización a IFCO"</b>. Cargás los datos del transportista (nombre, DNI, patente, fecha estimada, cantidad) → se genera un movimiento "retiro pendiente" → preview del mail → enviar desde ifco@lnbonita.com.ar. Cuando IFCO entrega los cajones, click en "✓ Completar" para confirmar con el N° de remito real y la cantidad efectiva.'
+    a: 'En la pestaña <b>🔁 Retiros</b>, click en el botón <b>"📧 Solicitar autorización a IFCO"</b>. Cargás los datos del transportista (nombre, DNI, patente, fecha estimada, cantidad) → se genera un movimiento "retiro pendiente" → preview del mail → enviar desde ifco@lnbonita.com.ar. Cuando IFCO entrega los cajones, click en "✓ Completar" para confirmar con el N° de remito real y la cantidad efectiva.<br><br><b>Importante:</b> los retiros ahora <b>solo se hacen vía autorización por mail</b>. No hay carga manual de retiros.'
   },
   {
     q: '❌ ¿Cómo anulo un número de talonario que vino mal impreso?',
-    a: 'Andá a la pestaña <b>📋 Talonarios</b>, click en "👁 Ver" del talonario, y en la grilla de números pasá el mouse sobre la celda del número que querés anular. Aparece un botón <b>❌</b> chiquito en la esquina. Click → ingresar motivo (ej. "manchado") → confirmar.<br><br>Si te equivocaste y querés des-anular, solo el admin puede (botón ↩ en celdas anuladas).'
+    a: 'Andá a la pestaña <b>📋 Talonarios</b>, click en "👁 Ver" del talonario, y en la grilla de números pasá el mouse sobre la celda del número que querés anular. Aparece un botón <b>❌</b> chiquito en la esquina. Click → ingresar motivo (ej. "manchado") → confirmar.<br><br>Si te equivocaste y querés des-anular, solo el admin puede (botón ↩ en celdas anuladas).<br><br><b>Importante:</b> declarar los remitos anulados es importante para IFCO porque son documentos fiscales.'
   },
   {
     q: '🔍 ¿Qué hago si en la consolidación aparecen registros "no encontrados"?',
     a: 'En el paso 1 del wizard, cuando subís el Excel de IFCO, aparece una tabla con los registros que IFCO tiene pero no están en el sistema. <b>Para cada uno elegís una acción</b>:<br>• <b>📌 Revisar después</b>: queda en lista de pendientes (no afecta nada)<br>• <b>🗑️ Crear como pérdida</b>: si era una devolución de cajones rotos<br>• <b>📥 Crear como retiro</b>: si era un retiro que no se cargó<br>• <b>📤 Crear como despacho</b>: marca para revisar manual<br><br>También hay botones masivos para aplicar la misma acción a todos.'
-  },
-  {
-    q: '⚠️ ¿Por qué creció "Bajo tu responsabilidad" sin razón aparente?',
-    a: 'Ese KPI suma piso + proveedores + tránsito. Si crece, las causas más comunes son:<br>• <b>Despachos sin sellar</b> hace mucho tiempo (la cadena no devolvió el remito)<br>• <b>Sellados sin presentar</b> a IFCO (vencen a los 30 días)<br>• <b>Envíos a proveedor</b> sin recibir confirmación<br>• <b>Conteos físicos desactualizados</b><br><br>Revisá el panel <b>🔔 Notificaciones</b> del Resumen, agrupa todas las alertas con el botón de acción para resolver cada una.'
-  },
-  {
-    q: '🔗 ¿Cómo le mando el link de aceptación a un proveedor?',
-    a: 'En la pestaña <b>📤 Salidas</b>, en cada fila de un envío hay un botón <b>"🔗 Link"</b>. Click → el sistema copia automáticamente la URL al portapapeles. Después abrís WhatsApp Web (o el mail) y la pegás. El proveedor recibe el link, lo abre desde el celular, completa nombre + DNI y confirma. La fila va a cambiar de estado automáticamente: ⏳ Sin abrir → 👁 Visto → ✓ Aceptado.'
-  },
-  {
-    q: '🗑️ ¿Cómo cargo una pérdida cuando rompo cajones?',
-    a: 'Andá a la pestaña <b>🔁 Retiros</b>, click en <b>"+ Pérdida"</b>. Completá: fecha, cantidad, motivo (obligatorio: "rotos en planta", "devueltos a IFCO", "perdidos en transporte", etc.), notas opcional, guardar.<br><br>El movimiento resta del stock de SG inmediatamente y queda en el log con tu usuario.<br><br><b>Recordá:</b> las pérdidas tienen penalidad económica para la empresa, así que solo las cargan operadores de SG.'
   },
   {
     q: '📈 ¿Cómo veo el histórico de movimientos de un proveedor?',
@@ -17961,8 +18103,13 @@ async function ifcoCargarEnvios() {
         aceptHtml = '<div style="font-size:10px;color:var(--mut);margin-top:2px">⏳ Sin abrir</div>';
       }
 
+      const esTraspaso = !!r.origen_proveedor_id;
+      const traspasoBadge = esTraspaso
+        ? '<div style="font-size:10px;color:#1e40af;margin-top:2px" title="Traspaso entre galpones">🔄 Desde: ' + _ifcoEsc(r.origen_proveedor_nombre || '?') + '</div>'
+        : '';
+
       return '<tr>' +
-        '<td style="font-family:monospace;font-size:12px"><b>'+_ifcoEsc(r.n_remito_interno)+'</b></td>' +
+        '<td style="font-family:monospace;font-size:12px"><b>'+_ifcoEsc(r.n_remito_interno)+'</b>' + traspasoBadge + '</td>' +
         '<td>'+_ifcoFecha(r.fecha_envio)+'</td>' +
         '<td>'+_ifcoEsc(r.proveedor_nombre||'?')+'</td>' +
         '<td style="text-align:right;font-variant-numeric:tabular-nums"><b>'+_ifcoFmt(r.cantidad_enviada)+'</b></td>' +
@@ -18009,10 +18156,41 @@ async function ifcoEliminarEnvio(id, nro) {
   } catch(e) { alert('Error: ' + e.message); }
 }
 
+function _ifcoToggleTraspaso() {
+  const cb = document.getElementById('ifco-e-traspaso');
+  const wrap = document.getElementById('ifco-e-origen-wrap');
+  const titEl = document.querySelector('#ifco-mb-envio .mht');
+  const provLbl = document.getElementById('ifco-e-prov-label');
+  if (cb.checked) {
+    wrap.style.display = 'block';
+    if (titEl) titEl.textContent = '🔄 Traspaso entre galpones';
+    if (provLbl) provLbl.textContent = 'Galpón DESTINO';
+    // Sincronizar opciones del origen, excluyendo el destino actual
+    _ifcoSyncSelectsTraspaso();
+  } else {
+    wrap.style.display = 'none';
+    if (titEl) titEl.textContent = '🚚 Nuevo envío a proveedor';
+    if (provLbl) provLbl.textContent = 'Proveedor';
+  }
+}
+
+function _ifcoSyncSelectsTraspaso() {
+  const provs = IFCO._provs || [];
+  const selDestino = document.getElementById('ifco-e-prov');
+  const selOrigen = document.getElementById('ifco-e-origen');
+  const destinoVal = selDestino.value;
+  const origenVal = selOrigen.value;
+  selOrigen.innerHTML = '<option value="">— Seleccionar origen —</option>' +
+    provs.filter(function(p){ return String(p.id) !== String(destinoVal); })
+         .map(function(p){ return '<option value="'+p.id+'"'+(String(p.id)===origenVal?' selected':'')+'>'+_ifcoEsc(p.nombre)+'</option>'; }).join('');
+}
+
 function ifcoAbrirNuevoEnvio() {
   IFCO._editandoEnvioId = null;
   const tit = document.querySelector('#ifco-mb-envio .mht');
   if (tit) tit.textContent = '🚚 Nuevo envío a proveedor';
+  const provLbl = document.getElementById('ifco-e-prov-label');
+  if (provLbl) provLbl.textContent = 'Proveedor';
   const fechaInput = document.getElementById('ifco-e-fecha');
   fechaInput.value = _ifcoToday();
   fechaInput.disabled = true;
@@ -18020,11 +18198,21 @@ function ifcoAbrirNuevoEnvio() {
   if (fhint) fhint.textContent = '(día de hoy)';
   document.getElementById('ifco-e-cant').value = '';
   document.getElementById('ifco-e-notas').value = '';
+  // Reset toggle traspaso
+  const cbTr = document.getElementById('ifco-e-traspaso');
+  if (cbTr) cbTr.checked = false;
+  const wrapO = document.getElementById('ifco-e-origen-wrap');
+  if (wrapO) wrapO.style.display = 'none';
+
   const sel = document.getElementById('ifco-e-prov');
   sel.innerHTML = '<option value="">— Seleccionar —</option>' +
     IFCO._provs.map(function(p){
       return '<option value="'+p.id+'">'+_ifcoEsc(p.nombre)+(p.razon_social?' ('+_ifcoEsc(p.razon_social)+')':'')+'</option>';
     }).join('');
+  // Re-sincronizar opciones cuando cambia el destino (si traspaso está activo)
+  sel.onchange = function(){
+    if (document.getElementById('ifco-e-traspaso').checked) _ifcoSyncSelectsTraspaso();
+  };
   document.getElementById('ifco-mb-envio').classList.add('on');
 }
 
@@ -18032,6 +18220,7 @@ async function ifcoGuardarEnvio() {
   // Si estamos creando, la fecha siempre es hoy (input está disabled, podría no enviarse)
   const fechaInput = document.getElementById('ifco-e-fecha');
   const fechaVal = (fechaInput.value || _ifcoToday());
+  const esTraspaso = document.getElementById('ifco-e-traspaso').checked;
   const body = {
     fecha_envio:      IFCO._editandoEnvioId ? fechaInput.value : fechaVal,
     proveedor_id:     document.getElementById('ifco-e-prov').value,
@@ -18039,6 +18228,12 @@ async function ifcoGuardarEnvio() {
     modelo:           '6420',
     notas:            document.getElementById('ifco-e-notas').value.trim() || null
   };
+  if (esTraspaso) {
+    const origenId = document.getElementById('ifco-e-origen').value;
+    if (!origenId) { alert('Elegí el galpón ORIGEN del traspaso'); return; }
+    if (String(origenId) === String(body.proveedor_id)) { alert('El galpón origen y destino no pueden ser el mismo'); return; }
+    body.origen_proveedor_id = origenId;
+  }
   if (!body.proveedor_id) { alert('Elegí un proveedor'); return; }
   try {
     if (IFCO._editandoEnvioId) {
@@ -18494,21 +18689,30 @@ async function ifcoCargarMovimientos() {
       const tipoBadge = r.tipo === 'retiro'
         ? '<span class="ifco-badge" style="background:#dbeafe;color:#1e40af">Retiro</span>'
         : '<span class="ifco-badge" style="background:#fee2e2;color:#991b1b">Pérdida</span>';
+      const pendBadge = r.pendiente
+        ? ' <span class="ifco-badge" style="background:#fef3c7;color:#92400e" title="Esperando confirmación del operador con N° remito y cantidad real">⏳ PENDIENTE</span>'
+        : '';
       const consoBadge = r.consolidado_en
         ? ' <span class="ifco-badge" style="background:#dcfce7;color:#166534" title="Consolidado con archivo IFCO el '+r.consolidado_en+'">✓ CONSOLIDADO</span>'
         : '';
       const costo = r.costo_total > 0 ? (r.moneda||'ARS') + ' ' + _ifcoFmt(r.costo_total) : '—';
       const sucursal = r.tipo === 'retiro' ? _ifcoEsc(r.sucursal_ifco || '—') : '—';
-      const acciones = r.consolidado_en
-        ? '<span style="font-size:11px;color:var(--mut)" title="Bloqueado: consolidado con IFCO">🔒</span>'
-        : [
-            '<button class="btn bo" style="font-size:11px;padding:4px 8px" onclick="ifcoAbrirEditarMovimiento('+r.id+')">Editar</button>',
-            '<button class="btn bo" style="font-size:11px;padding:4px 8px;color:#991b1b" onclick="ifcoEliminarMovimiento('+r.id+')">🗑️</button>'
-          ].join('');
-      return '<tr>' +
+      let acciones;
+      if (r.consolidado_en) {
+        acciones = '<span style="font-size:11px;color:var(--mut)" title="Bloqueado: consolidado con IFCO">🔒</span>';
+      } else if (r.pendiente) {
+        // Pendiente de confirmación → no editable manual; se completa desde la sección Autorizaciones arriba
+        acciones = '<span style="font-size:11px;color:#92400e;background:#fef3c7;padding:3px 8px;border-radius:6px" title="Completar desde la sección Autorizaciones de retiro arriba">⏳ Esperando confirmación</span>';
+      } else {
+        acciones = [
+          '<button class="btn bo" style="font-size:11px;padding:4px 8px" onclick="ifcoAbrirEditarMovimiento('+r.id+')">Editar</button>',
+          '<button class="btn bo" style="font-size:11px;padding:4px 8px;color:#991b1b" onclick="ifcoEliminarMovimiento('+r.id+')">🗑️</button>'
+        ].join('');
+      }
+      return '<tr' + (r.pendiente ? ' style="background:#fffbeb"' : '') + '>' +
         '<td style="font-size:14px;font-weight:600">'+_ifcoFecha(r.fecha)+'</td>' +
-        '<td style="font-size:11px">'+tipoBadge+consoBadge+'</td>' +
-        '<td style="text-align:right;font-variant-numeric:tabular-nums;font-size:16px;font-weight:700">'+_ifcoFmt(r.cantidad)+'</td>' +
+        '<td style="font-size:11px">'+tipoBadge+pendBadge+consoBadge+'</td>' +
+        '<td style="text-align:right;font-variant-numeric:tabular-nums;font-size:16px;font-weight:700' + (r.pendiente?';color:#92400e':'') + '">'+_ifcoFmt(r.cantidad)+(r.pendiente?' <span style="font-size:10px;font-weight:400">est.</span>':'')+'</td>' +
         '<td style="font-size:12px;color:var(--mut)">'+sucursal+'</td>' +
         '<td style="font-family:monospace;font-size:11px;color:var(--mut)">'+_ifcoEsc(r.n_remito||'—')+'</td>' +
         '<td style="text-align:right;font-size:12px;color:var(--mut)">'+costo+'</td>' +
