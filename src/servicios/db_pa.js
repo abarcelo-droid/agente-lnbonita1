@@ -1785,6 +1785,12 @@ db.exec(`
     if (!cols.find(c => c.name === 'asiento_modelo_id')) {
       db.exec('ALTER TABLE adm_proveedores ADD COLUMN asiento_modelo_id INTEGER REFERENCES adm_asientos_modelo(id)');
     }
+    // Agregar columna tipo_linea a adm_asientos_modelo_lineas si no existe
+    const colsML = db.prepare("PRAGMA table_info(adm_asientos_modelo_lineas)").all();
+    if (!colsML.find(c => c.name === 'tipo_linea')) {
+      db.exec("ALTER TABLE adm_asientos_modelo_lineas ADD COLUMN tipo_linea TEXT NOT NULL DEFAULT 'libre'");
+      console.log('[PA] tipo_linea agregado en adm_asientos_modelo_lineas');
+    }
     // Agregar columna ref_compra_id a pa_asientos si no existe
     const colsA = db.prepare("PRAGMA table_info(pa_asientos)").all();
     if (!colsA.find(c => c.name === 'ref_compra_id')) {
@@ -1919,39 +1925,6 @@ db.exec(`
       console.log('[FIN] cuenta_contable_id agregado en fin_cheques_terceros');
     }
   } catch(e) { console.error('[FIN] Error migrando caja/bancos:', e.message); }
-})();
-
-// ── MÓDULO ÓRDENES DE PAGO ────────────────────────────────────────────────────
-(function() {
-  try {
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS fin_ordenes_pago (
-        id              INTEGER PRIMARY KEY AUTOINCREMENT,
-        numero          TEXT UNIQUE,
-        fecha           TEXT NOT NULL DEFAULT (date('now','localtime')),
-        proveedor_id    INTEGER NOT NULL REFERENCES adm_proveedores(id),
-        monto_total     REAL NOT NULL,
-        forma_pago      TEXT NOT NULL DEFAULT 'transferencia',
-        cuenta_fin_id   INTEGER REFERENCES fin_cuentas(id),
-        cheque_prop_id  INTEGER REFERENCES fin_cheques_propios(id),
-        cheque_ter_id   INTEGER REFERENCES fin_cheques_terceros(id),
-        referencia      TEXT,
-        notas           TEXT,
-        estado          TEXT NOT NULL DEFAULT 'emitida',
-        asiento_id      INTEGER,
-        movimiento_id   INTEGER,
-        usuario_id      INTEGER,
-        creado_en       TEXT DEFAULT (datetime('now','localtime'))
-      );
-      CREATE TABLE IF NOT EXISTS fin_op_compras (
-        id        INTEGER PRIMARY KEY AUTOINCREMENT,
-        op_id     INTEGER NOT NULL REFERENCES fin_ordenes_pago(id),
-        compra_id INTEGER NOT NULL REFERENCES pa_compras(id),
-        monto     REAL NOT NULL
-      );
-    `);
-    console.log('[FIN] Tablas ordenes de pago listas');
-  } catch(e) { console.error('[FIN] Error migrando ordenes_pago:', e.message); }
 })();
 
 export { db };

@@ -2835,7 +2835,8 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       <thead><tr>
         <th>Cuenta Contable</th>
         <th style="width:100px;text-align:center">Lado</th>
-        <th style="width:180px">Descripción</th>
+        <th style="width:180px">Tipo de línea</th>
+        <th style="width:140px">Descripción</th>
         <th style="width:40px"></th>
       </tr></thead>
       <tbody id="adm-mod-lineas"></tbody>
@@ -8641,28 +8642,27 @@ function paCompAsientoCargar(provId) {
 
 // Genera las líneas del asiento a partir del modelo y los montos reales
 function paCompAsientoGenerarLineas(lineasModelo, neto, iva, total) {
-  // Clasificar las líneas del modelo por tipo de descripción
+  var percep = PA._compraPercep || { iva: 0, gan: 0, iibb: 0 };
   var lineas = [];
   lineasModelo.forEach(function(l) {
-    var desc = (l.descripcion || '').toLowerCase();
+    var tipo = l.tipo_linea || 'libre';
     var monto = 0;
-    if (desc.includes('iva') || desc.includes('crédito fiscal') || desc.includes('credito fiscal')) {
-      monto = iva;
-    } else if (desc.includes('percep') || desc.includes('iibb') || desc.includes('ganancias') || desc.includes('ingresos brutos')) {
-      monto = 0; // percepciones: el usuario las completa manualmente
-    } else if (l.lado === 'haber') {
-      monto = total; // proveedores/pasivo: total
-    } else {
-      monto = neto; // compras/gastos: neto
+    switch(tipo) {
+      case 'iva':                  monto = iva; break;
+      case 'percepcion_iva':       monto = percep.iva; break;
+      case 'percepcion_iibb':      monto = percep.iibb; break;
+      case 'percepcion_ganancias': monto = percep.gan; break;
+      case 'retencion':            monto = 0; break; // el usuario completa
+      case 'proveedores':          monto = total; break;
+      default:                     monto = neto; break; // libre = neto/compras
     }
     lineas.push({
       cuenta_id:   l.cuenta_id,
       debe:        l.lado === 'debe'  ? monto : 0,
       haber:       l.lado === 'haber' ? monto : 0,
-      descripcion: l.descripcion || ''
+      descripcion: l.descripcion || tipo
     });
   });
-  // Si no hay líneas del modelo, usar defaults
   if (!lineas.length) {
     lineas = [
       { cuenta_id: '', debe: neto,  haber: 0,     descripcion: 'Compras neto' },
@@ -8737,23 +8737,6 @@ function paCompAsientoSincronizarTotal(total, neto, iva) {
     paCompAsientoRender(lineas);
     return;
   }
-  // Sin modelo: actualizar manualmente línea por línea
-  var rows = document.querySelectorAll('#pa-comp-asiento-lineas tr');
-  rows.forEach(function(tr) {
-    var nums   = tr.querySelectorAll('input[type=number]');
-    var descEl = tr.querySelector('input:not([type=number])');
-    var desc   = descEl ? descEl.value.toLowerCase() : '';
-    var d = parseFloat((nums[0] && nums[0].value) || 0);
-    var h = parseFloat((nums[1] && nums[1].value) || 0);
-    var esPercep = desc.includes('percep') || desc.includes('iibb') || desc.includes('ganancias') || desc.includes('ingresos brutos');
-    if (!esPercep) {
-      if (d > 0 && h === 0) {
-        var esIva = desc.includes('iva') || desc.includes('crédito') || desc.includes('credito');
-        nums[0].value = esIva ? iva.toFixed(2) : neto.toFixed(2);
-      }
-      if (h > 0 && d === 0) nums[1].value = total.toFixed(2);
-    }
-  });
   paCompAsientoActualizar();
 }
 
@@ -8853,21 +8836,31 @@ function admModEditar(id) {
       document.getElementById('adm-mod-nombre').value = m.nombre || '';
       document.getElementById('adm-mod-desc').value = m.descripcion || '';
       document.getElementById('adm-mod-lineas').innerHTML = '';
-      (m.lineas || []).forEach(function(l) { admModAgregarLinea(l.lado, l.cuenta_id, l.descripcion); });
+      (m.lineas || []).forEach(function(l) { admModAgregarLinea(l.lado, l.cuenta_id, l.descripcion, l.tipo_linea); });
       admModValidarDoble();
       document.getElementById('adm-mb-modelo').classList.add('on');
     });
   });
 }
 
-function admModAgregarLinea(lado, cuentaId, desc) {
+function admModAgregarLinea(lado, cuentaId, desc, tipoLinea) {
   lado = lado || 'debe';
+  tipoLinea = tipoLinea || 'libre';
   var tbody = document.getElementById('adm-mod-lineas');
   var idx = tbody.children.length;
   var opts = ADM_MOD_CUENTAS.map(function(c) {
     return '<option value="' + c.id + '"' + (c.id == cuentaId ? ' selected' : '') + '>'
       + (c.codigo ? '[' + c.codigo + '] ' : '') + c.nombre + '</option>';
   }).join('');
+  var tipoOpts = [
+    ['libre',                '— Libre (neto/compras) —'],
+    ['iva',                  'IVA Crédito Fiscal'],
+    ['percepcion_iva',       'Percepción IVA'],
+    ['percepcion_iibb',      'Percepción IIBB'],
+    ['percepcion_ganancias', 'Percepción Ganancias'],
+    ['retencion',            'Retención'],
+    ['proveedores',          'Proveedores (Haber)']
+  ].map(function(t){ return '<option value="' + t[0] + '"' + (t[0]===tipoLinea?' selected':'') + '>' + t[1] + '</option>'; }).join('');
   var tr = document.createElement('tr');
   tr.innerHTML = '<td><select class="adm-mod-cuenta" onchange="admModValidarDoble()" style="width:100%">'
     + '<option value="">— Seleccioná cuenta —</option>' + opts + '</select></td>'
@@ -8875,6 +8868,7 @@ function admModAgregarLinea(lado, cuentaId, desc) {
     + '<option value="debe"' + (lado==='debe'?' selected':'') + '>DEBE</option>'
     + '<option value="haber"' + (lado==='haber'?' selected':'') + '>HABER</option>'
     + '</select></td>'
+    + '<td><select class="adm-mod-tipo" style="width:100%;font-size:11px">' + tipoOpts + '</select></td>'
     + '<td><input class="adm-mod-linea-desc" placeholder="Descripción" value="' + (desc||'') + '" style="width:100%"></td>'
     + '<td><button class="btn bd bs" onclick="this.closest(\'tr\').remove();admModValidarDoble()" style="padding:2px 6px;font-size:11px">✕</button></td>';
   tbody.appendChild(tr);
@@ -8906,8 +8900,9 @@ function admModLeerLineas() {
   rows.forEach(function(tr) {
     var cuenta_id = tr.querySelector('.adm-mod-cuenta')?.value;
     var lado = tr.querySelector('.adm-mod-lado')?.value;
+    var tipo_linea = tr.querySelector('.adm-mod-tipo')?.value || 'libre';
     var desc = tr.querySelector('.adm-mod-linea-desc')?.value?.trim();
-    if (cuenta_id && lado) lineas.push({ cuenta_id: parseInt(cuenta_id), lado: lado, descripcion: desc || null });
+    if (cuenta_id && lado) lineas.push({ cuenta_id: parseInt(cuenta_id), lado: lado, tipo_linea: tipo_linea, descripcion: desc || null });
   });
   return lineas;
 }
