@@ -20884,7 +20884,12 @@ function opCargar() {
         + '<td style="padding:9px 12px;color:var(--mut)">' + (formas[op.forma_pago]||op.forma_pago) + (op.cuenta_nombre?' — '+op.cuenta_nombre:'') + '</td>'
         + '<td style="padding:9px 12px;text-align:right;font-weight:700">' + paMoney(op.monto_total) + '</td>'
         + '<td style="padding:9px 12px;text-align:center">' + badge + '</td>'
-        + '<td style="padding:9px 12px">' + (op.estado==='emitida'?'<button class="btn bd bs" onclick="opAnular('+op.id+')" style="font-size:10px;padding:2px 7px">Anular</button>':'') + '</td></tr>';
+        + '<td style="padding:9px 12px">'
+        + (op.estado==='emitida'
+            ? '<button class="btn bo bs" onclick="opImprimir('+op.id+')" style="font-size:10px;padding:2px 7px" title="Imprimir">🖨️</button> '
+              + '<button class="btn bd bs" onclick="opAnular('+op.id+')" style="font-size:10px;padding:2px 7px">Anular</button>'
+            : '')
+        + '</td></tr>';
     }).join('');
   });
 }
@@ -20962,6 +20967,79 @@ function opAnular(id) {
   if (!confirm('¿Anular esta orden? Se revertirán saldos y movimientos.')) return;
   opApi('/'+id+'/anular',{method:'PATCH',body:'{}'}).then(function(r){
     if(r.ok){toast('Orden anulada','ok');opCargar();}else toast(r.error||'Error','er');
+  });
+}
+
+function opImprimir(id) {
+  opApi('/'+id).then(function(r) {
+    if (!r.ok) return toast('Error al cargar la orden', 'er');
+    var op = r.data;
+    var formas = { transferencia:'Transferencia Bancaria', efectivo:'Efectivo', cheque_propio:'Cheque Propio', cheque_tercero:'Cheque de Tercero' };
+    var formaPago = formas[op.forma_pago] || op.forma_pago;
+    var cuentaInfo = '';
+    if (op.cuenta_nombre) {
+      cuentaInfo = op.cuenta_nombre + (op.cuenta_banco ? ' — ' + op.cuenta_banco : '') + (op.cuenta_cbu ? '<br>CBU: ' + op.cuenta_cbu : '');
+    }
+    var facturasRows = (op.compras || []).map(function(c) {
+      return '<tr>'
+        + '<td style="padding:7px 10px;border-bottom:1px solid #e5e7eb">' + (c.nro_factura || 'Fac. ' + c.compra_id) + '</td>'
+        + '<td style="padding:7px 10px;border-bottom:1px solid #e5e7eb;text-align:center">' + c.fecha + '</td>'
+        + '<td style="padding:7px 10px;border-bottom:1px solid #e5e7eb;text-align:right;font-weight:600">$\u00a0' + parseFloat(c.monto).toLocaleString('es-AR', {minimumFractionDigits:2}) + '</td>'
+        + '</tr>';
+    }).join('');
+
+    var html = '<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8">'
+      + '<title>Orden de Pago ' + op.numero + '</title>'
+      + '<style>'
+      + 'body{font-family:Arial,sans-serif;font-size:13px;color:#111;margin:0;padding:32px}'
+      + 'h1{font-size:22px;margin:0 0 4px}'
+      + '.header{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #111;padding-bottom:16px;margin-bottom:24px}'
+      + '.empresa{font-size:12px;color:#555;line-height:1.6}'
+      + '.numero{font-size:28px;font-weight:700;font-family:monospace;color:#1d4ed8}'
+      + '.grid{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:24px}'
+      + '.bloque{background:#f8fafc;border:1px solid #e5e7eb;border-radius:8px;padding:14px}'
+      + '.bloque label{font-size:10px;text-transform:uppercase;color:#6b7280;font-weight:700;display:block;margin-bottom:4px}'
+      + '.bloque .val{font-size:14px;font-weight:600}'
+      + 'table{width:100%;border-collapse:collapse;margin-bottom:24px}'
+      + 'thead th{background:#1d4ed8;color:#fff;padding:8px 10px;font-size:11px;text-transform:uppercase;text-align:left}'
+      + 'thead th:last-child{text-align:right}'
+      + '.total-row td{font-size:15px;font-weight:700;padding:10px;background:#eff6ff;border-top:2px solid #1d4ed8}'
+      + '.firmas{display:grid;grid-template-columns:1fr 1fr;gap:40px;margin-top:48px}'
+      + '.firma{border-top:1px solid #111;padding-top:8px;font-size:11px;color:#555;text-align:center}'
+      + '@media print{body{padding:20px}.no-print{display:none}}'
+      + '</style></head><body>'
+      + '<div class="no-print" style="margin-bottom:20px">'
+      + '<button onclick="window.print()" style="padding:8px 20px;background:#1d4ed8;color:#fff;border:none;border-radius:6px;font-size:13px;cursor:pointer;margin-right:8px">🖨️ Imprimir / Guardar PDF</button>'
+      + '<button onclick="window.close()" style="padding:8px 16px;background:#e5e7eb;border:none;border-radius:6px;font-size:13px;cursor:pointer">✕ Cerrar</button>'
+      + '</div>'
+      + '<div class="header">'
+      + '<div><h1>La Nueva Bonita</h1><div class="empresa">Orden de Pago</div></div>'
+      + '<div style="text-align:right"><div class="numero">' + op.numero + '</div><div style="font-size:12px;color:#555">Fecha: ' + op.fecha + '</div></div>'
+      + '</div>'
+      + '<div class="grid">'
+      + '<div class="bloque"><label>Proveedor</label><div class="val">' + (op.proveedor_nombre||'—') + '</div>'
+      + (op.proveedor_cuit ? '<div style="font-size:12px;color:#555;margin-top:2px">CUIT: ' + op.proveedor_cuit + '</div>' : '')
+      + '</div>'
+      + '<div class="bloque"><label>Forma de Pago</label><div class="val">' + formaPago + '</div>'
+      + (cuentaInfo ? '<div style="font-size:12px;color:#555;margin-top:2px">' + cuentaInfo + '</div>' : '')
+      + '</div>'
+      + '</div>'
+      + '<div style="font-size:12px;font-weight:700;text-transform:uppercase;color:#6b7280;margin-bottom:8px">Facturas Canceladas</div>'
+      + '<table><thead><tr><th>Nro. Factura</th><th style="text-align:center">Fecha</th><th style="text-align:right">Monto</th></tr></thead><tbody>'
+      + facturasRows
+      + '<tr class="total-row"><td colspan="2">TOTAL</td><td style="text-align:right">$\u00a0' + parseFloat(op.monto_total).toLocaleString('es-AR', {minimumFractionDigits:2}) + '</td></tr>'
+      + '</tbody></table>'
+      + (op.referencia ? '<div style="margin-bottom:8px"><span style="font-size:11px;color:#6b7280;font-weight:700">REFERENCIA:</span> ' + op.referencia + '</div>' : '')
+      + (op.notas     ? '<div style="margin-bottom:8px"><span style="font-size:11px;color:#6b7280;font-weight:700">NOTAS:</span> ' + op.notas + '</div>' : '')
+      + '<div class="firmas">'
+      + '<div class="firma">Firma Empresa</div>'
+      + '<div class="firma">Firma Conformidad Proveedor</div>'
+      + '</div>'
+      + '</body></html>';
+
+    var win = window.open('', '_blank', 'width=800,height:650');
+    if (win) { win.document.write(html); win.document.close(); }
+    else toast('Habilitá las ventanas emergentes para imprimir', 'warn');
   });
 }
 
