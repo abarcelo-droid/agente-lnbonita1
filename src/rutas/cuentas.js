@@ -447,8 +447,8 @@ router.post('/modelos', requireAdmin, (req, res) => {
       const r = db.prepare(`INSERT INTO adm_asientos_modelo (nombre, descripcion) VALUES (?, ?)`)
         .run(String(nombre).trim(), descripcion || null);
       const modeloId = r.lastInsertRowid;
-      const ins = db.prepare(`INSERT INTO adm_asientos_modelo_lineas (modelo_id, cuenta_id, lado, descripcion, orden) VALUES (?, ?, ?, ?, ?)`);
-      lineas.forEach((l, i) => ins.run(modeloId, l.cuenta_id, l.lado, l.descripcion || null, i));
+      const ins = db.prepare(`INSERT INTO adm_asientos_modelo_lineas (modelo_id, cuenta_id, lado, descripcion, orden, tipo_linea) VALUES (?, ?, ?, ?, ?, ?)`);
+      lineas.forEach((l, i) => ins.run(modeloId, l.cuenta_id, l.lado, l.descripcion || null, i, l.tipo_linea || 'libre'));
       return modeloId;
     });
     res.json({ ok: true, id: tx() });
@@ -473,8 +473,8 @@ router.put('/modelos/:id', requireAdmin, (req, res) => {
       db.prepare('UPDATE adm_asientos_modelo SET nombre=?, descripcion=? WHERE id=?')
         .run(String(nombre).trim(), descripcion || null, id);
       db.prepare('DELETE FROM adm_asientos_modelo_lineas WHERE modelo_id = ?').run(id);
-      const ins = db.prepare(`INSERT INTO adm_asientos_modelo_lineas (modelo_id, cuenta_id, lado, descripcion, orden) VALUES (?, ?, ?, ?, ?)`);
-      lineas.forEach((l, i) => ins.run(id, l.cuenta_id, l.lado, l.descripcion || null, i));
+      const ins = db.prepare(`INSERT INTO adm_asientos_modelo_lineas (modelo_id, cuenta_id, lado, descripcion, orden, tipo_linea) VALUES (?, ?, ?, ?, ?, ?)`);
+      lineas.forEach((l, i) => ins.run(id, l.cuenta_id, l.lado, l.descripcion || null, i, l.tipo_linea || 'libre'));
     })();
     res.json({ ok: true });
   } catch(e) { res.status(500).json({ error: e.message }); }
