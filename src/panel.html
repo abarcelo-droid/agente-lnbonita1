@@ -8854,8 +8854,22 @@ function paCompBuscarProveedorIA(nombre) {
     var data = r.data || [];
     if (data.length === 1) {
       var sel = document.getElementById('pa-comp-prov-id');
-      if (sel) sel.value = data[0].id;
+      if (sel) {
+        sel.value = data[0].id;
+        // Disparar el change para cargar el asiento contable
+        paCompOnProveedorChange();
+        // Advertencia clara para que el usuario verifique
+        var warn = document.getElementById('pa-comp-prov-warn');
+        if (warn) {
+          warn.textContent = '⚠ La IA detectó "' + data[0].razon_social + '" — verificá que sea el proveedor correcto antes de guardar.';
+          warn.style.display = 'block';
+          warn.style.color = 'var(--warn, #b45309)';
+        }
+      }
+    } else if (data.length === 0) {
+      toast('IA detectó proveedor "' + nombre + '" pero no está en el padrón — seleccionalo manualmente', 'warn');
     }
+    // Si devuelve más de 1 resultado, no auto-selecciona — el usuario elige
   });
 }
 
@@ -21028,8 +21042,15 @@ function finNuevaCuenta() {
   document.getElementById('fin-cuenta-tipo').value = 'cuenta_corriente';
   document.getElementById('fin-cuenta-moneda').value = 'ARS';
   document.getElementById('fin-cuenta-saldo').value = '0';
+<<<<<<< HEAD
+  document.getElementById('fin-cuenta-contable').innerHTML = '<option value="">Cargando...</option>';
+=======
   document.getElementById('fin-cuenta-contable').innerHTML = admCuentasOpts('');
+>>>>>>> main
   document.getElementById('fin-mb-cuenta').classList.add('on');
+  admCargarCuentas().then(function() {
+    document.getElementById('fin-cuenta-contable').innerHTML = admCuentasOpts('');
+  });
 }
 
 function finEditarCuenta(id) {
@@ -21045,14 +21066,23 @@ function finEditarCuenta(id) {
   document.getElementById('fin-cuenta-cbu').value    = c.cbu    || '';
   document.getElementById('fin-cuenta-alias').value  = c.alias  || '';
   document.getElementById('fin-cuenta-saldo').value  = c.saldo_inicial || 0;
+<<<<<<< HEAD
+  document.getElementById('fin-cuenta-contable').innerHTML = '<option value="">Cargando...</option>';
+=======
   document.getElementById('fin-cuenta-contable').innerHTML = admCuentasOpts(c.cuenta_contable_id || '');
+>>>>>>> main
   document.getElementById('fin-mb-cuenta').classList.add('on');
+  admCargarCuentas().then(function() {
+    document.getElementById('fin-cuenta-contable').innerHTML = admCuentasOpts(c.cuenta_contable_id || '');
+  });
 }
 
 function finGuardarCuenta() {
   var id     = document.getElementById('fin-cuenta-id').value;
   var nombre = document.getElementById('fin-cuenta-nombre').value.trim();
   if (!nombre) return toast('El nombre es obligatorio', 'er');
+  var cuentaContableId = document.getElementById('fin-cuenta-contable').value || null;
+  if (!cuentaContableId) return toast('Seleccioná una cuenta contable', 'er');
   var body = {
     nombre, tipo: document.getElementById('fin-cuenta-tipo').value,
     banco:  document.getElementById('fin-cuenta-banco').value.trim() || null,
@@ -21061,7 +21091,11 @@ function finGuardarCuenta() {
     cbu:    document.getElementById('fin-cuenta-cbu').value.trim() || null,
     alias:  document.getElementById('fin-cuenta-alias').value.trim() || null,
     saldo_inicial: parseFloat(document.getElementById('fin-cuenta-saldo').value || 0),
+<<<<<<< HEAD
+    cuenta_contable_id: cuentaContableId
+=======
     cuenta_contable_id: document.getElementById('fin-cuenta-contable').value || null
+>>>>>>> main
   };
   var url    = id ? '/cuentas/' + id : '/cuentas';
   var method = id ? 'PUT' : 'POST';
