@@ -2651,6 +2651,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   <button id="fin-tab-cheques-p" class="fin-tab"             onclick="finTab('cheques-p')">Cheques Propios</button>
   <button id="fin-tab-cheques-t" class="fin-tab"             onclick="finTab('cheques-t')">Cheques Terceros</button>
   <button id="fin-tab-movim"     class="fin-tab"             onclick="finTab('movim')">Movimientos</button>
+  <button id="fin-tab-concilia"  class="fin-tab"             onclick="finTab('concilia')">🔄 Conciliación</button>
 </div>
 
 <!-- Tab: Cuentas -->
@@ -2765,6 +2766,49 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       </tr></thead>
       <tbody id="fin-tbody-movim"></tbody>
     </table>
+  </div>
+</div>
+<!-- Tab: Conciliación -->
+<div id="fin-panel-concilia" style="display:none">
+  <!-- Filtros -->
+  <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:14px">
+    <select id="fin-conc-cuenta" onchange="finConciliaCargar()" style="font-size:12px;min-width:200px">
+      <option value="">— Seleccioná una cuenta —</option>
+    </select>
+    <input type="month" id="fin-conc-periodo" onchange="finConciliaCargar()" style="font-size:12px">
+    <button class="btn bb" onclick="finConciliaAbrirExtracto()">+ Cargar Extracto</button>
+  </div>
+  <!-- Resumen saldos -->
+  <div id="fin-conc-resumen" style="display:none;display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:16px">
+    <div style="background:var(--sur);border:1px solid var(--bor);border-radius:10px;padding:14px;text-align:center">
+      <div style="font-size:10px;color:var(--mut);text-transform:uppercase;font-weight:700;margin-bottom:4px">Saldo Libros</div>
+      <div id="fin-conc-saldo-libro" style="font-size:20px;font-weight:700;color:var(--ok)">$0</div>
+    </div>
+    <div style="background:var(--sur);border:1px solid var(--bor);border-radius:10px;padding:14px;text-align:center">
+      <div style="font-size:10px;color:var(--mut);text-transform:uppercase;font-weight:700;margin-bottom:4px">Saldo Extracto</div>
+      <div id="fin-conc-saldo-ext" style="font-size:20px;font-weight:700;color:var(--acc)">$0</div>
+    </div>
+    <div style="background:var(--sur);border:1px solid var(--bor);border-radius:10px;padding:14px;text-align:center">
+      <div style="font-size:10px;color:var(--mut);text-transform:uppercase;font-weight:700;margin-bottom:4px">Diferencia</div>
+      <div id="fin-conc-diferencia" style="font-size:20px;font-weight:700">$0</div>
+    </div>
+  </div>
+  <!-- Dos columnas: extracto vs libros -->
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+    <!-- Extracto bancario -->
+    <div>
+      <div style="font-size:12px;font-weight:700;color:var(--txt);margin-bottom:8px;text-transform:uppercase">📄 Extracto Bancario</div>
+      <div id="fin-conc-extracto-lista" style="border:1px solid var(--bor);border-radius:10px;overflow:hidden;font-size:12px">
+        <div class="emp" style="padding:20px;text-align:center">Seleccioná cuenta y período</div>
+      </div>
+    </div>
+    <!-- Movimientos propios -->
+    <div>
+      <div style="font-size:12px;font-weight:700;color:var(--txt);margin-bottom:8px;text-transform:uppercase">📒 Movimientos Propios</div>
+      <div id="fin-conc-movim-lista" style="border:1px solid var(--bor);border-radius:10px;overflow:hidden;font-size:12px">
+        <div class="emp" style="padding:20px;text-align:center">Seleccioná cuenta y período</div>
+      </div>
+    </div>
   </div>
 </div>
 </div>
@@ -2903,7 +2947,27 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
 </div>
 </div>
 
-<!-- ─── MODAL: Nuevo/Editar Asiento Modelo ───────────────────────────── -->
+<!-- Modal: Cargar Extracto -->
+<div class="ab-modal-overlay" id="fin-mb-extracto">
+<div class="ab-modal" style="max-width:600px">
+  <div class="mhd">
+    <div><div class="mht">Cargar Extracto Bancario</div>
+    <div style="font-size:11px;color:var(--mut)">Ingresá las líneas del extracto del banco</div></div>
+    <button class="mcl" onclick="document.getElementById('fin-mb-extracto').classList.remove('on')">×</button>
+  </div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
+    <div class="fl"><label>Cuenta *</label><select id="fin-ext-cuenta" style="font-size:13px"></select></div>
+    <div class="fl"><label>Período *</label><input type="month" id="fin-ext-periodo"></div>
+  </div>
+  <div style="font-size:11px;font-weight:600;color:var(--mut);text-transform:uppercase;margin-bottom:6px">Líneas del extracto</div>
+  <div id="fin-ext-lineas" style="display:flex;flex-direction:column;gap:6px;max-height:320px;overflow-y:auto"></div>
+  <button class="btn bo bs" onclick="finExtAgregarLinea()" style="margin-top:8px;font-size:11px">+ Agregar línea</button>
+  <div class="ab-modal-footer">
+    <button class="btn bo" onclick="document.getElementById('fin-mb-extracto').classList.remove('on')">Cancelar</button>
+    <button class="btn bb" onclick="finExtGuardar()">Guardar Extracto</button>
+  </div>
+</div>
+</div>
 <div class="ab-modal-overlay" id="adm-mb-modelo">
 <div class="ab-modal" style="width:720px;max-height:90vh;overflow-y:auto">
   <div class="mhd">
@@ -21069,7 +21133,7 @@ function finCajaBancosIniciar() {
 
 function finTab(tab) {
   FIN.tabActual = tab;
-  var tabs = ['cuentas','chequeras','cheques-p','cheques-t','movim'];
+  var tabs = ['cuentas','chequeras','cheques-p','cheques-t','movim','concilia'];
   tabs.forEach(function(t) {
     var btn = document.getElementById('fin-tab-' + t);
     var panel = document.getElementById('fin-panel-' + t);
@@ -21081,6 +21145,164 @@ function finTab(tab) {
   if (tab === 'cheques-p')  finCargarChequesPropios();
   if (tab === 'cheques-t')  finCargarChequesTerceros();
   if (tab === 'movim')      finCargarMovimientos();
+  if (tab === 'concilia')   finConciliaIniciar();
+}
+
+// ── CONCILIACIÓN BANCARIA ─────────────────────────────────────────────────────
+var CONC = { extracto: [], movimientos: [], selExtracto: null, selMovim: null };
+
+function finConciliaIniciar() {
+  // Poblar select de cuentas
+  var sel = document.getElementById('fin-conc-cuenta');
+  sel.innerHTML = '<option value="">— Seleccioná una cuenta —</option>'
+    + FIN.cuentas.map(function(c){ return '<option value="'+c.id+'">'+c.nombre+(c.banco?' — '+c.banco:'')+'</option>'; }).join('');
+  // Período default: mes actual
+  var hoy = new Date();
+  var periodo = hoy.getFullYear() + '-' + String(hoy.getMonth()+1).padStart(2,'0');
+  document.getElementById('fin-conc-periodo').value = periodo;
+}
+
+function finConciliaCargar() {
+  var cuentaId = document.getElementById('fin-conc-cuenta').value;
+  var periodo  = document.getElementById('fin-conc-periodo').value;
+  if (!cuentaId || !periodo) return;
+  finApi('/conciliacion?cuentaId='+cuentaId+'&periodo='+periodo).then(function(r) {
+    if (!r.ok) return toast(r.error||'Error', 'er');
+    CONC.extracto    = r.extracto    || [];
+    CONC.movimientos = r.movimientos || [];
+    // Resumen
+    document.getElementById('fin-conc-resumen').style.display = 'grid';
+    document.getElementById('fin-conc-saldo-libro').textContent = paMoney(r.saldo_libro||0);
+    document.getElementById('fin-conc-saldo-ext').textContent   = paMoney(r.saldo_extracto||0);
+    var dif = r.diferencia || 0;
+    var difEl = document.getElementById('fin-conc-diferencia');
+    difEl.textContent = paMoney(dif);
+    difEl.style.color = Math.abs(dif) < 0.01 ? 'var(--ok)' : 'var(--err)';
+    finConciliaRenderExtracto();
+    finConciliaRenderMovim();
+  });
+}
+
+function finConciliaRenderExtracto() {
+  var cont = document.getElementById('fin-conc-extracto-lista');
+  if (!CONC.extracto.length) {
+    cont.innerHTML = '<div class="emp" style="padding:16px;text-align:center">Sin líneas de extracto. Cargá el extracto bancario.</div>';
+    return;
+  }
+  cont.innerHTML = CONC.extracto.map(function(e) {
+    var conc = e.conciliado;
+    var bg   = conc ? 'background:rgba(34,197,94,.08)' : '';
+    var icono = conc ? '✅' : '⬜';
+    return '<div style="display:grid;grid-template-columns:auto 1fr auto auto;gap:6px;align-items:center;padding:7px 10px;border-bottom:1px solid var(--bor);'+bg+'" id="ext-row-'+e.id+'">'
+      + '<span style="font-size:14px;cursor:pointer" title="'+(conc?'Desconciliar':'Conciliar con movimiento seleccionado')+'" onclick="finConciliaToggle('+e.id+','+conc+')">' + icono + '</span>'
+      + '<div><div style="font-weight:600">' + (e.concepto||'Sin concepto') + '</div>'
+      + '<div style="font-size:10px;color:var(--mut)">' + e.fecha + (e.referencia?' · '+e.referencia:'') + '</div></div>'
+      + '<div style="text-align:right;font-weight:700;color:'+(e.tipo==='ingreso'?'var(--ok)':'var(--err)')+'">'
+      + (e.tipo==='egreso'?'-':'+')+paMoney(e.monto)+'</div>'
+      + '<button class="btn bd bs" onclick="finExtEliminar('+e.id+')" style="font-size:10px;padding:1px 5px" title="Eliminar">✕</button>'
+      + '</div>';
+  }).join('');
+}
+
+function finConciliaRenderMovim() {
+  var cont = document.getElementById('fin-conc-movim-lista');
+  if (!CONC.movimientos.length) {
+    cont.innerHTML = '<div class="emp" style="padding:16px;text-align:center">Sin movimientos en este período.</div>';
+    return;
+  }
+  cont.innerHTML = CONC.movimientos.map(function(m) {
+    var conc = m.conciliado;
+    var bg   = conc ? 'background:rgba(34,197,94,.08)' : '';
+    var icono = conc ? '✅' : '⬜';
+    return '<div style="display:grid;grid-template-columns:auto 1fr auto;gap:6px;align-items:center;padding:7px 10px;border-bottom:1px solid var(--bor);'+bg+'" id="mov-row-'+m.id+'">'
+      + '<span style="font-size:14px">' + icono + '</span>'
+      + '<div><div style="font-weight:600">' + (m.concepto||'Sin concepto') + '</div>'
+      + '<div style="font-size:10px;color:var(--mut)">' + m.fecha + (m.referencia?' · '+m.referencia:'') + '</div></div>'
+      + '<div style="text-align:right;font-weight:700;color:'+(m.tipo==='ingreso'?'var(--ok)':'var(--err)')+'">'
+      + (m.tipo==='egreso'?'-':'+')+paMoney(m.monto)+'</div>'
+      + '</div>';
+  }).join('');
+}
+
+function finConciliaToggle(extractoId, yaConciliado) {
+  if (yaConciliado) {
+    // Desconciliar
+    finApi('/conciliacion/desconciliar', { method: 'PATCH', body: JSON.stringify({ extracto_id: extractoId }) })
+      .then(function(r) { if (r.ok) { toast('Desconciliado', 'ok'); finConciliaCargar(); } else toast(r.error||'Error','er'); });
+  } else {
+    // Buscar movimiento seleccionado en la lista derecha (click en una fila)
+    var movId = CONC.selMovim;
+    finApi('/conciliacion/conciliar', { method: 'PATCH', body: JSON.stringify({ extracto_id: extractoId, movimiento_id: movId||null }) })
+      .then(function(r) {
+        if (r.ok) { toast('✅ Conciliado', 'ok'); CONC.selMovim = null; finConciliaCargar(); }
+        else toast(r.error||'Error','er');
+      });
+  }
+}
+
+function finExtEliminar(id) {
+  if (!confirm('¿Eliminar esta línea del extracto?')) return;
+  finApi('/conciliacion/extracto/'+id, { method: 'DELETE' })
+    .then(function(r) { if (r.ok) finConciliaCargar(); else toast(r.error||'Error','er'); });
+}
+
+function finConciliaAbrirExtracto() {
+  // Poblar select de cuentas en modal
+  var sel = document.getElementById('fin-ext-cuenta');
+  sel.innerHTML = '<option value="">— Cuenta —</option>'
+    + FIN.cuentas.map(function(c){ return '<option value="'+c.id+'">'+c.nombre+(c.banco?' — '+c.banco:'')+'</option>'; }).join('');
+  // Pre-seleccionar cuenta y período del filtro
+  var cuentaId = document.getElementById('fin-conc-cuenta').value;
+  var periodo  = document.getElementById('fin-conc-periodo').value;
+  if (cuentaId) sel.value = cuentaId;
+  if (periodo)  document.getElementById('fin-ext-periodo').value = periodo;
+  // Limpiar líneas y agregar una vacía
+  document.getElementById('fin-ext-lineas').innerHTML = '';
+  finExtAgregarLinea();
+  document.getElementById('fin-mb-extracto').classList.add('on');
+}
+
+var FIN_EXT_N = 0;
+function finExtAgregarLinea() {
+  var n = FIN_EXT_N++;
+  var hoy = new Date().toISOString().split('T')[0];
+  var row = document.createElement('div');
+  row.id = 'fin-ext-row-' + n;
+  row.style.cssText = 'display:grid;grid-template-columns:100px 1fr 110px 90px auto;gap:6px;align-items:center';
+  row.innerHTML = '<input type="date" value="'+hoy+'" style="font-size:11px;padding:4px 6px;border:1px solid var(--bor2);border-radius:5px">'
+    + '<input type="text" placeholder="Concepto" style="font-size:11px;padding:4px 6px;border:1px solid var(--bor2);border-radius:5px">'
+    + '<select style="font-size:11px;padding:4px 6px;border:1px solid var(--bor2);border-radius:5px"><option value="egreso">Egreso</option><option value="ingreso">Ingreso</option></select>'
+    + '<input type="number" step="0.01" min="0" placeholder="Monto" style="font-size:11px;padding:4px 6px;border:1px solid var(--bor2);border-radius:5px;text-align:right">'
+    + '<button class="btn bd bs" onclick="this.closest(\'[id^=fin-ext-row]\').remove()" style="font-size:10px;padding:2px 6px">✕</button>';
+  document.getElementById('fin-ext-lineas').appendChild(row);
+}
+
+function finExtGuardar() {
+  var cuentaId = document.getElementById('fin-ext-cuenta').value;
+  var periodo  = document.getElementById('fin-ext-periodo').value;
+  if (!cuentaId) return toast('Seleccioná una cuenta','er');
+  if (!periodo)  return toast('Seleccioná un período','er');
+  var lineas = [];
+  document.querySelectorAll('[id^=fin-ext-row-]').forEach(function(row) {
+    var inps = row.querySelectorAll('input,select');
+    var fecha    = inps[0].value;
+    var concepto = inps[1].value.trim();
+    var tipo     = inps[2].value;
+    var monto    = parseFloat(inps[3].value||0);
+    if (!fecha || monto <= 0) return;
+    lineas.push({ fecha, concepto: concepto||null, tipo, monto });
+  });
+  if (!lineas.length) return toast('Agregá al menos una línea válida','er');
+  finApi('/conciliacion/extracto', { method: 'POST', body: JSON.stringify({ cuenta_id: parseInt(cuentaId), periodo, lineas }) })
+    .then(function(r) {
+      if (r.ok) {
+        toast('✓ ' + r.insertadas + ' líneas cargadas', 'ok');
+        document.getElementById('fin-mb-extracto').classList.remove('on');
+        document.getElementById('fin-conc-cuenta').value  = cuentaId;
+        document.getElementById('fin-conc-periodo').value = periodo;
+        finConciliaCargar();
+      } else toast(r.error||'Error','er');
+    });
 }
 
 // ── CUENTAS ──────────────────────────────────────────────────────────────────
