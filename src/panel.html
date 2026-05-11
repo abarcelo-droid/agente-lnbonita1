@@ -21028,8 +21028,11 @@ function finNuevaCuenta() {
   document.getElementById('fin-cuenta-tipo').value = 'cuenta_corriente';
   document.getElementById('fin-cuenta-moneda').value = 'ARS';
   document.getElementById('fin-cuenta-saldo').value = '0';
-  document.getElementById('fin-cuenta-contable').innerHTML = admCuentasOpts('');
+  document.getElementById('fin-cuenta-contable').innerHTML = '<option value="">Cargando...</option>';
   document.getElementById('fin-mb-cuenta').classList.add('on');
+  admCargarCuentas().then(function() {
+    document.getElementById('fin-cuenta-contable').innerHTML = admCuentasOpts('');
+  });
 }
 
 function finEditarCuenta(id) {
@@ -21045,14 +21048,19 @@ function finEditarCuenta(id) {
   document.getElementById('fin-cuenta-cbu').value    = c.cbu    || '';
   document.getElementById('fin-cuenta-alias').value  = c.alias  || '';
   document.getElementById('fin-cuenta-saldo').value  = c.saldo_inicial || 0;
-  document.getElementById('fin-cuenta-contable').innerHTML = admCuentasOpts(c.cuenta_contable_id || '');
+  document.getElementById('fin-cuenta-contable').innerHTML = '<option value="">Cargando...</option>';
   document.getElementById('fin-mb-cuenta').classList.add('on');
+  admCargarCuentas().then(function() {
+    document.getElementById('fin-cuenta-contable').innerHTML = admCuentasOpts(c.cuenta_contable_id || '');
+  });
 }
 
 function finGuardarCuenta() {
   var id     = document.getElementById('fin-cuenta-id').value;
   var nombre = document.getElementById('fin-cuenta-nombre').value.trim();
   if (!nombre) return toast('El nombre es obligatorio', 'er');
+  var cuentaContableId = document.getElementById('fin-cuenta-contable').value || null;
+  if (!cuentaContableId) return toast('Seleccioná una cuenta contable', 'er');
   var body = {
     nombre, tipo: document.getElementById('fin-cuenta-tipo').value,
     banco:  document.getElementById('fin-cuenta-banco').value.trim() || null,
@@ -21061,7 +21069,7 @@ function finGuardarCuenta() {
     cbu:    document.getElementById('fin-cuenta-cbu').value.trim() || null,
     alias:  document.getElementById('fin-cuenta-alias').value.trim() || null,
     saldo_inicial: parseFloat(document.getElementById('fin-cuenta-saldo').value || 0),
-    cuenta_contable_id: document.getElementById('fin-cuenta-contable').value || null
+    cuenta_contable_id: cuentaContableId
   };
   var url    = id ? '/cuentas/' + id : '/cuentas';
   var method = id ? 'PUT' : 'POST';
