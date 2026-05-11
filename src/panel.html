@@ -21042,7 +21042,11 @@ function finNuevaCuenta() {
   document.getElementById('fin-cuenta-tipo').value = 'cuenta_corriente';
   document.getElementById('fin-cuenta-moneda').value = 'ARS';
   document.getElementById('fin-cuenta-saldo').value = '0';
+<<<<<<< HEAD
   document.getElementById('fin-cuenta-contable').innerHTML = '<option value="">Cargando...</option>';
+=======
+  document.getElementById('fin-cuenta-contable').innerHTML = admCuentasOpts('');
+>>>>>>> main
   document.getElementById('fin-mb-cuenta').classList.add('on');
   admCargarCuentas().then(function() {
     document.getElementById('fin-cuenta-contable').innerHTML = admCuentasOpts('');
@@ -21062,7 +21066,11 @@ function finEditarCuenta(id) {
   document.getElementById('fin-cuenta-cbu').value    = c.cbu    || '';
   document.getElementById('fin-cuenta-alias').value  = c.alias  || '';
   document.getElementById('fin-cuenta-saldo').value  = c.saldo_inicial || 0;
+<<<<<<< HEAD
   document.getElementById('fin-cuenta-contable').innerHTML = '<option value="">Cargando...</option>';
+=======
+  document.getElementById('fin-cuenta-contable').innerHTML = admCuentasOpts(c.cuenta_contable_id || '');
+>>>>>>> main
   document.getElementById('fin-mb-cuenta').classList.add('on');
   admCargarCuentas().then(function() {
     document.getElementById('fin-cuenta-contable').innerHTML = admCuentasOpts(c.cuenta_contable_id || '');
@@ -21083,7 +21091,11 @@ function finGuardarCuenta() {
     cbu:    document.getElementById('fin-cuenta-cbu').value.trim() || null,
     alias:  document.getElementById('fin-cuenta-alias').value.trim() || null,
     saldo_inicial: parseFloat(document.getElementById('fin-cuenta-saldo').value || 0),
+<<<<<<< HEAD
     cuenta_contable_id: cuentaContableId
+=======
+    cuenta_contable_id: document.getElementById('fin-cuenta-contable').value || null
+>>>>>>> main
   };
   var url    = id ? '/cuentas/' + id : '/cuentas';
   var method = id ? 'PUT' : 'POST';
