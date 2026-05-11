@@ -27,6 +27,15 @@ function requireAdmin(req, res, next) {
   next();
 }
 
+function requireAuth(req, res, next) {
+  const u = getUser(req);
+  if (!u) {
+    return res.status(401).json({ error: 'no autenticado' });
+  }
+  req._user = u;
+  next();
+}
+
 function logAccion({ cuenta_id = null, seccion_id = null, accion, detalle = null, usuario_id = null }) {
   db.prepare(`
     INSERT INTO pa_cuentas_log (cuenta_id, seccion_id, accion, detalle, usuario_id)
@@ -488,7 +497,7 @@ router.delete('/modelos/:id', requireAdmin, (req, res) => {
 
 // POST /api/pa/cuentas/modelos/desde-factura
 // Genera asiento contable real desde una factura, usando el modelo del proveedor
-router.post('/modelos/desde-factura', requireAdmin, (req, res) => {
+router.post('/modelos/desde-factura', requireAuth, (req, res) => {
   const { compra_id, lineas } = req.body || {};
   if (!compra_id) return res.status(400).json({ error: 'compra_id requerido' });
 
