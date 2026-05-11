@@ -8854,8 +8854,22 @@ function paCompBuscarProveedorIA(nombre) {
     var data = r.data || [];
     if (data.length === 1) {
       var sel = document.getElementById('pa-comp-prov-id');
-      if (sel) sel.value = data[0].id;
+      if (sel) {
+        sel.value = data[0].id;
+        // Disparar el change para cargar el asiento contable
+        paCompOnProveedorChange();
+        // Advertencia clara para que el usuario verifique
+        var warn = document.getElementById('pa-comp-prov-warn');
+        if (warn) {
+          warn.textContent = '⚠ La IA detectó "' + data[0].razon_social + '" — verificá que sea el proveedor correcto antes de guardar.';
+          warn.style.display = 'block';
+          warn.style.color = 'var(--warn, #b45309)';
+        }
+      }
+    } else if (data.length === 0) {
+      toast('IA detectó proveedor "' + nombre + '" pero no está en el padrón — seleccionalo manualmente', 'warn');
     }
+    // Si devuelve más de 1 resultado, no auto-selecciona — el usuario elige
   });
 }
 
