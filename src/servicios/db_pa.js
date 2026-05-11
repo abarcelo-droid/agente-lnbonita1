@@ -1927,5 +1927,44 @@ db.exec(`
   } catch(e) { console.error('[FIN] Error migrando caja/bancos:', e.message); }
 })();
 
+// ── MÓDULO ÓRDENES DE PAGO ────────────────────────────────────────────────────
+(function migrarOrdenesPago() {
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS fin_ordenes_pago (
+        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+        numero          TEXT NOT NULL UNIQUE,
+        fecha           TEXT NOT NULL DEFAULT (date('now','localtime')),
+        proveedor_id    INTEGER NOT NULL REFERENCES adm_proveedores(id),
+        monto_total     REAL NOT NULL,
+        forma_pago      TEXT NOT NULL DEFAULT 'transferencia',
+        cuenta_fin_id   INTEGER REFERENCES fin_cuentas(id),
+        cheque_prop_id  INTEGER REFERENCES fin_cheques_propios(id),
+        cheque_ter_id   INTEGER REFERENCES fin_cheques_terceros(id),
+        referencia      TEXT,
+        notas           TEXT,
+        estado          TEXT NOT NULL DEFAULT 'emitida' CHECK(estado IN ('emitida','anulada')),
+        movimiento_id   INTEGER REFERENCES fin_movimientos(id),
+        usuario_id      INTEGER,
+        creado_en       TEXT DEFAULT (datetime('now','localtime'))
+      );
+
+      CREATE TABLE IF NOT EXISTS fin_op_compras (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        op_id       INTEGER NOT NULL REFERENCES fin_ordenes_pago(id),
+        compra_id   INTEGER NOT NULL REFERENCES pa_compras(id),
+        monto       REAL NOT NULL
+      );
+    `);
+    // Agregar asiento_id si no existe
+    const colsOP = db.prepare("PRAGMA table_info(fin_ordenes_pago)").all().map(c => c.name);
+    if (!colsOP.includes('asiento_id')) {
+      db.exec('ALTER TABLE fin_ordenes_pago ADD COLUMN asiento_id INTEGER REFERENCES pa_asientos(id)');
+      console.log('[FIN] asiento_id agregado en fin_ordenes_pago');
+    }
+    console.log('[FIN] Tablas órdenes de pago listas');
+  } catch(e) { console.error('[FIN] Error migrando órdenes de pago:', e.message); }
+})();
+
 export { db };
 export default db;
