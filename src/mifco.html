@@ -475,6 +475,60 @@ const S = {
   user: null            // datos del usuario logueado (incluye deposito_tipo, deposito_proveedor_id, ...)
 };
 
+// Comprime una imagen client-side antes de enviarla al backend.
+// La API de Claude (OCR) rechaza imágenes > 5MB, y los celulares modernos sacan
+// fotos de 8-12MB. Esta función:
+// - Reescala manteniendo aspect ratio si el lado mayor > maxDim (default 1600px)
+// - Convierte a JPEG con quality progresivamente menor hasta entrar bajo maxKB (default 4500KB)
+// - Si el archivo ya está bajo el límite y no es enorme, lo devuelve sin tocar
+async function _comprimirImagen(file, maxKB = 4500, maxDim = 1600) {
+  if (!file || !file.type || !file.type.startsWith('image/')) return file;
+  // Si ya está bajo el límite y es razonablemente chico, no reprocesar
+  if (file.size <= maxKB * 1024 && file.size <= 3 * 1024 * 1024) return file;
+
+  return new Promise(function(resolve, reject){
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = function(){
+      try {
+        let w = img.naturalWidth, h = img.naturalHeight;
+        if (w > maxDim || h > maxDim) {
+          const scale = Math.min(maxDim / w, maxDim / h);
+          w = Math.round(w * scale);
+          h = Math.round(h * scale);
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = w; canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, w, h);
+        URL.revokeObjectURL(url);
+
+        let q = 0.85;
+        const tryBlob = function(){
+          canvas.toBlob(function(blob){
+            if (!blob) { resolve(file); return; }
+            if (blob.size <= maxKB * 1024 || q <= 0.35) {
+              const nuevoNombre = (file.name || 'foto').replace(/\.[^.]+$/, '') + '.jpg';
+              try {
+                resolve(new File([blob], nuevoNombre, { type: 'image/jpeg' }));
+              } catch(_){
+                blob.name = nuevoNombre;
+                resolve(blob);
+              }
+            } else {
+              q -= 0.1;
+              tryBlob();
+            }
+          }, 'image/jpeg', q);
+        };
+        tryBlob();
+      } catch(e){ URL.revokeObjectURL(url); resolve(file); }
+    };
+    img.onerror = function(){ URL.revokeObjectURL(url); resolve(file); };
+    img.src = url;
+  });
+}
+
 // Cargar info del usuario al iniciar
 (async function() {
   try {
@@ -622,11 +676,13 @@ function goCargarSellado() {
 }
 
 async function onFotoSellado(ev) {
-  const file = ev.target.files && ev.target.files[0];
+  let file = ev.target.files && ev.target.files[0];
   if (!file) return;
+  $('loading-sub').textContent = 'Optimizando foto…';
+  showView('view-loading', { title:'Procesando…' });
+  file = await _comprimirImagen(file);
   S.fotoFile = file;
   $('loading-sub').textContent = 'Buscando el N° de remito en la base…';
-  showView('view-loading', { title:'Procesando…' });
 
   try {
     const fd = new FormData();
@@ -841,12 +897,13 @@ async function enviarSG() {
   const fecha = $('esg-fecha').value;
   const nrem  = $('esg-nrem').value.trim();
   const notas = $('esg-notas').value.trim();
-  const foto  = $('esg-foto').files[0];
+  let foto    = $('esg-foto').files[0];
   if (!cant || cant <= 0) { alert('Cantidad inválida'); return; }
   if (!fecha)             { alert('Falta la fecha'); return; }
   if (!S.user || !S.user.deposito_proveedor_id) {
     alert('No tenés proveedor asignado'); return;
   }
+  if (foto) foto = await _comprimirImagen(foto);
   try {
     const fd = new FormData();
     fd.append('es_envio_a_sg', '1');
@@ -909,11 +966,13 @@ async function enviarStockReal() {
 }
 
 async function onFotoDespacho(ev) {
-  const file = ev.target.files && ev.target.files[0];
+  let file = ev.target.files && ev.target.files[0];
   if (!file) return;
+  $('loading-sub').textContent = 'Optimizando foto…';
+  showView('view-loading', { title:'Procesando…' });
+  file = await _comprimirImagen(file);
   S.fotoFile = file;
   $('loading-sub').textContent = 'Leyendo los datos del remito…';
-  showView('view-loading', { title:'Procesando…' });
   try {
     const fd = new FormData();
     fd.append('foto', file);

@@ -3029,6 +3029,20 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
 
 <!-- ==================== MÓDULO IFCO — control de cajones retornables ==================== -->
 <div class="sec" id="sec-ab-ifcos">
+  <!-- Banner mobile: si la pantalla es chica, sugerir la app mobile -->
+  <div id="ifco-mobile-banner" style="display:none;background:#dbeafe;border:1px solid #93c5fd;border-radius:8px;padding:10px 12px;margin-bottom:12px;font-size:13px;color:#1e3a8a">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+      <div style="flex:1;min-width:200px;line-height:1.4">
+        📱 <b>Estás viendo el panel admin desde un celular.</b><br>
+        <span style="font-size:11px;color:#1e40af">Para la operatoria diaria (cargar despachos, sellados, fotos) la app mobile es más rápida y simple.</span>
+      </div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap">
+        <a href="/m/ifco" class="btn bb" style="font-size:12px;text-decoration:none;padding:6px 12px">→ Abrir app mobile</a>
+        <button onclick="document.getElementById('ifco-mobile-banner').style.display='none';try{localStorage.setItem('ifco_hide_mobile_banner','1')}catch(_){}" class="btn bo" style="font-size:11px;padding:4px 8px" title="No mostrar más">Ocultar</button>
+      </div>
+    </div>
+  </div>
+
   <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:12px">
     <div>
       <div style="font-size:22px;font-weight:600">📦 Gestión de IFCOs</div>
@@ -15901,6 +15915,47 @@ function _ifcoToday()    { const d = new Date(); const m = String(d.getMonth()+1
 function _ifcoBadge(est) { return '<span class="ifco-badge ifco-badge-'+est+'">'+est+'</span>'; }
 function _ifcoEsc(s)     { return String(s == null ? '' : s).replace(/[&<>"']/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
 
+// Comprime una imagen client-side antes de enviar al backend.
+// La API de Claude (OCR) rechaza > 5MB; celulares modernos sacan fotos de 8-12MB.
+// Reescala a max 1600px de lado mayor + JPEG quality progresivamente menor hasta entrar bajo 4.5MB.
+async function _ifcoComprimirImagen(file, maxKB, maxDim) {
+  maxKB = maxKB || 4500;
+  maxDim = maxDim || 1600;
+  if (!file || !file.type || !file.type.startsWith('image/')) return file;
+  if (file.size <= maxKB * 1024 && file.size <= 3 * 1024 * 1024) return file;
+  return new Promise(function(resolve){
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = function(){
+      try {
+        let w = img.naturalWidth, h = img.naturalHeight;
+        if (w > maxDim || h > maxDim) {
+          const scale = Math.min(maxDim / w, maxDim / h);
+          w = Math.round(w * scale); h = Math.round(h * scale);
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = w; canvas.height = h;
+        canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+        URL.revokeObjectURL(url);
+        let q = 0.85;
+        const tryBlob = function(){
+          canvas.toBlob(function(blob){
+            if (!blob) { resolve(file); return; }
+            if (blob.size <= maxKB * 1024 || q <= 0.35) {
+              const n = (file.name || 'foto').replace(/\.[^.]+$/, '') + '.jpg';
+              try { resolve(new File([blob], n, { type: 'image/jpeg' })); }
+              catch(_){ blob.name = n; resolve(blob); }
+            } else { q -= 0.1; tryBlob(); }
+          }, 'image/jpeg', q);
+        };
+        tryBlob();
+      } catch(e){ URL.revokeObjectURL(url); resolve(file); }
+    };
+    img.onerror = function(){ URL.revokeObjectURL(url); resolve(file); };
+    img.src = url;
+  });
+}
+
 async function _ifcoFetch(url, opts) {
   const r = await fetch(url, Object.assign({ credentials: 'include' }, opts || {}));
   const ct = r.headers.get('content-type') || '';
@@ -16133,6 +16188,14 @@ function ifcoAbrirFAQ() {
 }
 
 async function ifcoCargarResumen() {
+  // Mostrar banner mobile si está en pantalla chica y no fue ocultado
+  try {
+    const isMobile = window.innerWidth < 768;
+    const hidden = localStorage.getItem('ifco_hide_mobile_banner') === '1';
+    const banner = document.getElementById('ifco-mobile-banner');
+    if (banner && isMobile && !hidden) banner.style.display = 'block';
+    else if (banner) banner.style.display = 'none';
+  } catch(_){}
   document.getElementById('ifco-resumen-loading').style.display = 'block';
   document.getElementById('ifco-resumen-content').style.display = 'none';
   try {
@@ -16985,8 +17048,10 @@ function ifcoSaltarOcrDespacho() {
 }
 
 async function ifcoOnFotoDespacho(ev) {
-  const file = ev.target.files[0];
+  let file = ev.target.files[0];
   if (!file) return;
+  file = await _ifcoComprimirImagen(file);
+  ev.target._compressedFile = file;
   const _ckYS = document.getElementById('ifco-r-ya-sellado'); const yaSellado = _ckYS ? _ckYS.checked : false;
   // Preview
   const prev = document.getElementById('ifco-r-foto-preview');
@@ -17628,11 +17693,12 @@ function ifcoAbrirCargarSellado() {
 
 // Recibe la foto, llama al match-sellado y rutea según el resultado
 async function ifcoCargarSelladoFoto(ev) {
-  const file = ev.target.files && ev.target.files[0];
+  let file = ev.target.files && ev.target.files[0];
   if (!file) return;
   document.getElementById('ifco-cs-step-foto').style.display = 'none';
   document.getElementById('ifco-cs-step-loading').style.display = 'block';
   document.getElementById('ifco-cs-step-error').style.display = 'none';
+  file = await _ifcoComprimirImagen(file);
   try {
     const fd = new FormData();
     fd.append('foto', file);
@@ -17819,8 +17885,10 @@ function ifcoSaltarOcrSellado() {
 }
 
 async function ifcoOnFotoSellado(ev) {
-  const file = ev.target.files[0];
+  let file = ev.target.files[0];
   if (!file) return;
+  file = await _ifcoComprimirImagen(file);
+  ev.target._compressedFile = file;
   const prev = document.getElementById('ifco-s-foto-preview');
   prev.style.display = 'block';
   prev.querySelector('img').src = URL.createObjectURL(file);
