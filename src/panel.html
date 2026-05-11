@@ -12323,16 +12323,27 @@ function paGuardarCompra(){
   if (errorValidacion) return toast(errorValidacion, 'er');
   if(!items.length) return toast(esServicio ? 'Agregá al menos un concepto' : 'Agregá al menos un producto','er');
 
-  // Asiento inline — validar si está visible
+  // Asiento contable — OBLIGATORIO
   var asWrap = document.getElementById('pa-comp-asiento-wrap');
   var asientoLineas = null;
-  if (asWrap && asWrap.style.display !== 'none') {
-    asientoLineas = paCompAsientoGetLineas();
-    if (asientoLineas.length) {
-      var asDebe = 0, asHaber = 0;
-      asientoLineas.forEach(function(l){ asDebe += l.debe; asHaber += l.haber; });
-      if (Math.abs(asDebe - asHaber) >= 0.01) return toast('❌ El asiento contable no cuadra. Corregilo antes de guardar.', 'er');
-    }
+
+  // Si el asiento no está visible (proveedor sin modelo o sin seleccionar)
+  if (!asWrap || asWrap.style.display === 'none') {
+    return toast('❌ Debés cargar el asiento contable antes de registrar la factura. Seleccioná un proveedor con modelo asignado.', 'er');
+  }
+
+  asientoLineas = paCompAsientoGetLineas();
+
+  // Si no hay líneas
+  if (!asientoLineas.length) {
+    return toast('❌ El asiento contable está vacío. Completá las líneas antes de guardar.', 'er');
+  }
+
+  // Si no cuadra
+  var asDebe = 0, asHaber = 0;
+  asientoLineas.forEach(function(l){ asDebe += l.debe; asHaber += l.haber; });
+  if (Math.abs(asDebe - asHaber) >= 0.01) {
+    return toast('❌ El asiento contable no cuadra (Debe: $' + asDebe.toFixed(2) + ' / Haber: $' + asHaber.toFixed(2) + '). Corregilo antes de guardar.', 'er');
   }
 
   var body = { fecha, nro_factura:factura, tipo_comprobante:tipoComp, proveedor_id:parseInt(prov), notas, items, remito_foto_b64: PA._compraFotoB64||null };
