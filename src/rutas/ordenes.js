@@ -144,11 +144,77 @@ router.post('/', (req, res) => {
           .run(opId, parseInt(cheque_prop_id));
       }
 
-      return { opId, numero };
+      // ── Asiento contable automático ────────────────────────────────────────
+      // Debe: cuenta contable del proveedor (cancela el pasivo)
+      // Haber: cuenta contable del banco/caja (egreso de fondos)
+      // Solo se genera si ambas cuentas contables están configuradas.
+      let asientoId = null;
+      try {
+        // Cuenta contable del banco (solo aplica para transferencia/efectivo)
+        let cuentaBancariaContableId = null;
+        if (cuenta_fin_id) {
+          const cuentaFin = db.prepare('SELECT cuenta_contable_id FROM fin_cuentas WHERE id=?')
+            .get(parseInt(cuenta_fin_id));
+          cuentaBancariaContableId = cuentaFin?.cuenta_contable_id || null;
+        }
+
+        // Cuenta contable del proveedor (línea tipo_linea='proveedores' en su asiento modelo)
+        const lineaProv = db.prepare(`
+          SELECT aml.cuenta_id
+          FROM adm_asientos_modelo_lineas aml
+          JOIN adm_proveedores ap ON ap.asiento_modelo_id = aml.modelo_id
+          WHERE ap.id = ? AND aml.tipo_linea = 'proveedores'
+          LIMIT 1
+        `).get(parseInt(proveedor_id));
+        const cuentaProveedorId = lineaProv?.cuenta_id || null;
+
+        if (cuentaBancariaContableId && cuentaProveedorId) {
+          // Nombre del proveedor para la descripción
+          const prov = db.prepare('SELECT razon_social FROM adm_proveedores WHERE id=?')
+            .get(parseInt(proveedor_id));
+          const nombreProv = prov?.razon_social || `Prov. #${proveedor_id}`;
+
+          const asiento = db.prepare(`
+            INSERT INTO pa_asientos (fecha, descripcion, usuario_id, ref_codigo)
+            VALUES (?, ?, ?, ?)
+          `).run(
+            fechaOp,
+            `Pago OP ${numero} — ${nombreProv}`,
+            u ? u.id : null,
+            numero
+          );
+          asientoId = asiento.lastInsertRowid;
+
+          // Debe: cuenta proveedor
+          db.prepare(`
+            INSERT INTO pa_asientos_lineas (asiento_id, cuenta_id, debe, haber, descripcion)
+            VALUES (?, ?, ?, 0, ?)
+          `).run(asientoId, cuentaProveedorId, parseFloat(monto_total),
+            `Cancelación deuda — ${numero}`);
+
+          // Haber: cuenta bancaria
+          db.prepare(`
+            INSERT INTO pa_asientos_lineas (asiento_id, cuenta_id, debe, haber, descripcion)
+            VALUES (?, ?, 0, ?, ?)
+          `).run(asientoId, cuentaBancariaContableId, parseFloat(monto_total),
+            `Pago ${forma_pago} — ${numero}`);
+
+          // Vincular asiento a la OP
+          db.prepare('UPDATE fin_ordenes_pago SET asiento_id=? WHERE id=?').run(asientoId, opId);
+          console.log(`[OP] Asiento contable #${asientoId} generado para ${numero}`);
+        } else {
+          console.log(`[OP] ${numero} sin asiento contable: falta cuenta contable del ${!cuentaProveedorId ? 'proveedor' : 'banco'}`);
+        }
+      } catch(eAsiento) {
+        // El asiento falla silenciosamente — la OP igual se crea
+        console.error(`[OP] Error generando asiento para ${numero}:`, eAsiento.message);
+      }
+
+      return { opId, numero, asientoId };
     });
 
     const result = crear();
-    res.json({ ok: true, id: result.opId, numero: result.numero });
+    res.json({ ok: true, id: result.opId, numero: result.numero, asiento_id: result.asientoId });
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
@@ -174,6 +240,12 @@ router.patch('/:id/anular', (req, res) => {
       if (op.cheque_prop_id) {
         db.prepare("UPDATE fin_cheques_propios SET estado='disponible', pago_id=NULL WHERE id=?")
           .run(op.cheque_prop_id);
+      }
+      // Anular asiento contable si existe
+      if (op.asiento_id) {
+        db.prepare("UPDATE pa_asientos SET anulado=1, anulado_en=datetime('now','localtime') WHERE id=?")
+          .run(op.asiento_id);
+        console.log(`[OP] Asiento #${op.asiento_id} anulado junto con OP #${op.id}`);
       }
       db.prepare("UPDATE fin_ordenes_pago SET estado='anulada' WHERE id=?").run(op.id);
     });
