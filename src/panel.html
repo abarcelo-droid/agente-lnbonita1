@@ -2796,6 +2796,10 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       <div class="fl ff"><label>CBU</label><input type="text" id="fin-cuenta-cbu" placeholder="22 dígitos"></div>
       <div class="fl ff"><label>Alias</label><input type="text" id="fin-cuenta-alias"></div>
       <div class="fl ff"><label>Saldo Inicial</label><input type="number" id="fin-cuenta-saldo" step="0.01" value="0"></div>
+      <div class="fl ff">
+        <label>Cuenta Contable <span style="font-size:11px;color:var(--muted)">(para asientos automáticos)</span></label>
+        <select id="fin-cuenta-contable" style="font-size:13px"></select>
+      </div>
     </div>
     <div class="ab-modal-footer">
       <button class="btn bo" onclick="document.getElementById('fin-mb-cuenta').classList.remove('on')">Cancelar</button>
@@ -21024,6 +21028,7 @@ function finNuevaCuenta() {
   document.getElementById('fin-cuenta-tipo').value = 'cuenta_corriente';
   document.getElementById('fin-cuenta-moneda').value = 'ARS';
   document.getElementById('fin-cuenta-saldo').value = '0';
+  document.getElementById('fin-cuenta-contable').innerHTML = admCuentasOpts('');
   document.getElementById('fin-mb-cuenta').classList.add('on');
 }
 
@@ -21040,6 +21045,7 @@ function finEditarCuenta(id) {
   document.getElementById('fin-cuenta-cbu').value    = c.cbu    || '';
   document.getElementById('fin-cuenta-alias').value  = c.alias  || '';
   document.getElementById('fin-cuenta-saldo').value  = c.saldo_inicial || 0;
+  document.getElementById('fin-cuenta-contable').innerHTML = admCuentasOpts(c.cuenta_contable_id || '');
   document.getElementById('fin-mb-cuenta').classList.add('on');
 }
 
@@ -21054,7 +21060,8 @@ function finGuardarCuenta() {
     moneda: document.getElementById('fin-cuenta-moneda').value,
     cbu:    document.getElementById('fin-cuenta-cbu').value.trim() || null,
     alias:  document.getElementById('fin-cuenta-alias').value.trim() || null,
-    saldo_inicial: parseFloat(document.getElementById('fin-cuenta-saldo').value || 0)
+    saldo_inicial: parseFloat(document.getElementById('fin-cuenta-saldo').value || 0),
+    cuenta_contable_id: document.getElementById('fin-cuenta-contable').value || null
   };
   var url    = id ? '/cuentas/' + id : '/cuentas';
   var method = id ? 'PUT' : 'POST';
