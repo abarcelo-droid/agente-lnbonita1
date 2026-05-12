@@ -1544,7 +1544,17 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   </label>
 </div>
 <div class="pa-wrap"><div class="ab-table-wrap"><table class="pa-tbl">
-  <thead><tr><th>Fecha</th><th>Tipo</th><th>Comprobante</th><th>Proveedor</th><th>Detalle</th><th style="text-align:right">Total</th><th>Foto</th><th></th></tr></thead>
+  <thead>
+    <tr><th>Fecha</th><th>Tipo</th><th>Comprobante</th><th>Proveedor</th><th>Detalle</th><th style="text-align:right">Total</th><th>Foto</th><th></th></tr>
+    <tr style="background:var(--bg)">
+      <th><input type="text" placeholder="🔍" oninput="tablaFiltrar('pa-comp-tbody',0,this.value)" style="width:90%;font-size:11px;padding:3px 5px;border:1px solid var(--bor2);border-radius:4px"></th>
+      <th><input type="text" placeholder="🔍" oninput="tablaFiltrar('pa-comp-tbody',1,this.value)" style="width:90%;font-size:11px;padding:3px 5px;border:1px solid var(--bor2);border-radius:4px"></th>
+      <th><input type="text" placeholder="🔍" oninput="tablaFiltrar('pa-comp-tbody',2,this.value)" style="width:90%;font-size:11px;padding:3px 5px;border:1px solid var(--bor2);border-radius:4px"></th>
+      <th><input type="text" placeholder="🔍" oninput="tablaFiltrar('pa-comp-tbody',3,this.value)" style="width:90%;font-size:11px;padding:3px 5px;border:1px solid var(--bor2);border-radius:4px"></th>
+      <th><input type="text" placeholder="🔍" oninput="tablaFiltrar('pa-comp-tbody',4,this.value)" style="width:90%;font-size:11px;padding:3px 5px;border:1px solid var(--bor2);border-radius:4px"></th>
+      <th></th><th></th><th></th>
+    </tr>
+  </thead>
   <tbody id="pa-comp-tbody"><tr><td colspan="8" class="emp">Cargando...</td></tr></tbody>
 </table></div></div>
 </div>
@@ -2540,7 +2550,10 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
 
   <!-- Tabla de facturas -->
   <div id="cc-facturas-wrap" style="display:none">
-    <div style="font-size:12px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.07em;margin-bottom:8px">Facturas</div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+      <div style="font-size:12px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.07em">Facturas</div>
+      <button class="btn bo bs" onclick="exportarCC()" title="Exportar a Excel" style="font-size:11px">📥 Excel</button>
+    </div>
     <div style="overflow-x:auto;border:1px solid var(--bor);border-radius:10px">
       <table style="width:100%;border-collapse:collapse;font-size:13px">
         <thead>
@@ -2551,6 +2564,12 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
             <th style="padding:9px 12px;text-align:right;font-size:10px;color:var(--mut);text-transform:uppercase">Pagado</th>
             <th style="padding:9px 12px;text-align:right;font-size:10px;color:var(--mut);text-transform:uppercase">Pendiente</th>
             <th style="padding:9px 12px;text-align:center;font-size:10px;color:var(--mut);text-transform:uppercase">Estado</th>
+          </tr>
+          <tr style="background:var(--bg)">
+            <th><input type="text" placeholder="🔍" oninput="tablaFiltrar('cc-facturas-tbody',0,this.value)" style="width:90%;font-size:11px;padding:3px 5px;border:1px solid var(--bor2);border-radius:4px"></th>
+            <th><input type="text" placeholder="🔍" oninput="tablaFiltrar('cc-facturas-tbody',1,this.value)" style="width:90%;font-size:11px;padding:3px 5px;border:1px solid var(--bor2);border-radius:4px"></th>
+            <th></th><th></th><th></th>
+            <th><input type="text" placeholder="🔍" oninput="tablaFiltrar('cc-facturas-tbody',5,this.value)" style="width:90%;font-size:11px;padding:3px 5px;border:1px solid var(--bor2);border-radius:4px"></th>
           </tr>
         </thead>
         <tbody id="cc-facturas-tbody"></tbody>
@@ -2570,6 +2589,12 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
             <th style="padding:9px 12px;text-align:left;font-size:10px;color:var(--mut);text-transform:uppercase">Referencia</th>
             <th style="padding:9px 12px;text-align:right;font-size:10px;color:var(--mut);text-transform:uppercase">Monto</th>
             <th style="width:40px"></th>
+          </tr>
+          <tr style="background:var(--bg)">
+            <th><input type="text" placeholder="🔍" oninput="tablaFiltrar('cc-pagos-tbody',0,this.value)" style="width:90%;font-size:11px;padding:3px 5px;border:1px solid var(--bor2);border-radius:4px"></th>
+            <th><input type="text" placeholder="🔍" oninput="tablaFiltrar('cc-pagos-tbody',1,this.value)" style="width:90%;font-size:11px;padding:3px 5px;border:1px solid var(--bor2);border-radius:4px"></th>
+            <th><input type="text" placeholder="🔍" oninput="tablaFiltrar('cc-pagos-tbody',2,this.value)" style="width:90%;font-size:11px;padding:3px 5px;border:1px solid var(--bor2);border-radius:4px"></th>
+            <th></th><th></th>
           </tr>
         </thead>
         <tbody id="cc-pagos-tbody"></tbody>
@@ -2834,14 +2859,22 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   </div>
   <div style="overflow-x:auto;border:1px solid var(--bor);border-radius:10px">
     <table style="width:100%;border-collapse:collapse;font-size:13px">
-      <thead><tr style="background:var(--bg);border-bottom:1px solid var(--bor)">
-        <th style="padding:9px 12px;text-align:left;font-size:10px;color:var(--mut);text-transform:uppercase">Fecha</th>
-        <th style="padding:9px 12px;text-align:left;font-size:10px;color:var(--mut);text-transform:uppercase">Cuenta</th>
-        <th style="padding:9px 12px;text-align:left;font-size:10px;color:var(--mut);text-transform:uppercase">Concepto</th>
-        <th style="padding:9px 12px;text-align:right;font-size:10px;color:var(--mut);text-transform:uppercase">Ingreso</th>
-        <th style="padding:9px 12px;text-align:right;font-size:10px;color:var(--mut);text-transform:uppercase">Egreso</th>
-        <th style="width:40px"></th>
-      </tr></thead>
+      <thead>
+        <tr style="background:var(--bg);border-bottom:1px solid var(--bor)">
+          <th style="padding:9px 12px;text-align:left;font-size:10px;color:var(--mut);text-transform:uppercase">Fecha</th>
+          <th style="padding:9px 12px;text-align:left;font-size:10px;color:var(--mut);text-transform:uppercase">Cuenta</th>
+          <th style="padding:9px 12px;text-align:left;font-size:10px;color:var(--mut);text-transform:uppercase">Concepto</th>
+          <th style="padding:9px 12px;text-align:right;font-size:10px;color:var(--mut);text-transform:uppercase">Ingreso</th>
+          <th style="padding:9px 12px;text-align:right;font-size:10px;color:var(--mut);text-transform:uppercase">Egreso</th>
+          <th style="width:40px"></th>
+        </tr>
+        <tr style="background:var(--bg)">
+          <th><input type="text" placeholder="🔍" oninput="tablaFiltrar('fin-tbody-movim',0,this.value)" style="width:90%;font-size:11px;padding:3px 5px;border:1px solid var(--bor2);border-radius:4px"></th>
+          <th><input type="text" placeholder="🔍" oninput="tablaFiltrar('fin-tbody-movim',1,this.value)" style="width:90%;font-size:11px;padding:3px 5px;border:1px solid var(--bor2);border-radius:4px"></th>
+          <th><input type="text" placeholder="🔍" oninput="tablaFiltrar('fin-tbody-movim',2,this.value)" style="width:90%;font-size:11px;padding:3px 5px;border:1px solid var(--bor2);border-radius:4px"></th>
+          <th></th><th></th><th></th>
+        </tr>
+      </thead>
       <tbody id="fin-tbody-movim"></tbody>
     </table>
   </div>
