@@ -2029,5 +2029,117 @@ db.exec(`
   } catch(e) { console.error('[ADM] Error migrando config impositiva:', e.message); }
 })();
 
+// ── MÓDULO VENTAS ─────────────────────────────────────────────────────────────
+(function migrarVentas() {
+  try {
+    db.exec(`
+      -- Padrón de Clientes
+      CREATE TABLE IF NOT EXISTS ven_clientes (
+        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+        razon_social    TEXT NOT NULL,
+        nombre_comercial TEXT,
+        cuit            TEXT,
+        condicion_iva   TEXT DEFAULT 'responsable_inscripto',
+        direccion       TEXT,
+        telefono        TEXT,
+        email           TEXT,
+        contacto        TEXT,
+        rubro           TEXT,
+        notas           TEXT,
+        cuenta_contable_id INTEGER REFERENCES pa_cuentas(id),
+        activo          INTEGER NOT NULL DEFAULT 1,
+        creado_en       TEXT DEFAULT (datetime('now','localtime'))
+      );
+
+      -- Liquidaciones de Producto (recibidas del acopiador)
+      CREATE TABLE IF NOT EXISTS ven_liquidaciones (
+        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+        numero          TEXT NOT NULL UNIQUE,
+        fecha           TEXT NOT NULL DEFAULT (date('now','localtime')),
+        cliente_id      INTEGER NOT NULL REFERENCES ven_clientes(id),
+        nro_remito      TEXT,
+        observaciones   TEXT,
+        precio_bruto    REAL NOT NULL DEFAULT 0,
+        desc_comision   REAL NOT NULL DEFAULT 0,
+        desc_flete      REAL NOT NULL DEFAULT 0,
+        desc_carga_descarga REAL NOT NULL DEFAULT 0,
+        desc_otros      REAL NOT NULL DEFAULT 0,
+        ret_iva         REAL NOT NULL DEFAULT 0,
+        ret_ganancias   REAL NOT NULL DEFAULT 0,
+        ret_iibb        REAL NOT NULL DEFAULT 0,
+        ret_otras       REAL NOT NULL DEFAULT 0,
+        neto_acreditar  REAL NOT NULL DEFAULT 0,
+        estado          TEXT NOT NULL DEFAULT 'pendiente' CHECK(estado IN ('pendiente','cobrada','anulada')),
+        asiento_id      INTEGER REFERENCES pa_asientos(id),
+        usuario_id      INTEGER,
+        creado_en       TEXT DEFAULT (datetime('now','localtime'))
+      );
+
+      -- Ítems de la liquidación (uno por cultivo/producto)
+      CREATE TABLE IF NOT EXISTS ven_liquidacion_items (
+        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+        liquidacion_id  INTEGER NOT NULL REFERENCES ven_liquidaciones(id),
+        descripcion     TEXT NOT NULL,
+        kilos           REAL,
+        precio_unitario REAL,
+        subtotal        REAL NOT NULL DEFAULT 0
+      );
+
+      -- Facturas de Venta (emitidas por nosotros)
+      CREATE TABLE IF NOT EXISTS ven_facturas (
+        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+        numero          TEXT NOT NULL UNIQUE,
+        fecha           TEXT NOT NULL DEFAULT (date('now','localtime')),
+        cliente_id      INTEGER NOT NULL REFERENCES ven_clientes(id),
+        tipo            TEXT NOT NULL DEFAULT 'A' CHECK(tipo IN ('A','B','C')),
+        concepto        TEXT,
+        neto            REAL NOT NULL DEFAULT 0,
+        iva             REAL NOT NULL DEFAULT 0,
+        total           REAL NOT NULL DEFAULT 0,
+        estado          TEXT NOT NULL DEFAULT 'pendiente' CHECK(estado IN ('pendiente','cobrada','anulada')),
+        asiento_id      INTEGER REFERENCES pa_asientos(id),
+        notas           TEXT,
+        usuario_id      INTEGER,
+        creado_en       TEXT DEFAULT (datetime('now','localtime'))
+      );
+
+      -- Ítems de factura de venta
+      CREATE TABLE IF NOT EXISTS ven_factura_items (
+        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+        factura_id      INTEGER NOT NULL REFERENCES ven_facturas(id),
+        descripcion     TEXT NOT NULL,
+        cantidad        REAL DEFAULT 1,
+        precio_unitario REAL DEFAULT 0,
+        subtotal        REAL NOT NULL DEFAULT 0
+      );
+
+      -- Cobranzas (pagos recibidos de clientes)
+      CREATE TABLE IF NOT EXISTS ven_cobranzas (
+        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+        fecha           TEXT NOT NULL DEFAULT (date('now','localtime')),
+        cliente_id      INTEGER NOT NULL REFERENCES ven_clientes(id),
+        monto           REAL NOT NULL,
+        forma_pago      TEXT DEFAULT 'transferencia',
+        referencia      TEXT,
+        notas           TEXT,
+        anulada         INTEGER NOT NULL DEFAULT 0,
+        usuario_id      INTEGER,
+        creado_en       TEXT DEFAULT (datetime('now','localtime'))
+      );
+
+      -- Vínculos cobranza ↔ liquidaciones/facturas
+      CREATE TABLE IF NOT EXISTS ven_cobranza_docs (
+        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+        cobranza_id     INTEGER NOT NULL REFERENCES ven_cobranzas(id),
+        tipo            TEXT NOT NULL CHECK(tipo IN ('liquidacion','factura')),
+        doc_id          INTEGER NOT NULL,
+        monto           REAL NOT NULL
+      );
+    `);
+
+    console.log('[VEN] Tablas ventas listas');
+  } catch(e) { console.error('[VEN] Error migrando ventas:', e.message); }
+})();
+
 export { db };
 export default db;
