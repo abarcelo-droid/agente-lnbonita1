@@ -6,7 +6,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { getDb } from '../servicios/db.js';
-import '../servicios/db_pa.js'; // Asegura que las tablas existan
+import dbPa from '../servicios/db_pa.js'; // DB contable — asientos, proveedores
 
 const router = express.Router();
 const __dirnamePA = path.dirname(fileURLToPath(import.meta.url));
@@ -858,7 +858,73 @@ router.post('/compras', requireAuth, (req, res) => {
       return compraId;
     });
     const id = nuevaCompra();
-    res.json({ ok: true, id, neto_total, iva_total, total });
+
+    // ── Generar asiento contable ──────────────────────────────────────────────
+    // Si el frontend envió líneas → usarlas directamente
+    // Si no → auto-generar desde el modelo del proveedor
+    let asientoRef = null;
+    try {
+      const { asiento_lineas } = req.body;
+      let lineas = asiento_lineas || null;
+
+      if (!lineas || !lineas.length) {
+        // Auto-generar desde modelo del proveedor
+        const prov = dbPa.prepare('SELECT asiento_modelo_id, razon_social FROM adm_proveedores WHERE id=?').get(parseInt(proveedor_id));
+        if (prov?.asiento_modelo_id) {
+          const modeloLineas = dbPa.prepare('SELECT * FROM adm_asientos_modelo_lineas WHERE modelo_id=? ORDER BY id').all(prov.asiento_modelo_id);
+          if (modeloLineas.length >= 2) {
+            // Mapear tipo_linea a montos de la compra
+            const montosPorTipo = {
+              proveedores: total,        // Haber: deuda con proveedor
+              iva: iva_total,            // Debe: IVA crédito fiscal
+              percepcion_iva: 0,
+              percepcion_iibb: 0,
+              percepcion_ganancias: 0,
+              retencion: 0,
+              libre: neto_total          // Debe: gasto/compra
+            };
+            lineas = modeloLineas.map(function(ml) {
+              const monto = montosPorTipo[ml.tipo_linea] ?? 0;
+              return {
+                cuenta_id: ml.cuenta_id,
+                debe: ml.tipo === 'debe' ? monto : 0,
+                haber: ml.tipo === 'haber' ? monto : 0,
+                descripcion: ml.descripcion || ml.tipo_linea
+              };
+            }).filter(l => l.debe > 0 || l.haber > 0);
+            // Verificar partida doble
+            const sumDebe  = lineas.reduce((s,l) => s + l.debe,  0);
+            const sumHaber = lineas.reduce((s,l) => s + l.haber, 0);
+            if (Math.abs(sumDebe - sumHaber) > 0.01) lineas = null; // No cuadra → no generar
+          }
+        }
+      }
+
+      if (lineas && lineas.length >= 2) {
+        const año = new Date().getFullYear();
+        const ultimo = dbPa.prepare(`SELECT ref_codigo FROM pa_asientos WHERE ref_codigo LIKE 'FAC-${año}-%' ORDER BY id DESC LIMIT 1`).get();
+        let seq = 1;
+        if (ultimo?.ref_codigo) { const p = ultimo.ref_codigo.split('-'); seq = (parseInt(p[2])||0)+1; }
+        const refCodigo = `FAC-${año}-${String(seq).padStart(4,'0')}`;
+        const prov = dbPa.prepare('SELECT razon_social FROM adm_proveedores WHERE id=?').get(parseInt(proveedor_id));
+        const desc = `${refCodigo} | ${prov?.razon_social||'Proveedor'} | ${nro_factura||'S/N'}`;
+        const fechaCompra = req.body.fecha || new Date().toISOString().slice(0,10);
+
+        const txAsiento = dbPa.transaction(() => {
+          const ra = dbPa.prepare('INSERT INTO pa_asientos (fecha, descripcion, usuario_id, ref_compra_id, ref_codigo) VALUES (?,?,?,?,?)')
+            .run(fechaCompra, desc, req.user?.id||null, id, refCodigo);
+          const ins = dbPa.prepare('INSERT INTO pa_asientos_lineas (asiento_id, cuenta_id, debe, haber, descripcion) VALUES (?,?,?,?,?)');
+          for (const l of lineas) ins.run(ra.lastInsertRowid, l.cuenta_id, parseFloat(l.debe)||0, parseFloat(l.haber)||0, l.descripcion||null);
+          return refCodigo;
+        });
+        asientoRef = txAsiento();
+        console.log(`[PA] Asiento ${asientoRef} generado para compra #${id} (usuario: ${req.user?.id})`);
+      }
+    } catch(eA) {
+      console.error('[PA] Error generando asiento para compra #'+id+':', eA.message);
+    }
+
+    res.json({ ok: true, id, neto_total, iva_total, total, asiento_ref: asientoRef });
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
