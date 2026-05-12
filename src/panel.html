@@ -1528,7 +1528,10 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
 <!-- ─── PA COMPRAS ────────────────────────────────────────────── -->
 <div class="sec" id="sec-pa-compras">
 <div class="ph"><div><div class="ph-t">📥 Ingreso de Factura</div><div class="ph-s">Registro de facturas (agroinsumos, herramientas, otros) y actualización de stock / pañol</div></div>
-<button class="btn bb" onclick="paAbrirNuevaCompra()">+ Nueva factura</button></div>
+<div style="display:flex;gap:8px">
+  <button class="btn bo bs" onclick="exportarFacturas()" title="Exportar a Excel">📥 Excel</button>
+  <button class="btn bb" onclick="paAbrirNuevaCompra()">+ Nueva factura</button>
+</div></div>
 <div class="filt">
   <select id="pa-comp-fil-tipo" onchange="paLoadCompras()" style="font-size:12px">
     <option value="">Todas las facturas</option>
@@ -2235,6 +2238,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     Ver anulados
   </label>
   <button class="btn bo bs" onclick="admLoadAsientos()">↻ Actualizar</button>
+  <button class="btn bo bs" onclick="exportarAsientos()" title="Exportar a Excel">📥 Excel</button>
 </div>
 
 <!-- Tabla asientos -->
@@ -2403,6 +2407,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   <select id="op-filter-prov" onchange="opCargar()" style="font-size:12px;min-width:180px">
     <option value="">Todos los proveedores</option>
   </select>
+  <button class="btn bo bs" onclick="exportarOP()" title="Exportar a Excel">📥 Excel</button>
 </div>
 <div style="overflow-x:auto;border:1px solid var(--bor);border-radius:10px">
   <table style="width:100%;border-collapse:collapse;font-size:13px">
@@ -2488,6 +2493,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       <option value="">— Seleccioná un proveedor —</option>
     </select>
     <button class="btn bb" onclick="ccNuevoPago()" id="cc-btn-pago" style="display:none">+ Nuevo Pago</button>
+    <button class="btn bo bs" onclick="exportarCC()" id="cc-btn-export" style="display:none" title="Exportar a Excel">📥 Excel</button>
   </div>
 
   <!-- Resumen de saldos -->
@@ -2684,7 +2690,10 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       <option value="rechazado">Rechazado</option>
       <option value="anulado">Anulado</option>
     </select>
-    <button class="btn bb" onclick="finNuevoChequeProp()">+ Nuevo Cheque</button>
+    <div style="display:flex;gap:8px">
+      <button class="btn bo bs" onclick="exportarChequesPropios()" title="Exportar a Excel">📥 Excel</button>
+      <button class="btn bb" onclick="finNuevoChequeProp()">+ Nuevo Cheque</button>
+    </div>
   </div>
   <div style="overflow-x:auto;border:1px solid var(--bor);border-radius:10px">
     <table style="width:100%;border-collapse:collapse;font-size:13px">
@@ -2712,7 +2721,10 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       <option value="endosado">Endosado</option>
       <option value="rechazado">Rechazado</option>
     </select>
-    <button class="btn bb" onclick="finNuevoChequeTer()">+ Nuevo Cheque</button>
+    <div style="display:flex;gap:8px">
+      <button class="btn bo bs" onclick="exportarChequesTerceros()" title="Exportar a Excel">📥 Excel</button>
+      <button class="btn bb" onclick="finNuevoChequeTer()">+ Nuevo Cheque</button>
+    </div>
   </div>
   <div style="overflow-x:auto;border:1px solid var(--bor);border-radius:10px">
     <table style="width:100%;border-collapse:collapse;font-size:13px">
@@ -2739,6 +2751,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     </select>
     <input type="date" id="fin-filter-mov-desde" onchange="finCargarMovimientos()" style="font-size:12px">
     <input type="date" id="fin-filter-mov-hasta" onchange="finCargarMovimientos()" style="font-size:12px">
+    <button class="btn bo bs" onclick="exportarMovimientos()" title="Exportar a Excel">📥 Excel</button>
     <button class="btn bb" onclick="finNuevoMovimiento()">+ Movimiento</button>
   </div>
   <div style="overflow-x:auto;border:1px solid var(--bor);border-radius:10px">
@@ -8416,6 +8429,7 @@ function admLoadAsientos() {
   if (anulados === '1') qs.push('anulados=1');
   admApi('/asientos' + (qs.length ? '?' + qs.join('&') : '')).then(function(r) {
     var data = r.data || [];
+    EXPORT_DATA.asientos = data;
     var tb = document.getElementById('adm-as-tbody');
     if (!data.length) {
       tb.innerHTML = '<tr><td colspan="8" class="emp">Sin asientos en el período</td></tr>';
@@ -11901,7 +11915,9 @@ function paLoadCompras(){
   if (filTipo && filTipo.value) params.push('tipo_factura='+encodeURIComponent(filTipo.value));
   var qs = params.length ? '?'+params.join('&') : '';
   paF('/api/pa/compras'+qs).then(function(r){
-    var data=r.data||[];var tb=document.getElementById('pa-comp-tbody');
+    var data=r.data||[];
+    EXPORT_DATA.facturas = data;
+    var tb=document.getElementById('pa-comp-tbody');
     if(!data.length){tb.innerHTML='<tr><td colspan="8" class="emp">Sin facturas</td></tr>';return;}
     tb.innerHTML=data.map(function(c){
       var esServicio = c.tipo_factura === 'servicio';
@@ -20856,9 +20872,14 @@ function ccProvCargar() {
     return;
   }
   if (btnPago) btnPago.style.display = '';
+  var btnExport = document.getElementById('cc-btn-export');
   ccApi('/cc/' + CC.provId).then(function(r) {
     if (!r.ok) return toast(r.error || 'Error', 'er');
     CC.facturas = r.data || [];
+    var provNombre = sel.options[sel.selectedIndex].text;
+    EXPORT_DATA.cc.proveedor = provNombre;
+    EXPORT_DATA.cc.facturas  = CC.facturas;
+    if (btnExport) btnExport.style.display = '';
     document.getElementById('cc-resumen').style.display = 'grid';
     document.getElementById('cc-total-compras').textContent   = paMoney(r.totales.total);
     document.getElementById('cc-total-pagado').textContent    = paMoney(r.totales.pagado);
@@ -20887,6 +20908,7 @@ function ccProvCargar() {
   ccApi('?proveedorId=' + CC.provId).then(function(r) {
     if (!r.ok) return;
     var pagos = r.data || [];
+    EXPORT_DATA.cc.pagos = pagos;
     document.getElementById('cc-pagos-wrap').style.display = pagos.length ? '' : 'none';
     var tbody = document.getElementById('cc-pagos-tbody');
     var formas = { transferencia:'Transferencia', efectivo:'Efectivo', cheque_propio:'Cheque Propio', cheque_tercero:'Cheque Tercero' };
@@ -21047,6 +21069,7 @@ function opCargar() {
   if (provId) params.push('proveedorId='+provId);
   opApi('/'+(params.length?'?'+params.join('&'):'')).then(function(r) {
     var data = r.data || [];
+    EXPORT_DATA.op = data;
     var tbody = document.getElementById('op-tbody');
     if (!data.length) { tbody.innerHTML = '<tr><td colspan="7" class="emp">Sin órdenes de pago.</td></tr>'; return; }
     var formas = { transferencia:'Transferencia', efectivo:'Efectivo', cheque_propio:'Cheque Propio', cheque_tercero:'Cheque Tercero' };
@@ -21884,6 +21907,7 @@ function finCargarChequesPropios() {
   var url = '/cheques-propios' + (estado ? '?estado=' + estado : '');
   finApi(url).then(function(r) {
     var data = r.data || [];
+    EXPORT_DATA.chequesPropios = data;
     var tbody = document.getElementById('fin-tbody-cheques-p');
     if (!data.length) { tbody.innerHTML = '<tr><td colspan="7" class="emp">Sin cheques.</td></tr>'; return; }
     tbody.innerHTML = data.map(function(c) {
@@ -21944,6 +21968,7 @@ function finCargarChequesTerceros() {
   var url = '/cheques-terceros' + (estado ? '?estado=' + estado : '');
   finApi(url).then(function(r) {
     var data = r.data || [];
+    EXPORT_DATA.chequesTerceros = data;
     var tbody = document.getElementById('fin-tbody-cheques-t');
     if (!data.length) { tbody.innerHTML = '<tr><td colspan="8" class="emp">Sin cheques de terceros.</td></tr>'; return; }
     tbody.innerHTML = data.map(function(c) {
@@ -22005,6 +22030,7 @@ function finCargarMovimientos() {
   if (hasta)    params.push('hasta=' + hasta);
   finApi('/movimientos' + (params.length ? '?' + params.join('&') : '')).then(function(r) {
     var data = r.data || [];
+    EXPORT_DATA.movimientos = data;
     var tbody = document.getElementById('fin-tbody-movim');
     if (!data.length) { tbody.innerHTML = '<tr><td colspan="6" class="emp">Sin movimientos.</td></tr>'; return; }
     tbody.innerHTML = data.map(function(m) {
@@ -22053,6 +22079,132 @@ function finEliminarMovimiento(id) {
     if (r.ok) { toast('Movimiento eliminado', 'ok'); finCargarMovimientos(); }
     else toast(r.error || 'Error', 'er');
   });
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// EXPORTACIÓN A EXCEL (CSV descargable)
+// ══════════════════════════════════════════════════════════════════════════════
+var EXPORT_DATA = {
+  asientos:[], op:[], chequesPropios:[], chequesTerceros:[],
+  movimientos:[], facturas:[], cc:{ proveedor:'', facturas:[], pagos:[] }
+};
+
+function exportCSV(filas, columnas, nombreArchivo) {
+  if (!filas || !filas.length) return toast('No hay datos para exportar', 'warn');
+  var bom='\uFEFF', sep=';';
+  var cab=columnas.map(function(c){ return '"'+c.label+'"'; }).join(sep);
+  var rows=filas.map(function(f){
+    return columnas.map(function(c){
+      var v=c.fn?c.fn(f):(f[c.key]!=null?f[c.key]:'');
+      return '"'+String(v).replace(/"/g,'""')+'"';
+    }).join(sep);
+  });
+  var blob=new Blob([bom+cab+'\r\n'+rows.join('\r\n')],{type:'text/csv;charset=utf-8;'});
+  var url=URL.createObjectURL(blob);
+  var a=document.createElement('a');
+  a.href=url; a.download=nombreArchivo+'.csv';
+  document.body.appendChild(a); a.click();
+  document.body.removeChild(a); URL.revokeObjectURL(url);
+  toast('✅ Descargado: '+nombreArchivo+'.csv','ok');
+}
+
+function fmtMoney(n){ return parseFloat(n||0).toLocaleString('es-AR',{minimumFractionDigits:2}); }
+function fmtFecha(f){ return f?String(f).substring(0,10):''; }
+
+function exportarAsientos(){
+  var d=document.getElementById('adm-as-desde').value, h=document.getElementById('adm-as-hasta').value;
+  exportCSV(EXPORT_DATA.asientos,[
+    {label:'ID',fn:function(r){return r.id;}},
+    {label:'Fecha',fn:function(r){return fmtFecha(r.fecha);}},
+    {label:'Referencia',fn:function(r){return r.ref_codigo||'';}},
+    {label:'Descripción',fn:function(r){return r.descripcion||'';}},
+    {label:'Usuario',fn:function(r){return r.usuario_nombre||'';}},
+    {label:'Estado',fn:function(r){return r.anulado?'Anulado':'Activo';}}
+  ],'asientos'+(d?'_'+d:'')+(h?'_al_'+h:''));
+}
+
+function exportarOP(){
+  exportCSV(EXPORT_DATA.op,[
+    {label:'Número',fn:function(r){return r.numero||'';}},
+    {label:'Fecha',fn:function(r){return fmtFecha(r.fecha);}},
+    {label:'Proveedor',fn:function(r){return r.proveedor_nombre||'';}},
+    {label:'Forma Pago',fn:function(r){return r.forma_pago||'';}},
+    {label:'Cuenta',fn:function(r){return r.cuenta_nombre||'';}},
+    {label:'Monto',fn:function(r){return fmtMoney(r.monto_total);}},
+    {label:'Estado',fn:function(r){return r.estado||'';}},
+    {label:'Referencia',fn:function(r){return r.referencia||'';}}
+  ],'ordenes_pago');
+}
+
+function exportarChequesPropios(){
+  var e=document.getElementById('fin-filter-cp-estado').value;
+  exportCSV(EXPORT_DATA.chequesPropios,[
+    {label:'Nro. Cheque',fn:function(r){return r.nro_cheque||'';}},
+    {label:'Cuenta',fn:function(r){return r.cuenta_nombre||'';}},
+    {label:'Beneficiario',fn:function(r){return r.beneficiario||'';}},
+    {label:'Emisión',fn:function(r){return fmtFecha(r.fecha_emision);}},
+    {label:'Vencimiento',fn:function(r){return fmtFecha(r.fecha_vto);}},
+    {label:'Monto',fn:function(r){return fmtMoney(r.monto);}},
+    {label:'Estado',fn:function(r){return r.estado||'';}},
+    {label:'Notas',fn:function(r){return r.notas||'';}}
+  ],'cheques_propios'+(e?'_'+e:''));
+}
+
+function exportarChequesTerceros(){
+  var e=document.getElementById('fin-filter-ct-estado').value;
+  exportCSV(EXPORT_DATA.chequesTerceros,[
+    {label:'Librador',fn:function(r){return r.librador||'';}},
+    {label:'Banco',fn:function(r){return r.banco||'';}},
+    {label:'Nro. Cheque',fn:function(r){return r.nro_cheque||'';}},
+    {label:'Recepción',fn:function(r){return fmtFecha(r.fecha_recepcion);}},
+    {label:'Vencimiento',fn:function(r){return fmtFecha(r.fecha_vto);}},
+    {label:'Monto',fn:function(r){return fmtMoney(r.monto);}},
+    {label:'Estado',fn:function(r){return r.estado||'';}},
+    {label:'Notas',fn:function(r){return r.notas||'';}}
+  ],'cheques_terceros'+(e?'_'+e:''));
+}
+
+function exportarMovimientos(){
+  var d=document.getElementById('fin-filter-mov-desde').value, h=document.getElementById('fin-filter-mov-hasta').value;
+  exportCSV(EXPORT_DATA.movimientos,[
+    {label:'Fecha',fn:function(r){return fmtFecha(r.fecha);}},
+    {label:'Cuenta',fn:function(r){return r.cuenta_nombre||'';}},
+    {label:'Tipo',fn:function(r){return r.tipo||'';}},
+    {label:'Concepto',fn:function(r){return r.concepto||'';}},
+    {label:'Ingreso',fn:function(r){return r.tipo==='ingreso'?fmtMoney(r.monto):'';}},
+    {label:'Egreso',fn:function(r){return r.tipo==='egreso'?fmtMoney(r.monto):'';}},
+    {label:'Referencia',fn:function(r){return r.referencia||'';}}
+  ],'movimientos'+(d?'_'+d:'')+(h?'_al_'+h:''));
+}
+
+function exportarFacturas(){
+  exportCSV(EXPORT_DATA.facturas,[
+    {label:'Fecha',fn:function(r){return fmtFecha(r.fecha);}},
+    {label:'Tipo',fn:function(r){return r.tipo_factura||r.tipo_comprobante||'';}},
+    {label:'Comprobante',fn:function(r){return r.nro_factura||'';}},
+    {label:'Proveedor',fn:function(r){return r.proveedor_nombre||r.proveedor_txt||'';}},
+    {label:'Neto',fn:function(r){return fmtMoney(r.neto_total||r.subtotal);}},
+    {label:'IVA',fn:function(r){return fmtMoney(r.iva_total||r.iva_monto);}},
+    {label:'Total',fn:function(r){return fmtMoney(r.total);}},
+    {label:'Notas',fn:function(r){return r.notas||'';}}
+  ],'facturas');
+}
+
+function exportarCC(){
+  var prov=EXPORT_DATA.cc.proveedor||'proveedor';
+  var filas=EXPORT_DATA.cc.facturas.map(function(f){return Object.assign({_tipo:'Factura'},f);})
+    .concat(EXPORT_DATA.cc.pagos.map(function(p){return Object.assign({_tipo:'Pago'},p);}));
+  filas.sort(function(a,b){return (a.fecha||'')<(b.fecha||'')?-1:1;});
+  exportCSV(filas,[
+    {label:'Tipo',fn:function(r){return r._tipo;}},
+    {label:'Fecha',fn:function(r){return fmtFecha(r.fecha);}},
+    {label:'Comprobante',fn:function(r){return r.nro_factura||r.referencia||'';}},
+    {label:'Total',fn:function(r){return r._tipo==='Factura'?fmtMoney(r.total):'';}},
+    {label:'Pagado',fn:function(r){return r._tipo==='Factura'?fmtMoney(r.saldo_pagado):'';}},
+    {label:'Pendiente',fn:function(r){return r._tipo==='Factura'?fmtMoney(r.saldo_pendiente):'';}},
+    {label:'Monto Pago',fn:function(r){return r._tipo==='Pago'?fmtMoney(r.monto):'';}},
+    {label:'Forma Pago',fn:function(r){return r._tipo==='Pago'?(r.forma_pago||''):'';}}
+  ],'cuenta_corriente_'+prov.replace(/\s+/g,'_').toLowerCase());
 }
 
 </script>
