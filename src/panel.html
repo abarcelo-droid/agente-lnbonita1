@@ -12687,7 +12687,11 @@ function paGuardarCompra(){
   }
   // Si asiento no visible: el backend lo auto-genera desde el modelo del proveedor
 
-  var body = { fecha, nro_factura:factura, tipo_comprobante:tipoComp, proveedor_id:parseInt(prov), notas, items, remito_foto_b64: PA._compraFotoB64||null };
+  var body = { fecha, nro_factura:factura, tipo_comprobante:tipoComp, proveedor_id:parseInt(prov), notas, items, remito_foto_b64: PA._compraFotoB64||null,
+    percep_iva: PA._compraPercep?.iva || 0,
+    percep_ganancias: PA._compraPercep?.gan || 0,
+    percep_iibb: PA._compraPercep?.iibb || 0
+  };
   if (esServicio) body.tipo_factura = 'servicio';
   if (asientoLineas && asientoLineas.length) body.asiento_lineas = asientoLineas;
 
