@@ -330,4 +330,40 @@ router.delete('/conciliacion/extracto/:id', (req, res) => {
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
+// POST /api/fin/conciliacion/auto-match
+router.post('/conciliacion/auto-match', (req, res) => {
+  const { cuenta_id, periodo } = req.body || {};
+  if (!cuenta_id) return res.status(400).json({ ok:false, error:'cuenta_id requerido' });
+  try {
+    let sqlExt='SELECT * FROM fin_extracto_lineas WHERE cuenta_id=? AND conciliado=0';
+    const pe=[parseInt(cuenta_id)];
+    if(periodo){sqlExt+=" AND strftime('%Y-%m',fecha)=?";pe.push(periodo);}
+    const lineasPend=db.prepare(sqlExt).all(...pe);
+    let sqlMov='SELECT * FROM fin_movimientos WHERE cuenta_id=? AND conciliado=0';
+    const pm=[parseInt(cuenta_id)];
+    if(periodo){sqlMov+=" AND strftime('%Y-%m',fecha)=?";pm.push(periodo);}
+    const movPend=db.prepare(sqlMov).all(...pm);
+    let matches=0;
+    const usados=new Set();
+    const tx=db.transaction(()=>{
+      for(const ext of lineasPend){
+        const extFecha=new Date(ext.fecha);
+        for(const mov of movPend){
+          if(usados.has(mov.id)) continue;
+          if(mov.tipo!==ext.tipo) continue;
+          if(Math.abs(mov.monto-ext.monto)>0.01) continue;
+          const diff=Math.abs((extFecha-new Date(mov.fecha))/86400000);
+          if(diff<=3){
+            db.prepare('UPDATE fin_extracto_lineas SET conciliado=1,movimiento_id=? WHERE id=?').run(mov.id,ext.id);
+            db.prepare('UPDATE fin_movimientos SET conciliado=1 WHERE id=?').run(mov.id);
+            usados.add(mov.id); matches++; break;
+          }
+        }
+      }
+    });
+    tx();
+    res.json({ok:true,matches});
+  } catch(e){res.status(500).json({ok:false,error:e.message});}
+});
+
 export default router;
