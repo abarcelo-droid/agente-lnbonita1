@@ -387,7 +387,21 @@ router.get('/asientos', (req, res) => {
   if (desde) { sql += ' AND a.fecha >= ?'; params.push(desde); }
   if (hasta) { sql += ' AND a.fecha <= ?'; params.push(hasta); }
   sql += ' ORDER BY a.fecha DESC, a.id DESC LIMIT 200';
-  res.json({ ok: true, data: db.prepare(sql).all(...params) });
+  const asientos = db.prepare(sql).all(...params);
+
+  // Traer líneas para cada asiento
+  const getLineas = db.prepare(`
+    SELECT l.*, c.codigo AS cuenta_codigo, c.nombre AS cuenta_nombre
+      FROM pa_asientos_lineas l
+      JOIN pa_cuentas c ON c.id = l.cuenta_id
+     WHERE l.asiento_id = ?
+     ORDER BY l.id
+  `);
+  for (const a of asientos) {
+    a.lineas = getLineas.all(a.id);
+  }
+
+  res.json({ ok: true, data: asientos });
 });
 
 // GET /api/pa/cuentas/asientos/:id — detalle con líneas
