@@ -145,12 +145,11 @@ router.post('/', (req, res) => {
       }
 
       // ── Asiento contable automático ────────────────────────────────────────
-      // Debe: cuenta contable del proveedor (cancela el pasivo)
-      // Haber: cuenta contable del banco/caja (egreso de fondos)
-      // Solo se genera si ambas cuentas contables están configuradas.
+      // Debe: cuenta Proveedores (tomada del asiento de la factura original)
+      // Haber: cuenta bancaria/caja con que se pagó
       let asientoId = null;
       try {
-        // Cuenta contable del banco (solo aplica para transferencia/efectivo)
+        // 1. Cuenta contable del banco
         let cuentaBancariaContableId = null;
         if (cuenta_fin_id) {
           const cuentaFin = db.prepare('SELECT cuenta_contable_id FROM fin_cuentas WHERE id=?')
@@ -158,18 +157,39 @@ router.post('/', (req, res) => {
           cuentaBancariaContableId = cuentaFin?.cuenta_contable_id || null;
         }
 
-        // Cuenta contable del proveedor (línea tipo_linea='proveedores' en su asiento modelo)
-        const lineaProv = db.prepare(`
-          SELECT aml.cuenta_id
-          FROM adm_asientos_modelo_lineas aml
-          JOIN adm_proveedores ap ON ap.asiento_modelo_id = aml.modelo_id
-          WHERE ap.id = ? AND aml.tipo_linea = 'proveedores'
-          LIMIT 1
-        `).get(parseInt(proveedor_id));
-        const cuentaProveedorId = lineaProv?.cuenta_id || null;
+        // 2. Cuenta Proveedores — buscar en los asientos de las facturas que cancela esta OP
+        //    Tomamos la línea con mayor Haber de los asientos vinculados a esas compras
+        let cuentaProveedorId = null;
+        const compraIds = compras.map(c => parseInt(c.id));
+        if (compraIds.length) {
+          const placeholders = compraIds.map(() => '?').join(',');
+          const lineaProv = db.prepare(`
+            SELECT l.cuenta_id, SUM(l.haber) as total_haber
+            FROM pa_asientos a
+            JOIN pa_asientos_lineas l ON l.asiento_id = a.id
+            WHERE a.ref_compra_id IN (${placeholders})
+              AND a.anulado = 0
+              AND l.haber > 0
+            GROUP BY l.cuenta_id
+            ORDER BY total_haber DESC
+            LIMIT 1
+          `).get(...compraIds);
+          cuentaProveedorId = lineaProv?.cuenta_id || null;
+        }
+
+        // 3. Fallback: buscar en el modelo del proveedor si no encontramos en los asientos
+        if (!cuentaProveedorId) {
+          const lineaMod = db.prepare(`
+            SELECT aml.cuenta_id
+            FROM adm_asientos_modelo_lineas aml
+            JOIN adm_proveedores ap ON ap.asiento_modelo_id = aml.modelo_id
+            WHERE ap.id = ? AND aml.tipo_linea = 'proveedores'
+            LIMIT 1
+          `).get(parseInt(proveedor_id));
+          cuentaProveedorId = lineaMod?.cuenta_id || null;
+        }
 
         if (cuentaBancariaContableId && cuentaProveedorId) {
-          // Nombre del proveedor para la descripción
           const prov = db.prepare('SELECT razon_social FROM adm_proveedores WHERE id=?')
             .get(parseInt(proveedor_id));
           const nombreProv = prov?.razon_social || `Prov. #${proveedor_id}`;
@@ -179,34 +199,32 @@ router.post('/', (req, res) => {
             VALUES (?, ?, ?, ?)
           `).run(
             fechaOp,
-            `Pago OP ${numero} — ${nombreProv}`,
+            `OP ${numero} | ${nombreProv} | Cancelación`,
             u ? u.id : null,
             numero
           );
           asientoId = asiento.lastInsertRowid;
 
-          // Debe: cuenta proveedor
+          // Debe: cuenta Proveedores (cancela el pasivo)
           db.prepare(`
             INSERT INTO pa_asientos_lineas (asiento_id, cuenta_id, debe, haber, descripcion)
             VALUES (?, ?, ?, 0, ?)
           `).run(asientoId, cuentaProveedorId, parseFloat(monto_total),
             `Cancelación deuda — ${numero}`);
 
-          // Haber: cuenta bancaria
+          // Haber: cuenta bancaria/caja
           db.prepare(`
             INSERT INTO pa_asientos_lineas (asiento_id, cuenta_id, debe, haber, descripcion)
             VALUES (?, ?, 0, ?, ?)
           `).run(asientoId, cuentaBancariaContableId, parseFloat(monto_total),
             `Pago ${forma_pago} — ${numero}`);
 
-          // Vincular asiento a la OP
           db.prepare('UPDATE fin_ordenes_pago SET asiento_id=? WHERE id=?').run(asientoId, opId);
-          console.log(`[OP] Asiento contable #${asientoId} generado para ${numero}`);
+          console.log(`[OP] Asiento #${asientoId} generado para ${numero} — Prov. cta ${cuentaProveedorId} / Banco cta ${cuentaBancariaContableId}`);
         } else {
-          console.log(`[OP] ${numero} sin asiento contable: falta cuenta contable del ${!cuentaProveedorId ? 'proveedor' : 'banco'}`);
+          console.log(`[OP] ${numero} sin asiento: falta ${!cuentaProveedorId ? 'cuenta proveedores (cargá la factura con asiento primero)' : 'cuenta contable del banco'}`);
         }
       } catch(eAsiento) {
-        // El asiento falla silenciosamente — la OP igual se crea
         console.error(`[OP] Error generando asiento para ${numero}:`, eAsiento.message);
       }
 
