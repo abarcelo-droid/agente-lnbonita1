@@ -486,7 +486,16 @@ async function _comprimirImagen(file, maxKB = 4500, maxDim = 1600) {
   // Si ya está bajo el límite y es razonablemente chico, no reprocesar
   if (file.size <= maxKB * 1024 && file.size <= 3 * 1024 * 1024) return file;
 
-  return new Promise(function(resolve, reject){
+  return new Promise(function(resolve){
+    let done = false;
+    const finish = function(result){ if (done) return; done = true; clearTimeout(timer); resolve(result); };
+    // Timeout defensivo: si el image decode se cuelga (formato raro), después de 15s
+    // devolvemos el file original (que el backend lo rechazará pero por lo menos no se cuelga la app)
+    const timer = setTimeout(function(){
+      console.warn('[mifco] Compresión timeout, usando archivo original');
+      finish(file);
+    }, 15000);
+
     const img = new Image();
     const url = URL.createObjectURL(file);
     img.onload = function(){
@@ -506,15 +515,11 @@ async function _comprimirImagen(file, maxKB = 4500, maxDim = 1600) {
         let q = 0.85;
         const tryBlob = function(){
           canvas.toBlob(function(blob){
-            if (!blob) { resolve(file); return; }
+            if (!blob) { finish(file); return; }
             if (blob.size <= maxKB * 1024 || q <= 0.35) {
               const nuevoNombre = (file.name || 'foto').replace(/\.[^.]+$/, '') + '.jpg';
-              try {
-                resolve(new File([blob], nuevoNombre, { type: 'image/jpeg' }));
-              } catch(_){
-                blob.name = nuevoNombre;
-                resolve(blob);
-              }
+              try { finish(new File([blob], nuevoNombre, { type: 'image/jpeg' })); }
+              catch(_){ blob.name = nuevoNombre; finish(blob); }
             } else {
               q -= 0.1;
               tryBlob();
@@ -522,11 +527,49 @@ async function _comprimirImagen(file, maxKB = 4500, maxDim = 1600) {
           }, 'image/jpeg', q);
         };
         tryBlob();
-      } catch(e){ URL.revokeObjectURL(url); resolve(file); }
+      } catch(e){ URL.revokeObjectURL(url); finish(file); }
     };
-    img.onerror = function(){ URL.revokeObjectURL(url); resolve(file); };
+    img.onerror = function(){ URL.revokeObjectURL(url); finish(file); };
     img.src = url;
   });
+}
+
+// Helper: hace fetch con timeout (default 90s) y muestra contador de segundos en loading-sub.
+// Si pasa el timeout, aborta y tira error específico que el caller puede mostrar.
+// Si hay error de red ("Failed to fetch"), tira mensaje claro en lugar del técnico.
+async function _fetchConFeedback(url, opts, opcionesFeedback) {
+  opcionesFeedback = opcionesFeedback || {};
+  const mensajeBase = opcionesFeedback.mensaje || 'Subiendo al servidor…';
+  const timeoutMs   = opcionesFeedback.timeoutMs || 90000; // 90s default
+  const subEl = $('loading-sub');
+  const inicio = Date.now();
+  let tickTimer = null;
+  if (subEl) {
+    subEl.textContent = mensajeBase;
+    tickTimer = setInterval(function(){
+      const segs = Math.floor((Date.now() - inicio) / 1000);
+      if (segs >= 5) subEl.textContent = mensajeBase + ' (' + segs + 's)';
+      if (segs >= 30) subEl.textContent = mensajeBase + ' (' + segs + 's — puede tardar un poco más, no cierres la app)';
+    }, 1000);
+  }
+  const controller = new AbortController();
+  const timer = setTimeout(function(){ controller.abort(); }, timeoutMs);
+  try {
+    const optsConSignal = Object.assign({}, opts || {}, { signal: controller.signal });
+    const r = await fetch(url, optsConSignal);
+    return r;
+  } catch(e) {
+    if (e.name === 'AbortError') {
+      throw new Error('El servidor tardó demasiado. Verificá tu conexión y volvé a intentar.');
+    }
+    if (String(e.message || '').includes('Failed to fetch') || String(e.message || '').includes('NetworkError')) {
+      throw new Error('Sin conexión a internet. Verificá tu señal y volvé a intentar.');
+    }
+    throw e;
+  } finally {
+    clearTimeout(timer);
+    if (tickTimer) clearInterval(tickTimer);
+  }
 }
 
 // Cargar info del usuario al iniciar
@@ -687,7 +730,7 @@ async function onFotoSellado(ev) {
   try {
     const fd = new FormData();
     fd.append('foto', file);
-    const r = await fetch('/api/ifco/ocr/match-sellado', { method:'POST', credentials:'include', body:fd });
+    const r = await _fetchConFeedback('/api/ifco/ocr/match-sellado', { method:'POST', credentials:'include', body:fd }, { mensaje:'Buscando el N° de remito en la base…' });
     const data = await r.json();
 
     if (data.escaneo_path) S.escaneoPath = data.escaneo_path;
@@ -725,7 +768,7 @@ async function onFotoSellado(ev) {
       const fd2 = new FormData();
       fd2.append('foto', file);
       fd2.append('tipo', 'completo');
-      const r2 = await fetch('/api/ifco/ocr/remito-super', { method:'POST', credentials:'include', body:fd2 });
+      const r2 = await _fetchConFeedback('/api/ifco/ocr/remito-super', { method:'POST', credentials:'include', body:fd2 }, { mensaje:'Leyendo todos los datos del remito…' });
       const d2 = await r2.json();
       if (!r2.ok || !d2.datos) {
         showError('No se pudieron leer los datos', d2.error || 'Probá manual desde el panel.', '📷');
@@ -775,12 +818,12 @@ async function confirmarSellado() {
     if (rech > 0) fd.append('rechazo_destino', $('cs-rech-dest').value || 'san_geronimo');
     if (S.fotoFile) fd.append('escaneo', S.fotoFile);
     else if (S.escaneoPath) fd.append('escaneo_path', S.escaneoPath);
-    const r = await fetch('/api/ifco/remitos/'+S.matchRemitoId+'/sellar', { method:'POST', credentials:'include', body:fd });
+    const r = await _fetchConFeedback('/api/ifco/remitos/'+S.matchRemitoId+'/sellar', { method:'POST', credentials:'include', body:fd }, { mensaje:'Guardando el sellado…' });
     const d = await r.json();
     if (!r.ok) throw new Error(d.error || 'Error '+r.status);
     showOk('✓ Remito sellado', S.matchData.n_remito_ifco + ' — ' + (S.matchData.empresa||''));
   } catch(e) {
-    alert('Error: ' + e.message);
+    showError('No se pudo guardar', e.message, '⚠️');
     btn.disabled = false; btn.innerHTML = '✓ Confirmar sellado';
   }
 }
@@ -831,12 +874,12 @@ async function confirmarCrearSellado() {
     if (rech > 0) fd.append('rechazo_destino', $('ns-rech-dest').value || 'san_geronimo');
     if (S.fotoFile) fd.append('escaneo', S.fotoFile);
     else if (S.escaneoPath) fd.append('escaneo_path', S.escaneoPath);
-    const r = await fetch('/api/ifco/remitos/sellado-directo', { method:'POST', credentials:'include', body:fd });
+    const r = await _fetchConFeedback('/api/ifco/remitos/sellado-directo', { method:'POST', credentials:'include', body:fd }, { mensaje:'Guardando el remito sellado…' });
     const d = await r.json();
     if (!r.ok) throw new Error(d.error || 'Error '+r.status);
     showOk('✓ Remito creado y sellado', numero + ' — ' + cadena);
   } catch(e) {
-    alert('Error: ' + e.message);
+    showError('No se pudo guardar', e.message, '⚠️');
     btn.disabled = false; btn.innerHTML = '✓ Crear y sellar';
   }
 }
@@ -913,14 +956,14 @@ async function enviarSG() {
     if (nrem)  fd.append('n_remito_proveedor', nrem);
     if (notas) fd.append('notas', notas);
     if (foto)  fd.append('escaneo', foto);
-    const r = await fetch('/api/ifco/recepciones-proveedor', { method:'POST', credentials:'include', body:fd });
+    const r = await _fetchConFeedback('/api/ifco/recepciones-proveedor', { method:'POST', credentials:'include', body:fd }, { mensaje:'Enviando los cajones a SG…' });
     const data = await r.json();
     if (!r.ok) throw new Error(data.error || 'HTTP '+r.status);
     showView('view-ok', { title:'Listo' });
     $('ok-titulo').textContent = '¡Envío registrado!';
     $('ok-detalle').innerHTML = 'Quedó <b>en viaje</b>. Cuando alguien de SG confirme la recepción física, se actualizan los saldos.';
   } catch(e) {
-    alert('Error: ' + e.message);
+    showError('No se pudo guardar', e.message, '⚠️');
   }
 }
 
@@ -942,8 +985,9 @@ async function enviarStockReal() {
   const notas = $('sr-notas').value.trim();
   if (isNaN(cant) || cant < 0) { alert('Cantidad inválida'); return; }
   if (!fecha) { alert('Falta la fecha'); return; }
+  showView('view-loading', { title:'Procesando…' });
   try {
-    const r = await fetch('/api/ifco/stocks-reales', {
+    const r = await _fetchConFeedback('/api/ifco/stocks-reales', {
       method:'POST', credentials:'include',
       headers:{'Content-Type':'application/json'},
       body: JSON.stringify({
@@ -951,7 +995,7 @@ async function enviarStockReal() {
         proveedor_id: S.user.deposito_proveedor_id,
         cantidad: cant, fecha: fecha, notas: notas || null
       })
-    });
+    }, { mensaje:'Guardando conteo…', timeoutMs: 30000 });
     const data = await r.json();
     if (!r.ok) throw new Error(data.error || 'HTTP '+r.status);
     showView('view-ok', { title:'Listo' });
@@ -961,7 +1005,7 @@ async function enviarStockReal() {
     const banner = document.getElementById('banner-stock');
     if (banner) banner.style.display = 'none';
   } catch(e) {
-    alert('Error: ' + e.message);
+    showError('No se pudo guardar', e.message, '⚠️');
   }
 }
 
@@ -977,7 +1021,7 @@ async function onFotoDespacho(ev) {
     const fd = new FormData();
     fd.append('foto', file);
     fd.append('tipo', 'despacho');
-    const r = await fetch('/api/ifco/ocr/remito-super', { method:'POST', credentials:'include', body:fd });
+    const r = await _fetchConFeedback('/api/ifco/ocr/remito-super', { method:'POST', credentials:'include', body:fd }, { mensaje:'Leyendo los datos del remito…' });
     const data = await r.json();
     if (!r.ok || !data.datos) {
       showError('No se pudieron leer los datos', (data && data.error) || 'Probá con una foto mejor.', '📷');
@@ -1055,12 +1099,12 @@ async function confirmarDespacho() {
     if (provId) fd.append('proveedor_origen_id', String(provId));
     if (S.fotoFile) fd.append('escaneo_original', S.fotoFile);
     else if (S.escaneoPath) fd.append('escaneo_original_path', S.escaneoPath);
-    const r = await fetch('/api/ifco/remitos', { method:'POST', credentials:'include', body:fd });
+    const r = await _fetchConFeedback('/api/ifco/remitos', { method:'POST', credentials:'include', body:fd }, { mensaje:'Guardando el despacho…' });
     const d = await r.json();
     if (!r.ok) throw new Error(d.error || 'Error '+r.status);
     showOk('✓ Despacho creado', numero + ' — ' + cadena);
   } catch(e) {
-    alert('Error: ' + e.message);
+    showError('No se pudo guardar', e.message, '⚠️');
     btn.disabled = false; btn.innerHTML = '✓ Crear despacho';
   }
 }
@@ -1077,11 +1121,41 @@ function matchCadena(s) {
   return '';
 }
 
-// Registrar el Service Worker (PWA instalable)
+// Registrar el Service Worker (PWA instalable) — con auto-update forzado
+// El problema clásico de PWA: el SW sirve la versión vieja del HTML aunque hayas deployado
+// una nueva. Solución: en cada carga, chequear si hay nueva versión y forzar skipWaiting +
+// reload. Así los operadores ven los cambios inmediatamente sin tener que desinstalar la app.
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('/mifco-sw.js', { scope: '/m/' })
+      .then((reg) => {
+        // Forzar verificación de update en cada apertura
+        reg.update().catch(() => {});
+
+        // Si hay una versión esperando, decirle al SW que se active YA
+        if (reg.waiting) {
+          try { reg.waiting.postMessage({ type: 'SKIP_WAITING' }); } catch(_){}
+        }
+
+        // Si aparece una nueva instalación, esperar a que esté lista y activarla
+        reg.addEventListener('updatefound', () => {
+          const nw = reg.installing;
+          if (!nw) return;
+          nw.addEventListener('statechange', () => {
+            if (nw.state === 'installed' && navigator.serviceWorker.controller) {
+              try { nw.postMessage({ type: 'SKIP_WAITING' }); } catch(_){}
+            }
+          });
+        });
+      })
       .catch((e) => console.warn('SW no registrado:', e));
+
+    // Cuando el SW activo cambie (después del skipWaiting), recargar para tomar la nueva versión
+    let recargando = false;
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (recargando) return; recargando = true;
+      window.location.reload();
+    });
   });
 }
 </script>
