@@ -387,21 +387,7 @@ router.get('/asientos', (req, res) => {
   if (desde) { sql += ' AND a.fecha >= ?'; params.push(desde); }
   if (hasta) { sql += ' AND a.fecha <= ?'; params.push(hasta); }
   sql += ' ORDER BY a.fecha DESC, a.id DESC LIMIT 200';
-  const asientos = db.prepare(sql).all(...params);
-
-  // Traer líneas para cada asiento
-  const getLineas = db.prepare(`
-    SELECT l.*, c.codigo AS cuenta_codigo, c.nombre AS cuenta_nombre
-      FROM pa_asientos_lineas l
-      JOIN pa_cuentas c ON c.id = l.cuenta_id
-     WHERE l.asiento_id = ?
-     ORDER BY l.id
-  `);
-  for (const a of asientos) {
-    a.lineas = getLineas.all(a.id);
-  }
-
-  res.json({ ok: true, data: asientos });
+  res.json({ ok: true, data: db.prepare(sql).all(...params) });
 });
 
 // GET /api/pa/cuentas/asientos/:id — detalle con líneas
@@ -631,4 +617,30 @@ router.post('/asientos/:id(\\d+)/anular', requireAdmin, (req, res) => {
   `).run(req._user?.id ?? null, id);
   res.json({ ok: true });
 });
+// ── GET /api/pa/cuentas/config-impositiva ────────────────────────────────────
+router.get('/config-impositiva', (req, res) => {
+  try {
+    const rows = db.prepare(`
+      SELECT ci.clave, ci.cuenta_id, ci.descripcion,
+        c.nombre as cuenta_nombre, c.codigo as cuenta_codigo
+      FROM adm_config_impositiva ci
+      LEFT JOIN pa_cuentas c ON c.id = ci.cuenta_id
+      ORDER BY ci.clave
+    `).all();
+    res.json({ ok: true, data: rows });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// ── PUT /api/pa/cuentas/config-impositiva ────────────────────────────────────
+router.put('/config-impositiva', requireAuth, (req, res) => {
+  const { clave, cuenta_id } = req.body || {};
+  if (!clave) return res.status(400).json({ ok: false, error: 'clave requerida' });
+  try {
+    db.prepare(`
+      UPDATE adm_config_impositiva SET cuenta_id = ? WHERE clave = ?
+    `).run(cuenta_id ? parseInt(cuenta_id) : null, clave);
+    res.json({ ok: true });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
 export default router;
