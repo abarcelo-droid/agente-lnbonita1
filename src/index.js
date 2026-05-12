@@ -23,6 +23,7 @@ import pagosRouter        from "./rutas/pagos.js";
 import liquidacionesRouter from "./rutas/liquidaciones.js";
 import bancosRouter        from "./rutas/bancos.js";
 import ordenesRouter       from "./rutas/ordenes.js";
+import ventasRouter        from "./rutas/ventas.js";
 import { guardarSnapshotCRM } from "./servicios/db.js";
 import { syncSheets } from "./servicios/sheets.js";
 
@@ -159,6 +160,7 @@ app.use("/api/pa/pagos",        pagosRouter);
 app.use("/api/liquidaciones",   liquidacionesRouter);
 app.use("/api/fin",             bancosRouter);
 app.use("/api/fin/ordenes",     ordenesRouter);
+app.use("/api/ven",            ventasRouter);
 app.use("/api/pa/clima",        climaRouter);
 app.use("/api/pa",     produccionRouter);
 app.use("/api/pa/scout", scoutRouter);

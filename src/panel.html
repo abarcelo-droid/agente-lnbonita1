@@ -179,6 +179,15 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     <div class="ni" data-sec="pa-despachos"><span class="dot dc"></span>🚚 Despachos</div>
   </div>
 
+  <div class="ni-grp" data-grp="ven-ventas">Administración de Ventas<span class="ni-caret">▾</span></div>
+  <div class="ni-grp-items">
+    <div class="ni" data-sec="ven-clientes"><span class="dot da"></span>👥 Padrón de Clientes</div>
+    <div class="ni" data-sec="ven-liquidaciones"><span class="dot db"></span>🌾 Liquidaciones de Producto</div>
+    <div class="ni" data-sec="ven-facturas"><span class="dot dc"></span>🧾 Facturas de Venta</div>
+    <div class="ni" data-sec="ven-cc"><span class="dot dd"></span>💳 Cuenta Corriente Clientes</div>
+    <div class="ni" data-sec="ven-cobranzas"><span class="dot da"></span>💰 Cobranzas</div>
+  </div>
+
   <div class="ni-grp" data-grp="pa-maestros">Maestros<span class="ni-caret">▾</span></div>
   <div class="ni-grp-items">
     <div class="ni" data-sec="pa-cuentas"><span class="dot dc"></span>📊 Plan de Cuentas</div>
@@ -9496,6 +9505,11 @@ loadSec = function(s) {
     ccProvIniciar();
     return;
   }
+  if (s === 'ven-clientes')      { venIniciarClientes();      return; }
+  if (s === 'ven-liquidaciones') { venIniciarLiquidaciones(); return; }
+  if (s === 'ven-facturas')      { venIniciarFacturas();      return; }
+  if (s === 'ven-cc')            { venIniciarCC();            return; }
+  if (s === 'ven-cobranzas')     { return; }
   if (s === 'fin-ordenes-pago') {
     opIniciar();
     return;
@@ -22442,6 +22456,838 @@ function _descargarTSV(filas, cols, nombre) {
   toast('✅ Descargado: '+nombre+'.xls', 'ok');
 }
 
+</script>
+
+<!-- ═══════════════════════════════════════════════════════════════════════════
+     MÓDULO VENTAS
+════════════════════════════════════════════════════════════════════════════ -->
+
+<!-- ─── PADRÓN DE CLIENTES ───────────────────────────────────────────────── -->
+<div class="sec" id="sec-ven-clientes">
+<div class="ph">
+  <div><div class="ph-t">👥 Padrón de Clientes</div><div class="ph-s">Acopiadores y clientes directos</div></div>
+  <button class="btn bb" onclick="venClienteNuevo()">+ Nuevo Cliente</button>
+</div>
+<div class="pa-wrap"><div class="ab-table-wrap"><table class="pa-tbl">
+  <thead>
+    <tr><th>Razón Social</th><th>CUIT</th><th>Cond. IVA</th><th>Teléfono</th><th>Email</th><th></th></tr>
+    <tr style="background:var(--bg)">
+      <th><input type="text" placeholder="🔍" oninput="tablaFiltrar('ven-cli-tbody',0,this.value)" style="width:90%;font-size:11px;padding:3px 5px;border:1px solid var(--bor2);border-radius:4px"></th>
+      <th><input type="text" placeholder="🔍" oninput="tablaFiltrar('ven-cli-tbody',1,this.value)" style="width:90%;font-size:11px;padding:3px 5px;border:1px solid var(--bor2);border-radius:4px"></th>
+      <th></th><th></th><th></th><th></th>
+    </tr>
+  </thead>
+  <tbody id="ven-cli-tbody"><tr><td colspan="6" class="emp">Cargando...</td></tr></tbody>
+</table></div></div>
+</div>
+
+<!-- ─── LIQUIDACIONES DE PRODUCTO ────────────────────────────────────────── -->
+<div class="sec" id="sec-ven-liquidaciones">
+<div class="ph">
+  <div><div class="ph-t">🌾 Liquidaciones de Producto</div><div class="ph-s">Liquidaciones recibidas de acopiadores</div></div>
+  <button class="btn bb" onclick="venLiqNueva()">+ Nueva Liquidación</button>
+</div>
+<div style="display:flex;gap:10px;align-items:center;margin-bottom:12px;flex-wrap:wrap">
+  <select id="ven-liq-fil-cliente" onchange="venLiqCargar()" style="font-size:12px;min-width:200px">
+    <option value="">Todos los clientes</option>
+  </select>
+  <select id="ven-liq-fil-estado" onchange="venLiqCargar()" style="font-size:12px">
+    <option value="">Todos los estados</option>
+    <option value="pendiente">Pendiente</option>
+    <option value="cobrada">Cobrada</option>
+    <option value="anulada">Anulada</option>
+  </select>
+  <button class="btn bo bs" onclick="venLiqExportar()" title="Exportar Excel">📥 Excel</button>
+</div>
+<div class="pa-wrap"><div class="ab-table-wrap"><table class="pa-tbl">
+  <thead>
+    <tr><th>Número</th><th>Fecha</th><th>Cliente</th><th>Nro. Remito</th><th style="text-align:right">Precio Bruto</th><th style="text-align:right">Neto a Cobrar</th><th>Estado</th><th></th></tr>
+    <tr style="background:var(--bg)">
+      <th><input type="text" placeholder="🔍" oninput="tablaFiltrar('ven-liq-tbody',0,this.value)" style="width:90%;font-size:11px;padding:3px 5px;border:1px solid var(--bor2);border-radius:4px"></th>
+      <th></th>
+      <th><input type="text" placeholder="🔍" oninput="tablaFiltrar('ven-liq-tbody',2,this.value)" style="width:90%;font-size:11px;padding:3px 5px;border:1px solid var(--bor2);border-radius:4px"></th>
+      <th><input type="text" placeholder="🔍" oninput="tablaFiltrar('ven-liq-tbody',3,this.value)" style="width:90%;font-size:11px;padding:3px 5px;border:1px solid var(--bor2);border-radius:4px"></th>
+      <th></th><th></th>
+      <th><input type="text" placeholder="🔍" oninput="tablaFiltrar('ven-liq-tbody',6,this.value)" style="width:90%;font-size:11px;padding:3px 5px;border:1px solid var(--bor2);border-radius:4px"></th>
+      <th></th>
+    </tr>
+  </thead>
+  <tbody id="ven-liq-tbody"><tr><td colspan="8" class="emp">Cargando...</td></tr></tbody>
+</table></div></div>
+</div>
+
+<!-- ─── FACTURAS DE VENTA ─────────────────────────────────────────────────── -->
+<div class="sec" id="sec-ven-facturas">
+<div class="ph">
+  <div><div class="ph-t">🧾 Facturas de Venta</div><div class="ph-s">Facturas emitidas por la empresa</div></div>
+  <button class="btn bb" onclick="venFacNueva()">+ Nueva Factura</button>
+</div>
+<div style="display:flex;gap:10px;align-items:center;margin-bottom:12px;flex-wrap:wrap">
+  <select id="ven-fac-fil-cliente" onchange="venFacCargar()" style="font-size:12px;min-width:200px">
+    <option value="">Todos los clientes</option>
+  </select>
+  <select id="ven-fac-fil-estado" onchange="venFacCargar()" style="font-size:12px">
+    <option value="">Todos los estados</option>
+    <option value="pendiente">Pendiente</option>
+    <option value="cobrada">Cobrada</option>
+    <option value="anulada">Anulada</option>
+  </select>
+  <button class="btn bo bs" onclick="venFacExportar()" title="Exportar Excel">📥 Excel</button>
+</div>
+<div class="pa-wrap"><div class="ab-table-wrap"><table class="pa-tbl">
+  <thead>
+    <tr><th>Número</th><th>Fecha</th><th>Cliente</th><th>Tipo</th><th>Concepto</th><th style="text-align:right">Neto</th><th style="text-align:right">IVA</th><th style="text-align:right">Total</th><th>Estado</th><th></th></tr>
+    <tr style="background:var(--bg)">
+      <th><input type="text" placeholder="🔍" oninput="tablaFiltrar('ven-fac-tbody',0,this.value)" style="width:90%;font-size:11px;padding:3px 5px;border:1px solid var(--bor2);border-radius:4px"></th>
+      <th></th>
+      <th><input type="text" placeholder="🔍" oninput="tablaFiltrar('ven-fac-tbody',2,this.value)" style="width:90%;font-size:11px;padding:3px 5px;border:1px solid var(--bor2);border-radius:4px"></th>
+      <th><input type="text" placeholder="🔍" oninput="tablaFiltrar('ven-fac-tbody',3,this.value)" style="width:90%;font-size:11px;padding:3px 5px;border:1px solid var(--bor2);border-radius:4px"></th>
+      <th><input type="text" placeholder="🔍" oninput="tablaFiltrar('ven-fac-tbody',4,this.value)" style="width:90%;font-size:11px;padding:3px 5px;border:1px solid var(--bor2);border-radius:4px"></th>
+      <th></th><th></th><th></th>
+      <th><input type="text" placeholder="🔍" oninput="tablaFiltrar('ven-fac-tbody',8,this.value)" style="width:90%;font-size:11px;padding:3px 5px;border:1px solid var(--bor2);border-radius:4px"></th>
+      <th></th>
+    </tr>
+  </thead>
+  <tbody id="ven-fac-tbody"><tr><td colspan="10" class="emp">Cargando...</td></tr></tbody>
+</table></div></div>
+</div>
+
+<!-- ─── CUENTA CORRIENTE CLIENTES ────────────────────────────────────────── -->
+<div class="sec" id="sec-ven-cc">
+<div class="ph"><div><div class="ph-t">💳 Cuenta Corriente Clientes</div><div class="ph-s">Saldos pendientes por cliente</div></div></div>
+<div style="display:flex;gap:10px;align-items:center;margin-bottom:16px">
+  <select id="ven-cc-cliente" onchange="venCCCargar()" style="font-size:13px;min-width:250px;padding:6px 10px;border:1px solid var(--bor2);border-radius:7px">
+    <option value="">— Seleccioná un cliente —</option>
+  </select>
+  <button class="btn bo bs" id="ven-cc-btn-export" style="display:none" onclick="venCCExportar()">📥 Excel</button>
+</div>
+<!-- Resumen -->
+<div id="ven-cc-resumen" style="display:none;display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:20px">
+  <div style="background:var(--sur);border:1px solid var(--bor);border-radius:10px;padding:14px;text-align:center">
+    <div style="font-size:10px;color:var(--mut);text-transform:uppercase;margin-bottom:4px">Total a Cobrar</div>
+    <div id="ven-cc-total" style="font-size:22px;font-weight:700">$0</div>
+  </div>
+  <div style="background:var(--sur);border:1px solid var(--bor);border-radius:10px;padding:14px;text-align:center">
+    <div style="font-size:10px;color:var(--mut);text-transform:uppercase;margin-bottom:4px">Cobrado</div>
+    <div id="ven-cc-cobrado" style="font-size:22px;font-weight:700;color:#16a34a">$0</div>
+  </div>
+  <div style="background:var(--sur);border:1px solid var(--bor);border-radius:10px;padding:14px;text-align:center">
+    <div style="font-size:10px;color:var(--mut);text-transform:uppercase;margin-bottom:4px">Pendiente</div>
+    <div id="ven-cc-pendiente" style="font-size:22px;font-weight:700;color:#dc2626">$0</div>
+  </div>
+</div>
+<!-- Documentos -->
+<div id="ven-cc-docs-wrap" style="display:none">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+    <div style="font-size:12px;font-weight:700;color:var(--mut);text-transform:uppercase">Documentos</div>
+    <button class="btn bb" onclick="venCobNueva()" id="ven-cc-btn-cobrar">+ Registrar Cobranza</button>
+  </div>
+  <div style="overflow-x:auto;border:1px solid var(--bor);border-radius:10px;margin-bottom:16px">
+    <table style="width:100%;border-collapse:collapse;font-size:13px">
+      <thead><tr style="background:var(--bg);border-bottom:1px solid var(--bor)">
+        <th style="padding:9px 12px;font-size:10px;color:var(--mut);text-transform:uppercase">Tipo</th>
+        <th style="padding:9px 12px;font-size:10px;color:var(--mut);text-transform:uppercase">Número</th>
+        <th style="padding:9px 12px;font-size:10px;color:var(--mut);text-transform:uppercase">Fecha</th>
+        <th style="padding:9px 12px;text-align:right;font-size:10px;color:var(--mut);text-transform:uppercase">Total</th>
+        <th style="padding:9px 12px;text-align:right;font-size:10px;color:var(--mut);text-transform:uppercase">Cobrado</th>
+        <th style="padding:9px 12px;text-align:right;font-size:10px;color:var(--mut);text-transform:uppercase">Pendiente</th>
+        <th style="padding:9px 12px;text-align:center;font-size:10px;color:var(--mut);text-transform:uppercase">Estado</th>
+      </tr></thead>
+      <tbody id="ven-cc-docs-tbody"></tbody>
+    </table>
+  </div>
+  <!-- Cobranzas registradas -->
+  <div id="ven-cc-cob-wrap" style="display:none">
+    <div style="font-size:12px;font-weight:700;color:var(--mut);text-transform:uppercase;margin-bottom:8px">Cobranzas</div>
+    <div style="overflow-x:auto;border:1px solid var(--bor);border-radius:10px">
+      <table style="width:100%;border-collapse:collapse;font-size:13px">
+        <thead><tr style="background:var(--bg);border-bottom:1px solid var(--bor)">
+          <th style="padding:9px 12px;font-size:10px;color:var(--mut)">Fecha</th>
+          <th style="padding:9px 12px;font-size:10px;color:var(--mut)">Forma</th>
+          <th style="padding:9px 12px;font-size:10px;color:var(--mut)">Referencia</th>
+          <th style="padding:9px 12px;text-align:right;font-size:10px;color:var(--mut)">Monto</th>
+          <th style="width:40px"></th>
+        </tr></thead>
+        <tbody id="ven-cc-cob-tbody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+</div>
+
+<!-- ─── COBRANZAS ──────────────────────────────────────────────────────────── -->
+<div class="sec" id="sec-ven-cobranzas">
+<div class="ph"><div><div class="ph-t">💰 Cobranzas</div><div class="ph-s">Pagos recibidos de clientes</div></div></div>
+<div style="padding:40px;text-align:center;color:var(--mut)">
+  <div style="font-size:32px;margin-bottom:8px">💳</div>
+  <div>Las cobranzas se registran desde <strong>Cuenta Corriente Clientes</strong> → seleccioná el cliente y hacé click en "+ Registrar Cobranza".</div>
+</div>
+</div>
+
+<!-- ════ MODALES VENTAS ═══════════════════════════════════════════════════════ -->
+
+<!-- Modal: Nuevo/Editar Cliente -->
+<div class="ab-modal-overlay" id="ven-mb-cliente">
+<div class="ab-modal" style="max-width:600px">
+  <div class="mhd">
+    <div><div class="mht" id="ven-mb-cli-tit">Nuevo Cliente</div></div>
+    <button class="mcl" onclick="document.getElementById('ven-mb-cliente').classList.remove('on')">×</button>
+  </div>
+  <input type="hidden" id="ven-cli-id">
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+    <div class="fl ff"><label>Razón Social *</label><input type="text" id="ven-cli-razon"></div>
+    <div class="fl ff"><label>Nombre Comercial</label><input type="text" id="ven-cli-nombre-com"></div>
+    <div class="fl"><label>CUIT *</label><input type="text" id="ven-cli-cuit" placeholder="30-12345678-9"></div>
+    <div class="fl"><label>Condición IVA</label>
+      <select id="ven-cli-cond-iva">
+        <option value="responsable_inscripto">Responsable Inscripto</option>
+        <option value="monotributo">Monotributo</option>
+        <option value="exento">Exento</option>
+        <option value="consumidor_final">Consumidor Final</option>
+      </select>
+    </div>
+    <div class="fl ff"><label>Dirección</label><input type="text" id="ven-cli-dir"></div>
+    <div class="fl"><label>Teléfono</label><input type="text" id="ven-cli-tel"></div>
+    <div class="fl"><label>Email</label><input type="email" id="ven-cli-email"></div>
+    <div class="fl"><label>Contacto</label><input type="text" id="ven-cli-contacto"></div>
+    <div class="fl"><label>Rubro</label><input type="text" id="ven-cli-rubro" placeholder="Acopiador, Exportador..."></div>
+    <div class="fl ff"><label>Cuenta Contable</label><select id="ven-cli-cuenta" style="font-size:13px"></select></div>
+    <div class="fl ff" style="grid-column:1/-1"><label>Notas</label><textarea id="ven-cli-notas" rows="2"></textarea></div>
+  </div>
+  <div class="ab-modal-footer">
+    <button class="btn bo" onclick="document.getElementById('ven-mb-cliente').classList.remove('on')">Cancelar</button>
+    <button class="btn bb" onclick="venClienteGuardar()">Guardar</button>
+  </div>
+</div></div>
+
+<!-- Modal: Nueva Liquidación -->
+<div class="ab-modal-overlay" id="ven-mb-liq">
+<div class="ab-modal" style="max-width:700px">
+  <div class="mhd">
+    <div><div class="mht">Nueva Liquidación de Producto</div></div>
+    <button class="mcl" onclick="document.getElementById('ven-mb-liq').classList.remove('on')">×</button>
+  </div>
+  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:16px">
+    <div class="fl"><label>Fecha *</label><input type="date" id="ven-liq-fecha"></div>
+    <div class="fl ff"><label>Cliente (Acopiador) *</label>
+      <select id="ven-liq-cliente" style="font-size:13px"><option value="">— Seleccioná —</option></select>
+    </div>
+    <div class="fl"><label>Nro. Remito</label><input type="text" id="ven-liq-remito" placeholder="Ej: R-0001-00012345"></div>
+  </div>
+
+  <!-- Ítems -->
+  <div style="font-size:11px;font-weight:700;color:var(--mut);text-transform:uppercase;margin-bottom:6px">Productos / Cultivos</div>
+  <div id="ven-liq-items" style="display:flex;flex-direction:column;gap:6px;margin-bottom:8px"></div>
+  <button class="btn bo bs" onclick="venLiqAgregarItem()" style="font-size:11px;margin-bottom:16px">+ Agregar ítem</button>
+
+  <!-- Descuentos y Retenciones -->
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+    <div>
+      <div style="font-size:11px;font-weight:700;color:var(--mut);text-transform:uppercase;margin-bottom:8px">Descuentos</div>
+      <div class="fl"><label>Comisión acopiador</label><input type="number" id="ven-liq-desc-com" step="0.01" min="0" value="0" oninput="venLiqActTotal()"></div>
+      <div class="fl"><label>Flete</label><input type="number" id="ven-liq-desc-flete" step="0.01" min="0" value="0" oninput="venLiqActTotal()"></div>
+      <div class="fl"><label>Carga y descarga</label><input type="number" id="ven-liq-desc-cd" step="0.01" min="0" value="0" oninput="venLiqActTotal()"></div>
+      <div class="fl"><label>Otros descuentos</label><input type="number" id="ven-liq-desc-otros" step="0.01" min="0" value="0" oninput="venLiqActTotal()"></div>
+    </div>
+    <div>
+      <div style="font-size:11px;font-weight:700;color:var(--mut);text-transform:uppercase;margin-bottom:8px">Retenciones</div>
+      <div class="fl"><label>Retención IVA</label><input type="number" id="ven-liq-ret-iva" step="0.01" min="0" value="0" oninput="venLiqActTotal()"></div>
+      <div class="fl"><label>Retención Ganancias</label><input type="number" id="ven-liq-ret-gan" step="0.01" min="0" value="0" oninput="venLiqActTotal()"></div>
+      <div class="fl"><label>Retención IIBB</label><input type="number" id="ven-liq-ret-iibb" step="0.01" min="0" value="0" oninput="venLiqActTotal()"></div>
+      <div class="fl"><label>Otras retenciones</label><input type="number" id="ven-liq-ret-otras" step="0.01" min="0" value="0" oninput="venLiqActTotal()"></div>
+    </div>
+  </div>
+
+  <!-- Resumen -->
+  <div style="background:#f0fdf4;border:1px solid #86efac;border-radius:10px;padding:14px;margin-top:16px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;text-align:center">
+    <div><div style="font-size:10px;color:var(--mut);font-weight:700;text-transform:uppercase">Precio Bruto</div><div id="ven-liq-res-bruto" style="font-size:18px;font-weight:700">$0</div></div>
+    <div><div style="font-size:10px;color:var(--mut);font-weight:700;text-transform:uppercase">Desc. + Ret.</div><div id="ven-liq-res-desc" style="font-size:18px;font-weight:700;color:#dc2626">-$0</div></div>
+    <div><div style="font-size:10px;color:#15803d;font-weight:700;text-transform:uppercase">Neto a Cobrar</div><div id="ven-liq-res-neto" style="font-size:22px;font-weight:700;color:#15803d">$0</div></div>
+  </div>
+
+  <div class="fl" style="margin-top:12px"><label>Observaciones</label><textarea id="ven-liq-obs" rows="2"></textarea></div>
+
+  <div class="ab-modal-footer">
+    <button class="btn bo" onclick="document.getElementById('ven-mb-liq').classList.remove('on')">Cancelar</button>
+    <button class="btn bb" onclick="venLiqGuardar()">Registrar Liquidación</button>
+  </div>
+</div></div>
+
+<!-- Modal: Nueva Factura de Venta -->
+<div class="ab-modal-overlay" id="ven-mb-fac">
+<div class="ab-modal" style="max-width:640px">
+  <div class="mhd">
+    <div><div class="mht">Nueva Factura de Venta</div></div>
+    <button class="mcl" onclick="document.getElementById('ven-mb-fac').classList.remove('on')">×</button>
+  </div>
+  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:16px">
+    <div class="fl"><label>Fecha *</label><input type="date" id="ven-fac-fecha"></div>
+    <div class="fl ff"><label>Cliente *</label><select id="ven-fac-cliente" style="font-size:13px"><option value="">— Seleccioná —</option></select></div>
+    <div class="fl"><label>Tipo</label>
+      <select id="ven-fac-tipo"><option value="A">Factura A</option><option value="B">Factura B</option><option value="C">Factura C</option></select>
+    </div>
+    <div class="fl ff" style="grid-column:1/-1"><label>Concepto General</label><input type="text" id="ven-fac-concepto" placeholder="Venta de..."></div>
+  </div>
+  <div style="font-size:11px;font-weight:700;color:var(--mut);text-transform:uppercase;margin-bottom:6px">Ítems</div>
+  <div id="ven-fac-items" style="display:flex;flex-direction:column;gap:6px;margin-bottom:8px"></div>
+  <button class="btn bo bs" onclick="venFacAgregarItem()" style="font-size:11px;margin-bottom:12px">+ Agregar ítem</button>
+  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
+    <div class="fl"><label>IVA</label><input type="number" id="ven-fac-iva" step="0.01" min="0" value="0" oninput="venFacActTotal()"></div>
+    <div class="fl"><label>Neto</label><input type="number" id="ven-fac-neto" readonly style="background:var(--sur)"></div>
+    <div class="fl"><label>Total</label><input type="number" id="ven-fac-total" readonly style="background:var(--sur);font-weight:700"></div>
+  </div>
+  <div class="fl" style="margin-top:10px"><label>Notas</label><textarea id="ven-fac-notas" rows="2"></textarea></div>
+  <div class="ab-modal-footer">
+    <button class="btn bo" onclick="document.getElementById('ven-mb-fac').classList.remove('on')">Cancelar</button>
+    <button class="btn bb" onclick="venFacGuardar()">Registrar Factura</button>
+  </div>
+</div></div>
+
+<!-- Modal: Nueva Cobranza -->
+<div class="ab-modal-overlay" id="ven-mb-cob">
+<div class="ab-modal" style="max-width:560px">
+  <div class="mhd">
+    <div><div class="mht">Registrar Cobranza</div><div style="font-size:11px;color:var(--mut)" id="ven-cob-cli-nom"></div></div>
+    <button class="mcl" onclick="document.getElementById('ven-mb-cob').classList.remove('on')">×</button>
+  </div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px">
+    <div class="fl"><label>Fecha *</label><input type="date" id="ven-cob-fecha"></div>
+    <div class="fl"><label>Forma de Pago</label>
+      <select id="ven-cob-forma"><option value="transferencia">Transferencia</option><option value="cheque">Cheque</option><option value="efectivo">Efectivo</option></select>
+    </div>
+    <div class="fl ff"><label>Referencia</label><input type="text" id="ven-cob-ref" placeholder="Nro. transferencia, cheque..."></div>
+    <div class="fl"><label>Monto Total *</label><input type="number" id="ven-cob-monto" step="0.01" min="0" oninput="venCobActMonto()"></div>
+  </div>
+  <div style="font-size:11px;font-weight:700;color:var(--mut);text-transform:uppercase;margin-bottom:6px">Documentos a cancelar</div>
+  <div id="ven-cob-docs" style="overflow-y:auto;max-height:260px;border:1px solid var(--bor);border-radius:8px"></div>
+  <div style="margin-top:10px;display:flex;gap:16px;font-size:13px">
+    <span>Seleccionado: <strong id="ven-cob-sel-monto">$0</strong></span>
+    <span style="color:var(--mut)">Disponible: <strong id="ven-cob-disponible">$0</strong></span>
+  </div>
+  <div class="fl" style="margin-top:10px"><label>Notas</label><textarea id="ven-cob-notas" rows="2"></textarea></div>
+  <div class="ab-modal-footer">
+    <button class="btn bo" onclick="document.getElementById('ven-mb-cob').classList.remove('on')">Cancelar</button>
+    <button class="btn bb" onclick="venCobGuardar()">Registrar Cobranza</button>
+  </div>
+</div></div>
+
+<script>
+// ══════════════════════════════════════════════════════════════════════════════
+// MÓDULO VENTAS — JS
+// ══════════════════════════════════════════════════════════════════════════════
+var VEN = { clientes: [], liqN: 0, facN: 0, ccClienteId: null, ccDocs: [] };
+
+function venApi(path, opts) {
+  opts = opts || {};
+  opts.headers = Object.assign({ 'Content-Type': 'application/json' }, opts.headers||{});
+  opts.credentials = 'include';
+  return fetch('/api/ven' + path, opts).then(function(r){ return r.json(); })
+    .catch(function(){ return { ok: false, error: 'Error de red' }; });
+}
+
+function venMoney(n) { return '$\u00a0' + parseFloat(n||0).toLocaleString('es-AR',{minimumFractionDigits:2}); }
+function venFecha(f) { return f ? String(f).substring(0,10) : ''; }
+
+function venBadge(estado) {
+  var m = { pendiente:'bwarn', cobrada:'bok', anulada:'ber' };
+  return '<span class="bdg '+(m[estado]||'bcc')+'" style="font-size:10px">'+estado+'</span>';
+}
+
+// ── Registro de secciones ─────────────────────────────────────────────────────
+// Se llaman desde el switch principal de secciones
+function venIniciarClientes()      { venClienteCargar(); }
+function venIniciarLiquidaciones() { venLiqCargar(); venPoblarClientesSel('ven-liq-fil-cliente'); venPoblarClientesSel('ven-liq-cliente'); }
+function venIniciarFacturas()      { venFacCargar(); venPoblarClientesSel('ven-fac-fil-cliente'); venPoblarClientesSel('ven-fac-cliente'); }
+function venIniciarCC()            { venPoblarClientesSel('ven-cc-cliente'); }
+
+function venPoblarClientesSel(id) {
+  venApi('/clientes').then(function(r) {
+    VEN.clientes = r.data || [];
+    var sel = document.getElementById(id);
+    if (!sel) return;
+    var val = sel.value;
+    var opts = id.indexOf('fil') >= 0
+      ? '<option value="">Todos los clientes</option>'
+      : '<option value="">— Seleccioná —</option>';
+    opts += VEN.clientes.map(function(c){ return '<option value="'+c.id+'">'+c.razon_social+'</option>'; }).join('');
+    sel.innerHTML = opts;
+    if (val) sel.value = val;
+  });
+}
+
+// ── CLIENTES ──────────────────────────────────────────────────────────────────
+function venClienteCargar() {
+  venApi('/clientes').then(function(r) {
+    VEN.clientes = r.data || [];
+    var tb = document.getElementById('ven-cli-tbody');
+    if (!VEN.clientes.length) { tb.innerHTML='<tr><td colspan="6" class="emp">Sin clientes. Creá el primero.</td></tr>'; return; }
+    tb.innerHTML = VEN.clientes.map(function(c) {
+      return '<tr>'
+        +'<td style="padding:9px 12px;font-weight:600">'+c.razon_social+'</td>'
+        +'<td style="padding:9px 12px;font-family:monospace;color:var(--mut)">'+( c.cuit||'—')+'</td>'
+        +'<td style="padding:9px 12px;color:var(--mut)">'+( c.condicion_iva||'—').replace('_',' ')+'</td>'
+        +'<td style="padding:9px 12px;color:var(--mut)">'+( c.telefono||'—')+'</td>'
+        +'<td style="padding:9px 12px;color:var(--mut)">'+( c.email||'—')+'</td>'
+        +'<td style="padding:9px 12px;text-align:right">'
+          +'<button class="btn bo bs" onclick="venClienteEditar('+c.id+')" style="font-size:10px;padding:2px 7px">✏️</button> '
+          +'<button class="btn bd bs" onclick="venClienteEliminar('+c.id+')" style="font-size:10px;padding:2px 7px">🗑</button>'
+        +'</td></tr>';
+    }).join('');
+  });
+}
+
+function venClienteNuevo() {
+  document.getElementById('ven-cli-id').value='';
+  document.getElementById('ven-mb-cli-tit').textContent='Nuevo Cliente';
+  ['ven-cli-razon','ven-cli-nombre-com','ven-cli-cuit','ven-cli-dir','ven-cli-tel','ven-cli-email','ven-cli-contacto','ven-cli-rubro','ven-cli-notas'].forEach(function(id){
+    var el=document.getElementById(id); if(el) el.value='';
+  });
+  document.getElementById('ven-cli-cond-iva').value='responsable_inscripto';
+  // Poblar cuentas contables
+  admCargarCuentas().then(function(){
+    document.getElementById('ven-cli-cuenta').innerHTML = admCuentasOpts('');
+  });
+  document.getElementById('ven-mb-cliente').classList.add('on');
+}
+
+function venClienteEditar(id) {
+  var c = VEN.clientes.find(function(x){ return x.id===id; });
+  if (!c) return;
+  document.getElementById('ven-cli-id').value=c.id;
+  document.getElementById('ven-mb-cli-tit').textContent='Editar — '+c.razon_social;
+  document.getElementById('ven-cli-razon').value=c.razon_social||'';
+  document.getElementById('ven-cli-nombre-com').value=c.nombre_comercial||'';
+  document.getElementById('ven-cli-cuit').value=c.cuit||'';
+  document.getElementById('ven-cli-cond-iva').value=c.condicion_iva||'responsable_inscripto';
+  document.getElementById('ven-cli-dir').value=c.direccion||'';
+  document.getElementById('ven-cli-tel').value=c.telefono||'';
+  document.getElementById('ven-cli-email').value=c.email||'';
+  document.getElementById('ven-cli-contacto').value=c.contacto||'';
+  document.getElementById('ven-cli-rubro').value=c.rubro||'';
+  document.getElementById('ven-cli-notas').value=c.notas||'';
+  admCargarCuentas().then(function(){
+    document.getElementById('ven-cli-cuenta').innerHTML = admCuentasOpts(c.cuenta_contable_id||'');
+  });
+  document.getElementById('ven-mb-cliente').classList.add('on');
+}
+
+function venClienteGuardar() {
+  var id=document.getElementById('ven-cli-id').value;
+  var razon=document.getElementById('ven-cli-razon').value.trim();
+  if (!razon) return toast('Razón Social obligatoria','er');
+  var body={
+    razon_social:razon,
+    nombre_comercial:document.getElementById('ven-cli-nombre-com').value.trim()||null,
+    cuit:document.getElementById('ven-cli-cuit').value.trim()||null,
+    condicion_iva:document.getElementById('ven-cli-cond-iva').value,
+    direccion:document.getElementById('ven-cli-dir').value.trim()||null,
+    telefono:document.getElementById('ven-cli-tel').value.trim()||null,
+    email:document.getElementById('ven-cli-email').value.trim()||null,
+    contacto:document.getElementById('ven-cli-contacto').value.trim()||null,
+    rubro:document.getElementById('ven-cli-rubro').value.trim()||null,
+    notas:document.getElementById('ven-cli-notas').value.trim()||null,
+    cuenta_contable_id:document.getElementById('ven-cli-cuenta').value||null
+  };
+  var url=id?'/clientes/'+id:'/clientes';
+  var method=id?'PUT':'POST';
+  venApi(url,{method:method,body:JSON.stringify(body)}).then(function(r){
+    if(r.ok){toast('✓ Cliente guardado','ok');document.getElementById('ven-mb-cliente').classList.remove('on');venClienteCargar();}
+    else toast(r.error||'Error','er');
+  });
+}
+
+function venClienteEliminar(id) {
+  if (!confirm('¿Desactivar este cliente?')) return;
+  venApi('/clientes/'+id,{method:'DELETE'}).then(function(r){
+    if(r.ok){toast('Cliente desactivado','ok');venClienteCargar();}
+    else toast(r.error||'Error','er');
+  });
+}
+
+// ── LIQUIDACIONES ─────────────────────────────────────────────────────────────
+var VEN_LIQ_DATA = [];
+function venLiqCargar() {
+  var cid=document.getElementById('ven-liq-fil-cliente').value;
+  var est=document.getElementById('ven-liq-fil-estado').value;
+  var qs=[];
+  if(cid) qs.push('clienteId='+cid);
+  if(est) qs.push('estado='+est);
+  venApi('/liquidaciones'+(qs.length?'?'+qs.join('&'):'')).then(function(r){
+    VEN_LIQ_DATA = r.data||[];
+    var tb=document.getElementById('ven-liq-tbody');
+    if(!VEN_LIQ_DATA.length){tb.innerHTML='<tr><td colspan="8" class="emp">Sin liquidaciones</td></tr>';return;}
+    tb.innerHTML=VEN_LIQ_DATA.map(function(l){
+      return '<tr>'
+        +'<td style="padding:9px 12px;font-family:monospace;font-weight:600">'+l.numero+'</td>'
+        +'<td style="padding:9px 12px;color:var(--mut)">'+venFecha(l.fecha)+'</td>'
+        +'<td style="padding:9px 12px">'+l.cliente_nombre+'</td>'
+        +'<td style="padding:9px 12px;color:var(--mut)">'+( l.nro_remito||'—')+'</td>'
+        +'<td style="padding:9px 12px;text-align:right;font-weight:600">'+venMoney(l.precio_bruto)+'</td>'
+        +'<td style="padding:9px 12px;text-align:right;font-weight:700;color:#15803d">'+venMoney(l.neto_acreditar)+'</td>'
+        +'<td style="padding:9px 12px;text-align:center">'+venBadge(l.estado)+'</td>'
+        +'<td style="padding:9px 12px;text-align:right">'
+          +(l.estado!=='anulada'?'<button class="btn bd bs" onclick="venLiqAnular('+l.id+')" style="font-size:10px;padding:2px 7px">Anular</button>':'')
+        +'</td></tr>';
+    }).join('');
+  });
+}
+
+function venLiqNueva() {
+  VEN.liqN=0;
+  document.getElementById('ven-liq-fecha').value=new Date().toISOString().split('T')[0];
+  document.getElementById('ven-liq-remito').value='';
+  document.getElementById('ven-liq-obs').value='';
+  ['ven-liq-desc-com','ven-liq-desc-flete','ven-liq-desc-cd','ven-liq-desc-otros',
+   'ven-liq-ret-iva','ven-liq-ret-gan','ven-liq-ret-iibb','ven-liq-ret-otras'].forEach(function(id){
+    document.getElementById(id).value='0';
+  });
+  document.getElementById('ven-liq-items').innerHTML='';
+  venLiqAgregarItem();
+  venLiqActTotal();
+  venPoblarClientesSel('ven-liq-cliente');
+  document.getElementById('ven-mb-liq').classList.add('on');
+}
+
+function venLiqAgregarItem() {
+  var n=VEN.liqN++;
+  var row=document.createElement('div');
+  row.id='ven-liq-item-'+n;
+  row.style.cssText='display:grid;grid-template-columns:2fr 90px 110px 110px auto;gap:6px;align-items:center';
+  row.innerHTML='<input type="text" placeholder="Descripción (ej: Soja, campaña 24/25)" style="font-size:12px;padding:5px 8px;border:1px solid var(--bor2);border-radius:5px">'
+    +'<input type="number" step="0.001" min="0" placeholder="Kilos" oninput="venLiqItemCalc('+n+')" style="font-size:12px;padding:5px 8px;border:1px solid var(--bor2);border-radius:5px;text-align:right">'
+    +'<input type="number" step="0.01" min="0" placeholder="$/kg" oninput="venLiqItemCalc('+n+')" style="font-size:12px;padding:5px 8px;border:1px solid var(--bor2);border-radius:5px;text-align:right">'
+    +'<input type="number" step="0.01" min="0" placeholder="Subtotal" oninput="venLiqActTotal()" id="ven-liq-item-sub-'+n+'" style="font-size:12px;padding:5px 8px;border:1px solid var(--bor2);border-radius:5px;text-align:right;font-weight:700">'
+    +'<button class="btn bd bs" onclick="this.closest(\'[id^=ven-liq-item]\').remove();venLiqActTotal()" style="font-size:10px;padding:3px 7px">✕</button>';
+  document.getElementById('ven-liq-items').appendChild(row);
+}
+
+function venLiqItemCalc(n) {
+  var row=document.getElementById('ven-liq-item-'+n);
+  if(!row) return;
+  var inps=row.querySelectorAll('input');
+  var kilos=parseFloat(inps[1].value||0), precio=parseFloat(inps[2].value||0);
+  if(kilos>0&&precio>0) inps[3].value=(kilos*precio).toFixed(2);
+  venLiqActTotal();
+}
+
+function venLiqActTotal() {
+  var bruto=0;
+  document.querySelectorAll('[id^=ven-liq-item-sub-]').forEach(function(el){ bruto+=parseFloat(el.value||0); });
+  var desc=(parseFloat(document.getElementById('ven-liq-desc-com').value||0))
+    +(parseFloat(document.getElementById('ven-liq-desc-flete').value||0))
+    +(parseFloat(document.getElementById('ven-liq-desc-cd').value||0))
+    +(parseFloat(document.getElementById('ven-liq-desc-otros').value||0));
+  var ret=(parseFloat(document.getElementById('ven-liq-ret-iva').value||0))
+    +(parseFloat(document.getElementById('ven-liq-ret-gan').value||0))
+    +(parseFloat(document.getElementById('ven-liq-ret-iibb').value||0))
+    +(parseFloat(document.getElementById('ven-liq-ret-otras').value||0));
+  var neto=bruto-desc-ret;
+  document.getElementById('ven-liq-res-bruto').textContent=venMoney(bruto);
+  document.getElementById('ven-liq-res-desc').textContent='-'+venMoney(desc+ret);
+  document.getElementById('ven-liq-res-neto').textContent=venMoney(neto);
+}
+
+function venLiqGuardar() {
+  var clienteId=document.getElementById('ven-liq-cliente').value;
+  if(!clienteId) return toast('Seleccioná un cliente','er');
+  var items=[];
+  document.querySelectorAll('#ven-liq-items > div').forEach(function(row){
+    var inps=row.querySelectorAll('input');
+    var desc=(inps[0].value||'').trim();
+    var sub=parseFloat(inps[3].value||0);
+    if(desc&&sub>0) items.push({descripcion:desc,kilos:parseFloat(inps[1].value||0)||null,precio_unitario:parseFloat(inps[2].value||0)||null,subtotal:sub});
+  });
+  if(!items.length) return toast('Agregá al menos un ítem con monto','er');
+  var body={
+    fecha:document.getElementById('ven-liq-fecha').value,
+    cliente_id:parseInt(clienteId),
+    nro_remito:document.getElementById('ven-liq-remito').value.trim()||null,
+    observaciones:document.getElementById('ven-liq-obs').value.trim()||null,
+    items,
+    desc_comision:parseFloat(document.getElementById('ven-liq-desc-com').value||0),
+    desc_flete:parseFloat(document.getElementById('ven-liq-desc-flete').value||0),
+    desc_carga_descarga:parseFloat(document.getElementById('ven-liq-desc-cd').value||0),
+    desc_otros:parseFloat(document.getElementById('ven-liq-desc-otros').value||0),
+    ret_iva:parseFloat(document.getElementById('ven-liq-ret-iva').value||0),
+    ret_ganancias:parseFloat(document.getElementById('ven-liq-ret-gan').value||0),
+    ret_iibb:parseFloat(document.getElementById('ven-liq-ret-iibb').value||0),
+    ret_otras:parseFloat(document.getElementById('ven-liq-ret-otras').value||0)
+  };
+  venApi('/liquidaciones',{method:'POST',body:JSON.stringify(body)}).then(function(r){
+    if(r.ok){toast('✓ Liquidación '+r.numero+' registrada','ok');document.getElementById('ven-mb-liq').classList.remove('on');venLiqCargar();}
+    else toast(r.error||'Error','er');
+  });
+}
+
+function venLiqAnular(id){
+  if(!confirm('¿Anular esta liquidación? Se revertirán las cobranzas vinculadas.')) return;
+  venApi('/liquidaciones/'+id+'/anular',{method:'PATCH',body:'{}'}).then(function(r){
+    if(r.ok){toast('Liquidación anulada','ok');venLiqCargar();}else toast(r.error||'Error','er');
+  });
+}
+
+function venLiqExportar(){
+  _descargarTSV(VEN_LIQ_DATA.map(function(l){
+    return [l.numero,venFecha(l.fecha),l.cliente_nombre,l.nro_remito||'',
+      l.precio_bruto,l.desc_comision,l.desc_flete,l.desc_carga_descarga,l.desc_otros,
+      l.ret_iva,l.ret_ganancias,l.ret_iibb,l.ret_otras,l.neto_acreditar,l.estado];
+  }),['Número','Fecha','Cliente','Nro. Remito','Precio Bruto','Comisión','Flete','Carga/Desc.','Otros Desc.',
+    'Ret. IVA','Ret. Ganancias','Ret. IIBB','Otras Ret.','Neto a Cobrar','Estado'],'liquidaciones');
+}
+
+// ── FACTURAS DE VENTA ─────────────────────────────────────────────────────────
+var VEN_FAC_DATA = [];
+function venFacCargar() {
+  var cid=document.getElementById('ven-fac-fil-cliente').value;
+  var est=document.getElementById('ven-fac-fil-estado').value;
+  var qs=[];
+  if(cid) qs.push('clienteId='+cid);
+  if(est) qs.push('estado='+est);
+  venApi('/facturas'+(qs.length?'?'+qs.join('&'):'')).then(function(r){
+    VEN_FAC_DATA=r.data||[];
+    var tb=document.getElementById('ven-fac-tbody');
+    if(!VEN_FAC_DATA.length){tb.innerHTML='<tr><td colspan="10" class="emp">Sin facturas</td></tr>';return;}
+    tb.innerHTML=VEN_FAC_DATA.map(function(f){
+      return '<tr>'
+        +'<td style="padding:9px 12px;font-family:monospace;font-weight:600">'+f.numero+'</td>'
+        +'<td style="padding:9px 12px;color:var(--mut)">'+venFecha(f.fecha)+'</td>'
+        +'<td style="padding:9px 12px">'+f.cliente_nombre+'</td>'
+        +'<td style="padding:9px 12px;text-align:center"><span class="bdg" style="font-size:10px">'+f.tipo+'</span></td>'
+        +'<td style="padding:9px 12px;color:var(--mut);font-size:12px">'+( f.concepto||'—')+'</td>'
+        +'<td style="padding:9px 12px;text-align:right">'+venMoney(f.neto)+'</td>'
+        +'<td style="padding:9px 12px;text-align:right;color:var(--mut)">'+venMoney(f.iva)+'</td>'
+        +'<td style="padding:9px 12px;text-align:right;font-weight:700">'+venMoney(f.total)+'</td>'
+        +'<td style="padding:9px 12px;text-align:center">'+venBadge(f.estado)+'</td>'
+        +'<td style="padding:9px 12px;text-align:right">'
+          +(f.estado!=='anulada'?'<button class="btn bd bs" onclick="venFacAnular('+f.id+')" style="font-size:10px;padding:2px 7px">Anular</button>':'')
+        +'</td></tr>';
+    }).join('');
+  });
+}
+
+function venFacNueva(){
+  VEN.facN=0;
+  document.getElementById('ven-fac-fecha').value=new Date().toISOString().split('T')[0];
+  document.getElementById('ven-fac-concepto').value='';
+  document.getElementById('ven-fac-iva').value='0';
+  document.getElementById('ven-fac-neto').value='0';
+  document.getElementById('ven-fac-total').value='0';
+  document.getElementById('ven-fac-notas').value='';
+  document.getElementById('ven-fac-items').innerHTML='';
+  venFacAgregarItem();
+  venPoblarClientesSel('ven-fac-cliente');
+  document.getElementById('ven-mb-fac').classList.add('on');
+}
+
+function venFacAgregarItem(){
+  var n=VEN.facN++;
+  var row=document.createElement('div');
+  row.id='ven-fac-item-'+n;
+  row.style.cssText='display:grid;grid-template-columns:2fr 80px 110px 110px auto;gap:6px;align-items:center';
+  row.innerHTML='<input type="text" placeholder="Descripción" style="font-size:12px;padding:5px 8px;border:1px solid var(--bor2);border-radius:5px">'
+    +'<input type="number" step="0.001" min="0" placeholder="Cant." value="1" oninput="venFacItemCalc('+n+')" style="font-size:12px;padding:5px 8px;border:1px solid var(--bor2);border-radius:5px;text-align:right">'
+    +'<input type="number" step="0.01" min="0" placeholder="Precio" oninput="venFacItemCalc('+n+')" style="font-size:12px;padding:5px 8px;border:1px solid var(--bor2);border-radius:5px;text-align:right">'
+    +'<input type="number" step="0.01" min="0" placeholder="Subtotal" oninput="venFacActTotal()" id="ven-fac-item-sub-'+n+'" style="font-size:12px;padding:5px 8px;border:1px solid var(--bor2);border-radius:5px;text-align:right;font-weight:700">'
+    +'<button class="btn bd bs" onclick="this.closest(\'[id^=ven-fac-item]\').remove();venFacActTotal()" style="font-size:10px;padding:3px 7px">✕</button>';
+  document.getElementById('ven-fac-items').appendChild(row);
+}
+
+function venFacItemCalc(n){
+  var row=document.getElementById('ven-fac-item-'+n);
+  if(!row) return;
+  var inps=row.querySelectorAll('input');
+  var cant=parseFloat(inps[1].value||1),precio=parseFloat(inps[2].value||0);
+  if(precio>0) inps[3].value=(cant*precio).toFixed(2);
+  venFacActTotal();
+}
+
+function venFacActTotal(){
+  var neto=0;
+  document.querySelectorAll('[id^=ven-fac-item-sub-]').forEach(function(el){ neto+=parseFloat(el.value||0); });
+  var iva=parseFloat(document.getElementById('ven-fac-iva').value||0);
+  document.getElementById('ven-fac-neto').value=neto.toFixed(2);
+  document.getElementById('ven-fac-total').value=(neto+iva).toFixed(2);
+}
+
+function venFacGuardar(){
+  var clienteId=document.getElementById('ven-fac-cliente').value;
+  if(!clienteId) return toast('Seleccioná un cliente','er');
+  var items=[];
+  document.querySelectorAll('#ven-fac-items > div').forEach(function(row){
+    var inps=row.querySelectorAll('input');
+    var desc=(inps[0].value||'').trim();
+    var sub=parseFloat(inps[3].value||0);
+    if(desc&&sub>0) items.push({descripcion:desc,cantidad:parseFloat(inps[1].value||1),precio_unitario:parseFloat(inps[2].value||0),subtotal:sub});
+  });
+  if(!items.length) return toast('Agregá al menos un ítem','er');
+  var body={
+    fecha:document.getElementById('ven-fac-fecha').value,
+    cliente_id:parseInt(clienteId),
+    tipo:document.getElementById('ven-fac-tipo').value,
+    concepto:document.getElementById('ven-fac-concepto').value.trim()||null,
+    iva:parseFloat(document.getElementById('ven-fac-iva').value||0),
+    notas:document.getElementById('ven-fac-notas').value.trim()||null,
+    items
+  };
+  venApi('/facturas',{method:'POST',body:JSON.stringify(body)}).then(function(r){
+    if(r.ok){toast('✓ Factura '+r.numero+' registrada','ok');document.getElementById('ven-mb-fac').classList.remove('on');venFacCargar();}
+    else toast(r.error||'Error','er');
+  });
+}
+
+function venFacAnular(id){
+  if(!confirm('¿Anular esta factura?')) return;
+  venApi('/facturas/'+id+'/anular',{method:'PATCH',body:'{}'}).then(function(r){
+    if(r.ok){toast('Factura anulada','ok');venFacCargar();}else toast(r.error||'Error','er');
+  });
+}
+
+function venFacExportar(){
+  _descargarTSV(VEN_FAC_DATA.map(function(f){
+    return [f.numero,venFecha(f.fecha),f.cliente_nombre,f.tipo,f.concepto||'',f.neto,f.iva,f.total,f.estado];
+  }),['Número','Fecha','Cliente','Tipo','Concepto','Neto','IVA','Total','Estado'],'facturas_venta');
+}
+
+// ── CUENTA CORRIENTE ──────────────────────────────────────────────────────────
+function venCCCargar(){
+  var cid=document.getElementById('ven-cc-cliente').value;
+  if(!cid){
+    document.getElementById('ven-cc-resumen').style.display='none';
+    document.getElementById('ven-cc-docs-wrap').style.display='none';
+    document.getElementById('ven-cc-btn-export').style.display='none';
+    return;
+  }
+  VEN.ccClienteId=parseInt(cid);
+  venApi('/cc/'+cid).then(function(r){
+    if(!r.ok) return toast(r.error||'Error','er');
+    VEN.ccDocs=r.docs||[];
+    document.getElementById('ven-cc-resumen').style.display='grid';
+    document.getElementById('ven-cc-total').textContent=venMoney(r.totales.total);
+    document.getElementById('ven-cc-cobrado').textContent=venMoney(r.totales.cobrado);
+    document.getElementById('ven-cc-pendiente').textContent=venMoney(r.totales.pendiente);
+    document.getElementById('ven-cc-docs-wrap').style.display='';
+    document.getElementById('ven-cc-btn-export').style.display='';
+
+    var tb=document.getElementById('ven-cc-docs-tbody');
+    tb.innerHTML=VEN.ccDocs.map(function(d){
+      var tipoBadge=d.tipo_doc==='liquidacion'
+        ?'<span class="bdg" style="font-size:10px;background:#e0f2fe;color:#0369a1">Liquidación</span>'
+        :'<span class="bdg" style="font-size:10px;background:#f0fdf4;color:#15803d">Factura</span>';
+      return '<tr>'
+        +'<td style="padding:9px 12px">'+tipoBadge+'</td>'
+        +'<td style="padding:9px 12px;font-family:monospace;font-weight:600">'+d.numero+'</td>'
+        +'<td style="padding:9px 12px;color:var(--mut)">'+venFecha(d.fecha)+'</td>'
+        +'<td style="padding:9px 12px;text-align:right">'+venMoney(d.total)+'</td>'
+        +'<td style="padding:9px 12px;text-align:right;color:#16a34a">'+venMoney(d.cobrado)+'</td>'
+        +'<td style="padding:9px 12px;text-align:right;color:'+(d.pendiente>0?'#dc2626':'#16a34a')+'">'+venMoney(d.pendiente)+'</td>'
+        +'<td style="padding:9px 12px;text-align:center">'+venBadge(d.estado)+'</td>'
+        +'</tr>';
+    }).join('')||'<tr><td colspan="7" class="emp">Sin documentos</td></tr>';
+
+    var cobTb=document.getElementById('ven-cc-cob-tbody');
+    var cobs=r.cobranzas||[];
+    document.getElementById('ven-cc-cob-wrap').style.display=cobs.length?'':'none';
+    cobTb.innerHTML=cobs.map(function(c){
+      return '<tr>'
+        +'<td style="padding:9px 12px;color:var(--mut)">'+venFecha(c.fecha)+'</td>'
+        +'<td style="padding:9px 12px">'+c.forma_pago+'</td>'
+        +'<td style="padding:9px 12px;color:var(--mut)">'+( c.referencia||'—')+'</td>'
+        +'<td style="padding:9px 12px;text-align:right;font-weight:700;color:#16a34a">'+venMoney(c.monto)+'</td>'
+        +'<td style="padding:9px 12px"><button class="btn bd bs" onclick="venCobAnular('+c.id+')" style="font-size:10px;padding:2px 6px" title="Anular">✕</button></td>'
+        +'</tr>';
+    }).join('');
+  });
+}
+
+function venCCExportar(){
+  _descargarTSV(VEN.ccDocs.map(function(d){
+    return [d.tipo_doc,d.numero,venFecha(d.fecha),d.total,d.cobrado,d.pendiente,d.estado];
+  }),['Tipo','Número','Fecha','Total','Cobrado','Pendiente','Estado'],'cuenta_corriente_cliente');
+}
+
+// ── COBRANZAS ─────────────────────────────────────────────────────────────────
+function venCobNueva(){
+  if(!VEN.ccClienteId) return toast('Seleccioná un cliente','er');
+  var cli=VEN.clientes.find(function(c){return c.id===VEN.ccClienteId;});
+  document.getElementById('ven-cob-cli-nom').textContent=cli?cli.razon_social:'';
+  document.getElementById('ven-cob-fecha').value=new Date().toISOString().split('T')[0];
+  document.getElementById('ven-cob-monto').value='';
+  document.getElementById('ven-cob-ref').value='';
+  document.getElementById('ven-cob-notas').value='';
+  document.getElementById('ven-cob-sel-monto').textContent='$0';
+
+  // Documentos pendientes
+  var pendientes=VEN.ccDocs.filter(function(d){return d.pendiente>0;});
+  var disponible=parseFloat(document.getElementById('ven-cob-monto').value||0);
+  document.getElementById('ven-cob-disponible').textContent=venMoney(disponible);
+  var cont=document.getElementById('ven-cob-docs');
+  cont.innerHTML=pendientes.map(function(d){
+    return '<div style="display:grid;grid-template-columns:auto 1fr auto 90px;gap:8px;align-items:center;padding:9px 12px;border-bottom:1px solid var(--bor)">'
+      +'<input type="checkbox" id="ven-cob-chk-'+d.id+'-'+d.tipo_doc+'" onchange="venCobActMonto()" style="width:auto">'
+      +'<div><div style="font-weight:600;font-size:12px">'+d.numero+'</div>'
+      +'<div style="font-size:10px;color:var(--mut)">'+d.tipo_doc+' · '+venFecha(d.fecha)+'</div></div>'
+      +'<div style="text-align:right;font-size:12px;color:var(--mut)">Pend: <strong>'+venMoney(d.pendiente)+'</strong></div>'
+      +'<input type="number" id="ven-cob-mnt-'+d.id+'-'+d.tipo_doc+'" step="0.01" min="0" max="'+d.pendiente+'" value="'+d.pendiente.toFixed(2)+'" oninput="venCobActMonto()" style="font-size:12px;padding:4px 6px;border:1px solid var(--bor2);border-radius:5px;text-align:right" disabled>'
+      +'</div>';
+  }).join('')||'<div style="padding:20px;text-align:center;color:var(--mut)">Sin documentos pendientes</div>';
+
+  // Habilitar inputs al tildar
+  pendientes.forEach(function(d){
+    var chk=document.getElementById('ven-cob-chk-'+d.id+'-'+d.tipo_doc);
+    var mnt=document.getElementById('ven-cob-mnt-'+d.id+'-'+d.tipo_doc);
+    if(chk&&mnt) chk.addEventListener('change',function(){ mnt.disabled=!chk.checked; venCobActMonto(); });
+  });
+
+  document.getElementById('ven-mb-cob').classList.add('on');
+}
+
+function venCobActMonto(){
+  var total=0;
+  document.querySelectorAll('[id^=ven-cob-mnt-]').forEach(function(inp){
+    var id=inp.id.replace('ven-cob-mnt-','');
+    var chk=document.getElementById('ven-cob-chk-'+id);
+    if(chk&&chk.checked) total+=parseFloat(inp.value||0);
+  });
+  document.getElementById('ven-cob-sel-monto').textContent=venMoney(total);
+  var disponible=parseFloat(document.getElementById('ven-cob-monto').value||0);
+  document.getElementById('ven-cob-disponible').textContent=venMoney(disponible-total);
+}
+
+function venCobGuardar(){
+  var monto=parseFloat(document.getElementById('ven-cob-monto').value||0);
+  if(monto<=0) return toast('Ingresá el monto','er');
+  var docs=[];
+  document.querySelectorAll('[id^=ven-cob-chk-]').forEach(function(chk){
+    if(!chk.checked) return;
+    var key=chk.id.replace('ven-cob-chk-','');
+    var parts=key.split('-');
+    var tipo=parts[parts.length-1];
+    var docId=parts.slice(0,parts.length-1).join('-');
+    var montoDoc=parseFloat((document.getElementById('ven-cob-mnt-'+key)||{}).value||0);
+    if(montoDoc>0) docs.push({tipo,doc_id:parseInt(docId),monto:montoDoc});
+  });
+  if(!docs.length) return toast('Seleccioná al menos un documento','er');
+  var body={
+    fecha:document.getElementById('ven-cob-fecha').value,
+    cliente_id:VEN.ccClienteId,
+    monto,
+    forma_pago:document.getElementById('ven-cob-forma').value,
+    referencia:document.getElementById('ven-cob-ref').value.trim()||null,
+    notas:document.getElementById('ven-cob-notas').value.trim()||null,
+    docs
+  };
+  venApi('/cobranzas',{method:'POST',body:JSON.stringify(body)}).then(function(r){
+    if(r.ok){toast('✓ Cobranza registrada','ok');document.getElementById('ven-mb-cob').classList.remove('on');venCCCargar();}
+    else toast(r.error||'Error','er');
+  });
+}
+
+function venCobAnular(id){
+  if(!confirm('¿Anular esta cobranza?')) return;
+  venApi('/cobranzas/'+id,{method:'DELETE'}).then(function(r){
+    if(r.ok){toast('Cobranza anulada','ok');venCCCargar();}else toast(r.error||'Error','er');
+  });
+}
 </script>
 
 </body>
