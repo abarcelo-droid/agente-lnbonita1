@@ -22147,173 +22147,200 @@ var EXPORT_DATA = {
 
 function exportCSV(filas, columnas, nombreArchivo) {
   if (!filas || !filas.length) return toast('No hay datos para exportar', 'warn');
-
-  // Generar tabla HTML que Excel abre nativamente con columnas separadas
-  var cab = columnas.map(function(c){
-    return '<th style="background:#1d4ed8;color:#fff;padding:6px 10px;border:1px solid #cbd5e1;white-space:nowrap">'+c.label+'</th>';
-  }).join('');
-
-  var rows = filas.map(function(f, i) {
-    var bg = i % 2 === 0 ? '#ffffff' : '#f8fafc';
-    var tds = columnas.map(function(c){
+  // TSV: separador tabulación — Excel lo abre perfectamente con columnas separadas
+  var tab = '\t', nl = '\r\n';
+  var cab = columnas.map(function(c){ return c.label; }).join(tab);
+  var rows = filas.map(function(f) {
+    return columnas.map(function(c) {
       var v = c.fn ? c.fn(f) : (f[c.key] != null ? f[c.key] : '');
-      return '<td style="padding:5px 10px;border:1px solid #e2e8f0;background:'+bg+'">'+String(v)+'</td>';
-    }).join('');
-    return '<tr>'+tds+'</tr>';
-  }).join('');
-
-  var html = '<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel">'
-    + '<head><meta charset="UTF-8">'
-    + '<style>body{font-family:Arial,sans-serif;font-size:12px}</style></head>'
-    + '<body><table border="1" cellspacing="0">'
-    + '<thead><tr>'+cab+'</tr></thead>'
-    + '<tbody>'+rows+'</tbody>'
-    + '</table></body></html>';
-
-  var blob = new Blob(['\uFEFF'+html], { type: 'application/vnd.ms-excel;charset=utf-8' });
+      // Limpiar: quitar tabs, saltos de línea y HTML
+      v = String(v === null || v === undefined ? '' : v)
+        .replace(/<[^>]+>/g, '')   // strip HTML tags
+        .replace(/\t/g, ' ')        // no tabs dentro de celdas
+        .replace(/\r?\n/g, ' ')     // no saltos de línea
+        .trim();
+      return v;
+    }).join(tab);
+  });
+  var contenido = '\uFEFF' + cab + nl + rows.join(nl);
+  var blob = new Blob([contenido], { type: 'text/tab-separated-values;charset=utf-8' });
   var url  = URL.createObjectURL(blob);
   var a    = document.createElement('a');
   a.href = url; a.download = nombreArchivo + '.xls';
   document.body.appendChild(a); a.click();
   document.body.removeChild(a); URL.revokeObjectURL(url);
-  toast('✅ Descargado: '+nombreArchivo+'.xls', 'ok');
+  toast('✅ Descargado: ' + nombreArchivo + '.xls', 'ok');
 }
 
-function fmtMoney(n){ return parseFloat(n||0).toLocaleString('es-AR',{minimumFractionDigits:2}); }
-function fmtFecha(f){ return f?String(f).substring(0,10):''; }
+function fmtMoney(n){ return parseFloat(n||0).toFixed(2).replace('.',','); }
+function fmtFecha(f){ return f ? String(f).substring(0,10) : ''; }
+function fmtNum(n)  { return n != null && n !== '' ? parseFloat(n||0).toFixed(2).replace('.',',') : ''; }
 
+// ── ASIENTOS CONTABLES — una fila por línea de asiento ───────────────────────
 function exportarAsientos(){
-  var d=document.getElementById('adm-as-desde').value, h=document.getElementById('adm-as-hasta').value;
-  // Expandir línea por línea
+  var d=document.getElementById('adm-as-desde').value;
+  var h=document.getElementById('adm-as-hasta').value;
   var filas = [];
   (EXPORT_DATA.asientos||[]).forEach(function(a) {
     var partes = (a.descripcion||'').split('|');
-    var ref    = (a.ref_codigo || (partes[0]||'')).trim();
-    var nroFact= partes.length>=3 ? partes[partes.length-1].trim() : '';
-    var prov   = partes.length>=2 ? partes[1].trim() : '';
-    var lineas = a.lineas || [];
+    var ref     = (a.ref_codigo || (partes[0]||'')).trim();
+    var prov    = partes.length>=2 ? partes[1].trim() : (a.descripcion||'');
+    var nroFact = partes.length>=3 ? partes[partes.length-1].trim() : '';
+    var estado  = a.anulado ? 'Anulado' : 'Vigente';
+    var usuario = a.usuario_nombre || '';
+    var lineas  = a.lineas || [];
     if (!lineas.length) {
-      filas.push({ id:a.id, fecha:a.fecha, ref, nroFact, prov, cuenta:'', debe:'', haber:'', estado:a.anulado?'Anulado':'Vigente', usuario:a.usuario_nombre||'' });
+      filas.push([a.id, fmtFecha(a.fecha), ref, nroFact, prov, '', '', '', '', estado, usuario]);
     } else {
-      lineas.forEach(function(l) {
-        filas.push({ id:a.id, fecha:a.fecha, ref, nroFact, prov, cuenta:(l.cuenta_nombre||''), debe:l.debe||0, haber:l.haber||0, estado:a.anulado?'Anulado':'Vigente', usuario:a.usuario_nombre||'' });
+      lineas.forEach(function(l){
+        filas.push([
+          a.id, fmtFecha(a.fecha), ref, nroFact, prov,
+          l.cuenta_codigo||'', l.cuenta_nombre||'', l.descripcion||'',
+          fmtNum(l.debe), fmtNum(l.haber),
+          estado, usuario
+        ]);
       });
     }
   });
-  exportCSV(filas,[
-    {label:'ID',fn:function(r){return r.id;}},
-    {label:'Fecha',fn:function(r){return fmtFecha(r.fecha);}},
-    {label:'Referencia',fn:function(r){return r.ref;}},
-    {label:'Nro. Factura',fn:function(r){return r.nroFact;}},
-    {label:'Proveedor',fn:function(r){return r.prov;}},
-    {label:'Cuenta',fn:function(r){return r.cuenta;}},
-    {label:'Debe',fn:function(r){return r.debe!==''?fmtMoney(r.debe):'';}},
-    {label:'Haber',fn:function(r){return r.haber!==''?fmtMoney(r.haber):'';}},
-    {label:'Estado',fn:function(r){return r.estado;}},
-    {label:'Usuario',fn:function(r){return r.usuario;}}
-  ],'asientos'+(d?'_'+d:'')+(h?'_al_'+h:''));
+  var cols = ['ID Asiento','Fecha','Referencia','Nro. Factura','Proveedor','Cta. Código','Cta. Nombre','Descripción Línea','Debe','Haber','Estado','Usuario'];
+  var tab='\t', nl='\r\n';
+  var contenido = '\uFEFF' + cols.join(tab) + nl + filas.map(function(r){ return r.join(tab); }).join(nl);
+  var blob = new Blob([contenido], { type: 'text/tab-separated-values;charset=utf-8' });
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement('a');
+  a.href=url; a.download='asientos'+(d?'_'+d:'')+(h?'_al_'+h:'')+'.xls';
+  document.body.appendChild(a); a.click();
+  document.body.removeChild(a); URL.revokeObjectURL(url);
+  toast('✅ Descargado: asientos.xls', 'ok');
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
-// FILTROS DE COLUMNA EN TABLAS
-// ══════════════════════════════════════════════════════════════════════════════
+// ── FILTROS DE COLUMNA ────────────────────────────────────────────────────────
 function tablaFiltrar(tbodyId, colIndex, valor) {
   var tbody = document.getElementById(tbodyId);
   if (!tbody) return;
   var v = valor.toLowerCase().trim();
-  var filas = tbody.querySelectorAll('tr');
-  filas.forEach(function(tr) {
+  tbody.querySelectorAll('tr').forEach(function(tr) {
     var celdas = tr.querySelectorAll('td');
     if (!celdas.length) return;
     var celda = celdas[colIndex];
     if (!celda) { tr.style.display = ''; return; }
-    var texto = celda.textContent.toLowerCase();
-    tr.style.display = (!v || texto.indexOf(v) >= 0) ? '' : 'none';
+    tr.style.display = (!v || celda.textContent.toLowerCase().indexOf(v) >= 0) ? '' : 'none';
   });
 }
 
+// ── ÓRDENES DE PAGO ──────────────────────────────────────────────────────────
 function exportarOP(){
-  exportCSV(EXPORT_DATA.op,[
-    {label:'Número',fn:function(r){return r.numero||'';}},
-    {label:'Fecha',fn:function(r){return fmtFecha(r.fecha);}},
-    {label:'Proveedor',fn:function(r){return r.proveedor_nombre||'';}},
-    {label:'Forma Pago',fn:function(r){return r.forma_pago||'';}},
-    {label:'Cuenta',fn:function(r){return r.cuenta_nombre||'';}},
-    {label:'Monto',fn:function(r){return fmtMoney(r.monto_total);}},
-    {label:'Estado',fn:function(r){return r.estado||'';}},
-    {label:'Referencia',fn:function(r){return r.referencia||'';}}
-  ],'ordenes_pago');
+  var filas = (EXPORT_DATA.op||[]).map(function(r){
+    var facturas = (r.compras||[]).map(function(c){ return c.nro_factura||('ID:'+c.compra_id); }).join(' / ');
+    return [
+      r.numero||'', fmtFecha(r.fecha), r.proveedor_nombre||'',
+      r.forma_pago||'', r.cuenta_nombre||'',
+      fmtNum(r.monto_total), r.estado||'',
+      r.referencia||'', r.notas||'', facturas
+    ];
+  });
+  var cols = ['Número','Fecha','Proveedor','Forma Pago','Cuenta','Monto','Estado','Referencia','Notas','Facturas canceladas'];
+  _descargarTSV(filas, cols, 'ordenes_pago');
 }
 
+// ── CHEQUES PROPIOS ──────────────────────────────────────────────────────────
 function exportarChequesPropios(){
-  var e=document.getElementById('fin-filter-cp-estado').value;
-  exportCSV(EXPORT_DATA.chequesPropios,[
-    {label:'Nro. Cheque',fn:function(r){return r.nro_cheque||'';}},
-    {label:'Cuenta',fn:function(r){return r.cuenta_nombre||'';}},
-    {label:'Beneficiario',fn:function(r){return r.beneficiario||'';}},
-    {label:'Emisión',fn:function(r){return fmtFecha(r.fecha_emision);}},
-    {label:'Vencimiento',fn:function(r){return fmtFecha(r.fecha_vto);}},
-    {label:'Monto',fn:function(r){return fmtMoney(r.monto);}},
-    {label:'Estado',fn:function(r){return r.estado||'';}},
-    {label:'Notas',fn:function(r){return r.notas||'';}}
-  ],'cheques_propios'+(e?'_'+e:''));
+  var e = document.getElementById('fin-filter-cp-estado').value;
+  var filas = (EXPORT_DATA.chequesPropios||[]).map(function(r){
+    return [
+      r.nro_cheque||'', r.cuenta_nombre||'', r.banco||'',
+      r.beneficiario||'', fmtFecha(r.fecha_emision), fmtFecha(r.fecha_vto),
+      fmtNum(r.monto), r.estado||'', r.notas||''
+    ];
+  });
+  _descargarTSV(filas, ['Nro. Cheque','Cuenta','Banco','Beneficiario','Emisión','Vencimiento','Monto','Estado','Notas'],
+    'cheques_propios'+(e?'_'+e:''));
 }
 
+// ── CHEQUES TERCEROS ─────────────────────────────────────────────────────────
 function exportarChequesTerceros(){
-  var e=document.getElementById('fin-filter-ct-estado').value;
-  exportCSV(EXPORT_DATA.chequesTerceros,[
-    {label:'Librador',fn:function(r){return r.librador||'';}},
-    {label:'Banco',fn:function(r){return r.banco||'';}},
-    {label:'Nro. Cheque',fn:function(r){return r.nro_cheque||'';}},
-    {label:'Recepción',fn:function(r){return fmtFecha(r.fecha_recepcion);}},
-    {label:'Vencimiento',fn:function(r){return fmtFecha(r.fecha_vto);}},
-    {label:'Monto',fn:function(r){return fmtMoney(r.monto);}},
-    {label:'Estado',fn:function(r){return r.estado||'';}},
-    {label:'Notas',fn:function(r){return r.notas||'';}}
-  ],'cheques_terceros'+(e?'_'+e:''));
+  var e = document.getElementById('fin-filter-ct-estado').value;
+  var filas = (EXPORT_DATA.chequesTerceros||[]).map(function(r){
+    return [
+      r.librador||'', r.banco||'', r.nro_cheque||'',
+      fmtFecha(r.fecha_recepcion), fmtFecha(r.fecha_vto),
+      fmtNum(r.monto), r.estado||'', r.notas||''
+    ];
+  });
+  _descargarTSV(filas, ['Librador','Banco','Nro. Cheque','Recepción','Vencimiento','Monto','Estado','Notas'],
+    'cheques_terceros'+(e?'_'+e:''));
 }
 
+// ── MOVIMIENTOS ──────────────────────────────────────────────────────────────
 function exportarMovimientos(){
-  var d=document.getElementById('fin-filter-mov-desde').value, h=document.getElementById('fin-filter-mov-hasta').value;
-  exportCSV(EXPORT_DATA.movimientos,[
-    {label:'Fecha',fn:function(r){return fmtFecha(r.fecha);}},
-    {label:'Cuenta',fn:function(r){return r.cuenta_nombre||'';}},
-    {label:'Tipo',fn:function(r){return r.tipo||'';}},
-    {label:'Concepto',fn:function(r){return r.concepto||'';}},
-    {label:'Ingreso',fn:function(r){return r.tipo==='ingreso'?fmtMoney(r.monto):'';}},
-    {label:'Egreso',fn:function(r){return r.tipo==='egreso'?fmtMoney(r.monto):'';}},
-    {label:'Referencia',fn:function(r){return r.referencia||'';}}
-  ],'movimientos'+(d?'_'+d:'')+(h?'_al_'+h:''));
+  var d=document.getElementById('fin-filter-mov-desde').value;
+  var h=document.getElementById('fin-filter-mov-hasta').value;
+  var filas = (EXPORT_DATA.movimientos||[]).map(function(r){
+    return [
+      fmtFecha(r.fecha), r.cuenta_nombre||'', r.tipo||'',
+      r.concepto||'',
+      r.tipo==='ingreso' ? fmtNum(r.monto) : '',
+      r.tipo==='egreso'  ? fmtNum(r.monto) : '',
+      r.referencia||''
+    ];
+  });
+  _descargarTSV(filas, ['Fecha','Cuenta','Tipo','Concepto','Ingreso','Egreso','Referencia'],
+    'movimientos'+(d?'_'+d:'')+(h?'_al_'+h:''));
 }
 
+// ── FACTURAS ─────────────────────────────────────────────────────────────────
 function exportarFacturas(){
-  exportCSV(EXPORT_DATA.facturas,[
-    {label:'Fecha',fn:function(r){return fmtFecha(r.fecha);}},
-    {label:'Tipo',fn:function(r){return r.tipo_factura||r.tipo_comprobante||'';}},
-    {label:'Comprobante',fn:function(r){return r.nro_factura||'';}},
-    {label:'Proveedor',fn:function(r){return r.proveedor_nombre||r.proveedor_txt||'';}},
-    {label:'Neto',fn:function(r){return fmtMoney(r.neto_total||r.subtotal);}},
-    {label:'IVA',fn:function(r){return fmtMoney(r.iva_total||r.iva_monto);}},
-    {label:'Total',fn:function(r){return fmtMoney(r.total);}},
-    {label:'Notas',fn:function(r){return r.notas||'';}}
-  ],'facturas');
+  var filas = (EXPORT_DATA.facturas||[]).map(function(r){
+    var detalle = (r.items||[]).map(function(i){
+      return i.insumo_nombre||i.concepto||'';
+    }).join(' / ');
+    return [
+      fmtFecha(r.fecha), r.tipo_factura||r.tipo_comprobante||'',
+      r.nro_factura||'', r.proveedor_nombre||r.proveedor_txt||'',
+      fmtNum(r.neto_total||r.subtotal), fmtNum(r.iva_total||r.iva_monto),
+      fmtNum(r.total), detalle, r.notas||''
+    ];
+  });
+  _descargarTSV(filas, ['Fecha','Tipo','Comprobante','Proveedor','Neto','IVA','Total','Detalle','Notas'], 'facturas');
 }
 
+// ── CUENTA CORRIENTE ─────────────────────────────────────────────────────────
 function exportarCC(){
-  var prov=EXPORT_DATA.cc.proveedor||'proveedor';
-  var filas=EXPORT_DATA.cc.facturas.map(function(f){return Object.assign({_tipo:'Factura'},f);})
-    .concat(EXPORT_DATA.cc.pagos.map(function(p){return Object.assign({_tipo:'Pago'},p);}));
-  filas.sort(function(a,b){return (a.fecha||'')<(b.fecha||'')?-1:1;});
-  exportCSV(filas,[
-    {label:'Tipo',fn:function(r){return r._tipo;}},
-    {label:'Fecha',fn:function(r){return fmtFecha(r.fecha);}},
-    {label:'Comprobante',fn:function(r){return r.nro_factura||r.referencia||'';}},
-    {label:'Total',fn:function(r){return r._tipo==='Factura'?fmtMoney(r.total):'';}},
-    {label:'Pagado',fn:function(r){return r._tipo==='Factura'?fmtMoney(r.saldo_pagado):'';}},
-    {label:'Pendiente',fn:function(r){return r._tipo==='Factura'?fmtMoney(r.saldo_pendiente):'';}},
-    {label:'Monto Pago',fn:function(r){return r._tipo==='Pago'?fmtMoney(r.monto):'';}},
-    {label:'Forma Pago',fn:function(r){return r._tipo==='Pago'?(r.forma_pago||''):'';}}
-  ],'cuenta_corriente_'+prov.replace(/\s+/g,'_').toLowerCase());
+  var prov = EXPORT_DATA.cc.proveedor || 'proveedor';
+  var filas = [];
+  (EXPORT_DATA.cc.facturas||[]).forEach(function(f){
+    filas.push(['Factura', fmtFecha(f.fecha), f.nro_factura||'',
+      fmtNum(f.total), fmtNum(f.saldo_pagado), fmtNum(f.saldo_pendiente),
+      '', '', f.notas||'']);
+  });
+  (EXPORT_DATA.cc.pagos||[]).forEach(function(p){
+    filas.push(['Pago', fmtFecha(p.fecha), p.referencia||'',
+      '', '', '',
+      fmtNum(p.monto), p.forma_pago||'', p.notas||'']);
+  });
+  filas.sort(function(a,b){ return (a[1]||'')<(b[1]||'')?-1:1; });
+  _descargarTSV(filas,
+    ['Tipo','Fecha','Comprobante/Ref','Total Factura','Pagado','Pendiente','Monto Pago','Forma Pago','Notas'],
+    'cuenta_corriente_'+prov.replace(/\s+/g,'_').toLowerCase());
+}
+
+// ── Helper interno ────────────────────────────────────────────────────────────
+function _descargarTSV(filas, cols, nombre) {
+  if (!filas.length) return toast('No hay datos para exportar', 'warn');
+  var tab='\t', nl='\r\n';
+  var contenido = '\uFEFF' + cols.join(tab) + nl
+    + filas.map(function(r){
+        return r.map(function(v){
+          return String(v===null||v===undefined?'':v).replace(/\t/g,' ').replace(/\r?\n/g,' ');
+        }).join(tab);
+      }).join(nl);
+  var blob = new Blob([contenido], { type: 'text/tab-separated-values;charset=utf-8' });
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement('a');
+  a.href=url; a.download=nombre+'.xls';
+  document.body.appendChild(a); a.click();
+  document.body.removeChild(a); URL.revokeObjectURL(url);
+  toast('✅ Descargado: '+nombre+'.xls', 'ok');
 }
 
 </script>
