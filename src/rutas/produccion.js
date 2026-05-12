@@ -882,6 +882,11 @@ router.post('/compras', requireAuth, (req, res) => {
             const percepIibb = parseFloat(req.body.percep_iibb      || 0);
             const totalConPercep = total + percepIva + percepGan + percepIibb;
 
+            // Leer configuración impositiva global para las cuentas de percepción
+            const configImp = {};
+            dbPa.prepare('SELECT clave, cuenta_id FROM adm_config_impositiva WHERE cuenta_id IS NOT NULL').all()
+              .forEach(r => { configImp[r.clave] = r.cuenta_id; });
+
             // Mapear tipo_linea a montos de la compra
             const montosPorTipo = {
               proveedores:          totalConPercep,  // Haber: deuda total con proveedor
@@ -892,6 +897,8 @@ router.post('/compras', requireAuth, (req, res) => {
               retencion:            0,
               libre:                neto_total        // Debe: gasto/compra
             };
+
+            // Líneas del modelo + líneas de config impositiva si tienen monto
             lineas = modeloLineas.map(function(ml) {
               const monto = montosPorTipo[ml.tipo_linea] ?? 0;
               return {
@@ -901,6 +908,24 @@ router.post('/compras', requireAuth, (req, res) => {
                 descripcion: ml.descripcion || ml.tipo_linea
               };
             }).filter(l => l.debe > 0 || l.haber > 0);
+
+            // Agregar líneas de config impositiva global si tienen monto y no están en el modelo
+            const clavesEnModelo = new Set(modeloLineas.map(ml => ml.tipo_linea));
+            const percepExtra = [
+              { clave: 'percepcion_iva',       monto: percepIva  },
+              { clave: 'percepcion_iibb',       monto: percepIibb },
+              { clave: 'percepcion_ganancias',  monto: percepGan  },
+            ];
+            for (const pe of percepExtra) {
+              if (pe.monto > 0 && !clavesEnModelo.has(pe.clave) && configImp[pe.clave]) {
+                lineas.push({
+                  cuenta_id: configImp[pe.clave],
+                  debe: pe.monto,
+                  haber: 0,
+                  descripcion: pe.clave.replace('_', ' ')
+                });
+              }
+            }
             // Verificar partida doble
             const sumDebe  = lineas.reduce((s,l) => s + l.debe,  0);
             const sumHaber = lineas.reduce((s,l) => s + l.haber, 0);

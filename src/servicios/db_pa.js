@@ -2006,5 +2006,28 @@ db.exec(`
   } catch(e) { console.error('[FIN] Error migrando conciliación:', e.message); }
 })();
 
+// ── CONFIGURACIÓN IMPOSITIVA GLOBAL ──────────────────────────────────────────
+(function migrarConfigImpositiva() {
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS adm_config_impositiva (
+        clave       TEXT PRIMARY KEY,
+        cuenta_id   INTEGER REFERENCES pa_cuentas(id),
+        descripcion TEXT
+      );
+    `);
+    // Insertar claves si no existen
+    const claves = [
+      ['percepcion_iva',       'Percepción IVA'],
+      ['percepcion_iibb',      'Percepción IIBB'],
+      ['percepcion_ganancias', 'Percepción Ganancias'],
+      ['retencion',            'Retención']
+    ];
+    const ins = db.prepare("INSERT OR IGNORE INTO adm_config_impositiva (clave, descripcion) VALUES (?,?)");
+    for (const [clave, desc] of claves) ins.run(clave, desc);
+    console.log('[ADM] Configuración impositiva lista');
+  } catch(e) { console.error('[ADM] Error migrando config impositiva:', e.message); }
+})();
+
 export { db };
 export default db;
