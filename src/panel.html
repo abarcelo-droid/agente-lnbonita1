@@ -254,19 +254,6 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   </div>
 </nav>
 
-<!-- Botón flotante "Ir al Scout" — siempre visible arriba a la derecha -->
-<a href="/scout" id="btn-goto-scout-fixed" title="Abrir Scout móvil"
-   style="position:fixed;top:16px;right:20px;z-index:1000;
-          background:linear-gradient(135deg,#059669 0%,#047857 100%);color:#fff;
-          padding:10px 16px;border-radius:10px;text-decoration:none;
-          font-weight:600;font-size:13px;font-family:var(--sans);
-          box-shadow:0 4px 12px rgba(5,150,105,.35);
-          display:flex;align-items:center;gap:8px;transition:transform .15s,box-shadow .15s"
-   onmouseover="this.style.transform='translateY(-1px)';this.style.boxShadow='0 6px 18px rgba(5,150,105,.45)'"
-   onmouseout="this.style.transform='';this.style.boxShadow='0 4px 12px rgba(5,150,105,.35)'">
-  📱 Ir al Scout
-</a>
-
 <main>
 
 <!-- ==================== ESTILOS ABASTO ==================== -->
@@ -3363,6 +3350,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
           <th style="text-align:right;cursor:pointer;user-select:none" onclick="ifcoSortRemitos('cantidad_recibida')">Recibido <span id="ifco-th-cantidad_recibida" style="color:var(--mut);font-size:10px"></span></th>
           <th style="text-align:right;cursor:pointer;user-select:none" onclick="ifcoSortRemitos('cantidad_rechazada')">Rech. <span id="ifco-th-cantidad_rechazada" style="color:var(--mut);font-size:10px"></span></th>
           <th style="cursor:pointer;user-select:none" onclick="ifcoSortRemitos('estado')">Estado <span id="ifco-th-estado" style="color:var(--mut);font-size:10px"></span></th>
+          <th>Operador</th>
           <th></th>
         </tr></thead>
         <tbody></tbody>
@@ -3387,7 +3375,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
         <thead><tr>
           <th>N° Interno</th><th>Fecha envío</th><th>Proveedor</th>
           <th style="text-align:right">Enviado</th><th style="text-align:right">Recibido</th>
-          <th>Estado</th><th>Recepción</th><th></th>
+          <th>Estado</th><th>Recepción</th><th>Operador</th><th></th>
         </tr></thead>
         <tbody></tbody>
       </table>
@@ -3420,13 +3408,16 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
           <div style="font-size:13px;font-weight:600">📧 Autorizaciones de retiro</div>
           <div style="font-size:11px;color:var(--mut);margin-top:2px">Mails que mandamos a IFCO autorizando un transportista a retirar cajones. Cuando se completa, se genera el retiro real.</div>
         </div>
-        <select id="ifco-flt-autoriz" onchange="ifcoCargarAutorizaciones()" style="font-size:12px;padding:5px 9px;border-radius:7px;border:1px solid var(--bor);background:var(--bg)">
-          <option value="">Todas</option>
-          <option value="pendiente_envio">Pendientes de enviar</option>
-          <option value="enviada">Enviadas (esperando retiro)</option>
-          <option value="completada">Completadas</option>
-          <option value="cancelada">Canceladas</option>
-        </select>
+        <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+          <select id="ifco-flt-autoriz" onchange="ifcoCargarAutorizaciones()" style="font-size:12px;padding:5px 9px;border-radius:7px;border:1px solid var(--bor);background:var(--bg)">
+            <option value="">Todas</option>
+            <option value="pendiente_envio">Pendientes de enviar</option>
+            <option value="enviada">Enviadas (esperando retiro)</option>
+            <option value="completada">Completadas</option>
+            <option value="cancelada">Canceladas</option>
+          </select>
+          <button id="ifco-btn-limpiar-autoriz" class="btn bo" style="font-size:11px;padding:4px 9px;color:#991b1b;display:none" onclick="ifcoLimpiarAutorizacionesPrueba()" title="Solo admin — borra todas las no completadas">🧹 Limpiar de prueba</button>
+        </div>
       </div>
       <div id="ifco-autoriz-tabla"></div>
     </div>
@@ -3439,7 +3430,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
           <th>Sucursal IFCO</th>
           <th>N° Remito</th>
           <th style="text-align:right">Costo</th>
-          <th>Notas</th><th></th>
+          <th>Operador</th><th></th>
         </tr></thead>
         <tbody></tbody>
       </table>
@@ -3647,7 +3638,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
           <th>Producto</th>
           <th>N° Remito prov.</th>
           <th>Foto</th>
-          <th>Notas</th>
+          <th>Operador</th>
           <th></th>
         </tr></thead>
         <tbody></tbody>
@@ -17053,7 +17044,7 @@ function _ifcoRenderRemitos() {
   });
 
   if (rows.length === 0) {
-    tb.innerHTML = '<tr><td colspan="10" style="text-align:center;padding:20px;color:var(--mut)">Sin remitos</td></tr>';
+    tb.innerHTML = '<tr><td colspan="11" style="text-align:center;padding:20px;color:var(--mut)">Sin remitos</td></tr>';
     return;
   }
 
@@ -17095,6 +17086,7 @@ function _ifcoRenderRemitos() {
       '<td style="text-align:right;font-variant-numeric:tabular-nums">'+(r.cantidad_recibida != null ? _ifcoFmt(r.cantidad_recibida) : '—')+'</td>' +
       '<td style="text-align:right;font-variant-numeric:tabular-nums">'+(r.cantidad_rechazada != null && r.cantidad_rechazada > 0 ? _ifcoFmt(r.cantidad_rechazada) : '—')+'</td>' +
       '<td>'+_ifcoEstadoBig(r.estado)+'</td>' +
+      '<td style="font-size:11px;color:var(--mut)">'+_ifcoEsc(r.usuario_creador_nombre||'—')+'</td>' +
       '<td style="display:flex;gap:4px;flex-wrap:wrap">'+acciones.join('')+'</td>' +
     '</tr>';
   }).join('');
@@ -18371,6 +18363,7 @@ async function ifcoCargarEnvios() {
         '<td style="text-align:right;font-variant-numeric:tabular-nums">'+(r.cantidad_recibida!=null?_ifcoFmt(r.cantidad_recibida):'—')+'</td>' +
         '<td>'+_ifcoBadge(r.estado)+aceptHtml+'</td>' +
         '<td style="font-size:11px;color:var(--mut)">'+(r.fecha_recepcion?_ifcoFecha(r.fecha_recepcion):'—')+'</td>' +
+        '<td style="font-size:11px;color:var(--mut)">'+_ifcoEsc(r.usuario_creador_nombre||'—')+'</td>' +
         '<td style="display:flex;gap:4px;flex-wrap:wrap">'+acciones.join('')+'</td>' +
       '</tr>';
     }).join('');
@@ -18791,12 +18784,24 @@ async function ifcoEnviarMailAutorizacion() {
   }
 }
 
+async function ifcoLimpiarAutorizacionesPrueba() {
+  if (!confirm('¿Borrar TODAS las autorizaciones que NO están completadas?\n\nEsto incluye las canceladas, pendientes de envío y enviadas. Solo quedarán las completadas (las que generaron retiros reales).\n\nNo se puede deshacer.')) return;
+  try {
+    const r = await _ifcoFetch('/api/ifco/autorizaciones-retiro/limpiar-pruebas', { method: 'POST' });
+    alert('✓ Listo: ' + r.eliminadas + ' autorizaciones eliminadas (' + r.movimientos_eliminados + ' movimientos pendientes también).');
+    ifcoCargarAutorizaciones();
+  } catch(e) { alert('Error: ' + e.message); }
+}
+
 async function ifcoCargarAutorizaciones() {
   const filtro = document.getElementById('ifco-flt-autoriz');
   const estado = filtro ? filtro.value : '';
   const cont = document.getElementById('ifco-autoriz-tabla');
   const section = document.getElementById('ifco-autoriz-section');
   if (!cont || !section) return;
+  // Botón "Limpiar de prueba" solo visible para admin
+  const btnLimpiar = document.getElementById('ifco-btn-limpiar-autoriz');
+  if (btnLimpiar) btnLimpiar.style.display = (window.LNB_USER && LNB_USER.rol === 'admin') ? 'inline-flex' : 'none';
   try {
     const url = '/api/ifco/autorizaciones-retiro' + (estado ? '?estado=' + encodeURIComponent(estado) : '');
     const rows = await _ifcoFetch(url);
@@ -18971,7 +18976,7 @@ async function ifcoCargarMovimientos() {
         '<td style="font-size:12px;color:var(--mut)">'+sucursal+'</td>' +
         '<td style="font-family:monospace;font-size:11px;color:var(--mut)">'+_ifcoEsc(r.n_remito||'—')+'</td>' +
         '<td style="text-align:right;font-size:12px;color:var(--mut)">'+costo+'</td>' +
-        '<td style="font-size:11px;color:var(--mut)">'+_ifcoEsc(r.notas||'')+'</td>' +
+        '<td style="font-size:11px;color:var(--mut)">'+_ifcoEsc(r.usuario_creador_nombre||'—')+'</td>' +
         '<td style="display:flex;gap:4px">'+acciones+'</td>' +
       '</tr>';
     }).join('');
@@ -19083,12 +19088,21 @@ async function ifcoCargarRecepciones() {
       return;
     }
     tb.innerHTML = rows.map(function(r){
-      const acciones = r.consolidado_en
-        ? '<span style="font-size:11px;color:var(--mut)" title="Bloqueado: consolidado con IFCO">🔒</span>'
-        : [
-            '<button class="btn bo" style="font-size:11px;padding:4px 8px" onclick="ifcoAbrirEditarRecepcionMerc('+r.id+')">Editar</button>',
-            '<button class="btn bo" style="font-size:11px;padding:4px 8px;color:#991b1b" onclick="ifcoEliminarRecepcionMerc('+r.id+')">🗑️</button>'
-          ].join('');
+      let acciones;
+      if (r.consolidado_en) {
+        acciones = '<span style="font-size:11px;color:var(--mut)" title="Bloqueado: consolidado con IFCO">🔒</span>';
+      } else if (r.estado === 'en_viaje') {
+        // EN VIAJE → botones para confirmar o rechazar lo enviado por el operario
+        acciones = [
+          '<button class="btn bb" style="font-size:11px;padding:4px 8px;background:#059669" onclick="ifcoConfirmarRecepcion('+r.id+')" title="Aceptar los cajones — suma al stock de SG">✓ Confirmar</button>',
+          '<button class="btn bo" style="font-size:11px;padding:4px 8px;color:#991b1b" onclick="ifcoRechazarRecepcion('+r.id+')" title="Rechazar la recepción">✗ Rechazar</button>'
+        ].join('');
+      } else {
+        acciones = [
+          '<button class="btn bo" style="font-size:11px;padding:4px 8px" onclick="ifcoAbrirEditarRecepcionMerc('+r.id+')">Editar</button>',
+          '<button class="btn bo" style="font-size:11px;padding:4px 8px;color:#991b1b" onclick="ifcoEliminarRecepcionMerc('+r.id+')">🗑️</button>'
+        ].join('');
+      }
       const consoBadge = r.consolidado_en
         ? ' <span class="ifco-badge" style="background:#dcfce7;color:#166534" title="Consolidado">✓</span>'
         : '';
@@ -19114,7 +19128,7 @@ async function ifcoCargarRecepciones() {
         '<td>'+_ifcoEsc(r.producto||'—')+'</td>' +
         '<td style="font-family:monospace;font-size:12px">'+_ifcoEsc(r.n_remito_proveedor||'—')+'</td>' +
         '<td>'+fotoCell+'</td>' +
-        '<td style="font-size:12px;color:var(--mut)">'+_ifcoEsc(r.notas||'')+'</td>' +
+        '<td style="font-size:11px;color:var(--mut)">'+_ifcoEsc(r.usuario_creador_nombre||'—')+'</td>' +
         '<td style="display:flex;gap:4px">'+acciones+'</td>' +
       '</tr>';
     }).join('');

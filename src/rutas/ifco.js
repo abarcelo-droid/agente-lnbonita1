@@ -262,6 +262,12 @@ try {
   `);
 } catch(e) { console.error('[IFCO] Crear ifco_autorizaciones_retiro:', e.message); }
 try { db.exec("CREATE INDEX IF NOT EXISTS idx_autoriz_retiro_estado ON ifco_autorizaciones_retiro(estado, creado_en DESC)"); } catch(_){}
+// Migración: las autorizaciones canceladas que quedaron visibles (sin eliminado_en) se mandan a papelera.
+// (Antes "cancelar" no mandaba a papelera; ahora sí, y limpiamos las que quedaron viejas.)
+try {
+  const r = db.prepare("UPDATE ifco_autorizaciones_retiro SET eliminado_en = COALESCE(eliminado_en, datetime('now','localtime')) WHERE estado = 'cancelada' AND eliminado_en IS NULL").run();
+  if (r.changes > 0) console.log('[IFCO] ' + r.changes + ' autorizaciones canceladas migradas a papelera.');
+} catch(_){}
 
 // Columna nueva: marca movimientos pendientes (no impactan en stock hasta confirmar)
 try { db.exec("ALTER TABLE ifco_movimientos ADD COLUMN pendiente INTEGER NOT NULL DEFAULT 0"); } catch(_){}
@@ -1545,10 +1551,12 @@ router.get('/remitos', function(req, res) {
   const papelera = f.papelera === '1' || f.incluir_eliminados === '1';
   let q = `SELECT r.*,
                   pori.nombre AS proveedor_origen_nombre,
-                  u.nombre AS eliminado_por_username
+                  u.nombre AS eliminado_por_username,
+                  uc.nombre AS usuario_creador_nombre
            FROM ifco_remitos_super r
            LEFT JOIN proveedores pori ON pori.id = r.proveedor_origen_id
            LEFT JOIN usuarios u ON u.id = r.eliminado_por_id
+           LEFT JOIN usuarios uc ON uc.id = r.usuario_id
            WHERE 1=1`;
   const p = [];
   if (papelera) {
@@ -2162,11 +2170,13 @@ router.get('/envios', function(req, res) {
   let q = `
     SELECT e.*, p.nombre AS proveedor_nombre, p.razon_social AS proveedor_razon,
            u.nombre AS eliminado_por_username,
-           porig.nombre AS origen_proveedor_nombre
+           porig.nombre AS origen_proveedor_nombre,
+           uc.nombre AS usuario_creador_nombre
     FROM ifco_envios_proveedor e
     LEFT JOIN proveedores p ON p.id = e.proveedor_id
     LEFT JOIN proveedores porig ON porig.id = e.origen_proveedor_id
     LEFT JOIN usuarios u ON u.id = e.eliminado_por_id
+    LEFT JOIN usuarios uc ON uc.id = e.usuario_id
     WHERE 1=1
   `;
   const p = [];
@@ -2319,9 +2329,11 @@ router.post('/envios/:id/restaurar', function(req, res) {
 router.get('/movimientos', function(req, res) {
   const f = req.query;
   const papelera = f.papelera === '1' || f.incluir_eliminados === '1';
-  let q = `SELECT m.*, u.nombre AS eliminado_por_username
+  let q = `SELECT m.*, u.nombre AS eliminado_por_username,
+                  uc.nombre AS usuario_creador_nombre
            FROM ifco_movimientos m
            LEFT JOIN usuarios u ON u.id = m.eliminado_por_id
+           LEFT JOIN usuarios uc ON uc.id = m.usuario_id
            WHERE 1=1`;
   const p = [];
   if (papelera) q += " AND m.eliminado_en IS NOT NULL";
@@ -2623,7 +2635,8 @@ router.post('/autorizaciones-retiro/:id/completar', express.json(), function(req
   }
 });
 
-// POST /autorizaciones-retiro/:id/cancelar — cancela la autorización (elimina movimiento pendiente)
+// POST /autorizaciones-retiro/:id/cancelar — cancela la autorización y la manda a papelera
+// (también elimina el movimiento pendiente para que no quede como retiro fantasma)
 router.post('/autorizaciones-retiro/:id/cancelar', express.json(), function(req, res) {
   try {
     const a = db.prepare("SELECT * FROM ifco_autorizaciones_retiro WHERE id = ? AND eliminado_en IS NULL").get(req.params.id);
@@ -2635,7 +2648,9 @@ router.post('/autorizaciones-retiro/:id/cancelar', express.json(), function(req,
     }
     db.prepare(`
       UPDATE ifco_autorizaciones_retiro
-      SET estado = 'cancelada', notas = COALESCE(notas, '') || ' [Cancelada: ' || COALESCE(?, 'sin motivo') || ']'
+      SET estado = 'cancelada',
+          eliminado_en = datetime('now','localtime'),
+          notas = COALESCE(notas, '') || ' [Cancelada: ' || COALESCE(?, 'sin motivo') || ']'
       WHERE id = ?
     `).run(req.body && req.body.motivo ? String(req.body.motivo).trim() : null, a.id);
 
@@ -2656,6 +2671,53 @@ router.delete('/autorizaciones-retiro/:id', function(req, res) {
     }
     db.prepare("UPDATE ifco_autorizaciones_retiro SET eliminado_en = datetime('now','localtime') WHERE id = ?").run(a.id);
     res.json({ ok: true });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /autorizaciones-retiro/limpiar-pruebas — borra todas las no completadas (admin only)
+// Útil para limpiar las autorizaciones de prueba que quedaron en la base.
+router.post('/autorizaciones-retiro/limpiar-pruebas', function(req, res) {
+  if (!req.user || req.user.rol !== 'admin') return res.status(403).json({ error: 'Solo admin' });
+  try {
+    // Buscar todas las no completadas (incluyendo canceladas que no fueron borradas)
+    const noCompletadas = db.prepare(`
+      SELECT id, movimiento_pendiente_id FROM ifco_autorizaciones_retiro
+      WHERE estado != 'completada'
+    `).all();
+    const ids = noCompletadas.map(function(r){ return r.id; });
+    const movIds = noCompletadas.map(function(r){ return r.movimiento_pendiente_id; }).filter(Boolean);
+
+    const tx = db.transaction(function(){
+      // Eliminar movimientos pendientes asociados
+      if (movIds.length > 0) {
+        const placeholders = movIds.map(function(){return '?';}).join(',');
+        db.prepare("UPDATE ifco_movimientos SET eliminado_en = datetime('now','localtime') WHERE id IN (" + placeholders + ")").run(...movIds);
+      }
+      // Mandar a papelera las autorizaciones
+      db.prepare("UPDATE ifco_autorizaciones_retiro SET eliminado_en = datetime('now','localtime') WHERE estado != 'completada' AND eliminado_en IS NULL").run();
+    });
+    tx();
+    res.json({ ok: true, eliminadas: ids.length, movimientos_eliminados: movIds.length });
+  } catch(e) {
+    console.error('[IFCO][limpiar-pruebas]', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// PATCH /admin/fecha-remito — corrección puntual de fecha de un remito (admin only)
+// Útil cuando un operador cargó la fecha mal y el remito está bloqueado por estar presentado.
+// Body: { n_remito_ifco: "00015-01579690", fecha_emision: "2026-11-15" }
+router.patch('/admin/fecha-remito', express.json(), function(req, res) {
+  if (!req.user || req.user.rol !== 'admin') return res.status(403).json({ error: 'Solo admin' });
+  try {
+    const d = req.body || {};
+    if (!d.n_remito_ifco) return res.status(400).json({ error: 'n_remito_ifco requerido' });
+    if (!d.fecha_emision || !/^\d{4}-\d{2}-\d{2}$/.test(d.fecha_emision)) {
+      return res.status(400).json({ error: 'fecha_emision en formato YYYY-MM-DD requerida' });
+    }
+    const r = db.prepare("UPDATE ifco_remitos_super SET fecha_emision = ? WHERE n_remito_ifco = ? AND eliminado_en IS NULL").run(d.fecha_emision, d.n_remito_ifco);
+    if (r.changes === 0) return res.status(404).json({ error: 'Remito no encontrado' });
+    res.json({ ok: true, n_remito_ifco: d.n_remito_ifco, fecha_emision_nueva: d.fecha_emision });
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -3574,10 +3636,12 @@ router.get('/recepciones-proveedor', function(req, res) {
   let q = `SELECT r.*,
                   p.nombre  AS proveedor_nombre,
                   p.razon_social AS proveedor_razon,
-                  u.nombre AS eliminado_por_username
+                  u.nombre AS eliminado_por_username,
+                  uc.nombre AS usuario_creador_nombre
            FROM ifco_recepciones_proveedor r
            LEFT JOIN proveedores p ON p.id = r.proveedor_id
            LEFT JOIN usuarios u ON u.id = r.eliminado_por_id
+           LEFT JOIN usuarios uc ON uc.id = r.usuario_id
            WHERE 1=1`;
   const p = [];
   if (papelera) q += " AND r.eliminado_en IS NOT NULL";
