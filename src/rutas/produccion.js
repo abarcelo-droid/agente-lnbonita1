@@ -707,7 +707,10 @@ router.post('/compras', requireAuth, (req, res) => {
     if (req.body.iva_monto != null && !items.some(it => it.iva_porcentaje != null)) {
       iva_total = Number(req.body.iva_monto);
     }
-    const total = neto_total + iva_total;
+    const percep_iva       = parseFloat(req.body.percep_iva       || 0);
+    const percep_ganancias = parseFloat(req.body.percep_ganancias || 0);
+    const percep_iibb      = parseFloat(req.body.percep_iibb      || 0);
+    const total = neto_total + iva_total + percep_iva + percep_ganancias + percep_iibb;
 
     // Guardar foto remito si viene
     let remito_foto_path = null;
@@ -873,15 +876,21 @@ router.post('/compras', requireAuth, (req, res) => {
         if (prov?.asiento_modelo_id) {
           const modeloLineas = dbPa.prepare('SELECT * FROM adm_asientos_modelo_lineas WHERE modelo_id=? ORDER BY id').all(prov.asiento_modelo_id);
           if (modeloLineas.length >= 2) {
+            // Percepciones enviadas desde el frontend
+            const percepIva  = parseFloat(req.body.percep_iva      || 0);
+            const percepGan  = parseFloat(req.body.percep_ganancias || 0);
+            const percepIibb = parseFloat(req.body.percep_iibb      || 0);
+            const totalConPercep = total + percepIva + percepGan + percepIibb;
+
             // Mapear tipo_linea a montos de la compra
             const montosPorTipo = {
-              proveedores: total,        // Haber: deuda con proveedor
-              iva: iva_total,            // Debe: IVA crédito fiscal
-              percepcion_iva: 0,
-              percepcion_iibb: 0,
-              percepcion_ganancias: 0,
-              retencion: 0,
-              libre: neto_total          // Debe: gasto/compra
+              proveedores:          totalConPercep,  // Haber: deuda total con proveedor
+              iva:                  iva_total,        // Debe: IVA crédito fiscal
+              percepcion_iva:       percepIva,        // Debe: percepción IVA
+              percepcion_iibb:      percepIibb,       // Debe: percepción IIBB
+              percepcion_ganancias: percepGan,        // Debe: percepción Ganancias
+              retencion:            0,
+              libre:                neto_total        // Debe: gasto/compra
             };
             lineas = modeloLineas.map(function(ml) {
               const monto = montosPorTipo[ml.tipo_linea] ?? 0;
@@ -895,7 +904,10 @@ router.post('/compras', requireAuth, (req, res) => {
             // Verificar partida doble
             const sumDebe  = lineas.reduce((s,l) => s + l.debe,  0);
             const sumHaber = lineas.reduce((s,l) => s + l.haber, 0);
-            if (Math.abs(sumDebe - sumHaber) > 0.01) lineas = null; // No cuadra → no generar
+            if (Math.abs(sumDebe - sumHaber) > 0.01) {
+              console.log(`[PA] Asiento no cuadra: Debe ${sumDebe} / Haber ${sumHaber} — se omite`);
+              lineas = null;
+            }
           }
         }
       }
