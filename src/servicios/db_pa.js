@@ -2141,5 +2141,45 @@ db.exec(`
   } catch(e) { console.error('[VEN] Error migrando ventas:', e.message); }
 })();
 
+// ── GRUPOS CONTABLES (1-Activo, 2-Pasivo, 3-Patrimonio, 4-Ingresos, 5-Egresos) ──
+(function migrarGruposContables() {
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS pa_grupos_contables (
+        id          INTEGER PRIMARY KEY,
+        codigo      INTEGER NOT NULL UNIQUE,
+        nombre      TEXT NOT NULL,
+        descripcion TEXT,
+        orden       INTEGER NOT NULL DEFAULT 0
+      );
+    `);
+    // Insertar grupos si no existen
+    const grupos = [
+      [1, 'ACTIVO',      'Bienes y derechos de la empresa',          1],
+      [2, 'PASIVO',      'Obligaciones y deudas de la empresa',      2],
+      [3, 'PATRIMONIO',  'Capital y reservas de la empresa',         3],
+      [4, 'INGRESOS',    'Ventas y otros ingresos',                   4],
+      [5, 'EGRESOS',     'Costos, gastos y otros egresos',            5],
+    ];
+    const ins = db.prepare('INSERT OR IGNORE INTO pa_grupos_contables (id, codigo, nombre, descripcion, orden) VALUES (?,?,?,?,?)');
+    for (const [id, codigo, nombre, desc, orden] of grupos) {
+      ins.run(id, codigo, nombre, desc, orden);
+    }
+    // Agregar grupo_contable_id a pa_cuentas si no existe
+    const colsCuentas = db.prepare('PRAGMA table_info(pa_cuentas)').all().map(c => c.name);
+    if (!colsCuentas.includes('grupo_contable_id')) {
+      db.exec('ALTER TABLE pa_cuentas ADD COLUMN grupo_contable_id INTEGER REFERENCES pa_grupos_contables(id)');
+      console.log('[PA] grupo_contable_id agregado en pa_cuentas');
+    }
+    // Agregar grupo_contable_id a pa_cuentas_secciones si no existe
+    const colsSec = db.prepare('PRAGMA table_info(pa_cuentas_secciones)').all().map(c => c.name);
+    if (!colsSec.includes('grupo_contable_id')) {
+      db.exec('ALTER TABLE pa_cuentas_secciones ADD COLUMN grupo_contable_id INTEGER REFERENCES pa_grupos_contables(id)');
+      console.log('[PA] grupo_contable_id agregado en pa_cuentas_secciones');
+    }
+    console.log('[PA] Grupos contables listos');
+  } catch(e) { console.error('[PA] Error migrando grupos contables:', e.message); }
+})();
+
 export { db };
 export default db;

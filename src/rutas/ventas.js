@@ -138,14 +138,21 @@ router.post('/liquidaciones', requireAuth, (req, res) => {
   const u = req._user;
   const { fecha, cliente_id, nro_remito, observaciones, items,
           desc_comision, desc_flete, desc_carga_descarga, desc_otros,
-          ret_iva, ret_ganancias, ret_iibb, ret_otras } = req.body || {};
+          ret_iva, ret_ganancias, ret_iibb, ret_otras, nro_liquidacion } = req.body || {};
 
   if (!cliente_id) return res.status(400).json({ ok: false, error: 'cliente_id requerido' });
   if (!items?.length) return res.status(400).json({ ok: false, error: 'Ingresá al menos un ítem' });
 
+  // Validar número único por cliente si se ingresó manualmente
+  if (nro_liquidacion?.trim()) {
+    const existe = db.prepare('SELECT id FROM ven_liquidaciones WHERE numero=? AND cliente_id=?')
+      .get(nro_liquidacion.trim(), parseInt(cliente_id));
+    if (existe) return res.status(400).json({ ok: false, error: `Ya existe la liquidación ${nro_liquidacion} para este cliente` });
+  }
+
   try {
     const tx = db.transaction(() => {
-      const numero = generarNumLiq();
+      const numero = nro_liquidacion?.trim() || generarNumLiq();
       const fechaLiq = fecha || new Date().toISOString().split('T')[0];
 
       // Calcular precio bruto desde ítems
@@ -275,12 +282,19 @@ router.get('/facturas', (req, res) => {
 // POST /api/ven/facturas
 router.post('/facturas', requireAuth, (req, res) => {
   const u = req._user;
-  const { fecha, cliente_id, tipo, concepto, items, notas } = req.body || {};
+  const { fecha, cliente_id, tipo, concepto, items, notas, nro_factura } = req.body || {};
   if (!cliente_id) return res.status(400).json({ ok: false, error: 'cliente_id requerido' });
   if (!items?.length) return res.status(400).json({ ok: false, error: 'Ingresá al menos un ítem' });
+
+  // Validar número único por cliente
+  if (nro_factura?.trim()) {
+    const existe = db.prepare('SELECT id FROM ven_facturas WHERE numero=? AND cliente_id=?')
+      .get(nro_factura.trim(), parseInt(cliente_id));
+    if (existe) return res.status(400).json({ ok: false, error: `Ya existe la factura ${nro_factura} para este cliente` });
+  }
   try {
     const tx = db.transaction(() => {
-      const numero = generarNumFac(tipo||'A');
+      const numero = nro_factura?.trim() || generarNumFac(tipo||'A');
       const fechaFac = fecha || new Date().toISOString().split('T')[0];
       const neto  = items.reduce((s, it) => s + (parseFloat(it.subtotal)||0), 0);
       const iva   = parseFloat(req.body.iva)||0;
