@@ -2094,6 +2094,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   <div style="display:flex; border-bottom:1px solid var(--bor); margin-bottom:14px">
     <div class="eq-tab on" data-eq="organigrama" onclick="eqSubtab('organigrama')">🏢 Organigrama</div>
     <div class="eq-tab" data-eq="personas" onclick="eqSubtab('personas')">👥 Personas</div>
+    <div class="eq-tab" data-eq="arbol" onclick="eqSubtab('arbol')">🌳 Árbol</div>
     <div class="eq-tab" data-eq="ubicaciones" onclick="eqSubtab('ubicaciones')">📍 Ubicaciones</div>
   </div>
 
@@ -2126,6 +2127,17 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
         <tbody id="eq-personas-tbody"><tr><td colspan="8" class="emp">Cargando...</td></tr></tbody>
       </table>
     </div>
+  </div>
+
+  <!-- ÁRBOL JERÁRQUICO -->
+  <div class="eq-sub" id="eq-sub-arbol">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; flex-wrap:wrap; gap:8px">
+      <div style="font-size:12px; color:var(--mut)">
+        Personas organizadas por reporta-a. Click en un nombre para editarlo.
+      </div>
+      <button class="btn bo bs" onclick="eqArbolToggle(true)">+ Expandir todo</button>
+    </div>
+    <div id="eq-arbol-cont" style="border:1px solid var(--bor); border-radius:8px; padding:8px; background:var(--bg); min-height:120px"></div>
   </div>
 
   <!-- UBICACIONES -->
@@ -2204,6 +2216,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       <div class="fl"><label>Mail</label><input id="eq-per-mail" type="email"></div>
       <div class="fl"><label>Teléfono</label><input id="eq-per-tel"></div>
       <div class="fl"><label>Ubicación</label><select id="eq-per-ubic"><option value="">— sin ubicación —</option></select></div>
+      <div class="fl ff"><label>Reporta a</label><select id="eq-per-reporta"><option value="">— sin manager —</option></select></div>
       <div class="fl ff"><label>Notas</label><textarea id="eq-per-notas" rows="2"></textarea></div>
     </div>
 
@@ -23522,6 +23535,7 @@ function eqSubtab(tab) {
   document.querySelectorAll('#sec-equipo .eq-sub').forEach(function(s){ s.classList.remove('on'); });
   document.getElementById('eq-sub-' + tab).classList.add('on');
   if (tab === 'personas')    eqCargarPersonas();
+  if (tab === 'arbol')       eqCargarArbol();
   if (tab === 'ubicaciones') eqCargarUbicaciones();
 }
 
@@ -23737,6 +23751,21 @@ function eqAbrirPersonaModal(persona, asignaciones) {
     setUbicSelect();
   }
 
+  // Popular select "Reporta a" — todas las personas activas excepto vos mismo
+  var rep = document.getElementById('eq-per-reporta');
+  var valRep = persona ? persona.reporta_a_id : null;
+  var miId = persona ? persona.id : null;
+  eqApi('/personas').then(function(r) {
+    if (!r.ok) return;
+    var opts = '<option value="">— sin manager —</option>';
+    r.personas.forEach(function(p) {
+      if (p.id === miId) return; // no se reporta a sí mismo
+      var nom = (p.apellido || '') + (p.apellido ? ', ' : '') + (p.nombre || '');
+      opts += '<option value="'+p.id+'"'+(valRep==p.id?' selected':'')+'>'+eqEsc(nom)+'</option>';
+    });
+    rep.innerHTML = opts;
+  });
+
   if (persona) {
     document.getElementById('eq-per-asign-box').style.display = 'block';
     eqRenderAsignaciones(asignaciones);
@@ -23802,6 +23831,7 @@ function eqGuardarPersona() {
     mail: document.getElementById('eq-per-mail').value.trim() || null,
     telefono: document.getElementById('eq-per-tel').value.trim() || null,
     ubicacion_id: document.getElementById('eq-per-ubic').value || null,
+    reporta_a_id: document.getElementById('eq-per-reporta').value || null,
     notas: document.getElementById('eq-per-notas').value.trim() || null,
   };
   if (!body.nombre) { toast('Nombre requerido', 'er'); return; }
@@ -23820,6 +23850,74 @@ function eqBorrarPersona(id) {
     if (!r.ok) { toast('Error: ' + r.error, 'er'); return; }
     toast('Persona dada de baja', 'ok');
     eqCargarPersonas();
+  });
+}
+
+// ─── ÁRBOL JERÁRQUICO ────────────────────────────────────────────────
+function eqCargarArbol() {
+  eqApi('/jerarquia').then(function(r) {
+    if (!r.ok) { toast('Error: ' + r.error, 'er'); return; }
+    eqRenderArbol(r.raices || [], r.huerfanos || []);
+  });
+}
+
+function eqRenderArbol(raices, huerfanos) {
+  var cont = document.getElementById('eq-arbol-cont');
+  if (raices.length === 0 && huerfanos.length === 0) {
+    cont.innerHTML = '<div class="emp" style="padding:24px">Sin personas cargadas. Agregá algunas en la pestaña Personas y asignales un manager para ver el árbol.</div>';
+    return;
+  }
+  var html = raices.map(function(p){ return eqArbolNodo(p, 0); }).join('');
+  if (huerfanos.length > 0) {
+    html += '<div style="margin-top:12px; padding:10px; background:#fef3c7; border:1px solid #fde68a; border-radius:6px">' +
+      '<div style="font-size:11px; font-weight:600; color:#92400e; text-transform:uppercase; margin-bottom:6px">⚠️ Huérfanos (reportan a alguien inactivo/eliminado)</div>' +
+      huerfanos.map(function(p){ return eqArbolNodo(p, 0); }).join('') +
+    '</div>';
+  }
+  cont.innerHTML = html;
+}
+
+function eqArbolNodo(p, nivel) {
+  var nombreFull = (p.apellido || '') + (p.apellido ? ', ' : '') + (p.nombre || '');
+  var tieneReportes = p.reportes && p.reportes.length > 0;
+  var caret = tieneReportes
+    ? '<span style="cursor:pointer; display:inline-block; width:14px; user-select:none" onclick="eqArbolToggleNode(this)">▼</span>'
+    : '<span style="display:inline-block; width:14px; color:var(--mut)">·</span>';
+  var areasStr = p.areas_str ? '<span style="color:var(--mut); font-size:11px; margin-left:8px">' + eqEsc(p.areas_str) + '</span>' : '';
+  var hijosCount = tieneReportes ? '<span style="color:var(--mut); font-size:11px; margin-left:6px">(' + p.reportes.length + ')</span>' : '';
+  var hijos = tieneReportes
+    ? '<div class="eq-arbol-hijos" style="margin-left:18px">' + p.reportes.map(function(c){ return eqArbolNodo(c, nivel+1); }).join('') + '</div>'
+    : '';
+  return '<div class="eq-arbol-nodo" style="padding:4px 0">' +
+    '<div style="display:flex; align-items:center; gap:4px">' +
+      caret +
+      '<a href="#" onclick="eqEditarPersona(' + p.id + ');return false" style="color:var(--burg); text-decoration:none; font-weight:600">' + eqEsc(nombreFull) + '</a>' +
+      hijosCount +
+      areasStr +
+    '</div>' +
+    hijos +
+  '</div>';
+}
+
+function eqArbolToggleNode(caretEl) {
+  var hijos = caretEl.parentElement.parentElement.querySelector('.eq-arbol-hijos');
+  if (!hijos) return;
+  if (hijos.style.display === 'none') {
+    hijos.style.display = '';
+    caretEl.textContent = '▼';
+  } else {
+    hijos.style.display = 'none';
+    caretEl.textContent = '▶';
+  }
+}
+
+function eqArbolToggle(expandir) {
+  // expandir todo o colapsar todo
+  document.querySelectorAll('#eq-arbol-cont .eq-arbol-hijos').forEach(function(h){
+    h.style.display = expandir ? '' : 'none';
+  });
+  document.querySelectorAll('#eq-arbol-cont .eq-arbol-nodo > div > span:first-child').forEach(function(c){
+    if (c.textContent === '▼' || c.textContent === '▶') c.textContent = expandir ? '▼' : '▶';
   });
 }
 

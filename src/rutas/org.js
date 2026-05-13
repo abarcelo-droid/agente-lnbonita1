@@ -170,9 +170,12 @@ router.get('/personas', (req, res) => {
       SELECT p.*,
         u.nombre AS ubicacion_nombre,
         (SELECT COUNT(*) FROM personas_areas WHERE persona_id = p.id) AS areas_count,
-        (SELECT id FROM usuarios WHERE persona_id = p.id LIMIT 1) AS usuario_id
+        (SELECT id FROM usuarios WHERE persona_id = p.id LIMIT 1) AS usuario_id,
+        m.nombre   AS reporta_a_nombre,
+        m.apellido AS reporta_a_apellido
       FROM personas p
       LEFT JOIN ubicaciones u ON u.id = p.ubicacion_id
+      LEFT JOIN personas m    ON m.id = p.reporta_a_id
       WHERE 1=1
     `;
     const params = [];
@@ -203,8 +206,11 @@ router.get('/personas/:id', (req, res) => {
   const id = parseInt(req.params.id);
   try {
     const persona = db().prepare(`
-      SELECT p.*, u.nombre AS ubicacion_nombre
-      FROM personas p LEFT JOIN ubicaciones u ON u.id = p.ubicacion_id
+      SELECT p.*, u.nombre AS ubicacion_nombre,
+        m.nombre AS reporta_a_nombre, m.apellido AS reporta_a_apellido
+      FROM personas p
+      LEFT JOIN ubicaciones u ON u.id = p.ubicacion_id
+      LEFT JOIN personas m    ON m.id = p.reporta_a_id
       WHERE p.id = ?
     `).get(id);
     if (!persona) return res.status(404).json({ ok: false, error: 'No existe' });
@@ -225,15 +231,16 @@ router.get('/personas/:id', (req, res) => {
 });
 
 router.post('/personas', requireAdmin, (req, res) => {
-  const { dni, nombre, apellido, mail, telefono, ubicacion_id, notas, areas } = req.body || {};
+  const { dni, nombre, apellido, mail, telefono, ubicacion_id, notas, areas, reporta_a_id } = req.body || {};
   if (!nombre) return res.status(400).json({ ok: false, error: 'nombre requerido' });
   try {
     const r = db().prepare(`
-      INSERT INTO personas (dni, nombre, apellido, mail, telefono, ubicacion_id, notas)
-      VALUES (?,?,?,?,?,?,?)
+      INSERT INTO personas (dni, nombre, apellido, mail, telefono, ubicacion_id, notas, reporta_a_id)
+      VALUES (?,?,?,?,?,?,?,?)
     `).run(
       dni || null, nombre.trim(), apellido || null, mail || null, telefono || null,
-      ubicacion_id ? parseInt(ubicacion_id) : null, notas || null
+      ubicacion_id ? parseInt(ubicacion_id) : null, notas || null,
+      reporta_a_id ? parseInt(reporta_a_id) : null
     );
     const personaId = r.lastInsertRowid;
     if (Array.isArray(areas) && areas.length > 0) {
@@ -248,13 +255,33 @@ router.post('/personas', requireAdmin, (req, res) => {
 
 router.patch('/personas/:id', requireAdmin, (req, res) => {
   const id = parseInt(req.params.id);
-  const { dni, nombre, apellido, mail, telefono, ubicacion_id, notas, activo } = req.body || {};
+  const { dni, nombre, apellido, mail, telefono, ubicacion_id, notas, activo, reporta_a_id } = req.body || {};
   try {
     const cur = db().prepare("SELECT * FROM personas WHERE id = ?").get(id);
     if (!cur) return res.status(404).json({ ok: false, error: 'No existe' });
+
+    // Validación: reporta_a_id no puede ser uno mismo ni crear ciclo
+    let nuevoReportaA = cur.reporta_a_id;
+    if (reporta_a_id !== undefined) {
+      const r = reporta_a_id ? parseInt(reporta_a_id) : null;
+      if (r === id) return res.status(400).json({ ok: false, error: 'Una persona no puede reportarse a sí misma' });
+      if (r) {
+        // Subir por la cadena: si encuentro `id`, hay ciclo
+        let visited = new Set();
+        let actual = r;
+        while (actual && !visited.has(actual)) {
+          if (actual === id) return res.status(400).json({ ok: false, error: 'Crea un ciclo en la jerarquía' });
+          visited.add(actual);
+          const row = db().prepare("SELECT reporta_a_id FROM personas WHERE id = ?").get(actual);
+          actual = row ? row.reporta_a_id : null;
+        }
+      }
+      nuevoReportaA = r;
+    }
+
     db().prepare(`
       UPDATE personas SET dni = ?, nombre = ?, apellido = ?, mail = ?, telefono = ?,
-        ubicacion_id = ?, notas = ?, activo = ?
+        ubicacion_id = ?, notas = ?, activo = ?, reporta_a_id = ?
       WHERE id = ?
     `).run(
       dni ?? cur.dni,
@@ -265,6 +292,7 @@ router.patch('/personas/:id', requireAdmin, (req, res) => {
       ubicacion_id !== undefined ? (ubicacion_id ? parseInt(ubicacion_id) : null) : cur.ubicacion_id,
       notas ?? cur.notas,
       activo ?? cur.activo,
+      nuevoReportaA,
       id
     );
     res.json({ ok: true });
@@ -320,6 +348,42 @@ router.get('/organigrama', (req, res) => {
       `).all(s.id);
     }
     res.json({ ok: true, sociedades });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// ─── JERARQUÍA: árbol de personas armado por reporta_a_id ──────────────
+router.get('/jerarquia', (req, res) => {
+  try {
+    const personas = db().prepare(`
+      SELECT p.id, p.nombre, p.apellido, p.reporta_a_id,
+        (SELECT GROUP_CONCAT(s.nombre || ' / ' || a.nombre, ' · ')
+         FROM personas_areas pa
+         JOIN areas a     ON a.id = pa.area_id
+         JOIN sociedades s ON s.id = a.sociedad_id
+         WHERE pa.persona_id = p.id AND a.activa = 1) AS areas_str
+      FROM personas p
+      WHERE p.activo = 1
+      ORDER BY p.apellido, p.nombre
+    `).all();
+
+    // Armar mapa id → persona y agregar reportes[]
+    const map = {};
+    for (const p of personas) { p.reportes = []; map[p.id] = p; }
+
+    const raices = [];
+    const huerfanos = [];
+    for (const p of personas) {
+      if (!p.reporta_a_id) {
+        raices.push(p);
+      } else if (map[p.reporta_a_id]) {
+        map[p.reporta_a_id].reportes.push(p);
+      } else {
+        // Tiene reporta_a_id pero el padre no está activo / no existe
+        huerfanos.push(p);
+      }
+    }
+
+    res.json({ ok: true, raices, huerfanos });
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
