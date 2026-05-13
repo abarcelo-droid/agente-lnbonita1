@@ -1688,7 +1688,20 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_pa_asientos_fecha ON pa_asientos(fecha);
   CREATE INDEX IF NOT EXISTS idx_pa_asientos_lineas ON pa_asientos_lineas(asiento_id);
 `);
-// ── MIGRACIÓN: grupo contable en pa_cuentas_secciones ─────────────────────
+// ── MIGRACIÓN: asignar grupo a secciones existentes ──────────────────────────
+(function migrarGrupoSecciones() {
+  try {
+    const cols = db.prepare("PRAGMA table_info(pa_cuentas_secciones)").all().map(c => c.name);
+    if (!cols.includes('grupo')) {
+      db.exec("ALTER TABLE pa_cuentas_secciones ADD COLUMN grupo TEXT DEFAULT 'gastos'");
+      console.log('[PA] grupo agregado en pa_cuentas_secciones');
+    }
+    // Las secciones existentes (1-7: costos) son todas Egresos
+    // Si tienen grupo NULL o vacío, asignarlas a 'gastos'
+    db.prepare("UPDATE pa_cuentas_secciones SET grupo='gastos' WHERE grupo IS NULL OR grupo=''").run();
+    console.log('[PA] Grupos de secciones actualizados');
+  } catch(e) { console.error('[PA] Error migrando grupos secciones:', e.message); }
+})();
 // Agrupa las secciones en los 5 grandes grupos del plan de cuentas clásico.
 // Los valores válidos: 'activo' | 'pasivo' | 'patrimonio_neto' | 'ingresos' | 'gastos'
 (function migrarGrupoSecciones() {
@@ -2141,44 +2154,161 @@ db.exec(`
   } catch(e) { console.error('[VEN] Error migrando ventas:', e.message); }
 })();
 
-// ── GRUPOS CONTABLES (1-Activo, 2-Pasivo, 3-Patrimonio, 4-Ingresos, 5-Egresos) ──
-(function migrarGruposContables() {
+// ── MIGRACIÓN: Recodificación Plan de Cuentas 1-5 ────────────────────────────
+(function recodificarPlanCuentas() {
   try {
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS pa_grupos_contables (
-        id          INTEGER PRIMARY KEY,
-        codigo      INTEGER NOT NULL UNIQUE,
-        nombre      TEXT NOT NULL,
-        descripcion TEXT,
-        orden       INTEGER NOT NULL DEFAULT 0
-      );
+    const yaRecodificado = db.prepare("SELECT COUNT(*) as c FROM pa_cuentas_secciones WHERE codigo LIKE '5.0%'").get();
+    if (yaRecodificado?.c > 0) return;
+
+    console.log('[PA] Iniciando recodificación del Plan de Cuentas...');
+
+    const mapaSeccion = {
+      1: { nuevo: '5.01', grupo: 'gastos' },
+      2: { nuevo: '5.02', grupo: 'gastos' },
+      3: { nuevo: '5.03', grupo: 'gastos' },
+      4: { nuevo: '5.04', grupo: 'gastos' },
+      5: { nuevo: '5.05', grupo: 'gastos' },
+      6: { nuevo: '5.06', grupo: 'gastos' },
+      7: { nuevo: '5.07', grupo: 'gastos' },
+    };
+
+    const tx = db.transaction(() => {
+      for (const [codigoViejo, datos] of Object.entries(mapaSeccion)) {
+        const sec = db.prepare('SELECT id FROM pa_cuentas_secciones WHERE codigo=?').get(parseInt(codigoViejo));
+        if (!sec) continue;
+        db.prepare("UPDATE pa_cuentas_secciones SET codigo=?, grupo=? WHERE id=?")
+          .run(datos.nuevo, datos.grupo, sec.id);
+        const cuentas = db.prepare('SELECT id, codigo FROM pa_cuentas WHERE seccion_id=?').all(sec.id);
+        for (const cuenta of cuentas) {
+          const partes = String(cuenta.codigo).split('.');
+          const subCodigo = partes.slice(1).join('.');
+          const nuevoCodigo = datos.nuevo + '.' + subCodigo;
+          try {
+            db.prepare('UPDATE pa_cuentas SET codigo=? WHERE id=?').run(nuevoCodigo, cuenta.id);
+          } catch(e) {
+            db.prepare('UPDATE pa_cuentas SET codigo=? WHERE id=?').run(nuevoCodigo + '_v', cuenta.id);
+          }
+        }
+        console.log(`[PA] Sección ${codigoViejo} → ${datos.nuevo} (${cuentas.length} cuentas)`);
+      }
+    });
+    tx();
+    console.log('[PA] Recodificación completada');
+  } catch(e) { console.error('[PA] Error en recodificación:', e.message); }
+})();
+
+// ── MIGRACIÓN: Secciones y cuentas de Activo, Pasivo, Patrimonio e Ingresos ──
+(function seedActivoPasivoPNIngresos() {
+  try {
+    // Solo correr si no existen estas secciones
+    const yaExiste = db.prepare("SELECT COUNT(*) as c FROM pa_cuentas_secciones WHERE codigo IN ('1.01','2.01','3.01','4.01')").get();
+    if (yaExiste?.c > 0) return;
+
+    console.log('[PA] Creando secciones Activo, Pasivo, Patrimonio e Ingresos...');
+
+    const insSec = db.prepare(`
+      INSERT INTO pa_cuentas_secciones (codigo, nombre, orden, activo, grupo)
+      VALUES (?, ?, ?, 1, ?)
     `);
-    // Insertar grupos si no existen
+    const insCta = db.prepare(`
+      INSERT OR IGNORE INTO pa_cuentas (codigo, nombre, seccion_id, tipo, permite_lote, permite_campania, es_sistema, orden, activo)
+      VALUES (?, ?, ?, ?, 0, 0, 0, ?, 1)
+    `);
+
     const grupos = [
-      [1, 'ACTIVO',      'Bienes y derechos de la empresa',          1],
-      [2, 'PASIVO',      'Obligaciones y deudas de la empresa',      2],
-      [3, 'PATRIMONIO',  'Capital y reservas de la empresa',         3],
-      [4, 'INGRESOS',    'Ventas y otros ingresos',                   4],
-      [5, 'EGRESOS',     'Costos, gastos y otros egresos',            5],
+      // [codigo_sec, nombre_sec, grupo, orden_sec, cuentas]
+      ['1.01', 'CAJA Y BANCOS',            'activo', 10, [
+        ['1.01.01', 'Caja Pesos',                    'patrimonial', 1],
+        ['1.01.02', 'Banco Cuenta Corriente',        'patrimonial', 2],
+        ['1.01.03', 'Banco Caja de Ahorro',          'patrimonial', 3],
+        ['1.01.04', 'Cheques en Cartera',            'patrimonial', 4],
+      ]],
+      ['1.02', 'CRÉDITOS POR VENTAS',       'activo', 20, [
+        ['1.02.01', 'Clientes — Cuenta Corriente',   'patrimonial', 1],
+        ['1.02.02', 'Liquidaciones a Cobrar',        'patrimonial', 2],
+      ]],
+      ['1.03', 'OTROS CRÉDITOS',            'activo', 30, [
+        ['1.03.01', 'IVA Crédito Fiscal',            'patrimonial', 1],
+        ['1.03.02', 'Anticipos a Proveedores',       'patrimonial', 2],
+        ['1.03.03', 'Retenciones a Recuperar',       'patrimonial', 3],
+      ]],
+      ['1.04', 'BIENES DE CAMBIO',          'activo', 40, [
+        ['1.04.01', 'Insumos en Stock',              'patrimonial', 1],
+        ['1.04.02', 'Producción en Proceso',         'patrimonial', 2],
+        ['1.04.03', 'Producción Terminada',          'patrimonial', 3],
+      ]],
+      ['1.05', 'BIENES DE USO',             'activo', 50, [
+        ['1.05.01', 'Maquinaria Agrícola',           'patrimonial', 1],
+        ['1.05.02', 'Rodados',                       'patrimonial', 2],
+        ['1.05.03', 'Instalaciones y Mejoras',       'patrimonial', 3],
+        ['1.05.04', 'Equipos y Herramientas',        'patrimonial', 4],
+        ['1.05.05', 'Amortizaciones Acumuladas',     'patrimonial', 5],
+      ]],
+      ['1.06', 'ACTIVOS BIOLÓGICOS',        'activo', 60, [
+        ['1.06.01', 'Cultivos en Pie',               'patrimonial', 1],
+        ['1.06.02', 'Plantaciones Perennes',         'patrimonial', 2],
+      ]],
+      ['2.01', 'PROVEEDORES',               'pasivo', 10, [
+        ['2.01.01', 'Proveedores — Cuenta Corriente','patrimonial', 1],
+        ['2.01.02', 'Proveedores — Facturas a Pagar','patrimonial', 2],
+      ]],
+      ['2.02', 'DEUDAS BANCARIAS Y FINANCIERAS', 'pasivo', 20, [
+        ['2.02.01', 'Préstamos Bancarios CP',        'patrimonial', 1],
+        ['2.02.02', 'Préstamos Bancarios LP',        'patrimonial', 2],
+        ['2.02.03', 'Intereses a Pagar',             'patrimonial', 3],
+      ]],
+      ['2.03', 'DEUDAS FISCALES',           'pasivo', 30, [
+        ['2.03.01', 'IVA Débito Fiscal',             'patrimonial', 1],
+        ['2.03.02', 'Ganancias a Pagar',             'patrimonial', 2],
+        ['2.03.03', 'IIBB a Pagar',                  'patrimonial', 3],
+      ]],
+      ['2.04', 'DEUDAS LABORALES Y SOCIALES', 'pasivo', 40, [
+        ['2.04.01', 'Sueldos y Jornales a Pagar',   'patrimonial', 1],
+        ['2.04.02', 'Cargas Sociales a Pagar',      'patrimonial', 2],
+        ['2.04.03', 'Vacaciones y SAC a Pagar',     'patrimonial', 3],
+      ]],
+      ['3.01', 'CAPITAL',                   'patrimonio_neto', 10, [
+        ['3.01.01', 'Capital Social',               'patrimonial', 1],
+        ['3.01.02', 'Aportes Irrevocables',         'patrimonial', 2],
+      ]],
+      ['3.02', 'RESULTADOS',                'patrimonio_neto', 20, [
+        ['3.02.01', 'Resultados No Asignados',      'patrimonial', 1],
+        ['3.02.02', 'Resultado del Ejercicio',      'patrimonial', 2],
+      ]],
+      ['3.03', 'RESERVAS',                  'patrimonio_neto', 30, [
+        ['3.03.01', 'Reserva Legal',                'patrimonial', 1],
+        ['3.03.02', 'Reserva Facultativa',          'patrimonial', 2],
+      ]],
+      ['4.01', 'VENTAS AGROPECUARIAS',      'ingresos', 10, [
+        ['4.01.01', 'Ventas de Producción Propia',  'resultado', 1],
+        ['4.01.02', 'Liquidaciones de Producto',    'resultado', 2],
+        ['4.01.03', 'Ventas de Hacienda',           'resultado', 3],
+      ]],
+      ['4.02', 'INGRESOS POR SERVICIOS',    'ingresos', 20, [
+        ['4.02.01', 'Servicios Agrícolas',          'resultado', 1],
+        ['4.02.02', 'Alquiler de Maquinaria',       'resultado', 2],
+        ['4.02.03', 'Arrendamientos Cobrados',      'resultado', 3],
+      ]],
+      ['4.03', 'OTROS INGRESOS',            'ingresos', 30, [
+        ['4.03.01', 'Intereses Ganados',            'resultado', 1],
+        ['4.03.02', 'Diferencia de Cambio',         'resultado', 2],
+        ['4.03.03', 'Ingresos Extraordinarios',     'resultado', 3],
+      ]],
     ];
-    const ins = db.prepare('INSERT OR IGNORE INTO pa_grupos_contables (id, codigo, nombre, descripcion, orden) VALUES (?,?,?,?,?)');
-    for (const [id, codigo, nombre, desc, orden] of grupos) {
-      ins.run(id, codigo, nombre, desc, orden);
-    }
-    // Agregar grupo_contable_id a pa_cuentas si no existe
-    const colsCuentas = db.prepare('PRAGMA table_info(pa_cuentas)').all().map(c => c.name);
-    if (!colsCuentas.includes('grupo_contable_id')) {
-      db.exec('ALTER TABLE pa_cuentas ADD COLUMN grupo_contable_id INTEGER REFERENCES pa_grupos_contables(id)');
-      console.log('[PA] grupo_contable_id agregado en pa_cuentas');
-    }
-    // Agregar grupo_contable_id a pa_cuentas_secciones si no existe
-    const colsSec = db.prepare('PRAGMA table_info(pa_cuentas_secciones)').all().map(c => c.name);
-    if (!colsSec.includes('grupo_contable_id')) {
-      db.exec('ALTER TABLE pa_cuentas_secciones ADD COLUMN grupo_contable_id INTEGER REFERENCES pa_grupos_contables(id)');
-      console.log('[PA] grupo_contable_id agregado en pa_cuentas_secciones');
-    }
-    console.log('[PA] Grupos contables listos');
-  } catch(e) { console.error('[PA] Error migrando grupos contables:', e.message); }
+
+    const txSeed = db.transaction(() => {
+      for (const [codSec, nomSec, grupo, ordenSec, cuentas] of grupos) {
+        const rSec = insSec.run(codSec, nomSec, ordenSec, grupo);
+        const secId = rSec.lastInsertRowid;
+        let orden = 0;
+        for (const [codCta, nomCta, tipo, ord] of cuentas) {
+          insCta.run(codCta, nomCta, secId, tipo, ord);
+        }
+      }
+    });
+    txSeed();
+    console.log('[PA] Secciones Activo/Pasivo/Patrimonio/Ingresos creadas');
+  } catch(e) { console.error('[PA] Error creando secciones base:', e.message); }
 })();
 
 export { db };
