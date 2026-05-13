@@ -1,0 +1,105 @@
+// src/servicios/db_org.js
+// ─── Schema organizacional ─────────────────────────────────────────────
+// Tablas: sociedades, areas, ubicaciones, personas, personas_areas.
+// Vínculos opcionales: usuarios.persona_id, proveedores.sociedad_id.
+// Fase 1: solo modelado. No toca el flujo de login ni los permisos actuales.
+
+import { getDb } from './db.js';
+
+const db = getDb();
+
+// ─── TABLAS NUEVAS ─────────────────────────────────────────────────────
+db.exec(`
+  CREATE TABLE IF NOT EXISTS sociedades (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    nombre       TEXT NOT NULL UNIQUE,
+    cuit         TEXT,
+    tipo         TEXT NOT NULL DEFAULT 'interna' CHECK(tipo IN ('interna','externa')),
+    funcion      TEXT,
+    activa       INTEGER DEFAULT 1,
+    creada_en    TEXT DEFAULT (datetime('now','localtime'))
+  );
+
+  CREATE TABLE IF NOT EXISTS areas (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    sociedad_id  INTEGER NOT NULL REFERENCES sociedades(id),
+    nombre       TEXT NOT NULL,
+    descripcion  TEXT,
+    activa       INTEGER DEFAULT 1,
+    creada_en    TEXT DEFAULT (datetime('now','localtime'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_areas_sociedad ON areas(sociedad_id);
+
+  CREATE TABLE IF NOT EXISTS ubicaciones (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    nombre       TEXT NOT NULL,
+    direccion    TEXT,
+    lat          REAL,
+    lng          REAL,
+    notas        TEXT,
+    creada_en    TEXT DEFAULT (datetime('now','localtime'))
+  );
+
+  CREATE TABLE IF NOT EXISTS personas (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    dni          TEXT,
+    nombre       TEXT NOT NULL,
+    apellido     TEXT,
+    mail         TEXT,
+    telefono     TEXT,
+    foto_url     TEXT,
+    ubicacion_id INTEGER REFERENCES ubicaciones(id),
+    notas        TEXT,
+    activo       INTEGER DEFAULT 1,
+    creada_en    TEXT DEFAULT (datetime('now','localtime'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_personas_dni      ON personas(dni);
+  CREATE INDEX IF NOT EXISTS idx_personas_apellido ON personas(apellido);
+  CREATE INDEX IF NOT EXISTS idx_personas_activo   ON personas(activo);
+
+  CREATE TABLE IF NOT EXISTS personas_areas (
+    persona_id   INTEGER NOT NULL REFERENCES personas(id),
+    area_id      INTEGER NOT NULL REFERENCES areas(id),
+    rol_en_area  TEXT,
+    desde        TEXT DEFAULT (date('now','localtime')),
+    hasta        TEXT,
+    PRIMARY KEY (persona_id, area_id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_pa_area ON personas_areas(area_id);
+`);
+
+// ─── ALTERs opcionales en tablas existentes ────────────────────────────
+// Vinculan registros viejos al nuevo modelo sin romper nada.
+try { db.exec("ALTER TABLE usuarios ADD COLUMN persona_id INTEGER REFERENCES personas(id)"); } catch(_) {}
+try { db.exec("ALTER TABLE proveedores ADD COLUMN sociedad_id INTEGER REFERENCES sociedades(id)"); } catch(_) {}
+
+// ─── SEED: 4 sociedades internas + áreas confirmadas ───────────────────
+(function seedOrg() {
+  try {
+    const n = db.prepare("SELECT COUNT(*) AS n FROM sociedades").get().n;
+    if (n > 0) return;
+
+    const insertSoc  = db.prepare("INSERT INTO sociedades (nombre, tipo, funcion) VALUES (?,?,?)");
+    const insertArea = db.prepare("INSERT INTO areas (sociedad_id, nombre) VALUES (?,?)");
+
+    const sociedades = [
+      { nombre: 'Puente Cordón SA',       funcion: 'productiva', areas: ['Producción','Cosecha','Personal agrícola'] },
+      { nombre: 'San Gerónimo SA',        funcion: 'comercial',  areas: ['Comercial','Logística','Operativo IFCO','Administración'] },
+      { nombre: 'Barceló Transporte SRL', funcion: 'transporte', areas: [] },
+      { nombre: 'Estructura',             funcion: 'estructura', areas: ['Contadores','Abogados','Family Office'] },
+    ];
+
+    db.transaction(() => {
+      for (const s of sociedades) {
+        const r = insertSoc.run(s.nombre, 'interna', s.funcion);
+        for (const a of s.areas) insertArea.run(r.lastInsertRowid, a);
+      }
+    })();
+
+    console.log(`[ORG] Seed: ${sociedades.length} sociedades + áreas creadas`);
+  } catch(e) {
+    console.error("[ORG] Error seed:", e.message);
+  }
+})();
+
+console.log("[ORG] Schema organizacional inicializado");
