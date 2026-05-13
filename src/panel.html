@@ -13382,10 +13382,14 @@ function paGuardarCompra(){
   }).then(function(r){
     if(r.ok){
       toast(esServicio ? '✓ Factura de servicio registrada' : '✓ Factura registrada — stock y/o pañol actualizados');
+      if (r.asiento_error) {
+        setTimeout(function(){ toast('⚠ Asiento no generado: ' + r.asiento_error, 'warn'); }, 800);
+      } else if (r.asiento_ref) {
+        toast('📒 Asiento ' + r.asiento_ref + ' generado', 'ok');
+      }
       document.getElementById('pa-mb-compra').classList.remove('on');
       paLoadCompras();
       if (!esServicio) paF('/api/pa/insumos').then(function(r2){PA.insumos=r2.data||[];});
-      if (r.asiento_ref) toast('📒 Asiento ' + r.asiento_ref + ' generado', 'ok');
     } else toast(r.error||'Error','er');
   });
 }
