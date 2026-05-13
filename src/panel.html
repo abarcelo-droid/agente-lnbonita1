@@ -184,6 +184,15 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     <div class="ni" data-sec="pa-despachos"><span class="dot dc"></span>🚚 Despachos</div>
   </div>
 
+  <div class="ni-grp" data-grp="ven-ventas">Administración de Ventas<span class="ni-caret">▾</span></div>
+  <div class="ni-grp-items">
+    <div class="ni" data-sec="ven-clientes"><span class="dot da"></span>👥 Padrón de Clientes</div>
+    <div class="ni" data-sec="ven-liquidaciones"><span class="dot db"></span>🌾 Liquidaciones de Producto</div>
+    <div class="ni" data-sec="ven-facturas"><span class="dot dc"></span>🧾 Facturas de Venta</div>
+    <div class="ni" data-sec="ven-cc"><span class="dot dd"></span>💳 Cuenta Corriente Clientes</div>
+    <div class="ni" data-sec="ven-cobranzas"><span class="dot da"></span>💰 Cobranzas</div>
+  </div>
+
   <div class="ni-grp" data-grp="pa-maestros">Maestros<span class="ni-caret">▾</span></div>
   <div class="ni-grp-items">
     <div class="ni" data-sec="pa-cuentas"><span class="dot dc"></span>📊 Plan de Cuentas</div>
@@ -5642,9 +5651,11 @@ var CANALES = [
 document.querySelectorAll('.ni').forEach(function(el) {
   el.addEventListener('click', function() {
     var sec = el.getAttribute('data-sec');
+    var secEl = document.getElementById('sec-'+sec);
+    if (!secEl) return;
     document.querySelectorAll('.sec').forEach(function(s){ s.classList.remove('on'); });
     document.querySelectorAll('.ni').forEach(function(n){ n.classList.remove('on'); });
-    document.getElementById('sec-'+sec).classList.add('on');
+    secEl.classList.add('on');
     el.classList.add('on');
     navAct = sec;
     loadSec(sec);
@@ -5698,7 +5709,12 @@ function loadSec(s) {
     'pa-costos':     function(){ paLoadCostos(); },
     'pa-lotes':      function(){ paLoadLotes(); },
     'pa-scout':      function(){ paLoadScout(); },
-    'pa-cuentas':    function(){ paCuLoad(); }
+    'pa-cuentas':    function(){ paCuLoad(); },
+    'ven-clientes':      function(){ venIniciarClientes(); },
+    'ven-liquidaciones': function(){ venIniciarLiquidaciones(); },
+    'ven-facturas':      function(){ venIniciarFacturas(); },
+    'ven-cc':            function(){ venIniciarCC(); },
+    'ven-cobranzas':     function(){ /* redirige a CC */ }
   };
   if (m[s]) m[s]();
 }
