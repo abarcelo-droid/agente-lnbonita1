@@ -2157,55 +2157,158 @@ db.exec(`
 // ── MIGRACIÓN: Recodificación Plan de Cuentas 1-5 ────────────────────────────
 (function recodificarPlanCuentas() {
   try {
-    // Verificar si ya fue recodificado (buscamos código que empiece con 5.0)
     const yaRecodificado = db.prepare("SELECT COUNT(*) as c FROM pa_cuentas_secciones WHERE codigo LIKE '5.0%'").get();
-    if (yaRecodificado?.c > 0) return; // Ya se hizo
+    if (yaRecodificado?.c > 0) return;
 
     console.log('[PA] Iniciando recodificación del Plan de Cuentas...');
 
-    // Mapa de secciones actuales → nuevo código de sección
-    // Todas son Egresos (grupo 5), Inversiones también van a Egresos
     const mapaSeccion = {
-      1: { nuevo: '5.01', grupo: 'gastos' },  // COSTO DE PRODUCCION
-      2: { nuevo: '5.02', grupo: 'gastos' },  // COSTO ASOCIADO A VENTAS - MERCADO
-      3: { nuevo: '5.03', grupo: 'gastos' },  // COSTO ASOCIADO A VENTAS - INDUSTRIA
-      4: { nuevo: '5.04', grupo: 'gastos' },  // COSTOS FIJOS
-      5: { nuevo: '5.05', grupo: 'gastos' },  // COSTOS FINANCIEROS
-      6: { nuevo: '5.06', grupo: 'gastos' },  // COSTOS IMPOSITIVOS
-      7: { nuevo: '5.07', grupo: 'gastos' },  // INVERSIONES
+      1: { nuevo: '5.01', grupo: 'gastos' },
+      2: { nuevo: '5.02', grupo: 'gastos' },
+      3: { nuevo: '5.03', grupo: 'gastos' },
+      4: { nuevo: '5.04', grupo: 'gastos' },
+      5: { nuevo: '5.05', grupo: 'gastos' },
+      6: { nuevo: '5.06', grupo: 'gastos' },
+      7: { nuevo: '5.07', grupo: 'gastos' },
     };
 
     const tx = db.transaction(() => {
       for (const [codigoViejo, datos] of Object.entries(mapaSeccion)) {
         const sec = db.prepare('SELECT id FROM pa_cuentas_secciones WHERE codigo=?').get(parseInt(codigoViejo));
         if (!sec) continue;
-
-        // Actualizar código de sección
         db.prepare("UPDATE pa_cuentas_secciones SET codigo=?, grupo=? WHERE id=?")
           .run(datos.nuevo, datos.grupo, sec.id);
-
-        // Actualizar códigos de cuentas de esta sección
-        // Ej: 1.01 → 5.01.01, 1.05 → 5.01.05, 2.10 → 5.02.10
         const cuentas = db.prepare('SELECT id, codigo FROM pa_cuentas WHERE seccion_id=?').all(sec.id);
         for (const cuenta of cuentas) {
-          // El código actual es "X.YY" → nuevo es "5.0X.YY"
           const partes = String(cuenta.codigo).split('.');
           const subCodigo = partes.slice(1).join('.');
           const nuevoCodigo = datos.nuevo + '.' + subCodigo;
           try {
             db.prepare('UPDATE pa_cuentas SET codigo=? WHERE id=?').run(nuevoCodigo, cuenta.id);
           } catch(e) {
-            // Si hay conflicto de unicidad, agregar sufijo
             db.prepare('UPDATE pa_cuentas SET codigo=? WHERE id=?').run(nuevoCodigo + '_v', cuenta.id);
           }
         }
-
         console.log(`[PA] Sección ${codigoViejo} → ${datos.nuevo} (${cuentas.length} cuentas)`);
       }
     });
     tx();
     console.log('[PA] Recodificación completada');
   } catch(e) { console.error('[PA] Error en recodificación:', e.message); }
+})();
+
+// ── MIGRACIÓN: Secciones y cuentas de Activo, Pasivo, Patrimonio e Ingresos ──
+(function seedActivoPasivoPNIngresos() {
+  try {
+    // Solo correr si no existen estas secciones
+    const yaExiste = db.prepare("SELECT COUNT(*) as c FROM pa_cuentas_secciones WHERE codigo IN ('1.01','2.01','3.01','4.01')").get();
+    if (yaExiste?.c > 0) return;
+
+    console.log('[PA] Creando secciones Activo, Pasivo, Patrimonio e Ingresos...');
+
+    const insSec = db.prepare(`
+      INSERT INTO pa_cuentas_secciones (codigo, nombre, orden, activo, grupo)
+      VALUES (?, ?, ?, 1, ?)
+    `);
+    const insCta = db.prepare(`
+      INSERT OR IGNORE INTO pa_cuentas (codigo, nombre, seccion_id, tipo, permite_lote, permite_campania, es_sistema, orden, activo)
+      VALUES (?, ?, ?, ?, 0, 0, 0, ?, 1)
+    `);
+
+    const grupos = [
+      // [codigo_sec, nombre_sec, grupo, orden_sec, cuentas]
+      ['1.01', 'CAJA Y BANCOS',            'activo', 10, [
+        ['1.01.01', 'Caja Pesos',                    'patrimonial', 1],
+        ['1.01.02', 'Banco Cuenta Corriente',        'patrimonial', 2],
+        ['1.01.03', 'Banco Caja de Ahorro',          'patrimonial', 3],
+        ['1.01.04', 'Cheques en Cartera',            'patrimonial', 4],
+      ]],
+      ['1.02', 'CRÉDITOS POR VENTAS',       'activo', 20, [
+        ['1.02.01', 'Clientes — Cuenta Corriente',   'patrimonial', 1],
+        ['1.02.02', 'Liquidaciones a Cobrar',        'patrimonial', 2],
+      ]],
+      ['1.03', 'OTROS CRÉDITOS',            'activo', 30, [
+        ['1.03.01', 'IVA Crédito Fiscal',            'patrimonial', 1],
+        ['1.03.02', 'Anticipos a Proveedores',       'patrimonial', 2],
+        ['1.03.03', 'Retenciones a Recuperar',       'patrimonial', 3],
+      ]],
+      ['1.04', 'BIENES DE CAMBIO',          'activo', 40, [
+        ['1.04.01', 'Insumos en Stock',              'patrimonial', 1],
+        ['1.04.02', 'Producción en Proceso',         'patrimonial', 2],
+        ['1.04.03', 'Producción Terminada',          'patrimonial', 3],
+      ]],
+      ['1.05', 'BIENES DE USO',             'activo', 50, [
+        ['1.05.01', 'Maquinaria Agrícola',           'patrimonial', 1],
+        ['1.05.02', 'Rodados',                       'patrimonial', 2],
+        ['1.05.03', 'Instalaciones y Mejoras',       'patrimonial', 3],
+        ['1.05.04', 'Equipos y Herramientas',        'patrimonial', 4],
+        ['1.05.05', 'Amortizaciones Acumuladas',     'patrimonial', 5],
+      ]],
+      ['1.06', 'ACTIVOS BIOLÓGICOS',        'activo', 60, [
+        ['1.06.01', 'Cultivos en Pie',               'patrimonial', 1],
+        ['1.06.02', 'Plantaciones Perennes',         'patrimonial', 2],
+      ]],
+      ['2.01', 'PROVEEDORES',               'pasivo', 10, [
+        ['2.01.01', 'Proveedores — Cuenta Corriente','patrimonial', 1],
+        ['2.01.02', 'Proveedores — Facturas a Pagar','patrimonial', 2],
+      ]],
+      ['2.02', 'DEUDAS BANCARIAS Y FINANCIERAS', 'pasivo', 20, [
+        ['2.02.01', 'Préstamos Bancarios CP',        'patrimonial', 1],
+        ['2.02.02', 'Préstamos Bancarios LP',        'patrimonial', 2],
+        ['2.02.03', 'Intereses a Pagar',             'patrimonial', 3],
+      ]],
+      ['2.03', 'DEUDAS FISCALES',           'pasivo', 30, [
+        ['2.03.01', 'IVA Débito Fiscal',             'patrimonial', 1],
+        ['2.03.02', 'Ganancias a Pagar',             'patrimonial', 2],
+        ['2.03.03', 'IIBB a Pagar',                  'patrimonial', 3],
+      ]],
+      ['2.04', 'DEUDAS LABORALES Y SOCIALES', 'pasivo', 40, [
+        ['2.04.01', 'Sueldos y Jornales a Pagar',   'patrimonial', 1],
+        ['2.04.02', 'Cargas Sociales a Pagar',      'patrimonial', 2],
+        ['2.04.03', 'Vacaciones y SAC a Pagar',     'patrimonial', 3],
+      ]],
+      ['3.01', 'CAPITAL',                   'patrimonio_neto', 10, [
+        ['3.01.01', 'Capital Social',               'patrimonial', 1],
+        ['3.01.02', 'Aportes Irrevocables',         'patrimonial', 2],
+      ]],
+      ['3.02', 'RESULTADOS',                'patrimonio_neto', 20, [
+        ['3.02.01', 'Resultados No Asignados',      'patrimonial', 1],
+        ['3.02.02', 'Resultado del Ejercicio',      'patrimonial', 2],
+      ]],
+      ['3.03', 'RESERVAS',                  'patrimonio_neto', 30, [
+        ['3.03.01', 'Reserva Legal',                'patrimonial', 1],
+        ['3.03.02', 'Reserva Facultativa',          'patrimonial', 2],
+      ]],
+      ['4.01', 'VENTAS AGROPECUARIAS',      'ingresos', 10, [
+        ['4.01.01', 'Ventas de Producción Propia',  'resultado', 1],
+        ['4.01.02', 'Liquidaciones de Producto',    'resultado', 2],
+        ['4.01.03', 'Ventas de Hacienda',           'resultado', 3],
+      ]],
+      ['4.02', 'INGRESOS POR SERVICIOS',    'ingresos', 20, [
+        ['4.02.01', 'Servicios Agrícolas',          'resultado', 1],
+        ['4.02.02', 'Alquiler de Maquinaria',       'resultado', 2],
+        ['4.02.03', 'Arrendamientos Cobrados',      'resultado', 3],
+      ]],
+      ['4.03', 'OTROS INGRESOS',            'ingresos', 30, [
+        ['4.03.01', 'Intereses Ganados',            'resultado', 1],
+        ['4.03.02', 'Diferencia de Cambio',         'resultado', 2],
+        ['4.03.03', 'Ingresos Extraordinarios',     'resultado', 3],
+      ]],
+    ];
+
+    const txSeed = db.transaction(() => {
+      for (const [codSec, nomSec, grupo, ordenSec, cuentas] of grupos) {
+        const rSec = insSec.run(codSec, nomSec, ordenSec, grupo);
+        const secId = rSec.lastInsertRowid;
+        let orden = 0;
+        for (const [codCta, nomCta, tipo, ord] of cuentas) {
+          insCta.run(codCta, nomCta, secId, tipo, ord);
+        }
+      }
+    });
+    txSeed();
+    console.log('[PA] Secciones Activo/Pasivo/Patrimonio/Ingresos creadas');
+  } catch(e) { console.error('[PA] Error creando secciones base:', e.message); }
 })();
 
 export { db };
