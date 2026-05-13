@@ -248,6 +248,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   <div class="ni" data-sec="retail-gastos"><span class="dot dd"></span>Matrix de Gastos</div>
   <div class="ni" data-sec="calendario"><span class="dot da"></span>Calendario Estacional</div>
   <div class="ni" data-sec="maestro-usuarios"><span class="dot db"></span>Usuarios</div>
+  <div class="ni" data-sec="equipo" data-admin-only="1"><span class="dot dd"></span>🏢 Equipo</div>
     <a href="/scout" style="display:flex;align-items:center;justify-content:center;gap:8px;
        margin:14px 12px 8px;padding:11px 14px;
        background:linear-gradient(135deg,#059669 0%,#047857 100%);
@@ -2054,6 +2055,196 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       </tr></thead>
       <tbody id="pn-hist-tbody"><tr><td colspan="6" class="emp">Cargando...</td></tr></tbody>
     </table></div>
+  </div>
+</div>
+
+<!-- ═════════════════════════════════════════════════════════════════════
+     🏢 EQUIPO — Organigrama, personas, ubicaciones (admin only)
+     ═════════════════════════════════════════════════════════════════════ -->
+<div class="sec" id="sec-equipo">
+  <div class="ph">
+    <div>
+      <div class="ph-t">🏢 Equipo</div>
+      <div class="ph-s">Organigrama del grupo LNB — sociedades, áreas, personas y ubicaciones</div>
+    </div>
+  </div>
+
+  <style>
+    .eq-tab { padding:10px 16px; cursor:pointer; border-bottom:2px solid transparent; color:var(--mut); font-weight:600 }
+    .eq-tab.on { color:var(--burg); border-bottom-color:var(--burg) }
+    .eq-sub { display:none }
+    .eq-sub.on { display:block }
+    .eq-org-grid { display:grid; grid-template-columns:repeat(2,1fr); gap:16px }
+    .eq-org-card { border:1px solid var(--bor); border-radius:8px; padding:16px; background:var(--bg) }
+    .eq-org-card h3 { margin:0 0 4px 0; font-size:15px; font-weight:600; display:flex; align-items:center; gap:8px; flex-wrap:wrap }
+    .eq-org-sub { font-size:12px; color:var(--mut); margin-bottom:12px }
+    .eq-area-row { display:flex; justify-content:space-between; align-items:center; padding:7px 0; border-bottom:1px dashed var(--bor); gap:8px }
+    .eq-area-row:last-child { border-bottom:0 }
+    .eq-area-actions { display:flex; gap:4px; opacity:0; transition:opacity .15s }
+    .eq-area-row:hover .eq-area-actions { opacity:1 }
+    .eq-pill { display:inline-block; padding:2px 8px; border-radius:10px; font-size:11px; font-weight:600; text-transform:lowercase }
+    .eq-pill-interna { background:#dcfce7; color:#166534 }
+    .eq-pill-externa { background:#fef3c7; color:#92400e }
+    .eq-chip { display:inline-flex; align-items:center; gap:6px; padding:4px 10px; background:var(--bg); border:1px solid var(--bor); border-radius:16px; font-size:12px; margin:2px }
+    .eq-chip button { background:transparent; border:0; cursor:pointer; color:var(--mut); padding:0; font-size:14px; line-height:1 }
+    @media(max-width:900px){ .eq-org-grid { grid-template-columns:1fr } }
+  </style>
+
+  <!-- Sub-tabs -->
+  <div style="display:flex; border-bottom:1px solid var(--bor); margin-bottom:14px">
+    <div class="eq-tab on" data-eq="organigrama" onclick="eqSubtab('organigrama')">🏢 Organigrama</div>
+    <div class="eq-tab" data-eq="personas" onclick="eqSubtab('personas')">👥 Personas</div>
+    <div class="eq-tab" data-eq="ubicaciones" onclick="eqSubtab('ubicaciones')">📍 Ubicaciones</div>
+  </div>
+
+  <!-- ORGANIGRAMA -->
+  <div class="eq-sub on" id="eq-sub-organigrama">
+    <div style="display:flex; justify-content:flex-end; margin-bottom:14px">
+      <button class="btn bb" onclick="eqNuevaSociedad()">+ Sociedad externa</button>
+    </div>
+    <div id="eq-org-grid" class="eq-org-grid"></div>
+  </div>
+
+  <!-- PERSONAS -->
+  <div class="eq-sub" id="eq-sub-personas">
+    <div style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:12px; align-items:center">
+      <input id="eq-q" placeholder="🔍 Buscar nombre / apellido / DNI / mail" style="flex:1; min-width:240px" oninput="eqCargarPersonas()">
+      <select id="eq-f-sociedad" onchange="eqCargarPersonas()" style="min-width:180px">
+        <option value="">Todas las sociedades</option>
+      </select>
+      <select id="eq-f-area" onchange="eqCargarPersonas()" style="min-width:180px">
+        <option value="">Todas las áreas</option>
+      </select>
+      <button class="btn bb" onclick="eqNuevaPersona()">+ Persona</button>
+    </div>
+    <div class="tw">
+      <table>
+        <thead><tr>
+          <th>Apellido, Nombre</th><th>DNI</th><th>Mail</th><th>Teléfono</th>
+          <th>Áreas</th><th>Ubicación</th><th>Login</th><th></th>
+        </tr></thead>
+        <tbody id="eq-personas-tbody"><tr><td colspan="8" class="emp">Cargando...</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- UBICACIONES -->
+  <div class="eq-sub" id="eq-sub-ubicaciones">
+    <div style="display:flex; justify-content:flex-end; margin-bottom:14px">
+      <button class="btn bb" onclick="eqNuevaUbicacion()">+ Ubicación</button>
+    </div>
+    <div class="tw">
+      <table>
+        <thead><tr><th>Nombre</th><th>Dirección</th><th>Lat / Lng</th><th></th></tr></thead>
+        <tbody id="eq-ubic-tbody"><tr><td colspan="4" class="emp">Cargando...</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: Sociedad -->
+<div class="mb" id="mb-eq-sociedad">
+  <div class="mbox" style="width:500px">
+    <div class="mhd">
+      <div class="mht" id="mb-eq-soc-tit">Nueva sociedad externa</div>
+      <button class="mcl" onclick="closeMB('mb-eq-sociedad')">×</button>
+    </div>
+    <input type="hidden" id="eq-soc-id">
+    <div class="fg">
+      <div class="fl ff"><label>Nombre *</label><input id="eq-soc-nombre"></div>
+      <div class="fl"><label>CUIT</label><input id="eq-soc-cuit"></div>
+      <div class="fl"><label>Función</label>
+        <select id="eq-soc-funcion">
+          <option value="proveedor">Proveedor</option>
+          <option value="cliente">Cliente</option>
+          <option value="transportista">Transportista</option>
+        </select>
+      </div>
+    </div>
+    <div style="display:flex; gap:10px; justify-content:flex-end; margin-top:20px">
+      <button class="btn bo" onclick="closeMB('mb-eq-sociedad')">Cancelar</button>
+      <button class="btn bb" onclick="eqGuardarSociedad()">Guardar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: Área -->
+<div class="mb" id="mb-eq-area">
+  <div class="mbox" style="width:480px">
+    <div class="mhd">
+      <div class="mht" id="mb-eq-area-tit">Nueva área</div>
+      <button class="mcl" onclick="closeMB('mb-eq-area')">×</button>
+    </div>
+    <input type="hidden" id="eq-area-id">
+    <input type="hidden" id="eq-area-soc-id">
+    <div class="fg">
+      <div class="fl ff"><label>Sociedad</label><div id="eq-area-soc-nombre" style="padding:8px 0; font-weight:600"></div></div>
+      <div class="fl ff"><label>Nombre del área *</label><input id="eq-area-nombre"></div>
+      <div class="fl ff"><label>Descripción</label><textarea id="eq-area-desc" rows="2"></textarea></div>
+    </div>
+    <div style="display:flex; gap:10px; justify-content:flex-end; margin-top:20px">
+      <button class="btn bo" onclick="closeMB('mb-eq-area')">Cancelar</button>
+      <button class="btn bb" onclick="eqGuardarArea()">Guardar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: Persona -->
+<div class="mb" id="mb-eq-persona">
+  <div class="mbox" style="width:640px; max-height:90vh; overflow-y:auto">
+    <div class="mhd">
+      <div class="mht" id="mb-eq-per-tit">Nueva persona</div>
+      <button class="mcl" onclick="closeMB('mb-eq-persona')">×</button>
+    </div>
+    <input type="hidden" id="eq-per-id">
+    <div class="fg">
+      <div class="fl"><label>Nombre *</label><input id="eq-per-nombre"></div>
+      <div class="fl"><label>Apellido</label><input id="eq-per-apellido"></div>
+      <div class="fl"><label>DNI</label><input id="eq-per-dni"></div>
+      <div class="fl"><label>Mail</label><input id="eq-per-mail" type="email"></div>
+      <div class="fl"><label>Teléfono</label><input id="eq-per-tel"></div>
+      <div class="fl"><label>Ubicación</label><select id="eq-per-ubic"><option value="">— sin ubicación —</option></select></div>
+      <div class="fl ff"><label>Notas</label><textarea id="eq-per-notas" rows="2"></textarea></div>
+    </div>
+
+    <div id="eq-per-asign-box" style="margin-top:16px; padding-top:16px; border-top:1px solid var(--bor); display:none">
+      <label style="font-size:11px; color:var(--mut); font-weight:600; text-transform:uppercase; letter-spacing:.05em">Áreas asignadas</label>
+      <div id="eq-per-asign-list" style="margin:8px 0 12px; min-height:32px"></div>
+      <div style="display:flex; gap:8px">
+        <select id="eq-asign-soc" onchange="eqPoblarAreasAsign()" style="flex:1">
+          <option value="">Sociedad...</option>
+        </select>
+        <select id="eq-asign-area" style="flex:1"><option value="">Área...</option></select>
+        <button class="btn bo" onclick="eqAgregarAsignacion()">+ Asignar</button>
+      </div>
+    </div>
+
+    <div style="display:flex; gap:10px; justify-content:flex-end; margin-top:20px">
+      <button class="btn bo" onclick="closeMB('mb-eq-persona')">Cerrar</button>
+      <button class="btn bb" onclick="eqGuardarPersona()">Guardar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: Ubicación -->
+<div class="mb" id="mb-eq-ubicacion">
+  <div class="mbox" style="width:480px">
+    <div class="mhd">
+      <div class="mht" id="mb-eq-ubic-tit">Nueva ubicación</div>
+      <button class="mcl" onclick="closeMB('mb-eq-ubicacion')">×</button>
+    </div>
+    <input type="hidden" id="eq-ubic-id">
+    <div class="fg">
+      <div class="fl ff"><label>Nombre *</label><input id="eq-ubic-nombre"></div>
+      <div class="fl ff"><label>Dirección</label><input id="eq-ubic-dir"></div>
+      <div class="fl"><label>Latitud</label><input id="eq-ubic-lat" type="number" step="any"></div>
+      <div class="fl"><label>Longitud</label><input id="eq-ubic-lng" type="number" step="any"></div>
+      <div class="fl ff"><label>Notas</label><textarea id="eq-ubic-notas" rows="2"></textarea></div>
+    </div>
+    <div style="display:flex; gap:10px; justify-content:flex-end; margin-top:20px">
+      <button class="btn bo" onclick="closeMB('mb-eq-ubicacion')">Cancelar</button>
+      <button class="btn bb" onclick="eqGuardarUbicacion()">Guardar</button>
+    </div>
   </div>
 </div>
 
@@ -5336,11 +5527,9 @@ var CANALES = [
 document.querySelectorAll('.ni').forEach(function(el) {
   el.addEventListener('click', function() {
     var sec = el.getAttribute('data-sec');
-    var secEl = document.getElementById('sec-'+sec);
-    if (!secEl) return;
     document.querySelectorAll('.sec').forEach(function(s){ s.classList.remove('on'); });
     document.querySelectorAll('.ni').forEach(function(n){ n.classList.remove('on'); });
-    secEl.classList.add('on');
+    document.getElementById('sec-'+sec).classList.add('on');
     el.classList.add('on');
     navAct = sec;
     loadSec(sec);
@@ -5394,12 +5583,7 @@ function loadSec(s) {
     'pa-costos':     function(){ paLoadCostos(); },
     'pa-lotes':      function(){ paLoadLotes(); },
     'pa-scout':      function(){ paLoadScout(); },
-    'pa-cuentas':    function(){ paCuLoad(); },
-    'ven-clientes':      function(){ venIniciarClientes(); },
-    'ven-liquidaciones': function(){ venIniciarLiquidaciones(); },
-    'ven-facturas':      function(){ venIniciarFacturas(); },
-    'ven-cc':            function(){ venIniciarCC(); },
-    'ven-cobranzas':     function(){ /* redirige a CC */ }
+    'pa-cuentas':    function(){ paCuLoad(); }
   };
   if (m[s]) m[s]();
 }
@@ -8516,6 +8700,13 @@ var LNB_USER = null;
         });
       }
 
+      // Items / grupos admin-only: ocultar si no es admin
+      if (LNB_USER.rol !== 'admin') {
+        document.querySelectorAll('[data-admin-only]').forEach(function(el) {
+          el.style.display = 'none';
+        });
+      }
+
       // Arrancar el panel
       loadInicio();
       startPoll();
@@ -9559,6 +9750,7 @@ loadSec = function(s) {
     });
     return;
   }
+  if (s === 'equipo') { eqInit(); return; }
   _loadSecOriginal(s);
 };
 function doLogout() {
@@ -23305,6 +23497,403 @@ function venCobAnular(id){
     if(r.ok){toast('Cobranza anulada','ok');venCCCargar();}else toast(r.error||'Error','er');
   });
 }
+
+// ═════════════════════════════════════════════════════════════════════
+// 🏢 EQUIPO — Organigrama, personas, ubicaciones (admin only)
+// ═════════════════════════════════════════════════════════════════════
+var EQ = { sociedades: [], ubicaciones: [], personas: [], personaActual: null };
+
+function eqApi(path, opts) {
+  opts = opts || {};
+  opts.credentials = 'include';
+  opts.headers = opts.headers || { 'Content-Type': 'application/json' };
+  if (opts.body && typeof opts.body !== 'string') opts.body = JSON.stringify(opts.body);
+  return fetch('/api/org' + path, opts).then(function(r){ return r.json(); });
+}
+
+function eqEsc(s) { return String(s == null ? '' : s).replace(/[<>&"]/g, function(c){ return {'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c]; }); }
+
+function eqInit() {
+  eqCargarOrganigrama();
+}
+
+function eqSubtab(tab) {
+  document.querySelectorAll('#sec-equipo .eq-tab').forEach(function(t){ t.classList.toggle('on', t.dataset.eq === tab); });
+  document.querySelectorAll('#sec-equipo .eq-sub').forEach(function(s){ s.classList.remove('on'); });
+  document.getElementById('eq-sub-' + tab).classList.add('on');
+  if (tab === 'personas')    eqCargarPersonas();
+  if (tab === 'ubicaciones') eqCargarUbicaciones();
+}
+
+// ─── ORGANIGRAMA ─────────────────────────────────────────────────────
+function eqCargarOrganigrama() {
+  eqApi('/organigrama').then(function(r) {
+    if (!r.ok) { toast('Error: ' + r.error, 'er'); return; }
+    EQ.sociedades = r.sociedades;
+    eqRenderOrganigrama();
+    var optsSoc = '<option value="">Todas las sociedades</option>' +
+      r.sociedades.map(function(s){ return '<option value="'+s.id+'">'+eqEsc(s.nombre)+'</option>'; }).join('');
+    document.getElementById('eq-f-sociedad').innerHTML = optsSoc;
+    var optsAsignSoc = '<option value="">Sociedad...</option>' +
+      r.sociedades.map(function(s){ return '<option value="'+s.id+'">'+eqEsc(s.nombre)+'</option>'; }).join('');
+    document.getElementById('eq-asign-soc').innerHTML = optsAsignSoc;
+  });
+}
+
+function eqRenderOrganigrama() {
+  var grid = document.getElementById('eq-org-grid');
+  grid.innerHTML = EQ.sociedades.map(function(s) {
+    var pillCls = s.tipo === 'externa' ? 'eq-pill-externa' : 'eq-pill-interna';
+    var areasHtml = s.areas.length === 0
+      ? '<div class="eq-org-sub" style="font-style:italic">Sin áreas cargadas</div>'
+      : s.areas.map(function(a){
+          var nombreEsc = a.nombre.replace(/'/g, "\\'");
+          return '<div class="eq-area-row">' +
+            '<span>' + eqEsc(a.nombre) + ' <span style="color:var(--mut); font-size:11px">(' + a.personas_count + ')</span></span>' +
+            '<span class="eq-area-actions">' +
+              '<button class="btn bo bs" onclick="eqEditarArea(' + a.id + ", '" + nombreEsc + "'" + ')">Editar</button>' +
+              '<button class="btn bo bs" style="color:#991b1b" onclick="eqBorrarArea(' + a.id + ')">×</button>' +
+            '</span>' +
+          '</div>';
+        }).join('');
+    var btnEditSoc = s.tipo === 'externa'
+      ? '<button class="btn bo bs" onclick="eqEditarSociedad(' + s.id + ')">Editar sociedad</button>'
+      : '';
+    return '<div class="eq-org-card">' +
+      '<h3>' + eqEsc(s.nombre) + ' <span class="eq-pill ' + pillCls + '">' + eqEsc(s.tipo) + '</span></h3>' +
+      '<div class="eq-org-sub">' + eqEsc(s.funcion || '—') + (s.cuit ? ' · CUIT ' + eqEsc(s.cuit) : '') + '</div>' +
+      '<div>' + areasHtml + '</div>' +
+      '<div style="margin-top:12px; display:flex; gap:6px; flex-wrap:wrap">' +
+        '<button class="btn bo bs" onclick="eqNuevaArea(' + s.id + ')">+ Área</button>' +
+        btnEditSoc +
+      '</div>' +
+    '</div>';
+  }).join('');
+}
+
+function eqNuevaSociedad() {
+  document.getElementById('mb-eq-soc-tit').textContent = 'Nueva sociedad externa';
+  document.getElementById('eq-soc-id').value = '';
+  document.getElementById('eq-soc-nombre').value = '';
+  document.getElementById('eq-soc-cuit').value = '';
+  document.getElementById('eq-soc-funcion').value = 'proveedor';
+  document.getElementById('mb-eq-sociedad').classList.add('on');
+}
+
+function eqEditarSociedad(id) {
+  var s = EQ.sociedades.find(function(x){ return x.id === id; });
+  if (!s) return;
+  document.getElementById('mb-eq-soc-tit').textContent = 'Editar: ' + s.nombre;
+  document.getElementById('eq-soc-id').value = s.id;
+  document.getElementById('eq-soc-nombre').value = s.nombre;
+  document.getElementById('eq-soc-cuit').value = s.cuit || '';
+  document.getElementById('eq-soc-funcion').value = s.funcion || 'proveedor';
+  document.getElementById('mb-eq-sociedad').classList.add('on');
+}
+
+function eqGuardarSociedad() {
+  var id = document.getElementById('eq-soc-id').value;
+  var body = {
+    nombre: document.getElementById('eq-soc-nombre').value.trim(),
+    cuit: document.getElementById('eq-soc-cuit').value.trim() || null,
+    funcion: document.getElementById('eq-soc-funcion').value,
+  };
+  if (!body.nombre) { toast('Nombre requerido', 'er'); return; }
+  if (!id) body.tipo = 'externa';
+  var url = id ? '/sociedades/' + id : '/sociedades';
+  eqApi(url, { method: id ? 'PATCH' : 'POST', body: body }).then(function(r) {
+    if (!r.ok) { toast('Error: ' + r.error, 'er'); return; }
+    toast('Sociedad guardada', 'ok');
+    closeMB('mb-eq-sociedad');
+    eqCargarOrganigrama();
+  });
+}
+
+function eqNuevaArea(sociedadId) {
+  var s = EQ.sociedades.find(function(x){ return x.id === sociedadId; });
+  document.getElementById('mb-eq-area-tit').textContent = 'Nueva área en ' + (s ? s.nombre : '');
+  document.getElementById('eq-area-id').value = '';
+  document.getElementById('eq-area-soc-id').value = sociedadId;
+  document.getElementById('eq-area-soc-nombre').textContent = s ? s.nombre : '';
+  document.getElementById('eq-area-nombre').value = '';
+  document.getElementById('eq-area-desc').value = '';
+  document.getElementById('mb-eq-area').classList.add('on');
+}
+
+function eqEditarArea(id, nombreActual) {
+  document.getElementById('mb-eq-area-tit').textContent = 'Editar área';
+  document.getElementById('eq-area-id').value = id;
+  document.getElementById('eq-area-soc-id').value = '';
+  document.getElementById('eq-area-soc-nombre').textContent = '';
+  document.getElementById('eq-area-nombre').value = nombreActual || '';
+  document.getElementById('eq-area-desc').value = '';
+  document.getElementById('mb-eq-area').classList.add('on');
+}
+
+function eqGuardarArea() {
+  var id = document.getElementById('eq-area-id').value;
+  var socId = document.getElementById('eq-area-soc-id').value;
+  var nombre = document.getElementById('eq-area-nombre').value.trim();
+  var desc = document.getElementById('eq-area-desc').value.trim() || null;
+  if (!nombre) { toast('Nombre requerido', 'er'); return; }
+  var url = id ? '/areas/' + id : '/areas';
+  var body = id ? { nombre: nombre, descripcion: desc } : { sociedad_id: parseInt(socId), nombre: nombre, descripcion: desc };
+  eqApi(url, { method: id ? 'PATCH' : 'POST', body: body }).then(function(r) {
+    if (!r.ok) { toast('Error: ' + r.error, 'er'); return; }
+    toast('Área guardada', 'ok');
+    closeMB('mb-eq-area');
+    eqCargarOrganigrama();
+  });
+}
+
+function eqBorrarArea(id) {
+  if (!confirm('¿Borrar el área? (las personas asignadas no se borran)')) return;
+  eqApi('/areas/' + id, { method: 'DELETE' }).then(function(r) {
+    if (!r.ok) { toast('Error: ' + r.error, 'er'); return; }
+    toast('Área borrada', 'ok');
+    eqCargarOrganigrama();
+  });
+}
+
+// ─── PERSONAS ────────────────────────────────────────────────────────
+function eqCargarPersonas() {
+  var q = document.getElementById('eq-q').value;
+  var sid = document.getElementById('eq-f-sociedad').value;
+  var aid = document.getElementById('eq-f-area').value;
+  if (sid && EQ.sociedades.length) {
+    var s = EQ.sociedades.find(function(x){ return x.id == sid; });
+    var sel = document.getElementById('eq-f-area');
+    sel.innerHTML = '<option value="">Todas las áreas</option>' +
+      (s ? s.areas.map(function(a){ return '<option value="'+a.id+'"'+(a.id==aid?' selected':'')+'>'+eqEsc(a.nombre)+'</option>'; }).join('') : '');
+  } else if (!sid) {
+    document.getElementById('eq-f-area').innerHTML = '<option value="">Todas las áreas</option>';
+  }
+  var params = new URLSearchParams();
+  if (q) params.set('q', q);
+  if (sid) params.set('sociedad_id', sid);
+  if (aid) params.set('area_id', aid);
+  eqApi('/personas?' + params.toString()).then(function(r) {
+    if (!r.ok) { toast('Error: ' + r.error, 'er'); return; }
+    EQ.personas = r.personas;
+    eqRenderPersonas();
+  });
+}
+
+function eqRenderPersonas() {
+  var tb = document.getElementById('eq-personas-tbody');
+  if (EQ.personas.length === 0) {
+    tb.innerHTML = '<tr><td colspan="8" class="emp">Sin personas cargadas</td></tr>';
+    return;
+  }
+  tb.innerHTML = EQ.personas.map(function(p) {
+    var nombreFull = (p.apellido || '') + (p.apellido ? ', ' : '') + (p.nombre || '');
+    return '<tr>' +
+      '<td><a href="#" onclick="eqEditarPersona(' + p.id + ');return false" style="color:var(--burg); text-decoration:none; font-weight:600">' + eqEsc(nombreFull) + '</a></td>' +
+      '<td>' + eqEsc(p.dni || '—') + '</td>' +
+      '<td>' + eqEsc(p.mail || '—') + '</td>' +
+      '<td>' + eqEsc(p.telefono || '—') + '</td>' +
+      '<td>' + p.areas_count + '</td>' +
+      '<td>' + eqEsc(p.ubicacion_nombre || '—') + '</td>' +
+      '<td>' + (p.usuario_id ? '✓' : '—') + '</td>' +
+      '<td>' +
+        '<button class="btn bo bs" onclick="eqEditarPersona(' + p.id + ')">Editar</button> ' +
+        '<button class="btn bo bs" style="color:#991b1b" onclick="eqBorrarPersona(' + p.id + ')">×</button>' +
+      '</td>' +
+    '</tr>';
+  }).join('');
+}
+
+function eqNuevaPersona() {
+  eqAbrirPersonaModal(null, null);
+}
+
+function eqEditarPersona(id) {
+  eqApi('/personas/' + id).then(function(r) {
+    if (!r.ok) { toast('Error: ' + r.error, 'er'); return; }
+    eqAbrirPersonaModal(r.persona, r.areas || []);
+  });
+}
+
+function eqAbrirPersonaModal(persona, asignaciones) {
+  EQ.personaActual = persona ? persona.id : null;
+  document.getElementById('mb-eq-per-tit').textContent = persona ? 'Editar persona' : 'Nueva persona';
+  document.getElementById('eq-per-id').value = persona ? persona.id : '';
+  document.getElementById('eq-per-nombre').value = persona ? (persona.nombre || '') : '';
+  document.getElementById('eq-per-apellido').value = persona ? (persona.apellido || '') : '';
+  document.getElementById('eq-per-dni').value = persona ? (persona.dni || '') : '';
+  document.getElementById('eq-per-mail').value = persona ? (persona.mail || '') : '';
+  document.getElementById('eq-per-tel').value = persona ? (persona.telefono || '') : '';
+  document.getElementById('eq-per-notas').value = persona ? (persona.notas || '') : '';
+
+  var setUbicSelect = function() {
+    var sel = document.getElementById('eq-per-ubic');
+    var val = persona ? persona.ubicacion_id : null;
+    sel.innerHTML = '<option value="">— sin ubicación —</option>' +
+      EQ.ubicaciones.map(function(u){ return '<option value="'+u.id+'"'+(val==u.id?' selected':'')+'>'+eqEsc(u.nombre)+'</option>'; }).join('');
+  };
+  if (EQ.ubicaciones.length === 0) {
+    eqApi('/ubicaciones').then(function(r){ EQ.ubicaciones = r.ubicaciones || []; setUbicSelect(); });
+  } else {
+    setUbicSelect();
+  }
+
+  if (persona) {
+    document.getElementById('eq-per-asign-box').style.display = 'block';
+    eqRenderAsignaciones(asignaciones);
+    document.getElementById('eq-asign-soc').value = '';
+    document.getElementById('eq-asign-area').innerHTML = '<option value="">Área...</option>';
+  } else {
+    document.getElementById('eq-per-asign-box').style.display = 'none';
+  }
+  document.getElementById('mb-eq-persona').classList.add('on');
+}
+
+function eqRenderAsignaciones(asignaciones) {
+  var list = document.getElementById('eq-per-asign-list');
+  if (!asignaciones || asignaciones.length === 0) {
+    list.innerHTML = '<div style="color:var(--mut); font-style:italic; font-size:12px">Sin áreas asignadas</div>';
+    return;
+  }
+  list.innerHTML = asignaciones.map(function(a){
+    return '<span class="eq-chip">' + eqEsc(a.sociedad_nombre) + ' / ' + eqEsc(a.area_nombre) +
+      '<button onclick="eqQuitarAsignacion(' + a.area_id + ')" title="Quitar">×</button></span>';
+  }).join('');
+}
+
+function eqPoblarAreasAsign() {
+  var sid = parseInt(document.getElementById('eq-asign-soc').value);
+  var s = EQ.sociedades.find(function(x){ return x.id === sid; });
+  var sel = document.getElementById('eq-asign-area');
+  sel.innerHTML = '<option value="">Área...</option>' +
+    (s ? s.areas.map(function(a){ return '<option value="'+a.id+'">'+eqEsc(a.nombre)+'</option>'; }).join('') : '');
+}
+
+function eqAgregarAsignacion() {
+  var personaId = EQ.personaActual;
+  if (!personaId) return;
+  var areaId = parseInt(document.getElementById('eq-asign-area').value);
+  if (!areaId) { toast('Elegí un área', 'er'); return; }
+  eqApi('/personas/' + personaId + '/areas', {
+    method: 'POST', body: { area_id: areaId }
+  }).then(function(r) {
+    if (!r.ok) { toast('Error: ' + r.error, 'er'); return; }
+    toast('Asignación agregada', 'ok');
+    eqApi('/personas/' + personaId).then(function(rr){ if (rr.ok) eqRenderAsignaciones(rr.areas); });
+  });
+}
+
+function eqQuitarAsignacion(areaId) {
+  var personaId = EQ.personaActual;
+  if (!personaId) return;
+  if (!confirm('¿Quitar esta área de la persona?')) return;
+  eqApi('/personas/' + personaId + '/areas/' + areaId, { method: 'DELETE' }).then(function(r) {
+    if (!r.ok) { toast('Error: ' + r.error, 'er'); return; }
+    toast('Asignación quitada', 'ok');
+    eqApi('/personas/' + personaId).then(function(rr){ if (rr.ok) eqRenderAsignaciones(rr.areas); });
+  });
+}
+
+function eqGuardarPersona() {
+  var id = document.getElementById('eq-per-id').value;
+  var body = {
+    nombre: document.getElementById('eq-per-nombre').value.trim(),
+    apellido: document.getElementById('eq-per-apellido').value.trim() || null,
+    dni: document.getElementById('eq-per-dni').value.trim() || null,
+    mail: document.getElementById('eq-per-mail').value.trim() || null,
+    telefono: document.getElementById('eq-per-tel').value.trim() || null,
+    ubicacion_id: document.getElementById('eq-per-ubic').value || null,
+    notas: document.getElementById('eq-per-notas').value.trim() || null,
+  };
+  if (!body.nombre) { toast('Nombre requerido', 'er'); return; }
+  var url = id ? '/personas/' + id : '/personas';
+  eqApi(url, { method: id ? 'PATCH' : 'POST', body: body }).then(function(r) {
+    if (!r.ok) { toast('Error: ' + r.error, 'er'); return; }
+    toast('Persona guardada', 'ok');
+    closeMB('mb-eq-persona');
+    eqCargarPersonas();
+  });
+}
+
+function eqBorrarPersona(id) {
+  if (!confirm('¿Dar de baja a esta persona? (soft delete, se puede reactivar)')) return;
+  eqApi('/personas/' + id, { method: 'DELETE' }).then(function(r) {
+    if (!r.ok) { toast('Error: ' + r.error, 'er'); return; }
+    toast('Persona dada de baja', 'ok');
+    eqCargarPersonas();
+  });
+}
+
+// ─── UBICACIONES ─────────────────────────────────────────────────────
+function eqCargarUbicaciones() {
+  eqApi('/ubicaciones').then(function(r) {
+    if (!r.ok) { toast('Error: ' + r.error, 'er'); return; }
+    EQ.ubicaciones = r.ubicaciones;
+    var tb = document.getElementById('eq-ubic-tbody');
+    if (r.ubicaciones.length === 0) {
+      tb.innerHTML = '<tr><td colspan="4" class="emp">Sin ubicaciones cargadas</td></tr>';
+      return;
+    }
+    tb.innerHTML = r.ubicaciones.map(function(u) {
+      var latlng = (u.lat && u.lng) ? (u.lat + ', ' + u.lng) : '—';
+      return '<tr>' +
+        '<td><a href="#" onclick="eqEditarUbicacion(' + u.id + ');return false" style="color:var(--burg); text-decoration:none; font-weight:600">' + eqEsc(u.nombre) + '</a></td>' +
+        '<td>' + eqEsc(u.direccion || '—') + '</td>' +
+        '<td>' + eqEsc(latlng) + '</td>' +
+        '<td>' +
+          '<button class="btn bo bs" onclick="eqEditarUbicacion(' + u.id + ')">Editar</button> ' +
+          '<button class="btn bo bs" style="color:#991b1b" onclick="eqBorrarUbicacion(' + u.id + ')">×</button>' +
+        '</td>' +
+      '</tr>';
+    }).join('');
+  });
+}
+
+function eqNuevaUbicacion() { eqAbrirUbicacionModal(null); }
+
+function eqEditarUbicacion(id) {
+  var u = EQ.ubicaciones.find(function(x){ return x.id === id; });
+  if (u) eqAbrirUbicacionModal(u);
+}
+
+function eqAbrirUbicacionModal(u) {
+  document.getElementById('mb-eq-ubic-tit').textContent = u ? 'Editar ubicación' : 'Nueva ubicación';
+  document.getElementById('eq-ubic-id').value = u ? u.id : '';
+  document.getElementById('eq-ubic-nombre').value = u ? u.nombre : '';
+  document.getElementById('eq-ubic-dir').value = u && u.direccion ? u.direccion : '';
+  document.getElementById('eq-ubic-lat').value = u && u.lat != null ? u.lat : '';
+  document.getElementById('eq-ubic-lng').value = u && u.lng != null ? u.lng : '';
+  document.getElementById('eq-ubic-notas').value = u && u.notas ? u.notas : '';
+  document.getElementById('mb-eq-ubicacion').classList.add('on');
+}
+
+function eqGuardarUbicacion() {
+  var id = document.getElementById('eq-ubic-id').value;
+  var body = {
+    nombre: document.getElementById('eq-ubic-nombre').value.trim(),
+    direccion: document.getElementById('eq-ubic-dir').value.trim() || null,
+    lat: parseFloat(document.getElementById('eq-ubic-lat').value) || null,
+    lng: parseFloat(document.getElementById('eq-ubic-lng').value) || null,
+    notas: document.getElementById('eq-ubic-notas').value.trim() || null,
+  };
+  if (!body.nombre) { toast('Nombre requerido', 'er'); return; }
+  var url = id ? '/ubicaciones/' + id : '/ubicaciones';
+  eqApi(url, { method: id ? 'PATCH' : 'POST', body: body }).then(function(r) {
+    if (!r.ok) { toast('Error: ' + r.error, 'er'); return; }
+    toast('Ubicación guardada', 'ok');
+    closeMB('mb-eq-ubicacion');
+    eqCargarUbicaciones();
+  });
+}
+
+function eqBorrarUbicacion(id) {
+  if (!confirm('¿Borrar esta ubicación?')) return;
+  eqApi('/ubicaciones/' + id, { method: 'DELETE' }).then(function(r) {
+    if (!r.ok) { toast(r.error || 'Error', 'er'); return; }
+    toast('Ubicación borrada', 'ok');
+    eqCargarUbicaciones();
+  });
+}
+
 </script>
 
 </body>
