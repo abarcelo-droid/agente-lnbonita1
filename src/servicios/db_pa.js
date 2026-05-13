@@ -2031,8 +2031,6 @@ db.exec(`
     `);
     // Insertar claves si no existen
     const claves = [
-      ['iva_credito_fiscal',  'IVA Crédito Fiscal (Compras)'],
-      ['iva_debito_fiscal',   'IVA Débito Fiscal (Ventas)'],
       ['percepcion_iva',       'Percepción IVA'],
       ['percepcion_iibb',      'Percepción IIBB'],
       ['percepcion_ganancias', 'Percepción Ganancias'],
@@ -2044,7 +2042,29 @@ db.exec(`
   } catch(e) { console.error('[ADM] Error migrando config impositiva:', e.message); }
 })();
 
-// ── MÓDULO VENTAS ─────────────────────────────────────────────────────────────
+// ── MIGRACIÓN: Unificar pa_proveedores → adm_proveedores ─────────────────────
+(function migrarProveedoresUnificado() {
+  try {
+    // Copiar proveedores viejos a adm_proveedores si no existen ya
+    const viejos = db.prepare('SELECT * FROM pa_proveedores WHERE activo=1').all();
+    const insAdm = db.prepare(`
+      INSERT OR IGNORE INTO adm_proveedores (id, razon_social, cuit, telefono, email, activo, creado_en)
+      VALUES (?, ?, ?, ?, ?, 1, datetime('now','localtime'))
+    `);
+    let migrados = 0;
+    const txMig = db.transaction(() => {
+      for (const p of viejos) {
+        const existe = db.prepare('SELECT id FROM adm_proveedores WHERE id=?').get(p.id);
+        if (!existe) {
+          insAdm.run(p.id, p.razon_social, p.cuit||null, p.telefono||null, p.email||null);
+          migrados++;
+        }
+      }
+    });
+    txMig();
+    if (migrados > 0) console.log(`[PA] ${migrados} proveedores migrados de pa_proveedores a adm_proveedores`);
+  } catch(e) { console.error('[PA] Error migrando proveedores:', e.message); }
+})();
 (function migrarVentas() {
   try {
     db.exec(`
