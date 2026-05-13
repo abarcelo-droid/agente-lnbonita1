@@ -5217,6 +5217,321 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   </div>
 </div>
 
+
+<!-- ═══════════════════════════════════════════════════════════════════════════
+     MÓDULO VENTAS
+════════════════════════════════════════════════════════════════════════════ -->
+
+<!-- ─── PADRÓN DE CLIENTES ───────────────────────────────────────────────── -->
+<div class="sec" id="sec-ven-clientes">
+<div class="ph">
+  <div><div class="ph-t">👥 Padrón de Clientes</div><div class="ph-s">Acopiadores y clientes directos</div></div>
+  <button class="btn bb" onclick="venClienteNuevo()">+ Nuevo Cliente</button>
+</div>
+<div class="pa-wrap"><div class="ab-table-wrap"><table class="pa-tbl">
+  <thead>
+    <tr><th>Razón Social</th><th>CUIT</th><th>Cond. IVA</th><th>Teléfono</th><th>Email</th><th></th></tr>
+    <tr style="background:var(--bg)">
+      <th><input type="text" placeholder="🔍" oninput="tablaFiltrar('ven-cli-tbody',0,this.value)" style="width:90%;font-size:11px;padding:3px 5px;border:1px solid var(--bor2);border-radius:4px"></th>
+      <th><input type="text" placeholder="🔍" oninput="tablaFiltrar('ven-cli-tbody',1,this.value)" style="width:90%;font-size:11px;padding:3px 5px;border:1px solid var(--bor2);border-radius:4px"></th>
+      <th></th><th></th><th></th><th></th>
+    </tr>
+  </thead>
+  <tbody id="ven-cli-tbody"><tr><td colspan="6" class="emp">Cargando...</td></tr></tbody>
+</table></div></div>
+</div>
+
+<!-- ─── LIQUIDACIONES DE PRODUCTO ────────────────────────────────────────── -->
+<div class="sec" id="sec-ven-liquidaciones">
+<div class="ph">
+  <div><div class="ph-t">🌾 Liquidaciones de Producto</div><div class="ph-s">Liquidaciones recibidas de acopiadores</div></div>
+  <button class="btn bb" onclick="venLiqNueva()">+ Nueva Liquidación</button>
+</div>
+<div style="display:flex;gap:10px;align-items:center;margin-bottom:12px;flex-wrap:wrap">
+  <select id="ven-liq-fil-cliente" onchange="venLiqCargar()" style="font-size:12px;min-width:200px">
+    <option value="">Todos los clientes</option>
+  </select>
+  <select id="ven-liq-fil-estado" onchange="venLiqCargar()" style="font-size:12px">
+    <option value="">Todos los estados</option>
+    <option value="pendiente">Pendiente</option>
+    <option value="cobrada">Cobrada</option>
+    <option value="anulada">Anulada</option>
+  </select>
+  <button class="btn bo bs" onclick="venLiqExportar()" title="Exportar Excel">📥 Excel</button>
+</div>
+<div class="pa-wrap"><div class="ab-table-wrap"><table class="pa-tbl">
+  <thead>
+    <tr><th>Número</th><th>Fecha</th><th>Cliente</th><th>Nro. Remito</th><th style="text-align:right">Precio Bruto</th><th style="text-align:right">Neto a Cobrar</th><th>Estado</th><th></th></tr>
+    <tr style="background:var(--bg)">
+      <th><input type="text" placeholder="🔍" oninput="tablaFiltrar('ven-liq-tbody',0,this.value)" style="width:90%;font-size:11px;padding:3px 5px;border:1px solid var(--bor2);border-radius:4px"></th>
+      <th></th>
+      <th><input type="text" placeholder="🔍" oninput="tablaFiltrar('ven-liq-tbody',2,this.value)" style="width:90%;font-size:11px;padding:3px 5px;border:1px solid var(--bor2);border-radius:4px"></th>
+      <th><input type="text" placeholder="🔍" oninput="tablaFiltrar('ven-liq-tbody',3,this.value)" style="width:90%;font-size:11px;padding:3px 5px;border:1px solid var(--bor2);border-radius:4px"></th>
+      <th></th><th></th>
+      <th><input type="text" placeholder="🔍" oninput="tablaFiltrar('ven-liq-tbody',6,this.value)" style="width:90%;font-size:11px;padding:3px 5px;border:1px solid var(--bor2);border-radius:4px"></th>
+      <th></th>
+    </tr>
+  </thead>
+  <tbody id="ven-liq-tbody"><tr><td colspan="8" class="emp">Cargando...</td></tr></tbody>
+</table></div></div>
+</div>
+
+<!-- ─── FACTURAS DE VENTA ─────────────────────────────────────────────────── -->
+<div class="sec" id="sec-ven-facturas">
+<div class="ph">
+  <div><div class="ph-t">🧾 Facturas de Venta</div><div class="ph-s">Facturas emitidas por la empresa</div></div>
+  <button class="btn bb" onclick="venFacNueva()">+ Nueva Factura</button>
+</div>
+<div style="display:flex;gap:10px;align-items:center;margin-bottom:12px;flex-wrap:wrap">
+  <select id="ven-fac-fil-cliente" onchange="venFacCargar()" style="font-size:12px;min-width:200px">
+    <option value="">Todos los clientes</option>
+  </select>
+  <select id="ven-fac-fil-estado" onchange="venFacCargar()" style="font-size:12px">
+    <option value="">Todos los estados</option>
+    <option value="pendiente">Pendiente</option>
+    <option value="cobrada">Cobrada</option>
+    <option value="anulada">Anulada</option>
+  </select>
+  <button class="btn bo bs" onclick="venFacExportar()" title="Exportar Excel">📥 Excel</button>
+</div>
+<div class="pa-wrap"><div class="ab-table-wrap"><table class="pa-tbl">
+  <thead>
+    <tr><th>Número</th><th>Fecha</th><th>Cliente</th><th>Tipo</th><th>Concepto</th><th style="text-align:right">Neto</th><th style="text-align:right">IVA</th><th style="text-align:right">Total</th><th>Estado</th><th></th></tr>
+    <tr style="background:var(--bg)">
+      <th><input type="text" placeholder="🔍" oninput="tablaFiltrar('ven-fac-tbody',0,this.value)" style="width:90%;font-size:11px;padding:3px 5px;border:1px solid var(--bor2);border-radius:4px"></th>
+      <th></th>
+      <th><input type="text" placeholder="🔍" oninput="tablaFiltrar('ven-fac-tbody',2,this.value)" style="width:90%;font-size:11px;padding:3px 5px;border:1px solid var(--bor2);border-radius:4px"></th>
+      <th><input type="text" placeholder="🔍" oninput="tablaFiltrar('ven-fac-tbody',3,this.value)" style="width:90%;font-size:11px;padding:3px 5px;border:1px solid var(--bor2);border-radius:4px"></th>
+      <th><input type="text" placeholder="🔍" oninput="tablaFiltrar('ven-fac-tbody',4,this.value)" style="width:90%;font-size:11px;padding:3px 5px;border:1px solid var(--bor2);border-radius:4px"></th>
+      <th></th><th></th><th></th>
+      <th><input type="text" placeholder="🔍" oninput="tablaFiltrar('ven-fac-tbody',8,this.value)" style="width:90%;font-size:11px;padding:3px 5px;border:1px solid var(--bor2);border-radius:4px"></th>
+      <th></th>
+    </tr>
+  </thead>
+  <tbody id="ven-fac-tbody"><tr><td colspan="10" class="emp">Cargando...</td></tr></tbody>
+</table></div></div>
+</div>
+
+<!-- ─── CUENTA CORRIENTE CLIENTES ────────────────────────────────────────── -->
+<div class="sec" id="sec-ven-cc">
+<div class="ph"><div><div class="ph-t">💳 Cuenta Corriente Clientes</div><div class="ph-s">Saldos pendientes por cliente</div></div></div>
+<div style="display:flex;gap:10px;align-items:center;margin-bottom:16px">
+  <select id="ven-cc-cliente" onchange="venCCCargar()" style="font-size:13px;min-width:250px;padding:6px 10px;border:1px solid var(--bor2);border-radius:7px">
+    <option value="">— Seleccioná un cliente —</option>
+  </select>
+  <button class="btn bo bs" id="ven-cc-btn-export" style="display:none" onclick="venCCExportar()">📥 Excel</button>
+</div>
+<!-- Resumen -->
+<div id="ven-cc-resumen" style="display:none;display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:20px">
+  <div style="background:var(--sur);border:1px solid var(--bor);border-radius:10px;padding:14px;text-align:center">
+    <div style="font-size:10px;color:var(--mut);text-transform:uppercase;margin-bottom:4px">Total a Cobrar</div>
+    <div id="ven-cc-total" style="font-size:22px;font-weight:700">$0</div>
+  </div>
+  <div style="background:var(--sur);border:1px solid var(--bor);border-radius:10px;padding:14px;text-align:center">
+    <div style="font-size:10px;color:var(--mut);text-transform:uppercase;margin-bottom:4px">Cobrado</div>
+    <div id="ven-cc-cobrado" style="font-size:22px;font-weight:700;color:#16a34a">$0</div>
+  </div>
+  <div style="background:var(--sur);border:1px solid var(--bor);border-radius:10px;padding:14px;text-align:center">
+    <div style="font-size:10px;color:var(--mut);text-transform:uppercase;margin-bottom:4px">Pendiente</div>
+    <div id="ven-cc-pendiente" style="font-size:22px;font-weight:700;color:#dc2626">$0</div>
+  </div>
+</div>
+<!-- Documentos -->
+<div id="ven-cc-docs-wrap" style="display:none">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+    <div style="font-size:12px;font-weight:700;color:var(--mut);text-transform:uppercase">Documentos</div>
+    <button class="btn bb" onclick="venCobNueva()" id="ven-cc-btn-cobrar">+ Registrar Cobranza</button>
+  </div>
+  <div style="overflow-x:auto;border:1px solid var(--bor);border-radius:10px;margin-bottom:16px">
+    <table style="width:100%;border-collapse:collapse;font-size:13px">
+      <thead><tr style="background:var(--bg);border-bottom:1px solid var(--bor)">
+        <th style="padding:9px 12px;font-size:10px;color:var(--mut);text-transform:uppercase">Tipo</th>
+        <th style="padding:9px 12px;font-size:10px;color:var(--mut);text-transform:uppercase">Número</th>
+        <th style="padding:9px 12px;font-size:10px;color:var(--mut);text-transform:uppercase">Fecha</th>
+        <th style="padding:9px 12px;text-align:right;font-size:10px;color:var(--mut);text-transform:uppercase">Total</th>
+        <th style="padding:9px 12px;text-align:right;font-size:10px;color:var(--mut);text-transform:uppercase">Cobrado</th>
+        <th style="padding:9px 12px;text-align:right;font-size:10px;color:var(--mut);text-transform:uppercase">Pendiente</th>
+        <th style="padding:9px 12px;text-align:center;font-size:10px;color:var(--mut);text-transform:uppercase">Estado</th>
+      </tr></thead>
+      <tbody id="ven-cc-docs-tbody"></tbody>
+    </table>
+  </div>
+  <!-- Cobranzas registradas -->
+  <div id="ven-cc-cob-wrap" style="display:none">
+    <div style="font-size:12px;font-weight:700;color:var(--mut);text-transform:uppercase;margin-bottom:8px">Cobranzas</div>
+    <div style="overflow-x:auto;border:1px solid var(--bor);border-radius:10px">
+      <table style="width:100%;border-collapse:collapse;font-size:13px">
+        <thead><tr style="background:var(--bg);border-bottom:1px solid var(--bor)">
+          <th style="padding:9px 12px;font-size:10px;color:var(--mut)">Fecha</th>
+          <th style="padding:9px 12px;font-size:10px;color:var(--mut)">Forma</th>
+          <th style="padding:9px 12px;font-size:10px;color:var(--mut)">Referencia</th>
+          <th style="padding:9px 12px;text-align:right;font-size:10px;color:var(--mut)">Monto</th>
+          <th style="width:40px"></th>
+        </tr></thead>
+        <tbody id="ven-cc-cob-tbody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+</div>
+
+<!-- ─── COBRANZAS ──────────────────────────────────────────────────────────── -->
+<div class="sec" id="sec-ven-cobranzas">
+<div class="ph"><div><div class="ph-t">💰 Cobranzas</div><div class="ph-s">Pagos recibidos de clientes</div></div></div>
+<div style="padding:40px;text-align:center;color:var(--mut)">
+  <div style="font-size:32px;margin-bottom:8px">💳</div>
+  <div>Las cobranzas se registran desde <strong>Cuenta Corriente Clientes</strong> → seleccioná el cliente y hacé click en "+ Registrar Cobranza".</div>
+</div>
+</div>
+
+<!-- ════ MODALES VENTAS ═══════════════════════════════════════════════════════ -->
+
+<!-- Modal: Nuevo/Editar Cliente -->
+<div class="ab-modal-overlay" id="ven-mb-cliente">
+<div class="ab-modal" style="max-width:600px">
+  <div class="mhd">
+    <div><div class="mht" id="ven-mb-cli-tit">Nuevo Cliente</div></div>
+    <button class="mcl" onclick="document.getElementById('ven-mb-cliente').classList.remove('on')">×</button>
+  </div>
+  <input type="hidden" id="ven-cli-id">
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+    <div class="fl ff"><label>Razón Social *</label><input type="text" id="ven-cli-razon"></div>
+    <div class="fl ff"><label>Nombre Comercial</label><input type="text" id="ven-cli-nombre-com"></div>
+    <div class="fl"><label>CUIT *</label><input type="text" id="ven-cli-cuit" placeholder="30-12345678-9"></div>
+    <div class="fl"><label>Condición IVA</label>
+      <select id="ven-cli-cond-iva">
+        <option value="responsable_inscripto">Responsable Inscripto</option>
+        <option value="monotributo">Monotributo</option>
+        <option value="exento">Exento</option>
+        <option value="consumidor_final">Consumidor Final</option>
+      </select>
+    </div>
+    <div class="fl ff"><label>Dirección</label><input type="text" id="ven-cli-dir"></div>
+    <div class="fl"><label>Teléfono</label><input type="text" id="ven-cli-tel"></div>
+    <div class="fl"><label>Email</label><input type="email" id="ven-cli-email"></div>
+    <div class="fl"><label>Contacto</label><input type="text" id="ven-cli-contacto"></div>
+    <div class="fl"><label>Rubro</label><input type="text" id="ven-cli-rubro" placeholder="Acopiador, Exportador..."></div>
+    <div class="fl ff"><label>Cuenta Contable</label><select id="ven-cli-cuenta" style="font-size:13px"></select></div>
+    <div class="fl ff" style="grid-column:1/-1"><label>Notas</label><textarea id="ven-cli-notas" rows="2"></textarea></div>
+  </div>
+  <div class="ab-modal-footer">
+    <button class="btn bo" onclick="document.getElementById('ven-mb-cliente').classList.remove('on')">Cancelar</button>
+    <button class="btn bb" onclick="venClienteGuardar()">Guardar</button>
+  </div>
+</div></div>
+
+<!-- Modal: Nueva Liquidación -->
+<div class="ab-modal-overlay" id="ven-mb-liq">
+<div class="ab-modal" style="max-width:700px">
+  <div class="mhd">
+    <div><div class="mht">Nueva Liquidación de Producto</div></div>
+    <button class="mcl" onclick="document.getElementById('ven-mb-liq').classList.remove('on')">×</button>
+  </div>
+  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:16px">
+    <div class="fl"><label>Fecha *</label><input type="date" id="ven-liq-fecha"></div>
+    <div class="fl ff"><label>Cliente (Acopiador) *</label>
+      <select id="ven-liq-cliente" style="font-size:13px"><option value="">— Seleccioná —</option></select>
+    </div>
+    <div class="fl"><label>Nro. Remito</label><input type="text" id="ven-liq-remito" placeholder="Ej: R-0001-00012345"></div>
+  </div>
+
+  <!-- Ítems -->
+  <div style="font-size:11px;font-weight:700;color:var(--mut);text-transform:uppercase;margin-bottom:6px">Productos / Cultivos</div>
+  <div id="ven-liq-items" style="display:flex;flex-direction:column;gap:6px;margin-bottom:8px"></div>
+  <button class="btn bo bs" onclick="venLiqAgregarItem()" style="font-size:11px;margin-bottom:16px">+ Agregar ítem</button>
+
+  <!-- Descuentos y Retenciones -->
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+    <div>
+      <div style="font-size:11px;font-weight:700;color:var(--mut);text-transform:uppercase;margin-bottom:8px">Descuentos</div>
+      <div class="fl"><label>Comisión acopiador</label><input type="number" id="ven-liq-desc-com" step="0.01" min="0" value="0" oninput="venLiqActTotal()"></div>
+      <div class="fl"><label>Flete</label><input type="number" id="ven-liq-desc-flete" step="0.01" min="0" value="0" oninput="venLiqActTotal()"></div>
+      <div class="fl"><label>Carga y descarga</label><input type="number" id="ven-liq-desc-cd" step="0.01" min="0" value="0" oninput="venLiqActTotal()"></div>
+      <div class="fl"><label>Otros descuentos</label><input type="number" id="ven-liq-desc-otros" step="0.01" min="0" value="0" oninput="venLiqActTotal()"></div>
+    </div>
+    <div>
+      <div style="font-size:11px;font-weight:700;color:var(--mut);text-transform:uppercase;margin-bottom:8px">Retenciones</div>
+      <div class="fl"><label>Retención IVA</label><input type="number" id="ven-liq-ret-iva" step="0.01" min="0" value="0" oninput="venLiqActTotal()"></div>
+      <div class="fl"><label>Retención Ganancias</label><input type="number" id="ven-liq-ret-gan" step="0.01" min="0" value="0" oninput="venLiqActTotal()"></div>
+      <div class="fl"><label>Retención IIBB</label><input type="number" id="ven-liq-ret-iibb" step="0.01" min="0" value="0" oninput="venLiqActTotal()"></div>
+      <div class="fl"><label>Otras retenciones</label><input type="number" id="ven-liq-ret-otras" step="0.01" min="0" value="0" oninput="venLiqActTotal()"></div>
+    </div>
+  </div>
+
+  <!-- Resumen -->
+  <div style="background:#f0fdf4;border:1px solid #86efac;border-radius:10px;padding:14px;margin-top:16px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;text-align:center">
+    <div><div style="font-size:10px;color:var(--mut);font-weight:700;text-transform:uppercase">Precio Bruto</div><div id="ven-liq-res-bruto" style="font-size:18px;font-weight:700">$0</div></div>
+    <div><div style="font-size:10px;color:var(--mut);font-weight:700;text-transform:uppercase">Desc. + Ret.</div><div id="ven-liq-res-desc" style="font-size:18px;font-weight:700;color:#dc2626">-$0</div></div>
+    <div><div style="font-size:10px;color:#15803d;font-weight:700;text-transform:uppercase">Neto a Cobrar</div><div id="ven-liq-res-neto" style="font-size:22px;font-weight:700;color:#15803d">$0</div></div>
+  </div>
+
+  <div class="fl" style="margin-top:12px"><label>Observaciones</label><textarea id="ven-liq-obs" rows="2"></textarea></div>
+
+  <div class="ab-modal-footer">
+    <button class="btn bo" onclick="document.getElementById('ven-mb-liq').classList.remove('on')">Cancelar</button>
+    <button class="btn bb" onclick="venLiqGuardar()">Registrar Liquidación</button>
+  </div>
+</div></div>
+
+<!-- Modal: Nueva Factura de Venta -->
+<div class="ab-modal-overlay" id="ven-mb-fac">
+<div class="ab-modal" style="max-width:640px">
+  <div class="mhd">
+    <div><div class="mht">Nueva Factura de Venta</div></div>
+    <button class="mcl" onclick="document.getElementById('ven-mb-fac').classList.remove('on')">×</button>
+  </div>
+  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:16px">
+    <div class="fl"><label>Fecha *</label><input type="date" id="ven-fac-fecha"></div>
+    <div class="fl ff"><label>Cliente *</label><select id="ven-fac-cliente" style="font-size:13px"><option value="">— Seleccioná —</option></select></div>
+    <div class="fl"><label>Tipo</label>
+      <select id="ven-fac-tipo"><option value="A">Factura A</option><option value="B">Factura B</option><option value="C">Factura C</option></select>
+    </div>
+    <div class="fl ff" style="grid-column:1/-1"><label>Concepto General</label><input type="text" id="ven-fac-concepto" placeholder="Venta de..."></div>
+  </div>
+  <div style="font-size:11px;font-weight:700;color:var(--mut);text-transform:uppercase;margin-bottom:6px">Ítems</div>
+  <div id="ven-fac-items" style="display:flex;flex-direction:column;gap:6px;margin-bottom:8px"></div>
+  <button class="btn bo bs" onclick="venFacAgregarItem()" style="font-size:11px;margin-bottom:12px">+ Agregar ítem</button>
+  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
+    <div class="fl"><label>IVA</label><input type="number" id="ven-fac-iva" step="0.01" min="0" value="0" oninput="venFacActTotal()"></div>
+    <div class="fl"><label>Neto</label><input type="number" id="ven-fac-neto" readonly style="background:var(--sur)"></div>
+    <div class="fl"><label>Total</label><input type="number" id="ven-fac-total" readonly style="background:var(--sur);font-weight:700"></div>
+  </div>
+  <div class="fl" style="margin-top:10px"><label>Notas</label><textarea id="ven-fac-notas" rows="2"></textarea></div>
+  <div class="ab-modal-footer">
+    <button class="btn bo" onclick="document.getElementById('ven-mb-fac').classList.remove('on')">Cancelar</button>
+    <button class="btn bb" onclick="venFacGuardar()">Registrar Factura</button>
+  </div>
+</div></div>
+
+<!-- Modal: Nueva Cobranza -->
+<div class="ab-modal-overlay" id="ven-mb-cob">
+<div class="ab-modal" style="max-width:560px">
+  <div class="mhd">
+    <div><div class="mht">Registrar Cobranza</div><div style="font-size:11px;color:var(--mut)" id="ven-cob-cli-nom"></div></div>
+    <button class="mcl" onclick="document.getElementById('ven-mb-cob').classList.remove('on')">×</button>
+  </div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px">
+    <div class="fl"><label>Fecha *</label><input type="date" id="ven-cob-fecha"></div>
+    <div class="fl"><label>Forma de Pago</label>
+      <select id="ven-cob-forma"><option value="transferencia">Transferencia</option><option value="cheque">Cheque</option><option value="efectivo">Efectivo</option></select>
+    </div>
+    <div class="fl ff"><label>Referencia</label><input type="text" id="ven-cob-ref" placeholder="Nro. transferencia, cheque..."></div>
+    <div class="fl"><label>Monto Total *</label><input type="number" id="ven-cob-monto" step="0.01" min="0" oninput="venCobActMonto()"></div>
+  </div>
+  <div style="font-size:11px;font-weight:700;color:var(--mut);text-transform:uppercase;margin-bottom:6px">Documentos a cancelar</div>
+  <div id="ven-cob-docs" style="overflow-y:auto;max-height:260px;border:1px solid var(--bor);border-radius:8px"></div>
+  <div style="margin-top:10px;display:flex;gap:16px;font-size:13px">
+    <span>Seleccionado: <strong id="ven-cob-sel-monto">$0</strong></span>
+    <span style="color:var(--mut)">Disponible: <strong id="ven-cob-disponible">$0</strong></span>
+  </div>
+  <div class="fl" style="margin-top:10px"><label>Notas</label><textarea id="ven-cob-notas" rows="2"></textarea></div>
+  <div class="ab-modal-footer">
+    <button class="btn bo" onclick="document.getElementById('ven-mb-cob').classList.remove('on')">Cancelar</button>
+    <button class="btn bb" onclick="venCobGuardar()">Registrar Cobranza</button>
+  </div>
+</div></div>
+
+
 </main>
 </div>
 
@@ -22667,319 +22982,6 @@ function _descargarTSV(filas, cols, nombre) {
 
 </script>
 
-<!-- ═══════════════════════════════════════════════════════════════════════════
-     MÓDULO VENTAS
-════════════════════════════════════════════════════════════════════════════ -->
-
-<!-- ─── PADRÓN DE CLIENTES ───────────────────────────────────────────────── -->
-<div class="sec" id="sec-ven-clientes">
-<div class="ph">
-  <div><div class="ph-t">👥 Padrón de Clientes</div><div class="ph-s">Acopiadores y clientes directos</div></div>
-  <button class="btn bb" onclick="venClienteNuevo()">+ Nuevo Cliente</button>
-</div>
-<div class="pa-wrap"><div class="ab-table-wrap"><table class="pa-tbl">
-  <thead>
-    <tr><th>Razón Social</th><th>CUIT</th><th>Cond. IVA</th><th>Teléfono</th><th>Email</th><th></th></tr>
-    <tr style="background:var(--bg)">
-      <th><input type="text" placeholder="🔍" oninput="tablaFiltrar('ven-cli-tbody',0,this.value)" style="width:90%;font-size:11px;padding:3px 5px;border:1px solid var(--bor2);border-radius:4px"></th>
-      <th><input type="text" placeholder="🔍" oninput="tablaFiltrar('ven-cli-tbody',1,this.value)" style="width:90%;font-size:11px;padding:3px 5px;border:1px solid var(--bor2);border-radius:4px"></th>
-      <th></th><th></th><th></th><th></th>
-    </tr>
-  </thead>
-  <tbody id="ven-cli-tbody"><tr><td colspan="6" class="emp">Cargando...</td></tr></tbody>
-</table></div></div>
-</div>
-
-<!-- ─── LIQUIDACIONES DE PRODUCTO ────────────────────────────────────────── -->
-<div class="sec" id="sec-ven-liquidaciones">
-<div class="ph">
-  <div><div class="ph-t">🌾 Liquidaciones de Producto</div><div class="ph-s">Liquidaciones recibidas de acopiadores</div></div>
-  <button class="btn bb" onclick="venLiqNueva()">+ Nueva Liquidación</button>
-</div>
-<div style="display:flex;gap:10px;align-items:center;margin-bottom:12px;flex-wrap:wrap">
-  <select id="ven-liq-fil-cliente" onchange="venLiqCargar()" style="font-size:12px;min-width:200px">
-    <option value="">Todos los clientes</option>
-  </select>
-  <select id="ven-liq-fil-estado" onchange="venLiqCargar()" style="font-size:12px">
-    <option value="">Todos los estados</option>
-    <option value="pendiente">Pendiente</option>
-    <option value="cobrada">Cobrada</option>
-    <option value="anulada">Anulada</option>
-  </select>
-  <button class="btn bo bs" onclick="venLiqExportar()" title="Exportar Excel">📥 Excel</button>
-</div>
-<div class="pa-wrap"><div class="ab-table-wrap"><table class="pa-tbl">
-  <thead>
-    <tr><th>Número</th><th>Fecha</th><th>Cliente</th><th>Nro. Remito</th><th style="text-align:right">Precio Bruto</th><th style="text-align:right">Neto a Cobrar</th><th>Estado</th><th></th></tr>
-    <tr style="background:var(--bg)">
-      <th><input type="text" placeholder="🔍" oninput="tablaFiltrar('ven-liq-tbody',0,this.value)" style="width:90%;font-size:11px;padding:3px 5px;border:1px solid var(--bor2);border-radius:4px"></th>
-      <th></th>
-      <th><input type="text" placeholder="🔍" oninput="tablaFiltrar('ven-liq-tbody',2,this.value)" style="width:90%;font-size:11px;padding:3px 5px;border:1px solid var(--bor2);border-radius:4px"></th>
-      <th><input type="text" placeholder="🔍" oninput="tablaFiltrar('ven-liq-tbody',3,this.value)" style="width:90%;font-size:11px;padding:3px 5px;border:1px solid var(--bor2);border-radius:4px"></th>
-      <th></th><th></th>
-      <th><input type="text" placeholder="🔍" oninput="tablaFiltrar('ven-liq-tbody',6,this.value)" style="width:90%;font-size:11px;padding:3px 5px;border:1px solid var(--bor2);border-radius:4px"></th>
-      <th></th>
-    </tr>
-  </thead>
-  <tbody id="ven-liq-tbody"><tr><td colspan="8" class="emp">Cargando...</td></tr></tbody>
-</table></div></div>
-</div>
-
-<!-- ─── FACTURAS DE VENTA ─────────────────────────────────────────────────── -->
-<div class="sec" id="sec-ven-facturas">
-<div class="ph">
-  <div><div class="ph-t">🧾 Facturas de Venta</div><div class="ph-s">Facturas emitidas por la empresa</div></div>
-  <button class="btn bb" onclick="venFacNueva()">+ Nueva Factura</button>
-</div>
-<div style="display:flex;gap:10px;align-items:center;margin-bottom:12px;flex-wrap:wrap">
-  <select id="ven-fac-fil-cliente" onchange="venFacCargar()" style="font-size:12px;min-width:200px">
-    <option value="">Todos los clientes</option>
-  </select>
-  <select id="ven-fac-fil-estado" onchange="venFacCargar()" style="font-size:12px">
-    <option value="">Todos los estados</option>
-    <option value="pendiente">Pendiente</option>
-    <option value="cobrada">Cobrada</option>
-    <option value="anulada">Anulada</option>
-  </select>
-  <button class="btn bo bs" onclick="venFacExportar()" title="Exportar Excel">📥 Excel</button>
-</div>
-<div class="pa-wrap"><div class="ab-table-wrap"><table class="pa-tbl">
-  <thead>
-    <tr><th>Número</th><th>Fecha</th><th>Cliente</th><th>Tipo</th><th>Concepto</th><th style="text-align:right">Neto</th><th style="text-align:right">IVA</th><th style="text-align:right">Total</th><th>Estado</th><th></th></tr>
-    <tr style="background:var(--bg)">
-      <th><input type="text" placeholder="🔍" oninput="tablaFiltrar('ven-fac-tbody',0,this.value)" style="width:90%;font-size:11px;padding:3px 5px;border:1px solid var(--bor2);border-radius:4px"></th>
-      <th></th>
-      <th><input type="text" placeholder="🔍" oninput="tablaFiltrar('ven-fac-tbody',2,this.value)" style="width:90%;font-size:11px;padding:3px 5px;border:1px solid var(--bor2);border-radius:4px"></th>
-      <th><input type="text" placeholder="🔍" oninput="tablaFiltrar('ven-fac-tbody',3,this.value)" style="width:90%;font-size:11px;padding:3px 5px;border:1px solid var(--bor2);border-radius:4px"></th>
-      <th><input type="text" placeholder="🔍" oninput="tablaFiltrar('ven-fac-tbody',4,this.value)" style="width:90%;font-size:11px;padding:3px 5px;border:1px solid var(--bor2);border-radius:4px"></th>
-      <th></th><th></th><th></th>
-      <th><input type="text" placeholder="🔍" oninput="tablaFiltrar('ven-fac-tbody',8,this.value)" style="width:90%;font-size:11px;padding:3px 5px;border:1px solid var(--bor2);border-radius:4px"></th>
-      <th></th>
-    </tr>
-  </thead>
-  <tbody id="ven-fac-tbody"><tr><td colspan="10" class="emp">Cargando...</td></tr></tbody>
-</table></div></div>
-</div>
-
-<!-- ─── CUENTA CORRIENTE CLIENTES ────────────────────────────────────────── -->
-<div class="sec" id="sec-ven-cc">
-<div class="ph"><div><div class="ph-t">💳 Cuenta Corriente Clientes</div><div class="ph-s">Saldos pendientes por cliente</div></div></div>
-<div style="display:flex;gap:10px;align-items:center;margin-bottom:16px">
-  <select id="ven-cc-cliente" onchange="venCCCargar()" style="font-size:13px;min-width:250px;padding:6px 10px;border:1px solid var(--bor2);border-radius:7px">
-    <option value="">— Seleccioná un cliente —</option>
-  </select>
-  <button class="btn bo bs" id="ven-cc-btn-export" style="display:none" onclick="venCCExportar()">📥 Excel</button>
-</div>
-<!-- Resumen -->
-<div id="ven-cc-resumen" style="display:none;display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:20px">
-  <div style="background:var(--sur);border:1px solid var(--bor);border-radius:10px;padding:14px;text-align:center">
-    <div style="font-size:10px;color:var(--mut);text-transform:uppercase;margin-bottom:4px">Total a Cobrar</div>
-    <div id="ven-cc-total" style="font-size:22px;font-weight:700">$0</div>
-  </div>
-  <div style="background:var(--sur);border:1px solid var(--bor);border-radius:10px;padding:14px;text-align:center">
-    <div style="font-size:10px;color:var(--mut);text-transform:uppercase;margin-bottom:4px">Cobrado</div>
-    <div id="ven-cc-cobrado" style="font-size:22px;font-weight:700;color:#16a34a">$0</div>
-  </div>
-  <div style="background:var(--sur);border:1px solid var(--bor);border-radius:10px;padding:14px;text-align:center">
-    <div style="font-size:10px;color:var(--mut);text-transform:uppercase;margin-bottom:4px">Pendiente</div>
-    <div id="ven-cc-pendiente" style="font-size:22px;font-weight:700;color:#dc2626">$0</div>
-  </div>
-</div>
-<!-- Documentos -->
-<div id="ven-cc-docs-wrap" style="display:none">
-  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-    <div style="font-size:12px;font-weight:700;color:var(--mut);text-transform:uppercase">Documentos</div>
-    <button class="btn bb" onclick="venCobNueva()" id="ven-cc-btn-cobrar">+ Registrar Cobranza</button>
-  </div>
-  <div style="overflow-x:auto;border:1px solid var(--bor);border-radius:10px;margin-bottom:16px">
-    <table style="width:100%;border-collapse:collapse;font-size:13px">
-      <thead><tr style="background:var(--bg);border-bottom:1px solid var(--bor)">
-        <th style="padding:9px 12px;font-size:10px;color:var(--mut);text-transform:uppercase">Tipo</th>
-        <th style="padding:9px 12px;font-size:10px;color:var(--mut);text-transform:uppercase">Número</th>
-        <th style="padding:9px 12px;font-size:10px;color:var(--mut);text-transform:uppercase">Fecha</th>
-        <th style="padding:9px 12px;text-align:right;font-size:10px;color:var(--mut);text-transform:uppercase">Total</th>
-        <th style="padding:9px 12px;text-align:right;font-size:10px;color:var(--mut);text-transform:uppercase">Cobrado</th>
-        <th style="padding:9px 12px;text-align:right;font-size:10px;color:var(--mut);text-transform:uppercase">Pendiente</th>
-        <th style="padding:9px 12px;text-align:center;font-size:10px;color:var(--mut);text-transform:uppercase">Estado</th>
-      </tr></thead>
-      <tbody id="ven-cc-docs-tbody"></tbody>
-    </table>
-  </div>
-  <!-- Cobranzas registradas -->
-  <div id="ven-cc-cob-wrap" style="display:none">
-    <div style="font-size:12px;font-weight:700;color:var(--mut);text-transform:uppercase;margin-bottom:8px">Cobranzas</div>
-    <div style="overflow-x:auto;border:1px solid var(--bor);border-radius:10px">
-      <table style="width:100%;border-collapse:collapse;font-size:13px">
-        <thead><tr style="background:var(--bg);border-bottom:1px solid var(--bor)">
-          <th style="padding:9px 12px;font-size:10px;color:var(--mut)">Fecha</th>
-          <th style="padding:9px 12px;font-size:10px;color:var(--mut)">Forma</th>
-          <th style="padding:9px 12px;font-size:10px;color:var(--mut)">Referencia</th>
-          <th style="padding:9px 12px;text-align:right;font-size:10px;color:var(--mut)">Monto</th>
-          <th style="width:40px"></th>
-        </tr></thead>
-        <tbody id="ven-cc-cob-tbody"></tbody>
-      </table>
-    </div>
-  </div>
-</div>
-</div>
-
-<!-- ─── COBRANZAS ──────────────────────────────────────────────────────────── -->
-<div class="sec" id="sec-ven-cobranzas">
-<div class="ph"><div><div class="ph-t">💰 Cobranzas</div><div class="ph-s">Pagos recibidos de clientes</div></div></div>
-<div style="padding:40px;text-align:center;color:var(--mut)">
-  <div style="font-size:32px;margin-bottom:8px">💳</div>
-  <div>Las cobranzas se registran desde <strong>Cuenta Corriente Clientes</strong> → seleccioná el cliente y hacé click en "+ Registrar Cobranza".</div>
-</div>
-</div>
-
-<!-- ════ MODALES VENTAS ═══════════════════════════════════════════════════════ -->
-
-<!-- Modal: Nuevo/Editar Cliente -->
-<div class="ab-modal-overlay" id="ven-mb-cliente">
-<div class="ab-modal" style="max-width:600px">
-  <div class="mhd">
-    <div><div class="mht" id="ven-mb-cli-tit">Nuevo Cliente</div></div>
-    <button class="mcl" onclick="document.getElementById('ven-mb-cliente').classList.remove('on')">×</button>
-  </div>
-  <input type="hidden" id="ven-cli-id">
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
-    <div class="fl ff"><label>Razón Social *</label><input type="text" id="ven-cli-razon"></div>
-    <div class="fl ff"><label>Nombre Comercial</label><input type="text" id="ven-cli-nombre-com"></div>
-    <div class="fl"><label>CUIT *</label><input type="text" id="ven-cli-cuit" placeholder="30-12345678-9"></div>
-    <div class="fl"><label>Condición IVA</label>
-      <select id="ven-cli-cond-iva">
-        <option value="responsable_inscripto">Responsable Inscripto</option>
-        <option value="monotributo">Monotributo</option>
-        <option value="exento">Exento</option>
-        <option value="consumidor_final">Consumidor Final</option>
-      </select>
-    </div>
-    <div class="fl ff"><label>Dirección</label><input type="text" id="ven-cli-dir"></div>
-    <div class="fl"><label>Teléfono</label><input type="text" id="ven-cli-tel"></div>
-    <div class="fl"><label>Email</label><input type="email" id="ven-cli-email"></div>
-    <div class="fl"><label>Contacto</label><input type="text" id="ven-cli-contacto"></div>
-    <div class="fl"><label>Rubro</label><input type="text" id="ven-cli-rubro" placeholder="Acopiador, Exportador..."></div>
-    <div class="fl ff"><label>Cuenta Contable</label><select id="ven-cli-cuenta" style="font-size:13px"></select></div>
-    <div class="fl ff" style="grid-column:1/-1"><label>Notas</label><textarea id="ven-cli-notas" rows="2"></textarea></div>
-  </div>
-  <div class="ab-modal-footer">
-    <button class="btn bo" onclick="document.getElementById('ven-mb-cliente').classList.remove('on')">Cancelar</button>
-    <button class="btn bb" onclick="venClienteGuardar()">Guardar</button>
-  </div>
-</div></div>
-
-<!-- Modal: Nueva Liquidación -->
-<div class="ab-modal-overlay" id="ven-mb-liq">
-<div class="ab-modal" style="max-width:700px">
-  <div class="mhd">
-    <div><div class="mht">Nueva Liquidación de Producto</div></div>
-    <button class="mcl" onclick="document.getElementById('ven-mb-liq').classList.remove('on')">×</button>
-  </div>
-  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:16px">
-    <div class="fl"><label>Fecha *</label><input type="date" id="ven-liq-fecha"></div>
-    <div class="fl ff"><label>Cliente (Acopiador) *</label>
-      <select id="ven-liq-cliente" style="font-size:13px"><option value="">— Seleccioná —</option></select>
-    </div>
-    <div class="fl"><label>Nro. Remito</label><input type="text" id="ven-liq-remito" placeholder="Ej: R-0001-00012345"></div>
-  </div>
-
-  <!-- Ítems -->
-  <div style="font-size:11px;font-weight:700;color:var(--mut);text-transform:uppercase;margin-bottom:6px">Productos / Cultivos</div>
-  <div id="ven-liq-items" style="display:flex;flex-direction:column;gap:6px;margin-bottom:8px"></div>
-  <button class="btn bo bs" onclick="venLiqAgregarItem()" style="font-size:11px;margin-bottom:16px">+ Agregar ítem</button>
-
-  <!-- Descuentos y Retenciones -->
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
-    <div>
-      <div style="font-size:11px;font-weight:700;color:var(--mut);text-transform:uppercase;margin-bottom:8px">Descuentos</div>
-      <div class="fl"><label>Comisión acopiador</label><input type="number" id="ven-liq-desc-com" step="0.01" min="0" value="0" oninput="venLiqActTotal()"></div>
-      <div class="fl"><label>Flete</label><input type="number" id="ven-liq-desc-flete" step="0.01" min="0" value="0" oninput="venLiqActTotal()"></div>
-      <div class="fl"><label>Carga y descarga</label><input type="number" id="ven-liq-desc-cd" step="0.01" min="0" value="0" oninput="venLiqActTotal()"></div>
-      <div class="fl"><label>Otros descuentos</label><input type="number" id="ven-liq-desc-otros" step="0.01" min="0" value="0" oninput="venLiqActTotal()"></div>
-    </div>
-    <div>
-      <div style="font-size:11px;font-weight:700;color:var(--mut);text-transform:uppercase;margin-bottom:8px">Retenciones</div>
-      <div class="fl"><label>Retención IVA</label><input type="number" id="ven-liq-ret-iva" step="0.01" min="0" value="0" oninput="venLiqActTotal()"></div>
-      <div class="fl"><label>Retención Ganancias</label><input type="number" id="ven-liq-ret-gan" step="0.01" min="0" value="0" oninput="venLiqActTotal()"></div>
-      <div class="fl"><label>Retención IIBB</label><input type="number" id="ven-liq-ret-iibb" step="0.01" min="0" value="0" oninput="venLiqActTotal()"></div>
-      <div class="fl"><label>Otras retenciones</label><input type="number" id="ven-liq-ret-otras" step="0.01" min="0" value="0" oninput="venLiqActTotal()"></div>
-    </div>
-  </div>
-
-  <!-- Resumen -->
-  <div style="background:#f0fdf4;border:1px solid #86efac;border-radius:10px;padding:14px;margin-top:16px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;text-align:center">
-    <div><div style="font-size:10px;color:var(--mut);font-weight:700;text-transform:uppercase">Precio Bruto</div><div id="ven-liq-res-bruto" style="font-size:18px;font-weight:700">$0</div></div>
-    <div><div style="font-size:10px;color:var(--mut);font-weight:700;text-transform:uppercase">Desc. + Ret.</div><div id="ven-liq-res-desc" style="font-size:18px;font-weight:700;color:#dc2626">-$0</div></div>
-    <div><div style="font-size:10px;color:#15803d;font-weight:700;text-transform:uppercase">Neto a Cobrar</div><div id="ven-liq-res-neto" style="font-size:22px;font-weight:700;color:#15803d">$0</div></div>
-  </div>
-
-  <div class="fl" style="margin-top:12px"><label>Observaciones</label><textarea id="ven-liq-obs" rows="2"></textarea></div>
-
-  <div class="ab-modal-footer">
-    <button class="btn bo" onclick="document.getElementById('ven-mb-liq').classList.remove('on')">Cancelar</button>
-    <button class="btn bb" onclick="venLiqGuardar()">Registrar Liquidación</button>
-  </div>
-</div></div>
-
-<!-- Modal: Nueva Factura de Venta -->
-<div class="ab-modal-overlay" id="ven-mb-fac">
-<div class="ab-modal" style="max-width:640px">
-  <div class="mhd">
-    <div><div class="mht">Nueva Factura de Venta</div></div>
-    <button class="mcl" onclick="document.getElementById('ven-mb-fac').classList.remove('on')">×</button>
-  </div>
-  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:16px">
-    <div class="fl"><label>Fecha *</label><input type="date" id="ven-fac-fecha"></div>
-    <div class="fl ff"><label>Cliente *</label><select id="ven-fac-cliente" style="font-size:13px"><option value="">— Seleccioná —</option></select></div>
-    <div class="fl"><label>Tipo</label>
-      <select id="ven-fac-tipo"><option value="A">Factura A</option><option value="B">Factura B</option><option value="C">Factura C</option></select>
-    </div>
-    <div class="fl ff" style="grid-column:1/-1"><label>Concepto General</label><input type="text" id="ven-fac-concepto" placeholder="Venta de..."></div>
-  </div>
-  <div style="font-size:11px;font-weight:700;color:var(--mut);text-transform:uppercase;margin-bottom:6px">Ítems</div>
-  <div id="ven-fac-items" style="display:flex;flex-direction:column;gap:6px;margin-bottom:8px"></div>
-  <button class="btn bo bs" onclick="venFacAgregarItem()" style="font-size:11px;margin-bottom:12px">+ Agregar ítem</button>
-  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
-    <div class="fl"><label>IVA</label><input type="number" id="ven-fac-iva" step="0.01" min="0" value="0" oninput="venFacActTotal()"></div>
-    <div class="fl"><label>Neto</label><input type="number" id="ven-fac-neto" readonly style="background:var(--sur)"></div>
-    <div class="fl"><label>Total</label><input type="number" id="ven-fac-total" readonly style="background:var(--sur);font-weight:700"></div>
-  </div>
-  <div class="fl" style="margin-top:10px"><label>Notas</label><textarea id="ven-fac-notas" rows="2"></textarea></div>
-  <div class="ab-modal-footer">
-    <button class="btn bo" onclick="document.getElementById('ven-mb-fac').classList.remove('on')">Cancelar</button>
-    <button class="btn bb" onclick="venFacGuardar()">Registrar Factura</button>
-  </div>
-</div></div>
-
-<!-- Modal: Nueva Cobranza -->
-<div class="ab-modal-overlay" id="ven-mb-cob">
-<div class="ab-modal" style="max-width:560px">
-  <div class="mhd">
-    <div><div class="mht">Registrar Cobranza</div><div style="font-size:11px;color:var(--mut)" id="ven-cob-cli-nom"></div></div>
-    <button class="mcl" onclick="document.getElementById('ven-mb-cob').classList.remove('on')">×</button>
-  </div>
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px">
-    <div class="fl"><label>Fecha *</label><input type="date" id="ven-cob-fecha"></div>
-    <div class="fl"><label>Forma de Pago</label>
-      <select id="ven-cob-forma"><option value="transferencia">Transferencia</option><option value="cheque">Cheque</option><option value="efectivo">Efectivo</option></select>
-    </div>
-    <div class="fl ff"><label>Referencia</label><input type="text" id="ven-cob-ref" placeholder="Nro. transferencia, cheque..."></div>
-    <div class="fl"><label>Monto Total *</label><input type="number" id="ven-cob-monto" step="0.01" min="0" oninput="venCobActMonto()"></div>
-  </div>
-  <div style="font-size:11px;font-weight:700;color:var(--mut);text-transform:uppercase;margin-bottom:6px">Documentos a cancelar</div>
-  <div id="ven-cob-docs" style="overflow-y:auto;max-height:260px;border:1px solid var(--bor);border-radius:8px"></div>
-  <div style="margin-top:10px;display:flex;gap:16px;font-size:13px">
-    <span>Seleccionado: <strong id="ven-cob-sel-monto">$0</strong></span>
-    <span style="color:var(--mut)">Disponible: <strong id="ven-cob-disponible">$0</strong></span>
-  </div>
-  <div class="fl" style="margin-top:10px"><label>Notas</label><textarea id="ven-cob-notas" rows="2"></textarea></div>
-  <div class="ab-modal-footer">
-    <button class="btn bo" onclick="document.getElementById('ven-mb-cob').classList.remove('on')">Cancelar</button>
-    <button class="btn bb" onclick="venCobGuardar()">Registrar Cobranza</button>
-  </div>
-</div></div>
-
 <script>
 // ══════════════════════════════════════════════════════════════════════════════
 // MÓDULO VENTAS — JS
@@ -23895,6 +23897,7 @@ function eqBorrarUbicacion(id) {
 }
 
 </script>
+
 
 </body>
 </html>
