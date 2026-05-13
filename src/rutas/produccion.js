@@ -951,7 +951,13 @@ router.post('/compras', requireAuth, (req, res) => {
           const ra = dbPa.prepare('INSERT INTO pa_asientos (fecha, descripcion, usuario_id, ref_compra_id, ref_codigo) VALUES (?,?,?,?,?)')
             .run(fechaCompra, desc, req.user?.id||null, id, refCodigo);
           const ins = dbPa.prepare('INSERT INTO pa_asientos_lineas (asiento_id, cuenta_id, debe, haber, descripcion) VALUES (?,?,?,?,?)');
-          for (const l of lineas) ins.run(ra.lastInsertRowid, l.cuenta_id, parseFloat(l.debe)||0, parseFloat(l.haber)||0, l.descripcion||null);
+          for (const l of lineas) {
+            const cuentaExiste = dbPa.prepare('SELECT id FROM pa_cuentas WHERE id=?').get(parseInt(l.cuenta_id));
+            if (!cuentaExiste) {
+              throw new Error(`Cuenta ID ${l.cuenta_id} no existe. Actualizá el Asiento Modelo del proveedor con las cuentas del nuevo plan de cuentas.`);
+            }
+            ins.run(ra.lastInsertRowid, l.cuenta_id, parseFloat(l.debe)||0, parseFloat(l.haber)||0, l.descripcion||null);
+          }
           return refCodigo;
         });
         asientoRef = txAsiento();
@@ -959,6 +965,8 @@ router.post('/compras', requireAuth, (req, res) => {
       }
     } catch(eA) {
       console.error('[PA] Error generando asiento para compra #'+id+':', eA.message);
+      // Compra guardada OK — asiento falló, avisar al usuario
+      return res.json({ ok: true, id, neto_total, iva_total, total, asiento_ref: null, asiento_error: eA.message });
     }
 
     res.json({ ok: true, id, neto_total, iva_total, total, asiento_ref: asientoRef });
