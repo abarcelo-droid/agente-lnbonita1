@@ -729,7 +729,8 @@ router.post('/compras', requireAuth, (req, res) => {
                                 iva_total, neto_total, tipo_factura)
         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
       `).run(fecha||new Date().toISOString().slice(0,10), proveedor_id||null, proveedor_txt||null,
-             nro_factura||null, tipo_comprobante||'factura', campaña_id||null,
+             nro_factura||null, tipo_comprobante||'factura',
+             (campaña_id && !isNaN(parseInt(campaña_id))) ? parseInt(campaña_id) : null,
              neto_total, iva_total, total, notas||null, remito_foto_path,
              iva_total, neto_total,
              esServicio ? 'servicio' : 'compra');
@@ -779,7 +780,7 @@ router.post('/compras', requireAuth, (req, res) => {
                it.cant_bultos != null ? Number(it.cant_bultos) : null,
                esServicio ? 'servicio' : (it.precio_modo || 'bulto'),
                esServicio ? String(it.concepto).trim() : null,
-               (esServicio || it.lote_id) ? (it.lote_id || null) : null,
+               (esServicio || it.lote_id) ? ((it.lote_id && !isNaN(parseInt(it.lote_id))) ? parseInt(it.lote_id) : null) : null,
                (esServicio || it.cuenta_codigo) ? (it.cuenta_codigo || null) : null);
 
         // En servicios no toca stock ni crea pañol — saltar el resto del loop
