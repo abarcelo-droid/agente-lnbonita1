@@ -2031,6 +2031,8 @@ db.exec(`
     `);
     // Insertar claves si no existen
     const claves = [
+      ['iva_credito_fiscal',  'IVA Crédito Fiscal (Compras)'],
+      ['iva_debito_fiscal',   'IVA Débito Fiscal (Ventas)'],
       ['percepcion_iva',       'Percepción IVA'],
       ['percepcion_iibb',      'Percepción IIBB'],
       ['percepcion_ganancias', 'Percepción Ganancias'],
