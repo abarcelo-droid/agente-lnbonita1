@@ -10,6 +10,16 @@ import '../servicios/db_org.js';  // inicializa schema al primer import
 const router = express.Router();
 const db = () => getDb();
 
+// Middleware local: parsea la cookie lnb_user para poblar req.user
+// (consistente con cómo el resto del sistema maneja la sesión)
+router.use((req, res, next) => {
+  try {
+    const cookie = req.cookies?.lnb_user;
+    if (cookie) req.user = JSON.parse(cookie);
+  } catch(_) {}
+  next();
+});
+
 const requireAdmin = (req, res, next) => {
   if (!req.user || req.user.rol !== 'admin') {
     return res.status(403).json({ ok: false, error: 'Solo admin' });
