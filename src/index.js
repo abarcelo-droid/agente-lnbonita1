@@ -236,6 +236,22 @@ app.get("/favicon.ico", (req, res) => {
 // Health check
 app.get("/", (req, res) => res.json({ status:"ok", version:"3.0", panel:"/panel" }));
 
+// ── TEST: Consulta CUIT AFIP ──────────────────────────────────────────────────
+app.get("/api/test-cuit/:cuit", async (req, res) => {
+  const cuit = req.params.cuit.replace(/[-\s]/g, '');
+  try {
+    const response = await fetch(`https://soa.afip.gob.ar/sr-padron/v2/persona/${cuit}`, {
+      headers: { 'Accept': 'application/json' },
+      signal: AbortSignal.timeout(8000)
+    });
+    if (!response.ok) return res.json({ ok: false, status: response.status, msg: 'AFIP no responde o CUIT inválido' });
+    const data = await response.json();
+    res.json({ ok: true, data });
+  } catch(e) {
+    res.json({ ok: false, error: e.message, msg: 'No se pudo conectar con AFIP' });
+  }
+});
+
 const PORT = process.env.PORT || 3000;
 const server = app.listen(PORT, () => {
   console.log(`\n Servidor en http://localhost:${PORT}`);
