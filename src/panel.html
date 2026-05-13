@@ -2595,7 +2595,10 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   <div class="fg">
     <div class="fl ff"><label>Razón Social *</label><input id="adm-prov-razon" placeholder="Ej: SOLMIX SA"></div>
     <div class="fl ff"><label>Nombre Comercial</label><input id="adm-prov-nombre-com" placeholder="Ej: Solmix"></div>
-    <div class="fl"><label>CUIT <span style="color:var(--err)">*</span></label><input id="adm-prov-cuit" placeholder="20-12345678-9"></div>
+    <div class="fl"><label>CUIT <span style="color:var(--err)">*</span></label>
+      <input id="adm-prov-cuit" placeholder="20-12345678-9" oninput="cuitValidarInput('adm-prov-cuit','adm-prov-cuit-fb')" onblur="cuitValidarInput('adm-prov-cuit','adm-prov-cuit-fb')">
+      <div id="adm-prov-cuit-fb" style="font-size:11px;margin-top:3px;font-weight:600"></div>
+    </div>
     <div class="fl"><label>Condición IVA <span style="color:var(--err)">*</span></label>
       <select id="adm-prov-cond-iva">
         <option value="responsable_inscripto">Resp. Inscripto</option>
@@ -5418,7 +5421,10 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
     <div class="fl ff"><label>Razón Social *</label><input type="text" id="ven-cli-razon"></div>
     <div class="fl ff"><label>Nombre Comercial</label><input type="text" id="ven-cli-nombre-com"></div>
-    <div class="fl"><label>CUIT *</label><input type="text" id="ven-cli-cuit" placeholder="30-12345678-9"></div>
+    <div class="fl"><label>CUIT *</label>
+      <input type="text" id="ven-cli-cuit" placeholder="30-12345678-9" oninput="cuitValidarInput('ven-cli-cuit','ven-cli-cuit-fb')" onblur="cuitValidarInput('ven-cli-cuit','ven-cli-cuit-fb')">
+      <div id="ven-cli-cuit-fb" style="font-size:11px;margin-top:3px;font-weight:600"></div>
+    </div>
     <div class="fl"><label>Condición IVA</label>
       <select id="ven-cli-cond-iva">
         <option value="responsable_inscripto">Responsable Inscripto</option>
@@ -9512,7 +9518,12 @@ function admProvCargarModelosSelect(selectedId) {
 }
 function admProvAbrirNuevo(cb){ADM_PROV_CB=cb||null;document.getElementById('adm-prov-id').value='';document.getElementById('adm-prov-modal-tit').textContent='Nuevo proveedor';['adm-prov-razon','adm-prov-nombre-com','adm-prov-cuit','adm-prov-dir','adm-prov-tel','adm-prov-email','adm-prov-cbu','adm-prov-alias','adm-prov-contacto','adm-prov-notas'].forEach(function(id){var el=document.getElementById(id);if(el)el.value='';});document.getElementById('adm-prov-cond-iva').value='responsable_inscripto';document.getElementById('adm-prov-rubro-modal').value='';document.getElementById('adm-prov-cond-pago').value='';admProvCargarModelosSelect(null);document.getElementById('adm-mb-proveedor').classList.add('on');}
 function admProvEditar(id){admProvApi('/'+id).then(function(r){if(!r.ok)return toast(r.error||'Error','er');var p=r.data;document.getElementById('adm-prov-id').value=p.id;document.getElementById('adm-prov-modal-tit').textContent='Editar — '+p.razon_social;document.getElementById('adm-prov-razon').value=p.razon_social||'';document.getElementById('adm-prov-nombre-com').value=p.nombre_comercial||'';document.getElementById('adm-prov-cuit').value=p.cuit||'';document.getElementById('adm-prov-cond-iva').value=p.condicion_iva||'responsable_inscripto';document.getElementById('adm-prov-dir').value=p.direccion||'';document.getElementById('adm-prov-tel').value=p.telefono||'';document.getElementById('adm-prov-email').value=p.email||'';document.getElementById('adm-prov-rubro-modal').value=p.rubro||'';document.getElementById('adm-prov-cbu').value=p.cbu||'';document.getElementById('adm-prov-alias').value=p.alias_cbu||'';document.getElementById('adm-prov-cond-pago').value=p.condicion_pago||'';document.getElementById('adm-prov-contacto').value=p.contacto||'';document.getElementById('adm-prov-notas').value=p.notas||'';admProvCargarModelosSelect(p.asiento_modelo_id||null);document.getElementById('adm-mb-proveedor').classList.add('on');});}
-function admProvGuardar(){var id=document.getElementById('adm-prov-id').value;var modeloEl=document.getElementById('adm-prov-modelo-id');var body={razon_social:document.getElementById('adm-prov-razon').value.trim(),nombre_comercial:document.getElementById('adm-prov-nombre-com').value.trim()||null,cuit:document.getElementById('adm-prov-cuit').value.trim()||null,condicion_iva:document.getElementById('adm-prov-cond-iva').value,direccion:document.getElementById('adm-prov-dir').value.trim()||null,telefono:document.getElementById('adm-prov-tel').value.trim()||null,email:document.getElementById('adm-prov-email').value.trim()||null,rubro:document.getElementById('adm-prov-rubro-modal').value||null,cbu:document.getElementById('adm-prov-cbu').value.trim()||null,alias_cbu:document.getElementById('adm-prov-alias').value.trim()||null,condicion_pago:document.getElementById('adm-prov-cond-pago').value||null,contacto:document.getElementById('adm-prov-contacto').value.trim()||null,notas:document.getElementById('adm-prov-notas').value.trim()||null,asiento_modelo_id:modeloEl&&modeloEl.value?parseInt(modeloEl.value):null};if(!body.razon_social)return toast('La Razón Social es obligatoria','er');if(!body.cuit)return toast('El CUIT es obligatorio','er');if(!body.condicion_iva)return toast('La Condición IVA es obligatoria','er');var url=id?'/'+id:'';var method=id?'PUT':'POST';admProvApi(url,{method:method,body:JSON.stringify(body)}).then(function(r){if(r.ok){toast('✓ Proveedor guardado','ok');document.getElementById('adm-mb-proveedor').classList.remove('on');admProvCargar();if(ADM_PROV_CB){ADM_PROV_CB(id?parseInt(id):r.id);ADM_PROV_CB=null;}}else toast('Error: '+(r.error||'desconocido'),'er');});}
+function admProvGuardar(){var id=document.getElementById('adm-prov-id').value;var modeloEl=document.getElementById('adm-prov-modelo-id');var body={razon_social:document.getElementById('adm-prov-razon').value.trim(),nombre_comercial:document.getElementById('adm-prov-nombre-com').value.trim()||null,cuit:document.getElementById('adm-prov-cuit').value.trim()||null,condicion_iva:document.getElementById('adm-prov-cond-iva').value,direccion:document.getElementById('adm-prov-dir').value.trim()||null,telefono:document.getElementById('adm-prov-tel').value.trim()||null,email:document.getElementById('adm-prov-email').value.trim()||null,rubro:document.getElementById('adm-prov-rubro-modal').value||null,cbu:document.getElementById('adm-prov-cbu').value.trim()||null,alias_cbu:document.getElementById('adm-prov-alias').value.trim()||null,condicion_pago:document.getElementById('adm-prov-cond-pago').value||null,contacto:document.getElementById('adm-prov-contacto').value.trim()||null,notas:document.getElementById('adm-prov-notas').value.trim()||null,asiento_modelo_id:modeloEl&&modeloEl.value?parseInt(modeloEl.value):null};if(!body.razon_social)return toast('La Razón Social es obligatoria','er');
+if(!body.cuit)return toast('El CUIT es obligatorio','er');
+var cuitRes=validarCuit(body.cuit);
+if(!cuitRes.valido)return toast('CUIT inválido: '+cuitRes.msg,'er');
+body.cuit=cuitRes.cuit_formateado;
+if(!body.condicion_iva)return toast('La Condición IVA es obligatoria','er');var url=id?'/'+id:'';var method=id?'PUT':'POST';admProvApi(url,{method:method,body:JSON.stringify(body)}).then(function(r){if(r.ok){toast('✓ Proveedor guardado','ok');document.getElementById('adm-mb-proveedor').classList.remove('on');admProvCargar();if(ADM_PROV_CB){ADM_PROV_CB(id?parseInt(id):r.id);ADM_PROV_CB=null;}}else toast('Error: '+(r.error||'desconocido'),'er');});}
 function admProvDesactivar(id){if(!confirm('¿Desactivar este proveedor?'))return;admProvApi('/'+id,{method:'DELETE'}).then(function(r){if(r.ok){toast('✓ Desactivado','ok');admProvCargar();}else toast(r.error||'Error','er');});}
 function admProvReactivar(id){admProvApi('/'+id+'/reactivar',{method:'POST'}).then(function(r){if(r.ok){toast('✓ Reactivado','ok');admProvCargar();}else toast(r.error||'Error','er');});}
 
@@ -23005,8 +23016,46 @@ function _descargarTSV(filas, cols, nombre) {
 
 <script>
 // ══════════════════════════════════════════════════════════════════════════════
-// MÓDULO VENTAS — JS
+// VALIDACIÓN MATEMÁTICA DE CUIT (dígito verificador oficial AFIP)
 // ══════════════════════════════════════════════════════════════════════════════
+function validarCuit(cuit) {
+  if (!cuit) return { valido: false, msg: 'Ingresá el CUIT' };
+  var limpio = String(cuit).replace(/[-\s]/g, '');
+  if (!/^\d{11}$/.test(limpio)) return { valido: false, msg: 'El CUIT debe tener 11 dígitos' };
+  var tipos = ['20','23','24','27','30','33','34'];
+  var tipo = limpio.substring(0, 2);
+  if (!tipos.includes(tipo)) return { valido: false, msg: 'Tipo de CUIT inválido (' + tipo + ')' };
+  var mult = [5,4,3,2,7,6,5,4,3,2];
+  var suma = 0;
+  for (var i = 0; i < 10; i++) suma += parseInt(limpio[i]) * mult[i];
+  var resto = suma % 11;
+  var dv = resto === 0 ? 0 : resto === 1 ? 9 : 11 - resto;
+  if (dv !== parseInt(limpio[10])) return { valido: false, msg: 'Dígito verificador incorrecto' };
+  // Formatear: XX-XXXXXXXX-X
+  var fmt = limpio.substring(0,2) + '-' + limpio.substring(2,10) + '-' + limpio[10];
+  return { valido: true, msg: '✅ CUIT válido', cuit_formateado: fmt };
+}
+
+function cuitValidarInput(inputId, feedbackId) {
+  var el = document.getElementById(inputId);
+  var fb = document.getElementById(feedbackId);
+  if (!el || !fb) return;
+  var val = el.value.trim();
+  if (!val) { fb.textContent = ''; fb.style.color = ''; return; }
+  var res = validarCuit(val);
+  fb.textContent = res.msg;
+  fb.style.color = res.valido ? '#16a34a' : '#dc2626';
+  if (res.valido) el.value = res.cuit_formateado;
+  return res.valido;
+}
+
+function cuitValidarYBloquear(inputId, feedbackId, btnGuardar) {
+  var valido = cuitValidarInput(inputId, feedbackId);
+  if (btnGuardar) {
+    var btn = document.getElementById(btnGuardar);
+    if (btn) btn.disabled = !valido;
+  }
+}
 var VEN = { clientes: [], liqN: 0, facN: 0, ccClienteId: null, ccDocs: [] };
 
 function venApi(path, opts) {
@@ -23107,10 +23156,16 @@ function venClienteGuardar() {
   var id=document.getElementById('ven-cli-id').value;
   var razon=document.getElementById('ven-cli-razon').value.trim();
   if (!razon) return toast('Razón Social obligatoria','er');
+  var cuitVal=document.getElementById('ven-cli-cuit').value.trim();
+  if (cuitVal) {
+    var cuitRes=validarCuit(cuitVal);
+    if (!cuitRes.valido) return toast('CUIT inválido: '+cuitRes.msg,'er');
+    cuitVal=cuitRes.cuit_formateado;
+  }
   var body={
     razon_social:razon,
     nombre_comercial:document.getElementById('ven-cli-nombre-com').value.trim()||null,
-    cuit:document.getElementById('ven-cli-cuit').value.trim()||null,
+    cuit:cuitVal||null,
     condicion_iva:document.getElementById('ven-cli-cond-iva').value,
     direccion:document.getElementById('ven-cli-dir').value.trim()||null,
     telefono:document.getElementById('ven-cli-tel').value.trim()||null,

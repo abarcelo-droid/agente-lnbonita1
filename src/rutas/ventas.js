@@ -5,6 +5,18 @@ import db from '../servicios/db_pa.js';
 
 const router = express.Router();
 
+function validarCuit(cuit) {
+  if (!cuit) return { valido: true }; // opcional
+  const limpio = String(cuit).replace(/[-\s]/g, '');
+  if (!/^\d{11}$/.test(limpio)) return { valido: false, msg: 'CUIT debe tener 11 dígitos' };
+  const mult = [5,4,3,2,7,6,5,4,3,2];
+  const suma = mult.reduce((s, m, i) => s + parseInt(limpio[i]) * m, 0);
+  const resto = suma % 11;
+  const dv = resto === 0 ? 0 : resto === 1 ? 9 : 11 - resto;
+  if (dv !== parseInt(limpio[10])) return { valido: false, msg: 'Dígito verificador incorrecto' };
+  return { valido: true, cuit_formateado: `${limpio.substring(0,2)}-${limpio.substring(2,10)}-${limpio[10]}` };
+}
+
 function getUser(req) {
   try { return req.cookies?.lnb_user ? JSON.parse(req.cookies.lnb_user) : null; }
   catch(e) { return null; }
@@ -52,6 +64,10 @@ router.post('/clientes', requireAuth, (req, res) => {
   const { razon_social, nombre_comercial, cuit, condicion_iva, direccion,
           telefono, email, contacto, rubro, notas, cuenta_contable_id } = req.body || {};
   if (!razon_social?.trim()) return res.status(400).json({ ok: false, error: 'Razón social requerida' });
+  if (cuit) {
+    const cv = validarCuit(cuit);
+    if (!cv.valido) return res.status(400).json({ ok: false, error: 'CUIT inválido: ' + cv.msg });
+  }
   try {
     const r = db.prepare(`INSERT INTO ven_clientes
       (razon_social, nombre_comercial, cuit, condicion_iva, direccion, telefono, email, contacto, rubro, notas, cuenta_contable_id)
