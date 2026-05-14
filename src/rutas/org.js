@@ -241,16 +241,17 @@ router.get('/personas/:id', (req, res) => {
 });
 
 router.post('/personas', requireAdmin, (req, res) => {
-  const { dni, nombre, apellido, mail, telefono, ubicacion_id, notas, areas, reporta_a_id } = req.body || {};
+  const { dni, nombre, apellido, mail, telefono, ubicacion_id, notas, areas, reporta_a_id, cargo } = req.body || {};
   if (!nombre) return res.status(400).json({ ok: false, error: 'nombre requerido' });
   try {
     const r = db().prepare(`
-      INSERT INTO personas (dni, nombre, apellido, mail, telefono, ubicacion_id, notas, reporta_a_id)
-      VALUES (?,?,?,?,?,?,?,?)
+      INSERT INTO personas (dni, nombre, apellido, mail, telefono, ubicacion_id, notas, reporta_a_id, cargo)
+      VALUES (?,?,?,?,?,?,?,?,?)
     `).run(
       dni || null, nombre.trim(), apellido || null, mail || null, telefono || null,
       ubicacion_id ? parseInt(ubicacion_id) : null, notas || null,
-      reporta_a_id ? parseInt(reporta_a_id) : null
+      reporta_a_id ? parseInt(reporta_a_id) : null,
+      cargo || null
     );
     const personaId = r.lastInsertRowid;
     if (Array.isArray(areas) && areas.length > 0) {
@@ -265,7 +266,7 @@ router.post('/personas', requireAdmin, (req, res) => {
 
 router.patch('/personas/:id', requireAdmin, (req, res) => {
   const id = parseInt(req.params.id);
-  const { dni, nombre, apellido, mail, telefono, ubicacion_id, notas, activo, reporta_a_id } = req.body || {};
+  const { dni, nombre, apellido, mail, telefono, ubicacion_id, notas, activo, reporta_a_id, cargo } = req.body || {};
   try {
     const cur = db().prepare("SELECT * FROM personas WHERE id = ?").get(id);
     if (!cur) return res.status(404).json({ ok: false, error: 'No existe' });
@@ -291,7 +292,7 @@ router.patch('/personas/:id', requireAdmin, (req, res) => {
 
     db().prepare(`
       UPDATE personas SET dni = ?, nombre = ?, apellido = ?, mail = ?, telefono = ?,
-        ubicacion_id = ?, notas = ?, activo = ?, reporta_a_id = ?
+        ubicacion_id = ?, notas = ?, activo = ?, reporta_a_id = ?, cargo = ?
       WHERE id = ?
     `).run(
       dni ?? cur.dni,
@@ -303,6 +304,7 @@ router.patch('/personas/:id', requireAdmin, (req, res) => {
       notas ?? cur.notas,
       activo ?? cur.activo,
       nuevoReportaA,
+      cargo ?? cur.cargo,
       id
     );
     res.json({ ok: true });
@@ -361,39 +363,35 @@ router.get('/organigrama', (req, res) => {
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
-// ─── JERARQUÍA: árbol de personas armado por reporta_a_id ──────────────
+// ─── JERARQUÍA: lista plana de personas activas con campos para armar árbol
+// El frontend arma el árbol y aplica filtros (por sociedad, etc.)
 router.get('/jerarquia', (req, res) => {
   try {
     const personas = db().prepare(`
-      SELECT p.id, p.nombre, p.apellido, p.reporta_a_id,
+      SELECT p.id, p.nombre, p.apellido, p.cargo, p.reporta_a_id,
         (SELECT GROUP_CONCAT(s.nombre || ' / ' || a.nombre, ' · ')
          FROM personas_areas pa
          JOIN areas a     ON a.id = pa.area_id
          JOIN sociedades s ON s.id = a.sociedad_id
-         WHERE pa.persona_id = p.id AND a.activa = 1) AS areas_str
+         WHERE pa.persona_id = p.id AND a.activa = 1) AS areas_str,
+        (SELECT GROUP_CONCAT(DISTINCT s.nombre)
+         FROM personas_areas pa
+         JOIN areas a     ON a.id = pa.area_id
+         JOIN sociedades s ON s.id = a.sociedad_id
+         WHERE pa.persona_id = p.id AND a.activa = 1) AS sociedades_str,
+        EXISTS (
+          SELECT 1 FROM personas_areas pa
+          JOIN areas a ON a.id = pa.area_id
+          JOIN sociedades s ON s.id = a.sociedad_id
+          WHERE pa.persona_id = p.id
+            AND a.nombre = 'Directorio'
+            AND s.nombre = 'Familia'
+        ) AS en_directorio
       FROM personas p
       WHERE p.activo = 1
       ORDER BY p.apellido, p.nombre
     `).all();
-
-    // Armar mapa id → persona y agregar reportes[]
-    const map = {};
-    for (const p of personas) { p.reportes = []; map[p.id] = p; }
-
-    const raices = [];
-    const huerfanos = [];
-    for (const p of personas) {
-      if (!p.reporta_a_id) {
-        raices.push(p);
-      } else if (map[p.reporta_a_id]) {
-        map[p.reporta_a_id].reportes.push(p);
-      } else {
-        // Tiene reporta_a_id pero el padre no está activo / no existe
-        huerfanos.push(p);
-      }
-    }
-
-    res.json({ ok: true, raices, huerfanos });
+    res.json({ ok: true, personas });
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 

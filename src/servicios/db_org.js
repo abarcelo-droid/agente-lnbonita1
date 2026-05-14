@@ -77,6 +77,9 @@ try { db.exec("ALTER TABLE proveedores ADD COLUMN sociedad_id INTEGER REFERENCES
 try { db.exec("ALTER TABLE personas ADD COLUMN reporta_a_id INTEGER REFERENCES personas(id)"); } catch(_) {}
 try { db.exec("CREATE INDEX IF NOT EXISTS idx_personas_reporta_a ON personas(reporta_a_id)"); } catch(_) {}
 
+// Fase 1.b: cargo de la persona (texto libre, ej. "Gerente Comercial", "CEO")
+try { db.exec("ALTER TABLE personas ADD COLUMN cargo TEXT"); } catch(_) {}
+
 // Fase 1.b: rename Estructura → Familia + soft delete del área Family Office
 // (idempotente: solo afecta si todavía se llaman así)
 try {
@@ -88,6 +91,18 @@ try {
       AND activa = 1
   `).run();
 } catch(e) { console.error("[ORG] Error migrando Familia:", e.message); }
+
+// Fase 1.b: asegurar que existe el área "Directorio" en Familia (idempotente)
+try {
+  const familia = db.prepare("SELECT id FROM sociedades WHERE nombre = 'Familia' AND activa = 1").get();
+  if (familia) {
+    const tiene = db.prepare("SELECT 1 FROM areas WHERE sociedad_id = ? AND nombre = 'Directorio' AND activa = 1").get(familia.id);
+    if (!tiene) {
+      db.prepare("INSERT INTO areas (sociedad_id, nombre) VALUES (?, 'Directorio')").run(familia.id);
+      console.log("[ORG] Área 'Directorio' creada en Familia");
+    }
+  }
+} catch(e) { console.error("[ORG] Error creando Directorio:", e.message); }
 
 // ─── SEED: 4 sociedades internas + áreas confirmadas ───────────────────
 (function seedOrg() {
@@ -102,7 +117,7 @@ try {
       { nombre: 'Puente Cordón SA',       funcion: 'productiva', areas: ['Producción','Cosecha','Personal agrícola'] },
       { nombre: 'San Gerónimo SA',        funcion: 'comercial',  areas: ['Comercial','Logística','Operativo IFCO','Administración'] },
       { nombre: 'Barceló Transporte SRL', funcion: 'transporte', areas: [] },
-      { nombre: 'Familia',                funcion: 'estructura', areas: ['Contadores','Abogados'] },
+      { nombre: 'Familia',                funcion: 'estructura', areas: ['Directorio','Contadores','Abogados'] },
     ];
 
     db.transaction(() => {
