@@ -24059,24 +24059,42 @@ function eqArbolToggle(expandir) {
 function eqIniciales(p) {
   return ((p.nombre || ' ')[0] + (p.apellido || ' ')[0]).toUpperCase();
 }
-function eqColorSociedad(p) {
-  // Color del avatar según primera sociedad (o purple si Directorio)
-  if (p.en_directorio) return { bg:'#EEEDFE', fg:'#3C3489' };
-  var soc = (p.sociedades_str || '').split(',')[0];
-  if (soc === 'Familia')                return { bg:'#EEEDFE', fg:'#3C3489' };
-  if (soc === 'San Gerónimo SA')        return { bg:'#E6F1FB', fg:'#0C447C' };
-  if (soc === 'Puente Cordón SA')       return { bg:'#E1F5EE', fg:'#085041' };
-  if (soc === 'Barceló Transporte SRL') return { bg:'#FAEEDA', fg:'#633806' };
-  return { bg:'#F1EFE8', fg:'#5F5E5A' };
+// Mapa de colores por categoría de área. Una persona se categoriza por la
+// primera área que matchee, con prioridad: dirección > comercial > operativo > admin > prof.
+var EQ_COLORES = {
+  direccion:      { bg:'#EEEDFE', fg:'#3C3489', label:'Dirección' },
+  comercial:      { bg:'#E6F1FB', fg:'#0C447C', label:'Comercial' },
+  operativo:      { bg:'#E1F5EE', fg:'#085041', label:'Operativo' },
+  administrativo: { bg:'#FAEEDA', fg:'#633806', label:'Administrativo' },
+  profesional:    { bg:'#F1EFE8', fg:'#5F5E5A', label:'Profesional' },
+  otro:           { bg:'#F4F3EE', fg:'#737065', label:'—' }
+};
+function eqCategoriaPersona(p) {
+  if (p.en_directorio || p._es_directorio) return 'direccion';
+  if (!p.areas_str) return 'otro';
+  // areas_str viene como "Sociedad / Area · Sociedad / Area"
+  var areas = p.areas_str.split(' · ').map(function(s){ return s.split(' / ').pop(); });
+  // Prioridad: comercial → operativo → administrativo → profesional
+  if (areas.some(function(a){ return /^Comercial/i.test(a); })) return 'comercial';
+  if (areas.some(function(a){ return /^(Producción|Cosecha|Logística|Personal agrícola|Operativo)/i.test(a); })) return 'operativo';
+  if (areas.some(function(a){ return /^(Administración|Contadores)/i.test(a); })) return 'administrativo';
+  if (areas.some(function(a){ return /^Abogados/i.test(a); })) return 'profesional';
+  return 'otro';
+}
+function eqColorPersona(p) {
+  return EQ_COLORES[eqCategoriaPersona(p)];
 }
 
 function eqCardNodo(p, nivel) {
   var nombreFull = (p.apellido || '') + (p.apellido ? ', ' : '') + (p.nombre || '');
-  var col = eqColorSociedad(p);
+  var col = eqColorPersona(p);
+  var cat = eqCategoriaPersona(p);
+  var catLabel = EQ_COLORES[cat].label;
   var dirBadge = p.en_directorio ? '<span style="background:#EEEDFE; color:#3C3489; font-size:10px; font-weight:600; padding:1px 6px; border-radius:8px; margin-left:6px">DIRECTORIO</span>' : '';
+  var catPill = (cat !== 'otro' && !p.en_directorio) ? '<span style="background:' + col.bg + '; color:' + col.fg + '; font-size:10px; font-weight:600; padding:1px 6px; border-radius:8px; margin-left:6px">' + catLabel + '</span>' : '';
   var tieneReportes = p.reportes && p.reportes.length > 0;
   var areasStr = p.areas_str ? ' · <span style="color:var(--mut)">' + eqEsc(p.areas_str) + '</span>' : '';
-  var cargoLine = p.cargo ? eqEsc(p.cargo) + areasStr : (p.areas_str ? eqEsc(p.areas_str) : '');
+  var cargoLine = p.cargo ? '<b>' + eqEsc(p.cargo) + '</b>' + areasStr : (p.areas_str ? eqEsc(p.areas_str) : '');
   var hijos = tieneReportes
     ? '<div class="eq-arbol-hijos" style="margin-left:18px; padding-left:12px; border-left:1px solid var(--bor)">' + p.reportes.map(function(c){ return eqCardNodo(c, nivel+1); }).join('') + '</div>'
     : '';
@@ -24084,7 +24102,7 @@ function eqCardNodo(p, nivel) {
     '<div onclick="eqEditarPersona(' + p.id + ')" style="display:flex; align-items:center; gap:10px; padding:8px 12px; border:1px solid var(--bor); border-radius:8px; background:#fff; cursor:pointer" onmouseover="this.style.background=\'var(--bg)\'" onmouseout="this.style.background=\'#fff\'">' +
       '<div style="width:32px; height:32px; border-radius:50%; background:' + col.bg + '; color:' + col.fg + '; display:flex; align-items:center; justify-content:center; font-weight:600; font-size:12px; flex-shrink:0">' + eqIniciales(p) + '</div>' +
       '<div style="flex:1; min-width:0">' +
-        '<div style="font-weight:600; font-size:13px">' + eqEsc(nombreFull) + dirBadge + (tieneReportes ? '<span style="color:var(--mut); font-weight:400; margin-left:6px; font-size:11px">· ' + p.reportes.length + ' reportes</span>' : '') + '</div>' +
+        '<div style="font-weight:600; font-size:13px">' + eqEsc(nombreFull) + dirBadge + catPill + (tieneReportes ? '<span style="color:var(--mut); font-weight:400; margin-left:6px; font-size:11px">· ' + p.reportes.length + ' reportes</span>' : '') + '</div>' +
         (cargoLine ? '<div style="font-size:11px; color:var(--mut); margin-top:2px">' + cargoLine + '</div>' : '') +
       '</div>' +
       (tieneReportes ? '<span style="color:var(--mut); cursor:pointer" onclick="event.stopPropagation(); eqArbolToggleNode(this)">▼</span>' : '') +
@@ -24095,6 +24113,22 @@ function eqCardNodo(p, nivel) {
 
 // ── VISTA ORGCHART (SVG horizontal) ──
 function eqRenderOrgchart(cont, raices) {
+  // Si hay personas con en_directorio entre las raíces, las agrupo bajo una
+  // caja virtual "DIRECTORIO" que aparece arriba a la izquierda
+  var dirReportes = raices.filter(function(p){ return p.en_directorio; });
+  var nonDir      = raices.filter(function(p){ return !p.en_directorio; });
+  if (dirReportes.length > 0) {
+    var nodoDirectorio = {
+      id: '__directorio__',
+      nombre: 'DIRECTORIO',
+      apellido: '',
+      cargo: '',
+      _es_directorio: true,
+      reportes: dirReportes
+    };
+    raices = [nodoDirectorio].concat(nonDir);
+  }
+
   // Layout simple horizontal: cada nodo ocupa 160px ancho, separación 20px
   var BOX_W = 160, BOX_H = 56, GAP_H = 16, GAP_V = 40;
   var nextX = 0;
@@ -24112,7 +24146,6 @@ function eqRenderOrgchart(cont, raices) {
     node._y = depth * (BOX_H + GAP_V);
   }
 
-  // Layout cada raíz como árbol independiente, apiladas con GAP_H
   raices.forEach(function(r){ layout(r, 0); nextX += GAP_H * 2; });
 
   // Calcular dimensiones totales
@@ -24130,10 +24163,13 @@ function eqRenderOrgchart(cont, raices) {
   // Render
   var svg = '<svg width="' + W + '" height="' + H + '" xmlns="http://www.w3.org/2000/svg" style="display:block">';
   function renderNode(n) {
-    var col = eqColorSociedad(n);
-    var bordeColor = n.en_directorio ? '#3C3489' : '#888';
-    var nombreFull = (n.apellido || '') + (n.apellido ? ', ' : '') + (n.nombre || '');
-    var cargoTxt = n.cargo ? n.cargo : ((n.sociedades_str || '').split(',')[0] || '');
+    var esVirtual = !!n._es_directorio;
+    var col = esVirtual ? { bg:'#3C3489', fg:'#FFFFFF' } : eqColorPersona(n);
+    var bordeColor = esVirtual ? '#3C3489' : (n.en_directorio ? '#3C3489' : '#888');
+    var bordeW = (esVirtual || n.en_directorio) ? 1.5 : 1;
+    var nombreFull = esVirtual ? n.nombre : ((n.apellido || '') + (n.apellido ? ', ' : '') + (n.nombre || ''));
+    var linea2 = esVirtual ? '' : (n.cargo || '');
+    var clickAttr = esVirtual ? '' : ' style="cursor:pointer" onclick="eqEditarPersona(' + n.id + ')"';
     var s = '';
     // Líneas a los hijos
     (n.reportes || []).forEach(function(c) {
@@ -24143,17 +24179,26 @@ function eqRenderOrgchart(cont, raices) {
       s += '<path d="M ' + x1 + ' ' + y1 + ' V ' + ym + ' H ' + x2 + ' V ' + y2 + '" fill="none" stroke="#bbb" stroke-width="1"/>';
     });
     // Caja
-    s += '<g style="cursor:pointer" onclick="eqEditarPersona(' + n.id + ')">' +
-      '<rect x="' + n._x + '" y="' + n._y + '" width="' + BOX_W + '" height="' + BOX_H + '" rx="6" fill="' + col.bg + '" stroke="' + bordeColor + '" stroke-width="1"/>' +
-      '<text x="' + (n._x + BOX_W / 2) + '" y="' + (n._y + 22) + '" text-anchor="middle" font-size="12" font-weight="600" fill="' + col.fg + '">' + eqEsc(nombreFull) + '</text>' +
-      (cargoTxt ? '<text x="' + (n._x + BOX_W / 2) + '" y="' + (n._y + 40) + '" text-anchor="middle" font-size="10" fill="' + col.fg + '" opacity="0.8">' + eqEsc(cargoTxt) + '</text>' : '') +
+    s += '<g' + clickAttr + '>' +
+      '<rect x="' + n._x + '" y="' + n._y + '" width="' + BOX_W + '" height="' + BOX_H + '" rx="6" fill="' + col.bg + '" stroke="' + bordeColor + '" stroke-width="' + bordeW + '"/>' +
+      '<text x="' + (n._x + BOX_W / 2) + '" y="' + (n._y + (linea2 ? 22 : 33)) + '" text-anchor="middle" font-size="12" font-weight="600" fill="' + col.fg + '">' + eqEsc(nombreFull) + '</text>' +
+      (linea2 ? '<text x="' + (n._x + BOX_W / 2) + '" y="' + (n._y + 40) + '" text-anchor="middle" font-size="10" fill="' + col.fg + '" opacity="0.85">' + eqEsc(linea2) + '</text>' : '') +
       '</g>';
     (n.reportes || []).forEach(function(c){ s += renderNode(c); });
     return s;
   }
   raices.forEach(function(r){ svg += renderNode(r); });
   svg += '</svg>';
-  cont.innerHTML = svg;
+
+  // Leyenda de colores debajo del SVG
+  var leyenda = '<div style="margin-top:14px; padding-top:10px; border-top:1px dashed var(--bor); display:flex; gap:14px; flex-wrap:wrap; font-size:11px">';
+  ['direccion','comercial','operativo','administrativo','profesional'].forEach(function(k) {
+    var c = EQ_COLORES[k];
+    leyenda += '<span style="display:inline-flex; align-items:center; gap:6px"><span style="display:inline-block; width:12px; height:12px; border-radius:3px; background:' + c.bg + '; border:1px solid ' + c.fg + '"></span><span style="color:var(--mut)">' + c.label + '</span></span>';
+  });
+  leyenda += '</div>';
+
+  cont.innerHTML = svg + leyenda;
 }
 
 // ─── UBICACIONES ─────────────────────────────────────────────────────
