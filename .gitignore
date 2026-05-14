@@ -8,3 +8,6 @@ Thumbs.db
 node_modules/
 *.log
 data/
+ 
+# Excepciones para archivos servidos al usuario 
+!data/Manual_Modulo_IFCO.pdf 
