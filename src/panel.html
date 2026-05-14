@@ -3675,7 +3675,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       <button class="btn bb" onclick="ifcoAbrirNuevoRemito()">+ Despacho a súper</button>
       <button class="btn bb" onclick="ifcoAbrirCargarSellado()" style="background:#047857">🔏 Cargar sellado</button>
       <button class="btn bo" onclick="ifcoAbrirFAQ()" title="Preguntas frecuentes" style="font-size:12px">❓ FAQ</button>
-      <button class="btn bo" onclick="ifcoDescargarManual()" title="Descargar manual del módulo" style="font-size:12px">📚 Manual</button>
+      <button class="btn bo" onclick="ifcoDescargarManual()" title="Descargar manual del módulo (PDF)" style="font-size:12px">📚 Manual</button>
     </div>
   </div>
 
@@ -17161,7 +17161,7 @@ async function ifcoDescargarManual() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'Manual_Modulo_IFCO.docx';
+    a.download = 'Manual_Modulo_IFCO.pdf';
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
