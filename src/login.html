@@ -42,7 +42,7 @@ body{min-height:100vh;background:#0f2540;display:flex;align-items:center;justify
 </style>
 </head>
 <body>
-<div class="card">
+<div class="card" id="card-login">
   <div class="logo-wrap">
     <img src="/static/logo.jpg" alt="La Niña Bonita" onerror="this.style.display='none';document.querySelector('.logo-name').style.display='block'">
     <div class="logo-name" style="display:none;font-size:22px;font-weight:900;font-style:italic;color:#b8002a">La Niña Bonita</div>
@@ -50,8 +50,8 @@ body{min-height:100vh;background:#0f2540;display:flex;align-items:center;justify
   </div>
 
   <div class="email-wrap">
-    <label>Email</label>
-    <input type="email" id="email" placeholder="tu@email.com" autocomplete="email" inputmode="email"
+    <label>Email o usuario</label>
+    <input type="text" id="email" placeholder="tu@email.com o tu usuario" autocomplete="username" inputmode="email"
       onkeydown="if(event.key==='Enter') document.getElementById('pin-1').focus()">
   </div>
 
@@ -82,8 +82,42 @@ body{min-height:100vh;background:#0f2540;display:flex;align-items:center;justify
   <div class="error" id="error"></div>
 </div>
 
+<!-- FASE 2.C: pantalla para setear contraseña en primer login -->
+<div class="card" id="card-setear" style="display:none">
+  <div class="logo-wrap">
+    <img src="/static/logo.jpg" alt="La Niña Bonita" onerror="this.style.display='none'">
+    <div class="sub">¡Hola!</div>
+  </div>
+
+  <div style="font-size:14px;color:#1a2332;line-height:1.5;margin-bottom:20px;text-align:center">
+    Bienvenido, <strong id="welcome-nombre">—</strong>.<br>
+    Tu nuevo usuario es <strong id="welcome-username" style="color:#1a3a5c">—</strong>.<br>
+    <span style="font-size:12px;color:#5a6a7e">Por seguridad, elegí una contraseña para tu cuenta.</span>
+  </div>
+
+  <div class="email-wrap">
+    <label>Nueva contraseña</label>
+    <input type="password" id="new-pwd-1" placeholder="Mínimo 8 caracteres, letra y número" autocomplete="new-password">
+  </div>
+
+  <div class="email-wrap">
+    <label>Repetir contraseña</label>
+    <input type="password" id="new-pwd-2" placeholder="Misma contraseña otra vez" autocomplete="new-password"
+      onkeydown="if(event.key==='Enter') setearPassword()">
+  </div>
+
+  <button class="btn-login show" id="btn-setear" onclick="setearPassword()">Guardar y entrar →</button>
+  <div class="error" id="error-setear"></div>
+
+  <div style="font-size:11px;color:#8a9bb0;margin-top:14px;text-align:center;line-height:1.5">
+    Esta contraseña reemplazará al PIN en el futuro.<br>
+    Anotala en un lugar seguro.
+  </div>
+</div>
+
 <script>
 var pin = '';
+var pendingUserId = null;  // Fase 2.C: user_id pendiente de setear password
 // Leer ?next= de la URL para redirigir después del login (ej: /login?next=/scout)
 var nextParam = new URLSearchParams(window.location.search).get('next') || '';
 
@@ -117,7 +151,7 @@ function doLogin() {
   var email = document.getElementById('email').value.trim();
   var errEl = document.getElementById('error');
   errEl.textContent = '';
-  if (!email) { errEl.textContent = 'Ingresá tu email'; return; }
+  if (!email) { errEl.textContent = 'Ingresá tu email o usuario'; return; }
   if (pin.length !== 4) { errEl.textContent = 'Ingresá tu PIN de 4 dígitos'; return; }
 
   var btn = document.getElementById('btn-login');
@@ -130,6 +164,16 @@ function doLogin() {
   })
   .then(function(r){ return r.json(); })
   .then(function(res) {
+    if (res.ok && res.requiere_setear_password) {
+      // FASE 2.C: usuario nunca seteó contraseña, mostrar pantalla intermedia
+      pendingUserId = res.user_id;
+      document.getElementById('welcome-nombre').textContent = res.nombre || 'usuario';
+      document.getElementById('welcome-username').textContent = res.username || '—';
+      document.getElementById('card-login').style.display = 'none';
+      document.getElementById('card-setear').style.display = 'block';
+      setTimeout(function(){ document.getElementById('new-pwd-1').focus(); }, 100);
+      return;
+    }
     if (res.ok) {
       window.location.href = res.redirect_to || '/panel';
     } else {
@@ -142,6 +186,42 @@ function doLogin() {
   .catch(function() {
     errEl.textContent = 'Error de conexión';
     btn.textContent = 'Ingresar →'; btn.disabled = false;
+  });
+}
+
+// FASE 2.C: setear contraseña en primer login
+function setearPassword() {
+  var p1 = document.getElementById('new-pwd-1').value;
+  var p2 = document.getElementById('new-pwd-2').value;
+  var err = document.getElementById('error-setear');
+  err.textContent = '';
+
+  // Validaciones del cliente (el backend valida lo real)
+  if (p1.length < 8) { err.textContent = 'Mínimo 8 caracteres'; return; }
+  if (p1 !== p2) { err.textContent = 'Las contraseñas no coinciden'; return; }
+  if (!/[a-zA-Z]/.test(p1)) { err.textContent = 'Debe contener al menos una letra'; return; }
+  if (!/[0-9]/.test(p1)) { err.textContent = 'Debe contener al menos un número'; return; }
+
+  var btn = document.getElementById('btn-setear');
+  btn.textContent = 'Guardando...'; btn.disabled = true;
+
+  fetch('/api/auth/setear-password', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ user_id: pendingUserId, pin: pin, password: p1, next: nextParam })
+  })
+  .then(function(r){ return r.json(); })
+  .then(function(res) {
+    if (res.ok) {
+      window.location.href = res.redirect_to || '/panel';
+    } else {
+      err.textContent = res.error || 'Error al guardar';
+      btn.textContent = 'Guardar y entrar →'; btn.disabled = false;
+    }
+  })
+  .catch(function() {
+    err.textContent = 'Error de conexión';
+    btn.textContent = 'Guardar y entrar →'; btn.disabled = false;
   });
 }
 
