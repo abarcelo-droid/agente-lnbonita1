@@ -182,7 +182,12 @@ router.get('/personas', (req, res) => {
         (SELECT COUNT(*) FROM personas_areas WHERE persona_id = p.id) AS areas_count,
         (SELECT id FROM usuarios WHERE persona_id = p.id LIMIT 1) AS usuario_id,
         m.nombre   AS reporta_a_nombre,
-        m.apellido AS reporta_a_apellido
+        m.apellido AS reporta_a_apellido,
+        (SELECT GROUP_CONCAT(DISTINCT s.nombre)
+         FROM personas_areas pa
+         JOIN areas a     ON a.id = pa.area_id
+         JOIN sociedades s ON s.id = a.sociedad_id
+         WHERE pa.persona_id = p.id AND a.activa = 1) AS sociedades_str
       FROM personas p
       LEFT JOIN ubicaciones u ON u.id = p.ubicacion_id
       LEFT JOIN personas m    ON m.id = p.reporta_a_id
@@ -241,17 +246,19 @@ router.get('/personas/:id', (req, res) => {
 });
 
 router.post('/personas', requireAdmin, (req, res) => {
-  const { dni, nombre, apellido, mail, telefono, ubicacion_id, notas, areas, reporta_a_id, cargo } = req.body || {};
+  const { dni, nombre, apellido, mail, telefono, ubicacion_id, notas, areas, reporta_a_id, cargo, reporta_a_directorio } = req.body || {};
   if (!nombre) return res.status(400).json({ ok: false, error: 'nombre requerido' });
+  // Mutuamente excluyente: o reporta a una persona, o al Directorio
+  const repDir = reporta_a_directorio ? 1 : 0;
+  const repId  = repDir ? null : (reporta_a_id ? parseInt(reporta_a_id) : null);
   try {
     const r = db().prepare(`
-      INSERT INTO personas (dni, nombre, apellido, mail, telefono, ubicacion_id, notas, reporta_a_id, cargo)
-      VALUES (?,?,?,?,?,?,?,?,?)
+      INSERT INTO personas (dni, nombre, apellido, mail, telefono, ubicacion_id, notas, reporta_a_id, cargo, reporta_a_directorio)
+      VALUES (?,?,?,?,?,?,?,?,?,?)
     `).run(
       dni || null, nombre.trim(), apellido || null, mail || null, telefono || null,
       ubicacion_id ? parseInt(ubicacion_id) : null, notas || null,
-      reporta_a_id ? parseInt(reporta_a_id) : null,
-      cargo || null
+      repId, cargo || null, repDir
     );
     const personaId = r.lastInsertRowid;
     if (Array.isArray(areas) && areas.length > 0) {
@@ -266,14 +273,21 @@ router.post('/personas', requireAdmin, (req, res) => {
 
 router.patch('/personas/:id', requireAdmin, (req, res) => {
   const id = parseInt(req.params.id);
-  const { dni, nombre, apellido, mail, telefono, ubicacion_id, notas, activo, reporta_a_id, cargo } = req.body || {};
+  const { dni, nombre, apellido, mail, telefono, ubicacion_id, notas, activo, reporta_a_id, cargo, reporta_a_directorio } = req.body || {};
   try {
     const cur = db().prepare("SELECT * FROM personas WHERE id = ?").get(id);
     if (!cur) return res.status(404).json({ ok: false, error: 'No existe' });
 
-    // Validación: reporta_a_id no puede ser uno mismo ni crear ciclo
+    // Determinar nuevos valores de reporte. Mutuamente excluyentes:
+    // si reporta_a_directorio = 1 → reporta_a_id se fuerza a null.
     let nuevoReportaA = cur.reporta_a_id;
-    if (reporta_a_id !== undefined) {
+    let nuevoReportaDir = (reporta_a_directorio !== undefined)
+      ? (reporta_a_directorio ? 1 : 0)
+      : (cur.reporta_a_directorio || 0);
+
+    if (nuevoReportaDir === 1) {
+      nuevoReportaA = null;
+    } else if (reporta_a_id !== undefined) {
       const r = reporta_a_id ? parseInt(reporta_a_id) : null;
       if (r === id) return res.status(400).json({ ok: false, error: 'Una persona no puede reportarse a sí misma' });
       if (r) {
@@ -292,7 +306,7 @@ router.patch('/personas/:id', requireAdmin, (req, res) => {
 
     db().prepare(`
       UPDATE personas SET dni = ?, nombre = ?, apellido = ?, mail = ?, telefono = ?,
-        ubicacion_id = ?, notas = ?, activo = ?, reporta_a_id = ?, cargo = ?
+        ubicacion_id = ?, notas = ?, activo = ?, reporta_a_id = ?, cargo = ?, reporta_a_directorio = ?
       WHERE id = ?
     `).run(
       dni ?? cur.dni,
@@ -305,6 +319,7 @@ router.patch('/personas/:id', requireAdmin, (req, res) => {
       activo ?? cur.activo,
       nuevoReportaA,
       cargo ?? cur.cargo,
+      nuevoReportaDir,
       id
     );
     res.json({ ok: true });
@@ -368,7 +383,7 @@ router.get('/organigrama', (req, res) => {
 router.get('/jerarquia', (req, res) => {
   try {
     const personas = db().prepare(`
-      SELECT p.id, p.nombre, p.apellido, p.cargo, p.reporta_a_id,
+      SELECT p.id, p.nombre, p.apellido, p.cargo, p.reporta_a_id, p.reporta_a_directorio,
         (SELECT GROUP_CONCAT(s.nombre || ' / ' || a.nombre, ' · ')
          FROM personas_areas pa
          JOIN areas a     ON a.id = pa.area_id
