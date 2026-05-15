@@ -2092,7 +2092,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
 
   <!-- Sub-tabs -->
   <div style="display:flex; border-bottom:1px solid var(--bor); margin-bottom:14px">
-    <div class="eq-tab on" data-eq="organigrama" onclick="eqSubtab('organigrama')">🏢 Organigrama</div>
+    <div class="eq-tab on" data-eq="organigrama" onclick="eqSubtab('organigrama')">🏢 Empresas</div>
     <div class="eq-tab" data-eq="personas" onclick="eqSubtab('personas')">👥 Personas</div>
     <div class="eq-tab" data-eq="arbol" onclick="eqSubtab('arbol')">🌳 Árbol</div>
     <div class="eq-tab" data-eq="ubicaciones" onclick="eqSubtab('ubicaciones')">📍 Ubicaciones</div>
@@ -2121,10 +2121,10 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     <div class="tw">
       <table>
         <thead><tr>
-          <th>Apellido, Nombre</th><th>DNI</th><th>Mail</th><th>Teléfono</th>
-          <th>Áreas</th><th>Ubicación</th><th>Login</th><th></th>
+          <th>Apellido, Nombre</th><th>Rol</th><th>Reporte</th>
+          <th>Empresas</th><th>Login</th><th></th>
         </tr></thead>
-        <tbody id="eq-personas-tbody"><tr><td colspan="8" class="emp">Cargando...</td></tr></tbody>
+        <tbody id="eq-personas-tbody"><tr><td colspan="6" class="emp">Cargando...</td></tr></tbody>
       </table>
     </div>
   </div>
@@ -2134,8 +2134,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; flex-wrap:wrap; gap:8px">
       <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap">
         <div style="display:inline-flex; background:#fff; border:1px solid var(--bor); border-radius:6px; padding:2px; gap:2px">
-          <button class="eq-vista-btn on" data-vista="lista" onclick="eqCambiarVista('lista')" style="padding:6px 12px; border:0; background:var(--burg); color:#fff; border-radius:4px; font-size:12px; font-weight:600; cursor:pointer">📋 Lista</button>
-          <button class="eq-vista-btn" data-vista="cards" onclick="eqCambiarVista('cards')" style="padding:6px 12px; border:0; background:transparent; color:var(--mut); border-radius:4px; font-size:12px; font-weight:600; cursor:pointer">🪪 Cards</button>
+          <button class="eq-vista-btn on" data-vista="cards" onclick="eqCambiarVista('cards')" style="padding:6px 12px; border:0; background:var(--burg); color:#fff; border-radius:4px; font-size:12px; font-weight:600; cursor:pointer">🪪 Cards</button>
           <button class="eq-vista-btn" data-vista="orgchart" onclick="eqCambiarVista('orgchart')" style="padding:6px 12px; border:0; background:transparent; color:var(--mut); border-radius:4px; font-size:12px; font-weight:600; cursor:pointer">🏢 Orgchart</button>
         </div>
         <select id="eq-arbol-filtro-soc" onchange="eqRenderArbolActual()" style="min-width:180px">
@@ -23780,21 +23779,47 @@ function eqCargarPersonas() {
   });
 }
 
+// Mapa de colores por sociedad (para pills de la columna Empresas)
+var EQ_COLORES_SOC = {
+  'Familia':                { bg:'#EEEDFE', fg:'#3C3489' },
+  'San Gerónimo SA':        { bg:'#E6F1FB', fg:'#0C447C' },
+  'Puente Cordón SA':       { bg:'#E1F5EE', fg:'#085041' },
+  'Barceló Transporte SRL': { bg:'#FAEEDA', fg:'#633806' }
+};
+function eqPillSociedad(nombre) {
+  var c = EQ_COLORES_SOC[nombre] || { bg:'#F1EFE8', fg:'#5F5E5A' };
+  // Abreviar nombres largos para que entren en la pill
+  var short = nombre.replace(' SA','').replace(' SRL','');
+  return '<span style="display:inline-block; background:' + c.bg + '; color:' + c.fg + '; font-size:10px; font-weight:600; padding:2px 8px; border-radius:10px; margin-right:4px; margin-bottom:2px">' + eqEsc(short) + '</span>';
+}
+
 function eqRenderPersonas() {
   var tb = document.getElementById('eq-personas-tbody');
   if (EQ.personas.length === 0) {
-    tb.innerHTML = '<tr><td colspan="8" class="emp">Sin personas cargadas</td></tr>';
+    tb.innerHTML = '<tr><td colspan="6" class="emp">Sin personas cargadas</td></tr>';
     return;
   }
   tb.innerHTML = EQ.personas.map(function(p) {
     var nombreFull = (p.apellido || '') + (p.apellido ? ', ' : '') + (p.nombre || '');
+    // Reporte: prioriza Directorio (entidad) > manager persona > guion
+    var reporte;
+    if (p.reporta_a_directorio) {
+      reporte = '<span style="color:#3C3489; font-style:italic; font-weight:500">🏛️ Directorio</span>';
+    } else if (p.reporta_a_nombre || p.reporta_a_apellido) {
+      var rn = (p.reporta_a_apellido || '') + (p.reporta_a_apellido ? ', ' : '') + (p.reporta_a_nombre || '');
+      reporte = eqEsc(rn);
+    } else {
+      reporte = '<span style="color:var(--mut)">—</span>';
+    }
+    // Empresas: pills de color por cada sociedad
+    var empresas = p.sociedades_str
+      ? p.sociedades_str.split(',').map(eqPillSociedad).join('')
+      : '<span style="color:var(--mut)">—</span>';
     return '<tr>' +
       '<td><a href="#" onclick="eqEditarPersona(' + p.id + ');return false" style="color:var(--burg); text-decoration:none; font-weight:600">' + eqEsc(nombreFull) + '</a></td>' +
-      '<td>' + eqEsc(p.dni || '—') + '</td>' +
-      '<td>' + eqEsc(p.mail || '—') + '</td>' +
-      '<td>' + eqEsc(p.telefono || '—') + '</td>' +
-      '<td>' + p.areas_count + '</td>' +
-      '<td>' + eqEsc(p.ubicacion_nombre || '—') + '</td>' +
+      '<td>' + eqEsc(p.cargo || '—') + '</td>' +
+      '<td>' + reporte + '</td>' +
+      '<td>' + empresas + '</td>' +
       '<td>' + (p.usuario_id ? '✓' : '—') + '</td>' +
       '<td>' +
         '<button class="btn bo bs" onclick="eqEditarPersona(' + p.id + ')">Editar</button> ' +
@@ -23839,17 +23864,20 @@ function eqAbrirPersonaModal(persona, asignaciones) {
     setUbicSelect();
   }
 
-  // Popular select "Reporta a" — todas las personas activas excepto vos mismo
+  // Popular select "Reporta a" — incluye opción "Directorio" arriba + todas las personas
   var rep = document.getElementById('eq-per-reporta');
   var valRep = persona ? persona.reporta_a_id : null;
+  var reportaDir = persona && persona.reporta_a_directorio ? true : false;
   var miId = persona ? persona.id : null;
   eqApi('/personas').then(function(r) {
     if (!r.ok) return;
     var opts = '<option value="">— sin manager —</option>';
+    opts += '<option value="__directorio__"' + (reportaDir ? ' selected' : '') + '>🏛️ Directorio (entidad)</option>';
+    opts += '<option disabled>──────────</option>';
     r.personas.forEach(function(p) {
       if (p.id === miId) return; // no se reporta a sí mismo
       var nom = (p.apellido || '') + (p.apellido ? ', ' : '') + (p.nombre || '');
-      opts += '<option value="'+p.id+'"'+(valRep==p.id?' selected':'')+'>'+eqEsc(nom)+'</option>';
+      opts += '<option value="'+p.id+'"'+(!reportaDir && valRep==p.id?' selected':'')+'>'+eqEsc(nom)+'</option>';
     });
     rep.innerHTML = opts;
   });
@@ -23920,9 +23948,17 @@ function eqGuardarPersona() {
     mail: document.getElementById('eq-per-mail').value.trim() || null,
     telefono: document.getElementById('eq-per-tel').value.trim() || null,
     ubicacion_id: document.getElementById('eq-per-ubic').value || null,
-    reporta_a_id: document.getElementById('eq-per-reporta').value || null,
     notas: document.getElementById('eq-per-notas').value.trim() || null,
   };
+  // Reporta a: si eligió Directorio, mandamos flag; si es una persona, va al id
+  var repVal = document.getElementById('eq-per-reporta').value;
+  if (repVal === '__directorio__') {
+    body.reporta_a_directorio = 1;
+    body.reporta_a_id = null;
+  } else {
+    body.reporta_a_directorio = 0;
+    body.reporta_a_id = repVal || null;
+  }
   if (!body.nombre) { toast('Nombre requerido', 'er'); return; }
   var url = id ? '/personas/' + id : '/personas';
   eqApi(url, { method: id ? 'PATCH' : 'POST', body: body }).then(function(r) {
@@ -23943,7 +23979,7 @@ function eqBorrarPersona(id) {
 }
 
 // ─── ÁRBOL JERÁRQUICO (3 vistas: lista / cards / orgchart) ───────────
-var EQ_ARBOL = { vista: 'lista', personas: [] };
+var EQ_ARBOL = { vista: 'cards', personas: [] };
 
 function eqCargarArbol() {
   eqApi('/jerarquia').then(function(r) {
@@ -23996,7 +24032,9 @@ function eqArmarArbolFiltrado(filtroSoc) {
   });
   // Ordenar raíces: Directorio arriba, luego alfabético
   raices.sort(function(a, b) {
-    if ((b.en_directorio || 0) !== (a.en_directorio || 0)) return (b.en_directorio || 0) - (a.en_directorio || 0);
+    var aDir = (a.en_directorio || a.reporta_a_directorio) ? 1 : 0;
+    var bDir = (b.en_directorio || b.reporta_a_directorio) ? 1 : 0;
+    if (aDir !== bDir) return bDir - aDir;
     return (a.apellido || '').localeCompare(b.apellido || '');
   });
   return raices;
@@ -24012,33 +24050,8 @@ function eqRenderArbolActual() {
       'agregá personas en la pestaña Personas.</div>';
     return;
   }
-  if (EQ_ARBOL.vista === 'lista')    cont.innerHTML = raices.map(function(p){ return eqArbolNodo(p, 0); }).join('');
   if (EQ_ARBOL.vista === 'cards')    cont.innerHTML = raices.map(function(p){ return eqCardNodo(p, 0); }).join('');
   if (EQ_ARBOL.vista === 'orgchart') eqRenderOrgchart(cont, raices);
-}
-
-// ── VISTA LISTA (compacta) ──
-function eqArbolNodo(p, nivel) {
-  var nombreFull = (p.apellido || '') + (p.apellido ? ', ' : '') + (p.nombre || '');
-  var tieneReportes = p.reportes && p.reportes.length > 0;
-  var caret = tieneReportes
-    ? '<span style="cursor:pointer; display:inline-block; width:14px; user-select:none" onclick="eqArbolToggleNode(this)">▼</span>'
-    : '<span style="display:inline-block; width:14px; color:var(--mut)">·</span>';
-  var dirBadge = p.en_directorio ? '<span style="background:#EEEDFE; color:#3C3489; font-size:10px; font-weight:600; padding:1px 6px; border-radius:8px; margin-left:6px">DIRECTORIO</span>' : '';
-  var cargoStr = p.cargo ? '<span style="color:var(--burg); font-size:12px; margin-left:6px; font-weight:500">· ' + eqEsc(p.cargo) + '</span>' : '';
-  var areasStr = p.areas_str ? '<span style="color:var(--mut); font-size:11px; margin-left:8px">' + eqEsc(p.areas_str) + '</span>' : '';
-  var hijosCount = tieneReportes ? '<span style="color:var(--mut); font-size:11px; margin-left:6px">(' + p.reportes.length + ')</span>' : '';
-  var hijos = tieneReportes
-    ? '<div class="eq-arbol-hijos" style="margin-left:18px">' + p.reportes.map(function(c){ return eqArbolNodo(c, nivel+1); }).join('') + '</div>'
-    : '';
-  return '<div class="eq-arbol-nodo" style="padding:4px 0">' +
-    '<div style="display:flex; align-items:center; gap:4px; flex-wrap:wrap">' +
-      caret +
-      '<a href="#" onclick="eqEditarPersona(' + p.id + ');return false" style="color:var(--burg); text-decoration:none; font-weight:600">' + eqEsc(nombreFull) + '</a>' +
-      dirBadge + cargoStr + hijosCount + areasStr +
-    '</div>' +
-    hijos +
-  '</div>';
 }
 
 function eqArbolToggleNode(caretEl) {
@@ -24091,6 +24104,7 @@ function eqCardNodo(p, nivel) {
   var cat = eqCategoriaPersona(p);
   var catLabel = EQ_COLORES[cat].label;
   var dirBadge = p.en_directorio ? '<span style="background:#EEEDFE; color:#3C3489; font-size:10px; font-weight:600; padding:1px 6px; border-radius:8px; margin-left:6px">DIRECTORIO</span>' : '';
+  var repDirBadge = (p.reporta_a_directorio && !p.en_directorio) ? '<span style="background:#F4F2FB; color:#3C3489; font-size:10px; font-weight:500; padding:1px 6px; border-radius:8px; margin-left:6px; font-style:italic">↑ Directorio</span>' : '';
   var catPill = (cat !== 'otro' && !p.en_directorio) ? '<span style="background:' + col.bg + '; color:' + col.fg + '; font-size:10px; font-weight:600; padding:1px 6px; border-radius:8px; margin-left:6px">' + catLabel + '</span>' : '';
   var tieneReportes = p.reportes && p.reportes.length > 0;
   var areasStr = p.areas_str ? ' · <span style="color:var(--mut)">' + eqEsc(p.areas_str) + '</span>' : '';
@@ -24102,7 +24116,7 @@ function eqCardNodo(p, nivel) {
     '<div onclick="eqEditarPersona(' + p.id + ')" style="display:flex; align-items:center; gap:10px; padding:8px 12px; border:1px solid var(--bor); border-radius:8px; background:#fff; cursor:pointer" onmouseover="this.style.background=\'var(--bg)\'" onmouseout="this.style.background=\'#fff\'">' +
       '<div style="width:32px; height:32px; border-radius:50%; background:' + col.bg + '; color:' + col.fg + '; display:flex; align-items:center; justify-content:center; font-weight:600; font-size:12px; flex-shrink:0">' + eqIniciales(p) + '</div>' +
       '<div style="flex:1; min-width:0">' +
-        '<div style="font-weight:600; font-size:13px">' + eqEsc(nombreFull) + dirBadge + catPill + (tieneReportes ? '<span style="color:var(--mut); font-weight:400; margin-left:6px; font-size:11px">· ' + p.reportes.length + ' reportes</span>' : '') + '</div>' +
+        '<div style="font-weight:600; font-size:13px">' + eqEsc(nombreFull) + dirBadge + repDirBadge + catPill + (tieneReportes ? '<span style="color:var(--mut); font-weight:400; margin-left:6px; font-size:11px">· ' + p.reportes.length + ' reportes</span>' : '') + '</div>' +
         (cargoLine ? '<div style="font-size:11px; color:var(--mut); margin-top:2px">' + cargoLine + '</div>' : '') +
       '</div>' +
       (tieneReportes ? '<span style="color:var(--mut); cursor:pointer" onclick="event.stopPropagation(); eqArbolToggleNode(this)">▼</span>' : '') +
@@ -24113,10 +24127,12 @@ function eqCardNodo(p, nivel) {
 
 // ── VISTA ORGCHART (SVG horizontal) ──
 function eqRenderOrgchart(cont, raices) {
-  // Si hay personas con en_directorio entre las raíces, las agrupo bajo una
-  // caja virtual "DIRECTORIO" que aparece arriba a la izquierda
-  var dirReportes = raices.filter(function(p){ return p.en_directorio; });
-  var nonDir      = raices.filter(function(p){ return !p.en_directorio; });
+  // Si hay personas con en_directorio o reporta_a_directorio, las agrupo bajo
+  // una caja virtual "DIRECTORIO" arriba a la izquierda. La diferencia es solo conceptual:
+  // - en_directorio = persona asignada al área Familia/Directorio (es un director)
+  // - reporta_a_directorio = persona que reporta al Directorio como entidad (subalterno del board)
+  var dirReportes = raices.filter(function(p){ return p.en_directorio || p.reporta_a_directorio; });
+  var nonDir      = raices.filter(function(p){ return !p.en_directorio && !p.reporta_a_directorio; });
   if (dirReportes.length > 0) {
     var nodoDirectorio = {
       id: '__directorio__',

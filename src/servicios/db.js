@@ -719,6 +719,35 @@ db.exec(`
   }
 })();
 
+// ─── FASE 2.A: auth username + password (mayo 2026) ────────────────────────
+// Agrega 6 columnas a usuarios, todas nullable. Sin impacto en login actual:
+// el sistema sigue usando email + PIN hasta que en fase 2.D hagamos el corte.
+// Idempotente: si ya están las columnas, no hace nada.
+(function migrarAuthV2() {
+  try {
+    const cols = db.prepare("PRAGMA table_info(usuarios)").all().map(c => c.name);
+    const toAdd = [
+      ['username',              'TEXT'],
+      ['password_hash',         'TEXT'],
+      ['password_reset_token',  'TEXT'],
+      ['password_reset_expires','TEXT'],
+      ['debe_cambiar_password', 'INTEGER DEFAULT 0'],
+      ['migrado_a_v2',          'INTEGER DEFAULT 0']
+    ];
+    let added = 0;
+    for (const [name, type] of toAdd) {
+      if (!cols.includes(name)) {
+        db.exec(`ALTER TABLE usuarios ADD COLUMN ${name} ${type}`);
+        added++;
+      }
+    }
+    // Índice único para username (NULLs permitidos múltiples veces).
+    // SQLite no permite UNIQUE en ALTER, hay que crearlo aparte.
+    db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_usuarios_username ON usuarios(username) WHERE username IS NOT NULL`);
+    if (added > 0) console.log(`[DB] Fase 2.A: ${added} columnas auth agregadas en usuarios`);
+  } catch(e) { console.error('[DB] Error migración Fase 2.A:', e.message); }
+})();
+
 // Usuario admin por defecto (PIN: 0000) — solo si no existe ninguno
 (function() {
   try {

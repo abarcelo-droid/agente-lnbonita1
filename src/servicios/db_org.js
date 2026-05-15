@@ -80,6 +80,10 @@ try { db.exec("CREATE INDEX IF NOT EXISTS idx_personas_reporta_a ON personas(rep
 // Fase 1.b: cargo de la persona (texto libre, ej. "Gerente Comercial", "CEO")
 try { db.exec("ALTER TABLE personas ADD COLUMN cargo TEXT"); } catch(_) {}
 
+// Fase 1.c: reportar al Directorio como entidad (sin un manager persona específico)
+// Mutuamente excluyente con reporta_a_id: o reportás a una persona, o al Directorio
+try { db.exec("ALTER TABLE personas ADD COLUMN reporta_a_directorio INTEGER DEFAULT 0"); } catch(_) {}
+
 // Fase 1.b: rename Estructura → Familia + soft delete del área Family Office
 // (idempotente: solo afecta si todavía se llaman así)
 try {
