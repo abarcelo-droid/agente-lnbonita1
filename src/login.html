@@ -92,7 +92,12 @@ body{min-height:100vh;background:#0f2540;display:flex;align-items:center;justify
   <div style="font-size:14px;color:#1a2332;line-height:1.5;margin-bottom:20px;text-align:center">
     Bienvenido, <strong id="welcome-nombre">—</strong>.<br>
     Tu nuevo usuario es <strong id="welcome-username" style="color:#1a3a5c">—</strong>.<br>
-    <span style="font-size:12px;color:#5a6a7e">Por seguridad, elegí una contraseña para tu cuenta.</span>
+    <span style="font-size:12px;color:#5a6a7e">Por seguridad, confirmá tu PIN y elegí una contraseña.</span>
+  </div>
+
+  <div class="email-wrap">
+    <label>Confirmá tu PIN actual</label>
+    <input type="password" id="confirm-pin" placeholder="4 dígitos" maxlength="4" inputmode="numeric" autocomplete="off" pattern="[0-9]*">
   </div>
 
   <div class="email-wrap">
@@ -171,7 +176,7 @@ function doLogin() {
       document.getElementById('welcome-username').textContent = res.username || '—';
       document.getElementById('card-login').style.display = 'none';
       document.getElementById('card-setear').style.display = 'block';
-      setTimeout(function(){ document.getElementById('new-pwd-1').focus(); }, 100);
+      setTimeout(function(){ document.getElementById('confirm-pin').focus(); }, 100);
       return;
     }
     if (res.ok) {
@@ -191,12 +196,14 @@ function doLogin() {
 
 // FASE 2.C: setear contraseña en primer login
 function setearPassword() {
+  var confirmPin = document.getElementById('confirm-pin').value.trim();
   var p1 = document.getElementById('new-pwd-1').value;
   var p2 = document.getElementById('new-pwd-2').value;
   var err = document.getElementById('error-setear');
   err.textContent = '';
 
   // Validaciones del cliente (el backend valida lo real)
+  if (!/^\d{4}$/.test(confirmPin)) { err.textContent = 'Confirmá tu PIN (4 dígitos)'; return; }
   if (p1.length < 8) { err.textContent = 'Mínimo 8 caracteres'; return; }
   if (p1 !== p2) { err.textContent = 'Las contraseñas no coinciden'; return; }
   if (!/[a-zA-Z]/.test(p1)) { err.textContent = 'Debe contener al menos una letra'; return; }
@@ -208,7 +215,7 @@ function setearPassword() {
   fetch('/api/auth/setear-password', {
     method: 'POST',
     headers: {'Content-Type':'application/json'},
-    body: JSON.stringify({ user_id: pendingUserId, pin: pin, password: p1, next: nextParam })
+    body: JSON.stringify({ user_id: pendingUserId, pin: confirmPin, password: p1, next: nextParam })
   })
   .then(function(r){ return r.json(); })
   .then(function(res) {
@@ -227,7 +234,12 @@ function setearPassword() {
 
 // También permitir teclado físico para el PIN
 document.addEventListener('keydown', function(e) {
-  if (document.activeElement === document.getElementById('email')) return;
+  // Si el usuario está tipeando en cualquier input (email, password, etc.) no interceptar
+  var ae = document.activeElement;
+  if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA')) return;
+  // Si la pantalla de setear password está visible, tampoco interceptar
+  var cardSetear = document.getElementById('card-setear');
+  if (cardSetear && cardSetear.style.display !== 'none') return;
   if (e.key >= '0' && e.key <= '9') pinKey(e.key);
   if (e.key === 'Backspace') pinDel();
   if (e.key === 'Enter' && pin.length === 4) doLogin();
