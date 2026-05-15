@@ -2738,20 +2738,20 @@ router.get('/mails-log', function(req, res) {
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
-// GET /manual — descarga el manual del módulo (accesible para todos los usuarios)
+// GET /manual — descarga el manual del módulo en PDF (accesible para todos los usuarios)
 router.get('/manual', function(req, res) {
   // Se busca el archivo en estos paths, en orden:
   const candidates = [
-    path.join(__dirname, '../../data/Manual_Modulo_IFCO.docx'),
-    path.join(__dirname, '../../data/manuales/Manual_Modulo_IFCO.docx'),
-    path.join(UPLOAD_DIR, 'Manual_Modulo_IFCO.docx')
+    path.join(__dirname, '../../data/Manual_Modulo_IFCO.pdf'),
+    path.join(__dirname, '../../data/manuales/Manual_Modulo_IFCO.pdf'),
+    path.join(UPLOAD_DIR, 'Manual_Modulo_IFCO.pdf')
   ];
   for (const p of candidates) {
     if (fs.existsSync(p)) {
-      return res.download(p, 'Manual_Modulo_IFCO.docx');
+      return res.download(p, 'Manual_Modulo_IFCO.pdf');
     }
   }
-  res.status(404).json({ error: 'Manual no disponible. El admin debe subirlo al servidor en data/Manual_Modulo_IFCO.docx' });
+  res.status(404).json({ error: 'Manual no disponible. El admin debe subirlo al servidor en data/Manual_Modulo_IFCO.pdf' });
 });
 
 // ════════════════════════════════════════════════════════════════════════════
