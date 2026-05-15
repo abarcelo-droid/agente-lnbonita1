@@ -722,14 +722,26 @@ router.post('/compras', requireAuth, (req, res) => {
       remito_foto_path = '/data/remitos_pa/' + fname;
     }
 
+    // Obtener nombre del proveedor desde adm_proveedores para proveedor_txt
+    let proveedorNombre = proveedor_txt || null;
+    if (!proveedorNombre && proveedor_id) {
+      try {
+        const prov = dbPa.prepare('SELECT razon_social FROM adm_proveedores WHERE id=?').get(parseInt(proveedor_id));
+        if (prov) proveedorNombre = prov.razon_social;
+      } catch(e) {}
+    }
+
     const nuevaCompra = db.transaction(() => {
       const r = db.prepare(`
         INSERT INTO pa_compras (fecha, proveedor_id, proveedor_txt, nro_factura, tipo_comprobante, campaña_id,
                                 subtotal, iva_monto, total, notas, remito_foto_path,
                                 iva_total, neto_total, tipo_factura)
         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-      `).run(fecha||new Date().toISOString().slice(0,10), proveedor_id||null, proveedor_txt||null,
-             nro_factura||null, tipo_comprobante||'factura', campaña_id||null,
+      `).run(fecha||new Date().toISOString().slice(0,10),
+             null,  // proveedor_id siempre NULL — evita FK con pa_proveedores
+             proveedorNombre,
+             nro_factura||null, tipo_comprobante||'factura',
+             (campaña_id && !isNaN(parseInt(campaña_id))) ? parseInt(campaña_id) : null,
              neto_total, iva_total, total, notas||null, remito_foto_path,
              iva_total, neto_total,
              esServicio ? 'servicio' : 'compra');
