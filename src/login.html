@@ -8,40 +8,52 @@
 *{box-sizing:border-box;margin:0;padding:0}
 body{min-height:100vh;background:#0f2540;display:flex;align-items:center;justify-content:center;font-family:'Arial',sans-serif}
 
-.card{background:#fff;border-radius:20px;padding:32px 28px;width:340px;max-width:95vw;box-shadow:0 20px 60px rgba(0,0,0,.4)}
+.card{background:#fff;border-radius:20px;padding:32px 28px;width:360px;max-width:95vw;box-shadow:0 20px 60px rgba(0,0,0,.4)}
 
 .logo-wrap{text-align:center;margin-bottom:24px}
 .logo-wrap img{width:200px;max-width:100%;height:auto}
 .logo-wrap .sub{font-size:11px;color:#8a9bb0;letter-spacing:.1em;text-transform:uppercase;margin-top:6px}
 
-.email-wrap{margin-bottom:20px}
-.email-wrap label{font-size:11px;font-weight:700;color:#5a6a7e;text-transform:uppercase;letter-spacing:.06em;display:block;margin-bottom:6px}
-.email-wrap input{width:100%;padding:12px 14px;border:2px solid #dde3ea;border-radius:10px;font-size:15px;font-family:Arial;outline:none;transition:border-color .15s}
-.email-wrap input:focus{border-color:#1a3a5c}
+.field{margin-bottom:18px}
+.field label{font-size:11px;font-weight:700;color:#5a6a7e;text-transform:uppercase;letter-spacing:.06em;display:block;margin-bottom:6px}
+.field input{width:100%;padding:12px 14px;border:2px solid #dde3ea;border-radius:10px;font-size:15px;font-family:Arial;outline:none;transition:border-color .15s}
+.field input:focus{border-color:#1a3a5c}
+.field-pwd{position:relative}
+.field-pwd input{padding-right:42px}
+.pwd-toggle{position:absolute;right:6px;top:6px;width:36px;height:36px;border:none;background:transparent;cursor:pointer;border-radius:8px;font-size:18px;color:#5a6a7e;display:flex;align-items:center;justify-content:center;transition:background .1s}
+.pwd-toggle:hover{background:#f0f4f8}
+.pwd-toggle:active{transform:scale(.9)}
 
+.switch-link{text-align:center;font-size:12px;color:#5a6a7e;margin-top:-6px;margin-bottom:18px}
+.switch-link a{color:#1a3a5c;text-decoration:none;font-weight:600;cursor:pointer}
+.switch-link a:hover{text-decoration:underline}
+
+/* PIN mode */
 .pin-label{font-size:11px;font-weight:700;color:#5a6a7e;text-transform:uppercase;letter-spacing:.06em;text-align:center;margin-bottom:14px}
-
-/* Puntos del PIN */
-.pin-dots{display:flex;justify-content:center;gap:14px;margin-bottom:24px}
+.pin-dots{display:flex;justify-content:center;gap:14px;margin-bottom:20px}
 .pin-dot{width:18px;height:18px;border-radius:50%;border:2px solid #dde3ea;transition:all .15s}
 .pin-dot.filled{background:#1a3a5c;border-color:#1a3a5c}
-
-/* Teclado numérico */
-.keypad{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:20px}
-.key{background:#f0f4f8;border:none;border-radius:12px;height:60px;font-size:22px;font-weight:700;color:#1a2332;cursor:pointer;transition:all .1s;-webkit-tap-highlight-color:transparent;user-select:none}
+.keypad{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:16px}
+.key{background:#f0f4f8;border:none;border-radius:12px;height:56px;font-size:22px;font-weight:700;color:#1a2332;cursor:pointer;transition:all .1s;-webkit-tap-highlight-color:transparent;user-select:none}
 .key:active{background:#1a3a5c;color:#fff;transform:scale(.95)}
 .key.del{background:#fef2f2;color:#dc2626;font-size:18px}
 .key.empty{background:transparent;cursor:default}
 
-/* Botón login */
-.btn-login{width:100%;padding:16px;background:#1a3a5c;color:#fff;border:none;border-radius:12px;font-size:16px;font-weight:700;cursor:pointer;transition:all .15s;display:none}
-.btn-login.show{display:block}
+.btn-login{width:100%;padding:15px;background:#1a3a5c;color:#fff;border:none;border-radius:12px;font-size:16px;font-weight:700;cursor:pointer;transition:all .15s}
+.btn-login:hover{background:#0f2540}
 .btn-login:active{background:#0f2540;transform:scale(.98)}
+.btn-login:disabled{opacity:.6;cursor:not-allowed}
 
 .error{color:#dc2626;font-size:13px;text-align:center;margin-top:12px;min-height:20px}
+
+.welcome-text{font-size:14px;color:#1a2332;line-height:1.5;margin-bottom:20px;text-align:center}
+.welcome-text strong{color:#1a3a5c}
+.pwd-hint{font-size:11px;color:#8a9bb0;margin-top:14px;text-align:center;line-height:1.5}
 </style>
 </head>
 <body>
+
+<!-- ═══════════ CARD: LOGIN ═══════════ -->
 <div class="card" id="card-login">
   <div class="logo-wrap">
     <img src="/static/logo.jpg" alt="La Niña Bonita" onerror="this.style.display='none';document.querySelector('.logo-name').style.display='block'">
@@ -49,72 +61,95 @@ body{min-height:100vh;background:#0f2540;display:flex;align-items:center;justify
     <div class="sub">Panel de control</div>
   </div>
 
-  <div class="email-wrap">
+  <div class="field">
     <label>Email o usuario</label>
     <input type="text" id="email" placeholder="tu@email.com o tu usuario" autocomplete="username" inputmode="email"
-      onkeydown="if(event.key==='Enter') document.getElementById('pin-1').focus()">
+      onkeydown="if(event.key==='Enter') focusCredential()">
   </div>
 
-  <div class="pin-label">PIN de acceso</div>
-  <div class="pin-dots">
-    <div class="pin-dot" id="dot-0"></div>
-    <div class="pin-dot" id="dot-1"></div>
-    <div class="pin-dot" id="dot-2"></div>
-    <div class="pin-dot" id="dot-3"></div>
+  <!-- ── Modo CONTRASEÑA (default) ── -->
+  <div id="mode-password">
+    <div class="field">
+      <label>Contraseña</label>
+      <div class="field-pwd">
+        <input type="password" id="password" placeholder="Tu contraseña" autocomplete="current-password"
+          onkeydown="if(event.key==='Enter') doLogin()">
+        <button type="button" class="pwd-toggle" onclick="togglePassword()" title="Mostrar/ocultar contraseña">👁️</button>
+      </div>
+    </div>
+    <div class="switch-link">
+      ¿Todavía no tenés contraseña? <a onclick="switchToPin()">Entrá con tu PIN</a>
+    </div>
   </div>
 
-  <div class="keypad">
-    <button class="key" onclick="pinKey('1')">1</button>
-    <button class="key" onclick="pinKey('2')">2</button>
-    <button class="key" onclick="pinKey('3')">3</button>
-    <button class="key" onclick="pinKey('4')">4</button>
-    <button class="key" onclick="pinKey('5')">5</button>
-    <button class="key" onclick="pinKey('6')">6</button>
-    <button class="key" onclick="pinKey('7')">7</button>
-    <button class="key" onclick="pinKey('8')">8</button>
-    <button class="key" onclick="pinKey('9')">9</button>
-    <button class="key empty"></button>
-    <button class="key" onclick="pinKey('0')">0</button>
-    <button class="key del" onclick="pinDel()">⌫</button>
+  <!-- ── Modo PIN (transición) ── -->
+  <div id="mode-pin" style="display:none">
+    <div class="pin-label">PIN de acceso</div>
+    <div class="pin-dots">
+      <div class="pin-dot" id="dot-0"></div>
+      <div class="pin-dot" id="dot-1"></div>
+      <div class="pin-dot" id="dot-2"></div>
+      <div class="pin-dot" id="dot-3"></div>
+    </div>
+    <div class="keypad">
+      <button class="key" onclick="pinKey('1')">1</button>
+      <button class="key" onclick="pinKey('2')">2</button>
+      <button class="key" onclick="pinKey('3')">3</button>
+      <button class="key" onclick="pinKey('4')">4</button>
+      <button class="key" onclick="pinKey('5')">5</button>
+      <button class="key" onclick="pinKey('6')">6</button>
+      <button class="key" onclick="pinKey('7')">7</button>
+      <button class="key" onclick="pinKey('8')">8</button>
+      <button class="key" onclick="pinKey('9')">9</button>
+      <button class="key empty"></button>
+      <button class="key" onclick="pinKey('0')">0</button>
+      <button class="key del" onclick="pinDel()">⌫</button>
+    </div>
+    <div class="switch-link">
+      ¿Ya tenés contraseña? <a onclick="switchToPassword()">Volver a contraseña</a>
+    </div>
   </div>
 
   <button class="btn-login" id="btn-login" onclick="doLogin()">Ingresar →</button>
   <div class="error" id="error"></div>
 </div>
 
-<!-- FASE 2.C: pantalla para setear contraseña en primer login -->
+<!-- ═══════════ CARD: SETEAR PASSWORD (Fase 2.C) ═══════════ -->
 <div class="card" id="card-setear" style="display:none">
   <div class="logo-wrap">
     <img src="/static/logo.jpg" alt="La Niña Bonita" onerror="this.style.display='none'">
     <div class="sub">¡Hola!</div>
   </div>
 
-  <div style="font-size:14px;color:#1a2332;line-height:1.5;margin-bottom:20px;text-align:center">
+  <div class="welcome-text">
     Bienvenido, <strong id="welcome-nombre">—</strong>.<br>
-    Tu nuevo usuario es <strong id="welcome-username" style="color:#1a3a5c">—</strong>.<br>
+    Tu nuevo usuario es <strong id="welcome-username">—</strong>.<br>
     <span style="font-size:12px;color:#5a6a7e">Por seguridad, confirmá tu PIN y elegí una contraseña.</span>
   </div>
 
-  <div class="email-wrap">
+  <div class="field">
     <label>Confirmá tu PIN actual</label>
     <input type="password" id="confirm-pin" placeholder="4 dígitos" maxlength="4" inputmode="numeric" autocomplete="off" pattern="[0-9]*">
   </div>
 
-  <div class="email-wrap">
+  <div class="field">
     <label>Nueva contraseña</label>
-    <input type="password" id="new-pwd-1" placeholder="Mínimo 8 caracteres, letra y número" autocomplete="new-password">
+    <div class="field-pwd">
+      <input type="password" id="new-pwd-1" placeholder="Mínimo 8 caracteres, letra y número" autocomplete="new-password">
+      <button type="button" class="pwd-toggle" onclick="toggleNewPassword()" title="Mostrar/ocultar">👁️</button>
+    </div>
   </div>
 
-  <div class="email-wrap">
+  <div class="field">
     <label>Repetir contraseña</label>
     <input type="password" id="new-pwd-2" placeholder="Misma contraseña otra vez" autocomplete="new-password"
       onkeydown="if(event.key==='Enter') setearPassword()">
   </div>
 
-  <button class="btn-login show" id="btn-setear" onclick="setearPassword()">Guardar y entrar →</button>
+  <button class="btn-login" id="btn-setear" onclick="setearPassword()">Guardar y entrar →</button>
   <div class="error" id="error-setear"></div>
 
-  <div style="font-size:11px;color:#8a9bb0;margin-top:14px;text-align:center;line-height:1.5">
+  <div class="pwd-hint">
     Esta contraseña reemplazará al PIN en el futuro.<br>
     Anotala en un lugar seguro.
   </div>
@@ -122,30 +157,55 @@ body{min-height:100vh;background:#0f2540;display:flex;align-items:center;justify
 
 <script>
 var pin = '';
-var pendingUserId = null;  // Fase 2.C: user_id pendiente de setear password
-// Leer ?next= de la URL para redirigir después del login (ej: /login?next=/scout)
+var pendingUserId = null;
+var modoActivo = 'password';
 var nextParam = new URLSearchParams(window.location.search).get('next') || '';
+
+function switchToPin() {
+  modoActivo = 'pin';
+  document.getElementById('mode-password').style.display = 'none';
+  document.getElementById('mode-pin').style.display = 'block';
+  document.getElementById('error').textContent = '';
+  document.getElementById('password').value = '';
+}
+function switchToPassword() {
+  modoActivo = 'password';
+  document.getElementById('mode-password').style.display = 'block';
+  document.getElementById('mode-pin').style.display = 'none';
+  document.getElementById('error').textContent = '';
+  pin = '';
+  updateDots();
+  setTimeout(function(){ document.getElementById('password').focus(); }, 50);
+}
+
+function togglePassword() {
+  var inp = document.getElementById('password');
+  inp.type = inp.type === 'password' ? 'text' : 'password';
+}
+function toggleNewPassword() {
+  var inp = document.getElementById('new-pwd-1');
+  inp.type = inp.type === 'password' ? 'text' : 'password';
+}
+
+function focusCredential() {
+  if (modoActivo === 'password') document.getElementById('password').focus();
+}
 
 function pinKey(d) {
   if (pin.length >= 4) return;
   pin += d;
   updateDots();
   if (pin.length === 4) {
-    document.getElementById('btn-login').classList.add('show');
-    // Auto-login si el email ya está completo
     var email = document.getElementById('email').value.trim();
     if (email) setTimeout(doLogin, 200);
   }
 }
-
 function pinDel() {
   if (!pin.length) return;
   pin = pin.slice(0,-1);
-  document.getElementById('btn-login').classList.remove('show');
   updateDots();
   document.getElementById('error').textContent = '';
 }
-
 function updateDots() {
   for (var i=0; i<4; i++) {
     document.getElementById('dot-'+i).classList.toggle('filled', i < pin.length);
@@ -157,7 +217,16 @@ function doLogin() {
   var errEl = document.getElementById('error');
   errEl.textContent = '';
   if (!email) { errEl.textContent = 'Ingresá tu email o usuario'; return; }
-  if (pin.length !== 4) { errEl.textContent = 'Ingresá tu PIN de 4 dígitos'; return; }
+
+  var body = { email: email, next: nextParam };
+  if (modoActivo === 'password') {
+    var pwd = document.getElementById('password').value;
+    if (!pwd) { errEl.textContent = 'Ingresá tu contraseña'; return; }
+    body.password = pwd;
+  } else {
+    if (pin.length !== 4) { errEl.textContent = 'Ingresá tu PIN de 4 dígitos'; return; }
+    body.pin = pin;
+  }
 
   var btn = document.getElementById('btn-login');
   btn.textContent = 'Verificando...'; btn.disabled = true;
@@ -165,12 +234,11 @@ function doLogin() {
   fetch('/api/auth/login', {
     method: 'POST',
     headers: {'Content-Type':'application/json'},
-    body: JSON.stringify({ email: email, pin: pin, next: nextParam })
+    body: JSON.stringify(body)
   })
   .then(function(r){ return r.json(); })
   .then(function(res) {
     if (res.ok && res.requiere_setear_password) {
-      // FASE 2.C: usuario nunca seteó contraseña, mostrar pantalla intermedia
       pendingUserId = res.user_id;
       document.getElementById('welcome-nombre').textContent = res.nombre || 'usuario';
       document.getElementById('welcome-username').textContent = res.username || '—';
@@ -185,7 +253,6 @@ function doLogin() {
       errEl.textContent = res.error || 'Error al ingresar';
       pin = ''; updateDots();
       btn.textContent = 'Ingresar →'; btn.disabled = false;
-      btn.classList.remove('show');
     }
   })
   .catch(function() {
@@ -194,7 +261,6 @@ function doLogin() {
   });
 }
 
-// FASE 2.C: setear contraseña en primer login
 function setearPassword() {
   var confirmPin = document.getElementById('confirm-pin').value.trim();
   var p1 = document.getElementById('new-pwd-1').value;
@@ -202,7 +268,6 @@ function setearPassword() {
   var err = document.getElementById('error-setear');
   err.textContent = '';
 
-  // Validaciones del cliente (el backend valida lo real)
   if (!/^\d{4}$/.test(confirmPin)) { err.textContent = 'Confirmá tu PIN (4 dígitos)'; return; }
   if (p1.length < 8) { err.textContent = 'Mínimo 8 caracteres'; return; }
   if (p1 !== p2) { err.textContent = 'Las contraseñas no coinciden'; return; }
@@ -232,17 +297,19 @@ function setearPassword() {
   });
 }
 
-// También permitir teclado físico para el PIN
 document.addEventListener('keydown', function(e) {
-  // Si el usuario está tipeando en cualquier input (email, password, etc.) no interceptar
   var ae = document.activeElement;
   if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA')) return;
-  // Si la pantalla de setear password está visible, tampoco interceptar
   var cardSetear = document.getElementById('card-setear');
   if (cardSetear && cardSetear.style.display !== 'none') return;
+  if (modoActivo !== 'pin') return;
   if (e.key >= '0' && e.key <= '9') pinKey(e.key);
   if (e.key === 'Backspace') pinDel();
   if (e.key === 'Enter' && pin.length === 4) doLogin();
+});
+
+window.addEventListener('load', function() {
+  document.getElementById('email').focus();
 });
 </script>
 </body>

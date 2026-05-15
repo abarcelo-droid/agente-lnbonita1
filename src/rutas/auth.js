@@ -95,12 +95,13 @@ function validatePassword(password, username) {
   } catch(e) { console.error('[AUTH] Error generando usernames iniciales:', e.message); }
 })();
 
-// Login por email+PIN, username+PIN o nombre+PIN (transición a username)
+// Login por email+PIN, username+PIN, password (post-fase 2.C), o nombre+PIN
 // El campo del body sigue siendo `email` por compatibilidad con el frontend actual,
 // pero el backend prueba 3 caminos: email exacto → username → nombre exacto.
-router.post('/login', (req, res) => {
-  const { email, pin, next } = req.body;
-  if (!pin) return res.status(400).json({ ok: false, error: 'PIN requerido' });
+// Acepta `pin` (modo viejo) o `password` (modo nuevo post-migración).
+router.post('/login', async (req, res) => {
+  const { email, pin, password, next } = req.body;
+  if (!pin && !password) return res.status(400).json({ ok: false, error: 'Ingresá tu PIN o contraseña' });
   const db = getDb();
   try {
     let user = null;
@@ -119,18 +120,30 @@ router.post('/login', (req, res) => {
       }
     }
     if (!user) return res.status(401).json({ ok: false, error: 'Usuario no encontrado' });
-    if (user.pin !== String(pin).trim()) return res.status(401).json({ ok: false, error: 'PIN incorrecto' });
 
-    // FASE 2.C: si el usuario nunca seteó contraseña, lo mandamos a setearla
-    // antes de entrar. Devolvemos requiere_setear_password SIN setear la cookie.
-    if (!user.migrado_a_v2 || user.migrado_a_v2 === 0) {
-      return res.json({
-        ok: true,
-        requiere_setear_password: true,
-        user_id: user.id,
-        username: user.username || null,
-        nombre: user.nombre
-      });
+    // ── Modo contraseña (post-fase 2.C) ──────────────────────────────────
+    if (password) {
+      if (!user.password_hash) {
+        return res.status(401).json({ ok: false, error: 'Este usuario todavía no seteó contraseña. Entrá con tu PIN.' });
+      }
+      const match = await bcrypt.compare(password, user.password_hash);
+      if (!match) return res.status(401).json({ ok: false, error: 'Contraseña incorrecta' });
+      // OK, seguimos al setear cookie
+    } else {
+      // ── Modo PIN (transición) ──────────────────────────────────────────
+      if (user.pin !== String(pin).trim()) return res.status(401).json({ ok: false, error: 'PIN incorrecto' });
+
+      // FASE 2.C: si el usuario nunca seteó contraseña, lo mandamos a setearla
+      // antes de entrar. Devolvemos requiere_setear_password SIN setear la cookie.
+      if (!user.migrado_a_v2 || user.migrado_a_v2 === 0) {
+        return res.json({
+          ok: true,
+          requiere_setear_password: true,
+          user_id: user.id,
+          username: user.username || null,
+          nombre: user.nombre
+        });
+      }
     }
 
     const userData = {
