@@ -155,12 +155,18 @@ db.exec(`
     label        TEXT NOT NULL,
     grupo        TEXT NOT NULL,
     sociedad_id  INTEGER REFERENCES sociedades(id),
-    tipo         TEXT NOT NULL DEFAULT 'operativo' CHECK(tipo IN ('numero','operativo','mobile','externo','sistema')),
+    area_id      INTEGER REFERENCES areas(id),
+    tipo         INTEGER NOT NULL DEFAULT 2 CHECK(tipo IN (0,1,2,3,4)),
+    oculto       INTEGER NOT NULL DEFAULT 0,
     orden        INTEGER DEFAULT 0
   );
   CREATE INDEX IF NOT EXISTS idx_modulos_grupo    ON modulos_config(grupo);
   CREATE INDEX IF NOT EXISTS idx_modulos_sociedad ON modulos_config(sociedad_id);
+  CREATE INDEX IF NOT EXISTS idx_modulos_area     ON modulos_config(area_id);
 `);
+// ALTERs idempotentes para instalaciones que ya tengan la tabla
+try { db.exec("ALTER TABLE modulos_config ADD COLUMN area_id INTEGER REFERENCES areas(id)"); } catch(_) {}
+try { db.exec("ALTER TABLE modulos_config ADD COLUMN oculto INTEGER NOT NULL DEFAULT 0"); } catch(_) {}
 
 // Seed inicial de los 65 módulos detectados del sidebar.
 // Defaults razonables; el admin puede ajustarlos desde la UI.
@@ -185,93 +191,93 @@ db.exec(`
 
     const modulos = [
       // ── General / Sistema (transversal, todos ven)
-      ['inicio',              'Inicio / Dashboard',         'General',       null, 'sistema',   10],
-      ['calendario',          'Calendario',                 'General',       null, 'sistema',   11],
-      ['conv',                'Conversaciones',             'General',       null, 'sistema',   12],
-      ['equipo',              'Equipo (Organigrama)',       'Sistema',       null, 'sistema',  900],
-      ['maestro-usuarios',    'Usuarios',                   'Sistema',       null, 'sistema',  901],
-      ['ingreso-factura',     'Ingreso de Factura',         'General',       null, 'operativo', 13],
+      ['inicio',              'Inicio / Dashboard',         'General',       null, 0,   10],
+      ['calendario',          'Calendario',                 'General',       null, 0,   11],
+      ['conv',                'Conversaciones',             'General',       null, 0,   12],
+      ['equipo',              'Equipo (Organigrama)',       'Sistema',       null, 0,  900],
+      ['maestro-usuarios',    'Usuarios',                   'Sistema',       null, 0,  901],
+      ['ingreso-factura',     'Ingreso de Factura',         'General',       null, 2, 13],
 
       // ── Comercial / CRM (San Gerónimo)
-      ['crm',                 'CRM Dedicados',              'Comercial',     SG,   'operativo', 100],
-      ['dedicados',           'Dedicados',                  'Comercial',     SG,   'operativo', 101],
-      ['food',                'Food Service',               'Comercial',     SG,   'operativo', 102],
-      ['may-a',               'Mayorista A',                'Comercial',     SG,   'operativo', 103],
-      ['may-mcba',            'Mayorista MCBA',             'Comercial',     SG,   'operativo', 104],
-      ['min-mcba',            'Minorista MCBA',             'Comercial',     SG,   'operativo', 105],
-      ['min-ent',             'Minorista Entrega',          'Comercial',     SG,   'operativo', 106],
-      ['cons-final',          'Consumidor Final',           'Comercial',     SG,   'operativo', 107],
-      ['pedidos',             'Pedidos',                    'Comercial',     SG,   'operativo', 108],
-      ['repet',               'Recompra',                   'Comercial',     SG,   'operativo', 109],
+      ['crm',                 'CRM Dedicados',              'Comercial',     SG,   2, 100],
+      ['dedicados',           'Dedicados',                  'Comercial',     SG,   2, 101],
+      ['food',                'Food Service',               'Comercial',     SG,   2, 102],
+      ['may-a',               'Mayorista A',                'Comercial',     SG,   2, 103],
+      ['may-mcba',            'Mayorista MCBA',             'Comercial',     SG,   2, 104],
+      ['min-mcba',            'Minorista MCBA',             'Comercial',     SG,   2, 105],
+      ['min-ent',             'Minorista Entrega',          'Comercial',     SG,   2, 106],
+      ['cons-final',          'Consumidor Final',           'Comercial',     SG,   2, 107],
+      ['pedidos',             'Pedidos',                    'Comercial',     SG,   2, 108],
+      ['repet',               'Recompra',                   'Comercial',     SG,   2, 109],
 
       // ── Pricing & Ofertas (números, San Gerónimo)
-      ['pricing1',            'Pricing 1',                  'Pricing',       SG,   'numero',    200],
-      ['pricing2',            'Pricing 2',                  'Pricing',       SG,   'numero',    201],
-      ['oferta1',             'Oferta 1',                   'Pricing',       SG,   'numero',    202],
-      ['oferta2',             'Oferta 2',                   'Pricing',       SG,   'numero',    203],
+      ['pricing1',            'Pricing 1',                  'Pricing',       SG,   1,    200],
+      ['pricing2',            'Pricing 2',                  'Pricing',       SG,   1,    201],
+      ['oferta1',             'Oferta 1',                   'Pricing',       SG,   1,    202],
+      ['oferta2',             'Oferta 2',                   'Pricing',       SG,   1,    203],
 
       // ── Logística (San Gerónimo)
-      ['logistica',           'Logística',                  'Logística',     SG,   'operativo', 300],
-      ['envios',              'Envíos',                     'Logística',     SG,   'operativo', 301],
-      ['preparacion',         'Preparación',                'Logística',     SG,   'operativo', 302],
-      ['remitos',             'Remitos',                    'Logística',     SG,   'operativo', 303],
-      ['guardias',            'Guardias',                   'Logística',     SG,   'operativo', 304],
+      ['logistica',           'Logística',                  'Logística',     SG,   2, 300],
+      ['envios',              'Envíos',                     'Logística',     SG,   2, 301],
+      ['preparacion',         'Preparación',                'Logística',     SG,   2, 302],
+      ['remitos',             'Remitos',                    'Logística',     SG,   2, 303],
+      ['guardias',            'Guardias',                   'Logística',     SG,   2, 304],
 
       // ── Cobranzas (números, San Gerónimo)
-      ['cobranza',            'Cobranza',                   'Cobranzas',     SG,   'numero',    400],
-      ['cta-cte',             'Cuenta Corriente',           'Cobranzas',     SG,   'numero',    401],
+      ['cobranza',            'Cobranza',                   'Cobranzas',     SG,   1,    400],
+      ['cta-cte',             'Cuenta Corriente',           'Cobranzas',     SG,   1,    401],
 
       // ── Producción Agrícola (Puente Cordón)
-      ['pa-dashboard',        'Dashboard PA',               'Producción',    PC,   'operativo', 500],
-      ['pa-lotes',            'Lotes',                      'Producción',    PC,   'operativo', 501],
-      ['pa-insumos',          'Insumos',                    'Producción',    PC,   'operativo', 502],
-      ['pa-clima',            'Clima',                      'Producción',    PC,   'operativo', 503],
-      ['pa-combustible',      'Combustible',                'Producción',    PC,   'operativo', 504],
-      ['pa-compras',          'Compras',                    'Producción',    PC,   'operativo', 505],
-      ['pa-costos',           'Costos',                     'Producción',    PC,   'numero',    506],
-      ['pa-cuentas',          'Cuentas',                    'Producción',    PC,   'numero',    507],
-      ['pa-calendario',       'Calendario PA',              'Producción',    PC,   'operativo', 508],
-      ['pa-despachos',        'Despachos',                  'Producción',    PC,   'operativo', 509],
-      ['pa-electricidad',     'Electricidad',               'Producción',    PC,   'operativo', 510],
-      ['pa-ordenes',          'Órdenes',                    'Producción',    PC,   'operativo', 511],
-      ['pa-panol',            'Pañol',                      'Producción',    PC,   'operativo', 512],
-      ['pa-personal',         'Personal',                   'Producción',    PC,   'operativo', 513],
-      ['pa-scout',            'Scout (Mobile)',             'Producción',    PC,   'mobile',    514],
+      ['pa-dashboard',        'Dashboard PA',               'Producción',    PC,   2, 500],
+      ['pa-lotes',            'Lotes',                      'Producción',    PC,   2, 501],
+      ['pa-insumos',          'Insumos',                    'Producción',    PC,   2, 502],
+      ['pa-clima',            'Clima',                      'Producción',    PC,   2, 503],
+      ['pa-combustible',      'Combustible',                'Producción',    PC,   2, 504],
+      ['pa-compras',          'Compras',                    'Producción',    PC,   2, 505],
+      ['pa-costos',           'Costos',                     'Producción',    PC,   1,    506],
+      ['pa-cuentas',          'Cuentas',                    'Producción',    PC,   1,    507],
+      ['pa-calendario',       'Calendario PA',              'Producción',    PC,   2, 508],
+      ['pa-despachos',        'Despachos',                  'Producción',    PC,   2, 509],
+      ['pa-electricidad',     'Electricidad',               'Producción',    PC,   2, 510],
+      ['pa-ordenes',          'Órdenes',                    'Producción',    PC,   2, 511],
+      ['pa-panol',            'Pañol',                      'Producción',    PC,   2, 512],
+      ['pa-personal',         'Personal',                   'Producción',    PC,   2, 513],
+      ['pa-scout',            'Scout (Mobile)',             'Producción',    PC,   3,    514],
 
       // ── Abasto IFCO (San Gerónimo)
-      ['ab-dashboard',        'Dashboard IFCO',             'Abasto IFCO',   SG,   'operativo', 600],
-      ['ab-gastos',           'Gastos IFCO',                'Abasto IFCO',   SG,   'numero',    601],
-      ['ab-ifcos',            'IFCOs',                      'Abasto IFCO',   SG,   'operativo', 602],
-      ['ab-liquidaciones',    'Liquidaciones IFCO',         'Abasto IFCO',   SG,   'numero',    603],
-      ['ab-mandata',          'Mandata',                    'Abasto IFCO',   SG,   'numero',    604],
-      ['ab-partidas',         'Partidas',                   'Abasto IFCO',   SG,   'operativo', 605],
-      ['ab-proveedores',      'Proveedores IFCO',           'Abasto IFCO',   SG,   'operativo', 606],
-      ['ab-remitos',          'Remitos IFCO',               'Abasto IFCO',   SG,   'operativo', 607],
-      ['ab-stock',            'Stock IFCO',                 'Abasto IFCO',   SG,   'operativo', 608],
+      ['ab-dashboard',        'Dashboard IFCO',             'Abasto IFCO',   SG,   2, 600],
+      ['ab-gastos',           'Gastos IFCO',                'Abasto IFCO',   SG,   1,    601],
+      ['ab-ifcos',            'IFCOs',                      'Abasto IFCO',   SG,   2, 602],
+      ['ab-liquidaciones',    'Liquidaciones IFCO',         'Abasto IFCO',   SG,   1,    603],
+      ['ab-mandata',          'Mandata',                    'Abasto IFCO',   SG,   1,    604],
+      ['ab-partidas',         'Partidas',                   'Abasto IFCO',   SG,   2, 605],
+      ['ab-proveedores',      'Proveedores IFCO',           'Abasto IFCO',   SG,   2, 606],
+      ['ab-remitos',          'Remitos IFCO',               'Abasto IFCO',   SG,   2, 607],
+      ['ab-stock',            'Stock IFCO',                 'Abasto IFCO',   SG,   2, 608],
 
       // ── Administración Contable (Familia, transversal números)
-      ['adm-asientos',        'Asientos',                   'Contabilidad',  FAM,  'numero',    700],
-      ['adm-cc-proveedores',  'CC Proveedores',             'Contabilidad',  FAM,  'numero',    701],
-      ['adm-modelos',         'Modelos',                    'Contabilidad',  FAM,  'numero',    702],
-      ['adm-plan-cuentas',    'Plan de Cuentas',            'Contabilidad',  FAM,  'numero',    703],
-      ['adm-proveedores',     'Proveedores',                'Contabilidad',  FAM,  'numero',    704],
+      ['adm-asientos',        'Asientos',                   'Contabilidad',  FAM,  1,    700],
+      ['adm-cc-proveedores',  'CC Proveedores',             'Contabilidad',  FAM,  1,    701],
+      ['adm-modelos',         'Modelos',                    'Contabilidad',  FAM,  1,    702],
+      ['adm-plan-cuentas',    'Plan de Cuentas',            'Contabilidad',  FAM,  1,    703],
+      ['adm-proveedores',     'Proveedores',                'Contabilidad',  FAM,  1,    704],
 
       // ── Financiero (Familia)
-      ['fin-caja-bancos',     'Caja / Bancos',              'Financiero',    FAM,  'numero',    750],
-      ['fin-ordenes-pago',    'Órdenes de Pago',            'Financiero',    FAM,  'numero',    751],
+      ['fin-caja-bancos',     'Caja / Bancos',              'Financiero',    FAM,  1,    750],
+      ['fin-ordenes-pago',    'Órdenes de Pago',            'Financiero',    FAM,  1,    751],
 
       // ── Ventas (San Gerónimo, mayoría números)
-      ['ven-clientes',        'Clientes Ventas',            'Ventas',        SG,   'operativo', 800],
-      ['ven-facturas',        'Facturas Ventas',            'Ventas',        SG,   'numero',    801],
-      ['ven-cobranzas',       'Cobranzas Ventas',           'Ventas',        SG,   'numero',    802],
-      ['ven-cc',              'CC Ventas',                  'Ventas',        SG,   'numero',    803],
-      ['ven-liquidaciones',   'Liquidaciones Ventas',       'Ventas',        SG,   'numero',    804],
+      ['ven-clientes',        'Clientes Ventas',            'Ventas',        SG,   2, 800],
+      ['ven-facturas',        'Facturas Ventas',            'Ventas',        SG,   1,    801],
+      ['ven-cobranzas',       'Cobranzas Ventas',           'Ventas',        SG,   1,    802],
+      ['ven-cc',              'CC Ventas',                  'Ventas',        SG,   1,    803],
+      ['ven-liquidaciones',   'Liquidaciones Ventas',       'Ventas',        SG,   1,    804],
 
       // ── Retail (San Gerónimo)
-      ['retail-view',         'Retail View',                'Retail',        SG,   'operativo', 850],
-      ['retail-prod',         'Retail Producción',          'Retail',        SG,   'operativo', 851],
-      ['retail-gastos',       'Retail Gastos',              'Retail',        SG,   'numero',    852],
-      ['rent-retail',         'Rentabilidad Retail',        'Retail',        SG,   'numero',    853],
+      ['retail-view',         'Retail View',                'Retail',        SG,   2, 850],
+      ['retail-prod',         'Retail Producción',          'Retail',        SG,   2, 851],
+      ['retail-gastos',       'Retail Gastos',              'Retail',        SG,   1,    852],
+      ['rent-retail',         'Rentabilidad Retail',        'Retail',        SG,   1,    853],
     ];
 
     db.transaction(() => {

@@ -1010,16 +1010,11 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   </div>
 
   <div style="margin:14px 0;padding:12px;background:var(--bg);border:1px solid var(--bor);border-radius:8px;font-size:12px;color:var(--mut)">
-    <div style="margin-bottom:6px"><strong>Niveles de acceso:</strong>
-      <span style="margin-left:8px">0 Directivo · 1 Gerencial · 2 Ejecutivo · 3 Administrativo/Operativo · 4 Externo</span>
+    <div style="margin-bottom:6px"><strong>Niveles de persona:</strong>
+      <span style="margin-left:8px">0 Directivo · 1 Gerencial · 2 Ejecutivo · 3 Adm/Operativo · 4 Externo</span>
     </div>
-    <div><strong>Tipos de módulo:</strong>
-      <span style="margin-left:8px"><span style="display:inline-block;width:10px;height:10px;background:#fde68a;border-radius:50%"></span> <b>Número</b>: niveles 0–1 (Directivo/Gerencial)</span>
-      <span style="margin-left:14px"><span style="display:inline-block;width:10px;height:10px;background:#bbf7d0;border-radius:50%"></span> <b>Operativo</b>: niveles 0–2 (suma Ejecutivo)</span>
-      <span style="margin-left:14px"><span style="display:inline-block;width:10px;height:10px;background:#bfdbfe;border-radius:50%"></span> <b>Mobile</b>: niveles 0–3 (suma Adm/Operativo)</span>
-      <span style="margin-left:14px"><span style="display:inline-block;width:10px;height:10px;background:#e9d5ff;border-radius:50%"></span> <b>Externo</b>: niveles 0–4 (incluye Externo)</span>
-      <span style="margin-left:14px"><span style="display:inline-block;width:10px;height:10px;background:#e5e7eb;border-radius:50%"></span> <b>Sistema</b>: solo Directivo</span>
-    </div>
+    <div style="margin-bottom:6px"><strong>Tipo del módulo</strong> = nivel máximo que lo puede ver. Ej: tipo <b>2</b> lo ven 0, 1 y 2 (Directivo, Gerencial y Ejecutivo).</div>
+    <div><strong>Área</strong>: si está seteada, solo personas de ESA área lo ven. <strong>Visible/Oculto</strong>: 🔒 oculta el módulo a todos menos Directivo (útil para módulos en construcción).</div>
   </div>
 
   <div class="tw">
@@ -1028,9 +1023,11 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
         <th>Módulo</th>
         <th>Grupo</th>
         <th>Sociedad</th>
+        <th>Área</th>
         <th>Tipo</th>
+        <th style="text-align:center">Visible</th>
       </tr></thead>
-      <tbody id="t-modulos"><tr><td colspan="4" class="emp">Cargando...</td></tr></tbody>
+      <tbody id="t-modulos"><tr><td colspan="6" class="emp">Cargando...</td></tr></tbody>
     </table>
   </div>
 </div>
@@ -2128,14 +2125,14 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
 
   <!-- Sub-tabs -->
   <div style="display:flex; border-bottom:1px solid var(--bor); margin-bottom:14px">
-    <div class="eq-tab on" data-eq="organigrama" onclick="eqSubtab('organigrama')">🏢 Empresas</div>
+    <div class="eq-tab" data-eq="organigrama" onclick="eqSubtab('organigrama')">🏢 Empresas</div>
     <div class="eq-tab" data-eq="personas" onclick="eqSubtab('personas')">👥 Personas</div>
-    <div class="eq-tab" data-eq="arbol" onclick="eqSubtab('arbol')">🌳 Árbol</div>
+    <div class="eq-tab on" data-eq="arbol" onclick="eqSubtab('arbol')">🌳 Organigrama</div>
     <div class="eq-tab" data-eq="ubicaciones" onclick="eqSubtab('ubicaciones')">📍 Ubicaciones</div>
   </div>
 
   <!-- ORGANIGRAMA -->
-  <div class="eq-sub on" id="eq-sub-organigrama">
+  <div class="eq-sub" id="eq-sub-organigrama">
     <div style="display:flex; justify-content:flex-end; margin-bottom:14px">
       <button class="btn bb" onclick="eqNuevaSociedad()">+ Sociedad externa</button>
     </div>
@@ -2166,12 +2163,12 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   </div>
 
   <!-- ÁRBOL JERÁRQUICO -->
-  <div class="eq-sub" id="eq-sub-arbol">
+  <div class="eq-sub on" id="eq-sub-arbol">
     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; flex-wrap:wrap; gap:8px">
       <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap">
         <div style="display:inline-flex; background:#fff; border:1px solid var(--bor); border-radius:6px; padding:2px; gap:2px">
-          <button class="eq-vista-btn on" data-vista="cards" onclick="eqCambiarVista('cards')" style="padding:6px 12px; border:0; background:var(--burg); color:#fff; border-radius:4px; font-size:12px; font-weight:600; cursor:pointer">🪪 Cards</button>
-          <button class="eq-vista-btn" data-vista="orgchart" onclick="eqCambiarVista('orgchart')" style="padding:6px 12px; border:0; background:transparent; color:var(--mut); border-radius:4px; font-size:12px; font-weight:600; cursor:pointer">🏢 Orgchart</button>
+          <button class="eq-vista-btn" data-vista="cards" onclick="eqCambiarVista('cards')" style="padding:6px 12px; border:0; background:transparent; color:var(--mut); border-radius:4px; font-size:12px; font-weight:600; cursor:pointer">🪪 Cards</button>
+          <button class="eq-vista-btn on" data-vista="orgchart" onclick="eqCambiarVista('orgchart')" style="padding:6px 12px; border:0; background:var(--burg); color:#fff; border-radius:4px; font-size:12px; font-weight:600; cursor:pointer">🏢 Orgchart</button>
         </div>
         <select id="eq-arbol-filtro-soc" onchange="eqRenderArbolActual()" style="min-width:180px">
           <option value="">Todas las sociedades</option>
@@ -2189,8 +2186,8 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     </div>
     <div class="tw">
       <table>
-        <thead><tr><th>Nombre</th><th>Dirección</th><th>Lat / Lng</th><th></th></tr></thead>
-        <tbody id="eq-ubic-tbody"><tr><td colspan="4" class="emp">Cargando...</td></tr></tbody>
+        <thead><tr><th>Nombre</th><th>Dirección</th><th>Lat / Lng</th><th style="text-align:center">Personas</th><th></th></tr></thead>
+        <tbody id="eq-ubic-tbody"><tr><td colspan="5" class="emp">Cargando...</td></tr></tbody>
       </table>
     </div>
   </div>
@@ -23771,6 +23768,9 @@ function eqApi(path, opts) {
 function eqEsc(s) { return String(s == null ? '' : s).replace(/[<>&"]/g, function(c){ return {'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c]; }); }
 
 function eqInit() {
+  // Vista principal: organigrama por nivel jerárquico
+  eqCargarArbol();
+  // Pre-cargar también las sociedades para tener los datos listos al cambiar de sub-tab
   eqCargarOrganigrama();
 }
 
@@ -23802,6 +23802,7 @@ function eqRenderOrganigrama() {
   var grid = document.getElementById('eq-org-grid');
   grid.innerHTML = EQ.sociedades.map(function(s) {
     var pillCls = s.tipo === 'externa' ? 'eq-pill-externa' : 'eq-pill-interna';
+    var totalPersonas = (s.areas || []).reduce(function(acc, a){ return acc + (a.personas_count || 0); }, 0);
     var areasHtml = s.areas.length === 0
       ? '<div class="eq-org-sub" style="font-style:italic">Sin áreas cargadas</div>'
       : s.areas.map(function(a){
@@ -23818,7 +23819,9 @@ function eqRenderOrganigrama() {
       ? '<button class="btn bo bs" onclick="eqEditarSociedad(' + s.id + ')">Editar sociedad</button>'
       : '';
     return '<div class="eq-org-card">' +
-      '<h3>' + eqEsc(s.nombre) + ' <span class="eq-pill ' + pillCls + '">' + eqEsc(s.tipo) + '</span></h3>' +
+      '<h3>' + eqEsc(s.nombre) + ' <span class="eq-pill ' + pillCls + '">' + eqEsc(s.tipo) + '</span>' +
+        ' <span style="margin-left:8px;font-size:11px;font-weight:500;color:var(--mut);background:var(--bg);padding:2px 8px;border-radius:10px;border:1px solid var(--bor)">👥 ' + totalPersonas + '</span>' +
+      '</h3>' +
       '<div class="eq-org-sub">' + eqEsc(s.funcion || '—') + (s.cuit ? ' · CUIT ' + eqEsc(s.cuit) : '') + '</div>' +
       '<div>' + areasHtml + '</div>' +
       '<div style="margin-top:12px; display:flex; gap:6px; flex-wrap:wrap">' +
@@ -24139,7 +24142,7 @@ function eqBorrarPersona(id) {
 }
 
 // ─── ÁRBOL JERÁRQUICO (3 vistas: lista / cards / orgchart) ───────────
-var EQ_ARBOL = { vista: 'cards', personas: [] };
+var EQ_ARBOL = { vista: 'orgchart', personas: [] };
 
 function eqCargarArbol() {
   eqApi('/jerarquia').then(function(r) {
@@ -24300,44 +24303,78 @@ function eqRenderOrgchart(cont, raices) {
       apellido: '',
       cargo: '',
       _es_directorio: true,
+      nivel_acceso: 0,  // la caja virtual va siempre en la banda Directivo
       reportes: dirReportes
     };
     raices = [nodoDirectorio].concat(nonDir);
   }
 
-  // Layout simple horizontal: cada nodo ocupa 160px ancho, separación 20px
-  var BOX_W = 160, BOX_H = 56, GAP_H = 16, GAP_V = 40;
-  var nextX = 0;
+  // ── Bandas horizontales por nivel_acceso (0=arriba, 4=abajo) ──
+  var BANDAS = [
+    { nivel: 0, label: 'Directivo',                bg: '#FAFAFA' },
+    { nivel: 1, label: 'Gerencial',                bg: '#F4F4F5' },
+    { nivel: 2, label: 'Ejecutivo',                bg: '#FAFAFA' },
+    { nivel: 3, label: 'Administrativo / Operativo', bg: '#F4F4F5' },
+    { nivel: 4, label: 'Externo',                  bg: '#FAFAFA' }
+  ];
+  var BOX_W = 160, BOX_H = 56, GAP_H = 16, GAP_V = 36;
+  var LANE_LABEL_W = 90;   // ancho de la franja de la izquierda con los labels
+  var LANE_H = BOX_H + GAP_V; // alto de cada banda
 
-  function layout(node, depth) {
+  function getBanda(node) {
+    if (node._es_directorio) return 0;
+    var n = node.nivel_acceso;
+    if (n === undefined || n === null) n = 0;
+    return Math.max(0, Math.min(4, parseInt(n) || 0));
+  }
+  function yDeBanda(banda) {
+    return banda * LANE_H + (LANE_H - BOX_H) / 2; // centrar caja verticalmente en la banda
+  }
+
+  // Layout X recursivo: cada nodo se centra horizontalmente en sus hijos
+  // El Y siempre viene de la banda del nivel del nodo
+  var nextX = LANE_LABEL_W + 20;
+  function layoutX(node) {
+    node._y = yDeBanda(getBanda(node));
     if (!node.reportes || node.reportes.length === 0) {
       node._x = nextX;
-      node._y = depth * (BOX_H + GAP_V);
       nextX += BOX_W + GAP_H;
       return;
     }
-    node.reportes.forEach(function(c){ layout(c, depth + 1); });
+    node.reportes.forEach(layoutX);
     var first = node.reportes[0], last = node.reportes[node.reportes.length - 1];
     node._x = (first._x + last._x) / 2;
-    node._y = depth * (BOX_H + GAP_V);
   }
+  raices.forEach(function(r){ layoutX(r); nextX += GAP_H * 2; });
 
-  raices.forEach(function(r){ layout(r, 0); nextX += GAP_H * 2; });
-
-  // Calcular dimensiones totales
-  var maxX = 0, maxY = 0;
+  // Dimensiones
+  var maxX = 0;
   function walk(n) {
     maxX = Math.max(maxX, n._x + BOX_W);
-    maxY = Math.max(maxY, n._y + BOX_H);
     (n.reportes || []).forEach(walk);
   }
   raices.forEach(walk);
+  var W = Math.max(maxX + 20, 800);
+  var H = BANDAS.length * LANE_H + 10;
 
-  var W = Math.max(maxX + 20, 640);
-  var H = maxY + 20;
-
-  // Render
+  // ─── RENDER ───
   var svg = '<svg width="' + W + '" height="' + H + '" xmlns="http://www.w3.org/2000/svg" style="display:block">';
+
+  // 1. Fondos de bandas + labels izquierdos
+  BANDAS.forEach(function(b, i) {
+    var y = i * LANE_H;
+    svg += '<rect x="0" y="' + y + '" width="' + W + '" height="' + LANE_H + '" fill="' + b.bg + '"/>';
+    // Línea separadora inferior
+    svg += '<line x1="0" y1="' + (y + LANE_H) + '" x2="' + W + '" y2="' + (y + LANE_H) + '" stroke="#E5E7EB" stroke-width="1"/>';
+    // Numerito grande del nivel
+    svg += '<text x="20" y="' + (y + LANE_H/2 - 4) + '" font-size="32" font-weight="700" fill="#CBD5E1">' + b.nivel + '</text>';
+    // Label texto
+    svg += '<text x="20" y="' + (y + LANE_H/2 + 18) + '" font-size="10" font-weight="600" fill="#94A3B8" letter-spacing="0.5">' + eqEsc(b.label.toUpperCase()) + '</text>';
+  });
+  // Separador vertical entre labels y cajas
+  svg += '<line x1="' + LANE_LABEL_W + '" y1="0" x2="' + LANE_LABEL_W + '" y2="' + H + '" stroke="#D1D5DB" stroke-width="1.5"/>';
+
+  // 2. Cajas + líneas de reporte
   function renderNode(n) {
     var esVirtual = !!n._es_directorio;
     var col = esVirtual ? { bg:'#3C3489', fg:'#FFFFFF' } : eqColorPersona(n);
@@ -24347,12 +24384,12 @@ function eqRenderOrgchart(cont, raices) {
     var linea2 = esVirtual ? '' : (n.cargo || '');
     var clickAttr = esVirtual ? '' : ' style="cursor:pointer" onclick="eqEditarPersona(' + n.id + ')"';
     var s = '';
-    // Líneas a los hijos
+    // Líneas a los hijos (pueden cruzar bandas verticalmente)
     (n.reportes || []).forEach(function(c) {
       var x1 = n._x + BOX_W / 2, y1 = n._y + BOX_H;
       var x2 = c._x + BOX_W / 2, y2 = c._y;
       var ym = (y1 + y2) / 2;
-      s += '<path d="M ' + x1 + ' ' + y1 + ' V ' + ym + ' H ' + x2 + ' V ' + y2 + '" fill="none" stroke="#bbb" stroke-width="1"/>';
+      s += '<path d="M ' + x1 + ' ' + y1 + ' V ' + ym + ' H ' + x2 + ' V ' + y2 + '" fill="none" stroke="#9CA3AF" stroke-width="1"/>';
     });
     // Caja
     s += '<g' + clickAttr + '>' +
@@ -24366,8 +24403,9 @@ function eqRenderOrgchart(cont, raices) {
   raices.forEach(function(r){ svg += renderNode(r); });
   svg += '</svg>';
 
-  // Leyenda de colores debajo del SVG
+  // Leyenda de colores debajo
   var leyenda = '<div style="margin-top:14px; padding-top:10px; border-top:1px dashed var(--bor); display:flex; gap:14px; flex-wrap:wrap; font-size:11px">';
+  leyenda += '<span style="color:var(--mut); font-weight:600">Color por categoría de área:</span>';
   ['direccion','comercial','operativo','administrativo','profesional'].forEach(function(k) {
     var c = EQ_COLORES[k];
     leyenda += '<span style="display:inline-flex; align-items:center; gap:6px"><span style="display:inline-block; width:12px; height:12px; border-radius:3px; background:' + c.bg + '; border:1px solid ' + c.fg + '"></span><span style="color:var(--mut)">' + c.label + '</span></span>';
@@ -24384,15 +24422,20 @@ function eqCargarUbicaciones() {
     EQ.ubicaciones = r.ubicaciones;
     var tb = document.getElementById('eq-ubic-tbody');
     if (r.ubicaciones.length === 0) {
-      tb.innerHTML = '<tr><td colspan="4" class="emp">Sin ubicaciones cargadas</td></tr>';
+      tb.innerHTML = '<tr><td colspan="5" class="emp">Sin ubicaciones cargadas</td></tr>';
       return;
     }
     tb.innerHTML = r.ubicaciones.map(function(u) {
       var latlng = (u.lat && u.lng) ? (u.lat + ', ' + u.lng) : '—';
+      var pc = u.personas_count || 0;
+      var pcCell = pc === 0
+        ? '<span style="color:var(--sub)">—</span>'
+        : '<span style="display:inline-block;min-width:28px;padding:2px 8px;background:var(--bg);border:1px solid var(--bor);border-radius:10px;font-size:11px;font-weight:600;color:var(--mut)">👥 ' + pc + '</span>';
       return '<tr>' +
         '<td><a href="#" onclick="eqEditarUbicacion(' + u.id + ');return false" style="color:var(--burg); text-decoration:none; font-weight:600">' + eqEsc(u.nombre) + '</a></td>' +
         '<td>' + eqEsc(u.direccion || '—') + '</td>' +
         '<td>' + eqEsc(latlng) + '</td>' +
+        '<td style="text-align:center">' + pcCell + '</td>' +
         '<td>' +
           '<button class="btn bo bs" onclick="eqEditarUbicacion(' + u.id + ')">Editar</button> ' +
           '<button class="btn bo bs" style="color:#991b1b" onclick="eqBorrarUbicacion(' + u.id + ')">×</button>' +
@@ -24453,17 +24496,17 @@ var CM_SOCIEDADES = [];  // se llena con la lista de sociedades activas
 var CM_MODULOS = [];     // cache de la respuesta del backend
 
 function cmCargar() {
-  // Cargar sociedades + módulos en paralelo
+  // Cargo organigrama (sociedades CON sus áreas) + módulos en paralelo
   Promise.all([
-    fetch('/api/org/sociedades', { credentials:'include' }).then(function(r){ return r.json(); }),
+    fetch('/api/org/organigrama', { credentials:'include' }).then(function(r){ return r.json(); }),
     fetch('/api/org/modulos', { credentials:'include' }).then(function(r){ return r.json(); })
   ]).then(function(arr) {
     var resSoc = arr[0], resMod = arr[1];
     if (!resMod.ok) {
-      document.getElementById('t-modulos').innerHTML = '<tr><td colspan="4" class="emp">Error: '+(resMod.error||'sin permiso')+'</td></tr>';
+      document.getElementById('t-modulos').innerHTML = '<tr><td colspan="6" class="emp">Error: '+(resMod.error||'sin permiso')+'</td></tr>';
       return;
     }
-    CM_SOCIEDADES = (resSoc.sociedades || []).filter(function(s){ return s.activa; });
+    CM_SOCIEDADES = (resSoc.sociedades || []);  // cada una con .areas[]
     CM_MODULOS = resMod.modulos || [];
     cmRender();
   });
@@ -24477,7 +24520,6 @@ function cmRender() {
     grupos[m.grupo].push(m);
   });
   var ordenGrupos = Object.keys(grupos).sort(function(a,b) {
-    // ordenar grupos por el orden mínimo de sus módulos
     var minA = Math.min.apply(null, grupos[a].map(function(m){return m.orden||0;}));
     var minB = Math.min.apply(null, grupos[b].map(function(m){return m.orden||0;}));
     return minA - minB;
@@ -24486,22 +24528,28 @@ function cmRender() {
   var html = '';
   ordenGrupos.forEach(function(grupo) {
     // Header de grupo con acciones masivas
-    html += '<tr style="background:var(--bg)"><td colspan="4" style="padding:8px 12px">' +
+    html += '<tr style="background:var(--bg)"><td colspan="6" style="padding:8px 12px">' +
       '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">' +
       '<strong style="font-size:13px">' + grupo + ' <span style="color:var(--mut);font-weight:400">('+grupos[grupo].length+')</span></strong>' +
       '<div style="margin-left:auto;display:flex;gap:6px;align-items:center;font-size:11px">' +
       '<span style="color:var(--mut)">Asignar todo el grupo:</span>' +
       cmBulkSocSelect(grupo) +
       cmBulkTipoSelect(grupo) +
+      cmBulkOcultoSelect(grupo) +
       '</div></div></td></tr>';
     // Filas individuales
     grupos[grupo].forEach(function(m) {
-      html += '<tr>' +
-        '<td><code style="font-size:11px;color:var(--burg);background:var(--bg);padding:2px 6px;border-radius:4px">'+m.modulo+'</code> ' +
+      var ocultoStyle = m.oculto ? 'background:#FFF7ED' : '';  // naranja claro si oculto
+      var iconLock = m.oculto ? '<span title="Oculto: solo Directivo lo ve" style="margin-right:4px">🔒</span>' : '';
+      html += '<tr style="'+ocultoStyle+'">' +
+        '<td>' + iconLock +
+          '<code style="font-size:11px;color:var(--burg);background:var(--bg);padding:2px 6px;border-radius:4px">'+m.modulo+'</code> ' +
           '<span style="font-size:12px;margin-left:6px">'+m.label+'</span></td>' +
         '<td style="font-size:12px;color:var(--mut)">'+m.grupo+'</td>' +
         '<td>'+cmSocSelect(m)+'</td>' +
+        '<td>'+cmAreaSelect(m)+'</td>' +
         '<td>'+cmTipoSelect(m)+'</td>' +
+        '<td style="text-align:center">'+cmOcultoToggle(m)+'</td>' +
       '</tr>';
     });
   });
@@ -24513,22 +24561,47 @@ function cmSocSelect(m) {
   CM_SOCIEDADES.forEach(function(s) {
     opts += '<option value="'+s.id+'"'+(m.sociedad_id==s.id?' selected':'')+'>'+s.nombre+'</option>';
   });
-  return '<select onchange="cmActualizar(\''+m.modulo+'\',{sociedad_id:this.value||null})" style="font-size:12px;padding:4px 8px;min-width:160px">'+opts+'</select>';
+  return '<select onchange="cmCambiarSociedad(\''+m.modulo+'\',this.value)" style="font-size:12px;padding:4px 8px;min-width:150px">'+opts+'</select>';
 }
+
+function cmAreaSelect(m) {
+  // Si no hay sociedad, el área queda deshabilitada
+  if (!m.sociedad_id) {
+    return '<select disabled style="font-size:12px;padding:4px 8px;min-width:140px;opacity:.5"><option>— sin sociedad —</option></select>';
+  }
+  var soc = CM_SOCIEDADES.find(function(s){ return s.id == m.sociedad_id; });
+  var areas = (soc && soc.areas) ? soc.areas : [];
+  var opts = '<option value=""'+(!m.area_id?' selected':'')+'>— Todas las áreas —</option>';
+  areas.forEach(function(a) {
+    opts += '<option value="'+a.id+'"'+(m.area_id==a.id?' selected':'')+'>'+a.nombre+'</option>';
+  });
+  return '<select onchange="cmActualizar(\''+m.modulo+'\',{area_id:this.value?parseInt(this.value):null})" style="font-size:12px;padding:4px 8px;min-width:140px">'+opts+'</select>';
+}
+
 function cmTipoSelect(m) {
+  // 5 niveles 0-4. Color va de gris (más restrictivo) a violeta (más abierto)
   var tipos = [
-    {v:'numero',    label:'🔢 Número',    bg:'#fde68a'},
-    {v:'operativo', label:'⚙️ Operativo', bg:'#bbf7d0'},
-    {v:'mobile',    label:'📱 Mobile',    bg:'#bfdbfe'},
-    {v:'externo',   label:'🔓 Externo',   bg:'#e9d5ff'},
-    {v:'sistema',   label:'🛡️ Sistema',   bg:'#e5e7eb'}
+    {v:0, label:'0 — solo Directivo',          bg:'#e5e7eb'},
+    {v:1, label:'1 — hasta Gerencial',         bg:'#fde68a'},
+    {v:2, label:'2 — hasta Ejecutivo',         bg:'#bbf7d0'},
+    {v:3, label:'3 — hasta Adm/Operativo',     bg:'#bfdbfe'},
+    {v:4, label:'4 — hasta Externo',           bg:'#e9d5ff'}
   ];
-  var actual = tipos.find(function(t){return t.v===m.tipo;}) || tipos[1];
+  var actual = tipos.find(function(t){return t.v===parseInt(m.tipo);}) || tipos[2];
   var opts = tipos.map(function(t) {
-    return '<option value="'+t.v+'"'+(m.tipo===t.v?' selected':'')+'>'+t.label+'</option>';
+    return '<option value="'+t.v+'"'+(parseInt(m.tipo)===t.v?' selected':'')+'>'+t.label+'</option>';
   }).join('');
-  return '<select onchange="cmActualizar(\''+m.modulo+'\',{tipo:this.value})" style="font-size:12px;padding:4px 8px;background:'+actual.bg+'">'+opts+'</select>';
+  return '<select onchange="cmActualizar(\''+m.modulo+'\',{tipo:parseInt(this.value)})" style="font-size:12px;padding:4px 8px;background:'+actual.bg+'">'+opts+'</select>';
 }
+
+function cmOcultoToggle(m) {
+  // Botón toggle: clickea para alternar Visible/Oculto
+  if (m.oculto) {
+    return '<button onclick="cmActualizar(\''+m.modulo+'\',{oculto:0})" title="Está oculto. Click para mostrar" style="font-size:11px;padding:4px 10px;background:#FED7AA;border:1px solid #FB923C;color:#9A3412;border-radius:4px;cursor:pointer;font-weight:600">🔒 Oculto</button>';
+  }
+  return '<button onclick="cmActualizar(\''+m.modulo+'\',{oculto:1})" title="Visible para todos. Click para ocultar (solo lo verá Directivo)" style="font-size:11px;padding:4px 10px;background:#D1FAE5;border:1px solid #10B981;color:#065F46;border-radius:4px;cursor:pointer;font-weight:600">👁️ Visible</button>';
+}
+
 function cmBulkSocSelect(grupo) {
   var opts = '<option value="">→ Sociedad</option><option value="0">— Transversal —</option>';
   CM_SOCIEDADES.forEach(function(s){ opts += '<option value="'+s.id+'">'+s.nombre+'</option>'; });
@@ -24537,12 +24610,25 @@ function cmBulkSocSelect(grupo) {
 function cmBulkTipoSelect(grupo) {
   return '<select onchange="cmBulkTipo(\''+grupo+'\',this.value);this.value=\'\'" style="font-size:11px;padding:3px 6px">' +
     '<option value="">→ Tipo</option>' +
-    '<option value="numero">🔢 Número</option>' +
-    '<option value="operativo">⚙️ Operativo</option>' +
-    '<option value="mobile">📱 Mobile</option>' +
-    '<option value="externo">🔓 Externo</option>' +
-    '<option value="sistema">🛡️ Sistema</option>' +
+    '<option value="0">0 — solo Directivo</option>' +
+    '<option value="1">1 — hasta Gerencial</option>' +
+    '<option value="2">2 — hasta Ejecutivo</option>' +
+    '<option value="3">3 — hasta Adm/Operativo</option>' +
+    '<option value="4">4 — hasta Externo</option>' +
     '</select>';
+}
+function cmBulkOcultoSelect(grupo) {
+  return '<select onchange="cmBulkOculto(\''+grupo+'\',this.value);this.value=\'\'" style="font-size:11px;padding:3px 6px">' +
+    '<option value="">→ Visible/Oculto</option>' +
+    '<option value="0">👁️ Visibles</option>' +
+    '<option value="1">🔒 Ocultos (solo Directivo)</option>' +
+    '</select>';
+}
+
+function cmCambiarSociedad(modulo, val) {
+  // Al cambiar sociedad, el área se resetea (no aplica a la nueva sociedad)
+  var nuevaSoc = val ? parseInt(val) : null;
+  cmActualizar(modulo, { sociedad_id: nuevaSoc, area_id: null });
 }
 
 function cmActualizar(modulo, cambios) {
@@ -24554,7 +24640,7 @@ function cmActualizar(modulo, cambios) {
     .then(function(r){ return r.json(); })
     .then(function(res) {
       if (res.ok) {
-        // Actualizar cache local sin recargar
+        // Actualizar cache local
         var m = CM_MODULOS.find(function(x){return x.modulo===modulo;});
         if (m) {
           if (cambios.sociedad_id !== undefined) {
@@ -24562,13 +24648,47 @@ function cmActualizar(modulo, cambios) {
             var s = CM_SOCIEDADES.find(function(x){return x.id==m.sociedad_id;});
             m.sociedad_nombre = s ? s.nombre : null;
           }
+          if (cambios.area_id !== undefined) {
+            m.area_id = cambios.area_id || null;
+            if (m.area_id) {
+              // Buscar el nombre del área en CM_SOCIEDADES
+              for (var i = 0; i < CM_SOCIEDADES.length; i++) {
+                var a = (CM_SOCIEDADES[i].areas || []).find(function(x){ return x.id == m.area_id; });
+                if (a) { m.area_nombre = a.nombre; m.sociedad_id = CM_SOCIEDADES[i].id; break; }
+              }
+            } else {
+              m.area_nombre = null;
+            }
+          }
           if (cambios.tipo !== undefined) m.tipo = cambios.tipo;
+          if (cambios.oculto !== undefined) m.oculto = cambios.oculto;
         }
+        // Re-render completo (necesario porque cambiar sociedad cambia opciones del área, y cambiar oculto cambia el fondo de fila)
+        cmRender();
         toast('Actualizado','ok');
       } else {
         toast('Error: '+res.error, 'er');
-        cmCargar();  // recargar para volver al estado correcto
+        cmCargar();
       }
+    });
+}
+
+function cmBulkOculto(grupo, val) {
+  if (val === '') return;
+  var oculto = val === '1' ? 1 : 0;
+  var msg = oculto
+    ? '¿Ocultar TODOS los módulos de "'+grupo+'"? Solo Directivos podrán verlos.'
+    : '¿Hacer VISIBLES TODOS los módulos de "'+grupo+'"?';
+  if (!confirm(msg)) { cmCargar(); return; }
+  fetch('/api/org/modulos/bulk', {
+    method:'POST', credentials:'include',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ filter:{grupo:grupo}, update:{oculto:oculto} })
+  })
+    .then(function(r){ return r.json(); })
+    .then(function(res) {
+      if (res.ok) { toast('✓ '+res.actualizados+' módulos actualizados','ok'); cmCargar(); }
+      else { toast('Error: '+res.error,'er'); }
     });
 }
 
