@@ -246,19 +246,23 @@ router.get('/personas/:id', (req, res) => {
 });
 
 router.post('/personas', requireAdmin, (req, res) => {
-  const { dni, nombre, apellido, mail, telefono, ubicacion_id, notas, areas, reporta_a_id, cargo, reporta_a_directorio } = req.body || {};
+  const { dni, nombre, apellido, mail, telefono, ubicacion_id, notas, areas, reporta_a_id, cargo, reporta_a_directorio, nivel_acceso } = req.body || {};
   if (!nombre) return res.status(400).json({ ok: false, error: 'nombre requerido' });
   // Mutuamente excluyente: o reporta a una persona, o al Directorio
   const repDir = reporta_a_directorio ? 1 : 0;
   const repId  = repDir ? null : (reporta_a_id ? parseInt(reporta_a_id) : null);
+  // Nivel de acceso 0-4 (default 0 = admin total)
+  const nivel = (nivel_acceso !== undefined && nivel_acceso !== null && nivel_acceso !== '')
+    ? Math.max(0, Math.min(4, parseInt(nivel_acceso)))
+    : 0;
   try {
     const r = db().prepare(`
-      INSERT INTO personas (dni, nombre, apellido, mail, telefono, ubicacion_id, notas, reporta_a_id, cargo, reporta_a_directorio)
-      VALUES (?,?,?,?,?,?,?,?,?,?)
+      INSERT INTO personas (dni, nombre, apellido, mail, telefono, ubicacion_id, notas, reporta_a_id, cargo, reporta_a_directorio, nivel_acceso)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?)
     `).run(
       dni || null, nombre.trim(), apellido || null, mail || null, telefono || null,
       ubicacion_id ? parseInt(ubicacion_id) : null, notas || null,
-      repId, cargo || null, repDir
+      repId, cargo || null, repDir, nivel
     );
     const personaId = r.lastInsertRowid;
     if (Array.isArray(areas) && areas.length > 0) {
@@ -273,7 +277,7 @@ router.post('/personas', requireAdmin, (req, res) => {
 
 router.patch('/personas/:id', requireAdmin, (req, res) => {
   const id = parseInt(req.params.id);
-  const { dni, nombre, apellido, mail, telefono, ubicacion_id, notas, activo, reporta_a_id, cargo, reporta_a_directorio } = req.body || {};
+  const { dni, nombre, apellido, mail, telefono, ubicacion_id, notas, activo, reporta_a_id, cargo, reporta_a_directorio, nivel_acceso } = req.body || {};
   try {
     const cur = db().prepare("SELECT * FROM personas WHERE id = ?").get(id);
     if (!cur) return res.status(404).json({ ok: false, error: 'No existe' });
@@ -304,9 +308,15 @@ router.patch('/personas/:id', requireAdmin, (req, res) => {
       nuevoReportaA = r;
     }
 
+    // Nivel de acceso (0-4) — si vino en body lo aplico, si no mantengo el actual
+    let nuevoNivel = cur.nivel_acceso || 0;
+    if (nivel_acceso !== undefined && nivel_acceso !== null && nivel_acceso !== '') {
+      nuevoNivel = Math.max(0, Math.min(4, parseInt(nivel_acceso)));
+    }
+
     db().prepare(`
       UPDATE personas SET dni = ?, nombre = ?, apellido = ?, mail = ?, telefono = ?,
-        ubicacion_id = ?, notas = ?, activo = ?, reporta_a_id = ?, cargo = ?, reporta_a_directorio = ?
+        ubicacion_id = ?, notas = ?, activo = ?, reporta_a_id = ?, cargo = ?, reporta_a_directorio = ?, nivel_acceso = ?
       WHERE id = ?
     `).run(
       dni ?? cur.dni,
@@ -320,6 +330,7 @@ router.patch('/personas/:id', requireAdmin, (req, res) => {
       nuevoReportaA,
       cargo ?? cur.cargo,
       nuevoReportaDir,
+      nuevoNivel,
       id
     );
     res.json({ ok: true });
@@ -407,6 +418,90 @@ router.get('/jerarquia', (req, res) => {
       ORDER BY p.apellido, p.nombre
     `).all();
     res.json({ ok: true, personas });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// ─── FASE 3.A: CONFIGURACIÓN DE MÓDULOS ────────────────────────────────
+// El admin define qué sociedad y tipo tiene cada módulo del panel.
+// Esto se usa después en /me para calcular permisos efectivos por usuario.
+
+// GET /modulos — lista todos los módulos con su configuración (admin only)
+router.get('/modulos', requireAdmin, (req, res) => {
+  try {
+    const rows = db().prepare(`
+      SELECT m.modulo, m.label, m.grupo, m.sociedad_id, m.tipo, m.orden,
+             s.nombre AS sociedad_nombre
+      FROM modulos_config m
+      LEFT JOIN sociedades s ON s.id = m.sociedad_id
+      ORDER BY m.orden ASC, m.label ASC
+    `).all();
+    res.json({ ok: true, modulos: rows });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// PATCH /modulos/:modulo — actualizar sociedad y/o tipo de un módulo
+router.patch('/modulos/:modulo', requireAdmin, (req, res) => {
+  const modulo = req.params.modulo;
+  const { sociedad_id, tipo } = req.body || {};
+  try {
+    const cur = db().prepare("SELECT * FROM modulos_config WHERE modulo = ?").get(modulo);
+    if (!cur) return res.status(404).json({ ok: false, error: 'Módulo no encontrado' });
+
+    // sociedad_id: null = transversal, número = sociedad específica
+    let nuevaSoc = cur.sociedad_id;
+    if (sociedad_id !== undefined) {
+      nuevaSoc = sociedad_id ? parseInt(sociedad_id) : null;
+      if (nuevaSoc) {
+        const exSoc = db().prepare("SELECT id FROM sociedades WHERE id = ?").get(nuevaSoc);
+        if (!exSoc) return res.status(400).json({ ok: false, error: 'Sociedad inexistente' });
+      }
+    }
+
+    let nuevoTipo = cur.tipo;
+    if (tipo !== undefined) {
+      if (!['numero','operativo','mobile','externo','sistema'].includes(tipo)) {
+        return res.status(400).json({ ok: false, error: 'Tipo inválido' });
+      }
+      nuevoTipo = tipo;
+    }
+
+    db().prepare("UPDATE modulos_config SET sociedad_id = ?, tipo = ? WHERE modulo = ?")
+      .run(nuevaSoc, nuevoTipo, modulo);
+    res.json({ ok: true });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// POST /modulos/bulk — actualización masiva (filtros por grupo o prefijo)
+// Body: { filter: { grupo?, prefix? }, update: { sociedad_id?, tipo? } }
+// Ej: { filter:{prefix:'pa-'}, update:{sociedad_id:2} } → todos los pa-* a Puente Cordón
+router.post('/modulos/bulk', requireAdmin, (req, res) => {
+  const { filter, update } = req.body || {};
+  if (!filter || !update) return res.status(400).json({ ok: false, error: 'Falta filter o update' });
+
+  try {
+    let sql = "UPDATE modulos_config SET ";
+    const sets = [];
+    const params = [];
+
+    if (update.sociedad_id !== undefined) {
+      sets.push("sociedad_id = ?");
+      params.push(update.sociedad_id ? parseInt(update.sociedad_id) : null);
+    }
+    if (update.tipo !== undefined) {
+      if (!['numero','operativo','mobile','externo','sistema'].includes(update.tipo)) {
+        return res.status(400).json({ ok: false, error: 'Tipo inválido' });
+      }
+      sets.push("tipo = ?");
+      params.push(update.tipo);
+    }
+    if (sets.length === 0) return res.status(400).json({ ok: false, error: 'Nada para actualizar' });
+
+    sql += sets.join(', ') + " WHERE 1=1";
+    if (filter.grupo) { sql += " AND grupo = ?"; params.push(filter.grupo); }
+    if (filter.prefix) { sql += " AND modulo LIKE ?"; params.push(filter.prefix + '%'); }
+
+    const r = db().prepare(sql).run(...params);
+    res.json({ ok: true, actualizados: r.changes });
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 

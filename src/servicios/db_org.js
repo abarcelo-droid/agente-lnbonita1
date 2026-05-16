@@ -137,4 +137,151 @@ try {
   }
 })();
 
+// ─── FASE 3.A: nivel de acceso de personas (0-4) ────────────────────────
+// 0: Nivel Directivo            — acceso total y modificaciones
+// 1: Nivel Gerencial            — acceso a todos los números de su sociedad
+// 2: Nivel Ejecutivo            — solo operativos: panel y apps
+// 3: Nivel Administrativo/Operativo — operativos solo apps
+// 4: Externo                    — operativos externos a la empresa
+try { db.exec("ALTER TABLE personas ADD COLUMN nivel_acceso INTEGER DEFAULT 0"); } catch(_) {}
+
+// ─── FASE 3.A: configuración de módulos del panel ────────────────────────
+// Cada módulo del sidebar pertenece a una sociedad y tiene un tipo.
+// Esto define quién lo ve según (sociedad_visible × nivel_acceso).
+// El admin puede modificar la asignación desde la UI.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS modulos_config (
+    modulo       TEXT PRIMARY KEY,
+    label        TEXT NOT NULL,
+    grupo        TEXT NOT NULL,
+    sociedad_id  INTEGER REFERENCES sociedades(id),
+    tipo         TEXT NOT NULL DEFAULT 'operativo' CHECK(tipo IN ('numero','operativo','mobile','externo','sistema')),
+    orden        INTEGER DEFAULT 0
+  );
+  CREATE INDEX IF NOT EXISTS idx_modulos_grupo    ON modulos_config(grupo);
+  CREATE INDEX IF NOT EXISTS idx_modulos_sociedad ON modulos_config(sociedad_id);
+`);
+
+// Seed inicial de los 65 módulos detectados del sidebar.
+// Defaults razonables; el admin puede ajustarlos desde la UI.
+(function seedModulos() {
+  try {
+    const n = db.prepare("SELECT COUNT(*) AS n FROM modulos_config").get().n;
+    if (n > 0) return;  // idempotente
+
+    // Helper: obtener ID de sociedad por nombre (puede ser null si no existe)
+    const sid = (nombre) => {
+      const r = db.prepare("SELECT id FROM sociedades WHERE nombre = ?").get(nombre);
+      return r ? r.id : null;
+    };
+    const SG = sid('San Gerónimo SA');
+    const PC = sid('Puente Cordón SA');
+    const FAM = sid('Familia');
+    // BT = sid('Barceló Transporte SRL'); // no usado por default, admin lo asigna
+
+    const insert = db.prepare(
+      "INSERT INTO modulos_config (modulo, label, grupo, sociedad_id, tipo, orden) VALUES (?,?,?,?,?,?)"
+    );
+
+    const modulos = [
+      // ── General / Sistema (transversal, todos ven)
+      ['inicio',              'Inicio / Dashboard',         'General',       null, 'sistema',   10],
+      ['calendario',          'Calendario',                 'General',       null, 'sistema',   11],
+      ['conv',                'Conversaciones',             'General',       null, 'sistema',   12],
+      ['equipo',              'Equipo (Organigrama)',       'Sistema',       null, 'sistema',  900],
+      ['maestro-usuarios',    'Usuarios',                   'Sistema',       null, 'sistema',  901],
+      ['ingreso-factura',     'Ingreso de Factura',         'General',       null, 'operativo', 13],
+
+      // ── Comercial / CRM (San Gerónimo)
+      ['crm',                 'CRM Dedicados',              'Comercial',     SG,   'operativo', 100],
+      ['dedicados',           'Dedicados',                  'Comercial',     SG,   'operativo', 101],
+      ['food',                'Food Service',               'Comercial',     SG,   'operativo', 102],
+      ['may-a',               'Mayorista A',                'Comercial',     SG,   'operativo', 103],
+      ['may-mcba',            'Mayorista MCBA',             'Comercial',     SG,   'operativo', 104],
+      ['min-mcba',            'Minorista MCBA',             'Comercial',     SG,   'operativo', 105],
+      ['min-ent',             'Minorista Entrega',          'Comercial',     SG,   'operativo', 106],
+      ['cons-final',          'Consumidor Final',           'Comercial',     SG,   'operativo', 107],
+      ['pedidos',             'Pedidos',                    'Comercial',     SG,   'operativo', 108],
+      ['repet',               'Recompra',                   'Comercial',     SG,   'operativo', 109],
+
+      // ── Pricing & Ofertas (números, San Gerónimo)
+      ['pricing1',            'Pricing 1',                  'Pricing',       SG,   'numero',    200],
+      ['pricing2',            'Pricing 2',                  'Pricing',       SG,   'numero',    201],
+      ['oferta1',             'Oferta 1',                   'Pricing',       SG,   'numero',    202],
+      ['oferta2',             'Oferta 2',                   'Pricing',       SG,   'numero',    203],
+
+      // ── Logística (San Gerónimo)
+      ['logistica',           'Logística',                  'Logística',     SG,   'operativo', 300],
+      ['envios',              'Envíos',                     'Logística',     SG,   'operativo', 301],
+      ['preparacion',         'Preparación',                'Logística',     SG,   'operativo', 302],
+      ['remitos',             'Remitos',                    'Logística',     SG,   'operativo', 303],
+      ['guardias',            'Guardias',                   'Logística',     SG,   'operativo', 304],
+
+      // ── Cobranzas (números, San Gerónimo)
+      ['cobranza',            'Cobranza',                   'Cobranzas',     SG,   'numero',    400],
+      ['cta-cte',             'Cuenta Corriente',           'Cobranzas',     SG,   'numero',    401],
+
+      // ── Producción Agrícola (Puente Cordón)
+      ['pa-dashboard',        'Dashboard PA',               'Producción',    PC,   'operativo', 500],
+      ['pa-lotes',            'Lotes',                      'Producción',    PC,   'operativo', 501],
+      ['pa-insumos',          'Insumos',                    'Producción',    PC,   'operativo', 502],
+      ['pa-clima',            'Clima',                      'Producción',    PC,   'operativo', 503],
+      ['pa-combustible',      'Combustible',                'Producción',    PC,   'operativo', 504],
+      ['pa-compras',          'Compras',                    'Producción',    PC,   'operativo', 505],
+      ['pa-costos',           'Costos',                     'Producción',    PC,   'numero',    506],
+      ['pa-cuentas',          'Cuentas',                    'Producción',    PC,   'numero',    507],
+      ['pa-calendario',       'Calendario PA',              'Producción',    PC,   'operativo', 508],
+      ['pa-despachos',        'Despachos',                  'Producción',    PC,   'operativo', 509],
+      ['pa-electricidad',     'Electricidad',               'Producción',    PC,   'operativo', 510],
+      ['pa-ordenes',          'Órdenes',                    'Producción',    PC,   'operativo', 511],
+      ['pa-panol',            'Pañol',                      'Producción',    PC,   'operativo', 512],
+      ['pa-personal',         'Personal',                   'Producción',    PC,   'operativo', 513],
+      ['pa-scout',            'Scout (Mobile)',             'Producción',    PC,   'mobile',    514],
+
+      // ── Abasto IFCO (San Gerónimo)
+      ['ab-dashboard',        'Dashboard IFCO',             'Abasto IFCO',   SG,   'operativo', 600],
+      ['ab-gastos',           'Gastos IFCO',                'Abasto IFCO',   SG,   'numero',    601],
+      ['ab-ifcos',            'IFCOs',                      'Abasto IFCO',   SG,   'operativo', 602],
+      ['ab-liquidaciones',    'Liquidaciones IFCO',         'Abasto IFCO',   SG,   'numero',    603],
+      ['ab-mandata',          'Mandata',                    'Abasto IFCO',   SG,   'numero',    604],
+      ['ab-partidas',         'Partidas',                   'Abasto IFCO',   SG,   'operativo', 605],
+      ['ab-proveedores',      'Proveedores IFCO',           'Abasto IFCO',   SG,   'operativo', 606],
+      ['ab-remitos',          'Remitos IFCO',               'Abasto IFCO',   SG,   'operativo', 607],
+      ['ab-stock',            'Stock IFCO',                 'Abasto IFCO',   SG,   'operativo', 608],
+
+      // ── Administración Contable (Familia, transversal números)
+      ['adm-asientos',        'Asientos',                   'Contabilidad',  FAM,  'numero',    700],
+      ['adm-cc-proveedores',  'CC Proveedores',             'Contabilidad',  FAM,  'numero',    701],
+      ['adm-modelos',         'Modelos',                    'Contabilidad',  FAM,  'numero',    702],
+      ['adm-plan-cuentas',    'Plan de Cuentas',            'Contabilidad',  FAM,  'numero',    703],
+      ['adm-proveedores',     'Proveedores',                'Contabilidad',  FAM,  'numero',    704],
+
+      // ── Financiero (Familia)
+      ['fin-caja-bancos',     'Caja / Bancos',              'Financiero',    FAM,  'numero',    750],
+      ['fin-ordenes-pago',    'Órdenes de Pago',            'Financiero',    FAM,  'numero',    751],
+
+      // ── Ventas (San Gerónimo, mayoría números)
+      ['ven-clientes',        'Clientes Ventas',            'Ventas',        SG,   'operativo', 800],
+      ['ven-facturas',        'Facturas Ventas',            'Ventas',        SG,   'numero',    801],
+      ['ven-cobranzas',       'Cobranzas Ventas',           'Ventas',        SG,   'numero',    802],
+      ['ven-cc',              'CC Ventas',                  'Ventas',        SG,   'numero',    803],
+      ['ven-liquidaciones',   'Liquidaciones Ventas',       'Ventas',        SG,   'numero',    804],
+
+      // ── Retail (San Gerónimo)
+      ['retail-view',         'Retail View',                'Retail',        SG,   'operativo', 850],
+      ['retail-prod',         'Retail Producción',          'Retail',        SG,   'operativo', 851],
+      ['retail-gastos',       'Retail Gastos',              'Retail',        SG,   'numero',    852],
+      ['rent-retail',         'Rentabilidad Retail',        'Retail',        SG,   'numero',    853],
+    ];
+
+    db.transaction(() => {
+      for (const m of modulos) insert.run(...m);
+    })();
+
+    console.log(`[ORG] Seed: ${modulos.length} módulos de configuración cargados (Fase 3.A)`);
+  } catch(e) {
+    console.error("[ORG] Error seed modulos:", e.message);
+  }
+})();
+
 console.log("[ORG] Schema organizacional inicializado");
