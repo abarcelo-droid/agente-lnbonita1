@@ -162,6 +162,11 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_modulos_sociedad ON modulos_config(sociedad_id);
 `);
 
+// FASE 3.A v2 — agregar área específica del módulo + flag de oculto (idempotente)
+try { db.exec("ALTER TABLE modulos_config ADD COLUMN area_id INTEGER REFERENCES areas(id)"); } catch(_) {}
+try { db.exec("ALTER TABLE modulos_config ADD COLUMN oculto INTEGER NOT NULL DEFAULT 0"); } catch(_) {}
+try { db.exec("CREATE INDEX IF NOT EXISTS idx_modulos_area ON modulos_config(area_id)"); } catch(_) {}
+
 // Seed inicial de los 65 módulos detectados del sidebar.
 // Defaults razonables; el admin puede ajustarlos desde la UI.
 (function seedModulos() {
