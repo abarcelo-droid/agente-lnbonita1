@@ -394,7 +394,7 @@ router.get('/organigrama', (req, res) => {
 router.get('/jerarquia', (req, res) => {
   try {
     const personas = db().prepare(`
-      SELECT p.id, p.nombre, p.apellido, p.cargo, p.reporta_a_id, p.reporta_a_directorio,
+      SELECT p.id, p.nombre, p.apellido, p.cargo, p.reporta_a_id, p.reporta_a_directorio, p.nivel_acceso,
         (SELECT GROUP_CONCAT(s.nombre || ' / ' || a.nombre, ' · ')
          FROM personas_areas pa
          JOIN areas a     ON a.id = pa.area_id
