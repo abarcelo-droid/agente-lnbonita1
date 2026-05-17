@@ -425,6 +425,15 @@ router.get('/jerarquia', (req, res) => {
 // El admin define qué sociedad y tipo tiene cada módulo del panel.
 // Esto se usa después en /me para calcular permisos efectivos por usuario.
 
+// GET /modulos-ocultos — lista de módulos marcados como ocultos
+// Cualquier usuario autenticado puede consultar esto (lo usa el sidebar para filtrar)
+router.get('/modulos-ocultos', (req, res) => {
+  try {
+    const rows = db().prepare("SELECT modulo FROM modulos_config WHERE oculto = 1").all();
+    res.json({ ok: true, modulos: rows.map(r => r.modulo) });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
 // GET /modulos — lista todos los módulos con su configuración (admin only)
 router.get('/modulos', requireAdmin, (req, res) => {
   try {
