@@ -429,20 +429,22 @@ router.get('/jerarquia', (req, res) => {
 router.get('/modulos', requireAdmin, (req, res) => {
   try {
     const rows = db().prepare(`
-      SELECT m.modulo, m.label, m.grupo, m.sociedad_id, m.tipo, m.orden,
-             s.nombre AS sociedad_nombre
+      SELECT m.modulo, m.label, m.grupo, m.sociedad_id, m.area_id, m.tipo, m.oculto, m.orden,
+             s.nombre AS sociedad_nombre,
+             a.nombre AS area_nombre
       FROM modulos_config m
       LEFT JOIN sociedades s ON s.id = m.sociedad_id
+      LEFT JOIN areas a      ON a.id = m.area_id
       ORDER BY m.orden ASC, m.label ASC
     `).all();
     res.json({ ok: true, modulos: rows });
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
-// PATCH /modulos/:modulo — actualizar sociedad y/o tipo de un módulo
+// PATCH /modulos/:modulo — actualizar sociedad, área, tipo y/o oculto
 router.patch('/modulos/:modulo', requireAdmin, (req, res) => {
   const modulo = req.params.modulo;
-  const { sociedad_id, tipo } = req.body || {};
+  const { sociedad_id, area_id, tipo, oculto } = req.body || {};
   try {
     const cur = db().prepare("SELECT * FROM modulos_config WHERE modulo = ?").get(modulo);
     if (!cur) return res.status(404).json({ ok: false, error: 'Módulo no encontrado' });
@@ -457,6 +459,22 @@ router.patch('/modulos/:modulo', requireAdmin, (req, res) => {
       }
     }
 
+    // area_id: null = todas las áreas de la sociedad. Si está set, fuerza la sociedad a la del área (consistencia)
+    let nuevaArea = cur.area_id;
+    if (area_id !== undefined) {
+      nuevaArea = area_id ? parseInt(area_id) : null;
+      if (nuevaArea) {
+        const exArea = db().prepare("SELECT sociedad_id FROM areas WHERE id = ?").get(nuevaArea);
+        if (!exArea) return res.status(400).json({ ok: false, error: 'Área inexistente' });
+        nuevaSoc = exArea.sociedad_id;
+      }
+    }
+    // Si cambió la sociedad y el área actual no pertenece a la nueva, limpio el área
+    if (sociedad_id !== undefined && nuevaArea && area_id === undefined) {
+      const exArea = db().prepare("SELECT sociedad_id FROM areas WHERE id = ?").get(nuevaArea);
+      if (!exArea || exArea.sociedad_id !== nuevaSoc) nuevaArea = null;
+    }
+
     let nuevoTipo = cur.tipo;
     if (tipo !== undefined) {
       if (!['numero','operativo','mobile','externo','sistema'].includes(tipo)) {
@@ -465,15 +483,17 @@ router.patch('/modulos/:modulo', requireAdmin, (req, res) => {
       nuevoTipo = tipo;
     }
 
-    db().prepare("UPDATE modulos_config SET sociedad_id = ?, tipo = ? WHERE modulo = ?")
-      .run(nuevaSoc, nuevoTipo, modulo);
+    let nuevoOculto = cur.oculto || 0;
+    if (oculto !== undefined) nuevoOculto = oculto ? 1 : 0;
+
+    db().prepare("UPDATE modulos_config SET sociedad_id = ?, area_id = ?, tipo = ?, oculto = ? WHERE modulo = ?")
+      .run(nuevaSoc, nuevaArea, nuevoTipo, nuevoOculto, modulo);
     res.json({ ok: true });
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
 // POST /modulos/bulk — actualización masiva (filtros por grupo o prefijo)
-// Body: { filter: { grupo?, prefix? }, update: { sociedad_id?, tipo? } }
-// Ej: { filter:{prefix:'pa-'}, update:{sociedad_id:2} } → todos los pa-* a Puente Cordón
+// Body: { filter: { grupo?, prefix? }, update: { sociedad_id?, area_id?, tipo?, oculto? } }
 router.post('/modulos/bulk', requireAdmin, (req, res) => {
   const { filter, update } = req.body || {};
   if (!filter || !update) return res.status(400).json({ ok: false, error: 'Falta filter o update' });
@@ -486,6 +506,18 @@ router.post('/modulos/bulk', requireAdmin, (req, res) => {
     if (update.sociedad_id !== undefined) {
       sets.push("sociedad_id = ?");
       params.push(update.sociedad_id ? parseInt(update.sociedad_id) : null);
+      sets.push("area_id = NULL");
+    }
+    if (update.area_id !== undefined) {
+      const aid = update.area_id ? parseInt(update.area_id) : null;
+      if (aid) {
+        const exArea = db().prepare("SELECT sociedad_id FROM areas WHERE id = ?").get(aid);
+        if (!exArea) return res.status(400).json({ ok: false, error: 'Área inexistente' });
+        sets.push("area_id = ?", "sociedad_id = ?");
+        params.push(aid, exArea.sociedad_id);
+      } else {
+        sets.push("area_id = NULL");
+      }
     }
     if (update.tipo !== undefined) {
       if (!['numero','operativo','mobile','externo','sistema'].includes(update.tipo)) {
@@ -493,6 +525,10 @@ router.post('/modulos/bulk', requireAdmin, (req, res) => {
       }
       sets.push("tipo = ?");
       params.push(update.tipo);
+    }
+    if (update.oculto !== undefined) {
+      sets.push("oculto = ?");
+      params.push(update.oculto ? 1 : 0);
     }
     if (sets.length === 0) return res.status(400).json({ ok: false, error: 'Nada para actualizar' });
 

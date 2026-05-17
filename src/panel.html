@@ -1010,16 +1010,11 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   </div>
 
   <div style="margin:14px 0;padding:12px;background:var(--bg);border:1px solid var(--bor);border-radius:8px;font-size:12px;color:var(--mut)">
-    <div style="margin-bottom:6px"><strong>Niveles de acceso:</strong>
-      <span style="margin-left:8px">0 Directivo · 1 Gerencial · 2 Ejecutivo · 3 Administrativo/Operativo · 4 Externo</span>
+    <div style="margin-bottom:6px"><strong>Niveles de persona:</strong>
+      <span style="margin-left:8px">0 Directivo · 1 Gerencial · 2 Ejecutivo · 3 Adm/Operativo · 4 Externo</span>
     </div>
-    <div><strong>Tipos de módulo:</strong>
-      <span style="margin-left:8px"><span style="display:inline-block;width:10px;height:10px;background:#fde68a;border-radius:50%"></span> <b>Número</b>: niveles 0–1 (Directivo/Gerencial)</span>
-      <span style="margin-left:14px"><span style="display:inline-block;width:10px;height:10px;background:#bbf7d0;border-radius:50%"></span> <b>Operativo</b>: niveles 0–2 (suma Ejecutivo)</span>
-      <span style="margin-left:14px"><span style="display:inline-block;width:10px;height:10px;background:#bfdbfe;border-radius:50%"></span> <b>Mobile</b>: niveles 0–3 (suma Adm/Operativo)</span>
-      <span style="margin-left:14px"><span style="display:inline-block;width:10px;height:10px;background:#e9d5ff;border-radius:50%"></span> <b>Externo</b>: niveles 0–4 (incluye Externo)</span>
-      <span style="margin-left:14px"><span style="display:inline-block;width:10px;height:10px;background:#e5e7eb;border-radius:50%"></span> <b>Sistema</b>: solo Directivo</span>
-    </div>
+    <div style="margin-bottom:6px"><strong>Tipo del módulo</strong> = nivel máximo que lo puede ver. Ej: tipo <b>2</b> lo ven 0, 1 y 2 (Directivo, Gerencial y Ejecutivo).</div>
+    <div><strong>Área</strong>: si está seteada, solo personas de ESA área lo ven. <strong>Visible/Oculto</strong>: 🔒 oculta el módulo a todos menos Directivo (útil para módulos en construcción).</div>
   </div>
 
   <div class="tw">
@@ -1028,9 +1023,11 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
         <th>Módulo</th>
         <th>Grupo</th>
         <th>Sociedad</th>
+        <th>Área</th>
         <th>Tipo</th>
+        <th style="text-align:center">Visible</th>
       </tr></thead>
-      <tbody id="t-modulos"><tr><td colspan="4" class="emp">Cargando...</td></tr></tbody>
+      <tbody id="t-modulos"><tr><td colspan="6" class="emp">Cargando...</td></tr></tbody>
     </table>
   </div>
 </div>
@@ -24241,12 +24238,12 @@ function eqIniciales(p) {
 // Mapa de colores por categoría de área. Una persona se categoriza por la
 // primera área que matchee, con prioridad: dirección > comercial > operativo > admin > prof.
 var EQ_COLORES = {
-  direccion:      { bg:'#EEEDFE', fg:'#3C3489', label:'Dirección' },
-  comercial:      { bg:'#E6F1FB', fg:'#0C447C', label:'Comercial' },
-  operativo:      { bg:'#E1F5EE', fg:'#085041', label:'Operativo' },
-  administrativo: { bg:'#FAEEDA', fg:'#633806', label:'Administrativo' },
-  profesional:    { bg:'#F1EFE8', fg:'#5F5E5A', label:'Profesional' },
-  otro:           { bg:'#F4F3EE', fg:'#737065', label:'—' }
+  direccion:      { bg:'#DDD6FE', fg:'#3C3489', label:'Dirección' },
+  comercial:      { bg:'#BFDBFE', fg:'#0C447C', label:'Comercial' },
+  operativo:      { bg:'#A7F3D0', fg:'#085041', label:'Operativo' },
+  administrativo: { bg:'#FDE68A', fg:'#633806', label:'Administrativo' },
+  profesional:    { bg:'#D6D3D1', fg:'#3F3F46', label:'Profesional' },
+  otro:           { bg:'#E5E4DC', fg:'#57534E', label:'—' }
 };
 function eqCategoriaPersona(p) {
   if (p.en_directorio || p._es_directorio) return 'direccion';
@@ -24313,6 +24310,8 @@ function eqRenderOrgchart(cont, raices) {
   }
 
   // ── Bandas horizontales por nivel_acceso (0=arriba, 4=abajo) ──
+  // El DIRECTORIO (caja virtual) se posiciona en una pre-banda ARRIBA de la banda 0,
+  // conceptualmente "sobre" los niveles (es una entidad transversal, no un nivel).
   var BANDAS = [
     { nivel: 0, label: 'Directivo',                bg: '#FAFAFA' },
     { nivel: 1, label: 'Gerencial',                bg: '#F4F4F5' },
@@ -24323,20 +24322,45 @@ function eqRenderOrgchart(cont, raices) {
   var BOX_W = 160, BOX_H = 56, GAP_H = 16, GAP_V = 36;
   var LANE_LABEL_W = 90;
   var LANE_H = BOX_H + GAP_V;
+  // Si hay DIRECTORIO, reservo una zona ARRIBA de las bandas para que se vea como entidad sobre los niveles
+  var hayDirectorio = raices.length > 0 && raices[0]._es_directorio;
+  var PRE_BAND_H = hayDirectorio ? LANE_H : 0;
 
   function getBanda(node) {
-    if (node._es_directorio) return 0;
+    if (node._es_directorio) return -1;  // marcador: va en la pre-banda, no en banda 0
     var n = node.nivel_acceso;
     if (n === undefined || n === null) n = 0;
     return Math.max(0, Math.min(4, parseInt(n) || 0));
   }
-  function yDeBanda(banda) {
-    return banda * LANE_H + (LANE_H - BOX_H) / 2;
+  function yDeNodo(node) {
+    if (node._es_directorio) {
+      // Centrado verticalmente en la pre-banda
+      return (PRE_BAND_H - BOX_H) / 2;
+    }
+    var banda = getBanda(node);
+    return PRE_BAND_H + banda * LANE_H + (LANE_H - BOX_H) / 2;
   }
+
+  // Orden horizontal de hijos por categoría: comercial primero, administrativos al final.
+  // Esto agrupa los administrativos siempre del mismo lado en cualquier nivel.
+  var CAT_ORDER = { direccion: 0, comercial: 1, operativo: 2, profesional: 3, administrativo: 4, otro: 5 };
+  function ordenarReportes(node) {
+    if (node.reportes && node.reportes.length > 1) {
+      node.reportes.sort(function(a, b) {
+        var ca = CAT_ORDER[eqCategoriaPersona(a)] ?? 5;
+        var cb = CAT_ORDER[eqCategoriaPersona(b)] ?? 5;
+        if (ca !== cb) return ca - cb;
+        // Tie-breaker: por apellido
+        return (a.apellido || '').localeCompare(b.apellido || '');
+      });
+    }
+    (node.reportes || []).forEach(ordenarReportes);
+  }
+  raices.forEach(ordenarReportes);
 
   var nextX = LANE_LABEL_W + 20;
   function layoutX(node) {
-    node._y = yDeBanda(getBanda(node));
+    node._y = yDeNodo(node);
     if (!node.reportes || node.reportes.length === 0) {
       node._x = nextX;
       nextX += BOX_W + GAP_H;
@@ -24355,19 +24379,24 @@ function eqRenderOrgchart(cont, raices) {
   }
   raices.forEach(walk);
   var W = Math.max(maxX + 20, 800);
-  var H = BANDAS.length * LANE_H + 10;
+  var H = PRE_BAND_H + BANDAS.length * LANE_H + 10;
 
   var svg = '<svg width="' + W + '" height="' + H + '" xmlns="http://www.w3.org/2000/svg" style="display:block">';
 
-  // Bandas fondo + labels
+  // Bandas fondo + labels (todas con offset PRE_BAND_H)
   BANDAS.forEach(function(b, i) {
-    var y = i * LANE_H;
+    var y = PRE_BAND_H + i * LANE_H;
     svg += '<rect x="0" y="' + y + '" width="' + W + '" height="' + LANE_H + '" fill="' + b.bg + '"/>';
     svg += '<line x1="0" y1="' + (y + LANE_H) + '" x2="' + W + '" y2="' + (y + LANE_H) + '" stroke="#E5E7EB" stroke-width="1"/>';
     svg += '<text x="20" y="' + (y + LANE_H/2 - 4) + '" font-size="32" font-weight="700" fill="#CBD5E1">' + b.nivel + '</text>';
     svg += '<text x="20" y="' + (y + LANE_H/2 + 18) + '" font-size="10" font-weight="600" fill="#94A3B8" letter-spacing="0.5">' + eqEsc(b.label.toUpperCase()) + '</text>';
   });
+  // Separador vertical entre labels y cajas (toda la altura, incluida pre-banda)
   svg += '<line x1="' + LANE_LABEL_W + '" y1="0" x2="' + LANE_LABEL_W + '" y2="' + H + '" stroke="#D1D5DB" stroke-width="1.5"/>';
+  // Línea horizontal divisoria entre la pre-banda del DIRECTORIO y las bandas 0-4
+  if (hayDirectorio) {
+    svg += '<line x1="0" y1="' + PRE_BAND_H + '" x2="' + W + '" y2="' + PRE_BAND_H + '" stroke="#D1D5DB" stroke-width="1.5" stroke-dasharray="4 4"/>';
+  }
 
   function renderNode(n) {
     var esVirtual = !!n._es_directorio;
@@ -24487,31 +24516,29 @@ var CM_SOCIEDADES = [];  // se llena con la lista de sociedades activas
 var CM_MODULOS = [];     // cache de la respuesta del backend
 
 function cmCargar() {
-  // Cargar sociedades + módulos en paralelo
+  // Cargo organigrama (sociedades CON sus áreas) + módulos en paralelo
   Promise.all([
-    fetch('/api/org/sociedades', { credentials:'include' }).then(function(r){ return r.json(); }),
+    fetch('/api/org/organigrama', { credentials:'include' }).then(function(r){ return r.json(); }),
     fetch('/api/org/modulos', { credentials:'include' }).then(function(r){ return r.json(); })
   ]).then(function(arr) {
     var resSoc = arr[0], resMod = arr[1];
     if (!resMod.ok) {
-      document.getElementById('t-modulos').innerHTML = '<tr><td colspan="4" class="emp">Error: '+(resMod.error||'sin permiso')+'</td></tr>';
+      document.getElementById('t-modulos').innerHTML = '<tr><td colspan="6" class="emp">Error: '+(resMod.error||'sin permiso')+'</td></tr>';
       return;
     }
-    CM_SOCIEDADES = (resSoc.sociedades || []).filter(function(s){ return s.activa; });
+    CM_SOCIEDADES = (resSoc.sociedades || []);  // cada una con .areas[]
     CM_MODULOS = resMod.modulos || [];
     cmRender();
   });
 }
 
 function cmRender() {
-  // Agrupar por grupo (Comercial, Producción, etc.)
   var grupos = {};
   CM_MODULOS.forEach(function(m) {
     if (!grupos[m.grupo]) grupos[m.grupo] = [];
     grupos[m.grupo].push(m);
   });
   var ordenGrupos = Object.keys(grupos).sort(function(a,b) {
-    // ordenar grupos por el orden mínimo de sus módulos
     var minA = Math.min.apply(null, grupos[a].map(function(m){return m.orden||0;}));
     var minB = Math.min.apply(null, grupos[b].map(function(m){return m.orden||0;}));
     return minA - minB;
@@ -24519,23 +24546,27 @@ function cmRender() {
 
   var html = '';
   ordenGrupos.forEach(function(grupo) {
-    // Header de grupo con acciones masivas
-    html += '<tr style="background:var(--bg)"><td colspan="4" style="padding:8px 12px">' +
+    html += '<tr style="background:var(--bg)"><td colspan="6" style="padding:8px 12px">' +
       '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">' +
       '<strong style="font-size:13px">' + grupo + ' <span style="color:var(--mut);font-weight:400">('+grupos[grupo].length+')</span></strong>' +
       '<div style="margin-left:auto;display:flex;gap:6px;align-items:center;font-size:11px">' +
       '<span style="color:var(--mut)">Asignar todo el grupo:</span>' +
       cmBulkSocSelect(grupo) +
       cmBulkTipoSelect(grupo) +
+      cmBulkOcultoSelect(grupo) +
       '</div></div></td></tr>';
-    // Filas individuales
     grupos[grupo].forEach(function(m) {
-      html += '<tr>' +
-        '<td><code style="font-size:11px;color:var(--burg);background:var(--bg);padding:2px 6px;border-radius:4px">'+m.modulo+'</code> ' +
+      var ocultoStyle = m.oculto ? 'background:#FFF7ED' : '';
+      var iconLock = m.oculto ? '<span title="Oculto: solo Directivo lo ve" style="margin-right:4px">🔒</span>' : '';
+      html += '<tr style="'+ocultoStyle+'">' +
+        '<td>' + iconLock +
+          '<code style="font-size:11px;color:var(--burg);background:var(--bg);padding:2px 6px;border-radius:4px">'+m.modulo+'</code> ' +
           '<span style="font-size:12px;margin-left:6px">'+m.label+'</span></td>' +
         '<td style="font-size:12px;color:var(--mut)">'+m.grupo+'</td>' +
         '<td>'+cmSocSelect(m)+'</td>' +
+        '<td>'+cmAreaSelect(m)+'</td>' +
         '<td>'+cmTipoSelect(m)+'</td>' +
+        '<td style="text-align:center">'+cmOcultoToggle(m)+'</td>' +
       '</tr>';
     });
   });
@@ -24547,22 +24578,45 @@ function cmSocSelect(m) {
   CM_SOCIEDADES.forEach(function(s) {
     opts += '<option value="'+s.id+'"'+(m.sociedad_id==s.id?' selected':'')+'>'+s.nombre+'</option>';
   });
-  return '<select onchange="cmActualizar(\''+m.modulo+'\',{sociedad_id:this.value||null})" style="font-size:12px;padding:4px 8px;min-width:160px">'+opts+'</select>';
+  return '<select onchange="cmCambiarSociedad(\''+m.modulo+'\',this.value)" style="font-size:12px;padding:4px 8px;min-width:150px">'+opts+'</select>';
 }
+
+function cmAreaSelect(m) {
+  if (!m.sociedad_id) {
+    return '<select disabled style="font-size:12px;padding:4px 8px;min-width:140px;opacity:.5"><option>— sin sociedad —</option></select>';
+  }
+  var soc = CM_SOCIEDADES.find(function(s){ return s.id == m.sociedad_id; });
+  var areas = (soc && soc.areas) ? soc.areas : [];
+  var opts = '<option value=""'+(!m.area_id?' selected':'')+'>— Todas las áreas —</option>';
+  areas.forEach(function(a) {
+    opts += '<option value="'+a.id+'"'+(m.area_id==a.id?' selected':'')+'>'+a.nombre+'</option>';
+  });
+  return '<select onchange="cmActualizar(\''+m.modulo+'\',{area_id:this.value?parseInt(this.value):null})" style="font-size:12px;padding:4px 8px;min-width:140px">'+opts+'</select>';
+}
+
 function cmTipoSelect(m) {
+  // Tipos internos siguen siendo strings, pero la UI los muestra como nivel 0-4
   var tipos = [
-    {v:'numero',    label:'🔢 Número',    bg:'#fde68a'},
-    {v:'operativo', label:'⚙️ Operativo', bg:'#bbf7d0'},
-    {v:'mobile',    label:'📱 Mobile',    bg:'#bfdbfe'},
-    {v:'externo',   label:'🔓 Externo',   bg:'#e9d5ff'},
-    {v:'sistema',   label:'🛡️ Sistema',   bg:'#e5e7eb'}
+    {v:'sistema',   label:'0 — solo Directivo',      bg:'#e5e7eb'},
+    {v:'numero',    label:'1 — hasta Gerencial',     bg:'#fde68a'},
+    {v:'operativo', label:'2 — hasta Ejecutivo',     bg:'#bbf7d0'},
+    {v:'mobile',    label:'3 — hasta Adm/Operativo', bg:'#bfdbfe'},
+    {v:'externo',   label:'4 — hasta Externo',       bg:'#e9d5ff'}
   ];
-  var actual = tipos.find(function(t){return t.v===m.tipo;}) || tipos[1];
+  var actual = tipos.find(function(t){return t.v===m.tipo;}) || tipos[2];
   var opts = tipos.map(function(t) {
     return '<option value="'+t.v+'"'+(m.tipo===t.v?' selected':'')+'>'+t.label+'</option>';
   }).join('');
   return '<select onchange="cmActualizar(\''+m.modulo+'\',{tipo:this.value})" style="font-size:12px;padding:4px 8px;background:'+actual.bg+'">'+opts+'</select>';
 }
+
+function cmOcultoToggle(m) {
+  if (m.oculto) {
+    return '<button onclick="cmActualizar(\''+m.modulo+'\',{oculto:0})" title="Está oculto. Click para mostrar" style="font-size:11px;padding:4px 10px;background:#FED7AA;border:1px solid #FB923C;color:#9A3412;border-radius:4px;cursor:pointer;font-weight:600">🔒 Oculto</button>';
+  }
+  return '<button onclick="cmActualizar(\''+m.modulo+'\',{oculto:1})" title="Visible para todos. Click para ocultar (solo Directivo lo verá)" style="font-size:11px;padding:4px 10px;background:#D1FAE5;border:1px solid #10B981;color:#065F46;border-radius:4px;cursor:pointer;font-weight:600">👁️ Visible</button>';
+}
+
 function cmBulkSocSelect(grupo) {
   var opts = '<option value="">→ Sociedad</option><option value="0">— Transversal —</option>';
   CM_SOCIEDADES.forEach(function(s){ opts += '<option value="'+s.id+'">'+s.nombre+'</option>'; });
@@ -24571,12 +24625,25 @@ function cmBulkSocSelect(grupo) {
 function cmBulkTipoSelect(grupo) {
   return '<select onchange="cmBulkTipo(\''+grupo+'\',this.value);this.value=\'\'" style="font-size:11px;padding:3px 6px">' +
     '<option value="">→ Tipo</option>' +
-    '<option value="numero">🔢 Número</option>' +
-    '<option value="operativo">⚙️ Operativo</option>' +
-    '<option value="mobile">📱 Mobile</option>' +
-    '<option value="externo">🔓 Externo</option>' +
-    '<option value="sistema">🛡️ Sistema</option>' +
+    '<option value="sistema">0 — solo Directivo</option>' +
+    '<option value="numero">1 — hasta Gerencial</option>' +
+    '<option value="operativo">2 — hasta Ejecutivo</option>' +
+    '<option value="mobile">3 — hasta Adm/Operativo</option>' +
+    '<option value="externo">4 — hasta Externo</option>' +
     '</select>';
+}
+function cmBulkOcultoSelect(grupo) {
+  return '<select onchange="cmBulkOculto(\''+grupo+'\',this.value);this.value=\'\'" style="font-size:11px;padding:3px 6px">' +
+    '<option value="">→ Visible/Oculto</option>' +
+    '<option value="0">👁️ Visibles</option>' +
+    '<option value="1">🔒 Ocultos (solo Directivo)</option>' +
+    '</select>';
+}
+
+function cmCambiarSociedad(modulo, val) {
+  // Al cambiar sociedad, el área se resetea (no aplica a la nueva sociedad)
+  var nuevaSoc = val ? parseInt(val) : null;
+  cmActualizar(modulo, { sociedad_id: nuevaSoc, area_id: null });
 }
 
 function cmActualizar(modulo, cambios) {
@@ -24588,7 +24655,6 @@ function cmActualizar(modulo, cambios) {
     .then(function(r){ return r.json(); })
     .then(function(res) {
       if (res.ok) {
-        // Actualizar cache local sin recargar
         var m = CM_MODULOS.find(function(x){return x.modulo===modulo;});
         if (m) {
           if (cambios.sociedad_id !== undefined) {
@@ -24596,12 +24662,25 @@ function cmActualizar(modulo, cambios) {
             var s = CM_SOCIEDADES.find(function(x){return x.id==m.sociedad_id;});
             m.sociedad_nombre = s ? s.nombre : null;
           }
+          if (cambios.area_id !== undefined) {
+            m.area_id = cambios.area_id || null;
+            if (m.area_id) {
+              for (var i = 0; i < CM_SOCIEDADES.length; i++) {
+                var a = (CM_SOCIEDADES[i].areas || []).find(function(x){ return x.id == m.area_id; });
+                if (a) { m.area_nombre = a.nombre; m.sociedad_id = CM_SOCIEDADES[i].id; break; }
+              }
+            } else {
+              m.area_nombre = null;
+            }
+          }
           if (cambios.tipo !== undefined) m.tipo = cambios.tipo;
+          if (cambios.oculto !== undefined) m.oculto = cambios.oculto;
         }
+        cmRender();
         toast('Actualizado','ok');
       } else {
         toast('Error: '+res.error, 'er');
-        cmCargar();  // recargar para volver al estado correcto
+        cmCargar();
       }
     });
 }
@@ -24628,6 +24707,24 @@ function cmBulkTipo(grupo, tipo) {
     method:'POST', credentials:'include',
     headers:{'Content-Type':'application/json'},
     body: JSON.stringify({ filter:{grupo:grupo}, update:{tipo:tipo} })
+  })
+    .then(function(r){ return r.json(); })
+    .then(function(res) {
+      if (res.ok) { toast('✓ '+res.actualizados+' módulos actualizados','ok'); cmCargar(); }
+      else { toast('Error: '+res.error,'er'); }
+    });
+}
+function cmBulkOculto(grupo, val) {
+  if (val === '') return;
+  var oculto = val === '1' ? 1 : 0;
+  var msg = oculto
+    ? '¿Ocultar TODOS los módulos de "'+grupo+'"? Solo Directivos podrán verlos.'
+    : '¿Hacer VISIBLES TODOS los módulos de "'+grupo+'"?';
+  if (!confirm(msg)) { cmCargar(); return; }
+  fetch('/api/org/modulos/bulk', {
+    method:'POST', credentials:'include',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ filter:{grupo:grupo}, update:{oculto:oculto} })
   })
     .then(function(r){ return r.json(); })
     .then(function(res) {
