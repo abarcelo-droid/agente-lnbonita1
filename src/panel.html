@@ -2128,14 +2128,14 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
 
   <!-- Sub-tabs -->
   <div style="display:flex; border-bottom:1px solid var(--bor); margin-bottom:14px">
-    <div class="eq-tab on" data-eq="organigrama" onclick="eqSubtab('organigrama')">🏢 Empresas</div>
+    <div class="eq-tab" data-eq="organigrama" onclick="eqSubtab('organigrama')">🏢 Empresas</div>
     <div class="eq-tab" data-eq="personas" onclick="eqSubtab('personas')">👥 Personas</div>
-    <div class="eq-tab" data-eq="arbol" onclick="eqSubtab('arbol')">🌳 Árbol</div>
+    <div class="eq-tab on" data-eq="arbol" onclick="eqSubtab('arbol')">🌳 Organigrama</div>
     <div class="eq-tab" data-eq="ubicaciones" onclick="eqSubtab('ubicaciones')">📍 Ubicaciones</div>
   </div>
 
   <!-- ORGANIGRAMA -->
-  <div class="eq-sub on" id="eq-sub-organigrama">
+  <div class="eq-sub" id="eq-sub-organigrama">
     <div style="display:flex; justify-content:flex-end; margin-bottom:14px">
       <button class="btn bb" onclick="eqNuevaSociedad()">+ Sociedad externa</button>
     </div>
@@ -2166,12 +2166,12 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   </div>
 
   <!-- ÁRBOL JERÁRQUICO -->
-  <div class="eq-sub" id="eq-sub-arbol">
+  <div class="eq-sub on" id="eq-sub-arbol">
     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; flex-wrap:wrap; gap:8px">
       <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap">
         <div style="display:inline-flex; background:#fff; border:1px solid var(--bor); border-radius:6px; padding:2px; gap:2px">
-          <button class="eq-vista-btn on" data-vista="cards" onclick="eqCambiarVista('cards')" style="padding:6px 12px; border:0; background:var(--burg); color:#fff; border-radius:4px; font-size:12px; font-weight:600; cursor:pointer">🪪 Cards</button>
-          <button class="eq-vista-btn" data-vista="orgchart" onclick="eqCambiarVista('orgchart')" style="padding:6px 12px; border:0; background:transparent; color:var(--mut); border-radius:4px; font-size:12px; font-weight:600; cursor:pointer">🏢 Orgchart</button>
+          <button class="eq-vista-btn" data-vista="cards" onclick="eqCambiarVista('cards')" style="padding:6px 12px; border:0; background:transparent; color:var(--mut); border-radius:4px; font-size:12px; font-weight:600; cursor:pointer">🪪 Cards</button>
+          <button class="eq-vista-btn on" data-vista="orgchart" onclick="eqCambiarVista('orgchart')" style="padding:6px 12px; border:0; background:var(--burg); color:#fff; border-radius:4px; font-size:12px; font-weight:600; cursor:pointer">🏢 Orgchart</button>
         </div>
         <select id="eq-arbol-filtro-soc" onchange="eqRenderArbolActual()" style="min-width:180px">
           <option value="">Todas las sociedades</option>
@@ -2189,8 +2189,8 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     </div>
     <div class="tw">
       <table>
-        <thead><tr><th>Nombre</th><th>Dirección</th><th>Lat / Lng</th><th></th></tr></thead>
-        <tbody id="eq-ubic-tbody"><tr><td colspan="4" class="emp">Cargando...</td></tr></tbody>
+        <thead><tr><th>Nombre</th><th>Dirección</th><th>Lat / Lng</th><th style="text-align:center">Personas</th><th></th></tr></thead>
+        <tbody id="eq-ubic-tbody"><tr><td colspan="5" class="emp">Cargando...</td></tr></tbody>
       </table>
     </div>
   </div>
@@ -23771,6 +23771,9 @@ function eqApi(path, opts) {
 function eqEsc(s) { return String(s == null ? '' : s).replace(/[<>&"]/g, function(c){ return {'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c]; }); }
 
 function eqInit() {
+  // Vista principal: organigrama por nivel jerárquico
+  eqCargarArbol();
+  // Pre-cargar también las sociedades para tener los datos listos al cambiar de sub-tab
   eqCargarOrganigrama();
 }
 
@@ -23802,6 +23805,7 @@ function eqRenderOrganigrama() {
   var grid = document.getElementById('eq-org-grid');
   grid.innerHTML = EQ.sociedades.map(function(s) {
     var pillCls = s.tipo === 'externa' ? 'eq-pill-externa' : 'eq-pill-interna';
+    var totalPersonas = (s.areas || []).reduce(function(acc, a){ return acc + (a.personas_count || 0); }, 0);
     var areasHtml = s.areas.length === 0
       ? '<div class="eq-org-sub" style="font-style:italic">Sin áreas cargadas</div>'
       : s.areas.map(function(a){
@@ -23818,7 +23822,9 @@ function eqRenderOrganigrama() {
       ? '<button class="btn bo bs" onclick="eqEditarSociedad(' + s.id + ')">Editar sociedad</button>'
       : '';
     return '<div class="eq-org-card">' +
-      '<h3>' + eqEsc(s.nombre) + ' <span class="eq-pill ' + pillCls + '">' + eqEsc(s.tipo) + '</span></h3>' +
+      '<h3>' + eqEsc(s.nombre) + ' <span class="eq-pill ' + pillCls + '">' + eqEsc(s.tipo) + '</span>' +
+        ' <span style="margin-left:8px;font-size:11px;font-weight:500;color:var(--mut);background:var(--bg);padding:2px 8px;border-radius:10px;border:1px solid var(--bor)">👥 ' + totalPersonas + '</span>' +
+      '</h3>' +
       '<div class="eq-org-sub">' + eqEsc(s.funcion || '—') + (s.cuit ? ' · CUIT ' + eqEsc(s.cuit) : '') + '</div>' +
       '<div>' + areasHtml + '</div>' +
       '<div style="margin-top:12px; display:flex; gap:6px; flex-wrap:wrap">' +
@@ -24139,7 +24145,7 @@ function eqBorrarPersona(id) {
 }
 
 // ─── ÁRBOL JERÁRQUICO (3 vistas: lista / cards / orgchart) ───────────
-var EQ_ARBOL = { vista: 'cards', personas: [] };
+var EQ_ARBOL = { vista: 'orgchart', personas: [] };
 
 function eqCargarArbol() {
   eqApi('/jerarquia').then(function(r) {
@@ -24300,44 +24306,69 @@ function eqRenderOrgchart(cont, raices) {
       apellido: '',
       cargo: '',
       _es_directorio: true,
+      nivel_acceso: 0,
       reportes: dirReportes
     };
     raices = [nodoDirectorio].concat(nonDir);
   }
 
-  // Layout simple horizontal: cada nodo ocupa 160px ancho, separación 20px
-  var BOX_W = 160, BOX_H = 56, GAP_H = 16, GAP_V = 40;
-  var nextX = 0;
+  // ── Bandas horizontales por nivel_acceso (0=arriba, 4=abajo) ──
+  var BANDAS = [
+    { nivel: 0, label: 'Directivo',                bg: '#FAFAFA' },
+    { nivel: 1, label: 'Gerencial',                bg: '#F4F4F5' },
+    { nivel: 2, label: 'Ejecutivo',                bg: '#FAFAFA' },
+    { nivel: 3, label: 'Administrativo / Operativo', bg: '#F4F4F5' },
+    { nivel: 4, label: 'Externo',                  bg: '#FAFAFA' }
+  ];
+  var BOX_W = 160, BOX_H = 56, GAP_H = 16, GAP_V = 36;
+  var LANE_LABEL_W = 90;
+  var LANE_H = BOX_H + GAP_V;
 
-  function layout(node, depth) {
+  function getBanda(node) {
+    if (node._es_directorio) return 0;
+    var n = node.nivel_acceso;
+    if (n === undefined || n === null) n = 0;
+    return Math.max(0, Math.min(4, parseInt(n) || 0));
+  }
+  function yDeBanda(banda) {
+    return banda * LANE_H + (LANE_H - BOX_H) / 2;
+  }
+
+  var nextX = LANE_LABEL_W + 20;
+  function layoutX(node) {
+    node._y = yDeBanda(getBanda(node));
     if (!node.reportes || node.reportes.length === 0) {
       node._x = nextX;
-      node._y = depth * (BOX_H + GAP_V);
       nextX += BOX_W + GAP_H;
       return;
     }
-    node.reportes.forEach(function(c){ layout(c, depth + 1); });
+    node.reportes.forEach(layoutX);
     var first = node.reportes[0], last = node.reportes[node.reportes.length - 1];
     node._x = (first._x + last._x) / 2;
-    node._y = depth * (BOX_H + GAP_V);
   }
+  raices.forEach(function(r){ layoutX(r); nextX += GAP_H * 2; });
 
-  raices.forEach(function(r){ layout(r, 0); nextX += GAP_H * 2; });
-
-  // Calcular dimensiones totales
-  var maxX = 0, maxY = 0;
+  var maxX = 0;
   function walk(n) {
     maxX = Math.max(maxX, n._x + BOX_W);
-    maxY = Math.max(maxY, n._y + BOX_H);
     (n.reportes || []).forEach(walk);
   }
   raices.forEach(walk);
+  var W = Math.max(maxX + 20, 800);
+  var H = BANDAS.length * LANE_H + 10;
 
-  var W = Math.max(maxX + 20, 640);
-  var H = maxY + 20;
-
-  // Render
   var svg = '<svg width="' + W + '" height="' + H + '" xmlns="http://www.w3.org/2000/svg" style="display:block">';
+
+  // Bandas fondo + labels
+  BANDAS.forEach(function(b, i) {
+    var y = i * LANE_H;
+    svg += '<rect x="0" y="' + y + '" width="' + W + '" height="' + LANE_H + '" fill="' + b.bg + '"/>';
+    svg += '<line x1="0" y1="' + (y + LANE_H) + '" x2="' + W + '" y2="' + (y + LANE_H) + '" stroke="#E5E7EB" stroke-width="1"/>';
+    svg += '<text x="20" y="' + (y + LANE_H/2 - 4) + '" font-size="32" font-weight="700" fill="#CBD5E1">' + b.nivel + '</text>';
+    svg += '<text x="20" y="' + (y + LANE_H/2 + 18) + '" font-size="10" font-weight="600" fill="#94A3B8" letter-spacing="0.5">' + eqEsc(b.label.toUpperCase()) + '</text>';
+  });
+  svg += '<line x1="' + LANE_LABEL_W + '" y1="0" x2="' + LANE_LABEL_W + '" y2="' + H + '" stroke="#D1D5DB" stroke-width="1.5"/>';
+
   function renderNode(n) {
     var esVirtual = !!n._es_directorio;
     var col = esVirtual ? { bg:'#3C3489', fg:'#FFFFFF' } : eqColorPersona(n);
@@ -24347,14 +24378,12 @@ function eqRenderOrgchart(cont, raices) {
     var linea2 = esVirtual ? '' : (n.cargo || '');
     var clickAttr = esVirtual ? '' : ' style="cursor:pointer" onclick="eqEditarPersona(' + n.id + ')"';
     var s = '';
-    // Líneas a los hijos
     (n.reportes || []).forEach(function(c) {
       var x1 = n._x + BOX_W / 2, y1 = n._y + BOX_H;
       var x2 = c._x + BOX_W / 2, y2 = c._y;
       var ym = (y1 + y2) / 2;
-      s += '<path d="M ' + x1 + ' ' + y1 + ' V ' + ym + ' H ' + x2 + ' V ' + y2 + '" fill="none" stroke="#bbb" stroke-width="1"/>';
+      s += '<path d="M ' + x1 + ' ' + y1 + ' V ' + ym + ' H ' + x2 + ' V ' + y2 + '" fill="none" stroke="#9CA3AF" stroke-width="1"/>';
     });
-    // Caja
     s += '<g' + clickAttr + '>' +
       '<rect x="' + n._x + '" y="' + n._y + '" width="' + BOX_W + '" height="' + BOX_H + '" rx="6" fill="' + col.bg + '" stroke="' + bordeColor + '" stroke-width="' + bordeW + '"/>' +
       '<text x="' + (n._x + BOX_W / 2) + '" y="' + (n._y + (linea2 ? 22 : 33)) + '" text-anchor="middle" font-size="12" font-weight="600" fill="' + col.fg + '">' + eqEsc(nombreFull) + '</text>' +
@@ -24366,8 +24395,8 @@ function eqRenderOrgchart(cont, raices) {
   raices.forEach(function(r){ svg += renderNode(r); });
   svg += '</svg>';
 
-  // Leyenda de colores debajo del SVG
   var leyenda = '<div style="margin-top:14px; padding-top:10px; border-top:1px dashed var(--bor); display:flex; gap:14px; flex-wrap:wrap; font-size:11px">';
+  leyenda += '<span style="color:var(--mut); font-weight:600">Color por categoría de área:</span>';
   ['direccion','comercial','operativo','administrativo','profesional'].forEach(function(k) {
     var c = EQ_COLORES[k];
     leyenda += '<span style="display:inline-flex; align-items:center; gap:6px"><span style="display:inline-block; width:12px; height:12px; border-radius:3px; background:' + c.bg + '; border:1px solid ' + c.fg + '"></span><span style="color:var(--mut)">' + c.label + '</span></span>';
@@ -24384,15 +24413,20 @@ function eqCargarUbicaciones() {
     EQ.ubicaciones = r.ubicaciones;
     var tb = document.getElementById('eq-ubic-tbody');
     if (r.ubicaciones.length === 0) {
-      tb.innerHTML = '<tr><td colspan="4" class="emp">Sin ubicaciones cargadas</td></tr>';
+      tb.innerHTML = '<tr><td colspan="5" class="emp">Sin ubicaciones cargadas</td></tr>';
       return;
     }
     tb.innerHTML = r.ubicaciones.map(function(u) {
       var latlng = (u.lat && u.lng) ? (u.lat + ', ' + u.lng) : '—';
+      var pc = u.personas_count || 0;
+      var pcCell = pc === 0
+        ? '<span style="color:var(--sub)">—</span>'
+        : '<span style="display:inline-block;min-width:28px;padding:2px 8px;background:var(--bg);border:1px solid var(--bor);border-radius:10px;font-size:11px;font-weight:600;color:var(--mut)">👥 ' + pc + '</span>';
       return '<tr>' +
         '<td><a href="#" onclick="eqEditarUbicacion(' + u.id + ');return false" style="color:var(--burg); text-decoration:none; font-weight:600">' + eqEsc(u.nombre) + '</a></td>' +
         '<td>' + eqEsc(u.direccion || '—') + '</td>' +
         '<td>' + eqEsc(latlng) + '</td>' +
+        '<td style="text-align:center">' + pcCell + '</td>' +
         '<td>' +
           '<button class="btn bo bs" onclick="eqEditarUbicacion(' + u.id + ')">Editar</button> ' +
           '<button class="btn bo bs" style="color:#991b1b" onclick="eqBorrarUbicacion(' + u.id + ')">×</button>' +
