@@ -9140,6 +9140,33 @@ var LNB_USER = null;
         });
       }
 
+      // Ocultar del sidebar los módulos marcados como "oculto" en Config Módulos.
+      // Aplica a TODOS los usuarios (incluido admin). Los admins acceden a esos módulos
+      // desde el panel ⚙️ Config Módulos con el botón "🔗 Abrir".
+      fetch('/api/org/modulos-ocultos', { credentials:'include' })
+        .then(function(r){ return r.json(); })
+        .then(function(resOcultos) {
+          if (!resOcultos.ok) return;
+          var ocultos = resOcultos.modulos || [];
+          // Nunca ocultar la propia sección de Config Módulos (sino el admin queda atrapado)
+          var blacklist = ocultos.filter(function(m){ return m !== 'config-modulos'; });
+          blacklist.forEach(function(modulo) {
+            document.querySelectorAll('.ni[data-sec="'+modulo+'"]').forEach(function(ni) {
+              ni.style.display = 'none';
+            });
+          });
+          // Re-evaluar grupos del sidebar que pudieron quedar vacíos
+          document.querySelectorAll('.ng').forEach(function(ng) {
+            var nextSibling = ng.nextElementSibling;
+            var tieneVisible = false;
+            while (nextSibling && nextSibling.classList.contains('ni')) {
+              if (nextSibling.style.display !== 'none') { tieneVisible = true; break; }
+              nextSibling = nextSibling.nextElementSibling;
+            }
+            if (!tieneVisible) ng.style.display = 'none';
+          });
+        });
+
       // Arrancar el panel
       loadInicio();
       startPoll();
@@ -24515,6 +24542,22 @@ function eqBorrarUbicacion(id) {
 var CM_SOCIEDADES = [];  // se llena con la lista de sociedades activas
 var CM_MODULOS = [];     // cache de la respuesta del backend
 
+function cmAbrirModulo(modulo) {
+  // Replica la lógica del listener de .ni pero fuerza la sección destino aunque el item esté display:none.
+  var ni = document.querySelector('.ni[data-sec="'+modulo+'"]');
+  var sec = document.getElementById('sec-'+modulo);
+  if (!sec) {
+    toast('No se encuentra la sección "'+modulo+'"','er');
+    return;
+  }
+  document.querySelectorAll('.sec').forEach(function(s){ s.classList.remove('on'); });
+  document.querySelectorAll('.ni').forEach(function(n){ n.classList.remove('on'); });
+  sec.classList.add('on');
+  if (ni) ni.classList.add('on');  // marca visualmente aunque esté display:none
+  if (typeof navAct !== 'undefined') navAct = modulo;
+  if (typeof loadSec === 'function') loadSec(modulo);
+}
+
 function cmCargar() {
   // Cargo organigrama (sociedades CON sus áreas) + módulos en paralelo
   Promise.all([
@@ -24557,11 +24600,15 @@ function cmRender() {
       '</div></div></td></tr>';
     grupos[grupo].forEach(function(m) {
       var ocultoStyle = m.oculto ? 'background:#FFF7ED' : '';
-      var iconLock = m.oculto ? '<span title="Oculto: solo Directivo lo ve" style="margin-right:4px">🔒</span>' : '';
+      var iconLock = m.oculto ? '<span title="Oculto: solo accesible desde acá con 🔗 Abrir" style="margin-right:4px">🔒</span>' : '';
+      // Botón abrir: navega al módulo. Sistema y módulos con sección propia no se filtra por oculto.
+      var btnAbrir = '<button onclick="cmAbrirModulo(\''+m.modulo+'\')" title="Ir al módulo" style="margin-left:6px;padding:2px 8px;font-size:11px;background:#fff;border:1px solid var(--bor);border-radius:4px;cursor:pointer;color:var(--burg);font-weight:600">🔗 Abrir</button>';
       html += '<tr style="'+ocultoStyle+'">' +
         '<td>' + iconLock +
           '<code style="font-size:11px;color:var(--burg);background:var(--bg);padding:2px 6px;border-radius:4px">'+m.modulo+'</code> ' +
-          '<span style="font-size:12px;margin-left:6px">'+m.label+'</span></td>' +
+          '<span style="font-size:12px;margin-left:6px">'+m.label+'</span>' +
+          btnAbrir +
+        '</td>' +
         '<td style="font-size:12px;color:var(--mut)">'+m.grupo+'</td>' +
         '<td>'+cmSocSelect(m)+'</td>' +
         '<td>'+cmAreaSelect(m)+'</td>' +
