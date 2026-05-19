@@ -128,19 +128,6 @@ router.post('/login', async (req, res) => {
       }
       const match = await bcrypt.compare(password, user.password_hash);
       if (!match) return res.status(401).json({ ok: false, error: 'Contraseña incorrecta' });
-
-      // FASE 2.C: si el admin le asignó password inicial con debe_cambiar_password=1,
-      // forzar el cambio antes de entrar al panel (mismo flow que el PIN, pero confirma con password actual)
-      if (user.debe_cambiar_password) {
-        return res.json({
-          ok: true,
-          requiere_setear_password: true,
-          user_id: user.id,
-          username: user.username || null,
-          nombre: user.nombre,
-          via: 'password'  // el frontend pedirá "password actual" en vez de PIN
-        });
-      }
       // OK, seguimos al setear cookie
     } else {
       // ── Modo PIN (transición) ──────────────────────────────────────────
@@ -154,8 +141,7 @@ router.post('/login', async (req, res) => {
           requiere_setear_password: true,
           user_id: user.id,
           username: user.username || null,
-          nombre: user.nombre,
-          via: 'pin'  // el frontend pide "PIN actual" como confirmación
+          nombre: user.nombre
         });
       }
     }
@@ -200,40 +186,22 @@ router.post('/logout', (req, res) => {
 });
 
 // ─── FASE 2.C: setear contraseña en primer login ───────────────────────────
-// El cliente llega acá después de un login cuando:
-//   (a) entró con PIN y migrado_a_v2 = 0 (primer login natural)
-//   (b) entró con password genérica asignada por admin (debe_cambiar_password = 1)
-// Re-verifica la credencial (PIN o password actual), valida la nueva contra la
-// política, la hashea con bcrypt, marca migrado_a_v2 = 1, debe_cambiar_password = 0
-// y setea la cookie.
+// El cliente llega acá después de un login exitoso con PIN cuando migrado_a_v2 = 0.
+// Re-verifica el PIN por seguridad, valida la nueva contraseña contra la política,
+// la hashea con bcrypt, marca migrado_a_v2 = 1 y setea la cookie de sesión.
 router.post('/setear-password', async (req, res) => {
-  const { user_id, pin, password_actual, password, next } = req.body || {};
-  if (!user_id || !password) {
+  const { user_id, pin, password, next } = req.body || {};
+  if (!user_id || !pin || !password) {
     return res.status(400).json({ ok: false, error: 'Faltan datos' });
-  }
-  if (!pin && !password_actual) {
-    return res.status(400).json({ ok: false, error: 'Confirmá tu PIN o tu contraseña actual' });
   }
   const db = getDb();
   try {
     const user = db.prepare('SELECT * FROM usuarios WHERE id = ? AND activo = 1').get(parseInt(user_id));
     if (!user) return res.status(401).json({ ok: false, error: 'Usuario no encontrado' });
-
-    // Confirmación: o PIN, o password actual
-    if (password_actual) {
-      if (!user.password_hash) return res.status(401).json({ ok: false, error: 'Sin contraseña actual configurada' });
-      const ok = await bcrypt.compare(password_actual, user.password_hash);
-      if (!ok) return res.status(401).json({ ok: false, error: 'Contraseña actual incorrecta' });
-    } else {
-      if (user.pin !== String(pin).trim()) return res.status(401).json({ ok: false, error: 'PIN incorrecto' });
-    }
+    if (user.pin !== String(pin).trim()) return res.status(401).json({ ok: false, error: 'PIN incorrecto' });
     // Validar política
     const error = validatePassword(password, user.username);
     if (error) return res.status(400).json({ ok: false, error });
-    // No permitir reusar la misma contraseña
-    if (password_actual && password_actual === password) {
-      return res.status(400).json({ ok: false, error: 'La nueva contraseña debe ser distinta a la actual' });
-    }
     // Hashear y guardar
     const hash = await bcrypt.hash(password, BCRYPT_ROUNDS);
     db.prepare("UPDATE usuarios SET password_hash = ?, migrado_a_v2 = 1, debe_cambiar_password = 0 WHERE id = ?")
@@ -311,21 +279,14 @@ function soloAdmin(req, res, next) {
 }
 
 // GET usuarios — accesible para cualquier usuario autenticado (necesario para Scout y asignaciones)
-// Incluye datos de la persona vinculada (nivel_acceso, áreas, cargo)
 router.get('/usuarios', requireAuth, (req, res) => {
   const db = getDb();
   try {
     const usuarios = db.prepare(`
       SELECT u.id, u.nombre, u.email, u.username, u.rol, u.depositos, u.secciones, u.activo, u.creado_en,
-             u.deposito_tipo, u.deposito_proveedor_id, u.migrado_a_v2, u.debe_cambiar_password,
-             u.password_hash IS NOT NULL AS tiene_password,
-             u.persona_id,
-             p.nombre AS persona_nombre, p.apellido AS persona_apellido,
-             p.cargo AS persona_cargo, p.nivel_acceso AS persona_nivel_acceso,
-             pr.nombre AS deposito_proveedor_nombre
+             u.deposito_tipo, u.deposito_proveedor_id, u.migrado_a_v2, p.nombre AS deposito_proveedor_nombre
       FROM usuarios u
-      LEFT JOIN proveedores pr ON u.deposito_proveedor_id = pr.id
-      LEFT JOIN personas p ON u.persona_id = p.id
+      LEFT JOIN proveedores p ON u.deposito_proveedor_id = p.id
       ORDER BY u.nombre
     `).all();
     res.json({ ok: true, data: usuarios });
@@ -447,59 +408,6 @@ router.patch('/usuarios/:id', soloAdmin, (req, res) => {
   } catch(e) {
     if (e.message.includes('UNIQUE')) return res.status(400).json({ ok: false, error: 'Ya existe un usuario con ese username, email o nombre' });
     res.status(500).json({ ok: false, error: e.message });
-  }
-});
-
-// ─── FASE 2.C: ASIGNAR PASSWORD INICIAL (admin) ────────────────────────────
-// El admin elige una contraseña genérica para el usuario.
-// El usuario podrá entrar UNA VEZ con esa password y será forzado a cambiarla.
-// Setea password_hash + debe_cambiar_password=1 + migrado_a_v2=0.
-router.post('/asignar-password-inicial/:id', soloAdmin, async (req, res) => {
-  const { password } = req.body || {};
-  const userId = parseInt(req.params.id);
-  if (!userId || !password) return res.status(400).json({ ok: false, error: 'Faltan datos' });
-  const db = getDb();
-  try {
-    const user = db.prepare('SELECT id, username, nombre FROM usuarios WHERE id = ? AND activo = 1').get(userId);
-    if (!user) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
-
-    // Validar política (misma que setear-password)
-    const error = validatePassword(password, user.username);
-    if (error) return res.status(400).json({ ok: false, error });
-
-    const hash = await bcrypt.hash(password, BCRYPT_ROUNDS);
-    db.prepare(`
-      UPDATE usuarios
-      SET password_hash = ?, debe_cambiar_password = 1, migrado_a_v2 = 0
-      WHERE id = ?
-    `).run(hash, userId);
-    console.log(`[AUTH] Admin asignó password inicial a ${user.username || user.nombre}`);
-    res.json({ ok: true, mensaje: `Password inicial asignada. ${user.nombre} deberá cambiarla al ingresar.` });
-  } catch(e) {
-    console.error('[AUTH] Error asignar-password-inicial:', e.message);
-    res.status(500).json({ ok: false, error: 'Error al asignar contraseña' });
-  }
-});
-
-// ─── FASE 2.C: RESETEAR PASSWORD (admin) ───────────────────────────────────
-// Borra la contraseña. El usuario vuelve al flow de PIN + setear-password.
-router.post('/resetear-password/:id', soloAdmin, (req, res) => {
-  const userId = parseInt(req.params.id);
-  if (!userId) return res.status(400).json({ ok: false, error: 'ID inválido' });
-  const db = getDb();
-  try {
-    const user = db.prepare('SELECT id, username, nombre FROM usuarios WHERE id = ?').get(userId);
-    if (!user) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
-    db.prepare(`
-      UPDATE usuarios
-      SET password_hash = NULL, debe_cambiar_password = 0, migrado_a_v2 = 0
-      WHERE id = ?
-    `).run(userId);
-    console.log(`[AUTH] Admin reseteó password de ${user.username || user.nombre}`);
-    res.json({ ok: true, mensaje: `Contraseña reseteada. ${user.nombre} podrá ingresar con su PIN.` });
-  } catch(e) {
-    console.error('[AUTH] Error resetear-password:', e.message);
-    res.status(500).json({ ok: false, error: 'Error al resetear contraseña' });
   }
 });
 
