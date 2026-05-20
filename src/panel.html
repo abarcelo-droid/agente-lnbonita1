@@ -2129,6 +2129,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     <div class="eq-tab" data-eq="personas" onclick="eqSubtab('personas')">👥 Personas</div>
     <div class="eq-tab on" data-eq="arbol" onclick="eqSubtab('arbol')">🌳 Organigrama</div>
     <div class="eq-tab" data-eq="ubicaciones" onclick="eqSubtab('ubicaciones')">📍 Ubicaciones</div>
+    <div class="eq-tab" data-eq="huerfanos" onclick="eqSubtab('huerfanos')">👻 Huérfanos <span id="eq-huerfanos-badge" style="display:none; background:#dc2626; color:#fff; font-size:10px; padding:2px 6px; border-radius:10px; margin-left:4px; vertical-align:middle">0</span></div>
   </div>
 
   <!-- ORGANIGRAMA -->
@@ -2188,6 +2189,24 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       <table>
         <thead><tr><th>Nombre</th><th>Dirección</th><th>Lat / Lng</th><th style="text-align:center">Personas</th><th></th></tr></thead>
         <tbody id="eq-ubic-tbody"><tr><td colspan="5" class="emp">Cargando...</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- HUÉRFANOS -->
+  <div class="eq-sub" id="eq-sub-huerfanos">
+    <div style="background:#fef3c7; border-left:3px solid #f59e0b; border-radius:4px; padding:10px 14px; margin-bottom:14px; font-size:13px; color:#92400e">
+      <strong>👻 Usuarios huérfanos</strong> son cuentas que existen en el sistema pero <strong>no están vinculadas a ninguna persona</strong> del organigrama. Vinculalos a una persona para poder gestionar su acceso desde el módulo Equipo.
+    </div>
+    <div class="tw">
+      <table>
+        <thead><tr>
+          <th style="text-align:center">Estado</th>
+          <th>Username</th><th>Nombre</th><th>Email</th><th>Rol</th>
+          <th style="text-align:center">Password</th>
+          <th>Creado</th><th></th>
+        </tr></thead>
+        <tbody id="eq-huerfanos-tbody"><tr><td colspan="8" class="emp">Cargando...</td></tr></tbody>
       </table>
     </div>
   </div>
@@ -2393,6 +2412,38 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     <div style="display:flex; gap:10px; justify-content:flex-end; margin-top:20px">
       <button class="btn bo" onclick="closeMB('mb-eq-pwd-inicial')">Cancelar</button>
       <button class="btn bb" onclick="eqAsignarPwdInicial()">Asignar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: Vincular usuario huérfano a persona -->
+<div class="mb" id="mb-eq-vincular">
+  <div class="mbox" style="width:520px">
+    <div class="mhd">
+      <div class="mht">🔗 Vincular usuario a persona</div>
+      <button class="mcl" onclick="closeMB('mb-eq-vincular')">×</button>
+    </div>
+    <input type="hidden" id="eq-vinc-usr-id">
+    <div style="background:var(--bg); border-radius:8px; padding:10px 14px; margin-bottom:14px; font-size:13px">
+      <div style="margin-bottom:6px"><strong>Usuario a vincular:</strong></div>
+      <div id="eq-vinc-usr-info" style="color:var(--mut)">—</div>
+    </div>
+    <div class="fg">
+      <div class="fl ff">
+        <label>Vincular a persona *</label>
+        <select id="eq-vinc-persona"><option value="">— Cargando personas —</option></select>
+        <div style="font-size:11px; color:var(--mut); margin-top:4px">
+          Solo se muestran personas activas <strong>sin usuario vinculado</strong>.
+        </div>
+      </div>
+    </div>
+    <div id="eq-vinc-error" style="color:#dc2626; font-size:12px; margin-top:8px; min-height:18px"></div>
+    <div style="background:#dbeafe; border-left:3px solid #2563eb; border-radius:4px; padding:8px 12px; margin-top:12px; font-size:11px; color:#1e3a8a">
+      ℹ️ Después de vincular, vas a poder gestionar el acceso de este usuario desde 👥 <strong>Personas</strong> (cambiar username, asignar password, etc.).
+    </div>
+    <div style="display:flex; gap:10px; justify-content:flex-end; margin-top:20px">
+      <button class="btn bo" onclick="closeMB('mb-eq-vincular')">Cancelar</button>
+      <button class="btn bb" onclick="eqVincularUsuario()">Vincular</button>
     </div>
   </div>
 </div>
@@ -23886,6 +23937,13 @@ function eqInit() {
   eqCargarArbol();
   // Pre-cargar también las sociedades para tener los datos listos al cambiar de sub-tab
   eqCargarOrganigrama();
+  // Pre-cargar count de huérfanos para mostrar el badge en la sub-tab
+  eqApi('/usuarios-huerfanos').then(function(r) {
+    if (r.ok) {
+      EQ_HUERFANOS.lista = r.data || [];
+      eqActualizarBadgeHuerfanos();
+    }
+  }).catch(function(){ /* no-op si no es admin */ });
 }
 
 function eqSubtab(tab) {
@@ -23895,6 +23953,7 @@ function eqSubtab(tab) {
   if (tab === 'personas')    eqCargarPersonas();
   if (tab === 'arbol')       eqCargarArbol();
   if (tab === 'ubicaciones') eqCargarUbicaciones();
+  if (tab === 'huerfanos')   eqCargarHuerfanos();
 }
 
 // ─── ORGANIGRAMA ─────────────────────────────────────────────────────
@@ -24897,6 +24956,115 @@ function cmAbrirModulo(modulo) {
   if (typeof navAct !== 'undefined') navAct = modulo;
   if (typeof loadSec === 'function') loadSec(modulo);
 }
+
+// ─── HUÉRFANOS ───────────────────────────────────────────────────────
+// Usuarios sin persona vinculada (legacy o creados antes del modelo persona-céntrico).
+// Permite vincularlos retroactivamente a una persona del organigrama.
+var EQ_HUERFANOS = { lista: [], personasDisponibles: [] };
+
+function eqCargarHuerfanos() {
+  var tb = document.getElementById('eq-huerfanos-tbody');
+  tb.innerHTML = '<tr><td colspan="8" class="emp">Cargando...</td></tr>';
+  eqApi('/usuarios-huerfanos').then(function(r) {
+    if (!r.ok) { toast('Error: ' + r.error, 'er'); return; }
+    EQ_HUERFANOS.lista = r.data || [];
+    eqActualizarBadgeHuerfanos();
+    if (EQ_HUERFANOS.lista.length === 0) {
+      tb.innerHTML = '<tr><td colspan="8" class="emp">✓ Todos los usuarios están vinculados a personas</td></tr>';
+      return;
+    }
+    tb.innerHTML = EQ_HUERFANOS.lista.map(function(u) {
+      var estadoCell = u.activo
+        ? '<span style="display:inline-block;padding:2px 8px;background:#d1fae5;color:#065f46;border-radius:10px;font-size:11px;font-weight:600">✓ Activo</span>'
+        : '<span style="display:inline-block;padding:2px 8px;background:#fee2e2;color:#991b1b;border-radius:10px;font-size:11px;font-weight:600">✗ Baja</span>';
+      var pwdCell = u.migrado_a_v2
+        ? '<span title="Usuario ya configuró su contraseña" style="color:#059669; font-weight:600">✓</span>'
+        : (u.tiene_password
+            ? '<span title="Password inicial pendiente de cambio" style="color:#d97706; font-weight:600">⏳</span>'
+            : '<span title="Sin password, entra con PIN" style="color:var(--mut)">—</span>');
+      var creado = u.creado_en ? new Date(u.creado_en).toLocaleDateString('es-AR') : '—';
+      var rowStyle = u.activo ? '' : ' style="opacity:0.55"';
+      var nombreEsc = (u.nombre || '').replace(/'/g, "\\'");
+      var usernameEsc = (u.username || '').replace(/'/g, "\\'");
+      return '<tr' + rowStyle + '>' +
+        '<td style="text-align:center">' + estadoCell + '</td>' +
+        '<td><code style="font-size:12px">' + eqEsc(u.username || '—') + '</code></td>' +
+        '<td>' + eqEsc(u.nombre || '—') + '</td>' +
+        '<td style="font-size:12px; color:var(--mut)">' + eqEsc(u.email || '—') + '</td>' +
+        '<td><span style="font-size:11px; text-transform:uppercase; color:var(--mut)">' + eqEsc(u.rol || '—') + '</span></td>' +
+        '<td style="text-align:center">' + pwdCell + '</td>' +
+        '<td style="font-size:11px; color:var(--mut)">' + creado + '</td>' +
+        '<td>' +
+          (u.activo
+            ? '<button class="btn bb bs" onclick="eqAbrirVincular(' + u.id + ", '" + nombreEsc + "', '" + usernameEsc + "', '" + eqEsc(u.email||'').replace(/'/g,"\\'") + "', '" + (u.rol||'') + "'" + ')">🔗 Vincular</button>'
+            : '<span style="font-size:11px; color:var(--mut); font-style:italic">Baja — vincular y reactivar desde Personas</span>') +
+        '</td>' +
+      '</tr>';
+    }).join('');
+  });
+}
+
+function eqActualizarBadgeHuerfanos() {
+  var activos = EQ_HUERFANOS.lista.filter(function(u){ return u.activo; }).length;
+  var badge = document.getElementById('eq-huerfanos-badge');
+  if (activos > 0) {
+    badge.textContent = activos;
+    badge.style.display = 'inline-block';
+  } else {
+    badge.style.display = 'none';
+  }
+}
+
+// Abrir modal de vinculación
+function eqAbrirVincular(usrId, nombre, username, email, rol) {
+  document.getElementById('eq-vinc-usr-id').value = usrId;
+  document.getElementById('eq-vinc-usr-info').innerHTML =
+    '<strong>' + eqEsc(nombre) + '</strong><br>' +
+    '<span style="font-size:12px">Username: <code>' + eqEsc(username || '—') + '</code> · Rol: ' + eqEsc(rol || '—') + '</span><br>' +
+    '<span style="font-size:11px; color:var(--sub)">' + eqEsc(email || '') + '</span>';
+  document.getElementById('eq-vinc-error').textContent = '';
+  // Cargar personas disponibles (activas y sin usuario vinculado)
+  var sel = document.getElementById('eq-vinc-persona');
+  sel.innerHTML = '<option value="">— Cargando personas —</option>';
+  eqApi('/usuarios-con-personas').then(function(r) {
+    if (!r.ok) {
+      sel.innerHTML = '<option value="">Error al cargar</option>';
+      return;
+    }
+    // Filtrar: solo personas activas SIN usuario vinculado
+    var disponibles = (r.data || []).filter(function(p){ return !p.usuario_id; });
+    EQ_HUERFANOS.personasDisponibles = disponibles;
+    if (disponibles.length === 0) {
+      sel.innerHTML = '<option value="">— No hay personas disponibles —</option>';
+      return;
+    }
+    sel.innerHTML = '<option value="">Elegí una persona...</option>' + disponibles.map(function(p){
+      var nom = (p.apellido || '') + (p.apellido ? ', ' : '') + (p.nombre || '');
+      var nivel = p.nivel_acceso != null ? ' [N' + p.nivel_acceso + ']' : '';
+      var cargo = p.cargo ? ' — ' + p.cargo : '';
+      return '<option value="' + p.persona_id + '">' + eqEsc(nom) + nivel + eqEsc(cargo) + '</option>';
+    }).join('');
+  });
+  document.getElementById('mb-eq-vincular').classList.add('on');
+}
+
+function eqVincularUsuario() {
+  var usrId = document.getElementById('eq-vinc-usr-id').value;
+  var personaId = document.getElementById('eq-vinc-persona').value;
+  var err = document.getElementById('eq-vinc-error');
+  err.textContent = '';
+  if (!personaId) { err.textContent = 'Elegí una persona'; return; }
+  eqApi('/usuarios/' + usrId + '/vincular-persona', {
+    method: 'POST',
+    body: { persona_id: parseInt(personaId) }
+  }).then(function(r) {
+    if (!r.ok) { err.textContent = r.error || 'Error al vincular'; return; }
+    toast(r.mensaje || 'Vinculado correctamente', 'ok');
+    closeMB('mb-eq-vincular');
+    eqCargarHuerfanos();  // Refresca lista de huérfanos
+  });
+}
+
 
 function cmCargar() {
   // Cargo organigrama (sociedades CON sus áreas) + módulos en paralelo

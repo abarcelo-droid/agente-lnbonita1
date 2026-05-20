@@ -734,4 +734,68 @@ router.get('/usuarios-con-personas', requireAdmin, (req, res) => {
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
+// ─── USUARIOS HUÉRFANOS (sin persona vinculada) ──────────────────────────
+// Detecta usuarios viejos creados antes del modelo persona-céntrico.
+// Permite vincularlos a una persona del organigrama sin perder credenciales.
+
+// GET /usuarios-huerfanos — Lista todos los usuarios (activos e inactivos) sin persona_id
+router.get('/usuarios-huerfanos', requireAdmin, (req, res) => {
+  try {
+    const rows = db().prepare(`
+      SELECT id, nombre, email, username, rol, activo, creado_en,
+             password_hash IS NOT NULL AS tiene_password,
+             migrado_a_v2
+      FROM usuarios
+      WHERE persona_id IS NULL
+      ORDER BY activo DESC, nombre
+    `).all();
+    res.json({ ok: true, data: rows });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// POST /usuarios/:id/vincular-persona — Vincula un usuario huérfano a una persona
+// Body: { persona_id }
+router.post('/usuarios/:id/vincular-persona', requireAdmin, (req, res) => {
+  const userId = parseInt(req.params.id);
+  const personaId = parseInt(req.body?.persona_id);
+  if (!userId) return res.status(400).json({ ok: false, error: 'ID de usuario inválido' });
+  if (!personaId) return res.status(400).json({ ok: false, error: 'Debés elegir una persona' });
+
+  try {
+    // Validar usuario: existe y es huérfano
+    const usuario = db().prepare("SELECT id, nombre, username, persona_id FROM usuarios WHERE id = ?").get(userId);
+    if (!usuario) return res.status(404).json({ ok: false, error: 'Usuario no existe' });
+    if (usuario.persona_id) {
+      return res.status(400).json({ ok: false, error: 'Este usuario ya está vinculado a una persona' });
+    }
+
+    // Validar persona: existe, está activa, no tiene ya otro usuario activo
+    const persona = db().prepare("SELECT id, nombre, apellido, activo FROM personas WHERE id = ?").get(personaId);
+    if (!persona) return res.status(400).json({ ok: false, error: 'La persona seleccionada no existe' });
+    if (!persona.activo) return res.status(400).json({ ok: false, error: 'La persona seleccionada está dada de baja' });
+
+    const yaTiene = db().prepare(
+      "SELECT id, nombre, username FROM usuarios WHERE persona_id = ? AND activo = 1 AND id != ?"
+    ).get(personaId, userId);
+    if (yaTiene) {
+      return res.status(400).json({
+        ok: false,
+        error: `Esa persona ya tiene un usuario vinculado (${yaTiene.username || yaTiene.nombre}). Vinculalo a otra persona o desvinculá el anterior primero.`
+      });
+    }
+
+    // Vincular
+    db().prepare("UPDATE usuarios SET persona_id = ? WHERE id = ?").run(personaId, userId);
+    const nombrePersona = (persona.nombre + ' ' + (persona.apellido || '')).trim();
+    console.log(`[ORG] Usuario ${usuario.username || usuario.nombre} (#${userId}) vinculado a persona ${nombrePersona} (#${personaId})`);
+    res.json({
+      ok: true,
+      mensaje: `${usuario.username || usuario.nombre} ahora está vinculado a ${nombrePersona}.`
+    });
+  } catch(e) {
+    console.error('[ORG] Error vincular-persona:', e.message);
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
 export default router;
