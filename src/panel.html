@@ -247,7 +247,6 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   <div class="ni" data-sec="retail-prod"><span class="dot da"></span>Productos Retail</div>
   <div class="ni" data-sec="retail-gastos"><span class="dot dd"></span>Matrix de Gastos</div>
   <div class="ni" data-sec="calendario"><span class="dot da"></span>Calendario Estacional</div>
-  <div class="ni" data-sec="maestro-usuarios"><span class="dot db"></span>Usuarios</div>
   <div class="ni" data-sec="equipo" data-admin-only="1"><span class="dot dd"></span>🏢 Equipo</div>
   <div class="ni" data-sec="config-modulos" data-admin-only="1"><span class="dot db"></span>⚙️ Config Módulos</div>
     <a href="/scout" style="display:flex;align-items:center;justify-content:center;gap:8px;
@@ -940,14 +939,15 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
 <!-- MAESTRO USUARIOS -->
 <div class="sec" id="sec-maestro-usuarios">
   <div class="ph">
-    <div><div class="ph-t">Usuarios</div><div class="ph-s">Accesos al panel — solo administradores</div></div>
-    <button class="btn bb" onclick="usrAbrirNuevo()">+ Nuevo usuario</button>
+    <div><div class="ph-t">Usuarios</div><div class="ph-s">Este módulo se movió</div></div>
   </div>
-  <div class="tw">
-    <table>
-      <thead><tr><th>Nombre</th><th>Email</th><th style="text-align:center">Password</th><th>Rol</th><th>Depósitos</th><th>Secciones</th><th>IFCO</th><th>Estado</th><th></th></tr></thead>
-      <tbody id="t-usuarios"><tr><td colspan="9" class="emp">Cargando...</td></tr></tbody>
-    </table>
+  <div style="background:var(--sur); border:1px dashed var(--bor); border-radius:12px; padding:32px 24px; text-align:center; margin-top:20px">
+    <div style="font-size:40px; margin-bottom:12px">🏢</div>
+    <div style="font-size:16px; font-weight:600; margin-bottom:8px">La gestión de accesos ahora se hace desde Equipo</div>
+    <div style="color:var(--mut); max-width:520px; margin:0 auto 18px; line-height:1.5; font-size:13px">
+      Cada persona del organigrama puede tener acceso al panel. Username, contraseña, rol y depósitos se configuran al editar la persona en el módulo <strong>🏢 Equipo</strong>.
+    </div>
+    <button class="btn bb" onclick="show('equipo')">Ir a Equipo →</button>
   </div>
 </div>
 
@@ -2281,6 +2281,66 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       </div>
     </div>
 
+    <!-- ─── BLOQUE: ACCESO AL SISTEMA (Fase 2.D) ─────────────────────────── -->
+    <div id="eq-per-acceso-box" style="margin-top:16px; padding-top:16px; border-top:1px solid var(--bor)">
+      <label style="font-size:11px; color:var(--mut); font-weight:600; text-transform:uppercase; letter-spacing:.05em; display:flex; align-items:center; gap:6px">
+        🔐 Acceso al sistema
+      </label>
+
+      <!-- Toggle: tiene login o no -->
+      <label style="display:flex; align-items:center; gap:8px; margin:10px 0; cursor:pointer; font-size:13px">
+        <input type="checkbox" id="eq-per-tiene-login" onchange="eqToggleAccesoBloque()">
+        <span>Esta persona tiene acceso al panel</span>
+      </label>
+
+      <!-- Caja que aparece solo si tiene login -->
+      <div id="eq-per-acceso-detalle" style="display:none; background:var(--bg); border-radius:8px; padding:12px; margin-top:8px">
+        <!-- Estado de password -->
+        <div id="eq-per-pwd-estado" style="margin-bottom:12px; padding:8px 10px; background:#fff; border-radius:6px; border:1px solid var(--bor); font-size:12px"></div>
+
+        <div class="fg">
+          <div class="fl"><label>Username *</label><input id="eq-per-username" placeholder="ej: pbarcelo" style="font-family:monospace"></div>
+          <div class="fl"><label>Rol del sistema</label>
+            <select id="eq-per-rol-sistema">
+              <option value="admin">Administrador</option>
+              <option value="operador" selected>Operador</option>
+              <option value="consulta">Solo consulta</option>
+              <option value="campo">🌿 Solo Scout (campo)</option>
+            </select>
+          </div>
+          <div class="fl"><label>PIN (4 dígitos)</label><input id="eq-per-pin" type="text" inputmode="numeric" maxlength="4" placeholder="0000" style="letter-spacing:6px; font-family:monospace; text-align:center"></div>
+          <div class="fl ff" style="margin-top:4px">
+            <label>Depósitos habilitados</label>
+            <div style="display:flex; gap:14px; margin-top:6px; flex-wrap:wrap">
+              <label style="display:flex; align-items:center; gap:6px; font-size:13px; text-transform:none; color:var(--txt); cursor:pointer"><input type="checkbox" id="eq-per-dep-mcba" value="MCBA" checked> MCBA</label>
+              <label style="display:flex; align-items:center; gap:6px; font-size:13px; text-transform:none; color:var(--txt); cursor:pointer"><input type="checkbox" id="eq-per-dep-finca" value="FINCA" checked> FINCA</label>
+              <label style="display:flex; align-items:center; gap:6px; font-size:13px; text-transform:none; color:var(--txt); cursor:pointer"><input type="checkbox" id="eq-per-dep-sanpedro" value="SAN PEDRO" checked> SAN PEDRO</label>
+            </div>
+          </div>
+          <div class="fl ff" style="margin-top:8px">
+            <label>Depósito IFCO <span style="color:var(--sub); font-weight:400">(fija origen al cargar remitos desde mobile)</span></label>
+            <select id="eq-per-dep-ifco-tipo" onchange="eqToggleDepIfcoProv()" style="margin-top:4px">
+              <option value="">Sin asignar (puede elegir el origen al cargar)</option>
+              <option value="san_geronimo">San Gerónimo (siempre)</option>
+              <option value="proveedor">Proveedor específico (siempre)</option>
+            </select>
+            <div id="eq-per-dep-ifco-prov-wrap" style="display:none; margin-top:6px">
+              <select id="eq-per-dep-ifco-prov"><option value="">— Cargando proveedores —</option></select>
+            </div>
+          </div>
+        </div>
+
+        <!-- Acciones de password -->
+        <div id="eq-per-pwd-acciones" style="display:flex; gap:8px; margin-top:12px; flex-wrap:wrap"></div>
+
+        <!-- Información de permisos efectivos (Fase 3.B) -->
+        <div style="margin-top:12px; padding:8px 10px; background:#fef3c7; border-left:3px solid #f59e0b; border-radius:4px; font-size:11px; color:#92400e">
+          ℹ️ Los módulos visibles se calculan automáticamente según el <strong>nivel de acceso</strong> + sociedades/áreas asignadas. Configurar visibilidad por módulo desde <strong>⚙️ Config Módulos</strong>.
+        </div>
+      </div>
+    </div>
+    <!-- ─── FIN BLOQUE ACCESO ──────────────────────────────────────────── -->
+
     <div style="display:flex; gap:10px; justify-content:flex-end; margin-top:20px">
       <button class="btn bo" onclick="closeMB('mb-eq-persona')">Cerrar</button>
       <button class="btn bb" onclick="eqGuardarPersona()">Guardar</button>
@@ -2306,6 +2366,33 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     <div style="display:flex; gap:10px; justify-content:flex-end; margin-top:20px">
       <button class="btn bo" onclick="closeMB('mb-eq-ubicacion')">Cancelar</button>
       <button class="btn bb" onclick="eqGuardarUbicacion()">Guardar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: Asignar password inicial (Fase 2.D) -->
+<div class="mb" id="mb-eq-pwd-inicial">
+  <div class="mbox" style="width:460px">
+    <div class="mhd">
+      <div class="mht">🔑 Asignar contraseña inicial</div>
+      <button class="mcl" onclick="closeMB('mb-eq-pwd-inicial')">×</button>
+    </div>
+    <input type="hidden" id="eq-pwd-usr-id">
+    <div style="font-size:13px; color:var(--txt); margin-bottom:12px; line-height:1.5">
+      Estás por asignar una contraseña inicial para <strong id="eq-pwd-nombre">—</strong> (<code id="eq-pwd-username">—</code>).
+      <br><span style="font-size:12px; color:var(--mut)">Al ingresar con ella, el sistema lo va a obligar a cambiarla. Pasale los datos por WhatsApp.</span>
+    </div>
+    <div class="fg">
+      <div class="fl ff">
+        <label>Contraseña inicial *</label>
+        <input id="eq-pwd-value" type="text" placeholder="Mínimo 8, letra y número" style="font-family:monospace; letter-spacing:1px">
+        <div style="font-size:11px; color:var(--mut); margin-top:4px">Sugerida: <code style="background:var(--bg); padding:2px 6px; border-radius:3px; cursor:pointer" onclick="eqUsarSugerida(this)" title="Click para usar">LNB2026!</code></div>
+      </div>
+    </div>
+    <div id="eq-pwd-error" style="color:#dc2626; font-size:12px; margin-top:8px; min-height:18px"></div>
+    <div style="display:flex; gap:10px; justify-content:flex-end; margin-top:20px">
+      <button class="btn bo" onclick="closeMB('mb-eq-pwd-inicial')">Cancelar</button>
+      <button class="btn bb" onclick="eqAsignarPwdInicial()">Asignar</button>
     </div>
   </div>
 </div>
@@ -5996,7 +6083,7 @@ function loadSec(s) {
     'calendario': loadCalendario,
     conv: loadConvs, guardias: loadGuardias, cobranza: loadCob,
     'retail-prod': loadRP, 'retail-gastos': loadGastos,
-    'maestro-usuarios': usrCargar,
+    'maestro-usuarios': function(){ /* deprecado: ahora se gestiona desde Equipo */ },
     'config-modulos': cmCargar,
     'ab-dashboard': abDashboard,
     'ab-stock': abCargarStock,
@@ -24024,11 +24111,11 @@ function eqNuevaPersona() {
 function eqEditarPersona(id) {
   eqApi('/personas/' + id).then(function(r) {
     if (!r.ok) { toast('Error: ' + r.error, 'er'); return; }
-    eqAbrirPersonaModal(r.persona, r.areas || []);
+    eqAbrirPersonaModal(r.persona, r.areas || [], r.usuario || null);
   });
 }
 
-function eqAbrirPersonaModal(persona, asignaciones) {
+function eqAbrirPersonaModal(persona, asignaciones, usuario) {
   EQ.personaActual = persona ? persona.id : null;
   document.getElementById('mb-eq-per-tit').textContent = persona ? 'Editar persona' : 'Nueva persona';
   document.getElementById('eq-per-id').value = persona ? persona.id : '';
@@ -24079,6 +24166,10 @@ function eqAbrirPersonaModal(persona, asignaciones) {
   } else {
     document.getElementById('eq-per-asign-box').style.display = 'none';
   }
+
+  // Bloque "Acceso al sistema" (Fase 2.D)
+  eqPoblarAcceso(persona, usuario);
+
   document.getElementById('mb-eq-persona').classList.add('on');
 }
 
@@ -24129,6 +24220,7 @@ function eqQuitarAsignacion(areaId) {
 
 function eqGuardarPersona() {
   var id = document.getElementById('eq-per-id').value;
+  var esNueva = !id;
   var body = {
     nombre: document.getElementById('eq-per-nombre').value.trim(),
     apellido: document.getElementById('eq-per-apellido').value.trim() || null,
@@ -24153,10 +24245,258 @@ function eqGuardarPersona() {
   var url = id ? '/personas/' + id : '/personas';
   eqApi(url, { method: id ? 'PATCH' : 'POST', body: body }).then(function(r) {
     if (!r.ok) { toast('Error: ' + r.error, 'er'); return; }
-    toast('Persona guardada', 'ok');
-    closeMB('mb-eq-persona');
-    eqCargarPersonas();
+    var personaId = id ? parseInt(id) : r.id;
+
+    // Sincronizar el bloque "Acceso al sistema" (Fase 2.D)
+    eqSincronizarAcceso(personaId).then(function(){
+      toast('Persona guardada', 'ok');
+      closeMB('mb-eq-persona');
+      eqCargarPersonas();
+    }).catch(function(err){
+      toast('Persona guardada, pero falló acceso: ' + (err.message || err), 'er');
+      closeMB('mb-eq-persona');
+      eqCargarPersonas();
+    });
   });
+}
+
+// ─── BLOQUE ACCESO AL SISTEMA (Fase 2.D) ─────────────────────────────────
+// Estado local del bloque (refleja lo que vino del backend al abrir el modal)
+var EQ_ACCESO = { usuario: null, proveedoresIfco: [] };
+
+function eqPoblarAcceso(persona, usuario) {
+  EQ_ACCESO.usuario = usuario || null;
+  var cb = document.getElementById('eq-per-tiene-login');
+  var detalle = document.getElementById('eq-per-acceso-detalle');
+
+  if (!persona) {
+    // Persona nueva: ocultar bloque hasta que se guarde
+    cb.checked = false;
+    cb.disabled = true;
+    detalle.style.display = 'none';
+    var label = cb.parentElement;
+    if (label) label.title = 'Primero guardá la persona para poder darle acceso';
+    return;
+  }
+  cb.disabled = false;
+
+  if (usuario) {
+    cb.checked = true;
+    detalle.style.display = 'block';
+    // Poblar campos con los datos del usuario actual
+    document.getElementById('eq-per-username').value = usuario.username || '';
+    document.getElementById('eq-per-rol-sistema').value = usuario.rol || 'operador';
+    document.getElementById('eq-per-pin').value = '';
+    document.getElementById('eq-per-pin').placeholder = '•••• (sin cambios)';
+    // Depósitos
+    var deps = [];
+    try { deps = JSON.parse(usuario.depositos || '[]'); } catch(e){ deps = []; }
+    document.getElementById('eq-per-dep-mcba').checked = deps.indexOf('MCBA') >= 0;
+    document.getElementById('eq-per-dep-finca').checked = deps.indexOf('FINCA') >= 0;
+    document.getElementById('eq-per-dep-sanpedro').checked = deps.indexOf('SAN PEDRO') >= 0;
+    // Depósito IFCO
+    document.getElementById('eq-per-dep-ifco-tipo').value = usuario.deposito_tipo || '';
+    eqToggleDepIfcoProv();
+    eqCargarProveedoresIfcoEq(usuario.deposito_proveedor_id);
+
+    // Estado de password
+    eqRenderPwdEstado(usuario);
+  } else {
+    cb.checked = false;
+    detalle.style.display = 'none';
+    // Pre-llenar sugerencias para cuando lo tilden
+    var initial = (persona.nombre || '').charAt(0).toLowerCase();
+    var ape = (persona.apellido || persona.nombre || 'user').toLowerCase()
+      .normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]/g, '');
+    document.getElementById('eq-per-username').value = (initial + ape).replace(/[^a-z0-9]/g, '');
+    document.getElementById('eq-per-rol-sistema').value = 'operador';
+    document.getElementById('eq-per-pin').value = '';
+    document.getElementById('eq-per-pin').placeholder = '0000';
+    document.getElementById('eq-per-dep-mcba').checked = true;
+    document.getElementById('eq-per-dep-finca').checked = true;
+    document.getElementById('eq-per-dep-sanpedro').checked = true;
+    document.getElementById('eq-per-dep-ifco-tipo').value = '';
+    eqToggleDepIfcoProv();
+  }
+}
+
+function eqRenderPwdEstado(usuario) {
+  var box = document.getElementById('eq-per-pwd-estado');
+  var acc = document.getElementById('eq-per-pwd-acciones');
+  if (!usuario) { box.innerHTML = ''; acc.innerHTML = ''; return; }
+  var nombre = (document.getElementById('eq-per-nombre').value + ' ' + (document.getElementById('eq-per-apellido').value || '')).trim();
+
+  if (usuario.migrado_a_v2) {
+    box.innerHTML = '<span style="color:#059669; font-weight:600">✓ Migrado</span> — el usuario ya configuró su propia contraseña.';
+    acc.innerHTML =
+      '<button class="btn bo bs" onclick="eqAbrirPwdInicial(' + usuario.id + ', \'' + nombre.replace(/'/g,"\\'") + '\', \'' + (usuario.username||'') + '\')">🔑 Forzar nueva contraseña</button>' +
+      '<button class="btn bo bs" style="color:#d97706" onclick="eqResetearPwd(' + usuario.id + ', \'' + nombre.replace(/'/g,"\\'") + '\')">🔓 Resetear (vuelve a PIN)</button>';
+  } else if (usuario.tiene_password && usuario.debe_cambiar_password) {
+    box.innerHTML = '<span style="color:#d97706; font-weight:600">⏳ Password inicial asignada</span> — esperando que el usuario ingrese y la cambie.';
+    acc.innerHTML =
+      '<button class="btn bo bs" onclick="eqAbrirPwdInicial(' + usuario.id + ', \'' + nombre.replace(/'/g,"\\'") + '\', \'' + (usuario.username||'') + '\')">🔑 Cambiar contraseña inicial</button>' +
+      '<button class="btn bo bs" style="color:#d97706" onclick="eqResetearPwd(' + usuario.id + ', \'' + nombre.replace(/'/g,"\\'") + '\')">🔓 Resetear (vuelve a PIN)</button>';
+  } else {
+    box.innerHTML = '<span style="color:#92400e; font-weight:600">⏳ Sin password</span> — el usuario sigue entrando con PIN. Asignale una password inicial o esperá a que entre y la cree.';
+    acc.innerHTML =
+      '<button class="btn bb bs" onclick="eqAbrirPwdInicial(' + usuario.id + ', \'' + nombre.replace(/'/g,"\\'") + '\', \'' + (usuario.username||'') + '\')">🔑 Asignar contraseña inicial</button>';
+  }
+}
+
+function eqToggleAccesoBloque() {
+  var cb = document.getElementById('eq-per-tiene-login');
+  var detalle = document.getElementById('eq-per-acceso-detalle');
+  detalle.style.display = cb.checked ? 'block' : 'none';
+  if (cb.checked) {
+    // Cargar proveedores IFCO en background
+    eqCargarProveedoresIfcoEq(null);
+  }
+}
+
+function eqToggleDepIfcoProv() {
+  var tipo = document.getElementById('eq-per-dep-ifco-tipo').value;
+  document.getElementById('eq-per-dep-ifco-prov-wrap').style.display = (tipo === 'proveedor') ? 'block' : 'none';
+}
+
+function eqCargarProveedoresIfcoEq(selectedId) {
+  var sel = document.getElementById('eq-per-dep-ifco-prov');
+  // Cache simple: si ya cargamos, reusar
+  if (EQ_ACCESO.proveedoresIfco.length > 0) {
+    var opts = '<option value="">— elegí proveedor —</option>';
+    EQ_ACCESO.proveedoresIfco.forEach(function(p){
+      opts += '<option value="' + p.id + '"' + (selectedId == p.id ? ' selected' : '') + '>' + eqEsc(p.nombre) + '</option>';
+    });
+    sel.innerHTML = opts;
+    return;
+  }
+  fetch('/api/ifco/proveedores', { credentials: 'include' })
+    .then(function(r){ return r.json(); })
+    .then(function(res){
+      if (!res.ok) return;
+      EQ_ACCESO.proveedoresIfco = res.proveedores || [];
+      eqCargarProveedoresIfcoEq(selectedId);  // reentrar con cache
+    });
+}
+
+// Sincronizar el bloque Acceso después de guardar la persona.
+// Devuelve una Promise.
+function eqSincronizarAcceso(personaId) {
+  return new Promise(function(resolve, reject) {
+    var cb = document.getElementById('eq-per-tiene-login');
+    var teniaUsuario = EQ_ACCESO.usuario ? true : false;
+    var quiereLogin = cb.checked;
+
+    // CASO 1: no tenía y sigue sin querer → no hacer nada
+    if (!teniaUsuario && !quiereLogin) return resolve();
+
+    // CASO 2: tenía pero ya no quiere → DELETE
+    if (teniaUsuario && !quiereLogin) {
+      if (!confirm('Esto va a quitarle el acceso al panel a esta persona. ¿Confirmás?')) {
+        cb.checked = true;  // revertir UI
+        return resolve();
+      }
+      eqApi('/personas/' + personaId + '/usuario', { method: 'DELETE' }).then(function(r){
+        if (!r.ok) return reject(new Error(r.error || 'No se pudo quitar el acceso'));
+        EQ_ACCESO.usuario = null;
+        resolve();
+      });
+      return;
+    }
+
+    // Recolectar datos del bloque
+    var deps = [];
+    if (document.getElementById('eq-per-dep-mcba').checked) deps.push('MCBA');
+    if (document.getElementById('eq-per-dep-finca').checked) deps.push('FINCA');
+    if (document.getElementById('eq-per-dep-sanpedro').checked) deps.push('SAN PEDRO');
+    var depTipo = document.getElementById('eq-per-dep-ifco-tipo').value || null;
+    var depProvId = depTipo === 'proveedor' ? (document.getElementById('eq-per-dep-ifco-prov').value || null) : null;
+    var pin = document.getElementById('eq-per-pin').value.trim();
+    var body = {
+      username: document.getElementById('eq-per-username').value.trim(),
+      rol: document.getElementById('eq-per-rol-sistema').value,
+      depositos: deps,
+      deposito_tipo: depTipo,
+      deposito_proveedor_id: depProvId
+    };
+    // PIN: solo lo mando si vino algo (en edit el campo está vacío para "sin cambios")
+    if (pin) body.pin = pin;
+
+    // CASO 3: no tenía y ahora quiere → POST
+    if (!teniaUsuario && quiereLogin) {
+      if (!body.username) return reject(new Error('Ingresá un username'));
+      // PIN obligatorio para usuarios nuevos (transición). Default 0000 si no se dio.
+      if (!body.pin) body.pin = '0000';
+      eqApi('/personas/' + personaId + '/usuario', { method: 'POST', body: body }).then(function(r){
+        if (!r.ok) return reject(new Error(r.error || 'No se pudo crear el acceso'));
+        resolve();
+      });
+      return;
+    }
+
+    // CASO 4: tenía y sigue queriendo → PATCH (solo si hay cambios visibles)
+    eqApi('/personas/' + personaId + '/usuario', { method: 'PATCH', body: body }).then(function(r){
+      if (!r.ok) return reject(new Error(r.error || 'No se pudo actualizar el acceso'));
+      resolve();
+    });
+  });
+}
+
+// ─── ACCIONES DE PASSWORD ────────────────────────────────────────────────
+function eqAbrirPwdInicial(usuarioId, nombre, username) {
+  document.getElementById('eq-pwd-usr-id').value = usuarioId;
+  document.getElementById('eq-pwd-nombre').textContent = nombre || '—';
+  document.getElementById('eq-pwd-username').textContent = username || '—';
+  document.getElementById('eq-pwd-value').value = '';
+  document.getElementById('eq-pwd-error').textContent = '';
+  document.getElementById('mb-eq-pwd-inicial').classList.add('on');
+  setTimeout(function(){ document.getElementById('eq-pwd-value').focus(); }, 100);
+}
+
+function eqUsarSugerida(el) {
+  document.getElementById('eq-pwd-value').value = el.textContent;
+  document.getElementById('eq-pwd-value').focus();
+}
+
+function eqAsignarPwdInicial() {
+  var usrId = document.getElementById('eq-pwd-usr-id').value;
+  var pwd = document.getElementById('eq-pwd-value').value;
+  var err = document.getElementById('eq-pwd-error');
+  err.textContent = '';
+  if (pwd.length < 8) { err.textContent = 'Mínimo 8 caracteres'; return; }
+  if (!/[a-zA-Z]/.test(pwd)) { err.textContent = 'Debe tener al menos una letra'; return; }
+  if (!/[0-9]/.test(pwd)) { err.textContent = 'Debe tener al menos un número'; return; }
+  fetch('/api/auth/asignar-password-inicial/' + usrId, {
+    method: 'POST', credentials: 'include',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ password: pwd })
+  })
+  .then(function(r){ return r.json(); })
+  .then(function(res){
+    if (!res.ok) { err.textContent = res.error || 'Error'; return; }
+    toast(res.mensaje || 'Password asignada', 'ok');
+    closeMB('mb-eq-pwd-inicial');
+    // Recargar la persona para refrescar el bloque
+    if (EQ.personaActual) {
+      eqApi('/personas/' + EQ.personaActual).then(function(rr){
+        if (rr.ok) eqPoblarAcceso(rr.persona, rr.usuario);
+      });
+    }
+  });
+}
+
+function eqResetearPwd(usuarioId, nombre) {
+  if (!confirm('¿Resetear la contraseña de ' + nombre + '?\n\nVa a volver a ingresar con su PIN y elegir una nueva.')) return;
+  fetch('/api/auth/resetear-password/' + usuarioId, { method: 'POST', credentials: 'include' })
+    .then(function(r){ return r.json(); })
+    .then(function(res){
+      if (!res.ok) { toast('Error: ' + res.error, 'er'); return; }
+      toast(res.mensaje || 'Contraseña reseteada', 'ok');
+      if (EQ.personaActual) {
+        eqApi('/personas/' + EQ.personaActual).then(function(rr){
+          if (rr.ok) eqPoblarAcceso(rr.persona, rr.usuario);
+        });
+      }
+    });
 }
 
 function eqBorrarPersona(id) {

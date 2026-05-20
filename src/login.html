@@ -124,12 +124,20 @@ body{min-height:100vh;background:#0f2540;display:flex;align-items:center;justify
   <div class="welcome-text">
     Bienvenido, <strong id="welcome-nombre">—</strong>.<br>
     Tu nuevo usuario es <strong id="welcome-username">—</strong>.<br>
-    <span style="font-size:12px;color:#5a6a7e">Por seguridad, confirmá tu PIN y elegí una contraseña.</span>
+    <span style="font-size:12px;color:#5a6a7e" id="welcome-extra">Por seguridad, confirmá tu PIN y elegí una contraseña.</span>
   </div>
 
-  <div class="field">
+  <div class="field" id="confirm-field-pin">
     <label>Confirmá tu PIN actual</label>
     <input type="password" id="confirm-pin" placeholder="4 dígitos" maxlength="4" inputmode="numeric" autocomplete="off" pattern="[0-9]*">
+  </div>
+
+  <div class="field" id="confirm-field-pwd" style="display:none">
+    <label>Confirmá tu contraseña actual</label>
+    <div class="field-pwd">
+      <input type="password" id="confirm-pwd" placeholder="La que te dieron" autocomplete="current-password">
+      <button type="button" class="pwd-toggle" onclick="toggleConfirmPwd()" title="Mostrar/ocultar">👁️</button>
+    </div>
   </div>
 
   <div class="field">
@@ -159,7 +167,13 @@ body{min-height:100vh;background:#0f2540;display:flex;align-items:center;justify
 var pin = '';
 var pendingUserId = null;
 var modoActivo = 'password';
+var setearVia = 'pin';  // 'pin' (primer login natural) o 'password' (cambio forzado de password genérica)
 var nextParam = new URLSearchParams(window.location.search).get('next') || '';
+
+function toggleConfirmPwd() {
+  var inp = document.getElementById('confirm-pwd');
+  inp.type = inp.type === 'password' ? 'text' : 'password';
+}
 
 function switchToPin() {
   modoActivo = 'pin';
@@ -240,11 +254,25 @@ function doLogin() {
   .then(function(res) {
     if (res.ok && res.requiere_setear_password) {
       pendingUserId = res.user_id;
+      setearVia = res.via || 'pin';
       document.getElementById('welcome-nombre').textContent = res.nombre || 'usuario';
       document.getElementById('welcome-username').textContent = res.username || '—';
+      // Mostrar el campo de confirmación correcto + ajustar texto
+      if (setearVia === 'password') {
+        document.getElementById('welcome-extra').textContent = 'Tu administrador te asignó una contraseña inicial. Elegí una nueva.';
+        document.getElementById('confirm-field-pin').style.display = 'none';
+        document.getElementById('confirm-field-pwd').style.display = 'block';
+      } else {
+        document.getElementById('welcome-extra').textContent = 'Por seguridad, confirmá tu PIN y elegí una contraseña.';
+        document.getElementById('confirm-field-pin').style.display = 'block';
+        document.getElementById('confirm-field-pwd').style.display = 'none';
+      }
       document.getElementById('card-login').style.display = 'none';
       document.getElementById('card-setear').style.display = 'block';
-      setTimeout(function(){ document.getElementById('confirm-pin').focus(); }, 100);
+      setTimeout(function(){
+        var fieldToFocus = setearVia === 'password' ? 'confirm-pwd' : 'confirm-pin';
+        document.getElementById(fieldToFocus).focus();
+      }, 100);
       return;
     }
     if (res.ok) {
@@ -262,17 +290,34 @@ function doLogin() {
 }
 
 function setearPassword() {
-  var confirmPin = document.getElementById('confirm-pin').value.trim();
   var p1 = document.getElementById('new-pwd-1').value;
   var p2 = document.getElementById('new-pwd-2').value;
   var err = document.getElementById('error-setear');
   err.textContent = '';
 
-  if (!/^\d{4}$/.test(confirmPin)) { err.textContent = 'Confirmá tu PIN (4 dígitos)'; return; }
+  // Body base
+  var body = { user_id: pendingUserId, password: p1, next: nextParam };
+
+  // Confirmación: PIN o password actual
+  if (setearVia === 'password') {
+    var actual = document.getElementById('confirm-pwd').value;
+    if (!actual) { err.textContent = 'Ingresá tu contraseña actual'; return; }
+    body.password_actual = actual;
+  } else {
+    var confirmPin = document.getElementById('confirm-pin').value.trim();
+    if (!/^\d{4}$/.test(confirmPin)) { err.textContent = 'Confirmá tu PIN (4 dígitos)'; return; }
+    body.pin = confirmPin;
+  }
+
+  // Validaciones de la nueva
   if (p1.length < 8) { err.textContent = 'Mínimo 8 caracteres'; return; }
   if (p1 !== p2) { err.textContent = 'Las contraseñas no coinciden'; return; }
   if (!/[a-zA-Z]/.test(p1)) { err.textContent = 'Debe contener al menos una letra'; return; }
   if (!/[0-9]/.test(p1)) { err.textContent = 'Debe contener al menos un número'; return; }
+  if (setearVia === 'password' && body.password_actual === p1) {
+    err.textContent = 'La nueva debe ser distinta a la actual';
+    return;
+  }
 
   var btn = document.getElementById('btn-setear');
   btn.textContent = 'Guardando...'; btn.disabled = true;
@@ -280,7 +325,7 @@ function setearPassword() {
   fetch('/api/auth/setear-password', {
     method: 'POST',
     headers: {'Content-Type':'application/json'},
-    body: JSON.stringify({ user_id: pendingUserId, pin: confirmPin, password: p1, next: nextParam })
+    body: JSON.stringify(body)
   })
   .then(function(r){ return r.json(); })
   .then(function(res) {
