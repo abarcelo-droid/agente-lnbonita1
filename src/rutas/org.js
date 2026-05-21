@@ -738,8 +738,8 @@ router.get('/usuarios-con-personas', requireAdmin, (req, res) => {
 // Detecta usuarios viejos creados antes del modelo persona-céntrico.
 // Permite vincularlos a una persona del organigrama sin perder credenciales.
 
-// GET /usuarios-huerfanos — Lista todos los usuarios (activos e inactivos) sin persona_id
-router.get('/usuarios-huerfanos', requireAdmin, (req, res) => {
+// GET /usuarios-libres — Lista todos los usuarios (activos e inactivos) sin persona_id
+router.get('/usuarios-libres', requireAdmin, (req, res) => {
   try {
     const rows = db().prepare(`
       SELECT id, nombre, email, username, rol, activo, creado_en,
@@ -753,7 +753,7 @@ router.get('/usuarios-huerfanos', requireAdmin, (req, res) => {
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
-// POST /usuarios/:id/vincular-persona — Vincula un usuario huérfano a una persona
+// POST /usuarios/:id/vincular-persona — Vincula un usuario libre a una persona
 // Body: { persona_id }
 router.post('/usuarios/:id/vincular-persona', requireAdmin, (req, res) => {
   const userId = parseInt(req.params.id);
@@ -762,7 +762,7 @@ router.post('/usuarios/:id/vincular-persona', requireAdmin, (req, res) => {
   if (!personaId) return res.status(400).json({ ok: false, error: 'Debés elegir una persona' });
 
   try {
-    // Validar usuario: existe y es huérfano
+    // Validar usuario: existe y es libre
     const usuario = db().prepare("SELECT id, nombre, username, persona_id FROM usuarios WHERE id = ?").get(userId);
     if (!usuario) return res.status(404).json({ ok: false, error: 'Usuario no existe' });
     if (usuario.persona_id) {

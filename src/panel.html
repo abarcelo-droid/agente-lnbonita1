@@ -2129,7 +2129,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     <div class="eq-tab" data-eq="personas" onclick="eqSubtab('personas')">👥 Personas</div>
     <div class="eq-tab on" data-eq="arbol" onclick="eqSubtab('arbol')">🌳 Organigrama</div>
     <div class="eq-tab" data-eq="ubicaciones" onclick="eqSubtab('ubicaciones')">📍 Ubicaciones</div>
-    <div class="eq-tab" data-eq="huerfanos" onclick="eqSubtab('huerfanos')">👻 Huérfanos <span id="eq-huerfanos-badge" style="display:none; background:#dc2626; color:#fff; font-size:10px; padding:2px 6px; border-radius:10px; margin-left:4px; vertical-align:middle">0</span></div>
+    <div class="eq-tab" data-eq="libres" onclick="eqSubtab('libres')">🆓 Libres <span id="eq-libres-badge" style="display:none; background:#dc2626; color:#fff; font-size:10px; padding:2px 6px; border-radius:10px; margin-left:4px; vertical-align:middle">0</span></div>
   </div>
 
   <!-- ORGANIGRAMA -->
@@ -2194,9 +2194,9 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   </div>
 
   <!-- HUÉRFANOS -->
-  <div class="eq-sub" id="eq-sub-huerfanos">
+  <div class="eq-sub" id="eq-sub-libres">
     <div style="background:#fef3c7; border-left:3px solid #f59e0b; border-radius:4px; padding:10px 14px; margin-bottom:14px; font-size:13px; color:#92400e">
-      <strong>👻 Usuarios huérfanos</strong> son cuentas que existen en el sistema pero <strong>no están vinculadas a ninguna persona</strong> del organigrama. Vinculalos a una persona para poder gestionar su acceso desde el módulo Equipo.
+      <strong>👻 Usuarios libres</strong> son cuentas que existen en el sistema pero <strong>no están vinculadas a ninguna persona</strong> del organigrama. Vinculalos a una persona para poder gestionar su acceso desde el módulo Equipo.
     </div>
     <div class="tw">
       <table>
@@ -2206,7 +2206,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
           <th style="text-align:center">Password</th>
           <th>Creado</th><th></th>
         </tr></thead>
-        <tbody id="eq-huerfanos-tbody"><tr><td colspan="8" class="emp">Cargando...</td></tr></tbody>
+        <tbody id="eq-libres-tbody"><tr><td colspan="8" class="emp">Cargando...</td></tr></tbody>
       </table>
     </div>
   </div>
@@ -2416,7 +2416,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   </div>
 </div>
 
-<!-- Modal: Vincular usuario huérfano a persona -->
+<!-- Modal: Vincular usuario libre a persona -->
 <div class="mb" id="mb-eq-vincular">
   <div class="mbox" style="width:520px">
     <div class="mhd">
@@ -23937,11 +23937,11 @@ function eqInit() {
   eqCargarArbol();
   // Pre-cargar también las sociedades para tener los datos listos al cambiar de sub-tab
   eqCargarOrganigrama();
-  // Pre-cargar count de huérfanos para mostrar el badge en la sub-tab
-  eqApi('/usuarios-huerfanos').then(function(r) {
+  // Pre-cargar count de libres para mostrar el badge en la sub-tab
+  eqApi('/usuarios-libres').then(function(r) {
     if (r.ok) {
-      EQ_HUERFANOS.lista = r.data || [];
-      eqActualizarBadgeHuerfanos();
+      EQ_LIBRES.lista = r.data || [];
+      eqActualizarBadgeLibres();
     }
   }).catch(function(){ /* no-op si no es admin */ });
 }
@@ -23953,7 +23953,7 @@ function eqSubtab(tab) {
   if (tab === 'personas')    eqCargarPersonas();
   if (tab === 'arbol')       eqCargarArbol();
   if (tab === 'ubicaciones') eqCargarUbicaciones();
-  if (tab === 'huerfanos')   eqCargarHuerfanos();
+  if (tab === 'libres')   eqCargarLibres();
 }
 
 // ─── ORGANIGRAMA ─────────────────────────────────────────────────────
@@ -24960,20 +24960,20 @@ function cmAbrirModulo(modulo) {
 // ─── HUÉRFANOS ───────────────────────────────────────────────────────
 // Usuarios sin persona vinculada (legacy o creados antes del modelo persona-céntrico).
 // Permite vincularlos retroactivamente a una persona del organigrama.
-var EQ_HUERFANOS = { lista: [], personasDisponibles: [] };
+var EQ_LIBRES = { lista: [], personasDisponibles: [] };
 
-function eqCargarHuerfanos() {
-  var tb = document.getElementById('eq-huerfanos-tbody');
+function eqCargarLibres() {
+  var tb = document.getElementById('eq-libres-tbody');
   tb.innerHTML = '<tr><td colspan="8" class="emp">Cargando...</td></tr>';
-  eqApi('/usuarios-huerfanos').then(function(r) {
+  eqApi('/usuarios-libres').then(function(r) {
     if (!r.ok) { toast('Error: ' + r.error, 'er'); return; }
-    EQ_HUERFANOS.lista = r.data || [];
-    eqActualizarBadgeHuerfanos();
-    if (EQ_HUERFANOS.lista.length === 0) {
+    EQ_LIBRES.lista = r.data || [];
+    eqActualizarBadgeLibres();
+    if (EQ_LIBRES.lista.length === 0) {
       tb.innerHTML = '<tr><td colspan="8" class="emp">✓ Todos los usuarios están vinculados a personas</td></tr>';
       return;
     }
-    tb.innerHTML = EQ_HUERFANOS.lista.map(function(u) {
+    tb.innerHTML = EQ_LIBRES.lista.map(function(u) {
       var estadoCell = u.activo
         ? '<span style="display:inline-block;padding:2px 8px;background:#d1fae5;color:#065f46;border-radius:10px;font-size:11px;font-weight:600">✓ Activo</span>'
         : '<span style="display:inline-block;padding:2px 8px;background:#fee2e2;color:#991b1b;border-radius:10px;font-size:11px;font-weight:600">✗ Baja</span>';
@@ -25004,9 +25004,9 @@ function eqCargarHuerfanos() {
   });
 }
 
-function eqActualizarBadgeHuerfanos() {
-  var activos = EQ_HUERFANOS.lista.filter(function(u){ return u.activo; }).length;
-  var badge = document.getElementById('eq-huerfanos-badge');
+function eqActualizarBadgeLibres() {
+  var activos = EQ_LIBRES.lista.filter(function(u){ return u.activo; }).length;
+  var badge = document.getElementById('eq-libres-badge');
   if (activos > 0) {
     badge.textContent = activos;
     badge.style.display = 'inline-block';
@@ -25033,7 +25033,7 @@ function eqAbrirVincular(usrId, nombre, username, email, rol) {
     }
     // Filtrar: solo personas activas SIN usuario vinculado
     var disponibles = (r.data || []).filter(function(p){ return !p.usuario_id; });
-    EQ_HUERFANOS.personasDisponibles = disponibles;
+    EQ_LIBRES.personasDisponibles = disponibles;
     if (disponibles.length === 0) {
       sel.innerHTML = '<option value="">— No hay personas disponibles —</option>';
       return;
@@ -25061,7 +25061,7 @@ function eqVincularUsuario() {
     if (!r.ok) { err.textContent = r.error || 'Error al vincular'; return; }
     toast(r.mensaje || 'Vinculado correctamente', 'ok');
     closeMB('mb-eq-vincular');
-    eqCargarHuerfanos();  // Refresca lista de huérfanos
+    eqCargarLibres();  // Refresca lista de libres
   });
 }
 
