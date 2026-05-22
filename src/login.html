@@ -112,6 +112,76 @@ body{min-height:100vh;background:#0f2540;display:flex;align-items:center;justify
 
   <button class="btn-login" id="btn-login" onclick="doLogin()">Ingresar →</button>
   <div class="error" id="error"></div>
+  <div class="switch-link" style="margin-top:14px;margin-bottom:0">
+    <a onclick="switchToReset()">¿Olvidaste tu contraseña?</a>
+  </div>
+</div>
+
+<!-- ═══════════ CARD: SOLICITAR RESET (paso 1: pedir email) ═══════════ -->
+<div class="card" id="card-reset-pedir" style="display:none">
+  <div class="logo-wrap">
+    <img src="/static/logo.jpg" alt="La Niña Bonita" onerror="this.style.display='none'">
+    <div class="sub">Recuperar contraseña</div>
+  </div>
+  <div class="welcome-text" style="text-align:left">
+    Ingresá tu email y te mandamos un link para restablecer tu contraseña.
+  </div>
+  <div class="field">
+    <label>Email</label>
+    <input type="email" id="reset-email" placeholder="tu@email.com" autocomplete="email" inputmode="email"
+      onkeydown="if(event.key==='Enter') solicitarReset()">
+  </div>
+  <button class="btn-login" id="btn-reset-pedir" onclick="solicitarReset()">Enviar link →</button>
+  <div class="error" id="error-reset-pedir"></div>
+  <div class="switch-link" style="margin-top:14px;margin-bottom:0">
+    <a onclick="switchToLogin()">← Volver al login</a>
+  </div>
+</div>
+
+<!-- ═══════════ CARD: RESET ENVIADO (paso 2: confirmación) ═══════════ -->
+<div class="card" id="card-reset-enviado" style="display:none">
+  <div class="logo-wrap">
+    <img src="/static/logo.jpg" alt="La Niña Bonita" onerror="this.style.display='none'">
+    <div class="sub">Mail enviado</div>
+  </div>
+  <div style="text-align:center;margin:24px 0">
+    <div style="font-size:48px;margin-bottom:12px">📬</div>
+    <div style="font-size:14px;color:#1a2332;line-height:1.5">
+      Si el email está registrado, te llegó un link para resetear tu contraseña.<br>
+      <span style="font-size:12px;color:#5a6a7e">Revisá también la carpeta de spam.</span>
+    </div>
+  </div>
+  <div class="pwd-hint">
+    El link expira en <strong>1 hora</strong> y solo se puede usar una vez.
+  </div>
+  <button class="btn-login" onclick="switchToLogin()" style="margin-top:18px">Volver al login</button>
+</div>
+
+<!-- ═══════════ CARD: NUEVA PASSWORD (paso 3: aterrizaje del link) ═══════════ -->
+<div class="card" id="card-reset-nueva" style="display:none">
+  <div class="logo-wrap">
+    <img src="/static/logo.jpg" alt="La Niña Bonita" onerror="this.style.display='none'">
+    <div class="sub">Nueva contraseña</div>
+  </div>
+  <div class="welcome-text">
+    Hola, <strong id="reset-nueva-nombre">—</strong>.<br>
+    Usuario: <strong id="reset-nueva-username">—</strong>.<br>
+    <span style="font-size:12px;color:#5a6a7e">Elegí tu nueva contraseña.</span>
+  </div>
+  <div class="field">
+    <label>Nueva contraseña</label>
+    <div class="field-pwd">
+      <input type="password" id="reset-nueva-1" placeholder="Mínimo 8 caracteres, letra y número" autocomplete="new-password">
+      <button type="button" class="pwd-toggle" onclick="toggleResetPwd()" title="Mostrar/ocultar">👁️</button>
+    </div>
+  </div>
+  <div class="field">
+    <label>Repetir contraseña</label>
+    <input type="password" id="reset-nueva-2" placeholder="Misma contraseña otra vez" autocomplete="new-password"
+      onkeydown="if(event.key==='Enter') confirmarReset()">
+  </div>
+  <button class="btn-login" id="btn-reset-confirmar" onclick="confirmarReset()">Guardar →</button>
+  <div class="error" id="error-reset-nueva"></div>
 </div>
 
 <!-- ═══════════ CARD: SETEAR PASSWORD (Fase 2.C) ═══════════ -->
@@ -354,8 +424,145 @@ document.addEventListener('keydown', function(e) {
 });
 
 window.addEventListener('load', function() {
-  document.getElementById('email').focus();
+  // Si vino con ?reset=TOKEN, abrir directamente la card de nueva password
+  var params = new URLSearchParams(window.location.search);
+  var resetToken = params.get('reset');
+  if (resetToken) {
+    aterrizarConToken(resetToken);
+  } else {
+    document.getElementById('email').focus();
+  }
 });
+
+// ─── FLUJO DE RESET DE CONTRASEÑA POR MAIL ───────────────────────────────
+function switchToReset() {
+  document.getElementById('card-login').style.display = 'none';
+  document.getElementById('card-reset-pedir').style.display = 'block';
+  document.getElementById('error-reset-pedir').textContent = '';
+  // Pre-llenar el email si ya escribió algo en el login
+  var emailLogin = document.getElementById('email').value.trim();
+  if (emailLogin && emailLogin.indexOf('@') > 0) {
+    document.getElementById('reset-email').value = emailLogin;
+  }
+  setTimeout(function(){ document.getElementById('reset-email').focus(); }, 50);
+}
+
+function switchToLogin() {
+  document.getElementById('card-reset-pedir').style.display = 'none';
+  document.getElementById('card-reset-enviado').style.display = 'none';
+  document.getElementById('card-reset-nueva').style.display = 'none';
+  document.getElementById('card-login').style.display = 'block';
+  // Limpiar la URL si tenía ?reset=...
+  if (window.location.search.indexOf('reset=') >= 0) {
+    history.replaceState({}, '', window.location.pathname);
+  }
+  setTimeout(function(){ document.getElementById('email').focus(); }, 50);
+}
+
+function solicitarReset() {
+  var email = document.getElementById('reset-email').value.trim();
+  var err = document.getElementById('error-reset-pedir');
+  err.textContent = '';
+  if (!email || email.indexOf('@') < 0) { err.textContent = 'Ingresá un email válido'; return; }
+
+  var btn = document.getElementById('btn-reset-pedir');
+  btn.textContent = 'Enviando...'; btn.disabled = true;
+
+  fetch('/api/auth/solicitar-reset', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ email: email })
+  })
+  .then(function(r){ return r.json(); })
+  .then(function(res) {
+    if (res.ok) {
+      document.getElementById('card-reset-pedir').style.display = 'none';
+      document.getElementById('card-reset-enviado').style.display = 'block';
+    } else {
+      err.textContent = res.error || 'Error al solicitar el link';
+      btn.textContent = 'Enviar link →'; btn.disabled = false;
+    }
+  })
+  .catch(function() {
+    err.textContent = 'Error de conexión';
+    btn.textContent = 'Enviar link →'; btn.disabled = false;
+  });
+}
+
+// Cuando el usuario clickea el link del mail y aterriza con ?reset=TOKEN
+function aterrizarConToken(token) {
+  // Esconder todas las cards
+  document.getElementById('card-login').style.display = 'none';
+  document.getElementById('card-setear').style.display = 'none';
+  // Mostrar la nueva
+  var cardNueva = document.getElementById('card-reset-nueva');
+  cardNueva.style.display = 'block';
+  document.getElementById('error-reset-nueva').textContent = 'Validando link...';
+  document.getElementById('btn-reset-confirmar').disabled = true;
+
+  fetch('/api/auth/validar-token?token=' + encodeURIComponent(token))
+    .then(function(r){ return r.json(); })
+    .then(function(res) {
+      if (!res.ok) {
+        document.getElementById('error-reset-nueva').textContent = res.error || 'Link inválido';
+        return;
+      }
+      document.getElementById('reset-nueva-nombre').textContent = res.nombre || 'usuario';
+      document.getElementById('reset-nueva-username').textContent = res.username || '—';
+      document.getElementById('error-reset-nueva').textContent = '';
+      document.getElementById('btn-reset-confirmar').disabled = false;
+      // Guardar el token para usarlo al confirmar
+      cardNueva.dataset.token = token;
+      setTimeout(function(){ document.getElementById('reset-nueva-1').focus(); }, 100);
+    })
+    .catch(function() {
+      document.getElementById('error-reset-nueva').textContent = 'Error de conexión';
+    });
+}
+
+function toggleResetPwd() {
+  var inp = document.getElementById('reset-nueva-1');
+  inp.type = inp.type === 'password' ? 'text' : 'password';
+}
+
+function confirmarReset() {
+  var p1 = document.getElementById('reset-nueva-1').value;
+  var p2 = document.getElementById('reset-nueva-2').value;
+  var err = document.getElementById('error-reset-nueva');
+  var token = document.getElementById('card-reset-nueva').dataset.token;
+  err.textContent = '';
+
+  if (!token) { err.textContent = 'Falta el token. Solicitá un link nuevo.'; return; }
+  if (p1.length < 8) { err.textContent = 'Mínimo 8 caracteres'; return; }
+  if (p1 !== p2) { err.textContent = 'Las contraseñas no coinciden'; return; }
+  if (!/[a-zA-Z]/.test(p1)) { err.textContent = 'Debe contener al menos una letra'; return; }
+  if (!/[0-9]/.test(p1)) { err.textContent = 'Debe contener al menos un número'; return; }
+
+  var btn = document.getElementById('btn-reset-confirmar');
+  btn.textContent = 'Guardando...'; btn.disabled = true;
+
+  fetch('/api/auth/resetear-con-token', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ token: token, password: p1 })
+  })
+  .then(function(r){ return r.json(); })
+  .then(function(res) {
+    if (res.ok) {
+      // Limpiar la URL y volver al login para que entre con la nueva pwd
+      alert('✓ ' + (res.mensaje || 'Contraseña actualizada'));
+      history.replaceState({}, '', window.location.pathname);
+      window.location.reload();
+    } else {
+      err.textContent = res.error || 'Error al guardar';
+      btn.textContent = 'Guardar →'; btn.disabled = false;
+    }
+  })
+  .catch(function() {
+    err.textContent = 'Error de conexión';
+    btn.textContent = 'Guardar →'; btn.disabled = false;
+  });
+}
 </script>
 </body>
 </html>
