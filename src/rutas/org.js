@@ -577,11 +577,12 @@ function generarUsernameOrg(nombre, apellido) {
 }
 
 // POST /personas/:id/usuario — Crear usuario para una persona que aún no tiene
-// Body: { username?, rol?, pin?, depositos?, deposito_tipo?, deposito_proveedor_id? }
-// Si no viene username, se auto-genera. PIN es obligatorio (default '0000' si no se da).
+// Body: { username?, rol?, depositos?, deposito_tipo?, deposito_proveedor_id? }
+// Si no viene username, se auto-genera. El PIN ya no se usa (legacy): se inserta
+// un placeholder porque la columna existe pero el login solo acepta password.
 router.post('/personas/:id/usuario', requireAdmin, (req, res) => {
   const personaId = parseInt(req.params.id);
-  const { username, rol = 'operador', pin = '0000', depositos, deposito_tipo, deposito_proveedor_id } = req.body || {};
+  const { username, rol = 'operador', depositos, deposito_tipo, deposito_proveedor_id } = req.body || {};
 
   try {
     const persona = db().prepare("SELECT * FROM personas WHERE id = ?").get(personaId);
@@ -591,8 +592,6 @@ router.post('/personas/:id/usuario', requireAdmin, (req, res) => {
     // ¿Ya tiene un usuario activo?
     const yaTiene = db().prepare("SELECT id FROM usuarios WHERE persona_id = ? AND activo = 1").get(personaId);
     if (yaTiene) return res.status(400).json({ ok: false, error: 'Esta persona ya tiene un usuario vinculado' });
-
-    if (!/^\d{4}$/.test(String(pin))) return res.status(400).json({ ok: false, error: 'El PIN debe ser de 4 dígitos' });
 
     // Username: saneado o auto-generado a partir del nombre+apellido
     let usernameFinal = username
@@ -626,11 +625,13 @@ router.post('/personas/:id/usuario', requireAdmin, (req, res) => {
     const rolesValidos = ['admin', 'operador', 'consulta', 'campo'];
     const rolFinal = rolesValidos.includes(rol) ? rol : 'operador';
 
+    // PIN: ya no se usa para login, pero la columna existe con NOT NULL.
+    // Insertamos '0000' como placeholder para compatibilidad con el schema.
     const r = db().prepare(`
       INSERT INTO usuarios (nombre, email, pin, rol, depositos, secciones, deposito_tipo, deposito_proveedor_id, username, persona_id)
       VALUES (?,?,?,?,?,?,?,?,?,?)
     `).run(
-      nombreCompleto, emailFinal, String(pin), rolFinal,
+      nombreCompleto, emailFinal, '0000', rolFinal,
       JSON.stringify(depositos || ['MCBA','FINCA','SAN PEDRO']),
       JSON.stringify(['*']),  // Fase 3.B derivará esto del nivel + áreas; por ahora '*'
       depTipo, depProvId, usernameFinal, personaId
@@ -646,14 +647,10 @@ router.post('/personas/:id/usuario', requireAdmin, (req, res) => {
 // Body: { username?, rol?, pin?, depositos?, deposito_tipo?, deposito_proveedor_id? }
 router.patch('/personas/:id/usuario', requireAdmin, (req, res) => {
   const personaId = parseInt(req.params.id);
-  const { username, rol, pin, depositos, deposito_tipo, deposito_proveedor_id } = req.body || {};
+  const { username, rol, depositos, deposito_tipo, deposito_proveedor_id } = req.body || {};
   try {
     const u = db().prepare("SELECT * FROM usuarios WHERE persona_id = ? AND activo = 1").get(personaId);
     if (!u) return res.status(404).json({ ok: false, error: 'La persona no tiene usuario vinculado' });
-
-    if (pin !== undefined && !/^\d{4}$/.test(String(pin))) {
-      return res.status(400).json({ ok: false, error: 'El PIN debe ser de 4 dígitos' });
-    }
 
     let usernameFinal = u.username;
     if (username !== undefined) {
@@ -689,11 +686,10 @@ router.patch('/personas/:id/usuario', requireAdmin, (req, res) => {
 
     db().prepare(`
       UPDATE usuarios
-      SET username = ?, rol = ?, pin = ?, depositos = ?, deposito_tipo = ?, deposito_proveedor_id = ?
+      SET username = ?, rol = ?, depositos = ?, deposito_tipo = ?, deposito_proveedor_id = ?
       WHERE id = ?
     `).run(
       usernameFinal, rolFinal,
-      pin !== undefined ? String(pin) : u.pin,
       depositos ? JSON.stringify(depositos) : u.depositos,
       depTipo, depProvId, u.id
     );
