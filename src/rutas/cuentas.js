@@ -63,20 +63,21 @@ router.get('/secciones', (req, res) => {
 });
 
 router.post('/secciones', requireAdmin, (req, res) => {
-  const { codigo, nombre } = req.body || {};
+  const { codigo, nombre, grupo } = req.body || {};
   if (!codigo || !nombre) return res.status(400).json({ error: 'codigo y nombre son requeridos' });
-  const codigoNum = parseInt(codigo, 10);
-  if (!Number.isFinite(codigoNum) || codigoNum < 1) {
-    return res.status(400).json({ error: 'codigo debe ser un entero >= 1' });
+  // Aceptar tanto enteros (5) como decimales (5.08)
+  const codigoStr = String(codigo).trim();
+  if (!/^\d+(\.\d+)?$/.test(codigoStr)) {
+    return res.status(400).json({ error: 'codigo debe tener formato N o N.NN (ej: 5 o 5.08)' });
   }
-  const existe = db.prepare('SELECT id FROM pa_cuentas_secciones WHERE codigo = ?').get(codigoNum);
+  const existe = db.prepare('SELECT id FROM pa_cuentas_secciones WHERE codigo = ?').get(codigoStr);
   if (existe) return res.status(400).json({ error: 'ya existe una sección con ese código' });
   try {
     const r = db.prepare(`
-      INSERT INTO pa_cuentas_secciones (codigo, nombre, orden, activo)
-      VALUES (?, ?, ?, 1)
-    `).run(codigoNum, String(nombre).trim(), codigoNum);
-    logAccion({ seccion_id: r.lastInsertRowid, accion: 'crear', detalle: { codigo: codigoNum, nombre }, usuario_id: req._user?.id });
+      INSERT INTO pa_cuentas_secciones (codigo, nombre, orden, activo, grupo)
+      VALUES (?, ?, ?, 1, ?)
+    `).run(codigoStr, String(nombre).trim(), codigoStr, grupo||'gastos');
+    logAccion({ seccion_id: r.lastInsertRowid, accion: 'crear', detalle: { codigo: codigoStr, nombre }, usuario_id: req._user?.id });
     res.json({ ok: true, id: r.lastInsertRowid });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -88,15 +89,18 @@ router.put('/secciones/:id', requireAdmin, (req, res) => {
   const sec = db.prepare('SELECT * FROM pa_cuentas_secciones WHERE id = ?').get(id);
   if (!sec) return res.status(404).json({ error: 'sección no encontrada' });
 
-  const { nombre, codigo } = req.body || {};
-  if (codigo !== undefined && parseInt(codigo, 10) !== sec.codigo) {
-    const codigoNum = parseInt(codigo, 10);
-    const otra = db.prepare('SELECT id FROM pa_cuentas_secciones WHERE codigo = ? AND id != ?').get(codigoNum, id);
+  const { nombre, codigo, grupo } = req.body || {};
+  if (codigo !== undefined && String(codigo).trim() !== String(sec.codigo)) {
+    const codigoStr = String(codigo).trim();
+    const otra = db.prepare('SELECT id FROM pa_cuentas_secciones WHERE codigo = ? AND id != ?').get(codigoStr, id);
     if (otra) return res.status(400).json({ error: 'ya existe otra sección con ese código' });
-    db.prepare("UPDATE pa_cuentas_secciones SET codigo = ?, actualizado_en = datetime('now','localtime') WHERE id = ?").run(codigoNum, id);
+    db.prepare("UPDATE pa_cuentas_secciones SET codigo = ?, actualizado_en = datetime('now','localtime') WHERE id = ?").run(codigoStr, id);
   }
   if (nombre && String(nombre).trim() !== sec.nombre) {
     db.prepare("UPDATE pa_cuentas_secciones SET nombre = ?, actualizado_en = datetime('now','localtime') WHERE id = ?").run(String(nombre).trim(), id);
+  }
+  if (grupo) {
+    db.prepare("UPDATE pa_cuentas_secciones SET grupo = ? WHERE id = ?").run(grupo, id);
   }
   logAccion({ seccion_id: id, accion: 'editar', detalle: { antes: sec, despues: req.body }, usuario_id: req._user?.id });
   res.json({ ok: true });
