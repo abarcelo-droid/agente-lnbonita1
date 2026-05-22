@@ -182,7 +182,12 @@ router.get('/personas', (req, res) => {
         (SELECT COUNT(*) FROM personas_areas WHERE persona_id = p.id) AS areas_count,
         (SELECT id FROM usuarios WHERE persona_id = p.id LIMIT 1) AS usuario_id,
         m.nombre   AS reporta_a_nombre,
-        m.apellido AS reporta_a_apellido
+        m.apellido AS reporta_a_apellido,
+        (SELECT GROUP_CONCAT(DISTINCT s.nombre)
+         FROM personas_areas pa
+         JOIN areas a     ON a.id = pa.area_id
+         JOIN sociedades s ON s.id = a.sociedad_id
+         WHERE pa.persona_id = p.id AND a.activa = 1) AS sociedades_str
       FROM personas p
       LEFT JOIN ubicaciones u ON u.id = p.ubicacion_id
       LEFT JOIN personas m    ON m.id = p.reporta_a_id
@@ -233,25 +238,35 @@ router.get('/personas/:id', (req, res) => {
       WHERE pa.persona_id = ?
       ORDER BY s.nombre, a.nombre
     `).all(id);
-    const usuario = db().prepare(
-      "SELECT id, email, nombre AS nombre_login, rol FROM usuarios WHERE persona_id = ?"
-    ).get(id);
+    const usuario = db().prepare(`
+      SELECT id, email, nombre AS nombre_login, username, rol, activo,
+             depositos, deposito_tipo, deposito_proveedor_id,
+             password_hash IS NOT NULL AS tiene_password,
+             debe_cambiar_password, migrado_a_v2
+      FROM usuarios WHERE persona_id = ?
+    `).get(id);
     res.json({ ok: true, persona, areas, usuario: usuario || null });
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
 router.post('/personas', requireAdmin, (req, res) => {
-  const { dni, nombre, apellido, mail, telefono, ubicacion_id, notas, areas, reporta_a_id, cargo } = req.body || {};
+  const { dni, nombre, apellido, mail, telefono, ubicacion_id, notas, areas, reporta_a_id, cargo, reporta_a_directorio, nivel_acceso } = req.body || {};
   if (!nombre) return res.status(400).json({ ok: false, error: 'nombre requerido' });
+  // Mutuamente excluyente: o reporta a una persona, o al Directorio
+  const repDir = reporta_a_directorio ? 1 : 0;
+  const repId  = repDir ? null : (reporta_a_id ? parseInt(reporta_a_id) : null);
+  // Nivel de acceso 0-4 (default 0 = admin total)
+  const nivel = (nivel_acceso !== undefined && nivel_acceso !== null && nivel_acceso !== '')
+    ? Math.max(0, Math.min(4, parseInt(nivel_acceso)))
+    : 0;
   try {
     const r = db().prepare(`
-      INSERT INTO personas (dni, nombre, apellido, mail, telefono, ubicacion_id, notas, reporta_a_id, cargo)
-      VALUES (?,?,?,?,?,?,?,?,?)
+      INSERT INTO personas (dni, nombre, apellido, mail, telefono, ubicacion_id, notas, reporta_a_id, cargo, reporta_a_directorio, nivel_acceso)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?)
     `).run(
       dni || null, nombre.trim(), apellido || null, mail || null, telefono || null,
       ubicacion_id ? parseInt(ubicacion_id) : null, notas || null,
-      reporta_a_id ? parseInt(reporta_a_id) : null,
-      cargo || null
+      repId, cargo || null, repDir, nivel
     );
     const personaId = r.lastInsertRowid;
     if (Array.isArray(areas) && areas.length > 0) {
@@ -266,14 +281,21 @@ router.post('/personas', requireAdmin, (req, res) => {
 
 router.patch('/personas/:id', requireAdmin, (req, res) => {
   const id = parseInt(req.params.id);
-  const { dni, nombre, apellido, mail, telefono, ubicacion_id, notas, activo, reporta_a_id, cargo } = req.body || {};
+  const { dni, nombre, apellido, mail, telefono, ubicacion_id, notas, activo, reporta_a_id, cargo, reporta_a_directorio, nivel_acceso } = req.body || {};
   try {
     const cur = db().prepare("SELECT * FROM personas WHERE id = ?").get(id);
     if (!cur) return res.status(404).json({ ok: false, error: 'No existe' });
 
-    // Validación: reporta_a_id no puede ser uno mismo ni crear ciclo
+    // Determinar nuevos valores de reporte. Mutuamente excluyentes:
+    // si reporta_a_directorio = 1 → reporta_a_id se fuerza a null.
     let nuevoReportaA = cur.reporta_a_id;
-    if (reporta_a_id !== undefined) {
+    let nuevoReportaDir = (reporta_a_directorio !== undefined)
+      ? (reporta_a_directorio ? 1 : 0)
+      : (cur.reporta_a_directorio || 0);
+
+    if (nuevoReportaDir === 1) {
+      nuevoReportaA = null;
+    } else if (reporta_a_id !== undefined) {
       const r = reporta_a_id ? parseInt(reporta_a_id) : null;
       if (r === id) return res.status(400).json({ ok: false, error: 'Una persona no puede reportarse a sí misma' });
       if (r) {
@@ -290,9 +312,15 @@ router.patch('/personas/:id', requireAdmin, (req, res) => {
       nuevoReportaA = r;
     }
 
+    // Nivel de acceso (0-4) — si vino en body lo aplico, si no mantengo el actual
+    let nuevoNivel = cur.nivel_acceso || 0;
+    if (nivel_acceso !== undefined && nivel_acceso !== null && nivel_acceso !== '') {
+      nuevoNivel = Math.max(0, Math.min(4, parseInt(nivel_acceso)));
+    }
+
     db().prepare(`
       UPDATE personas SET dni = ?, nombre = ?, apellido = ?, mail = ?, telefono = ?,
-        ubicacion_id = ?, notas = ?, activo = ?, reporta_a_id = ?, cargo = ?
+        ubicacion_id = ?, notas = ?, activo = ?, reporta_a_id = ?, cargo = ?, reporta_a_directorio = ?, nivel_acceso = ?
       WHERE id = ?
     `).run(
       dni ?? cur.dni,
@@ -305,6 +333,8 @@ router.patch('/personas/:id', requireAdmin, (req, res) => {
       activo ?? cur.activo,
       nuevoReportaA,
       cargo ?? cur.cargo,
+      nuevoReportaDir,
+      nuevoNivel,
       id
     );
     res.json({ ok: true });
@@ -368,7 +398,7 @@ router.get('/organigrama', (req, res) => {
 router.get('/jerarquia', (req, res) => {
   try {
     const personas = db().prepare(`
-      SELECT p.id, p.nombre, p.apellido, p.cargo, p.reporta_a_id,
+      SELECT p.id, p.nombre, p.apellido, p.cargo, p.reporta_a_id, p.reporta_a_directorio, p.nivel_acceso,
         (SELECT GROUP_CONCAT(s.nombre || ' / ' || a.nombre, ' · ')
          FROM personas_areas pa
          JOIN areas a     ON a.id = pa.area_id
@@ -393,6 +423,379 @@ router.get('/jerarquia', (req, res) => {
     `).all();
     res.json({ ok: true, personas });
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// ─── FASE 3.A: CONFIGURACIÓN DE MÓDULOS ────────────────────────────────
+// El admin define qué sociedad y tipo tiene cada módulo del panel.
+// Esto se usa después en /me para calcular permisos efectivos por usuario.
+
+// GET /modulos-ocultos — lista de módulos marcados como ocultos
+// Cualquier usuario autenticado puede consultar esto (lo usa el sidebar para filtrar)
+router.get('/modulos-ocultos', (req, res) => {
+  try {
+    const rows = db().prepare("SELECT modulo FROM modulos_config WHERE oculto = 1").all();
+    res.json({ ok: true, modulos: rows.map(r => r.modulo) });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// GET /modulos — lista todos los módulos con su configuración (admin only)
+router.get('/modulos', requireAdmin, (req, res) => {
+  try {
+    const rows = db().prepare(`
+      SELECT m.modulo, m.label, m.grupo, m.sociedad_id, m.area_id, m.tipo, m.oculto, m.orden,
+             s.nombre AS sociedad_nombre,
+             a.nombre AS area_nombre
+      FROM modulos_config m
+      LEFT JOIN sociedades s ON s.id = m.sociedad_id
+      LEFT JOIN areas a      ON a.id = m.area_id
+      ORDER BY m.orden ASC, m.label ASC
+    `).all();
+    res.json({ ok: true, modulos: rows });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// PATCH /modulos/:modulo — actualizar sociedad, área, tipo y/o oculto
+router.patch('/modulos/:modulo', requireAdmin, (req, res) => {
+  const modulo = req.params.modulo;
+  const { sociedad_id, area_id, tipo, oculto } = req.body || {};
+  try {
+    const cur = db().prepare("SELECT * FROM modulos_config WHERE modulo = ?").get(modulo);
+    if (!cur) return res.status(404).json({ ok: false, error: 'Módulo no encontrado' });
+
+    // sociedad_id: null = transversal, número = sociedad específica
+    let nuevaSoc = cur.sociedad_id;
+    if (sociedad_id !== undefined) {
+      nuevaSoc = sociedad_id ? parseInt(sociedad_id) : null;
+      if (nuevaSoc) {
+        const exSoc = db().prepare("SELECT id FROM sociedades WHERE id = ?").get(nuevaSoc);
+        if (!exSoc) return res.status(400).json({ ok: false, error: 'Sociedad inexistente' });
+      }
+    }
+
+    // area_id: null = todas las áreas de la sociedad. Si está set, fuerza la sociedad a la del área (consistencia)
+    let nuevaArea = cur.area_id;
+    if (area_id !== undefined) {
+      nuevaArea = area_id ? parseInt(area_id) : null;
+      if (nuevaArea) {
+        const exArea = db().prepare("SELECT sociedad_id FROM areas WHERE id = ?").get(nuevaArea);
+        if (!exArea) return res.status(400).json({ ok: false, error: 'Área inexistente' });
+        nuevaSoc = exArea.sociedad_id;
+      }
+    }
+    // Si cambió la sociedad y el área actual no pertenece a la nueva, limpio el área
+    if (sociedad_id !== undefined && nuevaArea && area_id === undefined) {
+      const exArea = db().prepare("SELECT sociedad_id FROM areas WHERE id = ?").get(nuevaArea);
+      if (!exArea || exArea.sociedad_id !== nuevaSoc) nuevaArea = null;
+    }
+
+    let nuevoTipo = cur.tipo;
+    if (tipo !== undefined) {
+      if (!['numero','operativo','mobile','externo','sistema'].includes(tipo)) {
+        return res.status(400).json({ ok: false, error: 'Tipo inválido' });
+      }
+      nuevoTipo = tipo;
+    }
+
+    let nuevoOculto = cur.oculto || 0;
+    if (oculto !== undefined) nuevoOculto = oculto ? 1 : 0;
+
+    db().prepare("UPDATE modulos_config SET sociedad_id = ?, area_id = ?, tipo = ?, oculto = ? WHERE modulo = ?")
+      .run(nuevaSoc, nuevaArea, nuevoTipo, nuevoOculto, modulo);
+    res.json({ ok: true });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// POST /modulos/bulk — actualización masiva (filtros por grupo o prefijo)
+// Body: { filter: { grupo?, prefix? }, update: { sociedad_id?, area_id?, tipo?, oculto? } }
+router.post('/modulos/bulk', requireAdmin, (req, res) => {
+  const { filter, update } = req.body || {};
+  if (!filter || !update) return res.status(400).json({ ok: false, error: 'Falta filter o update' });
+
+  try {
+    let sql = "UPDATE modulos_config SET ";
+    const sets = [];
+    const params = [];
+
+    if (update.sociedad_id !== undefined) {
+      sets.push("sociedad_id = ?");
+      params.push(update.sociedad_id ? parseInt(update.sociedad_id) : null);
+      sets.push("area_id = NULL");
+    }
+    if (update.area_id !== undefined) {
+      const aid = update.area_id ? parseInt(update.area_id) : null;
+      if (aid) {
+        const exArea = db().prepare("SELECT sociedad_id FROM areas WHERE id = ?").get(aid);
+        if (!exArea) return res.status(400).json({ ok: false, error: 'Área inexistente' });
+        sets.push("area_id = ?", "sociedad_id = ?");
+        params.push(aid, exArea.sociedad_id);
+      } else {
+        sets.push("area_id = NULL");
+      }
+    }
+    if (update.tipo !== undefined) {
+      if (!['numero','operativo','mobile','externo','sistema'].includes(update.tipo)) {
+        return res.status(400).json({ ok: false, error: 'Tipo inválido' });
+      }
+      sets.push("tipo = ?");
+      params.push(update.tipo);
+    }
+    if (update.oculto !== undefined) {
+      sets.push("oculto = ?");
+      params.push(update.oculto ? 1 : 0);
+    }
+    if (sets.length === 0) return res.status(400).json({ ok: false, error: 'Nada para actualizar' });
+
+    sql += sets.join(', ') + " WHERE 1=1";
+    if (filter.grupo) { sql += " AND grupo = ?"; params.push(filter.grupo); }
+    if (filter.prefix) { sql += " AND modulo LIKE ?"; params.push(filter.prefix + '%'); }
+
+    const r = db().prepare(sql).run(...params);
+    res.json({ ok: true, actualizados: r.changes });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// ─── FASE 2.D: GESTIÓN DE LOGIN DESDE PERSONA ──────────────────────────────
+// Una persona puede tener 0 o 1 usuario activo vinculado. Estos endpoints permiten:
+//   - Crear el usuario inicial para una persona (POST /personas/:id/usuario)
+//   - Actualizar credenciales de la persona (PATCH /personas/:id/usuario)
+//   - Quitar el acceso (DELETE /personas/:id/usuario → soft delete del usuario)
+
+// Helpers (duplicados intencionalmente desde auth.js para no acoplar archivos)
+function quitarTildesOrg(s) { return (s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, ''); }
+function sanearUsernameOrg(s) { return quitarTildesOrg(s || '').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 30); }
+function generarUsernameOrg(nombre, apellido) {
+  const ini = quitarTildesOrg(nombre || '').toLowerCase().replace(/[^a-z0-9]/g, '')[0] || 'x';
+  const ape = quitarTildesOrg(apellido || nombre || 'user').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 30);
+  let base = (ini + ape) || 'usuario';
+  let candidate = base, n = 2;
+  while (db().prepare("SELECT 1 FROM usuarios WHERE LOWER(username) = ?").get(candidate)) {
+    candidate = base + n;
+    n++;
+    if (n > 999) { candidate = base + Date.now(); break; }
+  }
+  return candidate;
+}
+
+// POST /personas/:id/usuario — Crear usuario para una persona que aún no tiene
+// Body: { username?, rol?, pin?, depositos?, deposito_tipo?, deposito_proveedor_id? }
+// Si no viene username, se auto-genera. PIN es obligatorio (default '0000' si no se da).
+router.post('/personas/:id/usuario', requireAdmin, (req, res) => {
+  const personaId = parseInt(req.params.id);
+  const { username, rol = 'operador', pin = '0000', depositos, deposito_tipo, deposito_proveedor_id } = req.body || {};
+
+  try {
+    const persona = db().prepare("SELECT * FROM personas WHERE id = ?").get(personaId);
+    if (!persona) return res.status(404).json({ ok: false, error: 'Persona no existe' });
+    if (!persona.activo) return res.status(400).json({ ok: false, error: 'La persona está dada de baja' });
+
+    // ¿Ya tiene un usuario activo?
+    const yaTiene = db().prepare("SELECT id FROM usuarios WHERE persona_id = ? AND activo = 1").get(personaId);
+    if (yaTiene) return res.status(400).json({ ok: false, error: 'Esta persona ya tiene un usuario vinculado' });
+
+    if (!/^\d{4}$/.test(String(pin))) return res.status(400).json({ ok: false, error: 'El PIN debe ser de 4 dígitos' });
+
+    // Username: saneado o auto-generado a partir del nombre+apellido
+    let usernameFinal = username
+      ? sanearUsernameOrg(username)
+      : generarUsernameOrg(persona.nombre, persona.apellido);
+    if (!usernameFinal) return res.status(400).json({ ok: false, error: 'Username inválido' });
+    const colision = db().prepare("SELECT id FROM usuarios WHERE LOWER(username) = ?").get(usernameFinal);
+    if (colision) return res.status(400).json({ ok: false, error: 'Ya existe un usuario con ese username' });
+
+    // Email: si la persona tiene mail real lo uso; si no, genero uno interno
+    const nombreCompleto = (persona.nombre + ' ' + (persona.apellido || '')).trim();
+    const emailFinal = persona.mail
+      ? persona.mail.trim().toLowerCase()
+      : `campo_${nombreCompleto.toLowerCase().replace(/\s+/g,'_').replace(/[^a-z0-9_]/g,'')}@interno.lnb`;
+
+    // Validar depósito IFCO si vino
+    let depTipo = deposito_tipo || null;
+    let depProvId = null;
+    if (depTipo) {
+      if (depTipo !== 'san_geronimo' && depTipo !== 'proveedor') {
+        return res.status(400).json({ ok: false, error: 'deposito_tipo inválido' });
+      }
+      if (depTipo === 'proveedor') {
+        depProvId = parseInt(deposito_proveedor_id) || null;
+        if (!depProvId) return res.status(400).json({ ok: false, error: 'Falta el proveedor' });
+        const exProv = db().prepare("SELECT id FROM proveedores WHERE id = ?").get(depProvId);
+        if (!exProv) return res.status(400).json({ ok: false, error: 'Proveedor inexistente' });
+      }
+    }
+
+    const rolesValidos = ['admin', 'operador', 'consulta', 'campo'];
+    const rolFinal = rolesValidos.includes(rol) ? rol : 'operador';
+
+    const r = db().prepare(`
+      INSERT INTO usuarios (nombre, email, pin, rol, depositos, secciones, deposito_tipo, deposito_proveedor_id, username, persona_id)
+      VALUES (?,?,?,?,?,?,?,?,?,?)
+    `).run(
+      nombreCompleto, emailFinal, String(pin), rolFinal,
+      JSON.stringify(depositos || ['MCBA','FINCA','SAN PEDRO']),
+      JSON.stringify(['*']),  // Fase 3.B derivará esto del nivel + áreas; por ahora '*'
+      depTipo, depProvId, usernameFinal, personaId
+    );
+    res.json({ ok: true, usuario_id: r.lastInsertRowid, username: usernameFinal });
+  } catch(e) {
+    if (e.message && e.message.includes('UNIQUE')) return res.status(400).json({ ok: false, error: 'Conflicto: username, email o nombre ya existe' });
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+// PATCH /personas/:id/usuario — Editar credenciales del usuario vinculado
+// Body: { username?, rol?, pin?, depositos?, deposito_tipo?, deposito_proveedor_id? }
+router.patch('/personas/:id/usuario', requireAdmin, (req, res) => {
+  const personaId = parseInt(req.params.id);
+  const { username, rol, pin, depositos, deposito_tipo, deposito_proveedor_id } = req.body || {};
+  try {
+    const u = db().prepare("SELECT * FROM usuarios WHERE persona_id = ? AND activo = 1").get(personaId);
+    if (!u) return res.status(404).json({ ok: false, error: 'La persona no tiene usuario vinculado' });
+
+    if (pin !== undefined && !/^\d{4}$/.test(String(pin))) {
+      return res.status(400).json({ ok: false, error: 'El PIN debe ser de 4 dígitos' });
+    }
+
+    let usernameFinal = u.username;
+    if (username !== undefined) {
+      const san = sanearUsernameOrg(username);
+      if (!san) return res.status(400).json({ ok: false, error: 'Username inválido' });
+      if (san !== u.username) {
+        const colision = db().prepare("SELECT id FROM usuarios WHERE LOWER(username) = ? AND id != ?").get(san, u.id);
+        if (colision) return res.status(400).json({ ok: false, error: 'Ya existe un usuario con ese username' });
+      }
+      usernameFinal = san;
+    }
+
+    const rolesValidos = ['admin', 'operador', 'consulta', 'campo'];
+    const rolFinal = (rol && rolesValidos.includes(rol)) ? rol : u.rol;
+
+    let depTipo = u.deposito_tipo;
+    let depProvId = u.deposito_proveedor_id;
+    if (deposito_tipo !== undefined) {
+      if (!deposito_tipo) { depTipo = null; depProvId = null; }
+      else {
+        if (deposito_tipo !== 'san_geronimo' && deposito_tipo !== 'proveedor') {
+          return res.status(400).json({ ok: false, error: 'deposito_tipo inválido' });
+        }
+        depTipo = deposito_tipo;
+        if (depTipo === 'proveedor') {
+          depProvId = parseInt(deposito_proveedor_id) || null;
+          if (!depProvId) return res.status(400).json({ ok: false, error: 'Falta el proveedor' });
+        } else {
+          depProvId = null;
+        }
+      }
+    }
+
+    db().prepare(`
+      UPDATE usuarios
+      SET username = ?, rol = ?, pin = ?, depositos = ?, deposito_tipo = ?, deposito_proveedor_id = ?
+      WHERE id = ?
+    `).run(
+      usernameFinal, rolFinal,
+      pin !== undefined ? String(pin) : u.pin,
+      depositos ? JSON.stringify(depositos) : u.depositos,
+      depTipo, depProvId, u.id
+    );
+    res.json({ ok: true, username: usernameFinal });
+  } catch(e) {
+    if (e.message && e.message.includes('UNIQUE')) return res.status(400).json({ ok: false, error: 'Conflicto con datos existentes' });
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+// DELETE /personas/:id/usuario — Quitar el acceso (soft delete del usuario)
+router.delete('/personas/:id/usuario', requireAdmin, (req, res) => {
+  const personaId = parseInt(req.params.id);
+  try {
+    const u = db().prepare("SELECT id FROM usuarios WHERE persona_id = ? AND activo = 1").get(personaId);
+    if (!u) return res.status(404).json({ ok: false, error: 'La persona no tiene usuario vinculado' });
+    db().prepare("UPDATE usuarios SET activo = 0 WHERE id = ?").run(u.id);
+    res.json({ ok: true });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// GET /usuarios-con-personas — Vista para el "ex-módulo Usuarios"
+// Lista todas las personas activas con el estado de su login.
+router.get('/usuarios-con-personas', requireAdmin, (req, res) => {
+  try {
+    const rows = db().prepare(`
+      SELECT p.id AS persona_id, p.nombre, p.apellido, p.cargo, p.nivel_acceso,
+             p.mail AS persona_mail,
+             u.id AS usuario_id, u.username, u.rol, u.activo AS usuario_activo,
+             u.password_hash IS NOT NULL AS tiene_password,
+             u.migrado_a_v2, u.debe_cambiar_password
+      FROM personas p
+      LEFT JOIN usuarios u ON u.persona_id = p.id AND u.activo = 1
+      WHERE p.activo = 1
+      ORDER BY p.apellido, p.nombre
+    `).all();
+    res.json({ ok: true, data: rows });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// ─── USUARIOS HUÉRFANOS (sin persona vinculada) ──────────────────────────
+// Detecta usuarios viejos creados antes del modelo persona-céntrico.
+// Permite vincularlos a una persona del organigrama sin perder credenciales.
+
+// GET /usuarios-libres — Lista todos los usuarios (activos e inactivos) sin persona_id
+router.get('/usuarios-libres', requireAdmin, (req, res) => {
+  try {
+    const rows = db().prepare(`
+      SELECT id, nombre, email, username, rol, activo, creado_en,
+             password_hash IS NOT NULL AS tiene_password,
+             migrado_a_v2
+      FROM usuarios
+      WHERE persona_id IS NULL
+      ORDER BY activo DESC, nombre
+    `).all();
+    res.json({ ok: true, data: rows });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// POST /usuarios/:id/vincular-persona — Vincula un usuario libre a una persona
+// Body: { persona_id }
+router.post('/usuarios/:id/vincular-persona', requireAdmin, (req, res) => {
+  const userId = parseInt(req.params.id);
+  const personaId = parseInt(req.body?.persona_id);
+  if (!userId) return res.status(400).json({ ok: false, error: 'ID de usuario inválido' });
+  if (!personaId) return res.status(400).json({ ok: false, error: 'Debés elegir una persona' });
+
+  try {
+    // Validar usuario: existe y es libre
+    const usuario = db().prepare("SELECT id, nombre, username, persona_id FROM usuarios WHERE id = ?").get(userId);
+    if (!usuario) return res.status(404).json({ ok: false, error: 'Usuario no existe' });
+    if (usuario.persona_id) {
+      return res.status(400).json({ ok: false, error: 'Este usuario ya está vinculado a una persona' });
+    }
+
+    // Validar persona: existe, está activa, no tiene ya otro usuario activo
+    const persona = db().prepare("SELECT id, nombre, apellido, activo FROM personas WHERE id = ?").get(personaId);
+    if (!persona) return res.status(400).json({ ok: false, error: 'La persona seleccionada no existe' });
+    if (!persona.activo) return res.status(400).json({ ok: false, error: 'La persona seleccionada está dada de baja' });
+
+    const yaTiene = db().prepare(
+      "SELECT id, nombre, username FROM usuarios WHERE persona_id = ? AND activo = 1 AND id != ?"
+    ).get(personaId, userId);
+    if (yaTiene) {
+      return res.status(400).json({
+        ok: false,
+        error: `Esa persona ya tiene un usuario vinculado (${yaTiene.username || yaTiene.nombre}). Vinculalo a otra persona o desvinculá el anterior primero.`
+      });
+    }
+
+    // Vincular
+    db().prepare("UPDATE usuarios SET persona_id = ? WHERE id = ?").run(personaId, userId);
+    const nombrePersona = (persona.nombre + ' ' + (persona.apellido || '')).trim();
+    console.log(`[ORG] Usuario ${usuario.username || usuario.nombre} (#${userId}) vinculado a persona ${nombrePersona} (#${personaId})`);
+    res.json({
+      ok: true,
+      mensaje: `${usuario.username || usuario.nombre} ahora está vinculado a ${nombrePersona}.`
+    });
+  } catch(e) {
+    console.error('[ORG] Error vincular-persona:', e.message);
+    res.status(500).json({ ok: false, error: e.message });
+  }
 });
 
 export default router;

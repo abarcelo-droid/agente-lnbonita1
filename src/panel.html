@@ -247,8 +247,8 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   <div class="ni" data-sec="retail-prod"><span class="dot da"></span>Productos Retail</div>
   <div class="ni" data-sec="retail-gastos"><span class="dot dd"></span>Matrix de Gastos</div>
   <div class="ni" data-sec="calendario"><span class="dot da"></span>Calendario Estacional</div>
-  <div class="ni" data-sec="maestro-usuarios"><span class="dot db"></span>Usuarios</div>
   <div class="ni" data-sec="equipo" data-admin-only="1"><span class="dot dd"></span>🏢 Equipo</div>
+  <div class="ni" data-sec="config-modulos" data-admin-only="1"><span class="dot db"></span>⚙️ Config Módulos</div>
     <a href="/scout" style="display:flex;align-items:center;justify-content:center;gap:8px;
        margin:14px 12px 8px;padding:11px 14px;
        background:linear-gradient(135deg,#059669 0%,#047857 100%);
@@ -265,6 +265,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   <!-- Usuario actual -->
   <div style="margin-top:auto;padding:12px 16px;border-top:1px solid rgba(255,255,255,.1)">
     <div id="nav-usuario" style="font-size:11px;color:rgba(255,255,255,.6);margin-bottom:8px">—</div>
+    <button onclick="abrirCambiarPassword()" style="width:100%;padding:7px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.12);border-radius:8px;color:rgba(255,255,255,.7);font-size:11px;cursor:pointer;font-family:var(--sans);margin-bottom:6px">🔑 Cambiar contraseña</button>
     <button onclick="doLogout()" style="width:100%;padding:7px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.15);border-radius:8px;color:rgba(255,255,255,.7);font-size:11px;cursor:pointer;font-family:var(--sans)">Cerrar sesión</button>
   </div>
 </nav>
@@ -938,14 +939,15 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
 <!-- MAESTRO USUARIOS -->
 <div class="sec" id="sec-maestro-usuarios">
   <div class="ph">
-    <div><div class="ph-t">Usuarios</div><div class="ph-s">Accesos al panel — solo administradores</div></div>
-    <button class="btn bb" onclick="usrAbrirNuevo()">+ Nuevo usuario</button>
+    <div><div class="ph-t">Usuarios</div><div class="ph-s">Este módulo se movió</div></div>
   </div>
-  <div class="tw">
-    <table>
-      <thead><tr><th>Nombre</th><th>Email</th><th>Rol</th><th>Depósitos</th><th>Secciones</th><th>IFCO</th><th>Estado</th><th></th></tr></thead>
-      <tbody id="t-usuarios"><tr><td colspan="8" class="emp">Cargando...</td></tr></tbody>
-    </table>
+  <div style="background:var(--sur); border:1px dashed var(--bor); border-radius:12px; padding:32px 24px; text-align:center; margin-top:20px">
+    <div style="font-size:40px; margin-bottom:12px">🏢</div>
+    <div style="font-size:16px; font-weight:600; margin-bottom:8px">La gestión de accesos ahora se hace desde Equipo</div>
+    <div style="color:var(--mut); max-width:520px; margin:0 auto 18px; line-height:1.5; font-size:13px">
+      Cada persona del organigrama puede tener acceso al panel. Username, contraseña, rol y depósitos se configuran al editar la persona en el módulo <strong>🏢 Equipo</strong>.
+    </div>
+    <button class="btn bb" onclick="show('equipo')">Ir a Equipo →</button>
   </div>
 </div>
 
@@ -997,7 +999,38 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
 </div>
 </div>
 
-<!-- CALENDARIO ESTACIONAL -->
+<!-- ⚙️ CONFIG MÓDULOS (Fase 3.A) -->
+<div class="sec" id="sec-config-modulos">
+  <div class="ph">
+    <div>
+      <div class="ph-t">⚙️ Configuración de módulos</div>
+      <div class="ph-s">Definí a qué sociedad pertenece cada módulo y su tipo. Esto se usa para los permisos por nivel de acceso.</div>
+    </div>
+    <button class="btn bo" onclick="cmCargar()">🔄 Recargar</button>
+  </div>
+
+  <div style="margin:14px 0;padding:12px;background:var(--bg);border:1px solid var(--bor);border-radius:8px;font-size:12px;color:var(--mut)">
+    <div style="margin-bottom:6px"><strong>Niveles de persona:</strong>
+      <span style="margin-left:8px">0 Directivo · 1 Gerencial · 2 Ejecutivo · 3 Adm/Operativo · 4 Externo</span>
+    </div>
+    <div style="margin-bottom:6px"><strong>Tipo del módulo</strong> = nivel máximo que lo puede ver. Ej: tipo <b>2</b> lo ven 0, 1 y 2 (Directivo, Gerencial y Ejecutivo).</div>
+    <div><strong>Área</strong>: si está seteada, solo personas de ESA área lo ven. <strong>Visible/Oculto</strong>: 🔒 oculta el módulo a todos menos Directivo (útil para módulos en construcción).</div>
+  </div>
+
+  <div class="tw">
+    <table>
+      <thead><tr>
+        <th>Módulo</th>
+        <th>Grupo</th>
+        <th>Sociedad</th>
+        <th>Área</th>
+        <th>Tipo</th>
+        <th style="text-align:center">Visible</th>
+      </tr></thead>
+      <tbody id="t-modulos"><tr><td colspan="6" class="emp">Cargando...</td></tr></tbody>
+    </table>
+  </div>
+</div>
 <div class="sec" id="sec-calendario">
   <div class="ph">
     <div><div class="ph-t">Calendario Estacional</div><div class="ph-s">Temporadas por producto según historial de ventas</div></div>
@@ -2092,14 +2125,15 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
 
   <!-- Sub-tabs -->
   <div style="display:flex; border-bottom:1px solid var(--bor); margin-bottom:14px">
-    <div class="eq-tab on" data-eq="organigrama" onclick="eqSubtab('organigrama')">🏢 Organigrama</div>
+    <div class="eq-tab" data-eq="organigrama" onclick="eqSubtab('organigrama')">🏢 Empresas</div>
     <div class="eq-tab" data-eq="personas" onclick="eqSubtab('personas')">👥 Personas</div>
-    <div class="eq-tab" data-eq="arbol" onclick="eqSubtab('arbol')">🌳 Árbol</div>
+    <div class="eq-tab on" data-eq="arbol" onclick="eqSubtab('arbol')">🌳 Organigrama</div>
     <div class="eq-tab" data-eq="ubicaciones" onclick="eqSubtab('ubicaciones')">📍 Ubicaciones</div>
+    <div class="eq-tab" data-eq="libres" onclick="eqSubtab('libres')">🆓 Libres <span id="eq-libres-badge" style="display:none; background:#dc2626; color:#fff; font-size:10px; padding:2px 6px; border-radius:10px; margin-left:4px; vertical-align:middle">0</span></div>
   </div>
 
   <!-- ORGANIGRAMA -->
-  <div class="eq-sub on" id="eq-sub-organigrama">
+  <div class="eq-sub" id="eq-sub-organigrama">
     <div style="display:flex; justify-content:flex-end; margin-bottom:14px">
       <button class="btn bb" onclick="eqNuevaSociedad()">+ Sociedad externa</button>
     </div>
@@ -2121,22 +2155,21 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     <div class="tw">
       <table>
         <thead><tr>
-          <th>Apellido, Nombre</th><th>DNI</th><th>Mail</th><th>Teléfono</th>
-          <th>Áreas</th><th>Ubicación</th><th>Login</th><th></th>
+          <th>Apellido, Nombre</th><th>Rol</th><th>Reporte</th>
+          <th>Empresas</th><th>Login</th><th></th>
         </tr></thead>
-        <tbody id="eq-personas-tbody"><tr><td colspan="8" class="emp">Cargando...</td></tr></tbody>
+        <tbody id="eq-personas-tbody"><tr><td colspan="6" class="emp">Cargando...</td></tr></tbody>
       </table>
     </div>
   </div>
 
   <!-- ÁRBOL JERÁRQUICO -->
-  <div class="eq-sub" id="eq-sub-arbol">
+  <div class="eq-sub on" id="eq-sub-arbol">
     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; flex-wrap:wrap; gap:8px">
       <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap">
         <div style="display:inline-flex; background:#fff; border:1px solid var(--bor); border-radius:6px; padding:2px; gap:2px">
-          <button class="eq-vista-btn on" data-vista="lista" onclick="eqCambiarVista('lista')" style="padding:6px 12px; border:0; background:var(--burg); color:#fff; border-radius:4px; font-size:12px; font-weight:600; cursor:pointer">📋 Lista</button>
           <button class="eq-vista-btn" data-vista="cards" onclick="eqCambiarVista('cards')" style="padding:6px 12px; border:0; background:transparent; color:var(--mut); border-radius:4px; font-size:12px; font-weight:600; cursor:pointer">🪪 Cards</button>
-          <button class="eq-vista-btn" data-vista="orgchart" onclick="eqCambiarVista('orgchart')" style="padding:6px 12px; border:0; background:transparent; color:var(--mut); border-radius:4px; font-size:12px; font-weight:600; cursor:pointer">🏢 Orgchart</button>
+          <button class="eq-vista-btn on" data-vista="orgchart" onclick="eqCambiarVista('orgchart')" style="padding:6px 12px; border:0; background:var(--burg); color:#fff; border-radius:4px; font-size:12px; font-weight:600; cursor:pointer">🏢 Orgchart</button>
         </div>
         <select id="eq-arbol-filtro-soc" onchange="eqRenderArbolActual()" style="min-width:180px">
           <option value="">Todas las sociedades</option>
@@ -2154,8 +2187,26 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     </div>
     <div class="tw">
       <table>
-        <thead><tr><th>Nombre</th><th>Dirección</th><th>Lat / Lng</th><th></th></tr></thead>
-        <tbody id="eq-ubic-tbody"><tr><td colspan="4" class="emp">Cargando...</td></tr></tbody>
+        <thead><tr><th>Nombre</th><th>Dirección</th><th>Lat / Lng</th><th style="text-align:center">Personas</th><th></th></tr></thead>
+        <tbody id="eq-ubic-tbody"><tr><td colspan="5" class="emp">Cargando...</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- HUÉRFANOS -->
+  <div class="eq-sub" id="eq-sub-libres">
+    <div style="background:#fef3c7; border-left:3px solid #f59e0b; border-radius:4px; padding:10px 14px; margin-bottom:14px; font-size:13px; color:#92400e">
+      <strong>👻 Usuarios libres</strong> son cuentas que existen en el sistema pero <strong>no están vinculadas a ninguna persona</strong> del organigrama. Vinculalos a una persona para poder gestionar su acceso desde el módulo Equipo.
+    </div>
+    <div class="tw">
+      <table>
+        <thead><tr>
+          <th style="text-align:center">Estado</th>
+          <th>Username</th><th>Nombre</th><th>Email</th><th>Rol</th>
+          <th style="text-align:center">Password</th>
+          <th>Creado</th><th></th>
+        </tr></thead>
+        <tbody id="eq-libres-tbody"><tr><td colspan="8" class="emp">Cargando...</td></tr></tbody>
       </table>
     </div>
   </div>
@@ -2220,6 +2271,15 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       <div class="fl"><label>Nombre *</label><input id="eq-per-nombre"></div>
       <div class="fl"><label>Apellido</label><input id="eq-per-apellido"></div>
       <div class="fl ff"><label>Cargo</label><input id="eq-per-cargo" placeholder="Ej: Gerente Comercial, Encargado IFCO, CEO"></div>
+      <div class="fl ff"><label>Nivel de acceso <span style="color:var(--sub);font-weight:400">(define qué módulos puede ver — preparado para Fase 3.B)</span></label>
+        <select id="eq-per-nivel">
+          <option value="0">0 — Nivel Directivo</option>
+          <option value="1">1 — Nivel Gerencial</option>
+          <option value="2">2 — Nivel Ejecutivo</option>
+          <option value="3">3 — Nivel Administrativo / Operativo</option>
+          <option value="4">4 — Externo</option>
+        </select>
+      </div>
       <div class="fl"><label>DNI</label><input id="eq-per-dni"></div>
       <div class="fl"><label>Mail</label><input id="eq-per-mail" type="email"></div>
       <div class="fl"><label>Teléfono</label><input id="eq-per-tel"></div>
@@ -2239,6 +2299,66 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
         <button class="btn bo" onclick="eqAgregarAsignacion()">+ Asignar</button>
       </div>
     </div>
+
+    <!-- ─── BLOQUE: ACCESO AL SISTEMA (Fase 2.D) ─────────────────────────── -->
+    <div id="eq-per-acceso-box" style="margin-top:16px; padding-top:16px; border-top:1px solid var(--bor)">
+      <label style="font-size:11px; color:var(--mut); font-weight:600; text-transform:uppercase; letter-spacing:.05em; display:flex; align-items:center; gap:6px">
+        🔐 Acceso al sistema
+      </label>
+
+      <!-- Toggle: tiene login o no -->
+      <label style="display:flex; align-items:center; gap:8px; margin:10px 0; cursor:pointer; font-size:13px">
+        <input type="checkbox" id="eq-per-tiene-login" onchange="eqToggleAccesoBloque()">
+        <span>Esta persona tiene acceso al panel</span>
+      </label>
+
+      <!-- Caja que aparece solo si tiene login -->
+      <div id="eq-per-acceso-detalle" style="display:none; background:var(--bg); border-radius:8px; padding:12px; margin-top:8px">
+        <!-- Estado de password -->
+        <div id="eq-per-pwd-estado" style="margin-bottom:12px; padding:8px 10px; background:#fff; border-radius:6px; border:1px solid var(--bor); font-size:12px"></div>
+
+        <div class="fg">
+          <div class="fl"><label>Username *</label><input id="eq-per-username" placeholder="ej: pbarcelo" style="font-family:monospace"></div>
+          <div class="fl"><label>Rol del sistema</label>
+            <select id="eq-per-rol-sistema">
+              <option value="admin">Administrador</option>
+              <option value="operador" selected>Operador</option>
+              <option value="consulta">Solo consulta</option>
+              <option value="campo">🌿 Solo Scout (campo)</option>
+            </select>
+          </div>
+          <div class="fl"><label>PIN (4 dígitos)</label><input id="eq-per-pin" type="text" inputmode="numeric" maxlength="4" placeholder="0000" style="letter-spacing:6px; font-family:monospace; text-align:center"></div>
+          <div class="fl ff" style="margin-top:4px">
+            <label>Depósitos habilitados</label>
+            <div style="display:flex; gap:14px; margin-top:6px; flex-wrap:wrap">
+              <label style="display:flex; align-items:center; gap:6px; font-size:13px; text-transform:none; color:var(--txt); cursor:pointer"><input type="checkbox" id="eq-per-dep-mcba" value="MCBA" checked> MCBA</label>
+              <label style="display:flex; align-items:center; gap:6px; font-size:13px; text-transform:none; color:var(--txt); cursor:pointer"><input type="checkbox" id="eq-per-dep-finca" value="FINCA" checked> FINCA</label>
+              <label style="display:flex; align-items:center; gap:6px; font-size:13px; text-transform:none; color:var(--txt); cursor:pointer"><input type="checkbox" id="eq-per-dep-sanpedro" value="SAN PEDRO" checked> SAN PEDRO</label>
+            </div>
+          </div>
+          <div class="fl ff" style="margin-top:8px">
+            <label>Depósito IFCO <span style="color:var(--sub); font-weight:400">(fija origen al cargar remitos desde mobile)</span></label>
+            <select id="eq-per-dep-ifco-tipo" onchange="eqToggleDepIfcoProv()" style="margin-top:4px">
+              <option value="">Sin asignar (puede elegir el origen al cargar)</option>
+              <option value="san_geronimo">San Gerónimo (siempre)</option>
+              <option value="proveedor">Proveedor específico (siempre)</option>
+            </select>
+            <div id="eq-per-dep-ifco-prov-wrap" style="display:none; margin-top:6px">
+              <select id="eq-per-dep-ifco-prov"><option value="">— Cargando proveedores —</option></select>
+            </div>
+          </div>
+        </div>
+
+        <!-- Acciones de password -->
+        <div id="eq-per-pwd-acciones" style="display:flex; gap:8px; margin-top:12px; flex-wrap:wrap"></div>
+
+        <!-- Información de permisos efectivos (Fase 3.B) -->
+        <div style="margin-top:12px; padding:8px 10px; background:#fef3c7; border-left:3px solid #f59e0b; border-radius:4px; font-size:11px; color:#92400e">
+          ℹ️ Los módulos visibles se calculan automáticamente según el <strong>nivel de acceso</strong> + sociedades/áreas asignadas. Configurar visibilidad por módulo desde <strong>⚙️ Config Módulos</strong>.
+        </div>
+      </div>
+    </div>
+    <!-- ─── FIN BLOQUE ACCESO ──────────────────────────────────────────── -->
 
     <div style="display:flex; gap:10px; justify-content:flex-end; margin-top:20px">
       <button class="btn bo" onclick="closeMB('mb-eq-persona')">Cerrar</button>
@@ -2265,6 +2385,65 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     <div style="display:flex; gap:10px; justify-content:flex-end; margin-top:20px">
       <button class="btn bo" onclick="closeMB('mb-eq-ubicacion')">Cancelar</button>
       <button class="btn bb" onclick="eqGuardarUbicacion()">Guardar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: Asignar password inicial (Fase 2.D) -->
+<div class="mb" id="mb-eq-pwd-inicial">
+  <div class="mbox" style="width:460px">
+    <div class="mhd">
+      <div class="mht">🔑 Asignar contraseña inicial</div>
+      <button class="mcl" onclick="closeMB('mb-eq-pwd-inicial')">×</button>
+    </div>
+    <input type="hidden" id="eq-pwd-usr-id">
+    <div style="font-size:13px; color:var(--txt); margin-bottom:12px; line-height:1.5">
+      Estás por asignar una contraseña inicial para <strong id="eq-pwd-nombre">—</strong> (<code id="eq-pwd-username">—</code>).
+      <br><span style="font-size:12px; color:var(--mut)">Al ingresar con ella, el sistema lo va a obligar a cambiarla. Pasale los datos por WhatsApp.</span>
+    </div>
+    <div class="fg">
+      <div class="fl ff">
+        <label>Contraseña inicial *</label>
+        <input id="eq-pwd-value" type="text" placeholder="Mínimo 8, letra y número" style="font-family:monospace; letter-spacing:1px">
+        <div style="font-size:11px; color:var(--mut); margin-top:4px">Sugerida: <code style="background:var(--bg); padding:2px 6px; border-radius:3px; cursor:pointer" onclick="eqUsarSugerida(this)" title="Click para usar">LNB2026!</code></div>
+      </div>
+    </div>
+    <div id="eq-pwd-error" style="color:#dc2626; font-size:12px; margin-top:8px; min-height:18px"></div>
+    <div style="display:flex; gap:10px; justify-content:flex-end; margin-top:20px">
+      <button class="btn bo" onclick="closeMB('mb-eq-pwd-inicial')">Cancelar</button>
+      <button class="btn bb" onclick="eqAsignarPwdInicial()">Asignar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: Vincular usuario libre a persona -->
+<div class="mb" id="mb-eq-vincular">
+  <div class="mbox" style="width:520px">
+    <div class="mhd">
+      <div class="mht">🔗 Vincular usuario a persona</div>
+      <button class="mcl" onclick="closeMB('mb-eq-vincular')">×</button>
+    </div>
+    <input type="hidden" id="eq-vinc-usr-id">
+    <div style="background:var(--bg); border-radius:8px; padding:10px 14px; margin-bottom:14px; font-size:13px">
+      <div style="margin-bottom:6px"><strong>Usuario a vincular:</strong></div>
+      <div id="eq-vinc-usr-info" style="color:var(--mut)">—</div>
+    </div>
+    <div class="fg">
+      <div class="fl ff">
+        <label>Vincular a persona *</label>
+        <select id="eq-vinc-persona"><option value="">— Cargando personas —</option></select>
+        <div style="font-size:11px; color:var(--mut); margin-top:4px">
+          Solo se muestran personas activas <strong>sin usuario vinculado</strong>.
+        </div>
+      </div>
+    </div>
+    <div id="eq-vinc-error" style="color:#dc2626; font-size:12px; margin-top:8px; min-height:18px"></div>
+    <div style="background:#dbeafe; border-left:3px solid #2563eb; border-radius:4px; padding:8px 12px; margin-top:12px; font-size:11px; color:#1e3a8a">
+      ℹ️ Después de vincular, vas a poder gestionar el acceso de este usuario desde 👥 <strong>Personas</strong> (cambiar username, asignar password, etc.).
+    </div>
+    <div style="display:flex; gap:10px; justify-content:flex-end; margin-top:20px">
+      <button class="btn bo" onclick="closeMB('mb-eq-vincular')">Cancelar</button>
+      <button class="btn bb" onclick="eqVincularUsuario()">Vincular</button>
     </div>
   </div>
 </div>
@@ -5579,6 +5758,38 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
 </main>
 </div>
 
+<!-- MODAL CAMBIAR CONTRASEÑA (Fase 2.C - botón A) -->
+<div class="mb" id="mb-cambiar-pwd">
+  <div class="mbox" style="width:420px;max-width:95vw">
+    <div class="mhd"><div class="mht">🔑 Cambiar contraseña</div><button class="mcl" onclick="closeMB('mb-cambiar-pwd')">×</button></div>
+    <div class="fg">
+      <div class="fl ff">
+        <label>Contraseña actual</label>
+        <div style="position:relative">
+          <input type="password" id="cp-actual" placeholder="Tu contraseña actual" style="padding-right:42px" autocomplete="current-password">
+          <button type="button" onclick="cpToggle('cp-actual')" style="position:absolute;right:4px;top:50%;transform:translateY(-50%);width:34px;height:34px;border:none;background:transparent;cursor:pointer;font-size:16px;color:var(--mut)" title="Mostrar/ocultar">👁️</button>
+        </div>
+      </div>
+      <div class="fl ff">
+        <label>Contraseña nueva</label>
+        <div style="position:relative">
+          <input type="password" id="cp-nueva-1" placeholder="Mínimo 8 caracteres, letra y número" style="padding-right:42px" autocomplete="new-password">
+          <button type="button" onclick="cpToggle('cp-nueva-1')" style="position:absolute;right:4px;top:50%;transform:translateY(-50%);width:34px;height:34px;border:none;background:transparent;cursor:pointer;font-size:16px;color:var(--mut)" title="Mostrar/ocultar">👁️</button>
+        </div>
+      </div>
+      <div class="fl ff">
+        <label>Repetir contraseña nueva</label>
+        <input type="password" id="cp-nueva-2" placeholder="Misma contraseña otra vez" autocomplete="new-password" onkeydown="if(event.key==='Enter') cambiarPasswordSubmit()">
+      </div>
+      <div id="cp-error" style="color:#dc2626;font-size:13px;text-align:center;min-height:18px"></div>
+    </div>
+    <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:20px">
+      <button class="btn bo" onclick="closeMB('mb-cambiar-pwd')">Cancelar</button>
+      <button class="btn bb" id="cp-btn-guardar" onclick="cambiarPasswordSubmit()">Guardar</button>
+    </div>
+  </div>
+</div>
+
 <!-- MODAL CLIENTE -->
 <div class="mb" id="mb-c">
 <div class="mbox">
@@ -5923,7 +6134,8 @@ function loadSec(s) {
     'calendario': loadCalendario,
     conv: loadConvs, guardias: loadGuardias, cobranza: loadCob,
     'retail-prod': loadRP, 'retail-gastos': loadGastos,
-    'maestro-usuarios': usrCargar,
+    'maestro-usuarios': function(){ /* deprecado: ahora se gestiona desde Equipo */ },
+    'config-modulos': cmCargar,
     'ab-dashboard': abDashboard,
     'ab-stock': abCargarStock,
     'ab-partidas': abCargarPartidas,
@@ -9066,6 +9278,33 @@ var LNB_USER = null;
         });
       }
 
+      // Ocultar del sidebar los módulos marcados como "oculto" en Config Módulos.
+      // Aplica a TODOS los usuarios (incluido admin). Los admins acceden a esos módulos
+      // desde el panel ⚙️ Config Módulos con el botón "🔗 Abrir".
+      fetch('/api/org/modulos-ocultos', { credentials:'include' })
+        .then(function(r){ return r.json(); })
+        .then(function(resOcultos) {
+          if (!resOcultos.ok) return;
+          var ocultos = resOcultos.modulos || [];
+          // Nunca ocultar la propia sección de Config Módulos (sino el admin queda atrapado)
+          var blacklist = ocultos.filter(function(m){ return m !== 'config-modulos'; });
+          blacklist.forEach(function(modulo) {
+            document.querySelectorAll('.ni[data-sec="'+modulo+'"]').forEach(function(ni) {
+              ni.style.display = 'none';
+            });
+          });
+          // Re-evaluar grupos del sidebar que pudieron quedar vacíos
+          document.querySelectorAll('.ng').forEach(function(ng) {
+            var nextSibling = ng.nextElementSibling;
+            var tieneVisible = false;
+            while (nextSibling && nextSibling.classList.contains('ni')) {
+              if (nextSibling.style.display !== 'none') { tieneVisible = true; break; }
+              nextSibling = nextSibling.nextElementSibling;
+            }
+            if (!tieneVisible) ng.style.display = 'none';
+          });
+        });
+
       // Arrancar el panel
       loadInicio();
       startPoll();
@@ -10117,6 +10356,73 @@ loadSec = function(s) {
   if (s === 'equipo') { eqInit(); return; }
   _loadSecOriginal(s);
 };
+// ── A: CAMBIAR CONTRASEÑA (usuario logueado) ──────────────
+function abrirCambiarPassword() {
+  document.getElementById('cp-actual').value = '';
+  document.getElementById('cp-nueva-1').value = '';
+  document.getElementById('cp-nueva-2').value = '';
+  document.getElementById('cp-error').textContent = '';
+  // Reset tipo a password (por si se quedó visible)
+  ['cp-actual','cp-nueva-1'].forEach(function(id){ document.getElementById(id).type = 'password'; });
+  document.getElementById('mb-cambiar-pwd').classList.add('on');
+  setTimeout(function(){ document.getElementById('cp-actual').focus(); }, 100);
+}
+function cpToggle(id) {
+  var inp = document.getElementById(id);
+  inp.type = inp.type === 'password' ? 'text' : 'password';
+}
+function cambiarPasswordSubmit() {
+  var actual = document.getElementById('cp-actual').value;
+  var p1 = document.getElementById('cp-nueva-1').value;
+  var p2 = document.getElementById('cp-nueva-2').value;
+  var err = document.getElementById('cp-error');
+  err.textContent = '';
+  if (!actual) { err.textContent = 'Ingresá tu contraseña actual'; return; }
+  if (p1.length < 8) { err.textContent = 'Mínimo 8 caracteres'; return; }
+  if (p1 !== p2) { err.textContent = 'Las contraseñas no coinciden'; return; }
+  if (!/[a-zA-Z]/.test(p1)) { err.textContent = 'Debe contener al menos una letra'; return; }
+  if (!/[0-9]/.test(p1)) { err.textContent = 'Debe contener al menos un número'; return; }
+  if (actual === p1) { err.textContent = 'La nueva no puede ser igual a la actual'; return; }
+  var btn = document.getElementById('cp-btn-guardar');
+  btn.textContent = 'Guardando...'; btn.disabled = true;
+  fetch('/api/auth/cambiar-password', {
+    method:'POST', credentials:'include',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ password_actual: actual, password_nueva: p1 })
+  })
+    .then(function(r){ return r.json(); })
+    .then(function(res) {
+      btn.textContent = 'Guardar'; btn.disabled = false;
+      if (res.ok) {
+        closeMB('mb-cambiar-pwd');
+        toast('Contraseña actualizada','ok');
+      } else {
+        err.textContent = res.error || 'Error al guardar';
+      }
+    })
+    .catch(function(){
+      btn.textContent = 'Guardar'; btn.disabled = false;
+      err.textContent = 'Error de conexión';
+    });
+}
+
+// ── B: RESETEAR CONTRASEÑA (admin reseteando a otro usuario) ──────────
+function usrResetearPassword(userId, userNombre) {
+  if (!confirm('¿Resetear la contraseña de ' + userNombre + '?\n\nEsto va a borrar su contraseña actual. La próxima vez que entre con su PIN va a poder elegir una nueva.')) return;
+  fetch('/api/auth/resetear-password/' + userId, {
+    method:'POST', credentials:'include'
+  })
+    .then(function(r){ return r.json(); })
+    .then(function(res) {
+      if (res.ok) {
+        toast(res.mensaje || 'Contraseña reseteada','ok');
+        usrCargar();
+      } else {
+        toast('Error: ' + (res.error || 'desconocido'),'er');
+      }
+    });
+}
+
 function doLogout() {
   fetch('/api/auth/logout', { method:'POST' })
     .then(function(){ window.location.href='/login'; });
@@ -10249,7 +10555,7 @@ function usrCargar() {
     .then(function(r){ return r.json(); })
     .then(function(res) {
       var tbody = document.getElementById('t-usuarios');
-      if (!res.ok) { tbody.innerHTML='<tr><td colspan="8" class="emp">Sin acceso</td></tr>'; return; }
+      if (!res.ok) { tbody.innerHTML='<tr><td colspan="9" class="emp">Sin acceso</td></tr>'; return; }
       var rolLabel = { admin:'Administrador', operador:'Operador', consulta:'Solo lectura', campo:'Solo Scout' };
       tbody.innerHTML = res.data.map(function(u) {
         var deps = JSON.parse(u.depositos||'[]').join(', ');
@@ -10264,15 +10570,28 @@ function usrCargar() {
         } else {
           depIfco = '<span style="font-size:11px;color:var(--sub)">—</span>';
         }
+        // Estado de password (Fase 2.C — columna nueva)
+        var pwdCell;
+        if (u.migrado_a_v2) {
+          pwdCell = '<span title="Contraseña configurada" style="color:#059669;font-size:14px">✓</span>';
+        } else {
+          pwdCell = '<span title="Pendiente: el usuario todavía no eligió contraseña" style="color:#d97706;font-size:14px">⏳</span>';
+        }
+        // Botón resetear (solo si tiene password configurada — si no, no hay nada que resetear)
+        var btnReset = u.migrado_a_v2
+          ? '<button class="btn bo bs" onclick="usrResetearPassword('+u.id+',\''+(u.nombre||'').replace(/'/g,"\\'")+'\')" title="Resetear contraseña" style="margin-right:6px;color:#d97706">🔓</button>'
+          : '';
         return '<tr style="'+(u.activo?'':'opacity:.45')+'">' +
           '<td><strong>'+u.nombre+'</strong></td>' +
           '<td style="color:var(--mut)">'+(u.email&&!u.email.includes('@interno.lnb')?u.email:'<span style="color:var(--sub);font-style:italic">Solo campo</span>')+'</td>' +
+          '<td style="text-align:center">'+pwdCell+'</td>' +
           '<td><span class="bdg bcc" style="font-size:11px">'+(rolLabel[u.rol]||u.rol)+'</span></td>' +
           '<td style="font-size:12px;color:var(--mut)">'+deps+'</td>' +
           '<td style="font-size:12px;color:var(--mut)">'+secsLabel+'</td>' +
           '<td>'+depIfco+'</td>' +
           '<td>'+(u.activo?'<span class="bdg bok">Activo</span>':'<span class="bdg ber">Inactivo</span>')+'</td>' +
           '<td style="text-align:right;white-space:nowrap">' +
+            btnReset +
             '<button class="btn bo bs" onclick=\'usrEditar('+JSON.stringify(u).replace(/'/g,"&#39;")+')\' style="margin-right:6px">Editar</button>' +
             (u.activo?'<button class="btn bd bs" onclick="usrToggle('+u.id+',0)">Desactivar</button>':'<button class="btn bo bs" onclick="usrToggle('+u.id+',1)">Activar</button>') +
           '</td></tr>';
@@ -23614,7 +23933,17 @@ function eqApi(path, opts) {
 function eqEsc(s) { return String(s == null ? '' : s).replace(/[<>&"]/g, function(c){ return {'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c]; }); }
 
 function eqInit() {
+  // Vista principal: organigrama por nivel jerárquico
+  eqCargarArbol();
+  // Pre-cargar también las sociedades para tener los datos listos al cambiar de sub-tab
   eqCargarOrganigrama();
+  // Pre-cargar count de libres para mostrar el badge en la sub-tab
+  eqApi('/usuarios-libres').then(function(r) {
+    if (r.ok) {
+      EQ_LIBRES.lista = r.data || [];
+      eqActualizarBadgeLibres();
+    }
+  }).catch(function(){ /* no-op si no es admin */ });
 }
 
 function eqSubtab(tab) {
@@ -23624,6 +23953,7 @@ function eqSubtab(tab) {
   if (tab === 'personas')    eqCargarPersonas();
   if (tab === 'arbol')       eqCargarArbol();
   if (tab === 'ubicaciones') eqCargarUbicaciones();
+  if (tab === 'libres')   eqCargarLibres();
 }
 
 // ─── ORGANIGRAMA ─────────────────────────────────────────────────────
@@ -23645,6 +23975,7 @@ function eqRenderOrganigrama() {
   var grid = document.getElementById('eq-org-grid');
   grid.innerHTML = EQ.sociedades.map(function(s) {
     var pillCls = s.tipo === 'externa' ? 'eq-pill-externa' : 'eq-pill-interna';
+    var totalPersonas = (s.areas || []).reduce(function(acc, a){ return acc + (a.personas_count || 0); }, 0);
     var areasHtml = s.areas.length === 0
       ? '<div class="eq-org-sub" style="font-style:italic">Sin áreas cargadas</div>'
       : s.areas.map(function(a){
@@ -23661,7 +23992,9 @@ function eqRenderOrganigrama() {
       ? '<button class="btn bo bs" onclick="eqEditarSociedad(' + s.id + ')">Editar sociedad</button>'
       : '';
     return '<div class="eq-org-card">' +
-      '<h3>' + eqEsc(s.nombre) + ' <span class="eq-pill ' + pillCls + '">' + eqEsc(s.tipo) + '</span></h3>' +
+      '<h3>' + eqEsc(s.nombre) + ' <span class="eq-pill ' + pillCls + '">' + eqEsc(s.tipo) + '</span>' +
+        ' <span style="margin-left:8px;font-size:11px;font-weight:500;color:var(--mut);background:var(--bg);padding:2px 8px;border-radius:10px;border:1px solid var(--bor)">👥 ' + totalPersonas + '</span>' +
+      '</h3>' +
       '<div class="eq-org-sub">' + eqEsc(s.funcion || '—') + (s.cuit ? ' · CUIT ' + eqEsc(s.cuit) : '') + '</div>' +
       '<div>' + areasHtml + '</div>' +
       '<div style="margin-top:12px; display:flex; gap:6px; flex-wrap:wrap">' +
@@ -23780,21 +24113,47 @@ function eqCargarPersonas() {
   });
 }
 
+// Mapa de colores por sociedad (para pills de la columna Empresas)
+var EQ_COLORES_SOC = {
+  'Familia':                { bg:'#EEEDFE', fg:'#3C3489' },
+  'San Gerónimo SA':        { bg:'#E6F1FB', fg:'#0C447C' },
+  'Puente Cordón SA':       { bg:'#E1F5EE', fg:'#085041' },
+  'Barceló Transporte SRL': { bg:'#FAEEDA', fg:'#633806' }
+};
+function eqPillSociedad(nombre) {
+  var c = EQ_COLORES_SOC[nombre] || { bg:'#F1EFE8', fg:'#5F5E5A' };
+  // Abreviar nombres largos para que entren en la pill
+  var short = nombre.replace(' SA','').replace(' SRL','');
+  return '<span style="display:inline-block; background:' + c.bg + '; color:' + c.fg + '; font-size:10px; font-weight:600; padding:2px 8px; border-radius:10px; margin-right:4px; margin-bottom:2px">' + eqEsc(short) + '</span>';
+}
+
 function eqRenderPersonas() {
   var tb = document.getElementById('eq-personas-tbody');
   if (EQ.personas.length === 0) {
-    tb.innerHTML = '<tr><td colspan="8" class="emp">Sin personas cargadas</td></tr>';
+    tb.innerHTML = '<tr><td colspan="6" class="emp">Sin personas cargadas</td></tr>';
     return;
   }
   tb.innerHTML = EQ.personas.map(function(p) {
     var nombreFull = (p.apellido || '') + (p.apellido ? ', ' : '') + (p.nombre || '');
+    // Reporte: prioriza Directorio (entidad) > manager persona > guion
+    var reporte;
+    if (p.reporta_a_directorio) {
+      reporte = '<span style="color:#3C3489; font-style:italic; font-weight:500">🏛️ Directorio</span>';
+    } else if (p.reporta_a_nombre || p.reporta_a_apellido) {
+      var rn = (p.reporta_a_apellido || '') + (p.reporta_a_apellido ? ', ' : '') + (p.reporta_a_nombre || '');
+      reporte = eqEsc(rn);
+    } else {
+      reporte = '<span style="color:var(--mut)">—</span>';
+    }
+    // Empresas: pills de color por cada sociedad
+    var empresas = p.sociedades_str
+      ? p.sociedades_str.split(',').map(eqPillSociedad).join('')
+      : '<span style="color:var(--mut)">—</span>';
     return '<tr>' +
       '<td><a href="#" onclick="eqEditarPersona(' + p.id + ');return false" style="color:var(--burg); text-decoration:none; font-weight:600">' + eqEsc(nombreFull) + '</a></td>' +
-      '<td>' + eqEsc(p.dni || '—') + '</td>' +
-      '<td>' + eqEsc(p.mail || '—') + '</td>' +
-      '<td>' + eqEsc(p.telefono || '—') + '</td>' +
-      '<td>' + p.areas_count + '</td>' +
-      '<td>' + eqEsc(p.ubicacion_nombre || '—') + '</td>' +
+      '<td>' + eqEsc(p.cargo || '—') + '</td>' +
+      '<td>' + reporte + '</td>' +
+      '<td>' + empresas + '</td>' +
       '<td>' + (p.usuario_id ? '✓' : '—') + '</td>' +
       '<td>' +
         '<button class="btn bo bs" onclick="eqEditarPersona(' + p.id + ')">Editar</button> ' +
@@ -23811,17 +24170,18 @@ function eqNuevaPersona() {
 function eqEditarPersona(id) {
   eqApi('/personas/' + id).then(function(r) {
     if (!r.ok) { toast('Error: ' + r.error, 'er'); return; }
-    eqAbrirPersonaModal(r.persona, r.areas || []);
+    eqAbrirPersonaModal(r.persona, r.areas || [], r.usuario || null);
   });
 }
 
-function eqAbrirPersonaModal(persona, asignaciones) {
+function eqAbrirPersonaModal(persona, asignaciones, usuario) {
   EQ.personaActual = persona ? persona.id : null;
   document.getElementById('mb-eq-per-tit').textContent = persona ? 'Editar persona' : 'Nueva persona';
   document.getElementById('eq-per-id').value = persona ? persona.id : '';
   document.getElementById('eq-per-nombre').value = persona ? (persona.nombre || '') : '';
   document.getElementById('eq-per-apellido').value = persona ? (persona.apellido || '') : '';
   document.getElementById('eq-per-cargo').value = persona ? (persona.cargo || '') : '';
+  document.getElementById('eq-per-nivel').value = persona ? String(persona.nivel_acceso || 0) : '0';
   document.getElementById('eq-per-dni').value = persona ? (persona.dni || '') : '';
   document.getElementById('eq-per-mail').value = persona ? (persona.mail || '') : '';
   document.getElementById('eq-per-tel').value = persona ? (persona.telefono || '') : '';
@@ -23839,17 +24199,20 @@ function eqAbrirPersonaModal(persona, asignaciones) {
     setUbicSelect();
   }
 
-  // Popular select "Reporta a" — todas las personas activas excepto vos mismo
+  // Popular select "Reporta a" — incluye opción "Directorio" arriba + todas las personas
   var rep = document.getElementById('eq-per-reporta');
   var valRep = persona ? persona.reporta_a_id : null;
+  var reportaDir = persona && persona.reporta_a_directorio ? true : false;
   var miId = persona ? persona.id : null;
   eqApi('/personas').then(function(r) {
     if (!r.ok) return;
     var opts = '<option value="">— sin manager —</option>';
+    opts += '<option value="__directorio__"' + (reportaDir ? ' selected' : '') + '>🏛️ Directorio (entidad)</option>';
+    opts += '<option disabled>──────────</option>';
     r.personas.forEach(function(p) {
       if (p.id === miId) return; // no se reporta a sí mismo
       var nom = (p.apellido || '') + (p.apellido ? ', ' : '') + (p.nombre || '');
-      opts += '<option value="'+p.id+'"'+(valRep==p.id?' selected':'')+'>'+eqEsc(nom)+'</option>';
+      opts += '<option value="'+p.id+'"'+(!reportaDir && valRep==p.id?' selected':'')+'>'+eqEsc(nom)+'</option>';
     });
     rep.innerHTML = opts;
   });
@@ -23862,6 +24225,10 @@ function eqAbrirPersonaModal(persona, asignaciones) {
   } else {
     document.getElementById('eq-per-asign-box').style.display = 'none';
   }
+
+  // Bloque "Acceso al sistema" (Fase 2.D)
+  eqPoblarAcceso(persona, usuario);
+
   document.getElementById('mb-eq-persona').classList.add('on');
 }
 
@@ -23912,25 +24279,283 @@ function eqQuitarAsignacion(areaId) {
 
 function eqGuardarPersona() {
   var id = document.getElementById('eq-per-id').value;
+  var esNueva = !id;
   var body = {
     nombre: document.getElementById('eq-per-nombre').value.trim(),
     apellido: document.getElementById('eq-per-apellido').value.trim() || null,
     cargo: document.getElementById('eq-per-cargo').value.trim() || null,
+    nivel_acceso: parseInt(document.getElementById('eq-per-nivel').value) || 0,
     dni: document.getElementById('eq-per-dni').value.trim() || null,
     mail: document.getElementById('eq-per-mail').value.trim() || null,
     telefono: document.getElementById('eq-per-tel').value.trim() || null,
     ubicacion_id: document.getElementById('eq-per-ubic').value || null,
-    reporta_a_id: document.getElementById('eq-per-reporta').value || null,
     notas: document.getElementById('eq-per-notas').value.trim() || null,
   };
+  // Reporta a: si eligió Directorio, mandamos flag; si es una persona, va al id
+  var repVal = document.getElementById('eq-per-reporta').value;
+  if (repVal === '__directorio__') {
+    body.reporta_a_directorio = 1;
+    body.reporta_a_id = null;
+  } else {
+    body.reporta_a_directorio = 0;
+    body.reporta_a_id = repVal || null;
+  }
   if (!body.nombre) { toast('Nombre requerido', 'er'); return; }
   var url = id ? '/personas/' + id : '/personas';
   eqApi(url, { method: id ? 'PATCH' : 'POST', body: body }).then(function(r) {
     if (!r.ok) { toast('Error: ' + r.error, 'er'); return; }
-    toast('Persona guardada', 'ok');
-    closeMB('mb-eq-persona');
-    eqCargarPersonas();
+    var personaId = id ? parseInt(id) : r.id;
+
+    // Sincronizar el bloque "Acceso al sistema" (Fase 2.D)
+    eqSincronizarAcceso(personaId).then(function(){
+      toast('Persona guardada', 'ok');
+      closeMB('mb-eq-persona');
+      eqCargarPersonas();
+    }).catch(function(err){
+      toast('Persona guardada, pero falló acceso: ' + (err.message || err), 'er');
+      closeMB('mb-eq-persona');
+      eqCargarPersonas();
+    });
   });
+}
+
+// ─── BLOQUE ACCESO AL SISTEMA (Fase 2.D) ─────────────────────────────────
+// Estado local del bloque (refleja lo que vino del backend al abrir el modal)
+var EQ_ACCESO = { usuario: null, proveedoresIfco: [] };
+
+function eqPoblarAcceso(persona, usuario) {
+  EQ_ACCESO.usuario = usuario || null;
+  var cb = document.getElementById('eq-per-tiene-login');
+  var detalle = document.getElementById('eq-per-acceso-detalle');
+
+  if (!persona) {
+    // Persona nueva: ocultar bloque hasta que se guarde
+    cb.checked = false;
+    cb.disabled = true;
+    detalle.style.display = 'none';
+    var label = cb.parentElement;
+    if (label) label.title = 'Primero guardá la persona para poder darle acceso';
+    return;
+  }
+  cb.disabled = false;
+
+  if (usuario) {
+    cb.checked = true;
+    detalle.style.display = 'block';
+    // Poblar campos con los datos del usuario actual
+    document.getElementById('eq-per-username').value = usuario.username || '';
+    document.getElementById('eq-per-rol-sistema').value = usuario.rol || 'operador';
+    document.getElementById('eq-per-pin').value = '';
+    document.getElementById('eq-per-pin').placeholder = '•••• (sin cambios)';
+    // Depósitos
+    var deps = [];
+    try { deps = JSON.parse(usuario.depositos || '[]'); } catch(e){ deps = []; }
+    document.getElementById('eq-per-dep-mcba').checked = deps.indexOf('MCBA') >= 0;
+    document.getElementById('eq-per-dep-finca').checked = deps.indexOf('FINCA') >= 0;
+    document.getElementById('eq-per-dep-sanpedro').checked = deps.indexOf('SAN PEDRO') >= 0;
+    // Depósito IFCO
+    document.getElementById('eq-per-dep-ifco-tipo').value = usuario.deposito_tipo || '';
+    eqToggleDepIfcoProv();
+    eqCargarProveedoresIfcoEq(usuario.deposito_proveedor_id);
+
+    // Estado de password
+    eqRenderPwdEstado(usuario);
+  } else {
+    cb.checked = false;
+    detalle.style.display = 'none';
+    // Pre-llenar sugerencias para cuando lo tilden
+    var initial = (persona.nombre || '').charAt(0).toLowerCase();
+    var ape = (persona.apellido || persona.nombre || 'user').toLowerCase()
+      .normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]/g, '');
+    document.getElementById('eq-per-username').value = (initial + ape).replace(/[^a-z0-9]/g, '');
+    document.getElementById('eq-per-rol-sistema').value = 'operador';
+    document.getElementById('eq-per-pin').value = '';
+    document.getElementById('eq-per-pin').placeholder = '0000';
+    document.getElementById('eq-per-dep-mcba').checked = true;
+    document.getElementById('eq-per-dep-finca').checked = true;
+    document.getElementById('eq-per-dep-sanpedro').checked = true;
+    document.getElementById('eq-per-dep-ifco-tipo').value = '';
+    eqToggleDepIfcoProv();
+  }
+}
+
+function eqRenderPwdEstado(usuario) {
+  var box = document.getElementById('eq-per-pwd-estado');
+  var acc = document.getElementById('eq-per-pwd-acciones');
+  if (!usuario) { box.innerHTML = ''; acc.innerHTML = ''; return; }
+  var nombre = (document.getElementById('eq-per-nombre').value + ' ' + (document.getElementById('eq-per-apellido').value || '')).trim();
+
+  if (usuario.migrado_a_v2) {
+    box.innerHTML = '<span style="color:#059669; font-weight:600">✓ Migrado</span> — el usuario ya configuró su propia contraseña.';
+    acc.innerHTML =
+      '<button class="btn bo bs" onclick="eqAbrirPwdInicial(' + usuario.id + ', \'' + nombre.replace(/'/g,"\\'") + '\', \'' + (usuario.username||'') + '\')">🔑 Forzar nueva contraseña</button>' +
+      '<button class="btn bo bs" style="color:#d97706" onclick="eqResetearPwd(' + usuario.id + ', \'' + nombre.replace(/'/g,"\\'") + '\')">🔓 Resetear (vuelve a PIN)</button>';
+  } else if (usuario.tiene_password && usuario.debe_cambiar_password) {
+    box.innerHTML = '<span style="color:#d97706; font-weight:600">⏳ Password inicial asignada</span> — esperando que el usuario ingrese y la cambie.';
+    acc.innerHTML =
+      '<button class="btn bo bs" onclick="eqAbrirPwdInicial(' + usuario.id + ', \'' + nombre.replace(/'/g,"\\'") + '\', \'' + (usuario.username||'') + '\')">🔑 Cambiar contraseña inicial</button>' +
+      '<button class="btn bo bs" style="color:#d97706" onclick="eqResetearPwd(' + usuario.id + ', \'' + nombre.replace(/'/g,"\\'") + '\')">🔓 Resetear (vuelve a PIN)</button>';
+  } else {
+    box.innerHTML = '<span style="color:#92400e; font-weight:600">⏳ Sin password</span> — el usuario sigue entrando con PIN. Asignale una password inicial o esperá a que entre y la cree.';
+    acc.innerHTML =
+      '<button class="btn bb bs" onclick="eqAbrirPwdInicial(' + usuario.id + ', \'' + nombre.replace(/'/g,"\\'") + '\', \'' + (usuario.username||'') + '\')">🔑 Asignar contraseña inicial</button>';
+  }
+}
+
+function eqToggleAccesoBloque() {
+  var cb = document.getElementById('eq-per-tiene-login');
+  var detalle = document.getElementById('eq-per-acceso-detalle');
+  detalle.style.display = cb.checked ? 'block' : 'none';
+  if (cb.checked) {
+    // Cargar proveedores IFCO en background
+    eqCargarProveedoresIfcoEq(null);
+  }
+}
+
+function eqToggleDepIfcoProv() {
+  var tipo = document.getElementById('eq-per-dep-ifco-tipo').value;
+  document.getElementById('eq-per-dep-ifco-prov-wrap').style.display = (tipo === 'proveedor') ? 'block' : 'none';
+}
+
+function eqCargarProveedoresIfcoEq(selectedId) {
+  var sel = document.getElementById('eq-per-dep-ifco-prov');
+  // Cache simple: si ya cargamos, reusar
+  if (EQ_ACCESO.proveedoresIfco.length > 0) {
+    var opts = '<option value="">— elegí proveedor —</option>';
+    EQ_ACCESO.proveedoresIfco.forEach(function(p){
+      opts += '<option value="' + p.id + '"' + (selectedId == p.id ? ' selected' : '') + '>' + eqEsc(p.nombre) + '</option>';
+    });
+    sel.innerHTML = opts;
+    return;
+  }
+  fetch('/api/ifco/proveedores', { credentials: 'include' })
+    .then(function(r){ return r.json(); })
+    .then(function(res){
+      if (!res.ok) return;
+      EQ_ACCESO.proveedoresIfco = res.proveedores || [];
+      eqCargarProveedoresIfcoEq(selectedId);  // reentrar con cache
+    });
+}
+
+// Sincronizar el bloque Acceso después de guardar la persona.
+// Devuelve una Promise.
+function eqSincronizarAcceso(personaId) {
+  return new Promise(function(resolve, reject) {
+    var cb = document.getElementById('eq-per-tiene-login');
+    var teniaUsuario = EQ_ACCESO.usuario ? true : false;
+    var quiereLogin = cb.checked;
+
+    // CASO 1: no tenía y sigue sin querer → no hacer nada
+    if (!teniaUsuario && !quiereLogin) return resolve();
+
+    // CASO 2: tenía pero ya no quiere → DELETE
+    if (teniaUsuario && !quiereLogin) {
+      if (!confirm('Esto va a quitarle el acceso al panel a esta persona. ¿Confirmás?')) {
+        cb.checked = true;  // revertir UI
+        return resolve();
+      }
+      eqApi('/personas/' + personaId + '/usuario', { method: 'DELETE' }).then(function(r){
+        if (!r.ok) return reject(new Error(r.error || 'No se pudo quitar el acceso'));
+        EQ_ACCESO.usuario = null;
+        resolve();
+      });
+      return;
+    }
+
+    // Recolectar datos del bloque
+    var deps = [];
+    if (document.getElementById('eq-per-dep-mcba').checked) deps.push('MCBA');
+    if (document.getElementById('eq-per-dep-finca').checked) deps.push('FINCA');
+    if (document.getElementById('eq-per-dep-sanpedro').checked) deps.push('SAN PEDRO');
+    var depTipo = document.getElementById('eq-per-dep-ifco-tipo').value || null;
+    var depProvId = depTipo === 'proveedor' ? (document.getElementById('eq-per-dep-ifco-prov').value || null) : null;
+    var pin = document.getElementById('eq-per-pin').value.trim();
+    var body = {
+      username: document.getElementById('eq-per-username').value.trim(),
+      rol: document.getElementById('eq-per-rol-sistema').value,
+      depositos: deps,
+      deposito_tipo: depTipo,
+      deposito_proveedor_id: depProvId
+    };
+    // PIN: solo lo mando si vino algo (en edit el campo está vacío para "sin cambios")
+    if (pin) body.pin = pin;
+
+    // CASO 3: no tenía y ahora quiere → POST
+    if (!teniaUsuario && quiereLogin) {
+      if (!body.username) return reject(new Error('Ingresá un username'));
+      // PIN obligatorio para usuarios nuevos (transición). Default 0000 si no se dio.
+      if (!body.pin) body.pin = '0000';
+      eqApi('/personas/' + personaId + '/usuario', { method: 'POST', body: body }).then(function(r){
+        if (!r.ok) return reject(new Error(r.error || 'No se pudo crear el acceso'));
+        resolve();
+      });
+      return;
+    }
+
+    // CASO 4: tenía y sigue queriendo → PATCH (solo si hay cambios visibles)
+    eqApi('/personas/' + personaId + '/usuario', { method: 'PATCH', body: body }).then(function(r){
+      if (!r.ok) return reject(new Error(r.error || 'No se pudo actualizar el acceso'));
+      resolve();
+    });
+  });
+}
+
+// ─── ACCIONES DE PASSWORD ────────────────────────────────────────────────
+function eqAbrirPwdInicial(usuarioId, nombre, username) {
+  document.getElementById('eq-pwd-usr-id').value = usuarioId;
+  document.getElementById('eq-pwd-nombre').textContent = nombre || '—';
+  document.getElementById('eq-pwd-username').textContent = username || '—';
+  document.getElementById('eq-pwd-value').value = '';
+  document.getElementById('eq-pwd-error').textContent = '';
+  document.getElementById('mb-eq-pwd-inicial').classList.add('on');
+  setTimeout(function(){ document.getElementById('eq-pwd-value').focus(); }, 100);
+}
+
+function eqUsarSugerida(el) {
+  document.getElementById('eq-pwd-value').value = el.textContent;
+  document.getElementById('eq-pwd-value').focus();
+}
+
+function eqAsignarPwdInicial() {
+  var usrId = document.getElementById('eq-pwd-usr-id').value;
+  var pwd = document.getElementById('eq-pwd-value').value;
+  var err = document.getElementById('eq-pwd-error');
+  err.textContent = '';
+  if (pwd.length < 8) { err.textContent = 'Mínimo 8 caracteres'; return; }
+  if (!/[a-zA-Z]/.test(pwd)) { err.textContent = 'Debe tener al menos una letra'; return; }
+  if (!/[0-9]/.test(pwd)) { err.textContent = 'Debe tener al menos un número'; return; }
+  fetch('/api/auth/asignar-password-inicial/' + usrId, {
+    method: 'POST', credentials: 'include',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ password: pwd })
+  })
+  .then(function(r){ return r.json(); })
+  .then(function(res){
+    if (!res.ok) { err.textContent = res.error || 'Error'; return; }
+    toast(res.mensaje || 'Password asignada', 'ok');
+    closeMB('mb-eq-pwd-inicial');
+    // Recargar la persona para refrescar el bloque
+    if (EQ.personaActual) {
+      eqApi('/personas/' + EQ.personaActual).then(function(rr){
+        if (rr.ok) eqPoblarAcceso(rr.persona, rr.usuario);
+      });
+    }
+  });
+}
+
+function eqResetearPwd(usuarioId, nombre) {
+  if (!confirm('¿Resetear la contraseña de ' + nombre + '?\n\nVa a volver a ingresar con su PIN y elegir una nueva.')) return;
+  fetch('/api/auth/resetear-password/' + usuarioId, { method: 'POST', credentials: 'include' })
+    .then(function(r){ return r.json(); })
+    .then(function(res){
+      if (!res.ok) { toast('Error: ' + res.error, 'er'); return; }
+      toast(res.mensaje || 'Contraseña reseteada', 'ok');
+      if (EQ.personaActual) {
+        eqApi('/personas/' + EQ.personaActual).then(function(rr){
+          if (rr.ok) eqPoblarAcceso(rr.persona, rr.usuario);
+        });
+      }
+    });
 }
 
 function eqBorrarPersona(id) {
@@ -23943,7 +24568,7 @@ function eqBorrarPersona(id) {
 }
 
 // ─── ÁRBOL JERÁRQUICO (3 vistas: lista / cards / orgchart) ───────────
-var EQ_ARBOL = { vista: 'lista', personas: [] };
+var EQ_ARBOL = { vista: 'orgchart', personas: [] };
 
 function eqCargarArbol() {
   eqApi('/jerarquia').then(function(r) {
@@ -23996,7 +24621,9 @@ function eqArmarArbolFiltrado(filtroSoc) {
   });
   // Ordenar raíces: Directorio arriba, luego alfabético
   raices.sort(function(a, b) {
-    if ((b.en_directorio || 0) !== (a.en_directorio || 0)) return (b.en_directorio || 0) - (a.en_directorio || 0);
+    var aDir = (a.en_directorio || a.reporta_a_directorio) ? 1 : 0;
+    var bDir = (b.en_directorio || b.reporta_a_directorio) ? 1 : 0;
+    if (aDir !== bDir) return bDir - aDir;
     return (a.apellido || '').localeCompare(b.apellido || '');
   });
   return raices;
@@ -24012,33 +24639,8 @@ function eqRenderArbolActual() {
       'agregá personas en la pestaña Personas.</div>';
     return;
   }
-  if (EQ_ARBOL.vista === 'lista')    cont.innerHTML = raices.map(function(p){ return eqArbolNodo(p, 0); }).join('');
   if (EQ_ARBOL.vista === 'cards')    cont.innerHTML = raices.map(function(p){ return eqCardNodo(p, 0); }).join('');
   if (EQ_ARBOL.vista === 'orgchart') eqRenderOrgchart(cont, raices);
-}
-
-// ── VISTA LISTA (compacta) ──
-function eqArbolNodo(p, nivel) {
-  var nombreFull = (p.apellido || '') + (p.apellido ? ', ' : '') + (p.nombre || '');
-  var tieneReportes = p.reportes && p.reportes.length > 0;
-  var caret = tieneReportes
-    ? '<span style="cursor:pointer; display:inline-block; width:14px; user-select:none" onclick="eqArbolToggleNode(this)">▼</span>'
-    : '<span style="display:inline-block; width:14px; color:var(--mut)">·</span>';
-  var dirBadge = p.en_directorio ? '<span style="background:#EEEDFE; color:#3C3489; font-size:10px; font-weight:600; padding:1px 6px; border-radius:8px; margin-left:6px">DIRECTORIO</span>' : '';
-  var cargoStr = p.cargo ? '<span style="color:var(--burg); font-size:12px; margin-left:6px; font-weight:500">· ' + eqEsc(p.cargo) + '</span>' : '';
-  var areasStr = p.areas_str ? '<span style="color:var(--mut); font-size:11px; margin-left:8px">' + eqEsc(p.areas_str) + '</span>' : '';
-  var hijosCount = tieneReportes ? '<span style="color:var(--mut); font-size:11px; margin-left:6px">(' + p.reportes.length + ')</span>' : '';
-  var hijos = tieneReportes
-    ? '<div class="eq-arbol-hijos" style="margin-left:18px">' + p.reportes.map(function(c){ return eqArbolNodo(c, nivel+1); }).join('') + '</div>'
-    : '';
-  return '<div class="eq-arbol-nodo" style="padding:4px 0">' +
-    '<div style="display:flex; align-items:center; gap:4px; flex-wrap:wrap">' +
-      caret +
-      '<a href="#" onclick="eqEditarPersona(' + p.id + ');return false" style="color:var(--burg); text-decoration:none; font-weight:600">' + eqEsc(nombreFull) + '</a>' +
-      dirBadge + cargoStr + hijosCount + areasStr +
-    '</div>' +
-    hijos +
-  '</div>';
 }
 
 function eqArbolToggleNode(caretEl) {
@@ -24062,12 +24664,12 @@ function eqIniciales(p) {
 // Mapa de colores por categoría de área. Una persona se categoriza por la
 // primera área que matchee, con prioridad: dirección > comercial > operativo > admin > prof.
 var EQ_COLORES = {
-  direccion:      { bg:'#EEEDFE', fg:'#3C3489', label:'Dirección' },
-  comercial:      { bg:'#E6F1FB', fg:'#0C447C', label:'Comercial' },
-  operativo:      { bg:'#E1F5EE', fg:'#085041', label:'Operativo' },
-  administrativo: { bg:'#FAEEDA', fg:'#633806', label:'Administrativo' },
-  profesional:    { bg:'#F1EFE8', fg:'#5F5E5A', label:'Profesional' },
-  otro:           { bg:'#F4F3EE', fg:'#737065', label:'—' }
+  direccion:      { bg:'#DDD6FE', fg:'#3C3489', label:'Dirección' },
+  comercial:      { bg:'#BFDBFE', fg:'#0C447C', label:'Comercial' },
+  operativo:      { bg:'#A7F3D0', fg:'#085041', label:'Operativo' },
+  administrativo: { bg:'#FDE68A', fg:'#633806', label:'Administrativo' },
+  profesional:    { bg:'#D6D3D1', fg:'#3F3F46', label:'Profesional' },
+  otro:           { bg:'#E5E4DC', fg:'#57534E', label:'—' }
 };
 function eqCategoriaPersona(p) {
   if (p.en_directorio || p._es_directorio) return 'direccion';
@@ -24091,6 +24693,7 @@ function eqCardNodo(p, nivel) {
   var cat = eqCategoriaPersona(p);
   var catLabel = EQ_COLORES[cat].label;
   var dirBadge = p.en_directorio ? '<span style="background:#EEEDFE; color:#3C3489; font-size:10px; font-weight:600; padding:1px 6px; border-radius:8px; margin-left:6px">DIRECTORIO</span>' : '';
+  var repDirBadge = (p.reporta_a_directorio && !p.en_directorio) ? '<span style="background:#F4F2FB; color:#3C3489; font-size:10px; font-weight:500; padding:1px 6px; border-radius:8px; margin-left:6px; font-style:italic">↑ Directorio</span>' : '';
   var catPill = (cat !== 'otro' && !p.en_directorio) ? '<span style="background:' + col.bg + '; color:' + col.fg + '; font-size:10px; font-weight:600; padding:1px 6px; border-radius:8px; margin-left:6px">' + catLabel + '</span>' : '';
   var tieneReportes = p.reportes && p.reportes.length > 0;
   var areasStr = p.areas_str ? ' · <span style="color:var(--mut)">' + eqEsc(p.areas_str) + '</span>' : '';
@@ -24102,7 +24705,7 @@ function eqCardNodo(p, nivel) {
     '<div onclick="eqEditarPersona(' + p.id + ')" style="display:flex; align-items:center; gap:10px; padding:8px 12px; border:1px solid var(--bor); border-radius:8px; background:#fff; cursor:pointer" onmouseover="this.style.background=\'var(--bg)\'" onmouseout="this.style.background=\'#fff\'">' +
       '<div style="width:32px; height:32px; border-radius:50%; background:' + col.bg + '; color:' + col.fg + '; display:flex; align-items:center; justify-content:center; font-weight:600; font-size:12px; flex-shrink:0">' + eqIniciales(p) + '</div>' +
       '<div style="flex:1; min-width:0">' +
-        '<div style="font-weight:600; font-size:13px">' + eqEsc(nombreFull) + dirBadge + catPill + (tieneReportes ? '<span style="color:var(--mut); font-weight:400; margin-left:6px; font-size:11px">· ' + p.reportes.length + ' reportes</span>' : '') + '</div>' +
+        '<div style="font-weight:600; font-size:13px">' + eqEsc(nombreFull) + dirBadge + repDirBadge + catPill + (tieneReportes ? '<span style="color:var(--mut); font-weight:400; margin-left:6px; font-size:11px">· ' + p.reportes.length + ' reportes</span>' : '') + '</div>' +
         (cargoLine ? '<div style="font-size:11px; color:var(--mut); margin-top:2px">' + cargoLine + '</div>' : '') +
       '</div>' +
       (tieneReportes ? '<span style="color:var(--mut); cursor:pointer" onclick="event.stopPropagation(); eqArbolToggleNode(this)">▼</span>' : '') +
@@ -24113,10 +24716,12 @@ function eqCardNodo(p, nivel) {
 
 // ── VISTA ORGCHART (SVG horizontal) ──
 function eqRenderOrgchart(cont, raices) {
-  // Si hay personas con en_directorio entre las raíces, las agrupo bajo una
-  // caja virtual "DIRECTORIO" que aparece arriba a la izquierda
-  var dirReportes = raices.filter(function(p){ return p.en_directorio; });
-  var nonDir      = raices.filter(function(p){ return !p.en_directorio; });
+  // Si hay personas con en_directorio o reporta_a_directorio, las agrupo bajo
+  // una caja virtual "DIRECTORIO" arriba a la izquierda. La diferencia es solo conceptual:
+  // - en_directorio = persona asignada al área Familia/Directorio (es un director)
+  // - reporta_a_directorio = persona que reporta al Directorio como entidad (subalterno del board)
+  var dirReportes = raices.filter(function(p){ return p.en_directorio || p.reporta_a_directorio; });
+  var nonDir      = raices.filter(function(p){ return !p.en_directorio && !p.reporta_a_directorio; });
   if (dirReportes.length > 0) {
     var nodoDirectorio = {
       id: '__directorio__',
@@ -24124,44 +24729,101 @@ function eqRenderOrgchart(cont, raices) {
       apellido: '',
       cargo: '',
       _es_directorio: true,
+      nivel_acceso: 0,
       reportes: dirReportes
     };
     raices = [nodoDirectorio].concat(nonDir);
   }
 
-  // Layout simple horizontal: cada nodo ocupa 160px ancho, separación 20px
-  var BOX_W = 160, BOX_H = 56, GAP_H = 16, GAP_V = 40;
-  var nextX = 0;
+  // ── Bandas horizontales por nivel_acceso (0=arriba, 4=abajo) ──
+  // El DIRECTORIO (caja virtual) se posiciona en una pre-banda ARRIBA de la banda 0,
+  // conceptualmente "sobre" los niveles (es una entidad transversal, no un nivel).
+  var BANDAS = [
+    { nivel: 0, label: 'Directivo',                bg: '#FAFAFA' },
+    { nivel: 1, label: 'Gerencial',                bg: '#F4F4F5' },
+    { nivel: 2, label: 'Ejecutivo',                bg: '#FAFAFA' },
+    { nivel: 3, label: 'Administrativo / Operativo', bg: '#F4F4F5' },
+    { nivel: 4, label: 'Externo',                  bg: '#FAFAFA' }
+  ];
+  var BOX_W = 160, BOX_H = 56, GAP_H = 16, GAP_V = 36;
+  var LANE_LABEL_W = 90;
+  var LANE_H = BOX_H + GAP_V;
+  // Si hay DIRECTORIO, reservo una zona ARRIBA de las bandas para que se vea como entidad sobre los niveles
+  var hayDirectorio = raices.length > 0 && raices[0]._es_directorio;
+  var PRE_BAND_H = hayDirectorio ? LANE_H : 0;
 
-  function layout(node, depth) {
+  function getBanda(node) {
+    if (node._es_directorio) return -1;  // marcador: va en la pre-banda, no en banda 0
+    var n = node.nivel_acceso;
+    if (n === undefined || n === null) n = 0;
+    return Math.max(0, Math.min(4, parseInt(n) || 0));
+  }
+  function yDeNodo(node) {
+    if (node._es_directorio) {
+      // Centrado verticalmente en la pre-banda
+      return (PRE_BAND_H - BOX_H) / 2;
+    }
+    var banda = getBanda(node);
+    return PRE_BAND_H + banda * LANE_H + (LANE_H - BOX_H) / 2;
+  }
+
+  // Orden horizontal de hijos por categoría: comercial primero, administrativos al final.
+  // Esto agrupa los administrativos siempre del mismo lado en cualquier nivel.
+  var CAT_ORDER = { direccion: 0, comercial: 1, operativo: 2, profesional: 3, administrativo: 4, otro: 5 };
+  function ordenarReportes(node) {
+    if (node.reportes && node.reportes.length > 1) {
+      node.reportes.sort(function(a, b) {
+        var ca = CAT_ORDER[eqCategoriaPersona(a)] ?? 5;
+        var cb = CAT_ORDER[eqCategoriaPersona(b)] ?? 5;
+        if (ca !== cb) return ca - cb;
+        // Tie-breaker: por apellido
+        return (a.apellido || '').localeCompare(b.apellido || '');
+      });
+    }
+    (node.reportes || []).forEach(ordenarReportes);
+  }
+  raices.forEach(ordenarReportes);
+
+  var nextX = LANE_LABEL_W + 20;
+  function layoutX(node) {
+    node._y = yDeNodo(node);
     if (!node.reportes || node.reportes.length === 0) {
       node._x = nextX;
-      node._y = depth * (BOX_H + GAP_V);
       nextX += BOX_W + GAP_H;
       return;
     }
-    node.reportes.forEach(function(c){ layout(c, depth + 1); });
+    node.reportes.forEach(layoutX);
     var first = node.reportes[0], last = node.reportes[node.reportes.length - 1];
     node._x = (first._x + last._x) / 2;
-    node._y = depth * (BOX_H + GAP_V);
   }
+  raices.forEach(function(r){ layoutX(r); nextX += GAP_H * 2; });
 
-  raices.forEach(function(r){ layout(r, 0); nextX += GAP_H * 2; });
-
-  // Calcular dimensiones totales
-  var maxX = 0, maxY = 0;
+  var maxX = 0;
   function walk(n) {
     maxX = Math.max(maxX, n._x + BOX_W);
-    maxY = Math.max(maxY, n._y + BOX_H);
     (n.reportes || []).forEach(walk);
   }
   raices.forEach(walk);
+  var W = Math.max(maxX + 20, 800);
+  var H = PRE_BAND_H + BANDAS.length * LANE_H + 10;
 
-  var W = Math.max(maxX + 20, 640);
-  var H = maxY + 20;
-
-  // Render
   var svg = '<svg width="' + W + '" height="' + H + '" xmlns="http://www.w3.org/2000/svg" style="display:block">';
+
+  // Bandas fondo + labels (todas con offset PRE_BAND_H)
+  BANDAS.forEach(function(b, i) {
+    var y = PRE_BAND_H + i * LANE_H;
+    svg += '<rect x="0" y="' + y + '" width="' + W + '" height="' + LANE_H + '" fill="' + b.bg + '"/>';
+    svg += '<line x1="0" y1="' + (y + LANE_H) + '" x2="' + W + '" y2="' + (y + LANE_H) + '" stroke="#E5E7EB" stroke-width="1"/>';
+    svg += '<text x="20" y="' + (y + LANE_H/2 - 4) + '" font-size="32" font-weight="700" fill="#CBD5E1">' + b.nivel + '</text>';
+    svg += '<text x="20" y="' + (y + LANE_H/2 + 18) + '" font-size="10" font-weight="600" fill="#94A3B8" letter-spacing="0.5">' + eqEsc(b.label.toUpperCase()) + '</text>';
+  });
+  // Separador vertical entre labels y cajas (toda la altura, incluida pre-banda)
+  svg += '<line x1="' + LANE_LABEL_W + '" y1="0" x2="' + LANE_LABEL_W + '" y2="' + H + '" stroke="#D1D5DB" stroke-width="1.5"/>';
+  // Línea horizontal divisoria entre la pre-banda del DIRECTORIO y las bandas 0-4
+  if (hayDirectorio) {
+    svg += '<line x1="0" y1="' + PRE_BAND_H + '" x2="' + W + '" y2="' + PRE_BAND_H + '" stroke="#D1D5DB" stroke-width="1.5" stroke-dasharray="4 4"/>';
+  }
+
   function renderNode(n) {
     var esVirtual = !!n._es_directorio;
     var col = esVirtual ? { bg:'#3C3489', fg:'#FFFFFF' } : eqColorPersona(n);
@@ -24171,14 +24833,12 @@ function eqRenderOrgchart(cont, raices) {
     var linea2 = esVirtual ? '' : (n.cargo || '');
     var clickAttr = esVirtual ? '' : ' style="cursor:pointer" onclick="eqEditarPersona(' + n.id + ')"';
     var s = '';
-    // Líneas a los hijos
     (n.reportes || []).forEach(function(c) {
       var x1 = n._x + BOX_W / 2, y1 = n._y + BOX_H;
       var x2 = c._x + BOX_W / 2, y2 = c._y;
       var ym = (y1 + y2) / 2;
-      s += '<path d="M ' + x1 + ' ' + y1 + ' V ' + ym + ' H ' + x2 + ' V ' + y2 + '" fill="none" stroke="#bbb" stroke-width="1"/>';
+      s += '<path d="M ' + x1 + ' ' + y1 + ' V ' + ym + ' H ' + x2 + ' V ' + y2 + '" fill="none" stroke="#9CA3AF" stroke-width="1"/>';
     });
-    // Caja
     s += '<g' + clickAttr + '>' +
       '<rect x="' + n._x + '" y="' + n._y + '" width="' + BOX_W + '" height="' + BOX_H + '" rx="6" fill="' + col.bg + '" stroke="' + bordeColor + '" stroke-width="' + bordeW + '"/>' +
       '<text x="' + (n._x + BOX_W / 2) + '" y="' + (n._y + (linea2 ? 22 : 33)) + '" text-anchor="middle" font-size="12" font-weight="600" fill="' + col.fg + '">' + eqEsc(nombreFull) + '</text>' +
@@ -24190,8 +24850,8 @@ function eqRenderOrgchart(cont, raices) {
   raices.forEach(function(r){ svg += renderNode(r); });
   svg += '</svg>';
 
-  // Leyenda de colores debajo del SVG
   var leyenda = '<div style="margin-top:14px; padding-top:10px; border-top:1px dashed var(--bor); display:flex; gap:14px; flex-wrap:wrap; font-size:11px">';
+  leyenda += '<span style="color:var(--mut); font-weight:600">Color por categoría de área:</span>';
   ['direccion','comercial','operativo','administrativo','profesional'].forEach(function(k) {
     var c = EQ_COLORES[k];
     leyenda += '<span style="display:inline-flex; align-items:center; gap:6px"><span style="display:inline-block; width:12px; height:12px; border-radius:3px; background:' + c.bg + '; border:1px solid ' + c.fg + '"></span><span style="color:var(--mut)">' + c.label + '</span></span>';
@@ -24208,15 +24868,20 @@ function eqCargarUbicaciones() {
     EQ.ubicaciones = r.ubicaciones;
     var tb = document.getElementById('eq-ubic-tbody');
     if (r.ubicaciones.length === 0) {
-      tb.innerHTML = '<tr><td colspan="4" class="emp">Sin ubicaciones cargadas</td></tr>';
+      tb.innerHTML = '<tr><td colspan="5" class="emp">Sin ubicaciones cargadas</td></tr>';
       return;
     }
     tb.innerHTML = r.ubicaciones.map(function(u) {
       var latlng = (u.lat && u.lng) ? (u.lat + ', ' + u.lng) : '—';
+      var pc = u.personas_count || 0;
+      var pcCell = pc === 0
+        ? '<span style="color:var(--sub)">—</span>'
+        : '<span style="display:inline-block;min-width:28px;padding:2px 8px;background:var(--bg);border:1px solid var(--bor);border-radius:10px;font-size:11px;font-weight:600;color:var(--mut)">👥 ' + pc + '</span>';
       return '<tr>' +
         '<td><a href="#" onclick="eqEditarUbicacion(' + u.id + ');return false" style="color:var(--burg); text-decoration:none; font-weight:600">' + eqEsc(u.nombre) + '</a></td>' +
         '<td>' + eqEsc(u.direccion || '—') + '</td>' +
         '<td>' + eqEsc(latlng) + '</td>' +
+        '<td style="text-align:center">' + pcCell + '</td>' +
         '<td>' +
           '<button class="btn bo bs" onclick="eqEditarUbicacion(' + u.id + ')">Editar</button> ' +
           '<button class="btn bo bs" style="color:#991b1b" onclick="eqBorrarUbicacion(' + u.id + ')">×</button>' +
@@ -24270,6 +24935,357 @@ function eqBorrarUbicacion(id) {
     toast('Ubicación borrada', 'ok');
     eqCargarUbicaciones();
   });
+}
+
+// ─── FASE 3.A: CONFIGURACIÓN DE MÓDULOS ────────────────────────────────
+var CM_SOCIEDADES = [];  // se llena con la lista de sociedades activas
+var CM_MODULOS = [];     // cache de la respuesta del backend
+
+function cmAbrirModulo(modulo) {
+  // Replica la lógica del listener de .ni pero fuerza la sección destino aunque el item esté display:none.
+  var ni = document.querySelector('.ni[data-sec="'+modulo+'"]');
+  var sec = document.getElementById('sec-'+modulo);
+  if (!sec) {
+    toast('No se encuentra la sección "'+modulo+'"','er');
+    return;
+  }
+  document.querySelectorAll('.sec').forEach(function(s){ s.classList.remove('on'); });
+  document.querySelectorAll('.ni').forEach(function(n){ n.classList.remove('on'); });
+  sec.classList.add('on');
+  if (ni) ni.classList.add('on');  // marca visualmente aunque esté display:none
+  if (typeof navAct !== 'undefined') navAct = modulo;
+  if (typeof loadSec === 'function') loadSec(modulo);
+}
+
+// ─── HUÉRFANOS ───────────────────────────────────────────────────────
+// Usuarios sin persona vinculada (legacy o creados antes del modelo persona-céntrico).
+// Permite vincularlos retroactivamente a una persona del organigrama.
+var EQ_LIBRES = { lista: [], personasDisponibles: [] };
+
+function eqCargarLibres() {
+  var tb = document.getElementById('eq-libres-tbody');
+  tb.innerHTML = '<tr><td colspan="8" class="emp">Cargando...</td></tr>';
+  eqApi('/usuarios-libres').then(function(r) {
+    if (!r.ok) { toast('Error: ' + r.error, 'er'); return; }
+    EQ_LIBRES.lista = r.data || [];
+    eqActualizarBadgeLibres();
+    if (EQ_LIBRES.lista.length === 0) {
+      tb.innerHTML = '<tr><td colspan="8" class="emp">✓ Todos los usuarios están vinculados a personas</td></tr>';
+      return;
+    }
+    tb.innerHTML = EQ_LIBRES.lista.map(function(u) {
+      var estadoCell = u.activo
+        ? '<span style="display:inline-block;padding:2px 8px;background:#d1fae5;color:#065f46;border-radius:10px;font-size:11px;font-weight:600">✓ Activo</span>'
+        : '<span style="display:inline-block;padding:2px 8px;background:#fee2e2;color:#991b1b;border-radius:10px;font-size:11px;font-weight:600">✗ Baja</span>';
+      var pwdCell = u.migrado_a_v2
+        ? '<span title="Usuario ya configuró su contraseña" style="color:#059669; font-weight:600">✓</span>'
+        : (u.tiene_password
+            ? '<span title="Password inicial pendiente de cambio" style="color:#d97706; font-weight:600">⏳</span>'
+            : '<span title="Sin password, entra con PIN" style="color:var(--mut)">—</span>');
+      var creado = u.creado_en ? new Date(u.creado_en).toLocaleDateString('es-AR') : '—';
+      var rowStyle = u.activo ? '' : ' style="opacity:0.55"';
+      var nombreEsc = (u.nombre || '').replace(/'/g, "\\'");
+      var usernameEsc = (u.username || '').replace(/'/g, "\\'");
+      return '<tr' + rowStyle + '>' +
+        '<td style="text-align:center">' + estadoCell + '</td>' +
+        '<td><code style="font-size:12px">' + eqEsc(u.username || '—') + '</code></td>' +
+        '<td>' + eqEsc(u.nombre || '—') + '</td>' +
+        '<td style="font-size:12px; color:var(--mut)">' + eqEsc(u.email || '—') + '</td>' +
+        '<td><span style="font-size:11px; text-transform:uppercase; color:var(--mut)">' + eqEsc(u.rol || '—') + '</span></td>' +
+        '<td style="text-align:center">' + pwdCell + '</td>' +
+        '<td style="font-size:11px; color:var(--mut)">' + creado + '</td>' +
+        '<td>' +
+          (u.activo
+            ? '<button class="btn bb bs" onclick="eqAbrirVincular(' + u.id + ", '" + nombreEsc + "', '" + usernameEsc + "', '" + eqEsc(u.email||'').replace(/'/g,"\\'") + "', '" + (u.rol||'') + "'" + ')">🔗 Vincular</button>'
+            : '<span style="font-size:11px; color:var(--mut); font-style:italic">Baja — vincular y reactivar desde Personas</span>') +
+        '</td>' +
+      '</tr>';
+    }).join('');
+  });
+}
+
+function eqActualizarBadgeLibres() {
+  var activos = EQ_LIBRES.lista.filter(function(u){ return u.activo; }).length;
+  var badge = document.getElementById('eq-libres-badge');
+  if (activos > 0) {
+    badge.textContent = activos;
+    badge.style.display = 'inline-block';
+  } else {
+    badge.style.display = 'none';
+  }
+}
+
+// Abrir modal de vinculación
+function eqAbrirVincular(usrId, nombre, username, email, rol) {
+  document.getElementById('eq-vinc-usr-id').value = usrId;
+  document.getElementById('eq-vinc-usr-info').innerHTML =
+    '<strong>' + eqEsc(nombre) + '</strong><br>' +
+    '<span style="font-size:12px">Username: <code>' + eqEsc(username || '—') + '</code> · Rol: ' + eqEsc(rol || '—') + '</span><br>' +
+    '<span style="font-size:11px; color:var(--sub)">' + eqEsc(email || '') + '</span>';
+  document.getElementById('eq-vinc-error').textContent = '';
+  // Cargar personas disponibles (activas y sin usuario vinculado)
+  var sel = document.getElementById('eq-vinc-persona');
+  sel.innerHTML = '<option value="">— Cargando personas —</option>';
+  eqApi('/usuarios-con-personas').then(function(r) {
+    if (!r.ok) {
+      sel.innerHTML = '<option value="">Error al cargar</option>';
+      return;
+    }
+    // Filtrar: solo personas activas SIN usuario vinculado
+    var disponibles = (r.data || []).filter(function(p){ return !p.usuario_id; });
+    EQ_LIBRES.personasDisponibles = disponibles;
+    if (disponibles.length === 0) {
+      sel.innerHTML = '<option value="">— No hay personas disponibles —</option>';
+      return;
+    }
+    sel.innerHTML = '<option value="">Elegí una persona...</option>' + disponibles.map(function(p){
+      var nom = (p.apellido || '') + (p.apellido ? ', ' : '') + (p.nombre || '');
+      var nivel = p.nivel_acceso != null ? ' [N' + p.nivel_acceso + ']' : '';
+      var cargo = p.cargo ? ' — ' + p.cargo : '';
+      return '<option value="' + p.persona_id + '">' + eqEsc(nom) + nivel + eqEsc(cargo) + '</option>';
+    }).join('');
+  });
+  document.getElementById('mb-eq-vincular').classList.add('on');
+}
+
+function eqVincularUsuario() {
+  var usrId = document.getElementById('eq-vinc-usr-id').value;
+  var personaId = document.getElementById('eq-vinc-persona').value;
+  var err = document.getElementById('eq-vinc-error');
+  err.textContent = '';
+  if (!personaId) { err.textContent = 'Elegí una persona'; return; }
+  eqApi('/usuarios/' + usrId + '/vincular-persona', {
+    method: 'POST',
+    body: { persona_id: parseInt(personaId) }
+  }).then(function(r) {
+    if (!r.ok) { err.textContent = r.error || 'Error al vincular'; return; }
+    toast(r.mensaje || 'Vinculado correctamente', 'ok');
+    closeMB('mb-eq-vincular');
+    eqCargarLibres();  // Refresca lista de libres
+  });
+}
+
+
+function cmCargar() {
+  // Cargo organigrama (sociedades CON sus áreas) + módulos en paralelo
+  Promise.all([
+    fetch('/api/org/organigrama', { credentials:'include' }).then(function(r){ return r.json(); }),
+    fetch('/api/org/modulos', { credentials:'include' }).then(function(r){ return r.json(); })
+  ]).then(function(arr) {
+    var resSoc = arr[0], resMod = arr[1];
+    if (!resMod.ok) {
+      document.getElementById('t-modulos').innerHTML = '<tr><td colspan="6" class="emp">Error: '+(resMod.error||'sin permiso')+'</td></tr>';
+      return;
+    }
+    CM_SOCIEDADES = (resSoc.sociedades || []);  // cada una con .areas[]
+    CM_MODULOS = resMod.modulos || [];
+    cmRender();
+  });
+}
+
+function cmRender() {
+  var grupos = {};
+  CM_MODULOS.forEach(function(m) {
+    if (!grupos[m.grupo]) grupos[m.grupo] = [];
+    grupos[m.grupo].push(m);
+  });
+  var ordenGrupos = Object.keys(grupos).sort(function(a,b) {
+    var minA = Math.min.apply(null, grupos[a].map(function(m){return m.orden||0;}));
+    var minB = Math.min.apply(null, grupos[b].map(function(m){return m.orden||0;}));
+    return minA - minB;
+  });
+
+  var html = '';
+  ordenGrupos.forEach(function(grupo) {
+    html += '<tr style="background:var(--bg)"><td colspan="6" style="padding:8px 12px">' +
+      '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">' +
+      '<strong style="font-size:13px">' + grupo + ' <span style="color:var(--mut);font-weight:400">('+grupos[grupo].length+')</span></strong>' +
+      '<div style="margin-left:auto;display:flex;gap:6px;align-items:center;font-size:11px">' +
+      '<span style="color:var(--mut)">Asignar todo el grupo:</span>' +
+      cmBulkSocSelect(grupo) +
+      cmBulkTipoSelect(grupo) +
+      cmBulkOcultoSelect(grupo) +
+      '</div></div></td></tr>';
+    grupos[grupo].forEach(function(m) {
+      var ocultoStyle = m.oculto ? 'background:#FFF7ED' : '';
+      var iconLock = m.oculto ? '<span title="Oculto: solo accesible desde acá con 🔗 Abrir" style="margin-right:4px">🔒</span>' : '';
+      // Botón abrir: navega al módulo. Sistema y módulos con sección propia no se filtra por oculto.
+      var btnAbrir = '<button onclick="cmAbrirModulo(\''+m.modulo+'\')" title="Ir al módulo" style="margin-left:6px;padding:2px 8px;font-size:11px;background:#fff;border:1px solid var(--bor);border-radius:4px;cursor:pointer;color:var(--burg);font-weight:600">🔗 Abrir</button>';
+      html += '<tr style="'+ocultoStyle+'">' +
+        '<td>' + iconLock +
+          '<code style="font-size:11px;color:var(--burg);background:var(--bg);padding:2px 6px;border-radius:4px">'+m.modulo+'</code> ' +
+          '<span style="font-size:12px;margin-left:6px">'+m.label+'</span>' +
+          btnAbrir +
+        '</td>' +
+        '<td style="font-size:12px;color:var(--mut)">'+m.grupo+'</td>' +
+        '<td>'+cmSocSelect(m)+'</td>' +
+        '<td>'+cmAreaSelect(m)+'</td>' +
+        '<td>'+cmTipoSelect(m)+'</td>' +
+        '<td style="text-align:center">'+cmOcultoToggle(m)+'</td>' +
+      '</tr>';
+    });
+  });
+  document.getElementById('t-modulos').innerHTML = html;
+}
+
+function cmSocSelect(m) {
+  var opts = '<option value=""'+(!m.sociedad_id?' selected':'')+'>— Transversal —</option>';
+  CM_SOCIEDADES.forEach(function(s) {
+    opts += '<option value="'+s.id+'"'+(m.sociedad_id==s.id?' selected':'')+'>'+s.nombre+'</option>';
+  });
+  return '<select onchange="cmCambiarSociedad(\''+m.modulo+'\',this.value)" style="font-size:12px;padding:4px 8px;min-width:150px">'+opts+'</select>';
+}
+
+function cmAreaSelect(m) {
+  if (!m.sociedad_id) {
+    return '<select disabled style="font-size:12px;padding:4px 8px;min-width:140px;opacity:.5"><option>— sin sociedad —</option></select>';
+  }
+  var soc = CM_SOCIEDADES.find(function(s){ return s.id == m.sociedad_id; });
+  var areas = (soc && soc.areas) ? soc.areas : [];
+  var opts = '<option value=""'+(!m.area_id?' selected':'')+'>— Todas las áreas —</option>';
+  areas.forEach(function(a) {
+    opts += '<option value="'+a.id+'"'+(m.area_id==a.id?' selected':'')+'>'+a.nombre+'</option>';
+  });
+  return '<select onchange="cmActualizar(\''+m.modulo+'\',{area_id:this.value?parseInt(this.value):null})" style="font-size:12px;padding:4px 8px;min-width:140px">'+opts+'</select>';
+}
+
+function cmTipoSelect(m) {
+  // Tipos internos siguen siendo strings, pero la UI los muestra como nivel 0-4
+  var tipos = [
+    {v:'sistema',   label:'0 — solo Directivo',      bg:'#e5e7eb'},
+    {v:'numero',    label:'1 — hasta Gerencial',     bg:'#fde68a'},
+    {v:'operativo', label:'2 — hasta Ejecutivo',     bg:'#bbf7d0'},
+    {v:'mobile',    label:'3 — hasta Adm/Operativo', bg:'#bfdbfe'},
+    {v:'externo',   label:'4 — hasta Externo',       bg:'#e9d5ff'}
+  ];
+  var actual = tipos.find(function(t){return t.v===m.tipo;}) || tipos[2];
+  var opts = tipos.map(function(t) {
+    return '<option value="'+t.v+'"'+(m.tipo===t.v?' selected':'')+'>'+t.label+'</option>';
+  }).join('');
+  return '<select onchange="cmActualizar(\''+m.modulo+'\',{tipo:this.value})" style="font-size:12px;padding:4px 8px;background:'+actual.bg+'">'+opts+'</select>';
+}
+
+function cmOcultoToggle(m) {
+  if (m.oculto) {
+    return '<button onclick="cmActualizar(\''+m.modulo+'\',{oculto:0})" title="Está oculto. Click para mostrar" style="font-size:11px;padding:4px 10px;background:#FED7AA;border:1px solid #FB923C;color:#9A3412;border-radius:4px;cursor:pointer;font-weight:600">🔒 Oculto</button>';
+  }
+  return '<button onclick="cmActualizar(\''+m.modulo+'\',{oculto:1})" title="Visible para todos. Click para ocultar (solo Directivo lo verá)" style="font-size:11px;padding:4px 10px;background:#D1FAE5;border:1px solid #10B981;color:#065F46;border-radius:4px;cursor:pointer;font-weight:600">👁️ Visible</button>';
+}
+
+function cmBulkSocSelect(grupo) {
+  var opts = '<option value="">→ Sociedad</option><option value="0">— Transversal —</option>';
+  CM_SOCIEDADES.forEach(function(s){ opts += '<option value="'+s.id+'">'+s.nombre+'</option>'; });
+  return '<select onchange="cmBulkSoc(\''+grupo+'\',this.value);this.value=\'\'" style="font-size:11px;padding:3px 6px">'+opts+'</select>';
+}
+function cmBulkTipoSelect(grupo) {
+  return '<select onchange="cmBulkTipo(\''+grupo+'\',this.value);this.value=\'\'" style="font-size:11px;padding:3px 6px">' +
+    '<option value="">→ Tipo</option>' +
+    '<option value="sistema">0 — solo Directivo</option>' +
+    '<option value="numero">1 — hasta Gerencial</option>' +
+    '<option value="operativo">2 — hasta Ejecutivo</option>' +
+    '<option value="mobile">3 — hasta Adm/Operativo</option>' +
+    '<option value="externo">4 — hasta Externo</option>' +
+    '</select>';
+}
+function cmBulkOcultoSelect(grupo) {
+  return '<select onchange="cmBulkOculto(\''+grupo+'\',this.value);this.value=\'\'" style="font-size:11px;padding:3px 6px">' +
+    '<option value="">→ Visible/Oculto</option>' +
+    '<option value="0">👁️ Visibles</option>' +
+    '<option value="1">🔒 Ocultos (solo Directivo)</option>' +
+    '</select>';
+}
+
+function cmCambiarSociedad(modulo, val) {
+  // Al cambiar sociedad, el área se resetea (no aplica a la nueva sociedad)
+  var nuevaSoc = val ? parseInt(val) : null;
+  cmActualizar(modulo, { sociedad_id: nuevaSoc, area_id: null });
+}
+
+function cmActualizar(modulo, cambios) {
+  fetch('/api/org/modulos/'+encodeURIComponent(modulo), {
+    method:'PATCH', credentials:'include',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify(cambios)
+  })
+    .then(function(r){ return r.json(); })
+    .then(function(res) {
+      if (res.ok) {
+        var m = CM_MODULOS.find(function(x){return x.modulo===modulo;});
+        if (m) {
+          if (cambios.sociedad_id !== undefined) {
+            m.sociedad_id = cambios.sociedad_id ? parseInt(cambios.sociedad_id) : null;
+            var s = CM_SOCIEDADES.find(function(x){return x.id==m.sociedad_id;});
+            m.sociedad_nombre = s ? s.nombre : null;
+          }
+          if (cambios.area_id !== undefined) {
+            m.area_id = cambios.area_id || null;
+            if (m.area_id) {
+              for (var i = 0; i < CM_SOCIEDADES.length; i++) {
+                var a = (CM_SOCIEDADES[i].areas || []).find(function(x){ return x.id == m.area_id; });
+                if (a) { m.area_nombre = a.nombre; m.sociedad_id = CM_SOCIEDADES[i].id; break; }
+              }
+            } else {
+              m.area_nombre = null;
+            }
+          }
+          if (cambios.tipo !== undefined) m.tipo = cambios.tipo;
+          if (cambios.oculto !== undefined) m.oculto = cambios.oculto;
+        }
+        cmRender();
+        toast('Actualizado','ok');
+      } else {
+        toast('Error: '+res.error, 'er');
+        cmCargar();
+      }
+    });
+}
+
+function cmBulkSoc(grupo, val) {
+  if (val === '') return;
+  var socId = val === '0' ? null : parseInt(val);
+  if (!confirm('¿Asignar TODOS los módulos de "'+grupo+'" a esta sociedad?')) { cmCargar(); return; }
+  fetch('/api/org/modulos/bulk', {
+    method:'POST', credentials:'include',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ filter:{grupo:grupo}, update:{sociedad_id:socId} })
+  })
+    .then(function(r){ return r.json(); })
+    .then(function(res) {
+      if (res.ok) { toast('✓ '+res.actualizados+' módulos actualizados','ok'); cmCargar(); }
+      else { toast('Error: '+res.error,'er'); }
+    });
+}
+function cmBulkTipo(grupo, tipo) {
+  if (!tipo) return;
+  if (!confirm('¿Asignar TODOS los módulos de "'+grupo+'" como '+tipo+'?')) { cmCargar(); return; }
+  fetch('/api/org/modulos/bulk', {
+    method:'POST', credentials:'include',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ filter:{grupo:grupo}, update:{tipo:tipo} })
+  })
+    .then(function(r){ return r.json(); })
+    .then(function(res) {
+      if (res.ok) { toast('✓ '+res.actualizados+' módulos actualizados','ok'); cmCargar(); }
+      else { toast('Error: '+res.error,'er'); }
+    });
+}
+function cmBulkOculto(grupo, val) {
+  if (val === '') return;
+  var oculto = val === '1' ? 1 : 0;
+  var msg = oculto
+    ? '¿Ocultar TODOS los módulos de "'+grupo+'"? Solo Directivos podrán verlos.'
+    : '¿Hacer VISIBLES TODOS los módulos de "'+grupo+'"?';
+  if (!confirm(msg)) { cmCargar(); return; }
+  fetch('/api/org/modulos/bulk', {
+    method:'POST', credentials:'include',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ filter:{grupo:grupo}, update:{oculto:oculto} })
+  })
+    .then(function(r){ return r.json(); })
+    .then(function(res) {
+      if (res.ok) { toast('✓ '+res.actualizados+' módulos actualizados','ok'); cmCargar(); }
+      else { toast('Error: '+res.error,'er'); }
+    });
 }
 
 </script>
