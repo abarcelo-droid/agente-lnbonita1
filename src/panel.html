@@ -2327,7 +2327,6 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
               <option value="campo">🌿 Solo Scout (campo)</option>
             </select>
           </div>
-          <div class="fl"><label>PIN (4 dígitos)</label><input id="eq-per-pin" type="text" inputmode="numeric" maxlength="4" placeholder="0000" style="letter-spacing:6px; font-family:monospace; text-align:center"></div>
           <div class="fl ff" style="margin-top:4px">
             <label>Depósitos habilitados</label>
             <div style="display:flex; gap:14px; margin-top:6px; flex-wrap:wrap">
@@ -24345,8 +24344,6 @@ function eqPoblarAcceso(persona, usuario) {
     // Poblar campos con los datos del usuario actual
     document.getElementById('eq-per-username').value = usuario.username || '';
     document.getElementById('eq-per-rol-sistema').value = usuario.rol || 'operador';
-    document.getElementById('eq-per-pin').value = '';
-    document.getElementById('eq-per-pin').placeholder = '•••• (sin cambios)';
     // Depósitos
     var deps = [];
     try { deps = JSON.parse(usuario.depositos || '[]'); } catch(e){ deps = []; }
@@ -24369,8 +24366,6 @@ function eqPoblarAcceso(persona, usuario) {
       .normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]/g, '');
     document.getElementById('eq-per-username').value = (initial + ape).replace(/[^a-z0-9]/g, '');
     document.getElementById('eq-per-rol-sistema').value = 'operador';
-    document.getElementById('eq-per-pin').value = '';
-    document.getElementById('eq-per-pin').placeholder = '0000';
     document.getElementById('eq-per-dep-mcba').checked = true;
     document.getElementById('eq-per-dep-finca').checked = true;
     document.getElementById('eq-per-dep-sanpedro').checked = true;
@@ -24469,7 +24464,6 @@ function eqSincronizarAcceso(personaId) {
     if (document.getElementById('eq-per-dep-sanpedro').checked) deps.push('SAN PEDRO');
     var depTipo = document.getElementById('eq-per-dep-ifco-tipo').value || null;
     var depProvId = depTipo === 'proveedor' ? (document.getElementById('eq-per-dep-ifco-prov').value || null) : null;
-    var pin = document.getElementById('eq-per-pin').value.trim();
     var body = {
       username: document.getElementById('eq-per-username').value.trim(),
       rol: document.getElementById('eq-per-rol-sistema').value,
@@ -24477,14 +24471,10 @@ function eqSincronizarAcceso(personaId) {
       deposito_tipo: depTipo,
       deposito_proveedor_id: depProvId
     };
-    // PIN: solo lo mando si vino algo (en edit el campo está vacío para "sin cambios")
-    if (pin) body.pin = pin;
 
     // CASO 3: no tenía y ahora quiere → POST
     if (!teniaUsuario && quiereLogin) {
       if (!body.username) return reject(new Error('Ingresá un username'));
-      // PIN obligatorio para usuarios nuevos (transición). Default 0000 si no se dio.
-      if (!body.pin) body.pin = '0000';
       eqApi('/personas/' + personaId + '/usuario', { method: 'POST', body: body }).then(function(r){
         if (!r.ok) return reject(new Error(r.error || 'No se pudo crear el acceso'));
         resolve();

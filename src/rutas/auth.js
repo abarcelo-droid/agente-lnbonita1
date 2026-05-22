@@ -140,13 +140,14 @@ function validatePassword(password, username) {
   } catch(e) { console.error('[AUTH] Error generando usernames iniciales:', e.message); }
 })();
 
-// Login por email+PIN, username+PIN, password (post-fase 2.C), o nombre+PIN
+// Login por email+password, username+password, o nombre+password
 // El campo del body sigue siendo `email` por compatibilidad con el frontend actual,
 // pero el backend prueba 3 caminos: email exacto → username → nombre exacto.
-// Acepta `pin` (modo viejo) o `password` (modo nuevo post-migración).
+// Solo acepta `password`. Los usuarios viejos con solo PIN deben pedirle al admin
+// que les asigne una password inicial.
 router.post('/login', async (req, res) => {
-  const { email, pin, password, next } = req.body;
-  if (!pin && !password) return res.status(400).json({ ok: false, error: 'Ingresá tu PIN o contraseña' });
+  const { email, password, next } = req.body;
+  if (!password) return res.status(400).json({ ok: false, error: 'Ingresá tu contraseña' });
   const db = getDb();
   try {
     let user = null;
@@ -164,45 +165,29 @@ router.post('/login', async (req, res) => {
         user = db.prepare('SELECT * FROM usuarios WHERE nombre = ? AND activo = 1').get(identifier);
       }
     }
-    if (!user) return res.status(401).json({ ok: false, error: 'Usuario no encontrado' });
+    if (!user) return res.status(401).json({ ok: false, error: 'Usuario o contraseña incorrectos' });
 
-    // ── Modo contraseña (post-fase 2.C) ──────────────────────────────────
-    if (password) {
-      if (!user.password_hash) {
-        return res.status(401).json({ ok: false, error: 'Este usuario todavía no seteó contraseña. Entrá con tu PIN.' });
-      }
-      const match = await bcrypt.compare(password, user.password_hash);
-      if (!match) return res.status(401).json({ ok: false, error: 'Contraseña incorrecta' });
+    // Si el usuario todavía no tiene password configurada (legacy con solo PIN),
+    // no puede entrar. Tiene que pedirle al admin que le asigne una password inicial.
+    if (!user.password_hash) {
+      return res.status(401).json({
+        ok: false,
+        error: 'Tu cuenta todavía no tiene contraseña configurada. Pedile a tu administrador que te asigne una.'
+      });
+    }
+    const match = await bcrypt.compare(password, user.password_hash);
+    if (!match) return res.status(401).json({ ok: false, error: 'Usuario o contraseña incorrectos' });
 
-      // FASE 2.C: si el admin le asignó password inicial con debe_cambiar_password=1,
-      // forzar el cambio antes de entrar al panel (mismo flow que el PIN, pero confirma con password actual)
-      if (user.debe_cambiar_password) {
-        return res.json({
-          ok: true,
-          requiere_setear_password: true,
-          user_id: user.id,
-          username: user.username || null,
-          nombre: user.nombre,
-          via: 'password'  // el frontend pedirá "password actual" en vez de PIN
-        });
-      }
-      // OK, seguimos al setear cookie
-    } else {
-      // ── Modo PIN (transición) ──────────────────────────────────────────
-      if (user.pin !== String(pin).trim()) return res.status(401).json({ ok: false, error: 'PIN incorrecto' });
-
-      // FASE 2.C: si el usuario nunca seteó contraseña, lo mandamos a setearla
-      // antes de entrar. Devolvemos requiere_setear_password SIN setear la cookie.
-      if (!user.migrado_a_v2 || user.migrado_a_v2 === 0) {
-        return res.json({
-          ok: true,
-          requiere_setear_password: true,
-          user_id: user.id,
-          username: user.username || null,
-          nombre: user.nombre,
-          via: 'pin'  // el frontend pide "PIN actual" como confirmación
-        });
-      }
+    // FASE 2.C: si el admin le asignó password inicial con debe_cambiar_password=1,
+    // forzar el cambio antes de entrar al panel.
+    if (user.debe_cambiar_password) {
+      return res.json({
+        ok: true,
+        requiere_setear_password: true,
+        user_id: user.id,
+        username: user.username || null,
+        nombre: user.nombre
+      });
     }
 
     const userData = {
@@ -245,38 +230,33 @@ router.post('/logout', (req, res) => {
 });
 
 // ─── FASE 2.C: setear contraseña en primer login ───────────────────────────
-// El cliente llega acá después de un login cuando:
-//   (a) entró con PIN y migrado_a_v2 = 0 (primer login natural)
-//   (b) entró con password genérica asignada por admin (debe_cambiar_password = 1)
-// Re-verifica la credencial (PIN o password actual), valida la nueva contra la
-// política, la hashea con bcrypt, marca migrado_a_v2 = 1, debe_cambiar_password = 0
-// y setea la cookie.
+// El cliente llega acá cuando el admin le asignó una password inicial
+// con debe_cambiar_password = 1. Re-verifica la password actual, valida la nueva
+// contra la política, la hashea con bcrypt, marca migrado_a_v2 = 1,
+// debe_cambiar_password = 0 y setea la cookie.
 router.post('/setear-password', async (req, res) => {
-  const { user_id, pin, password_actual, password, next } = req.body || {};
+  const { user_id, password_actual, password, next } = req.body || {};
   if (!user_id || !password) {
     return res.status(400).json({ ok: false, error: 'Faltan datos' });
   }
-  if (!pin && !password_actual) {
-    return res.status(400).json({ ok: false, error: 'Confirmá tu PIN o tu contraseña actual' });
+  if (!password_actual) {
+    return res.status(400).json({ ok: false, error: 'Confirmá tu contraseña actual' });
   }
   const db = getDb();
   try {
     const user = db.prepare('SELECT * FROM usuarios WHERE id = ? AND activo = 1').get(parseInt(user_id));
     if (!user) return res.status(401).json({ ok: false, error: 'Usuario no encontrado' });
 
-    // Confirmación: o PIN, o password actual
-    if (password_actual) {
-      if (!user.password_hash) return res.status(401).json({ ok: false, error: 'Sin contraseña actual configurada' });
-      const ok = await bcrypt.compare(password_actual, user.password_hash);
-      if (!ok) return res.status(401).json({ ok: false, error: 'Contraseña actual incorrecta' });
-    } else {
-      if (user.pin !== String(pin).trim()) return res.status(401).json({ ok: false, error: 'PIN incorrecto' });
-    }
+    // Verificar password actual
+    if (!user.password_hash) return res.status(401).json({ ok: false, error: 'Sin contraseña actual configurada' });
+    const ok = await bcrypt.compare(password_actual, user.password_hash);
+    if (!ok) return res.status(401).json({ ok: false, error: 'Contraseña actual incorrecta' });
+
     // Validar política
     const error = validatePassword(password, user.username);
     if (error) return res.status(400).json({ ok: false, error });
     // No permitir reusar la misma contraseña
-    if (password_actual && password_actual === password) {
+    if (password_actual === password) {
       return res.status(400).json({ ok: false, error: 'La nueva contraseña debe ser distinta a la actual' });
     }
     // Hashear y guardar
@@ -526,27 +506,11 @@ router.post('/asignar-password-inicial/:id', soloAdmin, async (req, res) => {
   }
 });
 
-// ─── FASE 2.C: RESETEAR PASSWORD (admin) ───────────────────────────────────
-// Borra la contraseña. El usuario vuelve al flow de PIN + setear-password.
-router.post('/resetear-password/:id', soloAdmin, (req, res) => {
-  const userId = parseInt(req.params.id);
-  if (!userId) return res.status(400).json({ ok: false, error: 'ID inválido' });
-  const db = getDb();
-  try {
-    const user = db.prepare('SELECT id, username, nombre FROM usuarios WHERE id = ?').get(userId);
-    if (!user) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
-    db.prepare(`
-      UPDATE usuarios
-      SET password_hash = NULL, debe_cambiar_password = 0, migrado_a_v2 = 0
-      WHERE id = ?
-    `).run(userId);
-    console.log(`[AUTH] Admin reseteó password de ${user.username || user.nombre}`);
-    res.json({ ok: true, mensaje: `Contraseña reseteada. ${user.nombre} podrá ingresar con su PIN.` });
-  } catch(e) {
-    console.error('[AUTH] Error resetear-password:', e.message);
-    res.status(500).json({ ok: false, error: 'Error al resetear contraseña' });
-  }
-});
+// NOTA: El antiguo endpoint /resetear-password/:id se eliminó.
+// Antes ponía password_hash = NULL para que el usuario volviera a entrar con PIN.
+// Como ya no aceptamos PIN, ese flow no tiene sentido.
+// Si el admin necesita "resetear" a un usuario, debe asignar una password inicial
+// nueva vía POST /asignar-password-inicial/:id (el usuario será forzado a cambiarla).
 
 // ─── RECUPERACIÓN DE CONTRASEÑA POR MAIL ────────────────────────────────────
 // Flujo:
