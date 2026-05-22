@@ -35,6 +35,28 @@ try {
 // URL base del panel (para los links del mail de recuperación)
 const PANEL_BASE_URL = process.env.PANEL_BASE_URL || 'https://agente-lnbonita1-production.up.railway.app';
 
+// ─── DURACIÓN DE SESIÓN SEGÚN DISPOSITIVO ─────────────────────────────────
+// Móviles: cookie de 30 días (queremos que la app del celular quede siempre abierta)
+// Desktop: cookie de 1 día (al día siguiente requiere reloguearse)
+// La detección es por User-Agent. No es 100% confiable pero alcanza para 99% de los casos.
+const COOKIE_MAX_AGE_MOBILE  = 30 * 24 * 60 * 60 * 1000; // 30 días en ms
+const COOKIE_MAX_AGE_DESKTOP =  1 * 24 * 60 * 60 * 1000; //  1 día en ms
+
+function esMovil(req) {
+  const ua = String(req?.headers?.['user-agent'] || '').toLowerCase();
+  // Match conservador: tablets caen como mobile, modo escritorio fuerza desktop
+  return /android|iphone|ipad|ipod|iemobile|blackberry|opera mini|mobile/i.test(ua);
+}
+
+function cookieOpts(req) {
+  return {
+    httpOnly: false,
+    sameSite: 'lax',
+    path: '/',
+    maxAge: esMovil(req) ? COOKIE_MAX_AGE_MOBILE : COOKIE_MAX_AGE_DESKTOP
+  };
+}
+
 const parseSecciones = (s) => { try { return JSON.parse(s || '["*"]'); } catch(e) { return ['*']; } };
 const parseDepositos = (s) => { try { return JSON.parse(s || '["MCBA","FINCA","SAN PEDRO"]'); } catch(e) { return ['MCBA','FINCA','SAN PEDRO']; } };
 
@@ -191,7 +213,7 @@ router.post('/login', async (req, res) => {
       deposito_tipo: user.deposito_tipo || null,
       deposito_proveedor_id: user.deposito_proveedor_id || null
     };
-    res.cookie('lnb_user', JSON.stringify(userData), { httpOnly: false, sameSite: 'lax', path: '/' });
+    res.cookie('lnb_user', JSON.stringify(userData), cookieOpts(req));
 
     // Whitelist de rutas internas válidas para el parámetro ?next=
     // Se aceptan rutas que empiecen con /scout, /panel o /m (mobile IFCO)
@@ -272,7 +294,7 @@ router.post('/setear-password', async (req, res) => {
       deposito_tipo: user.deposito_tipo || null,
       deposito_proveedor_id: user.deposito_proveedor_id || null
     };
-    res.cookie('lnb_user', JSON.stringify(userData), { httpOnly: false, sameSite: 'lax', path: '/' });
+    res.cookie('lnb_user', JSON.stringify(userData), cookieOpts(req));
 
     // Mismo manejo de redirect que el login
     const RUTAS_VALIDAS = ['/scout', '/panel', '/m'];
