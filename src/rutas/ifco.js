@@ -7,6 +7,7 @@ import path    from "path";
 import fs      from "fs";
 import { fileURLToPath } from "url";
 import db from "../servicios/db.js";
+import { enviarMail } from "../servicios/mail.js";
 import nodemailer from "nodemailer";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -284,7 +285,10 @@ try { db.exec("ALTER TABLE ifco_movimientos ADD COLUMN pendiente INTEGER NOT NUL
 //   SMTP_FROM      — opcional, default: ifco@lnbonita.com.ar
 // ════════════════════════════════════════════════════════════════════════════
 
-// Helper: enviar mail vía API HTTP de Brevo y registrar en log
+// Helper: enviar mail vía servicio centralizado de Brevo y registrar en ifco_mails_log.
+// Mantiene la firma original para no romper a los callers.
+// El sender específico de IFCO ("Gestión IFCO - SAN GERONIMO SA") se pasa explícitamente,
+// para que el log diga "viene de IFCO" aunque el helper genérico viva en servicios/mail.js.
 // opts: { tipo, to, cc?, asunto, cuerpo_html, cuerpo_texto, adjuntos: [{filename, path}], related_ids?, usuario_id? }
 async function _enviarMailIFCO(opts) {
   const log = {
@@ -297,70 +301,31 @@ async function _enviarMailIFCO(opts) {
     adjuntos_count: (opts.adjuntos || []).length,
     related_ids: opts.related_ids ? JSON.stringify(opts.related_ids) : null
   };
-  try {
-    if (!process.env.BREVO_API_KEY) {
-      throw new Error('BREVO_API_KEY no configurada en variables de entorno de Railway');
-    }
-    const from = process.env.SMTP_FROM || 'ifco@lnbonita.com.ar';
+  // Delegar al servicio centralizado pasando el sender de IFCO
+  const senderEmail = process.env.SMTP_FROM || 'ifco@lnbonita.com.ar';
+  const r = await enviarMail({
+    to: opts.to,
+    cc: opts.cc,
+    asunto: opts.asunto,
+    cuerpo_html: opts.cuerpo_html,
+    cuerpo_texto: opts.cuerpo_texto,
+    adjuntos: opts.adjuntos,
+    sender_email: senderEmail,
+    sender_name: 'Gestión IFCO - SAN GERONIMO SA'
+  });
 
-    // Convertir destinatarios al formato que espera Brevo: [{ email: '...', name?: '...' }]
-    const toRaw = Array.isArray(opts.to) ? opts.to : String(opts.to || '').split(',');
-    const toList = toRaw.map(function(x){ return String(x).trim(); }).filter(Boolean).map(function(e){ return { email: e }; });
-    if (toList.length === 0) throw new Error('Destinatario requerido');
-
-    const ccRaw = opts.cc ? (Array.isArray(opts.cc) ? opts.cc : String(opts.cc).split(',')) : [];
-    const ccList = ccRaw.map(function(x){ return String(x).trim(); }).filter(Boolean).map(function(e){ return { email: e }; });
-
-    // Convertir adjuntos a base64 (Brevo los acepta así)
-    const attachments = [];
-    (opts.adjuntos || []).forEach(function(a){
-      try {
-        const content = fs.readFileSync(a.path).toString('base64');
-        attachments.push({ name: a.filename, content: content });
-      } catch(e) {
-        console.warn('[IFCO][_enviarMailIFCO] No se pudo leer adjunto:', a.path, e.message);
-      }
-    });
-
-    const payload = {
-      sender: { name: 'Gestión IFCO - SAN GERONIMO SA', email: from },
-      to: toList,
-      subject: opts.asunto || '(sin asunto)'
-    };
-    if (opts.cuerpo_html)  payload.htmlContent = opts.cuerpo_html;
-    if (opts.cuerpo_texto) payload.textContent = opts.cuerpo_texto;
-    if (ccList.length > 0) payload.cc = ccList;
-    if (attachments.length > 0) payload.attachment = attachments;
-
-    const res = await fetch('https://api.brevo.com/v3/smtp/email', {
-      method: 'POST',
-      headers: {
-        'api-key': process.env.BREVO_API_KEY,
-        'content-type': 'application/json',
-        'accept': 'application/json'
-      },
-      body: JSON.stringify(payload)
-    });
-
-    if (!res.ok) {
-      const errText = await res.text().catch(function(){ return ''; });
-      throw new Error('Brevo API HTTP ' + res.status + ': ' + errText.slice(0, 300));
-    }
-    const data = await res.json().catch(function(){ return {}; });
-    const messageId = data.messageId || null;
-
+  if (r.success) {
     db.prepare(`
       INSERT INTO ifco_mails_log (tipo, enviado_por_id, destinatarios_to, destinatarios_cc, asunto, cuerpo, adjuntos_count, status, message_id, related_ids)
       VALUES (@tipo, @enviado_por_id, @destinatarios_to, @destinatarios_cc, @asunto, @cuerpo, @adjuntos_count, 'success', @message_id, @related_ids)
-    `).run(Object.assign(log, { message_id: messageId }));
-    return { success: true, messageId: messageId };
-  } catch(err) {
+    `).run(Object.assign(log, { message_id: r.messageId }));
+    return { success: true, messageId: r.messageId };
+  } else {
     db.prepare(`
       INSERT INTO ifco_mails_log (tipo, enviado_por_id, destinatarios_to, destinatarios_cc, asunto, cuerpo, adjuntos_count, status, error_msg, related_ids)
       VALUES (@tipo, @enviado_por_id, @destinatarios_to, @destinatarios_cc, @asunto, @cuerpo, @adjuntos_count, 'error', @error_msg, @related_ids)
-    `).run(Object.assign(log, { error_msg: String(err.message || err).slice(0, 500) }));
-    console.error('[IFCO][_enviarMailIFCO]', err);
-    return { success: false, error: err.message };
+    `).run(Object.assign(log, { error_msg: String(r.error || '').slice(0, 500) }));
+    return { success: false, error: r.error };
   }
 }
 

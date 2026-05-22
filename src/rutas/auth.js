@@ -1,7 +1,9 @@
 // src/rutas/auth.js
 import express from 'express';
 import bcrypt from 'bcrypt';
+import crypto from 'crypto';
 import { getDb } from '../servicios/db.js';
+import { enviarMail } from '../servicios/mail.js';
 
 const router = express.Router();
 const BCRYPT_ROUNDS = 10;
@@ -11,6 +13,27 @@ const BCRYPT_ROUNDS = 10;
 // deposito_proveedor_id: FK a proveedores cuando deposito_tipo='proveedor', NULL en otro caso
 try { getDb().exec("ALTER TABLE usuarios ADD COLUMN deposito_tipo TEXT"); } catch(e) { /* ya existe */ }
 try { getDb().exec("ALTER TABLE usuarios ADD COLUMN deposito_proveedor_id INTEGER"); } catch(e) { /* ya existe */ }
+
+// ── Tabla password_reset_tokens (recuperación de contraseña por mail) ──────
+// Tokens de un solo uso, expiran en 1 hora.
+// Se purgan automáticamente los vencidos al crear uno nuevo.
+try {
+  getDb().exec(`
+    CREATE TABLE IF NOT EXISTS password_reset_tokens (
+      token       TEXT PRIMARY KEY,
+      usuario_id  INTEGER NOT NULL,
+      creado_en   TEXT DEFAULT (datetime('now')),
+      expira_en   TEXT NOT NULL,
+      usado_en    TEXT,
+      ip          TEXT,
+      FOREIGN KEY (usuario_id) REFERENCES usuarios(id)
+    )
+  `);
+  getDb().exec("CREATE INDEX IF NOT EXISTS idx_prt_usuario ON password_reset_tokens(usuario_id)");
+} catch(e) { console.error('[AUTH] Error creando tabla password_reset_tokens:', e.message); }
+
+// URL base del panel (para los links del mail de recuperación)
+const PANEL_BASE_URL = process.env.PANEL_BASE_URL || 'https://agente-lnbonita1-production.up.railway.app';
 
 const parseSecciones = (s) => { try { return JSON.parse(s || '["*"]'); } catch(e) { return ['*']; } };
 const parseDepositos = (s) => { try { return JSON.parse(s || '["MCBA","FINCA","SAN PEDRO"]'); } catch(e) { return ['MCBA','FINCA','SAN PEDRO']; } };
@@ -500,6 +523,177 @@ router.post('/resetear-password/:id', soloAdmin, (req, res) => {
   } catch(e) {
     console.error('[AUTH] Error resetear-password:', e.message);
     res.status(500).json({ ok: false, error: 'Error al resetear contraseña' });
+  }
+});
+
+// ─── RECUPERACIÓN DE CONTRASEÑA POR MAIL ────────────────────────────────────
+// Flujo:
+//   1. POST /solicitar-reset → genera token + manda mail (público, sin auth)
+//   2. GET  /validar-token?token=X → la pantalla del link verifica antes de mostrar form
+//   3. POST /resetear-con-token → recibe token + nueva pwd, valida, guarda
+//
+// Seguridad:
+//   - Tokens de 32 bytes hex (criptográficamente seguros)
+//   - Expiran en 1 hora
+//   - Un solo uso (al usar se marca usado_en)
+//   - Nunca revelar si un email existe en DB (anti-enumeration)
+
+const TOKEN_TTL_HORAS = 1;
+
+// POST /solicitar-reset — Genera token y manda mail
+router.post('/solicitar-reset', async (req, res) => {
+  const email = String(req.body?.email || '').trim().toLowerCase();
+  if (!email) return res.status(400).json({ ok: false, error: 'Email requerido' });
+
+  // RESPUESTA UNIFORME: siempre devolvemos OK aunque el email no exista.
+  // Esto evita que un atacante enumere mails válidos probando uno por uno.
+  const respuestaUniforme = {
+    ok: true,
+    mensaje: 'Si el email está registrado, vas a recibir un link en tu casilla.'
+  };
+
+  try {
+    const db = getDb();
+    const user = db.prepare("SELECT id, nombre, username, email FROM usuarios WHERE LOWER(email) = ? AND activo = 1").get(email);
+    if (!user) {
+      // No existe → respondemos OK igual (sin hacer nada)
+      console.log('[AUTH] Reset solicitado para email inexistente:', email);
+      return res.json(respuestaUniforme);
+    }
+
+    // Purgar tokens vencidos para no acumular basura
+    db.prepare("DELETE FROM password_reset_tokens WHERE expira_en < datetime('now')").run();
+
+    // Invalidar tokens previos del mismo usuario (que no haya 2 válidos a la vez)
+    db.prepare("UPDATE password_reset_tokens SET usado_en = datetime('now') WHERE usuario_id = ? AND usado_en IS NULL").run(user.id);
+
+    // Generar token nuevo
+    const token = crypto.randomBytes(32).toString('hex');
+    const expiraEn = new Date(Date.now() + TOKEN_TTL_HORAS * 60 * 60 * 1000).toISOString().slice(0, 19).replace('T', ' ');
+    const ip = (req.headers['x-forwarded-for'] || req.socket?.remoteAddress || '').toString().split(',')[0].trim() || null;
+
+    db.prepare("INSERT INTO password_reset_tokens (token, usuario_id, expira_en, ip) VALUES (?, ?, ?, ?)").run(token, user.id, expiraEn, ip);
+
+    // Armar link y mandar mail
+    const link = `${PANEL_BASE_URL}/login.html?reset=${token}`;
+    const nombre = user.nombre || user.username || 'usuario';
+    const username = user.username || '—';
+
+    const cuerpoHtml = `
+      <div style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto;color:#1a2332">
+        <div style="background:#0f2540;padding:24px;text-align:center;border-radius:8px 8px 0 0">
+          <div style="color:#fff;font-size:22px;font-weight:bold">La Niña Bonita</div>
+          <div style="color:#a8b5c8;font-size:12px;margin-top:4px;letter-spacing:1px">PANEL DE CONTROL</div>
+        </div>
+        <div style="background:#fff;padding:32px 24px;border:1px solid #dde3ea;border-top:none;border-radius:0 0 8px 8px">
+          <h2 style="margin:0 0 16px;color:#1a3a5c;font-size:20px">🔑 Recuperar contraseña</h2>
+          <p style="margin:0 0 12px;line-height:1.5">Hola <strong>${nombre}</strong>,</p>
+          <p style="margin:0 0 12px;line-height:1.5">Recibimos una solicitud para restablecer la contraseña de tu cuenta (<code style="background:#f0f4f8;padding:2px 6px;border-radius:3px">${username}</code>) en el panel de La Niña Bonita.</p>
+          <p style="margin:0 0 24px;line-height:1.5">Hacé click en el botón para elegir una nueva contraseña:</p>
+          <div style="text-align:center;margin:28px 0">
+            <a href="${link}" style="display:inline-block;background:#1a3a5c;color:#fff;text-decoration:none;padding:14px 28px;border-radius:8px;font-weight:bold;font-size:15px">Resetear contraseña →</a>
+          </div>
+          <p style="margin:24px 0 0;font-size:12px;color:#5a6a7e;line-height:1.5">
+            Este link expira en <strong>1 hora</strong> y solo se puede usar una vez.<br>
+            Si no fuiste vos quien lo pidió, ignorá este mail. Tu contraseña no se modifica.
+          </p>
+          <hr style="border:none;border-top:1px solid #dde3ea;margin:24px 0">
+          <p style="margin:0;font-size:11px;color:#8a9bb0;text-align:center">
+            ¿Problemas con el botón? Copiá este link en tu navegador:<br>
+            <span style="word-break:break-all;color:#1a3a5c">${link}</span>
+          </p>
+        </div>
+      </div>
+    `;
+    const cuerpoTexto =
+      `Hola ${nombre},\n\n` +
+      `Recibimos una solicitud para restablecer la contraseña de tu cuenta (${username}) en el panel de La Niña Bonita.\n\n` +
+      `Para elegir una nueva contraseña, entrá a este link:\n${link}\n\n` +
+      `Este link expira en 1 hora y solo se puede usar una vez.\n` +
+      `Si no fuiste vos quien lo pidió, ignorá este mail. Tu contraseña no se modifica.\n\n` +
+      `— ERP LNB`;
+
+    const mailRes = await enviarMail({
+      to: user.email,
+      asunto: '🔑 Recuperá tu contraseña — La Niña Bonita',
+      cuerpo_html: cuerpoHtml,
+      cuerpo_texto: cuerpoTexto
+    });
+
+    if (!mailRes.success) {
+      console.error('[AUTH] Error enviando mail de reset a', user.email, ':', mailRes.error);
+      // Igual devolvemos OK al cliente (no revelamos errores internos)
+    } else {
+      console.log('[AUTH] Mail de reset enviado a', user.email, '· messageId:', mailRes.messageId);
+    }
+
+    res.json(respuestaUniforme);
+  } catch(e) {
+    console.error('[AUTH] Error solicitar-reset:', e.message);
+    // Igual devolvemos OK uniforme al cliente
+    res.json(respuestaUniforme);
+  }
+});
+
+// GET /validar-token?token=X — Verifica si un token es válido (público)
+// Lo usa la pantalla del link antes de mostrar el form de nueva password.
+router.get('/validar-token', (req, res) => {
+  const token = String(req.query?.token || '').trim();
+  if (!token || token.length < 32) return res.json({ ok: false, error: 'Token inválido' });
+  try {
+    const db = getDb();
+    const row = db.prepare(`
+      SELECT prt.usuario_id, prt.expira_en, prt.usado_en,
+             u.nombre, u.username, u.activo
+      FROM password_reset_tokens prt
+      LEFT JOIN usuarios u ON prt.usuario_id = u.id
+      WHERE prt.token = ?
+    `).get(token);
+    if (!row) return res.json({ ok: false, error: 'Link inválido o no encontrado' });
+    if (row.usado_en) return res.json({ ok: false, error: 'Este link ya fue utilizado' });
+    if (new Date(row.expira_en) < new Date()) return res.json({ ok: false, error: 'Este link expiró. Solicitá uno nuevo.' });
+    if (!row.activo) return res.json({ ok: false, error: 'La cuenta está dada de baja' });
+    res.json({ ok: true, nombre: row.nombre, username: row.username });
+  } catch(e) {
+    console.error('[AUTH] Error validar-token:', e.message);
+    res.status(500).json({ ok: false, error: 'Error al validar el link' });
+  }
+});
+
+// POST /resetear-con-token — Recibe token + nueva password, valida, guarda
+router.post('/resetear-con-token', async (req, res) => {
+  const token = String(req.body?.token || '').trim();
+  const password = req.body?.password;
+  if (!token || !password) return res.status(400).json({ ok: false, error: 'Faltan datos' });
+  try {
+    const db = getDb();
+    const row = db.prepare(`
+      SELECT prt.usuario_id, prt.expira_en, prt.usado_en,
+             u.username, u.activo
+      FROM password_reset_tokens prt
+      LEFT JOIN usuarios u ON prt.usuario_id = u.id
+      WHERE prt.token = ?
+    `).get(token);
+    if (!row) return res.status(400).json({ ok: false, error: 'Link inválido' });
+    if (row.usado_en) return res.status(400).json({ ok: false, error: 'Este link ya fue utilizado' });
+    if (new Date(row.expira_en) < new Date()) return res.status(400).json({ ok: false, error: 'Este link expiró' });
+    if (!row.activo) return res.status(400).json({ ok: false, error: 'Cuenta dada de baja' });
+
+    // Validar política de password (misma que setear-password)
+    const error = validatePassword(password, row.username);
+    if (error) return res.status(400).json({ ok: false, error });
+
+    // Hashear y guardar
+    const hash = await bcrypt.hash(password, BCRYPT_ROUNDS);
+    db.prepare("UPDATE usuarios SET password_hash = ?, migrado_a_v2 = 1, debe_cambiar_password = 0 WHERE id = ?")
+      .run(hash, row.usuario_id);
+    // Marcar token como usado
+    db.prepare("UPDATE password_reset_tokens SET usado_en = datetime('now') WHERE token = ?").run(token);
+    console.log('[AUTH] Password reseteada vía mail para usuario_id', row.usuario_id);
+    res.json({ ok: true, mensaje: 'Contraseña actualizada. Ya podés ingresar con tu nueva contraseña.' });
+  } catch(e) {
+    console.error('[AUTH] Error resetear-con-token:', e.message);
+    res.status(500).json({ ok: false, error: 'Error al actualizar la contraseña' });
   }
 });
 
