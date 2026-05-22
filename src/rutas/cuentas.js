@@ -203,8 +203,8 @@ router.post('/', requireAdmin, (req, res) => {
   if (!codigo || !nombre || !seccion_id) {
     return res.status(400).json({ error: 'codigo, nombre y seccion_id son requeridos' });
   }
-  if (!/^\d+\.\d+$/.test(codigo)) {
-    return res.status(400).json({ error: 'codigo debe tener formato S.NN (ej: 1.05)' });
+  if (!/^\d+(\.\d+)+$/.test(codigo)) {
+    return res.status(400).json({ error: 'codigo debe tener formato S.NN o S.NN.NN (ej: 1.05 o 2.02.04)' });
   }
   if (!['resultado', 'patrimonial'].includes(tipo)) {
     return res.status(400).json({ error: 'tipo inválido' });
@@ -246,8 +246,8 @@ router.put('/:id(\\d+)', requireAdmin, (req, res) => {
   const { codigo, nombre, seccion_id, tipo, permite_lote, permite_campania } = req.body || {};
 
   if (codigo && codigo !== cuenta.codigo) {
-    if (!/^\d+\.\d+$/.test(codigo)) {
-      return res.status(400).json({ error: 'codigo debe tener formato S.NN' });
+    if (!/^\d+(\.\d+)+$/.test(codigo)) {
+      return res.status(400).json({ error: 'codigo debe tener formato S.NN o S.NN.NN (ej: 2.02.04)' });
     }
     const otra = db.prepare('SELECT id FROM pa_cuentas WHERE codigo = ? AND id != ?').get(codigo, id);
     if (otra) return res.status(400).json({ error: 'ya existe otra cuenta con ese código' });
