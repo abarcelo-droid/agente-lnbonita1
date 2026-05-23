@@ -20744,6 +20744,33 @@ function _ifcoRenderStep1Preview() {
   }
   html += '</div>';
 
+  // ── BALANCE AGREGADO DE INGRESOS (red de seguridad fila-por-fila puede fallar) ──
+  const balIng = data.balance_ingresos;
+  if (balIng) {
+    const fmt = function(n){ return (n || 0).toLocaleString('es-AR'); };
+    const coincide = balIng.coincide;
+    const diff = balIng.diferencia;
+    const colorTit = coincide ? '#065f46' : (Math.abs(diff) < 50 ? '#92400e' : '#991b1b');
+    const colorBg  = coincide ? '#ecfdf5' : (Math.abs(diff) < 50 ? '#fef3c7' : '#fee2e2');
+    const colorBor = coincide ? '#10b981' : (Math.abs(diff) < 50 ? '#fbbf24' : '#ef4444');
+    const icono    = coincide ? '✓' : '⚠️';
+    const titulo   = coincide ? 'Balance de ingresos: coincide' : 'Balance de ingresos: NO coincide';
+    let detalleDiff = '';
+    if (!coincide) {
+      if (diff > 0) detalleDiff = 'Faltan ' + fmt(Math.abs(diff)) + ' unidades en el sistema (el archivo tiene más).';
+      else          detalleDiff = 'Sobran ' + fmt(Math.abs(diff)) + ' unidades en el sistema (el archivo tiene menos).';
+    }
+    html += '<div style="margin-top:14px;background:' + colorBg + ';border:1px solid ' + colorBor + ';border-radius:8px;padding:12px 14px">' +
+      '<div style="font-size:13px;font-weight:600;color:' + colorTit + ';margin-bottom:6px">' + icono + ' ' + titulo + '</div>' +
+      '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;font-size:12px">' +
+        '<div><div style="color:' + colorTit + ';opacity:0.7;font-size:10px;text-transform:uppercase">Total en archivo IFCO</div><div style="font-weight:700;font-size:18px;color:' + colorTit + '">' + fmt(balIng.total_archivo) + '</div></div>' +
+        '<div><div style="color:' + colorTit + ';opacity:0.7;font-size:10px;text-transform:uppercase">Total en sistema (retiros + pérdidas)</div><div style="font-weight:700;font-size:18px;color:' + colorTit + '">' + fmt(balIng.total_sistema) + '</div></div>' +
+        '<div><div style="color:' + colorTit + ';opacity:0.7;font-size:10px;text-transform:uppercase">Diferencia</div><div style="font-weight:700;font-size:18px;color:' + colorTit + '">' + (diff > 0 ? '+' : '') + fmt(diff) + '</div></div>' +
+      '</div>' +
+      (detalleDiff ? '<div style="margin-top:8px;font-size:11px;color:' + colorTit + '">' + detalleDiff + '</div>' : '') +
+    '</div>';
+  }
+
   document.getElementById('ifco-step1-resumen').innerHTML = html;
 
   // Detalle expandible: tabla con TODOS los no encontrados + selector de acción por fila
