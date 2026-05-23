@@ -4459,7 +4459,7 @@ router.post('/consolidacion-revisar/bulk-resolver', express.json(), function(req
   const resolucion = (req.body?.resolucion || '').toString().slice(0, 500) || null;
   const userId = (req.user && req.user.id) || null;
   try {
-    const stmt = db.prepare("UPDATE ifco_consolidacion_revisar SET resuelto_en = datetime('now','localtime'), resuelto_por = ?, resolucion = ? WHERE id = ? AND resuelto_en IS NULL");
+    const stmt = db.prepare("UPDATE ifco_consolidacion_revisar SET resuelto_en = datetime('now','localtime'), resuelto_por_id = ?, resolucion = ? WHERE id = ? AND resuelto_en IS NULL");
     const tx = db.transaction(function(ids) {
       let n = 0;
       for (const id of ids) { const r = stmt.run(userId, resolucion, id); n += r.changes; }
@@ -4488,6 +4488,90 @@ router.post('/consolidacion-revisar/bulk-borrar', express.json(), function(req, 
     console.log('[IFCO][bulk-borrar]', borrados, 'de', ids.length, 'por usuario_id', req.user.id);
     res.json({ ok: true, borrados: borrados, total_pedidos: ids.length });
   } catch(e) { console.error('[IFCO][bulk-borrar]', e); res.status(500).json({ error: e.message }); }
+});
+
+// POST /consolidacion-revisar/auto-crear — Para pendientes tipo='despacho', si detecta
+// cadena conocida en el detalle, crea el despacho automáticamente y marca el pendiente como resuelto.
+// Body: { ids?: [int] }  // si no se mandan ids, procesa TODOS los pendientes no resueltos
+// Retorna conteo por categoría: creados / saltados (sin cadena) / errores / ya_existian
+router.post('/consolidacion-revisar/auto-crear', express.json(), function(req, res) {
+  const userId = (req.user && req.user.id) || null;
+  const idsFiltro = Array.isArray(req.body?.ids) ? req.body.ids.filter(function(x){ return Number.isInteger(x); }) : null;
+  try {
+    let pendientes;
+    if (idsFiltro && idsFiltro.length > 0) {
+      const placeholders = idsFiltro.map(function(){ return '?'; }).join(',');
+      pendientes = db.prepare(`
+        SELECT id, n_remito, cantidad, detalle, tipo_origen, fecha_archivo
+        FROM ifco_consolidacion_revisar
+        WHERE resuelto_en IS NULL AND tipo_origen = 'despacho' AND id IN (${placeholders})
+      `).all(...idsFiltro);
+    } else {
+      pendientes = db.prepare(`
+        SELECT id, n_remito, cantidad, detalle, tipo_origen, fecha_archivo
+        FROM ifco_consolidacion_revisar
+        WHERE resuelto_en IS NULL AND tipo_origen = 'despacho'
+      `).all();
+    }
+
+    const result = { total: pendientes.length, creados: 0, sin_cadena: 0, ya_existian: 0, errores: [] };
+    const stmtInsertDespacho = db.prepare(`
+      INSERT INTO ifco_remitos_super (
+        n_remito_ifco, fecha_emision, empresa,
+        cantidad_despachada, cantidad_recibida, cantidad_rechazada,
+        estado, fecha_sellado, fecha_presentado,
+        origen, usuario_id, notas
+      ) VALUES (?,?,?,?,?,0,'presentado',?,?,'san_geronimo',?,'Auto-creado desde Pendientes de revisar')
+    `);
+    const stmtMarcarResuelto = db.prepare(`
+      UPDATE ifco_consolidacion_revisar
+      SET resuelto_en = datetime('now','localtime'),
+          resuelto_por_id = ?,
+          resolucion = ?
+      WHERE id = ?
+    `);
+
+    const tx = db.transaction(function() {
+      for (const p of pendientes) {
+        // Limpiar prefijo "[CREAR DESPACHO MANUAL]" si está en el detalle
+        const detalleLimpio = (p.detalle || '').replace(/^\[CREAR DESPACHO MANUAL\]\s*/i, '');
+        const cadena = _matchCadenaIFCO(detalleLimpio);
+        if (!cadena) { result.sin_cadena++; continue; }
+        if (!p.n_remito || !p.cantidad) { result.errores.push({ id: p.id, error: 'Faltan n_remito o cantidad' }); continue; }
+        // ¿Ya existe ese remito en el sistema?
+        const ex = db.prepare("SELECT id FROM ifco_remitos_super WHERE n_remito_ifco = ? AND eliminado_en IS NULL").get(p.n_remito);
+        if (ex) {
+          result.ya_existian++;
+          // Igual marcamos el pendiente como resuelto, porque ya tiene su despacho
+          stmtMarcarResuelto.run(userId, 'Auto: el remito ya existía en el sistema', p.id);
+          continue;
+        }
+        try {
+          stmtInsertDespacho.run(
+            p.n_remito,
+            p.fecha_archivo || null,
+            cadena,
+            parseInt(p.cantidad) || 0,
+            parseInt(p.cantidad) || 0,
+            p.fecha_archivo || null,
+            p.fecha_archivo || null,
+            userId
+          );
+          stmtMarcarResuelto.run(userId, 'Auto-creado: ' + cadena, p.id);
+          result.creados++;
+        } catch(e) {
+          result.errores.push({ id: p.id, n_remito: p.n_remito, error: e.message });
+        }
+      }
+    });
+    tx();
+
+    console.log('[IFCO][auto-crear]', JSON.stringify(result), 'por usuario_id', userId);
+    res.json({ ok: true, ...result });
+  } catch(e) {
+    console.error('[IFCO][auto-crear]', e);
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // Body JSON: {
