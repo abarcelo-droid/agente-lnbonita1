@@ -22,12 +22,15 @@
 const LS_RECIENTES = 'lnb-recientes';
 const LS_DENSITY   = 'lnb-sidebar-density';
 const LS_COLLAPSED = 'lnb-sidebar-collapsed-groups';
+const LS_SOCIEDAD  = 'lnb-sidebar-sociedad';
 const MAX_RECIENTES = 4;
 
-let SIDEBAR_DATA = { grupos: [], modulos: [] };  // cache de la data
-let FAVORITOS = [];                              // array de strings (modulo)
-let RECIENTES = [];                              // array de strings (modulo)
-let MODULO_INDEX = {};                           // modulo -> {label, grupo, sociedad_nombre, ...}
+let SIDEBAR_DATA = { grupos: [], modulos: [] };
+let SOCIEDADES = [];                             // array de {id, nombre, funcion}
+let CURRENT_SOCIEDAD = 'all';                    // 'all' o sociedad_id (number)
+let FAVORITOS = [];
+let RECIENTES = [];
+let MODULO_INDEX = {};
 
 // ═══════════ Util ═══════════
 function escapeHtml(s){
@@ -74,9 +77,10 @@ function pushReciente(modulo){
 
 // ═══════════ Data fetch ═══════════
 async function fetchSidebarData(){
-  const [sidebarResp, favsResp] = await Promise.allSettled([
+  const [sidebarResp, favsResp, socResp] = await Promise.allSettled([
     fetch('/api/org/sidebar',       { credentials: 'same-origin' }).then(r => r.json()),
     fetch('/api/usuario/favoritos', { credentials: 'same-origin' }).then(r => r.json()),
+    fetch('/api/org/sociedades',    { credentials: 'same-origin' }).then(r => r.json()),
   ]);
 
   if (sidebarResp.status !== 'fulfilled' || !sidebarResp.value?.ok){
@@ -97,8 +101,28 @@ async function fetchSidebarData(){
     ? favsResp.value.favoritos.map(f => f.modulo)
     : [];
 
-  RECIENTES = getRecientes().filter(m => MODULO_INDEX[m]);  // limpiar recientes que ya no existen
+  SOCIEDADES = (socResp.status === 'fulfilled' && socResp.value?.ok)
+    ? socResp.value.sociedades
+    : [];
+
+  // Restaurar selección previa
+  const saved = localStorage.getItem(LS_SOCIEDAD);
+  if (saved && saved !== 'all'){
+    const id = parseInt(saved, 10);
+    if (!isNaN(id) && SOCIEDADES.some(s => s.id === id)){
+      CURRENT_SOCIEDAD = id;
+    }
+  }
+
+  RECIENTES = getRecientes().filter(m => MODULO_INDEX[m]);
   return true;
+}
+
+// Helper: ¿este módulo debe mostrarse según el filtro actual de sociedad?
+function shouldShow(m){
+  if (CURRENT_SOCIEDAD === 'all') return true;
+  if (!m.sociedad_id) return true;  // transversales (sin sociedad) siempre
+  return m.sociedad_id === CURRENT_SOCIEDAD;
 }
 
 // ═══════════ Render principal ═══════════
@@ -138,6 +162,9 @@ function buildSidebar(){
       <span class="sb2-kbd">⌘K</span>
     </div>
 
+    <!-- Selector de sociedad -->
+    <div class="sb2-soc" id="sb2-soc"></div>
+
     <!-- Widget Hoy -->
     <div class="sb2-hoy" data-action="hoy">
       <div class="sb2-hoy-icon" id="sb2-hoy-icon">🌤️</div>
@@ -165,11 +192,7 @@ function buildSidebar(){
     <!-- Grupos -->
     <div id="sb2-grupos"></div>
 
-    <!-- LNB APP -->
-    <a class="sb2-app" href="/scout" target="_self">
-      <span style="font-size:14px">📱</span>
-      <span class="sb2-app-text">LNB APP</span>
-    </a>
+    <!-- LNB APP (removido por pedido) -->
 
     <!-- User bar -->
     <div class="sb2-user">
@@ -202,6 +225,7 @@ function buildSidebar(){
   `;
   document.body.appendChild(cmdk);
 
+  renderSocSelector();
   renderFavoritos();
   renderRecientes();
   renderGrupos();
@@ -210,12 +234,95 @@ function buildSidebar(){
   fetchClima();
 }
 
+// ═══════════ Render: Selector de Sociedad ═══════════
+function renderSocSelector(){
+  const wrap = document.getElementById('sb2-soc');
+  if (!wrap || !SOCIEDADES.length){
+    if (wrap) wrap.innerHTML = '';
+    return;
+  }
+
+  const currentLabel = CURRENT_SOCIEDAD === 'all'
+    ? 'Todas las sociedades'
+    : (SOCIEDADES.find(s => s.id === CURRENT_SOCIEDAD)?.nombre || 'Todas las sociedades');
+
+  const FUNC_LABELS = {
+    'productiva':  'Producción',
+    'comercial':   'Comercial',
+    'transporte':  'Transporte',
+    'estructura':  'Familia',
+  };
+  const byFunc = {};
+  for (const s of SOCIEDADES){
+    const k = s.funcion || 'otra';
+    if (!byFunc[k]) byFunc[k] = [];
+    byFunc[k].push(s);
+  }
+
+  let menuHTML = `
+    <div class="sb2-soc-item ${CURRENT_SOCIEDAD === 'all' ? 'active' : ''}" data-soc="all">
+      <span class="check"></span>
+      <span>Todas las sociedades</span>
+    </div>
+  `;
+  const ordenFunc = ['productiva','comercial','transporte','estructura','otra'];
+  for (const k of ordenFunc){
+    if (!byFunc[k]) continue;
+    menuHTML += `<div class="sb2-soc-item divider">${escapeHtml(FUNC_LABELS[k] || k)}</div>`;
+    for (const s of byFunc[k]){
+      const isActive = s.id === CURRENT_SOCIEDAD;
+      menuHTML += `
+        <div class="sb2-soc-item ${isActive ? 'active' : ''}" data-soc="${s.id}">
+          <span class="check"></span>
+          <span>${escapeHtml(s.nombre)}</span>
+        </div>
+      `;
+    }
+  }
+
+  wrap.innerHTML = `
+    <button class="sb2-soc-trigger" data-action="toggle-soc">
+      <span class="soc-ico">🏢</span>
+      <span class="soc-label">${escapeHtml(currentLabel)}</span>
+      <span class="soc-caret">▾</span>
+    </button>
+    <div class="sb2-soc-menu">${menuHTML}</div>
+  `;
+}
+
+function toggleSocMenu(){
+  const trig = document.querySelector('.sb2-soc-trigger');
+  if (trig) trig.classList.toggle('open');
+}
+
+function closeSocMenu(){
+  const trig = document.querySelector('.sb2-soc-trigger');
+  if (trig) trig.classList.remove('open');
+}
+
+function selectSociedad(value){
+  if (value === 'all'){
+    CURRENT_SOCIEDAD = 'all';
+    localStorage.setItem(LS_SOCIEDAD, 'all');
+  } else {
+    const id = parseInt(value, 10);
+    if (isNaN(id)) return;
+    CURRENT_SOCIEDAD = id;
+    localStorage.setItem(LS_SOCIEDAD, String(id));
+  }
+  closeSocMenu();
+  renderSocSelector();
+  renderFavoritos();
+  renderRecientes();
+  renderGrupos();
+}
+
 // ═══════════ Render: Favoritos ═══════════
 function renderFavoritos(){
   const wrap = document.getElementById('sb2-favoritos-wrap');
   if (!wrap) return;
-  // Si no hay favoritos, mostrar estado vacío educativo
-  if (!FAVORITOS.length){
+  const favs = FAVORITOS.map(m => MODULO_INDEX[m]).filter(m => m && shouldShow(m));
+  if (!favs.length){
     wrap.innerHTML = `
       <div class="sb2-fastlane fav">
         <div class="sb2-group-sec">
@@ -223,7 +330,7 @@ function renderFavoritos(){
         </div>
         <div class="sb2-empty-fav">
           <span class="star-pulse">★</span>
-          <span>Marcá tus secciones más usadas con la estrella para acceso rápido desde acá.</span>
+          <span>${FAVORITOS.length ? 'No hay favoritos en esta sociedad. Cambiá a “Todas” para verlos.' : 'Marcá tus secciones más usadas con la estrella para acceso rápido desde acá.'}</span>
         </div>
       </div>
     `;
@@ -233,13 +340,9 @@ function renderFavoritos(){
     <div class="sb2-fastlane fav">
       <div class="sb2-group-sec">
         <span class="sb2-label">⭐ Favoritos</span>
-        <span class="badge-count">${FAVORITOS.length}</span>
+        <span class="badge-count">${favs.length}</span>
       </div>
-      ${FAVORITOS.map(modulo => {
-        const m = MODULO_INDEX[modulo];
-        if (!m) return '';
-        return niHTML(m, true);
-      }).join('')}
+      ${favs.map(m => niHTML(m, true)).join('')}
     </div>
   `;
 }
@@ -248,8 +351,10 @@ function renderFavoritos(){
 function renderRecientes(){
   const wrap = document.getElementById('sb2-recientes-wrap');
   if (!wrap) return;
-  // No mostrar items que ya están en favoritos
-  const recientesFiltrados = RECIENTES.filter(m => !FAVORITOS.includes(m));
+  const recientesFiltrados = RECIENTES
+    .filter(m => !FAVORITOS.includes(m))
+    .map(m => MODULO_INDEX[m])
+    .filter(m => m && shouldShow(m));
   if (!recientesFiltrados.length){ wrap.innerHTML = ''; return; }
 
   wrap.innerHTML = `
@@ -258,11 +363,7 @@ function renderRecientes(){
         <span class="sb2-label">⏱ Recientes</span>
         <span class="badge-count">${recientesFiltrados.length}</span>
       </div>
-      ${recientesFiltrados.map(modulo => {
-        const m = MODULO_INDEX[modulo];
-        if (!m) return '';
-        return niHTML(m, false);
-      }).join('')}
+      ${recientesFiltrados.map(m => niHTML(m, false)).join('')}
     </div>
   `;
 }
@@ -273,7 +374,16 @@ function renderGrupos(){
   if (!wrap) return;
   const collapsed = getCollapsedGroups();
 
-  wrap.innerHTML = SIDEBAR_DATA.grupos.map(g => {
+  const gruposFiltrados = SIDEBAR_DATA.grupos
+    .map(g => ({ ...g, items: g.items.filter(shouldShow) }))
+    .filter(g => g.items.length > 0);
+
+  if (!gruposFiltrados.length){
+    wrap.innerHTML = `<div style="padding:14px 16px;font-size:11.5px;color:rgba(255,255,255,.5);text-align:center">No hay módulos para esta sociedad.</div>`;
+    return;
+  }
+
+  wrap.innerHTML = gruposFiltrados.map(g => {
     const isCollapsed = collapsed.includes(g.grupo);
     return `
       <div class="sb2-grp ${isCollapsed ? 'collapsed' : ''}" data-grp="${escapeHtml(g.grupo)}">
@@ -447,6 +557,15 @@ function attachEventListeners(){
       if (action === 'hoy')      { irAClima(); return; }
       if (action === 'user-menu'){ openUserMenu(); return; }
       if (action === 'cog')      { openUserMenu(); return; }
+      if (action === 'toggle-soc'){ e.preventDefault(); e.stopPropagation(); toggleSocMenu(); return; }
+    }
+
+    // Item del selector de sociedad
+    const socItem = e.target.closest('.sb2-soc-item[data-soc]');
+    if (socItem){
+      e.preventDefault();
+      selectSociedad(socItem.dataset.soc);
+      return;
     }
 
     // Star (favorito)
@@ -591,34 +710,51 @@ function irAClima(){
   else if (MODULO_INDEX['pa-clima']) navigateTo('pa-clima');
 }
 
-// ═══════════ Clima ═══════════
+// ═══════════ Clima (proxy a SMN) ═══════════
 async function fetchClima(){
   try {
-    const r = await fetch('/api/pa/clima/actual', { credentials: 'same-origin' });
-    if (!r.ok) return;
-    const data = await r.json();
-    if (!data?.ok) return;
-    const c = data.clima || data;
-    const temp = c.temperatura ?? c.temp ?? c.t;
-    if (temp != null) document.getElementById('sb2-hoy-temp').textContent = Math.round(temp) + '°';
-    const icon = c.emoji || climaEmoji(c.condicion || c.descripcion || '');
-    if (icon) document.getElementById('sb2-hoy-icon').textContent = icon;
-    const ubic = c.ubicacion || c.localidad || 'Carpintería';
-    const sub = document.getElementById('sb2-hoy-sub');
-    let html = escapeHtml(ubic);
-    if (c.alerta || data.alerta){
-      const a = c.alerta || data.alerta;
-      html += `<span class="sb2-alert">⚠ ${escapeHtml(a)}</span>`;
+    const r = await fetch('/api/pa/clima/smn', { credentials: 'same-origin' });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const json = await r.json();
+    if (!json?.ok || !json.data) return;
+
+    const d = json.data;
+    const w = d.weather || {};
+
+    // SMN devuelve: temp (°C), humidity (%), wind_speed (km/h), wind_deg, description, ...
+    const temp = w.temp ?? w.temperatura;
+    const desc = w.description || w.descripcion || '';
+
+    if (temp != null && !isNaN(temp)){
+      const el = document.getElementById('sb2-hoy-temp');
+      if (el) el.textContent = Math.round(temp) + '°';
     }
-    sub.innerHTML = html;
-  } catch(_) { /* sin clima — se queda el placeholder */ }
+    const iconEl = document.getElementById('sb2-hoy-icon');
+    if (iconEl) iconEl.textContent = climaEmoji(desc);
+
+    const sub = document.getElementById('sb2-hoy-sub');
+    if (sub){
+      const ubic = d.estacion || 'Carpintería';
+      // Capitalizar descripción y mostrarla bonita
+      const descLabel = desc ? (desc.charAt(0).toUpperCase() + desc.slice(1).toLowerCase()) : '';
+      let html = escapeHtml(ubic);
+      if (descLabel) html += '<span class="sb2-alert" style="color:rgba(255,255,255,.55);font-weight:600">' + escapeHtml(descLabel) + '</span>';
+      sub.innerHTML = html;
+    }
+  } catch(e) {
+    console.warn('[SB2] No se pudo cargar el clima:', e.message);
+    // Se queda con el placeholder "—° / Carpintería"
+  }
 }
 function climaEmoji(desc){
   const d = (desc || '').toLowerCase();
-  if (d.includes('lluv') || d.includes('rain'))   return '🌧️';
-  if (d.includes('nubl') || d.includes('cloud'))  return '⛅';
-  if (d.includes('sol')  || d.includes('clear') || d.includes('despej')) return '☀️';
-  if (d.includes('nieve')|| d.includes('snow'))   return '❄️';
+  if (d.includes('lluv') || d.includes('rain') || d.includes('lluvi'))   return '🌧️';
+  if (d.includes('tormenta') || d.includes('storm'))                       return '⛈️';
+  if (d.includes('nubl') || d.includes('cloud'))                           return '⛅';
+  if (d.includes('parc') || d.includes('algo nub'))                        return '⛅';
+  if (d.includes('sol')  || d.includes('clear') || d.includes('despej'))   return '☀️';
+  if (d.includes('nieve')|| d.includes('snow'))                            return '❄️';
+  if (d.includes('niebla') || d.includes('fog') || d.includes('bruma'))    return '🌫️';
   return '🌤️';
 }
 
@@ -719,6 +855,13 @@ document.addEventListener('keydown', e => {
       navigateTo(it.dataset.go);
       closeCmdK();
     }
+  }
+});
+
+// Cerrar selector de sociedad cuando se clickea fuera
+document.addEventListener('click', e => {
+  if (!e.target.closest('.sb2-soc')){
+    closeSocMenu();
   }
 });
 
