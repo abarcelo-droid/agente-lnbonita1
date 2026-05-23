@@ -86,12 +86,11 @@
 }
 .sb2-brand-text{ flex:1; min-width:0 }
 .sb2-brand-name{
-  /* Nunito 800 (no Archivo Black) — para que "Niña" se lea correctamente,
-     ya que Archivo Black renderiza la "i" sin punto visible. */
-  font-family: var(--sb2-sans);
-  font-weight: 800;
-  font-size: 15px;
-  letter-spacing: -.005em;
+  /* Vuelve a Archivo Black, como en el diseño original */
+  font-family: var(--sb2-display);
+  font-weight: 400;
+  font-size: 14.5px;
+  letter-spacing: .005em;
   line-height: 1.1;
   color: #fff;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
@@ -166,6 +165,81 @@
   color: var(--sb2-warn-soft); font-weight: 700;
 }
 .sb2-hoy-sub .sb2-alert::before{ content: "·"; margin: 0 5px; opacity: .4 }
+
+/* ═══════════ Selector de Sociedad ═══════════ */
+.sb2-soc{
+  margin: 10px var(--sb2-pad-x) 0;
+  position: relative;
+  font-family: var(--sb2-ui);
+}
+.sb2-soc-trigger{
+  display: flex; align-items: center; gap: 8px;
+  width: 100%;
+  padding: 9px 12px;
+  background: rgba(255,255,255,.06);
+  border: 1px solid rgba(255,255,255,.1);
+  border-radius: 8px;
+  color: rgba(255,255,255,.85);
+  font-size: 12px; font-weight: 600;
+  cursor: pointer;
+  font-family: var(--sb2-ui);
+  transition: all .12s;
+  text-align: left;
+}
+.sb2-soc-trigger:hover{ background: rgba(255,255,255,.1); border-color: rgba(255,255,255,.18) }
+.sb2-soc-trigger.open{ background: rgba(255,255,255,.12); border-color: var(--sb2-gold) }
+.sb2-soc-trigger .soc-ico{ font-size: 12px; flex-shrink: 0; opacity: .8 }
+.sb2-soc-trigger .soc-label{
+  flex: 1; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.sb2-soc-trigger .soc-caret{
+  font-size: 9px; opacity: .55;
+  transition: transform .15s;
+  flex-shrink: 0;
+}
+.sb2-soc-trigger.open .soc-caret{ transform: rotate(180deg) }
+
+.sb2-soc-menu{
+  display: none;
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0; right: 0;
+  background: #1A2A40;
+  border: 1px solid rgba(255,255,255,.12);
+  border-radius: 10px;
+  padding: 4px;
+  z-index: 50;
+  box-shadow: 0 12px 32px rgba(0,0,0,.4);
+  max-height: 320px; overflow-y: auto;
+}
+.sb2-soc-trigger.open + .sb2-soc-menu{ display: block }
+.sb2-soc-item{
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  color: rgba(255,255,255,.8);
+  font-size: 12px; font-weight: 600;
+  cursor: pointer;
+  font-family: var(--sb2-ui);
+}
+.sb2-soc-item:hover{ background: rgba(255,255,255,.06); color: #fff }
+.sb2-soc-item .check{ width: 14px; flex-shrink: 0; color: var(--sb2-gold); font-weight: 800 }
+.sb2-soc-item .check::before{ content: ""; }
+.sb2-soc-item.active .check::before{ content: "✓" }
+.sb2-soc-item.divider{
+  padding: 4px 10px;
+  font-size: 9px; font-weight: 800; letter-spacing: .14em;
+  color: rgba(255,255,255,.4);
+  text-transform: uppercase;
+  pointer-events: none;
+  border-top: 1px solid rgba(255,255,255,.08);
+  margin-top: 4px; padding-top: 8px;
+}
+.sb2-soc-item.divider:first-child{ border-top: none; margin-top: 0 }
+
+.shell[data-density="compact"] .sb2-soc,
+.sb2[data-density="compact"] .sb2-soc{ display: none }
 
 /* ═══════════ Fast lanes wrapper (Favoritos + Recientes) ═══════════ */
 .sb2-fastlane{
@@ -357,27 +431,8 @@
 .sb2-grp[data-grp="Ventas"]       { border-left-color: var(--sb2-acc-ventas) }
 .sb2-grp[data-grp="Retail"]       { border-left-color: var(--sb2-acc-retail) }
 
-/* ═══════════ LNB APP button ═══════════ */
-.sb2-app{
-  margin: 12px var(--sb2-pad-x) 8px;
-  display: flex; align-items: center; justify-content: center;
-  gap: 8px;
-  padding: 10px 14px;
-  background: linear-gradient(135deg, #059669 0%, #047857 100%);
-  border: 2px solid rgba(255,255,255,.15);
-  border-radius: 10px;
-  color: #fff; text-decoration: none;
-  font-weight: 800; font-size: 12.5px;
-  letter-spacing: .04em;
-  font-family: var(--sb2-sans);
-  box-shadow: 0 4px 12px rgba(5,150,105,.3);
-  transition: transform .15s, box-shadow .15s;
-  cursor: pointer;
-}
-.sb2-app:hover{
-  transform: translateY(-1px);
-  box-shadow: 0 6px 18px rgba(5,150,105,.45);
-}
+/* ═══════════ LNB APP button (removido del sidebar) ═══════════ */
+.sb2-app{ display: none !important }
 
 /* ═══════════ User bar (footer) ═══════════ */
 .sb2-user{
