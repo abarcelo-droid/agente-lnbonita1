@@ -4451,6 +4451,45 @@ router.delete('/consolidacion-revisar/:id', function(req, res) {
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
+// POST /consolidacion-revisar/bulk-resolver — marcar varios como resueltos
+// Body: { ids: [int], resolucion?: string }
+router.post('/consolidacion-revisar/bulk-resolver', express.json(), function(req, res) {
+  const ids = Array.isArray(req.body?.ids) ? req.body.ids.filter(function(x){ return Number.isInteger(x); }) : [];
+  if (ids.length === 0) return res.status(400).json({ error: 'ids requerido (array de enteros)' });
+  const resolucion = (req.body?.resolucion || '').toString().slice(0, 500) || null;
+  const userId = (req.user && req.user.id) || null;
+  try {
+    const stmt = db.prepare("UPDATE ifco_consolidacion_revisar SET resuelto_en = datetime('now','localtime'), resuelto_por = ?, resolucion = ? WHERE id = ? AND resuelto_en IS NULL");
+    const tx = db.transaction(function(ids) {
+      let n = 0;
+      for (const id of ids) { const r = stmt.run(userId, resolucion, id); n += r.changes; }
+      return n;
+    });
+    const actualizados = tx(ids);
+    console.log('[IFCO][bulk-resolver]', actualizados, 'de', ids.length, 'por usuario_id', userId);
+    res.json({ ok: true, actualizados: actualizados, total_pedidos: ids.length });
+  } catch(e) { console.error('[IFCO][bulk-resolver]', e); res.status(500).json({ error: e.message }); }
+});
+
+// POST /consolidacion-revisar/bulk-borrar — eliminar varios (admin only)
+// Body: { ids: [int] }
+router.post('/consolidacion-revisar/bulk-borrar', express.json(), function(req, res) {
+  if (!req.user || req.user.rol !== 'admin') return res.status(403).json({ error: 'Solo admin' });
+  const ids = Array.isArray(req.body?.ids) ? req.body.ids.filter(function(x){ return Number.isInteger(x); }) : [];
+  if (ids.length === 0) return res.status(400).json({ error: 'ids requerido (array de enteros)' });
+  try {
+    const stmt = db.prepare("DELETE FROM ifco_consolidacion_revisar WHERE id = ?");
+    const tx = db.transaction(function(ids) {
+      let n = 0;
+      for (const id of ids) { const r = stmt.run(id); n += r.changes; }
+      return n;
+    });
+    const borrados = tx(ids);
+    console.log('[IFCO][bulk-borrar]', borrados, 'de', ids.length, 'por usuario_id', req.user.id);
+    res.json({ ok: true, borrados: borrados, total_pedidos: ids.length });
+  } catch(e) { console.error('[IFCO][bulk-borrar]', e); res.status(500).json({ error: e.message }); }
+});
+
 // Body JSON: {
 //   despachos: { ids_marcar: [int], fechas_por_id: {id:'YYYY-MM-DD'}, crear: [{n_remito_sistema, fecha, empresa, cantidad}] },
 //   ingresos:  { ids_marcar: [int], crear: [{n_remito_sistema, fecha, cantidad, sucursal_ifco, modelo}] },
