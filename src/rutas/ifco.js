@@ -4574,6 +4574,52 @@ router.post('/consolidacion-revisar/auto-crear', express.json(), function(req, r
   }
 });
 
+// POST /consolidar/auto-crear-inline — Crear despachos directamente sin pasar por Pendientes.
+// Usado por el wizard de consolidación: cuando elige "crear_despacho" Y hay cadena reconocida,
+// se llama acá en vez de mandarlo a la tabla de Pendientes.
+// Body: { items: [{ n_remito, cantidad, detalle, fecha }] }
+router.post('/consolidar/auto-crear-inline', express.json(), function(req, res) {
+  const userId = (req.user && req.user.id) || null;
+  const items = Array.isArray(req.body?.items) ? req.body.items : [];
+  if (items.length === 0) return res.json({ ok: true, total: 0, creados: 0, sin_cadena: 0, ya_existian: 0, errores: [] });
+  try {
+    const result = { total: items.length, creados: 0, sin_cadena: 0, ya_existian: 0, errores: [] };
+    const stmtInsert = db.prepare(`
+      INSERT INTO ifco_remitos_super (
+        n_remito_ifco, fecha_emision, empresa,
+        cantidad_despachada, cantidad_recibida, cantidad_rechazada,
+        estado, fecha_sellado, fecha_presentado,
+        origen, usuario_id, notas
+      ) VALUES (?,?,?,?,?,0,'presentado',?,?,'san_geronimo',?,'Auto-creado desde consolidación IFCO')
+    `);
+    const tx = db.transaction(function() {
+      for (const it of items) {
+        const cadena = _matchCadenaIFCO(it.detalle);
+        if (!cadena) { result.sin_cadena++; continue; }
+        if (!it.n_remito || !it.cantidad) { result.errores.push({ n_remito: it.n_remito, error: 'Faltan datos' }); continue; }
+        const ex = db.prepare("SELECT id FROM ifco_remitos_super WHERE n_remito_ifco = ? AND eliminado_en IS NULL").get(it.n_remito);
+        if (ex) { result.ya_existian++; continue; }
+        try {
+          stmtInsert.run(
+            it.n_remito, it.fecha || null, cadena,
+            parseInt(it.cantidad) || 0, parseInt(it.cantidad) || 0,
+            it.fecha || null, it.fecha || null, userId
+          );
+          result.creados++;
+        } catch(e) {
+          result.errores.push({ n_remito: it.n_remito, error: e.message });
+        }
+      }
+    });
+    tx();
+    console.log('[IFCO][auto-crear-inline]', JSON.stringify(result), 'por usuario_id', userId);
+    res.json({ ok: true, ...result });
+  } catch(e) {
+    console.error('[IFCO][auto-crear-inline]', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // Body JSON: {
 //   despachos: { ids_marcar: [int], fechas_por_id: {id:'YYYY-MM-DD'}, crear: [{n_remito_sistema, fecha, empresa, cantidad}] },
 //   ingresos:  { ids_marcar: [int], crear: [{n_remito_sistema, fecha, cantidad, sucursal_ifco, modelo}] },
