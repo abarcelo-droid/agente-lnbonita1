@@ -2722,6 +2722,35 @@ router.get('/manual', function(req, res) {
   res.status(404).json({ error: 'Manual no disponible. El admin debe subirlo al servidor en src/static/Manual_Modulo_IFCO.pdf' });
 });
 
+// ─────────────────────────────────────────────────────────────────────────────
+// ENDPOINT TEMPORAL — corregir fecha de un remito mal cargado
+// Solo admin. Body: { n_remito_ifco, fecha_nueva (YYYY-MM-DD) }
+// Una vez corregidos los casos puntuales, este endpoint se puede borrar.
+// ─────────────────────────────────────────────────────────────────────────────
+router.post('/admin/fix-fecha-despacho', function(req, res) {
+  if (!req.user || req.user.rol !== 'admin') {
+    return res.status(403).json({ ok: false, error: 'Solo admin' });
+  }
+  const { n_remito_ifco, fecha_nueva } = req.body || {};
+  if (!n_remito_ifco || !fecha_nueva) {
+    return res.status(400).json({ ok: false, error: 'Faltan n_remito_ifco o fecha_nueva' });
+  }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha_nueva)) {
+    return res.status(400).json({ ok: false, error: 'fecha_nueva debe ser YYYY-MM-DD' });
+  }
+  try {
+    const row = db.prepare("SELECT id, n_remito_ifco, fecha_emision, estado FROM ifco_remitos_super WHERE n_remito_ifco = ?").get(n_remito_ifco);
+    if (!row) return res.status(404).json({ ok: false, error: 'Remito no encontrado' });
+    const fechaVieja = row.fecha_emision;
+    db.prepare("UPDATE ifco_remitos_super SET fecha_emision = ? WHERE id = ?").run(fecha_nueva, row.id);
+    console.log(`[IFCO][admin][fix-fecha] Remito ${n_remito_ifco} (id ${row.id}): ${fechaVieja} → ${fecha_nueva} por usuario ${req.user.username || req.user.email}`);
+    return res.json({ ok: true, id: row.id, n_remito_ifco: row.n_remito_ifco, fecha_anterior: fechaVieja, fecha_nueva: fecha_nueva, estado: row.estado });
+  } catch(e) {
+    console.error('[IFCO][admin][fix-fecha]', e);
+    return res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
 // ════════════════════════════════════════════════════════════════════════════
 // RESUMEN — stocks calculados + alertas + saldos por contraparte
 // ════════════════════════════════════════════════════════════════════════════
