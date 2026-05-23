@@ -4203,6 +4203,28 @@ router.post('/consolidar/preview', upload.single('archivo'), async function(req,
       'ingresos[a/ya/no]=', ing.a_marcar.length, ing.ya_consolidados.length, ing.no_encontrados.length,
       'r22[a/ya/no]=', r22out.a_marcar.length, r22out.ya_consolidados.length, r22out.no_encontrados.length);
 
+    // ── BALANCE AGREGADO DE INGRESOS (red de seguridad) ─────────────────────
+    // Suma todo lo que el archivo dice que ingresó (devoluciones de cajas vacías),
+    // contra el total de retiros + pérdidas en el sistema. Útil cuando el match
+    // fila-por-fila falla por diferencias de numeración entre IFCO y sistema.
+    const sumArr = function(arr, key) {
+      return (arr || []).reduce(function(s, x){ return s + (parseInt(x[key]) || 0); }, 0);
+    };
+    const totalArchivoIng = sumArr(parsed.ingresos, 'cantidad');
+    // El total del sistema lo tomamos sumando los movimientos que tenemos en el índice
+    const totalSistemaIng = (function(){
+      let total = 0;
+      for (const k in idxIngRetiro)  total += (parseInt(idxIngRetiro[k].cantidad)  || 0);
+      for (const k in idxIngPerdida) total += (parseInt(idxIngPerdida[k].cantidad) || 0);
+      return total;
+    })();
+    const balanceIng = {
+      total_archivo:  totalArchivoIng,
+      total_sistema:  totalSistemaIng,
+      diferencia:     totalArchivoIng - totalSistemaIng,
+      coincide:       totalArchivoIng === totalSistemaIng
+    };
+
     res.json({
       ok: true,
       totales: {
@@ -4212,7 +4234,8 @@ router.post('/consolidar/preview', upload.single('archivo'), async function(req,
       },
       despachos: desp,
       ingresos:  ing,
-      r22:       r22out
+      r22:       r22out,
+      balance_ingresos: balanceIng
     });
   } catch(e) {
     console.error('[IFCO][consolidar/preview] EXCEPCION:', e);
