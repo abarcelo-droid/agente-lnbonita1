@@ -21154,14 +21154,23 @@ async function ifcoConsolCargarRevisar() {
   if (!cont) return;
   const incl = document.getElementById('ifco-rev-incluir-resueltos');
   const incluir = incl && incl.checked;
+  const isAdmin = (LNB_USER && LNB_USER.rol === 'admin');
   try {
     const rows = await _ifcoFetch('/api/ifco/consolidacion-revisar' + (incluir ? '?incluir_resueltos=true' : ''));
     if (!rows || rows.length === 0) {
       cont.innerHTML = '<div style="font-size:12px;color:var(--mut);padding:8px">' + (incluir ? 'Sin pendientes ni resueltos' : '✓ Sin pendientes') + '</div>';
       return;
     }
-    let html = '<table style="width:100%;font-size:12px;border-collapse:collapse">';
+    // Barra de acciones masivas (encima de la tabla)
+    let html = '<div id="ifco-rev-bulk-bar" style="display:flex;gap:8px;align-items:center;padding:6px 4px;margin-bottom:6px;font-size:12px">' +
+                 '<span id="ifco-rev-sel-count" style="color:var(--mut)">Ningún registro seleccionado</span>' +
+                 '<div style="flex:1"></div>' +
+                 '<button id="ifco-rev-btn-resolver" class="btn bo bs" style="font-size:11px;padding:3px 10px" onclick="ifcoConsolBulkResolver()" disabled>✓ Marcar resueltos</button>' +
+                 (isAdmin ? '<button id="ifco-rev-btn-borrar" class="btn bo bs" style="font-size:11px;padding:3px 10px;color:#991b1b" onclick="ifcoConsolBulkBorrar()" disabled>🗑️ Borrar</button>' : '') +
+               '</div>';
+    html += '<table style="width:100%;font-size:12px;border-collapse:collapse">';
     html += '<thead><tr style="color:var(--mut);font-size:10px;text-transform:uppercase;border-bottom:1px solid var(--bor)">' +
+            '<th style="text-align:center;padding:6px 4px;width:28px"><input type="checkbox" id="ifco-rev-chk-all" onclick="ifcoConsolToggleAll(this.checked)"></th>' +
             '<th style="text-align:left;padding:6px 8px">Marcado</th>' +
             '<th style="text-align:left;padding:6px 8px">N° Remito</th>' +
             '<th style="text-align:left;padding:6px 8px">Detalle</th>' +
@@ -21172,8 +21181,8 @@ async function ifcoConsolCargarRevisar() {
             '</tr></thead><tbody>';
     rows.forEach(function(r){
       const resuelto = r.resuelto_en != null;
-      const isAdmin = (LNB_USER && LNB_USER.rol === 'admin');
-      html += '<tr style="border-bottom:1px solid #f3f4f6;' + (resuelto ? 'opacity:0.55' : '') + '">' +
+      html += '<tr data-rev-id="' + r.id + '" data-resuelto="' + (resuelto ? '1' : '0') + '" style="border-bottom:1px solid #f3f4f6;' + (resuelto ? 'opacity:0.55' : '') + '">' +
+              '<td style="text-align:center;padding:6px 4px"><input type="checkbox" class="ifco-rev-chk" data-id="' + r.id + '" onclick="ifcoConsolActualizarSel()"></td>' +
               '<td style="padding:6px 8px;color:var(--mut);font-size:11px">' + _ifcoFecha(r.marcado_en) + '</td>' +
               '<td style="padding:6px 8px;font-family:monospace">' + _ifcoEsc(r.n_remito || '—') + '</td>' +
               '<td style="padding:6px 8px">' + _ifcoEsc(r.detalle || '') + '</td>' +
@@ -21195,6 +21204,74 @@ async function ifcoConsolCargarRevisar() {
   } catch(e) {
     cont.innerHTML = '<div style="color:#991b1b;padding:8px">Error: ' + _ifcoEsc(e.message) + '</div>';
   }
+}
+
+// Marca/desmarca todas las filas (solo las no-resueltas si hay incluir_resueltos)
+function ifcoConsolToggleAll(checked) {
+  document.querySelectorAll('.ifco-rev-chk').forEach(function(cb){ cb.checked = checked; });
+  ifcoConsolActualizarSel();
+}
+
+// Recolecta IDs seleccionados y actualiza la barra de acciones
+function ifcoConsolGetSeleccionados() {
+  const ids = [];
+  document.querySelectorAll('.ifco-rev-chk:checked').forEach(function(cb){
+    const id = parseInt(cb.dataset.id, 10);
+    if (Number.isInteger(id)) ids.push(id);
+  });
+  return ids;
+}
+
+function ifcoConsolActualizarSel() {
+  const ids = ifcoConsolGetSeleccionados();
+  const lbl = document.getElementById('ifco-rev-sel-count');
+  const btnR = document.getElementById('ifco-rev-btn-resolver');
+  const btnB = document.getElementById('ifco-rev-btn-borrar');
+  if (lbl) lbl.textContent = ids.length === 0 ? 'Ningún registro seleccionado' : (ids.length + ' seleccionado' + (ids.length > 1 ? 's' : ''));
+  if (btnR) btnR.disabled = ids.length === 0;
+  if (btnB) btnB.disabled = ids.length === 0;
+  // Sincronizar el "checkbox all" si todos están tildados
+  const chkAll = document.getElementById('ifco-rev-chk-all');
+  const total = document.querySelectorAll('.ifco-rev-chk').length;
+  if (chkAll) chkAll.checked = (total > 0 && ids.length === total);
+}
+
+async function ifcoConsolBulkResolver() {
+  const ids = ifcoConsolGetSeleccionados();
+  if (ids.length === 0) return;
+  // Filtrar ya resueltos (no tiene sentido marcarlos de nuevo)
+  const idsValidos = ids.filter(function(id){
+    const tr = document.querySelector('tr[data-rev-id="' + id + '"]');
+    return tr && tr.dataset.resuelto === '0';
+  });
+  if (idsValidos.length === 0) { alert('Los registros seleccionados ya están resueltos'); return; }
+  if (!confirm('¿Marcar ' + idsValidos.length + ' registro' + (idsValidos.length > 1 ? 's' : '') + ' como resuelto' + (idsValidos.length > 1 ? 's' : '') + '?')) return;
+  const resolucion = prompt('¿Cómo se resolvieron estos registros? (opcional, queda en log)');
+  if (resolucion === null) return; // canceló
+  try {
+    const r = await _ifcoFetch('/api/ifco/consolidacion-revisar/bulk-resolver', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids: idsValidos, resolucion: resolucion || null })
+    });
+    alert('✓ Resueltos: ' + (r.actualizados || 0));
+    ifcoConsolCargarRevisar();
+  } catch(e) { alert('Error: ' + e.message); }
+}
+
+async function ifcoConsolBulkBorrar() {
+  const ids = ifcoConsolGetSeleccionados();
+  if (ids.length === 0) return;
+  if (!confirm('¿Borrar definitivamente ' + ids.length + ' registro' + (ids.length > 1 ? 's' : '') + ' de la lista de pendientes? Esta acción no se puede deshacer.')) return;
+  try {
+    const r = await _ifcoFetch('/api/ifco/consolidacion-revisar/bulk-borrar', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids: ids })
+    });
+    alert('🗑️ Borrados: ' + (r.borrados || 0));
+    ifcoConsolCargarRevisar();
+  } catch(e) { alert('Error: ' + e.message); }
 }
 
 async function ifcoConsolResolverRevisar(id) {
