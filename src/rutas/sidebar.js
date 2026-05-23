@@ -33,7 +33,7 @@ const requireAuth = (req, res, next) => {
 // ═══════════ GET /api/org/sidebar ═══════════
 // Devuelve la estructura del sidebar para el usuario actual.
 // Cualquier autenticado puede consultarlo. Filtra los ocultos.
-router.get('/sidebar', requireAuth, (req, res) => {
+router.get('/org/sidebar', requireAuth, (req, res) => {
   try {
     const modulos = db().prepare(`
       SELECT m.modulo, m.label, m.grupo, m.sociedad_id, m.area_id, m.tipo, m.orden,
