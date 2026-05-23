@@ -20749,10 +20749,17 @@ function _ifcoRenderStep1Preview() {
   // Detalle expandible: tabla con TODOS los no encontrados + selector de acción por fila
   let detHtml = '';
   const totalNoEnc = desp.no_encontrados.length + ing.no_encontrados.length + r22.no_encontrados.length;
+  const conCadena = desp.no_encontrados.filter(function(x){ return !!x.cadena_sugerida; }).length;
   if (totalNoEnc > 0) {
     detHtml += '<div style="margin-top:14px;background:#fef3c7;border:1px solid #fcd34d;border-radius:8px;padding:12px 14px">';
     detHtml += '<div style="font-size:13px;font-weight:600;color:#78350f;margin-bottom:4px">⚠️ ' + totalNoEnc + ' registro(s) en IFCO no están en el sistema</div>';
-    detHtml += '<div style="font-size:11px;color:#78350f;margin-bottom:10px">Para cada uno elegí qué hacer. La acción se aplica al confirmar el paso 2. Por defecto: marcar para revisar.</div>';
+    detHtml += '<div style="font-size:11px;color:#78350f;margin-bottom:10px">Para cada uno elegí qué hacer. La acción se aplica al confirmar el paso 2.</div>';
+    if (conCadena > 0) {
+      detHtml += '<div style="background:#d1fae5;border-left:3px solid #059669;border-radius:4px;padding:8px 12px;margin-bottom:10px;font-size:11px;color:#065f46">';
+      detHtml += '<strong>🪄 ' + conCadena + ' despacho(s)</strong> con cadena reconocida vienen preseleccionados como "Crear despacho" (resaltados en verde). ';
+      detHtml += 'Si querés cambiarlos a otra acción, hacelo en el dropdown.';
+      detHtml += '</div>';
+    }
 
     detHtml += '<table style="width:100%;font-size:12px;border-collapse:collapse;background:#fff;border-radius:6px;overflow:hidden">';
     detHtml += '<thead><tr style="background:#fde68a;color:#78350f;font-size:10px;text-transform:uppercase">';
@@ -20765,17 +20772,30 @@ function _ifcoRenderStep1Preview() {
 
     const renderRow = function(x, tipoOrigen, idx){
       const key = tipoOrigen + '_' + idx;
-      return '<tr style="border-top:1px solid #fde68a">' +
+      // Si tiene cadena reconocida (Carrefour, Coto, etc), preseleccionar "crear_despacho"
+      // y pintar la fila con un highlight verde para indicar auto-crear.
+      const tieneCadena = !!x.cadena_sugerida;
+      const accionDefault = tieneCadena ? 'crear_despacho' : 'revisar';
+      const rowStyle = tieneCadena
+        ? 'border-top:1px solid #fde68a;background:#ecfdf5'
+        : 'border-top:1px solid #fde68a';
+      const selectStyle = tieneCadena
+        ? 'font-size:11px;padding:3px 6px;border-radius:5px;border:1px solid #059669;background:#d1fae5;font-weight:600'
+        : 'font-size:11px;padding:3px 6px;border-radius:5px;border:1px solid #d1d5db;background:#fff';
+      const detalleHtml = tieneCadena
+        ? _ifcoEsc(x.detalle || '') + ' <span style="background:#10b981;color:#fff;font-size:9px;padding:1px 6px;border-radius:4px;margin-left:4px">🪄 ' + _ifcoEsc(x.cadena_sugerida) + '</span>'
+        : _ifcoEsc(x.detalle || '');
+      return '<tr style="' + rowStyle + '">' +
         '<td style="padding:6px 8px;font-family:monospace">' + _ifcoEsc(x.n_remito_archivo || x.n_remito || '') + '</td>' +
-        '<td style="padding:6px 8px">' + _ifcoEsc(x.detalle || '') + '</td>' +
+        '<td style="padding:6px 8px">' + detalleHtml + '</td>' +
         '<td style="padding:6px 8px;text-align:right;font-weight:600">' + _ifcoFmt(x.cantidad) + '</td>' +
         '<td style="padding:6px 8px;text-align:center"><span style="background:#fef3c7;color:#78350f;font-size:10px;padding:1px 6px;border-radius:6px">' + tipoOrigen + '</span></td>' +
         '<td style="padding:6px 8px">' +
-          '<select class="ifco-noenc-accion" data-key="' + key + '" data-tipo-origen="' + tipoOrigen + '" data-n-remito="' + _ifcoEsc(x.n_remito_archivo || x.n_remito || '') + '" data-cantidad="' + (x.cantidad || 0) + '" data-detalle="' + _ifcoEsc(x.detalle || '') + '" data-fecha="' + _ifcoEsc(x.fecha || '') + '" style="font-size:11px;padding:3px 6px;border-radius:5px;border:1px solid #d1d5db;background:#fff">' +
-            '<option value="revisar" selected>📌 Revisar después</option>' +
+          '<select class="ifco-noenc-accion" data-key="' + key + '" data-tipo-origen="' + tipoOrigen + '" data-n-remito="' + _ifcoEsc(x.n_remito_archivo || x.n_remito || '') + '" data-cantidad="' + (x.cantidad || 0) + '" data-detalle="' + _ifcoEsc(x.detalle || '') + '" data-fecha="' + _ifcoEsc(x.fecha || '') + '" data-cadena-sugerida="' + _ifcoEsc(x.cadena_sugerida || '') + '" style="' + selectStyle + '">' +
+            '<option value="revisar"' + (accionDefault === 'revisar' ? ' selected' : '') + '>📌 Revisar después</option>' +
             '<option value="crear_perdida">🗑️ Crear como pérdida</option>' +
             '<option value="crear_retiro">📥 Crear como retiro</option>' +
-            '<option value="crear_despacho">📤 Crear como despacho ya presentado</option>' +
+            '<option value="crear_despacho"' + (accionDefault === 'crear_despacho' ? ' selected' : '') + '>📤 Crear como despacho ya presentado</option>' +
           '</select>' +
         '</td></tr>';
     };
@@ -20864,7 +20884,8 @@ async function ifcoConsolStep2Aplicar() {
       cantidad: parseInt(sel.getAttribute('data-cantidad')) || 0,
       detalle: sel.getAttribute('data-detalle') || '',
       fecha: sel.getAttribute('data-fecha') || null,
-      tipo_origen: sel.getAttribute('data-tipo-origen')
+      tipo_origen: sel.getAttribute('data-tipo-origen'),
+      cadena_sugerida: sel.getAttribute('data-cadena-sugerida') || null
     };
     if (acciones[accion]) acciones[accion].push(item);
   });
@@ -20921,19 +20942,42 @@ async function ifcoConsolStep2Aplicar() {
       } catch(e) { console.error('Error creando retiro:', it.n_remito, e); }
     }
 
-    // Crear como despacho ya presentado: lo dejamos para crear manual
-    // (requiere muchos campos: empresa, sucursal, etc. que el archivo no trae)
+    // Crear como despacho: si tiene cadena reconocida (Carrefour, Coto, etc),
+    // se crea directo como despacho ya presentado. Si no, queda en Pendientes para revisar.
+    let creadosAuto = 0;
     if (acciones.crear_despacho.length > 0) {
-      // Los marcamos para revisar igual, con nota especial
-      await _ifcoFetch('/api/ifco/consolidacion-revisar', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          items: acciones.crear_despacho.map(function(x){
-            return { n_remito: x.n_remito, cantidad: x.cantidad, detalle: '[CREAR DESPACHO MANUAL] ' + (x.detalle || ''), tipo_origen: x.tipo_origen, fecha_archivo: x.fecha };
+      const conCadena    = acciones.crear_despacho.filter(function(x){ return !!x.cadena_sugerida; });
+      const sinCadena    = acciones.crear_despacho.filter(function(x){ return !x.cadena_sugerida; });
+      // Auto-crear los que tienen cadena
+      if (conCadena.length > 0) {
+        try {
+          const r = await _ifcoFetch('/api/ifco/consolidar/auto-crear-inline', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              items: conCadena.map(function(x){
+                return { n_remito: x.n_remito, cantidad: x.cantidad, detalle: x.detalle, fecha: x.fecha };
+              })
+            })
+          });
+          creadosAuto = r.creados || 0;
+          if (r.errores && r.errores.length > 0) {
+            console.warn('[ifco][auto-crear-inline] errores:', r.errores);
+          }
+        } catch(e) { console.error('Error auto-creando despachos:', e); }
+      }
+      // Los sin cadena van a Pendientes como hoy
+      if (sinCadena.length > 0) {
+        await _ifcoFetch('/api/ifco/consolidacion-revisar', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            items: sinCadena.map(function(x){
+              return { n_remito: x.n_remito, cantidad: x.cantidad, detalle: '[CREAR DESPACHO MANUAL] ' + (x.detalle || ''), tipo_origen: x.tipo_origen, fecha_archivo: x.fecha };
+            })
           })
-        })
-      });
+        });
+      }
     }
 
     // ── Paso B: aplicar la consolidación normal (matches) ──
@@ -20959,9 +21003,11 @@ async function ifcoConsolStep2Aplicar() {
     const resumen = [];
     const matchTotal = (desp.a_marcar.length || 0) + (ing.a_marcar.length || 0) + (r22.a_marcar.length || 0);
     if (matchTotal > 0) resumen.push('✓ ' + matchTotal + ' registros consolidados');
+    if (creadosAuto > 0) resumen.push('🪄 ' + creadosAuto + ' despachos auto-creados');
     if (acciones.crear_perdida.length > 0) resumen.push('🗑️ ' + acciones.crear_perdida.length + ' creados como pérdida');
     if (acciones.crear_retiro.length > 0) resumen.push('📥 ' + acciones.crear_retiro.length + ' creados como retiro');
-    if (acciones.revisar.length + acciones.crear_despacho.length > 0) resumen.push('📌 ' + (acciones.revisar.length + acciones.crear_despacho.length) + ' marcados para revisar');
+    const aRevisar = acciones.revisar.length + acciones.crear_despacho.filter(function(x){ return !x.cadena_sugerida; }).length;
+    if (aRevisar > 0) resumen.push('📌 ' + aRevisar + ' marcados para revisar');
 
     _ifcoWizard.applied = true;
     _ifcoWizard.step = 3;
