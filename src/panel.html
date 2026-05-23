@@ -21164,9 +21164,10 @@ async function ifcoConsolCargarRevisar() {
       return;
     }
     // Barra de acciones masivas (encima de la tabla)
-    let html = '<div id="ifco-rev-bulk-bar" style="display:flex;gap:8px;align-items:center;padding:6px 4px;margin-bottom:6px;font-size:12px">' +
+    let html = '<div id="ifco-rev-bulk-bar" style="display:flex;gap:8px;align-items:center;padding:6px 4px;margin-bottom:6px;font-size:12px;flex-wrap:wrap">' +
                  '<span id="ifco-rev-sel-count" style="color:var(--mut)">Ningún registro seleccionado</span>' +
                  '<div style="flex:1"></div>' +
+                 '<button class="btn bo bs" style="font-size:11px;padding:3px 10px" onclick="ifcoConsolAutoCrear()" title="Crear automáticamente los despachos cuyo detalle tenga cadena conocida (Carrefour, Coto, etc)">🪄 Auto-crear despachos</button>' +
                  '<button id="ifco-rev-btn-resolver" class="btn bo bs" style="font-size:11px;padding:3px 10px" onclick="ifcoConsolBulkResolver()" disabled>✓ Marcar resueltos</button>' +
                  (isAdmin ? '<button id="ifco-rev-btn-borrar" class="btn bo bs" style="font-size:11px;padding:3px 10px;color:#991b1b" onclick="ifcoConsolBulkBorrar()" disabled>🗑️ Borrar</button>' : '') +
                '</div>';
@@ -21272,6 +21273,34 @@ async function ifcoConsolBulkBorrar() {
       body: JSON.stringify({ ids: ids })
     });
     alert('🗑️ Borrados: ' + (r.borrados || 0));
+    ifcoConsolCargarRevisar();
+  } catch(e) { alert('Error: ' + e.message); }
+}
+
+// Auto-crear despachos a partir de pendientes (matchea por nombre de cadena en el detalle)
+async function ifcoConsolAutoCrear() {
+  const idsSel = ifcoConsolGetSeleccionados();
+  const usarSeleccion = idsSel.length > 0;
+  const msg = usarSeleccion
+    ? '¿Auto-crear despachos para los ' + idsSel.length + ' pendientes seleccionados?\n\nEl sistema va a:\n• Detectar la cadena (Carrefour, Coto, etc) en el detalle\n• Crear el despacho con estado PRESENTADO usando la fecha del archivo IFCO\n• Marcar el pendiente como resuelto\n\nLos que no tengan cadena reconocible quedan sin tocar.'
+    : '¿Auto-crear despachos para TODOS los pendientes (despachos no resueltos)?\n\nEl sistema va a:\n• Detectar la cadena (Carrefour, Coto, etc) en el detalle\n• Crear el despacho con estado PRESENTADO usando la fecha del archivo IFCO\n• Marcar el pendiente como resuelto\n\nLos que no tengan cadena reconocible quedan sin tocar.';
+  if (!confirm(msg)) return;
+  try {
+    const r = await _ifcoFetch('/api/ifco/consolidacion-revisar/auto-crear', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(usarSeleccion ? { ids: idsSel } : {})
+    });
+    let resumen = '🪄 Auto-creación terminada:\n\n';
+    resumen += '• Procesados: ' + (r.total || 0) + '\n';
+    resumen += '• Creados: ' + (r.creados || 0) + '\n';
+    resumen += '• Ya existían (marcados resueltos): ' + (r.ya_existian || 0) + '\n';
+    resumen += '• Sin cadena reconocible: ' + (r.sin_cadena || 0) + '\n';
+    if (r.errores && r.errores.length > 0) {
+      resumen += '• Errores: ' + r.errores.length + '\n';
+      console.warn('[ifco][auto-crear] errores:', r.errores);
+    }
+    alert(resumen);
     ifcoConsolCargarRevisar();
   } catch(e) { alert('Error: ' + e.message); }
 }
