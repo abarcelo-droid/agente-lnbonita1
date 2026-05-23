@@ -4135,17 +4135,34 @@ router.post('/consolidar/preview', upload.single('archivo'), async function(req,
       }
     });
 
-    // ── INGRESOS: matchea contra ifco_movimientos (tipo='retiro') por n_remito_normalizado
+    // ── INGRESOS: matchea contra ifco_movimientos por n_remito_normalizado
+    // Caso especial: si el detalle dice "Devolución de Cajas Utilizadas", los IFCOs vuelven
+    // del cliente al sistema. Históricamente algunos se cargaron como tipo='perdida' por error,
+    // así que esos también deben considerarse válidos. El resto solo matchea contra tipo='retiro'.
     const sysIng = db.prepare(`
-      SELECT id, n_remito, fecha, cantidad, sucursal_ifco, modelo, consolidado_en
+      SELECT id, n_remito, fecha, cantidad, sucursal_ifco, modelo, consolidado_en, tipo
       FROM ifco_movimientos
-      WHERE eliminado_en IS NULL AND tipo = 'retiro'
+      WHERE eliminado_en IS NULL AND tipo IN ('retiro','perdida')
     `).all();
-    const idxIng = {};
-    sysIng.forEach(function(r){ const k = _normalizarNumeroRemito(r.n_remito); if (k) idxIng[k] = r; });
+    const idxIngRetiro = {};
+    const idxIngPerdida = {};
+    sysIng.forEach(function(r){
+      const k = _normalizarNumeroRemito(r.n_remito);
+      if (!k) return;
+      if (r.tipo === 'retiro')  idxIngRetiro[k]  = r;
+      if (r.tipo === 'perdida') idxIngPerdida[k] = r;
+    });
     const ing = { a_marcar: [], ya_consolidados: [], no_encontrados: [] };
+    const esDevolucion = function(detalle) {
+      return /devoluci[oó]n\s+de\s+cajas\s+utilizadas/i.test(detalle || '');
+    };
     parsed.ingresos.forEach(function(arch) {
-      const sis = idxIng[arch.n_remito_normalizado];
+      // Primero busca como retiro normal
+      let sis = idxIngRetiro[arch.n_remito_normalizado];
+      // Si no encontró y es "Devolución de Cajas Utilizadas", busca también en pérdidas
+      if (!sis && esDevolucion(arch.detalle)) {
+        sis = idxIngPerdida[arch.n_remito_normalizado];
+      }
       if (!sis) {
         ing.no_encontrados.push({
           n_remito_archivo: arch.n_remito_archivo, n_remito_sistema: arch.n_remito_sistema,
@@ -4547,8 +4564,10 @@ router.post('/consolidacion-revisar/auto-crear', express.json(), function(req, r
           continue;
         }
         try {
+          // Si el número viene en formato archivo IFCO (con R), convertir al formato sistema (con guión)
+          const nRemitoFinal = _archivoANumeroSistema(p.n_remito) || p.n_remito;
           stmtInsertDespacho.run(
-            p.n_remito,
+            nRemitoFinal,
             p.fecha_archivo || null,
             cadena,
             parseInt(p.cantidad) || 0,
@@ -4597,11 +4616,13 @@ router.post('/consolidar/auto-crear-inline', express.json(), function(req, res) 
         const cadena = _matchCadenaIFCO(it.detalle);
         if (!cadena) { result.sin_cadena++; continue; }
         if (!it.n_remito || !it.cantidad) { result.errores.push({ n_remito: it.n_remito, error: 'Faltan datos' }); continue; }
-        const ex = db.prepare("SELECT id FROM ifco_remitos_super WHERE n_remito_ifco = ? AND eliminado_en IS NULL").get(it.n_remito);
+        // Convertir formato archivo IFCO (con R) al formato sistema (con guión) si aplica
+        const nRemitoFinal = _archivoANumeroSistema(it.n_remito) || it.n_remito;
+        const ex = db.prepare("SELECT id FROM ifco_remitos_super WHERE n_remito_ifco = ? AND eliminado_en IS NULL").get(nRemitoFinal);
         if (ex) { result.ya_existian++; continue; }
         try {
           stmtInsert.run(
-            it.n_remito, it.fecha || null, cadena,
+            nRemitoFinal, it.fecha || null, cadena,
             parseInt(it.cantidad) || 0, parseInt(it.cantidad) || 0,
             it.fecha || null, it.fecha || null, userId
           );
@@ -4686,10 +4707,10 @@ router.post('/consolidar/aplicar', express.json(), function(req, res) {
         } catch(e) { result.despachos.errores.push({ n_remito: n.n_remito_sistema, error: e.message }); }
       }
 
-      // ───── INGRESOS (retiros) ─────
+      // ───── INGRESOS (retiros + perdidas que el archivo IFCO trae como devolución) ─────
       for (const id of (ing.ids_marcar || [])) {
         try {
-          const r = db.prepare("SELECT * FROM ifco_movimientos WHERE id=? AND eliminado_en IS NULL AND tipo='retiro'").get(id);
+          const r = db.prepare("SELECT * FROM ifco_movimientos WHERE id=? AND eliminado_en IS NULL AND tipo IN ('retiro','perdida')").get(id);
           if (!r) { result.ingresos.errores.push({ id, error: 'No encontrado' }); continue; }
           if (r.consolidado_en) continue;
           db.prepare("UPDATE ifco_movimientos SET consolidado_en=datetime('now','localtime') WHERE id=?").run(id);
