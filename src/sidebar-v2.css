@@ -86,13 +86,13 @@
 }
 .sb2-brand-text{ flex:1; min-width:0 }
 .sb2-brand-name{
-  /* Vuelve a Archivo Black, como en el diseño original */
   font-family: var(--sb2-display);
   font-weight: 400;
-  font-size: 14.5px;
-  letter-spacing: .005em;
-  line-height: 1.1;
+  font-size: 13px;
+  letter-spacing: .03em;
+  line-height: 1.05;
   color: #fff;
+  text-transform: uppercase;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .sb2-brand-sub{
@@ -183,22 +183,54 @@
   font-size: 12px; font-weight: 600;
   cursor: pointer;
   font-family: var(--sb2-ui);
-  transition: all .12s;
+  transition: all .25s ease;
   text-align: left;
 }
-.sb2-soc-trigger:hover{ background: rgba(255,255,255,.1); border-color: rgba(255,255,255,.18) }
-.sb2-soc-trigger.open{ background: rgba(255,255,255,.12); border-color: var(--sb2-gold) }
-.sb2-soc-trigger .soc-ico{ font-size: 12px; flex-shrink: 0; opacity: .8 }
+.sb2-soc-trigger:hover{ filter: brightness(1.1) }
+.sb2-soc-trigger.open{ filter: brightness(1.15); border-color: rgba(255,255,255,.4) }
+.sb2-soc-trigger .soc-ico{ font-size: 12px; flex-shrink: 0; opacity: .9 }
 .sb2-soc-trigger .soc-label{
   flex: 1; min-width: 0;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-weight: 700;
 }
 .sb2-soc-trigger .soc-caret{
-  font-size: 9px; opacity: .55;
+  font-size: 9px; opacity: .65;
   transition: transform .15s;
   flex-shrink: 0;
 }
 .sb2-soc-trigger.open .soc-caret{ transform: rotate(180deg) }
+
+/* Color del trigger según sociedad activa — todos planos, sin gradientes */
+.sb2-soc-trigger[data-soc-color="todas"]{
+  background: rgba(255,255,255,.06);
+  border-color: rgba(255,255,255,.1);
+  color: rgba(255,255,255,.85);
+}
+.sb2-soc-trigger[data-soc-color="amarillo"]{    /* San Gerónimo — amarillo cartel ruta + texto negro (único legible sobre amarillo) */
+  background: #F5C518;
+  border-color: #F5C518;
+  color: #1a1100;
+}
+.sb2-soc-trigger[data-soc-color="celeste"]{      /* Barceló Transporte */
+  background: #4A90E2;
+  border-color: #4A90E2;
+  color: #fff;
+}
+.sb2-soc-trigger[data-soc-color="verde"]{        /* Puente Cordón — verde cartel ruta + texto blanco */
+  background: #2BB138;
+  border-color: #2BB138;
+  color: #fff;
+}
+.sb2-soc-trigger[data-soc-color="carbon"]{       /* Familia — fondo blanco, texto negro */
+  background: #FFFFFF;
+  border-color: #FFFFFF;
+  color: #1A1F2E;
+}
+
+/* Cuando hay sociedad específica seleccionada (no "todas"), el icono 🏢 se ve más vivo */
+.sb2-soc-trigger:not([data-soc-color="todas"]) .soc-ico{ opacity: 1 }
+.sb2-soc-trigger:not([data-soc-color="todas"]) .soc-caret{ opacity: .9 }
 
 .sb2-soc-menu{
   display: none;
@@ -222,6 +254,7 @@
   font-size: 12px; font-weight: 600;
   cursor: pointer;
   font-family: var(--sb2-ui);
+  position: relative;
 }
 .sb2-soc-item:hover{ background: rgba(255,255,255,.06); color: #fff }
 .sb2-soc-item .check{ width: 14px; flex-shrink: 0; color: var(--sb2-gold); font-weight: 800 }
@@ -237,6 +270,18 @@
   margin-top: 4px; padding-top: 8px;
 }
 .sb2-soc-item.divider:first-child{ border-top: none; margin-top: 0 }
+
+/* Dot de color al lado del nombre de cada sociedad en el menu */
+.sb2-soc-item .soc-dot{
+  width: 8px; height: 8px; border-radius: 50%;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+.sb2-soc-item[data-soc-color="amarillo"] .soc-dot{ background: #F5C518 }
+.sb2-soc-item[data-soc-color="celeste"]  .soc-dot{ background: #4A90E2 }
+.sb2-soc-item[data-soc-color="verde"]    .soc-dot{ background: #2BB138 }
+.sb2-soc-item[data-soc-color="carbon"]   .soc-dot{ background: #FFFFFF; box-shadow: 0 0 0 2px rgba(0,0,0,.18) }
+.sb2-soc-item[data-soc-color="todas"]    .soc-dot{ display: none }
 
 .shell[data-density="compact"] .sb2-soc,
 .sb2[data-density="compact"] .sb2-soc{ display: none }

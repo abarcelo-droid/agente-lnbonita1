@@ -235,6 +235,22 @@ function buildSidebar(){
 }
 
 // ═══════════ Render: Selector de Sociedad ═══════════
+// Mapeo nombre/función -> color semántico del trigger
+function sociedadColor(sociedad){
+  if (!sociedad) return 'todas';
+  const nombre = (sociedad.nombre || '').toLowerCase();
+  if (nombre.includes('san gerónimo') || nombre.includes('san geronimo')) return 'amarillo';
+  if (nombre.includes('puente cordón')   || nombre.includes('puente cordon')) return 'verde';
+  if (nombre.includes('barceló transporte') || nombre.includes('barcelo transporte')) return 'celeste';
+  if (nombre.includes('familia')) return 'carbon';
+  // Fallback por función si el nombre no matchea exactamente
+  if (sociedad.funcion === 'productiva')  return 'verde';
+  if (sociedad.funcion === 'comercial')   return 'amarillo';
+  if (sociedad.funcion === 'transporte')  return 'celeste';
+  if (sociedad.funcion === 'estructura')  return 'carbon';
+  return 'todas';
+}
+
 function renderSocSelector(){
   const wrap = document.getElementById('sb2-soc');
   if (!wrap || !SOCIEDADES.length){
@@ -242,9 +258,11 @@ function renderSocSelector(){
     return;
   }
 
-  const currentLabel = CURRENT_SOCIEDAD === 'all'
-    ? 'Todas las sociedades'
-    : (SOCIEDADES.find(s => s.id === CURRENT_SOCIEDAD)?.nombre || 'Todas las sociedades');
+  const activeSoc = CURRENT_SOCIEDAD === 'all'
+    ? null
+    : SOCIEDADES.find(s => s.id === CURRENT_SOCIEDAD);
+  const currentLabel = activeSoc ? activeSoc.nombre : 'Todas las sociedades';
+  const currentColor = activeSoc ? sociedadColor(activeSoc) : 'todas';
 
   const FUNC_LABELS = {
     'productiva':  'Producción',
@@ -260,28 +278,31 @@ function renderSocSelector(){
   }
 
   let menuHTML = `
-    <div class="sb2-soc-item ${CURRENT_SOCIEDAD === 'all' ? 'active' : ''}" data-soc="all">
+    <div class="sb2-soc-item ${CURRENT_SOCIEDAD === 'all' ? 'active' : ''}" data-soc="all" data-soc-color="todas">
       <span class="check"></span>
       <span>Todas las sociedades</span>
+      <span class="soc-dot"></span>
     </div>
   `;
   const ordenFunc = ['productiva','comercial','transporte','estructura','otra'];
   for (const k of ordenFunc){
     if (!byFunc[k]) continue;
-    menuHTML += `<div class="sb2-soc-item divider">${escapeHtml(FUNC_LABELS[k] || k)}</div>`;
+    // (Sin divider — los dots de color ya identifican el tipo)
     for (const s of byFunc[k]){
       const isActive = s.id === CURRENT_SOCIEDAD;
+      const col = sociedadColor(s);
       menuHTML += `
-        <div class="sb2-soc-item ${isActive ? 'active' : ''}" data-soc="${s.id}">
+        <div class="sb2-soc-item ${isActive ? 'active' : ''}" data-soc="${s.id}" data-soc-color="${col}">
           <span class="check"></span>
           <span>${escapeHtml(s.nombre)}</span>
+          <span class="soc-dot"></span>
         </div>
       `;
     }
   }
 
   wrap.innerHTML = `
-    <button class="sb2-soc-trigger" data-action="toggle-soc">
+    <button class="sb2-soc-trigger" data-action="toggle-soc" data-soc-color="${currentColor}">
       <span class="soc-ico">🏢</span>
       <span class="soc-label">${escapeHtml(currentLabel)}</span>
       <span class="soc-caret">▾</span>
