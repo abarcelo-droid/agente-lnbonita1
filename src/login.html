@@ -4,207 +4,325 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
 <title>La Niña Bonita — Acceso</title>
+<link rel="icon" type="image/png" href="/static/icon-32.png">
+<link href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Nunito:wght@400;600;700;800&display=swap" rel="stylesheet">
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
-body{min-height:100vh;background:#0f2540;display:flex;align-items:center;justify-content:center;font-family:'Arial',sans-serif}
+html,body{height:100%}
+body{font-family:'Nunito','Segoe UI',Arial,sans-serif;color:#1A1F2E;background:#FBF7EE;overflow:hidden}
 
-.card{background:#fff;border-radius:20px;padding:32px 28px;width:360px;max-width:95vw;box-shadow:0 20px 60px rgba(0,0,0,.4)}
+.shell{display:grid;grid-template-columns:1.2fr 1fr;min-height:100vh}
 
-.logo-wrap{text-align:center;margin-bottom:24px}
-.logo-wrap img{width:200px;max-width:100%;height:auto}
-.logo-wrap .sub{font-size:11px;color:#8a9bb0;letter-spacing:.1em;text-transform:uppercase;margin-top:6px}
+/* ============ Panel izquierdo (branding) ============ */
+.brand{position:relative;overflow:hidden;color:#FBF7EE;padding:48px 56px;display:flex;flex-direction:column;justify-content:space-between;background:#0F2647}
+.bg-layer{position:absolute !important;inset:0;background-size:cover;background-position:center;opacity:0;transition:opacity 1.6s ease-in-out;will-change:opacity;z-index:0 !important}
+.bg-layer.on{opacity:1}
+.brand .overlay{position:absolute;inset:0;background:linear-gradient(180deg,rgba(15,38,71,.30) 0%,rgba(15,38,71,.52) 60%,rgba(15,38,71,.72) 100%);pointer-events:none;z-index:1 !important}
+.brand>*:not(.bg-layer):not(.overlay){position:relative;z-index:2}
 
-.field{margin-bottom:18px}
-.field label{font-size:11px;font-weight:700;color:#5a6a7e;text-transform:uppercase;letter-spacing:.06em;display:block;margin-bottom:6px}
-.field input{width:100%;padding:12px 14px;border:2px solid #dde3ea;border-radius:10px;font-size:15px;font-family:Arial;outline:none;transition:border-color .15s}
-.field input:focus{border-color:#1a3a5c}
+.brand-top{display:flex;align-items:center;gap:14px}
+.brand-name{font-family:'Archivo Black','Nunito',sans-serif;font-weight:400;font-size:18px;letter-spacing:.01em;line-height:1.1}
+.brand-sub{font-size:11px;color:rgba(255,255,255,.7);letter-spacing:.18em;text-transform:uppercase;margin-top:4px}
+
+.brand-hero{max-width:480px}
+.brand-hero h1{font-family:'Archivo Black','Nunito',sans-serif;font-weight:400;font-size:46px;line-height:1.0;letter-spacing:-.015em;animation:rise 900ms .2s cubic-bezier(.2,.8,.2,1) both}
+.brand-hero p{font-size:15px;color:rgba(255,255,255,.78);margin-top:18px;line-height:1.5;max-width:420px;animation:rise 900ms .38s cubic-bezier(.2,.8,.2,1) both}
+
+@keyframes rise{0%{opacity:0;transform:translateY(14px)}100%{opacity:1;transform:translateY(0)}}
+
+.brand-foot{display:flex;justify-content:space-between;align-items:center;font-size:11.5px;color:rgba(255,255,255,.55)}
+
+/* ============ Panel derecho (form) ============ */
+.form-wrap{display:flex;flex-direction:column;justify-content:center;padding:48px 64px;background:#FBF7EE;overflow-y:auto}
+.form{max-width:380px;width:100%;margin:0 auto}
+
+/* Cada "card" del flujo es una variante del mismo form — sin background blanco */
+.card{display:none}
+.card.on{display:block}
+
+.eyebrow{font-size:11px;font-weight:700;letter-spacing:.18em;text-transform:uppercase;color:#5B7FB0}
+.form h2{font-family:'Archivo Black','Nunito',sans-serif;font-weight:400;font-size:34px;color:#0F2647;margin-top:8px;line-height:1.05;letter-spacing:-.015em}
+.lead{font-size:13.5px;color:#6B7283;margin-top:8px;line-height:1.5}
+.lead strong{color:#1A1F2E;font-weight:800}
+
+/* Inputs (todos comparten el estilo del email-wrap del preview) */
+.field-wrap{margin-top:22px}
+.field-wrap:first-of-type{margin-top:28px}
+.field-wrap label{font-size:11px;font-weight:700;color:#3A4253;letter-spacing:.14em;text-transform:uppercase;display:block;margin-bottom:8px}
+.field-wrap input{width:100%;padding:11px 14px;border:1px solid #DDE2EC;background:#fff;border-radius:8px;font-size:14px;font-family:inherit;color:#1A1F2E;outline:none;transition:border-color .15s,box-shadow .15s}
+.field-wrap input:focus{border-color:#1B3A6B;box-shadow:0 0 0 3px rgba(27,58,107,.12)}
+
 .field-pwd{position:relative}
-.field-pwd input{padding-right:42px}
-.pwd-toggle{position:absolute;right:6px;top:6px;width:36px;height:36px;border:none;background:transparent;cursor:pointer;border-radius:8px;font-size:18px;color:#5a6a7e;display:flex;align-items:center;justify-content:center;transition:background .1s}
-.pwd-toggle:hover{background:#f0f4f8}
-.pwd-toggle:active{transform:scale(.9)}
+.field-pwd input{padding-right:44px}
+.pwd-toggle{position:absolute;right:6px;bottom:6px;width:34px;height:34px;border:none;background:transparent;cursor:pointer;border-radius:6px;font-size:15px;color:#5a6a7e;display:flex;align-items:center;justify-content:center;transition:background .1s}
+.pwd-toggle:hover{background:#F4F1E8}
+.pwd-toggle:active{transform:scale(.92)}
 
-.switch-link{text-align:center;font-size:12px;color:#5a6a7e;margin-top:-6px;margin-bottom:18px}
-.switch-link a{color:#1a3a5c;text-decoration:none;font-weight:600;cursor:pointer}
+/* Botón primario */
+.btn-login{width:100%;margin-top:22px;padding:13px;background:#1B3A6B;color:#FBF7EE;border:none;border-radius:8px;font-size:14px;font-weight:800;cursor:pointer;letter-spacing:.04em;display:flex;align-items:center;justify-content:center;gap:8px;font-family:inherit;transition:background .15s,transform .1s}
+.btn-login:hover{background:#0F2647}
+.btn-login:active{transform:scale(.98)}
+.btn-login:disabled{opacity:.6;cursor:wait}
+
+.error{color:#8C1A1F;font-size:12.5px;text-align:center;margin-top:12px;min-height:18px;font-weight:600}
+
+/* Switch link debajo del botón */
+.switch-link{text-align:center;font-size:12.5px;color:#6B7283;margin-top:14px}
+.switch-link a{color:#1B3A6B;text-decoration:none;font-weight:700;cursor:pointer}
 .switch-link a:hover{text-decoration:underline}
 
-.btn-login{width:100%;padding:15px;background:#1a3a5c;color:#fff;border:none;border-radius:12px;font-size:16px;font-weight:700;cursor:pointer;transition:all .15s}
-.btn-login:hover{background:#0f2540}
-.btn-login:active{background:#0f2540;transform:scale(.98)}
-.btn-login:disabled{opacity:.6;cursor:not-allowed}
+/* Card de info al pie (estilo "ip-card" del preview) */
+.ip-card{margin-top:32px;padding:12px 14px;background:#fff;border:1px solid #DDE2EC;border-radius:10px;display:flex;align-items:center;gap:12px}
+.ip-icon{width:32px;height:32px;border-radius:8px;background:#EFE6D2;display:flex;align-items:center;justify-content:center;flex-shrink:0;color:#1B3A6B}
+.ip-text{flex:1;font-size:11.5px;color:#3A4253;line-height:1.4}
+.ip-text b{color:#1A1F2E;display:block}
 
-.error{color:#dc2626;font-size:13px;text-align:center;margin-top:12px;min-height:20px}
+/* Tip-box (para "no llegó el mail") con la misma piel que ip-card */
+.tip-box{margin-top:20px;padding:14px 16px;background:#fff;border:1px solid #DDE2EC;border-radius:10px;font-size:12px;color:#3A4253;line-height:1.55}
+.tip-box strong{color:#1B3A6B;display:block;margin-bottom:6px;font-size:11.5px;letter-spacing:.06em;text-transform:uppercase}
+.tip-box ul{list-style:none;padding:0;margin:0}
+.tip-box li{padding-left:14px;position:relative;margin-top:3px}
+.tip-box li::before{content:"·";position:absolute;left:4px;color:#5B7FB0;font-weight:800}
 
-.welcome-text{font-size:14px;color:#1a2332;line-height:1.5;margin-bottom:20px;text-align:center}
-.welcome-text strong{color:#1a3a5c}
-.pwd-hint{font-size:11px;color:#8a9bb0;margin-top:14px;text-align:center;line-height:1.5}
+/* Mail-graphic (reemplaza al emoji grande) */
+.mail-graphic{margin-top:24px;display:flex;justify-content:center}
+.mail-graphic .circle{width:72px;height:72px;border-radius:50%;background:#EFE6D2;display:flex;align-items:center;justify-content:center;color:#1B3A6B}
+
+/* Hint pie (link expira / anotala en lugar seguro) */
+.pwd-hint{font-size:11.5px;color:#6B7283;margin-top:18px;text-align:center;line-height:1.5}
+.pwd-hint strong{color:#1A1F2E;font-weight:800}
+
+/* ============ Mobile ============ */
+@media(max-width:880px){
+  .shell{grid-template-columns:1fr;min-height:100vh}
+  body{overflow:auto}
+  .brand{padding:28px 24px;min-height:auto}
+  .brand-hero{margin:24px 0}
+  .brand-hero h1{font-size:32px}
+  .brand-hero p{font-size:13.5px}
+  .brand-foot{margin-top:18px;font-size:10.5px}
+  .form-wrap{padding:32px 24px}
+  .form h2{font-size:26px}
+}
 </style>
 </head>
 <body>
+<div class="shell">
 
-<!-- ═══════════ CARD: LOGIN ═══════════ -->
-<div class="card" id="card-login">
-  <div class="logo-wrap">
-    <img src="/static/logo.jpg" alt="La Niña Bonita" onerror="this.style.display='none';document.querySelector('.logo-name').style.display='block'">
-    <div class="logo-name" style="display:none;font-size:22px;font-weight:900;font-style:italic;color:#b8002a">La Niña Bonita</div>
-    <div class="sub">Panel de control</div>
-  </div>
+  <!-- ═══════════ Panel izquierdo: branding ═══════════ -->
+  <div class="brand">
+    <div class="bg-layer" id="bg-a"></div>
+    <div class="bg-layer" id="bg-b"></div>
+    <div class="overlay"></div>
 
-  <div class="field">
-    <label>Email o usuario</label>
-    <input type="text" id="email" placeholder="tu@email.com o tu usuario" autocomplete="username" inputmode="email"
-      onkeydown="if(event.key==='Enter') document.getElementById('password').focus()">
-  </div>
+    <div class="brand-top">
+      <div>
+        <div class="brand-name">La Niña Bonita</div>
+        <div class="brand-sub">Sistema de Gestión</div>
+      </div>
+    </div>
 
-  <div class="field">
-    <label>Contraseña</label>
-    <div class="field-pwd">
-      <input type="password" id="password" placeholder="Tu contraseña" autocomplete="current-password"
-        onkeydown="if(event.key==='Enter') doLogin()">
-      <button type="button" class="pwd-toggle" onclick="togglePassword()" title="Mostrar/ocultar contraseña">👁️</button>
+    <div class="brand-hero">
+      <h1>Gestión integral<br>desde la finca<br>a nuestros clientes.</h1>
+      <p>San Juan · Argentina.</p>
+    </div>
+
+    <div class="brand-foot">
+      <div>© 2026 La Niña Bonita S.A.</div>
+      <div>v 3.0</div>
     </div>
   </div>
 
-  <button class="btn-login" id="btn-login" onclick="doLogin()">Ingresar →</button>
-  <div class="error" id="error"></div>
-  <div class="switch-link" style="margin-top:14px;margin-bottom:0">
-    <a onclick="switchToReset()">¿Olvidaste tu contraseña?</a>
-  </div>
-</div>
+  <!-- ═══════════ Panel derecho ═══════════ -->
+  <div class="form-wrap">
+    <div class="form">
 
-<!-- ═══════════ CARD: SOLICITAR RESET (paso 1: pedir email) ═══════════ -->
-<div class="card" id="card-reset-pedir" style="display:none">
-  <div class="logo-wrap">
-    <img src="/static/logo.jpg" alt="La Niña Bonita" onerror="this.style.display='none'">
-    <div class="sub">Recuperar contraseña</div>
-  </div>
-  <div class="welcome-text" style="text-align:left">
-    Ingresá tu email y te mandamos un link para restablecer tu contraseña.
-  </div>
-  <div class="field">
-    <label>Email</label>
-    <input type="email" id="reset-email" placeholder="tu@email.com" autocomplete="email" inputmode="email"
-      onkeydown="if(event.key==='Enter') solicitarReset()">
-  </div>
-  <button class="btn-login" id="btn-reset-pedir" onclick="solicitarReset()">Enviar link →</button>
-  <div class="error" id="error-reset-pedir"></div>
-  <div class="switch-link" style="margin-top:14px;margin-bottom:0">
-    <a onclick="switchToLogin()">← Volver al login</a>
-  </div>
-</div>
+      <!-- ═══════════ CARD: LOGIN ═══════════ -->
+      <div class="card on" id="card-login">
+        <div class="eyebrow">Bienvenido</div>
+        <h2>Ingresá a tu cuenta</h2>
+        <p class="lead">Usá tu email o usuario y tu contraseña. Si no tenés acceso, hablá con administración.</p>
 
-<!-- ═══════════ CARD: RESET ENVIADO (paso 2: confirmación) ═══════════ -->
-<div class="card" id="card-reset-enviado" style="display:none">
-  <div class="logo-wrap">
-    <img src="/static/logo.jpg" alt="La Niña Bonita" onerror="this.style.display='none'">
-    <div class="sub">Mail enviado</div>
-  </div>
-  <div style="text-align:center;margin:24px 0">
-    <div style="font-size:48px;margin-bottom:12px">📬</div>
-    <div style="font-size:14px;color:#1a2332;line-height:1.5">
-      Si tu email está registrado, te llegó un link para resetear tu contraseña.
+        <div class="field-wrap">
+          <label for="email">Email o usuario</label>
+          <input type="text" id="email" placeholder="tu@email.com o tu usuario" autocomplete="username" inputmode="email"
+            onkeydown="if(event.key==='Enter') document.getElementById('password').focus()">
+        </div>
+
+        <div class="field-wrap">
+          <label for="password">Contraseña</label>
+          <div class="field-pwd">
+            <input type="password" id="password" placeholder="Tu contraseña" autocomplete="current-password"
+              onkeydown="if(event.key==='Enter') doLogin()">
+            <button type="button" class="pwd-toggle" onclick="togglePassword()" title="Mostrar/ocultar contraseña">👁️</button>
+          </div>
+        </div>
+
+        <button class="btn-login" id="btn-login" onclick="doLogin()">Ingresar →</button>
+        <div class="error" id="error"></div>
+        <div class="switch-link"><a onclick="switchToReset()">¿Olvidaste tu contraseña?</a></div>
+
+        <div class="ip-card">
+          <div class="ip-icon">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3 L3 6 V21 L9 18 L15 21 L21 18 V3 L15 6 Z M9 3 V18 M15 6 V21"/></svg>
+          </div>
+          <div class="ip-text">
+            <b>Acceso seguro</b>
+            Tu sesión queda asociada a este dispositivo.
+          </div>
+        </div>
+      </div>
+
+      <!-- ═══════════ CARD: SOLICITAR RESET ═══════════ -->
+      <div class="card" id="card-reset-pedir">
+        <div class="eyebrow">Recuperar acceso</div>
+        <h2>¿Olvidaste tu contraseña?</h2>
+        <p class="lead">Ingresá tu email y te mandamos un link para definir una nueva.</p>
+
+        <div class="field-wrap">
+          <label for="reset-email">Email</label>
+          <input type="email" id="reset-email" placeholder="tu@email.com" autocomplete="email" inputmode="email"
+            onkeydown="if(event.key==='Enter') solicitarReset()">
+        </div>
+
+        <button class="btn-login" id="btn-reset-pedir" onclick="solicitarReset()">Enviar link →</button>
+        <div class="error" id="error-reset-pedir"></div>
+        <div class="switch-link"><a onclick="switchToLogin()">← Volver al login</a></div>
+      </div>
+
+      <!-- ═══════════ CARD: RESET ENVIADO ═══════════ -->
+      <div class="card" id="card-reset-enviado">
+        <div class="eyebrow">Mail enviado</div>
+        <h2>Revisá tu casilla</h2>
+        <p class="lead">Si tu email está registrado, te llegó un link para resetear tu contraseña.</p>
+
+        <div class="mail-graphic">
+          <div class="circle">
+            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg>
+          </div>
+        </div>
+
+        <div class="tip-box">
+          <strong>¿No te llegó nada?</strong>
+          <ul>
+            <li>Revisá la carpeta de spam.</li>
+            <li>Verificá que escribiste bien el email.</li>
+            <li>Si seguís sin recibirlo, pedile a tu administrador que confirme qué email tenés cargado en tu perfil.</li>
+          </ul>
+        </div>
+
+        <div class="pwd-hint">El link expira en <strong>1 hora</strong> y solo se puede usar una vez.</div>
+        <button class="btn-login" onclick="switchToLogin()">Volver al login</button>
+      </div>
+
+      <!-- ═══════════ CARD: NUEVA PASSWORD (desde link del mail) ═══════════ -->
+      <div class="card" id="card-reset-nueva">
+        <div class="eyebrow">Nueva contraseña</div>
+        <h2>Definí tu nueva clave</h2>
+        <p class="lead">Hola, <strong id="reset-nueva-nombre">—</strong>. Usuario: <strong id="reset-nueva-username">—</strong>.</p>
+
+        <div class="field-wrap">
+          <label for="reset-nueva-1">Nueva contraseña</label>
+          <div class="field-pwd">
+            <input type="password" id="reset-nueva-1" placeholder="Mínimo 8 caracteres, letra y número" autocomplete="new-password">
+            <button type="button" class="pwd-toggle" onclick="toggleResetPwd()" title="Mostrar/ocultar">👁️</button>
+          </div>
+        </div>
+        <div class="field-wrap">
+          <label for="reset-nueva-2">Repetir contraseña</label>
+          <input type="password" id="reset-nueva-2" placeholder="Misma contraseña otra vez" autocomplete="new-password"
+            onkeydown="if(event.key==='Enter') confirmarReset()">
+        </div>
+
+        <button class="btn-login" id="btn-reset-confirmar" onclick="confirmarReset()">Guardar →</button>
+        <div class="error" id="error-reset-nueva"></div>
+      </div>
+
+      <!-- ═══════════ CARD: SETEAR PASSWORD (primer login) ═══════════ -->
+      <div class="card" id="card-setear">
+        <div class="eyebrow">¡Hola!</div>
+        <h2>Definí tu contraseña</h2>
+        <p class="lead">Bienvenido, <strong id="welcome-nombre">—</strong>. Tu usuario es <strong id="welcome-username">—</strong>. Tu administrador te asignó una contraseña inicial — elegí una nueva.</p>
+
+        <div class="field-wrap">
+          <label for="confirm-pwd">Confirmá tu contraseña actual</label>
+          <div class="field-pwd">
+            <input type="password" id="confirm-pwd" placeholder="La que te dieron" autocomplete="current-password">
+            <button type="button" class="pwd-toggle" onclick="toggleConfirmPwd()" title="Mostrar/ocultar">👁️</button>
+          </div>
+        </div>
+
+        <div class="field-wrap">
+          <label for="new-pwd-1">Nueva contraseña</label>
+          <div class="field-pwd">
+            <input type="password" id="new-pwd-1" placeholder="Mínimo 8 caracteres, letra y número" autocomplete="new-password">
+            <button type="button" class="pwd-toggle" onclick="toggleNewPassword()" title="Mostrar/ocultar">👁️</button>
+          </div>
+        </div>
+
+        <div class="field-wrap">
+          <label for="new-pwd-2">Repetir contraseña</label>
+          <input type="password" id="new-pwd-2" placeholder="Misma contraseña otra vez" autocomplete="new-password"
+            onkeydown="if(event.key==='Enter') setearPassword()">
+        </div>
+
+        <button class="btn-login" id="btn-setear" onclick="setearPassword()">Guardar y entrar →</button>
+        <div class="error" id="error-setear"></div>
+        <div class="pwd-hint">Anotala en un lugar seguro.</div>
+      </div>
+
     </div>
-    <div style="margin-top:16px;padding:12px;background:#f0f4f8;border-radius:8px;text-align:left;font-size:12px;color:#5a6a7e;line-height:1.5">
-      <strong style="color:#1a3a5c">¿No te llegó nada?</strong><br>
-      • Revisá la carpeta de spam<br>
-      • Verificá que escribiste bien el email<br>
-      • Si seguís sin recibirlo, pedile a tu administrador que confirme qué email tenés cargado en tu perfil.
-    </div>
-  </div>
-  <div class="pwd-hint">
-    El link expira en <strong>1 hora</strong> y solo se puede usar una vez.
-  </div>
-  <button class="btn-login" onclick="switchToLogin()" style="margin-top:18px">Volver al login</button>
-</div>
-
-<!-- ═══════════ CARD: NUEVA PASSWORD (paso 3: aterrizaje del link) ═══════════ -->
-<div class="card" id="card-reset-nueva" style="display:none">
-  <div class="logo-wrap">
-    <img src="/static/logo.jpg" alt="La Niña Bonita" onerror="this.style.display='none'">
-    <div class="sub">Nueva contraseña</div>
-  </div>
-  <div class="welcome-text">
-    Hola, <strong id="reset-nueva-nombre">—</strong>.<br>
-    Usuario: <strong id="reset-nueva-username">—</strong>.<br>
-    <span style="font-size:12px;color:#5a6a7e">Elegí tu nueva contraseña.</span>
-  </div>
-  <div class="field">
-    <label>Nueva contraseña</label>
-    <div class="field-pwd">
-      <input type="password" id="reset-nueva-1" placeholder="Mínimo 8 caracteres, letra y número" autocomplete="new-password">
-      <button type="button" class="pwd-toggle" onclick="toggleResetPwd()" title="Mostrar/ocultar">👁️</button>
-    </div>
-  </div>
-  <div class="field">
-    <label>Repetir contraseña</label>
-    <input type="password" id="reset-nueva-2" placeholder="Misma contraseña otra vez" autocomplete="new-password"
-      onkeydown="if(event.key==='Enter') confirmarReset()">
-  </div>
-  <button class="btn-login" id="btn-reset-confirmar" onclick="confirmarReset()">Guardar →</button>
-  <div class="error" id="error-reset-nueva"></div>
-</div>
-
-<!-- ═══════════ CARD: SETEAR PASSWORD (Fase 2.C) ═══════════ -->
-<div class="card" id="card-setear" style="display:none">
-  <div class="logo-wrap">
-    <img src="/static/logo.jpg" alt="La Niña Bonita" onerror="this.style.display='none'">
-    <div class="sub">¡Hola!</div>
   </div>
 
-  <div class="welcome-text">
-    Bienvenido, <strong id="welcome-nombre">—</strong>.<br>
-    Tu usuario es <strong id="welcome-username">—</strong>.<br>
-    <span style="font-size:12px;color:#5a6a7e">Tu administrador te asignó una contraseña inicial. Elegí una nueva.</span>
-  </div>
-
-  <div class="field">
-    <label>Confirmá tu contraseña actual</label>
-    <div class="field-pwd">
-      <input type="password" id="confirm-pwd" placeholder="La que te dieron" autocomplete="current-password">
-      <button type="button" class="pwd-toggle" onclick="toggleConfirmPwd()" title="Mostrar/ocultar">👁️</button>
-    </div>
-  </div>
-
-  <div class="field">
-    <label>Nueva contraseña</label>
-    <div class="field-pwd">
-      <input type="password" id="new-pwd-1" placeholder="Mínimo 8 caracteres, letra y número" autocomplete="new-password">
-      <button type="button" class="pwd-toggle" onclick="toggleNewPassword()" title="Mostrar/ocultar">👁️</button>
-    </div>
-  </div>
-
-  <div class="field">
-    <label>Repetir contraseña</label>
-    <input type="password" id="new-pwd-2" placeholder="Misma contraseña otra vez" autocomplete="new-password"
-      onkeydown="if(event.key==='Enter') setearPassword()">
-  </div>
-
-  <button class="btn-login" id="btn-setear" onclick="setearPassword()">Guardar y entrar →</button>
-  <div class="error" id="error-setear"></div>
-
-  <div class="pwd-hint">
-    Anotala en un lugar seguro.
-  </div>
 </div>
 
 <script>
+/* ═══════════ Rotación aleatoria de fondos ═══════════ */
+var BG_IMAGES = [
+  '/static/bg-1-finca-aerea.jpg',
+  '/static/bg-2-melon-campo.jpg',
+  '/static/bg-3-melon-campo.jpg',
+  '/static/bg-4-melon-surcos.jpg',
+  '/static/bg-5-parronal.jpg',
+  '/static/bg-6-uva.jpg',
+  '/static/bg-8-damasco.jpg',
+  '/static/bg-9-camion.jpg',
+  '/static/bg-10-cebolla.jpg'
+];
+(function rotateBackgrounds(){
+  var layers = [document.getElementById('bg-a'), document.getElementById('bg-b')];
+  var order = BG_IMAGES.slice().sort(function(){ return Math.random() - 0.5; });
+  var idx = 0, active = 0;
+  order.forEach(function(src){ var i = new Image(); i.src = src; });
+  layers[0].style.backgroundImage = 'url("' + order[0] + '")';
+  layers[0].classList.add('on');
+  setInterval(function(){
+    idx = (idx + 1) % order.length;
+    var next = 1 - active;
+    layers[next].style.backgroundImage = 'url("' + order[idx] + '")';
+    layers[next].classList.add('on');
+    layers[active].classList.remove('on');
+    active = next;
+  }, 8000);
+})();
+</script>
+
+<script>
+/* ═══════════ Navegación entre cards ═══════════ */
+function showCard(id) {
+  var cards = document.querySelectorAll('.card');
+  for (var i = 0; i < cards.length; i++) cards[i].classList.remove('on');
+  document.getElementById(id).classList.add('on');
+}
+
+/* ═══════════ Estado + login ═══════════ */
 var pendingUserId = null;
 var nextParam = new URLSearchParams(window.location.search).get('next') || '';
 
-function toggleConfirmPwd() {
-  var inp = document.getElementById('confirm-pwd');
-  inp.type = inp.type === 'password' ? 'text' : 'password';
-}
-
-function togglePassword() {
-  var inp = document.getElementById('password');
-  inp.type = inp.type === 'password' ? 'text' : 'password';
-}
-
-function toggleNewPassword() {
-  var inp = document.getElementById('new-pwd-1');
-  inp.type = inp.type === 'password' ? 'text' : 'password';
-}
+function togglePassword()    { var i = document.getElementById('password');    i.type = i.type === 'password' ? 'text' : 'password'; }
+function toggleConfirmPwd()  { var i = document.getElementById('confirm-pwd'); i.type = i.type === 'password' ? 'text' : 'password'; }
+function toggleNewPassword() { var i = document.getElementById('new-pwd-1');   i.type = i.type === 'password' ? 'text' : 'password'; }
+function toggleResetPwd()    { var i = document.getElementById('reset-nueva-1'); i.type = i.type === 'password' ? 'text' : 'password'; }
 
 function doLogin() {
   var email = document.getElementById('email').value.trim();
@@ -212,10 +330,10 @@ function doLogin() {
   var errEl = document.getElementById('error');
   errEl.textContent = '';
   if (!email) { errEl.textContent = 'Ingresá tu email o usuario'; return; }
-  if (!pwd) { errEl.textContent = 'Ingresá tu contraseña'; return; }
+  if (!pwd)   { errEl.textContent = 'Ingresá tu contraseña'; return; }
 
   var btn = document.getElementById('btn-login');
-  btn.textContent = 'Verificando...'; btn.disabled = true;
+  btn.textContent = 'Verificando…'; btn.disabled = true;
 
   fetch('/api/auth/login', {
     method: 'POST',
@@ -225,12 +343,10 @@ function doLogin() {
   .then(function(r){ return r.json(); })
   .then(function(res) {
     if (res.ok && res.requiere_setear_password) {
-      // Admin asignó password inicial → forzar cambio
       pendingUserId = res.user_id;
       document.getElementById('welcome-nombre').textContent = res.nombre || 'usuario';
       document.getElementById('welcome-username').textContent = res.username || '—';
-      document.getElementById('card-login').style.display = 'none';
-      document.getElementById('card-setear').style.display = 'block';
+      showCard('card-setear');
       setTimeout(function(){ document.getElementById('confirm-pwd').focus(); }, 100);
       return;
     }
@@ -262,7 +378,7 @@ function setearPassword() {
   if (actual === p1) { err.textContent = 'La nueva debe ser distinta a la actual'; return; }
 
   var btn = document.getElementById('btn-setear');
-  btn.textContent = 'Guardando...'; btn.disabled = true;
+  btn.textContent = 'Guardando…'; btn.disabled = true;
 
   fetch('/api/auth/setear-password', {
     method: 'POST',
@@ -284,23 +400,10 @@ function setearPassword() {
   });
 }
 
-window.addEventListener('load', function() {
-  // Si vino con ?reset=TOKEN, abrir directamente la card de nueva password
-  var params = new URLSearchParams(window.location.search);
-  var resetToken = params.get('reset');
-  if (resetToken) {
-    aterrizarConToken(resetToken);
-  } else {
-    document.getElementById('email').focus();
-  }
-});
-
-// ─── FLUJO DE RESET DE CONTRASEÑA POR MAIL ───────────────────────────────
+/* ─── RESET DE CONTRASEÑA POR MAIL ─── */
 function switchToReset() {
-  document.getElementById('card-login').style.display = 'none';
-  document.getElementById('card-reset-pedir').style.display = 'block';
+  showCard('card-reset-pedir');
   document.getElementById('error-reset-pedir').textContent = '';
-  // Pre-llenar el email si ya escribió algo en el login
   var emailLogin = document.getElementById('email').value.trim();
   if (emailLogin && emailLogin.indexOf('@') > 0) {
     document.getElementById('reset-email').value = emailLogin;
@@ -309,11 +412,7 @@ function switchToReset() {
 }
 
 function switchToLogin() {
-  document.getElementById('card-reset-pedir').style.display = 'none';
-  document.getElementById('card-reset-enviado').style.display = 'none';
-  document.getElementById('card-reset-nueva').style.display = 'none';
-  document.getElementById('card-login').style.display = 'block';
-  // Limpiar la URL si tenía ?reset=...
+  showCard('card-login');
   if (window.location.search.indexOf('reset=') >= 0) {
     history.replaceState({}, '', window.location.pathname);
   }
@@ -327,7 +426,7 @@ function solicitarReset() {
   if (!email || email.indexOf('@') < 0) { err.textContent = 'Ingresá un email válido'; return; }
 
   var btn = document.getElementById('btn-reset-pedir');
-  btn.textContent = 'Enviando...'; btn.disabled = true;
+  btn.textContent = 'Enviando…'; btn.disabled = true;
 
   fetch('/api/auth/solicitar-reset', {
     method: 'POST',
@@ -337,8 +436,7 @@ function solicitarReset() {
   .then(function(r){ return r.json(); })
   .then(function(res) {
     if (res.ok) {
-      document.getElementById('card-reset-pedir').style.display = 'none';
-      document.getElementById('card-reset-enviado').style.display = 'block';
+      showCard('card-reset-enviado');
     } else {
       err.textContent = res.error || 'Error al solicitar el link';
       btn.textContent = 'Enviar link →'; btn.disabled = false;
@@ -350,15 +448,9 @@ function solicitarReset() {
   });
 }
 
-// Cuando el usuario clickea el link del mail y aterriza con ?reset=TOKEN
 function aterrizarConToken(token) {
-  // Esconder todas las cards
-  document.getElementById('card-login').style.display = 'none';
-  document.getElementById('card-setear').style.display = 'none';
-  // Mostrar la nueva
-  var cardNueva = document.getElementById('card-reset-nueva');
-  cardNueva.style.display = 'block';
-  document.getElementById('error-reset-nueva').textContent = 'Validando link...';
+  showCard('card-reset-nueva');
+  document.getElementById('error-reset-nueva').textContent = 'Validando link…';
   document.getElementById('btn-reset-confirmar').disabled = true;
 
   fetch('/api/auth/validar-token?token=' + encodeURIComponent(token))
@@ -372,18 +464,12 @@ function aterrizarConToken(token) {
       document.getElementById('reset-nueva-username').textContent = res.username || '—';
       document.getElementById('error-reset-nueva').textContent = '';
       document.getElementById('btn-reset-confirmar').disabled = false;
-      // Guardar el token para usarlo al confirmar
-      cardNueva.dataset.token = token;
+      document.getElementById('card-reset-nueva').dataset.token = token;
       setTimeout(function(){ document.getElementById('reset-nueva-1').focus(); }, 100);
     })
     .catch(function() {
       document.getElementById('error-reset-nueva').textContent = 'Error de conexión';
     });
-}
-
-function toggleResetPwd() {
-  var inp = document.getElementById('reset-nueva-1');
-  inp.type = inp.type === 'password' ? 'text' : 'password';
 }
 
 function confirmarReset() {
@@ -400,7 +486,7 @@ function confirmarReset() {
   if (!/[0-9]/.test(p1)) { err.textContent = 'Debe contener al menos un número'; return; }
 
   var btn = document.getElementById('btn-reset-confirmar');
-  btn.textContent = 'Guardando...'; btn.disabled = true;
+  btn.textContent = 'Guardando…'; btn.disabled = true;
 
   fetch('/api/auth/resetear-con-token', {
     method: 'POST',
@@ -410,7 +496,6 @@ function confirmarReset() {
   .then(function(r){ return r.json(); })
   .then(function(res) {
     if (res.ok) {
-      // Limpiar la URL y volver al login para que entre con la nueva pwd
       alert('✓ ' + (res.mensaje || 'Contraseña actualizada'));
       history.replaceState({}, '', window.location.pathname);
       window.location.reload();
@@ -424,6 +509,17 @@ function confirmarReset() {
     btn.textContent = 'Guardar →'; btn.disabled = false;
   });
 }
+
+/* ═══════════ Init ═══════════ */
+window.addEventListener('load', function() {
+  var params = new URLSearchParams(window.location.search);
+  var resetToken = params.get('reset');
+  if (resetToken) {
+    aterrizarConToken(resetToken);
+  } else {
+    document.getElementById('email').focus();
+  }
+});
 </script>
 </body>
 </html>
