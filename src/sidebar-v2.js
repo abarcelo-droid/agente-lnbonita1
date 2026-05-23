@@ -374,20 +374,26 @@ function attachEventListeners(){
 
 function navigateTo(modulo){
   pushReciente(modulo);
-  // Marcar como activo
+  // Marcar como activo en el sidebar nuevo
   document.querySelectorAll('.sb2-ni').forEach(n => n.classList.remove('on'));
   document.querySelectorAll('.sb2-ni[data-sec="' + CSS.escape(modulo) + '"]').forEach(n => n.classList.add('on'));
 
-  // Llamar a la función existente del panel viejo
-  if (typeof window.navTo === 'function'){
-    window.navTo(modulo);
-  } else {
-    // Fallback: emular el sistema viejo (mostrar/ocultar .sec)
-    document.querySelectorAll('.sec').forEach(s => s.classList.remove('on'));
-    const sec = document.getElementById('sec-' + modulo);
-    if (sec) sec.classList.add('on');
-    window.scrollTo(0, 0);
+  // Trigger del nav viejo: buscar el .ni con el data-sec correcto y simular click.
+  // El nav viejo está escondido (display:none) pero sus event listeners siguen activos —
+  // disparamos la navegación real del panel.
+  const oldNi = document.querySelector('nav .ni[data-sec="' + CSS.escape(modulo) + '"], #sidebar-old-hidden .ni[data-sec="' + CSS.escape(modulo) + '"]');
+  if (oldNi){
+    oldNi.click();
+    return;
   }
+
+  // Fallback: si por alguna razón no existe el .ni viejo, probamos con el sistema antiguo
+  // de mostrar/ocultar .sec directamente
+  console.warn('[SB2] No se encontró .ni del nav viejo para "' + modulo + '" — fallback manual');
+  document.querySelectorAll('.sec').forEach(s => s.classList.remove('on'));
+  const sec = document.getElementById('sec-' + modulo);
+  if (sec) sec.classList.add('on');
+  window.scrollTo(0, 0);
 }
 
 function hookCurrentSection(){
