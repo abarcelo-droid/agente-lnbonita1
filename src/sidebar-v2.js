@@ -158,6 +158,10 @@ function buildSidebar(){
     <!-- Recientes -->
     <div id="sb2-recientes-wrap"></div>
 
+    <!-- Divider fuerte entre fast lanes y menú normal -->
+    <div class="sb2-divider"></div>
+    <div class="sb2-group-sec"><span class="sb2-label">Menú completo</span></div>
+
     <!-- Grupos -->
     <div id="sb2-grupos"></div>
 
@@ -210,15 +214,33 @@ function buildSidebar(){
 function renderFavoritos(){
   const wrap = document.getElementById('sb2-favoritos-wrap');
   if (!wrap) return;
-  if (!FAVORITOS.length){ wrap.innerHTML = ''; return; }
-
+  // Si no hay favoritos, mostrar estado vacío educativo
+  if (!FAVORITOS.length){
+    wrap.innerHTML = `
+      <div class="sb2-fastlane fav">
+        <div class="sb2-group-sec">
+          <span class="sb2-label">⭐ Favoritos</span>
+        </div>
+        <div class="sb2-empty-fav">
+          <span class="star-pulse">★</span>
+          <span>Marcá tus secciones más usadas con la estrella para acceso rápido desde acá.</span>
+        </div>
+      </div>
+    `;
+    return;
+  }
   wrap.innerHTML = `
-    <div class="sb2-group-sec"><span class="sb2-label">⭐ Favoritos</span></div>
-    ${FAVORITOS.map(modulo => {
-      const m = MODULO_INDEX[modulo];
-      if (!m) return '';
-      return niHTML(m, true);
-    }).join('')}
+    <div class="sb2-fastlane fav">
+      <div class="sb2-group-sec">
+        <span class="sb2-label">⭐ Favoritos</span>
+        <span class="badge-count">${FAVORITOS.length}</span>
+      </div>
+      ${FAVORITOS.map(modulo => {
+        const m = MODULO_INDEX[modulo];
+        if (!m) return '';
+        return niHTML(m, true);
+      }).join('')}
+    </div>
   `;
 }
 
@@ -231,12 +253,17 @@ function renderRecientes(){
   if (!recientesFiltrados.length){ wrap.innerHTML = ''; return; }
 
   wrap.innerHTML = `
-    <div class="sb2-group-sec"><span class="sb2-label">⏱ Recientes</span></div>
-    ${recientesFiltrados.map(modulo => {
-      const m = MODULO_INDEX[modulo];
-      if (!m) return '';
-      return niHTML(m, false);
-    }).join('')}
+    <div class="sb2-fastlane rec">
+      <div class="sb2-group-sec">
+        <span class="sb2-label">⏱ Recientes</span>
+        <span class="badge-count">${recientesFiltrados.length}</span>
+      </div>
+      ${recientesFiltrados.map(modulo => {
+        const m = MODULO_INDEX[modulo];
+        if (!m) return '';
+        return niHTML(m, false);
+      }).join('')}
+    </div>
   `;
 }
 
@@ -288,10 +315,94 @@ function stripIconFromLabel(label){
 }
 
 function moduleIcon(m){
-  // Si el label arranca con emoji, usar ese
+  // 1) Mapping manual prioritario — emojis por módulo según el panel original
+  const map = {
+    // General / Sistema
+    'inicio':            '⌂',
+    'calendario':        '📅',
+    'conv':              '💬',
+    'equipo':            '🏢',
+    'maestro-usuarios':  '👥',
+    'ingreso-factura':   '🧾',
+    // Comercial
+    'crm':               '💼',
+    'dedicados':         '⭐',
+    'food':              '🍴',
+    'may-a':             '🏪',
+    'may-mcba':          '🏪',
+    'min-mcba':          '🛒',
+    'min-ent':           '🚚',
+    'cons-final':        '👤',
+    'pedidos':           '📋',
+    'repet':             '🔁',
+    // Pricing / Oferta
+    'pricing1':          '💲',
+    'pricing2':          '💲',
+    'oferta1':           '🏷️',
+    'oferta2':           '🏷️',
+    // Logística
+    'logistica':         '🚛',
+    'envios':            '📨',
+    'preparacion':       '📦',
+    'remitos':           '📋',
+    'guardias':          '🕐',
+    // Cobranzas
+    'cobranza':          '💰',
+    'cta-cte':           '💳',
+    // Producción Agrícola
+    'pa-dashboard':      '🌱',
+    'pa-lotes':          '🌾',
+    'pa-insumos':        '🧪',
+    'pa-clima':          '🌤️',
+    'pa-combustible':    '⛽',
+    'pa-compras':        '🛒',
+    'pa-costos':         '💲',
+    'pa-cuentas':        '📊',
+    'pa-calendario':     '📅',
+    'pa-despachos':      '🚚',
+    'pa-electricidad':   '⚡',
+    'pa-ordenes':        '📋',
+    'pa-panol':          '🔧',
+    'pa-personal':       '👷',
+    'pa-scout':          '📱',
+    // Abasto IFCO
+    'ab-dashboard':      '📊',
+    'ab-gastos':         '💸',
+    'ab-ifcos':          '📦',
+    'ab-liquidaciones':  '📄',
+    'ab-mandata':        '🧾',
+    'ab-partidas':       '🚛',
+    'ab-proveedores':    '🏭',
+    'ab-remitos':        '📋',
+    'ab-stock':          '📦',
+    // Contabilidad
+    'adm-asientos':      '📒',
+    'adm-cc-proveedores':'💳',
+    'adm-modelos':       '📐',
+    'adm-plan-cuentas':  '📊',
+    'adm-proveedores':   '🏭',
+    // Financiero
+    'fin-caja-bancos':   '🏦',
+    'fin-ordenes-pago':  '📄',
+    // Ventas
+    'ven-clientes':      '👥',
+    'ven-facturas':      '🧾',
+    'ven-cobranzas':     '💰',
+    'ven-cc':            '💳',
+    'ven-liquidaciones': '🌾',
+    // Retail
+    'retail-view':       '🛒',
+    'retail-prod':       '🌱',
+    'retail-gastos':     '💸',
+    'rent-retail':       '📈',
+  };
+  if (map[m.modulo]) return map[m.modulo];
+
+  // 2) Si el label ya trae emoji al inicio (ej. "🌤️ Clima"), usarlo
   const match = (m.label || '').match(/^([\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]\uFE0F?)/u);
   if (match) return match[1];
-  // Fallback por tipo
+
+  // 3) Fallback por tipo
   const TIPO_ICONS = {
     'numero':    '#',
     'operativo': '•',
