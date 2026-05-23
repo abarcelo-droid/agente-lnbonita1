@@ -20744,31 +20744,51 @@ function _ifcoRenderStep1Preview() {
   }
   html += '</div>';
 
-  // ── BALANCE AGREGADO DE INGRESOS (red de seguridad fila-por-fila puede fallar) ──
-  const balIng = data.balance_ingresos;
-  if (balIng) {
+  // ── BALANCES AGREGADOS (red de seguridad cuando match fila-por-fila puede fallar) ──
+  // Renderiza un card para INGRESOS y otro para EGRESOS.
+  const renderBalance = function(titLabel, bal, subSistema) {
+    if (!bal) return '';
     const fmt = function(n){ return (n || 0).toLocaleString('es-AR'); };
-    const coincide = balIng.coincide;
-    const diff = balIng.diferencia;
+    const coincide = bal.coincide;
+    const diff = bal.diferencia;
     const colorTit = coincide ? '#065f46' : (Math.abs(diff) < 50 ? '#92400e' : '#991b1b');
     const colorBg  = coincide ? '#ecfdf5' : (Math.abs(diff) < 50 ? '#fef3c7' : '#fee2e2');
     const colorBor = coincide ? '#10b981' : (Math.abs(diff) < 50 ? '#fbbf24' : '#ef4444');
     const icono    = coincide ? '✓' : '⚠️';
-    const titulo   = coincide ? 'Balance de ingresos: coincide' : 'Balance de ingresos: NO coincide';
+    const titulo   = icono + ' ' + titLabel + ': ' + (coincide ? 'coincide' : 'NO coincide');
     let detalleDiff = '';
     if (!coincide) {
       if (diff > 0) detalleDiff = 'Faltan ' + fmt(Math.abs(diff)) + ' unidades en el sistema (el archivo tiene más).';
       else          detalleDiff = 'Sobran ' + fmt(Math.abs(diff)) + ' unidades en el sistema (el archivo tiene menos).';
     }
-    html += '<div style="margin-top:14px;background:' + colorBg + ';border:1px solid ' + colorBor + ';border-radius:8px;padding:12px 14px">' +
-      '<div style="font-size:13px;font-weight:600;color:' + colorTit + ';margin-bottom:6px">' + icono + ' ' + titulo + '</div>' +
+    return '<div style="background:' + colorBg + ';border:1px solid ' + colorBor + ';border-radius:8px;padding:12px 14px">' +
+      '<div style="font-size:13px;font-weight:600;color:' + colorTit + ';margin-bottom:6px">' + titulo + '</div>' +
       '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;font-size:12px">' +
-        '<div><div style="color:' + colorTit + ';opacity:0.7;font-size:10px;text-transform:uppercase">Total en archivo IFCO</div><div style="font-weight:700;font-size:18px;color:' + colorTit + '">' + fmt(balIng.total_archivo) + '</div></div>' +
-        '<div><div style="color:' + colorTit + ';opacity:0.7;font-size:10px;text-transform:uppercase">Total en sistema (retiros + pérdidas)</div><div style="font-weight:700;font-size:18px;color:' + colorTit + '">' + fmt(balIng.total_sistema) + '</div></div>' +
+        '<div><div style="color:' + colorTit + ';opacity:0.7;font-size:10px;text-transform:uppercase">Archivo IFCO</div><div style="font-weight:700;font-size:18px;color:' + colorTit + '">' + fmt(bal.total_archivo) + '</div></div>' +
+        '<div><div style="color:' + colorTit + ';opacity:0.7;font-size:10px;text-transform:uppercase">Sistema</div><div style="font-weight:700;font-size:18px;color:' + colorTit + '">' + fmt(bal.total_sistema) + '</div>' +
+          (subSistema ? '<div style="font-size:10px;color:' + colorTit + ';opacity:0.6;margin-top:2px">' + subSistema + '</div>' : '') +
+        '</div>' +
         '<div><div style="color:' + colorTit + ';opacity:0.7;font-size:10px;text-transform:uppercase">Diferencia</div><div style="font-weight:700;font-size:18px;color:' + colorTit + '">' + (diff > 0 ? '+' : '') + fmt(diff) + '</div></div>' +
       '</div>' +
       (detalleDiff ? '<div style="margin-top:8px;font-size:11px;color:' + colorTit + '">' + detalleDiff + '</div>' : '') +
     '</div>';
+  };
+  const balIng = data.balance_ingresos;
+  const balEgr = data.balance_egresos;
+  if (balIng || balEgr) {
+    let subIng = '', subEgr = '';
+    if (balIng && balIng.total_sistema_desg) {
+      const fmt = function(n){ return (n || 0).toLocaleString('es-AR'); };
+      subIng = 'Retiros ' + fmt(balIng.total_sistema_desg.retiros) + ' · R22 ' + fmt(balIng.total_sistema_desg.r22);
+    }
+    if (balEgr && balEgr.total_sistema_desg) {
+      const fmt = function(n){ return (n || 0).toLocaleString('es-AR'); };
+      subEgr = 'Despachos ' + fmt(balEgr.total_sistema_desg.despachos) + ' · Pérdidas ' + fmt(balEgr.total_sistema_desg.perdidas);
+    }
+    html += '<div style="margin-top:14px;display:grid;grid-template-columns:1fr 1fr;gap:10px">';
+    html += renderBalance('Balance INGRESOS', balIng, subIng);
+    html += renderBalance('Balance EGRESOS', balEgr, subEgr);
+    html += '</div>';
   }
 
   document.getElementById('ifco-step1-resumen').innerHTML = html;
@@ -21008,12 +21028,23 @@ async function ifcoConsolStep2Aplicar() {
     }
 
     // ── Paso B: aplicar la consolidación normal (matches) ──
+    // Los despachos a marcar pueden incluir pérdidas (marcadas con sistema._es_perdida)
+    // Las separamos para que el backend las trate como tipo='perdida' de ifco_movimientos
+    const despachosNormales = desp.a_marcar.filter(function(x){ return !x.sistema._es_perdida; });
+    const perdidasComoEgreso = desp.a_marcar.filter(function(x){ return x.sistema._es_perdida; });
     const body = {
-      despachos: { ids_marcar: desp.a_marcar.map(function(x){ return x.id_sistema; }).filter(Boolean), fechas_por_id: {}, crear: [] },
-      ingresos:  { ids_marcar: ing.a_marcar.map(function(x){ return x.id_sistema; }).filter(Boolean), crear: [] },
-      r22:       { ids_marcar: r22.a_marcar.map(function(x){ return x.id_sistema; }).filter(Boolean), crear: [] }
+      despachos: {
+        ids_marcar:    despachosNormales.map(function(x){ return x.sistema.id; }).filter(Boolean),
+        fechas_por_id: {},
+        crear:         [],
+        ids_perdidas:  perdidasComoEgreso.map(function(x){ return x.sistema.id; }).filter(Boolean)
+      },
+      ingresos:  { ids_marcar: ing.a_marcar.map(function(x){ return x.sistema.id; }).filter(Boolean), crear: [] },
+      r22:       { ids_marcar: r22.a_marcar.map(function(x){ return x.sistema.id; }).filter(Boolean), crear: [] }
     };
-    desp.a_marcar.forEach(function(x){ if (x.id_sistema && x.fecha) body.despachos.fechas_por_id[x.id_sistema] = x.fecha; });
+    despachosNormales.forEach(function(x){
+      if (x.sistema.id && x.archivo && x.archivo.fecha) body.despachos.fechas_por_id[x.sistema.id] = x.archivo.fecha;
+    });
 
     const res = await fetch('/api/ifco/consolidar/aplicar', {
       method: 'POST',

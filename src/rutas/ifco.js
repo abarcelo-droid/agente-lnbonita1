@@ -4110,59 +4110,68 @@ router.post('/consolidar/preview', upload.single('archivo'), async function(req,
     }
     try { fs.unlinkSync(filePath); } catch(_){}
 
-    // ── DESPACHOS: matchea contra ifco_remitos_super
+    // ── DESPACHOS / EGRESOS: matchea contra ifco_remitos_super (despachos) Y contra ifco_movimientos tipo='perdida'
+    // Los egresos del archivo IFCO (también llamados "Retiros" en el header) representan TODO lo que sale del depo.
+    // En el sistema eso son los despachos (ifco_remitos_super) + las pérdidas (ifco_movimientos tipo='perdida').
     const sysDesp = db.prepare(`
       SELECT id, n_remito_ifco, n_remito_sg, fecha_emision, fecha_sellado, fecha_enviado, fecha_presentado,
              empresa, sucursal, cantidad_despachada, cantidad_recibida, cantidad_rechazada,
              estado, origen, proveedor_origen_id
       FROM ifco_remitos_super WHERE eliminado_en IS NULL
     `).all();
+    const sysPerdidas = db.prepare(`
+      SELECT id, n_remito, fecha, cantidad, consolidado_en
+      FROM ifco_movimientos
+      WHERE eliminado_en IS NULL AND tipo = 'perdida'
+    `).all();
     const idxDesp = {};
     sysDesp.forEach(function(r){ const k = _normalizarNumeroRemito(r.n_remito_ifco); if (k) idxDesp[k] = r; });
+    const idxPerd = {};
+    sysPerdidas.forEach(function(r){ const k = _normalizarNumeroRemito(r.n_remito); if (k) idxPerd[k] = r; });
     const desp = { a_marcar: [], ya_consolidados: [], no_encontrados: [] };
     parsed.despachos.forEach(function(arch) {
-      const sis = idxDesp[arch.n_remito_normalizado];
-      if (!sis) {
-        desp.no_encontrados.push({
-          n_remito_archivo: arch.n_remito_archivo, n_remito_sistema: arch.n_remito_sistema,
-          fecha: arch.fecha, detalle: arch.detalle, cantidad: arch.cantidad,
-          cadena_sugerida: _matchCadenaIFCO(arch.detalle)
-        });
-      } else if (sis.estado === 'presentado') {
-        desp.ya_consolidados.push({ archivo: arch, sistema: sis });
-      } else {
-        desp.a_marcar.push({ archivo: arch, sistema: sis });
+      // Primero busca como despacho normal
+      const sisDesp = idxDesp[arch.n_remito_normalizado];
+      if (sisDesp) {
+        if (sisDesp.estado === 'presentado') {
+          desp.ya_consolidados.push({ archivo: arch, sistema: sisDesp });
+        } else {
+          desp.a_marcar.push({ archivo: arch, sistema: sisDesp });
+        }
+        return;
       }
+      // Si no es despacho, buscar en pérdidas (cajones perdidos = egreso del depo)
+      const sisPerd = idxPerd[arch.n_remito_normalizado];
+      if (sisPerd) {
+        // Lo tratamos como "ya consolidado" si tiene consolidado_en, sino como "a_marcar"
+        if (sisPerd.consolidado_en) {
+          desp.ya_consolidados.push({ archivo: arch, sistema: Object.assign({}, sisPerd, { _es_perdida: true }) });
+        } else {
+          desp.a_marcar.push({ archivo: arch, sistema: Object.assign({}, sisPerd, { _es_perdida: true }) });
+        }
+        return;
+      }
+      // No encontrado en ningún lado
+      desp.no_encontrados.push({
+        n_remito_archivo: arch.n_remito_archivo, n_remito_sistema: arch.n_remito_sistema,
+        fecha: arch.fecha, detalle: arch.detalle, cantidad: arch.cantidad,
+        cadena_sugerida: _matchCadenaIFCO(arch.detalle)
+      });
     });
 
-    // ── INGRESOS: matchea contra ifco_movimientos por n_remito_normalizado
-    // Caso especial: si el detalle dice "Devolución de Cajas Utilizadas", los IFCOs vuelven
-    // del cliente al sistema. Históricamente algunos se cargaron como tipo='perdida' por error,
-    // así que esos también deben considerarse válidos. El resto solo matchea contra tipo='retiro'.
+    // ── INGRESOS: matchea contra ifco_movimientos (tipo='retiro') por n_remito_normalizado
+    // Los ingresos del archivo IFCO se corresponden con retiros del sistema (cajones que volvieron).
+    // Las pérdidas NO se incluyen acá — son egresos y se matchean contra los egresos del archivo.
     const sysIng = db.prepare(`
-      SELECT id, n_remito, fecha, cantidad, sucursal_ifco, modelo, consolidado_en, tipo
+      SELECT id, n_remito, fecha, cantidad, sucursal_ifco, modelo, consolidado_en
       FROM ifco_movimientos
-      WHERE eliminado_en IS NULL AND tipo IN ('retiro','perdida')
+      WHERE eliminado_en IS NULL AND tipo = 'retiro'
     `).all();
-    const idxIngRetiro = {};
-    const idxIngPerdida = {};
-    sysIng.forEach(function(r){
-      const k = _normalizarNumeroRemito(r.n_remito);
-      if (!k) return;
-      if (r.tipo === 'retiro')  idxIngRetiro[k]  = r;
-      if (r.tipo === 'perdida') idxIngPerdida[k] = r;
-    });
+    const idxIng = {};
+    sysIng.forEach(function(r){ const k = _normalizarNumeroRemito(r.n_remito); if (k) idxIng[k] = r; });
     const ing = { a_marcar: [], ya_consolidados: [], no_encontrados: [] };
-    const esDevolucion = function(detalle) {
-      return /devoluci[oó]n\s+de\s+cajas\s+utilizadas/i.test(detalle || '');
-    };
     parsed.ingresos.forEach(function(arch) {
-      // Primero busca como retiro normal
-      let sis = idxIngRetiro[arch.n_remito_normalizado];
-      // Si no encontró y es "Devolución de Cajas Utilizadas", busca también en pérdidas
-      if (!sis && esDevolucion(arch.detalle)) {
-        sis = idxIngPerdida[arch.n_remito_normalizado];
-      }
+      const sis = idxIng[arch.n_remito_normalizado];
       if (!sis) {
         ing.no_encontrados.push({
           n_remito_archivo: arch.n_remito_archivo, n_remito_sistema: arch.n_remito_sistema,
@@ -4203,26 +4212,52 @@ router.post('/consolidar/preview', upload.single('archivo'), async function(req,
       'ingresos[a/ya/no]=', ing.a_marcar.length, ing.ya_consolidados.length, ing.no_encontrados.length,
       'r22[a/ya/no]=', r22out.a_marcar.length, r22out.ya_consolidados.length, r22out.no_encontrados.length);
 
-    // ── BALANCE AGREGADO DE INGRESOS (red de seguridad) ─────────────────────
-    // Suma todo lo que el archivo dice que ingresó (devoluciones de cajas vacías),
-    // contra el total de retiros + pérdidas en el sistema. Útil cuando el match
-    // fila-por-fila falla por diferencias de numeración entre IFCO y sistema.
+    // ── BALANCE AGREGADO (red de seguridad si el match fila-por-fila falla) ──────
+    // INGRESOS:  total archivo (ingresos) vs total sistema (retiros + R22)
+    // EGRESOS:   total archivo (despachos) vs total sistema (despachos + perdidas)
     const sumArr = function(arr, key) {
       return (arr || []).reduce(function(s, x){ return s + (parseInt(x[key]) || 0); }, 0);
     };
+    // Total del archivo IFCO
     const totalArchivoIng = sumArr(parsed.ingresos, 'cantidad');
-    // El total del sistema lo tomamos sumando los movimientos que tenemos en el índice
-    const totalSistemaIng = (function(){
+    const totalArchivoEgr = sumArr(parsed.despachos, 'cantidad');
+    // Total sistema lado ingresos: retiros (idxIng) + R22 (sumamos directo de DB porque no hay índice)
+    const totalSistemaRetiros = (function(){
       let total = 0;
-      for (const k in idxIngRetiro)  total += (parseInt(idxIngRetiro[k].cantidad)  || 0);
-      for (const k in idxIngPerdida) total += (parseInt(idxIngPerdida[k].cantidad) || 0);
+      for (const k in idxIng) total += (parseInt(idxIng[k].cantidad) || 0);
       return total;
     })();
+    const totalSistemaR22 = db.prepare(`
+      SELECT COALESCE(SUM(cantidad), 0) AS total FROM ifco_recepciones_proveedor
+      WHERE eliminado_en IS NULL AND es_r22 = 1
+    `).get().total || 0;
+    const totalSistemaIng = totalSistemaRetiros + totalSistemaR22;
+    // Total sistema lado egresos: despachos + perdidas
+    const totalSistemaDespachos = (function(){
+      let total = 0;
+      for (const k in idxDesp) total += (parseInt(idxDesp[k].cantidad_despachada) || 0);
+      return total;
+    })();
+    const totalSistemaPerdidas = (function(){
+      let total = 0;
+      for (const k in idxPerd) total += (parseInt(idxPerd[k].cantidad) || 0);
+      return total;
+    })();
+    const totalSistemaEgr = totalSistemaDespachos + totalSistemaPerdidas;
+
     const balanceIng = {
-      total_archivo:  totalArchivoIng,
-      total_sistema:  totalSistemaIng,
-      diferencia:     totalArchivoIng - totalSistemaIng,
-      coincide:       totalArchivoIng === totalSistemaIng
+      total_archivo:        totalArchivoIng,
+      total_sistema:        totalSistemaIng,
+      total_sistema_desg:   { retiros: totalSistemaRetiros, r22: totalSistemaR22 },
+      diferencia:           totalArchivoIng - totalSistemaIng,
+      coincide:             totalArchivoIng === totalSistemaIng
+    };
+    const balanceEgr = {
+      total_archivo:        totalArchivoEgr,
+      total_sistema:        totalSistemaEgr,
+      total_sistema_desg:   { despachos: totalSistemaDespachos, perdidas: totalSistemaPerdidas },
+      diferencia:           totalArchivoEgr - totalSistemaEgr,
+      coincide:             totalArchivoEgr === totalSistemaEgr
     };
 
     res.json({
@@ -4235,7 +4270,8 @@ router.post('/consolidar/preview', upload.single('archivo'), async function(req,
       despachos: desp,
       ingresos:  ing,
       r22:       r22out,
-      balance_ingresos: balanceIng
+      balance_ingresos: balanceIng,
+      balance_egresos:  balanceEgr
     });
   } catch(e) {
     console.error('[IFCO][consolidar/preview] EXCEPCION:', e);
@@ -4711,6 +4747,17 @@ router.post('/consolidar/aplicar', express.json(), function(req, res) {
           result.despachos.actualizados++;
         } catch(e) { result.despachos.errores.push({ id, error: e.message }); }
       }
+      // PÉRDIDAS marcadas como egreso (vienen del lado despachos del archivo IFCO)
+      // Se consolidan en ifco_movimientos como cualquier otro movimiento.
+      for (const id of (desp.ids_perdidas || [])) {
+        try {
+          const r = db.prepare("SELECT * FROM ifco_movimientos WHERE id=? AND eliminado_en IS NULL AND tipo='perdida'").get(id);
+          if (!r) { result.despachos.errores.push({ id, error: 'Pérdida no encontrada' }); continue; }
+          if (r.consolidado_en) continue;
+          db.prepare("UPDATE ifco_movimientos SET consolidado_en=datetime('now','localtime') WHERE id=?").run(id);
+          result.despachos.actualizados++;
+        } catch(e) { result.despachos.errores.push({ id, error: e.message }); }
+      }
       for (let i = 0; i < (desp.crear || []).length; i++) {
         const n = desp.crear[i];
         try {
@@ -4730,10 +4777,10 @@ router.post('/consolidar/aplicar', express.json(), function(req, res) {
         } catch(e) { result.despachos.errores.push({ n_remito: n.n_remito_sistema, error: e.message }); }
       }
 
-      // ───── INGRESOS (retiros + perdidas que el archivo IFCO trae como devolución) ─────
+      // ───── INGRESOS (retiros) ─────
       for (const id of (ing.ids_marcar || [])) {
         try {
-          const r = db.prepare("SELECT * FROM ifco_movimientos WHERE id=? AND eliminado_en IS NULL AND tipo IN ('retiro','perdida')").get(id);
+          const r = db.prepare("SELECT * FROM ifco_movimientos WHERE id=? AND eliminado_en IS NULL AND tipo='retiro'").get(id);
           if (!r) { result.ingresos.errores.push({ id, error: 'No encontrado' }); continue; }
           if (r.consolidado_en) continue;
           db.prepare("UPDATE ifco_movimientos SET consolidado_en=datetime('now','localtime') WHERE id=?").run(id);
