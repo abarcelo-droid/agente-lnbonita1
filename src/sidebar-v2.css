@@ -4,7 +4,7 @@
  * el CSS existente del panel.html.
  * ─────────────────────────────────────────────────────────────── */
 
-@import url('https://fonts.googleapis.com/css2?family=Archivo+Black&family=Nunito:wght@400;600;700;800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Archivo+Black&family=Nunito:wght@400;600;700;800&family=Public+Sans:wght@400;500;600;700;800&display=swap');
 
 .sb2{
   --sb2-w: 268px;
@@ -34,6 +34,7 @@
 
   --sb2-sans:'Nunito',sans-serif;
   --sb2-display:'Archivo Black','Nunito',sans-serif;
+  --sb2-ui:'Public Sans','Nunito',sans-serif;
 
   width: var(--sb2-w);
   flex-shrink: 0;
@@ -85,8 +86,13 @@
 }
 .sb2-brand-text{ flex:1; min-width:0 }
 .sb2-brand-name{
-  font-family: var(--sb2-display);
-  font-size: 14.5px; letter-spacing: .005em; line-height: 1.1;
+  /* Nunito 800 (no Archivo Black) — para que "Niña" se lea correctamente,
+     ya que Archivo Black renderiza la "i" sin punto visible. */
+  font-family: var(--sb2-sans);
+  font-weight: 800;
+  font-size: 15px;
+  letter-spacing: -.005em;
+  line-height: 1.1;
   color: #fff;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
@@ -161,7 +167,83 @@
 }
 .sb2-hoy-sub .sb2-alert::before{ content: "·"; margin: 0 5px; opacity: .4 }
 
-/* ═══════════ Section heading ═══════════ */
+/* ═══════════ Fast lanes wrapper (Favoritos + Recientes) ═══════════ */
+.sb2-fastlane{
+  margin: 10px var(--sb2-pad-x) 0;
+  background: rgba(255,255,255,.03);
+  border: 1px solid rgba(255,255,255,.06);
+  border-radius: 10px;
+  padding: 4px 0 6px;
+  overflow: hidden;
+  position: relative;
+}
+.sb2-fastlane + .sb2-fastlane{ margin-top: 8px }
+.sb2-fastlane.fav{ background: rgba(240,165,0,.06); border-color: rgba(240,165,0,.18) }
+.sb2-fastlane.rec{ background: rgba(91,127,176,.06); border-color: rgba(91,127,176,.18) }
+
+.sb2-fastlane .sb2-group-sec{
+  padding: 8px 12px 4px;
+  font-size: 9px; letter-spacing: .14em;
+  color: rgba(255,255,255,.65);
+  display: flex; align-items: center; gap: 6px;
+}
+.sb2-fastlane.fav .sb2-group-sec{ color: #FFD89A }
+.sb2-fastlane.rec .sb2-group-sec{ color: #B9CFE7 }
+.sb2-fastlane .sb2-group-sec .badge-count{
+  margin-left: auto;
+  font-size: 9px; font-weight: 800;
+  background: rgba(255,255,255,.08);
+  padding: 1px 6px; border-radius: 999px;
+  color: rgba(255,255,255,.55);
+}
+
+.sb2-fastlane .sb2-ni{
+  padding: 6px 12px;
+  font-family: var(--sb2-ui);
+  font-weight: 500;
+  font-size: 12.5px;
+  color: rgba(255,255,255,.85);
+  border-left-width: 0;
+  padding-left: 14px;
+}
+.sb2-fastlane .sb2-ni:hover{ background: rgba(255,255,255,.06) }
+.sb2-fastlane.fav .sb2-ni .sb2-star{ opacity: .9 }
+
+/* Estado vacío de favoritos — onboarding */
+.sb2-empty-fav{
+  padding: 12px 14px;
+  font-size: 11.5px;
+  color: rgba(255,255,255,.6);
+  line-height: 1.4;
+  display: flex; align-items: flex-start; gap: 10px;
+  font-family: var(--sb2-ui);
+}
+.sb2-empty-fav .star-pulse{
+  color: var(--sb2-gold);
+  font-size: 16px;
+  flex-shrink: 0;
+  margin-top: 1px;
+  animation: sb2starpulse 1.6s ease-in-out infinite;
+}
+@keyframes sb2starpulse{
+  0%,100%{ transform: scale(1); opacity: .8 }
+  50%    { transform: scale(1.18); opacity: 1 }
+}
+
+/* Divider fuerte entre fast lanes y menú normal */
+.sb2-divider{
+  margin: 14px var(--sb2-pad-x) 4px;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,.12) 30%, rgba(255,255,255,.12) 70%, transparent);
+}
+.sb2-divider + .sb2-group-sec{
+  margin-top: 0;
+  padding-top: 4px;
+  font-size: 9px;
+  color: rgba(255,255,255,.3);
+}
+
+/* ═══════════ Section heading (grupos del menú) ═══════════ */
 .sb2-group-sec{
   padding: 14px var(--sb2-pad-x) 6px;
   font-size: 9.5px; font-weight: 800; letter-spacing: .16em;
@@ -175,7 +257,8 @@
   padding: 7px var(--sb2-pad-x);
   cursor: pointer;
   color: rgba(255,255,255,.7);
-  font-size: 12.5px; font-weight: 600;
+  font-family: var(--sb2-ui);
+  font-size: 12.5px; font-weight: 500;
   border-left: 3px solid transparent;
   transition: all .12s;
   text-decoration: none;
@@ -207,19 +290,28 @@
   50%    { box-shadow: 0 0 0 4px rgba(140,26,31,0) }
 }
 
-/* Star (toggle favorito) */
+/* Star (toggle favorito) — más visible para descubrir la feature */
 .sb2-star{
   margin-left: 4px;
-  color: var(--sb2-gold);
-  opacity: 0;
-  font-size: 11px;
+  color: rgba(255,255,255,.25);
+  font-size: 12px;
   flex-shrink: 0;
   cursor: pointer;
-  transition: opacity .12s, transform .12s;
+  transition: color .15s, opacity .12s, transform .12s;
 }
-.sb2-ni:hover .sb2-star{ opacity: .55 }
-.sb2-ni .sb2-star.on{ opacity: 1 }
-.sb2-star:hover{ opacity: 1 !important; transform: scale(1.2) }
+.sb2-ni:hover .sb2-star{ color: rgba(255,200,80,.55) }
+.sb2-ni .sb2-star.on{ color: var(--sb2-gold); opacity: 1 }
+.sb2-star:hover{ color: var(--sb2-gold) !important; transform: scale(1.25) }
+
+/* Animación first-time: la primera estrella visible pulsa para llamar la atención */
+.sb2-ni.sb2-hint .sb2-star{
+  color: var(--sb2-gold);
+  animation: sb2starhint 1.8s ease-in-out 3;
+}
+@keyframes sb2starhint{
+  0%,100%{ transform: scale(1) }
+  50%    { transform: scale(1.35) }
+}
 
 /* ═══════════ Grupo (top-level) ═══════════ */
 .sb2-grp{
@@ -227,7 +319,8 @@
   padding: 9px var(--sb2-pad-x);
   cursor: pointer;
   color: rgba(255,255,255,.85);
-  font-size: 10.5px; font-weight: 800;
+  font-family: var(--sb2-ui);
+  font-size: 10.5px; font-weight: 700;
   text-transform: uppercase; letter-spacing: .1em;
   user-select: none;
   border-left: 3px solid var(--sb2-acc-general);
