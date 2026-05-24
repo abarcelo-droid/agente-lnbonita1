@@ -1543,12 +1543,13 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
 <div class="ph"><div><div class="ph-t">🧪 Fertilizantes e Insumos</div><div class="ph-s">Stock actual y maestro de productos</div></div>
 <button class="btn bb" onclick="paAbrirNuevoInsumo()">+ Nuevo insumo</button></div>
 <div class="filt">
-  <select id="pa-ins-cat-fil" onchange="paLoadInsumos()" style="margin-right:8px">
-    <option value="">Todas las categorías</option>
-    <option value="agroinsumos">🌱 AGROINSUMOS</option>
-    <option value="herramientas">🔧 HERRAMIENTAS</option>
-    <option value="otros">📦 OTROS</option>
-  </select>
+  <!-- Selector de categoría con 2 botones (default: Agroinsumos). Mantenemos un input
+       hidden con el valor actual para no tener que tocar paLoadInsumos() ni el resto del flow. -->
+  <input type="hidden" id="pa-ins-cat-fil" value="agroinsumos">
+  <div style="display:inline-flex;gap:6px;margin-right:14px" id="pa-ins-cat-pills">
+    <button type="button" class="pa-pill on" data-cat="agroinsumos" onclick="paSetCatFiltro('agroinsumos')">🌱 Agroinsumos</button>
+    <button type="button" class="pa-pill" data-cat="otros" onclick="paSetCatFiltro('otros')">📦 Otros</button>
+  </div>
   <select id="pa-ins-tipo-fil" onchange="paLoadInsumos()">
     <option value="">Todos los tipos</option>
     <option value="fertilizante">Fertilizantes</option>
@@ -1570,8 +1571,27 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     Ver desactivados
   </label>
 </div>
+<style>
+  .pa-pill { padding:6px 14px; border-radius:999px; border:1px solid var(--bor); background:#fff; font-size:13px; cursor:pointer; font-weight:500; color:var(--mut); transition:all .15s }
+  .pa-pill:hover { background:#f3f4f6 }
+  .pa-pill.on { background:var(--burg); color:#fff; border-color:var(--burg) }
+  .pa-pill.on:hover { background:var(--burg); opacity:0.9 }
+  /* Headers ordenables */
+  .pa-tbl th.sortable { cursor:pointer; user-select:none; white-space:nowrap }
+  .pa-tbl th.sortable:hover { background:#f3f4f6 }
+  .pa-tbl th .sort-ind { color:var(--burg); font-size:10px; margin-left:4px }
+</style>
 <div class="pa-wrap"><div class="ab-table-wrap"><table class="pa-tbl">
-  <thead><tr><th>Nombre</th><th>Principio activo</th><th>Categoría</th><th>Unidad</th><th style="text-align:right">Stock actual</th><th style="text-align:right">Último precio</th><th>Estado</th><th></th></tr></thead>
+  <thead><tr>
+    <th class="sortable" onclick="paSortBy('nombre')">Nombre <span class="sort-ind" id="pa-sort-nombre"></span></th>
+    <th class="sortable" onclick="paSortBy('componente_madre')">Principio activo <span class="sort-ind" id="pa-sort-componente_madre"></span></th>
+    <th class="sortable" onclick="paSortBy('categoria')">Categoría <span class="sort-ind" id="pa-sort-categoria"></span></th>
+    <th class="sortable" onclick="paSortBy('unidad')">Unidad <span class="sort-ind" id="pa-sort-unidad"></span></th>
+    <th class="sortable" style="text-align:right" onclick="paSortBy('stock_actual')">Stock actual <span class="sort-ind" id="pa-sort-stock_actual"></span></th>
+    <th class="sortable" style="text-align:right" onclick="paSortBy('precio_ref_usd')">Último precio <span class="sort-ind" id="pa-sort-precio_ref_usd"></span></th>
+    <th class="sortable" onclick="paSortBy('estado')">Estado <span class="sort-ind" id="pa-sort-estado"></span></th>
+    <th></th>
+  </tr></thead>
   <tbody id="pa-ins-tbody"><tr><td colspan="8" class="emp">Cargando...</td></tr></tbody>
 </table></div></div>
 </div>
@@ -12663,6 +12683,34 @@ function paBadgeTipo(t){
   var d=m[t]||['pa-gris-bg',t];
   return'<span class="pa-badge '+d[0]+'">'+d[1]+'</span>';
 }
+// Estado de sort para insumos: cuando es null, se usa el default (críticos arriba)
+PA._insSort = { col: null, dir: 'asc' };
+
+// Cambiar categoría desde los pills
+function paSetCatFiltro(cat){
+  document.getElementById('pa-ins-cat-fil').value = cat;
+  document.querySelectorAll('#pa-ins-cat-pills .pa-pill').forEach(function(b){
+    b.classList.toggle('on', b.getAttribute('data-cat') === cat);
+  });
+  paLoadInsumos();
+}
+
+// Click en header: alterna asc/desc o cambia columna
+function paSortBy(col){
+  if (PA._insSort.col === col) {
+    PA._insSort.dir = (PA._insSort.dir === 'asc') ? 'desc' : 'asc';
+  } else {
+    PA._insSort.col = col;
+    PA._insSort.dir = 'asc';
+  }
+  // Actualizar indicadores visuales en todos los headers
+  ['nombre','componente_madre','categoria','unidad','stock_actual','precio_ref_usd','estado'].forEach(function(c){
+    var el = document.getElementById('pa-sort-' + c);
+    if (el) el.textContent = (PA._insSort.col === c) ? (PA._insSort.dir === 'asc' ? '▲' : '▼') : '';
+  });
+  paLoadInsumos();
+}
+
 function paLoadInsumos(){
   var tipo=document.getElementById('pa-ins-tipo-fil').value;
   var cat=document.getElementById('pa-ins-cat-fil').value;
@@ -12672,8 +12720,55 @@ function paLoadInsumos(){
   paF('/api/pa/insumos'+(qs.length?'?'+qs.join('&'):'')).then(function(r){
     PA.insumos=r.data||[];var tb=document.getElementById('pa-ins-tbody');
     if(!PA.insumos.length){tb.innerHTML='<tr><td colspan="8" class="emp">Sin insumos</td></tr>';return;}
+    // Helper local: redondea floats a N decimales sin la basura típica de JS
+    // (4.610000000000001 → 4.61). Si es entero, no muestra decimales.
+    var paFmtStock = function(n) {
+      if (n === null || n === undefined || n === '') return '0';
+      var num = Number(n);
+      if (isNaN(num)) return String(n);
+      var redondeado = Math.round(num * 100) / 100;
+      return (redondeado % 1 === 0) ? redondeado.toString() : redondeado.toFixed(2);
+    };
+    // Ordenamiento: si el usuario eligió una columna, usar esa. Si no, default = críticos arriba.
+    var sortCol = PA._insSort.col;
+    var sortDir = PA._insSort.dir === 'desc' ? -1 : 1;
+    PA.insumos.sort(function(a, b){
+      // Los desactivados siempre van al final, independientemente del sort
+      if (!a.activo && b.activo) return 1;
+      if (a.activo && !b.activo) return -1;
+      if (!sortCol) {
+        // Default: críticos (stock negativo) primero, después bajos, después OK
+        var pA = (a.stock_actual < 0) ? 0 : (a.stock_minimo > 0 && a.stock_actual <= a.stock_minimo ? 1 : 2);
+        var pB = (b.stock_actual < 0) ? 0 : (b.stock_minimo > 0 && b.stock_actual <= b.stock_minimo ? 1 : 2);
+        if (pA !== pB) return pA - pB;
+        return (a.nombre || '').localeCompare(b.nombre || '');
+      }
+      // Sort dinámico por columna
+      var va, vb;
+      if (sortCol === 'categoria') {
+        // Concatenar categoria_v2 + subcategoria para sort consistente
+        va = ((a.categoria_v2 || a.categoria_principal || '') + ' ' + (a.subcategoria || '')).trim();
+        vb = ((b.categoria_v2 || b.categoria_principal || '') + ' ' + (b.subcategoria || '')).trim();
+      } else if (sortCol === 'estado') {
+        // Orden de prioridad: crítico < bajo < ok
+        var stateA = (a.stock_actual < 0) ? 0 : (a.stock_minimo > 0 && a.stock_actual <= a.stock_minimo ? 1 : 2);
+        var stateB = (b.stock_actual < 0) ? 0 : (b.stock_minimo > 0 && b.stock_actual <= b.stock_minimo ? 1 : 2);
+        va = stateA; vb = stateB;
+      } else {
+        va = a[sortCol];
+        vb = b[sortCol];
+      }
+      // Nulls al final
+      if (va == null && vb == null) return 0;
+      if (va == null) return 1;
+      if (vb == null) return -1;
+      // Comparación: si son números, numérica; si no, string
+      if (typeof va === 'number' && typeof vb === 'number') return (va - vb) * sortDir;
+      return String(va).localeCompare(String(vb)) * sortDir;
+    });
     tb.innerHTML=PA.insumos.map(function(i){
-      var bajo=i.stock_minimo>0&&i.stock_actual<=i.stock_minimo;
+      var critico = Number(i.stock_actual) < 0;
+      var bajo=!critico && i.stock_minimo>0 && i.stock_actual<=i.stock_minimo;
       var ficha=i.ficha_tecnica_path?'<a href="'+i.ficha_tecnica_path+'" target="_blank" style="font-size:11px;color:var(--burg)">📄 Ficha</a>':'';
       var precioUsd=i.precio_ref_usd?'USD '+Number(i.precio_ref_usd).toFixed(2):'—';
       // Icono de categoría preferentemente desde categoria_v2 (taxonomía nueva),
@@ -12703,21 +12798,32 @@ function paLoadInsumos(){
         ? '<span style="cursor:pointer;text-decoration:underline;text-decoration-style:dotted;color:var(--mut);font-size:12px" onclick="paVerHistorialCompras(null,\''+i.componente_madre.replace(/'/g,"\\'")+'\',\'componente\')">'+i.componente_madre+'</span>'
         : '<span style="color:var(--mut);font-size:12px">—</span>';
 
-      // Stock: si hay presentacion_base, mostrar también cuántos bultos equivalen
-      var stockTxt = '<strong>'+(i.stock_actual||0)+' '+i.unidad+'</strong>';
-      if (i.presentacion_base && i.presentacion_base > 0 && i.stock_actual > 0) {
-        var bultos = (i.stock_actual / i.presentacion_base);
+      // Stock: redondeado a 2 decimales (evita basura de floats como 4.610000000000001).
+      // Si el stock es negativo, lo pintamos en rojo para que salte a la vista.
+      var stockNum = Number(i.stock_actual) || 0;
+      var stockStr = paFmtStock(stockNum);
+      var stockColor = critico ? 'color:#991b1b;' : '';
+      var stockTxt = '<strong style="'+stockColor+'">'+stockStr+' '+i.unidad+'</strong>';
+      if (i.presentacion_base && i.presentacion_base > 0 && stockNum > 0) {
+        var bultos = (stockNum / i.presentacion_base);
         var bultosStr = (bultos % 1 === 0) ? bultos.toString() : bultos.toFixed(2);
         stockTxt += '<br><span style="font-size:10px;color:var(--mut)">≈ '+bultosStr+' × '+i.presentacion_base+' '+i.unidad+'</span>';
       }
 
-      var estadoBadge = i.activo
-        ? (bajo ? '<span class="pa-badge pa-rojo-bg">⚠ Bajo</span>' : '<span class="pa-badge pa-verde-bg">OK</span>')
-        : '<span class="pa-badge pa-gris-bg">○ Desactivado</span>';
+      var estadoBadge;
+      if (!i.activo) {
+        estadoBadge = '<span class="pa-badge pa-gris-bg">○ Desactivado</span>';
+      } else if (critico) {
+        estadoBadge = '<span class="pa-badge" style="background:#fee2e2;color:#991b1b;font-weight:700" title="Stock negativo: hay un error de registro. Revisá compras/movimientos.">🚨 STOCK CRÍTICO</span>';
+      } else if (bajo) {
+        estadoBadge = '<span class="pa-badge pa-rojo-bg">⚠ Bajo</span>';
+      } else {
+        estadoBadge = '<span class="pa-badge pa-verde-bg">OK</span>';
+      }
       var accionBtn = i.activo
-        ? '<button class="btn bd bs" onclick="paDesactivarInsumo('+i.id+',\''+i.nombre.replace(/'/g,"\\'")+'\')" title="Desactivar" style="padding:4px 10px;font-size:11px">🗑 Borrar</button>'
+        ? '<button class="btn bo bs" onclick="paDesactivarInsumo('+i.id+',\''+i.nombre.replace(/'/g,"\\'")+'\')" title="Desactivar (queda el historial, se puede reactivar después)" style="padding:4px 10px;font-size:11px">🗑 Desactivar</button>'
         : '<button class="btn bo bs" onclick="paReactivarInsumo('+i.id+')" title="Reactivar" style="padding:4px 10px;font-size:11px;color:var(--ok);border-color:var(--ok)">↺ Reactivar</button>';
-      var rowStyle = i.activo ? '' : ' style="opacity:0.5"';
+      var rowStyle = i.activo ? (critico ? ' style="background:#fef2f2"' : '') : ' style="opacity:0.5"';
       return'<tr'+rowStyle+'>'
         +'<td><span title="'+(i.categoria_v2||i.categoria_principal||'agroinsumos')+'" style="margin-right:4px">'+catIco+'</span><strong style="cursor:pointer;color:var(--burg)" onclick="paVerHistorialCompras('+i.id+',\''+i.nombre.replace(/'/g,"\\'")+'\',\'producto\')">'+i.nombre+'</strong>'+(ficha?'<br>'+ficha:'')+'</td>'
         +'<td>'+princip+'</td>'
