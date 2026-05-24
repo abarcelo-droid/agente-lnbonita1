@@ -114,6 +114,13 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
 <script src="/static/mandata.js" defer></script>
 <link rel="stylesheet" href="/static/sidebar-v2.css">
 <script src="/static/sidebar-v2.js" defer></script>
+<style>
+  /* Evitar el FOUC del sidebar viejo: cuando carga el sidebar v2 (sb-v2),
+     el nav original queda como "fuente de verdad" pero NO debe renderizarse.
+     Lo ocultamos desde el inicio con CSS inline en el head; así no parpadea
+     al recargar la página antes de que el JS del sidebar v2 corra. */
+  body > .shell > nav { display: none !important; }
+</style>
 </head>
 <body>
 <div class="shell">
