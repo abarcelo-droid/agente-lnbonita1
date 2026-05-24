@@ -6078,6 +6078,34 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
 <div id="toast"></div>
 
 <script>
+// ── INTERCEPTOR GLOBAL DE 401 ─────────────────────────────────────────────
+// Cuando la sesión expira (1 día en desktop, 30 días en mobile), el backend
+// devuelve 401 a cualquier endpoint protegido. Antes el usuario podía seguir
+// navegando el panel pero sus POSTs fallaban silenciosamente.
+// Ahora: cualquier 401 → aviso + redirect al login.
+(function() {
+  if (window.__lnb_fetch_intercepted) return;
+  window.__lnb_fetch_intercepted = true;
+  const _origFetch = window.fetch.bind(window);
+  let _redirigiendo = false;
+  window.fetch = function(input, init) {
+    return _origFetch(input, init).then(function(res) {
+      if (res.status === 401 && !_redirigiendo) {
+        // Excluir el propio endpoint de login para no entrar en loop
+        const url = (typeof input === 'string') ? input : (input && input.url) || '';
+        if (url.indexOf('/api/auth/login') === -1 && url.indexOf('/api/auth/me') === -1) {
+          _redirigiendo = true;
+          alert('Tu sesión expiró. Te llevamos al login.');
+          // Conservar a dónde estaba para volver después de loguear
+          const next = encodeURIComponent(window.location.pathname + window.location.search);
+          window.location.href = '/login.html?next=' + next;
+        }
+      }
+      return res;
+    });
+  };
+})();
+
 var navAct = 'inicio';
 var convAct = null;
 var ofertaAct = 'oferta1';
