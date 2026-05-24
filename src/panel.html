@@ -4116,6 +4116,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
           <th>Serie</th><th>Rango</th><th>En poder de</th>
           <th style="text-align:right">Usados</th><th style="text-align:right">Disponibles</th>
           <th style="text-align:center">Salteos</th>
+          <th>Último uso</th>
           <th></th>
         </tr></thead>
         <tbody></tbody>
@@ -4903,7 +4904,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
           <textarea id="ifco-presentar-cc" rows="3" style="width:100%;padding:8px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg);font-family:inherit;font-size:12px;resize:vertical"></textarea>
         </div>
       </div>
-      <div style="font-size:11px;color:var(--mut);margin-top:3px">El CC viene precargado con los referentes habituales. Editalo si necesitás. Se guarda en tu navegador para próximas veces.</div>
+      <div style="font-size:11px;color:var(--mut);margin-top:3px">El CC se precarga con los referentes habituales. Si lo editás, los cambios son solo para este envío (vuelve a los fijos en el próximo).</div>
       <div class="ab-modal-footer" style="margin-top:18px;display:flex;justify-content:flex-end;gap:8px">
         <button class="btn bo" onclick="document.getElementById('ifco-mb-presentar').classList.remove('on')">Cancelar</button>
         <button class="btn bb" onclick="ifcoPresentarPreview()">Preview del mail →</button>
@@ -19521,7 +19522,8 @@ async function ifcoAbrirPresentar() {
           '</tr>';
         }).join('') + '</tbody></table>';
     }
-    // Email guardado (TO siempre vacío, CC con default fijo si nunca se guardó nada)
+    // CC siempre con los 8 fijos (no se persiste en localStorage para evitar
+    // que el usuario los borre por accidente y queden olvidados).
     const CC_FIJOS = [
       'r.figueredo@lnbonita.com.ar',
       'c.persampieri@lnbonita.com.ar',
@@ -19533,7 +19535,7 @@ async function ifcoAbrirPresentar() {
       'maria.mendiondo@ifco.com'
     ].join(', ');
     document.getElementById('ifco-presentar-email').value = ''; // TO siempre vacío (requerido)
-    document.getElementById('ifco-presentar-cc').value    = localStorage.getItem('ifco_presentar_cc') || CC_FIJOS;
+    document.getElementById('ifco-presentar-cc').value    = CC_FIJOS;
     document.getElementById('ifco-mb-presentar').classList.add('on');
   } catch(e) { alert('Error: ' + e.message); }
 }
@@ -19547,7 +19549,6 @@ async function ifcoPresentarPreview() {
   const email = document.getElementById('ifco-presentar-email').value.trim();
   const cc    = document.getElementById('ifco-presentar-cc').value.trim();
   if (!email) { alert('Ingresá el mail destinatario (IFCO)'); return; }
-  localStorage.setItem('ifco_presentar_cc', cc);
   _ifcoPresState = { ids: ids, to: email, cc: cc };
 
   try {
@@ -20072,7 +20073,7 @@ async function ifcoAbrirMailAutorizacion(id) {
     document.getElementById('ifco-autm-cuerpo-html').oninput = function(){
       document.getElementById('ifco-autm-cuerpo-preview').innerHTML = this.value;
     };
-    // TO siempre vacío (requerido). CC con los referentes habituales como default.
+    // CC siempre con los 8 fijos (mismo comportamiento que el modal de presentación)
     const CC_FIJOS_AUT = [
       'r.figueredo@lnbonita.com.ar',
       'c.persampieri@lnbonita.com.ar',
@@ -20084,7 +20085,7 @@ async function ifcoAbrirMailAutorizacion(id) {
       'maria.mendiondo@ifco.com'
     ].join(', ');
     document.getElementById('ifco-autm-to').value = '';
-    document.getElementById('ifco-autm-cc').value = localStorage.getItem('ifco_autoriz_cc') || CC_FIJOS_AUT;
+    document.getElementById('ifco-autm-cc').value = CC_FIJOS_AUT;
     document.getElementById('ifco-mb-autoriz-mail').classList.add('on');
   } catch(e) { alert('Error: ' + e.message); }
 }
@@ -20099,8 +20100,6 @@ async function ifcoEnviarMailAutorizacion() {
   if (!asunto) { alert('El asunto no puede estar vacío'); return; }
 
   if (!confirm('¿Enviar el mail a ' + to + '?')) return;
-
-  if (cc) localStorage.setItem('ifco_autoriz_cc', cc);
 
   const btn = document.getElementById('ifco-autm-btn-enviar');
   btn.disabled = true; btn.textContent = 'Enviando…';
@@ -20465,7 +20464,7 @@ async function ifcoCargarRecepciones() {
         '<td>'+_ifcoFecha(r.fecha_recepcion)+'</td>' +
         '<td>'+provCell+'</td>' +
         '<td style="text-align:right;font-variant-numeric:tabular-nums"><b>'+_ifcoFmt(r.cantidad)+'</b></td>' +
-        '<td>'+_ifcoEsc(r.producto||'—')+'</td>' +
+        '<td style="font-style:italic;color:var(--mut);font-size:12px;text-transform:lowercase">'+_ifcoEsc(r.producto||'—')+'</td>' +
         '<td style="font-family:monospace;font-size:12px">'+_ifcoEsc(r.n_remito_proveedor||'—')+'</td>' +
         '<td>'+fotoCell+'</td>' +
         '<td style="font-size:11px;color:var(--mut)">'+_ifcoEsc(r.usuario_creador_nombre||'—')+'</td>' +
@@ -20695,7 +20694,7 @@ async function ifcoPapCargarRecep() {
           '<td>'+_ifcoFecha(r.fecha_recepcion)+'</td>' +
           '<td>'+_ifcoEsc(r.proveedor_nombre||'?')+'</td>' +
           '<td style="text-align:right">'+_ifcoFmt(r.cantidad)+'</td>' +
-          '<td>'+_ifcoEsc(r.producto||'—')+'</td>' +
+          '<td style="font-style:italic;color:var(--mut);font-size:12px;text-transform:lowercase">'+_ifcoEsc(r.producto||'—')+'</td>' +
           '<td style="font-size:11px;color:var(--mut)">'+_ifcoPapEliminado(r)+'</td>' +
           '<td><button class="btn bb" style="font-size:11px;padding:4px 10px" onclick="ifcoRestaurarRecepcionMerc('+r.id+')">↩️ Restaurar</button></td>' +
         '</tr>';
@@ -21596,7 +21595,7 @@ async function ifcoCargarTalonarios() {
     const rows = await _ifcoFetch('/api/ifco/talonarios');
     const tb = document.querySelector('#ifco-tbl-talons tbody');
     if (rows.length === 0) {
-      tb.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:20px;color:var(--mut)">No hay talonarios cargados — agregá uno con el botón de arriba</td></tr>';
+      tb.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:20px;color:var(--mut)">No hay talonarios cargados — agregá uno con el botón de arriba</td></tr>';
       return;
     }
     tb.innerHTML = rows.map(function(t){
@@ -21628,6 +21627,7 @@ async function ifcoCargarTalonarios() {
         '<td style="text-align:right">'+t.usados_count+'</td>' +
         '<td style="text-align:right"><b>'+disp+'</b></td>' +
         '<td style="text-align:center">'+salteosCell+'</td>' +
+        '<td style="font-size:11px;color:var(--mut)">'+(t.ultimo_uso_en ? _ifcoFecha(t.ultimo_uso_en) : '—')+'</td>' +
         '<td style="display:flex;gap:4px;flex-wrap:wrap">'+acciones.join('')+'</td>' +
       '</tr>';
     }).join('');
