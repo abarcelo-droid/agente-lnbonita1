@@ -1061,14 +1061,21 @@ function _verificarAccesoDeposito(u, deposito_tipo, proveedor_id) {
 // ════════════════════════════════════════════════════════════════════════════
 
 router.get('/talonarios', function(req, res) {
+  // Ordenamos por el último uso (fecha del despacho más reciente que usó cada talonario).
+  // Los que tienen movimiento reciente van arriba. Si nunca se usaron, se ordenan
+  // por fecha de creación. Los inactivos siempre quedan al final.
   const rows = db.prepare(`
     SELECT t.*,
       p.nombre AS proveedor_nombre,
       (SELECT COUNT(*) FROM ifco_remitos_super r WHERE r.talonario_id = t.id AND r.eliminado_en IS NULL) AS usados_count,
-      (SELECT COUNT(*) FROM ifco_numeros_anulados a WHERE a.talonario_id = t.id) AS anulados_count
+      (SELECT COUNT(*) FROM ifco_numeros_anulados a WHERE a.talonario_id = t.id) AS anulados_count,
+      (SELECT MAX(r.creado_en) FROM ifco_remitos_super r WHERE r.talonario_id = t.id AND r.eliminado_en IS NULL) AS ultimo_uso_en
     FROM ifco_talonarios t
     LEFT JOIN proveedores p ON p.id = t.proveedor_id
-    ORDER BY t.activo DESC, t.creado_en DESC
+    ORDER BY t.activo DESC,
+             (ultimo_uso_en IS NULL) ASC,
+             ultimo_uso_en DESC,
+             t.creado_en DESC
   `).all();
 
   // Calcular salteos por talonario: números que están entre el mínimo usado y el máximo usado,
@@ -1591,7 +1598,7 @@ router.get('/remitos', function(req, res) {
                   tal.serie AS talonario_serie,
                   tal.cai AS cai,
                   tal.vto_cai AS vto_cai,
-                  cli.razon_social AS cliente_nombre`;
+                  cli.nombre AS cliente_nombre`;
   }
   q += ` FROM ifco_remitos_super r
            LEFT JOIN proveedores pori ON pori.id = r.proveedor_origen_id
@@ -1600,7 +1607,7 @@ router.get('/remitos', function(req, res) {
   if (esExport) {
     q += `
            LEFT JOIN ifco_talonarios tal ON tal.id = r.talonario_id
-           LEFT JOIN ifco_clientes_dedicados cli ON cli.id = r.cliente_id`;
+           LEFT JOIN dedicados_clientes cli ON cli.id = r.cliente_id`;
   }
   q += ` WHERE 1=1`;
   const p = [];
