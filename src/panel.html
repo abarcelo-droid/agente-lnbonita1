@@ -2120,6 +2120,9 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       <div class="ph-t">🏢 Equipo</div>
       <div class="ph-s">Organigrama del grupo LNB — sociedades, áreas, personas y ubicaciones</div>
     </div>
+    <button id="eq-btn-config-modulos" class="btn bo" style="display:none; font-size:12px; padding:6px 12px; white-space:nowrap" onclick="loadSec('config-modulos')" title="Configurar a qué sociedad pertenece cada módulo (solo admin)">
+      ⚙️ Config Módulos
+    </button>
   </div>
 
   <style>
@@ -9333,6 +9336,9 @@ var LNB_USER = null;
         document.querySelectorAll('[data-admin-only]').forEach(function(el) {
           el.style.display = 'none';
         });
+      } else {
+        var btnCfgMod = document.getElementById('eq-btn-config-modulos');
+        if (btnCfgMod) btnCfgMod.style.display = 'inline-flex';
       }
 
       // Ocultar del sidebar los módulos marcados como "oculto" en Config Módulos.
