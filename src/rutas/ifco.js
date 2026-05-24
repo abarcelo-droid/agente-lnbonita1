@@ -558,6 +558,10 @@ function _parsearFormatoNuevo(ws) {
   if (headerRow < 0) return null;
 
   const despachos = [], ingresos = [], r22 = [];
+  // Totales brutos del Excel (suma directa de columnas INGRESOS y EGRESOS,
+  // sin filtrar ajustes, IC, ni nada). Se usan para el balance agregado.
+  let totalBrutoIngresos = 0;
+  let totalBrutoEgresos  = 0;
   for (let i = headerRow + 1; i <= ws.rowCount; i++) {
     const row = ws.getRow(i);
     const nRem = _cellValue(row.getCell(cN));
@@ -567,6 +571,9 @@ function _parsearFormatoNuevo(ws) {
     const cantEgr = parseInt(egr) || 0;
     const cantIng = parseInt(ing) || 0;
     if (cantEgr <= 0 && cantIng <= 0) continue;
+    // Sumar al total bruto ANTES de filtrar (ajustes, IC, etc se incluyen)
+    totalBrutoIngresos += cantIng;
+    totalBrutoEgresos  += cantEgr;
 
     const detalleVal = cDet > 0 ? _cellValue(row.getCell(cDet)) : null;
     const detalleStr = detalleVal ? String(detalleVal).trim() : '';
@@ -617,7 +624,8 @@ function _parsearFormatoNuevo(ws) {
     }
     // Filas que no encajan en ninguna categoría se ignoran silenciosamente
   }
-  return { despachos: despachos, ingresos: ingresos, r22: r22, remitos: despachos /* compat */ };
+  return { despachos: despachos, ingresos: ingresos, r22: r22, remitos: despachos /* compat */,
+           totalBrutoIngresos: totalBrutoIngresos, totalBrutoEgresos: totalBrutoEgresos };
 }
 
 // FORMATO VIEJO — busca la sección "Entregas a Cadenas" como subtítulo
@@ -688,7 +696,9 @@ function _parsearFormatoViejo(ws) {
     });
   }
   // Formato viejo: solo despachos. Devuelve mismo shape para compat con wizard.
-  return { despachos: remitos, ingresos: [], r22: [], remitos: remitos };
+  const totalEgrViejo = remitos.reduce(function(s, x){ return s + (parseInt(x.cantidad) || 0); }, 0);
+  return { despachos: remitos, ingresos: [], r22: [], remitos: remitos,
+           totalBrutoIngresos: 0, totalBrutoEgresos: totalEgrViejo };
 }
 
 const router = express.Router();
@@ -4218,9 +4228,9 @@ router.post('/consolidar/preview', upload.single('archivo'), async function(req,
     const sumArr = function(arr, key) {
       return (arr || []).reduce(function(s, x){ return s + (parseInt(x[key]) || 0); }, 0);
     };
-    // Total del archivo IFCO
-    const totalArchivoIng = sumArr(parsed.ingresos, 'cantidad');
-    const totalArchivoEgr = sumArr(parsed.despachos, 'cantidad');
+    // Total del archivo IFCO (sumando TODAS las filas, sin filtrar nada — Ajustes, IC, etc incluidos)
+    const totalArchivoIng = parsed.totalBrutoIngresos || 0;
+    const totalArchivoEgr = parsed.totalBrutoEgresos || 0;
     // Total sistema lado ingresos: retiros (idxIng) + R22 (sumamos directo de DB porque no hay índice)
     const totalSistemaRetiros = (function(){
       let total = 0;
