@@ -1603,28 +1603,25 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   <button class="btn bo bs" onclick="exportarFacturas()" title="Exportar a Excel">📥 Excel</button>
   <button class="btn bb" onclick="paAbrirNuevaCompra()">+ Nueva factura</button>
 </div></div>
-<div class="filt">
+<div class="filt" style="flex-wrap:wrap;gap:8px;align-items:center">
+  <input type="text" id="pa-comp-buscar" placeholder="🔍 Buscar proveedor, comprobante, detalle, tipo..." oninput="paFiltrarCompras()" style="flex:1;min-width:240px;font-size:12px;padding:5px 9px;border:1px solid var(--bor2);border-radius:6px">
+  <label style="font-size:12px;color:var(--mut);display:inline-flex;align-items:center;gap:4px">Desde<input type="date" id="pa-comp-desde" onchange="paFiltrarCompras()" style="font-size:12px;padding:3px 5px;border:1px solid var(--bor2);border-radius:4px"></label>
+  <label style="font-size:12px;color:var(--mut);display:inline-flex;align-items:center;gap:4px">Hasta<input type="date" id="pa-comp-hasta" onchange="paFiltrarCompras()" style="font-size:12px;padding:3px 5px;border:1px solid var(--bor2);border-radius:4px"></label>
+  <button class="btn bo bs" onclick="paLimpiarFiltrosCompras()" title="Limpiar filtros" style="font-size:11px;padding:4px 8px">✕ Limpiar</button>
   <select id="pa-comp-fil-tipo" onchange="paLoadCompras()" style="font-size:12px">
     <option value="">Todas las facturas</option>
     <option value="compra">🛒 Compras de bienes</option>
     <option value="servicio">🛠️ Servicios</option>
   </select>
-  <label style="font-size:12px;color:var(--mut);display:inline-flex;align-items:center;gap:6px;cursor:pointer;margin-left:12px">
+  <label style="font-size:12px;color:var(--mut);display:inline-flex;align-items:center;gap:6px;cursor:pointer">
     <input type="checkbox" id="pa-comp-ver-inact" onchange="paLoadCompras()" style="width:auto">
     Ver desactivadas
   </label>
+  <span id="pa-comp-count" style="font-size:12px;color:var(--mut);margin-left:auto"></span>
 </div>
 <div class="pa-wrap"><div class="ab-table-wrap"><table class="pa-tbl">
   <thead>
     <tr><th>Fecha</th><th>Tipo</th><th>Comprobante</th><th>Proveedor</th><th>Detalle</th><th style="text-align:right">Total</th><th>Foto</th><th></th></tr>
-    <tr style="background:var(--bg)">
-      <th><input type="text" placeholder="🔍" oninput="tablaFiltrar('pa-comp-tbody',0,this.value)" style="width:90%;font-size:11px;padding:3px 5px;border:1px solid var(--bor2);border-radius:4px"></th>
-      <th><input type="text" placeholder="🔍" oninput="tablaFiltrar('pa-comp-tbody',1,this.value)" style="width:90%;font-size:11px;padding:3px 5px;border:1px solid var(--bor2);border-radius:4px"></th>
-      <th><input type="text" placeholder="🔍" oninput="tablaFiltrar('pa-comp-tbody',2,this.value)" style="width:90%;font-size:11px;padding:3px 5px;border:1px solid var(--bor2);border-radius:4px"></th>
-      <th><input type="text" placeholder="🔍" oninput="tablaFiltrar('pa-comp-tbody',3,this.value)" style="width:90%;font-size:11px;padding:3px 5px;border:1px solid var(--bor2);border-radius:4px"></th>
-      <th><input type="text" placeholder="🔍" oninput="tablaFiltrar('pa-comp-tbody',4,this.value)" style="width:90%;font-size:11px;padding:3px 5px;border:1px solid var(--bor2);border-radius:4px"></th>
-      <th></th><th></th><th></th>
-    </tr>
   </thead>
   <tbody id="pa-comp-tbody"><tr><td colspan="8" class="emp">Cargando...</td></tr></tbody>
 </table></div></div>
@@ -13121,7 +13118,7 @@ function paLoadCompras(){
     var data=r.data||[];
     EXPORT_DATA.facturas = data;
     var tb=document.getElementById('pa-comp-tbody');
-    if(!data.length){tb.innerHTML='<tr><td colspan="8" class="emp">Sin facturas</td></tr>';return;}
+    if(!data.length){tb.innerHTML='<tr><td colspan="8" class="emp">Sin facturas</td></tr>';var cnt0=document.getElementById('pa-comp-count');if(cnt0)cnt0.textContent='';return;}
     tb.innerHTML=data.map(function(c){
       var esServicio = c.tipo_factura === 'servicio';
       // Detalle: si es servicio, mostrar conceptos; si compra, mostrar productos
@@ -13141,7 +13138,7 @@ function paLoadCompras(){
       var accionBtn = activa
         ? '<button class="btn bd bs" onclick="paDesactivarCompra('+c.id+')" title="Desactivar (revierte stock)" style="padding:3px 8px;font-size:11px">🗑</button>'
         : '<button class="btn bo bs" onclick="paReactivarCompra('+c.id+')" title="Reactivar (suma stock)" style="padding:3px 8px;font-size:11px;color:var(--ok);border-color:var(--ok)">↺</button>';
-      return'<tr'+rowStyle+'>'
+      return'<tr data-fecha="'+(c.fecha?String(c.fecha).slice(0,10):'')+'"'+rowStyle+'>'
         +'<td>'+paFecha(c.fecha)+'</td>'
         +'<td>'+tipoBadge+'</td>'
         +'<td><span class="pa-badge pa-gris-bg" style="font-size:10px">'+(tipoLabel[c.tipo_comprobante]||'Factura')+'</span><br><span style="font-size:11px">'+(c.nro_factura||'—')+'</span></td>'
@@ -13155,7 +13152,42 @@ function paLoadCompras(){
         +'</td>'
         +'</tr>';
     }).join('');
+    paFiltrarCompras();
   });
+}
+
+// Buscador global + rango de fechas para Ingreso de Factura
+function paFiltrarCompras(){
+  var tb=document.getElementById('pa-comp-tbody'); if(!tb) return;
+  var q=((document.getElementById('pa-comp-buscar')||{}).value||'').toLowerCase().trim();
+  var terms=q?q.split(/\s+/):[];
+  var desde=(document.getElementById('pa-comp-desde')||{}).value||'';
+  var hasta=(document.getElementById('pa-comp-hasta')||{}).value||'';
+  var visibles=0, total=0;
+  tb.querySelectorAll('tr').forEach(function(tr){
+    var primera=tr.querySelector('td');
+    if(primera && primera.classList.contains('emp')) return; // fila de estado vacío
+    total++;
+    var texto=tr.textContent.toLowerCase();
+    var okTexto=terms.every(function(t){return texto.indexOf(t)>=0;});
+    var fecha=tr.getAttribute('data-fecha')||'';
+    var okDesde=!desde||(fecha&&fecha>=desde);
+    var okHasta=!hasta||(fecha&&fecha<=hasta);
+    var vis=okTexto&&okDesde&&okHasta;
+    tr.style.display=vis?'':'none';
+    if(vis) visibles++;
+  });
+  var cnt=document.getElementById('pa-comp-count');
+  if(cnt){
+    var filtrando=terms.length||desde||hasta;
+    cnt.textContent=filtrando?(visibles+' de '+total+' facturas'):(total+' factura'+(total===1?'':'s'));
+  }
+}
+function paLimpiarFiltrosCompras(){
+  var b=document.getElementById('pa-comp-buscar'); if(b) b.value='';
+  var d=document.getElementById('pa-comp-desde'); if(d) d.value='';
+  var h=document.getElementById('pa-comp-hasta'); if(h) h.value='';
+  paFiltrarCompras();
 }
 
 function paDesactivarCompra(id){
