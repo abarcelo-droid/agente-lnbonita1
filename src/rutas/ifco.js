@@ -42,6 +42,27 @@ try {
 // Columna para guardar a quién se mandó el mail (al usar "Enviar a IFCO")
 try { db.exec("ALTER TABLE ifco_remitos_super ADD COLUMN email_enviado_a TEXT"); } catch(_){}
 
+// Contador de veces enviado a IFCO (incluye reenvíos cuando IFCO no recibió).
+// Default 1 al primer envío, +1 por cada reenvío.
+try { db.exec("ALTER TABLE ifco_remitos_super ADD COLUMN veces_enviado INTEGER DEFAULT 0"); } catch(_){}
+try { db.exec("ALTER TABLE ifco_remitos_super ADD COLUMN fecha_ultimo_envio TEXT"); } catch(_){}
+
+// Tabla de log de envíos de mail (cada vez que se manda el mail a IFCO, incluyendo reenvíos)
+try {
+  db.exec(`CREATE TABLE IF NOT EXISTS ifco_envios_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    remito_id INTEGER NOT NULL,
+    enviado_en TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+    enviado_por_id INTEGER,
+    to_email TEXT,
+    cc_email TEXT,
+    message_id TEXT,
+    es_reenvio INTEGER DEFAULT 0,
+    FOREIGN KEY(remito_id) REFERENCES ifco_remitos_super(id)
+  )`);
+  db.exec("CREATE INDEX IF NOT EXISTS idx_ifco_envios_log_remito ON ifco_envios_log(remito_id, enviado_en DESC)");
+} catch(e) { console.error('[IFCO] Crear ifco_envios_log:', e.message); }
+
 // Migración del CHECK constraint en `estado`. La tabla original tiene CHECK que NO incluye 'enviado',
 // y por eso el UPDATE a 'enviado' (Enviar a IFCO) falla con: CHECK constraint failed.
 // Reconstruimos la tabla preservando el SQL original exacto y solo reemplazando la lista de estados.
@@ -1049,6 +1070,40 @@ router.get('/talonarios', function(req, res) {
     LEFT JOIN proveedores p ON p.id = t.proveedor_id
     ORDER BY t.activo DESC, t.creado_en DESC
   `).all();
+
+  // Calcular salteos por talonario: números que están entre el mínimo usado y el máximo usado,
+  // pero que no aparecen en ifco_remitos_super ni en ifco_numeros_anulados.
+  // Devuelve count + sample (hasta 50 números puntuales para el detalle).
+  const stmtUsados = db.prepare(`
+    SELECT CAST(SUBSTR(n_remito_sg, INSTR(n_remito_sg,'-')+1) AS INTEGER) AS num
+    FROM ifco_remitos_super
+    WHERE talonario_id = ? AND eliminado_en IS NULL
+  `);
+  const stmtAnulados = db.prepare(`
+    SELECT numero AS num FROM ifco_numeros_anulados WHERE talonario_id = ?
+  `);
+  rows.forEach(function(t){
+    try {
+      const usados = stmtUsados.all(t.id).map(function(r){ return r.num; }).filter(function(n){ return Number.isInteger(n); });
+      if (usados.length === 0) { t.salteos_count = 0; t.salteos_sample = []; return; }
+      const anulados = stmtAnulados.all(t.id).map(function(r){ return r.num; }).filter(function(n){ return Number.isInteger(n); });
+      const usadosSet = new Set(usados.concat(anulados));
+      const minU = Math.min.apply(null, usados);
+      const maxU = Math.max.apply(null, usados);
+      const salteos = [];
+      for (let n = minU; n <= maxU; n++) {
+        if (!usadosSet.has(n)) salteos.push(n);
+      }
+      t.salteos_count = salteos.length;
+      t.salteos_sample = salteos.slice(0, 50);
+      t.salteos_rango = { min: minU, max: maxU };
+    } catch(e) {
+      console.warn('[IFCO][talonarios][salteos]', t.id, e.message);
+      t.salteos_count = 0;
+      t.salteos_sample = [];
+    }
+  });
+
   res.json(rows);
 });
 
@@ -1524,15 +1579,30 @@ router.delete('/talonarios/:id', function(req, res) {
 router.get('/remitos', function(req, res) {
   const f = req.query;
   const papelera = f.papelera === '1' || f.incluir_eliminados === '1';
+  const esExport = f.export === '1';
+  // En export: agregar JOINs adicionales para traer todos los datos legibles (talonario, CAI, cliente)
+  // y subir el LIMIT a 10000 para historiales.
   let q = `SELECT r.*,
                   pori.nombre AS proveedor_origen_nombre,
                   u.nombre AS eliminado_por_username,
-                  uc.nombre AS usuario_creador_nombre
-           FROM ifco_remitos_super r
+                  uc.nombre AS usuario_creador_nombre`;
+  if (esExport) {
+    q += `,
+                  tal.serie AS talonario_serie,
+                  tal.cai AS cai,
+                  tal.vto_cai AS vto_cai,
+                  cli.razon_social AS cliente_nombre`;
+  }
+  q += ` FROM ifco_remitos_super r
            LEFT JOIN proveedores pori ON pori.id = r.proveedor_origen_id
            LEFT JOIN usuarios u ON u.id = r.eliminado_por_id
-           LEFT JOIN usuarios uc ON uc.id = r.usuario_id
-           WHERE 1=1`;
+           LEFT JOIN usuarios uc ON uc.id = r.usuario_id`;
+  if (esExport) {
+    q += `
+           LEFT JOIN ifco_talonarios tal ON tal.id = r.talonario_id
+           LEFT JOIN ifco_clientes_dedicados cli ON cli.id = r.cliente_id`;
+  }
+  q += ` WHERE 1=1`;
   const p = [];
   if (papelera) {
     q += " AND r.eliminado_en IS NOT NULL";
@@ -1556,7 +1626,7 @@ router.get('/remitos', function(req, res) {
     const wild = '%' + f.search + '%';
     p.push(wild, wild, wild, wild);
   }
-  q += " ORDER BY r.fecha_emision DESC, r.id DESC LIMIT 500";
+  q += " ORDER BY r.fecha_emision DESC, r.id DESC LIMIT " + (esExport ? '10000' : '500');
   res.json(db.prepare(q).all(...p));
 });
 
@@ -1882,10 +1952,10 @@ router.post('/remitos/presentar/preview', express.json(), function(req, res) {
     if (!Array.isArray(ids) || ids.length === 0) return res.status(400).json({ error: 'IDs requeridos' });
     const ph = ids.map(function(){ return '?'; }).join(',');
     const remitos = db.prepare(`
-      SELECT id, n_remito_ifco, fecha_sellado, empresa, sucursal, cantidad_recibida, cantidad_rechazada, escaneo_path, estado
-      FROM ifco_remitos_super WHERE id IN (${ph}) AND estado = 'sellado' AND eliminado_en IS NULL
+      SELECT id, n_remito_ifco, fecha_sellado, empresa, sucursal, cantidad_recibida, cantidad_rechazada, escaneo_path, estado, veces_enviado
+      FROM ifco_remitos_super WHERE id IN (${ph}) AND estado IN ('sellado','enviado') AND eliminado_en IS NULL
     `).all(...ids);
-    if (remitos.length === 0) return res.status(400).json({ error: 'Ninguno de los IDs corresponde a un remito sellado' });
+    if (remitos.length === 0) return res.status(400).json({ error: 'Ninguno de los IDs corresponde a un remito sellado o enviado' });
 
     // Asunto sugerido
     const hoy = new Date().toISOString().slice(0,10);
@@ -1954,10 +2024,10 @@ router.post('/remitos/presentar/enviar', express.json(), async function(req, res
 
     const ph = ids.map(function(){ return '?'; }).join(',');
     const remitos = db.prepare(`
-      SELECT id, n_remito_ifco, escaneo_path
-      FROM ifco_remitos_super WHERE id IN (${ph}) AND estado = 'sellado' AND eliminado_en IS NULL
+      SELECT id, n_remito_ifco, escaneo_path, estado, veces_enviado
+      FROM ifco_remitos_super WHERE id IN (${ph}) AND estado IN ('sellado','enviado') AND eliminado_en IS NULL
     `).all(...ids);
-    if (remitos.length === 0) return res.status(400).json({ error: 'Ninguno de los IDs corresponde a un remito sellado' });
+    if (remitos.length === 0) return res.status(400).json({ error: 'Ninguno de los IDs corresponde a un remito sellado o enviado' });
 
     // Armar adjuntos físicos. Bug que arreglar: el escaneo_path se guarda
     // como '/data/ifco/xxx.jpg' (no /uploads/ifco/...). Usar path.basename
@@ -1993,19 +2063,35 @@ router.post('/remitos/presentar/enviar', express.json(), async function(req, res
       return res.status(500).json({ error: 'Error enviando mail: ' + mailRes.error });
     }
 
-    // Marcar remitos como 'enviado'
+    // Actualizar remitos: marcar como 'enviado', bump del contador, registrar último envío
     db.prepare(`
       UPDATE ifco_remitos_super
       SET estado = 'enviado',
-          fecha_enviado = date('now','localtime'),
+          fecha_enviado = COALESCE(fecha_enviado, date('now','localtime')),
+          fecha_ultimo_envio = date('now','localtime'),
+          veces_enviado = COALESCE(veces_enviado, 0) + 1,
           email_enviado_a = ?,
           actualizado_en = datetime('now','localtime')
-      WHERE id IN (${ph}) AND estado = 'sellado'
+      WHERE id IN (${ph}) AND estado IN ('sellado','enviado')
     `).run(to, ...ids);
+
+    // Log de envío por cada remito (incluyendo reenvíos)
+    const stmtLog = db.prepare(`
+      INSERT INTO ifco_envios_log (remito_id, enviado_por_id, to_email, cc_email, message_id, es_reenvio)
+      VALUES (?,?,?,?,?,?)
+    `);
+    const reenviosCount = remitos.filter(function(r){ return r.estado === 'enviado'; }).length;
+    const userId = (req.user && req.user.id) || null;
+    remitos.forEach(function(r){
+      try {
+        stmtLog.run(r.id, userId, to, cc || null, mailRes.messageId || null, r.estado === 'enviado' ? 1 : 0);
+      } catch(e) { console.warn('[IFCO][envio-log]', e.message); }
+    });
 
     res.json({
       ok: true,
       enviados: remitos.length,
+      reenvios: reenviosCount,
       adjuntos_count: adjuntos.length,
       message_id: mailRes.messageId
     });

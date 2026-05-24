@@ -110,11 +110,10 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
 <link rel="stylesheet" href="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.css">
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" defer></script>
 <script src="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.js" defer></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js" defer></script>
 <script src="/static/mandata.js" defer></script>
 <link rel="stylesheet" href="/static/sidebar-v2.css">
 <script src="/static/sidebar-v2.js" defer></script>
-<link rel="stylesheet" href="/static/pa-calendario.css">
-<script src="/static/pa-calendario.js" defer></script>
 </head>
 <body>
 <div class="shell">
@@ -3995,7 +3994,15 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
         <option value="anulado">Anulados</option>
       </select>
       <input type="text" id="ifco-flt-rem-search" placeholder="Buscar por N° (sin ceros está OK) o empresa…" oninput="ifcoCargarRemitos()" style="font-size:13px;padding:6px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg);min-width:280px">
-      <div style="margin-left:auto;display:flex;gap:6px">
+      <div style="margin-left:auto;display:flex;gap:6px;align-items:center;position:relative">
+        <button class="btn bo" onclick="ifcoToggleMenuExportar(event)" title="Bajar Excel con los remitos">📊 Exportar ▾</button>
+        <div id="ifco-menu-export" style="display:none;position:absolute;top:100%;right:120px;background:#fff;border:1px solid var(--bor);border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,0.1);z-index:100;min-width:200px;margin-top:4px">
+          <button class="btn bo" style="display:block;width:100%;text-align:left;border:0;border-radius:0;border-bottom:1px solid var(--bor);padding:8px 12px;font-size:12px" onclick="ifcoExportarRemitos('todos')">📋 Todos los remitos</button>
+          <button class="btn bo" style="display:block;width:100%;text-align:left;border:0;border-radius:0;border-bottom:1px solid var(--bor);padding:8px 12px;font-size:12px" onclick="ifcoExportarRemitos('despachado')">🟡 Despachados</button>
+          <button class="btn bo" style="display:block;width:100%;text-align:left;border:0;border-radius:0;border-bottom:1px solid var(--bor);padding:8px 12px;font-size:12px" onclick="ifcoExportarRemitos('sellado')">🔵 Sellados</button>
+          <button class="btn bo" style="display:block;width:100%;text-align:left;border:0;border-radius:0;border-bottom:1px solid var(--bor);padding:8px 12px;font-size:12px" onclick="ifcoExportarRemitos('enviado')">📨 Enviados a IFCO</button>
+          <button class="btn bo" style="display:block;width:100%;text-align:left;border:0;border-radius:0;padding:8px 12px;font-size:12px" onclick="ifcoExportarRemitos('presentado')">🟢 Presentados</button>
+        </div>
         <button class="btn bb" onclick="ifcoAbrirPresentar()" id="ifco-btn-presentar">📧 Enviar a IFCO</button>
       </div>
     </div>
@@ -4106,8 +4113,9 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     <div class="ab-table-wrap">
       <table class="ab-table" id="ifco-tbl-talons">
         <thead><tr>
-          <th>Serie</th><th>Rango</th><th>CAI</th><th>Vto. CAI</th>
+          <th>Serie</th><th>Rango</th><th>En poder de</th>
           <th style="text-align:right">Usados</th><th style="text-align:right">Disponibles</th>
+          <th style="text-align:center">Salteos</th>
           <th></th>
         </tr></thead>
         <tbody></tbody>
@@ -4888,14 +4896,14 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       <div style="margin-top:12px;display:grid;grid-template-columns:1fr 1fr;gap:10px">
         <div>
           <label style="font-size:11px;color:var(--mut);text-transform:uppercase">Mail destinatario (IFCO) *</label>
-          <input id="ifco-presentar-email" type="email" placeholder="presentaciones@ifco.com" style="width:100%;padding:8px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg)">
+          <input id="ifco-presentar-email" type="email" placeholder="presentaciones@ifco.com" required style="width:100%;padding:8px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg)">
         </div>
         <div>
-          <label style="font-size:11px;color:var(--mut);text-transform:uppercase">CC (copia interna)</label>
-          <input id="ifco-presentar-cc" type="email" placeholder="andres@laninabonita.com" style="width:100%;padding:8px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg)">
+          <label style="font-size:11px;color:var(--mut);text-transform:uppercase">CC (copia interna y referentes)</label>
+          <textarea id="ifco-presentar-cc" rows="3" style="width:100%;padding:8px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg);font-family:inherit;font-size:12px;resize:vertical"></textarea>
         </div>
       </div>
-      <div style="font-size:11px;color:var(--mut);margin-top:3px">Se guardan en tu navegador para próximas veces.</div>
+      <div style="font-size:11px;color:var(--mut);margin-top:3px">El CC viene precargado con los referentes habituales. Editalo si necesitás. Se guarda en tu navegador para próximas veces.</div>
       <div class="ab-modal-footer" style="margin-top:18px;display:flex;justify-content:flex-end;gap:8px">
         <button class="btn bo" onclick="document.getElementById('ifco-mb-presentar').classList.remove('on')">Cancelar</button>
         <button class="btn bb" onclick="ifcoPresentarPreview()">Preview del mail →</button>
@@ -4995,11 +5003,11 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
       <div>
         <label style="font-size:11px;color:var(--mut);text-transform:uppercase">Mail destinatario (IFCO) *</label>
-        <input id="ifco-autm-to" type="email" placeholder="autorizaciones@ifco.com" style="width:100%;padding:8px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg)">
+        <input id="ifco-autm-to" type="email" placeholder="autorizaciones@ifco.com" required style="width:100%;padding:8px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg)">
       </div>
       <div>
-        <label style="font-size:11px;color:var(--mut);text-transform:uppercase">CC (copia interna)</label>
-        <input id="ifco-autm-cc" type="email" style="width:100%;padding:8px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg)">
+        <label style="font-size:11px;color:var(--mut);text-transform:uppercase">CC (copia interna y referentes)</label>
+        <textarea id="ifco-autm-cc" rows="3" style="width:100%;padding:8px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg);font-family:inherit;font-size:12px;resize:vertical"></textarea>
       </div>
     </div>
     <div style="margin-bottom:10px">
@@ -18195,6 +18203,101 @@ async function ifcoCargarRemitos() {
   }
 }
 
+// ── EXPORTAR REMITOS A EXCEL (XLSX) ──────────────────────────────────────
+// Genera el XLSX en el navegador usando SheetJS (cargado por CDN).
+// estado: 'todos' | 'despachado' | 'sellado' | 'enviado' | 'presentado'
+function ifcoToggleMenuExportar(ev) {
+  if (ev) ev.stopPropagation();
+  const m = document.getElementById('ifco-menu-export');
+  if (!m) return;
+  const abierto = m.style.display !== 'none';
+  m.style.display = abierto ? 'none' : 'block';
+  // Si lo abrimos, registramos un listener global para cerrarlo al hacer click afuera
+  if (!abierto) {
+    setTimeout(function(){
+      document.addEventListener('click', function cerrarMenu(e){
+        if (!m.contains(e.target)) {
+          m.style.display = 'none';
+          document.removeEventListener('click', cerrarMenu);
+        }
+      });
+    }, 0);
+  }
+}
+
+async function ifcoExportarRemitos(estado) {
+  // Cerrar el menú
+  const m = document.getElementById('ifco-menu-export');
+  if (m) m.style.display = 'none';
+  // Verificar que SheetJS esté cargado
+  if (typeof XLSX === 'undefined') {
+    alert('La librería de Excel todavía está cargando. Probá de nuevo en unos segundos.');
+    return;
+  }
+  try {
+    // Pedir los remitos filtrados por estado (o todos) con flag export para traer
+    // los JOINs adicionales (talonario, cliente, CAI) y subir el LIMIT.
+    const params = new URLSearchParams();
+    params.set('export', '1');
+    if (estado && estado !== 'todos') params.set('estado', estado);
+    const rows = await _ifcoFetch('/api/ifco/remitos?' + params.toString());
+    if (!rows || rows.length === 0) {
+      alert('No hay remitos para exportar con ese filtro');
+      return;
+    }
+    // Mapear cada fila a un objeto plano con TODOS los campos legibles
+    const data = rows.map(function(r){
+      return {
+        'ID':                  r.id,
+        'N° Remito IFCO':      r.n_remito_ifco || '',
+        'N° Remito SG':        r.n_remito_sg || '',
+        'Fecha emisión':       r.fecha_emision || '',
+        'Estado':              r.estado || '',
+        'Cadena/Empresa':      r.empresa || '',
+        'Sucursal':            r.sucursal || '',
+        'Origen':              r.origen || '',
+        'Proveedor origen':    r.proveedor_origen_nombre || '',
+        'Cliente':             r.cliente_nombre || '',
+        'Tel cliente':         r.cliente_telefono || '',
+        'Cant. despachada':    r.cantidad_despachada || 0,
+        'Cant. recibida':      r.cantidad_recibida != null ? r.cantidad_recibida : '',
+        'Cant. rechazada':     r.cantidad_rechazada != null ? r.cantidad_rechazada : '',
+        'Operador':            r.usuario_nombre || '',
+        'Fecha sellado':       r.fecha_sellado || '',
+        'Fecha enviado':       r.fecha_enviado || '',
+        'Fecha presentado':    r.fecha_presentado || '',
+        'Veces enviado':       r.veces_enviado || 0,
+        'Email enviado a':     r.email_enviado_a || '',
+        'Talonario serie':     r.talonario_serie || '',
+        'CAI':                 r.cai || '',
+        'Vto CAI':             r.vto_cai || '',
+        'Escaneo path':        r.escaneo_path || '',
+        'Notas':               r.notas || '',
+        'Creado en':           r.creado_en || '',
+        'Actualizado en':      r.actualizado_en || ''
+      };
+    });
+    // Crear workbook + worksheet
+    const ws = XLSX.utils.json_to_sheet(data);
+    // Ajustar ancho de columnas (auto-fit aproximado)
+    const cols = Object.keys(data[0]);
+    ws['!cols'] = cols.map(function(k){
+      let max = k.length;
+      data.forEach(function(row){ const v = String(row[k] || ''); if (v.length > max) max = v.length; });
+      return { wch: Math.min(max + 2, 50) };
+    });
+    const wb = XLSX.utils.book_new();
+    const sheetName = (estado === 'todos' || !estado) ? 'Todos' : estado.charAt(0).toUpperCase() + estado.slice(1) + 's';
+    XLSX.utils.book_append_sheet(wb, ws, sheetName);
+    // Nombre del archivo
+    const hoy = new Date().toISOString().slice(0,10);
+    const filename = 'remitos_ifco_' + (estado || 'todos') + '_' + hoy + '.xlsx';
+    XLSX.writeFile(wb, filename);
+  } catch(e) {
+    alert('Error exportando: ' + e.message);
+  }
+}
+
 // Estado de ordenamiento (default: fecha emisión desc)
 function _ifcoEnsureSort() {
   if (!IFCO._sortBy) { IFCO._sortBy = 'fecha_emision'; IFCO._sortDir = 'desc'; }
@@ -19384,33 +19487,53 @@ async function ifcoAbrirPresentar() {
     if (elInfo) elInfo.innerHTML = '';
     if (elAdj) elAdj.innerHTML = '';
 
-    const rows = await _ifcoFetch('/api/ifco/remitos?estado=sellado');
+    // Pedimos sellados y enviados juntos (los enviados van como reenvío)
+    const rowsSel = await _ifcoFetch('/api/ifco/remitos?estado=sellado');
+    const rowsEnv = await _ifcoFetch('/api/ifco/remitos?estado=enviado');
+    const rows = (rowsSel || []).concat(rowsEnv || []);
     const lista = document.getElementById('ifco-presentar-lista');
     if (rows.length === 0) {
-      lista.innerHTML = '<div style="padding:20px;text-align:center;color:var(--mut)">No hay remitos sellados pendientes de presentar</div>';
+      lista.innerHTML = '<div style="padding:20px;text-align:center;color:var(--mut)">No hay remitos pendientes de presentar</div>';
     } else {
       // Ordenar: los más viejos primero (los urgentes)
       rows.sort(function(a,b){ return new Date(a.fecha_sellado) - new Date(b.fecha_sellado); });
       lista.innerHTML = '<table class="ab-table"><thead><tr>' +
         '<th><input type="checkbox" id="ifco-pp-todos" onchange="document.querySelectorAll(\'.ifco-pp-cb\').forEach(function(x){x.checked=document.getElementById(\'ifco-pp-todos\').checked})"></th>' +
-        '<th>N° Remito</th><th>Sellado</th><th>Cadena</th><th style="text-align:right">Recib.</th><th style="text-align:right">Rech.</th><th>Foto</th>' +
+        '<th>N° Remito</th><th>Sellado</th><th>Cadena</th><th style="text-align:right">Recib.</th><th style="text-align:right">Rech.</th><th>Estado</th><th>Foto</th>' +
         '</tr></thead><tbody>' + rows.map(function(r){
           const dias = Math.floor((new Date() - new Date(r.fecha_sellado)) / (1000*60*60*24));
           const urg = dias >= 25;
-          return '<tr'+(urg?' style="background:#fee2e2"':'')+'>' +
-            '<td><input type="checkbox" class="ifco-pp-cb" data-id="'+r.id+'" '+(urg?'checked':'')+'></td>' +
+          const esEnviado = r.estado === 'enviado';
+          const veces = parseInt(r.veces_enviado) || 0;
+          const badgeEstado = esEnviado
+            ? '<span style="background:#fef3c7;color:#92400e;font-size:10px;padding:2px 7px;border-radius:10px;font-weight:600" title="Ya enviado ' + veces + ' vez(es). Al enviar de nuevo cuenta como reenvío.">📨 Enviado' + (veces > 1 ? ' ×' + veces : '') + '</span>'
+            : '<span style="background:#dbeafe;color:#1e3a8a;font-size:10px;padding:2px 7px;border-radius:10px;font-weight:600">🔒 Sellado</span>';
+          const rowBg = urg ? ' style="background:#fee2e2"' : (esEnviado ? ' style="background:#fffbeb"' : '');
+          return '<tr'+rowBg+'>' +
+            '<td><input type="checkbox" class="ifco-pp-cb" data-id="'+r.id+'" '+(urg && !esEnviado ?'checked':'')+'></td>' +
             '<td style="font-family:monospace;font-size:12px">'+_ifcoEsc(r.n_remito_ifco)+'</td>' +
             '<td>'+_ifcoFecha(r.fecha_sellado)+(urg?' <b style="color:#991b1b">('+dias+'d)</b>':' <span style="color:var(--mut);font-size:11px">('+dias+'d)</span>')+'</td>' +
             '<td>'+_ifcoEsc(r.empresa||'')+'<div style="font-size:11px;color:var(--mut)">'+_ifcoEsc(r.sucursal||'')+'</div></td>' +
             '<td style="text-align:right">'+_ifcoFmt(r.cantidad_recibida)+'</td>' +
             '<td style="text-align:right">'+_ifcoFmt(r.cantidad_rechazada||0)+'</td>' +
+            '<td style="text-align:center">'+badgeEstado+'</td>' +
             '<td>'+(r.escaneo_path?'<a href="'+r.escaneo_path+'" target="_blank" style="font-size:11px;color:var(--burg)">Ver</a>':'<span style="color:#991b1b;font-size:11px">⚠️ falta</span>')+'</td>' +
           '</tr>';
         }).join('') + '</tbody></table>';
     }
-    // Email guardado
-    document.getElementById('ifco-presentar-email').value = localStorage.getItem('ifco_presentar_email') || '';
-    document.getElementById('ifco-presentar-cc').value    = localStorage.getItem('ifco_presentar_cc') || '';
+    // Email guardado (TO siempre vacío, CC con default fijo si nunca se guardó nada)
+    const CC_FIJOS = [
+      'r.figueredo@lnbonita.com.ar',
+      'c.persampieri@lnbonita.com.ar',
+      'a.barcelo@lnbonita.com.ar',
+      'r.palazuelos@lnbonita.com.ar',
+      's.viduheiro@lnbonita.com.ar',
+      'diego.frutos@ifco.com',
+      'silvio.monesterolo@ifco.com',
+      'maria.mendiondo@ifco.com'
+    ].join(', ');
+    document.getElementById('ifco-presentar-email').value = ''; // TO siempre vacío (requerido)
+    document.getElementById('ifco-presentar-cc').value    = localStorage.getItem('ifco_presentar_cc') || CC_FIJOS;
     document.getElementById('ifco-mb-presentar').classList.add('on');
   } catch(e) { alert('Error: ' + e.message); }
 }
@@ -19424,7 +19547,6 @@ async function ifcoPresentarPreview() {
   const email = document.getElementById('ifco-presentar-email').value.trim();
   const cc    = document.getElementById('ifco-presentar-cc').value.trim();
   if (!email) { alert('Ingresá el mail destinatario (IFCO)'); return; }
-  localStorage.setItem('ifco_presentar_email', email);
   localStorage.setItem('ifco_presentar_cc', cc);
   _ifcoPresState = { ids: ids, to: email, cc: cc };
 
@@ -19950,9 +20072,19 @@ async function ifcoAbrirMailAutorizacion(id) {
     document.getElementById('ifco-autm-cuerpo-html').oninput = function(){
       document.getElementById('ifco-autm-cuerpo-preview').innerHTML = this.value;
     };
-    // Mail destinatario guardado
-    document.getElementById('ifco-autm-to').value = localStorage.getItem('ifco_autoriz_email') || '';
-    document.getElementById('ifco-autm-cc').value = localStorage.getItem('ifco_autoriz_cc') || '';
+    // TO siempre vacío (requerido). CC con los referentes habituales como default.
+    const CC_FIJOS_AUT = [
+      'r.figueredo@lnbonita.com.ar',
+      'c.persampieri@lnbonita.com.ar',
+      'a.barcelo@lnbonita.com.ar',
+      'r.palazuelos@lnbonita.com.ar',
+      's.viduheiro@lnbonita.com.ar',
+      'diego.frutos@ifco.com',
+      'silvio.monesterolo@ifco.com',
+      'maria.mendiondo@ifco.com'
+    ].join(', ');
+    document.getElementById('ifco-autm-to').value = '';
+    document.getElementById('ifco-autm-cc').value = localStorage.getItem('ifco_autoriz_cc') || CC_FIJOS_AUT;
     document.getElementById('ifco-mb-autoriz-mail').classList.add('on');
   } catch(e) { alert('Error: ' + e.message); }
 }
@@ -19968,7 +20100,6 @@ async function ifcoEnviarMailAutorizacion() {
 
   if (!confirm('¿Enviar el mail a ' + to + '?')) return;
 
-  localStorage.setItem('ifco_autoriz_email', to);
   if (cc) localStorage.setItem('ifco_autoriz_cc', cc);
 
   const btn = document.getElementById('ifco-autm-btn-enviar');
@@ -21472,6 +21603,18 @@ async function ifcoCargarTalonarios() {
       const total = t.numero_hasta - t.numero_desde + 1;
       const anuladosCount = t.anulados_count || 0;
       const disp = total - t.usados_count - anuladosCount;
+      // En poder de: si es de SG → "San Gerónimo"; si es de proveedor → nombre del proveedor
+      const enPoderDe = (t.dueno_tipo === 'proveedor')
+        ? '<span style="background:#fef3c7;color:#78350f;font-size:11px;padding:2px 8px;border-radius:10px">🚚 ' + _ifcoEsc(t.proveedor_nombre || 'Proveedor s/n') + '</span>'
+        : '<span style="background:#dbeafe;color:#1e3a8a;font-size:11px;padding:2px 8px;border-radius:10px">🏢 San Gerónimo</span>';
+      // Salteos: badge con count + tooltip con los números puntuales
+      const salteosCount = parseInt(t.salteos_count) || 0;
+      let salteosCell = '<span style="color:var(--mut);font-size:11px">—</span>';
+      if (salteosCount > 0) {
+        const sample = (t.salteos_sample || []).slice(0, 15);
+        const tip = 'Números salteados: ' + sample.join(', ') + (salteosCount > sample.length ? ' (y ' + (salteosCount - sample.length) + ' más)' : '');
+        salteosCell = '<button class="btn bo" style="font-size:11px;padding:2px 8px;color:#991b1b;background:#fee2e2;border-color:#fca5a5" onclick="event.stopPropagation();ifcoVerSalteosTalonario(' + t.id + ')" title="' + tip.replace(/"/g, '&quot;') + '">⚠️ ' + salteosCount + '</button>';
+      }
       const acciones = ['<button class="btn bo" style="font-size:11px;padding:4px 8px" onclick="event.stopPropagation();ifcoVerTalonario('+t.id+')">👁 Ver</button>'];
       acciones.push('<button class="btn bo" style="font-size:11px;padding:4px 8px" onclick="event.stopPropagation();ifcoEditarTalonario('+t.id+')">✏️ Editar</button>');
       acciones.push('<button class="btn bo" style="font-size:11px;padding:4px 8px" onclick="event.stopPropagation();ifcoAbrirTransferirTalonario('+t.id+')" title="Transferir el talonario a otro dueño (proveedor o SG)">🔄 Transferir</button>');
@@ -21481,13 +21624,31 @@ async function ifcoCargarTalonarios() {
       return '<tr style="cursor:pointer" onclick="ifcoVerTalonario('+t.id+')">' +
         '<td style="font-family:monospace"><b>'+_ifcoEsc(t.serie)+'</b></td>' +
         '<td style="font-family:monospace;font-size:12px">'+t.numero_desde+' → '+t.numero_hasta+'</td>' +
-        '<td style="font-family:monospace;font-size:12px">'+_ifcoEsc(t.cai||'—')+'</td>' +
-        '<td>'+_ifcoFecha(t.vto_cai)+'</td>' +
+        '<td>'+enPoderDe+'</td>' +
         '<td style="text-align:right">'+t.usados_count+'</td>' +
         '<td style="text-align:right"><b>'+disp+'</b></td>' +
+        '<td style="text-align:center">'+salteosCell+'</td>' +
         '<td style="display:flex;gap:4px;flex-wrap:wrap">'+acciones.join('')+'</td>' +
       '</tr>';
     }).join('');
+  } catch(e) { alert('Error: ' + e.message); }
+}
+
+// Muestra el detalle de los números salteados en un modal simple
+async function ifcoVerSalteosTalonario(id) {
+  try {
+    const rows = await _ifcoFetch('/api/ifco/talonarios');
+    const t = (rows || []).find(function(x){ return x.id === id; });
+    if (!t) { alert('Talonario no encontrado'); return; }
+    const sample = t.salteos_sample || [];
+    const count = t.salteos_count || 0;
+    if (count === 0) { alert('No hay salteos en este talonario'); return; }
+    const rango = t.salteos_rango ? ('Entre ' + t.salteos_rango.min + ' y ' + t.salteos_rango.max) : '';
+    let msg = '⚠️ ' + count + ' número(s) salteado(s) en el talonario ' + t.serie + '\n\n';
+    msg += rango + '\n\n';
+    msg += 'Números puntuales:\n' + sample.join(', ');
+    if (count > sample.length) msg += '\n\n(...y ' + (count - sample.length) + ' más — mostrando los primeros 50)';
+    alert(msg);
   } catch(e) { alert('Error: ' + e.message); }
 }
 
