@@ -2851,6 +2851,57 @@ router.post('/compras/:id/reactivar', requireAuth, (req, res) => {
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
+// ─────────────────────────────────────────────────────────────────────────
+// HARD DELETE de compra (borrado definitivo, solo admin) — IRREVERSIBLE.
+// NO revierte stock: la compra se trata como si nunca hubiera existido.
+// Borra en una transacción: ítems, movimientos de stock, asientos contables
+// (+ sus líneas) y la compra.
+// ─────────────────────────────────────────────────────────────────────────
+router.post('/compras/:id/hard-delete', requireAuth, (req, res) => {
+  if (!req.user || req.user.rol !== 'admin') {
+    return res.status(403).json({ ok: false, error: 'Solo admin puede borrar definitivamente' });
+  }
+  const db = getDb();
+  const compraId = req.params.id;
+  try {
+    const compra = db.prepare("SELECT id, nro_factura, total FROM pa_compras WHERE id = ?").get(compraId);
+    if (!compra) return res.status(404).json({ ok: false, error: 'Compra no encontrada' });
+
+    const tx = db.transaction(() => {
+      // Asientos contables generados por esta compra (+ sus líneas)
+      const asientos = db.prepare("SELECT id FROM pa_asientos WHERE ref_compra_id = ?").all(compraId);
+      let asientoLineasBorradas = 0;
+      for (const a of asientos) {
+        asientoLineasBorradas += db.prepare("DELETE FROM pa_asientos_lineas WHERE asiento_id = ?").run(a.id).changes;
+      }
+      const asientosBorrados = db.prepare("DELETE FROM pa_asientos WHERE ref_compra_id = ?").run(compraId).changes;
+
+      // Movimientos de stock de la compra (NO se revierte el stock a propósito)
+      const movsBorrados = db.prepare("DELETE FROM pa_movimientos_stock WHERE motivo = 'compra' AND referencia_id = ?").run(compraId).changes;
+
+      // Ítems de la compra
+      const itemsBorrados = db.prepare("DELETE FROM pa_compras_items WHERE compra_id = ?").run(compraId).changes;
+
+      // La compra
+      db.prepare("DELETE FROM pa_compras WHERE id = ?").run(compraId);
+
+      return { itemsBorrados, movsBorrados, asientosBorrados, asientoLineasBorradas };
+    });
+
+    const detalle = tx();
+    console.log(
+      `[PA][HARD-DELETE] usuario=${req.user.id} (${req.user.nombre || req.user.email || '?'}, rol=${req.user.rol}) ` +
+      `borró DEFINITIVO compra #${compraId} (nro_factura=${compra.nro_factura || '—'}, total=${compra.total}) | ` +
+      `items=${detalle.itemsBorrados} movs_stock=${detalle.movsBorrados} ` +
+      `asientos=${detalle.asientosBorrados} asiento_lineas=${detalle.asientoLineasBorradas}`
+    );
+    res.json({ ok: true, eliminada: detalle });
+  } catch(e) {
+    console.error(`[PA][HARD-DELETE] error borrando compra #${compraId} por usuario=${req.user?.id}:`, e.message);
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
 // Desactivar insumo (soft delete)
 router.delete('/insumos/:id', requireAuth, (req, res) => {
   const db = getDb();
