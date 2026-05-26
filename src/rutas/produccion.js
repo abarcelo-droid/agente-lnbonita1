@@ -1011,10 +1011,13 @@ router.get('/ordenes', requireAuth, (req, res) => {
     // Enriquecer cada orden con lotes e items
     const getLotes = db.prepare(`
       SELECT ol.lote_id, ol.hectareas_aplicadas, l.nombre as lote_nombre, l.hectareas,
-             s.nombre as sector_nombre
+             l.finca, s.nombre as sector_nombre,
+             cl.cultivo as cultivo
       FROM pa_ordenes_lotes ol
       JOIN pa_lotes l ON l.id = ol.lote_id
       JOIN pa_sectores s ON s.id = l.sector_id
+      LEFT JOIN pa_cultivos_lote cl ON cl.lote_id = l.id
+        AND cl.campaña = (SELECT nombre FROM pa_campañas WHERE activa = 1 LIMIT 1)
       WHERE ol.orden_id = ?
     `);
     const getItems = db.prepare(`
@@ -1023,12 +1026,21 @@ router.get('/ordenes', requireAuth, (req, res) => {
       JOIN pa_insumos i ON i.id = oi.insumo_id
       WHERE oi.orden_id = ?
     `);
+    // Costo real ejecutado de la orden: suma de los costos registrados al aplicar
+    // (pa_aplicaciones.costo_total se costea con el precio de la última compra).
+    // Las órdenes no ejecutadas todavía no tienen aplicaciones => costo 0.
+    const getCosto = db.prepare(
+      "SELECT COALESCE(SUM(costo_total), 0) AS costo FROM pa_aplicaciones WHERE orden_id = ?"
+    );
 
-    const data = ordenes.map(o => ({
-      ...o,
-      lotes: getLotes.all(o.id),
-      items: getItems.all(o.id)
-    }));
+    const data = ordenes.map(o => {
+      const lotes = getLotes.all(o.id);
+      const items = getItems.all(o.id);
+      const cultivos = [...new Set(lotes.map(l => l.cultivo).filter(Boolean))];
+      const finca_nombres = [...new Set(lotes.map(l => l.finca).filter(Boolean))];
+      const costo_total = getCosto.get(o.id).costo;
+      return { ...o, lotes, items, cultivos, finca_nombres, costo_total };
+    });
     res.json({ ok: true, data });
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
