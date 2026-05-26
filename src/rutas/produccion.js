@@ -21,6 +21,14 @@ function requireAuth(req, res, next) {
   } catch(e) { res.status(401).json({ ok: false, error: 'Sesión inválida' }); }
 }
 
+// ── Helper: campañas activas (una por tipo) ────────────────────────────────
+// Devuelve los ids de la campaña anual y estacional activas (o null cada una).
+function campañasActivas(db) {
+  const anual = db.prepare("SELECT id FROM pa_campañas WHERE activa=1 AND tipo='anual' LIMIT 1").get();
+  const estacional = db.prepare("SELECT id FROM pa_campañas WHERE activa=1 AND tipo='estacional' LIMIT 1").get();
+  return { anualId: anual?.id || null, estacionalId: estacional?.id || null };
+}
+
 // ─────────────────────────────────────────────────────────────────────────
 // CAMPAÑAS
 // ─────────────────────────────────────────────────────────────────────────
@@ -28,7 +36,8 @@ function requireAuth(req, res, next) {
 router.get('/campanas', requireAuth, (req, res) => {
   const db = getDb();
   try {
-    const data = db.prepare("SELECT * FROM pa_campañas ORDER BY fecha_inicio DESC").all();
+    // tipo: 'anual' | 'estacional'. Ordenamos por tipo y fecha para agrupar.
+    const data = db.prepare("SELECT * FROM pa_campañas ORDER BY tipo, fecha_inicio DESC").all();
     res.json({ ok: true, data });
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
@@ -36,11 +45,15 @@ router.get('/campanas', requireAuth, (req, res) => {
 router.post('/campanas', requireAuth, (req, res) => {
   const db = getDb();
   const { nombre, fecha_inicio, fecha_fin } = req.body;
+  let { tipo } = req.body;
   if (!nombre || !fecha_inicio || !fecha_fin)
     return res.status(400).json({ ok: false, error: 'Nombre, fecha_inicio y fecha_fin requeridos' });
+  tipo = tipo || 'anual';
+  if (!['anual', 'estacional'].includes(tipo))
+    return res.status(400).json({ ok: false, error: "tipo debe ser 'anual' o 'estacional'" });
   try {
-    const r = db.prepare("INSERT INTO pa_campañas (nombre, fecha_inicio, fecha_fin) VALUES (?,?,?)")
-      .run(nombre, fecha_inicio, fecha_fin);
+    const r = db.prepare("INSERT INTO pa_campañas (nombre, fecha_inicio, fecha_fin, tipo) VALUES (?,?,?,?)")
+      .run(nombre, fecha_inicio, fecha_fin, tipo);
     res.json({ ok: true, id: r.lastInsertRowid });
   } catch(e) {
     if (e.message.includes('UNIQUE')) return res.status(400).json({ ok: false, error: 'Ya existe esa campaña' });
@@ -51,8 +64,16 @@ router.post('/campanas', requireAuth, (req, res) => {
 router.patch('/campanas/:id/activar', requireAuth, (req, res) => {
   const db = getDb();
   try {
-    db.prepare("UPDATE pa_campañas SET activa = 0").run();
-    db.prepare("UPDATE pa_campañas SET activa = 1 WHERE id = ?").run(req.params.id);
+    const camp = db.prepare("SELECT id, tipo FROM pa_campañas WHERE id = ?").get(req.params.id);
+    if (!camp) return res.status(404).json({ ok: false, error: 'Campaña no encontrada' });
+    // Permitimos hasta 2 campañas activas: una por cada tipo. Al activar una,
+    // desactivamos SOLO las del mismo tipo (no la del otro tipo).
+    const tipo = camp.tipo || 'anual';
+    const activar = db.transaction(() => {
+      db.prepare("UPDATE pa_campañas SET activa = 0 WHERE tipo = ?").run(tipo);
+      db.prepare("UPDATE pa_campañas SET activa = 1 WHERE id = ?").run(camp.id);
+    });
+    activar();
     res.json({ ok: true });
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
@@ -626,7 +647,8 @@ router.get('/compras', requireAuth, (req, res) => {
 
 router.post('/compras', requireAuth, (req, res) => {
   const db = getDb();
-  const { fecha, proveedor_id, proveedor_txt, nro_factura, tipo_comprobante, campaña_id, items, notas, remito_foto_b64,
+  const { fecha, proveedor_id, proveedor_txt, nro_factura, tipo_comprobante, campaña_id,
+          campaña_anual_id, campaña_estacional_id, items, notas, remito_foto_b64,
           tipo_factura } = req.body;
   if (!items?.length) return res.status(400).json({ ok: false, error: 'Debe incluir al menos un item' });
   // Validar que el proveedor esté en el padrón ADM
@@ -732,16 +754,23 @@ router.post('/compras', requireAuth, (req, res) => {
     }
 
     const nuevaCompra = db.transaction(() => {
+      // Campañas: ids explícitos del body, o las dos activas (anual + estacional).
+      const _act = campañasActivas(db);
+      const _toId = v => (v && !isNaN(parseInt(v))) ? parseInt(v) : null;
+      const anualFinal      = _toId(campaña_anual_id) || _toId(campaña_id) || _act.anualId || null;
+      const estacionalFinal = _toId(campaña_estacional_id) || _act.estacionalId || null;
       const r = db.prepare(`
         INSERT INTO pa_compras (fecha, proveedor_id, proveedor_txt, nro_factura, tipo_comprobante, campaña_id,
+                                campaña_anual_id, campaña_estacional_id,
                                 subtotal, iva_monto, total, notas, remito_foto_path,
                                 iva_total, neto_total, tipo_factura)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
       `).run(fecha||new Date().toISOString().slice(0,10),
              null,  // proveedor_id siempre NULL — evita FK con pa_proveedores
              proveedorNombre,
              nro_factura||null, tipo_comprobante||'factura',
-             (campaña_id && !isNaN(parseInt(campaña_id))) ? parseInt(campaña_id) : null,
+             anualFinal,  // campaña_id viejo = anual (retrocompat)
+             anualFinal, estacionalFinal,
              neto_total, iva_total, total, notas||null, remito_foto_path,
              iva_total, neto_total,
              esServicio ? 'servicio' : 'compra');
@@ -992,19 +1021,25 @@ router.post('/compras', requireAuth, (req, res) => {
 router.get('/ordenes', requireAuth, (req, res) => {
   const db = getDb();
   try {
-    const { estado, campaña_id } = req.query;
+    const { estado, campaña_id, campaña_anual_id, campaña_estacional_id } = req.query;
     let query = `
       SELECT o.*, u.nombre as creada_por_nombre, ca.nombre as campaña_nombre,
+             can.nombre as campaña_anual_nombre, ces.nombre as campaña_estacional_nombre,
              ua.nombre as asignado_nombre
       FROM pa_ordenes o
       LEFT JOIN usuarios u ON u.id = o.creada_por
       LEFT JOIN pa_campañas ca ON ca.id = o.campaña_id
+      LEFT JOIN pa_campañas can ON can.id = o.campaña_anual_id
+      LEFT JOIN pa_campañas ces ON ces.id = o.campaña_estacional_id
       LEFT JOIN usuarios ua ON ua.id = o.asignado_a
       WHERE o.eliminada_en IS NULL
     `;
     const params = [];
     if (estado) { query += " AND o.estado = ?"; params.push(estado); }
-    if (campaña_id) { query += " AND o.campaña_id = ?"; params.push(campaña_id); }
+    // Filtros de campaña por tipo (independientes). campaña_id viejo = anual.
+    if (campaña_anual_id) { query += " AND o.campaña_anual_id = ?"; params.push(campaña_anual_id); }
+    if (campaña_estacional_id) { query += " AND o.campaña_estacional_id = ?"; params.push(campaña_estacional_id); }
+    if (campaña_id && !campaña_anual_id) { query += " AND o.campaña_anual_id = ?"; params.push(campaña_id); }
     query += " ORDER BY o.fecha_orden DESC";
     const ordenes = db.prepare(query).all(...params);
 
@@ -1081,7 +1116,8 @@ router.get('/ordenes/:id', requireAuth, (req, res) => {
 
 router.post('/ordenes', requireAuth, (req, res) => {
   const db = getDb();
-  const { campaña_id, fecha_orden, fecha_propuesta, tipo_aplicacion, objetivo, notas, lotes, items, asignado_a } = req.body;
+  const { campaña_id, campaña_anual_id, campaña_estacional_id,
+          fecha_orden, fecha_propuesta, tipo_aplicacion, objetivo, notas, lotes, items, asignado_a } = req.body;
   if (!lotes?.length || !items?.length)
     return res.status(400).json({ ok: false, error: 'Debe incluir lotes e items' });
 
@@ -1113,18 +1149,19 @@ router.post('/ordenes', requireAuth, (req, res) => {
 
   try {
     const crearOrden = db.transaction(() => {
-      // Si no se especifica campaña, usar la activa
-      let campañaIdFinal = campaña_id || null;
-      if (!campañaIdFinal) {
-        const camp = db.prepare("SELECT id FROM pa_campañas WHERE activa=1 LIMIT 1").get();
-        if (camp) campañaIdFinal = camp.id;
-      }
+      // Campañas: si el body trae ids explícitos los usamos; si no, autoasignamos
+      // las dos activas (una anual + una estacional). campaña_id viejo = anual.
+      const act = campañasActivas(db);
+      const anualFinal      = campaña_anual_id || campaña_id || act.anualId || null;
+      const estacionalFinal = campaña_estacional_id || act.estacionalId || null;
+      const campañaIdFinal  = anualFinal; // retrocompat columna vieja
       const n = db.prepare("SELECT COUNT(*) as n FROM pa_ordenes").get().n + 1;
       const nro = `OA-${String(n).padStart(5, '0')}`;
       const r = db.prepare(`
-        INSERT INTO pa_ordenes (nro_orden, campaña_id, fecha_orden, fecha_propuesta, creada_por, tipo_aplicacion, objetivo, notas, estado, asignado_a)
-        VALUES (?,?,?,?,?,?,?,?,'emitida',?)
-      `).run(nro, campañaIdFinal, fecha_orden||new Date().toISOString().slice(0,10),
+        INSERT INTO pa_ordenes (nro_orden, campaña_id, campaña_anual_id, campaña_estacional_id, fecha_orden, fecha_propuesta, creada_por, tipo_aplicacion, objetivo, notas, estado, asignado_a)
+        VALUES (?,?,?,?,?,?,?,?,?,?,'emitida',?)
+      `).run(nro, campañaIdFinal, anualFinal, estacionalFinal,
+             fecha_orden||new Date().toISOString().slice(0,10),
              fecha_propuesta||null, req.user.id, tipo_aplicacion||null, objetivo||null, notas||null, asignado_a||null);
       const ordenId = r.lastInsertRowid;
       const insLote = db.prepare("INSERT INTO pa_ordenes_lotes (orden_id, lote_id, hectareas_aplicadas) VALUES (?,?,?)");
@@ -1374,27 +1411,27 @@ router.post('/aplicaciones', requireAuth, (req, res) => {
         VALUES (?,?,?,?,?,?)
       `).run(fecha_real || new Date().toISOString().slice(0,10), insumo_id, 'salida', cantidad_real, 'aplicacion', r.lastInsertRowid);
 
-      // Registrar costo por lote
-      // Si la orden no tiene campaña, usamos la activa al momento como fallback
-      let campañaParaCosto = null;
-      const ordenCamp = db.prepare("SELECT campaña_id FROM pa_ordenes WHERE id=?").get(orden_id);
-      if (ordenCamp?.campaña_id) {
-        campañaParaCosto = ordenCamp.campaña_id;
-      } else {
-        const camp = db.prepare("SELECT id FROM pa_campañas WHERE activa=1 LIMIT 1").get();
-        if (camp) {
-          campañaParaCosto = camp.id;
-          // Aprovechamos para asociar la campaña a la orden huérfana
-          db.prepare("UPDATE pa_ordenes SET campaña_id = ? WHERE id = ? AND campaña_id IS NULL").run(camp.id, orden_id);
-        }
+      // Registrar costo por lote, imputado a las DOS campañas de la orden
+      // (anual + estacional). Si la orden no tiene campaña, fallback a las activas.
+      let campAnual = null, campEstacional = null;
+      const ordenCamp = db.prepare("SELECT campaña_id, campaña_anual_id, campaña_estacional_id FROM pa_ordenes WHERE id=?").get(orden_id);
+      campAnual      = ordenCamp?.campaña_anual_id || ordenCamp?.campaña_id || null;
+      campEstacional = ordenCamp?.campaña_estacional_id || null;
+      if (!campAnual && !campEstacional) {
+        const act = campañasActivas(db);
+        campAnual = act.anualId; campEstacional = act.estacionalId;
+        // Asociar las campañas a la orden huérfana
+        if (campAnual) db.prepare("UPDATE pa_ordenes SET campaña_id = COALESCE(campaña_id, ?), campaña_anual_id = COALESCE(campaña_anual_id, ?) WHERE id = ?").run(campAnual, campAnual, orden_id);
+        if (campEstacional) db.prepare("UPDATE pa_ordenes SET campaña_estacional_id = COALESCE(campaña_estacional_id, ?) WHERE id = ?").run(campEstacional, orden_id);
       }
+      const campañaParaCosto = campAnual || campEstacional; // campaña_id viejo (NOT NULL deseable)
       if (campañaParaCosto && costoTotal > 0) {
         const insumoData = db.prepare("SELECT tipo FROM pa_insumos WHERE id=?").get(insumo_id);
         const categoria = insumoData?.tipo === 'fertilizante' ? 'fertilizante' : 'agroquimico';
         db.prepare(`
-          INSERT INTO pa_costos_lote (lote_id, campaña_id, categoria, referencia_id, fecha, monto, descripcion)
-          VALUES (?,?,?,?,?,?,?)
-        `).run(lote_id, campañaParaCosto, categoria, r.lastInsertRowid,
+          INSERT INTO pa_costos_lote (lote_id, campaña_id, campaña_anual_id, campaña_estacional_id, categoria, referencia_id, fecha, monto, descripcion)
+          VALUES (?,?,?,?,?,?,?,?,?)
+        `).run(lote_id, campañaParaCosto, campAnual, campEstacional, categoria, r.lastInsertRowid,
                fecha_real || new Date().toISOString().slice(0,10), costoTotal,
                `Aplicación OA: ${insumo?.nombre}`);
       }
@@ -1433,19 +1470,20 @@ router.post('/aplicaciones/batch', requireAuth, (req, res) => {
 
   try {
     const fechaFinal = fecha_real || new Date().toISOString().slice(0,10);
-    const orden = db.prepare("SELECT campaña_id FROM pa_ordenes WHERE id=?").get(orden_id);
+    const orden = db.prepare("SELECT campaña_id, campaña_anual_id, campaña_estacional_id FROM pa_ordenes WHERE id=?").get(orden_id);
     if (!orden) return res.status(404).json({ ok: false, error: 'Orden no encontrada' });
 
-    // Resolver la campaña: la de la orden, o la activa como fallback.
-    // Si la orden estaba huérfana (sin campaña), aprovechamos para asociarla.
-    let campañaParaCosto = orden.campaña_id;
-    if (!campañaParaCosto) {
-      const camp = db.prepare("SELECT id FROM pa_campañas WHERE activa=1 LIMIT 1").get();
-      if (camp) {
-        campañaParaCosto = camp.id;
-        db.prepare("UPDATE pa_ordenes SET campaña_id = ? WHERE id = ? AND campaña_id IS NULL").run(camp.id, orden_id);
-      }
+    // Resolver las DOS campañas de la orden (anual + estacional), o las activas
+    // como fallback. Si la orden estaba huérfana, aprovechamos para asociarlas.
+    let campAnual = orden.campaña_anual_id || orden.campaña_id || null;
+    let campEstacional = orden.campaña_estacional_id || null;
+    if (!campAnual && !campEstacional) {
+      const act = campañasActivas(db);
+      campAnual = act.anualId; campEstacional = act.estacionalId;
+      if (campAnual) db.prepare("UPDATE pa_ordenes SET campaña_id = COALESCE(campaña_id, ?), campaña_anual_id = COALESCE(campaña_anual_id, ?) WHERE id = ?").run(campAnual, campAnual, orden_id);
+      if (campEstacional) db.prepare("UPDATE pa_ordenes SET campaña_estacional_id = COALESCE(campaña_estacional_id, ?) WHERE id = ?").run(campEstacional, orden_id);
     }
+    const campañaParaCosto = campAnual || campEstacional;
 
     const registrar = db.transaction(() => {
       const ids = [];
@@ -1483,13 +1521,13 @@ router.post('/aplicaciones/batch', requireAuth, (req, res) => {
           VALUES (?,?,?,?,?,?)
         `).run(fechaFinal, ej.insumo_id, 'salida', cantidad, 'aplicacion', r.lastInsertRowid);
 
-        // Costo por lote
+        // Costo por lote — imputado a las dos campañas (anual + estacional)
         if (campañaParaCosto && costoTotal > 0) {
           const categoria = insumo.tipo === 'fertilizante' ? 'fertilizante' : 'agroquimico';
           db.prepare(`
-            INSERT INTO pa_costos_lote (lote_id, campaña_id, categoria, referencia_id, fecha, monto, descripcion)
-            VALUES (?,?,?,?,?,?,?)
-          `).run(ej.lote_id, campañaParaCosto, categoria, r.lastInsertRowid,
+            INSERT INTO pa_costos_lote (lote_id, campaña_id, campaña_anual_id, campaña_estacional_id, categoria, referencia_id, fecha, monto, descripcion)
+            VALUES (?,?,?,?,?,?,?,?,?)
+          `).run(ej.lote_id, campañaParaCosto, campAnual, campEstacional, categoria, r.lastInsertRowid,
                  fechaFinal, costoTotal,
                  `Aplicación OA: ${insumo.nombre}`);
         }
@@ -1518,7 +1556,23 @@ router.post('/aplicaciones/batch', requireAuth, (req, res) => {
 router.get('/costos', requireAuth, (req, res) => {
   const db = getDb();
   try {
-    const { campaña_id, lote_id } = req.query;
+    // Filtros de campaña independientes por tipo. campaña_id (viejo) = anual.
+    const { campaña_id, campaña_anual_id, campaña_estacional_id, lote_id } = req.query;
+    const anualFiltro = campaña_anual_id || campaña_id || null;
+    const estacionalFiltro = campaña_estacional_id || null;
+
+    // WHERE dinámico sobre pa_costos_lote (cl). Si no viene ningún filtro,
+    // por defecto usamos la campaña anual activa.
+    const costoConds = [];
+    const costoPrm = [];
+    if (anualFiltro)      { costoConds.push("cl.campaña_anual_id = ?");      costoPrm.push(anualFiltro); }
+    if (estacionalFiltro) { costoConds.push("cl.campaña_estacional_id = ?"); costoPrm.push(estacionalFiltro); }
+    if (!costoConds.length) {
+      const def = db.prepare("SELECT id FROM pa_campañas WHERE activa=1 AND tipo='anual'").get();
+      if (def) { costoConds.push("cl.campaña_anual_id = ?"); costoPrm.push(def.id); }
+      else { costoConds.push("1=1"); }
+    }
+    const costoWhere = costoConds.join(' AND ');
 
     // Si se pide un lote específico, detalle completo
     if (lote_id) {
@@ -1527,19 +1581,20 @@ router.get('/costos', requireAuth, (req, res) => {
                ca.nombre as campaña_nombre
         FROM pa_costos_lote cl
         JOIN pa_lotes l ON l.id = cl.lote_id
-        JOIN pa_campañas ca ON ca.id = cl.campaña_id
-        WHERE cl.lote_id = ? ${campaña_id ? 'AND cl.campaña_id = ?' : ''}
+        LEFT JOIN pa_campañas ca ON ca.id = cl.campaña_id
+        WHERE cl.lote_id = ? AND ${costoWhere}
         ORDER BY cl.fecha DESC
-      `).all(...(campaña_id ? [lote_id, campaña_id] : [lote_id]));
+      `).all(lote_id, ...costoPrm);
       return res.json({ ok: true, data: detalle });
     }
 
-    // Resumen por lote
-    const campañaFiltro = campaña_id || db.prepare("SELECT id FROM pa_campañas WHERE activa=1").get()?.id;
-    // Necesitamos el nombre de la campaña para hacer el JOIN con pa_cultivos_lote
-    // (esa tabla guarda la campaña como TEXT, no como FK)
-    const campañaNombre = campañaFiltro
-      ? db.prepare("SELECT nombre FROM pa_campañas WHERE id=?").get(campañaFiltro)?.nombre
+    // Nombre de campaña para el JOIN con pa_cultivos_lote (guarda campaña como
+    // TEXT). Si se filtra por estacional, priorizamos su nombre para agrupar el
+    // cultivo de ese ciclo; si no, el de la anual.
+    const nombreCampId = estacionalFiltro || anualFiltro
+      || db.prepare("SELECT id FROM pa_campañas WHERE activa=1 AND tipo='anual'").get()?.id;
+    const campañaNombre = nombreCampId
+      ? db.prepare("SELECT nombre FROM pa_campañas WHERE id=?").get(nombreCampId)?.nombre
       : null;
     const resumen = db.prepare(`
       SELECT
@@ -1556,12 +1611,12 @@ router.get('/costos', requireAuth, (req, res) => {
       FROM pa_costos_lote cl
       JOIN pa_lotes l ON l.id = cl.lote_id
       JOIN pa_sectores s ON s.id = l.sector_id
-      JOIN pa_campañas ca ON ca.id = cl.campaña_id
+      LEFT JOIN pa_campañas ca ON ca.id = cl.campaña_id
       LEFT JOIN pa_cultivos_lote cu ON cu.lote_id = l.id AND cu.campaña = ?
-      WHERE cl.campaña_id = ?
-      GROUP BY l.id, cl.campaña_id
+      WHERE ${costoWhere}
+      GROUP BY l.id
       ORDER BY s.nombre, l.nombre
-    `).all(campañaNombre || '', campañaFiltro);
+    `).all(campañaNombre || '', ...costoPrm);
 
     // Total por sector
     const porSector = db.prepare(`
@@ -1574,10 +1629,10 @@ router.get('/costos', requireAuth, (req, res) => {
       FROM pa_costos_lote cl
       JOIN pa_lotes l ON l.id = cl.lote_id
       JOIN pa_sectores s ON s.id = l.sector_id
-      WHERE cl.campaña_id = ?
+      WHERE ${costoWhere}
       GROUP BY s.id
       ORDER BY s.nombre
-    `).all(campañaFiltro);
+    `).all(...costoPrm);
 
     // Total por cultivo: agrupamos los lotes por su cultivo de la campaña.
     // Lotes sin cultivo asignado se agrupan en "Sin cultivo asignado".
@@ -1597,13 +1652,13 @@ router.get('/costos', requireAuth, (req, res) => {
           SUM(cl.monto) AS monto
         FROM pa_costos_lote cl
         JOIN pa_lotes l ON l.id = cl.lote_id
-        WHERE cl.campaña_id = ?
+        WHERE ${costoWhere}
         GROUP BY l.id
       ) t
       LEFT JOIN pa_cultivos_lote cu ON cu.lote_id = t.lote_id AND cu.campaña = ?
       GROUP BY cultivo
       ORDER BY costo_total DESC
-    `).all(campañaFiltro, campañaNombre || '');
+    `).all(...costoPrm, campañaNombre || '');
 
     res.json({ ok: true, data: resumen, por_sector: porSector, por_cultivo: porCultivo });
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
@@ -1632,16 +1687,28 @@ router.get('/stock', requireAuth, (req, res) => {
 router.get('/dashboard', requireAuth, (req, res) => {
   const db = getDb();
   try {
-    const campaña = db.prepare("SELECT * FROM pa_campañas WHERE activa=1").get();
     const hoy = new Date().toISOString().slice(0,10);
+    // Dos campañas activas simultáneas: una anual + una estacional.
+    const anual      = db.prepare("SELECT * FROM pa_campañas WHERE activa=1 AND tipo='anual' LIMIT 1").get() || null;
+    const estacional = db.prepare("SELECT * FROM pa_campañas WHERE activa=1 AND tipo='estacional' LIMIT 1").get() || null;
+    const costoAnual = anual
+      ? (db.prepare("SELECT COALESCE(SUM(monto),0) as total FROM pa_costos_lote WHERE campaña_anual_id=?").get(anual.id)?.total || 0)
+      : 0;
+    const costoEstacional = estacional
+      ? (db.prepare("SELECT COALESCE(SUM(monto),0) as total FROM pa_costos_lote WHERE campaña_estacional_id=?").get(estacional.id)?.total || 0)
+      : 0;
     const data = {
-      campaña,
+      // Compat: el front viejo leía `campaña` y `costo_campaña` (= anual)
+      campaña: anual,
+      costo_campaña: costoAnual,
+      // Nuevo modelo: una card por tipo
+      campaña_anual_activa:      anual      ? { id: anual.id,      nombre: anual.nombre,      costo_total: costoAnual }      : null,
+      campaña_estacional_activa: estacional ? { id: estacional.id, nombre: estacional.nombre, costo_total: costoEstacional } : null,
       insumos_bajo_stock: db.prepare("SELECT COUNT(*) as n FROM pa_insumos WHERE activo=1 AND stock_actual <= stock_minimo AND stock_minimo > 0").get().n,
       ordenes_pendientes: db.prepare("SELECT COUNT(*) as n FROM pa_ordenes WHERE estado IN ('emitida','en_ejecucion')").get().n,
       ordenes_hoy:        db.prepare("SELECT COUNT(*) as n FROM pa_ordenes WHERE fecha_orden = ?").get(hoy).n,
       aplicaciones_hoy:   db.prepare("SELECT COUNT(*) as n FROM pa_aplicaciones WHERE fecha_real = ?").get(hoy).n,
       total_lotes:        db.prepare("SELECT COUNT(*) as n FROM pa_lotes WHERE activo=1").get().n,
-      costo_campaña:      db.prepare("SELECT COALESCE(SUM(monto),0) as total FROM pa_costos_lote WHERE campaña_id=?").get(campaña?.id)?.total || 0,
     };
     res.json({ ok: true, data });
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
@@ -1906,12 +1973,13 @@ router.post('/combustible/movimientos', requireAuth, (req, res) => {
       // Imputar costo a lote si corresponde (consumo con lote asignado)
       if (lote_id && Number(precio_total) > 0 &&
           ['consumo_tanque','consumo_estacion'].includes(tipo_movimiento)) {
-        const camp = db.prepare("SELECT id FROM pa_campañas WHERE activa=1 LIMIT 1").get();
-        if (camp) {
+        const act = campañasActivas(db);
+        const campId = act.anualId || act.estacionalId;
+        if (campId) {
           db.prepare(`INSERT INTO pa_costos_lote
-              (lote_id, campaña_id, categoria, referencia_id, fecha, monto, descripcion)
-              VALUES (?,?,'otros',?,?,?,?)`)
-            .run(lote_id, camp.id, movId,
+              (lote_id, campaña_id, campaña_anual_id, campaña_estacional_id, categoria, referencia_id, fecha, monto, descripcion)
+              VALUES (?,?,?,?,'otros',?,?,?,?)`)
+            .run(lote_id, campId, act.anualId, act.estacionalId, movId,
                  fecha || new Date().toISOString().slice(0,10),
                  Number(precio_total),
                  `Combustible ${combustible} · ${litros} lt`);
@@ -2571,13 +2639,14 @@ router.post('/personal/partes/:id/valorizar', requireAuth, (req, res) => {
       else if (tipoLabor === 'produccion' || tipoLabor === 'general') categoria = 'labor_propia';
       else categoria = 'otros';
 
-      const camp = db.prepare("SELECT id FROM pa_campañas WHERE activa=1 LIMIT 1").get();
-      if (camp && Number(monto_total) > 0) {
+      const act = campañasActivas(db);
+      const campId = act.anualId || act.estacionalId;
+      if (campId && Number(monto_total) > 0) {
         // Uso referencia_id = -parte.id para no colisionar con referencias de otros módulos
         db.prepare(`INSERT INTO pa_costos_lote
-            (lote_id, campaña_id, categoria, referencia_id, fecha, monto, descripcion)
-            VALUES (?,?,?,?,?,?,?)`)
-          .run(parte.lote_id, camp.id, categoria, -parte.id, parte.fecha,
+            (lote_id, campaña_id, campaña_anual_id, campaña_estacional_id, categoria, referencia_id, fecha, monto, descripcion)
+            VALUES (?,?,?,?,?,?,?,?,?)`)
+          .run(parte.lote_id, campId, act.anualId, act.estacionalId, categoria, -parte.id, parte.fecha,
                Number(monto_total),
                `MO · ${tarea ? tarea.nombre : 'Parte'} · ${rubro.nombre}${observaciones ? ' · ' + observaciones : ''}`);
       }
