@@ -2410,12 +2410,21 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
         <div class="fg">
           <div class="fl"><label>Username *</label><input id="eq-per-username" placeholder="ej: pbarcelo" style="font-family:monospace"></div>
           <div class="fl"><label>Rol del sistema</label>
-            <select id="eq-per-rol-sistema">
+            <select id="eq-per-rol-sistema" onchange="eqOnRolSistemaCambio()">
               <option value="admin">Administrador</option>
               <option value="operador" selected>Operador</option>
               <option value="consulta">Solo consulta</option>
               <option value="campo">🌿 Solo Scout (campo)</option>
             </select>
+          </div>
+          <div class="fl ff" id="eq-per-fl-solo-lectura" style="margin-top:4px">
+            <label style="display:flex;align-items:center;gap:8px;text-transform:none;font-weight:500;cursor:pointer;background:#fef3c7;padding:8px 12px;border-radius:6px;border:1px solid #fbbf24">
+              <input type="checkbox" id="eq-per-solo-lectura" style="width:18px;height:18px">
+              <div>
+                <span style="color:#78350f;font-weight:600">👁 Modo solo lectura</span>
+                <div style="font-size:11px;color:#92400e;margin-top:2px;font-weight:400">El usuario puede ver todo pero NO puede crear, editar ni borrar. Útil para auditores, contadores, externos.</div>
+              </div>
+            </label>
           </div>
           <div class="fl ff" style="margin-top:4px">
             <label>Depósitos habilitados</label>
@@ -25195,6 +25204,8 @@ function eqPoblarAcceso(persona, usuario) {
     // Poblar campos con los datos del usuario actual
     document.getElementById('eq-per-username').value = usuario.username || '';
     document.getElementById('eq-per-rol-sistema').value = usuario.rol || 'operador';
+    document.getElementById('eq-per-solo-lectura').checked = !!usuario.solo_lectura;
+    eqOnRolSistemaCambio();
     // Depósitos
     var deps = [];
     try { deps = JSON.parse(usuario.depositos || '[]'); } catch(e){ deps = []; }
@@ -25217,6 +25228,8 @@ function eqPoblarAcceso(persona, usuario) {
       .normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]/g, '');
     document.getElementById('eq-per-username').value = (initial + ape).replace(/[^a-z0-9]/g, '');
     document.getElementById('eq-per-rol-sistema').value = 'operador';
+    document.getElementById('eq-per-solo-lectura').checked = false;
+    eqOnRolSistemaCambio();
     document.getElementById('eq-per-dep-mcba').checked = true;
     document.getElementById('eq-per-dep-finca').checked = true;
     document.getElementById('eq-per-dep-sanpedro').checked = true;
@@ -25255,6 +25268,20 @@ function eqToggleAccesoBloque() {
   if (cb.checked) {
     // Cargar proveedores IFCO en background
     eqCargarProveedoresIfcoEq(null);
+    eqOnRolSistemaCambio();
+  }
+}
+
+// El flag solo_lectura NO aplica a admin (admin siempre puede modificar todo).
+// Ocultamos el checkbox cuando rol=admin y lo destildamos para evitar enviar 1.
+function eqOnRolSistemaCambio() {
+  var rol = document.getElementById('eq-per-rol-sistema').value;
+  var fl = document.getElementById('eq-per-fl-solo-lectura');
+  if (rol === 'admin') {
+    document.getElementById('eq-per-solo-lectura').checked = false;
+    fl.style.display = 'none';
+  } else {
+    fl.style.display = '';
   }
 }
 
@@ -25320,7 +25347,8 @@ function eqSincronizarAcceso(personaId) {
       rol: document.getElementById('eq-per-rol-sistema').value,
       depositos: deps,
       deposito_tipo: depTipo,
-      deposito_proveedor_id: depProvId
+      deposito_proveedor_id: depProvId,
+      solo_lectura: document.getElementById('eq-per-solo-lectura').checked ? 1 : 0
     };
 
     // CASO 3: no tenía y ahora quiere → POST
