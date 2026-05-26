@@ -1689,17 +1689,28 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
 <!-- ─── PA ÓRDENES ────────────────────────────────────────────── -->
 <div class="sec" id="sec-pa-ordenes">
 <div class="ph"><div><div class="ph-t">📋 Órdenes de Aplicación</div><div class="ph-s">Creadas por la ingeniera, ejecutadas en campo</div></div>
-<button class="btn bb" onclick="paAbrirNuevaOrden()">+ Nueva orden</button></div>
+<div style="display:flex;gap:8px">
+  <button class="btn bo" onclick="paOrdExportarExcel()" title="Exportar a Excel (respeta filtros)">📥 Excel</button>
+  <button class="btn bb" onclick="paAbrirNuevaOrden()">+ Nueva orden</button>
+</div></div>
+<!-- Cards de resumen por cultivo (respetan filtros) -->
+<div id="pa-ord-cards" class="pa-grid4" style="display:none;margin-bottom:18px"></div>
 <div class="filt">
   <select id="pa-ord-estado-fil" onchange="paLoadOrdenes()">
     <option value="">Todos los estados</option><option value="emitida">Emitidas</option>
     <option value="en_ejecucion">En ejecución</option><option value="ejecutada">Ejecutadas</option>
     <option value="borrador">Borradores</option><option value="anulada">Anuladas</option>
   </select>
+  <select id="pa-ord-finca-fil" onchange="paOrdFincaChange()" style="margin-left:10px">
+    <option value="">Todas las fincas</option>
+  </select>
+  <select id="pa-ord-lote-fil" onchange="paOrdAplicarFiltros()" style="margin-left:10px" disabled>
+    <option value="">Elegí finca primero</option>
+  </select>
 </div>
 <div class="pa-wrap"><div class="ab-table-wrap"><table class="pa-tbl">
-  <thead><tr><th>N° Orden</th><th>Fecha</th><th>Tipo</th><th>Lotes</th><th>Productos</th><th>Asignado a</th><th>Estado</th><th></th></tr></thead>
-  <tbody id="pa-ord-tbody"><tr><td colspan="8" class="emp">Cargando...</td></tr></tbody>
+  <thead><tr><th>N° Orden</th><th>Fecha</th><th>Tipo</th><th>Lotes</th><th>Cultivo</th><th>Productos</th><th style="text-align:right">Costo</th><th>Asignado a</th><th>Estado</th><th></th></tr></thead>
+  <tbody id="pa-ord-tbody"><tr><td colspan="10" class="emp">Cargando...</td></tr></tbody>
 </table></div></div>
 </div>
 
@@ -14583,30 +14594,139 @@ function paActTotalComp(){
 }
 function paLoadOrdenes(){
   var estado=document.getElementById('pa-ord-estado-fil').value;
-  paF('/api/pa/ordenes'+(estado?'?estado='+estado:'')).then(function(r){
-    var data=r.data||[];var tb=document.getElementById('pa-ord-tbody');
-    if(!data.length){tb.innerHTML='<tr><td colspan="8" class="emp">Sin órdenes</td></tr>';return;}
-    tb.innerHTML=data.map(function(o){
-      var lts=(o.lotes||[]).map(function(l){return l.lote_nombre;}).join(', ');
-      var prs=(o.items||[]).map(function(i){return i.insumo_nombre;}).join(', ');
-      // Editar y eliminar solo si la orden está en estado "emitida"
-      var btnEdit='', btnDel='';
-      if(o.estado==='emitida'){
-        btnEdit=' <button class="btn bo bs" onclick="paAbrirEditarOrden('+o.id+')" title="Editar orden">✏️</button>';
-        btnDel =' <button class="btn bs" style="background:#dc2626;color:#fff;border-color:#dc2626" onclick="paEliminarOrden('+o.id+',\''+(o.nro_orden||'').replace(/\'/g,"\\'")+'\')" title="Eliminar orden">🗑</button>';
-      }
-      return '<tr>'
-        +'<td><strong>'+o.nro_orden+'</strong></td>'
-        +'<td>'+paFecha(o.fecha_orden)+'</td>'
-        +'<td>'+(o.tipo_aplicacion||'—')+'</td>'
-        +'<td style="font-size:12px;color:var(--mut)">'+lts+'</td>'
-        +'<td style="font-size:12px;color:var(--mut)">'+prs+'</td>'
-        +'<td style="font-size:12px">'+(o.asignado_nombre?'<span class="pa-badge pa-azul-bg">👤 '+o.asignado_nombre+'</span>':'<span style="color:var(--sub)">—</span>')+'</td>'
-        +'<td>'+paBadgeEstado(o.estado)+'</td>'
-        +'<td style="white-space:nowrap"><button class="btn bo bs" onclick="paVerOrden('+o.id+')">Ver</button>'+btnEdit+btnDel+'</td>'
-      +'</tr>';
-    }).join('');
+  // Asegurar que los lotes estén cargados para los filtros Finca→Lote
+  var ensureLotes=(PA.lotes&&PA.lotes.length)
+    ? Promise.resolve()
+    : paF('/api/pa/lotes').then(function(r){PA.lotes=r.data||[];});
+  ensureLotes.then(function(){
+    paOrdPoblarFincaFil();
+    return paF('/api/pa/ordenes'+(estado?'?estado='+estado:''));
+  }).then(function(r){
+    PA._ordenes=r.data||[];
+    paOrdAplicarFiltros();
   });
+}
+// Poblar el select de Finca con las fincas existentes (preservando selección)
+function paOrdPoblarFincaFil(){
+  var sel=document.getElementById('pa-ord-finca-fil');
+  if(!sel)return;
+  var prev=sel.value;
+  var fincas=[];
+  (PA.lotes||[]).forEach(function(l){if(l.finca&&fincas.indexOf(l.finca)===-1)fincas.push(l.finca);});
+  fincas.sort();
+  sel.innerHTML='<option value="">Todas las fincas</option>'
+    +fincas.map(function(f){return'<option value="'+f.replace(/"/g,'&quot;')+'">'+f+'</option>';}).join('');
+  if(prev&&fincas.indexOf(prev)!==-1)sel.value=prev;
+}
+// Cambió la Finca → recargar el select de Lote en cascada y re-filtrar
+function paOrdFincaChange(){
+  var finca=document.getElementById('pa-ord-finca-fil').value;
+  var selL=document.getElementById('pa-ord-lote-fil');
+  if(!finca){
+    selL.innerHTML='<option value="">Elegí finca primero</option>';
+    selL.disabled=true;
+  }else{
+    var lotes=(PA.lotes||[]).filter(function(l){return l.finca===finca;});
+    selL.disabled=false;
+    selL.innerHTML='<option value="">Todos los lotes</option>'
+      +lotes.map(function(l){return'<option value="'+l.id+'">'+l.nombre+'</option>';}).join('');
+  }
+  paOrdAplicarFiltros();
+}
+// Aplica los filtros Finca/Lote (cliente) sobre PA._ordenes y renderiza cards + tabla
+function paOrdAplicarFiltros(){
+  var finca=document.getElementById('pa-ord-finca-fil').value;
+  var loteId=document.getElementById('pa-ord-lote-fil').value;
+  var rows=(PA._ordenes||[]).filter(function(o){
+    if(loteId)return (o.lotes||[]).some(function(l){return String(l.lote_id)===String(loteId);});
+    if(finca)return (o.finca_nombres||[]).indexOf(finca)!==-1;
+    return true;
+  });
+  PA._ordenesFiltradas=rows;
+  paOrdRenderCards(rows);
+  paOrdRenderTablaOrdenes(rows);
+}
+// Cards de resumen por cultivo. Se ocultan si hay 0 o 1 cultivo.
+function paOrdRenderCards(rows){
+  var cont=document.getElementById('pa-ord-cards');
+  if(!cont)return;
+  var mapa={}; // cultivo -> {n, costo}
+  rows.forEach(function(o){
+    (o.cultivos||[]).forEach(function(c){
+      if(!mapa[c])mapa[c]={n:0,costo:0};
+      mapa[c].n++;
+      mapa[c].costo+=(o.costo_total||0);
+    });
+  });
+  var cultivos=Object.keys(mapa).sort();
+  if(cultivos.length<=1){cont.style.display='none';cont.innerHTML='';return;}
+  cont.style.display='grid';
+  cont.innerHTML=cultivos.map(function(c){
+    return'<div class="pa-card"><div class="pa-card-title">🌱 '+c+'</div>'
+      +'<div class="pa-stat">'+paMoney(mapa[c].costo)+'</div>'
+      +'<div style="font-size:12px;color:var(--mut);margin-top:4px">'+mapa[c].n+' '+(mapa[c].n===1?'orden':'órdenes')+'</div></div>';
+  }).join('');
+}
+function paOrdRenderTablaOrdenes(data){
+  var tb=document.getElementById('pa-ord-tbody');
+  if(!tb)return;
+  if(!data.length){tb.innerHTML='<tr><td colspan="10" class="emp">Sin órdenes</td></tr>';return;}
+  tb.innerHTML=data.map(function(o){
+    var lts=(o.lotes||[]).map(function(l){return l.lote_nombre;}).join(', ');
+    var prs=(o.items||[]).map(function(i){return i.insumo_nombre;}).join(', ');
+    var cult=(o.cultivos&&o.cultivos.length)?o.cultivos.join(', '):'—';
+    var costo=(o.costo_total&&o.costo_total>0)?paMoney(o.costo_total):'—';
+    // Editar y eliminar solo si la orden está en estado "emitida"
+    var btnEdit='', btnDel='';
+    if(o.estado==='emitida'){
+      btnEdit=' <button class="btn bo bs" onclick="paAbrirEditarOrden('+o.id+')" title="Editar orden">✏️</button>';
+      btnDel =' <button class="btn bs" style="background:#dc2626;color:#fff;border-color:#dc2626" onclick="paEliminarOrden('+o.id+',\''+(o.nro_orden||'').replace(/\'/g,"\\'")+'\')" title="Eliminar orden">🗑</button>';
+    }
+    return '<tr>'
+      +'<td><strong>'+o.nro_orden+'</strong></td>'
+      +'<td>'+paFecha(o.fecha_orden)+'</td>'
+      +'<td>'+(o.tipo_aplicacion||'—')+'</td>'
+      +'<td style="font-size:12px;color:var(--mut)">'+lts+'</td>'
+      +'<td style="font-size:12px;color:var(--mut)">'+cult+'</td>'
+      +'<td style="font-size:12px;color:var(--mut)">'+prs+'</td>'
+      +'<td style="text-align:right;font-size:12px;white-space:nowrap">'+costo+'</td>'
+      +'<td style="font-size:12px">'+(o.asignado_nombre?'<span class="pa-badge pa-azul-bg">👤 '+o.asignado_nombre+'</span>':'<span style="color:var(--sub)">—</span>')+'</td>'
+      +'<td>'+paBadgeEstado(o.estado)+'</td>'
+      +'<td style="white-space:nowrap"><button class="btn bo bs" onclick="paVerOrden('+o.id+')">Ver</button>'+btnEdit+btnDel+'</td>'
+    +'</tr>';
+  }).join('');
+}
+// Exporta a XLSX las órdenes actualmente filtradas (mismo patrón que IFCO)
+function paOrdExportarExcel(){
+  if(typeof XLSX==='undefined'){alert('La librería de Excel todavía está cargando. Probá de nuevo en unos segundos.');return;}
+  var rows=PA._ordenesFiltradas||[];
+  if(!rows.length){alert('No hay órdenes para exportar con esos filtros');return;}
+  var estadoLbl={borrador:'Borrador',emitida:'Emitida',en_ejecucion:'En ejecución',ejecutada:'Ejecutada',parcial:'Parcial',anulada:'Anulada'};
+  var data=rows.map(function(o){
+    return{
+      'N° Orden':   o.nro_orden||'',
+      'Fecha':      paFecha(o.fecha_orden),
+      'Tipo':       o.tipo_aplicacion||'',
+      'Finca':      (o.finca_nombres||[]).join(', '),
+      'Lote(s)':    (o.lotes||[]).map(function(l){return l.lote_nombre;}).join(', '),
+      'Cultivo(s)': (o.cultivos||[]).join(', '),
+      'Productos':  (o.items||[]).map(function(i){return i.insumo_nombre;}).join(', '),
+      'Costo':      o.costo_total||0,
+      'Asignado a': o.asignado_nombre||'',
+      'Estado':     estadoLbl[o.estado]||o.estado||''
+    };
+  });
+  var ws=XLSX.utils.json_to_sheet(data);
+  var cols=Object.keys(data[0]);
+  ws['!cols']=cols.map(function(k){
+    var max=k.length;
+    data.forEach(function(row){var v=String(row[k]||'');if(v.length>max)max=v.length;});
+    return{wch:Math.min(max+2,50)};
+  });
+  var wb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb,ws,'Órdenes');
+  var hoy=new Date().toISOString().slice(0,10);
+  XLSX.writeFile(wb,'ordenes-aplicacion-'+hoy+'.xlsx');
 }
 
 function paEliminarOrden(id,nro){
