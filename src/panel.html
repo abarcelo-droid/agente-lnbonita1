@@ -1510,10 +1510,14 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
 <div class="ph"><div><div class="ph-t">🌾 Producción Agrícola</div><div class="ph-s" id="pa-dash-sub">Puente Cordon SA — Carpinteria, San Juan</div></div>
 <button class="btn bb" onclick="paLoadDash()">↺ Actualizar</button></div>
 <div class="pa-grid4">
-  <div class="pa-card"><div class="pa-card-title">Campaña activa</div><div class="pa-stat" id="pad-campaña">—</div></div>
+  <div class="pa-card"><div class="pa-card-title">📅 Campaña anual</div><div class="pa-stat" id="pad-camp-anual">—</div></div>
+  <div class="pa-card"><div class="pa-card-title">💰 Costo anual</div><div class="pa-stat" id="pad-costo-anual">—</div></div>
+  <div class="pa-card"><div class="pa-card-title">🌱 Campaña estacional</div><div class="pa-stat" id="pad-camp-estacional">—</div></div>
+  <div class="pa-card"><div class="pa-card-title">💰 Costo estacional</div><div class="pa-stat" id="pad-costo-estacional">—</div></div>
+</div>
+<div class="pa-grid4">
   <div class="pa-card"><div class="pa-card-title">Lotes totales</div><div class="pa-stat" id="pad-lotes">—</div></div>
   <div class="pa-card"><div class="pa-card-title">Órdenes pendientes</div><div class="pa-stat" id="pad-ordenes">—</div></div>
-  <div class="pa-card"><div class="pa-card-title">Costo campaña</div><div class="pa-stat" id="pad-costo">—</div></div>
 </div>
 
 <!-- Clima Carpinteria -->
@@ -1573,7 +1577,8 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
 <div class="ph"><div><div class="ph-t">📅 Calendario Agrícola</div><div class="ph-s">Cultivos por lote y campaña — rotación</div></div>
 <div style="display:flex;gap:10px;align-items:center">
   <button class="btn bo" onclick="paAbrirNuevoLote()">+ Nuevo lote</button>
-  <select id="cal-campaña-sel" onchange="paLoadCalendario();paCalRefrescarMapa();" style="padding:7px 12px;font-size:13px;width:auto"><option value="">Campaña activa</option></select>
+  <select id="cal-campaña-anual-sel" onchange="paLoadCalendario();paCalRefrescarMapa();" title="Campaña anual" style="padding:7px 12px;font-size:13px;width:auto"><option value="">Campaña anual</option></select>
+  <select id="cal-campaña-estacional-sel" onchange="paLoadCalendario();paCalRefrescarMapa();" title="Campaña estacional" style="padding:7px 12px;font-size:13px;width:auto"><option value="">(sin filtrar)</option></select>
   <div style="display:inline-flex;gap:4px;background:var(--bg);border:1px solid var(--bor);border-radius:8px;padding:3px">
     <button class="btn bo" id="pa-cal-vista-tabla" onclick="paCalVista('tabla')" style="border:none;background:var(--burg);color:#fff;padding:5px 12px;font-size:12px">📋 Tabla</button>
     <button class="btn bo" id="pa-cal-vista-mapa"  onclick="paCalVista('mapa')"  style="border:none;background:transparent;color:var(--mut);padding:5px 12px;font-size:12px">🗺️ Mapa</button>
@@ -1717,7 +1722,10 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
 <!-- ─── PA COSTOS ─────────────────────────────────────────────── -->
 <div class="sec" id="sec-pa-costos">
 <div class="ph"><div><div class="ph-t">💰 Costos por Lote</div><div class="ph-s">Resumen acumulado por lote y campaña</div></div>
-<select id="pa-cos-campaña" onchange="paLoadCostos()" style="padding:7px 12px;font-size:13px;width:auto"><option value="">Campaña activa</option></select>
+<div style="display:flex;gap:8px">
+  <select id="pa-cos-campaña-anual" onchange="paLoadCostos()" title="Campaña anual" style="padding:7px 12px;font-size:13px;width:auto"><option value="">Campaña anual</option></select>
+  <select id="pa-cos-campaña-estacional" onchange="paLoadCostos()" title="Campaña estacional" style="padding:7px 12px;font-size:13px;width:auto"><option value="">(sin filtrar)</option></select>
+</div>
 </div>
 <!-- Resumen por cultivo -->
 <div style="font-size:11px;font-weight:700;color:var(--mut);text-transform:uppercase;margin:14px 0 8px">Por cultivo</div>
@@ -11750,17 +11758,36 @@ function paFecha(s){if(!s)return'—';var p=s.slice(0,10).split('-');return p[2]
 function paBadgeEstado(e){var m={borrador:['pa-gris-bg','Borrador'],emitida:['pa-azul-bg','Emitida'],en_ejecucion:['pa-amarillo-bg','En ejecución'],ejecutada:['pa-verde-bg','Ejecutada'],parcial:['pa-amarillo-bg','Parcial'],anulada:['pa-rojo-bg','Anulada']};var d=m[e]||['pa-gris-bg',e];return'<span class="pa-badge '+d[0]+'">'+d[1]+'</span>';}
 function paBadgeTipo(t){var m={fertilizante:['pa-verde-bg','Fertilizante'],herbicida:['pa-amarillo-bg','Herbicida'],fungicida:['pa-azul-bg','Fungicida'],insecticida:['pa-rojo-bg','Insecticida'],abono:['pa-verde-bg','Abono'],agroquimico:['pa-azul-bg','Agroquímico'],semilla:['pa-amarillo-bg','Semilla'],otro:['pa-gris-bg','Otro']};var d=m[t]||['pa-gris-bg',t];return'<span class="pa-badge '+d[0]+'">'+d[1]+'</span>';}
 
+// Pobla los selects duales (anual + estacional) de Calendario y Costos a partir
+// de PA.campañas. Anual por defecto = anual activa; estacional por defecto = la
+// estacional activa, con opción "(sin filtrar)" arriba.
+function paPoblarSelectsCampaña(){
+  var camps=PA.campañas||[];
+  var anuales=camps.filter(function(c){return (c.tipo||'anual')==='anual';});
+  var estac  =camps.filter(function(c){return c.tipo==='estacional';});
+  var anualAct=anuales.find(function(c){return c.activa;});
+  var estacAct=estac.find(function(c){return c.activa;});
+  var anualOpts=anuales.map(function(c){return'<option value="'+c.id+'">'+c.nombre+'</option>';}).join('');
+  var estacOpts=estac.map(function(c){return'<option value="'+c.id+'">'+c.nombre+'</option>';}).join('');
+  ['cal-campaña-anual-sel','pa-cos-campaña-anual'].forEach(function(id){
+    var el=document.getElementById(id);if(!el)return;
+    el.innerHTML='<option value="">Campaña anual</option>'+anualOpts;
+    if(anualAct){el.value=String(anualAct.id);}
+    else{var o=Array.from(el.options).find(function(x){return x.text==='2026/27';});if(o)el.value=o.value;}
+  });
+  ['cal-campaña-estacional-sel','pa-cos-campaña-estacional'].forEach(function(id){
+    var el=document.getElementById(id);if(!el)return;
+    el.innerHTML='<option value="">(sin filtrar)</option>'+estacOpts;
+    if(estacAct){el.value=String(estacAct.id);}
+  });
+}
+
 function paInit(){
   paF('/api/pa/campanas').then(function(r){
     PA.campañas=r.data||[];
     var opts=PA.campañas.map(function(c){return'<option value="'+c.id+'"'+(c.activa?' selected':'')+'>'+c.nombre+'</option>';}).join('');
-    ['cal-campaña-sel','pa-cos-campaña'].forEach(function(id){var el=document.getElementById(id);if(el){el.innerHTML='<option value="">Campaña activa</option>'+opts;}});
-    // En el calendario, seleccionar 2026/27 como default (la más reciente)
-    var calSel=document.getElementById('cal-campaña-sel');
-    if(calSel){
-      var opt2627=Array.from(calSel.options).find(function(o){return o.text==='2026/27';});
-      if(opt2627) calSel.value=opt2627.value;
-    }
+    // Poblar los selects duales (anual + estacional) del Calendario y Costos.
+    paPoblarSelectsCampaña();
     var cs=document.getElementById('pa-cult-campaña');if(cs)cs.innerHTML=opts;
   });
   paF('/api/pa/sectores').then(function(r){
@@ -11782,10 +11809,13 @@ function paLoadDash(){
   paF('/api/pa/dashboard').then(function(r){
     if(!r.ok)return;
     var d=r.data;
-    document.getElementById('pad-campaña').textContent=d.campaña?d.campaña.nombre:'—';
+    var ca=d.campaña_anual_activa, ce=d.campaña_estacional_activa;
+    document.getElementById('pad-camp-anual').textContent=ca?ca.nombre:'—';
+    document.getElementById('pad-costo-anual').textContent=ca?paMoney(ca.costo_total):'—';
+    document.getElementById('pad-camp-estacional').textContent=ce?ce.nombre:'—';
+    document.getElementById('pad-costo-estacional').textContent=ce?paMoney(ce.costo_total):'—';
     document.getElementById('pad-lotes').textContent=d.total_lotes||0;
     document.getElementById('pad-ordenes').textContent=d.ordenes_pendientes||0;
-    document.getElementById('pad-costo').textContent=paMoney(d.costo_campaña);
   });
   paF('/api/pa/stock').then(function(r){
     var bajos=(r.data||[]).filter(function(i){return i.stock_minimo>0&&i.stock_actual<=i.stock_minimo;});
@@ -12227,29 +12257,39 @@ function paLoadCalendario(){
     var lotes=r.data||[];
     if(!lotes.length){document.getElementById('pa-cal-contenido').innerHTML='<div class="emp">No hay lotes. Agregá lotes en Fincas y Lotes.</div>';return;}
 
-    // ── Resumen ha por producto (campaña activa o seleccionada) ──
-    var campañaSel = document.getElementById('cal-campaña-sel').value;
-    var campañaActiva = PA.campañas.find(function(c){ return c.activa; });
-    // Determinar qué campaña usar para el resumen
+    // ── Resumen ha por producto (campaña anual + estacional) ──
+    // Dos selects independientes: anual (default = anual activa) y estacional
+    // ("(sin filtrar)" = no restringe). El resumen suma las campañas elegidas.
+    var anualSel = (document.getElementById('cal-campaña-anual-sel')||{}).value || '';
+    var estacSel = (document.getElementById('cal-campaña-estacional-sel')||{}).value || '';
+    var campañaActivaAnual = PA.campañas.find(function(c){ return c.activa && (c.tipo||'anual')==='anual'; });
+    // Nombre de la anual a considerar (selección o activa)
     var campañaNombre = '';
-    if (campañaSel) {
-      var cf = PA.campañas.find(function(c){ return String(c.id)===String(campañaSel); });
+    if (anualSel) {
+      var cf = PA.campañas.find(function(c){ return String(c.id)===String(anualSel); });
       if (cf) campañaNombre = cf.nombre;
-    } else if (campañaActiva) {
-      campañaNombre = campañaActiva.nombre;
+    } else if (campañaActivaAnual) {
+      campañaNombre = campañaActivaAnual.nombre;
     }
-    // Determinar el par de campañas a considerar (verano + invierno del mismo año base)
-    var yearBase = null;
-    if (/^\d{4}\//.test(campañaNombre)) yearBase = campañaNombre.substring(0, 4);
-    else if (/^Inv \d{4}$/.test(campañaNombre)) yearBase = campañaNombre.substring(4).trim();
-
+    // Nombre de la estacional elegida (si la hay)
+    var estacNombre = '';
+    if (estacSel) {
+      var ce = PA.campañas.find(function(c){ return String(c.id)===String(estacSel); });
+      if (ce) estacNombre = ce.nombre;
+    }
     var campañasIncluidas = [];
-    if (yearBase) {
-      var veranoNom = yearBase + '/' + String(parseInt(yearBase)+1).substr(-2);
-      var inviernoNom = 'Inv ' + yearBase;
-      [veranoNom, inviernoNom].forEach(function(n){
-        if (PA.campañas.some(function(c){ return c.nombre === n; })) campañasIncluidas.push(n);
-      });
+    if (campañaNombre) campañasIncluidas.push(campañaNombre);
+    if (estacNombre) {
+      if (campañasIncluidas.indexOf(estacNombre)===-1) campañasIncluidas.push(estacNombre);
+    } else {
+      // Sin estacional elegida: mantener el comportamiento previo de emparejar
+      // el invierno del mismo año base que la anual seleccionada.
+      var yearBase = null;
+      if (/^\d{4}\//.test(campañaNombre)) yearBase = campañaNombre.substring(0, 4);
+      if (yearBase) {
+        var inviernoNom = 'Inv ' + yearBase;
+        if (PA.campañas.some(function(c){ return c.nombre === inviernoNom; })) campañasIncluidas.push(inviernoNom);
+      }
     }
     if (!campañasIncluidas.length) campañasIncluidas.push(campañaNombre);
 
@@ -14758,8 +14798,8 @@ function paAbrirNuevaOrden(){
   // Reset buscador
   var buscEl=document.getElementById('pa-ord-lotes-busc');
   if(buscEl)buscEl.value='';
-  // Detectar campaña activa para mostrar el cultivo actual al lado del lote
-  var campAct=(PA.campañas||[]).find(function(c){return c.activa;});
+  // Detectar campaña anual activa para mostrar el cultivo actual al lado del lote
+  var campAct=(PA.campañas||[]).find(function(c){return c.activa && (c.tipo||'anual')==='anual';});
   var campAciActNombre=campAct?campAct.nombre:'2026/27';
   // Lotes con formato: NOMBRE - FINCA (HA) + Cultivo de campaña activa
   // Cada lote incluye un sub-row con "Aplicar parcial" (ha < ha del lote)
@@ -15223,8 +15263,12 @@ function paRegistrarEjecucionMulti() {
 }
 
 function paLoadCostos(){
-  var campId=document.getElementById('pa-cos-campaña').value;
-  paF('/api/pa/costos'+(campId?'?campaña_id='+campId:'')).then(function(r){
+  var anualId=(document.getElementById('pa-cos-campaña-anual')||{}).value||'';
+  var estacId=(document.getElementById('pa-cos-campaña-estacional')||{}).value||'';
+  var qs=[];
+  if(anualId)qs.push('campaña_anual_id='+encodeURIComponent(anualId));
+  if(estacId)qs.push('campaña_estacional_id='+encodeURIComponent(estacId));
+  paF('/api/pa/costos'+(qs.length?'?'+qs.join('&'):'')).then(function(r){
     var data=r.data||[],sects=r.por_sector||[],cults=r.por_cultivo||[];
     // Tabla de cultivos
     var ctbody=document.getElementById('pa-cos-cult-tbody');
@@ -17009,7 +17053,7 @@ function paRenderMapaGeneral() {
       if (layer._isPaPoly) PAMAP.general.removeLayer(layer);
     });
   }
-  var campAct = (PA.campañas||[]).find(function(c){return c.activa==1;});
+  var campAct = (PA.campañas||[]).find(function(c){return c.activa==1 && (c.tipo||'anual')==='anual';});
   var campañaNom = campAct ? campAct.nombre : null;
   var bounds = [];
   var cultivosUsados = {};
@@ -17297,14 +17341,14 @@ function paCalRenderMapa() {
 }
 
 function paCalRenderMapaCore() {
-  // Determinar campaña a mostrar: la del selector o la activa
-  var campSelVal = document.getElementById('cal-campaña-sel').value;
+  // Determinar campaña a mostrar: la anual seleccionada o la anual activa
+  var campSelVal = (document.getElementById('cal-campaña-anual-sel')||{}).value || '';
   var campañaNom;
   if (campSelVal) {
     var cs = (PA.campañas||[]).find(function(c){return c.id==campSelVal;});
     campañaNom = cs ? cs.nombre : null;
   } else {
-    var ca = (PA.campañas||[]).find(function(c){return c.activa==1;});
+    var ca = (PA.campañas||[]).find(function(c){return c.activa==1 && (c.tipo||'anual')==='anual';});
     campañaNom = ca ? ca.nombre : null;
   }
 

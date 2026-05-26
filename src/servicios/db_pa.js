@@ -535,42 +535,112 @@ export function getCampañaActiva() {
   } catch(e) { console.error('[PA] Error migrando cultivos_lote:', e.message); }
 })();
 
-// ── MIGRACIÓN: columna tipo en pa_campañas ────────────────────────────────
-(function() {
+// ── MIGRACIÓN: columna tipo en pa_campañas (anual / estacional) ───────────
+// Modelo de dos niveles temporales superpuestos:
+//   - 'anual'      → campaña anual Jul→Jun (ej: 2026/27). Antes 'verano'.
+//   - 'estacional' → ciclos cortos dentro de la anual (ej: Inv 2026). Antes 'invierno'.
+// El histórico usaba CHECK(tipo IN ('verano','invierno')). Como el CHECK impide
+// hacer UPDATE a los valores nuevos, recreamos la tabla (mismo patrón que el
+// resto del módulo) preservando los id (las FK por campaña_id se mantienen).
+(function migrarTipoCampañaAnualEstacional() {
   try {
+    const t = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='pa_campañas'").get();
     const cols = db.prepare("PRAGMA table_info(pa_campañas)").all().map(c => c.name);
     if (!cols.includes('tipo')) {
-      db.exec("ALTER TABLE pa_campañas ADD COLUMN tipo TEXT DEFAULT 'verano' CHECK(tipo IN ('verano','invierno'))");
-      console.log("[PA] Columna tipo agregada en pa_campañas");
+      db.exec("ALTER TABLE pa_campañas ADD COLUMN tipo TEXT DEFAULT 'anual'");
+      console.log("[PA] Columna tipo (anual/estacional) agregada en pa_campañas");
+    } else if (t && t.sql && /CHECK\(tipo IN \('verano','invierno'\)\)/.test(t.sql)) {
+      db.pragma('foreign_keys = OFF');
+      db.exec(`
+        BEGIN;
+        CREATE TABLE pa_campañas_v2 (
+          id           INTEGER PRIMARY KEY AUTOINCREMENT,
+          nombre       TEXT NOT NULL UNIQUE,
+          fecha_inicio TEXT NOT NULL,
+          fecha_fin    TEXT NOT NULL,
+          activa       INTEGER DEFAULT 0,
+          tipo         TEXT DEFAULT 'anual'
+        );
+        INSERT INTO pa_campañas_v2 (id, nombre, fecha_inicio, fecha_fin, activa, tipo)
+          SELECT id, nombre, fecha_inicio, fecha_fin, activa,
+                 CASE WHEN tipo = 'invierno' THEN 'estacional' ELSE 'anual' END
+          FROM pa_campañas;
+        DROP TABLE pa_campañas;
+        ALTER TABLE pa_campañas_v2 RENAME TO pa_campañas;
+        COMMIT;
+      `);
+      const fk = db.prepare("PRAGMA foreign_key_check").all();
+      if (fk.length > 0) console.error('[PA] ⚠️  FK check tras migrar pa_campañas:', fk);
+      db.pragma('foreign_keys = ON');
+      console.log('[PA] pa_campañas: tipo migrado verano→anual / invierno→estacional');
     }
+    // Normalizar residuales y aplicar heurística por nombre para estacionales.
+    db.exec("UPDATE pa_campañas SET tipo='anual' WHERE tipo IS NULL OR tipo NOT IN ('anual','estacional')");
+    db.exec(`UPDATE pa_campañas SET tipo='estacional'
+             WHERE tipo='anual' AND (
+               nombre LIKE '%Invierno%' OR nombre LIKE '%invierno%' OR
+               nombre LIKE 'Inv %'      OR nombre LIKE '%Verano%'   OR
+               nombre LIKE '%Otoño%'    OR nombre LIKE '%Primavera%')`);
   } catch(e) { console.error('[PA] Error migrando tipo campaña:', e.message); }
+})();
+
+// ── MIGRACIÓN: doble campaña (anual + estacional) en órdenes/compras/costos ─
+// Cada movimiento ahora se imputa a DOS campañas activas simultáneas (una de
+// cada tipo). Se conserva la columna vieja campaña_id (= anual) por retrocompat.
+(function migrarDobleCampaña() {
+  const addCol = (tabla, col, def) => {
+    try {
+      const cols = db.prepare(`PRAGMA table_info(${tabla})`).all().map(c => c.name);
+      if (!cols.includes(col)) {
+        db.exec(`ALTER TABLE ${tabla} ADD COLUMN ${col} ${def}`);
+        console.log(`[PA] Columna ${col} agregada en ${tabla}`);
+        return true;
+      }
+    } catch(e) { console.error(`[PA] Error agregando ${col} en ${tabla}:`, e.message); }
+    return false;
+  };
+  // pa_ordenes (el brief la llama ordenes_aplicacion; en este repo es pa_ordenes)
+  const oa = addCol('pa_ordenes',     'campaña_anual_id',      'INTEGER REFERENCES pa_campañas(id)');
+                    addCol('pa_ordenes',     'campaña_estacional_id', 'INTEGER REFERENCES pa_campañas(id)');
+  // pa_compras
+  const ca = addCol('pa_compras',     'campaña_anual_id',      'INTEGER REFERENCES pa_campañas(id)');
+                    addCol('pa_compras',     'campaña_estacional_id', 'INTEGER REFERENCES pa_campañas(id)');
+  // pa_costos_lote (necesario para filtrar costos por campaña estacional)
+  const cl = addCol('pa_costos_lote', 'campaña_anual_id',      'INTEGER REFERENCES pa_campañas(id)');
+                    addCol('pa_costos_lote', 'campaña_estacional_id', 'INTEGER REFERENCES pa_campañas(id)');
+  // Migración de datos: la columna vieja campaña_id pasa a ser la anual.
+  try {
+    if (oa) db.exec("UPDATE pa_ordenes     SET campaña_anual_id = campaña_id WHERE campaña_anual_id IS NULL AND campaña_id IS NOT NULL");
+    if (ca) db.exec("UPDATE pa_compras     SET campaña_anual_id = campaña_id WHERE campaña_anual_id IS NULL AND campaña_id IS NOT NULL");
+    if (cl) db.exec("UPDATE pa_costos_lote SET campaña_anual_id = campaña_id WHERE campaña_anual_id IS NULL AND campaña_id IS NOT NULL");
+  } catch(e) { console.error('[PA] Error migrando campaña_id → campaña_anual_id:', e.message); }
 })();
 
 // ── MIGRACIÓN: campañas históricas ────────────────────────────────────────
 (function migrarCampañasHistoricas() {
   try {
-    // Campañas de verano (Jul→Jun)
-    const verano = [
+    // Campañas anuales (Jul→Jun)
+    const anuales = [
       ['2021/22', '2021-07-01', '2022-06-30'],
       ['2022/23', '2022-07-01', '2023-06-30'],
       ['2023/24', '2023-07-01', '2024-06-30'],
       ['2024/25', '2024-07-01', '2025-06-30'],
       ['2026/27', '2026-07-01', '2027-06-30'],
     ];
-    for (const [nombre, inicio, fin] of verano) {
-      db.prepare("INSERT OR IGNORE INTO pa_campañas (nombre, fecha_inicio, fecha_fin, activa, tipo) VALUES (?,?,?,0,'verano')")
+    for (const [nombre, inicio, fin] of anuales) {
+      db.prepare("INSERT OR IGNORE INTO pa_campañas (nombre, fecha_inicio, fecha_fin, activa, tipo) VALUES (?,?,?,0,'anual')")
         .run(nombre, inicio, fin);
     }
-    // Campañas de invierno (May→Oct aprox)
-    const invierno = [
+    // Campañas estacionales (ciclos cortos — ej. invierno May→Oct)
+    const estacionales = [
       ['Inv 2022', '2022-05-01', '2022-10-31'],
       ['Inv 2023', '2023-05-01', '2023-10-31'],
       ['Inv 2024', '2024-05-01', '2024-10-31'],
       ['Inv 2025', '2025-05-01', '2025-10-31'],
       ['Inv 2026', '2026-05-01', '2026-10-31'],
     ];
-    for (const [nombre, inicio, fin] of invierno) {
-      db.prepare("INSERT OR IGNORE INTO pa_campañas (nombre, fecha_inicio, fecha_fin, activa, tipo) VALUES (?,?,?,0,'invierno')")
+    for (const [nombre, inicio, fin] of estacionales) {
+      db.prepare("INSERT OR IGNORE INTO pa_campañas (nombre, fecha_inicio, fecha_fin, activa, tipo) VALUES (?,?,?,0,'estacional')")
         .run(nombre, inicio, fin);
     }
   } catch(e) { console.error('[PA] Error migrando campañas históricas:', e.message); }
