@@ -133,6 +133,69 @@ router.get('/lotes', requireAuth, (req, res) => {
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
+// ── Cultivos disponibles para una selección de lotes + sugerencia ─────────
+// Se usa al emitir una Orden: el operario elige el cultivo, con sugerencia
+// según las campañas activas (estacional > anual) y la fecha de la orden.
+// IMPORTANTE: declarar ANTES de '/lotes/:id' para que no lo capture el :id.
+function _mesEnRango(m, ini, fin) {
+  if (!ini || !fin) return false;
+  return (ini <= fin) ? (m >= ini && m <= fin) : (m >= ini || m <= fin); // soporta wrap (ej: Nov→Feb)
+}
+router.get('/lotes/cultivos-disponibles', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const { lote_ids, fecha } = req.query;
+    const ids = String(lote_ids || '').split(',').map(s => parseInt(s.trim(), 10)).filter(n => n > 0);
+    if (!ids.length) return res.json({ ok: true, cultivos: [], sugerido: null, razon: null });
+    const ph = ids.map(() => '?').join(',');
+
+    // 1) Cultivos únicos cargados en esos lotes
+    const cultivos = db.prepare(`
+      SELECT DISTINCT cultivo FROM pa_cultivos_lote
+      WHERE lote_id IN (${ph}) AND cultivo IS NOT NULL AND TRIM(cultivo) <> ''
+      ORDER BY cultivo
+    `).all(...ids).map(r => r.cultivo);
+    if (!cultivos.length) return res.json({ ok: true, cultivos: [], sugerido: null, razon: null });
+
+    // Detalle (cultivo + campaña + meses) para calcular la sugerencia
+    const detalle = db.prepare(`
+      SELECT cl.cultivo, cl.campaña, cl.mes_siembra, cl.mes_cosecha
+      FROM pa_cultivos_lote cl
+      WHERE cl.lote_id IN (${ph}) AND cl.cultivo IS NOT NULL AND TRIM(cl.cultivo) <> ''
+    `).all(...ids);
+
+    const fechaOrden = fecha || new Date().toISOString().slice(0, 10);
+    const mes = parseInt(fechaOrden.slice(5, 7), 10);
+    let sugerido = null, razon = null;
+
+    const pickDe = (campNombre) => {
+      const cands = detalle.filter(d => d.campaña === campNombre);
+      if (!cands.length) return null;
+      // Preferir un cultivo cuyo rango de meses contenga la fecha; si no, el primero
+      return cands.find(d => _mesEnRango(mes, d.mes_siembra, d.mes_cosecha)) || cands[0];
+    };
+
+    // 2a) Campaña estacional activa, si la fecha cae en su rango
+    const estac = db.prepare("SELECT * FROM pa_campañas WHERE tipo='estacional' AND activa=1 LIMIT 1").get();
+    if (estac && fechaOrden >= estac.fecha_inicio && fechaOrden <= estac.fecha_fin) {
+      const pick = pickDe(estac.nombre);
+      if (pick) { sugerido = pick.cultivo; razon = 'Campaña estacional activa: ' + estac.nombre; }
+    }
+    // 2b) Campaña anual activa
+    if (!sugerido) {
+      const anual = db.prepare("SELECT * FROM pa_campañas WHERE tipo='anual' AND activa=1 LIMIT 1").get();
+      if (anual) {
+        const pick = pickDe(anual.nombre);
+        if (pick) { sugerido = pick.cultivo; razon = 'Campaña anual activa: ' + anual.nombre; }
+      }
+    }
+    // 2c) Sin cultivo claro
+    if (!sugerido) { sugerido = cultivos[0]; razon = 'No hay cultivo claro para esta fecha'; }
+
+    res.json({ ok: true, cultivos, sugerido, razon });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
 // GET lote individual con todos sus cultivos por campaña
 router.get('/lotes/:id', requireAuth, (req, res) => {
   const db = getDb();
@@ -1128,10 +1191,13 @@ router.get('/ordenes/:id', requireAuth, (req, res) => {
 
 router.post('/ordenes', requireAuth, (req, res) => {
   const db = getDb();
-  const { campaña_id, campaña_anual_id, campaña_estacional_id,
+  const { campaña_id, campaña_anual_id, campaña_estacional_id, cultivo,
           fecha_orden, fecha_propuesta, tipo_aplicacion, objetivo, notas, lotes, items, asignado_a } = req.body;
   if (!lotes?.length || !items?.length)
     return res.status(400).json({ ok: false, error: 'Debe incluir lotes e items' });
+  // Cultivo obligatorio: el operario lo elige explícitamente al emitir la orden.
+  const cultivoTrim = (typeof cultivo === 'string') ? cultivo.trim() : '';
+  if (!cultivoTrim) return res.status(400).json({ ok: false, error: 'Cultivo requerido' });
 
   // Normalizar lotes: acepta array de números (formato viejo, todo completo)
   // o array de objetos {lote_id, hectareas_aplicadas} (formato nuevo).
@@ -1159,6 +1225,15 @@ router.post('/ordenes', requireAuth, (req, res) => {
     }
   }
 
+  // El cultivo debe estar cargado en pa_cultivos_lote de al menos uno de los lotes.
+  const loteIds = lotesNorm.map(l => l.lote_id);
+  const phLotes = loteIds.map(() => '?').join(',');
+  const cultivoMatch = db.prepare(
+    `SELECT 1 FROM pa_cultivos_lote WHERE lote_id IN (${phLotes}) AND cultivo = ? LIMIT 1`
+  ).get(...loteIds, cultivoTrim);
+  if (!cultivoMatch)
+    return res.status(400).json({ ok: false, error: 'El cultivo no corresponde a los lotes seleccionados' });
+
   try {
     const crearOrden = db.transaction(() => {
       // Campañas: si el body trae ids explícitos los usamos; si no, autoasignamos
@@ -1170,9 +1245,9 @@ router.post('/ordenes', requireAuth, (req, res) => {
       const n = db.prepare("SELECT COUNT(*) as n FROM pa_ordenes").get().n + 1;
       const nro = `OA-${String(n).padStart(5, '0')}`;
       const r = db.prepare(`
-        INSERT INTO pa_ordenes (nro_orden, campaña_id, campaña_anual_id, campaña_estacional_id, fecha_orden, fecha_propuesta, creada_por, tipo_aplicacion, objetivo, notas, estado, asignado_a)
-        VALUES (?,?,?,?,?,?,?,?,?,?,'emitida',?)
-      `).run(nro, campañaIdFinal, anualFinal, estacionalFinal,
+        INSERT INTO pa_ordenes (nro_orden, campaña_id, campaña_anual_id, campaña_estacional_id, cultivo, fecha_orden, fecha_propuesta, creada_por, tipo_aplicacion, objetivo, notas, estado, asignado_a)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,'emitida',?)
+      `).run(nro, campañaIdFinal, anualFinal, estacionalFinal, cultivoTrim,
              fecha_orden||new Date().toISOString().slice(0,10),
              fecha_propuesta||null, req.user.id, tipo_aplicacion||null, objetivo||null, notas||null, asignado_a||null);
       const ordenId = r.lastInsertRowid;
@@ -1215,7 +1290,7 @@ router.patch('/ordenes/:id', requireAuth, (req, res) => {
   const db = getDb();
   const ordenId = req.params.id;
   const { fecha_orden, fecha_propuesta, tipo_aplicacion, objetivo, notas,
-          asignado_a, lotes, items } = req.body;
+          asignado_a, lotes, items, cultivo } = req.body;
 
   try {
     const orden = db.prepare("SELECT * FROM pa_ordenes WHERE id = ? AND eliminada_en IS NULL").get(ordenId);
@@ -1223,6 +1298,11 @@ router.patch('/ordenes/:id', requireAuth, (req, res) => {
     if (orden.estado !== 'emitida') {
       return res.status(400).json({ ok: false, error: 'Solo se pueden editar órdenes en estado "emitida"' });
     }
+    // Cultivo (opcional en edición). Si viene, no puede quedar vacío y debe
+    // corresponder a alguno de los lotes (los nuevos si se mandan, o los actuales).
+    const cultivoTrim = (cultivo !== undefined) ? String(cultivo || '').trim() : undefined;
+    if (cultivoTrim !== undefined && !cultivoTrim)
+      return res.status(400).json({ ok: false, error: 'Cultivo requerido' });
 
     // Normalizar lotes (mismo formato que POST)
     let lotesNorm = null;
@@ -1258,6 +1338,21 @@ router.patch('/ordenes/:id', requireAuth, (req, res) => {
       return res.status(400).json({ ok: false, error: 'Debe haber al menos un producto' });
     }
 
+    // Validar cultivo contra los lotes (nuevos si se mandan, si no los actuales)
+    if (cultivoTrim !== undefined) {
+      const loteIds = lotesNorm
+        ? lotesNorm.map(l => l.lote_id)
+        : db.prepare("SELECT lote_id FROM pa_ordenes_lotes WHERE orden_id = ?").all(ordenId).map(r => r.lote_id);
+      if (loteIds.length) {
+        const phLotes = loteIds.map(() => '?').join(',');
+        const match = db.prepare(
+          `SELECT 1 FROM pa_cultivos_lote WHERE lote_id IN (${phLotes}) AND cultivo = ? LIMIT 1`
+        ).get(...loteIds, cultivoTrim);
+        if (!match)
+          return res.status(400).json({ ok: false, error: 'El cultivo no corresponde a los lotes seleccionados' });
+      }
+    }
+
     const tx = db.transaction(() => {
       // Campos simples
       const sets = [], params = { id: ordenId };
@@ -1267,6 +1362,7 @@ router.patch('/ordenes/:id', requireAuth, (req, res) => {
       if (objetivo        !== undefined) { sets.push("objetivo = @objetivo");               params.objetivo        = objetivo        || null; }
       if (notas           !== undefined) { sets.push("notas = @notas");                     params.notas           = notas           || null; }
       if (asignado_a      !== undefined) { sets.push("asignado_a = @asignado_a");           params.asignado_a      = asignado_a      || null; }
+      if (cultivoTrim     !== undefined) { sets.push("cultivo = @cultivo");                 params.cultivo         = cultivoTrim; }
       if (sets.length > 0) {
         db.prepare(`UPDATE pa_ordenes SET ${sets.join(", ")} WHERE id = @id`).run(params);
       }

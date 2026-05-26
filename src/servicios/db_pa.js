@@ -616,6 +616,20 @@ export function getCampañaActiva() {
   } catch(e) { console.error('[PA] Error migrando campaña_id → campaña_anual_id:', e.message); }
 })();
 
+// ── MIGRACIÓN: cultivo elegido por el operario en la orden ────────────────
+// El cultivo se elige explícitamente al emitir la orden (no se infiere del
+// "cultivo actual" del lote, que es ambiguo con rotación). NULLABLE por
+// compatibilidad con órdenes viejas; las nuevas lo exigen desde el backend.
+(function migrarCultivoEnOrden() {
+  try {
+    const cols = db.prepare("PRAGMA table_info(pa_ordenes)").all().map(c => c.name);
+    if (!cols.includes('cultivo')) {
+      db.exec("ALTER TABLE pa_ordenes ADD COLUMN cultivo TEXT");
+      console.log("[PA] Columna cultivo agregada en pa_ordenes");
+    }
+  } catch(e) { console.error('[PA] Error agregando cultivo en pa_ordenes:', e.message); }
+})();
+
 // ── MIGRACIÓN: campañas históricas ────────────────────────────────────────
 (function migrarCampañasHistoricas() {
   try {
