@@ -14,6 +14,11 @@ const BCRYPT_ROUNDS = 10;
 try { getDb().exec("ALTER TABLE usuarios ADD COLUMN deposito_tipo TEXT"); } catch(e) { /* ya existe */ }
 try { getDb().exec("ALTER TABLE usuarios ADD COLUMN deposito_proveedor_id INTEGER"); } catch(e) { /* ya existe */ }
 
+// Flag de "solo lectura": usuarios con esta marca pueden ver todo pero no editar/crear/borrar.
+// NO afecta a admins (que siempre pueden hacer todo, ignoran el flag).
+// Default 0 (false) para no romper usuarios existentes.
+try { getDb().exec("ALTER TABLE usuarios ADD COLUMN solo_lectura INTEGER DEFAULT 0"); } catch(e) { /* ya existe */ }
+
 // ── Tabla password_reset_tokens (recuperación de contraseña por mail) ──────
 // Tokens de un solo uso, expiran en 1 hora.
 // Se purgan automáticamente los vencidos al crear uno nuevo.
@@ -196,7 +201,8 @@ router.post('/login', async (req, res) => {
       depositos: parseDepositos(user.depositos),
       secciones: parseSecciones(user.secciones),
       deposito_tipo: user.deposito_tipo || null,
-      deposito_proveedor_id: user.deposito_proveedor_id || null
+      deposito_proveedor_id: user.deposito_proveedor_id || null,
+      solo_lectura: !!user.solo_lectura
     };
     res.cookie('lnb_user', JSON.stringify(userData), cookieOpts(req));
 
@@ -272,7 +278,8 @@ router.post('/setear-password', async (req, res) => {
       depositos: parseDepositos(user.depositos),
       secciones: parseSecciones(user.secciones),
       deposito_tipo: user.deposito_tipo || null,
-      deposito_proveedor_id: user.deposito_proveedor_id || null
+      deposito_proveedor_id: user.deposito_proveedor_id || null,
+      solo_lectura: !!user.solo_lectura
     };
     res.cookie('lnb_user', JSON.stringify(userData), cookieOpts(req));
 
@@ -301,12 +308,15 @@ router.get('/me', (req, res) => {
   try {
     const user = JSON.parse(cookie);
     const db = getDb();
-    const u = db.prepare('SELECT activo, deposito_tipo, deposito_proveedor_id, username FROM usuarios WHERE id=?').get(user.id);
+    const u = db.prepare('SELECT activo, deposito_tipo, deposito_proveedor_id, username, solo_lectura FROM usuarios WHERE id=?').get(user.id);
     if (!u || !u.activo) { res.clearCookie('lnb_user', { path: '/' }); return res.status(401).json({ ok: false, error: 'Sesión expirada' }); }
     // Refrescar campos que pueden cambiar desde admin sin re-loguear
     user.deposito_tipo = u.deposito_tipo || null;
     user.deposito_proveedor_id = u.deposito_proveedor_id || null;
     user.username = u.username || null;
+    // Flag solo_lectura: leído fresco de la DB en cada /me para que el cambio
+    // desde admin tenga efecto inmediato (sin necesidad de re-login del visor).
+    user.solo_lectura = !!u.solo_lectura;
     // Si es depósito de un proveedor, traer el nombre para mostrar en UI
     if (user.deposito_tipo === 'proveedor' && user.deposito_proveedor_id) {
       const p = db.prepare('SELECT nombre FROM proveedores WHERE id=?').get(user.deposito_proveedor_id);
@@ -335,6 +345,50 @@ function soloAdmin(req, res, next) {
   } catch(e) { res.status(401).json({ ok: false, error: 'Sesión inválida' }); }
 }
 
+// ─── Middleware: bloquear acciones de escritura para usuarios "solo_lectura" ───
+// Se monta globalmente desde index.js sobre TODAS las rutas /api/*.
+// Lógica:
+//   - GET / HEAD / OPTIONS → siempre pasa (es lectura)
+//   - POST / PUT / PATCH / DELETE → bloqueado SI el usuario tiene solo_lectura=1 Y no es admin
+//   - Excepciones (siempre permitidas aunque sea solo_lectura):
+//       /api/auth/logout      → tiene que poder salir de su sesión
+//       /api/auth/cambiar-pwd → debe poder cambiar su propia contraseña
+//
+// Importante: NO verificamos cookie acá (la lógica de auth la maneja cada endpoint).
+// Si el usuario no está logueado, simplemente lo dejamos pasar y el endpoint
+// destino devolverá 401. Si está logueado y tiene solo_lectura=1, lo bloqueamos.
+function bloquearSiSoloLectura(req, res, next) {
+  const metodo = req.method;
+  if (metodo === 'GET' || metodo === 'HEAD' || metodo === 'OPTIONS') return next();
+  const cookie = req.cookies?.lnb_user;
+  if (!cookie) return next(); // sin cookie → que el endpoint maneje el 401
+  let user;
+  try { user = JSON.parse(cookie); } catch(e) { return next(); }
+  // Admin pasa siempre
+  if (user.rol === 'admin') return next();
+  // Refrescar el flag desde DB (la cookie es snapshot al login, puede estar vieja)
+  try {
+    const u = getDb().prepare('SELECT solo_lectura, activo FROM usuarios WHERE id=?').get(user.id);
+    if (!u || !u.activo) return next(); // que el endpoint maneje el 401
+    if (!u.solo_lectura) return next(); // no es visor → pasa
+  } catch(e) { return next(); }
+  // Excepciones permitidas (URL relativa al mount /api)
+  const url = req.originalUrl || req.url || '';
+  if (url.indexOf('/api/auth/logout') === 0) return next();
+  if (url.indexOf('/api/auth/cambiar-pwd') === 0) return next();
+  if (url.indexOf('/api/auth/me') === 0) return next();
+  // Bloquear
+  console.log('[AUTH][solo_lectura] Bloqueando', metodo, url, 'para usuario', user.id);
+  return res.status(403).json({
+    ok: false,
+    error: 'Tu usuario es solo lectura. No podés realizar cambios.',
+    solo_lectura: true
+  });
+}
+
+// Exportar el middleware para que index.js lo monte globalmente
+export { bloquearSiSoloLectura };
+
 // GET usuarios — accesible para cualquier usuario autenticado (necesario para Scout y asignaciones)
 // Incluye datos de la persona vinculada (nivel_acceso, áreas, cargo)
 router.get('/usuarios', requireAuth, (req, res) => {
@@ -343,6 +397,7 @@ router.get('/usuarios', requireAuth, (req, res) => {
     const usuarios = db.prepare(`
       SELECT u.id, u.nombre, u.email, u.username, u.rol, u.depositos, u.secciones, u.activo, u.creado_en,
              u.deposito_tipo, u.deposito_proveedor_id, u.migrado_a_v2, u.debe_cambiar_password,
+             u.solo_lectura,
              u.password_hash IS NOT NULL AS tiene_password,
              u.persona_id,
              p.nombre AS persona_nombre, p.apellido AS persona_apellido,
@@ -407,10 +462,14 @@ router.post('/usuarios', soloAdmin, (req, res) => {
     ? email.trim().toLowerCase()
     : `campo_${nombre.toLowerCase().replace(/\s+/g,'_').replace(/[^a-z0-9_]/g,'')}@interno.lnb`;
   try {
-    const r = db.prepare(`INSERT INTO usuarios (nombre, email, pin, rol, depositos, secciones, deposito_tipo, deposito_proveedor_id, username) VALUES (?,?,?,?,?,?,?,?,?)`)
-      .run(nombre.trim(), emailFinal, String(pin), rol||'operador',
+    // Flag solo_lectura: viene como bool/0/1 desde el frontend. Default 0.
+    // Admin nunca tiene solo_lectura=1, así que si el body lo trae pero rol=admin, forzamos 0.
+    const rolFinal = rol || 'operador';
+    const soloLect = (rolFinal === 'admin') ? 0 : (req.body.solo_lectura ? 1 : 0);
+    const r = db.prepare(`INSERT INTO usuarios (nombre, email, pin, rol, depositos, secciones, deposito_tipo, deposito_proveedor_id, username, solo_lectura) VALUES (?,?,?,?,?,?,?,?,?,?)`)
+      .run(nombre.trim(), emailFinal, String(pin), rolFinal,
            JSON.stringify(depositos||['MCBA','FINCA','SAN PEDRO']), JSON.stringify(secciones||['*']),
-           depTipo, depProvId, usernameFinal);
+           depTipo, depProvId, usernameFinal, soloLect);
     res.json({ ok: true, id: r.lastInsertRowid, username: usernameFinal });
   } catch(e) {
     if (e.message.includes('UNIQUE')) return res.status(400).json({ ok: false, error: 'Ya existe un usuario con ese nombre, email o username' });
@@ -461,12 +520,22 @@ router.patch('/usuarios/:id', soloAdmin, (req, res) => {
         }
       }
     }
-    db.prepare(`UPDATE usuarios SET nombre=?, email=?, pin=?, rol=?, depositos=?, secciones=?, activo=?, deposito_tipo=?, deposito_proveedor_id=?, username=? WHERE id=?`)
+    // Flag solo_lectura: si no viene en body, mantener actual.
+    // Si el rol final es admin, forzar a 0 (admin nunca tiene solo_lectura).
+    const rolFinal = rol || current.rol;
+    let soloLect;
+    if (req.body.solo_lectura !== undefined) {
+      soloLect = req.body.solo_lectura ? 1 : 0;
+    } else {
+      soloLect = current.solo_lectura || 0;
+    }
+    if (rolFinal === 'admin') soloLect = 0;
+    db.prepare(`UPDATE usuarios SET nombre=?, email=?, pin=?, rol=?, depositos=?, secciones=?, activo=?, deposito_tipo=?, deposito_proveedor_id=?, username=?, solo_lectura=? WHERE id=?`)
       .run(nombre||current.nombre, emailFinal, pin?String(pin):current.pin,
-           rol||current.rol, depositos?JSON.stringify(depositos):current.depositos,
+           rolFinal, depositos?JSON.stringify(depositos):current.depositos,
            secciones?JSON.stringify(secciones):current.secciones,
            activo!==undefined?(activo?1:0):current.activo,
-           depTipo, depProvId, usernameFinal,
+           depTipo, depProvId, usernameFinal, soloLect,
            req.params.id);
     res.json({ ok: true, username: usernameFinal });
   } catch(e) {
