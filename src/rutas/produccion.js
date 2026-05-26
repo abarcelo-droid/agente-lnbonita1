@@ -475,7 +475,7 @@ router.get('/insumos/historial', requireAuth, (req, res) => {
         JOIN pa_compras c ON c.id = ci.compra_id
         JOIN pa_insumos i ON i.id = ci.insumo_id
         LEFT JOIN adm_proveedores p ON p.id = c.proveedor_id
-        WHERE ci.insumo_id = ?
+        WHERE ci.insumo_id = ? AND c.activo = 1 AND i.activo = 1
         ORDER BY c.fecha DESC LIMIT 20
       `).all(insumo_id);
     } else if (componente) {
@@ -488,7 +488,7 @@ router.get('/insumos/historial', requireAuth, (req, res) => {
         JOIN pa_compras c ON c.id = ci.compra_id
         JOIN pa_insumos i ON i.id = ci.insumo_id
         LEFT JOIN adm_proveedores p ON p.id = c.proveedor_id
-        WHERE i.componente_madre = ?
+        WHERE i.componente_madre = ? AND c.activo = 1 AND i.activo = 1
         ORDER BY c.fecha DESC LIMIT 20
       `).all(componente);
     } else {
