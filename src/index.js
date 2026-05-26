@@ -12,7 +12,7 @@ import cotizacionRouter   from "./rutas/cotizacion.js";
 import crmRouter          from "./rutas/crm.js";
 import buscarRouter       from "./rutas/buscar.js";
 import abastoRouter       from "./rutas/abasto.js";
-import authRouter         from "./rutas/auth.js";
+import authRouter, { bloquearSiSoloLectura } from "./rutas/auth.js";
 import produccionRouter   from "./rutas/produccion.js";
 import scoutRouter        from "./rutas/scout.js";
 import cuentasRouter      from "./rutas/cuentas.js";
@@ -72,6 +72,10 @@ app.use("/data/conformados", express.static(path.join(__dirname, "../data/confor
 app.use("/data/fichas",      express.static(path.join(__dirname, "../data/fichas")));
 app.use("/data/remitos_pa", express.static(path.join(__dirname, "../data/remitos_pa")));
 app.use("/data/ifco",       express.static(path.join(__dirname, "../data/ifco")));
+
+// Solo-lectura: bloquea escrituras (POST/PUT/PATCH/DELETE) para usuarios con
+// solo_lectura=1 que no son admin. Debe ir antes de cualquier router /api.
+app.use("/api", bloquearSiSoloLectura);
 
 // Auth
 app.use("/api/auth", authRouter);
