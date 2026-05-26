@@ -619,7 +619,18 @@ router.get('/compras', requireAuth, (req, res) => {
       LEFT JOIN pa_cuentas cu ON cu.codigo = ci.cuenta_codigo
       WHERE ci.compra_id = ?
     `);
-    const data = compras.map(c => ({ ...c, items: getItems.all(c.id) }));
+    // Recargas del tanque central vinculadas a la compra (ej. facturas YPF Directo)
+    const getRecargas = db.prepare(`
+      SELECT id, fecha, litros, precio_total AS importe
+      FROM pa_combustible_movimientos
+      WHERE factura_compra_id = ? AND tipo_movimiento = 'carga_tanque'
+      ORDER BY fecha DESC, id DESC
+    `);
+    const data = compras.map(c => ({
+      ...c,
+      items: getItems.all(c.id),
+      recargas_vinculadas: getRecargas.all(c.id)
+    }));
     res.json({ ok: true, data });
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
@@ -627,7 +638,7 @@ router.get('/compras', requireAuth, (req, res) => {
 router.post('/compras', requireAuth, (req, res) => {
   const db = getDb();
   const { fecha, proveedor_id, proveedor_txt, nro_factura, tipo_comprobante, campaña_id, items, notas, remito_foto_b64,
-          tipo_factura } = req.body;
+          tipo_factura, recargas_tanque_ids } = req.body;
   if (!items?.length) return res.status(400).json({ ok: false, error: 'Debe incluir al menos un item' });
   // Validar que el proveedor esté en el padrón ADM
   if (!proveedor_id) return res.status(400).json({ ok: false, error: 'Debe seleccionar un proveedor del padrón' });
@@ -869,6 +880,21 @@ router.post('/compras', requireAuth, (req, res) => {
           db.prepare("INSERT INTO pa_movimientos_stock (fecha, insumo_id, tipo, cantidad, motivo, referencia_id) VALUES (?,?,?,?,?,?)")
             .run(fecha||new Date().toISOString().slice(0,10), it.insumo_id, 'entrada', cantidadBase, 'compra', compraId);
         }
+      }
+
+      // Vincular recargas del tanque central (ej. factura YPF Directo) si vinieron.
+      // Solo se vinculan movimientos de tipo 'carga_tanque' que aún estén libres.
+      if (Array.isArray(recargas_tanque_ids) && recargas_tanque_ids.length) {
+        const linkRecarga = db.prepare(
+          "UPDATE pa_combustible_movimientos SET factura_compra_id = ? WHERE id = ? AND tipo_movimiento = 'carga_tanque' AND factura_compra_id IS NULL"
+        );
+        let vinculadas = 0;
+        for (const rid of recargas_tanque_ids) {
+          const idNum = parseInt(rid);
+          if (!idNum) continue;
+          vinculadas += linkRecarga.run(compraId, idNum).changes;
+        }
+        console.log(`[PA] Compra #${compraId}: ${vinculadas}/${recargas_tanque_ids.length} recarga(s) de tanque vinculada(s)`);
       }
       return compraId;
     });
@@ -1799,6 +1825,28 @@ router.get('/combustible/movimientos', requireAuth, (req, res) => {
     if (hasta) { q += " AND m.fecha<=?"; params.push(hasta); }
     q += " ORDER BY m.fecha DESC, m.id DESC LIMIT ?";
     params.push(parseInt(limit) || 200);
+    res.json({ ok: true, data: db.prepare(q).all(...params) });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// Recargas del tanque central SIN factura vinculada (para asociar a una compra
+// de YPF Directo). Filtro opcional por rango de fechas ?desde= & ?hasta=.
+router.get('/combustible/recargas-tanque-sin-vincular', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const { desde, hasta } = req.query;
+    let q = `
+      SELECT m.id, m.fecha, m.litros, m.precio_total AS importe,
+             m.combustible, m.nro_comprobante, m.proveedor_txt,
+             t.nombre AS tanque_nombre
+      FROM pa_combustible_movimientos m
+      LEFT JOIN pa_combustible_tanques t ON t.id = m.tanque_id
+      WHERE m.tipo_movimiento = 'carga_tanque' AND m.factura_compra_id IS NULL
+    `;
+    const params = [];
+    if (desde) { q += " AND m.fecha >= ?"; params.push(desde); }
+    if (hasta) { q += " AND m.fecha <= ?"; params.push(hasta); }
+    q += " ORDER BY m.fecha DESC, m.id DESC";
     res.json({ ok: true, data: db.prepare(q).all(...params) });
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
@@ -2848,6 +2896,45 @@ router.post('/compras/:id/reactivar', requireAuth, (req, res) => {
     });
     reactivar();
     res.json({ ok: true, msg: 'Compra reactivada y stock sumado' });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// ─────────────────────────────────────────────────────────────────────────
+// RE-VINCULAR recargas del tanque a una compra (ej. factura YPF Directo).
+// Recibe { recargas_tanque_ids: [1,2,3] }. Limpia los vínculos previos de
+// esta compra y aplica los nuevos. No toca stock ni asientos.
+// ─────────────────────────────────────────────────────────────────────────
+router.post('/compras/:id/recargas', requireAuth, (req, res) => {
+  const db = getDb();
+  const compraId = req.params.id;
+  try {
+    const compra = db.prepare("SELECT id FROM pa_compras WHERE id = ?").get(compraId);
+    if (!compra) return res.status(404).json({ ok: false, error: 'Compra no encontrada' });
+
+    const ids = Array.isArray(req.body?.recargas_tanque_ids) ? req.body.recargas_tanque_ids : [];
+
+    const tx = db.transaction(() => {
+      // 1) Desvincular todo lo que hoy apunta a esta compra
+      const desvinculadas = db.prepare(
+        "UPDATE pa_combustible_movimientos SET factura_compra_id = NULL WHERE factura_compra_id = ?"
+      ).run(compraId).changes;
+
+      // 2) Vincular las recargas nuevas (solo carga_tanque que estén libres)
+      const link = db.prepare(
+        "UPDATE pa_combustible_movimientos SET factura_compra_id = ? WHERE id = ? AND tipo_movimiento = 'carga_tanque' AND factura_compra_id IS NULL"
+      );
+      let vinculadas = 0;
+      for (const rid of ids) {
+        const idNum = parseInt(rid);
+        if (!idNum) continue;
+        vinculadas += link.run(compraId, idNum).changes;
+      }
+      return { desvinculadas, vinculadas };
+    });
+
+    const detalle = tx();
+    console.log(`[PA] Compra #${compraId}: re-vínculo recargas → desvinculadas=${detalle.desvinculadas}, vinculadas=${detalle.vinculadas} (usuario=${req.user?.id})`);
+    res.json({ ok: true, ...detalle });
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 

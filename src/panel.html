@@ -9870,6 +9870,7 @@ function admProvReactivar(id){admProvApi('/'+id+'/reactivar',{method:'POST'}).th
 function paCompRecargarProveedores(seleccionarId) {
   admProvApi('').then(function(r) {
     var data = (r.data || []).filter(function(p){ return p.activo; });
+    PA._compProvList = data;  // cache para detectar proveedores especiales (ej. YPF Directo)
     var sel = document.getElementById('pa-comp-prov-id');
     if (!sel) return;
     sel.innerHTML = '<option value="">— Seleccioná un proveedor del padrón —</option>'
@@ -9889,6 +9890,166 @@ function paCompOnProveedorChange() {
     var wrap = document.getElementById('pa-comp-asiento-wrap');
     if (wrap) wrap.style.display = 'none';
   }
+  paCompYpfToggle();  // mostrar/ocultar sección de recargas de tanque (YPF Directo)
+}
+
+// ── VÍNCULO RECARGAS DE TANQUE ↔ FACTURA YPF DIRECTO ──────────────────────
+// Normaliza un texto para comparar nombres de proveedor (minúsculas, sin
+// acentos ni espacios sobrantes).
+function paNormalizar(s) {
+  return (s || '').toString().toLowerCase()
+    .normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .replace(/\s+/g, ' ').trim();
+}
+
+// ¿El proveedor seleccionado es YPF Directo? Matchea por razón social
+// normalizada (no por ID hardcodeado).
+function paCompEsProvYPF() {
+  var provId = document.getElementById('pa-comp-prov-id').value;
+  if (!provId) return false;
+  var prov = (PA._compProvList || []).find(function(p){ return String(p.id) === String(provId); });
+  if (!prov) return false;
+  var norm = paNormalizar(prov.razon_social) + ' ' + paNormalizar(prov.nombre_comercial);
+  return norm.indexOf('ypf') >= 0;  // "YPF Directo", "YPF Directo SA", etc.
+}
+
+// Muestra u oculta la sección de recargas según el proveedor. Solo aplica a
+// facturas de compra (no de servicio). Carga las recargas sin vincular.
+function paCompYpfToggle() {
+  var wrap = document.getElementById('pa-comp-ypf-wrap');
+  if (!wrap) return;
+  var esYPF = paCompEsProvYPF() && PA.tipoFacturaActual !== 'servicio';
+  if (!esYPF) {
+    wrap.style.display = 'none';
+    PA._ypfSelIds = {};
+    return;
+  }
+  wrap.style.display = '';
+  // Si la factura tiene fecha, la usamos para sugerir recargas cercanas (±15 días)
+  var fecha = document.getElementById('pa-comp-fecha').value;
+  var qs = '';
+  if (fecha) {
+    // Traemos un rango amplio (±60 días) y resaltamos las de ±15 en el render
+    var f = new Date(fecha + 'T00:00:00');
+    var desde = new Date(f); desde.setDate(desde.getDate() - 60);
+    var hasta = new Date(f); hasta.setDate(hasta.getDate() + 60);
+    qs = '?desde=' + desde.toISOString().slice(0,10) + '&hasta=' + hasta.toISOString().slice(0,10);
+  }
+  document.getElementById('pa-comp-ypf-lista').innerHTML =
+    '<div style="color:var(--mut);font-size:12px;padding:8px">Cargando recargas…</div>';
+  paF('/api/pa/combustible/recargas-tanque-sin-vincular' + qs).then(function(r){
+    PA._ypfRecargas = r.data || [];
+    paCompYpfRenderLista();
+    paCompYpfRecalc();
+  });
+}
+
+// Renderiza la lista de recargas con checkboxes. Las de ±15 días de la fecha
+// de factura van expandidas arriba; el resto, colapsadas.
+function paCompYpfRenderLista() {
+  var cont = document.getElementById('pa-comp-ypf-lista');
+  if (!cont) return;
+  var recargas = PA._ypfRecargas || [];
+  if (!recargas.length) {
+    cont.innerHTML = '<div style="color:var(--mut);font-size:12px;padding:8px">No hay recargas de tanque sin vincular.</div>';
+    return;
+  }
+  var fechaFac = document.getElementById('pa-comp-fecha').value;
+  var refMs = fechaFac ? new Date(fechaFac + 'T00:00:00').getTime() : null;
+  var DIA = 86400000;
+  var cercanas = [], lejanas = [];
+  recargas.forEach(function(rec){
+    if (refMs != null) {
+      var diff = Math.abs(new Date(rec.fecha + 'T00:00:00').getTime() - refMs) / DIA;
+      (diff <= 15 ? cercanas : lejanas).push(rec);
+    } else {
+      cercanas.push(rec);
+    }
+  });
+
+  function fila(rec){
+    var checked = PA._ypfSelIds[rec.id] ? ' checked' : '';
+    return '<label style="display:flex;align-items:center;gap:8px;padding:6px 4px;border-bottom:1px solid var(--bor);cursor:pointer;font-size:12px">'
+      + '<input type="checkbox" style="width:auto;flex-shrink:0" value="' + rec.id + '"' + checked
+      + ' onchange="paCompYpfOnCheck(' + rec.id + ', this.checked)">'
+      + '<span style="flex:1">' + paFecha(rec.fecha)
+      + (rec.nro_comprobante ? ' <span style="color:var(--mut)">· ' + rec.nro_comprobante + '</span>' : '')
+      + '</span>'
+      + '<span style="white-space:nowrap;color:var(--mut)">' + (Number(rec.litros)||0).toLocaleString('es-AR') + ' L</span>'
+      + '<span style="white-space:nowrap;font-weight:600;min-width:80px;text-align:right">' + paMoney(rec.importe) + '</span>'
+      + '</label>';
+  }
+
+  var html = '';
+  if (cercanas.length) {
+    if (refMs != null) html += '<div style="font-size:10px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.06em;padding:4px">Cercanas a la factura (±15 días)</div>';
+    html += cercanas.map(fila).join('');
+  }
+  if (lejanas.length) {
+    html += '<details style="margin-top:6px">'
+      + '<summary style="cursor:pointer;font-size:11px;color:var(--burg);padding:6px 4px">Otras recargas (' + lejanas.length + ')</summary>'
+      + lejanas.map(fila).join('')
+      + '</details>';
+  }
+  cont.innerHTML = html;
+}
+
+function paCompYpfOnCheck(id, checked) {
+  if (!PA._ypfSelIds) PA._ypfSelIds = {};
+  if (checked) PA._ypfSelIds[id] = true;
+  else delete PA._ypfSelIds[id];
+  paCompYpfRecalc();
+}
+
+// Suma litros de la factura a partir de los items (stock que se sumaría).
+function paCompFacturaLitros() {
+  var litros = 0;
+  document.querySelectorAll('[id^=pa-ci-row-]').forEach(function(row){
+    var n = row.dataset.n;
+    var modo = document.getElementById('pa-ci-modo-'+n).value;
+    var cantBul = parseFloat(document.getElementById('pa-ci-cantb-'+n).value)||0;
+    var presB = parseFloat(document.getElementById('pa-ci-presb-'+n).value)||0;
+    litros += (modo === 'presentacion' && presB > 0) ? (cantBul * presB) : cantBul;
+  });
+  return litros;
+}
+
+// Recalcula el cartel comparativo factura vs recargas seleccionadas.
+function paCompYpfRecalc() {
+  var cartel = document.getElementById('pa-comp-ypf-cartel');
+  if (!cartel) return;
+  var recargas = PA._ypfRecargas || [];
+  var sel = PA._ypfSelIds || {};
+  var totRecargas = 0, litrosRecargas = 0, nSel = 0;
+  recargas.forEach(function(rec){
+    if (sel[rec.id]) {
+      totRecargas += Number(rec.importe) || 0;
+      litrosRecargas += Number(rec.litros) || 0;
+      nSel++;
+    }
+  });
+  var totFactura = PA._compraTotal || 0;
+  var litrosFactura = paCompFacturaLitros();
+  var dif = totFactura - totRecargas;
+  var difPct = totRecargas !== 0 ? (dif / totRecargas) * 100 : (totFactura !== 0 ? 100 : 0);
+  var alerta = Math.abs(dif) > 100 || Math.abs(difPct) > 5;
+
+  function lt(n){ return (n||0).toLocaleString('es-AR', {maximumFractionDigits:1}) + ' L'; }
+
+  var html = ''
+    + '<div style="display:flex;justify-content:space-between"><span>Total factura:</span>'
+    + '<span><strong>' + paMoney(totFactura) + '</strong> · ' + lt(litrosFactura) + '</span></div>'
+    + '<div style="display:flex;justify-content:space-between"><span>Total recargas (' + nSel + '):</span>'
+    + '<span><strong>' + paMoney(totRecargas) + '</strong> · ' + lt(litrosRecargas) + '</span></div>'
+    + '<div style="display:flex;justify-content:space-between;margin-top:4px;padding-top:4px;border-top:1px solid var(--bor)">'
+    + '<span>Diferencia:</span><span style="font-weight:700;color:' + (alerta ? '#92400e' : 'var(--txt)') + '">'
+    + paMoney(dif) + ' (' + difPct.toFixed(1) + '%)</span></div>';
+
+  if (alerta && nSel > 0) {
+    html += '<div style="margin-top:8px;padding:8px 10px;background:#fef9c3;border:1px solid #fde047;border-radius:6px;color:#92400e;font-size:11px">'
+      + '⚠ La diferencia supera $100 ó 5%. Verificá la selección (no bloquea el guardado).</div>';
+  }
+  cartel.innerHTML = html;
 }
 
 function paCompAsientoCargar(provId) {
@@ -11028,7 +11189,7 @@ if(_inpGondola) _inpGondola.addEventListener('keydown', function(e){
   <!-- DATOS DEL COMPROBANTE -->
   <div style="font-size:12px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">Datos del comprobante</div>
   <div class="fg">
-    <div class="fl"><label>Fecha</label><input type="date" id="pa-comp-fecha"></div>
+    <div class="fl"><label>Fecha</label><input type="date" id="pa-comp-fecha" onchange="paCompYpfToggle()"></div>
     <div class="fl"><label>Tipo</label>
       <select id="pa-comp-tipo-comp">
         <option value="factura">Factura</option>
@@ -11093,6 +11254,18 @@ if(_inpGondola) _inpGondola.addEventListener('keydown', function(e){
       </div>
       <div style="font-size:15px;font-weight:600;margin-top:4px;padding-top:4px;border-top:1px solid var(--bor);min-width:200px;text-align:right">Total: <span id="pa-comp-total">$0</span></div>
     </div>
+  </div>
+
+  <!-- ── RECARGAS DE TANQUE VINCULADAS (YPF Directo) ────────────────── -->
+  <div id="pa-comp-ypf-wrap" style="display:none;margin-top:16px;border:1px solid var(--bor);border-radius:10px;overflow:hidden">
+    <div style="background:var(--bg);padding:9px 14px;border-bottom:1px solid var(--bor)">
+      <div style="font-size:11px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.07em">⛽ Recargas del tanque vinculadas</div>
+      <div style="font-size:11px;color:var(--mut);margin-top:2px">Tildá las recargas del tanque central que cubre esta factura de YPF Directo.</div>
+    </div>
+    <div id="pa-comp-ypf-lista" style="padding:6px 12px;max-height:280px;overflow-y:auto">
+      <div style="color:var(--mut);font-size:12px;padding:8px">Cargando recargas…</div>
+    </div>
+    <div id="pa-comp-ypf-cartel" style="padding:10px 14px;border-top:1px solid var(--bor);font-family:monospace;font-size:12px;background:var(--bg)"></div>
   </div>
 
   <!-- ── ASIENTO CONTABLE INLINE ──────────────────────────────────── -->
@@ -13445,7 +13618,111 @@ function paVerDetalleCompra(id){
 
     html += '</div>'; // cierre del card-factura
 
+    // RECARGAS DE TANQUE VINCULADAS (facturas YPF Directo)
+    PA._detCompra = c;
+    var provNorm = paNormalizar(c.proveedor_nombre || c.proveedor_txt || '');
+    var esYPF = provNorm.indexOf('ypf') >= 0;
+    var vinc = c.recargas_vinculadas || [];
+    if (esYPF || vinc.length) {
+      html += paDetRecargasHtml(c);
+    }
+
     document.getElementById('pa-comp-det-body').innerHTML = html;
+  });
+}
+
+// Construye la sección de recargas vinculadas dentro del detalle de una factura.
+function paDetRecargasHtml(c) {
+  var vinc = c.recargas_vinculadas || [];
+  var subtotal = 0, litros = 0;
+  vinc.forEach(function(rec){ subtotal += Number(rec.importe)||0; litros += Number(rec.litros)||0; });
+  var dif = (c.total||0) - subtotal;
+  var difPct = subtotal !== 0 ? (dif/subtotal)*100 : 0;
+  var alerta = Math.abs(dif) > 100 || Math.abs(difPct) > 5;
+
+  var h = '<div style="margin:14px 4px 0;border:1px solid var(--bor);border-radius:10px;overflow:hidden">';
+  h += '<div style="background:var(--bg);padding:9px 14px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--bor)">'
+    + '<span style="font-size:11px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.07em">⛽ Recargas del tanque vinculadas</span>'
+    + '<button class="btn bo bs" style="font-size:11px" onclick="paDetEditarVinculos('+c.id+')">✎ Editar vínculos</button>'
+    + '</div>';
+
+  if (!vinc.length) {
+    h += '<div style="padding:12px 14px;color:var(--mut);font-size:12px">Sin recargas vinculadas todavía.</div>';
+  } else {
+    h += '<table style="width:100%;border-collapse:collapse;font-size:12px">';
+    vinc.forEach(function(rec){
+      h += '<tr style="border-bottom:1px solid var(--bor)">'
+        + '<td style="padding:6px 14px">'+paFecha(rec.fecha)+'</td>'
+        + '<td style="padding:6px 14px;text-align:right;color:var(--mut)">'+(Number(rec.litros)||0).toLocaleString('es-AR')+' L</td>'
+        + '<td style="padding:6px 14px;text-align:right;font-weight:600">'+paMoney(rec.importe)+'</td></tr>';
+    });
+    h += '</table>';
+    h += '<div style="padding:10px 14px;border-top:1px solid var(--bor);font-family:monospace;font-size:12px;background:var(--bg)">'
+      + '<div style="display:flex;justify-content:space-between"><span>Subtotal recargas ('+vinc.length+'):</span><span><strong>'+paMoney(subtotal)+'</strong> · '+litros.toLocaleString('es-AR',{maximumFractionDigits:1})+' L</span></div>'
+      + '<div style="display:flex;justify-content:space-between"><span>Total factura:</span><span><strong>'+paMoney(c.total||0)+'</strong></span></div>'
+      + '<div style="display:flex;justify-content:space-between;margin-top:4px;padding-top:4px;border-top:1px solid var(--bor)"><span>Diferencia:</span>'
+      + '<span style="font-weight:700;color:'+(alerta?'#92400e':'var(--txt)')+'">'+paMoney(dif)+' ('+difPct.toFixed(1)+'%)</span></div>'
+      + '</div>';
+  }
+  h += '</div>';
+  return h;
+}
+
+// Abre el editor inline de vínculos: trae recargas sin vincular + las ya
+// vinculadas a esta factura (pre-tildadas) y permite re-asignar.
+function paDetEditarVinculos(id) {
+  var c = PA._detCompra;
+  if (!c || c.id !== id) return;
+  var yaVinc = c.recargas_vinculadas || [];
+  PA._detVincSel = {};
+  yaVinc.forEach(function(rec){ PA._detVincSel[rec.id] = true; });
+
+  paF('/api/pa/combustible/recargas-tanque-sin-vincular').then(function(r){
+    // Las ya vinculadas no vienen en "sin vincular" → las anexamos para que se vean tildadas
+    var lista = (r.data || []).concat(yaVinc);
+    PA._detVincLista = lista;
+    var body = document.getElementById('pa-comp-det-body');
+    var box = document.createElement('div');
+    box.id = 'pa-det-vinc-editor';
+    box.style.cssText = 'margin:14px 4px 0;border:2px solid var(--burg);border-radius:10px;overflow:hidden';
+    var filas = lista.map(function(rec){
+      var checked = PA._detVincSel[rec.id] ? ' checked' : '';
+      return '<label style="display:flex;align-items:center;gap:8px;padding:6px 14px;border-bottom:1px solid var(--bor);cursor:pointer;font-size:12px">'
+        + '<input type="checkbox" style="width:auto" value="'+rec.id+'"'+checked+' onchange="paDetVincOnCheck('+rec.id+',this.checked)">'
+        + '<span style="flex:1">'+paFecha(rec.fecha)+(rec.nro_comprobante?' <span style="color:var(--mut)">· '+rec.nro_comprobante+'</span>':'')+'</span>'
+        + '<span style="color:var(--mut)">'+(Number(rec.litros)||0).toLocaleString('es-AR')+' L</span>'
+        + '<span style="font-weight:600;min-width:80px;text-align:right">'+paMoney(rec.importe)+'</span>'
+        + '</label>';
+    }).join('') || '<div style="padding:12px 14px;color:var(--mut);font-size:12px">No hay recargas disponibles.</div>';
+    box.innerHTML = '<div style="background:var(--bg);padding:9px 14px;border-bottom:1px solid var(--bor);font-size:11px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.07em">Editar vínculos de recargas</div>'
+      + '<div style="max-height:280px;overflow-y:auto">'+filas+'</div>'
+      + '<div style="padding:10px 14px;border-top:1px solid var(--bor);display:flex;justify-content:flex-end;gap:8px;background:var(--bg)">'
+      + '<button class="btn bo bs" onclick="document.getElementById(\'pa-det-vinc-editor\').remove()">Cancelar</button>'
+      + '<button class="btn bb bs" onclick="paDetGuardarVinculos('+id+')">Guardar vínculos</button>'
+      + '</div>';
+    // Reemplazar editor previo si existía
+    var prev = document.getElementById('pa-det-vinc-editor');
+    if (prev) prev.remove();
+    body.appendChild(box);
+  });
+}
+
+function paDetVincOnCheck(id, checked) {
+  if (!PA._detVincSel) PA._detVincSel = {};
+  if (checked) PA._detVincSel[id] = true; else delete PA._detVincSel[id];
+}
+
+function paDetGuardarVinculos(id) {
+  var ids = Object.keys(PA._detVincSel || {}).map(function(x){ return parseInt(x); });
+  paF('/api/pa/compras/'+id+'/recargas', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ recargas_tanque_ids: ids })
+  }).then(function(r){
+    if (r.ok) {
+      toast('✓ Vínculos actualizados');
+      paVerDetalleCompra(id);   // recargar el detalle
+      paLoadCompras();
+    } else toast(r.error||'Error', 'er');
   });
 }
 function paOnFotoCompra(input){
@@ -13675,6 +13952,11 @@ function paAbrirNuevaCompra(){
   ['pa-comp-percep-iva','pa-comp-percep-gan','pa-comp-percep-iibb'].forEach(function(id){
     var el = document.getElementById(id); if(el) el.value = '0';
   });
+  // Reset vínculo de recargas de tanque (YPF Directo)
+  PA._ypfRecargas = [];
+  PA._ypfSelIds = {};
+  var ypfWrap = document.getElementById('pa-comp-ypf-wrap');
+  if (ypfWrap) ypfWrap.style.display = 'none';
   var asWrap = document.getElementById('pa-comp-asiento-wrap');
   if (asWrap) { asWrap.style.display = 'none'; document.getElementById('pa-comp-asiento-lineas').innerHTML = ''; }
   document.getElementById('pa-comp-foto-inp').value='';
@@ -13716,6 +13998,7 @@ function paCambiarTipoFactura(tipo){
     if (titulo) titulo.textContent = 'Nueva Factura';
   }
   paActTotalComp();
+  paCompYpfToggle();  // la sección de recargas solo aplica a facturas de compra
 }
 
 // Agrega un nuevo concepto de servicio al modal de Nueva Factura.
@@ -13909,6 +14192,12 @@ function paGuardarCompra(){
   };
   if (esServicio) body.tipo_factura = 'servicio';
   if (asientoLineas && asientoLineas.length) body.asiento_lineas = asientoLineas;
+
+  // Recargas de tanque vinculadas (solo si la sección YPF está visible)
+  var ypfWrap = document.getElementById('pa-comp-ypf-wrap');
+  if (ypfWrap && ypfWrap.style.display !== 'none') {
+    body.recargas_tanque_ids = Object.keys(PA._ypfSelIds || {}).map(function(x){ return parseInt(x); });
+  }
 
   paF('/api/pa/compras',{method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify(body)
@@ -14390,6 +14679,9 @@ function paActTotalComp(){
   if(ivaEl2)ivaEl2.textContent=paMoney(iva);
   var asWrap = document.getElementById('pa-comp-asiento-wrap');
   if (asWrap && asWrap.style.display !== 'none') paCompAsientoSincronizarTotal(total, neto, iva);
+  // Si la sección de recargas YPF está visible, refrescar el cartel comparativo
+  var ypfWrap = document.getElementById('pa-comp-ypf-wrap');
+  if (ypfWrap && ypfWrap.style.display !== 'none') paCompYpfRecalc();
 }
 function paLoadOrdenes(){
   var estado=document.getElementById('pa-ord-estado-fil').value;

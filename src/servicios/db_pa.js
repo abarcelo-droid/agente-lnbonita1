@@ -884,6 +884,20 @@ db.exec(`
   } catch(e) { console.error('[PA] Error seed tanques combustible:', e.message); }
 })();
 
+// ── MIGRACIÓN: factura_compra_id en pa_combustible_movimientos ─────────────
+// Vincula una recarga del tanque central (carga_tanque) con la factura de
+// compra correspondiente (ej. YPF Directo). NULL = sin vincular.
+(function() {
+  try {
+    const cols = db.prepare("PRAGMA table_info(pa_combustible_movimientos)").all().map(c => c.name);
+    if (!cols.includes('factura_compra_id')) {
+      db.exec("ALTER TABLE pa_combustible_movimientos ADD COLUMN factura_compra_id INTEGER REFERENCES pa_compras(id)");
+      db.exec("CREATE INDEX IF NOT EXISTS idx_pa_comb_mov_factura ON pa_combustible_movimientos(factura_compra_id)");
+      console.log("[PA] factura_compra_id agregado en pa_combustible_movimientos");
+    }
+  } catch(e) { console.error('[PA] Error migración factura_compra_id:', e.message); }
+})();
+
 // ── MÓDULO PERSONAL / MANO DE OBRA ─────────────────────────────────────────
 // Cuadrillas, trabajadores, tareas, partes de trabajo y valorización por RRHH.
 // El rubro contable se sugiere automáticamente cruzando tipo_labor × cultivo.
