@@ -1765,17 +1765,20 @@ router.post('/remitos/sellado-directo', upload.single('escaneo'), function(req, 
   // Validaciones del despacho
   if (!d.n_remito_ifco)   return res.status(400).json({ error: 'N° de remito IFCO requerido' });
   if (!d.fecha_emision)   return res.status(400).json({ error: 'Fecha de emisión requerida' });
-  if (!d.cantidad_despachada || parseInt(d.cantidad_despachada) <= 0) {
-    return res.status(400).json({ error: 'Cantidad despachada inválida' });
-  }
   if (!d.cliente_id && !d.empresa) {
     return res.status(400).json({ error: 'Cliente (Dedicado) o empresa requeridos' });
   }
   // Validaciones del sellado
   if (!d.fecha_sellado) return res.status(400).json({ error: 'Fecha de sellado requerida' });
-  const cantDesp = parseInt(d.cantidad_despachada);
-  const recibida  = d.cantidad_recibida  != null && d.cantidad_recibida  !== '' ? parseInt(d.cantidad_recibida)  : cantDesp;
+  // Cantidad despachada: si viene 0 o vacía (caso "remito ya sellado de origen"),
+  // se deduce automáticamente como recibida + rechazada.
+  const recibida  = d.cantidad_recibida  != null && d.cantidad_recibida  !== '' ? parseInt(d.cantidad_recibida)  : 0;
   const rechazada = d.cantidad_rechazada != null && d.cantidad_rechazada !== '' ? parseInt(d.cantidad_rechazada) : 0;
+  let cantDesp = parseInt(d.cantidad_despachada) || 0;
+  if (cantDesp <= 0) cantDesp = recibida + rechazada;
+  if (cantDesp <= 0) {
+    return res.status(400).json({ error: 'Cantidad inválida: hace falta al menos cantidad_recibida > 0 o cantidad_despachada > 0' });
+  }
   if (recibida < 0 || rechazada < 0) {
     return res.status(400).json({ error: 'Cantidades no pueden ser negativas' });
   }

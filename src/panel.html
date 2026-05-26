@@ -5153,6 +5153,63 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   </div>
 </div>
 
+<!-- Mini-modal: Cargar directamente como SELLADO (cuando el remito no existe en sistema)
+     En vez de pedir al operador que cargue todo el despacho, le pedimos solo los datos
+     que se ven en el sellado: cliente/cadena, cantidades. El resto se infiere. -->
+<div class="mb" id="ifco-mb-sellado-directo">
+  <div class="mbox" style="max-width:520px">
+    <div class="mhd">
+      <div class="mht">🔏 Cargar como sellado directo</div>
+      <button class="mcl" onclick="document.getElementById('ifco-mb-sellado-directo').classList.remove('on')">x</button>
+    </div>
+    <div style="background:#ecfdf5;border-left:3px solid #10b981;border-radius:4px;padding:10px 14px;margin-bottom:14px;font-size:12px;color:#065f46">
+      <b>✨ Este remito no estaba en el sistema.</b> Se va a crear directamente en estado <b>SELLADO</b> con los datos que detectamos del OCR. Verificá los datos antes de guardar.
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
+      <div>
+        <label style="font-size:11px;color:var(--mut);text-transform:uppercase">N° Remito</label>
+        <input id="ifco-sd-nremito" type="text" readonly style="width:100%;padding:8px 10px;border-radius:7px;border:1px solid var(--bor);background:#f3f4f6;font-family:monospace">
+      </div>
+      <div>
+        <label style="font-size:11px;color:var(--mut);text-transform:uppercase">Cadena / Cliente *</label>
+        <select id="ifco-sd-cadena" required style="width:100%;padding:8px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg)">
+          <option value="">— Seleccionar —</option>
+          <option value="CENCOSUD">CENCOSUD</option>
+          <option value="CARREFOUR (INC SA)">CARREFOUR (INC SA)</option>
+          <option value="COTO">COTO</option>
+          <option value="LA COOPERATIVA OBRERA">LA COOPERATIVA OBRERA</option>
+          <option value="LA ANONIMA">LA ANONIMA</option>
+          <option value="CHANGO MAS (DORINKA)">CHANGO MAS (DORINKA)</option>
+        </select>
+      </div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
+      <div>
+        <label style="font-size:11px;color:var(--mut);text-transform:uppercase">Cant. recibida *</label>
+        <input id="ifco-sd-recibida" type="number" min="0" required style="width:100%;padding:8px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg)">
+      </div>
+      <div>
+        <label style="font-size:11px;color:var(--mut);text-transform:uppercase">Cant. rechazada</label>
+        <input id="ifco-sd-rechazada" type="number" min="0" value="0" style="width:100%;padding:8px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg)">
+      </div>
+    </div>
+    <div id="ifco-sd-rechazo-destino-wrap" style="display:none;margin-bottom:10px">
+      <label style="font-size:11px;color:var(--mut);text-transform:uppercase">Destino del rechazo *</label>
+      <select id="ifco-sd-rechazo-destino" style="width:100%;padding:8px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg)">
+        <option value="san_geronimo">San Gerónimo (vuelve al depo)</option>
+        <option value="proveedor">Proveedor (vuelve al productor)</option>
+      </select>
+    </div>
+    <div style="background:#f3f4f6;border-radius:6px;padding:8px 12px;font-size:11px;color:var(--mut);margin-bottom:14px">
+      ℹ️ Se va a usar fecha de hoy como fecha de emisión y de sellado. El talonario se asocia automáticamente si el N° entra en algún rango cargado.
+    </div>
+    <div style="display:flex;justify-content:flex-end;gap:8px">
+      <button class="btn bo" onclick="document.getElementById('ifco-mb-sellado-directo').classList.remove('on')">Cancelar</button>
+      <button class="btn bb" onclick="ifcoSelladoDirectoGuardar()" id="ifco-sd-btn-guardar" style="background:#047857">🔏 Guardar como sellado</button>
+    </div>
+  </div>
+</div>
+
 <!-- Modal: Detalle del talonario (grilla de N° con estado) -->
 <div class="mb" id="ifco-mb-talon-detalle">
   <div class="mbox" style="max-width:820px">
@@ -19407,22 +19464,33 @@ async function ifcoCargarSelladoFoto(ev) {
       return;
     }
 
-    // Caso: no hay match → abrir flujo de creación con OCR completo
-    // Reusamos el modal de "Nuevo despacho" con el checkbox "Ya viene sellado" prellenado
+    // Caso: no hay match → abrir flujo de carga DIRECTA como sellado.
+    // En vez del modal grande de nuevo despacho, abrimos el mini-modal que solo pide los datos
+    // que se ven en el sellado (cadena, cant recibida, cant rechazada). El operador no carga
+    // el despacho original porque ese dato ya no nos interesa: el remito vino sellado de origen.
     if (data.accion === 'crear_nuevo') {
       document.getElementById('ifco-mb-cargar-sellado').classList.remove('on');
-      // Abrimos el modal nuevo despacho y pre-marcamos el checkbox
-      ifcoAbrirNuevoRemito();
-      const ck = document.getElementById('ifco-r-ya-sellado');
-      ck.checked = true;
-      ifcoOnYaSelladoChange();
-      // Disparamos el OCR completo automáticamente con el archivo que ya tenemos
-      // Para esto creamos un evento sintético sobre el input del modal nuevo despacho
-      const inp = document.getElementById('ifco-r-foto-input');
-      const dt = new DataTransfer();
-      dt.items.add(file);
-      inp.files = dt.files;
-      ifcoOnFotoDespacho({ target: inp });
+      // Primero corremos el OCR completo en paralelo para pre-llenar la cadena y cantidades.
+      // Si falla, igual abrimos el mini-modal con el N° solo.
+      IFCO._sdData = {
+        n_remito_ifco: data.n_remito_ifco,
+        escaneo_path: data.escaneo_path,
+        file: file
+      };
+      // Reset mini-modal
+      document.getElementById('ifco-sd-nremito').value = data.n_remito_ifco || '';
+      document.getElementById('ifco-sd-cadena').value = '';
+      document.getElementById('ifco-sd-recibida').value = '';
+      document.getElementById('ifco-sd-rechazada').value = '0';
+      document.getElementById('ifco-sd-rechazo-destino-wrap').style.display = 'none';
+      document.getElementById('ifco-mb-sellado-directo').classList.add('on');
+      // Activar mostrar/ocultar destino-rechazo según cantidad
+      document.getElementById('ifco-sd-rechazada').oninput = function(){
+        const v = parseInt(this.value) || 0;
+        document.getElementById('ifco-sd-rechazo-destino-wrap').style.display = v > 0 ? 'block' : 'none';
+      };
+      // Intentar OCR completo en background para pre-llenar
+      _ifcoSelladoDirectoOCR(file);
       return;
     }
 
@@ -19447,6 +19515,88 @@ function _ifcoCargarSelladoMostrarError(titulo, mensajeHtml, puedeReintentar) {
         ? '<div style="margin-top:12px"><button class="btn bo" onclick="ifcoAbrirCargarSellado()">↻ Probar otra foto</button></div>'
         : '') +
     '</div>';
+}
+
+// OCR background para sellado directo: intenta llenar cadena + cantidades automáticamente
+async function _ifcoSelladoDirectoOCR(file) {
+  try {
+    const fd = new FormData();
+    fd.append('foto', file);
+    fd.append('tipo', 'sellado');
+    const r = await fetch('/api/ifco/ocr/remito-super', { method: 'POST', credentials: 'include', body: fd });
+    const data = await r.json();
+    if (!data || !data.ok) return; // si falla, dejamos los campos vacíos
+    // El OCR de "sellado" devuelve cadena, cant recibida, cant rechazada
+    const d = data.datos || data;
+    // Cadena: matchear contra las opciones del select
+    if (d.cadena || d.empresa) {
+      const cadenaVal = (d.cadena || d.empresa || '').toUpperCase().trim();
+      const sel = document.getElementById('ifco-sd-cadena');
+      for (const opt of sel.options) {
+        if (opt.value && cadenaVal.indexOf(opt.value.toUpperCase().split('(')[0].trim()) >= 0) {
+          sel.value = opt.value;
+          break;
+        }
+      }
+    }
+    if (d.cantidad_recibida != null && d.cantidad_recibida !== '') {
+      document.getElementById('ifco-sd-recibida').value = parseInt(d.cantidad_recibida) || 0;
+    }
+    if (d.cantidad_rechazada != null && d.cantidad_rechazada !== '') {
+      const v = parseInt(d.cantidad_rechazada) || 0;
+      document.getElementById('ifco-sd-rechazada').value = v;
+      if (v > 0) document.getElementById('ifco-sd-rechazo-destino-wrap').style.display = 'block';
+    }
+  } catch(e) {
+    console.warn('[ifco][sellado-directo] OCR background falló:', e);
+  }
+}
+
+// Guardar el sellado directo: crea el remito con estado='sellado' usando el endpoint existente
+async function ifcoSelladoDirectoGuardar() {
+  const cadena   = document.getElementById('ifco-sd-cadena').value;
+  const recibida = parseInt(document.getElementById('ifco-sd-recibida').value) || 0;
+  const rechazada = parseInt(document.getElementById('ifco-sd-rechazada').value) || 0;
+  const rechDestino = document.getElementById('ifco-sd-rechazo-destino').value;
+
+  if (!cadena) { alert('Seleccioná la cadena/cliente'); return; }
+  if (recibida <= 0 && rechazada <= 0) { alert('Indicá al menos cantidad recibida o rechazada'); return; }
+
+  const sd = IFCO._sdData;
+  if (!sd || !sd.n_remito_ifco) { alert('Faltan datos. Cerrá y volvé a empezar.'); return; }
+
+  const btn = document.getElementById('ifco-sd-btn-guardar');
+  btn.disabled = true;
+  btn.textContent = '⏳ Guardando...';
+
+  try {
+    const hoy = new Date().toISOString().slice(0,10);
+    const fd = new FormData();
+    fd.append('n_remito_ifco',      sd.n_remito_ifco);
+    fd.append('fecha_emision',      hoy);
+    fd.append('fecha_sellado',      hoy);
+    fd.append('empresa',            cadena);
+    fd.append('cantidad_despachada', '0'); // se deduce en backend como recibida + rechazada
+    fd.append('cantidad_recibida',  String(recibida));
+    fd.append('cantidad_rechazada', String(rechazada));
+    if (rechazada > 0) fd.append('rechazo_destino', rechDestino);
+    fd.append('origen', 'san_geronimo');
+    // Pasamos el escaneo_path ya subido (no re-subimos el archivo)
+    if (sd.escaneo_path) fd.append('escaneo_path', sd.escaneo_path);
+    const r = await fetch('/api/ifco/remitos/sellado-directo', { method: 'POST', credentials: 'include', body: fd });
+    const data = await r.json();
+    if (!r.ok || !data || data.error) {
+      throw new Error(data.error || 'Error guardando');
+    }
+    alert('✓ Remito ' + sd.n_remito_ifco + ' creado como SELLADO');
+    document.getElementById('ifco-mb-sellado-directo').classList.remove('on');
+    if (typeof ifcoCargarRemitos === 'function') ifcoCargarRemitos();
+  } catch(e) {
+    alert('Error: ' + e.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '🔏 Guardar como sellado';
+  }
 }
 
 // Lightbox: abrir/cerrar foto a tamaño completo
