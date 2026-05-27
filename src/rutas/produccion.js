@@ -2191,6 +2191,138 @@ router.get('/combustible/dashboard', requireAuth, (req, res) => {
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
+// ═══════════════════════════════════════════════════════════════════════════
+// VINCULACIÓN FACTURAS COMBUSTIBLE BARCELO ↔ RECARGAS DEL TANQUE
+// Una "recarga del tanque" es un pa_combustible_movimientos con
+// tipo_movimiento='carga_tanque'. Las facturas son pa_compras del proveedor
+// COMBUSTIBLE BARCELO (se identifica por proveedor_txt o razon_social, ya que
+// pa_compras.proveedor_id se persiste NULL).
+// ═══════════════════════════════════════════════════════════════════════════
+const PROV_BARCELO = 'COMBUSTIBLE BARCELO';
+// Condición SQL reutilizable: la compra es de COMBUSTIBLE BARCELO.
+// Requiere el LEFT JOIN adm_proveedores p ON p.id = c.proveedor_id.
+const _condBarcelo =
+  "(UPPER(TRIM(COALESCE(c.proveedor_txt,''))) = @barcelo OR UPPER(TRIM(COALESCE(p.razon_social,''))) = @barcelo)";
+
+function _esCompraBarcelo(db, compraId) {
+  const row = db.prepare(`
+    SELECT c.id FROM pa_compras c
+    LEFT JOIN adm_proveedores p ON p.id = c.proveedor_id
+    WHERE c.id = @id AND ${_condBarcelo}
+  `).get({ id: compraId, barcelo: PROV_BARCELO });
+  return !!row;
+}
+
+// 1) Listar facturas de COMBUSTIBLE BARCELO con conteo de recargas vinculadas
+router.get('/combustible/facturas-barcelo', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const { desde, hasta, solo_sin_vincular } = req.query;
+    let q = `
+      SELECT c.id, c.fecha, c.nro_factura, c.total,
+        COALESCE((SELECT COUNT(*) FROM pa_vinculacion_factura_recarga v WHERE v.compra_id = c.id), 0) AS recargas_vinculadas_count
+      FROM pa_compras c
+      LEFT JOIN adm_proveedores p ON p.id = c.proveedor_id
+      WHERE ${_condBarcelo} AND (c.activo IS NULL OR c.activo = 1)
+    `;
+    const params = { barcelo: PROV_BARCELO };
+    if (desde) { q += " AND c.fecha >= @desde"; params.desde = desde; }
+    if (hasta) { q += " AND c.fecha <= @hasta"; params.hasta = hasta; }
+    q += " ORDER BY c.fecha DESC";
+    let data = db.prepare(q).all(params);
+    data = data.map(c => ({ ...c, tiene_vinculaciones: c.recargas_vinculadas_count > 0 }));
+    if (solo_sin_vincular === '1' || solo_sin_vincular === 'true')
+      data = data.filter(c => !c.tiene_vinculaciones);
+    res.json({ ok: true, data });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// 2) Recargas del tanque (carga_tanque) que NO tienen ninguna vinculación
+router.get('/combustible/recargas-sin-vincular', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const { desde, hasta } = req.query;
+    let q = `
+      SELECT m.*, t.nombre AS tanque_nombre
+      FROM pa_combustible_movimientos m
+      LEFT JOIN pa_combustible_tanques t ON t.id = m.tanque_id
+      WHERE m.tipo_movimiento = 'carga_tanque'
+        AND NOT EXISTS (SELECT 1 FROM pa_vinculacion_factura_recarga v WHERE v.recarga_id = m.id)
+    `;
+    const params = {};
+    if (desde) { q += " AND m.fecha >= @desde"; params.desde = desde; }
+    if (hasta) { q += " AND m.fecha <= @hasta"; params.hasta = hasta; }
+    q += " ORDER BY m.fecha DESC";
+    res.json({ ok: true, data: db.prepare(q).all(params) });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// 3) Recargas vinculadas a una factura
+router.get('/combustible/facturas/:compra_id/recargas', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const data = db.prepare(`
+      SELECT m.*, t.nombre AS tanque_nombre
+      FROM pa_combustible_movimientos m
+      JOIN pa_vinculacion_factura_recarga v ON v.recarga_id = m.id
+      LEFT JOIN pa_combustible_tanques t ON t.id = m.tanque_id
+      WHERE v.compra_id = ?
+      ORDER BY m.fecha
+    `).all(req.params.compra_id);
+    res.json({ ok: true, data });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// 4) Facturas vinculadas a una recarga (en general 1)
+router.get('/combustible/recargas/:recarga_id/facturas', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const data = db.prepare(`
+      SELECT c.id, c.fecha, c.nro_factura, c.total, c.proveedor_txt
+      FROM pa_compras c
+      JOIN pa_vinculacion_factura_recarga v ON v.compra_id = c.id
+      WHERE v.recarga_id = ?
+      ORDER BY c.fecha DESC
+    `).all(req.params.recarga_id);
+    res.json({ ok: true, data });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// 5) Vincular una factura con una o varias recargas
+router.post('/combustible/vincular', requireAuth, (req, res) => {
+  const db = getDb();
+  const { compra_id, recarga_ids } = req.body;
+  const ids = Array.isArray(recarga_ids) ? recarga_ids.map(Number).filter(n => n > 0) : [];
+  if (!compra_id || !ids.length)
+    return res.status(400).json({ ok: false, error: 'compra_id y recarga_ids requeridos' });
+  if (!_esCompraBarcelo(db, compra_id))
+    return res.status(400).json({ ok: false, error: 'La factura no es de COMBUSTIBLE BARCELO' });
+  try {
+    const ins = db.prepare(
+      "INSERT OR IGNORE INTO pa_vinculacion_factura_recarga (compra_id, recarga_id, vinculado_por) VALUES (?,?,?)"
+    );
+    const tx = db.transaction(() => {
+      let vinculadas = 0;
+      for (const rid of ids) vinculadas += ins.run(compra_id, rid, req.user.id).changes;
+      return vinculadas;
+    });
+    res.json({ ok: true, vinculadas: tx() });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// 6) Desvincular una factura de una recarga
+router.delete('/combustible/vincular', requireAuth, (req, res) => {
+  const db = getDb();
+  const { compra_id, recarga_id } = req.body;
+  if (!compra_id || !recarga_id)
+    return res.status(400).json({ ok: false, error: 'compra_id y recarga_id requeridos' });
+  try {
+    db.prepare("DELETE FROM pa_vinculacion_factura_recarga WHERE compra_id = ? AND recarga_id = ?")
+      .run(compra_id, recarga_id);
+    res.json({ ok: true });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
 // ── Lector IA: ticket/remito de combustible ────────────────────────────────
 router.post('/combustible/leer-ticket', requireAuth, async (req, res) => {
   const { imagen_b64, media_type } = req.body;

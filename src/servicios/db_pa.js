@@ -952,6 +952,21 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_pa_comb_mov_vehiculo ON pa_combustible_movimientos(vehiculo_id);
   CREATE INDEX IF NOT EXISTS idx_pa_comb_mov_estado ON pa_combustible_movimientos(estado_revision);
   CREATE INDEX IF NOT EXISTS idx_pa_comb_mov_lote ON pa_combustible_movimientos(lote_id);
+
+  -- Vinculación N:M entre facturas de combustible (pa_compras, proveedor
+  -- COMBUSTIBLE BARCELO) y recargas del tanque central. En este repo una
+  -- "recarga" es un movimiento con tipo_movimiento='carga_tanque', por eso
+  -- recarga_id referencia pa_combustible_movimientos (no existe recargas_tanque).
+  CREATE TABLE IF NOT EXISTS pa_vinculacion_factura_recarga (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    compra_id     INTEGER NOT NULL REFERENCES pa_compras(id) ON DELETE CASCADE,
+    recarga_id    INTEGER NOT NULL REFERENCES pa_combustible_movimientos(id) ON DELETE CASCADE,
+    vinculado_en  TEXT DEFAULT CURRENT_TIMESTAMP,
+    vinculado_por INTEGER REFERENCES usuarios(id),
+    UNIQUE(compra_id, recarga_id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_pa_vinc_compra  ON pa_vinculacion_factura_recarga(compra_id);
+  CREATE INDEX IF NOT EXISTS idx_pa_vinc_recarga ON pa_vinculacion_factura_recarga(recarga_id);
 `);
 
 // ── SEED: Tanque Gasoil + Tanque Nafta ─────────────────────────────────────

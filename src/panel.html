@@ -1836,6 +1836,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     <div class="cb-subtab" data-sub="vehiculos" onclick="cbShowSub('vehiculos')" style="padding:10px 18px;cursor:pointer;font-size:13px;font-weight:600;border-bottom:2px solid transparent">🚜 Vehículos</div>
     <div class="cb-subtab" data-sub="movimientos" onclick="cbShowSub('movimientos')" style="padding:10px 18px;cursor:pointer;font-size:13px;font-weight:600;border-bottom:2px solid transparent">📋 Movimientos</div>
     <div class="cb-subtab" data-sub="tanques" onclick="cbShowSub('tanques')" style="padding:10px 18px;cursor:pointer;font-size:13px;font-weight:600;border-bottom:2px solid transparent">🛢️ Tanques</div>
+    <div class="cb-subtab" data-sub="vinculacion" onclick="cbShowSub('vinculacion')" style="padding:10px 18px;cursor:pointer;font-size:13px;font-weight:600;border-bottom:2px solid transparent">🔗 Vinculación con facturas</div>
   </div>
 
   <style>
@@ -1908,7 +1909,80 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   <div class="cb-sub" id="cb-sub-tanques">
     <div id="cb-tanques-list" style="display:grid;grid-template-columns:1fr 1fr;gap:16px"></div>
   </div>
+
+  <!-- Vinculación con facturas BARCELO -->
+  <div class="cb-sub" id="cb-sub-vinculacion">
+    <div style="margin-bottom:14px">
+      <div style="font-weight:700;font-size:15px">🔗 Vinculación con facturas COMBUSTIBLE BARCELO</div>
+      <div style="font-size:12px;color:var(--mut)">Asociá facturas con las recargas del tanque central</div>
+    </div>
+    <!-- Toggle sub-vistas -->
+    <div style="display:inline-flex;gap:2px;background:var(--bg);border:1px solid var(--bor);border-radius:8px;padding:3px;margin-bottom:16px">
+      <div class="cb-vinc-mode on" data-mode="factura" onclick="cbVincSetMode('factura')" style="padding:6px 14px;cursor:pointer;font-size:13px;font-weight:600;border-radius:6px">Por factura</div>
+      <div class="cb-vinc-mode" data-mode="recarga" onclick="cbVincSetMode('recarga')" style="padding:6px 14px;cursor:pointer;font-size:13px;font-weight:600;border-radius:6px">Por recarga sin vincular</div>
+    </div>
+    <style>.cb-vinc-mode.on{background:var(--burg);color:#fff}</style>
+
+    <!-- Sub-vista A: Por factura -->
+    <div id="cb-vinc-factura">
+      <div style="display:flex;gap:10px;margin-bottom:12px;align-items:center;flex-wrap:wrap">
+        <label style="font-size:12px;color:var(--mut)">Desde <input type="date" id="cb-vinc-f-desde" onchange="cbVincLoadFacturas()" style="padding:5px 8px;border-radius:6px;border:1px solid var(--bor);background:var(--bg)"></label>
+        <label style="font-size:12px;color:var(--mut)">Hasta <input type="date" id="cb-vinc-f-hasta" onchange="cbVincLoadFacturas()" style="padding:5px 8px;border-radius:6px;border:1px solid var(--bor);background:var(--bg)"></label>
+        <label style="font-size:12px;color:var(--mut);display:inline-flex;align-items:center;gap:6px;cursor:pointer">
+          <input type="checkbox" id="cb-vinc-solo-sin" onchange="cbVincLoadFacturas()" style="width:auto"> Solo facturas sin vincular
+        </label>
+      </div>
+      <div class="tw"><table>
+        <thead><tr><th>Fecha</th><th>Nº factura</th><th style="text-align:right">Total</th><th style="text-align:center">Recargas vinculadas</th><th></th></tr></thead>
+        <tbody id="cb-vinc-facturas-tbody"><tr><td colspan="5" class="emp">Cargando…</td></tr></tbody>
+      </table></div>
+    </div>
+
+    <!-- Sub-vista B: Por recarga sin vincular -->
+    <div id="cb-vinc-recarga" style="display:none">
+      <div style="display:flex;gap:10px;margin-bottom:12px;align-items:center;flex-wrap:wrap">
+        <label style="font-size:12px;color:var(--mut)">Desde <input type="date" id="cb-vinc-r-desde" onchange="cbVincLoadRecargas()" style="padding:5px 8px;border-radius:6px;border:1px solid var(--bor);background:var(--bg)"></label>
+        <label style="font-size:12px;color:var(--mut)">Hasta <input type="date" id="cb-vinc-r-hasta" onchange="cbVincLoadRecargas()" style="padding:5px 8px;border-radius:6px;border:1px solid var(--bor);background:var(--bg)"></label>
+      </div>
+      <div class="tw"><table>
+        <thead><tr><th>Fecha</th><th>Tanque</th><th>Comb.</th><th style="text-align:right">Litros</th><th>Notas</th><th></th></tr></thead>
+        <tbody id="cb-vinc-recargas-tbody"><tr><td colspan="6" class="emp">Cargando…</td></tr></tbody>
+      </table></div>
+    </div>
+  </div>
 </div>
+
+<!-- MODAL: vincular recargas a una factura -->
+<div class="ab-modal-overlay" id="cb-mb-factura">
+<div class="ab-modal" style="width:680px">
+  <div class="mhd"><div class="mht" id="cb-mb-factura-tit">Factura</div><button class="mcl" onclick="document.getElementById('cb-mb-factura').classList.remove('on')">×</button></div>
+  <div style="font-size:12px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.06em;margin:6px 0 8px">Recargas ya vinculadas</div>
+  <div id="cb-mb-factura-vinculadas"><div class="emp">—</div></div>
+  <div style="font-size:12px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.06em;margin:16px 0 8px">Vincular recargas</div>
+  <div style="display:flex;gap:10px;margin-bottom:8px;align-items:center;flex-wrap:wrap">
+    <label style="font-size:12px;color:var(--mut)">Desde <input type="date" id="cb-mb-busc-desde" onchange="cbVincModalBuscarRecargas()" style="padding:5px 8px;border-radius:6px;border:1px solid var(--bor);background:var(--bg)"></label>
+    <label style="font-size:12px;color:var(--mut)">Hasta <input type="date" id="cb-mb-busc-hasta" onchange="cbVincModalBuscarRecargas()" style="padding:5px 8px;border-radius:6px;border:1px solid var(--bor);background:var(--bg)"></label>
+  </div>
+  <div id="cb-mb-busc-recargas" style="max-height:240px;overflow-y:auto;border:1px solid var(--bor2);border-radius:8px;padding:8px"><div class="emp">Cargando…</div></div>
+  <div class="ab-modal-footer">
+    <button class="btn bo" onclick="document.getElementById('cb-mb-factura').classList.remove('on')">Cerrar</button>
+    <button class="btn bb" onclick="cbVincModalVincularSeleccionadas()">Vincular seleccionadas</button>
+  </div>
+</div></div>
+
+<!-- MODAL: vincular una recarga a una factura -->
+<div class="ab-modal-overlay" id="cb-mb-recarga">
+<div class="ab-modal" style="width:520px">
+  <div class="mhd"><div class="mht">Vincular recarga a factura</div><button class="mcl" onclick="document.getElementById('cb-mb-recarga').classList.remove('on')">×</button></div>
+  <div id="cb-mb-recarga-info" style="font-size:13px;margin-bottom:12px;padding:10px;background:var(--bg);border-radius:8px"></div>
+  <div class="fl"><label>Factura COMBUSTIBLE BARCELO</label>
+    <select id="cb-mb-recarga-factura" class="ab-form-select" style="width:100%"></select>
+  </div>
+  <div class="ab-modal-footer">
+    <button class="btn bo" onclick="document.getElementById('cb-mb-recarga').classList.remove('on')">Cancelar</button>
+    <button class="btn bb" onclick="cbVincModalVincularRecarga()">Vincular</button>
+  </div>
+</div></div>
 
 <!-- MODAL EDITOR DE POLÍGONO (Leaflet + Esri) -->
 <div class="mb" id="mb-poligono">
@@ -15618,6 +15692,166 @@ function cbShowSub(sub) {
   if (sub === 'vehiculos') cbLoadVehiculos();
   if (sub === 'movimientos') cbLoadMovimientos();
   if (sub === 'tanques') cbLoadTanques();
+  if (sub === 'vinculacion') cbLoadVinculacion();
+}
+
+// ── Vinculación facturas BARCELO ↔ recargas del tanque ──
+var CB_VINC_MODE = 'factura';      // 'factura' | 'recarga'
+var CB_VINC_FACTURA_ACTUAL = null; // compra_id abierta en el modal de factura
+var CB_VINC_RECARGA_ACTUAL = null; // recarga_id abierta en el modal de recarga
+
+function cbLoadVinculacion(){ cbVincSetMode(CB_VINC_MODE); }
+
+function cbVincSetMode(mode){
+  CB_VINC_MODE = mode;
+  document.querySelectorAll('.cb-vinc-mode').forEach(function(el){ el.classList.toggle('on', el.dataset.mode===mode); });
+  document.getElementById('cb-vinc-factura').style.display = (mode==='factura')?'block':'none';
+  document.getElementById('cb-vinc-recarga').style.display = (mode==='recarga')?'block':'none';
+  if(mode==='factura') cbVincLoadFacturas(); else cbVincLoadRecargas();
+}
+
+// ── Sub-vista A: facturas ──
+function cbVincLoadFacturas(){
+  var desde=document.getElementById('cb-vinc-f-desde').value;
+  var hasta=document.getElementById('cb-vinc-f-hasta').value;
+  var solo=document.getElementById('cb-vinc-solo-sin').checked;
+  var qs=[];
+  if(desde)qs.push('desde='+desde);
+  if(hasta)qs.push('hasta='+hasta);
+  if(solo)qs.push('solo_sin_vincular=1');
+  paF('/api/pa/combustible/facturas-barcelo'+(qs.length?'?'+qs.join('&'):'')).then(function(r){
+    var tb=document.getElementById('cb-vinc-facturas-tbody');
+    var data=r.data||[];
+    if(!data.length){tb.innerHTML='<tr><td colspan="5" class="emp">Sin facturas de COMBUSTIBLE BARCELO</td></tr>';return;}
+    tb.innerHTML=data.map(function(c){
+      var badge=c.recargas_vinculadas_count>0
+        ? '<span class="pa-badge pa-verde-bg">'+c.recargas_vinculadas_count+'</span>'
+        : '<span class="pa-badge pa-gris-bg">0</span>';
+      return '<tr>'
+        +'<td>'+paFecha(c.fecha)+'</td>'
+        +'<td>'+(c.nro_factura||'—')+'</td>'
+        +'<td style="text-align:right">'+paMoney(c.total)+'</td>'
+        +'<td style="text-align:center">'+badge+'</td>'
+        +'<td style="text-align:right"><button class="btn bo bs" onclick="cbVincAbrirFactura('+c.id+',\''+(c.nro_factura||'').replace(/\'/g,"\\'")+'\')">Ver / Vincular</button></td>'
+      +'</tr>';
+    }).join('');
+  });
+}
+
+// ── Sub-vista B: recargas sin vincular ──
+function cbVincLoadRecargas(){
+  var desde=document.getElementById('cb-vinc-r-desde').value;
+  var hasta=document.getElementById('cb-vinc-r-hasta').value;
+  var qs=[];
+  if(desde)qs.push('desde='+desde);
+  if(hasta)qs.push('hasta='+hasta);
+  paF('/api/pa/combustible/recargas-sin-vincular'+(qs.length?'?'+qs.join('&'):'')).then(function(r){
+    var tb=document.getElementById('cb-vinc-recargas-tbody');
+    var data=r.data||[];
+    if(!data.length){tb.innerHTML='<tr><td colspan="6" class="emp">No hay recargas sin vincular 🎉</td></tr>';return;}
+    tb.innerHTML=data.map(function(m){
+      return '<tr>'
+        +'<td>'+paFecha(m.fecha)+'</td>'
+        +'<td>'+(m.tanque_nombre||'—')+'</td>'
+        +'<td>'+(m.combustible||'—')+'</td>'
+        +'<td style="text-align:right">'+cbFmtLitros(m.litros)+'</td>'
+        +'<td style="font-size:12px;color:var(--mut)">'+(m.notas||'')+'</td>'
+        +'<td style="text-align:right"><button class="btn bo bs" onclick="cbVincAbrirRecarga('+m.id+')">Vincular a factura</button></td>'
+      +'</tr>';
+    }).join('');
+  });
+}
+
+// ── Modal: factura → recargas ──
+function cbVincAbrirFactura(compraId, nro){
+  CB_VINC_FACTURA_ACTUAL=compraId;
+  document.getElementById('cb-mb-factura-tit').textContent='Factura '+(nro||('#'+compraId));
+  document.getElementById('cb-mb-busc-desde').value='';
+  document.getElementById('cb-mb-busc-hasta').value='';
+  cbVincModalRefrescarVinculadas();
+  cbVincModalBuscarRecargas();
+  document.getElementById('cb-mb-factura').classList.add('on');
+}
+
+function cbVincModalRefrescarVinculadas(){
+  var cont=document.getElementById('cb-mb-factura-vinculadas');
+  paF('/api/pa/combustible/facturas/'+CB_VINC_FACTURA_ACTUAL+'/recargas').then(function(r){
+    var data=r.data||[];
+    if(!data.length){cont.innerHTML='<div class="emp" style="padding:8px">Sin recargas vinculadas todavía</div>';return;}
+    cont.innerHTML=data.map(function(m){
+      return '<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 8px;border-bottom:1px solid var(--bor);font-size:13px">'
+        +'<span>'+paFecha(m.fecha)+' — '+(m.tanque_nombre||'')+' · <strong>'+cbFmtLitros(m.litros)+'</strong> '+(m.combustible||'')+'</span>'
+        +'<button class="btn bs" style="background:#dc2626;color:#fff;border-color:#dc2626" onclick="cbVincDesvincular('+m.id+')" title="Desvincular">🗑 Desvincular</button>'
+      +'</div>';
+    }).join('');
+  });
+}
+
+function cbVincModalBuscarRecargas(){
+  var desde=document.getElementById('cb-mb-busc-desde').value;
+  var hasta=document.getElementById('cb-mb-busc-hasta').value;
+  var qs=[];
+  if(desde)qs.push('desde='+desde);
+  if(hasta)qs.push('hasta='+hasta);
+  paF('/api/pa/combustible/recargas-sin-vincular'+(qs.length?'?'+qs.join('&'):'')).then(function(r){
+    var cont=document.getElementById('cb-mb-busc-recargas');
+    var data=r.data||[];
+    if(!data.length){cont.innerHTML='<div class="emp" style="padding:8px">No hay recargas sin vincular en ese rango</div>';return;}
+    cont.innerHTML=data.map(function(m){
+      return '<label style="display:flex;align-items:center;gap:8px;padding:6px 4px;font-size:13px;cursor:pointer;border-bottom:1px solid var(--bor)">'
+        +'<input type="checkbox" class="cb-vinc-rec-cb" value="'+m.id+'" style="width:auto"> '
+        +'<span>'+paFecha(m.fecha)+' — '+(m.tanque_nombre||'')+' · <strong>'+cbFmtLitros(m.litros)+'</strong> '+(m.combustible||'')+(m.notas?' <span style="color:var(--mut)">· '+m.notas+'</span>':'')+'</span>'
+      +'</label>';
+    }).join('');
+  });
+}
+
+function cbVincModalVincularSeleccionadas(){
+  var ids=[];
+  document.querySelectorAll('#cb-mb-busc-recargas .cb-vinc-rec-cb:checked').forEach(function(cb){ids.push(Number(cb.value));});
+  if(!ids.length)return toast('Tildá al menos una recarga','er');
+  paF('/api/pa/combustible/vincular',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({compra_id:CB_VINC_FACTURA_ACTUAL,recarga_ids:ids})}).then(function(r){
+    if(!r.ok)return toast(r.error||'Error','er');
+    toast(r.vinculadas+' recarga(s) vinculada(s)');
+    cbVincModalRefrescarVinculadas();
+    cbVincModalBuscarRecargas();
+  });
+}
+
+function cbVincDesvincular(recargaId){
+  paF('/api/pa/combustible/vincular',{method:'DELETE',headers:{'Content-Type':'application/json'},body:JSON.stringify({compra_id:CB_VINC_FACTURA_ACTUAL,recarga_id:recargaId})}).then(function(r){
+    if(!r.ok)return toast(r.error||'Error','er');
+    toast('Desvinculada');
+    cbVincModalRefrescarVinculadas();
+    cbVincModalBuscarRecargas();
+  });
+}
+
+// ── Modal: recarga → factura ──
+function cbVincAbrirRecarga(recargaId){
+  CB_VINC_RECARGA_ACTUAL=recargaId;
+  document.getElementById('cb-mb-recarga-info').textContent='Recarga #'+recargaId;
+  var sel=document.getElementById('cb-mb-recarga-factura');
+  sel.innerHTML='<option value="">Cargando…</option>';
+  paF('/api/pa/combustible/facturas-barcelo').then(function(r){
+    var data=r.data||[];
+    if(!data.length){sel.innerHTML='<option value="">No hay facturas BARCELO</option>';return;}
+    sel.innerHTML='<option value="">— Elegí una factura —</option>'+data.map(function(c){
+      return '<option value="'+c.id+'">'+paFecha(c.fecha)+' — '+(c.nro_factura||('#'+c.id))+' · '+paMoney(c.total)+'</option>';
+    }).join('');
+  });
+  document.getElementById('cb-mb-recarga').classList.add('on');
+}
+
+function cbVincModalVincularRecarga(){
+  var compraId=document.getElementById('cb-mb-recarga-factura').value;
+  if(!compraId)return toast('Elegí una factura','er');
+  paF('/api/pa/combustible/vincular',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({compra_id:Number(compraId),recarga_ids:[CB_VINC_RECARGA_ACTUAL]})}).then(function(r){
+    if(!r.ok)return toast(r.error||'Error','er');
+    toast('Recarga vinculada');
+    document.getElementById('cb-mb-recarga').classList.remove('on');
+    cbVincLoadRecargas();
+  });
 }
 
 function cbFmtLitros(n) { return (n||0).toFixed(0) + ' lt'; }
