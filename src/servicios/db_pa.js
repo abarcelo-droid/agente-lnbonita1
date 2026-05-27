@@ -1871,6 +1871,20 @@ db.exec(`
   } catch(e) { console.error('[ADM] Error creando adm_proveedores:', e.message); }
 })();
 
+// ── MIGRACIÓN: categoria en adm_proveedores ────────────────────────────────
+// Clasifica proveedores por rubro/categoría. Se usa para identificar los
+// proveedores de combustible (categoria='Combustible') en la vinculación de
+// facturas con recargas del tanque. El campo arranca NULL; el admin lo marca.
+(function migrarAdmProveedoresCategoria() {
+  try {
+    const cols = db.prepare("PRAGMA table_info(adm_proveedores)").all().map(c => c.name);
+    if (!cols.includes('categoria')) {
+      db.exec("ALTER TABLE adm_proveedores ADD COLUMN categoria TEXT");
+      console.log("[ADM] categoria agregada en adm_proveedores");
+    }
+  } catch(e) { console.error('[ADM] Error migrando adm_proveedores categoria:', e.message); }
+})();
+
 
 // ── MIGRACIÓN: Asientos Modelo ────────────────────────────────────────────
 (function migrarAsientosModelo() {

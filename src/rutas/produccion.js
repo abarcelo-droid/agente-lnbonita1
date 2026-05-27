@@ -2293,40 +2293,76 @@ router.get('/combustible/dashboard', requireAuth, (req, res) => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
-// VINCULACIÓN FACTURAS COMBUSTIBLE BARCELO ↔ RECARGAS DEL TANQUE
+// VINCULACIÓN FACTURAS DE COMBUSTIBLE ↔ RECARGAS DEL TANQUE
 // Una "recarga del tanque" es un pa_combustible_movimientos con
-// tipo_movimiento='carga_tanque'. Las facturas son pa_compras del proveedor
-// COMBUSTIBLE BARCELO (se identifica por proveedor_txt o razon_social, ya que
-// pa_compras.proveedor_id se persiste NULL).
+// tipo_movimiento='carga_tanque'. Las facturas son pa_compras de CUALQUIER
+// proveedor de combustible.
+//
+// Identificación del proveedor: pa_compras.proveedor_id se persiste NULL
+// (ver creación de compra), por eso la compra se asocia a un proveedor por
+// nombre: pa_compras.proveedor_txt = adm_proveedores.razon_social. Un
+// proveedor es "de combustible" si su categoria (o, como fallback, su rubro)
+// es 'Combustible'. El fallback a rubro permite usar el campo que ya es
+// editable en el padrón sin tocar el módulo contable.
 // ═══════════════════════════════════════════════════════════════════════════
-const PROV_BARCELO = 'COMBUSTIBLE BARCELO';
-// Condición SQL reutilizable: la compra es de COMBUSTIBLE BARCELO.
-// Requiere el LEFT JOIN adm_proveedores p ON p.id = c.proveedor_id.
-const _condBarcelo =
-  "(UPPER(TRIM(COALESCE(c.proveedor_txt,''))) = @barcelo OR UPPER(TRIM(COALESCE(p.razon_social,''))) = @barcelo)";
+// Condición SQL reutilizable: el proveedor `p` es de combustible.
+const _condProvCombustible =
+  "(LOWER(TRIM(COALESCE(p.categoria,''))) = 'combustible' OR LOWER(TRIM(COALESCE(p.rubro,''))) = 'combustible')";
 
-function _esCompraBarcelo(db, compraId) {
+// Devuelve {id, razon_social} si el proveedor existe y es de combustible.
+function _proveedorCombustible(db, proveedorId) {
+  return db.prepare(`
+    SELECT p.id, p.razon_social FROM adm_proveedores p
+    WHERE p.id = ? AND p.activo = 1 AND ${_condProvCombustible}
+  `).get(proveedorId);
+}
+
+// La compra pertenece a un proveedor de combustible si su proveedor_txt
+// coincide (por nombre) con la razón social de algún proveedor de combustible.
+function _esCompraCombustible(db, compraId) {
   const row = db.prepare(`
     SELECT c.id FROM pa_compras c
-    LEFT JOIN adm_proveedores p ON p.id = c.proveedor_id
-    WHERE c.id = @id AND ${_condBarcelo}
-  `).get({ id: compraId, barcelo: PROV_BARCELO });
+    WHERE c.id = ? AND EXISTS (
+      SELECT 1 FROM adm_proveedores p
+      WHERE p.activo = 1 AND ${_condProvCombustible}
+        AND UPPER(TRIM(p.razon_social)) = UPPER(TRIM(COALESCE(c.proveedor_txt,'')))
+    )
+  `).get(compraId);
   return !!row;
 }
 
-// 1) Listar facturas de COMBUSTIBLE BARCELO con conteo de recargas vinculadas
-router.get('/combustible/facturas-barcelo', requireAuth, (req, res) => {
+// 1a) Listar proveedores de categoría Combustible (para los selectores)
+router.get('/combustible/proveedores', requireAuth, (req, res) => {
   const db = getDb();
   try {
-    const { desde, hasta, solo_sin_vincular } = req.query;
+    const proveedores = db.prepare(`
+      SELECT p.id, p.razon_social, p.cuit
+      FROM adm_proveedores p
+      WHERE p.activo = 1 AND ${_condProvCombustible}
+      ORDER BY p.razon_social
+    `).all();
+    res.json({ ok: true, proveedores });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// 1b) Listar facturas de un proveedor de combustible con conteo de recargas
+router.get('/combustible/facturas', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const { proveedor_id, desde, hasta, solo_sin_vincular } = req.query;
+    if (!proveedor_id)
+      return res.status(400).json({ ok: false, error: 'proveedor_id requerido' });
+    const prov = _proveedorCombustible(db, Number(proveedor_id));
+    if (!prov)
+      return res.status(400).json({ ok: false, error: 'El proveedor no es de categoría Combustible' });
     let q = `
       SELECT c.id, c.fecha, c.nro_factura, c.total,
         COALESCE((SELECT COUNT(*) FROM pa_vinculacion_factura_recarga v WHERE v.compra_id = c.id), 0) AS recargas_vinculadas_count
       FROM pa_compras c
-      LEFT JOIN adm_proveedores p ON p.id = c.proveedor_id
-      WHERE ${_condBarcelo} AND (c.activo IS NULL OR c.activo = 1)
+      WHERE UPPER(TRIM(COALESCE(c.proveedor_txt,''))) = UPPER(TRIM(@razon))
+        AND (c.activo IS NULL OR c.activo = 1)
     `;
-    const params = { barcelo: PROV_BARCELO };
+    const params = { razon: prov.razon_social };
     if (desde) { q += " AND c.fecha >= @desde"; params.desde = desde; }
     if (hasta) { q += " AND c.fecha <= @hasta"; params.hasta = hasta; }
     q += " ORDER BY c.fecha DESC";
@@ -2396,8 +2432,8 @@ router.post('/combustible/vincular', requireAuth, (req, res) => {
   const ids = Array.isArray(recarga_ids) ? recarga_ids.map(Number).filter(n => n > 0) : [];
   if (!compra_id || !ids.length)
     return res.status(400).json({ ok: false, error: 'compra_id y recarga_ids requeridos' });
-  if (!_esCompraBarcelo(db, compra_id))
-    return res.status(400).json({ ok: false, error: 'La factura no es de COMBUSTIBLE BARCELO' });
+  if (!_esCompraCombustible(db, compra_id))
+    return res.status(400).json({ ok: false, error: 'La compra no es de un proveedor de combustible' });
   try {
     const ins = db.prepare(
       "INSERT OR IGNORE INTO pa_vinculacion_factura_recarga (compra_id, recarga_id, vinculado_por) VALUES (?,?,?)"
