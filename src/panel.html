@@ -248,6 +248,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   <div class="ni-grp-items">
     <div class="ni" data-sec="pa-cuentas"><span class="dot dc"></span>📊 Plan de Cuentas</div>
     <div class="ni" data-sec="pa-lotes"><span class="dot db"></span>Fincas y Lotes</div>
+    <div class="ni" data-sec="pa-campanias" data-admin-only="1"><span class="dot dc"></span>📅 Campañas</div>
   </div>
 
   <div class="ng" style="margin-top:8px">General</div>
@@ -1764,6 +1765,118 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   <thead><tr><th>Sector</th><th>Lote</th><th style="text-align:right">Ha</th><th>Cultivo</th><th style="text-align:right">Costo total</th><th style="text-align:right">$/ha</th><th></th></tr></thead>
   <tbody id="pa-cos-tbody"><tr><td colspan="7" class="emp">Cargando...</td></tr></tbody>
 </table></div></div>
+</div>
+
+<!-- ─── PA CAMPAÑAS (admin) ────────────────────────────────────── -->
+<div class="sec" id="sec-pa-campanias">
+  <div class="ph">
+    <div><div class="ph-t">📅 Campañas</div><div class="ph-s">Administrá campañas y reasigná órdenes/compras en lote</div></div>
+    <button class="btn bb" onclick="paCampAbrirModal()">+ Nueva campaña</button>
+  </div>
+  <style>
+    .pac-subtab{padding:10px 18px;cursor:pointer;font-size:13px;font-weight:600;border-bottom:2px solid transparent;color:var(--mut)}
+    .pac-subtab.on{color:var(--burg);border-bottom-color:var(--burg)}
+    .pac-sub{display:none} .pac-sub.on{display:block}
+    .pac-ent{padding:6px 14px;cursor:pointer;font-size:13px;font-weight:600;border-radius:6px}
+    .pac-ent.on{background:var(--burg);color:#fff}
+  </style>
+  <div style="display:flex;gap:2px;border-bottom:1px solid var(--bor);margin-bottom:18px">
+    <div class="pac-subtab on" data-sub="lista" onclick="paCampShowSub('lista')">📅 Campañas</div>
+    <div class="pac-subtab" data-sub="reasignar" onclick="paCampShowSub('reasignar')">🔄 Reasignar</div>
+  </div>
+
+  <!-- Sub-tab: lista de campañas -->
+  <div class="pac-sub on" id="pac-sub-lista">
+    <div style="display:flex;gap:10px;margin-bottom:12px;align-items:center;flex-wrap:wrap">
+      <label style="font-size:12px;color:var(--mut)">Tipo
+        <select id="pac-fil-tipo" onchange="paCampLoadLista()" style="padding:5px 8px;border-radius:6px;border:1px solid var(--bor);background:var(--bg)">
+          <option value="">Todos</option><option value="anual">Anual</option><option value="estacional">Estacional</option>
+        </select>
+      </label>
+      <label style="font-size:12px;color:var(--mut)">Estado
+        <select id="pac-fil-estado" onchange="paCampLoadLista()" style="padding:5px 8px;border-radius:6px;border:1px solid var(--bor);background:var(--bg)">
+          <option value="">Todas</option><option value="activa">Vigentes</option><option value="inactiva">No vigentes</option>
+        </select>
+      </label>
+    </div>
+    <div class="ab-table-wrap"><table class="pa-tbl">
+      <thead><tr><th>Nombre</th><th>Tipo</th><th>Inicio</th><th>Fin</th><th style="text-align:right">Órdenes</th><th style="text-align:right">Compras</th><th style="text-align:center">Estado</th><th></th></tr></thead>
+      <tbody id="pac-lista-tbody"><tr><td colspan="8" class="emp">Cargando…</td></tr></tbody>
+    </table></div>
+  </div>
+
+  <!-- Sub-tab: reasignar -->
+  <div class="pac-sub" id="pac-sub-reasignar">
+    <div style="display:inline-flex;gap:2px;background:var(--bg);border:1px solid var(--bor);border-radius:8px;padding:3px;margin-bottom:16px">
+      <div class="pac-ent on" data-ent="ordenes" onclick="paCampSetEnt('ordenes')">Órdenes</div>
+      <div class="pac-ent" data-ent="compras" onclick="paCampSetEnt('compras')">Compras</div>
+    </div>
+    <!-- Filtros -->
+    <div style="display:flex;gap:10px;margin-bottom:12px;align-items:flex-end;flex-wrap:wrap">
+      <label class="pac-f-cultivo" style="font-size:12px;color:var(--mut)">Cultivo<br>
+        <select id="pac-r-cultivo" style="padding:5px 8px;border-radius:6px;border:1px solid var(--bor);background:var(--bg);min-width:140px"><option value="">— Todos —</option></select>
+      </label>
+      <label class="pac-f-prov" style="font-size:12px;color:var(--mut);display:none">Proveedor<br>
+        <input id="pac-r-prov" placeholder="🔍 nombre" style="padding:5px 8px;border-radius:6px;border:1px solid var(--bor);background:var(--bg)">
+      </label>
+      <label style="font-size:12px;color:var(--mut)">Desde<br><input type="date" id="pac-r-desde" style="padding:5px 8px;border-radius:6px;border:1px solid var(--bor);background:var(--bg)"></label>
+      <label style="font-size:12px;color:var(--mut)">Hasta<br><input type="date" id="pac-r-hasta" style="padding:5px 8px;border-radius:6px;border:1px solid var(--bor);background:var(--bg)"></label>
+      <label style="font-size:12px;color:var(--mut)">Campaña anual<br><select id="pac-r-anual" style="padding:5px 8px;border-radius:6px;border:1px solid var(--bor);background:var(--bg)"><option value="">— Todas —</option></select></label>
+      <label style="font-size:12px;color:var(--mut)">Estacional actual<br><select id="pac-r-estac" style="padding:5px 8px;border-radius:6px;border:1px solid var(--bor);background:var(--bg)"><option value="">— Todas —</option><option value="null">— Sin estacional —</option></select></label>
+      <label class="pac-f-estado" style="font-size:12px;color:var(--mut)">Estado<br><select id="pac-r-estado" style="padding:5px 8px;border-radius:6px;border:1px solid var(--bor);background:var(--bg)"><option value="">Todos</option><option value="ejecutada">Ejecutadas</option><option value="emitida">Emitidas</option><option value="borrador">Borrador</option></select></label>
+      <button class="btn bb" onclick="paCampBuscar()">🔍 Buscar</button>
+    </div>
+    <!-- Preview -->
+    <div class="ab-table-wrap" style="max-height:340px;overflow-y:auto"><table class="pa-tbl">
+      <thead id="pac-prev-thead"></thead>
+      <tbody id="pac-prev-tbody"><tr><td colspan="8" class="emp">Buscá órdenes/compras para reasignar</td></tr></tbody>
+    </table></div>
+    <!-- Acción -->
+    <div id="pac-accion" style="display:none;margin-top:14px;padding:14px;background:var(--burl,#faf5f0);border:1px solid var(--bor2);border-radius:10px">
+      <div style="font-size:12px;font-weight:700;color:var(--mut);text-transform:uppercase;margin-bottom:10px">Acción de reasignación</div>
+      <div style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap">
+        <label style="font-size:12px;color:var(--mut)">Asignar campaña anual<br><select id="pac-set-anual" style="padding:6px 8px;border-radius:6px;border:1px solid var(--bor);background:var(--bg)"><option value="">— No cambiar —</option></select></label>
+        <label style="font-size:12px;color:var(--mut)">Asignar campaña estacional<br><select id="pac-set-estac" onchange="paCampOnSetEstac()" style="padding:6px 8px;border-radius:6px;border:1px solid var(--bor);background:var(--bg)"><option value="">— No cambiar —</option></select></label>
+        <label style="font-size:12px;color:var(--mut);display:inline-flex;align-items:center;gap:6px"><input type="checkbox" id="pac-limpiar-estac" onchange="paCampOnLimpiar()" style="width:auto"> Limpiar estacional (NULL)</label>
+        <button class="btn bb" onclick="paCampConfirmar()" id="pac-aplicar-btn">Aplicar a 0 seleccionadas</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Modal nueva/editar campaña -->
+<div class="ab-modal-overlay" id="pac-mb-campana">
+  <div class="ab-modal" style="width:480px">
+    <div class="mhd"><div class="mht" id="pac-mb-tit">Nueva campaña</div><button class="mcl" onclick="document.getElementById('pac-mb-campana').classList.remove('on')">×</button></div>
+    <div class="fg">
+      <div class="fl ff"><label>Nombre <span style="color:var(--err)">*</span></label><input id="pac-c-nombre" placeholder="Ej: Inv 2026"></div>
+      <div class="fl ff"><label>Tipo <span style="color:var(--err)">*</span></label>
+        <div style="display:flex;gap:16px;padding:4px 0">
+          <label style="display:inline-flex;align-items:center;gap:6px;font-weight:500"><input type="radio" name="pac-c-tipo" value="anual" style="width:auto"> Anual</label>
+          <label style="display:inline-flex;align-items:center;gap:6px;font-weight:500"><input type="radio" name="pac-c-tipo" value="estacional" style="width:auto"> Estacional</label>
+        </div>
+      </div>
+      <div class="fl"><label>Fecha inicio <span style="color:var(--err)">*</span></label><input type="date" id="pac-c-inicio"></div>
+      <div class="fl"><label>Fecha fin <span style="color:var(--err)">*</span></label><input type="date" id="pac-c-fin"></div>
+      <div class="fl ff"><label style="display:inline-flex;align-items:center;gap:6px"><input type="checkbox" id="pac-c-activa" style="width:auto"> Marcar como campaña vigente (de su tipo)</label></div>
+    </div>
+    <div class="ab-modal-footer">
+      <button class="btn bo" onclick="document.getElementById('pac-mb-campana').classList.remove('on')">Cancelar</button>
+      <button class="btn bb" onclick="paCampGuardar()" id="pac-c-guardar">Crear campaña</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal confirmación bulk -->
+<div class="ab-modal-overlay" id="pac-mb-confirm">
+  <div class="ab-modal" style="width:480px">
+    <div class="mhd"><div class="mht">Confirmar reasignación</div><button class="mcl" onclick="document.getElementById('pac-mb-confirm').classList.remove('on')">×</button></div>
+    <div id="pac-confirm-body" style="font-size:14px;line-height:1.5"></div>
+    <div class="ab-modal-footer">
+      <button class="btn bo" onclick="document.getElementById('pac-mb-confirm').classList.remove('on')">Cancelar</button>
+      <button class="btn" style="background:#dc2626;color:#fff" onclick="paCampAplicar()" id="pac-confirm-btn">Confirmar</button>
+    </div>
+  </div>
 </div>
 
 <!-- ─── PA LOTES ──────────────────────────────────────────────── -->
@@ -6510,7 +6623,8 @@ function loadSec(s) {
     'pa-costos':     function(){ paLoadCostos(); },
     'pa-lotes':      function(){ paLoadLotes(); },
     'pa-scout':      function(){ paLoadScout(); },
-    'pa-cuentas':    function(){ paCuLoad(); }
+    'pa-cuentas':    function(){ paCuLoad(); },
+    'pa-campanias':  function(){ paCampInit(); }
   };
   if (m[s]) m[s]();
 }
@@ -15798,6 +15912,258 @@ function paVerDetalleCosto(loteId){
     data.forEach(function(c){html+='<tr><td>'+paFecha(c.fecha)+'</td><td>'+c.categoria+'</td><td>'+(c.descripcion||'—')+'</td><td style="text-align:right">'+paMoney(c.monto)+'</td></tr>';total+=c.monto;});
     html+='<tr style="font-weight:700;background:var(--bg)"><td colspan="3">TOTAL</td><td style="text-align:right">'+paMoney(total)+'</td></tr></tbody></table>';
     document.getElementById('pa-ord-det-tit').textContent='Costos — '+data[0].lote_nombre;document.getElementById('pa-ord-det-sub').textContent='';document.getElementById('pa-ord-det-body').innerHTML=html;document.getElementById('pa-ord-ejec-form').style.display='none';document.getElementById('pa-ord-det-ejec-btn').style.display='none';var ec=document.getElementById('pa-ord-det-ejec-confirm-btn');if(ec)ec.style.display='none';document.getElementById('pa-mb-orden-det').classList.add('on');
+  });
+}
+
+// ══ ADMIN DE CAMPAÑAS + REASIGNACIÓN BULK ════════════════════════════════
+function paCampOptsHTML(tipo){
+  var camps=(PA.campañas||[]).filter(function(c){return (c.tipo||'anual')===tipo && !c.eliminada_en;});
+  return camps.map(function(c){return '<option value="'+c.id+'">'+c.nombre+(c.activa?' (vigente)':'')+'</option>';}).join('');
+}
+function paCampInit(){
+  PA._campEnt='ordenes'; PA._campPreview=[]; PA._campCultivosLoaded=false; PA._campEditId=null;
+  paCampShowSub('lista');
+}
+function paCampShowSub(sub){
+  document.querySelectorAll('.pac-subtab').forEach(function(t){t.classList.toggle('on',t.dataset.sub===sub);});
+  document.querySelectorAll('.pac-sub').forEach(function(s){s.classList.remove('on');});
+  var el=document.getElementById('pac-sub-'+sub); if(el)el.classList.add('on');
+  if(sub==='lista') paCampLoadLista();
+  else if(sub==='reasignar') paCampInitReasignar();
+}
+// ── Lista de campañas ──
+function paCampLoadLista(){
+  var tb=document.getElementById('pac-lista-tbody');
+  paF('/api/pa/campanas/admin').then(function(r){
+    if(!r.ok){tb.innerHTML='<tr><td colspan="8" class="emp">'+(r.error||'Error')+'</td></tr>';return;}
+    PA._campLista=r.data||[];
+    var filTipo=document.getElementById('pac-fil-tipo').value;
+    var filEstado=document.getElementById('pac-fil-estado').value;
+    var rows=PA._campLista.filter(function(c){
+      if(filTipo && (c.tipo||'anual')!==filTipo) return false;
+      if(filEstado==='activa' && !c.activa) return false;
+      if(filEstado==='inactiva' && c.activa) return false;
+      return true;
+    });
+    if(!rows.length){tb.innerHTML='<tr><td colspan="8" class="emp">Sin campañas</td></tr>';return;}
+    tb.innerHTML=rows.map(function(c){
+      var tipoBdg=(c.tipo==='estacional')
+        ? '<span style="background:#dcfce7;color:#166534;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600">estacional</span>'
+        : '<span style="background:#dbeafe;color:#1e40af;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600">anual</span>';
+      var estado=c.activa
+        ? '<span style="background:#dcfce7;color:#166534;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600">Vigente</span>'
+        : '<span style="color:var(--mut);font-size:12px">—</span>';
+      return '<tr>'
+        +'<td><strong>'+c.nombre+'</strong></td>'
+        +'<td>'+tipoBdg+'</td>'
+        +'<td style="font-size:12px">'+(c.fecha_inicio||'—')+'</td>'
+        +'<td style="font-size:12px">'+(c.fecha_fin||'—')+'</td>'
+        +'<td style="text-align:right">'+(c.ordenes_count||0)+'</td>'
+        +'<td style="text-align:right">'+(c.compras_count||0)+'</td>'
+        +'<td style="text-align:center">'+estado+'</td>'
+        +'<td style="white-space:nowrap"><button class="btn bo bs" onclick="paCampAbrirModal('+c.id+')">Editar</button> '
+          +'<button class="btn bo bs" style="border-color:#dc2626;color:#dc2626" onclick="paCampEliminar('+c.id+',\''+(c.nombre||'').replace(/'/g,"\\'")+'\')">Eliminar</button></td>'
+        +'</tr>';
+    }).join('');
+  });
+}
+// ── Modal nueva/editar ──
+function paCampAbrirModal(id){
+  PA._campEditId=id||null;
+  var c=id?(PA._campLista||[]).find(function(x){return x.id===id;}):null;
+  document.getElementById('pac-mb-tit').textContent=c?'Editar campaña':'Nueva campaña';
+  document.getElementById('pac-c-guardar').textContent=c?'Guardar cambios':'Crear campaña';
+  document.getElementById('pac-c-nombre').value=c?c.nombre:'';
+  document.querySelectorAll('input[name="pac-c-tipo"]').forEach(function(r){r.checked=(r.value===((c&&c.tipo)||'anual'));});
+  document.getElementById('pac-c-inicio').value=c?(c.fecha_inicio||''):'';
+  document.getElementById('pac-c-fin').value=c?(c.fecha_fin||''):'';
+  document.getElementById('pac-c-activa').checked=c?!!c.activa:false;
+  document.getElementById('pac-mb-campana').classList.add('on');
+}
+function paCampGuardar(){
+  var nombre=document.getElementById('pac-c-nombre').value.trim();
+  var tipoEl=document.querySelector('input[name="pac-c-tipo"]:checked');
+  var tipo=tipoEl?tipoEl.value:'';
+  var inicio=document.getElementById('pac-c-inicio').value;
+  var fin=document.getElementById('pac-c-fin').value;
+  var activa=document.getElementById('pac-c-activa').checked;
+  if(!nombre)return toast('Poné un nombre','er');
+  if(!tipo)return toast('Elegí el tipo','er');
+  if(!inicio||!fin)return toast('Completá fecha inicio y fin','er');
+  var body={nombre:nombre,tipo:tipo,fecha_inicio:inicio,fecha_fin:fin,activa:activa?1:0};
+  if(PA._campEditId){
+    paF('/api/pa/campanas/'+PA._campEditId,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
+      .then(function(r){paCampTrasGuardar(r);});
+  } else {
+    // Crear: POST no setea 'activa'; si se pidió vigente, lo activamos con un PATCH.
+    paF('/api/pa/campanas',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
+      .then(function(r){
+        if(r.ok && activa && r.id){
+          paF('/api/pa/campanas/'+r.id,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({activa:1})}).then(function(){paCampTrasGuardar(r);});
+        } else paCampTrasGuardar(r);
+      });
+  }
+}
+function paCampTrasGuardar(r){
+  if(!r.ok)return toast(r.error||'Error','er');
+  toast('Campaña guardada');
+  document.getElementById('pac-mb-campana').classList.remove('on');
+  // Refrescar cache global de campañas (usado por otros selects del módulo).
+  paF('/api/pa/campanas').then(function(rr){PA.campañas=rr.data||PA.campañas;});
+  paCampLoadLista();
+}
+function paCampEliminar(id,nombre){
+  if(!confirm('¿Eliminar la campaña "'+nombre+'"? Se hace soft-delete. No se permite si tiene órdenes o compras asociadas.'))return;
+  paF('/api/pa/campanas/'+id,{method:'DELETE',headers:{'Content-Type':'application/json'}}).then(function(r){
+    if(!r.ok)return toast(r.error||'Error','er');
+    toast('Campaña eliminada');
+    paCampLoadLista();
+  });
+}
+// ── Reasignación bulk ──
+function paCampInitReasignar(){
+  paCampPobladoSelects();
+  paCampSetEnt(PA._campEnt||'ordenes');
+}
+function paCampPobladoSelects(){
+  document.getElementById('pac-r-anual').innerHTML='<option value="">— Todas —</option>'+paCampOptsHTML('anual');
+  document.getElementById('pac-r-estac').innerHTML='<option value="">— Todas —</option><option value="null">— Sin estacional —</option>'+paCampOptsHTML('estacional');
+  document.getElementById('pac-set-anual').innerHTML='<option value="">— No cambiar —</option>'+paCampOptsHTML('anual');
+  document.getElementById('pac-set-estac').innerHTML='<option value="">— No cambiar —</option>'+paCampOptsHTML('estacional');
+}
+function paCampSetEnt(ent){
+  PA._campEnt=ent;
+  document.querySelectorAll('.pac-ent').forEach(function(b){b.classList.toggle('on',b.dataset.ent===ent);});
+  var esOrd=(ent==='ordenes');
+  document.querySelector('.pac-f-cultivo').style.display=esOrd?'':'none';
+  document.querySelector('.pac-f-estado').style.display=esOrd?'':'none';
+  document.querySelector('.pac-f-prov').style.display=esOrd?'none':'';
+  if(esOrd && !PA._campCultivosLoaded) paCampCargarCultivos();
+  // Reset preview
+  PA._campPreview=[];
+  document.getElementById('pac-prev-thead').innerHTML='';
+  document.getElementById('pac-prev-tbody').innerHTML='<tr><td colspan="8" class="emp">Buscá para reasignar</td></tr>';
+  document.getElementById('pac-accion').style.display='none';
+}
+function paCampCargarCultivos(){
+  paF('/api/pa/ordenes').then(function(r){
+    var cults=Array.from(new Set((r.data||[]).map(function(o){return o.cultivo;}).filter(Boolean))).sort();
+    var sel=document.getElementById('pac-r-cultivo');
+    if(sel)sel.innerHTML='<option value="">— Todos —</option>'+cults.map(function(c){return '<option value="'+c+'">'+c+'</option>';}).join('');
+    PA._campCultivosLoaded=true;
+  });
+}
+function paCampBuscar(){
+  var ent=PA._campEnt, qs=[];
+  var desde=document.getElementById('pac-r-desde').value, hasta=document.getElementById('pac-r-hasta').value;
+  var anual=document.getElementById('pac-r-anual').value, estac=document.getElementById('pac-r-estac').value;
+  if(desde)qs.push('desde='+desde);
+  if(hasta)qs.push('hasta='+hasta);
+  if(anual)qs.push('campaña_anual_id='+encodeURIComponent(anual));
+  if(estac)qs.push('campaña_estacional_id='+encodeURIComponent(estac));
+  if(ent==='ordenes'){
+    var cult=document.getElementById('pac-r-cultivo').value, estado=document.getElementById('pac-r-estado').value;
+    if(cult)qs.push('cultivo='+encodeURIComponent(cult));
+    if(estado)qs.push('estado='+encodeURIComponent(estado));
+  } else {
+    var prov=document.getElementById('pac-r-prov').value.trim();
+    if(prov)qs.push('proveedor='+encodeURIComponent(prov));
+  }
+  var url='/api/pa/'+(ent==='ordenes'?'ordenes':'compras')+'/buscar-para-reasignacion'+(qs.length?'?'+qs.join('&'):'');
+  paF(url).then(function(r){
+    if(!r.ok)return toast(r.error||'Error','er');
+    PA._campPreview=r.data||[];
+    paCampRenderPreview();
+    document.getElementById('pac-accion').style.display=PA._campPreview.length?'block':'none';
+    paCampUpdCount();
+  });
+}
+function paCampRenderPreview(){
+  var ent=PA._campEnt, thead=document.getElementById('pac-prev-thead'), tbody=document.getElementById('pac-prev-tbody');
+  if(!PA._campPreview.length){thead.innerHTML='';tbody.innerHTML='<tr><td colspan="8" class="emp">Sin resultados</td></tr>';return;}
+  var chkAll='<th style="width:28px"><input type="checkbox" id="pac-chk-all" onchange="paCampToggleAll(this)" style="width:auto"></th>';
+  if(ent==='ordenes'){
+    thead.innerHTML='<tr>'+chkAll+'<th>N° Orden</th><th>Fecha</th><th>Cultivo</th><th style="text-align:right">Lotes</th><th style="text-align:right">Costo</th><th>Anual</th><th>Estacional</th></tr>';
+    tbody.innerHTML=PA._campPreview.map(function(o){
+      return '<tr>'
+        +'<td><input type="checkbox" class="pac-prev-cb" value="'+o.id+'" onchange="paCampUpdCount()" style="width:auto"></td>'
+        +'<td><strong>'+(o.nro_orden||('#'+o.id))+'</strong></td>'
+        +'<td style="font-size:12px">'+paFecha(o.fecha_orden)+'</td>'
+        +'<td>'+(o.cultivo||'—')+'</td>'
+        +'<td style="text-align:right">'+(o.lotes_count||0)+'</td>'
+        +'<td style="text-align:right">'+paMoney(o.costo_total)+'</td>'
+        +'<td style="font-size:12px">'+(o.campaña_anual_nombre||'—')+'</td>'
+        +'<td style="font-size:12px">'+(o.campaña_estacional_nombre||'<span style="color:var(--mut)">sin asignar</span>')+'</td>'
+        +'</tr>';
+    }).join('');
+  } else {
+    thead.innerHTML='<tr>'+chkAll+'<th>Fecha</th><th>N° Factura</th><th>Proveedor</th><th style="text-align:right">Total</th><th>Anual</th><th>Estacional</th></tr>';
+    tbody.innerHTML=PA._campPreview.map(function(c){
+      return '<tr>'
+        +'<td><input type="checkbox" class="pac-prev-cb" value="'+c.id+'" onchange="paCampUpdCount()" style="width:auto"></td>'
+        +'<td style="font-size:12px">'+paFecha(c.fecha)+'</td>'
+        +'<td>'+(c.nro_factura||'—')+'</td>'
+        +'<td style="font-size:12px">'+(c.proveedor_txt||'—')+'</td>'
+        +'<td style="text-align:right">'+paMoney(c.total)+'</td>'
+        +'<td style="font-size:12px">'+(c.campaña_anual_nombre||'—')+'</td>'
+        +'<td style="font-size:12px">'+(c.campaña_estacional_nombre||'<span style="color:var(--mut)">sin asignar</span>')+'</td>'
+        +'</tr>';
+    }).join('');
+  }
+}
+function paCampToggleAll(cb){
+  document.querySelectorAll('.pac-prev-cb').forEach(function(x){x.checked=cb.checked;});
+  paCampUpdCount();
+}
+function paCampSeleccionados(){
+  return Array.from(document.querySelectorAll('.pac-prev-cb:checked')).map(function(x){return Number(x.value);});
+}
+function paCampUpdCount(){
+  var n=paCampSeleccionados().length;
+  var btn=document.getElementById('pac-aplicar-btn');
+  if(btn)btn.textContent='Aplicar a '+n+' seleccionada'+(n===1?'':'s');
+}
+function paCampOnLimpiar(){
+  if(document.getElementById('pac-limpiar-estac').checked){
+    document.getElementById('pac-set-estac').value='';
+    document.getElementById('pac-set-estac').disabled=true;
+  } else { document.getElementById('pac-set-estac').disabled=false; }
+}
+function paCampOnSetEstac(){
+  if(document.getElementById('pac-set-estac').value){
+    document.getElementById('pac-limpiar-estac').checked=false;
+  }
+}
+function paCampConfirmar(){
+  var ids=paCampSeleccionados();
+  if(!ids.length)return toast('Seleccioná al menos una fila','er');
+  var setAnual=document.getElementById('pac-set-anual').value;
+  var setEstac=document.getElementById('pac-set-estac').value;
+  var limpiar=document.getElementById('pac-limpiar-estac').checked;
+  if(!setAnual && !setEstac && !limpiar)return toast('Elegí qué reasignar','er');
+  var ent=PA._campEnt, entTxt=(ent==='ordenes'?'órden':'compra')+(ids.length===1?'':'s');
+  var partes=[];
+  if(setAnual){var an=document.getElementById('pac-set-anual'); partes.push('campaña anual = <strong>'+an.options[an.selectedIndex].text+'</strong>');}
+  if(setEstac){var es=document.getElementById('pac-set-estac'); partes.push('campaña estacional = <strong>'+es.options[es.selectedIndex].text+'</strong>');}
+  if(limpiar) partes.push('<strong>limpiar</strong> la campaña estacional');
+  PA._campAccion={ent:ent,ids:ids,anual:setAnual||null,estac:setEstac||null,limpiar:limpiar};
+  document.getElementById('pac-confirm-body').innerHTML=
+    'Vas a actualizar <strong>'+ids.length+' '+entTxt+'</strong>:<br><br>'+partes.join('<br>')+'<br><br>¿Confirmás?';
+  document.getElementById('pac-mb-confirm').classList.add('on');
+}
+function paCampAplicar(){
+  var a=PA._campAccion; if(!a)return;
+  var body={campaña_anual_id:a.anual,campaña_estacional_id:a.estac,limpiar_estacional:a.limpiar};
+  body[a.ent==='ordenes'?'orden_ids':'compra_ids']=a.ids;
+  var url='/api/pa/'+(a.ent==='ordenes'?'ordenes':'compras')+'/reasignar-bulk';
+  var btn=document.getElementById('pac-confirm-btn'); if(btn)btn.disabled=true;
+  paF(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(function(r){
+    if(btn)btn.disabled=false;
+    if(!r.ok)return toast(r.error||'Error','er');
+    var n=(r.data&&r.data.actualizadas)||0;
+    toast('✅ Se actualizaron '+n+' '+(a.ent==='ordenes'?'órden':'compra')+(n===1?'':'s'));
+    document.getElementById('pac-mb-confirm').classList.remove('on');
+    paCampBuscar(); // refresca el preview con los nuevos valores
   });
 }
 

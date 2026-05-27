@@ -21,6 +21,17 @@ function requireAuth(req, res, next) {
   } catch(e) { res.status(401).json({ ok: false, error: 'Sesión inválida' }); }
 }
 
+// Escritura sensible (admin de campañas, reasignación bulk). Admin = rol 'admin'.
+function requireAdmin(req, res, next) {
+  const cookie = req.cookies?.lnb_user;
+  if (!cookie) return res.status(401).json({ ok: false, error: 'No autenticado' });
+  try {
+    req.user = JSON.parse(cookie);
+    if (req.user.rol !== 'admin') return res.status(403).json({ ok: false, error: 'Solo administradores' });
+    next();
+  } catch(e) { res.status(401).json({ ok: false, error: 'Sesión inválida' }); }
+}
+
 // ── Helper: campañas activas (una por tipo) ────────────────────────────────
 // Devuelve los ids de la campaña anual y estacional activas (o null cada una).
 function campañasActivas(db) {
@@ -113,6 +124,90 @@ router.patch('/campanas/:id/activar', requireAuth, (req, res) => {
       db.prepare("UPDATE pa_campañas SET activa = 1 WHERE id = ?").run(camp.id);
     });
     activar();
+    res.json({ ok: true });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// ── ADMIN DE CAMPAÑAS ──────────────────────────────────────────────────────
+// Listado con metadata: conteo de órdenes y compras asociadas (no eliminadas).
+router.get('/campanas/admin', requireAdmin, (req, res) => {
+  const db = getDb();
+  try {
+    const data = db.prepare(`
+      SELECT c.*,
+        (SELECT COUNT(*) FROM pa_ordenes o
+          WHERE (o.campaña_anual_id = c.id OR o.campaña_estacional_id = c.id)
+            AND o.eliminada_en IS NULL) AS ordenes_count,
+        (SELECT COUNT(*) FROM pa_compras p
+          WHERE (p.campaña_anual_id = c.id OR p.campaña_estacional_id = c.id)
+            AND (p.activo IS NULL OR p.activo = 1)) AS compras_count
+      FROM pa_campañas c
+      WHERE c.eliminada_en IS NULL
+      ORDER BY c.tipo, c.fecha_inicio DESC
+    `).all();
+    res.json({ ok: true, data });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// Editar campaña (nombre, tipo, fechas, activa). Si activa pasa a 1, se
+// desactivan las demás del mismo tipo (una vigente por tipo).
+router.patch('/campanas/:id', requireAdmin, (req, res) => {
+  const db = getDb();
+  const { nombre, tipo, fecha_inicio, fecha_fin } = req.body;
+  const activaRaw = (req.body.activa !== undefined) ? req.body.activa : req.body.activo;
+  try {
+    const camp = db.prepare("SELECT * FROM pa_campañas WHERE id = ? AND eliminada_en IS NULL").get(req.params.id);
+    if (!camp) return res.status(404).json({ ok: false, error: 'Campaña no encontrada' });
+    if (tipo !== undefined && !['anual', 'estacional'].includes(tipo))
+      return res.status(400).json({ ok: false, error: "tipo debe ser 'anual' o 'estacional'" });
+    if (nombre !== undefined && !String(nombre).trim())
+      return res.status(400).json({ ok: false, error: 'El nombre no puede estar vacío' });
+
+    const sets = [], params = { id: camp.id };
+    if (nombre       !== undefined) { sets.push("nombre = @nombre");             params.nombre = String(nombre).trim(); }
+    if (tipo         !== undefined) { sets.push("tipo = @tipo");                 params.tipo = tipo; }
+    if (fecha_inicio !== undefined) { sets.push("fecha_inicio = @fecha_inicio"); params.fecha_inicio = fecha_inicio; }
+    if (fecha_fin    !== undefined) { sets.push("fecha_fin = @fecha_fin");       params.fecha_fin = fecha_fin; }
+
+    const nuevoTipo = (tipo !== undefined) ? tipo : camp.tipo;
+    const quiereActiva = (activaRaw !== undefined) ? (activaRaw === 1 || activaRaw === true || activaRaw === '1') : null;
+    if (quiereActiva !== null) { sets.push("activa = @activa"); params.activa = quiereActiva ? 1 : 0; }
+
+    const tx = db.transaction(() => {
+      // Si se activa, desactivar las demás vigentes del mismo tipo.
+      if (quiereActiva === true) {
+        db.prepare("UPDATE pa_campañas SET activa = 0 WHERE tipo = ? AND id != ?").run(nuevoTipo, camp.id);
+      }
+      if (sets.length) db.prepare(`UPDATE pa_campañas SET ${sets.join(", ")} WHERE id = @id`).run(params);
+    });
+    tx();
+    res.json({ ok: true });
+  } catch(e) {
+    if (e.message.includes('UNIQUE')) return res.status(400).json({ ok: false, error: 'Ya existe una campaña con ese nombre' });
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+// Soft delete: no se permite si tiene órdenes o compras asociadas activas.
+router.delete('/campanas/:id', requireAdmin, (req, res) => {
+  const db = getDb();
+  try {
+    const camp = db.prepare("SELECT * FROM pa_campañas WHERE id = ? AND eliminada_en IS NULL").get(req.params.id);
+    if (!camp) return res.status(404).json({ ok: false, error: 'Campaña no encontrada' });
+    const ordenes = db.prepare(
+      "SELECT COUNT(*) AS n FROM pa_ordenes WHERE (campaña_anual_id = ? OR campaña_estacional_id = ?) AND eliminada_en IS NULL"
+    ).get(camp.id, camp.id).n;
+    const compras = db.prepare(
+      "SELECT COUNT(*) AS n FROM pa_compras WHERE (campaña_anual_id = ? OR campaña_estacional_id = ?) AND (activo IS NULL OR activo = 1)"
+    ).get(camp.id, camp.id).n;
+    if (ordenes > 0 || compras > 0) {
+      return res.status(400).json({
+        ok: false,
+        error: `No se puede eliminar: tiene ${ordenes} orden(es) y ${compras} compra(s) asociadas. Reasigná esas operaciones a otra campaña primero.`
+      });
+    }
+    db.prepare("UPDATE pa_campañas SET eliminada_en = datetime('now','localtime'), eliminada_por_id = ?, activa = 0 WHERE id = ?")
+      .run(req.user.id || null, camp.id);
     res.json({ ok: true });
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
@@ -1179,6 +1274,132 @@ router.get('/ordenes', requireAuth, (req, res) => {
       return { ...o, lotes, items, cultivos, finca_nombres, costo_total };
     });
     res.json({ ok: true, data });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// ── REASIGNACIÓN BULK DE CAMPAÑA — helper de auditoría ─────────────────────
+function _logCampañaBulk(db, req, { entidad, cantidad, campaña_anual_id, campaña_estacional_id, limpiar_estacional, ids }) {
+  try {
+    db.prepare(`
+      INSERT INTO pa_campañas_log
+        (accion, entidad, cantidad, campaña_anual_id, campaña_estacional_id, limpiar_estacional, ids_afectados, usuario_id, usuario_nombre)
+      VALUES ('reasignar_bulk', ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(entidad, cantidad, campaña_anual_id || null, campaña_estacional_id || null,
+           limpiar_estacional ? 1 : 0, JSON.stringify(ids || []),
+           req.user?.id || null, req.user?.nombre || null);
+  } catch(e) { console.error('[PA] Error logueando reasignación bulk:', e.message); }
+}
+
+// IMPORTANTE: esta ruta va ANTES de GET /ordenes/:id para que el param no la capture.
+// Preview de órdenes candidatas a reasignación, según filtros.
+router.get('/ordenes/buscar-para-reasignacion', requireAdmin, (req, res) => {
+  const db = getDb();
+  try {
+    const { cultivo, desde, hasta, campaña_anual_id, campaña_estacional_id, estado } = req.query;
+    const conds = ["o.eliminada_en IS NULL"]; const params = [];
+    if (cultivo) { conds.push("o.cultivo = ?"); params.push(cultivo); }
+    if (desde)   { conds.push("o.fecha_orden >= ?"); params.push(desde); }
+    if (hasta)   { conds.push("o.fecha_orden <= ?"); params.push(hasta); }
+    if (campaña_anual_id) { conds.push("o.campaña_anual_id = ?"); params.push(campaña_anual_id); }
+    if (campaña_estacional_id === 'null') { conds.push("o.campaña_estacional_id IS NULL"); }
+    else if (campaña_estacional_id) { conds.push("o.campaña_estacional_id = ?"); params.push(campaña_estacional_id); }
+    if (estado) { conds.push("o.estado = ?"); params.push(estado); }
+
+    const ordenes = db.prepare(`
+      SELECT o.id, o.nro_orden, o.fecha_orden, o.cultivo, o.estado,
+             o.campaña_anual_id, o.campaña_estacional_id,
+             can.nombre AS campaña_anual_nombre, ces.nombre AS campaña_estacional_nombre,
+             (SELECT COALESCE(SUM(costo_total),0) FROM pa_aplicaciones WHERE orden_id = o.id) AS costo_total,
+             (SELECT COUNT(*) FROM pa_ordenes_lotes WHERE orden_id = o.id) AS lotes_count
+      FROM pa_ordenes o
+      LEFT JOIN pa_campañas can ON can.id = o.campaña_anual_id
+      LEFT JOIN pa_campañas ces ON ces.id = o.campaña_estacional_id
+      WHERE ${conds.join(' AND ')}
+      ORDER BY o.fecha_orden DESC
+    `).all(...params);
+    res.json({ ok: true, data: ordenes });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// Reasignación bulk de campaña sobre órdenes seleccionadas (transaccional).
+router.post('/ordenes/reasignar-bulk', requireAdmin, (req, res) => {
+  const db = getDb();
+  const { orden_ids, campaña_anual_id, campaña_estacional_id, limpiar_estacional } = req.body;
+  const ids = Array.isArray(orden_ids) ? orden_ids.map(Number).filter(n => n > 0) : [];
+  if (!ids.length) return res.status(400).json({ ok: false, error: 'Seleccioná al menos una orden' });
+  if (!campaña_anual_id && !campaña_estacional_id && !limpiar_estacional)
+    return res.status(400).json({ ok: false, error: 'No hay ningún cambio para aplicar' });
+  if (campaña_estacional_id && limpiar_estacional)
+    return res.status(400).json({ ok: false, error: 'No podés asignar y limpiar la campaña estacional a la vez' });
+  try {
+    const sets = [], baseParams = [];
+    if (campaña_anual_id) { sets.push("campaña_anual_id = ?"); baseParams.push(campaña_anual_id); }
+    if (limpiar_estacional) { sets.push("campaña_estacional_id = NULL"); }
+    else if (campaña_estacional_id) { sets.push("campaña_estacional_id = ?"); baseParams.push(campaña_estacional_id); }
+
+    const ph = ids.map(() => '?').join(',');
+    const stmt = db.prepare(`UPDATE pa_ordenes SET ${sets.join(', ')} WHERE id IN (${ph}) AND eliminada_en IS NULL`);
+    const tx = db.transaction(() => {
+      const info = stmt.run(...baseParams, ...ids);
+      _logCampañaBulk(db, req, { entidad: 'orden', cantidad: info.changes, campaña_anual_id, campaña_estacional_id, limpiar_estacional, ids });
+      return info.changes;
+    });
+    res.json({ ok: true, data: { actualizadas: tx() } });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// Preview de COMPRAS candidatas a reasignación (compras no tienen cultivo;
+// se filtran por fecha, proveedor y campañas).
+router.get('/compras/buscar-para-reasignacion', requireAdmin, (req, res) => {
+  const db = getDb();
+  try {
+    const { proveedor, desde, hasta, campaña_anual_id, campaña_estacional_id } = req.query;
+    const conds = ["(c.activo IS NULL OR c.activo = 1)"]; const params = [];
+    if (proveedor) { conds.push("UPPER(TRIM(COALESCE(c.proveedor_txt,''))) LIKE ?"); params.push('%' + String(proveedor).trim().toUpperCase() + '%'); }
+    if (desde) { conds.push("c.fecha >= ?"); params.push(desde); }
+    if (hasta) { conds.push("c.fecha <= ?"); params.push(hasta); }
+    if (campaña_anual_id) { conds.push("c.campaña_anual_id = ?"); params.push(campaña_anual_id); }
+    if (campaña_estacional_id === 'null') { conds.push("c.campaña_estacional_id IS NULL"); }
+    else if (campaña_estacional_id) { conds.push("c.campaña_estacional_id = ?"); params.push(campaña_estacional_id); }
+
+    const compras = db.prepare(`
+      SELECT c.id, c.fecha, c.nro_factura, c.proveedor_txt, c.total,
+             c.campaña_anual_id, c.campaña_estacional_id,
+             can.nombre AS campaña_anual_nombre, ces.nombre AS campaña_estacional_nombre
+      FROM pa_compras c
+      LEFT JOIN pa_campañas can ON can.id = c.campaña_anual_id
+      LEFT JOIN pa_campañas ces ON ces.id = c.campaña_estacional_id
+      WHERE ${conds.join(' AND ')}
+      ORDER BY c.fecha DESC
+    `).all(...params);
+    res.json({ ok: true, data: compras });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// Reasignación bulk de campaña sobre compras seleccionadas (transaccional).
+router.post('/compras/reasignar-bulk', requireAdmin, (req, res) => {
+  const db = getDb();
+  const { compra_ids, campaña_anual_id, campaña_estacional_id, limpiar_estacional } = req.body;
+  const ids = Array.isArray(compra_ids) ? compra_ids.map(Number).filter(n => n > 0) : [];
+  if (!ids.length) return res.status(400).json({ ok: false, error: 'Seleccioná al menos una compra' });
+  if (!campaña_anual_id && !campaña_estacional_id && !limpiar_estacional)
+    return res.status(400).json({ ok: false, error: 'No hay ningún cambio para aplicar' });
+  if (campaña_estacional_id && limpiar_estacional)
+    return res.status(400).json({ ok: false, error: 'No podés asignar y limpiar la campaña estacional a la vez' });
+  try {
+    const sets = [], baseParams = [];
+    if (campaña_anual_id) { sets.push("campaña_anual_id = ?"); baseParams.push(campaña_anual_id); }
+    if (limpiar_estacional) { sets.push("campaña_estacional_id = NULL"); }
+    else if (campaña_estacional_id) { sets.push("campaña_estacional_id = ?"); baseParams.push(campaña_estacional_id); }
+
+    const ph = ids.map(() => '?').join(',');
+    const stmt = db.prepare(`UPDATE pa_compras SET ${sets.join(', ')} WHERE id IN (${ph}) AND (activo IS NULL OR activo = 1)`);
+    const tx = db.transaction(() => {
+      const info = stmt.run(...baseParams, ...ids);
+      _logCampañaBulk(db, req, { entidad: 'compra', cantidad: info.changes, campaña_anual_id, campaña_estacional_id, limpiar_estacional, ids });
+      return info.changes;
+    });
+    res.json({ ok: true, data: { actualizadas: tx() } });
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
