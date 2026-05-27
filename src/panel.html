@@ -111,6 +111,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" defer></script>
 <script src="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.js" defer></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js" defer></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js" defer></script>
 <script src="/static/mandata.js" defer></script>
 <link rel="stylesheet" href="/static/sidebar-v2.css">
 <script src="/static/sidebar-v2.js" defer></script>
@@ -1722,10 +1723,28 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
 <!-- ─── PA COSTOS ─────────────────────────────────────────────── -->
 <div class="sec" id="sec-pa-costos">
 <div class="ph"><div><div class="ph-t">💰 Costos por Lote</div><div class="ph-s">Resumen acumulado por lote y campaña</div></div>
-<div style="display:flex;gap:8px">
+<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
   <select id="pa-cos-campaña-anual" onchange="paLoadCostos()" title="Campaña anual" style="padding:7px 12px;font-size:13px;width:auto"><option value="">Campaña anual</option></select>
   <select id="pa-cos-campaña-estacional" onchange="paLoadCostos()" title="Campaña estacional" style="padding:7px 12px;font-size:13px;width:auto"><option value="">(sin filtrar)</option></select>
+  <select id="pa-cos-sector-sel" onchange="paLoadCostos()" title="Sector / Finca" style="padding:7px 12px;font-size:13px;width:auto"><option value="">— Todos los sectores —</option></select>
+  <button class="btn bo" onclick="paCostosExportExcel()" title="Exportar a Excel" style="border-color:#107c41;color:#107c41">📥 Excel</button>
 </div>
+</div>
+<!-- Totales globales -->
+<div id="pa-cos-totales" style="margin:14px 0;padding:16px 20px;border:1px solid var(--bd);border-radius:12px;background:var(--card,#fff)">
+  <div id="pa-cos-tot-titulo" style="font-size:12px;font-weight:700;color:var(--mut);text-transform:uppercase;margin-bottom:12px">💰 Total campaña</div>
+  <div id="pa-cos-tot-kpis" style="display:flex;gap:32px;flex-wrap:wrap"><div class="emp">Cargando...</div></div>
+</div>
+<!-- Donuts -->
+<div style="display:flex;gap:18px;flex-wrap:wrap;margin:18px 0">
+  <div style="flex:1;min-width:280px;border:1px solid var(--bd);border-radius:12px;padding:14px">
+    <div style="font-size:11px;font-weight:700;color:var(--mut);text-transform:uppercase;margin-bottom:8px">Costo por cultivo</div>
+    <div style="position:relative;height:240px"><canvas id="pa-cos-donut-cultivo"></canvas></div>
+  </div>
+  <div style="flex:1;min-width:280px;border:1px solid var(--bd);border-radius:12px;padding:14px">
+    <div style="font-size:11px;font-weight:700;color:var(--mut);text-transform:uppercase;margin-bottom:8px">Costo por tipo de gasto</div>
+    <div style="position:relative;height:240px"><canvas id="pa-cos-donut-tipo"></canvas></div>
+  </div>
 </div>
 <!-- Resumen por cultivo -->
 <div style="font-size:11px;font-weight:700;color:var(--mut);text-transform:uppercase;margin:14px 0 8px">Por cultivo</div>
@@ -1737,7 +1756,10 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
 <div style="font-size:11px;font-weight:700;color:var(--mut);text-transform:uppercase;margin:14px 0 8px">Por sector</div>
 <div class="pa-grid3" id="pa-cos-sectores"></div>
 <!-- Detalle por lote -->
-<div style="font-size:11px;font-weight:700;color:var(--mut);text-transform:uppercase;margin:18px 0 8px">Detalle por lote</div>
+<div style="display:flex;align-items:center;gap:10px;margin:18px 0 8px;flex-wrap:wrap">
+  <div style="font-size:11px;font-weight:700;color:var(--mut);text-transform:uppercase">Detalle por lote</div>
+  <span id="pa-cos-drill-chip" style="display:none"></span>
+</div>
 <div class="pa-wrap"><div class="ab-table-wrap"><table class="pa-tbl">
   <thead><tr><th>Sector</th><th>Lote</th><th style="text-align:right">Ha</th><th>Cultivo</th><th style="text-align:right">Costo total</th><th style="text-align:right">$/ha</th><th></th></tr></thead>
   <tbody id="pa-cos-tbody"><tr><td colspan="7" class="emp">Cargando...</td></tr></tbody>
@@ -15439,14 +15461,36 @@ function paRegistrarEjecucionMulti() {
   });
 }
 
+// Paleta para el donut "por tipo de gasto" (rubros ejecutivos).
+var PA_COS_TIPO_COLOR={
+  'Insumos':'#16a34a',
+  'Combustible':'#f59e0b',
+  'Mano de obra':'#3b82f6',
+  'Tractor / Maquinaria':'#a16207',
+  'Otros':'#9ca3af'
+};
+var PA_COS_TIPO_EMOJI={
+  'Insumos':'🌱','Combustible':'⛽','Mano de obra':'👷','Tractor / Maquinaria':'🚜','Otros':'📦'
+};
+// Estado de la sección Costos: respuesta cruda + filtro drill-down por cultivo.
+PA._cos=PA._cos||{resp:null,drillCultivo:null,charts:{}};
+
 function paLoadCostos(){
   var anualId=(document.getElementById('pa-cos-campaña-anual')||{}).value||'';
   var estacId=(document.getElementById('pa-cos-campaña-estacional')||{}).value||'';
+  var sector =(document.getElementById('pa-cos-sector-sel')||{}).value||'';
   var qs=[];
   if(anualId)qs.push('campaña_anual_id='+encodeURIComponent(anualId));
   if(estacId)qs.push('campaña_estacional_id='+encodeURIComponent(estacId));
+  if(sector)qs.push('sector='+encodeURIComponent(sector));
   paF('/api/pa/costos'+(qs.length?'?'+qs.join('&'):'')).then(function(r){
-    var data=r.data||[],sects=r.por_sector||[],cults=r.por_cultivo||[];
+    PA._cos.resp=r;
+    PA._cos.drillCultivo=null; // al recargar filtros, limpiar drill-down
+    var cults=r.por_cultivo||[],sects=r.por_sector||[],tipos=r.por_tipo_gasto||[];
+    // Poblar select de sector (preservando selección actual)
+    paCosPoblarSectores(r.sectores||[],sector);
+    // Card de totales globales
+    paCosRenderTotales(r.totales||{});
     // Tabla de cultivos
     var ctbody=document.getElementById('pa-cos-cult-tbody');
     if(!cults.length){
@@ -15470,29 +15514,212 @@ function paLoadCostos(){
     document.getElementById('pa-cos-sectores').innerHTML=sects.map(function(s){
       return'<div class="pa-card"><div class="pa-card-title">'+s.sector_nombre+'</div><div class="pa-stat">'+paMoney(s.costo_total)+'</div><div style="font-size:12px;color:var(--mut);margin-top:4px">'+s.hectareas_total+' ha — '+paMoney(s.costo_por_ha)+'/ha</div></div>';
     }).join('');
-    // Detalle por lote
-    var tb=document.getElementById('pa-cos-tbody');
-    if(!data.length){tb.innerHTML='<tr><td colspan="7" class="emp">Sin costos para esta campaña</td></tr>';return;}
-    tb.innerHTML=data.map(function(l){
-      var cult=l.cultivo_actual||'';
-      var cultCell;
-      if(cult){
-        var col=(typeof cultColor==='function')?cultColor(cult):{bg:'#e0f2fe',fg:'#075985'};
-        cultCell='<span style="background:'+col.bg+';color:'+col.fg+';padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600">'+cult+'</span>';
-      } else {
-        cultCell='<span style="color:var(--mut);font-size:11px;font-style:italic">sin cultivo</span>';
-      }
-      return'<tr>'
-        +'<td style="font-size:12px;color:var(--mut)">'+l.sector_nombre+'</td>'
-        +'<td><strong>'+l.lote_nombre+'</strong></td>'
-        +'<td style="text-align:right">'+l.hectareas+'</td>'
-        +'<td>'+cultCell+'</td>'
-        +'<td style="text-align:right"><strong>'+paMoney(l.costo_total)+'</strong></td>'
-        +'<td style="text-align:right">'+paMoney(l.costo_por_ha)+'</td>'
-        +'<td><button class="btn bo bs" onclick="paVerDetalleCosto('+l.lote_id+')">Detalle</button></td>'
-      +'</tr>';
-    }).join('');
+    // Donuts
+    paCosRenderDonuts(cults,tipos);
+    // Detalle por lote (respeta drill-down)
+    paCosRenderDetalle();
   });
+}
+
+function paCosPoblarSectores(lista,actual){
+  var sel=document.getElementById('pa-cos-sector-sel');
+  if(!sel)return;
+  var opts='<option value="">— Todos los sectores —</option>'+
+    lista.map(function(s){return'<option value="'+s+'">'+s+'</option>';}).join('');
+  sel.innerHTML=opts;
+  // Restaurar selección si sigue existiendo
+  if(actual&&lista.indexOf(actual)>=0)sel.value=actual;
+}
+
+function paCosRenderTotales(t){
+  var titEl=document.getElementById('pa-cos-tot-titulo');
+  var anualSel=document.getElementById('pa-cos-campaña-anual');
+  var campNom=anualSel&&anualSel.selectedIndex>=0?anualSel.options[anualSel.selectedIndex].text:'';
+  if(/Campaña anual/i.test(campNom))campNom='';
+  var sector=(document.getElementById('pa-cos-sector-sel')||{}).value||'';
+  if(titEl)titEl.textContent='💰 Total campaña'+(campNom?' '+campNom:'')+(sector?' · '+sector:'');
+  function kpi(val,lbl){
+    return'<div><div style="font-size:22px;font-weight:800;color:var(--burg,#7a1f2b)">'+val+'</div>'
+      +'<div style="font-size:11px;color:var(--mut);text-transform:uppercase;letter-spacing:.3px">'+lbl+'</div></div>';
+  }
+  var html=kpi(paMoney(t.costo_total),'Costo total')
+    +kpi((t.hectareas_totales||0).toFixed(1)+' ha','Hectáreas')
+    +kpi(paMoney(t.costo_por_ha),'$/ha promedio')
+    +kpi((t.lotes_count||0),'Lotes activos')
+    +kpi((t.cultivos_count||0),'Cultivos');
+  document.getElementById('pa-cos-tot-kpis').innerHTML=html;
+}
+
+function paCosRenderDonuts(cults,tipos){
+  if(typeof Chart==='undefined')return; // CDN aún no cargó
+  // Donut A — por cultivo
+  var labA=cults.map(function(c){return c.cultivo;});
+  var datA=cults.map(function(c){return Math.round(c.costo_total||0);});
+  var colA=cults.map(function(c){
+    var esSinCult=/Sin cultivo/i.test(c.cultivo);
+    return(typeof cultColor==='function'&&!esSinCult)?cultColor(c.cultivo).bg:'#e5e7eb';
+  });
+  paCosDibujarDonut('pa-cos-donut-cultivo','cultivo',labA,datA,colA,function(label){
+    paCosSetDrill(label);
+  });
+  // Donut B — por tipo de gasto (informativo)
+  var labB=tipos.map(function(t){return(PA_COS_TIPO_EMOJI[t.tipo]||'')+' '+t.tipo;});
+  var datB=tipos.map(function(t){return Math.round(t.costo||0);});
+  var colB=tipos.map(function(t){return PA_COS_TIPO_COLOR[t.tipo]||'#9ca3af';});
+  paCosDibujarDonut('pa-cos-donut-tipo','tipo',labB,datB,colB,null);
+}
+
+function paCosDibujarDonut(canvasId,key,labels,data,colors,onClick){
+  var cv=document.getElementById(canvasId);
+  if(!cv)return;
+  if(PA._cos.charts[key]){PA._cos.charts[key].destroy();PA._cos.charts[key]=null;}
+  if(!data.length||data.every(function(v){return!v;})){
+    var ctx0=cv.getContext('2d');ctx0.clearRect(0,0,cv.width,cv.height);
+    ctx0.font='13px sans-serif';ctx0.fillStyle='#9ca3af';ctx0.textAlign='center';
+    ctx0.fillText('Sin datos',cv.width/2,cv.height/2);
+    return;
+  }
+  var total=data.reduce(function(a,b){return a+b;},0);
+  PA._cos.charts[key]=new Chart(cv,{
+    type:'doughnut',
+    data:{labels:labels,datasets:[{data:data,backgroundColor:colors,borderWidth:1,borderColor:'#fff'}]},
+    options:{
+      responsive:true,maintainAspectRatio:false,cutout:'58%',
+      plugins:{
+        legend:{position:'bottom',labels:{boxWidth:12,font:{size:11}}},
+        tooltip:{callbacks:{label:function(c){
+          var pct=total>0?(c.parsed/total*100).toFixed(1):'0';
+          return c.label+': '+paMoney(c.parsed)+' ('+pct+'%)';
+        }}}
+      },
+      onClick:onClick?function(evt,els){
+        if(els&&els.length){onClick(labels[els[0].index]);}
+      }:undefined
+    }
+  });
+  if(onClick)cv.style.cursor='pointer';
+}
+
+function paCosSetDrill(cultivo){
+  // El label del donut A es el nombre del cultivo tal cual la tabla por_cultivo.
+  PA._cos.drillCultivo=cultivo||null;
+  paCosRenderDetalle();
+}
+function paCosClearDrill(){PA._cos.drillCultivo=null;paCosRenderDetalle();}
+
+function paCosRenderDetalle(){
+  var resp=PA._cos.resp||{};
+  var data=resp.data||[];
+  var drill=PA._cos.drillCultivo;
+  var chip=document.getElementById('pa-cos-drill-chip');
+  // Resolver el filtro: el donut agrupa "— Sin cultivo asignado —"; en el
+  // detalle eso son lotes con cultivo_actual vacío.
+  var esSinCult=drill&&/Sin cultivo/i.test(drill);
+  var filtradas=data;
+  if(drill){
+    filtradas=data.filter(function(l){
+      var c=(l.cultivo_actual||'').trim();
+      return esSinCult?!c:c===drill;
+    });
+  }
+  if(chip){
+    if(drill){
+      var col=(typeof cultColor==='function'&&!esSinCult)?cultColor(drill):{bg:'#f3f4f6',fg:'#6b7280'};
+      chip.style.display='inline-flex';
+      chip.innerHTML='<span style="display:inline-flex;align-items:center;gap:6px;background:'+col.bg+';color:'+col.fg+';padding:3px 10px;border-radius:12px;font-size:12px;font-weight:600">Cultivo: '+drill
+        +' <span onclick="paCosClearDrill()" title="Quitar filtro" style="cursor:pointer;font-weight:700">✕</span></span>';
+    } else { chip.style.display='none';chip.innerHTML=''; }
+  }
+  var tb=document.getElementById('pa-cos-tbody');
+  if(!filtradas.length){tb.innerHTML='<tr><td colspan="7" class="emp">'+(drill?'Sin lotes para este cultivo':'Sin costos para esta campaña')+'</td></tr>';return;}
+  tb.innerHTML=filtradas.map(function(l){
+    var cult=l.cultivo_actual||'';
+    var cultCell;
+    if(cult){
+      var col=(typeof cultColor==='function')?cultColor(cult):{bg:'#e0f2fe',fg:'#075985'};
+      cultCell='<span style="background:'+col.bg+';color:'+col.fg+';padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600">'+cult+'</span>';
+    } else {
+      cultCell='<span style="color:var(--mut);font-size:11px;font-style:italic">sin cultivo</span>';
+    }
+    return'<tr>'
+      +'<td style="font-size:12px;color:var(--mut)">'+l.sector_nombre+'</td>'
+      +'<td><strong>'+l.lote_nombre+'</strong></td>'
+      +'<td style="text-align:right">'+l.hectareas+'</td>'
+      +'<td>'+cultCell+'</td>'
+      +'<td style="text-align:right"><strong>'+paMoney(l.costo_total)+'</strong></td>'
+      +'<td style="text-align:right">'+paMoney(l.costo_por_ha)+'</td>'
+      +'<td><button class="btn bo bs" onclick="paVerDetalleCosto('+l.lote_id+')">Detalle</button></td>'
+    +'</tr>';
+  }).join('');
+}
+
+function paCostosExportExcel(){
+  if(typeof XLSX==='undefined'){toast('La librería de Excel aún no cargó, reintentá');return;}
+  var resp=PA._cos.resp;
+  if(!resp){toast('No hay datos cargados');return;}
+  var t=resp.totales||{},cults=resp.por_cultivo||[],sects=resp.por_sector||[],tipos=resp.por_tipo_gasto||[],lotes=resp.data||[];
+  var anualSel=document.getElementById('pa-cos-campaña-anual');
+  var campNom=anualSel&&anualSel.selectedIndex>=0?anualSel.options[anualSel.selectedIndex].text:'';
+  if(/Campaña anual/i.test(campNom))campNom='';
+  var sector=(document.getElementById('pa-cos-sector-sel')||{}).value||'';
+  var hoy=new Date().toISOString().slice(0,10);
+  var num=function(n){return Math.round(n||0);};
+  // ── Hoja 1: Resumen ──
+  var aoa=[];
+  aoa.push(['Costos por Lote — Resumen']);
+  aoa.push(['Campaña',campNom||'(todas)']);
+  aoa.push(['Sector',sector||'Todos los sectores']);
+  aoa.push(['Fecha export',hoy]);
+  aoa.push([]);
+  aoa.push(['KPIs Globales']);
+  aoa.push(['Costo total',num(t.costo_total)]);
+  aoa.push(['Hectáreas totales',Math.round((t.hectareas_totales||0)*10)/10]);
+  aoa.push(['$/ha promedio',num(t.costo_por_ha)]);
+  aoa.push(['Lotes activos',t.lotes_count||0]);
+  aoa.push(['Cultivos distintos',t.cultivos_count||0]);
+  aoa.push([]);
+  aoa.push(['POR CULTIVO']);
+  aoa.push(['Cultivo','Lotes','Hectáreas','Costo Total','$/ha']);
+  cults.forEach(function(c){aoa.push([c.cultivo,c.lotes_count||0,Math.round((c.hectareas_total||0)*10)/10,num(c.costo_total),num(c.costo_por_ha)]);});
+  aoa.push([]);
+  aoa.push(['POR SECTOR']);
+  aoa.push(['Sector','Costo Total','Hectáreas','$/ha']);
+  sects.forEach(function(s){aoa.push([s.sector_nombre,num(s.costo_total),Math.round((s.hectareas_total||0)*10)/10,num(s.costo_por_ha)]);});
+  aoa.push([]);
+  aoa.push(['POR TIPO DE GASTO']);
+  aoa.push(['Tipo','Costo Total','% del total']);
+  tipos.forEach(function(tp){aoa.push([tp.tipo,num(tp.costo),tp.porcentaje]);});
+  var ws1=XLSX.utils.aoa_to_sheet(aoa);
+  ws1['!cols']=[{wch:28},{wch:14},{wch:14},{wch:16},{wch:14}];
+  // ── Hoja 2: Detalle por Lote ──
+  var detData=lotes.map(function(l){
+    return{
+      'Sector':l.sector_nombre||'',
+      'Lote':l.lote_nombre||'',
+      'Ha':l.hectareas||0,
+      'Cultivo':l.cultivo_actual||'',
+      'Costo Total':num(l.costo_total),
+      '$/ha':num(l.costo_por_ha),
+      'Fecha primera aplicación':l.fecha_primera||'',
+      'Fecha última aplicación':l.fecha_ultima||'',
+      'Cantidad de órdenes':l.ordenes_count||0,
+      'Cantidad de aplicaciones':l.aplicaciones_count||0
+    };
+  });
+  var ws2=detData.length?XLSX.utils.json_to_sheet(detData):XLSX.utils.aoa_to_sheet([['Sin datos']]);
+  if(detData.length){
+    var cols=Object.keys(detData[0]);
+    ws2['!cols']=cols.map(function(k){
+      var max=k.length;
+      detData.forEach(function(row){var v=String(row[k]==null?'':row[k]);if(v.length>max)max=v.length;});
+      return{wch:Math.min(max+2,40)};
+    });
+  }
+  var wb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb,ws1,'Resumen');
+  XLSX.utils.book_append_sheet(wb,ws2,'Detalle por Lote');
+  var slug=(campNom||'campaña').replace(/[\/\\]/g,'-').replace(/\s+/g,'');
+  XLSX.writeFile(wb,'costos-por-lote-'+slug+'-'+hoy+'.xlsx');
 }
 function paVerDetalleCosto(loteId){
   paF('/api/pa/costos?lote_id='+loteId).then(function(r){var data=r.data||[];if(!data.length){toast('Sin costos para este lote');return;}

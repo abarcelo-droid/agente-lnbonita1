@@ -1700,6 +1700,7 @@ router.get('/costos', requireAuth, (req, res) => {
     const { campaña_id, campaña_anual_id, campaña_estacional_id, lote_id } = req.query;
     const anualFiltro = campaña_anual_id || campaña_id || null;
     const estacionalFiltro = campaña_estacional_id || null;
+    const sectorFiltro = (req.query.sector || '').trim() || null;
 
     // WHERE dinámico sobre pa_costos_lote (cl). Si no viene ningún filtro,
     // por defecto usamos la campaña anual activa.
@@ -1713,6 +1714,12 @@ router.get('/costos', requireAuth, (req, res) => {
       else { costoConds.push("1=1"); }
     }
     const costoWhere = costoConds.join(' AND ');
+
+    // Filtro adicional por sector (texto del nombre de sector). Aplica solo a
+    // las consultas agregadas, que joinean pa_sectores con alias `s`.
+    const sectorCond = sectorFiltro ? ' AND s.nombre = ?' : '';
+    const aggWhere   = costoWhere + sectorCond;
+    const aggPrm     = sectorFiltro ? [...costoPrm, sectorFiltro] : costoPrm.slice();
 
     // Si se pide un lote específico, detalle completo
     if (lote_id) {
@@ -1747,16 +1754,20 @@ router.get('/costos', requireAuth, (req, res) => {
         cu.cultivo as cultivo_actual,
         SUM(cl.monto) as costo_total,
         SUM(cl.monto) / NULLIF(l.hectareas, 0) as costo_por_ha,
-        GROUP_CONCAT(DISTINCT cl.categoria) as categorias
+        GROUP_CONCAT(DISTINCT cl.categoria) as categorias,
+        MIN(cl.fecha) as fecha_primera,
+        MAX(cl.fecha) as fecha_ultima,
+        COUNT(DISTINCT CASE WHEN cl.categoria IN ('fertilizante','agroquimico') THEN cl.referencia_id END) as ordenes_count,
+        SUM(CASE WHEN cl.categoria IN ('fertilizante','agroquimico') THEN 1 ELSE 0 END) as aplicaciones_count
       FROM pa_costos_lote cl
       JOIN pa_lotes l ON l.id = cl.lote_id
       JOIN pa_sectores s ON s.id = l.sector_id
       LEFT JOIN pa_campañas ca ON ca.id = cl.campaña_id
       LEFT JOIN pa_cultivos_lote cu ON cu.lote_id = l.id AND cu.campaña = ?
-      WHERE ${costoWhere}
+      WHERE ${aggWhere}
       GROUP BY l.id
       ORDER BY s.nombre, l.nombre
-    `).all(campañaNombre || '', ...costoPrm);
+    `).all(campañaNombre || '', ...aggPrm);
 
     // Total por sector
     const porSector = db.prepare(`
@@ -1769,10 +1780,10 @@ router.get('/costos', requireAuth, (req, res) => {
       FROM pa_costos_lote cl
       JOIN pa_lotes l ON l.id = cl.lote_id
       JOIN pa_sectores s ON s.id = l.sector_id
-      WHERE ${costoWhere}
+      WHERE ${aggWhere}
       GROUP BY s.id
       ORDER BY s.nombre
-    `).all(...costoPrm);
+    `).all(...aggPrm);
 
     // Total por cultivo: agrupamos los lotes por su cultivo de la campaña.
     // Lotes sin cultivo asignado se agrupan en "Sin cultivo asignado".
@@ -1792,15 +1803,73 @@ router.get('/costos', requireAuth, (req, res) => {
           SUM(cl.monto) AS monto
         FROM pa_costos_lote cl
         JOIN pa_lotes l ON l.id = cl.lote_id
-        WHERE ${costoWhere}
+        JOIN pa_sectores s ON s.id = l.sector_id
+        WHERE ${aggWhere}
         GROUP BY l.id
       ) t
       LEFT JOIN pa_cultivos_lote cu ON cu.lote_id = t.lote_id AND cu.campaña = ?
       GROUP BY cultivo
       ORDER BY costo_total DESC
-    `).all(...costoPrm, campañaNombre || '');
+    `).all(...aggPrm, campañaNombre || '');
 
-    res.json({ ok: true, data: resumen, por_sector: porSector, por_cultivo: porCultivo });
+    // Total por tipo de gasto: mapeamos las categorías técnicas de pa_costos_lote
+    // a los grandes rubros de la vista ejecutiva. Combustible se imputa con
+    // categoria='otros' y descripción que arranca con "Combustible".
+    // Nota: agrupamos por la expresión CASE completa (no por el alias `tipo`),
+    // porque pa_sectores tiene una columna `tipo` y SQLite resolvería el GROUP
+    // BY contra esa columna real en vez del alias de salida.
+    const tipoGastoCase = `
+      CASE
+        WHEN cl.categoria IN ('fertilizante','agroquimico','semilla') THEN 'Insumos'
+        WHEN cl.categoria IN ('labor_propia','labor_contratada','cosecha') THEN 'Mano de obra'
+        WHEN cl.categoria = 'otros' AND cl.descripcion LIKE 'Combustible%' THEN 'Combustible'
+        ELSE 'Otros'
+      END`;
+    const porTipoRaw = db.prepare(`
+      SELECT ${tipoGastoCase} AS tipo, SUM(cl.monto) AS costo
+      FROM pa_costos_lote cl
+      JOIN pa_lotes l ON l.id = cl.lote_id
+      JOIN pa_sectores s ON s.id = l.sector_id
+      WHERE ${aggWhere}
+      GROUP BY ${tipoGastoCase}
+      ORDER BY costo DESC
+    `).all(...aggPrm);
+    const totalGasto = porTipoRaw.reduce((a, r) => a + (r.costo || 0), 0);
+    const porTipoGasto = porTipoRaw.map(r => ({
+      tipo: r.tipo,
+      costo: r.costo || 0,
+      porcentaje: totalGasto > 0 ? Math.round((r.costo / totalGasto) * 1000) / 10 : 0
+    }));
+
+    // Totales globales (respetan los filtros activos). Se derivan del resumen
+    // por lote para no recontar hectáreas ni lotes.
+    const costoTotalGlobal = resumen.reduce((a, l) => a + (l.costo_total || 0), 0);
+    const hectareasTotales = resumen.reduce((a, l) => a + (l.hectareas || 0), 0);
+    const cultivosSet = new Set(
+      resumen.map(l => (l.cultivo_actual || '').trim()).filter(Boolean)
+    );
+    const totales = {
+      costo_total: costoTotalGlobal,
+      hectareas_totales: hectareasTotales,
+      costo_por_ha: hectareasTotales > 0 ? costoTotalGlobal / hectareasTotales : 0,
+      lotes_count: resumen.length,
+      cultivos_count: cultivosSet.size
+    };
+
+    // Lista de sectores para poblar el filtro (independiente de los filtros).
+    const sectores = db.prepare(
+      "SELECT nombre FROM pa_sectores WHERE activo=1 ORDER BY nombre"
+    ).all().map(r => r.nombre);
+
+    res.json({
+      ok: true,
+      data: resumen,
+      por_sector: porSector,
+      por_cultivo: porCultivo,
+      por_tipo_gasto: porTipoGasto,
+      totales,
+      sectores
+    });
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
