@@ -1576,6 +1576,16 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
 
 <!-- ─── PA CALENDARIO ─────────────────────────────────────────── -->
 <div class="sec" id="sec-pa-calendario">
+<style>
+  .cal-tab{padding:9px 16px;cursor:pointer;font-size:13px;font-weight:600;border-bottom:2px solid transparent;color:var(--mut)}
+  .cal-tab.on{color:var(--burg);border-bottom-color:var(--burg)}
+  .cal-pane{display:none} .cal-pane.on{display:block}
+</style>
+<div style="display:flex;gap:2px;border-bottom:1px solid var(--bor);margin-bottom:16px">
+  <div class="cal-tab on" data-ctab="vista" onclick="paCalTab('vista')">📅 Vista Calendario</div>
+  <div class="cal-tab" id="pa-cal-tab-camp" data-ctab="campanias" onclick="paCalTab('campanias')" style="display:none">⚙️ Campañas</div>
+</div>
+<div class="cal-pane on" id="cal-pane-vista">
 <div class="ph"><div><div class="ph-t">📅 Calendario Agrícola</div><div class="ph-s">Cultivos por lote y campaña — rotación</div></div>
 <div style="display:flex;gap:10px;align-items:center">
   <button class="btn bo" onclick="paAbrirNuevoLote()">+ Nuevo lote</button>
@@ -1599,6 +1609,8 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   <div id="pa-cal-leyenda" style="margin-top:10px;padding:10px 14px;background:var(--bg);border:1px solid var(--bor);border-radius:8px;font-size:12px;display:flex;flex-wrap:wrap;gap:6px 14px;align-items:center"></div>
   <div id="pa-cal-sin-poligono" style="margin-top:10px"></div>
 </div>
+</div><!-- /cal-pane-vista -->
+<div class="cal-pane" id="cal-pane-campanias"></div>
 </div>
 
 <!-- ─── PA INSUMOS ────────────────────────────────────────────── -->
@@ -6616,7 +6628,7 @@ function loadSec(s) {
     'ab-liquidaciones': liqCargar,
     'pa-dashboard':  function(){ paLoadDash(); },
     'pa-clima':      function(){ paLoadClimaSeccion(); },
-    'pa-calendario': function(){ paLoadCalendario(); },
+    'pa-calendario': function(){ paCalAbrir(); },
     'pa-insumos':    function(){ paLoadInsumos(); },
     'pa-compras':    function(){ paLoadCompras(); },
     'pa-ordenes':    function(){ paLoadOrdenes(); },
@@ -12526,6 +12538,34 @@ function paLoadClimaSeccion(){
   }).catch(function(){
     if (elSMN) elSMN.innerHTML = '<div class="emp" style="padding:8px">SMN no disponible</div>';
   });
+}
+
+// Calendario PA con sub-tabs: Vista Calendario (todos) + Campañas (admin).
+// La tab Campañas reutiliza el bloque de admin de campañas (#sec-pa-campanias),
+// que se reubica una sola vez dentro del pane (sin duplicar HTML).
+function paCalAbrir(){
+  var tabCamp=document.getElementById('pa-cal-tab-camp');
+  if(tabCamp) tabCamp.style.display=(LNB_USER && LNB_USER.rol==='admin')?'':'none';
+  paCalTab('vista');
+}
+function paCalTab(t){
+  if(t==='campanias' && !(LNB_USER && LNB_USER.rol==='admin')) t='vista';
+  document.querySelectorAll('#sec-pa-calendario .cal-tab').forEach(function(b){ b.classList.toggle('on', b.dataset.ctab===t); });
+  var pv=document.getElementById('cal-pane-vista'), pc=document.getElementById('cal-pane-campanias');
+  if(pv) pv.classList.toggle('on', t==='vista');
+  if(pc) pc.classList.toggle('on', t==='campanias');
+  if(t==='vista'){
+    paLoadCalendario();
+  } else {
+    // Reubicar el bloque de admin de campañas dentro del pane (una sola vez).
+    var src=document.getElementById('sec-pa-campanias');
+    if(src && pc && src.parentNode!==pc){
+      src.classList.remove('sec');  // que lo controle el pane, no la navegación .sec/.on
+      src.style.display='';
+      pc.appendChild(src);
+    }
+    if(typeof paCampInit==='function') paCampInit();
+  }
 }
 
 function paLoadCalendario(){
