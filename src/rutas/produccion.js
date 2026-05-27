@@ -68,8 +68,15 @@ router.get('/cc/proveedores', requireAuth, (req, res) => {
 router.get('/campanas', requireAuth, (req, res) => {
   const db = getDb();
   try {
-    // tipo: 'anual' | 'estacional'. Ordenamos por tipo y fecha para agrupar.
-    const data = db.prepare("SELECT * FROM pa_campañas ORDER BY tipo, fecha_inicio DESC").all();
+    // Filtros opcionales: tipo ('anual'|'estacional') y activo (1). Sin
+    // params devuelve TODAS (incluye inactivas) — la gestión de campañas lo necesita.
+    const { tipo } = req.query;
+    const soloActivas = req.query.activo === '1' || req.query.activa === '1';
+    const conds = [], prm = [];
+    if (tipo === 'anual' || tipo === 'estacional') { conds.push('tipo = ?'); prm.push(tipo); }
+    if (soloActivas) { conds.push('activa = 1'); }
+    const where = conds.length ? `WHERE ${conds.join(' AND ')}` : '';
+    const data = db.prepare(`SELECT * FROM pa_campañas ${where} ORDER BY tipo, fecha_inicio DESC`).all(...prm);
     res.json({ ok: true, data });
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
@@ -1322,7 +1329,8 @@ router.patch('/ordenes/:id', requireAuth, (req, res) => {
   const db = getDb();
   const ordenId = req.params.id;
   const { fecha_orden, fecha_propuesta, tipo_aplicacion, objetivo, notas,
-          asignado_a, lotes, items, cultivo } = req.body;
+          asignado_a, lotes, items, cultivo,
+          campaña_id, campaña_anual_id, campaña_estacional_id } = req.body;
 
   try {
     const orden = db.prepare("SELECT * FROM pa_ordenes WHERE id = ? AND eliminada_en IS NULL").get(ordenId);
@@ -1395,6 +1403,12 @@ router.patch('/ordenes/:id', requireAuth, (req, res) => {
       if (notas           !== undefined) { sets.push("notas = @notas");                     params.notas           = notas           || null; }
       if (asignado_a      !== undefined) { sets.push("asignado_a = @asignado_a");           params.asignado_a      = asignado_a      || null; }
       if (cultivoTrim     !== undefined) { sets.push("cultivo = @cultivo");                 params.cultivo         = cultivoTrim; }
+      // Campañas: campaña_id (legacy) si llega va a la anual. La canónica es
+      // campaña_anual_id; la estacional es opcional (puede limpiarse a NULL).
+      const campAnualEdit = (campaña_anual_id !== undefined) ? campaña_anual_id
+                          : (campaña_id !== undefined) ? campaña_id : undefined;
+      if (campAnualEdit !== undefined) { sets.push("campaña_anual_id = @camp_anual"); params.camp_anual = campAnualEdit || null; }
+      if (campaña_estacional_id !== undefined) { sets.push("campaña_estacional_id = @camp_estac"); params.camp_estac = campaña_estacional_id || null; }
       if (sets.length > 0) {
         db.prepare(`UPDATE pa_ordenes SET ${sets.join(", ")} WHERE id = @id`).run(params);
       }
@@ -1861,8 +1875,16 @@ router.get('/costos', requireAuth, (req, res) => {
       "SELECT nombre FROM pa_sectores WHERE activo=1 ORDER BY nombre"
     ).all().map(r => r.nombre);
 
+    // Header: qué campaña se está mostrando (para el título dinámico del front).
+    const campAnualRow = anualFiltro
+      ? db.prepare("SELECT id, nombre FROM pa_campañas WHERE id=?").get(anualFiltro) : null;
+    const campEstacRow = estacionalFiltro
+      ? db.prepare("SELECT id, nombre FROM pa_campañas WHERE id=?").get(estacionalFiltro) : null;
+
     res.json({
       ok: true,
+      campaña_anual: campAnualRow || null,
+      campaña_estacional: campEstacRow || null,
       data: resumen,
       por_sector: porSector,
       por_cultivo: porCultivo,
