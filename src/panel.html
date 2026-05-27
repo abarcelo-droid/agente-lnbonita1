@@ -1932,10 +1932,10 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     <div id="cb-tanques-list" style="display:grid;grid-template-columns:1fr 1fr;gap:16px"></div>
   </div>
 
-  <!-- Vinculación con facturas BARCELO -->
+  <!-- Vinculación con facturas de combustible -->
   <div class="cb-sub" id="cb-sub-vinculacion">
     <div style="margin-bottom:14px">
-      <div style="font-weight:700;font-size:15px">🔗 Vinculación con facturas COMBUSTIBLE BARCELO</div>
+      <div style="font-weight:700;font-size:15px">🔗 Vinculación con facturas de combustible</div>
       <div style="font-size:12px;color:var(--mut)">Asociá facturas con las recargas del tanque central</div>
     </div>
     <!-- Toggle sub-vistas -->
@@ -1945,8 +1945,19 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     </div>
     <style>.cb-vinc-mode.on{background:var(--burg);color:#fff}</style>
 
+    <!-- Warning: no hay proveedores de combustible -->
+    <div id="cb-vinc-no-prov" style="display:none;background:#fef3c7;border:1px solid #f59e0b;color:#92400e;padding:10px 14px;border-radius:8px;font-size:13px;margin-bottom:14px">
+      ⚠ No hay proveedores marcados como "Combustible". Andá a <strong>Proveedores</strong> y asignales esa categoría (campo categoría o rubro = "Combustible").
+    </div>
+
     <!-- Sub-vista A: Por factura -->
     <div id="cb-vinc-factura">
+      <div style="margin-bottom:12px">
+        <label style="font-size:12px;color:var(--mut);font-weight:600">Proveedor de combustible</label><br>
+        <select id="cb-vinc-proveedor-sel" onchange="cbVincLoadFacturas()" class="ab-form-select" style="margin-top:4px;min-width:280px">
+          <option value="">— Elegí un proveedor de combustible —</option>
+        </select>
+      </div>
       <div style="display:flex;gap:10px;margin-bottom:12px;align-items:center;flex-wrap:wrap">
         <label style="font-size:12px;color:var(--mut)">Desde <input type="date" id="cb-vinc-f-desde" onchange="cbVincLoadFacturas()" style="padding:5px 8px;border-radius:6px;border:1px solid var(--bor);background:var(--bg)"></label>
         <label style="font-size:12px;color:var(--mut)">Hasta <input type="date" id="cb-vinc-f-hasta" onchange="cbVincLoadFacturas()" style="padding:5px 8px;border-radius:6px;border:1px solid var(--bor);background:var(--bg)"></label>
@@ -1997,8 +2008,13 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
 <div class="ab-modal" style="width:520px">
   <div class="mhd"><div class="mht">Vincular recarga a factura</div><button class="mcl" onclick="document.getElementById('cb-mb-recarga').classList.remove('on')">×</button></div>
   <div id="cb-mb-recarga-info" style="font-size:13px;margin-bottom:12px;padding:10px;background:var(--bg);border-radius:8px"></div>
-  <div class="fl"><label>Factura COMBUSTIBLE BARCELO</label>
-    <select id="cb-mb-recarga-factura" class="ab-form-select" style="width:100%"></select>
+  <div class="fl"><label>Proveedor de combustible</label>
+    <select id="cb-mb-recarga-proveedor" class="ab-form-select" style="width:100%" onchange="cbVincModalRecargaLoadFacturas()">
+      <option value="">— Elegí un proveedor —</option>
+    </select>
+  </div>
+  <div class="fl" style="margin-top:10px"><label>Factura</label>
+    <select id="cb-mb-recarga-factura" class="ab-form-select" style="width:100%"><option value="">— Elegí primero un proveedor —</option></select>
   </div>
   <div class="ab-modal-footer">
     <button class="btn bo" onclick="document.getElementById('cb-mb-recarga').classList.remove('on')">Cancelar</button>
@@ -15954,12 +15970,29 @@ function cbShowSub(sub) {
   if (sub === 'vinculacion') cbLoadVinculacion();
 }
 
-// ── Vinculación facturas BARCELO ↔ recargas del tanque ──
+// ── Vinculación facturas de combustible ↔ recargas del tanque ──
 var CB_VINC_MODE = 'factura';      // 'factura' | 'recarga'
 var CB_VINC_FACTURA_ACTUAL = null; // compra_id abierta en el modal de factura
 var CB_VINC_RECARGA_ACTUAL = null; // recarga_id abierta en el modal de recarga
+var CB_VINC_PROVEEDORES = [];      // proveedores de combustible (cache)
 
-function cbLoadVinculacion(){ cbVincSetMode(CB_VINC_MODE); }
+function cbLoadVinculacion(){ cbVincLoadProveedores().then(function(){ cbVincSetMode(CB_VINC_MODE); }); }
+
+// Carga los proveedores de combustible y puebla los dos selectores. Devuelve
+// una promesa para encadenar la carga de la vista que corresponda.
+function cbVincLoadProveedores(){
+  return paF('/api/pa/combustible/proveedores').then(function(r){
+    CB_VINC_PROVEEDORES = (r && r.proveedores) || [];
+    var hayProv = CB_VINC_PROVEEDORES.length > 0;
+    var warn = document.getElementById('cb-vinc-no-prov');
+    if(warn) warn.style.display = hayProv ? 'none' : 'block';
+    var opts = '<option value="">— Elegí un proveedor de combustible —</option>'
+      + CB_VINC_PROVEEDORES.map(function(p){ return '<option value="'+p.id+'">'+p.razon_social+'</option>'; }).join('');
+    var selA = document.getElementById('cb-vinc-proveedor-sel');
+    if(selA){ var prev=selA.value; selA.innerHTML=opts; if(prev) selA.value=prev; }
+    return CB_VINC_PROVEEDORES;
+  });
+}
 
 function cbVincSetMode(mode){
   CB_VINC_MODE = mode;
@@ -15971,17 +16004,20 @@ function cbVincSetMode(mode){
 
 // ── Sub-vista A: facturas ──
 function cbVincLoadFacturas(){
+  var tb=document.getElementById('cb-vinc-facturas-tbody');
+  var proveedorId=document.getElementById('cb-vinc-proveedor-sel').value;
+  if(!proveedorId){ tb.innerHTML='<tr><td colspan="5" class="emp">Elegí un proveedor para ver sus facturas</td></tr>'; return; }
   var desde=document.getElementById('cb-vinc-f-desde').value;
   var hasta=document.getElementById('cb-vinc-f-hasta').value;
   var solo=document.getElementById('cb-vinc-solo-sin').checked;
-  var qs=[];
+  var qs=['proveedor_id='+encodeURIComponent(proveedorId)];
   if(desde)qs.push('desde='+desde);
   if(hasta)qs.push('hasta='+hasta);
   if(solo)qs.push('solo_sin_vincular=1');
-  paF('/api/pa/combustible/facturas-barcelo'+(qs.length?'?'+qs.join('&'):'')).then(function(r){
-    var tb=document.getElementById('cb-vinc-facturas-tbody');
+  paF('/api/pa/combustible/facturas?'+qs.join('&')).then(function(r){
+    if(!r.ok){tb.innerHTML='<tr><td colspan="5" class="emp">'+(r.error||'Error')+'</td></tr>';return;}
     var data=r.data||[];
-    if(!data.length){tb.innerHTML='<tr><td colspan="5" class="emp">Sin facturas de COMBUSTIBLE BARCELO</td></tr>';return;}
+    if(!data.length){tb.innerHTML='<tr><td colspan="5" class="emp">Este proveedor no tiene facturas cargadas</td></tr>';return;}
     tb.innerHTML=data.map(function(c){
       var badge=c.recargas_vinculadas_count>0
         ? '<span class="pa-badge pa-verde-bg">'+c.recargas_vinculadas_count+'</span>'
@@ -16090,16 +16126,30 @@ function cbVincDesvincular(recargaId){
 function cbVincAbrirRecarga(recargaId){
   CB_VINC_RECARGA_ACTUAL=recargaId;
   document.getElementById('cb-mb-recarga-info').textContent='Recarga #'+recargaId;
+  // Paso 1: proveedor (se reusa el cache de proveedores de combustible)
+  var selProv=document.getElementById('cb-mb-recarga-proveedor');
+  selProv.innerHTML='<option value="">— Elegí un proveedor —</option>'+CB_VINC_PROVEEDORES.map(function(p){
+    return '<option value="'+p.id+'">'+p.razon_social+'</option>';
+  }).join('');
+  selProv.value='';
+  // Paso 2: factura (se carga al elegir proveedor)
+  document.getElementById('cb-mb-recarga-factura').innerHTML='<option value="">— Elegí primero un proveedor —</option>';
+  document.getElementById('cb-mb-recarga').classList.add('on');
+}
+
+// Paso 2 del modal: al elegir proveedor, cargar sus facturas
+function cbVincModalRecargaLoadFacturas(){
+  var proveedorId=document.getElementById('cb-mb-recarga-proveedor').value;
   var sel=document.getElementById('cb-mb-recarga-factura');
+  if(!proveedorId){ sel.innerHTML='<option value="">— Elegí primero un proveedor —</option>'; return; }
   sel.innerHTML='<option value="">Cargando…</option>';
-  paF('/api/pa/combustible/facturas-barcelo').then(function(r){
-    var data=r.data||[];
-    if(!data.length){sel.innerHTML='<option value="">No hay facturas BARCELO</option>';return;}
+  paF('/api/pa/combustible/facturas?proveedor_id='+encodeURIComponent(proveedorId)).then(function(r){
+    var data=(r&&r.data)||[];
+    if(!data.length){sel.innerHTML='<option value="">Este proveedor no tiene facturas</option>';return;}
     sel.innerHTML='<option value="">— Elegí una factura —</option>'+data.map(function(c){
       return '<option value="'+c.id+'">'+paFecha(c.fecha)+' — '+(c.nro_factura||('#'+c.id))+' · '+paMoney(c.total)+'</option>';
     }).join('');
   });
-  document.getElementById('cb-mb-recarga').classList.add('on');
 }
 
 function cbVincModalVincularRecarga(){
