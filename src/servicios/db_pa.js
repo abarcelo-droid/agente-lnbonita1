@@ -630,6 +630,36 @@ export function getCampañaActiva() {
   } catch(e) { console.error('[PA] Error agregando cultivo en pa_ordenes:', e.message); }
 })();
 
+// ── MIGRACIÓN: admin de campañas — soft delete + log de auditoría ──────────
+// pa_campañas.activa es el flag de "campaña vigente" (una por tipo), NO un
+// soft-delete. Para poder borrar campañas creadas por error sin romper esa
+// semántica, agregamos eliminada_en / eliminada_por_id (patrón de pa_ordenes).
+// pa_campañas_log audita las reasignaciones bulk de órdenes/compras.
+(function migrarAdminCampañas() {
+  try {
+    const cols = db.prepare("PRAGMA table_info(pa_campañas)").all().map(c => c.name);
+    if (!cols.includes('eliminada_en'))     db.exec("ALTER TABLE pa_campañas ADD COLUMN eliminada_en TEXT");
+    if (!cols.includes('eliminada_por_id'))  db.exec("ALTER TABLE pa_campañas ADD COLUMN eliminada_por_id INTEGER REFERENCES usuarios(id)");
+  } catch(e) { console.error('[PA] Error agregando soft-delete en pa_campañas:', e.message); }
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS pa_campañas_log (
+        id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+        accion                TEXT NOT NULL,
+        entidad               TEXT NOT NULL CHECK(entidad IN ('orden','compra')),
+        cantidad              INTEGER NOT NULL DEFAULT 0,
+        campaña_anual_id      INTEGER REFERENCES pa_campañas(id),
+        campaña_estacional_id INTEGER REFERENCES pa_campañas(id),
+        limpiar_estacional    INTEGER DEFAULT 0,
+        ids_afectados         TEXT,
+        usuario_id            INTEGER REFERENCES usuarios(id),
+        usuario_nombre        TEXT,
+        creado_en             TEXT DEFAULT (datetime('now','localtime'))
+      );
+    `);
+  } catch(e) { console.error('[PA] Error creando pa_campañas_log:', e.message); }
+})();
+
 // ── MIGRACIÓN: campañas históricas ────────────────────────────────────────
 (function migrarCampañasHistoricas() {
   try {
