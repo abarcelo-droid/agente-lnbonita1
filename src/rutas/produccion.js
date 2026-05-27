@@ -30,6 +30,38 @@ function campañasActivas(db) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────
+// CUENTA CORRIENTE — listado de proveedores con saldos
+// (montado en /api/pa → ruta final /api/pa/cc/proveedores)
+// ─────────────────────────────────────────────────────────────────────────
+// Listado de todos los proveedores activos ordenados por saldo pendiente DESC.
+// Se calcula igual que el detalle (rutas/pagos.js): compras del proveedor por
+// proveedor_id, total = SUM(c.total), pagado = SUM(c.saldo_pagado), de modo que
+// el saldo del listado coincide exactamente con la card "Saldo Pendiente".
+router.get('/cc/proveedores', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const rows = db.prepare(`
+      SELECT
+        p.id, p.razon_social, p.cuit,
+        COALESCE(SUM(CASE WHEN c.activo = 1 THEN c.total ELSE 0 END), 0)                       AS total_comprado,
+        COALESCE(SUM(CASE WHEN c.activo = 1 THEN COALESCE(c.saldo_pagado, 0) ELSE 0 END), 0)    AS total_pagado,
+        (SELECT MAX(pg.fecha) FROM pa_pagos_proveedores pg
+          WHERE pg.proveedor_id = p.id AND pg.anulado = 0)                                      AS ultimo_pago
+      FROM adm_proveedores p
+      LEFT JOIN pa_compras c ON c.proveedor_id = p.id
+      WHERE p.activo = 1
+      GROUP BY p.id
+      ORDER BY (total_comprado - total_pagado) DESC, p.razon_social ASC
+    `).all();
+    const proveedores = rows.map(r => ({
+      ...r,
+      saldo: (r.total_comprado || 0) - (r.total_pagado || 0)
+    }));
+    res.json({ ok: true, proveedores });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// ─────────────────────────────────────────────────────────────────────────
 // CAMPAÑAS
 // ─────────────────────────────────────────────────────────────────────────
 

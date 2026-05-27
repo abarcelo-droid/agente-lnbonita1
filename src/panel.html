@@ -3122,6 +3122,37 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     </div>
   </div>
 
+  <!-- LISTADO inicial: todos los proveedores ordenados por saldo DESC -->
+  <div id="ccp-listado">
+    <input id="ccp-search" type="text" placeholder="🔍 Buscar proveedor (razón social o CUIT)…" oninput="ccpFiltrar()"
+           style="width:100%;padding:9px 12px;font-size:13px;border:1px solid var(--bor2);border-radius:8px;margin-bottom:14px">
+    <div style="overflow-x:auto;border:1px solid var(--bor);border-radius:10px">
+      <table id="ccp-tabla" style="width:100%;border-collapse:collapse;font-size:13px">
+        <thead>
+          <tr style="background:var(--bg);border-bottom:1px solid var(--bor)">
+            <th style="padding:9px 12px;text-align:left;font-size:10px;color:var(--mut);text-transform:uppercase">Proveedor</th>
+            <th style="padding:9px 12px;text-align:right;font-size:10px;color:var(--mut);text-transform:uppercase">Total Comprado</th>
+            <th style="padding:9px 12px;text-align:right;font-size:10px;color:var(--mut);text-transform:uppercase">Total Pagado</th>
+            <th style="padding:9px 12px;text-align:right;font-size:10px;color:var(--mut);text-transform:uppercase">Saldo</th>
+            <th style="padding:9px 12px;text-align:left;font-size:10px;color:var(--mut);text-transform:uppercase">Último Pago</th>
+            <th style="padding:9px 12px;width:60px"></th>
+          </tr>
+        </thead>
+        <tbody id="ccp-tbody"><tr><td colspan="6" class="emp">Cargando…</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+  <style>
+    #ccp-tabla tbody tr{border-bottom:1px solid var(--bor);cursor:pointer}
+    #ccp-tabla tbody tr:hover{background:var(--bg)}
+    #ccp-tabla tr.ccp-al-dia{color:#999;background:#fafafa}
+    #ccp-tabla tr.ccp-al-dia td{font-weight:400}
+  </style>
+
+  <!-- DETALLE del proveedor (oculto hasta clickear una fila) -->
+  <div id="ccp-detalle" style="display:none">
+  <button class="btn bo bs" onclick="ccpVolverListado()" style="margin-bottom:14px">← Volver al listado</button>
+
   <!-- Selector de proveedor -->
   <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:16px">
     <select id="cc-prov-sel" onchange="ccProvCargar()" style="flex:1;min-width:220px;font-size:13px">
@@ -3200,6 +3231,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       </table>
     </div>
   </div>
+  </div><!-- /#ccp-detalle -->
 </div>
 
 <!-- ── MODAL: Nuevo Pago ──────────────────────────────────────────────────── -->
@@ -10642,7 +10674,7 @@ loadSec = function(s) {
     return;
   }
   if (s === 'adm-cc-proveedores') {
-    ccProvIniciar();
+    ccpIniciar();
     return;
   }
   if (s === 'ven-clientes')      { venIniciarClientes();      return; }
@@ -23231,7 +23263,61 @@ async function ifcoEliminarTalonario(id) {
 // CUENTA CORRIENTE PROVEEDORES
 // ══════════════════════════════════════════════════════════════════════════════
 
-var CC = { proveedores: [], facturas: [], provId: null };
+var CC = { proveedores: [], facturas: [], provId: null, listado: [] };
+
+// ── Listado inicial de CC Proveedores (tabla ordenada por saldo DESC) ──
+function ccpIniciar() {
+  document.getElementById('ccp-detalle').style.display = 'none';
+  document.getElementById('ccp-listado').style.display = '';
+  ccProvIniciar();   // pobla el dropdown + CC.proveedores que usa el detalle
+  ccpCargar();
+}
+function ccpCargar() {
+  fetch('/api/pa/cc/proveedores').then(function(r){ return r.json(); }).then(function(r) {
+    if (!r.ok) return;
+    CC.listado = r.proveedores || [];
+    ccpRenderTabla();
+  });
+}
+function ccpFiltrar() { ccpRenderTabla(); }
+function ccpRenderTabla() {
+  var tbody = document.getElementById('ccp-tbody');
+  var q = (document.getElementById('ccp-search').value || '').toLowerCase();
+  var data = (CC.listado || []).filter(function(p) {
+    return (p.razon_social || '').toLowerCase().indexOf(q) !== -1 || (p.cuit || '').indexOf(q) !== -1;
+  });
+  if (!data.length) { tbody.innerHTML = '<tr><td colspan="6" class="emp">Sin proveedores</td></tr>'; return; }
+  tbody.innerHTML = data.map(function(p) {
+    var alDia = (p.saldo || 0) <= 0;
+    var saldoColor = alDia ? '#999' : '#dc2626';
+    return '<tr class="' + (alDia ? 'ccp-al-dia' : '') + '" onclick="ccpAbrirDetalle(' + p.id + ')">'
+      + '<td style="padding:9px 12px">' + p.razon_social + (p.cuit ? '<div style="font-size:11px;color:var(--mut)">' + p.cuit + '</div>' : '') + '</td>'
+      + '<td style="padding:9px 12px;text-align:right">' + paMoney(p.total_comprado) + '</td>'
+      + '<td style="padding:9px 12px;text-align:right">' + paMoney(p.total_pagado) + '</td>'
+      + '<td style="padding:9px 12px;text-align:right;color:' + saldoColor + ';font-weight:600">' + paMoney(p.saldo) + '</td>'
+      + '<td style="padding:9px 12px;color:var(--mut)">' + paFecha(p.ultimo_pago) + '</td>'
+      + '<td style="padding:9px 12px;text-align:center"><button class="btn bo bs" onclick="event.stopPropagation();ccpAbrirDetalle(' + p.id + ')">Ver</button></td>'
+      + '</tr>';
+  }).join('');
+}
+function ccpAbrirDetalle(id) {
+  var sel = document.getElementById('cc-prov-sel');
+  // Asegurar que exista la opción (por si el dropdown todavía no terminó de cargar)
+  if (sel && !Array.from(sel.options).some(function(o){ return o.value == String(id); })) {
+    var p = (CC.listado || []).find(function(x){ return x.id === id; });
+    if (p) { var o = document.createElement('option'); o.value = id; o.textContent = p.razon_social; sel.appendChild(o); }
+  }
+  if (sel) sel.value = String(id);
+  document.getElementById('ccp-listado').style.display = 'none';
+  document.getElementById('ccp-detalle').style.display = '';
+  ccProvCargar();
+}
+function ccpVolverListado() {
+  document.getElementById('ccp-detalle').style.display = 'none';
+  document.getElementById('ccp-listado').style.display = '';
+  var sel = document.getElementById('cc-prov-sel'); if (sel) sel.value = '';
+  ccpCargar(); // refrescar saldos (por si se registró un pago en el detalle)
+}
 
 function ccApi(path, opts) {
   opts = opts || {};
