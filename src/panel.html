@@ -1888,7 +1888,34 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       </table></div>
     </div>
   </div>
-  <div class="sg-pane" id="sg-pane-stock"><div class="sg-ph-ph">📦 Stock + Trazabilidad — Próximamente (Fase 3)</div></div>
+  <div class="sg-pane" id="sg-pane-stock">
+    <div style="display:flex;gap:10px;margin-bottom:12px;align-items:flex-end;flex-wrap:wrap">
+      <label style="font-size:12px;color:var(--mut)">Producto<br>
+        <select id="sg-st-prod" onchange="sgLoadStock()" style="padding:5px 8px;border-radius:6px;border:1px solid var(--bor);background:var(--bg);min-width:150px"><option value="">— Todos —</option></select>
+      </label>
+      <label style="font-size:12px;color:var(--mut)">Calidad<br>
+        <select id="sg-st-cal" onchange="sgLoadStock()" style="padding:5px 8px;border-radius:6px;border:1px solid var(--bor);background:var(--bg)">
+          <option value="">Todas</option><option value="primera">Primera</option><option value="segunda">Segunda</option><option value="tercera">Tercera</option>
+        </select>
+      </label>
+      <label style="font-size:12px;color:var(--mut)">Estado<br>
+        <select id="sg-st-est" onchange="sgLoadStock()" style="padding:5px 8px;border-radius:6px;border:1px solid var(--bor);background:var(--bg)">
+          <option value="">Todos</option><option value="disponible">Disponible</option><option value="reservado">Reservado</option>
+          <option value="despachado_parcial">Despachado parcial</option><option value="despachado_total">Despachado total</option><option value="bajado">Bajado</option>
+        </select>
+      </label>
+      <label style="font-size:12px;color:var(--mut)">Vence en (días)<br>
+        <input type="number" id="sg-st-venc" placeholder="ej 5" onchange="sgLoadStock()" style="width:80px;padding:5px 8px;border-radius:6px;border:1px solid var(--bor);background:var(--bg)">
+      </label>
+      <label style="font-size:12px;color:var(--mut)">Ingreso desde<br><input type="date" id="sg-st-desde" onchange="sgLoadStock()" style="padding:5px 8px;border-radius:6px;border:1px solid var(--bor);background:var(--bg)"></label>
+      <label style="font-size:12px;color:var(--mut)">hasta<br><input type="date" id="sg-st-hasta" onchange="sgLoadStock()" style="padding:5px 8px;border-radius:6px;border:1px solid var(--bor);background:var(--bg)"></label>
+      <button class="btn bo bs" onclick="sgStockReset()">Limpiar</button>
+    </div>
+    <div class="ab-table-wrap"><table class="pa-tbl">
+      <thead><tr><th>Código</th><th>Producto</th><th style="text-align:right">Kg</th><th>Calidad</th><th>Vence</th><th style="text-align:center">Días</th><th style="text-align:right">Costo final</th><th style="text-align:center">Estado</th><th></th></tr></thead>
+      <tbody id="sg-tb-stock"><tr><td colspan="9" class="emp">Cargando…</td></tr></tbody>
+    </table></div>
+  </div>
   <div class="sg-pane" id="sg-pane-ventas"><div class="sg-ph-ph">💰 Ventas (Pedidos · Despachos FEFO · CC) — Próximamente (Fase 4)</div></div>
   <div class="sg-pane" id="sg-pane-reportes"><div class="sg-ph-ph">📈 Reportes — Próximamente (Fase 5)</div></div>
 
@@ -2125,6 +2152,15 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   </div>
 </div>
 
+<!-- Modal detalle de Lote (trazabilidad backward + editar + bajar) -->
+<div class="ab-modal-overlay" id="sg-lote-modal">
+  <div class="ab-modal" style="width:680px;max-height:90vh;overflow-y:auto">
+    <div class="mhd"><div class="mht" id="sg-lote-tit">Lote</div><button class="mcl" onclick="closeMB('sg-lote-modal')">×</button></div>
+    <div class="fg" id="sg-lote-body"></div>
+    <div class="ab-modal-footer"><button class="btn bo" onclick="closeMB('sg-lote-modal')">Cerrar</button></div>
+  </div>
+</div>
+
 <script>
 // ═══ MÓDULO SAN GERÓNIMO (sg_*) — Fase 1: Catálogo ═══════════════════════════
 var SG = { cacheProd: [], cacheCond: [], last: {}, cur: null, cuotas: [] };
@@ -2205,6 +2241,7 @@ function sgTab(t){
   document.querySelectorAll('#sec-sg .sg-tab').forEach(function(el){ el.classList.toggle('on', el.dataset.tab===t); });
   document.querySelectorAll('#sec-sg .sg-pane').forEach(function(el){ el.classList.toggle('on', el.id==='sg-pane-'+t); });
   if (t==='compras') sgComInit();
+  if (t==='stock') sgStockInit();
 }
 
 function sgCatSub(s){
@@ -2762,6 +2799,132 @@ function sgGgGuardar(){
 function sgGgDel(id){
   if(!confirm('¿Eliminar gasto global? (recalcula lotes del período)')) return;
   api('/api/sg/gastos-globales/'+id,'DELETE').then(function(r){ if(r&&r.ok){toast('Eliminado','ok');sgLoadGGlobales();} else toast((r&&r.error)||'Error','er'); });
+}
+
+// ════ FASE 3 — STOCK + TRAZABILIDAD + BAJAS (frontend) ═══════════════════════
+var SG_DESTINO=[['venta','Venta'],['liquidacion','Liquidación'],['donacion','Donación'],['disposal','Disposal (tirado/pérdida)']];
+var SG_ESTLOTE={disponible:'Disponible',reservado:'Reservado',despachado_parcial:'Desp. parcial',despachado_total:'Desp. total',bajado:'Bajado'};
+
+function sgStockInit(){
+  sgLoadCaches(function(){
+    var sel=eid('sg-st-prod');
+    if(sel){ var v=sel.value; sel.innerHTML='<option value="">— Todos —</option>'+SG.cacheProd.map(function(p){return '<option value="'+p.id+'">'+esc(p.nombre)+'</option>';}).join(''); sel.value=v; }
+    sgLoadStock();
+  });
+}
+function sgStockReset(){
+  ['sg-st-prod','sg-st-cal','sg-st-est','sg-st-venc','sg-st-desde','sg-st-hasta'].forEach(function(id){ var el=eid(id); if(el) el.value=''; });
+  sgLoadStock();
+}
+function sgDiasBadge(d, estado){
+  if(estado==='bajado') return '<span class="bdg" style="background:#e5e7eb;color:#6b7280">—</span>';
+  if(d===null||d===undefined) return '—';
+  var cls='bok', txt=d+'d';
+  if(d<0){ cls='ber'; txt='vencido '+Math.abs(d)+'d'; }
+  else if(d<=3){ cls='ber'; }
+  else if(d<=7){ cls='bpe'; }
+  return '<span class="bdg '+cls+'">'+txt+'</span>';
+}
+function sgLoadStock(){
+  var q=[];
+  var prod=eid('sg-st-prod').value; if(prod) q.push('producto_id='+prod);
+  var cal=eid('sg-st-cal').value; if(cal) q.push('calidad='+cal);
+  var est=eid('sg-st-est').value; if(est) q.push('estado='+est);
+  var venc=eid('sg-st-venc').value; if(venc!=='') q.push('por_vencer='+venc);
+  var d=eid('sg-st-desde').value; if(d) q.push('ingreso_desde='+d);
+  var h=eid('sg-st-hasta').value; if(h) q.push('ingreso_hasta='+h);
+  api('/api/sg/lotes'+(q.length?('?'+q.join('&')):'')).then(function(r){
+    var rows=(r&&r.ok)?r.data:[];
+    eid('sg-tb-stock').innerHTML = rows.length ? rows.map(function(l){
+      return '<tr style="cursor:pointer" onclick="sgLoteVer('+l.id+')">'
+        +'<td><code>'+esc(l.codigo_lote)+'</code></td><td>'+esc(l.producto_nombre||'')+'</td>'
+        +'<td style="text-align:right">'+nr(l.kg_reales)+'</td><td>'+(l.calidad||'—')+'</td>'
+        +'<td>'+(l.fecha_vencimiento_estimada||'—')+'</td><td style="text-align:center">'+sgDiasBadge(l.dias_restantes,l.estado)+'</td>'
+        +'<td style="text-align:right">'+sgMoney(l.costo_final)+'</td>'
+        +'<td style="text-align:center"><span class="bdg '+(l.estado==='bajado'?'ber':'bok')+'">'+(SG_ESTLOTE[l.estado]||l.estado)+'</span></td>'
+        +'<td style="text-align:right"><button class="btn bo bs" onclick="event.stopPropagation();sgLoteVer('+l.id+')">🔍</button></td></tr>';
+    }).join('') : '<tr><td colspan="9" class="emp">Sin lotes con esos filtros.</td></tr>';
+  });
+}
+
+function sgLoteVer(id){
+  api('/api/sg/lotes/'+id+'/trazabilidad').then(function(r){
+    if(!r||!r.ok){ toast('Error','er'); return; }
+    var d=r.data, l=d.lote;
+    eid('sg-lote-tit').textContent='Lote '+l.codigo_lote;
+    var h='';
+    // resumen
+    h+='<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px">'
+      +'<span class="bdg '+(l.estado==='bajado'?'ber':'bok')+'">'+(SG_ESTLOTE[l.estado]||l.estado)+'</span>'
+      +'<span>'+esc(d.producto.nombre||'')+'</span>'
+      +'<span style="color:var(--mut)">·</span><b>'+nr(l.kg_reales)+' kg</b>'
+      +(l.calidad?'<span style="color:var(--mut)">· '+l.calidad+'</span>':'')
+      +'<span style="color:var(--mut)">· vence '+(l.fecha_vencimiento_estimada||'—')+'</span>'+sgDiasBadge(l.dias_restantes,l.estado)
+      +'<span style="color:var(--mut)">· costo final</span><b>'+sgMoney(l.costo_final)+'</b></div>';
+    if(l.destino_baja) h+='<div style="font-size:12px;color:var(--err);margin-bottom:8px">Baja: '+sgLbl(SG_DESTINO,l.destino_baja)+(l.receptor_donacion?(' → '+esc(l.receptor_donacion)):'')+'</div>';
+
+    // Trazabilidad backward
+    h+='<details open style="margin-bottom:10px"><summary style="cursor:pointer;font-weight:700;font-size:13px">🔍 Trazabilidad (backward)</summary>';
+    h+='<div style="margin-top:8px;font-size:13px;line-height:1.7;border-left:3px solid var(--burg);padding-left:12px">';
+    if(d.proveedor){ h+='🚜 <b>Proveedor:</b> '+esc(d.proveedor.razon_social)+(d.proveedor.localidad?(' ('+esc(d.proveedor.localidad)+')'):'')+'<br>'; }
+    else { h+='🚜 <b>Proveedor:</b> — (lote sin OC / finca propia)<br>'; }
+    if(d.oc){ h+='📋 <b>OC:</b> '+esc(d.oc.numero)+' · '+(d.oc.tipo_precio==='pizarra'?'pizarra':'firme')+' · '+(d.oc.fecha_oc||'')+'<br>'; }
+    if(d.recepcion){ h+='📥 <b>Recepción:</b> '+esc(d.recepcion.numero_recepcion)+' · '+(d.recepcion.fecha_recepcion||'')+(d.recepcion.numero_remito_proveedor?(' · remito '+esc(d.recepcion.numero_remito_proveedor)):'')+'<br>'; }
+    h+='📦 <b>Costo base:</b> '+sgMoney(l.costo_base)+(l.precio_unitario_kg!=null?(' ('+sgMoney(l.precio_unitario_kg)+'/kg)'):' <span class="bdg bpe">pizarra sin precio</span>')+'<br>';
+    if((d.gastos_directos||[]).length){
+      h+='🧾 <b>Gastos directos:</b><br>';
+      d.gastos_directos.forEach(function(g){ h+='&nbsp;&nbsp;• '+(g.tipo_gasto||'')+': '+sgMoney(g.monto)+'<br>'; });
+    } else h+='🧾 <b>Gastos directos:</b> ninguno<br>';
+    if(d.prorrateo){ h+='🏭 <b>Prorrateo global '+d.prorrateo.periodo+':</b> '+sgMoney(d.prorrateo.share)+' (de '+sgMoney(d.prorrateo.total_global)+' sobre '+nr(d.prorrateo.kg_periodo)+'kg)<br>'; }
+    // forward (despachos) — F4
+    if((d.despachos||[]).length){
+      h+='🚚 <b>Despachos donde se usó:</b><br>';
+      d.despachos.forEach(function(x){ h+='&nbsp;&nbsp;• '+esc(x.despacho_numero||'')+' → '+esc(x.cliente_nombre||'')+' ('+nr(x.kg_despachados)+'kg)<br>'; });
+    } else h+='🚚 <b>Despachos:</b> ninguno aún';
+    h+='</div></details>';
+
+    // Editar (si no está bajado)
+    if(l.estado!=='bajado'){
+      h+='<details style="margin-bottom:10px"><summary style="cursor:pointer;font-weight:700;font-size:13px">✏️ Editar lote</summary>'
+        +'<div style="margin-top:8px;display:grid;grid-template-columns:1fr 1fr;gap:8px">'
+        +'<div class="fl"><label>Vencimiento</label><input type="date" id="sg-le-venc" value="'+(l.fecha_vencimiento_estimada||'')+'"></div>'
+        +'<div class="fl"><label>Calidad</label><select id="sg-le-cal"><option value="">—</option>'+['primera','segunda','tercera'].map(function(c){return '<option value="'+c+'"'+(c===l.calidad?' selected':'')+'>'+c+'</option>';}).join('')+'</select></div>'
+        +'<div class="fl"><label>Calibre</label><input id="sg-le-calibre" value="'+esc(l.calibre||'')+'"></div>'
+        +'<div class="fl"><label>Origen</label><input id="sg-le-origen" value="'+esc(l.origen||'')+'"></div>'
+        +'</div><button class="btn bb bs" style="margin-top:8px" onclick="sgLoteGuardar('+l.id+')">Guardar cambios</button></details>';
+
+      // Bajar lote
+      h+='<details style="margin-bottom:4px"><summary style="cursor:pointer;font-weight:700;font-size:13px;color:var(--err)">⬇️ Dar de baja</summary>'
+        +'<div style="margin-top:8px;display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap">'
+        +'<div class="fl"><label>Destino</label><select id="sg-lb-destino" onchange="sgLoteBajaToggle()">'+SG_DESTINO.map(function(o){return '<option value="'+o[0]+'">'+o[1]+'</option>';}).join('')+'</select></div>'
+        +'<div class="fl" id="sg-lb-receptor-wrap" style="display:none"><label>Receptor donación</label><input id="sg-lb-receptor" placeholder="Ej: Banco de Alimentos"></div>'
+        +'<button class="btn bd bs" onclick="sgLoteBaja('+l.id+')">Confirmar baja</button>'
+        +'</div></details>';
+    }
+    eid('sg-lote-body').innerHTML=h;
+    eid('sg-lote-modal').classList.add('on');
+  });
+}
+function sgLoteBajaToggle(){
+  var dest=eid('sg-lb-destino').value;
+  eid('sg-lb-receptor-wrap').style.display = (dest==='donacion') ? 'block' : 'none';
+}
+function sgLoteGuardar(id){
+  var body={ fecha_vencimiento_estimada:eid('sg-le-venc').value||null, calidad:eid('sg-le-cal').value||null, calibre:eid('sg-le-calibre').value, origen:eid('sg-le-origen').value };
+  api('/api/sg/lotes/'+id,'PUT',body).then(function(r){
+    if(r&&r.ok){ toast('Lote actualizado','ok'); closeMB('sg-lote-modal'); sgLoadStock(); }
+    else toast((r&&r.error)||'Error','er');
+  });
+}
+function sgLoteBaja(id){
+  var dest=eid('sg-lb-destino').value;
+  var receptor=(dest==='donacion')?(eid('sg-lb-receptor').value||'').trim():'';
+  if(dest==='donacion' && !receptor){ toast('La donación requiere receptor','er'); return; }
+  if(!confirm('¿Dar de baja el lote como "'+sgLbl(SG_DESTINO,dest)+'"?')) return;
+  api('/api/sg/lotes/'+id+'/baja','POST',{destino_baja:dest, receptor_donacion:receptor}).then(function(r){
+    if(r&&r.ok){ toast('Lote dado de baja','ok'); closeMB('sg-lote-modal'); sgLoadStock(); }
+    else toast((r&&r.error)||'Error','er');
+  });
 }
 </script>
 

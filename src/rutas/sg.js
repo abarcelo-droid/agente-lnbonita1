@@ -642,13 +642,26 @@ router.get('/lotes', requireAuth, (req, res) => {
     const where = ['l.activo=1'], params = [];
     if (req.query.estado) { where.push('l.estado=?'); params.push(req.query.estado); }
     if (req.query.producto_id) { where.push('l.producto_id=?'); params.push(req.query.producto_id); }
+    if (req.query.calidad) { where.push('l.calidad=?'); params.push(req.query.calidad); }
     if (req.query.recepcion_id) { where.push('l.recepcion_id=?'); params.push(req.query.recepcion_id); }
     if (req.query.oc_id) { where.push('l.oc_item_id IN (SELECT id FROM sg_oc_items WHERE oc_id=?)'); params.push(req.query.oc_id); }
     if (req.query.sin_precio === '1') where.push('l.precio_unitario_kg IS NULL');
+    if (req.query.ingreso_desde) { where.push('l.fecha_ingreso>=?'); params.push(req.query.ingreso_desde); }
+    if (req.query.ingreso_hasta) { where.push('l.fecha_ingreso<=?'); params.push(req.query.ingreso_hasta); }
+    // Próximos a vencer: dentro de N días (incluye vencidos), y no dados de baja.
+    if (req.query.por_vencer) {
+      where.push("l.estado!='bajado' AND l.fecha_vencimiento_estimada IS NOT NULL AND julianday(l.fecha_vencimiento_estimada) - julianday(date('now','localtime')) <= ?");
+      params.push(Number(req.query.por_vencer));
+    }
     const rows = db.prepare(`
-      SELECT l.*, pr.nombre AS producto_nombre,
+      SELECT l.*, pr.nombre AS producto_nombre, pr.familia AS producto_familia,
+        r.numero_recepcion, o.numero AS oc_numero, pv.razon_social AS proveedor_nombre,
         CAST(julianday(l.fecha_vencimiento_estimada) - julianday(date('now','localtime')) AS INTEGER) AS dias_restantes
-      FROM sg_lotes l LEFT JOIN sg_productos pr ON pr.id=l.producto_id
+      FROM sg_lotes l
+      LEFT JOIN sg_productos pr ON pr.id=l.producto_id
+      LEFT JOIN sg_recepciones r ON r.id=l.recepcion_id
+      LEFT JOIN sg_oc o ON o.id=r.oc_id
+      LEFT JOIN sg_proveedores pv ON pv.id=o.proveedor_id
       WHERE ${where.join(' AND ')} ORDER BY l.fecha_vencimiento_estimada ASC, l.id DESC`).all(...params);
     res.json({ ok: true, data: rows });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
@@ -781,6 +794,85 @@ router.delete('/gastos-globales/:id', requireAdmin, (req, res) => {
     db.prepare("UPDATE sg_gastos_globales_periodo SET activo=0, eliminado_en=datetime('now','localtime'), eliminado_por_id=? WHERE id=?").run(uid(req), req.params.id);
     recalcPeriodo(db, g.periodo);
     res.json({ ok: true, data: { id: Number(req.params.id) } });
+  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// FASE 3 — STOCK: edición de lote + Trazabilidad backward + Bajas
+// ════════════════════════════════════════════════════════════════════════════
+
+// Editar campos manuales del lote (vencimiento, calibre, origen, calidad).
+router.put('/lotes/:id', requireAdmin, (req, res) => {
+  const db = getDb();
+  try {
+    const lote = db.prepare('SELECT id FROM sg_lotes WHERE id=? AND activo=1').get(req.params.id);
+    if (!lote) return res.status(404).json({ ok: false, error: 'Lote no encontrado' });
+    const campos = ['fecha_vencimiento_estimada', 'calibre', 'origen', 'calidad'];
+    const sets = [], vals = [];
+    for (const c of campos) if (req.body[c] !== undefined) { sets.push(`${c}=?`); vals.push(val(req.body[c])); }
+    if (!sets.length) return res.status(400).json({ ok: false, error: 'Sin cambios' });
+    sets.push(`modificado_en=datetime('now','localtime')`, 'modificado_por=?'); vals.push(uid(req), req.params.id);
+    db.prepare(`UPDATE sg_lotes SET ${sets.join(',')} WHERE id=?`).run(...vals);
+    res.json({ ok: true, data: { id: Number(req.params.id) } });
+  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+
+// Trazabilidad backward: proveedor → OC → recepción → gastos → (despachos: F4) → clientes.
+router.get('/lotes/:id/trazabilidad', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const lote = db.prepare(`SELECT l.*, pr.nombre AS producto_nombre, pr.familia AS producto_familia,
+        pr.vida_util_dias_default,
+        CAST(julianday(l.fecha_vencimiento_estimada) - julianday(date('now','localtime')) AS INTEGER) AS dias_restantes
+      FROM sg_lotes l LEFT JOIN sg_productos pr ON pr.id=l.producto_id WHERE l.id=?`).get(req.params.id);
+    if (!lote) return res.status(404).json({ ok: false, error: 'Lote no encontrado' });
+
+    const recepcion = lote.recepcion_id ? db.prepare('SELECT * FROM sg_recepciones WHERE id=?').get(lote.recepcion_id) : null;
+    const oc = recepcion ? db.prepare('SELECT * FROM sg_oc WHERE id=?').get(recepcion.oc_id) : null;
+    const proveedor = oc && oc.proveedor_id ? db.prepare('SELECT id, razon_social, cuit, tipo, localidad, provincia FROM sg_proveedores WHERE id=?').get(oc.proveedor_id) : null;
+    const ocItem = lote.oc_item_id ? db.prepare('SELECT * FROM sg_oc_items WHERE id=?').get(lote.oc_item_id) : null;
+    const gastosDirectos = db.prepare('SELECT * FROM sg_gastos_directos_lote WHERE lote_id=? AND activo=1 ORDER BY id').all(lote.id);
+
+    // Prorrateo global del período
+    const periodo = (lote.fecha_ingreso || '').slice(0, 7);
+    let prorrateo = null;
+    if (periodo) {
+      const totalGlob = db.prepare('SELECT COALESCE(SUM(monto),0) s FROM sg_gastos_globales_periodo WHERE periodo=? AND activo=1').get(periodo).s;
+      const totalKg = db.prepare("SELECT COALESCE(SUM(kg_reales),0) s FROM sg_lotes WHERE activo=1 AND substr(fecha_ingreso,1,7)=?").get(periodo).s;
+      const share = totalKg > 0 ? totalGlob * (lote.kg_reales / totalKg) : 0;
+      prorrateo = { periodo, total_global: totalGlob, kg_periodo: totalKg, kg_lote: lote.kg_reales, share };
+    }
+
+    // Forward (despachos donde se usó este lote) — se completa en Fase 4.
+    const despachos = db.prepare(`SELECT di.kg_despachados, di.precio_por_kg, di.subtotal, di.margen_estimado,
+        d.id AS despacho_id, d.numero AS despacho_numero, d.fecha_despacho, c.razon_social AS cliente_nombre
+      FROM sg_despacho_items di
+      JOIN sg_despachos d ON d.id=di.despacho_id AND d.activo=1
+      LEFT JOIN sg_clientes c ON c.id=d.cliente_id
+      WHERE di.lote_id=? ORDER BY d.fecha_despacho`).all(lote.id);
+
+    res.json({ ok: true, data: { lote, producto: { id: lote.producto_id, nombre: lote.producto_nombre, familia: lote.producto_familia }, oc_item: ocItem, recepcion, oc, proveedor, gastos_directos: gastosDirectos, prorrateo, despachos } });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// Baja de lote: destino_baja (venta/liquidacion/donacion/disposal). Donación exige receptor.
+router.post('/lotes/:id/baja', requireAdmin, (req, res) => {
+  const db = getDb();
+  try {
+    const destino = req.body.destino_baja;
+    if (!['venta', 'liquidacion', 'donacion', 'disposal'].includes(destino)) {
+      return res.status(400).json({ ok: false, error: 'destino_baja inválido' });
+    }
+    if (destino === 'donacion' && !val(req.body.receptor_donacion)) {
+      return res.status(400).json({ ok: false, error: 'La donación requiere receptor' });
+    }
+    const lote = db.prepare('SELECT estado FROM sg_lotes WHERE id=? AND activo=1').get(req.params.id);
+    if (!lote) return res.status(404).json({ ok: false, error: 'Lote no encontrado' });
+    if (lote.estado === 'bajado') return res.status(400).json({ ok: false, error: 'El lote ya está dado de baja' });
+    db.prepare(`UPDATE sg_lotes SET estado='bajado', destino_baja=?, receptor_donacion=?,
+        modificado_en=datetime('now','localtime'), modificado_por=? WHERE id=?`)
+      .run(destino, destino === 'donacion' ? val(req.body.receptor_donacion) : null, uid(req), req.params.id);
+    res.json({ ok: true, data: { id: Number(req.params.id), destino_baja: destino } });
   } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
 });
 
