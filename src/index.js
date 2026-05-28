@@ -26,6 +26,7 @@ import ordenesRouter       from "./rutas/ordenes.js";
 import orgRouter           from "./rutas/org.js";
 import sidebarRouter       from "./rutas/sidebar.js";
 import ventasRouter        from "./rutas/ventas.js";
+import sgRouter            from "./rutas/sg.js";
 import { guardarSnapshotCRM } from "./servicios/db.js";
 import { syncSheets } from "./servicios/sheets.js";
 
@@ -172,6 +173,7 @@ app.use("/api/ven",            ventasRouter);
 app.use("/api/pa/clima",        climaRouter);
 app.use("/api/pa",     produccionRouter);
 app.use("/api/pa/scout", scoutRouter);
+app.use("/api/sg",     sgRouter);
 
 // Scout — app mobile para campo
 app.get("/scout", (req, res) => {

@@ -251,6 +251,11 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     <div class="ni" data-sec="pa-campanias" data-admin-only="1"><span class="dot dc"></span>📅 Campañas</div>
   </div>
 
+  <div class="ni-grp" data-grp="sg" data-admin-only="1">San Gerónimo<span class="ni-caret">▾</span></div>
+  <div class="ni-grp-items" data-admin-only="1">
+    <div class="ni" data-sec="sg" data-admin-only="1"><span class="dot da"></span>🍅 San Gerónimo</div>
+  </div>
+
   <div class="ng" style="margin-top:8px">General</div>
   <div class="ni on" data-sec="inicio"><span class="dot"></span>Inicio</div>
   <div class="ni" data-sec="crm"><span class="dot dd"></span>CRM</div>
@@ -1780,6 +1785,391 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
 </div>
 
 <!-- ─── PA CAMPAÑAS (admin) ────────────────────────────────────── -->
+<!-- ═══════════════════════════════════════════════════════════════════════════
+     MÓDULO SAN GERÓNIMO (sg_*) — operatoria mayorista frutihortícola
+     Fase 1: Catálogo operativo. Compras/Stock/Ventas/Reportes = placeholders.
+═══════════════════════════════════════════════════════════════════════════ -->
+<div class="sec" id="sec-sg">
+  <style>
+    #sec-sg .sg-tabs{display:flex;gap:2px;border-bottom:1px solid var(--bor);margin-bottom:18px;flex-wrap:wrap}
+    #sec-sg .sg-tab{padding:10px 18px;cursor:pointer;font-size:13px;font-weight:600;border-bottom:2px solid transparent;color:var(--mut)}
+    #sec-sg .sg-tab.on{color:var(--burg);border-bottom-color:var(--burg)}
+    #sec-sg .sg-pane{display:none} #sec-sg .sg-pane.on{display:block}
+    #sec-sg .sg-subtab{padding:7px 14px;cursor:pointer;font-size:12.5px;font-weight:600;border-radius:6px;color:var(--mut)}
+    #sec-sg .sg-subtab.on{background:var(--burg);color:#fff}
+    #sec-sg .sg-sub{display:none} #sec-sg .sg-sub.on{display:block}
+    #sec-sg .sg-ph-ph{padding:48px 20px;text-align:center;color:var(--mut);font-size:14px;background:var(--burl,#faf5f0);border:1px dashed var(--bor2,#e0d5cc);border-radius:12px}
+  </style>
+
+  <div class="ph">
+    <div><div class="ph-t">🍅 San Gerónimo</div><div class="ph-s">Operatoria mayorista frutihortícola — PUENTE CORDON SA · MCBA Nave 4</div></div>
+  </div>
+
+  <!-- Tabs nivel 1 -->
+  <div class="sg-tabs">
+    <div class="sg-tab" data-tab="dashboard" onclick="sgTab('dashboard')">📊 Dashboard</div>
+    <div class="sg-tab" data-tab="compras"   onclick="sgTab('compras')">🛒 Compras</div>
+    <div class="sg-tab" data-tab="stock"     onclick="sgTab('stock')">📦 Stock</div>
+    <div class="sg-tab" data-tab="ventas"    onclick="sgTab('ventas')">💰 Ventas</div>
+    <div class="sg-tab on" data-tab="catalogo" onclick="sgTab('catalogo')">📚 Catálogo</div>
+    <div class="sg-tab" data-tab="reportes"  onclick="sgTab('reportes')">📈 Reportes</div>
+  </div>
+
+  <div class="sg-pane" id="sg-pane-dashboard"><div class="sg-ph-ph">📊 Dashboard — Próximamente (Fase 5)</div></div>
+  <div class="sg-pane" id="sg-pane-compras"><div class="sg-ph-ph">🛒 Compras (OC · Recepciones · Gastos) — Próximamente (Fase 2)</div></div>
+  <div class="sg-pane" id="sg-pane-stock"><div class="sg-ph-ph">📦 Stock + Trazabilidad — Próximamente (Fase 3)</div></div>
+  <div class="sg-pane" id="sg-pane-ventas"><div class="sg-ph-ph">💰 Ventas (Pedidos · Despachos FEFO · CC) — Próximamente (Fase 4)</div></div>
+  <div class="sg-pane" id="sg-pane-reportes"><div class="sg-ph-ph">📈 Reportes — Próximamente (Fase 5)</div></div>
+
+  <!-- Tab Catálogo (operativo en Fase 1) -->
+  <div class="sg-pane on" id="sg-pane-catalogo">
+    <div style="display:inline-flex;gap:2px;background:var(--bg);border:1px solid var(--bor);border-radius:8px;padding:3px;margin-bottom:16px;flex-wrap:wrap">
+      <div class="sg-subtab on" data-sub="productos"     onclick="sgCatSub('productos')">🥦 Productos</div>
+      <div class="sg-subtab" data-sub="presentaciones" onclick="sgCatSub('presentaciones')">📦 Presentaciones</div>
+      <div class="sg-subtab" data-sub="proveedores"    onclick="sgCatSub('proveedores')">🚜 Proveedores</div>
+      <div class="sg-subtab" data-sub="clientes"       onclick="sgCatSub('clientes')">🏪 Clientes</div>
+      <div class="sg-subtab" data-sub="condiciones"    onclick="sgCatSub('condiciones')">💳 Condiciones de pago</div>
+    </div>
+
+    <div class="sg-sub on" id="sg-sub-productos">
+      <div style="display:flex;justify-content:flex-end;margin-bottom:10px"><button class="btn bb" onclick="sgOpenModal('productos')">+ Nuevo producto</button></div>
+      <div class="ab-table-wrap"><table class="pa-tbl">
+        <thead><tr><th>Código</th><th>Nombre</th><th>Familia</th><th>Unidad</th><th style="text-align:right">Vida útil (d)</th><th></th></tr></thead>
+        <tbody id="sg-tb-productos"><tr><td colspan="6" class="emp">Cargando…</td></tr></tbody>
+      </table></div>
+    </div>
+
+    <div class="sg-sub" id="sg-sub-presentaciones">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;gap:10px;flex-wrap:wrap">
+        <label style="font-size:12px;color:var(--mut)">Producto
+          <select id="sg-pres-filtro" onchange="sgLoad('presentaciones')" style="padding:5px 8px;border-radius:6px;border:1px solid var(--bor);background:var(--bg)"><option value="">— Todos —</option></select>
+        </label>
+        <button class="btn bb" onclick="sgOpenModal('presentaciones')">+ Nueva presentación</button>
+      </div>
+      <div class="ab-table-wrap"><table class="pa-tbl">
+        <thead><tr><th>Producto</th><th>Presentación</th><th style="text-align:right">Factor → unidad base</th><th></th></tr></thead>
+        <tbody id="sg-tb-presentaciones"><tr><td colspan="4" class="emp">Cargando…</td></tr></tbody>
+      </table></div>
+    </div>
+
+    <div class="sg-sub" id="sg-sub-proveedores">
+      <div style="display:flex;justify-content:flex-end;margin-bottom:10px"><button class="btn bb" onclick="sgOpenModal('proveedores')">+ Nuevo proveedor</button></div>
+      <div class="ab-table-wrap"><table class="pa-tbl">
+        <thead><tr><th>Razón social</th><th>CUIT</th><th>Tipo</th><th>Fiscal hab.</th><th>Localidad</th><th></th></tr></thead>
+        <tbody id="sg-tb-proveedores"><tr><td colspan="6" class="emp">Cargando…</td></tr></tbody>
+      </table></div>
+    </div>
+
+    <div class="sg-sub" id="sg-sub-clientes">
+      <div style="display:flex;justify-content:flex-end;margin-bottom:10px"><button class="btn bb" onclick="sgOpenModal('clientes')">+ Nuevo cliente</button></div>
+      <div class="ab-table-wrap"><table class="pa-tbl">
+        <thead><tr><th>Razón social</th><th>CUIT</th><th>Tipo</th><th>Modalidad</th><th style="text-align:right">Lím. crédito</th><th></th></tr></thead>
+        <tbody id="sg-tb-clientes"><tr><td colspan="6" class="emp">Cargando…</td></tr></tbody>
+      </table></div>
+    </div>
+
+    <div class="sg-sub" id="sg-sub-condiciones">
+      <div style="display:flex;justify-content:flex-end;margin-bottom:10px"><button class="btn bb" onclick="sgOpenModal('condiciones')">+ Nueva condición</button></div>
+      <div class="ab-table-wrap"><table class="pa-tbl">
+        <thead><tr><th>Nombre</th><th>Cuotas</th><th style="text-align:right">Σ %</th><th></th></tr></thead>
+        <tbody id="sg-tb-condiciones"><tr><td colspan="4" class="emp">Cargando…</td></tr></tbody>
+      </table></div>
+    </div>
+  </div>
+</div>
+
+<!-- Modal genérico de catálogo SG (form schema-driven) -->
+<div class="ab-modal-overlay" id="sg-modal">
+  <div class="ab-modal" style="width:560px;max-height:88vh;overflow-y:auto">
+    <div class="mhd"><div class="mht" id="sg-modal-tit">Nuevo</div><button class="mcl" onclick="closeMB('sg-modal')">×</button></div>
+    <div class="fg" id="sg-modal-body"></div>
+    <div class="ab-modal-footer">
+      <button class="btn bo" onclick="closeMB('sg-modal')">Cancelar</button>
+      <button class="btn bb" id="sg-modal-save" onclick="sgSave()">Guardar</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ═══ MÓDULO SAN GERÓNIMO (sg_*) — Fase 1: Catálogo ═══════════════════════════
+var SG = { cacheProd: [], cacheCond: [], last: {}, cur: null, cuotas: [] };
+
+// Catálogos de opciones (value, label)
+var SG_FAMILIA = [['frutas','Frutas'],['hortalizas','Hortalizas'],['verduras_hoja','Verduras de hoja'],['aromaticas','Aromáticas'],['otros','Otros']];
+var SG_UNIDAD  = [['kg','kg'],['unidad','unidad'],['atado','atado']];
+var SG_TIPOPRV = [['productor','Productor'],['importador','Importador'],['mayorista_regional','Mayorista regional'],['otros','Otros']];
+var SG_TIPOCLI = [['horeca','HORECA'],['supermercado','Supermercado'],['mayorista_regional','Mayorista regional'],['minorista','Minorista'],['consumidor_final','Consumidor final'],['otros','Otros']];
+var SG_CATFISC = [['resp_inscripto','Resp. Inscripto'],['monotributista','Monotributista'],['exento','Exento'],['no_inscripto','No inscripto']];
+var SG_FISCAL  = [['factura_a','Factura A'],['factura_b','Factura B'],['liquidacion','Liquidación']];
+var SG_MODPED  = [['con_pedido','Con pedido'],['sobre_stock','Sobre stock'],['mixto','Mixto']];
+var SG_BASECAL = [['fecha_oc','Fecha OC'],['fecha_recepcion','Fecha recepción'],['fecha_factura','Fecha factura'],['al_pedido','Al pedido']];
+
+// Esquema de campos por entidad (k=columna, t=tipo, o=opciones, req, ph=placeholder, src=cache)
+var SG_SCHEMA = {
+  productos: {
+    titulo:'producto', path:'productos',
+    fields:[
+      {k:'codigo', l:'Código', t:'text', req:1, ph:'TOMATE-PERITA'},
+      {k:'nombre', l:'Nombre', t:'text', req:1, ph:'Tomate Perita'},
+      {k:'familia', l:'Familia', t:'select', o:SG_FAMILIA},
+      {k:'unidad_base', l:'Unidad base', t:'select', o:SG_UNIDAD, def:'kg'},
+      {k:'vida_util_dias_default', l:'Vida útil (días)', t:'number', ph:'7'}
+    ]
+  },
+  presentaciones: {
+    titulo:'presentación', path:'presentaciones',
+    fields:[
+      {k:'producto_id', l:'Producto', t:'select', src:'prod', req:1},
+      {k:'nombre', l:'Presentación', t:'text', req:1, ph:'Cajón 20kg'},
+      {k:'factor_conversion', l:'Factor de conversión (cuántas unidades base = 1 presentación)', t:'number', req:1, ph:'20'}
+    ]
+  },
+  proveedores: {
+    titulo:'proveedor', path:'proveedores',
+    fields:[
+      {k:'razon_social', l:'Razón social', t:'text', req:1},
+      {k:'cuit', l:'CUIT', t:'text'},
+      {k:'tipo', l:'Tipo', t:'select', o:SG_TIPOPRV},
+      {k:'categoria_fiscal', l:'Categoría fiscal', t:'select', o:SG_CATFISC},
+      {k:'tipo_fiscal_habitual', l:'Tipo fiscal habitual', t:'select', o:SG_FISCAL, def:'factura_a'},
+      {k:'condicion_pago_habitual_id', l:'Condición de pago habitual', t:'select', src:'cond'},
+      {k:'localidad', l:'Localidad', t:'text'},
+      {k:'provincia', l:'Provincia', t:'text'},
+      {k:'telefono', l:'Teléfono', t:'text'},
+      {k:'email', l:'Email', t:'text'},
+      {k:'observaciones', l:'Observaciones', t:'textarea'}
+    ]
+  },
+  clientes: {
+    titulo:'cliente', path:'clientes',
+    fields:[
+      {k:'razon_social', l:'Razón social', t:'text', req:1},
+      {k:'cuit', l:'CUIT', t:'text'},
+      {k:'tipo', l:'Tipo', t:'select', o:SG_TIPOCLI},
+      {k:'categoria_fiscal', l:'Categoría fiscal', t:'select', o:SG_CATFISC},
+      {k:'tipo_fiscal_habitual', l:'Tipo fiscal habitual', t:'select', o:SG_FISCAL, def:'factura_a'},
+      {k:'condicion_pago_habitual_id', l:'Condición de pago habitual', t:'select', src:'cond'},
+      {k:'modalidad_pedido', l:'Modalidad de pedido', t:'select', o:SG_MODPED, def:'mixto'},
+      {k:'limite_credito', l:'Límite de crédito ($)', t:'number'},
+      {k:'localidad', l:'Localidad', t:'text'},
+      {k:'provincia', l:'Provincia', t:'text'},
+      {k:'direccion_entrega', l:'Dirección de entrega', t:'text'},
+      {k:'telefono', l:'Teléfono', t:'text'},
+      {k:'email', l:'Email', t:'text'},
+      {k:'observaciones', l:'Observaciones', t:'textarea'}
+    ]
+  }
+};
+
+function sgInit(){
+  sgTab('catalogo');
+  sgLoadCaches(function(){ sgCatSub('productos'); });
+}
+
+function sgTab(t){
+  document.querySelectorAll('#sec-sg .sg-tab').forEach(function(el){ el.classList.toggle('on', el.dataset.tab===t); });
+  document.querySelectorAll('#sec-sg .sg-pane').forEach(function(el){ el.classList.toggle('on', el.id==='sg-pane-'+t); });
+}
+
+function sgCatSub(s){
+  document.querySelectorAll('#sec-sg .sg-subtab').forEach(function(el){ el.classList.toggle('on', el.dataset.sub===s); });
+  document.querySelectorAll('#sec-sg .sg-sub').forEach(function(el){ el.classList.toggle('on', el.id==='sg-sub-'+s); });
+  sgLoad(s);
+}
+
+// Carga caches para dropdowns (productos + condiciones) y arma el filtro de presentaciones
+function sgLoadCaches(cb){
+  Promise.all([api('/api/sg/productos'), api('/api/sg/condiciones-pago')]).then(function(r){
+    SG.cacheProd = (r[0] && r[0].ok) ? r[0].data : [];
+    SG.cacheCond = (r[1] && r[1].ok) ? r[1].data : [];
+    var sel = eid('sg-pres-filtro');
+    if (sel){
+      var v = sel.value;
+      sel.innerHTML = '<option value="">— Todos —</option>' + SG.cacheProd.map(function(p){ return '<option value="'+p.id+'">'+esc(p.nombre)+'</option>'; }).join('');
+      sel.value = v;
+    }
+    if (cb) cb();
+  });
+}
+
+function sgProdNombre(id){ var p = SG.cacheProd.find(function(x){ return x.id===id; }); return p ? p.nombre : ('#'+id); }
+function sgCondNombre(id){ if(!id) return '—'; var c = SG.cacheCond.find(function(x){ return x.id===id; }); return c ? c.nombre : ('#'+id); }
+function sgLbl(opts, v){ var f = (opts||[]).find(function(o){ return o[0]===v; }); return f ? f[1] : (v||'—'); }
+
+// ── Carga + render de tablas ────────────────────────────────────────────────
+function sgLoad(entity){
+  if (entity==='condiciones'){ return sgLoadCondiciones(); }
+  var path = SG_SCHEMA[entity].path;
+  var url = '/api/sg/'+path;
+  if (entity==='presentaciones'){
+    var f = eid('sg-pres-filtro') ? eid('sg-pres-filtro').value : '';
+    if (f) url += '?producto_id='+f;
+  }
+  api(url).then(function(r){
+    var rows = (r && r.ok) ? r.data : [];
+    SG.last[entity] = rows;
+    eid('sg-tb-'+entity).innerHTML = rows.length ? rows.map(function(row){ return sgRow(entity, row); }).join('') : sgEmpty(entity);
+  });
+}
+
+function sgEmpty(entity){
+  var cols = {productos:6, presentaciones:4, proveedores:6, clientes:6, condiciones:4};
+  return '<tr><td colspan="'+(cols[entity]||6)+'" class="emp">Sin registros. Creá el primero con el botón de arriba.</td></tr>';
+}
+
+function sgActions(entity, id){
+  return '<td style="text-align:right;white-space:nowrap">'
+    + '<button class="btn bo bs" onclick="sgOpenModal(\''+entity+'\','+id+')">✏️</button> '
+    + '<button class="btn bd bs" onclick="sgDelete(\''+entity+'\','+id+')">🗑️</button></td>';
+}
+
+function sgRow(entity, r){
+  if (entity==='productos'){
+    return '<tr><td><code>'+esc(r.codigo)+'</code></td><td>'+esc(r.nombre)+'</td><td>'+sgLbl(SG_FAMILIA,r.familia)
+      +'</td><td>'+esc(r.unidad_base||'')+'</td><td style="text-align:right">'+(r.vida_util_dias_default||'—')+'</td>'+sgActions(entity,r.id)+'</tr>';
+  }
+  if (entity==='presentaciones'){
+    return '<tr><td>'+esc(sgProdNombre(r.producto_id))+'</td><td>'+esc(r.nombre)+'</td><td style="text-align:right">'+(r.factor_conversion||0)+'</td>'+sgActions(entity,r.id)+'</tr>';
+  }
+  if (entity==='proveedores'){
+    return '<tr><td>'+esc(r.razon_social)+'</td><td>'+esc(r.cuit||'')+'</td><td>'+sgLbl(SG_TIPOPRV,r.tipo)
+      +'</td><td>'+sgLbl(SG_FISCAL,r.tipo_fiscal_habitual)+'</td><td>'+esc(r.localidad||'')+'</td>'+sgActions(entity,r.id)+'</tr>';
+  }
+  if (entity==='clientes'){
+    return '<tr><td>'+esc(r.razon_social)+'</td><td>'+esc(r.cuit||'')+'</td><td>'+sgLbl(SG_TIPOCLI,r.tipo)
+      +'</td><td>'+sgLbl(SG_MODPED,r.modalidad_pedido)+'</td><td style="text-align:right">$'+nr(r.limite_credito)+'</td>'+sgActions(entity,r.id)+'</tr>';
+  }
+  return '';
+}
+
+function sgLoadCondiciones(){
+  api('/api/sg/condiciones-pago').then(function(r){
+    var rows = (r && r.ok) ? r.data : [];
+    SG.last.condiciones = rows;
+    SG.cacheCond = rows; // mantener cache fresco
+    eid('sg-tb-condiciones').innerHTML = rows.length ? rows.map(function(c){
+      var suma = (c.cuotas||[]).reduce(function(a,q){ return a+Number(q.porcentaje||0); }, 0);
+      var det = (c.cuotas||[]).map(function(q){ return q.porcentaje+'% '+sgLbl(SG_BASECAL,q.base_calculo)+(q.dias_offset?(' +'+q.dias_offset+'d'):''); }).join(' · ');
+      return '<tr><td>'+esc(c.nombre)+'</td><td style="font-size:12px;color:var(--mut)">'+(det||'—')+'</td><td style="text-align:right">'+suma+'%</td>'+sgActions('condiciones',c.id)+'</tr>';
+    }).join('') : sgEmpty('condiciones');
+  });
+}
+
+// ── Modal genérico ──────────────────────────────────────────────────────────
+function sgOpenModal(entity, id){
+  SG.cur = { entity: entity, id: id || null };
+  if (entity==='condiciones'){ return sgOpenCondModal(id); }
+  var sc = SG_SCHEMA[entity];
+  var row = id ? (SG.last[entity]||[]).find(function(x){ return x.id===id; }) : null;
+  eid('sg-modal-tit').textContent = (id?'Editar ':'Nuevo ') + sc.titulo;
+  var html = sc.fields.map(function(f){
+    var inp;
+    if (f.t==='select'){
+      var opts = f.src==='prod' ? SG.cacheProd.map(function(p){ return [p.id, p.nombre]; })
+               : f.src==='cond' ? SG.cacheCond.map(function(c){ return [c.id, c.nombre]; })
+               : f.o;
+      var blank = (f.req && f.src) ? '' : '<option value="">—</option>';
+      inp = '<select id="sg-f-'+f.k+'">'+blank+opts.map(function(o){ return '<option value="'+o[0]+'">'+esc(String(o[1]))+'</option>'; }).join('')+'</select>';
+    } else if (f.t==='textarea'){
+      inp = '<textarea id="sg-f-'+f.k+'" rows="2" placeholder="'+(f.ph||'')+'"></textarea>';
+    } else {
+      inp = '<input id="sg-f-'+f.k+'" type="'+(f.t==='number'?'number':'text')+'" placeholder="'+(f.ph||'')+'">';
+    }
+    return '<div class="fl ff"><label>'+f.l+(f.req?' <span style="color:var(--err)">*</span>':'')+'</label>'+inp+'</div>';
+  }).join('');
+  eid('sg-modal-body').innerHTML = html;
+  // valores (edición o defaults)
+  sc.fields.forEach(function(f){
+    var el = eid('sg-f-'+f.k);
+    if (!el) return;
+    if (row && row[f.k]!==null && row[f.k]!==undefined) el.value = row[f.k];
+    else if (!row && f.def!==undefined) el.value = f.def;
+  });
+  eid('sg-modal').classList.add('on');
+}
+
+function sgOpenCondModal(id){
+  var row = id ? (SG.last.condiciones||[]).find(function(x){ return x.id===id; }) : null;
+  eid('sg-modal-tit').textContent = (id?'Editar ':'Nueva ') + 'condición de pago';
+  SG.cuotas = row && row.cuotas && row.cuotas.length ? row.cuotas.map(function(q){ return { porcentaje:q.porcentaje, base_calculo:q.base_calculo, dias_offset:q.dias_offset }; }) : [{ porcentaje:100, base_calculo:'fecha_factura', dias_offset:0 }];
+  eid('sg-modal-body').innerHTML =
+      '<div class="fl ff"><label>Nombre <span style="color:var(--err)">*</span></label><input id="sg-f-nombre" placeholder="Ej: 30 días desde factura"></div>'
+    + '<div class="fl ff"><label>Cuotas (deben sumar 100%)</label><div id="sg-cuotas-box"></div>'
+    + '<button class="btn bo bs" style="margin-top:8px" onclick="sgCondAddRow()">+ Agregar cuota</button>'
+    + '<div id="sg-cuotas-suma" style="margin-top:8px;font-weight:700;font-size:13px"></div></div>';
+  if (row) eid('sg-f-nombre').value = row.nombre || '';
+  sgCondRender();
+  eid('sg-modal').classList.add('on');
+}
+
+function sgCondAddRow(){ SG.cuotas.push({ porcentaje:0, base_calculo:'fecha_factura', dias_offset:0 }); sgCondRender(); }
+function sgCondDelRow(i){ SG.cuotas.splice(i,1); sgCondRender(); }
+function sgCondUpd(i, campo, v){ SG.cuotas[i][campo] = (campo==='base_calculo') ? v : Number(v); sgCondSuma(); }
+
+function sgCondRender(){
+  var box = eid('sg-cuotas-box');
+  box.innerHTML = SG.cuotas.map(function(q, i){
+    var baseOpts = SG_BASECAL.map(function(o){ return '<option value="'+o[0]+'"'+(o[0]===q.base_calculo?' selected':'')+'>'+o[1]+'</option>'; }).join('');
+    return '<div style="display:flex;gap:6px;align-items:center;margin-bottom:6px">'
+      + '<span style="font-size:12px;color:var(--mut);width:54px">Cuota '+(i+1)+'</span>'
+      + '<input type="number" value="'+q.porcentaje+'" onchange="sgCondUpd('+i+',\'porcentaje\',this.value)" style="width:70px" title="% de la cuota"> <span style="font-size:12px">%</span>'
+      + '<select onchange="sgCondUpd('+i+',\'base_calculo\',this.value)" style="flex:1">'+baseOpts+'</select>'
+      + '<input type="number" value="'+q.dias_offset+'" onchange="sgCondUpd('+i+',\'dias_offset\',this.value)" style="width:64px" title="días offset"> <span style="font-size:12px">días</span>'
+      + (SG.cuotas.length>1 ? ' <button class="btn bd bs" onclick="sgCondDelRow('+i+')">×</button>' : '')
+      + '</div>';
+  }).join('');
+  sgCondSuma();
+}
+function sgCondSuma(){
+  var s = SG.cuotas.reduce(function(a,q){ return a+Number(q.porcentaje||0); }, 0);
+  var el = eid('sg-cuotas-suma'); if (!el) return;
+  el.textContent = 'Σ = '+s+'%'; el.style.color = (Math.abs(s-100)<0.01) ? 'var(--ok,#16a34a)' : 'var(--err,#dc2626)';
+}
+
+// ── Guardar ─────────────────────────────────────────────────────────────────
+function sgSave(){
+  var entity = SG.cur.entity, id = SG.cur.id;
+  if (entity==='condiciones') return sgSaveCond();
+  var sc = SG_SCHEMA[entity];
+  var body = {};
+  for (var i=0;i<sc.fields.length;i++){
+    var f = sc.fields[i];
+    var el = eid('sg-f-'+f.k); if (!el) continue;
+    var v = (el.value||'').trim();
+    if (f.req && !v){ toast('Falta: '+f.l, 'er'); el.focus(); return; }
+    body[f.k] = (f.t==='number') ? (v===''?null:Number(v)) : v;
+  }
+  var path = '/api/sg/'+sc.path + (id?('/'+id):'');
+  api(path, id?'PUT':'POST', body).then(function(r){
+    if (r && r.ok){ toast(id?'Actualizado':'Creado', 'ok'); closeMB('sg-modal'); sgLoadCaches(); sgLoad(entity); }
+    else toast((r&&r.error)||'Error al guardar', 'er');
+  });
+}
+
+function sgSaveCond(){
+  var id = SG.cur.id;
+  var nombre = (eid('sg-f-nombre').value||'').trim();
+  if (!nombre){ toast('Falta nombre', 'er'); return; }
+  var s = SG.cuotas.reduce(function(a,q){ return a+Number(q.porcentaje||0); }, 0);
+  if (Math.abs(s-100)>0.01){ toast('Las cuotas deben sumar 100% (suman '+s+')', 'er'); return; }
+  var body = { nombre: nombre, cuotas: SG.cuotas.map(function(q,i){ return { orden:i+1, porcentaje:Number(q.porcentaje), base_calculo:q.base_calculo, dias_offset:Number(q.dias_offset||0) }; }) };
+  api('/api/sg/condiciones-pago'+(id?('/'+id):''), id?'PUT':'POST', body).then(function(r){
+    if (r && r.ok){ toast(id?'Actualizada':'Creada', 'ok'); closeMB('sg-modal'); sgLoadCaches(); sgLoad('condiciones'); }
+    else toast((r&&r.error)||'Error al guardar', 'er');
+  });
+}
+
+// ── Borrar (soft) ─────────────────────────────────────────────────────────────
+function sgDelete(entity, id){
+  if (!confirm('¿Eliminar este registro? (borrado lógico)')) return;
+  var path = (entity==='condiciones') ? 'condiciones-pago' : SG_SCHEMA[entity].path;
+  api('/api/sg/'+path+'/'+id, 'DELETE').then(function(r){
+    if (r && r.ok){ toast('Eliminado', 'ok'); sgLoadCaches(); sgLoad(entity); }
+    else toast((r&&r.error)||'No se pudo eliminar', 'er');
+  });
+}
+</script>
+
 <div class="sec" id="sec-pa-campanias">
   <div class="ph">
     <div><div class="ph-t">📅 Campañas</div><div class="ph-s">Administrá campañas y reasigná órdenes/compras en lote</div></div>
@@ -6637,7 +7027,8 @@ function loadSec(s) {
     'pa-lotes':      function(){ paLoadLotes(); },
     'pa-scout':      function(){ paLoadScout(); },
     'pa-cuentas':    function(){ paCuLoad(); },
-    'pa-campanias':  function(){ paCampInit(); }
+    'pa-campanias':  function(){ paCampInit(); },
+    'sg':            function(){ sgInit(); }
   };
   if (m[s]) m[s]();
 }
