@@ -5584,6 +5584,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     </div>
     <div style="margin-top:18px;display:flex;justify-content:flex-end;gap:8px;align-items:center">
       <button class="btn bb" id="ifco-pm-pdf-btn" onclick="ifcoDescargarMovimientosPdf()" style="display:none">📄 Descargar PDF</button>
+      <button class="btn bb" id="ifco-pm-xls-btn" onclick="ifcoDescargarMovimientosXlsx()" style="display:none">📊 Excel</button>
       <button class="btn bo" onclick="document.getElementById('ifco-mb-prov-mov').classList.remove('on')">Cerrar</button>
     </div>
   </div>
@@ -19555,7 +19556,7 @@ async function ifcoCargarStocksReales() {
           '<td style="padding:8px;text-align:right;font-variant-numeric:tabular-nums">'+(it.real != null ? _ifcoFmt(it.real) : '<span style="color:var(--mut)">—</span>')+'</td>' +
           '<td style="padding:8px;text-align:right;font-variant-numeric:tabular-nums">'+difCell+'</td>' +
           '<td style="padding:8px;font-size:11px">'+fechaCell+'</td>' +
-          '<td style="padding:8px;text-align:right;white-space:nowrap">' + btnFaltante + '<button class="btn bo bs" style="font-size:11px;padding:4px 8px;margin-right:4px" onclick="ifcoDescargarMovimientosDeposito(\''+it.deposito_tipo+'\','+(it.proveedor_id||'null')+')" title="PDF de movimientos último mes">📄 PDF</button><button class="btn bo bs" style="font-size:11px;padding:4px 8px;margin-right:4px" onclick="ifcoAbrirHistorialStock(\''+it.deposito_tipo+'\','+(it.proveedor_id||'null')+',\''+_ifcoEsc(it.nombre)+'\')">📈 Histórico</button><button class="btn bb bs" style="font-size:11px;padding:4px 8px" onclick="ifcoAbrirCargarStock(\''+it.deposito_tipo+'\','+(it.proveedor_id||'null')+',\''+_ifcoEsc(it.nombre)+'\','+it.teorico+')">'+(ult ? 'Actualizar' : 'Cargar')+'</button></td>' +
+          '<td style="padding:8px;text-align:right;white-space:nowrap">' + btnFaltante + '<button class="btn bo bs" style="font-size:11px;padding:4px 8px;margin-right:4px" onclick="ifcoDescargarMovimientosDeposito(\''+it.deposito_tipo+'\','+(it.proveedor_id||'null')+')" title="PDF de movimientos último mes">📄 PDF</button><button class="btn bo bs" style="font-size:11px;padding:4px 8px;margin-right:4px" onclick="ifcoDescargarMovimientosDepositoXlsx(\''+it.deposito_tipo+'\','+(it.proveedor_id||'null')+')" title="Excel de movimientos último mes">📊 Excel</button><button class="btn bo bs" style="font-size:11px;padding:4px 8px;margin-right:4px" onclick="ifcoAbrirHistorialStock(\''+it.deposito_tipo+'\','+(it.proveedor_id||'null')+',\''+_ifcoEsc(it.nombre)+'\')">📈 Histórico</button><button class="btn bb bs" style="font-size:11px;padding:4px 8px" onclick="ifcoAbrirCargarStock(\''+it.deposito_tipo+'\','+(it.proveedor_id||'null')+',\''+_ifcoEsc(it.nombre)+'\','+it.teorico+')">'+(ult ? 'Actualizar' : 'Cargar')+'</button></td>' +
         '</tr>';
       }).join('') +
     '</tbody></table>';
@@ -19581,6 +19582,27 @@ function ifcoDescargarMovimientosDeposito(deposito_tipo, proveedor_id) {
     url = '/api/ifco/proveedores/' + proveedor_id + '/movimientos.pdf' + qs;
   } else {
     alert('No se puede generar PDF para este depósito.');
+    return;
+  }
+  window.open(url, '_blank');
+}
+
+function ifcoDescargarMovimientosDepositoXlsx(deposito_tipo, proveedor_id) {
+  const hoy = new Date();
+  const desdeD = new Date(hoy.getTime() - 30 * 24 * 60 * 60 * 1000);
+  const fmt = function(d){
+    return d.getFullYear() + '-' +
+           String(d.getMonth()+1).padStart(2,'0') + '-' +
+           String(d.getDate()).padStart(2,'0');
+  };
+  const qs = '?desde=' + fmt(desdeD) + '&hasta=' + fmt(hoy);
+  let url;
+  if (deposito_tipo === 'san_geronimo') {
+    url = '/api/ifco/san-geronimo/movimientos.xlsx' + qs;
+  } else if (deposito_tipo === 'proveedor' && proveedor_id) {
+    url = '/api/ifco/proveedores/' + proveedor_id + '/movimientos.xlsx' + qs;
+  } else {
+    alert('No se puede generar Excel para este depósito.');
     return;
   }
   window.open(url, '_blank');
@@ -23972,27 +23994,36 @@ async function ifcoVerMovimientosProveedor(provId) {
   const tit = document.getElementById('ifco-pm-tit');
   body.innerHTML = '<div style="text-align:center;padding:30px;color:var(--mut)">Cargando…</div>';
   document.getElementById('ifco-pm-pdf-btn').style.display = ''; // mostrar botón descargar
+  var _xlsBtn = document.getElementById('ifco-pm-xls-btn'); if (_xlsBtn) _xlsBtn.style.display = '';
   modal.classList.add('on');
   try {
     const data = await _ifcoFetch('/api/ifco/proveedores/' + provId + '/movimientos');
     const p = data.proveedor;
     const movs = data.movimientos || [];
     const saldo = data.saldo;
+    const stockFisico = (data.stock_fisico != null) ? data.stock_fisico : saldo;
 
     tit.textContent = '📋 Movimientos — ' + (p.nombre || '');
 
     let saldoColor, saldoLbl;
-    if (saldo > 0)      { saldoColor = '#92400e'; saldoLbl = 'Cajones en poder del proveedor'; }
+    if (saldo > 0)      { saldoColor = '#92400e'; saldoLbl = 'En poder del proveedor (oficial)'; }
     else if (saldo < 0) { saldoColor = '#991b1b'; saldoLbl = 'Exceso entregado al proveedor'; }
-    else                { saldoColor = '#065f46'; saldoLbl = 'Saldo equilibrado'; }
+    else                { saldoColor = '#065f46'; saldoLbl = 'En poder del proveedor (oficial)'; }
+    const fisColor = stockFisico > 0 ? '#065f46' : (stockFisico < 0 ? '#991b1b' : 'var(--mut)');
 
-    // Header con saldo
-    let html = '<div style="display:flex;align-items:center;gap:12px;padding:12px 14px;background:var(--bg);border-radius:8px;margin-bottom:14px;flex-wrap:wrap">' +
-                 '<div style="font-size:14px;font-weight:600">'+_ifcoEsc(p.nombre||'?')+'</div>' +
-                 (p.razon_social ? '<div style="color:var(--mut);font-size:12px">'+_ifcoEsc(p.razon_social)+'</div>' : '') +
+    // Header con saldo oficial + stock físico (este último es lo que el proveedor cuenta en el galpón)
+    let html = '<div style="display:flex;align-items:center;gap:16px;padding:12px 14px;background:var(--bg);border-radius:8px;margin-bottom:14px;flex-wrap:wrap">' +
+                 '<div>' +
+                   '<div style="font-size:14px;font-weight:600">'+_ifcoEsc(p.nombre||'?')+'</div>' +
+                   (p.razon_social ? '<div style="color:var(--mut);font-size:12px">'+_ifcoEsc(p.razon_social)+'</div>' : '') +
+                 '</div>' +
                  '<div style="margin-left:auto;text-align:right">' +
                    '<div style="font-size:10px;color:var(--mut);text-transform:uppercase">'+saldoLbl+'</div>' +
-                   '<div style="font-size:22px;font-weight:600;color:'+saldoColor+';font-variant-numeric:tabular-nums">'+(saldo>0?'+':'')+saldo+' caj.</div>' +
+                   '<div style="font-size:18px;font-weight:600;color:'+saldoColor+';font-variant-numeric:tabular-nums">'+(saldo>0?'+':'')+saldo+' caj.</div>' +
+                 '</div>' +
+                 '<div style="text-align:right">' +
+                   '<div style="font-size:10px;color:var(--mut);text-transform:uppercase">Stock que tiene que tener</div>' +
+                   '<div style="font-size:22px;font-weight:700;color:'+fisColor+';font-variant-numeric:tabular-nums">'+(stockFisico>0?'+':'')+stockFisico+' caj.</div>' +
                  '</div>' +
                '</div>';
 
@@ -24016,37 +24047,53 @@ async function ifcoVerMovimientosProveedor(provId) {
             '<table class="ab-table" style="width:100%;font-size:12px"><thead><tr>' +
               '<th>Fecha</th><th>Tipo</th><th>Detalle</th>' +
               '<th style="text-align:right">Cant.</th>' +
+              '<th style="text-align:right">SALDO</th>' +
               '<th>Estado</th>' +
             '</tr></thead><tbody>';
 
-    html += movs.map(function(m) {
+    // SALDO = stock físico acumulado (verde >0, rojo <0, gris =0), es-AR con signo.
+    function fmtSaldoCaj(v) {
+      v = Number(v || 0);
+      const abs = Math.abs(v).toLocaleString('es-AR');
+      return (v > 0 ? '+' : v < 0 ? '-' : '') + abs;
+    }
+    // Más reciente arriba: la primera fila tiene el saldo físico final (= "Stock que tiene que tener").
+    html += movs.slice().reverse().map(function(m) {
       const deltaTxt = m.delta > 0 ? ('+' + m.delta) : (m.delta === 0 ? '0' : String(m.delta));
       const deltaColor = m.delta > 0 ? '#92400e' : (m.delta < 0 ? '#065f46' : 'var(--mut)');
+      const sa = Number(m.saldo_acumulado || 0);
+      const saldoColor = sa > 0 ? '#065f46' : (sa < 0 ? '#991b1b' : 'var(--mut)');
       const estadoTxt = m.estado ? _ifcoBadge(m.estado) : '—';
       return '<tr>' +
         '<td style="white-space:nowrap">'+_ifcoFecha(m.fecha)+'</td>' +
         '<td>'+tipoBadge(m.tipo)+'</td>' +
         '<td style="font-family:monospace;font-size:11px">'+_ifcoEsc(m.detalle||'—')+'</td>' +
         '<td style="text-align:right;font-variant-numeric:tabular-nums;color:'+deltaColor+';font-weight:600">'+deltaTxt+'</td>' +
+        '<td style="text-align:right;font-variant-numeric:tabular-nums;color:'+saldoColor+';font-weight:700">'+fmtSaldoCaj(sa)+'</td>' +
         '<td>'+estadoTxt+'</td>' +
       '</tr>';
     }).join('');
 
     html += '</tbody></table></div>';
+    html += '<div style="font-size:11px;color:var(--mut);margin-top:8px;line-height:1.5">' +
+            'La columna <b>SALDO</b> es el stock físico que debería estar en el galpón en cada fecha; ' +
+            'la fila más reciente coincide con "Stock que tiene que tener". ' +
+            '<b>Cant.</b> es el movimiento de cada operación.' +
+            '</div>';
     body.innerHTML = html;
   } catch(e) {
     body.innerHTML = '<div style="color:#991b1b;padding:14px">Error: ' + _ifcoEsc(e.message) + '</div>';
   }
 }
 
-// Descargar movimientos en Excel — PENDIENTE: reactivar cuando se haga `npm install xlsx`.
-// El endpoint GET /api/ifco/proveedores/:id/movimientos.xlsx + el botón en el modal de movimientos
-// están sacados temporalmente. Para reactivar: descomentar el endpoint en src/rutas/ifco.js,
-// agregar el botón ⬇ Descargar Excel al footer del modal ifco-mb-prov-mov, y restaurar esta función.
-
 function ifcoDescargarMovimientosPdf() {
   if (!IFCO._provMovActualId) return;
   window.open('/api/ifco/proveedores/' + IFCO._provMovActualId + '/movimientos.pdf', '_blank');
+}
+
+function ifcoDescargarMovimientosXlsx() {
+  if (!IFCO._provMovActualId) return;
+  window.open('/api/ifco/proveedores/' + IFCO._provMovActualId + '/movimientos.xlsx', '_blank');
 }
 
 async function ifcoGuardarTalonario() {

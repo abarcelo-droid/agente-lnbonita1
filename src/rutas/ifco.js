@@ -3289,26 +3289,18 @@ router.get('/despachos-por-mes', function(req, res) {
   res.json(rows);
 });
 
-// Helper: arma la lista cronológica de movimientos de un proveedor
+// Helper: arma la lista cronológica de movimientos de un proveedor.
+// El saldo físico acumulado se calcula sobre TODA la historia (anclado a
+// _stockFisicoProveedor) y recién después se filtra por fecha, para que cada
+// fila conserve su saldo físico histórico real.
 function _movimientosProveedor(provId, desde, hasta) {
-  // Filtros de fecha opcionales (formato 'YYYY-MM-DD')
-  const filtroDesde = desde ? ' AND fecha_envio >= ?' : '';
-  const filtroHasta = hasta ? ' AND fecha_envio <= ?' : '';
-  const paramsEnvios = [provId];
-  if (desde) paramsEnvios.push(desde);
-  if (hasta) paramsEnvios.push(hasta);
   const envios = db.prepare(`
     SELECT 'envio' AS tipo, id, fecha_envio AS fecha, n_remito_interno AS detalle,
            cantidad_enviada AS cantidad, cantidad_recibida, estado, notas
     FROM ifco_envios_proveedor
-    WHERE proveedor_id = ? AND eliminado_en IS NULL${filtroDesde}${filtroHasta}
-  `).all(...paramsEnvios);
+    WHERE proveedor_id = ? AND eliminado_en IS NULL
+  `).all(provId);
 
-  const filtroRDesde = desde ? ' AND fecha_recepcion >= ?' : '';
-  const filtroRHasta = hasta ? ' AND fecha_recepcion <= ?' : '';
-  const paramsRec = [provId];
-  if (desde) paramsRec.push(desde);
-  if (hasta) paramsRec.push(hasta);
   const recepciones = db.prepare(`
     SELECT 'recepcion' AS tipo, id, fecha_recepcion AS fecha,
            COALESCE(producto, n_remito_proveedor, 'Recepción de mercadería') AS detalle,
@@ -3316,22 +3308,17 @@ function _movimientosProveedor(provId, desde, hasta) {
     FROM ifco_recepciones_proveedor
     WHERE proveedor_id = ? AND eliminado_en IS NULL
       AND (es_r22 IS NULL OR es_r22 = 0)
-      AND (estado IS NULL OR estado = 'recibido')${filtroRDesde}${filtroRHasta}
-  `).all(...paramsRec);
+      AND (estado IS NULL OR estado = 'recibido')
+  `).all(provId);
 
-  const filtroDDesde = desde ? ' AND fecha_emision >= ?' : '';
-  const filtroDHasta = hasta ? ' AND fecha_emision <= ?' : '';
-  const paramsDir = [provId];
-  if (desde) paramsDir.push(desde);
-  if (hasta) paramsDir.push(hasta);
   const directos = db.prepare(`
     SELECT 'despacho_directo' AS tipo, id, fecha_emision AS fecha,
            (n_remito_ifco || ' → ' || COALESCE(empresa,'?')) AS detalle,
            cantidad_despachada AS cantidad, cantidad_recibida, cantidad_rechazada,
            estado, fecha_sellado, sucursal, rechazo_destino
     FROM ifco_remitos_super
-    WHERE proveedor_origen_id = ? AND origen = 'proveedor_directo' AND eliminado_en IS NULL${filtroDDesde}${filtroDHasta}
-  `).all(...paramsDir);
+    WHERE proveedor_origen_id = ? AND origen = 'proveedor_directo' AND eliminado_en IS NULL
+  `).all(provId);
 
   const all = envios.concat(recepciones, directos);
   // Orden cronológico ascendente (después por id como desempate)
@@ -3340,17 +3327,22 @@ function _movimientosProveedor(provId, desde, hasta) {
     return (a.fecha||'') < (b.fecha||'') ? -1 : 1;
   });
 
-  // Calcular delta de cada movimiento (mismo criterio que _calcSaldoProveedor)
-  return all.map(function(m) {
+  // Calcular delta (columna "Cant." visible, sin tocar) y delta_fisico (interno,
+  // para el saldo físico acumulado que cierra con _stockFisicoProveedor).
+  const conDelta = all.map(function(m) {
     let delta = 0;
+    let delta_fisico = 0;
     if (m.tipo === 'envio') {
-      // Saldo: sale cantidad enviada, vuelve cantidad recibida (esa parte se descuenta abajo)
-      // Acá registramos el envío entero como +cantidad
-      // Ojo: si el envío está finalizado, su cantidad_recibida ya está computada en las recepciones (otra tabla),
-      //      por eso solo suma "cantidad_enviada" entera y las recepciones lo bajan.
+      // Cant. (oficial): el envío entero suma al proveedor.
       delta = +m.cantidad;
+      // Físico: solo cuentan los envíos activos y netos de los vacíos ya devueltos.
+      //   Estados ≠ enviado/parcial no están físicamente en el galpón.
+      delta_fisico = (m.estado === 'enviado' || m.estado === 'parcial')
+        ? (m.cantidad - (m.cantidad_recibida || 0))
+        : 0;
     } else if (m.tipo === 'recepcion') {
       delta = -m.cantidad;
+      delta_fisico = -m.cantidad;
     } else if (m.tipo === 'despacho_directo') {
       if (m.estado === 'sellado' || m.estado === 'enviado' || m.estado === 'presentado') {
         const recib = m.cantidad_recibida != null ? m.cantidad_recibida : m.cantidad;
@@ -3369,12 +3361,37 @@ function _movimientosProveedor(provId, desde, hasta) {
       } else {
         delta = 0;
       }
+      // Los directos ya cierran con el físico (mismo criterio que _stockFisicoProveedor).
+      delta_fisico = delta;
     }
     // Etiqueta legible para el campo estado: "sin sellar" si despachado, agrega "rechazado" si hubo
     let estado_label = (m.estado === 'despachado') ? 'sin sellar' : (m.estado || '-');
     if ((m.cantidad_rechazada || 0) > 0) estado_label = estado_label + ' · rechazado';
-    return Object.assign({}, m, { delta: delta, estado_label: estado_label });
+    return Object.assign({}, m, { delta: delta, delta_fisico: delta_fisico, estado_label: estado_label });
   });
+
+  // Saldo físico acumulado, anclado: la fila más reciente == _stockFisicoProveedor.
+  // saldo_inicial absorbe flujos no listados como movimiento (ej. traspasos salientes),
+  // así que arranca en 0 cuando todo cierra y delata la diferencia cuando no.
+  let stockFisico = 0;
+  try { stockFisico = _stockFisicoProveedor(provId); } catch(_) {}
+  const sumaDeltaFisico = conDelta.reduce(function(acc,m){ return acc + (m.delta_fisico || 0); }, 0);
+  let acum = stockFisico - sumaDeltaFisico;
+  const conSaldo = conDelta.map(function(m) {
+    acum += (m.delta_fisico || 0);
+    return Object.assign({}, m, { saldo_acumulado: acum });
+  });
+
+  // Filtro de fecha por día (después de calcular el acumulado histórico completo)
+  if (desde || hasta) {
+    return conSaldo.filter(function(m) {
+      const f10 = (m.fecha || '').slice(0, 10);
+      if (desde && f10 < desde) return false;
+      if (hasta && f10 > hasta) return false;
+      return true;
+    });
+  }
+  return conSaldo;
 }
 
 // MOVIMIENTOS de un proveedor (envíos + recepciones + despachos directos)
@@ -3389,7 +3406,8 @@ router.get('/proveedores/:id/movimientos', function(req, res) {
 
   const movimientos = _movimientosProveedor(provId);
   const saldo = _calcSaldoProveedor(provId);
-  res.json({ proveedor: p, movimientos: movimientos, saldo: saldo });
+  const stock_fisico = _stockFisicoProveedor(provId);
+  res.json({ proveedor: p, movimientos: movimientos, saldo: saldo, stock_fisico: stock_fisico });
 });
 
 // PDF con los movimientos del proveedor (mismo contenido que el modal)
@@ -3508,31 +3526,36 @@ router.get('/proveedores/:id/movimientos.pdf', async function(req, res) {
     doc.setTextColor(0);
     y += 5;
 
-    // Encabezados de tabla
+    // Encabezados de tabla: FECHA | TIPO | DETALLE | CANT. | SALDO | ESTADO
     const cFecha  = L;
-    const cTipo   = L + 28;
-    const cDet    = L + 60;
-    const cCant   = L + innerW - 50;
-    const cEst    = L + innerW - 22;
+    const cTipo   = L + 24;
+    const cDet    = L + 50;
+    const cCantR  = R - 60;   // CANT. alineada a la derecha en esta X
+    const cSaldoR = R - 28;   // SALDO alineada a la derecha en esta X
+    const cEst    = R - 25;   // ESTADO arranca acá
+    const drawHead = () => {
+      doc.text('FECHA',  cFecha,  y);
+      doc.text('TIPO',   cTipo,   y);
+      doc.text('DETALLE',cDet,    y);
+      doc.text('CANT.',  cCantR,  y, { align: 'right' });
+      doc.text('SALDO',  cSaldoR, y, { align: 'right' });
+      doc.text('ESTADO', cEst,    y);
+    };
     setF(8.5, true);
     doc.setLineWidth(0.3);
     doc.line(L, y, R, y);
     y += 4;
-    doc.text('FECHA',    cFecha, y);
-    doc.text('TIPO',     cTipo,  y);
-    doc.text('DETALLE',  cDet,   y);
-    doc.text('CANT.',    cCant + 24, y, { align: 'right' });
-    doc.text('ESTADO',   cEst,   y);
+    drawHead();
     y += 2;
     doc.line(L, y, R, y);
     y += 4;
 
-    // Filas
+    // Filas (más reciente arriba, coherente con el modal)
     setF(8.5, false);
     const labelTipo = (t) => t === 'envio' ? 'Envio' : t === 'recepcion' ? 'Recepcion' : 'Directo super';
     const truncar = (s, max) => { s = _pdfSafe(s); return s.length > max ? s.slice(0, max - 1) + '...' : s; };
 
-    for (const m of movimientos) {
+    for (const m of movimientos.slice().reverse()) {
       // Salto de página si no entra
       if (y > H - 25) {
         doc.addPage();
@@ -3540,11 +3563,7 @@ router.get('/proveedores/:id/movimientos.pdf', async function(req, res) {
         setF(8.5, true);
         doc.line(L, y, R, y);
         y += 4;
-        doc.text('FECHA', cFecha, y);
-        doc.text('TIPO',  cTipo,  y);
-        doc.text('DETALLE', cDet, y);
-        doc.text('CANT.', cCant + 24, y, { align: 'right' });
-        doc.text('ESTADO', cEst, y);
+        drawHead();
         y += 2;
         doc.line(L, y, R, y);
         y += 4;
@@ -3552,11 +3571,18 @@ router.get('/proveedores/:id/movimientos.pdf', async function(req, res) {
       }
       doc.text(fechaFmt(m.fecha),         cFecha, y);
       doc.text(labelTipo(m.tipo),         cTipo,  y);
-      doc.text(truncar(m.detalle, 55),    cDet,   y);
+      doc.text(truncar(m.detalle, 42),    cDet,   y);
       const deltaTxt = (m.delta > 0 ? '+' : '') + fmt(m.delta);
       if (m.delta < 0) doc.setTextColor(180, 30, 30);
       else if (m.delta > 0) doc.setTextColor(30, 130, 60);
-      doc.text(deltaTxt, cCant + 24, y, { align: 'right' });
+      doc.text(deltaTxt, cCantR, y, { align: 'right' });
+      doc.setTextColor(0);
+      const sa = m.saldo_acumulado || 0;
+      const saTxt = (sa > 0 ? '+' : '') + fmt(sa);
+      if (sa < 0) doc.setTextColor(180, 30, 30);
+      else if (sa > 0) doc.setTextColor(30, 130, 60);
+      else doc.setTextColor(110, 110, 110);
+      doc.text(saTxt, cSaldoR, y, { align: 'right' });
       doc.setTextColor(0);
       doc.text(_pdfSafe(m.estado_label || m.estado || '-'),   cEst, y);
       y += 5;
@@ -3582,57 +3608,137 @@ router.get('/proveedores/:id/movimientos.pdf', async function(req, res) {
   }
 });
 
-// EXPORTAR movimientos a Excel (.xlsx) — PENDIENTE: requiere instalar dependency `xlsx` (SheetJS)
-// Endpoint comentado hasta que se haga `npm install xlsx`. Después descomentar y reactivar el botón
-// en el modal de movimientos del proveedor (ifcoDescargarMovimientosXlsx en panel.html).
+// ── Lazy load de SheetJS (xlsx) para GENERAR Excel de movimientos ─────────
+let _xlsxLib = null;
+async function _getXLSX() {
+  if (_xlsxLib) return _xlsxLib;
+  try {
+    const mod = await import('xlsx');
+    _xlsxLib = mod.default || mod;
+    return _xlsxLib;
+  } catch(e) {
+    console.error('[IFCO] xlsx (SheetJS) no disponible:', e.message);
+    return null;
+  }
+}
+
+// Arma el buffer .xlsx de un informe de movimientos (proveedor o SG).
+// CANTIDAD y SALDO ACUMULADO van como números reales (no texto) para que el
+// proveedor pueda filtrar/hacer cuentas. Filas en el mismo orden que el modal/PDF
+// (más reciente arriba).
+function _buildMovimientosXlsx(XLSX, titulo, lineasSaldo, movimientos, labelTipo) {
+  const fechaFmt = (s) => {
+    if (!s) return '';
+    const p = String(s).split(' ')[0].split('-');
+    return p.length === 3 ? p[2] + '/' + p[1] + '/' + p[0] : s;
+  };
+  const aoa = [];
+  aoa.push([titulo]);
+  (lineasSaldo || []).forEach(function(l) { aoa.push([l]); });
+  aoa.push([]); // fila en blanco
+  aoa.push(['FECHA', 'TIPO', 'DETALLE', 'CANTIDAD', 'SALDO ACUMULADO', 'ESTADO']);
+  const firstDataRow = aoa.length; // índice 0-based de la primera fila de datos
+  movimientos.slice().reverse().forEach(function(m) {
+    aoa.push([
+      fechaFmt(m.fecha),
+      labelTipo(m.tipo),
+      m.detalle || '',
+      Number(m.delta || 0),
+      Number(m.saldo_acumulado || 0),
+      m.estado_label || m.estado || '-'
+    ]);
+  });
+
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  ws['!cols'] = [ {wch:12}, {wch:16}, {wch:46}, {wch:11}, {wch:16}, {wch:22} ];
+  // Formato numérico (miles) en CANTIDAD (col D) y SALDO ACUMULADO (col E)
+  for (let r = firstDataRow; r < aoa.length; r++) {
+    ['D', 'E'].forEach(function(col) {
+      const cell = ws[col + (r + 1)]; // aoa[r] => fila r+1 en la planilla
+      if (cell && typeof cell.v === 'number') { cell.t = 'n'; cell.z = '#,##0'; }
+    });
+  }
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Movimientos');
+  return Buffer.from(XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }));
+}
+
+router.get('/proveedores/:id/movimientos.xlsx', async function(req, res) {
+  try {
+    const provId = parseInt(req.params.id);
+    if (!provId) return res.status(400).json({ error: 'ID inválido' });
+    const errAcc = _verificarAccesoDeposito(req.user, 'proveedor', provId);
+    if (errAcc) return res.status(403).json({ error: errAcc });
+    const p = db.prepare("SELECT id, nombre, razon_social FROM proveedores WHERE id = ?").get(provId);
+    if (!p) return res.status(404).json({ error: 'Proveedor no encontrado' });
+
+    const desde = (req.query.desde || '').slice(0, 10) || null;
+    const hasta = (req.query.hasta || '').slice(0, 10) || null;
+
+    const XLSX = await _getXLSX();
+    if (!XLSX) return res.status(503).json({ error: 'xlsx (SheetJS) no disponible' });
+
+    const movimientos = _movimientosProveedor(provId, desde, hasta);
+    const saldo = _calcSaldoProveedor(provId);
+    const stockFisico = _stockFisicoProveedor(provId);
+    const fmtN = (n) => Number(n || 0).toLocaleString('es-AR');
+
+    const titulo = 'Movimientos de cajones IFCO — ' + (p.nombre || ('Proveedor ' + provId));
+    const lineasSaldo = [
+      'Stock que tiene que tener (físico): ' + fmtN(stockFisico) + ' caj.',
+      'En poder del proveedor (oficial): ' + fmtN(saldo) + ' caj.'
+    ];
+    if (desde || hasta) lineasSaldo.push('Período: ' + (desde || 'inicio') + ' a ' + (hasta || 'hoy'));
+    const labelTipo = (t) => t === 'envio' ? 'Envío' : t === 'recepcion' ? 'Recepción' : 'Directo súper';
+
+    const buf = _buildMovimientosXlsx(XLSX, titulo, lineasSaldo, movimientos, labelTipo);
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', 'attachment; filename="movimientos-' + (p.nombre || provId).replace(/[^a-z0-9]+/gi, '_') + '.xlsx"');
+    res.send(buf);
+  } catch(e) {
+    console.error('[IFCO][movimientos.xlsx] error:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
 
 // ════════════════════════════════════════════════════════════════════════════
 // MOVIMIENTOS DE PLANTA SAN GERÓNIMO (todos los flujos que afectan stock SG)
 // ════════════════════════════════════════════════════════════════════════════
 
 function _movimientosSanGeronimo(desde, hasta) {
-  // Helper para construir filtros de fecha sobre una columna
-  const filtro = (col) => {
-    let where = '';
-    const params = [];
-    if (desde) { where += ' AND ' + col + ' >= ?'; params.push(desde); }
-    if (hasta) { where += ' AND ' + col + ' <= ?'; params.push(hasta); }
-    return { where, params };
-  };
+  // El saldo físico acumulado se calcula sobre TODA la historia (anclado a
+  // _calcStockSG) y recién después se filtra por fecha, para que cada fila
+  // conserve su saldo físico histórico real.
 
   // Retiros (ingreso manual a SG)
-  const fRet = filtro('fecha');
   const retiros = db.prepare(`
     SELECT 'retiro' AS tipo, id, fecha,
            ('Modelo ' || COALESCE(modelo,'?') || COALESCE(' / ' || n_remito, '') || COALESCE(' / ' || sucursal_ifco, '')) AS detalle,
            cantidad, NULL AS estado
     FROM ifco_movimientos
-    WHERE tipo = 'retiro' AND eliminado_en IS NULL${fRet.where}
-  `).all(...fRet.params);
+    WHERE tipo = 'retiro' AND eliminado_en IS NULL
+  `).all();
 
   // Pérdidas (egreso de SG)
-  const fPer = filtro('fecha');
   const perdidas = db.prepare(`
     SELECT 'perdida' AS tipo, id, fecha,
            COALESCE(notas, 'Pérdida') AS detalle,
            cantidad, NULL AS estado
     FROM ifco_movimientos
-    WHERE tipo = 'perdida' AND eliminado_en IS NULL${fPer.where}
-  `).all(...fPer.params);
+    WHERE tipo = 'perdida' AND eliminado_en IS NULL
+  `).all();
 
   // Envíos a proveedor (egreso de SG)
-  const fEnv = filtro('ep.fecha_envio');
   const envios = db.prepare(`
     SELECT 'envio' AS tipo, ep.id, ep.fecha_envio AS fecha,
            (ep.n_remito_interno || ' → ' || COALESCE(p.nombre,'?')) AS detalle,
            ep.cantidad_enviada AS cantidad, ep.estado
     FROM ifco_envios_proveedor ep
     LEFT JOIN proveedores p ON p.id = ep.proveedor_id
-    WHERE ep.eliminado_en IS NULL${fEnv.where}
-  `).all(...fEnv.params);
+    WHERE ep.eliminado_en IS NULL
+  `).all();
 
   // Recepciones desde proveedor (ingreso a SG)
-  const fRec = filtro('rp.fecha_recepcion');
   const recepciones = db.prepare(`
     SELECT 'recepcion' AS tipo, rp.id, rp.fecha_recepcion AS fecha,
            (COALESCE(p.nombre,'?') || COALESCE(' / ' || rp.n_remito_proveedor, '')) AS detalle,
@@ -3641,32 +3747,30 @@ function _movimientosSanGeronimo(desde, hasta) {
     LEFT JOIN proveedores p ON p.id = rp.proveedor_id
     WHERE rp.eliminado_en IS NULL
       AND (rp.es_r22 IS NULL OR rp.es_r22 = 0)
-      AND (rp.estado IS NULL OR rp.estado = 'recibido')${fRec.where}
-  `).all(...fRec.params);
+      AND (rp.estado IS NULL OR rp.estado = 'recibido')
+  `).all();
 
   // Despachos al súper desde SG (egreso de SG)
-  const fDes = filtro('fecha_emision');
   const despachos = db.prepare(`
     SELECT 'despacho_sg' AS tipo, id, fecha_emision AS fecha,
            (n_remito_ifco || ' → ' || COALESCE(empresa,'?')) AS detalle,
            cantidad_despachada AS cantidad, cantidad_recibida, cantidad_rechazada,
            estado, rechazo_destino
     FROM ifco_remitos_super
-    WHERE origen = 'san_geronimo' AND eliminado_en IS NULL${fDes.where}
-  `).all(...fDes.params);
+    WHERE origen = 'san_geronimo' AND eliminado_en IS NULL
+  `).all();
 
   // Faltantes declarados (ajustes manuales que afectan el teórico SG)
   // delta>0 = se declara faltante (sale del piso); delta<0 = se reduce el faltante (vuelve)
   let faltantes = [];
   try {
-    const fFal = filtro('fecha');
     faltantes = db.prepare(`
       SELECT 'faltante_sg' AS tipo, id, fecha,
              COALESCE(motivo, 'Faltante declarado') AS detalle,
              delta AS cantidad, NULL AS estado
       FROM ifco_faltantes_sg
-      WHERE eliminado_en IS NULL${fFal.where}
-    `).all(...fFal.params);
+      WHERE eliminado_en IS NULL
+    `).all();
   } catch(_) { /* tabla no existe en bases viejas, ignorar */ }
 
   const all = retiros.concat(perdidas, envios, recepciones, despachos, faltantes);
@@ -3677,7 +3781,7 @@ function _movimientosSanGeronimo(desde, hasta) {
   });
 
   // Calcular delta de cada movimiento (mismo criterio que _stockTeoricoDeposito para SG)
-  return all.map(function(m) {
+  const conDelta = all.map(function(m) {
     let delta = 0;
     if (m.tipo === 'retiro')          delta = +m.cantidad;
     else if (m.tipo === 'perdida')    delta = -m.cantidad;
@@ -3705,6 +3809,29 @@ function _movimientosSanGeronimo(desde, hasta) {
     if ((m.cantidad_rechazada || 0) > 0) estado_label = estado_label + ' · rechazado';
     return Object.assign({}, m, { delta: delta, estado_label: estado_label });
   });
+
+  // Saldo físico acumulado, anclado: la fila más reciente == stock de piso SG actual
+  // (_calcStockSG). saldo_inicial absorbe los flujos no representados como movimiento
+  // (faltantes manuales, retiros/pérdidas pendientes, etc.).
+  let stockSG = 0;
+  try { stockSG = _calcStockSG(); } catch(_) {}
+  const sumaDelta = conDelta.reduce(function(acc,m){ return acc + (m.delta || 0); }, 0);
+  let acum = stockSG - sumaDelta;
+  const conSaldo = conDelta.map(function(m) {
+    acum += (m.delta || 0);
+    return Object.assign({}, m, { saldo_acumulado: acum });
+  });
+
+  // Filtro de fecha por día (después de calcular el acumulado histórico completo)
+  if (desde || hasta) {
+    return conSaldo.filter(function(m) {
+      const f10 = (m.fecha || '').slice(0, 10);
+      if (desde && f10 < desde) return false;
+      if (hasta && f10 > hasta) return false;
+      return true;
+    });
+  }
+  return conSaldo;
 }
 
 router.get('/san-geronimo/movimientos.pdf', async function(req, res) {
@@ -3770,26 +3897,31 @@ router.get('/san-geronimo/movimientos.pdf', async function(req, res) {
     doc.setTextColor(0);
     y += 5;
 
-    // Encabezados de tabla
+    // Encabezados de tabla: FECHA | TIPO | DETALLE | CANT. | SALDO | ESTADO
     const cFecha  = L;
-    const cTipo   = L + 28;
-    const cDet    = L + 60;
-    const cCant   = L + innerW - 50;
-    const cEst    = L + innerW - 22;
+    const cTipo   = L + 24;
+    const cDet    = L + 50;
+    const cCantR  = R - 60;   // CANT. alineada a la derecha en esta X
+    const cSaldoR = R - 28;   // SALDO alineada a la derecha en esta X
+    const cEst    = R - 25;   // ESTADO arranca acá
+    const drawHead = () => {
+      doc.text('FECHA',  cFecha,  y);
+      doc.text('TIPO',   cTipo,   y);
+      doc.text('DETALLE',cDet,    y);
+      doc.text('CANT.',  cCantR,  y, { align: 'right' });
+      doc.text('SALDO',  cSaldoR, y, { align: 'right' });
+      doc.text('ESTADO', cEst,    y);
+    };
     setF(8.5, true);
     doc.setLineWidth(0.3);
     doc.line(L, y, R, y);
     y += 4;
-    doc.text('FECHA',    cFecha, y);
-    doc.text('TIPO',     cTipo,  y);
-    doc.text('DETALLE',  cDet,   y);
-    doc.text('CANT.',    cCant + 24, y, { align: 'right' });
-    doc.text('ESTADO',   cEst,   y);
+    drawHead();
     y += 2;
     doc.line(L, y, R, y);
     y += 4;
 
-    // Filas
+    // Filas (más reciente arriba, coherente con el modal)
     setF(8.5, false);
     const labelTipo = (t) => {
       if (t === 'retiro')        return 'Retiro IFCO';
@@ -3802,18 +3934,14 @@ router.get('/san-geronimo/movimientos.pdf', async function(req, res) {
     };
     const truncar = (s, max) => { s = _pdfSafe(s); return s.length > max ? s.slice(0, max - 1) + '...' : s; };
 
-    for (const m of movimientos) {
+    for (const m of movimientos.slice().reverse()) {
       if (y > H - 25) {
         doc.addPage();
         y = M + 8;
         setF(8.5, true);
         doc.line(L, y, R, y);
         y += 4;
-        doc.text('FECHA', cFecha, y);
-        doc.text('TIPO',  cTipo,  y);
-        doc.text('DETALLE', cDet, y);
-        doc.text('CANT.', cCant + 24, y, { align: 'right' });
-        doc.text('ESTADO', cEst, y);
+        drawHead();
         y += 2;
         doc.line(L, y, R, y);
         y += 4;
@@ -3821,11 +3949,18 @@ router.get('/san-geronimo/movimientos.pdf', async function(req, res) {
       }
       doc.text(fechaFmt(m.fecha),         cFecha, y);
       doc.text(labelTipo(m.tipo),         cTipo,  y);
-      doc.text(truncar(m.detalle, 55),    cDet,   y);
+      doc.text(truncar(m.detalle, 42),    cDet,   y);
       const deltaTxt = (m.delta > 0 ? '+' : '') + fmt(m.delta);
       if (m.delta < 0) doc.setTextColor(180, 30, 30);
       else if (m.delta > 0) doc.setTextColor(30, 130, 60);
-      doc.text(deltaTxt, cCant + 24, y, { align: 'right' });
+      doc.text(deltaTxt, cCantR, y, { align: 'right' });
+      doc.setTextColor(0);
+      const sa = m.saldo_acumulado || 0;
+      const saTxt = (sa > 0 ? '+' : '') + fmt(sa);
+      if (sa < 0) doc.setTextColor(180, 30, 30);
+      else if (sa > 0) doc.setTextColor(30, 130, 60);
+      else doc.setTextColor(110, 110, 110);
+      doc.text(saTxt, cSaldoR, y, { align: 'right' });
       doc.setTextColor(0);
       doc.text(_pdfSafe(m.estado_label || m.estado || '-'),   cEst, y);
       y += 5;
@@ -3845,6 +3980,44 @@ router.get('/san-geronimo/movimientos.pdf', async function(req, res) {
     res.send(buf);
   } catch(e) {
     console.error('[IFCO][san-geronimo/movimientos.pdf] error:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.get('/san-geronimo/movimientos.xlsx', async function(req, res) {
+  try {
+    const errAcc = _verificarAccesoDeposito(req.user, 'san_geronimo', null);
+    if (errAcc) return res.status(403).json({ error: errAcc });
+    const desde = (req.query.desde || '').slice(0, 10) || null;
+    const hasta = (req.query.hasta || '').slice(0, 10) || null;
+
+    const XLSX = await _getXLSX();
+    if (!XLSX) return res.status(503).json({ error: 'xlsx (SheetJS) no disponible' });
+
+    const movimientos = _movimientosSanGeronimo(desde, hasta);
+    let stockSG = 0;
+    try { stockSG = _stockTeoricoDeposito('san_geronimo'); } catch(_) {}
+    const fmtN = (n) => Number(n || 0).toLocaleString('es-AR');
+
+    const titulo = 'Movimientos de cajones IFCO — San Gerónimo (planta)';
+    const lineasSaldo = [ 'Stock de piso actual: ' + fmtN(stockSG) + ' caj.' ];
+    if (desde || hasta) lineasSaldo.push('Período: ' + (desde || 'inicio') + ' a ' + (hasta || 'hoy'));
+    const labelTipo = (t) => {
+      if (t === 'retiro')      return 'Retiro IFCO';
+      if (t === 'perdida')     return 'Pérdida';
+      if (t === 'envio')       return 'Envío prov.';
+      if (t === 'recepcion')   return 'Recepción';
+      if (t === 'despacho_sg') return 'Despacho súper';
+      if (t === 'faltante_sg') return 'Faltante decl.';
+      return t;
+    };
+
+    const buf = _buildMovimientosXlsx(XLSX, titulo, lineasSaldo, movimientos, labelTipo);
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', 'attachment; filename="movimientos-san_geronimo.xlsx"');
+    res.send(buf);
+  } catch(e) {
+    console.error('[IFCO][san-geronimo/movimientos.xlsx] error:', e);
     res.status(500).json({ error: e.message });
   }
 });
