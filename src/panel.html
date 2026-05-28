@@ -20270,6 +20270,20 @@ async function ifcoGuardarRemito() {
 
   // CREACIÓN: FormData (puede llevar foto)
   const _ckYS = document.getElementById('ifco-r-ya-sellado'); const yaSellado = _ckYS ? _ckYS.checked : false;
+
+  // Dry-run: si este número deja un hueco respecto del último usado, avisar.
+  // NO bloquea: solo confirma. (Puede haber motivos legítimos para saltear.)
+  try {
+    const _vs = await _ifcoFetch('/api/ifco/remitos/validar-salteo', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ n_remito_ifco: numero, origen: origen, proveedor_origen_id: provOrigenId || null })
+    });
+    if (_vs && _vs.data && _vs.data.genera_salteo) {
+      const _ok = await _ifcoConfirmSalteo(_vs.data, numero);
+      if (!_ok) return; // canceló
+    }
+  } catch(e) { /* si la validación falla, no bloquear la creación */ }
+
   const fd = new FormData();
   fd.append('n_remito_ifco', numero);
   const numSG = document.getElementById('ifco-r-numero-sg').value.trim();
@@ -20320,6 +20334,79 @@ async function ifcoGuardarRemito() {
   } catch(e) {
     alert('Error: ' + e.message);
   }
+}
+
+// Modal de confirmación de salteo (dinámico). Devuelve Promise<bool>.
+function _ifcoConfirmSalteo(d, numeroStr) {
+  return new Promise(function(resolve){
+    const lista = (d.salteos_que_quedarian_fmt || []).map(function(s){ return '<li style="font-family:monospace;margin:2px 0">'+_ifcoEsc(s)+'</li>'; }).join('');
+    const serie = (d.salteos_que_quedarian_fmt && d.salteos_que_quedarian_fmt.length) ? d.salteos_que_quedarian_fmt[0].split('-')[0] : '';
+    const ultimoFmt = serie ? (serie + '-' + String(d.ultimo_usado_actual).padStart(8,'0')) : String(d.ultimo_usado_actual);
+    const ov = document.createElement('div');
+    ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:99999;padding:16px';
+    ov.innerHTML =
+      '<div style="background:#fff;border-radius:12px;max-width:460px;width:100%;padding:22px;box-shadow:0 10px 40px rgba(0,0,0,.3)">' +
+        '<div style="font-size:17px;font-weight:700;color:#92400e;margin-bottom:14px">⚠️ Confirmar salteo</div>' +
+        '<div style="font-size:14px;line-height:1.55;color:#374151">' +
+          'Estás por crear el remito <b style="font-family:monospace">'+_ifcoEsc(numeroStr||'')+'</b>.<br><br>' +
+          'El último número usado en este talonario es el <b style="font-family:monospace">'+_ifcoEsc(ultimoFmt)+'</b>.<br><br>' +
+          'Si confirmás, van a quedar <b>SALTEADOS</b>:' +
+          '<ul style="margin:8px 0 0;padding-left:20px;color:#92400e">'+lista+'</ul>' +
+        '</div>' +
+        '<div style="display:flex;gap:10px;justify-content:flex-end;margin-top:20px">' +
+          '<button id="_salt-cancel" style="padding:9px 16px;border:1px solid #d1d5db;background:#fff;border-radius:8px;cursor:pointer;font-size:13px">Cancelar</button>' +
+          '<button id="_salt-ok" style="padding:9px 16px;border:none;background:#f59e0b;color:#fff;border-radius:8px;cursor:pointer;font-weight:600;font-size:13px">Sí, crear remito</button>' +
+        '</div>' +
+      '</div>';
+    document.body.appendChild(ov);
+    function done(v){ ov.remove(); resolve(v); }
+    ov.querySelector('#_salt-cancel').onclick = function(){ done(false); };
+    ov.querySelector('#_salt-ok').onclick = function(){ done(true); };
+    ov.onclick = function(e){ if (e.target === ov) done(false); };
+  });
+}
+
+// Mini-modal con el contexto de un salteo (anterior/posterior) + acción anular.
+async function ifcoVerSalteoContexto(talonarioId, numero) {
+  try {
+    const res = await _ifcoFetch('/api/ifco/talonarios/' + talonarioId + '/salteos');
+    const data = (res && res.data) || {};
+    const s = (data.salteos || []).find(function(x){ return x.numero === numero; });
+    if (!s) { alert('No se encontró el detalle del salteo'); return; }
+    const infoLine = function(x, lbl){
+      if (!x) return '<div style="color:var(--mut)"><b>'+lbl+':</b> —</div>';
+      const parts = [];
+      if (x.estado) parts.push(_ifcoEsc(x.estado));
+      if (x.supermercado) parts.push(_ifcoEsc(x.supermercado));
+      if (x.fecha_emision) parts.push(_ifcoFecha(x.fecha_emision));
+      return '<div><b>'+lbl+':</b> <span style="font-family:monospace">'+_ifcoEsc(data.talonario_serie+'-'+String(x.numero).padStart(8,'0'))+'</span>' +
+             (parts.length ? ' <span style="color:var(--mut)">('+parts.join(' · ')+')</span>' : '') + '</div>';
+    };
+    const ov = document.createElement('div');
+    ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:99999;padding:16px';
+    ov.innerHTML =
+      '<div style="background:#fff;border-radius:12px;max-width:440px;width:100%;padding:22px;box-shadow:0 10px 40px rgba(0,0,0,.3)">' +
+        '<div style="font-size:16px;font-weight:700;color:#78350f;margin-bottom:6px">⚠️ Salteo '+_ifcoEsc(s.numero_formateado)+'</div>' +
+        '<div style="font-size:12px;color:var(--mut);margin-bottom:14px">Número sin emitir dentro del rango usado</div>' +
+        '<div style="font-size:13px;line-height:1.7;background:var(--bg);border-radius:8px;padding:12px">' +
+          infoLine(s.anterior,'Anterior') + infoLine(s.posterior,'Posterior') +
+        '</div>' +
+        '<div style="display:flex;gap:10px;justify-content:space-between;margin-top:18px">' +
+          '<button id="_sc-anular" style="padding:9px 14px;border:1px solid #fca5a5;background:#fee2e2;color:#991b1b;border-radius:8px;cursor:pointer;font-size:13px;font-weight:600">Marcar como anulado</button>' +
+          '<button id="_sc-close" style="padding:9px 16px;border:1px solid #d1d5db;background:#fff;border-radius:8px;cursor:pointer;font-size:13px">Cerrar</button>' +
+        '</div>' +
+      '</div>';
+    document.body.appendChild(ov);
+    function close(){ ov.remove(); }
+    ov.querySelector('#_sc-close').onclick = close;
+    ov.onclick = function(e){ if (e.target === ov) close(); };
+    ov.querySelector('#_sc-anular').onclick = function(){
+      close();
+      // Reutiliza el flujo existente de anulación (cierra el modal de detalle y refresca).
+      var det = document.getElementById('ifco-mb-talon-detalle'); if (det) det.classList.remove('on');
+      ifcoAbrirAnularNumero(talonarioId, numero, s.numero_formateado);
+    };
+  } catch(e) { alert('Error: ' + e.message); }
 }
 
 // EDITAR remito existente: trae datos del backend y abre el modal en modo edición
@@ -23308,7 +23395,7 @@ async function ifcoCargarTalonarios() {
       if (salteosCount > 0) {
         const sample = (t.salteos_sample || []).slice(0, 15);
         const tip = 'Números salteados: ' + sample.join(', ') + (salteosCount > sample.length ? ' (y ' + (salteosCount - sample.length) + ' más)' : '');
-        salteosCell = '<button class="btn bo" style="font-size:11px;padding:2px 8px;color:#991b1b;background:#fee2e2;border-color:#fca5a5" onclick="event.stopPropagation();ifcoVerSalteosTalonario(' + t.id + ')" title="' + tip.replace(/"/g, '&quot;') + '">⚠️ ' + salteosCount + '</button>';
+        salteosCell = '<button class="btn bo" style="font-size:11px;padding:2px 8px;color:#991b1b;background:#fee2e2;border-color:#fca5a5;font-weight:600" onclick="event.stopPropagation();ifcoVerTalonario(' + t.id + ')" title="' + tip.replace(/"/g, '&quot;') + '">⚠️ ' + salteosCount + '</button>';
       }
       const acciones = ['<button class="btn bo" style="font-size:11px;padding:4px 8px" onclick="event.stopPropagation();ifcoVerTalonario('+t.id+')">👁 Ver</button>'];
       acciones.push('<button class="btn bo" style="font-size:11px;padding:4px 8px" onclick="event.stopPropagation();ifcoEditarTalonario('+t.id+')">✏️ Editar</button>');
@@ -23679,6 +23766,17 @@ async function ifcoVerTalonario(id) {
 
     tit.textContent = '📒 Detalle del talonario — ' + (t.serie || '');
 
+    // Salteos = DISPONIBLE dentro del rango [min,max] de los números usados.
+    // (mismo criterio que el backend). Diferencia de los disponibles "limpios"
+    // que vienen después del último usado.
+    const _usadosNums = numeros.filter(function(n){ return n.estado !== 'disponible'; }).map(function(n){ return n.numero; });
+    const _minU = _usadosNums.length ? Math.min.apply(null, _usadosNums) : null;
+    const _maxU = _usadosNums.length ? Math.max.apply(null, _usadosNums) : null;
+    const _saltSet = new Set();
+    if (_minU != null) numeros.forEach(function(n){ if (n.estado === 'disponible' && n.numero >= _minU && n.numero <= _maxU) _saltSet.add(n.numero); });
+    const _saltNums = Array.from(_saltSet).sort(function(a,b){ return a - b; });
+    const _saltFmt = _saltNums.map(function(n){ return t.serie + '-' + String(n).padStart(8,'0'); });
+
     // Conteos por estado (anulado_manual cuenta como anulado para el summary)
     const cuenta = { disponible:0, despachado:0, sellado:0, presentado:0, anulado:0 };
     numeros.forEach(function(n){
@@ -23710,9 +23808,11 @@ async function ifcoVerTalonario(id) {
 
     // Render de cada celda
     function celda(n) {
-      const c = colorEstado(n.estado);
+      let c = colorEstado(n.estado);
       const isAnuladoManual = n.estado === 'anulado_manual';
       const isDisponible = n.estado === 'disponible';
+      const esSalteo = isDisponible && _saltSet.has(n.numero);
+      if (esSalteo) c = { bg:'#fef3c7', border:'#f59e0b', txt:'#78350f', label:'⚠️ Salteo' };
       const clickable = !!n.remito_id;
       const cursor = clickable ? 'cursor:pointer' : 'cursor:default';
       const handler = clickable
@@ -23721,6 +23821,7 @@ async function ifcoVerTalonario(id) {
       let tooltip;
       if (clickable)            tooltip = 'title="Click para ver el remito"';
       else if (isAnuladoManual) tooltip = 'title="Anulado: '+_ifcoEsc(n.motivo||'sin motivo')+(n.anulado_por_username?' · por '+_ifcoEsc(n.anulado_por_username):'')+'"';
+      else if (esSalteo)        tooltip = 'title="⚠️ Salteo — número sin emitir dentro del rango usado. Si fue anulado externamente, marcalo con ❌"';
       else if (isDisponible)    tooltip = 'title="Disponible — Click derecho o botón ❌ para anular si está mal impreso"';
       else                       tooltip = 'title="Disponible — sin uso"';
       const subtxt = n.empresa
@@ -23786,6 +23887,14 @@ async function ifcoVerTalonario(id) {
         '<div style="margin-left:auto">'+duenoHtml+'</div>' +
       '</div>' +
 
+      // Banner de salteos (debajo del header)
+      (_saltNums.length
+        ? '<div style="background:#fef3c7;border:1px solid #f59e0b;border-radius:6px;padding:10px 14px;margin:0 0 12px;font-size:13px;color:#78350f">' +
+            '⚠️ <strong>Este talonario tiene ' + _saltNums.length + ' salteo' + (_saltNums.length>1?'s':'') + ':</strong> ' +
+            _ifcoEsc(_saltFmt.join(', ')) +
+          '</div>'
+        : '') +
+
       // CAI / vencimiento
       '<div style="display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap;font-size:12px;color:var(--mut)">' +
         '<div><span style="text-transform:uppercase;font-size:10px">CAI:</span> <span style="font-family:monospace;color:var(--txt)">'+_ifcoEsc(t.cai||'—')+'</span></div>' +
@@ -23818,6 +23927,27 @@ async function ifcoVerTalonario(id) {
             '</div>'
           : '') +
       '</div>' +
+
+      // Card de salteos (arriba del grid)
+      (_saltNums.length
+        ? '<div style="background:linear-gradient(135deg,#fef3c7,#fde68a);border-left:4px solid #f59e0b;border-radius:8px;padding:12px 16px;margin:12px 0">' +
+            '<div style="display:flex;align-items:center;gap:12px">' +
+              '<div style="font-size:32px;font-weight:700;color:#78350f;line-height:1">' + _saltNums.length + '</div>' +
+              '<div><div style="font-weight:600;color:#78350f">⚠️ Salteos detectados</div>' +
+                '<div style="font-size:12px;color:#92400e;margin-top:2px">Números dentro del rango usado que quedaron sin emitir</div></div>' +
+            '</div>' +
+            '<div style="margin-top:10px;padding-top:10px;border-top:1px solid rgba(120,53,15,0.2)">' +
+              '<div style="font-size:11px;color:#92400e;font-weight:600;margin-bottom:4px">NÚMEROS SALTEADOS:</div>' +
+              '<div style="display:flex;flex-wrap:wrap;gap:6px">' +
+                _saltNums.map(function(n){
+                  return '<span onclick="ifcoVerSalteoContexto('+t.id+','+n+')" title="Ver contexto / marcar como anulado" ' +
+                    'style="background:#fff;border:1px solid #f59e0b;padding:4px 10px;border-radius:14px;font-family:monospace;font-size:12px;color:#78350f;cursor:pointer">' +
+                    _ifcoEsc(t.serie + '-' + String(n).padStart(8,'0')) + '</span>';
+                }).join('') +
+              '</div>' +
+            '</div>' +
+          '</div>'
+        : '') +
 
       // Grilla de números
       '<div style="font-size:11px;color:var(--mut);text-transform:uppercase;font-weight:600;margin-bottom:8px">Estado de cada número</div>' +

@@ -1499,6 +1499,87 @@ router.get('/talonarios/:id/detalle', function(req, res) {
   res.json({ talonario: t, numeros: numeros, log: log });
 });
 
+// ── SALTEOS: cálculo detallado por talonario ───────────────────────────────
+// Mismo criterio que GET /talonarios (número parseado de n_remito_sg, usados =
+// remitos activos + números anulados). Devuelve, además del listado, el
+// contexto anterior/posterior de cada salteo (entre qué dos usos quedó).
+function _ifcoCalcSalteos(talonario_id) {
+  const t = db.prepare("SELECT id, serie, numero_desde, numero_hasta FROM ifco_talonarios WHERE id = ?").get(talonario_id);
+  if (!t) return null;
+  const remitos = db.prepare(`
+    SELECT CAST(SUBSTR(n_remito_sg, INSTR(n_remito_sg,'-')+1) AS INTEGER) AS num,
+           estado, empresa, fecha_emision
+    FROM ifco_remitos_super
+    WHERE talonario_id = ? AND eliminado_en IS NULL AND n_remito_sg IS NOT NULL
+  `).all(talonario_id);
+  const numInfo = new Map();
+  const usados = [];
+  for (const r of remitos) {
+    if (!Number.isInteger(r.num)) continue;
+    usados.push(r.num);
+    numInfo.set(r.num, { numero: r.num, estado: r.estado, supermercado: r.empresa || null, fecha_emision: r.fecha_emision || null });
+  }
+  const anulados = db.prepare("SELECT numero, anulado_en FROM ifco_numeros_anulados WHERE talonario_id = ?").all(talonario_id);
+  for (const a of anulados) {
+    if (!Number.isInteger(a.numero)) continue;
+    usados.push(a.numero);
+    if (!numInfo.has(a.numero)) numInfo.set(a.numero, { numero: a.numero, estado: 'anulado_manual', supermercado: null, fecha_emision: a.anulado_en || null });
+  }
+  const usadosSet = new Set(usados);
+  const fmt = (n) => t.serie + '-' + String(n).padStart(8, '0');
+  if (usados.length === 0) return { talonario: t, rango_usado: null, salteos: [], usadosSet, maxUsed: null, fmt };
+  const minU = Math.min.apply(null, usados), maxU = Math.max.apply(null, usados);
+  const sortedUsed = Array.from(usadosSet).sort(function(a,b){ return a - b; });
+  const salteos = [];
+  for (let i = 0; i < sortedUsed.length - 1; i++) {
+    const a = sortedUsed[i], b = sortedUsed[i + 1];
+    for (let n = a + 1; n < b; n++) {
+      salteos.push({
+        numero: n,
+        numero_formateado: fmt(n),
+        anterior: numInfo.get(a) || { numero: a },
+        posterior: numInfo.get(b) || { numero: b }
+      });
+    }
+  }
+  return { talonario: t, rango_usado: { min: minU, max: maxU }, salteos, usadosSet, maxUsed: maxU, fmt };
+}
+
+// Detalle completo de salteos de un talonario (todos, con anterior/posterior).
+router.get('/talonarios/:id/salteos', function(req, res) {
+  try {
+    const calc = _ifcoCalcSalteos(parseInt(req.params.id));
+    if (!calc) return res.status(404).json({ ok: false, error: 'Talonario no encontrado' });
+    res.json({ ok: true, data: {
+      talonario_id: calc.talonario.id,
+      talonario_serie: calc.talonario.serie,
+      rango_usado: calc.rango_usado,
+      salteos: calc.salteos
+    }});
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// Agregado de salteos de todo el sistema.
+router.get('/salteos/resumen', function(req, res) {
+  try {
+    const tals = db.prepare("SELECT t.id, t.serie, p.nombre AS proveedor FROM ifco_talonarios t LEFT JOIN proveedores p ON p.id = t.proveedor_id").all();
+    const detalle = [];
+    let total = 0;
+    for (const t of tals) {
+      const calc = _ifcoCalcSalteos(t.id);
+      if (calc && calc.salteos.length > 0) {
+        detalle.push({
+          talonario_id: t.id, serie: t.serie, proveedor: t.proveedor || null,
+          salteos_count: calc.salteos.length,
+          salteos: calc.salteos.map(function(s){ return s.numero; })
+        });
+        total += calc.salteos.length;
+      }
+    }
+    res.json({ ok: true, data: { talonarios_con_salteos: detalle.length, total_salteos: total, detalle_por_talonario: detalle } });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
 // Anular un número específico de un talonario (caso: mal impreso, manchado, etc.)
 // Solo se pueden anular números SIN USAR (sin remito asociado, ni eliminado).
 // El número queda registrado con motivo y usuario que lo anuló.
@@ -1681,6 +1762,46 @@ function _inferirTalonarioId(n_remito_ifco, origen, proveedor_origen_id) {
     return null;
   }
 }
+
+// Dry-run: ¿usar este número deja un hueco respecto del último usado? NO crea
+// nada; solo informa para que el frontend muestre confirmación antes del POST.
+// Acepta {talonario_id, numero_a_usar} o {n_remito_ifco, origen, proveedor_origen_id}.
+router.post('/remitos/validar-salteo', express.json(), function(req, res) {
+  try {
+    const d = req.body || {};
+    let talonarioId = parseInt(d.talonario_id) || null;
+    let numeroAUsar = parseInt(d.numero_a_usar);
+    if (!talonarioId && d.n_remito_ifco) {
+      talonarioId = _inferirTalonarioId(d.n_remito_ifco, d.origen, parseInt(d.proveedor_origen_id) || null);
+    }
+    if (!Number.isInteger(numeroAUsar) && d.n_remito_ifco) {
+      const m = String(d.n_remito_ifco).match(/-(\d+)\s*$/);
+      numeroAUsar = m ? parseInt(m[1], 10) : NaN;
+    }
+    if (!talonarioId) return res.json({ ok: true, data: { genera_salteo: false, motivo: 'talonario no identificado' } });
+    if (!Number.isInteger(numeroAUsar)) return res.status(400).json({ ok: false, error: 'numero_a_usar inválido' });
+    const calc = _ifcoCalcSalteos(talonarioId);
+    if (!calc) return res.status(404).json({ ok: false, error: 'Talonario no encontrado' });
+    const maxUsed = calc.maxUsed;
+    const salteos = [];
+    if (maxUsed != null && numeroAUsar > maxUsed + 1) {
+      for (let n = maxUsed + 1; n < numeroAUsar; n++) {
+        if (!calc.usadosSet.has(n)) salteos.push(n);
+      }
+    }
+    const genera = salteos.length > 0;
+    res.json({ ok: true, data: {
+      genera_salteo: genera,
+      salteos_que_quedarian: salteos,
+      salteos_que_quedarian_fmt: salteos.map(calc.fmt),
+      ultimo_usado_actual: maxUsed,
+      numero_que_se_va_a_usar: numeroAUsar,
+      advertencia: genera
+        ? ('Si usás este número, vas a dejar ' + salteos.length + ' número(s) salteado(s) (' + salteos.map(calc.fmt).join(', ') + '). ¿Confirmás?')
+        : null
+    }});
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
 
 router.post('/remitos', upload.single('escaneo_original'), function(req, res) {
   const d = req.body || {};
