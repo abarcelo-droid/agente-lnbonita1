@@ -616,6 +616,89 @@ export function getCampañaActiva() {
   } catch(e) { console.error('[PA] Error migrando campaña_id → campaña_anual_id:', e.message); }
 })();
 
+// ── MIGRACIÓN/BACKFILL: re-sincronizar campañas de pa_costos_lote con su orden ──
+// CASO B: el costo de una aplicación (categoria fertilizante/agroquimico) se graba
+// copiando las campañas que la orden tenía AL EJECUTARSE. Una reasignación bulk
+// posterior cambiaba pa_ordenes pero NO pa_costos_lote, dejando el costo apuntando a
+// campañas viejas (típicamente estacional NULL) que no matcheaban el reporte de Costos
+// (ej. brócoli OA-00060/00061 daba $0). Acá re-alineamos los costos con la campaña
+// actual de su orden (vía pa_aplicaciones). El arreglo de raíz vive en
+// /ordenes/reasignar-bulk (propaga en la misma transacción).
+// Idempotente: si no hay filas desincronizadas, no toca nada (solo un COUNT barato).
+(function backfillCostosCampañas() {
+  try {
+    const tablas = db.prepare(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('pa_costos_lote','pa_aplicaciones','pa_ordenes')"
+    ).all().map(t => t.name);
+    if (tablas.length < 3) return; // base vieja sin alguna tabla: nada que hacer
+    const clCols = db.prepare("PRAGMA table_info(pa_costos_lote)").all().map(c => c.name);
+    if (!clCols.includes('campaña_anual_id') || !clCols.includes('campaña_estacional_id')) return;
+
+    // Costo fert/agro cuya campaña difiere de la de su orden (solo órdenes existentes).
+    const condDesinc = `
+      cl.categoria IN ('fertilizante','agroquimico')
+      AND ( IFNULL(cl.campaña_anual_id,-1)      != IFNULL(o.campaña_anual_id,-1)
+         OR IFNULL(cl.campaña_estacional_id,-1) != IFNULL(o.campaña_estacional_id,-1) )`;
+    const desinc = db.prepare(`
+      SELECT COUNT(*) AS n
+      FROM pa_costos_lote cl
+      JOIN pa_aplicaciones a ON a.id = cl.referencia_id
+      JOIN pa_ordenes o ON o.id = a.orden_id
+      WHERE ${condDesinc}
+    `).get().n;
+
+    if (!desinc) return; // ya está todo sincronizado (idempotente)
+
+    console.log(`[PA] Backfill costos→campañas: ${desinc} fila(s) de pa_costos_lote desincronizadas con su orden. Re-sincronizando…`);
+    // Desglose por orden (top 20) → deja el "dry-run" visible en los logs de Railway.
+    try {
+      db.prepare(`
+        SELECT o.nro_orden AS nro, COUNT(*) AS filas,
+               cl.campaña_anual_id AS cl_a, cl.campaña_estacional_id AS cl_e,
+               o.campaña_anual_id  AS o_a,  o.campaña_estacional_id  AS o_e
+        FROM pa_costos_lote cl
+        JOIN pa_aplicaciones a ON a.id = cl.referencia_id
+        JOIN pa_ordenes o ON o.id = a.orden_id
+        WHERE ${condDesinc}
+        GROUP BY o.id
+        ORDER BY filas DESC
+        LIMIT 20
+      `).all().forEach(r => {
+        console.log(`[PA]   OA ${r.nro}: ${r.filas} fila(s) | costo(anual=${r.cl_a}, est=${r.cl_e}) → orden(anual=${r.o_a}, est=${r.o_e})`);
+      });
+    } catch(_) {}
+
+    // UPDATE en transacción, scopeado a las filas realmente desincronizadas.
+    // referencia_id es único entre filas fert/agro (un costo por aplicación), así que
+    // el IN por referencia_id selecciona exactamente esas filas. campaña_id es NOT NULL,
+    // por eso se usa COALESCE(anual, estacional, actual) y no se setea NULL nunca.
+    const tx = db.transaction(() => {
+      const info = db.prepare(`
+        UPDATE pa_costos_lote
+        SET campaña_anual_id      = (SELECT o.campaña_anual_id      FROM pa_aplicaciones a JOIN pa_ordenes o ON o.id=a.orden_id WHERE a.id = pa_costos_lote.referencia_id),
+            campaña_estacional_id = (SELECT o.campaña_estacional_id FROM pa_aplicaciones a JOIN pa_ordenes o ON o.id=a.orden_id WHERE a.id = pa_costos_lote.referencia_id),
+            campaña_id            = COALESCE(
+                                      (SELECT o.campaña_anual_id      FROM pa_aplicaciones a JOIN pa_ordenes o ON o.id=a.orden_id WHERE a.id = pa_costos_lote.referencia_id),
+                                      (SELECT o.campaña_estacional_id FROM pa_aplicaciones a JOIN pa_ordenes o ON o.id=a.orden_id WHERE a.id = pa_costos_lote.referencia_id),
+                                      pa_costos_lote.campaña_id)
+        WHERE categoria IN ('fertilizante','agroquimico')
+          AND referencia_id IN (
+            SELECT cl.referencia_id
+            FROM pa_costos_lote cl
+            JOIN pa_aplicaciones a ON a.id = cl.referencia_id
+            JOIN pa_ordenes o ON o.id = a.orden_id
+            WHERE ${condDesinc}
+          )
+      `).run();
+      return info.changes;
+    });
+    const changes = tx();
+    console.log(`[PA] Backfill costos→campañas: ${changes} fila(s) actualizadas.`);
+  } catch(e) {
+    console.error('[PA] Backfill costos→campañas error:', e.message);
+  }
+})();
+
 // ── MIGRACIÓN: cultivo elegido por el operario en la orden ────────────────
 // El cultivo se elige explícitamente al emitir la orden (no se infiere del
 // "cultivo actual" del lote, que es ambiguo con rotación). NULLABLE por

@@ -1339,8 +1339,25 @@ router.post('/ordenes/reasignar-bulk', requireAdmin, (req, res) => {
 
     const ph = ids.map(() => '?').join(',');
     const stmt = db.prepare(`UPDATE pa_ordenes SET ${sets.join(', ')} WHERE id IN (${ph}) AND eliminada_en IS NULL`);
+    // Arreglo de raíz: tras reasignar la orden, propagar sus campañas FINALES a los
+    // costos fert/agro de esa orden (vía pa_aplicaciones), en la misma transacción.
+    // Se deriva de la orden ya actualizada, así cubre cambio de anual, de estacional,
+    // limpieza de estacional (NULL) y campos sin cambiar, sin replicar la lógica condicional.
+    // campaña_id es NOT NULL → COALESCE(anual, estacional, actual).
+    const propagarCostos = db.prepare(`
+      UPDATE pa_costos_lote
+      SET campaña_anual_id      = (SELECT o.campaña_anual_id      FROM pa_aplicaciones a JOIN pa_ordenes o ON o.id=a.orden_id WHERE a.id = pa_costos_lote.referencia_id),
+          campaña_estacional_id = (SELECT o.campaña_estacional_id FROM pa_aplicaciones a JOIN pa_ordenes o ON o.id=a.orden_id WHERE a.id = pa_costos_lote.referencia_id),
+          campaña_id            = COALESCE(
+                                    (SELECT o.campaña_anual_id      FROM pa_aplicaciones a JOIN pa_ordenes o ON o.id=a.orden_id WHERE a.id = pa_costos_lote.referencia_id),
+                                    (SELECT o.campaña_estacional_id FROM pa_aplicaciones a JOIN pa_ordenes o ON o.id=a.orden_id WHERE a.id = pa_costos_lote.referencia_id),
+                                    pa_costos_lote.campaña_id)
+      WHERE categoria IN ('fertilizante','agroquimico')
+        AND referencia_id IN (SELECT id FROM pa_aplicaciones WHERE orden_id IN (${ph}))
+    `);
     const tx = db.transaction(() => {
       const info = stmt.run(...baseParams, ...ids);
+      propagarCostos.run(...ids);
       _logCampañaBulk(db, req, { entidad: 'orden', cantidad: info.changes, campaña_anual_id, campaña_estacional_id, limpiar_estacional, ids });
       return info.changes;
     });
@@ -1377,6 +1394,10 @@ router.get('/compras/buscar-para-reasignacion', requireAdmin, (req, res) => {
 });
 
 // Reasignación bulk de campaña sobre compras seleccionadas (transaccional).
+// NOTA: las compras NO generan filas en pa_costos_lote (las únicas fuentes de costos
+// son aplicaciones fert/agro, combustible y partes de MO; ver INSERTs en este archivo).
+// El reporte de Costos por Lote (/costos) lee solo de pa_costos_lote, así que reasignar
+// la campaña de una compra no afecta ese reporte → no hay nada que propagar acá.
 router.post('/compras/reasignar-bulk', requireAdmin, (req, res) => {
   const db = getDb();
   const { compra_ids, campaña_anual_id, campaña_estacional_id, limpiar_estacional } = req.body;
