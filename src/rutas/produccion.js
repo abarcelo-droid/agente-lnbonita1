@@ -2976,6 +2976,224 @@ router.patch('/personal/trabajadores/:id', requireAuth, (req, res) => {
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
+// ═══════════════════════════════════════════════════════════════════════════
+// PERSONAL V1 — Padrón unificado (pa_personal) + permisos del módulo
+// Permisos viven en pa_permisos_personal (decoupled de auth.js).
+// Admin (rol='admin') tiene ambos permisos por código.
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Resuelve los permisos del usuario actual para el módulo Personal
+function permisosPersonal(db, user) {
+  if (user && user.rol === 'admin') return { asistencia: true, valorizacion: true, admin: true };
+  const row = user && user.id
+    ? db.prepare("SELECT personal_asistencia, personal_valorizacion FROM pa_permisos_personal WHERE usuario_id=?").get(user.id)
+    : null;
+  return {
+    asistencia:   !!(row && row.personal_asistencia),
+    valorizacion: !!(row && row.personal_valorizacion),
+    admin: false
+  };
+}
+
+// ── Permisos: qué puede ver/hacer el usuario actual ────────────────────────
+router.get('/personal/mis-permisos', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    res.json({ ok: true, data: permisosPersonal(db, req.user) });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// ── Permisos: listado de usuarios con sus flags (solo admin) ───────────────
+router.get('/personal/permisos', requireAdmin, (req, res) => {
+  const db = getDb();
+  try {
+    const data = db.prepare(`
+      SELECT u.id as usuario_id, u.nombre, u.email, u.rol,
+             COALESCE(pp.personal_asistencia, 0)   as personal_asistencia,
+             COALESCE(pp.personal_valorizacion, 0) as personal_valorizacion
+      FROM usuarios u
+      LEFT JOIN pa_permisos_personal pp ON pp.usuario_id = u.id
+      WHERE u.activo=1
+      ORDER BY u.nombre
+    `).all();
+    res.json({ ok: true, data });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// ── Permisos: asignar flags a un usuario (solo admin) ──────────────────────
+router.post('/personal/permisos', requireAdmin, (req, res) => {
+  const db = getDb();
+  const { usuario_id, personal_asistencia, personal_valorizacion } = req.body;
+  if (!usuario_id) return res.status(400).json({ ok: false, error: 'usuario_id requerido' });
+  try {
+    const u = db.prepare("SELECT id, rol FROM usuarios WHERE id=?").get(usuario_id);
+    if (!u) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
+    db.prepare(`
+      INSERT INTO pa_permisos_personal (usuario_id, personal_asistencia, personal_valorizacion, modificado_en, modificado_por)
+      VALUES (?,?,?, datetime('now','localtime'), ?)
+      ON CONFLICT(usuario_id) DO UPDATE SET
+        personal_asistencia=excluded.personal_asistencia,
+        personal_valorizacion=excluded.personal_valorizacion,
+        modificado_en=excluded.modificado_en,
+        modificado_por=excluded.modificado_por
+    `).run(usuario_id, personal_asistencia ? 1 : 0, personal_valorizacion ? 1 : 0, req.user.id);
+    res.json({ ok: true });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// ── Personas del módulo Equipo (proxy read-only para linkear fijos) ────────
+router.get('/personal/personas-equipo', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const { q } = req.query;
+    let sql = `SELECT id, nombre, apellido, dni, cargo FROM personas WHERE activo=1`;
+    const params = [];
+    if (q) { sql += " AND (nombre LIKE ? OR apellido LIKE ? OR dni LIKE ?)"; params.push(`%${q}%`,`%${q}%`,`%${q}%`); }
+    sql += " ORDER BY apellido, nombre LIMIT 500";
+    res.json({ ok: true, data: db.prepare(sql).all(...params) });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// ── Padrón: listado ────────────────────────────────────────────────────────
+router.get('/personal/padron', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const perms = permisosPersonal(db, req.user);
+    const { tipo, q, incluir_inactivos } = req.query;
+    let sql = `
+      SELECT p.id, p.tipo, p.nombre, p.dni, p.cuit, p.persona_id, p.contratista_madre_id,
+             p.cuadrilla_default_id, p.tarifa_default, p.unidad_tarifa, p.activo, p.notas,
+             c.nombre as cuadrilla_nombre,
+             m.nombre as contratista_madre_nombre,
+             per.nombre as persona_nombre, per.apellido as persona_apellido
+      FROM pa_personal p
+      LEFT JOIN pa_cuadrillas c ON c.id = p.cuadrilla_default_id
+      LEFT JOIN pa_personal m   ON m.id = p.contratista_madre_id
+      LEFT JOIN personas per     ON per.id = p.persona_id
+      WHERE p.eliminado_en IS NULL`;
+    const params = [];
+    if (!incluir_inactivos) sql += " AND p.activo=1";
+    if (tipo === 'fijo' || tipo === 'contratista') { sql += " AND p.tipo=?"; params.push(tipo); }
+    if (q) { sql += " AND (p.nombre LIKE ? OR p.dni LIKE ? OR p.cuit LIKE ?)"; params.push(`%${q}%`,`%${q}%`,`%${q}%`); }
+    sql += " ORDER BY p.tipo, p.nombre";
+    let data = db.prepare(sql).all(...params);
+    // Separación de funciones: quien no valoriza, no ve tarifas ($)
+    if (!perms.valorizacion && !perms.admin) {
+      data = data.map(r => { const { tarifa_default, unidad_tarifa, ...rest } = r; return rest; });
+    }
+    res.json({ ok: true, data, perms });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// ── Padrón: detalle (con fijos asociados si es contratista) ────────────────
+router.get('/personal/padron/:id', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const perms = permisosPersonal(db, req.user);
+    const p = db.prepare(`
+      SELECT p.*, c.nombre as cuadrilla_nombre, m.nombre as contratista_madre_nombre,
+             per.nombre as persona_nombre, per.apellido as persona_apellido
+      FROM pa_personal p
+      LEFT JOIN pa_cuadrillas c ON c.id = p.cuadrilla_default_id
+      LEFT JOIN pa_personal m   ON m.id = p.contratista_madre_id
+      LEFT JOIN personas per     ON per.id = p.persona_id
+      WHERE p.id=? AND p.eliminado_en IS NULL`).get(req.params.id);
+    if (!p) return res.status(404).json({ ok: false, error: 'Personal no encontrado' });
+    let fijos = [];
+    if (p.tipo === 'contratista') {
+      fijos = db.prepare("SELECT id, nombre, dni, activo FROM pa_personal WHERE contratista_madre_id=? AND eliminado_en IS NULL ORDER BY nombre").all(p.id);
+    }
+    if (!perms.valorizacion && !perms.admin) { delete p.tarifa_default; delete p.unidad_tarifa; }
+    res.json({ ok: true, data: { ...p, fijos } });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// ── Padrón: alta ───────────────────────────────────────────────────────────
+router.post('/personal/padron', requireAuth, (req, res) => {
+  const db = getDb();
+  const perms = permisosPersonal(db, req.user);
+  if (!perms.asistencia && !perms.valorizacion && !perms.admin)
+    return res.status(403).json({ ok: false, error: 'Sin permiso para el módulo Personal' });
+  const { tipo, nombre, dni, cuit, persona_id, contratista_madre_id, cuadrilla_default_id, tarifa_default, unidad_tarifa, notas } = req.body;
+  if (!nombre) return res.status(400).json({ ok: false, error: 'nombre requerido' });
+  if (tipo !== 'fijo' && tipo !== 'contratista') return res.status(400).json({ ok: false, error: "tipo debe ser 'fijo' o 'contratista'" });
+  if (tipo === 'contratista' && (persona_id || contratista_madre_id))
+    return res.status(400).json({ ok: false, error: 'Un contratista no puede tener persona_id ni contratista_madre_id' });
+  try {
+    // Solo valorización/admin fijan tarifa; asistencia la deja en 0
+    const puedeTarifa = perms.valorizacion || perms.admin;
+    const r = db.prepare(`INSERT INTO pa_personal
+        (tipo, nombre, dni, cuit, persona_id, contratista_madre_id, cuadrilla_default_id, tarifa_default, unidad_tarifa, notas, creado_por)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?)`)
+      .run(tipo, nombre.trim(), dni || null, cuit || null,
+           tipo === 'fijo' ? (persona_id || null) : null,
+           tipo === 'fijo' ? (contratista_madre_id || null) : null,
+           cuadrilla_default_id || null,
+           puedeTarifa ? (Number(tarifa_default) || 0) : 0,
+           unidad_tarifa || 'jornal',
+           notas || null, req.user.id);
+    res.json({ ok: true, id: r.lastInsertRowid });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// ── Padrón: edición ────────────────────────────────────────────────────────
+router.patch('/personal/padron/:id', requireAuth, (req, res) => {
+  const db = getDb();
+  const perms = permisosPersonal(db, req.user);
+  if (!perms.asistencia && !perms.valorizacion && !perms.admin)
+    return res.status(403).json({ ok: false, error: 'Sin permiso para el módulo Personal' });
+  const { nombre, dni, cuit, persona_id, contratista_madre_id, cuadrilla_default_id, tarifa_default, unidad_tarifa, activo, notas } = req.body;
+  try {
+    const p = db.prepare("SELECT * FROM pa_personal WHERE id=? AND eliminado_en IS NULL").get(req.params.id);
+    if (!p) return res.status(404).json({ ok: false, error: 'Personal no encontrado' });
+    const puedeTarifa = perms.valorizacion || perms.admin;
+    db.prepare(`UPDATE pa_personal SET
+        nombre=?, dni=?, cuit=?, persona_id=?, contratista_madre_id=?, cuadrilla_default_id=?,
+        tarifa_default=?, unidad_tarifa=?, activo=?, notas=?,
+        modificado_en=datetime('now','localtime'), modificado_por=?
+        WHERE id=?`)
+      .run(nombre || p.nombre,
+           dni !== undefined ? dni : p.dni,
+           cuit !== undefined ? cuit : p.cuit,
+           p.tipo === 'fijo' ? (persona_id !== undefined ? persona_id : p.persona_id) : null,
+           p.tipo === 'fijo' ? (contratista_madre_id !== undefined ? contratista_madre_id : p.contratista_madre_id) : null,
+           cuadrilla_default_id !== undefined ? cuadrilla_default_id : p.cuadrilla_default_id,
+           puedeTarifa && tarifa_default !== undefined ? Number(tarifa_default) : p.tarifa_default,
+           unidad_tarifa || p.unidad_tarifa,
+           activo !== undefined ? (activo ? 1 : 0) : p.activo,
+           notas !== undefined ? notas : p.notas,
+           req.user.id, req.params.id);
+    res.json({ ok: true });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// ── Padrón: baja (soft delete) ─────────────────────────────────────────────
+router.delete('/personal/padron/:id', requireAuth, (req, res) => {
+  const db = getDb();
+  const perms = permisosPersonal(db, req.user);
+  if (!perms.asistencia && !perms.valorizacion && !perms.admin)
+    return res.status(403).json({ ok: false, error: 'Sin permiso para el módulo Personal' });
+  try {
+    const p = db.prepare("SELECT id FROM pa_personal WHERE id=? AND eliminado_en IS NULL").get(req.params.id);
+    if (!p) return res.status(404).json({ ok: false, error: 'Personal no encontrado' });
+    db.prepare("UPDATE pa_personal SET activo=0, eliminado_en=datetime('now','localtime'), eliminado_por_id=? WHERE id=?")
+      .run(req.user.id, req.params.id);
+    res.json({ ok: true });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// ── Padrón: reactivar ──────────────────────────────────────────────────────
+router.post('/personal/padron/:id/reactivar', requireAuth, (req, res) => {
+  const db = getDb();
+  const perms = permisosPersonal(db, req.user);
+  if (!perms.asistencia && !perms.valorizacion && !perms.admin)
+    return res.status(403).json({ ok: false, error: 'Sin permiso para el módulo Personal' });
+  try {
+    db.prepare("UPDATE pa_personal SET activo=1, eliminado_en=NULL, eliminado_por_id=NULL WHERE id=?").run(req.params.id);
+    res.json({ ok: true });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
 // ── Tipos de tarea ─────────────────────────────────────────────────────────
 router.get('/personal/tareas-tipos', requireAuth, (req, res) => {
   const db = getDb();

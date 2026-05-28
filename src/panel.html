@@ -2651,6 +2651,8 @@ function sgDelete(entity, id){
     <div class="pp-subtab" data-sub="grupos" onclick="ppShowSub('grupos')" style="padding:10px 16px;cursor:pointer;font-size:13px;font-weight:600;border-bottom:2px solid transparent">🏷️ Grupos</div>
     <div class="pp-subtab" data-sub="cuadrillas" onclick="ppShowSub('cuadrillas')" style="padding:10px 16px;cursor:pointer;font-size:13px;font-weight:600;border-bottom:2px solid transparent">🚜 Cuadrillas</div>
     <div class="pp-subtab" data-sub="rubros" onclick="ppShowSub('rubros')" style="padding:10px 16px;cursor:pointer;font-size:13px;font-weight:600;border-bottom:2px solid transparent">📊 Rubros</div>
+    <div class="pp-subtab" data-sub="padron" id="pp-tab-padron" onclick="ppShowSub('padron')" style="display:none;padding:10px 16px;cursor:pointer;font-size:13px;font-weight:600;border-bottom:2px solid transparent">👥 Personal <span style="font-size:9px;background:var(--burg);color:#fff;border-radius:8px;padding:1px 5px;margin-left:4px">NUEVO</span></div>
+    <div class="pp-subtab" data-sub="permisos" id="pp-tab-permisos" onclick="ppShowSub('permisos')" style="display:none;padding:10px 16px;cursor:pointer;font-size:13px;font-weight:600;border-bottom:2px solid transparent">⚙️ Permisos</div>
   </div>
 
   <!-- Fichajes Pendientes (admin asigna lote + rubro) -->
@@ -2724,6 +2726,79 @@ function sgDelete(entity, id){
       <thead><tr><th>Nombre (contabilidad)</th><th>Tipo</th><th>Cultivo</th><th>Estado</th><th></th></tr></thead>
       <tbody id="pp-rub-tbody"></tbody>
     </table></div>
+  </div>
+
+  <!-- Padrón unificado (Personal V1) -->
+  <div class="pp-sub" id="pp-sub-padron">
+    <div style="display:flex;gap:10px;margin-bottom:14px;align-items:center;flex-wrap:wrap">
+      <button class="btn bb" onclick="ppAbrirPersonal()">+ Nuevo</button>
+      <select id="pp-padron-tipo" onchange="ppLoadPadron()" style="padding:5px 10px;font-size:12px">
+        <option value="">Todos los tipos</option>
+        <option value="fijo">Fijos</option>
+        <option value="contratista">Contratistas</option>
+      </select>
+      <label style="font-size:12px;display:flex;align-items:center;gap:4px"><input type="checkbox" id="pp-padron-inactivos" onchange="ppLoadPadron()"> Incluir inactivos</label>
+      <input id="pp-padron-q" oninput="ppLoadPadron()" placeholder="Buscar nombre / DNI / CUIT" style="padding:5px 10px;font-size:12px;flex:1;min-width:180px">
+    </div>
+    <div class="tw"><table>
+      <thead><tr id="pp-padron-thead"></tr></thead>
+      <tbody id="pp-padron-tbody"></tbody>
+    </table></div>
+  </div>
+
+  <!-- Permisos del módulo (solo admin) -->
+  <div class="pp-sub" id="pp-sub-permisos">
+    <div style="margin-bottom:12px;font-size:12px;color:var(--mut)">
+      Asigná permisos del módulo Personal. <strong>Asistencia</strong>: carga el dato físico (no ve montos).
+      <strong>Valorización</strong>: aplica tarifas, ve cuenta corriente y registra pagos. Los admin tienen ambos automáticamente.
+    </div>
+    <div class="tw"><table>
+      <thead><tr><th>Usuario</th><th>Rol</th><th style="text-align:center">📝 Asistencia</th><th style="text-align:center">💰 Valorización</th></tr></thead>
+      <tbody id="pp-permisos-tbody"></tbody>
+    </table></div>
+  </div>
+</div>
+
+<!-- Modal alta/edición Personal (padrón unificado) -->
+<div class="mb" id="mb-pp-personal">
+  <div class="mbox" style="width:560px">
+    <div class="mhd">
+      <div class="mht" id="mb-pp-personal-tit">Nuevo personal</div>
+      <button class="mcl" onclick="document.getElementById('mb-pp-personal').classList.remove('on')">×</button>
+    </div>
+    <div class="fg">
+      <div class="fl"><label>Tipo *</label>
+        <select id="pp-per-tipo" onchange="ppPersonalToggleTipo()">
+          <option value="fijo">Fijo (empleado)</option>
+          <option value="contratista">Contratista (empresa/cuadrilla)</option>
+        </select>
+      </div>
+      <div class="fl"><label>Nombre *</label><input id="pp-per-nombre"></div>
+      <div class="fl"><label>DNI</label><input id="pp-per-dni"></div>
+      <div class="fl"><label>CUIT</label><input id="pp-per-cuit"></div>
+      <div class="fl pp-per-solo-fijo"><label>Persona (Equipo)</label>
+        <select id="pp-per-persona"><option value="">— Sin vincular —</option></select>
+      </div>
+      <div class="fl pp-per-solo-fijo"><label>Contratista madre</label>
+        <select id="pp-per-madre"><option value="">— Ninguno —</option></select>
+      </div>
+      <div class="fl"><label>Cuadrilla default</label>
+        <select id="pp-per-cuadrilla"><option value="">— Ninguna —</option></select>
+      </div>
+      <div class="fl pp-per-solo-val"><label>Tarifa default ($)</label><input id="pp-per-tarifa" type="number" step="0.01"></div>
+      <div class="fl pp-per-solo-val"><label>Unidad tarifa</label>
+        <select id="pp-per-unidad">
+          <option value="jornal">jornal</option><option value="hora">hora</option><option value="tanto">tanto</option>
+          <option value="tacho">tacho</option><option value="planta">planta</option><option value="kg">kg</option>
+        </select>
+      </div>
+      <div class="fl" style="flex:1 1 100%"><label>Notas</label><textarea id="pp-per-notas" rows="2"></textarea></div>
+    </div>
+    <div id="pp-per-fijos-asoc" style="display:none;margin-top:10px;font-size:12px;color:var(--mut)"></div>
+    <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:14px">
+      <button class="btn bo" onclick="document.getElementById('mb-pp-personal').classList.remove('on')">Cancelar</button>
+      <button class="btn bb" onclick="ppGuardarPersonal()">Guardar</button>
+    </div>
   </div>
 </div>
 
@@ -17322,14 +17397,30 @@ document.addEventListener('click', function(e) {
 // ═════════════════════════════════════════════════════════════════════
 var PP = {
   trabajadores: [], cuadrillas: [], tareas: [], rubros: [], partes: [], lotes: [], usuarios: [],
-  editTrabajadorId: null, editCuadrillaId: null, editTareaId: null,
+  padron: [], personasEquipo: [],
+  misPermisos: { asistencia:false, valorizacion:false, admin:false },
+  editTrabajadorId: null, editCuadrillaId: null, editTareaId: null, editPersonalId: null,
   valorizandoParteId: null
 };
 
 function ppInit() {
-  ppCargarBase().then(function(){
-    ppShowSub('fichajes-pend');
+  // Resolver permisos del módulo primero, luego cargar base y aplicar gating
+  paF('/api/pa/personal/mis-permisos').then(function(r){
+    PP.misPermisos = (r && r.data) || { asistencia:false, valorizacion:false, admin:false };
+    ppAplicarGating();
+    ppCargarBase().then(function(){
+      ppShowSub('fichajes-pend');
+    });
   });
+}
+
+// Muestra/oculta sub-tabs nuevos según permiso del módulo
+function ppAplicarGating() {
+  var p = PP.misPermisos || {};
+  var tabPadron = document.getElementById('pp-tab-padron');
+  var tabPerm   = document.getElementById('pp-tab-permisos');
+  if (tabPadron) tabPadron.style.display = (p.asistencia || p.valorizacion || p.admin) ? '' : 'none';
+  if (tabPerm)   tabPerm.style.display   = p.admin ? '' : 'none';
 }
 
 function ppCargarBase() {
@@ -17340,6 +17431,7 @@ function ppCargarBase() {
     paF('/api/pa/personal/tareas-tipos').then(function(r){ PP.tareas = r.data || []; }),
     paF('/api/pa/personal/rubros').then(function(r){ PP.rubros = r.data || []; }),
     paF('/api/pa/lotes').then(function(r){ PP.lotes = r.data || []; }),
+    paF('/api/pa/personal/personas-equipo').then(function(r){ PP.personasEquipo = r.data || []; }),
     paF('/api/auth/usuarios').then(function(r){ PP.usuarios = r.data || []; })
   ]);
 }
@@ -17354,6 +17446,189 @@ function ppShowSub(sub) {
   if (sub === 'grupos') ppRenderGrupos();
   if (sub === 'cuadrillas') ppRenderCuadrillas();
   if (sub === 'rubros') ppRenderRubros();
+  if (sub === 'padron') ppLoadPadron();
+  if (sub === 'permisos') ppLoadPermisos();
+}
+
+// ═══ PERSONAL V1 — Padrón unificado + permisos ═══════════════════════════════
+function ppPuedeVerTarifa() { return !!(PP.misPermisos.valorizacion || PP.misPermisos.admin); }
+
+function ppLoadPadron() {
+  var tipo = document.getElementById('pp-padron-tipo').value;
+  var inact = document.getElementById('pp-padron-inactivos').checked ? '1' : '';
+  var q = document.getElementById('pp-padron-q').value.trim();
+  var qs = '?' + (tipo?('tipo='+encodeURIComponent(tipo)+'&'):'') + (inact?'incluir_inactivos=1&':'') + (q?('q='+encodeURIComponent(q)):'');
+  paF('/api/pa/personal/padron'+qs).then(function(r){
+    PP.padron = (r && r.data) || [];
+    ppRenderPadron();
+  });
+}
+
+function ppRenderPadron() {
+  var verTarifa = ppPuedeVerTarifa();
+  var thead = document.getElementById('pp-padron-thead');
+  thead.innerHTML = '<th>Nombre</th><th>Tipo</th><th>DNI</th><th>Persona (Equipo)</th><th>Cuadrilla</th>' +
+    (verTarifa ? '<th style="text-align:right">Tarifa</th>' : '') + '<th>Estado</th><th></th>';
+  var tbody = document.getElementById('pp-padron-tbody');
+  if (!PP.padron.length) {
+    tbody.innerHTML = '<tr><td colspan="'+(verTarifa?8:7)+'" style="text-align:center;color:var(--mut);padding:20px">Sin registros</td></tr>';
+    return;
+  }
+  tbody.innerHTML = PP.padron.map(function(p){
+    var persona = p.persona_nombre ? esc((p.persona_apellido||'')+' '+p.persona_nombre).trim() : '—';
+    var tipoTag = p.tipo==='contratista'
+      ? '<span class="tag" style="background:#7c3aed22;color:#7c3aed;font-size:10px">contratista</span>'
+      : '<span class="tag" style="font-size:10px">fijo</span>';
+    var madre = p.contratista_madre_nombre ? '<div style="font-size:10px;color:var(--mut)">↳ '+esc(p.contratista_madre_nombre)+'</div>' : '';
+    var tarifaCell = verTarifa
+      ? '<td style="text-align:right">'+(p.tarifa_default?ppFmtARS(p.tarifa_default)+'<div style="font-size:10px;color:var(--mut)">/'+esc(p.unidad_tarifa||'')+'</div>':'—')+'</td>'
+      : '';
+    var estado = p.activo ? '<span style="color:var(--ok)">●</span> Activo' : '<span style="color:var(--mut)">○</span> Inactivo';
+    var acciones = '<button class="btn bo bs" onclick="ppEditarPersonal('+p.id+')" style="padding:3px 8px;font-size:11px">✏️</button> ' +
+      (p.activo
+        ? '<button class="btn bo bs" onclick="ppEliminarPersonal('+p.id+')" style="padding:3px 8px;font-size:11px">🗑️</button>'
+        : '<button class="btn bo bs" onclick="ppReactivarPersonal('+p.id+')" style="padding:3px 8px;font-size:11px">↩️</button>');
+    return '<tr><td><strong>'+esc(p.nombre)+'</strong>'+madre+'</td><td>'+tipoTag+'</td><td>'+(p.dni||'—')+'</td>' +
+      '<td>'+persona+'</td><td>'+(p.cuadrilla_nombre||'—')+'</td>'+tarifaCell +
+      '<td>'+estado+'</td><td style="white-space:nowrap">'+acciones+'</td></tr>';
+  }).join('');
+}
+
+function ppPersonalToggleTipo() {
+  var esFijo = document.getElementById('pp-per-tipo').value === 'fijo';
+  document.querySelectorAll('.pp-per-solo-fijo').forEach(function(el){ el.style.display = esFijo ? '' : 'none'; });
+  // Las tarifas solo se muestran a quien puede verlas
+  var verTarifa = ppPuedeVerTarifa();
+  document.querySelectorAll('.pp-per-solo-val').forEach(function(el){ el.style.display = verTarifa ? '' : 'none'; });
+}
+
+function ppLlenarSelectsPersonal(p) {
+  p = p || {};
+  document.getElementById('pp-per-persona').innerHTML = '<option value="">— Sin vincular —</option>' +
+    (PP.personasEquipo||[]).map(function(x){
+      var nom = ((x.apellido||'')+' '+x.nombre).trim();
+      return '<option value="'+x.id+'"'+(x.id==p.persona_id?' selected':'')+'>'+esc(nom)+(x.dni?' ('+x.dni+')':'')+'</option>';
+    }).join('');
+  document.getElementById('pp-per-madre').innerHTML = '<option value="">— Ninguno —</option>' +
+    (PP.padron||[]).filter(function(x){ return x.tipo==='contratista' && x.id!=p.id; }).map(function(x){
+      return '<option value="'+x.id+'"'+(x.id==p.contratista_madre_id?' selected':'')+'>'+esc(x.nombre)+'</option>';
+    }).join('');
+  document.getElementById('pp-per-cuadrilla').innerHTML = '<option value="">— Ninguna —</option>' +
+    (PP.cuadrillas||[]).map(function(c){
+      return '<option value="'+c.id+'"'+(c.id==p.cuadrilla_default_id?' selected':'')+'>'+esc(c.nombre)+'</option>';
+    }).join('');
+}
+
+function ppAbrirPersonal() {
+  PP.editPersonalId = null;
+  document.getElementById('mb-pp-personal-tit').textContent = 'Nuevo personal';
+  document.getElementById('pp-per-tipo').value = 'fijo';
+  document.getElementById('pp-per-nombre').value = '';
+  document.getElementById('pp-per-dni').value = '';
+  document.getElementById('pp-per-cuit').value = '';
+  document.getElementById('pp-per-tarifa').value = '';
+  document.getElementById('pp-per-unidad').value = 'jornal';
+  document.getElementById('pp-per-notas').value = '';
+  document.getElementById('pp-per-fijos-asoc').style.display = 'none';
+  ppLlenarSelectsPersonal({});
+  ppPersonalToggleTipo();
+  document.getElementById('mb-pp-personal').classList.add('on');
+}
+
+function ppEditarPersonal(id) {
+  paF('/api/pa/personal/padron/'+id).then(function(r){
+    if (!r.ok) return toast(r.error||'Error', 'er');
+    var p = r.data;
+    PP.editPersonalId = id;
+    document.getElementById('mb-pp-personal-tit').textContent = 'Editar personal';
+    document.getElementById('pp-per-tipo').value = p.tipo;
+    document.getElementById('pp-per-nombre').value = p.nombre || '';
+    document.getElementById('pp-per-dni').value = p.dni || '';
+    document.getElementById('pp-per-cuit').value = p.cuit || '';
+    document.getElementById('pp-per-tarifa').value = (p.tarifa_default != null ? p.tarifa_default : '');
+    document.getElementById('pp-per-unidad').value = p.unidad_tarifa || 'jornal';
+    document.getElementById('pp-per-notas').value = p.notas || '';
+    ppLlenarSelectsPersonal(p);
+    ppPersonalToggleTipo();
+    var asoc = document.getElementById('pp-per-fijos-asoc');
+    if (p.tipo==='contratista' && p.fijos && p.fijos.length) {
+      asoc.style.display = 'block';
+      asoc.innerHTML = '<strong>Fijos asociados ('+p.fijos.length+'):</strong> ' +
+        p.fijos.map(function(f){ return esc(f.nombre); }).join(', ');
+    } else { asoc.style.display = 'none'; }
+    document.getElementById('mb-pp-personal').classList.add('on');
+  });
+}
+
+function ppGuardarPersonal() {
+  var tipo = document.getElementById('pp-per-tipo').value;
+  var body = {
+    tipo: tipo,
+    nombre: document.getElementById('pp-per-nombre').value.trim(),
+    dni: document.getElementById('pp-per-dni').value.trim() || null,
+    cuit: document.getElementById('pp-per-cuit').value.trim() || null,
+    cuadrilla_default_id: document.getElementById('pp-per-cuadrilla').value ? parseInt(document.getElementById('pp-per-cuadrilla').value) : null,
+    notas: document.getElementById('pp-per-notas').value.trim() || null
+  };
+  if (tipo === 'fijo') {
+    body.persona_id = document.getElementById('pp-per-persona').value ? parseInt(document.getElementById('pp-per-persona').value) : null;
+    body.contratista_madre_id = document.getElementById('pp-per-madre').value ? parseInt(document.getElementById('pp-per-madre').value) : null;
+  }
+  if (ppPuedeVerTarifa()) {
+    body.tarifa_default = document.getElementById('pp-per-tarifa').value ? Number(document.getElementById('pp-per-tarifa').value) : 0;
+    body.unidad_tarifa = document.getElementById('pp-per-unidad').value;
+  }
+  if (!body.nombre) return toast('Nombre requerido', 'er');
+  var url = PP.editPersonalId ? '/api/pa/personal/padron/'+PP.editPersonalId : '/api/pa/personal/padron';
+  var method = PP.editPersonalId ? 'PATCH' : 'POST';
+  paF(url, { method:method, headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) }).then(function(r){
+    if (r.ok) { toast('Guardado'); document.getElementById('mb-pp-personal').classList.remove('on'); ppLoadPadron(); }
+    else toast(r.error||'Error', 'er');
+  });
+}
+
+function ppEliminarPersonal(id) {
+  if (!confirm('¿Dar de baja este registro de personal?')) return;
+  paF('/api/pa/personal/padron/'+id, { method:'DELETE' }).then(function(r){
+    if (r.ok) { toast('Dado de baja'); ppLoadPadron(); } else toast(r.error||'Error', 'er');
+  });
+}
+
+function ppReactivarPersonal(id) {
+  paF('/api/pa/personal/padron/'+id+'/reactivar', { method:'POST' }).then(function(r){
+    if (r.ok) { toast('Reactivado'); ppLoadPadron(); } else toast(r.error||'Error', 'er');
+  });
+}
+
+// ── Permisos del módulo (solo admin) ──
+function ppLoadPermisos() {
+  paF('/api/pa/personal/permisos').then(function(r){
+    var tbody = document.getElementById('pp-permisos-tbody');
+    var rows = (r && r.data) || [];
+    if (!rows.length) { tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:var(--mut);padding:20px">Sin usuarios</td></tr>'; return; }
+    tbody.innerHTML = rows.map(function(u){
+      var esAdmin = u.rol === 'admin';
+      var chk = function(campo, val){
+        if (esAdmin) return '<span style="color:var(--ok)" title="Admin tiene ambos permisos">✔ auto</span>';
+        return '<input type="checkbox" '+(val?'checked':'')+' onchange="ppTogglePermiso('+u.usuario_id+')" data-campo="'+campo+'" id="pp-perm-'+campo+'-'+u.usuario_id+'">';
+      };
+      return '<tr><td>'+esc(u.nombre)+'<div style="font-size:10px;color:var(--mut)">'+esc(u.email||'')+'</div></td>' +
+        '<td><span class="tag" style="font-size:10px">'+esc(u.rol)+'</span></td>' +
+        '<td style="text-align:center">'+chk('asistencia', u.personal_asistencia)+'</td>' +
+        '<td style="text-align:center">'+chk('valorizacion', u.personal_valorizacion)+'</td></tr>';
+    }).join('');
+  });
+}
+
+function ppTogglePermiso(usuarioId) {
+  var a = document.getElementById('pp-perm-asistencia-'+usuarioId);
+  var v = document.getElementById('pp-perm-valorizacion-'+usuarioId);
+  paF('/api/pa/personal/permisos', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({ usuario_id: usuarioId, personal_asistencia: a && a.checked, personal_valorizacion: v && v.checked })
+  }).then(function(r){
+    if (r.ok) toast('Permiso actualizado'); else toast(r.error||'Error', 'er');
+  });
 }
 
 function ppFmtARS(n) { return '$ ' + (n||0).toLocaleString('es-AR', {maximumFractionDigits:0}); }
