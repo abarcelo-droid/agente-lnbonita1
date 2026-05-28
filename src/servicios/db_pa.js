@@ -1266,6 +1266,101 @@ db.exec(`
   } catch(e) { console.error('[PA] Error seed grupo default:', e.message); }
 })();
 
+// ═══════════════════════════════════════════════════════════════════════════
+// PERSONAL V1 — Padrón unificado + permisos (Fase 1)
+// pa_personal reemplaza conceptualmente a pa_trabajadores (que queda LEGACY).
+// Los permisos del módulo viven en pa_permisos_personal (decoupled de auth.js).
+// ═══════════════════════════════════════════════════════════════════════════
+db.exec(`
+  -- Padrón unificado de personal (fijos + contratistas)
+  CREATE TABLE IF NOT EXISTS pa_personal (
+    id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+    tipo                  TEXT NOT NULL CHECK(tipo IN ('fijo','contratista')),
+    nombre                TEXT NOT NULL,
+    dni                   TEXT,
+    cuit                  TEXT,
+    persona_id            INTEGER REFERENCES personas(id),         -- FK opcional al módulo Equipo (solo fijos)
+    contratista_madre_id  INTEGER REFERENCES pa_personal(id),      -- si un fijo pertenece a un contratista
+    cuadrilla_default_id  INTEGER REFERENCES pa_cuadrillas(id),
+    tarifa_default        REAL DEFAULT 0,
+    unidad_tarifa         TEXT DEFAULT 'jornal' CHECK(unidad_tarifa IN ('jornal','hora','tanto','tacho','planta','kg')),
+    activo                INTEGER NOT NULL DEFAULT 1,
+    notas                 TEXT,
+    creado_en             TEXT DEFAULT (datetime('now','localtime')),
+    creado_por            INTEGER REFERENCES usuarios(id),
+    modificado_en         TEXT,
+    modificado_por        INTEGER,
+    eliminado_en          TEXT,
+    eliminado_por_id      INTEGER
+  );
+  CREATE INDEX IF NOT EXISTS idx_pa_personal_tipo    ON pa_personal(tipo);
+  CREATE INDEX IF NOT EXISTS idx_pa_personal_activo  ON pa_personal(activo);
+  CREATE INDEX IF NOT EXISTS idx_pa_personal_madre   ON pa_personal(contratista_madre_id);
+  CREATE INDEX IF NOT EXISTS idx_pa_personal_persona ON pa_personal(persona_id);
+
+  -- Permisos del módulo Personal (V1, sin tocar auth.js ni la UI admin central).
+  -- Una fila por usuario. Admin (rol='admin') obtiene ambos permisos por código.
+  CREATE TABLE IF NOT EXISTS pa_permisos_personal (
+    usuario_id            INTEGER PRIMARY KEY REFERENCES usuarios(id),
+    personal_asistencia   INTEGER NOT NULL DEFAULT 0,
+    personal_valorizacion INTEGER NOT NULL DEFAULT 0,
+    modificado_en         TEXT DEFAULT (datetime('now','localtime')),
+    modificado_por        INTEGER
+  );
+`);
+
+// ── MIGRACIÓN: agregar pa_trabajadores.personal_id (cruce con padrón nuevo) ──
+(function migrarTrabajadoresPersonalId() {
+  try {
+    const cols = db.prepare("PRAGMA table_info(pa_trabajadores)").all().map(c => c.name);
+    if (!cols.includes('personal_id')) {
+      db.exec("ALTER TABLE pa_trabajadores ADD COLUMN personal_id INTEGER REFERENCES pa_personal(id)");
+      console.log('[PA] pa_trabajadores.personal_id agregado');
+    }
+  } catch(e) { console.error('[PA] Error migrando pa_trabajadores.personal_id:', e.message); }
+})();
+
+// ── MIGRACIÓN idempotente: pa_trabajadores (activos) → pa_personal ──────────
+// Aditiva y no destructiva: inserta en tabla nueva y vincula de vuelta.
+// Guardada por sistema_flags para correr una sola vez en Railway.
+(function migrarTrabajadoresAPersonal() {
+  const FLAG_KEY = 'migracion_pa_personal_v1';
+  try {
+    db.exec(`CREATE TABLE IF NOT EXISTS sistema_flags (
+      key TEXT PRIMARY KEY, valor TEXT, ejecutado_en TEXT DEFAULT (datetime('now','localtime'))
+    );`);
+    if (db.prepare("SELECT key FROM sistema_flags WHERE key=?").get(FLAG_KEY)) return;
+
+    const pendientes = db.prepare(
+      "SELECT * FROM pa_trabajadores WHERE activo=1 AND (personal_id IS NULL)"
+    ).all();
+
+    const mapUnidad = (u) => (u === 'hora' ? 'hora' : 'jornal'); // 'dia'→jornal; ha/unidad→jornal (revisable)
+
+    const tx = db.transaction(() => {
+      const insPersonal = db.prepare(`
+        INSERT INTO pa_personal (tipo, nombre, dni, cuadrilla_default_id, tarifa_default, unidad_tarifa, activo, notas)
+        VALUES ('fijo', ?, ?, ?, ?, ?, 1, ?)
+      `);
+      const vincular = db.prepare("UPDATE pa_trabajadores SET personal_id=? WHERE id=?");
+      let n = 0;
+      for (const t of pendientes) {
+        const r = insPersonal.run(
+          t.nombre, t.dni || null, t.cuadrilla_habitual_id || null,
+          t.jornal_base || 0, mapUnidad(t.unidad_jornal), t.notas || null
+        );
+        vincular.run(r.lastInsertRowid, t.id);
+        n++;
+      }
+      db.prepare("INSERT INTO sistema_flags (key, valor) VALUES (?, ?)")
+        .run(FLAG_KEY, `migrados=${n}`);
+      return n;
+    });
+    const n = tx();
+    console.log(`[PA] Migración pa_trabajadores→pa_personal: ${n} trabajadores migrados (tipo='fijo')`);
+  } catch(e) { console.error('[PA] Error migrando pa_trabajadores→pa_personal:', e.message); }
+})();
+
 // ── SEED: 20 rubros contables (tal cual contabilidad) ──────────────────────
 (function seedRubrosContables() {
   try {
