@@ -3406,6 +3406,7 @@ function sgLoteBaja(id){
     <div class="pp-subtab" data-sub="grupos" onclick="ppShowSub('grupos')" style="padding:10px 16px;cursor:pointer;font-size:13px;font-weight:600;border-bottom:2px solid transparent">🏷️ Grupos</div>
     <div class="pp-subtab" data-sub="cuadrillas" onclick="ppShowSub('cuadrillas')" style="padding:10px 16px;cursor:pointer;font-size:13px;font-weight:600;border-bottom:2px solid transparent">🚜 Cuadrillas</div>
     <div class="pp-subtab" data-sub="rubros" onclick="ppShowSub('rubros')" style="padding:10px 16px;cursor:pointer;font-size:13px;font-weight:600;border-bottom:2px solid transparent">📊 Rubros</div>
+    <div class="pp-subtab" data-sub="asistencia" id="pp-tab-asistencia" onclick="ppShowSub('asistencia')" style="display:none;padding:10px 16px;cursor:pointer;font-size:13px;font-weight:600;border-bottom:2px solid transparent">📝 Asistencia diaria <span style="font-size:9px;background:var(--burg);color:#fff;border-radius:8px;padding:1px 5px;margin-left:4px">NUEVO</span></div>
     <div class="pp-subtab" data-sub="padron" id="pp-tab-padron" onclick="ppShowSub('padron')" style="display:none;padding:10px 16px;cursor:pointer;font-size:13px;font-weight:600;border-bottom:2px solid transparent">👥 Personal <span style="font-size:9px;background:var(--burg);color:#fff;border-radius:8px;padding:1px 5px;margin-left:4px">NUEVO</span></div>
     <div class="pp-subtab" data-sub="permisos" id="pp-tab-permisos" onclick="ppShowSub('permisos')" style="display:none;padding:10px 16px;cursor:pointer;font-size:13px;font-weight:600;border-bottom:2px solid transparent">⚙️ Permisos</div>
   </div>
@@ -3483,6 +3484,19 @@ function sgLoteBaja(id){
     </table></div>
   </div>
 
+  <!-- Asistencia diaria (Personal V1 — dato físico) -->
+  <div class="pp-sub" id="pp-sub-asistencia">
+    <div style="display:flex;gap:10px;margin-bottom:14px;align-items:center;flex-wrap:wrap">
+      <label style="font-size:12px">Fecha: <input type="date" id="pp-asist-fecha" onchange="ppLoadAsistencia()" style="padding:5px 8px;font-size:12px"></label>
+      <button class="btn bb" onclick="ppAbrirAsistencia()">+ Nueva fila</button>
+      <span id="pp-asist-resumen" style="font-size:12px;color:var(--mut)"></span>
+    </div>
+    <div class="tw"><table>
+      <thead><tr id="pp-asist-thead"></tr></thead>
+      <tbody id="pp-asist-tbody"></tbody>
+    </table></div>
+  </div>
+
   <!-- Padrón unificado (Personal V1) -->
   <div class="pp-sub" id="pp-sub-padron">
     <div style="display:flex;gap:10px;margin-bottom:14px;align-items:center;flex-wrap:wrap">
@@ -3553,6 +3567,57 @@ function sgLoteBaja(id){
     <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:14px">
       <button class="btn bo" onclick="document.getElementById('mb-pp-personal').classList.remove('on')">Cancelar</button>
       <button class="btn bb" onclick="ppGuardarPersonal()">Guardar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal alta/edición Asistencia diaria -->
+<div class="mb" id="mb-pp-asist">
+  <div class="mbox" style="width:640px">
+    <div class="mhd">
+      <div class="mht" id="mb-pp-asist-tit">Nueva fila de asistencia</div>
+      <button class="mcl" onclick="document.getElementById('mb-pp-asist').classList.remove('on')">×</button>
+    </div>
+    <div class="fg">
+      <div class="fl"><label>Fecha *</label><input type="date" id="pp-as-fecha"></div>
+      <div class="fl"><label>Cuadrilla (de dónde viene)</label>
+        <select id="pp-as-cuadrilla"><option value="">— Ninguna —</option></select>
+      </div>
+      <div class="fl" style="flex:1 1 100%"><label>Tipo de registro *</label>
+        <div style="display:flex;gap:16px;align-items:center;padding-top:4px">
+          <label style="font-size:13px;display:flex;gap:5px;align-items:center"><input type="radio" name="pp-as-modo" value="individual" checked onchange="ppAsistToggleModo()"> Individual (con nombre)</label>
+          <label style="font-size:13px;display:flex;gap:5px;align-items:center"><input type="radio" name="pp-as-modo" value="bloque" onchange="ppAsistToggleModo()"> Bloque (contratista, sin nombre)</label>
+        </div>
+      </div>
+      <div class="fl pp-as-ind"><label>Persona *</label>
+        <select id="pp-as-personal"><option value="">— Elegir —</option></select>
+      </div>
+      <div class="fl pp-as-blo" style="display:none"><label>Contratista *</label>
+        <select id="pp-as-contratista"><option value="">— Elegir —</option></select>
+      </div>
+      <div class="fl pp-as-blo" style="display:none"><label>Cantidad de personas *</label><input type="number" id="pp-as-cantidad" value="1" min="1"></div>
+      <div class="fl"><label>Horas *</label><input type="number" id="pp-as-horas" value="8" step="0.5" min="0.5"></div>
+      <div class="fl"><label>Rubro (cuenta MO) *</label>
+        <select id="pp-as-rubro"><option value="">— Elegir —</option></select>
+      </div>
+      <div class="fl"><label>Campaña anual *</label>
+        <select id="pp-as-canual"><option value="">— Elegir —</option></select>
+      </div>
+      <div class="fl"><label>Campaña estacional *</label>
+        <select id="pp-as-cestac"><option value="">— Elegir —</option></select>
+      </div>
+      <div class="fl"><label>Finca / Lote *</label>
+        <select id="pp-as-lote" onchange="ppAsistLoteChange()"><option value="">— Elegir —</option></select>
+      </div>
+      <div class="fl"><label>Tarea</label>
+        <select id="pp-as-tarea"><option value="">— Ninguna —</option></select>
+      </div>
+      <div class="fl"><label>Cultivo</label><input id="pp-as-cultivo" placeholder="(auto del lote)"></div>
+      <div class="fl" style="flex:1 1 100%"><label>Notas</label><textarea id="pp-as-notas" rows="2"></textarea></div>
+    </div>
+    <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:14px">
+      <button class="btn bo" onclick="document.getElementById('mb-pp-asist').classList.remove('on')">Cancelar</button>
+      <button class="btn bb" onclick="ppGuardarAsistencia()">Guardar</button>
     </div>
   </div>
 </div>
@@ -18153,6 +18218,7 @@ document.addEventListener('click', function(e) {
 var PP = {
   trabajadores: [], cuadrillas: [], tareas: [], rubros: [], partes: [], lotes: [], usuarios: [],
   padron: [], personasEquipo: [],
+  asistencias: [], asistDefaults: null, editAsistId: null,
   misPermisos: { asistencia:false, valorizacion:false, admin:false },
   editTrabajadorId: null, editCuadrillaId: null, editTareaId: null, editPersonalId: null,
   valorizandoParteId: null
@@ -18164,7 +18230,10 @@ function ppInit() {
     PP.misPermisos = (r && r.data) || { asistencia:false, valorizacion:false, admin:false };
     ppAplicarGating();
     ppCargarBase().then(function(){
-      ppShowSub('fichajes-pend');
+      // Con permiso del módulo, la pantalla principal nueva es Asistencia diaria
+      var p = PP.misPermisos;
+      if (p.asistencia || p.valorizacion || p.admin) ppShowSub('asistencia');
+      else ppShowSub('fichajes-pend');
     });
   });
 }
@@ -18172,9 +18241,12 @@ function ppInit() {
 // Muestra/oculta sub-tabs nuevos según permiso del módulo
 function ppAplicarGating() {
   var p = PP.misPermisos || {};
+  var verModulo = (p.asistencia || p.valorizacion || p.admin);
+  var tabAsist  = document.getElementById('pp-tab-asistencia');
   var tabPadron = document.getElementById('pp-tab-padron');
   var tabPerm   = document.getElementById('pp-tab-permisos');
-  if (tabPadron) tabPadron.style.display = (p.asistencia || p.valorizacion || p.admin) ? '' : 'none';
+  if (tabAsist)  tabAsist.style.display  = verModulo ? '' : 'none';
+  if (tabPadron) tabPadron.style.display = verModulo ? '' : 'none';
   if (tabPerm)   tabPerm.style.display   = p.admin ? '' : 'none';
 }
 
@@ -18203,6 +18275,7 @@ function ppShowSub(sub) {
   if (sub === 'rubros') ppRenderRubros();
   if (sub === 'padron') ppLoadPadron();
   if (sub === 'permisos') ppLoadPermisos();
+  if (sub === 'asistencia') ppLoadAsistencia();
 }
 
 // ═══ PERSONAL V1 — Padrón unificado + permisos ═══════════════════════════════
@@ -18383,6 +18456,197 @@ function ppTogglePermiso(usuarioId) {
     body:JSON.stringify({ usuario_id: usuarioId, personal_asistencia: a && a.checked, personal_valorizacion: v && v.checked })
   }).then(function(r){
     if (r.ok) toast('Permiso actualizado'); else toast(r.error||'Error', 'er');
+  });
+}
+
+// ═══ PERSONAL V1 — Asistencia diaria (dato físico) ═══════════════════════════
+function ppAsistDefaults() {
+  // Carga (una vez) los catálogos del modal de asistencia
+  if (PP.asistDefaults) return Promise.resolve(PP.asistDefaults);
+  return paF('/api/pa/personal/asistencias/defaults').then(function(r){
+    PP.asistDefaults = (r && r.data) || null;
+    return PP.asistDefaults;
+  });
+}
+
+function ppLoadAsistencia() {
+  var f = document.getElementById('pp-asist-fecha');
+  if (!f.value) f.value = new Date().toISOString().slice(0,10);
+  ppAsistDefaults().then(function(){
+    paF('/api/pa/personal/asistencias?fecha='+encodeURIComponent(f.value)).then(function(r){
+      PP.asistencias = (r && r.data) || [];
+      ppRenderAsistencia();
+    });
+  });
+}
+
+function ppRenderAsistencia() {
+  var thead = document.getElementById('pp-asist-thead');
+  thead.innerHTML = '<th>Cuadrilla</th><th>Persona / Bloque</th><th style="text-align:center">Cant.</th><th style="text-align:center">Horas</th>' +
+    '<th style="text-align:center">Jorn.</th><th>Rubro</th><th>Campañas</th><th>Finca / Lote</th><th>Tarea</th><th>Cultivo</th><th>Estado</th><th></th>';
+  var tbody = document.getElementById('pp-asist-tbody');
+  if (!PP.asistencias.length) {
+    tbody.innerHTML = '<tr><td colspan="12" style="text-align:center;color:var(--mut);padding:20px">Sin asistencias para esta fecha. Cargá la primera con "+ Nueva fila".</td></tr>';
+    document.getElementById('pp-asist-resumen').textContent = '';
+    return;
+  }
+  var totJorn = 0;
+  tbody.innerHTML = PP.asistencias.map(function(a){
+    totJorn += (a.jornales_calc || 0);
+    var quien = a.personal_id
+      ? esc(a.personal_nombre || '—') + (a.contratista_nombre ? '<div style="font-size:10px;color:var(--mut)">↳ '+esc(a.contratista_nombre)+'</div>' : '')
+      : '<span style="color:#7c3aed">▣ '+esc(a.contratista_nombre || 'Bloque')+'</span>';
+    var camp = '<div style="font-size:10px">'+esc(a.campana_anual_nombre||'—')+'</div><div style="font-size:10px;color:var(--mut)">'+esc(a.campana_estacional_nombre||'—')+'</div>';
+    var rubro = (a.rubro_codigo?a.rubro_codigo+' ':'')+esc(a.rubro_nombre||'—');
+    var pend = a.estado === 'pendiente_valorizar';
+    var badge = pend
+      ? '<span class="tag" style="font-size:10px;color:var(--warn)">pendiente</span>'
+      : (a.estado === 'valorizado'
+         ? '<span class="tag" style="font-size:10px;color:var(--ok)">valorizado</span>'
+         : '<span class="tag" style="font-size:10px">anulado</span>');
+    var acciones = pend
+      ? '<button class="btn bo bs" onclick="ppEditarAsistencia('+a.id+')" style="padding:3px 8px;font-size:11px">✏️</button> ' +
+        '<button class="btn bo bs" onclick="ppEliminarAsistencia('+a.id+')" style="padding:3px 8px;font-size:11px">🗑️</button>'
+      : '<span style="font-size:10px;color:var(--mut)">read-only</span>';
+    return '<tr><td>'+esc(a.cuadrilla_nombre||'—')+'</td><td>'+quien+'</td>' +
+      '<td style="text-align:center">'+a.cantidad+'</td><td style="text-align:center">'+a.horas+'</td>' +
+      '<td style="text-align:center"><strong>'+(a.jornales_calc!=null?a.jornales_calc:'—')+'</strong></td>' +
+      '<td style="font-size:11px">'+rubro+'</td><td>'+camp+'</td>' +
+      '<td>'+esc(a.lote_nombre||'—')+(a.finca?'<div style="font-size:10px;color:var(--mut)">'+esc(a.finca)+'</div>':'')+'</td>' +
+      '<td style="font-size:11px">'+esc(a.tarea_nombre||'—')+'</td><td style="font-size:11px">'+esc(a.cultivo||'—')+'</td>' +
+      '<td>'+badge+'</td><td style="white-space:nowrap">'+acciones+'</td></tr>';
+  }).join('');
+  document.getElementById('pp-asist-resumen').textContent =
+    PP.asistencias.length + ' fila(s) · ' + (Math.round(totJorn*100)/100) + ' jornales';
+}
+
+function ppAsistToggleModo() {
+  var modo = document.querySelector('input[name="pp-as-modo"]:checked').value;
+  var esInd = modo === 'individual';
+  document.querySelectorAll('.pp-as-ind').forEach(function(el){ el.style.display = esInd ? '' : 'none'; });
+  document.querySelectorAll('.pp-as-blo').forEach(function(el){ el.style.display = esInd ? 'none' : ''; });
+}
+
+function ppAsistLoteChange() {
+  // Autocompletar cultivo desde el lote elegido (si lo tiene y el campo está vacío)
+  var d = PP.asistDefaults; if (!d) return;
+  var loteId = document.getElementById('pp-as-lote').value;
+  var lote = (d.lotes||[]).find(function(l){ return String(l.id) === String(loteId); });
+  var cultEl = document.getElementById('pp-as-cultivo');
+  if (lote && lote.cultivo && !cultEl.value) cultEl.value = lote.cultivo;
+}
+
+function ppFillAsistSelects(a) {
+  a = a || {};
+  var d = PP.asistDefaults || {};
+  var opt = function(arr, val, label, sel) {
+    return (arr||[]).map(function(x){
+      var v = x[val], l = (typeof label === 'function') ? label(x) : x[label];
+      return '<option value="'+v+'"'+(x[val]==sel?' selected':'')+'>'+esc(String(l))+'</option>';
+    }).join('');
+  };
+  document.getElementById('pp-as-cuadrilla').innerHTML = '<option value="">— Ninguna —</option>' + opt(d.cuadrillas,'id','nombre',a.cuadrilla_id);
+  document.getElementById('pp-as-personal').innerHTML = '<option value="">— Elegir —</option>' +
+    opt((d.personal||[]).filter(function(p){ return p.tipo==='fijo'; }),'id','nombre',a.personal_id);
+  document.getElementById('pp-as-contratista').innerHTML = '<option value="">— Elegir —</option>' +
+    opt((d.personal||[]).filter(function(p){ return p.tipo==='contratista'; }),'id','nombre',a.contratista_id);
+  document.getElementById('pp-as-rubro').innerHTML = '<option value="">— Elegir —</option>' +
+    opt(d.cuentas_mo,'id',function(c){ return c.codigo+' · '+c.nombre; }, a.rubro_cuenta_id);
+  document.getElementById('pp-as-canual').innerHTML = '<option value="">— Elegir —</option>' +
+    opt(d.campanas?d.campanas.anual:[],'id',function(c){ return c.nombre+(c.activa?' (vigente)':''); }, a.campaña_anual_id);
+  document.getElementById('pp-as-cestac').innerHTML = '<option value="">— Elegir —</option>' +
+    opt(d.campanas?d.campanas.estacional:[],'id',function(c){ return c.nombre+(c.activa?' (vigente)':''); }, a.campaña_estacional_id);
+  document.getElementById('pp-as-lote').innerHTML = '<option value="">— Elegir —</option>' +
+    opt(d.lotes,'id',function(l){ return (l.finca?l.finca+' · ':'')+l.nombre; }, a.lote_id);
+  document.getElementById('pp-as-tarea').innerHTML = '<option value="">— Ninguna —</option>' + opt(d.tareas,'id','nombre',a.tarea_tipo_id);
+}
+
+function ppAbrirAsistencia() {
+  ppAsistDefaults().then(function(d){
+    if (!d) return toast('No se pudieron cargar los catálogos', 'er');
+    PP.editAsistId = null;
+    document.getElementById('mb-pp-asist-tit').textContent = 'Nueva fila de asistencia';
+    document.querySelector('input[name="pp-as-modo"][value="individual"]').checked = true;
+    ppFillAsistSelects({});
+    document.getElementById('pp-as-fecha').value = document.getElementById('pp-asist-fecha').value || new Date().toISOString().slice(0,10);
+    document.getElementById('pp-as-cantidad').value = '1';
+    document.getElementById('pp-as-horas').value = '8';
+    document.getElementById('pp-as-cultivo').value = '';
+    document.getElementById('pp-as-notas').value = '';
+    // Default campañas vigentes
+    if (d.campanas) {
+      if (d.campanas.vigenteAnualId) document.getElementById('pp-as-canual').value = d.campanas.vigenteAnualId;
+      if (d.campanas.vigenteEstacionalId) document.getElementById('pp-as-cestac').value = d.campanas.vigenteEstacionalId;
+    }
+    ppAsistToggleModo();
+    document.getElementById('mb-pp-asist').classList.add('on');
+  });
+}
+
+function ppEditarAsistencia(id) {
+  var a = PP.asistencias.find(function(x){ return x.id === id; });
+  if (!a) return;
+  ppAsistDefaults().then(function(){
+    PP.editAsistId = id;
+    document.getElementById('mb-pp-asist-tit').textContent = 'Editar fila de asistencia';
+    var esInd = !!a.personal_id;
+    document.querySelector('input[name="pp-as-modo"][value="'+(esInd?'individual':'bloque')+'"]').checked = true;
+    ppFillAsistSelects(a);
+    document.getElementById('pp-as-fecha').value = a.fecha;
+    document.getElementById('pp-as-cantidad').value = a.cantidad;
+    document.getElementById('pp-as-horas').value = a.horas;
+    document.getElementById('pp-as-cultivo').value = a.cultivo || '';
+    document.getElementById('pp-as-notas').value = a.notas || '';
+    ppAsistToggleModo();
+    document.getElementById('mb-pp-asist').classList.add('on');
+  });
+}
+
+function ppGuardarAsistencia() {
+  var modo = document.querySelector('input[name="pp-as-modo"]:checked').value;
+  var num = function(id){ var v = document.getElementById(id).value; return v ? parseInt(v) : null; };
+  var body = {
+    fecha: document.getElementById('pp-as-fecha').value,
+    cuadrilla_id: num('pp-as-cuadrilla'),
+    horas: Number(document.getElementById('pp-as-horas').value),
+    rubro_cuenta_id: num('pp-as-rubro'),
+    campaña_anual_id: num('pp-as-canual'),
+    campaña_estacional_id: num('pp-as-cestac'),
+    lote_id: num('pp-as-lote'),
+    tarea_tipo_id: num('pp-as-tarea'),
+    cultivo: document.getElementById('pp-as-cultivo').value.trim() || null,
+    notas: document.getElementById('pp-as-notas').value.trim() || null
+  };
+  if (modo === 'individual') {
+    body.personal_id = num('pp-as-personal');
+    body.cantidad = 1;
+    body.contratista_id = null;
+    if (!body.personal_id) return toast('Elegí una persona', 'er');
+  } else {
+    body.personal_id = null;
+    body.contratista_id = num('pp-as-contratista');
+    body.cantidad = parseInt(document.getElementById('pp-as-cantidad').value) || 0;
+    if (!body.contratista_id) return toast('Elegí un contratista', 'er');
+    if (body.cantidad < 1) return toast('Cantidad debe ser ≥ 1', 'er');
+  }
+  if (!body.fecha) return toast('Fecha requerida', 'er');
+  if (!(body.horas > 0)) return toast('Horas debe ser > 0', 'er');
+  if (!body.rubro_cuenta_id) return toast('Elegí el rubro (cuenta MO)', 'er');
+  if (!body.campaña_anual_id || !body.campaña_estacional_id) return toast('Campañas anual y estacional obligatorias', 'er');
+  if (!body.lote_id) return toast('Elegí finca / lote', 'er');
+
+  var url = PP.editAsistId ? '/api/pa/personal/asistencias/'+PP.editAsistId : '/api/pa/personal/asistencias';
+  var method = PP.editAsistId ? 'PATCH' : 'POST';
+  paF(url, { method:method, headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) }).then(function(r){
+    if (r.ok) { toast('Guardado'); document.getElementById('mb-pp-asist').classList.remove('on'); ppLoadAsistencia(); }
+    else toast(r.error||'Error', 'er');
+  });
+}
+
+function ppEliminarAsistencia(id) {
+  if (!confirm('¿Borrar esta fila de asistencia?')) return;
+  paF('/api/pa/personal/asistencias/'+id, { method:'DELETE' }).then(function(r){
+    if (r.ok) { toast('Borrado'); ppLoadAsistencia(); } else toast(r.error||'Error', 'er');
   });
 }
 

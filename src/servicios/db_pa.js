@@ -1361,6 +1361,48 @@ db.exec(`
   } catch(e) { console.error('[PA] Error migrando pa_trabajadores→pa_personal:', e.message); }
 })();
 
+// ═══════════════════════════════════════════════════════════════════════════
+// PERSONAL V1 — Asistencia diaria (Fase 2)
+// Una fila por persona-finca-tarea-tramo. Dato físico (sin $).
+// rubro_cuenta_id → pa_cuentas (plan de Pablo, read-only, siempre cuenta 'MO %').
+// cuadrilla_id = de dónde viene la gente (Silva/Gordillo/...), distinto del rubro.
+// ═══════════════════════════════════════════════════════════════════════════
+db.exec(`
+  CREATE TABLE IF NOT EXISTS pa_asistencias (
+    id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+    fecha                 TEXT NOT NULL,
+    cuadrilla_id          INTEGER REFERENCES pa_cuadrillas(id),
+    personal_id           INTEGER REFERENCES pa_personal(id),   -- NULL si bloque sin nombre
+    contratista_id        INTEGER REFERENCES pa_personal(id),   -- contratista madre (req. si bloque)
+    cantidad              INTEGER NOT NULL DEFAULT 1,
+    horas                 REAL NOT NULL,
+    jornales_calc         REAL,                                  -- cantidad * horas / 8 (al insertar/editar)
+    -- Imputación contable y de costos
+    rubro_cuenta_id       INTEGER NOT NULL,                      -- FK lógica a pa_cuentas(id), read-only
+    campaña_anual_id      INTEGER NOT NULL REFERENCES pa_campañas(id),
+    campaña_estacional_id INTEGER NOT NULL REFERENCES pa_campañas(id),
+    lote_id               INTEGER NOT NULL REFERENCES pa_lotes(id),
+    finca                 TEXT,                                  -- denormalizado del lote
+    tarea_tipo_id         INTEGER REFERENCES pa_tareas_tipos(id),
+    cultivo               TEXT,                                  -- opcional, denormalizado
+    estado                TEXT NOT NULL DEFAULT 'pendiente_valorizar'
+                            CHECK(estado IN ('pendiente_valorizar','valorizado','anulado')),
+    notas                 TEXT,
+    cargado_por           INTEGER NOT NULL REFERENCES usuarios(id),
+    creado_en             TEXT DEFAULT (datetime('now','localtime')),
+    modificado_en         TEXT,
+    modificado_por        INTEGER,
+    anulado_en            TEXT,
+    anulado_por           INTEGER,
+    anulado_motivo        TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_pa_asist_fecha   ON pa_asistencias(fecha);
+  CREATE INDEX IF NOT EXISTS idx_pa_asist_estado  ON pa_asistencias(estado);
+  CREATE INDEX IF NOT EXISTS idx_pa_asist_personal ON pa_asistencias(personal_id);
+  CREATE INDEX IF NOT EXISTS idx_pa_asist_contra  ON pa_asistencias(contratista_id);
+  CREATE INDEX IF NOT EXISTS idx_pa_asist_lote    ON pa_asistencias(lote_id);
+`);
+
 // ── SEED: 20 rubros contables (tal cual contabilidad) ──────────────────────
 (function seedRubrosContables() {
   try {

@@ -3194,6 +3194,213 @@ router.post('/personal/padron/:id/reactivar', requireAuth, (req, res) => {
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
+// ═══════════════════════════════════════════════════════════════════════════
+// PERSONAL V1 — Asistencia diaria (pa_asistencias) — Fase 2
+// Dato físico. rubro_cuenta_id siempre una cuenta 'MO %' del plan (read-only).
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Filtro de "cuentas MO" del plan de cuentas de Pablo (solo SELECT, read-only).
+// Criterio confirmado: nombre LIKE 'MO %' (incluye MO GENERALES aunque permite_lote=0).
+const PERSONAL_MO_LIKE = 'MO %';
+router.get('/personal/cuentas-mo', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const data = db.prepare(`
+      SELECT id, codigo, nombre, seccion_id
+      FROM pa_cuentas
+      WHERE activo=1 AND nombre LIKE ?
+      ORDER BY codigo
+    `).all(PERSONAL_MO_LIKE);
+    res.json({ ok: true, data });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// Defaults para el modal de asistencia (campañas vigentes + catálogos)
+router.get('/personal/asistencias/defaults', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const anuales    = db.prepare("SELECT id, nombre, activa FROM pa_campañas WHERE tipo='anual' AND eliminada_en IS NULL ORDER BY activa DESC, nombre").all();
+    const estac      = db.prepare("SELECT id, nombre, activa FROM pa_campañas WHERE tipo='estacional' AND eliminada_en IS NULL ORDER BY activa DESC, nombre").all();
+    const act        = campañasActivas(db);
+    const cuentasMo  = db.prepare("SELECT id, codigo, nombre FROM pa_cuentas WHERE activo=1 AND nombre LIKE ? ORDER BY codigo").all(PERSONAL_MO_LIKE);
+    const lotes      = db.prepare(`
+      SELECT l.id, l.nombre, l.finca,
+             (SELECT cultivo FROM pa_cultivos_lote WHERE lote_id=l.id ORDER BY id DESC LIMIT 1) as cultivo
+      FROM pa_lotes l WHERE l.activo=1 ORDER BY l.finca, l.nombre`).all();
+    const tareas     = db.prepare("SELECT id, nombre FROM pa_tareas_tipos WHERE activo=1 ORDER BY nombre").all();
+    const cuadrillas = db.prepare("SELECT id, nombre FROM pa_cuadrillas WHERE activo=1 ORDER BY nombre").all();
+    const personal   = db.prepare("SELECT id, nombre, tipo, contratista_madre_id FROM pa_personal WHERE activo=1 AND eliminado_en IS NULL ORDER BY tipo, nombre").all();
+    res.json({ ok: true, data: {
+      campanas: { anual: anuales, estacional: estac, vigenteAnualId: act.anualId, vigenteEstacionalId: act.estacionalId },
+      cuentas_mo: cuentasMo, lotes, tareas, cuadrillas, personal
+    }});
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// Grilla del día (o rango): asistencias con nombres resueltos
+router.get('/personal/asistencias', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const perms = permisosPersonal(db, req.user);
+    const { fecha, desde, hasta, estado } = req.query;
+    let sql = `
+      SELECT a.id, a.fecha, a.cuadrilla_id, a.personal_id, a.contratista_id, a.cantidad, a.horas, a.jornales_calc,
+             a.rubro_cuenta_id, a.campaña_anual_id, a.campaña_estacional_id, a.lote_id, a.finca, a.tarea_tipo_id,
+             a.cultivo, a.estado, a.notas,
+             cu.nombre as cuadrilla_nombre,
+             p.nombre  as personal_nombre, p.tipo as personal_tipo,
+             ct.nombre as contratista_nombre,
+             cta.nombre as rubro_nombre, cta.codigo as rubro_codigo,
+             l.nombre  as lote_nombre,
+             t.nombre  as tarea_nombre,
+             ca.nombre as campana_anual_nombre, ce.nombre as campana_estacional_nombre
+      FROM pa_asistencias a
+      LEFT JOIN pa_cuadrillas cu ON cu.id = a.cuadrilla_id
+      LEFT JOIN pa_personal p    ON p.id  = a.personal_id
+      LEFT JOIN pa_personal ct   ON ct.id = a.contratista_id
+      LEFT JOIN pa_cuentas cta    ON cta.id = a.rubro_cuenta_id
+      LEFT JOIN pa_lotes l       ON l.id  = a.lote_id
+      LEFT JOIN pa_tareas_tipos t ON t.id = a.tarea_tipo_id
+      LEFT JOIN pa_campañas ca    ON ca.id = a.campaña_anual_id
+      LEFT JOIN pa_campañas ce    ON ce.id = a.campaña_estacional_id
+      WHERE 1=1`;
+    const params = [];
+    if (fecha) { sql += " AND a.fecha=?"; params.push(fecha); }
+    if (desde) { sql += " AND a.fecha>=?"; params.push(desde); }
+    if (hasta) { sql += " AND a.fecha<=?"; params.push(hasta); }
+    if (estado) { sql += " AND a.estado=?"; params.push(estado); }
+    else sql += " AND a.estado != 'anulado'";
+    sql += " ORDER BY a.fecha DESC, a.id DESC";
+    let data = db.prepare(sql).all(...params);
+    res.json({ ok: true, data, perms });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// Valida y normaliza el payload de una asistencia. Devuelve {error} o {val}
+function _validarAsistencia(db, body) {
+  const { fecha, personal_id, contratista_id, cantidad, horas, rubro_cuenta_id,
+          campaña_anual_id, campaña_estacional_id, lote_id } = body;
+  if (!fecha) return { error: 'fecha requerida' };
+  if (!rubro_cuenta_id) return { error: 'rubro_cuenta_id requerido' };
+  if (!lote_id) return { error: 'lote_id requerido' };
+  if (!campaña_anual_id || !campaña_estacional_id) return { error: 'Campañas anual y estacional requeridas' };
+  const cant = Number(cantidad) || 1;
+  const hs = Number(horas);
+  if (cant < 1) return { error: 'cantidad debe ser ≥ 1' };
+  if (!(hs > 0)) return { error: 'horas debe ser > 0' };
+  // Individual vs bloque
+  let contraId = contratista_id || null;
+  if (!personal_id) {
+    if (!contraId) return { error: 'Un registro de bloque (sin persona) requiere un contratista' };
+  } else {
+    // si es individual y no se pasó contratista, derivar de la persona
+    if (!contraId) {
+      const per = db.prepare("SELECT contratista_madre_id FROM pa_personal WHERE id=?").get(personal_id);
+      contraId = per ? (per.contratista_madre_id || null) : null;
+    }
+  }
+  // Campañas: validar tipos
+  const ca = db.prepare("SELECT tipo FROM pa_campañas WHERE id=?").get(campaña_anual_id);
+  if (!ca || ca.tipo !== 'anual') return { error: 'campaña_anual_id no es una campaña anual válida' };
+  const ce = db.prepare("SELECT tipo FROM pa_campañas WHERE id=?").get(campaña_estacional_id);
+  if (!ce || ce.tipo !== 'estacional') return { error: 'campaña_estacional_id no es una campaña estacional válida' };
+  // Rubro: debe existir y ser cuenta MO
+  const cta = db.prepare("SELECT nombre FROM pa_cuentas WHERE id=? AND activo=1").get(rubro_cuenta_id);
+  if (!cta) return { error: 'rubro (cuenta) inexistente o inactivo' };
+  if (!/^MO /.test(cta.nombre)) return { error: 'El rubro debe ser una cuenta de Mano de Obra (MO)' };
+  // Lote: finca denormalizada
+  const lote = db.prepare("SELECT finca FROM pa_lotes WHERE id=?").get(lote_id);
+  if (!lote) return { error: 'lote inexistente' };
+  return { val: {
+    cant, hs, contraId,
+    jornales: Math.round((cant * hs / 8.0) * 100) / 100,
+    finca: lote.finca || null
+  }};
+}
+
+// Alta
+router.post('/personal/asistencias', requireAuth, (req, res) => {
+  const db = getDb();
+  const perms = permisosPersonal(db, req.user);
+  if (!perms.asistencia && !perms.valorizacion && !perms.admin)
+    return res.status(403).json({ ok: false, error: 'Sin permiso para cargar asistencias' });
+  const b = req.body;
+  const chk = _validarAsistencia(db, b);
+  if (chk.error) return res.status(400).json({ ok: false, error: chk.error });
+  const v = chk.val;
+  try {
+    const r = db.prepare(`INSERT INTO pa_asistencias
+        (fecha, cuadrilla_id, personal_id, contratista_id, cantidad, horas, jornales_calc,
+         rubro_cuenta_id, campaña_anual_id, campaña_estacional_id, lote_id, finca, tarea_tipo_id, cultivo, notas, cargado_por)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+      .run(b.fecha, b.cuadrilla_id || null, b.personal_id || null, v.contraId,
+           v.cant, v.hs, v.jornales,
+           b.rubro_cuenta_id, b.campaña_anual_id, b.campaña_estacional_id, b.lote_id, v.finca,
+           b.tarea_tipo_id || null, b.cultivo || null, b.notas || null, req.user.id);
+    res.json({ ok: true, id: r.lastInsertRowid });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// Edición (solo pendiente_valorizar)
+router.patch('/personal/asistencias/:id', requireAuth, (req, res) => {
+  const db = getDb();
+  const perms = permisosPersonal(db, req.user);
+  if (!perms.asistencia && !perms.valorizacion && !perms.admin)
+    return res.status(403).json({ ok: false, error: 'Sin permiso para editar asistencias' });
+  try {
+    const a = db.prepare("SELECT * FROM pa_asistencias WHERE id=?").get(req.params.id);
+    if (!a) return res.status(404).json({ ok: false, error: 'Asistencia no encontrada' });
+    if (a.estado !== 'pendiente_valorizar')
+      return res.status(400).json({ ok: false, error: 'Solo se editan asistencias pendientes de valorizar (anulá primero si está valorizada)' });
+    // Merge con valores actuales para validar
+    const merged = {
+      fecha: req.body.fecha || a.fecha,
+      cuadrilla_id: req.body.cuadrilla_id !== undefined ? req.body.cuadrilla_id : a.cuadrilla_id,
+      personal_id: req.body.personal_id !== undefined ? req.body.personal_id : a.personal_id,
+      contratista_id: req.body.contratista_id !== undefined ? req.body.contratista_id : a.contratista_id,
+      cantidad: req.body.cantidad !== undefined ? req.body.cantidad : a.cantidad,
+      horas: req.body.horas !== undefined ? req.body.horas : a.horas,
+      rubro_cuenta_id: req.body.rubro_cuenta_id || a.rubro_cuenta_id,
+      campaña_anual_id: req.body.campaña_anual_id || a.campaña_anual_id,
+      campaña_estacional_id: req.body.campaña_estacional_id || a.campaña_estacional_id,
+      lote_id: req.body.lote_id || a.lote_id,
+      tarea_tipo_id: req.body.tarea_tipo_id !== undefined ? req.body.tarea_tipo_id : a.tarea_tipo_id,
+      cultivo: req.body.cultivo !== undefined ? req.body.cultivo : a.cultivo,
+      notas: req.body.notas !== undefined ? req.body.notas : a.notas
+    };
+    const chk = _validarAsistencia(db, merged);
+    if (chk.error) return res.status(400).json({ ok: false, error: chk.error });
+    const v = chk.val;
+    db.prepare(`UPDATE pa_asistencias SET
+        fecha=?, cuadrilla_id=?, personal_id=?, contratista_id=?, cantidad=?, horas=?, jornales_calc=?,
+        rubro_cuenta_id=?, campaña_anual_id=?, campaña_estacional_id=?, lote_id=?, finca=?, tarea_tipo_id=?, cultivo=?, notas=?,
+        modificado_en=datetime('now','localtime'), modificado_por=?
+        WHERE id=?`)
+      .run(merged.fecha, merged.cuadrilla_id || null, merged.personal_id || null, v.contraId,
+           v.cant, v.hs, v.jornales,
+           merged.rubro_cuenta_id, merged.campaña_anual_id, merged.campaña_estacional_id, merged.lote_id, v.finca,
+           merged.tarea_tipo_id || null, merged.cultivo || null, merged.notas || null,
+           req.user.id, req.params.id);
+    res.json({ ok: true });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// Baja (solo pendiente_valorizar; las valorizadas se anulan en F3)
+router.delete('/personal/asistencias/:id', requireAuth, (req, res) => {
+  const db = getDb();
+  const perms = permisosPersonal(db, req.user);
+  if (!perms.asistencia && !perms.valorizacion && !perms.admin)
+    return res.status(403).json({ ok: false, error: 'Sin permiso para eliminar asistencias' });
+  try {
+    const a = db.prepare("SELECT estado FROM pa_asistencias WHERE id=?").get(req.params.id);
+    if (!a) return res.status(404).json({ ok: false, error: 'Asistencia no encontrada' });
+    if (a.estado !== 'pendiente_valorizar')
+      return res.status(400).json({ ok: false, error: 'No se puede borrar una asistencia valorizada' });
+    db.prepare("DELETE FROM pa_asistencias WHERE id=?").run(req.params.id);
+    res.json({ ok: true });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
 // ── Tipos de tarea ─────────────────────────────────────────────────────────
 router.get('/personal/tareas-tipos', requireAuth, (req, res) => {
   const db = getDb();
