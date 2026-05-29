@@ -3408,6 +3408,9 @@ function sgLoteBaja(id){
     <div class="pp-subtab" data-sub="rubros" onclick="ppShowSub('rubros')" style="padding:10px 16px;cursor:pointer;font-size:13px;font-weight:600;border-bottom:2px solid transparent">📊 Rubros</div>
     <div class="pp-subtab" data-sub="asistencia" id="pp-tab-asistencia" onclick="ppShowSub('asistencia')" style="display:none;padding:10px 16px;cursor:pointer;font-size:13px;font-weight:600;border-bottom:2px solid transparent">📝 Asistencia diaria <span style="font-size:9px;background:var(--burg);color:#fff;border-radius:8px;padding:1px 5px;margin-left:4px">NUEVO</span></div>
     <div class="pp-subtab" data-sub="padron" id="pp-tab-padron" onclick="ppShowSub('padron')" style="display:none;padding:10px 16px;cursor:pointer;font-size:13px;font-weight:600;border-bottom:2px solid transparent">👥 Personal <span style="font-size:9px;background:var(--burg);color:#fff;border-radius:8px;padding:1px 5px;margin-left:4px">NUEVO</span></div>
+    <div class="pp-subtab" data-sub="valorizar" id="pp-tab-valorizar" onclick="ppShowSub('valorizar')" style="display:none;padding:10px 16px;cursor:pointer;font-size:13px;font-weight:600;border-bottom:2px solid transparent">💰 Por valorizar</div>
+    <div class="pp-subtab" data-sub="cc" id="pp-tab-cc" onclick="ppShowSub('cc')" style="display:none;padding:10px 16px;cursor:pointer;font-size:13px;font-weight:600;border-bottom:2px solid transparent">📒 Cuenta Corriente</div>
+    <div class="pp-subtab" data-sub="pagos" id="pp-tab-pagos" onclick="ppShowSub('pagos')" style="display:none;padding:10px 16px;cursor:pointer;font-size:13px;font-weight:600;border-bottom:2px solid transparent">💸 Pagos/Adelantos</div>
     <div class="pp-subtab" data-sub="permisos" id="pp-tab-permisos" onclick="ppShowSub('permisos')" style="display:none;padding:10px 16px;cursor:pointer;font-size:13px;font-weight:600;border-bottom:2px solid transparent">⚙️ Permisos</div>
   </div>
 
@@ -3515,6 +3518,60 @@ function sgLoteBaja(id){
     </table></div>
   </div>
 
+  <!-- Por valorizar (semana jueves-a-jueves) -->
+  <div class="pp-sub" id="pp-sub-valorizar">
+    <div style="display:flex;gap:10px;margin-bottom:14px;align-items:center;flex-wrap:wrap">
+      <button class="btn bo bs" onclick="ppValSemana(-1)">‹ Semana ant.</button>
+      <span id="pp-val-rango" style="font-size:13px;font-weight:700"></span>
+      <button class="btn bo bs" onclick="ppValSemana(1)">Semana sig. ›</button>
+      <span style="flex:1"></span>
+      <span id="pp-val-resumen" style="font-size:12px;color:var(--mut)"></span>
+      <button class="btn bb" onclick="ppValorizarSeleccion()">💰 Valorizar selección</button>
+    </div>
+    <div class="tw"><table>
+      <thead><tr>
+        <th style="text-align:center"><input type="checkbox" id="pp-val-all" onchange="ppValToggleAll(this.checked)"></th>
+        <th>Titular</th><th>Fecha</th><th>Rubro</th><th>Finca/Lote</th>
+        <th style="text-align:center">Base</th><th style="text-align:right">Tarifa $</th><th style="text-align:right">Monto</th>
+      </tr></thead>
+      <tbody id="pp-val-tbody2"></tbody>
+    </table></div>
+  </div>
+
+  <!-- Cuenta Corriente -->
+  <div class="pp-sub" id="pp-sub-cc">
+    <div style="display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap">
+      <div style="flex:1;min-width:280px">
+        <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap">
+          <select id="pp-cc-tipo" onchange="ppLoadCC()" style="padding:5px 10px;font-size:12px">
+            <option value="">Todos</option><option value="fijo">Fijos</option><option value="contratista">Contratistas</option>
+          </select>
+          <label style="font-size:12px;display:flex;align-items:center;gap:4px"><input type="checkbox" id="pp-cc-consaldo" onchange="ppLoadCC()"> Solo con movimientos</label>
+          <input id="pp-cc-q" oninput="ppLoadCC()" placeholder="Buscar titular" style="padding:5px 10px;font-size:12px;flex:1;min-width:120px">
+        </div>
+        <div class="tw"><table>
+          <thead><tr><th>Titular</th><th>Tipo</th><th style="text-align:right">Saldo</th><th>Último mov.</th></tr></thead>
+          <tbody id="pp-cc-tbody"></tbody>
+        </table></div>
+      </div>
+      <div style="flex:1.3;min-width:340px">
+        <div id="pp-cc-detalle" style="border:1px solid var(--bor);border-radius:10px;padding:16px;min-height:200px">
+          <div style="color:var(--mut);font-size:13px;text-align:center;padding:40px 0">Elegí un titular para ver su cuenta corriente</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Pagos / Adelantos (registro rápido) -->
+  <div class="pp-sub" id="pp-sub-pagos">
+    <button class="btn bb" style="margin-bottom:12px" onclick="ppAbrirMov(null,null)">+ Registrar pago / adelanto / ajuste</button>
+    <div style="font-size:13px;font-weight:700;margin-bottom:8px">Últimos movimientos manuales</div>
+    <div class="tw"><table>
+      <thead><tr><th>Fecha</th><th>Titular</th><th>Tipo</th><th style="text-align:right">Monto</th><th>Descripción</th><th></th></tr></thead>
+      <tbody id="pp-pagos-tbody"></tbody>
+    </table></div>
+  </div>
+
   <!-- Permisos del módulo (solo admin) -->
   <div class="pp-sub" id="pp-sub-permisos">
     <div style="margin-bottom:12px;font-size:12px;color:var(--mut)">
@@ -3618,6 +3675,36 @@ function sgLoteBaja(id){
     <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:14px">
       <button class="btn bo" onclick="document.getElementById('mb-pp-asist').classList.remove('on')">Cancelar</button>
       <button class="btn bb" onclick="ppGuardarAsistencia()">Guardar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal pago/adelanto/ajuste de CC -->
+<div class="mb" id="mb-pp-ccmov">
+  <div class="mbox" style="width:460px">
+    <div class="mhd">
+      <div class="mht" id="mb-pp-ccmov-tit">Registrar movimiento</div>
+      <button class="mcl" onclick="document.getElementById('mb-pp-ccmov').classList.remove('on')">×</button>
+    </div>
+    <div class="fg">
+      <div class="fl" style="flex:1 1 100%"><label>Titular *</label>
+        <select id="pp-mov-titular"><option value="">— Elegir —</option></select>
+      </div>
+      <div class="fl"><label>Tipo *</label>
+        <select id="pp-mov-tipo">
+          <option value="pago">Pago</option>
+          <option value="adelanto">Adelanto</option>
+          <option value="ajuste">Ajuste</option>
+        </select>
+      </div>
+      <div class="fl"><label>Monto $ *</label><input type="number" id="pp-mov-monto" step="0.01"></div>
+      <div class="fl"><label>Fecha</label><input type="date" id="pp-mov-fecha"></div>
+      <div class="fl" style="flex:1 1 100%"><label>Descripción</label><input id="pp-mov-desc"></div>
+    </div>
+    <div style="font-size:11px;color:var(--mut);margin-top:6px">Pago/Adelanto bajan el saldo (se guardan en negativo). Ajuste respeta el signo que pongas (negativo baja, positivo sube).</div>
+    <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:14px">
+      <button class="btn bo" onclick="document.getElementById('mb-pp-ccmov').classList.remove('on')">Cancelar</button>
+      <button class="btn bb" onclick="ppGuardarMov()">Guardar</button>
     </div>
   </div>
 </div>
@@ -18219,6 +18306,8 @@ var PP = {
   trabajadores: [], cuadrillas: [], tareas: [], rubros: [], partes: [], lotes: [], usuarios: [],
   padron: [], personasEquipo: [],
   asistencias: [], asistDefaults: null, editAsistId: null,
+  valRows: [], valSemanaOffset: 0,
+  ccTitulares: [], ccActual: null,
   misPermisos: { asistencia:false, valorizacion:false, admin:false },
   editTrabajadorId: null, editCuadrillaId: null, editTareaId: null, editPersonalId: null,
   valorizandoParteId: null
@@ -18242,12 +18331,14 @@ function ppInit() {
 function ppAplicarGating() {
   var p = PP.misPermisos || {};
   var verModulo = (p.asistencia || p.valorizacion || p.admin);
-  var tabAsist  = document.getElementById('pp-tab-asistencia');
-  var tabPadron = document.getElementById('pp-tab-padron');
-  var tabPerm   = document.getElementById('pp-tab-permisos');
-  if (tabAsist)  tabAsist.style.display  = verModulo ? '' : 'none';
-  if (tabPadron) tabPadron.style.display = verModulo ? '' : 'none';
-  if (tabPerm)   tabPerm.style.display   = p.admin ? '' : 'none';
+  var verVal    = (p.valorizacion || p.admin);
+  var show = function(id, cond){ var el = document.getElementById(id); if (el) el.style.display = cond ? '' : 'none'; };
+  show('pp-tab-asistencia', verModulo);
+  show('pp-tab-padron', verModulo);
+  show('pp-tab-valorizar', verVal);
+  show('pp-tab-cc', verVal);
+  show('pp-tab-pagos', verVal);
+  show('pp-tab-permisos', p.admin);
 }
 
 function ppCargarBase() {
@@ -18276,6 +18367,9 @@ function ppShowSub(sub) {
   if (sub === 'padron') ppLoadPadron();
   if (sub === 'permisos') ppLoadPermisos();
   if (sub === 'asistencia') ppLoadAsistencia();
+  if (sub === 'valorizar') ppLoadValorizar();
+  if (sub === 'cc') ppLoadCC();
+  if (sub === 'pagos') ppLoadPagos();
 }
 
 // ═══ PERSONAL V1 — Padrón unificado + permisos ═══════════════════════════════
@@ -18504,10 +18598,15 @@ function ppRenderAsistencia() {
       : (a.estado === 'valorizado'
          ? '<span class="tag" style="font-size:10px;color:var(--ok)">valorizado</span>'
          : '<span class="tag" style="font-size:10px">anulado</span>');
-    var acciones = pend
-      ? '<button class="btn bo bs" onclick="ppEditarAsistencia('+a.id+')" style="padding:3px 8px;font-size:11px">✏️</button> ' +
-        '<button class="btn bo bs" onclick="ppEliminarAsistencia('+a.id+')" style="padding:3px 8px;font-size:11px">🗑️</button>'
-      : '<span style="font-size:10px;color:var(--mut)">read-only</span>';
+    var acciones;
+    if (pend) {
+      acciones = '<button class="btn bo bs" onclick="ppEditarAsistencia('+a.id+')" style="padding:3px 8px;font-size:11px">✏️</button> ' +
+        '<button class="btn bo bs" onclick="ppEliminarAsistencia('+a.id+')" style="padding:3px 8px;font-size:11px">🗑️</button>';
+    } else if (a.estado === 'valorizado' && ppPuedeVerTarifa()) {
+      acciones = '<button class="btn bo bs" onclick="ppAnularAsistencia('+a.id+')" style="padding:3px 8px;font-size:11px">⊘ Anular</button>';
+    } else {
+      acciones = '<span style="font-size:10px;color:var(--mut)">read-only</span>';
+    }
     return '<tr><td>'+esc(a.cuadrilla_nombre||'—')+'</td><td>'+quien+'</td>' +
       '<td style="text-align:center">'+a.cantidad+'</td><td style="text-align:center">'+a.horas+'</td>' +
       '<td style="text-align:center"><strong>'+(a.jornales_calc!=null?a.jornales_calc:'—')+'</strong></td>' +
@@ -18647,6 +18746,234 @@ function ppEliminarAsistencia(id) {
   if (!confirm('¿Borrar esta fila de asistencia?')) return;
   paF('/api/pa/personal/asistencias/'+id, { method:'DELETE' }).then(function(r){
     if (r.ok) { toast('Borrado'); ppLoadAsistencia(); } else toast(r.error||'Error', 'er');
+  });
+}
+
+function ppAnularAsistencia(id) {
+  var motivo = prompt('Anular asistencia valorizada — esto revierte el costo del lote y la cuenta corriente.\n\nMotivo:');
+  if (motivo === null) return;
+  if (!motivo.trim()) return toast('El motivo es obligatorio', 'er');
+  paF('/api/pa/personal/asistencias/'+id+'/anular', {
+    method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ motivo: motivo.trim() })
+  }).then(function(r){
+    if (r.ok) { toast('Asistencia anulada — CC y costo revertidos'); ppLoadAsistencia(); }
+    else toast(r.error||'Error', 'er');
+  });
+}
+
+// ═══ PERSONAL V1 — Valorización (semana jueves-a-jueves) ═════════════════════
+// Devuelve {desde,hasta} de la semana jueves→miércoles con offset de semanas
+function ppSemanaJueves(offset) {
+  var hoy = new Date(); hoy.setHours(0,0,0,0);
+  var dow = hoy.getDay();                 // 0=dom ... 4=jue
+  var diff = (dow - 4 + 7) % 7;           // días desde el jueves más reciente
+  var jueves = new Date(hoy); jueves.setDate(hoy.getDate() - diff + (offset*7));
+  var fin = new Date(jueves); fin.setDate(jueves.getDate() + 6);  // miércoles
+  var fmt = function(d){ return d.toISOString().slice(0,10); };
+  return { desde: fmt(jueves), hasta: fmt(fin) };
+}
+
+function ppValSemana(delta) { PP.valSemanaOffset += delta; ppLoadValorizar(); }
+
+function ppLoadValorizar() {
+  var sem = ppSemanaJueves(PP.valSemanaOffset);
+  document.getElementById('pp-val-rango').textContent = paFecha(sem.desde) + ' → ' + paFecha(sem.hasta) + ' (jueves a miércoles)';
+  paF('/api/pa/personal/valorizar?desde='+sem.desde+'&hasta='+sem.hasta).then(function(r){
+    PP.valRows = (r && r.data) || [];
+    ppRenderValorizar();
+  });
+}
+
+function ppRenderValorizar() {
+  var tbody = document.getElementById('pp-val-tbody2');
+  if (!PP.valRows.length) {
+    tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--mut);padding:20px">🎉 No hay asistencias pendientes en esta semana</td></tr>';
+    document.getElementById('pp-val-resumen').textContent = '';
+    document.getElementById('pp-val-all').checked = false;
+    return;
+  }
+  // Ordenar por titular para facilitar la lectura bulk
+  var rows = PP.valRows.slice().sort(function(a,b){ return (a.titular_nombre||'').localeCompare(b.titular_nombre||''); });
+  tbody.innerHTML = rows.map(function(a){
+    var quien = esc(a.titular_nombre||'—') + ' <span class="tag" style="font-size:9px">'+(a.titular_tipo||'')+'</span>';
+    return '<tr data-aid="'+a.id+'">' +
+      '<td style="text-align:center"><input type="checkbox" class="pp-val-chk" checked data-aid="'+a.id+'" onchange="ppValRecalc()"></td>' +
+      '<td>'+quien+'</td><td>'+paFecha(a.fecha)+'</td>' +
+      '<td style="font-size:11px">'+(a.rubro_codigo?a.rubro_codigo+' ':'')+esc(a.rubro_nombre||'—')+'</td>' +
+      '<td>'+esc(a.lote_nombre||'—')+(a.finca?'<div style="font-size:10px;color:var(--mut)">'+esc(a.finca)+'</div>':'')+'</td>' +
+      '<td style="text-align:center">'+a.base_unidades+'<div style="font-size:9px;color:var(--mut)">'+esc(a.unidad_tarifa||'')+'</div></td>' +
+      '<td style="text-align:right"><input type="number" step="0.01" value="'+(a.tarifa_default||0)+'" data-aid="'+a.id+'" class="pp-val-tar" oninput="ppValRecalc()" style="width:90px;text-align:right;padding:3px 6px;font-size:12px"></td>' +
+      '<td style="text-align:right" class="pp-val-monto" data-aid="'+a.id+'">'+ppFmtARS(a.monto_preview)+'</td></tr>';
+  }).join('');
+  ppValRecalc();
+}
+
+function ppValRecalc() {
+  var total = 0, n = 0;
+  PP.valRows.forEach(function(a){
+    var tarEl = document.querySelector('.pp-val-tar[data-aid="'+a.id+'"]');
+    var chkEl = document.querySelector('.pp-val-chk[data-aid="'+a.id+'"]');
+    var montoEl = document.querySelector('.pp-val-monto[data-aid="'+a.id+'"]');
+    if (!tarEl || !montoEl) return;
+    var tarifa = Number(tarEl.value) || 0;
+    var monto = Math.round(tarifa * a.base_unidades * 100) / 100;
+    montoEl.textContent = ppFmtARS(monto);
+    if (chkEl && chkEl.checked) { total += monto; n++; }
+  });
+  document.getElementById('pp-val-resumen').textContent = n + ' seleccionada(s) · ' + ppFmtARS(total);
+}
+
+function ppValToggleAll(on) {
+  document.querySelectorAll('.pp-val-chk').forEach(function(c){ c.checked = on; });
+  ppValRecalc();
+}
+
+function ppValorizarSeleccion() {
+  var items = [];
+  document.querySelectorAll('.pp-val-chk').forEach(function(c){
+    if (!c.checked) return;
+    var aid = parseInt(c.dataset.aid);
+    var tarEl = document.querySelector('.pp-val-tar[data-aid="'+aid+'"]');
+    items.push({ asistencia_id: aid, tarifa_unitaria: Number(tarEl.value) || 0 });
+  });
+  if (!items.length) return toast('No hay filas seleccionadas', 'er');
+  if (!confirm('Valorizar '+items.length+' asistencia(s)? Esto imputa el costo a cada lote y carga el devengado en la cuenta corriente.')) return;
+  paF('/api/pa/personal/valorizar', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ items: items }) })
+    .then(function(r){
+      if (!r.ok) return toast(r.error||'Error', 'er');
+      var d = r.data || {};
+      toast('Valorizadas: '+d.valorizadas+' · '+ppFmtARS(d.monto_total));
+      if (d.errores && d.errores.length) alert('Con observaciones:\n- ' + d.errores.join('\n- '));
+      ppLoadValorizar();
+    });
+}
+
+// ═══ PERSONAL V1 — Cuenta Corriente ══════════════════════════════════════════
+function ppLoadCC() {
+  var tipo = document.getElementById('pp-cc-tipo').value;
+  var q = document.getElementById('pp-cc-q').value.trim();
+  var cs = document.getElementById('pp-cc-consaldo').checked ? '1' : '';
+  var qs = '?' + (tipo?('tipo='+tipo+'&'):'') + (cs?'con_saldo=1&':'') + (q?('q='+encodeURIComponent(q)):'');
+  paF('/api/pa/personal/cc/titulares'+qs).then(function(r){
+    PP.ccTitulares = (r && r.data) || [];
+    ppRenderCCTitulares();
+  });
+}
+
+function ppSaldoSpan(s) {
+  s = s || 0;
+  var col = s > 0 ? 'var(--err)' : (s < 0 ? 'var(--ok)' : 'var(--mut)');
+  return '<span style="color:'+col+';font-weight:700">'+ppFmtARS(s)+'</span>';
+}
+
+function ppRenderCCTitulares() {
+  var tbody = document.getElementById('pp-cc-tbody');
+  if (!PP.ccTitulares.length) { tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:var(--mut);padding:20px">Sin titulares</td></tr>'; return; }
+  tbody.innerHTML = PP.ccTitulares.map(function(t){
+    return '<tr style="cursor:pointer" onclick="ppVerCC(\''+t.tipo+'\','+t.id+')">' +
+      '<td>'+esc(t.nombre)+'</td><td><span class="tag" style="font-size:10px">'+t.tipo+'</span></td>' +
+      '<td style="text-align:right">'+ppSaldoSpan(t.saldo)+'</td>' +
+      '<td style="font-size:11px;color:var(--mut)">'+(t.ultimo_mov?paFecha(t.ultimo_mov):'—')+'</td></tr>';
+  }).join('');
+}
+
+function ppVerCC(tipo, id) {
+  paF('/api/pa/personal/cc/'+tipo+'/'+id).then(function(r){
+    if (!r.ok) return toast(r.error||'Error', 'er');
+    PP.ccActual = r.data;
+    ppRenderCCDetalle();
+  });
+}
+
+function ppRenderCCDetalle() {
+  var d = PP.ccActual; if (!d) return;
+  var cont = document.getElementById('pp-cc-detalle');
+  var movs = d.movimientos || [];
+  var saldoRun = 0;
+  var filas = movs.map(function(m){
+    var anul = !!m.anulado;
+    if (!anul) saldoRun = Math.round((saldoRun + m.monto)*100)/100;
+    var signo = m.monto >= 0 ? '+' : '';
+    var puedeAnular = (m.tipo_mov==='pago'||m.tipo_mov==='adelanto'||m.tipo_mov==='ajuste') && !anul;
+    return '<tr style="'+(anul?'opacity:.45;text-decoration:line-through':'')+'">' +
+      '<td style="font-size:11px">'+paFecha(m.fecha)+'</td>' +
+      '<td><span class="tag" style="font-size:10px">'+m.tipo_mov+'</span></td>' +
+      '<td style="font-size:11px">'+esc(m.descripcion||'')+'</td>' +
+      '<td style="text-align:right;color:'+(m.monto>=0?'var(--err)':'var(--ok)')+'">'+signo+ppFmtARS(m.monto)+'</td>' +
+      '<td style="text-align:right">'+(anul?'—':ppFmtARS(saldoRun))+'</td>' +
+      '<td>'+(puedeAnular?'<button class="btn bo bs" onclick="ppAnularMov('+m.id+')" style="padding:2px 6px;font-size:10px">⊘</button>':'')+'</td></tr>';
+  }).join('');
+  cont.innerHTML =
+    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">' +
+      '<div><div style="font-size:15px;font-weight:700">'+esc(d.titular.nombre)+' <span class="tag" style="font-size:10px">'+d.titular.tipo+'</span></div>' +
+      '<div style="font-size:12px;color:var(--mut)">Saldo actual: '+ppSaldoSpan(d.saldo)+' '+(d.saldo>0?'(le debemos)':(d.saldo<0?'(a favor)':''))+'</div></div>' +
+      '<button class="btn bb bs" onclick="ppAbrirMov(\''+d.titular.tipo+'\','+d.titular.id+')" style="font-size:11px">+ Pago/Adelanto/Ajuste</button>' +
+    '</div>' +
+    '<div class="tw" style="max-height:340px;overflow:auto"><table>' +
+      '<thead><tr><th>Fecha</th><th>Tipo</th><th>Detalle</th><th style="text-align:right">Monto</th><th style="text-align:right">Saldo</th><th></th></tr></thead>' +
+      '<tbody>'+(filas || '<tr><td colspan="6" style="text-align:center;color:var(--mut);padding:16px">Sin movimientos</td></tr>')+'</tbody>' +
+    '</table></div>';
+}
+
+// ═══ PERSONAL V1 — Pagos / Adelantos / Ajustes ═══════════════════════════════
+function ppLoadPagos() {
+  // Reusar titulares para el dropdown del modal y listar últimos movimientos manuales
+  paF('/api/pa/personal/cc/titulares').then(function(r){ PP.ccTitulares = (r && r.data) || []; });
+  // Listar últimos movimientos manuales agregando de cada titular sería caro;
+  // mostramos un placeholder y dejamos el detalle por titular en la pestaña CC.
+  var tbody = document.getElementById('pp-pagos-tbody');
+  tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--mut);padding:16px">Usá "+ Registrar" para cargar un pago/adelanto/ajuste. El detalle por titular está en la pestaña Cuenta Corriente.</td></tr>';
+}
+
+function ppAbrirMov(tipoTitular, titularId) {
+  // Asegurar lista de titulares cargada
+  var fill = function() {
+    document.getElementById('pp-mov-titular').innerHTML = '<option value="">— Elegir —</option>' +
+      (PP.ccTitulares||[]).map(function(t){
+        return '<option value="'+t.id+'" data-tipo="'+t.tipo+'"'+(t.id==titularId?' selected':'')+'>'+esc(t.nombre)+' ('+t.tipo+')</option>';
+      }).join('');
+    document.getElementById('pp-mov-tipo').value = 'pago';
+    document.getElementById('pp-mov-monto').value = '';
+    document.getElementById('pp-mov-fecha').value = new Date().toISOString().slice(0,10);
+    document.getElementById('pp-mov-desc').value = '';
+    document.getElementById('mb-pp-ccmov').classList.add('on');
+  };
+  if (!PP.ccTitulares || !PP.ccTitulares.length) {
+    paF('/api/pa/personal/cc/titulares').then(function(r){ PP.ccTitulares = (r && r.data) || []; fill(); });
+  } else fill();
+}
+
+function ppGuardarMov() {
+  var sel = document.getElementById('pp-mov-titular');
+  var opt = sel.selectedOptions[0];
+  if (!opt || !opt.value) return toast('Elegí un titular', 'er');
+  var monto = Number(document.getElementById('pp-mov-monto').value);
+  if (!monto || isNaN(monto)) return toast('Monto inválido', 'er');
+  var body = {
+    titular_id: parseInt(opt.value),
+    tipo_titular: opt.dataset.tipo,
+    tipo_mov: document.getElementById('pp-mov-tipo').value,
+    monto: monto,
+    fecha: document.getElementById('pp-mov-fecha').value || null,
+    descripcion: document.getElementById('pp-mov-desc').value.trim() || null
+  };
+  paF('/api/pa/personal/cc/movimiento', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) })
+    .then(function(r){
+      if (!r.ok) return toast(r.error||'Error', 'er');
+      toast('Movimiento registrado');
+      document.getElementById('mb-pp-ccmov').classList.remove('on');
+      if (PP.ccActual && PP.ccActual.titular.id === body.titular_id) ppVerCC(body.tipo_titular, body.titular_id);
+      ppLoadCC();
+    });
+}
+
+function ppAnularMov(id) {
+  if (!confirm('¿Anular este movimiento? Se recalcula el saldo.')) return;
+  paF('/api/pa/personal/cc/movimiento/'+id+'/anular', { method:'POST' }).then(function(r){
+    if (!r.ok) return toast(r.error||'Error', 'er');
+    toast('Movimiento anulado');
+    if (PP.ccActual) ppVerCC(PP.ccActual.titular.tipo, PP.ccActual.titular.id);
+    ppLoadCC();
   });
 }
 

@@ -3401,6 +3401,330 @@ router.delete('/personal/asistencias/:id', requireAuth, (req, res) => {
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
+// ═══════════════════════════════════════════════════════════════════════════
+// PERSONAL V1 — Valorización + Cuenta Corriente + imputación (Fase 3)
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Mapeo rubro(cuenta MO) → categoría de pa_costos_lote. ÚNICO punto de cambio.
+// Regla: cuenta 'MO COSH%' → 'cosecha'; si no, por titular (contratista/fijo).
+function _categoriaCostoAsistencia(db, rubroCuentaId, tipoTitular) {
+  const cta = db.prepare("SELECT nombre FROM pa_cuentas WHERE id=?").get(rubroCuentaId);
+  const nombre = (cta && cta.nombre) ? cta.nombre : '';
+  if (/^MO\s+COSH/i.test(nombre)) return 'cosecha';
+  return tipoTitular === 'contratista' ? 'labor_contratada' : 'labor_propia';
+}
+
+// Base de unidades para calcular monto según unidad de tarifa del titular
+function _baseUnidadesAsistencia(unidad, a) {
+  if (unidad === 'hora')   return (a.cantidad || 1) * (a.horas || 0);
+  if (unidad === 'jornal') return (a.jornales_calc != null ? a.jornales_calc : (a.cantidad||1)*(a.horas||0)/8);
+  return (a.cantidad || 1); // tanto / tacho / planta / kg
+}
+
+// Recalcula saldo_acumulado cronológico de un titular (excluye anulados)
+function _recalcSaldoCC(db, tipoTitular, titularId) {
+  const movs = db.prepare(
+    "SELECT id, monto FROM pa_cc_movimientos WHERE tipo_titular=? AND titular_id=? AND anulado=0 ORDER BY fecha, id"
+  ).all(tipoTitular, titularId);
+  const upd = db.prepare("UPDATE pa_cc_movimientos SET saldo_acumulado=? WHERE id=?");
+  let saldo = 0;
+  for (const m of movs) { saldo = Math.round((saldo + m.monto) * 100) / 100; upd.run(saldo, m.id); }
+  return saldo;
+}
+
+// Resuelve el titular de CC de una asistencia (individual→persona; bloque→contratista)
+function _titularAsistencia(db, a) {
+  const id = a.personal_id || a.contratista_id;
+  if (!id) return null;
+  const p = db.prepare("SELECT id, nombre, tipo FROM pa_personal WHERE id=?").get(id);
+  return p || null;
+}
+
+// ── Por valorizar: pendientes en un rango, con titular + tarifa default ─────
+router.get('/personal/valorizar', requireAuth, (req, res) => {
+  const db = getDb();
+  const perms = permisosPersonal(db, req.user);
+  if (!perms.valorizacion && !perms.admin)
+    return res.status(403).json({ ok: false, error: 'Sin permiso de valorización' });
+  try {
+    const { desde, hasta } = req.query;
+    let sql = `
+      SELECT a.id, a.fecha, a.cantidad, a.horas, a.jornales_calc, a.personal_id, a.contratista_id,
+             a.rubro_cuenta_id, a.lote_id, a.finca,
+             p.nombre as personal_nombre, ct.nombre as contratista_nombre,
+             cta.codigo as rubro_codigo, cta.nombre as rubro_nombre,
+             l.nombre as lote_nombre, t.nombre as tarea_nombre
+      FROM pa_asistencias a
+      LEFT JOIN pa_personal p   ON p.id  = a.personal_id
+      LEFT JOIN pa_personal ct  ON ct.id = a.contratista_id
+      LEFT JOIN pa_cuentas cta   ON cta.id = a.rubro_cuenta_id
+      LEFT JOIN pa_lotes l      ON l.id  = a.lote_id
+      LEFT JOIN pa_tareas_tipos t ON t.id = a.tarea_tipo_id
+      WHERE a.estado='pendiente_valorizar'`;
+    const params = [];
+    if (desde) { sql += " AND a.fecha>=?"; params.push(desde); }
+    if (hasta) { sql += " AND a.fecha<=?"; params.push(hasta); }
+    sql += " ORDER BY a.fecha, a.id";
+    const rows = db.prepare(sql).all(...params);
+    // Enriquecer con titular + tarifa default + preview de monto
+    const data = rows.map(a => {
+      const tit = _titularAsistencia(db, a);
+      const padron = tit ? db.prepare("SELECT tarifa_default, unidad_tarifa FROM pa_personal WHERE id=?").get(tit.id) : null;
+      const unidad = (padron && padron.unidad_tarifa) || 'jornal';
+      const tarifa = (padron && padron.tarifa_default) || 0;
+      const base = _baseUnidadesAsistencia(unidad, a);
+      return {
+        ...a,
+        titular_id: tit ? tit.id : null,
+        titular_tipo: tit ? tit.tipo : null,
+        titular_nombre: tit ? tit.nombre : '—',
+        tarifa_default: tarifa,
+        unidad_tarifa: unidad,
+        base_unidades: Math.round(base * 100) / 100,
+        monto_preview: Math.round(tarifa * base * 100) / 100
+      };
+    });
+    res.json({ ok: true, data });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// ── Valorizar (bulk, transaccional): impacta costo lote + CC ────────────────
+router.post('/personal/valorizar', requireAuth, (req, res) => {
+  const db = getDb();
+  const perms = permisosPersonal(db, req.user);
+  if (!perms.valorizacion && !perms.admin)
+    return res.status(403).json({ ok: false, error: 'Sin permiso de valorización' });
+  const items = Array.isArray(req.body.items) ? req.body.items : [];
+  if (!items.length) return res.status(400).json({ ok: false, error: 'Sin ítems para valorizar' });
+  try {
+    const resumen = { valorizadas: 0, monto_total: 0, errores: [] };
+    const titularesTocados = new Set();
+    const tx = db.transaction(() => {
+      for (const it of items) {
+        const a = db.prepare("SELECT * FROM pa_asistencias WHERE id=?").get(it.asistencia_id);
+        if (!a) { resumen.errores.push(`Asistencia ${it.asistencia_id} inexistente`); continue; }
+        if (a.estado !== 'pendiente_valorizar') { resumen.errores.push(`Asistencia ${a.id} no está pendiente`); continue; }
+        const tit = _titularAsistencia(db, a);
+        if (!tit) { resumen.errores.push(`Asistencia ${a.id} sin titular`); continue; }
+        const padron = db.prepare("SELECT tarifa_default, unidad_tarifa FROM pa_personal WHERE id=?").get(tit.id);
+        const unidad = (padron && padron.unidad_tarifa) || 'jornal';
+        const tarifa = (it.tarifa_unitaria != null) ? Number(it.tarifa_unitaria) : ((padron && padron.tarifa_default) || 0);
+        if (!(tarifa > 0)) { resumen.errores.push(`Asistencia ${a.id} sin tarifa (> 0)`); continue; }
+        const base = _baseUnidadesAsistencia(unidad, a);
+        const monto = Math.round(tarifa * base * 100) / 100;
+        const categoria = _categoriaCostoAsistencia(db, a.rubro_cuenta_id, tit.tipo);
+        const tarea = db.prepare("SELECT nombre FROM pa_tareas_tipos WHERE id=?").get(a.tarea_tipo_id);
+        const rubro = db.prepare("SELECT nombre FROM pa_cuentas WHERE id=?").get(a.rubro_cuenta_id);
+        const desc = `MO · ${tarea ? tarea.nombre : 'Asist.'} · ${rubro ? rubro.nombre : ''} · ${tit.nombre}`;
+
+        // 1) Costo al lote (origen='asistencia', referencia_id positivo)
+        const rc = db.prepare(`INSERT INTO pa_costos_lote
+            (lote_id, campaña_id, campaña_anual_id, campaña_estacional_id, categoria, referencia_id, fecha, monto, descripcion, origen)
+            VALUES (?,?,?,?,?,?,?,?,?, 'asistencia')`)
+          .run(a.lote_id, a.campaña_anual_id, a.campaña_anual_id, a.campaña_estacional_id,
+               categoria, a.id, a.fecha, monto, desc);
+
+        // 2) CC: devengado (+)
+        const rcc = db.prepare(`INSERT INTO pa_cc_movimientos
+            (tipo_titular, titular_id, fecha, tipo_mov, monto, descripcion, referencia_tipo, referencia_id, cargado_por)
+            VALUES (?,?,?, 'devengado', ?, ?, 'asistencia', ?, ?)`)
+          .run(tit.tipo, tit.id, a.fecha, monto, desc, a.id, req.user.id);
+
+        // 3) Valorización con IDs cruzados
+        db.prepare(`INSERT INTO pa_asistencia_valorizacion
+            (asistencia_id, tarifa_unitaria, unidad_tarifa, monto_total, detalle_json, valorizado_por, costo_lote_id, cc_movimiento_id)
+            VALUES (?,?,?,?,?,?,?,?)`)
+          .run(a.id, tarifa, unidad, monto,
+               JSON.stringify({ tarifa, unidad, base_unidades: base, cantidad: a.cantidad, horas: a.horas, jornales: a.jornales_calc }),
+               req.user.id, rc.lastInsertRowid, rcc.lastInsertRowid);
+
+        // 4) Estado
+        db.prepare("UPDATE pa_asistencias SET estado='valorizado' WHERE id=?").run(a.id);
+
+        titularesTocados.add(tit.tipo + ':' + tit.id);
+        resumen.valorizadas++;
+        resumen.monto_total = Math.round((resumen.monto_total + monto) * 100) / 100;
+      }
+      // Recalcular saldos de los titulares afectados
+      for (const key of titularesTocados) {
+        const [tipo, id] = key.split(':');
+        _recalcSaldoCC(db, tipo, Number(id));
+      }
+    });
+    tx();
+    res.json({ ok: true, data: resumen });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// ── Anular asistencia valorizada (revierte CC + costo lote, transaccional) ──
+router.post('/personal/asistencias/:id/anular', requireAuth, (req, res) => {
+  const db = getDb();
+  const perms = permisosPersonal(db, req.user);
+  if (!perms.valorizacion && !perms.admin)
+    return res.status(403).json({ ok: false, error: 'Sin permiso de valorización' });
+  const motivo = (req.body.motivo || '').trim();
+  if (!motivo) return res.status(400).json({ ok: false, error: 'Motivo de anulación requerido' });
+  try {
+    const a = db.prepare("SELECT * FROM pa_asistencias WHERE id=?").get(req.params.id);
+    if (!a) return res.status(404).json({ ok: false, error: 'Asistencia no encontrada' });
+    if (a.estado !== 'valorizado')
+      return res.status(400).json({ ok: false, error: 'Solo se anula una asistencia valorizada (las pendientes se borran)' });
+    const val = db.prepare("SELECT * FROM pa_asistencia_valorizacion WHERE asistencia_id=?").get(a.id);
+    const tit = _titularAsistencia(db, a);
+    const tx = db.transaction(() => {
+      // 1) Revertir costo del lote (solo el de esta asistencia)
+      db.prepare("DELETE FROM pa_costos_lote WHERE origen='asistencia' AND referencia_id=?").run(a.id);
+      // 2) CC: movimiento de anulación (monto opuesto al devengado)
+      if (val && tit) {
+        db.prepare(`INSERT INTO pa_cc_movimientos
+            (tipo_titular, titular_id, fecha, tipo_mov, monto, descripcion, referencia_tipo, referencia_id, cargado_por)
+            VALUES (?,?, date('now','localtime'), 'anulacion', ?, ?, 'asistencia', ?, ?)`)
+          .run(tit.tipo, tit.id, -val.monto_total, 'Anulación: ' + motivo, a.id, req.user.id);
+        _recalcSaldoCC(db, tit.tipo, tit.id);
+      }
+      // 3) Estado
+      db.prepare(`UPDATE pa_asistencias SET estado='anulado', anulado_en=datetime('now','localtime'),
+          anulado_por=?, anulado_motivo=? WHERE id=?`).run(req.user.id, motivo, a.id);
+    });
+    tx();
+    res.json({ ok: true });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// ── Cuenta Corriente: listado de titulares con saldo ────────────────────────
+router.get('/personal/cc/titulares', requireAuth, (req, res) => {
+  const db = getDb();
+  const perms = permisosPersonal(db, req.user);
+  if (!perms.valorizacion && !perms.admin)
+    return res.status(403).json({ ok: false, error: 'Sin permiso de valorización' });
+  try {
+    const { tipo, q, con_saldo } = req.query;
+    let sql = `
+      SELECT p.id, p.nombre, p.tipo,
+        (SELECT saldo_acumulado FROM pa_cc_movimientos WHERE titular_id=p.id AND tipo_titular=p.tipo AND anulado=0 ORDER BY fecha DESC, id DESC LIMIT 1) as saldo,
+        (SELECT MAX(fecha) FROM pa_cc_movimientos WHERE titular_id=p.id AND tipo_titular=p.tipo AND anulado=0) as ultimo_mov,
+        (SELECT COUNT(*) FROM pa_cc_movimientos WHERE titular_id=p.id AND tipo_titular=p.tipo AND anulado=0) as n_movs
+      FROM pa_personal p
+      WHERE p.eliminado_en IS NULL`;
+    const params = [];
+    if (tipo === 'fijo' || tipo === 'contratista') { sql += " AND p.tipo=?"; params.push(tipo); }
+    if (q) { sql += " AND p.nombre LIKE ?"; params.push(`%${q}%`); }
+    sql += " ORDER BY p.tipo, p.nombre";
+    let data = db.prepare(sql).all(...params);
+    if (con_saldo) data = data.filter(r => r.n_movs > 0);
+    res.json({ ok: true, data });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// ── Cuenta Corriente: detalle de un titular ─────────────────────────────────
+router.get('/personal/cc/:tipo/:id', requireAuth, (req, res) => {
+  const db = getDb();
+  const perms = permisosPersonal(db, req.user);
+  if (!perms.valorizacion && !perms.admin)
+    return res.status(403).json({ ok: false, error: 'Sin permiso de valorización' });
+  try {
+    const { tipo, id } = req.params;
+    const titular = db.prepare("SELECT id, nombre, tipo, tarifa_default, unidad_tarifa FROM pa_personal WHERE id=?").get(id);
+    if (!titular) return res.status(404).json({ ok: false, error: 'Titular no encontrado' });
+    const movs = db.prepare(`
+      SELECT m.*, u.nombre as cargado_por_nombre
+      FROM pa_cc_movimientos m
+      LEFT JOIN usuarios u ON u.id = m.cargado_por
+      WHERE m.tipo_titular=? AND m.titular_id=?
+      ORDER BY m.fecha, m.id`).all(tipo, id);
+    const saldo = movs.filter(m => !m.anulado).reduce((s,m)=> Math.round((s+m.monto)*100)/100, 0);
+    res.json({ ok: true, data: { titular, saldo, movimientos: movs } });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// ── CC: registrar pago / adelanto / ajuste ──────────────────────────────────
+router.post('/personal/cc/movimiento', requireAuth, (req, res) => {
+  const db = getDb();
+  const perms = permisosPersonal(db, req.user);
+  if (!perms.valorizacion && !perms.admin)
+    return res.status(403).json({ ok: false, error: 'Sin permiso de valorización' });
+  const { tipo_titular, titular_id, tipo_mov, monto, fecha, descripcion } = req.body;
+  if (!titular_id) return res.status(400).json({ ok: false, error: 'titular_id requerido' });
+  if (!['pago','adelanto','ajuste'].includes(tipo_mov)) return res.status(400).json({ ok: false, error: 'tipo_mov inválido (pago/adelanto/ajuste)' });
+  const m = Number(monto);
+  if (!m || isNaN(m)) return res.status(400).json({ ok: false, error: 'monto inválido' });
+  try {
+    const tit = db.prepare("SELECT id, tipo FROM pa_personal WHERE id=?").get(titular_id);
+    if (!tit) return res.status(404).json({ ok: false, error: 'Titular no encontrado' });
+    const tt = tipo_titular || tit.tipo;
+    // Pago/adelanto bajan saldo (negativo); ajuste respeta el signo enviado
+    let signed = m;
+    if (tipo_mov === 'pago' || tipo_mov === 'adelanto') signed = -Math.abs(m);
+    const tx = db.transaction(() => {
+      db.prepare(`INSERT INTO pa_cc_movimientos
+          (tipo_titular, titular_id, fecha, tipo_mov, monto, descripcion, referencia_tipo, cargado_por)
+          VALUES (?,?,?,?,?,?,?,?)`)
+        .run(tt, titular_id, fecha || new Date().toISOString().slice(0,10), tipo_mov, signed,
+             descripcion || null, tipo_mov + '_manual', req.user.id);
+      _recalcSaldoCC(db, tt, titular_id);
+    });
+    tx();
+    res.json({ ok: true });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// ── CC: anular un movimiento manual (pago/adelanto/ajuste) ──────────────────
+router.post('/personal/cc/movimiento/:id/anular', requireAuth, (req, res) => {
+  const db = getDb();
+  const perms = permisosPersonal(db, req.user);
+  if (!perms.valorizacion && !perms.admin)
+    return res.status(403).json({ ok: false, error: 'Sin permiso de valorización' });
+  try {
+    const mov = db.prepare("SELECT * FROM pa_cc_movimientos WHERE id=?").get(req.params.id);
+    if (!mov) return res.status(404).json({ ok: false, error: 'Movimiento no encontrado' });
+    if (mov.tipo_mov === 'devengado' || mov.tipo_mov === 'anulacion')
+      return res.status(400).json({ ok: false, error: 'Los devengados se revierten anulando la asistencia, no acá' });
+    const tx = db.transaction(() => {
+      db.prepare("UPDATE pa_cc_movimientos SET anulado=1, anulado_en=datetime('now','localtime'), anulado_por=? WHERE id=?")
+        .run(req.user.id, mov.id);
+      _recalcSaldoCC(db, mov.tipo_titular, mov.titular_id);
+    });
+    tx();
+    res.json({ ok: true });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// ═══ Backfill admin de pa_costos_lote.origen — dry-run + ejecución única ════
+// Identifica filas viejas: parte (referencia_id<0), aplicacion (ref>0 + fert/agro), otros.
+// NO modifica referencia_id (para no romper el anular de partes legacy).
+function _planBackfillOrigen(db) {
+  const parte = db.prepare("SELECT COUNT(*) n FROM pa_costos_lote WHERE origen IS NULL AND referencia_id < 0").get().n;
+  const aplic = db.prepare("SELECT COUNT(*) n FROM pa_costos_lote WHERE origen IS NULL AND referencia_id > 0 AND categoria IN ('fertilizante','agroquimico')").get().n;
+  const otros = db.prepare("SELECT COUNT(*) n FROM pa_costos_lote WHERE origen IS NULL AND NOT (referencia_id < 0) AND NOT (referencia_id > 0 AND categoria IN ('fertilizante','agroquimico'))").get().n;
+  const ya    = db.prepare("SELECT COUNT(*) n FROM pa_costos_lote WHERE origen IS NOT NULL").get().n;
+  return { parte, aplicacion: aplic, otros, ya_marcadas: ya, total_pendientes: parte + aplic + otros };
+}
+
+router.get('/personal/admin/costos-origen', requireAdmin, (req, res) => {
+  const db = getDb();
+  try {
+    const flag = db.prepare("SELECT key, ejecutado_en FROM sistema_flags WHERE key='backfill_costos_origen_v1'").get();
+    res.json({ ok: true, data: { dry_run: true, ya_ejecutado: !!flag, plan: _planBackfillOrigen(db) } });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+router.post('/personal/admin/costos-origen', requireAdmin, (req, res) => {
+  const db = getDb();
+  try {
+    if (db.prepare("SELECT key FROM sistema_flags WHERE key='backfill_costos_origen_v1'").get())
+      return res.status(400).json({ ok: false, error: 'El backfill ya se ejecutó (flag presente)' });
+    const plan = _planBackfillOrigen(db);
+    const tx = db.transaction(() => {
+      db.prepare("UPDATE pa_costos_lote SET origen='parte'      WHERE origen IS NULL AND referencia_id < 0").run();
+      db.prepare("UPDATE pa_costos_lote SET origen='aplicacion' WHERE origen IS NULL AND referencia_id > 0 AND categoria IN ('fertilizante','agroquimico')").run();
+      db.prepare("UPDATE pa_costos_lote SET origen='otros'      WHERE origen IS NULL").run();
+      db.prepare("INSERT INTO sistema_flags (key, valor) VALUES ('backfill_costos_origen_v1', ?)").run(JSON.stringify(plan));
+    });
+    tx();
+    res.json({ ok: true, data: { ejecutado: plan } });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
 // ── Tipos de tarea ─────────────────────────────────────────────────────────
 router.get('/personal/tareas-tipos', requireAuth, (req, res) => {
   const db = getDb();
