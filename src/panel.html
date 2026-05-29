@@ -1913,7 +1913,45 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       <tbody id="sg-tb-stock"><tr><td colspan="9" class="emp">Cargando…</td></tr></tbody>
     </table></div>
   </div>
-  <div class="sg-pane" id="sg-pane-ventas"><div class="sg-ph-ph">💰 Ventas (Pedidos · Despachos FEFO · CC) — Próximamente (Fase 4)</div></div>
+  <div class="sg-pane" id="sg-pane-ventas">
+    <style>
+      #sec-sg .sgv-subtab{padding:7px 14px;cursor:pointer;font-size:12.5px;font-weight:600;border-radius:6px;color:var(--mut)}
+      #sec-sg .sgv-subtab.on{background:var(--burg);color:#fff}
+      #sec-sg .sgv-sub{display:none} #sec-sg .sgv-sub.on{display:block}
+    </style>
+    <div style="display:inline-flex;gap:2px;background:var(--bg);border:1px solid var(--bor);border-radius:8px;padding:3px;margin-bottom:16px;flex-wrap:wrap">
+      <div class="sgv-subtab on" data-sub="pedidos"   onclick="sgVenSub('pedidos')">📝 Pedidos</div>
+      <div class="sgv-subtab" data-sub="despachos"     onclick="sgVenSub('despachos')">🚚 Despachos</div>
+      <div class="sgv-subtab" data-sub="cc"            onclick="sgVenSub('cc')">💳 Cuenta corriente</div>
+    </div>
+
+    <!-- Pedidos -->
+    <div class="sgv-sub on" id="sgv-sub-pedidos">
+      <div style="display:flex;justify-content:flex-end;margin-bottom:10px"><button class="btn bb" onclick="sgPedOpen()">+ Nuevo pedido</button></div>
+      <div class="ab-table-wrap"><table class="pa-tbl">
+        <thead><tr><th>N°</th><th>Fecha</th><th>Cliente</th><th style="text-align:right">Total</th><th style="text-align:center">Estado</th><th></th></tr></thead>
+        <tbody id="sg-tb-pedidos"><tr><td colspan="6" class="emp">Cargando…</td></tr></tbody>
+      </table></div>
+    </div>
+
+    <!-- Despachos -->
+    <div class="sgv-sub" id="sgv-sub-despachos">
+      <div style="display:flex;justify-content:flex-end;margin-bottom:10px"><button class="btn bb" onclick="sgDespOpen()">+ Nuevo despacho</button></div>
+      <div class="ab-table-wrap"><table class="pa-tbl">
+        <thead><tr><th>N°</th><th>Fecha</th><th>Cliente</th><th>Pedido</th><th style="text-align:right">Total</th><th style="text-align:right">Margen</th><th style="text-align:center">Estado</th><th></th></tr></thead>
+        <tbody id="sg-tb-despachos"><tr><td colspan="8" class="emp">Cargando…</td></tr></tbody>
+      </table></div>
+    </div>
+
+    <!-- Cuenta corriente clientes -->
+    <div class="sgv-sub" id="sgv-sub-cc">
+      <div style="font-size:12px;color:var(--mut);margin-bottom:8px">💡 V1: total facturado por despachos. Cobranzas/DSO llegan en V2 (total cobrado = 0 por ahora).</div>
+      <div class="ab-table-wrap"><table class="pa-tbl">
+        <thead><tr><th>Cliente</th><th style="text-align:right">Facturado</th><th style="text-align:right">Cobrado</th><th style="text-align:right">Saldo</th><th style="text-align:right">Límite crédito</th></tr></thead>
+        <tbody id="sg-tb-cc"><tr><td colspan="5" class="emp">Cargando…</td></tr></tbody>
+      </table></div>
+    </div>
+  </div>
   <div class="sg-pane" id="sg-pane-reportes"><div class="sg-ph-ph">📈 Reportes — Próximamente (Fase 5)</div></div>
 
   <!-- Tab Catálogo (operativo en Fase 1) -->
@@ -2158,6 +2196,65 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   </div>
 </div>
 
+<!-- Modal Crear pedido -->
+<div class="ab-modal-overlay" id="sg-ped-modal">
+  <div class="ab-modal" style="width:760px;max-height:90vh;overflow-y:auto">
+    <div class="mhd"><div class="mht">Nuevo pedido</div><button class="mcl" onclick="closeMB('sg-ped-modal')">×</button></div>
+    <div class="fg">
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
+        <div class="fl"><label>Cliente <span style="color:var(--err)">*</span></label><select id="sg-ped-cli" onchange="sgPedCliChange()"></select></div>
+        <div class="fl"><label>Tipo fiscal</label><select id="sg-ped-fiscal"></select></div>
+        <div class="fl"><label>Condición de pago</label><select id="sg-ped-cond"></select></div>
+        <div class="fl"><label>Fecha pedido</label><input type="date" id="sg-ped-fecha"></div>
+        <div class="fl"><label>Entrega solicitada</label><input type="date" id="sg-ped-entrega"></div>
+        <div class="fl"><label>Dirección de entrega</label><input id="sg-ped-dir"></div>
+      </div>
+      <div class="fl ff"><label>Items</label><div id="sg-ped-items"></div>
+        <button class="btn bo bs" style="margin-top:6px" onclick="sgPedAddItem()">+ Agregar item</button></div>
+      <div class="fl ff"><label>Observaciones</label><textarea id="sg-ped-obs" rows="2"></textarea></div>
+      <div id="sg-ped-total" style="font-weight:700;font-size:14px;text-align:right;padding-top:6px;border-top:1px solid var(--bor)"></div>
+    </div>
+    <div class="ab-modal-footer">
+      <button class="btn bo" onclick="closeMB('sg-ped-modal')">Cancelar</button>
+      <button class="btn bb" onclick="sgPedGuardar()">Crear pedido</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal Crear despacho -->
+<div class="ab-modal-overlay" id="sg-desp-modal">
+  <div class="ab-modal" style="width:880px;max-height:90vh;overflow-y:auto">
+    <div class="mhd"><div class="mht">Nuevo despacho</div><button class="mcl" onclick="closeMB('sg-desp-modal')">×</button></div>
+    <div class="fg">
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
+        <div class="fl"><label>Cliente <span style="color:var(--err)">*</span></label><select id="sg-desp-cli"></select></div>
+        <div class="fl"><label>Pedido (opcional)</label><select id="sg-desp-ped"><option value="">— Sin pedido —</option></select></div>
+        <div class="fl"><label>Fecha despacho</label><input type="date" id="sg-desp-fecha"></div>
+        <div class="fl"><label>Transporte</label><select id="sg-desp-transp"><option value="">—</option><option value="propio">Propio</option><option value="cliente">Cliente</option><option value="tercero">Tercero</option></select></div>
+        <div class="fl"><label>Transportista</label><input id="sg-desp-transportista"></div>
+        <div class="fl"><label>Chofer / Dominio</label><input id="sg-desp-chofer" placeholder="chofer"><input id="sg-desp-dominio" placeholder="dominio" style="margin-top:4px"></div>
+      </div>
+      <div class="fl ff"><label>Líneas (elegí producto → lote sugerido por FEFO)</label><div id="sg-desp-items"></div>
+        <button class="btn bo bs" style="margin-top:6px" onclick="sgDespAddItem()">+ Agregar línea</button></div>
+      <div class="fl ff"><label>Observaciones</label><textarea id="sg-desp-obs" rows="2"></textarea></div>
+      <div id="sg-desp-total" style="font-weight:700;font-size:14px;text-align:right;padding-top:6px;border-top:1px solid var(--bor)"></div>
+    </div>
+    <div class="ab-modal-footer">
+      <button class="btn bo" onclick="closeMB('sg-desp-modal')">Cancelar</button>
+      <button class="btn bb" onclick="sgDespGuardar()">Registrar despacho</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal Ver pedido / Ver despacho (detalle + traza forward) -->
+<div class="ab-modal-overlay" id="sg-venver-modal">
+  <div class="ab-modal" style="width:720px;max-height:90vh;overflow-y:auto">
+    <div class="mhd"><div class="mht" id="sg-venver-tit">Detalle</div><button class="mcl" onclick="closeMB('sg-venver-modal')">×</button></div>
+    <div class="fg" id="sg-venver-body"></div>
+    <div class="ab-modal-footer"><button class="btn bo" onclick="closeMB('sg-venver-modal')">Cerrar</button></div>
+  </div>
+</div>
+
 <script>
 // ═══ MÓDULO SAN GERÓNIMO (sg_*) — Fase 1: Catálogo ═══════════════════════════
 var SG = { cacheProd: [], cacheCond: [], last: {}, cur: null, cuotas: [] };
@@ -2239,6 +2336,7 @@ function sgTab(t){
   document.querySelectorAll('#sec-sg .sg-pane').forEach(function(el){ el.classList.toggle('on', el.id==='sg-pane-'+t); });
   if (t==='compras') sgComInit();
   if (t==='stock') sgStockInit();
+  if (t==='ventas') sgVenInit();
 }
 
 function sgCatSub(s){
@@ -2249,11 +2347,12 @@ function sgCatSub(s){
 
 // Carga caches para dropdowns (productos, condiciones, presentaciones, proveedores)
 function sgLoadCaches(cb){
-  Promise.all([api('/api/sg/productos'), api('/api/sg/condiciones-pago'), api('/api/sg/presentaciones'), api('/api/sg/proveedores')]).then(function(r){
+  Promise.all([api('/api/sg/productos'), api('/api/sg/condiciones-pago'), api('/api/sg/presentaciones'), api('/api/sg/proveedores'), api('/api/sg/clientes')]).then(function(r){
     SG.cacheProd = (r[0] && r[0].ok) ? r[0].data : [];
     SG.cacheCond = (r[1] && r[1].ok) ? r[1].data : [];
     SG.cachePres = (r[2] && r[2].ok) ? r[2].data : [];
     SG.cacheProv = (r[3] && r[3].ok) ? r[3].data : [];
+    SG.cacheCli = (r[4] && r[4].ok) ? r[4].data : [];
     var sel = eid('sg-pres-filtro');
     if (sel){
       var v = sel.value;
@@ -2921,6 +3020,221 @@ function sgLoteBaja(id){
   api('/api/sg/lotes/'+id+'/baja','POST',{destino_baja:dest, receptor_donacion:receptor}).then(function(r){
     if(r&&r.ok){ toast('Lote dado de baja','ok'); closeMB('sg-lote-modal'); sgLoadStock(); }
     else toast((r&&r.error)||'Error','er');
+  });
+}
+
+// ════ FASE 4 — VENTAS (frontend) ═════════════════════════════════════════════
+SG.cacheCli = SG.cacheCli || [];
+var SG_ESTPED={borrador:'Borrador',confirmado:'Confirmado',despachado_parcial:'Desp. parcial',despachado_total:'Desp. total',facturado:'Facturado',anulado:'Anulado'};
+var SG_ESTDESP={preparado:'Preparado',despachado:'Despachado',entregado:'Entregado',rechazado_parcial:'Rech. parcial',rechazado_total:'Rech. total'};
+
+function sgVenInit(){ sgLoadCaches(function(){ sgVenSub(SG.venSub || 'pedidos'); }); }
+function sgVenSub(s){
+  SG.venSub = s;
+  document.querySelectorAll('#sec-sg .sgv-subtab').forEach(function(el){ el.classList.toggle('on', el.dataset.sub===s); });
+  document.querySelectorAll('#sec-sg .sgv-sub').forEach(function(el){ el.classList.toggle('on', el.id==='sgv-sub-'+s); });
+  if (s==='pedidos') sgLoadPedidos();
+  else if (s==='despachos') sgLoadDespachos();
+  else if (s==='cc') sgLoadCC();
+}
+
+// ── Pedidos ──
+function sgLoadPedidos(){
+  api('/api/sg/pedidos').then(function(r){
+    var rows=(r&&r.ok)?r.data:[];
+    eid('sg-tb-pedidos').innerHTML = rows.length ? rows.map(function(p){
+      var acc='<button class="btn bo bs" onclick="sgPedVer('+p.id+')">👁</button>';
+      if(p.estado!=='anulado') acc+=' <button class="btn bd bs" onclick="sgPedAnular('+p.id+')">✖</button>';
+      return '<tr><td><code>'+esc(p.numero||'')+'</code></td><td>'+(p.fecha_pedido||'—')+'</td><td>'+esc(p.cliente_nombre||'—')+'</td><td style="text-align:right">'+sgMoney(p.total)+'</td><td style="text-align:center"><span class="bdg '+(p.estado==='anulado'?'ber':'bcc')+'">'+(SG_ESTPED[p.estado]||p.estado)+'</span></td><td style="text-align:right;white-space:nowrap">'+acc+'</td></tr>';
+    }).join('') : '<tr><td colspan="6" class="emp">Sin pedidos.</td></tr>';
+  });
+}
+function sgPedOpen(){
+  SG.pedItems=[];
+  eid('sg-ped-cli').innerHTML=sgOpts(SG.cacheCli,'razon_social','','— Elegir —');
+  eid('sg-ped-cond').innerHTML=sgOpts(SG.cacheCond,'nombre','','— Sin condición —');
+  eid('sg-ped-fiscal').innerHTML=SG_FISCAL.map(function(o){return '<option value="'+o[0]+'">'+o[1]+'</option>';}).join('');
+  eid('sg-ped-fecha').value=new Date().toISOString().slice(0,10);
+  eid('sg-ped-entrega').value=''; eid('sg-ped-dir').value=''; eid('sg-ped-obs').value='';
+  sgPedAddItem();
+  eid('sg-ped-modal').classList.add('on');
+}
+function sgPedCliChange(){
+  var c=SG.cacheCli.find(function(x){return String(x.id)===String(eid('sg-ped-cli').value);});
+  if(c){ if(c.tipo_fiscal_habitual)eid('sg-ped-fiscal').value=c.tipo_fiscal_habitual; if(c.condicion_pago_habitual_id)eid('sg-ped-cond').value=c.condicion_pago_habitual_id; if(c.direccion_entrega)eid('sg-ped-dir').value=c.direccion_entrega; }
+}
+function sgPedAddItem(){ SG.pedItems.push({producto_id:'',presentacion_id:'',cantidad:'',precio:''}); sgPedRender(); }
+function sgPedDelItem(i){ SG.pedItems.splice(i,1); sgPedRender(); }
+function sgPedUpd(i,c,v){ SG.pedItems[i][c]=v; if(c==='producto_id')SG.pedItems[i].presentacion_id=''; sgPedRender(); }
+function sgPedUpdNR(i,c,v){ SG.pedItems[i][c]=v; sgPedTotal(); }
+function sgPedRender(){
+  eid('sg-ped-items').innerHTML=SG.pedItems.map(function(it,i){
+    return '<div class="sg-lrow">'
+      +'<select onchange="sgPedUpd('+i+',\'producto_id\',this.value)">'+sgOpts(SG.cacheProd,'nombre',it.producto_id,'— Producto —')+'</select>'
+      +'<select onchange="sgPedUpdNR('+i+',\'presentacion_id\',this.value)">'+sgOpts(sgPresDe(it.producto_id),'nombre',it.presentacion_id,'— Present. —')+'</select>'
+      +'<input type="number" placeholder="cant." value="'+(it.cantidad||'')+'" onchange="sgPedUpdNR('+i+',\'cantidad\',this.value)">'
+      +'<input type="number" placeholder="$/kg" value="'+(it.precio||'')+'" onchange="sgPedUpdNR('+i+',\'precio\',this.value)">'
+      +(SG.pedItems.length>1?'<button class="btn bd bs" onclick="sgPedDelItem('+i+')">×</button>':'<span></span>')
+      +'</div>';
+  }).join('');
+  sgPedTotal();
+}
+function sgPedTotal(){
+  var tk=0, tm=0;
+  SG.pedItems.forEach(function(it){ var kg=(Number(it.cantidad)||0)*sgFactor(it.presentacion_id); tk+=kg; tm+=kg*(Number(it.precio)||0); });
+  eid('sg-ped-total').innerHTML='Total: '+nr(tk)+' kg · '+sgMoney(tm);
+}
+function sgPedGuardar(){
+  var cli=eid('sg-ped-cli').value;
+  if(!cli){ toast('Elegí cliente','er'); return; }
+  var items=SG.pedItems.filter(function(it){return it.producto_id && Number(it.cantidad)>0;});
+  if(!items.length){ toast('Agregá un item con cantidad','er'); return; }
+  var body={ cliente_id:Number(cli), tipo_fiscal:eid('sg-ped-fiscal').value, condicion_pago_id:eid('sg-ped-cond').value?Number(eid('sg-ped-cond').value):null,
+    fecha_pedido:eid('sg-ped-fecha').value, fecha_entrega_solicitada:eid('sg-ped-entrega').value, direccion_entrega:eid('sg-ped-dir').value, observaciones:eid('sg-ped-obs').value,
+    items:items.map(function(it){ return {producto_id:Number(it.producto_id), presentacion_id:it.presentacion_id?Number(it.presentacion_id):null, cantidad_presentaciones:Number(it.cantidad), precio_por_kg:Number(it.precio||0)}; }) };
+  api('/api/sg/pedidos','POST',body).then(function(r){
+    if(r&&r.ok){ toast('Pedido creado','ok'); closeMB('sg-ped-modal'); sgLoadPedidos(); }
+    else toast((r&&r.error)||'Error','er');
+  });
+}
+function sgPedAnular(id){
+  if(!confirm('¿Anular pedido?')) return;
+  api('/api/sg/pedidos/'+id+'/anular','POST').then(function(r){ if(r&&r.ok){toast('Pedido anulado','ok');sgLoadPedidos();} else toast((r&&r.error)||'Error','er'); });
+}
+function sgPedVer(id){
+  api('/api/sg/pedidos/'+id).then(function(r){
+    if(!r||!r.ok) return; var p=r.data;
+    eid('sg-venver-tit').textContent='Pedido '+(p.numero||'');
+    var h='<div style="font-size:13px;margin-bottom:10px">Cliente: <b>'+esc(p.cliente_nombre||'—')+'</b> · '+(SG_ESTPED[p.estado]||p.estado)+' · '+sgLbl(SG_FISCAL,p.tipo_fiscal)+'</div>';
+    h+='<table class="pa-tbl"><thead><tr><th>Producto</th><th>Present.</th><th style="text-align:right">Kg</th><th style="text-align:right">$/kg</th><th style="text-align:right">Subtotal</th></tr></thead><tbody>';
+    (p.items||[]).forEach(function(it){ h+='<tr><td>'+esc(it.producto_nombre||'')+'</td><td>'+esc(it.presentacion_nombre||'—')+'</td><td style="text-align:right">'+nr(it.kg_solicitados)+'</td><td style="text-align:right">'+sgMoney(it.precio_por_kg)+'</td><td style="text-align:right">'+sgMoney(it.subtotal)+'</td></tr>'; });
+    h+='</tbody></table>';
+    eid('sg-venver-body').innerHTML=h; eid('sg-venver-modal').classList.add('on');
+  });
+}
+
+// ── Despachos ──
+function sgLoadDespachos(){
+  api('/api/sg/despachos').then(function(r){
+    var rows=(r&&r.ok)?r.data:[];
+    eid('sg-tb-despachos').innerHTML = rows.length ? rows.map(function(d){
+      return '<tr><td><code>'+esc(d.numero||'')+'</code></td><td>'+(d.fecha_despacho||'—')+'</td><td>'+esc(d.cliente_nombre||'—')+'</td><td>'+esc(d.pedido_numero||'—')+'</td><td style="text-align:right">'+sgMoney(d.total)+'</td><td style="text-align:right;color:'+((d.margen||0)>=0?'var(--ok,#16a34a)':'var(--err,#dc2626)')+'">'+sgMoney(d.margen)+'</td><td style="text-align:center"><span class="bdg bok">'+(SG_ESTDESP[d.estado]||d.estado)+'</span></td><td style="text-align:right;white-space:nowrap"><button class="btn bo bs" onclick="sgDespVer('+d.id+')">🔍</button> <button class="btn bd bs" onclick="sgDespAnular('+d.id+')">✖</button></td></tr>';
+    }).join('') : '<tr><td colspan="8" class="emp">Sin despachos.</td></tr>';
+  });
+}
+function sgDespOpen(){
+  SG.despItems=[]; SG.despLotes={};
+  eid('sg-desp-cli').innerHTML=sgOpts(SG.cacheCli,'razon_social','','— Elegir —');
+  api('/api/sg/pedidos?estado=confirmado').then(function(r){
+    var peds=(r&&r.ok)?r.data:[];
+    eid('sg-desp-ped').innerHTML='<option value="">— Sin pedido —</option>'+peds.map(function(p){return '<option value="'+p.id+'" data-cli="'+p.cliente_id+'">'+esc(p.numero)+' — '+esc(p.cliente_nombre||'')+'</option>';}).join('');
+  });
+  eid('sg-desp-fecha').value=new Date().toISOString().slice(0,10);
+  ['sg-desp-transportista','sg-desp-chofer','sg-desp-dominio','sg-desp-obs'].forEach(function(id){eid(id).value='';});
+  eid('sg-desp-transp').value='';
+  sgDespAddItem();
+  eid('sg-desp-modal').classList.add('on');
+}
+function sgDespAddItem(){ SG.despItems.push({producto_id:'',lote_id:'',kg:'',precio:'',lotes:[]}); sgDespRender(); }
+function sgDespDelItem(i){ SG.despItems.splice(i,1); sgDespRender(); }
+function sgDespProdChange(i,v){
+  SG.despItems[i].producto_id=v; SG.despItems[i].lote_id=''; SG.despItems[i].lotes=[];
+  if(v){
+    api('/api/sg/lotes-disponibles?producto_id='+v).then(function(r){
+      SG.despItems[i].lotes=(r&&r.ok)?r.data:[];
+      if(SG.despItems[i].lotes.length) SG.despItems[i].lote_id=SG.despItems[i].lotes[0].id; // FEFO sugerido
+      sgDespRender();
+    });
+  } else sgDespRender();
+}
+function sgDespUpd(i,c,v){ SG.despItems[i][c]=v; sgDespRender(); }
+function sgDespUpdNR(i,c,v){ SG.despItems[i][c]=v; sgDespTotal(); }
+function sgDespLoteDe(it){ return (it.lotes||[]).find(function(l){return String(l.id)===String(it.lote_id);}); }
+function sgDespRender(){
+  eid('sg-desp-items').innerHTML=SG.despItems.map(function(it,i){
+    var loteOpts=(it.lotes||[]).map(function(l,idx){
+      var venc=l.dias_restantes!=null?(l.dias_restantes+'d'):'';
+      return '<option value="'+l.id+'"'+(String(l.id)===String(it.lote_id)?' selected':'')+'>'+(idx===0?'💡 ':'')+esc(l.codigo_lote)+' · '+nr(l.kg_disponibles)+'kg · vence '+venc+'</option>';
+    }).join('');
+    var lote=sgDespLoteDe(it);
+    var costoKg=lote&&lote.kg_reales?((lote.costo_final||0)/lote.kg_reales):0;
+    var kg=Number(it.kg)||0, precio=Number(it.precio)||0;
+    var margen=kg*precio - kg*costoKg;
+    var info='';
+    if(lote){ info='<div style="font-size:11px;color:var(--mut);grid-column:1/-1;margin:-2px 0 4px">'+(it.lotes[0]&&String(it.lotes[0].id)===String(it.lote_id)?'💡 Sugerido FEFO · ':'')+'costo '+sgMoney(costoKg)+'/kg · disp '+nr(lote.kg_disponibles)+'kg · margen línea <b style="color:'+(margen>=0?'#16a34a':'#dc2626')+'">'+sgMoney(margen)+'</b></div>'; }
+    return '<div style="display:grid;grid-template-columns:1.4fr 1.8fr 0.8fr 0.8fr auto;gap:6px;align-items:center;margin-bottom:4px">'
+      +'<select onchange="sgDespProdChange('+i+',this.value)">'+sgOpts(SG.cacheProd,'nombre',it.producto_id,'— Producto —')+'</select>'
+      +'<select onchange="sgDespUpd('+i+',\'lote_id\',this.value)">'+(loteOpts||'<option value="">— sin stock —</option>')+'</select>'
+      +'<input type="number" placeholder="kg" value="'+(it.kg||'')+'" onchange="sgDespUpdNR('+i+',\'kg\',this.value)">'
+      +'<input type="number" placeholder="$/kg" value="'+(it.precio||'')+'" onchange="sgDespUpdNR('+i+',\'precio\',this.value)">'
+      +(SG.despItems.length>1?'<button class="btn bd bs" onclick="sgDespDelItem('+i+')">×</button>':'<span></span>')
+      +info+'</div>';
+  }).join('');
+  sgDespTotal();
+}
+function sgDespTotal(){
+  var tot=0, marg=0;
+  SG.despItems.forEach(function(it){ var lote=sgDespLoteDe(it); var kg=Number(it.kg)||0, precio=Number(it.precio)||0; var costoKg=lote&&lote.kg_reales?((lote.costo_final||0)/lote.kg_reales):0; tot+=kg*precio; marg+=kg*precio-kg*costoKg; });
+  eid('sg-desp-total').innerHTML='Total: '+sgMoney(tot)+' · Margen estimado: <span style="color:'+(marg>=0?'#16a34a':'#dc2626')+'">'+sgMoney(marg)+'</span>';
+}
+function sgDespGuardar(){
+  var cli=eid('sg-desp-cli').value;
+  if(!cli){ toast('Elegí cliente','er'); return; }
+  var items=[];
+  for(var i=0;i<SG.despItems.length;i++){
+    var it=SG.despItems[i];
+    if(!it.lote_id || !(Number(it.kg)>0)) continue;
+    var lote=sgDespLoteDe(it);
+    if(lote && Number(it.kg)>lote.kg_disponibles+0.01){ toast('Línea '+(i+1)+': '+it.kg+'kg supera lo disponible ('+nr(lote.kg_disponibles)+'kg)','er'); return; }
+    items.push({ lote_id:Number(it.lote_id), kg_despachados:Number(it.kg), precio_por_kg:Number(it.precio||0) });
+  }
+  if(!items.length){ toast('Cargá al menos una línea con lote y kg','er'); return; }
+  var body={ cliente_id:Number(cli), pedido_id:eid('sg-desp-ped').value?Number(eid('sg-desp-ped').value):null,
+    fecha_despacho:eid('sg-desp-fecha').value, transporte:eid('sg-desp-transp').value, transportista:eid('sg-desp-transportista').value,
+    chofer:eid('sg-desp-chofer').value, dominio:eid('sg-desp-dominio').value, observaciones:eid('sg-desp-obs').value, items:items };
+  api('/api/sg/despachos','POST',body).then(function(r){
+    if(r&&r.ok){ toast('Despacho registrado','ok'); closeMB('sg-desp-modal'); sgLoadDespachos(); }
+    else toast((r&&r.error)||'Error','er');
+  });
+}
+function sgDespAnular(id){
+  if(!confirm('¿Anular despacho? (devuelve el stock de los lotes)')) return;
+  api('/api/sg/despachos/'+id+'/anular','POST').then(function(r){ if(r&&r.ok){toast('Despacho anulado','ok');sgLoadDespachos();} else toast((r&&r.error)||'Error','er'); });
+}
+function sgDespVer(id){
+  Promise.all([api('/api/sg/despachos/'+id), api('/api/sg/despachos/'+id+'/trazabilidad')]).then(function(res){
+    var r=res[0]; if(!r||!r.ok) return; var d=r.data;
+    var tz=(res[1]&&res[1].ok)?res[1].data:null;
+    eid('sg-venver-tit').textContent='Despacho '+(d.numero||'');
+    var h='<div style="font-size:13px;margin-bottom:10px">Cliente: <b>'+esc(d.cliente_nombre||'—')+'</b> · '+(SG_ESTDESP[d.estado]||d.estado)+(d.pedido_numero?(' · pedido '+esc(d.pedido_numero)):'')+(d.transporte?(' · '+d.transporte):'')+'</div>';
+    h+='<table class="pa-tbl" style="margin-bottom:12px"><thead><tr><th>Lote</th><th>Producto</th><th style="text-align:right">Kg</th><th style="text-align:right">$/kg</th><th style="text-align:right">Subtotal</th><th style="text-align:right">Margen</th></tr></thead><tbody>';
+    (d.items||[]).forEach(function(it){ h+='<tr><td><code>'+esc(it.codigo_lote||'')+'</code></td><td>'+esc(it.producto_nombre||'')+'</td><td style="text-align:right">'+nr(it.kg_despachados)+'</td><td style="text-align:right">'+sgMoney(it.precio_por_kg)+'</td><td style="text-align:right">'+sgMoney(it.subtotal)+'</td><td style="text-align:right;color:'+((it.margen_estimado||0)>=0?'#16a34a':'#dc2626')+'">'+sgMoney(it.margen_estimado)+'</td></tr>'; });
+    h+='</tbody></table>';
+    // Trazabilidad forward
+    if(tz && (tz.items||[]).length){
+      h+='<details open><summary style="cursor:pointer;font-weight:700;font-size:13px">🔍 Trazabilidad (forward: hacia el origen)</summary>';
+      h+='<div style="margin-top:8px;font-size:12.5px;line-height:1.7;border-left:3px solid var(--burg);padding-left:12px">';
+      h+='🏪 <b>Cliente:</b> '+esc(tz.despacho.cliente_nombre||'—')+'<br>';
+      tz.items.forEach(function(it){
+        h+='&nbsp;&nbsp;📦 Lote <code>'+esc(it.codigo_lote||'')+'</code> ('+nr(it.kg_despachados)+'kg) ';
+        if(it.recepcion) h+='← 📥 '+esc(it.recepcion.numero_recepcion||'');
+        if(it.oc) h+=' ← 📋 OC '+esc(it.oc.numero||'');
+        if(it.proveedor) h+=' ← 🚜 '+esc(it.proveedor.razon_social||'');
+        h+='<br>';
+      });
+      h+='</div></details>';
+    }
+    eid('sg-venver-body').innerHTML=h; eid('sg-venver-modal').classList.add('on');
+  });
+}
+
+// ── Cuenta corriente ──
+function sgLoadCC(){
+  api('/api/sg/cc-clientes').then(function(r){
+    var rows=(r&&r.ok)?r.data:[];
+    eid('sg-tb-cc').innerHTML = rows.length ? rows.map(function(c){
+      return '<tr><td>'+esc(c.razon_social)+'</td><td style="text-align:right">'+sgMoney(c.total_facturado)+'</td><td style="text-align:right">'+sgMoney(c.total_cobrado)+'</td><td style="text-align:right;font-weight:700">'+sgMoney(c.saldo)+'</td><td style="text-align:right">'+sgMoney(c.limite_credito)+'</td></tr>';
+    }).join('') : '<tr><td colspan="5" class="emp">Sin movimientos (todavía no hay despachos).</td></tr>';
   });
 }
 </script>
