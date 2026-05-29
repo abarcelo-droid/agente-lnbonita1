@@ -876,4 +876,279 @@ router.post('/lotes/:id/baja', requireAdmin, (req, res) => {
   } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
 });
 
+// ════════════════════════════════════════════════════════════════════════════
+// FASE 4 — VENTAS: Pedidos + Despachos (FEFO + margen) + CC clientes + traza forward
+// ════════════════════════════════════════════════════════════════════════════
+
+// Recalcula el estado de un lote según lo despachado (no toca lotes 'bajado').
+function recalcEstadoLote(db, loteId) {
+  const l = db.prepare('SELECT kg_reales, estado FROM sg_lotes WHERE id=?').get(loteId);
+  if (!l || l.estado === 'bajado') return;
+  const desp = db.prepare(`SELECT COALESCE(SUM(di.kg_despachados),0) s
+    FROM sg_despacho_items di JOIN sg_despachos d ON d.id=di.despacho_id AND d.activo=1
+    WHERE di.lote_id=?`).get(loteId).s;
+  let estado = 'disponible';
+  if (desp >= (l.kg_reales || 0) - 0.01 && desp > 0) estado = 'despachado_total';
+  else if (desp > 0) estado = 'despachado_parcial';
+  db.prepare("UPDATE sg_lotes SET estado=?, modificado_en=datetime('now','localtime') WHERE id=?").run(estado, loteId);
+}
+
+// Autocompleta tipo_fiscal/condicion/direccion desde el cliente si no vinieron.
+function defaultsCliente(db, clienteId, body) {
+  const c = clienteId ? db.prepare('SELECT tipo_fiscal_habitual, condicion_pago_habitual_id, direccion_entrega FROM sg_clientes WHERE id=?').get(clienteId) : null;
+  return {
+    tipo_fiscal: val(body.tipo_fiscal) || (c && c.tipo_fiscal_habitual) || 'factura_a',
+    condicion_pago_id: body.condicion_pago_id != null ? body.condicion_pago_id : (c && c.condicion_pago_habitual_id) || null,
+    direccion_entrega: val(body.direccion_entrega) || (c && c.direccion_entrega) || null
+  };
+}
+
+// kg ya despachados de un lote (despachos activos)
+function kgDespachados(db, loteId) {
+  return db.prepare(`SELECT COALESCE(SUM(di.kg_despachados),0) s
+    FROM sg_despacho_items di JOIN sg_despachos d ON d.id=di.despacho_id AND d.activo=1
+    WHERE di.lote_id=?`).get(loteId).s;
+}
+
+// ── PEDIDOS ──────────────────────────────────────────────────────────────────
+router.post('/pedidos', requireAdmin, (req, res) => {
+  const db = getDb();
+  try {
+    const b = req.body;
+    const items = Array.isArray(b.items) ? b.items : [];
+    if (!b.cliente_id) return res.status(400).json({ ok: false, error: 'Falta cliente' });
+    if (!items.length) return res.status(400).json({ ok: false, error: 'El pedido necesita al menos un item' });
+    const dft = defaultsCliente(db, b.cliente_id, b);
+    const tx = db.transaction(() => {
+      const numero = nextNumero(db, 'SG-PED', 'sg_pedidos', 'numero');
+      const info = db.prepare(`INSERT INTO sg_pedidos
+        (numero, cliente_id, comercial_id, tipo_fiscal, condicion_pago_id, fecha_pedido, fecha_entrega_solicitada,
+         direccion_entrega, estado, observaciones, creado_por)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?)`).run(
+        numero, b.cliente_id, b.comercial_id || null, dft.tipo_fiscal, dft.condicion_pago_id,
+        val(b.fecha_pedido), val(b.fecha_entrega_solicitada), dft.direccion_entrega,
+        val(b.estado) || 'confirmado', val(b.observaciones), uid(req));
+      const pedidoId = info.lastInsertRowid;
+      const ins = db.prepare(`INSERT INTO sg_pedido_items
+        (pedido_id, producto_id, presentacion_id, cantidad_presentaciones, kg_solicitados, precio_por_kg, subtotal)
+        VALUES (?,?,?,?,?,?,?)`);
+      for (const it of items) {
+        const pres = it.presentacion_id ? db.prepare('SELECT factor_conversion FROM sg_presentaciones WHERE id=?').get(it.presentacion_id) : null;
+        const factor = pres ? Number(pres.factor_conversion) : 1;
+        const cant = Number(it.cantidad_presentaciones || 0);
+        const kg = it.kg_solicitados != null ? Number(it.kg_solicitados) : cant * factor;
+        const precio = Number(it.precio_por_kg || 0);
+        ins.run(pedidoId, it.producto_id, it.presentacion_id || null, cant, kg, precio, kg * precio);
+      }
+      return pedidoId;
+    });
+    res.json({ ok: true, data: { id: Number(tx()) } });
+  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+
+router.get('/pedidos', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const where = ['p.activo=1'], params = [];
+    if (req.query.estado) { where.push('p.estado=?'); params.push(req.query.estado); }
+    if (req.query.cliente_id) { where.push('p.cliente_id=?'); params.push(req.query.cliente_id); }
+    const rows = db.prepare(`
+      SELECT p.*, c.razon_social AS cliente_nombre,
+        (SELECT COALESCE(SUM(subtotal),0) FROM sg_pedido_items WHERE pedido_id=p.id) AS total
+      FROM sg_pedidos p LEFT JOIN sg_clientes c ON c.id=p.cliente_id
+      WHERE ${where.join(' AND ')} ORDER BY p.id DESC`).all(...params);
+    res.json({ ok: true, data: rows });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+router.get('/pedidos/:id', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const p = db.prepare(`SELECT p.*, c.razon_social AS cliente_nombre FROM sg_pedidos p
+      LEFT JOIN sg_clientes c ON c.id=p.cliente_id WHERE p.id=?`).get(req.params.id);
+    if (!p) return res.status(404).json({ ok: false, error: 'No encontrado' });
+    p.items = db.prepare(`SELECT i.*, pr.nombre AS producto_nombre, ps.nombre AS presentacion_nombre
+      FROM sg_pedido_items i LEFT JOIN sg_productos pr ON pr.id=i.producto_id
+      LEFT JOIN sg_presentaciones ps ON ps.id=i.presentacion_id WHERE i.pedido_id=?`).all(req.params.id);
+    res.json({ ok: true, data: p });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+router.post('/pedidos/:id/anular', requireAdmin, (req, res) => {
+  const db = getDb();
+  try {
+    db.prepare("UPDATE sg_pedidos SET estado='anulado', modificado_en=datetime('now','localtime'), modificado_por=? WHERE id=?").run(uid(req), req.params.id);
+    res.json({ ok: true, data: { id: Number(req.params.id) } });
+  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+
+// ── LOTES DISPONIBLES (FEFO) ───────────────────────────────────────────────────
+// Ordenados por fecha_vencimiento_estimada ASC; el front marca el primero como sugerido.
+router.get('/lotes-disponibles', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    if (!req.query.producto_id) return res.status(400).json({ ok: false, error: 'Falta producto_id' });
+    const rows = db.prepare(`
+      SELECT * FROM (
+        SELECT l.id, l.codigo_lote, l.producto_id, pr.nombre AS producto_nombre, l.calidad,
+          l.costo_final, l.kg_reales, l.precio_unitario_kg, l.fecha_vencimiento_estimada,
+          CAST(julianday(l.fecha_vencimiento_estimada) - julianday(date('now','localtime')) AS INTEGER) AS dias_restantes,
+          (l.kg_reales - COALESCE((SELECT SUM(di.kg_despachados) FROM sg_despacho_items di
+             JOIN sg_despachos d ON d.id=di.despacho_id AND d.activo=1 WHERE di.lote_id=l.id),0)) AS kg_disponibles
+        FROM sg_lotes l LEFT JOIN sg_productos pr ON pr.id=l.producto_id
+        WHERE l.activo=1 AND l.estado IN ('disponible','reservado','despachado_parcial') AND l.producto_id=?
+      ) WHERE kg_disponibles > 0.01
+      ORDER BY fecha_vencimiento_estimada ASC, id ASC`).all(req.query.producto_id);
+    res.json({ ok: true, data: rows });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// ── DESPACHOS ──────────────────────────────────────────────────────────────────
+router.post('/despachos', requireAdmin, (req, res) => {
+  const db = getDb();
+  try {
+    const b = req.body;
+    const items = Array.isArray(b.items) ? b.items : [];
+    if (!b.cliente_id) return res.status(400).json({ ok: false, error: 'Falta cliente' });
+    if (!items.length) return res.status(400).json({ ok: false, error: 'El despacho necesita al menos un item' });
+
+    // Validar disponibilidad por lote (suma de líneas del mismo lote incluida)
+    const pedidoLote = {};
+    for (const it of items) {
+      if (!it.lote_id || !(Number(it.kg_despachados) > 0)) return res.status(400).json({ ok: false, error: 'Cada línea necesita lote y kg' });
+      pedidoLote[it.lote_id] = (pedidoLote[it.lote_id] || 0) + Number(it.kg_despachados);
+    }
+    for (const loteId of Object.keys(pedidoLote)) {
+      const lote = db.prepare('SELECT kg_reales, estado FROM sg_lotes WHERE id=? AND activo=1').get(loteId);
+      if (!lote) return res.status(400).json({ ok: false, error: 'Lote inexistente: ' + loteId });
+      if (lote.estado === 'bajado') return res.status(400).json({ ok: false, error: 'Lote dado de baja: ' + loteId });
+      const disp = (lote.kg_reales || 0) - kgDespachados(db, loteId);
+      if (pedidoLote[loteId] > disp + 0.01) {
+        return res.status(400).json({ ok: false, error: `Lote ${loteId}: pedís ${pedidoLote[loteId]}kg pero hay ${disp.toFixed(1)}kg disponibles` });
+      }
+    }
+
+    const tx = db.transaction(() => {
+      const numero = nextNumero(db, 'SG-DESP', 'sg_despachos', 'numero');
+      const info = db.prepare(`INSERT INTO sg_despachos
+        (numero, pedido_id, cliente_id, comercial_id, fecha_despacho, transporte, transportista, chofer, dominio, estado, observaciones, creado_por)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+        numero, b.pedido_id || null, b.cliente_id, b.comercial_id || null, val(b.fecha_despacho),
+        val(b.transporte), val(b.transportista), val(b.chofer), val(b.dominio),
+        val(b.estado) || 'despachado', val(b.observaciones), uid(req));
+      const despachoId = info.lastInsertRowid;
+      const ins = db.prepare(`INSERT INTO sg_despacho_items
+        (despacho_id, lote_id, producto_id, presentacion_id, cantidad_presentaciones, kg_despachados, precio_por_kg, subtotal, margen_estimado)
+        VALUES (?,?,?,?,?,?,?,?,?)`);
+      const lotesAfectados = new Set();
+      for (const it of items) {
+        const lote = db.prepare('SELECT producto_id, costo_final FROM sg_lotes WHERE id=?').get(it.lote_id);
+        const kg = Number(it.kg_despachados);
+        const precio = Number(it.precio_por_kg || 0);
+        const subtotal = kg * precio;
+        const margen = subtotal - kg * (lote.costo_final || 0);
+        ins.run(despachoId, it.lote_id, lote.producto_id, it.presentacion_id || null,
+          Number(it.cantidad_presentaciones || 0), kg, precio, subtotal, margen);
+        lotesAfectados.add(it.lote_id);
+      }
+      for (const loteId of lotesAfectados) recalcEstadoLote(db, loteId);
+      if (b.pedido_id) {
+        db.prepare("UPDATE sg_pedidos SET estado='despachado_parcial', modificado_en=datetime('now','localtime') WHERE id=? AND estado IN ('borrador','confirmado')").run(b.pedido_id);
+      }
+      return despachoId;
+    });
+    res.json({ ok: true, data: { id: Number(tx()) } });
+  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+
+router.get('/despachos', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const where = ['d.activo=1'], params = [];
+    if (req.query.cliente_id) { where.push('d.cliente_id=?'); params.push(req.query.cliente_id); }
+    if (req.query.estado) { where.push('d.estado=?'); params.push(req.query.estado); }
+    const rows = db.prepare(`
+      SELECT d.*, c.razon_social AS cliente_nombre, p.numero AS pedido_numero,
+        (SELECT COALESCE(SUM(subtotal),0) FROM sg_despacho_items WHERE despacho_id=d.id) AS total,
+        (SELECT COALESCE(SUM(margen_estimado),0) FROM sg_despacho_items WHERE despacho_id=d.id) AS margen
+      FROM sg_despachos d
+      LEFT JOIN sg_clientes c ON c.id=d.cliente_id
+      LEFT JOIN sg_pedidos p ON p.id=d.pedido_id
+      WHERE ${where.join(' AND ')} ORDER BY d.id DESC`).all(...params);
+    res.json({ ok: true, data: rows });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+router.get('/despachos/:id', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const d = db.prepare(`SELECT d.*, c.razon_social AS cliente_nombre, p.numero AS pedido_numero
+      FROM sg_despachos d LEFT JOIN sg_clientes c ON c.id=d.cliente_id
+      LEFT JOIN sg_pedidos p ON p.id=d.pedido_id WHERE d.id=?`).get(req.params.id);
+    if (!d) return res.status(404).json({ ok: false, error: 'No encontrado' });
+    d.items = db.prepare(`SELECT di.*, l.codigo_lote, pr.nombre AS producto_nombre, ps.nombre AS presentacion_nombre
+      FROM sg_despacho_items di
+      LEFT JOIN sg_lotes l ON l.id=di.lote_id
+      LEFT JOIN sg_productos pr ON pr.id=di.producto_id
+      LEFT JOIN sg_presentaciones ps ON ps.id=di.presentacion_id WHERE di.despacho_id=?`).all(req.params.id);
+    res.json({ ok: true, data: d });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// Trazabilidad forward (inversa): cliente → items → lotes → recepciones → OCs → proveedores.
+router.get('/despachos/:id/trazabilidad', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const d = db.prepare(`SELECT d.*, c.razon_social AS cliente_nombre, c.cuit AS cliente_cuit
+      FROM sg_despachos d LEFT JOIN sg_clientes c ON c.id=d.cliente_id WHERE d.id=?`).get(req.params.id);
+    if (!d) return res.status(404).json({ ok: false, error: 'No encontrado' });
+    const items = db.prepare(`SELECT di.*, l.codigo_lote, l.recepcion_id, l.costo_final, pr.nombre AS producto_nombre
+      FROM sg_despacho_items di
+      LEFT JOIN sg_lotes l ON l.id=di.lote_id
+      LEFT JOIN sg_productos pr ON pr.id=di.producto_id WHERE di.despacho_id=?`).all(req.params.id);
+    for (const it of items) {
+      const rec = it.recepcion_id ? db.prepare('SELECT id, numero_recepcion, fecha_recepcion, oc_id FROM sg_recepciones WHERE id=?').get(it.recepcion_id) : null;
+      const oc = rec ? db.prepare('SELECT id, numero, fecha_oc, tipo_precio, proveedor_id FROM sg_oc WHERE id=?').get(rec.oc_id) : null;
+      const prov = oc && oc.proveedor_id ? db.prepare('SELECT razon_social, cuit FROM sg_proveedores WHERE id=?').get(oc.proveedor_id) : null;
+      it.recepcion = rec; it.oc = oc; it.proveedor = prov;
+    }
+    res.json({ ok: true, data: { despacho: d, items } });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+router.post('/despachos/:id/anular', requireAdmin, (req, res) => {
+  const db = getDb();
+  try {
+    const d = db.prepare('SELECT id FROM sg_despachos WHERE id=? AND activo=1').get(req.params.id);
+    if (!d) return res.status(404).json({ ok: false, error: 'No encontrado o ya anulado' });
+    const tx = db.transaction(() => {
+      const lotes = db.prepare('SELECT DISTINCT lote_id FROM sg_despacho_items WHERE despacho_id=?').all(req.params.id).map(r => r.lote_id);
+      db.prepare("UPDATE sg_despachos SET activo=0, eliminado_en=datetime('now','localtime'), eliminado_por_id=? WHERE id=?").run(uid(req), req.params.id);
+      for (const loteId of lotes) recalcEstadoLote(db, loteId);
+    });
+    tx();
+    res.json({ ok: true, data: { id: Number(req.params.id) } });
+  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+
+// ── CUENTA CORRIENTE CLIENTES (V1 simple) ──────────────────────────────────────
+// total_cobrado queda en 0 en V1 (no hay cobranzas de SG todavía). // TODO V2: cobranzas/DSO.
+router.get('/cc-clientes', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const rows = db.prepare(`
+      SELECT c.id, c.razon_social, c.limite_credito,
+        COALESCE(SUM(di.subtotal),0) AS total_facturado,
+        0 AS total_cobrado
+      FROM sg_clientes c
+      JOIN sg_despachos d ON d.cliente_id=c.id AND d.activo=1
+      JOIN sg_despacho_items di ON di.despacho_id=d.id
+      WHERE c.activo=1
+      GROUP BY c.id, c.razon_social, c.limite_credito
+      ORDER BY total_facturado DESC`).all();
+    for (const r of rows) r.saldo = (r.total_facturado || 0) - (r.total_cobrado || 0);
+    res.json({ ok: true, data: rows });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
 export default router;
