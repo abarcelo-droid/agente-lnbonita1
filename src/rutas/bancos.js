@@ -10,6 +10,36 @@ function getUser(req) {
   catch(e) { return null; }
 }
 
+// ── Multisociedad (Fase 2) ──────────────────────────────────────────────────
+// Cada caja/cuenta pertenece a una sociedad. Cheques/movimientos/OP derivan la
+// sociedad de su cuenta raíz. Si el request no manda sociedad_id, se usa PC por
+// defecto (selector UI = follow-up).
+let _pcId = null;
+function sociedadPCId() {
+  if (_pcId) return _pcId;
+  const r = db.prepare("SELECT id FROM sociedades WHERE nombre = 'Puente Cordón SA'").get()
+         || db.prepare("SELECT id FROM sociedades WHERE funcion = 'productiva' ORDER BY id LIMIT 1").get();
+  _pcId = r ? r.id : 1;
+  return _pcId;
+}
+function getSociedadId(req) {
+  const raw = req.body?.sociedad_id ?? req.query?.sociedad_id;
+  const id = (raw !== undefined && raw !== null && raw !== '') ? parseInt(raw, 10) : null;
+  if (Number.isInteger(id)) {
+    const ok = db.prepare('SELECT id FROM sociedades WHERE id = ?').get(id);
+    if (ok) return id;
+  }
+  return sociedadPCId();
+}
+function sociedadDeCuenta(cuentaId) {
+  const c = db.prepare('SELECT sociedad_id FROM fin_cuentas WHERE id = ?').get(parseInt(cuentaId));
+  return c ? c.sociedad_id : sociedadPCId();
+}
+function sociedadDeChequera(chequeraId) {
+  const ch = db.prepare('SELECT sociedad_id FROM fin_chequeras WHERE id = ?').get(parseInt(chequeraId));
+  return ch ? ch.sociedad_id : sociedadPCId();
+}
+
 // ────────────────────────────────────────────────────────────────────────────
 // CUENTAS
 // ────────────────────────────────────────────────────────────────────────────
@@ -17,15 +47,16 @@ function getUser(req) {
 // GET /api/fin/cuentas
 router.get('/cuentas', (req, res) => {
   try {
+    const sociedadId = getSociedadId(req);
     const cuentas = db.prepare(`
       SELECT c.*,
         COALESCE(c.saldo_inicial, 0) +
         COALESCE((SELECT SUM(CASE WHEN tipo='ingreso' THEN monto ELSE -monto END)
                   FROM fin_movimientos WHERE cuenta_id = c.id), 0) AS saldo_actual
       FROM fin_cuentas c
-      WHERE c.activo = 1
+      WHERE c.activo = 1 AND c.sociedad_id = ?
       ORDER BY c.tipo, c.nombre
-    `).all();
+    `).all(sociedadId);
     res.json({ ok: true, data: cuentas });
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
@@ -49,11 +80,12 @@ router.get('/cuentas/:id', (req, res) => {
 router.post('/cuentas', (req, res) => {
   const { nombre, tipo, banco, nro_cuenta, cbu, alias, moneda, saldo_inicial, cuenta_contable_id } = req.body || {};
   if (!nombre) return res.status(400).json({ ok: false, error: 'Nombre requerido' });
+  const sociedadId = getSociedadId(req);
   try {
     const r = db.prepare(`
-      INSERT INTO fin_cuentas (nombre, tipo, banco, nro_cuenta, cbu, alias, moneda, saldo_inicial, cuenta_contable_id)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(nombre.trim(), tipo||'cuenta_corriente', banco||null, nro_cuenta||null, cbu||null, alias||null, moneda||'ARS', parseFloat(saldo_inicial||0), cuenta_contable_id?parseInt(cuenta_contable_id):null);
+      INSERT INTO fin_cuentas (sociedad_id, nombre, tipo, banco, nro_cuenta, cbu, alias, moneda, saldo_inicial, cuenta_contable_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(sociedadId, nombre.trim(), tipo||'cuenta_corriente', banco||null, nro_cuenta||null, cbu||null, alias||null, moneda||'ARS', parseFloat(saldo_inicial||0), cuenta_contable_id?parseInt(cuenta_contable_id):null);
     res.json({ ok: true, id: r.lastInsertRowid });
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
@@ -87,8 +119,9 @@ router.delete('/cuentas/:id', (req, res) => {
 router.get('/chequeras', (req, res) => {
   try {
     const { cuentaId } = req.query;
-    let sql = `SELECT ch.*, c.nombre as cuenta_nombre, c.banco FROM fin_chequeras ch JOIN fin_cuentas c ON c.id=ch.cuenta_id WHERE ch.activo=1`;
-    const params = [];
+    const sociedadId = getSociedadId(req);
+    let sql = `SELECT ch.*, c.nombre as cuenta_nombre, c.banco FROM fin_chequeras ch JOIN fin_cuentas c ON c.id=ch.cuenta_id WHERE ch.activo=1 AND ch.sociedad_id = ?`;
+    const params = [sociedadId];
     if (cuentaId) { sql += ' AND ch.cuenta_id=?'; params.push(parseInt(cuentaId)); }
     sql += ' ORDER BY ch.id DESC';
     res.json({ ok: true, data: db.prepare(sql).all(...params) });
@@ -100,8 +133,8 @@ router.post('/chequeras', (req, res) => {
   const { cuenta_id, nro_chequera, desde, hasta } = req.body || {};
   if (!cuenta_id || !desde || !hasta) return res.status(400).json({ ok: false, error: 'cuenta_id, desde y hasta son requeridos' });
   try {
-    const r = db.prepare(`INSERT INTO fin_chequeras (cuenta_id, nro_chequera, desde, hasta) VALUES (?,?,?,?)`)
-      .run(parseInt(cuenta_id), nro_chequera||null, parseInt(desde), parseInt(hasta));
+    const r = db.prepare(`INSERT INTO fin_chequeras (cuenta_id, nro_chequera, desde, hasta, sociedad_id) VALUES (?,?,?,?,?)`)
+      .run(parseInt(cuenta_id), nro_chequera||null, parseInt(desde), parseInt(hasta), sociedadDeCuenta(cuenta_id));
     res.json({ ok: true, id: r.lastInsertRowid });
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
@@ -122,8 +155,9 @@ router.delete('/chequeras/:id', (req, res) => {
 router.get('/cheques-propios', (req, res) => {
   try {
     const { cuentaId, estado } = req.query;
-    let sql = `SELECT cp.*, ch.cuenta_id, c.nombre as cuenta_nombre, c.banco FROM fin_cheques_propios cp JOIN fin_chequeras ch ON ch.id=cp.chequera_id JOIN fin_cuentas c ON c.id=ch.cuenta_id WHERE 1=1`;
-    const params = [];
+    const sociedadId = getSociedadId(req);
+    let sql = `SELECT cp.*, ch.cuenta_id, c.nombre as cuenta_nombre, c.banco FROM fin_cheques_propios cp JOIN fin_chequeras ch ON ch.id=cp.chequera_id JOIN fin_cuentas c ON c.id=ch.cuenta_id WHERE cp.sociedad_id = ?`;
+    const params = [sociedadId];
     if (cuentaId) { sql += ' AND ch.cuenta_id=?'; params.push(parseInt(cuentaId)); }
     if (estado)   { sql += ' AND cp.estado=?'; params.push(estado); }
     sql += ' ORDER BY cp.fecha_emision DESC, cp.nro_cheque DESC';
@@ -136,10 +170,10 @@ router.post('/cheques-propios', (req, res) => {
   const { chequera_id, nro_cheque, monto, beneficiario, fecha_emision, fecha_vto, notas, pago_id } = req.body || {};
   if (!chequera_id || !nro_cheque || !monto) return res.status(400).json({ ok: false, error: 'chequera_id, nro_cheque y monto son requeridos' });
   try {
-    const r = db.prepare(`INSERT INTO fin_cheques_propios (chequera_id, nro_cheque, monto, beneficiario, fecha_emision, fecha_vto, notas, pago_id)
-      VALUES (?,?,?,?,?,?,?,?)`)
+    const r = db.prepare(`INSERT INTO fin_cheques_propios (chequera_id, nro_cheque, monto, beneficiario, fecha_emision, fecha_vto, notas, pago_id, sociedad_id)
+      VALUES (?,?,?,?,?,?,?,?,?)`)
       .run(parseInt(chequera_id), parseInt(nro_cheque), parseFloat(monto), beneficiario||null,
-           fecha_emision||new Date().toISOString().split('T')[0], fecha_vto||null, notas||null, pago_id?parseInt(pago_id):null);
+           fecha_emision||new Date().toISOString().split('T')[0], fecha_vto||null, notas||null, pago_id?parseInt(pago_id):null, sociedadDeChequera(chequera_id));
     res.json({ ok: true, id: r.lastInsertRowid });
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
@@ -163,8 +197,9 @@ router.patch('/cheques-propios/:id/estado', (req, res) => {
 router.get('/cheques-terceros', (req, res) => {
   try {
     const { estado } = req.query;
-    let sql = `SELECT * FROM fin_cheques_terceros WHERE 1=1`;
-    const params = [];
+    const sociedadId = getSociedadId(req);
+    let sql = `SELECT * FROM fin_cheques_terceros WHERE sociedad_id = ?`;
+    const params = [sociedadId];
     if (estado) { sql += ' AND estado=?'; params.push(estado); }
     sql += ' ORDER BY fecha_vto ASC, id DESC';
     res.json({ ok: true, data: db.prepare(sql).all(...params) });
@@ -175,12 +210,13 @@ router.get('/cheques-terceros', (req, res) => {
 router.post('/cheques-terceros', (req, res) => {
   const { banco, nro_cheque, librador, monto, fecha_recepcion, fecha_vto, notas, cuenta_contable_id } = req.body || {};
   if (!monto) return res.status(400).json({ ok: false, error: 'Monto requerido' });
+  const sociedadId = getSociedadId(req);
   try {
-    const r = db.prepare(`INSERT INTO fin_cheques_terceros (banco, nro_cheque, librador, monto, fecha_recepcion, fecha_vto, notas, cuenta_contable_id)
-      VALUES (?,?,?,?,?,?,?,?)`)
+    const r = db.prepare(`INSERT INTO fin_cheques_terceros (banco, nro_cheque, librador, monto, fecha_recepcion, fecha_vto, notas, cuenta_contable_id, sociedad_id)
+      VALUES (?,?,?,?,?,?,?,?,?)`)
       .run(banco||null, nro_cheque||null, librador||null, parseFloat(monto),
            fecha_recepcion||new Date().toISOString().split('T')[0], fecha_vto||null, notas||null,
-           cuenta_contable_id?parseInt(cuenta_contable_id):null);
+           cuenta_contable_id?parseInt(cuenta_contable_id):null, sociedadId);
     res.json({ ok: true, id: r.lastInsertRowid });
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
@@ -204,8 +240,9 @@ router.patch('/cheques-terceros/:id/estado', (req, res) => {
 router.get('/movimientos', (req, res) => {
   try {
     const { cuentaId, desde, hasta } = req.query;
-    let sql = `SELECT m.*, c.nombre as cuenta_nombre FROM fin_movimientos m JOIN fin_cuentas c ON c.id=m.cuenta_id WHERE 1=1`;
-    const params = [];
+    const sociedadId = getSociedadId(req);
+    let sql = `SELECT m.*, c.nombre as cuenta_nombre FROM fin_movimientos m JOIN fin_cuentas c ON c.id=m.cuenta_id WHERE m.sociedad_id = ?`;
+    const params = [sociedadId];
     if (cuentaId) { sql += ' AND m.cuenta_id=?'; params.push(parseInt(cuentaId)); }
     if (desde)    { sql += ' AND m.fecha>=?'; params.push(desde); }
     if (hasta)    { sql += ' AND m.fecha<=?'; params.push(hasta); }
@@ -220,10 +257,10 @@ router.post('/movimientos', (req, res) => {
   const { cuenta_id, fecha, tipo, concepto, monto, referencia, pago_id } = req.body || {};
   if (!cuenta_id || !tipo || !concepto || !monto) return res.status(400).json({ ok: false, error: 'Faltan campos requeridos' });
   try {
-    const r = db.prepare(`INSERT INTO fin_movimientos (cuenta_id, fecha, tipo, concepto, monto, referencia, pago_id, usuario_id)
-      VALUES (?,?,?,?,?,?,?,?)`)
+    const r = db.prepare(`INSERT INTO fin_movimientos (cuenta_id, fecha, tipo, concepto, monto, referencia, pago_id, usuario_id, sociedad_id)
+      VALUES (?,?,?,?,?,?,?,?,?)`)
       .run(parseInt(cuenta_id), fecha||new Date().toISOString().split('T')[0], tipo, concepto.trim(),
-           parseFloat(monto), referencia||null, pago_id?parseInt(pago_id):null, u?u.id:null);
+           parseFloat(monto), referencia||null, pago_id?parseInt(pago_id):null, u?u.id:null, sociedadDeCuenta(cuenta_id));
     res.json({ ok: true, id: r.lastInsertRowid });
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
@@ -276,13 +313,14 @@ router.post('/conciliacion/extracto', (req, res) => {
   const { cuenta_id, periodo, lineas } = req.body || {};
   if (!cuenta_id || !lineas?.length) return res.status(400).json({ ok: false, error: 'cuenta_id y lineas requeridos' });
   try {
-    const ins = db.prepare(`INSERT INTO fin_extracto_lineas (cuenta_id, fecha, concepto, monto, tipo, referencia, periodo)
-      VALUES (?,?,?,?,?,?,?)`);
+    const sociedadId = sociedadDeCuenta(cuenta_id);
+    const ins = db.prepare(`INSERT INTO fin_extracto_lineas (cuenta_id, fecha, concepto, monto, tipo, referencia, periodo, sociedad_id)
+      VALUES (?,?,?,?,?,?,?,?)`);
     const tx = db.transaction(() => {
       for (const l of lineas) {
         ins.run(parseInt(cuenta_id), l.fecha, l.concepto||null, Math.abs(parseFloat(l.monto)),
           l.tipo || (parseFloat(l.monto) >= 0 ? 'ingreso' : 'egreso'),
-          l.referencia||null, periodo||null);
+          l.referencia||null, periodo||null, sociedadId);
       }
     });
     tx();

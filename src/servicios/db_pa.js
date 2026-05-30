@@ -2961,5 +2961,100 @@ db.exec(`
   }
 })();
 
+// ═══════════════════════════════════════════════════════════════════════════
+// MULTISOCIEDAD — FASE 2: Financiero (cajas / bancos / cheques / OP) (OK Andy + Pablo)
+// ───────────────────────────────────────────────────────────────────────────
+// Cada caja/cuenta bancaria pertenece a UNA sociedad (titular del CBU). Sin pool
+// "Familia". La sociedad nace en fin_cuentas (raíz) y los routers la derivan hacia
+// abajo (cheques, movimientos, OP, conciliación).
+// Tablas que reciben sociedad_id NOT NULL DEFAULT=PC:
+//   fin_cuentas, fin_chequeras, fin_cheques_propios, fin_cheques_terceros,
+//   fin_movimientos, fin_extracto_lineas, fin_conciliaciones  → ADD COLUMN (sin rebuild).
+//   fin_ordenes_pago → REBUILD: numero pasa de UNIQUE global a UNIQUE(sociedad_id,numero)
+//     para que cada sociedad tenga su propia numeración de OP. Ids preservados.
+// Tabla-hijo fin_op_compras NO lleva columna: deriva de la OP por join.
+// Existentes → PC. SG arranca sin cuentas (las cargan con su CBU). Idempotente.
+// ═══════════════════════════════════════════════════════════════════════════
+(function migrarMultisociedadFase2() {
+  try {
+    const soc = (nombre) => db.prepare("SELECT id FROM sociedades WHERE nombre = ?").get(nombre);
+    const pc = soc('Puente Cordón SA')
+            || db.prepare("SELECT id FROM sociedades WHERE funcion = 'productiva' ORDER BY id LIMIT 1").get();
+    if (!pc) {
+      console.warn('[PA][MS-F2] Sociedad Puente Cordón no encontrada — Fase 2 multisociedad NO aplicada');
+      return;
+    }
+    const PC = pc.id;
+    const tieneCol = (tabla, col) =>
+      db.prepare(`PRAGMA table_info(${tabla})`).all().some(c => c.name === col);
+
+    // ── 1) Tablas simples: ADD COLUMN sociedad_id NOT NULL DEFAULT=PC + índice ──
+    const tablasSimples = [
+      'fin_cuentas',
+      'fin_chequeras',
+      'fin_cheques_propios',
+      'fin_cheques_terceros',
+      'fin_movimientos',
+      'fin_extracto_lineas',
+      'fin_conciliaciones',
+    ];
+    for (const t of tablasSimples) {
+      if (!tieneCol(t, 'sociedad_id')) {
+        db.exec(`ALTER TABLE ${t} ADD COLUMN sociedad_id INTEGER NOT NULL DEFAULT ${PC}`);
+        db.exec(`CREATE INDEX IF NOT EXISTS idx_${t}_sociedad ON ${t}(sociedad_id)`);
+        console.log(`[PA][MS-F2] ${t}.sociedad_id agregado (NOT NULL DEFAULT PC)`);
+      }
+    }
+
+    // ── 2) fin_ordenes_pago: rebuild para UNIQUE(sociedad_id, numero) ──
+    if (!tieneCol('fin_ordenes_pago', 'sociedad_id')) {
+      const fkPrev = db.pragma('foreign_keys', { simple: true });
+      db.pragma('foreign_keys = OFF');
+      try {
+        db.exec(`
+          BEGIN;
+          CREATE TABLE fin_ordenes_pago_v2 (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            sociedad_id     INTEGER NOT NULL REFERENCES sociedades(id),
+            numero          TEXT NOT NULL,
+            fecha           TEXT NOT NULL DEFAULT (date('now','localtime')),
+            proveedor_id    INTEGER NOT NULL REFERENCES adm_proveedores(id),
+            monto_total     REAL NOT NULL,
+            forma_pago      TEXT NOT NULL DEFAULT 'transferencia',
+            cuenta_fin_id   INTEGER REFERENCES fin_cuentas(id),
+            cheque_prop_id  INTEGER REFERENCES fin_cheques_propios(id),
+            cheque_ter_id   INTEGER REFERENCES fin_cheques_terceros(id),
+            referencia      TEXT,
+            notas           TEXT,
+            estado          TEXT NOT NULL DEFAULT 'emitida' CHECK(estado IN ('emitida','anulada')),
+            movimiento_id   INTEGER REFERENCES fin_movimientos(id),
+            usuario_id      INTEGER,
+            creado_en       TEXT DEFAULT (datetime('now','localtime')),
+            asiento_id      INTEGER REFERENCES pa_asientos(id),
+            UNIQUE(sociedad_id, numero)
+          );
+          INSERT INTO fin_ordenes_pago_v2
+            (id, sociedad_id, numero, fecha, proveedor_id, monto_total, forma_pago, cuenta_fin_id,
+             cheque_prop_id, cheque_ter_id, referencia, notas, estado, movimiento_id, usuario_id, creado_en, asiento_id)
+            SELECT id, ${PC}, numero, fecha, proveedor_id, monto_total, forma_pago, cuenta_fin_id,
+                   cheque_prop_id, cheque_ter_id, referencia, notas, estado, movimiento_id, usuario_id, creado_en, asiento_id
+              FROM fin_ordenes_pago;
+          DROP TABLE fin_ordenes_pago;
+          ALTER TABLE fin_ordenes_pago_v2 RENAME TO fin_ordenes_pago;
+          CREATE INDEX IF NOT EXISTS idx_fin_ordenes_pago_sociedad ON fin_ordenes_pago(sociedad_id);
+          COMMIT;
+        `);
+        console.log('[PA][MS-F2] fin_ordenes_pago: sociedad_id agregado (existentes → PC), UNIQUE(sociedad_id,numero)');
+      } finally {
+        db.pragma(`foreign_keys = ${fkPrev ? 'ON' : 'OFF'}`);
+      }
+    }
+
+    console.log('[PA][MS-F2] Financiero (cajas/bancos) multisociedad inicializado.');
+  } catch (e) {
+    console.error('[PA][MS-F2] Error en migración multisociedad Fase 2:', e.message);
+  }
+})();
+
 export { db };
 export default db;
