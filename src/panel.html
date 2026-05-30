@@ -251,7 +251,13 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     <div class="ni" data-sec="pa-campanias" data-admin-only="1"><span class="dot dc"></span>📅 Campañas</div>
   </div>
 
-  <div class="ni" data-sec="sg" data-admin-only="1"><span class="dot da"></span>🍅 San Gerónimo</div>
+  <div class="ng" style="margin-top:8px">Abasto SG</div>
+  <div class="ni" data-sec="sg-dashboard" data-admin-only="1"><span class="dot da"></span>📊 Dashboard</div>
+  <div class="ni" data-sec="sg-compras" data-admin-only="1"><span class="dot dd"></span>🛒 Compras</div>
+  <div class="ni" data-sec="sg-stock" data-admin-only="1"><span class="dot db"></span>📦 Stock</div>
+  <div class="ni" data-sec="sg-ventas" data-admin-only="1"><span class="dot dc"></span>💰 Ventas</div>
+  <div class="ni" data-sec="sg-catalogo" data-admin-only="1"><span class="dot da"></span>📚 Catálogo</div>
+  <div class="ni" data-sec="sg-reportes" data-admin-only="1"><span class="dot de"></span>📈 Reportes</div>
 
   <div class="ng" style="margin-top:8px">General</div>
   <div class="ni on" data-sec="inicio"><span class="dot"></span>Inicio</div>
@@ -1786,42 +1792,26 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
      MÓDULO SAN GERÓNIMO (sg_*) — operatoria mayorista frutihortícola
      Fase 1: Catálogo operativo. Compras/Stock/Ventas/Reportes = placeholders.
 ═══════════════════════════════════════════════════════════════════════════ -->
-<div class="sec" id="sec-sg">
+<!-- ════ ABASTO SG — 6 módulos independientes (1 .sec por módulo, CSS scopeado a .sg-mod). ════
+     Antes era una sola sección .sg-modcon tabs horizontales; ahora cada vista es su propio
+     módulo del sidebar. Los modales SG viven al final, top-level (sirven desde cualquier sección). -->
+<div class="sec sg-mod" id="sec-sg-dashboard">
   <style>
-    #sec-sg .sg-tabs{display:flex;gap:2px;border-bottom:1px solid var(--bor);margin-bottom:18px;flex-wrap:wrap}
-    #sec-sg .sg-tab{padding:10px 18px;cursor:pointer;font-size:13px;font-weight:600;border-bottom:2px solid transparent;color:var(--mut)}
-    #sec-sg .sg-tab.on{color:var(--burg);border-bottom-color:var(--burg)}
-    #sec-sg .sg-pane{display:none} #sec-sg .sg-pane.on{display:block}
-    #sec-sg .sg-subtab{padding:7px 14px;cursor:pointer;font-size:12.5px;font-weight:600;border-radius:6px;color:var(--mut)}
-    #sec-sg .sg-subtab.on{background:var(--burg);color:#fff}
-    #sec-sg .sg-sub{display:none} #sec-sg .sg-sub.on{display:block}
-    #sec-sg .sg-ph-ph{padding:48px 20px;text-align:center;color:var(--mut);font-size:14px;background:var(--burl,#faf5f0);border:1px dashed var(--bor2,#e0d5cc);border-radius:12px}
+    .sg-mod .sg-subtab{padding:7px 14px;cursor:pointer;font-size:12.5px;font-weight:600;border-radius:6px;color:var(--mut)}
+    .sg-mod .sg-subtab.on{background:var(--burg);color:#fff}
+    .sg-mod .sg-sub{display:none} .sg-mod .sg-sub.on{display:block}
+    .sg-mod .sg-ph-ph{padding:48px 20px;text-align:center;color:var(--mut);font-size:14px;background:var(--burl,#faf5f0);border:1px dashed var(--bor2,#e0d5cc);border-radius:12px}
   </style>
-
-  <div class="ph">
-    <div><div class="ph-t">🍅 San Gerónimo</div><div class="ph-s">Operatoria mayorista frutihortícola — PUENTE CORDON SA · MCBA Nave 4</div></div>
-  </div>
-
-  <!-- Tabs nivel 1 -->
-  <div class="sg-tabs">
-    <div class="sg-tab" data-tab="dashboard" onclick="sgTab('dashboard')">📊 Dashboard</div>
-    <div class="sg-tab" data-tab="compras"   onclick="sgTab('compras')">🛒 Compras</div>
-    <div class="sg-tab" data-tab="stock"     onclick="sgTab('stock')">📦 Stock</div>
-    <div class="sg-tab" data-tab="ventas"    onclick="sgTab('ventas')">💰 Ventas</div>
-    <div class="sg-tab on" data-tab="catalogo" onclick="sgTab('catalogo')">📚 Catálogo</div>
-    <div class="sg-tab" data-tab="reportes"  onclick="sgTab('reportes')">📈 Reportes</div>
-  </div>
-
-  <div class="sg-pane" id="sg-pane-dashboard">
+  <div class="ph"><div><div class="ph-t">🍅 San Gerónimo · Dashboard</div><div class="ph-s">KPIs y resumen operativo — PUENTE CORDON SA · MCBA Nave 4</div></div></div>
     <style>
-      #sec-sg .sgd-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:18px}
-      #sec-sg .sgd-card{background:var(--bg);border:1px solid var(--bor);border-radius:12px;padding:14px 16px}
-      #sec-sg .sgd-card .lbl{font-size:11px;color:var(--mut);text-transform:uppercase;letter-spacing:.04em}
-      #sec-sg .sgd-card .val{font-size:22px;font-weight:700;margin-top:4px}
-      #sec-sg .sgd-card .sub{font-size:11.5px;color:var(--mut);margin-top:2px}
-      #sec-sg .sgd-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px}
-      #sec-sg .sgd-box{background:var(--bg);border:1px solid var(--bor);border-radius:12px;padding:14px 16px}
-      #sec-sg .sgd-box h4{margin:0 0 10px;font-size:13px;color:var(--burg)}
+      .sg-mod .sgd-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:18px}
+      .sg-mod .sgd-card{background:var(--bg);border:1px solid var(--bor);border-radius:12px;padding:14px 16px}
+      .sg-mod .sgd-card .lbl{font-size:11px;color:var(--mut);text-transform:uppercase;letter-spacing:.04em}
+      .sg-mod .sgd-card .val{font-size:22px;font-weight:700;margin-top:4px}
+      .sg-mod .sgd-card .sub{font-size:11.5px;color:var(--mut);margin-top:2px}
+      .sg-mod .sgd-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px}
+      .sg-mod .sgd-box{background:var(--bg);border:1px solid var(--bor);border-radius:12px;padding:14px 16px}
+      .sg-mod .sgd-box h4{margin:0 0 10px;font-size:13px;color:var(--burg)}
     </style>
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;gap:10px;flex-wrap:wrap">
       <label style="font-size:12px;color:var(--mut)">Período
@@ -1841,12 +1831,13 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
         <div class="ab-table-wrap"><table class="pa-tbl"><thead><tr><th>Cliente</th><th style="text-align:right">Venta</th><th style="text-align:right">Margen</th></tr></thead><tbody id="sg-dash-topcli"></tbody></table></div></div>
     </div>
   </div>
-  <div class="sg-pane" id="sg-pane-compras">
+  <div class="sec sg-mod" id="sec-sg-compras">
+    <div class="ph"><div><div class="ph-t">🍅 San Gerónimo · Compras</div><div class="ph-s">Órdenes de compra, recepciones, lotes y gastos</div></div></div>
     <style>
-      #sec-sg .sgc-subtab{padding:7px 14px;cursor:pointer;font-size:12.5px;font-weight:600;border-radius:6px;color:var(--mut)}
-      #sec-sg .sgc-subtab.on{background:var(--burg);color:#fff}
-      #sec-sg .sgc-sub{display:none} #sec-sg .sgc-sub.on{display:block}
-      #sec-sg .sg-lrow{display:grid;grid-template-columns:1.6fr 1.3fr 0.8fr 0.9fr auto;gap:6px;align-items:center;margin-bottom:6px}
+      .sg-mod .sgc-subtab{padding:7px 14px;cursor:pointer;font-size:12.5px;font-weight:600;border-radius:6px;color:var(--mut)}
+      .sg-mod .sgc-subtab.on{background:var(--burg);color:#fff}
+      .sg-mod .sgc-sub{display:none} .sg-mod .sgc-sub.on{display:block}
+      .sg-mod .sg-lrow{display:grid;grid-template-columns:1.6fr 1.3fr 0.8fr 0.9fr auto;gap:6px;align-items:center;margin-bottom:6px}
     </style>
     <div style="display:inline-flex;gap:2px;background:var(--bg);border:1px solid var(--bor);border-radius:8px;padding:3px;margin-bottom:16px;flex-wrap:wrap">
       <div class="sgc-subtab on" data-sub="oc"        onclick="sgComSub('oc')">📋 Órdenes de compra</div>
@@ -1913,7 +1904,8 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       </table></div>
     </div>
   </div>
-  <div class="sg-pane" id="sg-pane-stock">
+  <div class="sec sg-mod" id="sec-sg-stock">
+    <div class="ph"><div><div class="ph-t">🍅 San Gerónimo · Stock</div><div class="ph-s">Lotes, vencimientos y trazabilidad</div></div></div>
     <div style="display:flex;gap:10px;margin-bottom:12px;align-items:flex-end;flex-wrap:wrap">
       <label style="font-size:12px;color:var(--mut)">Producto<br>
         <select id="sg-st-prod" onchange="sgLoadStock()" style="padding:5px 8px;border-radius:6px;border:1px solid var(--bor);background:var(--bg);min-width:150px"><option value="">— Todos —</option></select>
@@ -1941,11 +1933,12 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       <tbody id="sg-tb-stock"><tr><td colspan="9" class="emp">Cargando…</td></tr></tbody>
     </table></div>
   </div>
-  <div class="sg-pane" id="sg-pane-ventas">
+  <div class="sec sg-mod" id="sec-sg-ventas">
+    <div class="ph"><div><div class="ph-t">🍅 San Gerónimo · Ventas</div><div class="ph-s">Pedidos, despachos y cuenta corriente de clientes</div></div></div>
     <style>
-      #sec-sg .sgv-subtab{padding:7px 14px;cursor:pointer;font-size:12.5px;font-weight:600;border-radius:6px;color:var(--mut)}
-      #sec-sg .sgv-subtab.on{background:var(--burg);color:#fff}
-      #sec-sg .sgv-sub{display:none} #sec-sg .sgv-sub.on{display:block}
+      .sg-mod .sgv-subtab{padding:7px 14px;cursor:pointer;font-size:12.5px;font-weight:600;border-radius:6px;color:var(--mut)}
+      .sg-mod .sgv-subtab.on{background:var(--burg);color:#fff}
+      .sg-mod .sgv-sub{display:none} .sg-mod .sgv-sub.on{display:block}
     </style>
     <div style="display:inline-flex;gap:2px;background:var(--bg);border:1px solid var(--bor);border-radius:8px;padding:3px;margin-bottom:16px;flex-wrap:wrap">
       <div class="sgv-subtab on" data-sub="pedidos"   onclick="sgVenSub('pedidos')">📝 Pedidos</div>
@@ -1980,11 +1973,12 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       </table></div>
     </div>
   </div>
-  <div class="sg-pane" id="sg-pane-reportes">
+  <div class="sec sg-mod" id="sec-sg-reportes">
+    <div class="ph"><div><div class="ph-t">🍅 San Gerónimo · Reportes</div><div class="ph-s">Compras, ventas, márgenes y merma</div></div></div>
     <style>
-      #sec-sg .sgr-subtab{padding:7px 14px;cursor:pointer;font-size:12.5px;font-weight:600;border-radius:6px;color:var(--mut)}
-      #sec-sg .sgr-subtab.on{background:var(--burg);color:#fff}
-      #sec-sg .sgr-sub{display:none} #sec-sg .sgr-sub.on{display:block}
+      .sg-mod .sgr-subtab{padding:7px 14px;cursor:pointer;font-size:12.5px;font-weight:600;border-radius:6px;color:var(--mut)}
+      .sg-mod .sgr-subtab.on{background:var(--burg);color:#fff}
+      .sg-mod .sgr-sub{display:none} .sg-mod .sgr-sub.on{display:block}
     </style>
     <div style="display:inline-flex;gap:2px;background:var(--bg);border:1px solid var(--bor);border-radius:8px;padding:3px;margin-bottom:16px;flex-wrap:wrap">
       <div class="sgr-subtab on" data-sub="compras-prov" onclick="sgRepSub('compras-prov')">🚜 Compras × proveedor</div>
@@ -2027,8 +2021,9 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     </div>
   </div>
 
-  <!-- Tab Catálogo (operativo en Fase 1) -->
-  <div class="sg-pane on" id="sg-pane-catalogo">
+  <!-- Catálogo (operativo desde Fase 1) -->
+  <div class="sec sg-mod" id="sec-sg-catalogo">
+    <div class="ph"><div><div class="ph-t">🍅 San Gerónimo · Catálogo</div><div class="ph-s">Productos, presentaciones, proveedores, clientes y condiciones de pago</div></div></div>
     <div style="display:inline-flex;gap:2px;background:var(--bg);border:1px solid var(--bor);border-radius:8px;padding:3px;margin-bottom:16px;flex-wrap:wrap">
       <div class="sg-subtab on" data-sub="productos"     onclick="sgCatSub('productos')">🥦 Productos</div>
       <div class="sg-subtab" data-sub="presentaciones" onclick="sgCatSub('presentaciones')">📦 Presentaciones</div>
@@ -2082,7 +2077,6 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       </table></div>
     </div>
   </div>
-</div>
 
 <!-- Modal genérico de catálogo SG (form schema-driven) -->
 <div class="ab-modal-overlay" id="sg-modal">
@@ -2399,24 +2393,12 @@ var SG_SCHEMA = {
   }
 };
 
-function sgInit(){
-  sgTab('catalogo');
-  sgLoadCaches(function(){ sgCatSub('productos'); });
-}
-
-function sgTab(t){
-  document.querySelectorAll('#sec-sg .sg-tab').forEach(function(el){ el.classList.toggle('on', el.dataset.tab===t); });
-  document.querySelectorAll('#sec-sg .sg-pane').forEach(function(el){ el.classList.toggle('on', el.id==='sg-pane-'+t); });
-  if (t==='compras') sgComInit();
-  if (t==='stock') sgStockInit();
-  if (t==='ventas') sgVenInit();
-  if (t==='dashboard') sgDashInit();
-  if (t==='reportes') sgRepInit();
-}
+// Navegación SG: cada módulo es ahora una sección propia del sidebar (loadSec).
+// sgInit/sgTab (tabs horizontales) quedaron obsoletos al separar en 6 módulos.
 
 function sgCatSub(s){
-  document.querySelectorAll('#sec-sg .sg-subtab').forEach(function(el){ el.classList.toggle('on', el.dataset.sub===s); });
-  document.querySelectorAll('#sec-sg .sg-sub').forEach(function(el){ el.classList.toggle('on', el.id==='sg-sub-'+s); });
+  document.querySelectorAll('.sg-mod .sg-subtab').forEach(function(el){ el.classList.toggle('on', el.dataset.sub===s); });
+  document.querySelectorAll('.sg-mod .sg-sub').forEach(function(el){ el.classList.toggle('on', el.id==='sg-sub-'+s); });
   sgLoad(s);
 }
 
@@ -2628,8 +2610,8 @@ function sgDelete(entity, id){
 function sgComInit(){ sgLoadCaches(function(){ sgComSub(SG.comSub || 'oc'); }); }
 function sgComSub(s){
   SG.comSub = s;
-  document.querySelectorAll('#sec-sg .sgc-subtab').forEach(function(el){ el.classList.toggle('on', el.dataset.sub===s); });
-  document.querySelectorAll('#sec-sg .sgc-sub').forEach(function(el){ el.classList.toggle('on', el.id==='sgc-sub-'+s); });
+  document.querySelectorAll('.sg-mod .sgc-subtab').forEach(function(el){ el.classList.toggle('on', el.dataset.sub===s); });
+  document.querySelectorAll('.sg-mod .sgc-sub').forEach(function(el){ el.classList.toggle('on', el.id==='sgc-sub-'+s); });
   if (s==='oc') sgLoadOC();
   else if (s==='recepciones') sgLoadRecepciones();
   else if (s==='gdirectos') sgLoadGDirectos();
@@ -3106,8 +3088,8 @@ var SG_ESTDESP={preparado:'Preparado',despachado:'Despachado',entregado:'Entrega
 function sgVenInit(){ sgLoadCaches(function(){ sgVenSub(SG.venSub || 'pedidos'); }); }
 function sgVenSub(s){
   SG.venSub = s;
-  document.querySelectorAll('#sec-sg .sgv-subtab').forEach(function(el){ el.classList.toggle('on', el.dataset.sub===s); });
-  document.querySelectorAll('#sec-sg .sgv-sub').forEach(function(el){ el.classList.toggle('on', el.id==='sgv-sub-'+s); });
+  document.querySelectorAll('.sg-mod .sgv-subtab').forEach(function(el){ el.classList.toggle('on', el.dataset.sub===s); });
+  document.querySelectorAll('.sg-mod .sgv-sub').forEach(function(el){ el.classList.toggle('on', el.id==='sgv-sub-'+s); });
   if (s==='pedidos') sgLoadPedidos();
   else if (s==='despachos') sgLoadDespachos();
   else if (s==='cc') sgLoadCC();
@@ -3371,8 +3353,8 @@ var SG_REP_CFG={
 function sgRepInit(){ sgRepSub(SG_REP.sub); }
 function sgRepSub(s){
   SG_REP.sub=s;
-  document.querySelectorAll('#sec-sg .sgr-subtab').forEach(function(el){ el.classList.toggle('on', el.dataset.sub===s); });
-  document.querySelectorAll('#sec-sg .sgr-sub').forEach(function(el){ el.classList.toggle('on', el.id==='sgr-sub-'+s); });
+  document.querySelectorAll('.sg-mod .sgr-subtab').forEach(function(el){ el.classList.toggle('on', el.dataset.sub===s); });
+  document.querySelectorAll('.sg-mod .sgr-sub').forEach(function(el){ el.classList.toggle('on', el.id==='sgr-sub-'+s); });
   sgRepLoad();
 }
 function sgRepQS(){
@@ -8540,7 +8522,12 @@ function loadSec(s) {
     'pa-scout':      function(){ paLoadScout(); },
     'pa-cuentas':    function(){ paCuLoad(); },
     'pa-campanias':  function(){ paCampInit(); },
-    'sg':            function(){ sgInit(); }
+    'sg-dashboard':  function(){ sgDashInit(); },
+    'sg-compras':    function(){ sgComInit(); },
+    'sg-stock':      function(){ sgStockInit(); },
+    'sg-ventas':     function(){ sgVenInit(); },
+    'sg-catalogo':   function(){ sgLoadCaches(function(){ sgCatSub('productos'); }); },
+    'sg-reportes':   function(){ sgRepInit(); }
   };
   if (m[s]) m[s]();
 }
