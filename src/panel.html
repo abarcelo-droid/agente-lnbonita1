@@ -1812,7 +1812,35 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     <div class="sg-tab" data-tab="reportes"  onclick="sgTab('reportes')">📈 Reportes</div>
   </div>
 
-  <div class="sg-pane" id="sg-pane-dashboard"><div class="sg-ph-ph">📊 Dashboard — Próximamente (Fase 5)</div></div>
+  <div class="sg-pane" id="sg-pane-dashboard">
+    <style>
+      #sec-sg .sgd-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:18px}
+      #sec-sg .sgd-card{background:var(--bg);border:1px solid var(--bor);border-radius:12px;padding:14px 16px}
+      #sec-sg .sgd-card .lbl{font-size:11px;color:var(--mut);text-transform:uppercase;letter-spacing:.04em}
+      #sec-sg .sgd-card .val{font-size:22px;font-weight:700;margin-top:4px}
+      #sec-sg .sgd-card .sub{font-size:11.5px;color:var(--mut);margin-top:2px}
+      #sec-sg .sgd-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px}
+      #sec-sg .sgd-box{background:var(--bg);border:1px solid var(--bor);border-radius:12px;padding:14px 16px}
+      #sec-sg .sgd-box h4{margin:0 0 10px;font-size:13px;color:var(--burg)}
+    </style>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;gap:10px;flex-wrap:wrap">
+      <label style="font-size:12px;color:var(--mut)">Período
+        <input type="month" id="sg-dash-periodo" onchange="sgDashLoad()" style="padding:5px 8px;border-radius:6px;border:1px solid var(--bor);background:var(--bg)">
+      </label>
+      <button class="btn bo bs" onclick="sgDashLoad()">↻ Actualizar</button>
+    </div>
+    <div class="sgd-cards" id="sg-dash-cards"><div class="emp" style="grid-column:1/-1">Cargando…</div></div>
+    <div class="sgd-grid">
+      <div class="sgd-box"><h4>📦 Stock por familia (valor a costo)</h4>
+        <div class="ab-table-wrap"><table class="pa-tbl"><thead><tr><th>Familia</th><th style="text-align:right">Kg</th><th style="text-align:right">Valor</th></tr></thead><tbody id="sg-dash-familia"></tbody></table></div></div>
+      <div class="sgd-box"><h4>⏰ Próximos a vencer (≤5 días)</h4>
+        <div class="ab-table-wrap"><table class="pa-tbl"><thead><tr><th>Lote</th><th>Producto</th><th style="text-align:right">Kg</th><th style="text-align:center">Días</th></tr></thead><tbody id="sg-dash-vencer"></tbody></table></div></div>
+      <div class="sgd-box"><h4>🏆 Top 5 productos por margen</h4>
+        <div class="ab-table-wrap"><table class="pa-tbl"><thead><tr><th>Producto</th><th style="text-align:right">Venta</th><th style="text-align:right">Margen</th></tr></thead><tbody id="sg-dash-topprod"></tbody></table></div></div>
+      <div class="sgd-box"><h4>🥇 Top 5 clientes por venta</h4>
+        <div class="ab-table-wrap"><table class="pa-tbl"><thead><tr><th>Cliente</th><th style="text-align:right">Venta</th><th style="text-align:right">Margen</th></tr></thead><tbody id="sg-dash-topcli"></tbody></table></div></div>
+    </div>
+  </div>
   <div class="sg-pane" id="sg-pane-compras">
     <style>
       #sec-sg .sgc-subtab{padding:7px 14px;cursor:pointer;font-size:12.5px;font-weight:600;border-radius:6px;color:var(--mut)}
@@ -1952,7 +1980,52 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       </table></div>
     </div>
   </div>
-  <div class="sg-pane" id="sg-pane-reportes"><div class="sg-ph-ph">📈 Reportes — Próximamente (Fase 5)</div></div>
+  <div class="sg-pane" id="sg-pane-reportes">
+    <style>
+      #sec-sg .sgr-subtab{padding:7px 14px;cursor:pointer;font-size:12.5px;font-weight:600;border-radius:6px;color:var(--mut)}
+      #sec-sg .sgr-subtab.on{background:var(--burg);color:#fff}
+      #sec-sg .sgr-sub{display:none} #sec-sg .sgr-sub.on{display:block}
+    </style>
+    <div style="display:inline-flex;gap:2px;background:var(--bg);border:1px solid var(--bor);border-radius:8px;padding:3px;margin-bottom:16px;flex-wrap:wrap">
+      <div class="sgr-subtab on" data-sub="compras-prov" onclick="sgRepSub('compras-prov')">🚜 Compras × proveedor</div>
+      <div class="sgr-subtab" data-sub="ventas-cli"      onclick="sgRepSub('ventas-cli')">🏪 Ventas × cliente</div>
+      <div class="sgr-subtab" data-sub="margen-prod"     onclick="sgRepSub('margen-prod')">📊 Margen × producto</div>
+      <div class="sgr-subtab" data-sub="merma"           onclick="sgRepSub('merma')">♻️ Merma × destino</div>
+    </div>
+    <div style="display:flex;gap:10px;align-items:flex-end;margin-bottom:14px;flex-wrap:wrap">
+      <label style="font-size:12px;color:var(--mut)">Desde<br><input type="date" id="sg-rep-desde" style="padding:5px 8px;border-radius:6px;border:1px solid var(--bor);background:var(--bg)"></label>
+      <label style="font-size:12px;color:var(--mut)">Hasta<br><input type="date" id="sg-rep-hasta" style="padding:5px 8px;border-radius:6px;border:1px solid var(--bor);background:var(--bg)"></label>
+      <button class="btn bb bs" onclick="sgRepLoad()">Aplicar</button>
+      <button class="btn bo bs" onclick="sgRepReset()">Limpiar</button>
+      <button class="btn bo bs" onclick="sgRepExport()">⬇️ Excel</button>
+    </div>
+
+    <div class="sgr-sub on" id="sgr-sub-compras-prov">
+      <div class="ab-table-wrap"><table class="pa-tbl">
+        <thead><tr><th>Proveedor</th><th style="text-align:right">OCs</th><th style="text-align:right">Lotes</th><th style="text-align:right">Kg</th><th style="text-align:right">Monto</th></tr></thead>
+        <tbody id="sg-rep-tb-compras-prov"><tr><td colspan="5" class="emp">Aplicá un filtro o tocá Aplicar.</td></tr></tbody>
+      </table></div>
+    </div>
+    <div class="sgr-sub" id="sgr-sub-ventas-cli">
+      <div class="ab-table-wrap"><table class="pa-tbl">
+        <thead><tr><th>Cliente</th><th style="text-align:right">Despachos</th><th style="text-align:right">Kg</th><th style="text-align:right">Venta</th><th style="text-align:right">Margen</th><th style="text-align:right">Margen %</th></tr></thead>
+        <tbody id="sg-rep-tb-ventas-cli"><tr><td colspan="6" class="emp">Aplicá un filtro o tocá Aplicar.</td></tr></tbody>
+      </table></div>
+    </div>
+    <div class="sgr-sub" id="sgr-sub-margen-prod">
+      <div class="ab-table-wrap"><table class="pa-tbl">
+        <thead><tr><th>Producto</th><th>Familia</th><th style="text-align:right">Kg</th><th style="text-align:right">Venta</th><th style="text-align:right">Costo</th><th style="text-align:right">Margen</th><th style="text-align:right">Margen %</th></tr></thead>
+        <tbody id="sg-rep-tb-margen-prod"><tr><td colspan="7" class="emp">Aplicá un filtro o tocá Aplicar.</td></tr></tbody>
+      </table></div>
+    </div>
+    <div class="sgr-sub" id="sgr-sub-merma">
+      <div style="font-size:12px;color:var(--mut);margin-bottom:8px">💡 Lotes dados de baja. La fecha de baja se aproxima por la última modificación del lote (V1).</div>
+      <div class="ab-table-wrap"><table class="pa-tbl">
+        <thead><tr><th>Destino</th><th style="text-align:right">Lotes</th><th style="text-align:right">Kg</th><th style="text-align:right">Valor a costo</th></tr></thead>
+        <tbody id="sg-rep-tb-merma"><tr><td colspan="4" class="emp">Aplicá un filtro o tocá Aplicar.</td></tr></tbody>
+      </table></div>
+    </div>
+  </div>
 
   <!-- Tab Catálogo (operativo en Fase 1) -->
   <div class="sg-pane on" id="sg-pane-catalogo">
@@ -2337,6 +2410,8 @@ function sgTab(t){
   if (t==='compras') sgComInit();
   if (t==='stock') sgStockInit();
   if (t==='ventas') sgVenInit();
+  if (t==='dashboard') sgDashInit();
+  if (t==='reportes') sgRepInit();
 }
 
 function sgCatSub(s){
@@ -3236,6 +3311,96 @@ function sgLoadCC(){
       return '<tr><td>'+esc(c.razon_social)+'</td><td style="text-align:right">'+sgMoney(c.total_facturado)+'</td><td style="text-align:right">'+sgMoney(c.total_cobrado)+'</td><td style="text-align:right;font-weight:700">'+sgMoney(c.saldo)+'</td><td style="text-align:right">'+sgMoney(c.limite_credito)+'</td></tr>';
     }).join('') : '<tr><td colspan="5" class="emp">Sin movimientos (todavía no hay despachos).</td></tr>';
   });
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// FASE 5 — DASHBOARD + REPORTES
+// ════════════════════════════════════════════════════════════════════════════
+function sgPctFmt(n){ return (Math.round((parseFloat(n)||0)*10)/10).toLocaleString('es-AR')+'%'; }
+
+// ── DASHBOARD ──────────────────────────────────────────────────────────────────
+function sgDashInit(){
+  var inp=eid('sg-dash-periodo');
+  if(inp && !inp.value){ var d=new Date(); inp.value=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0'); }
+  sgDashLoad();
+}
+function sgDashLoad(){
+  var per=eid('sg-dash-periodo').value;
+  eid('sg-dash-cards').innerHTML='<div class="emp" style="grid-column:1/-1">Cargando…</div>';
+  api('/api/sg/dashboard'+(per?('?periodo='+per):'')).then(function(r){
+    if(!r||!r.ok){ eid('sg-dash-cards').innerHTML='<div class="emp" style="grid-column:1/-1">Error al cargar.</div>'; return; }
+    var d=r.data, c=d.compras||{}, v=d.ventas||{};
+    var margColor=(v.margen||0)>=0?'#16a34a':'#dc2626';
+    eid('sg-dash-cards').innerHTML=
+      sgCard('Compras', sgMoney(c.monto), nr(c.kg)+' kg · '+(c.lotes||0)+' lotes')
+     +sgCard('Ventas', sgMoney(v.monto), nr(v.kg)+' kg')
+     +sgCard('Margen bruto', '<span style="color:'+margColor+'">'+sgMoney(v.margen)+'</span>', sgPctFmt(d.margen_pct))
+     +sgCard('Período', (d.periodo||'—'), '');
+    eid('sg-dash-familia').innerHTML=(d.stock_familia&&d.stock_familia.length)
+      ? d.stock_familia.map(function(f){ return '<tr><td>'+esc(f.familia||'—')+'</td><td style="text-align:right">'+nr(f.kg)+'</td><td style="text-align:right">'+sgMoney(f.valor)+'</td></tr>'; }).join('')
+      : '<tr><td colspan="3" class="emp">Sin stock.</td></tr>';
+    eid('sg-dash-vencer').innerHTML=(d.por_vencer&&d.por_vencer.length)
+      ? d.por_vencer.map(function(l){ var dc=(l.dias_restantes<0)?'#dc2626':(l.dias_restantes<=2?'#d97706':'var(--tx)'); return '<tr><td><code>'+esc(l.codigo_lote)+'</code></td><td>'+esc(l.producto_nombre||'')+'</td><td style="text-align:right">'+nr(l.kg_disponibles)+'</td><td style="text-align:center;color:'+dc+';font-weight:700">'+l.dias_restantes+'</td></tr>'; }).join('')
+      : '<tr><td colspan="4" class="emp">Nada por vencer.</td></tr>';
+    eid('sg-dash-topprod').innerHTML=(d.top_productos&&d.top_productos.length)
+      ? d.top_productos.map(function(p){ return '<tr><td>'+esc(p.producto||'')+'</td><td style="text-align:right">'+sgMoney(p.venta)+'</td><td style="text-align:right;color:'+((p.margen||0)>=0?'#16a34a':'#dc2626')+'">'+sgMoney(p.margen)+'</td></tr>'; }).join('')
+      : '<tr><td colspan="3" class="emp">Sin ventas.</td></tr>';
+    eid('sg-dash-topcli').innerHTML=(d.top_clientes&&d.top_clientes.length)
+      ? d.top_clientes.map(function(p){ return '<tr><td>'+esc(p.cliente||'')+'</td><td style="text-align:right">'+sgMoney(p.venta)+'</td><td style="text-align:right;color:'+((p.margen||0)>=0?'#16a34a':'#dc2626')+'">'+sgMoney(p.margen)+'</td></tr>'; }).join('')
+      : '<tr><td colspan="3" class="emp">Sin ventas.</td></tr>';
+  });
+}
+function sgCard(lbl,val,sub){ return '<div class="sgd-card"><div class="lbl">'+esc(lbl)+'</div><div class="val">'+val+'</div>'+(sub?('<div class="sub">'+esc(sub)+'</div>'):'')+'</div>'; }
+
+// ── REPORTES ────────────────────────────────────────────────────────────────────
+var SG_REP={ sub:'compras-prov', last:{} };
+var SG_REP_CFG={
+  'compras-prov':{ path:'compras-proveedor', tb:'sg-rep-tb-compras-prov', cols:5,
+    row:function(r){ return '<tr><td>'+esc(r.proveedor||'')+'</td><td style="text-align:right">'+nr(r.ocs)+'</td><td style="text-align:right">'+nr(r.lotes)+'</td><td style="text-align:right">'+nr(r.kg)+'</td><td style="text-align:right">'+sgMoney(r.monto)+'</td></tr>'; },
+    xls:function(r){ return { Proveedor:r.proveedor, OCs:r.ocs, Lotes:r.lotes, Kg:r.kg, Monto:r.monto }; } },
+  'ventas-cli':{ path:'ventas-cliente', tb:'sg-rep-tb-ventas-cli', cols:6,
+    row:function(r){ return '<tr><td>'+esc(r.cliente||'')+'</td><td style="text-align:right">'+nr(r.despachos)+'</td><td style="text-align:right">'+nr(r.kg)+'</td><td style="text-align:right">'+sgMoney(r.venta)+'</td><td style="text-align:right;color:'+((r.margen||0)>=0?'#16a34a':'#dc2626')+'">'+sgMoney(r.margen)+'</td><td style="text-align:right">'+sgPctFmt(r.margen_pct)+'</td></tr>'; },
+    xls:function(r){ return { Cliente:r.cliente, Despachos:r.despachos, Kg:r.kg, Venta:r.venta, Margen:r.margen, 'Margen %':Math.round((r.margen_pct||0)*10)/10 }; } },
+  'margen-prod':{ path:'margen-producto', tb:'sg-rep-tb-margen-prod', cols:7,
+    row:function(r){ return '<tr><td>'+esc(r.producto||'')+'</td><td>'+esc(r.familia||'—')+'</td><td style="text-align:right">'+nr(r.kg)+'</td><td style="text-align:right">'+sgMoney(r.venta)+'</td><td style="text-align:right">'+sgMoney(r.costo)+'</td><td style="text-align:right;color:'+((r.margen||0)>=0?'#16a34a':'#dc2626')+'">'+sgMoney(r.margen)+'</td><td style="text-align:right">'+sgPctFmt(r.margen_pct)+'</td></tr>'; },
+    xls:function(r){ return { Producto:r.producto, Familia:r.familia, Kg:r.kg, Venta:r.venta, Costo:r.costo, Margen:r.margen, 'Margen %':Math.round((r.margen_pct||0)*10)/10 }; } },
+  'merma':{ path:'merma-destino', tb:'sg-rep-tb-merma', cols:4,
+    row:function(r){ return '<tr><td>'+esc(r.destino||'')+'</td><td style="text-align:right">'+nr(r.lotes)+'</td><td style="text-align:right">'+nr(r.kg)+'</td><td style="text-align:right">'+sgMoney(r.valor_costo)+'</td></tr>'; },
+    xls:function(r){ return { Destino:r.destino, Lotes:r.lotes, Kg:r.kg, 'Valor a costo':r.valor_costo }; } }
+};
+function sgRepInit(){ sgRepSub(SG_REP.sub); }
+function sgRepSub(s){
+  SG_REP.sub=s;
+  document.querySelectorAll('#sec-sg .sgr-subtab').forEach(function(el){ el.classList.toggle('on', el.dataset.sub===s); });
+  document.querySelectorAll('#sec-sg .sgr-sub').forEach(function(el){ el.classList.toggle('on', el.id==='sgr-sub-'+s); });
+  sgRepLoad();
+}
+function sgRepQS(){
+  var qs=[], de=eid('sg-rep-desde').value, ha=eid('sg-rep-hasta').value;
+  if(de) qs.push('desde='+de); if(ha) qs.push('hasta='+ha);
+  return qs.length?('?'+qs.join('&')):'';
+}
+function sgRepLoad(){
+  var cfg=SG_REP_CFG[SG_REP.sub]; if(!cfg) return;
+  var tb=eid(cfg.tb); tb.innerHTML='<tr><td colspan="'+cfg.cols+'" class="emp">Cargando…</td></tr>';
+  api('/api/sg/reportes/'+cfg.path+sgRepQS()).then(function(r){
+    var rows=(r&&r.ok)?r.data:[];
+    SG_REP.last[SG_REP.sub]=rows;
+    tb.innerHTML=rows.length ? rows.map(cfg.row).join('') : '<tr><td colspan="'+cfg.cols+'" class="emp">Sin datos para el período.</td></tr>';
+  });
+}
+function sgRepReset(){ eid('sg-rep-desde').value=''; eid('sg-rep-hasta').value=''; sgRepLoad(); }
+function sgRepExport(){
+  if(typeof XLSX==='undefined'){ toast('La librería de Excel aún no cargó, reintentá','er'); return; }
+  var cfg=SG_REP_CFG[SG_REP.sub], rows=SG_REP.last[SG_REP.sub]||[];
+  if(!rows.length){ toast('No hay datos para exportar','er'); return; }
+  var data=rows.map(cfg.xls);
+  var ws=XLSX.utils.json_to_sheet(data);
+  var wb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'SG');
+  var de=eid('sg-rep-desde').value, ha=eid('sg-rep-hasta').value;
+  var rango=(de||ha)?('-'+(de||'inicio')+'_'+(ha||'hoy')):'';
+  XLSX.writeFile(wb, 'sg-'+cfg.path+rango+'.xlsx');
 }
 </script>
 

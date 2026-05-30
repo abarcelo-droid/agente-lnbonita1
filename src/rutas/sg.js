@@ -1042,11 +1042,14 @@ router.post('/despachos', requireAdmin, (req, res) => {
         VALUES (?,?,?,?,?,?,?,?,?)`);
       const lotesAfectados = new Set();
       for (const it of items) {
-        const lote = db.prepare('SELECT producto_id, costo_final FROM sg_lotes WHERE id=?').get(it.lote_id);
+        const lote = db.prepare('SELECT producto_id, costo_final, kg_reales FROM sg_lotes WHERE id=?').get(it.lote_id);
         const kg = Number(it.kg_despachados);
         const precio = Number(it.precio_por_kg || 0);
         const subtotal = kg * precio;
-        const margen = subtotal - kg * (lote.costo_final || 0);
+        // costo_final del lote es el costo TOTAL del lote (no por kg) → prorratear por kg.
+        // (mismo cálculo que el front del modal: costo_final / kg_reales). Ver db_sg.js backfill.
+        const costoPorKg = lote.kg_reales > 0 ? (lote.costo_final || 0) / lote.kg_reales : 0;
+        const margen = subtotal - kg * costoPorKg;
         ins.run(despachoId, it.lote_id, lote.producto_id, it.presentacion_id || null,
           Number(it.cantidad_presentaciones || 0), kg, precio, subtotal, margen);
         lotesAfectados.add(it.lote_id);
@@ -1147,6 +1150,203 @@ router.get('/cc-clientes', requireAuth, (req, res) => {
       GROUP BY c.id, c.razon_social, c.limite_credito
       ORDER BY total_facturado DESC`).all();
     for (const r of rows) r.saldo = (r.total_facturado || 0) - (r.total_cobrado || 0);
+    res.json({ ok: true, data: rows });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// FASE 5 — DASHBOARD + REPORTES (solo lectura, depende de F1-F4)
+// ════════════════════════════════════════════════════════════════════════════
+
+// Costo por kg de un lote = costo_final / kg_reales (costo_final es TOTAL del lote).
+const COSTO_KG = '(COALESCE(l.costo_final,0)/NULLIF(l.kg_reales,0))';
+// Margen de una línea de despacho calculado desde el costo por kg (no depende del
+// margen_estimado guardado → robusto frente a datos viejos).
+const MARGEN_LINEA = `(di.subtotal - di.kg_despachados*${COSTO_KG})`;
+
+// Valida YYYY-MM; default = mes en curso.
+function periodoActual(db, q) {
+  return /^\d{4}-\d{2}$/.test(q || '') ? q : db.prepare("SELECT strftime('%Y-%m','now','localtime') p").get().p;
+}
+// Construye filtro de rango sobre una columna de fecha (desde/hasta inclusive).
+function rangoFecha(col, q, where, params) {
+  if (q.desde) { where.push(`${col}>=?`); params.push(q.desde); }
+  if (q.hasta) { where.push(`${col}<=?`); params.push(q.hasta); }
+}
+
+// ── DASHBOARD ──────────────────────────────────────────────────────────────────
+router.get('/dashboard', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const periodo = periodoActual(db, req.query.periodo);
+
+    // Compras del período (por fecha de ingreso del lote): kg + costo cargado
+    const compras = db.prepare(`
+      SELECT COALESCE(SUM(kg_reales),0) AS kg, COALESCE(SUM(costo_final),0) AS monto, COUNT(*) AS lotes
+      FROM sg_lotes WHERE activo=1 AND substr(fecha_ingreso,1,7)=?`).get(periodo);
+
+    // Ventas del período (por fecha de despacho): kg + facturado + margen (desde costo por kg)
+    const ventas = db.prepare(`
+      SELECT COALESCE(SUM(di.kg_despachados),0) AS kg,
+             COALESCE(SUM(di.subtotal),0) AS monto,
+             COALESCE(SUM(${MARGEN_LINEA}),0) AS margen
+      FROM sg_despacho_items di
+      JOIN sg_despachos d ON d.id=di.despacho_id AND d.activo=1
+      JOIN sg_lotes l ON l.id=di.lote_id
+      WHERE substr(d.fecha_despacho,1,7)=?`).get(periodo);
+    const margen_pct = ventas.monto > 0 ? (ventas.margen / ventas.monto) * 100 : 0;
+
+    // Stock actual por familia (snapshot): kg restantes + valor a costo
+    const stock_familia = db.prepare(`
+      WITH desp AS (
+        SELECT di.lote_id, SUM(di.kg_despachados) kg
+        FROM sg_despacho_items di JOIN sg_despachos d ON d.id=di.despacho_id AND d.activo=1
+        GROUP BY di.lote_id)
+      SELECT pr.familia AS familia,
+        COALESCE(SUM(l.kg_reales - COALESCE(de.kg,0)),0) AS kg,
+        COALESCE(SUM((l.kg_reales - COALESCE(de.kg,0))*${COSTO_KG}),0) AS valor
+      FROM sg_lotes l
+      JOIN sg_productos pr ON pr.id=l.producto_id
+      LEFT JOIN desp de ON de.lote_id=l.id
+      WHERE l.activo=1 AND l.estado NOT IN ('bajado','despachado_total')
+        AND (l.kg_reales - COALESCE(de.kg,0)) > 0.01
+      GROUP BY pr.familia ORDER BY valor DESC`).all();
+
+    // Lotes próximos a vencer (≤5 días, incluye vencidos) con stock disponible
+    const por_vencer = db.prepare(`
+      WITH desp AS (
+        SELECT di.lote_id, SUM(di.kg_despachados) kg
+        FROM sg_despacho_items di JOIN sg_despachos d ON d.id=di.despacho_id AND d.activo=1
+        GROUP BY di.lote_id)
+      SELECT l.id, l.codigo_lote, pr.nombre AS producto_nombre, l.calidad,
+        (l.kg_reales - COALESCE(de.kg,0)) AS kg_disponibles,
+        l.fecha_vencimiento_estimada,
+        CAST(julianday(l.fecha_vencimiento_estimada)-julianday(date('now','localtime')) AS INTEGER) AS dias_restantes
+      FROM sg_lotes l
+      JOIN sg_productos pr ON pr.id=l.producto_id
+      LEFT JOIN desp de ON de.lote_id=l.id
+      WHERE l.activo=1 AND l.estado NOT IN ('bajado','despachado_total')
+        AND l.fecha_vencimiento_estimada IS NOT NULL
+        AND julianday(l.fecha_vencimiento_estimada)-julianday(date('now','localtime')) <= 5
+        AND (l.kg_reales - COALESCE(de.kg,0)) > 0.01
+      ORDER BY l.fecha_vencimiento_estimada ASC LIMIT 20`).all();
+
+    // Top 5 productos por margen del período
+    const top_productos = db.prepare(`
+      SELECT pr.nombre AS producto,
+        COALESCE(SUM(di.kg_despachados),0) AS kg,
+        COALESCE(SUM(di.subtotal),0) AS venta,
+        COALESCE(SUM(${MARGEN_LINEA}),0) AS margen
+      FROM sg_despacho_items di
+      JOIN sg_despachos d ON d.id=di.despacho_id AND d.activo=1
+      JOIN sg_lotes l ON l.id=di.lote_id
+      JOIN sg_productos pr ON pr.id=di.producto_id
+      WHERE substr(d.fecha_despacho,1,7)=?
+      GROUP BY pr.id, pr.nombre ORDER BY margen DESC LIMIT 5`).all(periodo);
+
+    // Top 5 clientes por venta del período
+    const top_clientes = db.prepare(`
+      SELECT c.razon_social AS cliente,
+        COALESCE(SUM(di.subtotal),0) AS venta,
+        COALESCE(SUM(${MARGEN_LINEA}),0) AS margen
+      FROM sg_despacho_items di
+      JOIN sg_despachos d ON d.id=di.despacho_id AND d.activo=1
+      JOIN sg_lotes l ON l.id=di.lote_id
+      JOIN sg_clientes c ON c.id=d.cliente_id
+      WHERE substr(d.fecha_despacho,1,7)=?
+      GROUP BY c.id, c.razon_social ORDER BY venta DESC LIMIT 5`).all(periodo);
+
+    res.json({ ok: true, data: {
+      periodo,
+      compras, ventas, margen_pct,
+      stock_familia, por_vencer, top_productos, top_clientes
+    } });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// ── REPORTE: Compras por proveedor ──────────────────────────────────────────────
+// Por fecha de ingreso del lote. Lotes finca_propia (sin recepción) quedan fuera (stub V1).
+router.get('/reportes/compras-proveedor', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const where = ['l.activo=1'], params = [];
+    rangoFecha('l.fecha_ingreso', req.query, where, params);
+    const rows = db.prepare(`
+      SELECT pv.id AS proveedor_id, COALESCE(pv.razon_social,'(sin proveedor)') AS proveedor,
+        COUNT(DISTINCT o.id) AS ocs, COUNT(l.id) AS lotes,
+        COALESCE(SUM(l.kg_reales),0) AS kg, COALESCE(SUM(l.costo_final),0) AS monto
+      FROM sg_lotes l
+      JOIN sg_recepciones r ON r.id=l.recepcion_id
+      JOIN sg_oc o ON o.id=r.oc_id
+      LEFT JOIN sg_proveedores pv ON pv.id=o.proveedor_id
+      WHERE ${where.join(' AND ')}
+      GROUP BY pv.id, pv.razon_social ORDER BY monto DESC`).all(...params);
+    res.json({ ok: true, data: rows });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// ── REPORTE: Ventas por cliente ─────────────────────────────────────────────────
+router.get('/reportes/ventas-cliente', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const where = ['d.activo=1'], params = [];
+    rangoFecha('d.fecha_despacho', req.query, where, params);
+    const rows = db.prepare(`
+      SELECT c.id AS cliente_id, COALESCE(c.razon_social,'(sin cliente)') AS cliente,
+        COUNT(DISTINCT d.id) AS despachos,
+        COALESCE(SUM(di.kg_despachados),0) AS kg,
+        COALESCE(SUM(di.subtotal),0) AS venta,
+        COALESCE(SUM(${MARGEN_LINEA}),0) AS margen
+      FROM sg_despacho_items di
+      JOIN sg_despachos d ON d.id=di.despacho_id
+      JOIN sg_lotes l ON l.id=di.lote_id
+      LEFT JOIN sg_clientes c ON c.id=d.cliente_id
+      WHERE ${where.join(' AND ')}
+      GROUP BY c.id, c.razon_social ORDER BY venta DESC`).all(...params);
+    for (const r of rows) r.margen_pct = r.venta > 0 ? (r.margen / r.venta) * 100 : 0;
+    res.json({ ok: true, data: rows });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// ── REPORTE: Margen por producto ────────────────────────────────────────────────
+router.get('/reportes/margen-producto', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const where = ['d.activo=1'], params = [];
+    rangoFecha('d.fecha_despacho', req.query, where, params);
+    const rows = db.prepare(`
+      SELECT pr.id AS producto_id, pr.nombre AS producto, pr.familia AS familia,
+        COALESCE(SUM(di.kg_despachados),0) AS kg,
+        COALESCE(SUM(di.subtotal),0) AS venta,
+        COALESCE(SUM(di.kg_despachados*${COSTO_KG}),0) AS costo,
+        COALESCE(SUM(${MARGEN_LINEA}),0) AS margen
+      FROM sg_despacho_items di
+      JOIN sg_despachos d ON d.id=di.despacho_id
+      JOIN sg_lotes l ON l.id=di.lote_id
+      JOIN sg_productos pr ON pr.id=di.producto_id
+      WHERE ${where.join(' AND ')}
+      GROUP BY pr.id, pr.nombre, pr.familia ORDER BY margen DESC`).all(...params);
+    for (const r of rows) r.margen_pct = r.venta > 0 ? (r.margen / r.venta) * 100 : 0;
+    res.json({ ok: true, data: rows });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// ── REPORTE: Merma por destino ──────────────────────────────────────────────────
+// Lotes dados de baja, agrupados por destino. Fecha de baja ≈ modificado_en (no hay
+// columna propia de baja en V1). Valor a costo = kg_reales × costo por kg = costo_final.
+router.get('/reportes/merma-destino', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const where = ["l.activo=1", "l.estado='bajado'"], params = [];
+    rangoFecha("date(l.modificado_en)", req.query, where, params);
+    const rows = db.prepare(`
+      SELECT COALESCE(l.destino_baja,'(sin destino)') AS destino,
+        COUNT(*) AS lotes,
+        COALESCE(SUM(l.kg_reales),0) AS kg,
+        COALESCE(SUM(l.costo_final),0) AS valor_costo
+      FROM sg_lotes l
+      WHERE ${where.join(' AND ')}
+      GROUP BY l.destino_baja ORDER BY valor_costo DESC`).all(...params);
     res.json({ ok: true, data: rows });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
