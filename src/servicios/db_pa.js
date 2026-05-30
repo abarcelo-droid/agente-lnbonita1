@@ -2908,5 +2908,58 @@ db.exec(`
   }
 })();
 
+// ═══════════════════════════════════════════════════════════════════════════
+// MULTISOCIEDAD — FASE 3: Proveedores + Ventas (OK Andy + Pablo)
+// ───────────────────────────────────────────────────────────────────────────
+// Agrega sociedad_id a las tablas de proveedores/pagos y de ventas:
+//   adm_proveedores, pa_pagos_proveedores,
+//   ven_clientes, ven_liquidaciones, ven_facturas, ven_cobranzas.
+// Decisiones aplicadas:
+//   • Proveedores/pagos: cada sociedad el suyo. Existentes → PC; SG arranca con padrón vacío.
+//   • Ventas (ven_*) = de PC (productor vía acopiador). Existentes → PC; SG espeja circuito (vacío).
+//   • sociedad_id NOT NULL DEFAULT=PC: protege a los escritores actuales sin tocarlos
+//     (migrarProveedoresUnificado, pagos.js, ventas.js); los routers de esta fase lo setean
+//     explícito para habilitar el alta en SG.
+// Tablas-hijo (pa_pagos_compras, ven_*_items, ven_cobranza_docs) NO llevan columna:
+//   la sociedad se deriva del padre por join.
+// Sin UNIQUE(codigo) que migrar → no hay rebuilds, solo ADD COLUMN. Idempotente.
+// ═══════════════════════════════════════════════════════════════════════════
+(function migrarMultisociedadFase3() {
+  try {
+    const soc = (nombre) => db.prepare("SELECT id FROM sociedades WHERE nombre = ?").get(nombre);
+    const pc = soc('Puente Cordón SA')
+            || db.prepare("SELECT id FROM sociedades WHERE funcion = 'productiva' ORDER BY id LIMIT 1").get();
+    if (!pc) {
+      console.warn('[PA][MS-F3] Sociedad Puente Cordón no encontrada — Fase 3 multisociedad NO aplicada');
+      return;
+    }
+    const PC = pc.id;
+
+    const tieneCol = (tabla, col) =>
+      db.prepare(`PRAGMA table_info(${tabla})`).all().some(c => c.name === col);
+
+    // Tablas que reciben sociedad_id NOT NULL DEFAULT=PC + índice de filtrado.
+    const tablas = [
+      'adm_proveedores',
+      'pa_pagos_proveedores',
+      'ven_clientes',
+      'ven_liquidaciones',
+      'ven_facturas',
+      'ven_cobranzas',
+    ];
+    for (const t of tablas) {
+      if (!tieneCol(t, 'sociedad_id')) {
+        db.exec(`ALTER TABLE ${t} ADD COLUMN sociedad_id INTEGER NOT NULL DEFAULT ${PC}`);
+        db.exec(`CREATE INDEX IF NOT EXISTS idx_${t}_sociedad ON ${t}(sociedad_id)`);
+        console.log(`[PA][MS-F3] ${t}.sociedad_id agregado (NOT NULL DEFAULT PC)`);
+      }
+    }
+
+    console.log('[PA][MS-F3] Proveedores + Ventas multisociedad inicializado.');
+  } catch (e) {
+    console.error('[PA][MS-F3] Error en migración multisociedad Fase 3:', e.message);
+  }
+})();
+
 export { db };
 export default db;

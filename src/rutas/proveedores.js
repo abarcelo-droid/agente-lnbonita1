@@ -12,12 +12,34 @@ function getUser(req) {
   } catch(e) { return null; }
 }
 
+// ── Multisociedad (Fase 3) ──────────────────────────────────────────────────
+// Padrón de proveedores POR sociedad. Si el request no manda sociedad_id, se usa
+// Puente Cordón (PC) por defecto (compat con el panel actual; selector UI = follow-up).
+let _pcId = null;
+function sociedadPCId() {
+  if (_pcId) return _pcId;
+  const r = db.prepare("SELECT id FROM sociedades WHERE nombre = 'Puente Cordón SA'").get()
+         || db.prepare("SELECT id FROM sociedades WHERE funcion = 'productiva' ORDER BY id LIMIT 1").get();
+  _pcId = r ? r.id : 1;
+  return _pcId;
+}
+function getSociedadId(req) {
+  const raw = req.body?.sociedad_id ?? req.query?.sociedad_id;
+  const id = (raw !== undefined && raw !== null && raw !== '') ? parseInt(raw, 10) : null;
+  if (Number.isInteger(id)) {
+    const ok = db.prepare('SELECT id FROM sociedades WHERE id = ?').get(id);
+    if (ok) return id;
+  }
+  return sociedadPCId();
+}
+
 // GET /api/pa/proveedores?q=&rubro=&activo=todos
 router.get('/', (req, res) => {
   const { q, rubro } = req.query;
   const verTodos = req.query.activo === 'todos';
-  const params = [];
-  let sql = 'SELECT * FROM adm_proveedores WHERE 1=1';
+  const sociedadId = getSociedadId(req);
+  const params = [sociedadId];
+  let sql = 'SELECT * FROM adm_proveedores WHERE sociedad_id = ?';
   if (!verTodos) { sql += ' AND activo = 1'; }
   if (q) {
     sql += ' AND (razon_social LIKE ? OR nombre_comercial LIKE ? OR cuit LIKE ?)';
@@ -43,14 +65,16 @@ router.post('/', (req, res) => {
     cbu, alias_cbu, condicion_pago, contacto, notas, asiento_modelo_id
   } = req.body || {};
   if (!razon_social) return res.status(400).json({ error: 'razon_social es requerida' });
+  const sociedadId = getSociedadId(req);
   try {
     const r = db.prepare(`
       INSERT INTO adm_proveedores
-        (razon_social, nombre_comercial, cuit, condicion_iva,
+        (sociedad_id, razon_social, nombre_comercial, cuit, condicion_iva,
          direccion, telefono, email, rubro,
          cbu, alias_cbu, condicion_pago, contacto, notas, asiento_modelo_id)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
+      sociedadId,
       String(razon_social).trim(),
       nombre_comercial || null,
       cuit || null,
