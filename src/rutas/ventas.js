@@ -29,6 +29,32 @@ function requireAuth(req, res, next) {
   next();
 }
 
+// ── Multisociedad (Fase 3) ──────────────────────────────────────────────────
+// ven_* es de PC (productor vía acopiador). Cada sociedad su circuito. Si el
+// request no manda sociedad_id, se usa PC por defecto (selector UI = follow-up).
+let _pcId = null;
+function sociedadPCId() {
+  if (_pcId) return _pcId;
+  const r = db.prepare("SELECT id FROM sociedades WHERE nombre = 'Puente Cordón SA'").get()
+         || db.prepare("SELECT id FROM sociedades WHERE funcion = 'productiva' ORDER BY id LIMIT 1").get();
+  _pcId = r ? r.id : 1;
+  return _pcId;
+}
+function getSociedadId(req) {
+  const raw = req.body?.sociedad_id ?? req.query?.sociedad_id;
+  const id = (raw !== undefined && raw !== null && raw !== '') ? parseInt(raw, 10) : null;
+  if (Number.isInteger(id)) {
+    const ok = db.prepare('SELECT id FROM sociedades WHERE id = ?').get(id);
+    if (ok) return id;
+  }
+  return sociedadPCId();
+}
+// Deriva la sociedad de un cliente del padrón (cae a PC si no se encuentra).
+function sociedadDeCliente(clienteId) {
+  const c = db.prepare('SELECT sociedad_id FROM ven_clientes WHERE id = ?').get(parseInt(clienteId));
+  return c ? c.sociedad_id : sociedadPCId();
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // PADRÓN DE CLIENTES
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -37,11 +63,12 @@ function requireAuth(req, res, next) {
 router.get('/clientes', (req, res) => {
   try {
     const { q, incluir_inactivos } = req.query;
+    const sociedadId = getSociedadId(req);
     let sql = `SELECT c.*, pc.nombre as cuenta_nombre
                FROM ven_clientes c
                LEFT JOIN pa_cuentas pc ON pc.id = c.cuenta_contable_id
-               WHERE 1=1`;
-    const params = [];
+               WHERE c.sociedad_id = ?`;
+    const params = [sociedadId];
     if (!incluir_inactivos) { sql += ' AND c.activo=1'; }
     if (q) { sql += ' AND (c.razon_social LIKE ? OR c.cuit LIKE ? OR c.nombre_comercial LIKE ?)';
       const like = '%'+q+'%'; params.push(like, like, like); }
@@ -68,11 +95,12 @@ router.post('/clientes', requireAuth, (req, res) => {
     const cv = validarCuit(cuit);
     if (!cv.valido) return res.status(400).json({ ok: false, error: 'CUIT inválido: ' + cv.msg });
   }
+  const sociedadId = getSociedadId(req);
   try {
     const r = db.prepare(`INSERT INTO ven_clientes
-      (razon_social, nombre_comercial, cuit, condicion_iva, direccion, telefono, email, contacto, rubro, notas, cuenta_contable_id)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?)`)
-      .run(razon_social.trim(), nombre_comercial||null, cuit||null,
+      (sociedad_id, razon_social, nombre_comercial, cuit, condicion_iva, direccion, telefono, email, contacto, rubro, notas, cuenta_contable_id)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`)
+      .run(sociedadId, razon_social.trim(), nombre_comercial||null, cuit||null,
            condicion_iva||'responsable_inscripto', direccion||null, telefono||null,
            email||null, contacto||null, rubro||null, notas||null,
            cuenta_contable_id ? parseInt(cuenta_contable_id) : null);
@@ -122,11 +150,12 @@ function generarNumLiq() {
 router.get('/liquidaciones', (req, res) => {
   try {
     const { clienteId, estado } = req.query;
+    const sociedadId = getSociedadId(req);
     let sql = `SELECT l.*, c.razon_social as cliente_nombre
                FROM ven_liquidaciones l
                JOIN ven_clientes c ON c.id = l.cliente_id
-               WHERE 1=1`;
-    const params = [];
+               WHERE l.sociedad_id = ?`;
+    const params = [sociedadId];
     if (clienteId) { sql += ' AND l.cliente_id=?'; params.push(parseInt(clienteId)); }
     if (estado)    { sql += ' AND l.estado=?'; params.push(estado); }
     sql += ' ORDER BY l.fecha DESC, l.id DESC';
@@ -159,6 +188,9 @@ router.post('/liquidaciones', requireAuth, (req, res) => {
   if (!cliente_id) return res.status(400).json({ ok: false, error: 'cliente_id requerido' });
   if (!items?.length) return res.status(400).json({ ok: false, error: 'Ingresá al menos un ítem' });
 
+  // La liquidación (y su asiento) heredan la sociedad del cliente.
+  const sociedadId = sociedadDeCliente(cliente_id);
+
   // Validar número único por cliente si se ingresó manualmente
   if (nro_liquidacion?.trim()) {
     const existe = db.prepare('SELECT id FROM ven_liquidaciones WHERE numero=? AND cliente_id=?')
@@ -182,14 +214,14 @@ router.post('/liquidaciones', requireAuth, (req, res) => {
       const r = db.prepare(`INSERT INTO ven_liquidaciones
         (numero, fecha, cliente_id, nro_remito, observaciones, precio_bruto,
          desc_comision, desc_flete, desc_carga_descarga, desc_otros,
-         ret_iva, ret_ganancias, ret_iibb, ret_otras, neto_acreditar, usuario_id)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+         ret_iva, ret_ganancias, ret_iibb, ret_otras, neto_acreditar, usuario_id, sociedad_id)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
         .run(numero, fechaLiq, parseInt(cliente_id), nro_remito||null, observaciones||null,
              precio_bruto, parseFloat(desc_comision)||0, parseFloat(desc_flete)||0,
              parseFloat(desc_carga_descarga)||0, parseFloat(desc_otros)||0,
              parseFloat(ret_iva)||0, parseFloat(ret_ganancias)||0,
              parseFloat(ret_iibb)||0, parseFloat(ret_otras)||0,
-             neto_acreditar, u.id);
+             neto_acreditar, u.id, sociedadId);
       const liqId = r.lastInsertRowid;
 
       for (const it of items) {
@@ -215,10 +247,10 @@ router.post('/liquidaciones', requireAuth, (req, res) => {
         const cuentaRetIibb   = configImp['percepcion_iibb'] || null;
 
         if (cuentaCliente && cuentaVentas) {
-          const asiento = db.prepare(`INSERT INTO pa_asientos (fecha, descripcion, usuario_id, ref_codigo)
-            VALUES (?,?,?,?)`)
+          const asiento = db.prepare(`INSERT INTO pa_asientos (fecha, descripcion, usuario_id, ref_codigo, sociedad_id)
+            VALUES (?,?,?,?,?)`)
             .run(fechaLiq, `${numero} | ${cliente?.razon_social||''} | Liq. Producto`,
-                 u.id, numero);
+                 u.id, numero, sociedadId);
           asientoId = asiento.lastInsertRowid;
           const ins = db.prepare(`INSERT INTO pa_asientos_lineas (asiento_id, cuenta_id, debe, haber, descripcion)
             VALUES (?,?,?,?,?)`);
@@ -281,9 +313,10 @@ function generarNumFac(tipo) {
 router.get('/facturas', (req, res) => {
   try {
     const { clienteId, estado } = req.query;
+    const sociedadId = getSociedadId(req);
     let sql = `SELECT f.*, c.razon_social as cliente_nombre
-               FROM ven_facturas f JOIN ven_clientes c ON c.id=f.cliente_id WHERE 1=1`;
-    const params = [];
+               FROM ven_facturas f JOIN ven_clientes c ON c.id=f.cliente_id WHERE f.sociedad_id = ?`;
+    const params = [sociedadId];
     if (clienteId) { sql += ' AND f.cliente_id=?'; params.push(parseInt(clienteId)); }
     if (estado)    { sql += ' AND f.estado=?'; params.push(estado); }
     sql += ' ORDER BY f.fecha DESC, f.id DESC';
@@ -316,9 +349,9 @@ router.post('/facturas', requireAuth, (req, res) => {
       const iva   = parseFloat(req.body.iva)||0;
       const total = neto + iva;
 
-      const r = db.prepare(`INSERT INTO ven_facturas (numero, fecha, cliente_id, tipo, concepto, neto, iva, total, notas, usuario_id)
-        VALUES (?,?,?,?,?,?,?,?,?,?)`)
-        .run(numero, fechaFac, parseInt(cliente_id), tipo||'A', concepto||null, neto, iva, total, notas||null, u.id);
+      const r = db.prepare(`INSERT INTO ven_facturas (numero, fecha, cliente_id, tipo, concepto, neto, iva, total, notas, usuario_id, sociedad_id)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?)`)
+        .run(numero, fechaFac, parseInt(cliente_id), tipo||'A', concepto||null, neto, iva, total, notas||null, u.id, sociedadDeCliente(cliente_id));
       const facId = r.lastInsertRowid;
 
       for (const it of items) {
@@ -410,10 +443,10 @@ router.post('/cobranzas', requireAuth, (req, res) => {
   if (!docs?.length) return res.status(400).json({ ok: false, error: 'Seleccioná al menos un documento' });
   try {
     const tx = db.transaction(() => {
-      const r = db.prepare(`INSERT INTO ven_cobranzas (fecha, cliente_id, monto, forma_pago, referencia, notas, usuario_id)
-        VALUES (?,?,?,?,?,?,?)`)
+      const r = db.prepare(`INSERT INTO ven_cobranzas (fecha, cliente_id, monto, forma_pago, referencia, notas, usuario_id, sociedad_id)
+        VALUES (?,?,?,?,?,?,?,?)`)
         .run(fecha||new Date().toISOString().split('T')[0], parseInt(cliente_id),
-             parseFloat(monto), forma_pago||'transferencia', referencia||null, notas||null, u.id);
+             parseFloat(monto), forma_pago||'transferencia', referencia||null, notas||null, u.id, sociedadDeCliente(cliente_id));
       const cobId = r.lastInsertRowid;
 
       for (const d of docs) {
