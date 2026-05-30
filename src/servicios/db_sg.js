@@ -359,6 +359,26 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_sg_despacho_items_lote     ON sg_despacho_items(lote_id);
 `);
 
+// ── BACKFILL idempotente: margen_estimado por kg ────────────────────────────────
+// Bug F4: el margen se grababa como subtotal − kg_despachados × costo_final, pero
+// costo_final es el costo TOTAL del lote, no por kg. El front del modal ya calculaba
+// bien (costo_final / kg_reales); solo el valor PERSISTIDO quedaba absurdo.
+// Este UPDATE recalcula con el costo por kg y es self-healing (no-op una vez correcto).
+try {
+  db.exec(`
+    UPDATE sg_despacho_items
+    SET margen_estimado = subtotal - kg_despachados * (
+          SELECT COALESCE(l.costo_final,0) / NULLIF(l.kg_reales,0)
+          FROM sg_lotes l WHERE l.id = sg_despacho_items.lote_id)
+    WHERE EXISTS (SELECT 1 FROM sg_lotes l WHERE l.id = sg_despacho_items.lote_id AND l.kg_reales > 0)
+      AND ABS(margen_estimado - (subtotal - kg_despachados * (
+          SELECT COALESCE(l.costo_final,0) / NULLIF(l.kg_reales,0)
+          FROM sg_lotes l WHERE l.id = sg_despacho_items.lote_id))) > 0.01;
+  `);
+} catch (e) {
+  console.warn('[DB] SG backfill margen_estimado:', e.message);
+}
+
 console.log('[DB] Módulo San Gerónimo (sg_*) inicializado');
 
 export default db;
