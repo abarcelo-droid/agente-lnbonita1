@@ -1403,6 +1403,60 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_pa_asist_lote    ON pa_asistencias(lote_id);
 `);
 
+// ═══════════════════════════════════════════════════════════════════════════
+// PERSONAL V1 — Valorización + Cuenta Corriente (Fase 3)
+// ═══════════════════════════════════════════════════════════════════════════
+db.exec(`
+  -- Valorización de una asistencia (la hace rol Valorización)
+  CREATE TABLE IF NOT EXISTS pa_asistencia_valorizacion (
+    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    asistencia_id      INTEGER NOT NULL UNIQUE REFERENCES pa_asistencias(id),
+    tarifa_unitaria    REAL NOT NULL,
+    unidad_tarifa      TEXT NOT NULL,          -- copiada del padrón al valorizar
+    monto_total        REAL NOT NULL,
+    detalle_json       TEXT,                   -- breakdown del cálculo
+    valorizado_por     INTEGER NOT NULL REFERENCES usuarios(id),
+    fecha_valorizacion TEXT DEFAULT (datetime('now','localtime')),
+    costo_lote_id      INTEGER REFERENCES pa_costos_lote(id),
+    cc_movimiento_id   INTEGER REFERENCES pa_cc_movimientos(id)
+  );
+
+  -- Cuenta corriente unificada (fijos + contratistas)
+  CREATE TABLE IF NOT EXISTS pa_cc_movimientos (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    tipo_titular     TEXT NOT NULL CHECK(tipo_titular IN ('fijo','contratista')),
+    titular_id       INTEGER NOT NULL REFERENCES pa_personal(id),
+    fecha            TEXT NOT NULL DEFAULT (date('now','localtime')),
+    tipo_mov         TEXT NOT NULL CHECK(tipo_mov IN ('devengado','pago','adelanto','ajuste','anulacion')),
+    monto            REAL NOT NULL,            -- >0 le debemos (devengado) ; <0 le pagamos/adelanto
+    descripcion      TEXT,
+    referencia_tipo  TEXT,                     -- 'asistencia','pago_manual','adelanto_manual','ajuste_manual'
+    referencia_id    INTEGER,
+    saldo_acumulado  REAL,                     -- denormalizado, recalculado cronológicamente
+    cargado_por      INTEGER NOT NULL REFERENCES usuarios(id),
+    creado_en        TEXT DEFAULT (datetime('now','localtime')),
+    anulado          INTEGER DEFAULT 0,
+    anulado_en       TEXT,
+    anulado_por      INTEGER
+  );
+  CREATE INDEX IF NOT EXISTS idx_pa_cc_titular ON pa_cc_movimientos(tipo_titular, titular_id);
+  CREATE INDEX IF NOT EXISTS idx_pa_cc_fecha   ON pa_cc_movimientos(fecha);
+`);
+
+// ── MIGRACIÓN: columna 'origen' en pa_costos_lote (decisión Personal V1) ────
+// Aditiva y segura. Aísla los costos de asistencia ('asistencia') de los de
+// partes ('parte') y aplicaciones ('aplicacion'). El BACKFILL de filas viejas
+// NO corre acá — se hace por endpoint admin con dry-run + OK (ver produccion.js).
+(function migrarCostosLoteOrigen() {
+  try {
+    const cols = db.prepare("PRAGMA table_info(pa_costos_lote)").all().map(c => c.name);
+    if (!cols.includes('origen')) {
+      db.exec("ALTER TABLE pa_costos_lote ADD COLUMN origen TEXT");
+      console.log('[PA] pa_costos_lote.origen agregado (nullable; backfill por endpoint admin)');
+    }
+  } catch(e) { console.error('[PA] Error migrando pa_costos_lote.origen:', e.message); }
+})();
+
 // ── SEED: 20 rubros contables (tal cual contabilidad) ──────────────────────
 (function seedRubrosContables() {
   try {
