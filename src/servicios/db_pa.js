@@ -5,6 +5,12 @@
 import db from './db.js';
 import fs from 'fs';
 import path from 'path';
+// Multisociedad Fase 1: el cimiento contable necesita que la tabla `sociedades`
+// ya esté creada y sembrada (Puente Cordón / San Gerónimo) ANTES de correr la
+// migración del final de este archivo. En index.js produccion.js (que importa
+// este módulo) se carga antes que org.js, así que forzamos el orden acá.
+// db_org.js NO importa db_pa.js → no hay ciclo.
+import './db_org.js';
 
 // ── TABLAS MAESTRAS ────────────────────────────────────────────────────────
 
@@ -2694,6 +2700,158 @@ db.exec(`
     txSeed();
     console.log('[PA] Secciones Activo/Pasivo/Patrimonio/Ingresos creadas');
   } catch(e) { console.error('[PA] Error creando secciones base:', e.message); }
+})();
+
+// ═══════════════════════════════════════════════════════════════════════════
+// MULTISOCIEDAD — FASE 1: cimiento contable (OK Andy + Pablo)
+// ───────────────────────────────────────────────────────────────────────────
+// Agrega sociedad_id a las 4 tablas del cimiento contable:
+//   pa_cuentas, pa_cuentas_secciones, pa_movimientos_contables, pa_asientos.
+// Decisiones aplicadas:
+//   • Plan de cuentas UNO POR SOCIEDAD (Opción A). El plan existente = Puente Cordón (PC).
+//   • UNIQUE(codigo) → UNIQUE(sociedad_id, codigo) en pa_cuentas y pa_cuentas_secciones.
+//   • San Gerónimo (SG): se espeja SOLO la ESTRUCTURA de secciones (0 cuentas) — TODO Pablo.
+//   • sociedad_id NOT NULL DEFAULT=PC en pa_movimientos_contables y pa_asientos, así los
+//     escritores de pa_asientos de OTRAS fases (produccion.js/ventas.js/ordenes.js) siguen
+//     funcionando sin tocarlos (su contexto hoy es PC). Se endurecen en su fase.
+// BETA sin datos reales → se preserva el id de cada cuenta/sección (rebuild copia ids),
+// por lo que las FK existentes (pa_asientos_lineas, ven_*, fin_*, etc.) quedan válidas.
+// Idempotente: cada paso se guarda por presencia de columna / existencia de filas.
+// ═══════════════════════════════════════════════════════════════════════════
+(function migrarMultisociedadFase1() {
+  try {
+    const soc = (nombre) => db.prepare("SELECT id FROM sociedades WHERE nombre = ?").get(nombre);
+    const pc = soc('Puente Cordón SA')
+            || db.prepare("SELECT id FROM sociedades WHERE funcion = 'productiva' ORDER BY id LIMIT 1").get();
+    if (!pc) {
+      console.warn('[PA][MS-F1] Sociedad Puente Cordón no encontrada — Fase 1 multisociedad NO aplicada');
+      return;
+    }
+    const PC = pc.id;
+    const sg = soc('San Gerónimo SA')
+            || db.prepare("SELECT id FROM sociedades WHERE funcion = 'comercial' ORDER BY id LIMIT 1").get();
+    const SG = sg ? sg.id : null;
+
+    const tieneCol = (tabla, col) =>
+      db.prepare(`PRAGMA table_info(${tabla})`).all().some(c => c.name === col);
+
+    // Los rebuilds (DROP/RENAME) requieren FK enforcement apagado para no romper por
+    // las referencias entrantes (pa_asientos_lineas, pa_movimientos_contables, etc.).
+    // Los ids se preservan en el copiado, así que al restaurar FK la integridad se mantiene.
+    const fkPrev = db.pragma('foreign_keys', { simple: true });
+    db.pragma('foreign_keys = OFF');
+    try {
+
+    // ── 1) pa_cuentas_secciones: rebuild con sociedad_id + UNIQUE(sociedad_id,codigo) ──
+    if (!tieneCol('pa_cuentas_secciones', 'sociedad_id')) {
+      db.exec(`
+        BEGIN;
+        CREATE TABLE pa_cuentas_secciones_v2 (
+          id              INTEGER PRIMARY KEY AUTOINCREMENT,
+          sociedad_id     INTEGER NOT NULL REFERENCES sociedades(id),
+          codigo          TEXT NOT NULL,
+          nombre          TEXT NOT NULL,
+          orden           INTEGER NOT NULL DEFAULT 0,
+          activo          INTEGER NOT NULL DEFAULT 1,
+          grupo           TEXT DEFAULT 'gastos',
+          creado_en       TEXT DEFAULT (datetime('now','localtime')),
+          actualizado_en  TEXT DEFAULT (datetime('now','localtime')),
+          UNIQUE(sociedad_id, codigo)
+        );
+        INSERT INTO pa_cuentas_secciones_v2
+          (id, sociedad_id, codigo, nombre, orden, activo, grupo, creado_en, actualizado_en)
+          SELECT id, ${PC}, codigo, nombre, orden, activo, COALESCE(grupo,'gastos'), creado_en, actualizado_en
+            FROM pa_cuentas_secciones;
+        DROP TABLE pa_cuentas_secciones;
+        ALTER TABLE pa_cuentas_secciones_v2 RENAME TO pa_cuentas_secciones;
+        CREATE INDEX IF NOT EXISTS idx_pa_secciones_sociedad ON pa_cuentas_secciones(sociedad_id);
+        COMMIT;
+      `);
+      console.log('[PA][MS-F1] pa_cuentas_secciones: sociedad_id agregado (existentes → PC), UNIQUE(sociedad_id,codigo)');
+    }
+
+    // ── 2) pa_cuentas: rebuild con sociedad_id + UNIQUE(sociedad_id,codigo) ──
+    if (!tieneCol('pa_cuentas', 'sociedad_id')) {
+      db.exec(`
+        BEGIN;
+        CREATE TABLE pa_cuentas_v2 (
+          id                INTEGER PRIMARY KEY AUTOINCREMENT,
+          sociedad_id       INTEGER NOT NULL REFERENCES sociedades(id),
+          codigo            TEXT NOT NULL,
+          nombre            TEXT NOT NULL,
+          seccion_id        INTEGER NOT NULL REFERENCES pa_cuentas_secciones(id),
+          tipo              TEXT NOT NULL DEFAULT 'resultado',
+          permite_lote      INTEGER NOT NULL DEFAULT 0,
+          permite_campania  INTEGER NOT NULL DEFAULT 0,
+          es_sistema        INTEGER NOT NULL DEFAULT 0,
+          orden             INTEGER NOT NULL DEFAULT 0,
+          activo            INTEGER NOT NULL DEFAULT 1,
+          creado_en         TEXT DEFAULT (datetime('now','localtime')),
+          actualizado_en    TEXT DEFAULT (datetime('now','localtime')),
+          UNIQUE(sociedad_id, codigo)
+        );
+        INSERT INTO pa_cuentas_v2
+          (id, sociedad_id, codigo, nombre, seccion_id, tipo, permite_lote, permite_campania, es_sistema, orden, activo, creado_en, actualizado_en)
+          SELECT id, ${PC}, codigo, nombre, seccion_id, tipo, permite_lote, permite_campania, es_sistema, orden, activo, creado_en, actualizado_en
+            FROM pa_cuentas;
+        DROP TABLE pa_cuentas;
+        ALTER TABLE pa_cuentas_v2 RENAME TO pa_cuentas;
+        CREATE INDEX IF NOT EXISTS idx_pa_cuentas_seccion  ON pa_cuentas(seccion_id);
+        CREATE INDEX IF NOT EXISTS idx_pa_cuentas_codigo   ON pa_cuentas(codigo);
+        CREATE INDEX IF NOT EXISTS idx_pa_cuentas_sociedad ON pa_cuentas(sociedad_id);
+        COMMIT;
+      `);
+      console.log('[PA][MS-F1] pa_cuentas: sociedad_id agregado (existentes → PC), UNIQUE(sociedad_id,codigo)');
+    }
+
+    // ── 3) pa_movimientos_contables: sociedad_id NOT NULL DEFAULT=PC (tabla sin uso hoy) ──
+    if (!tieneCol('pa_movimientos_contables', 'sociedad_id')) {
+      db.exec(`ALTER TABLE pa_movimientos_contables ADD COLUMN sociedad_id INTEGER NOT NULL DEFAULT ${PC}`);
+      db.exec(`CREATE INDEX IF NOT EXISTS idx_mov_sociedad ON pa_movimientos_contables(sociedad_id)`);
+      console.log('[PA][MS-F1] pa_movimientos_contables.sociedad_id agregado (NOT NULL DEFAULT PC)');
+    }
+
+    // ── 4) pa_asientos (cabecera): sociedad_id NOT NULL DEFAULT=PC ──
+    // DEFAULT=PC permite que los INSERT de produccion.js/ventas.js/ordenes.js (otras fases)
+    // sigan andando sin tocarlos; cuentas.js lo setea explícito.
+    if (!tieneCol('pa_asientos', 'sociedad_id')) {
+      db.exec(`ALTER TABLE pa_asientos ADD COLUMN sociedad_id INTEGER NOT NULL DEFAULT ${PC}`);
+      db.exec(`CREATE INDEX IF NOT EXISTS idx_pa_asientos_sociedad ON pa_asientos(sociedad_id)`);
+      console.log('[PA][MS-F1] pa_asientos.sociedad_id agregado (NOT NULL DEFAULT PC)');
+    }
+
+    // ── 5) Espejo de SG: SOLO estructura de secciones (0 cuentas). TODO Pablo. ──
+    if (SG) {
+      const sgTieneSecciones = db.prepare(
+        "SELECT COUNT(*) AS c FROM pa_cuentas_secciones WHERE sociedad_id = ?"
+      ).get(SG).c;
+      if (sgTieneSecciones === 0) {
+        const pcSecs = db.prepare(
+          "SELECT codigo, nombre, orden, activo, grupo FROM pa_cuentas_secciones WHERE sociedad_id = ? ORDER BY codigo"
+        ).all(PC);
+        const insSG = db.prepare(
+          "INSERT INTO pa_cuentas_secciones (sociedad_id, codigo, nombre, orden, activo, grupo) VALUES (?,?,?,?,?,?)"
+        );
+        const tx = db.transaction(() => {
+          for (const s of pcSecs) insSG.run(SG, s.codigo, s.nombre, s.orden, s.activo, s.grupo || 'gastos');
+        });
+        tx();
+        console.log(`[PA][MS-F1] San Gerónimo: ${pcSecs.length} secciones espejadas (0 cuentas).`);
+        console.log('[PA][MS-F1] TODO Pablo: definir las CUENTAS reales de SG (comercializador). '
+          + 'Las secciones se espejaron de PC como punto de partida; revisar cuáles aplican.');
+      }
+    } else {
+      console.warn('[PA][MS-F1] Sociedad San Gerónimo no encontrada — espejo de secciones omitido.');
+    }
+
+    } finally {
+      db.pragma(`foreign_keys = ${fkPrev ? 'ON' : 'OFF'}`);
+    }
+
+    console.log('[PA][MS-F1] Cimiento contable multisociedad inicializado.');
+  } catch (e) {
+    console.error('[PA][MS-F1] Error en migración multisociedad Fase 1:', e.message);
+  }
 })();
 
 export { db };
