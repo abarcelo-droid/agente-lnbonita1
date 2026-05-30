@@ -3725,6 +3725,289 @@ router.post('/personal/admin/costos-origen', requireAdmin, (req, res) => {
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
+// ═══════════════════════════════════════════════════════════════════════════
+// PERSONAL V1 — Reportes + Export Excel + Rubros con uso (Fase 4)
+// Todos sobre asistencias VALORIZADAS (monto = pa_asistencia_valorizacion).
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Lazy load de SheetJS para generar Excel server-side (mismo patrón que IFCO).
+let _xlsxPersonalLib = null;
+async function _getXLSXPersonal() {
+  if (_xlsxPersonalLib) return _xlsxPersonalLib;
+  try {
+    const mod = await import('xlsx');
+    _xlsxPersonalLib = mod.default || mod;
+    return _xlsxPersonalLib;
+  } catch (e) {
+    console.error('[Personal] xlsx (SheetJS) no disponible:', e.message);
+    return null;
+  }
+}
+
+// Snap de una fecha al jueves de su semana (jueves <= fecha). %w: 0=dom..6=sab, jueves=4.
+function _juevesDeLaSemana(db, fecha) {
+  return db.prepare("SELECT date(?, '-' || ((strftime('%w', ?)+7-4)%7) || ' days') d").get(fecha, fecha).d;
+}
+
+// Config de los reportes tabulares. Cada run(db,{desde,hasta}) devuelve filas planas.
+// columns: {key,label,money?,num?} — money/num se exportan como número real al xlsx.
+const REPORTES_PERSONAL = {
+  'por-trabajador': {
+    titulo: 'Personal — Reporte por trabajador (fijos, asistencia individual)',
+    columns: [
+      { key: 'titular', label: 'Trabajador' },
+      { key: 'asistencias', label: 'Asistencias', num: true },
+      { key: 'jornales', label: 'Jornales', num: true },
+      { key: 'monto', label: 'Monto', money: true }
+    ],
+    run: (db, q) => {
+      const where = ["a.estado='valorizado'", 'a.personal_id IS NOT NULL'], p = [];
+      if (q.desde) { where.push('a.fecha>=?'); p.push(q.desde); }
+      if (q.hasta) { where.push('a.fecha<=?'); p.push(q.hasta); }
+      return db.prepare(`
+        SELECT pe.id AS titular_id, pe.nombre AS titular,
+          COUNT(*) AS asistencias,
+          COALESCE(SUM(a.jornales_calc),0) AS jornales,
+          COALESCE(SUM(v.monto_total),0) AS monto
+        FROM pa_asistencias a
+        JOIN pa_asistencia_valorizacion v ON v.asistencia_id=a.id
+        JOIN pa_personal pe ON pe.id=a.personal_id
+        WHERE ${where.join(' AND ')}
+        GROUP BY pe.id, pe.nombre ORDER BY monto DESC`).all(...p);
+    }
+  },
+  'por-contratista': {
+    titulo: 'Personal — Reporte por contratista (bloques)',
+    columns: [
+      { key: 'titular', label: 'Contratista' },
+      { key: 'asistencias', label: 'Asistencias', num: true },
+      { key: 'personas', label: 'Personas (suma)', num: true },
+      { key: 'jornales', label: 'Jornales', num: true },
+      { key: 'monto', label: 'Monto', money: true }
+    ],
+    run: (db, q) => {
+      const where = ["a.estado='valorizado'", 'a.contratista_id IS NOT NULL'], p = [];
+      if (q.desde) { where.push('a.fecha>=?'); p.push(q.desde); }
+      if (q.hasta) { where.push('a.fecha<=?'); p.push(q.hasta); }
+      return db.prepare(`
+        SELECT pe.id AS titular_id, pe.nombre AS titular,
+          COUNT(*) AS asistencias,
+          COALESCE(SUM(a.cantidad),0) AS personas,
+          COALESCE(SUM(a.jornales_calc),0) AS jornales,
+          COALESCE(SUM(v.monto_total),0) AS monto
+        FROM pa_asistencias a
+        JOIN pa_asistencia_valorizacion v ON v.asistencia_id=a.id
+        JOIN pa_personal pe ON pe.id=a.contratista_id
+        WHERE ${where.join(' AND ')}
+        GROUP BY pe.id, pe.nombre ORDER BY monto DESC`).all(...p);
+    }
+  },
+  'por-finca': {
+    titulo: 'Personal — Reporte por finca',
+    columns: [
+      { key: 'finca', label: 'Finca' },
+      { key: 'asistencias', label: 'Asistencias', num: true },
+      { key: 'jornales', label: 'Jornales', num: true },
+      { key: 'monto', label: 'Monto', money: true }
+    ],
+    run: (db, q) => {
+      const where = ["a.estado='valorizado'"], p = [];
+      if (q.desde) { where.push('a.fecha>=?'); p.push(q.desde); }
+      if (q.hasta) { where.push('a.fecha<=?'); p.push(q.hasta); }
+      // GROUP BY expresión repetida (no alias) para evitar colisión con a.finca real.
+      return db.prepare(`
+        SELECT COALESCE(NULLIF(a.finca,''),'(sin finca)') AS finca,
+          COUNT(*) AS asistencias,
+          COALESCE(SUM(a.jornales_calc),0) AS jornales,
+          COALESCE(SUM(v.monto_total),0) AS monto
+        FROM pa_asistencias a
+        JOIN pa_asistencia_valorizacion v ON v.asistencia_id=a.id
+        WHERE ${where.join(' AND ')}
+        GROUP BY COALESCE(NULLIF(a.finca,''),'(sin finca)') ORDER BY monto DESC`).all(...p);
+    }
+  },
+  'por-rubro': {
+    titulo: 'Personal — Reporte por rubro (cuenta MO)',
+    columns: [
+      { key: 'rubro_codigo', label: 'Código' },
+      { key: 'rubro_nombre', label: 'Rubro MO' },
+      { key: 'asistencias', label: 'Asistencias', num: true },
+      { key: 'jornales', label: 'Jornales', num: true },
+      { key: 'monto', label: 'Monto', money: true }
+    ],
+    run: (db, q) => {
+      const where = ["a.estado='valorizado'"], p = [];
+      if (q.desde) { where.push('a.fecha>=?'); p.push(q.desde); }
+      if (q.hasta) { where.push('a.fecha<=?'); p.push(q.hasta); }
+      return db.prepare(`
+        SELECT c.id AS rubro_id, c.codigo AS rubro_codigo, c.nombre AS rubro_nombre,
+          COUNT(*) AS asistencias,
+          COALESCE(SUM(a.jornales_calc),0) AS jornales,
+          COALESCE(SUM(v.monto_total),0) AS monto
+        FROM pa_asistencias a
+        JOIN pa_asistencia_valorizacion v ON v.asistencia_id=a.id
+        JOIN pa_cuentas c ON c.id=a.rubro_cuenta_id
+        WHERE ${where.join(' AND ')}
+        GROUP BY c.id, c.codigo, c.nombre ORDER BY monto DESC`).all(...p);
+    }
+  }
+};
+
+// Suma de las columnas num/money para la fila de totales.
+function _totalesReporte(cfg, rows) {
+  const tot = {};
+  for (const c of cfg.columns) if (c.num || c.money) tot[c.key] = rows.reduce((a, r) => a + (Number(r[c.key]) || 0), 0);
+  return tot;
+}
+
+// JSON de un reporte tabular.
+function _reporteJson(key) {
+  return (req, res) => {
+    const db = getDb();
+    const perms = permisosPersonal(db, req.user);
+    if (!perms.valorizacion && !perms.admin)
+      return res.status(403).json({ ok: false, error: 'Sin permiso de valorización' });
+    try {
+      const cfg = REPORTES_PERSONAL[key];
+      const rows = cfg.run(db, req.query);
+      res.json({ ok: true, data: rows, totales: _totalesReporte(cfg, rows), columns: cfg.columns });
+    } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+  };
+}
+
+// Construye el buffer .xlsx de un reporte (encabezado + subtítulos + tabla + totales).
+function _buildReporteXlsx(XLSX, titulo, subtitulos, columns, rows, totales) {
+  const aoa = [];
+  aoa.push([titulo]);
+  (subtitulos || []).forEach(s => aoa.push([s]));
+  aoa.push([]);
+  aoa.push(columns.map(c => c.label));
+  const firstDataRow = aoa.length;
+  rows.forEach(r => aoa.push(columns.map(c => (c.num || c.money) ? Number(r[c.key] || 0) : (r[c.key] != null ? String(r[c.key]) : ''))));
+  // Fila de totales
+  if (rows.length) {
+    aoa.push(columns.map((c, i) => i === 0 ? 'TOTAL' : ((c.num || c.money) ? Number(totales[c.key] || 0) : '')));
+  }
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  ws['!cols'] = columns.map(c => ({ wch: c.money ? 16 : (c.num ? 12 : 34) }));
+  // Formato numérico/$ en columnas num/money
+  for (let r = firstDataRow; r < aoa.length; r++) {
+    columns.forEach((c, ci) => {
+      if (!(c.num || c.money)) return;
+      const ref = XLSX.utils.encode_cell({ r, c: ci });
+      const cell = ws[ref];
+      if (cell && typeof cell.v === 'number') { cell.t = 'n'; cell.z = c.money ? '$#,##0' : '#,##0'; }
+    });
+  }
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Reporte');
+  return Buffer.from(XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }));
+}
+
+// .xlsx de un reporte tabular.
+function _reporteXlsx(key) {
+  return async (req, res) => {
+    const db = getDb();
+    const perms = permisosPersonal(db, req.user);
+    if (!perms.valorizacion && !perms.admin)
+      return res.status(403).json({ ok: false, error: 'Sin permiso de valorización' });
+    try {
+      const XLSX = await _getXLSXPersonal();
+      if (!XLSX) return res.status(503).json({ ok: false, error: 'xlsx (SheetJS) no disponible' });
+      const cfg = REPORTES_PERSONAL[key];
+      const rows = cfg.run(db, req.query);
+      const subt = [];
+      if (req.query.desde || req.query.hasta) subt.push('Período: ' + (req.query.desde || 'inicio') + ' a ' + (req.query.hasta || 'hoy'));
+      const buf = _buildReporteXlsx(XLSX, cfg.titulo, subt, cfg.columns, rows, _totalesReporte(cfg, rows));
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      res.setHeader('Content-Disposition', 'attachment; filename="personal-' + key + '.xlsx"');
+      res.send(buf);
+    } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+  };
+}
+
+// Registro de los 4 reportes tabulares (JSON + .xlsx)
+for (const key of Object.keys(REPORTES_PERSONAL)) {
+  router.get('/personal/reportes/' + key, requireAuth, _reporteJson(key));
+  router.get('/personal/reportes/' + key + '.xlsx', requireAuth, _reporteXlsx(key));
+}
+
+// ── Cierre semanal (jueves a jueves): consolidado por titular ──────────────
+const CIERRE_COLS = [
+  { key: 'titular', label: 'Titular' },
+  { key: 'tipo', label: 'Tipo' },
+  { key: 'asistencias', label: 'Asistencias', num: true },
+  { key: 'jornales', label: 'Jornales', num: true },
+  { key: 'monto', label: 'Monto', money: true }
+];
+function _cierreSemanal(db, fechaJueves) {
+  const fecha = (fechaJueves || '').slice(0, 10) || db.prepare("SELECT date('now','localtime') d").get().d;
+  const jueves = _juevesDeLaSemana(db, fecha);
+  const hasta = db.prepare("SELECT date(?, '+6 days') d").get(jueves).d;
+  const rows = db.prepare(`
+    WITH base AS (
+      SELECT COALESCE(a.personal_id, a.contratista_id) AS tit_id, a.jornales_calc, v.monto_total
+      FROM pa_asistencias a
+      JOIN pa_asistencia_valorizacion v ON v.asistencia_id=a.id
+      WHERE a.estado='valorizado' AND a.fecha>=? AND a.fecha<=?
+    )
+    SELECT pe.id AS titular_id, pe.nombre AS titular, pe.tipo AS tipo,
+      COUNT(*) AS asistencias,
+      COALESCE(SUM(b.jornales_calc),0) AS jornales,
+      COALESCE(SUM(b.monto_total),0) AS monto
+    FROM base b JOIN pa_personal pe ON pe.id=b.tit_id
+    GROUP BY pe.id, pe.nombre, pe.tipo ORDER BY monto DESC`).all(jueves, hasta);
+  return { jueves, hasta, rows };
+}
+
+router.get('/personal/reportes/cierre-semanal', requireAuth, (req, res) => {
+  const db = getDb();
+  const perms = permisosPersonal(db, req.user);
+  if (!perms.valorizacion && !perms.admin)
+    return res.status(403).json({ ok: false, error: 'Sin permiso de valorización' });
+  try {
+    const { jueves, hasta, rows } = _cierreSemanal(db, req.query.fecha_inicio_jueves);
+    const cfg = { columns: CIERRE_COLS };
+    res.json({ ok: true, data: rows, totales: _totalesReporte(cfg, rows), columns: CIERRE_COLS, semana: { desde: jueves, hasta } });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+router.get('/personal/reportes/cierre-semanal.xlsx', requireAuth, async (req, res) => {
+  const db = getDb();
+  const perms = permisosPersonal(db, req.user);
+  if (!perms.valorizacion && !perms.admin)
+    return res.status(403).json({ ok: false, error: 'Sin permiso de valorización' });
+  try {
+    const XLSX = await _getXLSXPersonal();
+    if (!XLSX) return res.status(503).json({ ok: false, error: 'xlsx (SheetJS) no disponible' });
+    const { jueves, hasta, rows } = _cierreSemanal(db, req.query.fecha_inicio_jueves);
+    const cfg = { columns: CIERRE_COLS };
+    const buf = _buildReporteXlsx(XLSX, 'Personal — Cierre semanal', ['Semana: ' + jueves + ' a ' + hasta + ' (jueves a jueves)'],
+      CIERRE_COLS, rows, _totalesReporte(cfg, rows));
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', 'attachment; filename="personal-cierre-semanal-' + jueves + '.xlsx"');
+    res.send(buf);
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// ── Rubros MO read-only con conteo de uso en asistencias ───────────────────
+router.get('/personal/reportes/rubros-uso', requireAuth, (req, res) => {
+  const db = getDb();
+  const perms = permisosPersonal(db, req.user);
+  if (!perms.asistencia && !perms.valorizacion && !perms.admin)
+    return res.status(403).json({ ok: false, error: 'Sin permiso del módulo Personal' });
+  try {
+    const data = db.prepare(`
+      SELECT c.id, c.codigo, c.nombre,
+        (SELECT COUNT(*) FROM pa_asistencias a WHERE a.rubro_cuenta_id=c.id) AS usos,
+        (SELECT COUNT(*) FROM pa_asistencias a WHERE a.rubro_cuenta_id=c.id AND a.estado='valorizado') AS usos_valorizados
+      FROM pa_cuentas c
+      WHERE c.nombre LIKE 'MO %'
+      ORDER BY usos DESC, c.codigo`).all();
+    res.json({ ok: true, data });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
 // ── Tipos de tarea ─────────────────────────────────────────────────────────
 router.get('/personal/tareas-tipos', requireAuth, (req, res) => {
   const db = getDb();
