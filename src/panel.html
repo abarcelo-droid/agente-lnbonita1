@@ -3890,6 +3890,8 @@ function sgRepExport(){
     <div class="pp-subtab" data-sub="valorizar" id="pp-tab-valorizar" onclick="ppShowSub('valorizar')" style="display:none;padding:10px 16px;cursor:pointer;font-size:13px;font-weight:600;border-bottom:2px solid transparent">💰 Por valorizar</div>
     <div class="pp-subtab" data-sub="cc" id="pp-tab-cc" onclick="ppShowSub('cc')" style="display:none;padding:10px 16px;cursor:pointer;font-size:13px;font-weight:600;border-bottom:2px solid transparent">📒 Cuenta Corriente</div>
     <div class="pp-subtab" data-sub="pagos" id="pp-tab-pagos" onclick="ppShowSub('pagos')" style="display:none;padding:10px 16px;cursor:pointer;font-size:13px;font-weight:600;border-bottom:2px solid transparent">💸 Pagos/Adelantos</div>
+    <div class="pp-subtab" data-sub="reportes" id="pp-tab-reportes" onclick="ppShowSub('reportes')" style="display:none;padding:10px 16px;cursor:pointer;font-size:13px;font-weight:600;border-bottom:2px solid transparent">📈 Reportes</div>
+    <div class="pp-subtab" data-sub="tareas-rubros" id="pp-tab-tareas-rubros" onclick="ppShowSub('tareas-rubros')" style="display:none;padding:10px 16px;cursor:pointer;font-size:13px;font-weight:600;border-bottom:2px solid transparent">🏷️ Tareas / Rubros</div>
     <div class="pp-subtab" data-sub="permisos" id="pp-tab-permisos" onclick="ppShowSub('permisos')" style="display:none;padding:10px 16px;cursor:pointer;font-size:13px;font-weight:600;border-bottom:2px solid transparent">⚙️ Permisos</div>
   </div>
 
@@ -4060,6 +4062,55 @@ function sgRepExport(){
     <div class="tw"><table>
       <thead><tr><th>Usuario</th><th>Rol</th><th style="text-align:center">📝 Asistencia</th><th style="text-align:center">💰 Valorización</th></tr></thead>
       <tbody id="pp-permisos-tbody"></tbody>
+    </table></div>
+  </div>
+
+  <!-- Reportes (Fase 4) — gated a valorización/admin -->
+  <div class="pp-sub" id="pp-sub-reportes">
+    <div style="display:flex;gap:14px;align-items:flex-end;flex-wrap:wrap;margin-bottom:14px">
+      <div style="display:inline-flex;gap:2px;background:var(--bg);border:1px solid var(--bor);border-radius:8px;padding:3px;flex-wrap:wrap">
+        <div class="pp-rep-tab on" data-rep="por-trabajador"  onclick="ppRepTab('por-trabajador')"  style="padding:7px 12px;cursor:pointer;font-size:12.5px;font-weight:600;border-radius:6px">👤 Por trabajador</div>
+        <div class="pp-rep-tab" data-rep="por-contratista" onclick="ppRepTab('por-contratista')" style="padding:7px 12px;cursor:pointer;font-size:12.5px;font-weight:600;border-radius:6px">🚜 Por contratista</div>
+        <div class="pp-rep-tab" data-rep="por-finca"       onclick="ppRepTab('por-finca')"       style="padding:7px 12px;cursor:pointer;font-size:12.5px;font-weight:600;border-radius:6px">🌳 Por finca</div>
+        <div class="pp-rep-tab" data-rep="por-rubro"       onclick="ppRepTab('por-rubro')"       style="padding:7px 12px;cursor:pointer;font-size:12.5px;font-weight:600;border-radius:6px">📊 Por rubro</div>
+        <div class="pp-rep-tab" data-rep="cierre-semanal"  onclick="ppRepTab('cierre-semanal')"  style="padding:7px 12px;cursor:pointer;font-size:12.5px;font-weight:600;border-radius:6px">📅 Cierre semanal</div>
+      </div>
+    </div>
+    <style>
+      #sec-pa-personal .pp-rep-tab.on{background:var(--burg);color:#fff}
+      #sec-pa-personal #pp-rep-filtros label{font-size:12px;color:var(--mut)}
+    </style>
+    <div id="pp-rep-filtros" style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin-bottom:12px">
+      <div id="pp-rep-rango">
+        <label>Desde<br><input type="date" id="pp-rep-desde" style="padding:5px 8px;border-radius:6px;border:1px solid var(--bor);background:var(--bg)"></label>
+        <label style="margin-left:8px">Hasta<br><input type="date" id="pp-rep-hasta" style="padding:5px 8px;border-radius:6px;border:1px solid var(--bor);background:var(--bg)"></label>
+      </div>
+      <div id="pp-rep-jueves" style="display:none">
+        <label>Semana (jueves)<br><input type="date" id="pp-rep-fjueves" style="padding:5px 8px;border-radius:6px;border:1px solid var(--bor);background:var(--bg)"></label>
+        <span id="pp-rep-semana-lbl" style="font-size:11px;color:var(--mut);margin-left:8px"></span>
+      </div>
+      <button class="btn bb bs" onclick="ppLoadReportes()">Aplicar</button>
+      <button class="btn bo bs" onclick="ppRepExport()">⬇️ Excel</button>
+    </div>
+    <div class="tw"><table>
+      <thead id="pp-rep-thead"></thead>
+      <tbody id="pp-rep-tbody"><tr><td class="emp" style="text-align:center;color:var(--mut);padding:20px">Elegí un reporte.</td></tr></tbody>
+      <tfoot id="pp-rep-tfoot"></tfoot>
+    </table></div>
+  </div>
+
+  <!-- Tareas / Rubros MO (Fase 4) — read-only con conteo de uso -->
+  <div class="pp-sub" id="pp-sub-tareas-rubros">
+    <div style="font-size:13px;font-weight:700;margin:4px 0 8px">🏷️ Rubros de Mano de Obra (read-only)</div>
+    <div style="font-size:12px;color:var(--mut);margin-bottom:8px">Cuentas <code>MO %</code> del plan de cuentas, con cuántas asistencias las usan. El plan de cuentas no se edita desde acá.</div>
+    <div class="tw"><table>
+      <thead><tr><th>Código</th><th>Rubro MO</th><th style="text-align:right">Usos</th><th style="text-align:right">Valorizados</th></tr></thead>
+      <tbody id="pp-tr-rubros-tbody"></tbody>
+    </table></div>
+    <div style="font-size:13px;font-weight:700;margin:18px 0 8px">📋 Catálogo de tareas</div>
+    <div class="tw"><table>
+      <thead><tr><th>Tarea</th><th>Tipo labor</th><th style="text-align:center">Destajo</th><th>Unidad destajo</th></tr></thead>
+      <tbody id="pp-tr-tareas-tbody"></tbody>
     </table></div>
   </div>
 </div>
@@ -18817,6 +18868,8 @@ function ppAplicarGating() {
   show('pp-tab-valorizar', verVal);
   show('pp-tab-cc', verVal);
   show('pp-tab-pagos', verVal);
+  show('pp-tab-reportes', verVal);
+  show('pp-tab-tareas-rubros', verModulo);
   show('pp-tab-permisos', p.admin);
 }
 
@@ -18849,6 +18902,91 @@ function ppShowSub(sub) {
   if (sub === 'valorizar') ppLoadValorizar();
   if (sub === 'cc') ppLoadCC();
   if (sub === 'pagos') ppLoadPagos();
+  if (sub === 'reportes') ppInitReportes();
+  if (sub === 'tareas-rubros') ppLoadTareasRubros();
+}
+
+// ═══ PERSONAL V1 — Reportes + Tareas/Rubros (Fase 4) ═════════════════════════
+var PP_REP = { key: 'por-trabajador', cols: [], inicializado: false };
+
+function ppInitReportes() {
+  ppRepTab(PP_REP.key, true);
+  PP_REP.inicializado = true;
+}
+function ppRepTab(key, soloUI) {
+  PP_REP.key = key;
+  document.querySelectorAll('#sec-pa-personal .pp-rep-tab').forEach(function(t){ t.classList.toggle('on', t.dataset.rep === key); });
+  // Cierre semanal usa selector de jueves; el resto, rango desde/hasta.
+  var esCierre = (key === 'cierre-semanal');
+  document.getElementById('pp-rep-rango').style.display = esCierre ? 'none' : '';
+  document.getElementById('pp-rep-jueves').style.display = esCierre ? '' : 'none';
+  ppLoadReportes();
+}
+function ppRepQS() {
+  if (PP_REP.key === 'cierre-semanal') {
+    var fj = document.getElementById('pp-rep-fjueves').value;
+    return fj ? ('?fecha_inicio_jueves=' + fj) : '';
+  }
+  var de = document.getElementById('pp-rep-desde').value, ha = document.getElementById('pp-rep-hasta').value;
+  var qs = [];
+  if (de) qs.push('desde=' + de);
+  if (ha) qs.push('hasta=' + ha);
+  return qs.length ? ('?' + qs.join('&')) : '';
+}
+function ppRepFmt(col, v) {
+  if (col.money) return ppFmtARS(v || 0);
+  if (col.num) return Number(v || 0).toLocaleString('es-AR');
+  return esc(v != null ? String(v) : '');
+}
+function ppLoadReportes() {
+  var key = PP_REP.key;
+  var thead = document.getElementById('pp-rep-thead'),
+      tbody = document.getElementById('pp-rep-tbody'),
+      tfoot = document.getElementById('pp-rep-tfoot');
+  tbody.innerHTML = '<tr><td class="emp" style="text-align:center;color:var(--mut);padding:20px">Cargando…</td></tr>';
+  thead.innerHTML = ''; tfoot.innerHTML = '';
+  paF('/api/pa/personal/reportes/' + key + ppRepQS()).then(function(r){
+    if (!r || !r.ok) { tbody.innerHTML = '<tr><td class="emp" style="text-align:center;color:var(--err);padding:20px">' + esc((r && r.error) || 'Error') + '</td></tr>'; return; }
+    var cols = r.columns || [];
+    PP_REP.cols = cols;
+    thead.innerHTML = '<tr>' + cols.map(function(c){ return '<th' + ((c.num||c.money)?' style="text-align:right"':'') + '>' + esc(c.label) + '</th>'; }).join('') + '</tr>';
+    if (key === 'cierre-semanal' && r.semana) {
+      document.getElementById('pp-rep-semana-lbl').textContent = 'Semana ' + r.semana.desde + ' a ' + r.semana.hasta;
+    }
+    var rows = r.data || [];
+    if (!rows.length) {
+      tbody.innerHTML = '<tr><td class="emp" colspan="' + cols.length + '" style="text-align:center;color:var(--mut);padding:20px">Sin datos valorizados para el período.</td></tr>';
+      return;
+    }
+    tbody.innerHTML = rows.map(function(row){
+      return '<tr>' + cols.map(function(c){ return '<td' + ((c.num||c.money)?' style="text-align:right"':'') + '>' + ppRepFmt(c, row[c.key]) + '</td>'; }).join('') + '</tr>';
+    }).join('');
+    var tot = r.totales || {};
+    tfoot.innerHTML = '<tr style="font-weight:700;border-top:2px solid var(--bor)">' + cols.map(function(c, i){
+      if (i === 0) return '<td>TOTAL</td>';
+      return '<td' + ((c.num||c.money)?' style="text-align:right"':'') + '>' + ((c.num||c.money) ? ppRepFmt(c, tot[c.key]) : '') + '</td>';
+    }).join('') + '</tr>';
+  });
+}
+function ppRepExport() {
+  window.open('/api/pa/personal/reportes/' + PP_REP.key + '.xlsx' + ppRepQS(), '_blank');
+}
+
+function ppLoadTareasRubros() {
+  paF('/api/pa/personal/reportes/rubros-uso').then(function(r){
+    var rows = (r && r.data) || [];
+    var tb = document.getElementById('pp-tr-rubros-tbody');
+    tb.innerHTML = rows.length ? rows.map(function(c){
+      return '<tr><td><code>' + esc(c.codigo||'') + '</code></td><td>' + esc(c.nombre||'') + '</td><td style="text-align:right">' + Number(c.usos||0).toLocaleString('es-AR') + '</td><td style="text-align:right">' + Number(c.usos_valorizados||0).toLocaleString('es-AR') + '</td></tr>';
+    }).join('') : '<tr><td colspan="4" style="text-align:center;color:var(--mut);padding:20px">Sin cuentas MO.</td></tr>';
+  });
+  paF('/api/pa/personal/tareas-tipos').then(function(r){
+    var rows = (r && r.data) || [];
+    var tb = document.getElementById('pp-tr-tareas-tbody');
+    tb.innerHTML = rows.length ? rows.map(function(t){
+      return '<tr><td>' + esc(t.nombre||'') + '</td><td>' + esc(t.tipo_labor||'—') + '</td><td style="text-align:center">' + (t.es_destajo ? '✅' : '—') + '</td><td>' + esc(t.unidad_destajo||'—') + '</td></tr>';
+    }).join('') : '<tr><td colspan="4" style="text-align:center;color:var(--mut);padding:20px">Sin tareas.</td></tr>';
+  });
 }
 
 // ═══ PERSONAL V1 — Padrón unificado + permisos ═══════════════════════════════
