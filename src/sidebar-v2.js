@@ -322,16 +322,21 @@ function closeSocMenu(){
 }
 
 function selectSociedad(value){
+  const prev = localStorage.getItem(LS_SOCIEDAD) || 'all';
+  let nuevo;
   if (value === 'all'){
-    CURRENT_SOCIEDAD = 'all';
-    localStorage.setItem(LS_SOCIEDAD, 'all');
+    nuevo = 'all';
   } else {
     const id = parseInt(value, 10);
     if (isNaN(id)) return;
-    CURRENT_SOCIEDAD = id;
-    localStorage.setItem(LS_SOCIEDAD, String(id));
+    nuevo = String(id);
   }
+  CURRENT_SOCIEDAD = (nuevo === 'all') ? 'all' : parseInt(nuevo, 10);
+  localStorage.setItem(LS_SOCIEDAD, nuevo);
   closeSocMenu();
+  // Cambio real de sociedad = cambio de contexto de datos. Recarga limpia para que
+  // todos los módulos (y sus caches) relean con el nuevo sociedad_id. Multisociedad F1/F2/F3.
+  if (nuevo !== prev){ location.reload(); return; }
   renderSocSelector();
   renderFavoritos();
   renderRecientes();
