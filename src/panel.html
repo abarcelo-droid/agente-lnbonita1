@@ -10123,6 +10123,85 @@ function closeMB(id){ var el=eid(id); if(el) el.classList.remove('on'); }
 var tT; function toast(msg,tipo){ var el=eid('toast'); el.textContent=msg; el.className='on '+(tipo||'ok'); clearTimeout(tT); tT=setTimeout(function(){el.className='';},3200); }
 function startPoll(){ setInterval(function(){if(navAct==='conv') loadConvs();},15000); }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// MULTISOCIEDAD — contexto de sociedad para módulos contables/financieros (F1/F2/F3)
+// El selector del sidebar persiste la sociedad en localStorage. Acá se inyecta
+// sociedad_id en TODAS las llamadas a los endpoints sociedad-aware mediante UN
+// interceptor de window.fetch → cubre wrappers, fetch directos y futuros (no hay
+// forma de que quede uno sin cablear: todo fetch pasa por acá).
+// 'all' (Todas): lecturas caen a PC (lo avisa la barra); escrituras se BLOQUEAN
+// (un alta a PC en silencio sería una fuga de trazabilidad).
+// ───────────────────────────────────────────────────────────────────────────
+function socActual(){
+  var v = localStorage.getItem('lnb-sidebar-sociedad');
+  if (!v || v === 'all') return null;
+  var id = parseInt(v, 10);
+  return isNaN(id) ? null : id;
+}
+var SOC_NOMBRES = {};  // id → nombre (para la barra de contexto)
+(function cargarNombresSociedades(){
+  try {
+    fetch('/api/org/sociedades').then(function(r){ return r.json(); }).then(function(r){
+      ((r && r.sociedades) || []).forEach(function(s){ SOC_NOMBRES[s.id] = s.nombre; });
+      actualizarBarraSociedad();
+    }).catch(function(){});
+  } catch(_){}
+})();
+(function instalarInterceptorSociedad(){
+  var AWARE = /^\/api\/(fin|ven|pa\/cuentas|pa\/proveedores|pa\/pagos)(\/|\?|$)/;
+  var _fetch = window.fetch.bind(window);
+  window.fetch = function(url, opts){
+    if (typeof url === 'string' && AWARE.test(url)){
+      opts = opts || {};
+      var metodo = (opts.method || 'GET').toUpperCase();
+      var escritura = (metodo !== 'GET' && metodo !== 'HEAD');
+      var soc = socActual();
+      if (soc === null){
+        if (escritura){
+          if (typeof toast === 'function') toast('Elegí una sociedad (no "Todas") para crear o editar acá', 'er');
+          return Promise.resolve(new Response(
+            JSON.stringify({ ok:false, error:'Seleccioná una sociedad para operar', _bloqueado:true }),
+            { status:200, headers:{ 'Content-Type':'application/json' } }
+          ));
+        }
+        // lectura en 'Todas' → sin sociedad_id → backend cae a PC
+      } else {
+        url += (url.indexOf('?') >= 0 ? '&' : '?') + 'sociedad_id=' + soc;
+        if (escritura && opts.body){
+          try {
+            var b = JSON.parse(opts.body);
+            if (b && typeof b === 'object' && b.sociedad_id == null){ b.sociedad_id = soc; opts.body = JSON.stringify(b); }
+          } catch(_){}
+        }
+      }
+    }
+    return _fetch(url, opts);
+  };
+})();
+// Barra de contexto: visible solo en módulos contables (sec-adm/fin/ven).
+function actualizarBarraSociedad(){
+  var bar = document.getElementById('soc-context-bar');
+  if (!bar){
+    bar = document.createElement('div');
+    bar.id = 'soc-context-bar';
+    bar.style.cssText = 'position:fixed;top:8px;left:50%;transform:translateX(-50%);z-index:99999;padding:5px 14px;border-radius:14px;font-size:12px;font-weight:600;box-shadow:0 2px 10px rgba(0,0,0,.18);pointer-events:none;max-width:92vw;text-align:center';
+    document.body.appendChild(bar);
+  }
+  var activa = document.querySelector('.sec.on');
+  var contable = activa && /^sec-(adm|fin|ven)-/.test(activa.id || '');
+  if (!contable){ bar.style.display = 'none'; return; }
+  bar.style.display = '';
+  var soc = socActual();
+  if (soc === null){
+    bar.style.background = '#fef3c7'; bar.style.color = '#92400e';
+    bar.textContent = '⚠ Mostrando Puente Cordón (PC) — NO es consolidado (el consolidado de las 3 sociedades llega con Familia)';
+  } else {
+    bar.style.background = '#dbeafe'; bar.style.color = '#1e40af';
+    bar.textContent = '● Operando en: ' + (SOC_NOMBRES[soc] || ('Sociedad #' + soc));
+  }
+}
+setInterval(actualizarBarraSociedad, 800);
+
 // DEDICADOS
 var dedActivo = null;
 eid('btn-nuevo-ded').addEventListener('click', function(){ openDed(null); });
