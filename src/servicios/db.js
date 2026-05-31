@@ -509,56 +509,9 @@ db.exec(`
     moneda          TEXT DEFAULT 'ARS'
   );
 
-  CREATE TABLE IF NOT EXISTS facturas_compra (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    nro_factura     TEXT,
-    fecha           TEXT NOT NULL,
-    proveedor_id    INTEGER REFERENCES proveedores(id),
-    partida_id      INTEGER REFERENCES partidas(id),
-    subtotal        REAL DEFAULT 0,
-    iva             REAL DEFAULT 0,
-    total           REAL DEFAULT 0,
-    moneda          TEXT DEFAULT 'ARS',
-    condicion_pago  TEXT DEFAULT 'cta_cte',
-    estado          TEXT DEFAULT 'ingresada' CHECK(estado IN ('ingresada','pagada','cta_cte','anulada')),
-    archivo_url     TEXT,
-    notas           TEXT,
-    creado_en       TEXT DEFAULT (datetime('now','localtime'))
-  );
-
-  CREATE TABLE IF NOT EXISTS liquidaciones_consignacion (
-    id               INTEGER PRIMARY KEY AUTOINCREMENT,
-    nro_liquidacion  TEXT UNIQUE,
-    fecha            TEXT NOT NULL,
-    proveedor_id     INTEGER REFERENCES proveedores(id),
-    partida_id       INTEGER REFERENCES partidas(id),
-    bultos_vendidos  REAL DEFAULT 0,
-    precio_promedio  REAL DEFAULT 0,
-    total            REAL DEFAULT 0,
-    moneda           TEXT DEFAULT 'ARS',
-    estado           TEXT DEFAULT 'borrador' CHECK(estado IN ('borrador','emitida','pagada','anulada')),
-    notas            TEXT,
-    creado_en        TEXT DEFAULT (datetime('now','localtime'))
-  );
-
-  CREATE TABLE IF NOT EXISTS facturas_venta (
-    id                INTEGER PRIMARY KEY AUTOINCREMENT,
-    nro_factura       TEXT UNIQUE,
-    fecha             TEXT NOT NULL,
-    tipo_comprobante  TEXT DEFAULT 'B' CHECK(tipo_comprobante IN ('A','B','C','X')),
-    cliente_telefono  TEXT,
-    empresa           TEXT,
-    contacto          TEXT,
-    remito_id         INTEGER REFERENCES remitos_salida(id),
-    subtotal          REAL DEFAULT 0,
-    iva               REAL DEFAULT 0,
-    total             REAL DEFAULT 0,
-    moneda            TEXT DEFAULT 'ARS',
-    condicion_pago    TEXT DEFAULT 'cta_cte',
-    estado            TEXT DEFAULT 'emitida' CHECK(estado IN ('emitida','cobrada','cta_cte','anulada')),
-    notas             TEXT,
-    creado_en         TEXT DEFAULT (datetime('now','localtime'))
-  );
+  -- [F5] Tablas legacy financieras muertas removidas (facturas_compra,
+  -- liquidaciones_consignacion, facturas_venta): cubiertas por pa_compras / ven_*.
+  -- Drop de DBs existentes en la migración del final de este archivo.
 
   CREATE TABLE IF NOT EXISTS gastos (
     id                INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -569,77 +522,13 @@ db.exec(`
     importe           REAL DEFAULT 0,
     moneda            TEXT DEFAULT 'ARS',
     estado            TEXT DEFAULT 'pendiente' CHECK(estado IN ('pendiente','facturado')),
-    factura_compra_id INTEGER REFERENCES facturas_compra(id),
     notas             TEXT,
     creado_en         TEXT DEFAULT (datetime('now','localtime'))
   );
 
-  CREATE TABLE IF NOT EXISTS cta_cte_proveedores (
-    id            INTEGER PRIMARY KEY AUTOINCREMENT,
-    proveedor_id  INTEGER NOT NULL REFERENCES proveedores(id),
-    fecha         TEXT NOT NULL,
-    tipo          TEXT NOT NULL CHECK(tipo IN ('debito','credito')),
-    concepto      TEXT NOT NULL,
-    importe       REAL DEFAULT 0,
-    moneda        TEXT DEFAULT 'ARS',
-    referencia_tipo TEXT,
-    referencia_id INTEGER,
-    saldo_acumulado REAL DEFAULT 0,
-    creado_en     TEXT DEFAULT (datetime('now','localtime'))
-  );
-
-  CREATE TABLE IF NOT EXISTS cta_cte_clientes (
-    id               INTEGER PRIMARY KEY AUTOINCREMENT,
-    cliente_telefono TEXT NOT NULL,
-    empresa          TEXT,
-    fecha            TEXT NOT NULL,
-    tipo             TEXT NOT NULL CHECK(tipo IN ('debito','credito')),
-    concepto         TEXT NOT NULL,
-    importe          REAL DEFAULT 0,
-    moneda           TEXT DEFAULT 'ARS',
-    referencia_tipo  TEXT,
-    referencia_id    INTEGER,
-    saldo_acumulado  REAL DEFAULT 0,
-    creado_en        TEXT DEFAULT (datetime('now','localtime'))
-  );
-
-  CREATE TABLE IF NOT EXISTS caja (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    fecha           TEXT NOT NULL,
-    tipo            TEXT NOT NULL CHECK(tipo IN ('ingreso','egreso')),
-    concepto        TEXT NOT NULL,
-    importe         REAL DEFAULT 0,
-    moneda          TEXT DEFAULT 'ARS',
-    referencia_tipo TEXT,
-    referencia_id   INTEGER,
-    creado_en       TEXT DEFAULT (datetime('now','localtime'))
-  );
-
-  CREATE TABLE IF NOT EXISTS cheques_propios (
-    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
-    fecha_emision      TEXT NOT NULL,
-    fecha_vencimiento  TEXT NOT NULL,
-    banco              TEXT,
-    nro_cheque         TEXT,
-    beneficiario       TEXT,
-    importe            REAL DEFAULT 0,
-    estado             TEXT DEFAULT 'emitido' CHECK(estado IN ('emitido','debitado','anulado')),
-    notas              TEXT,
-    creado_en          TEXT DEFAULT (datetime('now','localtime'))
-  );
-
-  CREATE TABLE IF NOT EXISTS cheques_terceros (
-    id                INTEGER PRIMARY KEY AUTOINCREMENT,
-    fecha_recepcion   TEXT NOT NULL,
-    fecha_vencimiento TEXT NOT NULL,
-    banco             TEXT,
-    nro_cheque        TEXT,
-    librador          TEXT,
-    importe           REAL DEFAULT 0,
-    estado            TEXT DEFAULT 'en_cartera' CHECK(estado IN ('en_cartera','depositado','endosado','rechazado')),
-    notas             TEXT,
-    creado_en         TEXT DEFAULT (datetime('now','localtime'))
-  );
+  -- [F5] Tablas legacy financieras muertas removidas (cta_cte_proveedores,
+  -- cta_cte_clientes, caja, cheques_propios, cheques_terceros): cubiertas por
+  -- pa_pagos_proveedores / ven_cobranzas / fin_*. Drop en la migración del final.
 `);
 
 // Función requerida por src/rutas/abasto.js
@@ -871,7 +760,6 @@ db.exec(`
     total_importe     REAL DEFAULT 0,
     moneda            TEXT DEFAULT 'ARS',
     notas             TEXT,
-    factura_venta_id  INTEGER REFERENCES facturas_venta(id),
     creado_en         TEXT DEFAULT (datetime('now','localtime'))
   );
 
@@ -1238,4 +1126,60 @@ db.exec(`
     } catch(e) { console.error("[DB] Error re-asociando remitos a talonarios:", e.message); }
 
   } catch(e) { console.error("[DB] Error migrando IFCO:", e.message); }
+})();
+
+// ═══════════════════════════════════════════════════════════════════════════
+// MULTISOCIEDAD — FASE 5: deprecación del legacy financiero MUERTO (OK Andy + Pablo)
+// ───────────────────────────────────────────────────────────────────────────
+// Borra 8 tablas legacy SIN uso (verificado: cero SELECT/INSERT/UPDATE en el código;
+// su función está cubierta por fin_* / ven_* / pa_pagos_* / pa_compras) y limpia 2
+// columnas colgantes (gastos.factura_compra_id, mandatas.factura_venta_id) —
+// confirmadas SIEMPRE NULL (ningún código las escribe nunca).
+// EXCLUIDAS (features VIVAS de Abasto IFCO, NO se tocan): gastos, caja_operador.
+// Red de seguridad: VACUUM INTO (backup completo) ANTES del DROP, una sola vez; si
+// no se puede crear el backup, ABORTA sin borrar nada. Idempotente.
+// ALTER DROP COLUMN requiere SQLite 3.35+ (Railway bundlea 3.45 vía better-sqlite3
+// 9.6.0); va con try/catch defensivo: si fallara, la columna queda NULL e inofensiva.
+(function deprecarLegacyFinancieroF5() {
+  try {
+    const MUERTAS = ['facturas_compra','liquidaciones_consignacion','facturas_venta',
+                     'cta_cte_proveedores','cta_cte_clientes','caja','cheques_propios','cheques_terceros'];
+    const existeTabla = (t) => !!db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name=?").get(t);
+    const tieneCol = (t,c) => { try { return db.prepare(`PRAGMA table_info(${t})`).all().some(x=>x.name===c); } catch(_) { return false; } };
+
+    const pendiente = MUERTAS.some(existeTabla)
+      || tieneCol('gastos','factura_compra_id')
+      || tieneCol('mandatas','factura_venta_id');
+    if (!pendiente) return; // idempotente: ya aplicado
+
+    // 1) Backup de red ANTES del DROP (una sola vez). Si falla, abortar sin tocar nada.
+    const backupPath = path.join(path.dirname(DB_PATH), 'clientes-pre-f5-backup.db');
+    if (!fs.existsSync(backupPath)) {
+      try {
+        db.exec(`VACUUM INTO '${backupPath.replace(/'/g, "''")}'`);
+        console.log('[F5] Backup pre-deprecación creado:', backupPath);
+      } catch(e) {
+        console.error('[F5] No se pudo crear el backup — ABORTANDO deprecación (no se borró nada):', e.message);
+        return;
+      }
+    }
+
+    // 2) Drop de tablas muertas + limpieza de columnas colgantes (FK off durante el cambio)
+    const fkPrev = db.pragma('foreign_keys', { simple: true });
+    db.pragma('foreign_keys = OFF');
+    try {
+      for (const t of MUERTAS) db.exec(`DROP TABLE IF EXISTS ${t}`);
+      if (tieneCol('gastos','factura_compra_id')) {
+        try { db.exec('ALTER TABLE gastos DROP COLUMN factura_compra_id'); }
+        catch(e) { console.warn('[F5] DROP COLUMN gastos.factura_compra_id falló (queda NULL, inofensiva):', e.message); }
+      }
+      if (tieneCol('mandatas','factura_venta_id')) {
+        try { db.exec('ALTER TABLE mandatas DROP COLUMN factura_venta_id'); }
+        catch(e) { console.warn('[F5] DROP COLUMN mandatas.factura_venta_id falló (queda NULL, inofensiva):', e.message); }
+      }
+      console.log('[F5] Legacy financiero muerto deprecado:', MUERTAS.join(', '));
+    } finally {
+      db.pragma(`foreign_keys = ${fkPrev ? 'ON' : 'OFF'}`);
+    }
+  } catch(e) { console.error('[F5] Error deprecando legacy financiero:', e.message); }
 })();
