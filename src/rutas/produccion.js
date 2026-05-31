@@ -32,6 +32,31 @@ function requireAdmin(req, res, next) {
   } catch(e) { res.status(401).json({ ok: false, error: 'Sesión inválida' }); }
 }
 
+// ── TEMPORAL: conteo de tablas legacy de personal (fichajes GPS + partes) ──────
+// Solo lectura, admin-only. Sirve para decidir el borrado del flujo legacy de
+// Scout. SE ELIMINA en el PR del borrado (andy/chore-borrar-personal-scout-legacy).
+router.get('/_debug-count-legacy', requireAdmin, (req, res) => {
+  const db = getDb();
+  // [tabla, columna_timestamp | null]
+  const tablas = [
+    ['pa_fichajes_cuadrilla', 'creado_en'],
+    ['pa_partes_trabajo', 'creado_en'],
+    ['pa_partes_trabajo_items', null],        // esta tabla no tiene columna de fecha
+    ['pa_partes_valorizacion', 'fecha_valorizacion'],
+  ];
+  const data = {};
+  for (const [t, tsCol] of tablas) {
+    try {
+      const filas = db.prepare(`SELECT COUNT(*) AS n FROM ${t}`).get().n;
+      const ultimo = tsCol ? (db.prepare(`SELECT MAX(${tsCol}) AS m FROM ${t}`).get().m || null) : null;
+      data[t] = { filas, ultimo, columna_fecha: tsCol };
+    } catch (e) {
+      data[t] = { error: e.message };
+    }
+  }
+  res.json({ ok: true, generado: new Date().toISOString(), data });
+});
+
 // ── Helper: campañas activas (una por tipo) ────────────────────────────────
 // Devuelve los ids de la campaña anual y estacional activas (o null cada una).
 function campañasActivas(db) {
