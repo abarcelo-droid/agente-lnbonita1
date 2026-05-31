@@ -120,8 +120,10 @@ function montarCRUD(path, tabla, fields, opts = {}) {
 }
 
 // ── PRODUCTOS ──────────────────────────────────────────────────────────────────
+// nombre = Especie (label en UI). unidad_base/vida_util_dias_default ya no se editan
+// desde la UI (Catálogo) pero siguen en la tabla con sus defaults (vida útil la usa Compras).
 montarCRUD('productos', 'sg_productos',
-  ['codigo', 'nombre', 'familia', 'unidad_base', 'vida_util_dias_default'],
+  ['codigo', 'nombre', 'variedad', 'familia', 'unidad_base', 'vida_util_dias_default'],
   { orderBy: 'nombre COLLATE NOCASE' });
 
 // ── PRESENTACIONES (filtra por producto_id) ──────────────────────────────────────

@@ -31,4 +31,13 @@ try {
     db.prepare("DELETE FROM modulos_config WHERE modulo='sg'").run();
     console.log("[ORG] Modulos Abasto SG verificados (6 modulos; legacy 'sg' removido)");
   } else { console.warn("[ORG] ensureModuloSG: sociedad no encontrada"); }
+
+  // ── Renombres "Gestion Insumos" (ex "Abasto IFCO") — solo labels, idempotente ──
+  // El seed de db_org.js no se actualiza en DBs ya seedeadas; estos UPDATE corren
+  // siempre (post-seed, porque db_org.js importa este archivo al final). NO toca rutas,
+  // endpoints ni ifco.js: solo los textos visibles en modulos_config.
+  db.prepare("UPDATE modulos_config SET grupo='Gestión Insumos' WHERE grupo='Abasto IFCO'").run();
+  db.prepare("UPDATE modulos_config SET label='Galpones Asociados' WHERE modulo='ab-proveedores'").run();
+  db.prepare("UPDATE modulos_config SET label='Liquidaciones' WHERE modulo='ab-liquidaciones'").run();
+  console.log("[ORG] Labels Gestion Insumos verificados (grupo + Galpones Asociados + Liquidaciones)");
 } catch (e) { console.error("[ORG] Error ensureModuloSG:", e.message); }
