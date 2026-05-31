@@ -283,17 +283,18 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   <div class="ng" style="margin-top:8px">Equipo</div>
   <div class="ni" data-sec="conv" id="nav-conv"><span class="dot" id="dot-conv"></span>Conversaciones</div>
   <div class="ni" data-sec="guardias"><span class="dot"></span>Guardias</div>
-  <div class="ng" style="margin-top:8px">Abasto</div>
+  <div class="ng" style="margin-top:8px">Gestión Insumos</div>
   <div class="ni" data-sec="ab-dashboard"><span class="dot da"></span>Dashboard</div>
   <div class="ni" data-sec="ab-stock"><span class="dot da"></span>Stock</div>
   <div class="ni" data-sec="ab-partidas"><span class="dot dc"></span>Ingreso Partidas</div>
-  <div class="ni" data-sec="ab-proveedores"><span class="dot db"></span>Proveedores</div>
+  <div class="ni" data-sec="ab-proveedores"><span class="dot db"></span>Galpones Asociados</div>
   <div class="ni" data-sec="ab-remitos"><span class="dot dd"></span>Remitos</div>
   <div class="ni" data-sec="ab-ifcos"><span class="dot da"></span>📦 IFCOs</div>
   <div class="ni" data-sec="ab-mandata"><span class="dot de"></span>Mandata</div>
   <div class="ni" data-sec="ab-gastos"><span class="dot de"></span>Gastos</div>
   <div class="ni" data-sec="ab-liquidaciones"><span class="dot db"></span>📄 Liquidaciones</div>
-  <div class="ni" data-sec="ingreso-factura"><span class="dot db"></span>Ingreso de Factura</div>
+  <!-- Ingreso de Factura: suelto, no pertenece a Gestión Insumos; margin-top lo separa -->
+  <div class="ni" data-sec="ingreso-factura" style="margin-top:8px"><span class="dot db"></span>Ingreso de Factura</div>
   <div class="ng" style="margin-top:8px">Administracion</div>
   <div class="ni" data-sec="cobranza"><span class="dot db"></span>Facturas y cobros</div>
   <div class="ni" data-sec="cta-cte"><span class="dot de"></span>Cta. Corriente</div>
@@ -2035,8 +2036,8 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     <div class="sg-sub on" id="sg-sub-productos">
       <div style="display:flex;justify-content:flex-end;margin-bottom:10px"><button class="btn bb" onclick="sgOpenModal('productos')">+ Nuevo producto</button></div>
       <div class="ab-table-wrap"><table class="pa-tbl">
-        <thead><tr><th>Código</th><th>Nombre</th><th>Familia</th><th>Unidad</th><th style="text-align:right">Vida útil (d)</th><th></th></tr></thead>
-        <tbody id="sg-tb-productos"><tr><td colspan="6" class="emp">Cargando…</td></tr></tbody>
+        <thead><tr><th>Código</th><th>Especie</th><th>Variedad</th><th>Familia</th><th></th></tr></thead>
+        <tbody id="sg-tb-productos"><tr><td colspan="5" class="emp">Cargando…</td></tr></tbody>
       </table></div>
     </div>
 
@@ -2327,7 +2328,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
 var SG = { cacheProd: [], cacheCond: [], last: {}, cur: null, cuotas: [] };
 
 // Catálogos de opciones (value, label)
-var SG_FAMILIA = [['frutas','Frutas'],['hortalizas','Hortalizas'],['verduras_hoja','Verduras de hoja'],['aromaticas','Aromáticas'],['otros','Otros']];
+var SG_FAMILIA = [['frutas','Frutas'],['hortalizas_pesadas','Hortalizas Pesadas'],['hortalizas_livianas','Hortalizas Livianas'],['hoja','Hoja'],['otros','Otros']];
 var SG_UNIDAD  = [['kg','kg'],['unidad','unidad'],['atado','atado']];
 var SG_TIPOPRV = [['productor','Productor'],['importador','Importador'],['mayorista_regional','Mayorista regional'],['otros','Otros']];
 var SG_TIPOCLI = [['horeca','HORECA'],['supermercado','Supermercado'],['mayorista_regional','Mayorista regional'],['minorista','Minorista'],['consumidor_final','Consumidor final'],['otros','Otros']];
@@ -2342,17 +2343,16 @@ var SG_SCHEMA = {
     titulo:'producto', path:'productos',
     fields:[
       {k:'codigo', l:'Código', t:'text', req:1, ph:'TOMATE-PERITA'},
-      {k:'nombre', l:'Nombre', t:'text', req:1, ph:'Tomate Perita'},
-      {k:'familia', l:'Familia', t:'select', o:SG_FAMILIA},
-      {k:'unidad_base', l:'Unidad base', t:'select', o:SG_UNIDAD, def:'kg'},
-      {k:'vida_util_dias_default', l:'Vida útil (días)', t:'number', ph:'7'}
+      {k:'nombre', l:'Especie', t:'text', req:1, ph:'Tomate'},
+      {k:'variedad', l:'Variedad', t:'text', ph:'Perita'},
+      {k:'familia', l:'Familia', t:'select', o:SG_FAMILIA}
     ]
   },
   presentaciones: {
     titulo:'presentación', path:'presentaciones',
     fields:[
       {k:'producto_id', l:'Producto', t:'select', src:'prod', req:1},
-      {k:'nombre', l:'Presentación', t:'text', req:1, ph:'Cajón 20kg'},
+      {k:'nombre', l:'Presentación', t:'select', o:[['Kilos','Kilos'],['Unidades','Unidades']], req:1},
       {k:'factor_conversion', l:'Factor de conversión (cuántas unidades base = 1 presentación)', t:'number', req:1, ph:'20'}
     ]
   },
@@ -2430,6 +2430,8 @@ function sgFactor(presId){ var p = SG.cachePres.find(function(x){ return String(
 function sgMoney(n){ return '$'+nr(n); }
 
 function sgProdNombre(id){ var p = SG.cacheProd.find(function(x){ return x.id===id; }); return p ? p.nombre : ('#'+id); }
+// Especie + Variedad (para dropdowns/listados de Catálogo donde conviene distinguir variedad)
+function sgProdLabel(id){ var p = SG.cacheProd.find(function(x){ return x.id===id; }); return p ? (p.nombre + (p.variedad ? ' '+p.variedad : '')) : ('#'+id); }
 function sgCondNombre(id){ if(!id) return '—'; var c = SG.cacheCond.find(function(x){ return x.id===id; }); return c ? c.nombre : ('#'+id); }
 function sgLbl(opts, v){ var f = (opts||[]).find(function(o){ return o[0]===v; }); return f ? f[1] : (v||'—'); }
 
@@ -2450,7 +2452,7 @@ function sgLoad(entity){
 }
 
 function sgEmpty(entity){
-  var cols = {productos:6, presentaciones:4, proveedores:6, clientes:6, condiciones:4};
+  var cols = {productos:5, presentaciones:4, proveedores:6, clientes:6, condiciones:4};
   return '<tr><td colspan="'+(cols[entity]||6)+'" class="emp">Sin registros. Creá el primero con el botón de arriba.</td></tr>';
 }
 
@@ -2462,11 +2464,11 @@ function sgActions(entity, id){
 
 function sgRow(entity, r){
   if (entity==='productos'){
-    return '<tr><td><code>'+esc(r.codigo)+'</code></td><td>'+esc(r.nombre)+'</td><td>'+sgLbl(SG_FAMILIA,r.familia)
-      +'</td><td>'+esc(r.unidad_base||'')+'</td><td style="text-align:right">'+(r.vida_util_dias_default||'—')+'</td>'+sgActions(entity,r.id)+'</tr>';
+    return '<tr><td><code>'+esc(r.codigo)+'</code></td><td>'+esc(r.nombre)+'</td><td>'+esc(r.variedad||'—')+'</td><td>'+sgLbl(SG_FAMILIA,r.familia)
+      +'</td>'+sgActions(entity,r.id)+'</tr>';
   }
   if (entity==='presentaciones'){
-    return '<tr><td>'+esc(sgProdNombre(r.producto_id))+'</td><td>'+esc(r.nombre)+'</td><td style="text-align:right">'+(r.factor_conversion||0)+'</td>'+sgActions(entity,r.id)+'</tr>';
+    return '<tr><td>'+esc(sgProdLabel(r.producto_id))+'</td><td>'+esc(r.nombre)+'</td><td style="text-align:right">'+(r.factor_conversion||0)+'</td>'+sgActions(entity,r.id)+'</tr>';
   }
   if (entity==='proveedores'){
     return '<tr><td>'+esc(r.razon_social)+'</td><td>'+esc(r.cuit||'')+'</td><td>'+sgLbl(SG_TIPOPRV,r.tipo)
@@ -2502,7 +2504,7 @@ function sgOpenModal(entity, id){
   var html = sc.fields.map(function(f){
     var inp;
     if (f.t==='select'){
-      var opts = f.src==='prod' ? SG.cacheProd.map(function(p){ return [p.id, p.nombre]; })
+      var opts = f.src==='prod' ? SG.cacheProd.map(function(p){ return [p.id, p.nombre + (p.variedad ? ' '+p.variedad : '')]; })
                : f.src==='cond' ? SG.cacheCond.map(function(c){ return [c.id, c.nombre]; })
                : f.o;
       var blank = (f.req && f.src) ? '' : '<option value="">—</option>';

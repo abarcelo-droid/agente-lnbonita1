@@ -21,8 +21,9 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS sg_productos (
     id                      INTEGER PRIMARY KEY AUTOINCREMENT,
     codigo                  TEXT NOT NULL UNIQUE,
-    nombre                  TEXT NOT NULL,
-    familia                 TEXT CHECK(familia IN ('frutas','hortalizas','verduras_hoja','aromaticas','otros')),
+    nombre                  TEXT NOT NULL,                       -- "Especie" en la UI
+    variedad                TEXT,                                -- texto libre (nullable)
+    familia                 TEXT CHECK(familia IN ('frutas','hortalizas_pesadas','hortalizas_livianas','hoja','otros')),
     unidad_base             TEXT NOT NULL DEFAULT 'kg' CHECK(unidad_base IN ('kg','unidad','atado')),
     vida_util_dias_default  INTEGER DEFAULT 7,
     activo                  INTEGER NOT NULL DEFAULT 1,
@@ -358,6 +359,61 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_sg_despacho_items_despacho ON sg_despacho_items(despacho_id);
   CREATE INDEX IF NOT EXISTS idx_sg_despacho_items_lote     ON sg_despacho_items(lote_id);
 `);
+
+// ── MIGRACIÓN idempotente: sg_productos → +'variedad' y nuevas opciones de familia ──
+// El CHECK de familia no se puede cambiar con ALTER, así que reconstruimos la tabla
+// (patrón estándar SQLite: FK off → tabla nueva → copia → drop → rename). BETA: se
+// mapean los valores viejos de familia a los nuevos. Corre solo una vez (cuando aún
+// no existe la columna 'variedad'). Mantiene los ids (las FKs de otras tablas siguen válidas).
+try {
+  const cols = db.prepare("PRAGMA table_info(sg_productos)").all().map(c => c.name);
+  if (!cols.includes('variedad')) {
+    db.pragma('foreign_keys = OFF');
+    const rebuild = db.transaction(() => {
+      db.exec(`
+        CREATE TABLE sg_productos_new (
+          id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+          codigo                  TEXT NOT NULL UNIQUE,
+          nombre                  TEXT NOT NULL,
+          variedad                TEXT,
+          familia                 TEXT CHECK(familia IN ('frutas','hortalizas_pesadas','hortalizas_livianas','hoja','otros')),
+          unidad_base             TEXT NOT NULL DEFAULT 'kg' CHECK(unidad_base IN ('kg','unidad','atado')),
+          vida_util_dias_default  INTEGER DEFAULT 7,
+          activo                  INTEGER NOT NULL DEFAULT 1,
+          creado_en               TEXT DEFAULT (datetime('now','localtime')),
+          creado_por              INTEGER,
+          modificado_en           TEXT,
+          modificado_por          INTEGER,
+          eliminado_en            TEXT,
+          eliminado_por_id        INTEGER
+        );
+        INSERT INTO sg_productos_new
+          (id, codigo, nombre, variedad, familia, unidad_base, vida_util_dias_default,
+           activo, creado_en, creado_por, modificado_en, modificado_por, eliminado_en, eliminado_por_id)
+        SELECT id, codigo, nombre, NULL,
+          CASE familia
+            WHEN 'hortalizas'    THEN 'hortalizas_pesadas'
+            WHEN 'verduras_hoja' THEN 'hoja'
+            WHEN 'aromaticas'    THEN 'otros'
+            WHEN 'frutas'        THEN 'frutas'
+            WHEN 'otros'         THEN 'otros'
+            ELSE NULL
+          END,
+          unidad_base, vida_util_dias_default,
+          activo, creado_en, creado_por, modificado_en, modificado_por, eliminado_en, eliminado_por_id
+        FROM sg_productos;
+        DROP TABLE sg_productos;
+        ALTER TABLE sg_productos_new RENAME TO sg_productos;
+      `);
+    });
+    rebuild();
+    db.pragma('foreign_keys = ON');
+    console.log('[DB] SG sg_productos migrado (+variedad, familia: frutas/hortalizas_pesadas/hortalizas_livianas/hoja/otros)');
+  }
+} catch (e) {
+  try { db.pragma('foreign_keys = ON'); } catch (_) {}
+  console.error('[DB] SG migración sg_productos:', e.message);
+}
 
 // ── BACKFILL idempotente: margen_estimado por kg ────────────────────────────────
 // Bug F4: el margen se grababa como subtotal − kg_despachados × costo_final, pero
