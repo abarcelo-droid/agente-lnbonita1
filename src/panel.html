@@ -8475,7 +8475,7 @@ function sgRepExport(){
           alert('Tu sesión expiró. Te llevamos al login.');
           // Conservar a dónde estaba para volver después de loguear
           const next = encodeURIComponent(window.location.pathname + window.location.search);
-          window.location.href = '/login.html?next=' + next;
+          window.location.href = '/login?next=' + next;
         }
       }
       return res;

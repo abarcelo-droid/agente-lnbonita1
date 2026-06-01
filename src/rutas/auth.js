@@ -630,7 +630,7 @@ router.post('/solicitar-reset', async (req, res) => {
     db.prepare("INSERT INTO password_reset_tokens (token, usuario_id, expira_en, ip) VALUES (?, ?, ?, ?)").run(token, user.id, expiraEn, ip);
 
     // Armar link y mandar mail
-    const link = `${PANEL_BASE_URL}/login.html?reset=${token}`;
+    const link = `${PANEL_BASE_URL}/login?reset=${token}`;
     const nombre = user.nombre || user.username || 'usuario';
     const username = user.username || '—';
 
