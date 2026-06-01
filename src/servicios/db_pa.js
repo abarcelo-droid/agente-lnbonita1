@@ -2974,6 +2974,19 @@ db.exec(`
     if (!c.includes('mo_clase'))   { db.exec("ALTER TABLE pa_cuentas ADD COLUMN mo_clase TEXT");                 console.log('[PA] pa_cuentas.mo_clase agregado'); }
     if (!c.includes('mo_cultivo')) { db.exec("ALTER TABLE pa_cuentas ADD COLUMN mo_cultivo TEXT");               console.log('[PA] pa_cuentas.mo_cultivo agregado'); }
     if (!c.includes('mo_vigente')) { db.exec("ALTER TABLE pa_cuentas ADD COLUMN mo_vigente INTEGER DEFAULT 0");  console.log('[PA] pa_cuentas.mo_vigente agregado'); }
+    // Backfill de clase para cuentas MO sin clasificar (idempotente: solo donde mo_clase IS NULL).
+    //   Señal = permite_lote del plan de cuentas: 0 = estructura (no va a un lote) → 'general';
+    //   1 = imputable a lote → 'productivo'. Así MO GENERALES (permite_lote=0) queda general
+    //   de entrada y el resto productivo, sin name-parsing. Overridable desde la UI de ingeniería.
+    const colsC = db.prepare("PRAGMA table_info(pa_cuentas)").all().map(x => x.name);
+    if (colsC.includes('permite_lote')) {
+      const r = db.prepare(`
+        UPDATE pa_cuentas
+        SET mo_clase = CASE WHEN COALESCE(permite_lote,1)=0 THEN 'general' ELSE 'productivo' END
+        WHERE nombre LIKE 'MO %' AND mo_clase IS NULL
+      `).run();
+      if (r.changes) console.log('[PA] backfill mo_clase en', r.changes, 'cuentas MO (general/productivo según permite_lote)');
+    }
   } catch (e) { console.error('[PA] Error migrando pa_cuentas (rubro MO):', e.message); }
 
   // (D) Link del pago de personal al egreso de caja (fin_movimientos).
