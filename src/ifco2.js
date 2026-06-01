@@ -578,6 +578,13 @@
       fetchJSON(API + '/proveedores').then(function (ps) {
         (ps || []).forEach(function (p) { st.provNombre[p.id] = p.nombre; });
       });
+      // Restaura el gate de prefill por foto (OCR). Los flujos legacy reusados (nuevo despacho,
+      // cargar sellado, match-sellado) leen window-global IFCO._ocr, que seteaba ifcoCargar() —
+      // el rediseño dejó de llamarlo. OJO: IFCO es un `const` global de panel.html (NO window.IFCO),
+      // por eso se referencia por nombre con guarda typeof.
+      fetchJSON(API + '/ocr/status').then(function (s) {
+        try { if (typeof IFCO !== 'undefined' && IFCO) IFCO._ocr = s || { enabled: false }; } catch (e) {}
+      });
       // resumen (KPIs + pills)
       fetchJSON(API + '/resumen').then(function (R) {
         st.resumen = R || {};
