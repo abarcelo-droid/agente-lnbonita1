@@ -1255,7 +1255,7 @@ db.exec(`
     rubro_cuenta_id       INTEGER NOT NULL,                      -- FK lógica a pa_cuentas(id), read-only
     campaña_anual_id      INTEGER NOT NULL REFERENCES pa_campañas(id),
     campaña_estacional_id INTEGER NOT NULL REFERENCES pa_campañas(id),
-    lote_id               INTEGER NOT NULL REFERENCES pa_lotes(id),
+    lote_id               INTEGER REFERENCES pa_lotes(id),        -- nullable: NULL en MO general (gasto de estructura, sin lote)
     finca                 TEXT,                                  -- denormalizado del lote
     tarea_tipo_id         INTEGER REFERENCES pa_tareas_tipos(id),
     cultivo               TEXT,                                  -- opcional, denormalizado
@@ -2956,6 +2956,105 @@ db.exec(`
     console.log('[PA][MS-F2] Financiero (cajas/bancos) multisociedad inicializado.');
   } catch (e) {
     console.error('[PA][MS-F2] Error en migración multisociedad Fase 2:', e.message);
+  }
+})();
+
+// ═══════════════════════════════════════════════════════════════════════════
+// MÓDULO PERSONAL PC — cambios de modales/lógica (rubro→producto, semanas, pago caja)
+// Todas idempotentes y guardadas: corren siempre, no rompen si las columnas/tablas
+// ya existen. NO referencian columnas nuevas dentro de un schema-template bare
+// (lección del crash #299 con personal_actual_id).
+// ═══════════════════════════════════════════════════════════════════════════
+(function migracionPersonalPCModales() {
+  // (B) Mini-modelo rubro→producto en cuentas MO (lo setea la ingeniera).
+  //     mo_clase: 'productivo'/'general'/NULL · mo_cultivo: producto (texto, = pa_cultivos_lote.cultivo)
+  //     mo_vigente: 1 = el operario puede cargar sobre este rubro.
+  try {
+    const c = db.prepare("PRAGMA table_info(pa_cuentas)").all().map(x => x.name);
+    if (!c.includes('mo_clase'))   { db.exec("ALTER TABLE pa_cuentas ADD COLUMN mo_clase TEXT");                 console.log('[PA] pa_cuentas.mo_clase agregado'); }
+    if (!c.includes('mo_cultivo')) { db.exec("ALTER TABLE pa_cuentas ADD COLUMN mo_cultivo TEXT");               console.log('[PA] pa_cuentas.mo_cultivo agregado'); }
+    if (!c.includes('mo_vigente')) { db.exec("ALTER TABLE pa_cuentas ADD COLUMN mo_vigente INTEGER DEFAULT 0");  console.log('[PA] pa_cuentas.mo_vigente agregado'); }
+  } catch (e) { console.error('[PA] Error migrando pa_cuentas (rubro MO):', e.message); }
+
+  // (D) Link del pago de personal al egreso de caja (fin_movimientos).
+  try {
+    const c = db.prepare("PRAGMA table_info(pa_cc_movimientos)").all().map(x => x.name);
+    if (!c.includes('fin_movimiento_id')) {
+      db.exec("ALTER TABLE pa_cc_movimientos ADD COLUMN fin_movimiento_id INTEGER REFERENCES fin_movimientos(id)");
+      console.log('[PA] pa_cc_movimientos.fin_movimiento_id agregado');
+    }
+  } catch (e) { console.error('[PA] Error migrando pa_cc_movimientos (fin_movimiento_id):', e.message); }
+
+  // (C) Semanas de pago (rango libre apertura→cierre, validación de huecos/solapes en la API).
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS pa_semanas_pago (
+        id             INTEGER PRIMARY KEY AUTOINCREMENT,
+        fecha_apertura TEXT NOT NULL,
+        fecha_cierre   TEXT NOT NULL,
+        estado         TEXT NOT NULL DEFAULT 'abierta' CHECK(estado IN ('abierta','cerrada')),
+        notas          TEXT,
+        creado_por     INTEGER REFERENCES usuarios(id),
+        creado_en      TEXT DEFAULT (datetime('now','localtime'))
+      );
+      CREATE INDEX IF NOT EXISTS idx_pa_semanas_pago_fechas ON pa_semanas_pago(fecha_apertura, fecha_cierre);
+    `);
+  } catch (e) { console.error('[PA] Error creando pa_semanas_pago:', e.message); }
+
+  // (B) lote_id nullable en pa_asistencias → MO general sin lote (gasto de estructura,
+  //     NO se imputa a pa_costos_lote). Cambiar NOT NULL requiere rebuild (SQLite).
+  //     Guard: solo rebuildea si lote_id TODAVÍA es NOT NULL → idempotente.
+  try {
+    const info = db.prepare("PRAGMA table_info(pa_asistencias)").all();
+    const loteCol = info.find(c => c.name === 'lote_id');
+    if (loteCol && loteCol.notnull === 1) {
+      db.pragma('foreign_keys = OFF');
+      const rebuild = db.transaction(() => {
+        db.exec(`
+          CREATE TABLE pa_asistencias_new (
+            id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+            fecha                 TEXT NOT NULL,
+            cuadrilla_id          INTEGER REFERENCES pa_cuadrillas(id),
+            personal_id           INTEGER REFERENCES pa_personal(id),
+            contratista_id        INTEGER REFERENCES pa_personal(id),
+            cantidad              INTEGER NOT NULL DEFAULT 1,
+            horas                 REAL NOT NULL,
+            jornales_calc         REAL,
+            rubro_cuenta_id       INTEGER NOT NULL,
+            campaña_anual_id      INTEGER NOT NULL REFERENCES pa_campañas(id),
+            campaña_estacional_id INTEGER NOT NULL REFERENCES pa_campañas(id),
+            lote_id               INTEGER REFERENCES pa_lotes(id),
+            finca                 TEXT,
+            tarea_tipo_id         INTEGER REFERENCES pa_tareas_tipos(id),
+            cultivo               TEXT,
+            estado                TEXT NOT NULL DEFAULT 'pendiente_valorizar'
+                                    CHECK(estado IN ('pendiente_valorizar','valorizado','anulado')),
+            notas                 TEXT,
+            cargado_por           INTEGER NOT NULL REFERENCES usuarios(id),
+            creado_en             TEXT DEFAULT (datetime('now','localtime')),
+            modificado_en         TEXT,
+            modificado_por        INTEGER,
+            anulado_en            TEXT,
+            anulado_por           INTEGER,
+            anulado_motivo        TEXT
+          );
+          INSERT INTO pa_asistencias_new SELECT * FROM pa_asistencias;
+          DROP TABLE pa_asistencias;
+          ALTER TABLE pa_asistencias_new RENAME TO pa_asistencias;
+          CREATE INDEX IF NOT EXISTS idx_pa_asist_fecha    ON pa_asistencias(fecha);
+          CREATE INDEX IF NOT EXISTS idx_pa_asist_estado   ON pa_asistencias(estado);
+          CREATE INDEX IF NOT EXISTS idx_pa_asist_personal ON pa_asistencias(personal_id);
+          CREATE INDEX IF NOT EXISTS idx_pa_asist_contra   ON pa_asistencias(contratista_id);
+          CREATE INDEX IF NOT EXISTS idx_pa_asist_lote     ON pa_asistencias(lote_id);
+        `);
+      });
+      rebuild();
+      db.pragma('foreign_keys = ON');
+      console.log('[PA] pa_asistencias.lote_id ahora nullable (MO general sin lote)');
+    }
+  } catch (e) {
+    try { db.pragma('foreign_keys = ON'); } catch (_) {}
+    console.error('[PA] Error en rebuild pa_asistencias (lote_id nullable):', e.message);
   }
 })();
 
