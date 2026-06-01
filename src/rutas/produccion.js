@@ -32,35 +32,6 @@ function requireAdmin(req, res, next) {
   } catch(e) { res.status(401).json({ ok: false, error: 'Sesión inválida' }); }
 }
 
-// ── TEMPORAL: conteos para unificar padrón (Trabajadores viejo → Personal V1) ──
-// Solo lectura, admin-only. Confirma que el padrón viejo está migrado y que Pañol
-// se puede repuntar antes de tocar nada. SE ELIMINA en el PR de la unificación
-// (andy/feat-unificar-padron-personal). Ver docs/unificar-padron-personal.md.
-router.get('/_debug-count-padron', requireAdmin, (req, res) => {
-  const db = getDb();
-  const q = (sql) => { try { return db.prepare(sql).get().n; } catch (e) { return 'ERR: ' + e.message; } };
-  const data = {
-    pa_trabajadores: {
-      total:                   q("SELECT COUNT(*) n FROM pa_trabajadores"),
-      activos:                 q("SELECT COUNT(*) n FROM pa_trabajadores WHERE activo=1"),
-      activos_sin_personal_id: q("SELECT COUNT(*) n FROM pa_trabajadores WHERE activo=1 AND personal_id IS NULL"),
-      con_grupo:               q("SELECT COUNT(*) n FROM pa_trabajadores WHERE grupo_id IS NOT NULL"),
-    },
-    pa_personal: {
-      total:   q("SELECT COUNT(*) n FROM pa_personal"),
-      activos: q("SELECT COUNT(*) n FROM pa_personal WHERE activo=1 AND eliminado_en IS NULL"),
-    },
-    panol: {
-      unidades_con_trabajador:    q("SELECT COUNT(*) n FROM pa_panol_unidades WHERE trabajador_actual_id IS NOT NULL"),
-      movimientos_con_trabajador: q("SELECT COUNT(*) n FROM pa_panol_movimientos WHERE trabajador_id IS NOT NULL"),
-      // Referencias que NO podrían backfillearse (el trabajador no tiene personal_id mapeado):
-      unidades_huerfanas:    q("SELECT COUNT(*) n FROM pa_panol_unidades u WHERE u.trabajador_actual_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM pa_trabajadores t WHERE t.id=u.trabajador_actual_id AND t.personal_id IS NOT NULL)"),
-      movimientos_huerfanos: q("SELECT COUNT(*) n FROM pa_panol_movimientos m WHERE m.trabajador_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM pa_trabajadores t WHERE t.id=m.trabajador_id AND t.personal_id IS NOT NULL)"),
-    },
-  };
-  res.json({ ok: true, generado: new Date().toISOString(), data });
-});
-
 // ── Helper: campañas activas (una por tipo) ────────────────────────────────
 // Devuelve los ids de la campaña anual y estacional activas (o null cada una).
 function campañasActivas(db) {
@@ -2854,7 +2825,7 @@ router.get('/personal/cuadrillas', requireAuth, (req, res) => {
   try {
     const data = db.prepare(`
       SELECT c.*, u.nombre as capataz_nombre,
-             (SELECT COUNT(*) FROM pa_trabajadores WHERE cuadrilla_habitual_id = c.id AND activo=1) as cantidad
+             (SELECT COUNT(*) FROM pa_personal WHERE cuadrilla_default_id = c.id AND activo=1 AND eliminado_en IS NULL) as cantidad
       FROM pa_cuadrillas c
       LEFT JOIN usuarios u ON u.id = c.capataz_id
       WHERE c.activo=1 ORDER BY c.tipo, c.nombre
@@ -2899,7 +2870,7 @@ router.get('/personal/grupos', requireAuth, (req, res) => {
   const db = getDb();
   try {
     const data = db.prepare(`
-      SELECT g.*, (SELECT COUNT(*) FROM pa_trabajadores WHERE grupo_id = g.id AND activo=1) as cantidad
+      SELECT g.*, (SELECT COUNT(*) FROM pa_personal WHERE grupo_id = g.id AND activo=1 AND eliminado_en IS NULL) as cantidad
       FROM pa_grupos g WHERE g.activo=1 ORDER BY g.nombre
     `).all();
     res.json({ ok: true, data });
@@ -2936,73 +2907,6 @@ router.patch('/personal/grupos/:id', requireAuth, (req, res) => {
     if (e.message.includes('UNIQUE')) return res.status(400).json({ ok: false, error: 'Ya existe un grupo con ese nombre' });
     res.status(500).json({ ok: false, error: e.message });
   }
-});
-
-// ── Trabajadores ───────────────────────────────────────────────────────────
-router.get('/personal/trabajadores', requireAuth, (req, res) => {
-  const db = getDb();
-  try {
-    const { cuadrilla_id, grupo_id, tipo_relacion, incluir_inactivos } = req.query;
-    let q = `SELECT t.*, c.nombre as cuadrilla_nombre, g.nombre as grupo_nombre
-             FROM pa_trabajadores t
-             LEFT JOIN pa_cuadrillas c ON c.id = t.cuadrilla_habitual_id
-             LEFT JOIN pa_grupos g ON g.id = t.grupo_id
-             WHERE 1=1`;
-    const params = [];
-    if (!incluir_inactivos) q += " AND t.activo=1";
-    if (cuadrilla_id) { q += " AND t.cuadrilla_habitual_id=?"; params.push(cuadrilla_id); }
-    if (grupo_id) { q += " AND t.grupo_id=?"; params.push(grupo_id); }
-    if (tipo_relacion) { q += " AND t.tipo_relacion=?"; params.push(tipo_relacion); }
-    q += " ORDER BY g.nombre, t.nombre";
-    res.json({ ok: true, data: db.prepare(q).all(...params) });
-  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
-});
-
-router.post('/personal/trabajadores', requireAuth, (req, res) => {
-  const db = getDb();
-  const { nombre, dni, grupo_id, cuadrilla_habitual_id, tipo_relacion, jornal_base, unidad_jornal, notas } = req.body;
-  if (!nombre) return res.status(400).json({ ok: false, error: 'nombre requerido' });
-  try {
-    // Si no viene grupo_id, asignar al grupo "Sin asignar" por default
-    let gId = grupo_id ? Number(grupo_id) : null;
-    if (!gId) {
-      const sa = db.prepare("SELECT id FROM pa_grupos WHERE nombre='Sin asignar'").get();
-      if (sa) gId = sa.id;
-    }
-    const r = db.prepare(`INSERT INTO pa_trabajadores
-        (nombre, dni, grupo_id, cuadrilla_habitual_id, tipo_relacion, jornal_base, unidad_jornal, notas)
-        VALUES (?,?,?,?,?,?,?,?)`)
-      .run(nombre, dni || null, gId, cuadrilla_habitual_id || null,
-           tipo_relacion || 'fijo',
-           Number(jornal_base) || 0,
-           unidad_jornal || 'dia',
-           notas || null);
-    res.json({ ok: true, id: r.lastInsertRowid });
-  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
-});
-
-router.patch('/personal/trabajadores/:id', requireAuth, (req, res) => {
-  const db = getDb();
-  const { nombre, dni, grupo_id, cuadrilla_habitual_id, tipo_relacion, jornal_base, unidad_jornal, activo, notas } = req.body;
-  try {
-    const c = db.prepare("SELECT * FROM pa_trabajadores WHERE id=?").get(req.params.id);
-    if (!c) return res.status(404).json({ ok: false, error: 'Trabajador no encontrado' });
-    db.prepare(`UPDATE pa_trabajadores SET
-        nombre=?, dni=?, grupo_id=?, cuadrilla_habitual_id=?, tipo_relacion=?,
-        jornal_base=?, unidad_jornal=?, activo=?, notas=?
-        WHERE id=?`)
-      .run(nombre || c.nombre,
-           dni !== undefined ? dni : c.dni,
-           grupo_id !== undefined ? grupo_id : c.grupo_id,
-           cuadrilla_habitual_id !== undefined ? cuadrilla_habitual_id : c.cuadrilla_habitual_id,
-           tipo_relacion || c.tipo_relacion,
-           jornal_base !== undefined ? Number(jornal_base) : c.jornal_base,
-           unidad_jornal || c.unidad_jornal,
-           activo !== undefined ? (activo ? 1 : 0) : c.activo,
-           notas !== undefined ? notas : c.notas,
-           req.params.id);
-    res.json({ ok: true });
-  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -3091,13 +2995,15 @@ router.get('/personal/padron', requireAuth, (req, res) => {
     const { tipo, q, incluir_inactivos } = req.query;
     let sql = `
       SELECT p.id, p.tipo, p.nombre, p.dni, p.cuit, p.persona_id, p.contratista_madre_id,
-             p.cuadrilla_default_id, p.tarifa_default, p.unidad_tarifa, p.activo, p.notas,
+             p.cuadrilla_default_id, p.grupo_id, p.tarifa_default, p.unidad_tarifa, p.activo, p.notas,
              c.nombre as cuadrilla_nombre,
              m.nombre as contratista_madre_nombre,
+             g.nombre as grupo_nombre,
              per.nombre as persona_nombre, per.apellido as persona_apellido
       FROM pa_personal p
       LEFT JOIN pa_cuadrillas c ON c.id = p.cuadrilla_default_id
       LEFT JOIN pa_personal m   ON m.id = p.contratista_madre_id
+      LEFT JOIN pa_grupos g     ON g.id = p.grupo_id
       LEFT JOIN personas per     ON per.id = p.persona_id
       WHERE p.eliminado_en IS NULL`;
     const params = [];
@@ -3121,10 +3027,12 @@ router.get('/personal/padron/:id', requireAuth, (req, res) => {
     const perms = permisosPersonal(db, req.user);
     const p = db.prepare(`
       SELECT p.*, c.nombre as cuadrilla_nombre, m.nombre as contratista_madre_nombre,
+             g.nombre as grupo_nombre,
              per.nombre as persona_nombre, per.apellido as persona_apellido
       FROM pa_personal p
       LEFT JOIN pa_cuadrillas c ON c.id = p.cuadrilla_default_id
       LEFT JOIN pa_personal m   ON m.id = p.contratista_madre_id
+      LEFT JOIN pa_grupos g     ON g.id = p.grupo_id
       LEFT JOIN personas per     ON per.id = p.persona_id
       WHERE p.id=? AND p.eliminado_en IS NULL`).get(req.params.id);
     if (!p) return res.status(404).json({ ok: false, error: 'Personal no encontrado' });
@@ -3143,7 +3051,7 @@ router.post('/personal/padron', requireAuth, (req, res) => {
   const perms = permisosPersonal(db, req.user);
   if (!perms.asistencia && !perms.valorizacion && !perms.admin)
     return res.status(403).json({ ok: false, error: 'Sin permiso para el módulo Personal' });
-  const { tipo, nombre, dni, cuit, persona_id, contratista_madre_id, cuadrilla_default_id, tarifa_default, unidad_tarifa, notas } = req.body;
+  const { tipo, nombre, dni, cuit, persona_id, contratista_madre_id, cuadrilla_default_id, grupo_id, tarifa_default, unidad_tarifa, notas } = req.body;
   if (!nombre) return res.status(400).json({ ok: false, error: 'nombre requerido' });
   if (tipo !== 'fijo' && tipo !== 'contratista') return res.status(400).json({ ok: false, error: "tipo debe ser 'fijo' o 'contratista'" });
   if (tipo === 'contratista' && (persona_id || contratista_madre_id))
@@ -3152,12 +3060,13 @@ router.post('/personal/padron', requireAuth, (req, res) => {
     // Solo valorización/admin fijan tarifa; asistencia la deja en 0
     const puedeTarifa = perms.valorizacion || perms.admin;
     const r = db.prepare(`INSERT INTO pa_personal
-        (tipo, nombre, dni, cuit, persona_id, contratista_madre_id, cuadrilla_default_id, tarifa_default, unidad_tarifa, notas, creado_por)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?)`)
+        (tipo, nombre, dni, cuit, persona_id, contratista_madre_id, cuadrilla_default_id, grupo_id, tarifa_default, unidad_tarifa, notas, creado_por)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`)
       .run(tipo, nombre.trim(), dni || null, cuit || null,
            tipo === 'fijo' ? (persona_id || null) : null,
            tipo === 'fijo' ? (contratista_madre_id || null) : null,
            cuadrilla_default_id || null,
+           grupo_id || null,
            puedeTarifa ? (Number(tarifa_default) || 0) : 0,
            unidad_tarifa || 'jornal',
            notas || null, req.user.id);
@@ -3171,13 +3080,13 @@ router.patch('/personal/padron/:id', requireAuth, (req, res) => {
   const perms = permisosPersonal(db, req.user);
   if (!perms.asistencia && !perms.valorizacion && !perms.admin)
     return res.status(403).json({ ok: false, error: 'Sin permiso para el módulo Personal' });
-  const { nombre, dni, cuit, persona_id, contratista_madre_id, cuadrilla_default_id, tarifa_default, unidad_tarifa, activo, notas } = req.body;
+  const { nombre, dni, cuit, persona_id, contratista_madre_id, cuadrilla_default_id, grupo_id, tarifa_default, unidad_tarifa, activo, notas } = req.body;
   try {
     const p = db.prepare("SELECT * FROM pa_personal WHERE id=? AND eliminado_en IS NULL").get(req.params.id);
     if (!p) return res.status(404).json({ ok: false, error: 'Personal no encontrado' });
     const puedeTarifa = perms.valorizacion || perms.admin;
     db.prepare(`UPDATE pa_personal SET
-        nombre=?, dni=?, cuit=?, persona_id=?, contratista_madre_id=?, cuadrilla_default_id=?,
+        nombre=?, dni=?, cuit=?, persona_id=?, contratista_madre_id=?, cuadrilla_default_id=?, grupo_id=?,
         tarifa_default=?, unidad_tarifa=?, activo=?, notas=?,
         modificado_en=datetime('now','localtime'), modificado_por=?
         WHERE id=?`)
@@ -3187,6 +3096,7 @@ router.patch('/personal/padron/:id', requireAuth, (req, res) => {
            p.tipo === 'fijo' ? (persona_id !== undefined ? persona_id : p.persona_id) : null,
            p.tipo === 'fijo' ? (contratista_madre_id !== undefined ? contratista_madre_id : p.contratista_madre_id) : null,
            cuadrilla_default_id !== undefined ? cuadrilla_default_id : p.cuadrilla_default_id,
+           grupo_id !== undefined ? grupo_id : p.grupo_id,
            puedeTarifa && tarifa_default !== undefined ? Number(tarifa_default) : p.tarifa_default,
            unidad_tarifa || p.unidad_tarifa,
            activo !== undefined ? (activo ? 1 : 0) : p.activo,
@@ -4292,21 +4202,6 @@ router.post('/combustible/vehiculos/:id/reactivar', requireAuth, (req, res) => {
 
 // ── Trabajadores / Grupos / Cuadrillas / Rubros / Proveedores / Lotes ──
 
-router.delete('/personal/trabajadores/:id', requireAuth, (req, res) => {
-  const db = getDb();
-  try {
-    db.prepare("UPDATE pa_trabajadores SET activo = 0 WHERE id = ?").run(req.params.id);
-    res.json({ ok: true });
-  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
-});
-router.post('/personal/trabajadores/:id/reactivar', requireAuth, (req, res) => {
-  const db = getDb();
-  try {
-    db.prepare("UPDATE pa_trabajadores SET activo = 1 WHERE id = ?").run(req.params.id);
-    res.json({ ok: true });
-  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
-});
-
 router.delete('/personal/grupos/:id', requireAuth, (req, res) => {
   const db = getDb();
   try {
@@ -4444,14 +4339,14 @@ router.get('/panol/unidades', requireAuth, (req, res) => {
     const incluirInactivas = req.query.incluir_inactivos === '1';
     const filtroEstado = req.query.estado || null;
     const filtroCategoria = req.query.categoria_id ? parseInt(req.query.categoria_id, 10) : null;
-    const filtroTrabajador = req.query.trabajador_id ? parseInt(req.query.trabajador_id, 10) : null;
+    const filtroTrabajador = req.query.personal_id ? parseInt(req.query.personal_id, 10) : null;
 
     const conds = [];
     const args = [];
     if (!incluirInactivas) conds.push('u.activo = 1');
     if (filtroEstado) { conds.push('u.estado = ?'); args.push(filtroEstado); }
     if (filtroCategoria) { conds.push('u.categoria_id = ?'); args.push(filtroCategoria); }
-    if (filtroTrabajador) { conds.push('u.trabajador_actual_id = ?'); args.push(filtroTrabajador); }
+    if (filtroTrabajador) { conds.push('u.personal_actual_id = ?'); args.push(filtroTrabajador); }
     const where = conds.length ? `WHERE ${conds.join(' AND ')}` : '';
 
     const data = db.prepare(`
@@ -4461,7 +4356,7 @@ router.get('/panol/unidades', requireAuth, (req, res) => {
         t.nombre AS trabajador_actual_nombre
       FROM pa_panol_unidades u
       LEFT JOIN pa_panol_categorias c ON c.id = u.categoria_id
-      LEFT JOIN pa_trabajadores t ON t.id = u.trabajador_actual_id
+      LEFT JOIN pa_personal t ON t.id = u.personal_actual_id
       ${where}
       ORDER BY u.codigo_interno
     `).all(...args);
@@ -4480,7 +4375,7 @@ router.get('/panol/unidades/:id', requireAuth, (req, res) => {
         t.nombre AS trabajador_actual_nombre
       FROM pa_panol_unidades u
       LEFT JOIN pa_panol_categorias c ON c.id = u.categoria_id
-      LEFT JOIN pa_trabajadores t ON t.id = u.trabajador_actual_id
+      LEFT JOIN pa_personal t ON t.id = u.personal_actual_id
       WHERE u.id = ?
     `).get(req.params.id);
     if (!u) return res.status(404).json({ ok: false, error: 'No encontrada' });
@@ -4489,7 +4384,7 @@ router.get('/panol/unidades/:id', requireAuth, (req, res) => {
         t.nombre AS trabajador_nombre,
         usr.nombre AS quien_registra_nombre
       FROM pa_panol_movimientos m
-      LEFT JOIN pa_trabajadores t ON t.id = m.trabajador_id
+      LEFT JOIN pa_personal t ON t.id = m.personal_id
       LEFT JOIN users usr ON usr.id = m.quien_registra
       WHERE m.unidad_id = ?
       ORDER BY m.fecha DESC, m.id DESC
@@ -4592,7 +4487,7 @@ router.post('/panol/unidades/:id/reactivar', requireAuth, (req, res) => {
 router.post('/panol/unidades/:id/movimiento', requireAuth, (req, res) => {
   const db = getDb();
   const unidadId = parseInt(req.params.id, 10);
-  const { tipo, trabajador_id, condicion, motivo, notas, fecha, lat, lng } = req.body;
+  const { tipo, personal_id, condicion, motivo, notas, fecha, lat, lng } = req.body;
   const tiposValidos = ['prestamo','devolucion','reparacion_inicio','reparacion_fin','baja','extravio'];
   if (!tiposValidos.includes(tipo))
     return res.status(400).json({ ok: false, error: 'Tipo de movimiento inválido' });
@@ -4604,8 +4499,8 @@ router.post('/panol/unidades/:id/movimiento', requireAuth, (req, res) => {
     if (tipo === 'prestamo') {
       if (u.estado !== 'disponible')
         return res.status(400).json({ ok: false, error: `No se puede prestar: estado actual '${u.estado}'` });
-      if (!trabajador_id)
-        return res.status(400).json({ ok: false, error: 'Trabajador requerido para préstamo' });
+      if (!personal_id)
+        return res.status(400).json({ ok: false, error: 'Persona requerida para préstamo' });
     }
     if (tipo === 'devolucion') {
       if (u.estado !== 'prestada')
@@ -4624,26 +4519,26 @@ router.post('/panol/unidades/:id/movimiento', requireAuth, (req, res) => {
       // Insertar movimiento
       db.prepare(`
         INSERT INTO pa_panol_movimientos
-          (unidad_id, tipo, fecha, trabajador_id, quien_registra, condicion, motivo, notas, lat, lng)
+          (unidad_id, tipo, fecha, personal_id, quien_registra, condicion, motivo, notas, lat, lng)
         VALUES (?, ?, COALESCE(?, datetime('now','localtime')), ?, ?, ?, ?, ?, ?, ?)
       `).run(
         unidadId, tipo, fecha || null,
-        trabajador_id || null, req.user.id,
+        personal_id || null, req.user.id,
         condicion || null, motivo || null, notas || null,
         lat || null, lng || null
       );
 
       // Actualizar estado/ubicación de la unidad según tipo
       let nuevoEstado = u.estado;
-      let nuevoTrab = u.trabajador_actual_id;
+      let nuevoTrab = u.personal_actual_id;
       let nuevaUbic = u.ubicacion_actual;
       let fechaBaja = u.fecha_baja;
       switch (tipo) {
         case 'prestamo':
           nuevoEstado = 'prestada';
-          nuevoTrab = trabajador_id;
-          // Resolver nombre del trabajador para ubicacion textual
-          const t = db.prepare("SELECT nombre FROM pa_trabajadores WHERE id=?").get(trabajador_id);
+          nuevoTrab = personal_id;
+          // Resolver nombre de la persona para ubicacion textual
+          const t = db.prepare("SELECT nombre FROM pa_personal WHERE id=?").get(personal_id);
           nuevaUbic = t ? `Con ${t.nombre}` : 'Prestada';
           break;
         case 'devolucion':
@@ -4672,7 +4567,7 @@ router.post('/panol/unidades/:id/movimiento', requireAuth, (req, res) => {
       }
       db.prepare(`
         UPDATE pa_panol_unidades
-        SET estado=?, trabajador_actual_id=?, ubicacion_actual=?, fecha_baja=?
+        SET estado=?, personal_actual_id=?, ubicacion_actual=?, fecha_baja=?
         WHERE id=?
       `).run(nuevoEstado, nuevoTrab, nuevaUbic, fechaBaja, unidadId);
     });
@@ -4693,7 +4588,7 @@ router.get('/panol/movimientos', requireAuth, (req, res) => {
         usr.nombre AS quien_registra_nombre
       FROM pa_panol_movimientos m
       JOIN pa_panol_unidades u ON u.id = m.unidad_id
-      LEFT JOIN pa_trabajadores t ON t.id = m.trabajador_id
+      LEFT JOIN pa_personal t ON t.id = m.personal_id
       LEFT JOIN users usr ON usr.id = m.quien_registra
       ORDER BY m.fecha DESC, m.id DESC
       LIMIT ?

@@ -1140,19 +1140,7 @@ db.exec(`
     creado_en   TEXT DEFAULT (datetime('now','localtime'))
   );
 
-  -- Trabajadores
-  CREATE TABLE IF NOT EXISTS pa_trabajadores (
-    id                    INTEGER PRIMARY KEY AUTOINCREMENT,
-    nombre                TEXT NOT NULL,
-    dni                   TEXT,
-    cuadrilla_habitual_id INTEGER REFERENCES pa_cuadrillas(id),
-    tipo_relacion         TEXT NOT NULL DEFAULT 'fijo' CHECK(tipo_relacion IN ('fijo','contratista')),
-    jornal_base           REAL DEFAULT 0,
-    unidad_jornal         TEXT DEFAULT 'dia' CHECK(unidad_jornal IN ('dia','hora','ha','unidad')),
-    activo                INTEGER DEFAULT 1,
-    notas                 TEXT,
-    creado_en             TEXT DEFAULT (datetime('now','localtime'))
-  );
+  -- (pa_trabajadores ELIMINADA — unificado en pa_personal. Ver migración abajo.)
 
   -- Tipos de tarea (catálogo)
   CREATE TABLE IF NOT EXISTS pa_tareas_tipos (
@@ -1187,19 +1175,7 @@ try {
   console.error('[PA] Error dropeando legacy partes/fichajes:', e.message);
 }
 
-// ── MIGRACIÓN: agregar grupo_id a pa_trabajadores ──────────────────────────
-// Grupo es distinto de cuadrilla: admin del trabajador vs. jornada operativa.
-(function migrarTrabajadoresGrupo() {
-  try {
-    const cols = db.prepare("PRAGMA table_info(pa_trabajadores)").all().map(c => c.name);
-    if (!cols.includes('grupo_id')) {
-      db.exec("ALTER TABLE pa_trabajadores ADD COLUMN grupo_id INTEGER REFERENCES pa_grupos(id)");
-      console.log('[PA] pa_trabajadores.grupo_id agregado');
-    }
-  } catch(e) { console.error('[PA] Error migrando pa_trabajadores.grupo_id:', e.message); }
-})();
-
-// ── SEED: grupo "Sin asignar" (fallback para trabajadores sin grupo) ───────
+// ── SEED: grupo "Sin asignar" (opción de fallback en el catálogo de grupos) ──
 (function seedGrupoDefault() {
   try {
     const n = db.prepare("SELECT COUNT(*) as n FROM pa_grupos").get();
@@ -1207,12 +1183,6 @@ try {
       db.prepare("INSERT INTO pa_grupos (nombre, descripcion) VALUES (?, ?)")
         .run('Sin asignar', 'Grupo por defecto — asignar uno real cuando se pueda');
       console.log('[PA] Grupo "Sin asignar" creado');
-    }
-    // Asignar trabajadores sin grupo al grupo "Sin asignar"
-    const sinAsignar = db.prepare("SELECT id FROM pa_grupos WHERE nombre='Sin asignar'").get();
-    if (sinAsignar) {
-      const upd = db.prepare("UPDATE pa_trabajadores SET grupo_id = ? WHERE grupo_id IS NULL").run(sinAsignar.id);
-      if (upd.changes > 0) console.log(`[PA] ${upd.changes} trabajadores asignados al grupo Sin asignar`);
     }
   } catch(e) { console.error('[PA] Error seed grupo default:', e.message); }
 })();
@@ -1233,6 +1203,7 @@ db.exec(`
     persona_id            INTEGER REFERENCES personas(id),         -- FK opcional al módulo Equipo (solo fijos)
     contratista_madre_id  INTEGER REFERENCES pa_personal(id),      -- si un fijo pertenece a un contratista
     cuadrilla_default_id  INTEGER REFERENCES pa_cuadrillas(id),
+    grupo_id              INTEGER REFERENCES pa_grupos(id),         -- clasificación administrativa (ex pa_trabajadores.grupo_id)
     tarifa_default        REAL DEFAULT 0,
     unidad_tarifa         TEXT DEFAULT 'jornal' CHECK(unidad_tarifa IN ('jornal','hora','tanto','tacho','planta','kg')),
     activo                INTEGER NOT NULL DEFAULT 1,
@@ -1260,57 +1231,9 @@ db.exec(`
   );
 `);
 
-// ── MIGRACIÓN: agregar pa_trabajadores.personal_id (cruce con padrón nuevo) ──
-(function migrarTrabajadoresPersonalId() {
-  try {
-    const cols = db.prepare("PRAGMA table_info(pa_trabajadores)").all().map(c => c.name);
-    if (!cols.includes('personal_id')) {
-      db.exec("ALTER TABLE pa_trabajadores ADD COLUMN personal_id INTEGER REFERENCES pa_personal(id)");
-      console.log('[PA] pa_trabajadores.personal_id agregado');
-    }
-  } catch(e) { console.error('[PA] Error migrando pa_trabajadores.personal_id:', e.message); }
-})();
-
-// ── MIGRACIÓN idempotente: pa_trabajadores (activos) → pa_personal ──────────
-// Aditiva y no destructiva: inserta en tabla nueva y vincula de vuelta.
-// Guardada por sistema_flags para correr una sola vez en Railway.
-(function migrarTrabajadoresAPersonal() {
-  const FLAG_KEY = 'migracion_pa_personal_v1';
-  try {
-    db.exec(`CREATE TABLE IF NOT EXISTS sistema_flags (
-      key TEXT PRIMARY KEY, valor TEXT, ejecutado_en TEXT DEFAULT (datetime('now','localtime'))
-    );`);
-    if (db.prepare("SELECT key FROM sistema_flags WHERE key=?").get(FLAG_KEY)) return;
-
-    const pendientes = db.prepare(
-      "SELECT * FROM pa_trabajadores WHERE activo=1 AND (personal_id IS NULL)"
-    ).all();
-
-    const mapUnidad = (u) => (u === 'hora' ? 'hora' : 'jornal'); // 'dia'→jornal; ha/unidad→jornal (revisable)
-
-    const tx = db.transaction(() => {
-      const insPersonal = db.prepare(`
-        INSERT INTO pa_personal (tipo, nombre, dni, cuadrilla_default_id, tarifa_default, unidad_tarifa, activo, notas)
-        VALUES ('fijo', ?, ?, ?, ?, ?, 1, ?)
-      `);
-      const vincular = db.prepare("UPDATE pa_trabajadores SET personal_id=? WHERE id=?");
-      let n = 0;
-      for (const t of pendientes) {
-        const r = insPersonal.run(
-          t.nombre, t.dni || null, t.cuadrilla_habitual_id || null,
-          t.jornal_base || 0, mapUnidad(t.unidad_jornal), t.notas || null
-        );
-        vincular.run(r.lastInsertRowid, t.id);
-        n++;
-      }
-      db.prepare("INSERT INTO sistema_flags (key, valor) VALUES (?, ?)")
-        .run(FLAG_KEY, `migrados=${n}`);
-      return n;
-    });
-    const n = tx();
-    console.log(`[PA] Migración pa_trabajadores→pa_personal: ${n} trabajadores migrados (tipo='fijo')`);
-  } catch(e) { console.error('[PA] Error migrando pa_trabajadores→pa_personal:', e.message); }
-})();
+// (Migraciones pa_trabajadores→pa_personal ELIMINADAS: ya cumplidas; la unificación
+//  final — grupo_id, columnas de Pañol y DROP de pa_trabajadores — está más abajo,
+//  después de crear las tablas de Pañol.)
 
 // ═══════════════════════════════════════════════════════════════════════════
 // PERSONAL V1 — Asistencia diaria (Fase 2)
@@ -1965,13 +1888,13 @@ db.exec(`
     estado          TEXT NOT NULL DEFAULT 'disponible'
                       CHECK(estado IN ('disponible','prestada','en_reparacion','dada_de_baja','extraviada')),
     ubicacion_actual TEXT,                            -- texto libre: "Estante A2", "Con Juan", etc.
-    trabajador_actual_id INTEGER REFERENCES pa_trabajadores(id), -- FK denormalizada para query rápido
+    personal_actual_id INTEGER REFERENCES pa_personal(id),       -- quién tiene la herramienta (FK denormalizada)
     notas           TEXT,
     activo          INTEGER DEFAULT 1,
     creado_en       TEXT DEFAULT (datetime('now','localtime'))
   );
   CREATE INDEX IF NOT EXISTS idx_panol_unidades_estado ON pa_panol_unidades(estado);
-  CREATE INDEX IF NOT EXISTS idx_panol_unidades_trab ON pa_panol_unidades(trabajador_actual_id);
+  CREATE INDEX IF NOT EXISTS idx_panol_unidades_personal ON pa_panol_unidades(personal_actual_id);
 
   -- Movimientos: préstamo, devolución, reparación, baja, alta
   CREATE TABLE IF NOT EXISTS pa_panol_movimientos (
@@ -1980,7 +1903,7 @@ db.exec(`
     tipo            TEXT NOT NULL
                       CHECK(tipo IN ('alta','prestamo','devolucion','reparacion_inicio','reparacion_fin','baja','extravio')),
     fecha           TEXT DEFAULT (datetime('now','localtime')),
-    trabajador_id   INTEGER REFERENCES pa_trabajadores(id),  -- a quién (en préstamo/devolución)
+    personal_id     INTEGER REFERENCES pa_personal(id),      -- a quién (en préstamo/devolución)
     quien_registra  INTEGER REFERENCES users(id),            -- usuario que carga el movimiento
     condicion       TEXT,                                    -- 'nueva','buena','regular','rota' (al prestar o devolver)
     motivo          TEXT,                                    -- para baja/extravio: motivo libre
@@ -1990,6 +1913,40 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_panol_mov_unidad ON pa_panol_movimientos(unidad_id);
   CREATE INDEX IF NOT EXISTS idx_panol_mov_fecha ON pa_panol_movimientos(fecha);
 `);
+
+// ── UNIFICACIÓN de padrón: pa_personal absorbe a pa_trabajadores (deprecado) ──
+// pa_trabajadores quedó VACÍO en prod (0 filas, confirmado) y sin referencias vivas
+// salvo Pañol. Corre acá (después de crear Pañol) y es idempotente:
+//  (1) grupo_id en pa_personal;
+//  (2) columnas personal_* en Pañol (las viejas trabajador_* quedan muertas → siempre
+//      NULL, su FK colgante a pa_trabajadores nunca se evalúa);
+//  (3) DROP de pa_trabajadores.
+(function unificarPadronPersonal() {
+  try {
+    const colsP = db.prepare("PRAGMA table_info(pa_personal)").all().map(c => c.name);
+    if (!colsP.includes('grupo_id')) {
+      db.exec("ALTER TABLE pa_personal ADD COLUMN grupo_id INTEGER REFERENCES pa_grupos(id)");
+      console.log('[PA] pa_personal.grupo_id agregado');
+    }
+    const colsU = db.prepare("PRAGMA table_info(pa_panol_unidades)").all().map(c => c.name);
+    if (!colsU.includes('personal_actual_id')) {
+      db.exec("ALTER TABLE pa_panol_unidades ADD COLUMN personal_actual_id INTEGER REFERENCES pa_personal(id)");
+      db.exec("CREATE INDEX IF NOT EXISTS idx_panol_unidades_personal ON pa_panol_unidades(personal_actual_id)");
+      console.log('[PA] pa_panol_unidades.personal_actual_id agregado');
+    }
+    const colsM = db.prepare("PRAGMA table_info(pa_panol_movimientos)").all().map(c => c.name);
+    if (!colsM.includes('personal_id')) {
+      db.exec("ALTER TABLE pa_panol_movimientos ADD COLUMN personal_id INTEGER REFERENCES pa_personal(id)");
+      console.log('[PA] pa_panol_movimientos.personal_id agregado');
+    }
+    db.pragma('foreign_keys = OFF');
+    db.exec("DROP TABLE IF EXISTS pa_trabajadores");
+    db.pragma('foreign_keys = ON');
+  } catch (e) {
+    try { db.pragma('foreign_keys = ON'); } catch (_) {}
+    console.error('[PA] Error en unificación de padrón:', e.message);
+  }
+})();
 
 // Seed de categorías base si tabla está vacía
 (function seedPanolCategorias() {
