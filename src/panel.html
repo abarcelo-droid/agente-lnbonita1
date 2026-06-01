@@ -4134,9 +4134,6 @@ function sgRepExport(){
       <div class="fl pp-per-solo-fijo"><label>Persona (Equipo)</label>
         <select id="pp-per-persona"><option value="">— Sin vincular —</option></select>
       </div>
-      <div class="fl pp-per-solo-fijo"><label>Contratista madre</label>
-        <select id="pp-per-madre"><option value="">— Ninguno —</option></select>
-      </div>
       <div class="fl"><label>Cuadrilla / Grupo</label>
         <select id="pp-per-grupo"><option value="">— Sin asignar —</option></select>
       </div>
@@ -19330,10 +19327,6 @@ function ppLlenarSelectsPersonal(p) {
       var nom = ((x.apellido||'')+' '+x.nombre).trim();
       return '<option value="'+x.id+'"'+(x.id==p.persona_id?' selected':'')+'>'+esc(nom)+(x.dni?' ('+x.dni+')':'')+'</option>';
     }).join('');
-  document.getElementById('pp-per-madre').innerHTML = '<option value="">— Ninguno —</option>' +
-    (PP.padron||[]).filter(function(x){ return x.tipo==='contratista' && x.id!=p.id; }).map(function(x){
-      return '<option value="'+x.id+'"'+(x.id==p.contratista_madre_id?' selected':'')+'>'+esc(x.nombre)+'</option>';
-    }).join('');
   document.getElementById('pp-per-grupo').innerHTML = '<option value="">— Sin asignar —</option>' +
     (PP.grupos||[]).filter(function(g){ return g.activo; }).map(function(g){
       return '<option value="'+g.id+'"'+(g.id==p.grupo_id?' selected':'')+'>'+esc(g.nombre)+'</option>';
@@ -19388,7 +19381,6 @@ function ppGuardarPersonal() {
   };
   if (tipo === 'fijo') {
     body.persona_id = document.getElementById('pp-per-persona').value ? parseInt(document.getElementById('pp-per-persona').value) : null;
-    body.contratista_madre_id = document.getElementById('pp-per-madre').value ? parseInt(document.getElementById('pp-per-madre').value) : null;
   }
   if (ppPuedeVerTarifa()) {
     body.unidad_tarifa = document.getElementById('pp-per-unidad').value;
