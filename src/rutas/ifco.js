@@ -1783,22 +1783,35 @@ router.post('/remitos/validar-salteo', express.json(), function(req, res) {
     const calc = _ifcoCalcSalteos(talonarioId);
     if (!calc) return res.status(404).json({ ok: false, error: 'Talonario no encontrado' });
     const maxUsed = calc.maxUsed;
-    const salteos = [];
-    if (maxUsed != null && numeroAUsar > maxUsed + 1) {
-      for (let n = maxUsed + 1; n < numeroAUsar; n++) {
-        if (!calc.usadosSet.has(n)) salteos.push(n);
-      }
+    // Acotado: NO materializamos todo el hueco (podía ser enorme y congelar al cliente al
+    // renderizar la lista). Devolvemos conteo + muestra de hasta 50. Si el salto supera 1000,
+    // lo tratamos como probable error de tipeo del N° (no listamos, avisamos distinto).
+    const MAX_MUESTRA = 50, UMBRAL_TIPEO = 1000;
+    const gapBruto = (maxUsed != null && numeroAUsar > maxUsed + 1) ? (numeroAUsar - maxUsed - 1) : 0;
+    const saltoGrande = gapBruto > UMBRAL_TIPEO;
+    let total = 0;
+    const muestra = [];
+    for (let n = maxUsed + 1; gapBruto > 0 && n < numeroAUsar; n++) {
+      if (calc.usadosSet.has(n)) continue;
+      total++;
+      if (muestra.length < MAX_MUESTRA) muestra.push(n);
+      else if (saltoGrande) break; // salto grande: con la muestra alcanza, no recorremos millones
     }
-    const genera = salteos.length > 0;
+    if (saltoGrande) total = gapBruto; // aproximado, suficiente para el aviso de tipeo
+    const genera = total > 0;
+    const muestraFmt = muestra.map(calc.fmt);
     res.json({ ok: true, data: {
       genera_salteo: genera,
-      salteos_que_quedarian: salteos,
-      salteos_que_quedarian_fmt: salteos.map(calc.fmt),
+      salteos_total: total,
+      salto_grande: saltoGrande,
+      salteos_que_quedarian: muestra,
+      salteos_que_quedarian_fmt: muestraFmt,
       ultimo_usado_actual: maxUsed,
       numero_que_se_va_a_usar: numeroAUsar,
-      advertencia: genera
-        ? ('Si usás este número, vas a dejar ' + salteos.length + ' número(s) salteado(s) (' + salteos.map(calc.fmt).join(', ') + '). ¿Confirmás?')
-        : null
+      advertencia: !genera ? null
+        : (saltoGrande
+            ? ('Este número deja un salto de ' + total + ' números respecto del último usado. Parece un error de tipeo del N° de remito.')
+            : ('Si usás este número, vas a dejar ' + total + ' número(s) salteado(s) (' + muestraFmt.join(', ') + (total > muestra.length ? ', …' : '') + '). ¿Confirmás?'))
     }});
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
