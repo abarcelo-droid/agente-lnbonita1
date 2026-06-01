@@ -3080,21 +3080,26 @@ router.patch('/personal/padron/:id', requireAuth, (req, res) => {
   const perms = permisosPersonal(db, req.user);
   if (!perms.asistencia && !perms.valorizacion && !perms.admin)
     return res.status(403).json({ ok: false, error: 'Sin permiso para el módulo Personal' });
-  const { nombre, dni, cuit, persona_id, contratista_madre_id, cuadrilla_default_id, grupo_id, tarifa_default, unidad_tarifa, activo, notas } = req.body;
+  const { tipo, nombre, dni, cuit, persona_id, contratista_madre_id, cuadrilla_default_id, grupo_id, tarifa_default, unidad_tarifa, activo, notas } = req.body;
   try {
     const p = db.prepare("SELECT * FROM pa_personal WHERE id=? AND eliminado_en IS NULL").get(req.params.id);
     if (!p) return res.status(404).json({ ok: false, error: 'Personal no encontrado' });
+    // tipo (Fijo/Temporal) es editable; si no llega un valor válido se conserva el actual.
+    // El gating de persona_id/contratista_madre_id usa el tipo NUEVO: pasar a Temporal
+    // (contratista) anula esos campos exclusivos de Fijo.
+    const nuevoTipo = (tipo === 'fijo' || tipo === 'contratista') ? tipo : p.tipo;
     const puedeTarifa = perms.valorizacion || perms.admin;
     db.prepare(`UPDATE pa_personal SET
-        nombre=?, dni=?, cuit=?, persona_id=?, contratista_madre_id=?, cuadrilla_default_id=?, grupo_id=?,
+        tipo=?, nombre=?, dni=?, cuit=?, persona_id=?, contratista_madre_id=?, cuadrilla_default_id=?, grupo_id=?,
         tarifa_default=?, unidad_tarifa=?, activo=?, notas=?,
         modificado_en=datetime('now','localtime'), modificado_por=?
         WHERE id=?`)
-      .run(nombre || p.nombre,
+      .run(nuevoTipo,
+           nombre || p.nombre,
            dni !== undefined ? dni : p.dni,
            cuit !== undefined ? cuit : p.cuit,
-           p.tipo === 'fijo' ? (persona_id !== undefined ? persona_id : p.persona_id) : null,
-           p.tipo === 'fijo' ? (contratista_madre_id !== undefined ? contratista_madre_id : p.contratista_madre_id) : null,
+           nuevoTipo === 'fijo' ? (persona_id !== undefined ? persona_id : p.persona_id) : null,
+           nuevoTipo === 'fijo' ? (contratista_madre_id !== undefined ? contratista_madre_id : p.contratista_madre_id) : null,
            cuadrilla_default_id !== undefined ? cuadrilla_default_id : p.cuadrilla_default_id,
            grupo_id !== undefined ? grupo_id : p.grupo_id,
            puedeTarifa && tarifa_default !== undefined ? Number(tarifa_default) : p.tarifa_default,
