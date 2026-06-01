@@ -199,7 +199,7 @@
           + '<td class="r"><div class="cj-cell"><span class="cj-desp">' + nf(r.desp) + '<span class="cj-u">desp.</span></span>' + cuadre + '</div></td>'
           + '<td><div style="display:flex;align-items:center;gap:8px">' + badge(r.estado) + dchip + '</div></td>'
           + '<td class="c">' + uav(r.usuario) + '</td>'
-          + '<td><div class="rowact">' + act + '<button class="btn-icon btn-ghost" onclick="event.stopPropagation()">' + ic('more-horizontal') + '</button></div></td></tr>';
+          + '<td><div class="rowact">' + act + '<button class="btn-icon btn-ghost" onclick="__ifco2MenuDespacho(event,' + r.id + ',\'' + esc(r.ifco || '') + '\',\'' + (r.estado || '') + '\')">' + ic('more-horizontal') + '</button></div></td></tr>';
       }).join('') : '<tr><td colspan="7">' + empty('No hay remitos para este filtro/búsqueda') + '</td></tr>';
 
       var totDesp = R.filter(function (r) { return r.estado !== 'anulado'; }).reduce(function (a, r) { return a + (r.desp || 0); }, 0);
@@ -380,7 +380,7 @@
           + '<td>' + fdate(t.vto_cai) + '</td>'
           + '<td class="c"><span class="dias ' + caiCls + '">' + (it.dias_cai == null ? '—' : (it.dias_cai < 0 ? 'vencido' : it.dias_cai + ' d')) + '</span></td>'
           + '<td>' + (t.activo && !it.agotado ? '<span class="bg-badge st-presentado"><span class="d"></span>Activo</span>' : '<span class="bg-badge st-anulado"><span class="d"></span>Agotado</span>') + '</td>'
-          + '<td><div class="rowact"><button class="btn-icon btn-ghost" title="Transferir">' + ic('arrow-right-left') + '</button><button class="btn-icon btn-ghost">' + ic('more-horizontal') + '</button></div></td></tr>';
+          + '<td><div class="rowact"><button class="btn-icon btn-ghost" title="Transferir" onclick="__ifco2Legacy(\'ifcoAbrirTransferirTalonario\',' + t.id + ')">' + ic('arrow-right-left') + '</button><button class="btn-icon btn-ghost" onclick="__ifco2MenuTalonario(event,' + t.id + ',\'' + esc(t.serie || '') + '\')">' + ic('more-horizontal') + '</button></div></td></tr>';
       }).join('') : '<tr><td colspan="10">' + empty('Sin talonarios') + '</td></tr>';
       var alertaTal = T.filter(function (it) { return it.agotado || it.pocos_remitos || it.cai_alerta; });
       h.innerHTML =
@@ -437,7 +437,8 @@
         var conf = estado === 'recibido' ? '<div class="sub2">' + esc(r.usuario_creador_nombre || '') + '</div><div class="sub2 muted">' + fdshort(r.fecha_recepcion) + '</div>'
           : (estado === 'rechazado' ? '<div class="sub2 num-neg">' + esc(r.motivo_rechazo || 'Rechazado') + '</div>' : '<span class="muted">—</span>');
         var tipo = consol ? '<span class="tag consol">' + ic('check') + ' consolidado</span>' : (r22 ? '<span class="tag r22">stock IFCO</span>' : '<span class="muted" style="font-size:11px">producto</span>');
-        var act = estado === 'en_viaje' ? '<button class="btn btn-pri btn-sm" onclick="__ifco2Reuse(\'ifcoConfirmarRecepcion\')">' + ic('check') + ' Confirmar</button><button class="btn btn-danger btn-sm">' + ic('x') + '</button>' : '<button class="btn-icon btn-ghost">' + ic('more-horizontal') + '</button>';
+        var menuRec = '<button class="btn-icon btn-ghost" onclick="__ifco2MenuRecep(event,' + r.id + ',\'' + esc(r.n_remito_proveedor || '') + '\')">' + ic('more-horizontal') + '</button>';
+        var act = estado === 'en_viaje' ? '<button class="btn btn-pri btn-sm" onclick="__ifco2Reuse(\'ifcoConfirmarRecepcion\')">' + ic('check') + ' Confirmar</button><button class="btn btn-danger btn-sm">' + ic('x') + '</button>' + menuRec : menuRec;
         return '<tr ' + (estado === 'en_viaje' ? 'style="background:var(--i-navy-050)"' : '') + '>'
           + '<td class="mono">' + esc(r.n_remito_proveedor || '—') + '</td><td>' + quien + '</td><td>' + fdate(r.fecha_recepcion) + '</td>'
           + '<td class="r num-strong">' + nf(r.cantidad) + '</td><td>' + tipo + '</td><td>' + badge(estado) + '</td><td>' + conf + '</td><td class="c">' + dchip + '</td>'
@@ -470,7 +471,7 @@
           + '<td class="r num-strong">' + nf(env) + '</td><td class="r">' + nf(rec) + '</td><td class="r ' + (pend > 0 ? '' : 'muted') + '">' + (pend > 0 ? nf(pend) : '0') + '</td>'
           + '<td><div style="display:flex;align-items:center;gap:8px"><div class="mbar ' + (occ === 100 ? 'ok' : (occ > 0 ? 'warn' : '')) + '" style="width:80px"><i style="width:' + occ + '%"></i></div><span class="sub2 tnum">' + occ + '%</span></div></td>'
           + '<td>' + badge(e.estado) + '</td><td class="c">' + dchip + '</td>'
-          + '<td><div class="rowact">' + (e.estado !== 'recibido' ? '<button class="btn btn-pri btn-sm" onclick="__ifco2Reuse(\'ifcoRecepcionarEnvio\')">' + ic('package-check') + ' Recepcionar</button>' : '') + '<button class="btn-icon btn-ghost">' + ic('more-horizontal') + '</button></div></td></tr>';
+          + '<td><div class="rowact">' + (e.estado !== 'recibido' ? '<button class="btn btn-pri btn-sm" onclick="__ifco2Reuse(\'ifcoRecepcionarEnvio\')">' + ic('package-check') + ' Recepcionar</button>' : '') + '<button class="btn-icon btn-ghost" onclick="__ifco2MenuEnvio(event,' + e.id + ',\'' + esc(e.n_remito_interno || '') + '\')">' + ic('more-horizontal') + '</button></div></td></tr>';
       }).join('') : '<tr><td colspan="10">' + empty('Sin envíos') + '</td></tr>';
       var totEnv = E.reduce(function (a, e) { return a + (e.cantidad_enviada || 0); }, 0);
       var totRec = E.reduce(function (a, e) { return a + (e.cantidad_recibida || 0); }, 0);
@@ -500,10 +501,13 @@
       (res[2] || []).forEach(function (m) { items.push({ tipo: 'Retiro', ref: m.n_remito || ('MOV-' + m.id), det: (m.notas || '') + ' · ' + nf(m.cantidad) + ' caj.', quien: m.eliminado_por_username, fecha: m.eliminado_en, motivo: 'Eliminado', id: m.id, kind: 'movimientos' }); });
       (res[3] || []).forEach(function (r) { items.push({ tipo: 'Ingreso', ref: r.n_remito_proveedor || ('REC-' + r.id), det: (r.proveedor_nombre || '') + ' · ' + nf(r.cantidad) + ' caj.', quien: r.eliminado_por_username, fecha: r.eliminado_en, motivo: 'Eliminado', id: r.id, kind: 'recepciones-proveedor' }); });
       items.sort(function (a, b) { return (b.fecha || '') < (a.fecha || '') ? -1 : 1; });
+      var esAdmin = _esAdmin();
       var rowsHtml = items.length ? items.map(function (i) {
         return '<tr><td><span class="tag">' + i.tipo + '</span></td><td class="mono lead">' + esc(i.ref || '—') + '</td><td>' + esc(i.det) + '</td>'
           + '<td><span class="sub2 num-neg">' + esc(i.motivo) + '</span></td><td>' + esc(i.quien || '—') + '</td><td>' + fdate(i.fecha) + '</td>'
-          + '<td><div class="rowact"><button class="btn btn-ghost btn-sm" onclick="__ifco2Restaurar(\'' + i.kind + '\',' + i.id + ')">' + ic('rotate-ccw') + ' Restaurar</button></div></td></tr>';
+          + '<td><div class="rowact"><button class="btn btn-ghost btn-sm" onclick="__ifco2Restaurar(\'' + i.kind + '\',' + i.id + ')">' + ic('rotate-ccw') + ' Restaurar</button>'
+          + (esAdmin ? '<button class="btn btn-danger btn-sm" onclick="__ifco2HardDelete(\'' + i.kind + '\',' + i.id + ',\'' + esc(i.ref || '') + '\')">' + ic('trash-2') + ' Eliminar definitivo</button>' : '')
+          + '</div></td></tr>';
       }).join('') : '<tr><td colspan="7">' + empty('La papelera está vacía') + '</td></tr>';
       h.innerHTML =
         '<div class="vh"><div><h2>' + ic('trash-2') + ' Papelera</h2><div class="vh-sub">Registros eliminados o anulados — se conservan 90 días y pueden restaurarse</div></div></div>'
@@ -567,6 +571,117 @@
   };
 
   document.addEventListener('keydown', function (e) { if (e.key === 'Escape') { window.__ifco2Close && window.__ifco2Close(); window.__ifco2Help && window.__ifco2Help(false); } });
+
+  // =========================================================================
+  // Menú ⋯ de fila + acciones (Editar / Eliminar soft / Hard delete admin)
+  // =========================================================================
+  function legacyCall(fn, arg) {
+    if (typeof window[fn] === 'function') { try { window[fn](arg); } catch (e) { toast('Error: ' + (e.message || e), 'er'); } }
+    else { toast('Acción no disponible', 'warn'); }
+  }
+  window.__ifco2Legacy = legacyCall;
+  function _esAdmin() { return !!(window.LNB_USER && window.LNB_USER.rol === 'admin'); }
+
+  window.__ifco2Menu = function (ev, items) {
+    ev.stopPropagation();
+    var prev = document.getElementById('ifco2-rowmenu'); if (prev) prev.remove();
+    var m = document.createElement('div');
+    m.id = 'ifco2-rowmenu';
+    m.style.cssText = 'position:fixed;z-index:1300;background:#fff;border:1px solid #cfd8e3;border-radius:8px;box-shadow:0 4px 14px rgba(16,32,58,.18);padding:4px;min-width:172px;font-family:var(--i-sans,sans-serif);font-size:12.5px';
+    var t = (ev.currentTarget || ev.target).getBoundingClientRect();
+    m.style.top = (t.bottom + 4) + 'px';
+    m.style.left = Math.max(8, Math.min(t.right - 172, window.innerWidth - 180)) + 'px';
+    (items || []).forEach(function (it) {
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.style.cssText = 'display:flex;align-items:center;gap:8px;width:100%;text-align:left;border:0;background:none;padding:8px 10px;border-radius:6px;font:inherit;cursor:' + (it.disabled ? 'not-allowed' : 'pointer') + ';color:' + (it.danger ? '#b1271f' : '#16202e') + (it.disabled ? ';opacity:.45' : '');
+      b.innerHTML = (it.icon ? '<i data-lucide="' + it.icon + '" style="width:15px;height:15px"></i>' : '') + '<span>' + esc(it.label) + '</span>';
+      if (!it.disabled) {
+        b.onmouseenter = function () { b.style.background = it.danger ? '#f9e1df' : '#eaf1f8'; };
+        b.onmouseleave = function () { b.style.background = 'none'; };
+      }
+      b.onclick = function (e) { e.stopPropagation(); if (it.disabled) return; cerrar(); if (it.onClick) it.onClick(); };
+      m.appendChild(b);
+    });
+    document.body.appendChild(m);
+    if (window.lucide) lucide.createIcons();
+    function cerrar() { if (m.parentNode) m.remove(); document.removeEventListener('click', cerrar, true); document.removeEventListener('keydown', onEsc, true); }
+    function onEsc(e) { if (e.key === 'Escape') cerrar(); }
+    setTimeout(function () { document.addEventListener('click', cerrar, true); document.addEventListener('keydown', onEsc, true); }, 0);
+  };
+
+  // Soft-delete genérico (a papelera) + refresco de la vista nueva
+  window.__ifco2SoftDelete = function (kind, id, ref, view) {
+    if (!confirm('¿Eliminar ' + (ref || ('#' + id)) + '?\n\nVa a la Papelera y se puede restaurar.')) return;
+    fetch(API + '/' + kind + '/' + id, { method: 'DELETE', credentials: 'include' })
+      .then(function (r) { return r.json().catch(function () { return {}; }); })
+      .then(function (d) { if (d && d.error) toast(d.error, 'er'); else { toast('Eliminado (queda en Papelera)', 'ok'); nav(view); } })
+      .catch(function () { toast('Error de red al eliminar', 'er'); });
+  };
+
+  // Menús ⋯ por vista (reusan los handlers legacy para Editar)
+  window.__ifco2MenuDespacho = function (ev, id, ref, estado) {
+    __ifco2Menu(ev, [
+      { label: 'Editar', icon: 'pencil', disabled: estado !== 'despachado', onClick: function () { legacyCall('ifcoAbrirEditarRemito', id); } },
+      { label: 'Eliminar', icon: 'trash-2', danger: true, onClick: function () { __ifco2SoftDelete('remitos', id, ref, 'despachos'); } }
+    ]);
+  };
+  window.__ifco2MenuRecep = function (ev, id, ref) {
+    __ifco2Menu(ev, [
+      { label: 'Editar', icon: 'pencil', onClick: function () { legacyCall('ifcoAbrirEditarRecepcionMerc', id); } },
+      { label: 'Eliminar', icon: 'trash-2', danger: true, onClick: function () { __ifco2SoftDelete('recepciones-proveedor', id, ref, 'ingresos'); } }
+    ]);
+  };
+  window.__ifco2MenuEnvio = function (ev, id, ref) {
+    __ifco2Menu(ev, [
+      { label: 'Editar', icon: 'pencil', onClick: function () { legacyCall('ifcoAbrirEditarEnvio', id); } },
+      { label: 'Eliminar', icon: 'trash-2', danger: true, onClick: function () { __ifco2SoftDelete('envios', id, ref, 'salidas'); } }
+    ]);
+  };
+  window.__ifco2MenuTalonario = function (ev, id, serie) {
+    // Talonarios: el "Eliminar" legacy es FÍSICO + admin (no tiene papelera). Se reusa tal cual.
+    __ifco2Menu(ev, [
+      { label: 'Editar', icon: 'pencil', onClick: function () { legacyCall('ifcoEditarTalonario', id); } },
+      { label: 'Transferir', icon: 'arrow-right-left', onClick: function () { legacyCall('ifcoAbrirTransferirTalonario', id); } },
+      { label: 'Eliminar (físico)', icon: 'trash-2', danger: true, onClick: function () { legacyCall('ifcoEliminarTalonario', id); } }
+    ]);
+  };
+
+  // Hard delete (admin, desde Papelera) — confirmación ESCRIBIENDO la referencia
+  window.__ifco2HardDelete = function (kind, id, ref) {
+    if (!_esAdmin()) { toast('Solo un administrador puede eliminar definitivamente', 'er'); return; }
+    var refStr = String(ref == null ? '' : ref).trim();
+    var ov = document.createElement('div');
+    ov.style.cssText = 'position:fixed;inset:0;background:rgba(11,29,51,.5);display:flex;align-items:center;justify-content:center;z-index:1400;padding:16px;font-family:var(--i-sans,sans-serif)';
+    ov.innerHTML =
+      '<div style="background:#fff;border-radius:12px;max-width:470px;width:100%;padding:22px;box-shadow:0 18px 50px rgba(11,29,51,.3)">'
+      + '<div style="font-size:17px;font-weight:700;color:#b1271f;margin-bottom:12px;display:flex;align-items:center;gap:8px"><i data-lucide="alert-triangle" style="width:18px;height:18px"></i> Eliminar definitivamente</div>'
+      + '<div style="font-size:13.5px;line-height:1.55;color:#3f4d5e">Esto es <b>IRREVERSIBLE</b>: el registro se borra físicamente y <b>NO se puede restaurar</b> (queda solo un registro de auditoría de quién lo borró).<br><br>Para confirmar, escribí la referencia <b style="font-family:var(--i-mono,monospace)">' + esc(refStr) + '</b>:</div>'
+      + '<input id="ifco2-hd-input" autocomplete="off" spellcheck="false" style="width:100%;margin-top:10px;padding:9px 11px;border:1.5px solid #cfd8e3;border-radius:8px;font-family:var(--i-mono,monospace);font-size:14px;box-sizing:border-box" placeholder="Escribí la referencia exacta">'
+      + '<div style="display:flex;gap:10px;justify-content:flex-end;margin-top:18px">'
+      + '<button id="ifco2-hd-cancel" style="padding:9px 16px;border:1px solid #cfd8e3;background:#fff;border-radius:8px;cursor:pointer;font-size:13px">Cancelar</button>'
+      + '<button id="ifco2-hd-ok" disabled style="padding:9px 16px;border:0;background:#b1271f;color:#fff;border-radius:8px;cursor:not-allowed;font-weight:600;font-size:13px;opacity:.5">Eliminar para siempre</button>'
+      + '</div></div>';
+    document.body.appendChild(ov);
+    if (window.lucide) lucide.createIcons();
+    var inp = ov.querySelector('#ifco2-hd-input'), ok = ov.querySelector('#ifco2-hd-ok');
+    function close() { if (ov.parentNode) ov.remove(); }
+    inp.oninput = function () {
+      var match = inp.value.trim() === refStr && refStr !== '';
+      ok.disabled = !match; ok.style.opacity = match ? '1' : '.5'; ok.style.cursor = match ? 'pointer' : 'not-allowed';
+    };
+    ov.querySelector('#ifco2-hd-cancel').onclick = close;
+    ov.onclick = function (e) { if (e.target === ov) close(); };
+    ok.onclick = function () {
+      if (ok.disabled) return;
+      ok.disabled = true; ok.textContent = 'Eliminando…';
+      fetch(API + '/papelera/eliminar-definitivo', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind: kind, id: id }) })
+        .then(function (r) { return r.json().catch(function () { return {}; }); })
+        .then(function (d) { close(); if (d && d.ok) { toast('Eliminado definitivamente', 'ok'); nav('papelera'); } else { toast((d && d.error) || 'No se pudo eliminar', 'er'); } })
+        .catch(function () { close(); toast('Error de red', 'er'); });
+    };
+    setTimeout(function () { inp.focus(); }, 30);
+  };
 
   // =========================================================================
   // init
