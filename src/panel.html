@@ -115,6 +115,10 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
 <script src="/static/mandata.js" defer></script>
 <link rel="stylesheet" href="/static/sidebar-v2.css">
 <script src="/static/sidebar-v2.js" defer></script>
+<!-- IFCO 2 (rediseño módulo Cajones IFCO) -->
+<link rel="stylesheet" href="/static/ifco2.css">
+<script src="/static/lucide.min.js" defer></script>
+<script src="/static/ifco2.js" defer></script>
 <style>
   /* Evitar el FOUC del sidebar viejo: cuando carga el sidebar v2 (sb-v2),
      el nav original queda como "fuente de verdad" pero NO debe renderizarse.
@@ -6027,7 +6031,64 @@ function sgRepExport(){
 </div>
 
 <!-- ==================== MÓDULO IFCO — control de cajones retornables ==================== -->
-<div class="sec" id="sec-ab-ifcos">
+<div class="sec ifco2" id="sec-ab-ifcos">
+
+  <!-- ════════ IFCO 2 (rediseño) — header + subnav + vistas + drawers ════════ -->
+  <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px;flex-wrap:wrap">
+    <div style="display:flex;align-items:center;gap:7px;font-size:11.5px;color:var(--i-mut)"><i data-lucide="store"></i> Abasto › <b style="color:var(--i-ink)">Cajones IFCO</b></div>
+    <div style="display:flex;align-items:center;gap:14px">
+      <span style="display:flex;align-items:center;gap:7px;font-size:11px;color:var(--i-mut)"><span style="width:7px;height:7px;border-radius:50%;background:var(--i-ok);box-shadow:0 0 0 3px var(--i-ok-bg)"></span> Datos en vivo</span>
+      <button class="btn btn-ghost btn-sm" onclick="__ifco2Help(true)"><i data-lucide="life-buoy"></i> Ayuda</button>
+    </div>
+  </div>
+
+  <div class="subnav">
+    <button data-v="resumen" onclick="__ifco2Nav('resumen')"><i data-lucide="gauge"></i> Resumen</button>
+    <button data-v="despachos" onclick="__ifco2Nav('despachos')"><i data-lucide="truck"></i> Despachos</button>
+    <button data-v="retiros" onclick="__ifco2Nav('retiros')"><i data-lucide="package-minus"></i> Retiros</button>
+    <button data-v="talonarios" onclick="__ifco2Nav('talonarios')"><i data-lucide="book-marked"></i> Talonarios</button>
+    <button data-v="consolidacion" onclick="__ifco2Nav('consolidacion')"><i data-lucide="file-spreadsheet"></i> Consolidación</button>
+    <span class="grp">Otros depósitos</span>
+    <button data-v="ingresos" onclick="__ifco2Nav('ingresos')"><i data-lucide="log-in"></i> Ingresos</button>
+    <button data-v="salidas" onclick="__ifco2Nav('salidas')"><i data-lucide="log-out"></i> Salidas</button>
+    <span class="grow"></span>
+    <button data-v="papelera" class="muted-tab" onclick="__ifco2Nav('papelera')"><i data-lucide="trash-2"></i> Papelera</button>
+  </div>
+
+  <div class="view" id="iv-resumen"></div>
+  <div class="view" id="iv-despachos"></div>
+  <div class="view" id="iv-retiros"></div>
+  <div class="view" id="iv-talonarios"></div>
+  <div class="view" id="iv-consolidacion"></div>
+  <div class="view" id="iv-ingresos"></div>
+  <div class="view" id="iv-salidas"></div>
+  <div class="view" id="iv-papelera"></div>
+  <div class="view" id="iv-conteo"></div>
+
+  <!-- Drawer: detalle de remito (Despachos) -->
+  <div class="drawer-scrim" id="dwScrim" onclick="__ifco2Close()"></div>
+  <aside class="drawer" id="dwDespacho" aria-hidden="true"></aside>
+
+  <!-- Drawer: Ayuda -->
+  <div class="drawer-scrim" id="helpScrim" onclick="__ifco2Help(false)"></div>
+  <aside class="drawer" id="dwHelp" aria-hidden="true">
+    <div class="detail">
+      <div class="d-head"><div style="display:flex;justify-content:space-between;align-items:center">
+        <div class="dn" style="font-family:var(--i-sans);font-size:15px;font-weight:600">Ayuda · Cajones IFCO</div>
+        <button class="btn btn-icon" style="background:rgba(255,255,255,.14);color:#fff;border:0" onclick="__ifco2Help(false)"><i data-lucide="x"></i></button>
+      </div></div>
+      <div class="help-sec"><div class="faq">
+        <details open><summary>Ciclo de un despacho <i data-lucide="chevron-right" class="chev"></i></summary><div class="faq-a">Despachado → Sellado (firma del súper) → Enviado a IFCO → Presentado. El sellado se carga desde la app móvil o por foto (OCR). Un remito solo se puede editar en estado "despachado".</div></details>
+        <details><summary>¿Qué es un alta R22? <i data-lucide="chevron-right" class="chev"></i></summary><div class="faq-a">Cajones nuevos comprados a IFCO. Suman al pool pero NO descuentan saldo de proveedor.</div></details>
+        <details><summary>Movimientos bloqueados <i data-lucide="chevron-right" class="chev"></i></summary><div class="faq-a">Los movimientos ya consolidados contra el Excel oficial de IFCO quedan bloqueados: no se editan ni se borran.</div></details>
+        <details><summary>¿Qué pasa al borrar? <i data-lucide="chevron-right" class="chev"></i></summary><div class="faq-a">Va a la Papelera (soft-delete) y se puede restaurar. Se purga automáticamente a los 90 días.</div></details>
+        <details><summary>Umbrales de alerta <i data-lucide="chevron-right" class="chev"></i></summary><div class="faq-a">Sellado sin presentar ≥25 días · envío sin recepcionar ≥15 días · talonario con menos de 100 N° libres · CAI a menos de 60 días.</div></details>
+      </div></div>
+    </div>
+  </aside>
+
+  <!-- ════════ Legacy IFCO (oculto) — conserva los modales y flujos de escritura reusados ════════ -->
+  <div id="ifco-legacy" style="display:none">
   <!-- Banner mobile: si la pantalla es chica, sugerir la app mobile -->
   <div id="ifco-mobile-banner" style="display:none;background:#dbeafe;border:1px solid #93c5fd;border-radius:8px;padding:10px 12px;margin-bottom:12px;font-size:13px;color:#1e3a8a">
     <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
@@ -6523,6 +6584,7 @@ function sgRepExport(){
     <div id="ifco-pap-content" style="font-size:13px"></div>
   </div>
 
+  </div><!-- /#ifco-legacy -->
 </div>
 
 <!-- ============ MODALES IFCO ============ -->
@@ -8436,7 +8498,7 @@ function loadSec(s) {
     'ab-partidas': abCargarPartidas,
     'ab-proveedores': abCargarProveedores,
     'ab-remitos': abCargarRemitos,
-    'ab-ifcos': function(){ ifcoCargar(); },
+    'ab-ifcos': function(){ if (window.IFCO2) IFCO2.init(); else ifcoCargar(); },
     'ab-mandata': mdCargar,
     'ab-gastos': abCargarGastos,
     'ab-liquidaciones': liqCargar,
