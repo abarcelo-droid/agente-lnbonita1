@@ -1267,6 +1267,18 @@ db.exec(`
   }
 })();
 
+// ── Migración: responsable_id en pa_cuadrillas ──────────────────────────────
+// La persona (pa_personal) que cobra por toda la cuadrilla y tiene su CC. En modo
+// Cuadrilla de asistencia, el titular de pago se deriva de este responsable.
+// Simple ADD COLUMN (sin rebuild), idempotente con guard PRAGMA table_info.
+try {
+  const colsCu = db.prepare("PRAGMA table_info(pa_cuadrillas)").all().map(c => c.name);
+  if (!colsCu.includes('responsable_id')) {
+    db.exec('ALTER TABLE pa_cuadrillas ADD COLUMN responsable_id INTEGER REFERENCES pa_personal(id)');
+    console.log('[PA] responsable_id agregado en pa_cuadrillas');
+  }
+} catch(e) { console.error('[PA] Error migrando responsable_id en pa_cuadrillas:', e.message); }
+
 // (Migraciones pa_trabajadores→pa_personal ELIMINADAS: ya cumplidas; la unificación
 //  final — grupo_id, columnas de Pañol y DROP de pa_trabajadores — está más abajo,
 //  después de crear las tablas de Pañol.)

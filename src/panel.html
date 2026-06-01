@@ -4164,12 +4164,12 @@ function sgRepExport(){
     <div class="fg">
       <div class="fl"><label>Fecha *</label><input type="date" id="pp-as-fecha"></div>
       <div class="fl"><label>Cuadrilla (de dónde viene)</label>
-        <select id="pp-as-cuadrilla"><option value="">— Ninguna —</option></select>
+        <select id="pp-as-cuadrilla" onchange="ppAsistCuadrillaChange()"><option value="">— Ninguna —</option></select>
       </div>
       <div class="fl" style="flex:1 1 100%"><label>Tipo de registro *</label>
         <div style="display:flex;gap:16px;align-items:center;padding-top:4px">
           <label style="font-size:13px;display:flex;gap:5px;align-items:center"><input type="radio" name="pp-as-modo" value="individual" checked onchange="ppAsistToggleModo()"> Persona (individual)</label>
-          <label style="font-size:13px;display:flex;gap:5px;align-items:center"><input type="radio" name="pp-as-modo" value="bloque" onchange="ppAsistToggleModo()"> Cuadrilla (total, sin persona)</label>
+          <label style="font-size:13px;display:flex;gap:5px;align-items:center"><input type="radio" name="pp-as-modo" value="bloque" onchange="ppAsistToggleModo()"> Cuadrilla (total — cobra el responsable)</label>
         </div>
       </div>
       <div class="fl pp-as-ind"><label>Persona *</label>
@@ -4182,8 +4182,8 @@ function sgRepExport(){
         <label>Personas del grupo — tildá las que estuvieron (una fila por cada una)</label>
         <div id="pp-as-grupo-personas" style="display:flex;flex-wrap:wrap;gap:6px 18px;padding:6px 2px;max-height:160px;overflow:auto;border:1px solid var(--bord,#e2e2e2);border-radius:6px"></div>
       </div>
-      <div class="fl pp-as-blo" style="display:none"><label>Contratista (titular) *</label>
-        <select id="pp-as-contratista"><option value="">— Elegir —</option></select>
+      <div class="fl pp-as-blo" style="display:none;flex:1 1 100%"><label>Responsable que cobra</label>
+        <div id="pp-as-blo-responsable" style="font-size:13px;padding:8px 10px;background:var(--bg2,#f5f5f5);border-radius:6px;border:1px solid var(--bord,#e2e2e2)">Elegí una cuadrilla arriba</div>
       </div>
       <div class="fl pp-as-blo" style="display:none"><label>Cantidad de personas *</label><input type="number" id="pp-as-cantidad" value="1" min="1"></div>
       <div class="fl"><label>Horas *</label><input type="number" id="pp-as-horas" value="8" step="0.5" min="0.5"></div>
@@ -4809,6 +4809,9 @@ function sgRepExport(){
       <div class="fl" style="flex:1 1 100%"><label>Nombre *</label><input id="pp-cuad-nombre" placeholder="Ej: Cuadrilla Gordillo"></div>
       <div class="fl" style="flex:1 1 100%"><label>Capataz <span style="color:var(--mut);font-weight:400;font-size:11px">(opcional)</span></label>
         <select id="pp-cuad-capataz"><option value="">— Ninguno —</option></select>
+      </div>
+      <div class="fl" style="flex:1 1 100%"><label>Responsable de cobro <span style="color:var(--mut);font-weight:400;font-size:11px">(persona que cobra por toda la cuadrilla)</span></label>
+        <select id="pp-cuad-responsable"><option value="">— Sin responsable —</option></select>
       </div>
       <div class="fl" style="flex:1 1 100%"><label>Notas</label><textarea id="pp-cuad-notas" rows="2" placeholder="Cualquier observación sobre la cuadrilla..."></textarea></div>
       <div class="fl" style="flex:1 1 100%;font-size:11px;color:var(--mut);padding:8px 0;border-top:1px dashed var(--bor);margin-top:4px">
@@ -18994,8 +18997,17 @@ function ppCargarBase() {
     paF('/api/pa/personal/rubros').then(function(r){ PP.rubros = r.data || []; }),
     paF('/api/pa/lotes').then(function(r){ PP.lotes = r.data || []; }),
     paF('/api/pa/personal/personas-equipo').then(function(r){ PP.personasEquipo = r.data || []; }),
-    paF('/api/auth/usuarios').then(function(r){ PP.usuarios = r.data || []; })
+    paF('/api/auth/usuarios').then(function(r){ PP.usuarios = r.data || []; }),
+    // Padrón activo (para el select "Responsable de cobro" de las cuadrillas)
+    paF('/api/pa/personal/padron').then(function(r){ PP.padronActivo = r.data || []; })
   ]);
+}
+
+// Opciones del select "Responsable de cobro" (persona del padrón que cobra por la cuadrilla)
+function ppCuadResponsableOptions(sel) {
+  return '<option value="">— Sin responsable —</option>' + (PP.padronActivo||[]).map(function(p){
+    return '<option value="'+p.id+'"'+(p.id==sel?' selected':'')+'>'+esc(p.nombre)+' ('+ppTipoLabel(p.tipo)+')</option>';
+  }).join('');
 }
 
 function ppShowSub(sub) {
@@ -19519,6 +19531,28 @@ function ppAsistToggleModo() {
   document.querySelectorAll('.pp-as-blo').forEach(function(el){ el.style.display = esInd ? 'none' : ''; });
   // El wrap de checkboxes solo se muestra si hay un grupo elegido (lo maneja ppAsistGrupoChange)
   if (!esInd) { var gw = document.getElementById('pp-as-grupo-wrap'); if (gw) gw.style.display = 'none'; }
+  // Modo Cuadrilla: refrescar quién es el responsable que va a cobrar
+  if (!esInd) ppAsistCuadrillaChange();
+}
+
+// Modo Cuadrilla: el titular de pago se deriva del responsable de la cuadrilla elegida.
+// Muestra el responsable (read-only) o avisa si la cuadrilla no tiene uno asignado.
+function ppAsistCuadrillaChange() {
+  var box = document.getElementById('pp-as-blo-responsable');
+  if (!box) return;
+  var cid = document.getElementById('pp-as-cuadrilla').value;
+  var d = PP.asistDefaults || {};
+  var cuad = (d.cuadrillas||[]).find(function(c){ return String(c.id) === String(cid); });
+  if (!cid || !cuad) {
+    box.innerHTML = 'Elegí una cuadrilla arriba';
+    box.style.color = ''; box.style.borderColor = 'var(--bord,#e2e2e2)';
+  } else if (!cuad.responsable_id) {
+    box.innerHTML = '⚠ Esta cuadrilla no tiene responsable de cobro — asignalo en Cuadrillas';
+    box.style.color = 'var(--er,#c0392b)'; box.style.borderColor = 'var(--er,#c0392b)';
+  } else {
+    box.innerHTML = '👤 <strong>' + esc(cuad.responsable_nombre || ('#'+cuad.responsable_id)) + '</strong> — cobra por toda la cuadrilla';
+    box.style.color = ''; box.style.borderColor = 'var(--ok,#27ae60)';
+  }
 }
 
 // Carga grupal: al elegir un grupo, lista sus personas como checkboxes SIN tildar.
@@ -19564,8 +19598,8 @@ function ppFillAsistSelects(a) {
   document.getElementById('pp-as-cuadrilla').innerHTML = '<option value="">— Ninguna —</option>' + opt(d.cuadrillas,'id','nombre',a.cuadrilla_id);
   document.getElementById('pp-as-personal').innerHTML = '<option value="">— Elegir —</option>' +
     opt((d.personal||[]).filter(function(p){ return p.tipo==='fijo'; }),'id','nombre',a.personal_id);
-  document.getElementById('pp-as-contratista').innerHTML = '<option value="">— Elegir —</option>' +
-    opt((d.personal||[]).filter(function(p){ return p.tipo==='contratista'; }),'id','nombre',a.contratista_id);
+  // Modo Cuadrilla: el titular se deriva del responsable de la cuadrilla (ppAsistCuadrillaChange)
+  ppAsistCuadrillaChange();
   // Carga grupal: select de grupos + reset del área de checkboxes
   document.getElementById('pp-as-grupo').innerHTML = '<option value="">— Sin grupo —</option>' + opt(d.grupos,'id','nombre','');
   document.getElementById('pp-as-grupo-personas').innerHTML = '';
@@ -19704,10 +19738,15 @@ function ppGuardarAsistencia() {
       if (!body.personal_id) return toast('Elegí una persona (o tildá personas de un grupo)', 'er');
     }
   } else {
+    // Modo Cuadrilla: el titular de pago lo deriva el backend del responsable de la
+    // cuadrilla (no se manda contratista_id suelto). Validamos en el front para feedback.
     body.personal_id = null;
-    body.contratista_id = num('pp-as-contratista');
+    body.contratista_id = null;
     body.cantidad = parseInt(document.getElementById('pp-as-cantidad').value) || 0;
-    if (!body.contratista_id) return toast('Elegí un contratista (titular de la cuadrilla)', 'er');
+    if (!body.cuadrilla_id) return toast('Elegí la cuadrilla (su responsable es quien cobra)', 'er');
+    var d = PP.asistDefaults || {};
+    var cuad = (d.cuadrillas||[]).find(function(c){ return String(c.id) === String(body.cuadrilla_id); });
+    if (!cuad || !cuad.responsable_id) return toast('Esta cuadrilla no tiene responsable de cobro — asignalo en Cuadrillas', 'er');
     if (body.cantidad < 1) return toast('Cantidad debe ser ≥ 1', 'er');
   }
   if (!body.fecha) return toast('Fecha requerida', 'er');
@@ -20021,6 +20060,7 @@ function ppAbrirCuadrilla() {
   document.getElementById('mb-pp-cuad-tit').textContent = 'Nueva cuadrilla';
   document.getElementById('pp-cuad-nombre').value = '';
   document.getElementById('pp-cuad-capataz').innerHTML = '<option value="">— Ninguno —</option>' + PP.usuarios.map(function(u){ return '<option value="'+u.id+'">'+u.nombre+'</option>'; }).join('');
+  document.getElementById('pp-cuad-responsable').innerHTML = ppCuadResponsableOptions(null);
   document.getElementById('pp-cuad-notas').value = '';
   document.getElementById('mb-pp-cuad').classList.add('on');
 }
@@ -20034,6 +20074,7 @@ function ppEditCuad(id) {
   // Limpiar notas de prefijo legacy [cant_habitual=X]
   var notasLimpio = (c.notas||'').replace(/^\[cant_habitual=\d+\]\s*/, '');
   document.getElementById('pp-cuad-capataz').innerHTML = '<option value="">— Ninguno —</option>' + PP.usuarios.map(function(u){ return '<option value="'+u.id+'"'+(u.id==c.capataz_id?' selected':'')+'>'+u.nombre+'</option>'; }).join('');
+  document.getElementById('pp-cuad-responsable').innerHTML = ppCuadResponsableOptions(c.responsable_id);
   document.getElementById('pp-cuad-notas').value = notasLimpio;
   document.getElementById('mb-pp-cuad').classList.add('on');
 }
@@ -20042,6 +20083,7 @@ function ppGuardarCuadrilla() {
   var body = {
     nombre: document.getElementById('pp-cuad-nombre').value.trim(),
     capataz_id: document.getElementById('pp-cuad-capataz').value ? parseInt(document.getElementById('pp-cuad-capataz').value) : null,
+    responsable_id: document.getElementById('pp-cuad-responsable').value ? parseInt(document.getElementById('pp-cuad-responsable').value) : null,
     notas: document.getElementById('pp-cuad-notas').value.trim() || null
   };
   if (!body.nombre) return toast('Nombre requerido', 'er');
