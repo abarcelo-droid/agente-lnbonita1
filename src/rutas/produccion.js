@@ -32,6 +32,32 @@ function requireAdmin(req, res, next) {
   } catch(e) { res.status(401).json({ ok: false, error: 'Sesión inválida' }); }
 }
 
+// ── [TEMPORAL] Diagnóstico read-only para el vaciado de Órdenes de Aplicación (PC) ──
+// Devuelve los COUNT de la orden + TODO lo que arrastra, para revisar los números antes
+// de ejecutar la migración de borrado. Solo admin, solo lectura, no muta nada.
+// SE ELIMINA en el mismo PR que la migración de borrado.
+router.get('/_debug-count-ordenes', requireAdmin, (req, res) => {
+  const db = getDb();
+  const one = (sql) => { try { return db.prepare(sql).get(); } catch (e) { return { _error: e.message }; } };
+  const n = (sql) => { const r = one(sql); return (r && r._error) ? r : (r ? r.n : 0); };
+  res.json({
+    ok: true,
+    generado_en: new Date().toISOString(),
+    nota: 'Read-only. mov_contables_ordenes DEBE ser 0 (las órdenes no generan asientos).',
+    data: {
+      pa_ordenes:                n("SELECT COUNT(*) AS n FROM pa_ordenes"),
+      pa_ordenes_lotes:          n("SELECT COUNT(*) AS n FROM pa_ordenes_lotes"),
+      pa_ordenes_items:          n("SELECT COUNT(*) AS n FROM pa_ordenes_items"),
+      pa_aplicaciones:           n("SELECT COUNT(*) AS n FROM pa_aplicaciones"),
+      mov_stock_aplicacion:      one("SELECT COUNT(*) AS n, COALESCE(SUM(cantidad),0) AS unidades FROM pa_movimientos_stock WHERE motivo='aplicacion'"),
+      costos_lote_aplicaciones:  one("SELECT COUNT(*) AS n, COALESCE(SUM(monto),0) AS monto FROM pa_costos_lote WHERE categoria IN ('fertilizante','agroquimico') AND referencia_id IN (SELECT id FROM pa_aplicaciones)"),
+      insumos_a_restaurar:       one("SELECT COUNT(DISTINCT insumo_id) AS n, COALESCE(SUM(cantidad_real),0) AS unidades FROM pa_aplicaciones WHERE insumo_id IS NOT NULL"),
+      combustible_a_desvincular: n("SELECT COUNT(*) AS n FROM pa_combustible_movimientos WHERE orden_id IS NOT NULL"),
+      mov_contables_ordenes:     n("SELECT COUNT(*) AS n FROM pa_movimientos_contables WHERE origen_tipo IN ('aplicacion','orden','orden_aplicacion')")
+    }
+  });
+});
+
 // ── Helper: campañas activas (una por tipo) ────────────────────────────────
 // Devuelve los ids de la campaña anual y estacional activas (o null cada una).
 function campañasActivas(db) {
