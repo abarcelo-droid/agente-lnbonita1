@@ -32,6 +32,35 @@ function requireAdmin(req, res, next) {
   } catch(e) { res.status(401).json({ ok: false, error: 'Sesión inválida' }); }
 }
 
+// ── TEMPORAL: conteos para unificar padrón (Trabajadores viejo → Personal V1) ──
+// Solo lectura, admin-only. Confirma que el padrón viejo está migrado y que Pañol
+// se puede repuntar antes de tocar nada. SE ELIMINA en el PR de la unificación
+// (andy/feat-unificar-padron-personal). Ver docs/unificar-padron-personal.md.
+router.get('/_debug-count-padron', requireAdmin, (req, res) => {
+  const db = getDb();
+  const q = (sql) => { try { return db.prepare(sql).get().n; } catch (e) { return 'ERR: ' + e.message; } };
+  const data = {
+    pa_trabajadores: {
+      total:                   q("SELECT COUNT(*) n FROM pa_trabajadores"),
+      activos:                 q("SELECT COUNT(*) n FROM pa_trabajadores WHERE activo=1"),
+      activos_sin_personal_id: q("SELECT COUNT(*) n FROM pa_trabajadores WHERE activo=1 AND personal_id IS NULL"),
+      con_grupo:               q("SELECT COUNT(*) n FROM pa_trabajadores WHERE grupo_id IS NOT NULL"),
+    },
+    pa_personal: {
+      total:   q("SELECT COUNT(*) n FROM pa_personal"),
+      activos: q("SELECT COUNT(*) n FROM pa_personal WHERE activo=1 AND eliminado_en IS NULL"),
+    },
+    panol: {
+      unidades_con_trabajador:    q("SELECT COUNT(*) n FROM pa_panol_unidades WHERE trabajador_actual_id IS NOT NULL"),
+      movimientos_con_trabajador: q("SELECT COUNT(*) n FROM pa_panol_movimientos WHERE trabajador_id IS NOT NULL"),
+      // Referencias que NO podrían backfillearse (el trabajador no tiene personal_id mapeado):
+      unidades_huerfanas:    q("SELECT COUNT(*) n FROM pa_panol_unidades u WHERE u.trabajador_actual_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM pa_trabajadores t WHERE t.id=u.trabajador_actual_id AND t.personal_id IS NOT NULL)"),
+      movimientos_huerfanos: q("SELECT COUNT(*) n FROM pa_panol_movimientos m WHERE m.trabajador_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM pa_trabajadores t WHERE t.id=m.trabajador_id AND t.personal_id IS NOT NULL)"),
+    },
+  };
+  res.json({ ok: true, generado: new Date().toISOString(), data });
+});
+
 // ── Helper: campañas activas (una por tipo) ────────────────────────────────
 // Devuelve los ids de la campaña anual y estacional activas (o null cada una).
 function campañasActivas(db) {
