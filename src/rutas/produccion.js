@@ -3154,6 +3154,84 @@ router.get('/personal/cuentas-mo', requireAuth, (req, res) => {
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
+// ── Bloque B — Configuración de rubros MO (UI ingeniera) ────────────────────
+// Cada cuenta MO se "modela" como producto: clase (productivo/general),
+// cultivo asociado (solo productivo) y si está vigente para cargar asistencias.
+router.get('/personal/rubros-mo', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const data = db.prepare(`
+      SELECT id, codigo, nombre,
+             COALESCE(mo_clase,'productivo') AS mo_clase,
+             mo_cultivo, COALESCE(mo_vigente,0) AS mo_vigente
+      FROM pa_cuentas
+      WHERE activo=1 AND nombre LIKE ?
+      ORDER BY codigo`).all(PERSONAL_MO_LIKE);
+    res.json({ ok: true, data });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// Setea clase/cultivo/vigente de una cuenta MO (admin o valorización)
+router.patch('/personal/rubros-mo/:id', requireAuth, (req, res) => {
+  const db = getDb();
+  const perms = permisosPersonal(db, req.user);
+  if (!perms.admin && !perms.valorizacion)
+    return res.status(403).json({ ok: false, error: 'Sin permiso para configurar rubros' });
+  try {
+    const cta = db.prepare("SELECT id, nombre FROM pa_cuentas WHERE id=? AND activo=1").get(req.params.id);
+    if (!cta) return res.status(404).json({ ok: false, error: 'Cuenta inexistente' });
+    if (!/^MO /.test(cta.nombre)) return res.status(400).json({ ok: false, error: 'No es una cuenta MO' });
+    const clase = (req.body.mo_clase === 'general') ? 'general' : 'productivo';
+    // cultivo solo aplica a productivo; general no lleva cultivo
+    const cultivo = (clase === 'productivo' && req.body.mo_cultivo) ? String(req.body.mo_cultivo).trim() : null;
+    const vigente = req.body.mo_vigente ? 1 : 0;
+    db.prepare("UPDATE pa_cuentas SET mo_clase=?, mo_cultivo=?, mo_vigente=? WHERE id=?")
+      .run(clase, cultivo, vigente, req.params.id);
+    res.json({ ok: true });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// Cultivos disponibles (distinct) para asociar a un rubro productivo.
+// Se toman de los cultivos cargados en lotes (pa_cultivos_lote).
+router.get('/personal/cultivos-disponibles', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const data = db.prepare(`
+      SELECT DISTINCT cultivo FROM pa_cultivos_lote
+      WHERE cultivo IS NOT NULL AND TRIM(cultivo) <> ''
+      ORDER BY cultivo`).all().map(r => r.cultivo);
+    res.json({ ok: true, data });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// Lotes elegibles para un rubro productivo: los que tienen el cultivo del rubro
+// cargado en la campaña anual vigente (pa_cultivos_lote). Para el flujo cocinado.
+router.get('/personal/lotes-por-rubro', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const rubroId = req.query.rubro_cuenta_id;
+    if (!rubroId) return res.status(400).json({ ok: false, error: 'rubro_cuenta_id requerido' });
+    const cta = db.prepare("SELECT COALESCE(mo_clase,'productivo') AS mo_clase, mo_cultivo FROM pa_cuentas WHERE id=?").get(rubroId);
+    if (!cta) return res.status(404).json({ ok: false, error: 'Rubro inexistente' });
+    // General: no lleva lote
+    if (cta.mo_clase === 'general') return res.json({ ok: true, data: [], mo_clase: 'general' });
+    let data;
+    if (cta.mo_cultivo) {
+      // lotes que tienen ese cultivo cargado (pa_cultivos_lote.cultivo es texto)
+      data = db.prepare(`
+        SELECT DISTINCT l.id, l.nombre, l.finca
+        FROM pa_lotes l
+        JOIN pa_cultivos_lote cl ON cl.lote_id = l.id
+        WHERE l.activo=1 AND cl.cultivo = ?
+        ORDER BY l.finca, l.nombre`).all(cta.mo_cultivo);
+    } else {
+      // rubro productivo sin cultivo asociado → todos los lotes activos
+      data = db.prepare("SELECT id, nombre, finca FROM pa_lotes WHERE activo=1 ORDER BY finca, nombre").all();
+    }
+    res.json({ ok: true, data, mo_clase: 'productivo', mo_cultivo: cta.mo_cultivo || null });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
 // Defaults para el modal de asistencia (campañas vigentes + catálogos)
 router.get('/personal/asistencias/defaults', requireAuth, (req, res) => {
   const db = getDb();
@@ -3161,7 +3239,7 @@ router.get('/personal/asistencias/defaults', requireAuth, (req, res) => {
     const anuales    = db.prepare("SELECT id, nombre, activa FROM pa_campañas WHERE tipo='anual' AND eliminada_en IS NULL ORDER BY activa DESC, nombre").all();
     const estac      = db.prepare("SELECT id, nombre, activa FROM pa_campañas WHERE tipo='estacional' AND eliminada_en IS NULL ORDER BY activa DESC, nombre").all();
     const act        = campañasActivas(db);
-    const cuentasMo  = db.prepare("SELECT id, codigo, nombre FROM pa_cuentas WHERE activo=1 AND nombre LIKE ? ORDER BY codigo").all(PERSONAL_MO_LIKE);
+    const cuentasMo  = db.prepare("SELECT id, codigo, nombre, mo_clase, mo_cultivo, mo_vigente FROM pa_cuentas WHERE activo=1 AND nombre LIKE ? ORDER BY codigo").all(PERSONAL_MO_LIKE);
     const lotes      = db.prepare(`
       SELECT l.id, l.nombre, l.finca,
              (SELECT cultivo FROM pa_cultivos_lote WHERE lote_id=l.id ORDER BY id DESC LIMIT 1) as cultivo
@@ -3216,44 +3294,64 @@ router.get('/personal/asistencias', requireAuth, (req, res) => {
 });
 
 // Valida y normaliza el payload de una asistencia. Devuelve {error} o {val}
+//
+// Bloque B — flujo "cocinado":
+//  · El rubro MO tiene una clase (pa_cuentas.mo_clase): 'productivo' o 'general'.
+//    - productivo → la MO va a un cultivo concreto: lote_id OBLIGATORIO; cultivo se
+//      deriva del lote (no se pide). campaña_anual/estacional vienen de las vigentes.
+//    - general   → MO de estructura (no es de un lote puntual): lote_id = NULL,
+//      cultivo = NULL. No se imputa a pa_costos_lote (decisión 2A, en /valorizar).
+//    Por compatibilidad, una cuenta sin mo_clase seteada se trata como 'productivo'.
+//  · Cuadrilla (agregado, sin persona) vs Individual (persona) son EXCLUYENTES.
 function _validarAsistencia(db, body) {
   const { fecha, personal_id, contratista_id, cantidad, horas, rubro_cuenta_id,
           campaña_anual_id, campaña_estacional_id, lote_id } = body;
   if (!fecha) return { error: 'fecha requerida' };
   if (!rubro_cuenta_id) return { error: 'rubro_cuenta_id requerido' };
-  if (!lote_id) return { error: 'lote_id requerido' };
   if (!campaña_anual_id || !campaña_estacional_id) return { error: 'Campañas anual y estacional requeridas' };
   const cant = Number(cantidad) || 1;
   const hs = Number(horas);
   if (cant < 1) return { error: 'cantidad debe ser ≥ 1' };
   if (!(hs > 0)) return { error: 'horas debe ser > 0' };
-  // Individual vs bloque
+  // Cuadrilla (agregado, sin persona) vs Individual (persona) — excluyentes
   let contraId = contratista_id || null;
   if (!personal_id) {
-    if (!contraId) return { error: 'Un registro de bloque (sin persona) requiere un contratista' };
+    if (!contraId) return { error: 'Un registro de cuadrilla (agregado, sin persona) requiere un contratista' };
   } else {
-    // si es individual y no se pasó contratista, derivar de la persona
-    if (!contraId) {
-      const per = db.prepare("SELECT contratista_madre_id FROM pa_personal WHERE id=?").get(personal_id);
-      contraId = per ? (per.contratista_madre_id || null) : null;
-    }
+    if (contraId) return { error: 'No se puede cargar persona y cuadrilla a la vez (son excluyentes)' };
+    // individual: derivar contratista madre de la persona (para CC del bloque)
+    const per = db.prepare("SELECT contratista_madre_id FROM pa_personal WHERE id=?").get(personal_id);
+    contraId = per ? (per.contratista_madre_id || null) : null;
   }
   // Campañas: validar tipos
   const ca = db.prepare("SELECT tipo FROM pa_campañas WHERE id=?").get(campaña_anual_id);
   if (!ca || ca.tipo !== 'anual') return { error: 'campaña_anual_id no es una campaña anual válida' };
   const ce = db.prepare("SELECT tipo FROM pa_campañas WHERE id=?").get(campaña_estacional_id);
   if (!ce || ce.tipo !== 'estacional') return { error: 'campaña_estacional_id no es una campaña estacional válida' };
-  // Rubro: debe existir y ser cuenta MO
-  const cta = db.prepare("SELECT nombre FROM pa_cuentas WHERE id=? AND activo=1").get(rubro_cuenta_id);
+  // Rubro: debe existir, ser cuenta MO, y trae su clase (productivo/general)
+  const cta = db.prepare("SELECT nombre, mo_clase FROM pa_cuentas WHERE id=? AND activo=1").get(rubro_cuenta_id);
   if (!cta) return { error: 'rubro (cuenta) inexistente o inactivo' };
   if (!/^MO /.test(cta.nombre)) return { error: 'El rubro debe ser una cuenta de Mano de Obra (MO)' };
-  // Lote: finca denormalizada
-  const lote = db.prepare("SELECT finca FROM pa_lotes WHERE id=?").get(lote_id);
-  if (!lote) return { error: 'lote inexistente' };
+  const esGeneral = (cta.mo_clase === 'general');
+  // Lote / cultivo según clase
+  let loteId = null, finca = null, cultivo = null;
+  if (esGeneral) {
+    loteId = null; finca = null; cultivo = null; // MO general: sin lote ni cultivo
+  } else {
+    if (!lote_id) return { error: 'Un rubro productivo requiere lote' };
+    const lote = db.prepare("SELECT finca FROM pa_lotes WHERE id=?").get(lote_id);
+    if (!lote) return { error: 'lote inexistente' };
+    loteId = lote_id; finca = lote.finca || null;
+    // cultivo derivado del lote (último cultivo cargado en pa_cultivos_lote)
+    const cul = db.prepare(
+      "SELECT cultivo FROM pa_cultivos_lote WHERE lote_id=? ORDER BY id DESC LIMIT 1"
+    ).get(lote_id);
+    cultivo = cul ? (cul.cultivo || null) : null;
+  }
   return { val: {
     cant, hs, contraId,
     jornales: Math.round((cant * hs / 8.0) * 100) / 100,
-    finca: lote.finca || null
+    loteId, finca, cultivo, esGeneral
   }};
 }
 
@@ -3274,8 +3372,8 @@ router.post('/personal/asistencias', requireAuth, (req, res) => {
         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
       .run(b.fecha, b.cuadrilla_id || null, b.personal_id || null, v.contraId,
            v.cant, v.hs, v.jornales,
-           b.rubro_cuenta_id, b.campaña_anual_id, b.campaña_estacional_id, b.lote_id, v.finca,
-           b.tarea_tipo_id || null, b.cultivo || null, b.notas || null, req.user.id);
+           b.rubro_cuenta_id, b.campaña_anual_id, b.campaña_estacional_id, v.loteId, v.finca,
+           b.tarea_tipo_id || null, v.cultivo, b.notas || null, req.user.id);
     res.json({ ok: true, id: r.lastInsertRowid });
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
@@ -3317,8 +3415,8 @@ router.patch('/personal/asistencias/:id', requireAuth, (req, res) => {
         WHERE id=?`)
       .run(merged.fecha, merged.cuadrilla_id || null, merged.personal_id || null, v.contraId,
            v.cant, v.hs, v.jornales,
-           merged.rubro_cuenta_id, merged.campaña_anual_id, merged.campaña_estacional_id, merged.lote_id, v.finca,
-           merged.tarea_tipo_id || null, merged.cultivo || null, merged.notas || null,
+           merged.rubro_cuenta_id, merged.campaña_anual_id, merged.campaña_estacional_id, v.loteId, v.finca,
+           merged.tarea_tipo_id || null, v.cultivo, merged.notas || null,
            req.user.id, req.params.id);
     res.json({ ok: true });
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
@@ -3456,12 +3554,18 @@ router.post('/personal/valorizar', requireAuth, (req, res) => {
         const rubro = db.prepare("SELECT nombre FROM pa_cuentas WHERE id=?").get(a.rubro_cuenta_id);
         const desc = `MO · ${tarea ? tarea.nombre : 'Asist.'} · ${rubro ? rubro.nombre : ''} · ${tit.nombre}`;
 
-        // 1) Costo al lote (origen='asistencia', referencia_id positivo)
-        const rc = db.prepare(`INSERT INTO pa_costos_lote
-            (lote_id, campaña_id, campaña_anual_id, campaña_estacional_id, categoria, referencia_id, fecha, monto, descripcion, origen)
-            VALUES (?,?,?,?,?,?,?,?,?, 'asistencia')`)
-          .run(a.lote_id, a.campaña_anual_id, a.campaña_anual_id, a.campaña_estacional_id,
-               categoria, a.id, a.fecha, monto, desc);
+        // 1) Costo al lote (origen='asistencia', referencia_id positivo) — SOLO si hay lote.
+        //    Decisión 2A: la MO general (lote_id NULL) es gasto de estructura, NO costo de
+        //    un lote → NO se imputa a pa_costos_lote (no ensucia el costo unitario por cultivo).
+        let costoLoteId = null;
+        if (a.lote_id != null) {
+          const rc = db.prepare(`INSERT INTO pa_costos_lote
+              (lote_id, campaña_id, campaña_anual_id, campaña_estacional_id, categoria, referencia_id, fecha, monto, descripcion, origen)
+              VALUES (?,?,?,?,?,?,?,?,?, 'asistencia')`)
+            .run(a.lote_id, a.campaña_anual_id, a.campaña_anual_id, a.campaña_estacional_id,
+                 categoria, a.id, a.fecha, monto, desc);
+          costoLoteId = rc.lastInsertRowid;
+        }
 
         // 2) CC: devengado (+)
         const rcc = db.prepare(`INSERT INTO pa_cc_movimientos
@@ -3475,7 +3579,7 @@ router.post('/personal/valorizar', requireAuth, (req, res) => {
             VALUES (?,?,?,?,?,?,?,?)`)
           .run(a.id, tarifa, unidad, monto,
                JSON.stringify({ tarifa, unidad, base_unidades: base, cantidad: a.cantidad, horas: a.horas, jornales: a.jornales_calc }),
-               req.user.id, rc.lastInsertRowid, rcc.lastInsertRowid);
+               req.user.id, costoLoteId, rcc.lastInsertRowid);
 
         // 4) Estado
         db.prepare("UPDATE pa_asistencias SET estado='valorizado' WHERE id=?").run(a.id);
@@ -3661,6 +3765,214 @@ router.post('/personal/admin/costos-origen', requireAdmin, (req, res) => {
     });
     tx();
     res.json({ ok: true, data: { ejecutado: plan } });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Bloque C — Semanas de pago flexibles (pa_semanas_pago)
+// Rangos libres apertura→cierre. Se valida (warn, no bloquea) que entre cierres
+// consecutivos no haya huecos ni solapes.
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Lista las semanas con un aviso de continuidad respecto de la semana anterior.
+function _semanasConAvisos(db) {
+  const rows = db.prepare(`
+    SELECT s.*, u.nombre AS creado_por_nombre
+    FROM pa_semanas_pago s LEFT JOIN usuarios u ON u.id = s.creado_por
+    ORDER BY s.fecha_apertura, s.id`).all();
+  // recorrer en orden cronológico y comparar apertura con cierre anterior
+  let prev = null;
+  for (const r of rows) {
+    r.aviso = null;
+    if (r.fecha_apertura > r.fecha_cierre) r.aviso = 'rango_invalido';
+    else if (prev) {
+      const sigEsperado = db.prepare("SELECT date(?, '+1 day') d").get(prev.fecha_cierre).d;
+      if (r.fecha_apertura <= prev.fecha_cierre) r.aviso = 'solape';
+      else if (r.fecha_apertura > sigEsperado) r.aviso = 'hueco';
+    }
+    prev = r;
+  }
+  return rows.sort((a, b) => (a.fecha_apertura < b.fecha_apertura ? 1 : -1)); // DESC para UI
+}
+
+router.get('/personal/semanas-pago', requireAuth, (req, res) => {
+  const db = getDb();
+  const perms = permisosPersonal(db, req.user);
+  if (!perms.valorizacion && !perms.admin)
+    return res.status(403).json({ ok: false, error: 'Sin permiso de valorización' });
+  try {
+    res.json({ ok: true, data: _semanasConAvisos(db) });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+router.post('/personal/semanas-pago', requireAuth, (req, res) => {
+  const db = getDb();
+  const perms = permisosPersonal(db, req.user);
+  if (!perms.valorizacion && !perms.admin)
+    return res.status(403).json({ ok: false, error: 'Sin permiso de valorización' });
+  const ap = (req.body.fecha_apertura || '').slice(0,10);
+  const ci = (req.body.fecha_cierre || '').slice(0,10);
+  if (!ap || !ci) return res.status(400).json({ ok: false, error: 'fecha_apertura y fecha_cierre requeridas' });
+  if (ap > ci) return res.status(400).json({ ok: false, error: 'La apertura no puede ser posterior al cierre' });
+  try {
+    const r = db.prepare(`INSERT INTO pa_semanas_pago (fecha_apertura, fecha_cierre, notas, creado_por)
+        VALUES (?,?,?,?)`).run(ap, ci, (req.body.notas || '').trim() || null, req.user.id);
+    // avisos de continuidad (no bloquean)
+    const semanas = _semanasConAvisos(db);
+    const creada = semanas.find(s => s.id === r.lastInsertRowid);
+    res.json({ ok: true, id: r.lastInsertRowid, aviso: creada ? creada.aviso : null });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+router.patch('/personal/semanas-pago/:id', requireAuth, (req, res) => {
+  const db = getDb();
+  const perms = permisosPersonal(db, req.user);
+  if (!perms.valorizacion && !perms.admin)
+    return res.status(403).json({ ok: false, error: 'Sin permiso de valorización' });
+  try {
+    const s = db.prepare("SELECT * FROM pa_semanas_pago WHERE id=?").get(req.params.id);
+    if (!s) return res.status(404).json({ ok: false, error: 'Semana no encontrada' });
+    const ap = req.body.fecha_apertura ? String(req.body.fecha_apertura).slice(0,10) : s.fecha_apertura;
+    const ci = req.body.fecha_cierre   ? String(req.body.fecha_cierre).slice(0,10)   : s.fecha_cierre;
+    if (ap > ci) return res.status(400).json({ ok: false, error: 'La apertura no puede ser posterior al cierre' });
+    const estado = (req.body.estado === 'cerrada' || req.body.estado === 'abierta') ? req.body.estado : s.estado;
+    const notas = req.body.notas !== undefined ? (String(req.body.notas).trim() || null) : s.notas;
+    db.prepare("UPDATE pa_semanas_pago SET fecha_apertura=?, fecha_cierre=?, estado=?, notas=? WHERE id=?")
+      .run(ap, ci, estado, notas, req.params.id);
+    res.json({ ok: true });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+router.delete('/personal/semanas-pago/:id', requireAuth, (req, res) => {
+  const db = getDb();
+  const perms = permisosPersonal(db, req.user);
+  if (!perms.valorizacion && !perms.admin)
+    return res.status(403).json({ ok: false, error: 'Sin permiso de valorización' });
+  try {
+    const s = db.prepare("SELECT id FROM pa_semanas_pago WHERE id=?").get(req.params.id);
+    if (!s) return res.status(404).json({ ok: false, error: 'Semana no encontrada' });
+    // No borrar si tiene pagos masivos asociados
+    const pagos = db.prepare("SELECT COUNT(*) n FROM pa_cc_movimientos WHERE referencia_tipo='pago_semana' AND referencia_id=? AND anulado=0").get(req.params.id).n;
+    if (pagos > 0) return res.status(400).json({ ok: false, error: 'La semana tiene pagos registrados; no se puede borrar' });
+    db.prepare("DELETE FROM pa_semanas_pago WHERE id=?").run(req.params.id);
+    res.json({ ok: true });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Bloque D — Pago rápido MASIVO desde una caja
+// Lista lo pendiente de la semana por titular; paga los seleccionados generando
+// un movimiento CC 'pago' por titular + UN egreso en fin_movimientos (caja).
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Cajas/bancos disponibles para pagar (fin_cuentas activas)
+router.get('/personal/cajas', requireAuth, (req, res) => {
+  const db = getDb();
+  const perms = permisosPersonal(db, req.user);
+  if (!perms.valorizacion && !perms.admin)
+    return res.status(403).json({ ok: false, error: 'Sin permiso de valorización' });
+  try {
+    const data = db.prepare("SELECT id, nombre, tipo, moneda FROM fin_cuentas WHERE activo=1 ORDER BY tipo, nombre").all();
+    res.json({ ok: true, data });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// Resuelve el rango [apertura,cierre] de una semana o desde/hasta sueltos
+function _rangoSemana(db, q) {
+  if (q.semana_id) {
+    const s = db.prepare("SELECT id, fecha_apertura, fecha_cierre FROM pa_semanas_pago WHERE id=?").get(q.semana_id);
+    if (!s) return null;
+    return { semana_id: s.id, desde: s.fecha_apertura, hasta: s.fecha_cierre };
+  }
+  if (q.desde && q.hasta) return { semana_id: null, desde: String(q.desde).slice(0,10), hasta: String(q.hasta).slice(0,10) };
+  return null;
+}
+
+// Pendiente por titular en la semana = devengado(semana) − ya pagado(semana)
+function _pendientesSemana(db, rango) {
+  const dev = db.prepare(`
+    SELECT m.tipo_titular, m.titular_id, p.nombre, p.tipo,
+           COALESCE(SUM(m.monto),0) AS devengado
+    FROM pa_cc_movimientos m
+    JOIN pa_personal p ON p.id = m.titular_id AND p.tipo = m.tipo_titular
+    WHERE m.tipo_mov='devengado' AND m.anulado=0 AND m.fecha BETWEEN ? AND ?
+    GROUP BY m.tipo_titular, m.titular_id`).all(rango.desde, rango.hasta);
+  // pagos ya hechos para esta semana (solo si hay semana_id)
+  const pagadoMap = {};
+  if (rango.semana_id) {
+    for (const r of db.prepare(`
+      SELECT tipo_titular, titular_id, COALESCE(SUM(-monto),0) AS pagado
+      FROM pa_cc_movimientos
+      WHERE tipo_mov='pago' AND anulado=0 AND referencia_tipo='pago_semana' AND referencia_id=?
+      GROUP BY tipo_titular, titular_id`).all(rango.semana_id)) {
+      pagadoMap[r.tipo_titular + ':' + r.titular_id] = r.pagado;
+    }
+  }
+  return dev.map(d => {
+    const pagado = pagadoMap[d.tipo_titular + ':' + d.titular_id] || 0;
+    const pendiente = Math.round((d.devengado - pagado) * 100) / 100;
+    return { ...d, pagado, pendiente };
+  }).filter(d => d.pendiente > 0.009);
+}
+
+router.get('/personal/pago-masivo/pendientes', requireAuth, (req, res) => {
+  const db = getDb();
+  const perms = permisosPersonal(db, req.user);
+  if (!perms.valorizacion && !perms.admin)
+    return res.status(403).json({ ok: false, error: 'Sin permiso de valorización' });
+  try {
+    const rango = _rangoSemana(db, req.query);
+    if (!rango) return res.status(400).json({ ok: false, error: 'Indicá semana_id o desde+hasta' });
+    const data = _pendientesSemana(db, rango);
+    const total = Math.round(data.reduce((s, d) => s + d.pendiente, 0) * 100) / 100;
+    res.json({ ok: true, data, rango, total });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+router.post('/personal/pago-masivo', requireAuth, (req, res) => {
+  const db = getDb();
+  const perms = permisosPersonal(db, req.user);
+  if (!perms.valorizacion && !perms.admin)
+    return res.status(403).json({ ok: false, error: 'Sin permiso de valorización' });
+  const { caja_id, semana_id, desde, hasta } = req.body;
+  const seleccion = Array.isArray(req.body.titulares) ? req.body.titulares : [];
+  if (!caja_id) return res.status(400).json({ ok: false, error: 'Seleccioná una caja' });
+  if (!seleccion.length) return res.status(400).json({ ok: false, error: 'Seleccioná al menos un titular' });
+  try {
+    const caja = db.prepare("SELECT id, nombre FROM fin_cuentas WHERE id=? AND activo=1").get(caja_id);
+    if (!caja) return res.status(404).json({ ok: false, error: 'Caja inexistente o inactiva' });
+    const rango = _rangoSemana(db, { semana_id, desde, hasta });
+    if (!rango) return res.status(400).json({ ok: false, error: 'Indicá semana_id o desde+hasta' });
+    // set de seleccionados ("tipo:id")
+    const selSet = new Set(seleccion.map(s => String(s)));
+    const pendientes = _pendientesSemana(db, rango).filter(d => selSet.has(d.tipo_titular + ':' + d.titular_id) || selSet.has(String(d.titular_id)));
+    if (!pendientes.length) return res.status(400).json({ ok: false, error: 'No hay pendientes para los titulares seleccionados' });
+    const total = Math.round(pendientes.reduce((s, d) => s + d.pendiente, 0) * 100) / 100;
+    if (!(total > 0)) return res.status(400).json({ ok: false, error: 'El total a pagar es 0' });
+    const fechaPago = (req.body.fecha || '').slice(0,10) || db.prepare("SELECT date('now','localtime') d").get().d;
+    const refTxt = rango.semana_id ? `semana #${rango.semana_id} (${rango.desde}→${rango.hasta})` : `${rango.desde}→${rango.hasta}`;
+
+    const resumen = { pagados: 0, total, caja: caja.nombre };
+    const tx = db.transaction(() => {
+      // 1) UN egreso en la caja por el total del lote de pagos
+      const egr = db.prepare(`INSERT INTO fin_movimientos (cuenta_id, fecha, tipo, concepto, monto, referencia, usuario_id)
+          VALUES (?,?, 'egreso', ?, ?, ?, ?)`)
+        .run(caja_id, fechaPago, `Pago personal ${refTxt} — ${pendientes.length} titular(es)`,
+             total, 'personal_pago_masivo', req.user.id);
+      const finMovId = egr.lastInsertRowid;
+      // 2) un movimiento CC 'pago' por titular, linkeado al egreso
+      const insPago = db.prepare(`INSERT INTO pa_cc_movimientos
+          (tipo_titular, titular_id, fecha, tipo_mov, monto, descripcion, referencia_tipo, referencia_id, fin_movimiento_id, cargado_por)
+          VALUES (?,?,?, 'pago', ?, ?, 'pago_semana', ?, ?, ?)`);
+      for (const d of pendientes) {
+        insPago.run(d.tipo_titular, d.titular_id, fechaPago, -d.pendiente,
+          `Pago ${refTxt} · caja ${caja.nombre}`, rango.semana_id, finMovId, req.user.id);
+        _recalcSaldoCC(db, d.tipo_titular, d.titular_id);
+        resumen.pagados++;
+      }
+    });
+    tx();
+    res.json({ ok: true, data: resumen });
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 

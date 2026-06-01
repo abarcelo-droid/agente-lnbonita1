@@ -3874,6 +3874,8 @@ function sgRepExport(){
     <div class="pp-subtab" data-sub="valorizar" id="pp-tab-valorizar" onclick="ppShowSub('valorizar')" style="display:none;padding:10px 16px;cursor:pointer;font-size:13px;font-weight:600;border-bottom:2px solid transparent">💰 Por valorizar</div>
     <div class="pp-subtab" data-sub="cc" id="pp-tab-cc" onclick="ppShowSub('cc')" style="display:none;padding:10px 16px;cursor:pointer;font-size:13px;font-weight:600;border-bottom:2px solid transparent">📒 Cuenta Corriente</div>
     <div class="pp-subtab" data-sub="pagos" id="pp-tab-pagos" onclick="ppShowSub('pagos')" style="display:none;padding:10px 16px;cursor:pointer;font-size:13px;font-weight:600;border-bottom:2px solid transparent">💸 Pagos/Adelantos</div>
+    <div class="pp-subtab" data-sub="semanas" id="pp-tab-semanas" onclick="ppShowSub('semanas')" style="display:none;padding:10px 16px;cursor:pointer;font-size:13px;font-weight:600;border-bottom:2px solid transparent">🗓️ Semanas</div>
+    <div class="pp-subtab" data-sub="masivo" id="pp-tab-masivo" onclick="ppShowSub('masivo')" style="display:none;padding:10px 16px;cursor:pointer;font-size:13px;font-weight:600;border-bottom:2px solid transparent">💵 Pago masivo</div>
     <div class="pp-subtab" data-sub="reportes" id="pp-tab-reportes" onclick="ppShowSub('reportes')" style="display:none;padding:10px 16px;cursor:pointer;font-size:13px;font-weight:600;border-bottom:2px solid transparent">📈 Reportes</div>
     <div class="pp-subtab" data-sub="tareas-rubros" id="pp-tab-tareas-rubros" onclick="ppShowSub('tareas-rubros')" style="display:none;padding:10px 16px;cursor:pointer;font-size:13px;font-weight:600;border-bottom:2px solid transparent">🏷️ Tareas / Rubros</div>
     <div class="pp-subtab" data-sub="permisos" id="pp-tab-permisos" onclick="ppShowSub('permisos')" style="display:none;padding:10px 16px;cursor:pointer;font-size:13px;font-weight:600;border-bottom:2px solid transparent">⚙️ Permisos</div>
@@ -3936,7 +3938,7 @@ function sgRepExport(){
       <select id="pp-padron-tipo" onchange="ppLoadPadron()" style="padding:5px 10px;font-size:12px">
         <option value="">Todos los tipos</option>
         <option value="fijo">Fijos</option>
-        <option value="contratista">Contratistas</option>
+        <option value="contratista">Temporales</option>
       </select>
       <label style="font-size:12px;display:flex;align-items:center;gap:4px"><input type="checkbox" id="pp-padron-inactivos" onchange="ppLoadPadron()"> Incluir inactivos</label>
       <input id="pp-padron-q" oninput="ppLoadPadron()" placeholder="Buscar nombre / DNI / CUIT" style="padding:5px 10px;font-size:12px;flex:1;min-width:180px">
@@ -3973,7 +3975,7 @@ function sgRepExport(){
       <div style="flex:1;min-width:280px">
         <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap">
           <select id="pp-cc-tipo" onchange="ppLoadCC()" style="padding:5px 10px;font-size:12px">
-            <option value="">Todos</option><option value="fijo">Fijos</option><option value="contratista">Contratistas</option>
+            <option value="">Todos</option><option value="fijo">Fijos</option><option value="contratista">Temporales</option>
           </select>
           <label style="font-size:12px;display:flex;align-items:center;gap:4px"><input type="checkbox" id="pp-cc-consaldo" onchange="ppLoadCC()"> Solo con movimientos</label>
           <input id="pp-cc-q" oninput="ppLoadCC()" placeholder="Buscar titular" style="padding:5px 10px;font-size:12px;flex:1;min-width:120px">
@@ -4048,8 +4050,58 @@ function sgRepExport(){
   </div>
 
   <!-- Tareas / Rubros MO (Fase 4) — read-only con conteo de uso -->
+  <!-- Bloque C — Semanas de pago flexibles -->
+  <div class="pp-sub" id="pp-sub-semanas">
+    <div style="font-size:13px;font-weight:700;margin:4px 0 8px">🗓️ Semanas de pago</div>
+    <div style="font-size:12px;color:var(--mut);margin-bottom:10px">Rangos libres de apertura → cierre. La valorización y el pago masivo operan sobre estos rangos. El sistema avisa (no bloquea) si hay huecos o solapes entre semanas.</div>
+    <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin-bottom:12px;padding:10px;background:var(--bg2);border-radius:8px">
+      <div class="fl" style="margin:0"><label>Apertura *</label><input type="date" id="pp-sem-apertura"></div>
+      <div class="fl" style="margin:0"><label>Cierre *</label><input type="date" id="pp-sem-cierre"></div>
+      <div class="fl" style="margin:0;flex:1 1 200px"><label>Notas</label><input id="pp-sem-notas" placeholder="(opcional)"></div>
+      <button class="btn bb" onclick="ppSemCrear()">+ Crear semana</button>
+    </div>
+    <div class="tw"><table>
+      <thead><tr><th>Apertura</th><th>Cierre</th><th>Estado</th><th>Continuidad</th><th>Notas</th><th></th></tr></thead>
+      <tbody id="pp-sem-tbody"></tbody>
+    </table></div>
+  </div>
+
+  <!-- Bloque D — Pago masivo desde una caja -->
+  <div class="pp-sub" id="pp-sub-masivo">
+    <div style="font-size:13px;font-weight:700;margin:4px 0 8px">💵 Pago rápido masivo</div>
+    <div style="font-size:12px;color:var(--mut);margin-bottom:10px">Paga lo pendiente de una semana a varios titulares de una vez. Genera un movimiento de pago por titular en su cuenta corriente y <strong>un único egreso</strong> en la caja elegida.</div>
+    <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin-bottom:12px;padding:10px;background:var(--bg2);border-radius:8px">
+      <div class="fl" style="margin:0"><label>Semana *</label>
+        <select id="pp-mas-semana" onchange="ppMasivoCargar()"><option value="">— Elegir —</option></select>
+      </div>
+      <div class="fl" style="margin:0"><label>Caja / banco (de dónde sale) *</label>
+        <select id="pp-mas-caja"><option value="">— Elegir —</option></select>
+      </div>
+      <div class="fl" style="margin:0"><label>Fecha de pago</label><input type="date" id="pp-mas-fecha"></div>
+      <button class="btn bo" onclick="ppMasivoCargar()">↻ Recargar pendientes</button>
+    </div>
+    <div class="tw"><table>
+      <thead><tr>
+        <th style="text-align:center"><input type="checkbox" id="pp-mas-all" onchange="ppMasivoToggleAll()"></th>
+        <th>Titular</th><th>Tipo</th><th style="text-align:right">Devengado</th>
+        <th style="text-align:right">Pagado</th><th style="text-align:right">Pendiente</th>
+      </tr></thead>
+      <tbody id="pp-mas-tbody"></tbody>
+    </table></div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-top:12px">
+      <div id="pp-mas-resumen" style="font-size:13px;font-weight:600"></div>
+      <button class="btn bb" onclick="ppMasivoPagar()">💵 Pagar seleccionados</button>
+    </div>
+  </div>
+
   <div class="pp-sub" id="pp-sub-tareas-rubros">
-    <div style="font-size:13px;font-weight:700;margin:4px 0 8px">🏷️ Rubros de Mano de Obra (read-only)</div>
+    <div style="font-size:13px;font-weight:700;margin:4px 0 8px">⚙️ Configuración de rubros MO (clase / cultivo / vigencia)</div>
+    <div style="font-size:12px;color:var(--mut);margin-bottom:8px">Modelá cada cuenta MO como producto: <strong>productivo</strong> (se imputa a un lote/cultivo) o <strong>general</strong> (gasto de estructura, sin lote). Solo los rubros <strong>vigentes</strong> aparecen en el modal de asistencia.</div>
+    <div class="tw"><table>
+      <thead><tr><th>Código</th><th>Rubro MO</th><th>Clase</th><th>Cultivo (productivo)</th><th style="text-align:center">Vigente</th><th></th></tr></thead>
+      <tbody id="pp-rmo-tbody"></tbody>
+    </table></div>
+    <div style="font-size:13px;font-weight:700;margin:18px 0 8px">🏷️ Rubros de Mano de Obra (read-only)</div>
     <div style="font-size:12px;color:var(--mut);margin-bottom:8px">Cuentas <code>MO %</code> del plan de cuentas, con cuántas asistencias las usan. El plan de cuentas no se edita desde acá.</div>
     <div class="tw"><table>
       <thead><tr><th>Código</th><th>Rubro MO</th><th style="text-align:right">Usos</th><th style="text-align:right">Valorizados</th></tr></thead>
@@ -4073,26 +4125,21 @@ function sgRepExport(){
     <div class="fg">
       <div class="fl"><label>Tipo *</label>
         <select id="pp-per-tipo" onchange="ppPersonalToggleTipo()">
-          <option value="fijo">Fijo (empleado)</option>
-          <option value="contratista">Contratista (empresa/cuadrilla)</option>
+          <option value="fijo">Fijo</option>
+          <option value="contratista">Temporal</option>
         </select>
       </div>
       <div class="fl"><label>Nombre *</label><input id="pp-per-nombre"></div>
       <div class="fl"><label>DNI</label><input id="pp-per-dni"></div>
-      <div class="fl"><label>CUIT</label><input id="pp-per-cuit"></div>
       <div class="fl pp-per-solo-fijo"><label>Persona (Equipo)</label>
         <select id="pp-per-persona"><option value="">— Sin vincular —</option></select>
       </div>
       <div class="fl pp-per-solo-fijo"><label>Contratista madre</label>
         <select id="pp-per-madre"><option value="">— Ninguno —</option></select>
       </div>
-      <div class="fl"><label>Cuadrilla default</label>
-        <select id="pp-per-cuadrilla"><option value="">— Ninguna —</option></select>
-      </div>
-      <div class="fl"><label>Grupo / Colectivo</label>
+      <div class="fl"><label>Cuadrilla / Grupo</label>
         <select id="pp-per-grupo"><option value="">— Sin asignar —</option></select>
       </div>
-      <div class="fl pp-per-solo-val"><label>Tarifa default ($)</label><input id="pp-per-tarifa" type="number" step="0.01"></div>
       <div class="fl pp-per-solo-val"><label>Unidad tarifa</label>
         <select id="pp-per-unidad">
           <option value="jornal">jornal</option><option value="hora">hora</option><option value="tanto">tanto</option>
@@ -4123,34 +4170,36 @@ function sgRepExport(){
       </div>
       <div class="fl" style="flex:1 1 100%"><label>Tipo de registro *</label>
         <div style="display:flex;gap:16px;align-items:center;padding-top:4px">
-          <label style="font-size:13px;display:flex;gap:5px;align-items:center"><input type="radio" name="pp-as-modo" value="individual" checked onchange="ppAsistToggleModo()"> Individual (con nombre)</label>
-          <label style="font-size:13px;display:flex;gap:5px;align-items:center"><input type="radio" name="pp-as-modo" value="bloque" onchange="ppAsistToggleModo()"> Bloque (contratista, sin nombre)</label>
+          <label style="font-size:13px;display:flex;gap:5px;align-items:center"><input type="radio" name="pp-as-modo" value="individual" checked onchange="ppAsistToggleModo()"> Persona (individual)</label>
+          <label style="font-size:13px;display:flex;gap:5px;align-items:center"><input type="radio" name="pp-as-modo" value="bloque" onchange="ppAsistToggleModo()"> Cuadrilla (total, sin persona)</label>
         </div>
       </div>
       <div class="fl pp-as-ind"><label>Persona *</label>
         <select id="pp-as-personal"><option value="">— Elegir —</option></select>
       </div>
-      <div class="fl pp-as-blo" style="display:none"><label>Contratista *</label>
+      <div class="fl pp-as-blo" style="display:none"><label>Contratista (titular) *</label>
         <select id="pp-as-contratista"><option value="">— Elegir —</option></select>
       </div>
       <div class="fl pp-as-blo" style="display:none"><label>Cantidad de personas *</label><input type="number" id="pp-as-cantidad" value="1" min="1"></div>
       <div class="fl"><label>Horas *</label><input type="number" id="pp-as-horas" value="8" step="0.5" min="0.5"></div>
       <div class="fl"><label>Rubro (cuenta MO) *</label>
-        <select id="pp-as-rubro"><option value="">— Elegir —</option></select>
+        <select id="pp-as-rubro" onchange="ppAsistRubroChange()"><option value="">— Elegir —</option></select>
       </div>
-      <div class="fl"><label>Campaña anual *</label>
-        <select id="pp-as-canual"><option value="">— Elegir —</option></select>
-      </div>
-      <div class="fl"><label>Campaña estacional *</label>
-        <select id="pp-as-cestac"><option value="">— Elegir —</option></select>
-      </div>
-      <div class="fl"><label>Finca / Lote *</label>
+      <!-- Campañas: ocultas, se autocompletan con las vigentes (Bloque B, flujo cocinado) -->
+      <select id="pp-as-canual" style="display:none"></select>
+      <select id="pp-as-cestac" style="display:none"></select>
+      <div class="fl pp-as-lote-wrap"><label>Finca / Lote *</label>
         <select id="pp-as-lote" onchange="ppAsistLoteChange()"><option value="">— Elegir —</option></select>
+      </div>
+      <div class="fl pp-as-general-note" style="display:none;flex:1 1 100%">
+        <div style="font-size:12px;color:var(--mut);padding:6px 8px;background:var(--bg2);border-radius:6px">
+          ℹ️ Rubro <strong>general</strong>: no se imputa a un lote ni cultivo (gasto de estructura). Va a la cuenta corriente del titular.
+        </div>
       </div>
       <div class="fl"><label>Tarea</label>
         <select id="pp-as-tarea"><option value="">— Ninguna —</option></select>
       </div>
-      <div class="fl"><label>Cultivo</label><input id="pp-as-cultivo" placeholder="(auto del lote)"></div>
+      <input type="hidden" id="pp-as-cultivo">
       <div class="fl" style="flex:1 1 100%"><label>Notas</label><textarea id="pp-as-notas" rows="2"></textarea></div>
     </div>
     <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:14px">
@@ -18925,6 +18974,8 @@ function ppAplicarGating() {
   show('pp-tab-valorizar', verVal);
   show('pp-tab-cc', verVal);
   show('pp-tab-pagos', verVal);
+  show('pp-tab-semanas', verVal);
+  show('pp-tab-masivo', verVal);
   show('pp-tab-reportes', verVal);
   show('pp-tab-tareas-rubros', verModulo);
   show('pp-tab-permisos', p.admin);
@@ -18955,8 +19006,182 @@ function ppShowSub(sub) {
   if (sub === 'valorizar') ppLoadValorizar();
   if (sub === 'cc') ppLoadCC();
   if (sub === 'pagos') ppLoadPagos();
+  if (sub === 'semanas') ppLoadSemanas();
+  if (sub === 'masivo') ppLoadMasivo();
   if (sub === 'reportes') ppInitReportes();
-  if (sub === 'tareas-rubros') ppLoadTareasRubros();
+  if (sub === 'tareas-rubros') { ppLoadRubrosMO(); ppLoadTareasRubros(); }
+}
+
+// ═══ Bloque B — Configuración (ingeniería) de rubros MO ══════════════════════
+function ppLoadRubrosMO() {
+  paF('/api/pa/personal/rubros-mo').then(function(r){
+    PP.rubrosMO = (r && r.data) || [];
+    paF('/api/pa/personal/cultivos-disponibles').then(function(rc){
+      PP.cultivosDisp = (rc && rc.data) || [];
+      ppRmoRender();
+    });
+  });
+}
+function ppRmoRender() {
+  var tbody = document.getElementById('pp-rmo-tbody');
+  if (!tbody) return;
+  var rows = PP.rubrosMO || [];
+  if (!rows.length) { tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--mut);padding:16px">Sin cuentas MO</td></tr>'; return; }
+  var cultOpts = function(sel){ return '<option value="">—</option>' + (PP.cultivosDisp||[]).map(function(c){ return '<option value="'+esc(c)+'"'+(c===sel?' selected':'')+'>'+esc(c)+'</option>'; }).join(''); };
+  tbody.innerHTML = rows.map(function(c){
+    var esGen = c.mo_clase === 'general';
+    return '<tr>'+
+      '<td style="font-size:11px">'+esc(c.codigo||'')+'</td>'+
+      '<td>'+esc(c.nombre)+'</td>'+
+      '<td><select id="rmo-clase-'+c.id+'" onchange="ppRmoClaseChange('+c.id+')">'+
+        '<option value="productivo"'+(!esGen?' selected':'')+'>Productivo</option>'+
+        '<option value="general"'+(esGen?' selected':'')+'>General</option></select></td>'+
+      '<td><select id="rmo-cult-'+c.id+'"'+(esGen?' disabled':'')+'>'+cultOpts(c.mo_cultivo)+'</select></td>'+
+      '<td style="text-align:center"><input type="checkbox" id="rmo-vig-'+c.id+'"'+(c.mo_vigente?' checked':'')+'></td>'+
+      '<td><button class="btn bo bs" onclick="ppRmoGuardar('+c.id+')" style="padding:3px 10px;font-size:11px">Guardar</button></td>'+
+    '</tr>';
+  }).join('');
+}
+function ppRmoClaseChange(id) {
+  var esGen = document.getElementById('rmo-clase-'+id).value === 'general';
+  var cult = document.getElementById('rmo-cult-'+id);
+  cult.disabled = esGen; if (esGen) cult.value = '';
+}
+function ppRmoGuardar(id) {
+  var body = {
+    mo_clase: document.getElementById('rmo-clase-'+id).value,
+    mo_cultivo: document.getElementById('rmo-cult-'+id).value || null,
+    mo_vigente: document.getElementById('rmo-vig-'+id).checked
+  };
+  paF('/api/pa/personal/rubros-mo/'+id, { method:'PATCH', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) }).then(function(r){
+    if (r.ok) { toast('Rubro actualizado'); PP.asistDefaults = null; ppLoadRubrosMO(); }
+    else toast(r.error||'Error', 'er');
+  });
+}
+
+// ═══ Bloque C — Semanas de pago ══════════════════════════════════════════════
+function ppLoadSemanas() {
+  paF('/api/pa/personal/semanas-pago').then(function(r){ PP.semanas = (r && r.data) || []; ppSemRender(); });
+}
+function ppSemAvisoTxt(av) {
+  if (av === 'hueco')          return '<span class="tag" style="font-size:10px;color:var(--warn)">⚠ hueco</span>';
+  if (av === 'solape')         return '<span class="tag" style="font-size:10px;color:#d9534f">⚠ solape</span>';
+  if (av === 'rango_invalido') return '<span class="tag" style="font-size:10px;color:#d9534f">⚠ rango inválido</span>';
+  return '<span style="font-size:10px;color:var(--mut)">✓</span>';
+}
+function ppSemRender() {
+  var tbody = document.getElementById('pp-sem-tbody');
+  var rows = PP.semanas || [];
+  if (!rows.length) { tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--mut);padding:16px">Sin semanas. Creá la primera arriba.</td></tr>'; return; }
+  tbody.innerHTML = rows.map(function(s){
+    var cerrada = s.estado === 'cerrada';
+    var estado = cerrada ? '<span class="tag" style="font-size:10px">cerrada</span>' : '<span class="tag" style="font-size:10px;color:var(--ok)">abierta</span>';
+    var toggle = cerrada
+      ? '<button class="btn bo bs" onclick="ppSemEstado('+s.id+',\'abierta\')" style="padding:3px 8px;font-size:11px">Reabrir</button>'
+      : '<button class="btn bo bs" onclick="ppSemEstado('+s.id+',\'cerrada\')" style="padding:3px 8px;font-size:11px">Cerrar</button>';
+    return '<tr><td>'+esc(s.fecha_apertura)+'</td><td>'+esc(s.fecha_cierre)+'</td><td>'+estado+'</td>'+
+      '<td>'+ppSemAvisoTxt(s.aviso)+'</td><td style="font-size:11px">'+esc(s.notas||'—')+'</td>'+
+      '<td style="white-space:nowrap">'+toggle+' <button class="btn bo bs" onclick="ppSemBorrar('+s.id+')" style="padding:3px 8px;font-size:11px">🗑️</button></td></tr>';
+  }).join('');
+}
+function ppSemCrear() {
+  var body = {
+    fecha_apertura: document.getElementById('pp-sem-apertura').value,
+    fecha_cierre: document.getElementById('pp-sem-cierre').value,
+    notas: document.getElementById('pp-sem-notas').value.trim() || null
+  };
+  if (!body.fecha_apertura || !body.fecha_cierre) return toast('Apertura y cierre requeridos', 'er');
+  paF('/api/pa/personal/semanas-pago', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) }).then(function(r){
+    if (r.ok) {
+      if (r.aviso === 'hueco') toast('Semana creada — ⚠ queda un hueco con la anterior', 'er');
+      else if (r.aviso === 'solape') toast('Semana creada — ⚠ solapa con otra semana', 'er');
+      else toast('Semana creada');
+      document.getElementById('pp-sem-notas').value = '';
+      ppLoadSemanas();
+    } else toast(r.error||'Error', 'er');
+  });
+}
+function ppSemEstado(id, estado) {
+  paF('/api/pa/personal/semanas-pago/'+id, { method:'PATCH', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ estado: estado }) }).then(function(r){
+    if (r.ok) { toast('Actualizada'); ppLoadSemanas(); } else toast(r.error||'Error', 'er');
+  });
+}
+function ppSemBorrar(id) {
+  if (!confirm('¿Borrar esta semana de pago?')) return;
+  paF('/api/pa/personal/semanas-pago/'+id, { method:'DELETE' }).then(function(r){
+    if (r.ok) { toast('Borrada'); ppLoadSemanas(); } else toast(r.error||'Error', 'er');
+  });
+}
+
+// ═══ Bloque D — Pago masivo desde una caja ═══════════════════════════════════
+function ppLoadMasivo() {
+  if (!document.getElementById('pp-mas-fecha').value)
+    document.getElementById('pp-mas-fecha').value = new Date().toISOString().slice(0,10);
+  Promise.all([
+    paF('/api/pa/personal/semanas-pago').then(function(r){ return (r&&r.data)||[]; }),
+    paF('/api/pa/personal/cajas').then(function(r){ return (r&&r.data)||[]; })
+  ]).then(function(res){
+    var semanas = res[0], cajas = res[1];
+    document.getElementById('pp-mas-semana').innerHTML = '<option value="">— Elegir —</option>' +
+      semanas.map(function(s){ return '<option value="'+s.id+'">'+esc(s.fecha_apertura+' → '+s.fecha_cierre)+(s.estado==='cerrada'?' (cerrada)':'')+'</option>'; }).join('');
+    document.getElementById('pp-mas-caja').innerHTML = '<option value="">— Elegir —</option>' +
+      cajas.map(function(c){ return '<option value="'+c.id+'">'+esc(c.nombre)+' ('+esc(c.tipo||'')+')</option>'; }).join('');
+    PP.masPend = [];
+    ppMasivoRender();
+  });
+}
+function ppMasivoCargar() {
+  var sem = document.getElementById('pp-mas-semana').value;
+  if (!sem) { PP.masPend = []; ppMasivoRender(); return; }
+  paF('/api/pa/personal/pago-masivo/pendientes?semana_id='+encodeURIComponent(sem)).then(function(r){
+    PP.masPend = (r && r.data) || [];
+    ppMasivoRender();
+  });
+}
+function ppMasivoRender() {
+  var tbody = document.getElementById('pp-mas-tbody');
+  var rows = PP.masPend || [];
+  if (!rows.length) {
+    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--mut);padding:16px">Sin pendientes para esta semana.</td></tr>';
+    document.getElementById('pp-mas-all').checked = false;
+    ppMasivoResumen();
+    return;
+  }
+  tbody.innerHTML = rows.map(function(d){
+    var key = d.tipo_titular+':'+d.titular_id;
+    return '<tr><td style="text-align:center"><input type="checkbox" class="pp-mas-chk" data-key="'+key+'" data-pend="'+d.pendiente+'" onchange="ppMasivoResumen()" checked></td>'+
+      '<td>'+esc(d.nombre)+'</td><td>'+ppTipoLabel(d.tipo)+'</td>'+
+      '<td style="text-align:right">'+ppFmtARS(d.devengado)+'</td>'+
+      '<td style="text-align:right">'+ppFmtARS(d.pagado)+'</td>'+
+      '<td style="text-align:right"><strong>'+ppFmtARS(d.pendiente)+'</strong></td></tr>';
+  }).join('');
+  document.getElementById('pp-mas-all').checked = true;
+  ppMasivoResumen();
+}
+function ppMasivoToggleAll() {
+  var on = document.getElementById('pp-mas-all').checked;
+  document.querySelectorAll('.pp-mas-chk').forEach(function(c){ c.checked = on; });
+  ppMasivoResumen();
+}
+function ppMasivoResumen() {
+  var total = 0, n = 0;
+  document.querySelectorAll('.pp-mas-chk:checked').forEach(function(c){ total += Number(c.dataset.pend)||0; n++; });
+  document.getElementById('pp-mas-resumen').textContent = n + ' seleccionado(s) · Total a pagar: ' + ppFmtARS(Math.round(total*100)/100);
+}
+function ppMasivoPagar() {
+  var sem = document.getElementById('pp-mas-semana').value;
+  var caja = document.getElementById('pp-mas-caja').value;
+  if (!sem) return toast('Elegí la semana', 'er');
+  if (!caja) return toast('Elegí la caja de dónde sale el pago', 'er');
+  var sel = [];
+  document.querySelectorAll('.pp-mas-chk:checked').forEach(function(c){ sel.push(c.dataset.key); });
+  if (!sel.length) return toast('Seleccioná al menos un titular', 'er');
+  if (!confirm('¿Pagar a '+sel.length+' titular(es) desde la caja elegida?\nSe generará un egreso por el total.')) return;
+  var body = { semana_id: parseInt(sem), caja_id: parseInt(caja), titulares: sel, fecha: document.getElementById('pp-mas-fecha').value || null };
+  paF('/api/pa/personal/pago-masivo', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) }).then(function(r){
+    if (r.ok) { toast('Pagados '+r.data.pagados+' · '+ppFmtARS(r.data.total)+' desde '+esc(r.data.caja)); ppMasivoCargar(); }
+    else toast(r.error||'Error', 'er');
+  });
 }
 
 // ═══ PERSONAL V1 — Reportes + Tareas/Rubros (Fase 4) ═════════════════════════
@@ -19056,6 +19281,10 @@ function ppLoadPadron() {
   });
 }
 
+// Etiqueta visible del tipo de personal. Internamente sigue siendo fijo/contratista
+// (sin migración); de cara al usuario se muestra Fijo / Temporal (Bloque B, item 4).
+function ppTipoLabel(t) { return t === 'contratista' ? 'Temporal' : 'Fijo'; }
+
 function ppRenderPadron() {
   var verTarifa = ppPuedeVerTarifa();
   var thead = document.getElementById('pp-padron-thead');
@@ -19069,8 +19298,8 @@ function ppRenderPadron() {
   tbody.innerHTML = PP.padron.map(function(p){
     var persona = p.persona_nombre ? esc((p.persona_apellido||'')+' '+p.persona_nombre).trim() : '—';
     var tipoTag = p.tipo==='contratista'
-      ? '<span class="tag" style="background:#7c3aed22;color:#7c3aed;font-size:10px">contratista</span>'
-      : '<span class="tag" style="font-size:10px">fijo</span>';
+      ? '<span class="tag" style="background:#7c3aed22;color:#7c3aed;font-size:10px">Temporal</span>'
+      : '<span class="tag" style="font-size:10px">Fijo</span>';
     var madre = p.contratista_madre_nombre ? '<div style="font-size:10px;color:var(--mut)">↳ '+esc(p.contratista_madre_nombre)+'</div>' : '';
     var tarifaCell = verTarifa
       ? '<td style="text-align:right">'+(p.tarifa_default?ppFmtARS(p.tarifa_default)+'<div style="font-size:10px;color:var(--mut)">/'+esc(p.unidad_tarifa||'')+'</div>':'—')+'</td>'
@@ -19105,10 +19334,6 @@ function ppLlenarSelectsPersonal(p) {
     (PP.padron||[]).filter(function(x){ return x.tipo==='contratista' && x.id!=p.id; }).map(function(x){
       return '<option value="'+x.id+'"'+(x.id==p.contratista_madre_id?' selected':'')+'>'+esc(x.nombre)+'</option>';
     }).join('');
-  document.getElementById('pp-per-cuadrilla').innerHTML = '<option value="">— Ninguna —</option>' +
-    (PP.cuadrillas||[]).map(function(c){
-      return '<option value="'+c.id+'"'+(c.id==p.cuadrilla_default_id?' selected':'')+'>'+esc(c.nombre)+'</option>';
-    }).join('');
   document.getElementById('pp-per-grupo').innerHTML = '<option value="">— Sin asignar —</option>' +
     (PP.grupos||[]).filter(function(g){ return g.activo; }).map(function(g){
       return '<option value="'+g.id+'"'+(g.id==p.grupo_id?' selected':'')+'>'+esc(g.nombre)+'</option>';
@@ -19121,8 +19346,6 @@ function ppAbrirPersonal() {
   document.getElementById('pp-per-tipo').value = 'fijo';
   document.getElementById('pp-per-nombre').value = '';
   document.getElementById('pp-per-dni').value = '';
-  document.getElementById('pp-per-cuit').value = '';
-  document.getElementById('pp-per-tarifa').value = '';
   document.getElementById('pp-per-unidad').value = 'jornal';
   document.getElementById('pp-per-notas').value = '';
   document.getElementById('pp-per-fijos-asoc').style.display = 'none';
@@ -19140,8 +19363,6 @@ function ppEditarPersonal(id) {
     document.getElementById('pp-per-tipo').value = p.tipo;
     document.getElementById('pp-per-nombre').value = p.nombre || '';
     document.getElementById('pp-per-dni').value = p.dni || '';
-    document.getElementById('pp-per-cuit').value = p.cuit || '';
-    document.getElementById('pp-per-tarifa').value = (p.tarifa_default != null ? p.tarifa_default : '');
     document.getElementById('pp-per-unidad').value = p.unidad_tarifa || 'jornal';
     document.getElementById('pp-per-notas').value = p.notas || '';
     ppLlenarSelectsPersonal(p);
@@ -19162,8 +19383,6 @@ function ppGuardarPersonal() {
     tipo: tipo,
     nombre: document.getElementById('pp-per-nombre').value.trim(),
     dni: document.getElementById('pp-per-dni').value.trim() || null,
-    cuit: document.getElementById('pp-per-cuit').value.trim() || null,
-    cuadrilla_default_id: document.getElementById('pp-per-cuadrilla').value ? parseInt(document.getElementById('pp-per-cuadrilla').value) : null,
     grupo_id: document.getElementById('pp-per-grupo').value ? parseInt(document.getElementById('pp-per-grupo').value) : null,
     notas: document.getElementById('pp-per-notas').value.trim() || null
   };
@@ -19172,7 +19391,6 @@ function ppGuardarPersonal() {
     body.contratista_madre_id = document.getElementById('pp-per-madre').value ? parseInt(document.getElementById('pp-per-madre').value) : null;
   }
   if (ppPuedeVerTarifa()) {
-    body.tarifa_default = document.getElementById('pp-per-tarifa').value ? Number(document.getElementById('pp-per-tarifa').value) : 0;
     body.unidad_tarifa = document.getElementById('pp-per-unidad').value;
   }
   if (!body.nombre) return toast('Nombre requerido', 'er');
@@ -19251,7 +19469,7 @@ function ppLoadAsistencia() {
 
 function ppRenderAsistencia() {
   var thead = document.getElementById('pp-asist-thead');
-  thead.innerHTML = '<th>Cuadrilla</th><th>Persona / Bloque</th><th style="text-align:center">Cant.</th><th style="text-align:center">Horas</th>' +
+  thead.innerHTML = '<th>Cuadrilla</th><th>Persona / Cuadrilla</th><th style="text-align:center">Cant.</th><th style="text-align:center">Horas</th>' +
     '<th style="text-align:center">Jorn.</th><th>Rubro</th><th>Campañas</th><th>Finca / Lote</th><th>Tarea</th><th>Cultivo</th><th>Estado</th><th></th>';
   var tbody = document.getElementById('pp-asist-tbody');
   if (!PP.asistencias.length) {
@@ -19264,7 +19482,7 @@ function ppRenderAsistencia() {
     totJorn += (a.jornales_calc || 0);
     var quien = a.personal_id
       ? esc(a.personal_nombre || '—') + (a.contratista_nombre ? '<div style="font-size:10px;color:var(--mut)">↳ '+esc(a.contratista_nombre)+'</div>' : '')
-      : '<span style="color:#7c3aed">▣ '+esc(a.contratista_nombre || 'Bloque')+'</span>';
+      : '<span style="color:#7c3aed">▣ '+esc(a.contratista_nombre || 'Cuadrilla')+'</span>';
     var camp = '<div style="font-size:10px">'+esc(a.campana_anual_nombre||'—')+'</div><div style="font-size:10px;color:var(--mut)">'+esc(a.campana_estacional_nombre||'—')+'</div>';
     var rubro = (a.rubro_codigo?a.rubro_codigo+' ':'')+esc(a.rubro_nombre||'—');
     var pend = a.estado === 'pendiente_valorizar';
@@ -19324,15 +19542,62 @@ function ppFillAsistSelects(a) {
     opt((d.personal||[]).filter(function(p){ return p.tipo==='fijo'; }),'id','nombre',a.personal_id);
   document.getElementById('pp-as-contratista').innerHTML = '<option value="">— Elegir —</option>' +
     opt((d.personal||[]).filter(function(p){ return p.tipo==='contratista'; }),'id','nombre',a.contratista_id);
+  // Rubros: si hay rubros marcados "vigente" mostramos solo esos (flujo cocinado);
+  // si todavía no se configuró ninguno, mostramos todos para no bloquear la carga.
+  var rubros = d.cuentas_mo || [];
+  var vig = rubros.filter(function(c){ return c.mo_vigente; });
+  var rubrosMostrar = vig.length ? vig : rubros;
+  // si el rubro guardado (edición) no está en la lista filtrada, lo agregamos igual
+  if (a.rubro_cuenta_id && !rubrosMostrar.some(function(c){ return c.id==a.rubro_cuenta_id; })) {
+    var orig = rubros.find(function(c){ return c.id==a.rubro_cuenta_id; });
+    if (orig) rubrosMostrar = rubrosMostrar.concat([orig]);
+  }
   document.getElementById('pp-as-rubro').innerHTML = '<option value="">— Elegir —</option>' +
-    opt(d.cuentas_mo,'id',function(c){ return c.codigo+' · '+c.nombre; }, a.rubro_cuenta_id);
-  document.getElementById('pp-as-canual').innerHTML = '<option value="">— Elegir —</option>' +
-    opt(d.campanas?d.campanas.anual:[],'id',function(c){ return c.nombre+(c.activa?' (vigente)':''); }, a.campaña_anual_id);
-  document.getElementById('pp-as-cestac').innerHTML = '<option value="">— Elegir —</option>' +
-    opt(d.campanas?d.campanas.estacional:[],'id',function(c){ return c.nombre+(c.activa?' (vigente)':''); }, a.campaña_estacional_id);
-  document.getElementById('pp-as-lote').innerHTML = '<option value="">— Elegir —</option>' +
-    opt(d.lotes,'id',function(l){ return (l.finca?l.finca+' · ':'')+l.nombre; }, a.lote_id);
+    opt(rubrosMostrar,'id',function(c){ return c.codigo+' · '+c.nombre + (c.mo_clase==='general'?' [general]':''); }, a.rubro_cuenta_id);
+  // Campañas (ocultas): se completan con las vigentes pero quedan seteables por código
+  document.getElementById('pp-as-canual').innerHTML = opt(d.campanas?d.campanas.anual:[],'id','nombre',a.campaña_anual_id);
+  document.getElementById('pp-as-cestac').innerHTML = opt(d.campanas?d.campanas.estacional:[],'id','nombre',a.campaña_estacional_id);
+  ppFillLotes(a.lote_id, a.rubro_cuenta_id);
   document.getElementById('pp-as-tarea').innerHTML = '<option value="">— Ninguna —</option>' + opt(d.tareas,'id','nombre',a.tarea_tipo_id);
+}
+
+// Rubro seleccionado (objeto) del catálogo de cuentas MO
+function ppAsistRubroSel() {
+  var d = PP.asistDefaults || {};
+  var id = document.getElementById('pp-as-rubro').value;
+  return (d.cuentas_mo || []).find(function(c){ return String(c.id) === String(id); }) || null;
+}
+
+// Llena el select de lotes. Si el rubro es productivo con cultivo asociado,
+// filtra a los lotes de ese cultivo; si no, todos los lotes activos.
+function ppFillLotes(selId, rubroId) {
+  var d = PP.asistDefaults || {};
+  var rubro = rubroId
+    ? (d.cuentas_mo || []).find(function(c){ return String(c.id) === String(rubroId); })
+    : ppAsistRubroSel();
+  var lotes = d.lotes || [];
+  if (rubro && rubro.mo_cultivo) {
+    var fil = lotes.filter(function(l){ return (l.cultivo || '') === rubro.mo_cultivo; });
+    if (fil.length) lotes = fil; // si no hay match, dejamos todos como fallback
+  }
+  document.getElementById('pp-as-lote').innerHTML = '<option value="">— Elegir —</option>' +
+    lotes.map(function(l){
+      return '<option value="'+l.id+'"'+(l.id==selId?' selected':'')+'>'+esc((l.finca?l.finca+' · ':'')+l.nombre)+'</option>';
+    }).join('');
+}
+
+// Al cambiar el rubro: productivo → pide lote (filtrado); general → sin lote/cultivo.
+function ppAsistRubroChange() {
+  var rubro = ppAsistRubroSel();
+  var esGeneral = !!(rubro && rubro.mo_clase === 'general');
+  document.querySelectorAll('.pp-as-lote-wrap').forEach(function(el){ el.style.display = esGeneral ? 'none' : ''; });
+  document.querySelectorAll('.pp-as-general-note').forEach(function(el){ el.style.display = esGeneral ? '' : 'none'; });
+  if (esGeneral) {
+    document.getElementById('pp-as-lote').value = '';
+    document.getElementById('pp-as-cultivo').value = '';
+  } else {
+    ppFillLotes(document.getElementById('pp-as-lote').value, rubro ? rubro.id : null);
+  }
 }
 
 function ppAbrirAsistencia() {
@@ -19347,12 +19612,13 @@ function ppAbrirAsistencia() {
     document.getElementById('pp-as-horas').value = '8';
     document.getElementById('pp-as-cultivo').value = '';
     document.getElementById('pp-as-notas').value = '';
-    // Default campañas vigentes
+    // Default campañas vigentes (campos ocultos: el operario no las elige)
     if (d.campanas) {
       if (d.campanas.vigenteAnualId) document.getElementById('pp-as-canual').value = d.campanas.vigenteAnualId;
       if (d.campanas.vigenteEstacionalId) document.getElementById('pp-as-cestac').value = d.campanas.vigenteEstacionalId;
     }
     ppAsistToggleModo();
+    ppAsistRubroChange();
     document.getElementById('mb-pp-asist').classList.add('on');
   });
 }
@@ -19372,6 +19638,7 @@ function ppEditarAsistencia(id) {
     document.getElementById('pp-as-cultivo').value = a.cultivo || '';
     document.getElementById('pp-as-notas').value = a.notas || '';
     ppAsistToggleModo();
+    ppAsistRubroChange();
     document.getElementById('mb-pp-asist').classList.add('on');
   });
 }
@@ -19400,14 +19667,19 @@ function ppGuardarAsistencia() {
     body.personal_id = null;
     body.contratista_id = num('pp-as-contratista');
     body.cantidad = parseInt(document.getElementById('pp-as-cantidad').value) || 0;
-    if (!body.contratista_id) return toast('Elegí un contratista', 'er');
+    if (!body.contratista_id) return toast('Elegí un contratista (titular de la cuadrilla)', 'er');
     if (body.cantidad < 1) return toast('Cantidad debe ser ≥ 1', 'er');
   }
   if (!body.fecha) return toast('Fecha requerida', 'er');
   if (!(body.horas > 0)) return toast('Horas debe ser > 0', 'er');
   if (!body.rubro_cuenta_id) return toast('Elegí el rubro (cuenta MO)', 'er');
-  if (!body.campaña_anual_id || !body.campaña_estacional_id) return toast('Campañas anual y estacional obligatorias', 'er');
-  if (!body.lote_id) return toast('Elegí finca / lote', 'er');
+  // Campañas: vienen de las vigentes (campos ocultos). Si faltan, avisar config.
+  if (!body.campaña_anual_id || !body.campaña_estacional_id) return toast('No hay campañas vigentes configuradas', 'er');
+  // Lote: obligatorio solo si el rubro es productivo. General → sin lote.
+  var rubroSel = ppAsistRubroSel();
+  var esGeneral = !!(rubroSel && rubroSel.mo_clase === 'general');
+  if (esGeneral) { body.lote_id = null; body.cultivo = null; }
+  else if (!body.lote_id) return toast('Elegí finca / lote', 'er');
 
   var url = PP.editAsistId ? '/api/pa/personal/asistencias/'+PP.editAsistId : '/api/pa/personal/asistencias';
   var method = PP.editAsistId ? 'PATCH' : 'POST';
@@ -19470,7 +19742,7 @@ function ppRenderValorizar() {
   // Ordenar por titular para facilitar la lectura bulk
   var rows = PP.valRows.slice().sort(function(a,b){ return (a.titular_nombre||'').localeCompare(b.titular_nombre||''); });
   tbody.innerHTML = rows.map(function(a){
-    var quien = esc(a.titular_nombre||'—') + ' <span class="tag" style="font-size:9px">'+(a.titular_tipo||'')+'</span>';
+    var quien = esc(a.titular_nombre||'—') + ' <span class="tag" style="font-size:9px">'+ppTipoLabel(a.titular_tipo)+'</span>';
     return '<tr data-aid="'+a.id+'">' +
       '<td style="text-align:center"><input type="checkbox" class="pp-val-chk" checked data-aid="'+a.id+'" onchange="ppValRecalc()"></td>' +
       '<td>'+quien+'</td><td>'+paFecha(a.fecha)+'</td>' +
@@ -19546,7 +19818,7 @@ function ppRenderCCTitulares() {
   if (!PP.ccTitulares.length) { tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:var(--mut);padding:20px">Sin titulares</td></tr>'; return; }
   tbody.innerHTML = PP.ccTitulares.map(function(t){
     return '<tr style="cursor:pointer" onclick="ppVerCC(\''+t.tipo+'\','+t.id+')">' +
-      '<td>'+esc(t.nombre)+'</td><td><span class="tag" style="font-size:10px">'+t.tipo+'</span></td>' +
+      '<td>'+esc(t.nombre)+'</td><td><span class="tag" style="font-size:10px">'+ppTipoLabel(t.tipo)+'</span></td>' +
       '<td style="text-align:right">'+ppSaldoSpan(t.saldo)+'</td>' +
       '<td style="font-size:11px;color:var(--mut)">'+(t.ultimo_mov?paFecha(t.ultimo_mov):'—')+'</td></tr>';
   }).join('');
@@ -19580,7 +19852,7 @@ function ppRenderCCDetalle() {
   }).join('');
   cont.innerHTML =
     '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">' +
-      '<div><div style="font-size:15px;font-weight:700">'+esc(d.titular.nombre)+' <span class="tag" style="font-size:10px">'+d.titular.tipo+'</span></div>' +
+      '<div><div style="font-size:15px;font-weight:700">'+esc(d.titular.nombre)+' <span class="tag" style="font-size:10px">'+ppTipoLabel(d.titular.tipo)+'</span></div>' +
       '<div style="font-size:12px;color:var(--mut)">Saldo actual: '+ppSaldoSpan(d.saldo)+' '+(d.saldo>0?'(le debemos)':(d.saldo<0?'(a favor)':''))+'</div></div>' +
       '<button class="btn bb bs" onclick="ppAbrirMov(\''+d.titular.tipo+'\','+d.titular.id+')" style="font-size:11px">+ Pago/Adelanto/Ajuste</button>' +
     '</div>' +
@@ -19605,7 +19877,7 @@ function ppAbrirMov(tipoTitular, titularId) {
   var fill = function() {
     document.getElementById('pp-mov-titular').innerHTML = '<option value="">— Elegir —</option>' +
       (PP.ccTitulares||[]).map(function(t){
-        return '<option value="'+t.id+'" data-tipo="'+t.tipo+'"'+(t.id==titularId?' selected':'')+'>'+esc(t.nombre)+' ('+t.tipo+')</option>';
+        return '<option value="'+t.id+'" data-tipo="'+t.tipo+'"'+(t.id==titularId?' selected':'')+'>'+esc(t.nombre)+' ('+ppTipoLabel(t.tipo)+')</option>';
       }).join('');
     document.getElementById('pp-mov-tipo').value = 'pago';
     document.getElementById('pp-mov-monto').value = '';
