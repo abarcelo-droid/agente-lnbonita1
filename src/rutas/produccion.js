@@ -2824,10 +2824,11 @@ router.get('/personal/cuadrillas', requireAuth, (req, res) => {
   const db = getDb();
   try {
     const data = db.prepare(`
-      SELECT c.*, u.nombre as capataz_nombre,
+      SELECT c.*, u.nombre as capataz_nombre, r.nombre as responsable_nombre,
              (SELECT COUNT(*) FROM pa_personal WHERE cuadrilla_default_id = c.id AND activo=1 AND eliminado_en IS NULL) as cantidad
       FROM pa_cuadrillas c
-      LEFT JOIN usuarios u ON u.id = c.capataz_id
+      LEFT JOIN usuarios u    ON u.id = c.capataz_id
+      LEFT JOIN pa_personal r ON r.id = c.responsable_id
       WHERE c.activo=1 ORDER BY c.tipo, c.nombre
     `).all();
     res.json({ ok: true, data });
@@ -2836,11 +2837,11 @@ router.get('/personal/cuadrillas', requireAuth, (req, res) => {
 
 router.post('/personal/cuadrillas', requireAuth, (req, res) => {
   const db = getDb();
-  const { nombre, capataz_id, tipo, notas } = req.body;
+  const { nombre, capataz_id, responsable_id, tipo, notas } = req.body;
   if (!nombre) return res.status(400).json({ ok: false, error: 'nombre requerido' });
   try {
-    const r = db.prepare("INSERT INTO pa_cuadrillas (nombre, capataz_id, tipo, notas) VALUES (?,?,?,?)")
-      .run(nombre, capataz_id || null, tipo || 'fija', notas || null);
+    const r = db.prepare("INSERT INTO pa_cuadrillas (nombre, capataz_id, responsable_id, tipo, notas) VALUES (?,?,?,?,?)")
+      .run(nombre, capataz_id || null, responsable_id || null, tipo || 'fija', notas || null);
     res.json({ ok: true, id: r.lastInsertRowid });
   } catch(e) {
     if (e.message.includes('UNIQUE')) return res.status(400).json({ ok: false, error: 'Ya existe una cuadrilla con ese nombre' });
@@ -2850,13 +2851,14 @@ router.post('/personal/cuadrillas', requireAuth, (req, res) => {
 
 router.patch('/personal/cuadrillas/:id', requireAuth, (req, res) => {
   const db = getDb();
-  const { nombre, capataz_id, tipo, activo, notas } = req.body;
+  const { nombre, capataz_id, responsable_id, tipo, activo, notas } = req.body;
   try {
     const c = db.prepare("SELECT * FROM pa_cuadrillas WHERE id=?").get(req.params.id);
     if (!c) return res.status(404).json({ ok: false, error: 'Cuadrilla no encontrada' });
-    db.prepare("UPDATE pa_cuadrillas SET nombre=?, capataz_id=?, tipo=?, activo=?, notas=? WHERE id=?")
+    db.prepare("UPDATE pa_cuadrillas SET nombre=?, capataz_id=?, responsable_id=?, tipo=?, activo=?, notas=? WHERE id=?")
       .run(nombre || c.nombre,
            capataz_id !== undefined ? capataz_id : c.capataz_id,
+           responsable_id !== undefined ? responsable_id : c.responsable_id,
            tipo || c.tipo,
            activo !== undefined ? (activo ? 1 : 0) : c.activo,
            notas !== undefined ? notas : c.notas,
@@ -3250,7 +3252,10 @@ router.get('/personal/asistencias/defaults', requireAuth, (req, res) => {
              (SELECT cultivo FROM pa_cultivos_lote WHERE lote_id=l.id ORDER BY id DESC LIMIT 1) as cultivo
       FROM pa_lotes l WHERE l.activo=1 ORDER BY l.finca, l.nombre`).all();
     const tareas     = db.prepare("SELECT id, nombre FROM pa_tareas_tipos WHERE activo=1 ORDER BY nombre").all();
-    const cuadrillas = db.prepare("SELECT id, nombre FROM pa_cuadrillas WHERE activo=1 ORDER BY nombre").all();
+    const cuadrillas = db.prepare(`
+      SELECT c.id, c.nombre, c.responsable_id, r.nombre as responsable_nombre
+      FROM pa_cuadrillas c LEFT JOIN pa_personal r ON r.id = c.responsable_id
+      WHERE c.activo=1 ORDER BY c.nombre`).all();
     const grupos     = db.prepare("SELECT id, nombre FROM pa_grupos WHERE activo=1 ORDER BY nombre").all();
     const personal   = db.prepare("SELECT id, nombre, tipo, contratista_madre_id, grupo_id FROM pa_personal WHERE activo=1 AND eliminado_en IS NULL ORDER BY tipo, nombre").all();
     res.json({ ok: true, data: {
@@ -3310,7 +3315,7 @@ router.get('/personal/asistencias', requireAuth, (req, res) => {
 //    Por compatibilidad, una cuenta sin mo_clase seteada se trata como 'productivo'.
 //  · Cuadrilla (agregado, sin persona) vs Individual (persona) son EXCLUYENTES.
 function _validarAsistencia(db, body) {
-  const { fecha, personal_id, contratista_id, cantidad, horas, rubro_cuenta_id,
+  const { fecha, personal_id, contratista_id, cuadrilla_id, cantidad, horas, rubro_cuenta_id,
           campaña_anual_id, campaña_estacional_id, lote_id } = body;
   if (!fecha) return { error: 'fecha requerida' };
   if (!rubro_cuenta_id) return { error: 'rubro_cuenta_id requerido' };
@@ -3322,7 +3327,16 @@ function _validarAsistencia(db, body) {
   // Cuadrilla (agregado, sin persona) vs Individual (persona) — excluyentes
   let contraId = contratista_id || null;
   if (!personal_id) {
-    if (!contraId) return { error: 'Un registro de cuadrilla (agregado, sin persona) requiere un contratista' };
+    // Modo Cuadrilla: el titular de pago se deriva del RESPONSABLE de la cuadrilla
+    // (persona de pa_personal con CC). Autoritativo: ignora cualquier contratista_id suelto.
+    if (cuadrilla_id) {
+      const cuad = db.prepare("SELECT responsable_id FROM pa_cuadrillas WHERE id=?").get(cuadrilla_id);
+      if (!cuad) return { error: 'Cuadrilla inexistente' };
+      if (!cuad.responsable_id) return { error: 'Esta cuadrilla no tiene responsable de cobro — asignalo en Cuadrillas' };
+      contraId = cuad.responsable_id;
+    } else if (!contraId) {
+      return { error: 'Elegí la cuadrilla (su responsable es el titular de cobro)' };
+    }
   } else {
     if (contraId) return { error: 'No se puede cargar persona y cuadrilla a la vez (son excluyentes)' };
     // individual: derivar contratista madre de la persona (para CC del bloque)
