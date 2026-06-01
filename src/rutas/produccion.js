@@ -3246,10 +3246,11 @@ router.get('/personal/asistencias/defaults', requireAuth, (req, res) => {
       FROM pa_lotes l WHERE l.activo=1 ORDER BY l.finca, l.nombre`).all();
     const tareas     = db.prepare("SELECT id, nombre FROM pa_tareas_tipos WHERE activo=1 ORDER BY nombre").all();
     const cuadrillas = db.prepare("SELECT id, nombre FROM pa_cuadrillas WHERE activo=1 ORDER BY nombre").all();
-    const personal   = db.prepare("SELECT id, nombre, tipo, contratista_madre_id FROM pa_personal WHERE activo=1 AND eliminado_en IS NULL ORDER BY tipo, nombre").all();
+    const grupos     = db.prepare("SELECT id, nombre FROM pa_grupos WHERE activo=1 ORDER BY nombre").all();
+    const personal   = db.prepare("SELECT id, nombre, tipo, contratista_madre_id, grupo_id FROM pa_personal WHERE activo=1 AND eliminado_en IS NULL ORDER BY tipo, nombre").all();
     res.json({ ok: true, data: {
       campanas: { anual: anuales, estacional: estac, vigenteAnualId: act.anualId, vigenteEstacionalId: act.estacionalId },
-      cuentas_mo: cuentasMo, lotes, tareas, cuadrillas, personal
+      cuentas_mo: cuentasMo, lotes, tareas, cuadrillas, grupos, personal
     }});
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
@@ -3375,6 +3376,51 @@ router.post('/personal/asistencias', requireAuth, (req, res) => {
            b.rubro_cuenta_id, b.campaña_anual_id, b.campaña_estacional_id, v.loteId, v.finca,
            b.tarea_tipo_id || null, v.cultivo, b.notas || null, req.user.id);
     res.json({ ok: true, id: r.lastInsertRowid });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// Carga GRUPAL: una FILA INDIVIDUAL por cada persona tildada (uno-por-fila, para que
+// cada una tenga su CC y valorización propias). Campos compartidos: fecha/horas/rubro/
+// lote/tarea/campañas; cada fila es individual (personal_id, cantidad=1, contratista
+// derivado por persona vía su madre). Reusa _validarAsistencia (misma lógica rubro→lote
+// del Bloque B). Atómica: si una persona falla la validación, no se inserta NINGUNA.
+router.post('/personal/asistencias/grupo', requireAuth, (req, res) => {
+  const db = getDb();
+  const perms = permisosPersonal(db, req.user);
+  if (!perms.asistencia && !perms.valorizacion && !perms.admin)
+    return res.status(403).json({ ok: false, error: 'Sin permiso para cargar asistencias' });
+  const b = req.body || {};
+  const ids = Array.isArray(b.personal_ids)
+    ? [...new Set(b.personal_ids.map(Number).filter(Number.isInteger))]
+    : [];
+  if (!ids.length) return res.status(400).json({ ok: false, error: 'Elegí al menos una persona del grupo' });
+  // Validar cada persona ANTES de insertar (todo-o-nada)
+  const filas = [];
+  for (const pid of ids) {
+    const persona = db.prepare("SELECT id, nombre FROM pa_personal WHERE id=? AND eliminado_en IS NULL").get(pid);
+    if (!persona) return res.status(400).json({ ok: false, error: 'Persona inexistente (id ' + pid + ')' });
+    const chk = _validarAsistencia(db, {
+      fecha: b.fecha, personal_id: pid, contratista_id: null, cantidad: 1, horas: b.horas,
+      rubro_cuenta_id: b.rubro_cuenta_id, campaña_anual_id: b.campaña_anual_id,
+      campaña_estacional_id: b.campaña_estacional_id, lote_id: b.lote_id
+    });
+    if (chk.error) return res.status(400).json({ ok: false, error: persona.nombre + ': ' + chk.error });
+    filas.push({ pid, v: chk.val });
+  }
+  try {
+    const ins = db.prepare(`INSERT INTO pa_asistencias
+        (fecha, cuadrilla_id, personal_id, contratista_id, cantidad, horas, jornales_calc,
+         rubro_cuenta_id, campaña_anual_id, campaña_estacional_id, lote_id, finca, tarea_tipo_id, cultivo, notas, cargado_por)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
+    const tx = db.transaction(() => {
+      for (const f of filas) {
+        ins.run(b.fecha, b.cuadrilla_id || null, f.pid, f.v.contraId, f.v.cant, f.v.hs, f.v.jornales,
+                b.rubro_cuenta_id, b.campaña_anual_id, b.campaña_estacional_id, f.v.loteId, f.v.finca,
+                b.tarea_tipo_id || null, f.v.cultivo, b.notas || null, req.user.id);
+      }
+    });
+    tx();
+    res.json({ ok: true, creadas: filas.length });
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
