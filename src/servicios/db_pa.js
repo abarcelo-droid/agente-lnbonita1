@@ -2,7 +2,7 @@
 // ── MÓDULO PRODUCCIÓN AGRÍCOLA — PUENTE CORDON SA ─────────────────────────
 // Todas las tablas usan prefijo pa_ para no colisionar con La Niña Bonita
 
-import db from './db.js';
+import db, { dbPath } from './db.js';
 import fs from 'fs';
 import path from 'path';
 // Multisociedad Fase 1: el cimiento contable necesita que la tabla `sociedades`
@@ -3068,6 +3068,65 @@ db.exec(`
   } catch (e) {
     try { db.pragma('foreign_keys = ON'); } catch (_) {}
     console.error('[PA] Error en rebuild pa_asistencias (lote_id nullable):', e.message);
+  }
+})();
+
+// ═══════════════════════════════════════════════════════════════════════════
+// VACIADO TOTAL — Órdenes de Aplicación (PC) (OK Andy + ingeniera)
+// ───────────────────────────────────────────────────────────────────────────
+// One-shot guardado por flag en sistema_flags ('wipe_ordenes_pc_v1'): vacía TODAS las
+// órdenes de aplicación y REVIERTE todo lo que arrastran — "como si nunca hubieran
+// existido". BETA sin datos productivos (arrancan jul-2026).
+//   1) Backup VACUUM INTO ANTES (aborta sin tocar nada si no puede crearlo; reintenta).
+//   2) En una transacción: RESTAURA el stock descontado (pa_insumos += Σ cantidad_real —
+//      el stock SUBE, no va a cero), borra costos (fert/agro de aplicaciones), borra
+//      mov_stock 'aplicacion', desvincula combustible, y borra aplicaciones/items/lotes/órdenes.
+//   3) Marca el flag → idempotente: no re-corre NI re-vacía órdenes creadas después.
+// Las órdenes NO generan asientos/movimientos contables → ese efecto es 0 (verificado).
+// Borra hijos antes que el padre (FK-safe). Validado con node:sqlite.
+// ═══════════════════════════════════════════════════════════════════════════
+(function vaciarOrdenesAplicacionPC() {
+  const FLAG = 'wipe_ordenes_pc_v1';
+  try {
+    db.exec(`CREATE TABLE IF NOT EXISTS sistema_flags (key TEXT PRIMARY KEY, valor TEXT, ejecutado_en TEXT DEFAULT (datetime('now','localtime')))`);
+    if (db.prepare("SELECT 1 FROM sistema_flags WHERE key = ?").get(FLAG)) return; // ya ejecutado
+
+    const totalOrdenes = db.prepare("SELECT COUNT(*) AS n FROM pa_ordenes").get().n;
+    if (totalOrdenes === 0) {
+      db.prepare("INSERT OR REPLACE INTO sistema_flags (key, valor) VALUES (?, ?)").run(FLAG, 'sin-ordenes');
+      return;
+    }
+
+    // 1) Backup de red ANTES del borrado. Si falla → abortar sin tocar nada (reintenta en el próximo deploy).
+    const backupPath = path.join(path.dirname(dbPath), 'clientes-pre-wipe-ordenes.db');
+    if (!fs.existsSync(backupPath)) {
+      try { db.exec(`VACUUM INTO '${backupPath.replace(/'/g, "''")}'`); console.log('[WIPE-OA] Backup creado:', backupPath); }
+      catch (e) { console.error('[WIPE-OA] No se pudo crear el backup — ABORTANDO (no se borró nada):', e.message); return; }
+    }
+
+    // 2) Reversa transaccional
+    const stats = {};
+    db.transaction(() => {
+      // Restaurar (sumar) el stock descontado por cada aplicación — ANTES de borrar aplicaciones
+      db.exec(`UPDATE pa_insumos SET stock_actual = stock_actual + COALESCE(
+                 (SELECT SUM(a.cantidad_real) FROM pa_aplicaciones a WHERE a.insumo_id = pa_insumos.id), 0)`);
+      // Costos por lote generados por aplicaciones (fert/agro con referencia a una aplicación)
+      stats.costos  = db.prepare(`DELETE FROM pa_costos_lote WHERE categoria IN ('fertilizante','agroquimico') AND referencia_id IN (SELECT id FROM pa_aplicaciones)`).run().changes;
+      // Movimientos de stock de aplicaciones
+      stats.movStock = db.prepare(`DELETE FROM pa_movimientos_stock WHERE motivo='aplicacion'`).run().changes;
+      // Desvincular combustible (NO se borra el movimiento)
+      stats.comb     = db.prepare(`UPDATE pa_combustible_movimientos SET orden_id=NULL WHERE orden_id IS NOT NULL`).run().changes;
+      // Borrar aplicaciones, ítems, lotes y órdenes (hijos → padre)
+      stats.aplic    = db.prepare(`DELETE FROM pa_aplicaciones`).run().changes;
+      stats.items    = db.prepare(`DELETE FROM pa_ordenes_items`).run().changes;
+      stats.lotes    = db.prepare(`DELETE FROM pa_ordenes_lotes`).run().changes;
+      stats.ordenes  = db.prepare(`DELETE FROM pa_ordenes`).run().changes;
+    })();
+
+    db.prepare("INSERT OR REPLACE INTO sistema_flags (key, valor) VALUES (?, ?)").run(FLAG, JSON.stringify(stats));
+    console.log('[WIPE-OA] Órdenes de aplicación vaciadas:', JSON.stringify(stats));
+  } catch (e) {
+    console.error('[WIPE-OA] Error vaciando órdenes de aplicación:', e.message);
   }
 })();
 
