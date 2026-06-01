@@ -1894,7 +1894,9 @@ db.exec(`
     creado_en       TEXT DEFAULT (datetime('now','localtime'))
   );
   CREATE INDEX IF NOT EXISTS idx_panol_unidades_estado ON pa_panol_unidades(estado);
-  CREATE INDEX IF NOT EXISTS idx_panol_unidades_personal ON pa_panol_unidades(personal_actual_id);
+  -- NOTA: el índice de personal_actual_id NO va acá. En DBs existentes la tabla ya
+  -- existe (CREATE IF NOT EXISTS = no-op) y la columna recién la agrega el ALTER de
+  -- unificarPadronPersonal() más abajo → crear el índice acá rompía el boot (#299).
 
   -- Movimientos: préstamo, devolución, reparación, baja, alta
   CREATE TABLE IF NOT EXISTS pa_panol_movimientos (
@@ -1931,9 +1933,11 @@ db.exec(`
     const colsU = db.prepare("PRAGMA table_info(pa_panol_unidades)").all().map(c => c.name);
     if (!colsU.includes('personal_actual_id')) {
       db.exec("ALTER TABLE pa_panol_unidades ADD COLUMN personal_actual_id INTEGER REFERENCES pa_personal(id)");
-      db.exec("CREATE INDEX IF NOT EXISTS idx_panol_unidades_personal ON pa_panol_unidades(personal_actual_id)");
       console.log('[PA] pa_panol_unidades.personal_actual_id agregado');
     }
+    // Índice acá (no en el schema template), ya con la columna garantizada en cualquier
+    // DB. IF NOT EXISTS → idempotente y sirve tanto a DBs frescas como existentes.
+    db.exec("CREATE INDEX IF NOT EXISTS idx_panol_unidades_personal ON pa_panol_unidades(personal_actual_id)");
     const colsM = db.prepare("PRAGMA table_info(pa_panol_movimientos)").all().map(c => c.name);
     if (!colsM.includes('personal_id')) {
       db.exec("ALTER TABLE pa_panol_movimientos ADD COLUMN personal_id INTEGER REFERENCES pa_personal(id)");
