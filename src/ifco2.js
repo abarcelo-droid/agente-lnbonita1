@@ -1,0 +1,551 @@
+/* ===========================================================================
+   IFCO 2 — Módulo Cajones IFCO (San Gerónimo SA)
+   Rediseño de alta fidelidad del handoff, cableado a la API real /api/ifco.
+   Se monta dentro de #sec-ab-ifcos.ifco2 (la SPA del panel). Reusa los flujos de
+   escritura existentes (window.ifcoAbrir*) — el rebuild de formularios es follow-up.
+   Expone window.IFCO2.init() (lo llama loadSec('ab-ifcos')).
+   =========================================================================== */
+(function () {
+  'use strict';
+  var API = '/api/ifco';
+  var st = { view: null, resumen: null, provNombre: {}, search: '00015-01', despEstado: '' };
+
+  // ---------- helpers ----------
+  function fetchJSON(url, opts) {
+    return fetch(url, Object.assign({ credentials: 'include' }, opts || {}))
+      .then(function (r) { return r.json().catch(function () { return null; }); })
+      .catch(function () { return null; });
+  }
+  function nf(n) { return (n == null || n === '') ? '—' : Number(n).toLocaleString('es-AR'); }
+  function fdate(s) { if (!s) return '—'; var p = String(s).slice(0, 10).split('-'); return p.length === 3 ? (p[2] + '/' + p[1] + '/' + p[0]) : s; }
+  function fdshort(s) { if (!s) return '—'; var p = String(s).slice(0, 10).split('-'); return p.length === 3 ? (p[2] + '/' + p[1]) : s; }
+  function ic(n) { return '<i data-lucide="' + n + '"></i>'; }
+  function esc(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
+  function diasDesde(f) { if (!f) return 0; var d = Math.floor((Date.now() - new Date(String(f).slice(0, 10)).getTime()) / 86400000); return (isNaN(d) || d < 0) ? 0 : d; }
+  function cadenaCorta(c) { return String(c || '').replace(' (INC SA)', '').replace(' (DORINKA)', ''); }
+  function inis(n) { n = String(n || '').trim(); if (!n) return '··'; return n.split(/\s+/).map(function (w) { return w[0]; }).join('').slice(0, 2).toUpperCase(); }
+  function uav(name) { return '<span class="uav" title="' + esc(name || '') + '">' + inis(name) + '</span>'; }
+  function toast(m, t) { if (typeof window.toast === 'function') window.toast(m, t); }
+  function icons() { if (window.lucide && window.lucide.createIcons) window.lucide.createIcons(); }
+  function reuse(fn, msg) { if (typeof window[fn] === 'function') { try { window[fn](); } catch (e) {} } else { toast(msg || 'Acción disponible en el flujo actual', 'warn'); } }
+  window.__ifco2Reuse = reuse;
+
+  var ESTADO = {
+    despachado: ['st-despachado', 'Despachado'], sellado: ['st-sellado', 'Sellado'],
+    enviado: ['st-enviado', 'Enviado a IFCO'], presentado: ['st-presentado', 'Presentado'],
+    anulado: ['st-anulado', 'Anulado'], en_viaje: ['st-enviaje', 'En viaje'],
+    recibido: ['st-recibido', 'Recibido'], parcial: ['st-parcial', 'Parcial'],
+    rechazado: ['st-rechazado', 'Rechazado'], retiro: ['st-retiro', 'Retiro'], perdida: ['st-perdida', 'Pérdida']
+  };
+  function badge(e) { var x = ESTADO[e] || ['st-anulado', e]; return '<span class="bg-badge ' + x[0] + '"><span class="d"></span>' + x[1] + '</span>'; }
+  function diasChip(d, w, c) { w = w || 15; c = c || 25; var cls = d >= c ? 'crit' : (d >= w ? 'warn' : 'ok'); return '<span class="dias ' + cls + '">' + d + '&thinsp;d</span>'; }
+  function provNombre(id) { return st.provNombre[id] || ('Proveedor #' + id); }
+  function loading(msg) { return '<div style="padding:40px;text-align:center;color:var(--i-mut);font-size:13px">' + ic('loader') + ' ' + (msg || 'Cargando…') + '</div>'; }
+  function empty(msg) { return '<div style="padding:34px;text-align:center;color:var(--i-sub);font-size:12.5px">' + esc(msg || 'Sin registros') + '</div>'; }
+
+  // ---------- adapters (DB row -> shape de vista) ----------
+  function mapRemito(r) {
+    return {
+      id: r.id, ifco: r.n_remito_ifco || '', sg: r.n_remito_sg || '', emi: r.fecha_emision,
+      cadena: r.empresa || '', suc: r.sucursal || '', desp: r.cantidad_despachada,
+      rec: (r.cantidad_recibida == null ? null : r.cantidad_recibida),
+      rech: (r.cantidad_rechazada == null ? null : r.cantidad_rechazada),
+      origen: r.origen || 'san_geronimo', prov: r.proveedor_origen_nombre || null,
+      estado: r.estado, sell: r.fecha_sellado, env: r.fecha_enviado, pres: r.fecha_presentado,
+      rdest: r.rechazo_destino, usuario: r.usuario_creador_nombre || '', dias: diasDesde(r.fecha_emision)
+    };
+  }
+
+  // =========================================================================
+  // Navegación
+  // =========================================================================
+  var RENDER = {};
+  function host(v) { return document.getElementById('iv-' + v); }
+  function nav(v) {
+    st.view = v;
+    document.querySelectorAll('#sec-ab-ifcos .subnav button[data-v]').forEach(function (b) { b.classList.toggle('on', b.dataset.v === v); });
+    document.querySelectorAll('#sec-ab-ifcos .view').forEach(function (s) { s.classList.toggle('on', s.id === 'iv-' + v); });
+    var h = host(v);
+    if (h && RENDER[v]) { h.innerHTML = loading(); icons(); Promise.resolve(RENDER[v](h)).then(icons); }
+    window.scrollTo(0, 0);
+  }
+  window.__ifco2Nav = nav;
+
+  function setPill(v, n, cls) {
+    var b = document.querySelector('#sec-ab-ifcos .subnav button[data-v="' + v + '"]');
+    if (!b) return;
+    var old = b.querySelector('.pill'); if (old) old.remove();
+    if (n && n > 0) {
+      var s = document.createElement('span');
+      s.className = 'pill' + (cls === 'amber' ? ' amber' : '');
+      s.textContent = n;
+      b.appendChild(s);
+    }
+  }
+
+  // =========================================================================
+  // 1) RESUMEN
+  // =========================================================================
+  RENDER.resumen = function (h) {
+    return Promise.all([fetchJSON(API + '/resumen'), fetchJSON(API + '/stocks-reales')]).then(function (res) {
+      var R = res[0] || {}, S = res[1] || {};
+      var s = R.stock || {}, al = R.alertas || {}, sal = R.saldos || {};
+      var conteos = (S.items || S || []);
+      var sinContar = conteos.filter(function (c) { return c.falta_cargar; });
+
+      function kpi(lbl, val, unit, icon, acc, sub) {
+        return '<div class="kpi ' + (acc || '') + '"><div class="k-top"><div class="k-lbl">' + lbl + '</div><div class="k-ic">' + ic(icon) + '</div></div>'
+          + '<div class="k-val">' + nf(val) + '<span class="u">' + unit + '</span></div><div class="k-sub">' + sub + '</div></div>';
+      }
+
+      var controles = [];
+      var urg = (al.urgentes_presentar || []);
+      if (urg.length) controles.push({ ai: 'crit', icon: 'alert-triangle', t: 'Sellados sin presentar a IFCO', s: urg.length + ' remitos · +25 días (multa en riesgo)', v: urg.reduce(function (a, x) { return a + (x.cantidad_recibida || 0); }, 0), u: 'cajones', go: 'despachos' });
+      var env = (al.envios_vencidos || []);
+      if (env.length) controles.push({ ai: 'warn', icon: 'send', t: 'Salidas a proveedor sin recepcionar', s: env.length + ' salidas · +15 días sin confirmar', v: env.reduce(function (a, x) { return a + (x.cantidad_enviada || 0); }, 0), u: 'cajones', go: 'salidas' });
+      if (sinContar.length) controles.push({ ai: 'warn', icon: 'clipboard-list', t: 'Conteos físicos sin cargar', s: sinContar.map(function (c) { return c.nombre; }).slice(0, 3).join(' · '), v: sinContar.length, u: 'depósitos', go: 'conteo' });
+      if (al.talonario) controles.push({ ai: 'crit', icon: 'book-marked', t: 'Talonario ' + (al.talonario.serie || '') + (al.talonario.razon === 'cai_vence' ? ' — CAI por vencer' : ' con pocos remitos'), s: (al.talonario.disponibles != null ? al.talonario.disponibles + ' disponibles' : '') + (al.talonario.dias_cai != null ? ' · CAI en ' + al.talonario.dias_cai + ' d' : ''), v: al.talonario.disponibles != null ? al.talonario.disponibles : '—', u: 'disp.', go: 'talonarios' });
+
+      var controlesHtml = controles.length ? controles.map(function (a) {
+        return '<div class="alert-row" onclick="__ifco2Nav(\'' + a.go + '\')"><div class="ai ' + a.ai + '">' + ic(a.icon) + '</div>'
+          + '<div class="at"><b>' + esc(a.t) + '</b><span>' + esc(a.s) + '</span></div>'
+          + '<div style="text-align:right"><div class="av tnum">' + nf(a.v) + '</div><div class="ac">' + a.u + '</div></div>' + ic('chevron-right') + '</div>';
+      }).join('') : empty('Sin controles pendientes — todo al día');
+
+      var provs = (sal.por_proveedor || []).filter(function (p) { return p.pendiente > 0; });
+      var maxP = provs.reduce(function (m, p) { return Math.max(m, p.pendiente); }, 1);
+      var provRows = provs.length ? provs.map(function (p) {
+        var w = Math.round((p.pendiente / maxP) * 100);
+        return '<tr><td class="lead">' + esc(p.proveedor_nombre) + '</td><td class="r num-strong">' + nf(p.pendiente) + '</td>'
+          + '<td style="width:120px"><div class="mbar ' + (p.pendiente > maxP * 0.6 ? 'warn' : '') + '"><i style="width:' + w + '%"></i></div></td></tr>';
+      }).join('') : '<tr><td colspan="3" style="text-align:center;color:var(--i-sub);padding:18px">Sin saldos pendientes</td></tr>';
+
+      var cads = (sal.por_cliente || []);
+      var cadRows = cads.length ? cads.map(function (c) {
+        return '<tr><td class="lead">' + esc(cadenaCorta(c.empresa || '')) + '</td><td class="r num-strong">' + nf(c.en_transito) + '</td>'
+          + '<td class="c">' + (c.sellados_pendientes_count ? '<span class="tag">' + c.sellados_pendientes_count + ' p/sellar</span>' : '<span class="muted">—</span>') + '</td></tr>';
+      }).join('') : '<tr><td colspan="3" style="text-align:center;color:var(--i-sub);padding:18px">Sin cajones en tránsito</td></tr>';
+
+      var tvTeo = conteos.reduce(function (a, c) { return a + (c.teorico || 0); }, 0);
+      var tvReal = conteos.reduce(function (a, c) { return a + (c.real || 0); }, 0);
+
+      h.innerHTML =
+        '<div class="vh"><div><h2>' + ic('gauge') + ' Resumen operativo</h2><div class="vh-sub">Posición de cajones IFCO y controles pendientes</div></div>'
+        + '<div class="actions"><button class="btn btn-ghost btn-sm" onclick="__ifco2Nav(\'conteo\')">' + ic('clipboard-check') + ' Conteo físico</button></div></div>'
+        + (sinContar.length ? '<div class="banner warn">' + ic('alert-triangle') + '<div><b>' + sinContar.length + ' conteos físicos sin cargar.</b> Todos los jueves a las 10:00 se pide el conteo de cada depósito para cuadrar el stock teórico contra el real.</div><button class="btn btn-ghost btn-sm" style="margin-left:auto" onclick="__ifco2Nav(\'conteo\')">Ir a conteo ' + ic('arrow-right') + '</button></div>' : '')
+        + '<div class="kpis" style="grid-template-columns:repeat(6,1fr)">'
+        + kpi('Piso San Gerónimo', s.piso, 'caj.', 'warehouse', '', 'en el piso de SG')
+        + kpi('En proveedores', s.en_proveedores, 'caj.', 'factory', 'acc-slate', 'bajo responsabilidad ext.')
+        + kpi('En tránsito a súper', s.en_transito, 'caj.', 'truck', 'acc-warn', 'despachados sin sellar')
+        + kpi('Bajo responsabilidad', s.bajo_responsabilidad, 'caj.', 'shield-check', 'acc-gold', 'total a rendir a IFCO')
+        + kpi('Pérdidas acumuladas', s.perdidas_acumuladas, 'caj.', 'alert-octagon', 'acc-err', 'multa asociada')
+        + kpi('Retirado del pool', s.retirado_total, 'caj.', 'package', 'acc-ok', 'histórico total')
+        + '</div>'
+        + '<div class="split" style="margin-bottom:14px">'
+        + '<div class="card"><div class="card-h"><h3>' + ic('list-checks') + ' Controles pendientes</h3>'
+        + '<span class="tag" style="background:var(--i-err-bg);color:var(--i-err);border-color:var(--i-err-line)">' + controles.length + ' ítems</span></div>'
+        + '<div class="alert-list">' + controlesHtml + '</div></div>'
+        + '<div class="card"><div class="card-h"><h3>' + ic('scale') + ' Cuadre de stock</h3></div><div class="card-b">'
+        + '<div class="istat" style="margin-bottom:14px"><div><div class="l">Teórico</div><div class="v tnum">' + nf(tvTeo) + '</div></div>'
+        + '<div><div class="l">Real contado</div><div class="v tnum">' + nf(tvReal) + '</div></div>'
+        + '<div><div class="l">Diferencia</div><div class="v tnum ' + (tvReal - tvTeo < 0 ? 'num-neg' : '') + '">' + (tvReal - tvTeo) + '</div></div></div>'
+        + '<div class="sectlabel">Composición — bajo responsabilidad</div>'
+        + [['Piso San Gerónimo', s.piso, 'var(--i-navy-600)'], ['En proveedores', s.en_proveedores, 'var(--i-slate)'], ['En tránsito a súper', s.en_transito, 'var(--i-warn)']].map(function (x) {
+          var pct = s.bajo_responsabilidad ? Math.round((x[1] || 0) / s.bajo_responsabilidad * 100) : 0;
+          return '<div style="display:flex;align-items:center;gap:9px;margin-bottom:8px"><span style="font-size:12px;flex:1">' + x[0] + '</span>'
+            + '<span class="tnum num-strong" style="font-size:12.5px">' + nf(x[1]) + '</span><div class="mbar" style="width:90px"><i style="width:' + pct + '%;background:' + x[2] + '"></i></div></div>';
+        }).join('')
+        + '<div style="border-top:1px solid var(--i-line);margin-top:10px;padding-top:10px;display:flex;justify-content:space-between;font-weight:700"><span>Total</span><span class="tnum">' + nf(s.bajo_responsabilidad) + '</span></div>'
+        + '</div></div></div>'
+        + '<div class="rowsplit">'
+        + '<div class="card"><div class="card-h"><h3>' + ic('factory') + ' Saldos por proveedor</h3><span class="muted" style="font-size:11px">cajones sin devolver</span></div>'
+        + '<div class="card-b flush"><div class="tbl-wrap"><table class="dt"><thead><tr><th>Proveedor</th><th class="r">Pendiente</th><th></th></tr></thead><tbody>' + provRows + '</tbody></table></div></div></div>'
+        + '<div class="card"><div class="card-h"><h3>' + ic('store') + ' Saldos por cadena</h3><span class="muted" style="font-size:11px">en tránsito / a sellar</span></div>'
+        + '<div class="card-b flush"><div class="tbl-wrap"><table class="dt"><thead><tr><th>Cadena</th><th class="r">En tránsito</th><th class="c">Pendiente</th></tr></thead><tbody>' + cadRows + '</tbody></table></div></div></div>'
+        + '</div>';
+    });
+  };
+
+  // =========================================================================
+  // 2) DESPACHOS (estrella)
+  // =========================================================================
+  RENDER.despachos = function (h) {
+    var qs = new URLSearchParams();
+    if (st.search) qs.set('search', st.search);
+    if (st.despEstado) qs.set('estado', st.despEstado);
+    return fetchJSON(API + '/remitos?' + qs.toString()).then(function (rows) {
+      var R = (rows || []).map(mapRemito);
+      var cnt = function (e) { return R.filter(function (r) { return r.estado === e; }).length; };
+      var al = (st.resumen && st.resumen.alertas) || {};
+      var sellTot = cnt('sellado');
+      var urg = (al.urgentes_presentar || []).length;
+      var enTransito = (st.resumen && st.resumen.stock && st.resumen.stock.en_transito) || R.filter(function (r) { return r.estado === 'despachado'; }).reduce(function (a, r) { return a + (r.desp || 0); }, 0);
+
+      var segDefs = [['', 'Todos', R.length], ['despachado', 'Despachados', cnt('despachado')], ['sellado', 'Sellados', cnt('sellado')], ['enviado', 'Enviados', cnt('enviado')], ['presentado', 'Presentados', cnt('presentado')], ['anulado', 'Anulados', cnt('anulado')]];
+      var segs = segDefs.map(function (s2) { return '<button class="' + (st.despEstado === s2[0] ? 'on' : '') + '" onclick="__ifco2Seg(\'' + s2[0] + '\')">' + s2[1] + '<span class="n">' + s2[2] + '</span></button>'; }).join('');
+
+      var rowsHtml = R.length ? R.map(function (r) {
+        var dchip = (r.estado === 'despachado') ? diasChip(r.dias, 15, 30) : (r.estado === 'sellado') ? diasChip(r.dias, 20, 25) : '<span class="dias ok">' + r.dias + '&thinsp;d</span>';
+        var origenSub = r.origen === 'proveedor_directo' ? '<div class="sub2" style="color:var(--i-plum)">Directo · ' + esc(r.prov || '') + '</div>' : '';
+        var cuadre = r.rec == null ? '<span class="cj-pend">sin sellar</span>'
+          : (r.rech > 0 ? '<span class="cj-sub"><span class="cj-lbl">rec.</span> ' + nf(r.rec) + '<span class="cj-rech">−' + r.rech + '</span></span>'
+            : '<span class="cj-sub"><span class="cj-lbl">rec.</span> ' + nf(r.rec) + '<i data-lucide="check" class="cj-ok"></i></span>');
+        var act = (r.estado === 'despachado') ? '<button class="btn btn-gold btn-sm" onclick="event.stopPropagation();__ifco2Reuse(\'ifcoAbrirCargarSellado\')">' + ic('stamp') + ' Sellar</button>'
+          : (r.estado === 'sellado') ? '<button class="btn btn-pri btn-sm" onclick="event.stopPropagation();__ifco2Open(' + r.id + ')">' + ic('send') + ' Enviar</button>' : '';
+        return '<tr data-rid="' + r.id + '" onclick="__ifco2Open(' + r.id + ')">'
+          + '<td class="mono lead">' + esc((r.ifco.split('-')[1] || r.ifco)) + '</td>'
+          + '<td><div class="lead">' + esc(cadenaCorta(r.cadena)) + '</div>' + origenSub + '</td>'
+          + '<td>' + fdate(r.emi) + '</td>'
+          + '<td class="r"><div class="cj-cell"><span class="cj-desp">' + nf(r.desp) + '<span class="cj-u">desp.</span></span>' + cuadre + '</div></td>'
+          + '<td><div style="display:flex;align-items:center;gap:8px">' + badge(r.estado) + dchip + '</div></td>'
+          + '<td class="c">' + uav(r.usuario) + '</td>'
+          + '<td><div class="rowact">' + act + '<button class="btn-icon btn-ghost" onclick="event.stopPropagation()">' + ic('more-horizontal') + '</button></div></td></tr>';
+      }).join('') : '<tr><td colspan="7">' + empty('No hay remitos para este filtro/búsqueda') + '</td></tr>';
+
+      var totDesp = R.filter(function (r) { return r.estado !== 'anulado'; }).reduce(function (a, r) { return a + (r.desp || 0); }, 0);
+      var totRech = R.reduce(function (a, r) { return a + (r.rech || 0); }, 0);
+
+      h.innerHTML =
+        '<div class="vh"><div><h2>' + ic('truck') + ' Despachos a súper</h2><div class="vh-sub">Remitos de cajones IFCO enviados a las cadenas · ciclo despachado → sellado → enviado → presentado</div></div>'
+        + '<div class="actions"><button class="btn btn-ghost btn-sm" onclick="__ifco2Reuse(\'ifcoAbrirCargarSellado\')">' + ic('scan-line') + ' Cargar por foto</button>'
+        + '<button class="btn btn-pri btn-sm" onclick="__ifco2Reuse(\'ifcoAbrirNuevoRemito\')">' + ic('plus') + ' Nuevo despacho</button></div></div>'
+        + '<div class="kpis" style="grid-template-columns:1.5fr 1fr 1fr">'
+        + '<div class="search-hero"><div class="sh-box">' + ic('search')
+        + '<input id="ifco2-search" value="' + esc(st.search) + '" placeholder="Buscar N° de remito IFCO o SG, proveedor, cadena o sucursal…" onkeydown="if(event.key===\'Enter\')__ifco2Search(this.value)"><kbd>↵</kbd></div>'
+        + '<div class="sh-hint">' + ic('info') + ' Buscá por número, cadena, sucursal o proveedor en todos los despachos</div></div>'
+        + '<div class="kpi acc-gold"><div class="k-top"><div class="k-lbl">Sellados a presentar</div><div class="k-ic">' + ic('stamp') + '</div></div><div class="k-val">' + sellTot + '<span class="u">rem.</span></div><div class="k-sub"' + (urg ? ' style="color:var(--i-err)"' : '') + '>' + (urg ? ic('alert-triangle') + ' ' + urg + ' urgentes (+25 d)' : 'al día') + '</div></div>'
+        + '<div class="kpi acc-warn"><div class="k-top"><div class="k-lbl">En tránsito (sin sellar)</div><div class="k-ic">' + ic('truck') + '</div></div><div class="k-val">' + nf(enTransito) + '<span class="u">caj.</span></div><div class="k-sub">' + ic('clock') + ' ' + cnt('despachado') + ' remitos abiertos</div></div>'
+        + '</div>'
+        + '<div class="filters"><div class="seg">' + segs + '</div>'
+        + '<span class="chip-count"><b>' + R.length + '</b> remitos · <b>' + nf(totDesp) + '</b> caj. despachados · <b class="num-neg">' + totRech + '</b> rech.</span></div>'
+        + '<div class="card"><div class="card-b flush"><div class="tbl-wrap"><table class="dt"><thead><tr>'
+        + '<th>N° IFCO</th><th>Cadena</th><th>Emisión</th><th class="r">Despacho · cuadre</th><th>Estado · antigüedad</th><th class="c">Usuario</th><th></th>'
+        + '</tr></thead><tbody>' + rowsHtml + '</tbody></table></div></div></div>'
+        + '<div class="foot-note">' + ic('mouse-pointer-click') + ' Hacé click en un remito para abrir su trazabilidad. El sellado se carga desde la app móvil del operador o por foto del remito firmado (OCR).</div>';
+    });
+  };
+  window.__ifco2Search = function (v) { st.search = (v || '').trim(); nav('despachos'); };
+  window.__ifco2Seg = function (e) { st.despEstado = e; nav('despachos'); };
+
+  function despDetalle(r) {
+    var order = ['despachado', 'sellado', 'enviado', 'presentado'];
+    var ci = order.indexOf(r.estado);
+    var defs = [
+      { l: 'Despachado', f: r.emi, x: nf(r.desp) + ' cajones · ' + (r.usuario || '') },
+      { l: 'Sellado por el súper', f: r.sell, x: r.rec != null ? (nf(r.rec) + ' rec. / ' + (r.rech || 0) + ' rech.') : '' },
+      { l: 'Enviado a IFCO', f: r.env, x: '' },
+      { l: 'Presentado / confirmado', f: r.pres, x: '' }
+    ];
+    var steps = defs.map(function (d, i) {
+      var stp = r.estado === 'anulado' ? 'pend' : (i < ci ? 'done' : (i === ci ? 'curr' : 'pend'));
+      var dot = stp === 'done' ? ic('check') : (stp === 'curr' ? '<span class="dd"></span>' : '');
+      var sub = d.f ? (fdate(d.f) + (d.x ? ' · ' + d.x : '')) : (i === ci ? 'en curso' : 'pendiente');
+      return '<div class="tstep ' + stp + '"><div class="td">' + dot + '</div><div class="ti"><b>' + d.l + '</b><span>' + esc(sub) + '</span></div></div>';
+    }).join('');
+    var destino = r.rdest === 'proveedor' ? 'Proveedor de origen' : (r.rdest === 'san_geronimo' ? 'Piso San Gerónimo' : '—');
+    var origen = r.origen === 'proveedor_directo' ? ('Directo · ' + (r.prov || '')) : 'San Gerónimo';
+    var accion = { despachado: ic('stamp') + ' Registrar sellado', sellado: ic('send') + ' Enviar a IFCO', enviado: ic('check-check') + ' Marcar presentado', presentado: ic('check') + ' Cadena completa', anulado: ic('ban') + ' Remito anulado' }[r.estado] || '';
+    var puedeAccion = r.estado !== 'anulado' && r.estado !== 'presentado';
+    return '<div class="detail"><div class="d-head"><div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px">'
+      + '<div><div class="dn">' + esc(r.ifco) + '</div><div class="dm">' + ic('store') + ' ' + esc(cadenaCorta(r.cadena)) + ' · ' + esc(r.suc) + '</div></div>'
+      + '<button class="btn btn-icon" style="background:rgba(255,255,255,.14);color:#fff;border:0" onclick="__ifco2Close()">' + ic('x') + '</button></div></div>'
+      + '<div style="padding:11px 16px;border-bottom:1px solid var(--i-line);display:flex;align-items:center;justify-content:space-between;gap:10px">' + badge(r.estado)
+      + '<span class="dias ' + (r.dias >= 25 ? 'crit' : r.dias >= 15 ? 'warn' : 'ok') + '">Antigüedad: ' + r.dias + ' d</span></div>'
+      + '<div class="dl">'
+      + '<div class="di"><div class="l">N° remito SG</div><div class="v mono" style="font-size:12px">' + esc(r.sg || '—') + '</div></div>'
+      + '<div class="di"><div class="l">Emisión</div><div class="v">' + fdate(r.emi) + '</div></div>'
+      + '<div class="di"><div class="l">Despachado</div><div class="v big tnum">' + nf(r.desp) + '</div></div>'
+      + '<div class="di"><div class="l">Recibido</div><div class="v big tnum">' + (r.rec != null ? nf(r.rec) : '—') + '</div></div>'
+      + '<div class="di"><div class="l">Rechazado</div><div class="v big tnum ' + (r.rech ? 'num-neg' : '') + '">' + (r.rech != null ? r.rech : '—') + '</div></div>'
+      + '<div class="di"><div class="l">Destino rechazo</div><div class="v" style="font-size:12px">' + (r.rech ? destino : '—') + '</div></div>'
+      + '<div class="di"><div class="l">Origen</div><div class="v" style="font-size:12.5px">' + esc(origen) + '</div></div>'
+      + '<div class="di"><div class="l">Cargado por</div><div class="v" style="font-size:12.5px;display:flex;align-items:center;gap:7px">' + uav(r.usuario) + ' ' + esc(r.usuario || '') + '</div></div>'
+      + '</div>'
+      + '<div style="padding:11px 16px 4px"><div class="sectlabel" style="margin-bottom:2px">Trazabilidad</div></div><div class="tline">' + steps + '</div>'
+      + '<div class="card-b" style="border-top:1px solid var(--i-line);display:flex;gap:8px">'
+      + (puedeAccion ? '<button class="btn btn-pri btn-sm" style="flex:1;justify-content:center" onclick="__ifco2Reuse(\'ifcoAbrirCargarSellado\')">' + accion + '</button>' : '<button class="btn btn-ghost btn-sm" style="flex:1;justify-content:center" disabled>' + accion + '</button>')
+      + '<button class="btn btn-ghost btn-sm">' + ic('image') + ' Ver remito</button></div></div>';
+  }
+  window.__ifco2Open = function (id) {
+    fetchJSON(API + '/remitos/' + id).then(function (row) {
+      if (!row) return;
+      var r = mapRemito(row);
+      document.querySelectorAll('#iv-despachos tbody tr.sel').forEach(function (t) { t.classList.remove('sel'); });
+      var tr = document.querySelector('#iv-despachos tbody tr[data-rid="' + id + '"]'); if (tr) tr.classList.add('sel');
+      var dw = document.getElementById('dwDespacho');
+      dw.innerHTML = despDetalle(r); dw.classList.add('on'); dw.setAttribute('aria-hidden', 'false');
+      document.getElementById('dwScrim').classList.add('on'); icons();
+    });
+  };
+  window.__ifco2Close = function () {
+    var dw = document.getElementById('dwDespacho'); if (dw) { dw.classList.remove('on'); dw.setAttribute('aria-hidden', 'true'); }
+    var sc = document.getElementById('dwScrim'); if (sc) sc.classList.remove('on');
+    document.querySelectorAll('#iv-despachos tbody tr.sel').forEach(function (t) { t.classList.remove('sel'); });
+  };
+
+  // =========================================================================
+  // 3) RETIROS / PÉRDIDAS
+  // =========================================================================
+  RENDER.retiros = function (h) {
+    return fetchJSON(API + '/movimientos').then(function (rows) {
+      var M = rows || [];
+      var rowsHtml = M.length ? M.map(function (m) {
+        var consol = !!m.consolidado_en;
+        return '<tr><td>' + fdate(m.fecha) + '</td><td>' + badge(m.tipo) + '</td>'
+          + '<td class="r num-strong ' + (m.tipo === 'perdida' ? 'num-neg' : '') + '">' + (m.tipo === 'perdida' ? '−' : '+') + nf(m.cantidad) + '</td>'
+          + '<td>' + esc(m.notas || m.n_remito || '—') + '</td>'
+          + '<td>' + (consol ? '<span class="tag consol">' + ic('check') + ' consolidado</span>' : '<span class="tag" style="background:var(--i-warn-bg);color:var(--i-warn);border-color:var(--i-warn-line)">sin consolidar</span>') + '</td>'
+          + '<td><div class="rowact">' + (consol ? '<button class="btn-icon btn-ghost" title="Bloqueado: consolidado">' + ic('lock') + '</button>' : '<button class="btn-icon btn-ghost">' + ic('pencil') + '</button><button class="btn-icon btn-ghost">' + ic('trash-2') + '</button>') + '</div></td></tr>';
+      }).join('') : '<tr><td colspan="6">' + empty('Sin movimientos') + '</td></tr>';
+      var retir = M.filter(function (m) { return m.tipo === 'retiro'; }).reduce(function (a, m) { return a + (m.cantidad || 0); }, 0);
+      var perd = M.filter(function (m) { return m.tipo === 'perdida'; }).reduce(function (a, m) { return a + (m.cantidad || 0); }, 0);
+      h.innerHTML =
+        '<div class="vh"><div><h2>' + ic('package-minus') + ' Retiros y pérdidas</h2><div class="vh-sub">Retiros del pool IFCO (altas de cajones vacíos) y pérdidas registradas</div></div>'
+        + '<div class="actions"><button class="btn btn-ghost btn-sm" style="color:var(--i-err)" onclick="__ifco2Reuse(\'ifcoAbrirNuevoMovimiento\')">' + ic('minus') + ' Registrar pérdida</button><button class="btn btn-pri btn-sm" onclick="__ifco2Reuse(\'ifcoAbrirNuevoMovimiento\')">' + ic('plus') + ' Registrar retiro</button></div></div>'
+        + '<div class="filters"><div class="seg"><button class="on">Todos<span class="n">' + M.length + '</span></button><button>Retiros<span class="n">' + M.filter(function (m) { return m.tipo === 'retiro'; }).length + '</span></button><button>Pérdidas<span class="n">' + M.filter(function (m) { return m.tipo === 'perdida'; }).length + '</span></button></div>'
+        + '<span class="chip-count">Neto del mes: <b class="tnum">+' + nf(retir - perd) + '</b> cajones</span></div>'
+        + '<div class="card"><div class="card-b flush"><div class="tbl-wrap"><table class="dt"><thead><tr><th>Fecha</th><th>Tipo</th><th class="r">Cantidad</th><th>Detalle / OT</th><th>Consolidación</th><th></th></tr></thead><tbody>' + rowsHtml + '</tbody></table></div></div></div>'
+        + '<div class="foot-note">' + ic('lock') + ' Los movimientos consolidados quedan bloqueados: ya fueron verificados contra el archivo oficial de IFCO y no se pueden editar ni borrar.</div>';
+    });
+  };
+
+  // =========================================================================
+  // 4) TALONARIOS
+  // =========================================================================
+  RENDER.talonarios = function (h) {
+    return fetchJSON(API + '/talonarios').then(function (rows) {
+      var T = rows || [];
+      var rowsHtml = T.length ? T.map(function (it) {
+        var t = it.talonario || it;
+        var total = (t.numero_hasta - t.numero_desde + 1) || 1;
+        var usados = ((it.proximo_num || t.numero_desde) - t.numero_desde);
+        var pct = Math.max(0, Math.min(100, Math.round(usados / total * 100)));
+        var esSG = t.dueno_tipo === 'san_geronimo';
+        var dueno = esSG ? 'San Gerónimo' : provNombre(t.proveedor_id);
+        var caiCls = it.dias_cai == null ? 'ok' : (it.dias_cai < 0 ? 'crit' : (it.dias_cai < 60 ? 'warn' : 'ok'));
+        var dispCls = it.disponibles === 0 ? 'crit' : (it.disponibles < 100 ? 'warn' : 'ok');
+        return '<tr ' + (!t.activo ? 'style="opacity:.55"' : '') + '>'
+          + '<td class="mono lead">' + esc(t.serie) + '</td>'
+          + '<td>' + (esSG ? '<span class="tag gold">' + ic('building-2') + ' SG</span>' : '<span class="tag">' + ic('factory') + ' ' + esc(dueno) + '</span>') + '</td>'
+          + '<td class="mono sub2">' + nf(t.numero_desde) + ' – ' + nf(t.numero_hasta) + '</td>'
+          + '<td class="mono num-strong">' + (it.proximo_num != null ? nf(it.proximo_num) : '—') + '</td>'
+          + '<td style="min-width:130px"><div style="display:flex;align-items:center;gap:8px"><div class="mbar ' + (pct > 90 ? 'warn' : '') + '" style="width:80px"><i style="width:' + pct + '%"></i></div><span class="sub2 tnum">' + pct + '%</span></div></td>'
+          + '<td class="r"><span class="dias ' + dispCls + '">' + nf(it.disponibles) + '</span></td>'
+          + '<td>' + fdate(t.vto_cai) + '</td>'
+          + '<td class="c"><span class="dias ' + caiCls + '">' + (it.dias_cai == null ? '—' : (it.dias_cai < 0 ? 'vencido' : it.dias_cai + ' d')) + '</span></td>'
+          + '<td>' + (t.activo && !it.agotado ? '<span class="bg-badge st-presentado"><span class="d"></span>Activo</span>' : '<span class="bg-badge st-anulado"><span class="d"></span>Agotado</span>') + '</td>'
+          + '<td><div class="rowact"><button class="btn-icon btn-ghost" title="Transferir">' + ic('arrow-right-left') + '</button><button class="btn-icon btn-ghost">' + ic('more-horizontal') + '</button></div></td></tr>';
+      }).join('') : '<tr><td colspan="10">' + empty('Sin talonarios') + '</td></tr>';
+      var alertaTal = T.filter(function (it) { return it.agotado || it.pocos_remitos || it.cai_alerta; });
+      h.innerHTML =
+        '<div class="vh"><div><h2>' + ic('book-marked') + ' Talonarios</h2><div class="vh-sub">Numeración de remitos IFCO autorizada por AFIP (CAI) · por dueño</div></div>'
+        + '<div class="actions"><button class="btn btn-pri btn-sm" onclick="__ifco2Reuse(\'ifcoAbrirNuevoTalonario\')">' + ic('plus') + ' Nuevo talonario</button></div></div>'
+        + (alertaTal.length ? '<div class="banner warn">' + ic('alert-triangle') + '<div><b>' + alertaTal.length + ' talonario(s) con atención</b> — agotados, con pocos remitos o CAI por vencer. Gestioná la reposición con AFIP a tiempo.</div></div>' : '')
+        + '<div class="card"><div class="card-b flush"><div class="tbl-wrap"><table class="dt"><thead><tr><th>Serie</th><th>Dueño</th><th>Rango</th><th>Próximo N°</th><th>Consumo</th><th class="r">Disp.</th><th>Vto. CAI</th><th class="c">Faltan</th><th>Estado</th><th></th></tr></thead><tbody>' + rowsHtml + '</tbody></table></div></div></div>';
+    });
+  };
+
+  // =========================================================================
+  // 5) CONSOLIDACIÓN
+  // =========================================================================
+  RENDER.consolidacion = function (h) {
+    h.innerHTML =
+      '<div class="vh"><div><h2>' + ic('file-spreadsheet') + ' Consolidación</h2><div class="vh-sub">Verificación contra el archivo oficial de IFCO — los movimientos coincidentes quedan bloqueados</div></div></div>'
+      + '<div class="split"><div class="card"><div class="card-b">'
+      + '<div class="drop"><div class="di">' + ic('file-up') + '</div><b>Arrastrá el Excel de IFCO</b><div style="margin-top:4px;font-size:12px">.xlsx con los movimientos del período</div>'
+      + '<button class="btn btn-pri btn-sm" style="margin-top:12px" onclick="document.getElementById(\'ifco2-xlsx\').click()">' + ic('folder-open') + ' Elegir archivo</button>'
+      + '<input type="file" id="ifco2-xlsx" accept=".xlsx" style="display:none" onchange="__ifco2Preview(this)"></div></div></div>'
+      + '<div class="card"><div class="card-h"><h3>' + ic('git-compare-arrows') + ' Vista previa del cruce</h3></div>'
+      + '<div class="card-b" id="ifco2-consol-preview">' + empty('Subí el Excel de IFCO para ver el cruce.') + '</div></div></div>'
+      + '<div class="foot-note">' + ic('info') + ' “No está en sistema” = el archivo de IFCO tiene un movimiento que no figura cargado. Revisalo antes de consolidar para no dejar cajones sin rastrear.</div>';
+    return Promise.resolve();
+  };
+  window.__ifco2Preview = function (input) {
+    var f = input.files && input.files[0]; if (!f) return;
+    var box = document.getElementById('ifco2-consol-preview');
+    box.innerHTML = loading('Procesando ' + esc(f.name) + '…'); icons();
+    var fd = new FormData(); fd.append('archivo', f);
+    fetch(API + '/consolidar/preview', { method: 'POST', credentials: 'include', body: fd })
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (!d || d.error) { box.innerHTML = empty('No se pudo procesar: ' + ((d && d.error) || 'error')); return; }
+        function grp(lbl, g) { g = g || {}; return '<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--i-line)"><span>' + lbl + '</span><span class="tnum"><b style="color:var(--i-ok)">' + (g.a_marcar || 0) + '</b> · <span class="muted">' + (g.ya_consolidados || 0) + '</span> · <b style="color:var(--i-err)">' + (g.no_encontrados || 0) + '</b></span></div>'; }
+        box.innerHTML = '<div class="sectlabel">A consolidar · ya · no encontrados</div>' + grp('Despachos', d.despachos) + grp('Ingresos', d.ingresos) + grp('Altas R22', d.r22)
+          + '<button class="btn btn-pri btn-sm" style="margin-top:12px;width:100%;justify-content:center" onclick="toast&&toast(\'Confirmá la consolidación desde el flujo actual\',\'warn\')">' + ic('check-check') + ' Consolidar movimientos</button>';
+        icons();
+      }).catch(function () { box.innerHTML = empty('Error de red al procesar el archivo'); });
+  };
+
+  // =========================================================================
+  // 6) INGRESOS (recepciones de proveedor)
+  // =========================================================================
+  RENDER.ingresos = function (h) {
+    return fetchJSON(API + '/recepciones-proveedor').then(function (rows) {
+      var R = rows || [];
+      var rowsHtml = R.length ? R.map(function (r) {
+        var estado = r.estado || 'recibido';
+        var r22 = !!r.es_r22, consol = !!r.consolidado_en;
+        var dias = diasDesde(r.fecha_recepcion);
+        var quien = r22 ? '<span class="tag r22">R22</span> <span class="muted" style="font-size:11px">IFCO</span>' : '<span class="lead">' + esc(r.proveedor_nombre || '—') + '</span>';
+        var dchip = estado === 'en_viaje' ? diasChip(dias, 2, 4) : '<span class="dias ok">' + dias + '&thinsp;d</span>';
+        var conf = estado === 'recibido' ? '<div class="sub2">' + esc(r.usuario_creador_nombre || '') + '</div><div class="sub2 muted">' + fdshort(r.fecha_recepcion) + '</div>'
+          : (estado === 'rechazado' ? '<div class="sub2 num-neg">' + esc(r.motivo_rechazo || 'Rechazado') + '</div>' : '<span class="muted">—</span>');
+        var tipo = consol ? '<span class="tag consol">' + ic('check') + ' consolidado</span>' : (r22 ? '<span class="tag r22">stock IFCO</span>' : '<span class="muted" style="font-size:11px">producto</span>');
+        var act = estado === 'en_viaje' ? '<button class="btn btn-pri btn-sm" onclick="__ifco2Reuse(\'ifcoConfirmarRecepcion\')">' + ic('check') + ' Confirmar</button><button class="btn btn-danger btn-sm">' + ic('x') + '</button>' : '<button class="btn-icon btn-ghost">' + ic('more-horizontal') + '</button>';
+        return '<tr ' + (estado === 'en_viaje' ? 'style="background:var(--i-navy-050)"' : '') + '>'
+          + '<td class="mono">' + esc(r.n_remito_proveedor || '—') + '</td><td>' + quien + '</td><td>' + fdate(r.fecha_recepcion) + '</td>'
+          + '<td class="r num-strong">' + nf(r.cantidad) + '</td><td>' + tipo + '</td><td>' + badge(estado) + '</td><td>' + conf + '</td><td class="c">' + dchip + '</td>'
+          + '<td><div class="rowact">' + act + '</div></td></tr>';
+      }).join('') : '<tr><td colspan="9">' + empty('Sin recepciones') + '</td></tr>';
+      var enViaje = R.filter(function (r) { return r.estado === 'en_viaje'; });
+      var totViaje = enViaje.reduce(function (a, r) { return a + (r.cantidad || 0); }, 0);
+      h.innerHTML =
+        '<div class="vh"><div><h2>' + ic('log-in') + ' Ingresos de proveedor</h2><div class="vh-sub">Cajones que vuelven a San Gerónimo con producto, más altas R22 (cajones nuevos comprados a IFCO)</div></div>'
+        + '<div class="actions"><button class="btn btn-ghost btn-sm" onclick="__ifco2Reuse(\'ifcoAbrirAltaR22\')">' + ic('plus') + ' Alta R22</button><button class="btn btn-pri btn-sm" onclick="__ifco2Reuse(\'ifcoAbrirNuevaRecepcion\')">' + ic('plus') + ' Nueva recepción</button></div></div>'
+        + (enViaje.length ? '<div class="banner info">' + ic('inbox') + '<div><b>' + enViaje.length + ' recepciones en viaje</b> esperando confirmación — <b class="tnum">' + nf(totViaje) + ' cajones</b>. Confirmá la recepción física para impactar el stock y descontar el saldo del proveedor.</div></div>' : '')
+        + '<div class="filters"><div class="seg"><button class="on">Todas<span class="n">' + R.length + '</span></button><button>En viaje<span class="n">' + enViaje.length + '</span></button><button>Recibidas<span class="n">' + R.filter(function (r) { return r.estado === 'recibido'; }).length + '</span></button><button>R22<span class="n">' + R.filter(function (r) { return r.es_r22; }).length + '</span></button></div>'
+        + '<span class="chip-count"><b>' + R.length + '</b> recepciones</span></div>'
+        + '<div class="card"><div class="card-b flush"><div class="tbl-wrap"><table class="dt"><thead><tr><th>N° remito</th><th>Proveedor / origen</th><th>Fecha</th><th class="r">Cajones</th><th>Tipo</th><th>Estado</th><th>Confirmación</th><th class="c">Antig.</th><th></th></tr></thead><tbody>' + rowsHtml + '</tbody></table></div></div></div>';
+    });
+  };
+
+  // =========================================================================
+  // 7) SALIDAS (envíos a proveedor)
+  // =========================================================================
+  RENDER.salidas = function (h) {
+    return fetchJSON(API + '/envios').then(function (rows) {
+      var E = rows || [];
+      var rowsHtml = E.length ? E.map(function (e) {
+        var env = e.cantidad_enviada || 0, rec = e.cantidad_recibida || 0, pend = env - rec;
+        var occ = env ? Math.round(rec / env * 100) : 0;
+        var dias = diasDesde(e.fecha_envio);
+        var dchip = e.estado === 'recibido' ? '<span class="dias ok">' + dias + '&thinsp;d</span>' : diasChip(dias, 10, 15);
+        return '<tr><td class="mono lead">' + esc(e.n_remito_interno || '—') + '</td><td>' + fdate(e.fecha_envio) + '</td><td class="lead">' + esc(e.proveedor_nombre || '—') + '</td>'
+          + '<td class="r num-strong">' + nf(env) + '</td><td class="r">' + nf(rec) + '</td><td class="r ' + (pend > 0 ? '' : 'muted') + '">' + (pend > 0 ? nf(pend) : '0') + '</td>'
+          + '<td><div style="display:flex;align-items:center;gap:8px"><div class="mbar ' + (occ === 100 ? 'ok' : (occ > 0 ? 'warn' : '')) + '" style="width:80px"><i style="width:' + occ + '%"></i></div><span class="sub2 tnum">' + occ + '%</span></div></td>'
+          + '<td>' + badge(e.estado) + '</td><td class="c">' + dchip + '</td>'
+          + '<td><div class="rowact">' + (e.estado !== 'recibido' ? '<button class="btn btn-pri btn-sm" onclick="__ifco2Reuse(\'ifcoRecepcionarEnvio\')">' + ic('package-check') + ' Recepcionar</button>' : '') + '<button class="btn-icon btn-ghost">' + ic('more-horizontal') + '</button></div></td></tr>';
+      }).join('') : '<tr><td colspan="10">' + empty('Sin envíos') + '</td></tr>';
+      var totEnv = E.reduce(function (a, e) { return a + (e.cantidad_enviada || 0); }, 0);
+      var totRec = E.reduce(function (a, e) { return a + (e.cantidad_recibida || 0); }, 0);
+      var venc = E.filter(function (e) { return e.estado === 'enviado' && diasDesde(e.fecha_envio) >= 15; });
+      h.innerHTML =
+        '<div class="vh"><div><h2>' + ic('log-out') + ' Salidas a proveedor</h2><div class="vh-sub">Cajones vacíos que San Gerónimo entrega a cada galpón (otros depósitos) para llenar con producto</div></div>'
+        + '<div class="actions"><button class="btn btn-pri btn-sm" onclick="__ifco2Reuse(\'ifcoAbrirNuevoEnvio\')">' + ic('plus') + ' Nueva salida</button></div></div>'
+        + (venc.length ? '<div class="banner warn">' + ic('clock') + '<div><b>' + venc.length + ' envíos sin recepcionar hace +15 días.</b> El proveedor debe confirmar la recepción para que los cajones queden a su cargo.</div></div>' : '')
+        + '<div class="filters"><div class="seg"><button class="on">Todos<span class="n">' + E.length + '</span></button><button>Enviados<span class="n">' + E.filter(function (e) { return e.estado === 'enviado'; }).length + '</span></button><button>Parciales<span class="n">' + E.filter(function (e) { return e.estado === 'parcial'; }).length + '</span></button><button>Recibidos<span class="n">' + E.filter(function (e) { return e.estado === 'recibido'; }).length + '</span></button></div>'
+        + '<span class="chip-count"><b>' + E.length + '</b> envíos · <b>' + nf(totEnv - totRec) + '</b> caj. pendientes</span></div>'
+        + '<div class="card"><div class="card-b flush"><div class="tbl-wrap"><table class="dt"><thead><tr><th>N° envío</th><th>Fecha</th><th>Proveedor</th><th class="r">Enviado</th><th class="r">Recib.</th><th class="r">Pend.</th><th>Recepción</th><th>Estado</th><th class="c">Antig.</th><th></th></tr></thead><tbody>' + rowsHtml + '</tbody>'
+        + '<tr class="totrow"><td colspan="3">Total</td><td class="r">' + nf(totEnv) + '</td><td class="r">' + nf(totRec) + '</td><td class="r">' + nf(totEnv - totRec) + '</td><td colspan="4"></td></tr></table></div></div></div>';
+    });
+  };
+
+  // =========================================================================
+  // 8) PAPELERA
+  // =========================================================================
+  RENDER.papelera = function (h) {
+    return Promise.all([
+      fetchJSON(API + '/remitos?papelera=1'), fetchJSON(API + '/envios?papelera=1'),
+      fetchJSON(API + '/movimientos?papelera=1'), fetchJSON(API + '/recepciones-proveedor?papelera=1')
+    ]).then(function (res) {
+      var items = [];
+      (res[0] || []).forEach(function (r) { items.push({ tipo: 'Despacho', ref: r.n_remito_ifco, det: cadenaCorta(r.empresa || '') + ' · ' + (r.sucursal || '') + ' · ' + nf(r.cantidad_despachada) + ' caj.', quien: r.eliminado_por_username, fecha: r.eliminado_en, motivo: r.notas || 'Eliminado', id: r.id, kind: 'remitos' }); });
+      (res[1] || []).forEach(function (e) { items.push({ tipo: 'Salida', ref: e.n_remito_interno, det: (e.proveedor_nombre || '') + ' · ' + nf(e.cantidad_enviada) + ' caj.', quien: e.eliminado_por_username, fecha: e.eliminado_en, motivo: 'Eliminado', id: e.id, kind: 'envios' }); });
+      (res[2] || []).forEach(function (m) { items.push({ tipo: 'Retiro', ref: m.n_remito || ('MOV-' + m.id), det: (m.notas || '') + ' · ' + nf(m.cantidad) + ' caj.', quien: m.eliminado_por_username, fecha: m.eliminado_en, motivo: 'Eliminado', id: m.id, kind: 'movimientos' }); });
+      (res[3] || []).forEach(function (r) { items.push({ tipo: 'Ingreso', ref: r.n_remito_proveedor || ('REC-' + r.id), det: (r.proveedor_nombre || '') + ' · ' + nf(r.cantidad) + ' caj.', quien: r.eliminado_por_username, fecha: r.eliminado_en, motivo: 'Eliminado', id: r.id, kind: 'recepciones-proveedor' }); });
+      items.sort(function (a, b) { return (b.fecha || '') < (a.fecha || '') ? -1 : 1; });
+      var rowsHtml = items.length ? items.map(function (i) {
+        return '<tr><td><span class="tag">' + i.tipo + '</span></td><td class="mono lead">' + esc(i.ref || '—') + '</td><td>' + esc(i.det) + '</td>'
+          + '<td><span class="sub2 num-neg">' + esc(i.motivo) + '</span></td><td>' + esc(i.quien || '—') + '</td><td>' + fdate(i.fecha) + '</td>'
+          + '<td><div class="rowact"><button class="btn btn-ghost btn-sm" onclick="__ifco2Restaurar(\'' + i.kind + '\',' + i.id + ')">' + ic('rotate-ccw') + ' Restaurar</button></div></td></tr>';
+      }).join('') : '<tr><td colspan="7">' + empty('La papelera está vacía') + '</td></tr>';
+      h.innerHTML =
+        '<div class="vh"><div><h2>' + ic('trash-2') + ' Papelera</h2><div class="vh-sub">Registros eliminados o anulados — se conservan 90 días y pueden restaurarse</div></div></div>'
+        + '<div class="banner info">' + ic('info') + '<div>Nada se borra de forma definitiva sin pasar por acá. <b>Restaurar</b> devuelve el registro a su estado anterior; los movimientos ya consolidados no pueden eliminarse.</div></div>'
+        + '<div class="card"><div class="card-b flush"><div class="tbl-wrap"><table class="dt"><thead><tr><th>Tipo</th><th>Referencia</th><th>Detalle</th><th>Motivo</th><th>Eliminado por</th><th>Fecha</th><th></th></tr></thead><tbody>' + rowsHtml + '</tbody></table></div></div></div>'
+        + '<div class="foot-note">' + ic('clock') + ' Los registros se eliminan automáticamente de la papelera a los 90 días.</div>';
+    });
+  };
+  window.__ifco2Restaurar = function (kind, id) {
+    fetch(API + '/' + kind + '/' + id + '/restaurar', { method: 'POST', credentials: 'include' })
+      .then(function (r) { return r.json(); })
+      .then(function () { toast('Registro restaurado', 'ok'); nav('papelera'); })
+      .catch(function () { toast('No se pudo restaurar', 'er'); });
+  };
+
+  // =========================================================================
+  // (drill-down) CONTEO FÍSICO — accesible desde Resumen, no es pestaña
+  // =========================================================================
+  RENDER.conteo = function (h) {
+    return fetchJSON(API + '/stocks-reales').then(function (S) {
+      var C = (S && (S.items || S)) || [];
+      var rowsHtml = C.length ? C.map(function (c) {
+        var dif = (c.diferencia != null) ? c.diferencia : (c.real != null ? c.real - c.teorico : null);
+        var difTxt = c.real == null ? '<span class="tag" style="background:var(--i-warn-bg);color:var(--i-warn);border-color:var(--i-warn-line)">sin contar</span>'
+          : '<span class="num-strong ' + (dif < 0 ? 'num-neg' : '') + '">' + (dif > 0 ? '+' : '') + dif + '</span>';
+        var uc = c.ultimo_conteo || {};
+        return '<tr ' + (c.falta_cargar ? 'style="background:var(--i-warn-bg)"' : '') + '>'
+          + '<td class="lead">' + esc(c.nombre) + '</td>'
+          + '<td>' + (c.deposito_tipo === 'san_geronimo' ? '<span class="tag gold">' + ic('building-2') + ' Propio</span>' : '<span class="tag">' + ic('factory') + ' Proveedor</span>') + '</td>'
+          + '<td class="r num-strong">' + nf(c.teorico) + '</td><td class="r num-strong">' + (c.real != null ? nf(c.real) : '—') + '</td><td class="r">' + difTxt + '</td>'
+          + '<td>' + (uc.fecha ? fdate(uc.fecha) : '<span class="muted">—</span>') + '</td>'
+          + '<td>' + (c.falta_cargar ? '<span class="bg-badge st-enviaje"><span class="d"></span>' + (c.real == null ? 'Pendiente' : 'Atrasado') + '</span>' : '<span class="bg-badge st-presentado"><span class="d"></span>Al día</span>') + '</td>'
+          + '<td><div class="rowact"><button class="btn btn-pri btn-sm" onclick="__ifco2Reuse(\'ifcoAbrirCargarConteo\')">' + ic('clipboard-pen') + ' Cargar conteo</button></div></td></tr>';
+      }).join('') : '<tr><td colspan="8">' + empty('Sin depósitos') + '</td></tr>';
+      var teo = C.reduce(function (a, c) { return a + (c.teorico || 0); }, 0);
+      var real = C.reduce(function (a, c) { return a + (c.real || 0); }, 0);
+      var sinContar = C.filter(function (c) { return c.falta_cargar; });
+      h.innerHTML =
+        '<div class="vh"><div><h2>' + ic('clipboard-check') + ' Conteo físico</h2><div class="vh-sub">Stock teórico contra el conteo real de cada depósito · se solicita los jueves a las 10:00</div></div>'
+        + '<div class="actions"><button class="btn btn-ghost btn-sm" onclick="__ifco2Nav(\'resumen\')">' + ic('arrow-left') + ' Volver a Resumen</button></div></div>'
+        + (sinContar.length ? '<div class="banner warn">' + ic('calendar-clock') + '<div><b>' + sinContar.length + ' depósitos sin contar esta semana.</b> La diferencia es informativa: no genera ajustes automáticos, pero es la base del control.</div></div>' : '')
+        + '<div class="kpis" style="grid-template-columns:repeat(4,1fr)">'
+        + '<div class="kpi"><div class="k-top"><div class="k-lbl">Teórico total</div><div class="k-ic">' + ic('calculator') + '</div></div><div class="k-val">' + nf(teo) + '<span class="u">caj.</span></div><div class="k-sub">según sistema</div></div>'
+        + '<div class="kpi acc-ok"><div class="k-top"><div class="k-lbl">Real contado</div><div class="k-ic">' + ic('clipboard-check') + '</div></div><div class="k-val">' + nf(real) + '<span class="u">caj.</span></div><div class="k-sub">' + C.filter(function (c) { return c.real != null; }).length + ' de ' + C.length + ' depósitos</div></div>'
+        + '<div class="kpi acc-err"><div class="k-top"><div class="k-lbl">Diferencia</div><div class="k-ic">' + ic('scale') + '</div></div><div class="k-val ' + (real - teo < 0 ? 'num-neg' : '') + '">' + (real - teo) + '<span class="u">caj.</span></div><div class="k-sub">sobre lo contado</div></div>'
+        + '<div class="kpi acc-warn"><div class="k-top"><div class="k-lbl">Sin contar</div><div class="k-ic">' + ic('clipboard-x') + '</div></div><div class="k-val">' + sinContar.length + '<span class="u">dep.</span></div><div class="k-sub">conteo atrasado</div></div>'
+        + '</div>'
+        + '<div class="card"><div class="card-b flush"><div class="tbl-wrap"><table class="dt"><thead><tr><th>Depósito</th><th>Tipo</th><th class="r">Teórico</th><th class="r">Real</th><th class="r">Dif.</th><th>Últ. conteo</th><th>Estado</th><th></th></tr></thead><tbody>' + rowsHtml + '</tbody></table></div></div></div>';
+    });
+  };
+
+  // =========================================================================
+  // Ayuda (drawer)
+  // =========================================================================
+  window.__ifco2Help = function (open) {
+    var show = open !== false;
+    var dw = document.getElementById('dwHelp'), sc = document.getElementById('helpScrim');
+    if (dw) { dw.classList.toggle('on', show); dw.setAttribute('aria-hidden', show ? 'false' : 'true'); }
+    if (sc) sc.classList.toggle('on', show);
+    icons();
+  };
+
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') { window.__ifco2Close && window.__ifco2Close(); window.__ifco2Help && window.__ifco2Help(false); } });
+
+  // =========================================================================
+  // init
+  // =========================================================================
+  var _booted = false;
+  window.IFCO2 = {
+    init: function () {
+      // catálogo de proveedores (id -> nombre) para talonarios/labels
+      fetchJSON(API + '/proveedores').then(function (ps) {
+        (ps || []).forEach(function (p) { st.provNombre[p.id] = p.nombre; });
+      });
+      // resumen (KPIs + pills)
+      fetchJSON(API + '/resumen').then(function (R) {
+        st.resumen = R || {};
+        var al = (R && R.alertas) || {};
+        setPill('despachos', (al.urgentes_presentar || []).length, '');
+        setPill('salidas', (al.envios_vencidos || []).length, 'amber');
+        setPill('talonarios', al.talonario ? 1 : 0, 'amber');
+        if (st.view === 'despachos') { var k = document.querySelector('#iv-despachos .acc-gold .k-sub'); /* refresco suave si ya está */ }
+      });
+      fetchJSON(API + '/recepciones-en-viaje').then(function (v) { setPill('ingresos', (v && v.length) || 0, 'amber'); });
+      // arranca SIEMPRE en Despachos con el buscador pre-cargado en 00015-01
+      st.search = '00015-01'; st.despEstado = '';
+      nav('despachos');
+      _booted = true;
+    }
+  };
+})();
