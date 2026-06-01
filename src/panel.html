@@ -4141,6 +4141,7 @@ function sgRepExport(){
         <select id="pp-per-unidad">
           <option value="jornal">jornal</option><option value="hora">hora</option><option value="tanto">tanto</option>
           <option value="tacho">tacho</option><option value="planta">planta</option><option value="kg">kg</option>
+          <option value="fijo">fijo (monto fijo semanal)</option>
         </select>
       </div>
       <div class="fl" style="flex:1 1 100%"><label>Notas</label><textarea id="pp-per-notas" rows="2"></textarea></div>
@@ -4173,6 +4174,13 @@ function sgRepExport(){
       </div>
       <div class="fl pp-as-ind"><label>Persona *</label>
         <select id="pp-as-personal"><option value="">— Elegir —</option></select>
+      </div>
+      <div class="fl pp-as-ind" id="pp-as-grupo-fl"><label>…o cargar por grupo</label>
+        <select id="pp-as-grupo" onchange="ppAsistGrupoChange()"><option value="">— Sin grupo —</option></select>
+      </div>
+      <div class="fl pp-as-ind" id="pp-as-grupo-wrap" style="display:none;flex:1 1 100%">
+        <label>Personas del grupo — tildá las que estuvieron (una fila por cada una)</label>
+        <div id="pp-as-grupo-personas" style="display:flex;flex-wrap:wrap;gap:6px 18px;padding:6px 2px;max-height:160px;overflow:auto;border:1px solid var(--bord,#e2e2e2);border-radius:6px"></div>
       </div>
       <div class="fl pp-as-blo" style="display:none"><label>Contratista (titular) *</label>
         <select id="pp-as-contratista"><option value="">— Elegir —</option></select>
@@ -19509,6 +19517,30 @@ function ppAsistToggleModo() {
   var esInd = modo === 'individual';
   document.querySelectorAll('.pp-as-ind').forEach(function(el){ el.style.display = esInd ? '' : 'none'; });
   document.querySelectorAll('.pp-as-blo').forEach(function(el){ el.style.display = esInd ? 'none' : ''; });
+  // El wrap de checkboxes solo se muestra si hay un grupo elegido (lo maneja ppAsistGrupoChange)
+  if (!esInd) { var gw = document.getElementById('pp-as-grupo-wrap'); if (gw) gw.style.display = 'none'; }
+}
+
+// Carga grupal: al elegir un grupo, lista sus personas como checkboxes SIN tildar.
+// El operario tilda las que estuvieron → se crea una fila individual por cada una.
+function ppAsistGrupoChange() {
+  var gid = document.getElementById('pp-as-grupo').value;
+  var wrap = document.getElementById('pp-as-grupo-wrap');
+  var cont = document.getElementById('pp-as-grupo-personas');
+  if (!gid) { cont.innerHTML = ''; wrap.style.display = 'none'; return; }
+  var d = PP.asistDefaults || {};
+  var miembros = (d.personal||[]).filter(function(p){ return String(p.grupo_id) === String(gid); });
+  if (!miembros.length) {
+    cont.innerHTML = '<div style="font-size:12px;color:var(--mut)">Este grupo no tiene personas activas asignadas.</div>';
+  } else {
+    cont.innerHTML = miembros.map(function(p){
+      return '<label style="font-size:13px;display:flex;gap:6px;align-items:center;min-width:160px;cursor:pointer">'
+        + '<input type="checkbox" value="'+p.id+'"> '+esc(p.nombre)+'</label>';
+    }).join('');
+  }
+  wrap.style.display = '';
+  // Al usar grupo, el select de persona única deja de aplicar
+  var ps = document.getElementById('pp-as-personal'); if (ps) ps.value = '';
 }
 
 function ppAsistLoteChange() {
@@ -19534,6 +19566,10 @@ function ppFillAsistSelects(a) {
     opt((d.personal||[]).filter(function(p){ return p.tipo==='fijo'; }),'id','nombre',a.personal_id);
   document.getElementById('pp-as-contratista').innerHTML = '<option value="">— Elegir —</option>' +
     opt((d.personal||[]).filter(function(p){ return p.tipo==='contratista'; }),'id','nombre',a.contratista_id);
+  // Carga grupal: select de grupos + reset del área de checkboxes
+  document.getElementById('pp-as-grupo').innerHTML = '<option value="">— Sin grupo —</option>' + opt(d.grupos,'id','nombre','');
+  document.getElementById('pp-as-grupo-personas').innerHTML = '';
+  document.getElementById('pp-as-grupo-wrap').style.display = 'none';
   // Rubros: si hay rubros marcados "vigente" mostramos solo esos (flujo cocinado);
   // si todavía no se configuró ninguno, mostramos todos para no bloquear la carga.
   var rubros = d.cuentas_mo || [];
@@ -19631,6 +19667,9 @@ function ppEditarAsistencia(id) {
     document.getElementById('pp-as-notas').value = a.notas || '';
     ppAsistToggleModo();
     ppAsistRubroChange();
+    // La carga grupal es solo para altas nuevas: ocultar el selector de grupo al editar
+    document.getElementById('pp-as-grupo-fl').style.display = 'none';
+    document.getElementById('pp-as-grupo-wrap').style.display = 'none';
     document.getElementById('mb-pp-asist').classList.add('on');
   });
 }
@@ -19650,11 +19689,20 @@ function ppGuardarAsistencia() {
     cultivo: document.getElementById('pp-as-cultivo').value.trim() || null,
     notas: document.getElementById('pp-as-notas').value.trim() || null
   };
+  var gruposTicks = [];
   if (modo === 'individual') {
-    body.personal_id = num('pp-as-personal');
     body.cantidad = 1;
     body.contratista_id = null;
-    if (!body.personal_id) return toast('Elegí una persona', 'er');
+    // Carga grupal (solo alta nueva): si hay personas tildadas de un grupo, ése es el camino
+    gruposTicks = Array.prototype.slice.call(
+      document.querySelectorAll('#pp-as-grupo-personas input[type="checkbox"]:checked')
+    ).map(function(c){ return parseInt(c.value); });
+    if (gruposTicks.length && !PP.editAsistId) {
+      body.personal_id = null;
+    } else {
+      body.personal_id = num('pp-as-personal');
+      if (!body.personal_id) return toast('Elegí una persona (o tildá personas de un grupo)', 'er');
+    }
   } else {
     body.personal_id = null;
     body.contratista_id = num('pp-as-contratista');
@@ -19672,6 +19720,22 @@ function ppGuardarAsistencia() {
   var esGeneral = !!(rubroSel && rubroSel.mo_clase === 'general');
   if (esGeneral) { body.lote_id = null; body.cultivo = null; }
   else if (!body.lote_id) return toast('Elegí finca / lote', 'er');
+
+  // ── Camino GRUPAL: una fila individual por cada persona tildada (comparten la carga) ──
+  if (gruposTicks.length && !PP.editAsistId) {
+    var gbody = {
+      fecha: body.fecha, cuadrilla_id: body.cuadrilla_id, horas: body.horas,
+      rubro_cuenta_id: body.rubro_cuenta_id, campaña_anual_id: body.campaña_anual_id,
+      campaña_estacional_id: body.campaña_estacional_id, lote_id: body.lote_id,
+      tarea_tipo_id: body.tarea_tipo_id, cultivo: body.cultivo, notas: body.notas,
+      personal_ids: gruposTicks
+    };
+    paF('/api/pa/personal/asistencias/grupo', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(gbody) }).then(function(r){
+      if (r.ok) { toast((r.creadas||gruposTicks.length)+' asistencias cargadas'); document.getElementById('mb-pp-asist').classList.remove('on'); ppLoadAsistencia(); }
+      else toast(r.error||'Error', 'er');
+    });
+    return;
+  }
 
   var url = PP.editAsistId ? '/api/pa/personal/asistencias/'+PP.editAsistId : '/api/pa/personal/asistencias';
   var method = PP.editAsistId ? 'PATCH' : 'POST';

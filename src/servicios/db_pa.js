@@ -1231,6 +1231,42 @@ db.exec(`
   );
 `);
 
+// ── Migración: pa_personal.unidad_tarifa admite 'fijo' (monto fijo semanal) ──
+// El CHECK original no incluye 'fijo', así que en prod (tabla ya creada) un INSERT
+// con unidad_tarifa='fijo' fallaría. SQLite no permite ALTER de un CHECK: hay que
+// rebuild. Idempotente y robusta:
+//  · Lee el SQL REAL de la tabla desde sqlite_master y ENSANCHA solo el CHECK de
+//    unidad_tarifa (derivar del schema real preserva las columnas que tenga prod
+//    — evita asumir columnas, como el crash de personal_actual_id).
+//  · Si el CHECK ya incluye 'fijo' (o no hay CHECK introspectable) no hace nada.
+//  · Replica los índices existentes (los que tengan sql) tras el swap.
+(function() {
+  try {
+    const row = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='pa_personal'").get();
+    if (!row || !row.sql) return;
+    const reCheck = /(unidad_tarifa[\s\S]*?CHECK\s*\(\s*unidad_tarifa\s+IN\s*\()([^)]*)(\))/i;
+    const m = row.sql.match(reCheck);
+    if (!m) return;                   // sin CHECK de unidad_tarifa: nada que ampliar
+    if (/'fijo'/.test(m[2])) return;  // ya migrada (idempotente)
+    const idxRows = db.prepare("SELECT sql FROM sqlite_master WHERE type='index' AND tbl_name='pa_personal' AND sql IS NOT NULL").all();
+    const nuevoSql = row.sql.replace(reCheck, (_x, pre, lista, post) => pre + lista.replace(/\s+$/, '') + ",'fijo'" + post);
+    const tmpSql   = nuevoSql.replace(/CREATE TABLE\s+(IF NOT EXISTS\s+)?["'`]?pa_personal["'`]?/i, 'CREATE TABLE pa_personal__mig');
+    db.pragma('foreign_keys = OFF');  // fuera de la transacción (better-sqlite3 lo ignora dentro)
+    db.transaction(() => {
+      db.exec(tmpSql);
+      db.exec('INSERT INTO pa_personal__mig SELECT * FROM pa_personal');
+      db.exec('DROP TABLE pa_personal');
+      db.exec('ALTER TABLE pa_personal__mig RENAME TO pa_personal');
+      idxRows.forEach(ix => { if (ix.sql) db.exec(ix.sql); });
+    })();
+    db.pragma('foreign_keys = ON');
+    console.log("[PA] pa_personal.unidad_tarifa: CHECK ampliado con 'fijo'");
+  } catch(e) {
+    console.error('[PA] Error migrando unidad_tarifa fijo:', e.message);
+    try { db.pragma('foreign_keys = ON'); } catch(_) {}
+  }
+})();
+
 // (Migraciones pa_trabajadores→pa_personal ELIMINADAS: ya cumplidas; la unificación
 //  final — grupo_id, columnas de Pañol y DROP de pa_trabajadores — está más abajo,
 //  después de crear las tablas de Pañol.)
