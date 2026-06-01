@@ -257,6 +257,24 @@ try {
 } catch(e) { console.error('[IFCO] Crear ifco_mails_log:', e.message); }
 try { db.exec("CREATE INDEX IF NOT EXISTS idx_mails_log_tipo ON ifco_mails_log(tipo, enviado_en DESC)"); } catch(_){}
 
+// Auditoría de borrados FÍSICOS (hard delete) desde la Papelera. Conserva quién/cuándo/qué
+// (snapshot JSON de la fila) aunque la fila se borre — trazabilidad del borrado mismo.
+try {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS ifco_hard_delete_log (
+      id                       INTEGER PRIMARY KEY AUTOINCREMENT,
+      entidad                  TEXT NOT NULL,
+      ref_id                   INTEGER,
+      referencia               TEXT,
+      snapshot                 TEXT,
+      hard_deleted_por_id      INTEGER,
+      hard_deleted_por_nombre  TEXT,
+      hard_deleted_en          TEXT DEFAULT (datetime('now','localtime'))
+    )
+  `);
+  db.exec("CREATE INDEX IF NOT EXISTS idx_ifco_hard_del_fecha ON ifco_hard_delete_log(hard_deleted_en DESC)");
+} catch(e) { console.error('[IFCO] Crear ifco_hard_delete_log:', e.message); }
+
 // Tabla de autorizaciones de retiro (mails que mandamos a IFCO autorizando un transportista)
 try {
   db.exec(`
@@ -5685,6 +5703,45 @@ router.get('/stocks-reales/alerta-mobile', function(req, res) {
     ultimo_conteo: ult || null,
     corte_jueves: corte
   });
+});
+
+// ── Hard delete (borrado físico irreversible) — SOLO admin, SOLO desde Papelera ──
+// Exige que la fila ya esté en papelera (eliminado_en NOT NULL). Audita en
+// ifco_hard_delete_log (quién/cuándo/snapshot) ANTES de borrar físicamente.
+router.post('/papelera/eliminar-definitivo', express.json(), function(req, res) {
+  if (!req.user || req.user.rol !== 'admin') {
+    return res.status(403).json({ error: 'Solo un administrador puede eliminar definitivamente' });
+  }
+  const d = req.body || {};
+  const MAP = {
+    'remitos':                { tabla: 'ifco_remitos_super',         ref: 'n_remito_ifco',      entidad: 'remito' },
+    'envios':                 { tabla: 'ifco_envios_proveedor',      ref: 'n_remito_interno',   entidad: 'envio' },
+    'movimientos':            { tabla: 'ifco_movimientos',           ref: 'n_remito',           entidad: 'movimiento' },
+    'recepciones-proveedor':  { tabla: 'ifco_recepciones_proveedor', ref: 'n_remito_proveedor', entidad: 'recepcion' }
+  };
+  const cfg = MAP[d.kind];
+  const id = parseInt(d.id);
+  if (!cfg || !Number.isInteger(id)) return res.status(400).json({ error: 'kind o id inválido' });
+  const row = db.prepare('SELECT * FROM ' + cfg.tabla + ' WHERE id = ?').get(id);
+  if (!row) return res.status(404).json({ error: 'No encontrado (¿ya fue eliminado?)' });
+  if (!row.eliminado_en) {
+    return res.status(400).json({ error: 'Solo se puede eliminar definitivamente desde la Papelera. Mandalo primero a la papelera.' });
+  }
+  try {
+    const tx = db.transaction(function () {
+      db.prepare(`INSERT INTO ifco_hard_delete_log
+                    (entidad, ref_id, referencia, snapshot, hard_deleted_por_id, hard_deleted_por_nombre)
+                  VALUES (?, ?, ?, ?, ?, ?)`)
+        .run(cfg.entidad, id, row[cfg.ref] || null, JSON.stringify(row),
+             (req.user && req.user.id) || null, (req.user && req.user.nombre) || null);
+      db.prepare('DELETE FROM ' + cfg.tabla + ' WHERE id = ?').run(id);
+    });
+    tx();
+    res.json({ ok: true });
+  } catch(e) {
+    console.error('[IFCO][hard-delete]', e);
+    res.status(500).json({ error: e.message });
+  }
 });
 
 export default router;
