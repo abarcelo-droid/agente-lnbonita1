@@ -208,6 +208,7 @@
       h.innerHTML =
         '<div class="vh"><div><h2>' + ic('truck') + ' Despachos a súper</h2><div class="vh-sub">Remitos de cajones IFCO enviados a las cadenas · ciclo despachado → sellado → enviado → presentado</div></div>'
         + '<div class="actions"><button class="btn btn-ghost btn-sm" onclick="__ifco2Reuse(\'ifcoAbrirCargarSellado\')">' + ic('scan-line') + ' Cargar por foto</button>'
+        + '<button class="btn btn-ghost btn-sm" onclick="__ifco2Reuse(\'ifcoAbrirPresentar\')">' + ic('send') + ' Presentar a IFCO</button>'
         + '<button class="btn btn-pri btn-sm" onclick="__ifco2Reuse(\'ifcoAbrirNuevoRemito\')">' + ic('plus') + ' Nuevo despacho</button></div></div>'
         + '<div class="kpis" style="grid-template-columns:1.5fr 1fr 1fr">'
         + '<div class="search-hero"><div class="sh-box">' + ic('search')
@@ -244,8 +245,10 @@
     }).join('');
     var destino = r.rdest === 'proveedor' ? 'Proveedor de origen' : (r.rdest === 'san_geronimo' ? 'Piso San Gerónimo' : '—');
     var origen = r.origen === 'proveedor_directo' ? ('Directo · ' + (r.prov || '')) : 'San Gerónimo';
-    var accion = { despachado: ic('stamp') + ' Registrar sellado', sellado: ic('send') + ' Enviar a IFCO', enviado: ic('check-check') + ' Marcar presentado', presentado: ic('check') + ' Cadena completa', anulado: ic('ban') + ' Remito anulado' }[r.estado] || '';
-    var puedeAccion = r.estado !== 'anulado' && r.estado !== 'presentado';
+    var accion = { despachado: ic('stamp') + ' Registrar sellado', sellado: ic('send') + ' Presentar a IFCO', enviado: ic('send') + ' Presentar a IFCO', presentado: ic('check') + ' Cadena completa', anulado: ic('ban') + ' Remito anulado' }[r.estado] || '';
+    // despachado → cargar sellado (app/OCR); sellado/enviado → flujo "Presentar a IFCO" (mail a ifco@)
+    var accionFn = r.estado === 'despachado' ? 'ifcoAbrirCargarSellado' : ((r.estado === 'sellado' || r.estado === 'enviado') ? 'ifcoAbrirPresentar' : null);
+    var puedeAccion = !!accionFn;
     return '<div class="detail"><div class="d-head"><div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px">'
       + '<div><div class="dn">' + esc(r.ifco) + '</div><div class="dm">' + ic('store') + ' ' + esc(cadenaCorta(r.cadena)) + ' · ' + esc(r.suc) + '</div></div>'
       + '<button class="btn btn-icon" style="background:rgba(255,255,255,.14);color:#fff;border:0" onclick="__ifco2Close()">' + ic('x') + '</button></div></div>'
@@ -263,7 +266,7 @@
       + '</div>'
       + '<div style="padding:11px 16px 4px"><div class="sectlabel" style="margin-bottom:2px">Trazabilidad</div></div><div class="tline">' + steps + '</div>'
       + '<div class="card-b" style="border-top:1px solid var(--i-line);display:flex;gap:8px">'
-      + (puedeAccion ? '<button class="btn btn-pri btn-sm" style="flex:1;justify-content:center" onclick="__ifco2Reuse(\'ifcoAbrirCargarSellado\')">' + accion + '</button>' : '<button class="btn btn-ghost btn-sm" style="flex:1;justify-content:center" disabled>' + accion + '</button>')
+      + (puedeAccion ? '<button class="btn btn-pri btn-sm" style="flex:1;justify-content:center" onclick="__ifco2Reuse(\'' + accionFn + '\')">' + accion + '</button>' : '<button class="btn btn-ghost btn-sm" style="flex:1;justify-content:center" disabled>' + accion + '</button>')
       + '<button class="btn btn-ghost btn-sm">' + ic('image') + ' Ver remito</button></div></div>';
   }
   window.__ifco2Open = function (id) {
@@ -287,8 +290,8 @@
   // 3) RETIROS / PÉRDIDAS
   // =========================================================================
   RENDER.retiros = function (h) {
-    return fetchJSON(API + '/movimientos').then(function (rows) {
-      var M = rows || [];
+    return Promise.all([fetchJSON(API + '/movimientos'), fetchJSON(API + '/autorizaciones-retiro')]).then(function (res) {
+      var M = res[0] || [], AU = res[1] || [];
       var rowsHtml = M.length ? M.map(function (m) {
         var consol = !!m.consolidado_en;
         return '<tr><td>' + fdate(m.fecha) + '</td><td>' + badge(m.tipo) + '</td>'
@@ -299,14 +302,57 @@
       }).join('') : '<tr><td colspan="6">' + empty('Sin movimientos') + '</td></tr>';
       var retir = M.filter(function (m) { return m.tipo === 'retiro'; }).reduce(function (a, m) { return a + (m.cantidad || 0); }, 0);
       var perd = M.filter(function (m) { return m.tipo === 'perdida'; }).reduce(function (a, m) { return a + (m.cantidad || 0); }, 0);
+
+      // Autorizaciones de retiro a IFCO (flujo de mail)
+      var autBadge = function (e) {
+        var map = { pendiente_envio: ['st-enviaje', 'Pendiente envío'], enviada: ['st-enviado', 'Enviada'], completada: ['st-presentado', 'Completada'], cancelada: ['st-anulado', 'Cancelada'] };
+        var x = map[e] || ['st-anulado', e]; return '<span class="bg-badge ' + x[0] + '"><span class="d"></span>' + x[1] + '</span>';
+      };
+      var autRows = AU.length ? AU.map(function (a) {
+        var acc;
+        if (a.estado === 'pendiente_envio') acc = '<button class="btn btn-pri btn-sm" onclick="__ifco2AutorizEnviar(' + a.id + ')">' + ic('send') + ' Enviar</button><button class="btn btn-ghost btn-sm" onclick="__ifco2AutorizCompletar(' + a.id + ',' + (a.cantidad_estimada || 0) + ')">' + ic('clipboard-check') + ' Completar</button>';
+        else if (a.estado === 'enviada') acc = '<button class="btn btn-ghost btn-sm" onclick="__ifco2AutorizCompletar(' + a.id + ',' + (a.cantidad_estimada || 0) + ')">' + ic('clipboard-check') + ' Completar</button>';
+        else acc = '<span class="muted" style="font-size:11px">—</span>';
+        return '<tr><td>' + fdate(a.fecha_autorizada) + '</td>'
+          + '<td><div class="lead">' + esc(a.transportista_nombre) + '</div><div class="sub2">DNI ' + esc(a.transportista_dni) + ' · ' + esc(a.transportista_patente) + '</div></td>'
+          + '<td class="r num-strong">' + nf(a.cantidad_estimada) + (a.cantidad_real != null ? '<div class="sub2">real ' + nf(a.cantidad_real) + '</div>' : '') + '</td>'
+          + '<td>' + autBadge(a.estado) + '</td>'
+          + '<td class="sub2">' + (a.mail_enviado_a ? esc(a.mail_enviado_a) : '<span class="muted">—</span>') + '</td>'
+          + '<td><div class="rowact">' + acc + '</div></td></tr>';
+      }).join('') : '<tr><td colspan="6">' + empty('Sin autorizaciones de retiro') + '</td></tr>';
+
       h.innerHTML =
         '<div class="vh"><div><h2>' + ic('package-minus') + ' Retiros y pérdidas</h2><div class="vh-sub">Retiros del pool IFCO (altas de cajones vacíos) y pérdidas registradas</div></div>'
-        + '<div class="actions"><button class="btn btn-ghost btn-sm" style="color:var(--i-err)" onclick="__ifco2Reuse(\'ifcoAbrirNuevoMovimiento\')">' + ic('minus') + ' Registrar pérdida</button><button class="btn btn-pri btn-sm" onclick="__ifco2Reuse(\'ifcoAbrirNuevoMovimiento\')">' + ic('plus') + ' Registrar retiro</button></div></div>'
+        + '<div class="actions"><button class="btn btn-ghost btn-sm" style="color:var(--i-err)" onclick="__ifco2Reuse(\'ifcoAbrirNuevoMovimiento\')">' + ic('minus') + ' Registrar pérdida</button><button class="btn btn-ghost btn-sm" onclick="__ifco2Reuse(\'ifcoAbrirNuevoMovimiento\')">' + ic('plus') + ' Registrar retiro</button><button class="btn btn-pri btn-sm" onclick="__ifco2Reuse(\'ifcoAbrirAutorizacion\')">' + ic('mail') + ' Autorizar retiro a IFCO</button></div></div>'
         + '<div class="filters"><div class="seg"><button class="on">Todos<span class="n">' + M.length + '</span></button><button>Retiros<span class="n">' + M.filter(function (m) { return m.tipo === 'retiro'; }).length + '</span></button><button>Pérdidas<span class="n">' + M.filter(function (m) { return m.tipo === 'perdida'; }).length + '</span></button></div>'
         + '<span class="chip-count">Neto del mes: <b class="tnum">+' + nf(retir - perd) + '</b> cajones</span></div>'
         + '<div class="card"><div class="card-b flush"><div class="tbl-wrap"><table class="dt"><thead><tr><th>Fecha</th><th>Tipo</th><th class="r">Cantidad</th><th>Detalle / OT</th><th>Consolidación</th><th></th></tr></thead><tbody>' + rowsHtml + '</tbody></table></div></div></div>'
-        + '<div class="foot-note">' + ic('lock') + ' Los movimientos consolidados quedan bloqueados: ya fueron verificados contra el archivo oficial de IFCO y no se pueden editar ni borrar.</div>';
+        + '<div class="foot-note">' + ic('lock') + ' Los movimientos consolidados quedan bloqueados: ya fueron verificados contra el archivo oficial de IFCO y no se pueden editar ni borrar.</div>'
+        + '<div class="card" style="margin-top:16px"><div class="card-h"><h3>' + ic('mail') + ' Autorizaciones de retiro a IFCO</h3><span class="muted" style="font-size:11px">autorización al transportista · mail a ifco@lnbonita.com.ar</span></div>'
+        + '<div class="card-b flush"><div class="tbl-wrap"><table class="dt"><thead><tr><th>Fecha autorizada</th><th>Transportista</th><th class="r">Cantidad</th><th>Estado</th><th>Mail a</th><th></th></tr></thead><tbody>' + autRows + '</tbody></table></div></div></div>'
+        + '<div class="foot-note">' + ic('info') + ' “Enviar” previsualiza y manda el mail de autorización a IFCO; “Completar” registra la cantidad real retirada + N° de remito (confirma el movimiento de stock). Cancelar/eliminar: follow-up.</div>';
     });
+  };
+  // Acciones del flujo "Autorizar retiro a IFCO" (lista en Retiros)
+  window.__ifco2AutorizEnviar = function (id) {
+    fetchJSON(API + '/autorizaciones-retiro/' + id + '/preview').then(function (p) {
+      if (!p || p.error) { toast('No se pudo generar el preview del mail', 'er'); return; }
+      if (!confirm('Enviar autorización de retiro a ifco@lnbonita.com.ar?\n\nAsunto: ' + p.asunto)) return;
+      fetch(API + '/autorizaciones-retiro/' + id + '/enviar', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ to: 'ifco@lnbonita.com.ar', asunto: p.asunto, cuerpo_html: p.cuerpo_html, cuerpo_texto: p.cuerpo_texto }) })
+        .then(function (r) { return r.json(); })
+        .then(function (d) { if (d && d.ok) { toast('✓ Autorización enviada a IFCO', 'ok'); nav('retiros'); } else { toast((d && d.error) || 'Error al enviar', 'er'); } })
+        .catch(function () { toast('Error de red al enviar', 'er'); });
+    });
+  };
+  window.__ifco2AutorizCompletar = function (id, estimada) {
+    var cant = prompt('Cantidad REAL de cajones retirados:', estimada || '');
+    if (cant === null) return;
+    var n = parseInt(cant, 10); if (isNaN(n) || n < 0) { toast('Cantidad inválida', 'er'); return; }
+    var rem = prompt('N° de remito IFCO del retiro:'); if (!rem || !String(rem).trim()) { toast('N° de remito requerido', 'er'); return; }
+    fetch(API + '/autorizaciones-retiro/' + id + '/completar', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ cantidad_real: n, n_remito: String(rem).trim() }) })
+      .then(function (r) { return r.json(); })
+      .then(function (d) { if (d && d.ok) { toast('✓ Retiro completado (' + d.cantidad_real + ' caj.)', 'ok'); nav('retiros'); } else { toast((d && d.error) || 'Error al completar', 'er'); } })
+      .catch(function () { toast('Error de red al completar', 'er'); });
   };
 
   // =========================================================================
