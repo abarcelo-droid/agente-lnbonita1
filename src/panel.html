@@ -3863,8 +3863,6 @@ function sgRepExport(){
 
   <!-- Sub-tabs -->
   <div style="display:flex;gap:2px;border-bottom:1px solid var(--bor);margin-bottom:20px;flex-wrap:wrap">
-    <div class="pp-subtab on" data-sub="fichajes-pend" onclick="ppShowSub('fichajes-pend')" style="padding:10px 16px;cursor:pointer;font-size:13px;font-weight:600;border-bottom:2px solid transparent">⏰ Pendientes <span id="pp-badge-fich" style="background:var(--err);color:#fff;border-radius:10px;padding:1px 7px;font-size:10px;margin-left:6px"></span></div>
-    <div class="pp-subtab" data-sub="fichajes-hist" onclick="ppShowSub('fichajes-hist')" style="padding:10px 16px;cursor:pointer;font-size:13px;font-weight:600;border-bottom:2px solid transparent">📚 Histórico</div>
     <div class="pp-subtab" data-sub="trabajadores" onclick="ppShowSub('trabajadores')" style="padding:10px 16px;cursor:pointer;font-size:13px;font-weight:600;border-bottom:2px solid transparent">👥 Trabajadores</div>
     <div class="pp-subtab" data-sub="grupos" onclick="ppShowSub('grupos')" style="padding:10px 16px;cursor:pointer;font-size:13px;font-weight:600;border-bottom:2px solid transparent">🏷️ Grupos</div>
     <div class="pp-subtab" data-sub="cuadrillas" onclick="ppShowSub('cuadrillas')" style="padding:10px 16px;cursor:pointer;font-size:13px;font-weight:600;border-bottom:2px solid transparent">🚜 Cuadrillas</div>
@@ -3877,34 +3875,6 @@ function sgRepExport(){
     <div class="pp-subtab" data-sub="reportes" id="pp-tab-reportes" onclick="ppShowSub('reportes')" style="display:none;padding:10px 16px;cursor:pointer;font-size:13px;font-weight:600;border-bottom:2px solid transparent">📈 Reportes</div>
     <div class="pp-subtab" data-sub="tareas-rubros" id="pp-tab-tareas-rubros" onclick="ppShowSub('tareas-rubros')" style="display:none;padding:10px 16px;cursor:pointer;font-size:13px;font-weight:600;border-bottom:2px solid transparent">🏷️ Tareas / Rubros</div>
     <div class="pp-subtab" data-sub="permisos" id="pp-tab-permisos" onclick="ppShowSub('permisos')" style="display:none;padding:10px 16px;cursor:pointer;font-size:13px;font-weight:600;border-bottom:2px solid transparent">⚙️ Permisos</div>
-  </div>
-
-  <!-- Fichajes Pendientes (admin asigna lote + rubro) -->
-  <div class="pp-sub on" id="pp-sub-fichajes-pend">
-    <div id="pp-fich-stats" style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:20px"></div>
-    <div style="font-size:13px;font-weight:700;margin-bottom:10px">Fichajes pendientes de asignar lote y rubro contable</div>
-    <div class="tw"><table>
-      <thead><tr><th>Fecha</th><th>Capataz</th><th>Cuadrilla</th><th>M/T</th><th>Hora decl.</th><th>Hora real</th><th>Tarea</th><th>Personas</th><th>GPS</th><th>Lote</th><th>Rubro</th><th></th></tr></thead>
-      <tbody id="pp-fich-pend-tbody"><tr><td colspan="12" style="text-align:center;color:var(--mut);padding:20px">Cargando...</td></tr></tbody>
-    </table></div>
-  </div>
-
-  <!-- Fichajes Histórico -->
-  <div class="pp-sub" id="pp-sub-fichajes-hist">
-    <div style="display:flex;gap:10px;margin-bottom:14px;align-items:center;flex-wrap:wrap">
-      <label style="font-size:12px">Desde: <input type="date" id="pp-fich-desde" onchange="ppLoadFichHist()" style="padding:4px 8px;font-size:12px"></label>
-      <label style="font-size:12px">Hasta: <input type="date" id="pp-fich-hasta" onchange="ppLoadFichHist()" style="padding:4px 8px;font-size:12px"></label>
-      <select id="pp-fich-estado-fil" onchange="ppLoadFichHist()" style="padding:4px 8px;font-size:12px">
-        <option value="">Todos los estados</option>
-        <option value="pendiente">Solo pendientes</option>
-        <option value="completado">Solo completados</option>
-        <option value="anulado">Solo anulados</option>
-      </select>
-    </div>
-    <div class="tw"><table>
-      <thead><tr><th>Fecha</th><th>Capataz</th><th>Cuadrilla</th><th>M/T</th><th>Hora</th><th>Tarea</th><th>Personas</th><th>Lote</th><th>Rubro</th><th>Estado</th><th></th></tr></thead>
-      <tbody id="pp-fich-hist-tbody"><tr><td colspan="11" style="text-align:center;color:var(--mut);padding:20px">Seleccioná rango de fechas</td></tr></tbody>
-    </table></div>
   </div>
 
   <!-- Trabajadores -->
@@ -4861,14 +4831,6 @@ function sgRepExport(){
       <button class="btn bo" onclick="document.getElementById('mb-pp-tarea').classList.remove('on')">Cancelar</button>
       <button class="btn bb" onclick="ppGuardarTarea()">Guardar</button>
     </div>
-  </div>
-</div>
-
-<!-- MODAL VALORIZAR -->
-<div class="mb" id="mb-pp-val">
-  <div class="mbox" style="width:600px;max-height:90vh;overflow-y:auto">
-    <div class="mhd"><div class="mht">💰 Valorizar parte</div><button class="mcl" onclick="document.getElementById('mb-pp-val').classList.remove('on')">×</button></div>
-    <div id="mb-pp-val-body"></div>
   </div>
 </div>
 
@@ -18920,7 +18882,7 @@ function ppInit() {
       // Con permiso del módulo, la pantalla principal nueva es Asistencia diaria
       var p = PP.misPermisos;
       if (p.asistencia || p.valorizacion || p.admin) ppShowSub('asistencia');
-      else ppShowSub('fichajes-pend');
+      else ppShowSub('trabajadores');
     });
   });
 }
@@ -18958,8 +18920,6 @@ function ppShowSub(sub) {
   document.querySelectorAll('.pp-subtab').forEach(function(t){ t.classList.toggle('on', t.dataset.sub === sub); });
   document.querySelectorAll('.pp-sub').forEach(function(s){ s.classList.remove('on'); });
   document.getElementById('pp-sub-'+sub).classList.add('on');
-  if (sub === 'fichajes-pend') ppLoadFichPend();
-  if (sub === 'fichajes-hist') ppLoadFichHist();
   if (sub === 'trabajadores') ppRenderTrabajadores();
   if (sub === 'grupos') ppRenderGrupos();
   if (sub === 'cuadrillas') ppRenderCuadrillas();
@@ -19664,173 +19624,6 @@ function ppAnularMov(id) {
 
 function ppFmtARS(n) { return '$ ' + (n||0).toLocaleString('es-AR', {maximumFractionDigits:0}); }
 
-// ── Dashboard (Por valorizar) ──
-function ppLoadDashboard() {
-  paF('/api/pa/personal/dashboard').then(function(res){
-    if (!res.ok) return;
-    var d = res.data;
-    document.getElementById('pp-badge-val').textContent = d.pendientes || '';
-    document.getElementById('pp-badge-val').style.display = d.pendientes ? 'inline-block' : 'none';
-
-    var stats =
-      '<div class="cb-card"><div class="cb-stat-label">⏳ Pendientes de valorizar</div><div class="cb-stat-val" style="color:var(--err)">'+(d.pendientes||0)+'</div></div>' +
-      '<div class="cb-card"><div class="cb-stat-label">⚠️ Partes viejos (+14 días)</div><div class="cb-stat-val" style="color:var(--warn)">'+(d.partes_viejos||0)+'</div></div>' +
-      '<div class="cb-card"><div class="cb-stat-label">💰 Gasto MO del mes</div>' +
-      '<div style="margin-top:8px;font-size:12px">' +
-        (d.gasto_mes_rubro||[]).slice(0,4).map(function(g){ return '<div style="display:flex;justify-content:space-between;padding:2px 0"><span style="color:var(--mut);font-size:11px">'+g.nombre+'</span><strong>'+ppFmtARS(g.total)+'</strong></div>'; }).join('') +
-        (!d.gasto_mes_rubro || !d.gasto_mes_rubro.length ? '<div style="color:var(--mut);font-size:12px">Sin valorizaciones este mes</div>' : '') +
-      '</div></div>';
-    document.getElementById('pp-dash-stats').innerHTML = stats;
-
-    // Tabla de pendientes — viene de /partes con filtro
-    paF('/api/pa/personal/partes?estado=pendiente_valorizar&limit=50').then(function(r){
-      var tbody = document.getElementById('pp-val-tbody');
-      if (!r.data || !r.data.length) {
-        tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--mut);padding:20px">🎉 No hay partes pendientes de valorizar</td></tr>';
-        return;
-      }
-      tbody.innerHTML = r.data.map(function(p){
-        var cantHoras = p.modo_registro === 'cuadrilla'
-          ? (p.cant_trabajadores||'—') + ' × ' + (p.horas_total||'—') + 'h'
-          : '(individual)';
-        return '<tr><td>'+paFecha(p.fecha)+'</td><td>'+(p.lote_nombre||'—')+(p.lote_finca?'<div style="font-size:10px;color:var(--mut)">'+p.lote_finca+'</div>':'')+'</td><td>'+(p.tarea_nombre||'—')+'</td><td><span class="tag" style="font-size:10px">'+p.modo_registro+'</span></td><td>'+(p.cuadrilla_nombre||'—')+'</td><td>'+cantHoras+'</td><td>'+(p.cargado_por_nombre||'—')+'</td><td><button class="btn bb bs" onclick="ppAbrirValorizar('+p.id+')" style="padding:4px 12px;font-size:11px">💰 Valorizar</button></td></tr>';
-      }).join('');
-    });
-  });
-}
-
-// ── Partes (completo) ──
-function ppLoadPartes() {
-  var estado = document.getElementById('pp-filt-estado').value;
-  var lote = document.getElementById('pp-filt-lote').value;
-  var qs = [];
-  if (estado) qs.push('estado='+estado);
-  if (lote) qs.push('lote_id='+lote);
-
-  // Poblar filtro de lotes
-  var selL = document.getElementById('pp-filt-lote');
-  if (selL.options.length <= 1) {
-    selL.innerHTML = '<option value="">Todos los lotes</option>' +
-      PP.lotes.map(function(l){ return '<option value="'+l.id+'">'+l.nombre+'</option>'; }).join('');
-    if (lote) selL.value = lote;
-  }
-
-  paF('/api/pa/personal/partes?' + qs.join('&')).then(function(r){
-    var tbody = document.getElementById('pp-partes-tbody');
-    if (!r.data || !r.data.length) {
-      tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;color:var(--mut);padding:20px">Sin partes con esos filtros</td></tr>';
-      return;
-    }
-    tbody.innerHTML = r.data.map(function(p){
-      var est = p.estado==='pendiente_valorizar' ? '<span style="color:var(--err)">⏳ Pendiente</span>' :
-                p.estado==='valorizado' ? '<span style="color:var(--ok)">✓ Valorizado</span>' :
-                '<span style="color:var(--mut)">✕ Anulado</span>';
-      var monto = p.monto_total ? ppFmtARS(p.monto_total) : '—';
-      var rubro = p.rubro_final_nombre || '—';
-      var cantH = p.modo_registro === 'cuadrilla' ? (p.cant_trabajadores||'—')+' × '+(p.horas_total||'—')+'h' : '(individual)';
-      var acc = p.estado === 'pendiente_valorizar'
-        ? '<button class="btn bb bs" onclick="ppAbrirValorizar('+p.id+')" style="padding:3px 10px;font-size:11px">💰</button> <button class="btn bd bs" onclick="ppEliminarParte('+p.id+')" style="padding:3px 8px;font-size:11px">✕</button>'
-        : p.estado === 'valorizado'
-        ? '<button class="btn bo bs" onclick="ppAbrirValorizar('+p.id+')" style="padding:3px 10px;font-size:11px">Revalorizar</button> <button class="btn bd bs" onclick="ppAnularParte('+p.id+')" style="padding:3px 8px;font-size:11px">Anular</button>'
-        : '';
-      return '<tr><td>'+paFecha(p.fecha)+'</td><td>'+(p.lote_nombre||'—')+'</td><td>'+(p.tarea_nombre||'—')+'</td><td>'+(p.cuadrilla_nombre||'—')+'</td><td>'+cantH+'</td><td><strong>'+monto+'</strong></td><td style="font-size:11px">'+rubro+'</td><td>'+est+'</td><td style="white-space:nowrap">'+acc+'</td></tr>';
-    }).join('');
-  });
-}
-
-function ppEliminarParte(id) {
-  if (!confirm('¿Eliminar este parte pendiente?')) return;
-  paF('/api/pa/personal/partes/'+id, { method:'DELETE' }).then(function(r){
-    if (r.ok) { toast('Eliminado'); ppLoadPartes(); ppLoadDashboard(); }
-    else toast(r.error||'Error', 'er');
-  });
-}
-
-function ppAnularParte(id) {
-  if (!confirm('¿Anular este parte valorizado? Se revertirá el costo del lote.')) return;
-  paF('/api/pa/personal/partes/'+id+'/anular', { method:'POST' }).then(function(r){
-    if (r.ok) { toast('Anulado'); ppLoadPartes(); ppLoadDashboard(); }
-    else toast(r.error||'Error', 'er');
-  });
-}
-
-// ── Valorizar ──
-function ppAbrirValorizar(parteId) {
-  PP.valorizandoParteId = parteId;
-  paF('/api/pa/personal/partes/'+parteId).then(function(r){
-    if (!r.ok) return toast(r.error||'Error','er');
-    var p = r.data.parte;
-    var items = r.data.items;
-    var sug = r.data.rubro_sugerido;
-    var val = r.data.valorizacion;
-
-    // Calcular monto sugerido
-    var montoSugerido = 0;
-    var breakdown = '';
-    if (p.modo_registro === 'cuadrilla') {
-      // Estimación básica: sin info de trabajadores individuales, dejamos 0 y que lo complete
-      montoSugerido = val ? val.monto_total : 0;
-      breakdown = '<div style="background:var(--bg);padding:10px;border-radius:8px;margin:10px 0;font-size:12px;color:var(--mut)">Modo cuadrilla: <strong>'+(p.cant_trabajadores||0)+' personas × '+(p.horas_total||0)+' horas</strong>. Cargá el monto total que corresponde.</div>';
-    } else {
-      // Modo individual: intentar calcular con jornal_base de cada trabajador
-      var detalle = items.map(function(it){
-        var jornal = it.jornal_base || 0;
-        var base = 0;
-        if (it.unidad_jornal === 'unidad' && it.unidades_destajo) base = jornal * it.unidades_destajo;
-        else if (it.unidad_jornal === 'hora' && it.horas) base = jornal * it.horas;
-        else if (it.unidad_jornal === 'dia') base = jornal;
-        montoSugerido += base;
-        return '<div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--bor);font-size:12px"><span>'+it.trabajador_nombre+' <span style="color:var(--mut)">('+(it.unidades_destajo||it.horas||'—')+' '+(it.unidad_jornal||'')+')</span></span><strong>'+ppFmtARS(base)+'</strong></div>';
-      }).join('');
-      breakdown = '<div style="background:var(--bg);padding:10px;border-radius:8px;margin:10px 0"><div style="font-size:11px;font-weight:700;color:var(--mut);margin-bottom:6px">CÁLCULO SUGERIDO</div>'+detalle+'</div>';
-    }
-
-    var rubroId = val ? val.rubro_contable_id : (sug ? sug.id : '');
-    var monto = val ? val.monto_total : montoSugerido;
-
-    var html =
-      '<div style="padding:10px 0 0">' +
-      '<div style="margin-bottom:10px"><strong>'+p.tarea_nombre+'</strong> — '+p.lote_nombre+(p.lote_finca?' · '+p.lote_finca:'')+'<br><span style="font-size:12px;color:var(--mut)">'+paFecha(p.fecha)+' · cargado por '+(p.cargado_por_nombre||'—')+'</span></div>' +
-      (p.observaciones ? '<div style="background:#fffbeb;border:1px solid #fde68a;padding:8px;border-radius:6px;font-size:12px;margin-bottom:10px">📝 '+p.observaciones+'</div>' : '') +
-      (p.foto_path ? '<div style="margin-bottom:10px"><a href="'+p.foto_path+'" target="_blank" style="color:var(--burg);font-size:12px">📷 Ver foto</a></div>' : '') +
-      breakdown +
-      '<div class="fg">' +
-        '<div class="fl" style="flex:1 1 45%"><label>Monto total *</label><input type="number" step="0.01" min="0" id="pp-val-monto" value="'+monto+'"></div>' +
-        '<div class="fl" style="flex:1 1 45%"><label>Rubro contable *</label>' +
-          '<select id="pp-val-rubro">' +
-            PP.rubros.map(function(r){ return '<option value="'+r.id+'"'+(r.id==rubroId?' selected':'')+'>'+r.nombre+'</option>'; }).join('') +
-          '</select>' +
-          (sug ? '<div style="font-size:11px;color:var(--ok);margin-top:4px">💡 Sugerido: '+sug.nombre+'</div>' : '') +
-        '</div>' +
-      '</div>' +
-      '<div style="display:flex;gap:10px;justify-content:flex-end;margin-top:14px">' +
-        '<button class="btn bo" onclick="document.getElementById(\'mb-pp-val\').classList.remove(\'on\')">Cancelar</button>' +
-        '<button class="btn bb" onclick="ppGuardarValorizar()">'+(val?'Actualizar':'Valorizar')+'</button>' +
-      '</div>' +
-      '</div>';
-    document.getElementById('mb-pp-val-body').innerHTML = html;
-    document.getElementById('mb-pp-val').classList.add('on');
-  });
-}
-
-function ppGuardarValorizar() {
-  var monto = parseFloat(document.getElementById('pp-val-monto').value);
-  var rubro = document.getElementById('pp-val-rubro').value;
-  if (isNaN(monto) || monto < 0) return toast('Monto inválido', 'er');
-  if (!rubro) return toast('Elegí un rubro', 'er');
-  paF('/api/pa/personal/partes/'+PP.valorizandoParteId+'/valorizar', {
-    method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({ monto_total: monto, rubro_contable_id: parseInt(rubro) })
-  }).then(function(r){
-    if (r.ok) {
-      toast('Valorizado ✓ — costo imputado al lote');
-      document.getElementById('mb-pp-val').classList.remove('on');
-      ppLoadDashboard();
-      ppLoadPartes();
-    } else toast(r.error||'Error', 'er');
-  });
-}
-
 // ── Trabajadores ──
 function ppRenderTrabajadores() {
   var tb = document.getElementById('pp-trab-tbody');
@@ -20159,124 +19952,6 @@ function ppReactivarRubro(id){
   paF('/api/pa/personal/rubros/'+id+'/reactivar', {method:'POST'}).then(function(r){
     if(r.ok){ toast('✓ Reactivado'); ppCargarBase().then(ppRenderRubros); }
     else toast(r.error||'Error','er');
-  });
-}
-
-// ═════════════════════════════════════════════════════════════════════
-// ⏰ FICHAJES DE CUADRILLA — Panel admin
-// ═════════════════════════════════════════════════════════════════════
-
-function ppLoadFichPend() {
-  paF('/api/pa/personal/fichajes-stats').then(function(st){
-    if (!st.ok) return;
-    var d = st.data;
-    document.getElementById('pp-badge-fich').textContent = d.pendientes || '';
-    document.getElementById('pp-badge-fich').style.display = d.pendientes ? 'inline-block' : 'none';
-    document.getElementById('pp-fich-stats').innerHTML =
-      '<div class="pa-card"><div class="pa-card-title">Pendientes de asignar</div><div class="pa-stat" style="color:var(--warn)">'+d.pendientes+'</div></div>'
-    + '<div class="pa-card"><div class="pa-card-title">Fichajes hoy</div><div class="pa-stat">'+d.hoy+'</div></div>'
-    + '<div class="pa-card"><div class="pa-card-title">Esta semana</div><div class="pa-stat">'+d.semana+'</div></div>';
-  });
-  paF('/api/pa/personal/fichajes?estado=pendiente').then(function(r){
-    PP.fichajesPend = r.data || [];
-    ppRenderFichPend();
-  });
-}
-
-function ppRenderFichPend() {
-  var tb = document.getElementById('pp-fich-pend-tbody');
-  if (!PP.fichajesPend.length) {
-    tb.innerHTML = '<tr><td colspan="12" style="text-align:center;color:var(--mut);padding:20px">No hay fichajes pendientes. 🎉</td></tr>';
-    return;
-  }
-  tb.innerHTML = PP.fichajesPend.map(function(f){
-    var mom = f.momento === 'entrada' ? '<span style="color:#059669;font-weight:700">🌅 ENT</span>' : '<span style="color:#ea580c;font-weight:700">🌇 SAL</span>';
-    var gps = f.gps_ok
-      ? '<a href="https://www.google.com/maps?q='+f.lat+','+f.lng+'" target="_blank" title="Ver en mapa">📍</a>'
-      : '<span title="Sin GPS">⚠️</span>';
-    var horaReal = f.hora_real ? f.hora_real.split(' ')[1] || '—' : '—';
-    // Inline selects para lote y rubro
-    var lotesOpts = '<option value="">—</option>' + (PP.lotes||[]).map(function(l){ return '<option value="'+l.id+'">'+(l.finca?l.finca+' · ':'')+l.nombre+'</option>'; }).join('');
-    var rubrosOpts = '<option value="">—</option>' + (PP.rubros||[]).filter(function(r){return r.activo;}).map(function(r){ return '<option value="'+r.id+'">'+r.nombre+'</option>'; }).join('');
-    return '<tr data-id="'+f.id+'">'
-      + '<td style="font-size:11px">'+f.fecha+'</td>'
-      + '<td>'+(f.capataz_nombre||'—')+'</td>'
-      + '<td><strong>'+f.cuadrilla_nombre+'</strong></td>'
-      + '<td>'+mom+'</td>'
-      + '<td>'+f.hora_declarada+'</td>'
-      + '<td style="font-size:11px;color:var(--mut)">'+horaReal+'</td>'
-      + '<td style="font-size:12px">'+f.tarea_texto+'</td>'
-      + '<td style="text-align:center">'+(f.cant_personas||'—')+'</td>'
-      + '<td style="text-align:center">'+gps+'</td>'
-      + '<td><select class="fich-lote" style="font-size:12px;padding:3px;max-width:150px">'+lotesOpts+'</select></td>'
-      + '<td><select class="fich-rubro" style="font-size:12px;padding:3px;max-width:180px">'+rubrosOpts+'</select></td>'
-      + '<td><button class="btn bb bs" onclick="ppAsignarFich('+f.id+')" style="padding:3px 10px;font-size:11px">💾 Asignar</button></td>'
-      + '</tr>';
-  }).join('');
-}
-
-function ppAsignarFich(id) {
-  var row = document.querySelector('tr[data-id="'+id+'"]');
-  if (!row) return;
-  var loteId = row.querySelector('.fich-lote').value;
-  var rubroId = row.querySelector('.fich-rubro').value;
-  if (!loteId || !rubroId) return toast('Seleccioná lote y rubro', 'er');
-  paF('/api/pa/personal/fichajes/'+id, {
-    method: 'PATCH', headers: {'Content-Type':'application/json'},
-    body: JSON.stringify({ lote_id: parseInt(loteId), rubro_contable_id: parseInt(rubroId) })
-  }).then(function(r){
-    if (r.ok) { toast('✓ Asignado'); ppLoadFichPend(); }
-    else toast(r.error || 'Error', 'er');
-  });
-}
-
-function ppLoadFichHist() {
-  var desde = document.getElementById('pp-fich-desde').value;
-  var hasta = document.getElementById('pp-fich-hasta').value;
-  var estado = document.getElementById('pp-fich-estado-fil').value;
-  if (!desde && !hasta) {
-    // Default: últimos 7 días
-    var h = new Date(); var d = new Date(h); d.setDate(d.getDate() - 7);
-    desde = d.toISOString().slice(0,10);
-    hasta = h.toISOString().slice(0,10);
-    document.getElementById('pp-fich-desde').value = desde;
-    document.getElementById('pp-fich-hasta').value = hasta;
-  }
-  var qs = [];
-  if (desde) qs.push('fecha_desde='+desde);
-  if (hasta) qs.push('fecha_hasta='+hasta);
-  if (estado) qs.push('estado='+estado);
-  paF('/api/pa/personal/fichajes?'+qs.join('&')).then(function(r){
-    var data = r.data || [];
-    var tb = document.getElementById('pp-fich-hist-tbody');
-    if (!data.length) { tb.innerHTML = '<tr><td colspan="11" style="text-align:center;color:var(--mut);padding:20px">Sin fichajes en el rango</td></tr>'; return; }
-    tb.innerHTML = data.map(function(f){
-      var mom = f.momento === 'entrada' ? '🌅 ENT' : '🌇 SAL';
-      var est = f.estado === 'pendiente' ? '<span style="background:#fef3c7;color:#92400e;padding:1px 6px;border-radius:8px;font-size:10px">Pendiente</span>'
-              : f.estado === 'completado' ? '<span style="background:#d1fae5;color:#065f46;padding:1px 6px;border-radius:8px;font-size:10px">✓ Completado</span>'
-              : '<span style="background:#fee2e2;color:#991b1b;padding:1px 6px;border-radius:8px;font-size:10px">Anulado</span>';
-      return '<tr>'
-        + '<td style="font-size:11px">'+f.fecha+'</td>'
-        + '<td>'+(f.capataz_nombre||'—')+'</td>'
-        + '<td>'+f.cuadrilla_nombre+'</td>'
-        + '<td>'+mom+'</td>'
-        + '<td>'+f.hora_declarada+'</td>'
-        + '<td style="font-size:12px">'+f.tarea_texto+'</td>'
-        + '<td style="text-align:center">'+(f.cant_personas||'—')+'</td>'
-        + '<td>'+(f.lote_nombre?(f.lote_finca?f.lote_finca+' · ':'')+f.lote_nombre:'<span style="color:var(--mut)">—</span>')+'</td>'
-        + '<td style="font-size:11px">'+(f.rubro_nombre||'<span style="color:var(--mut)">—</span>')+'</td>'
-        + '<td>'+est+'</td>'
-        + '<td>'+(f.estado !== 'anulado' ? '<button class="btn bo bs" onclick="ppAnularFich('+f.id+')" style="padding:2px 8px;font-size:10px;color:var(--err);border-color:var(--err)">🗑</button>' : '')+'</td>'
-        + '</tr>';
-    }).join('');
-  });
-}
-
-function ppAnularFich(id) {
-  if (!confirm('¿Anular este fichaje? Esta acción se puede revertir editándolo manualmente.')) return;
-  paF('/api/pa/personal/fichajes/'+id, { method: 'DELETE' }).then(function(r){
-    if (r.ok) { toast('✓ Anulado'); ppLoadFichHist(); ppLoadFichPend(); }
-    else toast(r.error || 'Error', 'er');
   });
 }
 

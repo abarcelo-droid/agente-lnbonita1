@@ -1165,82 +1165,27 @@ db.exec(`
     activo               INTEGER DEFAULT 1,
     creado_en            TEXT DEFAULT (datetime('now','localtime'))
   );
-
-  -- Partes de trabajo (cabecera)
-  CREATE TABLE IF NOT EXISTS pa_partes_trabajo (
-    id                INTEGER PRIMARY KEY AUTOINCREMENT,
-    fecha             TEXT NOT NULL DEFAULT (date('now','localtime')),
-    cuadrilla_id      INTEGER REFERENCES pa_cuadrillas(id),
-    lote_id           INTEGER NOT NULL REFERENCES pa_lotes(id),
-    tarea_tipo_id     INTEGER NOT NULL REFERENCES pa_tareas_tipos(id),
-    modo_registro     TEXT NOT NULL DEFAULT 'cuadrilla' CHECK(modo_registro IN ('cuadrilla','individual')),
-    cant_trabajadores INTEGER,      -- solo si modo=cuadrilla
-    horas_total       REAL,          -- solo si modo=cuadrilla
-    observaciones     TEXT,
-    foto_path         TEXT,
-    cargado_por       INTEGER REFERENCES usuarios(id),
-    estado            TEXT DEFAULT 'pendiente_valorizar' CHECK(estado IN ('pendiente_valorizar','valorizado','anulado')),
-    creado_en         TEXT DEFAULT (datetime('now','localtime'))
-  );
-
-  -- Items de parte individual (solo si modo=individual, ej destajo)
-  CREATE TABLE IF NOT EXISTS pa_partes_trabajo_items (
-    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
-    parte_id           INTEGER NOT NULL REFERENCES pa_partes_trabajo(id) ON DELETE CASCADE,
-    trabajador_id      INTEGER NOT NULL REFERENCES pa_trabajadores(id),
-    horas              REAL,
-    unidades_destajo   REAL,
-    notas              TEXT
-  );
-
-  -- Valorización (la hace RRHH/oficina)
-  CREATE TABLE IF NOT EXISTS pa_partes_valorizacion (
-    id                   INTEGER PRIMARY KEY AUTOINCREMENT,
-    parte_id             INTEGER NOT NULL UNIQUE REFERENCES pa_partes_trabajo(id),
-    monto_total          REAL NOT NULL,
-    detalle_json         TEXT,
-    rubro_contable_id    INTEGER NOT NULL REFERENCES pa_rubros_contables(id),
-    valorizado_por       INTEGER REFERENCES usuarios(id),
-    fecha_valorizacion   TEXT DEFAULT (datetime('now','localtime'))
-  );
-
-  CREATE INDEX IF NOT EXISTS idx_pa_partes_fecha ON pa_partes_trabajo(fecha);
-  CREATE INDEX IF NOT EXISTS idx_pa_partes_lote ON pa_partes_trabajo(lote_id);
-  CREATE INDEX IF NOT EXISTS idx_pa_partes_estado ON pa_partes_trabajo(estado);
   CREATE INDEX IF NOT EXISTS idx_pa_rubros_tipo_cult ON pa_rubros_contables(tipo_labor, cultivo);
-
-  -- ═════════════════════════════════════════════════════════════════════
-  -- FICHAJES DE CUADRILLA (sistema mñna/tarde con GPS)
-  -- Reemplaza conceptualmente a pa_partes_trabajo. Admin asigna rubro y lote
-  -- después de que el capataz fichó desde el celular.
-  -- ═════════════════════════════════════════════════════════════════════
-  CREATE TABLE IF NOT EXISTS pa_fichajes_cuadrilla (
-    id                INTEGER PRIMARY KEY AUTOINCREMENT,
-    capataz_id        INTEGER NOT NULL REFERENCES usuarios(id),
-    cuadrilla_id      INTEGER NOT NULL REFERENCES pa_cuadrillas(id),
-    fecha             TEXT NOT NULL DEFAULT (date('now','localtime')),
-    momento           TEXT NOT NULL CHECK(momento IN ('entrada','salida')),
-    hora_declarada    TEXT NOT NULL,  -- "HH:MM" lo que el capataz seleccionó
-    hora_real         TEXT NOT NULL DEFAULT (datetime('now','localtime')),  -- cuándo apretó el botón
-    tarea_texto       TEXT NOT NULL,  -- texto libre del capataz
-    cant_personas     INTEGER,
-    lat               REAL,
-    lng               REAL,
-    accuracy_metros   REAL,
-    gps_ok            INTEGER DEFAULT 0,  -- 1 = tomó GPS, 0 = falló/timeout
-    -- Campos que agrega admin desde el panel:
-    lote_id           INTEGER REFERENCES pa_lotes(id),
-    rubro_contable_id INTEGER REFERENCES pa_rubros_contables(id),
-    estado            TEXT DEFAULT 'pendiente' CHECK(estado IN ('pendiente','completado','anulado')),
-    notas_admin       TEXT,
-    completado_por    INTEGER REFERENCES usuarios(id),
-    fecha_completado  TEXT,
-    creado_en         TEXT DEFAULT (datetime('now','localtime'))
-  );
-  CREATE INDEX IF NOT EXISTS idx_pa_fich_fecha ON pa_fichajes_cuadrilla(fecha DESC);
-  CREATE INDEX IF NOT EXISTS idx_pa_fich_capataz ON pa_fichajes_cuadrilla(capataz_id, fecha DESC);
-  CREATE INDEX IF NOT EXISTS idx_pa_fich_estado ON pa_fichajes_cuadrilla(estado);
 `);
+
+// ── BORRADO legacy: partes de trabajo + fichajes GPS (flujo Scout discontinuado) ──
+// Se eliminaron la UI (Scout + panel) y los endpoints. Estas 4 tablas (confirmadas
+// vacías) se dropean. DROP IF EXISTS es idempotente (no-op si ya no están). Orden
+// hijas → padres, FK off por seguridad. NO toca pa_cuadrillas / pa_tareas_tipos /
+// pa_trabajadores / pa_rubros_contables / pa_grupos (compartidas o vivas por otro lado).
+try {
+  db.pragma('foreign_keys = OFF');
+  db.exec(`
+    DROP TABLE IF EXISTS pa_partes_valorizacion;
+    DROP TABLE IF EXISTS pa_partes_trabajo_items;
+    DROP TABLE IF EXISTS pa_partes_trabajo;
+    DROP TABLE IF EXISTS pa_fichajes_cuadrilla;
+  `);
+  db.pragma('foreign_keys = ON');
+} catch (e) {
+  try { db.pragma('foreign_keys = ON'); } catch (_) {}
+  console.error('[PA] Error dropeando legacy partes/fichajes:', e.message);
+}
 
 // ── MIGRACIÓN: agregar grupo_id a pa_trabajadores ──────────────────────────
 // Grupo es distinto de cuadrilla: admin del trabajador vs. jornada operativa.
@@ -1612,10 +1557,7 @@ db.exec(`
 
     // Tablas a vaciar — en orden seguro (hijas primero para evitar FK issues)
     const TABLAS_A_VACIAR = [
-      // Personal — orden hijas → padres
-      'pa_partes_valorizacion',
-      'pa_partes_trabajo_items',
-      'pa_partes_trabajo',
+      // (Personal legacy partes/fichajes: tablas eliminadas — ya no se vacían)
       // Combustible
       'pa_combustible_movimientos',
       // Stock y órdenes — hijas → padres
