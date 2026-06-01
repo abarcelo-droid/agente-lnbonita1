@@ -3849,7 +3849,6 @@ function sgRepExport(){
   <div class="ph">
     <div><div class="ph-t">👷 Personal / Mano de Obra</div><div class="ph-s">Cuadrillas, trabajadores y valorización de partes</div></div>
     <div style="display:flex;gap:8px">
-      <button class="btn bb" onclick="ppAbrirTrabajador()">+ Trabajador</button>
       <button class="btn bo" onclick="ppAbrirCuadrilla()">+ Cuadrilla</button>
       <button class="btn bo" onclick="ppAbrirTarea()">+ Tarea</button>
     </div>
@@ -3863,7 +3862,6 @@ function sgRepExport(){
 
   <!-- Sub-tabs -->
   <div style="display:flex;gap:2px;border-bottom:1px solid var(--bor);margin-bottom:20px;flex-wrap:wrap">
-    <div class="pp-subtab" data-sub="trabajadores" onclick="ppShowSub('trabajadores')" style="padding:10px 16px;cursor:pointer;font-size:13px;font-weight:600;border-bottom:2px solid transparent">👥 Trabajadores</div>
     <div class="pp-subtab" data-sub="grupos" onclick="ppShowSub('grupos')" style="padding:10px 16px;cursor:pointer;font-size:13px;font-weight:600;border-bottom:2px solid transparent">🏷️ Grupos</div>
     <div class="pp-subtab" data-sub="cuadrillas" onclick="ppShowSub('cuadrillas')" style="padding:10px 16px;cursor:pointer;font-size:13px;font-weight:600;border-bottom:2px solid transparent">🚜 Cuadrillas</div>
     <div class="pp-subtab" data-sub="rubros" onclick="ppShowSub('rubros')" style="padding:10px 16px;cursor:pointer;font-size:13px;font-weight:600;border-bottom:2px solid transparent">📊 Rubros</div>
@@ -3875,14 +3873,6 @@ function sgRepExport(){
     <div class="pp-subtab" data-sub="reportes" id="pp-tab-reportes" onclick="ppShowSub('reportes')" style="display:none;padding:10px 16px;cursor:pointer;font-size:13px;font-weight:600;border-bottom:2px solid transparent">📈 Reportes</div>
     <div class="pp-subtab" data-sub="tareas-rubros" id="pp-tab-tareas-rubros" onclick="ppShowSub('tareas-rubros')" style="display:none;padding:10px 16px;cursor:pointer;font-size:13px;font-weight:600;border-bottom:2px solid transparent">🏷️ Tareas / Rubros</div>
     <div class="pp-subtab" data-sub="permisos" id="pp-tab-permisos" onclick="ppShowSub('permisos')" style="display:none;padding:10px 16px;cursor:pointer;font-size:13px;font-weight:600;border-bottom:2px solid transparent">⚙️ Permisos</div>
-  </div>
-
-  <!-- Trabajadores -->
-  <div class="pp-sub" id="pp-sub-trabajadores">
-    <div class="tw"><table>
-      <thead><tr><th>Nombre</th><th>DNI</th><th>Grupo / Colectivo</th><th>Tipo relación</th><th>Estado</th><th></th></tr></thead>
-      <tbody id="pp-trab-tbody"></tbody>
-    </table></div>
   </div>
 
   <!-- Grupos / Colectivos -->
@@ -4094,6 +4084,9 @@ function sgRepExport(){
       </div>
       <div class="fl"><label>Cuadrilla default</label>
         <select id="pp-per-cuadrilla"><option value="">— Ninguna —</option></select>
+      </div>
+      <div class="fl"><label>Grupo / Colectivo</label>
+        <select id="pp-per-grupo"><option value="">— Sin asignar —</option></select>
       </div>
       <div class="fl pp-per-solo-val"><label>Tarifa default ($)</label><input id="pp-per-tarifa" type="number" step="0.01"></div>
       <div class="fl pp-per-solo-val"><label>Unidad tarifa</label>
@@ -4731,34 +4724,6 @@ function sgRepExport(){
     </label>
   </div>
   <div id="pa-cu-lista"></div>
-</div>
-
-<!-- MODAL TRABAJADOR -->
-<div class="mb" id="mb-pp-trab">
-  <div class="mbox" style="width:520px">
-    <div class="mhd"><div class="mht" id="mb-pp-trab-tit">Nuevo trabajador</div><button class="mcl" onclick="document.getElementById('mb-pp-trab').classList.remove('on')">×</button></div>
-    <div class="fg">
-      <div class="fl"><label>Nombre *</label><input id="pp-trab-nombre"></div>
-      <div class="fl"><label>DNI</label><input id="pp-trab-dni"></div>
-      <div class="fl"><label>Grupo / Colectivo *</label>
-        <select id="pp-trab-grupo"><option value="">— Sin asignar —</option></select>
-      </div>
-      <div class="fl"><label>Tipo relación</label>
-        <select id="pp-trab-relacion">
-          <option value="fijo">Fijo (empleado)</option>
-          <option value="contratista">Contratista</option>
-        </select>
-      </div>
-      <div class="fl" style="flex:1 1 100%"><label>Notas</label><textarea id="pp-trab-notas" rows="2" placeholder="Cualquier observación sobre el trabajador..."></textarea></div>
-      <div class="fl" style="flex:1 1 100%;font-size:11px;color:var(--mut);padding:8px 0;border-top:1px dashed var(--bor);margin-top:4px">
-        💼 <strong>Jornal y remuneración</strong>: los gestiona RRHH en una pantalla separada.
-      </div>
-    </div>
-    <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:14px">
-      <button class="btn bo" onclick="document.getElementById('mb-pp-trab').classList.remove('on')">Cancelar</button>
-      <button class="btn bb" onclick="ppGuardarTrabajador()">Guardar</button>
-    </div>
-  </div>
 </div>
 
 <!-- MODAL GRUPO / COLECTIVO -->
@@ -18882,7 +18847,7 @@ function ppInit() {
       // Con permiso del módulo, la pantalla principal nueva es Asistencia diaria
       var p = PP.misPermisos;
       if (p.asistencia || p.valorizacion || p.admin) ppShowSub('asistencia');
-      else ppShowSub('trabajadores');
+      else ppShowSub('grupos');
     });
   });
 }
@@ -18905,7 +18870,6 @@ function ppAplicarGating() {
 
 function ppCargarBase() {
   return Promise.all([
-    paF('/api/pa/personal/trabajadores?incluir_inactivos=1').then(function(r){ PP.trabajadores = r.data || []; }),
     paF('/api/pa/personal/cuadrillas').then(function(r){ PP.cuadrillas = r.data || []; }),
     paF('/api/pa/personal/grupos').then(function(r){ PP.grupos = r.data || []; }),
     paF('/api/pa/personal/tareas-tipos').then(function(r){ PP.tareas = r.data || []; }),
@@ -18920,7 +18884,6 @@ function ppShowSub(sub) {
   document.querySelectorAll('.pp-subtab').forEach(function(t){ t.classList.toggle('on', t.dataset.sub === sub); });
   document.querySelectorAll('.pp-sub').forEach(function(s){ s.classList.remove('on'); });
   document.getElementById('pp-sub-'+sub).classList.add('on');
-  if (sub === 'trabajadores') ppRenderTrabajadores();
   if (sub === 'grupos') ppRenderGrupos();
   if (sub === 'cuadrillas') ppRenderCuadrillas();
   if (sub === 'rubros') ppRenderRubros();
@@ -19034,11 +18997,11 @@ function ppLoadPadron() {
 function ppRenderPadron() {
   var verTarifa = ppPuedeVerTarifa();
   var thead = document.getElementById('pp-padron-thead');
-  thead.innerHTML = '<th>Nombre</th><th>Tipo</th><th>DNI</th><th>Persona (Equipo)</th><th>Cuadrilla</th>' +
+  thead.innerHTML = '<th>Nombre</th><th>Tipo</th><th>DNI</th><th>Persona (Equipo)</th><th>Cuadrilla</th><th>Grupo</th>' +
     (verTarifa ? '<th style="text-align:right">Tarifa</th>' : '') + '<th>Estado</th><th></th>';
   var tbody = document.getElementById('pp-padron-tbody');
   if (!PP.padron.length) {
-    tbody.innerHTML = '<tr><td colspan="'+(verTarifa?8:7)+'" style="text-align:center;color:var(--mut);padding:20px">Sin registros</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="'+(verTarifa?9:8)+'" style="text-align:center;color:var(--mut);padding:20px">Sin registros</td></tr>';
     return;
   }
   tbody.innerHTML = PP.padron.map(function(p){
@@ -19056,7 +19019,7 @@ function ppRenderPadron() {
         ? '<button class="btn bo bs" onclick="ppEliminarPersonal('+p.id+')" style="padding:3px 8px;font-size:11px">🗑️</button>'
         : '<button class="btn bo bs" onclick="ppReactivarPersonal('+p.id+')" style="padding:3px 8px;font-size:11px">↩️</button>');
     return '<tr><td><strong>'+esc(p.nombre)+'</strong>'+madre+'</td><td>'+tipoTag+'</td><td>'+(p.dni||'—')+'</td>' +
-      '<td>'+persona+'</td><td>'+(p.cuadrilla_nombre||'—')+'</td>'+tarifaCell +
+      '<td>'+persona+'</td><td>'+(p.cuadrilla_nombre||'—')+'</td><td>'+esc(p.grupo_nombre||'—')+'</td>'+tarifaCell +
       '<td>'+estado+'</td><td style="white-space:nowrap">'+acciones+'</td></tr>';
   }).join('');
 }
@@ -19083,6 +19046,10 @@ function ppLlenarSelectsPersonal(p) {
   document.getElementById('pp-per-cuadrilla').innerHTML = '<option value="">— Ninguna —</option>' +
     (PP.cuadrillas||[]).map(function(c){
       return '<option value="'+c.id+'"'+(c.id==p.cuadrilla_default_id?' selected':'')+'>'+esc(c.nombre)+'</option>';
+    }).join('');
+  document.getElementById('pp-per-grupo').innerHTML = '<option value="">— Sin asignar —</option>' +
+    (PP.grupos||[]).filter(function(g){ return g.activo; }).map(function(g){
+      return '<option value="'+g.id+'"'+(g.id==p.grupo_id?' selected':'')+'>'+esc(g.nombre)+'</option>';
     }).join('');
 }
 
@@ -19135,6 +19102,7 @@ function ppGuardarPersonal() {
     dni: document.getElementById('pp-per-dni').value.trim() || null,
     cuit: document.getElementById('pp-per-cuit').value.trim() || null,
     cuadrilla_default_id: document.getElementById('pp-per-cuadrilla').value ? parseInt(document.getElementById('pp-per-cuadrilla').value) : null,
+    grupo_id: document.getElementById('pp-per-grupo').value ? parseInt(document.getElementById('pp-per-grupo').value) : null,
     notas: document.getElementById('pp-per-notas').value.trim() || null
   };
   if (tipo === 'fijo') {
@@ -19624,81 +19592,6 @@ function ppAnularMov(id) {
 
 function ppFmtARS(n) { return '$ ' + (n||0).toLocaleString('es-AR', {maximumFractionDigits:0}); }
 
-// ── Trabajadores ──
-function ppRenderTrabajadores() {
-  var tb = document.getElementById('pp-trab-tbody');
-  if (!PP.trabajadores.length) {
-    tb.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--mut);padding:20px">Sin trabajadores. Agregá el primero con "+ Trabajador".</td></tr>';
-    return;
-  }
-  tb.innerHTML = PP.trabajadores.map(function(t){
-    var tipo = t.tipo_relacion === 'fijo' ? '<span class="tag" style="background:#dbeafe;color:#1e40af">Fijo</span>' : '<span class="tag" style="background:#fef3c7;color:#92400e">Contratista</span>';
-    var est = t.activo ? '<span style="color:var(--ok)">● Activo</span>' : '<span style="color:var(--mut)">○ Inactivo</span>';
-    var grupo = t.grupo_nombre || '<span style="color:var(--mut);font-size:11px">Sin asignar</span>';
-    var rowStyle = t.activo ? '' : ' style="opacity:0.5"';
-    var accionBtn = t.activo
-      ? '<button class="btn bd bs" onclick="ppDesactivarTrab('+t.id+',\''+t.nombre.replace(/'/g,"\\'")+'\')" title="Desactivar" style="padding:3px 8px;font-size:11px">🗑</button>'
-      : '<button class="btn bo bs" onclick="ppReactivarTrab('+t.id+')" title="Reactivar" style="padding:3px 8px;font-size:11px;color:var(--ok);border-color:var(--ok)">↺</button>';
-    return '<tr'+rowStyle+'><td><strong>'+t.nombre+'</strong></td><td>'+(t.dni||'—')+'</td><td>'+grupo+'</td><td>'+tipo+'</td><td>'+est+'</td>'
-      +'<td style="white-space:nowrap"><button class="btn bo bs" onclick="ppEditTrab('+t.id+')" style="padding:3px 8px;font-size:11px;margin-right:4px">✏</button>'+accionBtn+'</td></tr>';
-  }).join('');
-}
-
-function ppDesactivarTrab(id, nombre){
-  if(!confirm('¿Desactivar "'+nombre+'"?\n\nQueda en el histórico pero no aparece en nuevas asignaciones.'))return;
-  paF('/api/pa/personal/trabajadores/'+id, {method:'DELETE'}).then(function(r){
-    if(r.ok){ toast('✓ Desactivado'); ppCargarBase().then(ppRenderTrabajadores); }
-    else toast(r.error||'Error','er');
-  });
-}
-function ppReactivarTrab(id){
-  paF('/api/pa/personal/trabajadores/'+id+'/reactivar', {method:'POST'}).then(function(r){
-    if(r.ok){ toast('✓ Reactivado'); ppCargarBase().then(ppRenderTrabajadores); }
-    else toast(r.error||'Error','er');
-  });
-}
-
-function ppAbrirTrabajador() {
-  PP.editTrabajadorId = null;
-  document.getElementById('mb-pp-trab-tit').textContent = 'Nuevo trabajador';
-  document.getElementById('pp-trab-nombre').value = '';
-  document.getElementById('pp-trab-dni').value = '';
-  document.getElementById('pp-trab-grupo').innerHTML = '<option value="">— Sin asignar —</option>' + (PP.grupos||[]).map(function(g){ return '<option value="'+g.id+'">'+g.nombre+'</option>'; }).join('');
-  document.getElementById('pp-trab-relacion').value = 'fijo';
-  document.getElementById('pp-trab-notas').value = '';
-  document.getElementById('mb-pp-trab').classList.add('on');
-}
-
-function ppEditTrab(id) {
-  var t = PP.trabajadores.find(function(x){return x.id===id;});
-  if (!t) return;
-  PP.editTrabajadorId = id;
-  document.getElementById('mb-pp-trab-tit').textContent = 'Editar: ' + t.nombre;
-  document.getElementById('pp-trab-nombre').value = t.nombre;
-  document.getElementById('pp-trab-dni').value = t.dni || '';
-  document.getElementById('pp-trab-grupo').innerHTML = '<option value="">— Sin asignar —</option>' + (PP.grupos||[]).map(function(g){ return '<option value="'+g.id+'"'+(g.id==t.grupo_id?' selected':'')+'>'+g.nombre+'</option>'; }).join('');
-  document.getElementById('pp-trab-relacion').value = t.tipo_relacion;
-  document.getElementById('pp-trab-notas').value = t.notas || '';
-  document.getElementById('mb-pp-trab').classList.add('on');
-}
-
-function ppGuardarTrabajador() {
-  var body = {
-    nombre: document.getElementById('pp-trab-nombre').value.trim(),
-    dni: document.getElementById('pp-trab-dni').value.trim() || null,
-    grupo_id: document.getElementById('pp-trab-grupo').value ? parseInt(document.getElementById('pp-trab-grupo').value) : null,
-    tipo_relacion: document.getElementById('pp-trab-relacion').value,
-    notas: document.getElementById('pp-trab-notas').value.trim() || null
-  };
-  if (!body.nombre) return toast('Nombre requerido', 'er');
-  var url = PP.editTrabajadorId ? '/api/pa/personal/trabajadores/'+PP.editTrabajadorId : '/api/pa/personal/trabajadores';
-  var method = PP.editTrabajadorId ? 'PATCH' : 'POST';
-  paF(url, { method:method, headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) }).then(function(r){
-    if (r.ok) { toast('Guardado'); document.getElementById('mb-pp-trab').classList.remove('on'); ppCargarBase().then(ppRenderTrabajadores); }
-    else toast(r.error||'Error', 'er');
-  });
-}
-
 // ── Cuadrillas ──
 function ppRenderCuadrillas() {
   var tb = document.getElementById('pp-cuad-tbody');
@@ -19777,14 +19670,9 @@ function ppRenderGrupos() {
     tb.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--mut);padding:20px">Sin grupos. Agregá el primero con "+ Nuevo grupo".</td></tr>';
     return;
   }
-  // Contar trabajadores por grupo
-  var conteo = {};
-  (PP.trabajadores||[]).forEach(function(t){
-    if (t.grupo_id) conteo[t.grupo_id] = (conteo[t.grupo_id]||0) + 1;
-  });
   tb.innerHTML = PP.grupos.map(function(g){
     var est = g.activo ? '<span style="color:var(--ok)">● Activo</span>' : '<span style="color:var(--mut)">○ Inactivo</span>';
-    var cnt = conteo[g.id] || 0;
+    var cnt = g.cantidad || 0;
     var rowStyle = g.activo ? '' : ' style="opacity:0.5"';
     var accionBtn;
     if (g.id === 1) {
@@ -19802,13 +19690,13 @@ function ppRenderGrupos() {
 function ppDesactivarGrupo(id, nombre){
   if(!confirm('¿Desactivar grupo "'+nombre+'"?\n\nLos trabajadores asociados seguirán existiendo pero quedarán sin grupo visible. Podés reactivarlo después.'))return;
   paF('/api/pa/personal/grupos/'+id, {method:'DELETE'}).then(function(r){
-    if(r.ok){ toast('✓ Desactivado'); ppCargarBase().then(function(){ ppRenderGrupos(); ppRenderTrabajadores(); }); }
+    if(r.ok){ toast('✓ Desactivado'); ppCargarBase().then(function(){ ppRenderGrupos(); }); }
     else toast(r.error||'Error','er');
   });
 }
 function ppReactivarGrupo(id){
   paF('/api/pa/personal/grupos/'+id+'/reactivar', {method:'POST'}).then(function(r){
-    if(r.ok){ toast('✓ Reactivado'); ppCargarBase().then(function(){ ppRenderGrupos(); ppRenderTrabajadores(); }); }
+    if(r.ok){ toast('✓ Reactivado'); ppCargarBase().then(function(){ ppRenderGrupos(); }); }
     else toast(r.error||'Error','er');
   });
 }
@@ -19844,7 +19732,7 @@ function ppGuardarGrupo() {
       toast('Guardado');
       document.getElementById('mb-pp-grupo').classList.remove('on');
       // Refrescar grupos en memoria + trabajadores (por si cambió nombre)
-      ppCargarBase().then(function(){ ppRenderGrupos(); ppRenderTrabajadores(); });
+      ppCargarBase().then(function(){ ppRenderGrupos(); });
     } else toast(r.error||'Error', 'er');
   });
 }
@@ -19977,7 +19865,7 @@ function pnInit(){
   // Cargar trabajadores y categorías en paralelo
   Promise.all([
     paF('/api/pa/panol/categorias').then(function(r){ PN.categorias = r.data || []; }),
-    paF('/api/pa/personal/trabajadores').then(function(r){ PN.trabajadores = r.data || []; })
+    paF('/api/pa/personal/padron').then(function(r){ PN.trabajadores = r.data || []; })
   ]).then(function(){
     pnPoblarSelectoresCategorias();
     pnLoadInventario();
@@ -20251,7 +20139,7 @@ function pnConfirmarPrestamo(){
   if (!trab) return toast('Seleccioná un trabajador','er');
   var body = {
     tipo: 'prestamo',
-    trabajador_id: parseInt(trab,10),
+    personal_id: parseInt(trab,10),
     condicion: document.getElementById('pn-pr-cond').value,
     notas: document.getElementById('pn-pr-notas').value.trim() || null
   };
