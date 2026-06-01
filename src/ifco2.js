@@ -207,7 +207,7 @@
 
       h.innerHTML =
         '<div class="vh"><div><h2>' + ic('truck') + ' Despachos a súper</h2><div class="vh-sub">Remitos de cajones IFCO enviados a las cadenas · ciclo despachado → sellado → enviado → presentado</div></div>'
-        + '<div class="actions"><button class="btn btn-ghost btn-sm" onclick="__ifco2Reuse(\'ifcoAbrirCargarSellado\')">' + ic('scan-line') + ' Cargar por foto</button>'
+        + '<div class="actions"><button class="btn btn-ghost btn-sm" onclick="__ifco2Reuse(\'ifcoAbrirCargarSellado\')">' + ic('scan-line') + ' Cargar sellado</button>'
         + '<button class="btn btn-ghost btn-sm" onclick="__ifco2Reuse(\'ifcoAbrirPresentar\')">' + ic('send') + ' Presentar a IFCO</button>'
         + '<button class="btn btn-pri btn-sm" onclick="__ifco2Reuse(\'ifcoAbrirNuevoRemito\')">' + ic('plus') + ' Nuevo despacho</button></div></div>'
         + '<div class="kpis" style="grid-template-columns:1.5fr 1fr 1fr">'

@@ -22955,19 +22955,30 @@ async function ifcoGuardarRemito() {
 // Modal de confirmación de salteo (dinámico). Devuelve Promise<bool>.
 function _ifcoConfirmSalteo(d, numeroStr) {
   return new Promise(function(resolve){
-    const lista = (d.salteos_que_quedarian_fmt || []).map(function(s){ return '<li style="font-family:monospace;margin:2px 0">'+_ifcoEsc(s)+'</li>'; }).join('');
-    const serie = (d.salteos_que_quedarian_fmt && d.salteos_que_quedarian_fmt.length) ? d.salteos_que_quedarian_fmt[0].split('-')[0] : '';
+    // Acotado: nunca renderizamos más de 50 <li> (un hueco grande congelaba el navegador ~4,4s).
+    const _fmt = d.salteos_que_quedarian_fmt || [];
+    const _total = (d.salteos_total != null) ? d.salteos_total : _fmt.length;
+    const _saltoGrande = !!d.salto_grande || _total > 1000;
+    const _muestra = _fmt.slice(0, 50);
+    const _nf = function(n){ return Number(n).toLocaleString('es-AR'); };
+    const lista = _muestra.map(function(s){ return '<li style="font-family:monospace;margin:2px 0">'+_ifcoEsc(s)+'</li>'; }).join('')
+      + (_total > _muestra.length ? '<li style="list-style:none;margin-top:6px;font-weight:600">…y '+_nf(_total - _muestra.length)+' más</li>' : '');
+    const serie = _fmt.length ? _fmt[0].split('-')[0] : '';
     const ultimoFmt = serie ? (serie + '-' + String(d.ultimo_usado_actual).padStart(8,'0')) : String(d.ultimo_usado_actual);
+    const cuerpo = _saltoGrande
+      ? ('Estás por crear el remito <b style="font-family:monospace">'+_ifcoEsc(numeroStr||'')+'</b>.<br><br>' +
+         'El último número usado es <b style="font-family:monospace">'+_ifcoEsc(ultimoFmt)+'</b>, así que este número deja un <b>salto de '+_nf(_total)+' números</b>.<br><br>' +
+         '<b style="color:#92400e">Parece un error de tipeo del N° de remito.</b> Revisalo antes de confirmar.')
+      : ('Estás por crear el remito <b style="font-family:monospace">'+_ifcoEsc(numeroStr||'')+'</b>.<br><br>' +
+         'El último número usado en este talonario es el <b style="font-family:monospace">'+_ifcoEsc(ultimoFmt)+'</b>.<br><br>' +
+         'Si confirmás, van a quedar <b>SALTEADOS</b> ('+_nf(_total)+'):' +
+         '<ul style="margin:8px 0 0;padding-left:20px;color:#92400e">'+lista+'</ul>');
     const ov = document.createElement('div');
     ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:99999;padding:16px';
     ov.innerHTML =
       '<div style="background:#fff;border-radius:12px;max-width:460px;width:100%;padding:22px;box-shadow:0 10px 40px rgba(0,0,0,.3)">' +
         '<div style="font-size:17px;font-weight:700;color:#92400e;margin-bottom:14px">⚠️ Confirmar salteo</div>' +
-        '<div style="font-size:14px;line-height:1.55;color:#374151">' +
-          'Estás por crear el remito <b style="font-family:monospace">'+_ifcoEsc(numeroStr||'')+'</b>.<br><br>' +
-          'El último número usado en este talonario es el <b style="font-family:monospace">'+_ifcoEsc(ultimoFmt)+'</b>.<br><br>' +
-          'Si confirmás, van a quedar <b>SALTEADOS</b>:' +
-          '<ul style="margin:8px 0 0;padding-left:20px;color:#92400e">'+lista+'</ul>' +
+        '<div style="font-size:14px;line-height:1.55;color:#374151">' + cuerpo +
         '</div>' +
         '<div style="display:flex;gap:10px;justify-content:flex-end;margin-top:20px">' +
           '<button id="_salt-cancel" style="padding:9px 16px;border:1px solid #d1d5db;background:#fff;border-radius:8px;cursor:pointer;font-size:13px">Cancelar</button>' +
