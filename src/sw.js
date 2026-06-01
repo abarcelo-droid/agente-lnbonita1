@@ -2,7 +2,7 @@
 // Estrategia: network-first para API, cache-first para assets estáticos.
 // Actualizamos CACHE_NAME cada vez que queramos forzar refresh en todos los celulares.
 
-const CACHE_NAME = 'lnb-app-v4';
+const CACHE_NAME = 'lnb-app-v5';
 const OFFLINE_URL = '/scout';
 
 // Recursos que cacheamos al instalar el SW (sin los que requieren auth)
