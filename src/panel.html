@@ -1994,7 +1994,9 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       .sg-mod .sgr-sub{display:none} .sg-mod .sgr-sub.on{display:block}
     </style>
     <div style="display:inline-flex;gap:2px;background:var(--bg);border:1px solid var(--bor);border-radius:8px;padding:3px;margin-bottom:16px;flex-wrap:wrap">
-      <div class="sgr-subtab on" data-sub="compras-prov" onclick="sgRepSub('compras-prov')">🚜 Compras × proveedor</div>
+      <div class="sgr-subtab on" data-sub="rent-partida" onclick="sgRepSub('rent-partida')">💵 Rentabilidad × partida</div>
+      <div class="sgr-subtab" data-sub="rent-venta"      onclick="sgRepSub('rent-venta')">🧾 Rentabilidad × venta</div>
+      <div class="sgr-subtab" data-sub="compras-prov"    onclick="sgRepSub('compras-prov')">🚜 Compras × proveedor</div>
       <div class="sgr-subtab" data-sub="ventas-cli"      onclick="sgRepSub('ventas-cli')">🏪 Ventas × cliente</div>
       <div class="sgr-subtab" data-sub="margen-prod"     onclick="sgRepSub('margen-prod')">📊 Margen × producto</div>
       <div class="sgr-subtab" data-sub="merma"           onclick="sgRepSub('merma')">♻️ Merma × destino</div>
@@ -2007,7 +2009,24 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       <button class="btn bo bs" onclick="sgRepExport()">⬇️ Excel</button>
     </div>
 
-    <div class="sgr-sub on" id="sgr-sub-compras-prov">
+    <div class="sgr-sub on" id="sgr-sub-rent-partida">
+      <div style="font-size:12px;color:var(--mut);margin-bottom:8px;padding:8px 10px;background:var(--bg);border:1px solid var(--bor);border-radius:6px;line-height:1.5">
+        💡 <b>F0 — rentabilidad punta a punta con los datos de HOY.</b> Por cada partida (lote): costo acumulado conocido (compra + gastos directos + prorrateo global) contra lo vendido. El margen es <b>dinámico</b> (costo actual ÷ kg × kg vendidos) y <b>BRUTO</b>.<br>
+        <b>Todavía NO captura</b> (es F1+): gastos de <b>salida</b> (carga, flete de entrega), gastos compartidos entre varias partidas (M:N), prorrateo manual, ni cierre de partida. <b>⚠</b> = partida sin costo cargado (ej. pizarra sin cerrar) → su margen está inflado.
+      </div>
+      <div class="ab-table-wrap"><table class="pa-tbl">
+        <thead><tr><th>Partida</th><th>Producto</th><th>Proveedor</th><th style="text-align:right">Kg</th><th style="text-align:right">Vend.</th><th style="text-align:right">Costo total</th><th style="text-align:right">Venta</th><th style="text-align:right">Margen</th><th style="text-align:right">Margen %</th></tr></thead>
+        <tbody id="sg-rep-tb-rent-partida"><tr><td colspan="9" class="emp">Aplicá un filtro o tocá Aplicar.</td></tr></tbody>
+      </table></div>
+    </div>
+    <div class="sgr-sub" id="sgr-sub-rent-venta">
+      <div style="font-size:12px;color:var(--mut);margin-bottom:8px">💡 Rentabilidad por venta (despacho). Margen dinámico y bruto (sin gastos de salida todavía). Por cliente está en la pestaña "Ventas × cliente".</div>
+      <div class="ab-table-wrap"><table class="pa-tbl">
+        <thead><tr><th>Despacho</th><th>Fecha</th><th>Cliente</th><th style="text-align:right">Kg</th><th style="text-align:right">Venta</th><th style="text-align:right">Costo</th><th style="text-align:right">Margen</th><th style="text-align:right">Margen %</th></tr></thead>
+        <tbody id="sg-rep-tb-rent-venta"><tr><td colspan="8" class="emp">Aplicá un filtro o tocá Aplicar.</td></tr></tbody>
+      </table></div>
+    </div>
+    <div class="sgr-sub" id="sgr-sub-compras-prov">
       <div class="ab-table-wrap"><table class="pa-tbl">
         <thead><tr><th>Proveedor</th><th style="text-align:right">OCs</th><th style="text-align:right">Lotes</th><th style="text-align:right">Kg</th><th style="text-align:right">Monto</th></tr></thead>
         <tbody id="sg-rep-tb-compras-prov"><tr><td colspan="5" class="emp">Aplicá un filtro o tocá Aplicar.</td></tr></tbody>
@@ -3348,8 +3367,23 @@ function sgDashLoad(){
 function sgCard(lbl,val,sub){ return '<div class="sgd-card"><div class="lbl">'+esc(lbl)+'</div><div class="val">'+val+'</div>'+(sub?('<div class="sub">'+esc(sub)+'</div>'):'')+'</div>'; }
 
 // ── REPORTES ────────────────────────────────────────────────────────────────────
-var SG_REP={ sub:'compras-prov', last:{} };
+var SG_REP={ sub:'rent-partida', last:{} };
 var SG_REP_CFG={
+  'rent-partida':{ path:'rentabilidad-partida', tb:'sg-rep-tb-rent-partida', cols:9,
+    row:function(r){
+      var mc=(r.margen||0)>=0?'#16a34a':'#dc2626';
+      if(r._total) return '<tr style="font-weight:700;background:var(--bg)"><td colspan="3">TOTAL</td><td style="text-align:right">'+nr(r.kg_reales)+'</td><td style="text-align:right">'+nr(r.kg_vendidos)+'</td><td style="text-align:right">'+sgMoney(r.costo_total)+'</td><td style="text-align:right">'+sgMoney(r.venta)+'</td><td style="text-align:right;color:'+mc+'">'+sgMoney(r.margen)+'</td><td style="text-align:right">'+sgPctFmt(r.margen_pct)+'</td></tr>';
+      var warn=r.costo_incompleto?' <span title="Sin costo cargado: margen inflado">⚠</span>':'';
+      return '<tr><td><code>'+esc(r.codigo_lote)+'</code>'+warn+'</td><td>'+esc(r.producto||'')+'</td><td>'+esc(r.proveedor||'')+'</td><td style="text-align:right">'+nr(r.kg_reales)+'</td><td style="text-align:right">'+nr(r.kg_vendidos)+'</td><td style="text-align:right">'+sgMoney(r.costo_total)+'</td><td style="text-align:right">'+sgMoney(r.venta)+'</td><td style="text-align:right;color:'+mc+'">'+sgMoney(r.margen)+'</td><td style="text-align:right">'+sgPctFmt(r.margen_pct)+'</td></tr>';
+    },
+    xls:function(r){ return { Partida:r._total?'TOTAL':r.codigo_lote, Producto:r._total?'':(r.producto||''), Proveedor:r._total?'':(r.proveedor||''), Kg:r.kg_reales, 'Kg vendidos':r.kg_vendidos, 'Costo total':r.costo_total, Venta:r.venta, Margen:r.margen, 'Margen %':Math.round((r.margen_pct||0)*10)/10 }; } },
+  'rent-venta':{ path:'rentabilidad-venta', tb:'sg-rep-tb-rent-venta', cols:8,
+    row:function(r){
+      var mc=(r.margen||0)>=0?'#16a34a':'#dc2626';
+      if(r._total) return '<tr style="font-weight:700;background:var(--bg)"><td colspan="3">TOTAL</td><td style="text-align:right">'+nr(r.kg)+'</td><td style="text-align:right">'+sgMoney(r.venta)+'</td><td style="text-align:right">'+sgMoney(r.costo)+'</td><td style="text-align:right;color:'+mc+'">'+sgMoney(r.margen)+'</td><td style="text-align:right">'+sgPctFmt(r.margen_pct)+'</td></tr>';
+      return '<tr><td><code>'+esc(r.numero||'')+'</code></td><td>'+(r.fecha_despacho||'—')+'</td><td>'+esc(r.cliente||'')+'</td><td style="text-align:right">'+nr(r.kg)+'</td><td style="text-align:right">'+sgMoney(r.venta)+'</td><td style="text-align:right">'+sgMoney(r.costo)+'</td><td style="text-align:right;color:'+mc+'">'+sgMoney(r.margen)+'</td><td style="text-align:right">'+sgPctFmt(r.margen_pct)+'</td></tr>';
+    },
+    xls:function(r){ return { Despacho:r._total?'TOTAL':r.numero, Fecha:r._total?'':r.fecha_despacho, Cliente:r._total?'':(r.cliente||''), Kg:r.kg, Venta:r.venta, Costo:r.costo, Margen:r.margen, 'Margen %':Math.round((r.margen_pct||0)*10)/10 }; } },
   'compras-prov':{ path:'compras-proveedor', tb:'sg-rep-tb-compras-prov', cols:5,
     row:function(r){ return '<tr><td>'+esc(r.proveedor||'')+'</td><td style="text-align:right">'+nr(r.ocs)+'</td><td style="text-align:right">'+nr(r.lotes)+'</td><td style="text-align:right">'+nr(r.kg)+'</td><td style="text-align:right">'+sgMoney(r.monto)+'</td></tr>'; },
     xls:function(r){ return { Proveedor:r.proveedor, OCs:r.ocs, Lotes:r.lotes, Kg:r.kg, Monto:r.monto }; } },
