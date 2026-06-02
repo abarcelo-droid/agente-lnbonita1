@@ -1353,4 +1353,89 @@ router.get('/reportes/merma-destino', requireAuth, (req, res) => {
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
+// ════════════════════════════════════════════════════════════════════════════
+// F0 — RENTABILIDAD PUNTA A PUNTA (read-only, sin tocar el modelo)
+// Lee SOLO datos que ya existen hoy: costo_final del lote (= costo_base + gastos
+// directos + prorrateo global) vs lo vendido, con margen DINÁMICO (decisión #1:
+// nunca se lee el margen congelado, siempre se recalcula desde costo_final/kg_reales).
+// Pendiente de F1+ (NO incluido acá): gastos de salida, M:N gasto↔partida,
+// prorrateo manual, cierre de partida. El margen es BRUTO mientras falten esos.
+// ════════════════════════════════════════════════════════════════════════════
+
+// ── REPORTE F0: Rentabilidad × PARTIDA (cada sg_lotes = una partida) ─────────────
+router.get('/reportes/rentabilidad-partida', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const where = ['l.activo=1'], params = [];
+    rangoFecha('l.fecha_ingreso', req.query, where, params);
+    const rows = db.prepare(`
+      WITH desp AS (
+        SELECT di.lote_id, SUM(di.kg_despachados) kg, SUM(di.subtotal) venta
+        FROM sg_despacho_items di JOIN sg_despachos d ON d.id=di.despacho_id AND d.activo=1
+        GROUP BY di.lote_id)
+      SELECT l.id, l.codigo_lote, pr.nombre AS producto, pr.familia, l.estado,
+        COALESCE(pv.razon_social, CASE WHEN l.recepcion_id IS NULL THEN '(finca propia)' ELSE '(sin proveedor)' END) AS proveedor,
+        l.fecha_ingreso, l.kg_reales,
+        COALESCE(de.kg,0) AS kg_vendidos,
+        COALESCE(l.costo_final,0) AS costo_total,
+        COALESCE(de.venta,0) AS venta,
+        (COALESCE(de.kg,0) * (COALESCE(l.costo_final,0)/NULLIF(l.kg_reales,0))) AS costo_vendido,
+        (COALESCE(de.venta,0) - COALESCE(de.kg,0)*(COALESCE(l.costo_final,0)/NULLIF(l.kg_reales,0))) AS margen,
+        CASE WHEN COALESCE(l.costo_final,0)<=0 THEN 1 ELSE 0 END AS costo_incompleto
+      FROM sg_lotes l
+      JOIN sg_productos pr ON pr.id=l.producto_id
+      LEFT JOIN sg_recepciones r ON r.id=l.recepcion_id
+      LEFT JOIN sg_oc o ON o.id=r.oc_id
+      LEFT JOIN sg_proveedores pv ON pv.id=o.proveedor_id
+      LEFT JOIN desp de ON de.lote_id=l.id
+      WHERE ${where.join(' AND ')}
+      ORDER BY l.fecha_ingreso DESC, l.codigo_lote`).all(...params);
+    for (const r of rows) r.margen_pct = r.venta > 0 ? (r.margen / r.venta) * 100 : 0;
+    // Fila TOTAL (agregado) — se marca con _total para que el front la pinte distinta.
+    if (rows.length) {
+      const t = rows.reduce((a, r) => ({
+        kg_reales: a.kg_reales + (r.kg_reales || 0), kg_vendidos: a.kg_vendidos + (r.kg_vendidos || 0),
+        costo_total: a.costo_total + (r.costo_total || 0), venta: a.venta + (r.venta || 0),
+        costo_vendido: a.costo_vendido + (r.costo_vendido || 0), margen: a.margen + (r.margen || 0)
+      }), { kg_reales: 0, kg_vendidos: 0, costo_total: 0, venta: 0, costo_vendido: 0, margen: 0 });
+      t._total = 1; t.codigo_lote = 'TOTAL'; t.margen_pct = t.venta > 0 ? (t.margen / t.venta) * 100 : 0;
+      rows.push(t);
+    }
+    res.json({ ok: true, data: rows });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// ── REPORTE F0: Rentabilidad × VENTA (cada sg_despachos = una venta) ─────────────
+router.get('/reportes/rentabilidad-venta', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const where = ['d.activo=1'], params = [];
+    rangoFecha('d.fecha_despacho', req.query, where, params);
+    const rows = db.prepare(`
+      SELECT d.id, d.numero, d.fecha_despacho,
+        COALESCE(c.razon_social,'(sin cliente)') AS cliente,
+        COALESCE(SUM(di.kg_despachados),0) AS kg,
+        COALESCE(SUM(di.subtotal),0) AS venta,
+        COALESCE(SUM(di.kg_despachados*${COSTO_KG}),0) AS costo,
+        COALESCE(SUM(${MARGEN_LINEA}),0) AS margen
+      FROM sg_despacho_items di
+      JOIN sg_despachos d ON d.id=di.despacho_id
+      JOIN sg_lotes l ON l.id=di.lote_id
+      LEFT JOIN sg_clientes c ON c.id=d.cliente_id
+      WHERE ${where.join(' AND ')}
+      GROUP BY d.id, d.numero, d.fecha_despacho, c.razon_social
+      ORDER BY d.fecha_despacho DESC, d.numero`).all(...params);
+    for (const r of rows) r.margen_pct = r.venta > 0 ? (r.margen / r.venta) * 100 : 0;
+    if (rows.length) {
+      const t = rows.reduce((a, r) => ({
+        kg: a.kg + (r.kg || 0), venta: a.venta + (r.venta || 0),
+        costo: a.costo + (r.costo || 0), margen: a.margen + (r.margen || 0)
+      }), { kg: 0, venta: 0, costo: 0, margen: 0 });
+      t._total = 1; t.numero = 'TOTAL'; t.cliente = ''; t.margen_pct = t.venta > 0 ? (t.margen / t.venta) * 100 : 0;
+      rows.push(t);
+    }
+    res.json({ ok: true, data: rows });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
 export default router;
