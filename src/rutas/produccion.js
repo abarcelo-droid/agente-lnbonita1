@@ -2989,6 +2989,32 @@ router.get('/personal/personas-equipo', requireAuth, (req, res) => {
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
+// ── TEMPORAL — diagnóstico para invertir nombres "Nombre Apellido" → "Apellido Nombre".
+// Read-only, admin. Cuenta por cantidad de palabras y lista los que NO son de 2 (que NO se
+// deben invertir). BORRAR este endpoint junto con la migración one-shot.
+router.get('/personal/_diag-nombres', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    if (!req.user || req.user.rol !== 'admin') return res.status(403).json({ ok: false, error: 'solo admin' });
+    const rows = db.prepare("SELECT id, nombre FROM pa_personal WHERE eliminado_en IS NULL").all();
+    const unaPalabra = [], tresOmas = [], vacios = [];
+    let exactamente2 = 0;
+    for (const r of rows) {
+      const partes = String(r.nombre || '').trim().split(/\s+/).filter(Boolean);
+      if (partes.length === 0) vacios.push({ id: r.id, nombre: r.nombre });
+      else if (partes.length === 1) unaPalabra.push({ id: r.id, nombre: r.nombre });
+      else if (partes.length === 2) exactamente2++;
+      else tresOmas.push({ id: r.id, nombre: r.nombre });
+    }
+    res.json({
+      ok: true, total: rows.length, exactamente_2: exactamente2,
+      una_palabra_count: unaPalabra.length, una_palabra: unaPalabra,
+      tres_o_mas_count: tresOmas.length, tres_o_mas: tresOmas,
+      vacios_count: vacios.length, vacios
+    });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
 // ── Padrón: listado ────────────────────────────────────────────────────────
 router.get('/personal/padron', requireAuth, (req, res) => {
   const db = getDb();
