@@ -3255,15 +3255,23 @@ router.get('/personal/asistencias/defaults', requireAuth, (req, res) => {
       SELECT l.id, l.nombre, l.finca,
              (SELECT cultivo FROM pa_cultivos_lote WHERE lote_id=l.id ORDER BY id DESC LIMIT 1) as cultivo
       FROM pa_lotes l WHERE l.activo=1 ORDER BY l.finca, l.nombre`).all();
-    const tareas     = db.prepare("SELECT id, nombre FROM pa_tareas_tipos WHERE activo=1 ORDER BY nombre").all();
+    const tareas     = db.prepare("SELECT id, nombre, post_cosecha FROM pa_tareas_tipos WHERE activo=1 ORDER BY nombre").all();
     const cuadrillas = db.prepare(`
       SELECT c.id, c.nombre, c.responsable_id, r.nombre as responsable_nombre
       FROM pa_cuadrillas c LEFT JOIN pa_personal r ON r.id = c.responsable_id
       WHERE c.activo=1 ORDER BY c.nombre`).all();
     const grupos     = db.prepare("SELECT id, nombre FROM pa_grupos WHERE activo=1 ORDER BY nombre").all();
-    const personal   = db.prepare("SELECT id, nombre, tipo, contratista_madre_id, grupo_id FROM pa_personal WHERE activo=1 AND eliminado_en IS NULL ORDER BY tipo, nombre").all();
+    const personal   = db.prepare("SELECT id, nombre, tipo, contratista_madre_id, grupo_id FROM pa_personal WHERE activo=1 AND eliminado_en IS NULL ORDER BY nombre COLLATE NOCASE").all();
+    // Campaña inmediatamente anterior (anual + estacional) para el flujo Post-Cosecha.
+    const antA = db.prepare("SELECT id, nombre FROM pa_campañas WHERE tipo='anual' AND eliminada_en IS NULL AND id < ? ORDER BY id DESC LIMIT 1").get(act.anualId);
+    const antE = db.prepare("SELECT id, nombre FROM pa_campañas WHERE tipo='estacional' AND eliminada_en IS NULL AND id < ? ORDER BY id DESC LIMIT 1").get(act.estacionalId);
     res.json({ ok: true, data: {
-      campanas: { anual: anuales, estacional: estac, vigenteAnualId: act.anualId, vigenteEstacionalId: act.estacionalId },
+      campanas: {
+        anual: anuales, estacional: estac,
+        vigenteAnualId: act.anualId, vigenteEstacionalId: act.estacionalId,
+        anteriorAnualId: antA ? antA.id : null, anteriorAnualNombre: antA ? antA.nombre : null,
+        anteriorEstacionalId: antE ? antE.id : null, anteriorEstacionalNombre: antE ? antE.nombre : null
+      },
       cuentas_mo: cuentasMo, lotes, tareas, cuadrillas, grupos, personal
     }});
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
@@ -3320,9 +3328,9 @@ router.get('/personal/asistencias', requireAuth, (req, res) => {
 //      cultivo = NULL. No se imputa a pa_costos_lote (decisión 2A, en /valorizar).
 //    Por compatibilidad, una cuenta sin mo_clase seteada se trata como 'productivo'.
 //  · Cuadrilla (agregado, sin persona) vs Individual (persona) son EXCLUYENTES.
-function _validarAsistencia(db, body) {
+function _validarAsistencia(db, body, opts) {
   const { fecha, personal_id, contratista_id, cuadrilla_id, cantidad, horas, rubro_cuenta_id,
-          campaña_anual_id, campaña_estacional_id, lote_id } = body;
+          campaña_anual_id, campaña_estacional_id, lote_id, tarea_tipo_id } = body;
   if (!fecha) return { error: 'fecha requerida' };
   if (!rubro_cuenta_id) return { error: 'rubro_cuenta_id requerido' };
   if (!campaña_anual_id || !campaña_estacional_id) return { error: 'Campañas anual y estacional requeridas' };
@@ -3354,6 +3362,23 @@ function _validarAsistencia(db, body) {
   if (!ca || ca.tipo !== 'anual') return { error: 'campaña_anual_id no es una campaña anual válida' };
   const ce = db.prepare("SELECT tipo FROM pa_campañas WHERE id=?").get(campaña_estacional_id);
   if (!ce || ce.tipo !== 'estacional') return { error: 'campaña_estacional_id no es una campaña estacional válida' };
+  // Guarda de campaña (solo en altas nuevas): la imputación va a la campaña VIGENTE
+  // (anual + estacional). Excepción: si la tarea tiene post_cosecha=1, se permite la
+  // campaña INMEDIATAMENTE ANTERIOR (anual + estacional juntas). No se PATCHea para no
+  // bloquear la edición de registros históricos con campañas viejas.
+  if (opts && opts.enforceCampaña) {
+    const act = campañasActivas(db);
+    var campOk = (String(campaña_anual_id) === String(act.anualId) && String(campaña_estacional_id) === String(act.estacionalId));
+    if (!campOk && tarea_tipo_id) {
+      const tt = db.prepare("SELECT post_cosecha FROM pa_tareas_tipos WHERE id=?").get(tarea_tipo_id);
+      if (tt && tt.post_cosecha) {
+        const antA = db.prepare("SELECT id FROM pa_campañas WHERE tipo='anual' AND eliminada_en IS NULL AND id < ? ORDER BY id DESC LIMIT 1").get(act.anualId);
+        const antE = db.prepare("SELECT id FROM pa_campañas WHERE tipo='estacional' AND eliminada_en IS NULL AND id < ? ORDER BY id DESC LIMIT 1").get(act.estacionalId);
+        campOk = !!(antA && antE && String(campaña_anual_id) === String(antA.id) && String(campaña_estacional_id) === String(antE.id));
+      }
+    }
+    if (!campOk) return { error: 'La campaña debe ser la vigente (o la inmediatamente anterior, solo en tareas Post-Cosecha)' };
+  }
   // Rubro: debe existir, ser cuenta MO, y trae su clase (productivo/general)
   const cta = db.prepare("SELECT nombre, mo_clase FROM pa_cuentas WHERE id=? AND activo=1").get(rubro_cuenta_id);
   if (!cta) return { error: 'rubro (cuenta) inexistente o inactivo' };
@@ -3388,7 +3413,7 @@ router.post('/personal/asistencias', requireAuth, (req, res) => {
   if (!perms.asistencia && !perms.valorizacion && !perms.admin)
     return res.status(403).json({ ok: false, error: 'Sin permiso para cargar asistencias' });
   const b = req.body;
-  const chk = _validarAsistencia(db, b);
+  const chk = _validarAsistencia(db, b, { enforceCampaña: true });
   if (chk.error) return res.status(400).json({ ok: false, error: chk.error });
   const v = chk.val;
   try {
@@ -3427,8 +3452,8 @@ router.post('/personal/asistencias/grupo', requireAuth, (req, res) => {
     const chk = _validarAsistencia(db, {
       fecha: b.fecha, personal_id: pid, contratista_id: null, cantidad: 1, horas: b.horas,
       rubro_cuenta_id: b.rubro_cuenta_id, campaña_anual_id: b.campaña_anual_id,
-      campaña_estacional_id: b.campaña_estacional_id, lote_id: b.lote_id
-    });
+      campaña_estacional_id: b.campaña_estacional_id, lote_id: b.lote_id, tarea_tipo_id: b.tarea_tipo_id
+    }, { enforceCampaña: true });
     if (chk.error) return res.status(400).json({ ok: false, error: persona.nombre + ': ' + chk.error });
     filas.push({ pid, v: chk.val });
   }
@@ -4346,16 +4371,17 @@ router.get('/personal/tareas-tipos', requireAuth, (req, res) => {
 
 router.post('/personal/tareas-tipos', requireAuth, (req, res) => {
   const db = getDb();
-  const { nombre, tipo_labor, rubro_contable_id, es_destajo, unidad_destajo } = req.body;
+  const { nombre, tipo_labor, rubro_contable_id, es_destajo, unidad_destajo, post_cosecha } = req.body;
   if (!nombre || !tipo_labor) return res.status(400).json({ ok: false, error: 'nombre y tipo_labor requeridos' });
   try {
     const r = db.prepare(`INSERT INTO pa_tareas_tipos
-        (nombre, tipo_labor, rubro_contable_id, es_destajo, unidad_destajo)
-        VALUES (?,?,?,?,?)`)
+        (nombre, tipo_labor, rubro_contable_id, es_destajo, unidad_destajo, post_cosecha)
+        VALUES (?,?,?,?,?,?)`)
       .run(nombre, tipo_labor,
            rubro_contable_id || null,
            es_destajo ? 1 : 0,
-           unidad_destajo || null);
+           unidad_destajo || null,
+           post_cosecha ? 1 : 0);
     res.json({ ok: true, id: r.lastInsertRowid });
   } catch(e) {
     if (e.message.includes('UNIQUE')) return res.status(400).json({ ok: false, error: 'Ya existe una tarea con ese nombre' });
@@ -4365,16 +4391,17 @@ router.post('/personal/tareas-tipos', requireAuth, (req, res) => {
 
 router.patch('/personal/tareas-tipos/:id', requireAuth, (req, res) => {
   const db = getDb();
-  const { nombre, tipo_labor, rubro_contable_id, es_destajo, unidad_destajo, activo } = req.body;
+  const { nombre, tipo_labor, rubro_contable_id, es_destajo, unidad_destajo, activo, post_cosecha } = req.body;
   try {
     const c = db.prepare("SELECT * FROM pa_tareas_tipos WHERE id=?").get(req.params.id);
     if (!c) return res.status(404).json({ ok: false, error: 'Tarea no encontrada' });
-    db.prepare(`UPDATE pa_tareas_tipos SET nombre=?, tipo_labor=?, rubro_contable_id=?, es_destajo=?, unidad_destajo=?, activo=? WHERE id=?`)
+    db.prepare(`UPDATE pa_tareas_tipos SET nombre=?, tipo_labor=?, rubro_contable_id=?, es_destajo=?, unidad_destajo=?, activo=?, post_cosecha=? WHERE id=?`)
       .run(nombre || c.nombre, tipo_labor || c.tipo_labor,
            rubro_contable_id !== undefined ? rubro_contable_id : c.rubro_contable_id,
            es_destajo !== undefined ? (es_destajo ? 1 : 0) : c.es_destajo,
            unidad_destajo !== undefined ? unidad_destajo : c.unidad_destajo,
            activo !== undefined ? (activo ? 1 : 0) : c.activo,
+           post_cosecha !== undefined ? (post_cosecha ? 1 : 0) : c.post_cosecha,
            req.params.id);
     res.json({ ok: true });
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
