@@ -4200,10 +4200,11 @@ function sgRepExport(){
       <div class="fl pp-as-grupal-only" id="pp-as-grupo-fl"><label>Grupo</label>
         <select id="pp-as-grupo" onchange="ppAsistGrupoChange()"><option value="">— Sin grupo —</option></select>
       </div>
-      <div class="fl pp-as-grupal-only" id="pp-as-grupo-wrap" style="display:none;flex:1 1 100%">
+      <div class="fl pp-as-grupal-only" id="pp-as-grupo-wrap" style="display:none;grid-column:1/-1">
         <label style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">Personas del grupo — tildá las que estuvieron (una fila por cada una)
-          <button type="button" class="btn bo bs" style="padding:2px 8px;font-size:11px" onclick="ppAsistGrupoSelAll()">Seleccionar todos</button></label>
-        <div id="pp-as-grupo-personas" style="display:flex;flex-wrap:wrap;gap:6px 18px;padding:6px 2px;max-height:160px;overflow:auto;border:1px solid var(--bord,#e2e2e2);border-radius:6px"></div>
+          <button type="button" class="btn bo bs" style="padding:2px 8px;font-size:11px" onclick="ppAsistGrupoSelAll()">Seleccionar todos</button>
+          <span id="pp-as-grupo-count" style="font-size:12px;color:var(--mut);font-weight:600;margin-left:auto"></span></label>
+        <div id="pp-as-grupo-personas" style="max-height:340px;overflow-y:auto;overflow-x:hidden;border:1px solid var(--bord,#e2e2e2);border-radius:6px"></div>
       </div>
       <div class="fl pp-as-blo" style="display:none;flex:1 1 100%"><label>Responsable que cobra</label>
         <div id="pp-as-blo-responsable" style="font-size:13px;padding:8px 10px;background:var(--bg2,#f5f5f5);border-radius:6px;border:1px solid var(--bord,#e2e2e2)">Elegí una cuadrilla arriba</div>
@@ -19629,6 +19630,7 @@ function ppAsistGrupoSelAll() {
   if (!chks.length) return;
   var allOn = chks.every(function(c){ return c.checked; });
   chks.forEach(function(c){ c.checked = !allOn; });
+  ppAsistGrupoCount();
 }
 function ppAsistToggleModo() {
   var esCuadrilla = document.querySelector('input[name="pp-as-modo"]:checked').value === 'bloque';
@@ -19679,16 +19681,25 @@ function ppAsistGrupoChange() {
   var d = PP.asistDefaults || {};
   var miembros = (d.personal||[]).filter(function(p){ return String(p.grupo_id) === String(gid); });
   if (!miembros.length) {
-    cont.innerHTML = '<div style="font-size:12px;color:var(--mut)">Este grupo no tiene personas activas asignadas.</div>';
+    cont.innerHTML = '<div style="font-size:12px;color:var(--mut);padding:10px">Este grupo no tiene personas activas asignadas.</div>';
   } else {
-    cont.innerHTML = miembros.map(function(p){
-      return '<label style="font-size:13px;display:inline-flex;gap:6px;align-items:center;white-space:nowrap;min-width:220px;cursor:pointer;padding:2px 0">'
-        + '<input type="checkbox" value="'+p.id+'" style="flex:none"> <span>'+esc(p.nombre)+'</span></label>';
+    cont.innerHTML = miembros.map(function(p,i){
+      var sep = i < miembros.length-1 ? 'border-bottom:1px solid var(--bord,#eee);' : '';
+      return '<label style="display:flex;align-items:center;gap:8px;padding:8px 12px;'+sep+'cursor:pointer;font-size:13px;white-space:nowrap">'
+        + '<input type="checkbox" value="'+p.id+'" style="flex:none" onchange="ppAsistGrupoCount()"> <span>'+esc(p.nombre)+'</span></label>';
     }).join('');
   }
   wrap.style.display = '';
+  ppAsistGrupoCount();
   // Al usar grupo, el select de persona única deja de aplicar
   var ps = document.getElementById('pp-as-personal'); if (ps) ps.value = '';
+}
+
+// Contador "X seleccionados" de la lista grupal (se llama al tildar/destildar y en Sel. todos).
+function ppAsistGrupoCount() {
+  var el = document.getElementById('pp-as-grupo-count'); if (!el) return;
+  var n = document.querySelectorAll('#pp-as-grupo-personas input[type="checkbox"]:checked').length;
+  el.textContent = n + ' seleccionados';
 }
 
 function ppAsistLoteChange() {
