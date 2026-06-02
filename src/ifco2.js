@@ -448,7 +448,7 @@
       var totViaje = enViaje.reduce(function (a, r) { return a + (r.cantidad || 0); }, 0);
       h.innerHTML =
         '<div class="vh"><div><h2>' + ic('log-in') + ' Ingresos de proveedor</h2><div class="vh-sub">Cajones que vuelven a San Gerónimo con producto, más altas R22 (cajones nuevos comprados a IFCO)</div></div>'
-        + '<div class="actions"><button class="btn btn-ghost btn-sm" onclick="__ifco2Reuse(\'ifcoAbrirAltaR22\')">' + ic('plus') + ' Alta R22</button><button class="btn btn-pri btn-sm" onclick="__ifco2Reuse(\'ifcoAbrirNuevaRecepcion\')">' + ic('plus') + ' Nueva recepción</button></div></div>'
+        + '<div class="actions"><button class="btn btn-ghost btn-sm" onclick="__ifco2Reuse(\'ifcoAbrirNuevaRecepcionR22\')">' + ic('plus') + ' Alta R22</button><button class="btn btn-pri btn-sm" onclick="__ifco2Reuse(\'ifcoAbrirNuevaRecepcionMerc\')">' + ic('plus') + ' Nueva recepción</button></div></div>'
         + (enViaje.length ? '<div class="banner info">' + ic('inbox') + '<div><b>' + enViaje.length + ' recepciones en viaje</b> esperando confirmación — <b class="tnum">' + nf(totViaje) + ' cajones</b>. Confirmá la recepción física para impactar el stock y descontar el saldo del proveedor.</div></div>' : '')
         + '<div class="filters"><div class="seg"><button class="on">Todas<span class="n">' + R.length + '</span></button><button>En viaje<span class="n">' + enViaje.length + '</span></button><button>Recibidas<span class="n">' + R.filter(function (r) { return r.estado === 'recibido'; }).length + '</span></button><button>R22<span class="n">' + R.filter(function (r) { return r.es_r22; }).length + '</span></button></div>'
         + '<span class="chip-count"><b>' + R.length + '</b> recepciones</span></div>'
@@ -471,7 +471,7 @@
           + '<td class="r num-strong">' + nf(env) + '</td><td class="r">' + nf(rec) + '</td><td class="r ' + (pend > 0 ? '' : 'muted') + '">' + (pend > 0 ? nf(pend) : '0') + '</td>'
           + '<td><div style="display:flex;align-items:center;gap:8px"><div class="mbar ' + (occ === 100 ? 'ok' : (occ > 0 ? 'warn' : '')) + '" style="width:80px"><i style="width:' + occ + '%"></i></div><span class="sub2 tnum">' + occ + '%</span></div></td>'
           + '<td>' + badge(e.estado) + '</td><td class="c">' + dchip + '</td>'
-          + '<td><div class="rowact">' + (e.estado !== 'recibido' ? '<button class="btn btn-pri btn-sm" onclick="__ifco2Reuse(\'ifcoRecepcionarEnvio\')">' + ic('package-check') + ' Recepcionar</button>' : '') + '<button class="btn-icon btn-ghost" onclick="__ifco2MenuEnvio(event,' + e.id + ',\'' + esc(e.n_remito_interno || '') + '\')">' + ic('more-horizontal') + '</button></div></td></tr>';
+          + '<td><div class="rowact">' + (e.estado !== 'recibido' ? '<button class="btn btn-pri btn-sm" onclick="__ifco2Legacy(\'ifcoAbrirRecepcion\',' + e.id + ')">' + ic('package-check') + ' Recepcionar</button>' : '') + '<button class="btn-icon btn-ghost" onclick="__ifco2MenuEnvio(event,' + e.id + ',\'' + esc(e.n_remito_interno || '') + '\')">' + ic('more-horizontal') + '</button></div></td></tr>';
       }).join('') : '<tr><td colspan="10">' + empty('Sin envíos') + '</td></tr>';
       var totEnv = E.reduce(function (a, e) { return a + (e.cantidad_enviada || 0); }, 0);
       var totRec = E.reduce(function (a, e) { return a + (e.cantidad_recibida || 0); }, 0);
@@ -540,7 +540,7 @@
           + '<td class="r num-strong">' + nf(c.teorico) + '</td><td class="r num-strong">' + (c.real != null ? nf(c.real) : '—') + '</td><td class="r">' + difTxt + '</td>'
           + '<td>' + (uc.fecha ? fdate(uc.fecha) : '<span class="muted">—</span>') + '</td>'
           + '<td>' + (c.falta_cargar ? '<span class="bg-badge st-enviaje"><span class="d"></span>' + (c.real == null ? 'Pendiente' : 'Atrasado') + '</span>' : '<span class="bg-badge st-presentado"><span class="d"></span>Al día</span>') + '</td>'
-          + '<td><div class="rowact"><button class="btn btn-pri btn-sm" onclick="__ifco2Reuse(\'ifcoAbrirCargarConteo\')">' + ic('clipboard-pen') + ' Cargar conteo</button></div></td></tr>';
+          + '<td><div class="rowact"><button class="btn btn-pri btn-sm" onclick="__ifco2Legacy(\'ifcoAbrirCargarStock\',\'' + c.deposito_tipo + '\',' + (c.proveedor_id || 'null') + ',\'' + esc(c.nombre).replace(/'/g, "\\'") + '\',' + (c.teorico || 0) + ')">' + ic('clipboard-pen') + ' Cargar conteo</button></div></td></tr>';
       }).join('') : '<tr><td colspan="8">' + empty('Sin depósitos') + '</td></tr>';
       var teo = C.reduce(function (a, c) { return a + (c.teorico || 0); }, 0);
       var real = C.reduce(function (a, c) { return a + (c.real || 0); }, 0);
@@ -575,8 +575,9 @@
   // =========================================================================
   // Menú ⋯ de fila + acciones (Editar / Eliminar soft / Hard delete admin)
   // =========================================================================
-  function legacyCall(fn, arg) {
-    if (typeof window[fn] === 'function') { try { window[fn](arg); } catch (e) { toast('Error: ' + (e.message || e), 'er'); } }
+  function legacyCall(fn) {
+    var args = Array.prototype.slice.call(arguments, 1);
+    if (typeof window[fn] === 'function') { try { window[fn].apply(window, args); } catch (e) { toast('Error: ' + (e.message || e), 'er'); } }
     else { toast('Acción no disponible', 'warn'); }
   }
   window.__ifco2Legacy = legacyCall;
