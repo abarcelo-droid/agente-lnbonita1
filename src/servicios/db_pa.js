@@ -1279,6 +1279,16 @@ try {
   }
 } catch(e) { console.error('[PA] Error migrando responsable_id en pa_cuadrillas:', e.message); }
 
+// ── Migración: rol en pa_personal (texto libre, ej. Regador/Peón) ────────────
+// Simple ADD COLUMN (sin rebuild), idempotente con guard PRAGMA table_info.
+try {
+  const colsP = db.prepare("PRAGMA table_info(pa_personal)").all().map(c => c.name);
+  if (!colsP.includes('rol')) {
+    db.exec('ALTER TABLE pa_personal ADD COLUMN rol TEXT');
+    console.log('[PA] rol agregado en pa_personal');
+  }
+} catch(e) { console.error('[PA] Error migrando rol en pa_personal:', e.message); }
+
 // (Migraciones pa_trabajadores→pa_personal ELIMINADAS: ya cumplidas; la unificación
 //  final — grupo_id, columnas de Pañol y DROP de pa_trabajadores — está más abajo,
 //  después de crear las tablas de Pañol.)

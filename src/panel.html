@@ -4139,6 +4139,7 @@ function sgRepExport(){
       </div>
       <div class="fl"><label>Nombre *</label><input id="pp-per-nombre"></div>
       <div class="fl"><label>DNI</label><input id="pp-per-dni"></div>
+      <div class="fl"><label>Rol <span style="color:var(--mut);font-weight:400;font-size:11px">(ej. Regador, Peón)</span></label><input id="pp-per-rol" placeholder="Texto libre"></div>
       <div class="fl pp-per-solo-fijo"><label>Persona (Equipo)</label>
         <select id="pp-per-persona"><option value="">— Sin vincular —</option></select>
       </div>
@@ -4174,20 +4175,34 @@ function sgRepExport(){
       <div class="fl"><label>Cuadrilla (de dónde viene)</label>
         <select id="pp-as-cuadrilla" onchange="ppAsistCuadrillaChange()"><option value="">— Ninguna —</option></select>
       </div>
+      <style>
+        #mb-pp-asist .pp-as-segbtn{padding:7px 16px;cursor:pointer;font-size:13px;font-weight:600;border:1px solid var(--bor);background:var(--bg);border-radius:8px;color:var(--txt)}
+        #mb-pp-asist .pp-as-segbtn.on{background:var(--burg);color:#fff;border-color:var(--burg)}
+      </style>
       <div class="fl" style="flex:1 1 100%"><label>Tipo de registro *</label>
-        <div style="display:flex;gap:16px;align-items:center;padding-top:4px">
-          <label style="font-size:13px;display:flex;gap:5px;align-items:center"><input type="radio" name="pp-as-modo" value="individual" checked onchange="ppAsistToggleModo()"> Persona (individual)</label>
-          <label style="font-size:13px;display:flex;gap:5px;align-items:center"><input type="radio" name="pp-as-modo" value="bloque" onchange="ppAsistToggleModo()"> Cuadrilla (total — cobra el responsable)</label>
+        <div style="display:flex;gap:8px;padding-top:4px">
+          <button type="button" class="pp-as-segbtn pp-as-modo-btn on" data-modo="persona" onclick="ppAsistSetModo('persona')">👤 Persona</button>
+          <button type="button" class="pp-as-segbtn pp-as-modo-btn" data-modo="cuadrilla" onclick="ppAsistSetModo('cuadrilla')">👥 Cuadrilla</button>
+        </div>
+        <!-- Fuente de verdad para la lógica existente (oculto): persona=individual, cuadrilla=bloque -->
+        <input type="radio" name="pp-as-modo" value="individual" checked style="display:none">
+        <input type="radio" name="pp-as-modo" value="bloque" style="display:none">
+      </div>
+      <div class="fl pp-as-persona-only" style="flex:1 1 100%"><label>Modalidad</label>
+        <div style="display:flex;gap:8px;padding-top:4px">
+          <button type="button" class="pp-as-segbtn pp-as-sub-btn on" data-sub="individual" onclick="ppAsistSetPersonaSub('individual')">Individual</button>
+          <button type="button" class="pp-as-segbtn pp-as-sub-btn" data-sub="grupal" onclick="ppAsistSetPersonaSub('grupal')">Grupal</button>
         </div>
       </div>
-      <div class="fl pp-as-ind"><label>Persona *</label>
+      <div class="fl pp-as-ind-only"><label>Persona *</label>
         <select id="pp-as-personal"><option value="">— Elegir —</option></select>
       </div>
-      <div class="fl pp-as-ind" id="pp-as-grupo-fl"><label>…o cargar por grupo</label>
+      <div class="fl pp-as-grupal-only" id="pp-as-grupo-fl"><label>Grupo</label>
         <select id="pp-as-grupo" onchange="ppAsistGrupoChange()"><option value="">— Sin grupo —</option></select>
       </div>
-      <div class="fl pp-as-ind" id="pp-as-grupo-wrap" style="display:none;flex:1 1 100%">
-        <label>Personas del grupo — tildá las que estuvieron (una fila por cada una)</label>
+      <div class="fl pp-as-grupal-only" id="pp-as-grupo-wrap" style="display:none;flex:1 1 100%">
+        <label style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">Personas del grupo — tildá las que estuvieron (una fila por cada una)
+          <button type="button" class="btn bo bs" style="padding:2px 8px;font-size:11px" onclick="ppAsistGrupoSelAll()">Seleccionar todos</button></label>
         <div id="pp-as-grupo-personas" style="display:flex;flex-wrap:wrap;gap:6px 18px;padding:6px 2px;max-height:160px;overflow:auto;border:1px solid var(--bord,#e2e2e2);border-radius:6px"></div>
       </div>
       <div class="fl pp-as-blo" style="display:none;flex:1 1 100%"><label>Responsable que cobra</label>
@@ -8585,7 +8600,7 @@ function loadSec(s) {
     'sg-catalogo':   function(){ sgLoadCaches(function(){ sgCatSub('productos'); }); },
     'sg-reportes':   function(){ sgRepInit(); },
     'personal-padron':     function(){ ppOpenModulo('padron'); },
-    'personal-asistencia': function(){ ppOpenModulo('asistencia'); },
+    'personal-asistencia': function(){ var f=document.getElementById('pp-asist-fecha'); if(f) f.value=''; ppOpenModulo('asistencia'); },
     'personal-valorizar':  function(){ ppOpenModulo('valorizar'); },
     'personal-cc':         function(){ ppOpenModulo('cc'); },
     'personal-catalogo':   function(){ ppOpenModulo('grupos'); },
@@ -19324,32 +19339,55 @@ function ppLoadPadron() {
 // (sin migración); de cara al usuario se muestra Fijo / Temporal (Bloque B, item 4).
 function ppTipoLabel(t) { return t === 'contratista' ? 'Temporal' : 'Fijo'; }
 
+// Columnas del padrón (ordenables todas). 'activo' es numérico; el resto texto.
+var PADRON_COLS = [
+  { key:'nombre',            label:'Nombre' },
+  { key:'tipo',              label:'Tipo' },
+  { key:'cuadrilla_nombre',  label:'Cuadrilla' },
+  { key:'grupo_nombre',      label:'Grupo' },
+  { key:'rol',               label:'Rol' },
+  { key:'ultima_asistencia', label:'Última asistencia' },
+  { key:'activo',            label:'Estado' }
+];
+function ppSortPadron(col) {
+  var s = PP.padronSort || (PP.padronSort = { col:'nombre', dir:1 });
+  if (s.col === col) s.dir = -s.dir; else { s.col = col; s.dir = 1; }
+  ppRenderPadron();
+}
 function ppRenderPadron() {
-  var verTarifa = ppPuedeVerTarifa();
+  var s = PP.padronSort || (PP.padronSort = { col:'nombre', dir:1 });
   var thead = document.getElementById('pp-padron-thead');
-  thead.innerHTML = '<th>Nombre</th><th>Tipo</th><th>DNI</th><th>Persona (Equipo)</th><th>Cuadrilla</th><th>Grupo</th>' +
-    (verTarifa ? '<th style="text-align:right">Tarifa</th>' : '') + '<th>Estado</th><th></th>';
+  thead.innerHTML = PADRON_COLS.map(function(c){
+    var ind = s.col === c.key ? (s.dir > 0 ? ' ▲' : ' ▼') : '';
+    return '<th style="cursor:pointer;user-select:none;white-space:nowrap" onclick="ppSortPadron(\''+c.key+'\')">'+c.label+ind+'</th>';
+  }).join('') + '<th></th>';
   var tbody = document.getElementById('pp-padron-tbody');
   if (!PP.padron.length) {
-    tbody.innerHTML = '<tr><td colspan="'+(verTarifa?9:8)+'" style="text-align:center;color:var(--mut);padding:20px">Sin registros</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--mut);padding:20px">Sin registros</td></tr>';
     return;
   }
-  tbody.innerHTML = PP.padron.map(function(p){
-    var persona = p.persona_nombre ? esc((p.persona_apellido||'')+' '+p.persona_nombre).trim() : '—';
+  // Orden client-side: nulos/vacíos siempre al final; numérico para 'activo', texto (es, numeric) para el resto.
+  var rows = PP.padron.slice().sort(function(a,b){
+    var k = s.col, av = a[k], bv = b[k];
+    if (k === 'activo') return ((a.activo?1:0) - (b.activo?1:0)) * s.dir;
+    var an = (av === null || av === undefined || av === ''), bn = (bv === null || bv === undefined || bv === '');
+    if (an && bn) return 0; if (an) return 1; if (bn) return -1;
+    return String(av).localeCompare(String(bv), 'es', { numeric:true, sensitivity:'base' }) * s.dir;
+  });
+  tbody.innerHTML = rows.map(function(p){
     var tipoTag = p.tipo==='contratista'
       ? '<span class="tag" style="background:#7c3aed22;color:#7c3aed;font-size:10px">Temporal</span>'
       : '<span class="tag" style="font-size:10px">Fijo</span>';
     var madre = p.contratista_madre_nombre ? '<div style="font-size:10px;color:var(--mut)">↳ '+esc(p.contratista_madre_nombre)+'</div>' : '';
-    var tarifaCell = verTarifa
-      ? '<td style="text-align:right">'+(p.tarifa_default?ppFmtARS(p.tarifa_default)+'<div style="font-size:10px;color:var(--mut)">/'+esc(p.unidad_tarifa||'')+'</div>':'—')+'</td>'
-      : '';
+    var ultAsist = p.ultima_asistencia ? esc(p.ultima_asistencia.split('-').reverse().join('/')) : '<span style="color:var(--mut)">—</span>';
     var estado = p.activo ? '<span style="color:var(--ok)">●</span> Activo' : '<span style="color:var(--mut)">○</span> Inactivo';
     var acciones = '<button class="btn bo bs" onclick="ppEditarPersonal('+p.id+')" style="padding:3px 8px;font-size:11px">✏️</button> ' +
       (p.activo
         ? '<button class="btn bo bs" onclick="ppEliminarPersonal('+p.id+')" style="padding:3px 8px;font-size:11px">🗑️</button>'
         : '<button class="btn bo bs" onclick="ppReactivarPersonal('+p.id+')" style="padding:3px 8px;font-size:11px">↩️</button>');
-    return '<tr><td><strong>'+esc(p.nombre)+'</strong>'+madre+'</td><td>'+tipoTag+'</td><td>'+(p.dni||'—')+'</td>' +
-      '<td>'+persona+'</td><td>'+(p.cuadrilla_nombre||'—')+'</td><td>'+esc(p.grupo_nombre||'—')+'</td>'+tarifaCell +
+    return '<tr><td><strong>'+esc(p.nombre)+'</strong>'+madre+'</td><td>'+tipoTag+'</td>' +
+      '<td>'+esc(p.cuadrilla_nombre||'—')+'</td><td>'+esc(p.grupo_nombre||'—')+'</td>' +
+      '<td>'+(p.rol?esc(p.rol):'<span style="color:var(--mut)">—</span>')+'</td><td>'+ultAsist+'</td>' +
       '<td>'+estado+'</td><td style="white-space:nowrap">'+acciones+'</td></tr>';
   }).join('');
 }
@@ -19381,6 +19419,7 @@ function ppAbrirPersonal() {
   document.getElementById('pp-per-tipo').value = 'fijo';
   document.getElementById('pp-per-nombre').value = '';
   document.getElementById('pp-per-dni').value = '';
+  document.getElementById('pp-per-rol').value = '';
   document.getElementById('pp-per-unidad').value = 'jornal';
   document.getElementById('pp-per-notas').value = '';
   document.getElementById('pp-per-fijos-asoc').style.display = 'none';
@@ -19398,6 +19437,7 @@ function ppEditarPersonal(id) {
     document.getElementById('pp-per-tipo').value = p.tipo;
     document.getElementById('pp-per-nombre').value = p.nombre || '';
     document.getElementById('pp-per-dni').value = p.dni || '';
+    document.getElementById('pp-per-rol').value = p.rol || '';
     document.getElementById('pp-per-unidad').value = p.unidad_tarifa || 'jornal';
     document.getElementById('pp-per-notas').value = p.notas || '';
     ppLlenarSelectsPersonal(p);
@@ -19418,6 +19458,7 @@ function ppGuardarPersonal() {
     tipo: tipo,
     nombre: document.getElementById('pp-per-nombre').value.trim(),
     dni: document.getElementById('pp-per-dni').value.trim() || null,
+    rol: document.getElementById('pp-per-rol').value.trim() || null,
     grupo_id: document.getElementById('pp-per-grupo').value ? parseInt(document.getElementById('pp-per-grupo').value) : null,
     notas: document.getElementById('pp-per-notas').value.trim() || null
   };
@@ -19491,10 +19532,13 @@ function ppAsistDefaults() {
 }
 
 function ppLoadAsistencia() {
-  var f = document.getElementById('pp-asist-fecha');
-  if (!f.value) f.value = new Date().toISOString().slice(0,10);
+  // Sin fecha (default al entrar) → últimas 50 cargadas. Con fecha → ese día.
+  var fecha = document.getElementById('pp-asist-fecha').value;
+  PP.asistSinFecha = !fecha;
   ppAsistDefaults().then(function(){
-    paF('/api/pa/personal/asistencias?fecha='+encodeURIComponent(f.value)).then(function(r){
+    var url = fecha ? '/api/pa/personal/asistencias?fecha='+encodeURIComponent(fecha)
+                    : '/api/pa/personal/asistencias';
+    paF(url).then(function(r){
       PP.asistencias = (r && r.data) || [];
       ppRenderAsistencia();
     });
@@ -19507,8 +19551,11 @@ function ppRenderAsistencia() {
     '<th style="text-align:center">Jorn.</th><th>Rubro</th><th>Campañas</th><th>Finca / Lote</th><th>Tarea</th><th>Cultivo</th><th>Estado</th><th></th>';
   var tbody = document.getElementById('pp-asist-tbody');
   if (!PP.asistencias.length) {
-    tbody.innerHTML = '<tr><td colspan="12" style="text-align:center;color:var(--mut);padding:20px">Sin asistencias para esta fecha. Cargá la primera con "+ Nueva fila".</td></tr>';
-    document.getElementById('pp-asist-resumen').textContent = '';
+    var vacioMsg = PP.asistSinFecha
+      ? 'No hay asistencias cargadas. Cargá la primera con "+ Nueva fila".'
+      : 'Sin asistencias para esta fecha. Cargá la primera con "+ Nueva fila".';
+    tbody.innerHTML = '<tr><td colspan="12" style="text-align:center;color:var(--mut);padding:20px">'+vacioMsg+'</td></tr>';
+    document.getElementById('pp-asist-resumen').textContent = PP.asistSinFecha ? 'Mostrando últimas 50 — elegí una fecha para filtrar' : '';
     return;
   }
   var totJorn = 0;
@@ -19543,18 +19590,45 @@ function ppRenderAsistencia() {
       '<td>'+badge+'</td><td style="white-space:nowrap">'+acciones+'</td></tr>';
   }).join('');
   document.getElementById('pp-asist-resumen').textContent =
+    (PP.asistSinFecha ? 'Últimas 50 — elegí una fecha para filtrar · ' : '') +
     PP.asistencias.length + ' fila(s) · ' + (Math.round(totJorn*100)/100) + ' jornales';
 }
 
+// Botón Persona/Cuadrilla. Mantiene los radios ocultos pp-as-modo como fuente de verdad
+// (persona=individual, cuadrilla=bloque) para ppGuardar/ppEditar.
+function ppAsistSetModo(m) {
+  document.querySelector('input[name="pp-as-modo"][value="'+(m==='cuadrilla'?'bloque':'individual')+'"]').checked = true;
+  ppAsistToggleModo();
+}
+// Sub-toggle Individual/Grupal dentro de "Persona".
+function ppAsistSetPersonaSub(s) {
+  PP.asistPersonaSub = (s === 'grupal') ? 'grupal' : 'individual';
+  ppAsistToggleModo();
+}
+// "Seleccionar todos" de la carga grupal (toggle: si están todos tildados, destilda).
+function ppAsistGrupoSelAll() {
+  var chks = Array.prototype.slice.call(document.querySelectorAll('#pp-as-grupo-personas input[type="checkbox"]'));
+  if (!chks.length) return;
+  var allOn = chks.every(function(c){ return c.checked; });
+  chks.forEach(function(c){ c.checked = !allOn; });
+}
 function ppAsistToggleModo() {
-  var modo = document.querySelector('input[name="pp-as-modo"]:checked').value;
-  var esInd = modo === 'individual';
-  document.querySelectorAll('.pp-as-ind').forEach(function(el){ el.style.display = esInd ? '' : 'none'; });
-  document.querySelectorAll('.pp-as-blo').forEach(function(el){ el.style.display = esInd ? 'none' : ''; });
-  // El wrap de checkboxes solo se muestra si hay un grupo elegido (lo maneja ppAsistGrupoChange)
-  if (!esInd) { var gw = document.getElementById('pp-as-grupo-wrap'); if (gw) gw.style.display = 'none'; }
-  // Modo Cuadrilla: refrescar quién es el responsable que va a cobrar
-  if (!esInd) ppAsistCuadrillaChange();
+  var esCuadrilla = document.querySelector('input[name="pp-as-modo"]:checked').value === 'bloque';
+  var sub = PP.asistPersonaSub || (PP.asistPersonaSub = 'individual');
+  // Resaltado de los botones segmentados
+  document.querySelectorAll('.pp-as-modo-btn').forEach(function(b){ b.classList.toggle('on', b.dataset.modo === (esCuadrilla ? 'cuadrilla' : 'persona')); });
+  document.querySelectorAll('.pp-as-sub-btn').forEach(function(b){ b.classList.toggle('on', b.dataset.sub === sub); });
+  // Visibilidad
+  var show = function(sel, cond){ document.querySelectorAll(sel).forEach(function(el){ el.style.display = cond ? '' : 'none'; }); };
+  show('.pp-as-persona-only', !esCuadrilla);                          // sub-toggle Individual/Grupal
+  show('.pp-as-ind-only',     !esCuadrilla && sub === 'individual');  // select de persona única
+  show('.pp-as-grupal-only',  !esCuadrilla && sub === 'grupal');      // selector de grupo + checkboxes
+  show('.pp-as-blo',          esCuadrilla);                           // responsable + cantidad
+  if (esCuadrilla) ppAsistCuadrillaChange();
+  // El wrap de checkboxes depende de si hay grupo elegido (lo ajusta ppAsistGrupoChange);
+  // fuera de grupal se oculta sí o sí.
+  if (!esCuadrilla && sub === 'grupal') ppAsistGrupoChange();
+  else { var gw = document.getElementById('pp-as-grupo-wrap'); if (gw) gw.style.display = 'none'; }
 }
 
 // Modo Cuadrilla: el titular de pago se deriva del responsable de la cuadrilla elegida.
@@ -19690,6 +19764,7 @@ function ppAbrirAsistencia() {
     PP.editAsistId = null;
     document.getElementById('mb-pp-asist-tit').textContent = 'Nueva fila de asistencia';
     document.querySelector('input[name="pp-as-modo"][value="individual"]').checked = true;
+    PP.asistPersonaSub = 'individual';
     ppFillAsistSelects({});
     document.getElementById('pp-as-fecha').value = document.getElementById('pp-asist-fecha').value || new Date().toISOString().slice(0,10);
     document.getElementById('pp-as-cantidad').value = '1';
@@ -19715,6 +19790,7 @@ function ppEditarAsistencia(id) {
     document.getElementById('mb-pp-asist-tit').textContent = 'Editar fila de asistencia';
     var esInd = !!a.personal_id;
     document.querySelector('input[name="pp-as-modo"][value="'+(esInd?'individual':'bloque')+'"]').checked = true;
+    PP.asistPersonaSub = 'individual'; // editar es siempre una fila → modalidad individual
     ppFillAsistSelects(a);
     document.getElementById('pp-as-fecha').value = a.fecha;
     document.getElementById('pp-as-cantidad').value = a.cantidad;
@@ -19749,15 +19825,17 @@ function ppGuardarAsistencia() {
   if (modo === 'individual') {
     body.cantidad = 1;
     body.contratista_id = null;
-    // Carga grupal (solo alta nueva): si hay personas tildadas de un grupo, ése es el camino
-    gruposTicks = Array.prototype.slice.call(
-      document.querySelectorAll('#pp-as-grupo-personas input[type="checkbox"]:checked')
-    ).map(function(c){ return parseInt(c.value); });
-    if (gruposTicks.length && !PP.editAsistId) {
+    // Persona: el path lo decide el sub-toggle explícito Individual/Grupal (Grupal solo en alta).
+    var esGrupal = (PP.asistPersonaSub === 'grupal') && !PP.editAsistId;
+    if (esGrupal) {
+      gruposTicks = Array.prototype.slice.call(
+        document.querySelectorAll('#pp-as-grupo-personas input[type="checkbox"]:checked')
+      ).map(function(c){ return parseInt(c.value); });
+      if (!gruposTicks.length) return toast('Tildá al menos una persona del grupo', 'er');
       body.personal_id = null;
     } else {
       body.personal_id = num('pp-as-personal');
-      if (!body.personal_id) return toast('Elegí una persona (o tildá personas de un grupo)', 'er');
+      if (!body.personal_id) return toast('Elegí una persona', 'er');
     }
   } else {
     // Modo Cuadrilla: el titular de pago lo deriva el backend del responsable de la
