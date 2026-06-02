@@ -264,6 +264,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   <div class="ng" style="margin-top:8px">Abasto SG</div>
   <div class="ni" data-sec="sg-dashboard" data-admin-only="1"><span class="dot da"></span>📊 Dashboard</div>
   <div class="ni" data-sec="sg-compras" data-admin-only="1"><span class="dot dd"></span>🛒 Compras</div>
+  <div class="ni" data-sec="sg-gvariables" data-admin-only="1"><span class="dot dd"></span>🏭 Gastos Variables</div>
   <div class="ni" data-sec="sg-stock" data-admin-only="1"><span class="dot db"></span>📦 Stock</div>
   <div class="ni" data-sec="sg-ventas" data-admin-only="1"><span class="dot dc"></span>💰 Ventas</div>
   <div class="ni" data-sec="sg-catalogo" data-admin-only="1"><span class="dot da"></span>📚 Catálogo</div>
@@ -1854,7 +1855,6 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       <div class="sgc-subtab on" data-sub="oc"        onclick="sgComSub('oc')">📋 Órdenes de compra</div>
       <div class="sgc-subtab" data-sub="recepciones"  onclick="sgComSub('recepciones')">📥 Recepciones</div>
       <div class="sgc-subtab" data-sub="gdirectos"    onclick="sgComSub('gdirectos')">🧾 Gastos directos</div>
-      <div class="sgc-subtab" data-sub="gglobales"    onclick="sgComSub('gglobales')">🏭 Gastos globales</div>
     </div>
 
     <!-- Órdenes de compra -->
@@ -1900,20 +1900,22 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       </table></div>
     </div>
 
-    <!-- Gastos globales -->
-    <div class="sgc-sub" id="sgc-sub-gglobales">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;gap:10px;flex-wrap:wrap">
-        <label style="font-size:12px;color:var(--mut)">Período
-          <input type="month" id="sg-gg-filtro" onchange="sgLoadGGlobales()" style="padding:5px 8px;border-radius:6px;border:1px solid var(--bor);background:var(--bg)">
-        </label>
-        <button class="btn bb" onclick="sgGgOpen()">+ Nuevo gasto global</button>
-      </div>
-      <div style="font-size:12px;color:var(--mut);margin-bottom:8px">💡 Al guardar/editar un gasto global se recalcula el costo final de todos los lotes del período (prorrateo por kg).</div>
-      <div class="ab-table-wrap"><table class="pa-tbl">
-        <thead><tr><th>Período</th><th>Tipo</th><th>Fecha</th><th>Observaciones</th><th style="text-align:right">Monto</th><th></th></tr></thead>
-        <tbody id="sg-tb-gglobales"><tr><td colspan="6" class="emp">Cargando…</td></tr></tbody>
-      </table></div>
+  </div>
+
+  <!-- Gastos Variables (ex "Gastos globales" en Compras) — módulo propio del sidebar -->
+  <div class="sec sg-mod" id="sec-sg-gvariables">
+    <div class="ph"><div><div class="ph-t">🍅 San Gerónimo · Gastos Variables</div><div class="ph-s">Gastos del período que se prorratean por kg entre los lotes</div></div></div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;gap:10px;flex-wrap:wrap">
+      <label style="font-size:12px;color:var(--mut)">Período
+        <input type="month" id="sg-gg-filtro" onchange="sgLoadGGlobales()" style="padding:5px 8px;border-radius:6px;border:1px solid var(--bor);background:var(--bg)">
+      </label>
+      <button class="btn bb" onclick="sgGgOpen()">+ Nuevo gasto variable</button>
     </div>
+    <div style="font-size:12px;color:var(--mut);margin-bottom:8px">💡 Al guardar/editar un gasto variable se recalcula el costo final de todos los lotes del período (prorrateo por kg).</div>
+    <div class="ab-table-wrap"><table class="pa-tbl">
+      <thead><tr><th>Período</th><th>Tipo</th><th>Fecha</th><th>Observaciones</th><th style="text-align:right">Monto</th><th></th></tr></thead>
+      <tbody id="sg-tb-gglobales"><tr><td colspan="6" class="emp">Cargando…</td></tr></tbody>
+    </table></div>
   </div>
   <div class="sec sg-mod" id="sec-sg-stock">
     <div class="ph"><div><div class="ph-t">🍅 San Gerónimo · Stock</div><div class="ph-s">Lotes, vencimientos y trazabilidad</div></div></div>
@@ -2233,10 +2235,10 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   </div>
 </div>
 
-<!-- Modal Gasto global -->
+<!-- Modal Gasto variable -->
 <div class="ab-modal-overlay" id="sg-gg-modal">
   <div class="ab-modal" style="width:520px">
-    <div class="mhd"><div class="mht" id="sg-gg-tit">Nuevo gasto global</div><button class="mcl" onclick="closeMB('sg-gg-modal')">×</button></div>
+    <div class="mhd"><div class="mht" id="sg-gg-tit">Nuevo gasto variable</div><button class="mcl" onclick="closeMB('sg-gg-modal')">×</button></div>
     <div class="fg">
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
         <div class="fl"><label>Período <span style="color:var(--err)">*</span></label><input type="month" id="sg-gg-periodo"></div>
@@ -2627,7 +2629,6 @@ function sgComSub(s){
   if (s==='oc') sgLoadOC();
   else if (s==='recepciones') sgLoadRecepciones();
   else if (s==='gdirectos') sgLoadGDirectos();
-  else if (s==='gglobales') sgLoadGGlobales();
 }
 function sgOcBadge(e){
   var m={abierta:'bpe',recibida_parcial:'bcc',recibida_total:'bok',cerrada:'bok',anulada:'ber',borrador:'bpe'};
@@ -2935,14 +2936,14 @@ function sgGdDel(id){
   api('/api/sg/gastos-directos/'+id,'DELETE').then(function(r){ if(r&&r.ok){toast('Eliminado','ok');sgLoadGDirectos();} else toast((r&&r.error)||'Error','er'); });
 }
 
-// ── Gastos globales ──
+// ── Gastos Variables (endpoint/ids internos siguen siendo gastos-globales) ──
 function sgLoadGGlobales(){
   var per=eid('sg-gg-filtro')?eid('sg-gg-filtro').value:'';
   api('/api/sg/gastos-globales'+(per?('?periodo='+per):'')).then(function(r){
     var rows=(r&&r.ok)?r.data:[];
     eid('sg-tb-gglobales').innerHTML = rows.length ? rows.map(function(g){
       return '<tr><td>'+esc(g.periodo)+'</td><td>'+esc(g.tipo_gasto||'—')+'</td><td>'+(g.fecha||'—')+'</td><td>'+esc(g.observaciones||'')+'</td><td style="text-align:right">'+sgMoney(g.monto)+'</td><td style="text-align:right"><button class="btn bd bs" onclick="sgGgDel('+g.id+')">🗑️</button></td></tr>';
-    }).join('') : '<tr><td colspan="6" class="emp">Sin gastos globales.</td></tr>';
+    }).join('') : '<tr><td colspan="6" class="emp">Sin gastos variables.</td></tr>';
   });
 }
 function sgGgOpen(){
@@ -2957,12 +2958,12 @@ function sgGgGuardar(){
   if(!(monto>0)){ toast('Monto inválido','er'); return; }
   var body={ periodo:per, tipo_gasto:eid('sg-gg-tipo').value, monto:monto, fecha:eid('sg-gg-fecha').value, observaciones:eid('sg-gg-obs').value };
   api('/api/sg/gastos-globales','POST',body).then(function(r){
-    if(r&&r.ok){ toast('Gasto global cargado · lotes del período recalculados','ok'); closeMB('sg-gg-modal'); sgLoadGGlobales(); }
+    if(r&&r.ok){ toast('Gasto variable cargado · lotes del período recalculados','ok'); closeMB('sg-gg-modal'); sgLoadGGlobales(); }
     else toast((r&&r.error)||'Error','er');
   });
 }
 function sgGgDel(id){
-  if(!confirm('¿Eliminar gasto global? (recalcula lotes del período)')) return;
+  if(!confirm('¿Eliminar gasto variable? (recalcula lotes del período)')) return;
   api('/api/sg/gastos-globales/'+id,'DELETE').then(function(r){ if(r&&r.ok){toast('Eliminado','ok');sgLoadGGlobales();} else toast((r&&r.error)||'Error','er'); });
 }
 
@@ -8596,6 +8597,7 @@ function loadSec(s) {
     'pa-campanias':  function(){ paCampInit(); },
     'sg-dashboard':  function(){ sgDashInit(); },
     'sg-compras':    function(){ sgComInit(); },
+    'sg-gvariables': function(){ sgLoadGGlobales(); },
     'sg-stock':      function(){ sgStockInit(); },
     'sg-ventas':     function(){ sgVenInit(); },
     'sg-catalogo':   function(){ sgLoadCaches(function(){ sgCatSub('productos'); }); },

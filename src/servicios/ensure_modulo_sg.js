@@ -9,12 +9,15 @@ import db from "./db.js";
 
 // modulo (= data-sec en panel.html) | label | orden. Dashboard primero.
 const MODULOS_SG = [
-  ["sg-dashboard", "Dashboard", 650],
-  ["sg-compras",   "Compras",   651],
-  ["sg-stock",     "Stock",     652],
-  ["sg-ventas",    "Ventas",    653],
-  ["sg-catalogo",  "Catalogo",  654],
-  ["sg-reportes",  "Reportes",  655],
+  ["sg-dashboard",  "Dashboard",        650],
+  ["sg-compras",    "Compras",          651],
+  // Gastos Variables: ex sub-tab "Gastos globales" de Compras, ahora modulo propio.
+  // En el sidebar va al lado de Compras (HTML estatico); orden 656 = ultimo en Config Modulos.
+  ["sg-gvariables", "Gastos Variables", 656],
+  ["sg-stock",      "Stock",            652],
+  ["sg-ventas",     "Ventas",           653],
+  ["sg-catalogo",   "Catalogo",         654],
+  ["sg-reportes",   "Reportes",         655],
 ];
 
 try {
