@@ -27,7 +27,14 @@
   function uav(name) { return '<span class="uav" title="' + esc(name || '') + '">' + inis(name) + '</span>'; }
   function toast(m, t) { if (typeof window.toast === 'function') window.toast(m, t); }
   function icons() { if (window.lucide && window.lucide.createIcons) window.lucide.createIcons(); }
-  function reuse(fn, msg) { if (typeof window[fn] === 'function') { try { window[fn](); } catch (e) {} } else { toast(msg || 'Acción disponible en el flujo actual', 'warn'); } }
+  // Reusa un flujo legacy de IFCO REENVIANDO los argumentos (id/tipo/...). Antes llamaba
+  // window[fn]() sin args, lo que rompía los handlers que esperan parámetro (ej.
+  // ifcoConfirmarRecepcion(id), ifcoAbrirNuevoMovimiento(tipo)). Alineado con __ifco2Legacy.
+  function reuse(fn) {
+    var args = Array.prototype.slice.call(arguments, 1);
+    if (typeof window[fn] === 'function') { try { window[fn].apply(window, args); } catch (e) {} }
+    else { toast('Acción disponible en el flujo actual', 'warn'); }
+  }
   window.__ifco2Reuse = reuse;
 
   var ESTADO = {
@@ -323,7 +330,7 @@
 
       h.innerHTML =
         '<div class="vh"><div><h2>' + ic('package-minus') + ' Retiros y pérdidas</h2><div class="vh-sub">Retiros del pool IFCO (altas de cajones vacíos) y pérdidas registradas</div></div>'
-        + '<div class="actions"><button class="btn btn-ghost btn-sm" style="color:var(--i-err)" onclick="__ifco2Reuse(\'ifcoAbrirNuevoMovimiento\')">' + ic('minus') + ' Registrar pérdida</button><button class="btn btn-ghost btn-sm" onclick="__ifco2Reuse(\'ifcoAbrirNuevoMovimiento\')">' + ic('plus') + ' Registrar retiro</button><button class="btn btn-pri btn-sm" onclick="__ifco2Reuse(\'ifcoAbrirAutorizacion\')">' + ic('mail') + ' Autorizar retiro a IFCO</button></div></div>'
+        + '<div class="actions"><button class="btn btn-ghost btn-sm" style="color:var(--i-err)" onclick="__ifco2Reuse(\'ifcoAbrirNuevoMovimiento\',\'perdida\')">' + ic('minus') + ' Registrar pérdida</button><button class="btn btn-ghost btn-sm" onclick="__ifco2Reuse(\'ifcoAbrirNuevoMovimiento\',\'retiro\')">' + ic('plus') + ' Registrar retiro</button><button class="btn btn-pri btn-sm" onclick="__ifco2Reuse(\'ifcoAbrirAutorizacion\')">' + ic('mail') + ' Autorizar retiro a IFCO</button></div></div>'
         + '<div class="filters"><div class="seg"><button class="on">Todos<span class="n">' + M.length + '</span></button><button>Retiros<span class="n">' + M.filter(function (m) { return m.tipo === 'retiro'; }).length + '</span></button><button>Pérdidas<span class="n">' + M.filter(function (m) { return m.tipo === 'perdida'; }).length + '</span></button></div>'
         + '<span class="chip-count">Neto del mes: <b class="tnum">+' + nf(retir - perd) + '</b> cajones</span></div>'
         + '<div class="card"><div class="card-b flush"><div class="tbl-wrap"><table class="dt"><thead><tr><th>Fecha</th><th>Tipo</th><th class="r">Cantidad</th><th>Detalle / OT</th><th>Consolidación</th><th></th></tr></thead><tbody>' + rowsHtml + '</tbody></table></div></div></div>'
@@ -438,7 +445,7 @@
           : (estado === 'rechazado' ? '<div class="sub2 num-neg">' + esc(r.motivo_rechazo || 'Rechazado') + '</div>' : '<span class="muted">—</span>');
         var tipo = consol ? '<span class="tag consol">' + ic('check') + ' consolidado</span>' : (r22 ? '<span class="tag r22">stock IFCO</span>' : '<span class="muted" style="font-size:11px">producto</span>');
         var menuRec = '<button class="btn-icon btn-ghost" onclick="__ifco2MenuRecep(event,' + r.id + ',\'' + esc(r.n_remito_proveedor || '') + '\')">' + ic('more-horizontal') + '</button>';
-        var act = estado === 'en_viaje' ? '<button class="btn btn-pri btn-sm" onclick="__ifco2Reuse(\'ifcoConfirmarRecepcion\')">' + ic('check') + ' Confirmar</button><button class="btn btn-danger btn-sm">' + ic('x') + '</button>' + menuRec : menuRec;
+        var act = estado === 'en_viaje' ? '<button class="btn btn-pri btn-sm" onclick="__ifco2Reuse(\'ifcoConfirmarRecepcion\',' + r.id + ')">' + ic('check') + ' Confirmar</button><button class="btn btn-danger btn-sm">' + ic('x') + '</button>' + menuRec : menuRec;
         return '<tr ' + (estado === 'en_viaje' ? 'style="background:var(--i-navy-050)"' : '') + '>'
           + '<td class="mono">' + esc(r.n_remito_proveedor || '—') + '</td><td>' + quien + '</td><td>' + fdate(r.fecha_recepcion) + '</td>'
           + '<td class="r num-strong">' + nf(r.cantidad) + '</td><td>' + tipo + '</td><td>' + badge(estado) + '</td><td>' + conf + '</td><td class="c">' + dchip + '</td>'
@@ -690,9 +697,13 @@
   var _booted = false;
   window.IFCO2 = {
     init: function () {
-      // catálogo de proveedores (id -> nombre) para talonarios/labels
+      // catálogo de proveedores: mapa id->nombre (labels) Y el array crudo en IFCO._provs,
+      // que los modales legacy reusados (nuevo/editar despacho, envío, recepción, R22,
+      // transferir talonario) usan para poblar su <select> de proveedor. El rediseño dejó de
+      // llamar ifcoCargar() que lo seteaba → quedaba vacío. OJO: IFCO es const global (no window.IFCO).
       fetchJSON(API + '/proveedores').then(function (ps) {
         (ps || []).forEach(function (p) { st.provNombre[p.id] = p.nombre; });
+        try { if (typeof IFCO !== 'undefined' && IFCO) IFCO._provs = ps || []; } catch (e) {}
       });
       // Restaura el gate de prefill por foto (OCR). Los flujos legacy reusados (nuevo despacho,
       // cargar sellado, match-sellado) leen window-global IFCO._ocr, que seteaba ifcoCargar() —
