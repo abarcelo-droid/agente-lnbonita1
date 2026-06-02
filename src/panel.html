@@ -19682,8 +19682,8 @@ function ppAsistGrupoChange() {
     cont.innerHTML = '<div style="font-size:12px;color:var(--mut)">Este grupo no tiene personas activas asignadas.</div>';
   } else {
     cont.innerHTML = miembros.map(function(p){
-      return '<label style="font-size:13px;display:flex;gap:6px;align-items:center;min-width:160px;cursor:pointer">'
-        + '<input type="checkbox" value="'+p.id+'"> '+esc(p.nombre)+'</label>';
+      return '<label style="font-size:13px;display:inline-flex;gap:6px;align-items:center;white-space:nowrap;min-width:220px;cursor:pointer;padding:2px 0">'
+        + '<input type="checkbox" value="'+p.id+'" style="flex:none"> <span>'+esc(p.nombre)+'</span></label>';
     }).join('');
   }
   wrap.style.display = '';
