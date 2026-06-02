@@ -2997,11 +2997,12 @@ router.get('/personal/padron', requireAuth, (req, res) => {
     const { tipo, q, incluir_inactivos } = req.query;
     let sql = `
       SELECT p.id, p.tipo, p.nombre, p.dni, p.cuit, p.persona_id, p.contratista_madre_id,
-             p.cuadrilla_default_id, p.grupo_id, p.tarifa_default, p.unidad_tarifa, p.activo, p.notas,
+             p.cuadrilla_default_id, p.grupo_id, p.tarifa_default, p.unidad_tarifa, p.activo, p.notas, p.rol,
              c.nombre as cuadrilla_nombre,
              m.nombre as contratista_madre_nombre,
              g.nombre as grupo_nombre,
-             per.nombre as persona_nombre, per.apellido as persona_apellido
+             per.nombre as persona_nombre, per.apellido as persona_apellido,
+             (SELECT MAX(a.fecha) FROM pa_asistencias a WHERE a.personal_id = p.id AND a.estado != 'anulado') as ultima_asistencia
       FROM pa_personal p
       LEFT JOIN pa_cuadrillas c ON c.id = p.cuadrilla_default_id
       LEFT JOIN pa_personal m   ON m.id = p.contratista_madre_id
@@ -3053,7 +3054,7 @@ router.post('/personal/padron', requireAuth, (req, res) => {
   const perms = permisosPersonal(db, req.user);
   if (!perms.asistencia && !perms.valorizacion && !perms.admin)
     return res.status(403).json({ ok: false, error: 'Sin permiso para el módulo Personal' });
-  const { tipo, nombre, dni, cuit, persona_id, contratista_madre_id, cuadrilla_default_id, grupo_id, tarifa_default, unidad_tarifa, notas } = req.body;
+  const { tipo, nombre, dni, cuit, persona_id, contratista_madre_id, cuadrilla_default_id, grupo_id, tarifa_default, unidad_tarifa, notas, rol } = req.body;
   if (!nombre) return res.status(400).json({ ok: false, error: 'nombre requerido' });
   if (tipo !== 'fijo' && tipo !== 'contratista') return res.status(400).json({ ok: false, error: "tipo debe ser 'fijo' o 'contratista'" });
   if (tipo === 'contratista' && (persona_id || contratista_madre_id))
@@ -3062,8 +3063,8 @@ router.post('/personal/padron', requireAuth, (req, res) => {
     // Solo valorización/admin fijan tarifa; asistencia la deja en 0
     const puedeTarifa = perms.valorizacion || perms.admin;
     const r = db.prepare(`INSERT INTO pa_personal
-        (tipo, nombre, dni, cuit, persona_id, contratista_madre_id, cuadrilla_default_id, grupo_id, tarifa_default, unidad_tarifa, notas, creado_por)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`)
+        (tipo, nombre, dni, cuit, persona_id, contratista_madre_id, cuadrilla_default_id, grupo_id, tarifa_default, unidad_tarifa, notas, rol, creado_por)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`)
       .run(tipo, nombre.trim(), dni || null, cuit || null,
            tipo === 'fijo' ? (persona_id || null) : null,
            tipo === 'fijo' ? (contratista_madre_id || null) : null,
@@ -3071,7 +3072,9 @@ router.post('/personal/padron', requireAuth, (req, res) => {
            grupo_id || null,
            puedeTarifa ? (Number(tarifa_default) || 0) : 0,
            unidad_tarifa || 'jornal',
-           notas || null, req.user.id);
+           notas || null,
+           (rol && rol.trim()) || null,
+           req.user.id);
     res.json({ ok: true, id: r.lastInsertRowid });
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
@@ -3082,7 +3085,7 @@ router.patch('/personal/padron/:id', requireAuth, (req, res) => {
   const perms = permisosPersonal(db, req.user);
   if (!perms.asistencia && !perms.valorizacion && !perms.admin)
     return res.status(403).json({ ok: false, error: 'Sin permiso para el módulo Personal' });
-  const { tipo, nombre, dni, cuit, persona_id, contratista_madre_id, cuadrilla_default_id, grupo_id, tarifa_default, unidad_tarifa, activo, notas } = req.body;
+  const { tipo, nombre, dni, cuit, persona_id, contratista_madre_id, cuadrilla_default_id, grupo_id, tarifa_default, unidad_tarifa, activo, notas, rol } = req.body;
   try {
     const p = db.prepare("SELECT * FROM pa_personal WHERE id=? AND eliminado_en IS NULL").get(req.params.id);
     if (!p) return res.status(404).json({ ok: false, error: 'Personal no encontrado' });
@@ -3093,7 +3096,7 @@ router.patch('/personal/padron/:id', requireAuth, (req, res) => {
     const puedeTarifa = perms.valorizacion || perms.admin;
     db.prepare(`UPDATE pa_personal SET
         tipo=?, nombre=?, dni=?, cuit=?, persona_id=?, contratista_madre_id=?, cuadrilla_default_id=?, grupo_id=?,
-        tarifa_default=?, unidad_tarifa=?, activo=?, notas=?,
+        tarifa_default=?, unidad_tarifa=?, activo=?, notas=?, rol=?,
         modificado_en=datetime('now','localtime'), modificado_por=?
         WHERE id=?`)
       .run(nuevoTipo,
@@ -3108,6 +3111,7 @@ router.patch('/personal/padron/:id', requireAuth, (req, res) => {
            unidad_tarifa || p.unidad_tarifa,
            activo !== undefined ? (activo ? 1 : 0) : p.activo,
            notas !== undefined ? notas : p.notas,
+           rol !== undefined ? ((rol && rol.trim()) || null) : p.rol,
            req.user.id, req.params.id);
     res.json({ ok: true });
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
@@ -3299,6 +3303,8 @@ router.get('/personal/asistencias', requireAuth, (req, res) => {
     if (estado) { sql += " AND a.estado=?"; params.push(estado); }
     else sql += " AND a.estado != 'anulado'";
     sql += " ORDER BY a.fecha DESC, a.id DESC";
+    // Sin filtro de fecha → últimas 50 cargadas (las más recientes). Con fecha/rango → todas las del filtro.
+    if (!fecha && !desde && !hasta) sql += " LIMIT 50";
     let data = db.prepare(sql).all(...params);
     res.json({ ok: true, data, perms });
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
