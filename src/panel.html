@@ -17999,7 +17999,15 @@ function paCostosExportExcel(){
   XLSX.writeFile(wb,'costos-por-lote-'+slug+'-'+hoy+'.xlsx');
 }
 function paVerDetalleCosto(loteId){
-  paF('/api/pa/costos?lote_id='+loteId).then(function(r){var data=r.data||[];if(!data.length){toast('Sin costos para este lote');return;}
+  // Reenviar la MISMA campaña que está viendo el listado. Sin esto, el backend cae a la
+  // campaña anual activa por default y, si estás mirando otra campaña, el detalle vuelve
+  // vacío para TODOS los lotes ("Sin costos para este lote"), aunque el listado los muestre.
+  var anualId=(document.getElementById('pa-cos-campaña-anual')||{}).value||'';
+  var estacId=(document.getElementById('pa-cos-campaña-estacional')||{}).value||'';
+  var qs=['lote_id='+encodeURIComponent(loteId)];
+  if(anualId)qs.push('campaña_anual_id='+encodeURIComponent(anualId));
+  if(estacId)qs.push('campaña_estacional_id='+encodeURIComponent(estacId));
+  paF('/api/pa/costos?'+qs.join('&')).then(function(r){var data=r.data||[];if(!data.length){toast('Sin costos para este lote');return;}
     var html='<table class="pa-tbl"><thead><tr><th>Fecha</th><th>Categoría</th><th>Descripción</th><th style="text-align:right">Monto</th></tr></thead><tbody>',total=0;
     data.forEach(function(c){html+='<tr><td>'+paFecha(c.fecha)+'</td><td>'+c.categoria+'</td><td>'+(c.descripcion||'—')+'</td><td style="text-align:right">'+paMoney(c.monto)+'</td></tr>';total+=c.monto;});
     html+='<tr style="font-weight:700;background:var(--bg)"><td colspan="3">TOTAL</td><td style="text-align:right">'+paMoney(total)+'</td></tr></tbody></table>';
