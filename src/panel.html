@@ -8588,7 +8588,7 @@ function loadSec(s) {
     'pa-insumos':    function(){ paLoadInsumos(); },
     'pa-compras':    function(){ paLoadCompras(); },
     'pa-ordenes':    function(){ paLoadOrdenes(); },
-    'pa-costos':     function(){ paLoadCostos(); },
+    'pa-costos':     function(){ paCostosInit(); },
     'pa-lotes':      function(){ paLoadLotes(); },
     'pa-scout':      function(){ paLoadScout(); },
     'pa-cuentas':    function(){ paCuLoad(); },
@@ -17747,6 +17747,16 @@ var PA_COS_TIPO_EMOJI={
 };
 // Estado de la sección Costos: respuesta cruda + filtro drill-down por cultivo.
 PA._cos=PA._cos||{resp:null,drillCultivo:null,charts:{}};
+
+// Al ENTRAR al módulo Costos, posicionar los selectores de campaña en la VIGENTE (activa=1)
+// — anual y estacional —, no en la que hubiera quedado de antes. paPoblarSelectsCampaña ya
+// puebla las opciones y selecciona la activa. El usuario puede cambiarlas a mano después
+// (onchange no resetea; el default vigente se re-aplica solo al volver a entrar al módulo).
+function paCostosInit(){
+  function go(){ paPoblarSelectsCampaña(); paLoadCostos(); }
+  if (PA.campañas && PA.campañas.length) go();
+  else paF('/api/pa/campanas').then(function(r){ PA.campañas=(r&&r.data)||PA.campañas||[]; go(); });
+}
 
 function paLoadCostos(){
   var anualId=(document.getElementById('pa-cos-campaña-anual')||{}).value||'';
