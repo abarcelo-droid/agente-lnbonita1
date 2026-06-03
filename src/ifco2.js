@@ -452,7 +452,7 @@
           : (estado === 'rechazado' ? '<div class="sub2 num-neg">' + esc(r.motivo_rechazo || 'Rechazado') + '</div>' : '<span class="muted">—</span>');
         var tipo = consol ? '<span class="tag consol">' + ic('check') + ' consolidado</span>' : (r22 ? '<span class="tag r22">stock IFCO</span>' : '<span class="muted" style="font-size:11px">producto</span>');
         var menuRec = '<button class="btn-icon btn-ghost" onclick="__ifco2MenuRecep(event,' + r.id + ',\'' + esc(r.n_remito_proveedor || '') + '\')">' + ic('more-horizontal') + '</button>';
-        var act = estado === 'en_viaje' ? '<button class="btn btn-pri btn-sm" onclick="__ifco2Reuse(\'ifcoConfirmarRecepcion\',' + r.id + ')">' + ic('check') + ' Confirmar</button><button class="btn btn-danger btn-sm" title="Rechazar" onclick="__ifco2Legacy(\'ifcoRechazarRecepcion\',' + r.id + ')">' + ic('x') + '</button>' + menuRec : menuRec;
+        var act = estado === 'en_viaje' ? '<button class="btn btn-pri btn-sm" onclick="__ifco2ConfirmarRecep(' + r.id + ')">' + ic('check') + ' Confirmar</button><button class="btn btn-danger btn-sm" title="Rechazar" onclick="__ifco2RechazarRecep(' + r.id + ')">' + ic('x') + '</button>' + menuRec : menuRec;
         return '<tr ' + (estado === 'en_viaje' ? 'style="background:var(--i-navy-050)"' : '') + '>'
           + '<td class="mono">' + esc(r.n_remito_proveedor || '—') + '</td><td>' + quien + '</td><td>' + fdate(r.fecha_recepcion) + '</td>'
           + '<td class="r num-strong">' + nf(r.cantidad) + '</td><td>' + tipo + '</td><td>' + badge(estado) + '</td><td>' + conf + '</td><td class="c">' + dchip + '</td>'
@@ -634,6 +634,29 @@
       .then(function (r) { return r.json().catch(function () { return {}; }); })
       .then(function (d) { if (d && d.error) toast(d.error, 'er'); else { toast('Eliminado (queda en Papelera)', 'ok'); nav(view); } })
       .catch(function () { toast('Error de red al eliminar', 'er'); });
+  };
+
+  // Confirmar / Rechazar recepción en viaje (Ingresos). Handlers NATIVOS de IFCO2: postean y
+  // refrescan la vista nueva con nav('ingresos'). Antes se reusaba el handler legacy
+  // (ifcoConfirmarRecepcion/ifcoRechazarRecepcion) que refresca la pane vieja oculta, no esta
+  // vista → la fila quedaba mostrando "Confirmar" pese a haberse procesado (audit punto B, refresh).
+  window.__ifco2ConfirmarRecep = function (id) {
+    if (!confirm('¿Confirmar la recepción? Suma al stock de San Gerónimo y descuenta el saldo del proveedor.')) return;
+    fetch(API + '/recepciones-proveedor/' + id + '/confirmar', { method: 'POST', credentials: 'include' })
+      .then(function (r) { return r.json().catch(function () { return {}; }); })
+      .then(function (d) { if (d && d.error) toast(d.error, 'er'); else { toast('Recepción confirmada', 'ok'); nav('ingresos'); } })
+      .catch(function () { toast('Error de red al confirmar', 'er'); });
+  };
+  window.__ifco2RechazarRecep = function (id) {
+    var motivo = prompt('Motivo del rechazo (opcional):', '');
+    if (motivo === null) return;
+    fetch(API + '/recepciones-proveedor/' + id + '/rechazar', {
+      method: 'POST', credentials: 'include',
+      headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ motivo: motivo || null })
+    })
+      .then(function (r) { return r.json().catch(function () { return {}; }); })
+      .then(function (d) { if (d && d.error) toast(d.error, 'er'); else { toast('Recepción rechazada', 'ok'); nav('ingresos'); } })
+      .catch(function () { toast('Error de red al rechazar', 'er'); });
   };
 
   // Menús ⋯ por vista (reusan los handlers legacy para Editar)
