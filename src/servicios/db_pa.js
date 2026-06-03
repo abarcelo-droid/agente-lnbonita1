@@ -1289,6 +1289,17 @@ try {
   }
 } catch(e) { console.error('[PA] Error migrando rol en pa_personal:', e.message); }
 
+// ── Migración: flag post_cosecha en pa_tareas_tipos ("Post-Cosecha") ─────────
+// Habilita, en el modal de asistencia, imputar el trabajo a la campaña INMEDIATAMENTE
+// ANTERIOR (anual + estacional). Simple ADD COLUMN, idempotente con guard PRAGMA.
+try {
+  const colsT = db.prepare("PRAGMA table_info(pa_tareas_tipos)").all().map(c => c.name);
+  if (!colsT.includes('post_cosecha')) {
+    db.exec('ALTER TABLE pa_tareas_tipos ADD COLUMN post_cosecha INTEGER DEFAULT 0');
+    console.log('[PA] post_cosecha agregado en pa_tareas_tipos');
+  }
+} catch(e) { console.error('[PA] Error migrando post_cosecha en pa_tareas_tipos:', e.message); }
+
 // (Migraciones pa_trabajadores→pa_personal ELIMINADAS: ya cumplidas; la unificación
 //  final — grupo_id, columnas de Pañol y DROP de pa_trabajadores — está más abajo,
 //  después de crear las tablas de Pañol.)

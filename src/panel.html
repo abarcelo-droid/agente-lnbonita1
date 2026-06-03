@@ -4099,7 +4099,7 @@ function sgRepExport(){
     </table></div>
     <div style="font-size:13px;font-weight:700;margin:18px 0 8px">📋 Catálogo de tareas</div>
     <div class="tw"><table>
-      <thead><tr><th>Tarea</th><th>Tipo labor</th><th style="text-align:center">Destajo</th><th>Unidad destajo</th></tr></thead>
+      <thead><tr><th>Tarea</th><th>Tipo labor</th><th style="text-align:center">Destajo</th><th>Unidad destajo</th><th style="text-align:center">Post-Cosecha</th></tr></thead>
       <tbody id="pp-tr-tareas-tbody"></tbody>
     </table></div>
   </div>
@@ -4239,6 +4239,7 @@ function sgRepExport(){
         <label style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">Personas del grupo — tildá las que estuvieron (una fila por cada una)
           <button type="button" class="btn bo bs" style="padding:2px 8px;font-size:11px" onclick="ppAsistGrupoSelAll()">Seleccionar todos</button>
           <span id="pp-as-grupo-count" style="font-size:12px;color:var(--mut);font-weight:600;margin-left:auto"></span></label>
+        <input id="pp-as-grupo-buscar" oninput="ppAsistGrupoBuscar()" placeholder="🔎 Buscar persona por nombre…" style="width:100%;padding:6px 10px;font-size:12.5px;margin-bottom:6px;box-sizing:border-box">
         <div id="pp-as-grupo-personas" style="max-height:340px;overflow-y:auto;overflow-x:hidden;border:1px solid var(--bord,#e2e2e2);border-radius:6px"></div>
       </div>
       <div class="fl pp-as-blo" style="display:none;flex:1 1 100%"><label>Responsable que cobra</label>
@@ -4261,7 +4262,14 @@ function sgRepExport(){
         </div>
       </div>
       <div class="fl"><label>Tarea</label>
-        <select id="pp-as-tarea"><option value="">— Ninguna —</option></select>
+        <select id="pp-as-tarea" onchange="ppAsistTareaChange()"><option value="">— Ninguna —</option></select>
+      </div>
+      <div class="fl" id="pp-as-postcos-wrap" style="display:none;flex:1 1 100%">
+        <label>Campaña a imputar <span style="color:var(--mut);font-weight:400;font-size:11px">(tarea Post-Cosecha: podés usar la anterior)</span></label>
+        <div style="display:flex;gap:8px;padding-top:4px">
+          <button type="button" class="pp-as-segbtn pp-as-camp-btn on" data-camp="vigente" onclick="ppAsistSetCampaña('vigente')">Vigente <span id="pp-as-camp-vig-lbl" style="opacity:.7;font-weight:400"></span></button>
+          <button type="button" class="pp-as-segbtn pp-as-camp-btn" data-camp="anterior" onclick="ppAsistSetCampaña('anterior')">Anterior <span id="pp-as-camp-ant-lbl" style="opacity:.7;font-weight:400"></span></button>
+        </div>
       </div>
       <input type="hidden" id="pp-as-cultivo">
       <div class="fl" style="flex:1 1 100%"><label>Notas</label><textarea id="pp-as-notas" rows="2"></textarea></div>
@@ -19359,6 +19367,19 @@ function ppRepExport() {
   window.open('/api/pa/personal/reportes/' + PP_REP.key + '.xlsx' + ppRepQS(), '_blank');
 }
 
+// Toggle del flag Post-Cosecha de una tarea (config en Catálogo). Habilita, en el modal
+// de asistencia, imputar el trabajo a la campaña inmediatamente anterior (anual+estacional).
+function ppTogglePostCosecha(id, checked) {
+  paF('/api/pa/personal/tareas-tipos/' + id, {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ post_cosecha: checked ? 1 : 0 })
+  }).then(function(r){
+    if (r && r.ok) {
+      toast('Post-Cosecha ' + (checked ? 'activado' : 'desactivado'));
+      PP.asistDefaults = null; // invalidar cache: el modal de asistencia re-lee el flag al abrir
+    } else { toast((r && r.error) || 'Error', 'er'); ppLoadTareasRubros(); }
+  });
+}
+
 function ppLoadTareasRubros() {
   paF('/api/pa/personal/reportes/rubros-uso').then(function(r){
     var rows = (r && r.data) || [];
@@ -19371,8 +19392,9 @@ function ppLoadTareasRubros() {
     var rows = (r && r.data) || [];
     var tb = document.getElementById('pp-tr-tareas-tbody');
     tb.innerHTML = rows.length ? rows.map(function(t){
-      return '<tr><td>' + esc(t.nombre||'') + '</td><td>' + esc(t.tipo_labor||'—') + '</td><td style="text-align:center">' + (t.es_destajo ? '✅' : '—') + '</td><td>' + esc(t.unidad_destajo||'—') + '</td></tr>';
-    }).join('') : '<tr><td colspan="4" style="text-align:center;color:var(--mut);padding:20px">Sin tareas.</td></tr>';
+      return '<tr><td>' + esc(t.nombre||'') + '</td><td>' + esc(t.tipo_labor||'—') + '</td><td style="text-align:center">' + (t.es_destajo ? '✅' : '—') + '</td><td>' + esc(t.unidad_destajo||'—') + '</td>'
+        + '<td style="text-align:center"><input type="checkbox" ' + (t.post_cosecha ? 'checked' : '') + ' onchange="ppTogglePostCosecha(' + t.id + ',this.checked)" title="Post-Cosecha: habilita imputar a la campaña anterior"></td></tr>';
+    }).join('') : '<tr><td colspan="5" style="text-align:center;color:var(--mut);padding:20px">Sin tareas.</td></tr>';
   });
 }
 
@@ -19602,14 +19624,14 @@ function ppLoadAsistencia() {
 
 function ppRenderAsistencia() {
   var thead = document.getElementById('pp-asist-thead');
-  thead.innerHTML = '<th>Cuadrilla</th><th>Persona / Cuadrilla</th><th style="text-align:center">Cant.</th><th style="text-align:center">Horas</th>' +
+  thead.innerHTML = '<th>Fecha</th><th>Cuadrilla</th><th>Persona / Cuadrilla</th><th style="text-align:center">Cant.</th><th style="text-align:center">Horas</th>' +
     '<th style="text-align:center">Jorn.</th><th>Rubro</th><th>Campañas</th><th>Finca / Lote</th><th>Tarea</th><th>Cultivo</th><th>Estado</th><th></th>';
   var tbody = document.getElementById('pp-asist-tbody');
   if (!PP.asistencias.length) {
     var vacioMsg = PP.asistSinFecha
       ? 'No hay asistencias cargadas. Cargá la primera con "+ Nueva fila".'
       : 'Sin asistencias para esta fecha. Cargá la primera con "+ Nueva fila".';
-    tbody.innerHTML = '<tr><td colspan="12" style="text-align:center;color:var(--mut);padding:20px">'+vacioMsg+'</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="13" style="text-align:center;color:var(--mut);padding:20px">'+vacioMsg+'</td></tr>';
     document.getElementById('pp-asist-resumen').textContent = PP.asistSinFecha ? 'Mostrando últimas 50 — elegí una fecha para filtrar' : '';
     return;
   }
@@ -19636,7 +19658,7 @@ function ppRenderAsistencia() {
     } else {
       acciones = '<span style="font-size:10px;color:var(--mut)">read-only</span>';
     }
-    return '<tr><td>'+esc(a.cuadrilla_nombre||'—')+'</td><td>'+quien+'</td>' +
+    return '<tr><td style="white-space:nowrap">'+(a.fecha?a.fecha.split('-').reverse().join('/'):'—')+'</td><td>'+esc(a.cuadrilla_nombre||'—')+'</td><td>'+quien+'</td>' +
       '<td style="text-align:center">'+a.cantidad+'</td><td style="text-align:center">'+a.horas+'</td>' +
       '<td style="text-align:center"><strong>'+(a.jornales_calc!=null?a.jornales_calc:'—')+'</strong></td>' +
       '<td style="font-size:11px">'+rubro+'</td><td>'+camp+'</td>' +
@@ -19715,21 +19737,39 @@ function ppAsistGrupoChange() {
   var cont = document.getElementById('pp-as-grupo-personas');
   if (!gid) { cont.innerHTML = ''; wrap.style.display = 'none'; return; }
   var d = PP.asistDefaults || {};
-  var miembros = (d.personal||[]).filter(function(p){ return String(p.grupo_id) === String(gid); });
+  // Orden alfabético por el nombre guardado (Andy lo carga como "Apellido Nombre").
+  var miembros = (d.personal||[]).filter(function(p){ return String(p.grupo_id) === String(gid); })
+    .sort(function(a,b){ return String(a.nombre||'').localeCompare(String(b.nombre||''), 'es', {sensitivity:'base'}); });
   if (!miembros.length) {
     cont.innerHTML = '<div style="font-size:12px;color:var(--mut);padding:10px">Este grupo no tiene personas activas asignadas.</div>';
   } else {
     cont.innerHTML = miembros.map(function(p,i){
       var sep = i < miembros.length-1 ? 'border-bottom:1px solid var(--bord,#eee);' : '';
-      return '<label style="display:flex;align-items:center;justify-content:flex-start;gap:8px;padding:8px 12px;'+sep+'cursor:pointer;font-size:13px;white-space:nowrap">'
+      return '<label data-nombre="'+ppNorm(p.nombre)+'" style="display:flex;align-items:center;justify-content:flex-start;gap:8px;padding:8px 12px;'+sep+'cursor:pointer;font-size:13px;white-space:nowrap">'
         + '<input type="checkbox" value="'+p.id+'" style="width:auto;flex:none;margin:0" onchange="ppAsistGrupoCount()">'
         + '<span style="flex:1 1 auto;text-align:left">'+esc(p.nombre)+'</span></label>';
     }).join('');
   }
   wrap.style.display = '';
+  var bq = document.getElementById('pp-as-grupo-buscar'); if (bq) bq.value = '';
+  ppAsistGrupoBuscar();
   ppAsistGrupoCount();
   // Al usar grupo, el select de persona única deja de aplicar
   var ps = document.getElementById('pp-as-personal'); if (ps) ps.value = '';
+}
+
+// Normaliza texto para búsqueda: minúsculas + sin acentos.
+function ppNorm(s) { return String(s||'').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, ''); }
+
+// Buscador de la lista grupal: filtra SOLO la visualización (oculta filas que no matchean
+// por nombre), NO destilda. "Seleccionar todos" y el contador siguen operando sobre la
+// selección real (todos los checkboxes), no sobre lo visible.
+function ppAsistGrupoBuscar() {
+  var q = ppNorm((document.getElementById('pp-as-grupo-buscar')||{}).value);
+  document.querySelectorAll('#pp-as-grupo-personas label').forEach(function(l){
+    var n = l.getAttribute('data-nombre') || '';
+    l.style.display = (!q || n.indexOf(q) >= 0) ? '' : 'none';
+  });
 }
 
 // Contador "X seleccionados" de la lista grupal (se llama al tildar/destildar y en Sel. todos).
@@ -19737,6 +19777,38 @@ function ppAsistGrupoCount() {
   var el = document.getElementById('pp-as-grupo-count'); if (!el) return;
   var n = document.querySelectorAll('#pp-as-grupo-personas input[type="checkbox"]:checked').length;
   el.textContent = n + ' seleccionados';
+}
+
+// Post-Cosecha: setea las campañas ocultas (anual+estacional) a la VIGENTE o a la
+// inmediatamente ANTERIOR (las dos juntas). El backend valida el par permitido.
+function ppAsistSetCampaña(which) {
+  PP.asistCampSel = (which === 'anterior') ? 'anterior' : 'vigente';
+  var d = (PP.asistDefaults && PP.asistDefaults.campanas) || {};
+  document.querySelectorAll('.pp-as-camp-btn').forEach(function(b){ b.classList.toggle('on', b.dataset.camp === PP.asistCampSel); });
+  var canual = document.getElementById('pp-as-canual'), cestac = document.getElementById('pp-as-cestac');
+  if (PP.asistCampSel === 'anterior') {
+    if (d.anteriorAnualId) canual.value = d.anteriorAnualId;
+    if (d.anteriorEstacionalId) cestac.value = d.anteriorEstacionalId;
+  } else {
+    if (d.vigenteAnualId) canual.value = d.vigenteAnualId;
+    if (d.vigenteEstacionalId) cestac.value = d.vigenteEstacionalId;
+  }
+}
+
+// Al cambiar la tarea: si es Post-Cosecha (y es alta nueva y hay campaña anterior),
+// muestra el toggle Vigente/Anterior; si no, fuerza Vigente y lo oculta.
+function ppAsistTareaChange() {
+  var wrap = document.getElementById('pp-as-postcos-wrap'); if (!wrap) return;
+  var d = (PP.asistDefaults && PP.asistDefaults.campanas) || {};
+  var tid = document.getElementById('pp-as-tarea').value;
+  var tarea = ((PP.asistDefaults && PP.asistDefaults.tareas) || []).find(function(t){ return String(t.id) === String(tid); });
+  var postCos = !!(tarea && tarea.post_cosecha) && !PP.editAsistId && !!d.anteriorAnualId;
+  wrap.style.display = postCos ? '' : 'none';
+  if (!postCos) { ppAsistSetCampaña('vigente'); return; }
+  var vigNom = (((d.anual)||[]).find(function(c){ return String(c.id) === String(d.vigenteAnualId); })||{}).nombre || '';
+  var vl = document.getElementById('pp-as-camp-vig-lbl'); if (vl) vl.textContent = vigNom ? '('+vigNom+')' : '';
+  var al = document.getElementById('pp-as-camp-ant-lbl'); if (al) al.textContent = d.anteriorAnualNombre ? '('+d.anteriorAnualNombre+')' : '';
+  ppAsistSetCampaña(PP.asistCampSel || 'vigente');
 }
 
 function ppAsistLoteChange() {
@@ -19844,6 +19916,8 @@ function ppAbrirAsistencia() {
     }
     ppAsistToggleModo();
     ppAsistRubroChange();
+    PP.asistCampSel = 'vigente';   // Post-Cosecha: arranca en la campaña vigente
+    ppAsistTareaChange();
     document.getElementById('mb-pp-asist').classList.add('on');
   });
 }
@@ -19868,6 +19942,7 @@ function ppEditarAsistencia(id) {
     // La carga grupal es solo para altas nuevas: ocultar el selector de grupo al editar
     document.getElementById('pp-as-grupo-fl').style.display = 'none';
     document.getElementById('pp-as-grupo-wrap').style.display = 'none';
+    ppAsistTareaChange(); // post-cosecha es alta-only → al editar oculta el toggle
     document.getElementById('mb-pp-asist').classList.add('on');
   });
 }
