@@ -2837,11 +2837,12 @@ router.get('/personal/cuadrillas', requireAuth, (req, res) => {
 
 router.post('/personal/cuadrillas', requireAuth, (req, res) => {
   const db = getDb();
-  const { nombre, capataz_id, responsable_id, tipo, notas } = req.body;
+  const { nombre, capataz_id, responsable_id, tipo, notas, tarifa_jornal } = req.body;
   if (!nombre) return res.status(400).json({ ok: false, error: 'nombre requerido' });
   try {
-    const r = db.prepare("INSERT INTO pa_cuadrillas (nombre, capataz_id, responsable_id, tipo, notas) VALUES (?,?,?,?,?)")
-      .run(nombre, capataz_id || null, responsable_id || null, tipo || 'fija', notas || null);
+    const r = db.prepare("INSERT INTO pa_cuadrillas (nombre, capataz_id, responsable_id, tipo, notas, tarifa_jornal) VALUES (?,?,?,?,?,?)")
+      .run(nombre, capataz_id || null, responsable_id || null, tipo || 'fija', notas || null,
+           (tarifa_jornal != null && tarifa_jornal !== '') ? Number(tarifa_jornal) : null);
     res.json({ ok: true, id: r.lastInsertRowid });
   } catch(e) {
     if (e.message.includes('UNIQUE')) return res.status(400).json({ ok: false, error: 'Ya existe una cuadrilla con ese nombre' });
@@ -2851,18 +2852,55 @@ router.post('/personal/cuadrillas', requireAuth, (req, res) => {
 
 router.patch('/personal/cuadrillas/:id', requireAuth, (req, res) => {
   const db = getDb();
-  const { nombre, capataz_id, responsable_id, tipo, activo, notas } = req.body;
+  const { nombre, capataz_id, responsable_id, tipo, activo, notas, tarifa_jornal } = req.body;
   try {
     const c = db.prepare("SELECT * FROM pa_cuadrillas WHERE id=?").get(req.params.id);
     if (!c) return res.status(404).json({ ok: false, error: 'Cuadrilla no encontrada' });
-    db.prepare("UPDATE pa_cuadrillas SET nombre=?, capataz_id=?, responsable_id=?, tipo=?, activo=?, notas=? WHERE id=?")
+    db.prepare("UPDATE pa_cuadrillas SET nombre=?, capataz_id=?, responsable_id=?, tipo=?, activo=?, notas=?, tarifa_jornal=? WHERE id=?")
       .run(nombre || c.nombre,
            capataz_id !== undefined ? capataz_id : c.capataz_id,
            responsable_id !== undefined ? responsable_id : c.responsable_id,
            tipo || c.tipo,
            activo !== undefined ? (activo ? 1 : 0) : c.activo,
            notas !== undefined ? notas : c.notas,
+           tarifa_jornal !== undefined ? ((tarifa_jornal != null && tarifa_jornal !== '') ? Number(tarifa_jornal) : null) : c.tarifa_jornal,
            req.params.id);
+    res.json({ ok: true });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// ── Padrón de tarifas por ROL ($/jornal). Costeo MO automático individual/grupal. ──
+router.get('/personal/tarifas-rol', requireAuth, (req, res) => {
+  const db = getDb();
+  const perms = permisosPersonal(db, req.user);
+  if (!perms.valorizacion && !perms.admin) return res.status(403).json({ ok: false, error: 'Sin permiso de valorización' });
+  try {
+    // Roles EN USO (distintos, no vacíos) en el padrón activo + su tarifa cargada (si hay).
+    const data = db.prepare(`
+      SELECT TRIM(p.rol) AS rol, COUNT(*) AS personas, tr.tarifa AS tarifa
+      FROM pa_personal p
+      LEFT JOIN pa_tarifas_rol tr ON lower(trim(tr.rol)) = lower(trim(p.rol))
+      WHERE p.eliminado_en IS NULL AND p.activo = 1 AND p.rol IS NOT NULL AND TRIM(p.rol) <> ''
+      GROUP BY lower(trim(p.rol))
+      ORDER BY rol COLLATE NOCASE
+    `).all();
+    res.json({ ok: true, data });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+router.post('/personal/tarifas-rol', requireAuth, (req, res) => {
+  const db = getDb();
+  const perms = permisosPersonal(db, req.user);
+  if (!perms.valorizacion && !perms.admin) return res.status(403).json({ ok: false, error: 'Sin permiso de valorización' });
+  const rol = (req.body.rol || '').trim();
+  const tarifa = Number(req.body.tarifa);
+  if (!rol) return res.status(400).json({ ok: false, error: 'rol requerido' });
+  if (!(tarifa >= 0)) return res.status(400).json({ ok: false, error: 'tarifa inválida' });
+  try {
+    db.prepare(`INSERT INTO pa_tarifas_rol (rol, tarifa, modificado_por) VALUES (?,?,?)
+                ON CONFLICT(rol) DO UPDATE SET tarifa=excluded.tarifa,
+                  modificado_en=datetime('now','localtime'), modificado_por=excluded.modificado_por`)
+      .run(rol, tarifa, req.user.id);
     res.json({ ok: true });
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
@@ -3599,6 +3637,36 @@ function _titularAsistencia(db, a) {
   return p || null;
 }
 
+// Tarifa $/jornal de un rol (padrón pa_tarifas_rol). Match trim + case-insensitive.
+function _tarifaRol(db, rol) {
+  if (!rol || !String(rol).trim()) return null;
+  const r = db.prepare("SELECT tarifa FROM pa_tarifas_rol WHERE lower(trim(rol)) = lower(trim(?))").get(String(rol));
+  return (r && r.tarifa != null) ? Number(r.tarifa) : null;
+}
+
+// Resuelve la tarifa $/jornal de una asistencia. DOS sistemas:
+//  · Individual/Grupal (a.personal_id) → tarifa del ROL de la persona (pa_tarifas_rol).
+//  · Cuadrilla / bloque (sin personal_id) → tarifa de la CUADRILLA (pa_cuadrillas.tarifa_jornal),
+//    NO el rol de la responsable. El devengado igual va a la responsable (titular).
+// Devuelve { tarifa, fuente_label, falta, motivo }. Si falta → no se valoriza (queda pendiente).
+function _tarifaAsistencia(db, a) {
+  if (a.personal_id) {
+    const p = db.prepare("SELECT rol FROM pa_personal WHERE id=?").get(a.personal_id);
+    const rol = p && p.rol ? String(p.rol).trim() : '';
+    if (!rol) return { tarifa: 0, fuente_label: 'Persona sin rol', falta: true, motivo: 'persona sin rol asignado' };
+    const t = _tarifaRol(db, rol);
+    if (t == null || !(t > 0)) return { tarifa: 0, fuente_label: 'Rol: ' + rol, falta: true, motivo: 'rol "' + rol + '" sin tarifa cargada' };
+    return { tarifa: t, fuente_label: 'Rol: ' + rol, falta: false };
+  }
+  if (a.cuadrilla_id) {
+    const c = db.prepare("SELECT nombre, tarifa_jornal FROM pa_cuadrillas WHERE id=?").get(a.cuadrilla_id);
+    const nom = c ? c.nombre : ('#' + a.cuadrilla_id);
+    if (!c || c.tarifa_jornal == null || !(c.tarifa_jornal > 0)) return { tarifa: 0, fuente_label: 'Cuadrilla: ' + nom, falta: true, motivo: 'cuadrilla "' + nom + '" sin valor de jornal' };
+    return { tarifa: Number(c.tarifa_jornal), fuente_label: 'Cuadrilla: ' + nom, falta: false };
+  }
+  return { tarifa: 0, fuente_label: '—', falta: true, motivo: 'asistencia sin persona ni cuadrilla' };
+}
+
 // ── Por valorizar: pendientes en un rango, con titular + tarifa default ─────
 router.get('/personal/valorizar', requireAuth, (req, res) => {
   const db = getDb();
@@ -3608,7 +3676,7 @@ router.get('/personal/valorizar', requireAuth, (req, res) => {
   try {
     const { desde, hasta } = req.query;
     let sql = `
-      SELECT a.id, a.fecha, a.cantidad, a.horas, a.jornales_calc, a.personal_id, a.contratista_id,
+      SELECT a.id, a.fecha, a.cantidad, a.horas, a.jornales_calc, a.personal_id, a.contratista_id, a.cuadrilla_id,
              a.rubro_cuenta_id, a.lote_id, a.finca,
              p.nombre as personal_nombre, ct.nombre as contratista_nombre,
              cta.codigo as rubro_codigo, cta.nombre as rubro_nombre,
@@ -3625,22 +3693,23 @@ router.get('/personal/valorizar', requireAuth, (req, res) => {
     if (hasta) { sql += " AND a.fecha<=?"; params.push(hasta); }
     sql += " ORDER BY a.fecha, a.id";
     const rows = db.prepare(sql).all(...params);
-    // Enriquecer con titular + tarifa default + preview de monto
+    // Enriquecer con titular + tarifa RESUELTA (rol o cuadrilla) + preview de monto. $/jornal.
     const data = rows.map(a => {
       const tit = _titularAsistencia(db, a);
-      const padron = tit ? db.prepare("SELECT tarifa_default, unidad_tarifa FROM pa_personal WHERE id=?").get(tit.id) : null;
-      const unidad = (padron && padron.unidad_tarifa) || 'jornal';
-      const tarifa = (padron && padron.tarifa_default) || 0;
-      const base = _baseUnidadesAsistencia(unidad, a);
+      const tr = _tarifaAsistencia(db, a);
+      const base = _baseUnidadesAsistencia('jornal', a);
       return {
         ...a,
         titular_id: tit ? tit.id : null,
         titular_tipo: tit ? tit.tipo : null,
         titular_nombre: tit ? tit.nombre : '—',
-        tarifa_default: tarifa,
-        unidad_tarifa: unidad,
+        tarifa_resuelta: tr.tarifa,
+        fuente_label: tr.fuente_label,
+        sin_tarifa: tr.falta,
+        motivo_sin_tarifa: tr.falta ? tr.motivo : null,
+        unidad_tarifa: 'jornal',
         base_unidades: Math.round(base * 100) / 100,
-        monto_preview: Math.round(tarifa * base * 100) / 100
+        monto_preview: tr.falta ? 0 : Math.round(tr.tarifa * base * 100) / 100
       };
     });
     res.json({ ok: true, data });
@@ -3656,7 +3725,7 @@ router.post('/personal/valorizar', requireAuth, (req, res) => {
   const items = Array.isArray(req.body.items) ? req.body.items : [];
   if (!items.length) return res.status(400).json({ ok: false, error: 'Sin ítems para valorizar' });
   try {
-    const resumen = { valorizadas: 0, monto_total: 0, errores: [] };
+    const resumen = { valorizadas: 0, monto_total: 0, no_valorizadas: [], errores: [] };
     const titularesTocados = new Set();
     const tx = db.transaction(() => {
       for (const it of items) {
@@ -3665,11 +3734,12 @@ router.post('/personal/valorizar', requireAuth, (req, res) => {
         if (a.estado !== 'pendiente_valorizar') { resumen.errores.push(`Asistencia ${a.id} no está pendiente`); continue; }
         const tit = _titularAsistencia(db, a);
         if (!tit) { resumen.errores.push(`Asistencia ${a.id} sin titular`); continue; }
-        const padron = db.prepare("SELECT tarifa_default, unidad_tarifa FROM pa_personal WHERE id=?").get(tit.id);
-        const unidad = (padron && padron.unidad_tarifa) || 'jornal';
-        const tarifa = (it.tarifa_unitaria != null) ? Number(it.tarifa_unitaria) : ((padron && padron.tarifa_default) || 0);
-        if (!(tarifa > 0)) { resumen.errores.push(`Asistencia ${a.id} sin tarifa (> 0)`); continue; }
-        const base = _baseUnidadesAsistencia(unidad, a);
+        // Tarifa 100% automática (rol o cuadrilla). Sin tarifa → NO se valoriza: queda pendiente.
+        const tr = _tarifaAsistencia(db, a);
+        if (tr.falta) { resumen.no_valorizadas.push({ id: a.id, motivo: tr.motivo }); continue; }
+        const unidad = 'jornal';
+        const tarifa = tr.tarifa;
+        const base = _baseUnidadesAsistencia('jornal', a);
         const monto = Math.round(tarifa * base * 100) / 100;
         const categoria = _categoriaCostoAsistencia(db, a.rubro_cuenta_id, tit.tipo);
         const tarea = db.prepare("SELECT nombre FROM pa_tareas_tipos WHERE id=?").get(a.tarea_tipo_id);
@@ -3700,7 +3770,7 @@ router.post('/personal/valorizar', requireAuth, (req, res) => {
             (asistencia_id, tarifa_unitaria, unidad_tarifa, monto_total, detalle_json, valorizado_por, costo_lote_id, cc_movimiento_id)
             VALUES (?,?,?,?,?,?,?,?)`)
           .run(a.id, tarifa, unidad, monto,
-               JSON.stringify({ tarifa, unidad, base_unidades: base, cantidad: a.cantidad, horas: a.horas, jornales: a.jornales_calc }),
+               JSON.stringify({ tarifa, unidad, fuente: tr.fuente_label, base_unidades: base, cantidad: a.cantidad, horas: a.horas, jornales: a.jornales_calc }),
                req.user.id, costoLoteId, rcc.lastInsertRowid);
 
         // 4) Estado
@@ -4030,10 +4100,27 @@ function _pendientesSemana(db, rango) {
       pagadoMap[r.tipo_titular + ':' + r.titular_id] = r.pagado;
     }
   }
+  // Desglose RRHH: jornales de la semana + tarifa aplicada, por titular (de lo valorizado).
+  // titular_id es un pa_personal.id (único) → se puede mapear por id solo.
+  const jmap = {};
+  for (const v of db.prepare(`
+      SELECT av.tarifa_unitaria AS tarifa, a.personal_id, a.contratista_id, COALESCE(a.jornales_calc,0) AS jornales
+      FROM pa_asistencia_valorizacion av
+      JOIN pa_asistencias a ON a.id = av.asistencia_id
+      WHERE a.estado='valorizado' AND a.fecha BETWEEN ? AND ?`).all(rango.desde, rango.hasta)) {
+    const id = v.personal_id || v.contratista_id;
+    if (!id) continue;
+    if (!jmap[id]) jmap[id] = { jornales: 0, tarifas: new Set() };
+    jmap[id].jornales = Math.round((jmap[id].jornales + (v.jornales || 0)) * 100) / 100;
+    if (v.tarifa != null) jmap[id].tarifas.add(Number(v.tarifa));
+  }
   return dev.map(d => {
     const pagado = pagadoMap[d.tipo_titular + ':' + d.titular_id] || 0;
     const pendiente = Math.round((d.devengado - pagado) * 100) / 100;
-    return { ...d, pagado, pendiente };
+    const j = jmap[d.titular_id] || { jornales: 0, tarifas: new Set() };
+    const tarifas = Array.from(j.tarifas);
+    return { ...d, pagado, pendiente, jornales: j.jornales,
+             tarifa: tarifas.length === 1 ? tarifas[0] : null, tarifa_varias: tarifas.length > 1 };
   }).filter(d => d.pendiente > 0.009);
 }
 
