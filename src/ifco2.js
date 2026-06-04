@@ -60,7 +60,8 @@
       origen: r.origen || 'san_geronimo', prov: r.proveedor_origen_nombre || null,
       estado: r.estado, sell: r.fecha_sellado, env: r.fecha_enviado, pres: r.fecha_presentado,
       rdest: r.rechazo_destino, usuario: r.usuario_creador_nombre || '', dias: diasDesde(r.fecha_emision),
-      seg: r.seguimiento ? 1 : 0, segNota: r.seguimiento_notas || ''
+      seg: r.seguimiento ? 1 : 0, segNota: r.seguimiento_notas || '',
+      fotoDesp: r.escaneo_original_path || '', fotoSell: r.escaneo_path || ''
     };
   }
 
@@ -206,6 +207,9 @@
           : (r.estado === 'sellado') ? '<button class="btn btn-pri btn-sm" onclick="event.stopPropagation();__ifco2Open(' + r.id + ')">' + ic('send') + ' Enviar</button>' : '';
         var segTr = r.seg ? ' style="background:#fffbeb;box-shadow:inset 3px 0 0 #f59e0b"' : '';
         var segFlag = r.seg ? ' <span title="' + esc(r.segNota || 'En seguimiento') + '" style="cursor:help">🚩</span>' : '';
+        var verFoto = (r.fotoSell || r.fotoDesp)
+          ? '<button class="btn-icon btn-ghost" title="Ver foto" onclick="event.stopPropagation();__ifco2VerFoto(\'' + r.estado + '\',\'' + r.fotoSell + '\',\'' + r.fotoDesp + '\')">' + ic('image') + '</button>'
+          : '';
         return '<tr data-rid="' + r.id + '"' + segTr + ' onclick="__ifco2Open(' + r.id + ')">'
           + '<td class="mono lead">' + esc((r.ifco.split('-')[1] || r.ifco)) + segFlag + '</td>'
           + '<td><div class="lead">' + esc(cadenaCorta(r.cadena)) + '</div>' + origenSub + '</td>'
@@ -213,7 +217,7 @@
           + '<td class="r"><div class="cj-cell"><span class="cj-desp">' + nf(r.desp) + '<span class="cj-u">desp.</span></span>' + cuadre + '</div></td>'
           + '<td><div style="display:flex;align-items:center;gap:8px">' + badge(r.estado) + dchip + '</div></td>'
           + '<td class="c">' + uav(r.usuario) + '</td>'
-          + '<td><div class="rowact">' + act + '<button class="btn-icon btn-ghost" onclick="__ifco2MenuDespacho(event,' + r.id + ',\'' + esc(r.ifco || '') + '\',\'' + (r.estado || '') + '\')">' + ic('more-horizontal') + '</button></div></td></tr>';
+          + '<td><div class="rowact">' + act + verFoto + '<button class="btn-icon btn-ghost" onclick="__ifco2MenuDespacho(event,' + r.id + ',\'' + esc(r.ifco || '') + '\',\'' + (r.estado || '') + '\')">' + ic('more-horizontal') + '</button></div></td></tr>';
       }).join('') : '<tr><td colspan="7">' + empty('No hay remitos para este filtro/búsqueda') + '</td></tr>';
 
       var totDesp = R.filter(function (r) { return r.estado !== 'anulado'; }).reduce(function (a, r) { return a + (r.desp || 0); }, 0);
@@ -285,7 +289,7 @@
       + '<div style="padding:11px 16px 4px"><div class="sectlabel" style="margin-bottom:2px">Trazabilidad</div></div><div class="tline">' + steps + '</div>'
       + '<div class="card-b" style="border-top:1px solid var(--i-line);display:flex;gap:8px">'
       + (puedeAccion ? '<button class="btn btn-pri btn-sm" style="flex:1;justify-content:center" onclick="__ifco2Reuse(\'' + accionFn + '\')">' + accion + '</button>' : '<button class="btn btn-ghost btn-sm" style="flex:1;justify-content:center" disabled>' + accion + '</button>')
-      + '<button class="btn btn-ghost btn-sm" onclick="__ifco2Legacy(\'ifcoVerRemito\',' + r.id + ')">' + ic('image') + ' Ver remito</button></div></div>';
+      + '<button class="btn btn-ghost btn-sm" onclick="__ifco2VerFoto(\'' + r.estado + '\',\'' + r.fotoSell + '\',\'' + r.fotoDesp + '\')">' + ic('image') + ' Ver foto</button></div></div>';
   }
   window.__ifco2Open = function (id) {
     fetchJSON(API + '/remitos/' + id).then(function (row) {
@@ -298,6 +302,40 @@
       document.getElementById('dwScrim').classList.add('on'); icons();
     });
   };
+  // Visor de foto del remito (acceso directo desde la fila y el drawer). Muestra la foto
+  // RELEVANTE según el estado (despachado → despacho; sellado/enviado/presentado → sellado)
+  // con fallback a la que exista, y un toggle Despacho/Sellado solo si están ambas.
+  window.__ifco2VerFoto = function (estado, sellPath, despPath) {
+    sellPath = sellPath || ''; despPath = despPath || '';
+    if (!sellPath && !despPath) { toast('Este remito no tiene fotos cargadas', 'warn'); return; }
+    var ambas = !!(sellPath && despPath);
+    var actual = (estado === 'despachado') ? (despPath ? 'desp' : 'sell') : (sellPath ? 'sell' : 'desp');
+    var ov = document.createElement('div');
+    ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.88);z-index:9999;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px;gap:14px;font-family:var(--i-sans,sans-serif)';
+    function render() {
+      var src = actual === 'sell' ? sellPath : despPath;
+      var toggle = ambas
+        ? '<div style="display:inline-flex;gap:2px;background:rgba(255,255,255,.14);border-radius:8px;padding:3px">'
+          + '<button data-k="desp" style="border:0;padding:6px 14px;border-radius:6px;font:inherit;font-size:13px;cursor:pointer;' + (actual === 'desp' ? 'background:#fff;color:#16202e' : 'background:transparent;color:#fff') + '">📷 Despacho</button>'
+          + '<button data-k="sell" style="border:0;padding:6px 14px;border-radius:6px;font:inherit;font-size:13px;cursor:pointer;' + (actual === 'sell' ? 'background:#fff;color:#16202e' : 'background:transparent;color:#fff') + '">🔏 Sellado</button>'
+          + '</div>'
+        : '<div style="color:#cbd5e1;font-size:13px">' + (actual === 'sell' ? '🔏 Foto sellado' : '📷 Foto despacho') + '</div>';
+      ov.innerHTML = '<div style="display:flex;align-items:center;gap:14px">' + toggle
+        + '<button id="ifco2vf-close" title="Cerrar (Esc)" style="border:0;background:rgba(255,255,255,.15);color:#fff;width:34px;height:34px;border-radius:50%;font-size:18px;cursor:pointer">✕</button></div>'
+        + '<img src="' + esc(src) + '" style="max-width:95%;max-height:82vh;border-radius:8px;box-shadow:0 10px 40px rgba(0,0,0,.5);background:#fff" alt="Foto remito">';
+      ov.querySelector('#ifco2vf-close').onclick = close;
+      Array.prototype.forEach.call(ov.querySelectorAll('button[data-k]'), function (b) {
+        b.onclick = function (e) { e.stopPropagation(); actual = b.getAttribute('data-k'); render(); };
+      });
+    }
+    function close() { if (ov.parentNode) ov.remove(); document.removeEventListener('keydown', onEsc, true); }
+    function onEsc(e) { if (e.key === 'Escape') close(); }
+    ov.onclick = function (e) { if (e.target === ov) close(); };
+    document.body.appendChild(ov);
+    document.addEventListener('keydown', onEsc, true);
+    render();
+  };
+
   window.__ifco2Close = function () {
     var dw = document.getElementById('dwDespacho'); if (dw) { dw.classList.remove('on'); dw.setAttribute('aria-hidden', 'true'); }
     var sc = document.getElementById('dwScrim'); if (sc) sc.classList.remove('on');
