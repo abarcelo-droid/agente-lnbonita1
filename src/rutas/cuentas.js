@@ -75,6 +75,90 @@ function getSociedadId(req) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// TÍTULOS — listar / crear / editar / desactivar
+// Nivel intermedio X.XX.XX entre sección (X.XX) y cuenta (X.XX.XX.XXXX).
+// No son imputables — solo se usan para organizar el plan de cuentas.
+// ═══════════════════════════════════════════════════════════════════════════
+
+router.get('/titulos', (req, res) => {
+  const incluirInactivos = req.query.incluir_inactivos === '1';
+  const sociedadId = getSociedadId(req);
+  const seccionId = req.query.seccion_id ? parseInt(req.query.seccion_id, 10) : null;
+  const params = [sociedadId];
+  let sql = 'SELECT t.*, s.codigo AS seccion_codigo, s.nombre AS seccion_nombre FROM pa_cuentas_titulos t JOIN pa_cuentas_secciones s ON s.id = t.seccion_id WHERE t.sociedad_id = ?';
+  if (!incluirInactivos) sql += ' AND t.activo = 1';
+  if (seccionId) { sql += ' AND t.seccion_id = ?'; params.push(seccionId); }
+  sql += ' ORDER BY t.codigo';
+  res.json({ ok: true, data: db.prepare(sql).all(...params) });
+});
+
+router.post('/titulos', requireAdmin, (req, res) => {
+  const { codigo, nombre, seccion_id } = req.body || {};
+  if (!codigo || !nombre || !seccion_id) {
+    return res.status(400).json({ error: 'codigo, nombre y seccion_id son requeridos' });
+  }
+  const codigoStr = String(codigo).trim();
+  // Formato obligatorio: X.XX.XX  (3 partes, ej: 1.01.01)
+  if (!/^\d+\.\d{2}\.\d{2}$/.test(codigoStr)) {
+    return res.status(400).json({ error: 'El código del título debe tener formato X.XX.XX (ej: 1.01.01)' });
+  }
+  const sec = db.prepare('SELECT id, sociedad_id FROM pa_cuentas_secciones WHERE id = ?').get(parseInt(seccion_id, 10));
+  if (!sec) return res.status(400).json({ error: 'seccion_id inválido' });
+  const sociedadId = sec.sociedad_id;
+  const existe = db.prepare('SELECT id FROM pa_cuentas_titulos WHERE codigo = ? AND sociedad_id = ?').get(codigoStr, sociedadId);
+  if (existe) return res.status(400).json({ error: 'ya existe un título con ese código en esta sociedad' });
+  try {
+    const r = db.prepare(`
+      INSERT INTO pa_cuentas_titulos (sociedad_id, seccion_id, codigo, nombre, orden, activo)
+      VALUES (?, ?, ?, ?, ?, 1)
+    `).run(sociedadId, sec.id, codigoStr, String(nombre).trim(), codigoStr);
+    logAccion({ seccion_id: sec.id, accion: 'crear_titulo', detalle: { codigo: codigoStr, nombre }, usuario_id: req._user?.id });
+    res.json({ ok: true, id: r.lastInsertRowid });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.put('/titulos/:id', requireAdmin, (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const tit = db.prepare('SELECT * FROM pa_cuentas_titulos WHERE id = ?').get(id);
+  if (!tit) return res.status(404).json({ error: 'título no encontrado' });
+  const { nombre, codigo } = req.body || {};
+  if (codigo !== undefined && String(codigo).trim() !== String(tit.codigo)) {
+    const codigoStr = String(codigo).trim();
+    if (!/^\d+\.\d{2}\.\d{2}$/.test(codigoStr)) {
+      return res.status(400).json({ error: 'El código del título debe tener formato X.XX.XX (ej: 1.01.01)' });
+    }
+    const otra = db.prepare('SELECT id FROM pa_cuentas_titulos WHERE codigo = ? AND sociedad_id = ? AND id != ?').get(codigoStr, tit.sociedad_id, id);
+    if (otra) return res.status(400).json({ error: 'ya existe otro título con ese código en esta sociedad' });
+    db.prepare("UPDATE pa_cuentas_titulos SET codigo = ?, actualizado_en = datetime('now','localtime') WHERE id = ?").run(codigoStr, id);
+  }
+  if (nombre && String(nombre).trim() !== tit.nombre) {
+    db.prepare("UPDATE pa_cuentas_titulos SET nombre = ?, actualizado_en = datetime('now','localtime') WHERE id = ?").run(String(nombre).trim(), id);
+  }
+  logAccion({ seccion_id: tit.seccion_id, accion: 'editar_titulo', detalle: { antes: tit, despues: req.body }, usuario_id: req._user?.id });
+  res.json({ ok: true });
+});
+
+router.delete('/titulos/:id', requireAdmin, (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const conCuentas = db.prepare('SELECT COUNT(*) AS c FROM pa_cuentas WHERE titulo_id = ? AND activo = 1').get(id);
+  if (conCuentas.c > 0) {
+    return res.status(400).json({
+      error: `el título tiene ${conCuentas.c} cuenta(s) activa(s); desactivelas o muevalas primero`,
+    });
+  }
+  db.prepare("UPDATE pa_cuentas_titulos SET activo = 0, actualizado_en = datetime('now','localtime') WHERE id = ?").run(id);
+  res.json({ ok: true });
+});
+
+router.post('/titulos/:id/reactivar', requireAdmin, (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  db.prepare("UPDATE pa_cuentas_titulos SET activo = 1, actualizado_en = datetime('now','localtime') WHERE id = ?").run(id);
+  res.json({ ok: true });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
 // SECCIONES — listar / crear / editar / desactivar / reactivar
 // (van ANTES de las rutas de /:id para que no matcheen mal)
 // ═══════════════════════════════════════════════════════════════════════════
@@ -193,9 +277,12 @@ router.get('/', (req, res) => {
   let sql = `
     SELECT c.*,
            s.nombre AS seccion_nombre,
-           s.codigo AS seccion_codigo
+           s.codigo AS seccion_codigo,
+           t.nombre AS titulo_nombre,
+           t.codigo AS titulo_codigo
       FROM pa_cuentas c
       JOIN pa_cuentas_secciones s ON s.id = c.seccion_id
+      LEFT JOIN pa_cuentas_titulos t ON t.id = c.titulo_id
      WHERE c.sociedad_id = ?
   `;
   if (!incluirInactivas) sql += ' AND c.activo = 1';
@@ -212,9 +299,11 @@ router.get('/', (req, res) => {
 router.get('/:id(\\d+)', (req, res) => {
   const id = parseInt(req.params.id, 10);
   const c = db.prepare(`
-    SELECT c.*, s.nombre AS seccion_nombre, s.codigo AS seccion_codigo
+    SELECT c.*, s.nombre AS seccion_nombre, s.codigo AS seccion_codigo,
+           t.nombre AS titulo_nombre, t.codigo AS titulo_codigo
       FROM pa_cuentas c
       JOIN pa_cuentas_secciones s ON s.id = c.seccion_id
+      LEFT JOIN pa_cuentas_titulos t ON t.id = c.titulo_id
      WHERE c.id = ?
   `).get(id);
   if (!c) return res.status(404).json({ error: 'cuenta no encontrada' });
@@ -227,6 +316,7 @@ router.post('/', requireAdmin, (req, res) => {
     codigo,
     nombre,
     seccion_id,
+    titulo_id,
     tipo = 'resultado',
     permite_lote = 0,
     permite_campania = 0,
@@ -235,8 +325,10 @@ router.post('/', requireAdmin, (req, res) => {
   if (!codigo || !nombre || !seccion_id) {
     return res.status(400).json({ error: 'codigo, nombre y seccion_id son requeridos' });
   }
-  if (!/^\d+(\.\d+)+$/.test(codigo)) {
-    return res.status(400).json({ error: 'codigo debe tener formato S.NN o S.NN.NN (ej: 1.05 o 2.02.04)' });
+  // Formato nuevo obligatorio para cuentas: X.XX.XX.XXXX (4 partes)
+  // Se acepta también el formato legacy X.XX o X.XX.XX para cuentas existentes editadas.
+  if (!/^\d+(\.\d+){1,3}$/.test(codigo)) {
+    return res.status(400).json({ error: 'codigo inválido. El formato requerido para nuevas cuentas es X.XX.XX.XXXX (ej: 1.01.01.0001)' });
   }
   if (!['resultado', 'patrimonial'].includes(tipo)) {
     return res.status(400).json({ error: 'tipo inválido' });
@@ -251,15 +343,25 @@ router.post('/', requireAdmin, (req, res) => {
 
   try {
     const ordenMax = db.prepare('SELECT COALESCE(MAX(orden), 0) AS m FROM pa_cuentas WHERE seccion_id = ?').get(seccion_id).m;
+
+    // Validar titulo_id si se manda
+    let titIdFinal = null;
+    if (titulo_id) {
+      const tit = db.prepare('SELECT id FROM pa_cuentas_titulos WHERE id = ? AND seccion_id = ?').get(parseInt(titulo_id, 10), sec.id);
+      if (!tit) return res.status(400).json({ error: 'titulo_id no pertenece a la sección indicada' });
+      titIdFinal = tit.id;
+    }
+
     const r = db.prepare(`
       INSERT INTO pa_cuentas
-        (sociedad_id, codigo, nombre, seccion_id, tipo, permite_lote, permite_campania, es_sistema, orden, activo)
-      VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, 1)
+        (sociedad_id, codigo, nombre, seccion_id, titulo_id, tipo, permite_lote, permite_campania, es_sistema, orden, activo)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, 1)
     `).run(
       sociedadId,
       codigo,
       String(nombre).trim(),
       seccion_id,
+      titIdFinal,
       tipo,
       permite_lote ? 1 : 0,
       permite_campania ? 1 : 0,
@@ -278,7 +380,7 @@ router.put('/:id(\\d+)', requireAdmin, (req, res) => {
   const cuenta = db.prepare('SELECT * FROM pa_cuentas WHERE id = ?').get(id);
   if (!cuenta) return res.status(404).json({ error: 'cuenta no encontrada' });
 
-  const { codigo, nombre, seccion_id, tipo, permite_lote, permite_campania } = req.body || {};
+  const { codigo, nombre, seccion_id, titulo_id, tipo, permite_lote, permite_campania } = req.body || {};
 
   if (codigo && codigo !== cuenta.codigo) {
     if (!/^\d+(\.\d+)+$/.test(codigo)) {
@@ -305,6 +407,7 @@ router.put('/:id(\\d+)', requireAdmin, (req, res) => {
          SET codigo            = COALESCE(?, codigo),
              nombre            = COALESCE(?, nombre),
              seccion_id        = COALESCE(?, seccion_id),
+             titulo_id         = CASE WHEN ? IS NOT NULL THEN ? ELSE titulo_id END,
              tipo              = COALESCE(?, tipo),
              permite_lote      = COALESCE(?, permite_lote),
              permite_campania  = COALESCE(?, permite_campania),
@@ -314,6 +417,8 @@ router.put('/:id(\\d+)', requireAdmin, (req, res) => {
       codigo ?? null,
       nombre ? String(nombre).trim() : null,
       seccion_id ?? null,
+      titulo_id !== undefined ? 1 : null, // sentinel para distinguir "no mandado" vs "mandado"
+      titulo_id !== undefined ? (titulo_id || null) : null,
       tipo ?? null,
       permite_lote === undefined ? null : (permite_lote ? 1 : 0),
       permite_campania === undefined ? null : (permite_campania ? 1 : 0),
