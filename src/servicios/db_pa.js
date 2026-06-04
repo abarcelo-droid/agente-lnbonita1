@@ -3225,5 +3225,41 @@ db.exec(`
   }
 })();
 
+// ── MIGRACIÓN: Títulos del plan de cuentas (X.XX.XX) ────────────────────────
+// Introduce un tercer nivel jerárquico entre Sección (X.XX) y Cuenta (X.XX.XX.XXXX).
+// Los títulos agrupan cuentas dentro de una sección y NO son imputables.
+// Idempotente: CREATE TABLE IF NOT EXISTS + columna con guard PRAGMA.
+(function migrarTitulos() {
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS pa_cuentas_titulos (
+        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+        sociedad_id     INTEGER NOT NULL REFERENCES sociedades(id),
+        seccion_id      INTEGER NOT NULL REFERENCES pa_cuentas_secciones(id),
+        codigo          TEXT NOT NULL,
+        nombre          TEXT NOT NULL,
+        orden           INTEGER NOT NULL DEFAULT 0,
+        activo          INTEGER NOT NULL DEFAULT 1,
+        creado_en       TEXT DEFAULT (datetime('now','localtime')),
+        actualizado_en  TEXT DEFAULT (datetime('now','localtime')),
+        UNIQUE(sociedad_id, codigo)
+      );
+      CREATE INDEX IF NOT EXISTS idx_pa_titulos_seccion  ON pa_cuentas_titulos(seccion_id);
+      CREATE INDEX IF NOT EXISTS idx_pa_titulos_sociedad ON pa_cuentas_titulos(sociedad_id);
+      CREATE INDEX IF NOT EXISTS idx_pa_titulos_codigo   ON pa_cuentas_titulos(codigo);
+    `);
+    console.log('[PA] pa_cuentas_titulos: tabla lista');
+  } catch(e) { console.error('[PA] Error creando pa_cuentas_titulos:', e.message); }
+
+  // Agregar titulo_id a pa_cuentas (nullable → compatible con cuentas existentes)
+  try {
+    const cols = db.prepare("PRAGMA table_info(pa_cuentas)").all().map(c => c.name);
+    if (!cols.includes('titulo_id')) {
+      db.exec("ALTER TABLE pa_cuentas ADD COLUMN titulo_id INTEGER REFERENCES pa_cuentas_titulos(id)");
+      console.log('[PA] pa_cuentas.titulo_id agregado');
+    }
+  } catch(e) { console.error('[PA] Error agregando titulo_id a pa_cuentas:', e.message); }
+})();
+
 export { db };
 export default db;
