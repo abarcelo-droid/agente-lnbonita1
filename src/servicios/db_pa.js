@@ -1300,6 +1300,32 @@ try {
   }
 } catch(e) { console.error('[PA] Error migrando post_cosecha en pa_tareas_tipos:', e.message); }
 
+// ── Padrón de tarifas por ROL (costeo MO automático) ────────────────────────
+// La tarifa de la mano de obra individual/grupal se resuelve por el rol de la persona
+// (pa_personal.rol), no se tipea por línea. $/jornal. Idempotente.
+try {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS pa_tarifas_rol (
+      id             INTEGER PRIMARY KEY AUTOINCREMENT,
+      rol            TEXT NOT NULL UNIQUE,
+      tarifa         REAL NOT NULL DEFAULT 0,
+      modificado_en  TEXT DEFAULT (datetime('now','localtime')),
+      modificado_por INTEGER
+    )
+  `);
+} catch(e) { console.error('[PA] Error creando pa_tarifas_rol:', e.message); }
+
+// ── Migración: tarifa_jornal en pa_cuadrillas ($/jornal de la cuadrilla) ─────
+// El modo Cuadrilla (bloque) cobra por la tarifa de SU cuadrilla, no por el rol de la
+// responsable. Simple ADD COLUMN, idempotente con guard PRAGMA table_info.
+try {
+  const colsCu = db.prepare("PRAGMA table_info(pa_cuadrillas)").all().map(c => c.name);
+  if (!colsCu.includes('tarifa_jornal')) {
+    db.exec('ALTER TABLE pa_cuadrillas ADD COLUMN tarifa_jornal REAL');
+    console.log('[PA] tarifa_jornal agregado en pa_cuadrillas');
+  }
+} catch(e) { console.error('[PA] Error migrando tarifa_jornal en pa_cuadrillas:', e.message); }
+
 // (Migraciones pa_trabajadores→pa_personal ELIMINADAS: ya cumplidas; la unificación
 //  final — grupo_id, columnas de Pañol y DROP de pa_trabajadores — está más abajo,
 //  después de crear las tablas de Pañol.)
