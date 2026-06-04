@@ -15,6 +15,7 @@ const MODULOS_PERSONAL = [
   ["personal-valorizar",  "Por valorizar",     662],
   ["personal-cc",         "Cuenta Corriente",  663],
   ["personal-catalogo",   "Catalogo",          664],
+  ["personal-tarifas",    "Tarifas",           666],
   ["personal-reportes",   "Reportes",          665],
 ];
 

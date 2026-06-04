@@ -259,6 +259,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   <div class="ni" data-sec="personal-valorizar" data-admin-only="1"><span class="dot dc"></span>💰 Por valorizar</div>
   <div class="ni" data-sec="personal-cc" data-admin-only="1"><span class="dot dd"></span>📒 Cuenta Corriente</div>
   <div class="ni" data-sec="personal-catalogo" data-admin-only="1"><span class="dot da"></span>📚 Catálogo</div>
+  <div class="ni" data-sec="personal-tarifas" data-admin-only="1"><span class="dot dc"></span>💵 Tarifas</div>
   <div class="ni" data-sec="personal-reportes" data-admin-only="1"><span class="dot de"></span>📈 Reportes</div>
 
   <div class="ng" style="margin-top:8px">Abasto SG</div>
@@ -4060,7 +4061,6 @@ function sgRepExport(){
     <div class="pp-subtab" data-sub="cuadrillas" onclick="ppShowSub('cuadrillas')">🚜 Cuadrillas</div>
     <div class="pp-subtab" data-sub="rubros" onclick="ppShowSub('rubros')">📊 Rubros</div>
     <div class="pp-subtab" data-sub="tareas-rubros" id="pp-tab-tareas-rubros" onclick="ppShowSub('tareas-rubros')">🏷️ Tareas / Rubros</div>
-    <div class="pp-subtab" data-sub="tarifas-rol" id="pp-tab-tarifas-rol" onclick="ppShowSub('tarifas-rol')">💵 Tarifas por rol</div>
     <div class="pp-subtab" data-sub="permisos" id="pp-tab-permisos" onclick="ppShowSub('permisos')">⚙️ Permisos</div>
   </div>
   <div class="pp-sub on" id="pp-sub-grupos">
@@ -4121,7 +4121,12 @@ function sgRepExport(){
       <tbody id="pp-tareas-tbody"></tbody>
     </table></div>
   </div>
-  <div class="pp-sub" id="pp-sub-tarifas-rol">
+</div>
+
+<!-- Tarifas (módulo propio, fuera de Catálogo: la operadora de jornales no debe ver tarifas) -->
+<div class="sec pp-mod" id="sec-personal-tarifas">
+  <div class="ph"><div><div class="ph-t">💵 Tarifas</div><div class="ph-s">Tarifas genéricas de mano de obra ($/jornal por rol)</div></div></div>
+  <div class="pp-sub on" id="pp-sub-tarifas-rol">
     <div style="margin-bottom:12px;font-size:12px;color:var(--mut)">
       Tarifa <strong>$/jornal por rol</strong> para la mano de obra individual/grupal. El costo de la
       asistencia se resuelve solo: <strong>jornales × tarifa del rol</strong>. (Las cuadrillas tienen su
@@ -8665,6 +8670,7 @@ function loadSec(s) {
     'personal-valorizar':  function(){ ppOpenModulo('valorizar'); },
     'personal-cc':         function(){ ppOpenModulo('cc'); },
     'personal-catalogo':   function(){ ppOpenModulo('grupos'); },
+    'personal-tarifas':    function(){ ppOpenModulo('tarifas-rol'); },
     'personal-reportes':   function(){ ppOpenModulo('reportes'); }
   };
   if (m[s]) m[s]();
