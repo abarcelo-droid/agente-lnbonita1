@@ -80,6 +80,22 @@
   }
   window.__ifco2Nav = nav;
 
+  // Refresca los pills del subnav (que solo se setean en init) leyendo /resumen y /recepciones-en-viaje.
+  // Se usa en init y tras acciones que cambian datos por fuera de un nav() (p.ej. aplicar consolidación).
+  function refreshPills() {
+    fetchJSON(API + '/resumen').then(function (R) {
+      st.resumen = R || {};
+      var al = (R && R.alertas) || {};
+      setPill('despachos', (al.urgentes_presentar || []).length, '');
+      setPill('salidas', (al.envios_vencidos || []).length, 'amber');
+      setPill('talonarios', al.talonario ? 1 : 0, 'amber');
+    });
+    fetchJSON(API + '/recepciones-en-viaje').then(function (v) { setPill('ingresos', (v && v.length) || 0, 'amber'); });
+  }
+  // Refresco completo de la vista nueva tras una acción legacy (la consolidación se aplica desde el
+  // modal legacy): repinta los pills y re-renderiza la vista activa (cada RENDER re-fetchea de la API).
+  window.__ifco2Refresh = function () { refreshPills(); if (st.view) nav(st.view); };
+
   function setPill(v, n, cls) {
     var b = document.querySelector('#sec-ab-ifcos .subnav button[data-v="' + v + '"]');
     if (!b) return;
@@ -473,8 +489,21 @@
       .then(function (r) { return r.json(); })
       .then(function (d) {
         if (!d || d.error) { box.innerHTML = empty('No se pudo procesar: ' + ((d && d.error) || 'error')); return; }
-        function grp(lbl, g) { g = g || {}; return '<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--i-line)"><span>' + lbl + '</span><span class="tnum"><b style="color:var(--i-ok)">' + (g.a_marcar || 0) + '</b> · <span class="muted">' + (g.ya_consolidados || 0) + '</span> · <b style="color:var(--i-err)">' + (g.no_encontrados || 0) + '</b></span></div>'; }
+        // OJO: el endpoint devuelve a_marcar/ya_consolidados/no_encontrados como ARRAYS de {archivo, sistema}
+        // (no como conteos). Hay que mostrar su .length — concatenar el array crudo da "[object Object],…".
+        function grp(lbl, g) { g = g || {};
+          var a = (g.a_marcar || []).length, ya = (g.ya_consolidados || []).length, no = (g.no_encontrados || []).length;
+          return '<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--i-line)"><span>' + lbl + '</span><span class="tnum"><b style="color:var(--i-ok)">' + a + '</b> · <span class="muted">' + ya + '</span> · <b style="color:var(--i-err)">' + no + '</b></span></div>'; }
+        // Balance agregado (red de seguridad): total del archivo IFCO vs total del sistema, por lado.
+        function bal(lbl, b) { b = b || {};
+          var coincide = !!b.coincide;
+          return '<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--i-line)"><span>' + lbl + '</span>'
+            + '<span class="tnum">archivo <b>' + nf(b.total_archivo || 0) + '</b> · sistema <b>' + nf(b.total_sistema || 0) + '</b> · '
+            + (coincide ? '<span class="tag consol">' + ic('check') + ' coincide</span>'
+                        : '<b style="color:var(--i-err)">Δ ' + nf(b.diferencia || 0) + '</b>')
+            + '</span></div>'; }
         box.innerHTML = '<div class="sectlabel">A consolidar · ya · no encontrados</div>' + grp('Despachos', d.despachos) + grp('Ingresos', d.ingresos) + grp('Altas R22', d.r22)
+          + '<div class="sectlabel" style="margin-top:12px">Balance archivo vs sistema</div>' + bal('Egresos', d.balance_egresos) + bal('Ingresos', d.balance_ingresos)
           + '<button class="btn btn-pri btn-sm" style="margin-top:12px;width:100%;justify-content:center" onclick="__ifco2Legacy(\'ifcoAbrirConsolidar\')">' + ic('check-check') + ' Abrir consolidación (revisar y aplicar)</button>';
         icons();
       }).catch(function () { box.innerHTML = empty('Error de red al procesar el archivo'); });
@@ -829,16 +858,8 @@
       fetchJSON(API + '/ocr/status').then(function (s) {
         try { if (typeof IFCO !== 'undefined' && IFCO) IFCO._ocr = s || { enabled: false }; } catch (e) {}
       });
-      // resumen (KPIs + pills)
-      fetchJSON(API + '/resumen').then(function (R) {
-        st.resumen = R || {};
-        var al = (R && R.alertas) || {};
-        setPill('despachos', (al.urgentes_presentar || []).length, '');
-        setPill('salidas', (al.envios_vencidos || []).length, 'amber');
-        setPill('talonarios', al.talonario ? 1 : 0, 'amber');
-        if (st.view === 'despachos') { var k = document.querySelector('#iv-despachos .acc-gold .k-sub'); /* refresco suave si ya está */ }
-      });
-      fetchJSON(API + '/recepciones-en-viaje').then(function (v) { setPill('ingresos', (v && v.length) || 0, 'amber'); });
+      // resumen (KPIs + pills del subnav)
+      refreshPills();
       // arranca SIEMPRE en Despachos con el buscador pre-cargado en 00015-01
       st.search = '00015-01'; st.despEstado = '';
       nav('despachos');

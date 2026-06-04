@@ -23868,11 +23868,13 @@ async function ifcoConsolidarAplicar() {
       '<div style="margin-bottom:8px"><b>Ingresos:</b> ' + r2.ingresos.actualizados + ' marcados, ' + r2.ingresos.creados + ' creados' + (r2.ingresos.errores.length?' <span style="color:var(--err)">('+r2.ingresos.errores.length+' errores)</span>':'') + '</div>' +
       '<div><b>R22:</b> ' + r2.r22.actualizados + ' marcados, ' + r2.r22.creados + ' creados' + (r2.r22.errores.length?' <span style="color:var(--err)">('+r2.r22.errores.length+' errores)</span>':'') + '</div>';
 
-    // Refrescar listas
+    // Refrescar listas (panes legacy ocultas)
     if (typeof ifcoCargarRemitos === 'function') ifcoCargarRemitos();
     if (typeof ifcoCargarMovimientos === 'function') ifcoCargarMovimientos();
     if (typeof ifcoCargarRecepciones === 'function') ifcoCargarRecepciones();
     if (typeof ifcoCargarResumen === 'function') ifcoCargarResumen();
+    // …y la vista nueva IFCO2 (pills + vista activa), que no se entera de los refrescos legacy
+    if (typeof window.__ifco2Refresh === 'function') window.__ifco2Refresh();
   } catch(e) {
     alert('Error: ' + e.message);
     btn.disabled = false; btn.textContent = '✓ Aplicar consolidación';
