@@ -12,7 +12,7 @@ import cotizacionRouter   from "./rutas/cotizacion.js";
 import crmRouter          from "./rutas/crm.js";
 import buscarRouter       from "./rutas/buscar.js";
 import abastoRouter       from "./rutas/abasto.js";
-import authRouter         from "./rutas/auth.js";
+import authRouter, { bloquearSiSoloLectura } from "./rutas/auth.js";
 import produccionRouter   from "./rutas/produccion.js";
 import scoutRouter        from "./rutas/scout.js";
 import cuentasRouter      from "./rutas/cuentas.js";
@@ -24,7 +24,9 @@ import liquidacionesRouter from "./rutas/liquidaciones.js";
 import bancosRouter        from "./rutas/bancos.js";
 import ordenesRouter       from "./rutas/ordenes.js";
 import orgRouter           from "./rutas/org.js";
+import sidebarRouter       from "./rutas/sidebar.js";
 import ventasRouter        from "./rutas/ventas.js";
+import sgRouter            from "./rutas/sg.js";
 import { guardarSnapshotCRM } from "./servicios/db.js";
 import { syncSheets } from "./servicios/sheets.js";
 
@@ -71,6 +73,10 @@ app.use("/data/conformados", express.static(path.join(__dirname, "../data/confor
 app.use("/data/fichas",      express.static(path.join(__dirname, "../data/fichas")));
 app.use("/data/remitos_pa", express.static(path.join(__dirname, "../data/remitos_pa")));
 app.use("/data/ifco",       express.static(path.join(__dirname, "../data/ifco")));
+
+// Solo-lectura: bloquea escrituras (POST/PUT/PATCH/DELETE) para usuarios con
+// solo_lectura=1 que no son admin. Debe ir antes de cualquier router /api.
+app.use("/api", bloquearSiSoloLectura);
 
 // Auth
 app.use("/api/auth", authRouter);
@@ -156,6 +162,7 @@ app.use("/api", buscarRouter);
 app.use("/api/abasto", abastoRouter);
 app.use("/api/ifco",   ifcoRouter);
 app.use("/api/org",    orgRouter);
+app.use("/api",         sidebarRouter);
 app.use("/api/pa/cuentas",      cuentasRouter);
 app.use("/api/pa/proveedores",  proveedoresRouter);
 app.use("/api/pa/pagos",        pagosRouter);
@@ -166,6 +173,7 @@ app.use("/api/ven",            ventasRouter);
 app.use("/api/pa/clima",        climaRouter);
 app.use("/api/pa",     produccionRouter);
 app.use("/api/pa/scout", scoutRouter);
+app.use("/api/sg",     sgRouter);
 
 // Scout — app mobile para campo
 app.get("/scout", (req, res) => {

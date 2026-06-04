@@ -1,0 +1,358 @@
+/* ═══════════════════════════════════════════════════════════════════════
+ * pa-calendario.css — Mejoras visuales al módulo Calendario Agrícola
+ * Todo prefijado con .pac-* para no chocar con el panel.
+ * Agrega: search bar, chips KPI, vista Timeline, bloque órdenes en modal.
+ * ═══════════════════════════════════════════════════════════════════════ */
+
+@import url('https://fonts.googleapis.com/css2?family=Archivo+Black&family=Public+Sans:wght@400;500;600;700;800&display=swap');
+
+#sec-pa-calendario {
+  --pac-navy: #1B3A6B;
+  --pac-navy-deep: #0F2647;
+  --pac-gold: #F0A500;
+  --pac-bordo: #8C1A1F;
+  --pac-paper: #FBF7EE;
+  --pac-bone: #EFE6D2;
+  --pac-line: #DDE2EC;
+  --pac-mut: #6B7283;
+  --pac-display: 'Archivo Black','Nunito',sans-serif;
+  --pac-ui: 'Public Sans','Nunito',sans-serif;
+}
+
+/* ─── Header rediseñado (.ph del calendario) ─── */
+#sec-pa-calendario .ph .ph-t {
+  font-family: var(--pac-display);
+  font-weight: 400;
+  font-size: 26px;
+  color: var(--pac-navy-deep);
+  letter-spacing: -.01em;
+}
+#sec-pa-calendario .ph .ph-s {
+  font-family: var(--pac-ui);
+  font-size: 12.5px;
+  color: var(--pac-mut);
+}
+
+/* ─── Toolbar nueva (search + KPIs) ─── */
+.pac-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin: 14px 0;
+  padding: 12px 14px;
+  background: #fff;
+  border: 1px solid var(--pac-line);
+  border-radius: 10px;
+  font-family: var(--pac-ui);
+}
+
+/* SearchBar */
+.pac-search { position: relative; flex: 1; max-width: 320px; }
+.pac-search-inner {
+  display: flex; align-items: center; gap: 8px;
+  padding: 7px 10px;
+  background: var(--pac-paper);
+  border: 1px solid var(--pac-line);
+  border-radius: 8px;
+}
+.pac-search-inner svg { flex-shrink: 0; color: var(--pac-mut); }
+.pac-search input {
+  flex: 1; border: none; outline: none;
+  font-family: var(--pac-ui);
+  font-size: 12.5px; font-weight: 600;
+  color: #1A1F2E; background: transparent;
+}
+.pac-search input::placeholder { color: #8A93A8; font-weight: 500; }
+.pac-search-results {
+  position: absolute; top: calc(100% + 4px); left: 0; right: 0;
+  background: #fff; border: 1px solid var(--pac-line);
+  border-radius: 8px;
+  box-shadow: 0 12px 28px rgba(15,38,71,.12);
+  padding: 4px;
+  z-index: 20;
+  max-height: 320px; overflow: auto;
+  display: none;
+}
+.pac-search.open .pac-search-results { display: block; }
+.pac-search-item {
+  display: flex; align-items: center; gap: 8px;
+  width: 100%; padding: 8px 10px;
+  background: transparent; border: none;
+  border-radius: 6px; cursor: pointer;
+  font-family: var(--pac-ui); text-align: left;
+}
+.pac-search-item:hover { background: var(--pac-paper); }
+.pac-search-item-main { flex: 1; min-width: 0; }
+.pac-search-item-nombre {
+  font-family: var(--pac-display); font-weight: 400;
+  font-size: 12px; color: var(--pac-navy-deep);
+  display: block;
+}
+.pac-search-item-finca {
+  font-size: 10px; color: var(--pac-mut); font-weight: 600;
+}
+.pac-search-item-pill {
+  padding: 2px 7px; border-radius: 4px;
+  font-size: 10px; font-weight: 700; white-space: nowrap;
+}
+.pac-search-item-empty {
+  padding: 2px 7px; font-size: 10px; font-style: italic;
+  color: var(--pac-bordo); font-weight: 600;
+}
+.pac-search-item-ha {
+  font-size: 10px; font-weight: 700; color: var(--pac-mut);
+  font-variant-numeric: tabular-nums;
+}
+.pac-search-empty {
+  padding: 14px 10px; text-align: center;
+  font-size: 11.5px; color: var(--pac-mut);
+}
+
+/* KPIs inline */
+.pac-kpis { display: flex; align-items: center; gap: 16px; margin-left: auto; }
+.pac-kpi { display: flex; flex-direction: column; gap: 1px; }
+.pac-kpi-label {
+  font-size: 9.5px; font-weight: 800; letter-spacing: .14em;
+  text-transform: uppercase; color: var(--pac-mut);
+}
+.pac-kpi-value {
+  font-family: var(--pac-display); font-weight: 400;
+  font-size: 17px; color: var(--pac-navy-deep);
+  line-height: 1; letter-spacing: -.01em;
+}
+.pac-kpi-unit {
+  font-size: 11px; font-weight: 700; color: var(--pac-mut);
+  letter-spacing: 0;
+  font-family: var(--pac-ui);
+}
+.pac-kpi-divider { width: 1px; height: 28px; background: var(--pac-line); }
+
+/* ─── Chips KPI mejorados (reemplaza el resumen viejo) ─── */
+.pac-chips {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 6px;
+  margin: 14px 0;
+}
+.pac-chip {
+  display: flex; flex-direction: column; gap: 3px;
+  padding: 9px 11px;
+  border-radius: 8px;
+  border: 2px solid;
+  cursor: pointer;
+  font-family: var(--pac-ui);
+  transition: transform .12s, box-shadow .15s;
+  text-align: left;
+}
+.pac-chip:hover { transform: translateY(-1px); }
+.pac-chip.active { box-shadow: 0 0 0 2px var(--pac-navy-deep); }
+.pac-chip.total {
+  background: var(--pac-navy-deep);
+  border-color: var(--pac-navy-deep);
+  color: #fff;
+}
+.pac-chip-label {
+  font-size: 9px; font-weight: 800; letter-spacing: .08em;
+  opacity: .75; white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis;
+}
+.pac-chip-value {
+  font-family: var(--pac-display); font-weight: 400;
+  font-size: 17px; letter-spacing: -.01em; line-height: 1;
+}
+.pac-chip-unit {
+  font-size: 9.5px; font-weight: 700; opacity: .7;
+  font-family: var(--pac-ui);
+}
+.pac-chip-meta {
+  font-size: 9.5px; font-weight: 600; opacity: .7;
+}
+
+/* ─── Vista Timeline / Gantt ─── */
+.pac-timeline {
+  background: #fff;
+  border: 1px solid var(--pac-line);
+  border-radius: 12px;
+  overflow: hidden;
+  font-family: var(--pac-ui);
+}
+.pac-tl-header {
+  display: flex;
+  border-bottom: 1px solid var(--pac-line);
+  background: var(--pac-paper);
+  position: sticky; top: 0; z-index: 2;
+}
+.pac-tl-header-lote {
+  width: 160px; padding: 10px 14px;
+  font-size: 10px; font-weight: 800; letter-spacing: .14em;
+  text-transform: uppercase; color: var(--pac-mut);
+  border-right: 1px solid var(--pac-line);
+}
+.pac-tl-header-meses {
+  flex: 1; display: grid; grid-template-columns: repeat(12, 1fr);
+}
+.pac-tl-header-mes {
+  padding: 10px 4px;
+  font-size: 10.5px; font-weight: 700;
+  color: var(--pac-mut);
+  text-align: center;
+  border-right: 1px solid #F4F1E8;
+}
+.pac-tl-header-mes.trim { border-left: 1px solid var(--pac-line); }
+.pac-tl-header-mes.hoy {
+  color: var(--pac-navy-deep); font-weight: 800;
+  background: #FFFCF2;
+}
+
+.pac-tl-body { position: relative; min-height: 200px; }
+.pac-tl-hoy-line {
+  position: absolute; top: 0; bottom: 0; width: 2px;
+  background: var(--pac-bordo); z-index: 1; opacity: .55;
+}
+.pac-tl-hoy-label {
+  position: absolute; top: 2px; left: -18px;
+  background: var(--pac-bordo); color: #fff;
+  padding: 2px 6px; border-radius: 3px;
+  font-size: 9px; font-weight: 800; letter-spacing: .08em;
+}
+
+.pac-tl-finca-row {
+  display: flex; justify-content: space-between; align-items: baseline;
+  padding: 8px 14px;
+  background: #F4F1E8;
+  border-bottom: 1px solid #EFE6D2;
+}
+.pac-tl-finca-name {
+  font-family: var(--pac-display); font-weight: 400;
+  font-size: 11.5px; color: var(--pac-navy-deep);
+  letter-spacing: .02em; text-transform: uppercase;
+}
+.pac-tl-finca-meta {
+  font-size: 10.5px; color: var(--pac-mut); font-weight: 600;
+}
+
+.pac-tl-row {
+  display: flex; border-bottom: 1px solid #EFE6D2;
+  min-height: 38px; transition: background .12s;
+}
+.pac-tl-row:hover { background: #FFFCF2; }
+.pac-tl-label {
+  width: 160px; padding: 8px 14px;
+  display: flex; flex-direction: column; justify-content: center; gap: 1px;
+  border-right: 1px solid #EFE6D2;
+  cursor: pointer;
+}
+.pac-tl-label:hover { background: rgba(0,0,0,.02); }
+.pac-tl-nombre {
+  font-family: var(--pac-display); font-weight: 400;
+  font-size: 11px; color: #1A1F2E; letter-spacing: .01em;
+}
+.pac-tl-ha-meta { font-size: 9.5px; font-weight: 600; color: var(--pac-mut); }
+
+.pac-tl-timeline { flex: 1; position: relative; height: 38px; }
+.pac-tl-grid {
+  position: absolute; top: 0; bottom: 0; width: 1px;
+  background: #F4F1E8;
+}
+.pac-tl-grid.trim { background: var(--pac-line); }
+
+.pac-tl-bar {
+  position: absolute; top: 4px; bottom: 4px;
+  border-radius: 4px; border: 1.5px solid;
+  padding: 0 6px;
+  display: flex; align-items: center; justify-content: flex-start;
+  overflow: hidden; cursor: pointer;
+  transition: transform .12s, box-shadow .12s;
+}
+.pac-tl-bar:hover { box-shadow: 0 2px 8px rgba(0,0,0,.15); }
+.pac-tl-bar.perenne {
+  background-image: repeating-linear-gradient(45deg, currentColor 0 4px, transparent 4px 8px);
+}
+.pac-tl-bar-label {
+  font-size: 10px; font-weight: 700; white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis;
+  display: flex; align-items: center; gap: 5px;
+}
+.pac-tl-bar-dev {
+  font-size: 9px; font-weight: 800;
+  background: rgba(0,0,0,.12); padding: 1px 4px; border-radius: 2px;
+}
+.pac-tl-empty {
+  position: absolute; top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  color: #C8D2DE; font-size: 10.5px;
+  font-style: italic; font-weight: 600;
+}
+
+.pac-tl-footer {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 10px 14px;
+  background: var(--pac-paper);
+  border-top: 1px solid var(--pac-line);
+}
+.pac-tl-legend { display: flex; gap: 14px; }
+.pac-tl-legend-item {
+  display: flex; align-items: center; gap: 4px;
+  font-size: 10.5px; font-weight: 600; color: #3A4253;
+}
+.pac-tl-legend-swatch {
+  display: inline-block; width: 16px; height: 8px; border-radius: 2px;
+  background-image: repeating-linear-gradient(45deg, #8B6914 0 4px, #F5E2B0 4px 8px);
+}
+.pac-tl-stats { font-size: 10.5px; color: var(--pac-mut); font-weight: 600; }
+
+/* ─── Toggle de vistas (3 botones en lugar de 2) ─── */
+#sec-pa-calendario .pac-view-toggle {
+  display: inline-flex; gap: 4px;
+  background: var(--pac-bg, #f6f1e3);
+  border: 1px solid var(--pac-line);
+  border-radius: 8px; padding: 3px;
+}
+#sec-pa-calendario .pac-view-btn {
+  border: none; background: transparent;
+  padding: 5px 12px; border-radius: 6px;
+  font-size: 12px; font-weight: 700;
+  font-family: var(--pac-ui);
+  color: var(--pac-mut); cursor: pointer;
+}
+#sec-pa-calendario .pac-view-btn.on {
+  background: var(--pac-navy); color: #fff;
+}
+
+/* ─── Bloque "Órdenes activas" en el modal de editar lote ─── */
+.pac-modal-ordenes {
+  margin: 14px 0;
+  padding: 12px 14px;
+  background: #FFFCF2;
+  border: 1px solid #F5E2B0;
+  border-radius: 8px;
+  font-family: var(--pac-ui);
+}
+.pac-modal-ordenes-label {
+  font-size: 10px; font-weight: 800; letter-spacing: .14em;
+  text-transform: uppercase; color: #8B6914;
+  margin-bottom: 8px;
+}
+.pac-modal-orden-item {
+  display: flex; align-items: center; gap: 8px;
+  padding: 5px 0;
+  border-top: 1px solid rgba(245,226,176,.6);
+}
+.pac-modal-orden-item:first-of-type { border-top: none; }
+.pac-modal-orden-badge {
+  padding: 2px 7px; border-radius: 3px;
+  font-size: 10px; font-weight: 800;
+}
+.pac-modal-orden-tipo {
+  flex: 1; font-size: 12px; font-weight: 600; color: #1A1F2E;
+}
+.pac-modal-orden-dias {
+  font-size: 11px; font-weight: 700; color: var(--pac-mut);
+}
+.pac-modal-orden-dias.urgente {
+  color: var(--pac-bordo); font-weight: 800;
+}
+.pac-modal-ordenes-empty {
+  font-size: 11.5px; color: var(--pac-mut);
+  text-align: center; padding: 6px;
+}

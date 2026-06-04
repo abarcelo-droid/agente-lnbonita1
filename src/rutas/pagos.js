@@ -10,6 +10,27 @@ function getUser(req) {
   catch(e) { return null; }
 }
 
+// ── Multisociedad (Fase 3) ──────────────────────────────────────────────────
+// Pagos POR sociedad. El pago hereda la sociedad de su proveedor. Lecturas filtran
+// por sociedad (default PC si el request no la envía).
+let _pcId = null;
+function sociedadPCId() {
+  if (_pcId) return _pcId;
+  const r = db.prepare("SELECT id FROM sociedades WHERE nombre = 'Puente Cordón SA'").get()
+         || db.prepare("SELECT id FROM sociedades WHERE funcion = 'productiva' ORDER BY id LIMIT 1").get();
+  _pcId = r ? r.id : 1;
+  return _pcId;
+}
+function getSociedadId(req) {
+  const raw = req.body?.sociedad_id ?? req.query?.sociedad_id;
+  const id = (raw !== undefined && raw !== null && raw !== '') ? parseInt(raw, 10) : null;
+  if (Number.isInteger(id)) {
+    const ok = db.prepare('SELECT id FROM sociedades WHERE id = ?').get(id);
+    if (ok) return id;
+  }
+  return sociedadPCId();
+}
+
 // ── GET /api/pa/pagos/cc/:proveedorId — cuenta corriente de un proveedor ──
 // Devuelve todas las facturas activas con su saldo pendiente
 router.get('/cc/:proveedorId', (req, res) => {
@@ -44,13 +65,14 @@ router.get('/cc/:proveedorId', (req, res) => {
 router.get('/', (req, res) => {
   try {
     const { proveedorId } = req.query;
+    const sociedadId = getSociedadId(req);
     let sql = `
       SELECT p.*, pr.razon_social as proveedor_nombre
       FROM pa_pagos_proveedores p
       LEFT JOIN adm_proveedores pr ON pr.id = p.proveedor_id
-      WHERE p.anulado = 0
+      WHERE p.anulado = 0 AND p.sociedad_id = ?
     `;
-    const params = [];
+    const params = [sociedadId];
     if (proveedorId) { sql += ' AND p.proveedor_id = ?'; params.push(parseInt(proveedorId)); }
     sql += ' ORDER BY p.fecha DESC, p.id DESC';
     const pagos = db.prepare(sql).all(...params);
@@ -96,13 +118,17 @@ router.post('/', (req, res) => {
   if (!monto || monto <= 0) return res.status(400).json({ ok: false, error: 'monto inválido' });
   if (!compras || !compras.length) return res.status(400).json({ ok: false, error: 'Seleccioná al menos una factura' });
 
+  // El pago hereda la sociedad de su proveedor (default PC si no se resuelve).
+  const prov = db.prepare('SELECT sociedad_id FROM adm_proveedores WHERE id = ?').get(parseInt(proveedor_id));
+  const sociedadId = prov ? prov.sociedad_id : sociedadPCId();
+
   try {
     const registrar = db.transaction(() => {
       // Insertar pago
       const r = db.prepare(`
         INSERT INTO pa_pagos_proveedores
-          (fecha, proveedor_id, monto, forma_pago, banco, referencia, notas, usuario_id)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+          (fecha, proveedor_id, monto, forma_pago, banco, referencia, notas, usuario_id, sociedad_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         fecha || new Date().toISOString().split('T')[0],
         parseInt(proveedor_id),
@@ -111,7 +137,8 @@ router.post('/', (req, res) => {
         banco || null,
         referencia || null,
         notas || null,
-        u ? u.id : null
+        u ? u.id : null,
+        sociedadId
       );
       const pagoId = r.lastInsertRowid;
 

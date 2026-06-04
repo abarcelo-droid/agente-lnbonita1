@@ -14,6 +14,11 @@ const BCRYPT_ROUNDS = 10;
 try { getDb().exec("ALTER TABLE usuarios ADD COLUMN deposito_tipo TEXT"); } catch(e) { /* ya existe */ }
 try { getDb().exec("ALTER TABLE usuarios ADD COLUMN deposito_proveedor_id INTEGER"); } catch(e) { /* ya existe */ }
 
+// Flag de "solo lectura": usuarios con esta marca pueden ver todo pero no editar/crear/borrar.
+// NO afecta a admins (que siempre pueden hacer todo, ignoran el flag).
+// Default 0 (false) para no romper usuarios existentes.
+try { getDb().exec("ALTER TABLE usuarios ADD COLUMN solo_lectura INTEGER DEFAULT 0"); } catch(e) { /* ya existe */ }
+
 // ── Tabla password_reset_tokens (recuperación de contraseña por mail) ──────
 // Tokens de un solo uso, expiran en 1 hora.
 // Se purgan automáticamente los vencidos al crear uno nuevo.
@@ -140,13 +145,14 @@ function validatePassword(password, username) {
   } catch(e) { console.error('[AUTH] Error generando usernames iniciales:', e.message); }
 })();
 
-// Login por email+PIN, username+PIN, password (post-fase 2.C), o nombre+PIN
+// Login por email+password, username+password, o nombre+password
 // El campo del body sigue siendo `email` por compatibilidad con el frontend actual,
 // pero el backend prueba 3 caminos: email exacto → username → nombre exacto.
-// Acepta `pin` (modo viejo) o `password` (modo nuevo post-migración).
+// Solo acepta `password`. Los usuarios viejos con solo PIN deben pedirle al admin
+// que les asigne una password inicial.
 router.post('/login', async (req, res) => {
-  const { email, pin, password, next } = req.body;
-  if (!pin && !password) return res.status(400).json({ ok: false, error: 'Ingresá tu PIN o contraseña' });
+  const { email, password, next } = req.body;
+  if (!password) return res.status(400).json({ ok: false, error: 'Ingresá tu contraseña' });
   const db = getDb();
   try {
     let user = null;
@@ -164,45 +170,29 @@ router.post('/login', async (req, res) => {
         user = db.prepare('SELECT * FROM usuarios WHERE nombre = ? AND activo = 1').get(identifier);
       }
     }
-    if (!user) return res.status(401).json({ ok: false, error: 'Usuario no encontrado' });
+    if (!user) return res.status(401).json({ ok: false, error: 'Usuario o contraseña incorrectos' });
 
-    // ── Modo contraseña (post-fase 2.C) ──────────────────────────────────
-    if (password) {
-      if (!user.password_hash) {
-        return res.status(401).json({ ok: false, error: 'Este usuario todavía no seteó contraseña. Entrá con tu PIN.' });
-      }
-      const match = await bcrypt.compare(password, user.password_hash);
-      if (!match) return res.status(401).json({ ok: false, error: 'Contraseña incorrecta' });
+    // Si el usuario todavía no tiene password configurada (legacy con solo PIN),
+    // no puede entrar. Tiene que pedirle al admin que le asigne una password inicial.
+    if (!user.password_hash) {
+      return res.status(401).json({
+        ok: false,
+        error: 'Tu cuenta todavía no tiene contraseña configurada. Pedile a tu administrador que te asigne una.'
+      });
+    }
+    const match = await bcrypt.compare(password, user.password_hash);
+    if (!match) return res.status(401).json({ ok: false, error: 'Usuario o contraseña incorrectos' });
 
-      // FASE 2.C: si el admin le asignó password inicial con debe_cambiar_password=1,
-      // forzar el cambio antes de entrar al panel (mismo flow que el PIN, pero confirma con password actual)
-      if (user.debe_cambiar_password) {
-        return res.json({
-          ok: true,
-          requiere_setear_password: true,
-          user_id: user.id,
-          username: user.username || null,
-          nombre: user.nombre,
-          via: 'password'  // el frontend pedirá "password actual" en vez de PIN
-        });
-      }
-      // OK, seguimos al setear cookie
-    } else {
-      // ── Modo PIN (transición) ──────────────────────────────────────────
-      if (user.pin !== String(pin).trim()) return res.status(401).json({ ok: false, error: 'PIN incorrecto' });
-
-      // FASE 2.C: si el usuario nunca seteó contraseña, lo mandamos a setearla
-      // antes de entrar. Devolvemos requiere_setear_password SIN setear la cookie.
-      if (!user.migrado_a_v2 || user.migrado_a_v2 === 0) {
-        return res.json({
-          ok: true,
-          requiere_setear_password: true,
-          user_id: user.id,
-          username: user.username || null,
-          nombre: user.nombre,
-          via: 'pin'  // el frontend pide "PIN actual" como confirmación
-        });
-      }
+    // FASE 2.C: si el admin le asignó password inicial con debe_cambiar_password=1,
+    // forzar el cambio antes de entrar al panel.
+    if (user.debe_cambiar_password) {
+      return res.json({
+        ok: true,
+        requiere_setear_password: true,
+        user_id: user.id,
+        username: user.username || null,
+        nombre: user.nombre
+      });
     }
 
     const userData = {
@@ -211,7 +201,8 @@ router.post('/login', async (req, res) => {
       depositos: parseDepositos(user.depositos),
       secciones: parseSecciones(user.secciones),
       deposito_tipo: user.deposito_tipo || null,
-      deposito_proveedor_id: user.deposito_proveedor_id || null
+      deposito_proveedor_id: user.deposito_proveedor_id || null,
+      solo_lectura: !!user.solo_lectura
     };
     res.cookie('lnb_user', JSON.stringify(userData), cookieOpts(req));
 
@@ -245,38 +236,33 @@ router.post('/logout', (req, res) => {
 });
 
 // ─── FASE 2.C: setear contraseña en primer login ───────────────────────────
-// El cliente llega acá después de un login cuando:
-//   (a) entró con PIN y migrado_a_v2 = 0 (primer login natural)
-//   (b) entró con password genérica asignada por admin (debe_cambiar_password = 1)
-// Re-verifica la credencial (PIN o password actual), valida la nueva contra la
-// política, la hashea con bcrypt, marca migrado_a_v2 = 1, debe_cambiar_password = 0
-// y setea la cookie.
+// El cliente llega acá cuando el admin le asignó una password inicial
+// con debe_cambiar_password = 1. Re-verifica la password actual, valida la nueva
+// contra la política, la hashea con bcrypt, marca migrado_a_v2 = 1,
+// debe_cambiar_password = 0 y setea la cookie.
 router.post('/setear-password', async (req, res) => {
-  const { user_id, pin, password_actual, password, next } = req.body || {};
+  const { user_id, password_actual, password, next } = req.body || {};
   if (!user_id || !password) {
     return res.status(400).json({ ok: false, error: 'Faltan datos' });
   }
-  if (!pin && !password_actual) {
-    return res.status(400).json({ ok: false, error: 'Confirmá tu PIN o tu contraseña actual' });
+  if (!password_actual) {
+    return res.status(400).json({ ok: false, error: 'Confirmá tu contraseña actual' });
   }
   const db = getDb();
   try {
     const user = db.prepare('SELECT * FROM usuarios WHERE id = ? AND activo = 1').get(parseInt(user_id));
     if (!user) return res.status(401).json({ ok: false, error: 'Usuario no encontrado' });
 
-    // Confirmación: o PIN, o password actual
-    if (password_actual) {
-      if (!user.password_hash) return res.status(401).json({ ok: false, error: 'Sin contraseña actual configurada' });
-      const ok = await bcrypt.compare(password_actual, user.password_hash);
-      if (!ok) return res.status(401).json({ ok: false, error: 'Contraseña actual incorrecta' });
-    } else {
-      if (user.pin !== String(pin).trim()) return res.status(401).json({ ok: false, error: 'PIN incorrecto' });
-    }
+    // Verificar password actual
+    if (!user.password_hash) return res.status(401).json({ ok: false, error: 'Sin contraseña actual configurada' });
+    const ok = await bcrypt.compare(password_actual, user.password_hash);
+    if (!ok) return res.status(401).json({ ok: false, error: 'Contraseña actual incorrecta' });
+
     // Validar política
     const error = validatePassword(password, user.username);
     if (error) return res.status(400).json({ ok: false, error });
     // No permitir reusar la misma contraseña
-    if (password_actual && password_actual === password) {
+    if (password_actual === password) {
       return res.status(400).json({ ok: false, error: 'La nueva contraseña debe ser distinta a la actual' });
     }
     // Hashear y guardar
@@ -292,7 +278,8 @@ router.post('/setear-password', async (req, res) => {
       depositos: parseDepositos(user.depositos),
       secciones: parseSecciones(user.secciones),
       deposito_tipo: user.deposito_tipo || null,
-      deposito_proveedor_id: user.deposito_proveedor_id || null
+      deposito_proveedor_id: user.deposito_proveedor_id || null,
+      solo_lectura: !!user.solo_lectura
     };
     res.cookie('lnb_user', JSON.stringify(userData), cookieOpts(req));
 
@@ -321,12 +308,15 @@ router.get('/me', (req, res) => {
   try {
     const user = JSON.parse(cookie);
     const db = getDb();
-    const u = db.prepare('SELECT activo, deposito_tipo, deposito_proveedor_id, username FROM usuarios WHERE id=?').get(user.id);
+    const u = db.prepare('SELECT activo, deposito_tipo, deposito_proveedor_id, username, solo_lectura FROM usuarios WHERE id=?').get(user.id);
     if (!u || !u.activo) { res.clearCookie('lnb_user', { path: '/' }); return res.status(401).json({ ok: false, error: 'Sesión expirada' }); }
     // Refrescar campos que pueden cambiar desde admin sin re-loguear
     user.deposito_tipo = u.deposito_tipo || null;
     user.deposito_proveedor_id = u.deposito_proveedor_id || null;
     user.username = u.username || null;
+    // Flag solo_lectura: leído fresco de la DB en cada /me para que el cambio
+    // desde admin tenga efecto inmediato (sin necesidad de re-login del visor).
+    user.solo_lectura = !!u.solo_lectura;
     // Si es depósito de un proveedor, traer el nombre para mostrar en UI
     if (user.deposito_tipo === 'proveedor' && user.deposito_proveedor_id) {
       const p = db.prepare('SELECT nombre FROM proveedores WHERE id=?').get(user.deposito_proveedor_id);
@@ -355,6 +345,50 @@ function soloAdmin(req, res, next) {
   } catch(e) { res.status(401).json({ ok: false, error: 'Sesión inválida' }); }
 }
 
+// ─── Middleware: bloquear acciones de escritura para usuarios "solo_lectura" ───
+// Se monta globalmente desde index.js sobre TODAS las rutas /api/*.
+// Lógica:
+//   - GET / HEAD / OPTIONS → siempre pasa (es lectura)
+//   - POST / PUT / PATCH / DELETE → bloqueado SI el usuario tiene solo_lectura=1 Y no es admin
+//   - Excepciones (siempre permitidas aunque sea solo_lectura):
+//       /api/auth/logout      → tiene que poder salir de su sesión
+//       /api/auth/cambiar-pwd → debe poder cambiar su propia contraseña
+//
+// Importante: NO verificamos cookie acá (la lógica de auth la maneja cada endpoint).
+// Si el usuario no está logueado, simplemente lo dejamos pasar y el endpoint
+// destino devolverá 401. Si está logueado y tiene solo_lectura=1, lo bloqueamos.
+function bloquearSiSoloLectura(req, res, next) {
+  const metodo = req.method;
+  if (metodo === 'GET' || metodo === 'HEAD' || metodo === 'OPTIONS') return next();
+  const cookie = req.cookies?.lnb_user;
+  if (!cookie) return next(); // sin cookie → que el endpoint maneje el 401
+  let user;
+  try { user = JSON.parse(cookie); } catch(e) { return next(); }
+  // Admin pasa siempre
+  if (user.rol === 'admin') return next();
+  // Refrescar el flag desde DB (la cookie es snapshot al login, puede estar vieja)
+  try {
+    const u = getDb().prepare('SELECT solo_lectura, activo FROM usuarios WHERE id=?').get(user.id);
+    if (!u || !u.activo) return next(); // que el endpoint maneje el 401
+    if (!u.solo_lectura) return next(); // no es visor → pasa
+  } catch(e) { return next(); }
+  // Excepciones permitidas (URL relativa al mount /api)
+  const url = req.originalUrl || req.url || '';
+  if (url.indexOf('/api/auth/logout') === 0) return next();
+  if (url.indexOf('/api/auth/cambiar-pwd') === 0) return next();
+  if (url.indexOf('/api/auth/me') === 0) return next();
+  // Bloquear
+  console.log('[AUTH][solo_lectura] Bloqueando', metodo, url, 'para usuario', user.id);
+  return res.status(403).json({
+    ok: false,
+    error: 'Tu usuario es solo lectura. No podés realizar cambios.',
+    solo_lectura: true
+  });
+}
+
+// Exportar el middleware para que index.js lo monte globalmente
+export { bloquearSiSoloLectura };
+
 // GET usuarios — accesible para cualquier usuario autenticado (necesario para Scout y asignaciones)
 // Incluye datos de la persona vinculada (nivel_acceso, áreas, cargo)
 router.get('/usuarios', requireAuth, (req, res) => {
@@ -363,6 +397,7 @@ router.get('/usuarios', requireAuth, (req, res) => {
     const usuarios = db.prepare(`
       SELECT u.id, u.nombre, u.email, u.username, u.rol, u.depositos, u.secciones, u.activo, u.creado_en,
              u.deposito_tipo, u.deposito_proveedor_id, u.migrado_a_v2, u.debe_cambiar_password,
+             u.solo_lectura,
              u.password_hash IS NOT NULL AS tiene_password,
              u.persona_id,
              p.nombre AS persona_nombre, p.apellido AS persona_apellido,
@@ -427,10 +462,14 @@ router.post('/usuarios', soloAdmin, (req, res) => {
     ? email.trim().toLowerCase()
     : `campo_${nombre.toLowerCase().replace(/\s+/g,'_').replace(/[^a-z0-9_]/g,'')}@interno.lnb`;
   try {
-    const r = db.prepare(`INSERT INTO usuarios (nombre, email, pin, rol, depositos, secciones, deposito_tipo, deposito_proveedor_id, username) VALUES (?,?,?,?,?,?,?,?,?)`)
-      .run(nombre.trim(), emailFinal, String(pin), rol||'operador',
+    // Flag solo_lectura: viene como bool/0/1 desde el frontend. Default 0.
+    // Admin nunca tiene solo_lectura=1, así que si el body lo trae pero rol=admin, forzamos 0.
+    const rolFinal = rol || 'operador';
+    const soloLect = (rolFinal === 'admin') ? 0 : (req.body.solo_lectura ? 1 : 0);
+    const r = db.prepare(`INSERT INTO usuarios (nombre, email, pin, rol, depositos, secciones, deposito_tipo, deposito_proveedor_id, username, solo_lectura) VALUES (?,?,?,?,?,?,?,?,?,?)`)
+      .run(nombre.trim(), emailFinal, String(pin), rolFinal,
            JSON.stringify(depositos||['MCBA','FINCA','SAN PEDRO']), JSON.stringify(secciones||['*']),
-           depTipo, depProvId, usernameFinal);
+           depTipo, depProvId, usernameFinal, soloLect);
     res.json({ ok: true, id: r.lastInsertRowid, username: usernameFinal });
   } catch(e) {
     if (e.message.includes('UNIQUE')) return res.status(400).json({ ok: false, error: 'Ya existe un usuario con ese nombre, email o username' });
@@ -481,12 +520,22 @@ router.patch('/usuarios/:id', soloAdmin, (req, res) => {
         }
       }
     }
-    db.prepare(`UPDATE usuarios SET nombre=?, email=?, pin=?, rol=?, depositos=?, secciones=?, activo=?, deposito_tipo=?, deposito_proveedor_id=?, username=? WHERE id=?`)
+    // Flag solo_lectura: si no viene en body, mantener actual.
+    // Si el rol final es admin, forzar a 0 (admin nunca tiene solo_lectura).
+    const rolFinal = rol || current.rol;
+    let soloLect;
+    if (req.body.solo_lectura !== undefined) {
+      soloLect = req.body.solo_lectura ? 1 : 0;
+    } else {
+      soloLect = current.solo_lectura || 0;
+    }
+    if (rolFinal === 'admin') soloLect = 0;
+    db.prepare(`UPDATE usuarios SET nombre=?, email=?, pin=?, rol=?, depositos=?, secciones=?, activo=?, deposito_tipo=?, deposito_proveedor_id=?, username=?, solo_lectura=? WHERE id=?`)
       .run(nombre||current.nombre, emailFinal, pin?String(pin):current.pin,
-           rol||current.rol, depositos?JSON.stringify(depositos):current.depositos,
+           rolFinal, depositos?JSON.stringify(depositos):current.depositos,
            secciones?JSON.stringify(secciones):current.secciones,
            activo!==undefined?(activo?1:0):current.activo,
-           depTipo, depProvId, usernameFinal,
+           depTipo, depProvId, usernameFinal, soloLect,
            req.params.id);
     res.json({ ok: true, username: usernameFinal });
   } catch(e) {
@@ -526,27 +575,11 @@ router.post('/asignar-password-inicial/:id', soloAdmin, async (req, res) => {
   }
 });
 
-// ─── FASE 2.C: RESETEAR PASSWORD (admin) ───────────────────────────────────
-// Borra la contraseña. El usuario vuelve al flow de PIN + setear-password.
-router.post('/resetear-password/:id', soloAdmin, (req, res) => {
-  const userId = parseInt(req.params.id);
-  if (!userId) return res.status(400).json({ ok: false, error: 'ID inválido' });
-  const db = getDb();
-  try {
-    const user = db.prepare('SELECT id, username, nombre FROM usuarios WHERE id = ?').get(userId);
-    if (!user) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
-    db.prepare(`
-      UPDATE usuarios
-      SET password_hash = NULL, debe_cambiar_password = 0, migrado_a_v2 = 0
-      WHERE id = ?
-    `).run(userId);
-    console.log(`[AUTH] Admin reseteó password de ${user.username || user.nombre}`);
-    res.json({ ok: true, mensaje: `Contraseña reseteada. ${user.nombre} podrá ingresar con su PIN.` });
-  } catch(e) {
-    console.error('[AUTH] Error resetear-password:', e.message);
-    res.status(500).json({ ok: false, error: 'Error al resetear contraseña' });
-  }
-});
+// NOTA: El antiguo endpoint /resetear-password/:id se eliminó.
+// Antes ponía password_hash = NULL para que el usuario volviera a entrar con PIN.
+// Como ya no aceptamos PIN, ese flow no tiene sentido.
+// Si el admin necesita "resetear" a un usuario, debe asignar una password inicial
+// nueva vía POST /asignar-password-inicial/:id (el usuario será forzado a cambiarla).
 
 // ─── RECUPERACIÓN DE CONTRASEÑA POR MAIL ────────────────────────────────────
 // Flujo:
@@ -597,7 +630,7 @@ router.post('/solicitar-reset', async (req, res) => {
     db.prepare("INSERT INTO password_reset_tokens (token, usuario_id, expira_en, ip) VALUES (?, ?, ?, ?)").run(token, user.id, expiraEn, ip);
 
     // Armar link y mandar mail
-    const link = `${PANEL_BASE_URL}/login.html?reset=${token}`;
+    const link = `${PANEL_BASE_URL}/login?reset=${token}`;
     const nombre = user.nombre || user.username || 'usuario';
     const username = user.username || '—';
 

@@ -290,3 +290,5 @@ try { db.exec("CREATE INDEX IF NOT EXISTS idx_modulos_area ON modulos_config(are
 })();
 
 console.log("[ORG] Schema organizacional inicializado");
+import "./ensure_modulo_sg.js";
+import "./ensure_modulo_personal.js";

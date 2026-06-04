@@ -2,9 +2,15 @@
 // ── MÓDULO PRODUCCIÓN AGRÍCOLA — PUENTE CORDON SA ─────────────────────────
 // Todas las tablas usan prefijo pa_ para no colisionar con La Niña Bonita
 
-import db from './db.js';
+import db, { dbPath } from './db.js';
 import fs from 'fs';
 import path from 'path';
+// Multisociedad Fase 1: el cimiento contable necesita que la tabla `sociedades`
+// ya esté creada y sembrada (Puente Cordón / San Gerónimo) ANTES de correr la
+// migración del final de este archivo. En index.js produccion.js (que importa
+// este módulo) se carga antes que org.js, así que forzamos el orden acá.
+// db_org.js NO importa db_pa.js → no hay ciclo.
+import './db_org.js';
 
 // ── TABLAS MAESTRAS ────────────────────────────────────────────────────────
 
@@ -535,42 +541,239 @@ export function getCampañaActiva() {
   } catch(e) { console.error('[PA] Error migrando cultivos_lote:', e.message); }
 })();
 
-// ── MIGRACIÓN: columna tipo en pa_campañas ────────────────────────────────
-(function() {
+// ── MIGRACIÓN: columna tipo en pa_campañas (anual / estacional) ───────────
+// Modelo de dos niveles temporales superpuestos:
+//   - 'anual'      → campaña anual Jul→Jun (ej: 2026/27). Antes 'verano'.
+//   - 'estacional' → ciclos cortos dentro de la anual (ej: Inv 2026). Antes 'invierno'.
+// El histórico usaba CHECK(tipo IN ('verano','invierno')). Como el CHECK impide
+// hacer UPDATE a los valores nuevos, recreamos la tabla (mismo patrón que el
+// resto del módulo) preservando los id (las FK por campaña_id se mantienen).
+(function migrarTipoCampañaAnualEstacional() {
   try {
+    const t = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='pa_campañas'").get();
     const cols = db.prepare("PRAGMA table_info(pa_campañas)").all().map(c => c.name);
     if (!cols.includes('tipo')) {
-      db.exec("ALTER TABLE pa_campañas ADD COLUMN tipo TEXT DEFAULT 'verano' CHECK(tipo IN ('verano','invierno'))");
-      console.log("[PA] Columna tipo agregada en pa_campañas");
+      db.exec("ALTER TABLE pa_campañas ADD COLUMN tipo TEXT DEFAULT 'anual'");
+      console.log("[PA] Columna tipo (anual/estacional) agregada en pa_campañas");
+    } else if (t && t.sql && /CHECK\(tipo IN \('verano','invierno'\)\)/.test(t.sql)) {
+      db.pragma('foreign_keys = OFF');
+      db.exec(`
+        BEGIN;
+        CREATE TABLE pa_campañas_v2 (
+          id           INTEGER PRIMARY KEY AUTOINCREMENT,
+          nombre       TEXT NOT NULL UNIQUE,
+          fecha_inicio TEXT NOT NULL,
+          fecha_fin    TEXT NOT NULL,
+          activa       INTEGER DEFAULT 0,
+          tipo         TEXT DEFAULT 'anual'
+        );
+        INSERT INTO pa_campañas_v2 (id, nombre, fecha_inicio, fecha_fin, activa, tipo)
+          SELECT id, nombre, fecha_inicio, fecha_fin, activa,
+                 CASE WHEN tipo = 'invierno' THEN 'estacional' ELSE 'anual' END
+          FROM pa_campañas;
+        DROP TABLE pa_campañas;
+        ALTER TABLE pa_campañas_v2 RENAME TO pa_campañas;
+        COMMIT;
+      `);
+      const fk = db.prepare("PRAGMA foreign_key_check").all();
+      if (fk.length > 0) console.error('[PA] ⚠️  FK check tras migrar pa_campañas:', fk);
+      db.pragma('foreign_keys = ON');
+      console.log('[PA] pa_campañas: tipo migrado verano→anual / invierno→estacional');
     }
+    // Normalizar residuales y aplicar heurística por nombre para estacionales.
+    db.exec("UPDATE pa_campañas SET tipo='anual' WHERE tipo IS NULL OR tipo NOT IN ('anual','estacional')");
+    db.exec(`UPDATE pa_campañas SET tipo='estacional'
+             WHERE tipo='anual' AND (
+               nombre LIKE '%Invierno%' OR nombre LIKE '%invierno%' OR
+               nombre LIKE 'Inv %'      OR nombre LIKE '%Verano%'   OR
+               nombre LIKE '%Otoño%'    OR nombre LIKE '%Primavera%')`);
   } catch(e) { console.error('[PA] Error migrando tipo campaña:', e.message); }
+})();
+
+// ── MIGRACIÓN: doble campaña (anual + estacional) en órdenes/compras/costos ─
+// Cada movimiento ahora se imputa a DOS campañas activas simultáneas (una de
+// cada tipo). Se conserva la columna vieja campaña_id (= anual) por retrocompat.
+(function migrarDobleCampaña() {
+  const addCol = (tabla, col, def) => {
+    try {
+      const cols = db.prepare(`PRAGMA table_info(${tabla})`).all().map(c => c.name);
+      if (!cols.includes(col)) {
+        db.exec(`ALTER TABLE ${tabla} ADD COLUMN ${col} ${def}`);
+        console.log(`[PA] Columna ${col} agregada en ${tabla}`);
+        return true;
+      }
+    } catch(e) { console.error(`[PA] Error agregando ${col} en ${tabla}:`, e.message); }
+    return false;
+  };
+  // pa_ordenes (el brief la llama ordenes_aplicacion; en este repo es pa_ordenes)
+  const oa = addCol('pa_ordenes',     'campaña_anual_id',      'INTEGER REFERENCES pa_campañas(id)');
+                    addCol('pa_ordenes',     'campaña_estacional_id', 'INTEGER REFERENCES pa_campañas(id)');
+  // pa_compras
+  const ca = addCol('pa_compras',     'campaña_anual_id',      'INTEGER REFERENCES pa_campañas(id)');
+                    addCol('pa_compras',     'campaña_estacional_id', 'INTEGER REFERENCES pa_campañas(id)');
+  // pa_costos_lote (necesario para filtrar costos por campaña estacional)
+  const cl = addCol('pa_costos_lote', 'campaña_anual_id',      'INTEGER REFERENCES pa_campañas(id)');
+                    addCol('pa_costos_lote', 'campaña_estacional_id', 'INTEGER REFERENCES pa_campañas(id)');
+  // Migración de datos: la columna vieja campaña_id pasa a ser la anual.
+  try {
+    if (oa) db.exec("UPDATE pa_ordenes     SET campaña_anual_id = campaña_id WHERE campaña_anual_id IS NULL AND campaña_id IS NOT NULL");
+    if (ca) db.exec("UPDATE pa_compras     SET campaña_anual_id = campaña_id WHERE campaña_anual_id IS NULL AND campaña_id IS NOT NULL");
+    if (cl) db.exec("UPDATE pa_costos_lote SET campaña_anual_id = campaña_id WHERE campaña_anual_id IS NULL AND campaña_id IS NOT NULL");
+  } catch(e) { console.error('[PA] Error migrando campaña_id → campaña_anual_id:', e.message); }
+})();
+
+// ── MIGRACIÓN/BACKFILL: re-sincronizar campañas de pa_costos_lote con su orden ──
+// CASO B: el costo de una aplicación (categoria fertilizante/agroquimico) se graba
+// copiando las campañas que la orden tenía AL EJECUTARSE. Una reasignación bulk
+// posterior cambiaba pa_ordenes pero NO pa_costos_lote, dejando el costo apuntando a
+// campañas viejas (típicamente estacional NULL) que no matcheaban el reporte de Costos
+// (ej. brócoli OA-00060/00061 daba $0). Acá re-alineamos los costos con la campaña
+// actual de su orden (vía pa_aplicaciones). El arreglo de raíz vive en
+// /ordenes/reasignar-bulk (propaga en la misma transacción).
+// Idempotente: si no hay filas desincronizadas, no toca nada (solo un COUNT barato).
+(function backfillCostosCampañas() {
+  try {
+    const tablas = db.prepare(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('pa_costos_lote','pa_aplicaciones','pa_ordenes')"
+    ).all().map(t => t.name);
+    if (tablas.length < 3) return; // base vieja sin alguna tabla: nada que hacer
+    const clCols = db.prepare("PRAGMA table_info(pa_costos_lote)").all().map(c => c.name);
+    if (!clCols.includes('campaña_anual_id') || !clCols.includes('campaña_estacional_id')) return;
+
+    // Costo fert/agro cuya campaña difiere de la de su orden (solo órdenes existentes).
+    const condDesinc = `
+      cl.categoria IN ('fertilizante','agroquimico')
+      AND ( IFNULL(cl.campaña_anual_id,-1)      != IFNULL(o.campaña_anual_id,-1)
+         OR IFNULL(cl.campaña_estacional_id,-1) != IFNULL(o.campaña_estacional_id,-1) )`;
+    const desinc = db.prepare(`
+      SELECT COUNT(*) AS n
+      FROM pa_costos_lote cl
+      JOIN pa_aplicaciones a ON a.id = cl.referencia_id
+      JOIN pa_ordenes o ON o.id = a.orden_id
+      WHERE ${condDesinc}
+    `).get().n;
+
+    if (!desinc) return; // ya está todo sincronizado (idempotente)
+
+    console.log(`[PA] Backfill costos→campañas: ${desinc} fila(s) de pa_costos_lote desincronizadas con su orden. Re-sincronizando…`);
+    // Desglose por orden (top 20) → deja el "dry-run" visible en los logs de Railway.
+    try {
+      db.prepare(`
+        SELECT o.nro_orden AS nro, COUNT(*) AS filas,
+               cl.campaña_anual_id AS cl_a, cl.campaña_estacional_id AS cl_e,
+               o.campaña_anual_id  AS o_a,  o.campaña_estacional_id  AS o_e
+        FROM pa_costos_lote cl
+        JOIN pa_aplicaciones a ON a.id = cl.referencia_id
+        JOIN pa_ordenes o ON o.id = a.orden_id
+        WHERE ${condDesinc}
+        GROUP BY o.id
+        ORDER BY filas DESC
+        LIMIT 20
+      `).all().forEach(r => {
+        console.log(`[PA]   OA ${r.nro}: ${r.filas} fila(s) | costo(anual=${r.cl_a}, est=${r.cl_e}) → orden(anual=${r.o_a}, est=${r.o_e})`);
+      });
+    } catch(_) {}
+
+    // UPDATE en transacción, scopeado a las filas realmente desincronizadas.
+    // referencia_id es único entre filas fert/agro (un costo por aplicación), así que
+    // el IN por referencia_id selecciona exactamente esas filas. campaña_id es NOT NULL,
+    // por eso se usa COALESCE(anual, estacional, actual) y no se setea NULL nunca.
+    const tx = db.transaction(() => {
+      const info = db.prepare(`
+        UPDATE pa_costos_lote
+        SET campaña_anual_id      = (SELECT o.campaña_anual_id      FROM pa_aplicaciones a JOIN pa_ordenes o ON o.id=a.orden_id WHERE a.id = pa_costos_lote.referencia_id),
+            campaña_estacional_id = (SELECT o.campaña_estacional_id FROM pa_aplicaciones a JOIN pa_ordenes o ON o.id=a.orden_id WHERE a.id = pa_costos_lote.referencia_id),
+            campaña_id            = COALESCE(
+                                      (SELECT o.campaña_anual_id      FROM pa_aplicaciones a JOIN pa_ordenes o ON o.id=a.orden_id WHERE a.id = pa_costos_lote.referencia_id),
+                                      (SELECT o.campaña_estacional_id FROM pa_aplicaciones a JOIN pa_ordenes o ON o.id=a.orden_id WHERE a.id = pa_costos_lote.referencia_id),
+                                      pa_costos_lote.campaña_id)
+        WHERE categoria IN ('fertilizante','agroquimico')
+          AND referencia_id IN (
+            SELECT cl.referencia_id
+            FROM pa_costos_lote cl
+            JOIN pa_aplicaciones a ON a.id = cl.referencia_id
+            JOIN pa_ordenes o ON o.id = a.orden_id
+            WHERE ${condDesinc}
+          )
+      `).run();
+      return info.changes;
+    });
+    const changes = tx();
+    console.log(`[PA] Backfill costos→campañas: ${changes} fila(s) actualizadas.`);
+  } catch(e) {
+    console.error('[PA] Backfill costos→campañas error:', e.message);
+  }
+})();
+
+// ── MIGRACIÓN: cultivo elegido por el operario en la orden ────────────────
+// El cultivo se elige explícitamente al emitir la orden (no se infiere del
+// "cultivo actual" del lote, que es ambiguo con rotación). NULLABLE por
+// compatibilidad con órdenes viejas; las nuevas lo exigen desde el backend.
+(function migrarCultivoEnOrden() {
+  try {
+    const cols = db.prepare("PRAGMA table_info(pa_ordenes)").all().map(c => c.name);
+    if (!cols.includes('cultivo')) {
+      db.exec("ALTER TABLE pa_ordenes ADD COLUMN cultivo TEXT");
+      console.log("[PA] Columna cultivo agregada en pa_ordenes");
+    }
+  } catch(e) { console.error('[PA] Error agregando cultivo en pa_ordenes:', e.message); }
+})();
+
+// ── MIGRACIÓN: admin de campañas — soft delete + log de auditoría ──────────
+// pa_campañas.activa es el flag de "campaña vigente" (una por tipo), NO un
+// soft-delete. Para poder borrar campañas creadas por error sin romper esa
+// semántica, agregamos eliminada_en / eliminada_por_id (patrón de pa_ordenes).
+// pa_campañas_log audita las reasignaciones bulk de órdenes/compras.
+(function migrarAdminCampañas() {
+  try {
+    const cols = db.prepare("PRAGMA table_info(pa_campañas)").all().map(c => c.name);
+    if (!cols.includes('eliminada_en'))     db.exec("ALTER TABLE pa_campañas ADD COLUMN eliminada_en TEXT");
+    if (!cols.includes('eliminada_por_id'))  db.exec("ALTER TABLE pa_campañas ADD COLUMN eliminada_por_id INTEGER REFERENCES usuarios(id)");
+  } catch(e) { console.error('[PA] Error agregando soft-delete en pa_campañas:', e.message); }
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS pa_campañas_log (
+        id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+        accion                TEXT NOT NULL,
+        entidad               TEXT NOT NULL CHECK(entidad IN ('orden','compra')),
+        cantidad              INTEGER NOT NULL DEFAULT 0,
+        campaña_anual_id      INTEGER REFERENCES pa_campañas(id),
+        campaña_estacional_id INTEGER REFERENCES pa_campañas(id),
+        limpiar_estacional    INTEGER DEFAULT 0,
+        ids_afectados         TEXT,
+        usuario_id            INTEGER REFERENCES usuarios(id),
+        usuario_nombre        TEXT,
+        creado_en             TEXT DEFAULT (datetime('now','localtime'))
+      );
+    `);
+  } catch(e) { console.error('[PA] Error creando pa_campañas_log:', e.message); }
 })();
 
 // ── MIGRACIÓN: campañas históricas ────────────────────────────────────────
 (function migrarCampañasHistoricas() {
   try {
-    // Campañas de verano (Jul→Jun)
-    const verano = [
+    // Campañas anuales (Jul→Jun)
+    const anuales = [
       ['2021/22', '2021-07-01', '2022-06-30'],
       ['2022/23', '2022-07-01', '2023-06-30'],
       ['2023/24', '2023-07-01', '2024-06-30'],
       ['2024/25', '2024-07-01', '2025-06-30'],
       ['2026/27', '2026-07-01', '2027-06-30'],
     ];
-    for (const [nombre, inicio, fin] of verano) {
-      db.prepare("INSERT OR IGNORE INTO pa_campañas (nombre, fecha_inicio, fecha_fin, activa, tipo) VALUES (?,?,?,0,'verano')")
+    for (const [nombre, inicio, fin] of anuales) {
+      db.prepare("INSERT OR IGNORE INTO pa_campañas (nombre, fecha_inicio, fecha_fin, activa, tipo) VALUES (?,?,?,0,'anual')")
         .run(nombre, inicio, fin);
     }
-    // Campañas de invierno (May→Oct aprox)
-    const invierno = [
+    // Campañas estacionales (ciclos cortos — ej. invierno May→Oct)
+    const estacionales = [
       ['Inv 2022', '2022-05-01', '2022-10-31'],
       ['Inv 2023', '2023-05-01', '2023-10-31'],
       ['Inv 2024', '2024-05-01', '2024-10-31'],
       ['Inv 2025', '2025-05-01', '2025-10-31'],
       ['Inv 2026', '2026-05-01', '2026-10-31'],
     ];
-    for (const [nombre, inicio, fin] of invierno) {
-      db.prepare("INSERT OR IGNORE INTO pa_campañas (nombre, fecha_inicio, fecha_fin, activa, tipo) VALUES (?,?,?,0,'invierno')")
+    for (const [nombre, inicio, fin] of estacionales) {
+      db.prepare("INSERT OR IGNORE INTO pa_campañas (nombre, fecha_inicio, fecha_fin, activa, tipo) VALUES (?,?,?,0,'estacional')")
         .run(nombre, inicio, fin);
     }
   } catch(e) { console.error('[PA] Error migrando campañas históricas:', e.message); }
@@ -868,6 +1071,21 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_pa_comb_mov_vehiculo ON pa_combustible_movimientos(vehiculo_id);
   CREATE INDEX IF NOT EXISTS idx_pa_comb_mov_estado ON pa_combustible_movimientos(estado_revision);
   CREATE INDEX IF NOT EXISTS idx_pa_comb_mov_lote ON pa_combustible_movimientos(lote_id);
+
+  -- Vinculación N:M entre facturas de combustible (pa_compras, proveedor
+  -- COMBUSTIBLE BARCELO) y recargas del tanque central. En este repo una
+  -- "recarga" es un movimiento con tipo_movimiento='carga_tanque', por eso
+  -- recarga_id referencia pa_combustible_movimientos (no existe recargas_tanque).
+  CREATE TABLE IF NOT EXISTS pa_vinculacion_factura_recarga (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    compra_id     INTEGER NOT NULL REFERENCES pa_compras(id) ON DELETE CASCADE,
+    recarga_id    INTEGER NOT NULL REFERENCES pa_combustible_movimientos(id) ON DELETE CASCADE,
+    vinculado_en  TEXT DEFAULT CURRENT_TIMESTAMP,
+    vinculado_por INTEGER REFERENCES usuarios(id),
+    UNIQUE(compra_id, recarga_id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_pa_vinc_compra  ON pa_vinculacion_factura_recarga(compra_id);
+  CREATE INDEX IF NOT EXISTS idx_pa_vinc_recarga ON pa_vinculacion_factura_recarga(recarga_id);
 `);
 
 // ── SEED: Tanque Gasoil + Tanque Nafta ─────────────────────────────────────
@@ -922,19 +1140,7 @@ db.exec(`
     creado_en   TEXT DEFAULT (datetime('now','localtime'))
   );
 
-  -- Trabajadores
-  CREATE TABLE IF NOT EXISTS pa_trabajadores (
-    id                    INTEGER PRIMARY KEY AUTOINCREMENT,
-    nombre                TEXT NOT NULL,
-    dni                   TEXT,
-    cuadrilla_habitual_id INTEGER REFERENCES pa_cuadrillas(id),
-    tipo_relacion         TEXT NOT NULL DEFAULT 'fijo' CHECK(tipo_relacion IN ('fijo','contratista')),
-    jornal_base           REAL DEFAULT 0,
-    unidad_jornal         TEXT DEFAULT 'dia' CHECK(unidad_jornal IN ('dia','hora','ha','unidad')),
-    activo                INTEGER DEFAULT 1,
-    notas                 TEXT,
-    creado_en             TEXT DEFAULT (datetime('now','localtime'))
-  );
+  -- (pa_trabajadores ELIMINADA — unificado en pa_personal. Ver migración abajo.)
 
   -- Tipos de tarea (catálogo)
   CREATE TABLE IF NOT EXISTS pa_tareas_tipos (
@@ -947,96 +1153,29 @@ db.exec(`
     activo               INTEGER DEFAULT 1,
     creado_en            TEXT DEFAULT (datetime('now','localtime'))
   );
-
-  -- Partes de trabajo (cabecera)
-  CREATE TABLE IF NOT EXISTS pa_partes_trabajo (
-    id                INTEGER PRIMARY KEY AUTOINCREMENT,
-    fecha             TEXT NOT NULL DEFAULT (date('now','localtime')),
-    cuadrilla_id      INTEGER REFERENCES pa_cuadrillas(id),
-    lote_id           INTEGER NOT NULL REFERENCES pa_lotes(id),
-    tarea_tipo_id     INTEGER NOT NULL REFERENCES pa_tareas_tipos(id),
-    modo_registro     TEXT NOT NULL DEFAULT 'cuadrilla' CHECK(modo_registro IN ('cuadrilla','individual')),
-    cant_trabajadores INTEGER,      -- solo si modo=cuadrilla
-    horas_total       REAL,          -- solo si modo=cuadrilla
-    observaciones     TEXT,
-    foto_path         TEXT,
-    cargado_por       INTEGER REFERENCES usuarios(id),
-    estado            TEXT DEFAULT 'pendiente_valorizar' CHECK(estado IN ('pendiente_valorizar','valorizado','anulado')),
-    creado_en         TEXT DEFAULT (datetime('now','localtime'))
-  );
-
-  -- Items de parte individual (solo si modo=individual, ej destajo)
-  CREATE TABLE IF NOT EXISTS pa_partes_trabajo_items (
-    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
-    parte_id           INTEGER NOT NULL REFERENCES pa_partes_trabajo(id) ON DELETE CASCADE,
-    trabajador_id      INTEGER NOT NULL REFERENCES pa_trabajadores(id),
-    horas              REAL,
-    unidades_destajo   REAL,
-    notas              TEXT
-  );
-
-  -- Valorización (la hace RRHH/oficina)
-  CREATE TABLE IF NOT EXISTS pa_partes_valorizacion (
-    id                   INTEGER PRIMARY KEY AUTOINCREMENT,
-    parte_id             INTEGER NOT NULL UNIQUE REFERENCES pa_partes_trabajo(id),
-    monto_total          REAL NOT NULL,
-    detalle_json         TEXT,
-    rubro_contable_id    INTEGER NOT NULL REFERENCES pa_rubros_contables(id),
-    valorizado_por       INTEGER REFERENCES usuarios(id),
-    fecha_valorizacion   TEXT DEFAULT (datetime('now','localtime'))
-  );
-
-  CREATE INDEX IF NOT EXISTS idx_pa_partes_fecha ON pa_partes_trabajo(fecha);
-  CREATE INDEX IF NOT EXISTS idx_pa_partes_lote ON pa_partes_trabajo(lote_id);
-  CREATE INDEX IF NOT EXISTS idx_pa_partes_estado ON pa_partes_trabajo(estado);
   CREATE INDEX IF NOT EXISTS idx_pa_rubros_tipo_cult ON pa_rubros_contables(tipo_labor, cultivo);
-
-  -- ═════════════════════════════════════════════════════════════════════
-  -- FICHAJES DE CUADRILLA (sistema mñna/tarde con GPS)
-  -- Reemplaza conceptualmente a pa_partes_trabajo. Admin asigna rubro y lote
-  -- después de que el capataz fichó desde el celular.
-  -- ═════════════════════════════════════════════════════════════════════
-  CREATE TABLE IF NOT EXISTS pa_fichajes_cuadrilla (
-    id                INTEGER PRIMARY KEY AUTOINCREMENT,
-    capataz_id        INTEGER NOT NULL REFERENCES usuarios(id),
-    cuadrilla_id      INTEGER NOT NULL REFERENCES pa_cuadrillas(id),
-    fecha             TEXT NOT NULL DEFAULT (date('now','localtime')),
-    momento           TEXT NOT NULL CHECK(momento IN ('entrada','salida')),
-    hora_declarada    TEXT NOT NULL,  -- "HH:MM" lo que el capataz seleccionó
-    hora_real         TEXT NOT NULL DEFAULT (datetime('now','localtime')),  -- cuándo apretó el botón
-    tarea_texto       TEXT NOT NULL,  -- texto libre del capataz
-    cant_personas     INTEGER,
-    lat               REAL,
-    lng               REAL,
-    accuracy_metros   REAL,
-    gps_ok            INTEGER DEFAULT 0,  -- 1 = tomó GPS, 0 = falló/timeout
-    -- Campos que agrega admin desde el panel:
-    lote_id           INTEGER REFERENCES pa_lotes(id),
-    rubro_contable_id INTEGER REFERENCES pa_rubros_contables(id),
-    estado            TEXT DEFAULT 'pendiente' CHECK(estado IN ('pendiente','completado','anulado')),
-    notas_admin       TEXT,
-    completado_por    INTEGER REFERENCES usuarios(id),
-    fecha_completado  TEXT,
-    creado_en         TEXT DEFAULT (datetime('now','localtime'))
-  );
-  CREATE INDEX IF NOT EXISTS idx_pa_fich_fecha ON pa_fichajes_cuadrilla(fecha DESC);
-  CREATE INDEX IF NOT EXISTS idx_pa_fich_capataz ON pa_fichajes_cuadrilla(capataz_id, fecha DESC);
-  CREATE INDEX IF NOT EXISTS idx_pa_fich_estado ON pa_fichajes_cuadrilla(estado);
 `);
 
-// ── MIGRACIÓN: agregar grupo_id a pa_trabajadores ──────────────────────────
-// Grupo es distinto de cuadrilla: admin del trabajador vs. jornada operativa.
-(function migrarTrabajadoresGrupo() {
-  try {
-    const cols = db.prepare("PRAGMA table_info(pa_trabajadores)").all().map(c => c.name);
-    if (!cols.includes('grupo_id')) {
-      db.exec("ALTER TABLE pa_trabajadores ADD COLUMN grupo_id INTEGER REFERENCES pa_grupos(id)");
-      console.log('[PA] pa_trabajadores.grupo_id agregado');
-    }
-  } catch(e) { console.error('[PA] Error migrando pa_trabajadores.grupo_id:', e.message); }
-})();
+// ── BORRADO legacy: partes de trabajo + fichajes GPS (flujo Scout discontinuado) ──
+// Se eliminaron la UI (Scout + panel) y los endpoints. Estas 4 tablas (confirmadas
+// vacías) se dropean. DROP IF EXISTS es idempotente (no-op si ya no están). Orden
+// hijas → padres, FK off por seguridad. NO toca pa_cuadrillas / pa_tareas_tipos /
+// pa_trabajadores / pa_rubros_contables / pa_grupos (compartidas o vivas por otro lado).
+try {
+  db.pragma('foreign_keys = OFF');
+  db.exec(`
+    DROP TABLE IF EXISTS pa_partes_valorizacion;
+    DROP TABLE IF EXISTS pa_partes_trabajo_items;
+    DROP TABLE IF EXISTS pa_partes_trabajo;
+    DROP TABLE IF EXISTS pa_fichajes_cuadrilla;
+  `);
+  db.pragma('foreign_keys = ON');
+} catch (e) {
+  try { db.pragma('foreign_keys = ON'); } catch (_) {}
+  console.error('[PA] Error dropeando legacy partes/fichajes:', e.message);
+}
 
-// ── SEED: grupo "Sin asignar" (fallback para trabajadores sin grupo) ───────
+// ── SEED: grupo "Sin asignar" (opción de fallback en el catálogo de grupos) ──
 (function seedGrupoDefault() {
   try {
     const n = db.prepare("SELECT COUNT(*) as n FROM pa_grupos").get();
@@ -1045,13 +1184,246 @@ db.exec(`
         .run('Sin asignar', 'Grupo por defecto — asignar uno real cuando se pueda');
       console.log('[PA] Grupo "Sin asignar" creado');
     }
-    // Asignar trabajadores sin grupo al grupo "Sin asignar"
-    const sinAsignar = db.prepare("SELECT id FROM pa_grupos WHERE nombre='Sin asignar'").get();
-    if (sinAsignar) {
-      const upd = db.prepare("UPDATE pa_trabajadores SET grupo_id = ? WHERE grupo_id IS NULL").run(sinAsignar.id);
-      if (upd.changes > 0) console.log(`[PA] ${upd.changes} trabajadores asignados al grupo Sin asignar`);
-    }
   } catch(e) { console.error('[PA] Error seed grupo default:', e.message); }
+})();
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PERSONAL V1 — Padrón unificado + permisos (Fase 1)
+// pa_personal reemplaza conceptualmente a pa_trabajadores (que queda LEGACY).
+// Los permisos del módulo viven en pa_permisos_personal (decoupled de auth.js).
+// ═══════════════════════════════════════════════════════════════════════════
+db.exec(`
+  -- Padrón unificado de personal (fijos + contratistas)
+  CREATE TABLE IF NOT EXISTS pa_personal (
+    id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+    tipo                  TEXT NOT NULL CHECK(tipo IN ('fijo','contratista')),
+    nombre                TEXT NOT NULL,
+    dni                   TEXT,
+    cuit                  TEXT,
+    persona_id            INTEGER REFERENCES personas(id),         -- FK opcional al módulo Equipo (solo fijos)
+    contratista_madre_id  INTEGER REFERENCES pa_personal(id),      -- si un fijo pertenece a un contratista
+    cuadrilla_default_id  INTEGER REFERENCES pa_cuadrillas(id),
+    grupo_id              INTEGER REFERENCES pa_grupos(id),         -- clasificación administrativa (ex pa_trabajadores.grupo_id)
+    tarifa_default        REAL DEFAULT 0,
+    unidad_tarifa         TEXT DEFAULT 'jornal' CHECK(unidad_tarifa IN ('jornal','hora','tanto','tacho','planta','kg')),
+    activo                INTEGER NOT NULL DEFAULT 1,
+    notas                 TEXT,
+    creado_en             TEXT DEFAULT (datetime('now','localtime')),
+    creado_por            INTEGER REFERENCES usuarios(id),
+    modificado_en         TEXT,
+    modificado_por        INTEGER,
+    eliminado_en          TEXT,
+    eliminado_por_id      INTEGER
+  );
+  CREATE INDEX IF NOT EXISTS idx_pa_personal_tipo    ON pa_personal(tipo);
+  CREATE INDEX IF NOT EXISTS idx_pa_personal_activo  ON pa_personal(activo);
+  CREATE INDEX IF NOT EXISTS idx_pa_personal_madre   ON pa_personal(contratista_madre_id);
+  CREATE INDEX IF NOT EXISTS idx_pa_personal_persona ON pa_personal(persona_id);
+
+  -- Permisos del módulo Personal (V1, sin tocar auth.js ni la UI admin central).
+  -- Una fila por usuario. Admin (rol='admin') obtiene ambos permisos por código.
+  CREATE TABLE IF NOT EXISTS pa_permisos_personal (
+    usuario_id            INTEGER PRIMARY KEY REFERENCES usuarios(id),
+    personal_asistencia   INTEGER NOT NULL DEFAULT 0,
+    personal_valorizacion INTEGER NOT NULL DEFAULT 0,
+    modificado_en         TEXT DEFAULT (datetime('now','localtime')),
+    modificado_por        INTEGER
+  );
+`);
+
+// ── Migración: pa_personal.unidad_tarifa admite 'fijo' (monto fijo semanal) ──
+// El CHECK original no incluye 'fijo', así que en prod (tabla ya creada) un INSERT
+// con unidad_tarifa='fijo' fallaría. SQLite no permite ALTER de un CHECK: hay que
+// rebuild. Idempotente y robusta:
+//  · Lee el SQL REAL de la tabla desde sqlite_master y ENSANCHA solo el CHECK de
+//    unidad_tarifa (derivar del schema real preserva las columnas que tenga prod
+//    — evita asumir columnas, como el crash de personal_actual_id).
+//  · Si el CHECK ya incluye 'fijo' (o no hay CHECK introspectable) no hace nada.
+//  · Replica los índices existentes (los que tengan sql) tras el swap.
+(function() {
+  try {
+    const row = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='pa_personal'").get();
+    if (!row || !row.sql) return;
+    const reCheck = /(unidad_tarifa[\s\S]*?CHECK\s*\(\s*unidad_tarifa\s+IN\s*\()([^)]*)(\))/i;
+    const m = row.sql.match(reCheck);
+    if (!m) return;                   // sin CHECK de unidad_tarifa: nada que ampliar
+    if (/'fijo'/.test(m[2])) return;  // ya migrada (idempotente)
+    const idxRows = db.prepare("SELECT sql FROM sqlite_master WHERE type='index' AND tbl_name='pa_personal' AND sql IS NOT NULL").all();
+    const nuevoSql = row.sql.replace(reCheck, (_x, pre, lista, post) => pre + lista.replace(/\s+$/, '') + ",'fijo'" + post);
+    const tmpSql   = nuevoSql.replace(/CREATE TABLE\s+(IF NOT EXISTS\s+)?["'`]?pa_personal["'`]?/i, 'CREATE TABLE pa_personal__mig');
+    db.pragma('foreign_keys = OFF');  // fuera de la transacción (better-sqlite3 lo ignora dentro)
+    db.transaction(() => {
+      db.exec(tmpSql);
+      db.exec('INSERT INTO pa_personal__mig SELECT * FROM pa_personal');
+      db.exec('DROP TABLE pa_personal');
+      db.exec('ALTER TABLE pa_personal__mig RENAME TO pa_personal');
+      idxRows.forEach(ix => { if (ix.sql) db.exec(ix.sql); });
+    })();
+    db.pragma('foreign_keys = ON');
+    console.log("[PA] pa_personal.unidad_tarifa: CHECK ampliado con 'fijo'");
+  } catch(e) {
+    console.error('[PA] Error migrando unidad_tarifa fijo:', e.message);
+    try { db.pragma('foreign_keys = ON'); } catch(_) {}
+  }
+})();
+
+// ── Migración: responsable_id en pa_cuadrillas ──────────────────────────────
+// La persona (pa_personal) que cobra por toda la cuadrilla y tiene su CC. En modo
+// Cuadrilla de asistencia, el titular de pago se deriva de este responsable.
+// Simple ADD COLUMN (sin rebuild), idempotente con guard PRAGMA table_info.
+try {
+  const colsCu = db.prepare("PRAGMA table_info(pa_cuadrillas)").all().map(c => c.name);
+  if (!colsCu.includes('responsable_id')) {
+    db.exec('ALTER TABLE pa_cuadrillas ADD COLUMN responsable_id INTEGER REFERENCES pa_personal(id)');
+    console.log('[PA] responsable_id agregado en pa_cuadrillas');
+  }
+} catch(e) { console.error('[PA] Error migrando responsable_id en pa_cuadrillas:', e.message); }
+
+// ── Migración: rol en pa_personal (texto libre, ej. Regador/Peón) ────────────
+// Simple ADD COLUMN (sin rebuild), idempotente con guard PRAGMA table_info.
+try {
+  const colsP = db.prepare("PRAGMA table_info(pa_personal)").all().map(c => c.name);
+  if (!colsP.includes('rol')) {
+    db.exec('ALTER TABLE pa_personal ADD COLUMN rol TEXT');
+    console.log('[PA] rol agregado en pa_personal');
+  }
+} catch(e) { console.error('[PA] Error migrando rol en pa_personal:', e.message); }
+
+// ── Migración: flag post_cosecha en pa_tareas_tipos ("Post-Cosecha") ─────────
+// Habilita, en el modal de asistencia, imputar el trabajo a la campaña INMEDIATAMENTE
+// ANTERIOR (anual + estacional). Simple ADD COLUMN, idempotente con guard PRAGMA.
+try {
+  const colsT = db.prepare("PRAGMA table_info(pa_tareas_tipos)").all().map(c => c.name);
+  if (!colsT.includes('post_cosecha')) {
+    db.exec('ALTER TABLE pa_tareas_tipos ADD COLUMN post_cosecha INTEGER DEFAULT 0');
+    console.log('[PA] post_cosecha agregado en pa_tareas_tipos');
+  }
+} catch(e) { console.error('[PA] Error migrando post_cosecha en pa_tareas_tipos:', e.message); }
+
+// ── Padrón de tarifas por ROL (costeo MO automático) ────────────────────────
+// La tarifa de la mano de obra individual/grupal se resuelve por el rol de la persona
+// (pa_personal.rol), no se tipea por línea. $/jornal. Idempotente.
+try {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS pa_tarifas_rol (
+      id             INTEGER PRIMARY KEY AUTOINCREMENT,
+      rol            TEXT NOT NULL UNIQUE,
+      tarifa         REAL NOT NULL DEFAULT 0,
+      modificado_en  TEXT DEFAULT (datetime('now','localtime')),
+      modificado_por INTEGER
+    )
+  `);
+} catch(e) { console.error('[PA] Error creando pa_tarifas_rol:', e.message); }
+
+// ── Migración: tarifa_jornal en pa_cuadrillas ($/jornal de la cuadrilla) ─────
+// El modo Cuadrilla (bloque) cobra por la tarifa de SU cuadrilla, no por el rol de la
+// responsable. Simple ADD COLUMN, idempotente con guard PRAGMA table_info.
+try {
+  const colsCu = db.prepare("PRAGMA table_info(pa_cuadrillas)").all().map(c => c.name);
+  if (!colsCu.includes('tarifa_jornal')) {
+    db.exec('ALTER TABLE pa_cuadrillas ADD COLUMN tarifa_jornal REAL');
+    console.log('[PA] tarifa_jornal agregado en pa_cuadrillas');
+  }
+} catch(e) { console.error('[PA] Error migrando tarifa_jornal en pa_cuadrillas:', e.message); }
+
+// (Migraciones pa_trabajadores→pa_personal ELIMINADAS: ya cumplidas; la unificación
+//  final — grupo_id, columnas de Pañol y DROP de pa_trabajadores — está más abajo,
+//  después de crear las tablas de Pañol.)
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PERSONAL V1 — Asistencia diaria (Fase 2)
+// Una fila por persona-finca-tarea-tramo. Dato físico (sin $).
+// rubro_cuenta_id → pa_cuentas (plan de Pablo, read-only, siempre cuenta 'MO %').
+// cuadrilla_id = de dónde viene la gente (Silva/Gordillo/...), distinto del rubro.
+// ═══════════════════════════════════════════════════════════════════════════
+db.exec(`
+  CREATE TABLE IF NOT EXISTS pa_asistencias (
+    id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+    fecha                 TEXT NOT NULL,
+    cuadrilla_id          INTEGER REFERENCES pa_cuadrillas(id),
+    personal_id           INTEGER REFERENCES pa_personal(id),   -- NULL si bloque sin nombre
+    contratista_id        INTEGER REFERENCES pa_personal(id),   -- contratista madre (req. si bloque)
+    cantidad              INTEGER NOT NULL DEFAULT 1,
+    horas                 REAL NOT NULL,
+    jornales_calc         REAL,                                  -- cantidad * horas / 8 (al insertar/editar)
+    -- Imputación contable y de costos
+    rubro_cuenta_id       INTEGER NOT NULL,                      -- FK lógica a pa_cuentas(id), read-only
+    campaña_anual_id      INTEGER NOT NULL REFERENCES pa_campañas(id),
+    campaña_estacional_id INTEGER NOT NULL REFERENCES pa_campañas(id),
+    lote_id               INTEGER REFERENCES pa_lotes(id),        -- nullable: NULL en MO general (gasto de estructura, sin lote)
+    finca                 TEXT,                                  -- denormalizado del lote
+    tarea_tipo_id         INTEGER REFERENCES pa_tareas_tipos(id),
+    cultivo               TEXT,                                  -- opcional, denormalizado
+    estado                TEXT NOT NULL DEFAULT 'pendiente_valorizar'
+                            CHECK(estado IN ('pendiente_valorizar','valorizado','anulado')),
+    notas                 TEXT,
+    cargado_por           INTEGER NOT NULL REFERENCES usuarios(id),
+    creado_en             TEXT DEFAULT (datetime('now','localtime')),
+    modificado_en         TEXT,
+    modificado_por        INTEGER,
+    anulado_en            TEXT,
+    anulado_por           INTEGER,
+    anulado_motivo        TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_pa_asist_fecha   ON pa_asistencias(fecha);
+  CREATE INDEX IF NOT EXISTS idx_pa_asist_estado  ON pa_asistencias(estado);
+  CREATE INDEX IF NOT EXISTS idx_pa_asist_personal ON pa_asistencias(personal_id);
+  CREATE INDEX IF NOT EXISTS idx_pa_asist_contra  ON pa_asistencias(contratista_id);
+  CREATE INDEX IF NOT EXISTS idx_pa_asist_lote    ON pa_asistencias(lote_id);
+`);
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PERSONAL V1 — Valorización + Cuenta Corriente (Fase 3)
+// ═══════════════════════════════════════════════════════════════════════════
+db.exec(`
+  -- Valorización de una asistencia (la hace rol Valorización)
+  CREATE TABLE IF NOT EXISTS pa_asistencia_valorizacion (
+    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    asistencia_id      INTEGER NOT NULL UNIQUE REFERENCES pa_asistencias(id),
+    tarifa_unitaria    REAL NOT NULL,
+    unidad_tarifa      TEXT NOT NULL,          -- copiada del padrón al valorizar
+    monto_total        REAL NOT NULL,
+    detalle_json       TEXT,                   -- breakdown del cálculo
+    valorizado_por     INTEGER NOT NULL REFERENCES usuarios(id),
+    fecha_valorizacion TEXT DEFAULT (datetime('now','localtime')),
+    costo_lote_id      INTEGER REFERENCES pa_costos_lote(id),
+    cc_movimiento_id   INTEGER REFERENCES pa_cc_movimientos(id)
+  );
+
+  -- Cuenta corriente unificada (fijos + contratistas)
+  CREATE TABLE IF NOT EXISTS pa_cc_movimientos (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    tipo_titular     TEXT NOT NULL CHECK(tipo_titular IN ('fijo','contratista')),
+    titular_id       INTEGER NOT NULL REFERENCES pa_personal(id),
+    fecha            TEXT NOT NULL DEFAULT (date('now','localtime')),
+    tipo_mov         TEXT NOT NULL CHECK(tipo_mov IN ('devengado','pago','adelanto','ajuste','anulacion')),
+    monto            REAL NOT NULL,            -- >0 le debemos (devengado) ; <0 le pagamos/adelanto
+    descripcion      TEXT,
+    referencia_tipo  TEXT,                     -- 'asistencia','pago_manual','adelanto_manual','ajuste_manual'
+    referencia_id    INTEGER,
+    saldo_acumulado  REAL,                     -- denormalizado, recalculado cronológicamente
+    cargado_por      INTEGER NOT NULL REFERENCES usuarios(id),
+    creado_en        TEXT DEFAULT (datetime('now','localtime')),
+    anulado          INTEGER DEFAULT 0,
+    anulado_en       TEXT,
+    anulado_por      INTEGER
+  );
+  CREATE INDEX IF NOT EXISTS idx_pa_cc_titular ON pa_cc_movimientos(tipo_titular, titular_id);
+  CREATE INDEX IF NOT EXISTS idx_pa_cc_fecha   ON pa_cc_movimientos(fecha);
+`);
+
+// ── MIGRACIÓN: columna 'origen' en pa_costos_lote (decisión Personal V1) ────
+// Aditiva y segura. Aísla los costos de asistencia ('asistencia') de los de
+// partes ('parte') y aplicaciones ('aplicacion'). El BACKFILL de filas viejas
+// NO corre acá — se hace por endpoint admin con dry-run + OK (ver produccion.js).
+(function migrarCostosLoteOrigen() {
+  try {
+    const cols = db.prepare("PRAGMA table_info(pa_costos_lote)").all().map(c => c.name);
+    if (!cols.includes('origen')) {
+      db.exec("ALTER TABLE pa_costos_lote ADD COLUMN origen TEXT");
+      console.log('[PA] pa_costos_lote.origen agregado (nullable; backfill por endpoint admin)');
+    }
+  } catch(e) { console.error('[PA] Error migrando pa_costos_lote.origen:', e.message); }
 })();
 
 // ── SEED: 20 rubros contables (tal cual contabilidad) ──────────────────────
@@ -1203,10 +1575,7 @@ db.exec(`
 
     // Tablas a vaciar — en orden seguro (hijas primero para evitar FK issues)
     const TABLAS_A_VACIAR = [
-      // Personal — orden hijas → padres
-      'pa_partes_valorizacion',
-      'pa_partes_trabajo_items',
-      'pa_partes_trabajo',
+      // (Personal legacy partes/fichajes: tablas eliminadas — ya no se vacían)
       // Combustible
       'pa_combustible_movimientos',
       // Stock y órdenes — hijas → padres
@@ -1614,13 +1983,15 @@ db.exec(`
     estado          TEXT NOT NULL DEFAULT 'disponible'
                       CHECK(estado IN ('disponible','prestada','en_reparacion','dada_de_baja','extraviada')),
     ubicacion_actual TEXT,                            -- texto libre: "Estante A2", "Con Juan", etc.
-    trabajador_actual_id INTEGER REFERENCES pa_trabajadores(id), -- FK denormalizada para query rápido
+    personal_actual_id INTEGER REFERENCES pa_personal(id),       -- quién tiene la herramienta (FK denormalizada)
     notas           TEXT,
     activo          INTEGER DEFAULT 1,
     creado_en       TEXT DEFAULT (datetime('now','localtime'))
   );
   CREATE INDEX IF NOT EXISTS idx_panol_unidades_estado ON pa_panol_unidades(estado);
-  CREATE INDEX IF NOT EXISTS idx_panol_unidades_trab ON pa_panol_unidades(trabajador_actual_id);
+  -- NOTA: el índice de personal_actual_id NO va acá. En DBs existentes la tabla ya
+  -- existe (CREATE IF NOT EXISTS = no-op) y la columna recién la agrega el ALTER de
+  -- unificarPadronPersonal() más abajo → crear el índice acá rompía el boot (#299).
 
   -- Movimientos: préstamo, devolución, reparación, baja, alta
   CREATE TABLE IF NOT EXISTS pa_panol_movimientos (
@@ -1629,7 +2000,7 @@ db.exec(`
     tipo            TEXT NOT NULL
                       CHECK(tipo IN ('alta','prestamo','devolucion','reparacion_inicio','reparacion_fin','baja','extravio')),
     fecha           TEXT DEFAULT (datetime('now','localtime')),
-    trabajador_id   INTEGER REFERENCES pa_trabajadores(id),  -- a quién (en préstamo/devolución)
+    personal_id     INTEGER REFERENCES pa_personal(id),      -- a quién (en préstamo/devolución)
     quien_registra  INTEGER REFERENCES users(id),            -- usuario que carga el movimiento
     condicion       TEXT,                                    -- 'nueva','buena','regular','rota' (al prestar o devolver)
     motivo          TEXT,                                    -- para baja/extravio: motivo libre
@@ -1639,6 +2010,42 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_panol_mov_unidad ON pa_panol_movimientos(unidad_id);
   CREATE INDEX IF NOT EXISTS idx_panol_mov_fecha ON pa_panol_movimientos(fecha);
 `);
+
+// ── UNIFICACIÓN de padrón: pa_personal absorbe a pa_trabajadores (deprecado) ──
+// pa_trabajadores quedó VACÍO en prod (0 filas, confirmado) y sin referencias vivas
+// salvo Pañol. Corre acá (después de crear Pañol) y es idempotente:
+//  (1) grupo_id en pa_personal;
+//  (2) columnas personal_* en Pañol (las viejas trabajador_* quedan muertas → siempre
+//      NULL, su FK colgante a pa_trabajadores nunca se evalúa);
+//  (3) DROP de pa_trabajadores.
+(function unificarPadronPersonal() {
+  try {
+    const colsP = db.prepare("PRAGMA table_info(pa_personal)").all().map(c => c.name);
+    if (!colsP.includes('grupo_id')) {
+      db.exec("ALTER TABLE pa_personal ADD COLUMN grupo_id INTEGER REFERENCES pa_grupos(id)");
+      console.log('[PA] pa_personal.grupo_id agregado');
+    }
+    const colsU = db.prepare("PRAGMA table_info(pa_panol_unidades)").all().map(c => c.name);
+    if (!colsU.includes('personal_actual_id')) {
+      db.exec("ALTER TABLE pa_panol_unidades ADD COLUMN personal_actual_id INTEGER REFERENCES pa_personal(id)");
+      console.log('[PA] pa_panol_unidades.personal_actual_id agregado');
+    }
+    // Índice acá (no en el schema template), ya con la columna garantizada en cualquier
+    // DB. IF NOT EXISTS → idempotente y sirve tanto a DBs frescas como existentes.
+    db.exec("CREATE INDEX IF NOT EXISTS idx_panol_unidades_personal ON pa_panol_unidades(personal_actual_id)");
+    const colsM = db.prepare("PRAGMA table_info(pa_panol_movimientos)").all().map(c => c.name);
+    if (!colsM.includes('personal_id')) {
+      db.exec("ALTER TABLE pa_panol_movimientos ADD COLUMN personal_id INTEGER REFERENCES pa_personal(id)");
+      console.log('[PA] pa_panol_movimientos.personal_id agregado');
+    }
+    db.pragma('foreign_keys = OFF');
+    db.exec("DROP TABLE IF EXISTS pa_trabajadores");
+    db.pragma('foreign_keys = ON');
+  } catch (e) {
+    try { db.pragma('foreign_keys = ON'); } catch (_) {}
+    console.error('[PA] Error en unificación de padrón:', e.message);
+  }
+})();
 
 // Seed de categorías base si tabla está vacía
 (function seedPanolCategorias() {
@@ -1770,6 +2177,20 @@ db.exec(`
     `);
     console.log('[ADM] Tabla adm_proveedores lista');
   } catch(e) { console.error('[ADM] Error creando adm_proveedores:', e.message); }
+})();
+
+// ── MIGRACIÓN: categoria en adm_proveedores ────────────────────────────────
+// Clasifica proveedores por rubro/categoría. Se usa para identificar los
+// proveedores de combustible (categoria='Combustible') en la vinculación de
+// facturas con recargas del tanque. El campo arranca NULL; el admin lo marca.
+(function migrarAdmProveedoresCategoria() {
+  try {
+    const cols = db.prepare("PRAGMA table_info(adm_proveedores)").all().map(c => c.name);
+    if (!cols.includes('categoria')) {
+      db.exec("ALTER TABLE adm_proveedores ADD COLUMN categoria TEXT");
+      console.log("[ADM] categoria agregada en adm_proveedores");
+    }
+  } catch(e) { console.error('[ADM] Error migrando adm_proveedores categoria:', e.message); }
 })();
 
 
@@ -2331,6 +2752,477 @@ db.exec(`
     txSeed();
     console.log('[PA] Secciones Activo/Pasivo/Patrimonio/Ingresos creadas');
   } catch(e) { console.error('[PA] Error creando secciones base:', e.message); }
+})();
+
+// ═══════════════════════════════════════════════════════════════════════════
+// MULTISOCIEDAD — FASE 1: cimiento contable (OK Andy + Pablo)
+// ───────────────────────────────────────────────────────────────────────────
+// Agrega sociedad_id a las 4 tablas del cimiento contable:
+//   pa_cuentas, pa_cuentas_secciones, pa_movimientos_contables, pa_asientos.
+// Decisiones aplicadas:
+//   • Plan de cuentas UNO POR SOCIEDAD (Opción A). El plan existente = Puente Cordón (PC).
+//   • UNIQUE(codigo) → UNIQUE(sociedad_id, codigo) en pa_cuentas y pa_cuentas_secciones.
+//   • San Gerónimo (SG): se espeja SOLO la ESTRUCTURA de secciones (0 cuentas) — TODO Pablo.
+//   • sociedad_id NOT NULL DEFAULT=PC en pa_movimientos_contables y pa_asientos, así los
+//     escritores de pa_asientos de OTRAS fases (produccion.js/ventas.js/ordenes.js) siguen
+//     funcionando sin tocarlos (su contexto hoy es PC). Se endurecen en su fase.
+// BETA sin datos reales → se preserva el id de cada cuenta/sección (rebuild copia ids),
+// por lo que las FK existentes (pa_asientos_lineas, ven_*, fin_*, etc.) quedan válidas.
+// Idempotente: cada paso se guarda por presencia de columna / existencia de filas.
+// ═══════════════════════════════════════════════════════════════════════════
+(function migrarMultisociedadFase1() {
+  try {
+    const soc = (nombre) => db.prepare("SELECT id FROM sociedades WHERE nombre = ?").get(nombre);
+    const pc = soc('Puente Cordón SA')
+            || db.prepare("SELECT id FROM sociedades WHERE funcion = 'productiva' ORDER BY id LIMIT 1").get();
+    if (!pc) {
+      console.warn('[PA][MS-F1] Sociedad Puente Cordón no encontrada — Fase 1 multisociedad NO aplicada');
+      return;
+    }
+    const PC = pc.id;
+    const sg = soc('San Gerónimo SA')
+            || db.prepare("SELECT id FROM sociedades WHERE funcion = 'comercial' ORDER BY id LIMIT 1").get();
+    const SG = sg ? sg.id : null;
+
+    const tieneCol = (tabla, col) =>
+      db.prepare(`PRAGMA table_info(${tabla})`).all().some(c => c.name === col);
+
+    // Los rebuilds (DROP/RENAME) requieren FK enforcement apagado para no romper por
+    // las referencias entrantes (pa_asientos_lineas, pa_movimientos_contables, etc.).
+    // Los ids se preservan en el copiado, así que al restaurar FK la integridad se mantiene.
+    const fkPrev = db.pragma('foreign_keys', { simple: true });
+    db.pragma('foreign_keys = OFF');
+    try {
+
+    // ── 1) pa_cuentas_secciones: rebuild con sociedad_id + UNIQUE(sociedad_id,codigo) ──
+    if (!tieneCol('pa_cuentas_secciones', 'sociedad_id')) {
+      db.exec(`
+        BEGIN;
+        CREATE TABLE pa_cuentas_secciones_v2 (
+          id              INTEGER PRIMARY KEY AUTOINCREMENT,
+          sociedad_id     INTEGER NOT NULL REFERENCES sociedades(id),
+          codigo          TEXT NOT NULL,
+          nombre          TEXT NOT NULL,
+          orden           INTEGER NOT NULL DEFAULT 0,
+          activo          INTEGER NOT NULL DEFAULT 1,
+          grupo           TEXT DEFAULT 'gastos',
+          creado_en       TEXT DEFAULT (datetime('now','localtime')),
+          actualizado_en  TEXT DEFAULT (datetime('now','localtime')),
+          UNIQUE(sociedad_id, codigo)
+        );
+        INSERT INTO pa_cuentas_secciones_v2
+          (id, sociedad_id, codigo, nombre, orden, activo, grupo, creado_en, actualizado_en)
+          SELECT id, ${PC}, codigo, nombre, orden, activo, COALESCE(grupo,'gastos'), creado_en, actualizado_en
+            FROM pa_cuentas_secciones;
+        DROP TABLE pa_cuentas_secciones;
+        ALTER TABLE pa_cuentas_secciones_v2 RENAME TO pa_cuentas_secciones;
+        CREATE INDEX IF NOT EXISTS idx_pa_secciones_sociedad ON pa_cuentas_secciones(sociedad_id);
+        COMMIT;
+      `);
+      console.log('[PA][MS-F1] pa_cuentas_secciones: sociedad_id agregado (existentes → PC), UNIQUE(sociedad_id,codigo)');
+    }
+
+    // ── 2) pa_cuentas: rebuild con sociedad_id + UNIQUE(sociedad_id,codigo) ──
+    if (!tieneCol('pa_cuentas', 'sociedad_id')) {
+      db.exec(`
+        BEGIN;
+        CREATE TABLE pa_cuentas_v2 (
+          id                INTEGER PRIMARY KEY AUTOINCREMENT,
+          sociedad_id       INTEGER NOT NULL REFERENCES sociedades(id),
+          codigo            TEXT NOT NULL,
+          nombre            TEXT NOT NULL,
+          seccion_id        INTEGER NOT NULL REFERENCES pa_cuentas_secciones(id),
+          tipo              TEXT NOT NULL DEFAULT 'resultado',
+          permite_lote      INTEGER NOT NULL DEFAULT 0,
+          permite_campania  INTEGER NOT NULL DEFAULT 0,
+          es_sistema        INTEGER NOT NULL DEFAULT 0,
+          orden             INTEGER NOT NULL DEFAULT 0,
+          activo            INTEGER NOT NULL DEFAULT 1,
+          creado_en         TEXT DEFAULT (datetime('now','localtime')),
+          actualizado_en    TEXT DEFAULT (datetime('now','localtime')),
+          UNIQUE(sociedad_id, codigo)
+        );
+        INSERT INTO pa_cuentas_v2
+          (id, sociedad_id, codigo, nombre, seccion_id, tipo, permite_lote, permite_campania, es_sistema, orden, activo, creado_en, actualizado_en)
+          SELECT id, ${PC}, codigo, nombre, seccion_id, tipo, permite_lote, permite_campania, es_sistema, orden, activo, creado_en, actualizado_en
+            FROM pa_cuentas;
+        DROP TABLE pa_cuentas;
+        ALTER TABLE pa_cuentas_v2 RENAME TO pa_cuentas;
+        CREATE INDEX IF NOT EXISTS idx_pa_cuentas_seccion  ON pa_cuentas(seccion_id);
+        CREATE INDEX IF NOT EXISTS idx_pa_cuentas_codigo   ON pa_cuentas(codigo);
+        CREATE INDEX IF NOT EXISTS idx_pa_cuentas_sociedad ON pa_cuentas(sociedad_id);
+        COMMIT;
+      `);
+      console.log('[PA][MS-F1] pa_cuentas: sociedad_id agregado (existentes → PC), UNIQUE(sociedad_id,codigo)');
+    }
+
+    // ── 3) pa_movimientos_contables: sociedad_id NOT NULL DEFAULT=PC (tabla sin uso hoy) ──
+    if (!tieneCol('pa_movimientos_contables', 'sociedad_id')) {
+      db.exec(`ALTER TABLE pa_movimientos_contables ADD COLUMN sociedad_id INTEGER NOT NULL DEFAULT ${PC}`);
+      db.exec(`CREATE INDEX IF NOT EXISTS idx_mov_sociedad ON pa_movimientos_contables(sociedad_id)`);
+      console.log('[PA][MS-F1] pa_movimientos_contables.sociedad_id agregado (NOT NULL DEFAULT PC)');
+    }
+
+    // ── 4) pa_asientos (cabecera): sociedad_id NOT NULL DEFAULT=PC ──
+    // DEFAULT=PC permite que los INSERT de produccion.js/ventas.js/ordenes.js (otras fases)
+    // sigan andando sin tocarlos; cuentas.js lo setea explícito.
+    if (!tieneCol('pa_asientos', 'sociedad_id')) {
+      db.exec(`ALTER TABLE pa_asientos ADD COLUMN sociedad_id INTEGER NOT NULL DEFAULT ${PC}`);
+      db.exec(`CREATE INDEX IF NOT EXISTS idx_pa_asientos_sociedad ON pa_asientos(sociedad_id)`);
+      console.log('[PA][MS-F1] pa_asientos.sociedad_id agregado (NOT NULL DEFAULT PC)');
+    }
+
+    // ── 5) Espejo de SG: SOLO estructura de secciones (0 cuentas). TODO Pablo. ──
+    if (SG) {
+      const sgTieneSecciones = db.prepare(
+        "SELECT COUNT(*) AS c FROM pa_cuentas_secciones WHERE sociedad_id = ?"
+      ).get(SG).c;
+      if (sgTieneSecciones === 0) {
+        const pcSecs = db.prepare(
+          "SELECT codigo, nombre, orden, activo, grupo FROM pa_cuentas_secciones WHERE sociedad_id = ? ORDER BY codigo"
+        ).all(PC);
+        const insSG = db.prepare(
+          "INSERT INTO pa_cuentas_secciones (sociedad_id, codigo, nombre, orden, activo, grupo) VALUES (?,?,?,?,?,?)"
+        );
+        const tx = db.transaction(() => {
+          for (const s of pcSecs) insSG.run(SG, s.codigo, s.nombre, s.orden, s.activo, s.grupo || 'gastos');
+        });
+        tx();
+        console.log(`[PA][MS-F1] San Gerónimo: ${pcSecs.length} secciones espejadas (0 cuentas).`);
+        console.log('[PA][MS-F1] TODO Pablo: definir las CUENTAS reales de SG (comercializador). '
+          + 'Las secciones se espejaron de PC como punto de partida; revisar cuáles aplican.');
+      }
+    } else {
+      console.warn('[PA][MS-F1] Sociedad San Gerónimo no encontrada — espejo de secciones omitido.');
+    }
+
+    } finally {
+      db.pragma(`foreign_keys = ${fkPrev ? 'ON' : 'OFF'}`);
+    }
+
+    console.log('[PA][MS-F1] Cimiento contable multisociedad inicializado.');
+  } catch (e) {
+    console.error('[PA][MS-F1] Error en migración multisociedad Fase 1:', e.message);
+  }
+})();
+
+// ═══════════════════════════════════════════════════════════════════════════
+// MULTISOCIEDAD — FASE 3: Proveedores + Ventas (OK Andy + Pablo)
+// ───────────────────────────────────────────────────────────────────────────
+// Agrega sociedad_id a las tablas de proveedores/pagos y de ventas:
+//   adm_proveedores, pa_pagos_proveedores,
+//   ven_clientes, ven_liquidaciones, ven_facturas, ven_cobranzas.
+// Decisiones aplicadas:
+//   • Proveedores/pagos: cada sociedad el suyo. Existentes → PC; SG arranca con padrón vacío.
+//   • Ventas (ven_*) = de PC (productor vía acopiador). Existentes → PC; SG espeja circuito (vacío).
+//   • sociedad_id NOT NULL DEFAULT=PC: protege a los escritores actuales sin tocarlos
+//     (migrarProveedoresUnificado, pagos.js, ventas.js); los routers de esta fase lo setean
+//     explícito para habilitar el alta en SG.
+// Tablas-hijo (pa_pagos_compras, ven_*_items, ven_cobranza_docs) NO llevan columna:
+//   la sociedad se deriva del padre por join.
+// Sin UNIQUE(codigo) que migrar → no hay rebuilds, solo ADD COLUMN. Idempotente.
+// ═══════════════════════════════════════════════════════════════════════════
+(function migrarMultisociedadFase3() {
+  try {
+    const soc = (nombre) => db.prepare("SELECT id FROM sociedades WHERE nombre = ?").get(nombre);
+    const pc = soc('Puente Cordón SA')
+            || db.prepare("SELECT id FROM sociedades WHERE funcion = 'productiva' ORDER BY id LIMIT 1").get();
+    if (!pc) {
+      console.warn('[PA][MS-F3] Sociedad Puente Cordón no encontrada — Fase 3 multisociedad NO aplicada');
+      return;
+    }
+    const PC = pc.id;
+
+    const tieneCol = (tabla, col) =>
+      db.prepare(`PRAGMA table_info(${tabla})`).all().some(c => c.name === col);
+
+    // Tablas que reciben sociedad_id NOT NULL DEFAULT=PC + índice de filtrado.
+    const tablas = [
+      'adm_proveedores',
+      'pa_pagos_proveedores',
+      'ven_clientes',
+      'ven_liquidaciones',
+      'ven_facturas',
+      'ven_cobranzas',
+    ];
+    for (const t of tablas) {
+      if (!tieneCol(t, 'sociedad_id')) {
+        db.exec(`ALTER TABLE ${t} ADD COLUMN sociedad_id INTEGER NOT NULL DEFAULT ${PC}`);
+        db.exec(`CREATE INDEX IF NOT EXISTS idx_${t}_sociedad ON ${t}(sociedad_id)`);
+        console.log(`[PA][MS-F3] ${t}.sociedad_id agregado (NOT NULL DEFAULT PC)`);
+      }
+    }
+
+    console.log('[PA][MS-F3] Proveedores + Ventas multisociedad inicializado.');
+  } catch (e) {
+    console.error('[PA][MS-F3] Error en migración multisociedad Fase 3:', e.message);
+  }
+})();
+
+// ═══════════════════════════════════════════════════════════════════════════
+// MULTISOCIEDAD — FASE 2: Financiero (cajas / bancos / cheques / OP) (OK Andy + Pablo)
+// ───────────────────────────────────────────────────────────────────────────
+// Cada caja/cuenta bancaria pertenece a UNA sociedad (titular del CBU). Sin pool
+// "Familia". La sociedad nace en fin_cuentas (raíz) y los routers la derivan hacia
+// abajo (cheques, movimientos, OP, conciliación).
+// Tablas que reciben sociedad_id NOT NULL DEFAULT=PC:
+//   fin_cuentas, fin_chequeras, fin_cheques_propios, fin_cheques_terceros,
+//   fin_movimientos, fin_extracto_lineas, fin_conciliaciones  → ADD COLUMN (sin rebuild).
+//   fin_ordenes_pago → REBUILD: numero pasa de UNIQUE global a UNIQUE(sociedad_id,numero)
+//     para que cada sociedad tenga su propia numeración de OP. Ids preservados.
+// Tabla-hijo fin_op_compras NO lleva columna: deriva de la OP por join.
+// Existentes → PC. SG arranca sin cuentas (las cargan con su CBU). Idempotente.
+// ═══════════════════════════════════════════════════════════════════════════
+(function migrarMultisociedadFase2() {
+  try {
+    const soc = (nombre) => db.prepare("SELECT id FROM sociedades WHERE nombre = ?").get(nombre);
+    const pc = soc('Puente Cordón SA')
+            || db.prepare("SELECT id FROM sociedades WHERE funcion = 'productiva' ORDER BY id LIMIT 1").get();
+    if (!pc) {
+      console.warn('[PA][MS-F2] Sociedad Puente Cordón no encontrada — Fase 2 multisociedad NO aplicada');
+      return;
+    }
+    const PC = pc.id;
+    const tieneCol = (tabla, col) =>
+      db.prepare(`PRAGMA table_info(${tabla})`).all().some(c => c.name === col);
+
+    // ── 1) Tablas simples: ADD COLUMN sociedad_id NOT NULL DEFAULT=PC + índice ──
+    const tablasSimples = [
+      'fin_cuentas',
+      'fin_chequeras',
+      'fin_cheques_propios',
+      'fin_cheques_terceros',
+      'fin_movimientos',
+      'fin_extracto_lineas',
+      'fin_conciliaciones',
+    ];
+    for (const t of tablasSimples) {
+      if (!tieneCol(t, 'sociedad_id')) {
+        db.exec(`ALTER TABLE ${t} ADD COLUMN sociedad_id INTEGER NOT NULL DEFAULT ${PC}`);
+        db.exec(`CREATE INDEX IF NOT EXISTS idx_${t}_sociedad ON ${t}(sociedad_id)`);
+        console.log(`[PA][MS-F2] ${t}.sociedad_id agregado (NOT NULL DEFAULT PC)`);
+      }
+    }
+
+    // ── 2) fin_ordenes_pago: rebuild para UNIQUE(sociedad_id, numero) ──
+    if (!tieneCol('fin_ordenes_pago', 'sociedad_id')) {
+      const fkPrev = db.pragma('foreign_keys', { simple: true });
+      db.pragma('foreign_keys = OFF');
+      try {
+        db.exec(`
+          BEGIN;
+          CREATE TABLE fin_ordenes_pago_v2 (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            sociedad_id     INTEGER NOT NULL REFERENCES sociedades(id),
+            numero          TEXT NOT NULL,
+            fecha           TEXT NOT NULL DEFAULT (date('now','localtime')),
+            proveedor_id    INTEGER NOT NULL REFERENCES adm_proveedores(id),
+            monto_total     REAL NOT NULL,
+            forma_pago      TEXT NOT NULL DEFAULT 'transferencia',
+            cuenta_fin_id   INTEGER REFERENCES fin_cuentas(id),
+            cheque_prop_id  INTEGER REFERENCES fin_cheques_propios(id),
+            cheque_ter_id   INTEGER REFERENCES fin_cheques_terceros(id),
+            referencia      TEXT,
+            notas           TEXT,
+            estado          TEXT NOT NULL DEFAULT 'emitida' CHECK(estado IN ('emitida','anulada')),
+            movimiento_id   INTEGER REFERENCES fin_movimientos(id),
+            usuario_id      INTEGER,
+            creado_en       TEXT DEFAULT (datetime('now','localtime')),
+            asiento_id      INTEGER REFERENCES pa_asientos(id),
+            UNIQUE(sociedad_id, numero)
+          );
+          INSERT INTO fin_ordenes_pago_v2
+            (id, sociedad_id, numero, fecha, proveedor_id, monto_total, forma_pago, cuenta_fin_id,
+             cheque_prop_id, cheque_ter_id, referencia, notas, estado, movimiento_id, usuario_id, creado_en, asiento_id)
+            SELECT id, ${PC}, numero, fecha, proveedor_id, monto_total, forma_pago, cuenta_fin_id,
+                   cheque_prop_id, cheque_ter_id, referencia, notas, estado, movimiento_id, usuario_id, creado_en, asiento_id
+              FROM fin_ordenes_pago;
+          DROP TABLE fin_ordenes_pago;
+          ALTER TABLE fin_ordenes_pago_v2 RENAME TO fin_ordenes_pago;
+          CREATE INDEX IF NOT EXISTS idx_fin_ordenes_pago_sociedad ON fin_ordenes_pago(sociedad_id);
+          COMMIT;
+        `);
+        console.log('[PA][MS-F2] fin_ordenes_pago: sociedad_id agregado (existentes → PC), UNIQUE(sociedad_id,numero)');
+      } finally {
+        db.pragma(`foreign_keys = ${fkPrev ? 'ON' : 'OFF'}`);
+      }
+    }
+
+    console.log('[PA][MS-F2] Financiero (cajas/bancos) multisociedad inicializado.');
+  } catch (e) {
+    console.error('[PA][MS-F2] Error en migración multisociedad Fase 2:', e.message);
+  }
+})();
+
+// ═══════════════════════════════════════════════════════════════════════════
+// MÓDULO PERSONAL PC — cambios de modales/lógica (rubro→producto, semanas, pago caja)
+// Todas idempotentes y guardadas: corren siempre, no rompen si las columnas/tablas
+// ya existen. NO referencian columnas nuevas dentro de un schema-template bare
+// (lección del crash #299 con personal_actual_id).
+// ═══════════════════════════════════════════════════════════════════════════
+(function migracionPersonalPCModales() {
+  // (B) Mini-modelo rubro→producto en cuentas MO (lo setea la ingeniera).
+  //     mo_clase: 'productivo'/'general'/NULL · mo_cultivo: producto (texto, = pa_cultivos_lote.cultivo)
+  //     mo_vigente: 1 = el operario puede cargar sobre este rubro.
+  try {
+    const c = db.prepare("PRAGMA table_info(pa_cuentas)").all().map(x => x.name);
+    if (!c.includes('mo_clase'))   { db.exec("ALTER TABLE pa_cuentas ADD COLUMN mo_clase TEXT");                 console.log('[PA] pa_cuentas.mo_clase agregado'); }
+    if (!c.includes('mo_cultivo')) { db.exec("ALTER TABLE pa_cuentas ADD COLUMN mo_cultivo TEXT");               console.log('[PA] pa_cuentas.mo_cultivo agregado'); }
+    if (!c.includes('mo_vigente')) { db.exec("ALTER TABLE pa_cuentas ADD COLUMN mo_vigente INTEGER DEFAULT 0");  console.log('[PA] pa_cuentas.mo_vigente agregado'); }
+    // Backfill de clase para cuentas MO sin clasificar (idempotente: solo donde mo_clase IS NULL).
+    //   Señal = permite_lote del plan de cuentas: 0 = estructura (no va a un lote) → 'general';
+    //   1 = imputable a lote → 'productivo'. Así MO GENERALES (permite_lote=0) queda general
+    //   de entrada y el resto productivo, sin name-parsing. Overridable desde la UI de ingeniería.
+    const colsC = db.prepare("PRAGMA table_info(pa_cuentas)").all().map(x => x.name);
+    if (colsC.includes('permite_lote')) {
+      const r = db.prepare(`
+        UPDATE pa_cuentas
+        SET mo_clase = CASE WHEN COALESCE(permite_lote,1)=0 THEN 'general' ELSE 'productivo' END
+        WHERE nombre LIKE 'MO %' AND mo_clase IS NULL
+      `).run();
+      if (r.changes) console.log('[PA] backfill mo_clase en', r.changes, 'cuentas MO (general/productivo según permite_lote)');
+    }
+  } catch (e) { console.error('[PA] Error migrando pa_cuentas (rubro MO):', e.message); }
+
+  // (D) Link del pago de personal al egreso de caja (fin_movimientos).
+  try {
+    const c = db.prepare("PRAGMA table_info(pa_cc_movimientos)").all().map(x => x.name);
+    if (!c.includes('fin_movimiento_id')) {
+      db.exec("ALTER TABLE pa_cc_movimientos ADD COLUMN fin_movimiento_id INTEGER REFERENCES fin_movimientos(id)");
+      console.log('[PA] pa_cc_movimientos.fin_movimiento_id agregado');
+    }
+  } catch (e) { console.error('[PA] Error migrando pa_cc_movimientos (fin_movimiento_id):', e.message); }
+
+  // (C) Semanas de pago (rango libre apertura→cierre, validación de huecos/solapes en la API).
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS pa_semanas_pago (
+        id             INTEGER PRIMARY KEY AUTOINCREMENT,
+        fecha_apertura TEXT NOT NULL,
+        fecha_cierre   TEXT NOT NULL,
+        estado         TEXT NOT NULL DEFAULT 'abierta' CHECK(estado IN ('abierta','cerrada')),
+        notas          TEXT,
+        creado_por     INTEGER REFERENCES usuarios(id),
+        creado_en      TEXT DEFAULT (datetime('now','localtime'))
+      );
+      CREATE INDEX IF NOT EXISTS idx_pa_semanas_pago_fechas ON pa_semanas_pago(fecha_apertura, fecha_cierre);
+    `);
+  } catch (e) { console.error('[PA] Error creando pa_semanas_pago:', e.message); }
+
+  // (B) lote_id nullable en pa_asistencias → MO general sin lote (gasto de estructura,
+  //     NO se imputa a pa_costos_lote). Cambiar NOT NULL requiere rebuild (SQLite).
+  //     Guard: solo rebuildea si lote_id TODAVÍA es NOT NULL → idempotente.
+  try {
+    const info = db.prepare("PRAGMA table_info(pa_asistencias)").all();
+    const loteCol = info.find(c => c.name === 'lote_id');
+    if (loteCol && loteCol.notnull === 1) {
+      db.pragma('foreign_keys = OFF');
+      const rebuild = db.transaction(() => {
+        db.exec(`
+          CREATE TABLE pa_asistencias_new (
+            id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+            fecha                 TEXT NOT NULL,
+            cuadrilla_id          INTEGER REFERENCES pa_cuadrillas(id),
+            personal_id           INTEGER REFERENCES pa_personal(id),
+            contratista_id        INTEGER REFERENCES pa_personal(id),
+            cantidad              INTEGER NOT NULL DEFAULT 1,
+            horas                 REAL NOT NULL,
+            jornales_calc         REAL,
+            rubro_cuenta_id       INTEGER NOT NULL,
+            campaña_anual_id      INTEGER NOT NULL REFERENCES pa_campañas(id),
+            campaña_estacional_id INTEGER NOT NULL REFERENCES pa_campañas(id),
+            lote_id               INTEGER REFERENCES pa_lotes(id),
+            finca                 TEXT,
+            tarea_tipo_id         INTEGER REFERENCES pa_tareas_tipos(id),
+            cultivo               TEXT,
+            estado                TEXT NOT NULL DEFAULT 'pendiente_valorizar'
+                                    CHECK(estado IN ('pendiente_valorizar','valorizado','anulado')),
+            notas                 TEXT,
+            cargado_por           INTEGER NOT NULL REFERENCES usuarios(id),
+            creado_en             TEXT DEFAULT (datetime('now','localtime')),
+            modificado_en         TEXT,
+            modificado_por        INTEGER,
+            anulado_en            TEXT,
+            anulado_por           INTEGER,
+            anulado_motivo        TEXT
+          );
+          INSERT INTO pa_asistencias_new SELECT * FROM pa_asistencias;
+          DROP TABLE pa_asistencias;
+          ALTER TABLE pa_asistencias_new RENAME TO pa_asistencias;
+          CREATE INDEX IF NOT EXISTS idx_pa_asist_fecha    ON pa_asistencias(fecha);
+          CREATE INDEX IF NOT EXISTS idx_pa_asist_estado   ON pa_asistencias(estado);
+          CREATE INDEX IF NOT EXISTS idx_pa_asist_personal ON pa_asistencias(personal_id);
+          CREATE INDEX IF NOT EXISTS idx_pa_asist_contra   ON pa_asistencias(contratista_id);
+          CREATE INDEX IF NOT EXISTS idx_pa_asist_lote     ON pa_asistencias(lote_id);
+        `);
+      });
+      rebuild();
+      db.pragma('foreign_keys = ON');
+      console.log('[PA] pa_asistencias.lote_id ahora nullable (MO general sin lote)');
+    }
+  } catch (e) {
+    try { db.pragma('foreign_keys = ON'); } catch (_) {}
+    console.error('[PA] Error en rebuild pa_asistencias (lote_id nullable):', e.message);
+  }
+})();
+
+// ═══════════════════════════════════════════════════════════════════════════
+// VACIADO TOTAL — Órdenes de Aplicación (PC) (OK Andy + ingeniera)
+// ───────────────────────────────────────────────────────────────────────────
+// One-shot guardado por flag en sistema_flags ('wipe_ordenes_pc_v1'): vacía TODAS las
+// órdenes de aplicación y REVIERTE todo lo que arrastran — "como si nunca hubieran
+// existido". BETA sin datos productivos (arrancan jul-2026).
+//   1) Backup VACUUM INTO ANTES (aborta sin tocar nada si no puede crearlo; reintenta).
+//   2) En una transacción: RESTAURA el stock descontado (pa_insumos += Σ cantidad_real —
+//      el stock SUBE, no va a cero), borra costos (fert/agro de aplicaciones), borra
+//      mov_stock 'aplicacion', desvincula combustible, y borra aplicaciones/items/lotes/órdenes.
+//   3) Marca el flag → idempotente: no re-corre NI re-vacía órdenes creadas después.
+// Las órdenes NO generan asientos/movimientos contables → ese efecto es 0 (verificado).
+// Borra hijos antes que el padre (FK-safe). Validado con node:sqlite.
+// ═══════════════════════════════════════════════════════════════════════════
+(function vaciarOrdenesAplicacionPC() {
+  const FLAG = 'wipe_ordenes_pc_v1';
+  try {
+    db.exec(`CREATE TABLE IF NOT EXISTS sistema_flags (key TEXT PRIMARY KEY, valor TEXT, ejecutado_en TEXT DEFAULT (datetime('now','localtime')))`);
+    if (db.prepare("SELECT 1 FROM sistema_flags WHERE key = ?").get(FLAG)) return; // ya ejecutado
+
+    const totalOrdenes = db.prepare("SELECT COUNT(*) AS n FROM pa_ordenes").get().n;
+    if (totalOrdenes === 0) {
+      db.prepare("INSERT OR REPLACE INTO sistema_flags (key, valor) VALUES (?, ?)").run(FLAG, 'sin-ordenes');
+      return;
+    }
+
+    // 1) Backup de red ANTES del borrado. Si falla → abortar sin tocar nada (reintenta en el próximo deploy).
+    const backupPath = path.join(path.dirname(dbPath), 'clientes-pre-wipe-ordenes.db');
+    if (!fs.existsSync(backupPath)) {
+      try { db.exec(`VACUUM INTO '${backupPath.replace(/'/g, "''")}'`); console.log('[WIPE-OA] Backup creado:', backupPath); }
+      catch (e) { console.error('[WIPE-OA] No se pudo crear el backup — ABORTANDO (no se borró nada):', e.message); return; }
+    }
+
+    // 2) Reversa transaccional
+    const stats = {};
+    db.transaction(() => {
+      // Restaurar (sumar) el stock descontado por cada aplicación — ANTES de borrar aplicaciones
+      db.exec(`UPDATE pa_insumos SET stock_actual = stock_actual + COALESCE(
+                 (SELECT SUM(a.cantidad_real) FROM pa_aplicaciones a WHERE a.insumo_id = pa_insumos.id), 0)`);
+      // Costos por lote generados por aplicaciones (fert/agro con referencia a una aplicación)
+      stats.costos  = db.prepare(`DELETE FROM pa_costos_lote WHERE categoria IN ('fertilizante','agroquimico') AND referencia_id IN (SELECT id FROM pa_aplicaciones)`).run().changes;
+      // Movimientos de stock de aplicaciones
+      stats.movStock = db.prepare(`DELETE FROM pa_movimientos_stock WHERE motivo='aplicacion'`).run().changes;
+      // Desvincular combustible (NO se borra el movimiento)
+      stats.comb     = db.prepare(`UPDATE pa_combustible_movimientos SET orden_id=NULL WHERE orden_id IS NOT NULL`).run().changes;
+      // Borrar aplicaciones, ítems, lotes y órdenes (hijos → padre)
+      stats.aplic    = db.prepare(`DELETE FROM pa_aplicaciones`).run().changes;
+      stats.items    = db.prepare(`DELETE FROM pa_ordenes_items`).run().changes;
+      stats.lotes    = db.prepare(`DELETE FROM pa_ordenes_lotes`).run().changes;
+      stats.ordenes  = db.prepare(`DELETE FROM pa_ordenes`).run().changes;
+    })();
+
+    db.prepare("INSERT OR REPLACE INTO sistema_flags (key, valor) VALUES (?, ?)").run(FLAG, JSON.stringify(stats));
+    console.log('[WIPE-OA] Órdenes de aplicación vaciadas:', JSON.stringify(stats));
+  } catch (e) {
+    console.error('[WIPE-OA] Error vaciando órdenes de aplicación:', e.message);
+  }
 })();
 
 export { db };

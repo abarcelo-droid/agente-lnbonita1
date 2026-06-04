@@ -49,6 +49,31 @@ function logAccion({ cuenta_id = null, seccion_id = null, accion, detalle = null
   );
 }
 
+// ── Multisociedad (Fase 1) ──────────────────────────────────────────────────
+// El plan de cuentas es UNO POR SOCIEDAD. Las lecturas/escrituras se acotan a
+// una sociedad. Si el request no manda sociedad_id, se usa Puente Cordón (PC)
+// por defecto, para mantener compatibilidad con el panel actual (que todavía no
+// envía la dimensión). El cableado del selector en la UI es follow-up.
+let _pcId = null;
+function sociedadPCId() {
+  if (_pcId) return _pcId;
+  const r = db.prepare("SELECT id FROM sociedades WHERE nombre = 'Puente Cordón SA'").get()
+         || db.prepare("SELECT id FROM sociedades WHERE funcion = 'productiva' ORDER BY id LIMIT 1").get();
+  _pcId = r ? r.id : 1;
+  return _pcId;
+}
+// Resuelve la sociedad del request (query o body). Valida que exista; si no
+// viene o es inválida, cae a PC.
+function getSociedadId(req) {
+  const raw = req.body?.sociedad_id ?? req.query?.sociedad_id;
+  const id = (raw !== undefined && raw !== null && raw !== '') ? parseInt(raw, 10) : null;
+  if (Number.isInteger(id)) {
+    const ok = db.prepare('SELECT id FROM sociedades WHERE id = ?').get(id);
+    if (ok) return id;
+  }
+  return sociedadPCId();
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // SECCIONES — listar / crear / editar / desactivar / reactivar
 // (van ANTES de las rutas de /:id para que no matcheen mal)
@@ -56,27 +81,30 @@ function logAccion({ cuenta_id = null, seccion_id = null, accion, detalle = null
 
 router.get('/secciones', (req, res) => {
   const incluirInactivas = req.query.incluir_inactivas === '1';
-  let sql = 'SELECT * FROM pa_cuentas_secciones';
-  if (!incluirInactivas) sql += ' WHERE activo = 1';
+  const sociedadId = getSociedadId(req);
+  let sql = 'SELECT * FROM pa_cuentas_secciones WHERE sociedad_id = ?';
+  if (!incluirInactivas) sql += ' AND activo = 1';
   sql += ' ORDER BY codigo';
-  res.json({ ok: true, data: db.prepare(sql).all() });
+  res.json({ ok: true, data: db.prepare(sql).all(sociedadId) });
 });
 
 router.post('/secciones', requireAdmin, (req, res) => {
-  const { codigo, nombre } = req.body || {};
+  const { codigo, nombre, grupo } = req.body || {};
   if (!codigo || !nombre) return res.status(400).json({ error: 'codigo y nombre son requeridos' });
-  const codigoNum = parseInt(codigo, 10);
-  if (!Number.isFinite(codigoNum) || codigoNum < 1) {
-    return res.status(400).json({ error: 'codigo debe ser un entero >= 1' });
+  // Aceptar tanto enteros (5) como decimales (5.08)
+  const codigoStr = String(codigo).trim();
+  if (!/^\d+(\.\d+)?$/.test(codigoStr)) {
+    return res.status(400).json({ error: 'codigo debe tener formato N o N.NN (ej: 5 o 5.08)' });
   }
-  const existe = db.prepare('SELECT id FROM pa_cuentas_secciones WHERE codigo = ?').get(codigoNum);
-  if (existe) return res.status(400).json({ error: 'ya existe una sección con ese código' });
+  const sociedadId = getSociedadId(req);
+  const existe = db.prepare('SELECT id FROM pa_cuentas_secciones WHERE codigo = ? AND sociedad_id = ?').get(codigoStr, sociedadId);
+  if (existe) return res.status(400).json({ error: 'ya existe una sección con ese código en esta sociedad' });
   try {
     const r = db.prepare(`
-      INSERT INTO pa_cuentas_secciones (codigo, nombre, orden, activo)
-      VALUES (?, ?, ?, 1)
-    `).run(codigoNum, String(nombre).trim(), codigoNum);
-    logAccion({ seccion_id: r.lastInsertRowid, accion: 'crear', detalle: { codigo: codigoNum, nombre }, usuario_id: req._user?.id });
+      INSERT INTO pa_cuentas_secciones (sociedad_id, codigo, nombre, orden, activo, grupo)
+      VALUES (?, ?, ?, ?, 1, ?)
+    `).run(sociedadId, codigoStr, String(nombre).trim(), codigoStr, grupo||'gastos');
+    logAccion({ seccion_id: r.lastInsertRowid, accion: 'crear', detalle: { codigo: codigoStr, nombre }, usuario_id: req._user?.id });
     res.json({ ok: true, id: r.lastInsertRowid });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -88,15 +116,18 @@ router.put('/secciones/:id', requireAdmin, (req, res) => {
   const sec = db.prepare('SELECT * FROM pa_cuentas_secciones WHERE id = ?').get(id);
   if (!sec) return res.status(404).json({ error: 'sección no encontrada' });
 
-  const { nombre, codigo } = req.body || {};
-  if (codigo !== undefined && parseInt(codigo, 10) !== sec.codigo) {
-    const codigoNum = parseInt(codigo, 10);
-    const otra = db.prepare('SELECT id FROM pa_cuentas_secciones WHERE codigo = ? AND id != ?').get(codigoNum, id);
-    if (otra) return res.status(400).json({ error: 'ya existe otra sección con ese código' });
-    db.prepare("UPDATE pa_cuentas_secciones SET codigo = ?, actualizado_en = datetime('now','localtime') WHERE id = ?").run(codigoNum, id);
+  const { nombre, codigo, grupo } = req.body || {};
+  if (codigo !== undefined && String(codigo).trim() !== String(sec.codigo)) {
+    const codigoStr = String(codigo).trim();
+    const otra = db.prepare('SELECT id FROM pa_cuentas_secciones WHERE codigo = ? AND sociedad_id = ? AND id != ?').get(codigoStr, sec.sociedad_id, id);
+    if (otra) return res.status(400).json({ error: 'ya existe otra sección con ese código en esta sociedad' });
+    db.prepare("UPDATE pa_cuentas_secciones SET codigo = ?, actualizado_en = datetime('now','localtime') WHERE id = ?").run(codigoStr, id);
   }
   if (nombre && String(nombre).trim() !== sec.nombre) {
     db.prepare("UPDATE pa_cuentas_secciones SET nombre = ?, actualizado_en = datetime('now','localtime') WHERE id = ?").run(String(nombre).trim(), id);
+  }
+  if (grupo) {
+    db.prepare("UPDATE pa_cuentas_secciones SET grupo = ? WHERE id = ?").run(grupo, id);
   }
   logAccion({ seccion_id: id, accion: 'editar', detalle: { antes: sec, despues: req.body }, usuario_id: req._user?.id });
   res.json({ ok: true });
@@ -157,14 +188,15 @@ router.get('/log/general', (req, res) => {
 router.get('/', (req, res) => {
   const { seccion_id, q } = req.query;
   const incluirInactivas = req.query.incluir_inactivas === '1';
-  const params = [];
+  const sociedadId = getSociedadId(req);
+  const params = [sociedadId];
   let sql = `
     SELECT c.*,
            s.nombre AS seccion_nombre,
            s.codigo AS seccion_codigo
       FROM pa_cuentas c
       JOIN pa_cuentas_secciones s ON s.id = c.seccion_id
-     WHERE 1 = 1
+     WHERE c.sociedad_id = ?
   `;
   if (!incluirInactivas) sql += ' AND c.activo = 1';
   if (seccion_id) { sql += ' AND c.seccion_id = ?'; params.push(parseInt(seccion_id, 10)); }
@@ -203,25 +235,28 @@ router.post('/', requireAdmin, (req, res) => {
   if (!codigo || !nombre || !seccion_id) {
     return res.status(400).json({ error: 'codigo, nombre y seccion_id son requeridos' });
   }
-  if (!/^\d+\.\d+$/.test(codigo)) {
-    return res.status(400).json({ error: 'codigo debe tener formato S.NN (ej: 1.05)' });
+  if (!/^\d+(\.\d+)+$/.test(codigo)) {
+    return res.status(400).json({ error: 'codigo debe tener formato S.NN o S.NN.NN (ej: 1.05 o 2.02.04)' });
   }
   if (!['resultado', 'patrimonial'].includes(tipo)) {
     return res.status(400).json({ error: 'tipo inválido' });
   }
-  const sec = db.prepare('SELECT id FROM pa_cuentas_secciones WHERE id = ?').get(seccion_id);
+  // La cuenta hereda la sociedad de su sección (plan de cuentas por sociedad).
+  const sec = db.prepare('SELECT id, sociedad_id FROM pa_cuentas_secciones WHERE id = ?').get(seccion_id);
   if (!sec) return res.status(400).json({ error: 'seccion_id inválido' });
+  const sociedadId = sec.sociedad_id;
 
-  const existe = db.prepare('SELECT id FROM pa_cuentas WHERE codigo = ?').get(codigo);
-  if (existe) return res.status(400).json({ error: 'ya existe una cuenta con ese código' });
+  const existe = db.prepare('SELECT id FROM pa_cuentas WHERE codigo = ? AND sociedad_id = ?').get(codigo, sociedadId);
+  if (existe) return res.status(400).json({ error: 'ya existe una cuenta con ese código en esta sociedad' });
 
   try {
     const ordenMax = db.prepare('SELECT COALESCE(MAX(orden), 0) AS m FROM pa_cuentas WHERE seccion_id = ?').get(seccion_id).m;
     const r = db.prepare(`
       INSERT INTO pa_cuentas
-        (codigo, nombre, seccion_id, tipo, permite_lote, permite_campania, es_sistema, orden, activo)
-      VALUES (?, ?, ?, ?, ?, ?, 0, ?, 1)
+        (sociedad_id, codigo, nombre, seccion_id, tipo, permite_lote, permite_campania, es_sistema, orden, activo)
+      VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, 1)
     `).run(
+      sociedadId,
       codigo,
       String(nombre).trim(),
       seccion_id,
@@ -246,18 +281,22 @@ router.put('/:id(\\d+)', requireAdmin, (req, res) => {
   const { codigo, nombre, seccion_id, tipo, permite_lote, permite_campania } = req.body || {};
 
   if (codigo && codigo !== cuenta.codigo) {
-    if (!/^\d+\.\d+$/.test(codigo)) {
-      return res.status(400).json({ error: 'codigo debe tener formato S.NN' });
+    if (!/^\d+(\.\d+)+$/.test(codigo)) {
+      return res.status(400).json({ error: 'codigo debe tener formato S.NN o S.NN.NN (ej: 2.02.04)' });
     }
-    const otra = db.prepare('SELECT id FROM pa_cuentas WHERE codigo = ? AND id != ?').get(codigo, id);
-    if (otra) return res.status(400).json({ error: 'ya existe otra cuenta con ese código' });
+    const otra = db.prepare('SELECT id FROM pa_cuentas WHERE codigo = ? AND sociedad_id = ? AND id != ?').get(codigo, cuenta.sociedad_id, id);
+    if (otra) return res.status(400).json({ error: 'ya existe otra cuenta con ese código en esta sociedad' });
   }
   if (tipo && !['resultado', 'patrimonial'].includes(tipo)) {
     return res.status(400).json({ error: 'tipo inválido' });
   }
   if (seccion_id) {
-    const sec = db.prepare('SELECT id FROM pa_cuentas_secciones WHERE id = ?').get(seccion_id);
+    // La sección destino debe pertenecer a la misma sociedad (no se mueve entre sociedades).
+    const sec = db.prepare('SELECT id, sociedad_id FROM pa_cuentas_secciones WHERE id = ?').get(seccion_id);
     if (!sec) return res.status(400).json({ error: 'seccion_id inválido' });
+    if (sec.sociedad_id !== cuenta.sociedad_id) {
+      return res.status(400).json({ error: 'la sección destino pertenece a otra sociedad' });
+    }
   }
 
   try {
@@ -376,12 +415,13 @@ router.get('/:id(\\d+)/log', (req, res) => {
 router.get('/asientos', (req, res) => {
   const { desde, hasta } = req.query;
   const incluirAnulados = req.query.anulados === '1';
-  const params = [];
+  const sociedadId = getSociedadId(req);
+  const params = [sociedadId];
   let sql = `
     SELECT a.*, u.nombre AS usuario_nombre
       FROM pa_asientos a
       LEFT JOIN usuarios u ON u.id = a.usuario_id
-     WHERE 1 = 1
+     WHERE a.sociedad_id = ?
   `;
   if (!incluirAnulados) { sql += ' AND a.anulado = 0'; }
   if (desde) { sql += ' AND a.fecha >= ?'; params.push(desde); }
@@ -531,9 +571,9 @@ router.post('/modelos/desde-factura', requireAuth, (req, res) => {
   try {
     const tx = db.transaction(() => {
       const r = db.prepare(`
-        INSERT INTO pa_asientos (fecha, descripcion, usuario_id, ref_compra_id, ref_codigo)
-        VALUES (?, ?, ?, ?, ?)
-      `).run(compra.fecha, descripcion, req._user?.id ?? null, compra_id, refCodigo);
+        INSERT INTO pa_asientos (fecha, descripcion, usuario_id, ref_compra_id, ref_codigo, sociedad_id)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `).run(compra.fecha, descripcion, req._user?.id ?? null, compra_id, refCodigo, sociedadPCId());
       const asientoId = r.lastInsertRowid;
       const ins = db.prepare(`INSERT INTO pa_asientos_lineas (asiento_id, cuenta_id, debe, haber, descripcion) VALUES (?, ?, ?, ?, ?)`);
       for (const l of lineas) {
@@ -564,22 +604,29 @@ router.post('/asientos', requireAdmin, (req, res) => {
     });
   }
 
-  // Validar que cada línea tenga cuenta válida
+  // El asiento pertenece a una sociedad; todas sus cuentas deben ser de esa sociedad.
+  const sociedadId = getSociedadId(req);
+
+  // Validar que cada línea tenga cuenta válida y de la misma sociedad
   for (const l of lineas) {
     if (!l.cuenta_id) return res.status(400).json({ error: 'cada línea debe tener cuenta_id' });
-    const c = db.prepare('SELECT id FROM pa_cuentas WHERE id = ? AND activo = 1').get(l.cuenta_id);
+    const c = db.prepare('SELECT id, sociedad_id FROM pa_cuentas WHERE id = ? AND activo = 1').get(l.cuenta_id);
     if (!c) return res.status(400).json({ error: `cuenta_id ${l.cuenta_id} no existe o está inactiva` });
+    if (c.sociedad_id !== sociedadId) {
+      return res.status(400).json({ error: `cuenta_id ${l.cuenta_id} pertenece a otra sociedad` });
+    }
   }
 
   try {
     const tx = db.transaction(() => {
       const r = db.prepare(`
-        INSERT INTO pa_asientos (fecha, descripcion, usuario_id)
-        VALUES (?, ?, ?)
+        INSERT INTO pa_asientos (fecha, descripcion, usuario_id, sociedad_id)
+        VALUES (?, ?, ?, ?)
       `).run(
         fecha || new Date().toISOString().slice(0, 10),
         String(descripcion).trim(),
-        req._user?.id ?? null
+        req._user?.id ?? null,
+        sociedadId
       );
       const asientoId = r.lastInsertRowid;
       const insLinea = db.prepare(`

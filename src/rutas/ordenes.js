@@ -10,10 +10,39 @@ function getUser(req) {
   catch(e) { return null; }
 }
 
-function generarNumero() {
+// ── Multisociedad (Fase 2) ──────────────────────────────────────────────────
+// La OP pertenece a la sociedad que paga (la de su cuenta/caja; si paga con cheque,
+// la del proveedor). La numeración OP-AAAA-NNNN es por sociedad.
+let _pcId = null;
+function sociedadPCId() {
+  if (_pcId) return _pcId;
+  const r = db.prepare("SELECT id FROM sociedades WHERE nombre = 'Puente Cordón SA'").get()
+         || db.prepare("SELECT id FROM sociedades WHERE funcion = 'productiva' ORDER BY id LIMIT 1").get();
+  _pcId = r ? r.id : 1;
+  return _pcId;
+}
+function getSociedadId(req) {
+  const raw = req.body?.sociedad_id ?? req.query?.sociedad_id;
+  const id = (raw !== undefined && raw !== null && raw !== '') ? parseInt(raw, 10) : null;
+  if (Number.isInteger(id)) {
+    const ok = db.prepare('SELECT id FROM sociedades WHERE id = ?').get(id);
+    if (ok) return id;
+  }
+  return sociedadPCId();
+}
+function sociedadDeCuenta(cuentaId) {
+  const c = db.prepare('SELECT sociedad_id FROM fin_cuentas WHERE id = ?').get(parseInt(cuentaId));
+  return c ? c.sociedad_id : null;
+}
+function sociedadDeProveedor(provId) {
+  const p = db.prepare('SELECT sociedad_id FROM adm_proveedores WHERE id = ?').get(parseInt(provId));
+  return p ? p.sociedad_id : sociedadPCId();
+}
+
+function generarNumero(sociedadId) {
   const año = new Date().getFullYear();
-  const ultima = db.prepare("SELECT numero FROM fin_ordenes_pago WHERE numero LIKE ? ORDER BY id DESC LIMIT 1")
-    .get(`OP-${año}-%`);
+  const ultima = db.prepare("SELECT numero FROM fin_ordenes_pago WHERE sociedad_id = ? AND numero LIKE ? ORDER BY id DESC LIMIT 1")
+    .get(sociedadId, `OP-${año}-%`);
   let n = 1;
   if (ultima) {
     const partes = ultima.numero.split('-');
@@ -26,15 +55,16 @@ function generarNumero() {
 router.get('/', (req, res) => {
   try {
     const { estado, proveedorId } = req.query;
+    const sociedadId = getSociedadId(req);
     let sql = `
       SELECT op.*, pr.razon_social as proveedor_nombre,
         fc.nombre as cuenta_nombre
       FROM fin_ordenes_pago op
       LEFT JOIN adm_proveedores pr ON pr.id = op.proveedor_id
       LEFT JOIN fin_cuentas fc ON fc.id = op.cuenta_fin_id
-      WHERE 1=1
+      WHERE op.sociedad_id = ?
     `;
-    const params = [];
+    const params = [sociedadId];
     if (estado)      { sql += ' AND op.estado=?'; params.push(estado); }
     if (proveedorId) { sql += ' AND op.proveedor_id=?'; params.push(parseInt(proveedorId)); }
     sql += ' ORDER BY op.fecha DESC, op.id DESC';
@@ -95,23 +125,29 @@ router.post('/', (req, res) => {
   if (forma_pago === 'cheque_tercero' && !cheque_ter_id)
     return res.status(400).json({ ok: false, error: 'Seleccioná un cheque de tercero' });
 
+  // La OP pertenece a la sociedad de la cuenta/caja con que se paga; si se paga con
+  // cheque (sin cuenta), a la del proveedor.
+  const sociedadId = cuenta_fin_id
+    ? (sociedadDeCuenta(cuenta_fin_id) || sociedadDeProveedor(proveedor_id))
+    : sociedadDeProveedor(proveedor_id);
+
   try {
     const crear = db.transaction(() => {
-      const numero = generarNumero();
+      const numero = generarNumero(sociedadId);
       const fechaOp = fecha || new Date().toISOString().split('T')[0];
 
       // Insertar OP
       const r = db.prepare(`
         INSERT INTO fin_ordenes_pago
           (numero, fecha, proveedor_id, monto_total, forma_pago, cuenta_fin_id,
-           cheque_prop_id, cheque_ter_id, referencia, notas, estado, usuario_id)
-        VALUES (?,?,?,?,?,?,?,?,?,?,'emitida',?)
+           cheque_prop_id, cheque_ter_id, referencia, notas, estado, usuario_id, sociedad_id)
+        VALUES (?,?,?,?,?,?,?,?,?,?,'emitida',?,?)
       `).run(
         numero, fechaOp, parseInt(proveedor_id), parseFloat(monto_total),
         forma_pago, cuenta_fin_id ? parseInt(cuenta_fin_id) : null,
         cheque_prop_id ? parseInt(cheque_prop_id) : null,
         cheque_ter_id  ? parseInt(cheque_ter_id)  : null,
-        referencia || null, notas || null, u ? u.id : null
+        referencia || null, notas || null, u ? u.id : null, sociedadId
       );
       const opId = r.lastInsertRowid;
 
@@ -127,12 +163,12 @@ router.post('/', (req, res) => {
       let movId = null;
       if (cuenta_fin_id) {
         const mv = db.prepare(`
-          INSERT INTO fin_movimientos (cuenta_id, fecha, tipo, concepto, monto, referencia, usuario_id)
-          VALUES (?,?,'egreso',?,?,?,?)
+          INSERT INTO fin_movimientos (cuenta_id, fecha, tipo, concepto, monto, referencia, usuario_id, sociedad_id)
+          VALUES (?,?,'egreso',?,?,?,?,?)
         `).run(
           parseInt(cuenta_fin_id), fechaOp,
           'Orden de Pago ' + numero + ' - ' + (referencia || ''),
-          parseFloat(monto_total), numero, u ? u.id : null
+          parseFloat(monto_total), numero, u ? u.id : null, sociedadId
         );
         movId = mv.lastInsertRowid;
         db.prepare('UPDATE fin_ordenes_pago SET movimiento_id=? WHERE id=?').run(movId, opId);
@@ -195,13 +231,14 @@ router.post('/', (req, res) => {
           const nombreProv = prov?.razon_social || `Prov. #${proveedor_id}`;
 
           const asiento = db.prepare(`
-            INSERT INTO pa_asientos (fecha, descripcion, usuario_id, ref_codigo)
-            VALUES (?, ?, ?, ?)
+            INSERT INTO pa_asientos (fecha, descripcion, usuario_id, ref_codigo, sociedad_id)
+            VALUES (?, ?, ?, ?, ?)
           `).run(
             fechaOp,
             `OP ${numero} | ${nombreProv} | Cancelación`,
             u ? u.id : null,
-            numero
+            numero,
+            sociedadId
           );
           asientoId = asiento.lastInsertRowid;
 

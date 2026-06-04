@@ -42,6 +42,27 @@ try {
 // Columna para guardar a quién se mandó el mail (al usar "Enviar a IFCO")
 try { db.exec("ALTER TABLE ifco_remitos_super ADD COLUMN email_enviado_a TEXT"); } catch(_){}
 
+// Contador de veces enviado a IFCO (incluye reenvíos cuando IFCO no recibió).
+// Default 1 al primer envío, +1 por cada reenvío.
+try { db.exec("ALTER TABLE ifco_remitos_super ADD COLUMN veces_enviado INTEGER DEFAULT 0"); } catch(_){}
+try { db.exec("ALTER TABLE ifco_remitos_super ADD COLUMN fecha_ultimo_envio TEXT"); } catch(_){}
+
+// Tabla de log de envíos de mail (cada vez que se manda el mail a IFCO, incluyendo reenvíos)
+try {
+  db.exec(`CREATE TABLE IF NOT EXISTS ifco_envios_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    remito_id INTEGER NOT NULL,
+    enviado_en TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+    enviado_por_id INTEGER,
+    to_email TEXT,
+    cc_email TEXT,
+    message_id TEXT,
+    es_reenvio INTEGER DEFAULT 0,
+    FOREIGN KEY(remito_id) REFERENCES ifco_remitos_super(id)
+  )`);
+  db.exec("CREATE INDEX IF NOT EXISTS idx_ifco_envios_log_remito ON ifco_envios_log(remito_id, enviado_en DESC)");
+} catch(e) { console.error('[IFCO] Crear ifco_envios_log:', e.message); }
+
 // Migración del CHECK constraint en `estado`. La tabla original tiene CHECK que NO incluye 'enviado',
 // y por eso el UPDATE a 'enviado' (Enviar a IFCO) falla con: CHECK constraint failed.
 // Reconstruimos la tabla preservando el SQL original exacto y solo reemplazando la lista de estados.
@@ -235,6 +256,24 @@ try {
   `);
 } catch(e) { console.error('[IFCO] Crear ifco_mails_log:', e.message); }
 try { db.exec("CREATE INDEX IF NOT EXISTS idx_mails_log_tipo ON ifco_mails_log(tipo, enviado_en DESC)"); } catch(_){}
+
+// Auditoría de borrados FÍSICOS (hard delete) desde la Papelera. Conserva quién/cuándo/qué
+// (snapshot JSON de la fila) aunque la fila se borre — trazabilidad del borrado mismo.
+try {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS ifco_hard_delete_log (
+      id                       INTEGER PRIMARY KEY AUTOINCREMENT,
+      entidad                  TEXT NOT NULL,
+      ref_id                   INTEGER,
+      referencia               TEXT,
+      snapshot                 TEXT,
+      hard_deleted_por_id      INTEGER,
+      hard_deleted_por_nombre  TEXT,
+      hard_deleted_en          TEXT DEFAULT (datetime('now','localtime'))
+    )
+  `);
+  db.exec("CREATE INDEX IF NOT EXISTS idx_ifco_hard_del_fecha ON ifco_hard_delete_log(hard_deleted_en DESC)");
+} catch(e) { console.error('[IFCO] Crear ifco_hard_delete_log:', e.message); }
 
 // Tabla de autorizaciones de retiro (mails que mandamos a IFCO autorizando un transportista)
 try {
@@ -558,6 +597,10 @@ function _parsearFormatoNuevo(ws) {
   if (headerRow < 0) return null;
 
   const despachos = [], ingresos = [], r22 = [];
+  // Totales brutos del Excel (suma directa de columnas INGRESOS y EGRESOS,
+  // sin filtrar ajustes, IC, ni nada). Se usan para el balance agregado.
+  let totalBrutoIngresos = 0;
+  let totalBrutoEgresos  = 0;
   for (let i = headerRow + 1; i <= ws.rowCount; i++) {
     const row = ws.getRow(i);
     const nRem = _cellValue(row.getCell(cN));
@@ -567,6 +610,9 @@ function _parsearFormatoNuevo(ws) {
     const cantEgr = parseInt(egr) || 0;
     const cantIng = parseInt(ing) || 0;
     if (cantEgr <= 0 && cantIng <= 0) continue;
+    // Sumar al total bruto ANTES de filtrar (ajustes, IC, etc se incluyen)
+    totalBrutoIngresos += cantIng;
+    totalBrutoEgresos  += cantEgr;
 
     const detalleVal = cDet > 0 ? _cellValue(row.getCell(cDet)) : null;
     const detalleStr = detalleVal ? String(detalleVal).trim() : '';
@@ -617,7 +663,8 @@ function _parsearFormatoNuevo(ws) {
     }
     // Filas que no encajan en ninguna categoría se ignoran silenciosamente
   }
-  return { despachos: despachos, ingresos: ingresos, r22: r22, remitos: despachos /* compat */ };
+  return { despachos: despachos, ingresos: ingresos, r22: r22, remitos: despachos /* compat */,
+           totalBrutoIngresos: totalBrutoIngresos, totalBrutoEgresos: totalBrutoEgresos };
 }
 
 // FORMATO VIEJO — busca la sección "Entregas a Cadenas" como subtítulo
@@ -688,7 +735,9 @@ function _parsearFormatoViejo(ws) {
     });
   }
   // Formato viejo: solo despachos. Devuelve mismo shape para compat con wizard.
-  return { despachos: remitos, ingresos: [], r22: [], remitos: remitos };
+  const totalEgrViejo = remitos.reduce(function(s, x){ return s + (parseInt(x.cantidad) || 0); }, 0);
+  return { despachos: remitos, ingresos: [], r22: [], remitos: remitos,
+           totalBrutoIngresos: 0, totalBrutoEgresos: totalEgrViejo };
 }
 
 const router = express.Router();
@@ -1030,15 +1079,56 @@ function _verificarAccesoDeposito(u, deposito_tipo, proveedor_id) {
 // ════════════════════════════════════════════════════════════════════════════
 
 router.get('/talonarios', function(req, res) {
+  // Ordenamos por el último uso (fecha del despacho más reciente que usó cada talonario).
+  // Los que tienen movimiento reciente van arriba. Si nunca se usaron, se ordenan
+  // por fecha de creación. Los inactivos siempre quedan al final.
   const rows = db.prepare(`
     SELECT t.*,
       p.nombre AS proveedor_nombre,
       (SELECT COUNT(*) FROM ifco_remitos_super r WHERE r.talonario_id = t.id AND r.eliminado_en IS NULL) AS usados_count,
-      (SELECT COUNT(*) FROM ifco_numeros_anulados a WHERE a.talonario_id = t.id) AS anulados_count
+      (SELECT COUNT(*) FROM ifco_numeros_anulados a WHERE a.talonario_id = t.id) AS anulados_count,
+      (SELECT MAX(r.creado_en) FROM ifco_remitos_super r WHERE r.talonario_id = t.id AND r.eliminado_en IS NULL) AS ultimo_uso_en
     FROM ifco_talonarios t
     LEFT JOIN proveedores p ON p.id = t.proveedor_id
-    ORDER BY t.activo DESC, t.creado_en DESC
+    ORDER BY t.activo DESC,
+             (ultimo_uso_en IS NULL) ASC,
+             ultimo_uso_en DESC,
+             t.creado_en DESC
   `).all();
+
+  // Calcular salteos por talonario: números que están entre el mínimo usado y el máximo usado,
+  // pero que no aparecen en ifco_remitos_super ni en ifco_numeros_anulados.
+  // Devuelve count + sample (hasta 50 números puntuales para el detalle).
+  const stmtUsados = db.prepare(`
+    SELECT CAST(SUBSTR(n_remito_sg, INSTR(n_remito_sg,'-')+1) AS INTEGER) AS num
+    FROM ifco_remitos_super
+    WHERE talonario_id = ? AND eliminado_en IS NULL
+  `);
+  const stmtAnulados = db.prepare(`
+    SELECT numero AS num FROM ifco_numeros_anulados WHERE talonario_id = ?
+  `);
+  rows.forEach(function(t){
+    try {
+      const usados = stmtUsados.all(t.id).map(function(r){ return r.num; }).filter(function(n){ return Number.isInteger(n); });
+      if (usados.length === 0) { t.salteos_count = 0; t.salteos_sample = []; return; }
+      const anulados = stmtAnulados.all(t.id).map(function(r){ return r.num; }).filter(function(n){ return Number.isInteger(n); });
+      const usadosSet = new Set(usados.concat(anulados));
+      const minU = Math.min.apply(null, usados);
+      const maxU = Math.max.apply(null, usados);
+      const salteos = [];
+      for (let n = minU; n <= maxU; n++) {
+        if (!usadosSet.has(n)) salteos.push(n);
+      }
+      t.salteos_count = salteos.length;
+      t.salteos_sample = salteos.slice(0, 50);
+      t.salteos_rango = { min: minU, max: maxU };
+    } catch(e) {
+      console.warn('[IFCO][talonarios][salteos]', t.id, e.message);
+      t.salteos_count = 0;
+      t.salteos_sample = [];
+    }
+  });
+
   res.json(rows);
 });
 
@@ -1427,6 +1517,87 @@ router.get('/talonarios/:id/detalle', function(req, res) {
   res.json({ talonario: t, numeros: numeros, log: log });
 });
 
+// ── SALTEOS: cálculo detallado por talonario ───────────────────────────────
+// Mismo criterio que GET /talonarios (número parseado de n_remito_sg, usados =
+// remitos activos + números anulados). Devuelve, además del listado, el
+// contexto anterior/posterior de cada salteo (entre qué dos usos quedó).
+function _ifcoCalcSalteos(talonario_id) {
+  const t = db.prepare("SELECT id, serie, numero_desde, numero_hasta FROM ifco_talonarios WHERE id = ?").get(talonario_id);
+  if (!t) return null;
+  const remitos = db.prepare(`
+    SELECT CAST(SUBSTR(n_remito_sg, INSTR(n_remito_sg,'-')+1) AS INTEGER) AS num,
+           estado, empresa, fecha_emision
+    FROM ifco_remitos_super
+    WHERE talonario_id = ? AND eliminado_en IS NULL AND n_remito_sg IS NOT NULL
+  `).all(talonario_id);
+  const numInfo = new Map();
+  const usados = [];
+  for (const r of remitos) {
+    if (!Number.isInteger(r.num)) continue;
+    usados.push(r.num);
+    numInfo.set(r.num, { numero: r.num, estado: r.estado, supermercado: r.empresa || null, fecha_emision: r.fecha_emision || null });
+  }
+  const anulados = db.prepare("SELECT numero, anulado_en FROM ifco_numeros_anulados WHERE talonario_id = ?").all(talonario_id);
+  for (const a of anulados) {
+    if (!Number.isInteger(a.numero)) continue;
+    usados.push(a.numero);
+    if (!numInfo.has(a.numero)) numInfo.set(a.numero, { numero: a.numero, estado: 'anulado_manual', supermercado: null, fecha_emision: a.anulado_en || null });
+  }
+  const usadosSet = new Set(usados);
+  const fmt = (n) => t.serie + '-' + String(n).padStart(8, '0');
+  if (usados.length === 0) return { talonario: t, rango_usado: null, salteos: [], usadosSet, maxUsed: null, fmt };
+  const minU = Math.min.apply(null, usados), maxU = Math.max.apply(null, usados);
+  const sortedUsed = Array.from(usadosSet).sort(function(a,b){ return a - b; });
+  const salteos = [];
+  for (let i = 0; i < sortedUsed.length - 1; i++) {
+    const a = sortedUsed[i], b = sortedUsed[i + 1];
+    for (let n = a + 1; n < b; n++) {
+      salteos.push({
+        numero: n,
+        numero_formateado: fmt(n),
+        anterior: numInfo.get(a) || { numero: a },
+        posterior: numInfo.get(b) || { numero: b }
+      });
+    }
+  }
+  return { talonario: t, rango_usado: { min: minU, max: maxU }, salteos, usadosSet, maxUsed: maxU, fmt };
+}
+
+// Detalle completo de salteos de un talonario (todos, con anterior/posterior).
+router.get('/talonarios/:id/salteos', function(req, res) {
+  try {
+    const calc = _ifcoCalcSalteos(parseInt(req.params.id));
+    if (!calc) return res.status(404).json({ ok: false, error: 'Talonario no encontrado' });
+    res.json({ ok: true, data: {
+      talonario_id: calc.talonario.id,
+      talonario_serie: calc.talonario.serie,
+      rango_usado: calc.rango_usado,
+      salteos: calc.salteos
+    }});
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// Agregado de salteos de todo el sistema.
+router.get('/salteos/resumen', function(req, res) {
+  try {
+    const tals = db.prepare("SELECT t.id, t.serie, p.nombre AS proveedor FROM ifco_talonarios t LEFT JOIN proveedores p ON p.id = t.proveedor_id").all();
+    const detalle = [];
+    let total = 0;
+    for (const t of tals) {
+      const calc = _ifcoCalcSalteos(t.id);
+      if (calc && calc.salteos.length > 0) {
+        detalle.push({
+          talonario_id: t.id, serie: t.serie, proveedor: t.proveedor || null,
+          salteos_count: calc.salteos.length,
+          salteos: calc.salteos.map(function(s){ return s.numero; })
+        });
+        total += calc.salteos.length;
+      }
+    }
+    res.json({ ok: true, data: { talonarios_con_salteos: detalle.length, total_salteos: total, detalle_por_talonario: detalle } });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
 // Anular un número específico de un talonario (caso: mal impreso, manchado, etc.)
 // Solo se pueden anular números SIN USAR (sin remito asociado, ni eliminado).
 // El número queda registrado con motivo y usuario que lo anuló.
@@ -1514,15 +1685,30 @@ router.delete('/talonarios/:id', function(req, res) {
 router.get('/remitos', function(req, res) {
   const f = req.query;
   const papelera = f.papelera === '1' || f.incluir_eliminados === '1';
+  const esExport = f.export === '1';
+  // En export: agregar JOINs adicionales para traer todos los datos legibles (talonario, CAI, cliente)
+  // y subir el LIMIT a 10000 para historiales.
   let q = `SELECT r.*,
                   pori.nombre AS proveedor_origen_nombre,
                   u.nombre AS eliminado_por_username,
-                  uc.nombre AS usuario_creador_nombre
-           FROM ifco_remitos_super r
+                  uc.nombre AS usuario_creador_nombre`;
+  if (esExport) {
+    q += `,
+                  tal.serie AS talonario_serie,
+                  tal.cai AS cai,
+                  tal.vto_cai AS vto_cai,
+                  cli.nombre AS cliente_nombre`;
+  }
+  q += ` FROM ifco_remitos_super r
            LEFT JOIN proveedores pori ON pori.id = r.proveedor_origen_id
            LEFT JOIN usuarios u ON u.id = r.eliminado_por_id
-           LEFT JOIN usuarios uc ON uc.id = r.usuario_id
-           WHERE 1=1`;
+           LEFT JOIN usuarios uc ON uc.id = r.usuario_id`;
+  if (esExport) {
+    q += `
+           LEFT JOIN ifco_talonarios tal ON tal.id = r.talonario_id
+           LEFT JOIN dedicados_clientes cli ON cli.id = r.cliente_id`;
+  }
+  q += ` WHERE 1=1`;
   const p = [];
   if (papelera) {
     q += " AND r.eliminado_en IS NOT NULL";
@@ -1530,6 +1716,7 @@ router.get('/remitos', function(req, res) {
     q += " AND r.eliminado_en IS NULL";
   }
   if (f.estado)     { q += " AND r.estado = ?";        p.push(f.estado); }
+  if (f.seguimiento === '1') { q += " AND r.seguimiento = 1"; }
   if (f.cliente_id) { q += " AND r.cliente_id = ?";    p.push(f.cliente_id); }
   if (f.desde)      { q += " AND r.fecha_emision >= ?"; p.push(f.desde); }
   if (f.hasta)      { q += " AND r.fecha_emision <= ?"; p.push(f.hasta); }
@@ -1546,7 +1733,7 @@ router.get('/remitos', function(req, res) {
     const wild = '%' + f.search + '%';
     p.push(wild, wild, wild, wild);
   }
-  q += " ORDER BY r.fecha_emision DESC, r.id DESC LIMIT 500";
+  q += " ORDER BY r.fecha_emision DESC, r.id DESC LIMIT " + (esExport ? '10000' : '500');
   res.json(db.prepare(q).all(...p));
 });
 
@@ -1594,6 +1781,59 @@ function _inferirTalonarioId(n_remito_ifco, origen, proveedor_origen_id) {
     return null;
   }
 }
+
+// Dry-run: ¿usar este número deja un hueco respecto del último usado? NO crea
+// nada; solo informa para que el frontend muestre confirmación antes del POST.
+// Acepta {talonario_id, numero_a_usar} o {n_remito_ifco, origen, proveedor_origen_id}.
+router.post('/remitos/validar-salteo', express.json(), function(req, res) {
+  try {
+    const d = req.body || {};
+    let talonarioId = parseInt(d.talonario_id) || null;
+    let numeroAUsar = parseInt(d.numero_a_usar);
+    if (!talonarioId && d.n_remito_ifco) {
+      talonarioId = _inferirTalonarioId(d.n_remito_ifco, d.origen, parseInt(d.proveedor_origen_id) || null);
+    }
+    if (!Number.isInteger(numeroAUsar) && d.n_remito_ifco) {
+      const m = String(d.n_remito_ifco).match(/-(\d+)\s*$/);
+      numeroAUsar = m ? parseInt(m[1], 10) : NaN;
+    }
+    if (!talonarioId) return res.json({ ok: true, data: { genera_salteo: false, motivo: 'talonario no identificado' } });
+    if (!Number.isInteger(numeroAUsar)) return res.status(400).json({ ok: false, error: 'numero_a_usar inválido' });
+    const calc = _ifcoCalcSalteos(talonarioId);
+    if (!calc) return res.status(404).json({ ok: false, error: 'Talonario no encontrado' });
+    const maxUsed = calc.maxUsed;
+    // Acotado: NO materializamos todo el hueco (podía ser enorme y congelar al cliente al
+    // renderizar la lista). Devolvemos conteo + muestra de hasta 50. Si el salto supera 1000,
+    // lo tratamos como probable error de tipeo del N° (no listamos, avisamos distinto).
+    const MAX_MUESTRA = 50, UMBRAL_TIPEO = 1000;
+    const gapBruto = (maxUsed != null && numeroAUsar > maxUsed + 1) ? (numeroAUsar - maxUsed - 1) : 0;
+    const saltoGrande = gapBruto > UMBRAL_TIPEO;
+    let total = 0;
+    const muestra = [];
+    for (let n = maxUsed + 1; gapBruto > 0 && n < numeroAUsar; n++) {
+      if (calc.usadosSet.has(n)) continue;
+      total++;
+      if (muestra.length < MAX_MUESTRA) muestra.push(n);
+      else if (saltoGrande) break; // salto grande: con la muestra alcanza, no recorremos millones
+    }
+    if (saltoGrande) total = gapBruto; // aproximado, suficiente para el aviso de tipeo
+    const genera = total > 0;
+    const muestraFmt = muestra.map(calc.fmt);
+    res.json({ ok: true, data: {
+      genera_salteo: genera,
+      salteos_total: total,
+      salto_grande: saltoGrande,
+      salteos_que_quedarian: muestra,
+      salteos_que_quedarian_fmt: muestraFmt,
+      ultimo_usado_actual: maxUsed,
+      numero_que_se_va_a_usar: numeroAUsar,
+      advertencia: !genera ? null
+        : (saltoGrande
+            ? ('Este número deja un salto de ' + total + ' números respecto del último usado. Parece un error de tipeo del N° de remito.')
+            : ('Si usás este número, vas a dejar ' + total + ' número(s) salteado(s) (' + muestraFmt.join(', ') + (total > muestra.length ? ', …' : '') + '). ¿Confirmás?'))
+    }});
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
 
 router.post('/remitos', upload.single('escaneo_original'), function(req, res) {
   const d = req.body || {};
@@ -1678,17 +1918,20 @@ router.post('/remitos/sellado-directo', upload.single('escaneo'), function(req, 
   // Validaciones del despacho
   if (!d.n_remito_ifco)   return res.status(400).json({ error: 'N° de remito IFCO requerido' });
   if (!d.fecha_emision)   return res.status(400).json({ error: 'Fecha de emisión requerida' });
-  if (!d.cantidad_despachada || parseInt(d.cantidad_despachada) <= 0) {
-    return res.status(400).json({ error: 'Cantidad despachada inválida' });
-  }
   if (!d.cliente_id && !d.empresa) {
     return res.status(400).json({ error: 'Cliente (Dedicado) o empresa requeridos' });
   }
   // Validaciones del sellado
   if (!d.fecha_sellado) return res.status(400).json({ error: 'Fecha de sellado requerida' });
-  const cantDesp = parseInt(d.cantidad_despachada);
-  const recibida  = d.cantidad_recibida  != null && d.cantidad_recibida  !== '' ? parseInt(d.cantidad_recibida)  : cantDesp;
+  // Cantidad despachada: si viene 0 o vacía (caso "remito ya sellado de origen"),
+  // se deduce automáticamente como recibida + rechazada.
+  const recibida  = d.cantidad_recibida  != null && d.cantidad_recibida  !== '' ? parseInt(d.cantidad_recibida)  : 0;
   const rechazada = d.cantidad_rechazada != null && d.cantidad_rechazada !== '' ? parseInt(d.cantidad_rechazada) : 0;
+  let cantDesp = parseInt(d.cantidad_despachada) || 0;
+  if (cantDesp <= 0) cantDesp = recibida + rechazada;
+  if (cantDesp <= 0) {
+    return res.status(400).json({ error: 'Cantidad inválida: hace falta al menos cantidad_recibida > 0 o cantidad_despachada > 0' });
+  }
   if (recibida < 0 || rechazada < 0) {
     return res.status(400).json({ error: 'Cantidades no pueden ser negativas' });
   }
@@ -1872,7 +2115,7 @@ router.post('/remitos/presentar/preview', express.json(), function(req, res) {
     if (!Array.isArray(ids) || ids.length === 0) return res.status(400).json({ error: 'IDs requeridos' });
     const ph = ids.map(function(){ return '?'; }).join(',');
     const remitos = db.prepare(`
-      SELECT id, n_remito_ifco, fecha_sellado, empresa, sucursal, cantidad_recibida, cantidad_rechazada, escaneo_path, estado
+      SELECT id, n_remito_ifco, fecha_sellado, empresa, sucursal, cantidad_recibida, cantidad_rechazada, escaneo_path, estado, veces_enviado
       FROM ifco_remitos_super WHERE id IN (${ph}) AND estado = 'sellado' AND eliminado_en IS NULL
     `).all(...ids);
     if (remitos.length === 0) return res.status(400).json({ error: 'Ninguno de los IDs corresponde a un remito sellado' });
@@ -1944,7 +2187,7 @@ router.post('/remitos/presentar/enviar', express.json(), async function(req, res
 
     const ph = ids.map(function(){ return '?'; }).join(',');
     const remitos = db.prepare(`
-      SELECT id, n_remito_ifco, escaneo_path
+      SELECT id, n_remito_ifco, escaneo_path, estado, veces_enviado
       FROM ifco_remitos_super WHERE id IN (${ph}) AND estado = 'sellado' AND eliminado_en IS NULL
     `).all(...ids);
     if (remitos.length === 0) return res.status(400).json({ error: 'Ninguno de los IDs corresponde a un remito sellado' });
@@ -1983,19 +2226,35 @@ router.post('/remitos/presentar/enviar', express.json(), async function(req, res
       return res.status(500).json({ error: 'Error enviando mail: ' + mailRes.error });
     }
 
-    // Marcar remitos como 'enviado'
+    // Actualizar remitos: marcar como 'enviado', bump del contador, registrar último envío
     db.prepare(`
       UPDATE ifco_remitos_super
       SET estado = 'enviado',
-          fecha_enviado = date('now','localtime'),
+          fecha_enviado = COALESCE(fecha_enviado, date('now','localtime')),
+          fecha_ultimo_envio = date('now','localtime'),
+          veces_enviado = COALESCE(veces_enviado, 0) + 1,
           email_enviado_a = ?,
           actualizado_en = datetime('now','localtime')
       WHERE id IN (${ph}) AND estado = 'sellado'
     `).run(to, ...ids);
 
+    // Log de envío por cada remito (incluyendo reenvíos)
+    const stmtLog = db.prepare(`
+      INSERT INTO ifco_envios_log (remito_id, enviado_por_id, to_email, cc_email, message_id, es_reenvio)
+      VALUES (?,?,?,?,?,?)
+    `);
+    const reenviosCount = remitos.filter(function(r){ return r.estado === 'enviado'; }).length;
+    const userId = (req.user && req.user.id) || null;
+    remitos.forEach(function(r){
+      try {
+        stmtLog.run(r.id, userId, to, cc || null, mailRes.messageId || null, r.estado === 'enviado' ? 1 : 0);
+      } catch(e) { console.warn('[IFCO][envio-log]', e.message); }
+    });
+
     res.json({
       ok: true,
       enviados: remitos.length,
+      reenvios: reenviosCount,
       adjuntos_count: adjuntos.length,
       message_id: mailRes.messageId
     });
@@ -2100,6 +2359,25 @@ router.patch('/remitos/:id', function(req, res) {
     req.params.id
   );
   res.json({ ok: true });
+});
+
+// PATCH /remitos/:id/seguimiento — marcar/desmarcar seguimiento + nota.
+// A diferencia del PATCH genérico (limitado a 'despachado'), esto corre en CUALQUIER
+// estado (los remitos que se complican suelen estar sellados/enviados).
+router.patch('/remitos/:id/seguimiento', express.json(), function(req, res) {
+  const r = db.prepare("SELECT id, eliminado_en FROM ifco_remitos_super WHERE id = ?").get(req.params.id);
+  if (!r) return res.status(404).json({ error: 'No encontrado' });
+  if (r.eliminado_en) return res.status(400).json({ error: 'Está eliminado. Restauralo primero.' });
+  const d = req.body || {};
+  const seg = (d.seguimiento === 1 || d.seguimiento === true || d.seguimiento === '1') ? 1 : 0;
+  // La nota solo aplica si está marcado; al desmarcar se limpia.
+  const notas = seg ? ((d.seguimiento_notas != null && String(d.seguimiento_notas).trim()) ? String(d.seguimiento_notas).trim() : null) : null;
+  db.prepare(`
+    UPDATE ifco_remitos_super
+    SET seguimiento = ?, seguimiento_notas = ?, actualizado_en = datetime('now','localtime')
+    WHERE id = ?
+  `).run(seg, notas, req.params.id);
+  res.json({ ok: true, seguimiento: seg, seguimiento_notas: notas });
 });
 
 // DELETE /remitos/:id — soft delete (todos)
@@ -2706,7 +2984,10 @@ router.get('/mails-log', function(req, res) {
 // GET /manual — descarga el manual del módulo en PDF (accesible para todos los usuarios)
 router.get('/manual', function(req, res) {
   // Se busca el archivo en estos paths, en orden:
+  // src/static/ tiene prioridad porque se reescribe en cada deploy (a diferencia
+  // de data/, que en Railway suele estar montado como volume persistente).
   const candidates = [
+    path.join(__dirname, '../static/Manual_Modulo_IFCO.pdf'),
     path.join(__dirname, '../../data/Manual_Modulo_IFCO.pdf'),
     path.join(__dirname, '../../data/manuales/Manual_Modulo_IFCO.pdf'),
     path.join(UPLOAD_DIR, 'Manual_Modulo_IFCO.pdf')
@@ -2716,7 +2997,36 @@ router.get('/manual', function(req, res) {
       return res.download(p, 'Manual_Modulo_IFCO.pdf');
     }
   }
-  res.status(404).json({ error: 'Manual no disponible. El admin debe subirlo al servidor en data/Manual_Modulo_IFCO.pdf' });
+  res.status(404).json({ error: 'Manual no disponible. El admin debe subirlo al servidor en src/static/Manual_Modulo_IFCO.pdf' });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ENDPOINT TEMPORAL — corregir fecha de un remito mal cargado
+// Solo admin. Body: { n_remito_ifco, fecha_nueva (YYYY-MM-DD) }
+// Una vez corregidos los casos puntuales, este endpoint se puede borrar.
+// ─────────────────────────────────────────────────────────────────────────────
+router.post('/admin/fix-fecha-despacho', function(req, res) {
+  if (!req.user || req.user.rol !== 'admin') {
+    return res.status(403).json({ ok: false, error: 'Solo admin' });
+  }
+  const { n_remito_ifco, fecha_nueva } = req.body || {};
+  if (!n_remito_ifco || !fecha_nueva) {
+    return res.status(400).json({ ok: false, error: 'Faltan n_remito_ifco o fecha_nueva' });
+  }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha_nueva)) {
+    return res.status(400).json({ ok: false, error: 'fecha_nueva debe ser YYYY-MM-DD' });
+  }
+  try {
+    const row = db.prepare("SELECT id, n_remito_ifco, fecha_emision, estado FROM ifco_remitos_super WHERE n_remito_ifco = ?").get(n_remito_ifco);
+    if (!row) return res.status(404).json({ ok: false, error: 'Remito no encontrado' });
+    const fechaVieja = row.fecha_emision;
+    db.prepare("UPDATE ifco_remitos_super SET fecha_emision = ? WHERE id = ?").run(fecha_nueva, row.id);
+    console.log(`[IFCO][admin][fix-fecha] Remito ${n_remito_ifco} (id ${row.id}): ${fechaVieja} → ${fecha_nueva} por usuario ${req.user.username || req.user.email}`);
+    return res.json({ ok: true, id: row.id, n_remito_ifco: row.n_remito_ifco, fecha_anterior: fechaVieja, fecha_nueva: fecha_nueva, estado: row.estado });
+  } catch(e) {
+    console.error('[IFCO][admin][fix-fecha]', e);
+    return res.status(500).json({ ok: false, error: e.message });
+  }
 });
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -3030,26 +3340,18 @@ router.get('/despachos-por-mes', function(req, res) {
   res.json(rows);
 });
 
-// Helper: arma la lista cronológica de movimientos de un proveedor
+// Helper: arma la lista cronológica de movimientos de un proveedor.
+// El saldo físico acumulado se calcula sobre TODA la historia (anclado a
+// _stockFisicoProveedor) y recién después se filtra por fecha, para que cada
+// fila conserve su saldo físico histórico real.
 function _movimientosProveedor(provId, desde, hasta) {
-  // Filtros de fecha opcionales (formato 'YYYY-MM-DD')
-  const filtroDesde = desde ? ' AND fecha_envio >= ?' : '';
-  const filtroHasta = hasta ? ' AND fecha_envio <= ?' : '';
-  const paramsEnvios = [provId];
-  if (desde) paramsEnvios.push(desde);
-  if (hasta) paramsEnvios.push(hasta);
   const envios = db.prepare(`
     SELECT 'envio' AS tipo, id, fecha_envio AS fecha, n_remito_interno AS detalle,
            cantidad_enviada AS cantidad, cantidad_recibida, estado, notas
     FROM ifco_envios_proveedor
-    WHERE proveedor_id = ? AND eliminado_en IS NULL${filtroDesde}${filtroHasta}
-  `).all(...paramsEnvios);
+    WHERE proveedor_id = ? AND eliminado_en IS NULL
+  `).all(provId);
 
-  const filtroRDesde = desde ? ' AND fecha_recepcion >= ?' : '';
-  const filtroRHasta = hasta ? ' AND fecha_recepcion <= ?' : '';
-  const paramsRec = [provId];
-  if (desde) paramsRec.push(desde);
-  if (hasta) paramsRec.push(hasta);
   const recepciones = db.prepare(`
     SELECT 'recepcion' AS tipo, id, fecha_recepcion AS fecha,
            COALESCE(producto, n_remito_proveedor, 'Recepción de mercadería') AS detalle,
@@ -3057,22 +3359,17 @@ function _movimientosProveedor(provId, desde, hasta) {
     FROM ifco_recepciones_proveedor
     WHERE proveedor_id = ? AND eliminado_en IS NULL
       AND (es_r22 IS NULL OR es_r22 = 0)
-      AND (estado IS NULL OR estado = 'recibido')${filtroRDesde}${filtroRHasta}
-  `).all(...paramsRec);
+      AND (estado IS NULL OR estado = 'recibido')
+  `).all(provId);
 
-  const filtroDDesde = desde ? ' AND fecha_emision >= ?' : '';
-  const filtroDHasta = hasta ? ' AND fecha_emision <= ?' : '';
-  const paramsDir = [provId];
-  if (desde) paramsDir.push(desde);
-  if (hasta) paramsDir.push(hasta);
   const directos = db.prepare(`
     SELECT 'despacho_directo' AS tipo, id, fecha_emision AS fecha,
            (n_remito_ifco || ' → ' || COALESCE(empresa,'?')) AS detalle,
            cantidad_despachada AS cantidad, cantidad_recibida, cantidad_rechazada,
            estado, fecha_sellado, sucursal, rechazo_destino
     FROM ifco_remitos_super
-    WHERE proveedor_origen_id = ? AND origen = 'proveedor_directo' AND eliminado_en IS NULL${filtroDDesde}${filtroDHasta}
-  `).all(...paramsDir);
+    WHERE proveedor_origen_id = ? AND origen = 'proveedor_directo' AND eliminado_en IS NULL
+  `).all(provId);
 
   const all = envios.concat(recepciones, directos);
   // Orden cronológico ascendente (después por id como desempate)
@@ -3081,17 +3378,22 @@ function _movimientosProveedor(provId, desde, hasta) {
     return (a.fecha||'') < (b.fecha||'') ? -1 : 1;
   });
 
-  // Calcular delta de cada movimiento (mismo criterio que _calcSaldoProveedor)
-  return all.map(function(m) {
+  // Calcular delta (columna "Cant." visible, sin tocar) y delta_fisico (interno,
+  // para el saldo físico acumulado que cierra con _stockFisicoProveedor).
+  const conDelta = all.map(function(m) {
     let delta = 0;
+    let delta_fisico = 0;
     if (m.tipo === 'envio') {
-      // Saldo: sale cantidad enviada, vuelve cantidad recibida (esa parte se descuenta abajo)
-      // Acá registramos el envío entero como +cantidad
-      // Ojo: si el envío está finalizado, su cantidad_recibida ya está computada en las recepciones (otra tabla),
-      //      por eso solo suma "cantidad_enviada" entera y las recepciones lo bajan.
+      // Cant. (oficial): el envío entero suma al proveedor.
       delta = +m.cantidad;
+      // Físico: solo cuentan los envíos activos y netos de los vacíos ya devueltos.
+      //   Estados ≠ enviado/parcial no están físicamente en el galpón.
+      delta_fisico = (m.estado === 'enviado' || m.estado === 'parcial')
+        ? (m.cantidad - (m.cantidad_recibida || 0))
+        : 0;
     } else if (m.tipo === 'recepcion') {
       delta = -m.cantidad;
+      delta_fisico = -m.cantidad;
     } else if (m.tipo === 'despacho_directo') {
       if (m.estado === 'sellado' || m.estado === 'enviado' || m.estado === 'presentado') {
         const recib = m.cantidad_recibida != null ? m.cantidad_recibida : m.cantidad;
@@ -3110,12 +3412,37 @@ function _movimientosProveedor(provId, desde, hasta) {
       } else {
         delta = 0;
       }
+      // Los directos ya cierran con el físico (mismo criterio que _stockFisicoProveedor).
+      delta_fisico = delta;
     }
     // Etiqueta legible para el campo estado: "sin sellar" si despachado, agrega "rechazado" si hubo
     let estado_label = (m.estado === 'despachado') ? 'sin sellar' : (m.estado || '-');
     if ((m.cantidad_rechazada || 0) > 0) estado_label = estado_label + ' · rechazado';
-    return Object.assign({}, m, { delta: delta, estado_label: estado_label });
+    return Object.assign({}, m, { delta: delta, delta_fisico: delta_fisico, estado_label: estado_label });
   });
+
+  // Saldo físico acumulado, anclado: la fila más reciente == _stockFisicoProveedor.
+  // saldo_inicial absorbe flujos no listados como movimiento (ej. traspasos salientes),
+  // así que arranca en 0 cuando todo cierra y delata la diferencia cuando no.
+  let stockFisico = 0;
+  try { stockFisico = _stockFisicoProveedor(provId); } catch(_) {}
+  const sumaDeltaFisico = conDelta.reduce(function(acc,m){ return acc + (m.delta_fisico || 0); }, 0);
+  let acum = stockFisico - sumaDeltaFisico;
+  const conSaldo = conDelta.map(function(m) {
+    acum += (m.delta_fisico || 0);
+    return Object.assign({}, m, { saldo_acumulado: acum });
+  });
+
+  // Filtro de fecha por día (después de calcular el acumulado histórico completo)
+  if (desde || hasta) {
+    return conSaldo.filter(function(m) {
+      const f10 = (m.fecha || '').slice(0, 10);
+      if (desde && f10 < desde) return false;
+      if (hasta && f10 > hasta) return false;
+      return true;
+    });
+  }
+  return conSaldo;
 }
 
 // MOVIMIENTOS de un proveedor (envíos + recepciones + despachos directos)
@@ -3130,7 +3457,8 @@ router.get('/proveedores/:id/movimientos', function(req, res) {
 
   const movimientos = _movimientosProveedor(provId);
   const saldo = _calcSaldoProveedor(provId);
-  res.json({ proveedor: p, movimientos: movimientos, saldo: saldo });
+  const stock_fisico = _stockFisicoProveedor(provId);
+  res.json({ proveedor: p, movimientos: movimientos, saldo: saldo, stock_fisico: stock_fisico });
 });
 
 // PDF con los movimientos del proveedor (mismo contenido que el modal)
@@ -3249,31 +3577,36 @@ router.get('/proveedores/:id/movimientos.pdf', async function(req, res) {
     doc.setTextColor(0);
     y += 5;
 
-    // Encabezados de tabla
+    // Encabezados de tabla: FECHA | TIPO | DETALLE | CANT. | SALDO | ESTADO
     const cFecha  = L;
-    const cTipo   = L + 28;
-    const cDet    = L + 60;
-    const cCant   = L + innerW - 50;
-    const cEst    = L + innerW - 22;
+    const cTipo   = L + 24;
+    const cDet    = L + 50;
+    const cCantR  = R - 60;   // CANT. alineada a la derecha en esta X
+    const cSaldoR = R - 28;   // SALDO alineada a la derecha en esta X
+    const cEst    = R - 25;   // ESTADO arranca acá
+    const drawHead = () => {
+      doc.text('FECHA',  cFecha,  y);
+      doc.text('TIPO',   cTipo,   y);
+      doc.text('DETALLE',cDet,    y);
+      doc.text('CANT.',  cCantR,  y, { align: 'right' });
+      doc.text('SALDO',  cSaldoR, y, { align: 'right' });
+      doc.text('ESTADO', cEst,    y);
+    };
     setF(8.5, true);
     doc.setLineWidth(0.3);
     doc.line(L, y, R, y);
     y += 4;
-    doc.text('FECHA',    cFecha, y);
-    doc.text('TIPO',     cTipo,  y);
-    doc.text('DETALLE',  cDet,   y);
-    doc.text('CANT.',    cCant + 24, y, { align: 'right' });
-    doc.text('ESTADO',   cEst,   y);
+    drawHead();
     y += 2;
     doc.line(L, y, R, y);
     y += 4;
 
-    // Filas
+    // Filas (más reciente arriba, coherente con el modal)
     setF(8.5, false);
     const labelTipo = (t) => t === 'envio' ? 'Envio' : t === 'recepcion' ? 'Recepcion' : 'Directo super';
     const truncar = (s, max) => { s = _pdfSafe(s); return s.length > max ? s.slice(0, max - 1) + '...' : s; };
 
-    for (const m of movimientos) {
+    for (const m of movimientos.slice().reverse()) {
       // Salto de página si no entra
       if (y > H - 25) {
         doc.addPage();
@@ -3281,11 +3614,7 @@ router.get('/proveedores/:id/movimientos.pdf', async function(req, res) {
         setF(8.5, true);
         doc.line(L, y, R, y);
         y += 4;
-        doc.text('FECHA', cFecha, y);
-        doc.text('TIPO',  cTipo,  y);
-        doc.text('DETALLE', cDet, y);
-        doc.text('CANT.', cCant + 24, y, { align: 'right' });
-        doc.text('ESTADO', cEst, y);
+        drawHead();
         y += 2;
         doc.line(L, y, R, y);
         y += 4;
@@ -3293,11 +3622,18 @@ router.get('/proveedores/:id/movimientos.pdf', async function(req, res) {
       }
       doc.text(fechaFmt(m.fecha),         cFecha, y);
       doc.text(labelTipo(m.tipo),         cTipo,  y);
-      doc.text(truncar(m.detalle, 55),    cDet,   y);
+      doc.text(truncar(m.detalle, 42),    cDet,   y);
       const deltaTxt = (m.delta > 0 ? '+' : '') + fmt(m.delta);
       if (m.delta < 0) doc.setTextColor(180, 30, 30);
       else if (m.delta > 0) doc.setTextColor(30, 130, 60);
-      doc.text(deltaTxt, cCant + 24, y, { align: 'right' });
+      doc.text(deltaTxt, cCantR, y, { align: 'right' });
+      doc.setTextColor(0);
+      const sa = m.saldo_acumulado || 0;
+      const saTxt = (sa > 0 ? '+' : '') + fmt(sa);
+      if (sa < 0) doc.setTextColor(180, 30, 30);
+      else if (sa > 0) doc.setTextColor(30, 130, 60);
+      else doc.setTextColor(110, 110, 110);
+      doc.text(saTxt, cSaldoR, y, { align: 'right' });
       doc.setTextColor(0);
       doc.text(_pdfSafe(m.estado_label || m.estado || '-'),   cEst, y);
       y += 5;
@@ -3323,57 +3659,137 @@ router.get('/proveedores/:id/movimientos.pdf', async function(req, res) {
   }
 });
 
-// EXPORTAR movimientos a Excel (.xlsx) — PENDIENTE: requiere instalar dependency `xlsx` (SheetJS)
-// Endpoint comentado hasta que se haga `npm install xlsx`. Después descomentar y reactivar el botón
-// en el modal de movimientos del proveedor (ifcoDescargarMovimientosXlsx en panel.html).
+// ── Lazy load de SheetJS (xlsx) para GENERAR Excel de movimientos ─────────
+let _xlsxLib = null;
+async function _getXLSX() {
+  if (_xlsxLib) return _xlsxLib;
+  try {
+    const mod = await import('xlsx');
+    _xlsxLib = mod.default || mod;
+    return _xlsxLib;
+  } catch(e) {
+    console.error('[IFCO] xlsx (SheetJS) no disponible:', e.message);
+    return null;
+  }
+}
+
+// Arma el buffer .xlsx de un informe de movimientos (proveedor o SG).
+// CANTIDAD y SALDO ACUMULADO van como números reales (no texto) para que el
+// proveedor pueda filtrar/hacer cuentas. Filas en el mismo orden que el modal/PDF
+// (más reciente arriba).
+function _buildMovimientosXlsx(XLSX, titulo, lineasSaldo, movimientos, labelTipo) {
+  const fechaFmt = (s) => {
+    if (!s) return '';
+    const p = String(s).split(' ')[0].split('-');
+    return p.length === 3 ? p[2] + '/' + p[1] + '/' + p[0] : s;
+  };
+  const aoa = [];
+  aoa.push([titulo]);
+  (lineasSaldo || []).forEach(function(l) { aoa.push([l]); });
+  aoa.push([]); // fila en blanco
+  aoa.push(['FECHA', 'TIPO', 'DETALLE', 'CANTIDAD', 'SALDO ACUMULADO', 'ESTADO']);
+  const firstDataRow = aoa.length; // índice 0-based de la primera fila de datos
+  movimientos.slice().reverse().forEach(function(m) {
+    aoa.push([
+      fechaFmt(m.fecha),
+      labelTipo(m.tipo),
+      m.detalle || '',
+      Number(m.delta || 0),
+      Number(m.saldo_acumulado || 0),
+      m.estado_label || m.estado || '-'
+    ]);
+  });
+
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  ws['!cols'] = [ {wch:12}, {wch:16}, {wch:46}, {wch:11}, {wch:16}, {wch:22} ];
+  // Formato numérico (miles) en CANTIDAD (col D) y SALDO ACUMULADO (col E)
+  for (let r = firstDataRow; r < aoa.length; r++) {
+    ['D', 'E'].forEach(function(col) {
+      const cell = ws[col + (r + 1)]; // aoa[r] => fila r+1 en la planilla
+      if (cell && typeof cell.v === 'number') { cell.t = 'n'; cell.z = '#,##0'; }
+    });
+  }
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Movimientos');
+  return Buffer.from(XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }));
+}
+
+router.get('/proveedores/:id/movimientos.xlsx', async function(req, res) {
+  try {
+    const provId = parseInt(req.params.id);
+    if (!provId) return res.status(400).json({ error: 'ID inválido' });
+    const errAcc = _verificarAccesoDeposito(req.user, 'proveedor', provId);
+    if (errAcc) return res.status(403).json({ error: errAcc });
+    const p = db.prepare("SELECT id, nombre, razon_social FROM proveedores WHERE id = ?").get(provId);
+    if (!p) return res.status(404).json({ error: 'Proveedor no encontrado' });
+
+    const desde = (req.query.desde || '').slice(0, 10) || null;
+    const hasta = (req.query.hasta || '').slice(0, 10) || null;
+
+    const XLSX = await _getXLSX();
+    if (!XLSX) return res.status(503).json({ error: 'xlsx (SheetJS) no disponible' });
+
+    const movimientos = _movimientosProveedor(provId, desde, hasta);
+    const saldo = _calcSaldoProveedor(provId);
+    const stockFisico = _stockFisicoProveedor(provId);
+    const fmtN = (n) => Number(n || 0).toLocaleString('es-AR');
+
+    const titulo = 'Movimientos de cajones IFCO — ' + (p.nombre || ('Proveedor ' + provId));
+    const lineasSaldo = [
+      'Stock que tiene que tener (físico): ' + fmtN(stockFisico) + ' caj.',
+      'En poder del proveedor (oficial): ' + fmtN(saldo) + ' caj.'
+    ];
+    if (desde || hasta) lineasSaldo.push('Período: ' + (desde || 'inicio') + ' a ' + (hasta || 'hoy'));
+    const labelTipo = (t) => t === 'envio' ? 'Envío' : t === 'recepcion' ? 'Recepción' : 'Directo súper';
+
+    const buf = _buildMovimientosXlsx(XLSX, titulo, lineasSaldo, movimientos, labelTipo);
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', 'attachment; filename="movimientos-' + (p.nombre || provId).replace(/[^a-z0-9]+/gi, '_') + '.xlsx"');
+    res.send(buf);
+  } catch(e) {
+    console.error('[IFCO][movimientos.xlsx] error:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
 
 // ════════════════════════════════════════════════════════════════════════════
 // MOVIMIENTOS DE PLANTA SAN GERÓNIMO (todos los flujos que afectan stock SG)
 // ════════════════════════════════════════════════════════════════════════════
 
 function _movimientosSanGeronimo(desde, hasta) {
-  // Helper para construir filtros de fecha sobre una columna
-  const filtro = (col) => {
-    let where = '';
-    const params = [];
-    if (desde) { where += ' AND ' + col + ' >= ?'; params.push(desde); }
-    if (hasta) { where += ' AND ' + col + ' <= ?'; params.push(hasta); }
-    return { where, params };
-  };
+  // El saldo físico acumulado se calcula sobre TODA la historia (anclado a
+  // _calcStockSG) y recién después se filtra por fecha, para que cada fila
+  // conserve su saldo físico histórico real.
 
   // Retiros (ingreso manual a SG)
-  const fRet = filtro('fecha');
   const retiros = db.prepare(`
     SELECT 'retiro' AS tipo, id, fecha,
            ('Modelo ' || COALESCE(modelo,'?') || COALESCE(' / ' || n_remito, '') || COALESCE(' / ' || sucursal_ifco, '')) AS detalle,
            cantidad, NULL AS estado
     FROM ifco_movimientos
-    WHERE tipo = 'retiro' AND eliminado_en IS NULL${fRet.where}
-  `).all(...fRet.params);
+    WHERE tipo = 'retiro' AND eliminado_en IS NULL
+  `).all();
 
   // Pérdidas (egreso de SG)
-  const fPer = filtro('fecha');
   const perdidas = db.prepare(`
     SELECT 'perdida' AS tipo, id, fecha,
            COALESCE(notas, 'Pérdida') AS detalle,
            cantidad, NULL AS estado
     FROM ifco_movimientos
-    WHERE tipo = 'perdida' AND eliminado_en IS NULL${fPer.where}
-  `).all(...fPer.params);
+    WHERE tipo = 'perdida' AND eliminado_en IS NULL
+  `).all();
 
   // Envíos a proveedor (egreso de SG)
-  const fEnv = filtro('ep.fecha_envio');
   const envios = db.prepare(`
     SELECT 'envio' AS tipo, ep.id, ep.fecha_envio AS fecha,
            (ep.n_remito_interno || ' → ' || COALESCE(p.nombre,'?')) AS detalle,
            ep.cantidad_enviada AS cantidad, ep.estado
     FROM ifco_envios_proveedor ep
     LEFT JOIN proveedores p ON p.id = ep.proveedor_id
-    WHERE ep.eliminado_en IS NULL${fEnv.where}
-  `).all(...fEnv.params);
+    WHERE ep.eliminado_en IS NULL
+  `).all();
 
   // Recepciones desde proveedor (ingreso a SG)
-  const fRec = filtro('rp.fecha_recepcion');
   const recepciones = db.prepare(`
     SELECT 'recepcion' AS tipo, rp.id, rp.fecha_recepcion AS fecha,
            (COALESCE(p.nombre,'?') || COALESCE(' / ' || rp.n_remito_proveedor, '')) AS detalle,
@@ -3382,32 +3798,30 @@ function _movimientosSanGeronimo(desde, hasta) {
     LEFT JOIN proveedores p ON p.id = rp.proveedor_id
     WHERE rp.eliminado_en IS NULL
       AND (rp.es_r22 IS NULL OR rp.es_r22 = 0)
-      AND (rp.estado IS NULL OR rp.estado = 'recibido')${fRec.where}
-  `).all(...fRec.params);
+      AND (rp.estado IS NULL OR rp.estado = 'recibido')
+  `).all();
 
   // Despachos al súper desde SG (egreso de SG)
-  const fDes = filtro('fecha_emision');
   const despachos = db.prepare(`
     SELECT 'despacho_sg' AS tipo, id, fecha_emision AS fecha,
            (n_remito_ifco || ' → ' || COALESCE(empresa,'?')) AS detalle,
            cantidad_despachada AS cantidad, cantidad_recibida, cantidad_rechazada,
            estado, rechazo_destino
     FROM ifco_remitos_super
-    WHERE origen = 'san_geronimo' AND eliminado_en IS NULL${fDes.where}
-  `).all(...fDes.params);
+    WHERE origen = 'san_geronimo' AND eliminado_en IS NULL
+  `).all();
 
   // Faltantes declarados (ajustes manuales que afectan el teórico SG)
   // delta>0 = se declara faltante (sale del piso); delta<0 = se reduce el faltante (vuelve)
   let faltantes = [];
   try {
-    const fFal = filtro('fecha');
     faltantes = db.prepare(`
       SELECT 'faltante_sg' AS tipo, id, fecha,
              COALESCE(motivo, 'Faltante declarado') AS detalle,
              delta AS cantidad, NULL AS estado
       FROM ifco_faltantes_sg
-      WHERE eliminado_en IS NULL${fFal.where}
-    `).all(...fFal.params);
+      WHERE eliminado_en IS NULL
+    `).all();
   } catch(_) { /* tabla no existe en bases viejas, ignorar */ }
 
   const all = retiros.concat(perdidas, envios, recepciones, despachos, faltantes);
@@ -3418,7 +3832,7 @@ function _movimientosSanGeronimo(desde, hasta) {
   });
 
   // Calcular delta de cada movimiento (mismo criterio que _stockTeoricoDeposito para SG)
-  return all.map(function(m) {
+  const conDelta = all.map(function(m) {
     let delta = 0;
     if (m.tipo === 'retiro')          delta = +m.cantidad;
     else if (m.tipo === 'perdida')    delta = -m.cantidad;
@@ -3446,6 +3860,29 @@ function _movimientosSanGeronimo(desde, hasta) {
     if ((m.cantidad_rechazada || 0) > 0) estado_label = estado_label + ' · rechazado';
     return Object.assign({}, m, { delta: delta, estado_label: estado_label });
   });
+
+  // Saldo físico acumulado, anclado: la fila más reciente == stock de piso SG actual
+  // (_calcStockSG). saldo_inicial absorbe los flujos no representados como movimiento
+  // (faltantes manuales, retiros/pérdidas pendientes, etc.).
+  let stockSG = 0;
+  try { stockSG = _calcStockSG(); } catch(_) {}
+  const sumaDelta = conDelta.reduce(function(acc,m){ return acc + (m.delta || 0); }, 0);
+  let acum = stockSG - sumaDelta;
+  const conSaldo = conDelta.map(function(m) {
+    acum += (m.delta || 0);
+    return Object.assign({}, m, { saldo_acumulado: acum });
+  });
+
+  // Filtro de fecha por día (después de calcular el acumulado histórico completo)
+  if (desde || hasta) {
+    return conSaldo.filter(function(m) {
+      const f10 = (m.fecha || '').slice(0, 10);
+      if (desde && f10 < desde) return false;
+      if (hasta && f10 > hasta) return false;
+      return true;
+    });
+  }
+  return conSaldo;
 }
 
 router.get('/san-geronimo/movimientos.pdf', async function(req, res) {
@@ -3511,26 +3948,31 @@ router.get('/san-geronimo/movimientos.pdf', async function(req, res) {
     doc.setTextColor(0);
     y += 5;
 
-    // Encabezados de tabla
+    // Encabezados de tabla: FECHA | TIPO | DETALLE | CANT. | SALDO | ESTADO
     const cFecha  = L;
-    const cTipo   = L + 28;
-    const cDet    = L + 60;
-    const cCant   = L + innerW - 50;
-    const cEst    = L + innerW - 22;
+    const cTipo   = L + 24;
+    const cDet    = L + 50;
+    const cCantR  = R - 60;   // CANT. alineada a la derecha en esta X
+    const cSaldoR = R - 28;   // SALDO alineada a la derecha en esta X
+    const cEst    = R - 25;   // ESTADO arranca acá
+    const drawHead = () => {
+      doc.text('FECHA',  cFecha,  y);
+      doc.text('TIPO',   cTipo,   y);
+      doc.text('DETALLE',cDet,    y);
+      doc.text('CANT.',  cCantR,  y, { align: 'right' });
+      doc.text('SALDO',  cSaldoR, y, { align: 'right' });
+      doc.text('ESTADO', cEst,    y);
+    };
     setF(8.5, true);
     doc.setLineWidth(0.3);
     doc.line(L, y, R, y);
     y += 4;
-    doc.text('FECHA',    cFecha, y);
-    doc.text('TIPO',     cTipo,  y);
-    doc.text('DETALLE',  cDet,   y);
-    doc.text('CANT.',    cCant + 24, y, { align: 'right' });
-    doc.text('ESTADO',   cEst,   y);
+    drawHead();
     y += 2;
     doc.line(L, y, R, y);
     y += 4;
 
-    // Filas
+    // Filas (más reciente arriba, coherente con el modal)
     setF(8.5, false);
     const labelTipo = (t) => {
       if (t === 'retiro')        return 'Retiro IFCO';
@@ -3543,18 +3985,14 @@ router.get('/san-geronimo/movimientos.pdf', async function(req, res) {
     };
     const truncar = (s, max) => { s = _pdfSafe(s); return s.length > max ? s.slice(0, max - 1) + '...' : s; };
 
-    for (const m of movimientos) {
+    for (const m of movimientos.slice().reverse()) {
       if (y > H - 25) {
         doc.addPage();
         y = M + 8;
         setF(8.5, true);
         doc.line(L, y, R, y);
         y += 4;
-        doc.text('FECHA', cFecha, y);
-        doc.text('TIPO',  cTipo,  y);
-        doc.text('DETALLE', cDet, y);
-        doc.text('CANT.', cCant + 24, y, { align: 'right' });
-        doc.text('ESTADO', cEst, y);
+        drawHead();
         y += 2;
         doc.line(L, y, R, y);
         y += 4;
@@ -3562,11 +4000,18 @@ router.get('/san-geronimo/movimientos.pdf', async function(req, res) {
       }
       doc.text(fechaFmt(m.fecha),         cFecha, y);
       doc.text(labelTipo(m.tipo),         cTipo,  y);
-      doc.text(truncar(m.detalle, 55),    cDet,   y);
+      doc.text(truncar(m.detalle, 42),    cDet,   y);
       const deltaTxt = (m.delta > 0 ? '+' : '') + fmt(m.delta);
       if (m.delta < 0) doc.setTextColor(180, 30, 30);
       else if (m.delta > 0) doc.setTextColor(30, 130, 60);
-      doc.text(deltaTxt, cCant + 24, y, { align: 'right' });
+      doc.text(deltaTxt, cCantR, y, { align: 'right' });
+      doc.setTextColor(0);
+      const sa = m.saldo_acumulado || 0;
+      const saTxt = (sa > 0 ? '+' : '') + fmt(sa);
+      if (sa < 0) doc.setTextColor(180, 30, 30);
+      else if (sa > 0) doc.setTextColor(30, 130, 60);
+      else doc.setTextColor(110, 110, 110);
+      doc.text(saTxt, cSaldoR, y, { align: 'right' });
       doc.setTextColor(0);
       doc.text(_pdfSafe(m.estado_label || m.estado || '-'),   cEst, y);
       y += 5;
@@ -3586,6 +4031,44 @@ router.get('/san-geronimo/movimientos.pdf', async function(req, res) {
     res.send(buf);
   } catch(e) {
     console.error('[IFCO][san-geronimo/movimientos.pdf] error:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.get('/san-geronimo/movimientos.xlsx', async function(req, res) {
+  try {
+    const errAcc = _verificarAccesoDeposito(req.user, 'san_geronimo', null);
+    if (errAcc) return res.status(403).json({ error: errAcc });
+    const desde = (req.query.desde || '').slice(0, 10) || null;
+    const hasta = (req.query.hasta || '').slice(0, 10) || null;
+
+    const XLSX = await _getXLSX();
+    if (!XLSX) return res.status(503).json({ error: 'xlsx (SheetJS) no disponible' });
+
+    const movimientos = _movimientosSanGeronimo(desde, hasta);
+    let stockSG = 0;
+    try { stockSG = _stockTeoricoDeposito('san_geronimo'); } catch(_) {}
+    const fmtN = (n) => Number(n || 0).toLocaleString('es-AR');
+
+    const titulo = 'Movimientos de cajones IFCO — San Gerónimo (planta)';
+    const lineasSaldo = [ 'Stock de piso actual: ' + fmtN(stockSG) + ' caj.' ];
+    if (desde || hasta) lineasSaldo.push('Período: ' + (desde || 'inicio') + ' a ' + (hasta || 'hoy'));
+    const labelTipo = (t) => {
+      if (t === 'retiro')      return 'Retiro IFCO';
+      if (t === 'perdida')     return 'Pérdida';
+      if (t === 'envio')       return 'Envío prov.';
+      if (t === 'recepcion')   return 'Recepción';
+      if (t === 'despacho_sg') return 'Despacho súper';
+      if (t === 'faltante_sg') return 'Faltante decl.';
+      return t;
+    };
+
+    const buf = _buildMovimientosXlsx(XLSX, titulo, lineasSaldo, movimientos, labelTipo);
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', 'attachment; filename="movimientos-san_geronimo.xlsx"');
+    res.send(buf);
+  } catch(e) {
+    console.error('[IFCO][san-geronimo/movimientos.xlsx] error:', e);
     res.status(500).json({ error: e.message });
   }
 });
@@ -4078,32 +4561,58 @@ router.post('/consolidar/preview', upload.single('archivo'), async function(req,
     }
     try { fs.unlinkSync(filePath); } catch(_){}
 
-    // ── DESPACHOS: matchea contra ifco_remitos_super
+    // ── DESPACHOS / EGRESOS: matchea contra ifco_remitos_super (despachos) Y contra ifco_movimientos tipo='perdida'
+    // Los egresos del archivo IFCO (también llamados "Retiros" en el header) representan TODO lo que sale del depo.
+    // En el sistema eso son los despachos (ifco_remitos_super) + las pérdidas (ifco_movimientos tipo='perdida').
     const sysDesp = db.prepare(`
       SELECT id, n_remito_ifco, n_remito_sg, fecha_emision, fecha_sellado, fecha_enviado, fecha_presentado,
              empresa, sucursal, cantidad_despachada, cantidad_recibida, cantidad_rechazada,
              estado, origen, proveedor_origen_id
       FROM ifco_remitos_super WHERE eliminado_en IS NULL
     `).all();
+    const sysPerdidas = db.prepare(`
+      SELECT id, n_remito, fecha, cantidad, consolidado_en
+      FROM ifco_movimientos
+      WHERE eliminado_en IS NULL AND tipo = 'perdida'
+    `).all();
     const idxDesp = {};
     sysDesp.forEach(function(r){ const k = _normalizarNumeroRemito(r.n_remito_ifco); if (k) idxDesp[k] = r; });
+    const idxPerd = {};
+    sysPerdidas.forEach(function(r){ const k = _normalizarNumeroRemito(r.n_remito); if (k) idxPerd[k] = r; });
     const desp = { a_marcar: [], ya_consolidados: [], no_encontrados: [] };
     parsed.despachos.forEach(function(arch) {
-      const sis = idxDesp[arch.n_remito_normalizado];
-      if (!sis) {
-        desp.no_encontrados.push({
-          n_remito_archivo: arch.n_remito_archivo, n_remito_sistema: arch.n_remito_sistema,
-          fecha: arch.fecha, detalle: arch.detalle, cantidad: arch.cantidad,
-          cadena_sugerida: _matchCadenaIFCO(arch.detalle)
-        });
-      } else if (sis.estado === 'presentado') {
-        desp.ya_consolidados.push({ archivo: arch, sistema: sis });
-      } else {
-        desp.a_marcar.push({ archivo: arch, sistema: sis });
+      // Primero busca como despacho normal
+      const sisDesp = idxDesp[arch.n_remito_normalizado];
+      if (sisDesp) {
+        if (sisDesp.estado === 'presentado') {
+          desp.ya_consolidados.push({ archivo: arch, sistema: sisDesp });
+        } else {
+          desp.a_marcar.push({ archivo: arch, sistema: sisDesp });
+        }
+        return;
       }
+      // Si no es despacho, buscar en pérdidas (cajones perdidos = egreso del depo)
+      const sisPerd = idxPerd[arch.n_remito_normalizado];
+      if (sisPerd) {
+        // Lo tratamos como "ya consolidado" si tiene consolidado_en, sino como "a_marcar"
+        if (sisPerd.consolidado_en) {
+          desp.ya_consolidados.push({ archivo: arch, sistema: Object.assign({}, sisPerd, { _es_perdida: true }) });
+        } else {
+          desp.a_marcar.push({ archivo: arch, sistema: Object.assign({}, sisPerd, { _es_perdida: true }) });
+        }
+        return;
+      }
+      // No encontrado en ningún lado
+      desp.no_encontrados.push({
+        n_remito_archivo: arch.n_remito_archivo, n_remito_sistema: arch.n_remito_sistema,
+        fecha: arch.fecha, detalle: arch.detalle, cantidad: arch.cantidad,
+        cadena_sugerida: _matchCadenaIFCO(arch.detalle)
+      });
     });
 
     // ── INGRESOS: matchea contra ifco_movimientos (tipo='retiro') por n_remito_normalizado
+    // Los ingresos del archivo IFCO se corresponden con retiros del sistema (cajones que volvieron).
+    // Las pérdidas NO se incluyen acá — son egresos y se matchean contra los egresos del archivo.
     const sysIng = db.prepare(`
       SELECT id, n_remito, fecha, cantidad, sucursal_ifco, modelo, consolidado_en
       FROM ifco_movimientos
@@ -4154,6 +4663,54 @@ router.post('/consolidar/preview', upload.single('archivo'), async function(req,
       'ingresos[a/ya/no]=', ing.a_marcar.length, ing.ya_consolidados.length, ing.no_encontrados.length,
       'r22[a/ya/no]=', r22out.a_marcar.length, r22out.ya_consolidados.length, r22out.no_encontrados.length);
 
+    // ── BALANCE AGREGADO (red de seguridad si el match fila-por-fila falla) ──────
+    // INGRESOS:  total archivo (ingresos) vs total sistema (retiros + R22)
+    // EGRESOS:   total archivo (despachos) vs total sistema (despachos + perdidas)
+    const sumArr = function(arr, key) {
+      return (arr || []).reduce(function(s, x){ return s + (parseInt(x[key]) || 0); }, 0);
+    };
+    // Total del archivo IFCO (sumando TODAS las filas, sin filtrar nada — Ajustes, IC, etc incluidos)
+    const totalArchivoIng = parsed.totalBrutoIngresos || 0;
+    const totalArchivoEgr = parsed.totalBrutoEgresos || 0;
+    // Total sistema lado ingresos: retiros (idxIng) + R22 (sumamos directo de DB porque no hay índice)
+    const totalSistemaRetiros = (function(){
+      let total = 0;
+      for (const k in idxIng) total += (parseInt(idxIng[k].cantidad) || 0);
+      return total;
+    })();
+    const totalSistemaR22 = db.prepare(`
+      SELECT COALESCE(SUM(cantidad), 0) AS total FROM ifco_recepciones_proveedor
+      WHERE eliminado_en IS NULL AND es_r22 = 1
+    `).get().total || 0;
+    const totalSistemaIng = totalSistemaRetiros + totalSistemaR22;
+    // Total sistema lado egresos: despachos + perdidas
+    const totalSistemaDespachos = (function(){
+      let total = 0;
+      for (const k in idxDesp) total += (parseInt(idxDesp[k].cantidad_despachada) || 0);
+      return total;
+    })();
+    const totalSistemaPerdidas = (function(){
+      let total = 0;
+      for (const k in idxPerd) total += (parseInt(idxPerd[k].cantidad) || 0);
+      return total;
+    })();
+    const totalSistemaEgr = totalSistemaDespachos + totalSistemaPerdidas;
+
+    const balanceIng = {
+      total_archivo:        totalArchivoIng,
+      total_sistema:        totalSistemaIng,
+      total_sistema_desg:   { retiros: totalSistemaRetiros, r22: totalSistemaR22 },
+      diferencia:           totalArchivoIng - totalSistemaIng,
+      coincide:             totalArchivoIng === totalSistemaIng
+    };
+    const balanceEgr = {
+      total_archivo:        totalArchivoEgr,
+      total_sistema:        totalSistemaEgr,
+      total_sistema_desg:   { despachos: totalSistemaDespachos, perdidas: totalSistemaPerdidas },
+      diferencia:           totalArchivoEgr - totalSistemaEgr,
+      coincide:             totalArchivoEgr === totalSistemaEgr
+    };
+
     res.json({
       ok: true,
       totales: {
@@ -4163,7 +4720,9 @@ router.post('/consolidar/preview', upload.single('archivo'), async function(req,
       },
       despachos: desp,
       ingresos:  ing,
-      r22:       r22out
+      r22:       r22out,
+      balance_ingresos: balanceIng,
+      balance_egresos:  balanceEgr
     });
   } catch(e) {
     console.error('[IFCO][consolidar/preview] EXCEPCION:', e);
@@ -4419,6 +4978,179 @@ router.delete('/consolidacion-revisar/:id', function(req, res) {
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
+// POST /consolidacion-revisar/bulk-resolver — marcar varios como resueltos
+// Body: { ids: [int], resolucion?: string }
+router.post('/consolidacion-revisar/bulk-resolver', express.json(), function(req, res) {
+  const ids = Array.isArray(req.body?.ids) ? req.body.ids.filter(function(x){ return Number.isInteger(x); }) : [];
+  if (ids.length === 0) return res.status(400).json({ error: 'ids requerido (array de enteros)' });
+  const resolucion = (req.body?.resolucion || '').toString().slice(0, 500) || null;
+  const userId = (req.user && req.user.id) || null;
+  try {
+    const stmt = db.prepare("UPDATE ifco_consolidacion_revisar SET resuelto_en = datetime('now','localtime'), resuelto_por_id = ?, resolucion = ? WHERE id = ? AND resuelto_en IS NULL");
+    const tx = db.transaction(function(ids) {
+      let n = 0;
+      for (const id of ids) { const r = stmt.run(userId, resolucion, id); n += r.changes; }
+      return n;
+    });
+    const actualizados = tx(ids);
+    console.log('[IFCO][bulk-resolver]', actualizados, 'de', ids.length, 'por usuario_id', userId);
+    res.json({ ok: true, actualizados: actualizados, total_pedidos: ids.length });
+  } catch(e) { console.error('[IFCO][bulk-resolver]', e); res.status(500).json({ error: e.message }); }
+});
+
+// POST /consolidacion-revisar/bulk-borrar — eliminar varios (admin only)
+// Body: { ids: [int] }
+router.post('/consolidacion-revisar/bulk-borrar', express.json(), function(req, res) {
+  if (!req.user || req.user.rol !== 'admin') return res.status(403).json({ error: 'Solo admin' });
+  const ids = Array.isArray(req.body?.ids) ? req.body.ids.filter(function(x){ return Number.isInteger(x); }) : [];
+  if (ids.length === 0) return res.status(400).json({ error: 'ids requerido (array de enteros)' });
+  try {
+    const stmt = db.prepare("DELETE FROM ifco_consolidacion_revisar WHERE id = ?");
+    const tx = db.transaction(function(ids) {
+      let n = 0;
+      for (const id of ids) { const r = stmt.run(id); n += r.changes; }
+      return n;
+    });
+    const borrados = tx(ids);
+    console.log('[IFCO][bulk-borrar]', borrados, 'de', ids.length, 'por usuario_id', req.user.id);
+    res.json({ ok: true, borrados: borrados, total_pedidos: ids.length });
+  } catch(e) { console.error('[IFCO][bulk-borrar]', e); res.status(500).json({ error: e.message }); }
+});
+
+// POST /consolidacion-revisar/auto-crear — Para pendientes tipo='despacho', si detecta
+// cadena conocida en el detalle, crea el despacho automáticamente y marca el pendiente como resuelto.
+// Body: { ids?: [int] }  // si no se mandan ids, procesa TODOS los pendientes no resueltos
+// Retorna conteo por categoría: creados / saltados (sin cadena) / errores / ya_existian
+router.post('/consolidacion-revisar/auto-crear', express.json(), function(req, res) {
+  const userId = (req.user && req.user.id) || null;
+  const idsFiltro = Array.isArray(req.body?.ids) ? req.body.ids.filter(function(x){ return Number.isInteger(x); }) : null;
+  try {
+    let pendientes;
+    if (idsFiltro && idsFiltro.length > 0) {
+      const placeholders = idsFiltro.map(function(){ return '?'; }).join(',');
+      pendientes = db.prepare(`
+        SELECT id, n_remito, cantidad, detalle, tipo_origen, fecha_archivo
+        FROM ifco_consolidacion_revisar
+        WHERE resuelto_en IS NULL AND tipo_origen = 'despacho' AND id IN (${placeholders})
+      `).all(...idsFiltro);
+    } else {
+      pendientes = db.prepare(`
+        SELECT id, n_remito, cantidad, detalle, tipo_origen, fecha_archivo
+        FROM ifco_consolidacion_revisar
+        WHERE resuelto_en IS NULL AND tipo_origen = 'despacho'
+      `).all();
+    }
+
+    const result = { total: pendientes.length, creados: 0, sin_cadena: 0, ya_existian: 0, errores: [] };
+    const stmtInsertDespacho = db.prepare(`
+      INSERT INTO ifco_remitos_super (
+        n_remito_ifco, fecha_emision, empresa,
+        cantidad_despachada, cantidad_recibida, cantidad_rechazada,
+        estado, fecha_sellado, fecha_presentado,
+        origen, usuario_id, notas
+      ) VALUES (?,?,?,?,?,0,'presentado',?,?,'san_geronimo',?,'Auto-creado desde Pendientes de revisar')
+    `);
+    const stmtMarcarResuelto = db.prepare(`
+      UPDATE ifco_consolidacion_revisar
+      SET resuelto_en = datetime('now','localtime'),
+          resuelto_por_id = ?,
+          resolucion = ?
+      WHERE id = ?
+    `);
+
+    const tx = db.transaction(function() {
+      for (const p of pendientes) {
+        // Limpiar prefijo "[CREAR DESPACHO MANUAL]" si está en el detalle
+        const detalleLimpio = (p.detalle || '').replace(/^\[CREAR DESPACHO MANUAL\]\s*/i, '');
+        const cadena = _matchCadenaIFCO(detalleLimpio);
+        if (!cadena) { result.sin_cadena++; continue; }
+        if (!p.n_remito || !p.cantidad) { result.errores.push({ id: p.id, error: 'Faltan n_remito o cantidad' }); continue; }
+        // ¿Ya existe ese remito en el sistema?
+        const ex = db.prepare("SELECT id FROM ifco_remitos_super WHERE n_remito_ifco = ? AND eliminado_en IS NULL").get(p.n_remito);
+        if (ex) {
+          result.ya_existian++;
+          // Igual marcamos el pendiente como resuelto, porque ya tiene su despacho
+          stmtMarcarResuelto.run(userId, 'Auto: el remito ya existía en el sistema', p.id);
+          continue;
+        }
+        try {
+          // Si el número viene en formato archivo IFCO (con R), convertir al formato sistema (con guión)
+          const nRemitoFinal = _archivoANumeroSistema(p.n_remito) || p.n_remito;
+          stmtInsertDespacho.run(
+            nRemitoFinal,
+            p.fecha_archivo || null,
+            cadena,
+            parseInt(p.cantidad) || 0,
+            parseInt(p.cantidad) || 0,
+            p.fecha_archivo || null,
+            p.fecha_archivo || null,
+            userId
+          );
+          stmtMarcarResuelto.run(userId, 'Auto-creado: ' + cadena, p.id);
+          result.creados++;
+        } catch(e) {
+          result.errores.push({ id: p.id, n_remito: p.n_remito, error: e.message });
+        }
+      }
+    });
+    tx();
+
+    console.log('[IFCO][auto-crear]', JSON.stringify(result), 'por usuario_id', userId);
+    res.json({ ok: true, ...result });
+  } catch(e) {
+    console.error('[IFCO][auto-crear]', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /consolidar/auto-crear-inline — Crear despachos directamente sin pasar por Pendientes.
+// Usado por el wizard de consolidación: cuando elige "crear_despacho" Y hay cadena reconocida,
+// se llama acá en vez de mandarlo a la tabla de Pendientes.
+// Body: { items: [{ n_remito, cantidad, detalle, fecha }] }
+router.post('/consolidar/auto-crear-inline', express.json(), function(req, res) {
+  const userId = (req.user && req.user.id) || null;
+  const items = Array.isArray(req.body?.items) ? req.body.items : [];
+  if (items.length === 0) return res.json({ ok: true, total: 0, creados: 0, sin_cadena: 0, ya_existian: 0, errores: [] });
+  try {
+    const result = { total: items.length, creados: 0, sin_cadena: 0, ya_existian: 0, errores: [] };
+    const stmtInsert = db.prepare(`
+      INSERT INTO ifco_remitos_super (
+        n_remito_ifco, fecha_emision, empresa,
+        cantidad_despachada, cantidad_recibida, cantidad_rechazada,
+        estado, fecha_sellado, fecha_presentado,
+        origen, usuario_id, notas
+      ) VALUES (?,?,?,?,?,0,'presentado',?,?,'san_geronimo',?,'Auto-creado desde consolidación IFCO')
+    `);
+    const tx = db.transaction(function() {
+      for (const it of items) {
+        const cadena = _matchCadenaIFCO(it.detalle);
+        if (!cadena) { result.sin_cadena++; continue; }
+        if (!it.n_remito || !it.cantidad) { result.errores.push({ n_remito: it.n_remito, error: 'Faltan datos' }); continue; }
+        // Convertir formato archivo IFCO (con R) al formato sistema (con guión) si aplica
+        const nRemitoFinal = _archivoANumeroSistema(it.n_remito) || it.n_remito;
+        const ex = db.prepare("SELECT id FROM ifco_remitos_super WHERE n_remito_ifco = ? AND eliminado_en IS NULL").get(nRemitoFinal);
+        if (ex) { result.ya_existian++; continue; }
+        try {
+          stmtInsert.run(
+            nRemitoFinal, it.fecha || null, cadena,
+            parseInt(it.cantidad) || 0, parseInt(it.cantidad) || 0,
+            it.fecha || null, it.fecha || null, userId
+          );
+          result.creados++;
+        } catch(e) {
+          result.errores.push({ n_remito: it.n_remito, error: e.message });
+        }
+      }
+    });
+    tx();
+    console.log('[IFCO][auto-crear-inline]', JSON.stringify(result), 'por usuario_id', userId);
+    res.json({ ok: true, ...result });
+  } catch(e) {
+    console.error('[IFCO][auto-crear-inline]', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // Body JSON: {
 //   despachos: { ids_marcar: [int], fechas_por_id: {id:'YYYY-MM-DD'}, crear: [{n_remito_sistema, fecha, empresa, cantidad}] },
 //   ingresos:  { ids_marcar: [int], crear: [{n_remito_sistema, fecha, cantidad, sucursal_ifco, modelo}] },
@@ -4463,6 +5195,17 @@ router.post('/consolidar/aplicar', express.json(), function(req, res) {
               SET estado='presentado',fecha_presentado=?,actualizado_en=datetime('now','localtime')
               WHERE id=?`).run(fechaArchivo, id);
           }
+          result.despachos.actualizados++;
+        } catch(e) { result.despachos.errores.push({ id, error: e.message }); }
+      }
+      // PÉRDIDAS marcadas como egreso (vienen del lado despachos del archivo IFCO)
+      // Se consolidan en ifco_movimientos como cualquier otro movimiento.
+      for (const id of (desp.ids_perdidas || [])) {
+        try {
+          const r = db.prepare("SELECT * FROM ifco_movimientos WHERE id=? AND eliminado_en IS NULL AND tipo='perdida'").get(id);
+          if (!r) { result.despachos.errores.push({ id, error: 'Pérdida no encontrada' }); continue; }
+          if (r.consolidado_en) continue;
+          db.prepare("UPDATE ifco_movimientos SET consolidado_en=datetime('now','localtime') WHERE id=?").run(id);
           result.despachos.actualizados++;
         } catch(e) { result.despachos.errores.push({ id, error: e.message }); }
       }
@@ -4980,6 +5723,45 @@ router.get('/stocks-reales/alerta-mobile', function(req, res) {
     ultimo_conteo: ult || null,
     corte_jueves: corte
   });
+});
+
+// ── Hard delete (borrado físico irreversible) — SOLO admin, SOLO desde Papelera ──
+// Exige que la fila ya esté en papelera (eliminado_en NOT NULL). Audita en
+// ifco_hard_delete_log (quién/cuándo/snapshot) ANTES de borrar físicamente.
+router.post('/papelera/eliminar-definitivo', express.json(), function(req, res) {
+  if (!req.user || req.user.rol !== 'admin') {
+    return res.status(403).json({ error: 'Solo un administrador puede eliminar definitivamente' });
+  }
+  const d = req.body || {};
+  const MAP = {
+    'remitos':                { tabla: 'ifco_remitos_super',         ref: 'n_remito_ifco',      entidad: 'remito' },
+    'envios':                 { tabla: 'ifco_envios_proveedor',      ref: 'n_remito_interno',   entidad: 'envio' },
+    'movimientos':            { tabla: 'ifco_movimientos',           ref: 'n_remito',           entidad: 'movimiento' },
+    'recepciones-proveedor':  { tabla: 'ifco_recepciones_proveedor', ref: 'n_remito_proveedor', entidad: 'recepcion' }
+  };
+  const cfg = MAP[d.kind];
+  const id = parseInt(d.id);
+  if (!cfg || !Number.isInteger(id)) return res.status(400).json({ error: 'kind o id inválido' });
+  const row = db.prepare('SELECT * FROM ' + cfg.tabla + ' WHERE id = ?').get(id);
+  if (!row) return res.status(404).json({ error: 'No encontrado (¿ya fue eliminado?)' });
+  if (!row.eliminado_en) {
+    return res.status(400).json({ error: 'Solo se puede eliminar definitivamente desde la Papelera. Mandalo primero a la papelera.' });
+  }
+  try {
+    const tx = db.transaction(function () {
+      db.prepare(`INSERT INTO ifco_hard_delete_log
+                    (entidad, ref_id, referencia, snapshot, hard_deleted_por_id, hard_deleted_por_nombre)
+                  VALUES (?, ?, ?, ?, ?, ?)`)
+        .run(cfg.entidad, id, row[cfg.ref] || null, JSON.stringify(row),
+             (req.user && req.user.id) || null, (req.user && req.user.nombre) || null);
+      db.prepare('DELETE FROM ' + cfg.tabla + ' WHERE id = ?').run(id);
+    });
+    tx();
+    res.json({ ok: true });
+  } catch(e) {
+    console.error('[IFCO][hard-delete]', e);
+    res.status(500).json({ error: e.message });
+  }
 });
 
 export default router;
