@@ -5019,6 +5019,7 @@ function sgRepExport(){
   </div>
   <div style="display:flex;gap:8px">
     <button class="btn bb" onclick="admPcAbrirNuevaCuenta()">+ Cuenta</button>
+    <button class="btn bo" onclick="admPcAbrirNuevoTitulo()">+ Título</button>
     <button class="btn bo" onclick="admPcAbrirNuevaSeccion()">+ Sección</button>
   </div>
 </div>
@@ -11959,7 +11960,7 @@ var LNB_USER = null;
 // ═════════════════════════════════════════════════════════════════════
 // 📒 ADMINISTRACIÓN — Asientos Contables + Plan de Cuentas
 // ═════════════════════════════════════════════════════════════════════
-var ADM = { lineasN: 0, cuentas: [], secciones: [], asientoActualId: null, grupoActual: 'activo' };
+var ADM = { lineasN: 0, cuentas: [], secciones: [], titulos: [], asientoActualId: null, grupoActual: 'activo' };
 
 function admApi(path, opts) {
   opts = opts || {};
@@ -11977,7 +11978,8 @@ function admMoney(n) {
 function admCargarCuentas() {
   return Promise.all([
     admApi('?incluir_inactivas=0').then(function(r){ ADM.cuentas = r.data || []; }),
-    admApi('/secciones').then(function(r){ ADM.secciones = r.data || []; })
+    admApi('/secciones').then(function(r){ ADM.secciones = r.data || []; }),
+    admApi('/titulos').then(function(r){ ADM.titulos = r.data || []; })
   ]);
 }
 
@@ -12175,11 +12177,11 @@ function admAnularAsientoActual() {
 // ═════════════════════════════════════════════════════════════════════
 
 var ADM_GRUPOS = {
-  activo:         { label: '🏦 Activo',          color: '#1d4ed8', bg: '#dbeafe' },
-  pasivo:         { label: '💳 Pasivo',           color: '#9a3412', bg: '#fed7aa' },
-  patrimonio_neto:{ label: '🏛️ Patrimonio Neto', color: '#6b21a8', bg: '#e9d5ff' },
-  ingresos:       { label: '📈 Ingresos',         color: '#166534', bg: '#dcfce7' },
-  gastos:         { label: '📉 Gastos',           color: '#991b1b', bg: '#fee2e2' },
+  activo:         { label: '🏦 Activo',          color: '#1d4ed8', colorDark: '#1e3a8a', bg: '#dbeafe' },
+  pasivo:         { label: '💳 Pasivo',           color: '#9a3412', colorDark: '#7c2d12', bg: '#fed7aa' },
+  patrimonio_neto:{ label: '🏛️ Patrimonio Neto', color: '#6b21a8', colorDark: '#4c1d95', bg: '#e9d5ff' },
+  ingresos:       { label: '📈 Ingresos',         color: '#166534', colorDark: '#14532d', bg: '#dcfce7' },
+  gastos:         { label: '📉 Gastos',           color: '#991b1b', colorDark: '#7f1d1d', bg: '#fee2e2' },
 };
 
 function admPcTab(el) {
@@ -12209,41 +12211,77 @@ function admPcLoadGrupo(grupo) {
       return;
     }
     cont.innerHTML = secciones.map(function(s){
-      var cuentas = ADM.cuentas.filter(function(c){ return c.seccion_id === s.id; });
-      return '<div class="pa-wrap" style="margin-bottom:16px">'
-        + '<div style="background:'+g.bg+';padding:10px 14px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--bor)">'
+      var titsSec = ADM.titulos.filter(function(t){ return t.seccion_id === s.id && t.activo; })
+        .sort(function(a,b){ return a.codigo.localeCompare(b.codigo); });
+      var cuentasSinTit = ADM.cuentas.filter(function(c){ return c.seccion_id === s.id && !c.titulo_id; });
+
+      function filaCuenta(c) {
+        var rowStyle = c.activo ? '' : ' style="opacity:.5"';
+        return '<tr'+rowStyle+'>'
+          + '<td style="font-family:monospace;font-size:12px;padding-left:40px;color:#1e293b">'+c.codigo+'</td>'
+          + '<td style="padding-left:8px">'+c.nombre+(c.es_sistema?' <span title="Sistema" style="color:#b88600">🔒</span>':'')+'</td>'
+          + '<td style="text-align:center;font-size:11px;color:var(--mut)">'+(c.tipo==='resultado'?'ER':'Patr.')+'</td>'
+          + '<td style="text-align:center">'+(c.permite_lote?'✓':'—')+'</td>'
+          + '<td style="text-align:center">'+(c.permite_campania?'✓':'—')+'</td>'
+          + '<td style="text-align:right;white-space:nowrap">'
+            + '<button class="btn bo" style="padding:2px 7px;font-size:11px;margin-right:4px" onclick="admPcEditarCuenta('+c.id+')">✏️</button>'
+            + (c.activo && !c.es_sistema
+              ? '<button class="btn bo" style="padding:2px 7px;font-size:11px;color:var(--err);border-color:var(--err)" onclick="admPcDesactivarCuenta('+c.id+')">🗑</button>'
+              : (!c.activo ? '<button class="btn bo" style="padding:2px 7px;font-size:11px;color:var(--ok);border-color:var(--ok)" onclick="admPcReactivarCuenta('+c.id+')">↺</button>' : ''))
+          + '</td>'
+          + '</tr>';
+      }
+
+      function filaTitulo(t) {
+        var cuentasTit = ADM.cuentas.filter(function(c){ return c.titulo_id === t.id; });
+        return '<tr style="background:#dbeafe;border-left:4px solid #3b82f6">'
+          + '<td colspan="5" style="padding:8px 14px 8px 18px">'
+            + '<div style="display:flex;align-items:center;gap:10px">'
+              + '<span style="color:#2563eb;font-size:13px">▸</span>'
+              + '<span style="font-weight:700;font-size:13px;color:#1e3a5f;letter-spacing:.2px">'+t.codigo+' — '+t.nombre+'</span>'
+              + '<span style="background:#bfdbfe;color:#1d4ed8;font-size:10px;font-weight:600;padding:2px 7px;border-radius:20px;letter-spacing:.5px">NO IMPUTABLE</span>'
+            + '</div>'
+          + '</td>'
+          + '<td style="text-align:right;white-space:nowrap;padding-right:8px">'
+            + '<button class="btn bo" style="padding:2px 8px;font-size:10px;background:#eff6ff;border-color:#93c5fd;color:#1d4ed8" onclick="admPcAbrirNuevaCuentaEnTitulo('+s.id+','+t.id+')">+ Cuenta</button> '
+            + '<button class="btn bo" style="padding:2px 7px;font-size:11px" onclick="admPcEditarTitulo('+t.id+')">✏️</button> '
+            + '<button class="btn bo" style="padding:2px 7px;font-size:11px" onclick="admPcEliminarTitulo('+t.id+')">🗑</button>'
+          + '</td>'
+          + '</tr>'
+          + cuentasTit.map(filaCuenta).join('');
+      }
+
+      return '<div class="pa-wrap" style="margin-bottom:20px">'
+        + '<div style="background:linear-gradient(135deg,'+g.color+','+g.colorDark+');padding:11px 16px;display:flex;justify-content:space-between;align-items:center">'
           + '<div style="display:flex;align-items:center;gap:10px">'
-            + '<strong style="color:'+g.color+';font-size:14px">'+s.codigo+' — '+s.nombre+'</strong>'
-            + (s.activo ? '' : '<span style="font-size:11px;color:var(--mut);font-style:italic">(inactiva)</span>')
+            + '<strong style="color:#fff;font-size:14px;letter-spacing:.3px">'+s.codigo+' — '+s.nombre+'</strong>'
+            + (s.activo ? '' : '<span style="font-size:11px;color:rgba(255,255,255,.7);font-style:italic">(inactiva)</span>')
+            + '<span style="background:rgba(255,255,255,.18);color:#fff;font-size:10px;font-weight:600;padding:2px 8px;border-radius:20px;letter-spacing:.5px;border:1px solid rgba(255,255,255,.3)">NO IMPUTABLE</span>'
           + '</div>'
           + '<div style="display:flex;gap:6px">'
-            + '<button class="btn bo" style="padding:3px 9px;font-size:11px" onclick="admPcEditarSeccion('+s.id+')">✏️ Editar</button>'
-            + '<button class="btn bo" style="padding:3px 9px;font-size:11px" onclick="admPcEliminarSeccion('+s.id+')">🗑</button>'
+            + '<button class="btn bo" style="padding:3px 9px;font-size:11px;background:rgba(255,255,255,.15);border-color:rgba(255,255,255,.4);color:#fff" onclick="admPcAbrirNuevoTituloEnSeccion('+s.id+')">+ Título</button>'
+            + '<button class="btn bo" style="padding:3px 9px;font-size:11px;background:rgba(255,255,255,.15);border-color:rgba(255,255,255,.4);color:#fff" onclick="admPcEditarSeccion('+s.id+')">✏️</button>'
+            + '<button class="btn bo" style="padding:3px 9px;font-size:11px;background:rgba(255,255,255,.15);border-color:rgba(255,255,255,.4);color:#fff" onclick="admPcEliminarSeccion('+s.id+')">🗑</button>'
           + '</div>'
         + '</div>'
-        + (cuentas.length
-          ? '<div class="ab-table-wrap"><table class="pa-tbl">'
-            + '<thead><tr><th style="width:80px">Código</th><th>Nombre</th><th style="width:80px;text-align:center">Tipo</th><th style="width:60px;text-align:center">Lote</th><th style="width:80px;text-align:center">Campaña</th><th style="width:160px;text-align:right"></th></tr></thead>'
-            + '<tbody>'
-            + cuentas.map(function(c){
-                var rowStyle = c.activo ? '' : ' style="opacity:.5"';
-                return '<tr'+rowStyle+'>'
-                  + '<td style="font-family:monospace;font-size:12px">'+c.codigo+'</td>'
-                  + '<td>'+c.nombre+(c.es_sistema?' <span title="Sistema" style="color:#b88600">🔒</span>':'')+'</td>'
-                  + '<td style="text-align:center;font-size:11px;color:var(--mut)">'+(c.tipo==='resultado'?'ER':'Patr.')+'</td>'
-                  + '<td style="text-align:center">'+(c.permite_lote?'✓':'—')+'</td>'
-                  + '<td style="text-align:center">'+(c.permite_campania?'✓':'—')+'</td>'
-                  + '<td style="text-align:right;white-space:nowrap">'
-                    + '<button class="btn bo" style="padding:2px 7px;font-size:11px;margin-right:4px" onclick="admPcEditarCuenta('+c.id+')">✏️</button>'
-                    + (c.activo && !c.es_sistema
-                      ? '<button class="btn bo" style="padding:2px 7px;font-size:11px;color:var(--err);border-color:var(--err)" onclick="admPcDesactivarCuenta('+c.id+')">🗑</button>'
-                      : (!c.activo ? '<button class="btn bo" style="padding:2px 7px;font-size:11px;color:var(--ok);border-color:var(--ok)" onclick="admPcReactivarCuenta('+c.id+')">↺</button>' : ''))
-                  + '</td>'
-                  + '</tr>';
-              }).join('')
-            + '</tbody></table></div>'
-          : '<div style="padding:16px;color:var(--mut);font-size:13px;font-style:italic;text-align:center">Sin cuentas — <button class="btn bo bs" onclick="admPcAbrirNuevaCuenta(\''+s.id+'\')" style="font-size:12px">+ Agregar cuenta</button></div>')
-        + '</div>';
+        + '<div class="ab-table-wrap"><table class="pa-tbl">'
+          + '<thead><tr>'
+            + '<th style="width:150px">Código</th>'
+            + '<th>Nombre</th>'
+            + '<th style="width:80px;text-align:center">Tipo</th>'
+            + '<th style="width:60px;text-align:center">Lote</th>'
+            + '<th style="width:80px;text-align:center">Campaña</th>'
+            + '<th style="width:180px;text-align:right"></th>'
+          + '</tr></thead>'
+          + '<tbody>'
+            + titsSec.map(filaTitulo).join('')
+            + (cuentasSinTit.length
+              ? '<tr style="background:#f1f5f9"><td colspan="6" style="padding:5px 14px;font-size:11px;color:var(--mut);font-style:italic">📌 Sin título asignado</td></tr>'
+                + cuentasSinTit.map(filaCuenta).join('')
+              : '')
+          + '</tbody>'
+        + '</table></div>'
+      + '</div>';
     }).join('');
   });
 }
@@ -12271,7 +12309,7 @@ function admPcEditarSeccion(id) {
 
 function admPcGuardarSeccion() {
   var id     = document.getElementById('adm-sec-id').value;
-  var codigo = parseInt(document.getElementById('adm-sec-codigo').value, 10);
+  var codigo = document.getElementById('adm-sec-codigo').value.trim();
   var nombre = document.getElementById('adm-sec-nombre').value.trim();
   var grupo  = document.getElementById('adm-sec-grupo').value;
   if (!codigo || !nombre) return toast('Completá código y nombre', 'er');
@@ -12280,7 +12318,6 @@ function admPcGuardarSeccion() {
   admApi(url, { method: method, body: JSON.stringify({ codigo: codigo, nombre: nombre, grupo: grupo }) })
     .then(function(r){
       if (r.ok) {
-        // Actualizar grupo si es edición (el endpoint de secciones existente no tiene grupo, lo patcheamos directo)
         if (id) {
           admApi('/secciones/' + id, { method: 'PUT', body: JSON.stringify({ nombre: nombre, grupo: grupo }) });
         }
@@ -12301,6 +12338,10 @@ function admPcEliminarSeccion(id) {
 
 // ── Cuentas ────────────────────────────────────────────────────────
 function admPcAbrirNuevaCuenta(seccionId) {
+  admPcAbrirNuevaCuentaEnTitulo(seccionId, null);
+}
+
+function admPcAbrirNuevaCuentaEnTitulo(seccionId, tituloId) {
   document.getElementById('adm-cu-id').value = '';
   document.getElementById('adm-cu-tit').textContent = 'Nueva cuenta';
   document.getElementById('adm-cu-codigo').value = '';
@@ -12309,26 +12350,57 @@ function admPcAbrirNuevaCuenta(seccionId) {
   document.getElementById('adm-cu-lote').checked = false;
   document.getElementById('adm-cu-camp').checked = false;
   document.getElementById('adm-cu-codigo-sug').textContent = '';
-  var secs = ADM.secciones.filter(function(s){ return s.grupo === ADM.grupoActual && s.activo; });
+  var secs = ADM.secciones.filter(function(s){ return s.activo; });
   document.getElementById('adm-cu-seccion').innerHTML =
     secs.map(function(s){ return '<option value="'+s.id+'"'+(s.id==seccionId?' selected':'')+'>'+s.codigo+' — '+s.nombre+'</option>'; }).join('');
+  admPcPoblarTitulosModal(seccionId, tituloId);
   admPcSugerirCodigo();
   document.getElementById('adm-mb-cuenta').classList.add('on');
 }
 
+function admPcPoblarTitulosModal(seccionId, tituloIdSeleccionado) {
+  var sId = seccionId || parseInt((document.getElementById('adm-cu-seccion')||{}).value, 10);
+  var titsSec = ADM.titulos.filter(function(t){ return t.seccion_id === sId && t.activo; });
+  var sel = document.getElementById('adm-cu-titulo');
+  if (!sel) return;
+  sel.innerHTML = '<option value="">— Sin título —</option>' +
+    titsSec.map(function(t){ return '<option value="'+t.id+'"'+(t.id===tituloIdSeleccionado?' selected':'')+'>'+t.codigo+' — '+t.nombre+'</option>'; }).join('');
+}
+
+function admPcOnSeccionChange() {
+  admPcPoblarTitulosModal(parseInt(document.getElementById('adm-cu-seccion').value, 10), null);
+  admPcSugerirCodigo();
+}
+
 function admPcSugerirCodigo() {
   var sId = parseInt(document.getElementById('adm-cu-seccion').value, 10);
+  var titId = parseInt((document.getElementById('adm-cu-titulo')||{}).value, 10);
   if (!sId) return;
   var sec = ADM.secciones.find(function(s){ return s.id === sId; });
   if (!sec) return;
-  var cuentasSec = ADM.cuentas.filter(function(c){ return c.seccion_id === sId; });
-  var max = 0;
-  cuentasSec.forEach(function(c){
-    var sub = parseInt(String(c.codigo).split('.')[1]||'0', 10);
-    if (sub > max) max = sub;
-  });
-  var sugerido = sec.codigo + '.' + String(max + 5).padStart(2,'0');
-  document.getElementById('adm-cu-codigo-sug').textContent = 'Sugerido: ' + sugerido;
+  var sugerido = '';
+  if (titId) {
+    var tit = ADM.titulos.find(function(t){ return t.id === titId; });
+    if (tit) {
+      var cuentasTit = ADM.cuentas.filter(function(c){ return c.titulo_id === titId; });
+      var max = 0;
+      cuentasTit.forEach(function(c){
+        var partes = String(c.codigo).split('.');
+        var ult = parseInt(partes[partes.length-1], 10);
+        if (ult > max) max = ult;
+      });
+      sugerido = tit.codigo + '.' + String(max + 1).padStart(4, '0');
+    }
+  } else {
+    var cuentasSec = ADM.cuentas.filter(function(c){ return c.seccion_id === sId && !c.titulo_id; });
+    var max2 = 0;
+    cuentasSec.forEach(function(c){
+      var sub = parseInt(String(c.codigo).split('.')[1]||'0', 10);
+      if (sub > max2) max2 = sub;
+    });
+    sugerido = sec.codigo + '.' + String(max2 + 5).padStart(2,'0');
+  }
+  document.getElementById('adm-cu-codigo-sug').textContent = sugerido ? 'Sugerido: ' + sugerido : '';
   if (!document.getElementById('adm-cu-id').value) document.getElementById('adm-cu-codigo').value = sugerido;
 }
 
@@ -12340,6 +12412,7 @@ function admPcEditarCuenta(id) {
   var secs = ADM.secciones.filter(function(s){ return s.activo; });
   document.getElementById('adm-cu-seccion').innerHTML =
     secs.map(function(s){ return '<option value="'+s.id+'"'+(s.id===c.seccion_id?' selected':'')+'>'+s.codigo+' — '+s.nombre+'</option>'; }).join('');
+  admPcPoblarTitulosModal(c.seccion_id, c.titulo_id);
   document.getElementById('adm-cu-codigo').value = c.codigo;
   document.getElementById('adm-cu-nombre').value = c.nombre;
   document.getElementById('adm-cu-tipo').value   = c.tipo;
@@ -12351,13 +12424,15 @@ function admPcEditarCuenta(id) {
 
 function admPcGuardarCuenta() {
   var id   = document.getElementById('adm-cu-id').value;
+  var titVal = (document.getElementById('adm-cu-titulo')||{}).value;
   var body = {
-    codigo:          document.getElementById('adm-cu-codigo').value.trim(),
-    nombre:          document.getElementById('adm-cu-nombre').value.trim(),
-    seccion_id:      parseInt(document.getElementById('adm-cu-seccion').value, 10),
-    tipo:            document.getElementById('adm-cu-tipo').value,
-    permite_lote:    document.getElementById('adm-cu-lote').checked ? 1 : 0,
-    permite_campania:document.getElementById('adm-cu-camp').checked ? 1 : 0,
+    codigo:           document.getElementById('adm-cu-codigo').value.trim(),
+    nombre:           document.getElementById('adm-cu-nombre').value.trim(),
+    seccion_id:       parseInt(document.getElementById('adm-cu-seccion').value, 10),
+    titulo_id:        titVal ? parseInt(titVal, 10) : null,
+    tipo:             document.getElementById('adm-cu-tipo').value,
+    permite_lote:     document.getElementById('adm-cu-lote').checked ? 1 : 0,
+    permite_campania: document.getElementById('adm-cu-camp').checked ? 1 : 0,
   };
   if (!body.codigo || !body.nombre || !body.seccion_id) return toast('Completá código, nombre y sección', 'er');
   var url    = id ? '/' + id : '';
@@ -12386,19 +12461,94 @@ function admPcReactivarCuenta(id) {
   });
 }
 
+// ── Títulos ────────────────────────────────────────────────────────
+function admPcAbrirNuevoTitulo() {
+  admPcAbrirNuevoTituloEnSeccion(null);
+}
+
+function admPcAbrirNuevoTituloEnSeccion(seccionId) {
+  document.getElementById('adm-tit-id').value = '';
+  document.getElementById('adm-tit-modal-tit').textContent = 'Nuevo título';
+  document.getElementById('adm-tit-codigo').value = '';
+  document.getElementById('adm-tit-nombre').value = '';
+  var sel = document.getElementById('adm-tit-seccion');
+  sel.innerHTML = ADM.secciones.filter(function(s){ return s.activo; })
+    .map(function(s){ return '<option value="'+s.id+'"'+(s.id===seccionId?' selected':'')+'>'+s.codigo+' — '+s.nombre+'</option>'; }).join('');
+  admPcTitSugerirCodigo();
+  document.getElementById('adm-mb-titulo').classList.add('on');
+}
+
+function admPcEditarTitulo(id) {
+  var t = ADM.titulos.find(function(x){ return x.id === id; });
+  if (!t) return;
+  document.getElementById('adm-tit-id').value = t.id;
+  document.getElementById('adm-tit-modal-tit').textContent = 'Editar título ' + t.codigo;
+  var sel = document.getElementById('adm-tit-seccion');
+  sel.innerHTML = ADM.secciones.filter(function(s){ return s.activo; })
+    .map(function(s){ return '<option value="'+s.id+'"'+(s.id===t.seccion_id?' selected':'')+'>'+s.codigo+' — '+s.nombre+'</option>'; }).join('');
+  document.getElementById('adm-tit-codigo').value = t.codigo;
+  document.getElementById('adm-tit-nombre').value = t.nombre;
+  document.getElementById('adm-tit-codigo-sug').textContent = '';
+  document.getElementById('adm-mb-titulo').classList.add('on');
+}
+
+function admPcTitSugerirCodigo() {
+  var sId = parseInt((document.getElementById('adm-tit-seccion')||{}).value, 10);
+  if (!sId) return;
+  var sec = ADM.secciones.find(function(s){ return s.id === sId; });
+  if (!sec) return;
+  var titsSec = ADM.titulos.filter(function(t){ return t.seccion_id === sId; });
+  var max = 0;
+  titsSec.forEach(function(t){
+    var partes = String(t.codigo).split('.');
+    var sub = parseInt(partes[2]||'0', 10);
+    if (sub > max) max = sub;
+  });
+  var sugerido = sec.codigo + '.' + String(max + 1).padStart(2, '0');
+  document.getElementById('adm-tit-codigo-sug').textContent = 'Sugerido: ' + sugerido;
+  if (!document.getElementById('adm-tit-id').value) document.getElementById('adm-tit-codigo').value = sugerido;
+}
+
+function admPcGuardarTitulo() {
+  var id = document.getElementById('adm-tit-id').value;
+  var body = {
+    codigo:     document.getElementById('adm-tit-codigo').value.trim(),
+    nombre:     document.getElementById('adm-tit-nombre').value.trim(),
+    seccion_id: parseInt(document.getElementById('adm-tit-seccion').value, 10),
+  };
+  if (!body.codigo || !body.nombre || !body.seccion_id) return toast('Completá código, nombre y sección', 'er');
+  var url = id ? '/titulos/' + id : '/titulos';
+  admApi(url, { method: id ? 'PUT' : 'POST', body: JSON.stringify(body) }).then(function(r){
+    if (r.ok) {
+      toast('✓ Título guardado', 'ok');
+      document.getElementById('adm-mb-titulo').classList.remove('on');
+      admPcLoadGrupo(ADM.grupoActual);
+    } else toast('Error: ' + (r.error||'desconocido'), 'er');
+  });
+}
+
+function admPcEliminarTitulo(id) {
+  if (!confirm('¿Desactivar este título?')) return;
+  admApi('/titulos/' + id, { method: 'DELETE' }).then(function(r){
+    if (r.ok) { toast('✓ Título desactivado', 'ok'); admPcLoadGrupo(ADM.grupoActual); }
+    else toast('Error: ' + (r.error||'desconocido'), 'er');
+  });
+}
+
 // ── Hook navegación ────────────────────────────────────────────────
 // Registrar las secciones nuevas en el loadSec del nav existente
 // ── Inyectar modales ADM si no están en el DOM ──────────────────
 (function() {
   // Eliminar modales rotos si existen
-  ['adm-mb-asiento','adm-mb-asiento-det','adm-mb-seccion','adm-mb-cuenta'].forEach(function(id){
+  ['adm-mb-asiento','adm-mb-asiento-det','adm-mb-seccion','adm-mb-titulo','adm-mb-cuenta'].forEach(function(id){
     var el = document.getElementById(id); if(el) el.remove();
   });
   var div = document.createElement('div');
   div.innerHTML = '<div class="ab-modal-overlay" id="adm-mb-asiento"><div class="ab-modal" style="width:780px"><div class="mhd"><div><div class="mht">📒 Asiento contable</div><div style="font-size:12px;color:var(--mut)">El debe debe ser igual al haber</div></div><button class="mcl" onclick="document.getElementById(\'adm-mb-asiento\').classList.remove(\'on\')">×</button></div><div class="fg" style="margin-bottom:14px"><div class="fl"><label>Fecha *</label><input type="date" id="adm-as-fecha"></div><div class="fl ff"><label>Descripción *</label><input id="adm-as-desc" placeholder="Ej: Pago factura proveedor"></div></div><div style="display:grid;grid-template-columns:1fr 130px 130px auto;gap:8px;padding:0 0 6px;border-bottom:1px solid var(--bor);font-size:10px;font-weight:700;color:var(--mut);text-transform:uppercase"><div>Cuenta</div><div style="text-align:right">Debe $</div><div style="text-align:right">Haber $</div><div></div></div><div id="adm-as-lineas" style="margin:8px 0"></div><button class="btn bo bs" onclick="admAgregarLinea()" style="margin-bottom:16px">+ Agregar línea</button><div style="background:var(--bg);border:1px solid var(--bor);border-radius:8px;padding:12px 14px;display:flex;justify-content:flex-end;gap:32px;font-size:14px;margin-bottom:16px"><div>Total Debe: <strong id="adm-as-tot-debe" style="font-size:16px;color:var(--burd)">$0</strong></div><div>Total Haber: <strong id="adm-as-tot-haber" style="font-size:16px;color:var(--burd)">$0</strong></div><div id="adm-as-balance" style="font-weight:700;font-size:16px;color:var(--ok)">✓ Cuadra</div></div><div class="ab-modal-footer"><button class="btn bo" onclick="document.getElementById(\'adm-mb-asiento\').classList.remove(\'on\')">Cancelar</button><button class="btn bb" onclick="admGuardarAsiento()">Registrar asiento</button></div></div></div>'
   + '<div class="ab-modal-overlay" id="adm-mb-asiento-det"><div class="ab-modal" style="width:680px"><div class="mhd"><div><div class="mht" id="adm-as-det-tit">Asiento</div><div style="font-size:12px;color:var(--mut)" id="adm-as-det-sub"></div></div><button class="mcl" onclick="document.getElementById(\'adm-mb-asiento-det\').classList.remove(\'on\')">×</button></div><div id="adm-as-det-body"></div><div class="ab-modal-footer" style="justify-content:space-between"><button class="btn bd" id="adm-as-det-anular-btn" onclick="admAnularAsientoActual()">Anular asiento</button><button class="btn bo" onclick="document.getElementById(\'adm-mb-asiento-det\').classList.remove(\'on\')">Cerrar</button></div></div></div>'
-  + '<div class="ab-modal-overlay" id="adm-mb-seccion"><div class="ab-modal" style="width:460px"><div class="mhd"><div><div class="mht" id="adm-sec-tit">Nueva sección</div></div><button class="mcl" onclick="document.getElementById(\'adm-mb-seccion\').classList.remove(\'on\')">×</button></div><input type="hidden" id="adm-sec-id"><div class="fg"><div class="fl"><label>Código *</label><input type="number" id="adm-sec-codigo" min="1" placeholder="Ej: 20"></div><div class="fl ff"><label>Nombre *</label><input id="adm-sec-nombre" placeholder="Ej: CAJA Y BANCOS"></div><div class="fl ff"><label>Grupo *</label><select id="adm-sec-grupo"><option value="activo">🏦 Activo</option><option value="pasivo">💳 Pasivo</option><option value="patrimonio_neto">🏛️ Patrimonio Neto</option><option value="ingresos">📈 Ingresos</option><option value="gastos">📉 Gastos</option></select></div></div><div class="ab-modal-footer"><button class="btn bo" onclick="document.getElementById(\'adm-mb-seccion\').classList.remove(\'on\')">Cancelar</button><button class="btn bb" onclick="admPcGuardarSeccion()">Guardar</button></div></div></div>'
-  + '<div class="ab-modal-overlay" id="adm-mb-cuenta"><div class="ab-modal" style="width:520px"><div class="mhd"><div><div class="mht" id="adm-cu-tit">Nueva cuenta</div></div><button class="mcl" onclick="document.getElementById(\'adm-mb-cuenta\').classList.remove(\'on\')">×</button></div><input type="hidden" id="adm-cu-id"><div class="fg"><div class="fl ff"><label>Sección *</label><select id="adm-cu-seccion" onchange="admPcSugerirCodigo()"></select></div><div class="fl"><label>Código *</label><input id="adm-cu-codigo" placeholder="Ej: 10.01"><div id="adm-cu-codigo-sug" style="font-size:10px;color:var(--mut);margin-top:3px"></div></div><div class="fl ff"><label>Nombre *</label><input id="adm-cu-nombre" placeholder="Ej: Caja pesos"></div><div class="fl"><label>Tipo</label><select id="adm-cu-tipo"><option value="resultado">Resultado (ER)</option><option value="patrimonial">Patrimonial</option></select></div><div class="fl ff" style="display:flex;gap:18px;align-items:center;padding-top:8px"><label style="display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--mut);cursor:pointer"><input type="checkbox" id="adm-cu-lote" style="width:auto"> Permite lote</label><label style="display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--mut);cursor:pointer"><input type="checkbox" id="adm-cu-camp" style="width:auto"> Permite campaña</label></div></div><div class="ab-modal-footer"><button class="btn bo" onclick="document.getElementById(\'adm-mb-cuenta\').classList.remove(\'on\')">Cancelar</button><button class="btn bb" onclick="admPcGuardarCuenta()">Guardar</button></div></div></div>';
+  + '<div class="ab-modal-overlay" id="adm-mb-seccion"><div class="ab-modal" style="width:460px"><div class="mhd"><div><div class="mht" id="adm-sec-tit">Nueva sección</div></div><button class="mcl" onclick="document.getElementById(\'adm-mb-seccion\').classList.remove(\'on\')">×</button></div><input type="hidden" id="adm-sec-id"><div class="fg"><div class="fl"><label>Código * <span style="font-size:10px;color:var(--mut)">formato X.XX</span></label><input id="adm-sec-codigo" placeholder="Ej: 1.08"></div><div class="fl ff"><label>Nombre *</label><input id="adm-sec-nombre" placeholder="Ej: CAJA Y BANCOS"></div><div class="fl ff"><label>Grupo *</label><select id="adm-sec-grupo"><option value="activo">🏦 Activo</option><option value="pasivo">💳 Pasivo</option><option value="patrimonio_neto">🏛️ Patrimonio Neto</option><option value="ingresos">📈 Ingresos</option><option value="gastos">📉 Gastos</option></select></div></div><div class="ab-modal-footer"><button class="btn bo" onclick="document.getElementById(\'adm-mb-seccion\').classList.remove(\'on\')">Cancelar</button><button class="btn bb" onclick="admPcGuardarSeccion()">Guardar</button></div></div></div>'
+  + '<div class="ab-modal-overlay" id="adm-mb-titulo"><div class="ab-modal" style="width:460px"><div class="mhd"><div><div class="mht" id="adm-tit-modal-tit">Nuevo título</div></div><button class="mcl" onclick="document.getElementById(\'adm-mb-titulo\').classList.remove(\'on\')">×</button></div><input type="hidden" id="adm-tit-id"><div class="fg"><div class="fl ff"><label>Sección *</label><select id="adm-tit-seccion" onchange="admPcTitSugerirCodigo()"></select></div><div class="fl"><label>Código * <span style="font-size:10px;color:var(--mut)">formato X.XX.XX</span></label><input id="adm-tit-codigo" placeholder="1.01.03"><div id="adm-tit-codigo-sug" style="font-size:10px;color:var(--mut);margin-top:3px"></div></div><div class="fl ff"><label>Nombre *</label><input id="adm-tit-nombre" placeholder="Ej: Caja y Efectivo"></div><div style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:6px;padding:8px 10px;font-size:12px;color:#0369a1;margin-top:4px">ℹ️ Los títulos agrupan cuentas dentro de una sección. <strong>No son imputables</strong> en asientos.</div></div><div class="ab-modal-footer"><button class="btn bo" onclick="document.getElementById(\'adm-mb-titulo\').classList.remove(\'on\')">Cancelar</button><button class="btn bb" onclick="admPcGuardarTitulo()">Guardar</button></div></div></div>'
+  + '<div class="ab-modal-overlay" id="adm-mb-cuenta"><div class="ab-modal" style="width:520px"><div class="mhd"><div><div class="mht" id="adm-cu-tit">Nueva cuenta</div></div><button class="mcl" onclick="document.getElementById(\'adm-mb-cuenta\').classList.remove(\'on\')">×</button></div><input type="hidden" id="adm-cu-id"><div class="fg"><div class="fl ff"><label>Sección *</label><select id="adm-cu-seccion" onchange="admPcOnSeccionChange()"></select></div><div class="fl ff"><label>Título <span style="font-size:10px;color:var(--mut)">(organiza dentro de la sección)</span></label><select id="adm-cu-titulo"><option value="">— Sin título —</option></select></div><div class="fl"><label>Código * <span style="font-size:10px;color:var(--mut)">X.XX.XX.XXXX</span></label><input id="adm-cu-codigo" placeholder="1.01.01.0001"><div id="adm-cu-codigo-sug" style="font-size:10px;color:var(--mut);margin-top:3px"></div></div><div class="fl ff"><label>Nombre *</label><input id="adm-cu-nombre" placeholder="Ej: Caja pesos"></div><div class="fl"><label>Tipo</label><select id="adm-cu-tipo"><option value="resultado">Resultado (ER)</option><option value="patrimonial">Patrimonial</option></select></div><div class="fl ff" style="display:flex;gap:18px;align-items:center;padding-top:8px"><label style="display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--mut);cursor:pointer"><input type="checkbox" id="adm-cu-lote" style="width:auto"> Permite lote</label><label style="display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--mut);cursor:pointer"><input type="checkbox" id="adm-cu-camp" style="width:auto"> Permite campaña</label></div></div><div class="ab-modal-footer"><button class="btn bo" onclick="document.getElementById(\'adm-mb-cuenta\').classList.remove(\'on\')">Cancelar</button><button class="btn bb" onclick="admPcGuardarCuenta()">Guardar</button></div></div></div>';
   document.body.appendChild(div);
 })();
 
