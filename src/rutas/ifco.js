@@ -2361,21 +2361,6 @@ router.patch('/remitos/:id', function(req, res) {
   res.json({ ok: true });
 });
 
-// ── TEMPORAL (PR1, se saca en PR2) — COUNT read-only de remitos 100% rechazados
-//    que quedaron en 'sellado' antes de la regla auto-presentado. Admin, sin escribir.
-router.get('/_debug-count-rechazados-sellados', function(req, res) {
-  if (!req.user || req.user.rol !== 'admin') return res.status(403).json({ error: 'Solo admin' });
-  try {
-    const cond = "estado='sellado' AND cantidad_rechazada IS NOT NULL AND cantidad_rechazada >= cantidad_despachada AND eliminado_en IS NULL";
-    const n = db.prepare(`SELECT COUNT(*) AS n FROM ifco_remitos_super WHERE ${cond}`).get().n;
-    const muestra = db.prepare(`
-      SELECT id, n_remito_ifco, cantidad_despachada, cantidad_rechazada, rechazo_destino, fecha_sellado
-      FROM ifco_remitos_super WHERE ${cond}
-      ORDER BY fecha_sellado ASC LIMIT 25`).all();
-    res.json({ ok: true, total: n, condicion: cond, muestra });
-  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
-});
-
 // PATCH /remitos/:id/seguimiento — marcar/desmarcar seguimiento + nota.
 // A diferencia del PATCH genérico (limitado a 'despachado'), esto corre en CUALQUIER
 // estado (los remitos que se complican suelen estar sellados/enviados).
