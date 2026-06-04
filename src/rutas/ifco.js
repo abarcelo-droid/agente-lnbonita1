@@ -1716,6 +1716,7 @@ router.get('/remitos', function(req, res) {
     q += " AND r.eliminado_en IS NULL";
   }
   if (f.estado)     { q += " AND r.estado = ?";        p.push(f.estado); }
+  if (f.seguimiento === '1') { q += " AND r.seguimiento = 1"; }
   if (f.cliente_id) { q += " AND r.cliente_id = ?";    p.push(f.cliente_id); }
   if (f.desde)      { q += " AND r.fecha_emision >= ?"; p.push(f.desde); }
   if (f.hasta)      { q += " AND r.fecha_emision <= ?"; p.push(f.hasta); }
@@ -2115,9 +2116,9 @@ router.post('/remitos/presentar/preview', express.json(), function(req, res) {
     const ph = ids.map(function(){ return '?'; }).join(',');
     const remitos = db.prepare(`
       SELECT id, n_remito_ifco, fecha_sellado, empresa, sucursal, cantidad_recibida, cantidad_rechazada, escaneo_path, estado, veces_enviado
-      FROM ifco_remitos_super WHERE id IN (${ph}) AND estado IN ('sellado','enviado') AND eliminado_en IS NULL
+      FROM ifco_remitos_super WHERE id IN (${ph}) AND estado = 'sellado' AND eliminado_en IS NULL
     `).all(...ids);
-    if (remitos.length === 0) return res.status(400).json({ error: 'Ninguno de los IDs corresponde a un remito sellado o enviado' });
+    if (remitos.length === 0) return res.status(400).json({ error: 'Ninguno de los IDs corresponde a un remito sellado' });
 
     // Asunto sugerido
     const hoy = new Date().toISOString().slice(0,10);
@@ -2187,9 +2188,9 @@ router.post('/remitos/presentar/enviar', express.json(), async function(req, res
     const ph = ids.map(function(){ return '?'; }).join(',');
     const remitos = db.prepare(`
       SELECT id, n_remito_ifco, escaneo_path, estado, veces_enviado
-      FROM ifco_remitos_super WHERE id IN (${ph}) AND estado IN ('sellado','enviado') AND eliminado_en IS NULL
+      FROM ifco_remitos_super WHERE id IN (${ph}) AND estado = 'sellado' AND eliminado_en IS NULL
     `).all(...ids);
-    if (remitos.length === 0) return res.status(400).json({ error: 'Ninguno de los IDs corresponde a un remito sellado o enviado' });
+    if (remitos.length === 0) return res.status(400).json({ error: 'Ninguno de los IDs corresponde a un remito sellado' });
 
     // Armar adjuntos físicos. Bug que arreglar: el escaneo_path se guarda
     // como '/data/ifco/xxx.jpg' (no /uploads/ifco/...). Usar path.basename
@@ -2234,7 +2235,7 @@ router.post('/remitos/presentar/enviar', express.json(), async function(req, res
           veces_enviado = COALESCE(veces_enviado, 0) + 1,
           email_enviado_a = ?,
           actualizado_en = datetime('now','localtime')
-      WHERE id IN (${ph}) AND estado IN ('sellado','enviado')
+      WHERE id IN (${ph}) AND estado = 'sellado'
     `).run(to, ...ids);
 
     // Log de envío por cada remito (incluyendo reenvíos)
@@ -2358,6 +2359,40 @@ router.patch('/remitos/:id', function(req, res) {
     req.params.id
   );
   res.json({ ok: true });
+});
+
+// ── TEMPORAL (PR1, se saca en PR2) — COUNT read-only de remitos 100% rechazados
+//    que quedaron en 'sellado' antes de la regla auto-presentado. Admin, sin escribir.
+router.get('/_debug-count-rechazados-sellados', function(req, res) {
+  if (!req.user || req.user.rol !== 'admin') return res.status(403).json({ error: 'Solo admin' });
+  try {
+    const cond = "estado='sellado' AND cantidad_rechazada IS NOT NULL AND cantidad_rechazada >= cantidad_despachada AND eliminado_en IS NULL";
+    const n = db.prepare(`SELECT COUNT(*) AS n FROM ifco_remitos_super WHERE ${cond}`).get().n;
+    const muestra = db.prepare(`
+      SELECT id, n_remito_ifco, cantidad_despachada, cantidad_rechazada, rechazo_destino, fecha_sellado
+      FROM ifco_remitos_super WHERE ${cond}
+      ORDER BY fecha_sellado ASC LIMIT 25`).all();
+    res.json({ ok: true, total: n, condicion: cond, muestra });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// PATCH /remitos/:id/seguimiento — marcar/desmarcar seguimiento + nota.
+// A diferencia del PATCH genérico (limitado a 'despachado'), esto corre en CUALQUIER
+// estado (los remitos que se complican suelen estar sellados/enviados).
+router.patch('/remitos/:id/seguimiento', express.json(), function(req, res) {
+  const r = db.prepare("SELECT id, eliminado_en FROM ifco_remitos_super WHERE id = ?").get(req.params.id);
+  if (!r) return res.status(404).json({ error: 'No encontrado' });
+  if (r.eliminado_en) return res.status(400).json({ error: 'Está eliminado. Restauralo primero.' });
+  const d = req.body || {};
+  const seg = (d.seguimiento === 1 || d.seguimiento === true || d.seguimiento === '1') ? 1 : 0;
+  // La nota solo aplica si está marcado; al desmarcar se limpia.
+  const notas = seg ? ((d.seguimiento_notas != null && String(d.seguimiento_notas).trim()) ? String(d.seguimiento_notas).trim() : null) : null;
+  db.prepare(`
+    UPDATE ifco_remitos_super
+    SET seguimiento = ?, seguimiento_notas = ?, actualizado_en = datetime('now','localtime')
+    WHERE id = ?
+  `).run(seg, notas, req.params.id);
+  res.json({ ok: true, seguimiento: seg, seguimiento_notas: notas });
 });
 
 // DELETE /remitos/:id — soft delete (todos)

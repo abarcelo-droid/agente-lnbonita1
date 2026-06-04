@@ -8,7 +8,7 @@
 (function () {
   'use strict';
   var API = '/api/ifco';
-  var st = { view: null, resumen: null, provNombre: {}, search: '00015-01', despEstado: '' };
+  var st = { view: null, resumen: null, provNombre: {}, search: '00015-01', despEstado: '', soloSeguimiento: false };
 
   // ---------- helpers ----------
   function fetchJSON(url, opts) {
@@ -59,7 +59,8 @@
       rech: (r.cantidad_rechazada == null ? null : r.cantidad_rechazada),
       origen: r.origen || 'san_geronimo', prov: r.proveedor_origen_nombre || null,
       estado: r.estado, sell: r.fecha_sellado, env: r.fecha_enviado, pres: r.fecha_presentado,
-      rdest: r.rechazo_destino, usuario: r.usuario_creador_nombre || '', dias: diasDesde(r.fecha_emision)
+      rdest: r.rechazo_destino, usuario: r.usuario_creador_nombre || '', dias: diasDesde(r.fecha_emision),
+      seg: r.seguimiento ? 1 : 0, segNota: r.seguimiento_notas || ''
     };
   }
 
@@ -180,6 +181,7 @@
     var qs = new URLSearchParams();
     if (st.search) qs.set('search', st.search);
     if (st.despEstado) qs.set('estado', st.despEstado);
+    if (st.soloSeguimiento) qs.set('seguimiento', '1');
     return fetchJSON(API + '/remitos?' + qs.toString()).then(function (rows) {
       var R = (rows || []).map(mapRemito);
       var cnt = function (e) { return R.filter(function (r) { return r.estado === e; }).length; };
@@ -190,6 +192,9 @@
 
       var segDefs = [['', 'Todos', R.length], ['despachado', 'Despachados', cnt('despachado')], ['sellado', 'Sellados', cnt('sellado')], ['enviado', 'Enviados', cnt('enviado')], ['presentado', 'Presentados', cnt('presentado')], ['anulado', 'Anulados', cnt('anulado')]];
       var segs = segDefs.map(function (s2) { return '<button class="' + (st.despEstado === s2[0] ? 'on' : '') + '" onclick="__ifco2Seg(\'' + s2[0] + '\')">' + s2[1] + '<span class="n">' + s2[2] + '</span></button>'; }).join('');
+      // Toggle "Seguimiento" (filtra ?seguimiento=1). Cuenta = remitos marcados en la vista actual.
+      var nSeg = R.filter(function (r) { return r.seg; }).length;
+      segs += '<button class="' + (st.soloSeguimiento ? 'on' : '') + '" style="color:#b45309" onclick="__ifco2SegV(\'soloSeguimiento\',\'despachos\',' + (st.soloSeguimiento ? 'false' : 'true') + ')">🚩 Seguimiento<span class="n">' + nSeg + '</span></button>';
 
       var rowsHtml = R.length ? R.map(function (r) {
         var dchip = (r.estado === 'despachado') ? diasChip(r.dias, 15, 30) : (r.estado === 'sellado') ? diasChip(r.dias, 20, 25) : '<span class="dias ok">' + r.dias + '&thinsp;d</span>';
@@ -199,8 +204,10 @@
             : '<span class="cj-sub"><span class="cj-lbl">rec.</span> ' + nf(r.rec) + '<i data-lucide="check" class="cj-ok"></i></span>');
         var act = (r.estado === 'despachado') ? '<button class="btn btn-gold btn-sm" onclick="event.stopPropagation();__ifco2Reuse(\'ifcoAbrirCargarSellado\')">' + ic('stamp') + ' Sellar</button>'
           : (r.estado === 'sellado') ? '<button class="btn btn-pri btn-sm" onclick="event.stopPropagation();__ifco2Open(' + r.id + ')">' + ic('send') + ' Enviar</button>' : '';
-        return '<tr data-rid="' + r.id + '" onclick="__ifco2Open(' + r.id + ')">'
-          + '<td class="mono lead">' + esc((r.ifco.split('-')[1] || r.ifco)) + '</td>'
+        var segTr = r.seg ? ' style="background:#fffbeb;box-shadow:inset 3px 0 0 #f59e0b"' : '';
+        var segFlag = r.seg ? ' <span title="' + esc(r.segNota || 'En seguimiento') + '" style="cursor:help">🚩</span>' : '';
+        return '<tr data-rid="' + r.id + '"' + segTr + ' onclick="__ifco2Open(' + r.id + ')">'
+          + '<td class="mono lead">' + esc((r.ifco.split('-')[1] || r.ifco)) + segFlag + '</td>'
           + '<td><div class="lead">' + esc(cadenaCorta(r.cadena)) + '</div>' + origenSub + '</td>'
           + '<td>' + fdate(r.emi) + '</td>'
           + '<td class="r"><div class="cj-cell"><span class="cj-desp">' + nf(r.desp) + '<span class="cj-u">desp.</span></span>' + cuadre + '</div></td>'
@@ -255,9 +262,10 @@
     }).join('');
     var destino = r.rdest === 'proveedor' ? 'Proveedor de origen' : (r.rdest === 'san_geronimo' ? 'Piso San Gerónimo' : '—');
     var origen = r.origen === 'proveedor_directo' ? ('Directo · ' + (r.prov || '')) : 'San Gerónimo';
-    var accion = { despachado: ic('stamp') + ' Registrar sellado', sellado: ic('send') + ' Presentar a IFCO', enviado: ic('send') + ' Presentar a IFCO', presentado: ic('check') + ' Cadena completa', anulado: ic('ban') + ' Remito anulado' }[r.estado] || '';
-    // despachado → cargar sellado (app/OCR); sellado/enviado → flujo "Presentar a IFCO" (mail a ifco@)
-    var accionFn = r.estado === 'despachado' ? 'ifcoAbrirCargarSellado' : ((r.estado === 'sellado' || r.estado === 'enviado') ? 'ifcoAbrirPresentar' : null);
+    var accion = { despachado: ic('stamp') + ' Registrar sellado', sellado: ic('send') + ' Presentar a IFCO', enviado: ic('clock') + ' Enviado — esperando IFCO', presentado: ic('check') + ' Cadena completa', anulado: ic('ban') + ' Remito anulado' }[r.estado] || '';
+    // despachado → cargar sellado (app/OCR); SOLO sellado → flujo "Presentar a IFCO" (mail a ifco@).
+    // 'enviado' ya no se re-envía (revertido #242): llega a presentado por la confirmación de IFCO.
+    var accionFn = r.estado === 'despachado' ? 'ifcoAbrirCargarSellado' : (r.estado === 'sellado' ? 'ifcoAbrirPresentar' : null);
     var puedeAccion = !!accionFn;
     return '<div class="detail"><div class="d-head"><div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px">'
       + '<div><div class="dn">' + esc(r.ifco) + '</div><div class="dm">' + ic('store') + ' ' + esc(cadenaCorta(r.cadena)) + ' · ' + esc(r.suc) + '</div></div>'
@@ -663,8 +671,47 @@
   window.__ifco2MenuDespacho = function (ev, id, ref, estado) {
     __ifco2Menu(ev, [
       { label: 'Editar', icon: 'pencil', disabled: estado !== 'despachado', onClick: function () { legacyCall('ifcoAbrirEditarRemito', id); } },
+      { label: 'Seguimiento', icon: 'flag', onClick: function () { __ifco2Seguimiento(id, ref); } },
       { label: 'Eliminar', icon: 'trash-2', danger: true, onClick: function () { __ifco2SoftDelete('remitos', id, ref, 'despachos'); } }
     ]);
+  };
+
+  // Modal de seguimiento: marca/desmarca un remito y guarda una nota (el por qué).
+  // Funciona en cualquier estado. Prefilea con el detalle actual del remito.
+  window.__ifco2Seguimiento = function (id, ref) {
+    fetchJSON(API + '/remitos/' + id).then(function (r) {
+      r = r || {};
+      var marcado = !!r.seguimiento;
+      var nota = r.seguimiento_notas || '';
+      var ov = document.createElement('div');
+      ov.style.cssText = 'position:fixed;inset:0;background:rgba(11,29,51,.5);display:flex;align-items:center;justify-content:center;z-index:1400;padding:16px;font-family:var(--i-sans,sans-serif)';
+      ov.innerHTML =
+        '<div style="background:#fff;border-radius:12px;max-width:460px;width:100%;padding:22px;box-shadow:0 18px 50px rgba(11,29,51,.3)">'
+        + '<div style="font-size:16px;font-weight:700;color:#16202e;margin-bottom:4px;display:flex;align-items:center;gap:8px">🚩 Seguimiento</div>'
+        + '<div style="font-size:12.5px;color:#5b6b7f;margin-bottom:14px">Remito <b style="font-family:var(--i-mono,monospace)">' + esc(ref || ('#' + id)) + '</b> — marcalo si se complica (sellado u otra cuestión) y dejá el motivo.</div>'
+        + '<label style="display:flex;align-items:center;gap:8px;font-size:13.5px;cursor:pointer;margin-bottom:12px"><input type="checkbox" id="ifco2-seg-chk"' + (marcado ? ' checked' : '') + '> Marcar para seguimiento</label>'
+        + '<textarea id="ifco2-seg-nota" rows="3" placeholder="Motivo / nota (opcional)" style="width:100%;padding:9px 11px;border:1.5px solid #cfd8e3;border-radius:8px;font-family:inherit;font-size:13.5px;box-sizing:border-box;resize:vertical">' + esc(nota) + '</textarea>'
+        + '<div style="display:flex;gap:10px;justify-content:flex-end;margin-top:18px">'
+        + '<button id="ifco2-seg-cancel" style="padding:9px 16px;border:1px solid #cfd8e3;background:#fff;border-radius:8px;cursor:pointer;font-size:13px">Cancelar</button>'
+        + '<button id="ifco2-seg-ok" style="padding:9px 16px;border:0;background:#b45309;color:#fff;border-radius:8px;cursor:pointer;font-weight:600;font-size:13px">Guardar</button>'
+        + '</div></div>';
+      document.body.appendChild(ov);
+      if (window.lucide) lucide.createIcons();
+      function close() { if (ov.parentNode) ov.remove(); }
+      ov.querySelector('#ifco2-seg-cancel').onclick = close;
+      ov.onclick = function (e) { if (e.target === ov) close(); };
+      ov.querySelector('#ifco2-seg-ok').onclick = function () {
+        var seg = ov.querySelector('#ifco2-seg-chk').checked ? 1 : 0;
+        var notas = ov.querySelector('#ifco2-seg-nota').value;
+        fetch(API + '/remitos/' + id + '/seguimiento', {
+          method: 'PATCH', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ seguimiento: seg, seguimiento_notas: notas })
+        }).then(function (rp) { return rp.json().catch(function () { return {}; }); })
+          .then(function (d) { close(); if (d && d.error) toast(d.error, 'er'); else { toast(seg ? 'Marcado para seguimiento' : 'Seguimiento quitado', 'ok'); nav('despachos'); } })
+          .catch(function () { close(); toast('Error de red', 'er'); });
+      };
+      setTimeout(function () { var t = ov.querySelector('#ifco2-seg-nota'); if (t) t.focus(); }, 30);
+    });
   };
   window.__ifco2MenuRecep = function (ev, id, ref) {
     __ifco2Menu(ev, [

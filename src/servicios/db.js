@@ -933,6 +933,15 @@ db.exec(`
       db.exec("ALTER TABLE ifco_remitos_super ADD COLUMN eliminado_por_id INTEGER REFERENCES usuarios(id)");
       console.log("[DB] ifco_remitos_super.eliminado_por_id agregada");
     }
+    // Flag de seguimiento + nota (para remitos que se complican por sellado u otra cuestión)
+    if (!colsRem.includes('seguimiento')) {
+      db.exec("ALTER TABLE ifco_remitos_super ADD COLUMN seguimiento INTEGER DEFAULT 0");
+      console.log("[DB] ifco_remitos_super.seguimiento agregada");
+    }
+    if (!colsRem.includes('seguimiento_notas')) {
+      db.exec("ALTER TABLE ifco_remitos_super ADD COLUMN seguimiento_notas TEXT");
+      console.log("[DB] ifco_remitos_super.seguimiento_notas agregada");
+    }
 
     // ── ifco_envios_proveedor
     const colsEnv = db.prepare("PRAGMA table_info(ifco_envios_proveedor)").all().map(c => c.name);
