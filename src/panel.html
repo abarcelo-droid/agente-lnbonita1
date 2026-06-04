@@ -24234,10 +24234,8 @@ async function ifcoAbrirPresentar() {
     if (elInfo) elInfo.innerHTML = '';
     if (elAdj) elAdj.innerHTML = '';
 
-    // Pedimos sellados y enviados juntos (los enviados van como reenvío)
-    const rowsSel = await _ifcoFetch('/api/ifco/remitos?estado=sellado');
-    const rowsEnv = await _ifcoFetch('/api/ifco/remitos?estado=enviado');
-    const rows = (rowsSel || []).concat(rowsEnv || []);
+    // Solo sellados se presentan a IFCO (los 'enviado' ya no se re-envían).
+    const rows = (await _ifcoFetch('/api/ifco/remitos?estado=sellado')) || [];
     const lista = document.getElementById('ifco-presentar-lista');
     if (rows.length === 0) {
       lista.innerHTML = '<div style="padding:20px;text-align:center;color:var(--mut)">No hay remitos pendientes de presentar</div>';
