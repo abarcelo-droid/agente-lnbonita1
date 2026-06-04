@@ -259,6 +259,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   <div class="ni" data-sec="personal-valorizar" data-admin-only="1"><span class="dot dc"></span>💰 Por valorizar</div>
   <div class="ni" data-sec="personal-cc" data-admin-only="1"><span class="dot dd"></span>📒 Cuenta Corriente</div>
   <div class="ni" data-sec="personal-catalogo" data-admin-only="1"><span class="dot da"></span>📚 Catálogo</div>
+  <div class="ni" data-sec="personal-tarifas" data-admin-only="1"><span class="dot dc"></span>💵 Tarifas</div>
   <div class="ni" data-sec="personal-reportes" data-admin-only="1"><span class="dot de"></span>📈 Reportes</div>
 
   <div class="ng" style="margin-top:8px">Abasto SG</div>
@@ -4060,7 +4061,6 @@ function sgRepExport(){
     <div class="pp-subtab" data-sub="cuadrillas" onclick="ppShowSub('cuadrillas')">🚜 Cuadrillas</div>
     <div class="pp-subtab" data-sub="rubros" onclick="ppShowSub('rubros')">📊 Rubros</div>
     <div class="pp-subtab" data-sub="tareas-rubros" id="pp-tab-tareas-rubros" onclick="ppShowSub('tareas-rubros')">🏷️ Tareas / Rubros</div>
-    <div class="pp-subtab" data-sub="tarifas-rol" id="pp-tab-tarifas-rol" onclick="ppShowSub('tarifas-rol')">💵 Tarifas por rol</div>
     <div class="pp-subtab" data-sub="permisos" id="pp-tab-permisos" onclick="ppShowSub('permisos')">⚙️ Permisos</div>
   </div>
   <div class="pp-sub on" id="pp-sub-grupos">
@@ -4121,7 +4121,12 @@ function sgRepExport(){
       <tbody id="pp-tareas-tbody"></tbody>
     </table></div>
   </div>
-  <div class="pp-sub" id="pp-sub-tarifas-rol">
+</div>
+
+<!-- Tarifas (módulo propio, fuera de Catálogo: la operadora de jornales no debe ver tarifas) -->
+<div class="sec pp-mod" id="sec-personal-tarifas">
+  <div class="ph"><div><div class="ph-t">💵 Tarifas</div><div class="ph-s">Tarifas genéricas de mano de obra ($/jornal por rol)</div></div></div>
+  <div class="pp-sub on" id="pp-sub-tarifas-rol">
     <div style="margin-bottom:12px;font-size:12px;color:var(--mut)">
       Tarifa <strong>$/jornal por rol</strong> para la mano de obra individual/grupal. El costo de la
       asistencia se resuelve solo: <strong>jornales × tarifa del rol</strong>. (Las cuadrillas tienen su
@@ -4846,7 +4851,8 @@ function sgRepExport(){
       <div class="ph-s">Maestro contable. Las cuentas con 🔒 son del sistema y no se pueden desactivar</div>
     </div>
     <div style="display:flex;gap:8px">
-      <button class="btn bb" onclick="paCuAbrirNuevaCuenta()">+ Nueva cuenta</button>
+      <button class="btn bb" onclick="paCuAbrirNuevaCuenta()">+ Cuenta</button>
+      <button class="btn bo" onclick="paCuAbrirNuevoTitulo()">+ Título</button>
       <button class="btn bo" onclick="paCuAbrirNuevaSeccion()">+ Sección</button>
       <button class="btn bo" onclick="paCuAbrirLogGeneral()">📜 Ver log</button>
     </div>
@@ -8665,6 +8671,7 @@ function loadSec(s) {
     'personal-valorizar':  function(){ ppOpenModulo('valorizar'); },
     'personal-cc':         function(){ ppOpenModulo('cc'); },
     'personal-catalogo':   function(){ ppOpenModulo('grupos'); },
+    'personal-tarifas':    function(){ ppOpenModulo('tarifas-rol'); },
     'personal-reportes':   function(){ ppOpenModulo('reportes'); }
   };
   if (m[s]) m[s]();
@@ -14031,10 +14038,15 @@ if(_inpGondola) _inpGondola.addEventListener('keydown', function(e){
   <input type="hidden" id="pa-cu-id">
   <div class="fg">
     <div class="fl ff"><label>Sección <span style="color:var(--err)">*</span></label>
-      <select id="pa-cu-seccion" onchange="paCuSugerirCodigo()"></select>
+      <select id="pa-cu-seccion" onchange="paCuOnSeccionChange()"></select>
     </div>
-    <div class="fl"><label>Código <span style="color:var(--err)">*</span></label>
-      <input id="pa-cu-codigo" placeholder="1.05">
+    <div class="fl ff"><label>Título <span style="color:var(--mut);font-size:11px">(organiza cuentas dentro de la sección)</span></label>
+      <select id="pa-cu-titulo">
+        <option value="">— Sin título —</option>
+      </select>
+    </div>
+    <div class="fl"><label>Código <span style="color:var(--err)">*</span> <span style="color:var(--mut);font-size:10px">formato X.XX.XX.XXXX</span></label>
+      <input id="pa-cu-codigo" placeholder="1.01.01.0001">
       <div id="pa-cu-codigo-sug" style="font-size:10px;color:var(--mut);margin-top:3px"></div>
     </div>
     <div class="fl ff"><label>Nombre <span style="color:var(--err)">*</span></label>
@@ -14072,8 +14084,8 @@ if(_inpGondola) _inpGondola.addEventListener('keydown', function(e){
   <div class="mhd"><div class="mht" id="pa-cu-sec-modal-tit">Nueva sección</div><button class="mcl" onclick="document.getElementById('pa-mb-seccion').classList.remove('on')">×</button></div>
   <input type="hidden" id="pa-cu-sec-id">
   <div class="fg">
-    <div class="fl"><label>Código <span style="color:var(--err)">*</span></label>
-      <input type="number" id="pa-cu-sec-codigo" min="1">
+    <div class="fl"><label>Código <span style="color:var(--err)">*</span> <span style="color:var(--mut);font-size:10px">formato X.XX</span></label>
+      <input id="pa-cu-sec-codigo" placeholder="1.08">
     </div>
     <div class="fl ff"><label>Nombre <span style="color:var(--err)">*</span></label>
       <input id="pa-cu-sec-nombre" placeholder="Ej: COSTOS DE PRODUCCION">
@@ -14082,6 +14094,32 @@ if(_inpGondola) _inpGondola.addEventListener('keydown', function(e){
   <div class="ab-modal-footer">
     <button class="btn bo" onclick="document.getElementById('pa-mb-seccion').classList.remove('on')">Cancelar</button>
     <button class="btn bb" onclick="paCuGuardarSeccion()">Guardar</button>
+  </div>
+</div></div>
+
+<!-- Modal Título -->
+<div class="ab-modal-overlay" id="pa-mb-titulo">
+<div class="ab-modal" style="width:460px">
+  <div class="mhd"><div class="mht" id="pa-cu-tit-modal-tit">Nuevo título</div><button class="mcl" onclick="document.getElementById('pa-mb-titulo').classList.remove('on')">×</button></div>
+  <input type="hidden" id="pa-cu-tit-id">
+  <div class="fg">
+    <div class="fl ff"><label>Sección <span style="color:var(--err)">*</span></label>
+      <select id="pa-cu-tit-seccion" onchange="paCuTitSugerirCodigo()"></select>
+    </div>
+    <div class="fl"><label>Código <span style="color:var(--err)">*</span> <span style="color:var(--mut);font-size:10px">formato X.XX.XX</span></label>
+      <input id="pa-cu-tit-codigo" placeholder="1.01.03">
+      <div id="pa-cu-tit-codigo-sug" style="font-size:10px;color:var(--mut);margin-top:3px"></div>
+    </div>
+    <div class="fl ff"><label>Nombre <span style="color:var(--err)">*</span></label>
+      <input id="pa-cu-tit-nombre" placeholder="Ej: Caja y Efectivo">
+    </div>
+    <div style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:6px;padding:8px 10px;font-size:12px;color:#0369a1;margin-top:4px">
+      ℹ️ Los títulos agrupan cuentas dentro de una sección. <strong>No son imputables</strong> (no se pueden usar en asientos).
+    </div>
+  </div>
+  <div class="ab-modal-footer">
+    <button class="btn bo" onclick="document.getElementById('pa-mb-titulo').classList.remove('on')">Cancelar</button>
+    <button class="btn bb" onclick="paCuGuardarTitulo()">Guardar</button>
   </div>
 </div></div>
 
@@ -21588,7 +21626,7 @@ function paCalRenderMapaCore() {
 // ═════════════════════════════════════════════════════════════════════
 // 📊 PLAN DE CUENTAS — Maestro contable
 // ═════════════════════════════════════════════════════════════════════
-var PACU = { secciones: [], cuentas: [] };
+var PACU = { secciones: [], titulos: [], cuentas: [] };
 
 function paCuLoad() {
   // Cargar secciones (siempre, incluyendo inactivas para selectores)
@@ -21603,17 +21641,22 @@ function paCuLoad() {
       fil.value = actual;
     }
 
-    // Cargar cuentas con filtros actuales
-    var q = (document.getElementById('pa-cu-busc') || {}).value || '';
-    var secId = (document.getElementById('pa-cu-sec-fil') || {}).value || '';
-    var verInact = (document.getElementById('pa-cu-ver-inact') || {}).checked ? '1' : '0';
-    var qs = [];
-    if (q) qs.push('q=' + encodeURIComponent(q));
-    if (secId) qs.push('seccion_id=' + encodeURIComponent(secId));
-    if (verInact === '1') qs.push('incluir_inactivas=1');
-    paF('/api/pa/cuentas' + (qs.length ? '?' + qs.join('&') : '')).then(function(rc){
-      PACU.cuentas = rc.data || [];
-      paCuRender();
+    // Cargar títulos
+    paF('/api/pa/cuentas/titulos?incluir_inactivos=1').then(function(rt){
+      PACU.titulos = (rt.data || []);
+
+      // Cargar cuentas con filtros actuales
+      var q = (document.getElementById('pa-cu-busc') || {}).value || '';
+      var secId = (document.getElementById('pa-cu-sec-fil') || {}).value || '';
+      var verInact = (document.getElementById('pa-cu-ver-inact') || {}).checked ? '1' : '0';
+      var qs = [];
+      if (q) qs.push('q=' + encodeURIComponent(q));
+      if (secId) qs.push('seccion_id=' + encodeURIComponent(secId));
+      if (verInact === '1') qs.push('incluir_inactivas=1');
+      paF('/api/pa/cuentas' + (qs.length ? '?' + qs.join('&') : '')).then(function(rc){
+        PACU.cuentas = rc.data || [];
+        paCuRender();
+      });
     });
   });
 }
@@ -21621,30 +21664,89 @@ function paCuLoad() {
 function paCuRender() {
   var cont = document.getElementById('pa-cu-lista');
   if (!cont) return;
-  if (!PACU.cuentas.length) {
-    cont.innerHTML = '<div class="emp" style="padding:32px;text-align:center">Sin resultados</div>';
-    return;
-  }
-  // Agrupar por sección
+
+  // Agrupar cuentas por sección
   var porSec = {};
   PACU.cuentas.forEach(function(c){
     if (!porSec[c.seccion_id]) porSec[c.seccion_id] = { sec: { id:c.seccion_id, codigo:c.seccion_codigo, nombre:c.seccion_nombre }, cuentas: [] };
     porSec[c.seccion_id].cuentas.push(c);
   });
-  var grupos = Object.values(porSec).sort(function(a,b){ return a.sec.codigo - b.sec.codigo; });
+
+  // Incluir secciones que tienen títulos aunque no tengan cuentas visibles
+  PACU.titulos.filter(function(t){return t.activo;}).forEach(function(t){
+    if (!porSec[t.seccion_id]) {
+      var sec = PACU.secciones.find(function(s){return s.id === t.seccion_id;});
+      if (sec) porSec[t.seccion_id] = { sec: sec, cuentas: [] };
+    }
+  });
+
+  var grupos = Object.values(porSec).sort(function(a,b){ return String(a.sec.codigo).localeCompare(String(b.sec.codigo)); });
+
+  if (!grupos.length) {
+    cont.innerHTML = '<div class="emp" style="padding:32px;text-align:center">Sin resultados</div>';
+    return;
+  }
 
   cont.innerHTML = grupos.map(function(g){
+    // Títulos de esta sección
+    var titsSec = PACU.titulos.filter(function(t){return t.seccion_id === g.sec.id;}).sort(function(a,b){return a.codigo.localeCompare(b.codigo);});
+
+    // Cuentas sin título (legacy o sin asignar)
+    var cuentasSinTit = g.cuentas.filter(function(c){return !c.titulo_id;});
+
+    // Armar HTML de filas de cuentas
+    function filaCuenta(c) {
+      return '<tr style="'+(c.activo?'':'opacity:.5')+'">' +
+        '<td style="font-family:monospace;font-size:12px;padding-left:32px">'+c.codigo+'</td>' +
+        '<td>'+c.nombre +
+          (c.es_sistema ? ' <span title="Cuenta del sistema" style="color:#b88600">🔒</span>' : '') +
+          (c.activo ? '' : ' <span style="color:var(--mut);font-style:italic;font-size:11px">(desactivada)</span>') +
+        '</td>' +
+        '<td style="text-align:center">'+(c.permite_lote?'✓':'—')+'</td>' +
+        '<td style="text-align:center">'+(c.permite_campania?'✓':'—')+'</td>' +
+        '<td style="text-align:center;font-size:11px;color:var(--mut)">'+(c.tipo==='resultado'?'ER':'Patr.')+'</td>' +
+        '<td style="text-align:right;white-space:nowrap">' +
+          '<button class="btn bo" style="padding:3px 7px;font-size:11px" onclick="paCuMover('+c.id+',\'arriba\')" title="Subir">⬆</button> ' +
+          '<button class="btn bo" style="padding:3px 7px;font-size:11px" onclick="paCuMover('+c.id+',\'abajo\')" title="Bajar">⬇</button> ' +
+          '<button class="btn bo" style="padding:3px 7px;font-size:11px" onclick="paCuEditarCuenta('+c.id+')" title="Editar">✏️</button> ' +
+          '<button class="btn bo" style="padding:3px 7px;font-size:11px" onclick="paCuVerLog('+c.id+')" title="Ver log">📜</button> ' +
+          (c.activo
+            ? '<button class="btn bo" style="padding:3px 7px;font-size:11px" onclick="paCuDesactivarCuenta('+c.id+','+(c.es_sistema?1:0)+')" title="Desactivar">🗑</button>'
+            : '<button class="btn bb" style="padding:3px 7px;font-size:11px" onclick="paCuReactivarCuenta('+c.id+')" title="Reactivar">↺</button>'
+          ) +
+        '</td>' +
+      '</tr>';
+    }
+
+    function filaTitulo(t) {
+      var cuentasTit = g.cuentas.filter(function(c){return c.titulo_id === t.id;});
+      var filasTit = cuentasTit.map(filaCuenta).join('');
+      return '<tr style="background:#f8fafc;'+(t.activo?'':'opacity:.5')+'">' +
+        '<td colspan="5" style="padding:7px 14px 7px 20px;font-weight:600;font-size:12px;color:#334155;letter-spacing:.3px">' +
+          '<span style="color:#64748b;margin-right:6px">▸</span>' +
+          t.codigo + ' — ' + t.nombre +
+          (t.activo ? '' : ' <span style="color:var(--mut);font-style:italic;font-size:11px;font-weight:normal">(desactivado)</span>') +
+        '</td>' +
+        '<td style="text-align:right;white-space:nowrap;padding-right:8px">' +
+          '<button class="btn bo" style="padding:3px 7px;font-size:10px" onclick="paCuAbrirNuevaCuentaEnTitulo('+g.sec.id+','+t.id+')" title="Nueva cuenta en este título">+ Cuenta</button> ' +
+          '<button class="btn bo" style="padding:3px 7px;font-size:11px" onclick="paCuEditarTitulo('+t.id+')" title="Editar título">✏️</button> ' +
+          '<button class="btn bo" style="padding:3px 7px;font-size:11px" onclick="paCuEliminarTitulo('+t.id+')" title="Desactivar título">🗑</button>' +
+        '</td>' +
+      '</tr>' + filasTit;
+    }
+
     return '<div class="pa-wrap" style="margin-bottom:16px">' +
       '<div style="background:#f0d9da;padding:10px 14px;display:flex;justify-content:space-between;align-items:center">' +
         '<strong style="color:var(--burg);font-size:14px">'+g.sec.codigo+' — '+g.sec.nombre+'</strong>' +
         '<div style="display:flex;gap:6px">' +
+          '<button class="btn bo" style="padding:4px 9px;font-size:11px" onclick="paCuAbrirNuevoTituloEnSeccion('+g.sec.id+')">+ Título</button>' +
           '<button class="btn bo" style="padding:4px 9px;font-size:11px" onclick="paCuEditarSeccion('+g.sec.id+')">✏️</button>' +
           '<button class="btn bo" style="padding:4px 9px;font-size:11px" onclick="paCuEliminarSeccion('+g.sec.id+')">🗑</button>' +
         '</div>' +
       '</div>' +
       '<div class="ab-table-wrap"><table class="pa-tbl">' +
         '<thead><tr>' +
-          '<th style="width:80px">Código</th>' +
+          '<th style="width:130px">Código</th>' +
           '<th>Nombre</th>' +
           '<th style="width:60px;text-align:center">Lote</th>' +
           '<th style="width:80px;text-align:center">Campaña</th>' +
@@ -21652,28 +21754,11 @@ function paCuRender() {
           '<th style="width:230px;text-align:right">Acciones</th>' +
         '</tr></thead>' +
         '<tbody>' +
-          g.cuentas.map(function(c){
-            return '<tr style="'+(c.activo?'':'opacity:.5')+'">' +
-              '<td style="font-family:monospace;font-size:12px">'+c.codigo+'</td>' +
-              '<td>'+c.nombre +
-                (c.es_sistema ? ' <span title="Cuenta del sistema" style="color:#b88600">🔒</span>' : '') +
-                (c.activo ? '' : ' <span style="color:var(--mut);font-style:italic;font-size:11px">(desactivada)</span>') +
-              '</td>' +
-              '<td style="text-align:center">'+(c.permite_lote?'✓':'—')+'</td>' +
-              '<td style="text-align:center">'+(c.permite_campania?'✓':'—')+'</td>' +
-              '<td style="text-align:center;font-size:11px;color:var(--mut)">'+(c.tipo==='resultado'?'ER':'Patr.')+'</td>' +
-              '<td style="text-align:right;white-space:nowrap">' +
-                '<button class="btn bo" style="padding:3px 7px;font-size:11px" onclick="paCuMover('+c.id+',\'arriba\')" title="Subir">⬆</button> ' +
-                '<button class="btn bo" style="padding:3px 7px;font-size:11px" onclick="paCuMover('+c.id+',\'abajo\')" title="Bajar">⬇</button> ' +
-                '<button class="btn bo" style="padding:3px 7px;font-size:11px" onclick="paCuEditarCuenta('+c.id+')" title="Editar">✏️</button> ' +
-                '<button class="btn bo" style="padding:3px 7px;font-size:11px" onclick="paCuVerLog('+c.id+')" title="Ver log">📜</button> ' +
-                (c.activo
-                  ? '<button class="btn bo" style="padding:3px 7px;font-size:11px" onclick="paCuDesactivarCuenta('+c.id+','+(c.es_sistema?1:0)+')" title="Desactivar">🗑</button>'
-                  : '<button class="btn bb" style="padding:3px 7px;font-size:11px" onclick="paCuReactivarCuenta('+c.id+')" title="Reactivar">↺</button>'
-                ) +
-              '</td>' +
-            '</tr>';
-          }).join('') +
+          titsSec.map(filaTitulo).join('') +
+          (cuentasSinTit.length ? (
+            '<tr style="background:#fafafa"><td colspan="6" style="padding:5px 14px;font-size:11px;color:var(--mut);font-style:italic">Sin título asignado</td></tr>' +
+            cuentasSinTit.map(filaCuenta).join('')
+          ) : '') +
         '</tbody>' +
       '</table></div>' +
     '</div>';
@@ -21682,6 +21767,10 @@ function paCuRender() {
 
 // ── Modal cuenta ────────────────────────────────────────────────────
 function paCuAbrirNuevaCuenta() {
+  paCuAbrirNuevaCuentaEnTitulo(null, null);
+}
+
+function paCuAbrirNuevaCuentaEnTitulo(seccionId, tituloId) {
   document.getElementById('pa-cu-id').value = '';
   document.getElementById('pa-cu-modal-tit').textContent = 'Nueva cuenta';
   document.getElementById('pa-cu-codigo').value = '';
@@ -21694,26 +21783,59 @@ function paCuAbrirNuevaCuenta() {
   // Poblar select secciones (solo activas)
   var sel = document.getElementById('pa-cu-seccion');
   sel.innerHTML = PACU.secciones.filter(function(s){return s.activo;})
-    .map(function(s){return '<option value="'+s.id+'">'+s.codigo+' — '+s.nombre+'</option>';}).join('');
+    .map(function(s){return '<option value="'+s.id+'"'+(s.id===seccionId?' selected':'')+'>'+s.codigo+' — '+s.nombre+'</option>';}).join('');
+  // Poblar títulos según sección
+  paCuPoblarTitulosModal(seccionId, tituloId);
   paCuSugerirCodigo();
   document.getElementById('pa-mb-cuenta').classList.add('on');
 }
 
+function paCuPoblarTitulosModal(seccionId, tituloIdSeleccionado) {
+  var sId = seccionId || parseInt((document.getElementById('pa-cu-seccion')||{}).value, 10);
+  var titsSec = PACU.titulos.filter(function(t){return t.seccion_id === sId && t.activo;});
+  var sel = document.getElementById('pa-cu-titulo');
+  if (!sel) return;
+  sel.innerHTML = '<option value="">— Sin título —</option>' +
+    titsSec.map(function(t){return '<option value="'+t.id+'"'+(t.id===tituloIdSeleccionado?' selected':'')+'>'+t.codigo+' — '+t.nombre+'</option>';}).join('');
+}
+
+function paCuOnSeccionChange() {
+  paCuPoblarTitulosModal(parseInt(document.getElementById('pa-cu-seccion').value, 10), null);
+  paCuSugerirCodigo();
+}
+
 function paCuSugerirCodigo() {
-  var sId = parseInt(document.getElementById('pa-cu-seccion').value, 10);
+  var sId = parseInt((document.getElementById('pa-cu-seccion')||{}).value, 10);
+  var titId = parseInt((document.getElementById('pa-cu-titulo')||{}).value, 10);
   if (!sId) return;
   var sec = PACU.secciones.find(function(s){return s.id === sId;});
   if (!sec) return;
-  var cuentasSec = PACU.cuentas.filter(function(c){return c.seccion_id === sId;});
-  var max = 0;
-  cuentasSec.forEach(function(c){
-    var sub = parseInt(String(c.codigo).split('.')[1], 10);
-    if (sub > max) max = sub;
-  });
-  var sub = String(max + 5).padStart(2, '0');
-  var sugerido = sec.codigo + '.' + sub;
-  document.getElementById('pa-cu-codigo-sug').textContent = 'Sugerido: ' + sugerido;
-  // Auto-completar solo si es nueva cuenta (no editar)
+
+  var sugerido = '';
+  if (titId) {
+    // Sugerir dentro del título: X.XX.XX.XXXX
+    var tit = PACU.titulos.find(function(t){return t.id === titId;});
+    if (tit) {
+      var cuentasTit = PACU.cuentas.filter(function(c){return c.titulo_id === titId;});
+      var max = 0;
+      cuentasTit.forEach(function(c){
+        var partes = String(c.codigo).split('.');
+        var ult = parseInt(partes[partes.length-1], 10);
+        if (ult > max) max = ult;
+      });
+      sugerido = tit.codigo + '.' + String(max + 1).padStart(4, '0');
+    }
+  } else {
+    // Sin título: sugerir X.XX.NN (legacy)
+    var cuentasSec = PACU.cuentas.filter(function(c){return c.seccion_id === sId && !c.titulo_id;});
+    var max2 = 0;
+    cuentasSec.forEach(function(c){
+      var sub = parseInt(String(c.codigo).split('.')[1], 10);
+      if (sub > max2) max2 = sub;
+    });
+    sugerido = sec.codigo + '.' + String(max2 + 5).padStart(2, '0');
+  }
+  document.getElementById('pa-cu-codigo-sug').textContent = sugerido ? 'Sugerido: ' + sugerido : '';
   if (!document.getElementById('pa-cu-id').value) {
     document.getElementById('pa-cu-codigo').value = sugerido;
   }
@@ -21728,6 +21850,7 @@ function paCuEditarCuenta(id) {
     var sel = document.getElementById('pa-cu-seccion');
     sel.innerHTML = PACU.secciones.filter(function(s){return s.activo;})
       .map(function(s){return '<option value="'+s.id+'"'+(s.id===c.seccion_id?' selected':'')+'>'+s.codigo+' — '+s.nombre+'</option>';}).join('');
+    paCuPoblarTitulosModal(c.seccion_id, c.titulo_id);
     document.getElementById('pa-cu-codigo').value = c.codigo;
     document.getElementById('pa-cu-codigo').disabled = false;
     document.getElementById('pa-cu-nombre').value = c.nombre;
@@ -21742,10 +21865,12 @@ function paCuEditarCuenta(id) {
 
 function paCuGuardarCuenta() {
   var id = document.getElementById('pa-cu-id').value;
+  var titVal = document.getElementById('pa-cu-titulo').value;
   var body = {
     codigo: document.getElementById('pa-cu-codigo').value.trim(),
     nombre: document.getElementById('pa-cu-nombre').value.trim(),
     seccion_id: parseInt(document.getElementById('pa-cu-seccion').value, 10),
+    titulo_id: titVal ? parseInt(titVal, 10) : null,
     tipo: document.getElementById('pa-cu-tipo').value,
     permite_lote: document.getElementById('pa-cu-permite-lote').checked ? 1 : 0,
     permite_campania: document.getElementById('pa-cu-permite-camp').checked ? 1 : 0,
@@ -21800,8 +21925,7 @@ function paCuMover(id, direccion) {
 function paCuAbrirNuevaSeccion() {
   document.getElementById('pa-cu-sec-id').value = '';
   document.getElementById('pa-cu-sec-modal-tit').textContent = 'Nueva sección';
-  var max = PACU.secciones.reduce(function(m, s){ return Math.max(m, s.codigo); }, 0);
-  document.getElementById('pa-cu-sec-codigo').value = max + 1;
+  document.getElementById('pa-cu-sec-codigo').value = '';
   document.getElementById('pa-cu-sec-nombre').value = '';
   document.getElementById('pa-mb-seccion').classList.add('on');
 }
@@ -21819,7 +21943,7 @@ function paCuEditarSeccion(id) {
 function paCuGuardarSeccion() {
   var id = document.getElementById('pa-cu-sec-id').value;
   var body = {
-    codigo: parseInt(document.getElementById('pa-cu-sec-codigo').value, 10),
+    codigo: document.getElementById('pa-cu-sec-codigo').value.trim(),
     nombre: document.getElementById('pa-cu-sec-nombre').value.trim(),
   };
   if (!body.codigo || !body.nombre) {
@@ -21844,6 +21968,89 @@ function paCuEliminarSeccion(id) {
   paF('/api/pa/cuentas/secciones/' + id, { method: 'DELETE' }).then(function(r){
     if (!r.ok) { toast(r.error || 'Error', 'err'); return; }
     toast('✓ Desactivada', 'ok');
+    paCuLoad();
+  });
+}
+
+// ── Modal título ─────────────────────────────────────────────────────
+function paCuAbrirNuevoTitulo() {
+  paCuAbrirNuevoTituloEnSeccion(null);
+}
+
+function paCuAbrirNuevoTituloEnSeccion(seccionId) {
+  document.getElementById('pa-cu-tit-id').value = '';
+  document.getElementById('pa-cu-tit-modal-tit').textContent = 'Nuevo título';
+  document.getElementById('pa-cu-tit-codigo').value = '';
+  document.getElementById('pa-cu-tit-nombre').value = '';
+  var sel = document.getElementById('pa-cu-tit-seccion');
+  sel.innerHTML = PACU.secciones.filter(function(s){return s.activo;})
+    .map(function(s){return '<option value="'+s.id+'"'+(s.id===seccionId?' selected':'')+'>'+s.codigo+' — '+s.nombre+'</option>';}).join('');
+  paCuTitSugerirCodigo();
+  document.getElementById('pa-mb-titulo').classList.add('on');
+}
+
+function paCuEditarTitulo(id) {
+  var t = PACU.titulos.find(function(x){return x.id === id;});
+  if (!t) return;
+  document.getElementById('pa-cu-tit-id').value = t.id;
+  document.getElementById('pa-cu-tit-modal-tit').textContent = 'Editar título ' + t.codigo;
+  var sel = document.getElementById('pa-cu-tit-seccion');
+  sel.innerHTML = PACU.secciones.filter(function(s){return s.activo;})
+    .map(function(s){return '<option value="'+s.id+'"'+(s.id===t.seccion_id?' selected':'')+'>'+s.codigo+' — '+s.nombre+'</option>';}).join('');
+  document.getElementById('pa-cu-tit-codigo').value = t.codigo;
+  document.getElementById('pa-cu-tit-nombre').value = t.nombre;
+  document.getElementById('pa-cu-tit-codigo-sug').textContent = '';
+  document.getElementById('pa-mb-titulo').classList.add('on');
+}
+
+function paCuTitSugerirCodigo() {
+  var sId = parseInt((document.getElementById('pa-cu-tit-seccion')||{}).value, 10);
+  if (!sId) return;
+  var sec = PACU.secciones.find(function(s){return s.id === sId;});
+  if (!sec) return;
+  var titsSec = PACU.titulos.filter(function(t){return t.seccion_id === sId;});
+  var max = 0;
+  titsSec.forEach(function(t){
+    var partes = String(t.codigo).split('.');
+    var sub = parseInt(partes[2]||'0', 10);
+    if (sub > max) max = sub;
+  });
+  var sugerido = sec.codigo + '.' + String(max + 1).padStart(2, '0');
+  document.getElementById('pa-cu-tit-codigo-sug').textContent = 'Sugerido: ' + sugerido;
+  if (!document.getElementById('pa-cu-tit-id').value) {
+    document.getElementById('pa-cu-tit-codigo').value = sugerido;
+  }
+}
+
+function paCuGuardarTitulo() {
+  var id = document.getElementById('pa-cu-tit-id').value;
+  var body = {
+    codigo: document.getElementById('pa-cu-tit-codigo').value.trim(),
+    nombre: document.getElementById('pa-cu-tit-nombre').value.trim(),
+    seccion_id: parseInt(document.getElementById('pa-cu-tit-seccion').value, 10),
+  };
+  if (!body.codigo || !body.nombre || !body.seccion_id) {
+    toast('Completá código, nombre y sección', 'err');
+    return;
+  }
+  var url = id ? '/api/pa/cuentas/titulos/' + id : '/api/pa/cuentas/titulos';
+  paF(url, {
+    method: id ? 'PUT' : 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  }).then(function(r){
+    if (!r.ok) { toast(r.error || 'Error', 'err'); return; }
+    toast(id ? '✓ Título actualizado' : '✓ Título creado', 'ok');
+    document.getElementById('pa-mb-titulo').classList.remove('on');
+    paCuLoad();
+  });
+}
+
+function paCuEliminarTitulo(id) {
+  if (!confirm('¿Desactivar este título? (las cuentas asignadas quedan sin título)')) return;
+  paF('/api/pa/cuentas/titulos/' + id, { method: 'DELETE' }).then(function(r){
+    if (!r.ok) { toast(r.error || 'Error', 'err'); return; }
+    toast('✓ Título desactivado', 'ok');
     paCuLoad();
   });
 }
