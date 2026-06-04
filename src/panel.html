@@ -21697,8 +21697,8 @@ function paCuRender() {
     // Armar HTML de filas de cuentas
     function filaCuenta(c) {
       return '<tr style="'+(c.activo?'':'opacity:.5')+'">' +
-        '<td style="font-family:monospace;font-size:12px;padding-left:32px">'+c.codigo+'</td>' +
-        '<td>'+c.nombre +
+        '<td style="font-family:monospace;font-size:12px;padding-left:40px;color:#1e293b">'+c.codigo+'</td>' +
+        '<td style="padding-left:8px">'+c.nombre +
           (c.es_sistema ? ' <span title="Cuenta del sistema" style="color:#b88600">🔒</span>' : '') +
           (c.activo ? '' : ' <span style="color:var(--mut);font-style:italic;font-size:11px">(desactivada)</span>') +
         '</td>' +
@@ -21721,32 +21721,38 @@ function paCuRender() {
     function filaTitulo(t) {
       var cuentasTit = g.cuentas.filter(function(c){return c.titulo_id === t.id;});
       var filasTit = cuentasTit.map(filaCuenta).join('');
-      return '<tr style="background:#f8fafc;'+(t.activo?'':'opacity:.5')+'">' +
-        '<td colspan="5" style="padding:7px 14px 7px 20px;font-weight:600;font-size:12px;color:#334155;letter-spacing:.3px">' +
-          '<span style="color:#64748b;margin-right:6px">▸</span>' +
-          t.codigo + ' — ' + t.nombre +
-          (t.activo ? '' : ' <span style="color:var(--mut);font-style:italic;font-size:11px;font-weight:normal">(desactivado)</span>') +
+      return '<tr style="background:#dbeafe;border-left:4px solid #3b82f6;'+(t.activo?'':'opacity:.5')+'">' +
+        '<td colspan="5" style="padding:8px 14px 8px 18px">' +
+          '<div style="display:flex;align-items:center;gap:10px">' +
+            '<span style="color:#2563eb;font-size:13px">▸</span>' +
+            '<span style="font-weight:700;font-size:13px;color:#1e3a5f;letter-spacing:.2px">'+t.codigo+' — '+t.nombre+'</span>' +
+            '<span style="background:#bfdbfe;color:#1d4ed8;font-size:10px;font-weight:600;padding:2px 7px;border-radius:20px;letter-spacing:.5px">NO IMPUTABLE</span>' +
+            (t.activo ? '' : '<span style="color:var(--mut);font-style:italic;font-size:11px;font-weight:normal">(desactivado)</span>') +
+          '</div>' +
         '</td>' +
         '<td style="text-align:right;white-space:nowrap;padding-right:8px">' +
-          '<button class="btn bo" style="padding:3px 7px;font-size:10px" onclick="paCuAbrirNuevaCuentaEnTitulo('+g.sec.id+','+t.id+')" title="Nueva cuenta en este título">+ Cuenta</button> ' +
+          '<button class="btn bo" style="padding:3px 8px;font-size:10px;background:#eff6ff;border-color:#93c5fd;color:#1d4ed8" onclick="paCuAbrirNuevaCuentaEnTitulo('+g.sec.id+','+t.id+')" title="Nueva cuenta en este título">+ Cuenta</button> '
           '<button class="btn bo" style="padding:3px 7px;font-size:11px" onclick="paCuEditarTitulo('+t.id+')" title="Editar título">✏️</button> ' +
           '<button class="btn bo" style="padding:3px 7px;font-size:11px" onclick="paCuEliminarTitulo('+t.id+')" title="Desactivar título">🗑</button>' +
         '</td>' +
       '</tr>' + filasTit;
     }
 
-    return '<div class="pa-wrap" style="margin-bottom:16px">' +
-      '<div style="background:#f0d9da;padding:10px 14px;display:flex;justify-content:space-between;align-items:center">' +
-        '<strong style="color:var(--burg);font-size:14px">'+g.sec.codigo+' — '+g.sec.nombre+'</strong>' +
+    return '<div class="pa-wrap" style="margin-bottom:20px">' +
+      '<div style="background:linear-gradient(135deg,#c0474f,#9b2c2c);padding:11px 16px;display:flex;justify-content:space-between;align-items:center">' +
+        '<div style="display:flex;align-items:center;gap:10px">' +
+          '<strong style="color:#fff;font-size:14px;letter-spacing:.3px">'+g.sec.codigo+' — '+g.sec.nombre+'</strong>' +
+          '<span style="background:rgba(255,255,255,.18);color:#fde8e8;font-size:10px;font-weight:600;padding:2px 8px;border-radius:20px;letter-spacing:.5px;border:1px solid rgba(255,255,255,.3)">NO IMPUTABLE</span>' +
+        '</div>' +
         '<div style="display:flex;gap:6px">' +
-          '<button class="btn bo" style="padding:4px 9px;font-size:11px" onclick="paCuAbrirNuevoTituloEnSeccion('+g.sec.id+')">+ Título</button>' +
-          '<button class="btn bo" style="padding:4px 9px;font-size:11px" onclick="paCuEditarSeccion('+g.sec.id+')">✏️</button>' +
-          '<button class="btn bo" style="padding:4px 9px;font-size:11px" onclick="paCuEliminarSeccion('+g.sec.id+')">🗑</button>' +
+          '<button class="btn bo" style="padding:4px 9px;font-size:11px;background:rgba(255,255,255,.15);border-color:rgba(255,255,255,.4);color:#fff" onclick="paCuAbrirNuevoTituloEnSeccion('+g.sec.id+')">+ Título</button>' +
+          '<button class="btn bo" style="padding:4px 9px;font-size:11px;background:rgba(255,255,255,.15);border-color:rgba(255,255,255,.4);color:#fff" onclick="paCuEditarSeccion('+g.sec.id+')">✏️</button>' +
+          '<button class="btn bo" style="padding:4px 9px;font-size:11px;background:rgba(255,255,255,.15);border-color:rgba(255,255,255,.4);color:#fff" onclick="paCuEliminarSeccion('+g.sec.id+')">🗑</button>'
         '</div>' +
       '</div>' +
       '<div class="ab-table-wrap"><table class="pa-tbl">' +
         '<thead><tr>' +
-          '<th style="width:130px">Código</th>' +
+          '<th style="width:150px">Código</th>' +
           '<th>Nombre</th>' +
           '<th style="width:60px;text-align:center">Lote</th>' +
           '<th style="width:80px;text-align:center">Campaña</th>' +
@@ -21756,7 +21762,7 @@ function paCuRender() {
         '<tbody>' +
           titsSec.map(filaTitulo).join('') +
           (cuentasSinTit.length ? (
-            '<tr style="background:#fafafa"><td colspan="6" style="padding:5px 14px;font-size:11px;color:var(--mut);font-style:italic">Sin título asignado</td></tr>' +
+            '<tr style="background:#f1f5f9"><td colspan="6" style="padding:5px 14px;font-size:11px;color:var(--mut);font-style:italic">📌 Sin título asignado</td></tr>' +
             cuentasSinTit.map(filaCuenta).join('')
           ) : '') +
         '</tbody>' +
