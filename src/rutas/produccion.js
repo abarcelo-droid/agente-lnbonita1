@@ -44,32 +44,48 @@ function campañasActivas(db) {
 function round2(n) { return Math.round((Number(n) || 0) * 100) / 100; }
 
 // ── Construcción autoritativa del asiento de una factura de compra ──────────
-// Estructura unificada (bienes y servicios):
-//   DEBE  → una línea por cada cuenta contable distinta (gasto/compra), sumando netos
-//           · bienes:    la cuenta sale de cada producto (pa_insumos.cuenta_codigo o item.cuenta_codigo)
-//           · servicios: la cuenta sale de cada concepto (item.cuenta_codigo)
-//   DEBE  → IVA Crédito Fiscal (cuenta de la config impositiva global)
-//   DEBE  → percepciones (cuentas de la config impositiva global) si hay montos
-//   HABER → Proveedores (cuenta tomada del asiento modelo del proveedor) = total
+// BIENES:
+//   DEBE  → una línea por cada cuenta contable distinta (la cuenta sale de cada producto), sumando netos
+//   DEBE  → IVA Crédito Fiscal (config impositiva global)
+//   DEBE  → percepciones (config impositiva global) si hay montos
+//   HABER → Proveedores (del asiento modelo del proveedor) = total
+// SERVICIOS:
+//   DEBE  → el NETO total va a la cuenta de gasto del asiento modelo del proveedor (un proveedor = una cuenta)
+//   DEBE  → IVA Crédito Fiscal (config impositiva global)
+//   DEBE  → percepciones (config impositiva global) si hay montos
+//   HABER → Proveedores (del asiento modelo del proveedor) = total
 // Lanza Error con mensaje claro si falta una cuenta o el modelo del proveedor.
-function construirLineasAsientoCompra({ dbPa, items, iva_total, percep, total, modeloLineas, configImp, esServicio }) {
+function construirLineasAsientoCompra({ dbPa, items, neto_total, iva_total, percep, total, modeloLineas, configImp, esServicio }) {
   const lineas = [];
+  const TIPOS_NO_GASTO = ['proveedores', 'iva', 'percepcion_iva', 'percepcion_iibb', 'percepcion_ganancias', 'retencion'];
 
-  // 1) DEBE — agrupar netos por cuenta_codigo
-  const netoPorCuenta = {}; // codigo → neto acumulado
-  for (const it of items) {
-    const codigo = it.cuenta_codigo || it._cuenta_codigo_insumo || null;
-    if (!codigo) {
-      throw new Error(esServicio
-        ? `Un concepto de servicio no tiene cuenta contable asignada`
-        : `Un producto no tiene cuenta contable asignada — asignala en el padrón de insumos antes de registrar`);
+  // 1) DEBE — cuentas de gasto/compra
+  if (esServicio) {
+    // Servicios: el neto total va a la cuenta de gasto del modelo del proveedor.
+    const gastoLinea = (modeloLineas || []).find(function(ml) {
+      return ml.lado === 'debe' && TIPOS_NO_GASTO.indexOf(ml.tipo_linea) === -1;
+    }) || (modeloLineas || []).find(function(ml) { return ml.tipo_linea === 'libre'; });
+    if (!gastoLinea) {
+      throw new Error('El asiento modelo del proveedor no tiene una cuenta de gasto. Configurala en el Asiento Modelo.');
     }
-    netoPorCuenta[codigo] = round2((netoPorCuenta[codigo] || 0) + (it._subNeto || 0));
-  }
-  for (const codigo of Object.keys(netoPorCuenta)) {
-    const cuenta = dbPa.prepare('SELECT id, nombre FROM pa_cuentas WHERE codigo = ? AND activo = 1').get(codigo);
-    if (!cuenta) throw new Error(`La cuenta contable ${codigo} no existe o está desactivada en el plan de cuentas`);
-    lineas.push({ cuenta_id: cuenta.id, debe: round2(netoPorCuenta[codigo]), haber: 0, descripcion: cuenta.nombre });
+    const cuenta = dbPa.prepare('SELECT id, nombre FROM pa_cuentas WHERE id = ? AND activo = 1').get(gastoLinea.cuenta_id);
+    if (!cuenta) throw new Error('La cuenta de gasto del modelo del proveedor no existe o está desactivada');
+    lineas.push({ cuenta_id: cuenta.id, debe: round2(neto_total), haber: 0, descripcion: cuenta.nombre });
+  } else {
+    // Bienes: agrupar netos por cuenta_codigo de cada producto
+    const netoPorCuenta = {}; // codigo → neto acumulado
+    for (const it of items) {
+      const codigo = it.cuenta_codigo || it._cuenta_codigo_insumo || null;
+      if (!codigo) {
+        throw new Error('Un producto no tiene cuenta contable asignada — asignala en el padrón de insumos antes de registrar');
+      }
+      netoPorCuenta[codigo] = round2((netoPorCuenta[codigo] || 0) + (it._subNeto || 0));
+    }
+    for (const codigo of Object.keys(netoPorCuenta)) {
+      const cuenta = dbPa.prepare('SELECT id, nombre FROM pa_cuentas WHERE codigo = ? AND activo = 1').get(codigo);
+      if (!cuenta) throw new Error(`La cuenta contable ${codigo} no existe o está desactivada en el plan de cuentas`);
+      lineas.push({ cuenta_id: cuenta.id, debe: round2(netoPorCuenta[codigo]), haber: 0, descripcion: cuenta.nombre });
+    }
   }
 
   // 2) DEBE — IVA Crédito Fiscal (global)
@@ -597,14 +613,18 @@ router.delete('/lotes/:id/poligono', requireAuth, (req, res) => {
 router.get('/insumos', requireAuth, (req, res) => {
   const db = getDb();
   try {
-    const { tipo, categoria_principal, incluir_inactivos } = req.query;
+    const { tipo, categoria_principal, incluir_inactivos, sin_cuenta } = req.query;
     let query = "SELECT * FROM pa_insumos WHERE 1=1";
     const params = [];
     if (!incluir_inactivos) { query += " AND activo = 1"; }
     if (categoria_principal) { query += " AND categoria_principal = ?"; params.push(categoria_principal); }
     if (tipo) { query += " AND tipo = ?"; params.push(tipo); }
+    if (sin_cuenta === '1') { query += " AND (cuenta_codigo IS NULL OR cuenta_codigo = '')"; }
     query += " ORDER BY categoria_principal, tipo, nombre";
-    res.json({ ok: true, data: db.prepare(query).all(...params) });
+    const data = db.prepare(query).all(...params);
+    // Flag derivado para la UI: el insumo tiene cuenta contable asignada
+    data.forEach(i => { i.tiene_cuenta = (i.cuenta_codigo && String(i.cuenta_codigo).trim()) ? 1 : 0; });
+    res.json({ ok: true, data });
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
@@ -920,13 +940,11 @@ router.post('/compras', requireAuth, (req, res) => {
   try {
     // ── Validaciones específicas por tipo
     if (esServicio) {
-      // En facturas de servicio, cada item debe traer concepto + cuenta_codigo + monto
+      // En facturas de servicio, cada concepto requiere descripción + monto.
+      // La cuenta de gasto NO se pide por concepto: sale del asiento modelo del proveedor.
       for (const it of items) {
         if (!it.concepto || !String(it.concepto).trim()) {
           return res.status(400).json({ ok: false, error: 'Cada concepto de servicio requiere descripción' });
-        }
-        if (!it.cuenta_codigo) {
-          return res.status(400).json({ ok: false, error: 'Cada concepto de servicio requiere una cuenta contable' });
         }
         const monto = Number(it.monto_neto || it.precio_unit || 0);
         if (!monto || monto <= 0) {
@@ -1029,7 +1047,7 @@ router.post('/compras', requireAuth, (req, res) => {
 
       try {
         lineasAsientoPrebuilt = construirLineasAsientoCompra({
-          dbPa, items, iva_total,
+          dbPa, items, neto_total, iva_total,
           percep: { iva: percep_iva, gan: percep_ganancias, iibb: percep_iibb },
           total, modeloLineas, configImp, esServicio,
         });
