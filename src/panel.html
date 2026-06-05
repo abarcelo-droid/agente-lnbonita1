@@ -4854,6 +4854,7 @@ function sgRepExport(){
       <button class="btn bb" onclick="paCuAbrirNuevaCuenta()">+ Cuenta</button>
       <button class="btn bo" onclick="paCuAbrirNuevoTitulo()">+ Título</button>
       <button class="btn bo" onclick="paCuAbrirNuevaSeccion()">+ Sección</button>
+      <button class="btn bo" id="pa-cu-modo-edicion-btn" onclick="paCuToggleModoEdicion()">🔓 Modo edición</button>
       <button class="btn bo" onclick="paCuAbrirLogGeneral()">📜 Ver log</button>
     </div>
   </div>
@@ -4866,6 +4867,9 @@ function sgRepExport(){
       <input type="checkbox" id="pa-cu-ver-inact" onchange="paCuLoad()" style="width:auto">
       Ver desactivadas
     </label>
+  </div>
+  <div id="pa-cu-modo-banner" style="display:none;background:#fef3c7;border:1px solid #f59e0b;border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:13px;color:#92400e">
+    ✋ <strong>Modo edición activo.</strong> Arrastrá las cuentas y soltalas dentro de un título (o en "Sin título asignado") para reubicarlas. El código se renumera automáticamente (X.XX.XX.XXXX). Los asientos existentes siguen vinculados — no se rompe nada.
   </div>
   <div id="pa-cu-lista"></div>
 </div>
@@ -5021,7 +5025,12 @@ function sgRepExport(){
     <button class="btn bb" onclick="admPcAbrirNuevaCuenta()">+ Cuenta</button>
     <button class="btn bo" onclick="admPcAbrirNuevoTitulo()">+ Título</button>
     <button class="btn bo" onclick="admPcAbrirNuevaSeccion()">+ Sección</button>
+    <button class="btn bo" id="adm-pc-modo-edicion-btn" onclick="admPcToggleModoEdicion()">🔓 Modo edición</button>
   </div>
+</div>
+
+<div id="adm-pc-modo-banner" style="display:none;background:#fef3c7;border:1px solid #f59e0b;border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:13px;color:#92400e">
+  ✋ <strong>Modo edición activo.</strong> Arrastrá las cuentas y soltalas dentro de un título (o en "Sin título asignado") para reubicarlas. El código se renumera automáticamente (X.XX.XX.XXXX). Los asientos existentes siguen vinculados — no se rompe nada.
 </div>
 
 <!-- Tabs por grupo -->
@@ -11961,6 +11970,63 @@ var LNB_USER = null;
 // 📒 ADMINISTRACIÓN — Asientos Contables + Plan de Cuentas
 // ═════════════════════════════════════════════════════════════════════
 var ADM = { lineasN: 0, cuentas: [], secciones: [], titulos: [], asientoActualId: null, grupoActual: 'activo' };
+var ADM_EDIT_MODE = false;
+var ADM_DRAG_ID = null;
+
+function admPcToggleModoEdicion() {
+  if (!ADM_EDIT_MODE) {
+    if (!confirm('¿Activar modo edición?\n\nVas a poder arrastrar cuentas entre títulos y se renumerarán automáticamente. Usalo solo durante el período de armado del plan de cuentas.')) return;
+  }
+  ADM_EDIT_MODE = !ADM_EDIT_MODE;
+  var btn = document.getElementById('adm-pc-modo-edicion-btn');
+  var banner = document.getElementById('adm-pc-modo-banner');
+  if (ADM_EDIT_MODE) {
+    btn.innerHTML = '🔒 Salir de edición';
+    btn.style.background = '#f59e0b'; btn.style.color = '#fff'; btn.style.borderColor = '#f59e0b';
+    if (banner) banner.style.display = 'block';
+  } else {
+    btn.innerHTML = '🔓 Modo edición';
+    btn.style.background = ''; btn.style.color = ''; btn.style.borderColor = '';
+    if (banner) banner.style.display = 'none';
+  }
+  admPcLoadGrupo(ADM.grupoActual);
+}
+
+function admPcDragStart(ev, cuentaId) {
+  ADM_DRAG_ID = cuentaId;
+  ev.dataTransfer.effectAllowed = 'move';
+  try { ev.dataTransfer.setData('text/plain', String(cuentaId)); } catch(e){}
+}
+function admPcDragOver(ev) {
+  if (!ADM_EDIT_MODE) return;
+  ev.preventDefault();
+  ev.dataTransfer.dropEffect = 'move';
+  ev.currentTarget.style.background = '#dcfce7';
+  ev.currentTarget.style.outline = '2px dashed #16a34a';
+}
+function admPcDragLeave(ev) {
+  ev.currentTarget.style.background = '';
+  ev.currentTarget.style.outline = '';
+}
+function admPcDrop(ev, tituloId) {
+  if (!ADM_EDIT_MODE) return;
+  ev.preventDefault();
+  ev.currentTarget.style.background = '';
+  ev.currentTarget.style.outline = '';
+  var cuentaId = ADM_DRAG_ID || parseInt(ev.dataTransfer.getData('text/plain'), 10);
+  ADM_DRAG_ID = null;
+  if (!cuentaId) return;
+  var cuenta = ADM.cuentas.find(function(c){ return c.id === cuentaId; });
+  if (cuenta && cuenta.titulo_id === tituloId) return;
+  admApi('/' + cuentaId + '/reasignar-titulo', {
+    method: 'POST',
+    body: JSON.stringify({ titulo_id: tituloId }),
+  }).then(function(r){
+    if (!r.ok) { toast(r.error || 'Error al mover', 'er'); return; }
+    toast('✓ Cuenta movida → ' + r.codigo, 'ok');
+    admPcLoadGrupo(ADM.grupoActual);
+  });
+}
 
 function admApi(path, opts) {
   opts = opts || {};
@@ -12216,9 +12282,12 @@ function admPcLoadGrupo(grupo) {
       var cuentasSinTit = ADM.cuentas.filter(function(c){ return c.seccion_id === s.id && !c.titulo_id; });
 
       function filaCuenta(c) {
-        var rowStyle = c.activo ? '' : ' style="opacity:.5"';
-        return '<tr'+rowStyle+'>'
-          + '<td style="font-family:monospace;font-size:12px;padding-left:40px;color:#1e293b">'+c.codigo+'</td>'
+        var canDrag = ADM_EDIT_MODE && c.activo && !c.es_sistema;
+        var dragAttrs = canDrag ? ' draggable="true" ondragstart="admPcDragStart(event,'+c.id+')"' : '';
+        var rowStyle = canDrag ? ' style="cursor:grab;'+(c.activo?'':'opacity:.5')+'"' : (c.activo ? '' : ' style="opacity:.5"');
+        var handle = canDrag ? '<span style="color:#94a3b8;margin-right:6px;cursor:grab" title="Arrastrar">⠿</span>' : '';
+        return '<tr'+dragAttrs+rowStyle+'>'
+          + '<td style="font-family:monospace;font-size:12px;padding-left:'+(ADM_EDIT_MODE?'20':'40')+'px;color:#1e293b">'+handle+c.codigo+'</td>'
           + '<td style="padding-left:8px">'+c.nombre+(c.es_sistema?' <span title="Sistema" style="color:#b88600">🔒</span>':'')+'</td>'
           + '<td style="text-align:center;font-size:11px;color:var(--mut)">'+(c.tipo==='resultado'?'ER':'Patr.')+'</td>'
           + '<td style="text-align:center">'+(c.permite_lote?'✓':'—')+'</td>'
@@ -12234,10 +12303,11 @@ function admPcLoadGrupo(grupo) {
 
       function filaTitulo(t) {
         var cuentasTit = ADM.cuentas.filter(function(c){ return c.titulo_id === t.id; });
-        return '<tr style="background:#dbeafe;border-left:4px solid #3b82f6">'
+        var dropAttrs = ADM_EDIT_MODE ? ' ondragover="admPcDragOver(event)" ondragleave="admPcDragLeave(event)" ondrop="admPcDrop(event,'+t.id+')"' : '';
+        return '<tr'+dropAttrs+' style="background:#dbeafe;border-left:4px solid #3b82f6">'
           + '<td colspan="5" style="padding:8px 14px 8px 18px">'
             + '<div style="display:flex;align-items:center;gap:10px">'
-              + '<span style="color:#2563eb;font-size:13px">▸</span>'
+              + (ADM_EDIT_MODE ? '<span style="color:#2563eb;font-size:13px" title="Soltá cuentas acá">⬇</span>' : '<span style="color:#2563eb;font-size:13px">▸</span>')
               + '<span style="font-weight:700;font-size:13px;color:#1e3a5f;letter-spacing:.2px">'+t.codigo+' — '+t.nombre+'</span>'
               + '<span style="background:#bfdbfe;color:#1d4ed8;font-size:10px;font-weight:600;padding:2px 7px;border-radius:20px;letter-spacing:.5px">NO IMPUTABLE</span>'
             + '</div>'
@@ -12275,8 +12345,8 @@ function admPcLoadGrupo(grupo) {
           + '</tr></thead>'
           + '<tbody>'
             + titsSec.map(filaTitulo).join('')
-            + (cuentasSinTit.length
-              ? '<tr style="background:#f1f5f9"><td colspan="6" style="padding:5px 14px;font-size:11px;color:var(--mut);font-style:italic">📌 Sin título asignado</td></tr>'
+            + ((cuentasSinTit.length || ADM_EDIT_MODE)
+              ? '<tr'+(ADM_EDIT_MODE ? ' ondragover="admPcDragOver(event)" ondragleave="admPcDragLeave(event)" ondrop="admPcDrop(event,null)"' : '')+' style="background:#f1f5f9"><td colspan="6" style="padding:5px 14px;font-size:11px;color:var(--mut);font-style:italic">📌 Sin título asignado'+(ADM_EDIT_MODE?' <span style="color:#16a34a">(soltá acá para quitar de un título)</span>':'')+'</td></tr>'
                 + cuentasSinTit.map(filaCuenta).join('')
               : '')
           + '</tbody>'
@@ -21777,6 +21847,78 @@ function paCalRenderMapaCore() {
 // 📊 PLAN DE CUENTAS — Maestro contable
 // ═════════════════════════════════════════════════════════════════════
 var PACU = { secciones: [], titulos: [], cuentas: [] };
+var PACU_EDIT_MODE = false;
+
+function paCuToggleModoEdicion() {
+  if (!PACU_EDIT_MODE) {
+    if (!confirm('¿Activar modo edición?\n\nVas a poder arrastrar cuentas entre títulos y se renumerarán automáticamente. Usalo solo durante el período de armado del plan de cuentas.')) return;
+  }
+  PACU_EDIT_MODE = !PACU_EDIT_MODE;
+  var btn = document.getElementById('pa-cu-modo-edicion-btn');
+  var banner = document.getElementById('pa-cu-modo-banner');
+  if (PACU_EDIT_MODE) {
+    btn.innerHTML = '🔒 Salir de edición';
+    btn.style.background = '#f59e0b';
+    btn.style.color = '#fff';
+    btn.style.borderColor = '#f59e0b';
+    if (banner) banner.style.display = 'block';
+  } else {
+    btn.innerHTML = '🔓 Modo edición';
+    btn.style.background = '';
+    btn.style.color = '';
+    btn.style.borderColor = '';
+    if (banner) banner.style.display = 'none';
+  }
+  paCuRender();
+}
+
+// ── Drag & drop handlers ───────────────────────────────────────────
+var PACU_DRAG_ID = null;
+
+function paCuDragStart(ev, cuentaId) {
+  PACU_DRAG_ID = cuentaId;
+  ev.dataTransfer.effectAllowed = 'move';
+  try { ev.dataTransfer.setData('text/plain', String(cuentaId)); } catch(e){}
+}
+
+function paCuDragOver(ev) {
+  if (!PACU_EDIT_MODE) return;
+  ev.preventDefault();
+  ev.dataTransfer.dropEffect = 'move';
+  var dz = ev.currentTarget;
+  dz.style.background = '#dcfce7';
+  dz.style.outline = '2px dashed #16a34a';
+}
+
+function paCuDragLeave(ev) {
+  var dz = ev.currentTarget;
+  dz.style.background = '';
+  dz.style.outline = '';
+}
+
+function paCuDrop(ev, tituloId) {
+  if (!PACU_EDIT_MODE) return;
+  ev.preventDefault();
+  var dz = ev.currentTarget;
+  dz.style.background = '';
+  dz.style.outline = '';
+  var cuentaId = PACU_DRAG_ID || parseInt(ev.dataTransfer.getData('text/plain'), 10);
+  PACU_DRAG_ID = null;
+  if (!cuentaId) return;
+
+  var cuenta = PACU.cuentas.find(function(c){ return c.id === cuentaId; });
+  if (cuenta && cuenta.titulo_id === tituloId) return; // ya está ahí, no hacer nada
+
+  paF('/api/pa/cuentas/' + cuentaId + '/reasignar-titulo', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ titulo_id: tituloId }),
+  }).then(function(r){
+    if (!r.ok) { toast(r.error || 'Error al mover', 'err'); return; }
+    toast('✓ Cuenta movida → ' + r.codigo, 'ok');
+    paCuLoad();
+  });
+}
 
 function paCuLoad() {
   // Cargar secciones (siempre, incluyendo inactivas para selectores)
@@ -21846,8 +21988,13 @@ function paCuRender() {
 
     // Armar HTML de filas de cuentas
     function filaCuenta(c) {
-      return '<tr style="'+(c.activo?'':'opacity:.5')+'">' +
-        '<td style="font-family:monospace;font-size:12px;padding-left:40px;color:#1e293b">'+c.codigo+'</td>' +
+      var dragAttrs = (PACU_EDIT_MODE && c.activo && !c.es_sistema)
+        ? ' draggable="true" ondragstart="paCuDragStart(event,'+c.id+')" style="cursor:grab;'
+        : ' style="';
+      var handle = (PACU_EDIT_MODE && c.activo && !c.es_sistema)
+        ? '<span style="color:#94a3b8;margin-right:6px;cursor:grab" title="Arrastrar">⠿</span>' : '';
+      return '<tr'+dragAttrs+(c.activo?'':'opacity:.5')+'">' +
+        '<td style="font-family:monospace;font-size:12px;padding-left:'+(PACU_EDIT_MODE?'20':'40')+'px;color:#1e293b">'+handle+c.codigo+'</td>' +
         '<td style="padding-left:8px">'+c.nombre +
           (c.es_sistema ? ' <span title="Cuenta del sistema" style="color:#b88600">🔒</span>' : '') +
           (c.activo ? '' : ' <span style="color:var(--mut);font-style:italic;font-size:11px">(desactivada)</span>') +
@@ -21871,17 +22018,19 @@ function paCuRender() {
     function filaTitulo(t) {
       var cuentasTit = g.cuentas.filter(function(c){return c.titulo_id === t.id;});
       var filasTit = cuentasTit.map(filaCuenta).join('');
-      return '<tr style="background:#dbeafe;border-left:4px solid #3b82f6;'+(t.activo?'':'opacity:.5')+'">' +
+      var dropAttrs = PACU_EDIT_MODE
+        ? ' ondragover="paCuDragOver(event)" ondragleave="paCuDragLeave(event)" ondrop="paCuDrop(event,'+t.id+')"' : '';
+      return '<tr'+dropAttrs+' style="background:#dbeafe;border-left:4px solid #3b82f6;'+(t.activo?'':'opacity:.5')+'">' +
         '<td colspan="5" style="padding:8px 14px 8px 18px">' +
           '<div style="display:flex;align-items:center;gap:10px">' +
-            '<span style="color:#2563eb;font-size:13px">▸</span>' +
+            (PACU_EDIT_MODE ? '<span style="color:#2563eb;font-size:13px" title="Soltá cuentas acá">⬇</span>' : '<span style="color:#2563eb;font-size:13px">▸</span>') +
             '<span style="font-weight:700;font-size:13px;color:#1e3a5f;letter-spacing:.2px">'+t.codigo+' — '+t.nombre+'</span>' +
             '<span style="background:#bfdbfe;color:#1d4ed8;font-size:10px;font-weight:600;padding:2px 7px;border-radius:20px;letter-spacing:.5px">NO IMPUTABLE</span>' +
             (t.activo ? '' : '<span style="color:var(--mut);font-style:italic;font-size:11px;font-weight:normal">(desactivado)</span>') +
           '</div>' +
         '</td>' +
         '<td style="text-align:right;white-space:nowrap;padding-right:8px">' +
-          '<button class="btn bo" style="padding:3px 8px;font-size:10px;background:#eff6ff;border-color:#93c5fd;color:#1d4ed8" onclick="paCuAbrirNuevaCuentaEnTitulo('+g.sec.id+','+t.id+')" title="Nueva cuenta en este título">+ Cuenta</button> '
+          '<button class="btn bo" style="padding:3px 8px;font-size:10px;background:#eff6ff;border-color:#93c5fd;color:#1d4ed8" onclick="paCuAbrirNuevaCuentaEnTitulo('+g.sec.id+','+t.id+')" title="Nueva cuenta en este título">+ Cuenta</button> ' +
           '<button class="btn bo" style="padding:3px 7px;font-size:11px" onclick="paCuEditarTitulo('+t.id+')" title="Editar título">✏️</button> ' +
           '<button class="btn bo" style="padding:3px 7px;font-size:11px" onclick="paCuEliminarTitulo('+t.id+')" title="Desactivar título">🗑</button>' +
         '</td>' +
@@ -21897,7 +22046,7 @@ function paCuRender() {
         '<div style="display:flex;gap:6px">' +
           '<button class="btn bo" style="padding:4px 9px;font-size:11px;background:rgba(255,255,255,.15);border-color:rgba(255,255,255,.4);color:#fff" onclick="paCuAbrirNuevoTituloEnSeccion('+g.sec.id+')">+ Título</button>' +
           '<button class="btn bo" style="padding:4px 9px;font-size:11px;background:rgba(255,255,255,.15);border-color:rgba(255,255,255,.4);color:#fff" onclick="paCuEditarSeccion('+g.sec.id+')">✏️</button>' +
-          '<button class="btn bo" style="padding:4px 9px;font-size:11px;background:rgba(255,255,255,.15);border-color:rgba(255,255,255,.4);color:#fff" onclick="paCuEliminarSeccion('+g.sec.id+')">🗑</button>'
+          '<button class="btn bo" style="padding:4px 9px;font-size:11px;background:rgba(255,255,255,.15);border-color:rgba(255,255,255,.4);color:#fff" onclick="paCuEliminarSeccion('+g.sec.id+')">🗑</button>' +
         '</div>' +
       '</div>' +
       '<div class="ab-table-wrap"><table class="pa-tbl">' +
@@ -21911,8 +22060,8 @@ function paCuRender() {
         '</tr></thead>' +
         '<tbody>' +
           titsSec.map(filaTitulo).join('') +
-          (cuentasSinTit.length ? (
-            '<tr style="background:#f1f5f9"><td colspan="6" style="padding:5px 14px;font-size:11px;color:var(--mut);font-style:italic">📌 Sin título asignado</td></tr>' +
+          ((cuentasSinTit.length || PACU_EDIT_MODE) ? (
+            '<tr'+(PACU_EDIT_MODE ? ' ondragover="paCuDragOver(event)" ondragleave="paCuDragLeave(event)" ondrop="paCuDrop(event,null)"' : '')+' style="background:#f1f5f9"><td colspan="6" style="padding:5px 14px;font-size:11px;color:var(--mut);font-style:italic">📌 Sin título asignado'+(PACU_EDIT_MODE?' <span style="color:#16a34a">(soltá acá para quitar de un título)</span>':'')+'</td></tr>' +
             cuentasSinTit.map(filaCuenta).join('')
           ) : '') +
         '</tbody>' +
