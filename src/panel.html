@@ -1666,6 +1666,10 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     <input type="checkbox" id="pa-ins-ver-inact" onchange="paLoadInsumos()" style="width:auto">
     Ver desactivados
   </label>
+  <label style="margin-left:14px;font-size:12px;color:var(--mut);display:inline-flex;align-items:center;gap:6px;cursor:pointer">
+    <input type="checkbox" id="pa-ins-sin-cuenta" onchange="paLoadInsumos()" style="width:auto">
+    Solo sin cuenta contable
+  </label>
 </div>
 <style>
   .pa-pill { padding:6px 14px; border-radius:999px; border:1px solid var(--bor); background:#fff; font-size:13px; cursor:pointer; font-weight:500; color:var(--mut); transition:all .15s }
@@ -1685,10 +1689,11 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     <th class="sortable" onclick="paSortBy('unidad')">Unidad <span class="sort-ind" id="pa-sort-unidad"></span></th>
     <th class="sortable" style="text-align:right" onclick="paSortBy('stock_actual')">Stock actual <span class="sort-ind" id="pa-sort-stock_actual"></span></th>
     <th class="sortable" style="text-align:right" onclick="paSortBy('precio_ref_usd')">Último precio <span class="sort-ind" id="pa-sort-precio_ref_usd"></span></th>
+    <th style="text-align:center">Cuenta contable</th>
     <th class="sortable" onclick="paSortBy('estado')">Estado <span class="sort-ind" id="pa-sort-estado"></span></th>
     <th></th>
   </tr></thead>
-  <tbody id="pa-ins-tbody"><tr><td colspan="8" class="emp">Cargando...</td></tr></tbody>
+  <tbody id="pa-ins-tbody"><tr><td colspan="9" class="emp">Cargando...</td></tr></tbody>
 </table></div></div>
 </div>
 
@@ -5070,6 +5075,9 @@ function sgRepExport(){
   <label style="display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--mut);cursor:pointer">
     <input type="checkbox" id="adm-prov-ver-inact" onchange="admProvCargar()" style="width:auto"> Ver inactivos
   </label>
+  <label style="display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--mut);cursor:pointer">
+    <input type="checkbox" id="adm-prov-sin-modelo" onchange="admProvCargar()" style="width:auto"> Solo sin asiento modelo
+  </label>
   <button class="btn bo bs" onclick="admProvCargar()">↻</button>
 </div>
 <div class="pa-wrap">
@@ -5079,11 +5087,12 @@ function sgRepExport(){
         <th>Razón Social</th><th style="width:130px">CUIT</th>
         <th style="width:100px">Cond. IVA</th><th style="width:110px">Rubro</th>
         <th style="width:120px">Teléfono</th><th style="width:100px">Cond. Pago</th>
+        <th style="width:110px;text-align:center">Asiento modelo</th>
         <th style="width:70px;text-align:center">Estado</th>
         <th style="width:110px;text-align:right"></th>
       </tr></thead>
       <tbody id="adm-prov-tbody">
-        <tr><td colspan="8" class="emp">Cargando...</td></tr>
+        <tr><td colspan="9" class="emp">Cargando...</td></tr>
       </tbody>
     </table>
   </div>
@@ -12627,7 +12636,7 @@ function admPcEliminarTitulo(id) {
 // ═══════════════════════════════════════════════════════════════════════════
 var ADM_PROV_CB = null;
 function admProvApi(path,opts){opts=opts||{};opts.headers=opts.headers||{'Content-Type':'application/json'};return fetch('/api/pa/proveedores'+path,opts).then(function(r){return r.json();}).catch(function(){return{ok:false,error:'Error de red'};});}
-function admProvCargar(){var q=(document.getElementById('adm-prov-buscar')||{}).value||'';var rubro=(document.getElementById('adm-prov-rubro')||{}).value||'';var verInact=(document.getElementById('adm-prov-ver-inact')||{}).checked;var qs=[];if(q)qs.push('q='+encodeURIComponent(q));if(rubro)qs.push('rubro='+encodeURIComponent(rubro));if(verInact)qs.push('activo=todos');admProvApi('?'+qs.join('&')).then(function(r){var data=r.data||[];var tb=document.getElementById('adm-prov-tbody');if(!data.length){tb.innerHTML='<tr><td colspan="8" class="emp">Sin proveedores. <button class="btn bo bs" onclick="admProvAbrirNuevo()">+ Agregar el primero</button></td></tr>';return;}var ivaL={responsable_inscripto:'RI',monotributista:'Monotrib.',exento:'Exento',no_responsable:'No Resp.'};var rubL={insumos:'Insumos',servicios:'Servicios',transporte:'Transporte',construccion:'Construcción',combustible:'Combustible',otro:'Otro'};var pagL={contado:'Contado','15_dias':'15 días','30_dias':'30 días','60_dias':'60 días','90_dias':'90 días'};tb.innerHTML=data.map(function(p){var rs=p.activo?'':' style="opacity:.5"';var est=p.activo?'<span class="pa-badge pa-verde-bg">Activo</span>':'<span class="pa-badge pa-gris-bg">Inactivo</span>';var btn=p.activo?'<button class="btn bd bs" onclick="admProvDesactivar('+p.id+')" style="padding:3px 8px;font-size:11px">🗑</button>':'<button class="btn bo bs" onclick="admProvReactivar('+p.id+')" style="padding:3px 8px;font-size:11px;color:var(--ok);border-color:var(--ok)">↺</button>';return'<tr'+rs+'><td><strong>'+(p.razon_social||'—')+'</strong>'+(p.nombre_comercial?'<div style="font-size:11px;color:var(--mut)">'+p.nombre_comercial+'</div>':'')+(p.contacto?'<div style="font-size:10px;color:var(--sub)">👤 '+p.contacto+'</div>':'')+'</td><td style="font-family:monospace;font-size:12px">'+(p.cuit||'—')+'</td><td><span class="pa-badge pa-azul-bg" style="font-size:10px">'+(ivaL[p.condicion_iva]||p.condicion_iva||'—')+'</span></td><td style="font-size:12px;color:var(--mut)">'+(rubL[p.rubro]||p.rubro||'—')+'</td><td style="font-size:12px">'+(p.telefono||'—')+(p.email?'<div style="font-size:10px;color:var(--mut)">'+p.email+'</div>':'')+'</td><td style="font-size:12px;color:var(--mut)">'+(pagL[p.condicion_pago]||p.condicion_pago||'—')+'</td><td style="text-align:center">'+est+'</td><td style="text-align:right;white-space:nowrap"><button class="btn bo bs" onclick="admProvEditar('+p.id+')" style="padding:3px 8px;font-size:11px;margin-right:4px">✏️</button>'+btn+'</td></tr>';}).join('');});}
+function admProvCargar(){var q=(document.getElementById('adm-prov-buscar')||{}).value||'';var rubro=(document.getElementById('adm-prov-rubro')||{}).value||'';var verInact=(document.getElementById('adm-prov-ver-inact')||{}).checked;var sinModelo=(document.getElementById('adm-prov-sin-modelo')||{}).checked;var qs=[];if(q)qs.push('q='+encodeURIComponent(q));if(rubro)qs.push('rubro='+encodeURIComponent(rubro));if(verInact)qs.push('activo=todos');if(sinModelo)qs.push('sin_modelo=1');admProvApi('?'+qs.join('&')).then(function(r){var data=r.data||[];var tb=document.getElementById('adm-prov-tbody');if(!data.length){tb.innerHTML='<tr><td colspan="9" class="emp">Sin proveedores. <button class="btn bo bs" onclick="admProvAbrirNuevo()">+ Agregar el primero</button></td></tr>';return;}var ivaL={responsable_inscripto:'RI',monotributista:'Monotrib.',exento:'Exento',no_responsable:'No Resp.'};var rubL={insumos:'Insumos',servicios:'Servicios',transporte:'Transporte',construccion:'Construcción',combustible:'Combustible',otro:'Otro'};var pagL={contado:'Contado','15_dias':'15 días','30_dias':'30 días','60_dias':'60 días','90_dias':'90 días'};tb.innerHTML=data.map(function(p){var rs=p.activo?'':' style="opacity:.5"';var est=p.activo?'<span class="pa-badge pa-verde-bg">Activo</span>':'<span class="pa-badge pa-gris-bg">Inactivo</span>';var asiento=p.tiene_asiento_modelo?'<span class="pa-badge pa-verde-bg" style="font-size:10px">✓ Sí</span>':'<span class="pa-badge" style="background:#fee2e2;color:#991b1b;font-size:10px">✗ Falta</span>';var btn=p.activo?'<button class="btn bd bs" onclick="admProvDesactivar('+p.id+')" style="padding:3px 8px;font-size:11px">🗑</button>':'<button class="btn bo bs" onclick="admProvReactivar('+p.id+')" style="padding:3px 8px;font-size:11px;color:var(--ok);border-color:var(--ok)">↺</button>';return'<tr'+rs+'><td><strong>'+(p.razon_social||'—')+'</strong>'+(p.nombre_comercial?'<div style="font-size:11px;color:var(--mut)">'+p.nombre_comercial+'</div>':'')+(p.contacto?'<div style="font-size:10px;color:var(--sub)">👤 '+p.contacto+'</div>':'')+'</td><td style="font-family:monospace;font-size:12px">'+(p.cuit||'—')+'</td><td><span class="pa-badge pa-azul-bg" style="font-size:10px">'+(ivaL[p.condicion_iva]||p.condicion_iva||'—')+'</span></td><td style="font-size:12px;color:var(--mut)">'+(rubL[p.rubro]||p.rubro||'—')+'</td><td style="font-size:12px">'+(p.telefono||'—')+(p.email?'<div style="font-size:10px;color:var(--mut)">'+p.email+'</div>':'')+'</td><td style="font-size:12px;color:var(--mut)">'+(pagL[p.condicion_pago]||p.condicion_pago||'—')+'</td><td style="text-align:center">'+asiento+'</td><td style="text-align:center">'+est+'</td><td style="text-align:right;white-space:nowrap"><button class="btn bo bs" onclick="admProvEditar('+p.id+')" style="padding:3px 8px;font-size:11px;margin-right:4px">✏️</button>'+btn+'</td></tr>';}).join('');});}
 function admProvCargarModelosSelect(selectedId) {
   var sel = document.getElementById('adm-prov-modelo-id');
   if (!sel) return;
@@ -12734,20 +12743,27 @@ function paCompAsientoRebuild() {
   var total = PA._compraTotal || 0;
   var percep = PA._compraPercep || { iva:0, gan:0, iibb:0 };
 
-  // 1) Agrupar netos por cuenta_codigo según los items en el DOM
-  var netoPorCuenta = {}; // codigo → neto
+  // 1) Líneas de gasto/compra (Debe)
+  var lineas = [];
   var faltanCuentas = [];
 
   if (esServicio) {
-    document.querySelectorAll('[id^=pa-cs-row-]').forEach(function(row){
-      var n = row.dataset.n;
-      var monto = parseFloat((document.getElementById('pa-cs-monto-'+n)||{}).value)||0;
-      var codigo = (document.getElementById('pa-cs-cuenta-'+n)||{}).value || '';
-      if (monto <= 0) return;
-      if (!codigo) { faltanCuentas.push('concepto sin cuenta'); return; }
-      netoPorCuenta[codigo] = paRound2((netoPorCuenta[codigo]||0) + monto);
-    });
+    // Servicios: el neto total va a la cuenta de gasto del modelo del proveedor
+    var neto = PA._compraНето || 0;
+    if (neto > 0) {
+      var gastoLinea = (PA._asientoLineasModelo || []).find(function(l){
+        return l.lado === 'debe' && ['proveedores','iva','percepcion_iva','percepcion_iibb','percepcion_ganancias','retencion'].indexOf(l.tipo_linea) === -1;
+      }) || (PA._asientoLineasModelo || []).find(function(l){ return l.tipo_linea === 'libre'; });
+      if (gastoLinea) {
+        var gc = paCompCuentaPorId(gastoLinea.cuenta_id);
+        lineas.push({ cuenta_codigo: gc?gc.codigo:'', cuenta_nombre: gc?gc.nombre:'(cuenta de gasto)', debe: paRound2(neto), haber: 0, descripcion: gc?gc.nombre:'Gasto' });
+      } else {
+        faltanCuentas.push('cuenta de gasto del modelo');
+      }
+    }
   } else {
+    // Bienes: agrupar netos por cuenta_codigo de cada producto
+    var netoPorCuenta = {}; // codigo → neto
     document.querySelectorAll('[id^=pa-ci-row-]').forEach(function(row){
       var n = row.dataset.n;
       var insEl = document.getElementById('pa-ci-ins-'+n);
@@ -12757,7 +12773,6 @@ function paCompAsientoRebuild() {
       var prec    = parseFloat((document.getElementById('pa-ci-prec-'+n)||{}).value)||0;
       var sNeto = cantBul * prec;
       if (sNeto <= 0) return;
-      // cuenta: la elegida en zona pañol, si no la del insumo
       var codigo = '';
       var selCu = document.getElementById('pa-ci-cuenta-sel-'+n);
       var zonaCuenta = document.getElementById('pa-ci-cuenta-'+n);
@@ -12771,20 +12786,16 @@ function paCompAsientoRebuild() {
       if (!codigo) { faltanCuentas.push(nombreItem || ('producto '+n)); return; }
       netoPorCuenta[codigo] = paRound2((netoPorCuenta[codigo]||0) + sNeto);
     });
-  }
-
-  var lineas = [];
-
-  // Líneas de gasto/compra (Debe)
-  Object.keys(netoPorCuenta).forEach(function(codigo){
-    var cuenta = paCompCuentaPorCodigo(codigo);
-    lineas.push({
-      cuenta_codigo: codigo,
-      cuenta_nombre: cuenta ? cuenta.nombre : '(cuenta no encontrada)',
-      debe: netoPorCuenta[codigo], haber: 0,
-      descripcion: cuenta ? cuenta.nombre : ''
+    Object.keys(netoPorCuenta).forEach(function(codigo){
+      var cuenta = paCompCuentaPorCodigo(codigo);
+      lineas.push({
+        cuenta_codigo: codigo,
+        cuenta_nombre: cuenta ? cuenta.nombre : '(cuenta no encontrada)',
+        debe: netoPorCuenta[codigo], haber: 0,
+        descripcion: cuenta ? cuenta.nombre : ''
+      });
     });
-  });
+  }
 
   // IVA Crédito Fiscal (Debe) — global
   if (paRound2(iva) > 0) {
@@ -15734,11 +15745,13 @@ function paLoadInsumos(){
   var tipo=document.getElementById('pa-ins-tipo-fil').value;
   var cat=document.getElementById('pa-ins-cat-fil').value;
   var verInact=document.getElementById('pa-ins-ver-inact');
+  var sinCuenta=document.getElementById('pa-ins-sin-cuenta');
   var qs=[]; if(tipo)qs.push('tipo='+tipo); if(cat)qs.push('categoria_principal='+cat);
   if(verInact && verInact.checked) qs.push('incluir_inactivos=1');
+  if(sinCuenta && sinCuenta.checked) qs.push('sin_cuenta=1');
   paF('/api/pa/insumos'+(qs.length?'?'+qs.join('&'):'')).then(function(r){
     PA.insumos=r.data||[];var tb=document.getElementById('pa-ins-tbody');
-    if(!PA.insumos.length){tb.innerHTML='<tr><td colspan="8" class="emp">Sin insumos</td></tr>';return;}
+    if(!PA.insumos.length){tb.innerHTML='<tr><td colspan="9" class="emp">Sin insumos</td></tr>';return;}
     // Helper local: redondea floats a N decimales sin la basura típica de JS
     // (4.610000000000001 → 4.61). Si es entero, no muestra decimales.
     var paFmtStock = function(n) {
@@ -15842,6 +15855,9 @@ function paLoadInsumos(){
       var accionBtn = i.activo
         ? '<button class="btn bo bs" onclick="paDesactivarInsumo('+i.id+',\''+i.nombre.replace(/'/g,"\\'")+'\')" title="Desactivar (queda el historial, se puede reactivar después)" style="padding:4px 10px;font-size:11px">🗑 Desactivar</button>'
         : '<button class="btn bo bs" onclick="paReactivarInsumo('+i.id+')" title="Reactivar" style="padding:4px 10px;font-size:11px;color:var(--ok);border-color:var(--ok)">↺ Reactivar</button>';
+      var cuentaBadge = (i.cuenta_codigo && String(i.cuenta_codigo).trim())
+        ? '<span class="pa-badge pa-verde-bg" style="font-size:10px" title="'+i.cuenta_codigo+'">✓ Sí</span>'
+        : '<span class="pa-badge" style="background:#fee2e2;color:#991b1b;font-size:10px">✗ Falta</span>';
       var rowStyle = i.activo ? (critico ? ' style="background:#fef2f2"' : '') : ' style="opacity:0.5"';
       return'<tr'+rowStyle+'>'
         +'<td><span title="'+(i.categoria_v2||i.categoria_principal||'agroinsumos')+'" style="margin-right:4px">'+catIco+'</span><strong style="cursor:pointer;color:var(--burg)" onclick="paVerHistorialCompras('+i.id+',\''+i.nombre.replace(/'/g,"\\'")+'\',\'producto\')">'+i.nombre+'</strong>'+(ficha?'<br>'+ficha:'')+'</td>'
@@ -15850,6 +15866,7 @@ function paLoadInsumos(){
         +'<td>'+i.unidad+'</td>'
         +'<td style="text-align:right">'+stockTxt+'</td>'
         +'<td style="text-align:right;font-size:12px">'+precioUsd+'</td>'
+        +'<td style="text-align:center">'+cuentaBadge+'</td>'
         +'<td>'+estadoBadge+'</td>'
         +'<td style="white-space:nowrap">'
           +'<button class="btn bo bs" onclick="paEditarInsumo('+i.id+')" title="Editar" style="margin-right:4px;padding:4px 10px;font-size:11px">✏️ Editar</button>'
@@ -16720,10 +16737,6 @@ function paCambiarTipoFactura(tipo){
 // Cada concepto tiene: descripción, monto neto, IVA, cuenta contable y lote opcional.
 function paAgregarItemServicio(){
   var n = PA.compNSrv++;
-  var optsCuentas = '<option value="">— Elegí cuenta —</option>'
-    + (PA.cuentasGastos||[]).map(function(c){
-        return '<option value="'+c.codigo+'">'+c.codigo+' — '+c.nombre+'</option>';
-      }).join('');
   var optsLotes = '<option value="">— Sin lote / general —</option>'
     + (PA.lotesCache||[]).map(function(l){
         return '<option value="'+l.id+'">'+(l.finca_nombre?l.finca_nombre+' / ':'')+l.nombre+'</option>';
@@ -16759,12 +16772,8 @@ function paAgregarItemServicio(){
         +'<span id="pa-cs-sub-'+n+'" style="font-weight:600">$0</span>'
       +'</div>'
     +'</div>'
-    // Línea 3: cuenta + lote
-    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:12px">'
-      +'<div>'
-        +'<div style="font-size:10px;color:var(--mut);margin-bottom:2px">Cuenta contable <span style="color:var(--err)">*</span></div>'
-        +'<select id="pa-cs-cuenta-'+n+'" style="width:100%;font-size:12px">'+optsCuentas+'</select>'
-      +'</div>'
+    // Línea 3: lote (la cuenta de gasto sale del asiento modelo del proveedor)
+    +'<div style="display:grid;grid-template-columns:1fr;gap:8px;font-size:12px">'
       +'<div>'
         +'<div style="font-size:10px;color:var(--mut);margin-bottom:2px">Lote afectado <span style="color:var(--mut);font-weight:400">(opcional)</span></div>'
         +'<select id="pa-cs-lote-'+n+'" style="width:100%;font-size:12px">'+optsLotes+'</select>'
@@ -16869,18 +16878,15 @@ function paGuardarCompra(){
       var monto = parseFloat(document.getElementById('pa-cs-monto-'+n).value)||0;
       var ivaEl = document.getElementById('pa-cs-iva-'+n);
       var ivaPct = ivaEl && ivaEl.value !== '' ? parseFloat(ivaEl.value) : null;
-      var cuenta = document.getElementById('pa-cs-cuenta-'+n).value;
       var lote = document.getElementById('pa-cs-lote-'+n).value;
       // Saltear items vacíos (el user puede haber agregado uno y dejarlo en blanco)
-      if (!concepto && monto === 0 && !cuenta) return;
+      if (!concepto && monto === 0) return;
       if (!concepto) { errorValidacion = 'Concepto requerido en línea '+(items.length+1); return; }
       if (monto <= 0) { errorValidacion = 'Monto requerido en concepto: '+concepto; return; }
-      if (!cuenta)   { errorValidacion = 'Cuenta contable requerida en concepto: '+concepto; return; }
       items.push({
         concepto: concepto,
         monto_neto: monto,
         iva_porcentaje: ivaPct,
-        cuenta_codigo: cuenta,
         lote_id: lote ? parseInt(lote, 10) : null
       });
     });

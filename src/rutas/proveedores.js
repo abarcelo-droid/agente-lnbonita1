@@ -33,10 +33,11 @@ function getSociedadId(req) {
   return sociedadPCId();
 }
 
-// GET /api/pa/proveedores?q=&rubro=&activo=todos
+// GET /api/pa/proveedores?q=&rubro=&activo=todos&sin_modelo=1
 router.get('/', (req, res) => {
   const { q, rubro } = req.query;
   const verTodos = req.query.activo === 'todos';
+  const soloSinModelo = req.query.sin_modelo === '1';
   const sociedadId = getSociedadId(req);
   const params = [sociedadId];
   let sql = 'SELECT * FROM adm_proveedores WHERE sociedad_id = ?';
@@ -46,8 +47,12 @@ router.get('/', (req, res) => {
     params.push(`%${q}%`, `%${q}%`, `%${q}%`);
   }
   if (rubro) { sql += ' AND rubro = ?'; params.push(rubro); }
+  if (soloSinModelo) { sql += ' AND (asiento_modelo_id IS NULL)'; }
   sql += ' ORDER BY razon_social';
-  res.json({ ok: true, data: db.prepare(sql).all(...params) });
+  const data = db.prepare(sql).all(...params);
+  // Flag derivado para la UI: el proveedor tiene asiento modelo asignado
+  data.forEach(p => { p.tiene_asiento_modelo = p.asiento_modelo_id ? 1 : 0; });
+  res.json({ ok: true, data });
 });
 
 // GET /api/pa/proveedores/:id
