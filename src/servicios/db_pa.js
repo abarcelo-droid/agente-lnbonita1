@@ -3261,5 +3261,23 @@ db.exec(`
   } catch(e) { console.error('[PA] Error agregando titulo_id a pa_cuentas:', e.message); }
 })();
 
+// ── MIGRACIÓN: Asiento modelo por insumo (facturas de bienes) ───────────────
+// Cada insumo puede tener un asiento modelo asignado (como los proveedores).
+// Para facturas de BIENES el asiento sale del modelo del insumo, no del proveedor.
+// El insumo operativo vive en db.js, pero el modelo vive acá (dbPa), así que la
+// vinculación se guarda en esta tabla de mapeo por insumo_id.
+(function migrarInsumoModelo() {
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS pa_insumo_modelo (
+        insumo_id          INTEGER PRIMARY KEY,
+        asiento_modelo_id  INTEGER REFERENCES adm_asientos_modelo(id),
+        actualizado_en     TEXT DEFAULT (datetime('now','localtime'))
+      );
+    `);
+    console.log('[PA] pa_insumo_modelo: tabla lista');
+  } catch(e) { console.error('[PA] Error creando pa_insumo_modelo:', e.message); }
+})();
+
 export { db };
 export default db;

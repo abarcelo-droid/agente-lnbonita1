@@ -12746,14 +12746,22 @@ function paCompAsientoRebuild() {
   // 1) Líneas de gasto/compra (Debe)
   var lineas = [];
   var faltanCuentas = [];
+  var provCuentaId = null;   // cuenta de Proveedores (Haber)
+  var TIPOS_NO_GASTO = ['proveedores','iva','percepcion_iva','percepcion_iibb','percepcion_ganancias','retencion'];
+
+  function gastoLineaDe(mLineas){
+    return (mLineas||[]).find(function(l){ return l.lado === 'debe' && TIPOS_NO_GASTO.indexOf(l.tipo_linea) === -1; })
+        || (mLineas||[]).find(function(l){ return l.tipo_linea === 'libre'; });
+  }
+  function provLineaDe(mLineas){
+    return (mLineas||[]).find(function(l){ return l.tipo_linea === 'proveedores'; });
+  }
 
   if (esServicio) {
-    // Servicios: el neto total va a la cuenta de gasto del modelo del proveedor
+    // Servicios: el neto total va a la cuenta de gasto del modelo del PROVEEDOR
     var neto = PA._compraНето || 0;
     if (neto > 0) {
-      var gastoLinea = (PA._asientoLineasModelo || []).find(function(l){
-        return l.lado === 'debe' && ['proveedores','iva','percepcion_iva','percepcion_iibb','percepcion_ganancias','retencion'].indexOf(l.tipo_linea) === -1;
-      }) || (PA._asientoLineasModelo || []).find(function(l){ return l.tipo_linea === 'libre'; });
+      var gastoLinea = gastoLineaDe(PA._asientoLineasModelo);
       if (gastoLinea) {
         var gc = paCompCuentaPorId(gastoLinea.cuenta_id);
         lineas.push({ cuenta_codigo: gc?gc.codigo:'', cuenta_nombre: gc?gc.nombre:'(cuenta de gasto)', debe: paRound2(neto), haber: 0, descripcion: gc?gc.nombre:'Gasto' });
@@ -12761,9 +12769,11 @@ function paCompAsientoRebuild() {
         faltanCuentas.push('cuenta de gasto del modelo');
       }
     }
+    var pls = provLineaDe(PA._asientoLineasModelo);
+    if (pls) provCuentaId = pls.cuenta_id;
   } else {
-    // Bienes: agrupar netos por cuenta_codigo de cada producto
-    var netoPorCuenta = {}; // codigo → neto
+    // Bienes: gasto agrupado por la cuenta de gasto del modelo de CADA insumo
+    var netoPorCuentaId = {}; // cuenta_id → neto
     document.querySelectorAll('[id^=pa-ci-row-]').forEach(function(row){
       var n = row.dataset.n;
       var insEl = document.getElementById('pa-ci-ins-'+n);
@@ -12773,25 +12783,21 @@ function paCompAsientoRebuild() {
       var prec    = parseFloat((document.getElementById('pa-ci-prec-'+n)||{}).value)||0;
       var sNeto = cantBul * prec;
       if (sNeto <= 0) return;
-      var codigo = '';
-      var selCu = document.getElementById('pa-ci-cuenta-sel-'+n);
-      var zonaCuenta = document.getElementById('pa-ci-cuenta-'+n);
-      if (selCu && zonaCuenta && zonaCuenta.style.display !== 'none' && selCu.value) {
-        codigo = selCu.value;
-      } else {
-        var ins = (PA.insumos||[]).find(function(i){ return String(i.id) === String(insId); });
-        codigo = ins && ins.cuenta_codigo ? ins.cuenta_codigo : '';
-      }
-      var nombreItem = insEl.selectedOptions[0] ? insEl.selectedOptions[0].textContent : '';
-      if (!codigo) { faltanCuentas.push(nombreItem || ('producto '+n)); return; }
-      netoPorCuenta[codigo] = paRound2((netoPorCuenta[codigo]||0) + sNeto);
+      var nombreItem = insEl.selectedOptions[0] ? insEl.selectedOptions[0].textContent : ('producto '+n);
+      var ins = (PA.insumos||[]).find(function(i){ return String(i.id) === String(insId); });
+      var mLineas = ins ? ins.asiento_modelo_lineas : null;
+      if (!mLineas || !mLineas.length) { faltanCuentas.push(nombreItem); return; }
+      var gl = gastoLineaDe(mLineas);
+      if (!gl) { faltanCuentas.push(nombreItem); return; }
+      netoPorCuentaId[gl.cuenta_id] = paRound2((netoPorCuentaId[gl.cuenta_id]||0) + sNeto);
+      if (!provCuentaId) { var pl = provLineaDe(mLineas); if (pl) provCuentaId = pl.cuenta_id; }
     });
-    Object.keys(netoPorCuenta).forEach(function(codigo){
-      var cuenta = paCompCuentaPorCodigo(codigo);
+    Object.keys(netoPorCuentaId).forEach(function(cid){
+      var cuenta = paCompCuentaPorId(cid);
       lineas.push({
-        cuenta_codigo: codigo,
+        cuenta_codigo: cuenta ? cuenta.codigo : '',
         cuenta_nombre: cuenta ? cuenta.nombre : '(cuenta no encontrada)',
-        debe: netoPorCuenta[codigo], haber: 0,
+        debe: netoPorCuentaId[cid], haber: 0,
         descripcion: cuenta ? cuenta.nombre : ''
       });
     });
@@ -12816,13 +12822,12 @@ function paCompAsientoRebuild() {
     }
   });
 
-  // Proveedores (Haber) — del modelo del proveedor
-  var provLinea = (PA._asientoLineasModelo || []).find(function(l){ return l.tipo_linea === 'proveedores'; });
-  if (provLinea) {
-    var pc = paCompCuentaPorId(provLinea.cuenta_id);
+  // Proveedores (Haber) — del modelo (del proveedor en servicios, del insumo en bienes)
+  if (provCuentaId) {
+    var pc = paCompCuentaPorId(provCuentaId);
     lineas.push({ cuenta_codigo: pc?pc.codigo:'', cuenta_nombre: pc?pc.nombre:'Proveedores', debe: 0, haber: paRound2(total), descripcion: 'Proveedores' });
   } else {
-    lineas.push({ cuenta_codigo: '', cuenta_nombre: '⚠ Proveedor sin asiento modelo', debe: 0, haber: paRound2(total), descripcion: 'Proveedores' });
+    lineas.push({ cuenta_codigo: '', cuenta_nombre: esServicio?'⚠ Proveedor sin asiento modelo':'⚠ Producto sin asiento modelo', debe: 0, haber: paRound2(total), descripcion: 'Proveedores' });
   }
 
   paCompAsientoRender(lineas, faltanCuentas);
@@ -13793,6 +13798,15 @@ if(_inpGondola) _inpGondola.addEventListener('keydown', function(e){
       <select id="pa-ins-cuenta-elegir" style="display:none">
         <option value="">— Elegí cuenta —</option>
       </select>
+    </div>
+
+    <!-- Asiento modelo del insumo: define el asiento de las facturas de BIENES -->
+    <div class="fl ff">
+      <label>Asiento modelo <span style="color:var(--mut);font-weight:400;font-size:11px">(para el asiento contable de las facturas de bienes)</span></label>
+      <select id="pa-ins-asiento-modelo">
+        <option value="">— Sin asiento modelo —</option>
+      </select>
+      <div style="font-size:11px;color:var(--mut);margin-top:4px">Sin asiento modelo, este producto no se podrá usar en facturas de compra.</div>
     </div>
 
     <!-- ── LEGACY: campos viejos que mantenemos para no romper compatibilidad ── -->
@@ -16022,6 +16036,17 @@ function paAsegurarSubcategoriasCargadas(){
   });
 }
 
+function paInsCargarModelosSelect(selectedId){
+  var sel = document.getElementById('pa-ins-asiento-modelo');
+  if (!sel) return;
+  return admModApi('/modelos').then(function(r){
+    var modelos = r.data || [];
+    sel.innerHTML = '<option value="">— Sin asiento modelo —</option>'
+      + modelos.map(function(m){ return '<option value="'+m.id+'">'+m.nombre+'</option>'; }).join('');
+    if (selectedId) sel.value = selectedId;
+  });
+}
+
 function paAbrirNuevoInsumo(){
   paAsegurarSubcategoriasCargadas().then(function(){
     document.getElementById('pa-ins-id').value='';
@@ -16040,6 +16065,7 @@ function paAbrirNuevoInsumo(){
     document.getElementById('pa-ins-ficha-actual').style.display='none';
     var pbEl=document.getElementById('pa-ins-pres-base');if(pbEl)pbEl.value='';
     document.getElementById('pa-ins-modal-tit').textContent='Nuevo Insumo';
+    paInsCargarModelosSelect(null);
     paOnCatV2Cambio();
     document.getElementById('pa-mb-insumo').classList.add('on');
   });
@@ -16066,6 +16092,7 @@ function paEditarInsumo(id){
       fichEl.style.display='block';
     } else { fichEl.style.display='none'; }
     document.getElementById('pa-ins-modal-tit').textContent='Editar Insumo';
+    paInsCargarModelosSelect(ins.asiento_modelo_id || null);
     // Setear cascada nueva si el insumo ya está migrado
     document.getElementById('pa-ins-cat-v2').value = ins.categoria_v2 || '';
     paOnCatV2Cambio();
@@ -16126,23 +16153,29 @@ function paGuardarInsumo(){
     .then(function(r){
       if(!r.ok)return toast(r.error||'Error','er');
       var insId=id||r.id;
-      if(fichaFile){
-        var reader=new FileReader();
-        reader.onload=function(e){
-          var b64=e.target.result.split(',')[1];
-          paF('/api/pa/insumos/'+insId+'/ficha',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({data:b64})})
-            .then(function(rf){
-              toast(id?'Insumo actualizado + ficha subida':'Insumo creado + ficha subida');
-              document.getElementById('pa-mb-insumo').classList.remove('on');
-              paLoadInsumos();paF('/api/pa/insumos').then(function(r2){PA.insumos=r2.data||[];});
-            });
-        };
-        reader.readAsDataURL(fichaFile);
-      } else {
-        toast(id?'Insumo actualizado':'Insumo creado');
-        document.getElementById('pa-mb-insumo').classList.remove('on');
-        paLoadInsumos();paF('/api/pa/insumos').then(function(r2){PA.insumos=r2.data||[];});
-      }
+      // Guardar el asiento modelo del insumo (vive en dbPa, endpoint aparte)
+      var modeloSel = document.getElementById('pa-ins-asiento-modelo');
+      var modeloId = modeloSel && modeloSel.value ? parseInt(modeloSel.value) : null;
+      var guardarModelo = paF('/api/pa/insumos/'+insId+'/asiento-modelo',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({asiento_modelo_id:modeloId})});
+      guardarModelo.then(function(){
+        if(fichaFile){
+          var reader=new FileReader();
+          reader.onload=function(e){
+            var b64=e.target.result.split(',')[1];
+            paF('/api/pa/insumos/'+insId+'/ficha',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({data:b64})})
+              .then(function(rf){
+                toast(id?'Insumo actualizado + ficha subida':'Insumo creado + ficha subida');
+                document.getElementById('pa-mb-insumo').classList.remove('on');
+                paLoadInsumos();paF('/api/pa/insumos').then(function(r2){PA.insumos=r2.data||[];});
+              });
+          };
+          reader.readAsDataURL(fichaFile);
+        } else {
+          toast(id?'Insumo actualizado':'Insumo creado');
+          document.getElementById('pa-mb-insumo').classList.remove('on');
+          paLoadInsumos();paF('/api/pa/insumos').then(function(r2){PA.insumos=r2.data||[];});
+        }
+      });
     });
 }
 
@@ -16898,10 +16931,10 @@ function paGuardarCompra(){
   // Asiento contable — el backend lo arma de forma autoritativa.
   // Acá solo hacemos una verificación previa para dar feedback claro al usuario.
   if (!esServicio) {
-    // Bienes: cada producto debe tener cuenta contable (del insumo o elegida en pañol)
-    var faltaCuenta = null;
+    // Bienes: cada producto debe tener ASIENTO MODELO asignado (de ahí sale gasto + proveedores)
+    var faltaModelo = null;
     document.querySelectorAll('[id^=pa-ci-row-]').forEach(function(row){
-      if (faltaCuenta) return;
+      if (faltaModelo) return;
       var n = row.dataset.n;
       var insEl = document.getElementById('pa-ci-ins-'+n);
       var insId = insEl ? insEl.value : null;
@@ -16909,23 +16942,19 @@ function paGuardarCompra(){
       var cantBul = parseFloat((document.getElementById('pa-ci-cantb-'+n)||{}).value)||0;
       var prec    = parseFloat((document.getElementById('pa-ci-prec-'+n)||{}).value)||0;
       if (cantBul*prec <= 0) return;
-      var codigo = '';
-      var selCu = document.getElementById('pa-ci-cuenta-sel-'+n);
-      var zonaCuenta = document.getElementById('pa-ci-cuenta-'+n);
-      if (selCu && zonaCuenta && zonaCuenta.style.display !== 'none' && selCu.value) codigo = selCu.value;
-      else { var ins = (PA.insumos||[]).find(function(i){ return String(i.id)===String(insId); }); codigo = ins && ins.cuenta_codigo ? ins.cuenta_codigo : ''; }
-      if (!codigo) {
-        var nom = insEl.selectedOptions[0] ? insEl.selectedOptions[0].textContent : ('producto '+n);
-        faltaCuenta = nom;
+      var ins = (PA.insumos||[]).find(function(i){ return String(i.id)===String(insId); });
+      if (!ins || !ins.asiento_modelo_id) {
+        faltaModelo = insEl.selectedOptions[0] ? insEl.selectedOptions[0].textContent : ('producto '+n);
       }
     });
-    if (faltaCuenta) {
-      return toast('❌ El producto "'+faltaCuenta+'" no tiene cuenta contable asignada. Asignala en el padrón de insumos antes de registrar.', 'er');
+    if (faltaModelo) {
+      return toast('❌ El producto "'+faltaModelo+'" no tiene asiento modelo asignado. Asignalo en el padrón de insumos (Editar → Asiento modelo) antes de registrar.', 'er');
     }
-  }
-  // El proveedor debe tener asiento modelo (de ahí sale la línea de Proveedores)
-  if (!PA._asientoLineasModelo || !PA._asientoLineasModelo.length) {
-    return toast('❌ El proveedor no tiene asiento modelo asignado. Asignalo en el padrón de proveedores antes de registrar.', 'er');
+  } else {
+    // Servicios: el proveedor debe tener asiento modelo (de ahí salen gasto y Proveedores)
+    if (!PA._asientoLineasModelo || !PA._asientoLineasModelo.length) {
+      return toast('❌ El proveedor no tiene asiento modelo asignado. Asignalo en el padrón de proveedores antes de registrar.', 'er');
+    }
   }
 
   var body = { fecha, nro_factura:factura, tipo_comprobante:tipoComp, proveedor_id:parseInt(prov), notas, items, remito_foto_b64: PA._compraFotoB64||null,
