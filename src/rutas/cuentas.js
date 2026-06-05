@@ -499,7 +499,87 @@ router.post('/:id(\\d+)/mover', requireAdmin, (req, res) => {
   res.json({ ok: true });
 });
 
-// GET /api/pa/cuentas/:id/log
+// POST /api/pa/cuentas/:id/reasignar-titulo
+// Mueve una cuenta a un título (o la saca de un título) y le asigna automáticamente
+// el próximo código libre dentro del destino. Pensado para el "Modo edición" de
+// reorganización del plan de cuentas. El ID de la cuenta NO cambia, por lo que los
+// asientos contables siguen vinculados y muestran el código nuevo automáticamente.
+// body: { titulo_id: number|null, seccion_id?: number }
+router.post('/:id(\\d+)/reasignar-titulo', requireAdmin, (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const cuenta = db.prepare('SELECT * FROM pa_cuentas WHERE id = ?').get(id);
+  if (!cuenta) return res.status(404).json({ error: 'cuenta no encontrada' });
+  if (cuenta.es_sistema) {
+    return res.status(400).json({ error: 'cuenta del sistema, no se puede reorganizar' });
+  }
+
+  const tituloIdRaw = req.body?.titulo_id;
+  const tituloId = (tituloIdRaw === null || tituloIdRaw === undefined || tituloIdRaw === '')
+    ? null : parseInt(tituloIdRaw, 10);
+
+  let seccionId = cuenta.seccion_id;
+  let nuevoCodigo = null;
+
+  try {
+    if (tituloId) {
+      // Destino: un título. La cuenta hereda la sección del título y toma el próximo X.XX.XX.XXXX libre.
+      const tit = db.prepare('SELECT * FROM pa_cuentas_titulos WHERE id = ? AND sociedad_id = ?').get(tituloId, cuenta.sociedad_id);
+      if (!tit) return res.status(400).json({ error: 'titulo_id inválido' });
+      seccionId = tit.seccion_id;
+
+      // Buscar el máximo correlativo (últimos 4 dígitos) entre las cuentas ya asignadas a este título
+      const hermanas = db.prepare('SELECT codigo FROM pa_cuentas WHERE titulo_id = ?').all(tituloId);
+      let max = 0;
+      hermanas.forEach(h => {
+        const partes = String(h.codigo).split('.');
+        const ult = parseInt(partes[partes.length - 1], 10);
+        if (Number.isInteger(ult) && ult > max) max = ult;
+      });
+      // Generar código y garantizar que no choque con ninguno existente en la sociedad
+      let n = max + 1;
+      do {
+        nuevoCodigo = tit.codigo + '.' + String(n).padStart(4, '0');
+        const choca = db.prepare('SELECT id FROM pa_cuentas WHERE codigo = ? AND sociedad_id = ? AND id != ?').get(nuevoCodigo, cuenta.sociedad_id, id);
+        if (!choca) break;
+        n++;
+      } while (n < 10000);
+    } else {
+      // Destino: "Sin título" dentro de la misma sección. Toma próximo X.XX.NN libre.
+      const sec = db.prepare('SELECT * FROM pa_cuentas_secciones WHERE id = ?').get(seccionId);
+      if (!sec) return res.status(400).json({ error: 'la cuenta no tiene sección válida' });
+      const sinTit = db.prepare('SELECT codigo FROM pa_cuentas WHERE seccion_id = ? AND titulo_id IS NULL AND id != ?').all(seccionId, id);
+      let max = 0;
+      sinTit.forEach(h => {
+        const sub = parseInt(String(h.codigo).split('.')[1] || '0', 10);
+        if (Number.isInteger(sub) && sub > max) max = sub;
+      });
+      let n = max + 5;
+      do {
+        nuevoCodigo = sec.codigo + '.' + String(n).padStart(2, '0');
+        const choca = db.prepare('SELECT id FROM pa_cuentas WHERE codigo = ? AND sociedad_id = ? AND id != ?').get(nuevoCodigo, cuenta.sociedad_id, id);
+        if (!choca) break;
+        n++;
+      } while (n < 100);
+    }
+
+    db.prepare(`
+      UPDATE pa_cuentas
+         SET titulo_id = ?, seccion_id = ?, codigo = ?, actualizado_en = datetime('now','localtime')
+       WHERE id = ?
+    `).run(tituloId, seccionId, nuevoCodigo, id);
+
+    logAccion({
+      cuenta_id: id,
+      accion: 'reasignar_titulo',
+      detalle: { antes: { codigo: cuenta.codigo, titulo_id: cuenta.titulo_id }, despues: { codigo: nuevoCodigo, titulo_id: tituloId } },
+      usuario_id: req._user?.id,
+    });
+
+    res.json({ ok: true, codigo: nuevoCodigo, titulo_id: tituloId, seccion_id: seccionId });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
 router.get('/:id(\\d+)/log', (req, res) => {
   const id = parseInt(req.params.id, 10);
   const log = db.prepare(`
