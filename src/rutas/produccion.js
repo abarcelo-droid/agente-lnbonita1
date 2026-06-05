@@ -40,6 +40,70 @@ function campañasActivas(db) {
   return { anualId: anual?.id || null, estacionalId: estacional?.id || null };
 }
 
+// ── Redondeo contable a 2 decimales ─────────────────────────────────────────
+function round2(n) { return Math.round((Number(n) || 0) * 100) / 100; }
+
+// ── Construcción autoritativa del asiento de una factura de compra ──────────
+// Estructura unificada (bienes y servicios):
+//   DEBE  → una línea por cada cuenta contable distinta (gasto/compra), sumando netos
+//           · bienes:    la cuenta sale de cada producto (pa_insumos.cuenta_codigo o item.cuenta_codigo)
+//           · servicios: la cuenta sale de cada concepto (item.cuenta_codigo)
+//   DEBE  → IVA Crédito Fiscal (cuenta de la config impositiva global)
+//   DEBE  → percepciones (cuentas de la config impositiva global) si hay montos
+//   HABER → Proveedores (cuenta tomada del asiento modelo del proveedor) = total
+// Lanza Error con mensaje claro si falta una cuenta o el modelo del proveedor.
+function construirLineasAsientoCompra({ dbPa, items, iva_total, percep, total, modeloLineas, configImp, esServicio }) {
+  const lineas = [];
+
+  // 1) DEBE — agrupar netos por cuenta_codigo
+  const netoPorCuenta = {}; // codigo → neto acumulado
+  for (const it of items) {
+    const codigo = it.cuenta_codigo || it._cuenta_codigo_insumo || null;
+    if (!codigo) {
+      throw new Error(esServicio
+        ? `Un concepto de servicio no tiene cuenta contable asignada`
+        : `Un producto no tiene cuenta contable asignada — asignala en el padrón de insumos antes de registrar`);
+    }
+    netoPorCuenta[codigo] = round2((netoPorCuenta[codigo] || 0) + (it._subNeto || 0));
+  }
+  for (const codigo of Object.keys(netoPorCuenta)) {
+    const cuenta = dbPa.prepare('SELECT id, nombre FROM pa_cuentas WHERE codigo = ? AND activo = 1').get(codigo);
+    if (!cuenta) throw new Error(`La cuenta contable ${codigo} no existe o está desactivada en el plan de cuentas`);
+    lineas.push({ cuenta_id: cuenta.id, debe: round2(netoPorCuenta[codigo]), haber: 0, descripcion: cuenta.nombre });
+  }
+
+  // 2) DEBE — IVA Crédito Fiscal (global)
+  if (round2(iva_total) > 0) {
+    if (!configImp.iva_credito_fiscal) {
+      throw new Error('Falta configurar la cuenta de IVA Crédito Fiscal en Configuración Impositiva Global');
+    }
+    lineas.push({ cuenta_id: configImp.iva_credito_fiscal, debe: round2(iva_total), haber: 0, descripcion: 'IVA Crédito Fiscal' });
+  }
+
+  // 3) DEBE — percepciones (global) si tienen monto
+  [['percepcion_iva', percep.iva], ['percepcion_iibb', percep.iibb], ['percepcion_ganancias', percep.gan]].forEach(function(par) {
+    const clave = par[0], monto = round2(par[1]);
+    if (monto > 0 && configImp[clave]) {
+      lineas.push({ cuenta_id: configImp[clave], debe: monto, haber: 0, descripcion: clave.replace(/_/g, ' ') });
+    }
+  });
+
+  // 4) HABER — Proveedores (del asiento modelo del proveedor)
+  const provLinea = (modeloLineas || []).find(function(ml) { return ml.tipo_linea === 'proveedores'; });
+  if (!provLinea) {
+    throw new Error('El asiento modelo del proveedor no tiene una línea de tipo "Proveedores". Configurala en el Asiento Modelo.');
+  }
+  lineas.push({ cuenta_id: provLinea.cuenta_id, debe: 0, haber: round2(total), descripcion: 'Proveedores' });
+
+  // Verificación de partida doble
+  const sumDebe  = round2(lineas.reduce(function(s, l){ return s + l.debe;  }, 0));
+  const sumHaber = round2(lineas.reduce(function(s, l){ return s + l.haber; }, 0));
+  if (Math.abs(sumDebe - sumHaber) > 0.01) {
+    throw new Error(`El asiento no cuadra: Debe $${sumDebe.toFixed(2)} vs Haber $${sumHaber.toFixed(2)}`);
+  }
+  return lineas;
+}
+
 // ─────────────────────────────────────────────────────────────────────────
 // CUENTA CORRIENTE — listado de proveedores con saldos
 // (montado en /api/pa → ruta final /api/pa/cc/proveedores)
@@ -931,6 +995,49 @@ router.post('/compras', requireAuth, (req, res) => {
     const percep_iibb      = parseFloat(req.body.percep_iibb      || 0);
     const total = neto_total + iva_total + percep_iva + percep_ganancias + percep_iibb;
 
+    // ── VALIDACIÓN + CONSTRUCCIÓN DEL ASIENTO (antes de crear la compra) ──────
+    // Reglas de bloqueo:
+    //   · bienes:    cada producto debe tener cuenta contable; el proveedor debe tener asiento modelo
+    //   · servicios: cada concepto trae su cuenta (ya validado); el proveedor debe tener asiento modelo
+    // Si algo falta, NO se registra la factura (se corta acá con 400).
+    let lineasAsientoPrebuilt = null;
+    {
+      // Resolver cuenta contable de cada item (bienes: desde el insumo si no vino explícita)
+      if (!esServicio) {
+        for (const it of items) {
+          if (!it.cuenta_codigo && it.insumo_id) {
+            const ins = db.prepare('SELECT cuenta_codigo, nombre FROM pa_insumos WHERE id = ?').get(it.insumo_id);
+            it._cuenta_codigo_insumo = ins?.cuenta_codigo || null;
+            if (!it._cuenta_codigo_insumo) {
+              return res.status(400).json({ ok: false, error: `El producto "${ins?.nombre || ('#'+it.insumo_id)}" no tiene cuenta contable asignada. Asignala en el padrón de insumos antes de registrar la factura.` });
+            }
+          }
+        }
+      }
+
+      // El proveedor debe tener asiento modelo (de ahí sale la línea de Proveedores)
+      const provModelo = dbPa.prepare('SELECT asiento_modelo_id, razon_social FROM adm_proveedores WHERE id = ?').get(parseInt(proveedor_id));
+      if (!provModelo?.asiento_modelo_id) {
+        return res.status(400).json({ ok: false, error: `El proveedor "${provModelo?.razon_social || ''}" no tiene asiento modelo asignado. Asignalo en el padrón de proveedores antes de registrar la factura.` });
+      }
+      const modeloLineas = dbPa.prepare('SELECT * FROM adm_asientos_modelo_lineas WHERE modelo_id = ? ORDER BY id').all(provModelo.asiento_modelo_id);
+
+      // Config impositiva global (IVA CF y percepciones)
+      const configImp = {};
+      dbPa.prepare('SELECT clave, cuenta_id FROM adm_config_impositiva WHERE cuenta_id IS NOT NULL').all()
+        .forEach(function(r){ configImp[r.clave] = r.cuenta_id; });
+
+      try {
+        lineasAsientoPrebuilt = construirLineasAsientoCompra({
+          dbPa, items, iva_total,
+          percep: { iva: percep_iva, gan: percep_ganancias, iibb: percep_iibb },
+          total, modeloLineas, configImp, esServicio,
+        });
+      } catch (eBuild) {
+        return res.status(400).json({ ok: false, error: eBuild.message });
+      }
+    }
+
     // Guardar foto remito si viene
     let remito_foto_path = null;
     if (remito_foto_b64) {
@@ -1101,79 +1208,11 @@ router.post('/compras', requireAuth, (req, res) => {
     const id = nuevaCompra();
 
     // ── Generar asiento contable ──────────────────────────────────────────────
-    // Si el frontend envió líneas → usarlas directamente
-    // Si no → auto-generar desde el modelo del proveedor
+    // Las líneas ya fueron validadas y construidas ANTES de crear la compra
+    // (lineasAsientoPrebuilt). Acá solo se persisten.
     let asientoRef = null;
     try {
-      const { asiento_lineas } = req.body;
-      let lineas = asiento_lineas || null;
-
-      if (!lineas || !lineas.length) {
-        // Auto-generar desde modelo del proveedor
-        const prov = dbPa.prepare('SELECT asiento_modelo_id, razon_social FROM adm_proveedores WHERE id=?').get(parseInt(proveedor_id));
-        if (prov?.asiento_modelo_id) {
-          const modeloLineas = dbPa.prepare('SELECT * FROM adm_asientos_modelo_lineas WHERE modelo_id=? ORDER BY id').all(prov.asiento_modelo_id);
-          if (modeloLineas.length >= 2) {
-            // Percepciones enviadas desde el frontend
-            const percepIva  = parseFloat(req.body.percep_iva      || 0);
-            const percepGan  = parseFloat(req.body.percep_ganancias || 0);
-            const percepIibb = parseFloat(req.body.percep_iibb      || 0);
-            const totalConPercep = total + percepIva + percepGan + percepIibb;
-
-            // Leer configuración impositiva global para las cuentas de percepción
-            const configImp = {};
-            dbPa.prepare('SELECT clave, cuenta_id FROM adm_config_impositiva WHERE cuenta_id IS NOT NULL').all()
-              .forEach(r => { configImp[r.clave] = r.cuenta_id; });
-
-            // Mapear tipo_linea a montos de la compra
-            const montosPorTipo = {
-              proveedores:          totalConPercep,  // Haber: deuda total con proveedor
-              iva:                  iva_total,        // Debe: IVA crédito fiscal
-              percepcion_iva:       percepIva,        // Debe: percepción IVA
-              percepcion_iibb:      percepIibb,       // Debe: percepción IIBB
-              percepcion_ganancias: percepGan,        // Debe: percepción Ganancias
-              retencion:            0,
-              libre:                neto_total        // Debe: gasto/compra
-            };
-
-            // Líneas del modelo + líneas de config impositiva si tienen monto
-            lineas = modeloLineas.map(function(ml) {
-              const monto = montosPorTipo[ml.tipo_linea] ?? 0;
-              return {
-                cuenta_id: ml.cuenta_id,
-                debe: ml.tipo === 'debe' ? monto : 0,
-                haber: ml.tipo === 'haber' ? monto : 0,
-                descripcion: ml.descripcion || ml.tipo_linea
-              };
-            }).filter(l => l.debe > 0 || l.haber > 0);
-
-            // Agregar líneas de config impositiva global si tienen monto y no están en el modelo
-            const clavesEnModelo = new Set(modeloLineas.map(ml => ml.tipo_linea));
-            const percepExtra = [
-              { clave: 'percepcion_iva',       monto: percepIva  },
-              { clave: 'percepcion_iibb',       monto: percepIibb },
-              { clave: 'percepcion_ganancias',  monto: percepGan  },
-            ];
-            for (const pe of percepExtra) {
-              if (pe.monto > 0 && !clavesEnModelo.has(pe.clave) && configImp[pe.clave]) {
-                lineas.push({
-                  cuenta_id: configImp[pe.clave],
-                  debe: pe.monto,
-                  haber: 0,
-                  descripcion: pe.clave.replace('_', ' ')
-                });
-              }
-            }
-            // Verificar partida doble
-            const sumDebe  = lineas.reduce((s,l) => s + l.debe,  0);
-            const sumHaber = lineas.reduce((s,l) => s + l.haber, 0);
-            if (Math.abs(sumDebe - sumHaber) > 0.01) {
-              console.log(`[PA] Asiento no cuadra: Debe ${sumDebe} / Haber ${sumHaber} — se omite`);
-              lineas = null;
-            }
-          }
-        }
-      }
+      const lineas = lineasAsientoPrebuilt;
 
       if (lineas && lineas.length >= 2) {
         const año = new Date().getFullYear();
@@ -1192,9 +1231,9 @@ router.post('/compras', requireAuth, (req, res) => {
           for (const l of lineas) {
             const cuentaExiste = dbPa.prepare('SELECT id FROM pa_cuentas WHERE id=?').get(parseInt(l.cuenta_id));
             if (!cuentaExiste) {
-              throw new Error(`Cuenta ID ${l.cuenta_id} no existe. Actualizá el Asiento Modelo del proveedor con las cuentas del nuevo plan de cuentas.`);
+              throw new Error(`Cuenta ID ${l.cuenta_id} no existe en el plan de cuentas`);
             }
-            ins.run(ra.lastInsertRowid, l.cuenta_id, parseFloat(l.debe)||0, parseFloat(l.haber)||0, l.descripcion||null);
+            ins.run(ra.lastInsertRowid, l.cuenta_id, round2(l.debe)||0, round2(l.haber)||0, l.descripcion||null);
           }
           return refCodigo;
         });
