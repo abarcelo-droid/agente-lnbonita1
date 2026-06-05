@@ -12674,138 +12674,189 @@ function paCompOnProveedorChange() {
   }
 }
 
+// Formato 2 decimales para toda la operación de factura
+function paMoney2(n){ return '$ ' + (Number(n)||0).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+function paRound2(n){ return Math.round((Number(n)||0)*100)/100; }
+
+// Cache de config impositiva global { clave: cuenta_id }
+var ADM_MOD_CONFIG = {};
+function admModCargarConfig(cb) {
+  admModApi('/config-impositiva').then(function(r){
+    ADM_MOD_CONFIG = {};
+    (r.data||[]).forEach(function(row){ if (row.cuenta_id) ADM_MOD_CONFIG[row.clave] = row.cuenta_id; });
+    if (cb) cb();
+  });
+}
+
 function paCompAsientoCargar(provId) {
   var wrap = document.getElementById('pa-comp-asiento-wrap');
   if (!wrap) return;
   admModCargarCuentas(function() {
-    fetch('/api/pa/proveedores/' + provId)
-      .then(function(r){ return r.json(); })
-      .then(function(rp) {
-        wrap.style.display = '';
-        var modeloId = rp.data && rp.data.asiento_modelo_id;
-        if (modeloId) {
-          admModApi('/modelos/' + modeloId).then(function(rm) {
-            PA._asientoLineasModelo = (rm.data && rm.data.lineas) || [];
-            var neto  = PA._compraНето  || 0;
-            var iva   = PA._compraIva   || 0;
-            var total = PA._compraTotal || 0;
-            var lineas = paCompAsientoGenerarLineas(PA._asientoLineasModelo, neto, iva, total);
-            paCompAsientoRender(lineas);
-          });
-        } else {
-          PA._asientoLineasModelo = null;
-          var total = PA._compraTotal || 0;
-          paCompAsientoRender([
-            { cuenta_id: '', debe: total, haber: 0,     descripcion: 'Total factura' },
-            { cuenta_id: '', debe: 0,     haber: total, descripcion: 'Total factura' }
-          ]);
-          toast('⚠ Este proveedor no tiene asiento modelo asignado', 'warn');
-        }
-      });
+    admModCargarConfig(function() {
+      fetch('/api/pa/proveedores/' + provId)
+        .then(function(r){ return r.json(); })
+        .then(function(rp) {
+          wrap.style.display = '';
+          var modeloId = rp.data && rp.data.asiento_modelo_id;
+          if (modeloId) {
+            admModApi('/modelos/' + modeloId).then(function(rm) {
+              PA._asientoLineasModelo = (rm.data && rm.data.lineas) || [];
+              paCompAsientoRebuild();
+            });
+          } else {
+            PA._asientoLineasModelo = null;
+            paCompAsientoRebuild();
+          }
+        });
+    });
   });
 }
 
-// Genera las líneas del asiento a partir del modelo y los montos reales
-function paCompAsientoGenerarLineas(lineasModelo, neto, iva, total) {
-  var percep = PA._compraPercep || { iva: 0, gan: 0, iibb: 0 };
+// Busca una cuenta del cache por código → {id, nombre, codigo}
+function paCompCuentaPorCodigo(codigo) {
+  if (!codigo) return null;
+  return ADM_MOD_CUENTAS.find(function(c){ return String(c.codigo) === String(codigo); }) || null;
+}
+function paCompCuentaPorId(id) {
+  if (!id) return null;
+  return ADM_MOD_CUENTAS.find(function(c){ return String(c.id) === String(id); }) || null;
+}
+
+// Reconstruye el asiento PREVIEW (solo lectura) a partir de los items cargados.
+// Misma lógica que el backend: gasto por cuenta (Debe) + IVA CF global (Debe)
+// + percepciones (Debe) + Proveedores del modelo (Haber).
+function paCompAsientoRebuild() {
+  var wrap = document.getElementById('pa-comp-asiento-wrap');
+  if (!wrap || wrap.style.display === 'none') return;
+
+  var esServicio = (PA.tipoFacturaActual === 'servicio');
+  var iva   = PA._compraIva   || 0;
+  var total = PA._compraTotal || 0;
+  var percep = PA._compraPercep || { iva:0, gan:0, iibb:0 };
+
+  // 1) Agrupar netos por cuenta_codigo según los items en el DOM
+  var netoPorCuenta = {}; // codigo → neto
+  var faltanCuentas = [];
+
+  if (esServicio) {
+    document.querySelectorAll('[id^=pa-cs-row-]').forEach(function(row){
+      var n = row.dataset.n;
+      var monto = parseFloat((document.getElementById('pa-cs-monto-'+n)||{}).value)||0;
+      var codigo = (document.getElementById('pa-cs-cuenta-'+n)||{}).value || '';
+      if (monto <= 0) return;
+      if (!codigo) { faltanCuentas.push('concepto sin cuenta'); return; }
+      netoPorCuenta[codigo] = paRound2((netoPorCuenta[codigo]||0) + monto);
+    });
+  } else {
+    document.querySelectorAll('[id^=pa-ci-row-]').forEach(function(row){
+      var n = row.dataset.n;
+      var insEl = document.getElementById('pa-ci-ins-'+n);
+      var insId = insEl ? insEl.value : null;
+      if (!insId) return;
+      var cantBul = parseFloat((document.getElementById('pa-ci-cantb-'+n)||{}).value)||0;
+      var prec    = parseFloat((document.getElementById('pa-ci-prec-'+n)||{}).value)||0;
+      var sNeto = cantBul * prec;
+      if (sNeto <= 0) return;
+      // cuenta: la elegida en zona pañol, si no la del insumo
+      var codigo = '';
+      var selCu = document.getElementById('pa-ci-cuenta-sel-'+n);
+      var zonaCuenta = document.getElementById('pa-ci-cuenta-'+n);
+      if (selCu && zonaCuenta && zonaCuenta.style.display !== 'none' && selCu.value) {
+        codigo = selCu.value;
+      } else {
+        var ins = (PA.insumos||[]).find(function(i){ return String(i.id) === String(insId); });
+        codigo = ins && ins.cuenta_codigo ? ins.cuenta_codigo : '';
+      }
+      var nombreItem = insEl.selectedOptions[0] ? insEl.selectedOptions[0].textContent : '';
+      if (!codigo) { faltanCuentas.push(nombreItem || ('producto '+n)); return; }
+      netoPorCuenta[codigo] = paRound2((netoPorCuenta[codigo]||0) + sNeto);
+    });
+  }
+
   var lineas = [];
-  lineasModelo.forEach(function(l) {
-    var tipo = l.tipo_linea || 'libre';
-    var desc = (l.descripcion || '').toLowerCase();
-    // Retrocompatibilidad: inferir tipo por descripción si es 'libre'
-    if (tipo === 'libre') {
-      if (desc.includes('iva') || desc.includes('crédito fiscal') || desc.includes('credito fiscal')) tipo = 'iva';
-      else if (desc.includes('percep') && desc.includes('iva')) tipo = 'percepcion_iva';
-      else if (desc.includes('iibb') || desc.includes('ingresos brutos')) tipo = 'percepcion_iibb';
-      else if (desc.includes('percep') && (desc.includes('ganancias') || desc.includes('gan'))) tipo = 'percepcion_ganancias';
-      else if (desc.includes('retencion') || desc.includes('retención')) tipo = 'retencion';
-      else if (l.lado === 'haber') tipo = 'proveedores';
-    }
-    var monto = 0;
-    switch(tipo) {
-      case 'iva':                  monto = iva; break;
-      case 'percepcion_iva':       monto = percep.iva; break;
-      case 'percepcion_iibb':      monto = percep.iibb; break;
-      case 'percepcion_ganancias': monto = percep.gan; break;
-      case 'retencion':            monto = 0; break;
-      case 'proveedores':          monto = total; break;
-      default:                     monto = neto; break;
-    }
-    lineas.push({ cuenta_id: l.cuenta_id, debe: l.lado==='debe'?monto:0, haber: l.lado==='haber'?monto:0, descripcion: l.descripcion || tipo });
+
+  // Líneas de gasto/compra (Debe)
+  Object.keys(netoPorCuenta).forEach(function(codigo){
+    var cuenta = paCompCuentaPorCodigo(codigo);
+    lineas.push({
+      cuenta_codigo: codigo,
+      cuenta_nombre: cuenta ? cuenta.nombre : '(cuenta no encontrada)',
+      debe: netoPorCuenta[codigo], haber: 0,
+      descripcion: cuenta ? cuenta.nombre : ''
+    });
   });
-  if (!lineas.length) lineas = [
-    { cuenta_id:'', debe:neto,  haber:0,     descripcion:'Compras neto' },
-    { cuenta_id:'', debe:iva,   haber:0,     descripcion:'IVA Crédito Fiscal' },
-    { cuenta_id:'', debe:0,     haber:total, descripcion:'Proveedores' }
-  ];
-  return lineas;
+
+  // IVA Crédito Fiscal (Debe) — global
+  if (paRound2(iva) > 0) {
+    var ivaCuenta = paCompCuentaPorId(ADM_MOD_CONFIG.iva_credito_fiscal);
+    lineas.push({
+      cuenta_codigo: ivaCuenta ? ivaCuenta.codigo : '',
+      cuenta_nombre: ivaCuenta ? ivaCuenta.nombre : '⚠ IVA CF sin configurar',
+      debe: paRound2(iva), haber: 0, descripcion: 'IVA Crédito Fiscal'
+    });
+  }
+
+  // Percepciones (Debe) — global
+  [['percepcion_iva',percep.iva],['percepcion_iibb',percep.iibb],['percepcion_ganancias',percep.gan]].forEach(function(par){
+    var clave = par[0], monto = paRound2(par[1]);
+    if (monto > 0 && ADM_MOD_CONFIG[clave]) {
+      var cu = paCompCuentaPorId(ADM_MOD_CONFIG[clave]);
+      lineas.push({ cuenta_codigo: cu?cu.codigo:'', cuenta_nombre: cu?cu.nombre:'', debe: monto, haber: 0, descripcion: clave.replace(/_/g,' ') });
+    }
+  });
+
+  // Proveedores (Haber) — del modelo del proveedor
+  var provLinea = (PA._asientoLineasModelo || []).find(function(l){ return l.tipo_linea === 'proveedores'; });
+  if (provLinea) {
+    var pc = paCompCuentaPorId(provLinea.cuenta_id);
+    lineas.push({ cuenta_codigo: pc?pc.codigo:'', cuenta_nombre: pc?pc.nombre:'Proveedores', debe: 0, haber: paRound2(total), descripcion: 'Proveedores' });
+  } else {
+    lineas.push({ cuenta_codigo: '', cuenta_nombre: '⚠ Proveedor sin asiento modelo', debe: 0, haber: paRound2(total), descripcion: 'Proveedores' });
+  }
+
+  paCompAsientoRender(lineas, faltanCuentas);
 }
 
-function paCompAsientoRender(lineas) {
+// Render SOLO LECTURA del asiento
+function paCompAsientoRender(lineas, faltanCuentas) {
   var tbody = document.getElementById('pa-comp-asiento-lineas');
   if (!tbody) return;
   tbody.innerHTML = lineas.map(function(l) {
-    var opts = '<option value="">— Cuenta —</option>' + ADM_MOD_CUENTAS.map(function(c) {
-      return '<option value="' + c.id + '"' + (c.id == l.cuenta_id ? ' selected' : '') + '>[' + (c.codigo||'') + '] ' + c.nombre + '</option>';
-    }).join('');
-    return '<tr>'
-      + '<td style="padding:5px 10px"><select onchange="paCompAsientoActualizar()" style="width:100%;font-size:11px">' + opts + '</select></td>'
-      + '<td style="padding:5px 8px"><input type="number" step="0.01" min="0" value="' + (l.debe||0).toFixed(2) + '" oninput="paCompAsientoActualizar()" style="width:100px;font-size:12px;text-align:right;padding:4px 6px;border:1px solid var(--bor2);border-radius:5px"></td>'
-      + '<td style="padding:5px 8px"><input type="number" step="0.01" min="0" value="' + (l.haber||0).toFixed(2) + '" oninput="paCompAsientoActualizar()" style="width:100px;font-size:12px;text-align:right;padding:4px 6px;border:1px solid var(--bor2);border-radius:5px"></td>'
-      + '<td style="padding:5px 8px"><input value="' + (l.descripcion||'').replace(/"/g,'&quot;') + '" placeholder="Descripción" style="width:100%;font-size:11px;padding:4px 6px;border:1px solid var(--bor2);border-radius:5px"></td>'
-      + '<td style="padding:4px 6px"><button class="btn bd bs" onclick="this.closest(\'tr\').remove();paCompAsientoActualizar()" style="padding:2px 6px;font-size:10px">✕</button></td>'
+    var cuentaTxt = (l.cuenta_codigo ? '<span style="font-family:monospace;color:var(--mut)">['+l.cuenta_codigo+']</span> ' : '') + (l.cuenta_nombre||'');
+    return '<tr style="border-bottom:1px solid var(--bor)">'
+      + '<td style="padding:7px 10px;font-size:12px">' + cuentaTxt + '</td>'
+      + '<td style="padding:7px 10px;text-align:right;font-family:monospace;font-size:12px">' + (l.debe>0 ? (Number(l.debe)).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2}) : '—') + '</td>'
+      + '<td style="padding:7px 10px;text-align:right;font-family:monospace;font-size:12px">' + (l.haber>0 ? (Number(l.haber)).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2}) : '—') + '</td>'
+      + '<td style="padding:7px 10px;font-size:11px;color:var(--mut)">' + (l.descripcion||'') + '</td>'
       + '</tr>';
   }).join('');
-  paCompAsientoActualizar();
-}
 
-function paCompAsientoActualizar() {
-  var rows = document.querySelectorAll('#pa-comp-asiento-lineas tr');
-  var totalDebe = 0, totalHaber = 0;
-  rows.forEach(function(tr) {
-    var nums = tr.querySelectorAll('input[type=number]');
-    totalDebe  += parseFloat((nums[0] && nums[0].value) || 0);
-    totalHaber += parseFloat((nums[1] && nums[1].value) || 0);
-  });
+  var totalDebe = lineas.reduce(function(s,l){ return s + (Number(l.debe)||0); }, 0);
+  var totalHaber = lineas.reduce(function(s,l){ return s + (Number(l.haber)||0); }, 0);
   var debeEl   = document.getElementById('pa-comp-as-debe');
   var haberEl  = document.getElementById('pa-comp-as-haber');
   var estadoEl = document.getElementById('pa-comp-asiento-estado');
-  if (debeEl)  debeEl.textContent  = '$ ' + totalDebe.toFixed(2);
-  if (haberEl) haberEl.textContent = '$ ' + totalHaber.toFixed(2);
+  if (debeEl)  debeEl.textContent  = paMoney2(totalDebe);
+  if (haberEl) haberEl.textContent = paMoney2(totalHaber);
   if (estadoEl) {
-    var ok = Math.abs(totalDebe - totalHaber) < 0.01 && totalDebe > 0;
-    if (ok) { estadoEl.style.color = 'var(--ok)'; estadoEl.textContent = '✅ Cuadra'; }
-    else if (totalDebe === 0 && totalHaber === 0) { estadoEl.style.color = 'var(--mut)'; estadoEl.textContent = '—'; }
-    else { estadoEl.style.color = 'var(--err)'; estadoEl.textContent = '❌ No cuadra'; }
+    if (faltanCuentas && faltanCuentas.length) {
+      estadoEl.style.color = 'var(--err)';
+      estadoEl.textContent = '❌ Falta cuenta contable';
+    } else if (Math.abs(totalDebe - totalHaber) < 0.01 && totalDebe > 0) {
+      estadoEl.style.color = 'var(--ok)';
+      estadoEl.textContent = '✅ Cuadra';
+    } else if (totalDebe === 0 && totalHaber === 0) {
+      estadoEl.style.color = 'var(--mut)';
+      estadoEl.textContent = '—';
+    } else {
+      estadoEl.style.color = 'var(--err)';
+      estadoEl.textContent = '❌ No cuadra';
+    }
   }
-}
-
-function paCompAsientoAgregarLinea() {
-  var tbody = document.getElementById('pa-comp-asiento-lineas');
-  if (!tbody) return;
-  var opts = '<option value="">— Cuenta —</option>' + ADM_MOD_CUENTAS.map(function(c) {
-    return '<option value="' + c.id + '">[' + (c.codigo||'') + '] ' + c.nombre + '</option>';
-  }).join('');
-  var tr = document.createElement('tr');
-  tr.innerHTML = '<td style="padding:5px 10px"><select onchange="paCompAsientoActualizar()" style="width:100%;font-size:11px">' + opts + '</select></td>'
-    + '<td style="padding:5px 8px"><input type="number" step="0.01" min="0" value="0.00" oninput="paCompAsientoActualizar()" style="width:100px;font-size:12px;text-align:right;padding:4px 6px;border:1px solid var(--bor2);border-radius:5px"></td>'
-    + '<td style="padding:5px 8px"><input type="number" step="0.01" min="0" value="0.00" oninput="paCompAsientoActualizar()" style="width:100px;font-size:12px;text-align:right;padding:4px 6px;border:1px solid var(--bor2);border-radius:5px"></td>'
-    + '<td style="padding:5px 8px"><input placeholder="Descripción" style="width:100%;font-size:11px;padding:4px 6px;border:1px solid var(--bor2);border-radius:5px"></td>'
-    + '<td style="padding:4px 6px"><button class="btn bd bs" onclick="this.closest(\'tr\').remove();paCompAsientoActualizar()" style="padding:2px 6px;font-size:10px">✕</button></td>';
-  tbody.appendChild(tr);
-  paCompAsientoActualizar();
 }
 
 function paCompAsientoSincronizarTotal(total, neto, iva) {
-  neto  = neto  !== undefined ? neto  : (PA._compraНето  || total);
-  iva   = iva   !== undefined ? iva   : (PA._compraIva   || 0);
-  // Si tenemos el modelo guardado, re-renderizar completo con los nuevos montos
-  if (PA._asientoLineasModelo && PA._asientoLineasModelo.length) {
-    var lineas = paCompAsientoGenerarLineas(PA._asientoLineasModelo, neto, iva, total);
-    paCompAsientoRender(lineas);
-    return;
-  }
-  paCompAsientoActualizar();
+  paCompAsientoRebuild();
 }
 
 function paCompAsientoGetLineas() {
@@ -13923,7 +13974,7 @@ if(_inpGondola) _inpGondola.addEventListener('keydown', function(e){
   <!-- ── ASIENTO CONTABLE INLINE ──────────────────────────────────── -->
   <div id="pa-comp-asiento-wrap" style="display:none;margin-top:16px;border:1px solid var(--bor);border-radius:10px;overflow:hidden">
     <div style="background:var(--bg);padding:9px 14px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--bor)">
-      <div style="font-size:11px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.07em">📒 Asiento contable</div>
+      <div style="font-size:11px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.07em">📒 Asiento contable <span style="font-weight:400;text-transform:none;letter-spacing:0">(generado automáticamente — solo lectura)</span></div>
       <div id="pa-comp-asiento-estado" style="font-size:12px;font-weight:700;color:var(--mut)">—</div>
     </div>
     <div style="overflow-x:auto">
@@ -13931,17 +13982,15 @@ if(_inpGondola) _inpGondola.addEventListener('keydown', function(e){
         <thead>
           <tr style="background:var(--bg);border-bottom:1px solid var(--bor)">
             <th style="padding:7px 10px;text-align:left;font-size:10px;color:var(--mut);text-transform:uppercase;letter-spacing:.06em">Cuenta</th>
-            <th style="padding:7px 10px;text-align:right;font-size:10px;color:var(--mut);text-transform:uppercase;letter-spacing:.06em;width:110px">Debe $</th>
-            <th style="padding:7px 10px;text-align:right;font-size:10px;color:var(--mut);text-transform:uppercase;letter-spacing:.06em;width:110px">Haber $</th>
+            <th style="padding:7px 10px;text-align:right;font-size:10px;color:var(--mut);text-transform:uppercase;letter-spacing:.06em;width:120px">Debe $</th>
+            <th style="padding:7px 10px;text-align:right;font-size:10px;color:var(--mut);text-transform:uppercase;letter-spacing:.06em;width:120px">Haber $</th>
             <th style="padding:7px 10px;text-align:left;font-size:10px;color:var(--mut);text-transform:uppercase;letter-spacing:.06em">Descripción</th>
-            <th style="width:32px"></th>
           </tr>
         </thead>
         <tbody id="pa-comp-asiento-lineas"></tbody>
       </table>
     </div>
-    <div style="padding:8px 12px;border-top:1px solid var(--bor);display:flex;justify-content:space-between;align-items:center;background:var(--bg)">
-      <button class="btn bo bs" onclick="paCompAsientoAgregarLinea()" style="font-size:11px">+ Línea</button>
+    <div style="padding:8px 12px;border-top:1px solid var(--bor);display:flex;justify-content:flex-end;align-items:center;background:var(--bg)">
       <div style="display:flex;gap:20px;font-size:12px;font-family:monospace;color:var(--mut)">
         <span>Debe: <strong id="pa-comp-as-debe" style="color:var(--txt)">$0.00</strong></span>
         <span>Haber: <strong id="pa-comp-as-haber" style="color:var(--txt)">$0.00</strong></span>
@@ -16840,23 +16889,38 @@ function paGuardarCompra(){
   if (errorValidacion) return toast(errorValidacion, 'er');
   if(!items.length) return toast(esServicio ? 'Agregá al menos un concepto' : 'Agregá al menos un producto','er');
 
-  // Asiento contable — opcional desde frontend, obligatorio el resultado final
-  var asWrap = document.getElementById('pa-comp-asiento-wrap');
-  var asientoLineas = null;
-
-  if (asWrap && asWrap.style.display !== 'none') {
-    // Asiento visible: validar y recolectar líneas
-    asientoLineas = paCompAsientoGetLineas();
-    if (!asientoLineas.length) {
-      return toast('❌ El asiento contable está vacío. Completá las líneas antes de guardar.', 'er');
-    }
-    var asDebe = 0, asHaber = 0;
-    asientoLineas.forEach(function(l){ asDebe += l.debe; asHaber += l.haber; });
-    if (Math.abs(asDebe - asHaber) >= 0.01) {
-      return toast('❌ El asiento contable no cuadra (Debe: $' + asDebe.toFixed(2) + ' / Haber: $' + asHaber.toFixed(2) + '). Corregilo antes de guardar.', 'er');
+  // Asiento contable — el backend lo arma de forma autoritativa.
+  // Acá solo hacemos una verificación previa para dar feedback claro al usuario.
+  if (!esServicio) {
+    // Bienes: cada producto debe tener cuenta contable (del insumo o elegida en pañol)
+    var faltaCuenta = null;
+    document.querySelectorAll('[id^=pa-ci-row-]').forEach(function(row){
+      if (faltaCuenta) return;
+      var n = row.dataset.n;
+      var insEl = document.getElementById('pa-ci-ins-'+n);
+      var insId = insEl ? insEl.value : null;
+      if (!insId) return;
+      var cantBul = parseFloat((document.getElementById('pa-ci-cantb-'+n)||{}).value)||0;
+      var prec    = parseFloat((document.getElementById('pa-ci-prec-'+n)||{}).value)||0;
+      if (cantBul*prec <= 0) return;
+      var codigo = '';
+      var selCu = document.getElementById('pa-ci-cuenta-sel-'+n);
+      var zonaCuenta = document.getElementById('pa-ci-cuenta-'+n);
+      if (selCu && zonaCuenta && zonaCuenta.style.display !== 'none' && selCu.value) codigo = selCu.value;
+      else { var ins = (PA.insumos||[]).find(function(i){ return String(i.id)===String(insId); }); codigo = ins && ins.cuenta_codigo ? ins.cuenta_codigo : ''; }
+      if (!codigo) {
+        var nom = insEl.selectedOptions[0] ? insEl.selectedOptions[0].textContent : ('producto '+n);
+        faltaCuenta = nom;
+      }
+    });
+    if (faltaCuenta) {
+      return toast('❌ El producto "'+faltaCuenta+'" no tiene cuenta contable asignada. Asignala en el padrón de insumos antes de registrar.', 'er');
     }
   }
-  // Si asiento no visible: el backend lo auto-genera desde el modelo del proveedor
+  // El proveedor debe tener asiento modelo (de ahí sale la línea de Proveedores)
+  if (!PA._asientoLineasModelo || !PA._asientoLineasModelo.length) {
+    return toast('❌ El proveedor no tiene asiento modelo asignado. Asignalo en el padrón de proveedores antes de registrar.', 'er');
+  }
 
   var body = { fecha, nro_factura:factura, tipo_comprobante:tipoComp, proveedor_id:parseInt(prov), notas, items, remito_foto_b64: PA._compraFotoB64||null,
     campaña_anual_id: compCampAnual, campaña_estacional_id: compCampEstac||null,
@@ -16865,7 +16929,6 @@ function paGuardarCompra(){
     percep_iibb: PA._compraPercep?.iibb || 0
   };
   if (esServicio) body.tipo_factura = 'servicio';
-  if (asientoLineas && asientoLineas.length) body.asiento_lineas = asientoLineas;
 
   paF('/api/pa/compras',{method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify(body)
@@ -17299,7 +17362,7 @@ function paActTotalComp(){
     var sTotal= sNeto + sIva;
 
     var se=document.getElementById('pa-ci-sub-'+n);
-    if(se)se.textContent=paMoney(sTotal);
+    if(se)se.textContent=paMoney2(sTotal);
 
     var hint=document.getElementById('pa-ci-hint-'+n);
     if(hint){
@@ -17326,7 +17389,7 @@ function paActTotalComp(){
     var sIva = monto * (ivaPct/100);
     var sTotal = monto + sIva;
     var sub = document.getElementById('pa-cs-sub-'+n);
-    if (sub) sub.textContent = paMoney(sTotal);
+    if (sub) sub.textContent = paMoney2(sTotal);
     neto += monto; iva += sIva;
   });
   var total=neto+iva;
@@ -17340,11 +17403,11 @@ function paActTotalComp(){
   PA._compraНето    = neto;
   PA._compraIva     = iva;
   PA._compraPercep  = { iva: percepIva, gan: percepGan, iibb: percepIibb };
-  document.getElementById('pa-comp-total').textContent=paMoney(total);
+  document.getElementById('pa-comp-total').textContent=paMoney2(total);
   var netoEl=document.getElementById('pa-comp-neto');
   var ivaEl2=document.getElementById('pa-comp-iva');
-  if(netoEl)netoEl.textContent=paMoney(neto);
-  if(ivaEl2)ivaEl2.textContent=paMoney(iva);
+  if(netoEl)netoEl.textContent=paMoney2(neto);
+  if(ivaEl2)ivaEl2.textContent=paMoney2(iva);
   var asWrap = document.getElementById('pa-comp-asiento-wrap');
   if (asWrap && asWrap.style.display !== 'none') paCompAsientoSincronizarTotal(total, neto, iva);
 }
