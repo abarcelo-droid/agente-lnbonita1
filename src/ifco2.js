@@ -489,6 +489,9 @@
       .then(function (r) { return r.json(); })
       .then(function (d) {
         if (!d || d.error) { box.innerHTML = empty('No se pudo procesar: ' + ((d && d.error) || 'error')); return; }
+        // Guardamos el cruce para que "Abrir consolidación" salte directo a revisar/aplicar sin re-subir
+        // el Excel (el modal legacy reusa este mismo objeto vía ifcoConsolidarDesdeCruce).
+        window.__ifco2ConsolData = d;
         // OJO: el endpoint devuelve a_marcar/ya_consolidados/no_encontrados como ARRAYS de {archivo, sistema}
         // (no como conteos). Hay que mostrar su .length — concatenar el array crudo da "[object Object],…".
         function grp(lbl, g) { g = g || {};
@@ -504,7 +507,7 @@
             + '</span></div>'; }
         box.innerHTML = '<div class="sectlabel">A consolidar · ya · no encontrados</div>' + grp('Despachos', d.despachos) + grp('Ingresos', d.ingresos) + grp('Altas R22', d.r22)
           + '<div class="sectlabel" style="margin-top:12px">Balance archivo vs sistema</div>' + bal('Egresos', d.balance_egresos) + bal('Ingresos', d.balance_ingresos)
-          + '<button class="btn btn-pri btn-sm" style="margin-top:12px;width:100%;justify-content:center" onclick="__ifco2Legacy(\'ifcoAbrirConsolidar\')">' + ic('check-check') + ' Abrir consolidación (revisar y aplicar)</button>';
+          + '<button class="btn btn-pri btn-sm" style="margin-top:12px;width:100%;justify-content:center" onclick="__ifco2Legacy(\'ifcoConsolidarDesdeCruce\')">' + ic('check-check') + ' Abrir consolidación (revisar y aplicar)</button>';
         icons();
       }).catch(function () { box.innerHTML = empty('Error de red al procesar el archivo'); });
   };
