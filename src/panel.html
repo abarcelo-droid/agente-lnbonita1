@@ -24258,25 +24258,44 @@ async function ifcoConsolidarPreview(ev) {
     const r = await fetch('/api/ifco/consolidar/preview', { method:'POST', credentials:'include', body:fd });
     const data = await r.json();
     if (!r.ok) throw new Error(data.error || 'HTTP '+r.status);
-
-    _ifcoCs2.data = data;
-    // Inicializar selecciones: por defecto TODOS los a_marcar marcados, ningún no_encontrado para crear
-    _ifcoCs2.sel = { despachos: { a:{}, no:[] }, ingresos: { a:{}, no:[] }, r22: { a:{}, no:[] } };
-    ['despachos','ingresos','r22'].forEach(function(cat) {
-      (data[cat].a_marcar || []).forEach(function(it){ _ifcoCs2.sel[cat].a[it.sistema.id] = true; });
-      _ifcoCs2.sel[cat].no = (data[cat].no_encontrados || []).map(function(it){
-        return Object.assign({ create: false }, it);
-      });
-    });
-    document.getElementById('ifco-cs2-loading').style.display = 'none';
-    document.getElementById('ifco-cs2-stepper').style.display = 'block';
-    _ifcoCs2.step = 1;
-    _ifcoCsRender();
+    _ifcoConsolidarMostrarCruce(data);
   } catch(e) {
     alert('Error: ' + e.message);
     document.getElementById('ifco-cs2-step0').style.display   = 'block';
     document.getElementById('ifco-cs2-loading').style.display = 'none';
   }
+}
+
+// Puebla el wizard a partir de un cruce ya calculado y salta a la pantalla de revisar (step 1).
+// Lo usan tanto la subida en el modal (ifcoConsolidarPreview) como la entrada desde la vista
+// previa de IFCO2 (ifcoConsolidarDesdeCruce), que reusa el cruce sin re-subir el archivo.
+function _ifcoConsolidarMostrarCruce(data) {
+  _ifcoCs2.data = data;
+  // Inicializar selecciones: por defecto TODOS los a_marcar marcados, ningún no_encontrado para crear
+  _ifcoCs2.sel = { despachos: { a:{}, no:[] }, ingresos: { a:{}, no:[] }, r22: { a:{}, no:[] } };
+  ['despachos','ingresos','r22'].forEach(function(cat) {
+    (data[cat].a_marcar || []).forEach(function(it){ _ifcoCs2.sel[cat].a[it.sistema.id] = true; });
+    _ifcoCs2.sel[cat].no = (data[cat].no_encontrados || []).map(function(it){
+      return Object.assign({ create: false }, it);
+    });
+  });
+  document.getElementById('ifco-cs2-step0').style.display   = 'none';
+  document.getElementById('ifco-cs2-loading').style.display = 'none';
+  document.getElementById('ifco-cs2-stepper').style.display = 'block';
+  _ifcoCs2.step = 1;
+  _ifcoCsRender();
+}
+
+// Entrada desde la vista previa de IFCO2: abre el modal directo en "revisar/aplicar" reusando
+// el cruce que ya calculó __ifco2Preview (window.__ifco2ConsolData), sin volver a subir el Excel.
+function ifcoConsolidarDesdeCruce() {
+  const data = window.__ifco2ConsolData;
+  if (!data) { ifcoAbrirConsolidar(); return; }  // fallback: sin cruce guardado, pedir archivo
+  _ifcoCs2 = { data: null, sel: null, step: 0 };
+  document.getElementById('ifco-cs2-result').style.display     = 'none';
+  document.getElementById('ifco-cs2-pane').style.display       = 'block';
+  document.getElementById('ifco-mb-consolidar').classList.add('on');
+  _ifcoConsolidarMostrarCruce(data);
 }
 
 function _ifcoCsRender() {
