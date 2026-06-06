@@ -556,26 +556,46 @@
       var E = rows || [];
       var salFil = st.salFiltro || '';
       var Ef = salFil ? E.filter(function (e) { return e.estado === salFil; }) : E;
+      // Aceptación digital del proveedor (link público con token): badge de estado por fila, para ver
+      // de un vistazo qué galpones ya confirmaron la recepción aunque SG no la haya cargado a mano.
+      function aceptBadge(e) {
+        if (!e.aceptacion_token) return '';
+        if (e.aceptado_en) return '<div class="sub2" style="color:var(--i-ok)" title="Aceptado por ' + esc(e.aceptado_por_nombre || '?') + ' · DNI ' + esc(e.aceptado_por_dni || '?') + ' · ' + fdshort(e.aceptado_en) + '">' + ic('check') + ' Aceptado</div>';
+        if (e.visto_en)    return '<div class="sub2" style="color:var(--i-warn)" title="Abrió el link el ' + fdshort(e.visto_en) + ' pero todavía no confirmó">' + ic('eye') + ' Visto, sin confirmar</div>';
+        return '<div class="sub2 muted">' + ic('clock') + ' Sin abrir</div>';
+      }
       var rowsHtml = Ef.length ? Ef.map(function (e) {
         var env = e.cantidad_enviada || 0, rec = e.cantidad_recibida || 0, pend = env - rec;
         var occ = env ? Math.round(rec / env * 100) : 0;
         var dias = diasDesde(e.fecha_envio);
-        var dchip = e.estado === 'recibido' ? '<span class="dias ok">' + dias + '&thinsp;d</span>' : diasChip(dias, 10, 15);
+        var aceptado = !!e.aceptado_en;
+        // Un envío aceptado por link ya no está "atrasado": la antigüedad no debe alarmar (rojo).
+        var dchip = (e.estado === 'recibido' || aceptado) ? '<span class="dias ok">' + dias + '&thinsp;d</span>' : diasChip(dias, 10, 15);
+        // Recepción: si hubo recepción manual mostramos el % de ocupación; si todavía no, pero el
+        // proveedor ya aceptó por link, lo reflejamos como "aceptado digital" en vez de un 0% engañoso.
+        var recepCell = (rec > 0 || e.estado === 'recibido' || e.estado === 'parcial')
+          ? '<div style="display:flex;align-items:center;gap:8px"><div class="mbar ' + (occ === 100 ? 'ok' : (occ > 0 ? 'warn' : '')) + '" style="width:80px"><i style="width:' + occ + '%"></i></div><span class="sub2 tnum">' + occ + '%</span></div>'
+          : (aceptado ? '<span class="tag consol">' + ic('check') + ' aceptado digital</span>'
+                      : '<div style="display:flex;align-items:center;gap:8px"><div class="mbar" style="width:80px"><i style="width:0%"></i></div><span class="sub2 tnum">0%</span></div>');
+        var linkBtn = e.aceptacion_token ? '<button class="btn btn-ghost btn-sm" title="Copiar link de aceptación para mandar al galpón por WhatsApp" onclick="__ifco2Legacy(\'ifcoCopiarLinkEnvio\',\'' + esc(e.n_remito_interno || '') + '\',\'' + esc(e.aceptacion_token) + '\')">' + ic('link') + ' Link</button>' : '';
         return '<tr><td class="mono lead">' + esc(e.n_remito_interno || '—') + '</td><td>' + fdate(e.fecha_envio) + '</td><td class="lead">' + esc(e.proveedor_nombre || '—') + '</td>'
           + '<td class="r num-strong">' + nf(env) + '</td><td class="r">' + nf(rec) + '</td><td class="r ' + (pend > 0 ? '' : 'muted') + '">' + (pend > 0 ? nf(pend) : '0') + '</td>'
-          + '<td><div style="display:flex;align-items:center;gap:8px"><div class="mbar ' + (occ === 100 ? 'ok' : (occ > 0 ? 'warn' : '')) + '" style="width:80px"><i style="width:' + occ + '%"></i></div><span class="sub2 tnum">' + occ + '%</span></div></td>'
-          + '<td>' + badge(e.estado) + '</td><td class="c">' + dchip + '</td>'
-          + '<td><div class="rowact">' + (e.estado !== 'recibido' ? '<button class="btn btn-pri btn-sm" onclick="__ifco2Legacy(\'ifcoAbrirRecepcion\',' + e.id + ')">' + ic('package-check') + ' Recepcionar</button>' : '') + '<button class="btn-icon btn-ghost" onclick="__ifco2MenuEnvio(event,' + e.id + ',\'' + esc(e.n_remito_interno || '') + '\')">' + ic('more-horizontal') + '</button></div></td></tr>';
+          + '<td>' + recepCell + '</td>'
+          + '<td>' + badge(e.estado) + aceptBadge(e) + '</td><td class="c">' + dchip + '</td>'
+          + '<td><div class="rowact">' + (e.estado !== 'recibido' ? '<button class="btn btn-pri btn-sm" onclick="__ifco2Legacy(\'ifcoAbrirRecepcion\',' + e.id + ')">' + ic('package-check') + ' Recepcionar</button>' : '') + linkBtn + '<button class="btn-icon btn-ghost" onclick="__ifco2MenuEnvio(event,' + e.id + ',\'' + esc(e.n_remito_interno || '') + '\')">' + ic('more-horizontal') + '</button></div></td></tr>';
       }).join('') : '<tr><td colspan="10">' + empty('Sin envíos') + '</td></tr>';
       var totEnv = E.reduce(function (a, e) { return a + (e.cantidad_enviada || 0); }, 0);
       var totRec = E.reduce(function (a, e) { return a + (e.cantidad_recibida || 0); }, 0);
-      var venc = E.filter(function (e) { return e.estado === 'enviado' && diasDesde(e.fecha_envio) >= 15; });
+      // "Atrasado" = enviado, +15 días, y NI recepcionado a mano NI aceptado por link. Sin el chequeo
+      // de aceptado_en, los envíos que el galpón ya confirmó digitalmente aparecían como vencidos.
+      var venc = E.filter(function (e) { return e.estado === 'enviado' && diasDesde(e.fecha_envio) >= 15 && !e.aceptado_en; });
+      var aceptDigital = E.filter(function (e) { return e.aceptado_en && e.estado !== 'recibido'; }).length;
       h.innerHTML =
         '<div class="vh"><div><h2>' + ic('log-out') + ' Salidas a proveedor</h2><div class="vh-sub">Cajones vacíos que San Gerónimo entrega a cada galpón (otros depósitos) para llenar con producto</div></div>'
         + '<div class="actions"><button class="btn btn-pri btn-sm" onclick="__ifco2Reuse(\'ifcoAbrirNuevoEnvio\')">' + ic('plus') + ' Nueva salida</button></div></div>'
-        + (venc.length ? '<div class="banner warn">' + ic('clock') + '<div><b>' + venc.length + ' envíos sin recepcionar hace +15 días.</b> El proveedor debe confirmar la recepción para que los cajones queden a su cargo.</div></div>' : '')
+        + (venc.length ? '<div class="banner warn">' + ic('clock') + '<div><b>' + venc.length + ' envíos sin recepcionar ni aceptar hace +15 días.</b> El proveedor debe confirmar la recepción (a mano o por el link) para que los cajones queden a su cargo.</div></div>' : '')
         + '<div class="filters"><div class="seg">' + [['', 'Todos', E.length], ['enviado', 'Enviados', E.filter(function (e) { return e.estado === 'enviado'; }).length], ['parcial', 'Parciales', E.filter(function (e) { return e.estado === 'parcial'; }).length], ['recibido', 'Recibidos', E.filter(function (e) { return e.estado === 'recibido'; }).length]].map(function (s) { return '<button class="' + (salFil === s[0] ? 'on' : '') + '" onclick="__ifco2SegV(\'salFiltro\',\'salidas\',\'' + s[0] + '\')">' + s[1] + '<span class="n">' + s[2] + '</span></button>'; }).join('') + '</div>'
-        + '<span class="chip-count"><b>' + E.length + '</b> envíos · <b>' + nf(totEnv - totRec) + '</b> caj. pendientes</span></div>'
+        + '<span class="chip-count"><b>' + E.length + '</b> envíos · <b>' + nf(totEnv - totRec) + '</b> caj. pendientes' + (aceptDigital ? ' · <b style="color:var(--i-ok)">' + aceptDigital + '</b> aceptados por link' : '') + '</span></div>'
         + '<div class="card"><div class="card-b flush"><div class="tbl-wrap"><table class="dt"><thead><tr><th>N° envío</th><th>Fecha</th><th>Proveedor</th><th class="r">Enviado</th><th class="r">Recib.</th><th class="r">Pend.</th><th>Recepción</th><th>Estado</th><th class="c">Antig.</th><th></th></tr></thead><tbody>' + rowsHtml + '</tbody>'
         + '<tr class="totrow"><td colspan="3">Total</td><td class="r">' + nf(totEnv) + '</td><td class="r">' + nf(totRec) + '</td><td class="r">' + nf(totEnv - totRec) + '</td><td colspan="4"></td></tr></table></div></div></div>';
     });
