@@ -20198,6 +20198,9 @@ function ppAsistSetCampaña(which) {
 // Al cambiar la tarea: si es Post-Cosecha (y es alta nueva y hay campaña anterior),
 // muestra el toggle Vigente/Anterior; si no, fuerza Vigente y lo oculta.
 function ppAsistTareaChange() {
+  // Cambiar la tarea re-filtra el dropdown de lotes: post-cosecha matchea contra el cultivo
+  // de la campaña anterior; si no, contra el vigente. (Antes solo se re-filtraba al cambiar el rubro.)
+  ppFillLotes(document.getElementById('pp-as-lote').value, null);
   var wrap = document.getElementById('pp-as-postcos-wrap'); if (!wrap) return;
   var d = (PP.asistDefaults && PP.asistDefaults.campanas) || {};
   var tid = document.getElementById('pp-as-tarea').value;
@@ -20264,8 +20267,18 @@ function ppAsistRubroSel() {
   return (d.cuentas_mo || []).find(function(c){ return String(c.id) === String(id); }) || null;
 }
 
-// Llena el select de lotes. Si el rubro es productivo con cultivo asociado,
-// filtra a los lotes de ese cultivo; si no, todos los lotes activos.
+// ¿La tarea elegida está marcada post_cosecha? (labores cruzadas sobre lote de campaña pasada)
+function ppTareaEsPostCosecha() {
+  var d = PP.asistDefaults || {};
+  var tid = document.getElementById('pp-as-tarea').value;
+  if (!tid) return false;
+  var t = (d.tareas || []).find(function(x){ return String(x.id) === String(tid); });
+  return !!(t && t.post_cosecha);
+}
+
+// Llena el select de lotes. Si el rubro es productivo con cultivo asociado, filtra a los lotes
+// de ese cultivo. Tarea post-cosecha → matchea contra el cultivo de la campaña ANTERIOR del lote
+// (cultivo_anterior); si no, contra el cultivo vigente (cultivo). Fallback: si nadie matchea, todos.
 function ppFillLotes(selId, rubroId) {
   var d = PP.asistDefaults || {};
   var rubro = rubroId
@@ -20273,7 +20286,8 @@ function ppFillLotes(selId, rubroId) {
     : ppAsistRubroSel();
   var lotes = d.lotes || [];
   if (rubro && rubro.mo_cultivo) {
-    var fil = lotes.filter(function(l){ return (l.cultivo || '') === rubro.mo_cultivo; });
+    var campo = ppTareaEsPostCosecha() ? 'cultivo_anterior' : 'cultivo';
+    var fil = lotes.filter(function(l){ return (l[campo] || '') === rubro.mo_cultivo; });
     if (fil.length) lotes = fil; // si no hay match, dejamos todos como fallback
   }
   document.getElementById('pp-as-lote').innerHTML = '<option value="">— Elegir —</option>' +

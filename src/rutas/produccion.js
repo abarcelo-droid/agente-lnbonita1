@@ -3441,11 +3441,18 @@ router.get('/personal/asistencias/defaults', requireAuth, (req, res) => {
     const anuales    = db.prepare("SELECT id, nombre, activa FROM pa_campañas WHERE tipo='anual' AND eliminada_en IS NULL ORDER BY activa DESC, nombre").all();
     const estac      = db.prepare("SELECT id, nombre, activa FROM pa_campañas WHERE tipo='estacional' AND eliminada_en IS NULL ORDER BY activa DESC, nombre").all();
     const act        = campañasActivas(db);
+    // Campaña inmediatamente anterior (misma definición que usa el costeo post-cosecha):
+    // la anual con id < vigente. Se usa para resolver el cultivo de la campaña pasada por lote.
+    const antA = db.prepare("SELECT id, nombre FROM pa_campañas WHERE tipo='anual' AND eliminada_en IS NULL AND id < ? ORDER BY id DESC LIMIT 1").get(act.anualId);
+    const antE = db.prepare("SELECT id, nombre FROM pa_campañas WHERE tipo='estacional' AND eliminada_en IS NULL AND id < ? ORDER BY id DESC LIMIT 1").get(act.estacionalId);
     const cuentasMo  = db.prepare("SELECT id, codigo, nombre, mo_clase, mo_cultivo, mo_vigente FROM pa_cuentas WHERE activo=1 AND nombre LIKE ? ORDER BY codigo").all(PERSONAL_MO_LIKE);
+    // cultivo = el último cargado (campaña vigente, comportamiento actual).
+    // cultivo_anterior = el de la campaña anual inmediatamente anterior (para tareas post-cosecha).
     const lotes      = db.prepare(`
       SELECT l.id, l.nombre, l.finca,
-             (SELECT cultivo FROM pa_cultivos_lote WHERE lote_id=l.id ORDER BY id DESC LIMIT 1) as cultivo
-      FROM pa_lotes l WHERE l.activo=1 ORDER BY l.finca, l.nombre`).all();
+             (SELECT cultivo FROM pa_cultivos_lote WHERE lote_id=l.id ORDER BY id DESC LIMIT 1) as cultivo,
+             (SELECT cultivo FROM pa_cultivos_lote WHERE lote_id=l.id AND campaña = ?) as cultivo_anterior
+      FROM pa_lotes l WHERE l.activo=1 ORDER BY l.finca, l.nombre`).all(antA ? antA.nombre : null);
     const tareas     = db.prepare("SELECT id, nombre, post_cosecha FROM pa_tareas_tipos WHERE activo=1 ORDER BY nombre").all();
     const cuadrillas = db.prepare(`
       SELECT c.id, c.nombre, c.responsable_id, r.nombre as responsable_nombre
@@ -3453,9 +3460,6 @@ router.get('/personal/asistencias/defaults', requireAuth, (req, res) => {
       WHERE c.activo=1 ORDER BY c.nombre`).all();
     const grupos     = db.prepare("SELECT id, nombre FROM pa_grupos WHERE activo=1 ORDER BY nombre").all();
     const personal   = db.prepare("SELECT id, nombre, tipo, contratista_madre_id, grupo_id FROM pa_personal WHERE activo=1 AND eliminado_en IS NULL ORDER BY nombre COLLATE NOCASE").all();
-    // Campaña inmediatamente anterior (anual + estacional) para el flujo Post-Cosecha.
-    const antA = db.prepare("SELECT id, nombre FROM pa_campañas WHERE tipo='anual' AND eliminada_en IS NULL AND id < ? ORDER BY id DESC LIMIT 1").get(act.anualId);
-    const antE = db.prepare("SELECT id, nombre FROM pa_campañas WHERE tipo='estacional' AND eliminada_en IS NULL AND id < ? ORDER BY id DESC LIMIT 1").get(act.estacionalId);
     res.json({ ok: true, data: {
       campanas: {
         anual: anuales, estacional: estac,
