@@ -5627,9 +5627,10 @@ router.get('/stocks-reales', function(req, res) {
   const corte = _ultimoJueves10am().toISOString().replace('T',' ').slice(0,19);
   // SG
   const sgUlt = db.prepare(`
-    SELECT * FROM ifco_stocks_reales
-    WHERE deposito_tipo='san_geronimo'
-    ORDER BY fecha DESC, id DESC LIMIT 1
+    SELECT s.*, u.nombre AS usuario_nombre FROM ifco_stocks_reales s
+    LEFT JOIN usuarios u ON u.id = s.usuario_id
+    WHERE s.deposito_tipo='san_geronimo'
+    ORDER BY s.fecha DESC, s.id DESC LIMIT 1
   `).get();
   const sgTeo = _stockTeoricoDeposito('san_geronimo');
   const sgFalta = !sgUlt || (sgUlt.creado_en < corte);
@@ -5647,9 +5648,10 @@ router.get('/stocks-reales', function(req, res) {
   const provs = db.prepare("SELECT id, nombre FROM proveedores ORDER BY nombre").all();
   for (const p of provs) {
     const ult = db.prepare(`
-      SELECT * FROM ifco_stocks_reales
-      WHERE deposito_tipo='proveedor' AND proveedor_id=?
-      ORDER BY fecha DESC, id DESC LIMIT 1
+      SELECT s.*, u.nombre AS usuario_nombre FROM ifco_stocks_reales s
+      LEFT JOIN usuarios u ON u.id = s.usuario_id
+      WHERE s.deposito_tipo='proveedor' AND s.proveedor_id=?
+      ORDER BY s.fecha DESC, s.id DESC LIMIT 1
     `).get(p.id);
     const teo = _stockTeoricoDeposito('proveedor', p.id);
     items.push({
