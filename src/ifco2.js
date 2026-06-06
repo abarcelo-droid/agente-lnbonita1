@@ -440,7 +440,9 @@
       var rowsHtml = T.length ? T.map(function (it) {
         var t = it.talonario || it;
         var total = (t.numero_hasta - t.numero_desde + 1) || 1;
-        var usados = ((it.proximo_num || t.numero_desde) - t.numero_desde);
+        // Consumo = remitos emitidos / total del rango. La emisión no es secuencial, por eso se
+        // usa usados_count (cantidad real emitida), no "próximo − desde".
+        var usados = (it.usados_count != null) ? it.usados_count : 0;
         var pct = Math.max(0, Math.min(100, Math.round(usados / total * 100)));
         var esSG = t.dueno_tipo === 'san_geronimo';
         var dueno = esSG ? 'San Gerónimo' : provNombre(t.proveedor_id);
@@ -455,7 +457,11 @@
           + '<td class="r"><span class="dias ' + dispCls + '">' + nf(it.disponibles) + '</span></td>'
           + '<td>' + fdate(t.vto_cai) + '</td>'
           + '<td class="c"><span class="dias ' + caiCls + '">' + (it.dias_cai == null ? '—' : (it.dias_cai < 0 ? 'vencido' : it.dias_cai + ' d')) + '</span></td>'
-          + '<td>' + (t.activo && !it.agotado ? '<span class="bg-badge st-presentado"><span class="d"></span>Activo</span>' : '<span class="bg-badge st-anulado"><span class="d"></span>Agotado</span>') + '</td>'
+          + '<td>' + (it.agotado
+              ? '<span class="bg-badge st-anulado"><span class="d"></span>Agotado</span>'
+              : (t.activo
+                  ? '<span class="bg-badge st-presentado"><span class="d"></span>Activo</span>'
+                  : '<span class="bg-badge st-enviaje"><span class="d"></span>Inactivo</span>')) + '</td>'
           + '<td><div class="rowact"><button class="btn-icon btn-ghost" title="Transferir" onclick="__ifco2Legacy(\'ifcoAbrirTransferirTalonario\',' + t.id + ')">' + ic('arrow-right-left') + '</button><button class="btn-icon btn-ghost" onclick="__ifco2MenuTalonario(event,' + t.id + ',\'' + esc(t.serie || '') + '\')">' + ic('more-horizontal') + '</button></div></td></tr>';
       }).join('') : '<tr><td colspan="10">' + empty('Sin talonarios') + '</td></tr>';
       var alertaTal = T.filter(function (it) { return it.agotado || it.pocos_remitos || it.cai_alerta; });

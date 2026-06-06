@@ -494,6 +494,18 @@ function _normalizarNumeroRemito(s) {
   return digits.slice(-8);
 }
 
+// Número correlativo de un remito para los cálculos de talonario. Fuente unificada:
+// n_remito_sg y, si está vacío (remitos viejos), fallback a n_remito_ifco. Toma la parte
+// después del último guion (o el string completo) y la pasa a entero.
+function _numTalonario(n_remito_sg, n_remito_ifco) {
+  let s = (n_remito_sg != null && String(n_remito_sg).trim() !== '') ? String(n_remito_sg)
+        : (n_remito_ifco != null ? String(n_remito_ifco) : '');
+  if (!s) return null;
+  const tail = s.indexOf('-') >= 0 ? s.slice(s.lastIndexOf('-') + 1) : s;
+  const digits = tail.replace(/[^0-9]/g, '');
+  return digits ? parseInt(digits, 10) : null;
+}
+
 // Convierte el formato del archivo IFCO al formato canónico del sistema
 // "0015R01508545" → "00015-01508545"
 function _archivoANumeroSistema(s) {
@@ -1096,11 +1108,11 @@ router.get('/talonarios', function(req, res) {
              t.creado_en DESC
   `).all();
 
-  // Calcular salteos por talonario: números que están entre el mínimo usado y el máximo usado,
-  // pero que no aparecen en ifco_remitos_super ni en ifco_numeros_anulados.
-  // Devuelve count + sample (hasta 50 números puntuales para el detalle).
-  const stmtUsados = db.prepare(`
-    SELECT CAST(SUBSTR(n_remito_sg, INSTR(n_remito_sg,'-')+1) AS INTEGER) AS num
+  // Campos derivados por talonario (sin migrar schema), que la grilla del front ya espera:
+  // disponibles, consumo %, próximo N°, CAI restante y salteos. El número del remito se parsea
+  // de una fuente unificada (n_remito_sg con fallback a n_remito_ifco) en TODOS los cálculos.
+  const stmtNums = db.prepare(`
+    SELECT n_remito_sg, n_remito_ifco
     FROM ifco_remitos_super
     WHERE talonario_id = ? AND eliminado_en IS NULL
   `);
@@ -1108,22 +1120,41 @@ router.get('/talonarios', function(req, res) {
     SELECT numero AS num FROM ifco_numeros_anulados WHERE talonario_id = ?
   `);
   rows.forEach(function(t){
+    const total = (t.numero_hasta - t.numero_desde + 1);
+    // Disponibles / consumo: según la cantidad de remitos emitidos (usados_count).
+    t.disponibles = Math.max(0, total - (t.usados_count || 0));
+    t.consumo_pct = total > 0 ? Math.round((t.usados_count || 0) / total * 100) : 0;
+    t.agotado = t.disponibles === 0;
+    t.pocos_remitos = t.disponibles > 0 && t.disponibles < 100;
+    // CAI: días hasta el vencimiento.
+    t.dias_cai = t.vto_cai ? Math.floor((new Date(t.vto_cai) - new Date()) / 86400000) : null;
+    t.cai_alerta = t.dias_cai !== null && t.dias_cai < 60;
     try {
-      const usados = stmtUsados.all(t.id).map(function(r){ return r.num; }).filter(function(n){ return Number.isInteger(n); });
-      if (usados.length === 0) { t.salteos_count = 0; t.salteos_sample = []; return; }
+      const usados = stmtNums.all(t.id)
+        .map(function(r){ return _numTalonario(r.n_remito_sg, r.n_remito_ifco); })
+        .filter(function(n){ return Number.isInteger(n); });
       const anulados = stmtAnulados.all(t.id).map(function(r){ return r.num; }).filter(function(n){ return Number.isInteger(n); });
       const usadosSet = new Set(usados.concat(anulados));
-      const minU = Math.min.apply(null, usados);
-      const maxU = Math.max.apply(null, usados);
-      const salteos = [];
-      for (let n = minU; n <= maxU; n++) {
-        if (!usadosSet.has(n)) salteos.push(n);
+      // Próximo N°: menor número del rango [desde, hasta] sin emitir ni anular. La emisión NO es
+      // secuencial (talonarios repartidos en distintos galpones), por eso se busca el menor libre,
+      // no "último insertado + 1".
+      let proximo = null;
+      for (let n = t.numero_desde; n <= t.numero_hasta; n++) { if (!usadosSet.has(n)) { proximo = n; break; } }
+      t.proximo_num = proximo;
+      // Salteos: números entre el mínimo y el máximo emitido que no figuran emitidos ni anulados.
+      if (usados.length === 0) { t.salteos_count = 0; t.salteos_sample = []; }
+      else {
+        const minU = Math.min.apply(null, usados);
+        const maxU = Math.max.apply(null, usados);
+        const salteos = [];
+        for (let n = minU; n <= maxU; n++) { if (!usadosSet.has(n)) salteos.push(n); }
+        t.salteos_count = salteos.length;
+        t.salteos_sample = salteos.slice(0, 50);
+        t.salteos_rango = { min: minU, max: maxU };
       }
-      t.salteos_count = salteos.length;
-      t.salteos_sample = salteos.slice(0, 50);
-      t.salteos_rango = { min: minU, max: maxU };
     } catch(e) {
-      console.warn('[IFCO][talonarios][salteos]', t.id, e.message);
+      console.warn('[IFCO][talonarios][calc]', t.id, e.message);
+      t.proximo_num = t.disponibles > 0 ? t.numero_desde : null;
       t.salteos_count = 0;
       t.salteos_sample = [];
     }
@@ -1410,8 +1441,9 @@ router.post('/talonarios/:id/transferir', function(req, res) {
   }
 
   const tx = db.transaction(() => {
-    // Al transferir, lo dejamos inactivo: el receptor decide si lo activa.
-    db.prepare("UPDATE ifco_talonarios SET dueno_tipo = ?, proveedor_id = ?, activo = 0 WHERE id = ?")
+    // Transferir cambia SOLO el dueño: el talonario se sigue trackeando en todos los galpones,
+    // no se apaga (el estado Activo/Agotado/Inactivo se deriva del consumo y del flag manual).
+    db.prepare("UPDATE ifco_talonarios SET dueno_tipo = ?, proveedor_id = ? WHERE id = ?")
       .run(nuevo_tipo, nuevo_prov_id, id);
     db.prepare(`
       INSERT INTO ifco_talonarios_log
