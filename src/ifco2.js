@@ -372,8 +372,9 @@
           + '<td class="r num-strong ' + (m.tipo === 'perdida' ? 'num-neg' : '') + '">' + (m.tipo === 'perdida' ? '−' : '+') + nf(m.cantidad) + '</td>'
           + '<td>' + esc(m.notas || m.n_remito || '—') + '</td>'
           + '<td>' + (consol ? '<span class="tag consol">' + ic('check') + ' consolidado</span>' : '<span class="tag" style="background:var(--i-warn-bg);color:var(--i-warn);border-color:var(--i-warn-line)">sin consolidar</span>') + '</td>'
+          + '<td class="c">' + uav(m.usuario_creador_nombre) + '</td>'
           + '<td><div class="rowact">' + (consol ? '<button class="btn-icon btn-ghost" title="Bloqueado: consolidado">' + ic('lock') + '</button>' : '<button class="btn-icon btn-ghost" title="Editar" onclick="__ifco2Legacy(\'ifcoAbrirEditarMovimiento\',' + m.id + ')">' + ic('pencil') + '</button><button class="btn-icon btn-ghost" title="Eliminar" onclick="__ifco2SoftDelete(\'movimientos\',' + m.id + ',\'' + esc(m.n_remito || ('MOV-' + m.id)) + '\',\'retiros\')">' + ic('trash-2') + '</button>') + '</div></td></tr>';
-      }).join('') : '<tr><td colspan="6">' + empty('Sin movimientos') + '</td></tr>';
+      }).join('') : '<tr><td colspan="7">' + empty('Sin movimientos') + '</td></tr>';
       var retir = M.filter(function (m) { return m.tipo === 'retiro'; }).reduce(function (a, m) { return a + (m.cantidad || 0); }, 0);
       var perd = M.filter(function (m) { return m.tipo === 'perdida'; }).reduce(function (a, m) { return a + (m.cantidad || 0); }, 0);
 
@@ -392,18 +393,19 @@
           + '<td class="r num-strong">' + nf(a.cantidad_estimada) + (a.cantidad_real != null ? '<div class="sub2">real ' + nf(a.cantidad_real) + '</div>' : '') + '</td>'
           + '<td>' + autBadge(a.estado) + '</td>'
           + '<td class="sub2">' + (a.mail_enviado_a ? esc(a.mail_enviado_a) : '<span class="muted">—</span>') + '</td>'
+          + '<td class="c">' + uav(a.completada_por_username || a.usuario_username) + '</td>'
           + '<td><div class="rowact">' + acc + '</div></td></tr>';
-      }).join('') : '<tr><td colspan="6">' + empty('Sin autorizaciones de retiro') + '</td></tr>';
+      }).join('') : '<tr><td colspan="7">' + empty('Sin autorizaciones de retiro') + '</td></tr>';
 
       h.innerHTML =
         '<div class="vh"><div><h2>' + ic('package-minus') + ' Retiros y pérdidas</h2><div class="vh-sub">Retiros del pool IFCO (altas de cajones vacíos) y pérdidas registradas</div></div>'
         + '<div class="actions"><button class="btn btn-ghost btn-sm" style="color:var(--i-err)" onclick="__ifco2Reuse(\'ifcoAbrirNuevoMovimiento\',\'perdida\')">' + ic('minus') + ' Registrar pérdida</button><button class="btn btn-ghost btn-sm" onclick="__ifco2Reuse(\'ifcoAbrirNuevoMovimiento\',\'retiro\')">' + ic('plus') + ' Registrar retiro</button><button class="btn btn-pri btn-sm" onclick="__ifco2Reuse(\'ifcoAbrirAutorizacion\')">' + ic('mail') + ' Autorizar retiro a IFCO</button></div></div>'
         + '<div class="filters"><div class="seg">' + [['', 'Todos', M.length], ['retiro', 'Retiros', M.filter(function (m) { return m.tipo === 'retiro'; }).length], ['perdida', 'Pérdidas', M.filter(function (m) { return m.tipo === 'perdida'; }).length]].map(function (s) { return '<button class="' + (movFil === s[0] ? 'on' : '') + '" onclick="__ifco2SegV(\'movFiltro\',\'retiros\',\'' + s[0] + '\')">' + s[1] + '<span class="n">' + s[2] + '</span></button>'; }).join('') + '</div>'
         + '<span class="chip-count">Neto del mes: <b class="tnum">+' + nf(retir - perd) + '</b> cajones</span></div>'
-        + '<div class="card"><div class="card-b flush"><div class="tbl-wrap"><table class="dt"><thead><tr><th>Fecha</th><th>Tipo</th><th class="r">Cantidad</th><th>Detalle / OT</th><th>Consolidación</th><th></th></tr></thead><tbody>' + rowsHtml + '</tbody></table></div></div></div>'
+        + '<div class="card"><div class="card-b flush"><div class="tbl-wrap"><table class="dt"><thead><tr><th>Fecha</th><th>Tipo</th><th class="r">Cantidad</th><th>Detalle / OT</th><th>Consolidación</th><th class="c">Usuario</th><th></th></tr></thead><tbody>' + rowsHtml + '</tbody></table></div></div></div>'
         + '<div class="foot-note">' + ic('lock') + ' Los movimientos consolidados quedan bloqueados: ya fueron verificados contra el archivo oficial de IFCO y no se pueden editar ni borrar.</div>'
         + '<div class="card" style="margin-top:16px"><div class="card-h"><h3>' + ic('mail') + ' Autorizaciones de retiro a IFCO</h3><span class="muted" style="font-size:11px">autorización al transportista · mail a ifco@lnbonita.com.ar</span></div>'
-        + '<div class="card-b flush"><div class="tbl-wrap"><table class="dt"><thead><tr><th>Fecha autorizada</th><th>Transportista</th><th class="r">Cantidad</th><th>Estado</th><th>Mail a</th><th></th></tr></thead><tbody>' + autRows + '</tbody></table></div></div></div>'
+        + '<div class="card-b flush"><div class="tbl-wrap"><table class="dt"><thead><tr><th>Fecha autorizada</th><th>Transportista</th><th class="r">Cantidad</th><th>Estado</th><th>Mail a</th><th class="c">Usuario</th><th></th></tr></thead><tbody>' + autRows + '</tbody></table></div></div></div>'
         + '<div class="foot-note">' + ic('info') + ' “Enviar” previsualiza y manda el mail de autorización a IFCO; “Completar” registra la cantidad real retirada + N° de remito (confirma el movimiento de stock). Cancelar/eliminar: follow-up.</div>';
     });
   };
@@ -534,8 +536,9 @@
         return '<tr ' + (estado === 'en_viaje' ? 'style="background:var(--i-navy-050)"' : '') + '>'
           + '<td class="mono">' + esc(r.n_remito_proveedor || '—') + '</td><td>' + quien + '</td><td>' + fdate(r.fecha_recepcion) + '</td>'
           + '<td class="r num-strong">' + nf(r.cantidad) + '</td><td>' + tipo + '</td><td>' + badge(estado) + '</td><td>' + conf + '</td><td class="c">' + dchip + '</td>'
+          + '<td class="c">' + uav(r.usuario_creador_nombre) + '</td>'
           + '<td><div class="rowact">' + act + '</div></td></tr>';
-      }).join('') : '<tr><td colspan="9">' + empty('Sin recepciones') + '</td></tr>';
+      }).join('') : '<tr><td colspan="10">' + empty('Sin recepciones') + '</td></tr>';
       var enViaje = R.filter(function (r) { return r.estado === 'en_viaje'; });
       var totViaje = enViaje.reduce(function (a, r) { return a + (r.cantidad || 0); }, 0);
       h.innerHTML =
@@ -544,7 +547,7 @@
         + (enViaje.length ? '<div class="banner info">' + ic('inbox') + '<div><b>' + enViaje.length + ' recepciones en viaje</b> esperando confirmación — <b class="tnum">' + nf(totViaje) + ' cajones</b>. Confirmá la recepción física para impactar el stock y descontar el saldo del proveedor.</div></div>' : '')
         + '<div class="filters"><div class="seg">' + [['', 'Todas', R.length], ['en_viaje', 'En viaje', enViaje.length], ['recibido', 'Recibidas', R.filter(function (r) { return r.estado === 'recibido'; }).length], ['r22', 'R22', R.filter(function (r) { return r.es_r22; }).length]].map(function (s) { return '<button class="' + (ingFil === s[0] ? 'on' : '') + '" onclick="__ifco2SegV(\'ingFiltro\',\'ingresos\',\'' + s[0] + '\')">' + s[1] + '<span class="n">' + s[2] + '</span></button>'; }).join('') + '</div>'
         + '<span class="chip-count"><b>' + R.length + '</b> recepciones</span></div>'
-        + '<div class="card"><div class="card-b flush"><div class="tbl-wrap"><table class="dt"><thead><tr><th>N° remito</th><th>Proveedor / origen</th><th>Fecha</th><th class="r">Cajones</th><th>Tipo</th><th>Estado</th><th>Confirmación</th><th class="c">Antig.</th><th></th></tr></thead><tbody>' + rowsHtml + '</tbody></table></div></div></div>';
+        + '<div class="card"><div class="card-b flush"><div class="tbl-wrap"><table class="dt"><thead><tr><th>N° remito</th><th>Proveedor / origen</th><th>Fecha</th><th class="r">Cajones</th><th>Tipo</th><th>Estado</th><th>Confirmación</th><th class="c">Antig.</th><th class="c">Usuario</th><th></th></tr></thead><tbody>' + rowsHtml + '</tbody></table></div></div></div>';
     });
   };
 
@@ -582,8 +585,9 @@
           + '<td class="r num-strong">' + nf(env) + '</td><td class="r">' + nf(rec) + '</td><td class="r ' + (pend > 0 ? '' : 'muted') + '">' + (pend > 0 ? nf(pend) : '0') + '</td>'
           + '<td>' + recepCell + '</td>'
           + '<td>' + badge(e.estado) + '</td><td>' + (aceptBadge(e) || '<span class="muted">—</span>') + '</td><td class="c">' + dchip + '</td>'
+          + '<td class="c">' + uav(e.usuario_creador_nombre) + '</td>'
           + '<td><div class="rowact">' + (e.estado !== 'recibido' ? '<button class="btn btn-pri btn-sm" onclick="__ifco2Legacy(\'ifcoAbrirRecepcion\',' + e.id + ')">' + ic('package-check') + ' Recepcionar</button>' : '') + linkBtn + '<button class="btn-icon btn-ghost" onclick="__ifco2MenuEnvio(event,' + e.id + ',\'' + esc(e.n_remito_interno || '') + '\')">' + ic('more-horizontal') + '</button></div></td></tr>';
-      }).join('') : '<tr><td colspan="11">' + empty('Sin envíos') + '</td></tr>';
+      }).join('') : '<tr><td colspan="12">' + empty('Sin envíos') + '</td></tr>';
       var totEnv = E.reduce(function (a, e) { return a + (e.cantidad_enviada || 0); }, 0);
       var totRec = E.reduce(function (a, e) { return a + (e.cantidad_recibida || 0); }, 0);
       // "Atrasado" = enviado, +15 días, y NI recepcionado a mano NI aceptado por link. Sin el chequeo
@@ -596,8 +600,8 @@
         + (venc.length ? '<div class="banner warn">' + ic('clock') + '<div><b>' + venc.length + ' envíos sin recepcionar ni aceptar hace +15 días.</b> El proveedor debe confirmar la recepción (a mano o por el link) para que los cajones queden a su cargo.</div></div>' : '')
         + '<div class="filters"><div class="seg">' + [['', 'Todos', E.length], ['enviado', 'Enviados', E.filter(function (e) { return e.estado === 'enviado'; }).length], ['parcial', 'Parciales', E.filter(function (e) { return e.estado === 'parcial'; }).length], ['recibido', 'Recibidos', E.filter(function (e) { return e.estado === 'recibido'; }).length]].map(function (s) { return '<button class="' + (salFil === s[0] ? 'on' : '') + '" onclick="__ifco2SegV(\'salFiltro\',\'salidas\',\'' + s[0] + '\')">' + s[1] + '<span class="n">' + s[2] + '</span></button>'; }).join('') + '</div>'
         + '<span class="chip-count"><b>' + E.length + '</b> envíos · <b>' + nf(totEnv - totRec) + '</b> caj. pendientes' + (aceptDigital ? ' · <b style="color:var(--i-ok)">' + aceptDigital + '</b> aceptados por link' : '') + '</span></div>'
-        + '<div class="card"><div class="card-b flush"><div class="tbl-wrap"><table class="dt"><thead><tr><th>N° envío</th><th>Fecha</th><th>Proveedor</th><th class="r">Enviado</th><th class="r">Recib.</th><th class="r">Pend.</th><th>Recepción</th><th>Estado</th><th>Aceptación</th><th class="c">Antig.</th><th></th></tr></thead><tbody>' + rowsHtml + '</tbody>'
-        + '<tr class="totrow"><td colspan="3">Total</td><td class="r">' + nf(totEnv) + '</td><td class="r">' + nf(totRec) + '</td><td class="r">' + nf(totEnv - totRec) + '</td><td colspan="5"></td></tr></table></div></div></div>';
+        + '<div class="card"><div class="card-b flush"><div class="tbl-wrap"><table class="dt"><thead><tr><th>N° envío</th><th>Fecha</th><th>Proveedor</th><th class="r">Enviado</th><th class="r">Recib.</th><th class="r">Pend.</th><th>Recepción</th><th>Estado</th><th>Aceptación</th><th class="c">Antig.</th><th class="c">Usuario</th><th></th></tr></thead><tbody>' + rowsHtml + '</tbody>'
+        + '<tr class="totrow"><td colspan="3">Total</td><td class="r">' + nf(totEnv) + '</td><td class="r">' + nf(totRec) + '</td><td class="r">' + nf(totEnv - totRec) + '</td><td colspan="6"></td></tr></table></div></div></div>';
     });
   };
 
@@ -653,9 +657,10 @@
           + '<td>' + (c.deposito_tipo === 'san_geronimo' ? '<span class="tag gold">' + ic('building-2') + ' Propio</span>' : '<span class="tag">' + ic('factory') + ' Proveedor</span>') + '</td>'
           + '<td class="r num-strong">' + nf(c.teorico) + '</td><td class="r num-strong">' + (c.real != null ? nf(c.real) : '—') + '</td><td class="r">' + difTxt + '</td>'
           + '<td>' + (uc.fecha ? fdate(uc.fecha) : '<span class="muted">—</span>') + '</td>'
+          + '<td class="c">' + uav(uc.usuario_nombre) + '</td>'
           + '<td>' + (c.falta_cargar ? '<span class="bg-badge st-enviaje"><span class="d"></span>' + (c.real == null ? 'Pendiente' : 'Atrasado') + '</span>' : '<span class="bg-badge st-presentado"><span class="d"></span>Al día</span>') + '</td>'
           + '<td><div class="rowact"><button class="btn btn-pri btn-sm" onclick="__ifco2Legacy(\'ifcoAbrirCargarStock\',\'' + c.deposito_tipo + '\',' + (c.proveedor_id || 'null') + ',\'' + esc(c.nombre).replace(/'/g, "\\'") + '\',' + (c.teorico || 0) + ')">' + ic('clipboard-pen') + ' Cargar conteo</button></div></td></tr>';
-      }).join('') : '<tr><td colspan="8">' + empty('Sin depósitos') + '</td></tr>';
+      }).join('') : '<tr><td colspan="9">' + empty('Sin depósitos') + '</td></tr>';
       var teo = C.reduce(function (a, c) { return a + (c.teorico || 0); }, 0);
       var real = C.reduce(function (a, c) { return a + (c.real || 0); }, 0);
       var sinContar = C.filter(function (c) { return c.falta_cargar; });
@@ -669,7 +674,7 @@
         + '<div class="kpi acc-err"><div class="k-top"><div class="k-lbl">Diferencia</div><div class="k-ic">' + ic('scale') + '</div></div><div class="k-val ' + (real - teo < 0 ? 'num-neg' : '') + '">' + (real - teo) + '<span class="u">caj.</span></div><div class="k-sub">sobre lo contado</div></div>'
         + '<div class="kpi acc-warn"><div class="k-top"><div class="k-lbl">Sin contar</div><div class="k-ic">' + ic('clipboard-x') + '</div></div><div class="k-val">' + sinContar.length + '<span class="u">dep.</span></div><div class="k-sub">conteo atrasado</div></div>'
         + '</div>'
-        + '<div class="card"><div class="card-b flush"><div class="tbl-wrap"><table class="dt"><thead><tr><th>Depósito</th><th>Tipo</th><th class="r">Teórico</th><th class="r">Real</th><th class="r">Dif.</th><th>Últ. conteo</th><th>Estado</th><th></th></tr></thead><tbody>' + rowsHtml + '</tbody></table></div></div></div>';
+        + '<div class="card"><div class="card-b flush"><div class="tbl-wrap"><table class="dt"><thead><tr><th>Depósito</th><th>Tipo</th><th class="r">Teórico</th><th class="r">Real</th><th class="r">Dif.</th><th>Últ. conteo</th><th class="c">Usuario</th><th>Estado</th><th></th></tr></thead><tbody>' + rowsHtml + '</tbody></table></div></div></div>';
     });
   };
 
