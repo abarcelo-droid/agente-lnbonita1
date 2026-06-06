@@ -581,9 +581,9 @@
         return '<tr><td class="mono lead">' + esc(e.n_remito_interno || '—') + '</td><td>' + fdate(e.fecha_envio) + '</td><td class="lead">' + esc(e.proveedor_nombre || '—') + '</td>'
           + '<td class="r num-strong">' + nf(env) + '</td><td class="r">' + nf(rec) + '</td><td class="r ' + (pend > 0 ? '' : 'muted') + '">' + (pend > 0 ? nf(pend) : '0') + '</td>'
           + '<td>' + recepCell + '</td>'
-          + '<td>' + badge(e.estado) + aceptBadge(e) + '</td><td class="c">' + dchip + '</td>'
+          + '<td>' + badge(e.estado) + '</td><td>' + (aceptBadge(e) || '<span class="muted">—</span>') + '</td><td class="c">' + dchip + '</td>'
           + '<td><div class="rowact">' + (e.estado !== 'recibido' ? '<button class="btn btn-pri btn-sm" onclick="__ifco2Legacy(\'ifcoAbrirRecepcion\',' + e.id + ')">' + ic('package-check') + ' Recepcionar</button>' : '') + linkBtn + '<button class="btn-icon btn-ghost" onclick="__ifco2MenuEnvio(event,' + e.id + ',\'' + esc(e.n_remito_interno || '') + '\')">' + ic('more-horizontal') + '</button></div></td></tr>';
-      }).join('') : '<tr><td colspan="10">' + empty('Sin envíos') + '</td></tr>';
+      }).join('') : '<tr><td colspan="11">' + empty('Sin envíos') + '</td></tr>';
       var totEnv = E.reduce(function (a, e) { return a + (e.cantidad_enviada || 0); }, 0);
       var totRec = E.reduce(function (a, e) { return a + (e.cantidad_recibida || 0); }, 0);
       // "Atrasado" = enviado, +15 días, y NI recepcionado a mano NI aceptado por link. Sin el chequeo
@@ -596,8 +596,8 @@
         + (venc.length ? '<div class="banner warn">' + ic('clock') + '<div><b>' + venc.length + ' envíos sin recepcionar ni aceptar hace +15 días.</b> El proveedor debe confirmar la recepción (a mano o por el link) para que los cajones queden a su cargo.</div></div>' : '')
         + '<div class="filters"><div class="seg">' + [['', 'Todos', E.length], ['enviado', 'Enviados', E.filter(function (e) { return e.estado === 'enviado'; }).length], ['parcial', 'Parciales', E.filter(function (e) { return e.estado === 'parcial'; }).length], ['recibido', 'Recibidos', E.filter(function (e) { return e.estado === 'recibido'; }).length]].map(function (s) { return '<button class="' + (salFil === s[0] ? 'on' : '') + '" onclick="__ifco2SegV(\'salFiltro\',\'salidas\',\'' + s[0] + '\')">' + s[1] + '<span class="n">' + s[2] + '</span></button>'; }).join('') + '</div>'
         + '<span class="chip-count"><b>' + E.length + '</b> envíos · <b>' + nf(totEnv - totRec) + '</b> caj. pendientes' + (aceptDigital ? ' · <b style="color:var(--i-ok)">' + aceptDigital + '</b> aceptados por link' : '') + '</span></div>'
-        + '<div class="card"><div class="card-b flush"><div class="tbl-wrap"><table class="dt"><thead><tr><th>N° envío</th><th>Fecha</th><th>Proveedor</th><th class="r">Enviado</th><th class="r">Recib.</th><th class="r">Pend.</th><th>Recepción</th><th>Estado</th><th class="c">Antig.</th><th></th></tr></thead><tbody>' + rowsHtml + '</tbody>'
-        + '<tr class="totrow"><td colspan="3">Total</td><td class="r">' + nf(totEnv) + '</td><td class="r">' + nf(totRec) + '</td><td class="r">' + nf(totEnv - totRec) + '</td><td colspan="4"></td></tr></table></div></div></div>';
+        + '<div class="card"><div class="card-b flush"><div class="tbl-wrap"><table class="dt"><thead><tr><th>N° envío</th><th>Fecha</th><th>Proveedor</th><th class="r">Enviado</th><th class="r">Recib.</th><th class="r">Pend.</th><th>Recepción</th><th>Estado</th><th>Aceptación</th><th class="c">Antig.</th><th></th></tr></thead><tbody>' + rowsHtml + '</tbody>'
+        + '<tr class="totrow"><td colspan="3">Total</td><td class="r">' + nf(totEnv) + '</td><td class="r">' + nf(totRec) + '</td><td class="r">' + nf(totEnv - totRec) + '</td><td colspan="5"></td></tr></table></div></div></div>';
     });
   };
 
