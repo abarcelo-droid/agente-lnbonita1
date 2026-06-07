@@ -3032,6 +3032,49 @@ router.post('/personal/tarifas-rol', requireAuth, (req, res) => {
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
+// ── Tarifa por PERSONA ($/jornal) con vigencia. Override del default por rol. ──
+// GET: vigencias cargadas (histórico, no se pisan) + padrón activo para el selector.
+router.get('/personal/tarifas-persona', requireAuth, (req, res) => {
+  const db = getDb();
+  const perms = permisosPersonal(db, req.user);
+  if (!perms.valorizacion && !perms.admin) return res.status(403).json({ ok: false, error: 'Sin permiso de valorización' });
+  try {
+    const data = db.prepare(`
+      SELECT tp.id, tp.personal_id, tp.tarifa, tp.vigente_desde, tp.creado_en,
+             p.nombre AS personal_nombre, p.rol AS personal_rol
+      FROM pa_tarifas_persona tp
+      JOIN pa_personal p ON p.id = tp.personal_id
+      ORDER BY p.nombre COLLATE NOCASE, tp.vigente_desde DESC, tp.id DESC
+    `).all();
+    const personas = db.prepare(`
+      SELECT id, nombre, rol FROM pa_personal
+      WHERE eliminado_en IS NULL AND activo = 1
+      ORDER BY nombre COLLATE NOCASE
+    `).all();
+    res.json({ ok: true, data, personas });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// POST: nueva vigencia (NO pisa la anterior; nueva fila con su fecha).
+router.post('/personal/tarifas-persona', requireAuth, (req, res) => {
+  const db = getDb();
+  const perms = permisosPersonal(db, req.user);
+  if (!perms.valorizacion && !perms.admin) return res.status(403).json({ ok: false, error: 'Sin permiso de valorización' });
+  const personalId = Number(req.body.personal_id);
+  const tarifa = Number(req.body.tarifa);
+  const vigenteDesde = (req.body.vigente_desde || '').trim();
+  if (!personalId) return res.status(400).json({ ok: false, error: 'persona requerida' });
+  if (!(tarifa > 0)) return res.status(400).json({ ok: false, error: 'tarifa inválida' });
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(vigenteDesde)) return res.status(400).json({ ok: false, error: 'vigente_desde inválida (YYYY-MM-DD)' });
+  try {
+    const p = db.prepare("SELECT id FROM pa_personal WHERE id=? AND eliminado_en IS NULL").get(personalId);
+    if (!p) return res.status(404).json({ ok: false, error: 'persona inexistente' });
+    db.prepare(`INSERT INTO pa_tarifas_persona (personal_id, tarifa, vigente_desde, creado_por) VALUES (?,?,?,?)`)
+      .run(personalId, tarifa, vigenteDesde, req.user.id);
+    res.json({ ok: true });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
 // ── Grupos / Colectivos (administrativo de trabajadores) ───────────────────
 router.get('/personal/grupos', requireAuth, (req, res) => {
   const db = getDb();
@@ -3775,18 +3818,35 @@ function _tarifaRol(db, rol) {
   return (r && r.tarifa != null) ? Number(r.tarifa) : null;
 }
 
+// Tarifa $/jornal POR PERSONA vigente a una fecha (override del rol). pa_tarifas_persona.
+// La aplicable = fila de la persona con vigente_desde <= fecha del jornal, la más reciente.
+// IMPORTANTE: usa la FECHA del jornal (no la de hoy) para elegir la vigencia. NULL si no hay.
+function _tarifaPersonaVigente(db, personalId, fecha) {
+  if (!personalId || !fecha) return null;
+  const r = db.prepare(
+    "SELECT tarifa FROM pa_tarifas_persona WHERE personal_id=? AND vigente_desde<=? ORDER BY vigente_desde DESC, id DESC LIMIT 1"
+  ).get(personalId, fecha);
+  return (r && r.tarifa != null) ? Number(r.tarifa) : null;
+}
+
 // Resuelve la tarifa $/jornal de una asistencia. DOS sistemas:
-//  · Individual/Grupal (a.personal_id) → tarifa del ROL de la persona (pa_tarifas_rol).
+//  · Individual/Grupal (a.personal_id) → tarifa POR PERSONA vigente a la fecha del jornal
+//    (pa_tarifas_persona); si la persona no tiene tarifa propia → fallback al ROL (pa_tarifas_rol).
 //  · Cuadrilla / bloque (sin personal_id) → tarifa de la CUADRILLA (pa_cuadrillas.tarifa_jornal),
 //    NO el rol de la responsable. El devengado igual va a la responsable (titular).
 // Devuelve { tarifa, fuente_label, falta, motivo }. Si falta → no se valoriza (queda pendiente).
 function _tarifaAsistencia(db, a) {
   if (a.personal_id) {
-    const p = db.prepare("SELECT rol FROM pa_personal WHERE id=?").get(a.personal_id);
+    const p = db.prepare("SELECT nombre, rol FROM pa_personal WHERE id=?").get(a.personal_id);
+    const nom = p && p.nombre ? String(p.nombre).trim() : ('#' + a.personal_id);
+    // a) Override POR PERSONA vigente a la fecha del jornal (gana sobre el rol).
+    const tp = _tarifaPersonaVigente(db, a.personal_id, a.fecha);
+    if (tp != null && tp > 0) return { tarifa: tp, fuente_label: 'Persona: ' + nom, falta: false };
+    // b) Fallback: tarifa del ROL (default).
     const rol = p && p.rol ? String(p.rol).trim() : '';
-    if (!rol) return { tarifa: 0, fuente_label: 'Persona sin rol', falta: true, motivo: 'persona sin rol asignado' };
+    if (!rol) return { tarifa: 0, fuente_label: 'Persona sin tarifa ni rol', falta: true, motivo: 'persona sin tarifa propia ni rol asignado' };
     const t = _tarifaRol(db, rol);
-    if (t == null || !(t > 0)) return { tarifa: 0, fuente_label: 'Rol: ' + rol, falta: true, motivo: 'rol "' + rol + '" sin tarifa cargada' };
+    if (t == null || !(t > 0)) return { tarifa: 0, fuente_label: 'Rol: ' + rol, falta: true, motivo: 'sin tarifa de persona; rol "' + rol + '" sin tarifa cargada' };
     return { tarifa: t, fuente_label: 'Rol: ' + rol, falta: false };
   }
   if (a.cuadrilla_id) {
