@@ -1315,6 +1315,26 @@ try {
   `);
 } catch(e) { console.error('[PA] Error creando pa_tarifas_rol:', e.message); }
 
+// ── Tarifa por PERSONA con vigencia (override del default por rol) ───────────
+// RRHH redefinió que la valorización individual es POR PERSONA. La tarifa de rol
+// (pa_tarifas_rol) pasa a ser el DEFAULT; si la persona tiene tarifa propia, gana.
+// SIN UNIQUE(personal_id): varias filas por persona = histórico de vigencias. La
+// tarifa aplicable a una fecha = fila de esa persona con vigente_desde <= fecha,
+// la más reciente (ORDER BY vigente_desde DESC LIMIT 1). Idempotente.
+try {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS pa_tarifas_persona (
+      id            INTEGER PRIMARY KEY AUTOINCREMENT,
+      personal_id   INTEGER NOT NULL REFERENCES pa_personal(id),
+      tarifa        REAL NOT NULL,
+      vigente_desde TEXT NOT NULL,
+      creado_en     TEXT DEFAULT (datetime('now','localtime')),
+      creado_por    INTEGER
+    );
+    CREATE INDEX IF NOT EXISTS idx_pa_tarifas_persona ON pa_tarifas_persona(personal_id, vigente_desde);
+  `);
+} catch(e) { console.error('[PA] Error creando pa_tarifas_persona:', e.message); }
+
 // ── Migración: tarifa_jornal en pa_cuadrillas ($/jornal de la cuadrilla) ─────
 // El modo Cuadrilla (bloque) cobra por la tarifa de SU cuadrilla, no por el rol de la
 // responsable. Simple ADD COLUMN, idempotente con guard PRAGMA table_info.

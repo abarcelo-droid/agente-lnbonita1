@@ -4130,16 +4130,42 @@ function sgRepExport(){
 
 <!-- Tarifas (módulo propio, fuera de Catálogo: la operadora de jornales no debe ver tarifas) -->
 <div class="sec pp-mod" id="sec-personal-tarifas">
-  <div class="ph"><div><div class="ph-t">💵 Tarifas</div><div class="ph-s">Tarifas genéricas de mano de obra ($/jornal por rol)</div></div></div>
+  <div class="ph"><div><div class="ph-t">💵 Tarifas</div><div class="ph-s">Tarifas de mano de obra ($/jornal): default por rol + override por persona</div></div></div>
+
+  <!-- A) Default por rol -->
   <div class="pp-sub on" id="pp-sub-tarifas-rol">
+    <div style="font-weight:700;font-size:13px;margin:2px 0 6px">Tarifas por rol <span style="font-weight:400;color:var(--mut)">(default)</span></div>
     <div style="margin-bottom:12px;font-size:12px;color:var(--mut)">
-      Tarifa <strong>$/jornal por rol</strong> para la mano de obra individual/grupal. El costo de la
-      asistencia se resuelve solo: <strong>jornales × tarifa del rol</strong>. (Las cuadrillas tienen su
-      propio valor de jornal, se carga en <strong>Cuadrillas</strong>.) Los roles salen del padrón de Personal.
+      Tarifa <strong>$/jornal por rol</strong> base de la mano de obra individual/grupal. Si la persona
+      no tiene tarifa propia, se usa la de su rol: <strong>jornales × tarifa del rol</strong>. (Las cuadrillas
+      tienen su propio valor de jornal, se carga en <strong>Cuadrillas</strong>.) Los roles salen del padrón de Personal.
     </div>
     <div class="tw"><table>
       <thead><tr><th>Rol</th><th style="text-align:center">Personas</th><th style="text-align:right">Tarifa $/jornal</th><th></th></tr></thead>
       <tbody id="pp-tarrol-tbody"></tbody>
+    </table></div>
+  </div>
+
+  <!-- B) Override por persona (con vigencia) -->
+  <div class="pp-sub on" id="pp-sub-tarifas-persona" style="margin-top:26px;border-top:1px solid var(--bor);padding-top:18px">
+    <div style="font-weight:700;font-size:13px;margin:2px 0 6px">Tarifas por persona <span style="font-weight:400;color:var(--mut)">(override)</span></div>
+    <div style="margin-bottom:12px;font-size:12px;color:var(--mut)">
+      Tarifa propia de una persona. <strong>Gana sobre la del rol.</strong> Con <strong>vigencia</strong>: se aplica la
+      vigente a la fecha del jornal. Cargar una tarifa nueva crea una <strong>fila nueva</strong> (no pisa la anterior),
+      así queda el histórico. Lo ya valorizado no se recalcula.
+    </div>
+    <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin-bottom:14px">
+      <div><label style="display:block;font-size:11px;color:var(--mut);margin-bottom:3px">Persona</label>
+        <select id="pp-tarper-persona" style="min-width:220px;padding:5px 8px;font-size:12px"></select></div>
+      <div><label style="display:block;font-size:11px;color:var(--mut);margin-bottom:3px">Tarifa $/jornal</label>
+        <input type="number" step="0.01" min="0" id="pp-tarper-tarifa" placeholder="0" style="width:130px;text-align:right;padding:5px 8px;font-size:12px"></div>
+      <div><label style="display:block;font-size:11px;color:var(--mut);margin-bottom:3px">Vigente desde</label>
+        <input type="date" id="pp-tarper-desde" style="padding:5px 8px;font-size:12px"></div>
+      <button class="btn bb bs" style="padding:6px 14px;font-size:12px" onclick="ppGuardarTarifaPersona()">Agregar vigencia</button>
+    </div>
+    <div class="tw"><table>
+      <thead><tr><th>Persona</th><th>Rol</th><th style="text-align:right">Tarifa $/jornal</th><th>Vigente desde</th><th>Cargada</th></tr></thead>
+      <tbody id="pp-tarper-tbody"></tbody>
     </table></div>
   </div>
 </div>
@@ -19499,7 +19525,7 @@ function ppShowSub(sub) {
   if (sub === 'masivo') ppLoadMasivo();
   if (sub === 'reportes') ppInitReportes();
   if (sub === 'tareas-rubros') { ppLoadRubrosMO(); ppLoadTareasRubros(); }
-  if (sub === 'tarifas-rol') ppLoadTarifasRol();
+  if (sub === 'tarifas-rol') { ppLoadTarifasRol(); ppLoadTarifasPersona(); }
 }
 
 // ── Tarifas por rol ($/jornal). Lista roles en uso + tarifa editable. ──
@@ -19524,6 +19550,41 @@ function ppGuardarTarifaRol(btn) {
   if (!(tarifa >= 0)) return toast('Tarifa inválida', 'er');
   paF('/api/pa/personal/tarifas-rol', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ rol: rol, tarifa: tarifa }) })
     .then(function(r){ if (r && r.ok) { toast('Tarifa de "'+rol+'" guardada'); ppLoadTarifasRol(); } else toast((r&&r.error)||'Error', 'er'); });
+}
+
+// ── Tarifas por persona (override con vigencia). Gana sobre la del rol. ──
+function ppLoadTarifasPersona() {
+  paF('/api/pa/personal/tarifas-persona').then(function(r){
+    var rows = (r && r.data) || [];
+    var personas = (r && r.personas) || [];
+    var sel = document.getElementById('pp-tarper-persona');
+    if (sel) sel.innerHTML = '<option value="">— Elegí persona —</option>' + personas.map(function(p){
+      return '<option value="'+p.id+'">'+esc(p.nombre)+(p.rol?' ('+esc(p.rol)+')':'')+'</option>'; }).join('');
+    var tb = document.getElementById('pp-tarper-tbody');
+    if (!tb) return;
+    if (!rows.length) { tb.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--mut);padding:18px">Sin tarifas por persona. Se usa la del rol.</td></tr>'; return; }
+    // La primera fila de cada persona (orden DESC por vigente_desde) es la vigente hoy.
+    var vistas = {};
+    tb.innerHTML = rows.map(function(t){
+      var esVigente = !vistas[t.personal_id]; vistas[t.personal_id] = true;
+      return '<tr'+(esVigente?'':' style="color:var(--mut)"')+'>' +
+        '<td><strong>'+esc(t.personal_nombre)+'</strong>'+(esVigente?' <span style="font-size:10px;color:#166534">● vigente</span>':'')+'</td>' +
+        '<td style="font-size:11px;color:var(--mut)">'+esc(t.personal_rol||'—')+'</td>' +
+        '<td style="text-align:right">$'+Number(t.tarifa).toLocaleString('es-AR')+'</td>' +
+        '<td>'+esc(t.vigente_desde)+'</td>' +
+        '<td style="font-size:11px;color:var(--mut)">'+esc((t.creado_en||'').slice(0,10))+'</td></tr>';
+    }).join('');
+  });
+}
+function ppGuardarTarifaPersona() {
+  var personalId = Number(document.getElementById('pp-tarper-persona').value);
+  var tarifa = Number(document.getElementById('pp-tarper-tarifa').value);
+  var desde = (document.getElementById('pp-tarper-desde').value || '').trim();
+  if (!personalId) return toast('Elegí una persona', 'er');
+  if (!(tarifa > 0)) return toast('Tarifa inválida', 'er');
+  if (!desde) return toast('Indicá desde cuándo rige', 'er');
+  paF('/api/pa/personal/tarifas-persona', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ personal_id: personalId, tarifa: tarifa, vigente_desde: desde }) })
+    .then(function(r){ if (r && r.ok) { toast('Vigencia agregada'); document.getElementById('pp-tarper-tarifa').value=''; ppLoadTarifasPersona(); } else toast((r&&r.error)||'Error', 'er'); });
 }
 
 // ═══ Bloque B — Configuración (ingeniería) de rubros MO ══════════════════════
