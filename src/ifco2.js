@@ -446,30 +446,29 @@
         var pct = Math.max(0, Math.min(100, Math.round(usados / total * 100)));
         var esSG = t.dueno_tipo === 'san_geronimo';
         var dueno = esSG ? 'San Gerónimo' : provNombre(t.proveedor_id);
-        var caiCls = it.dias_cai == null ? 'ok' : (it.dias_cai < 0 ? 'crit' : (it.dias_cai < 60 ? 'warn' : 'ok'));
         var dispCls = it.disponibles === 0 ? 'crit' : (it.disponibles < 100 ? 'warn' : 'ok');
-        return '<tr ' + (!t.activo ? 'style="opacity:.55"' : '') + '>'
-          + '<td class="mono lead">' + esc(t.serie) + '</td>'
+        var salteos = it.salteos_count || 0;
+        // Fila clickeable → abre el detalle del talonario (modal legacy, sigue vivo). Los botones de
+        // acción frenan la propagación para no disparar el detalle al usarlos.
+        return '<tr style="cursor:pointer' + (!t.activo ? ';opacity:.55' : '') + '" onclick="__ifco2Legacy(\'ifcoVerTalonario\',' + t.id + ')">'
           + '<td>' + (esSG ? '<span class="tag gold">' + ic('building-2') + ' SG</span>' : '<span class="tag">' + ic('factory') + ' ' + esc(dueno) + '</span>') + '</td>'
-          + '<td class="mono sub2">' + nf(t.numero_desde) + ' – ' + nf(t.numero_hasta) + '</td>'
-          + '<td class="mono num-strong">' + (it.proximo_num != null ? nf(it.proximo_num) : '—') + '</td>'
+          + '<td class="mono sub2">' + t.numero_desde + ' – ' + t.numero_hasta + '</td>'
           + '<td style="min-width:130px"><div style="display:flex;align-items:center;gap:8px"><div class="mbar ' + (pct > 90 ? 'warn' : '') + '" style="width:80px"><i style="width:' + pct + '%"></i></div><span class="sub2 tnum">' + pct + '%</span></div></td>'
           + '<td class="r"><span class="dias ' + dispCls + '">' + nf(it.disponibles) + '</span></td>'
-          + '<td>' + fdate(t.vto_cai) + '</td>'
-          + '<td class="c"><span class="dias ' + caiCls + '">' + (it.dias_cai == null ? '—' : (it.dias_cai < 0 ? 'vencido' : it.dias_cai + ' d')) + '</span></td>'
+          + '<td class="c">' + (salteos > 0 ? '<span class="dias crit">' + salteos + '</span>' : '<span class="muted">0</span>') + '</td>'
           + '<td>' + (it.agotado
               ? '<span class="bg-badge st-anulado"><span class="d"></span>Agotado</span>'
               : (t.activo
                   ? '<span class="bg-badge st-presentado"><span class="d"></span>Activo</span>'
                   : '<span class="bg-badge st-enviaje"><span class="d"></span>Inactivo</span>')) + '</td>'
-          + '<td><div class="rowact"><button class="btn-icon btn-ghost" title="Transferir" onclick="__ifco2Legacy(\'ifcoAbrirTransferirTalonario\',' + t.id + ')">' + ic('arrow-right-left') + '</button><button class="btn-icon btn-ghost" onclick="__ifco2MenuTalonario(event,' + t.id + ',\'' + esc(t.serie || '') + '\')">' + ic('more-horizontal') + '</button></div></td></tr>';
-      }).join('') : '<tr><td colspan="10">' + empty('Sin talonarios') + '</td></tr>';
+          + '<td><div class="rowact"><button class="btn-icon btn-ghost" title="Transferir" onclick="event.stopPropagation();__ifco2Legacy(\'ifcoAbrirTransferirTalonario\',' + t.id + ')">' + ic('arrow-right-left') + '</button><button class="btn-icon btn-ghost" onclick="__ifco2MenuTalonario(event,' + t.id + ',\'' + esc(t.serie || '') + '\')">' + ic('more-horizontal') + '</button></div></td></tr>';
+      }).join('') : '<tr><td colspan="7">' + empty('Sin talonarios') + '</td></tr>';
       var alertaTal = T.filter(function (it) { return it.agotado || it.pocos_remitos || it.cai_alerta; });
       h.innerHTML =
         '<div class="vh"><div><h2>' + ic('book-marked') + ' Talonarios</h2><div class="vh-sub">Numeración de remitos IFCO autorizada por AFIP (CAI) · por dueño</div></div>'
         + '<div class="actions"><button class="btn btn-pri btn-sm" onclick="__ifco2Reuse(\'ifcoAbrirNuevoTalonario\')">' + ic('plus') + ' Nuevo talonario</button></div></div>'
         + (alertaTal.length ? '<div class="banner warn">' + ic('alert-triangle') + '<div><b>' + alertaTal.length + ' talonario(s) con atención</b> — agotados, con pocos remitos o CAI por vencer. Gestioná la reposición con AFIP a tiempo.</div></div>' : '')
-        + '<div class="card"><div class="card-b flush"><div class="tbl-wrap"><table class="dt"><thead><tr><th>Serie</th><th>Dueño</th><th>Rango</th><th>Próximo N°</th><th>Consumo</th><th class="r">Disp.</th><th>Vto. CAI</th><th class="c">Faltan</th><th>Estado</th><th></th></tr></thead><tbody>' + rowsHtml + '</tbody></table></div></div></div>';
+        + '<div class="card"><div class="card-b flush"><div class="tbl-wrap"><table class="dt"><thead><tr><th>Dueño</th><th>Rango</th><th>Consumo</th><th class="r">Disp.</th><th class="c">Faltan</th><th>Estado</th><th></th></tr></thead><tbody>' + rowsHtml + '</tbody></table></div></div></div>';
     });
   };
 
@@ -829,6 +828,7 @@
   window.__ifco2MenuTalonario = function (ev, id, serie) {
     // Talonarios: el "Eliminar" legacy es FÍSICO + admin (no tiene papelera). Se reusa tal cual.
     __ifco2Menu(ev, [
+      { label: 'Ver detalle', icon: 'eye', onClick: function () { legacyCall('ifcoVerTalonario', id); } },
       { label: 'Editar', icon: 'pencil', onClick: function () { legacyCall('ifcoEditarTalonario', id); } },
       { label: 'Transferir', icon: 'arrow-right-left', onClick: function () { legacyCall('ifcoAbrirTransferirTalonario', id); } },
       { label: 'Eliminar (físico)', icon: 'trash-2', danger: true, onClick: function () { legacyCall('ifcoEliminarTalonario', id); } }
