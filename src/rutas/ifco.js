@@ -1135,12 +1135,6 @@ router.get('/talonarios', function(req, res) {
         .filter(function(n){ return Number.isInteger(n); });
       const anulados = stmtAnulados.all(t.id).map(function(r){ return r.num; }).filter(function(n){ return Number.isInteger(n); });
       const usadosSet = new Set(usados.concat(anulados));
-      // Próximo N°: menor número del rango [desde, hasta] sin emitir ni anular. La emisión NO es
-      // secuencial (talonarios repartidos en distintos galpones), por eso se busca el menor libre,
-      // no "último insertado + 1".
-      let proximo = null;
-      for (let n = t.numero_desde; n <= t.numero_hasta; n++) { if (!usadosSet.has(n)) { proximo = n; break; } }
-      t.proximo_num = proximo;
       // Salteos: números entre el mínimo y el máximo emitido que no figuran emitidos ni anulados.
       if (usados.length === 0) { t.salteos_count = 0; t.salteos_sample = []; }
       else {
@@ -1154,7 +1148,6 @@ router.get('/talonarios', function(req, res) {
       }
     } catch(e) {
       console.warn('[IFCO][talonarios][calc]', t.id, e.message);
-      t.proximo_num = t.disponibles > 0 ? t.numero_desde : null;
       t.salteos_count = 0;
       t.salteos_sample = [];
     }
