@@ -659,16 +659,19 @@ router.post('/oc', requireAdmin, (req, res) => {
       const ocId = ocInfo.lastInsertRowid;
 
       const insItem = db.prepare(`INSERT INTO sg_oc_items
-        (oc_id, producto_id, presentacion_id, cantidad_estimada_presentaciones, kg_estimados, precio_estimado_por_kg, observaciones_item)
-        VALUES (?,?,?,?,?,?,?)`);
+        (oc_id, producto_id, presentacion_id, cantidad_estimada_presentaciones, kg_estimados, precio_estimado_por_kg, observaciones_item, modo_carga)
+        VALUES (?,?,?,?,?,?,?,?)`);
       let totKg = 0, totMonto = 0;
       for (const it of items) {
         const pres = it.presentacion_id ? db.prepare('SELECT factor_conversion FROM sg_presentaciones WHERE id=?').get(it.presentacion_id) : null;
         const factor = pres ? Number(pres.factor_conversion) : 1;
         const cant = Number(it.cantidad_estimada_presentaciones || 0);
+        // El front manda kg_estimados y precio_estimado_por_kg YA canónicos (kg y $/kg efectivo),
+        // sin importar el modo de carga → el costeo/stock siguen 100% en kg, intactos.
         const kg = it.kg_estimados != null ? Number(it.kg_estimados) : cant * factor;
         const precio = tipoPrecio === 'pizarra' ? null : (it.precio_estimado_por_kg != null ? Number(it.precio_estimado_por_kg) : null);
-        insItem.run(ocId, it.producto_id, it.presentacion_id || null, cant, kg, precio, val(it.observaciones_item));
+        const modo = it.modo_carga === 'bulto' ? 'bulto' : 'kilo';   // CAMBIO 2: solo registro del modo de ingreso
+        insItem.run(ocId, it.producto_id, it.presentacion_id || null, cant, kg, precio, val(it.observaciones_item), modo);
         totKg += kg;
         if (precio != null) totMonto += kg * precio;
       }

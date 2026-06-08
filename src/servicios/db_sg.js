@@ -625,6 +625,19 @@ try {
   console.error('[DB] SG migración sg_proveedores (datos pago):', e.message);
 }
 
+// ── CAMBIO 2 (bulto/kilo): sg_oc_items → +modo_carga ────────────────────────────
+// Cómo cargó el operador el item: 'bulto' (cantidad=bultos, precio=$/bulto) o 'kilo'
+// (cantidad=kg, precio=$/kg). NULL/legacy = 'kilo'. ALTER ADD COLUMN simple, nullable,
+// sin rebuild: NO cambia el almacenamiento canónico (kg_estimados + precio_estimado_por_kg
+// + total siguen en kg). Solo registra el modo de ingreso. OCs viejas quedan NULL → 'kilo'.
+try {
+  const cols = db.prepare("PRAGMA table_info(sg_oc_items)").all().map(c => c.name);
+  if (!cols.includes('modo_carga')) {
+    db.exec("ALTER TABLE sg_oc_items ADD COLUMN modo_carga TEXT");
+    console.log('[DB] SG sg_oc_items.modo_carga agregado');
+  }
+} catch (e) { console.error('[DB] SG migración sg_oc_items.modo_carga:', e.message); }
+
 // ── MIGRACIÓN idempotente: sg_presentaciones → +envase_id, +paletizado ──────────
 // Campos aditivos nullable (catálogo de envases + unidades por pallet). ALTER ADD
 // COLUMN simple, sin rebuild, no rompe presentaciones ya cargadas ni el cálculo de
