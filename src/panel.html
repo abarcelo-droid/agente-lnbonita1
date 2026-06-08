@@ -1124,7 +1124,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   </div>
 
   <div style="margin:14px 0;padding:12px;background:#fff7ed;border:1px solid #fdba74;border-radius:8px;font-size:12.5px;color:#9a3412">
-    ⚠️ <b>Mide actividad de CARGA</b> (creación de registros), <b>no accesos/logins</b>. Un usuario que entra a consultar pero no carga datos aparece como <b>sin actividad</b>. Hoy el sistema no registra logins.
+    ⚠️ <b>"Registros" / "Últ. registro" miden CARGA</b> (creación de registros); <b>"Últ. acceso" es el último login</b> (solo el último, no historial). Así se distinguen los 3 estados de adopción: <b>nunca entró</b> (acceso "nunca") · <b>entra pero no carga</b> (acceso con fecha, 0 registros) · <b>entra y carga</b>.
   </div>
 
   <div style="display:flex;gap:14px;align-items:flex-end;flex-wrap:wrap;margin-bottom:8px">
@@ -1137,8 +1137,8 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
 
   <div style="font-weight:700;font-size:13px;margin:16px 0 6px">👤 Por usuario <span style="font-weight:400;color:var(--mut);font-size:11px">— los "sin actividad" son los importantes para adopción</span></div>
   <div class="tw"><table>
-    <thead><tr><th>Usuario</th><th>Rol</th><th style="text-align:right">Registros</th><th>Por módulo</th><th>Último</th></tr></thead>
-    <tbody id="aa-tb-usuarios"><tr><td colspan="5" class="emp">Aplicá un rango.</td></tr></tbody>
+    <thead><tr><th>Usuario</th><th>Rol</th><th style="text-align:right">Registros</th><th>Por módulo</th><th>Últ. acceso</th><th>Últ. registro</th></tr></thead>
+    <tbody id="aa-tb-usuarios"><tr><td colspan="6" class="emp">Aplicá un rango.</td></tr></tbody>
   </table></div>
 
   <div style="font-weight:700;font-size:13px;margin:20px 0 6px">🧩 Por módulo <span style="font-weight:400;color:var(--mut);font-size:11px">— qué módulos están vivos y cuáles nadie toca</span></div>
@@ -10750,10 +10750,10 @@ function admActInit(){
 function admActLoad(){
   var qs = '?desde='+encodeURIComponent(eid('aa-desde').value||'')+'&hasta='+encodeURIComponent(eid('aa-hasta').value||'');
   var m = eid('aa-modulo').value; if(m) qs += '&modulo='+encodeURIComponent(m);
-  eid('aa-tb-usuarios').innerHTML = '<tr><td colspan="5" class="emp">Cargando…</td></tr>';
+  eid('aa-tb-usuarios').innerHTML = '<tr><td colspan="6" class="emp">Cargando…</td></tr>';
   eid('aa-tb-modulos').innerHTML = '<tr><td colspan="4" class="emp">Cargando…</td></tr>';
   api('/api/admin/actividad'+qs).then(function(r){
-    if(!r || !r.ok){ eid('aa-tb-usuarios').innerHTML = '<tr><td colspan="5" class="emp">'+esc((r&&r.error)||'Error')+'</td></tr>'; eid('aa-tb-modulos').innerHTML=''; return; }
+    if(!r || !r.ok){ eid('aa-tb-usuarios').innerHTML = '<tr><td colspan="6" class="emp">'+esc((r&&r.error)||'Error')+'</td></tr>'; eid('aa-tb-modulos').innerHTML=''; return; }
     admActFillModulos(r.modulos_disponibles);
     admActRenderUsuarios(r.por_usuario||[]);
     admActRenderModulos(r.por_modulo||[]);
@@ -10773,8 +10773,8 @@ function admActModChips(modulos){
 }
 // "Último" como texto relativo + semáforo (verde hoy / amarillo 1-3d / rojo +3d).
 // ts = MAX(creado_en) "YYYY-MM-DD HH:MM:SS" (hora local). La fecha exacta va en el tooltip.
-function admActUltimo(ts){
-  if(!ts) return '<span style="color:var(--mut)">—</span>';
+function admActUltimo(ts, nullLabel){
+  if(!ts) return '<span style="color:var(--mut)">'+(nullLabel||'—')+'</span>';
   var dt = new Date(String(ts).replace(' ','T'));
   if(isNaN(dt.getTime())) return esc(ts);
   var hoy = new Date();
@@ -10793,15 +10793,18 @@ function admActUltimo(ts){
 }
 function admActRenderUsuarios(rows){
   var tb = eid('aa-tb-usuarios');
-  if(!rows.length){ tb.innerHTML = '<tr><td colspan="5" class="emp">Sin usuarios.</td></tr>'; return; }
+  if(!rows.length){ tb.innerHTML = '<tr><td colspan="6" class="emp">Sin usuarios.</td></tr>'; return; }
   tb.innerHTML = rows.map(function(u){
     var sin = (u.total===0);
     var nombre = esc(u.nombre) + (u.activo===0 ? ' <span style="color:var(--mut);font-size:10px">(inactivo)</span>' : '');
     var tot = sin ? '<span style="color:var(--mut)">0 · sin actividad</span>' : '<strong>'+nr(u.total)+'</strong>';
+    // Últ. acceso: NULL = "nunca" para usuarios reales; "—" para la fila sintética "(sin autor)".
+    var acceso = admActUltimo(u.ultimo_acceso, u.id===null ? '—' : 'nunca');
     return '<tr'+(sin?' style="background:#fff7ed"':'')+'><td>'+nombre+'</td>'
       + '<td><span class="tag" style="font-size:10px">'+esc(u.rol||'—')+'</span></td>'
       + '<td style="text-align:right">'+tot+'</td>'
       + '<td>'+admActModChips(u.modulos)+'</td>'
+      + '<td style="font-size:11.5px">'+acceso+'</td>'
       + '<td style="font-size:11.5px">'+admActUltimo(u.ultimo)+'</td></tr>';
   }).join('');
 }

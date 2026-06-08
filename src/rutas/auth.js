@@ -183,6 +183,10 @@ router.post('/login', async (req, res) => {
     const match = await bcrypt.compare(password, user.password_hash);
     if (!match) return res.status(401).json({ ok: false, error: 'Usuario o contraseña incorrectos' });
 
+    // Registrar último acceso (credencial verificada OK). Best-effort: si falla NO bloquea
+    // el login. Guarda solo el último (se pisa en cada acceso); no es historial.
+    try { db.prepare("UPDATE usuarios SET ultimo_acceso = datetime('now','localtime') WHERE id = ?").run(user.id); } catch (_) {}
+
     // FASE 2.C: si el admin le asignó password inicial con debe_cambiar_password=1,
     // forzar el cambio antes de entrar al panel.
     if (user.debe_cambiar_password) {
