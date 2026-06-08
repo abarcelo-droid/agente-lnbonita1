@@ -259,7 +259,6 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   <div class="ni" data-sec="personal-valorizar" data-admin-only="1"><span class="dot dc"></span>💰 Por valorizar</div>
   <div class="ni" data-sec="personal-cc" data-admin-only="1"><span class="dot dd"></span>📒 Cuenta Corriente</div>
   <div class="ni" data-sec="personal-catalogo" data-admin-only="1"><span class="dot da"></span>📚 Catálogo</div>
-  <div class="ni" data-sec="personal-tarifas" data-admin-only="1"><span class="dot dc"></span>💵 Tarifas</div>
   <div class="ni" data-sec="personal-reportes" data-admin-only="1"><span class="dot de"></span>📈 Reportes</div>
 
   <div class="ng" style="margin-top:8px">Abasto SG</div>
@@ -3950,6 +3949,7 @@ function sgRepExport(){
   <div class="pp-subtabbar">
     <div class="pp-subtab on" data-sub="valorizar" id="pp-tab-valorizar" onclick="ppShowSub('valorizar')">💰 Por valorizar</div>
     <div class="pp-subtab" data-sub="semanas" id="pp-tab-semanas" onclick="ppShowSub('semanas')">🗓️ Semanas</div>
+    <div class="pp-subtab" data-sub="tarifas" id="pp-tab-tarifas" onclick="ppShowSub('tarifas')">💵 Tarifas</div>
   </div>
   <div class="pp-sub on" id="pp-sub-valorizar">
     <!-- Barrera re-password (sesión sensible 15 min) -->
@@ -4001,6 +4001,44 @@ function sgRepExport(){
       <thead><tr><th>Apertura</th><th>Cierre</th><th>Estado</th><th>Continuidad</th><th>Notas</th><th></th></tr></thead>
       <tbody id="pp-sem-tbody"></tbody>
     </table></div>
+  </div>
+  <!-- Tarifas (mudado desde el módulo personal-tarifas del sidebar) -->
+  <div class="pp-sub" id="pp-sub-tarifas">
+    <!-- A) Default por rol -->
+    <div>
+      <div style="font-weight:700;font-size:13px;margin:2px 0 6px">Tarifas por rol <span style="font-weight:400;color:var(--mut)">(default)</span></div>
+      <div style="margin-bottom:12px;font-size:12px;color:var(--mut)">
+        Tarifa <strong>$/jornal por rol</strong> base de la mano de obra individual/grupal. Si la persona
+        no tiene tarifa propia, se usa la de su rol: <strong>jornales × tarifa del rol</strong>. (Las cuadrillas
+        tienen su propio valor de jornal, se carga en <strong>Cuadrillas</strong>.) Los roles salen del padrón de Personal.
+      </div>
+      <div class="tw"><table>
+        <thead><tr><th>Rol</th><th style="text-align:center">Personas</th><th style="text-align:right">Tarifa $/jornal</th><th></th></tr></thead>
+        <tbody id="pp-tarrol-tbody"></tbody>
+      </table></div>
+    </div>
+    <!-- B) Override por persona (con vigencia) -->
+    <div style="margin-top:26px;border-top:1px solid var(--bor);padding-top:18px">
+      <div style="font-weight:700;font-size:13px;margin:2px 0 6px">Tarifas por persona <span style="font-weight:400;color:var(--mut)">(override)</span></div>
+      <div style="margin-bottom:12px;font-size:12px;color:var(--mut)">
+        Tarifa propia de una persona. <strong>Gana sobre la del rol.</strong> Con <strong>vigencia</strong>: se aplica la
+        vigente a la fecha del jornal. Cargar una tarifa nueva crea una <strong>fila nueva</strong> (no pisa la anterior),
+        así queda el histórico. Lo ya valorizado no se recalcula.
+      </div>
+      <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin-bottom:14px">
+        <div><label style="display:block;font-size:11px;color:var(--mut);margin-bottom:3px">Persona</label>
+          <select id="pp-tarper-persona" style="min-width:220px;padding:5px 8px;font-size:12px"></select></div>
+        <div><label style="display:block;font-size:11px;color:var(--mut);margin-bottom:3px">Tarifa $/jornal</label>
+          <input type="number" step="0.01" min="0" id="pp-tarper-tarifa" placeholder="0" style="width:130px;text-align:right;padding:5px 8px;font-size:12px"></div>
+        <div><label style="display:block;font-size:11px;color:var(--mut);margin-bottom:3px">Vigente desde</label>
+          <input type="date" id="pp-tarper-desde" style="padding:5px 8px;font-size:12px"></div>
+        <button class="btn bb bs" style="padding:6px 14px;font-size:12px" onclick="ppGuardarTarifaPersona()">Agregar vigencia</button>
+      </div>
+      <div class="tw"><table>
+        <thead><tr><th>Persona</th><th>Rol</th><th style="text-align:right">Tarifa $/jornal</th><th>Vigente desde</th><th>Cargada</th></tr></thead>
+        <tbody id="pp-tarper-tbody"></tbody>
+      </table></div>
+    </div>
   </div>
 </div>
 
@@ -4147,47 +4185,6 @@ function sgRepExport(){
 </div>
 
 <!-- Tarifas (módulo propio, fuera de Catálogo: la operadora de jornales no debe ver tarifas) -->
-<div class="sec pp-mod" id="sec-personal-tarifas">
-  <div class="ph"><div><div class="ph-t">💵 Tarifas</div><div class="ph-s">Tarifas de mano de obra ($/jornal): default por rol + override por persona</div></div></div>
-
-  <!-- A) Default por rol -->
-  <div class="pp-sub on" id="pp-sub-tarifas-rol">
-    <div style="font-weight:700;font-size:13px;margin:2px 0 6px">Tarifas por rol <span style="font-weight:400;color:var(--mut)">(default)</span></div>
-    <div style="margin-bottom:12px;font-size:12px;color:var(--mut)">
-      Tarifa <strong>$/jornal por rol</strong> base de la mano de obra individual/grupal. Si la persona
-      no tiene tarifa propia, se usa la de su rol: <strong>jornales × tarifa del rol</strong>. (Las cuadrillas
-      tienen su propio valor de jornal, se carga en <strong>Cuadrillas</strong>.) Los roles salen del padrón de Personal.
-    </div>
-    <div class="tw"><table>
-      <thead><tr><th>Rol</th><th style="text-align:center">Personas</th><th style="text-align:right">Tarifa $/jornal</th><th></th></tr></thead>
-      <tbody id="pp-tarrol-tbody"></tbody>
-    </table></div>
-  </div>
-
-  <!-- B) Override por persona (con vigencia) -->
-  <div class="pp-sub on" id="pp-sub-tarifas-persona" style="margin-top:26px;border-top:1px solid var(--bor);padding-top:18px">
-    <div style="font-weight:700;font-size:13px;margin:2px 0 6px">Tarifas por persona <span style="font-weight:400;color:var(--mut)">(override)</span></div>
-    <div style="margin-bottom:12px;font-size:12px;color:var(--mut)">
-      Tarifa propia de una persona. <strong>Gana sobre la del rol.</strong> Con <strong>vigencia</strong>: se aplica la
-      vigente a la fecha del jornal. Cargar una tarifa nueva crea una <strong>fila nueva</strong> (no pisa la anterior),
-      así queda el histórico. Lo ya valorizado no se recalcula.
-    </div>
-    <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin-bottom:14px">
-      <div><label style="display:block;font-size:11px;color:var(--mut);margin-bottom:3px">Persona</label>
-        <select id="pp-tarper-persona" style="min-width:220px;padding:5px 8px;font-size:12px"></select></div>
-      <div><label style="display:block;font-size:11px;color:var(--mut);margin-bottom:3px">Tarifa $/jornal</label>
-        <input type="number" step="0.01" min="0" id="pp-tarper-tarifa" placeholder="0" style="width:130px;text-align:right;padding:5px 8px;font-size:12px"></div>
-      <div><label style="display:block;font-size:11px;color:var(--mut);margin-bottom:3px">Vigente desde</label>
-        <input type="date" id="pp-tarper-desde" style="padding:5px 8px;font-size:12px"></div>
-      <button class="btn bb bs" style="padding:6px 14px;font-size:12px" onclick="ppGuardarTarifaPersona()">Agregar vigencia</button>
-    </div>
-    <div class="tw"><table>
-      <thead><tr><th>Persona</th><th>Rol</th><th style="text-align:right">Tarifa $/jornal</th><th>Vigente desde</th><th>Cargada</th></tr></thead>
-      <tbody id="pp-tarper-tbody"></tbody>
-    </table></div>
-  </div>
-</div>
-
 <!-- 6) REPORTES -->
 <div class="sec pp-mod" id="sec-personal-reportes">
   <div class="ph"><div><div class="ph-t">📈 Reportes</div><div class="ph-s">Reportes y exportaciones de mano de obra</div></div></div>
@@ -8734,7 +8731,6 @@ function loadSec(s) {
     'personal-valorizar':  function(){ ppOpenModulo('valorizar'); },
     'personal-cc':         function(){ ppOpenModulo('cc'); },
     'personal-catalogo':   function(){ ppOpenModulo('grupos'); },
-    'personal-tarifas':    function(){ ppOpenModulo('tarifas-rol'); },
     'personal-reportes':   function(){ ppOpenModulo('reportes'); }
   };
   if (m[s]) m[s]();
@@ -19499,6 +19495,7 @@ function ppAplicarGating() {
   show('pp-tab-cc', verVal);
   show('pp-tab-pagos', verVal);
   show('pp-tab-semanas', verVal);
+  show('pp-tab-tarifas', verVal);
   show('pp-tab-masivo', verVal);
   show('pp-tab-reportes', verVal);
   show('pp-tab-tareas-rubros', verModulo);
@@ -19543,7 +19540,7 @@ function ppShowSub(sub) {
   if (sub === 'masivo') ppLoadMasivo();
   if (sub === 'reportes') ppInitReportes();
   if (sub === 'tareas-rubros') { ppLoadRubrosMO(); ppLoadTareasRubros(); }
-  if (sub === 'tarifas-rol') { ppLoadTarifasRol(); ppLoadTarifasPersona(); }
+  if (sub === 'tarifas') { ppLoadTarifasRol(); ppLoadTarifasPersona(); }
 }
 
 // ── Tarifas por rol ($/jornal). Lista roles en uso + tarifa editable. ──
