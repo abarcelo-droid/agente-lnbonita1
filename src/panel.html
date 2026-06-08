@@ -2085,8 +2085,8 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
         <button class="btn bb" onclick="sgOpenModal('presentaciones')">+ Nueva presentación</button>
       </div>
       <div class="ab-table-wrap"><table class="pa-tbl">
-        <thead><tr><th>Producto</th><th>Presentación</th><th style="text-align:right">Factor → unidad base</th><th></th></tr></thead>
-        <tbody id="sg-tb-presentaciones"><tr><td colspan="4" class="emp">Cargando…</td></tr></tbody>
+        <thead><tr><th>Producto</th><th>Presentación</th><th style="text-align:right">Factor → unidad base</th><th>Envase</th><th style="text-align:right">Paletizado</th><th></th></tr></thead>
+        <tbody id="sg-tb-presentaciones"><tr><td colspan="6" class="emp">Cargando…</td></tr></tbody>
       </table></div>
     </div>
 
@@ -2361,7 +2361,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
 
 <script>
 // ═══ MÓDULO SAN GERÓNIMO (sg_*) — Fase 1: Catálogo ═══════════════════════════
-var SG = { cacheProd: [], cacheCond: [], cacheFam: [], last: {}, cur: null, cuotas: [], _prodEsp: [], _prodVar: [] };
+var SG = { cacheProd: [], cacheCond: [], cacheFam: [], cacheEnv: [], last: {}, cur: null, cuotas: [], _prodEsp: [], _prodVar: [] };
 
 // Catálogos de opciones (value, label)
 var SG_FAMILIA = [['frutas','Frutas'],['hortalizas_pesadas','Hortalizas Pesadas'],['hortalizas_livianas','Hortalizas Livianas'],['hoja','Hoja'],['otros','Otros']];
@@ -2394,7 +2394,9 @@ var SG_SCHEMA = {
     fields:[
       {k:'producto_id', l:'Producto', t:'select', src:'prod', req:1},
       {k:'nombre', l:'Presentación', t:'select', o:[['Kilos','Kilos'],['Unidades','Unidades']], req:1},
-      {k:'factor_conversion', l:'Factor de conversión (cuántas unidades base = 1 presentación)', t:'number', req:1, ph:'20'}
+      {k:'factor_conversion', l:'Factor de conversión (cuántas unidades base = 1 presentación)', t:'number', req:1, ph:'20'},
+      {k:'envase_id', l:'Envase', t:'select', src:'env', add:'sgEnvAdd()'},
+      {k:'paletizado', l:'Paletizado (unidades por pallet)', t:'number', ph:'ej. 80'}
     ]
   },
   proveedores: {
@@ -2445,13 +2447,14 @@ function sgCatSub(s){
 
 // Carga caches para dropdowns (productos, condiciones, presentaciones, proveedores)
 function sgLoadCaches(cb){
-  Promise.all([api('/api/sg/productos'), api('/api/sg/condiciones-pago'), api('/api/sg/presentaciones'), api('/api/sg/proveedores'), api('/api/sg/clientes'), api('/api/sg/familias')]).then(function(r){
+  Promise.all([api('/api/sg/productos'), api('/api/sg/condiciones-pago'), api('/api/sg/presentaciones'), api('/api/sg/proveedores'), api('/api/sg/clientes'), api('/api/sg/familias'), api('/api/sg/envases')]).then(function(r){
     SG.cacheProd = (r[0] && r[0].ok) ? r[0].data : [];
     SG.cacheCond = (r[1] && r[1].ok) ? r[1].data : [];
     SG.cachePres = (r[2] && r[2].ok) ? r[2].data : [];
     SG.cacheProv = (r[3] && r[3].ok) ? r[3].data : [];
     SG.cacheCli = (r[4] && r[4].ok) ? r[4].data : [];
     SG.cacheFam = (r[5] && r[5].ok) ? r[5].data : [];
+    SG.cacheEnv = (r[6] && r[6].ok) ? r[6].data : [];
     var sel = eid('sg-pres-filtro');
     if (sel){
       var v = sel.value;
@@ -2472,6 +2475,19 @@ function sgFactor(presId){ var p = SG.cachePres.find(function(x){ return String(
 function sgMoney(n){ return '$'+nr(n); }
 
 function sgProdNombre(id){ var p = SG.cacheProd.find(function(x){ return x.id===id; }); return p ? p.nombre : ('#'+id); }
+// Nombre de envase desde cache (para el listado de presentaciones).
+function sgEnvNombre(id){ if(!id) return '—'; var e = (SG.cacheEnv||[]).find(function(x){ return String(x.id)===String(id); }); return e ? e.nombre : ('#'+id); }
+// Alta de envase al vuelo desde el modal de presentación (botón ＋ del select).
+function sgEnvAdd(){
+  var nombre = (prompt('Nombre del nuevo envase:')||'').trim(); if(!nombre) return;
+  api('/api/sg/envases','POST',{nombre:nombre}).then(function(r){
+    if(!r||!r.ok) return toast((r&&r.error)||'Error','er');
+    SG.cacheEnv.push(r.data); SG.cacheEnv.sort(function(a,b){ return String(a.nombre).localeCompare(String(b.nombre)); });
+    var sel = eid('sg-f-envase_id');
+    if(sel){ sel.innerHTML = '<option value="">—</option>' + SG.cacheEnv.map(function(e){ return '<option value="'+e.id+'">'+esc(e.nombre)+'</option>'; }).join(''); sel.value = r.data.id; }
+    toast('Envase creado','ok');
+  });
+}
 // Especie + Variedad (para dropdowns/listados de Catálogo donde conviene distinguir variedad)
 function sgProdLabel(id){ var p = SG.cacheProd.find(function(x){ return x.id===id; }); return p ? (p.nombre + (p.variedad ? ' '+p.variedad : '')) : ('#'+id); }
 function sgCondNombre(id){ if(!id) return '—'; var c = SG.cacheCond.find(function(x){ return x.id===id; }); return c ? c.nombre : ('#'+id); }
@@ -2494,7 +2510,7 @@ function sgLoad(entity){
 }
 
 function sgEmpty(entity){
-  var cols = {productos:5, presentaciones:4, proveedores:6, clientes:6, condiciones:4};
+  var cols = {productos:5, presentaciones:6, proveedores:6, clientes:6, condiciones:4};
   return '<tr><td colspan="'+(cols[entity]||6)+'" class="emp">Sin registros. Creá el primero con el botón de arriba.</td></tr>';
 }
 
@@ -2510,7 +2526,7 @@ function sgRow(entity, r){
       +'</td>'+sgActions(entity,r.id)+'</tr>';
   }
   if (entity==='presentaciones'){
-    return '<tr><td>'+esc(sgProdLabel(r.producto_id))+'</td><td>'+esc(r.nombre)+'</td><td style="text-align:right">'+(r.factor_conversion||0)+'</td>'+sgActions(entity,r.id)+'</tr>';
+    return '<tr><td>'+esc(sgProdLabel(r.producto_id))+'</td><td>'+esc(r.nombre)+'</td><td style="text-align:right">'+(r.factor_conversion||0)+'</td><td>'+esc(sgEnvNombre(r.envase_id))+'</td><td style="text-align:right">'+(r.paletizado!=null&&r.paletizado!==''?r.paletizado:'—')+'</td>'+sgActions(entity,r.id)+'</tr>';
   }
   if (entity==='proveedores'){
     var origLbl = (r.origen==='extranjero') ? '<span class="bdg bcc" style="margin-right:4px">Ext</span>' : '';
@@ -2551,9 +2567,12 @@ function sgOpenModal(entity, id){
     if (f.t==='select'){
       var opts = f.src==='prod' ? SG.cacheProd.map(function(p){ return [p.id, p.nombre + (p.variedad ? ' '+p.variedad : '')]; })
                : f.src==='cond' ? SG.cacheCond.map(function(c){ return [c.id, c.nombre]; })
+               : f.src==='env' ? (SG.cacheEnv||[]).map(function(e){ return [e.id, e.nombre]; })
                : f.o;
       var blank = (f.req && f.src) ? '' : '<option value="">—</option>';
-      inp = '<select id="sg-f-'+f.k+'">'+blank+opts.map(function(o){ return '<option value="'+o[0]+'">'+esc(String(o[1]))+'</option>'; }).join('')+'</select>';
+      var selEl = '<select id="sg-f-'+f.k+'"'+(f.add?' style="flex:1"':'')+'>'+blank+opts.map(function(o){ return '<option value="'+o[0]+'">'+esc(String(o[1]))+'</option>'; }).join('')+'</select>';
+      // f.add = handler para alta al vuelo → botón ＋ al lado del select.
+      inp = f.add ? '<div style="display:flex;gap:6px">'+selEl+'<button class="btn bo bs" type="button" onclick="'+f.add+'" title="Nuevo">＋</button></div>' : selEl;
     } else if (f.t==='textarea'){
       inp = '<textarea id="sg-f-'+f.k+'" rows="2" placeholder="'+(f.ph||'')+'"></textarea>';
     } else {

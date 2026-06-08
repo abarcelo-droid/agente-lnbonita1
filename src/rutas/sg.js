@@ -295,9 +295,15 @@ router.delete('/productos/:id', requireAdmin, (req, res) => {
   } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
 });
 
+// ── ENVASES (catálogo editable: cajón, bolsa, bin, IFCO…) ─────────────────────────
+// CRUD completo vía helper (GET/POST/PUT/DELETE). El dropdown de presentaciones lo
+// lee por GET; el alta al vuelo usa POST. nombre es UNIQUE → duplicado da 400.
+montarCRUD('envases', 'sg_envases', ['nombre'], { orderBy: 'nombre COLLATE NOCASE' });
+
 // ── PRESENTACIONES (filtra por producto_id) ──────────────────────────────────────
+// envase_id/paletizado son aditivos; factor_conversion (cálculo de kg) no se toca.
 montarCRUD('presentaciones', 'sg_presentaciones',
-  ['producto_id', 'nombre', 'factor_conversion'],
+  ['producto_id', 'nombre', 'factor_conversion', 'envase_id', 'paletizado'],
   {
     orderBy: 'nombre COLLATE NOCASE',
     listExtra: (req, params) => {
