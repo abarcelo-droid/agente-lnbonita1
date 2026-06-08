@@ -755,11 +755,13 @@ router.get('/oc/:id/pdf', requireAuth, (req, res) => {
     const oc = db.prepare(`SELECT o.*,
         p.razon_social AS prov_razon, p.cuit AS prov_cuit, p.categoria_fiscal AS prov_catfisc,
         p.localidad AS prov_localidad, p.provincia AS prov_provincia, p.nombre_comercial AS prov_fantasia,
-        c.nombre AS cond_nombre, u.nombre AS comercial_nombre
+        c.nombre AS cond_nombre,
+        COALESCE(uc.nombre, ucr.nombre) AS comercial_nombre
       FROM sg_oc o
       LEFT JOIN sg_proveedores p ON p.id=o.proveedor_id
       LEFT JOIN sg_condiciones_pago c ON c.id=o.condicion_pago_id
-      LEFT JOIN usuarios u ON u.id=o.comercial_id
+      LEFT JOIN usuarios uc  ON uc.id  = o.comercial_id
+      LEFT JOIN usuarios ucr ON ucr.id = o.creado_por
       WHERE o.id=?`).get(req.params.id);
     if (!oc) return res.status(404).json({ ok: false, error: 'No encontrado' });
     oc.items = db.prepare(`SELECT i.*, pr.codigo AS producto_codigo, pr.nombre AS producto_nombre,

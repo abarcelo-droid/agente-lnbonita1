@@ -62,13 +62,12 @@ export function generarOcPDF(oc) {
   // ── Membrete ───────────────────────────────────────────────────────────────
   const logo = getLogo();
   if (logo) {
-    try { doc.addImage(logo, 'JPEG', 14, 9, 46, 15); } catch (e) {} // logo.jpg ≈ 3:1
+    try { doc.addImage(logo, 'JPEG', 14, 9, 46, 15); } catch (e) {} // logo.jpg ≈ 3:1 (ya trae la marca)
   } else {
+    // Fallback solo si no se pudo cargar el logo: el nombre de la marca como texto.
     doc.setFont('helvetica', 'bold').setFontSize(15).setTextColor(...AZUL);
     doc.text(EMISOR.marca, 14, 18);
   }
-  doc.setFont('helvetica', 'bold').setFontSize(8.5).setTextColor(...GRIS);
-  doc.text(EMISOR.marca, 14, 27);
 
   // Datos fiscales del emisor (derecha)
   doc.setTextColor(...AZUL).setFont('helvetica', 'bold').setFontSize(11);
