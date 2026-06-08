@@ -621,7 +621,8 @@ db.exec(`
       ['password_reset_token',  'TEXT'],
       ['password_reset_expires','TEXT'],
       ['debe_cambiar_password', 'INTEGER DEFAULT 0'],
-      ['migrado_a_v2',          'INTEGER DEFAULT 0']
+      ['migrado_a_v2',          'INTEGER DEFAULT 0'],
+      ['ultimo_acceso',         'TEXT']   // último login OK (se pisa en cada acceso) — para adopción
     ];
     let added = 0;
     for (const [name, type] of toAdd) {

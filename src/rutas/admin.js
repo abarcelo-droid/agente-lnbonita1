@@ -113,14 +113,19 @@ router.get('/actividad', requireAdmin, (req, res) => {
       a.modulos[r.modulo] = (a.modulos[r.modulo] || 0) + r.n;
       if (r.ult && (!a.ult || r.ult > a.ult)) a.ult = r.ult;
     }
-    const usuarios = d.prepare("SELECT id, nombre, rol, activo FROM usuarios ORDER BY nombre COLLATE NOCASE").all();
+    // ultimo_acceso (último login OK; NULL = nunca entró desde que existe la columna).
+    // La columna la crea la migración de db.js al boot; igual blindamos por si no existiera.
+    const tieneAcceso = colsDe('usuarios').has('ultimo_acceso');
+    const usuarios = d.prepare(
+      `SELECT id, nombre, rol, activo${tieneAcceso ? ', ultimo_acceso' : ''} FROM usuarios ORDER BY nombre COLLATE NOCASE`
+    ).all();
     const por_usuario = usuarios.map(u => {
       const a = actByUid[u.id] || { total: 0, ult: null, modulos: {} };
-      return { id: u.id, nombre: u.nombre, rol: u.rol, activo: u.activo, total: a.total, ultimo: a.ult, modulos: a.modulos };
+      return { id: u.id, nombre: u.nombre, rol: u.rol, activo: u.activo, total: a.total, ultimo: a.ult, ultimo_acceso: u.ultimo_acceso || null, modulos: a.modulos };
     });
     if (actByUid['__null__']) {
       const a = actByUid['__null__'];
-      por_usuario.push({ id: null, nombre: '(sin autor — legacy)', rol: '—', activo: 1, total: a.total, ultimo: a.ult, modulos: a.modulos });
+      por_usuario.push({ id: null, nombre: '(sin autor — legacy)', rol: '—', activo: 1, total: a.total, ultimo: a.ult, ultimo_acceso: null, modulos: a.modulos });
     }
     por_usuario.sort((a, b) => b.total - a.total);
 
