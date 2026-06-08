@@ -4587,12 +4587,14 @@ function sgRepExport(){
     </div>
     <!-- Acceso a Config Módulos: solo admin. Aparece arriba a la derecha del header de Equipo
          porque desde acá se gestionan sociedades/áreas/personas/permisos.
-         No usamos loadSec() directamente porque depende del nav viejo (oculto en el sidebar v2)
-         y a veces no muestra la sección. Hacemos el show manual: ocultar todas las .sec y mostrar la del config. -->
+         No usamos loadSec() directamente porque depende del nav viejo (oculto en el sidebar v2).
+         Show manual por CLASE (.sec.on{display:block}), igual que el resto del panel: limpiamos
+         cualquier display inline residual (s.style.display='') y mostramos config por su clase .on.
+         (Antes forzaba display:none/block inline, lo que trababa la navegación posterior hasta F5.) -->
     <button id="eq-btn-config-modulos"
             class="btn bo"
             style="display:none; font-size:12px; padding:6px 12px; white-space:nowrap"
-            onclick="document.querySelectorAll('.sec').forEach(function(s){s.classList.remove('on');s.style.display='none'});var sec=document.getElementById('sec-config-modulos');if(sec){sec.classList.add('on');sec.style.display='block';if(typeof cmCargar==='function')cmCargar();window.scrollTo({top:0,behavior:'smooth'});}"
+            onclick="document.querySelectorAll('.sec').forEach(function(s){s.classList.remove('on');s.style.display='';});var sec=document.getElementById('sec-config-modulos');if(sec){sec.classList.add('on');if(typeof cmCargar==='function')cmCargar();window.scrollTo({top:0,behavior:'smooth'});}"
             title="Configurar a qué sociedad pertenece cada módulo y su nivel de acceso (solo admin)">
       ⚙️ Config Módulos
     </button>
@@ -8772,7 +8774,10 @@ var CANALES = [
 document.querySelectorAll('.ni').forEach(function(el) {
   el.addEventListener('click', function() {
     var sec = el.getAttribute('data-sec');
-    document.querySelectorAll('.sec').forEach(function(s){ s.classList.remove('on'); });
+    // Reset del display inline residual: features como el botón ⚙️ Config Módulos estampan
+    // style.display en las .sec; sin esto, el inline pisa a .sec.on{display:block} y la
+    // navegación queda trabada hasta refrescar. Limpiar acá lo cubre para cualquier origen.
+    document.querySelectorAll('.sec').forEach(function(s){ s.classList.remove('on'); s.style.display=''; });
     document.querySelectorAll('.ni').forEach(function(n){ n.classList.remove('on'); });
     document.getElementById('sec-'+sec).classList.add('on');
     el.classList.add('on');
@@ -31238,7 +31243,7 @@ function cmAbrirModulo(modulo) {
     toast('No se encuentra la sección "'+modulo+'"','er');
     return;
   }
-  document.querySelectorAll('.sec').forEach(function(s){ s.classList.remove('on'); });
+  document.querySelectorAll('.sec').forEach(function(s){ s.classList.remove('on'); s.style.display=''; });
   document.querySelectorAll('.ni').forEach(function(n){ n.classList.remove('on'); });
   sec.classList.add('on');
   if (ni) ni.classList.add('on');  // marca visualmente aunque esté display:none
