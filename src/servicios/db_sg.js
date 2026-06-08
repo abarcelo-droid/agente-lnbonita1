@@ -97,13 +97,33 @@ db.exec(`
     eliminado_por_id        INTEGER
   );
 
+  -- Catálogo editable de envases (cajón, bolsa, bin, IFCO…). Lista propia de SG,
+  -- agregable/editable desde el Catálogo. Seed inicial idempotente (OR IGNORE).
+  CREATE TABLE IF NOT EXISTS sg_envases (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    nombre            TEXT NOT NULL UNIQUE,
+    activo            INTEGER NOT NULL DEFAULT 1,
+    creado_en         TEXT DEFAULT (datetime('now','localtime')),
+    creado_por        INTEGER,
+    modificado_en     TEXT,
+    modificado_por    INTEGER,
+    eliminado_en      TEXT,
+    eliminado_por_id  INTEGER
+  );
+  INSERT OR IGNORE INTO sg_envases (nombre) VALUES
+    ('Cajón'), ('Bolsa'), ('Bin'), ('IFCO'), ('Atado'), ('Bandeja'), ('Caja'), ('Bolsón');
+
   -- Presentaciones por producto (cajón, bolsa, atado…). factor_conversion = cuántas
-  -- unidades_base equivale 1 presentación (ej. cajón 20kg → 20).
+  -- unidades_base equivale 1 presentación (ej. cajón 20kg → 20). envase_id/paletizado
+  -- son aditivos: NO intervienen en el cálculo de kg (solo factor_conversion lo hace);
+  -- paletizado (unidades por pallet) es informativo para costeo logístico futuro.
   CREATE TABLE IF NOT EXISTS sg_presentaciones (
     id                  INTEGER PRIMARY KEY AUTOINCREMENT,
     producto_id         INTEGER NOT NULL REFERENCES sg_productos(id),
     nombre              TEXT NOT NULL,
     factor_conversion   REAL NOT NULL DEFAULT 1,
+    envase_id           INTEGER REFERENCES sg_envases(id),
+    paletizado          INTEGER,                              -- unidades por pallet (informativo)
     activo              INTEGER NOT NULL DEFAULT 1,
     creado_en           TEXT DEFAULT (datetime('now','localtime')),
     creado_por          INTEGER,
@@ -603,6 +623,21 @@ try {
   if (faltan.length) console.log('[DB] SG sg_proveedores migrado (+' + faltan.join(', +') + ')');
 } catch (e) {
   console.error('[DB] SG migración sg_proveedores (datos pago):', e.message);
+}
+
+// ── MIGRACIÓN idempotente: sg_presentaciones → +envase_id, +paletizado ──────────
+// Campos aditivos nullable (catálogo de envases + unidades por pallet). ALTER ADD
+// COLUMN simple, sin rebuild, no rompe presentaciones ya cargadas ni el cálculo de
+// kg (factor_conversion intacto). envase_id se agrega sin REFERENCES inline (límite
+// de ALTER en SQLite); se valida app-side y la tabla nueva sí lleva la FK.
+try {
+  const cols = db.prepare("PRAGMA table_info(sg_presentaciones)").all().map(c => c.name);
+  const faltan = [];
+  if (!cols.includes('envase_id'))  { db.exec('ALTER TABLE sg_presentaciones ADD COLUMN envase_id INTEGER'); faltan.push('envase_id'); }
+  if (!cols.includes('paletizado')) { db.exec('ALTER TABLE sg_presentaciones ADD COLUMN paletizado INTEGER'); faltan.push('paletizado'); }
+  if (faltan.length) console.log('[DB] SG sg_presentaciones migrado (+' + faltan.join(', +') + ')');
+} catch (e) {
+  console.error('[DB] SG migración sg_presentaciones (envase/paletizado):', e.message);
 }
 
 // ── BACKFILL idempotente: margen_estimado por kg ────────────────────────────────
