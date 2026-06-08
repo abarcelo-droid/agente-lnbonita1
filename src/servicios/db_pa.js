@@ -1335,6 +1335,20 @@ try {
   `);
 } catch(e) { console.error('[PA] Error creando pa_tarifas_persona:', e.message); }
 
+// ── Acceso sensible: sesión re-password (15 min) para vistas de compensación ──
+// Barrera genérica (no PC-only): "Por valorizar" y la edición de tarifas por persona
+// exigen reingresar la clave. Validada → ventana de 15 min sin reingresar. Una fila
+// por usuario (PK), se pisa en cada revalidación. expira_en en localtime. Idempotente.
+try {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS pa_acceso_sensible (
+      usuario_id INTEGER PRIMARY KEY REFERENCES usuarios(id),
+      expira_en  TEXT NOT NULL,
+      creado_en  TEXT DEFAULT (datetime('now','localtime'))
+    )
+  `);
+} catch(e) { console.error('[PA] Error creando pa_acceso_sensible:', e.message); }
+
 // ── Migración: tarifa_jornal en pa_cuadrillas ($/jornal de la cuadrilla) ─────
 // El modo Cuadrilla (bloque) cobra por la tarifa de SU cuadrilla, no por el rol de la
 // responsable. Simple ADD COLUMN, idempotente con guard PRAGMA table_info.
