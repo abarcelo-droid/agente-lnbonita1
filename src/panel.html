@@ -2477,16 +2477,46 @@ function sgMoney(n){ return '$'+nr(n); }
 function sgProdNombre(id){ var p = SG.cacheProd.find(function(x){ return x.id===id; }); return p ? p.nombre : ('#'+id); }
 // Nombre de envase desde cache (para el listado de presentaciones).
 function sgEnvNombre(id){ if(!id) return '—'; var e = (SG.cacheEnv||[]).find(function(x){ return String(x.id)===String(id); }); return e ? e.nombre : ('#'+id); }
+// ── Alta de ítem de catálogo con detección de duplicados (reutilizable) ───────
+// POST a /api/sg/<path>. Si el backend devuelve 409 {duplicado}, muestra el
+// candidato existente y ofrece USARLO; un admin puede además forzar la creación
+// ("Crear de todas formas", reenvía con forzar:true). onUsar(candidato) y
+// onCreado(row) son los callbacks de cada desenlace.
+function sgCrearConDedup(path, body, onUsar, onCreado){
+  api('/api/sg/'+path, 'POST', body).then(function(r){
+    if (r && r.ok) return onCreado(r.data);
+    if (r && r.duplicado && r.candidato){
+      var c = r.candidato;
+      var esAdmin = !!(window.LNB_USER && window.LNB_USER.rol === 'admin');
+      var via = r.motivo === 'semantico' ? ' (detectado por similitud de significado)' : '';
+      var msg = 'Ya existe un ítem muy parecido: "' + c.nombre + '"' + via + '.\n'
+        + 'Usá ese en lugar de crear uno nuevo.\n\n'
+        + 'Aceptar = usar "' + c.nombre + '"\n'
+        + (esAdmin ? 'Cancelar = crear "' + body.nombre + '" de todas formas' : 'Cancelar = no crear');
+      if (confirm(msg)) return onUsar(c);
+      if (esAdmin && confirm('¿Crear "' + body.nombre + '" igualmente? Puede duplicar el catálogo.')){
+        var b2 = {}; for (var k in body) b2[k] = body[k]; b2.forzar = true;
+        api('/api/sg/'+path, 'POST', b2).then(function(r2){
+          if (r2 && r2.ok) onCreado(r2.data); else toast((r2&&r2.error)||'Error al guardar', 'er');
+        });
+      }
+      return;
+    }
+    toast((r&&r.error)||'Error al guardar', 'er');
+  });
+}
+// Refresca el dropdown de envases y deja seleccionado el id dado.
+function sgEnvSync(id){
+  var sel = eid('sg-f-envase_id');
+  if (sel){ sel.innerHTML = '<option value="">—</option>' + SG.cacheEnv.map(function(e){ return '<option value="'+e.id+'">'+esc(e.nombre)+'</option>'; }).join(''); sel.value = id; }
+}
 // Alta de envase al vuelo desde el modal de presentación (botón ＋ del select).
 function sgEnvAdd(){
   var nombre = (prompt('Nombre del nuevo envase:')||'').trim(); if(!nombre) return;
-  api('/api/sg/envases','POST',{nombre:nombre}).then(function(r){
-    if(!r||!r.ok) return toast((r&&r.error)||'Error','er');
-    SG.cacheEnv.push(r.data); SG.cacheEnv.sort(function(a,b){ return String(a.nombre).localeCompare(String(b.nombre)); });
-    var sel = eid('sg-f-envase_id');
-    if(sel){ sel.innerHTML = '<option value="">—</option>' + SG.cacheEnv.map(function(e){ return '<option value="'+e.id+'">'+esc(e.nombre)+'</option>'; }).join(''); sel.value = r.data.id; }
-    toast('Envase creado','ok');
-  });
+  sgCrearConDedup('envases', { nombre: nombre },
+    function(cand){ sgEnvSync(cand.id); toast('Usando "'+cand.nombre+'"','ok'); },        // usar existente
+    function(row){ SG.cacheEnv.push(row); SG.cacheEnv.sort(function(a,b){ return String(a.nombre).localeCompare(String(b.nombre)); }); sgEnvSync(row.id); toast('Envase creado','ok'); }
+  );
 }
 // Especie + Variedad (para dropdowns/listados de Catálogo donde conviene distinguir variedad)
 function sgProdLabel(id){ var p = SG.cacheProd.find(function(x){ return x.id===id; }); return p ? (p.nombre + (p.variedad ? ' '+p.variedad : '')) : ('#'+id); }

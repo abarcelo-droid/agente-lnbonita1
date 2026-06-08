@@ -7,6 +7,7 @@
 import express from 'express';
 import { getDb } from '../servicios/db.js';
 import '../servicios/db_sg.js'; // corre el DDL sg_* al importarse
+import { detectarDuplicado } from '../servicios/dedup.js';
 
 const router = express.Router();
 
@@ -44,7 +45,8 @@ function val(v) {
 // CRUD genérico soft-delete sobre una tabla con columnas de auditoría estándar.
 // fields: lista de columnas asignables desde el body.
 function montarCRUD(path, tabla, fields, opts = {}) {
-  const { orderBy = 'id DESC', listExtra = null } = opts;
+  // dedup: nombre de columna a chequear contra duplicados al crear (null = sin chequeo).
+  const { orderBy = 'id DESC', listExtra = null, dedup = null } = opts;
 
   // LISTAR (incluye inactivos solo si ?todos=1)
   router.get(`/${path}`, requireAuth, (req, res) => {
@@ -73,9 +75,21 @@ function montarCRUD(path, tabla, fields, opts = {}) {
   });
 
   // CREAR
-  router.post(`/${path}`, requireAdmin, (req, res) => {
+  router.post(`/${path}`, requireAdmin, async (req, res) => {
     const db = getDb();
     try {
+      // Detección de duplicados con bloqueo. Válvula de escape: un admin puede forzar
+      // con { forzar:true } (confirmación explícita en el front). Sin forzar, si hay
+      // un parecido por encima del umbral → 409 con el candidato existente.
+      if (dedup && !(req.body.forzar === true && req.user && req.user.rol === 'admin')) {
+        const hit = await detectarDuplicado(db, { tabla, columna: dedup, nombre: req.body[dedup] });
+        if (hit.bloqueado) {
+          return res.status(409).json({
+            ok: false, duplicado: true, motivo: hit.motivo, candidato: hit.candidato, score: hit.score,
+            error: `Ya existe un ítem muy parecido: "${hit.candidato.nombre}". Usá ese en lugar de crear uno nuevo.`,
+          });
+        }
+      }
       const cols = [], place = [], vals = [];
       for (const f of fields) {
         if (req.body[f] !== undefined) { cols.push(f); place.push('?'); vals.push(val(req.body[f])); }
@@ -349,7 +363,7 @@ router.delete('/productos/:id', requireAdmin, (req, res) => {
 // ── ENVASES (catálogo editable: cajón, bolsa, bin, IFCO…) ─────────────────────────
 // CRUD completo vía helper (GET/POST/PUT/DELETE). El dropdown de presentaciones lo
 // lee por GET; el alta al vuelo usa POST. nombre es UNIQUE → duplicado da 400.
-montarCRUD('envases', 'sg_envases', ['nombre'], { orderBy: 'nombre COLLATE NOCASE' });
+montarCRUD('envases', 'sg_envases', ['nombre'], { orderBy: 'nombre COLLATE NOCASE', dedup: 'nombre' });
 
 // ── PRESENTACIONES (filtra por producto_id) ──────────────────────────────────────
 // envase_id/paletizado son aditivos; factor_conversion (cálculo de kg) no se toca.
