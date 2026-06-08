@@ -2214,62 +2214,99 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   </div>
 </div>
 
-<!-- Modal Recepción de mercadería. BLOQUE A: secciones (datos/documentación/items/calidad)
-     + documentación (remito/factura/DTV) + paletizado recibido. BLOQUE B: informe de calidad
-     (mercadería observada) con fotos (reusa compresor IFCO). -->
+<!-- Modal Recepción de mercadería — FLUJO EN 2 PASOS (rediseño).
+     PASO 1 (sg-rec-paso1): recepción operativa — OC/fecha + documentación + paletizado + items + obs.
+     PASO 2 (sg-rec-paso2): control de calidad opcional (toggle ámbar) — informe + fotos + PDF.
+     El backend (multipart + fotos + PDF) se reusa de #377; acá solo cambia la UI + preview PDF. -->
 <div class="ab-modal-overlay" id="sg-rec-modal">
-  <div class="ab-modal" style="width:860px;max-height:92vh;overflow-y:auto">
-    <div class="mhd"><div class="mht">Recepción de mercadería</div><button class="mcl" onclick="closeMB('sg-rec-modal')">×</button></div>
+  <div class="ab-modal" style="width:780px;max-width:96vw;max-height:92vh;overflow-y:auto">
+    <div class="mhd"><div class="mht">📦 Recepción de mercadería</div><button class="mcl" onclick="closeMB('sg-rec-modal')">×</button></div>
+
+    <!-- Indicador de pasos -->
+    <div style="display:flex;align-items:center;gap:12px;margin:4px 2px 16px">
+      <div id="sg-rec-chip1" style="display:flex;align-items:center;gap:8px;font-weight:600;font-size:13px">
+        <span id="sg-rec-num1">1</span> Recepción
+      </div>
+      <div id="sg-rec-bar" style="flex:1;height:2px;background:var(--bor);border-radius:2px"></div>
+      <div id="sg-rec-chip2" style="display:flex;align-items:center;gap:8px;font-weight:600;font-size:13px;opacity:.55">
+        <span id="sg-rec-num2">2</span> Control de calidad
+      </div>
+    </div>
+
     <div class="fg">
 
-      <!-- ── Sección: Datos de recepción ── -->
-      <div style="font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--err);margin:2px 0 8px;border-bottom:1px solid var(--bor);padding-bottom:4px">Datos de recepción</div>
-      <div style="display:grid;grid-template-columns:2fr 1fr;gap:10px">
-        <div class="fl"><label>Orden de compra <span style="color:var(--err)">*</span></label><select id="sg-rec-oc" onchange="sgRecOcChange()"></select></div>
-        <div class="fl"><label>Fecha recepción</label><input type="date" id="sg-rec-fecha"></div>
-      </div>
-
-      <!-- ── Sección: Documentación (BLOQUE A) ── -->
-      <div style="font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--err);margin:16px 0 8px;border-bottom:1px solid var(--bor);padding-bottom:4px">Documentación</div>
-      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
-        <div class="fl"><label>Remito N°</label><input id="sg-rec-remito" placeholder="N° remito proveedor"></div>
-        <div class="fl"><label>Factura N°</label><input id="sg-rec-factura" placeholder="N° factura"></div>
-        <div class="fl"><label>DTV — SENASA</label><input id="sg-rec-dtv" placeholder="código de cierre"></div>
-      </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:8px">
-        <div class="fl"><label>Pallets recibidos</label><input type="number" min="0" id="sg-rec-pallets" placeholder="nº de pallets"></div>
-        <div class="fl"><label>Bultos recibidos</label><input type="number" min="0" id="sg-rec-bultos" placeholder="nº de bultos"></div>
-      </div>
-
-      <!-- ── Sección: Items ── -->
-      <div style="font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--err);margin:16px 0 8px;border-bottom:1px solid var(--bor);padding-bottom:4px">Items a recibir</div>
-      <div class="fl ff"><label style="font-weight:400;color:var(--mut);font-size:12px">Dividí por calidad si hace falta</label>
-        <div id="sg-rec-items"><div class="emp">Elegí una OC abierta…</div></div>
-      </div>
-      <div class="fl ff"><label>Observaciones generales</label><textarea id="sg-rec-obs" rows="2"></textarea></div>
-
-      <!-- ── Sección: Control de calidad (BLOQUE B) ── -->
-      <div style="font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--err);margin:16px 0 8px;border-bottom:1px solid var(--bor);padding-bottom:4px">Control de calidad</div>
-      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;font-weight:600">
-        <input type="checkbox" id="sg-rec-observada" onchange="sgRecToggleObs()" style="width:auto;margin:0"> Mercadería observada — generar informe de calidad
-      </label>
-      <div id="sg-rec-calidad" style="display:none;margin-top:10px;border:1px solid var(--bor);border-radius:8px;padding:12px">
+      <!-- ════════ PASO 1 — Recepción ════════ -->
+      <div id="sg-rec-paso1">
         <div style="display:grid;grid-template-columns:2fr 1fr;gap:10px">
-          <div class="fl"><label>Estado general</label><input id="sg-rec-cal-estado" placeholder="ej. regular, con deterioro…"></div>
-          <div class="fl"><label>% afectado</label><input type="number" min="0" max="100" id="sg-rec-cal-pct" placeholder="0–100"></div>
+          <div class="fl"><label>Orden de compra <span style="color:var(--err)">*</span></label><select id="sg-rec-oc" onchange="sgRecOcChange()"></select></div>
+          <div class="fl"><label>Fecha recepción</label><input type="date" id="sg-rec-fecha"></div>
         </div>
-        <div class="fl ff" style="margin-top:8px"><label>Defectos detectados</label><input id="sg-rec-cal-defectos" placeholder="ej. golpes, pudrición, sobremaduro…"></div>
-        <div class="fl ff"><label>Observaciones del informe</label><textarea id="sg-rec-cal-obs" rows="2"></textarea></div>
-        <div class="fl ff"><label>Fotos del informe</label>
-          <input type="file" id="sg-rec-fotos" accept="image/jpeg,image/png,image/webp" multiple onchange="sgRecFotosPreview(event)">
-          <div id="sg-rec-fotos-preview" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px"></div>
+
+        <!-- Recuadro: Documentación -->
+        <div style="border:1px solid var(--bor);border-radius:10px;padding:12px;margin-top:14px">
+          <div style="font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--mut);margin-bottom:10px">📄 Documentación</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
+            <div class="fl"><label>Remito N°</label><input id="sg-rec-remito" placeholder="N° remito proveedor"></div>
+            <div class="fl"><label>Factura N°</label><input id="sg-rec-factura" placeholder="N° factura"></div>
+            <div class="fl"><label>DTV — SENASA</label><input id="sg-rec-dtv" placeholder="código de cierre"></div>
+          </div>
+        </div>
+
+        <!-- Recuadro: Paletizado recibido -->
+        <div style="border:1px solid var(--bor);border-radius:10px;padding:12px;margin-top:12px">
+          <div style="font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--mut);margin-bottom:10px">🧱 Paletizado recibido</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+            <div class="fl"><label>Pallets recibidos</label><input type="number" min="0" id="sg-rec-pallets" placeholder="nº de pallets"></div>
+            <div class="fl"><label>Bultos recibidos</label><input type="number" min="0" id="sg-rec-bultos" placeholder="nº de bultos"></div>
+          </div>
+        </div>
+
+        <!-- Items a recibir -->
+        <div style="margin-top:14px">
+          <div style="font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--mut);margin-bottom:8px">📥 Items a recibir <span style="font-weight:400;text-transform:none;letter-spacing:0">· dividí por calidad si hace falta</span></div>
+          <div id="sg-rec-items"><div class="emp">Elegí una OC abierta…</div></div>
+        </div>
+        <div class="fl ff" style="margin-top:10px"><label>Observaciones generales</label><textarea id="sg-rec-obs" rows="2"></textarea></div>
+
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:16px">
+          <button class="btn bo" onclick="closeMB('sg-rec-modal')">Cancelar</button>
+          <button class="btn bb" onclick="sgRecToPaso2()">Siguiente: Control de calidad →</button>
         </div>
       </div>
 
-    </div>
-    <div class="ab-modal-footer">
-      <button class="btn bo" onclick="closeMB('sg-rec-modal')">Cancelar</button>
-      <button class="btn bb" onclick="sgRecGuardar()">Confirmar recepción</button>
+      <!-- ════════ PASO 2 — Control de calidad ════════ -->
+      <div id="sg-rec-paso2" style="display:none">
+        <!-- Toggle destacado (ámbar) -->
+        <div style="border:1px solid #e0a72e;background:rgba(224,167,46,.12);border-radius:10px;padding:14px">
+          <label style="display:flex;align-items:center;gap:10px;cursor:pointer;font-weight:700;font-size:13px">
+            <input type="checkbox" id="sg-rec-observada" onchange="sgRecToggleObs()" style="width:auto;margin:0"> ⚠️ Mercadería observada — generar informe de calidad con fotos y PDF
+          </label>
+          <div style="font-size:12px;color:var(--mut);margin-top:8px">Si la mercadería entró sin problemas, dejá esto apagado y confirmá la recepción directamente.</div>
+        </div>
+
+        <div id="sg-rec-calidad" style="display:none;margin-top:12px;border:1px solid var(--bor);border-radius:10px;padding:14px">
+          <div style="display:grid;grid-template-columns:2fr 1fr;gap:10px">
+            <div class="fl"><label>Estado general</label><input id="sg-rec-cal-estado" placeholder="ej. regular, con deterioro…"></div>
+            <div class="fl"><label>% afectado</label><input type="number" min="0" max="100" id="sg-rec-cal-pct" placeholder="0–100"></div>
+          </div>
+          <div class="fl ff" style="margin-top:8px"><label>Defectos detectados</label><input id="sg-rec-cal-defectos" placeholder="ej. golpes, pudrición, sobremaduro…"></div>
+          <div class="fl ff"><label>Observaciones del informe</label><textarea id="sg-rec-cal-obs" rows="2"></textarea></div>
+          <div class="fl ff"><label>Fotos del informe</label>
+            <div id="sg-rec-fotos-preview" style="display:flex;flex-wrap:wrap;gap:8px;margin:6px 0"></div>
+            <input type="file" id="sg-rec-fotos" accept="image/jpeg,image/png,image/webp" multiple style="display:none" onchange="sgRecFotosAdd(event)">
+            <button class="btn bo bs" type="button" onclick="eid('sg-rec-fotos').click()">+ Agregar fotos</button>
+          </div>
+        </div>
+
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:16px">
+          <button class="btn bo" onclick="sgRecToPaso1()">← Atrás</button>
+          <div style="display:flex;gap:8px">
+            <button class="btn bo" id="sg-rec-preview-btn" style="display:none" onclick="sgRecPreviewPDF()">👁 Vista previa PDF</button>
+            <button class="btn bb" onclick="sgRecGuardar()">Confirmar recepción</button>
+          </div>
+        </div>
+      </div>
+
     </div>
   </div>
 </div>
@@ -3243,37 +3280,68 @@ function sgRecVer(id){
   });
 }
 function sgRecOpen(ocId){
-  SG.recItems=[];
+  SG.recItems=[]; SG._recFotos=[];
   Promise.all([api('/api/sg/oc?estado=abierta'), api('/api/sg/oc?estado=recibida_parcial')]).then(function(res){
     var ocs=((res[0]&&res[0].ok)?res[0].data:[]).concat((res[1]&&res[1].ok)?res[1].data:[]);
     eid('sg-rec-oc').innerHTML='<option value="">— Elegir OC —</option>'+ocs.map(function(o){return '<option value="'+o.id+'">'+esc(o.numero)+' — '+esc(o.proveedor_nombre||'')+'</option>';}).join('');
     eid('sg-rec-fecha').value=new Date().toISOString().slice(0,10);
     eid('sg-rec-remito').value=''; eid('sg-rec-obs').value='';
-    // BLOQUE A — reset documentación + paletizado
+    // PASO 1 — reset documentación + paletizado
     eid('sg-rec-factura').value=''; eid('sg-rec-dtv').value=''; eid('sg-rec-pallets').value=''; eid('sg-rec-bultos').value='';
-    // BLOQUE B — reset informe de calidad + fotos
-    eid('sg-rec-observada').checked=false; eid('sg-rec-calidad').style.display='none';
+    // PASO 2 — reset informe de calidad + fotos
+    eid('sg-rec-observada').checked=false; eid('sg-rec-calidad').style.display='none'; eid('sg-rec-preview-btn').style.display='none';
     eid('sg-rec-cal-estado').value=''; eid('sg-rec-cal-pct').value=''; eid('sg-rec-cal-defectos').value=''; eid('sg-rec-cal-obs').value='';
-    eid('sg-rec-fotos').value=''; eid('sg-rec-fotos-preview').innerHTML=''; SG._recFotos=[];
+    eid('sg-rec-fotos').value=''; sgRecRenderFotos();
     eid('sg-rec-items').innerHTML='<div class="emp">Elegí una OC…</div>';
+    sgRecPaso(1);
     if(ocId){ eid('sg-rec-oc').value=ocId; sgRecOcChange(); }
     eid('sg-rec-modal').classList.add('on');
   });
 }
-// BLOQUE B — toggle de la sección de informe de calidad.
-function sgRecToggleObs(){ eid('sg-rec-calidad').style.display=eid('sg-rec-observada').checked?'block':'none'; }
-// BLOQUE B — fotos del informe. REUSA el compresor de imágenes de IFCO (_ifcoComprimirImagen).
-async function sgRecFotosPreview(ev){
+// ── Navegación del flujo en 2 pasos + indicador de progreso ──
+function sgRecPaso(n){
+  SG._recPaso=n;
+  eid('sg-rec-paso1').style.display=(n===1)?'block':'none';
+  eid('sg-rec-paso2').style.display=(n===2)?'block':'none';
+  var base='display:inline-flex;width:26px;height:26px;border-radius:50%;align-items:center;justify-content:center;font-size:13px;font-weight:700;';
+  var done='background:#2e9e5b;color:#fff;'+base, active='background:var(--err);color:#fff;'+base,
+      idle='background:transparent;color:var(--mut);border:2px solid var(--bor);'+base;
+  eid('sg-rec-num1').style.cssText=(n>1)?done:active; eid('sg-rec-num1').textContent=(n>1)?'✓':'1';
+  eid('sg-rec-num2').style.cssText=(n===2)?active:idle;
+  eid('sg-rec-chip1').style.opacity='1';
+  eid('sg-rec-chip2').style.opacity=(n===2)?'1':'.55';
+  eid('sg-rec-bar').style.background=(n===2)?'#2e9e5b':'var(--bor)';
+}
+function sgRecToPaso1(){ sgRecPaso(1); }
+function sgRecToPaso2(){
+  // Validar el paso 1 antes de avanzar (OC + al menos un item con kg).
+  if(!eid('sg-rec-oc').value){ toast('Elegí una OC','er'); return; }
+  var any=SG.recItems.some(function(it){ return it.lotes.some(function(l){return Number(l.kg_reales)>0;}); });
+  if(!any){ toast('Cargá kg en al menos un item','er'); return; }
+  sgRecPaso(2);
+}
+// PASO 2 — toggle del informe de calidad (muestra/oculta campos + botón de preview PDF).
+function sgRecToggleObs(){
+  var on=eid('sg-rec-observada').checked;
+  eid('sg-rec-calidad').style.display=on?'block':'none';
+  eid('sg-rec-preview-btn').style.display=on?'inline-flex':'none';
+}
+// PASO 2 — fotos del informe: acumulables con "+ Agregar", thumbnails con × para quitar.
+// REUSA el compresor de imágenes de IFCO (_ifcoComprimirImagen).
+async function sgRecFotosAdd(ev){
   var files=Array.prototype.slice.call(ev.target.files||[]);
-  SG._recFotos=[]; var prev=eid('sg-rec-fotos-preview'); prev.innerHTML='';
-  for(var i=0;i<files.length;i++){
-    var f=await _ifcoComprimirImagen(files[i]);
-    SG._recFotos.push(f);
-    var img=document.createElement('img');
-    img.src=URL.createObjectURL(f);
-    img.style.cssText='width:72px;height:72px;object-fit:cover;border-radius:6px;border:1px solid var(--bor)';
-    prev.appendChild(img);
-  }
+  for(var i=0;i<files.length;i++){ SG._recFotos.push(await _ifcoComprimirImagen(files[i])); }
+  ev.target.value=''; sgRecRenderFotos();
+}
+function sgRecDelFoto(i){ SG._recFotos.splice(i,1); sgRecRenderFotos(); }
+function sgRecRenderFotos(){
+  var prev=eid('sg-rec-fotos-preview'); if(!prev) return;
+  prev.innerHTML=(SG._recFotos||[]).map(function(f,i){
+    return '<div style="position:relative;width:78px;height:78px">'
+      +'<img src="'+URL.createObjectURL(f)+'" style="width:78px;height:78px;object-fit:cover;border-radius:8px;border:1px solid var(--bor)">'
+      +'<button type="button" title="Quitar" onclick="sgRecDelFoto('+i+')" style="position:absolute;top:-7px;right:-7px;width:21px;height:21px;border-radius:50%;border:none;background:var(--err);color:#fff;cursor:pointer;font-size:12px;line-height:1;padding:0">×</button>'
+      +'</div>';
+  }).join('');
 }
 function sgRecOcChange(){
   var ocId=eid('sg-rec-oc').value;
@@ -3311,35 +3379,41 @@ function sgRecRenderItems(){
 function sgRecSuma(){
   SG.recItems.forEach(function(it,i){ var s=it.lotes.reduce(function(a,l){return a+(Number(l.kg_reales)||0);},0); var el=eid('sg-rec-suma-'+i); if(el)el.textContent='Σ '+nr(s)+'kg'; });
 }
-function sgRecGuardar(){
+// Arma el payload de la recepción (PASO 1 + PASO 2). requireItems=false → para la vista
+// previa PDF (permite previsualizar el informe aunque falten items). Devuelve null si inválido.
+function sgRecBuildBody(requireItems){
   var ocId=eid('sg-rec-oc').value;
-  if(!ocId){ toast('Elegí una OC','er'); return; }
+  if(!ocId){ toast('Elegí una OC','er'); return null; }
   var items=[];
   for(var i=0;i<SG.recItems.length;i++){
     var it=SG.recItems[i];
     var lotes=it.lotes.filter(function(l){return Number(l.kg_reales)>0;});
     if(!lotes.length) continue;
     var suma=lotes.reduce(function(a,l){return a+Number(l.kg_reales);},0);
-    items.push({ oc_item_id:it.oc_item_id, kg_reales_item:suma, lotes:lotes.map(function(l){return {kg_reales:Number(l.kg_reales),calidad:l.calidad||null};}) });
+    // producto_nombre se incluye solo para la vista previa PDF; el POST real lo ignora.
+    items.push({ oc_item_id:it.oc_item_id, producto_nombre:it.producto_nombre, kg_reales_item:suma,
+      lotes:lotes.map(function(l){return {kg_reales:Number(l.kg_reales),calidad:l.calidad||null};}) });
   }
-  if(!items.length){ toast('Cargá kg en al menos un item','er'); return; }
+  if(requireItems!==false && !items.length){ toast('Cargá kg en al menos un item','er'); return null; }
   var num=function(id){ var v=eid(id).value; return v===''?null:Number(v); };
   var observada=eid('sg-rec-observada').checked;
-  // BLOQUE A (doc/paletizado) + BLOQUE B (calidad) viajan en el payload.
-  var body={ oc_id:Number(ocId), fecha_recepcion:eid('sg-rec-fecha').value,
+  return { oc_id:Number(ocId), fecha_recepcion:eid('sg-rec-fecha').value,
     numero_remito_proveedor:eid('sg-rec-remito').value, observaciones:eid('sg-rec-obs').value,
-    factura_numero:eid('sg-rec-factura').value, dtv_codigo:eid('sg-rec-dtv').value,
-    pallets_recibidos:num('sg-rec-pallets'), bultos_recibidos:num('sg-rec-bultos'),
-    observada:observada,
+    factura_numero:eid('sg-rec-factura').value, dtv_codigo:eid('sg-rec-dtv').value,           // PASO 1 · documentación
+    pallets_recibidos:num('sg-rec-pallets'), bultos_recibidos:num('sg-rec-bultos'),           // PASO 1 · paletizado
+    observada:observada,                                                                       // PASO 2 · informe de calidad
     calidad_estado_general:observada?eid('sg-rec-cal-estado').value:null,
     calidad_defectos:observada?eid('sg-rec-cal-defectos').value:null,
     calidad_pct_afectado:observada?num('sg-rec-cal-pct'):null,
     calidad_observaciones:observada?eid('sg-rec-cal-obs').value:null,
     items:items };
-  // BLOQUE B — multipart (payload JSON + fotos). Reusa patrón IFCO de subida (FormData + fetch).
+}
+function sgRecGuardar(){
+  var body=sgRecBuildBody(true); if(!body) return;
+  // Multipart (payload JSON + fotos). Reusa el patrón IFCO de subida (FormData + fetch).
   var fd=new FormData();
   fd.append('payload', JSON.stringify(body));
-  var fotos=(observada && SG._recFotos)?SG._recFotos:[];
+  var fotos=(body.observada && SG._recFotos)?SG._recFotos:[];
   fotos.forEach(function(f){ fd.append('fotos', f); });
   fetch('/api/sg/recepciones',{method:'POST',credentials:'include',body:fd})
     .then(function(resp){return resp.json();})
@@ -3347,6 +3421,19 @@ function sgRecGuardar(){
       if(r&&r.ok){ toast('Recepción registrada ('+r.data.lotes+' lotes)','ok'); closeMB('sg-rec-modal'); sgLoadRecepciones(); sgLoadOC(); }
       else toast((r&&r.error)||'Error','er');
     }).catch(function(){ toast('Error de red','er'); });
+}
+// PASO 2 — vista previa del informe de calidad en PDF (sin persistir). Manda el payload +
+// fotos al endpoint de preview y abre el PDF devuelto en una pestaña nueva (blob).
+function sgRecPreviewPDF(){
+  var body=sgRecBuildBody(false); if(!body) return;
+  var fd=new FormData();
+  fd.append('payload', JSON.stringify(body));
+  (SG._recFotos||[]).forEach(function(f){ fd.append('fotos', f); });
+  toast('Generando vista previa…','ok');
+  fetch('/api/sg/recepciones/preview-calidad.pdf',{method:'POST',credentials:'include',body:fd})
+    .then(function(resp){ if(!resp.ok) throw new Error(); return resp.blob(); })
+    .then(function(blob){ window.open(URL.createObjectURL(blob),'_blank'); })
+    .catch(function(){ toast('No se pudo generar la vista previa','er'); });
 }
 
 // ── Compra retroactiva ──
