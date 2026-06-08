@@ -119,12 +119,181 @@ function montarCRUD(path, tabla, fields, opts = {}) {
   });
 }
 
-// ── PRODUCTOS ──────────────────────────────────────────────────────────────────
-// nombre = Especie (label en UI). unidad_base/vida_util_dias_default ya no se editan
-// desde la UI (Catálogo) pero siguen en la tabla con sus defaults (vida útil la usa Compras).
-montarCRUD('productos', 'sg_productos',
-  ['codigo', 'nombre', 'variedad', 'familia', 'unidad_base', 'vida_util_dias_default'],
-  { orderBy: 'nombre COLLATE NOCASE' });
+// ── TAXONOMÍA DE PRODUCTOS: Familia → Especie → Variedad ──────────────────────
+// Código jerárquico FF.EE.VV. Cada nivel tiene un 'codigo' INTEGER de 2 díg,
+// correlativo dentro de su padre (patrón plan de cuentas: max(codigo)+1 con loop
+// anti-colisión contra el UNIQUE). El código del producto se arma desde los 3.
+const pad2 = (n) => String(n).padStart(2, '0');
+
+// Próximo correlativo libre dentro del padre (whereSql = '' para familias).
+function nextCodigoNivel(db, tabla, whereSql, params) {
+  const row = db.prepare(`SELECT MAX(codigo) AS m FROM ${tabla}${whereSql ? ' WHERE ' + whereSql : ''}`).get(...params);
+  return (row && row.m ? Number(row.m) : 0) + 1;
+}
+
+// INSERT con autonumeración correlativa + loop anti-colisión contra el UNIQUE.
+// cols/vals NO incluyen 'codigo' ni 'creado_por' (los agrega el helper).
+function insertConCodigo(db, req, res, tabla, codigoInicial, whereSql, whereParams, cols, vals) {
+  let n = codigoInicial;
+  for (let intento = 0; intento < 200; intento++) {
+    try {
+      const allCols = ['codigo', ...cols, 'creado_por'];
+      const allVals = [n, ...vals, uid(req)];
+      const info = db.prepare(
+        `INSERT INTO ${tabla} (${allCols.join(',')}) VALUES (${allCols.map(() => '?').join(',')})`
+      ).run(...allVals);
+      const row = db.prepare(`SELECT * FROM ${tabla} WHERE id=?`).get(info.lastInsertRowid);
+      return res.json({ ok: true, data: row });
+    } catch (e) {
+      if (String(e.message).includes('UNIQUE') && intento < 199) { n++; continue; }
+      return res.status(400).json({ ok: false, error: e.message });
+    }
+  }
+}
+
+// ── Familias ──
+router.get('/familias', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const where = req.query.todos === '1' ? '1=1' : 'activo=1';
+    res.json({ ok: true, data: db.prepare(`SELECT * FROM sg_familias WHERE ${where} ORDER BY codigo`).all() });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+router.post('/familias', requireAdmin, (req, res) => {
+  const db = getDb();
+  try {
+    const nombre = val(req.body.nombre);
+    if (!nombre) return res.status(400).json({ ok: false, error: 'Falta nombre' });
+    const n = nextCodigoNivel(db, 'sg_familias', '', []);
+    insertConCodigo(db, req, res, 'sg_familias', n, '', [], ['nombre'], [nombre]);
+  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+
+// ── Especies (correlativo dentro de la familia) ──
+router.get('/especies', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    let where = req.query.todos === '1' ? '1=1' : 'activo=1';
+    const params = [];
+    if (req.query.familia_id) { where += ' AND familia_id=?'; params.push(req.query.familia_id); }
+    res.json({ ok: true, data: db.prepare(`SELECT * FROM sg_especies WHERE ${where} ORDER BY codigo`).all(...params) });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+router.post('/especies', requireAdmin, (req, res) => {
+  const db = getDb();
+  try {
+    const familia_id = req.body.familia_id, nombre = val(req.body.nombre);
+    if (!familia_id) return res.status(400).json({ ok: false, error: 'Falta familia_id' });
+    if (!nombre) return res.status(400).json({ ok: false, error: 'Falta nombre' });
+    if (!db.prepare('SELECT id FROM sg_familias WHERE id=?').get(familia_id)) return res.status(400).json({ ok: false, error: 'familia_id inválido' });
+    const n = nextCodigoNivel(db, 'sg_especies', 'familia_id=?', [familia_id]);
+    insertConCodigo(db, req, res, 'sg_especies', n, '', [], ['familia_id', 'nombre'], [familia_id, nombre]);
+  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+
+// ── Variedades (correlativo dentro de la especie) ──
+router.get('/variedades', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    let where = req.query.todos === '1' ? '1=1' : 'activo=1';
+    const params = [];
+    if (req.query.especie_id) { where += ' AND especie_id=?'; params.push(req.query.especie_id); }
+    res.json({ ok: true, data: db.prepare(`SELECT * FROM sg_variedades WHERE ${where} ORDER BY codigo`).all(...params) });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+router.post('/variedades', requireAdmin, (req, res) => {
+  const db = getDb();
+  try {
+    const especie_id = req.body.especie_id, nombre = val(req.body.nombre);
+    if (!especie_id) return res.status(400).json({ ok: false, error: 'Falta especie_id' });
+    if (!nombre) return res.status(400).json({ ok: false, error: 'Falta nombre' });
+    if (!db.prepare('SELECT id FROM sg_especies WHERE id=?').get(especie_id)) return res.status(400).json({ ok: false, error: 'especie_id inválido' });
+    const n = nextCodigoNivel(db, 'sg_variedades', 'especie_id=?', [especie_id]);
+    insertConCodigo(db, req, res, 'sg_variedades', n, '', [], ['especie_id', 'nombre'], [especie_id, nombre]);
+  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+
+// ── PRODUCTOS (código autogenerado FF.EE.VV desde la taxonomía) ───────────────
+// Resuelve la taxonomía, valida la jerarquía, arma el código y DENORMALIZA
+// familia/nombre/variedad (los consumen Compras/Lotes/Pedidos/Despachos/Reportes
+// por producto_id). El código queda fijado por (familia, especie, variedad): un
+// duplicado de esa terna choca con el UNIQUE → error claro (no auto-incrementa).
+function resolverProducto(db, body) {
+  const familia = db.prepare('SELECT * FROM sg_familias WHERE id=?').get(body.familia_id);
+  if (!familia) return { error: 'Elegí una familia' };
+  const especie = db.prepare('SELECT * FROM sg_especies WHERE id=?').get(body.especie_id);
+  if (!especie) return { error: 'Elegí una especie' };
+  if (Number(especie.familia_id) !== Number(familia.id)) return { error: 'La especie no pertenece a la familia elegida' };
+  let variedad = null;
+  if (body.variedad_id) {
+    variedad = db.prepare('SELECT * FROM sg_variedades WHERE id=?').get(body.variedad_id);
+    if (!variedad) return { error: 'Variedad inválida' };
+    if (Number(variedad.especie_id) !== Number(especie.id)) return { error: 'La variedad no pertenece a la especie elegida' };
+  }
+  return {
+    codigo: `${pad2(familia.codigo)}.${pad2(especie.codigo)}.${variedad ? pad2(variedad.codigo) : '00'}`,
+    familia_id: familia.id, especie_id: especie.id, variedad_id: variedad ? variedad.id : null,
+    nombre: especie.nombre, variedad: variedad ? variedad.nombre : null, familia: familia.nombre
+  };
+}
+
+router.get('/productos', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const where = req.query.todos === '1' ? '1=1' : 'activo=1';
+    res.json({ ok: true, data: db.prepare(`SELECT * FROM sg_productos WHERE ${where} ORDER BY codigo`).all() });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+router.get('/productos/:id', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const row = db.prepare('SELECT * FROM sg_productos WHERE id=?').get(req.params.id);
+    if (!row) return res.status(404).json({ ok: false, error: 'No encontrado' });
+    res.json({ ok: true, data: row });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+router.post('/productos', requireAdmin, (req, res) => {
+  const db = getDb();
+  try {
+    const r = resolverProducto(db, req.body || {});
+    if (r.error) return res.status(400).json({ ok: false, error: r.error });
+    try {
+      const info = db.prepare(`INSERT INTO sg_productos
+        (codigo, familia_id, especie_id, variedad_id, nombre, variedad, familia, creado_por)
+        VALUES (?,?,?,?,?,?,?,?)`).run(r.codigo, r.familia_id, r.especie_id, r.variedad_id, r.nombre, r.variedad, r.familia, uid(req));
+      res.json({ ok: true, data: db.prepare('SELECT * FROM sg_productos WHERE id=?').get(info.lastInsertRowid) });
+    } catch (e) {
+      if (String(e.message).includes('UNIQUE')) return res.status(400).json({ ok: false, error: `Ya existe un producto con código ${r.codigo} (misma familia/especie/variedad)` });
+      throw e;
+    }
+  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+router.put('/productos/:id', requireAdmin, (req, res) => {
+  const db = getDb();
+  try {
+    const r = resolverProducto(db, req.body || {});
+    if (r.error) return res.status(400).json({ ok: false, error: r.error });
+    try {
+      const info = db.prepare(`UPDATE sg_productos SET
+        codigo=?, familia_id=?, especie_id=?, variedad_id=?, nombre=?, variedad=?, familia=?,
+        modificado_en=datetime('now','localtime'), modificado_por=?
+        WHERE id=?`).run(r.codigo, r.familia_id, r.especie_id, r.variedad_id, r.nombre, r.variedad, r.familia, uid(req), req.params.id);
+      if (!info.changes) return res.status(404).json({ ok: false, error: 'No encontrado' });
+      res.json({ ok: true, data: db.prepare('SELECT * FROM sg_productos WHERE id=?').get(req.params.id) });
+    } catch (e) {
+      if (String(e.message).includes('UNIQUE')) return res.status(400).json({ ok: false, error: `Ya existe un producto con código ${r.codigo} (misma familia/especie/variedad)` });
+      throw e;
+    }
+  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+router.delete('/productos/:id', requireAdmin, (req, res) => {
+  const db = getDb();
+  try {
+    const info = db.prepare(`UPDATE sg_productos SET activo=0, eliminado_en=datetime('now','localtime'), eliminado_por_id=? WHERE id=? AND activo=1`).run(uid(req), req.params.id);
+    if (!info.changes) return res.status(404).json({ ok: false, error: 'No encontrado o ya eliminado' });
+    res.json({ ok: true, data: { id: Number(req.params.id) } });
+  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
 
 // ── PRESENTACIONES (filtra por producto_id) ──────────────────────────────────────
 montarCRUD('presentaciones', 'sg_presentaciones',
