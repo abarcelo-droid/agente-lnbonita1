@@ -2626,12 +2626,15 @@ function sgOpenProvModal(id){
       ff('Origen <span style="color:var(--err)">*</span>',
          '<select id="sg-f-origen" onchange="sgProvOrigen()">'+opt('nacional','Nacional')+opt('extranjero','Extranjero')+'</select>')
     + ff('Razón social <span style="color:var(--err)">*</span>', '<input id="sg-f-razon_social" type="text">')
+    + ff('Nombre comercial', '<input id="sg-f-nombre_comercial" type="text" placeholder="Nombre de fantasía">')
     + ff('<span id="sg-prov-cuit-lbl">CUIT</span>', '<input id="sg-f-cuit" type="text" placeholder="20-12345678-9">', 'sg-prov-cuit-row')
     + ff('Tipo', '<select id="sg-f-tipo">'+tipoOpts+'</select>')
     + ff('Categoría fiscal', '<select id="sg-f-categoria_fiscal">'+catOpts+'</select>', 'sg-prov-catfisc-row')
     + ff('Tipo fiscal habitual', '<select id="sg-f-tipo_fiscal_habitual">'+fiscalOpts+'</select>', 'sg-prov-fiscal-nac-row')
     + ff('Tipo fiscal habitual', '<input id="sg-f-fiscal-ext" type="text" value="Invoice" disabled style="background:var(--bg2,#f3f4f6)">', 'sg-prov-fiscal-ext-row')
     + ff('Condición de pago habitual', '<select id="sg-f-condicion_pago_habitual_id">'+condOpts+'</select>')
+    + ff('CBU', '<input id="sg-f-cbu" type="text" placeholder="0000000000000000000000">')
+    + ff('Alias CBU', '<input id="sg-f-alias_cbu" type="text" placeholder="alias.banco.ejemplo">')
     + ff('Localidad', '<input id="sg-f-localidad" type="text">')
     + ff('Provincia', '<select id="sg-f-provincia">'+provOpts+'</select>', 'sg-prov-provincia-row')
     + ff('País', '<input id="sg-f-pais" type="text" placeholder="Brasil">', 'sg-prov-pais-row')
@@ -2642,11 +2645,14 @@ function sgOpenProvModal(id){
   if (row){
     eid('sg-f-origen').value             = row.origen || 'nacional';
     eid('sg-f-razon_social').value       = row.razon_social || '';
+    eid('sg-f-nombre_comercial').value   = row.nombre_comercial || '';
     eid('sg-f-cuit').value               = row.cuit || '';
     eid('sg-f-tipo').value               = row.tipo || '';
     eid('sg-f-categoria_fiscal').value   = row.categoria_fiscal || '';
     if (row.tipo_fiscal_habitual && row.tipo_fiscal_habitual!=='invoice') eid('sg-f-tipo_fiscal_habitual').value = row.tipo_fiscal_habitual;
     if (row.condicion_pago_habitual_id)  eid('sg-f-condicion_pago_habitual_id').value = row.condicion_pago_habitual_id;
+    eid('sg-f-cbu').value                = row.cbu || '';
+    eid('sg-f-alias_cbu').value          = row.alias_cbu || '';
     eid('sg-f-localidad').value          = row.localidad || '';
     eid('sg-f-provincia').value          = row.provincia || '';   // si no matchea una provincia AR queda en —
     eid('sg-f-pais').value               = row.provincia || '';
@@ -2682,9 +2688,12 @@ function sgSaveProv(){
   var body = {
     origen: ext ? 'extranjero' : 'nacional',
     razon_social: razon,
+    nombre_comercial: pv('sg-f-nombre_comercial'),
     cuit: cuit || null,
     tipo: pv('sg-f-tipo'),
     condicion_pago_habitual_id: cond ? Number(cond) : null,
+    cbu: pv('sg-f-cbu'),
+    alias_cbu: pv('sg-f-alias_cbu'),
     localidad: pv('sg-f-localidad'),
     telefono: pv('sg-f-telefono'),
     email: pv('sg-f-email'),

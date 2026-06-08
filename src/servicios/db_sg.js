@@ -79,12 +79,15 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS sg_proveedores (
     id                          INTEGER PRIMARY KEY AUTOINCREMENT,
     razon_social                TEXT NOT NULL,
+    nombre_comercial            TEXT,   -- nombre de fantasía (opcional)
     origen                      TEXT NOT NULL DEFAULT 'nacional' CHECK(origen IN ('nacional','extranjero')),
     cuit                        TEXT,   -- nacional: CUIT XX-XXXXXXXX-X · extranjero: tax ID libre
     tipo                        TEXT CHECK(tipo IN ('productor','importador','mayorista_regional','otros')),
     categoria_fiscal            TEXT CHECK(categoria_fiscal IN ('resp_inscripto','monotributista','exento','no_inscripto')),
     tipo_fiscal_habitual        TEXT DEFAULT 'factura_a' CHECK(tipo_fiscal_habitual IN ('factura_a','factura_b','liquidacion','invoice')),
     condicion_pago_habitual_id  INTEGER REFERENCES sg_condiciones_pago(id),
+    cbu                         TEXT,   -- datos bancarios para pagos (opcional)
+    alias_cbu                   TEXT,
     comercial_responsable_id    INTEGER,
     localidad                   TEXT,
     provincia                   TEXT,   -- nacional: provincia AR · extranjero: país
@@ -474,6 +477,18 @@ try {
 } catch (e) {
   try { db.pragma('foreign_keys = ON'); } catch (_) {}
   console.error('[DB] SG migración sg_proveedores:', e.message);
+}
+
+// ── MIGRACIÓN idempotente: sg_proveedores → +nombre_comercial, +cbu, +alias_cbu ──
+// Campos aditivos opcionales (nombre de fantasía + datos bancarios para pagos).
+// Son TEXT nullable sin CHECK → ALTER ADD COLUMN simple, sin rebuild. Self-healing.
+try {
+  const cols = db.prepare("PRAGMA table_info(sg_proveedores)").all().map(c => c.name);
+  const faltan = ['nombre_comercial', 'cbu', 'alias_cbu'].filter(c => !cols.includes(c));
+  for (const c of faltan) db.exec(`ALTER TABLE sg_proveedores ADD COLUMN ${c} TEXT`);
+  if (faltan.length) console.log('[DB] SG sg_proveedores migrado (+' + faltan.join(', +') + ')');
+} catch (e) {
+  console.error('[DB] SG migración sg_proveedores (datos pago):', e.message);
 }
 
 // ── BACKFILL idempotente: margen_estimado por kg ────────────────────────────────
