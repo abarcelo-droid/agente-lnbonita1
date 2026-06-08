@@ -4307,6 +4307,8 @@ function sgRepExport(){
     <style>
       #sec-personal-reportes .pp-rep-tab.on{background:var(--burg);color:#fff}
       #sec-personal-reportes #pp-rep-filtros label{font-size:12px;color:var(--mut)}
+      #sec-personal-reportes .pp-rep-modo-btn{padding:6px 12px;font-size:12px;border:none;cursor:pointer;background:var(--bg);color:var(--mut)}
+      #sec-personal-reportes .pp-rep-modo-btn.on{background:var(--burg);color:#fff}
     </style>
     <div id="pp-rep-filtros" style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin-bottom:12px">
       <div id="pp-rep-rango">
@@ -4316,6 +4318,10 @@ function sgRepExport(){
       <div id="pp-rep-jueves" style="display:none">
         <label>Semana (jueves)<br><input type="date" id="pp-rep-fjueves" style="padding:5px 8px;border-radius:6px;border:1px solid var(--bor);background:var(--bg)"></label>
         <span id="pp-rep-semana-lbl" style="font-size:11px;color:var(--mut);margin-left:8px"></span>
+      </div>
+      <div id="pp-rep-modo" style="display:inline-flex;border:1px solid var(--bor);border-radius:8px;overflow:hidden;align-self:flex-end">
+        <button type="button" id="pp-rep-modo-dinero" class="pp-rep-modo-btn on" onclick="ppRepModo('dinero')">💲 Ver en $</button>
+        <button type="button" id="pp-rep-modo-jornales" class="pp-rep-modo-btn" onclick="ppRepModo('jornales')">📋 Ver en Jornales</button>
       </div>
       <button class="btn bb bs" onclick="ppLoadReportes()">Aplicar</button>
       <button class="btn bo bs" onclick="ppRepExport()">⬇️ Excel</button>
@@ -19884,7 +19890,7 @@ function ppMasivoPagar() {
 }
 
 // ═══ PERSONAL V1 — Reportes + Tareas/Rubros (Fase 4) ═════════════════════════
-var PP_REP = { key: 'por-trabajador', cols: [], inicializado: false };
+var PP_REP = { key: 'por-trabajador', cols: [], modo: 'dinero', inicializado: false };
 
 function ppInitReportes() {
   ppRepTab(PP_REP.key, true);
@@ -19900,15 +19906,25 @@ function ppRepTab(key, soloUI) {
   ppLoadReportes();
 }
 function ppRepQS() {
+  var qs = ['modo=' + PP_REP.modo];
   if (PP_REP.key === 'cierre-semanal') {
     var fj = document.getElementById('pp-rep-fjueves').value;
-    return fj ? ('?fecha_inicio_jueves=' + fj) : '';
+    if (fj) qs.push('fecha_inicio_jueves=' + fj);
+    return '?' + qs.join('&');
   }
   var de = document.getElementById('pp-rep-desde').value, ha = document.getElementById('pp-rep-hasta').value;
-  var qs = [];
   if (de) qs.push('desde=' + de);
   if (ha) qs.push('hasta=' + ha);
-  return qs.length ? ('?' + qs.join('&')) : '';
+  return '?' + qs.join('&');
+}
+// Toggle Jornales / $. 'jornales' = todas las asistencias (sin columna Monto);
+// 'dinero' = solo lo valorizado (con Monto). Recarga el reporte vigente.
+function ppRepModo(modo) {
+  PP_REP.modo = (modo === 'jornales') ? 'jornales' : 'dinero';
+  var d = document.getElementById('pp-rep-modo-dinero'), j = document.getElementById('pp-rep-modo-jornales');
+  if (d) d.classList.toggle('on', PP_REP.modo === 'dinero');
+  if (j) j.classList.toggle('on', PP_REP.modo === 'jornales');
+  ppLoadReportes();
 }
 function ppRepFmt(col, v) {
   if (col.money) return ppFmtARS(v || 0);
@@ -19932,7 +19948,7 @@ function ppLoadReportes() {
     }
     var rows = r.data || [];
     if (!rows.length) {
-      tbody.innerHTML = '<tr><td class="emp" colspan="' + cols.length + '" style="text-align:center;color:var(--mut);padding:20px">Sin datos valorizados para el período.</td></tr>';
+      tbody.innerHTML = '<tr><td class="emp" colspan="' + cols.length + '" style="text-align:center;color:var(--mut);padding:20px">' + (PP_REP.modo === 'jornales' ? 'Sin asistencias para el período.' : 'Sin datos valorizados para el período.') + '</td></tr>';
       return;
     }
     tbody.innerHTML = rows.map(function(row){
