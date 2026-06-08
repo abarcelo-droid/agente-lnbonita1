@@ -321,6 +321,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   <div class="ni" data-sec="calendario"><span class="dot da"></span>Calendario Estacional</div>
   <div class="ni" data-sec="equipo" data-admin-only="1"><span class="dot dd"></span>🏢 Equipo</div>
   <div class="ni" data-sec="config-modulos" data-admin-only="1"><span class="dot db"></span>⚙️ Config Módulos</div>
+  <div class="ni" data-sec="admin-actividad" data-admin-only="1"><span class="dot da"></span>📊 Actividad / Adopción</div>
     <a href="/scout" style="display:flex;align-items:center;justify-content:center;gap:8px;
        margin:14px 12px 8px;padding:11px 14px;
        background:linear-gradient(135deg,#059669 0%,#047857 100%);
@@ -1111,6 +1112,40 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       <tbody id="t-modulos"><tr><td colspan="6" class="emp">Cargando...</td></tr></tbody>
     </table>
   </div>
+</div>
+
+<div class="sec" id="sec-admin-actividad">
+  <div class="ph">
+    <div>
+      <div class="ph-t">📊 Actividad / Adopción</div>
+      <div class="ph-s">Seguimiento de uso del sistema durante la implementación</div>
+    </div>
+    <button class="btn bo" onclick="admActLoad()">🔄 Recargar</button>
+  </div>
+
+  <div style="margin:14px 0;padding:12px;background:#fff7ed;border:1px solid #fdba74;border-radius:8px;font-size:12.5px;color:#9a3412">
+    ⚠️ <b>Mide actividad de CARGA</b> (creación de registros), <b>no accesos/logins</b>. Un usuario que entra a consultar pero no carga datos aparece como <b>sin actividad</b>. Hoy el sistema no registra logins.
+  </div>
+
+  <div style="display:flex;gap:14px;align-items:flex-end;flex-wrap:wrap;margin-bottom:8px">
+    <label style="font-size:12px;color:var(--mut)">Desde<br><input type="date" id="aa-desde" style="padding:5px 8px;border-radius:6px;border:1px solid var(--bor);background:var(--bg)"></label>
+    <label style="font-size:12px;color:var(--mut)">Hasta<br><input type="date" id="aa-hasta" style="padding:5px 8px;border-radius:6px;border:1px solid var(--bor);background:var(--bg)"></label>
+    <label style="font-size:12px;color:var(--mut)">Módulo<br><select id="aa-modulo" style="padding:5px 8px;border-radius:6px;border:1px solid var(--bor);background:var(--bg);min-width:160px"><option value="">Todos los módulos</option></select></label>
+    <button class="btn bb bs" onclick="admActLoad()">Aplicar</button>
+    <span id="aa-resumen" style="font-size:11.5px;color:var(--mut)"></span>
+  </div>
+
+  <div style="font-weight:700;font-size:13px;margin:16px 0 6px">👤 Por usuario <span style="font-weight:400;color:var(--mut);font-size:11px">— los "sin actividad" son los importantes para adopción</span></div>
+  <div class="tw"><table>
+    <thead><tr><th>Usuario</th><th>Rol</th><th style="text-align:right">Registros</th><th>Por módulo</th><th>Último</th></tr></thead>
+    <tbody id="aa-tb-usuarios"><tr><td colspan="5" class="emp">Aplicá un rango.</td></tr></tbody>
+  </table></div>
+
+  <div style="font-weight:700;font-size:13px;margin:20px 0 6px">🧩 Por módulo <span style="font-weight:400;color:var(--mut);font-size:11px">— qué módulos están vivos y cuáles nadie toca</span></div>
+  <div class="tw"><table>
+    <thead><tr><th>Módulo</th><th style="text-align:right">Registros</th><th style="text-align:right">Usuarios distintos</th><th>Último</th></tr></thead>
+    <tbody id="aa-tb-modulos"><tr><td colspan="4" class="emp">Aplicá un rango.</td></tr></tbody>
+  </table></div>
 </div>
 <div class="sec" id="sec-calendario">
   <div class="ph">
@@ -9014,6 +9049,7 @@ function loadSec(s) {
     'retail-prod': loadRP, 'retail-gastos': loadGastos,
     'maestro-usuarios': function(){ /* deprecado: ahora se gestiona desde Equipo */ },
     'config-modulos': cmCargar,
+    'admin-actividad': admActInit,
     'ab-dashboard': abDashboard,
     'ab-stock': abCargarStock,
     'ab-partidas': abCargarPartidas,
@@ -10622,6 +10658,63 @@ function eid(id){ return document.getElementById(id); }
 function elv(id,val){ var el=eid(id); if(val!==undefined){if(el) el.value=val; return;} return el?el.value.trim():''; }
 function esc(s){ return (s||'').replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/"/g,'&quot;'); }
 function nr(n){ return Math.round(parseFloat(n)||0).toLocaleString('es-AR'); }
+
+// ─── Panel de actividad / adopción (admin, read-only) ───────────────────────
+function admActInit(){
+  var hoy = new Date(), d0 = new Date(Date.now()-30*86400000);
+  eid('aa-hasta').value = hoy.toISOString().slice(0,10);
+  eid('aa-desde').value = d0.toISOString().slice(0,10);
+  admActLoad();
+}
+function admActLoad(){
+  var qs = '?desde='+encodeURIComponent(eid('aa-desde').value||'')+'&hasta='+encodeURIComponent(eid('aa-hasta').value||'');
+  var m = eid('aa-modulo').value; if(m) qs += '&modulo='+encodeURIComponent(m);
+  eid('aa-tb-usuarios').innerHTML = '<tr><td colspan="5" class="emp">Cargando…</td></tr>';
+  eid('aa-tb-modulos').innerHTML = '<tr><td colspan="4" class="emp">Cargando…</td></tr>';
+  api('/api/admin/actividad'+qs).then(function(r){
+    if(!r || !r.ok){ eid('aa-tb-usuarios').innerHTML = '<tr><td colspan="5" class="emp">'+esc((r&&r.error)||'Error')+'</td></tr>'; eid('aa-tb-modulos').innerHTML=''; return; }
+    admActFillModulos(r.modulos_disponibles);
+    admActRenderUsuarios(r.por_usuario||[]);
+    admActRenderModulos(r.por_modulo||[]);
+    var reales = (r.por_usuario||[]).filter(function(u){ return u.id!==null; });
+    var conAct = reales.filter(function(u){ return u.total>0; }).length;
+    eid('aa-resumen').textContent = conAct+' de '+reales.length+' usuarios con actividad · '+(r.tablas_usadas||0)+' tablas · '+r.rango.desde+' → '+r.rango.hasta;
+  });
+}
+function admActFillModulos(mods){
+  var sel = eid('aa-modulo'); if(!mods || sel.options.length>1) return; // poblar una sola vez (preserva selección)
+  sel.innerHTML = '<option value="">Todos los módulos</option>' + mods.map(function(m){ return '<option value="'+esc(m)+'">'+esc(m)+'</option>'; }).join('');
+}
+function admActModChips(modulos){
+  var keys = Object.keys(modulos||{}); if(!keys.length) return '<span style="color:var(--mut)">—</span>';
+  keys.sort(function(a,b){ return modulos[b]-modulos[a]; });
+  return keys.map(function(k){ return '<span class="tag" style="font-size:10px;margin:1px 2px">'+esc(k)+' '+modulos[k]+'</span>'; }).join('');
+}
+function admActRenderUsuarios(rows){
+  var tb = eid('aa-tb-usuarios');
+  if(!rows.length){ tb.innerHTML = '<tr><td colspan="5" class="emp">Sin usuarios.</td></tr>'; return; }
+  tb.innerHTML = rows.map(function(u){
+    var sin = (u.total===0);
+    var nombre = esc(u.nombre) + (u.activo===0 ? ' <span style="color:var(--mut);font-size:10px">(inactivo)</span>' : '');
+    var tot = sin ? '<span style="color:var(--mut)">0 · sin actividad</span>' : '<strong>'+nr(u.total)+'</strong>';
+    return '<tr'+(sin?' style="background:#fff7ed"':'')+'><td>'+nombre+'</td>'
+      + '<td><span class="tag" style="font-size:10px">'+esc(u.rol||'—')+'</span></td>'
+      + '<td style="text-align:right">'+tot+'</td>'
+      + '<td>'+admActModChips(u.modulos)+'</td>'
+      + '<td style="font-size:11px;color:var(--mut)">'+(u.ultimo?esc(u.ultimo):'—')+'</td></tr>';
+  }).join('');
+}
+function admActRenderModulos(rows){
+  var tb = eid('aa-tb-modulos');
+  if(!rows.length){ tb.innerHTML = '<tr><td colspan="4" class="emp">Sin actividad en el período.</td></tr>'; return; }
+  tb.innerHTML = rows.map(function(m){
+    var sa = m.sin_autor ? ' <span style="color:var(--mut);font-size:10px">(+'+m.sin_autor+' sin autor)</span>' : '';
+    return '<tr><td><strong>'+esc(m.modulo)+'</strong></td>'
+      + '<td style="text-align:right">'+nr(m.registros)+sa+'</td>'
+      + '<td style="text-align:right">'+nr(m.usuarios)+'</td>'
+      + '<td style="font-size:11px;color:var(--mut)">'+(m.ultimo?esc(m.ultimo):'—')+'</td></tr>';
+  }).join('');
+}
 function lTipo(t){
   var m={mayorista_a:'Mayorista A',mayorista_mcba:'Mayorista MCBA',minorista_mcba:'Minorista MCBA',minorista_entrega:'Minorista Entrega',food_service:'Food Service',consumidor_final:'Consumidor Final',nuevo:'Nuevo',dedicados:'Dedicados'};
   return m[t]||t||'-';
