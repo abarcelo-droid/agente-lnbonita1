@@ -74,6 +74,7 @@ app.use("/data/conformados", express.static(path.join(__dirname, "../data/confor
 app.use("/data/fichas",      express.static(path.join(__dirname, "../data/fichas")));
 app.use("/data/remitos_pa", express.static(path.join(__dirname, "../data/remitos_pa")));
 app.use("/data/ifco",       express.static(path.join(__dirname, "../data/ifco")));
+app.use("/data/sg",         express.static(path.join(__dirname, "../data/sg"))); // fotos informe de calidad SG (patrón IFCO)
 
 // Solo-lectura: bloquea escrituras (POST/PUT/PATCH/DELETE) para usuarios con
 // solo_lectura=1 que no son admin. Debe ir antes de cualquier router /api.

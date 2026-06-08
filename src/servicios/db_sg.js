@@ -653,6 +653,50 @@ try {
   console.error('[DB] SG migración sg_presentaciones (envase/paletizado):', e.message);
 }
 
+// ── BLOQUE A — Recepción SG: +documentación (factura/DTV) + paletizado recibido ──
+// Campos aditivos nullable sobre sg_recepciones (el remito ya existe en
+// numero_remito_proveedor). ALTER ADD COLUMN simple, sin rebuild: las recepciones
+// viejas quedan con estas columnas en NULL y siguen funcionando igual.
+// ── BLOQUE B — Informe de calidad (mercadería observada): observada + campos del informe.
+// (mismo ALTER idempotente; el informe es 1:1 con la recepción).
+try {
+  const cols = db.prepare("PRAGMA table_info(sg_recepciones)").all().map(c => c.name);
+  const add = [
+    ['factura_numero',         'TEXT'],     // BLOQUE A · doc
+    ['dtv_codigo',             'TEXT'],     // BLOQUE A · doc (DTV SENASA - código de cierre)
+    ['pallets_recibidos',      'INTEGER'],  // BLOQUE A · paletizado recibido
+    ['bultos_recibidos',       'INTEGER'],  // BLOQUE A · paletizado recibido
+    ['observada',              'INTEGER'],  // BLOQUE B · 1 = entró con informe de calidad
+    ['calidad_estado_general', 'TEXT'],     // BLOQUE B
+    ['calidad_defectos',       'TEXT'],     // BLOQUE B
+    ['calidad_pct_afectado',   'REAL'],     // BLOQUE B
+    ['calidad_observaciones',  'TEXT']      // BLOQUE B
+  ];
+  const faltan = [];
+  for (const [c, t] of add) if (!cols.includes(c)) { db.exec(`ALTER TABLE sg_recepciones ADD COLUMN ${c} ${t}`); faltan.push(c); }
+  if (faltan.length) console.log('[DB] SG sg_recepciones migrado (+' + faltan.join(', +') + ')');
+} catch (e) {
+  console.error('[DB] SG migración sg_recepciones (doc/paletizado/calidad):', e.message);
+}
+
+// ── BLOQUE B — fotos del informe de calidad. Patrón IFCO: el archivo físico vive en
+// data/sg/ (servido estático) y en DB guardamos SOLO la ruta. Varias fotos por recepción
+// → tabla hija. CREATE TABLE IF NOT EXISTS (idempotente).
+try {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS sg_recepcion_fotos (
+      id              INTEGER PRIMARY KEY AUTOINCREMENT,
+      recepcion_id    INTEGER NOT NULL REFERENCES sg_recepciones(id),
+      ruta            TEXT NOT NULL,
+      nombre_original TEXT,
+      creado_en       TEXT DEFAULT (datetime('now','localtime')),
+      creado_por      INTEGER
+    );
+    CREATE INDEX IF NOT EXISTS idx_sg_recepcion_fotos_rec ON sg_recepcion_fotos(recepcion_id);`);
+} catch (e) {
+  console.error('[DB] SG sg_recepcion_fotos:', e.message);
+}
+
 // ── BACKFILL idempotente: margen_estimado por kg ────────────────────────────────
 // Bug F4: el margen se grababa como subtotal − kg_despachados × costo_final, pero
 // costo_final es el costo TOTAL del lote, no por kg. El front del modal ya calculaba

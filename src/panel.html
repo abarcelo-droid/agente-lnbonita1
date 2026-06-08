@@ -2206,20 +2206,58 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   </div>
 </div>
 
-<!-- Modal Recibir mercadería -->
+<!-- Modal Recepción de mercadería. BLOQUE A: secciones (datos/documentación/items/calidad)
+     + documentación (remito/factura/DTV) + paletizado recibido. BLOQUE B: informe de calidad
+     (mercadería observada) con fotos (reusa compresor IFCO). -->
 <div class="ab-modal-overlay" id="sg-rec-modal">
-  <div class="ab-modal" style="width:820px;max-height:90vh;overflow-y:auto">
-    <div class="mhd"><div class="mht">Recibir mercadería</div><button class="mcl" onclick="closeMB('sg-rec-modal')">×</button></div>
+  <div class="ab-modal" style="width:860px;max-height:92vh;overflow-y:auto">
+    <div class="mhd"><div class="mht">Recepción de mercadería</div><button class="mcl" onclick="closeMB('sg-rec-modal')">×</button></div>
     <div class="fg">
-      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
+
+      <!-- ── Sección: Datos de recepción ── -->
+      <div style="font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--err);margin:2px 0 8px;border-bottom:1px solid var(--bor);padding-bottom:4px">Datos de recepción</div>
+      <div style="display:grid;grid-template-columns:2fr 1fr;gap:10px">
         <div class="fl"><label>Orden de compra <span style="color:var(--err)">*</span></label><select id="sg-rec-oc" onchange="sgRecOcChange()"></select></div>
         <div class="fl"><label>Fecha recepción</label><input type="date" id="sg-rec-fecha"></div>
-        <div class="fl"><label>N° remito proveedor</label><input id="sg-rec-remito"></div>
       </div>
-      <div class="fl ff" style="margin-top:8px"><label>Items a recibir (dividí por calidad si hace falta)</label>
+
+      <!-- ── Sección: Documentación (BLOQUE A) ── -->
+      <div style="font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--err);margin:16px 0 8px;border-bottom:1px solid var(--bor);padding-bottom:4px">Documentación</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
+        <div class="fl"><label>Remito N°</label><input id="sg-rec-remito" placeholder="N° remito proveedor"></div>
+        <div class="fl"><label>Factura N°</label><input id="sg-rec-factura" placeholder="N° factura"></div>
+        <div class="fl"><label>DTV — SENASA</label><input id="sg-rec-dtv" placeholder="código de cierre"></div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:8px">
+        <div class="fl"><label>Pallets recibidos</label><input type="number" min="0" id="sg-rec-pallets" placeholder="nº de pallets"></div>
+        <div class="fl"><label>Bultos recibidos</label><input type="number" min="0" id="sg-rec-bultos" placeholder="nº de bultos"></div>
+      </div>
+
+      <!-- ── Sección: Items ── -->
+      <div style="font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--err);margin:16px 0 8px;border-bottom:1px solid var(--bor);padding-bottom:4px">Items a recibir</div>
+      <div class="fl ff"><label style="font-weight:400;color:var(--mut);font-size:12px">Dividí por calidad si hace falta</label>
         <div id="sg-rec-items"><div class="emp">Elegí una OC abierta…</div></div>
       </div>
-      <div class="fl ff"><label>Observaciones</label><textarea id="sg-rec-obs" rows="2"></textarea></div>
+      <div class="fl ff"><label>Observaciones generales</label><textarea id="sg-rec-obs" rows="2"></textarea></div>
+
+      <!-- ── Sección: Control de calidad (BLOQUE B) ── -->
+      <div style="font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--err);margin:16px 0 8px;border-bottom:1px solid var(--bor);padding-bottom:4px">Control de calidad</div>
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;font-weight:600">
+        <input type="checkbox" id="sg-rec-observada" onchange="sgRecToggleObs()" style="width:auto;margin:0"> Mercadería observada — generar informe de calidad
+      </label>
+      <div id="sg-rec-calidad" style="display:none;margin-top:10px;border:1px solid var(--bor);border-radius:8px;padding:12px">
+        <div style="display:grid;grid-template-columns:2fr 1fr;gap:10px">
+          <div class="fl"><label>Estado general</label><input id="sg-rec-cal-estado" placeholder="ej. regular, con deterioro…"></div>
+          <div class="fl"><label>% afectado</label><input type="number" min="0" max="100" id="sg-rec-cal-pct" placeholder="0–100"></div>
+        </div>
+        <div class="fl ff" style="margin-top:8px"><label>Defectos detectados</label><input id="sg-rec-cal-defectos" placeholder="ej. golpes, pudrición, sobremaduro…"></div>
+        <div class="fl ff"><label>Observaciones del informe</label><textarea id="sg-rec-cal-obs" rows="2"></textarea></div>
+        <div class="fl ff"><label>Fotos del informe</label>
+          <input type="file" id="sg-rec-fotos" accept="image/jpeg,image/png,image/webp" multiple onchange="sgRecFotosPreview(event)">
+          <div id="sg-rec-fotos-preview" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px"></div>
+        </div>
+      </div>
+
     </div>
     <div class="ab-modal-footer">
       <button class="btn bo" onclick="closeMB('sg-rec-modal')">Cancelar</button>
@@ -3178,7 +3216,10 @@ function sgLoadRecepciones(){
   api('/api/sg/recepciones').then(function(r){
     var rows=(r&&r.ok)?r.data:[];
     eid('sg-tb-recepciones').innerHTML = rows.length ? rows.map(function(x){
-      return '<tr><td><code>'+esc(x.numero_recepcion||'')+'</code></td><td>'+(x.fecha_recepcion||'—')+'</td><td>'+esc(x.oc_numero||'—')+'</td><td>'+esc(x.proveedor_nombre||'—')+'</td><td>'+esc(x.numero_remito_proveedor||'—')+'</td><td style="text-align:right">'+x.lotes+'</td><td style="text-align:right"><button class="btn bo bs" onclick="sgRecVer('+x.id+')">👁</button></td></tr>';
+      // BLOQUE B — si entró observada, link directo al informe de calidad en PDF.
+      var pdf = x.observada ? ' <a class="btn bo bs" href="/api/sg/recepciones/'+x.id+'/calidad.pdf" target="_blank" title="Informe de calidad PDF">📄</a>' : '';
+      var obs = x.observada ? ' <span title="Mercadería observada" style="color:var(--err)">⚠</span>' : '';
+      return '<tr><td><code>'+esc(x.numero_recepcion||'')+'</code>'+obs+'</td><td>'+(x.fecha_recepcion||'—')+'</td><td>'+esc(x.oc_numero||'—')+'</td><td>'+esc(x.proveedor_nombre||'—')+'</td><td>'+esc(x.numero_remito_proveedor||'—')+'</td><td style="text-align:right">'+x.lotes+'</td><td style="text-align:right"><button class="btn bo bs" onclick="sgRecVer('+x.id+')">👁</button>'+pdf+'</td></tr>';
     }).join('') : '<tr><td colspan="7" class="emp">Sin recepciones.</td></tr>';
   });
 }
@@ -3196,10 +3237,31 @@ function sgRecOpen(ocId){
     eid('sg-rec-oc').innerHTML='<option value="">— Elegir OC —</option>'+ocs.map(function(o){return '<option value="'+o.id+'">'+esc(o.numero)+' — '+esc(o.proveedor_nombre||'')+'</option>';}).join('');
     eid('sg-rec-fecha').value=new Date().toISOString().slice(0,10);
     eid('sg-rec-remito').value=''; eid('sg-rec-obs').value='';
+    // BLOQUE A — reset documentación + paletizado
+    eid('sg-rec-factura').value=''; eid('sg-rec-dtv').value=''; eid('sg-rec-pallets').value=''; eid('sg-rec-bultos').value='';
+    // BLOQUE B — reset informe de calidad + fotos
+    eid('sg-rec-observada').checked=false; eid('sg-rec-calidad').style.display='none';
+    eid('sg-rec-cal-estado').value=''; eid('sg-rec-cal-pct').value=''; eid('sg-rec-cal-defectos').value=''; eid('sg-rec-cal-obs').value='';
+    eid('sg-rec-fotos').value=''; eid('sg-rec-fotos-preview').innerHTML=''; SG._recFotos=[];
     eid('sg-rec-items').innerHTML='<div class="emp">Elegí una OC…</div>';
     if(ocId){ eid('sg-rec-oc').value=ocId; sgRecOcChange(); }
     eid('sg-rec-modal').classList.add('on');
   });
+}
+// BLOQUE B — toggle de la sección de informe de calidad.
+function sgRecToggleObs(){ eid('sg-rec-calidad').style.display=eid('sg-rec-observada').checked?'block':'none'; }
+// BLOQUE B — fotos del informe. REUSA el compresor de imágenes de IFCO (_ifcoComprimirImagen).
+async function sgRecFotosPreview(ev){
+  var files=Array.prototype.slice.call(ev.target.files||[]);
+  SG._recFotos=[]; var prev=eid('sg-rec-fotos-preview'); prev.innerHTML='';
+  for(var i=0;i<files.length;i++){
+    var f=await _ifcoComprimirImagen(files[i]);
+    SG._recFotos.push(f);
+    var img=document.createElement('img');
+    img.src=URL.createObjectURL(f);
+    img.style.cssText='width:72px;height:72px;object-fit:cover;border-radius:6px;border:1px solid var(--bor)';
+    prev.appendChild(img);
+  }
 }
 function sgRecOcChange(){
   var ocId=eid('sg-rec-oc').value;
@@ -3208,23 +3270,22 @@ function sgRecOcChange(){
     if(!r||!r.ok) return;
     SG.recItems=(r.data.items||[]).map(function(it){
       var pend=Math.max(0,(it.kg_estimados||0)-(it.kg_recibidos||0));
-      return { oc_item_id:it.id, producto_nombre:it.producto_nombre, kg_estimados:it.kg_estimados, kg_recibidos:it.kg_recibidos, lotes:[{kg_reales:pend||'',calidad:'',calibre:'',origen:''}] };
+      return { oc_item_id:it.id, producto_nombre:it.producto_nombre, kg_estimados:it.kg_estimados, kg_recibidos:it.kg_recibidos, lotes:[{kg_reales:pend||'',calidad:''}] };
     });
     sgRecRenderItems();
   });
 }
-function sgRecAddLote(i){ SG.recItems[i].lotes.push({kg_reales:'',calidad:'',calibre:'',origen:''}); sgRecRenderItems(); }
+function sgRecAddLote(i){ SG.recItems[i].lotes.push({kg_reales:'',calidad:''}); sgRecRenderItems(); }
 function sgRecDelLote(i,j){ SG.recItems[i].lotes.splice(j,1); sgRecRenderItems(); }
 function sgRecUpd(i,j,c,v){ SG.recItems[i].lotes[j][c]=v; sgRecSuma(); }
 function sgRecRenderItems(){
   eid('sg-rec-items').innerHTML=SG.recItems.map(function(it,i){
     var lotesH=it.lotes.map(function(lt,j){
       var calOpts=['','primera','segunda','tercera'].map(function(c){return '<option value="'+c+'"'+(c===lt.calidad?' selected':'')+'>'+(c||'(calidad)')+'</option>';}).join('');
-      return '<div style="display:grid;grid-template-columns:0.9fr 1fr 1fr 1.2fr auto;gap:6px;align-items:center;margin-bottom:5px">'
+      // BLOQUE A · punto 3 — se quitaron los campos "calibre" y "origen" (no se usan).
+      return '<div style="display:grid;grid-template-columns:1fr 1.4fr auto;gap:6px;align-items:center;margin-bottom:5px">'
         +'<input type="number" placeholder="kg" value="'+(lt.kg_reales||'')+'" onchange="sgRecUpd('+i+','+j+',\'kg_reales\',this.value)">'
         +'<select onchange="sgRecUpd('+i+','+j+',\'calidad\',this.value)">'+calOpts+'</select>'
-        +'<input placeholder="calibre" value="'+(lt.calibre||'')+'" onchange="sgRecUpd('+i+','+j+',\'calibre\',this.value)">'
-        +'<input placeholder="origen" value="'+(lt.origen||'')+'" onchange="sgRecUpd('+i+','+j+',\'origen\',this.value)">'
         +(it.lotes.length>1?'<button class="btn bd bs" onclick="sgRecDelLote('+i+','+j+')">×</button>':'<span></span>')
         +'</div>';
     }).join('');
@@ -3247,14 +3308,33 @@ function sgRecGuardar(){
     var lotes=it.lotes.filter(function(l){return Number(l.kg_reales)>0;});
     if(!lotes.length) continue;
     var suma=lotes.reduce(function(a,l){return a+Number(l.kg_reales);},0);
-    items.push({ oc_item_id:it.oc_item_id, kg_reales_item:suma, lotes:lotes.map(function(l){return {kg_reales:Number(l.kg_reales),calidad:l.calidad||null,calibre:l.calibre||null,origen:l.origen||null};}) });
+    items.push({ oc_item_id:it.oc_item_id, kg_reales_item:suma, lotes:lotes.map(function(l){return {kg_reales:Number(l.kg_reales),calidad:l.calidad||null};}) });
   }
   if(!items.length){ toast('Cargá kg en al menos un item','er'); return; }
-  var body={ oc_id:Number(ocId), fecha_recepcion:eid('sg-rec-fecha').value, numero_remito_proveedor:eid('sg-rec-remito').value, observaciones:eid('sg-rec-obs').value, items:items };
-  api('/api/sg/recepciones','POST',body).then(function(r){
-    if(r&&r.ok){ toast('Recepción registrada ('+r.data.lotes+' lotes)','ok'); closeMB('sg-rec-modal'); sgLoadRecepciones(); sgLoadOC(); }
-    else toast((r&&r.error)||'Error','er');
-  });
+  var num=function(id){ var v=eid(id).value; return v===''?null:Number(v); };
+  var observada=eid('sg-rec-observada').checked;
+  // BLOQUE A (doc/paletizado) + BLOQUE B (calidad) viajan en el payload.
+  var body={ oc_id:Number(ocId), fecha_recepcion:eid('sg-rec-fecha').value,
+    numero_remito_proveedor:eid('sg-rec-remito').value, observaciones:eid('sg-rec-obs').value,
+    factura_numero:eid('sg-rec-factura').value, dtv_codigo:eid('sg-rec-dtv').value,
+    pallets_recibidos:num('sg-rec-pallets'), bultos_recibidos:num('sg-rec-bultos'),
+    observada:observada,
+    calidad_estado_general:observada?eid('sg-rec-cal-estado').value:null,
+    calidad_defectos:observada?eid('sg-rec-cal-defectos').value:null,
+    calidad_pct_afectado:observada?num('sg-rec-cal-pct'):null,
+    calidad_observaciones:observada?eid('sg-rec-cal-obs').value:null,
+    items:items };
+  // BLOQUE B — multipart (payload JSON + fotos). Reusa patrón IFCO de subida (FormData + fetch).
+  var fd=new FormData();
+  fd.append('payload', JSON.stringify(body));
+  var fotos=(observada && SG._recFotos)?SG._recFotos:[];
+  fotos.forEach(function(f){ fd.append('fotos', f); });
+  fetch('/api/sg/recepciones',{method:'POST',credentials:'include',body:fd})
+    .then(function(resp){return resp.json();})
+    .then(function(r){
+      if(r&&r.ok){ toast('Recepción registrada ('+r.data.lotes+' lotes)','ok'); closeMB('sg-rec-modal'); sgLoadRecepciones(); sgLoadOC(); }
+      else toast((r&&r.error)||'Error','er');
+    }).catch(function(){ toast('Error de red','er'); });
 }
 
 // ── Compra retroactiva ──

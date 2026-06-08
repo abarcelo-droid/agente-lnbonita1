@@ -5,11 +5,31 @@
 // condiciones de pago + cuotas). Compras/Stock/Ventas/Reportes en fases siguientes.
 
 import express from 'express';
+import multer from 'multer';
+import path from 'path';
+import fs from 'fs';
+import { fileURLToPath } from 'url';
 import { getDb } from '../servicios/db.js';
 import '../servicios/db_sg.js'; // corre el DDL sg_* al importarse
 import { detectarDuplicado } from '../servicios/dedup.js';
+import { generarRecepcionCalidadPDF } from '../servicios/recepcionCalidadPDF.js';
 
 const router = express.Router();
+
+// ── BLOQUE B — almacenamiento de fotos del informe de calidad (REUSA patrón IFCO:
+// archivo físico en data/sg/, en DB solo la ruta; servido estático en index.js). ──
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const SG_UPLOAD_DIR = path.join(__dirname, '../../data/sg');
+fs.mkdirSync(SG_UPLOAD_DIR, { recursive: true });
+const sgStorage = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, SG_UPLOAD_DIR),
+  filename: (req, file, cb) => {
+    const ext = (path.extname(file.originalname || '') || '.jpg').toLowerCase();
+    // único aún con varias fotos en el mismo request (timestamp + random)
+    cb(null, 'calidad_' + (req.params.id || 'x') + '_' + Date.now() + '_' + Math.floor(Math.random() * 1e6) + ext);
+  }
+});
+const sgUpload = multer({ storage: sgStorage, limits: { fileSize: 10 * 1024 * 1024 } });
 
 // ── Auth (copia local, patrón del repo: produccion.js) ──────────────────────────
 function requireAuth(req, res, next) {
@@ -754,10 +774,13 @@ router.post('/oc/:id/anular', requireAdmin, (req, res) => {
 // ── RECEPCIONES ──────────────────────────────────────────────────────────────
 
 // Recibir mercadería: crea recepción + lotes (con división por calidad), recalcula costos y vencimientos.
-router.post('/recepciones', requireAdmin, (req, res) => {
+// BLOQUE A+B — multipart: campos de texto en req.body.payload (JSON) + fotos en req.files.
+// upload.array corre primero para poblar req.body/req.files; requireAdmin no lee el body.
+router.post('/recepciones', sgUpload.array('fotos', 12), requireAdmin, (req, res) => {
   const db = getDb();
   try {
-    const b = req.body;
+    const b = req.body && req.body.payload ? JSON.parse(req.body.payload) : (req.body || {});
+    const numN = (v) => (v != null && v !== '' && !isNaN(Number(v))) ? Number(v) : null; // BLOQUE A
     const oc = db.prepare('SELECT * FROM sg_oc WHERE id=? AND activo=1').get(b.oc_id);
     if (!oc) return res.status(400).json({ ok: false, error: 'OC inexistente' });
     if (oc.estado === 'anulada') return res.status(400).json({ ok: false, error: 'OC anulada' });
@@ -779,11 +802,21 @@ router.post('/recepciones', requireAdmin, (req, res) => {
 
     const tx = db.transaction(() => {
       const numero = nextNumero(db, 'SG-REC', 'sg_recepciones', 'numero_recepcion');
+      // BLOQUE A (doc + paletizado) + BLOQUE B (calidad) se persisten junto a la recepción.
       const recInfo = db.prepare(`INSERT INTO sg_recepciones
-        (oc_id, numero_recepcion, fecha_recepcion, recibido_por, numero_remito_proveedor, observaciones, creado_por)
-        VALUES (?,?,?,?,?,?,?)`).run(
-        b.oc_id, numero, fechaIngreso, b.recibido_por || null, val(b.numero_remito_proveedor), val(b.observaciones), uid(req));
+        (oc_id, numero_recepcion, fecha_recepcion, recibido_por, numero_remito_proveedor, observaciones, creado_por,
+         factura_numero, dtv_codigo, pallets_recibidos, bultos_recibidos,
+         observada, calidad_estado_general, calidad_defectos, calidad_pct_afectado, calidad_observaciones)
+        VALUES (?,?,?,?,?,?,?, ?,?,?,?, ?,?,?,?,?)`).run(
+        b.oc_id, numero, fechaIngreso, b.recibido_por || null, val(b.numero_remito_proveedor), val(b.observaciones), uid(req),
+        val(b.factura_numero), val(b.dtv_codigo), numN(b.pallets_recibidos), numN(b.bultos_recibidos),
+        b.observada ? 1 : 0, val(b.calidad_estado_general), val(b.calidad_defectos), numN(b.calidad_pct_afectado), val(b.calidad_observaciones));
       const recId = recInfo.lastInsertRowid;
+      // BLOQUE B — fotos del informe (patrón IFCO: ruta /data/sg/<archivo>).
+      for (const f of (req.files || [])) {
+        db.prepare('INSERT INTO sg_recepcion_fotos (recepcion_id, ruta, nombre_original, creado_por) VALUES (?,?,?,?)')
+          .run(recId, '/data/sg/' + f.filename, f.originalname || null, uid(req));
+      }
       const nuevosLotes = [];
       for (const it of items) {
         const ocItem = db.prepare('SELECT * FROM sg_oc_items WHERE id=? AND oc_id=?').get(it.oc_item_id, b.oc_id);
@@ -824,7 +857,45 @@ router.get('/recepciones/:id', requireAuth, (req, res) => {
     if (!rec) return res.status(404).json({ ok: false, error: 'No encontrado' });
     rec.lotes = db.prepare(`SELECT l.*, pr.nombre AS producto_nombre FROM sg_lotes l
       LEFT JOIN sg_productos pr ON pr.id=l.producto_id WHERE l.recepcion_id=? AND l.activo=1`).all(req.params.id);
+    // BLOQUE B — fotos del informe de calidad asociadas a la recepción.
+    rec.fotos = db.prepare('SELECT id, ruta, nombre_original FROM sg_recepcion_fotos WHERE recepcion_id=? ORDER BY id').all(req.params.id);
     res.json({ ok: true, data: rec });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// ── BLOQUE B — PDF del informe de calidad (REUSA jsPDF, patrón ordenPDF.js). Embebe las
+// fotos (leídas de disco → base64) + datos de recepción / proveedor / OC. Link directo
+// (GET con cookie → requireAuth). ──
+router.get('/recepciones/:id/calidad.pdf', requireAuth, async (req, res) => {
+  const db = getDb();
+  try {
+    const rec = db.prepare(`SELECT r.*, o.numero AS oc_numero, o.tipo_precio,
+        p.razon_social AS proveedor_nombre, p.cuit AS proveedor_cuit
+      FROM sg_recepciones r
+      LEFT JOIN sg_oc o ON o.id=r.oc_id
+      LEFT JOIN sg_proveedores p ON p.id=o.proveedor_id
+      WHERE r.id=?`).get(req.params.id);
+    if (!rec) return res.status(404).json({ ok: false, error: 'No encontrado' });
+    rec.lotes = db.prepare(`SELECT l.*, pr.nombre AS producto_nombre, pr.variedad AS producto_variedad
+      FROM sg_lotes l LEFT JOIN sg_productos pr ON pr.id=l.producto_id
+      WHERE l.recepcion_id=? AND l.activo=1`).all(rec.id);
+    // Leer las fotos físicas → base64 para embeber en el PDF (jsPDF.addImage).
+    const fotosRows = db.prepare('SELECT ruta FROM sg_recepcion_fotos WHERE recepcion_id=? ORDER BY id').all(rec.id);
+    const fotos = fotosRows.map((f) => {
+      try {
+        const fp = path.join(SG_UPLOAD_DIR, path.basename(f.ruta));
+        const buf = fs.readFileSync(fp);
+        const ext = path.extname(fp).toLowerCase();
+        const fmt = (ext === '.png') ? 'PNG' : 'JPEG';
+        return { dataUri: 'data:image/' + (fmt === 'PNG' ? 'png' : 'jpeg') + ';base64,' + buf.toString('base64'), fmt };
+      } catch (_) { return null; }
+    }).filter(Boolean);
+    const pdf = await generarRecepcionCalidadPDF(rec, fotos);
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `inline; filename="informe-calidad-${(rec.numero_recepcion || rec.id)}.pdf"`
+    });
+    res.send(pdf);
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
