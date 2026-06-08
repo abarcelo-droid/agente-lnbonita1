@@ -79,14 +79,15 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS sg_proveedores (
     id                          INTEGER PRIMARY KEY AUTOINCREMENT,
     razon_social                TEXT NOT NULL,
-    cuit                        TEXT,
+    origen                      TEXT NOT NULL DEFAULT 'nacional' CHECK(origen IN ('nacional','extranjero')),
+    cuit                        TEXT,   -- nacional: CUIT XX-XXXXXXXX-X · extranjero: tax ID libre
     tipo                        TEXT CHECK(tipo IN ('productor','importador','mayorista_regional','otros')),
     categoria_fiscal            TEXT CHECK(categoria_fiscal IN ('resp_inscripto','monotributista','exento','no_inscripto')),
-    tipo_fiscal_habitual        TEXT DEFAULT 'factura_a' CHECK(tipo_fiscal_habitual IN ('factura_a','factura_b','liquidacion')),
+    tipo_fiscal_habitual        TEXT DEFAULT 'factura_a' CHECK(tipo_fiscal_habitual IN ('factura_a','factura_b','liquidacion','invoice')),
     condicion_pago_habitual_id  INTEGER REFERENCES sg_condiciones_pago(id),
     comercial_responsable_id    INTEGER,
     localidad                   TEXT,
-    provincia                   TEXT,
+    provincia                   TEXT,   -- nacional: provincia AR · extranjero: país
     telefono                    TEXT,
     email                       TEXT,
     observaciones               TEXT,
@@ -413,6 +414,66 @@ try {
 } catch (e) {
   try { db.pragma('foreign_keys = ON'); } catch (_) {}
   console.error('[DB] SG migración sg_productos:', e.message);
+}
+
+// ── MIGRACIÓN idempotente: sg_proveedores → +'origen' (nacional/extranjero) y ──
+// CHECK de tipo_fiscal_habitual ampliado con 'invoice' (proveedor del exterior).
+// El CHECK no se puede ampliar con ALTER, así que reconstruimos la tabla (patrón
+// estándar SQLite: FK off → tabla nueva → copia → drop → rename). Preserva los ids
+// (las FKs de sg_oc y sg_gastos_directos_lote siguen válidas). Los proveedores
+// existentes quedan como 'nacional'. Corre solo una vez (cuando aún no existe 'origen').
+try {
+  const cols = db.prepare("PRAGMA table_info(sg_proveedores)").all().map(c => c.name);
+  if (!cols.includes('origen')) {
+    db.pragma('foreign_keys = OFF');
+    const rebuild = db.transaction(() => {
+      db.exec(`
+        CREATE TABLE sg_proveedores_new (
+          id                          INTEGER PRIMARY KEY AUTOINCREMENT,
+          razon_social                TEXT NOT NULL,
+          origen                      TEXT NOT NULL DEFAULT 'nacional' CHECK(origen IN ('nacional','extranjero')),
+          cuit                        TEXT,
+          tipo                        TEXT CHECK(tipo IN ('productor','importador','mayorista_regional','otros')),
+          categoria_fiscal            TEXT CHECK(categoria_fiscal IN ('resp_inscripto','monotributista','exento','no_inscripto')),
+          tipo_fiscal_habitual        TEXT DEFAULT 'factura_a' CHECK(tipo_fiscal_habitual IN ('factura_a','factura_b','liquidacion','invoice')),
+          condicion_pago_habitual_id  INTEGER REFERENCES sg_condiciones_pago(id),
+          comercial_responsable_id    INTEGER,
+          localidad                   TEXT,
+          provincia                   TEXT,
+          telefono                    TEXT,
+          email                       TEXT,
+          observaciones               TEXT,
+          adm_proveedor_id            INTEGER,
+          activo                      INTEGER NOT NULL DEFAULT 1,
+          creado_en                   TEXT DEFAULT (datetime('now','localtime')),
+          creado_por                  INTEGER,
+          modificado_en               TEXT,
+          modificado_por              INTEGER,
+          eliminado_en                TEXT,
+          eliminado_por_id            INTEGER
+        );
+        INSERT INTO sg_proveedores_new
+          (id, razon_social, origen, cuit, tipo, categoria_fiscal, tipo_fiscal_habitual,
+           condicion_pago_habitual_id, comercial_responsable_id, localidad, provincia,
+           telefono, email, observaciones, adm_proveedor_id, activo,
+           creado_en, creado_por, modificado_en, modificado_por, eliminado_en, eliminado_por_id)
+        SELECT
+           id, razon_social, 'nacional', cuit, tipo, categoria_fiscal, tipo_fiscal_habitual,
+           condicion_pago_habitual_id, comercial_responsable_id, localidad, provincia,
+           telefono, email, observaciones, adm_proveedor_id, activo,
+           creado_en, creado_por, modificado_en, modificado_por, eliminado_en, eliminado_por_id
+        FROM sg_proveedores;
+        DROP TABLE sg_proveedores;
+        ALTER TABLE sg_proveedores_new RENAME TO sg_proveedores;
+      `);
+    });
+    rebuild();
+    db.pragma('foreign_keys = ON');
+    console.log('[DB] SG sg_proveedores migrado (+origen nacional/extranjero, tipo_fiscal +invoice)');
+  }
+} catch (e) {
+  try { db.pragma('foreign_keys = ON'); } catch (_) {}
+  console.error('[DB] SG migración sg_proveedores:', e.message);
 }
 
 // ── BACKFILL idempotente: margen_estimado por kg ────────────────────────────────
