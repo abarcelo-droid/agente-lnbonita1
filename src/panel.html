@@ -88,6 +88,11 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
 #toast.on{opacity:1;pointer-events:auto;transform:translateY(0)}
 #toast.ok{border-left:3px solid var(--ok)}
 #toast.er{border-left:3px solid var(--err)}
+/* Autocompletado de producto en Ingreso de Factura (PC) */
+.pa-ac-list{position:absolute;left:0;right:0;top:100%;margin-top:2px;background:var(--sur);border:1px solid var(--bor);border-radius:8px;max-height:240px;overflow:auto;z-index:60;box-shadow:0 6px 24px rgba(0,0,0,.14)}
+.pa-ac-item{padding:7px 10px;cursor:pointer;font-size:13px}
+.pa-ac-item:hover,.pa-ac-item.pa-ac-on{background:var(--bg2,#f3f4f6)}
+.pa-ac-empty,.pa-ac-more{padding:7px 10px;font-size:12px;color:var(--mut)}
 .sc{background:var(--sur);border:1px solid var(--bor);border-radius:10px;padding:20px 22px;display:flex;align-items:center;justify-content:space-between;gap:20px;margin-bottom:12px}
 .cr{padding:13px 16px;border-bottom:1px solid var(--bor);cursor:pointer;transition:background .12s}
 .cr:hover{background:var(--bg)}.cr.on{background:var(--burl);border-left:3px solid var(--burg)}.cr.al{border-left:3px solid var(--err)}
@@ -17565,11 +17570,19 @@ function paAgregarItemCompra(){
   row.innerHTML=
     // Línea 1: producto + modo de carga + ✕
     '<div style="display:grid;grid-template-columns:1fr 180px auto;gap:8px;align-items:center;margin-bottom:8px">'
-      +'<select id="pa-ci-ins-'+n+'" onchange="paOnInsumoChange('+n+')">'
-        +'<option value="">— Elegí producto —</option>'
-        +'<option value="__new__" style="font-weight:700;color:#6b21a8">➕ Crear producto nuevo...</option>'
-        +opts
-      +'</select>'
+      // Buscador con autocompletado (filtra PA.insumos en el front). El <select>
+      // queda OCULTO pero vivo: guarda el insumo_id (lo lee el guardado) y conserva
+      // los data-* que usa paOnInsumoChange — así no cambia nada aguas abajo.
+      +'<div style="position:relative">'
+        +'<input id="pa-ci-insq-'+n+'" type="text" autocomplete="off" placeholder="Buscar producto…" '
+          +'oninput="paInsBuscar('+n+')" onfocus="paInsBuscar('+n+')" onblur="paInsBlur('+n+')" '
+          +'onkeydown="paInsKey(event,'+n+')" style="width:100%">'
+        +'<select id="pa-ci-ins-'+n+'" onchange="paOnInsumoChange('+n+')" style="display:none">'
+          +'<option value="">— Elegí producto —</option>'
+          +opts
+        +'</select>'
+        +'<div id="pa-ci-inslist-'+n+'" class="pa-ac-list" style="display:none"></div>'
+      +'</div>'
       +'<select id="pa-ci-modo-'+n+'" onchange="paOnModoCambio('+n+')" style="font-size:12px">'
         +'<option value="presentacion">Por bultos/latas</option>'
         +'<option value="base">En unidad base directo</option>'
@@ -17769,6 +17782,8 @@ function paOnInsumoChange(n){
   if (!sel.value) {
     var formNew2 = document.getElementById('pa-ci-newprod-'+n);
     if (formNew2) formNew2.style.display = 'none';
+    var qEmpty = document.getElementById('pa-ci-insq-'+n);
+    if (qEmpty) qEmpty.value = '';   // espejo del buscador
     paLimpiarZonasItem(n);
     return;
   }
@@ -17777,6 +17792,10 @@ function paOnInsumoChange(n){
   if (formNew3) formNew3.style.display = 'none';
   var opt=sel.selectedOptions[0];
   if(!opt)return;
+  // Espejo: que el buscador muestre el producto elegido (cubre OCR/auto-fill que
+  // setean el <select> por código y llaman a esta función).
+  var qSync=document.getElementById('pa-ci-insq-'+n);
+  if(qSync) qSync.value = opt.textContent;
   var presB=opt.dataset.presb||'';
   var elB=document.getElementById('pa-ci-presb-'+n);
   if(elB && !elB.value)elB.value=presB;
@@ -17804,6 +17823,44 @@ function paOnInsumoChange(n){
   paRenderInfoContable(n, insumo, catV2, subcat);
 
   paActTotalComp();
+}
+
+// ── Autocompletado del selector de Producto (Ingreso de Factura PC) ───────────
+// Filtra PA.insumos en el front (sin pegarle al backend por tecla; el padrón de
+// insumos PC es chico). Escribe el insumo_id en el <select> oculto pa-ci-ins-{n}
+// y dispara paOnInsumoChange → todo aguas abajo (cuenta, bultos, IVA) intacto.
+function paInsBuscar(n){
+  var inp=document.getElementById('pa-ci-insq-'+n); if(!inp) return;
+  var box=document.getElementById('pa-ci-inslist-'+n); if(!box) return;
+  var q=ppNorm(inp.value).trim();
+  var arr=(PA.insumos||[]).filter(function(i){ return !q || ppNorm(i.nombre).indexOf(q)!==-1; });
+  var top=arr.slice(0,50);
+  box.innerHTML = top.length
+    ? top.map(function(i){ return '<div class="pa-ac-item" data-id="'+i.id+'" onmousedown="paInsPick('+n+','+i.id+')">'+esc(i.nombre)+' <span style="color:var(--mut);font-size:11px">('+esc(i.unidad)+')</span></div>'; }).join('')
+        + (arr.length>top.length ? '<div class="pa-ac-more">… '+(arr.length-top.length)+' más — seguí escribiendo</div>' : '')
+    : '<div class="pa-ac-empty">Sin resultados</div>';
+  box.style.display='';
+}
+function paInsPick(n,id){
+  var sel=document.getElementById('pa-ci-ins-'+n); if(!sel) return;
+  sel.value=String(id);
+  var box=document.getElementById('pa-ci-inslist-'+n); if(box) box.style.display='none';
+  paOnInsumoChange(n); // espejea el nombre en el buscador + cuenta contable, etc.
+}
+function paInsBlur(n){ setTimeout(function(){ var box=document.getElementById('pa-ci-inslist-'+n); if(box) box.style.display='none'; }, 150); }
+function paInsKey(ev,n){
+  var box=document.getElementById('pa-ci-inslist-'+n); if(!box) return;
+  if(ev.key==='Escape'){ box.style.display='none'; return; }
+  if(ev.key!=='ArrowDown' && ev.key!=='ArrowUp' && ev.key!=='Enter') return;
+  if(box.style.display==='none' && ev.key!=='Enter') paInsBuscar(n);
+  var items=box.querySelectorAll('.pa-ac-item'); if(!items.length) return;
+  var cur=-1,k; for(k=0;k<items.length;k++){ if(items[k].classList.contains('pa-ac-on')){ cur=k; break; } }
+  if(ev.key==='Enter'){ ev.preventDefault(); var pick=(cur>=0)?items[cur]:items[0]; paInsPick(n, parseInt(pick.dataset.id,10)); return; }
+  ev.preventDefault();
+  var ni = ev.key==='ArrowDown' ? Math.min(cur+1, items.length-1) : Math.max(cur-1, 0);
+  if(cur<0 && ev.key==='ArrowDown') ni=0;
+  for(k=0;k<items.length;k++) items[k].classList.toggle('pa-ac-on', k===ni);
+  items[ni].scrollIntoView({block:'nearest'});
 }
 
 // Helper: limpiar todas las zonas extras del item cuando no hay insumo elegido
