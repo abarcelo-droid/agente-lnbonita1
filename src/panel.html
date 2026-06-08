@@ -1895,6 +1895,22 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       .sg-mod .sgc-subtab.on{background:var(--burg);color:#fff}
       .sg-mod .sgc-sub{display:none} .sg-mod .sgc-sub.on{display:block}
       .sg-mod .sg-lrow{display:grid;grid-template-columns:1.6fr 1.3fr 0.8fr 0.9fr auto;gap:6px;align-items:center;margin-bottom:6px}
+      /* ── Rediseño modal Nueva OC (mismo lenguaje que Recepción) ── */
+      .sg-seg{display:inline-flex;border:1px solid var(--bor);border-radius:9px;overflow:hidden;background:var(--bg)}
+      .sg-seg-btn{position:relative;display:inline-flex;align-items:center;gap:5px;padding:7px 14px;font-size:12.5px;font-weight:600;color:var(--mut);cursor:pointer;white-space:nowrap;user-select:none;border:0;background:transparent}
+      .sg-seg-btn input{position:absolute;opacity:0;width:0;height:0}
+      .sg-seg-btn:has(input:checked),.sg-seg-btn.on{background:var(--burg);color:#fff}
+      .sg-seg-sm .sg-seg-btn{padding:4px 11px;font-size:11px}
+      .sg-oc-box{border:1px solid var(--bor);border-radius:10px;padding:12px;margin-top:12px;background:var(--bg)}
+      .sg-oc-box-tit{font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--mut);margin-bottom:10px}
+      .sg-oc-card{border:1px solid var(--bor);border-radius:10px;padding:10px;margin-bottom:8px;background:var(--sur)}
+      .sg-oc-card-top{display:grid;grid-template-columns:1fr 1fr auto;gap:8px;align-items:center;margin-bottom:8px}
+      .sg-oc-card-bot{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+      .sg-oc-card-bot input{width:120px}
+      .sg-oc-sub{margin-left:auto;font-weight:700;font-size:13px;white-space:nowrap;color:var(--tx)}
+      .sg-oc-add{width:100%;border:1.5px dashed var(--bor);background:transparent;color:var(--mut);border-radius:9px;padding:10px;font-size:13px;font-weight:600;cursor:pointer;margin-top:4px}
+      .sg-oc-add:hover{border-color:var(--burg);color:var(--burg)}
+      @media(max-width:560px){.sg-oc-card-top{grid-template-columns:1fr}.sg-oc-card-bot input{width:100%}}
     </style>
     <div style="display:inline-flex;gap:2px;background:var(--bg);border:1px solid var(--bor);border-radius:8px;padding:3px;margin-bottom:16px;flex-wrap:wrap">
       <div class="sgc-subtab on" data-sub="oc"        onclick="sgComSub('oc')">📋 Órdenes de compra</div>
@@ -2180,36 +2196,54 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
 <!-- Modal Crear OC -->
 <div class="ab-modal-overlay" id="sg-oc-modal">
   <div class="ab-modal" style="width:780px;max-height:90vh;overflow-y:auto">
-    <div class="mhd"><div class="mht">Nueva orden de compra</div><button class="mcl" onclick="closeMB('sg-oc-modal')">×</button></div>
+    <div class="mhd"><div class="mht">🛒 Nueva orden de compra</div><button class="mcl" onclick="closeMB('sg-oc-modal')">×</button></div>
     <div class="fg">
+      <!-- Modalidad como tabs -->
       <div class="fl ff"><label>Modalidad</label>
-        <div style="display:flex;gap:14px;flex-wrap:wrap;padding:4px 0">
-          <label style="font-weight:500"><input type="radio" name="sg-oc-mod" value="normal" checked style="width:auto"> Normal</label>
-          <label style="font-weight:500"><input type="radio" name="sg-oc-mod" value="rapida" style="width:auto"> Rápida</label>
-          <label style="font-weight:500"><input type="radio" name="sg-oc-mod" value="finca_propia" style="width:auto"> Finca propia <span style="color:var(--mut);font-size:11px">(stub V1.5)</span></label>
+        <div class="sg-seg" role="radiogroup" style="margin-top:2px;flex-wrap:wrap">
+          <label class="sg-seg-btn"><input type="radio" name="sg-oc-mod" value="normal" checked> Normal</label>
+          <label class="sg-seg-btn"><input type="radio" name="sg-oc-mod" value="rapida"> Rápida</label>
+          <label class="sg-seg-btn"><input type="radio" name="sg-oc-mod" value="finca_propia"> Finca propia</label>
         </div>
       </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
-        <div class="fl"><label>Proveedor <span style="color:var(--err)">*</span></label><select id="sg-oc-prov" onchange="sgOcProvChange()"></select></div>
-        <div class="fl"><label>Comprobante Fiscal</label><select id="sg-oc-fiscal" onchange="sgOcFiscalChange()"></select></div>
-        <div class="fl"><label>Condiciones Comerciales</label>
-          <div style="display:flex;gap:14px;padding:6px 0">
-            <label style="font-weight:500"><input type="radio" name="sg-oc-precio" value="firme" checked onchange="sgOcPrecioChange()" style="width:auto"> Precio Cerrado</label>
-            <label style="font-weight:500"><input type="radio" name="sg-oc-precio" value="pizarra" onchange="sgOcPrecioChange()" style="width:auto"> Liquidación de Venta</label>
+
+      <!-- Proveedor y comprobante (agrupados) -->
+      <div class="sg-oc-box">
+        <div class="sg-oc-box-tit">🧑‍🌾 Proveedor y comprobante</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+          <div class="fl"><label>Proveedor <span style="color:var(--err)">*</span></label><select id="sg-oc-prov" onchange="sgOcProvChange()"></select></div>
+          <div class="fl"><label>Comprobante Fiscal</label><select id="sg-oc-fiscal" onchange="sgOcFiscalChange()"></select></div>
+          <div class="fl"><label>Condiciones Comerciales</label>
+            <div class="sg-seg" role="radiogroup" style="margin-top:2px;flex-wrap:wrap">
+              <label class="sg-seg-btn"><input type="radio" name="sg-oc-precio" value="firme" checked onchange="sgOcPrecioChange()"> Precio Cerrado</label>
+              <label class="sg-seg-btn"><input type="radio" name="sg-oc-precio" value="pizarra" onchange="sgOcPrecioChange()"> Liquidación de Venta</label>
+            </div>
           </div>
+          <div class="fl"><label>Condición de pago</label><select id="sg-oc-cond"></select></div>
         </div>
-        <div class="fl"><label>Condición de pago</label><select id="sg-oc-cond"></select></div>
+      </div>
+
+      <!-- Fechas -->
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px">
         <div class="fl"><label>Fecha OC</label><input type="date" id="sg-oc-fecha"></div>
         <div class="fl"><label>Fecha recepción estimada</label><input type="date" id="sg-oc-fecharec"></div>
-        <div class="fl"><label>Flete a cargo de</label>
-          <select id="sg-oc-flete-cargo">
-            <option value="">— Sin flete —</option>
-            <option value="comprador">Comprador</option>
-            <option value="vendedor">Vendedor</option>
-          </select>
-        </div>
-        <div class="fl"><label>Monto de flete ($)</label><input type="number" id="sg-oc-flete-monto" min="0" step="0.01" placeholder="informativo, no suma al total"></div>
       </div>
+
+      <!-- Flete (recuadro propio, informativo) -->
+      <div class="sg-oc-box">
+        <div class="sg-oc-box-tit">🚚 Flete <span style="font-weight:400;text-transform:none;letter-spacing:0">(informativo, no suma al total)</span></div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+          <div class="fl"><label>A cargo de</label>
+            <select id="sg-oc-flete-cargo">
+              <option value="">— Sin flete —</option>
+              <option value="comprador">Comprador</option>
+              <option value="vendedor">Vendedor</option>
+            </select>
+          </div>
+          <div class="fl"><label>Monto de flete ($)</label><input type="number" id="sg-oc-flete-monto" min="0" step="0.01" placeholder="informativo"></div>
+        </div>
+      </div>
+
       <!-- IVA Fase 2 — solo visible con Factura A + Precio Cerrado. La alícuota la define la
            familia del producto; acá el comercial solo dice si el $/kg ya incluye IVA o no. -->
       <div class="fl ff" id="sg-oc-iva-box" style="display:none">
@@ -2219,16 +2253,20 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
           <label style="font-weight:500"><input type="radio" name="sg-oc-inciva" value="no" onchange="sgOcTotales()" style="width:auto"> El precio no incluye IVA (se adiciona)</label>
         </div>
       </div>
-      <div class="fl ff"><label>Items</label>
+
+      <!-- Items (cada uno en su tarjeta) -->
+      <div class="fl ff" style="margin-top:14px"><label>📦 Items</label>
         <div id="sg-oc-items"></div>
-        <button class="btn bo bs" style="margin-top:6px" onclick="sgOcAddItem()">+ Agregar item</button>
+        <button class="sg-oc-add" onclick="sgOcAddItem()">+ Agregar item</button>
       </div>
       <div class="fl ff"><label>Observaciones</label><textarea id="sg-oc-obs" rows="2"></textarea></div>
-      <div id="sg-oc-totales" style="font-weight:700;font-size:14px;text-align:right;padding-top:6px;border-top:1px solid var(--bor)"></div>
     </div>
-    <div class="ab-modal-footer">
-      <button class="btn bo" onclick="closeMB('sg-oc-modal')">Cancelar</button>
-      <button class="btn bb" onclick="sgOcGuardar()">Cerrar OC</button>
+    <div class="ab-modal-footer" style="display:flex;justify-content:space-between;align-items:center;gap:12px;background:var(--bg)">
+      <div id="sg-oc-totales" style="font-weight:700;font-size:13.5px;text-align:left"></div>
+      <div style="display:flex;gap:8px;flex-shrink:0">
+        <button class="btn bo" onclick="closeMB('sg-oc-modal')">Cancelar</button>
+        <button class="btn bb" onclick="sgOcGuardar()">Crear OC</button>
+      </div>
     </div>
   </div>
 </div>
@@ -3225,21 +3263,28 @@ function sgOcRenderItems(){
     // CAMBIO 2 — modo de carga por item. BULTO: cantidad=nº bultos, precio=$/bulto → kg=bultos×factor.
     // KILO (default): cantidad=kg, precio=$/kg → kg=cantidad. Internamente siempre se guardan kg y total reales.
     var bulto = it.modo==='bulto';
-    var modoSel = '<select style="font-size:9.5px;padding:0 2px;width:100%;margin-bottom:2px" '
-      +'title="BULTO: cantidad=bultos, precio=$/bulto. KILO: cantidad=kg, precio=$/kg." '
-      +'onchange="sgOcUpd('+i+',\'modo\',this.value)">'
-      +'<option value="kilo"'+(bulto?'':' selected')+'>por kg</option>'
-      +'<option value="bulto"'+(bulto?' selected':'')+'>por bulto</option></select>';
+    // Toggle BULTO/KILO como botones (mismo handler sgOcUpd que el <select> anterior; re-renderiza).
+    var modoBtns = '<div class="sg-seg sg-seg-sm" role="group" title="BULTO: cantidad=bultos, precio=$/bulto. KILO: cantidad=kg, precio=$/kg.">'
+      +'<button type="button" class="sg-seg-btn'+(bulto?'':' on')+'" onclick="sgOcUpd('+i+',\'modo\',\'kilo\')">por kg</button>'
+      +'<button type="button" class="sg-seg-btn'+(bulto?' on':'')+'" onclick="sgOcUpd('+i+',\'modo\',\'bulto\')">por bulto</button>'
+      +'</div>';
     var cantPh = bulto ? 'bultos' : 'kg';
     var precioPh = bulto ? '$/bulto' : '$/kg';
     // CAMBIO 1 — inputs type="text" inputmode="numeric" con separador de miles VISUAL (sgMilShow/sgOcMilInput).
-    return '<div class="sg-lrow">'
-      +'<select onchange="sgOcUpd('+i+',\'producto_id\',this.value)">'+sgOpts(sgOcProductos(),sgOcProdLabel,it.producto_id,'— Producto —')+'</select>'
-      +presSel
-      +'<div>'+modoSel+'<input type="text" inputmode="numeric" placeholder="'+cantPh+'" value="'+sgMilShow(it.cantidad)+'" oninput="sgOcMilInput(this,'+i+',\'cantidad\')"></div>'
-      +(firme?'<input type="text" inputmode="numeric" placeholder="'+precioPh+'" value="'+sgMilShow(it.precio)+'" oninput="sgOcMilInput(this,'+i+',\'precio\')">':'<span style="font-size:11px;color:var(--mut);text-align:center">pizarra</span>')
-      +(SG.ocItems.length>1?'<button class="btn bd bs" onclick="sgOcDelItem('+i+')">×</button>':'<span></span>')
-      +'</div>';
+    // El subtotal por item (#sg-oc-sub-i) lo completa sgOcTotales en vivo (cálculo intacto).
+    return '<div class="sg-oc-card">'
+      +'<div class="sg-oc-card-top">'
+        +'<select onchange="sgOcUpd('+i+',\'producto_id\',this.value)">'+sgOpts(sgOcProductos(),sgOcProdLabel,it.producto_id,'— Producto —')+'</select>'
+        +presSel
+        +(SG.ocItems.length>1?'<button class="btn bd bs" onclick="sgOcDelItem('+i+')" title="Quitar item">×</button>':'<span></span>')
+      +'</div>'
+      +'<div class="sg-oc-card-bot">'
+        +modoBtns
+        +'<input type="text" inputmode="numeric" placeholder="'+cantPh+'" value="'+sgMilShow(it.cantidad)+'" oninput="sgOcMilInput(this,'+i+',\'cantidad\')">'
+        +(firme?'<input type="text" inputmode="numeric" placeholder="'+precioPh+'" value="'+sgMilShow(it.precio)+'" oninput="sgOcMilInput(this,'+i+',\'precio\')">':'<span style="font-size:11px;color:var(--mut)">pizarra</span>')
+        +'<span class="sg-oc-sub" id="sg-oc-sub-'+i+'"></span>'
+      +'</div>'
+    +'</div>';
   }).join('');
   sgOcTotales();
 }
@@ -3247,14 +3292,16 @@ function sgOcTotales(){
   // CAMBIO 2 — kg/total respetan el modo. IVA Fase 2 — con Factura A discrimina neto/IVA/total.
   var firme=sgOcPrecio()==='firme', disc=sgOcDiscrimina(), incl=sgOcIncluyeIva();
   var tk=0, tBruto=0, tNeto=0, tIva=0;
-  SG.ocItems.forEach(function(it){
+  SG.ocItems.forEach(function(it,i){
     var factor=sgFactor(it.presentacion_id), cant=Number(it.cantidad)||0, precio=Number(it.precio)||0;
     var bulto = it.modo==='bulto';
     var kg = bulto ? cant*factor : cant;          // bulto: kg=bultos×factor · kilo: kg=cantidad
     tk += kg;
-    if(!firme) return;
+    var subEl=eid('sg-oc-sub-'+i);                // subtotal por item (SOLO display; el cálculo del total NO cambia)
+    if(!firme){ if(subEl) subEl.textContent='—'; return; }
     var bruto = bulto ? (cant*precio) : (kg*precio);  // $ línea con criterio actual
     tBruto += bruto;
+    if(subEl) subEl.textContent=sgMoney(Math.round(bruto));
     if(disc){
       var alic=sgFamAlic(it.producto_id);
       if(alic==null){ tNeto += bruto; }                                  // familia sin alícuota → no discrimina esa línea
