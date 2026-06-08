@@ -5867,6 +5867,7 @@ function sgRepExport(){
 <!-- Tabs -->
 <div style="display:flex;gap:0;border-bottom:1px solid var(--bor);margin-bottom:16px">
   <button id="fin-tab-cuentas"   class="fin-tab fin-tab-act" onclick="finTab('cuentas')">Cuentas</button>
+  <button id="fin-tab-caja"      class="fin-tab"             onclick="finTab('caja')">💵 Caja</button>
   <button id="fin-tab-chequeras" class="fin-tab"             onclick="finTab('chequeras')">Chequeras</button>
   <button id="fin-tab-cheques-p" class="fin-tab"             onclick="finTab('cheques-p')">Cheques Propios</button>
   <button id="fin-tab-cheques-t" class="fin-tab"             onclick="finTab('cheques-t')">Cheques Terceros</button>
@@ -5887,6 +5888,52 @@ function sgRepExport(){
         <th style="width:80px"></th>
       </tr></thead>
       <tbody id="fin-tbody-cuentas"></tbody>
+    </table>
+  </div>
+</div>
+
+<!-- Tab: Caja (efectivo, ámbitos fiscal/interno) -->
+<div id="fin-panel-caja" style="display:none">
+  <!-- Saldo total de arqueo (A + B) -->
+  <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px">
+    <div style="flex:1;min-width:200px;background:linear-gradient(135deg,#065f46,#047857);color:#fff;border-radius:12px;padding:16px 18px">
+      <div style="font-size:11px;text-transform:uppercase;letter-spacing:.06em;opacity:.85">💵 Saldo total en efectivo (arqueo)</div>
+      <div id="fin-caja-saldo-total" style="font-size:26px;font-weight:800;margin-top:4px">$ 0,00</div>
+    </div>
+    <div style="flex:1;min-width:150px;background:var(--sur);border:1px solid var(--bor);border-radius:12px;padding:16px 18px">
+      <div style="font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--mut)">🟦 Caja A (fiscal)</div>
+      <div id="fin-caja-saldo-fiscal" style="font-size:20px;font-weight:700;margin-top:4px;color:var(--txt)">$ 0,00</div>
+    </div>
+    <div style="flex:1;min-width:150px;background:var(--sur);border:1px solid var(--bor);border-radius:12px;padding:16px 18px">
+      <div style="font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--mut)">🟧 Caja interna</div>
+      <div id="fin-caja-saldo-interno" style="font-size:20px;font-weight:700;margin-top:4px;color:var(--txt)">$ 0,00</div>
+    </div>
+  </div>
+
+  <!-- Controles: selector de caja + acciones -->
+  <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px">
+    <select id="fin-caja-filtro" onchange="finCajaRender()" style="font-size:13px;min-width:200px">
+      <option value="">Todas las cajas</option>
+    </select>
+    <div style="display:flex;gap:8px">
+      <button class="btn bo bs" onclick="finCajaAbrirNuevaCaja()">+ Nueva caja</button>
+      <button class="btn bb bs" onclick="finCajaAbrirMovimiento()">+ Movimiento</button>
+    </div>
+  </div>
+
+  <!-- Lista de movimientos -->
+  <div style="overflow-x:auto;border:1px solid var(--bor);border-radius:10px">
+    <table style="width:100%;border-collapse:collapse;font-size:13px">
+      <thead><tr style="background:var(--bg);border-bottom:1px solid var(--bor)">
+        <th style="padding:9px 12px;text-align:left;font-size:10px;color:var(--mut);text-transform:uppercase">Fecha</th>
+        <th style="padding:9px 12px;text-align:left;font-size:10px;color:var(--mut);text-transform:uppercase">Caja</th>
+        <th style="padding:9px 12px;text-align:center;font-size:10px;color:var(--mut);text-transform:uppercase">Ámbito</th>
+        <th style="padding:9px 12px;text-align:left;font-size:10px;color:var(--mut);text-transform:uppercase">Concepto</th>
+        <th style="padding:9px 12px;text-align:right;font-size:10px;color:var(--mut);text-transform:uppercase">Ingreso</th>
+        <th style="padding:9px 12px;text-align:right;font-size:10px;color:var(--mut);text-transform:uppercase">Egreso</th>
+        <th style="width:50px"></th>
+      </tr></thead>
+      <tbody id="fin-tbody-caja-movim"><tr><td colspan="7" style="padding:20px;text-align:center;color:var(--mut)">Cargando…</td></tr></tbody>
     </table>
   </div>
 </div>
@@ -6188,12 +6235,20 @@ function sgRepExport(){
     <div style="display:flex;flex-direction:column;gap:12px;margin-top:16px">
       <div class="fl ff"><label>Nombre *</label><input type="text" id="fin-cuenta-nombre" placeholder="Ej: Santander CC Pesos"></div>
       <div class="fl ff"><label>Tipo *</label>
-        <select id="fin-cuenta-tipo">
+        <select id="fin-cuenta-tipo" onchange="finCuentaToggleAmbito()">
           <option value="cuenta_corriente">Cuenta Corriente</option>
           <option value="caja_ahorro">Caja de Ahorro</option>
           <option value="caja">Caja (Efectivo)</option>
           <option value="inversion">Inversión</option>
         </select>
+      </div>
+      <div class="fl ff" id="fin-cuenta-ambito-row" style="display:none">
+        <label>Ámbito de la caja</label>
+        <select id="fin-cuenta-ambito">
+          <option value="fiscal">Fiscal (declarado, va a ARCA)</option>
+          <option value="interno">Interno (efectivo no declarado)</option>
+        </select>
+        <div style="font-size:11px;color:var(--mut);margin-top:4px">Solo las cajas de efectivo pueden ser internas. Banco/cheque/transferencia son siempre fiscales.</div>
       </div>
       <div class="fl ff"><label>Banco</label><input type="text" id="fin-cuenta-banco" placeholder="Ej: Santander"></div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
@@ -6213,6 +6268,32 @@ function sgRepExport(){
     <div class="ab-modal-footer">
       <button class="btn bo" onclick="document.getElementById('fin-mb-cuenta').classList.remove('on')">Cancelar</button>
       <button class="btn bb" onclick="finGuardarCuenta()">Guardar</button>
+    </div>
+</div>
+</div>
+
+<!-- Modal: Movimiento de Caja -->
+<div class="ab-modal-overlay" id="fin-modal-cajamov">
+<div class="ab-modal" style="max-width:440px">
+    <div class="mht">Movimiento de Caja</div>
+    <div style="display:flex;flex-direction:column;gap:12px;margin-top:16px">
+      <div class="fl ff"><label>Caja *</label><select id="fin-cajamov-cuenta"></select></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+        <div class="fl"><label>Tipo *</label>
+          <select id="fin-cajamov-tipo">
+            <option value="egreso">Egreso (sale efectivo)</option>
+            <option value="ingreso">Ingreso (entra efectivo)</option>
+          </select>
+        </div>
+        <div class="fl"><label>Fecha</label><input type="date" id="fin-cajamov-fecha"></div>
+      </div>
+      <div class="fl ff"><label>Concepto *</label><input type="text" id="fin-cajamov-concepto" placeholder="Ej: Pago changa cosecha"></div>
+      <div class="fl ff"><label>Monto *</label><input type="number" id="fin-cajamov-monto" step="0.01" min="0" placeholder="0.00"></div>
+      <div class="fl ff"><label>Referencia <span style="font-size:11px;color:var(--mut)">(opcional)</span></label><input type="text" id="fin-cajamov-ref"></div>
+    </div>
+    <div class="ab-modal-footer">
+      <button class="btn bo" onclick="document.getElementById('fin-modal-cajamov').classList.remove('on')">Cancelar</button>
+      <button class="btn bb" onclick="finCajaGuardarMovimiento()">Registrar</button>
     </div>
 </div>
 </div>
@@ -28814,7 +28895,7 @@ function finCajaBancosIniciar() {
 
 function finTab(tab) {
   FIN.tabActual = tab;
-  var tabs = ['cuentas','chequeras','cheques-p','cheques-t','movim','concilia'];
+  var tabs = ['cuentas','caja','chequeras','cheques-p','cheques-t','movim','concilia'];
   tabs.forEach(function(t) {
     var btn = document.getElementById('fin-tab-' + t);
     var panel = document.getElementById('fin-panel-' + t);
@@ -28822,11 +28903,130 @@ function finTab(tab) {
     if (panel) panel.style.display = t === tab ? '' : 'none';
   });
   if (tab === 'cuentas')    finCargarCuentas();
+  if (tab === 'caja')       finCajaCargar();
   if (tab === 'chequeras')  finCargarChequeras();
   if (tab === 'cheques-p')  finCargarChequesPropios();
   if (tab === 'cheques-t')  finCargarChequesTerceros();
   if (tab === 'movim')      finCargarMovimientos();
   if (tab === 'concilia')   finConciliaIniciar();
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// CAJA (efectivo, ámbitos fiscal/interno)
+// ══════════════════════════════════════════════════════════════════════════════
+var FIN_CAJA = { cajas: [], movimientos: [] };
+
+function finCajaMoney(n){ return '$ ' + (Number(n)||0).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+
+function finCajaCargar() {
+  // Traer cuentas tipo caja + sus movimientos
+  Promise.all([
+    finApi('/cuentas'),
+    finApi('/movimientos?solo_caja=1')
+  ]).then(function(res){
+    FIN_CAJA.cajas = (res[0].data || []).filter(function(c){ return c.tipo === 'caja'; });
+    FIN_CAJA.movimientos = res[1].data || [];
+    // Poblar selector
+    var sel = document.getElementById('fin-caja-filtro');
+    var prev = sel.value;
+    sel.innerHTML = '<option value="">Todas las cajas</option>'
+      + FIN_CAJA.cajas.map(function(c){
+          var et = c.ambito === 'interno' ? ' (interna)' : ' (fiscal)';
+          return '<option value="'+c.id+'">'+c.nombre+et+'</option>';
+        }).join('');
+    if (prev) sel.value = prev;
+    finCajaRender();
+  });
+}
+
+function finCajaRender() {
+  var cajas = FIN_CAJA.cajas;
+  // Saldos por ámbito (el saldo de cada caja ya viene calculado como saldo_actual)
+  var totFiscal = 0, totInterno = 0;
+  cajas.forEach(function(c){
+    var s = Number(c.saldo_actual)||0;
+    if (c.ambito === 'interno') totInterno += s; else totFiscal += s;
+  });
+  document.getElementById('fin-caja-saldo-total').textContent   = finCajaMoney(totFiscal + totInterno);
+  document.getElementById('fin-caja-saldo-fiscal').textContent  = finCajaMoney(totFiscal);
+  document.getElementById('fin-caja-saldo-interno').textContent = finCajaMoney(totInterno);
+
+  // Filtro de movimientos por caja seleccionada
+  var filtro = document.getElementById('fin-caja-filtro').value;
+  var movs = FIN_CAJA.movimientos.filter(function(m){
+    return filtro ? String(m.cuenta_id) === String(filtro) : true;
+  });
+
+  var tb = document.getElementById('fin-tbody-caja-movim');
+  if (!movs.length) {
+    tb.innerHTML = '<tr><td colspan="7" style="padding:20px;text-align:center;color:var(--mut)">Sin movimientos de caja'+(cajas.length?'':' — primero creá una caja de efectivo')+'</td></tr>';
+    return;
+  }
+  tb.innerHTML = movs.map(function(m){
+    var esIngreso = m.tipo === 'ingreso';
+    var amb = m.cuenta_ambito === 'interno'
+      ? '<span class="pa-badge" style="background:#fed7aa;color:#9a3412;font-size:10px">Interno</span>'
+      : '<span class="pa-badge" style="background:#bfdbfe;color:#1e40af;font-size:10px">Fiscal</span>';
+    return '<tr style="border-bottom:1px solid var(--bor)">'
+      + '<td style="padding:8px 12px;white-space:nowrap">'+(m.fecha||'')+'</td>'
+      + '<td style="padding:8px 12px">'+(m.cuenta_nombre||'')+'</td>'
+      + '<td style="padding:8px 12px;text-align:center">'+amb+'</td>'
+      + '<td style="padding:8px 12px">'+(m.concepto||'')+(m.referencia?' <span style="color:var(--mut);font-size:11px">('+m.referencia+')</span>':'')+'</td>'
+      + '<td style="padding:8px 12px;text-align:right;font-family:monospace;color:#16a34a">'+(esIngreso?finCajaMoney(m.monto):'—')+'</td>'
+      + '<td style="padding:8px 12px;text-align:right;font-family:monospace;color:#dc2626">'+(!esIngreso?finCajaMoney(m.monto):'—')+'</td>'
+      + '<td style="padding:8px 12px;text-align:center">'+(m.pago_id?'<span title="Generado por un pago" style="color:var(--mut)">🔗</span>':'<button class="btn bd bs" style="padding:2px 6px;font-size:10px" onclick="finCajaEliminarMov('+m.id+')">✕</button>')+'</td>'
+      + '</tr>';
+  }).join('');
+}
+
+function finCajaEliminarMov(id){
+  if(!confirm('¿Eliminar este movimiento de caja?')) return;
+  finApi('/movimientos/'+id,{method:'DELETE'}).then(function(r){
+    if(!r.ok) return toast(r.error||'Error','er');
+    toast('Movimiento eliminado','ok'); finCajaCargar();
+  });
+}
+
+function finCajaAbrirNuevaCaja(){
+  // Reutiliza el modal de cuenta, preseteado a tipo caja
+  finNuevaCuenta();
+  var t = document.getElementById('fin-cuenta-tipo');
+  if (t){ t.value='caja'; finCuentaToggleAmbito(); }
+}
+
+function finCajaAbrirMovimiento(){
+  var cajas = FIN_CAJA.cajas;
+  if (!cajas.length) return toast('Primero creá una caja de efectivo','er');
+  var sel = document.getElementById('fin-cajamov-cuenta');
+  sel.innerHTML = cajas.map(function(c){
+    var et = c.ambito === 'interno' ? ' (interna)' : ' (fiscal)';
+    return '<option value="'+c.id+'">'+c.nombre+et+'</option>';
+  }).join('');
+  document.getElementById('fin-cajamov-tipo').value = 'egreso';
+  document.getElementById('fin-cajamov-fecha').value = new Date().toISOString().split('T')[0];
+  document.getElementById('fin-cajamov-concepto').value = '';
+  document.getElementById('fin-cajamov-monto').value = '';
+  document.getElementById('fin-cajamov-ref').value = '';
+  document.getElementById('fin-modal-cajamov').classList.add('on');
+}
+
+function finCajaGuardarMovimiento(){
+  var cuenta_id = document.getElementById('fin-cajamov-cuenta').value;
+  var tipo = document.getElementById('fin-cajamov-tipo').value;
+  var fecha = document.getElementById('fin-cajamov-fecha').value;
+  var concepto = document.getElementById('fin-cajamov-concepto').value.trim();
+  var monto = parseFloat(document.getElementById('fin-cajamov-monto').value)||0;
+  var ref = document.getElementById('fin-cajamov-ref').value.trim();
+  if(!cuenta_id) return toast('Elegí la caja','er');
+  if(!concepto) return toast('Ingresá el concepto','er');
+  if(monto<=0) return toast('Ingresá un monto válido','er');
+  finApi('/movimientos',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({cuenta_id:parseInt(cuenta_id),tipo,fecha,concepto,monto,referencia:ref||null})})
+    .then(function(r){
+      if(!r.ok) return toast(r.error||'Error','er');
+      toast('Movimiento registrado','ok');
+      document.getElementById('fin-modal-cajamov').classList.remove('on');
+      finCajaCargar();
+    });
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -29313,6 +29513,12 @@ function finCargarCuentas() {
   });
 }
 
+function finCuentaToggleAmbito() {
+  var tipo = document.getElementById('fin-cuenta-tipo').value;
+  var row = document.getElementById('fin-cuenta-ambito-row');
+  if (row) row.style.display = (tipo === 'caja') ? '' : 'none';
+}
+
 function finNuevaCuenta() {
   document.getElementById('fin-cuenta-id').value = '';
   document.getElementById('fin-mb-cuenta-tit').textContent = 'Nueva Cuenta';
@@ -29320,6 +29526,8 @@ function finNuevaCuenta() {
   document.getElementById('fin-cuenta-tipo').value = 'cuenta_corriente';
   document.getElementById('fin-cuenta-moneda').value = 'ARS';
   document.getElementById('fin-cuenta-saldo').value = '0';
+  document.getElementById('fin-cuenta-ambito').value = 'fiscal';
+  finCuentaToggleAmbito();
   document.getElementById('fin-cuenta-contable').innerHTML = '<option value="">Cargando...</option>';
   document.getElementById('fin-mb-cuenta').classList.add('on');
   admCargarCuentas().then(function() {
@@ -29340,6 +29548,8 @@ function finEditarCuenta(id) {
   document.getElementById('fin-cuenta-cbu').value    = c.cbu    || '';
   document.getElementById('fin-cuenta-alias').value  = c.alias  || '';
   document.getElementById('fin-cuenta-saldo').value  = c.saldo_inicial || 0;
+  document.getElementById('fin-cuenta-ambito').value = c.ambito || 'fiscal';
+  finCuentaToggleAmbito();
   document.getElementById('fin-cuenta-contable').innerHTML = '<option value="">Cargando...</option>';
   document.getElementById('fin-mb-cuenta').classList.add('on');
   admCargarCuentas().then(function() {
@@ -29361,12 +29571,17 @@ function finGuardarCuenta() {
     cbu:    document.getElementById('fin-cuenta-cbu').value.trim() || null,
     alias:  document.getElementById('fin-cuenta-alias').value.trim() || null,
     saldo_inicial: parseFloat(document.getElementById('fin-cuenta-saldo').value || 0),
-    cuenta_contable_id: cuentaContableId
+    cuenta_contable_id: cuentaContableId,
+    ambito: document.getElementById('fin-cuenta-ambito').value
   };
   var url    = id ? '/cuentas/' + id : '/cuentas';
   var method = id ? 'PUT' : 'POST';
   finApi(url, { method, body: JSON.stringify(body) }).then(function(r) {
-    if (r.ok) { toast('✓ Cuenta guardada', 'ok'); document.getElementById('fin-mb-cuenta').classList.remove('on'); finCargarCuentas(); }
+    if (r.ok) {
+      toast('✓ Cuenta guardada', 'ok');
+      document.getElementById('fin-mb-cuenta').classList.remove('on');
+      if (FIN.tabActual === 'caja') finCajaCargar(); else finCargarCuentas();
+    }
     else toast(r.error || 'Error', 'er');
   });
 }
