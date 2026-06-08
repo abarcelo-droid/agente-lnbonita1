@@ -2181,16 +2181,24 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
         <div class="fl"><label>Proveedor <span style="color:var(--err)">*</span></label><select id="sg-oc-prov" onchange="sgOcProvChange()"></select></div>
-        <div class="fl"><label>Tipo fiscal</label><select id="sg-oc-fiscal"></select></div>
-        <div class="fl"><label>Tipo de precio</label>
+        <div class="fl"><label>Comprobante Fiscal</label><select id="sg-oc-fiscal"></select></div>
+        <div class="fl"><label>Condiciones Comerciales</label>
           <div style="display:flex;gap:14px;padding:6px 0">
-            <label style="font-weight:500"><input type="radio" name="sg-oc-precio" value="firme" checked onchange="sgOcPrecioChange()" style="width:auto"> Firme</label>
-            <label style="font-weight:500"><input type="radio" name="sg-oc-precio" value="pizarra" onchange="sgOcPrecioChange()" style="width:auto"> Pizarra</label>
+            <label style="font-weight:500"><input type="radio" name="sg-oc-precio" value="firme" checked onchange="sgOcPrecioChange()" style="width:auto"> Precio Cerrado</label>
+            <label style="font-weight:500"><input type="radio" name="sg-oc-precio" value="pizarra" onchange="sgOcPrecioChange()" style="width:auto"> Liquidación de Venta</label>
           </div>
         </div>
         <div class="fl"><label>Condición de pago</label><select id="sg-oc-cond"></select></div>
         <div class="fl"><label>Fecha OC</label><input type="date" id="sg-oc-fecha"></div>
         <div class="fl"><label>Fecha recepción estimada</label><input type="date" id="sg-oc-fecharec"></div>
+        <div class="fl"><label>Flete a cargo de</label>
+          <select id="sg-oc-flete-cargo">
+            <option value="">— Sin flete —</option>
+            <option value="comprador">Comprador</option>
+            <option value="vendedor">Vendedor</option>
+          </select>
+        </div>
+        <div class="fl"><label>Monto de flete ($)</label><input type="number" id="sg-oc-flete-monto" min="0" step="0.01" placeholder="informativo, no suma al total"></div>
       </div>
       <div class="fl ff"><label>Items</label>
         <div id="sg-oc-items"></div>
@@ -3052,7 +3060,7 @@ function sgLoadOC(){
       var acc='<button class="btn bo bs" onclick="sgOcVer('+o.id+')">👁</button> ';
       if(o.estado==='abierta'||o.estado==='recibida_parcial') acc+='<button class="btn bo bs" onclick="sgRecOpen('+o.id+')">📥</button> ';
       if(o.estado==='abierta') acc+='<button class="btn bd bs" onclick="sgOcAnular('+o.id+')">✖</button>';
-      return '<tr><td><code>'+esc(o.numero||'')+'</code></td><td>'+(o.fecha_oc||'—')+'</td><td>'+esc(o.proveedor_nombre||'—')+'</td><td>'+esc(o.modalidad)+'</td><td>'+(o.tipo_precio==='pizarra'?'<span class="bdg bpe">Pizarra</span>':'Firme')+'</td><td style="text-align:right">'+nr(o.total_estimado_kg)+'</td><td style="text-align:right">'+sgMoney(o.total_estimado_monto)+'</td><td style="text-align:center">'+sgOcBadge(o.estado)+'</td><td style="text-align:right;white-space:nowrap">'+acc+'</td></tr>';
+      return '<tr><td><code>'+esc(o.numero||'')+'</code></td><td>'+(o.fecha_oc||'—')+'</td><td>'+esc(o.proveedor_nombre||'—')+'</td><td>'+esc(o.modalidad)+'</td><td>'+(o.tipo_precio==='pizarra'?'<span class="bdg bpe">Liquidación de Venta</span>':'Precio Cerrado')+'</td><td style="text-align:right">'+nr(o.total_estimado_kg)+'</td><td style="text-align:right">'+sgMoney(o.total_estimado_monto)+'</td><td style="text-align:center">'+sgOcBadge(o.estado)+'</td><td style="text-align:right;white-space:nowrap">'+acc+'</td></tr>';
     }).join('') : '<tr><td colspan="9" class="emp">Sin órdenes. Creá una nueva.</td></tr>';
   });
 }
@@ -3063,6 +3071,7 @@ function sgOcOpen(){
   eid('sg-oc-fiscal').innerHTML=SG_FISCAL.map(function(o){return '<option value="'+o[0]+'">'+o[1]+'</option>';}).join('');
   eid('sg-oc-fecha').value=new Date().toISOString().slice(0,10);
   eid('sg-oc-fecharec').value=''; eid('sg-oc-obs').value='';
+  eid('sg-oc-flete-cargo').value=''; eid('sg-oc-flete-monto').value='';
   document.querySelector('input[name="sg-oc-mod"][value="normal"]').checked=true;
   document.querySelector('input[name="sg-oc-precio"][value="firme"]').checked=true;
   sgOcAddItem();
@@ -3150,7 +3159,7 @@ function sgOcTotales(){
     tk += kg;
     if(firme) tm += bulto ? (cant*precio) : (kg*precio);  // bulto: bultos×$/bulto · kilo: kg×$/kg
   });
-  eid('sg-oc-totales').innerHTML='Total estimado: '+nr(tk)+' kg'+(firme?(' · '+sgMoney(tm)):' · (pizarra)');
+  eid('sg-oc-totales').innerHTML='Total estimado: '+nr(tk)+' kg'+(firme?(' · '+sgMoney(tm)):' · (Liquidación de Venta — precio a definir)');
 }
 function sgOcGuardar(){
   var prov=eid('sg-oc-prov').value;
@@ -3161,6 +3170,7 @@ function sgOcGuardar(){
   var body={ modalidad:document.querySelector('input[name="sg-oc-mod"]:checked').value, proveedor_id:Number(prov),
     tipo_fiscal:eid('sg-oc-fiscal').value, tipo_precio:sgOcPrecio(), condicion_pago_id:eid('sg-oc-cond').value?Number(eid('sg-oc-cond').value):null,
     fecha_oc:eid('sg-oc-fecha').value, fecha_recepcion_estimada:eid('sg-oc-fecharec').value, observaciones:eid('sg-oc-obs').value,
+    flete_a_cargo:eid('sg-oc-flete-cargo').value||null, flete_monto:(eid('sg-oc-flete-monto').value!==''?Number(eid('sg-oc-flete-monto').value):null),
     // CAMBIO 2 — se envían SIEMPRE valores canónicos: kg_estimados (kg reales) y precio_estimado_por_kg ($/kg
     // efectivo), sin importar el modo. Así el backend (kg×$/kg) calcula el total correcto y el stock/costeo
     // quedan 100% en kg. modo_carga solo registra cómo lo cargó el operador.
@@ -3187,7 +3197,9 @@ function sgOcVer(id){
     var r=res[0]; if(!r||!r.ok){ toast('Error','er'); return; }
     var o=r.data; var lotes=(res[1]&&res[1].ok)?res[1].data:[];
     eid('sg-ocver-tit').textContent='OC '+(o.numero||'');
-    var h='<div style="font-size:13px;margin-bottom:10px">Proveedor: <b>'+esc(o.proveedor_nombre||'—')+'</b> · '+sgOcBadge(o.estado)+' · '+(o.tipo_precio==='pizarra'?'Pizarra':'Firme')+' · '+sgLbl(SG_FISCAL,o.tipo_fiscal)+'</div>';
+    var h='<div style="display:flex;justify-content:flex-end;margin-bottom:8px"><button class="btn bb bs" onclick="window.open(\'/api/sg/oc/'+id+'/pdf\',\'_blank\')">📄 Descargar PDF</button></div>';
+    h+='<div style="font-size:13px;margin-bottom:10px">Proveedor: <b>'+esc(o.proveedor_nombre||'—')+'</b> · '+sgOcBadge(o.estado)+' · '+(o.tipo_precio==='pizarra'?'Liquidación de Venta':'Precio Cerrado')+' · '+sgLbl(SG_FISCAL,o.tipo_fiscal)
+      +(o.flete_a_cargo?(' · Flete: '+o.flete_a_cargo+(o.flete_monto!=null?(' ('+sgMoney(o.flete_monto)+')'):'')):'')+'</div>';
     h+='<table class="pa-tbl" style="margin-bottom:12px"><thead><tr><th>Producto</th><th>Present.</th><th style="text-align:right">Kg est.</th><th style="text-align:right">$/kg</th><th style="text-align:right">Kg recibidos</th></tr></thead><tbody>';
     (o.items||[]).forEach(function(it){ h+='<tr><td>'+esc(it.producto_nombre||'')+'</td><td>'+esc(it.presentacion_nombre||'—')+'</td><td style="text-align:right">'+nr(it.kg_estimados)+'</td><td style="text-align:right">'+(it.precio_estimado_por_kg!=null?sgMoney(it.precio_estimado_por_kg):'—')+'</td><td style="text-align:right">'+nr(it.kg_recibidos)+'</td></tr>'; });
     h+='</tbody></table>';
