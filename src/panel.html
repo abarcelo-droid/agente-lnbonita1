@@ -2501,8 +2501,9 @@ function sgLoadCaches(cb){
 }
 // Opciones <option> desde una lista de objetos {id, <labelKey>}
 function sgOpts(list, labelKey, sel, blank){
+  var lab = (typeof labelKey === 'function') ? labelKey : function(o){ return o[labelKey]; };
   return (blank!==false ? '<option value="">'+(blank||'—')+'</option>' : '')
-    + (list||[]).map(function(o){ return '<option value="'+o.id+'"'+(String(o.id)===String(sel)?' selected':'')+'>'+esc(String(o[labelKey]||''))+'</option>'; }).join('');
+    + (list||[]).map(function(o){ return '<option value="'+o.id+'"'+(String(o.id)===String(sel)?' selected':'')+'>'+esc(String(lab(o)||''))+'</option>'; }).join('');
 }
 // Presentaciones de un producto (desde cache)
 function sgPresDe(prodId){ return SG.cachePres.filter(function(p){ return String(p.producto_id)===String(prodId); }); }
@@ -3034,12 +3035,29 @@ function sgOcAddItem(){ SG.ocItems.push({producto_id:'',presentacion_id:'',canti
 function sgOcDelItem(i){ SG.ocItems.splice(i,1); sgOcRenderItems(); }
 function sgOcUpd(i,c,v){ SG.ocItems[i][c]=v; if(c==='producto_id')SG.ocItems[i].presentacion_id=''; sgOcRenderItems(); }
 function sgOcUpdNR(i,c,v){ SG.ocItems[i][c]=v; sgOcTotales(); }
+// Label del producto en los items de OC: "CODIGO ESPECIE VARIEDAD" (ej. "02.05.01 Uva Cardinal")
+// para distinguir variedades de una misma especie (antes mostraba solo la especie → "Uva" x4).
+function sgOcProdLabel(p){
+  return (p.codigo ? p.codigo + ' ' : '') + (p.nombre || '') + (p.variedad ? ' ' + p.variedad : '');
+}
+// Productos ordenados por código (FF.EE.VV). numeric:true ordena bien los 2 dígitos.
+function sgOcProductos(){
+  return (SG.cacheProd || []).slice().sort(function(a,b){
+    return String(a.codigo||'').localeCompare(String(b.codigo||''), 'es', { numeric:true });
+  });
+}
 function sgOcRenderItems(){
   var firme=sgOcPrecio()==='firme';
   eid('sg-oc-items').innerHTML=SG.ocItems.map(function(it,i){
+    // Presentación: SIEMPRE filtrada por el producto elegido. Si el producto no tiene
+    // presentaciones cargadas, mostrar vacío claro (deshabilitado).
+    var presList = sgPresDe(it.producto_id);
+    var presSel = (it.producto_id && presList.length===0)
+      ? '<select disabled title="Este producto no tiene presentaciones cargadas (cargalas en Catálogo)"><option>(sin presentaciones)</option></select>'
+      : '<select onchange="sgOcUpdNR('+i+',\'presentacion_id\',this.value)">'+sgOpts(presList,'nombre',it.presentacion_id,'— Present. —')+'</select>';
     return '<div class="sg-lrow">'
-      +'<select onchange="sgOcUpd('+i+',\'producto_id\',this.value)">'+sgOpts(SG.cacheProd,'nombre',it.producto_id,'— Producto —')+'</select>'
-      +'<select onchange="sgOcUpdNR('+i+',\'presentacion_id\',this.value)">'+sgOpts(sgPresDe(it.producto_id),'nombre',it.presentacion_id,'— Present. —')+'</select>'
+      +'<select onchange="sgOcUpd('+i+',\'producto_id\',this.value)">'+sgOpts(sgOcProductos(),sgOcProdLabel,it.producto_id,'— Producto —')+'</select>'
+      +presSel
       +'<input type="number" placeholder="cant." value="'+(it.cantidad||'')+'" onchange="sgOcUpdNR('+i+',\'cantidad\',this.value)">'
       +(firme?'<input type="number" placeholder="$/kg" value="'+(it.precio||'')+'" onchange="sgOcUpdNR('+i+',\'precio\',this.value)">':'<span style="font-size:11px;color:var(--mut);text-align:center">pizarra</span>')
       +(SG.ocItems.length>1?'<button class="btn bd bs" onclick="sgOcDelItem('+i+')">×</button>':'<span></span>')
