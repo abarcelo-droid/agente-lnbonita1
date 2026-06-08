@@ -2072,7 +2072,77 @@ db.exec(`
       db.exec("ALTER TABLE pa_panol_movimientos ADD COLUMN personal_id INTEGER REFERENCES pa_personal(id)");
       console.log('[PA] pa_panol_movimientos.personal_id agregado');
     }
+    // ── FIX FK colgante (#299 dejó columnas trabajador_* muertas) ──────────────
+    // Las DBs PRE-#299 conservan en Pañol las columnas viejas trabajador_actual_id /
+    // trabajador_id con REFERENCES pa_trabajadores (tabla ya dropeada). Con
+    // foreign_keys=ON, CUALQUIER INSERT en esas tablas falla con
+    // "no such table: pa_trabajadores" AUNQUE la columna valga NULL (SQLite resuelve
+    // la tabla padre al ejecutar el DML, no según el valor). #299 asumió que "nunca
+    // se evalúa" — falso. Rebuild robusto: FK off → tabla nueva SIN trabajador_* →
+    // copia de columnas comunes (preserva filas y datos de personal_*) → drop → rename
+    // → recrea índices vivos (NO el viejo idx_panol_unidades_trab). Idempotente:
+    // corre solo si la columna vieja existe; en DBs frescas es no-op.
+    const rebuildPanol = (tabla, crearSql, indices) => {
+      db.exec(crearSql); // crea `${tabla}__new`
+      const viejas = new Set(db.prepare(`PRAGMA table_info(${tabla})`).all().map(c => c.name));
+      const comunes = db.prepare(`PRAGMA table_info(${tabla}__new)`).all()
+        .map(c => c.name).filter(c => viejas.has(c)).join(', ');
+      db.exec(`INSERT INTO ${tabla}__new (${comunes}) SELECT ${comunes} FROM ${tabla}`);
+      db.exec(`DROP TABLE ${tabla}`);
+      db.exec(`ALTER TABLE ${tabla}__new RENAME TO ${tabla}`);
+      for (const ix of indices) db.exec(ix);
+    };
+
     db.pragma('foreign_keys = OFF');
+    const colsU2 = db.prepare("PRAGMA table_info(pa_panol_unidades)").all().map(c => c.name);
+    if (colsU2.includes('trabajador_actual_id')) {
+      db.transaction(() => rebuildPanol('pa_panol_unidades', `
+        CREATE TABLE pa_panol_unidades__new (
+          id              INTEGER PRIMARY KEY AUTOINCREMENT,
+          codigo_interno  TEXT NOT NULL UNIQUE,
+          nombre          TEXT NOT NULL,
+          categoria_id    INTEGER REFERENCES pa_panol_categorias(id),
+          marca           TEXT,
+          modelo          TEXT,
+          numero_serie    TEXT,
+          compra_id       INTEGER REFERENCES pa_compras(id),
+          precio_compra   REAL,
+          fecha_alta      TEXT DEFAULT (date('now','localtime')),
+          fecha_baja      TEXT,
+          estado          TEXT NOT NULL DEFAULT 'disponible'
+                            CHECK(estado IN ('disponible','prestada','en_reparacion','dada_de_baja','extraviada')),
+          ubicacion_actual TEXT,
+          personal_actual_id INTEGER REFERENCES pa_personal(id),
+          notas           TEXT,
+          activo          INTEGER DEFAULT 1,
+          creado_en       TEXT DEFAULT (datetime('now','localtime'))
+        )`, [
+        "CREATE INDEX IF NOT EXISTS idx_panol_unidades_estado   ON pa_panol_unidades(estado)",
+        "CREATE INDEX IF NOT EXISTS idx_panol_unidades_personal ON pa_panol_unidades(personal_actual_id)",
+      ]))();
+      console.log('[PA] pa_panol_unidades rebuildeada (FK colgante trabajador_actual_id eliminada)');
+    }
+    const colsM2 = db.prepare("PRAGMA table_info(pa_panol_movimientos)").all().map(c => c.name);
+    if (colsM2.includes('trabajador_id')) {
+      db.transaction(() => rebuildPanol('pa_panol_movimientos', `
+        CREATE TABLE pa_panol_movimientos__new (
+          id              INTEGER PRIMARY KEY AUTOINCREMENT,
+          unidad_id       INTEGER NOT NULL REFERENCES pa_panol_unidades(id),
+          tipo            TEXT NOT NULL
+                            CHECK(tipo IN ('alta','prestamo','devolucion','reparacion_inicio','reparacion_fin','baja','extravio')),
+          fecha           TEXT DEFAULT (datetime('now','localtime')),
+          personal_id     INTEGER REFERENCES pa_personal(id),
+          quien_registra  INTEGER REFERENCES users(id),
+          condicion       TEXT,
+          motivo          TEXT,
+          notas           TEXT,
+          lat REAL, lng REAL
+        )`, [
+        "CREATE INDEX IF NOT EXISTS idx_panol_mov_unidad ON pa_panol_movimientos(unidad_id)",
+        "CREATE INDEX IF NOT EXISTS idx_panol_mov_fecha  ON pa_panol_movimientos(fecha)",
+      ]))();
+      console.log('[PA] pa_panol_movimientos rebuildeada (FK colgante trabajador_id eliminada)');
+    }
     db.exec("DROP TABLE IF EXISTS pa_trabajadores");
     db.pragma('foreign_keys = ON');
   } catch (e) {
