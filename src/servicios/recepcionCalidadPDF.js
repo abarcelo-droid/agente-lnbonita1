@@ -4,10 +4,10 @@
 // informe de calidad (estado, defectos, % afectado, observaciones) y las fotos adjuntas.
 // `fotos` = [{ dataUri, fmt }] ya leídas a base64 por el router (desde data/sg/).
 import { jsPDF } from "jspdf";
+// Identidad visual compartida (paleta azul/gris, emisor, logo) con el PDF de la OC.
+import { AZUL, AZUL_CL, GRIS, GRIS_CL, EMISOR, getLogo } from "./pdfComun.js";
 
-const ROJO_LNB = [139, 0, 0];
-const GRIS     = [90, 90, 90];
-const NEGRO    = [0, 0, 0];
+const NEGRO = [0, 0, 0];
 
 const fmtFecha = (d) => {
   if (!d) return "—";
@@ -21,20 +21,31 @@ export async function generarRecepcionCalidadPDF(rec, fotos = []) {
   const W = 210;
   let y = 0;
 
-  // ── Encabezado ─────────────────────────────────────────────────────────
-  doc.setFillColor(...ROJO_LNB);
-  doc.rect(0, 0, W, 26, "F");
-  doc.setTextColor(255, 255, 255);
-  doc.setFont("helvetica", "bold").setFontSize(16);
-  doc.text("SAN GERÓNIMO — Puente Cordón S.A.", M, 11);
-  doc.setFont("helvetica", "normal").setFontSize(10);
-  doc.text("Informe de calidad de recepción", M, 19);
-  doc.setFont("helvetica", "bold").setFontSize(11);
-  doc.text("Recepción " + (rec.numero_recepcion || ("#" + rec.id)), W - M, 11, { align: "right" });
-  doc.setFont("helvetica", "normal").setFontSize(9);
-  doc.text("Fecha: " + fmtFecha(rec.fecha_recepcion), W - M, 19, { align: "right" });
+  // ── Membrete (familia visual con el PDF de la OC: logo + emisor azul/gris) ──
+  const logo = getLogo();
+  if (logo) {
+    try { doc.addImage(logo, "JPEG", M, 9, 46, 15); } catch (e) {}   // logo.jpg ≈ 3:1 (trae la marca)
+  } else {
+    doc.setFont("helvetica", "bold").setFontSize(15).setTextColor(...AZUL);
+    doc.text(EMISOR.marca, M, 18);
+  }
+  // Datos fiscales del emisor (derecha)
+  doc.setTextColor(...AZUL).setFont("helvetica", "bold").setFontSize(11);
+  doc.text(EMISOR.razon, W - M, 13, { align: "right" });
+  doc.setTextColor(...GRIS).setFont("helvetica", "normal").setFontSize(8.5);
+  doc.text("CUIT " + EMISOR.cuit, W - M, 19, { align: "right" });
+  doc.text(EMISOR.domicilio, W - M, 24, { align: "right" });
+  doc.setDrawColor(...AZUL).setLineWidth(0.6);
+  doc.line(M, 31, W - M, 31);
+  // Banda de título
+  doc.setFillColor(...AZUL);
+  doc.rect(M, 35, W - 2 * M, 11, "F");
+  doc.setTextColor(255, 255, 255).setFont("helvetica", "bold").setFontSize(13);
+  doc.text("INFORME DE CALIDAD DE RECEPCIÓN", M + 4, 42.5);
+  doc.setFontSize(10);
+  doc.text("Recepción " + (rec.numero_recepcion || ("#" + rec.id)) + "  ·  " + fmtFecha(rec.fecha_recepcion), W - M - 2, 42.5, { align: "right" });
   doc.setTextColor(...NEGRO);
-  y = 34;
+  y = 53;
 
   // ── Helper de fila clave/valor ─────────────────────────────────────────
   const row = (label, value) => {
@@ -47,9 +58,9 @@ export async function generarRecepcionCalidadPDF(rec, fotos = []) {
   };
   const seccion = (titulo) => {
     y += 2;
-    doc.setFillColor(238, 238, 238);
+    doc.setFillColor(...AZUL_CL);
     doc.rect(M, y - 4, W - 2 * M, 7, "F");
-    doc.setFont("helvetica", "bold").setFontSize(10).setTextColor(...ROJO_LNB);
+    doc.setFont("helvetica", "bold").setFontSize(10).setTextColor(...AZUL);
     doc.text(titulo, M + 2, y + 1);
     doc.setTextColor(...NEGRO);
     y += 9;
