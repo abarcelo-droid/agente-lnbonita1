@@ -12,6 +12,7 @@ import { fileURLToPath } from 'url';
 import { getDb } from '../servicios/db.js';
 import '../servicios/db_sg.js'; // corre el DDL sg_* al importarse
 import { detectarDuplicado } from '../servicios/dedup.js';
+import { generarOcPDF } from '../servicios/ocPDF.js';
 import { generarRecepcionCalidadPDF } from '../servicios/recepcionCalidadPDF.js';
 
 const router = express.Router();
@@ -665,17 +666,21 @@ router.post('/oc', requireAdmin, (req, res) => {
     const items = Array.isArray(b.items) ? b.items : [];
     if (!items.length) return res.status(400).json({ ok: false, error: 'La OC necesita al menos un item' });
     const tipoPrecio = b.tipo_precio === 'pizarra' ? 'pizarra' : 'firme';
+    // Flete INFORMATIVO: se guarda quién paga + el monto que carga el comercial, pero
+    // NO entra al total (el total sigue saliendo solo del loop de items, más abajo).
+    const fleteCargo = (b.flete_a_cargo === 'comprador' || b.flete_a_cargo === 'vendedor') ? b.flete_a_cargo : null;
+    const fleteMonto = (b.flete_monto != null && b.flete_monto !== '') ? Number(b.flete_monto) : null;
     const dft = defaultsProveedor(db, b.proveedor_id, b);
 
     const tx = db.transaction(() => {
       const numero = nextNumero(db, 'SG-OC', 'sg_oc', 'numero');
       const ocInfo = db.prepare(`INSERT INTO sg_oc
         (numero, modalidad, proveedor_id, tipo_fiscal, tipo_precio, condicion_pago_id, fecha_oc,
-         fecha_recepcion_estimada, comercial_id, estado, observaciones, total_estimado_kg, total_estimado_monto, creado_por)
-        VALUES (?,?,?,?,?,?,?,?,?, 'abierta', ?, 0, 0, ?)`).run(
+         fecha_recepcion_estimada, comercial_id, estado, observaciones, flete_a_cargo, flete_monto, total_estimado_kg, total_estimado_monto, creado_por)
+        VALUES (?,?,?,?,?,?,?,?,?, 'abierta', ?,?,?, 0, 0, ?)`).run(
         numero, val(b.modalidad) || 'normal', b.proveedor_id || null, dft.tipo_fiscal, tipoPrecio,
         dft.condicion_pago_id, val(b.fecha_oc), val(b.fecha_recepcion_estimada), b.comercial_id || null,
-        val(b.observaciones), uid(req));
+        val(b.observaciones), fleteCargo, fleteMonto, uid(req));
       const ocId = ocInfo.lastInsertRowid;
 
       const insItem = db.prepare(`INSERT INTO sg_oc_items
@@ -740,6 +745,36 @@ router.get('/oc/:id', requireAuth, (req, res) => {
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
+// PDF formal de la OC. Reusa el detalle + joins extra (proveedor completo, nombre de
+// condición de pago y del comercial) que generarOcPDF necesita para el membrete/firma.
+router.get('/oc/:id/pdf', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const oc = db.prepare(`SELECT o.*,
+        p.razon_social AS prov_razon, p.cuit AS prov_cuit, p.categoria_fiscal AS prov_catfisc,
+        p.localidad AS prov_localidad, p.provincia AS prov_provincia, p.nombre_comercial AS prov_fantasia,
+        c.nombre AS cond_nombre, u.nombre AS comercial_nombre
+      FROM sg_oc o
+      LEFT JOIN sg_proveedores p ON p.id=o.proveedor_id
+      LEFT JOIN sg_condiciones_pago c ON c.id=o.condicion_pago_id
+      LEFT JOIN usuarios u ON u.id=o.comercial_id
+      WHERE o.id=?`).get(req.params.id);
+    if (!oc) return res.status(404).json({ ok: false, error: 'No encontrado' });
+    oc.items = db.prepare(`SELECT i.*, pr.codigo AS producto_codigo, pr.nombre AS producto_nombre,
+        pr.variedad AS producto_variedad, ps.nombre AS presentacion_nombre
+      FROM sg_oc_items i
+      LEFT JOIN sg_productos pr ON pr.id=i.producto_id
+      LEFT JOIN sg_presentaciones ps ON ps.id=i.presentacion_id
+      WHERE i.oc_id=?`).all(req.params.id);
+    const pdf = generarOcPDF(oc);
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `inline; filename="${(oc.numero || 'OC').replace(/[^\w.-]/g, '_')}.pdf"`,
+    });
+    res.send(pdf);
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
 // Editar cabecera de OC (solo borrador/abierta) + regenerar vencimientos
 router.put('/oc/:id', requireAdmin, (req, res) => {
   const db = getDb();
@@ -747,7 +782,7 @@ router.put('/oc/:id', requireAdmin, (req, res) => {
     const oc = db.prepare('SELECT estado FROM sg_oc WHERE id=?').get(req.params.id);
     if (!oc) return res.status(404).json({ ok: false, error: 'No encontrado' });
     if (!['borrador', 'abierta'].includes(oc.estado)) return res.status(400).json({ ok: false, error: 'Solo se edita una OC en borrador/abierta' });
-    const campos = ['tipo_fiscal', 'condicion_pago_id', 'fecha_oc', 'fecha_recepcion_estimada', 'comercial_id', 'observaciones'];
+    const campos = ['tipo_fiscal', 'condicion_pago_id', 'fecha_oc', 'fecha_recepcion_estimada', 'comercial_id', 'observaciones', 'flete_a_cargo', 'flete_monto'];
     const sets = [], vals = [];
     for (const c of campos) if (req.body[c] !== undefined) { sets.push(`${c}=?`); vals.push(val(req.body[c])); }
     if (sets.length) {

@@ -231,6 +231,8 @@ db.exec(`
     comercial_id                INTEGER,
     estado                      TEXT NOT NULL DEFAULT 'borrador' CHECK(estado IN ('borrador','abierta','recibida_parcial','recibida_total','cerrada','anulada')),
     observaciones               TEXT,
+    flete_a_cargo               TEXT CHECK(flete_a_cargo IN ('comprador','vendedor')),  -- informativo
+    flete_monto                 REAL,                                                    -- informativo, NO suma al total
     total_estimado_kg           REAL DEFAULT 0,
     total_estimado_monto        REAL DEFAULT 0,
     activo                      INTEGER NOT NULL DEFAULT 1,
@@ -651,6 +653,21 @@ try {
   if (faltan.length) console.log('[DB] SG sg_presentaciones migrado (+' + faltan.join(', +') + ')');
 } catch (e) {
   console.error('[DB] SG migración sg_presentaciones (envase/paletizado):', e.message);
+}
+
+// ── MIGRACIÓN idempotente: sg_oc → +flete_a_cargo, +flete_monto ─────────────────
+// Campos INFORMATIVOS del flete (quién paga + monto que carga el comercial). NO
+// suman al total_estimado_monto ni a los vencimientos. ALTER ADD COLUMN nullable,
+// sin rebuild. flete_a_cargo se agrega sin CHECK inline (límite de ALTER); el valor
+// se valida app-side y la tabla nueva sí lleva el CHECK ('comprador'/'vendedor').
+try {
+  const cols = db.prepare("PRAGMA table_info(sg_oc)").all().map(c => c.name);
+  const faltan = [];
+  if (!cols.includes('flete_a_cargo')) { db.exec('ALTER TABLE sg_oc ADD COLUMN flete_a_cargo TEXT'); faltan.push('flete_a_cargo'); }
+  if (!cols.includes('flete_monto'))   { db.exec('ALTER TABLE sg_oc ADD COLUMN flete_monto REAL');   faltan.push('flete_monto'); }
+  if (faltan.length) console.log('[DB] SG sg_oc migrado (+' + faltan.join(', +') + ')');
+} catch (e) {
+  console.error('[DB] SG migración sg_oc (flete):', e.message);
 }
 
 // ── BLOQUE A — Recepción SG: +documentación (factura/DTV) + paletizado recibido ──
