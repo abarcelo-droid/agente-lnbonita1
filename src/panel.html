@@ -31253,49 +31253,106 @@ function cmCargar() {
   });
 }
 
+// Agrupa por SOCIEDAD (nivel 1: PC → SG → BR → FAM) y, dentro, por `grupo` (nivel 2).
+// Los módulos con sociedad_id NULL (transversales de sistema) se MUESTRAN bajo FAM en un
+// sub-grupo "Sistema / Transversal" — es solo presentación, su sociedad_id sigue NULL en la
+// base (se ve en el dropdown de la fila). Sociedades sin módulos se omiten.
+var CM_TRANSV = 'Sistema / Transversal';
+var CM_ORDEN_SOC = [
+  { key:'PC',  label:'🏭 Puente Cordón (PC)',      test:function(n){ return /^puente/i.test(n); } },
+  { key:'SG',  label:'🛒 San Gerónimo (SG)',       test:function(n){ return /^san\s*ger/i.test(n); } },
+  { key:'BR',  label:'🚚 Barceló Transporte (BR)', test:function(n){ return /^barcel/i.test(n); } },
+  { key:'FAM', label:'🏛️ Familia (FAM)',           test:function(n){ return /^familia/i.test(n); } }
+];
+
+function cmSocKey(m) {
+  if (!m.sociedad_id) return 'FAM';                 // transversal NULL → se visualiza bajo FAM
+  var nom = m.sociedad_nombre || '';
+  for (var i = 0; i < CM_ORDEN_SOC.length; i++) if (CM_ORDEN_SOC[i].test(nom)) return CM_ORDEN_SOC[i].key;
+  return '__OTRAS__:' + nom;                        // sociedad externa no prevista → bucket propio
+}
+function cmSocLabel(key) {
+  var s = CM_ORDEN_SOC.find(function(x){ return x.key === key; });
+  return s ? s.label : ('🏢 ' + key.replace('__OTRAS__:', ''));
+}
+
 function cmRender() {
-  var grupos = {};
+  // Bucketizar: buckets[socKey].grupos[grupo] = [modulos...]
+  var buckets = {};
   CM_MODULOS.forEach(function(m) {
-    if (!grupos[m.grupo]) grupos[m.grupo] = [];
-    grupos[m.grupo].push(m);
-  });
-  var ordenGrupos = Object.keys(grupos).sort(function(a,b) {
-    var minA = Math.min.apply(null, grupos[a].map(function(m){return m.orden||0;}));
-    var minB = Math.min.apply(null, grupos[b].map(function(m){return m.orden||0;}));
-    return minA - minB;
+    var sk = cmSocKey(m);
+    var g  = m.sociedad_id ? (m.grupo || 'General') : CM_TRANSV;  // NULL → sub-grupo transversal
+    if (!buckets[sk]) buckets[sk] = {};
+    if (!buckets[sk][g]) buckets[sk][g] = [];
+    buckets[sk][g].push(m);
   });
 
+  // Orden de sociedades: PC, SG, BR, FAM, y luego cualquier sociedad externa (por nombre)
+  var ordenKeys = [];
+  CM_ORDEN_SOC.forEach(function(s){ if (buckets[s.key]) ordenKeys.push(s.key); });
+  Object.keys(buckets).filter(function(k){ return k.indexOf('__OTRAS__:') === 0; }).sort()
+    .forEach(function(k){ ordenKeys.push(k); });
+
   var html = '';
-  ordenGrupos.forEach(function(grupo) {
-    html += '<tr style="background:var(--bg)"><td colspan="6" style="padding:8px 12px">' +
-      '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">' +
-      '<strong style="font-size:13px">' + grupo + ' <span style="color:var(--mut);font-weight:400">('+grupos[grupo].length+')</span></strong>' +
-      '<div style="margin-left:auto;display:flex;gap:6px;align-items:center;font-size:11px">' +
-      '<span style="color:var(--mut)">Asignar todo el grupo:</span>' +
-      cmBulkSocSelect(grupo) +
-      cmBulkTipoSelect(grupo) +
-      cmBulkOcultoSelect(grupo) +
-      '</div></div></td></tr>';
-    grupos[grupo].forEach(function(m) {
-      var ocultoStyle = m.oculto ? 'background:#FFF7ED' : '';
-      var iconLock = m.oculto ? '<span title="Oculto: solo accesible desde acá con 🔗 Abrir" style="margin-right:4px">🔒</span>' : '';
-      // Botón abrir: navega al módulo. Sistema y módulos con sección propia no se filtra por oculto.
-      var btnAbrir = '<button onclick="cmAbrirModulo(\''+m.modulo+'\')" title="Ir al módulo" style="margin-left:6px;padding:2px 8px;font-size:11px;background:#fff;border:1px solid var(--bor);border-radius:4px;cursor:pointer;color:var(--burg);font-weight:600">🔗 Abrir</button>';
-      html += '<tr style="'+ocultoStyle+'">' +
-        '<td>' + iconLock +
-          '<code style="font-size:11px;color:var(--burg);background:var(--bg);padding:2px 6px;border-radius:4px">'+m.modulo+'</code> ' +
-          '<span style="font-size:12px;margin-left:6px">'+m.label+'</span>' +
-          btnAbrir +
-        '</td>' +
-        '<td style="font-size:12px;color:var(--mut)">'+m.grupo+'</td>' +
-        '<td>'+cmSocSelect(m)+'</td>' +
-        '<td>'+cmAreaSelect(m)+'</td>' +
-        '<td>'+cmTipoSelect(m)+'</td>' +
-        '<td style="text-align:center">'+cmOcultoToggle(m)+'</td>' +
-      '</tr>';
+  ordenKeys.forEach(function(sk) {
+    var grupos = buckets[sk];
+    var totalSoc = Object.keys(grupos).reduce(function(a,g){ return a + grupos[g].length; }, 0);
+    if (totalSoc === 0) return;                       // omitir sociedades vacías
+
+    // Nivel 1 — encabezado de SOCIEDAD
+    html += '<tr style="background:var(--burg)"><td colspan="6" style="padding:10px 12px;color:#fff;font-size:14px;font-weight:700">' +
+      cmSocLabel(sk) + ' <span style="opacity:.75;font-weight:400;font-size:12px">(' + totalSoc + ' módulo' + (totalSoc === 1 ? '' : 's') + ')</span>' +
+      '</td></tr>';
+
+    // Sub-grupos por `grupo`, ordenados por min orden; "Sistema / Transversal" siempre al final
+    var nombresGrupo = Object.keys(grupos).sort(function(a,b) {
+      if (a === CM_TRANSV) return 1;
+      if (b === CM_TRANSV) return -1;
+      var minA = Math.min.apply(null, grupos[a].map(function(m){ return m.orden || 0; }));
+      var minB = Math.min.apply(null, grupos[b].map(function(m){ return m.orden || 0; }));
+      return minA - minB;
+    });
+
+    nombresGrupo.forEach(function(grupo) {
+      var mods = grupos[grupo];
+      var esTransv = (grupo === CM_TRANSV);
+      // Nivel 2 — sub-encabezado de GRUPO. Los bulk-por-grupo se mantienen tal cual; para el
+      // sub-grupo transversal sintético (abarca varios grupos reales) no se muestran (no mapea a un `grupo`).
+      html += '<tr style="background:var(--bg)"><td colspan="6" style="padding:7px 12px 7px 26px">' +
+        '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">' +
+        '<strong style="font-size:12.5px;color:var(--mut)">› ' + grupo + ' <span style="font-weight:400">(' + mods.length + ')</span></strong>' +
+        (esTransv
+          ? '<span style="font-size:10px;color:var(--mut)">módulos con sociedad NULL — agrupados acá solo para visualizar</span>'
+          : '<div style="margin-left:auto;display:flex;gap:6px;align-items:center;font-size:11px">' +
+            '<span style="color:var(--mut)">Asignar todo el grupo:</span>' +
+            cmBulkSocSelect(grupo) + cmBulkTipoSelect(grupo) + cmBulkOcultoSelect(grupo) +
+            '</div>') +
+        '</div></td></tr>';
+      mods.forEach(function(m) { html += cmRenderFila(m); });
     });
   });
-  document.getElementById('t-modulos').innerHTML = html;
+
+  document.getElementById('t-modulos').innerHTML = html || '<tr><td colspan="6" class="emp">Sin módulos.</td></tr>';
+}
+
+// Fila de un módulo (idéntica a la versión anterior — extraída a helper de presentación).
+function cmRenderFila(m) {
+  var ocultoStyle = m.oculto ? 'background:#FFF7ED' : '';
+  var iconLock = m.oculto ? '<span title="Oculto: solo accesible desde acá con 🔗 Abrir" style="margin-right:4px">🔒</span>' : '';
+  // Botón abrir: navega al módulo. Sistema y módulos con sección propia no se filtra por oculto.
+  var btnAbrir = '<button onclick="cmAbrirModulo(\''+m.modulo+'\')" title="Ir al módulo" style="margin-left:6px;padding:2px 8px;font-size:11px;background:#fff;border:1px solid var(--bor);border-radius:4px;cursor:pointer;color:var(--burg);font-weight:600">🔗 Abrir</button>';
+  return '<tr style="'+ocultoStyle+'">' +
+    '<td>' + iconLock +
+      '<code style="font-size:11px;color:var(--burg);background:var(--bg);padding:2px 6px;border-radius:4px">'+m.modulo+'</code> ' +
+      '<span style="font-size:12px;margin-left:6px">'+m.label+'</span>' +
+      btnAbrir +
+    '</td>' +
+    '<td style="font-size:12px;color:var(--mut)">'+m.grupo+'</td>' +
+    '<td>'+cmSocSelect(m)+'</td>' +
+    '<td>'+cmAreaSelect(m)+'</td>' +
+    '<td>'+cmTipoSelect(m)+'</td>' +
+    '<td style="text-align:center">'+cmOcultoToggle(m)+'</td>' +
+  '</tr>';
 }
 
 function cmSocSelect(m) {
