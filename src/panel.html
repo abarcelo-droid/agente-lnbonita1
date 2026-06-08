@@ -2371,6 +2371,11 @@ var SG_TIPOPRV = [['productor','Productor'],['importador','Importador'],['mayori
 var SG_TIPOCLI = [['horeca','HORECA'],['supermercado','Supermercado'],['mayorista_regional','Mayorista regional'],['minorista','Minorista'],['consumidor_final','Consumidor final'],['otros','Otros']];
 var SG_CATFISC = [['resp_inscripto','Resp. Inscripto'],['monotributista','Monotributista'],['exento','Exento'],['no_inscripto','No inscripto']];
 var SG_FISCAL  = [['factura_a','Factura A'],['factura_b','Factura B'],['liquidacion','Liquidación']];
+// Para mostrar el tipo fiscal en listados: incluye 'invoice' (proveedor extranjero).
+// El selector nacional del alta sigue usando SG_FISCAL (A/B/Liq), sin Invoice.
+var SG_FISCAL_LBL = SG_FISCAL.concat([['invoice','Invoice']]);
+// 23 provincias argentinas + CABA (orden alfabético).
+var SG_PROVINCIAS = ['Buenos Aires','CABA','Catamarca','Chaco','Chubut','Córdoba','Corrientes','Entre Ríos','Formosa','Jujuy','La Pampa','La Rioja','Mendoza','Misiones','Neuquén','Río Negro','Salta','San Juan','San Luis','Santa Cruz','Santa Fe','Santiago del Estero','Tierra del Fuego','Tucumán'];
 var SG_MODPED  = [['con_pedido','Con pedido'],['sobre_stock','Sobre stock'],['mixto','Mixto']];
 var SG_BASECAL = [['fecha_oc','Fecha OC'],['fecha_recepcion','Fecha recepción'],['fecha_factura','Fecha factura'],['al_pedido','Al pedido']];
 
@@ -2508,8 +2513,9 @@ function sgRow(entity, r){
     return '<tr><td>'+esc(sgProdLabel(r.producto_id))+'</td><td>'+esc(r.nombre)+'</td><td style="text-align:right">'+(r.factor_conversion||0)+'</td>'+sgActions(entity,r.id)+'</tr>';
   }
   if (entity==='proveedores'){
-    return '<tr><td>'+esc(r.razon_social)+'</td><td>'+esc(r.cuit||'')+'</td><td>'+sgLbl(SG_TIPOPRV,r.tipo)
-      +'</td><td>'+sgLbl(SG_FISCAL,r.tipo_fiscal_habitual)+'</td><td>'+esc(r.localidad||'')+'</td>'+sgActions(entity,r.id)+'</tr>';
+    var origLbl = (r.origen==='extranjero') ? '<span class="bdg bcc" style="margin-right:4px">Ext</span>' : '';
+    return '<tr><td>'+origLbl+esc(r.razon_social)+'</td><td>'+esc(r.cuit||'')+'</td><td>'+sgLbl(SG_TIPOPRV,r.tipo)
+      +'</td><td>'+sgLbl(SG_FISCAL_LBL,r.tipo_fiscal_habitual)+'</td><td>'+esc(r.localidad||'')+'</td>'+sgActions(entity,r.id)+'</tr>';
   }
   if (entity==='clientes'){
     return '<tr><td>'+esc(r.razon_social)+'</td><td>'+esc(r.cuit||'')+'</td><td>'+sgLbl(SG_TIPOCLI,r.tipo)
@@ -2535,6 +2541,7 @@ function sgLoadCondiciones(){
 function sgOpenModal(entity, id){
   SG.cur = { entity: entity, id: id || null };
   if (entity==='condiciones'){ return sgOpenCondModal(id); }
+  if (entity==='proveedores'){ return sgOpenProvModal(id); }
   var sc = SG_SCHEMA[entity];
   var row = id ? (SG.last[entity]||[]).find(function(x){ return x.id===id; }) : null;
   eid('sg-modal-tit').textContent = (id?'Editar ':'Nuevo ') + sc.titulo;
@@ -2602,10 +2609,109 @@ function sgCondSuma(){
   el.textContent = 'Σ = '+s+'%'; el.style.color = (Math.abs(s-100)<0.01) ? 'var(--ok,#16a34a)' : 'var(--err,#dc2626)';
 }
 
+// ── Modal proveedor (Nacional / Extranjero) ──────────────────────────────────
+// Formulario condicional: el selector ORIGEN arriba de todo decide qué se muestra.
+//  · Nacional   → CUIT (validado XX-XXXXXXXX-X), Categoría fiscal, Tipo fiscal (A/B/Liq), Provincia (selector AR).
+//  · Extranjero → Identificación fiscal (libre), sin categoría fiscal AR, Tipo fiscal fijo "Invoice", País (libre, va a columna provincia).
+function sgOpenProvModal(id){
+  var row = id ? (SG.last.proveedores||[]).find(function(x){ return x.id===id; }) : null;
+  eid('sg-modal-tit').textContent = (id?'Editar ':'Nuevo ') + 'proveedor';
+  function opt(v,l,sel){ return '<option value="'+esc(String(v))+'"'+(String(sel)===String(v)?' selected':'')+'>'+esc(String(l))+'</option>'; }
+  var tipoOpts   = '<option value="">—</option>' + SG_TIPOPRV.map(function(o){ return opt(o[0],o[1]); }).join('');
+  var catOpts    = '<option value="">—</option>' + SG_CATFISC.map(function(o){ return opt(o[0],o[1]); }).join('');
+  var fiscalOpts = SG_FISCAL.map(function(o){ return opt(o[0],o[1]); }).join('');   // A/B/Liq, sin Invoice
+  var condOpts   = '<option value="">—</option>' + SG.cacheCond.map(function(c){ return opt(c.id,c.nombre); }).join('');
+  var provOpts   = '<option value="">—</option>' + SG_PROVINCIAS.map(function(p){ return opt(p,p); }).join('');
+  var ff = function(label, inner, rowId){ return '<div class="fl ff"'+(rowId?(' id="'+rowId+'"'):'')+'><label>'+label+'</label>'+inner+'</div>'; };
+  eid('sg-modal-body').innerHTML =
+      ff('Origen <span style="color:var(--err)">*</span>',
+         '<select id="sg-f-origen" onchange="sgProvOrigen()">'+opt('nacional','Nacional')+opt('extranjero','Extranjero')+'</select>')
+    + ff('Razón social <span style="color:var(--err)">*</span>', '<input id="sg-f-razon_social" type="text">')
+    + ff('<span id="sg-prov-cuit-lbl">CUIT</span>', '<input id="sg-f-cuit" type="text" placeholder="20-12345678-9">', 'sg-prov-cuit-row')
+    + ff('Tipo', '<select id="sg-f-tipo">'+tipoOpts+'</select>')
+    + ff('Categoría fiscal', '<select id="sg-f-categoria_fiscal">'+catOpts+'</select>', 'sg-prov-catfisc-row')
+    + ff('Tipo fiscal habitual', '<select id="sg-f-tipo_fiscal_habitual">'+fiscalOpts+'</select>', 'sg-prov-fiscal-nac-row')
+    + ff('Tipo fiscal habitual', '<input id="sg-f-fiscal-ext" type="text" value="Invoice" disabled style="background:var(--bg2,#f3f4f6)">', 'sg-prov-fiscal-ext-row')
+    + ff('Condición de pago habitual', '<select id="sg-f-condicion_pago_habitual_id">'+condOpts+'</select>')
+    + ff('Localidad', '<input id="sg-f-localidad" type="text">')
+    + ff('Provincia', '<select id="sg-f-provincia">'+provOpts+'</select>', 'sg-prov-provincia-row')
+    + ff('País', '<input id="sg-f-pais" type="text" placeholder="Brasil">', 'sg-prov-pais-row')
+    + ff('Teléfono', '<input id="sg-f-telefono" type="text">')
+    + ff('Email', '<input id="sg-f-email" type="text">')
+    + ff('Observaciones', '<textarea id="sg-f-observaciones" rows="2"></textarea>');
+  // Valores (edición). País y Provincia comparten la columna provincia: el toggle muestra el que corresponde.
+  if (row){
+    eid('sg-f-origen').value             = row.origen || 'nacional';
+    eid('sg-f-razon_social').value       = row.razon_social || '';
+    eid('sg-f-cuit').value               = row.cuit || '';
+    eid('sg-f-tipo').value               = row.tipo || '';
+    eid('sg-f-categoria_fiscal').value   = row.categoria_fiscal || '';
+    if (row.tipo_fiscal_habitual && row.tipo_fiscal_habitual!=='invoice') eid('sg-f-tipo_fiscal_habitual').value = row.tipo_fiscal_habitual;
+    if (row.condicion_pago_habitual_id)  eid('sg-f-condicion_pago_habitual_id').value = row.condicion_pago_habitual_id;
+    eid('sg-f-localidad').value          = row.localidad || '';
+    eid('sg-f-provincia').value          = row.provincia || '';   // si no matchea una provincia AR queda en —
+    eid('sg-f-pais').value               = row.provincia || '';
+    eid('sg-f-telefono').value           = row.telefono || '';
+    eid('sg-f-email').value              = row.email || '';
+    eid('sg-f-observaciones').value      = row.observaciones || '';
+  }
+  sgProvOrigen();
+  eid('sg-modal').classList.add('on');
+}
+// Muestra/oculta campos según Nacional/Extranjero.
+function sgProvOrigen(){
+  var ext = eid('sg-f-origen').value === 'extranjero';
+  eid('sg-prov-cuit-lbl').textContent      = ext ? 'Identificación fiscal' : 'CUIT';
+  eid('sg-f-cuit').placeholder             = ext ? 'Tax ID' : '20-12345678-9';
+  eid('sg-prov-catfisc-row').style.display    = ext ? 'none' : '';
+  eid('sg-prov-fiscal-nac-row').style.display = ext ? 'none' : '';
+  eid('sg-prov-fiscal-ext-row').style.display = ext ? '' : 'none';
+  eid('sg-prov-provincia-row').style.display  = ext ? 'none' : '';
+  eid('sg-prov-pais-row').style.display       = ext ? '' : 'none';
+}
+function sgSaveProv(){
+  var id = SG.cur.id;
+  var ext = eid('sg-f-origen').value === 'extranjero';
+  var pv  = function(elId){ var v=(eid(elId).value||'').trim(); return v===''?null:v; };
+  var razon = (eid('sg-f-razon_social').value||'').trim();
+  if (!razon){ toast('Falta: Razón social', 'er'); eid('sg-f-razon_social').focus(); return; }
+  var cuit = (eid('sg-f-cuit').value||'').trim();
+  if (!ext && cuit && !/^\d{2}-\d{8}-\d$/.test(cuit)){
+    toast('CUIT inválido. Formato XX-XXXXXXXX-X (11 dígitos con guiones)', 'er'); eid('sg-f-cuit').focus(); return;
+  }
+  var cond = eid('sg-f-condicion_pago_habitual_id').value;
+  var body = {
+    origen: ext ? 'extranjero' : 'nacional',
+    razon_social: razon,
+    cuit: cuit || null,
+    tipo: pv('sg-f-tipo'),
+    condicion_pago_habitual_id: cond ? Number(cond) : null,
+    localidad: pv('sg-f-localidad'),
+    telefono: pv('sg-f-telefono'),
+    email: pv('sg-f-email'),
+    observaciones: pv('sg-f-observaciones')
+  };
+  if (ext){
+    body.categoria_fiscal = null;            // no aplica categoría fiscal AR
+    body.tipo_fiscal_habitual = 'invoice';   // proveedor del exterior → Invoice fijo
+    body.provincia = pv('sg-f-pais');        // país se guarda en la columna provincia
+  } else {
+    body.categoria_fiscal = pv('sg-f-categoria_fiscal');
+    body.tipo_fiscal_habitual = eid('sg-f-tipo_fiscal_habitual').value || 'factura_a';
+    body.provincia = pv('sg-f-provincia');
+  }
+  var path = '/api/sg/proveedores' + (id?('/'+id):'');
+  api(path, id?'PUT':'POST', body).then(function(r){
+    if (r && r.ok){ toast(id?'Actualizado':'Creado', 'ok'); closeMB('sg-modal'); sgLoadCaches(); sgLoad('proveedores'); }
+    else toast((r&&r.error)||'Error al guardar', 'er');
+  });
+}
+
 // ── Guardar ─────────────────────────────────────────────────────────────────
 function sgSave(){
   var entity = SG.cur.entity, id = SG.cur.id;
   if (entity==='condiciones') return sgSaveCond();
+  if (entity==='proveedores') return sgSaveProv();
   var sc = SG_SCHEMA[entity];
   var body = {};
   for (var i=0;i<sc.fields.length;i++){

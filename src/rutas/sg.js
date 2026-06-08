@@ -139,7 +139,7 @@ montarCRUD('presentaciones', 'sg_presentaciones',
 
 // ── PROVEEDORES ──────────────────────────────────────────────────────────────────
 montarCRUD('proveedores', 'sg_proveedores',
-  ['razon_social', 'cuit', 'tipo', 'categoria_fiscal', 'tipo_fiscal_habitual',
+  ['razon_social', 'origen', 'cuit', 'tipo', 'categoria_fiscal', 'tipo_fiscal_habitual',
    'condicion_pago_habitual_id', 'comercial_responsable_id', 'localidad', 'provincia',
    'telefono', 'email', 'observaciones', 'adm_proveedor_id'],
   { orderBy: 'razon_social COLLATE NOCASE' });
