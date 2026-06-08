@@ -12,48 +12,14 @@
 //       kg_estimados, precio_estimado_por_kg}] }
 
 import { jsPDF } from 'jspdf';
-import path from 'path';
-import fs from 'fs';
-import { fileURLToPath } from 'url';
+// Identidad visual compartida (paleta azul/gris, emisor, logo) con el resto de los PDF SG.
+import { AZUL, AZUL_CL, GRIS, GRIS_CL, EMISOR, money, nr, getLogo } from './pdfComun.js';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-
-// Paleta azul/gris
-const AZUL      = [20, 60, 120];
-const AZUL_CL   = [222, 232, 245];
-const GRIS      = [90, 90, 90];
-const GRIS_CL   = [244, 246, 249];
-
-// Datos fiscales del emisor (San Gerónimo SA). Hardcodeado acá igual que ordenPDF.js
-// hardcodea los datos de la empresa; si en el futuro se cargan en `sociedades`, leer de ahí.
-const EMISOR = {
-  marca: 'La Niña Bonita',
-  razon: 'San Gerónimo SA',
-  cuit: '30-67325443-4',
-  domicilio: 'Mercado Central de Buenos Aires, Nave 4, Puestos 2-4-6',
-};
-
+// Etiquetas propias de la OC.
 const FISCAL_LBL    = { factura_a: 'Factura A', factura_b: 'Factura B', liquidacion: 'Liquidación', invoice: 'Invoice' };
 const COMERCIAL_LBL = { firme: 'Precio Cerrado', pizarra: 'Liquidación de Venta' };
 const CATFISC_LBL   = { resp_inscripto: 'Resp. Inscripto', monotributista: 'Monotributista', exento: 'Exento', no_inscripto: 'No inscripto' };
 const FLETE_LBL     = { comprador: 'Comprador', vendedor: 'Vendedor' };
-
-const money = (n) => '$' + Number(n || 0).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-const nr    = (n) => Number(n || 0).toLocaleString('es-AR');
-
-// Logo cacheado en base64 (undefined=no intentado, null=falló, string=OK).
-let _logoB64 = undefined;
-function getLogo() {
-  if (_logoB64 !== undefined) return _logoB64;
-  try {
-    const buf = fs.readFileSync(path.join(__dirname, '..', 'logo.jpg'));
-    _logoB64 = 'data:image/jpeg;base64,' + buf.toString('base64');
-  } catch (e) {
-    console.error('[OC-PDF] No se pudo cargar logo.jpg:', e.message);
-    _logoB64 = null;
-  }
-  return _logoB64;
-}
 
 export function generarOcPDF(oc) {
   const doc = new jsPDF();
