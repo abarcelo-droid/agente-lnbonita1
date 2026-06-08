@@ -30,6 +30,8 @@ const sgStorage = multer.diskStorage({
   }
 });
 const sgUpload = multer({ storage: sgStorage, limits: { fileSize: 10 * 1024 * 1024 } });
+// Vista previa PDF: las fotos NO se persisten (van a memoria) → sin archivos huérfanos.
+const sgUploadMem = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 
 // ── Auth (copia local, patrón del repo: produccion.js) ──────────────────────────
 function requireAuth(req, res, next) {
@@ -897,6 +899,39 @@ router.get('/recepciones/:id/calidad.pdf', requireAuth, async (req, res) => {
     });
     res.send(pdf);
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// ── PASO 2 — VISTA PREVIA del informe de calidad (sin persistir). Recibe el payload de la
+// recepción en curso + las fotos (en memoria) y devuelve el PDF para previsualizar antes de
+// confirmar. NO escribe en DB ni en disco. Reusa el mismo generador que el PDF definitivo. ──
+router.post('/recepciones/preview-calidad.pdf', sgUploadMem.array('fotos', 12), requireAuth, async (req, res) => {
+  const db = getDb();
+  try {
+    const b = (req.body && req.body.payload) ? JSON.parse(req.body.payload) : {};
+    const oc = b.oc_id ? db.prepare(`SELECT o.numero AS oc_numero, p.razon_social AS proveedor_nombre, p.cuit AS proveedor_cuit
+      FROM sg_oc o LEFT JOIN sg_proveedores p ON p.id=o.proveedor_id WHERE o.id=?`).get(b.oc_id) : null;
+    const rec = {
+      id: null, numero_recepcion: '(vista previa)', fecha_recepcion: b.fecha_recepcion,
+      oc_numero: oc && oc.oc_numero, proveedor_nombre: oc && oc.proveedor_nombre, proveedor_cuit: oc && oc.proveedor_cuit,
+      numero_remito_proveedor: b.numero_remito_proveedor, factura_numero: b.factura_numero, dtv_codigo: b.dtv_codigo,
+      pallets_recibidos: b.pallets_recibidos, bultos_recibidos: b.bultos_recibidos,
+      observada: b.observada ? 1 : 0, calidad_estado_general: b.calidad_estado_general, calidad_defectos: b.calidad_defectos,
+      calidad_pct_afectado: b.calidad_pct_afectado, calidad_observaciones: b.calidad_observaciones, observaciones: b.observaciones,
+      lotes: []
+    };
+    // Lotes-display desde los items del formulario (sin códigos aún; es una previa).
+    for (const it of (b.items || [])) for (const l of (it.lotes || [])) {
+      rec.lotes.push({ codigo_lote: '—', producto_nombre: it.producto_nombre || '', producto_variedad: '', calidad: l.calidad, kg_reales: l.kg_reales });
+    }
+    // Fotos desde memoria (buffer → base64), sin tocar disco.
+    const fotos = (req.files || []).map((f) => ({
+      dataUri: 'data:' + (f.mimetype || 'image/jpeg') + ';base64,' + f.buffer.toString('base64'),
+      fmt: (f.mimetype || '').includes('png') ? 'PNG' : 'JPEG'
+    }));
+    const pdf = await generarRecepcionCalidadPDF(rec, fotos);
+    res.set({ 'Content-Type': 'application/pdf', 'Content-Disposition': 'inline; filename="vista-previa-calidad.pdf"' });
+    res.send(pdf);
+  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
 });
 
 // ── COMPRA RETROACTIVA (OC + recepción + lotes en una transacción) ─────────────
