@@ -162,14 +162,42 @@ export function generarOcPDF(oc) {
   });
 
   // ── Totales ───────────────────────────────────────────────────────────────────
+  // IVA Fase 2 — solo Factura A (firme) discrimina neto / IVA / total + leyenda de si el
+  // precio incluye o no IVA. Liquidación/pizarra: total directo (como antes).
   y += 2;
-  doc.setFillColor(...AZUL);
-  doc.rect(110, y, 86, 9, 'F');
-  doc.setFont('helvetica', 'bold').setFontSize(9).setTextColor(255, 255, 255);
-  doc.text('TOTAL  ·  ' + nr(oc.total_estimado_kg) + ' kg', 114, y + 6);
-  doc.text(oc.tipo_precio === 'pizarra' ? '(a definir)' : money(oc.total_estimado_monto), 193, y + 6, { align: 'right' });
-  doc.setTextColor(0, 0, 0);
-  y += 16;
+  const discIva = (oc.tipo_fiscal === 'factura_a') && (oc.total_iva != null) && (oc.tipo_precio !== 'pizarra');
+  if (discIva) {
+    const alics = [...new Set(items.map(it => it.iva_alicuota).filter(a => a != null).map(a => Number(a)))];
+    const alicLbl = (alics.length === 1) ? (nr(alics[0]) + '%') : (alics.length ? 'varias alíc.' : '—');
+    const neto = Number(oc.total_neto || 0), iva = Number(oc.total_iva || 0);
+    doc.setFont('helvetica', 'normal').setFontSize(9).setTextColor(...GRIS);
+    doc.text('Neto gravado', 150, y + 4, { align: 'right' });
+    doc.setTextColor(0, 0, 0); doc.text(money(neto), 193, y + 4, { align: 'right' });
+    doc.setTextColor(...GRIS); doc.text('IVA (' + alicLbl + ')', 150, y + 10, { align: 'right' });
+    doc.setTextColor(0, 0, 0); doc.text(money(iva), 193, y + 10, { align: 'right' });
+    doc.setFillColor(...AZUL);
+    doc.rect(110, y + 13, 86, 9, 'F');
+    doc.setFont('helvetica', 'bold').setFontSize(9).setTextColor(255, 255, 255);
+    doc.text('TOTAL  ·  ' + nr(oc.total_estimado_kg) + ' kg', 114, y + 19);
+    doc.text(money(neto + iva), 193, y + 19, { align: 'right' });
+    doc.setTextColor(...GRIS).setFont('helvetica', 'italic').setFontSize(7.5);
+    doc.text(oc.precio_incluye_iva ? 'Los precios unitarios incluyen IVA.' : 'Los precios unitarios no incluyen IVA (se adiciona).', 18, y + 19);
+    doc.setTextColor(0, 0, 0);
+    y += 28;
+  } else {
+    doc.setFillColor(...AZUL);
+    doc.rect(110, y, 86, 9, 'F');
+    doc.setFont('helvetica', 'bold').setFontSize(9).setTextColor(255, 255, 255);
+    doc.text('TOTAL  ·  ' + nr(oc.total_estimado_kg) + ' kg', 114, y + 6);
+    doc.text(oc.tipo_precio === 'pizarra' ? '(a definir)' : money(oc.total_estimado_monto), 193, y + 6, { align: 'right' });
+    doc.setTextColor(0, 0, 0);
+    if (oc.tipo_fiscal === 'liquidacion') {
+      doc.setFont('helvetica', 'italic').setFontSize(7.5).setTextColor(...GRIS);
+      doc.text('Liquidación: IVA no discriminado en la OC (se resuelve en la liquidación).', 18, y + 6);
+      doc.setTextColor(0, 0, 0);
+    }
+    y += 16;
+  }
 
   // ── Cláusula de calidad ────────────────────────────────────────────────────────
   doc.setDrawColor(...AZUL).setLineWidth(0.4);
