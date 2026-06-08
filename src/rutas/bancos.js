@@ -78,27 +78,31 @@ router.get('/cuentas/:id', (req, res) => {
 
 // POST /api/fin/cuentas
 router.post('/cuentas', (req, res) => {
-  const { nombre, tipo, banco, nro_cuenta, cbu, alias, moneda, saldo_inicial, cuenta_contable_id } = req.body || {};
+  const { nombre, tipo, banco, nro_cuenta, cbu, alias, moneda, saldo_inicial, cuenta_contable_id, ambito } = req.body || {};
   if (!nombre) return res.status(400).json({ ok: false, error: 'Nombre requerido' });
   const sociedadId = getSociedadId(req);
+  // El ámbito interno solo aplica a cajas de efectivo; banco/cheque/transferencia siempre fiscal.
+  const ambitoFinal = (tipo === 'caja' && ambito === 'interno') ? 'interno' : 'fiscal';
   try {
     const r = db.prepare(`
-      INSERT INTO fin_cuentas (sociedad_id, nombre, tipo, banco, nro_cuenta, cbu, alias, moneda, saldo_inicial, cuenta_contable_id)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(sociedadId, nombre.trim(), tipo||'cuenta_corriente', banco||null, nro_cuenta||null, cbu||null, alias||null, moneda||'ARS', parseFloat(saldo_inicial||0), cuenta_contable_id?parseInt(cuenta_contable_id):null);
+      INSERT INTO fin_cuentas (sociedad_id, nombre, tipo, banco, nro_cuenta, cbu, alias, moneda, saldo_inicial, cuenta_contable_id, ambito)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(sociedadId, nombre.trim(), tipo||'cuenta_corriente', banco||null, nro_cuenta||null, cbu||null, alias||null, moneda||'ARS', parseFloat(saldo_inicial||0), cuenta_contable_id?parseInt(cuenta_contable_id):null, ambitoFinal);
     res.json({ ok: true, id: r.lastInsertRowid });
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
 // PUT /api/fin/cuentas/:id
 router.put('/cuentas/:id', (req, res) => {
-  const { nombre, tipo, banco, nro_cuenta, cbu, alias, moneda, saldo_inicial, cuenta_contable_id } = req.body || {};
+  const { nombre, tipo, banco, nro_cuenta, cbu, alias, moneda, saldo_inicial, cuenta_contable_id, ambito } = req.body || {};
   try {
     const actual = db.prepare('SELECT * FROM fin_cuentas WHERE id=?').get(req.params.id);
     if (!actual) return res.status(404).json({ ok: false, error: 'Cuenta no encontrada' });
+    const tipoFinal = tipo||actual.tipo;
+    const ambitoFinal = (tipoFinal === 'caja' && (ambito||actual.ambito) === 'interno') ? 'interno' : 'fiscal';
     db.prepare(`
-      UPDATE fin_cuentas SET nombre=?, tipo=?, banco=?, nro_cuenta=?, cbu=?, alias=?, moneda=?, saldo_inicial=?, cuenta_contable_id=? WHERE id=?
-    `).run(nombre||actual.nombre, tipo||actual.tipo, banco||null, nro_cuenta||null, cbu||null, alias||null, moneda||actual.moneda, parseFloat(saldo_inicial??actual.saldo_inicial), cuenta_contable_id?parseInt(cuenta_contable_id):null, req.params.id);
+      UPDATE fin_cuentas SET nombre=?, tipo=?, banco=?, nro_cuenta=?, cbu=?, alias=?, moneda=?, saldo_inicial=?, cuenta_contable_id=?, ambito=? WHERE id=?
+    `).run(nombre||actual.nombre, tipoFinal, banco||null, nro_cuenta||null, cbu||null, alias||null, moneda||actual.moneda, parseFloat(saldo_inicial??actual.saldo_inicial), cuenta_contable_id?parseInt(cuenta_contable_id):null, ambitoFinal, req.params.id);
     res.json({ ok: true });
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
@@ -239,13 +243,14 @@ router.patch('/cheques-terceros/:id/estado', (req, res) => {
 // GET /api/fin/movimientos?cuentaId=&desde=&hasta=
 router.get('/movimientos', (req, res) => {
   try {
-    const { cuentaId, desde, hasta } = req.query;
+    const { cuentaId, desde, hasta, solo_caja } = req.query;
     const sociedadId = getSociedadId(req);
-    let sql = `SELECT m.*, c.nombre as cuenta_nombre FROM fin_movimientos m JOIN fin_cuentas c ON c.id=m.cuenta_id WHERE m.sociedad_id = ?`;
+    let sql = `SELECT m.*, c.nombre as cuenta_nombre, c.ambito as cuenta_ambito, c.tipo as cuenta_tipo FROM fin_movimientos m JOIN fin_cuentas c ON c.id=m.cuenta_id WHERE m.sociedad_id = ?`;
     const params = [sociedadId];
-    if (cuentaId) { sql += ' AND m.cuenta_id=?'; params.push(parseInt(cuentaId)); }
-    if (desde)    { sql += ' AND m.fecha>=?'; params.push(desde); }
-    if (hasta)    { sql += ' AND m.fecha<=?'; params.push(hasta); }
+    if (cuentaId)  { sql += ' AND m.cuenta_id=?'; params.push(parseInt(cuentaId)); }
+    if (solo_caja === '1') { sql += " AND c.tipo='caja'"; }
+    if (desde)     { sql += ' AND m.fecha>=?'; params.push(desde); }
+    if (hasta)     { sql += ' AND m.fecha<=?'; params.push(hasta); }
     sql += ' ORDER BY m.fecha DESC, m.id DESC';
     res.json({ ok: true, data: db.prepare(sql).all(...params) });
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }

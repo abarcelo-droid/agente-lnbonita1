@@ -2387,6 +2387,12 @@ db.exec(`
       db.exec('ALTER TABLE fin_cuentas ADD COLUMN cuenta_contable_id INTEGER REFERENCES pa_cuentas(id)');
       console.log('[FIN] cuenta_contable_id agregado en fin_cuentas');
     }
+    // Ámbito de la caja: 'fiscal' (declarado, va a ARCA) o 'interno' (efectivo no declarado).
+    // Solo aplica a cajas de efectivo; las cuentas bancarias son siempre fiscales.
+    if (!colsFin.includes('ambito')) {
+      db.exec("ALTER TABLE fin_cuentas ADD COLUMN ambito TEXT NOT NULL DEFAULT 'fiscal'");
+      console.log('[FIN] ambito agregado en fin_cuentas');
+    }
     const colsMov = db.prepare("PRAGMA table_info(fin_movimientos)").all().map(c => c.name);
     if (!colsMov.includes('conciliado')) {
       db.exec('ALTER TABLE fin_movimientos ADD COLUMN conciliado INTEGER NOT NULL DEFAULT 0');
