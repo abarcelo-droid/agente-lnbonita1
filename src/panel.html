@@ -84,8 +84,8 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
 .filt{display:flex;gap:10px;margin-bottom:18px;flex-wrap:wrap;align-items:center}
 .filt select,.filt input[type=date]{padding:7px 12px;font-size:13px;width:auto}
 .emp{text-align:center;padding:40px;color:var(--mut);font-size:13px}
-#toast{position:fixed;bottom:24px;right:24px;background:var(--sur);border:1px solid var(--bor);border-radius:9px;padding:13px 18px;font-size:13px;opacity:0;transform:translateY(8px);transition:opacity .2s,transform .2s;z-index:200;box-shadow:0 4px 20px rgba(0,0,0,.1)}
-#toast.on{opacity:1;transform:translateY(0)}
+#toast{position:fixed;bottom:24px;right:24px;background:var(--sur);border:1px solid var(--bor);border-radius:9px;padding:13px 18px;font-size:13px;opacity:0;pointer-events:none;transform:translateY(8px);transition:opacity .2s,transform .2s;z-index:200;box-shadow:0 4px 20px rgba(0,0,0,.1)}
+#toast.on{opacity:1;pointer-events:auto;transform:translateY(0)}
 #toast.ok{border-left:3px solid var(--ok)}
 #toast.er{border-left:3px solid var(--err)}
 .sc{background:var(--sur);border:1px solid var(--bor);border-radius:10px;padding:20px 22px;display:flex;align-items:center;justify-content:space-between;gap:20px;margin-bottom:12px}
