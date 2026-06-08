@@ -2035,7 +2035,7 @@ db.exec(`
                       CHECK(tipo IN ('alta','prestamo','devolucion','reparacion_inicio','reparacion_fin','baja','extravio')),
     fecha           TEXT DEFAULT (datetime('now','localtime')),
     personal_id     INTEGER REFERENCES pa_personal(id),      -- a quién (en préstamo/devolución)
-    quien_registra  INTEGER REFERENCES users(id),            -- usuario que carga el movimiento
+    quien_registra  INTEGER REFERENCES usuarios(id),         -- usuario que carga el movimiento (tabla real: usuarios)
     condicion       TEXT,                                    -- 'nueva','buena','regular','rota' (al prestar o devolver)
     motivo          TEXT,                                    -- para baja/extravio: motivo libre
     notas           TEXT,
@@ -2072,16 +2072,20 @@ db.exec(`
       db.exec("ALTER TABLE pa_panol_movimientos ADD COLUMN personal_id INTEGER REFERENCES pa_personal(id)");
       console.log('[PA] pa_panol_movimientos.personal_id agregado');
     }
-    // ── FIX FK colgante (#299 dejó columnas trabajador_* muertas) ──────────────
-    // Las DBs PRE-#299 conservan en Pañol las columnas viejas trabajador_actual_id /
-    // trabajador_id con REFERENCES pa_trabajadores (tabla ya dropeada). Con
-    // foreign_keys=ON, CUALQUIER INSERT en esas tablas falla con
-    // "no such table: pa_trabajadores" AUNQUE la columna valga NULL (SQLite resuelve
-    // la tabla padre al ejecutar el DML, no según el valor). #299 asumió que "nunca
-    // se evalúa" — falso. Rebuild robusto: FK off → tabla nueva SIN trabajador_* →
-    // copia de columnas comunes (preserva filas y datos de personal_*) → drop → rename
-    // → recrea índices vivos (NO el viejo idx_panol_unidades_trab). Idempotente:
-    // corre solo si la columna vieja existe; en DBs frescas es no-op.
+    // ── FIX FK colgantes en Pañol ─────────────────────────────────────────────
+    // Una FK cuya tabla destino NO existe rompe CUALQUIER INSERT en esa tabla con
+    // "no such table: …" AUNQUE el valor sea NULL (SQLite resuelve la tabla padre al
+    // ejecutar el DML, no según el valor). Dos causas en Pañol:
+    //   (a) trabajador_actual_id / trabajador_id → pa_trabajadores (dropeada en #299).
+    //   (b) quien_registra → users (typo: la tabla real es 'usuarios'); afectaba hasta
+    //       a DBs frescas. Se repunta a usuarios(id) en el DDL nuevo (no se elimina:
+    //       registra quién cargó el movimiento). El #372 anterior arregló (a) pero
+    //       arrastró (b) en el DDL del rebuild → este fix lo corrige.
+    // Rebuild robusto: FK off → tabla nueva con el DDL correcto (sin trabajador_*,
+    // quien_registra→usuarios) → copia de columnas comunes (preserva filas y datos de
+    // personal_*) → drop → rename → recrea índices vivos (NO idx_panol_unidades_trab).
+    // Guardado por un detector genérico de FK colgantes (ver abajo): idempotente,
+    // se auto-cura, y en DBs ya sanas es no-op.
     const rebuildPanol = (tabla, crearSql, indices) => {
       db.exec(crearSql); // crea `${tabla}__new`
       const viejas = new Set(db.prepare(`PRAGMA table_info(${tabla})`).all().map(c => c.name));
@@ -2093,9 +2097,17 @@ db.exec(`
       for (const ix of indices) db.exec(ix);
     };
 
+    // Detector GENÉRICO de FK colgantes: una FK cuya tabla destino no existe rompe
+    // TODO INSERT en la tabla (aunque el valor sea NULL). Cubre de una las dos causas
+    // en Pañol — trabajador_* → pa_trabajadores (dropeada en #299) y quien_registra →
+    // users (nunca existió; la tabla real es 'usuarios') — y se auto-cura si una corrida
+    // previa dejó alguna colgante. Idempotente: tras el rebuild ya no hay colgante → no-op.
+    const existeTabla = (t) => !!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(t);
+    const tieneFKColgante = (tabla) =>
+      db.prepare(`PRAGMA foreign_key_list(${tabla})`).all().some(fk => !existeTabla(fk.table));
+
     db.pragma('foreign_keys = OFF');
-    const colsU2 = db.prepare("PRAGMA table_info(pa_panol_unidades)").all().map(c => c.name);
-    if (colsU2.includes('trabajador_actual_id')) {
+    if (tieneFKColgante('pa_panol_unidades')) {
       db.transaction(() => rebuildPanol('pa_panol_unidades', `
         CREATE TABLE pa_panol_unidades__new (
           id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -2120,10 +2132,9 @@ db.exec(`
         "CREATE INDEX IF NOT EXISTS idx_panol_unidades_estado   ON pa_panol_unidades(estado)",
         "CREATE INDEX IF NOT EXISTS idx_panol_unidades_personal ON pa_panol_unidades(personal_actual_id)",
       ]))();
-      console.log('[PA] pa_panol_unidades rebuildeada (FK colgante trabajador_actual_id eliminada)');
+      console.log('[PA] pa_panol_unidades rebuildeada (FK colgantes eliminadas)');
     }
-    const colsM2 = db.prepare("PRAGMA table_info(pa_panol_movimientos)").all().map(c => c.name);
-    if (colsM2.includes('trabajador_id')) {
+    if (tieneFKColgante('pa_panol_movimientos')) {
       db.transaction(() => rebuildPanol('pa_panol_movimientos', `
         CREATE TABLE pa_panol_movimientos__new (
           id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -2132,7 +2143,7 @@ db.exec(`
                             CHECK(tipo IN ('alta','prestamo','devolucion','reparacion_inicio','reparacion_fin','baja','extravio')),
           fecha           TEXT DEFAULT (datetime('now','localtime')),
           personal_id     INTEGER REFERENCES pa_personal(id),
-          quien_registra  INTEGER REFERENCES users(id),
+          quien_registra  INTEGER REFERENCES usuarios(id),
           condicion       TEXT,
           motivo          TEXT,
           notas           TEXT,
@@ -2141,7 +2152,7 @@ db.exec(`
         "CREATE INDEX IF NOT EXISTS idx_panol_mov_unidad ON pa_panol_movimientos(unidad_id)",
         "CREATE INDEX IF NOT EXISTS idx_panol_mov_fecha  ON pa_panol_movimientos(fecha)",
       ]))();
-      console.log('[PA] pa_panol_movimientos rebuildeada (FK colgante trabajador_id eliminada)');
+      console.log('[PA] pa_panol_movimientos rebuildeada (FK colgantes eliminadas → usuarios/pa_personal)');
     }
     db.exec("DROP TABLE IF EXISTS pa_trabajadores");
     db.pragma('foreign_keys = ON');
