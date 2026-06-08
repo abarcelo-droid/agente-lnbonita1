@@ -2107,6 +2107,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       <div class="sg-subtab" data-sub="proveedores"    onclick="sgCatSub('proveedores')">🚜 Proveedores</div>
       <div class="sg-subtab" data-sub="clientes"       onclick="sgCatSub('clientes')">🏪 Clientes</div>
       <div class="sg-subtab" data-sub="condiciones"    onclick="sgCatSub('condiciones')">💳 Condiciones de pago</div>
+      <div class="sg-subtab" data-sub="familias"       onclick="sgCatSub('familias')">🏷️ Familias (IVA)</div>
     </div>
 
     <div class="sg-sub on" id="sg-sub-productos">
@@ -2153,6 +2154,15 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
         <tbody id="sg-tb-condiciones"><tr><td colspan="4" class="emp">Cargando…</td></tr></tbody>
       </table></div>
     </div>
+
+    <!-- IVA Fase 2 — ABM de alícuota por familia (el producto la hereda vía familia_id). -->
+    <div class="sg-sub" id="sg-sub-familias">
+      <div style="font-size:12px;color:var(--mut);margin-bottom:10px">La alícuota de IVA la define la <b>familia</b>; el producto la hereda. Editá el % de cada una (vacío = sin definir → se resuelve en recepción/liquidación). Seed: 01–04 = 10,5%.</div>
+      <div class="ab-table-wrap"><table class="pa-tbl">
+        <thead><tr><th>Código</th><th>Familia</th><th style="text-align:right">Alícuota IVA (%)</th><th></th></tr></thead>
+        <tbody id="sg-tb-familias"><tr><td colspan="4" class="emp">Cargando…</td></tr></tbody>
+      </table></div>
+    </div>
   </div>
 
 <!-- Modal genérico de catálogo SG (form schema-driven) -->
@@ -2181,7 +2191,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
         <div class="fl"><label>Proveedor <span style="color:var(--err)">*</span></label><select id="sg-oc-prov" onchange="sgOcProvChange()"></select></div>
-        <div class="fl"><label>Comprobante Fiscal</label><select id="sg-oc-fiscal"></select></div>
+        <div class="fl"><label>Comprobante Fiscal</label><select id="sg-oc-fiscal" onchange="sgOcFiscalChange()"></select></div>
         <div class="fl"><label>Condiciones Comerciales</label>
           <div style="display:flex;gap:14px;padding:6px 0">
             <label style="font-weight:500"><input type="radio" name="sg-oc-precio" value="firme" checked onchange="sgOcPrecioChange()" style="width:auto"> Precio Cerrado</label>
@@ -2199,6 +2209,15 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
           </select>
         </div>
         <div class="fl"><label>Monto de flete ($)</label><input type="number" id="sg-oc-flete-monto" min="0" step="0.01" placeholder="informativo, no suma al total"></div>
+      </div>
+      <!-- IVA Fase 2 — solo visible con Factura A + Precio Cerrado. La alícuota la define la
+           familia del producto; acá el comercial solo dice si el $/kg ya incluye IVA o no. -->
+      <div class="fl ff" id="sg-oc-iva-box" style="display:none">
+        <div style="border:1px solid var(--bor);border-radius:8px;padding:10px;background:rgba(20,60,120,.05)">
+          <div style="font-weight:600;font-size:12px;margin-bottom:6px">💵 IVA — Factura A <span style="font-weight:400;color:var(--mut)">· alícuota heredada de la familia de cada producto</span></div>
+          <label style="margin-right:18px;font-weight:500"><input type="radio" name="sg-oc-inciva" value="si" checked onchange="sgOcTotales()" style="width:auto"> El precio ya incluye IVA</label>
+          <label style="font-weight:500"><input type="radio" name="sg-oc-inciva" value="no" onchange="sgOcTotales()" style="width:auto"> El precio no incluye IVA (se adiciona)</label>
+        </div>
       </div>
       <div class="fl ff"><label>Items</label>
         <div id="sg-oc-items"></div>
@@ -2650,6 +2669,7 @@ function sgLbl(opts, v){ var f = (opts||[]).find(function(o){ return o[0]===v; }
 // ── Carga + render de tablas ────────────────────────────────────────────────
 function sgLoad(entity){
   if (entity==='condiciones'){ return sgLoadCondiciones(); }
+  if (entity==='familias'){ return sgLoadFamilias(); }   // IVA Fase 2
   var path = SG_SCHEMA[entity].path;
   var url = '/api/sg/'+path;
   if (entity==='presentaciones'){
@@ -2666,6 +2686,27 @@ function sgLoad(entity){
 function sgEmpty(entity){
   var cols = {productos:5, presentaciones:6, proveedores:6, clientes:6, condiciones:4};
   return '<tr><td colspan="'+(cols[entity]||6)+'" class="emp">Sin registros. Creá el primero con el botón de arriba.</td></tr>';
+}
+// IVA Fase 2 — ABM de alícuota por familia. Refresca SG.cacheFam para que la OC use el valor al día.
+function sgLoadFamilias(){
+  api('/api/sg/familias').then(function(r){
+    var rows=(r&&r.ok)?r.data:[]; SG.cacheFam=rows;
+    eid('sg-tb-familias').innerHTML = rows.length ? rows.map(function(f){
+      return '<tr><td><code>'+esc(sgPad2(f.codigo))+'</code></td><td>'+esc(f.nombre)+'</td>'
+        +'<td style="text-align:right"><input id="sg-fam-alic-'+f.id+'" type="number" min="0" max="100" step="0.1" value="'+(f.iva_alicuota!=null?f.iva_alicuota:'')+'" placeholder="—" style="width:90px;text-align:right;padding:4px 6px;border-radius:6px;border:1px solid var(--bor);background:var(--bg)"></td>'
+        +'<td style="text-align:right"><button class="btn bb bs" onclick="sgFamGuardarAlic('+f.id+')">Guardar</button></td></tr>';
+    }).join('') : '<tr><td colspan="4" class="emp">Sin familias.</td></tr>';
+  });
+}
+function sgFamGuardarAlic(id){
+  var v=eid('sg-fam-alic-'+id).value;
+  var alic = (v==='') ? null : Number(v);
+  if(alic!==null && (isNaN(alic)||alic<0||alic>100)){ toast('Alícuota inválida (0–100)','er'); return; }
+  api('/api/sg/familias/'+id,'PATCH',{iva_alicuota:alic}).then(function(r){
+    if(r&&r.ok){ toast('Alícuota actualizada','ok');
+      var f=(SG.cacheFam||[]).find(function(x){return String(x.id)===String(id);}); if(f) f.iva_alicuota=alic;
+    } else toast((r&&r.error)||'Error','er');
+  });
 }
 
 function sgActions(entity, id){
@@ -3111,15 +3152,31 @@ function sgOcOpen(){
   eid('sg-oc-flete-cargo').value=''; eid('sg-oc-flete-monto').value='';
   document.querySelector('input[name="sg-oc-mod"][value="normal"]').checked=true;
   document.querySelector('input[name="sg-oc-precio"][value="firme"]').checked=true;
+  document.querySelector('input[name="sg-oc-inciva"][value="si"]').checked=true; // IVA Fase 2
   sgOcAddItem();
+  sgOcUpdIvaBox();
   eid('sg-oc-modal').classList.add('on');
 }
 function sgOcProvChange(){
   var p=SG.cacheProv.find(function(x){return String(x.id)===String(eid('sg-oc-prov').value);});
   if(p){ if(p.tipo_fiscal_habitual)eid('sg-oc-fiscal').value=p.tipo_fiscal_habitual; if(p.condicion_pago_habitual_id)eid('sg-oc-cond').value=p.condicion_pago_habitual_id; }
+  sgOcUpdIvaBox(); sgOcTotales();   // el comprobante del proveedor puede activar/desactivar IVA
 }
 function sgOcPrecio(){ return document.querySelector('input[name="sg-oc-precio"]:checked').value; }
-function sgOcPrecioChange(){ sgOcRenderItems(); }
+function sgOcPrecioChange(){ sgOcUpdIvaBox(); sgOcRenderItems(); }
+// ── IVA Fase 2 — helpers de discriminación en la OC ──
+// Discrimina solo con Factura A + Precio Cerrado (firme). Liquidación/pizarra: no discrimina.
+function sgOcDiscrimina(){ return sgOcPrecio()==='firme' && eid('sg-oc-fiscal').value==='factura_a'; }
+function sgOcIncluyeIva(){ var el=document.querySelector('input[name="sg-oc-inciva"]:checked'); return el ? el.value==='si' : true; }
+function sgOcUpdIvaBox(){ var b=eid('sg-oc-iva-box'); if(b) b.style.display=sgOcDiscrimina()?'block':'none'; }
+function sgOcFiscalChange(){ sgOcUpdIvaBox(); sgOcTotales(); }
+// Alícuota de IVA heredada de la familia del producto (vía familia_id → SG.cacheFam).
+function sgFamAlic(producto_id){
+  var p=(SG.cacheProd||[]).find(function(x){return String(x.id)===String(producto_id);});
+  if(!p||!p.familia_id) return null;
+  var f=(SG.cacheFam||[]).find(function(x){return String(x.id)===String(p.familia_id);});
+  return (f && f.iva_alicuota!=null && f.iva_alicuota!=='') ? Number(f.iva_alicuota) : null;
+}
 function sgOcAddItem(){ SG.ocItems.push({producto_id:'',presentacion_id:'',cantidad:'',precio:'',modo:'kilo'}); sgOcRenderItems(); }
 function sgOcDelItem(i){ SG.ocItems.splice(i,1); sgOcRenderItems(); }
 function sgOcUpd(i,c,v){ SG.ocItems[i][c]=v; if(c==='producto_id')SG.ocItems[i].presentacion_id=''; sgOcRenderItems(); }
@@ -3187,16 +3244,35 @@ function sgOcRenderItems(){
   sgOcTotales();
 }
 function sgOcTotales(){
-  // CAMBIO 2 — el total y los kg respetan el modo de cada item.
-  var firme=sgOcPrecio()==='firme', tk=0, tm=0;
+  // CAMBIO 2 — kg/total respetan el modo. IVA Fase 2 — con Factura A discrimina neto/IVA/total.
+  var firme=sgOcPrecio()==='firme', disc=sgOcDiscrimina(), incl=sgOcIncluyeIva();
+  var tk=0, tBruto=0, tNeto=0, tIva=0;
   SG.ocItems.forEach(function(it){
     var factor=sgFactor(it.presentacion_id), cant=Number(it.cantidad)||0, precio=Number(it.precio)||0;
     var bulto = it.modo==='bulto';
     var kg = bulto ? cant*factor : cant;          // bulto: kg=bultos×factor · kilo: kg=cantidad
     tk += kg;
-    if(firme) tm += bulto ? (cant*precio) : (kg*precio);  // bulto: bultos×$/bulto · kilo: kg×$/kg
+    if(!firme) return;
+    var bruto = bulto ? (cant*precio) : (kg*precio);  // $ línea con criterio actual
+    tBruto += bruto;
+    if(disc){
+      var alic=sgFamAlic(it.producto_id);
+      if(alic==null){ tNeto += bruto; }                                  // familia sin alícuota → no discrimina esa línea
+      else if(incl){ var neto=bruto/(1+alic/100); tNeto+=neto; tIva+=bruto-neto; }
+      else { tNeto+=bruto; tIva+=bruto*alic/100; }
+    }
   });
-  eid('sg-oc-totales').innerHTML='Total estimado: '+nr(tk)+' kg'+(firme?(' · '+sgMoney(tm)):' · (Liquidación de Venta — precio a definir)');
+  var el=eid('sg-oc-totales');
+  if(!firme){ el.innerHTML='Total estimado: '+nr(tk)+' kg · (Liquidación de Venta — precio a definir)'; return; }
+  if(disc){
+    var tTotal=tNeto+tIva;
+    el.innerHTML='Total estimado: '+nr(tk)+' kg'
+      +'<div style="font-weight:500;font-size:12px;color:var(--mut);margin-top:2px">Neto '+sgMoney(Math.round(tNeto))+' · IVA '+sgMoney(Math.round(tIva))+'</div>'
+      +'<div>Total c/IVA: '+sgMoney(Math.round(tTotal))+'</div>';
+  } else {
+    el.innerHTML='Total estimado: '+nr(tk)+' kg · '+sgMoney(tBruto)
+      +(eid('sg-oc-fiscal').value==='liquidacion'?'<div style="font-weight:500;font-size:11px;color:var(--mut)">Liquidación — IVA no discriminado en la OC</div>':'');
+  }
 }
 function sgOcGuardar(){
   var prov=eid('sg-oc-prov').value;
@@ -3208,6 +3284,7 @@ function sgOcGuardar(){
     tipo_fiscal:eid('sg-oc-fiscal').value, tipo_precio:sgOcPrecio(), condicion_pago_id:eid('sg-oc-cond').value?Number(eid('sg-oc-cond').value):null,
     fecha_oc:eid('sg-oc-fecha').value, fecha_recepcion_estimada:eid('sg-oc-fecharec').value, observaciones:eid('sg-oc-obs').value,
     flete_a_cargo:eid('sg-oc-flete-cargo').value||null, flete_monto:(eid('sg-oc-flete-monto').value!==''?Number(eid('sg-oc-flete-monto').value):null),
+    precio_incluye_iva: sgOcIncluyeIva()?1:0,   // IVA Fase 2 (el backend solo lo usa si discrimina: Factura A + firme)
     // CAMBIO 2 — se envían SIEMPRE valores canónicos: kg_estimados (kg reales) y precio_estimado_por_kg ($/kg
     // efectivo), sin importar el modo. Así el backend (kg×$/kg) calcula el total correcto y el stock/costeo
     // quedan 100% en kg. modo_carga solo registra cómo lo cargó el operador.

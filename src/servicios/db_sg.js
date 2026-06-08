@@ -670,6 +670,46 @@ try {
   console.error('[DB] SG migración sg_oc (flete):', e.message);
 }
 
+// ── IVA en la OC (Fase 2) ───────────────────────────────────────────────────────
+// 1) Alícuota POR FAMILIA. El producto la hereda vía familia_id (NO se duplica en el
+//    producto). ALTER ADD COLUMN nullable + seed: familias 01-04 (produce) → 10,5%;
+//    el resto (ej. 05 Otros) queda NULL y se configura en el ABM. El seed solo toca
+//    filas con alícuota NULL → no pisa configuraciones manuales (self-healing).
+try {
+  const cols = db.prepare("PRAGMA table_info(sg_familias)").all().map(c => c.name);
+  if (!cols.includes('iva_alicuota')) {
+    db.exec('ALTER TABLE sg_familias ADD COLUMN iva_alicuota REAL');
+    console.log('[DB] SG sg_familias.iva_alicuota agregado');
+  }
+  db.exec("UPDATE sg_familias SET iva_alicuota=10.5 WHERE codigo IN (1,2,3,4) AND iva_alicuota IS NULL");
+} catch (e) { console.error('[DB] SG migración sg_familias (iva_alicuota):', e.message); }
+
+// 2) Discriminación en la cabecera de la OC: flag precio_incluye_iva + override opcional
+//    de alícuota por OC + total NETO e IVA por separado (el total con IVA = neto+iva, se
+//    deriva y se guarda en total_estimado_monto). Nullable: las OCs viejas quedan sin
+//    discriminar (precio_incluye_iva/total_neto/total_iva NULL) y siguen igual.
+try {
+  const cols = db.prepare("PRAGMA table_info(sg_oc)").all().map(c => c.name);
+  const faltan = [];
+  if (!cols.includes('precio_incluye_iva')) { db.exec('ALTER TABLE sg_oc ADD COLUMN precio_incluye_iva INTEGER'); faltan.push('precio_incluye_iva'); }
+  if (!cols.includes('iva_alicuota_oc'))    { db.exec('ALTER TABLE sg_oc ADD COLUMN iva_alicuota_oc REAL');      faltan.push('iva_alicuota_oc'); }
+  if (!cols.includes('total_neto'))         { db.exec('ALTER TABLE sg_oc ADD COLUMN total_neto REAL');           faltan.push('total_neto'); }
+  if (!cols.includes('total_iva'))          { db.exec('ALTER TABLE sg_oc ADD COLUMN total_iva REAL');            faltan.push('total_iva'); }
+  if (faltan.length) console.log('[DB] SG sg_oc migrado (+' + faltan.join(', +') + ')');
+} catch (e) { console.error('[DB] SG migración sg_oc (iva):', e.message); }
+
+// 3) Snapshot de IVA por item de OC (la alícuota aplicada + neto/iva de la línea, fijados
+//    al momento de la OC para que el PDF/totales no dependan de cambios futuros de la
+//    alícuota de la familia). Nullable: items viejos quedan NULL.
+try {
+  const cols = db.prepare("PRAGMA table_info(sg_oc_items)").all().map(c => c.name);
+  const faltan = [];
+  if (!cols.includes('iva_alicuota'))  { db.exec('ALTER TABLE sg_oc_items ADD COLUMN iva_alicuota REAL');  faltan.push('iva_alicuota'); }
+  if (!cols.includes('neto_estimado')) { db.exec('ALTER TABLE sg_oc_items ADD COLUMN neto_estimado REAL'); faltan.push('neto_estimado'); }
+  if (!cols.includes('iva_estimado'))  { db.exec('ALTER TABLE sg_oc_items ADD COLUMN iva_estimado REAL');  faltan.push('iva_estimado'); }
+  if (faltan.length) console.log('[DB] SG sg_oc_items migrado (+' + faltan.join(', +') + ')');
+} catch (e) { console.error('[DB] SG migración sg_oc_items (iva):', e.message); }
+
 // ── BLOQUE A — Recepción SG: +documentación (factura/DTV) + paletizado recibido ──
 // Campos aditivos nullable sobre sg_recepciones (el remito ya existe en
 // numero_remito_proveedor). ALTER ADD COLUMN simple, sin rebuild: las recepciones

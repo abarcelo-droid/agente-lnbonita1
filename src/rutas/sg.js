@@ -205,6 +205,32 @@ router.post('/familias', requireAdmin, (req, res) => {
     insertConCodigo(db, req, res, 'sg_familias', n, '', [], ['nombre'], [nombre]);
   } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
 });
+// IVA Fase 2 — editar familia (nombre y/o alícuota de IVA). La alícuota la hereda el
+// producto vía familia_id; acá es donde se ve/configura. iva_alicuota: REAL en % (ej. 10.5)
+// o null para "sin definir" (se resolverá en recepción/liquidación).
+router.patch('/familias/:id', requireAdmin, (req, res) => {
+  const db = getDb();
+  try {
+    const fam = db.prepare('SELECT id FROM sg_familias WHERE id=? AND activo=1').get(req.params.id);
+    if (!fam) return res.status(404).json({ ok: false, error: 'Familia no encontrada' });
+    const sets = [], vals = [];
+    if (req.body.nombre !== undefined) {
+      const nombre = val(req.body.nombre);
+      if (!nombre) return res.status(400).json({ ok: false, error: 'Nombre vacío' });
+      sets.push('nombre=?'); vals.push(nombre);
+    }
+    if (req.body.iva_alicuota !== undefined) {
+      const a = req.body.iva_alicuota;
+      const alic = (a === null || a === '') ? null : Number(a);
+      if (alic !== null && (isNaN(alic) || alic < 0 || alic > 100)) return res.status(400).json({ ok: false, error: 'Alícuota inválida (0–100)' });
+      sets.push('iva_alicuota=?'); vals.push(alic);
+    }
+    if (!sets.length) return res.status(400).json({ ok: false, error: 'Nada para actualizar' });
+    sets.push(`modificado_en=datetime('now','localtime')`, 'modificado_por=?'); vals.push(uid(req), req.params.id);
+    db.prepare(`UPDATE sg_familias SET ${sets.join(',')} WHERE id=?`).run(...vals);
+    res.json({ ok: true, data: db.prepare('SELECT * FROM sg_familias WHERE id=?').get(req.params.id) });
+  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
 
 // ── Especies (correlativo dentro de la familia) ──
 router.get('/especies', requireAuth, (req, res) => {
@@ -673,22 +699,32 @@ router.post('/oc', requireAdmin, (req, res) => {
     const fleteCargo = (b.flete_a_cargo === 'comprador' || b.flete_a_cargo === 'vendedor') ? b.flete_a_cargo : null;
     const fleteMonto = (b.flete_monto != null && b.flete_monto !== '') ? Number(b.flete_monto) : null;
     const dft = defaultsProveedor(db, b.proveedor_id, b);
+    // ── IVA Fase 2 — la OC discrimina IVA solo con Factura A + precio firme. En Liquidación
+    // (o pizarra) NO se discrimina (el IVA se resuelve después). precio_incluye_iva: el
+    // comercial define si el $/kg ya trae IVA o si se le adiciona. iva_alicuota_oc: override
+    // opcional; si es null, la alícuota sale de la familia de cada item.
+    const discrimina = (dft.tipo_fiscal === 'factura_a') && (tipoPrecio === 'firme');
+    const incluyeIva = b.precio_incluye_iva ? 1 : 0;
+    const alicOverride = (b.iva_alicuota_oc != null && b.iva_alicuota_oc !== '') ? Number(b.iva_alicuota_oc) : null;
+    const alicFamStmt = db.prepare('SELECT f.iva_alicuota AS a FROM sg_productos p LEFT JOIN sg_familias f ON f.id=p.familia_id WHERE p.id=?');
 
     const tx = db.transaction(() => {
       const numero = nextNumero(db, 'SG-OC', 'sg_oc', 'numero');
       const ocInfo = db.prepare(`INSERT INTO sg_oc
         (numero, modalidad, proveedor_id, tipo_fiscal, tipo_precio, condicion_pago_id, fecha_oc,
-         fecha_recepcion_estimada, comercial_id, estado, observaciones, flete_a_cargo, flete_monto, total_estimado_kg, total_estimado_monto, creado_por)
-        VALUES (?,?,?,?,?,?,?,?,?, 'abierta', ?,?,?, 0, 0, ?)`).run(
+         fecha_recepcion_estimada, comercial_id, estado, observaciones, flete_a_cargo, flete_monto,
+         precio_incluye_iva, iva_alicuota_oc, total_estimado_kg, total_estimado_monto, creado_por)
+        VALUES (?,?,?,?,?,?,?,?,?, 'abierta', ?,?,?, ?,?, 0, 0, ?)`).run(
         numero, val(b.modalidad) || 'normal', b.proveedor_id || null, dft.tipo_fiscal, tipoPrecio,
         dft.condicion_pago_id, val(b.fecha_oc), val(b.fecha_recepcion_estimada), b.comercial_id || null,
-        val(b.observaciones), fleteCargo, fleteMonto, uid(req));
+        val(b.observaciones), fleteCargo, fleteMonto, (discrimina ? incluyeIva : null), alicOverride, uid(req));
       const ocId = ocInfo.lastInsertRowid;
 
       const insItem = db.prepare(`INSERT INTO sg_oc_items
-        (oc_id, producto_id, presentacion_id, cantidad_estimada_presentaciones, kg_estimados, precio_estimado_por_kg, observaciones_item, modo_carga)
-        VALUES (?,?,?,?,?,?,?,?)`);
-      let totKg = 0, totMonto = 0;
+        (oc_id, producto_id, presentacion_id, cantidad_estimada_presentaciones, kg_estimados, precio_estimado_por_kg, observaciones_item, modo_carga,
+         iva_alicuota, neto_estimado, iva_estimado)
+        VALUES (?,?,?,?,?,?,?,?, ?,?,?)`);
+      let totKg = 0, totMonto = 0, totNeto = 0, totIva = 0;
       for (const it of items) {
         const pres = it.presentacion_id ? db.prepare('SELECT factor_conversion FROM sg_presentaciones WHERE id=?').get(it.presentacion_id) : null;
         const factor = pres ? Number(pres.factor_conversion) : 1;
@@ -698,11 +734,24 @@ router.post('/oc', requireAdmin, (req, res) => {
         const kg = it.kg_estimados != null ? Number(it.kg_estimados) : cant * factor;
         const precio = tipoPrecio === 'pizarra' ? null : (it.precio_estimado_por_kg != null ? Number(it.precio_estimado_por_kg) : null);
         const modo = it.modo_carga === 'bulto' ? 'bulto' : 'kilo';   // CAMBIO 2: solo registro del modo de ingreso
-        insItem.run(ocId, it.producto_id, it.presentacion_id || null, cant, kg, precio, val(it.observaciones_item), modo);
+        // ── IVA por línea (snapshot). Alícuota = override de OC, o la heredada de la familia.
+        const bruto = (precio != null) ? kg * precio : 0;
+        let alic = null, neto = (precio != null) ? bruto : null, iva = (precio != null) ? 0 : null;
+        if (discrimina && precio != null) {
+          if (alicOverride != null) alic = alicOverride;
+          else { const fa = alicFamStmt.get(it.producto_id); alic = (fa && fa.a != null) ? Number(fa.a) : null; }
+          if (alic != null) {
+            if (incluyeIva) { neto = bruto / (1 + alic / 100); iva = bruto - neto; } // precio trae IVA
+            else            { neto = bruto;                     iva = bruto * alic / 100; } // se adiciona
+          }
+        }
+        insItem.run(ocId, it.producto_id, it.presentacion_id || null, cant, kg, precio, val(it.observaciones_item), modo,
+          alic, neto, iva);
         totKg += kg;
-        if (precio != null) totMonto += kg * precio;
+        if (precio != null) { totMonto += neto + iva; totNeto += neto; totIva += iva; } // total con IVA = neto+iva (= bruto si no discrimina o precio incluye IVA)
       }
-      db.prepare('UPDATE sg_oc SET total_estimado_kg=?, total_estimado_monto=? WHERE id=?').run(totKg, totMonto, ocId);
+      db.prepare('UPDATE sg_oc SET total_estimado_kg=?, total_estimado_monto=?, total_neto=?, total_iva=? WHERE id=?')
+        .run(totKg, totMonto, (discrimina ? totNeto : null), (discrimina ? totIva : null), ocId);
       if (tipoPrecio === 'firme') generarVencimientos(db, ocId);
       return ocId;
     });
