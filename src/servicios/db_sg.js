@@ -17,13 +17,75 @@ import db from './db.js';
 // ── CATÁLOGO ──────────────────────────────────────────────────────────────────
 
 db.exec(`
-  -- Productos (catálogo frutihortícola)
+  -- ── Taxonomía de productos: Familia → Especie → Variedad ──────────────────────
+  -- Código jerárquico FF.EE.VV. Cada nivel tiene un 'codigo' INTEGER de 2 dígitos:
+  -- familia = estable (seed fijo); especie = correlativo dentro de la familia;
+  -- variedad = correlativo dentro de la especie. Se autogeneran (patrón plan de
+  -- cuentas: max(codigo)+1 dentro del padre). Editables/agregables desde Catálogo.
+  CREATE TABLE IF NOT EXISTS sg_familias (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    codigo            INTEGER NOT NULL UNIQUE,            -- 2 díg estable (01..NN)
+    nombre            TEXT NOT NULL,
+    activo            INTEGER NOT NULL DEFAULT 1,
+    creado_en         TEXT DEFAULT (datetime('now','localtime')),
+    creado_por        INTEGER,
+    modificado_en     TEXT,
+    modificado_por    INTEGER,
+    eliminado_en      TEXT,
+    eliminado_por_id  INTEGER
+  );
+
+  CREATE TABLE IF NOT EXISTS sg_especies (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    familia_id        INTEGER NOT NULL REFERENCES sg_familias(id),
+    codigo            INTEGER NOT NULL,                   -- 2 díg, correlativo dentro de la familia
+    nombre            TEXT NOT NULL,
+    activo            INTEGER NOT NULL DEFAULT 1,
+    creado_en         TEXT DEFAULT (datetime('now','localtime')),
+    creado_por        INTEGER,
+    modificado_en     TEXT,
+    modificado_por    INTEGER,
+    eliminado_en      TEXT,
+    eliminado_por_id  INTEGER,
+    UNIQUE(familia_id, codigo)
+  );
+
+  CREATE TABLE IF NOT EXISTS sg_variedades (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    especie_id        INTEGER NOT NULL REFERENCES sg_especies(id),
+    codigo            INTEGER NOT NULL,                   -- 2 díg, correlativo dentro de la especie
+    nombre            TEXT NOT NULL,
+    activo            INTEGER NOT NULL DEFAULT 1,
+    creado_en         TEXT DEFAULT (datetime('now','localtime')),
+    creado_por        INTEGER,
+    modificado_en     TEXT,
+    modificado_por    INTEGER,
+    eliminado_en      TEXT,
+    eliminado_por_id  INTEGER,
+    UNIQUE(especie_id, codigo)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_sg_especies_familia   ON sg_especies(familia_id);
+  CREATE INDEX IF NOT EXISTS idx_sg_variedades_especie ON sg_variedades(especie_id);
+
+  -- Seed de familias (números fijos y estables; idempotente vía OR IGNORE). Migra
+  -- la constante SG_FAMILIA del front a tabla. Nuevas familias se agregan desde el UI.
+  INSERT OR IGNORE INTO sg_familias (codigo, nombre) VALUES
+    (1, 'Frutas'), (2, 'Hortalizas Pesadas'), (3, 'Hortalizas Livianas'), (4, 'Hoja'), (5, 'Otros');
+
+  -- Productos (catálogo frutihortícola). codigo = FF.EE.VV autogenerado desde la
+  -- taxonomía. familia_id/especie_id/variedad_id son la fuente ESTRUCTURADA;
+  -- familia/nombre/variedad quedan DENORMALIZADOS (display) — los consumen Compras,
+  -- Lotes, Pedidos, Despachos y Reportes vía join por producto_id. No romper ese contrato.
   CREATE TABLE IF NOT EXISTS sg_productos (
     id                      INTEGER PRIMARY KEY AUTOINCREMENT,
-    codigo                  TEXT NOT NULL UNIQUE,
-    nombre                  TEXT NOT NULL,                       -- "Especie" en la UI
-    variedad                TEXT,                                -- texto libre (nullable)
-    familia                 TEXT CHECK(familia IN ('frutas','hortalizas_pesadas','hortalizas_livianas','hoja','otros')),
+    codigo                  TEXT NOT NULL UNIQUE,                -- "FF.EE.VV" (ej. 02.05.00)
+    familia_id              INTEGER REFERENCES sg_familias(id),
+    especie_id              INTEGER REFERENCES sg_especies(id),
+    variedad_id             INTEGER REFERENCES sg_variedades(id),
+    nombre                  TEXT NOT NULL,                       -- denormalizado = especie.nombre ("Especie" en UI)
+    variedad                TEXT,                                -- denormalizado = variedad.nombre (nullable)
+    familia                 TEXT,                                -- denormalizado = familia.nombre (sin CHECK)
     unidad_base             TEXT NOT NULL DEFAULT 'kg' CHECK(unidad_base IN ('kg','unidad','atado')),
     vida_util_dias_default  INTEGER DEFAULT 7,
     activo                  INTEGER NOT NULL DEFAULT 1,
@@ -371,7 +433,7 @@ db.exec(`
 // no existe la columna 'variedad'). Mantiene los ids (las FKs de otras tablas siguen válidas).
 try {
   const cols = db.prepare("PRAGMA table_info(sg_productos)").all().map(c => c.name);
-  if (!cols.includes('variedad')) {
+  if (!cols.includes('variedad') && !cols.includes('especie_id')) {
     db.pragma('foreign_keys = OFF');
     const rebuild = db.transaction(() => {
       db.exec(`
@@ -417,6 +479,58 @@ try {
 } catch (e) {
   try { db.pragma('foreign_keys = ON'); } catch (_) {}
   console.error('[DB] SG migración sg_productos:', e.message);
+}
+
+// ── MIGRACIÓN idempotente: sg_productos → taxonomía (familia_id/especie_id/variedad_id) ──
+// Agrega los FK a la taxonomía y quita el CHECK viejo de 'familia' (catálogo vacío:
+// no hay datos de productos que migrar). Rebuild estándar (FK off → nueva → copia →
+// drop → rename) preservando ids (las FKs de presentaciones/oc_items/lotes/pedidos/
+// despachos siguen válidas). Corre una sola vez (cuando aún no existe 'especie_id').
+try {
+  const cols = db.prepare("PRAGMA table_info(sg_productos)").all().map(c => c.name);
+  if (!cols.includes('especie_id')) {
+    db.pragma('foreign_keys = OFF');
+    const rebuild = db.transaction(() => {
+      db.exec(`
+        CREATE TABLE sg_productos_new (
+          id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+          codigo                  TEXT NOT NULL UNIQUE,
+          familia_id              INTEGER REFERENCES sg_familias(id),
+          especie_id              INTEGER REFERENCES sg_especies(id),
+          variedad_id             INTEGER REFERENCES sg_variedades(id),
+          nombre                  TEXT NOT NULL,
+          variedad                TEXT,
+          familia                 TEXT,
+          unidad_base             TEXT NOT NULL DEFAULT 'kg' CHECK(unidad_base IN ('kg','unidad','atado')),
+          vida_util_dias_default  INTEGER DEFAULT 7,
+          activo                  INTEGER NOT NULL DEFAULT 1,
+          creado_en               TEXT DEFAULT (datetime('now','localtime')),
+          creado_por              INTEGER,
+          modificado_en           TEXT,
+          modificado_por          INTEGER,
+          eliminado_en            TEXT,
+          eliminado_por_id        INTEGER
+        );
+        INSERT INTO sg_productos_new
+          (id, codigo, familia_id, especie_id, variedad_id, nombre, variedad, familia,
+           unidad_base, vida_util_dias_default, activo, creado_en, creado_por,
+           modificado_en, modificado_por, eliminado_en, eliminado_por_id)
+        SELECT
+           id, codigo, NULL, NULL, NULL, nombre, variedad, NULL,
+           unidad_base, vida_util_dias_default, activo, creado_en, creado_por,
+           modificado_en, modificado_por, eliminado_en, eliminado_por_id
+        FROM sg_productos;
+        DROP TABLE sg_productos;
+        ALTER TABLE sg_productos_new RENAME TO sg_productos;
+      `);
+    });
+    rebuild();
+    db.pragma('foreign_keys = ON');
+    console.log('[DB] SG sg_productos migrado (+familia_id/especie_id/variedad_id, código FF.EE.VV)');
+  }
+} catch (e) {
+  try { db.pragma('foreign_keys = ON'); } catch (_) {}
+  console.error('[DB] SG migración sg_productos taxonomía:', e.message);
 }
 
 // ── MIGRACIÓN idempotente: sg_proveedores → +'origen' (nacional/extranjero) y ──

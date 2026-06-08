@@ -2361,7 +2361,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
 
 <script>
 // ═══ MÓDULO SAN GERÓNIMO (sg_*) — Fase 1: Catálogo ═══════════════════════════
-var SG = { cacheProd: [], cacheCond: [], last: {}, cur: null, cuotas: [] };
+var SG = { cacheProd: [], cacheCond: [], cacheFam: [], last: {}, cur: null, cuotas: [], _prodEsp: [], _prodVar: [] };
 
 // Catálogos de opciones (value, label)
 var SG_FAMILIA = [['frutas','Frutas'],['hortalizas_pesadas','Hortalizas Pesadas'],['hortalizas_livianas','Hortalizas Livianas'],['hoja','Hoja'],['otros','Otros']];
@@ -2445,12 +2445,13 @@ function sgCatSub(s){
 
 // Carga caches para dropdowns (productos, condiciones, presentaciones, proveedores)
 function sgLoadCaches(cb){
-  Promise.all([api('/api/sg/productos'), api('/api/sg/condiciones-pago'), api('/api/sg/presentaciones'), api('/api/sg/proveedores'), api('/api/sg/clientes')]).then(function(r){
+  Promise.all([api('/api/sg/productos'), api('/api/sg/condiciones-pago'), api('/api/sg/presentaciones'), api('/api/sg/proveedores'), api('/api/sg/clientes'), api('/api/sg/familias')]).then(function(r){
     SG.cacheProd = (r[0] && r[0].ok) ? r[0].data : [];
     SG.cacheCond = (r[1] && r[1].ok) ? r[1].data : [];
     SG.cachePres = (r[2] && r[2].ok) ? r[2].data : [];
     SG.cacheProv = (r[3] && r[3].ok) ? r[3].data : [];
     SG.cacheCli = (r[4] && r[4].ok) ? r[4].data : [];
+    SG.cacheFam = (r[5] && r[5].ok) ? r[5].data : [];
     var sel = eid('sg-pres-filtro');
     if (sel){
       var v = sel.value;
@@ -2505,7 +2506,7 @@ function sgActions(entity, id){
 
 function sgRow(entity, r){
   if (entity==='productos'){
-    return '<tr><td><code>'+esc(r.codigo)+'</code></td><td>'+esc(r.nombre)+'</td><td>'+esc(r.variedad||'—')+'</td><td>'+sgLbl(SG_FAMILIA,r.familia)
+    return '<tr><td><code>'+esc(r.codigo)+'</code></td><td>'+esc(r.nombre)+'</td><td>'+esc(r.variedad||'—')+'</td><td>'+esc(r.familia||'—')
       +'</td>'+sgActions(entity,r.id)+'</tr>';
   }
   if (entity==='presentaciones'){
@@ -2541,6 +2542,7 @@ function sgOpenModal(entity, id){
   SG.cur = { entity: entity, id: id || null };
   if (entity==='condiciones'){ return sgOpenCondModal(id); }
   if (entity==='proveedores'){ return sgOpenProvModal(id); }
+  if (entity==='productos'){ return sgOpenProdModal(id); }
   var sc = SG_SCHEMA[entity];
   var row = id ? (SG.last[entity]||[]).find(function(x){ return x.id===id; }) : null;
   eid('sg-modal-tit').textContent = (id?'Editar ':'Nuevo ') + sc.titulo;
@@ -2715,11 +2717,110 @@ function sgSaveProv(){
   });
 }
 
+// ── Modal producto (taxonomía Familia/Especie/Variedad + código FF.EE.VV) ─────
+// Dropdowns dependientes: Familia → Especie (filtra por familia) → Variedad
+// (filtra por especie, opcional). El CÓDIGO es solo-lectura: se previsualiza
+// FF.EE.VV al elegir y lo fija el backend al guardar. Cada nivel permite alta al
+// vuelo (botón ＋) que crea el registro con su correlativo y lo deja seleccionado.
+function sgPad2(n){ return String(n).padStart(2,'0'); }
+function sgOpenProdModal(id){
+  var row = id ? (SG.last.productos||[]).find(function(x){ return x.id===id; }) : null;
+  eid('sg-modal-tit').textContent = (id?'Editar ':'Nuevo ') + 'producto';
+  SG._prodEsp = []; SG._prodVar = [];
+  var famOpts = '<option value="">— Elegir —</option>' + (SG.cacheFam||[]).map(function(f){ return '<option value="'+f.id+'">'+esc(sgPad2(f.codigo)+' · '+f.nombre)+'</option>'; }).join('');
+  var ff = function(label, inner){ return '<div class="fl ff"><label>'+label+'</label>'+inner+'</div>'; };
+  var withAdd = function(sel, fn, title){ return '<div style="display:flex;gap:6px">'+sel+'<button class="btn bo bs" type="button" onclick="'+fn+'" title="'+title+'">＋</button></div>'; };
+  eid('sg-modal-body').innerHTML =
+      ff('Código', '<input id="sg-p-codigo" type="text" readonly placeholder="se genera solo" style="background:var(--bg2,#f3f4f6);font-family:monospace;font-weight:700">')
+    + ff('Familia <span style="color:var(--err)">*</span>',
+         withAdd('<select id="sg-p-familia" onchange="sgProdFamChange()" style="flex:1">'+famOpts+'</select>', 'sgProdAddFam()', 'Nueva familia'))
+    + ff('Especie <span style="color:var(--err)">*</span>',
+         withAdd('<select id="sg-p-especie" onchange="sgProdEspChange()" style="flex:1"><option value="">— Elegí familia primero —</option></select>', 'sgProdAddEsp()', 'Nueva especie'))
+    + ff('Variedad <span style="color:var(--mut);font-weight:400">(opcional)</span>',
+         withAdd('<select id="sg-p-variedad" onchange="sgProdPreview()" style="flex:1"><option value="">— Sin variedad (00) —</option></select>', 'sgProdAddVar()', 'Nueva variedad'));
+  eid('sg-modal').classList.add('on');
+  if (row){
+    eid('sg-p-familia').value = row.familia_id || '';
+    sgProdLoadEsp(row.familia_id, function(){
+      eid('sg-p-especie').value = row.especie_id || '';
+      sgProdLoadVar(row.especie_id, function(){
+        eid('sg-p-variedad').value = row.variedad_id || '';
+        sgProdPreview();
+      });
+    });
+  } else { sgProdPreview(); }
+}
+function sgProdLoadEsp(familiaId, cb){
+  var sel = eid('sg-p-especie');
+  if (!familiaId){ SG._prodEsp=[]; sel.innerHTML='<option value="">— Elegí familia primero —</option>'; if(cb)cb(); return; }
+  api('/api/sg/especies?familia_id='+familiaId).then(function(r){
+    SG._prodEsp = (r&&r.ok)?r.data:[];
+    sel.innerHTML = '<option value="">— Elegir —</option>' + SG._prodEsp.map(function(e){ return '<option value="'+e.id+'">'+esc(sgPad2(e.codigo)+' · '+e.nombre)+'</option>'; }).join('');
+    if(cb)cb();
+  });
+}
+function sgProdLoadVar(especieId, cb){
+  var sel = eid('sg-p-variedad');
+  if (!especieId){ SG._prodVar=[]; sel.innerHTML='<option value="">— Sin variedad (00) —</option>'; if(cb)cb(); return; }
+  api('/api/sg/variedades?especie_id='+especieId).then(function(r){
+    SG._prodVar = (r&&r.ok)?r.data:[];
+    sel.innerHTML = '<option value="">— Sin variedad (00) —</option>' + SG._prodVar.map(function(v){ return '<option value="'+v.id+'">'+esc(sgPad2(v.codigo)+' · '+v.nombre)+'</option>'; }).join('');
+    if(cb)cb();
+  });
+}
+function sgProdFamChange(){ sgProdLoadEsp(eid('sg-p-familia').value, function(){ sgProdLoadVar('', function(){ sgProdPreview(); }); }); }
+function sgProdEspChange(){ sgProdLoadVar(eid('sg-p-especie').value, function(){ sgProdPreview(); }); }
+function sgProdPreview(){
+  var fam = (SG.cacheFam||[]).find(function(f){ return String(f.id)===String(eid('sg-p-familia').value); });
+  var esp = (SG._prodEsp||[]).find(function(e){ return String(e.id)===String(eid('sg-p-especie').value); });
+  var vr  = (SG._prodVar||[]).find(function(v){ return String(v.id)===String(eid('sg-p-variedad').value); });
+  var code = (fam?sgPad2(fam.codigo):'··') + '.' + (esp?sgPad2(esp.codigo):'··') + '.' + (vr?sgPad2(vr.codigo):'00');
+  eid('sg-p-codigo').value = (fam && esp) ? code : '';
+}
+function sgProdAddFam(){
+  var nombre = (prompt('Nombre de la nueva familia:')||'').trim(); if(!nombre) return;
+  api('/api/sg/familias','POST',{nombre:nombre}).then(function(r){
+    if(!r||!r.ok) return toast((r&&r.error)||'Error','er');
+    SG.cacheFam.push(r.data); SG.cacheFam.sort(function(a,b){ return a.codigo-b.codigo; });
+    eid('sg-p-familia').innerHTML = '<option value="">— Elegir —</option>' + SG.cacheFam.map(function(f){ return '<option value="'+f.id+'">'+esc(sgPad2(f.codigo)+' · '+f.nombre)+'</option>'; }).join('');
+    eid('sg-p-familia').value = r.data.id; sgProdFamChange(); toast('Familia creada','ok');
+  });
+}
+function sgProdAddEsp(){
+  var famId = eid('sg-p-familia').value; if(!famId) return toast('Elegí una familia primero','er');
+  var nombre = (prompt('Nombre de la nueva especie:')||'').trim(); if(!nombre) return;
+  api('/api/sg/especies','POST',{familia_id:Number(famId),nombre:nombre}).then(function(r){
+    if(!r||!r.ok) return toast((r&&r.error)||'Error','er');
+    sgProdLoadEsp(famId, function(){ eid('sg-p-especie').value=r.data.id; sgProdEspChange(); toast('Especie creada','ok'); });
+  });
+}
+function sgProdAddVar(){
+  var espId = eid('sg-p-especie').value; if(!espId) return toast('Elegí una especie primero','er');
+  var nombre = (prompt('Nombre de la nueva variedad:')||'').trim(); if(!nombre) return;
+  api('/api/sg/variedades','POST',{especie_id:Number(espId),nombre:nombre}).then(function(r){
+    if(!r||!r.ok) return toast((r&&r.error)||'Error','er');
+    sgProdLoadVar(espId, function(){ eid('sg-p-variedad').value=r.data.id; sgProdPreview(); toast('Variedad creada','ok'); });
+  });
+}
+function sgSaveProd(){
+  var id = SG.cur.id;
+  var familia_id = eid('sg-p-familia').value, especie_id = eid('sg-p-especie').value, variedad_id = eid('sg-p-variedad').value;
+  if (!familia_id){ toast('Falta: Familia', 'er'); return; }
+  if (!especie_id){ toast('Falta: Especie', 'er'); return; }
+  var body = { familia_id:Number(familia_id), especie_id:Number(especie_id), variedad_id: variedad_id?Number(variedad_id):null };
+  var path = '/api/sg/productos' + (id?('/'+id):'');
+  api(path, id?'PUT':'POST', body).then(function(r){
+    if (r && r.ok){ toast(id?'Actualizado':'Creado', 'ok'); closeMB('sg-modal'); sgLoadCaches(); sgLoad('productos'); }
+    else toast((r&&r.error)||'Error al guardar', 'er');
+  });
+}
+
 // ── Guardar ─────────────────────────────────────────────────────────────────
 function sgSave(){
   var entity = SG.cur.entity, id = SG.cur.id;
   if (entity==='condiciones') return sgSaveCond();
   if (entity==='proveedores') return sgSaveProv();
+  if (entity==='productos') return sgSaveProd();
   var sc = SG_SCHEMA[entity];
   var body = {};
   for (var i=0;i<sc.fields.length;i++){
