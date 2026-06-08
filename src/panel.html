@@ -3031,10 +3031,31 @@ function sgOcProvChange(){
 }
 function sgOcPrecio(){ return document.querySelector('input[name="sg-oc-precio"]:checked').value; }
 function sgOcPrecioChange(){ sgOcRenderItems(); }
-function sgOcAddItem(){ SG.ocItems.push({producto_id:'',presentacion_id:'',cantidad:'',precio:''}); sgOcRenderItems(); }
+function sgOcAddItem(){ SG.ocItems.push({producto_id:'',presentacion_id:'',cantidad:'',precio:'',modo:'kilo'}); sgOcRenderItems(); }
 function sgOcDelItem(i){ SG.ocItems.splice(i,1); sgOcRenderItems(); }
 function sgOcUpd(i,c,v){ SG.ocItems[i][c]=v; if(c==='producto_id')SG.ocItems[i].presentacion_id=''; sgOcRenderItems(); }
 function sgOcUpdNR(i,c,v){ SG.ocItems[i][c]=v; sgOcTotales(); }
+
+// ── CAMBIO 1 — separador de miles (es-AR) SOLO visual en los inputs de la OC ─────
+// El valor REAL guardado en SG.ocItems es el número limpio (sgMilParse). El formato no
+// se propaga al cálculo ni al guardado. Decimal con coma; miles con punto.
+function sgMilParse(str){                 // string visual → number | null
+  if(str==null) return null;
+  var s=String(str).replace(/\./g,'').replace(',', '.').replace(/[^0-9.]/g,'');
+  if(s===''||s==='.') return null;
+  var n=Number(s); return isNaN(n)?null:n;
+}
+function sgMilFmtLive(str){                // string tipeado → visual (conserva decimal en edición)
+  var s=String(str==null?'':str).replace(/\./g,'').replace(/[^0-9,]/g,'');
+  if(s==='') return '';
+  var p=s.split(','), entN=Number(p[0]||'0');
+  var entFmt=isNaN(entN)?'0':entN.toLocaleString('es-AR');
+  return p.length>1 ? (entFmt+','+p.slice(1).join('').slice(0,2)) : entFmt;
+}
+function sgMilShow(n){                     // number almacenado → visual (para re-render)
+  return (n==null||n==='') ? '' : Number(n).toLocaleString('es-AR',{maximumFractionDigits:2});
+}
+function sgOcMilInput(el,i,campo){ SG.ocItems[i][campo]=sgMilParse(el.value); el.value=sgMilFmtLive(el.value); sgOcTotales(); }
 // Label del producto en los items de OC: "CODIGO ESPECIE VARIEDAD" (ej. "02.05.01 Uva Cardinal")
 // para distinguir variedades de una misma especie (antes mostraba solo la especie → "Uva" x4).
 function sgOcProdLabel(p){
@@ -3055,19 +3076,37 @@ function sgOcRenderItems(){
     var presSel = (it.producto_id && presList.length===0)
       ? '<select disabled title="Este producto no tiene presentaciones cargadas (cargalas en Catálogo)"><option>(sin presentaciones)</option></select>'
       : '<select onchange="sgOcUpdNR('+i+',\'presentacion_id\',this.value)">'+sgOpts(presList,'nombre',it.presentacion_id,'— Present. —')+'</select>';
+    // CAMBIO 2 — modo de carga por item. BULTO: cantidad=nº bultos, precio=$/bulto → kg=bultos×factor.
+    // KILO (default): cantidad=kg, precio=$/kg → kg=cantidad. Internamente siempre se guardan kg y total reales.
+    var bulto = it.modo==='bulto';
+    var modoSel = '<select style="font-size:9.5px;padding:0 2px;width:100%;margin-bottom:2px" '
+      +'title="BULTO: cantidad=bultos, precio=$/bulto. KILO: cantidad=kg, precio=$/kg." '
+      +'onchange="sgOcUpd('+i+',\'modo\',this.value)">'
+      +'<option value="kilo"'+(bulto?'':' selected')+'>por kg</option>'
+      +'<option value="bulto"'+(bulto?' selected':'')+'>por bulto</option></select>';
+    var cantPh = bulto ? 'bultos' : 'kg';
+    var precioPh = bulto ? '$/bulto' : '$/kg';
+    // CAMBIO 1 — inputs type="text" inputmode="numeric" con separador de miles VISUAL (sgMilShow/sgOcMilInput).
     return '<div class="sg-lrow">'
       +'<select onchange="sgOcUpd('+i+',\'producto_id\',this.value)">'+sgOpts(sgOcProductos(),sgOcProdLabel,it.producto_id,'— Producto —')+'</select>'
       +presSel
-      +'<input type="number" placeholder="cant." value="'+(it.cantidad||'')+'" onchange="sgOcUpdNR('+i+',\'cantidad\',this.value)">'
-      +(firme?'<input type="number" placeholder="$/kg" value="'+(it.precio||'')+'" onchange="sgOcUpdNR('+i+',\'precio\',this.value)">':'<span style="font-size:11px;color:var(--mut);text-align:center">pizarra</span>')
+      +'<div>'+modoSel+'<input type="text" inputmode="numeric" placeholder="'+cantPh+'" value="'+sgMilShow(it.cantidad)+'" oninput="sgOcMilInput(this,'+i+',\'cantidad\')"></div>'
+      +(firme?'<input type="text" inputmode="numeric" placeholder="'+precioPh+'" value="'+sgMilShow(it.precio)+'" oninput="sgOcMilInput(this,'+i+',\'precio\')">':'<span style="font-size:11px;color:var(--mut);text-align:center">pizarra</span>')
       +(SG.ocItems.length>1?'<button class="btn bd bs" onclick="sgOcDelItem('+i+')">×</button>':'<span></span>')
       +'</div>';
   }).join('');
   sgOcTotales();
 }
 function sgOcTotales(){
+  // CAMBIO 2 — el total y los kg respetan el modo de cada item.
   var firme=sgOcPrecio()==='firme', tk=0, tm=0;
-  SG.ocItems.forEach(function(it){ var kg=(Number(it.cantidad)||0)*sgFactor(it.presentacion_id); tk+=kg; if(firme)tm+=kg*(Number(it.precio)||0); });
+  SG.ocItems.forEach(function(it){
+    var factor=sgFactor(it.presentacion_id), cant=Number(it.cantidad)||0, precio=Number(it.precio)||0;
+    var bulto = it.modo==='bulto';
+    var kg = bulto ? cant*factor : cant;          // bulto: kg=bultos×factor · kilo: kg=cantidad
+    tk += kg;
+    if(firme) tm += bulto ? (cant*precio) : (kg*precio);  // bulto: bultos×$/bulto · kilo: kg×$/kg
+  });
   eid('sg-oc-totales').innerHTML='Total estimado: '+nr(tk)+' kg'+(firme?(' · '+sgMoney(tm)):' · (pizarra)');
 }
 function sgOcGuardar(){
@@ -3079,7 +3118,18 @@ function sgOcGuardar(){
   var body={ modalidad:document.querySelector('input[name="sg-oc-mod"]:checked').value, proveedor_id:Number(prov),
     tipo_fiscal:eid('sg-oc-fiscal').value, tipo_precio:sgOcPrecio(), condicion_pago_id:eid('sg-oc-cond').value?Number(eid('sg-oc-cond').value):null,
     fecha_oc:eid('sg-oc-fecha').value, fecha_recepcion_estimada:eid('sg-oc-fecharec').value, observaciones:eid('sg-oc-obs').value,
-    items:items.map(function(it){ return {producto_id:Number(it.producto_id), presentacion_id:it.presentacion_id?Number(it.presentacion_id):null, cantidad_estimada_presentaciones:Number(it.cantidad), precio_estimado_por_kg:(firme&&it.precio!=='')?Number(it.precio):null}; }) };
+    // CAMBIO 2 — se envían SIEMPRE valores canónicos: kg_estimados (kg reales) y precio_estimado_por_kg ($/kg
+    // efectivo), sin importar el modo. Así el backend (kg×$/kg) calcula el total correcto y el stock/costeo
+    // quedan 100% en kg. modo_carga solo registra cómo lo cargó el operador.
+    items:items.map(function(it){
+      var factor=sgFactor(it.presentacion_id), cant=Number(it.cantidad)||0, bulto=it.modo==='bulto';
+      var kg = bulto ? cant*factor : cant;
+      var precio = (firme && it.precio!=='' && it.precio!=null) ? Number(it.precio) : null;
+      var precioKg = precio==null ? null : (bulto ? (factor>0?precio/factor:precio) : precio);  // $/bulto → $/kg
+      var presCant = bulto ? cant : (factor>0 ? cant/factor : cant);  // cantidad en presentaciones (bultos) canónica
+      return { producto_id:Number(it.producto_id), presentacion_id:it.presentacion_id?Number(it.presentacion_id):null,
+        cantidad_estimada_presentaciones:presCant, kg_estimados:kg, precio_estimado_por_kg:precioKg,
+        modo_carga: bulto ? 'bulto' : 'kilo' }; }) };
   api('/api/sg/oc','POST',body).then(function(r){
     if(r&&r.ok){ toast('OC creada','ok'); closeMB('sg-oc-modal'); sgLoadOC(); }
     else toast((r&&r.error)||'Error','er');
