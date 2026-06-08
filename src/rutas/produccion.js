@@ -4,6 +4,7 @@
 import express from 'express';
 import fs from 'fs';
 import path from 'path';
+import bcrypt from 'bcrypt';
 import { fileURLToPath } from 'url';
 import { getDb } from '../servicios/db.js';
 import dbPa from '../servicios/db_pa.js'; // DB contable — asientos, proveedores
@@ -30,6 +31,23 @@ function requireAdmin(req, res, next) {
     if (req.user.rol !== 'admin') return res.status(403).json({ ok: false, error: 'Solo administradores' });
     next();
   } catch(e) { res.status(401).json({ ok: false, error: 'Sesión inválida' }); }
+}
+
+// ── Acceso sensible: barrera re-password con ventana de 15 min ───────────────
+// Para vistas de compensación individual (Por valorizar, edición de tarifa por
+// persona). Reutilizable (genérico). Requiere requireAuth antes (usa req.user.id).
+function _accesoSensibleVigente(db, usuarioId) {
+  const row = db.prepare(
+    "SELECT 1 FROM pa_acceso_sensible WHERE usuario_id=? AND expira_en > datetime('now','localtime')"
+  ).get(usuarioId);
+  return !!row;
+}
+function requireAccesoSensible(req, res, next) {
+  try {
+    const db = getDb();
+    if (_accesoSensibleVigente(db, req.user.id)) return next();
+    return res.status(403).json({ ok: false, error: 'Reingresá tu contraseña para acceder', requiere_acceso_sensible: true });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 }
 
 // ── Helper: campañas activas (una por tipo) ────────────────────────────────
@@ -3056,7 +3074,7 @@ router.get('/personal/tarifas-persona', requireAuth, (req, res) => {
 });
 
 // POST: nueva vigencia (NO pisa la anterior; nueva fila con su fecha).
-router.post('/personal/tarifas-persona', requireAuth, (req, res) => {
+router.post('/personal/tarifas-persona', requireAuth, requireAccesoSensible, (req, res) => {
   const db = getDb();
   const perms = permisosPersonal(db, req.user);
   if (!perms.valorizacion && !perms.admin) return res.status(403).json({ ok: false, error: 'Sin permiso de valorización' });
@@ -3072,6 +3090,37 @@ router.post('/personal/tarifas-persona', requireAuth, (req, res) => {
     db.prepare(`INSERT INTO pa_tarifas_persona (personal_id, tarifa, vigente_desde, creado_por) VALUES (?,?,?,?)`)
       .run(personalId, tarifa, vigenteDesde, req.user.id);
     res.json({ ok: true });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// ── Acceso sensible (re-password 15 min) para vistas de compensación ────────
+// GET: estado de la sesión (vigente + cuándo expira). POST: revalida la clave.
+router.get('/personal/acceso-sensible', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const row = db.prepare(
+      "SELECT expira_en FROM pa_acceso_sensible WHERE usuario_id=? AND expira_en > datetime('now','localtime')"
+    ).get(req.user.id);
+    res.json({ ok: true, vigente: !!row, expira_en: row ? row.expira_en : null });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+router.post('/personal/acceso-sensible', requireAuth, async (req, res) => {
+  const db = getDb();
+  const password = req.body && req.body.password;
+  if (!password) return res.status(400).json({ ok: false, error: 'Ingresá tu contraseña' });
+  try {
+    const u = db.prepare('SELECT password_hash FROM usuarios WHERE id=? AND activo=1').get(req.user.id);
+    if (!u || !u.password_hash) return res.status(401).json({ ok: false, error: 'Usuario sin contraseña configurada' });
+    const match = await bcrypt.compare(String(password), u.password_hash);
+    if (!match) return res.status(401).json({ ok: false, error: 'Contraseña incorrecta' });
+    db.prepare(`INSERT INTO pa_acceso_sensible (usuario_id, expira_en)
+                VALUES (?, datetime('now','localtime','+15 minutes'))
+                ON CONFLICT(usuario_id) DO UPDATE SET
+                  expira_en=excluded.expira_en, creado_en=datetime('now','localtime')`)
+      .run(req.user.id);
+    const row = db.prepare("SELECT expira_en FROM pa_acceso_sensible WHERE usuario_id=?").get(req.user.id);
+    res.json({ ok: true, vigente: true, expira_en: row ? row.expira_en : null });
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
@@ -3859,7 +3908,7 @@ function _tarifaAsistencia(db, a) {
 }
 
 // ── Por valorizar: pendientes en un rango, con titular + tarifa default ─────
-router.get('/personal/valorizar', requireAuth, (req, res) => {
+router.get('/personal/valorizar', requireAuth, requireAccesoSensible, (req, res) => {
   const db = getDb();
   const perms = permisosPersonal(db, req.user);
   if (!perms.valorizacion && !perms.admin)
@@ -3903,12 +3952,66 @@ router.get('/personal/valorizar', requireAuth, (req, res) => {
         monto_preview: tr.falta ? 0 : Math.round(tr.tarifa * base * 100) / 100
       };
     });
-    res.json({ ok: true, data });
+
+    // Vista AGREGADA POR TITULAR (persona). El costeo sigue siendo por asistencia/lote
+    // (ver POST /valorizar): esta agregación es SOLO de presentación. Cada grupo lleva
+    // sus asistencia_ids (para valorizar) y el detalle por lote (para el desglose UI).
+    const gruposMap = new Map();
+    for (const a of data) {
+      if (!a.titular_id) continue;
+      const key = a.titular_tipo + ':' + a.titular_id;
+      let g = gruposMap.get(key);
+      if (!g) {
+        g = {
+          titular_id: a.titular_id, titular_tipo: a.titular_tipo, titular_nombre: a.titular_nombre,
+          asistencia_ids: [], n_jornales: 0, monto_total: 0,
+          sin_tarifa: false, motivos: [], _tarifas: new Set(),
+          n_cuadrilla: 0, n_individual: 0, fecha_max: '', detalle: []
+        };
+        gruposMap.set(key, g);
+      }
+      g.asistencia_ids.push(a.id);
+      g.n_jornales = Math.round((g.n_jornales + a.base_unidades) * 100) / 100;
+      g.monto_total = Math.round((g.monto_total + a.monto_preview) * 100) / 100;
+      if (a.personal_id) g.n_individual++; else if (a.cuadrilla_id) g.n_cuadrilla++;
+      if (a.fecha > g.fecha_max) g.fecha_max = a.fecha;
+      if (a.sin_tarifa) { g.sin_tarifa = true; if (a.motivo_sin_tarifa) g.motivos.push(a.motivo_sin_tarifa); }
+      else g._tarifas.add(a.tarifa_resuelta);
+      g.detalle.push({
+        asistencia_id: a.id, fecha: a.fecha, lote_id: a.lote_id, lote_nombre: a.lote_nombre,
+        finca: a.finca, tarea_nombre: a.tarea_nombre, rubro_codigo: a.rubro_codigo, rubro_nombre: a.rubro_nombre,
+        base_unidades: a.base_unidades, tarifa_resuelta: a.tarifa_resuelta, monto_preview: a.monto_preview,
+        sin_tarifa: a.sin_tarifa, motivo_sin_tarifa: a.motivo_sin_tarifa
+      });
+    }
+    const grupos = [...gruposMap.values()].map(g => {
+      const tarifas = [...g._tarifas];
+      const uniforme = tarifas.length <= 1;
+      // Editable solo si es trabajo INDIVIDUAL (persona) sin bloques de cuadrilla:
+      // la edición inserta en pa_tarifas_persona(personal_id). Las cuadrillas se
+      // tarifan aparte (pa_cuadrillas.tarifa_jornal), no acá.
+      const editable = g.n_cuadrilla === 0 && g.n_individual > 0;
+      // Tarifa por defecto de la fila: si es uniforme, esa; si varía, el promedio
+      // ponderado (monto/jornales) como punto de partida editable.
+      const tarifa = uniforme
+        ? (tarifas.length ? tarifas[0] : 0)
+        : (g.n_jornales > 0 ? Math.round((g.monto_total / g.n_jornales) * 100) / 100 : 0);
+      return {
+        titular_id: g.titular_id, titular_tipo: g.titular_tipo, titular_nombre: g.titular_nombre,
+        asistencia_ids: g.asistencia_ids, n_jornales: g.n_jornales, monto_total: g.monto_total,
+        tarifa, tarifa_uniforme: uniforme, editable,
+        sin_tarifa: g.sin_tarifa,
+        motivo_sin_tarifa: g.sin_tarifa ? [...new Set(g.motivos)].join(' · ') : null,
+        detalle: g.detalle
+      };
+    }).sort((x, y) => (x.titular_nombre || '').localeCompare(y.titular_nombre || ''));
+
+    res.json({ ok: true, data, grupos });
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
 // ── Valorizar (bulk, transaccional): impacta costo lote + CC ────────────────
-router.post('/personal/valorizar', requireAuth, (req, res) => {
+router.post('/personal/valorizar', requireAuth, requireAccesoSensible, (req, res) => {
   const db = getDb();
   const perms = permisosPersonal(db, req.user);
   if (!perms.valorizacion && !perms.admin)
@@ -3925,8 +4028,15 @@ router.post('/personal/valorizar', requireAuth, (req, res) => {
         if (a.estado !== 'pendiente_valorizar') { resumen.errores.push(`Asistencia ${a.id} no está pendiente`); continue; }
         const tit = _titularAsistencia(db, a);
         if (!tit) { resumen.errores.push(`Asistencia ${a.id} sin titular`); continue; }
-        // Tarifa 100% automática (rol o cuadrilla). Sin tarifa → NO se valoriza: queda pendiente.
-        const tr = _tarifaAsistencia(db, a);
+        // Tarifa: si RRHH la editó en la vista agregada, llega como it.tarifa (override) y
+        // se usa tal cual para valorizar ESTA semana (la nueva vigencia ya quedó guardada
+        // aparte en pa_tarifas_persona con vigente_desde=hoy). El override SOLO aplica a
+        // trabajo individual (a.personal_id); la cuadrilla nunca se overridea acá. Sin
+        // override → resolución automática por persona/rol vigente a la fecha del jornal.
+        const ov = (it.tarifa != null && Number(it.tarifa) > 0) ? Number(it.tarifa) : null;
+        const tr = (ov != null && a.personal_id)
+          ? { tarifa: ov, fuente_label: 'Persona (editada por RRHH)', falta: false }
+          : _tarifaAsistencia(db, a);
         if (tr.falta) { resumen.no_valorizadas.push({ id: a.id, motivo: tr.motivo }); continue; }
         const unidad = 'jornal';
         const tarifa = tr.tarifa;

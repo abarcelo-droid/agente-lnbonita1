@@ -3952,20 +3952,38 @@ function sgRepExport(){
     <div class="pp-subtab" data-sub="semanas" id="pp-tab-semanas" onclick="ppShowSub('semanas')">🗓️ Semanas</div>
   </div>
   <div class="pp-sub on" id="pp-sub-valorizar">
+    <!-- Barrera re-password (sesión sensible 15 min) -->
+    <div id="pp-val-pwd-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;align-items:center;justify-content:center">
+      <div style="background:var(--card,#fff);border-radius:12px;padding:22px 24px;max-width:370px;width:90%;box-shadow:0 12px 44px rgba(0,0,0,.32)">
+        <div style="font-weight:700;font-size:15px;margin-bottom:4px">🔒 Acceso a compensación</div>
+        <div style="font-size:12px;color:var(--mut);margin-bottom:14px">Esta vista muestra montos individuales. Reingresá tu contraseña para abrir una sesión de 15 minutos.</div>
+        <input type="password" id="pp-val-pwd-input" placeholder="Tu contraseña" autocomplete="current-password" style="width:100%;padding:8px 10px;font-size:13px;margin-bottom:10px;box-sizing:border-box" onkeydown="if(event.key==='Enter')ppValPwdSubmit()">
+        <div id="pp-val-pwd-err" style="display:none;font-size:11px;color:#b91c1c;margin-bottom:8px"></div>
+        <div style="display:flex;gap:8px;justify-content:flex-end">
+          <button class="btn bo bs" onclick="ppValPwdCancel()">Cancelar</button>
+          <button class="btn bb bs" onclick="ppValPwdSubmit()">Validar</button>
+        </div>
+      </div>
+    </div>
     <div style="display:flex;gap:10px;margin-bottom:14px;align-items:center;flex-wrap:wrap">
       <button class="btn bo bs" onclick="ppValSemana(-1)">‹ Semana ant.</button>
       <span id="pp-val-rango" style="font-size:13px;font-weight:700"></span>
       <button class="btn bo bs" onclick="ppValSemana(1)">Semana sig. ›</button>
+      <span id="pp-val-sesion" style="font-size:11px;color:#166534;font-weight:600"></span>
       <span style="flex:1"></span>
       <span id="pp-val-resumen" style="font-size:12px;color:var(--mut)"></span>
       <button class="btn bb" onclick="ppValorizarSeleccion()">💰 Valorizar selección</button>
     </div>
+    <div style="font-size:11px;color:var(--mut);margin-bottom:10px">Agrupado por persona. La tarifa $/jornal es editable: al guardarla queda como nueva vigencia (no pisa la anterior) y se usa para valorizar esta semana. El costo se imputa a cada lote según los jornales que la persona hizo en cada uno.</div>
     <div id="pp-val-aviso" style="display:none;font-size:12px;background:var(--warn-bg,#fff7ed);border:1px solid var(--warn,#f59e0b);color:#92400e;border-radius:8px;padding:8px 12px;margin-bottom:10px"></div>
     <div class="tw"><table>
       <thead><tr>
         <th style="text-align:center"><input type="checkbox" id="pp-val-all" onchange="ppValToggleAll(this.checked)"></th>
-        <th>Titular</th><th>Fecha</th><th>Rubro</th><th>Finca/Lote</th>
-        <th style="text-align:center">Jornales</th><th style="text-align:right">Tarifa $/jornal</th><th style="text-align:right">Monto</th>
+        <th>Titular</th>
+        <th style="text-align:center">Jornales</th>
+        <th style="text-align:right">Tarifa $/jornal</th>
+        <th style="text-align:right">Monto total</th>
+        <th></th>
       </tr></thead>
       <tbody id="pp-val-tbody2"></tbody>
     </table></div>
@@ -19445,7 +19463,7 @@ var PP = {
   trabajadores: [], cuadrillas: [], tareas: [], rubros: [], partes: [], lotes: [], usuarios: [],
   padron: [], personasEquipo: [],
   asistencias: [], asistDefaults: null, editAsistId: null,
-  valRows: [], valSemanaOffset: 0,
+  valRows: [], valGrupos: [], valPwdCb: null, valSemanaOffset: 0,
   ccTitulares: [], ccActual: null,
   misPermisos: { asistencia:false, valorizacion:false, admin:false },
   editTrabajadorId: null, editCuadrillaId: null, editTareaId: null, editPersonalId: null,
@@ -20533,67 +20551,162 @@ function ppSemanaJueves(offset) {
 
 function ppValSemana(delta) { PP.valSemanaOffset += delta; ppLoadValorizar(); }
 
+// Fecha local de hoy (YYYY-MM-DD) para vigente_desde de la tarifa editada.
+function ppHoyISO(){ var d=new Date(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
+
+// ── Barrera re-password (sesión sensible 15 min) ─────────────────────────────
+function ppValConSesion(cb) {
+  paF('/api/pa/personal/acceso-sensible').then(function(r){
+    if (r && r.ok && r.vigente) { ppValSesionBadge(r.expira_en); cb(); }
+    else ppValPedirPassword(cb);
+  });
+}
+function ppValPedirPassword(cb) {
+  PP.valPwdCb = cb || null;
+  var err = document.getElementById('pp-val-pwd-err'); if (err) err.style.display='none';
+  var inp = document.getElementById('pp-val-pwd-input'); if (inp) inp.value='';
+  document.getElementById('pp-val-pwd-overlay').style.display='flex';
+  if (inp) setTimeout(function(){ try{inp.focus();}catch(e){} }, 60);
+}
+function ppValPwdCancel() {
+  document.getElementById('pp-val-pwd-overlay').style.display='none';
+  PP.valPwdCb = null;
+}
+function ppValPwdSubmit() {
+  var inp = document.getElementById('pp-val-pwd-input');
+  var pwd = inp ? inp.value : '';
+  if (!pwd) return;
+  paF('/api/pa/personal/acceso-sensible', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ password: pwd }) })
+    .then(function(r){
+      if (r && r.ok && r.vigente) {
+        document.getElementById('pp-val-pwd-overlay').style.display='none';
+        ppValSesionBadge(r.expira_en);
+        var cb = PP.valPwdCb; PP.valPwdCb = null;
+        if (cb) cb();
+      } else {
+        var err = document.getElementById('pp-val-pwd-err');
+        if (err) { err.textContent = (r&&r.error)||'Contraseña incorrecta'; err.style.display=''; }
+      }
+    });
+}
+function ppValSesionBadge(expira) {
+  var el = document.getElementById('pp-val-sesion');
+  if (el) el.textContent = expira ? ('🔓 sesión hasta ' + String(expira).slice(11,16)) : '';
+}
+
 function ppLoadValorizar() {
   var sem = ppSemanaJueves(PP.valSemanaOffset);
   document.getElementById('pp-val-rango').textContent = paFecha(sem.desde) + ' → ' + paFecha(sem.hasta) + ' (jueves a miércoles)';
-  paF('/api/pa/personal/valorizar?desde='+sem.desde+'&hasta='+sem.hasta).then(function(r){
-    PP.valRows = (r && r.data) || [];
-    ppRenderValorizar();
+  ppValConSesion(function(){
+    paF('/api/pa/personal/valorizar?desde='+sem.desde+'&hasta='+sem.hasta).then(function(r){
+      if (r && r.requiere_acceso_sensible) { ppValPedirPassword(ppLoadValorizar); return; }
+      PP.valGrupos = (r && r.grupos) || [];
+      ppRenderValorizar();
+    });
   });
 }
 
+// Vista AGREGADA POR PERSONA. Cada fila = un titular: N jornales (suma), tarifa
+// $/jornal editable, monto total. El detalle por lote queda plegable debajo. El
+// costeo real (por lote) lo hace el backend por asistencia (no se colapsa).
 function ppRenderValorizar() {
   var tbody = document.getElementById('pp-val-tbody2');
-  if (!PP.valRows.length) {
-    tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--mut);padding:20px">🎉 No hay asistencias pendientes en esta semana</td></tr>';
+  var grupos = PP.valGrupos || [];
+  document.getElementById('pp-val-all').checked = false;
+  if (!grupos.length) {
+    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--mut);padding:20px">🎉 No hay asistencias pendientes en esta semana</td></tr>';
     document.getElementById('pp-val-resumen').textContent = '';
-    document.getElementById('pp-val-all').checked = false;
+    document.getElementById('pp-val-aviso').style.display = 'none';
     return;
   }
-  // Ordenar por titular para facilitar la lectura bulk
-  var rows = PP.valRows.slice().sort(function(a,b){ return (a.titular_nombre||'').localeCompare(b.titular_nombre||''); });
-  tbody.innerHTML = rows.map(function(a){
-    var quien = esc(a.titular_nombre||'—') + ' <span class="tag" style="font-size:9px">'+ppTipoLabel(a.titular_tipo)+'</span>'
-      + '<div style="font-size:10px;color:var(--mut)">'+esc(a.fuente_label||'')+'</div>';
-    if (a.sin_tarifa) {
-      // No valorizable: sin checkbox, fila atenuada, motivo a la vista. Queda pendiente.
-      return '<tr data-aid="'+a.id+'" style="opacity:.6">' +
-        '<td style="text-align:center">⚠️</td>' +
-        '<td>'+quien+'</td><td>'+paFecha(a.fecha)+'</td>' +
-        '<td style="font-size:11px">'+(a.rubro_codigo?a.rubro_codigo+' ':'')+esc(a.rubro_nombre||'—')+'</td>' +
-        '<td>'+esc(a.lote_nombre||'—')+'</td>' +
-        '<td style="text-align:center">'+a.base_unidades+'</td>' +
-        '<td colspan="2" style="font-size:11px;color:#92400e">Sin tarifa — '+esc(a.motivo_sin_tarifa||'')+'</td></tr>';
+  tbody.innerHTML = grupos.map(function(g, gi){
+    var puedeOverride = g.editable && g.tarifa > 0;
+    var puedeValorizar = !g.sin_tarifa || puedeOverride;
+    var chk = puedeValorizar
+      ? '<input type="checkbox" class="pp-val-chk" checked data-gi="'+gi+'" onchange="ppValRecalc()">'
+      : '⚠️';
+    var quien = esc(g.titular_nombre||'—') + ' <span class="tag" style="font-size:9px">'+ppTipoLabel(g.titular_tipo)+'</span>'
+      + (g.editado ? ' <span style="font-size:9px;color:#166534;font-weight:700">tarifa editada</span>' : '');
+    var aviso = (g.sin_tarifa && !puedeOverride)
+      ? '<div style="font-size:10px;color:#92400e">Sin tarifa — '+esc(g.motivo_sin_tarifa||'')+(g.editable?'. Cargá una y guardá (💾).':' (se carga en Cuadrillas).')+'</div>'
+      : '';
+    var tarifaCell;
+    if (g.editable) {
+      tarifaCell = '<div style="display:inline-flex;gap:4px;align-items:center;justify-content:flex-end">' +
+        '<input type="number" step="0.01" min="0" value="'+(g.tarifa>0?g.tarifa:'')+'" class="pp-val-tar" data-gi="'+gi+'" style="width:94px;text-align:right;padding:3px 6px;font-size:12px">' +
+        '<button class="btn bs" title="Guardar como nueva vigencia (rige desde hoy) y usar para esta semana" style="padding:2px 7px;font-size:11px" onclick="ppValGuardarTarifa('+gi+')">💾</button></div>' +
+        (g.tarifa_uniforme ? '' : '<div style="font-size:9px;color:#92400e;text-align:right">varía en la semana</div>');
+    } else {
+      tarifaCell = ppFmtARS(g.tarifa||0) + '<div style="font-size:9px;color:var(--mut);text-align:right">cuadrilla</div>';
     }
-    return '<tr data-aid="'+a.id+'">' +
-      '<td style="text-align:center"><input type="checkbox" class="pp-val-chk" checked data-aid="'+a.id+'" onchange="ppValRecalc()"></td>' +
-      '<td>'+quien+'</td><td>'+paFecha(a.fecha)+'</td>' +
-      '<td style="font-size:11px">'+(a.rubro_codigo?a.rubro_codigo+' ':'')+esc(a.rubro_nombre||'—')+'</td>' +
-      '<td>'+esc(a.lote_nombre||'—')+(a.finca?'<div style="font-size:10px;color:var(--mut)">'+esc(a.finca)+'</div>':'')+'</td>' +
-      '<td style="text-align:center">'+a.base_unidades+'</td>' +
-      '<td style="text-align:right">'+ppFmtARS(a.tarifa_resuelta||0)+'</td>' +
-      '<td style="text-align:right" class="pp-val-monto" data-aid="'+a.id+'">'+ppFmtARS(a.monto_preview)+'</td></tr>';
+    var main = '<tr'+(puedeValorizar?'':' style="opacity:.65"')+'>' +
+      '<td style="text-align:center">'+chk+'</td>' +
+      '<td>'+quien+aviso+'</td>' +
+      '<td style="text-align:center">'+g.n_jornales+'</td>' +
+      '<td style="text-align:right">'+tarifaCell+'</td>' +
+      '<td style="text-align:right"><b>'+ppFmtARS(g.monto_total||0)+'</b></td>' +
+      '<td style="text-align:center"><button class="btn bs bo" style="padding:2px 7px;font-size:10px" onclick="ppValToggleDet('+gi+',this)">▸</button></td></tr>';
+    var det = (g.detalle||[]).map(function(d){
+      var ovr = puedeOverride;  // tras editar, el detalle refleja la tarifa nueva
+      var dTar = ovr ? g.tarifa : d.tarifa_resuelta;
+      var dSin = d.sin_tarifa && !ovr;
+      var dMonto = dSin ? 0 : (ovr ? Math.round(g.tarifa*d.base_unidades*100)/100 : d.monto_preview);
+      return '<tr class="pp-val-detrow-'+gi+'" style="display:none;background:var(--bg2,#fafafa);font-size:11px">' +
+        '<td></td>' +
+        '<td style="padding-left:16px;color:var(--mut)">'+esc(d.lote_nombre||'—')+(d.finca?(' · '+esc(d.finca)):'')+'<div style="font-size:9px">'+paFecha(d.fecha)+' · '+esc(d.tarea_nombre||'')+' · '+(d.rubro_codigo?esc(d.rubro_codigo)+' ':'')+esc(d.rubro_nombre||'')+'</div></td>' +
+        '<td style="text-align:center">'+d.base_unidades+'</td>' +
+        '<td style="text-align:right;color:var(--mut)">'+(dSin?'—':ppFmtARS(dTar||0))+'</td>' +
+        '<td style="text-align:right">'+(dSin?'<span style="color:#92400e">sin tarifa</span>':ppFmtARS(dMonto))+'</td>' +
+        '<td></td></tr>';
+    }).join('');
+    return main + det;
   }).join('');
-  // Aviso de las que no se pueden valorizar (sin rol/tarifa o cuadrilla sin valor jornal)
-  var sin = PP.valRows.filter(function(a){ return a.sin_tarifa; });
+  // Aviso de personas que no se pueden valorizar (sin tarifa de persona/rol/cuadrilla)
+  var sinG = grupos.filter(function(g){ return g.sin_tarifa && !(g.editable && g.tarifa>0); });
   var avisoEl = document.getElementById('pp-val-aviso');
-  if (sin.length) {
+  if (sinG.length) {
     avisoEl.style.display = '';
-    avisoEl.innerHTML = '⚠️ <b>'+sin.length+' fila(s) sin valorizar</b> — falta cargar la tarifa: '
-      + esc(sin.slice(0,6).map(function(a){ return a.motivo_sin_tarifa; }).filter(function(v,i,arr){return arr.indexOf(v)===i;}).join(' · '))
-      + (sin.length>6?' …':'') + '. Cargá las tarifas en <b>Catálogo › Tarifas por rol</b> / la cuadrilla, y volvé a valorizar.';
+    avisoEl.innerHTML = '⚠️ <b>'+sinG.length+' persona(s) sin valorizar</b> — falta tarifa. '
+      + 'Editá la tarifa de la persona acá y guardá (💾), o cargá la del rol / la cuadrilla, y volvé a valorizar.';
   } else { avisoEl.style.display = 'none'; }
   ppValRecalc();
 }
 
+// Guarda la tarifa editada como NUEVA vigencia (vigente_desde=hoy, no pisa) y la
+// deja como override de la semana actual. Costeo por lote intacto (lo hace el POST).
+function ppValGuardarTarifa(gi) {
+  var g = (PP.valGrupos||[])[gi]; if (!g) return;
+  var inp = document.querySelector('.pp-val-tar[data-gi="'+gi+'"]');
+  var val = inp ? Number(inp.value) : NaN;
+  if (!(val > 0)) return toast('Tarifa inválida', 'er');
+  paF('/api/pa/personal/tarifas-persona', { method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ personal_id: g.titular_id, tarifa: val, vigente_desde: ppHoyISO() }) })
+    .then(function(r){
+      if (r && r.requiere_acceso_sensible) { ppValPedirPassword(function(){ ppValGuardarTarifa(gi); }); return; }
+      if (!r || !r.ok) return toast((r&&r.error)||'Error al guardar', 'er');
+      g.tarifa = val; g.editado = true; g.sin_tarifa = false; g.tarifa_uniforme = true;
+      g.monto_total = Math.round(val * g.n_jornales * 100) / 100;
+      toast('Tarifa de '+(g.titular_nombre||'')+' guardada (rige desde hoy)');
+      ppRenderValorizar();
+    });
+}
+
+function ppValToggleDet(gi, btn) {
+  var rows = document.querySelectorAll('.pp-val-detrow-'+gi);
+  if (!rows.length) return;
+  var show = (rows[0].style.display === 'none');
+  rows.forEach(function(r){ r.style.display = show ? '' : 'none'; });
+  if (btn) btn.textContent = show ? '▾' : '▸';
+}
+
 function ppValRecalc() {
+  var grupos = PP.valGrupos || [];
   var total = 0, n = 0;
-  PP.valRows.forEach(function(a){
-    if (a.sin_tarifa) return;
-    var chkEl = document.querySelector('.pp-val-chk[data-aid="'+a.id+'"]');
-    if (chkEl && chkEl.checked) { total += (a.monto_preview || 0); n++; }
+  document.querySelectorAll('.pp-val-chk:checked').forEach(function(c){
+    var g = grupos[parseInt(c.dataset.gi)]; if (!g) return;
+    total += (g.monto_total || 0); n++;
   });
-  document.getElementById('pp-val-resumen').textContent = n + ' seleccionada(s) · ' + ppFmtARS(total);
+  document.getElementById('pp-val-resumen').textContent = n + ' persona(s) · ' + ppFmtARS(total);
 }
 
 function ppValToggleAll(on) {
@@ -20601,15 +20714,26 @@ function ppValToggleAll(on) {
   ppValRecalc();
 }
 
+// Valoriza las personas tildadas. Manda TODAS las asistencias de cada persona; si
+// la tarifa fue editada, viaja como override (tarifa) y el backend la usa para
+// imputar el costo a CADA lote según los jornales por lote (no colapsa).
 function ppValorizarSeleccion() {
-  var items = [];
+  var grupos = PP.valGrupos || [];
+  var items = [], nGrupos = 0;
   document.querySelectorAll('.pp-val-chk:checked').forEach(function(c){
-    items.push({ asistencia_id: parseInt(c.dataset.aid) });
+    var g = grupos[parseInt(c.dataset.gi)]; if (!g) return;
+    nGrupos++;
+    (g.asistencia_ids||[]).forEach(function(aid){
+      var it = { asistencia_id: aid };
+      if (g.editado && g.tarifa > 0) it.tarifa = g.tarifa;
+      items.push(it);
+    });
   });
-  if (!items.length) return toast('No hay filas seleccionadas', 'er');
-  if (!confirm('Valorizar '+items.length+' asistencia(s)? La tarifa se resuelve sola (rol / cuadrilla). Imputa el costo a cada lote y carga el devengado en la cuenta corriente.')) return;
+  if (!items.length) return toast('No hay personas seleccionadas', 'er');
+  if (!confirm('Valorizar '+nGrupos+' persona(s) ('+items.length+' asistencia(s))? El costo se imputa a cada lote según los jornales por lote y se devenga en la cuenta corriente.')) return;
   paF('/api/pa/personal/valorizar', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ items: items }) })
     .then(function(r){
+      if (r && r.requiere_acceso_sensible) { ppValPedirPassword(ppValorizarSeleccion); return; }
       if (!r.ok) return toast(r.error||'Error', 'er');
       var d = r.data || {};
       toast('Valorizadas: '+d.valorizadas+' · '+ppFmtARS(d.monto_total));
