@@ -2748,15 +2748,19 @@ function sgOpenProdModal(id){
   SG._prodEsp = []; SG._prodVar = [];
   var famOpts = '<option value="">— Elegir —</option>' + (SG.cacheFam||[]).map(function(f){ return '<option value="'+f.id+'">'+esc(sgPad2(f.codigo)+' · '+f.nombre)+'</option>'; }).join('');
   var ff = function(label, inner){ return '<div class="fl ff"><label>'+label+'</label>'+inner+'</div>'; };
-  var withAdd = function(sel, fn, title){ return '<div style="display:flex;gap:6px">'+sel+'<button class="btn bo bs" type="button" onclick="'+fn+'" title="'+title+'">＋</button></div>'; };
+  var withAdd = function(sel, fn, title, delFn, delTitle){
+    return '<div style="display:flex;gap:6px">'+sel
+      + '<button class="btn bo bs" type="button" onclick="'+fn+'" title="'+title+'">＋</button>'
+      + '<button class="btn bd bs" type="button" onclick="'+delFn+'" title="'+delTitle+'">🗑️</button></div>';
+  };
   eid('sg-modal-body').innerHTML =
       ff('Código', '<input id="sg-p-codigo" type="text" readonly placeholder="se genera solo" style="background:var(--bg2,#f3f4f6);font-family:monospace;font-weight:700">')
     + ff('Familia <span style="color:var(--err)">*</span>',
-         withAdd('<select id="sg-p-familia" onchange="sgProdFamChange()" style="flex:1">'+famOpts+'</select>', 'sgProdAddFam()', 'Nueva familia'))
+         withAdd('<select id="sg-p-familia" onchange="sgProdFamChange()" style="flex:1">'+famOpts+'</select>', 'sgProdAddFam()', 'Nueva familia', 'sgProdDelFam()', 'Borrar familia seleccionada'))
     + ff('Especie <span style="color:var(--err)">*</span>',
-         withAdd('<select id="sg-p-especie" onchange="sgProdEspChange()" style="flex:1"><option value="">— Elegí familia primero —</option></select>', 'sgProdAddEsp()', 'Nueva especie'))
+         withAdd('<select id="sg-p-especie" onchange="sgProdEspChange()" style="flex:1"><option value="">— Elegí familia primero —</option></select>', 'sgProdAddEsp()', 'Nueva especie', 'sgProdDelEsp()', 'Borrar especie seleccionada'))
     + ff('Variedad <span style="color:var(--mut);font-weight:400">(opcional)</span>',
-         withAdd('<select id="sg-p-variedad" onchange="sgProdPreview()" style="flex:1"><option value="">— Sin variedad (00) —</option></select>', 'sgProdAddVar()', 'Nueva variedad'));
+         withAdd('<select id="sg-p-variedad" onchange="sgProdPreview()" style="flex:1"><option value="">— Sin variedad (00) —</option></select>', 'sgProdAddVar()', 'Nueva variedad', 'sgProdDelVar()', 'Borrar variedad seleccionada'));
   eid('sg-modal').classList.add('on');
   if (row){
     eid('sg-p-familia').value = row.familia_id || '';
@@ -2819,6 +2823,41 @@ function sgProdAddVar(){
   api('/api/sg/variedades','POST',{especie_id:Number(espId),nombre:nombre}).then(function(r){
     if(!r||!r.ok) return toast((r&&r.error)||'Error','er');
     sgProdLoadVar(espId, function(){ eid('sg-p-variedad').value=r.data.id; sgProdPreview(); toast('Variedad creada','ok'); });
+  });
+}
+// ── Borrado de niveles de taxonomía (el back rechaza si hay productos/hijos usándolo) ──
+function sgProdDelVar(){
+  var id = eid('sg-p-variedad').value;
+  if(!id) return toast('Elegí una variedad para borrar','er');
+  var v = (SG._prodVar||[]).find(function(x){ return String(x.id)===String(id); });
+  if(!confirm('¿Borrar la variedad "'+(v?v.nombre:'')+'"? No se puede si algún producto la usa.')) return;
+  api('/api/sg/variedades/'+id,'DELETE').then(function(r){
+    if(r&&r.ok){ toast('Variedad borrada','ok'); sgProdLoadVar(eid('sg-p-especie').value, function(){ sgProdPreview(); }); }
+    else toast((r&&r.error)||'No se pudo borrar','er');
+  });
+}
+function sgProdDelEsp(){
+  var id = eid('sg-p-especie').value;
+  if(!id) return toast('Elegí una especie para borrar','er');
+  var e = (SG._prodEsp||[]).find(function(x){ return String(x.id)===String(id); });
+  if(!confirm('¿Borrar la especie "'+(e?e.nombre:'')+'"? No se puede si tiene variedades hijas o productos que la usan.')) return;
+  api('/api/sg/especies/'+id,'DELETE').then(function(r){
+    if(r&&r.ok){ toast('Especie borrada','ok'); sgProdLoadEsp(eid('sg-p-familia').value, function(){ sgProdLoadVar('', function(){ sgProdPreview(); }); }); }
+    else toast((r&&r.error)||'No se pudo borrar','er');
+  });
+}
+function sgProdDelFam(){
+  var id = eid('sg-p-familia').value;
+  if(!id) return toast('Elegí una familia para borrar','er');
+  var f = (SG.cacheFam||[]).find(function(x){ return String(x.id)===String(id); });
+  if(!confirm('¿Borrar la familia "'+(f?f.nombre:'')+'"? No se puede si tiene especies hijas o productos que la usan.')) return;
+  api('/api/sg/familias/'+id,'DELETE').then(function(r){
+    if(r&&r.ok){
+      toast('Familia borrada','ok');
+      SG.cacheFam = (SG.cacheFam||[]).filter(function(x){ return String(x.id)!==String(id); });
+      eid('sg-p-familia').innerHTML = '<option value="">— Elegir —</option>' + SG.cacheFam.map(function(x){ return '<option value="'+x.id+'">'+esc(sgPad2(x.codigo)+' · '+x.nombre)+'</option>'; }).join('');
+      sgProdFamChange();
+    } else toast((r&&r.error)||'No se pudo borrar','er');
   });
 }
 function sgSaveProd(){

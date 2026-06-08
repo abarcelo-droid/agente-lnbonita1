@@ -213,6 +213,57 @@ router.post('/variedades', requireAdmin, (req, res) => {
   } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
 });
 
+// ── DELETE de niveles de taxonomía (soft-delete) CON chequeo de uso obligatorio ──
+// `bloqueos` = lista de { count: SQL SELECT COUNT(*) AS n ..., params, etiqueta }.
+// Si algún conteo > 0 → rechaza (409) sin borrar y devuelve qué lo bloquea. Soft-delete
+// con el mismo patrón que sg_productos (activo=0 + eliminado_en/eliminado_por_id). El número
+// de código queda ocupado por el UNIQUE → nextCodigoNivel (MAX+1) NO lo reusa (intencional).
+function borrarNivelTax(db, req, res, tabla, id, bloqueos) {
+  const fila = db.prepare(`SELECT id FROM ${tabla} WHERE id=? AND activo=1`).get(id);
+  if (!fila) return res.status(404).json({ ok: false, error: 'No encontrado o ya eliminado' });
+  const detalle = [];
+  for (const b of bloqueos) {
+    const n = db.prepare(b.count).get(...(b.params || [])).n;
+    if (n > 0) detalle.push(`${n} ${b.etiqueta}`);
+  }
+  if (detalle.length) {
+    return res.status(409).json({ ok: false, bloqueado: true, detalle,
+      error: 'No se puede borrar: ' + detalle.join(' y ') + '. Reasignalos primero.' });
+  }
+  db.prepare(`UPDATE ${tabla} SET activo=0, eliminado_en=datetime('now','localtime'), eliminado_por_id=? WHERE id=? AND activo=1`)
+    .run(uid(req), id);
+  res.json({ ok: true, data: { id: Number(id) } });
+}
+
+router.delete('/variedades/:id', requireAdmin, (req, res) => {
+  const db = getDb();
+  try {
+    borrarNivelTax(db, req, res, 'sg_variedades', req.params.id, [
+      { count: 'SELECT COUNT(*) AS n FROM sg_productos WHERE variedad_id=? AND activo=1', params: [req.params.id], etiqueta: 'producto(s) la usan' }
+    ]);
+  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+
+router.delete('/especies/:id', requireAdmin, (req, res) => {
+  const db = getDb();
+  try {
+    borrarNivelTax(db, req, res, 'sg_especies', req.params.id, [
+      { count: 'SELECT COUNT(*) AS n FROM sg_variedades WHERE especie_id=? AND activo=1', params: [req.params.id], etiqueta: 'variedad(es) hija(s) activa(s)' },
+      { count: 'SELECT COUNT(*) AS n FROM sg_productos WHERE especie_id=? AND activo=1',  params: [req.params.id], etiqueta: 'producto(s) la usan' }
+    ]);
+  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+
+router.delete('/familias/:id', requireAdmin, (req, res) => {
+  const db = getDb();
+  try {
+    borrarNivelTax(db, req, res, 'sg_familias', req.params.id, [
+      { count: 'SELECT COUNT(*) AS n FROM sg_especies  WHERE familia_id=? AND activo=1', params: [req.params.id], etiqueta: 'especie(s) hija(s) activa(s)' },
+      { count: 'SELECT COUNT(*) AS n FROM sg_productos WHERE familia_id=? AND activo=1', params: [req.params.id], etiqueta: 'producto(s) la usan' }
+    ]);
+  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+
 // ── PRODUCTOS (código autogenerado FF.EE.VV desde la taxonomía) ───────────────
 // Resuelve la taxonomía, valida la jerarquía, arma el código y DENORMALIZA
 // familia/nombre/variedad (los consumen Compras/Lotes/Pedidos/Despachos/Reportes
