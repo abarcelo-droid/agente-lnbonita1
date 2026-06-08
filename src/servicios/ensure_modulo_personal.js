@@ -15,8 +15,9 @@ const MODULOS_PERSONAL = [
   ["personal-valorizar",  "Por valorizar",     662],
   ["personal-cc",         "Cuenta Corriente",  663],
   ["personal-catalogo",   "Catalogo",          664],
-  ["personal-tarifas",    "Tarifas",           666],
   ["personal-reportes",   "Reportes",          665],
+  // "personal-tarifas" se mudó a un sub-tab dentro de "Por valorizar" (ya no es
+  // modulo de sidebar). Se elimina abajo de modulos_config para no ensuciar Config Modulos.
 ];
 
 try {
@@ -31,6 +32,8 @@ try {
     // Legacy: el modulo monolitico "pa-personal" (tabs horizontales) ya no tiene entrada
     // en el sidebar; se elimina para no ensuciar Config Modulos.
     db.prepare("DELETE FROM modulos_config WHERE modulo='pa-personal'").run();
-    console.log("[ORG] Modulos Personal verificados (6 modulos; legacy 'pa-personal' removido)");
+    // 'personal-tarifas' se mudó a sub-tab de "Por valorizar": ya no va en el sidebar.
+    db.prepare("DELETE FROM modulos_config WHERE modulo='personal-tarifas'").run();
+    console.log("[ORG] Modulos Personal verificados (6 modulos; legacy 'pa-personal' y 'personal-tarifas' removidos)");
   } else { console.warn("[ORG] ensureModuloPersonal: sociedad Puente Cordon no encontrada"); }
 } catch (e) { console.error("[ORG] Error ensureModuloPersonal:", e.message); }
