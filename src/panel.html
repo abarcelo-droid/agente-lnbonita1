@@ -10690,6 +10690,26 @@ function admActModChips(modulos){
   keys.sort(function(a,b){ return modulos[b]-modulos[a]; });
   return keys.map(function(k){ return '<span class="tag" style="font-size:10px;margin:1px 2px">'+esc(k)+' '+modulos[k]+'</span>'; }).join('');
 }
+// "Último" como texto relativo + semáforo (verde hoy / amarillo 1-3d / rojo +3d).
+// ts = MAX(creado_en) "YYYY-MM-DD HH:MM:SS" (hora local). La fecha exacta va en el tooltip.
+function admActUltimo(ts){
+  if(!ts) return '<span style="color:var(--mut)">—</span>';
+  var dt = new Date(String(ts).replace(' ','T'));
+  if(isNaN(dt.getTime())) return esc(ts);
+  var hoy = new Date();
+  var a = new Date(dt.getFullYear(), dt.getMonth(), dt.getDate());
+  var b = new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate());
+  var dias = Math.round((b - a) / 86400000);
+  var color, txt;
+  if(dias <= 0)      { color = '#16a34a'; txt = 'Hoy'; }
+  else if(dias === 1){ color = '#d97706'; txt = 'Ayer'; }
+  else if(dias <= 3) { color = '#d97706'; txt = 'Hace ' + dias + ' días'; }
+  else if(dias <= 30){ color = '#dc2626'; txt = 'Hace ' + dias + ' días'; }
+  else               { color = '#dc2626'; txt = ('0'+dt.getDate()).slice(-2)+'/'+('0'+(dt.getMonth()+1)).slice(-2)+'/'+String(dt.getFullYear()).slice(-2); }
+  return '<span title="'+esc(ts)+'" style="white-space:nowrap">'
+    + '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:'+color+';margin-right:6px;vertical-align:middle"></span>'
+    + txt + '</span>';
+}
 function admActRenderUsuarios(rows){
   var tb = eid('aa-tb-usuarios');
   if(!rows.length){ tb.innerHTML = '<tr><td colspan="5" class="emp">Sin usuarios.</td></tr>'; return; }
@@ -10701,7 +10721,7 @@ function admActRenderUsuarios(rows){
       + '<td><span class="tag" style="font-size:10px">'+esc(u.rol||'—')+'</span></td>'
       + '<td style="text-align:right">'+tot+'</td>'
       + '<td>'+admActModChips(u.modulos)+'</td>'
-      + '<td style="font-size:11px;color:var(--mut)">'+(u.ultimo?esc(u.ultimo):'—')+'</td></tr>';
+      + '<td style="font-size:11.5px">'+admActUltimo(u.ultimo)+'</td></tr>';
   }).join('');
 }
 function admActRenderModulos(rows){
