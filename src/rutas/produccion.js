@@ -4522,19 +4522,23 @@ const REPORTES_PERSONAL = {
       { key: 'monto', label: 'Monto', money: true }
     ],
     run: (db, q) => {
-      const where = ["a.estado='valorizado'", 'a.personal_id IS NOT NULL'], p = [];
+      const modo = _modoReporte(q);
+      const where = ['a.personal_id IS NOT NULL'], p = [];
+      if (modo === 'dinero') where.push("a.estado='valorizado'");
       if (q.desde) { where.push('a.fecha>=?'); p.push(q.desde); }
       if (q.hasta) { where.push('a.fecha<=?'); p.push(q.hasta); }
+      const joinV = modo === 'jornales' ? 'LEFT JOIN' : 'JOIN';
+      const orden = modo === 'jornales' ? 'jornales' : 'monto';
       return db.prepare(`
         SELECT pe.id AS titular_id, pe.nombre AS titular,
           COUNT(*) AS asistencias,
           COALESCE(SUM(a.jornales_calc),0) AS jornales,
           COALESCE(SUM(v.monto_total),0) AS monto
         FROM pa_asistencias a
-        JOIN pa_asistencia_valorizacion v ON v.asistencia_id=a.id
+        ${joinV} pa_asistencia_valorizacion v ON v.asistencia_id=a.id
         JOIN pa_personal pe ON pe.id=a.personal_id
         WHERE ${where.join(' AND ')}
-        GROUP BY pe.id, pe.nombre ORDER BY monto DESC`).all(...p);
+        GROUP BY pe.id, pe.nombre ORDER BY ${orden} DESC`).all(...p);
     }
   },
   'por-contratista': {
@@ -4547,9 +4551,13 @@ const REPORTES_PERSONAL = {
       { key: 'monto', label: 'Monto', money: true }
     ],
     run: (db, q) => {
-      const where = ["a.estado='valorizado'", 'a.contratista_id IS NOT NULL'], p = [];
+      const modo = _modoReporte(q);
+      const where = ['a.contratista_id IS NOT NULL'], p = [];
+      if (modo === 'dinero') where.push("a.estado='valorizado'");
       if (q.desde) { where.push('a.fecha>=?'); p.push(q.desde); }
       if (q.hasta) { where.push('a.fecha<=?'); p.push(q.hasta); }
+      const joinV = modo === 'jornales' ? 'LEFT JOIN' : 'JOIN';
+      const orden = modo === 'jornales' ? 'jornales' : 'monto';
       return db.prepare(`
         SELECT pe.id AS titular_id, pe.nombre AS titular,
           COUNT(*) AS asistencias,
@@ -4557,10 +4565,10 @@ const REPORTES_PERSONAL = {
           COALESCE(SUM(a.jornales_calc),0) AS jornales,
           COALESCE(SUM(v.monto_total),0) AS monto
         FROM pa_asistencias a
-        JOIN pa_asistencia_valorizacion v ON v.asistencia_id=a.id
+        ${joinV} pa_asistencia_valorizacion v ON v.asistencia_id=a.id
         JOIN pa_personal pe ON pe.id=a.contratista_id
         WHERE ${where.join(' AND ')}
-        GROUP BY pe.id, pe.nombre ORDER BY monto DESC`).all(...p);
+        GROUP BY pe.id, pe.nombre ORDER BY ${orden} DESC`).all(...p);
     }
   },
   'por-finca': {
@@ -4572,9 +4580,14 @@ const REPORTES_PERSONAL = {
       { key: 'monto', label: 'Monto', money: true }
     ],
     run: (db, q) => {
-      const where = ["a.estado='valorizado'"], p = [];
+      const modo = _modoReporte(q);
+      const where = [], p = [];
+      if (modo === 'dinero') where.push("a.estado='valorizado'");
       if (q.desde) { where.push('a.fecha>=?'); p.push(q.desde); }
       if (q.hasta) { where.push('a.fecha<=?'); p.push(q.hasta); }
+      const joinV = modo === 'jornales' ? 'LEFT JOIN' : 'JOIN';
+      const orden = modo === 'jornales' ? 'jornales' : 'monto';
+      const whereSql = where.length ? ('WHERE ' + where.join(' AND ')) : '';
       // GROUP BY expresión repetida (no alias) para evitar colisión con a.finca real.
       return db.prepare(`
         SELECT COALESCE(NULLIF(a.finca,''),'(sin finca)') AS finca,
@@ -4582,9 +4595,9 @@ const REPORTES_PERSONAL = {
           COALESCE(SUM(a.jornales_calc),0) AS jornales,
           COALESCE(SUM(v.monto_total),0) AS monto
         FROM pa_asistencias a
-        JOIN pa_asistencia_valorizacion v ON v.asistencia_id=a.id
-        WHERE ${where.join(' AND ')}
-        GROUP BY COALESCE(NULLIF(a.finca,''),'(sin finca)') ORDER BY monto DESC`).all(...p);
+        ${joinV} pa_asistencia_valorizacion v ON v.asistencia_id=a.id
+        ${whereSql}
+        GROUP BY COALESCE(NULLIF(a.finca,''),'(sin finca)') ORDER BY ${orden} DESC`).all(...p);
     }
   },
   'por-rubro': {
@@ -4597,19 +4610,24 @@ const REPORTES_PERSONAL = {
       { key: 'monto', label: 'Monto', money: true }
     ],
     run: (db, q) => {
-      const where = ["a.estado='valorizado'"], p = [];
+      const modo = _modoReporte(q);
+      const where = [], p = [];
+      if (modo === 'dinero') where.push("a.estado='valorizado'");
       if (q.desde) { where.push('a.fecha>=?'); p.push(q.desde); }
       if (q.hasta) { where.push('a.fecha<=?'); p.push(q.hasta); }
+      const joinV = modo === 'jornales' ? 'LEFT JOIN' : 'JOIN';
+      const orden = modo === 'jornales' ? 'jornales' : 'monto';
+      const whereSql = where.length ? ('WHERE ' + where.join(' AND ')) : '';
       return db.prepare(`
         SELECT c.id AS rubro_id, c.codigo AS rubro_codigo, c.nombre AS rubro_nombre,
           COUNT(*) AS asistencias,
           COALESCE(SUM(a.jornales_calc),0) AS jornales,
           COALESCE(SUM(v.monto_total),0) AS monto
         FROM pa_asistencias a
-        JOIN pa_asistencia_valorizacion v ON v.asistencia_id=a.id
+        ${joinV} pa_asistencia_valorizacion v ON v.asistencia_id=a.id
         JOIN pa_cuentas c ON c.id=a.rubro_cuenta_id
-        WHERE ${where.join(' AND ')}
-        GROUP BY c.id, c.codigo, c.nombre ORDER BY monto DESC`).all(...p);
+        ${whereSql}
+        GROUP BY c.id, c.codigo, c.nombre ORDER BY ${orden} DESC`).all(...p);
     }
   }
 };
@@ -4621,6 +4639,16 @@ function _totalesReporte(cfg, rows) {
   return tot;
 }
 
+// Modo de vista del reporte: 'jornales' (todas las asistencias, sin $) | 'dinero' (default,
+// solo valorizado, con $). Cada run(db,q) ya conmuta JOIN/WHERE según este modo.
+function _modoReporte(q) { return q && q.modo === 'jornales' ? 'jornales' : 'dinero'; }
+
+// Columnas visibles según el modo. En 'jornales' se omite la columna Monto ($), que sería
+// parcial (solo sumaría lo valorizado vía LEFT JOIN).
+function _columnasReporte(cfg, modo) {
+  return modo === 'jornales' ? cfg.columns.filter(c => !c.money) : cfg.columns;
+}
+
 // JSON de un reporte tabular.
 function _reporteJson(key) {
   return (req, res) => {
@@ -4630,8 +4658,10 @@ function _reporteJson(key) {
       return res.status(403).json({ ok: false, error: 'Sin permiso de valorización' });
     try {
       const cfg = REPORTES_PERSONAL[key];
+      const modo = _modoReporte(req.query);
+      const columns = _columnasReporte(cfg, modo);
       const rows = cfg.run(db, req.query);
-      res.json({ ok: true, data: rows, totales: _totalesReporte(cfg, rows), columns: cfg.columns });
+      res.json({ ok: true, data: rows, totales: _totalesReporte({ columns }, rows), columns, modo });
     } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
   };
 }
@@ -4676,10 +4706,13 @@ function _reporteXlsx(key) {
       const XLSX = await _getXLSXPersonal();
       if (!XLSX) return res.status(503).json({ ok: false, error: 'xlsx (SheetJS) no disponible' });
       const cfg = REPORTES_PERSONAL[key];
+      const modo = _modoReporte(req.query);
+      const columns = _columnasReporte(cfg, modo);
       const rows = cfg.run(db, req.query);
       const subt = [];
       if (req.query.desde || req.query.hasta) subt.push('Período: ' + (req.query.desde || 'inicio') + ' a ' + (req.query.hasta || 'hoy'));
-      const buf = _buildReporteXlsx(XLSX, cfg.titulo, subt, cfg.columns, rows, _totalesReporte(cfg, rows));
+      subt.push('Vista: ' + (modo === 'jornales' ? 'Jornales (todas las asistencias)' : 'Dinero (solo valorizado)'));
+      const buf = _buildReporteXlsx(XLSX, cfg.titulo, subt, columns, rows, _totalesReporte({ columns }, rows));
       res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
       res.setHeader('Content-Disposition', 'attachment; filename="personal-' + key + '.xlsx"');
       res.send(buf);
@@ -4701,23 +4734,27 @@ const CIERRE_COLS = [
   { key: 'jornales', label: 'Jornales', num: true },
   { key: 'monto', label: 'Monto', money: true }
 ];
-function _cierreSemanal(db, fechaJueves) {
+function _cierreSemanal(db, fechaJueves, modo) {
+  modo = modo === 'jornales' ? 'jornales' : 'dinero';
   const fecha = (fechaJueves || '').slice(0, 10) || db.prepare("SELECT date('now','localtime') d").get().d;
   const jueves = _juevesDeLaSemana(db, fecha);
   const hasta = db.prepare("SELECT date(?, '+6 days') d").get(jueves).d;
+  const joinV = modo === 'jornales' ? 'LEFT JOIN' : 'JOIN';
+  const estadoCond = modo === 'jornales' ? '' : "a.estado='valorizado' AND ";
+  const orden = modo === 'jornales' ? 'jornales' : 'monto';
   const rows = db.prepare(`
     WITH base AS (
       SELECT COALESCE(a.personal_id, a.contratista_id) AS tit_id, a.jornales_calc, v.monto_total
       FROM pa_asistencias a
-      JOIN pa_asistencia_valorizacion v ON v.asistencia_id=a.id
-      WHERE a.estado='valorizado' AND a.fecha>=? AND a.fecha<=?
+      ${joinV} pa_asistencia_valorizacion v ON v.asistencia_id=a.id
+      WHERE ${estadoCond}a.fecha>=? AND a.fecha<=?
     )
     SELECT pe.id AS titular_id, pe.nombre AS titular, pe.tipo AS tipo,
       COUNT(*) AS asistencias,
       COALESCE(SUM(b.jornales_calc),0) AS jornales,
       COALESCE(SUM(b.monto_total),0) AS monto
     FROM base b JOIN pa_personal pe ON pe.id=b.tit_id
-    GROUP BY pe.id, pe.nombre, pe.tipo ORDER BY monto DESC`).all(jueves, hasta);
+    GROUP BY pe.id, pe.nombre, pe.tipo ORDER BY ${orden} DESC`).all(jueves, hasta);
   return { jueves, hasta, rows };
 }
 
@@ -4727,9 +4764,10 @@ router.get('/personal/reportes/cierre-semanal', requireAuth, (req, res) => {
   if (!perms.valorizacion && !perms.admin)
     return res.status(403).json({ ok: false, error: 'Sin permiso de valorización' });
   try {
-    const { jueves, hasta, rows } = _cierreSemanal(db, req.query.fecha_inicio_jueves);
-    const cfg = { columns: CIERRE_COLS };
-    res.json({ ok: true, data: rows, totales: _totalesReporte(cfg, rows), columns: CIERRE_COLS, semana: { desde: jueves, hasta } });
+    const modo = _modoReporte(req.query);
+    const { jueves, hasta, rows } = _cierreSemanal(db, req.query.fecha_inicio_jueves, modo);
+    const columns = _columnasReporte({ columns: CIERRE_COLS }, modo);
+    res.json({ ok: true, data: rows, totales: _totalesReporte({ columns }, rows), columns, modo, semana: { desde: jueves, hasta } });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
@@ -4741,10 +4779,12 @@ router.get('/personal/reportes/cierre-semanal.xlsx', requireAuth, async (req, re
   try {
     const XLSX = await _getXLSXPersonal();
     if (!XLSX) return res.status(503).json({ ok: false, error: 'xlsx (SheetJS) no disponible' });
-    const { jueves, hasta, rows } = _cierreSemanal(db, req.query.fecha_inicio_jueves);
-    const cfg = { columns: CIERRE_COLS };
-    const buf = _buildReporteXlsx(XLSX, 'Personal — Cierre semanal', ['Semana: ' + jueves + ' a ' + hasta + ' (jueves a jueves)'],
-      CIERRE_COLS, rows, _totalesReporte(cfg, rows));
+    const modo = _modoReporte(req.query);
+    const { jueves, hasta, rows } = _cierreSemanal(db, req.query.fecha_inicio_jueves, modo);
+    const columns = _columnasReporte({ columns: CIERRE_COLS }, modo);
+    const buf = _buildReporteXlsx(XLSX, 'Personal — Cierre semanal',
+      ['Semana: ' + jueves + ' a ' + hasta + ' (jueves a jueves)', 'Vista: ' + (modo === 'jornales' ? 'Jornales (todas las asistencias)' : 'Dinero (solo valorizado)')],
+      columns, rows, _totalesReporte({ columns }, rows));
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', 'attachment; filename="personal-cierre-semanal-' + jueves + '.xlsx"');
     res.send(buf);
