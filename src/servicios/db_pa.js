@@ -3268,6 +3268,49 @@ db.exec(`
     `);
   } catch (e) { console.error('[PA] Error creando pa_semanas_pago:', e.message); }
 
+  // (D) Liquidaciones de pago de jornales (reemplazo del pago masivo). Fase 1 = armado/selección
+  //     (borrador). Las columnas de la Fase 2 (caja/ámbito/asiento/egreso) ya existen nullable
+  //     para no migrar de nuevo: en borrador quedan NULL; se completan al EMITIR. Idempotente.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS pa_liquidaciones_pago (
+        id                INTEGER PRIMARY KEY AUTOINCREMENT,
+        semana_id         INTEGER REFERENCES pa_semanas_pago(id),
+        fecha             TEXT NOT NULL DEFAULT (date('now','localtime')),
+        rango_desde       TEXT,
+        rango_hasta       TEXT,
+        estado            TEXT NOT NULL DEFAULT 'borrador' CHECK(estado IN ('borrador','emitida','anulada')),
+        total             REAL NOT NULL DEFAULT 0,
+        -- Fase 2 (emisión): caja de donde sale, ámbito, egreso y asiento generados.
+        caja_id           INTEGER REFERENCES fin_cuentas(id),
+        ambito            TEXT,
+        fin_movimiento_id INTEGER REFERENCES fin_movimientos(id),
+        asiento_id        INTEGER REFERENCES pa_asientos(id),
+        notas             TEXT,
+        creado_por        INTEGER REFERENCES usuarios(id),
+        creado_en         TEXT DEFAULT (datetime('now','localtime')),
+        emitida_por       INTEGER,
+        emitida_en        TEXT,
+        anulada_por       INTEGER,
+        anulada_en        TEXT,
+        anulada_motivo    TEXT
+      );
+      -- Una línea por persona seleccionada (su monto = pendiente al armar la liquidación).
+      CREATE TABLE IF NOT EXISTS pa_liquidaciones_items (
+        id               INTEGER PRIMARY KEY AUTOINCREMENT,
+        liquidacion_id   INTEGER NOT NULL REFERENCES pa_liquidaciones_pago(id),
+        tipo_titular     TEXT NOT NULL,
+        titular_id       INTEGER NOT NULL REFERENCES pa_personal(id),
+        monto            REAL NOT NULL DEFAULT 0,
+        cc_movimiento_id INTEGER,
+        UNIQUE(liquidacion_id, tipo_titular, titular_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_liq_semana    ON pa_liquidaciones_pago(semana_id);
+      CREATE INDEX IF NOT EXISTS idx_liq_estado    ON pa_liquidaciones_pago(estado);
+      CREATE INDEX IF NOT EXISTS idx_liq_items_liq ON pa_liquidaciones_items(liquidacion_id);
+    `);
+  } catch (e) { console.error('[PA] Error creando pa_liquidaciones_pago:', e.message); }
+
   // (B) lote_id nullable en pa_asistencias → MO general sin lote (gasto de estructura,
   //     NO se imputa a pa_costos_lote). Cambiar NOT NULL requiere rebuild (SQLite).
   //     Guard: solo rebuildea si lote_id TODAVÍA es NOT NULL → idempotente.
