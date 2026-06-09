@@ -18,6 +18,9 @@ const MODULOS_SG = [
   ["sg-ventas",     "Ventas",           653],
   ["sg-catalogo",   "Catalogo",         654],
   ["sg-reportes",   "Reportes",         655],
+  // Gastos Directos (servicio con valorización diferida): Fletes de salida (Fase 1),
+  // cargas/descargas y repasos (próximas fases). Modulo propio en el sidebar.
+  ["sg-gastos-directos", "Gastos Directos", 657],
 ];
 
 try {
