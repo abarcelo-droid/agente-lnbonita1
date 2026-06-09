@@ -804,6 +804,68 @@ try {
   console.error('[DB] SG sg_recepcion_fotos:', e.message);
 }
 
+// ── RECEPCIÓN SIN OC (queda "OC pendiente", se vincula después) ──────────────────
+// 1) Flag oc_pendiente: 1 = recepción cargada sin OC (lotes con costo pendiente). ALTER simple.
+try {
+  const cols = db.prepare("PRAGMA table_info(sg_recepciones)").all().map(c => c.name);
+  if (!cols.includes('oc_pendiente')) {
+    db.exec('ALTER TABLE sg_recepciones ADD COLUMN oc_pendiente INTEGER');
+    console.log('[DB] SG sg_recepciones.oc_pendiente agregado');
+  }
+} catch (e) { console.error('[DB] SG migración sg_recepciones (oc_pendiente):', e.message); }
+
+// 2) oc_id pasa de NOT NULL a NULLABLE (para recibir sin OC). SQLite no permite ALTER del
+// NOT NULL → rebuild (FK off → tabla nueva con oc_id nullable → copia → drop → rename),
+// preservando ids (las FKs de sg_lotes/sg_recepcion_fotos siguen válidas). Copia dinámica
+// (intersección de columnas) para ser robusto ante drift. Corre solo si oc_id sigue NOT NULL.
+try {
+  const info = db.prepare("PRAGMA table_info(sg_recepciones)").all();
+  const ocCol = info.find(c => c.name === 'oc_id');
+  if (ocCol && ocCol.notnull === 1) {
+    db.pragma('foreign_keys = OFF');
+    const rebuild = db.transaction(() => {
+      db.exec(`
+        CREATE TABLE sg_recepciones_new (
+          id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+          oc_id                   INTEGER REFERENCES sg_oc(id),          -- ahora NULLABLE
+          numero_recepcion        TEXT UNIQUE,
+          fecha_recepcion         TEXT,
+          recibido_por            INTEGER,
+          numero_remito_proveedor TEXT,
+          observaciones           TEXT,
+          activo                  INTEGER NOT NULL DEFAULT 1,
+          creado_en               TEXT DEFAULT (datetime('now','localtime')),
+          creado_por              INTEGER,
+          modificado_en           TEXT,
+          modificado_por          INTEGER,
+          eliminado_en            TEXT,
+          eliminado_por_id        INTEGER,
+          factura_numero          TEXT,
+          dtv_codigo              TEXT,
+          pallets_recibidos       INTEGER,
+          bultos_recibidos        INTEGER,
+          observada               INTEGER,
+          calidad_estado_general  TEXT,
+          calidad_defectos        TEXT,
+          calidad_pct_afectado    REAL,
+          calidad_observaciones   TEXT,
+          oc_pendiente            INTEGER
+        );`);
+      const nuevas = db.prepare("PRAGMA table_info(sg_recepciones_new)").all().map(c => c.name);
+      const viejas = new Set(db.prepare("PRAGMA table_info(sg_recepciones)").all().map(c => c.name));
+      const comunes = nuevas.filter(c => viejas.has(c)).join(', ');
+      db.exec(`INSERT INTO sg_recepciones_new (${comunes}) SELECT ${comunes} FROM sg_recepciones;`);
+      db.exec('DROP TABLE sg_recepciones; ALTER TABLE sg_recepciones_new RENAME TO sg_recepciones;');
+    });
+    rebuild();
+    db.pragma('foreign_keys = ON');
+    console.log('[DB] SG sg_recepciones.oc_id ahora nullable (recepción sin OC)');
+  }
+} catch (e) {
+  try { db.pragma('foreign_keys = ON'); } catch (_) {}
+  console.error('[DB] SG migración sg_recepciones (oc_id nullable):', e.message);
+}
+
 // ── BACKFILL idempotente: margen_estimado por kg ────────────────────────────────
 // Bug F4: el margen se grababa como subtotal − kg_despachados × costo_final, pero
 // costo_final es el costo TOTAL del lote, no por kg. El front del modal ya calculaba

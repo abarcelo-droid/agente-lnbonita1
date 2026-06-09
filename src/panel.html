@@ -2330,7 +2330,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       <!-- ════════ PASO 1 — Recepción ════════ -->
       <div id="sg-rec-paso1">
         <div style="display:grid;grid-template-columns:2fr 1fr;gap:10px">
-          <div class="fl"><label>Orden de compra <span style="color:var(--err)">*</span></label><select id="sg-rec-oc" onchange="sgRecOcChange()"></select></div>
+          <div class="fl"><label>Orden de compra <span style="font-weight:400;color:var(--mut);font-size:11px">(o recibir sin OC)</span></label><select id="sg-rec-oc" onchange="sgRecOcChange()"></select></div>
           <div class="fl"><label>Fecha recepción</label><input type="date" id="sg-rec-fecha"></div>
         </div>
 
@@ -2399,6 +2399,22 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
         </div>
       </div>
 
+    </div>
+  </div>
+</div>
+
+<!-- Modal Vincular recepción (OC pendiente) a una OC -->
+<div class="ab-modal-overlay" id="sg-recvinc-modal">
+  <div class="ab-modal" style="width:560px;max-width:96vw;max-height:88vh;overflow-y:auto">
+    <div class="mhd"><div class="mht" id="sg-recvinc-tit">Vincular a una OC</div><button class="mcl" onclick="closeMB('sg-recvinc-modal')">×</button></div>
+    <div class="fg">
+      <div style="font-size:12px;color:var(--mut);margin-bottom:10px">Al vincular, se baja el precio de la OC a los lotes de esta recepción (match por producto) y se completa el costo. Los productos que no estén en la OC quedan pendientes.</div>
+      <div class="fl ff"><label>Orden de compra <span style="color:var(--err)">*</span></label><select id="sg-recvinc-oc"></select></div>
+      <div style="font-size:12px;color:var(--mut);margin-top:8px">¿No existe la OC? <button class="btn bo bs" onclick="sgRecVincularCrearOC()">➕ Crear OC nueva</button> y después volvé a vincular.</div>
+    </div>
+    <div class="ab-modal-footer">
+      <button class="btn bo" onclick="closeMB('sg-recvinc-modal')">Cancelar</button>
+      <button class="btn bb" onclick="sgRecVincularGuardar()">Vincular</button>
     </div>
   </div>
 </div>
@@ -3462,22 +3478,46 @@ function sgLoadRecepciones(){
       // BLOQUE B — si entró observada, link directo al informe de calidad en PDF.
       var pdf = x.observada ? ' <a class="btn bo bs" href="/api/sg/recepciones/'+x.id+'/calidad.pdf" target="_blank" title="Informe de calidad PDF">📄</a>' : '';
       var obs = x.observada ? ' <span title="Mercadería observada" style="color:var(--err)">⚠</span>' : '';
-      return '<tr><td><code>'+esc(x.numero_recepcion||'')+'</code>'+obs+'</td><td>'+(x.fecha_recepcion||'—')+'</td><td>'+esc(x.oc_numero||'—')+'</td><td>'+esc(x.proveedor_nombre||'—')+'</td><td>'+esc(x.numero_remito_proveedor||'—')+'</td><td style="text-align:right">'+x.lotes+'</td><td style="text-align:right"><button class="btn bo bs" onclick="sgRecVer('+x.id+')">👁</button>'+pdf+'</td></tr>';
+      // RECEPCIÓN SIN OC: badge "OC pendiente" en la columna OC + botón para vincular.
+      var ocCol = x.oc_pendiente ? '<span class="bdg bpe" title="Recibida sin OC — falta regularizar">OC pendiente</span>' : esc(x.oc_numero||'—');
+      var vinc = x.oc_pendiente ? ' <button class="btn bb bs" onclick="sgRecVincularOpen('+x.id+',\''+esc(x.numero_recepcion||'')+'\')" title="Vincular a una OC">🔗</button>' : '';
+      return '<tr><td><code>'+esc(x.numero_recepcion||'')+'</code>'+obs+'</td><td>'+(x.fecha_recepcion||'—')+'</td><td>'+ocCol+'</td><td>'+esc(x.proveedor_nombre||'—')+'</td><td>'+esc(x.numero_remito_proveedor||'—')+'</td><td style="text-align:right">'+x.lotes+'</td><td style="text-align:right;white-space:nowrap"><button class="btn bo bs" onclick="sgRecVer('+x.id+')">👁</button>'+pdf+vinc+'</td></tr>';
     }).join('') : '<tr><td colspan="7" class="emp">Sin recepciones.</td></tr>';
   });
 }
 function sgRecVer(id){
   api('/api/sg/recepciones/'+id).then(function(r){
     if(!r||!r.ok) return; var x=r.data;
-    var h=(x.lotes||[]).map(function(l){ return '• '+l.codigo_lote+' — '+(l.producto_nombre||'')+' '+nr(l.kg_reales)+'kg'+(l.calidad?(' ('+l.calidad+')'):'')+' · costo '+sgMoney(l.costo_final); }).join('\n');
-    alert('Recepción '+x.numero_recepcion+' (OC '+(x.oc_numero||'')+')\n\nLotes:\n'+(h||'—'));
+    var h=(x.lotes||[]).map(function(l){ var c=(l.precio_unitario_kg==null)?'COSTO PENDIENTE':sgMoney(l.costo_final); return '• '+l.codigo_lote+' — '+(l.producto_nombre||'')+' '+nr(l.kg_reales)+'kg'+(l.calidad?(' ('+l.calidad+')'):'')+' · costo '+c; }).join('\n');
+    var ocTxt = x.oc_pendiente ? 'OC PENDIENTE — vincular desde la lista (🔗)' : ('OC '+(x.oc_numero||''));
+    alert('Recepción '+x.numero_recepcion+' ('+ocTxt+')\n\nLotes:\n'+(h||'—'));
+  });
+}
+// VINCULAR una recepción "OC pendiente" a una OC (baja el precio de la OC a los lotes).
+function sgRecVincularOpen(id, numero){
+  SG._vincRec=id;
+  eid('sg-recvinc-tit').textContent='Vincular '+(numero||'recepción')+' a una OC';
+  Promise.all([api('/api/sg/oc?estado=abierta'), api('/api/sg/oc?estado=recibida_parcial')]).then(function(res){
+    var ocs=((res[0]&&res[0].ok)?res[0].data:[]).concat((res[1]&&res[1].ok)?res[1].data:[]);
+    eid('sg-recvinc-oc').innerHTML='<option value="">— Elegir OC —</option>'+ocs.map(function(o){return '<option value="'+o.id+'">'+esc(o.numero)+' — '+esc(o.proveedor_nombre||'')+' · '+(o.fecha_oc||'')+'</option>';}).join('');
+  });
+  eid('sg-recvinc-modal').classList.add('on');
+}
+function sgRecVincularCrearOC(){ closeMB('sg-recvinc-modal'); toast('Creá la OC y después volvé a vincular la recepción','ok'); if(typeof sgOcOpen==='function') sgOcOpen(); }
+function sgRecVincularGuardar(){
+  var ocId=eid('sg-recvinc-oc').value;
+  if(!ocId){ toast('Elegí una OC','er'); return; }
+  api('/api/sg/recepciones/'+SG._vincRec+'/vincular-oc','POST',{oc_id:Number(ocId)}).then(function(r){
+    if(r&&r.ok){ toast('Vinculada — '+r.data.conPrecio+'/'+r.data.lotes+' lote(s) con precio','ok'); closeMB('sg-recvinc-modal'); sgLoadRecepciones(); }
+    else toast((r&&r.error)||'Error','er');
   });
 }
 function sgRecOpen(ocId){
-  SG.recItems=[]; SG._recFotos=[];
+  SG.recItems=[]; SG._recFotos=[]; SG.recSinOc=false;
   Promise.all([api('/api/sg/oc?estado=abierta'), api('/api/sg/oc?estado=recibida_parcial')]).then(function(res){
     var ocs=((res[0]&&res[0].ok)?res[0].data:[]).concat((res[1]&&res[1].ok)?res[1].data:[]);
-    eid('sg-rec-oc').innerHTML='<option value="">— Elegir OC —</option>'+ocs.map(function(o){return '<option value="'+o.id+'">'+esc(o.numero)+' — '+esc(o.proveedor_nombre||'')+'</option>';}).join('');
+    // OC OPCIONAL: se puede recibir SIN OC → queda "OC pendiente" y se vincula después.
+    eid('sg-rec-oc').innerHTML='<option value="">— Elegir OC —</option><option value="__sinoc__">— Sin OC (regularizar después) —</option>'+ocs.map(function(o){return '<option value="'+o.id+'">'+esc(o.numero)+' — '+esc(o.proveedor_nombre||'')+'</option>';}).join('');
     eid('sg-rec-fecha').value=new Date().toISOString().slice(0,10);
     eid('sg-rec-remito').value=''; eid('sg-rec-obs').value='';
     // PASO 1 — reset documentación + paletizado
@@ -3508,10 +3548,15 @@ function sgRecPaso(n){
 }
 function sgRecToPaso1(){ sgRecPaso(1); }
 function sgRecToPaso2(){
-  // Validar el paso 1 antes de avanzar (OC + al menos un item con kg).
-  if(!eid('sg-rec-oc').value){ toast('Elegí una OC','er'); return; }
-  var any=SG.recItems.some(function(it){ return it.lotes.some(function(l){return Number(l.kg_reales)>0;}); });
-  if(!any){ toast('Cargá kg en al menos un item','er'); return; }
+  // Validar el paso 1 antes de avanzar (OC o "Sin OC" + al menos una línea con kg).
+  if(!eid('sg-rec-oc').value){ toast('Elegí una OC o "Sin OC"','er'); return; }
+  if(SG.recSinOc){
+    var okp=SG.recItems.some(function(it){ return it.producto_id && it.lotes.some(function(l){return Number(l.kg_reales)>0;}); });
+    if(!okp){ toast('Cargá producto y kg en al menos una línea','er'); return; }
+  } else {
+    var any=SG.recItems.some(function(it){ return it.lotes.some(function(l){return Number(l.kg_reales)>0;}); });
+    if(!any){ toast('Cargá kg en al menos un item','er'); return; }
+  }
   sgRecPaso(2);
 }
 // PASO 2 — toggle del informe de calidad (muestra/oculta campos + botón de preview PDF).
@@ -3539,6 +3584,12 @@ function sgRecRenderFotos(){
 }
 function sgRecOcChange(){
   var ocId=eid('sg-rec-oc').value;
+  if(ocId==='__sinoc__'){   // SIN OC → líneas manuales (producto + kg), costo pendiente
+    SG.recSinOc=true;
+    SG.recItems=[{producto_id:'',producto_nombre:'',lotes:[{kg_reales:'',calidad:''}]}];
+    sgRecRenderItems(); return;
+  }
+  SG.recSinOc=false;
   if(!ocId){ eid('sg-rec-items').innerHTML='<div class="emp">Elegí una OC…</div>'; SG.recItems=[]; return; }
   api('/api/sg/oc/'+ocId).then(function(r){
     if(!r||!r.ok) return;
@@ -3549,6 +3600,10 @@ function sgRecOcChange(){
     sgRecRenderItems();
   });
 }
+// SIN OC — líneas manuales: agregar/quitar producto + elegir producto.
+function sgRecAddItem(){ SG.recItems.push({producto_id:'',producto_nombre:'',lotes:[{kg_reales:'',calidad:''}]}); sgRecRenderItems(); }
+function sgRecDelItem(i){ SG.recItems.splice(i,1); if(!SG.recItems.length) SG.recItems=[{producto_id:'',producto_nombre:'',lotes:[{kg_reales:'',calidad:''}]}]; sgRecRenderItems(); }
+function sgRecProdChange(i,v){ SG.recItems[i].producto_id=v; var p=(SG.cacheProd||[]).find(function(x){return String(x.id)===String(v);}); SG.recItems[i].producto_nombre=p?((p.nombre||'')+(p.variedad?(' '+p.variedad):'')):''; }
 function sgRecAddLote(i){ SG.recItems[i].lotes.push({kg_reales:'',calidad:''}); sgRecRenderItems(); }
 function sgRecDelLote(i,j){ SG.recItems[i].lotes.splice(j,1); sgRecRenderItems(); }
 function sgRecUpd(i,j,c,v){ SG.recItems[i].lotes[j][c]=v; sgRecSuma(); }
@@ -3563,11 +3618,20 @@ function sgRecRenderItems(){
         +(it.lotes.length>1?'<button class="btn bd bs" onclick="sgRecDelLote('+i+','+j+')">×</button>':'<span></span>')
         +'</div>';
     }).join('');
+    // SIN OC: el encabezado es un selector de producto (no hay item de OC). Con OC: nombre fijo + estimado.
+    var head = SG.recSinOc
+      ? '<div style="display:flex;gap:8px;align-items:center;margin-bottom:6px">'
+          +'<select style="flex:1" onchange="sgRecProdChange('+i+',this.value)">'+sgOpts(sgOcProductos(),sgOcProdLabel,it.producto_id,'— Producto —')+'</select>'
+          +(SG.recItems.length>1?'<button class="btn bd bs" onclick="sgRecDelItem('+i+')">×</button>':'')
+        +'</div>'
+      : '<div style="font-weight:600;font-size:13px;margin-bottom:6px">'+esc(it.producto_nombre||'')+' <span style="color:var(--mut);font-weight:400">— est. '+nr(it.kg_estimados)+'kg'+(it.kg_recibidos?(', recibidos '+nr(it.kg_recibidos)+'kg'):'')+'</span></div>';
     return '<div style="border:1px solid var(--bor);border-radius:8px;padding:10px;margin-bottom:8px">'
-      +'<div style="font-weight:600;font-size:13px;margin-bottom:6px">'+esc(it.producto_nombre||'')+' <span style="color:var(--mut);font-weight:400">— est. '+nr(it.kg_estimados)+'kg'+(it.kg_recibidos?(', recibidos '+nr(it.kg_recibidos)+'kg'):'')+'</span></div>'
+      +head
       +lotesH+'<button class="btn bo bs" onclick="sgRecAddLote('+i+')">+ dividir por calidad</button> <span style="font-size:12px;color:var(--mut)" id="sg-rec-suma-'+i+'"></span>'
       +'</div>';
-  }).join('');
+  }).join('')
+    + (SG.recSinOc ? '<button class="btn bo bs" style="margin-top:4px" onclick="sgRecAddItem()">+ Agregar producto</button>'
+        +'<div style="font-size:11px;color:var(--mut);margin-top:6px">Sin OC: la mercadería queda con <b>costo pendiente</b> hasta vincular una OC.</div>' : '');
   sgRecSuma();
 }
 function sgRecSuma(){
@@ -3576,22 +3640,26 @@ function sgRecSuma(){
 // Arma el payload de la recepción (PASO 1 + PASO 2). requireItems=false → para la vista
 // previa PDF (permite previsualizar el informe aunque falten items). Devuelve null si inválido.
 function sgRecBuildBody(requireItems){
-  var ocId=eid('sg-rec-oc').value;
-  if(!ocId){ toast('Elegí una OC','er'); return null; }
+  var ocVal=eid('sg-rec-oc').value;
+  if(!ocVal){ toast('Elegí una OC o "Sin OC"','er'); return null; }
+  var sinOc=SG.recSinOc;
   var items=[];
   for(var i=0;i<SG.recItems.length;i++){
     var it=SG.recItems[i];
     var lotes=it.lotes.filter(function(l){return Number(l.kg_reales)>0;});
     if(!lotes.length) continue;
+    if(sinOc && !it.producto_id) continue;
     var suma=lotes.reduce(function(a,l){return a+Number(l.kg_reales);},0);
     // producto_nombre se incluye solo para la vista previa PDF; el POST real lo ignora.
-    items.push({ oc_item_id:it.oc_item_id, producto_nombre:it.producto_nombre, kg_reales_item:suma,
-      lotes:lotes.map(function(l){return {kg_reales:Number(l.kg_reales),calidad:l.calidad||null};}) });
+    var item={ producto_nombre:it.producto_nombre, kg_reales_item:suma,
+      lotes:lotes.map(function(l){return {kg_reales:Number(l.kg_reales),calidad:l.calidad||null};}) };
+    if(sinOc) item.producto_id=Number(it.producto_id); else item.oc_item_id=it.oc_item_id;
+    items.push(item);
   }
-  if(requireItems!==false && !items.length){ toast('Cargá kg en al menos un item','er'); return null; }
+  if(requireItems!==false && !items.length){ toast(sinOc?'Cargá producto y kg en al menos una línea':'Cargá kg en al menos un item','er'); return null; }
   var num=function(id){ var v=eid(id).value; return v===''?null:Number(v); };
   var observada=eid('sg-rec-observada').checked;
-  return { oc_id:Number(ocId), fecha_recepcion:eid('sg-rec-fecha').value,
+  return { oc_id: sinOc?null:Number(ocVal), fecha_recepcion:eid('sg-rec-fecha').value,
     numero_remito_proveedor:eid('sg-rec-remito').value, observaciones:eid('sg-rec-obs').value,
     factura_numero:eid('sg-rec-factura').value, dtv_codigo:eid('sg-rec-dtv').value,           // PASO 1 · documentación
     pallets_recibidos:num('sg-rec-pallets'), bultos_recibidos:num('sg-rec-bultos'),           // PASO 1 · paletizado
@@ -3815,7 +3883,7 @@ function sgLoadStock(){
         +'<td><code>'+esc(l.codigo_lote)+'</code></td><td>'+esc(l.producto_nombre||'')+'</td>'
         +'<td style="text-align:right">'+nr(l.kg_reales)+'</td><td>'+(l.calidad||'—')+'</td>'
         +'<td>'+(l.fecha_vencimiento_estimada||'—')+'</td><td style="text-align:center">'+sgDiasBadge(l.dias_restantes,l.estado)+'</td>'
-        +'<td style="text-align:right">'+sgMoney(l.costo_final)+'</td>'
+        +'<td style="text-align:right">'+(l.precio_unitario_kg==null?'<span class="bdg bpe" title="Sin precio (recepción sin OC o pizarra sin cerrar)">pendiente</span>':sgMoney(l.costo_final))+'</td>'
         +'<td style="text-align:center"><span class="bdg '+(l.estado==='bajado'?'ber':'bok')+'">'+(SG_ESTLOTE[l.estado]||l.estado)+'</span></td>'
         +'<td style="text-align:right"><button class="btn bo bs" onclick="event.stopPropagation();sgLoteVer('+l.id+')">🔍</button></td></tr>';
     }).join('') : '<tr><td colspan="9" class="emp">Sin lotes con esos filtros.</td></tr>';
