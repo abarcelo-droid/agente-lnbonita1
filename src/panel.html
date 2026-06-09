@@ -4825,6 +4825,11 @@ function sgRepExport(){
 
 <!-- 2) ASISTENCIA DIARIA -->
 <div class="sec pp-mod" id="sec-personal-asistencia">
+  <style>
+    /* Tipografía uniforme en toda la planilla (Fecha/Persona quedaban más grandes que el resto) */
+    #sec-personal-asistencia #pp-asist-thead th,
+    #sec-personal-asistencia #pp-asist-tbody td { font-size: 11px; }
+  </style>
   <div class="ph"><div><div class="ph-t">📝 Planilla de Asistencia</div><div class="ph-s">Carga de Asistencia Diaria</div></div></div>
   <div class="pp-sub on" id="pp-sub-asistencia">
     <div style="display:flex;gap:10px;margin-bottom:10px;align-items:flex-end;flex-wrap:wrap">
@@ -4844,7 +4849,6 @@ function sgRepExport(){
     <div class="tw"><table>
       <thead>
         <tr id="pp-asist-thead"></tr>
-        <tr id="pp-asist-filtros"></tr>
       </thead>
       <tbody id="pp-asist-tbody"></tbody>
     </table></div>
@@ -5005,7 +5009,7 @@ function sgRepExport(){
       <thead><tr>
         <th style="text-align:center"><input type="checkbox" id="pp-mas-all" onchange="ppMasivoToggleAll()"></th>
         <th>Titular</th><th>Tipo</th><th style="text-align:center">Jornales</th><th style="text-align:right">Tarifa</th><th style="text-align:right">Devengado</th>
-        <th style="text-align:right">Pagado</th><th style="text-align:right">Pendiente</th>
+        <th style="text-align:right">Pagado</th><th style="text-align:right" title="Pagos/adelantos manuales de esta semana — ya descontados del pendiente">Adelantado</th><th style="text-align:right">Pendiente</th>
       </tr></thead>
       <tbody id="pp-mas-tbody"></tbody>
     </table></div>
@@ -9729,7 +9733,7 @@ function loadSec(s) {
     'sg-catalogo':   function(){ sgLoadCaches(function(){ sgCatSub('productos'); }); },
     'sg-reportes':   function(){ sgRepInit(); },
     'personal-padron':     function(){ ppOpenModulo('padron'); },
-    'personal-asistencia': function(){ ['pp-asist-desde','pp-asist-hasta','pp-asist-buscar'].forEach(function(id){ var e=document.getElementById(id); if(e) e.value=''; }); var sm=document.getElementById('pp-asist-semana'); if(sm) sm.value=''; PP.asistColFiltros={}; PP.asistSort=null; PP._asistSemanasCargadas=false; ppOpenModulo('asistencia'); },
+    'personal-asistencia': function(){ ['pp-asist-desde','pp-asist-hasta','pp-asist-buscar'].forEach(function(id){ var e=document.getElementById(id); if(e) e.value=''; }); var sm=document.getElementById('pp-asist-semana'); if(sm) sm.value=''; PP.asistSort=null; PP._asistSemanasCargadas=false; ppOpenModulo('asistencia'); },
     'personal-valorizar':  function(){ ppOpenModulo('valorizar'); },
     'personal-cc':         function(){ ppOpenModulo('cc'); },
     'personal-catalogo':   function(){ ppOpenModulo('grupos'); },
@@ -20901,7 +20905,7 @@ function ppMasivoRender() {
   var tbody = document.getElementById('pp-mas-tbody');
   var rows = PP.masPend || [];
   if (!rows.length) {
-    tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--mut);padding:16px">Sin pendientes para esta semana.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;color:var(--mut);padding:16px">Sin pendientes para esta semana.</td></tr>';
     document.getElementById('pp-mas-all').checked = false;
     ppMasivoResumen();
     return;
@@ -20915,6 +20919,7 @@ function ppMasivoRender() {
       '<td style="text-align:right">'+tarifaCell+'</td>'+
       '<td style="text-align:right">'+ppFmtARS(d.devengado)+'</td>'+
       '<td style="text-align:right">'+ppFmtARS(d.pagado)+'</td>'+
+      '<td style="text-align:right" title="Pagos/adelantos manuales de esta semana — ya descontados del pendiente">'+((d.adelantado||0)>0?'<span style="color:var(--warn,#b45309)">'+ppFmtARS(d.adelantado)+'</span>':'—')+'</td>'+
       '<td style="text-align:right"><strong>'+ppFmtARS(d.pendiente)+'</strong></td></tr>';
   }).join('');
   document.getElementById('pp-mas-all').checked = true;
@@ -21322,7 +21327,6 @@ function ppAsistRangoChange() {
 function ppAsistLimpiarFiltros() {
   ['pp-asist-desde','pp-asist-hasta','pp-asist-buscar'].forEach(function(id){ var e=document.getElementById(id); if(e) e.value=''; });
   var sel = document.getElementById('pp-asist-semana'); if (sel) sel.value = '';
-  PP.asistColFiltros = {};
   PP.asistSort = null;
   ppLoadAsistencia();
 }
@@ -21331,11 +21335,6 @@ function ppAsistSort(key) {
   if (s && s.col === key) s.dir = (s.dir === 'asc' ? 'desc' : 'asc');
   else PP.asistSort = { col: key, dir: 'asc' };
   ppRenderAsistHead();
-  ppAsistAplicarFiltros();
-}
-function ppAsistColFiltro(key, val) {
-  PP.asistColFiltros = PP.asistColFiltros || {};
-  PP.asistColFiltros[key] = val;
   ppAsistAplicarFiltros();
 }
 
@@ -21354,7 +21353,6 @@ function ppLoadAsistencia() {
     paF(url).then(function(r){
       PP.asistencias = (r && r.data) || [];
       ppRenderAsistHead();
-      ppRenderAsistFiltros();
       ppAsistAplicarFiltros();
     });
   });
@@ -21370,31 +21368,12 @@ function ppRenderAsistHead() {
     return '<th onclick="ppAsistSort(\''+c.key+'\')" style="cursor:pointer;white-space:nowrap;'+al+'" title="Ordenar">'+esc(c.label)+arrow+'</th>';
   }).join('') + '<th></th>';
 }
-// Fila de inputs de filtro por columna (se dibuja una vez por carga; conserva valores).
-function ppRenderAsistFiltros() {
-  ppAsistEnsureCols();
-  var colf = PP.asistColFiltros || {};
-  document.getElementById('pp-asist-filtros').innerHTML = PP.asistCols.map(function(c){
-    if (!c.filtro) return '<th style="padding:2px 4px"><span style="font-size:9px;color:var(--mut)">↑ rango</span></th>';
-    var al = c.align === 'center' ? 'text-align:center;' : '';
-    var v = esc(colf[c.key] || '');
-    var ph = c.num ? 'valor' : 'filtrar';
-    return '<th style="padding:2px 4px;'+al+'"><input type="text" value="'+v+'" oninput="ppAsistColFiltro(\''+c.key+'\', this.value)" placeholder="'+ph+'" style="width:100%;min-width:50px;box-sizing:border-box;font-size:11px;padding:2px 4px"></th>';
-  }).join('') + '<th></th>';
-}
-
-// Aplica buscador + filtros por columna + orden sobre PP.asistencias → PP.asistVista.
+// Aplica buscador + orden sobre PP.asistencias → PP.asistVista.
 function ppAsistAplicarFiltros() {
   ppAsistEnsureCols();
   var buscar = ppAsistNorm((document.getElementById('pp-asist-buscar')||{}).value || '');
-  var colf = PP.asistColFiltros || {};
-  var activos = PP.asistCols.filter(function(c){ return c.filtro && ppAsistNorm(colf[c.key]||''); });
   var rows = (PP.asistencias || []).filter(function(a){
     if (buscar && ppAsistNorm(ppAsistPersonaTxt(a)).indexOf(buscar) === -1) return false;
-    for (var i=0;i<activos.length;i++){
-      var c = activos[i];
-      if (ppAsistNorm(c.filtro(a)).indexOf(ppAsistNorm(colf[c.key])) === -1) return false;
-    }
     return true;
   });
   var so = PP.asistSort;
@@ -22159,21 +22138,24 @@ function ppGuardarMov() {
   if (!opt || !opt.value) return toast('Elegí un titular', 'er');
   var monto = Number(document.getElementById('pp-mov-monto').value);
   if (!monto || isNaN(monto)) return toast('Monto inválido', 'er');
+  var cajaVal = document.getElementById('pp-mov-caja').value;
   var body = {
     titular_id: parseInt(opt.value),
     tipo_titular: opt.dataset.tipo,
     tipo_mov: document.getElementById('pp-mov-tipo').value,
     monto: monto,
     fecha: document.getElementById('pp-mov-fecha').value || null,
-    descripcion: document.getElementById('pp-mov-desc').value.trim() || null
+    descripcion: document.getElementById('pp-mov-desc').value.trim() || null,
+    caja_id: cajaVal ? parseInt(cajaVal) : null
   };
   paF('/api/pa/personal/cc/movimiento', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) })
     .then(function(r){
       if (!r.ok) return toast(r.error||'Error', 'er');
-      toast('Movimiento registrado');
+      toast(r.sin_caja ? 'Registrado — OJO: sin caja, no impactó tesorería' : 'Movimiento registrado', r.sin_caja ? 'warn' : 'ok');
       document.getElementById('mb-pp-ccmov').classList.remove('on');
       if (PP.ccActual && PP.ccActual.titular.id === body.titular_id) ppVerCC(body.tipo_titular, body.titular_id);
       ppLoadCC();
+      ppRefrescarPagos();
     });
 }
 
@@ -22184,6 +22166,7 @@ function ppAnularMov(id) {
     toast('Movimiento anulado');
     if (PP.ccActual) ppVerCC(PP.ccActual.titular.tipo, PP.ccActual.titular.id);
     ppLoadCC();
+    ppRefrescarPagos();
   });
 }
 
