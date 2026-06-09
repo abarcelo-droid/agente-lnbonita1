@@ -430,8 +430,17 @@ montarCRUD('presentaciones', 'sg_presentaciones',
 montarCRUD('proveedores', 'sg_proveedores',
   ['razon_social', 'nombre_comercial', 'origen', 'cuit', 'tipo', 'categoria_fiscal', 'tipo_fiscal_habitual',
    'condicion_pago_habitual_id', 'cbu', 'alias_cbu', 'comercial_responsable_id', 'localidad', 'provincia',
-   'telefono', 'email', 'observaciones', 'adm_proveedor_id'],
+   'telefono', 'email', 'observaciones', 'adm_proveedor_id', 'es_servicio'],   // es_servicio: 1 = fletero/cooperativa
   { orderBy: 'razon_social COLLATE NOCASE' });
+
+// Fleteros / proveedores de servicio (es_servicio=1). Alimenta el selector del despacho y
+// el filtro del módulo Gastos Directos.
+router.get('/proveedores-servicio', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    res.json({ ok: true, data: db.prepare("SELECT * FROM sg_proveedores WHERE activo=1 AND es_servicio=1 ORDER BY razon_social COLLATE NOCASE").all() });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
 
 // ── CLIENTES ──────────────────────────────────────────────────────────────────
 montarCRUD('clientes', 'sg_clientes',
@@ -1441,6 +1450,31 @@ router.get('/lotes-disponibles', requireAuth, (req, res) => {
 });
 
 // ── DESPACHOS ──────────────────────────────────────────────────────────────────
+// PARTE B — sincroniza el gasto de FLETE DE SALIDA (pendiente_valorizar) de un despacho con el
+// fletero elegido. Idempotente: solo toca el gasto PENDIENTE (nunca uno ya valorizado).
+//  - sin fletero → anula el pendiente si existía.
+//  - con fletero → si ya hay pendiente, reasigna; si no, crea uno nuevo sin monto.
+function syncGastoFleteDespacho(db, despachoId, fleteroId, fechaServicio, userId) {
+  const existente = db.prepare(
+    "SELECT id, estado FROM sg_gastos_directos WHERE despacho_id=? AND tipo_gasto='flete_salida' AND activo=1 AND estado!='anulado'"
+  ).get(despachoId);
+  if (!fleteroId) {
+    if (existente && existente.estado === 'pendiente_valorizar') {
+      db.prepare("UPDATE sg_gastos_directos SET estado='anulado' WHERE id=?").run(existente.id);
+    }
+    return;
+  }
+  if (existente) {
+    if (existente.estado === 'pendiente_valorizar') {
+      db.prepare("UPDATE sg_gastos_directos SET proveedor_servicio_id=?, fecha_servicio=? WHERE id=?").run(fleteroId, fechaServicio, existente.id);
+    }
+    return; // si ya está valorizado, no se re-asigna acá
+  }
+  db.prepare(`INSERT INTO sg_gastos_directos
+    (tipo_gasto, despacho_id, proveedor_servicio_id, estado, fecha_servicio, creado_por)
+    VALUES ('flete_salida', ?, ?, 'pendiente_valorizar', ?, ?)`).run(despachoId, fleteroId, fechaServicio, userId);
+}
+
 router.post('/despachos', requireAdmin, (req, res) => {
   const db = getDb();
   try {
@@ -1467,13 +1501,16 @@ router.post('/despachos', requireAdmin, (req, res) => {
 
     const tx = db.transaction(() => {
       const numero = nextNumero(db, 'SG-DESP', 'sg_despachos', 'numero');
+      const fleteroId = b.fletero_id ? Number(b.fletero_id) : null;
       const info = db.prepare(`INSERT INTO sg_despachos
-        (numero, pedido_id, cliente_id, comercial_id, fecha_despacho, transporte, transportista, chofer, dominio, estado, observaciones, creado_por)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+        (numero, pedido_id, cliente_id, comercial_id, fecha_despacho, transporte, transportista, chofer, dominio, fletero_id, estado, observaciones, creado_por)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
         numero, b.pedido_id || null, b.cliente_id, b.comercial_id || null, val(b.fecha_despacho),
-        val(b.transporte), val(b.transportista), val(b.chofer), val(b.dominio),
+        val(b.transporte), val(b.transportista), val(b.chofer), val(b.dominio), fleteroId,
         val(b.estado) || 'despachado', val(b.observaciones), uid(req));
       const despachoId = info.lastInsertRowid;
+      // PARTE B — si se asignó fletero, queda un gasto de flete de salida PENDIENTE de valorizar.
+      syncGastoFleteDespacho(db, despachoId, fleteroId, val(b.fecha_despacho), uid(req));
       const ins = db.prepare(`INSERT INTO sg_despacho_items
         (despacho_id, lote_id, producto_id, presentacion_id, cantidad_presentaciones, kg_despachados, precio_por_kg, subtotal, margen_estimado)
         VALUES (?,?,?,?,?,?,?,?,?)`);
@@ -1509,12 +1546,18 @@ router.get('/despachos', requireAuth, (req, res) => {
     if (req.query.estado) { where.push('d.estado=?'); params.push(req.query.estado); }
     const rows = db.prepare(`
       SELECT d.*, c.razon_social AS cliente_nombre, p.numero AS pedido_numero,
+        f.razon_social AS fletero_nombre,
         (SELECT COALESCE(SUM(subtotal),0) FROM sg_despacho_items WHERE despacho_id=d.id) AS total,
-        (SELECT COALESCE(SUM(margen_estimado),0) FROM sg_despacho_items WHERE despacho_id=d.id) AS margen
+        (SELECT COALESCE(SUM(margen_estimado),0) FROM sg_despacho_items WHERE despacho_id=d.id) AS margen,
+        (SELECT COALESCE(SUM(monto),0) FROM sg_gastos_directos WHERE despacho_id=d.id AND tipo_gasto='flete_salida' AND estado='valorizado' AND activo=1) AS flete_salida
       FROM sg_despachos d
       LEFT JOIN sg_clientes c ON c.id=d.cliente_id
       LEFT JOIN sg_pedidos p ON p.id=d.pedido_id
+      LEFT JOIN sg_proveedores f ON f.id=d.fletero_id
       WHERE ${where.join(' AND ')} ORDER BY d.id DESC`).all(...params);
+    // PARTE D — margen NETO = margen de items − flete de salida valorizado (costo de la venta,
+    // NO del lote: no toca costo_final). flete pendiente todavía no descuenta (aún sin monto).
+    for (const r of rows) r.margen_neto = (r.margen || 0) - (r.flete_salida || 0);
     res.json({ ok: true, data: rows });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
@@ -1522,15 +1565,22 @@ router.get('/despachos', requireAuth, (req, res) => {
 router.get('/despachos/:id', requireAuth, (req, res) => {
   const db = getDb();
   try {
-    const d = db.prepare(`SELECT d.*, c.razon_social AS cliente_nombre, p.numero AS pedido_numero
+    const d = db.prepare(`SELECT d.*, c.razon_social AS cliente_nombre, p.numero AS pedido_numero,
+        f.razon_social AS fletero_nombre
       FROM sg_despachos d LEFT JOIN sg_clientes c ON c.id=d.cliente_id
-      LEFT JOIN sg_pedidos p ON p.id=d.pedido_id WHERE d.id=?`).get(req.params.id);
+      LEFT JOIN sg_pedidos p ON p.id=d.pedido_id
+      LEFT JOIN sg_proveedores f ON f.id=d.fletero_id WHERE d.id=?`).get(req.params.id);
     if (!d) return res.status(404).json({ ok: false, error: 'No encontrado' });
     d.items = db.prepare(`SELECT di.*, l.codigo_lote, pr.nombre AS producto_nombre, ps.nombre AS presentacion_nombre
       FROM sg_despacho_items di
       LEFT JOIN sg_lotes l ON l.id=di.lote_id
       LEFT JOIN sg_productos pr ON pr.id=di.producto_id
       LEFT JOIN sg_presentaciones ps ON ps.id=di.presentacion_id WHERE di.despacho_id=?`).all(req.params.id);
+    // PARTE D — flete de salida (gasto de servicio) ligado al despacho + margen neto.
+    d.flete_salida_estado = db.prepare("SELECT estado, monto FROM sg_gastos_directos WHERE despacho_id=? AND tipo_gasto='flete_salida' AND activo=1 AND estado!='anulado' ORDER BY id DESC LIMIT 1").get(req.params.id) || null;
+    d.flete_salida = db.prepare("SELECT COALESCE(SUM(monto),0) s FROM sg_gastos_directos WHERE despacho_id=? AND tipo_gasto='flete_salida' AND estado='valorizado' AND activo=1").get(req.params.id).s;
+    const margen = db.prepare("SELECT COALESCE(SUM(margen_estimado),0) s FROM sg_despacho_items WHERE despacho_id=?").get(req.params.id).s;
+    d.margen = margen; d.margen_neto = margen - (d.flete_salida || 0);
     res.json({ ok: true, data: d });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
@@ -1565,9 +1615,64 @@ router.post('/despachos/:id/anular', requireAdmin, (req, res) => {
       const lotes = db.prepare('SELECT DISTINCT lote_id FROM sg_despacho_items WHERE despacho_id=?').all(req.params.id).map(r => r.lote_id);
       db.prepare("UPDATE sg_despachos SET activo=0, eliminado_en=datetime('now','localtime'), eliminado_por_id=? WHERE id=?").run(uid(req), req.params.id);
       for (const loteId of lotes) recalcEstadoLote(db, loteId);
+      // PARTE B — anular el gasto de flete PENDIENTE (no toca los ya valorizados: son deuda real).
+      db.prepare("UPDATE sg_gastos_directos SET estado='anulado' WHERE despacho_id=? AND tipo_gasto='flete_salida' AND estado='pendiente_valorizar' AND activo=1").run(req.params.id);
     });
     tx();
     res.json({ ok: true, data: { id: Number(req.params.id) } });
+  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+
+// ══ MÓDULO GASTOS DIRECTOS (servicio, valorización diferida) — Fase 1: Flete de Salida ══
+// Listado de gastos de servicio con datos de la operación (despacho → remito, cliente, kg).
+// Filtros: tipo (default flete_salida), estado (pendiente_valorizar/valorizado), proveedor.
+router.get('/gastos-servicio', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const where = ["g.activo=1", "g.estado!='anulado'"], params = [];
+    where.push('g.tipo_gasto=?'); params.push(req.query.tipo || 'flete_salida');
+    if (req.query.estado) { where.push('g.estado=?'); params.push(req.query.estado); }
+    if (req.query.proveedor_id) { where.push('g.proveedor_servicio_id=?'); params.push(req.query.proveedor_id); }
+    const rows = db.prepare(`
+      SELECT g.*, pv.razon_social AS fletero_nombre,
+        d.numero AS despacho_numero, d.fecha_despacho, c.razon_social AS cliente_nombre,
+        (SELECT COALESCE(SUM(kg_despachados),0) FROM sg_despacho_items WHERE despacho_id=d.id) AS kg,
+        uv.nombre AS valorizado_por_nombre
+      FROM sg_gastos_directos g
+      LEFT JOIN sg_proveedores pv ON pv.id=g.proveedor_servicio_id
+      LEFT JOIN sg_despachos d ON d.id=g.despacho_id
+      LEFT JOIN sg_clientes c ON c.id=d.cliente_id
+      LEFT JOIN usuarios uv ON uv.id=g.valorizado_por
+      WHERE ${where.join(' AND ')} ORDER BY g.id DESC`).all(...params);
+    res.json({ ok: true, data: rows });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// Valorizar la cuenta de un fletero: asigna monto + fecha + cuenta_ref común a sus gastos
+// pendientes. items=[{id, monto}] (el front ya calculó montos, sea a mano o por prorrateo).
+router.post('/gastos-servicio/valorizar', requireAdmin, (req, res) => {
+  const db = getDb();
+  try {
+    const b = req.body;
+    const items = Array.isArray(b.items) ? b.items : [];
+    if (!b.proveedor_servicio_id) return res.status(400).json({ ok: false, error: 'Falta fletero' });
+    if (!items.length) return res.status(400).json({ ok: false, error: 'Nada para valorizar' });
+    const ref = val(b.cuenta_ref) || db.prepare("SELECT 'SG-VAL-'||strftime('%Y%m%d%H%M%S','now','localtime') r").get().r;
+    const fecha = db.prepare("SELECT date('now','localtime') d").get().d;
+    const upd = db.prepare(`UPDATE sg_gastos_directos
+      SET estado='valorizado', monto=?, fecha_valorizacion=?, valorizado_por=?, cuenta_ref=?
+      WHERE id=? AND proveedor_servicio_id=? AND estado='pendiente_valorizar' AND activo=1`);
+    const tx = db.transaction(() => {
+      let n = 0;
+      for (const it of items) {
+        const monto = Number(it.monto);
+        if (!(monto >= 0)) throw new Error('Monto inválido en un remito');
+        n += upd.run(monto, fecha, uid(req), ref, it.id, b.proveedor_servicio_id).changes;
+      }
+      return n;
+    });
+    const n = tx();
+    res.json({ ok: true, data: { valorizados: n, cuenta_ref: ref } });
   } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
 });
 

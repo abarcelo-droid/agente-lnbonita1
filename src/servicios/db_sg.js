@@ -627,6 +627,56 @@ try {
   console.error('[DB] SG migración sg_proveedores (datos pago):', e.message);
 }
 
+// ── GASTOS DIRECTOS (modelo NUEVO con valorización diferida) — Fase 1: Flete de Salida ──
+// Pieza paralela a sg_gastos_directos_lote (que NO se toca): el gasto cuelga de la OPERACIÓN
+// (despacho), no del lote, y tiene estado pendiente_valorizar → valorizado.
+// A1) Tipificar fleteros: el fletero es un sg_proveedores con es_servicio=1 (flag aditivo
+//     nullable, NO tabla nueva). ALTER ADD COLUMN simple. Proveedores viejos quedan NULL.
+try {
+  const cols = db.prepare("PRAGMA table_info(sg_proveedores)").all().map(c => c.name);
+  if (!cols.includes('es_servicio')) {
+    db.exec('ALTER TABLE sg_proveedores ADD COLUMN es_servicio INTEGER');
+    console.log('[DB] SG sg_proveedores.es_servicio agregado');
+  }
+} catch (e) { console.error('[DB] SG migración sg_proveedores (es_servicio):', e.message); }
+
+// A2) En el despacho se elige el fletero (FK lógica a sg_proveedores; sin REFERENCES inline
+//     por el límite de ALTER, se valida app-side). El transportista TEXT viejo queda intacto.
+try {
+  const cols = db.prepare("PRAGMA table_info(sg_despachos)").all().map(c => c.name);
+  if (!cols.includes('fletero_id')) {
+    db.exec('ALTER TABLE sg_despachos ADD COLUMN fletero_id INTEGER');
+    console.log('[DB] SG sg_despachos.fletero_id agregado');
+  }
+} catch (e) { console.error('[DB] SG migración sg_despachos (fletero_id):', e.message); }
+
+// A3) Tabla nueva sg_gastos_directos (genérica, FK polimórfica). Esta fase usa despacho_id;
+//     recepcion_id / lote_id quedan previstas (nullable) para fases futuras (ingreso/repaso).
+try {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS sg_gastos_directos (
+      id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+      tipo_gasto            TEXT NOT NULL DEFAULT 'flete_salida',   -- extensible: cargas_descargas, repaso, flete_ingreso
+      despacho_id           INTEGER REFERENCES sg_despachos(id),    -- Fase 1
+      recepcion_id          INTEGER REFERENCES sg_recepciones(id),  -- futuro
+      lote_id               INTEGER REFERENCES sg_lotes(id),        -- futuro
+      proveedor_servicio_id INTEGER REFERENCES sg_proveedores(id),  -- el fletero/cooperativa
+      estado                TEXT NOT NULL DEFAULT 'pendiente_valorizar' CHECK(estado IN ('pendiente_valorizar','valorizado','anulado')),
+      monto                 REAL,                                   -- NULL mientras pendiente
+      fecha_servicio        TEXT,                                   -- fecha de la operación (despacho)
+      fecha_valorizacion    TEXT,
+      cuenta_ref            TEXT,                                   -- agrupador de la valorización (una cuenta del fletero)
+      observaciones         TEXT,
+      activo                INTEGER NOT NULL DEFAULT 1,
+      creado_en             TEXT DEFAULT (datetime('now','localtime')),
+      creado_por            INTEGER,
+      valorizado_por        INTEGER
+    );
+    CREATE INDEX IF NOT EXISTS idx_sg_gd_prov_estado ON sg_gastos_directos(proveedor_servicio_id, estado);
+    CREATE INDEX IF NOT EXISTS idx_sg_gd_despacho    ON sg_gastos_directos(despacho_id);
+  `);
+} catch (e) { console.error('[DB] SG sg_gastos_directos:', e.message); }
+
 // ── CAMBIO 2 (bulto/kilo): sg_oc_items → +modo_carga ────────────────────────────
 // Cómo cargó el operador el item: 'bulto' (cantidad=bultos, precio=$/bulto) o 'kilo'
 // (cantidad=kg, precio=$/kg). NULL/legacy = 'kilo'. ALTER ADD COLUMN simple, nullable,
