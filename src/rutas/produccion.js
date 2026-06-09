@@ -2309,11 +2309,14 @@ router.get('/dashboard', requireAuth, (req, res) => {
     // Dos campañas activas simultáneas: una anual + una estacional.
     const anual      = db.prepare("SELECT * FROM pa_campañas WHERE activa=1 AND tipo='anual' LIMIT 1").get() || null;
     const estacional = db.prepare("SELECT * FROM pa_campañas WHERE activa=1 AND tipo='estacional' LIMIT 1").get() || null;
+    // Total por campaña = costos por lote + costos imputados directo a la campaña (empaque/galpón).
     const costoAnual = anual
-      ? (db.prepare("SELECT COALESCE(SUM(monto),0) as total FROM pa_costos_lote WHERE campaña_anual_id=?").get(anual.id)?.total || 0)
+      ? ((db.prepare("SELECT COALESCE(SUM(monto),0) as total FROM pa_costos_lote WHERE campaña_anual_id=?").get(anual.id)?.total || 0)
+       + (db.prepare("SELECT COALESCE(SUM(monto),0) as total FROM pa_costos_campaña WHERE campaña_anual_id=?").get(anual.id)?.total || 0))
       : 0;
     const costoEstacional = estacional
-      ? (db.prepare("SELECT COALESCE(SUM(monto),0) as total FROM pa_costos_lote WHERE campaña_estacional_id=?").get(estacional.id)?.total || 0)
+      ? ((db.prepare("SELECT COALESCE(SUM(monto),0) as total FROM pa_costos_lote WHERE campaña_estacional_id=?").get(estacional.id)?.total || 0)
+       + (db.prepare("SELECT COALESCE(SUM(monto),0) as total FROM pa_costos_campaña WHERE campaña_estacional_id=?").get(estacional.id)?.total || 0))
       : 0;
     const data = {
       // Compat: el front viejo leía `campaña` y `costo_campaña` (= anual)
@@ -3545,7 +3548,7 @@ router.get('/personal/asistencias/defaults', requireAuth, (req, res) => {
              (SELECT cultivo FROM pa_cultivos_lote WHERE lote_id=l.id ORDER BY id DESC LIMIT 1) as cultivo,
              (SELECT cultivo FROM pa_cultivos_lote WHERE lote_id=l.id AND campaña = ?) as cultivo_anterior
       FROM pa_lotes l WHERE l.activo=1 ORDER BY l.finca, l.nombre`).all(antA ? antA.nombre : null);
-    const tareas     = db.prepare("SELECT id, nombre, post_cosecha FROM pa_tareas_tipos WHERE activo=1 ORDER BY nombre").all();
+    const tareas     = db.prepare("SELECT id, nombre, post_cosecha, requiere_lote FROM pa_tareas_tipos WHERE activo=1 ORDER BY nombre").all();
     const cuadrillas = db.prepare(`
       SELECT c.id, c.nombre, c.responsable_id, r.nombre as responsable_nombre
       FROM pa_cuadrillas c LEFT JOIN pa_personal r ON r.id = c.responsable_id
@@ -3671,10 +3674,18 @@ function _validarAsistencia(db, body, opts) {
   if (!cta) return { error: 'rubro (cuenta) inexistente o inactivo' };
   if (!/^MO /.test(cta.nombre)) return { error: 'El rubro debe ser una cuenta de Mano de Obra (MO)' };
   const esGeneral = (cta.mo_clase === 'general');
-  // Lote / cultivo según clase
+  // Tarea de galpón (empaque, etc.): requiere_lote=0 → NO va a lote, aunque el rubro sea
+  // productivo. El costo se imputa a la campaña (ver /valorizar). Default 1 = de campo.
+  let tareaSinLote = false;
+  if (tarea_tipo_id) {
+    const tt = db.prepare("SELECT requiere_lote FROM pa_tareas_tipos WHERE id=?").get(tarea_tipo_id);
+    if (tt && tt.requiere_lote === 0) tareaSinLote = true;
+  }
+  // Lote / cultivo: sin lote si el rubro es general (estructura) o la tarea no requiere lote.
+  const sinLote = esGeneral || tareaSinLote;
   let loteId = null, finca = null, cultivo = null;
-  if (esGeneral) {
-    loteId = null; finca = null; cultivo = null; // MO general: sin lote ni cultivo
+  if (sinLote) {
+    loteId = null; finca = null; cultivo = null; // sin lote ni cultivo
   } else {
     if (!lote_id) return { error: 'Un rubro productivo requiere lote' };
     const lote = db.prepare("SELECT finca FROM pa_lotes WHERE id=?").get(lote_id);
@@ -3689,7 +3700,7 @@ function _validarAsistencia(db, body, opts) {
   return { val: {
     cant, hs, contraId,
     jornales: Math.round((cant * hs / 8.0) * 100) / 100,
-    loteId, finca, cultivo, esGeneral
+    loteId, finca, cultivo, esGeneral, tareaSinLote
   }};
 }
 
@@ -4043,13 +4054,15 @@ router.post('/personal/valorizar', requireAuth, requireAccesoSensible, (req, res
         const base = _baseUnidadesAsistencia('jornal', a);
         const monto = Math.round(tarifa * base * 100) / 100;
         const categoria = _categoriaCostoAsistencia(db, a.rubro_cuenta_id, tit.tipo);
-        const tarea = db.prepare("SELECT nombre FROM pa_tareas_tipos WHERE id=?").get(a.tarea_tipo_id);
+        const tarea = db.prepare("SELECT nombre, requiere_lote FROM pa_tareas_tipos WHERE id=?").get(a.tarea_tipo_id);
         const rubro = db.prepare("SELECT nombre FROM pa_cuentas WHERE id=?").get(a.rubro_cuenta_id);
         const desc = `MO · ${tarea ? tarea.nombre : 'Asist.'} · ${rubro ? rubro.nombre : ''} · ${tit.nombre}`;
 
-        // 1) Costo al lote (origen='asistencia', referencia_id positivo) — SOLO si hay lote.
-        //    Decisión 2A: la MO general (lote_id NULL) es gasto de estructura, NO costo de
-        //    un lote → NO se imputa a pa_costos_lote (no ensucia el costo unitario por cultivo).
+        // 1) Imputación del costo de MO (origen='asistencia'):
+        //    a) con lote → pa_costos_lote (costo por lote/cultivo). Comportamiento actual.
+        //    b) sin lote pero tarea de galpón (requiere_lote=0, ej. empaque) → pa_costos_campaña
+        //       (costo a la campaña, no atribuible a un lote).
+        //    c) sin lote por rubro general (estructura) → NO se costea (decisión 2A).
         let costoLoteId = null;
         if (a.lote_id != null) {
           const rc = db.prepare(`INSERT INTO pa_costos_lote
@@ -4058,6 +4071,12 @@ router.post('/personal/valorizar', requireAuth, requireAccesoSensible, (req, res
             .run(a.lote_id, a.campaña_anual_id, a.campaña_anual_id, a.campaña_estacional_id,
                  categoria, a.id, a.fecha, monto, desc);
           costoLoteId = rc.lastInsertRowid;
+        } else if (tarea && tarea.requiere_lote === 0) {
+          db.prepare(`INSERT INTO pa_costos_campaña
+              (campaña_id, campaña_anual_id, campaña_estacional_id, categoria, referencia_id, fecha, monto, descripcion, origen)
+              VALUES (?,?,?,?,?,?,?,?, 'asistencia')`)
+            .run(a.campaña_anual_id, a.campaña_anual_id, a.campaña_estacional_id,
+                 categoria, a.id, a.fecha, monto, desc);
         }
 
         // 2) CC: devengado (+)
@@ -4108,8 +4127,9 @@ router.post('/personal/asistencias/:id/anular', requireAuth, (req, res) => {
     const val = db.prepare("SELECT * FROM pa_asistencia_valorizacion WHERE asistencia_id=?").get(a.id);
     const tit = _titularAsistencia(db, a);
     const tx = db.transaction(() => {
-      // 1) Revertir costo del lote (solo el de esta asistencia)
+      // 1) Revertir costo de esta asistencia (lote o campaña, según cómo se imputó)
       db.prepare("DELETE FROM pa_costos_lote WHERE origen='asistencia' AND referencia_id=?").run(a.id);
+      db.prepare("DELETE FROM pa_costos_campaña WHERE origen='asistencia' AND referencia_id=?").run(a.id);
       // 2) CC: movimiento de anulación (monto opuesto al devengado)
       if (val && tit) {
         db.prepare(`INSERT INTO pa_cc_movimientos
@@ -4845,17 +4865,18 @@ router.post('/personal/tareas-tipos', requireAuth, (req, res) => {
 
 router.patch('/personal/tareas-tipos/:id', requireAuth, (req, res) => {
   const db = getDb();
-  const { nombre, tipo_labor, rubro_contable_id, es_destajo, unidad_destajo, activo, post_cosecha } = req.body;
+  const { nombre, tipo_labor, rubro_contable_id, es_destajo, unidad_destajo, activo, post_cosecha, requiere_lote } = req.body;
   try {
     const c = db.prepare("SELECT * FROM pa_tareas_tipos WHERE id=?").get(req.params.id);
     if (!c) return res.status(404).json({ ok: false, error: 'Tarea no encontrada' });
-    db.prepare(`UPDATE pa_tareas_tipos SET nombre=?, tipo_labor=?, rubro_contable_id=?, es_destajo=?, unidad_destajo=?, activo=?, post_cosecha=? WHERE id=?`)
+    db.prepare(`UPDATE pa_tareas_tipos SET nombre=?, tipo_labor=?, rubro_contable_id=?, es_destajo=?, unidad_destajo=?, activo=?, post_cosecha=?, requiere_lote=? WHERE id=?`)
       .run(nombre || c.nombre, tipo_labor || c.tipo_labor,
            rubro_contable_id !== undefined ? rubro_contable_id : c.rubro_contable_id,
            es_destajo !== undefined ? (es_destajo ? 1 : 0) : c.es_destajo,
            unidad_destajo !== undefined ? unidad_destajo : c.unidad_destajo,
            activo !== undefined ? (activo ? 1 : 0) : c.activo,
            post_cosecha !== undefined ? (post_cosecha ? 1 : 0) : c.post_cosecha,
+           requiere_lote !== undefined ? (requiere_lote ? 1 : 0) : c.requiere_lote,
            req.params.id);
     res.json({ ok: true });
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }

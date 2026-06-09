@@ -191,6 +191,27 @@ db.exec(`
     descripcion TEXT,
     creado_en   TEXT DEFAULT (datetime('now','localtime'))
   );
+
+  -- Costos de MO imputados a la CAMPAÑA (no a un lote). Tareas de galpón
+  -- (pa_tareas_tipos.requiere_lote=0: empaque, selección, repaso): la MO no es de un
+  -- lote/cultivo puntual → se imputa a la campaña. Espeja pa_costos_lote SIN lote_id.
+  -- Tabla aditiva (no toca pa_costos_lote). Los totales por campaña suman ambas.
+  CREATE TABLE IF NOT EXISTS pa_costos_campaña (
+    id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+    campaña_id            INTEGER NOT NULL REFERENCES pa_campañas(id),
+    campaña_anual_id      INTEGER REFERENCES pa_campañas(id),
+    campaña_estacional_id INTEGER REFERENCES pa_campañas(id),
+    categoria             TEXT NOT NULL,
+    referencia_id         INTEGER,
+    origen                TEXT,
+    fecha                 TEXT NOT NULL DEFAULT (date('now','localtime')),
+    monto                 REAL NOT NULL DEFAULT 0,
+    descripcion           TEXT,
+    creado_en             TEXT DEFAULT (datetime('now','localtime'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_costos_camp_anual  ON pa_costos_campaña(campaña_anual_id);
+  CREATE INDEX IF NOT EXISTS idx_costos_camp_estac  ON pa_costos_campaña(campaña_estacional_id);
+  CREATE INDEX IF NOT EXISTS idx_costos_camp_origen ON pa_costos_campaña(origen, referencia_id);
 `);
 
 // ── MIGRACIÓN: Campaña inicial ─────────────────────────────────────────────
@@ -1299,6 +1320,23 @@ try {
     console.log('[PA] post_cosecha agregado en pa_tareas_tipos');
   }
 } catch(e) { console.error('[PA] Error migrando post_cosecha en pa_tareas_tipos:', e.message); }
+
+// ── Migración: flag requiere_lote en pa_tareas_tipos ─────────────────────────
+// La mayoría de las tareas son de campo (van a una finca/lote → default 1). Las de
+// galpón (empaque, selección, repaso, etc.) NO están en un lote: su MO se imputa a la
+// CAMPAÑA, no a un lote. Al CREAR la columna sembramos requiere_lote=0 por nombre para
+// esas tareas (solo esa vez; después respeta lo que marque el admin). Idempotente.
+try {
+  const colsRL = db.prepare("PRAGMA table_info(pa_tareas_tipos)").all().map(c => c.name);
+  if (!colsRL.includes('requiere_lote')) {
+    db.exec("ALTER TABLE pa_tareas_tipos ADD COLUMN requiere_lote INTEGER NOT NULL DEFAULT 1");
+    const r = db.prepare(`UPDATE pa_tareas_tipos SET requiere_lote=0
+      WHERE lower(nombre) LIKE '%empaque%'  OR lower(nombre) LIKE '%embalaje%'
+         OR lower(nombre) LIKE '%selecc%'   OR lower(nombre) LIKE '%repaso%'
+         OR lower(nombre) LIKE '%clasif%'   OR lower(nombre) LIKE '%galp%'`).run();
+    console.log(`[PA] requiere_lote agregado en pa_tareas_tipos (${r.changes} tarea(s) de galpón → 0)`);
+  }
+} catch(e) { console.error('[PA] Error migrando requiere_lote en pa_tareas_tipos:', e.message); }
 
 // ── Padrón de tarifas por ROL (costeo MO automático) ────────────────────────
 // La tarifa de la mano de obra individual/grupal se resuelve por el rol de la persona
