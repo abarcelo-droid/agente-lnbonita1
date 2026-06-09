@@ -583,8 +583,15 @@ function nextNumero(db, prefijo, tabla, col) {
 // Recalcula costo_final de un lote = costo_base + gastos directos + prorrateo global del período.
 // Prorrateo: monto global del período × (kg del lote / total kg activos del período).
 function recalcCostoLote(db, loteId) {
-  const lote = db.prepare('SELECT id, kg_reales, costo_base, fecha_ingreso FROM sg_lotes WHERE id=?').get(loteId);
+  const lote = db.prepare('SELECT id, kg_reales, costo_base, fecha_ingreso, precio_unitario_kg FROM sg_lotes WHERE id=?').get(loteId);
   if (!lote) return 0;
+  // COSTO PENDIENTE: lote sin precio (recepción sin OC, o pizarra sin cerrar) → costo_final=0 y
+  // NO se le suma prorrateo (sería un costo parcial engañoso que ensucia la rentabilidad).
+  // Se completa cuando se vincula la OC / se cierra el precio (ahí vuelve a correr este recalc).
+  if (lote.precio_unitario_kg == null) {
+    db.prepare("UPDATE sg_lotes SET costo_final=0, modificado_en=datetime('now','localtime') WHERE id=?").run(loteId);
+    return 0;
+  }
   const gd = db.prepare('SELECT COALESCE(SUM(monto),0) s FROM sg_gastos_directos_lote WHERE lote_id=? AND activo=1').get(loteId).s;
   let prorrateo = 0;
   const periodo = (lote.fecha_ingreso || '').slice(0, 7);
@@ -675,6 +682,29 @@ function crearLotesDeItem(db, { recepcionId, ocItem, tipoPrecio, fechaIngreso, l
     const codigo = nextNumero(db, 'SG-LT', 'sg_lotes', 'codigo_lote');
     const info = ins.run(codigo, recepcionId, ocItem.id, ocItem.producto_id, kg, precio, costoBase,
       val(lt.calidad), val(lt.calibre), val(lt.origen), fechaIngreso, venc, costoBase, userId);
+    ids.push(info.lastInsertRowid);
+  }
+  return ids;
+}
+
+// Lotes de una recepción SIN OC: producto elegido a mano, sin oc_item_id y SIN precio
+// (costo pendiente). precio_unitario_kg=NULL → recalcCostoLote los deja en costo_final=0 y
+// los reportes los marcan "costo pendiente". Se completa al vincular la OC (baja el precio).
+function crearLotesSinOC(db, { recepcionId, productoId, fechaIngreso, lotes, userId }) {
+  const prod = db.prepare('SELECT vida_util_dias_default FROM sg_productos WHERE id=?').get(productoId);
+  if (!prod) throw new Error('Producto inválido: ' + productoId);
+  const vida = prod.vida_util_dias_default || 0;
+  const ins = db.prepare(`INSERT INTO sg_lotes
+    (codigo_lote, recepcion_id, oc_item_id, producto_id, kg_reales, precio_unitario_kg, costo_base,
+     calidad, calibre, origen, fecha_ingreso, fecha_vencimiento_estimada, estado, costo_final, creado_por)
+    VALUES (?,?, NULL, ?,?, NULL, 0, ?, NULL, NULL, ?, ?, 'disponible', 0, ?)`);
+  const ids = [];
+  for (const lt of lotes) {
+    const kg = Number(lt.kg_reales || 0);
+    let venc = val(lt.fecha_vencimiento_estimada);
+    if (!venc && fechaIngreso && vida) venc = db.prepare('SELECT date(?, ?) d').get(fechaIngreso, `+${vida} days`).d;
+    const codigo = nextNumero(db, 'SG-LT', 'sg_lotes', 'codigo_lote');
+    const info = ins.run(codigo, recepcionId, productoId, kg, val(lt.calidad), fechaIngreso, venc, userId);
     ids.push(info.lastInsertRowid);
   }
   return ids;
@@ -878,16 +908,23 @@ router.post('/recepciones', sgUpload.array('fotos', 12), requireAdmin, (req, res
   try {
     const b = req.body && req.body.payload ? JSON.parse(req.body.payload) : (req.body || {});
     const numN = (v) => (v != null && v !== '' && !isNaN(Number(v))) ? Number(v) : null; // BLOQUE A
-    const oc = db.prepare('SELECT * FROM sg_oc WHERE id=? AND activo=1').get(b.oc_id);
-    if (!oc) return res.status(400).json({ ok: false, error: 'OC inexistente' });
-    if (oc.estado === 'anulada') return res.status(400).json({ ok: false, error: 'OC anulada' });
+    // RECEPCIÓN SIN OC: si no viene oc_id, se recibe igual y queda "OC pendiente" (lotes con
+    // costo pendiente). Se vincula a una OC después (POST /recepciones/:id/vincular-oc).
+    const sinOC = !b.oc_id;
+    let oc = null;
+    if (!sinOC) {
+      oc = db.prepare('SELECT * FROM sg_oc WHERE id=? AND activo=1').get(b.oc_id);
+      if (!oc) return res.status(400).json({ ok: false, error: 'OC inexistente' });
+      if (oc.estado === 'anulada') return res.status(400).json({ ok: false, error: 'OC anulada' });
+    }
     const items = Array.isArray(b.items) ? b.items : [];
     if (!items.length) return res.status(400).json({ ok: false, error: 'Sin items para recibir' });
 
-    // Validación: suma de kg de los lotes = kg_reales del item (si se informó kg_reales_item)
+    // Validación: cada item con lotes; sin OC además exige producto; y suma de kg coincide.
     for (const it of items) {
       const lotes = Array.isArray(it.lotes) ? it.lotes : [];
       if (!lotes.length) return res.status(400).json({ ok: false, error: 'Cada item debe tener al menos un lote' });
+      if (sinOC && !it.producto_id) return res.status(400).json({ ok: false, error: 'Cada línea sin OC necesita un producto' });
       if (it.kg_reales_item != null) {
         const suma = lotes.reduce((a, l) => a + Number(l.kg_reales || 0), 0);
         if (Math.abs(suma - Number(it.kg_reales_item)) > 0.01) {
@@ -899,15 +936,16 @@ router.post('/recepciones', sgUpload.array('fotos', 12), requireAdmin, (req, res
 
     const tx = db.transaction(() => {
       const numero = nextNumero(db, 'SG-REC', 'sg_recepciones', 'numero_recepcion');
-      // BLOQUE A (doc + paletizado) + BLOQUE B (calidad) se persisten junto a la recepción.
+      // BLOQUE A (doc + paletizado) + BLOQUE B (calidad) + oc_pendiente se persisten en la recepción.
       const recInfo = db.prepare(`INSERT INTO sg_recepciones
         (oc_id, numero_recepcion, fecha_recepcion, recibido_por, numero_remito_proveedor, observaciones, creado_por,
          factura_numero, dtv_codigo, pallets_recibidos, bultos_recibidos,
-         observada, calidad_estado_general, calidad_defectos, calidad_pct_afectado, calidad_observaciones)
-        VALUES (?,?,?,?,?,?,?, ?,?,?,?, ?,?,?,?,?)`).run(
-        b.oc_id, numero, fechaIngreso, b.recibido_por || null, val(b.numero_remito_proveedor), val(b.observaciones), uid(req),
+         observada, calidad_estado_general, calidad_defectos, calidad_pct_afectado, calidad_observaciones, oc_pendiente)
+        VALUES (?,?,?,?,?,?,?, ?,?,?,?, ?,?,?,?,?, ?)`).run(
+        sinOC ? null : b.oc_id, numero, fechaIngreso, b.recibido_por || null, val(b.numero_remito_proveedor), val(b.observaciones), uid(req),
         val(b.factura_numero), val(b.dtv_codigo), numN(b.pallets_recibidos), numN(b.bultos_recibidos),
-        b.observada ? 1 : 0, val(b.calidad_estado_general), val(b.calidad_defectos), numN(b.calidad_pct_afectado), val(b.calidad_observaciones));
+        b.observada ? 1 : 0, val(b.calidad_estado_general), val(b.calidad_defectos), numN(b.calidad_pct_afectado), val(b.calidad_observaciones),
+        sinOC ? 1 : 0);
       const recId = recInfo.lastInsertRowid;
       // BLOQUE B — fotos del informe (patrón IFCO: ruta /data/sg/<archivo>).
       for (const f of (req.files || [])) {
@@ -916,14 +954,21 @@ router.post('/recepciones', sgUpload.array('fotos', 12), requireAdmin, (req, res
       }
       const nuevosLotes = [];
       for (const it of items) {
-        const ocItem = db.prepare('SELECT * FROM sg_oc_items WHERE id=? AND oc_id=?').get(it.oc_item_id, b.oc_id);
-        if (!ocItem) throw new Error('Item de OC inválido: ' + it.oc_item_id);
-        const ids = crearLotesDeItem(db, { recepcionId: recId, ocItem, tipoPrecio: oc.tipo_precio, fechaIngreso, lotes: it.lotes, userId: uid(req) });
-        nuevosLotes.push(...ids);
+        if (sinOC) {
+          const ids = crearLotesSinOC(db, { recepcionId: recId, productoId: Number(it.producto_id), fechaIngreso, lotes: it.lotes, userId: uid(req) });
+          nuevosLotes.push(...ids);
+        } else {
+          const ocItem = db.prepare('SELECT * FROM sg_oc_items WHERE id=? AND oc_id=?').get(it.oc_item_id, b.oc_id);
+          if (!ocItem) throw new Error('Item de OC inválido: ' + it.oc_item_id);
+          const ids = crearLotesDeItem(db, { recepcionId: recId, ocItem, tipoPrecio: oc.tipo_precio, fechaIngreso, lotes: it.lotes, userId: uid(req) });
+          nuevosLotes.push(...ids);
+        }
       }
-      actualizarEstadoOC(db, b.oc_id);
+      if (!sinOC) {
+        actualizarEstadoOC(db, b.oc_id);
+        generarVencimientos(db, Number(b.oc_id));
+      }
       recalcPeriodo(db, fechaIngreso.slice(0, 7));
-      generarVencimientos(db, Number(b.oc_id));
       return { recId, nuevosLotes };
     });
     const out = tx();
@@ -958,6 +1003,44 @@ router.get('/recepciones/:id', requireAuth, (req, res) => {
     rec.fotos = db.prepare('SELECT id, ruta, nombre_original FROM sg_recepcion_fotos WHERE recepcion_id=? ORDER BY id').all(req.params.id);
     res.json({ ok: true, data: rec });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// Vincular una recepción "OC pendiente" a una OC: setea oc_id, quita la marca y BAJA el precio
+// de la OC a los lotes (match por producto_id con un item de la OC), recalculando el costo.
+// Lotes cuyo producto no esté en la OC (o OC pizarra sin precio) quedan pendientes.
+router.post('/recepciones/:id/vincular-oc', requireAdmin, (req, res) => {
+  const db = getDb();
+  try {
+    const rec = db.prepare('SELECT * FROM sg_recepciones WHERE id=? AND activo=1').get(req.params.id);
+    if (!rec) return res.status(404).json({ ok: false, error: 'Recepción no encontrada' });
+    if (rec.oc_id) return res.status(400).json({ ok: false, error: 'La recepción ya está vinculada a una OC' });
+    const ocId = Number(req.body.oc_id);
+    const oc = ocId ? db.prepare('SELECT * FROM sg_oc WHERE id=? AND activo=1').get(ocId) : null;
+    if (!oc) return res.status(400).json({ ok: false, error: 'OC inexistente' });
+    if (oc.estado === 'anulada') return res.status(400).json({ ok: false, error: 'OC anulada' });
+
+    const out = db.transaction(() => {
+      db.prepare("UPDATE sg_recepciones SET oc_id=?, oc_pendiente=0, modificado_en=datetime('now','localtime'), modificado_por=? WHERE id=?")
+        .run(ocId, uid(req), req.params.id);
+      const lotes = db.prepare('SELECT id, producto_id, kg_reales FROM sg_lotes WHERE recepcion_id=? AND activo=1').all(req.params.id);
+      let conPrecio = 0;
+      for (const l of lotes) {
+        const ocItem = db.prepare('SELECT id, precio_estimado_por_kg FROM sg_oc_items WHERE oc_id=? AND producto_id=? ORDER BY id LIMIT 1').get(ocId, l.producto_id);
+        if (!ocItem) continue; // producto no está en la OC → el lote queda pendiente
+        const precio = (oc.tipo_precio === 'firme' && ocItem.precio_estimado_por_kg != null) ? Number(ocItem.precio_estimado_por_kg) : null;
+        const costoBase = precio != null ? l.kg_reales * precio : 0;
+        db.prepare("UPDATE sg_lotes SET oc_item_id=?, precio_unitario_kg=?, costo_base=?, modificado_en=datetime('now','localtime'), modificado_por=? WHERE id=?")
+          .run(ocItem.id, precio, costoBase, uid(req), l.id);
+        recalcCostoLote(db, l.id);
+        if (precio != null) conPrecio++;
+      }
+      actualizarEstadoOC(db, ocId);
+      generarVencimientos(db, ocId);
+      recalcPeriodo(db, (rec.fecha_recepcion || '').slice(0, 7));
+      return { lotes: lotes.length, conPrecio };
+    })();
+    res.json({ ok: true, data: out });
+  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
 });
 
 // ── BLOQUE B — PDF del informe de calidad (REUSA jsPDF, patrón ordenPDF.js). Embebe las
@@ -1921,7 +2004,7 @@ router.get('/reportes/rentabilidad-partida', requireAuth, (req, res) => {
         COALESCE(de.venta,0) AS venta,
         (COALESCE(de.kg,0) * (COALESCE(l.costo_final,0)/NULLIF(l.kg_reales,0))) AS costo_vendido,
         (COALESCE(de.venta,0) - COALESCE(de.kg,0)*(COALESCE(l.costo_final,0)/NULLIF(l.kg_reales,0))) AS margen,
-        CASE WHEN COALESCE(l.costo_final,0)<=0 THEN 1 ELSE 0 END AS costo_incompleto
+        CASE WHEN l.precio_unitario_kg IS NULL THEN 1 ELSE 0 END AS costo_incompleto
       FROM sg_lotes l
       JOIN sg_productos pr ON pr.id=l.producto_id
       LEFT JOIN sg_recepciones r ON r.id=l.recepcion_id
