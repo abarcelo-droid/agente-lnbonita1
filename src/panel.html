@@ -5368,9 +5368,12 @@ function sgRepExport(){
       </div>
       <div class="fl"><label>Monto $ *</label><input type="number" id="pp-mov-monto" step="0.01"></div>
       <div class="fl"><label>Fecha</label><input type="date" id="pp-mov-fecha"></div>
+      <div class="fl" style="flex:1 1 100%"><label>Caja / banco <span style="font-size:10px;color:var(--mut)">(de dónde sale — solo pago/adelanto)</span></label>
+        <select id="pp-mov-caja"><option value="">— Sin caja (no impacta tesorería) —</option></select>
+      </div>
       <div class="fl" style="flex:1 1 100%"><label>Descripción</label><input id="pp-mov-desc"></div>
     </div>
-    <div style="font-size:11px;color:var(--mut);margin-top:6px">Pago/Adelanto bajan el saldo (se guardan en negativo). Ajuste respeta el signo que pongas (negativo baja, positivo sube).</div>
+    <div style="font-size:11px;color:var(--mut);margin-top:6px">Pago/Adelanto bajan el saldo (se guardan en negativo) y, si elegís caja, descuentan de tesorería. Ajuste respeta el signo (negativo baja, positivo sube) y nunca toca caja.</div>
     <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:14px">
       <button class="btn bo" onclick="document.getElementById('mb-pp-ccmov').classList.remove('on')">Cancelar</button>
       <button class="btn bb" onclick="ppGuardarMov()">Guardar</button>
@@ -22310,12 +22313,30 @@ function ppRenderCCDetalle() {
 
 // ═══ PERSONAL V1 — Pagos / Adelantos / Ajustes ═══════════════════════════════
 function ppLoadPagos() {
-  // Reusar titulares para el dropdown del modal y listar últimos movimientos manuales
+  // Reusar titulares para el dropdown del modal y listar los últimos movimientos manuales.
   paF('/api/pa/personal/cc/titulares').then(function(r){ PP.ccTitulares = (r && r.data) || []; });
-  // Listar últimos movimientos manuales agregando de cada titular sería caro;
-  // mostramos un placeholder y dejamos el detalle por titular en la pestaña CC.
+  ppRefrescarPagos();
+}
+function ppRefrescarPagos() {
   var tbody = document.getElementById('pp-pagos-tbody');
-  tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--mut);padding:16px">Usá "+ Registrar" para cargar un pago/adelanto/ajuste. El detalle por titular está en la pestaña Cuenta Corriente.</td></tr>';
+  if (!tbody) return;
+  tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--mut);padding:16px">Cargando…</td></tr>';
+  paF('/api/pa/personal/cc/movimientos?tipo_mov=pago,adelanto,ajuste&limit=80').then(function(r){
+    var rows = (r && r.data) || [];
+    if (!rows.length) {
+      tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--mut);padding:16px">Sin pagos/adelantos/ajustes cargados. Usá "+ Registrar".</td></tr>';
+      return;
+    }
+    var lbl = { pago:'Pago', adelanto:'Adelanto', ajuste:'Ajuste' };
+    tbody.innerHTML = rows.map(function(m){
+      var caja = m.fin_movimiento_id ? ' <span title="Impactó caja/tesorería">💵</span>' : '';
+      return '<tr><td>'+(m.fecha||'')+'</td><td>'+esc(m.titular_nombre||'')+'</td>'
+        +'<td>'+(lbl[m.tipo_mov]||m.tipo_mov)+caja+'</td>'
+        +'<td style="text-align:right">'+ppFmtARS(m.monto)+'</td>'
+        +'<td>'+esc(m.descripcion||'')+'</td>'
+        +'<td><button class="btn bd bs" onclick="ppAnularMov('+m.id+')">Anular</button></td></tr>';
+    }).join('');
+  });
 }
 
 function ppAbrirMov(tipoTitular, titularId) {
@@ -22329,6 +22350,13 @@ function ppAbrirMov(tipoTitular, titularId) {
     document.getElementById('pp-mov-monto').value = '';
     document.getElementById('pp-mov-fecha').value = new Date().toISOString().slice(0,10);
     document.getElementById('pp-mov-desc').value = '';
+    // Cajas (mismas que el pago masivo): si se elige, el pago/adelanto descuenta de tesorería.
+    var cajaSel = document.getElementById('pp-mov-caja');
+    cajaSel.value = '';
+    paF('/api/pa/personal/cajas').then(function(rc){
+      cajaSel.innerHTML = '<option value="">— Sin caja (no impacta tesorería) —</option>' +
+        ((rc && rc.data) || []).map(function(c){ return '<option value="'+c.id+'">'+esc(c.nombre)+'</option>'; }).join('');
+    });
     document.getElementById('mb-pp-ccmov').classList.add('on');
   };
   if (!PP.ccTitulares || !PP.ccTitulares.length) {
