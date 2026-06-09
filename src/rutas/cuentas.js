@@ -292,8 +292,27 @@ router.get('/', (req, res) => {
     params.push(`%${q}%`, `%${q}%`);
   }
   sql += ' ORDER BY c.codigo';
-  res.json({ ok: true, data: db.prepare(sql).all(...params) });
+  const data = db.prepare(sql).all(...params);
+  // Imputable = la cuenta NO es padre de ninguna otra (no tiene subcuentas).
+  // Una cuenta cuyo código es prefijo de otra (ej: 1.05 es prefijo de 1.05.01) es un
+  // rubro agrupador y NO se puede imputar en asientos.
+  const codigos = data.map(c => String(c.codigo));
+  data.forEach(c => {
+    const cod = String(c.codigo);
+    const esPadre = codigos.some(otro => otro !== cod && otro.startsWith(cod + '.'));
+    c.imputable = esPadre ? 0 : 1;
+  });
+  res.json({ ok: true, data });
 });
+
+// Helper backend: ¿la cuenta es imputable? (no es padre de ninguna otra)
+function cuentaEsImputable(db, cuentaId) {
+  const c = db.prepare('SELECT codigo FROM pa_cuentas WHERE id = ?').get(cuentaId);
+  if (!c) return false;
+  const cod = String(c.codigo);
+  const hijo = db.prepare("SELECT 1 FROM pa_cuentas WHERE codigo LIKE ? AND codigo != ? LIMIT 1").get(cod + '.%', cod);
+  return !hijo;
+}
 
 // GET /api/pa/cuentas/:id  (debe ir DESPUÉS de /secciones y /log)
 router.get('/:id(\\d+)', (req, res) => {
@@ -676,6 +695,13 @@ router.post('/modelos', requireAdmin, (req, res) => {
   const tieneHaber = lineas.some(l => l.lado === 'haber');
   if (!tieneDebе || !tieneHaber)
     return res.status(400).json({ error: 'El modelo debe tener al menos 1 línea en el debe y 1 en el haber' });
+  // Bloquear cuentas NO imputables (rubros agrupadores: cuentas padre)
+  for (const l of lineas) {
+    if (l.cuenta_id && !cuentaEsImputable(db, parseInt(l.cuenta_id))) {
+      const c = db.prepare('SELECT codigo, nombre FROM pa_cuentas WHERE id = ?').get(parseInt(l.cuenta_id));
+      return res.status(400).json({ error: `La cuenta ${c ? c.codigo+' — '+c.nombre : '#'+l.cuenta_id} no es imputable (es un rubro agrupador). Elegí una cuenta final.` });
+    }
+  }
   try {
     const tx = db.transaction(() => {
       const r = db.prepare(`INSERT INTO adm_asientos_modelo (nombre, descripcion) VALUES (?, ?)`)
@@ -702,6 +728,12 @@ router.put('/modelos/:id', requireAdmin, (req, res) => {
   const tieneHaber = lineas.some(l => l.lado === 'haber');
   if (!tieneDebе || !tieneHaber)
     return res.status(400).json({ error: 'El modelo debe tener al menos 1 línea en el debe y 1 en el haber' });
+  for (const l of lineas) {
+    if (l.cuenta_id && !cuentaEsImputable(db, parseInt(l.cuenta_id))) {
+      const c = db.prepare('SELECT codigo, nombre FROM pa_cuentas WHERE id = ?').get(parseInt(l.cuenta_id));
+      return res.status(400).json({ error: `La cuenta ${c ? c.codigo+' — '+c.nombre : '#'+l.cuenta_id} no es imputable (es un rubro agrupador). Elegí una cuenta final.` });
+    }
+  }
   try {
     db.transaction(() => {
       db.prepare('UPDATE adm_asientos_modelo SET nombre=?, descripcion=? WHERE id=?')
@@ -799,6 +831,10 @@ router.post('/asientos', requireAdmin, (req, res) => {
     if (!c) return res.status(400).json({ error: `cuenta_id ${l.cuenta_id} no existe o está inactiva` });
     if (c.sociedad_id !== sociedadId) {
       return res.status(400).json({ error: `cuenta_id ${l.cuenta_id} pertenece a otra sociedad` });
+    }
+    if (!cuentaEsImputable(db, parseInt(l.cuenta_id))) {
+      const cc = db.prepare('SELECT codigo, nombre FROM pa_cuentas WHERE id = ?').get(parseInt(l.cuenta_id));
+      return res.status(400).json({ error: `La cuenta ${cc ? cc.codigo+' — '+cc.nombre : '#'+l.cuenta_id} no es imputable (es un rubro agrupador). Elegí una cuenta final.` });
     }
   }
 
