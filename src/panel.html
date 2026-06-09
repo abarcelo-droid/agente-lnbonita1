@@ -14208,12 +14208,70 @@ function admModEditar(id) {
   });
 }
 
+var ADM_MOD_LINEA_SEQ = 0;
+
+// Texto visible de una cuenta para el autocompletar
+function admModCuTexto(c){ return (c.codigo ? '['+c.codigo+'] ' : '') + c.nombre; }
+
+// Autocompletar: filtra ADM_MOD_CUENTAS y muestra las coincidencias debajo del campo.
+// Las NO imputables aparecen en gris y no se pueden elegir.
+function admModCuBuscar(lid){
+  var inp = document.getElementById('adm-mod-cuq-'+lid); if(!inp) return;
+  var box = document.getElementById('adm-mod-culist-'+lid); if(!box) return;
+  var q = (inp.value||'').toLowerCase().trim();
+  var arr = ADM_MOD_CUENTAS.filter(function(c){
+    return !q || admModCuTexto(c).toLowerCase().indexOf(q) !== -1;
+  });
+  var top = arr.slice(0, 50);
+  box.innerHTML = top.length
+    ? top.map(function(c){
+        if (c.imputable === 0) {
+          return '<div class="pa-ac-item" style="color:#9ca3af;cursor:not-allowed" title="Rubro agrupador, no imputable">'
+            + admModCuTexto(c) + ' <span style="font-size:10px">🔒 NO IMPUTABLE</span></div>';
+        }
+        return '<div class="pa-ac-item" data-id="'+c.id+'" onmousedown="admModCuPick('+lid+','+c.id+')">'
+          + admModCuTexto(c) + '</div>';
+      }).join('') + (arr.length>top.length ? '<div class="pa-ac-more">… '+(arr.length-top.length)+' más — seguí escribiendo</div>' : '')
+    : '<div class="pa-ac-empty">Sin resultados</div>';
+  box.style.display='';
+}
+function admModCuPick(lid, cuentaId){
+  var c = ADM_MOD_CUENTAS.find(function(x){ return x.id == cuentaId; });
+  if (!c || c.imputable === 0) return;
+  var hid = document.getElementById('adm-mod-cuhid-'+lid);
+  var inp = document.getElementById('adm-mod-cuq-'+lid);
+  var box = document.getElementById('adm-mod-culist-'+lid);
+  if (hid) hid.value = c.id;
+  if (inp) inp.value = admModCuTexto(c);
+  if (box) box.style.display='none';
+  admModValidarDoble();
+}
+function admModCuBlur(lid){
+  setTimeout(function(){ var b=document.getElementById('adm-mod-culist-'+lid); if(b) b.style.display='none'; }, 150);
+}
+function admModCuKey(ev, lid){
+  var box=document.getElementById('adm-mod-culist-'+lid); if(!box) return;
+  if(ev.key==='Escape'){ box.style.display='none'; return; }
+  if(ev.key!=='ArrowDown' && ev.key!=='ArrowUp' && ev.key!=='Enter') return;
+  if(box.style.display==='none' && ev.key!=='Enter') admModCuBuscar(lid);
+  var items=box.querySelectorAll('.pa-ac-item[data-id]'); if(!items.length) return;
+  var cur=-1,k; for(k=0;k<items.length;k++){ if(items[k].classList.contains('pa-ac-on')){ cur=k; break; } }
+  if(ev.key==='Enter'){ ev.preventDefault(); var pick=(cur>=0)?items[cur]:items[0]; admModCuPick(lid, parseInt(pick.dataset.id,10)); return; }
+  ev.preventDefault();
+  var ni = ev.key==='ArrowDown' ? Math.min(cur+1, items.length-1) : Math.max(cur-1, 0);
+  if(cur<0 && ev.key==='ArrowDown') ni=0;
+  for(k=0;k<items.length;k++) items[k].classList.toggle('pa-ac-on', k===ni);
+  items[ni].scrollIntoView({block:'nearest'});
+}
+
 function admModAgregarLinea(lado, cuentaId, desc, tipoLinea) {
   lado = lado || 'debe';
   tipoLinea = tipoLinea || 'libre';
   var tbody = document.getElementById('adm-mod-lineas');
-  var idx = tbody.children.length;
-  var opts = admModCuentaOptions('', cuentaId);
+  var lid = ++ADM_MOD_LINEA_SEQ;
+  // Texto inicial si viene una cuenta (modo edición)
+  var cuIni = cuentaId ? ADM_MOD_CUENTAS.find(function(c){ return c.id == cuentaId; }) : null;
+  var cuTxt = cuIni ? admModCuTexto(cuIni).replace(/"/g,'&quot;') : '';
   var tipoOpts = [
     ['libre',                '— Libre (neto/compras) —'],
     ['iva',                  'IVA Crédito Fiscal'],
@@ -14225,8 +14283,12 @@ function admModAgregarLinea(lado, cuentaId, desc, tipoLinea) {
   ].map(function(t){ return '<option value="' + t[0] + '"' + (t[0]===tipoLinea?' selected':'') + '>' + t[1] + '</option>'; }).join('');
   var tr = document.createElement('tr');
   tr.innerHTML = '<td>'
-    + '<input class="adm-mod-buscar" oninput="admModFiltrarCuentas(this)" placeholder="🔍 Buscar código o nombre…" style="width:100%;font-size:11px;margin-bottom:3px;padding:3px 6px;border:1px solid var(--bor2);border-radius:5px">'
-    + '<select class="adm-mod-cuenta" onchange="admModValidarDoble()" style="width:100%">' + opts + '</select></td>'
+    + '<div style="position:relative">'
+      + '<input id="adm-mod-cuq-'+lid+'" type="text" autocomplete="off" placeholder="🔍 Escribí código o nombre…" value="'+cuTxt+'" '
+        + 'oninput="admModCuBuscar('+lid+')" onfocus="admModCuBuscar('+lid+')" onblur="admModCuBlur('+lid+')" onkeydown="admModCuKey(event,'+lid+')" style="width:100%">'
+      + '<input type="hidden" class="adm-mod-cuenta" id="adm-mod-cuhid-'+lid+'" value="'+(cuentaId||'')+'">'
+      + '<div id="adm-mod-culist-'+lid+'" class="pa-ac-list" style="display:none"></div>'
+    + '</div></td>'
     + '<td style="text-align:center"><select class="adm-mod-lado" onchange="admModValidarDoble()" style="width:90px">'
     + '<option value="debe"' + (lado==='debe'?' selected':'') + '>DEBE</option>'
     + '<option value="haber"' + (lado==='haber'?' selected':'') + '>HABER</option>'
@@ -17909,7 +17971,13 @@ function paAbrirNuevaCompra(){
   area.innerHTML='<div style="font-size:28px;margin-bottom:6px">📄</div><div style="font-size:12px;color:var(--mut)">Tocar para sacar foto o subir imagen</div>';
   area.onclick=function(){document.getElementById('pa-comp-foto-inp').click();};
   paCambiarTipoFactura('compra');
-  paAgregarItemCompra();
+  // Recargar SIEMPRE todos los insumos (sin filtro de categoría), porque PA.insumos
+  // se comparte con el padrón y puede haber quedado filtrado por un pill. Así la
+  // factura ve agroinsumos + otros juntos. Recién al tener la lista armamos el item.
+  paF('/api/pa/insumos').then(function(r){
+    PA.insumos = r.data || [];
+    paAgregarItemCompra();
+  }).catch(function(){ paAgregarItemCompra(); });
   document.getElementById('pa-mb-compra').classList.add('on');
 }
 
@@ -18437,11 +18505,32 @@ function paInsBuscar(n){
   var box=document.getElementById('pa-ci-inslist-'+n); if(!box) return;
   var q=ppNorm(inp.value).trim();
   var arr=(PA.insumos||[]).filter(function(i){ return !q || ppNorm(i.nombre).indexOf(q)!==-1; });
-  var top=arr.slice(0,50);
-  box.innerHTML = top.length
-    ? top.map(function(i){ return '<div class="pa-ac-item" data-id="'+i.id+'" onmousedown="paInsPick('+n+','+i.id+')">'+esc(i.nombre)+' <span style="color:var(--mut);font-size:11px">('+esc(i.unidad)+')</span></div>'; }).join('')
-        + (arr.length>top.length ? '<div class="pa-ac-more">… '+(arr.length-top.length)+' más — seguí escribiendo</div>' : '')
-    : '<div class="pa-ac-empty">Sin resultados</div>';
+  // Agrupar por categoría (Agroinsumos / Otros / etc.) con un encabezado por grupo
+  var labels = { agroinsumos:'🌱 Agroinsumos', combustibles:'⛽ Combustibles', panol:'🛠️ Pañol', embalajes:'📦 Embalajes', otros:'📋 Otros' };
+  function catDe(i){ return i.categoria_v2 || i.categoria_principal || 'otros'; }
+  var grupos = {};
+  arr.forEach(function(i){ var c=catDe(i); (grupos[c]=grupos[c]||[]).push(i); });
+  var orden = ['agroinsumos','combustibles','panol','embalajes','otros'];
+  var claves = Object.keys(grupos).sort(function(a,b){
+    var ia=orden.indexOf(a), ib=orden.indexOf(b);
+    return (ia<0?99:ia)-(ib<0?99:ib);
+  });
+  var totalMostrado = 0, MAX = 50, html = '';
+  claves.forEach(function(c){
+    if (totalMostrado >= MAX) return;
+    var items = grupos[c].slice(0, MAX - totalMostrado);
+    if (!items.length) return;
+    html += '<div class="pa-ac-group" style="padding:4px 10px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--mut);background:var(--bg);position:sticky;top:0">'
+      + (labels[c] || c) + '</div>';
+    html += items.map(function(i){
+      return '<div class="pa-ac-item" data-id="'+i.id+'" onmousedown="paInsPick('+n+','+i.id+')">'+esc(i.nombre)+' <span style="color:var(--mut);font-size:11px">('+esc(i.unidad)+')</span></div>';
+    }).join('');
+    totalMostrado += items.length;
+  });
+  if (arr.length > totalMostrado) {
+    html += '<div class="pa-ac-more">… '+(arr.length-totalMostrado)+' más — seguí escribiendo</div>';
+  }
+  box.innerHTML = html || '<div class="pa-ac-empty">Sin resultados</div>';
   box.style.display='';
 }
 function paInsPick(n,id){
