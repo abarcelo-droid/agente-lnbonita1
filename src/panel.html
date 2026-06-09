@@ -5074,7 +5074,7 @@ function sgRepExport(){
     </table></div>
     <div style="font-size:13px;font-weight:700;margin:18px 0 8px">📋 Catálogo de tareas</div>
     <div class="tw"><table>
-      <thead><tr><th>Tarea</th><th>Tipo labor</th><th style="text-align:center">Destajo</th><th>Unidad destajo</th><th style="text-align:center">Post-Cosecha</th></tr></thead>
+      <thead><tr><th>Tarea</th><th>Tipo labor</th><th style="text-align:center">Destajo</th><th>Unidad destajo</th><th style="text-align:center">Req. lote</th><th style="text-align:center">Post-Cosecha</th></tr></thead>
       <tbody id="pp-tr-tareas-tbody"></tbody>
     </table></div>
   </div>
@@ -5241,6 +5241,11 @@ function sgRepExport(){
       <div class="fl pp-as-general-note" style="display:none;flex:1 1 100%">
         <div style="font-size:12px;color:var(--mut);padding:6px 8px;background:var(--bg2);border-radius:6px">
           ℹ️ Rubro <strong>general</strong>: no se imputa a un lote ni cultivo (gasto de estructura). Va a la cuenta corriente del titular.
+        </div>
+      </div>
+      <div class="fl pp-as-empaque-note" style="display:none;flex:1 1 100%">
+        <div style="font-size:12px;color:var(--mut);padding:6px 8px;background:var(--bg2);border-radius:6px">
+          ℹ️ Tarea de <strong>galpón</strong> (empaque/selección/repaso): no va a un lote. El costo de MO se imputa a la <strong>campaña</strong>.
         </div>
       </div>
       <div class="fl"><label>Tarea</label>
@@ -21040,6 +21045,19 @@ function ppTogglePostCosecha(id, checked) {
   });
 }
 
+// Toggle "requiere finca/lote" de una tarea. Destildado = tarea de galpón (empaque):
+// el modal de asistencia oculta el lote y la valorización imputa el costo a la campaña.
+function ppToggleRequiereLote(id, checked) {
+  paF('/api/pa/personal/tareas-tipos/' + id, {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ requiere_lote: checked ? 1 : 0 })
+  }).then(function(r){
+    if (r && r.ok) {
+      toast(checked ? 'Tarea de campo (requiere lote)' : 'Tarea de galpón (sin lote → costo a campaña)');
+      PP.asistDefaults = null; // invalidar cache: el modal re-lee requiere_lote al abrir
+    } else { toast((r && r.error) || 'Error', 'er'); ppLoadTareasRubros(); }
+  });
+}
+
 function ppLoadTareasRubros() {
   paF('/api/pa/personal/reportes/rubros-uso').then(function(r){
     var rows = (r && r.data) || [];
@@ -21052,9 +21070,11 @@ function ppLoadTareasRubros() {
     var rows = (r && r.data) || [];
     var tb = document.getElementById('pp-tr-tareas-tbody');
     tb.innerHTML = rows.length ? rows.map(function(t){
+      var reqLote = (t.requiere_lote === undefined || t.requiere_lote === null) ? 1 : t.requiere_lote;
       return '<tr><td>' + esc(t.nombre||'') + '</td><td>' + esc(t.tipo_labor||'—') + '</td><td style="text-align:center">' + (t.es_destajo ? '✅' : '—') + '</td><td>' + esc(t.unidad_destajo||'—') + '</td>'
+        + '<td style="text-align:center"><input type="checkbox" ' + (reqLote ? 'checked' : '') + ' onchange="ppToggleRequiereLote(' + t.id + ',this.checked)" title="Requiere finca/lote (tareas de campo). Destildá para tareas de galpón (empaque): su costo va a la campaña"></td>'
         + '<td style="text-align:center"><input type="checkbox" ' + (t.post_cosecha ? 'checked' : '') + ' onchange="ppTogglePostCosecha(' + t.id + ',this.checked)" title="Post-Cosecha: habilita imputar a la campaña anterior"></td></tr>';
-    }).join('') : '<tr><td colspan="5" style="text-align:center;color:var(--mut);padding:20px">Sin tareas.</td></tr>';
+    }).join('') : '<tr><td colspan="6" style="text-align:center;color:var(--mut);padding:20px">Sin tareas.</td></tr>';
   });
 }
 
@@ -21569,9 +21589,9 @@ function ppAsistSetCampaña(which) {
 // Al cambiar la tarea: si es Post-Cosecha (y es alta nueva y hay campaña anterior),
 // muestra el toggle Vigente/Anterior; si no, fuerza Vigente y lo oculta.
 function ppAsistTareaChange() {
-  // Cambiar la tarea re-filtra el dropdown de lotes: post-cosecha matchea contra el cultivo
-  // de la campaña anterior; si no, contra el vigente. (Antes solo se re-filtraba al cambiar el rubro.)
-  ppFillLotes(document.getElementById('pp-as-lote').value, null);
+  // Cambiar la tarea re-evalúa si va a lote (requiere_lote) y re-filtra el dropdown de lotes:
+  // post-cosecha matchea contra el cultivo de la campaña anterior; si no, contra el vigente.
+  ppAsistActualizarLote();
   var wrap = document.getElementById('pp-as-postcos-wrap'); if (!wrap) return;
   var d = (PP.asistDefaults && PP.asistDefaults.campanas) || {};
   var tid = document.getElementById('pp-as-tarea').value;
@@ -21667,18 +21687,33 @@ function ppFillLotes(selId, rubroId) {
     }).join('');
 }
 
-// Al cambiar el rubro: productivo → pide lote (filtrado); general → sin lote/cultivo.
-function ppAsistRubroChange() {
+// Tarea seleccionada (objeto) del catálogo de tareas.
+function ppAsistTareaSel() {
+  var d = PP.asistDefaults || {};
+  var id = document.getElementById('pp-as-tarea').value;
+  return ((d.tareas) || []).find(function(t){ return String(t.id) === String(id); }) || null;
+}
+// Decide si la asistencia va SIN lote: rubro general (estructura) o tarea de galpón
+// (requiere_lote=0, ej. empaque). Muestra/oculta el campo Finca/Lote y la nota acorde.
+function ppAsistActualizarLote() {
   var rubro = ppAsistRubroSel();
-  var esGeneral = !!(rubro && rubro.mo_clase === 'general');
-  document.querySelectorAll('.pp-as-lote-wrap').forEach(function(el){ el.style.display = esGeneral ? 'none' : ''; });
+  var tarea = ppAsistTareaSel();
+  var esGeneral   = !!(rubro && rubro.mo_clase === 'general');
+  var tareaSinLote = !!(tarea && tarea.requiere_lote === 0);
+  var sinLote = esGeneral || tareaSinLote;
+  document.querySelectorAll('.pp-as-lote-wrap').forEach(function(el){ el.style.display = sinLote ? 'none' : ''; });
   document.querySelectorAll('.pp-as-general-note').forEach(function(el){ el.style.display = esGeneral ? '' : 'none'; });
-  if (esGeneral) {
+  document.querySelectorAll('.pp-as-empaque-note').forEach(function(el){ el.style.display = (tareaSinLote && !esGeneral) ? '' : 'none'; });
+  if (sinLote) {
     document.getElementById('pp-as-lote').value = '';
     document.getElementById('pp-as-cultivo').value = '';
   } else {
     ppFillLotes(document.getElementById('pp-as-lote').value, rubro ? rubro.id : null);
   }
+}
+// Al cambiar el rubro: re-evalúa la visibilidad del lote (productivo+tarea-de-campo → pide lote).
+function ppAsistRubroChange() {
+  ppAsistActualizarLote();
 }
 
 function ppAbrirAsistencia() {
