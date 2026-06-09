@@ -5005,7 +5005,7 @@ function sgRepExport(){
       <thead><tr>
         <th style="text-align:center"><input type="checkbox" id="pp-mas-all" onchange="ppMasivoToggleAll()"></th>
         <th>Titular</th><th>Tipo</th><th style="text-align:center">Jornales</th><th style="text-align:right">Tarifa</th><th style="text-align:right">Devengado</th>
-        <th style="text-align:right">Pagado</th><th style="text-align:right">Pendiente</th>
+        <th style="text-align:right">Pagado</th><th style="text-align:right" title="Pagos/adelantos manuales de esta semana — ya descontados del pendiente">Adelantado</th><th style="text-align:right">Pendiente</th>
       </tr></thead>
       <tbody id="pp-mas-tbody"></tbody>
     </table></div>
@@ -5279,9 +5279,12 @@ function sgRepExport(){
       </div>
       <div class="fl"><label>Monto $ *</label><input type="number" id="pp-mov-monto" step="0.01"></div>
       <div class="fl"><label>Fecha</label><input type="date" id="pp-mov-fecha"></div>
+      <div class="fl" style="flex:1 1 100%"><label>Caja / banco <span style="font-size:10px;color:var(--mut)">(de dónde sale — solo pago/adelanto)</span></label>
+        <select id="pp-mov-caja"><option value="">— Sin caja (no impacta tesorería) —</option></select>
+      </div>
       <div class="fl" style="flex:1 1 100%"><label>Descripción</label><input id="pp-mov-desc"></div>
     </div>
-    <div style="font-size:11px;color:var(--mut);margin-top:6px">Pago/Adelanto bajan el saldo (se guardan en negativo). Ajuste respeta el signo que pongas (negativo baja, positivo sube).</div>
+    <div style="font-size:11px;color:var(--mut);margin-top:6px">Pago/Adelanto bajan el saldo (se guardan en negativo) y, si elegís caja, descuentan de tesorería. Ajuste respeta el signo (negativo baja, positivo sube) y nunca toca caja.</div>
     <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:14px">
       <button class="btn bo" onclick="document.getElementById('mb-pp-ccmov').classList.remove('on')">Cancelar</button>
       <button class="btn bb" onclick="ppGuardarMov()">Guardar</button>
@@ -20901,7 +20904,7 @@ function ppMasivoRender() {
   var tbody = document.getElementById('pp-mas-tbody');
   var rows = PP.masPend || [];
   if (!rows.length) {
-    tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--mut);padding:16px">Sin pendientes para esta semana.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;color:var(--mut);padding:16px">Sin pendientes para esta semana.</td></tr>';
     document.getElementById('pp-mas-all').checked = false;
     ppMasivoResumen();
     return;
@@ -20915,6 +20918,7 @@ function ppMasivoRender() {
       '<td style="text-align:right">'+tarifaCell+'</td>'+
       '<td style="text-align:right">'+ppFmtARS(d.devengado)+'</td>'+
       '<td style="text-align:right">'+ppFmtARS(d.pagado)+'</td>'+
+      '<td style="text-align:right" title="Pagos/adelantos manuales de esta semana — ya descontados del pendiente">'+((d.adelantado||0)>0?'<span style="color:var(--warn,#b45309)">'+ppFmtARS(d.adelantado)+'</span>':'—')+'</td>'+
       '<td style="text-align:right"><strong>'+ppFmtARS(d.pendiente)+'</strong></td></tr>';
   }).join('');
   document.getElementById('pp-mas-all').checked = true;
@@ -22127,12 +22131,30 @@ function ppRenderCCDetalle() {
 
 // ═══ PERSONAL V1 — Pagos / Adelantos / Ajustes ═══════════════════════════════
 function ppLoadPagos() {
-  // Reusar titulares para el dropdown del modal y listar últimos movimientos manuales
+  // Reusar titulares para el dropdown del modal y listar los últimos movimientos manuales.
   paF('/api/pa/personal/cc/titulares').then(function(r){ PP.ccTitulares = (r && r.data) || []; });
-  // Listar últimos movimientos manuales agregando de cada titular sería caro;
-  // mostramos un placeholder y dejamos el detalle por titular en la pestaña CC.
+  ppRefrescarPagos();
+}
+function ppRefrescarPagos() {
   var tbody = document.getElementById('pp-pagos-tbody');
-  tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--mut);padding:16px">Usá "+ Registrar" para cargar un pago/adelanto/ajuste. El detalle por titular está en la pestaña Cuenta Corriente.</td></tr>';
+  if (!tbody) return;
+  tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--mut);padding:16px">Cargando…</td></tr>';
+  paF('/api/pa/personal/cc/movimientos?tipo_mov=pago,adelanto,ajuste&limit=80').then(function(r){
+    var rows = (r && r.data) || [];
+    if (!rows.length) {
+      tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--mut);padding:16px">Sin pagos/adelantos/ajustes cargados. Usá "+ Registrar".</td></tr>';
+      return;
+    }
+    var lbl = { pago:'Pago', adelanto:'Adelanto', ajuste:'Ajuste' };
+    tbody.innerHTML = rows.map(function(m){
+      var caja = m.fin_movimiento_id ? ' <span title="Impactó caja/tesorería">💵</span>' : '';
+      return '<tr><td>'+(m.fecha||'')+'</td><td>'+esc(m.titular_nombre||'')+'</td>'
+        +'<td>'+(lbl[m.tipo_mov]||m.tipo_mov)+caja+'</td>'
+        +'<td style="text-align:right">'+ppFmtARS(m.monto)+'</td>'
+        +'<td>'+esc(m.descripcion||'')+'</td>'
+        +'<td><button class="btn bd bs" onclick="ppAnularMov('+m.id+')">Anular</button></td></tr>';
+    }).join('');
+  });
 }
 
 function ppAbrirMov(tipoTitular, titularId) {
@@ -22146,6 +22168,13 @@ function ppAbrirMov(tipoTitular, titularId) {
     document.getElementById('pp-mov-monto').value = '';
     document.getElementById('pp-mov-fecha').value = new Date().toISOString().slice(0,10);
     document.getElementById('pp-mov-desc').value = '';
+    // Cajas (mismas que el pago masivo): si se elige, el pago/adelanto descuenta de tesorería.
+    var cajaSel = document.getElementById('pp-mov-caja');
+    cajaSel.value = '';
+    paF('/api/pa/personal/cajas').then(function(rc){
+      cajaSel.innerHTML = '<option value="">— Sin caja (no impacta tesorería) —</option>' +
+        ((rc && rc.data) || []).map(function(c){ return '<option value="'+c.id+'">'+esc(c.nombre)+'</option>'; }).join('');
+    });
     document.getElementById('mb-pp-ccmov').classList.add('on');
   };
   if (!PP.ccTitulares || !PP.ccTitulares.length) {
@@ -22159,21 +22188,24 @@ function ppGuardarMov() {
   if (!opt || !opt.value) return toast('Elegí un titular', 'er');
   var monto = Number(document.getElementById('pp-mov-monto').value);
   if (!monto || isNaN(monto)) return toast('Monto inválido', 'er');
+  var cajaVal = document.getElementById('pp-mov-caja').value;
   var body = {
     titular_id: parseInt(opt.value),
     tipo_titular: opt.dataset.tipo,
     tipo_mov: document.getElementById('pp-mov-tipo').value,
     monto: monto,
     fecha: document.getElementById('pp-mov-fecha').value || null,
-    descripcion: document.getElementById('pp-mov-desc').value.trim() || null
+    descripcion: document.getElementById('pp-mov-desc').value.trim() || null,
+    caja_id: cajaVal ? parseInt(cajaVal) : null
   };
   paF('/api/pa/personal/cc/movimiento', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) })
     .then(function(r){
       if (!r.ok) return toast(r.error||'Error', 'er');
-      toast('Movimiento registrado');
+      toast(r.sin_caja ? 'Registrado — OJO: sin caja, no impactó tesorería' : 'Movimiento registrado', r.sin_caja ? 'warn' : 'ok');
       document.getElementById('mb-pp-ccmov').classList.remove('on');
       if (PP.ccActual && PP.ccActual.titular.id === body.titular_id) ppVerCC(body.tipo_titular, body.titular_id);
       ppLoadCC();
+      ppRefrescarPagos();
     });
 }
 
@@ -22184,6 +22216,7 @@ function ppAnularMov(id) {
     toast('Movimiento anulado');
     if (PP.ccActual) ppVerCC(PP.ccActual.titular.tipo, PP.ccActual.titular.id);
     ppLoadCC();
+    ppRefrescarPagos();
   });
 }
 

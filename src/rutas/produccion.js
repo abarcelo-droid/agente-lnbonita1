@@ -4179,28 +4179,48 @@ router.post('/personal/cc/movimiento', requireAuth, (req, res) => {
   const perms = permisosPersonal(db, req.user);
   if (!perms.valorizacion && !perms.admin)
     return res.status(403).json({ ok: false, error: 'Sin permiso de valorización' });
-  const { tipo_titular, titular_id, tipo_mov, monto, fecha, descripcion } = req.body;
+  const { tipo_titular, titular_id, tipo_mov, monto, fecha, descripcion, caja_id } = req.body;
   if (!titular_id) return res.status(400).json({ ok: false, error: 'titular_id requerido' });
   if (!['pago','adelanto','ajuste'].includes(tipo_mov)) return res.status(400).json({ ok: false, error: 'tipo_mov inválido (pago/adelanto/ajuste)' });
   const m = Number(monto);
   if (!m || isNaN(m)) return res.status(400).json({ ok: false, error: 'monto inválido' });
   try {
-    const tit = db.prepare("SELECT id, tipo FROM pa_personal WHERE id=?").get(titular_id);
+    const tit = db.prepare("SELECT id, tipo, nombre FROM pa_personal WHERE id=?").get(titular_id);
     if (!tit) return res.status(404).json({ ok: false, error: 'Titular no encontrado' });
     const tt = tipo_titular || tit.tipo;
-    // Pago/adelanto bajan saldo (negativo); ajuste respeta el signo enviado
+    // Pago/adelanto bajan saldo (negativo) y SALEN PLATA REAL → impactan caja si se eligió una.
+    // Ajuste respeta el signo y NUNCA toca caja (no es salida de efectivo).
+    const saleEfectivo = (tipo_mov === 'pago' || tipo_mov === 'adelanto');
     let signed = m;
-    if (tipo_mov === 'pago' || tipo_mov === 'adelanto') signed = -Math.abs(m);
+    if (saleEfectivo) signed = -Math.abs(m);
+    let caja = null;
+    if (saleEfectivo && caja_id) {
+      caja = db.prepare("SELECT id, nombre FROM fin_cuentas WHERE id=? AND activo=1").get(caja_id);
+      if (!caja) return res.status(404).json({ ok: false, error: 'Caja inexistente o inactiva' });
+    }
+    const fechaMov = (fecha || new Date().toISOString().slice(0,10));
+    let sinCaja = false;
     const tx = db.transaction(() => {
+      let finMovId = null;
+      if (caja) {
+        // Egreso en la caja (mismo patrón que el pago masivo), linkeado 1:1 a este movimiento.
+        const egr = db.prepare(`INSERT INTO fin_movimientos (cuenta_id, fecha, tipo, concepto, monto, referencia, usuario_id)
+            VALUES (?,?, 'egreso', ?, ?, 'personal_pago_manual', ?)`)
+          .run(caja.id, fechaMov, `${tipo_mov === 'adelanto' ? 'Adelanto' : 'Pago'} personal — ${tit.nombre} · caja ${caja.nombre}`,
+               Math.abs(m), req.user.id);
+        finMovId = egr.lastInsertRowid;
+      } else if (saleEfectivo) {
+        sinCaja = true; // pago/adelanto SIN caja → no impacta tesorería (se avisa al front)
+      }
       db.prepare(`INSERT INTO pa_cc_movimientos
-          (tipo_titular, titular_id, fecha, tipo_mov, monto, descripcion, referencia_tipo, cargado_por)
-          VALUES (?,?,?,?,?,?,?,?)`)
-        .run(tt, titular_id, fecha || new Date().toISOString().slice(0,10), tipo_mov, signed,
-             descripcion || null, tipo_mov + '_manual', req.user.id);
+          (tipo_titular, titular_id, fecha, tipo_mov, monto, descripcion, referencia_tipo, fin_movimiento_id, cargado_por)
+          VALUES (?,?,?,?,?,?,?,?,?)`)
+        .run(tt, titular_id, fechaMov, tipo_mov, signed,
+             descripcion || null, tipo_mov + '_manual', finMovId, req.user.id);
       _recalcSaldoCC(db, tt, titular_id);
     });
     tx();
-    res.json({ ok: true });
+    res.json({ ok: true, sin_caja: sinCaja });
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
@@ -4215,13 +4235,53 @@ router.post('/personal/cc/movimiento/:id/anular', requireAuth, (req, res) => {
     if (!mov) return res.status(404).json({ ok: false, error: 'Movimiento no encontrado' });
     if (mov.tipo_mov === 'devengado' || mov.tipo_mov === 'anulacion')
       return res.status(400).json({ ok: false, error: 'Los devengados se revierten anulando la asistencia, no acá' });
+    const esManualConCaja = mov.fin_movimiento_id &&
+      (mov.referencia_tipo === 'pago_manual' || mov.referencia_tipo === 'adelanto_manual');
     const tx = db.transaction(() => {
       db.prepare("UPDATE pa_cc_movimientos SET anulado=1, anulado_en=datetime('now','localtime'), anulado_por=? WHERE id=?")
         .run(req.user.id, mov.id);
+      // Si el pago/adelanto manual tocó caja, revertir el egreso con un INGRESO compensatorio
+      // (no se borran movimientos financieros). El egreso del masivo (pago_semana) es compartido
+      // por varios titulares → NO se revierte acá (mismo comportamiento que antes).
+      if (esManualConCaja) {
+        const egr = db.prepare("SELECT cuenta_id, monto, concepto FROM fin_movimientos WHERE id=?").get(mov.fin_movimiento_id);
+        if (egr) {
+          db.prepare(`INSERT INTO fin_movimientos (cuenta_id, fecha, tipo, concepto, monto, referencia, usuario_id)
+              VALUES (?, date('now','localtime'), 'ingreso', ?, ?, 'personal_pago_manual_anulado', ?)`)
+            .run(egr.cuenta_id, 'Reversa anulación: ' + egr.concepto, egr.monto, req.user.id);
+        }
+      }
       _recalcSaldoCC(db, mov.tipo_titular, mov.titular_id);
     });
     tx();
     res.json({ ok: true });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// ── CC: listado global de movimientos manuales (pantalla "Pagos/Adelantos") ──────
+// Read-only. Por defecto pago/adelanto/ajuste (los manuales); filtrable por tipo_mov.
+router.get('/personal/cc/movimientos', requireAuth, (req, res) => {
+  const db = getDb();
+  const perms = permisosPersonal(db, req.user);
+  if (!perms.valorizacion && !perms.admin)
+    return res.status(403).json({ ok: false, error: 'Sin permiso de valorización' });
+  try {
+    const tipos = String(req.query.tipo_mov || 'pago,adelanto,ajuste')
+      .split(',').map(s => s.trim()).filter(t => ['devengado','pago','adelanto','ajuste','anulacion'].includes(t));
+    if (!tipos.length) return res.json({ ok: true, data: [] });
+    const lim = Math.min(Math.max(Number(req.query.limit) || 80, 1), 500);
+    const ph = tipos.map(() => '?').join(',');
+    const rows = db.prepare(`
+      SELECT m.id, m.fecha, m.tipo_titular, m.titular_id, p.nombre AS titular_nombre,
+             m.tipo_mov, m.monto, m.descripcion, m.referencia_tipo, m.fin_movimiento_id,
+             u.nombre AS cargado_por_nombre
+      FROM pa_cc_movimientos m
+      JOIN pa_personal p ON p.id = m.titular_id AND p.tipo = m.tipo_titular
+      LEFT JOIN usuarios u ON u.id = m.cargado_por
+      WHERE m.anulado=0 AND m.tipo_mov IN (${ph})
+      ORDER BY m.fecha DESC, m.id DESC
+      LIMIT ?`).all(...tipos, lim);
+    res.json({ ok: true, data: rows });
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
@@ -4401,6 +4461,20 @@ function _pendientesSemana(db, rango) {
       pagadoMap[r.tipo_titular + ':' + r.titular_id] = r.pagado;
     }
   }
+  // ANTI-DOBLE-PAGO: pagos/adelantos MANUALES dentro del rango de la semana (por fecha del
+  // movimiento, mismo criterio que el devengado). Restan del pendiente para que el masivo
+  // NO vuelva a pagar lo que ya se adelantó/pagó a mano. (Asociación por fecha; un semana_id
+  // explícito sería más preciso para adelantos cruzados de semana — ver reporte del PR.)
+  const adelantadoMap = {};
+  for (const r of db.prepare(`
+    SELECT tipo_titular, titular_id, COALESCE(SUM(-monto),0) AS adelantado
+    FROM pa_cc_movimientos
+    WHERE tipo_mov IN ('pago','adelanto') AND anulado=0
+      AND referencia_tipo IN ('pago_manual','adelanto_manual')
+      AND fecha BETWEEN ? AND ?
+    GROUP BY tipo_titular, titular_id`).all(rango.desde, rango.hasta)) {
+    adelantadoMap[r.tipo_titular + ':' + r.titular_id] = r.adelantado;
+  }
   // Desglose RRHH: jornales de la semana + tarifa aplicada, por titular (de lo valorizado).
   // titular_id es un pa_personal.id (único) → se puede mapear por id solo.
   const jmap = {};
@@ -4417,10 +4491,12 @@ function _pendientesSemana(db, rango) {
   }
   return dev.map(d => {
     const pagado = pagadoMap[d.tipo_titular + ':' + d.titular_id] || 0;
-    const pendiente = Math.round((d.devengado - pagado) * 100) / 100;
+    const adelantado = adelantadoMap[d.tipo_titular + ':' + d.titular_id] || 0;
+    // pendiente nunca negativo: el masivo no puede pagar de menos que cero (sin sobrepago).
+    const pendiente = Math.max(0, Math.round((d.devengado - pagado - adelantado) * 100) / 100);
     const j = jmap[d.titular_id] || { jornales: 0, tarifas: new Set() };
     const tarifas = Array.from(j.tarifas);
-    return { ...d, pagado, pendiente, jornales: j.jornales,
+    return { ...d, pagado, adelantado, pendiente, jornales: j.jornales,
              tarifa: tarifas.length === 1 ? tarifas[0] : null, tarifa_varias: tarifas.length > 1 };
   }).filter(d => d.pendiente > 0.009);
 }
