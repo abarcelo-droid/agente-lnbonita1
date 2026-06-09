@@ -2255,10 +2255,13 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
         </div>
       </div>
 
-      <!-- Fechas -->
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px">
-        <div class="fl"><label>Fecha OC</label><input type="date" id="sg-oc-fecha"></div>
-        <div class="fl"><label>Fecha recepción estimada</label><input type="date" id="sg-oc-fecharec"></div>
+      <!-- Fechas (en recuadro propio, alineadas con los demás bloques) -->
+      <div class="sg-oc-box">
+        <div class="sg-oc-box-tit">📅 Fechas</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+          <div class="fl"><label>Fecha OC</label><input type="date" id="sg-oc-fecha"></div>
+          <div class="fl"><label>Fecha recepción estimada</label><input type="date" id="sg-oc-fecharec"></div>
+        </div>
       </div>
 
       <!-- Flete (recuadro propio, informativo) -->
@@ -2716,6 +2719,15 @@ function sgMoney(n){ return '$'+nr(n); }
 function sgProdNombre(id){ var p = SG.cacheProd.find(function(x){ return x.id===id; }); return p ? p.nombre : ('#'+id); }
 // Nombre de envase desde cache (para el listado de presentaciones).
 function sgEnvNombre(id){ if(!id) return '—'; var e = (SG.cacheEnv||[]).find(function(x){ return String(x.id)===String(id); }); return e ? e.nombre : ('#'+id); }
+// Label de presentación para el dropdown de la OC: "NOMBRE — FACTOR kg (ENVASE)".
+// Ej. "Kilos — 10 kg (Caja Cartón)". El factor (factor_conversion) es el dato clave para
+// distinguir presentaciones del mismo producto (10 kg vs 12 kg). No usa nr() para no
+// redondear factores decimales. El cálculo posterior sigue usando el factor igual que antes.
+function sgPresLabel(p){
+  var f = (p.factor_conversion!=null && p.factor_conversion!=='') ? (Number(p.factor_conversion).toLocaleString('es-AR')+' kg') : '';
+  var env = p.envase_id ? sgEnvNombre(p.envase_id) : '';
+  return (p.nombre||'') + (f?(' — '+f):'') + (env && env!=='—' ? (' ('+env+')') : '');
+}
 // ── Alta de ítem de catálogo con detección de duplicados (reutilizable) ───────
 // POST a /api/sg/<path>. Si el backend devuelve 409 {duplicado}, muestra el
 // candidato existente y ofrece USARLO; un admin puede además forzar la creación
@@ -3317,7 +3329,7 @@ function sgOcRenderItems(){
     var presList = sgPresDe(it.producto_id);
     var presSel = (it.producto_id && presList.length===0)
       ? '<select disabled title="Este producto no tiene presentaciones cargadas (cargalas en Catálogo)"><option>(sin presentaciones)</option></select>'
-      : '<select onchange="sgOcUpdNR('+i+',\'presentacion_id\',this.value)">'+sgOpts(presList,'nombre',it.presentacion_id,'— Present. —')+'</select>';
+      : '<select onchange="sgOcUpdNR('+i+',\'presentacion_id\',this.value)">'+sgOpts(presList,sgPresLabel,it.presentacion_id,'— Present. —')+'</select>';
     // CAMBIO 2 — modo de carga por item. BULTO: cantidad=nº bultos, precio=$/bulto → kg=bultos×factor.
     // KILO (default): cantidad=kg, precio=$/kg → kg=cantidad. Internamente siempre se guardan kg y total reales.
     var bulto = it.modo==='bulto';
