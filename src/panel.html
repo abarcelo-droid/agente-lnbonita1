@@ -13256,7 +13256,11 @@ function admCuentasOpts(seleccionado) {
   Object.values(porSec).sort(function(a,b){ return a.codigo - b.codigo; }).forEach(function(g){
     html += '<optgroup label="'+g.codigo+' — '+g.nombre+'">';
     g.items.forEach(function(c){
-      html += '<option value="'+c.id+'"'+(c.id==seleccionado?' selected':'')+'>'+c.codigo+' — '+c.nombre+'</option>';
+      if (c.imputable === 0) {
+        html += '<option value="" disabled style="color:#9ca3af">'+c.codigo+' — '+c.nombre+' — 🔒 NO IMPUTABLE</option>';
+      } else {
+        html += '<option value="'+c.id+'"'+(c.id==seleccionado?' selected':'')+'>'+c.codigo+' — '+c.nombre+'</option>';
+      }
     });
     html += '</optgroup>';
   });
@@ -14059,9 +14063,42 @@ function admModCargarCuentas(cb) {
     .then(function(r){ return r.json(); })
     .then(function(r) {
       ADM_MOD_CUENTAS = (r.data || []).filter(function(c){ return c.activo; });
+      // El backend ya envía c.imputable; por las dudas lo recalculamos si falta.
+      var codigos = ADM_MOD_CUENTAS.map(function(c){ return String(c.codigo); });
+      ADM_MOD_CUENTAS.forEach(function(c){
+        if (c.imputable === undefined || c.imputable === null) {
+          var cod = String(c.codigo);
+          c.imputable = codigos.some(function(o){ return o !== cod && o.indexOf(cod + '.') === 0; }) ? 0 : 1;
+        }
+      });
       cb();
     })
     .catch(function(){ cb(); });
+}
+
+// Opciones de cuenta para el modelo, con buscador y bloqueo de no imputables.
+// Las no imputables aparecen deshabilitadas con la leyenda "NO IMPUTABLE".
+function admModCuentaOptions(query, selectedId) {
+  query = (query || '').toLowerCase().trim();
+  var html = '<option value="">— Seleccioná cuenta —</option>';
+  ADM_MOD_CUENTAS.forEach(function(c) {
+    var txt = (c.codigo ? '[' + c.codigo + '] ' : '') + c.nombre;
+    if (query && txt.toLowerCase().indexOf(query) === -1) return;
+    if (c.imputable === 0) {
+      html += '<option value="" disabled style="color:#9ca3af">' + txt + ' — 🔒 NO IMPUTABLE</option>';
+    } else {
+      html += '<option value="' + c.id + '"' + (c.id == selectedId ? ' selected' : '') + '>' + txt + '</option>';
+    }
+  });
+  return html;
+}
+
+// Filtra el select hermano al tipear en el buscador de una línea del modelo
+function admModFiltrarCuentas(input) {
+  var tr = input.closest('tr');
+  var sel = tr.querySelector('.adm-mod-cuenta');
+  var actual = sel.value;
+  sel.innerHTML = admModCuentaOptions(input.value, actual);
 }
 
 function admModCargar() {
@@ -14155,10 +14192,7 @@ function admModAgregarLinea(lado, cuentaId, desc, tipoLinea) {
   tipoLinea = tipoLinea || 'libre';
   var tbody = document.getElementById('adm-mod-lineas');
   var idx = tbody.children.length;
-  var opts = ADM_MOD_CUENTAS.map(function(c) {
-    return '<option value="' + c.id + '"' + (c.id == cuentaId ? ' selected' : '') + '>'
-      + (c.codigo ? '[' + c.codigo + '] ' : '') + c.nombre + '</option>';
-  }).join('');
+  var opts = admModCuentaOptions('', cuentaId);
   var tipoOpts = [
     ['libre',                '— Libre (neto/compras) —'],
     ['iva',                  'IVA Crédito Fiscal'],
@@ -14169,8 +14203,9 @@ function admModAgregarLinea(lado, cuentaId, desc, tipoLinea) {
     ['proveedores',          'Proveedores (Haber)']
   ].map(function(t){ return '<option value="' + t[0] + '"' + (t[0]===tipoLinea?' selected':'') + '>' + t[1] + '</option>'; }).join('');
   var tr = document.createElement('tr');
-  tr.innerHTML = '<td><select class="adm-mod-cuenta" onchange="admModValidarDoble()" style="width:100%">'
-    + '<option value="">— Seleccioná cuenta —</option>' + opts + '</select></td>'
+  tr.innerHTML = '<td>'
+    + '<input class="adm-mod-buscar" oninput="admModFiltrarCuentas(this)" placeholder="🔍 Buscar código o nombre…" style="width:100%;font-size:11px;margin-bottom:3px;padding:3px 6px;border:1px solid var(--bor2);border-radius:5px">'
+    + '<select class="adm-mod-cuenta" onchange="admModValidarDoble()" style="width:100%">' + opts + '</select></td>'
     + '<td style="text-align:center"><select class="adm-mod-lado" onchange="admModValidarDoble()" style="width:90px">'
     + '<option value="debe"' + (lado==='debe'?' selected':'') + '>DEBE</option>'
     + '<option value="haber"' + (lado==='haber'?' selected':'') + '>HABER</option>'
