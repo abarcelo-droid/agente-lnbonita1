@@ -2075,7 +2075,19 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       <div id="sggd-content"><div class="emp">Cargando…</div></div>
     </div>
 
-    <div class="sggd-pane" id="sggd-pane-cargas_descargas"><div class="emp" style="padding:40px">📦 Cargas y Descargas — próximamente (Fase 2).</div></div>
+    <div class="sggd-pane" id="sggd-pane-cargas_descargas">
+      <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:14px">
+        <div style="display:inline-flex;gap:2px;background:var(--bg);border:1px solid var(--bor);border-radius:8px;padding:3px">
+          <div class="sgcd-est on" data-e="pendiente_valorizar" onclick="sgCdsEstado('pendiente_valorizar')" style="padding:5px 12px;cursor:pointer;font-size:12px;font-weight:600;border-radius:6px;background:var(--burg);color:#fff">⏳ Pendientes</div>
+          <div class="sgcd-est" data-e="valorizado" onclick="sgCdsEstado('valorizado')" style="padding:5px 12px;cursor:pointer;font-size:12px;font-weight:600;border-radius:6px;color:var(--mut)">✅ Valorizadas</div>
+        </div>
+        <label style="font-size:12px;color:var(--mut)">Cooperativa
+          <select id="sgcd-filtro-coop" onchange="sgCdsLoad()" style="padding:5px 8px;border-radius:6px;border:1px solid var(--bor);background:var(--bg)"><option value="">— Todas —</option></select>
+        </label>
+        <span style="font-size:11px;color:var(--mut)">Descarga ↓ = costo de ingreso (lote) · Carga ↑ = costo de venta (margen)</span>
+      </div>
+      <div id="sgcd-content"><div class="emp">Cargando…</div></div>
+    </div>
     <div class="sggd-pane" id="sggd-pane-repaso"><div class="emp" style="padding:40px">🔁 Repasos — próximamente (Fase 3).</div></div>
   </div>
 
@@ -2351,6 +2363,16 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
             <div class="fl"><label>Pallets recibidos</label><input type="number" min="0" id="sg-rec-pallets" placeholder="nº de pallets"></div>
             <div class="fl"><label>Bultos recibidos</label><input type="number" min="0" id="sg-rec-bultos" placeholder="nº de bultos"></div>
           </div>
+          <!-- FASE 2 — Descarga de la cooperativa (genera gasto pendiente de valorizar). -->
+          <div style="display:grid;grid-template-columns:1.4fr 1fr;gap:10px;margin-top:8px">
+            <div class="fl"><label>Cooperativa (descarga) <span style="font-weight:400;color:var(--mut);font-size:11px">opcional</span></label><select id="sg-rec-coop"><option value="">— Sin descarga —</option></select></div>
+            <div class="fl"><label>Cobra por</label>
+              <div style="display:flex;gap:14px;padding:6px 0">
+                <label style="font-weight:500"><input type="radio" name="sg-rec-coop-unidad" value="bulto" checked style="width:auto"> Bulto</label>
+                <label style="font-weight:500"><input type="radio" name="sg-rec-coop-unidad" value="pallet" style="width:auto"> Pallet</label>
+              </div>
+            </div>
+          </div>
         </div>
 
         <!-- Items a recibir -->
@@ -2568,6 +2590,8 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
         <div class="fl"><label>Transporte</label><select id="sg-desp-transp"><option value="">—</option><option value="propio">Propio</option><option value="cliente">Cliente</option><option value="tercero">Tercero</option></select></div>
         <div class="fl"><label>Fletero <span style="font-weight:400;color:var(--mut);font-size:11px">(genera gasto pendiente)</span></label><select id="sg-desp-fletero"><option value="">— Sin fletero —</option></select></div>
         <div class="fl"><label>Chofer / Dominio</label><input id="sg-desp-chofer" placeholder="chofer"><input id="sg-desp-dominio" placeholder="dominio" style="margin-top:4px"></div>
+        <div class="fl"><label>Cooperativa (carga) <span style="font-weight:400;color:var(--mut);font-size:11px">cobra por bulto</span></label><select id="sg-desp-coop"><option value="">— Sin carga —</option></select></div>
+        <div class="fl"><label>Bultos cargados <span style="font-weight:400;color:var(--mut);font-size:11px">(si hay cooperativa)</span></label><input type="number" min="0" id="sg-desp-bultos" placeholder="nº de bultos"></div>
       </div>
       <div class="fl ff"><label>Líneas (elegí producto → lote sugerido por FEFO)</label><div id="sg-desp-items"></div>
         <button class="btn bo bs" style="margin-top:6px" onclick="sgDespAddItem()">+ Agregar línea</button></div>
@@ -2587,14 +2611,14 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     <div class="mhd"><div class="mht" id="sg-val-tit">Valorizar cuenta</div><button class="mcl" onclick="closeMB('sg-val-modal')">×</button></div>
     <div class="fg">
       <div style="display:flex;gap:18px;align-items:center;margin-bottom:12px;flex-wrap:wrap">
-        <label style="font-weight:600"><input type="radio" name="sg-val-modo" value="remito" checked onchange="sgGdsValModo()" style="width:auto"> Monto por remito</label>
-        <label style="font-weight:600"><input type="radio" name="sg-val-modo" value="total" onchange="sgGdsValModo()" style="width:auto"> Total a repartir (prorrateo por kg)</label>
+        <label style="font-weight:600"><input type="radio" name="sg-val-modo" value="remito" checked onchange="sgGdsValModo()" style="width:auto"> Monto por operación</label>
+        <label style="font-weight:600"><input type="radio" name="sg-val-modo" value="total" onchange="sgGdsValModo()" style="width:auto"> Total a repartir (prorrateo por cantidad)</label>
       </div>
       <div id="sg-val-totalbox" style="display:none;margin-bottom:12px">
-        <div class="fl"><label>Total de la cuenta ($)</label><input type="number" id="sg-val-total" min="0" step="0.01" oninput="sgGdsProrratear()" placeholder="se reparte por kg entre los remitos"></div>
+        <div class="fl"><label>Total de la cuenta ($)</label><input type="number" id="sg-val-total" min="0" step="0.01" oninput="sgGdsProrratear()" placeholder="se reparte entre las operaciones por su cantidad (kg / bultos / pallets)"></div>
       </div>
       <div class="ab-table-wrap"><table class="pa-tbl">
-        <thead><tr><th>Remito</th><th>Cliente</th><th>Fecha</th><th style="text-align:right">Kg</th><th style="text-align:right">Monto $</th></tr></thead>
+        <thead><tr><th>Operación</th><th>Detalle</th><th>Fecha</th><th style="text-align:right">Cant.</th><th style="text-align:right">Monto $</th></tr></thead>
         <tbody id="sg-val-items"></tbody>
       </table></div>
       <div id="sg-val-resumen" style="text-align:right;font-weight:700;margin-top:10px"></div>
@@ -3522,6 +3546,9 @@ function sgRecOpen(ocId){
     eid('sg-rec-remito').value=''; eid('sg-rec-obs').value='';
     // PASO 1 — reset documentación + paletizado
     eid('sg-rec-factura').value=''; eid('sg-rec-dtv').value=''; eid('sg-rec-pallets').value=''; eid('sg-rec-bultos').value='';
+    // FASE 2 — cooperativa (descarga): selector de proveedores de servicio + unidad bulto/pallet.
+    eid('sg-rec-coop').value=''; document.querySelector('input[name="sg-rec-coop-unidad"][value="bulto"]').checked=true;
+    api('/api/sg/proveedores-servicio').then(function(rr){ var fls=(rr&&rr.ok)?rr.data:[]; eid('sg-rec-coop').innerHTML='<option value="">— Sin descarga —</option>'+fls.map(function(f){return '<option value="'+f.id+'">'+esc(f.razon_social)+'</option>';}).join(''); });
     // PASO 2 — reset informe de calidad + fotos
     eid('sg-rec-observada').checked=false; eid('sg-rec-calidad').style.display='none'; eid('sg-rec-preview-btn').style.display='none';
     eid('sg-rec-cal-estado').value=''; eid('sg-rec-cal-pct').value=''; eid('sg-rec-cal-defectos').value=''; eid('sg-rec-cal-obs').value='';
@@ -3663,6 +3690,8 @@ function sgRecBuildBody(requireItems){
     numero_remito_proveedor:eid('sg-rec-remito').value, observaciones:eid('sg-rec-obs').value,
     factura_numero:eid('sg-rec-factura').value, dtv_codigo:eid('sg-rec-dtv').value,           // PASO 1 · documentación
     pallets_recibidos:num('sg-rec-pallets'), bultos_recibidos:num('sg-rec-bultos'),           // PASO 1 · paletizado
+    cooperativa_id: eid('sg-rec-coop').value?Number(eid('sg-rec-coop').value):null,           // FASE 2 · descarga
+    cooperativa_unidad: (document.querySelector('input[name="sg-rec-coop-unidad"]:checked')||{}).value||'bulto',
     observada:observada,                                                                       // PASO 2 · informe de calidad
     calidad_estado_general:observada?eid('sg-rec-cal-estado').value:null,
     calidad_defectos:observada?eid('sg-rec-cal-defectos').value:null,
@@ -4067,8 +4096,9 @@ function sgLoadDespachos(){
     eid('sg-tb-despachos').innerHTML = rows.length ? rows.map(function(d){
       // PARTE D — Margen NETO (descuenta el flete de salida valorizado). Si hay flete, se aclara en el title.
       var mn=(d.margen_neto!=null?d.margen_neto:(d.margen||0));
-      var fleteTip=(d.flete_salida>0)?(' title="Margen items '+sgMoney(d.margen)+' − flete '+sgMoney(d.flete_salida)+(d.fletero_nombre?(' ('+d.fletero_nombre+')'):'')+'"'):'';
-      var fleteMark=(d.flete_salida>0)?' 🚚':'';
+      var costoVenta=(Number(d.flete_salida)||0)+(Number(d.carga_salida)||0);
+      var fleteTip=(costoVenta>0)?(' title="Margen items '+sgMoney(d.margen)+(d.flete_salida>0?(' − flete '+sgMoney(d.flete_salida)):'')+(d.carga_salida>0?(' − carga '+sgMoney(d.carga_salida)):'')+'"'):'';
+      var fleteMark=(d.flete_salida>0?' 🚚':'')+(d.carga_salida>0?' 📦':'');
       return '<tr><td><code>'+esc(d.numero||'')+'</code></td><td>'+(d.fecha_despacho||'—')+'</td><td>'+esc(d.cliente_nombre||'—')+'</td><td>'+esc(d.pedido_numero||'—')+'</td><td style="text-align:right">'+sgMoney(d.total)+'</td><td style="text-align:right;color:'+(mn>=0?'var(--ok,#16a34a)':'var(--err,#dc2626)')+'"'+fleteTip+'>'+sgMoney(mn)+fleteMark+'</td><td style="text-align:center"><span class="bdg bok">'+(SG_ESTDESP[d.estado]||d.estado)+'</span></td><td style="text-align:right;white-space:nowrap"><button class="btn bo bs" onclick="sgDespVer('+d.id+')">🔍</button> <button class="btn bd bs" onclick="sgDespAnular('+d.id+')">✖</button></td></tr>';
     }).join('') : '<tr><td colspan="8" class="emp">Sin despachos.</td></tr>';
   });
@@ -4081,12 +4111,14 @@ function sgDespOpen(){
     eid('sg-desp-ped').innerHTML='<option value="">— Sin pedido —</option>'+peds.map(function(p){return '<option value="'+p.id+'" data-cli="'+p.cliente_id+'">'+esc(p.numero)+' — '+esc(p.cliente_nombre||'')+'</option>';}).join('');
   });
   eid('sg-desp-fecha').value=new Date().toISOString().slice(0,10);
-  ['sg-desp-chofer','sg-desp-dominio','sg-desp-obs'].forEach(function(id){eid(id).value='';});
+  ['sg-desp-chofer','sg-desp-dominio','sg-desp-obs','sg-desp-bultos'].forEach(function(id){eid(id).value='';});
   eid('sg-desp-transp').value='';
-  // Fletero (proveedor de servicio): al elegirlo se crea un gasto de flete de salida pendiente.
+  // Proveedores de servicio: fletero (flete de salida) y cooperativa (carga). Ambos del mismo catálogo.
   api('/api/sg/proveedores-servicio').then(function(r){
     var fls=(r&&r.ok)?r.data:[];
-    eid('sg-desp-fletero').innerHTML='<option value="">— Sin fletero —</option>'+fls.map(function(f){return '<option value="'+f.id+'">'+esc(f.razon_social)+'</option>';}).join('');
+    var opts='<option value="">{X}</option>'+fls.map(function(f){return '<option value="'+f.id+'">'+esc(f.razon_social)+'</option>';}).join('');
+    eid('sg-desp-fletero').innerHTML=opts.replace('{X}','— Sin fletero —');
+    eid('sg-desp-coop').innerHTML=opts.replace('{X}','— Sin carga —');
   });
   sgDespAddItem();
   eid('sg-desp-modal').classList.add('on');
@@ -4148,6 +4180,8 @@ function sgDespGuardar(){
   var body={ cliente_id:Number(cli), pedido_id:eid('sg-desp-ped').value?Number(eid('sg-desp-ped').value):null,
     fecha_despacho:eid('sg-desp-fecha').value, transporte:eid('sg-desp-transp').value,
     fletero_id:eid('sg-desp-fletero').value?Number(eid('sg-desp-fletero').value):null,
+    cooperativa_id:eid('sg-desp-coop').value?Number(eid('sg-desp-coop').value):null,                 // FASE 2 · carga
+    cooperativa_bultos:eid('sg-desp-bultos').value!==''?Number(eid('sg-desp-bultos').value):null,
     chofer:eid('sg-desp-chofer').value, dominio:eid('sg-desp-dominio').value, observaciones:eid('sg-desp-obs').value, items:items };
   api('/api/sg/despachos','POST',body).then(function(r){
     if(r&&r.ok){ toast('Despacho registrado','ok'); closeMB('sg-desp-modal'); sgLoadDespachos(); }
@@ -4173,6 +4207,7 @@ function sgGdsTab(t){
   document.querySelectorAll('.sg-mod .sggd-tab').forEach(function(el){el.classList.toggle('on',el.dataset.t===t);});
   document.querySelectorAll('.sg-mod .sggd-pane').forEach(function(el){el.classList.toggle('on',el.id==='sggd-pane-'+t);});
   if(t==='flete_salida') sgGdsLoad();
+  else if(t==='cargas_descargas') sgCdsInit();   // FASE 2
 }
 function sgGdsEstado(e){
   SGGD.estado=e;
@@ -4214,17 +4249,22 @@ function sgGdsRenderVal(){
       return '<tr><td>'+esc(g.fletero_nombre||'—')+'</td><td><code>'+esc(g.despacho_numero||'—')+'</code></td><td>'+esc(g.cliente_nombre||'—')+'</td><td>'+(g.fecha_servicio||'—')+'</td><td>'+(g.fecha_valorizacion||'—')+'</td><td style="font-size:11px;color:var(--mut)">'+esc(g.cuenta_ref||'—')+'</td><td style="text-align:right;font-weight:700">'+sgMoney(g.monto)+'</td></tr>';
     }).join('')+'</tbody></table></div>';
 }
-// ── Valorización de la cuenta de un fletero ──
-function sgGdsValOpen(provId){
-  var pend=SGGD.rows.filter(function(g){return String(g.proveedor_servicio_id)===String(provId);});
-  if(!pend.length){ toast('Sin remitos pendientes','er'); return; }
-  SGGD.valProv=provId; SGGD.valNombre=pend[0].fletero_nombre||'';
-  SGGD.valItems=pend.map(function(g){ return { id:g.id, despacho_numero:g.despacho_numero, cliente_nombre:g.cliente_nombre, fecha:g.fecha_despacho, kg:Number(g.kg)||0, monto:'' }; });
+// ── Valorización de una cuenta (fletero o cooperativa). GENÉRICA: prorratea por `base`
+//    (kg para flete; bultos/pallets para cargas/descargas). Reusada por Fletes y Cargas/Descargas.
+function sgGdsValAbrir(opts){   // opts:{prov, nombre, items:[{id,ref,sub,fecha,base,unidadLbl}], reload}
+  SGGD.valProv=opts.prov; SGGD.valNombre=opts.nombre||''; SGGD.valReload=opts.reload||sgGdsLoad;
+  SGGD.valItems=(opts.items||[]).map(function(x){ return {id:x.id, ref:x.ref, sub:x.sub, fecha:x.fecha, base:Number(x.base)||0, unidadLbl:x.unidadLbl||'', monto:''}; });
   eid('sg-val-tit').textContent='Valorizar cuenta — '+SGGD.valNombre;
   document.querySelector('input[name="sg-val-modo"][value="remito"]').checked=true;
   eid('sg-val-total').value='';
   sgGdsValModo();
   eid('sg-val-modal').classList.add('on');
+}
+function sgGdsValOpen(provId){   // FLETE (Fase 1) → base=kg
+  var pend=SGGD.rows.filter(function(g){return String(g.proveedor_servicio_id)===String(provId);});
+  if(!pend.length){ toast('Sin remitos pendientes','er'); return; }
+  sgGdsValAbrir({ prov:provId, nombre:pend[0].fletero_nombre||'', reload:sgGdsLoad,
+    items:pend.map(function(g){ return {id:g.id, ref:g.despacho_numero, sub:g.cliente_nombre, fecha:g.fecha_despacho, base:g.kg, unidadLbl:'kg'}; }) });
 }
 function sgGdsValModo(){
   var modo=document.querySelector('input[name="sg-val-modo"]:checked').value;
@@ -4233,17 +4273,18 @@ function sgGdsValModo(){
 }
 function sgGdsValRender(){
   var ro=document.querySelector('input[name="sg-val-modo"]:checked').value==='total';
+  var inSty='width:110px;text-align:right;padding:4px 6px;border-radius:6px;border:1px solid var(--bor)';
   eid('sg-val-items').innerHTML=SGGD.valItems.map(function(it,i){
-    return '<tr><td><code>'+esc(it.despacho_numero||'—')+'</code></td><td>'+esc(it.cliente_nombre||'—')+'</td><td>'+(it.fecha||'—')+'</td><td style="text-align:right">'+nr(it.kg)+'</td>'
-      +'<td style="text-align:right"><input type="number" min="0" step="0.01" value="'+(it.monto!==''&&it.monto!=null?it.monto:'')+'" '+(ro?'readonly style="background:rgba(128,128,128,.12);width:110px;text-align:right;padding:4px 6px;border-radius:6px;border:1px solid var(--bor)"':'style="width:110px;text-align:right;padding:4px 6px;border-radius:6px;border:1px solid var(--bor)"')+' oninput="sgGdsValMonto('+i+',this.value)"></td></tr>';
+    return '<tr><td><code>'+esc(it.ref||'—')+'</code></td><td>'+esc(it.sub||'—')+'</td><td>'+(it.fecha||'—')+'</td><td style="text-align:right">'+nr(it.base)+(it.unidadLbl?(' '+esc(it.unidadLbl)):'')+'</td>'
+      +'<td style="text-align:right"><input type="number" min="0" step="0.01" value="'+(it.monto!==''&&it.monto!=null?it.monto:'')+'" '+(ro?('readonly style="background:rgba(128,128,128,.12);'+inSty+'"'):('style="'+inSty+'"'))+' oninput="sgGdsValMonto('+i+',this.value)"></td></tr>';
   }).join('');
   sgGdsValResumen();
 }
 function sgGdsValMonto(i,v){ SGGD.valItems[i].monto=(v===''?'':Number(v)); sgGdsValResumen(); }
 function sgGdsProrratear(){
   var total=Number(eid('sg-val-total').value)||0;
-  var totKg=SGGD.valItems.reduce(function(a,x){return a+(x.kg||0);},0);
-  SGGD.valItems.forEach(function(it){ it.monto = totKg>0 ? Math.round((total*(it.kg/totKg))*100)/100 : 0; });
+  var totBase=SGGD.valItems.reduce(function(a,x){return a+(x.base||0);},0);
+  SGGD.valItems.forEach(function(it){ it.monto = totBase>0 ? Math.round((total*(it.base/totBase))*100)/100 : 0; });
   sgGdsValRender();
 }
 function sgGdsValResumen(){
@@ -4259,9 +4300,66 @@ function sgGdsValGuardar(){
   var items=SGGD.valItems.filter(function(it){return it.monto!==''&&Number(it.monto)>=0;}).map(function(it){return {id:it.id,monto:Number(it.monto)};});
   if(!items.length){ toast('Cargá al menos un monto','er'); return; }
   api('/api/sg/gastos-servicio/valorizar','POST',{proveedor_servicio_id:SGGD.valProv,items:items}).then(function(r){
-    if(r&&r.ok){ toast(r.data.valorizados+' flete(s) valorizados','ok'); closeMB('sg-val-modal'); sgGdsLoad(); }
+    if(r&&r.ok){ toast(r.data.valorizados+' operación(es) valorizada(s)','ok'); closeMB('sg-val-modal'); (SGGD.valReload||sgGdsLoad)(); }
     else toast((r&&r.error)||'Error','er');
   });
+}
+
+// ── FASE 2 — Cargas y Descargas (cooperativa). Reusa el modelo + la valorización del flete. ──
+var SGCD={ estado:'pendiente_valorizar', rows:[] };
+function sgCdsTipoLbl(t){ return t==='descarga_ingreso'?'Descarga (ingreso)':(t==='carga_salida'?'Carga (salida)':t); }
+function sgCdsInit(){
+  api('/api/sg/proveedores-servicio').then(function(r){
+    var fls=(r&&r.ok)?r.data:[];
+    eid('sgcd-filtro-coop').innerHTML='<option value="">— Todas —</option>'+fls.map(function(f){return '<option value="'+f.id+'">'+esc(f.razon_social)+'</option>';}).join('');
+  });
+  sgCdsLoad();
+}
+function sgCdsEstado(e){
+  SGCD.estado=e;
+  document.querySelectorAll('.sg-mod .sgcd-est').forEach(function(el){var on=el.dataset.e===e; el.classList.toggle('on',on); el.style.background=on?'var(--burg)':''; el.style.color=on?'#fff':'var(--mut)';});
+  sgCdsLoad();
+}
+function sgCdsLoad(){
+  var prov=eid('sgcd-filtro-coop').value;
+  api('/api/sg/gastos-servicio?tipo=carga_salida,descarga_ingreso&estado='+SGCD.estado+(prov?('&proveedor_id='+prov):'')).then(function(r){
+    SGCD.rows=(r&&r.ok)?r.data:[];
+    if(SGCD.estado==='pendiente_valorizar') sgCdsRenderPend(); else sgCdsRenderVal();
+  });
+}
+function sgCdsRenderPend(){
+  var c=eid('sgcd-content');
+  if(!SGCD.rows.length){ c.innerHTML='<div class="emp" style="padding:30px">Sin cargas/descargas pendientes. 🎉</div>'; return; }
+  var grupos={};
+  SGCD.rows.forEach(function(g){ var k=g.proveedor_servicio_id||'0'; if(!grupos[k])grupos[k]={nombre:g.fletero_nombre||'(sin cooperativa)',id:g.proveedor_servicio_id,items:[]}; grupos[k].items.push(g); });
+  c.innerHTML=Object.keys(grupos).map(function(k){
+    var gr=grupos[k];
+    var filas=gr.items.map(function(x){
+      var tipoBadge=x.tipo_gasto==='descarga_ingreso'?'<span class="bdg bcc">Descarga ↓</span>':'<span class="bdg bok">Carga ↑</span>';
+      return '<tr><td>'+tipoBadge+'</td><td><code>'+esc(x.operacion_ref||'—')+'</code></td><td>'+esc(x.cliente_nombre||'—')+'</td><td>'+(x.operacion_fecha||'—')+'</td><td style="text-align:right">'+nr(x.cantidad)+' '+esc(x.unidad||'')+'</td></tr>';
+    }).join('');
+    return '<div style="border:1px solid var(--bor);border-radius:10px;padding:12px;margin-bottom:12px">'
+      +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;gap:10px;flex-wrap:wrap">'
+      +'<div style="font-weight:700">📦 '+esc(gr.nombre)+' <span style="font-weight:400;color:var(--mut);font-size:12px">· '+gr.items.length+' operación(es)</span></div>'
+      +(gr.id?'<button class="btn bb bs" onclick="sgCdsValOpen('+gr.id+')">💵 Valorizar cuenta</button>':'')
+      +'</div>'
+      +'<table class="pa-tbl"><thead><tr><th>Tipo</th><th>Operación</th><th>Cliente</th><th>Fecha</th><th style="text-align:right">Cant.</th></tr></thead><tbody>'+filas+'</tbody></table>'
+      +'</div>';
+  }).join('');
+}
+function sgCdsRenderVal(){
+  var c=eid('sgcd-content');
+  if(!SGCD.rows.length){ c.innerHTML='<div class="emp" style="padding:30px">Sin cargas/descargas valorizadas todavía.</div>'; return; }
+  c.innerHTML='<div class="ab-table-wrap"><table class="pa-tbl"><thead><tr><th>Cooperativa</th><th>Tipo</th><th>Operación</th><th>Fecha serv.</th><th style="text-align:right">Cant.</th><th>Cuenta</th><th style="text-align:right">Monto</th></tr></thead><tbody>'
+    +SGCD.rows.map(function(g){
+      return '<tr><td>'+esc(g.fletero_nombre||'—')+'</td><td>'+esc(sgCdsTipoLbl(g.tipo_gasto))+'</td><td><code>'+esc(g.operacion_ref||'—')+'</code></td><td>'+(g.fecha_servicio||'—')+'</td><td style="text-align:right">'+nr(g.cantidad)+' '+esc(g.unidad||'')+'</td><td style="font-size:11px;color:var(--mut)">'+esc(g.cuenta_ref||'—')+'</td><td style="text-align:right;font-weight:700">'+sgMoney(g.monto)+'</td></tr>';
+    }).join('')+'</tbody></table></div>';
+}
+function sgCdsValOpen(provId){
+  var pend=SGCD.rows.filter(function(g){return String(g.proveedor_servicio_id)===String(provId);});
+  if(!pend.length){ toast('Sin operaciones pendientes','er'); return; }
+  sgGdsValAbrir({ prov:provId, nombre:pend[0].fletero_nombre||'', reload:sgCdsLoad,
+    items:pend.map(function(g){ return {id:g.id, ref:sgCdsTipoLbl(g.tipo_gasto)+' · '+(g.operacion_ref||''), sub:g.cliente_nombre||'—', fecha:g.operacion_fecha, base:g.cantidad, unidadLbl:g.unidad||''}; }) });
 }
 function sgDespVer(id){
   Promise.all([api('/api/sg/despachos/'+id), api('/api/sg/despachos/'+id+'/trazabilidad')]).then(function(res){
@@ -4269,13 +4367,16 @@ function sgDespVer(id){
     var tz=(res[1]&&res[1].ok)?res[1].data:null;
     eid('sg-venver-tit').textContent='Despacho '+(d.numero||'');
     var h='<div style="font-size:13px;margin-bottom:10px">Cliente: <b>'+esc(d.cliente_nombre||'—')+'</b> · '+(SG_ESTDESP[d.estado]||d.estado)+(d.pedido_numero?(' · pedido '+esc(d.pedido_numero)):'')+(d.transporte?(' · '+d.transporte):'')+'</div>';
-    // PARTE D — fletero + flete de salida + margen neto.
-    if(d.fletero_nombre || d.flete_salida_estado){
+    // PARTE D + FASE 2 — fletero + flete de salida + carga de cooperativa + margen neto.
+    if(d.fletero_nombre || d.flete_salida_estado || d.carga_salida_estado){
       var fEstado = d.flete_salida_estado ? d.flete_salida_estado.estado : null;
       var fTxt = (fEstado==='valorizado') ? ('valorizado '+sgMoney(d.flete_salida)) : (fEstado==='pendiente_valorizar' ? 'pendiente de valorizar' : '—');
-      h+='<div style="font-size:12.5px;margin-bottom:10px;padding:8px 10px;border:1px solid var(--bor);border-radius:8px">🚚 Fletero: <b>'+esc(d.fletero_nombre||'—')+'</b> · Flete de salida: '+fTxt
+      var cEstado = d.carga_salida_estado ? d.carga_salida_estado.estado : null;
+      var cTxt = (cEstado==='valorizado') ? ('valorizado '+sgMoney(d.carga_salida)) : (cEstado==='pendiente_valorizar' ? ('pendiente'+(d.carga_salida_estado&&d.carga_salida_estado.cantidad?(' · '+nr(d.carga_salida_estado.cantidad)+' '+esc(d.carga_salida_estado.unidad||'bulto')):'')) : null);
+      h+='<div style="font-size:12.5px;margin-bottom:10px;padding:8px 10px;border:1px solid var(--bor);border-radius:8px">🚚 Fletero: <b>'+esc(d.fletero_nombre||'—')+'</b> · Flete: '+fTxt
+        +(cTxt?(' · 📦 Carga (cooperativa): '+cTxt):'')
         +' · Margen neto: <b style="color:'+((d.margen_neto||0)>=0?'#16a34a':'#dc2626')+'">'+sgMoney(d.margen_neto)+'</b>'
-        +(d.flete_salida>0?(' <span style="color:var(--mut)">(margen items '+sgMoney(d.margen)+' − flete '+sgMoney(d.flete_salida)+')</span>'):'')+'</div>';
+        +'</div>';
     }
     h+='<table class="pa-tbl" style="margin-bottom:12px"><thead><tr><th>Lote</th><th>Producto</th><th style="text-align:right">Kg</th><th style="text-align:right">$/kg</th><th style="text-align:right">Subtotal</th><th style="text-align:right">Margen</th></tr></thead><tbody>';
     (d.items||[]).forEach(function(it){ h+='<tr><td><code>'+esc(it.codigo_lote||'')+'</code></td><td>'+esc(it.producto_nombre||'')+'</td><td style="text-align:right">'+nr(it.kg_despachados)+'</td><td style="text-align:right">'+sgMoney(it.precio_por_kg)+'</td><td style="text-align:right">'+sgMoney(it.subtotal)+'</td><td style="text-align:right;color:'+((it.margen_estimado||0)>=0?'#16a34a':'#dc2626')+'">'+sgMoney(it.margen_estimado)+'</td></tr>'; });

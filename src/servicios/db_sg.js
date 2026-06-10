@@ -677,6 +677,19 @@ try {
   `);
 } catch (e) { console.error('[DB] SG sg_gastos_directos:', e.message); }
 
+// ── FASE 2 (cargas y descargas, cooperativa): unidad de cobro + cantidad ────────
+// La cooperativa cobra por 'bulto' o 'pallet' (variable). Se guarda la unidad + la cantidad
+// (de sg_recepciones.bultos/pallets_recibidos para descarga_ingreso, o bultos del despacho
+// para carga_salida) → la valorización prorratea por esta cantidad (no por kg). ALTER nullable.
+try {
+  const cols = db.prepare("PRAGMA table_info(sg_gastos_directos)").all().map(c => c.name);
+  const faltan = [];
+  if (!cols.includes('unidad'))   { db.exec("ALTER TABLE sg_gastos_directos ADD COLUMN unidad TEXT"); faltan.push('unidad'); }     // 'bulto' | 'pallet'
+  if (!cols.includes('cantidad')) { db.exec("ALTER TABLE sg_gastos_directos ADD COLUMN cantidad REAL"); faltan.push('cantidad'); }
+  if (cols.length) db.exec("CREATE INDEX IF NOT EXISTS idx_sg_gd_recepcion ON sg_gastos_directos(recepcion_id)");
+  if (faltan.length) console.log('[DB] SG sg_gastos_directos migrado (+' + faltan.join(', +') + ')');
+} catch (e) { console.error('[DB] SG migración sg_gastos_directos (unidad/cantidad):', e.message); }
+
 // ── CAMBIO 2 (bulto/kilo): sg_oc_items → +modo_carga ────────────────────────────
 // Cómo cargó el operador el item: 'bulto' (cantidad=bultos, precio=$/bulto) o 'kilo'
 // (cantidad=kg, precio=$/kg). NULL/legacy = 'kilo'. ALTER ADD COLUMN simple, nullable,
