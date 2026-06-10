@@ -4583,6 +4583,172 @@ router.post('/personal/pago-masivo', requireAuth, (req, res) => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
+// LIQUIDACIONES DE PAGO DE JORNALES — Fase 1 (armado + selección, sin emitir)
+// Reemplazo del pago masivo. La encargada arma una liquidación eligiendo personas
+// (doble panel disponibles → a pagar) y la guarda en borrador. La EMISIÓN (egreso
+// de caja + pago CC + asiento contable) es la Fase 2 (otro PR, modelo caja directa).
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Titulares ya tomados por una liquidación NO anulada de la semana (no re-ofrecer).
+function _titularesEnLiquidacion(db, semanaId, excluirLiqId) {
+  if (!semanaId) return new Set();
+  const rows = db.prepare(`
+    SELECT it.tipo_titular, it.titular_id
+    FROM pa_liquidaciones_items it
+    JOIN pa_liquidaciones_pago l ON l.id = it.liquidacion_id
+    WHERE l.semana_id = ? AND l.estado != 'anulada' AND l.id != ?`).all(semanaId, excluirLiqId || -1);
+  return new Set(rows.map(r => r.tipo_titular + ':' + r.titular_id));
+}
+
+// Resuelve los ítems (tipo_titular, titular_id, monto=pendiente) de una selección,
+// filtrando lo que no tiene pendiente o ya está en otra liquidación de la semana.
+function _itemsLiquidacion(db, rango, seleccion, excluirLiqId) {
+  const yaEn = _titularesEnLiquidacion(db, rango.semana_id, excluirLiqId);
+  const pendMap = {};
+  for (const d of _pendientesSemana(db, rango)) pendMap[d.tipo_titular + ':' + d.titular_id] = d;
+  const items = [];
+  for (const sel of (seleccion || [])) {
+    const tt = sel.tipo_titular || (pendMap[':' + sel.titular_id] ? '' : '');
+    // aceptar {tipo_titular,titular_id} o que el tipo se derive del pendiente
+    let key = (sel.tipo_titular ? sel.tipo_titular + ':' + sel.titular_id : null);
+    let d = key ? pendMap[key] : null;
+    if (!d) { // fallback: buscar por titular_id solo (titular_id es único en pa_personal)
+      d = Object.values(pendMap).find(x => String(x.titular_id) === String(sel.titular_id)) || null;
+    }
+    if (!d) continue;
+    const k = d.tipo_titular + ':' + d.titular_id;
+    if (yaEn.has(k)) continue;
+    if (items.some(i => i.tipo_titular + ':' + i.titular_id === k)) continue; // sin duplicar
+    items.push({ tipo_titular: d.tipo_titular, titular_id: d.titular_id, monto: d.pendiente });
+  }
+  return items;
+}
+
+// Disponibles para armar/editar una liquidación: pendientes de la semana − lo ya tomado.
+router.get('/personal/liquidaciones/disponibles', requireAuth, (req, res) => {
+  const db = getDb();
+  const perms = permisosPersonal(db, req.user);
+  if (!perms.valorizacion && !perms.admin) return res.status(403).json({ ok: false, error: 'Sin permiso de valorización' });
+  try {
+    const rango = _rangoSemana(db, req.query);
+    if (!rango) return res.status(400).json({ ok: false, error: 'Indicá semana_id o desde+hasta' });
+    const yaEn = _titularesEnLiquidacion(db, rango.semana_id, req.query.excluir_liq_id);
+    const data = _pendientesSemana(db, rango).filter(d => !yaEn.has(d.tipo_titular + ':' + d.titular_id));
+    const total = Math.round(data.reduce((s, d) => s + d.pendiente, 0) * 100) / 100;
+    res.json({ ok: true, data, rango, total });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// Listado de liquidaciones (filtrable por semana / estado).
+router.get('/personal/liquidaciones', requireAuth, (req, res) => {
+  const db = getDb();
+  const perms = permisosPersonal(db, req.user);
+  if (!perms.valorizacion && !perms.admin) return res.status(403).json({ ok: false, error: 'Sin permiso de valorización' });
+  try {
+    const conds = [], prm = [];
+    if (req.query.semana_id) { conds.push('l.semana_id=?'); prm.push(req.query.semana_id); }
+    if (req.query.estado)    { conds.push('l.estado=?');    prm.push(req.query.estado); }
+    const where = conds.length ? ('WHERE ' + conds.join(' AND ')) : '';
+    const data = db.prepare(`
+      SELECT l.*, s.fecha_apertura, s.fecha_cierre, u.nombre AS creado_por_nombre,
+             (SELECT COUNT(*) FROM pa_liquidaciones_items WHERE liquidacion_id=l.id) AS n_personas
+      FROM pa_liquidaciones_pago l
+      LEFT JOIN pa_semanas_pago s ON s.id = l.semana_id
+      LEFT JOIN usuarios u ON u.id = l.creado_por
+      ${where} ORDER BY l.id DESC`).all(...prm);
+    res.json({ ok: true, data });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// Detalle de una liquidación (cabecera + ítems con nombre del titular).
+router.get('/personal/liquidaciones/:id', requireAuth, (req, res) => {
+  const db = getDb();
+  const perms = permisosPersonal(db, req.user);
+  if (!perms.valorizacion && !perms.admin) return res.status(403).json({ ok: false, error: 'Sin permiso de valorización' });
+  try {
+    const l = db.prepare(`SELECT l.*, s.fecha_apertura, s.fecha_cierre
+      FROM pa_liquidaciones_pago l LEFT JOIN pa_semanas_pago s ON s.id = l.semana_id WHERE l.id=?`).get(req.params.id);
+    if (!l) return res.status(404).json({ ok: false, error: 'Liquidación no encontrada' });
+    const items = db.prepare(`SELECT it.*, p.nombre AS titular_nombre, p.tipo AS titular_tipo
+      FROM pa_liquidaciones_items it JOIN pa_personal p ON p.id = it.titular_id
+      WHERE it.liquidacion_id=? ORDER BY p.nombre COLLATE NOCASE`).all(l.id);
+    res.json({ ok: true, data: { ...l, items } });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// Crear liquidación en BORRADOR con la selección de personas (monto = pendiente).
+router.post('/personal/liquidaciones', requireAuth, (req, res) => {
+  const db = getDb();
+  const perms = permisosPersonal(db, req.user);
+  if (!perms.valorizacion && !perms.admin) return res.status(403).json({ ok: false, error: 'Sin permiso de valorización' });
+  const seleccion = Array.isArray(req.body.titulares) ? req.body.titulares : [];
+  if (!seleccion.length) return res.status(400).json({ ok: false, error: 'Seleccioná al menos una persona' });
+  try {
+    const rango = _rangoSemana(db, req.body);
+    if (!rango) return res.status(400).json({ ok: false, error: 'Indicá semana_id o desde+hasta' });
+    const items = _itemsLiquidacion(db, rango, seleccion);
+    if (!items.length) return res.status(400).json({ ok: false, error: 'Ninguna de las personas seleccionadas tiene pendiente disponible' });
+    const total = Math.round(items.reduce((s, i) => s + i.monto, 0) * 100) / 100;
+    let liqId;
+    const tx = db.transaction(() => {
+      const r = db.prepare(`INSERT INTO pa_liquidaciones_pago
+          (semana_id, rango_desde, rango_hasta, estado, total, notas, creado_por)
+          VALUES (?,?,?, 'borrador', ?, ?, ?)`)
+        .run(rango.semana_id, rango.desde, rango.hasta, total, req.body.notas || null, req.user.id);
+      liqId = r.lastInsertRowid;
+      const ins = db.prepare("INSERT INTO pa_liquidaciones_items (liquidacion_id, tipo_titular, titular_id, monto) VALUES (?,?,?,?)");
+      for (const it of items) ins.run(liqId, it.tipo_titular, it.titular_id, it.monto);
+    });
+    tx();
+    res.json({ ok: true, data: { id: liqId, total, n_personas: items.length } });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// Editar la selección de una liquidación en BORRADOR (reemplaza los ítems).
+router.put('/personal/liquidaciones/:id', requireAuth, (req, res) => {
+  const db = getDb();
+  const perms = permisosPersonal(db, req.user);
+  if (!perms.valorizacion && !perms.admin) return res.status(403).json({ ok: false, error: 'Sin permiso de valorización' });
+  try {
+    const l = db.prepare("SELECT * FROM pa_liquidaciones_pago WHERE id=?").get(req.params.id);
+    if (!l) return res.status(404).json({ ok: false, error: 'Liquidación no encontrada' });
+    if (l.estado !== 'borrador') return res.status(400).json({ ok: false, error: 'Solo se edita una liquidación en borrador' });
+    const seleccion = Array.isArray(req.body.titulares) ? req.body.titulares : [];
+    const rango = _rangoSemana(db, { semana_id: l.semana_id, desde: l.rango_desde, hasta: l.rango_hasta });
+    if (!rango) return res.status(400).json({ ok: false, error: 'Rango de la liquidación inválido' });
+    const items = _itemsLiquidacion(db, rango, seleccion, l.id);
+    const total = Math.round(items.reduce((s, i) => s + i.monto, 0) * 100) / 100;
+    const tx = db.transaction(() => {
+      db.prepare("DELETE FROM pa_liquidaciones_items WHERE liquidacion_id=?").run(l.id);
+      const ins = db.prepare("INSERT INTO pa_liquidaciones_items (liquidacion_id, tipo_titular, titular_id, monto) VALUES (?,?,?,?)");
+      for (const it of items) ins.run(l.id, it.tipo_titular, it.titular_id, it.monto);
+      db.prepare("UPDATE pa_liquidaciones_pago SET total=?, notas=? WHERE id=?")
+        .run(total, req.body.notas !== undefined ? req.body.notas : l.notas, l.id);
+    });
+    tx();
+    res.json({ ok: true, data: { id: l.id, total, n_personas: items.length } });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// Borrar una liquidación en BORRADOR (las emitidas se anulan en Fase 2, no se borran).
+router.delete('/personal/liquidaciones/:id', requireAuth, (req, res) => {
+  const db = getDb();
+  const perms = permisosPersonal(db, req.user);
+  if (!perms.valorizacion && !perms.admin) return res.status(403).json({ ok: false, error: 'Sin permiso de valorización' });
+  try {
+    const l = db.prepare("SELECT estado FROM pa_liquidaciones_pago WHERE id=?").get(req.params.id);
+    if (!l) return res.status(404).json({ ok: false, error: 'Liquidación no encontrada' });
+    if (l.estado !== 'borrador') return res.status(400).json({ ok: false, error: 'Solo se borra una liquidación en borrador (las emitidas se anulan)' });
+    const tx = db.transaction(() => {
+      db.prepare("DELETE FROM pa_liquidaciones_items WHERE liquidacion_id=?").run(req.params.id);
+      db.prepare("DELETE FROM pa_liquidaciones_pago WHERE id=?").run(req.params.id);
+    });
+    tx();
+    res.json({ ok: true });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
 // PERSONAL V1 — Reportes + Export Excel + Rubros con uso (Fase 4)
 // Todos sobre asistencias VALORIZADAS (monto = pa_asistencia_valorizacion).
 // ═══════════════════════════════════════════════════════════════════════════

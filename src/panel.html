@@ -4942,6 +4942,7 @@ function sgRepExport(){
     <div class="pp-subtab on" data-sub="valorizar" id="pp-tab-valorizar" onclick="ppShowSub('valorizar')">💰 Por valorizar</div>
     <div class="pp-subtab" data-sub="semanas" id="pp-tab-semanas" onclick="ppShowSub('semanas')">🗓️ Semanas</div>
     <div class="pp-subtab" data-sub="tarifas" id="pp-tab-tarifas" onclick="ppShowSub('tarifas')">💵 Tarifas</div>
+    <div class="pp-subtab" data-sub="liquidaciones" id="pp-tab-liquidaciones" onclick="ppShowSub('liquidaciones')">🧾 Liquidaciones</div>
   </div>
   <div class="pp-sub on" id="pp-sub-valorizar">
     <!-- Barrera re-password (sesión sensible 15 min) -->
@@ -5030,6 +5031,54 @@ function sgRepExport(){
         <thead><tr><th>Persona</th><th>Rol</th><th style="text-align:right">Tarifa $/jornal</th><th>Vigente desde</th><th>Cargada</th></tr></thead>
         <tbody id="pp-tarper-tbody"></tbody>
       </table></div>
+    </div>
+  </div>
+
+  <!-- Liquidaciones de pago (armado/selección — borrador. Emisión = Fase 2) -->
+  <div class="pp-sub" id="pp-sub-liquidaciones">
+    <div style="display:flex;gap:10px;margin-bottom:10px;align-items:flex-end;flex-wrap:wrap">
+      <label style="font-size:11px;color:var(--mut);display:flex;flex-direction:column;gap:2px">Semana de pago
+        <select id="pp-liq-semana" onchange="ppLiqCargar()" style="padding:5px 8px;font-size:12px;min-width:230px"><option value="">— Elegí semana —</option></select></label>
+      <button class="btn bb" onclick="ppLiqNueva()">+ Nueva liquidación</button>
+      <span style="flex:1"></span>
+      <span id="pp-liq-resumen" style="font-size:12px;color:var(--mut)"></span>
+    </div>
+    <div style="font-size:11px;color:var(--mut);margin-bottom:8px">Armá la liquidación de la semana eligiendo a quién pagás (doble panel: disponibles → a pagar). Queda en <strong>borrador</strong>; la emisión del pago (descuento de caja + asiento contable) es el próximo paso.</div>
+    <div class="tw"><table>
+      <thead><tr><th>#</th><th>Estado</th><th style="text-align:center">Personas</th><th style="text-align:right">Total</th><th>Creada</th><th></th></tr></thead>
+      <tbody id="pp-liq-tbody"><tr><td colspan="6" style="text-align:center;color:var(--mut);padding:18px">Elegí una semana de pago.</td></tr></tbody>
+    </table></div>
+  </div>
+</div>
+
+<!-- Modal: armar liquidación (doble panel disponibles → a pagar) -->
+<div class="mb" id="mb-pp-liq">
+  <div class="mbox" style="width:820px;max-width:96vw">
+    <div class="mhd"><div class="mht" id="mb-pp-liq-tit">Nueva liquidación</div>
+      <button class="mcl" onclick="document.getElementById('mb-pp-liq').classList.remove('on')">×</button></div>
+    <div id="pp-liq-rango-lbl" style="font-size:12px;color:var(--mut);margin-bottom:10px"></div>
+    <div style="display:flex;gap:12px;align-items:stretch;flex-wrap:wrap">
+      <div style="flex:1 1 320px;min-width:260px">
+        <div style="font-size:12px;font-weight:700;margin-bottom:4px">Disponibles <span id="pp-liq-disp-n" style="color:var(--mut);font-weight:400"></span></div>
+        <input type="text" id="pp-liq-buscar" oninput="ppLiqRenderPaneles()" placeholder="Buscar persona…" style="width:100%;box-sizing:border-box;padding:5px 8px;font-size:12px;margin-bottom:6px">
+        <div id="pp-liq-disp" style="border:1px solid var(--bor);border-radius:8px;height:320px;overflow:auto"></div>
+      </div>
+      <div style="display:flex;flex-direction:column;justify-content:center;gap:8px">
+        <button class="btn bo bs" onclick="ppLiqMover('all-right')" title="Pasar todos a pagar">»</button>
+        <button class="btn bo bs" onclick="ppLiqMover('all-left')" title="Sacar todos">«</button>
+      </div>
+      <div style="flex:1 1 320px;min-width:260px">
+        <div style="font-size:12px;font-weight:700;margin-bottom:4px">A pagar <span id="pp-liq-sel-n" style="color:var(--mut);font-weight:400"></span></div>
+        <div style="height:30px"></div>
+        <div id="pp-liq-sel" style="border:1px solid var(--bor);border-radius:8px;height:320px;overflow:auto"></div>
+      </div>
+    </div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-top:14px">
+      <div style="font-size:14px;font-weight:700">Total a pagar: <span id="pp-liq-total">$ 0,00</span></div>
+      <div style="display:flex;gap:8px">
+        <button class="btn bo" onclick="document.getElementById('mb-pp-liq').classList.remove('on')">Cancelar</button>
+        <button class="btn bb" onclick="ppLiqGuardar()">Guardar borrador</button>
+      </div>
     </div>
   </div>
 </div>
@@ -20845,6 +20894,7 @@ function ppAplicarGating() {
   show('pp-tab-cc', verVal);
   show('pp-tab-pagos', verVal);
   show('pp-tab-semanas', verVal);
+  show('pp-tab-liquidaciones', verVal);
   show('pp-tab-tarifas', verVal);
   show('pp-tab-masivo', verVal);
   show('pp-tab-reportes', verVal);
@@ -20891,6 +20941,7 @@ function ppShowSub(sub) {
   if (sub === 'reportes') ppInitReportes();
   if (sub === 'tareas-rubros') { ppLoadRubrosMO(); ppLoadTareasRubros(); }
   if (sub === 'tarifas') { ppLoadTarifasRol(); ppLoadTarifasPersona(); }
+  if (sub === 'liquidaciones') ppLiqInit();
 }
 
 // ── Tarifas por rol ($/jornal). Lista roles en uso + tarifa editable. ──
@@ -21002,6 +21053,124 @@ function ppRmoGuardar(id) {
 // ═══ Bloque C — Semanas de pago ══════════════════════════════════════════════
 function ppLoadSemanas() {
   paF('/api/pa/personal/semanas-pago').then(function(r){ PP.semanas = (r && r.data) || []; ppSemRender(); });
+}
+
+// ═══ Liquidaciones de pago — Fase 1 (armado/selección, borrador) ═════════════
+function ppLiqInit() {
+  var sel = document.getElementById('pp-liq-semana');
+  paF('/api/pa/personal/semanas-pago').then(function(r){
+    var rows = (r && r.data) || [];
+    var actual = sel.value;
+    sel.innerHTML = '<option value="">— Elegí semana —</option>' + rows.map(function(s){
+      return '<option value="'+s.id+'">'+esc(s.fecha_apertura+' → '+s.fecha_cierre)+(s.estado==='cerrada'?' (cerrada)':'')+'</option>';
+    }).join('');
+    sel.value = actual;
+    ppLiqCargar();
+  });
+}
+function ppLiqCargar() {
+  var semId = document.getElementById('pp-liq-semana').value;
+  var tb = document.getElementById('pp-liq-tbody');
+  document.getElementById('pp-liq-resumen').textContent = '';
+  if (!semId) { tb.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--mut);padding:18px">Elegí una semana de pago.</td></tr>'; return; }
+  tb.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--mut);padding:18px">Cargando…</td></tr>';
+  paF('/api/pa/personal/liquidaciones?semana_id='+semId).then(function(r){
+    var rows = (r && r.data) || [];
+    if (!rows.length) { tb.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--mut);padding:18px">Sin liquidaciones en esta semana. Creá una con "+ Nueva liquidación".</td></tr>'; return; }
+    tb.innerHTML = rows.map(function(l){
+      var badge = l.estado==='borrador' ? '<span class="tag" style="font-size:10px;color:var(--warn)">borrador</span>'
+        : (l.estado==='emitida' ? '<span class="tag" style="font-size:10px;color:var(--ok)">emitida</span>'
+        : '<span class="tag" style="font-size:10px">anulada</span>');
+      var acc = (l.estado==='borrador')
+        ? '<button class="btn bo bs" style="font-size:11px;padding:3px 8px" onclick="ppLiqEditar('+l.id+')">✏️ Editar</button> '
+          + '<button class="btn bd bs" style="font-size:11px;padding:3px 8px" onclick="ppLiqBorrar('+l.id+')">🗑️</button>'
+        : '<span style="font-size:10px;color:var(--mut)">—</span>';
+      return '<tr><td>#'+l.id+'</td><td>'+badge+'</td><td style="text-align:center">'+(l.n_personas||0)+'</td>'
+        + '<td style="text-align:right"><strong>'+ppFmtARS(l.total||0)+'</strong></td>'
+        + '<td style="font-size:11px">'+esc((l.creado_en||'').slice(0,10))+(l.creado_por_nombre?(' · '+esc(l.creado_por_nombre)):'')+'</td>'
+        + '<td style="white-space:nowrap">'+acc+'</td></tr>';
+    }).join('');
+    var borr = rows.filter(function(l){return l.estado==='borrador';}).length;
+    document.getElementById('pp-liq-resumen').textContent = rows.length+' liquidación(es) · '+borr+' en borrador';
+  });
+}
+function ppLiqKey(p){ return p.tipo_titular+':'+p.titular_id; }
+function ppLiqNueva() {
+  var semId = document.getElementById('pp-liq-semana').value;
+  if (!semId) return toast('Elegí una semana primero', 'er');
+  PP.liq = { editId: null, semanaId: semId, disp: [], sel: [] };
+  document.getElementById('mb-pp-liq-tit').textContent = 'Nueva liquidación';
+  document.getElementById('pp-liq-buscar').value = '';
+  paF('/api/pa/personal/liquidaciones/disponibles?semana_id='+semId).then(function(r){
+    PP.liq.disp = (r && r.data) || [];
+    PP.liq.sel = [];
+    var rg = r && r.rango;
+    document.getElementById('pp-liq-rango-lbl').textContent = rg ? ('Semana '+rg.desde+' → '+rg.hasta+' · pendientes valorizados') : '';
+    ppLiqRenderPaneles();
+    document.getElementById('mb-pp-liq').classList.add('on');
+  });
+}
+function ppLiqEditar(id) {
+  paF('/api/pa/personal/liquidaciones/'+id).then(function(r){
+    if (!r || !r.ok) return toast((r&&r.error)||'Error', 'er');
+    var l = r.data;
+    PP.liq = { editId: id, semanaId: l.semana_id, disp: [], sel: [] };
+    document.getElementById('mb-pp-liq-tit').textContent = 'Editar liquidación #'+id;
+    document.getElementById('pp-liq-buscar').value = '';
+    document.getElementById('pp-liq-rango-lbl').textContent = (l.fecha_apertura ? ('Semana '+l.fecha_apertura+' → '+l.fecha_cierre) : ((l.rango_desde||'')+' → '+(l.rango_hasta||'')));
+    PP.liq.sel = (l.items||[]).map(function(it){ return { tipo_titular: it.tipo_titular, titular_id: it.titular_id, nombre: it.titular_nombre, pendiente: it.monto }; });
+    paF('/api/pa/personal/liquidaciones/disponibles?semana_id='+l.semana_id+'&excluir_liq_id='+id).then(function(rd){
+      PP.liq.disp = (rd && rd.data) || [];
+      ppLiqRenderPaneles();
+      document.getElementById('mb-pp-liq').classList.add('on');
+    });
+  });
+}
+function ppLiqRenderPaneles() {
+  var L = PP.liq; if (!L) return;
+  var norm = (typeof ppAsistNorm === 'function') ? ppAsistNorm : function(s){ return (s||'').toLowerCase(); };
+  var q = norm(document.getElementById('pp-liq-buscar').value || '');
+  var rowHtml = function(p, lado){
+    return '<div onclick="ppLiqMover(\''+lado+'\',\''+ppLiqKey(p)+'\')" style="display:flex;justify-content:space-between;gap:8px;padding:5px 8px;cursor:pointer;border-bottom:1px solid var(--bor);font-size:12px" onmouseover="this.style.background=\'var(--bg2)\'" onmouseout="this.style.background=\'\'">'
+      + '<span>'+(lado==='right'?'＋ ':'－ ')+esc(p.nombre||('#'+p.titular_id))+' <span style="font-size:9px;color:var(--mut)">'+(p.tipo_titular==='contratista'?'temp':'fijo')+'</span></span>'
+      + '<span style="color:var(--mut)">'+ppFmtARS(p.pendiente||0)+'</span></div>';
+  };
+  var disp = L.disp.filter(function(p){ return !q || norm(p.nombre||'').indexOf(q) !== -1; });
+  document.getElementById('pp-liq-disp').innerHTML = disp.length ? disp.map(function(p){ return rowHtml(p,'right'); }).join('') : '<div style="padding:14px;text-align:center;color:var(--mut);font-size:12px">— sin disponibles —</div>';
+  document.getElementById('pp-liq-sel').innerHTML = L.sel.length ? L.sel.map(function(p){ return rowHtml(p,'left'); }).join('') : '<div style="padding:14px;text-align:center;color:var(--mut);font-size:12px">— nadie seleccionado —</div>';
+  document.getElementById('pp-liq-disp-n').textContent = '('+L.disp.length+')';
+  document.getElementById('pp-liq-sel-n').textContent = '('+L.sel.length+')';
+  var total = L.sel.reduce(function(s,p){ return s + (p.pendiente||0); }, 0);
+  document.getElementById('pp-liq-total').textContent = ppFmtARS(Math.round(total*100)/100);
+}
+function ppLiqMover(lado, key) {
+  var L = PP.liq; if (!L) return;
+  if (lado === 'all-right') { L.sel = L.sel.concat(L.disp); L.disp = []; }
+  else if (lado === 'all-left') { L.disp = L.disp.concat(L.sel); L.sel = []; }
+  else if (lado === 'right') { var i = L.disp.findIndex(function(p){ return ppLiqKey(p)===key; }); if (i>=0) { L.sel.push(L.disp[i]); L.disp.splice(i,1); } }
+  else if (lado === 'left')  { var j = L.sel.findIndex(function(p){ return ppLiqKey(p)===key; });  if (j>=0) { L.disp.push(L.sel[j]); L.sel.splice(j,1); } }
+  ppLiqRenderPaneles();
+}
+function ppLiqGuardar() {
+  var L = PP.liq; if (!L) return;
+  if (!L.sel.length) return toast('Pasá al menos una persona a "a pagar"', 'er');
+  var titulares = L.sel.map(function(p){ return { tipo_titular: p.tipo_titular, titular_id: p.titular_id }; });
+  var url = L.editId ? '/api/pa/personal/liquidaciones/'+L.editId : '/api/pa/personal/liquidaciones';
+  var method = L.editId ? 'PUT' : 'POST';
+  var body = L.editId ? { titulares: titulares } : { semana_id: L.semanaId, titulares: titulares };
+  paF(url, { method: method, headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) }).then(function(r){
+    if (!r || !r.ok) return toast((r&&r.error)||'Error', 'er');
+    toast((L.editId?'Liquidación actualizada':'Liquidación creada')+' · '+r.data.n_personas+' persona(s) · '+ppFmtARS(r.data.total));
+    document.getElementById('mb-pp-liq').classList.remove('on');
+    ppLiqCargar();
+  });
+}
+function ppLiqBorrar(id) {
+  if (!confirm('¿Borrar la liquidación #'+id+' (borrador)?')) return;
+  paF('/api/pa/personal/liquidaciones/'+id, { method:'DELETE' }).then(function(r){
+    if (!r || !r.ok) return toast((r&&r.error)||'Error', 'er');
+    toast('Liquidación borrada'); ppLiqCargar();
+  });
 }
 function ppSemAvisoTxt(av) {
   if (av === 'hueco')          return '<span class="tag" style="font-size:10px;color:var(--warn)">⚠ hueco</span>';
