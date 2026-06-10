@@ -3582,7 +3582,7 @@ router.get('/personal/asistencias', requireAuth, (req, res) => {
              ct.nombre as contratista_nombre,
              cta.nombre as rubro_nombre, cta.codigo as rubro_codigo,
              l.nombre  as lote_nombre,
-             t.nombre  as tarea_nombre,
+             t.nombre  as tarea_nombre, t.requiere_lote AS tarea_requiere_lote,
              ca.nombre as campana_anual_nombre, ce.nombre as campana_estacional_nombre
       FROM pa_asistencias a
       LEFT JOIN pa_cuadrillas cu ON cu.id = a.cuadrilla_id

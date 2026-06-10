@@ -21789,11 +21789,21 @@ function ppRenderAsistencia() {
     } else {
       acciones = '<span style="font-size:10px;color:var(--mut)">read-only</span>';
     }
+    // Finca/Lote: con lote → finca+lote; sin lote pero tarea de galpón (requiere_lote=0) →
+    // "campaña" (no le falta nada); sin lote y tarea de campo → "—".
+    var loteCell;
+    if (a.lote_nombre) {
+      loteCell = esc(a.lote_nombre) + (a.finca?'<div style="font-size:10px;color:var(--mut)">'+esc(a.finca)+'</div>':'');
+    } else if (a.tarea_requiere_lote === 0) {
+      loteCell = '<span style="color:var(--mut)" title="Tarea de galpón: el costo va a la campaña, no a un lote">🏭 campaña</span>';
+    } else {
+      loteCell = '—';
+    }
     return '<tr><td style="white-space:nowrap">'+(a.fecha?a.fecha.split('-').reverse().join('/'):'—')+'</td><td>'+esc(a.cuadrilla_nombre||'—')+'</td><td>'+quien+'</td>' +
       '<td style="text-align:center">'+a.cantidad+'</td><td style="text-align:center">'+a.horas+'</td>' +
       '<td style="text-align:center"><strong>'+(a.jornales_calc!=null?a.jornales_calc:'—')+'</strong></td>' +
       '<td style="font-size:11px">'+rubro+'</td><td>'+camp+'</td>' +
-      '<td>'+esc(a.lote_nombre||'—')+(a.finca?'<div style="font-size:10px;color:var(--mut)">'+esc(a.finca)+'</div>':'')+'</td>' +
+      '<td>'+loteCell+'</td>' +
       '<td style="font-size:11px">'+esc(a.tarea_nombre||'—')+'</td><td style="font-size:11px">'+esc(a.cultivo||'—')+'</td>' +
       '<td>'+badge+'</td><td style="white-space:nowrap">'+acciones+'</td></tr>';
   }).join('');
@@ -22156,10 +22166,13 @@ function ppGuardarAsistencia() {
   if (!body.rubro_cuenta_id) return toast('Elegí el rubro (cuenta MO)', 'er');
   // Campañas: vienen de las vigentes (campos ocultos). Si faltan, avisar config.
   if (!body.campaña_anual_id || !body.campaña_estacional_id) return toast('No hay campañas vigentes configuradas', 'er');
-  // Lote: obligatorio solo si el rubro es productivo. General → sin lote.
+  // Lote: obligatorio solo si la tarea REQUIERE lote y el rubro es productivo. Sin lote si el
+  // rubro es general (estructura) o la tarea es de galpón (requiere_lote=0, va a la campaña).
   var rubroSel = ppAsistRubroSel();
   var esGeneral = !!(rubroSel && rubroSel.mo_clase === 'general');
-  if (esGeneral) { body.lote_id = null; body.cultivo = null; }
+  var tareaSel = (typeof ppAsistTareaSel === 'function') ? ppAsistTareaSel() : null;
+  var tareaSinLote = !!(tareaSel && tareaSel.requiere_lote === 0);
+  if (esGeneral || tareaSinLote) { body.lote_id = null; body.cultivo = null; }
   else if (!body.lote_id) return toast('Elegí finca / lote', 'er');
 
   // ── Camino GRUPAL: una fila individual por cada persona tildada (comparten la carga) ──
