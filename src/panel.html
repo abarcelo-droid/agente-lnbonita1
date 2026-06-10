@@ -13833,21 +13833,19 @@ function admPcSugerirCodigo() {
       var max = 0;
       cuentasTit.forEach(function(c){
         var partes = String(c.codigo).split('.');
-        var ult = parseInt(partes[partes.length-1], 10);
-        if (ult > max) max = ult;
+        if (partes.length === 4) { var ult = parseInt(partes[3], 10); if (ult > max) max = ult; }
       });
       sugerido = tit.codigo + '.' + String(max + 1).padStart(4, '0');
     }
-  } else {
-    var cuentasSec = ADM.cuentas.filter(function(c){ return c.seccion_id === sId && !c.titulo_id; });
-    var max2 = 0;
-    cuentasSec.forEach(function(c){
-      var sub = parseInt(String(c.codigo).split('.')[1]||'0', 10);
-      if (sub > max2) max2 = sub;
-    });
-    sugerido = sec.codigo + '.' + String(max2 + 5).padStart(2,'0');
   }
-  document.getElementById('adm-cu-codigo-sug').textContent = sugerido ? 'Sugerido: ' + sugerido : '';
+  var sugEl = document.getElementById('adm-cu-codigo-sug');
+  if (!titId) {
+    sugEl.textContent = 'Elegí un título para generar el código (formato X.XX.XX.XXXX)';
+    sugEl.style.color = '#b45309';
+    return;
+  }
+  sugEl.style.color = 'var(--mut)';
+  sugEl.textContent = sugerido ? 'Sugerido: ' + sugerido : '';
   if (!document.getElementById('adm-cu-id').value) document.getElementById('adm-cu-codigo').value = sugerido;
 }
 
@@ -24233,22 +24231,20 @@ function paCuSugerirCodigo() {
       var max = 0;
       cuentasTit.forEach(function(c){
         var partes = String(c.codigo).split('.');
-        var ult = parseInt(partes[partes.length-1], 10);
-        if (ult > max) max = ult;
+        if (partes.length === 4) { var ult = parseInt(partes[3], 10); if (ult > max) max = ult; }
       });
       sugerido = tit.codigo + '.' + String(max + 1).padStart(4, '0');
     }
-  } else {
-    // Sin título: sugerir X.XX.NN (legacy)
-    var cuentasSec = PACU.cuentas.filter(function(c){return c.seccion_id === sId && !c.titulo_id;});
-    var max2 = 0;
-    cuentasSec.forEach(function(c){
-      var sub = parseInt(String(c.codigo).split('.')[1], 10);
-      if (sub > max2) max2 = sub;
-    });
-    sugerido = sec.codigo + '.' + String(max2 + 5).padStart(2, '0');
   }
-  document.getElementById('pa-cu-codigo-sug').textContent = sugerido ? 'Sugerido: ' + sugerido : '';
+  var sugEl = document.getElementById('pa-cu-codigo-sug');
+  if (!titId) {
+    // Las cuentas deben ir bajo un título para respetar X.XX.XX.XXXX
+    sugEl.textContent = 'Elegí un título para generar el código (formato X.XX.XX.XXXX)';
+    sugEl.style.color = '#b45309';
+    return;
+  }
+  sugEl.style.color = 'var(--mut)';
+  sugEl.textContent = sugerido ? 'Sugerido: ' + sugerido : '';
   if (!document.getElementById('pa-cu-id').value) {
     document.getElementById('pa-cu-codigo').value = sugerido;
   }

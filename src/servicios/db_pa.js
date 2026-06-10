@@ -3481,5 +3481,69 @@ db.exec(`
   } catch(e) { console.error('[PA] Error creando pa_insumo_modelo:', e.message); }
 })();
 
+// ── MIGRACIÓN: Normalizar códigos de cuentas al formato X.XX.XX.XXXX ─────────
+// Renumera automáticamente las cuentas imputables cuyo código no respeta el
+// formato de 4 niveles, o que pisa el código de un título/sección. La cuenta se
+// renumera al próximo código libre DENTRO de su título (el título/sección manda).
+// El ID de la cuenta NO cambia, así que los asientos vinculados se mantienen.
+// Idempotente: las cuentas ya válidas se omiten. Deja log de cada cambio.
+(function migrarCodigosCuentas() {
+  try {
+    const validRe = /^\d\.\d{2}\.\d{2}\.\d{4}$/;
+    const cuentas = db.prepare('SELECT id, codigo, nombre, sociedad_id, seccion_id, titulo_id FROM pa_cuentas').all();
+    let arregladas = 0, omitidas = 0;
+    for (const c of cuentas) {
+      const cod = String(c.codigo);
+      const colT = db.prepare('SELECT 1 FROM pa_cuentas_titulos WHERE codigo = ? AND sociedad_id = ?').get(cod, c.sociedad_id);
+      const colS = db.prepare('SELECT 1 FROM pa_cuentas_secciones WHERE codigo = ? AND sociedad_id = ?').get(cod, c.sociedad_id);
+      const malFormato = !validRe.test(cod);
+      if (!malFormato && !colT && !colS) continue; // ya está bien
+
+      // Resolver el prefijo del título (X.XX.XX) bajo el cual va la cuenta
+      let prefijo = null, tituloId = c.titulo_id || null;
+      if (tituloId) {
+        const t = db.prepare('SELECT codigo FROM pa_cuentas_titulos WHERE id = ?').get(tituloId);
+        if (t) prefijo = String(t.codigo);
+      }
+      if (!prefijo) {
+        const partes = cod.split('.');
+        if (partes.length >= 3) {
+          const pref3 = partes.slice(0, 3).join('.');
+          const t = db.prepare('SELECT id, codigo FROM pa_cuentas_titulos WHERE codigo = ? AND sociedad_id = ?').get(pref3, c.sociedad_id);
+          if (t) { prefijo = String(t.codigo); tituloId = t.id; }
+        }
+      }
+      if (!prefijo) {
+        console.warn(`[PA-MIGRACION] Cuenta #${c.id} "${c.nombre}" (${cod}) sin título resoluble — se OMITE, revisar a mano`);
+        omitidas++;
+        continue;
+      }
+
+      // Próximo correlativo libre de 4 dígitos bajo el prefijo
+      const hermanas = db.prepare("SELECT codigo FROM pa_cuentas WHERE codigo LIKE ? AND id != ?").all(prefijo + '.%', c.id);
+      let max = 0;
+      hermanas.forEach(h => {
+        const p = String(h.codigo).split('.');
+        if (p.length === 4) { const u = parseInt(p[3], 10); if (Number.isInteger(u) && u > max) max = u; }
+      });
+      let n = max + 1, nuevo = null;
+      do {
+        nuevo = prefijo + '.' + String(n).padStart(4, '0');
+        const choca = db.prepare('SELECT 1 FROM pa_cuentas WHERE codigo = ? AND sociedad_id = ? AND id != ?').get(nuevo, c.sociedad_id, c.id);
+        if (!choca) break;
+        n++;
+      } while (n < 10000);
+
+      db.prepare("UPDATE pa_cuentas SET codigo = ?, titulo_id = COALESCE(?, titulo_id), actualizado_en = datetime('now','localtime') WHERE id = ?")
+        .run(nuevo, tituloId, c.id);
+      console.log(`[PA-MIGRACION] Cuenta #${c.id} "${c.nombre}": ${cod} → ${nuevo}`);
+      arregladas++;
+    }
+    if (arregladas || omitidas) {
+      console.log(`[PA-MIGRACION] Normalización de códigos: ${arregladas} cuenta(s) renumeradas, ${omitidas} omitida(s).`);
+    }
+  } catch(e) { console.error('[PA-MIGRACION] Error normalizando códigos de cuentas:', e.message); }
+})();
+
 export { db };
 export default db;
