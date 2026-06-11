@@ -23,6 +23,18 @@ const MODULOS_SG = [
   ["sg-gastos-directos", "Gastos Directos", 657],
 ];
 
+// Finanzas SG: COPIA física de Contable/Ventas/Tesorería de PC (tablas sg_*),
+// para que SG lleve su propia contabilidad/ventas/tesorería separada de PC.
+// data-sec="sgf-<x>" + seccion #sec-sgf-<x> en panel.html; endpoints /api/sg/*.
+// modulo | label | grupo | tipo | orden
+const MODULOS_SG_FIN = [
+  ["sgf-plan",     "Plan de Cuentas SG", "Contabilidad SG", "numero",    660],
+  ["sgf-asientos", "Asientos SG",        "Contabilidad SG", "numero",    661],
+  ["sgf-caja",     "Caja y Bancos SG",   "Financiero SG",   "numero",    665],
+  ["sgf-clientes", "Clientes SG",        "Ventas SG",       "operativo", 670],
+  ["sgf-cc",       "Ventas SG",          "Ventas SG",       "numero",    671],
+];
+
 try {
   const sg = db.prepare("SELECT id FROM sociedades WHERE nombre LIKE ?").get("San Ger%");
   if (sg) {
@@ -32,10 +44,23 @@ try {
     for (const [modulo, label, orden] of MODULOS_SG) {
       ins.run(modulo, label, "Abasto SG", sg.id, "operativo", orden);
     }
+    // Finanzas SG (copia física Contable/Ventas/Tesorería).
+    for (const [modulo, label, grupo, tipo, orden] of MODULOS_SG_FIN) {
+      ins.run(modulo, label, grupo, sg.id, tipo, orden);
+    }
+    // ── Neutralizar el ESPEJO de Ventas SG ────────────────────────────────────
+    // Antes SG operaba Ventas sobre las tablas ven_* de PC vía el selector de
+    // sociedad (filtro sociedad_id=SG). Ahora SG tiene su copia física (sgf-*),
+    // así que se quitan los modulos espejo ven-* del menu de SG para que no haya
+    // dos caminos a "Ventas SG". OJO: NO toca ab-* (IFCO / Galpones Asociados),
+    // que siguen en uso productivo real.
+    db.prepare(
+      "DELETE FROM modulos_config WHERE sociedad_id = ? AND modulo IN ('ven-clientes','ven-facturas','ven-cobranzas','ven-cc','ven-liquidaciones')"
+    ).run(sg.id);
     // Legacy: el modulo monolitico "sg" (tabs horizontales) ya no tiene entrada en el
     // sidebar; se elimina para no ensuciar Config Modulos. Solo borra la fila huerfana.
     db.prepare("DELETE FROM modulos_config WHERE modulo='sg'").run();
-    console.log("[ORG] Modulos Abasto SG verificados (6 modulos; legacy 'sg' removido)");
+    console.log("[ORG] Modulos SG verificados (Abasto + Finanzas SG; espejo ven-* removido; legacy 'sg' removido)");
   } else { console.warn("[ORG] ensureModuloSG: sociedad no encontrada"); }
 
   // ── Renombres "Gestion Insumos" (ex "Abasto IFCO") — solo labels, idempotente ──

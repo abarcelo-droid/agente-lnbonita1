@@ -276,6 +276,13 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   <div class="ni" data-sec="sg-catalogo" data-admin-only="1"><span class="dot da"></span>📋 Maestros</div>
   <div class="ni" data-sec="sg-reportes" data-admin-only="1"><span class="dot de"></span>📈 Reportes</div>
 
+  <div class="ng" style="margin-top:8px">Finanzas SG</div>
+  <div class="ni" data-sec="sgf-plan" data-admin-only="1"><span class="dot dc"></span>📊 Plan de Cuentas SG</div>
+  <div class="ni" data-sec="sgf-asientos" data-admin-only="1"><span class="dot db"></span>📒 Asientos SG</div>
+  <div class="ni" data-sec="sgf-caja" data-admin-only="1"><span class="dot db"></span>🏦 Caja y Bancos SG</div>
+  <div class="ni" data-sec="sgf-clientes" data-admin-only="1"><span class="dot da"></span>👥 Clientes SG</div>
+  <div class="ni" data-sec="sgf-cc" data-admin-only="1"><span class="dot dc"></span>💰 Ventas SG</div>
+
   <div class="ng" style="margin-top:8px">General</div>
   <div class="ni on" data-sec="inicio"><span class="dot"></span>Inicio</div>
   <div class="ni" data-sec="crm"><span class="dot dd"></span>CRM</div>
@@ -4982,6 +4989,39 @@ function sgRepExport(){
   .pp-mod .pp-sub{display:none}
   .pp-mod .pp-sub.on{display:block}
 </style>
+
+<!-- ════ FINANZAS SG — Contable + Ventas + Tesorería (copia física de PC, tablas sg_*) ════
+     Pantallas propias de SG que operan sobre /api/sg/contable|ventas|tesoreria. NO
+     comparten datos con PC (pa_*/ven_*/fin_*). El contenido lo renderiza sgf*() en JS. -->
+<style>
+  .sgf-mod .ph-t{font-size:18px;font-weight:700}
+  .sgf-mod .sgf-ctx{background:#dbeafe;color:#1e40af;font-size:11.5px;font-weight:700;padding:4px 11px;border-radius:8px;display:inline-block;margin:0 0 12px}
+  .sgf-mod .sgf-bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px}
+  .sgf-mod table{width:100%;border-collapse:collapse;font-size:12.5px}
+  .sgf-mod th,.sgf-mod td{padding:6px 9px;border-bottom:1px solid var(--bor,#eee);text-align:left;vertical-align:top}
+  .sgf-mod th{font-size:10.5px;text-transform:uppercase;letter-spacing:.04em;color:var(--mut,#888)}
+  .sgf-mod td.num,.sgf-mod th.num{text-align:right;font-variant-numeric:tabular-nums}
+  .sgf-mod .sgf-form{background:var(--bg,#fff);border:1px solid var(--bor2,#e0d5cc);border-radius:10px;padding:14px;margin-bottom:14px;display:none}
+  .sgf-mod .sgf-form.on{display:block}
+  .sgf-mod .sgf-form input,.sgf-mod .sgf-form select,.sgf-mod .sgf-form textarea{padding:6px 8px;border:1px solid var(--bor,#ddd);border-radius:6px;font-size:12.5px;width:100%;box-sizing:border-box}
+  .sgf-mod .sgf-g{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin-bottom:8px}
+  .sgf-mod .sgf-lbl{font-size:11px;color:var(--mut,#888);margin-bottom:2px;display:block}
+  .sgf-mod .sgf-tabs{display:flex;gap:6px;margin-bottom:14px;flex-wrap:wrap}
+  .sgf-mod .sgf-tab{padding:7px 14px;cursor:pointer;font-size:12.5px;font-weight:600;border-radius:6px;color:var(--mut,#888);background:var(--burl,#faf5f0)}
+  .sgf-mod .sgf-tab.on{background:var(--burg,#7a1f2b);color:#fff}
+  .sgf-mod .sgf-sub{display:none}.sgf-mod .sgf-sub.on{display:block}
+  .sgf-mod .sgf-empty{padding:30px;text-align:center;color:var(--mut,#999);font-size:13px}
+  .sgf-mod .sgf-pill{font-size:10.5px;padding:2px 7px;border-radius:9px;font-weight:600}
+  .sgf-mod .sgf-pill.pendiente{background:#fef3c7;color:#92400e}
+  .sgf-mod .sgf-pill.cobrada{background:#dcfce7;color:#166534}
+  .sgf-mod .sgf-pill.anulada{background:#fee2e2;color:#991b1b}
+  .sgf-mod .sgf-x{color:#b91c1c;cursor:pointer;font-weight:700}
+</style>
+<div class="sec sgf-mod" id="sec-sgf-plan"></div>
+<div class="sec sgf-mod" id="sec-sgf-asientos"></div>
+<div class="sec sgf-mod" id="sec-sgf-caja"></div>
+<div class="sec sgf-mod" id="sec-sgf-clientes"></div>
+<div class="sec sgf-mod" id="sec-sgf-cc"></div>
 
 <!-- 1) PERSONAL — padrón -->
 <div class="sec pp-mod" id="sec-personal-padron">
@@ -9939,6 +9979,296 @@ document.querySelectorAll('.ni-grp').forEach(function(el){
   });
 });
 
+// ═══════════════════════════════════════════════════════════════════════════
+// FINANZAS SG — Contable + Ventas + Tesorería (copia física de PC sobre sg_*).
+// Pantallas propias de SG. Operan sobre /api/sg/contable|ventas|tesoreria, que
+// NO comparten datos con PC. Estado mínimo en SGF.* ; todo se relee del backend.
+// ═══════════════════════════════════════════════════════════════════════════
+var SGF = { cuentas: [], secciones: [], titulos: [], finCuentas: [], clientes: [] };
+function sgfApi(base, path, method, body){ return api('/api/sg/' + base + path, method, body); }
+function sgfEsc(s){ return String(s == null ? '' : s).replace(/[&<>"']/g, function(c){ return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]); }); }
+function sgfMoney(n){ return '$ ' + (Math.round((parseFloat(n)||0)*100)/100).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+function sgfToggle(id){ var e = eid(id); if(e) e.classList.toggle('on'); }
+function sgfCtx(){ return '<div class="sgf-ctx">● San Gerónimo — datos propios (separados de PC)</div>'; }
+function sgfOk(r, msg){ if(r && r.ok){ if(msg) toast(msg,'ok'); return true; } toast((r && (r.error||r.msg)) || 'Error', 'er'); return false; }
+
+// ── PLAN DE CUENTAS SG ──────────────────────────────────────────────────────
+function sgfPlanInit(){
+  Promise.all([
+    sgfApi('contable','/secciones'),
+    sgfApi('contable','/titulos'),
+    sgfApi('contable','/')
+  ]).then(function(r){
+    SGF.secciones = (r[0]&&r[0].data)||[];
+    SGF.titulos   = (r[1]&&r[1].data)||[];
+    SGF.cuentas   = (r[2]&&r[2].data)||[];
+    sgfPlanRender();
+  });
+}
+function sgfPlanRender(){
+  var secOpts = SGF.secciones.map(function(s){ return '<option value="'+s.id+'">'+sgfEsc(s.codigo+' — '+s.nombre)+'</option>'; }).join('');
+  var titOpts = '<option value="">(sin título)</option>' + SGF.titulos.map(function(t){ return '<option value="'+t.id+'">'+sgfEsc(t.codigo+' — '+t.nombre)+'</option>'; }).join('');
+  var h = '<div class="ph"><div><div class="ph-t">📊 Plan de Cuentas SG</div><div class="ph-s">Secciones · Títulos · Cuentas imputables</div></div></div>' + sgfCtx();
+  // Secciones
+  h += '<div class="sgf-bar"><strong>Secciones</strong><button class="btn bs" onclick="sgfToggle(\'sgf-plan-fsec\')">+ Sección</button></div>';
+  h += '<div class="sgf-form" id="sgf-plan-fsec"><div class="sgf-g">'
+     + '<div><span class="sgf-lbl">Código (N o N.NN)</span><input id="sgf-sec-cod" placeholder="5 o 5.08"></div>'
+     + '<div><span class="sgf-lbl">Nombre</span><input id="sgf-sec-nom"></div>'
+     + '<div><span class="sgf-lbl">Grupo</span><select id="sgf-sec-grp"><option value="gastos">Gastos</option><option value="ingresos">Ingresos</option><option value="activo">Activo</option><option value="pasivo">Pasivo</option><option value="patrimonio_neto">Patrimonio Neto</option></select></div>'
+     + '</div><button class="btn bs" onclick="sgfSecCrear()">Guardar sección</button></div>';
+  h += '<table><thead><tr><th>Código</th><th>Nombre</th><th>Grupo</th><th></th></tr></thead><tbody>';
+  if(!SGF.secciones.length) h += '<tr><td colspan="4" class="sgf-empty">Sin secciones. Creá la primera.</td></tr>';
+  SGF.secciones.forEach(function(s){ h += '<tr><td>'+sgfEsc(s.codigo)+'</td><td>'+sgfEsc(s.nombre)+'</td><td>'+sgfEsc(s.grupo||'')+'</td><td><span class="sgf-x" title="Desactivar" onclick="sgfSecDel('+s.id+')">✕</span></td></tr>'; });
+  h += '</tbody></table>';
+  // Títulos
+  h += '<div class="sgf-bar" style="margin-top:18px"><strong>Títulos</strong><button class="btn bs" onclick="sgfToggle(\'sgf-plan-ftit\')">+ Título</button></div>';
+  h += '<div class="sgf-form" id="sgf-plan-ftit"><div class="sgf-g">'
+     + '<div><span class="sgf-lbl">Sección</span><select id="sgf-tit-sec">'+secOpts+'</select></div>'
+     + '<div><span class="sgf-lbl">Código (X.XX.XX)</span><input id="sgf-tit-cod" placeholder="1.01.01"></div>'
+     + '<div><span class="sgf-lbl">Nombre</span><input id="sgf-tit-nom"></div>'
+     + '</div><button class="btn bs" onclick="sgfTitCrear()">Guardar título</button></div>';
+  h += '<table><thead><tr><th>Código</th><th>Nombre</th><th>Sección</th><th></th></tr></thead><tbody>';
+  if(!SGF.titulos.length) h += '<tr><td colspan="4" class="sgf-empty">Sin títulos.</td></tr>';
+  SGF.titulos.forEach(function(t){ h += '<tr><td>'+sgfEsc(t.codigo)+'</td><td>'+sgfEsc(t.nombre)+'</td><td>'+sgfEsc(t.seccion_codigo||'')+'</td><td><span class="sgf-x" onclick="sgfTitDel('+t.id+')">✕</span></td></tr>'; });
+  h += '</tbody></table>';
+  // Cuentas
+  h += '<div class="sgf-bar" style="margin-top:18px"><strong>Cuentas</strong><button class="btn bs" onclick="sgfToggle(\'sgf-plan-fcta\')">+ Cuenta</button></div>';
+  h += '<div class="sgf-form" id="sgf-plan-fcta"><div class="sgf-g">'
+     + '<div><span class="sgf-lbl">Sección</span><select id="sgf-cta-sec">'+secOpts+'</select></div>'
+     + '<div><span class="sgf-lbl">Título</span><select id="sgf-cta-tit">'+titOpts+'</select></div>'
+     + '<div><span class="sgf-lbl">Código (X.XX.XX.XXXX)</span><input id="sgf-cta-cod" placeholder="1.01.01.0001"></div>'
+     + '<div><span class="sgf-lbl">Nombre</span><input id="sgf-cta-nom"></div>'
+     + '<div><span class="sgf-lbl">Tipo</span><select id="sgf-cta-tipo"><option value="resultado">Resultado</option><option value="patrimonial">Patrimonial</option></select></div>'
+     + '</div><button class="btn bs" onclick="sgfCtaCrear()">Guardar cuenta</button></div>';
+  h += '<table><thead><tr><th>Código</th><th>Nombre</th><th>Sección</th><th>Título</th><th>Tipo</th><th></th></tr></thead><tbody>';
+  if(!SGF.cuentas.length) h += '<tr><td colspan="6" class="sgf-empty">Sin cuentas todavía.</td></tr>';
+  SGF.cuentas.forEach(function(c){ h += '<tr><td>'+sgfEsc(c.codigo)+(c.imputable?'':' <span class="sgf-pill pendiente">rubro</span>')+'</td><td>'+sgfEsc(c.nombre)+'</td><td>'+sgfEsc(c.seccion_codigo||'')+'</td><td>'+sgfEsc(c.titulo_codigo||'')+'</td><td>'+sgfEsc(c.tipo)+'</td><td><span class="sgf-x" onclick="sgfCtaDel('+c.id+')">✕</span></td></tr>'; });
+  h += '</tbody></table>';
+  eid('sec-sgf-plan').innerHTML = h;
+}
+function sgfSecCrear(){ sgfApi('contable','/secciones','POST',{codigo:elv('sgf-sec-cod'),nombre:elv('sgf-sec-nom'),grupo:eid('sgf-sec-grp').value}).then(function(r){ if(sgfOk(r,'Sección creada')) sgfPlanInit(); }); }
+function sgfSecDel(id){ if(!confirm('¿Desactivar sección?')) return; sgfApi('contable','/secciones/'+id,'DELETE').then(function(r){ if(sgfOk(r)) sgfPlanInit(); }); }
+function sgfTitCrear(){ sgfApi('contable','/titulos','POST',{seccion_id:eid('sgf-tit-sec').value,codigo:elv('sgf-tit-cod'),nombre:elv('sgf-tit-nom')}).then(function(r){ if(sgfOk(r,'Título creado')) sgfPlanInit(); }); }
+function sgfTitDel(id){ if(!confirm('¿Desactivar título?')) return; sgfApi('contable','/titulos/'+id,'DELETE').then(function(r){ if(sgfOk(r)) sgfPlanInit(); }); }
+function sgfCtaCrear(){ sgfApi('contable','/','POST',{seccion_id:eid('sgf-cta-sec').value,titulo_id:eid('sgf-cta-tit').value||null,codigo:elv('sgf-cta-cod'),nombre:elv('sgf-cta-nom'),tipo:eid('sgf-cta-tipo').value}).then(function(r){ if(sgfOk(r,'Cuenta creada')) sgfPlanInit(); }); }
+function sgfCtaDel(id){ if(!confirm('¿Desactivar cuenta?')) return; sgfApi('contable','/'+id,'DELETE').then(function(r){ if(sgfOk(r)) sgfPlanInit(); }); }
+
+// ── ASIENTOS SG ─────────────────────────────────────────────────────────────
+function sgfAsientosInit(){
+  Promise.all([ sgfApi('contable','/asientos'), sgfApi('contable','/') ]).then(function(r){
+    SGF.cuentas = (r[1]&&r[1].data)||[];
+    var asientos = (r[0]&&r[0].data)||[];
+    var h = '<div class="ph"><div><div class="ph-t">📒 Asientos Contables SG</div><div class="ph-s">Partida doble manual</div></div></div>' + sgfCtx();
+    h += '<div class="sgf-bar"><button class="btn bs" onclick="sgfAsNuevoForm()">+ Nuevo asiento</button></div>';
+    h += '<div class="sgf-form" id="sgf-as-form"></div>';
+    h += '<table><thead><tr><th>Fecha</th><th>#</th><th>Descripción</th><th class="num">Debe</th><th></th></tr></thead><tbody id="sgf-as-tbody">';
+    if(!asientos.length) h += '<tr><td colspan="5" class="sgf-empty">Sin asientos.</td></tr>';
+    asientos.forEach(function(a){
+      h += '<tr'+(a.anulado?' style="opacity:.5"':'')+'><td>'+sgfEsc(a.fecha)+'</td><td>'+a.id+'</td><td>'+sgfEsc(a.descripcion)+(a.anulado?' <span class="sgf-pill anulada">anulado</span>':'')+'</td><td class="num">'+sgfEsc(a.ref_codigo||'')+'</td><td>'+(a.anulado?'':'<span class="sgf-x" title="Anular" onclick="sgfAsAnular('+a.id+')">✕</span>')+'</td></tr>';
+    });
+    h += '</tbody></table>';
+    eid('sec-sgf-asientos').innerHTML = h;
+  });
+}
+function sgfAsCtaOpts(){ return '<option value="">— cuenta —</option>' + SGF.cuentas.filter(function(c){ return c.imputable; }).map(function(c){ return '<option value="'+c.id+'">'+sgfEsc(c.codigo+' — '+c.nombre)+'</option>'; }).join(''); }
+function sgfAsLineaHtml(){ return '<div class="sgf-g sgf-as-linea"><select class="sgf-as-cta">'+sgfAsCtaOpts()+'</select><input class="sgf-as-debe" type="number" step="0.01" placeholder="Debe"><input class="sgf-as-haber" type="number" step="0.01" placeholder="Haber"><input class="sgf-as-desc" placeholder="Detalle (opcional)"></div>'; }
+function sgfAsNuevoForm(){
+  var f = eid('sgf-as-form');
+  f.innerHTML = '<div class="sgf-g"><div><span class="sgf-lbl">Fecha</span><input id="sgf-as-fecha" type="date" value="'+new Date().toISOString().slice(0,10)+'"></div><div style="grid-column:span 2"><span class="sgf-lbl">Descripción</span><input id="sgf-as-descr"></div></div>'
+    + '<div id="sgf-as-lineas">'+sgfAsLineaHtml()+sgfAsLineaHtml()+'</div>'
+    + '<button class="btn bo bs" onclick="document.getElementById(\'sgf-as-lineas\').insertAdjacentHTML(\'beforeend\', sgfAsLineaHtml())">+ línea</button> '
+    + '<button class="btn bs" onclick="sgfAsGuardar()">Guardar asiento</button>';
+  f.classList.add('on');
+}
+function sgfAsGuardar(){
+  var lineas = [].map.call(document.querySelectorAll('#sgf-as-lineas .sgf-as-linea'), function(row){
+    return { cuenta_id: row.querySelector('.sgf-as-cta').value, debe: row.querySelector('.sgf-as-debe').value, haber: row.querySelector('.sgf-as-haber').value, descripcion: row.querySelector('.sgf-as-desc').value };
+  }).filter(function(l){ return l.cuenta_id && ((parseFloat(l.debe)||0)>0 || (parseFloat(l.haber)||0)>0); });
+  sgfApi('contable','/asientos','POST',{ fecha: elv('sgf-as-fecha'), descripcion: elv('sgf-as-descr'), lineas: lineas }).then(function(r){ if(sgfOk(r,'Asiento creado')) sgfAsientosInit(); });
+}
+function sgfAsAnular(id){ if(!confirm('¿Anular asiento?')) return; sgfApi('contable','/asientos/'+id+'/anular','POST').then(function(r){ if(sgfOk(r)) sgfAsientosInit(); }); }
+
+// ── CAJA Y BANCOS SG ────────────────────────────────────────────────────────
+function sgfCajaInit(){
+  Promise.all([ sgfApi('tesoreria','/cuentas'), sgfApi('contable','/') ]).then(function(r){
+    SGF.finCuentas = (r[0]&&r[0].data)||[];
+    SGF.cuentas    = (r[1]&&r[1].data)||[];
+    var ccOpts = '<option value="">(sin imputar)</option>' + SGF.cuentas.filter(function(c){return c.imputable;}).map(function(c){ return '<option value="'+c.id+'">'+sgfEsc(c.codigo+' — '+c.nombre)+'</option>'; }).join('');
+    var h = '<div class="ph"><div><div class="ph-t">🏦 Caja y Bancos SG</div><div class="ph-s">Cuentas, cajas y movimientos</div></div></div>' + sgfCtx();
+    h += '<div class="sgf-bar"><button class="btn bs" onclick="sgfToggle(\'sgf-caja-form\')">+ Cuenta / Caja</button></div>';
+    h += '<div class="sgf-form" id="sgf-caja-form"><div class="sgf-g">'
+       + '<div><span class="sgf-lbl">Nombre</span><input id="sgf-cu-nom"></div>'
+       + '<div><span class="sgf-lbl">Tipo</span><select id="sgf-cu-tipo"><option value="caja">Caja (efectivo)</option><option value="cuenta_corriente">Cuenta corriente</option><option value="caja_ahorro">Caja de ahorro</option></select></div>'
+       + '<div><span class="sgf-lbl">Banco</span><input id="sgf-cu-banco"></div>'
+       + '<div><span class="sgf-lbl">Saldo inicial</span><input id="sgf-cu-saldo" type="number" step="0.01" value="0"></div>'
+       + '<div><span class="sgf-lbl">Cuenta contable</span><select id="sgf-cu-cc">'+ccOpts+'</select></div>'
+       + '</div><button class="btn bs" onclick="sgfCuCrear()">Guardar cuenta</button></div>';
+    h += '<table><thead><tr><th>Nombre</th><th>Tipo</th><th>Banco</th><th class="num">Saldo actual</th><th></th></tr></thead><tbody>';
+    if(!SGF.finCuentas.length) h += '<tr><td colspan="5" class="sgf-empty">Sin cuentas. Creá una caja o banco.</td></tr>';
+    SGF.finCuentas.forEach(function(c){ h += '<tr><td><a href="#" onclick="sgfMovVer('+c.id+');return false">'+sgfEsc(c.nombre)+'</a></td><td>'+sgfEsc(c.tipo)+'</td><td>'+sgfEsc(c.banco||'')+'</td><td class="num">'+sgfMoney(c.saldo_actual)+'</td><td><span class="sgf-x" onclick="sgfCuDel('+c.id+')">✕</span></td></tr>'; });
+    h += '</tbody></table><div id="sgf-mov-panel" style="margin-top:18px"></div>';
+    eid('sec-sgf-caja').innerHTML = h;
+  });
+}
+function sgfCuCrear(){ sgfApi('tesoreria','/cuentas','POST',{nombre:elv('sgf-cu-nom'),tipo:eid('sgf-cu-tipo').value,banco:elv('sgf-cu-banco'),saldo_inicial:elv('sgf-cu-saldo'),cuenta_contable_id:eid('sgf-cu-cc').value||null}).then(function(r){ if(sgfOk(r,'Cuenta creada')) sgfCajaInit(); }); }
+function sgfCuDel(id){ if(!confirm('¿Desactivar cuenta?')) return; sgfApi('tesoreria','/cuentas/'+id,'DELETE').then(function(r){ if(sgfOk(r)) sgfCajaInit(); }); }
+function sgfMovVer(cuentaId){
+  var cu = SGF.finCuentas.filter(function(c){ return c.id === cuentaId; })[0];
+  var nombre = cu ? cu.nombre : ('Cuenta #'+cuentaId);
+  sgfApi('tesoreria','/movimientos?cuentaId='+cuentaId).then(function(r){
+    var movs = (r&&r.data)||[];
+    var h = '<div class="sgf-bar"><strong>Movimientos · '+sgfEsc(nombre)+'</strong><button class="btn bs" onclick="sgfToggle(\'sgf-mov-form\')">+ Movimiento</button></div>';
+    h += '<div class="sgf-form" id="sgf-mov-form"><div class="sgf-g">'
+       + '<div><span class="sgf-lbl">Fecha</span><input id="sgf-mv-fecha" type="date" value="'+new Date().toISOString().slice(0,10)+'"></div>'
+       + '<div><span class="sgf-lbl">Tipo</span><select id="sgf-mv-tipo"><option value="ingreso">Ingreso</option><option value="egreso">Egreso</option></select></div>'
+       + '<div><span class="sgf-lbl">Concepto</span><input id="sgf-mv-concepto"></div>'
+       + '<div><span class="sgf-lbl">Monto</span><input id="sgf-mv-monto" type="number" step="0.01"></div>'
+       + '</div><button class="btn bs" onclick="sgfMovCrear('+cuentaId+')">Guardar</button></div>';
+    h += '<table><thead><tr><th>Fecha</th><th>Tipo</th><th>Concepto</th><th class="num">Monto</th><th></th></tr></thead><tbody>';
+    if(!movs.length) h += '<tr><td colspan="5" class="sgf-empty">Sin movimientos.</td></tr>';
+    movs.forEach(function(m){ h += '<tr><td>'+sgfEsc(m.fecha)+'</td><td>'+sgfEsc(m.tipo)+'</td><td>'+sgfEsc(m.concepto)+'</td><td class="num">'+(m.tipo==='egreso'?'-':'')+sgfMoney(m.monto)+'</td><td><span class="sgf-x" onclick="sgfMovDel('+m.id+','+cuentaId+')">✕</span></td></tr>'; });
+    h += '</tbody></table>';
+    eid('sgf-mov-panel').innerHTML = h;
+  });
+}
+function sgfMovCrear(cuentaId){ sgfApi('tesoreria','/movimientos','POST',{cuenta_id:cuentaId,fecha:elv('sgf-mv-fecha'),tipo:eid('sgf-mv-tipo').value,concepto:elv('sgf-mv-concepto'),monto:elv('sgf-mv-monto')}).then(function(r){ if(sgfOk(r,'Movimiento registrado')){ sgfApi('tesoreria','/cuentas').then(function(rr){ SGF.finCuentas=(rr&&rr.data)||[]; sgfMovVer(cuentaId); }); } }); }
+function sgfMovDel(id, cuentaId){ if(!confirm('¿Eliminar movimiento?')) return; sgfApi('tesoreria','/movimientos/'+id,'DELETE').then(function(r){ if(sgfOk(r)) sgfMovVer(cuentaId); }); }
+
+// ── CLIENTES SG ─────────────────────────────────────────────────────────────
+function sgfClientesInit(){
+  Promise.all([ sgfApi('ventas','/clientes'), sgfApi('contable','/') ]).then(function(r){
+    SGF.clientes = (r[0]&&r[0].data)||[];
+    SGF.cuentas  = (r[1]&&r[1].data)||[];
+    var ccOpts = '<option value="">(sin cuenta)</option>' + SGF.cuentas.filter(function(c){return c.imputable;}).map(function(c){ return '<option value="'+c.id+'">'+sgfEsc(c.codigo+' — '+c.nombre)+'</option>'; }).join('');
+    var h = '<div class="ph"><div><div class="ph-t">👥 Clientes SG</div><div class="ph-s">Padrón de clientes de ventas</div></div></div>' + sgfCtx();
+    h += '<div class="sgf-bar"><button class="btn bs" onclick="sgfToggle(\'sgf-cli-form\')">+ Cliente</button></div>';
+    h += '<div class="sgf-form" id="sgf-cli-form"><div class="sgf-g">'
+       + '<div><span class="sgf-lbl">Razón social *</span><input id="sgf-cli-rs"></div>'
+       + '<div><span class="sgf-lbl">Nombre comercial</span><input id="sgf-cli-nc"></div>'
+       + '<div><span class="sgf-lbl">CUIT</span><input id="sgf-cli-cuit"></div>'
+       + '<div><span class="sgf-lbl">Teléfono</span><input id="sgf-cli-tel"></div>'
+       + '<div><span class="sgf-lbl">Email</span><input id="sgf-cli-email"></div>'
+       + '<div><span class="sgf-lbl">Cuenta contable</span><select id="sgf-cli-cc">'+ccOpts+'</select></div>'
+       + '</div><button class="btn bs" onclick="sgfCliCrear()">Guardar cliente</button></div>';
+    h += '<table><thead><tr><th>Razón social</th><th>CUIT</th><th>Teléfono</th><th>Cuenta</th><th></th></tr></thead><tbody>';
+    if(!SGF.clientes.length) h += '<tr><td colspan="5" class="sgf-empty">Sin clientes.</td></tr>';
+    SGF.clientes.forEach(function(c){ h += '<tr><td>'+sgfEsc(c.razon_social)+'</td><td>'+sgfEsc(c.cuit||'')+'</td><td>'+sgfEsc(c.telefono||'')+'</td><td>'+sgfEsc(c.cuenta_nombre||'')+'</td><td><span class="sgf-x" onclick="sgfCliDel('+c.id+')">✕</span></td></tr>'; });
+    h += '</tbody></table>';
+    eid('sec-sgf-clientes').innerHTML = h;
+  });
+}
+function sgfCliCrear(){ sgfApi('ventas','/clientes','POST',{razon_social:elv('sgf-cli-rs'),nombre_comercial:elv('sgf-cli-nc'),cuit:elv('sgf-cli-cuit'),telefono:elv('sgf-cli-tel'),email:elv('sgf-cli-email'),cuenta_contable_id:eid('sgf-cli-cc').value||null}).then(function(r){ if(sgfOk(r,'Cliente creado')) sgfClientesInit(); }); }
+function sgfCliDel(id){ if(!confirm('¿Desactivar cliente?')) return; sgfApi('ventas','/clientes/'+id,'DELETE').then(function(r){ if(sgfOk(r)) sgfClientesInit(); }); }
+
+// ── VENTAS SG (Liquidaciones · Facturas · Cuenta Corriente) ─────────────────
+function sgfCcInit(){
+  sgfApi('ventas','/clientes').then(function(r){
+    SGF.clientes = (r&&r.data)||[];
+    var h = '<div class="ph"><div><div class="ph-t">💰 Ventas SG</div><div class="ph-s">Liquidaciones · Facturas · Cuenta corriente</div></div></div>' + sgfCtx();
+    h += '<div class="sgf-tabs"><div class="sgf-tab on" onclick="sgfVenTab(this,\'liq\')">Liquidaciones</div><div class="sgf-tab" onclick="sgfVenTab(this,\'fac\')">Facturas</div><div class="sgf-tab" onclick="sgfVenTab(this,\'cc\')">Cuenta Corriente</div></div>';
+    h += '<div class="sgf-sub on" id="sgf-sub-liq"></div><div class="sgf-sub" id="sgf-sub-fac"></div><div class="sgf-sub" id="sgf-sub-cc"></div>';
+    eid('sec-sgf-cc').innerHTML = h;
+    sgfLiqLoad();
+  });
+}
+function sgfVenTab(el, tab){
+  [].forEach.call(document.querySelectorAll('#sec-sgf-cc .sgf-tab'), function(t){ t.classList.remove('on'); });
+  el.classList.add('on');
+  [].forEach.call(document.querySelectorAll('#sec-sgf-cc .sgf-sub'), function(s){ s.classList.remove('on'); });
+  eid('sgf-sub-'+tab).classList.add('on');
+  if(tab==='liq') sgfLiqLoad(); else if(tab==='fac') sgfFacLoad(); else sgfCcLoad();
+}
+function sgfCliOpts(){ return '<option value="">— cliente —</option>' + SGF.clientes.map(function(c){ return '<option value="'+c.id+'">'+sgfEsc(c.razon_social)+'</option>'; }).join(''); }
+function sgfLiqLoad(){
+  sgfApi('ventas','/liquidaciones').then(function(r){
+    var liq = (r&&r.data)||[];
+    var h = '<div class="sgf-bar"><button class="btn bs" onclick="sgfToggle(\'sgf-liq-form\')">+ Liquidación</button></div>';
+    h += '<div class="sgf-form" id="sgf-liq-form"><div class="sgf-g">'
+       + '<div><span class="sgf-lbl">Cliente</span><select id="sgf-liq-cli">'+sgfCliOpts()+'</select></div>'
+       + '<div><span class="sgf-lbl">Fecha</span><input id="sgf-liq-fecha" type="date" value="'+new Date().toISOString().slice(0,10)+'"></div>'
+       + '<div><span class="sgf-lbl">Nro remito</span><input id="sgf-liq-rem"></div>'
+       + '</div><div class="sgf-g">'
+       + '<div><span class="sgf-lbl">Descripción ítem</span><input id="sgf-liq-desc" placeholder="Producto"></div>'
+       + '<div><span class="sgf-lbl">Kilos</span><input id="sgf-liq-kg" type="number" step="0.01"></div>'
+       + '<div><span class="sgf-lbl">Subtotal (bruto)</span><input id="sgf-liq-sub" type="number" step="0.01"></div>'
+       + '</div><div class="sgf-g">'
+       + '<div><span class="sgf-lbl">Comisión</span><input id="sgf-liq-com" type="number" step="0.01" value="0"></div>'
+       + '<div><span class="sgf-lbl">Flete</span><input id="sgf-liq-fle" type="number" step="0.01" value="0"></div>'
+       + '<div><span class="sgf-lbl">Ret. IVA</span><input id="sgf-liq-riva" type="number" step="0.01" value="0"></div>'
+       + '<div><span class="sgf-lbl">Ret. Gan.</span><input id="sgf-liq-rgan" type="number" step="0.01" value="0"></div>'
+       + '</div><button class="btn bs" onclick="sgfLiqCrear()">Guardar liquidación</button></div>';
+    h += '<table><thead><tr><th>Número</th><th>Fecha</th><th>Cliente</th><th class="num">Neto</th><th>Estado</th><th></th></tr></thead><tbody>';
+    if(!liq.length) h += '<tr><td colspan="6" class="sgf-empty">Sin liquidaciones.</td></tr>';
+    liq.forEach(function(l){ h += '<tr><td>'+sgfEsc(l.numero)+'</td><td>'+sgfEsc(l.fecha)+'</td><td>'+sgfEsc(l.cliente_nombre||'')+'</td><td class="num">'+sgfMoney(l.neto_acreditar)+'</td><td><span class="sgf-pill '+l.estado+'">'+l.estado+'</span></td><td>'+(l.estado==='anulada'?'':'<span class="sgf-x" title="Anular" onclick="sgfLiqAnular('+l.id+')">✕</span>')+'</td></tr>'; });
+    h += '</tbody></table>';
+    eid('sgf-sub-liq').innerHTML = h;
+  });
+}
+function sgfLiqCrear(){
+  var sub = parseFloat(elv('sgf-liq-sub'))||0;
+  var items = [{ descripcion: elv('sgf-liq-desc')||'Producto', kilos: elv('sgf-liq-kg'), subtotal: sub }];
+  sgfApi('ventas','/liquidaciones','POST',{ cliente_id: eid('sgf-liq-cli').value, fecha: elv('sgf-liq-fecha'), nro_remito: elv('sgf-liq-rem'), items: items, desc_comision: elv('sgf-liq-com'), desc_flete: elv('sgf-liq-fle'), ret_iva: elv('sgf-liq-riva'), ret_ganancias: elv('sgf-liq-rgan') }).then(function(r){ if(sgfOk(r,'Liquidación '+(r.numero||'')+' creada')) sgfLiqLoad(); });
+}
+function sgfLiqAnular(id){ if(!confirm('¿Anular liquidación?')) return; sgfApi('ventas','/liquidaciones/'+id+'/anular','PATCH').then(function(r){ if(sgfOk(r)) sgfLiqLoad(); }); }
+function sgfFacLoad(){
+  sgfApi('ventas','/facturas').then(function(r){
+    var facs = (r&&r.data)||[];
+    var h = '<div class="sgf-bar"><button class="btn bs" onclick="sgfToggle(\'sgf-fac-form\')">+ Factura</button></div>';
+    h += '<div class="sgf-form" id="sgf-fac-form"><div class="sgf-g">'
+       + '<div><span class="sgf-lbl">Cliente</span><select id="sgf-fac-cli">'+sgfCliOpts()+'</select></div>'
+       + '<div><span class="sgf-lbl">Fecha</span><input id="sgf-fac-fecha" type="date" value="'+new Date().toISOString().slice(0,10)+'"></div>'
+       + '<div><span class="sgf-lbl">Tipo</span><select id="sgf-fac-tipo"><option>A</option><option>B</option><option>C</option></select></div>'
+       + '</div><div class="sgf-g">'
+       + '<div><span class="sgf-lbl">Concepto / ítem</span><input id="sgf-fac-desc"></div>'
+       + '<div><span class="sgf-lbl">Neto</span><input id="sgf-fac-neto" type="number" step="0.01"></div>'
+       + '<div><span class="sgf-lbl">IVA</span><input id="sgf-fac-iva" type="number" step="0.01" value="0"></div>'
+       + '</div><button class="btn bs" onclick="sgfFacCrear()">Guardar factura</button></div>';
+    h += '<table><thead><tr><th>Número</th><th>Fecha</th><th>Cliente</th><th>Tipo</th><th class="num">Total</th><th>Estado</th><th></th></tr></thead><tbody>';
+    if(!facs.length) h += '<tr><td colspan="7" class="sgf-empty">Sin facturas.</td></tr>';
+    facs.forEach(function(f){ h += '<tr><td>'+sgfEsc(f.numero)+'</td><td>'+sgfEsc(f.fecha)+'</td><td>'+sgfEsc(f.cliente_nombre||'')+'</td><td>'+sgfEsc(f.tipo)+'</td><td class="num">'+sgfMoney(f.total)+'</td><td><span class="sgf-pill '+f.estado+'">'+f.estado+'</span></td><td>'+(f.estado==='anulada'?'':'<span class="sgf-x" onclick="sgfFacAnular('+f.id+')">✕</span>')+'</td></tr>'; });
+    h += '</tbody></table>';
+    eid('sgf-sub-fac').innerHTML = h;
+  });
+}
+function sgfFacCrear(){
+  var neto = parseFloat(elv('sgf-fac-neto'))||0;
+  var items = [{ descripcion: elv('sgf-fac-desc')||'Venta', cantidad:1, precio_unitario: neto, subtotal: neto }];
+  sgfApi('ventas','/facturas','POST',{ cliente_id: eid('sgf-fac-cli').value, fecha: elv('sgf-fac-fecha'), tipo: eid('sgf-fac-tipo').value, concepto: elv('sgf-fac-desc'), iva: elv('sgf-fac-iva'), items: items }).then(function(r){ if(sgfOk(r,'Factura '+(r.numero||'')+' creada')) sgfFacLoad(); });
+}
+function sgfFacAnular(id){ if(!confirm('¿Anular factura?')) return; sgfApi('ventas','/facturas/'+id+'/anular','PATCH').then(function(r){ if(sgfOk(r)) sgfFacLoad(); }); }
+function sgfCcLoad(){
+  var opts = sgfCliOpts();
+  var h = '<div class="sgf-bar"><span class="sgf-lbl">Cliente:</span> <select id="sgf-cc-cli" onchange="sgfCcVer()" style="padding:6px;border-radius:6px">'+opts+'</select></div><div id="sgf-cc-panel"></div>';
+  eid('sgf-sub-cc').innerHTML = h;
+}
+function sgfCcVer(){
+  var cid = eid('sgf-cc-cli').value; if(!cid){ eid('sgf-cc-panel').innerHTML=''; return; }
+  sgfApi('ventas','/cc/'+cid).then(function(r){
+    if(!r||!r.ok){ eid('sgf-cc-panel').innerHTML='<div class="sgf-empty">Sin datos</div>'; return; }
+    var t = r.totales||{total:0,cobrado:0,pendiente:0};
+    var h = '<div class="sgf-bar"><strong>Total: '+sgfMoney(t.total)+'</strong> · Cobrado: '+sgfMoney(t.cobrado)+' · <strong style="color:#b45309">Pendiente: '+sgfMoney(t.pendiente)+'</strong></div>';
+    h += '<table><thead><tr><th>Doc</th><th>Número</th><th>Fecha</th><th class="num">Total</th><th class="num">Pendiente</th></tr></thead><tbody>';
+    (r.docs||[]).forEach(function(d){ h += '<tr><td>'+sgfEsc(d.tipo_doc)+'</td><td>'+sgfEsc(d.numero)+'</td><td>'+sgfEsc(d.fecha)+'</td><td class="num">'+sgfMoney(d.total)+'</td><td class="num">'+sgfMoney(d.pendiente)+'</td></tr>'; });
+    if(!(r.docs||[]).length) h += '<tr><td colspan="5" class="sgf-empty">Sin documentos.</td></tr>';
+    h += '</tbody></table>';
+    h += '<div class="sgf-bar" style="margin-top:14px"><strong>Registrar cobranza</strong></div><div class="sgf-form on"><div class="sgf-g">'
+       + '<div><span class="sgf-lbl">Fecha</span><input id="sgf-cob-fecha" type="date" value="'+new Date().toISOString().slice(0,10)+'"></div>'
+       + '<div><span class="sgf-lbl">Monto</span><input id="sgf-cob-monto" type="number" step="0.01"></div>'
+       + '<div><span class="sgf-lbl">Forma de pago</span><input id="sgf-cob-fp" value="transferencia"></div>'
+       + '</div><div class="sgf-lbl">Aplicar a (doc pendiente):</div><select id="sgf-cob-doc">'
+       + (r.docs||[]).filter(function(d){return d.pendiente>0.01;}).map(function(d){ return '<option value="'+d.tipo_doc+':'+d.id+':'+d.pendiente+'">'+sgfEsc(d.tipo_doc+' '+d.numero+' (pend '+sgfMoney(d.pendiente)+')')+'</option>'; }).join('')
+       + '</select> <button class="btn bs" onclick="sgfCobCrear('+cid+')">Guardar cobranza</button></div>';
+    eid('sgf-cc-panel').innerHTML = h;
+  });
+}
+function sgfCobCrear(clienteId){
+  var dv = eid('sgf-cob-doc').value; if(!dv){ toast('No hay documento pendiente','er'); return; }
+  var parts = dv.split(':'); var monto = parseFloat(elv('sgf-cob-monto'))||0;
+  if(monto<=0){ toast('Ingresá un monto','er'); return; }
+  var docs = [{ tipo: parts[0], doc_id: parseInt(parts[1]), monto: monto }];
+  sgfApi('ventas','/cobranzas','POST',{ cliente_id: clienteId, fecha: elv('sgf-cob-fecha'), monto: monto, forma_pago: elv('sgf-cob-fp'), docs: docs }).then(function(r){ if(sgfOk(r,'Cobranza registrada')) sgfCcVer(); });
+}
+
 function loadSec(s) {
   var m = {
     inicio: loadInicio, pedidos: loadPedidos, logistica: loadLog,
@@ -9996,7 +10326,12 @@ function loadSec(s) {
     'personal-valorizar':  function(){ ppOpenModulo('valorizar'); },
     'personal-cc':         function(){ ppOpenModulo('cc'); },
     'personal-catalogo':   function(){ ppOpenModulo('grupos'); },
-    'personal-reportes':   function(){ ppOpenModulo('reportes'); }
+    'personal-reportes':   function(){ ppOpenModulo('reportes'); },
+    'sgf-plan':      function(){ sgfPlanInit(); },
+    'sgf-asientos':  function(){ sgfAsientosInit(); },
+    'sgf-caja':      function(){ sgfCajaInit(); },
+    'sgf-clientes':  function(){ sgfClientesInit(); },
+    'sgf-cc':        function(){ sgfCcInit(); }
   };
   if (m[s]) m[s]();
 }
