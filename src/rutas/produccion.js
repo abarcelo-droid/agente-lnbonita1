@@ -4445,7 +4445,7 @@ router.get('/personal/cajas', requireAuth, (req, res) => {
   if (!perms.valorizacion && !perms.admin)
     return res.status(403).json({ ok: false, error: 'Sin permiso de valorización' });
   try {
-    const data = db.prepare("SELECT id, nombre, tipo, moneda FROM fin_cuentas WHERE activo=1 ORDER BY tipo, nombre").all();
+    const data = db.prepare("SELECT id, nombre, tipo, moneda, ambito, cuenta_contable_id FROM fin_cuentas WHERE activo=1 ORDER BY tipo, nombre").all();
     res.json({ ok: true, data });
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
@@ -4495,6 +4495,23 @@ function _pendientesSemana(db, rango) {
     GROUP BY tipo_titular, titular_id`).all(rango.desde, rango.hasta)) {
     adelantadoMap[r.tipo_titular + ':' + r.titular_id] = r.adelantado;
   }
+  // PAGOS POR LIQUIDACIÓN EMITIDA (Fase 2) de esta misma semana/rango. Mismo criterio que
+  // pago_semana: restan del pendiente para que NI el masivo NI otra liquidación re-paguen lo ya
+  // liquidado (cierra el riesgo de doble vía masivo ↔ liquidación). Se atan a la semana por el
+  // semana_id de la liquidación (o por su rango si fue armada con desde/hasta sueltos), no por
+  // la fecha del movimiento — más preciso que el criterio por fecha de los adelantos manuales.
+  const liquidadoMap = {};
+  const liqWhere = rango.semana_id ? 'l.semana_id = ?' : '(l.rango_desde = ? AND l.rango_hasta = ?)';
+  const liqArgs  = rango.semana_id ? [rango.semana_id] : [rango.desde, rango.hasta];
+  for (const r of db.prepare(`
+    SELECT m.tipo_titular, m.titular_id, COALESCE(SUM(-m.monto),0) AS liquidado
+    FROM pa_cc_movimientos m
+    JOIN pa_liquidaciones_pago l ON l.id = m.referencia_id
+    WHERE m.tipo_mov='pago' AND m.anulado=0 AND m.referencia_tipo='liquidacion'
+      AND l.estado='emitida' AND ${liqWhere}
+    GROUP BY m.tipo_titular, m.titular_id`).all(...liqArgs)) {
+    liquidadoMap[r.tipo_titular + ':' + r.titular_id] = r.liquidado;
+  }
   // Desglose RRHH: jornales de la semana + tarifa aplicada, por titular (de lo valorizado).
   // titular_id es un pa_personal.id (único) → se puede mapear por id solo.
   const jmap = {};
@@ -4510,13 +4527,15 @@ function _pendientesSemana(db, rango) {
     if (v.tarifa != null) jmap[id].tarifas.add(Number(v.tarifa));
   }
   return dev.map(d => {
-    const pagado = pagadoMap[d.tipo_titular + ':' + d.titular_id] || 0;
-    const adelantado = adelantadoMap[d.tipo_titular + ':' + d.titular_id] || 0;
-    // pendiente nunca negativo: el masivo no puede pagar de menos que cero (sin sobrepago).
-    const pendiente = Math.max(0, Math.round((d.devengado - pagado - adelantado) * 100) / 100);
+    const k = d.tipo_titular + ':' + d.titular_id;
+    const pagado = pagadoMap[k] || 0;
+    const adelantado = adelantadoMap[k] || 0;
+    const liquidado = liquidadoMap[k] || 0;
+    // pendiente nunca negativo: no se puede pagar de menos que cero (sin sobrepago).
+    const pendiente = Math.max(0, Math.round((d.devengado - pagado - adelantado - liquidado) * 100) / 100);
     const j = jmap[d.titular_id] || { jornales: 0, tarifas: new Set() };
     const tarifas = Array.from(j.tarifas);
-    return { ...d, pagado, adelantado, pendiente, jornales: j.jornales,
+    return { ...d, pagado: Math.round((pagado + liquidado) * 100) / 100, adelantado, pendiente, jornales: j.jornales,
              tarifa: tarifas.length === 1 ? tarifas[0] : null, tarifa_varias: tarifas.length > 1 };
   }).filter(d => d.pendiente > 0.009);
 }
@@ -4742,6 +4761,204 @@ router.delete('/personal/liquidaciones/:id', requireAuth, (req, res) => {
     const tx = db.transaction(() => {
       db.prepare("DELETE FROM pa_liquidaciones_items WHERE liquidacion_id=?").run(req.params.id);
       db.prepare("DELETE FROM pa_liquidaciones_pago WHERE id=?").run(req.params.id);
+    });
+    tx();
+    res.json({ ok: true });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// LIQUIDACIONES DE PAGO — Fase 2: EMISIÓN (egreso de caja + pagos CC + asiento)
+// Modelo contable (definido con Pablo): CAJA DIRECTA / SOLO PAGO. El asiento se arma
+// sobre lo PAGADO: DEBE = rubros MO (proporcional al devengado por rubro) / HABER = Caja.
+// Sin cuenta de pasivo (no hay "Sueldos a Pagar"): se imputa el gasto directo al pagar.
+// ZONA SENSIBLE: toca caja + genera asiento → protegido por requireAccesoSensible.
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Devengado por (titular, rubro) en el rango — base para repartir lo pagado entre cuentas MO.
+// Misma fuente que el devengado de _pendientesSemana (CC devengado de asistencias del rango),
+// cruzada con el rubro_cuenta_id de cada asistencia.
+function _devengadoPorRubro(db, rango) {
+  const rows = db.prepare(`
+    SELECT m.tipo_titular, m.titular_id, a.rubro_cuenta_id AS rubro, COALESCE(SUM(m.monto),0) AS devengado
+    FROM pa_cc_movimientos m
+    JOIN pa_asistencias a ON a.id = m.referencia_id
+    WHERE m.tipo_mov='devengado' AND m.anulado=0 AND m.referencia_tipo='asistencia'
+      AND m.fecha BETWEEN ? AND ?
+    GROUP BY m.tipo_titular, m.titular_id, a.rubro_cuenta_id`).all(rango.desde, rango.hasta);
+  const map = {}; // 'tipo:id' -> { rubro_id: devengado, ... }
+  for (const r of rows) {
+    const k = r.tipo_titular + ':' + r.titular_id;
+    if (!map[k]) map[k] = {};
+    map[k][r.rubro] = round2((map[k][r.rubro] || 0) + r.devengado);
+  }
+  return map;
+}
+
+// POST /personal/liquidaciones/:id/emitir — emite el pago de una liquidación en borrador.
+router.post('/personal/liquidaciones/:id/emitir', requireAuth, requireAccesoSensible, (req, res) => {
+  const db = getDb();
+  const perms = permisosPersonal(db, req.user);
+  if (!perms.valorizacion && !perms.admin) return res.status(403).json({ ok: false, error: 'Sin permiso de valorización' });
+  const caja_id = req.body.caja_id;
+  if (!caja_id) return res.status(400).json({ ok: false, error: 'Elegí una caja de dónde sale el pago' });
+  try {
+    const l = db.prepare("SELECT * FROM pa_liquidaciones_pago WHERE id=?").get(req.params.id);
+    if (!l) return res.status(404).json({ ok: false, error: 'Liquidación no encontrada' });
+    if (l.estado !== 'borrador') return res.status(400).json({ ok: false, error: 'Solo se emite una liquidación en borrador (no re-emitir)' });
+    const items = db.prepare("SELECT * FROM pa_liquidaciones_items WHERE liquidacion_id=?").all(l.id);
+    if (!items.length) return res.status(400).json({ ok: false, error: 'La liquidación no tiene personas' });
+    const caja = db.prepare("SELECT id, nombre, ambito, cuenta_contable_id, sociedad_id FROM fin_cuentas WHERE id=? AND activo=1").get(caja_id);
+    if (!caja) return res.status(404).json({ ok: false, error: 'Caja inexistente o inactiva' });
+    if (!caja.cuenta_contable_id) return res.status(400).json({ ok: false, error: 'La caja no tiene cuenta contable asociada. Configurala (Config → Cajas) antes de emitir.' });
+    const rango = _rangoSemana(db, { semana_id: l.semana_id, desde: l.rango_desde, hasta: l.rango_hasta });
+    if (!rango) return res.status(400).json({ ok: false, error: 'Rango de la liquidación inválido' });
+
+    // ANTI-DOBLE-PAGO / ANTI-STALE: el pendiente ACTUAL (descontando masivo, manual y otras
+    // liquidaciones emitidas) debe cubrir el monto congelado de cada ítem. Si bajó (alguien pagó
+    // después de armar la liquidación), rechazar para no sobrepagar — hay que re-armarla.
+    const pendMap = {};
+    for (const d of _pendientesSemana(db, rango)) pendMap[d.tipo_titular + ':' + d.titular_id] = d.pendiente;
+    const stale = [];
+    for (const it of items) {
+      const disp = pendMap[it.tipo_titular + ':' + it.titular_id] || 0;
+      if (it.monto > disp + 0.01) stale.push({ titular_id: it.titular_id, monto_item: round2(it.monto), pendiente_actual: round2(disp) });
+    }
+    if (stale.length) return res.status(409).json({ ok: false, error: 'La liquidación quedó desactualizada: hay pagos posteriores al armado para una o más personas. Volvé a armarla.', detalle: stale });
+
+    const total = round2(items.reduce((s, it) => s + it.monto, 0));
+    if (!(total > 0)) return res.status(400).json({ ok: false, error: 'El total a pagar es 0' });
+
+    const dengMap = _devengadoPorRubro(db, rango);
+    const fechaPago = (req.body.fecha || '').slice(0, 10) || db.prepare("SELECT date('now','localtime') d").get().d;
+
+    let out = null;
+    const tx = db.transaction(() => {
+      // 1) UN egreso de caja por el TOTAL de la liquidación
+      const egr = db.prepare(`INSERT INTO fin_movimientos
+          (cuenta_id, fecha, tipo, concepto, monto, referencia, referencia_id, usuario_id, sociedad_id)
+          VALUES (?,?, 'egreso', ?, ?, 'personal_liquidacion', ?, ?, ?)`)
+        .run(caja.id, fechaPago, `Liquidación pago personal #${l.id} — ${items.length} titular(es)`,
+             total, l.id, req.user.id, caja.sociedad_id);
+      const finMovId = egr.lastInsertRowid;
+
+      // 2) Un pago en CC por titular (negativo), linkeado al egreso; guardar cc_movimiento_id.
+      //    En paralelo, repartir lo pagado a cada titular entre sus rubros MO (proporcional al
+      //    devengado por rubro del rango) → acumular el DEBE del asiento por cuenta.
+      const insPago = db.prepare(`INSERT INTO pa_cc_movimientos
+          (tipo_titular, titular_id, fecha, tipo_mov, monto, descripcion, referencia_tipo, referencia_id, fin_movimiento_id, cargado_por)
+          VALUES (?,?,?, 'pago', ?, ?, 'liquidacion', ?, ?, ?)`);
+      const updItem = db.prepare("UPDATE pa_liquidaciones_items SET cc_movimiento_id=? WHERE id=?");
+      const rubroDebe = {};   // rubro_cuenta_id -> monto DEBE acumulado
+      for (const it of items) {
+        const r = insPago.run(it.tipo_titular, it.titular_id, fechaPago, -round2(it.monto),
+          `Liquidación #${l.id} · caja ${caja.nombre}`, l.id, finMovId, req.user.id);
+        updItem.run(r.lastInsertRowid, it.id);
+        _recalcSaldoCC(db, it.tipo_titular, it.titular_id);
+
+        const rubros = dengMap[it.tipo_titular + ':' + it.titular_id] || {};
+        const totDev = Object.values(rubros).reduce((s, v) => s + v, 0);
+        if (totDev > 0) {
+          for (const [rid, dev] of Object.entries(rubros)) {
+            rubroDebe[rid] = (rubroDebe[rid] || 0) + it.monto * (dev / totDev);
+          }
+        } else {
+          // No debería pasar (si hay pendiente hay devengado en el rango). Clave centinela → corta abajo.
+          rubroDebe['__sin_rubro__'] = (rubroDebe['__sin_rubro__'] || 0) + it.monto;
+        }
+      }
+      if (rubroDebe['__sin_rubro__']) {
+        throw new Error('No se pudo determinar el rubro contable de un pago (titular sin devengado por rubro en el rango). Revisá la valorización.');
+      }
+
+      // 3) Asiento (DEBE rubros MO / HABER Caja), balanceado. Redondear cada DEBE y empujar el
+      //    residuo de centavos a la línea mayor para que Σ DEBE == total == HABER exacto.
+      const lineas = Object.entries(rubroDebe).map(([rid, m]) => ({ cuenta_id: Number(rid), debe: round2(m) }));
+      lineas.sort((a, b) => b.debe - a.debe);
+      const sumDebe = round2(lineas.reduce((s, x) => s + x.debe, 0));
+      const resid = round2(total - sumDebe);
+      if (resid !== 0 && lineas.length) lineas[0].debe = round2(lineas[0].debe + resid);
+      const chk = round2(lineas.reduce((s, x) => s + x.debe, 0));
+      if (chk !== total) throw new Error(`Asiento desbalanceado (DEBE ${chk} ≠ HABER ${total})`);
+
+      const asiento = db.prepare(`INSERT INTO pa_asientos (fecha, descripcion, usuario_id, ref_codigo, sociedad_id)
+          VALUES (?,?,?,?,?)`)
+        .run(fechaPago, `Liquidación pago personal #${l.id} — pago de jornales`, req.user.id, `LIQ-${l.id}`, caja.sociedad_id);
+      const asientoId = asiento.lastInsertRowid;
+      const insLin = db.prepare(`INSERT INTO pa_asientos_lineas (asiento_id, cuenta_id, debe, haber, descripcion) VALUES (?,?,?,?,?)`);
+      for (const ln of lineas) {
+        const cu = db.prepare("SELECT nombre FROM pa_cuentas WHERE id=?").get(ln.cuenta_id);
+        insLin.run(asientoId, ln.cuenta_id, ln.debe, 0, `MO · ${cu ? cu.nombre : ('cuenta ' + ln.cuenta_id)}`);
+      }
+      insLin.run(asientoId, caja.cuenta_contable_id, 0, total, `Pago jornales — caja ${caja.nombre}`);
+
+      // 4) Estado emitida + metadata (caja, ámbito, egreso, asiento, fecha, auditoría).
+      db.prepare(`UPDATE pa_liquidaciones_pago
+          SET estado='emitida', caja_id=?, ambito=?, fin_movimiento_id=?, asiento_id=?, total=?, fecha=?,
+              emitida_por=?, emitida_en=datetime('now','localtime')
+          WHERE id=?`)
+        .run(caja.id, caja.ambito, finMovId, asientoId, total, fechaPago, req.user.id, l.id);
+
+      out = { id: l.id, total, n_personas: items.length, caja: caja.nombre, ambito: caja.ambito,
+              fin_movimiento_id: finMovId, asiento_id: asientoId };
+    });
+    tx();
+    res.json({ ok: true, data: out });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// POST /personal/liquidaciones/:id/anular — revierte una liquidación emitida (los 3 efectos):
+//   (a) ingreso compensatorio en caja (NO borra el egreso), (b) pagos CC a anulado=1 (saldo vuelve),
+//   (c) asiento de reversa (DEBE↔HABER invertido; el original queda para auditoría, neto cero).
+router.post('/personal/liquidaciones/:id/anular', requireAuth, requireAccesoSensible, (req, res) => {
+  const db = getDb();
+  const perms = permisosPersonal(db, req.user);
+  if (!perms.valorizacion && !perms.admin) return res.status(403).json({ ok: false, error: 'Sin permiso de valorización' });
+  const motivo = (req.body.motivo || '').trim();
+  if (!motivo) return res.status(400).json({ ok: false, error: 'Motivo de anulación requerido' });
+  try {
+    const l = db.prepare("SELECT * FROM pa_liquidaciones_pago WHERE id=?").get(req.params.id);
+    if (!l) return res.status(404).json({ ok: false, error: 'Liquidación no encontrada' });
+    if (l.estado !== 'emitida') return res.status(400).json({ ok: false, error: 'Solo se anula una liquidación emitida (las borrador se borran)' });
+    const items = db.prepare("SELECT * FROM pa_liquidaciones_items WHERE liquidacion_id=?").all(l.id);
+    const tx = db.transaction(() => {
+      // (a) Reversa de caja: ingreso compensatorio por el monto del egreso (no se borra el egreso).
+      if (l.fin_movimiento_id) {
+        const egr = db.prepare("SELECT cuenta_id, monto, concepto, sociedad_id FROM fin_movimientos WHERE id=?").get(l.fin_movimiento_id);
+        if (egr) {
+          db.prepare(`INSERT INTO fin_movimientos
+              (cuenta_id, fecha, tipo, concepto, monto, referencia, referencia_id, usuario_id, sociedad_id)
+              VALUES (?, date('now','localtime'), 'ingreso', ?, ?, 'personal_liquidacion_anulada', ?, ?, ?)`)
+            .run(egr.cuenta_id, `Reversa anulación liq #${l.id}: ${egr.concepto}`, egr.monto, l.id, req.user.id, egr.sociedad_id);
+        }
+      }
+      // (b) Reversa de CC: anular cada pago de la liquidación y recalcular saldo del titular.
+      const titulares = new Set();
+      for (const it of items) {
+        if (it.cc_movimiento_id) {
+          db.prepare("UPDATE pa_cc_movimientos SET anulado=1, anulado_en=datetime('now','localtime'), anulado_por=? WHERE id=? AND anulado=0")
+            .run(req.user.id, it.cc_movimiento_id);
+        }
+        titulares.add(it.tipo_titular + ':' + it.titular_id);
+      }
+      for (const k of titulares) { const [t, id] = k.split(':'); _recalcSaldoCC(db, t, Number(id)); }
+      // (c) Reversa contable: asiento invertido (DEBE↔HABER). El original se conserva (neto cero).
+      if (l.asiento_id) {
+        const orig = db.prepare("SELECT * FROM pa_asientos WHERE id=?").get(l.asiento_id);
+        const lins = db.prepare("SELECT * FROM pa_asientos_lineas WHERE asiento_id=?").all(l.asiento_id);
+        if (orig && lins.length) {
+          const rev = db.prepare(`INSERT INTO pa_asientos (fecha, descripcion, usuario_id, ref_codigo, sociedad_id)
+              VALUES (date('now','localtime'), ?, ?, ?, ?)`)
+            .run(`Reversa anulación liquidación #${l.id} — ${motivo}`, req.user.id, `LIQ-${l.id}-REV`, orig.sociedad_id);
+          const revId = rev.lastInsertRowid;
+          const insLin = db.prepare(`INSERT INTO pa_asientos_lineas (asiento_id, cuenta_id, debe, haber, descripcion) VALUES (?,?,?,?,?)`);
+          for (const ln of lins) insLin.run(revId, ln.cuenta_id, ln.haber, ln.debe, `Reversa · ${ln.descripcion || ''}`);
+        }
+      }
+      // Estado anulada + auditoría.
+      db.prepare(`UPDATE pa_liquidaciones_pago
+          SET estado='anulada', anulada_por=?, anulada_en=datetime('now','localtime'), anulada_motivo=? WHERE id=?`)
+        .run(req.user.id, motivo, l.id);
     });
     tx();
     res.json({ ok: true });

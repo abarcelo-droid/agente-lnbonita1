@@ -2517,6 +2517,12 @@ db.exec(`
       db.exec('ALTER TABLE fin_movimientos ADD COLUMN conciliado INTEGER NOT NULL DEFAULT 0');
       console.log('[FIN] conciliado agregado en fin_movimientos');
     }
+    // referencia_id: id de la entidad que originó el movimiento (ej. liquidación de pago de jornales).
+    // Acompaña al texto `referencia` (ej. 'personal_liquidacion'). Nullable: los escritores viejos lo dejan NULL.
+    if (!colsMov.includes('referencia_id')) {
+      db.exec('ALTER TABLE fin_movimientos ADD COLUMN referencia_id INTEGER');
+      console.log('[FIN] referencia_id agregado en fin_movimientos');
+    }
     const colsCT = db.prepare("PRAGMA table_info(fin_cheques_terceros)").all().map(c => c.name);
     if (!colsCT.includes('cuenta_contable_id')) {
       db.exec('ALTER TABLE fin_cheques_terceros ADD COLUMN cuenta_contable_id INTEGER REFERENCES pa_cuentas(id)');
@@ -3309,6 +3315,24 @@ db.exec(`
       CREATE INDEX IF NOT EXISTS idx_liq_estado    ON pa_liquidaciones_pago(estado);
       CREATE INDEX IF NOT EXISTS idx_liq_items_liq ON pa_liquidaciones_items(liquidacion_id);
     `);
+    // Fase 2 (emisión): las columnas ya nacen en el CREATE de arriba, pero en DBs que corrieron
+    // una versión temprana de Fase 1 podrían faltar. Guard idempotente (ADD COLUMN no destruye datos).
+    const colsLiq = db.prepare("PRAGMA table_info(pa_liquidaciones_pago)").all().map(c => c.name);
+    const addLiq = (col, ddl) => { if (!colsLiq.includes(col)) { db.exec(`ALTER TABLE pa_liquidaciones_pago ADD COLUMN ${ddl}`); console.log(`[PA] ${col} agregado en pa_liquidaciones_pago`); } };
+    addLiq('caja_id',           'caja_id INTEGER REFERENCES fin_cuentas(id)');
+    addLiq('ambito',            'ambito TEXT');
+    addLiq('fin_movimiento_id', 'fin_movimiento_id INTEGER REFERENCES fin_movimientos(id)');
+    addLiq('asiento_id',        'asiento_id INTEGER REFERENCES pa_asientos(id)');
+    addLiq('emitida_por',       'emitida_por INTEGER');
+    addLiq('emitida_en',        'emitida_en TEXT');
+    addLiq('anulada_por',       'anulada_por INTEGER');
+    addLiq('anulada_en',        'anulada_en TEXT');
+    addLiq('anulada_motivo',    'anulada_motivo TEXT');
+    const colsLiqIt = db.prepare("PRAGMA table_info(pa_liquidaciones_items)").all().map(c => c.name);
+    if (!colsLiqIt.includes('cc_movimiento_id')) {
+      db.exec('ALTER TABLE pa_liquidaciones_items ADD COLUMN cc_movimiento_id INTEGER');
+      console.log('[PA] cc_movimiento_id agregado en pa_liquidaciones_items');
+    }
   } catch (e) { console.error('[PA] Error creando pa_liquidaciones_pago:', e.message); }
 
   // (B) lote_id nullable en pa_asistencias → MO general sin lote (gasto de estructura,

@@ -5144,7 +5144,7 @@ function sgRepExport(){
       <span style="flex:1"></span>
       <span id="pp-liq-resumen" style="font-size:12px;color:var(--mut)"></span>
     </div>
-    <div style="font-size:11px;color:var(--mut);margin-bottom:8px">Armá la liquidación de la semana eligiendo a quién pagás (doble panel: disponibles → a pagar). Queda en <strong>borrador</strong>; la emisión del pago (descuento de caja + asiento contable) es el próximo paso.</div>
+    <div style="font-size:11px;color:var(--mut);margin-bottom:8px">Armá la liquidación de la semana eligiendo a quién pagás (doble panel: disponibles → a pagar). Queda en <strong>borrador</strong>; después <strong>emití el pago</strong> (descuenta la caja + genera el asiento contable). Lo emitido deja de figurar como pendiente (ni el masivo ni otra liquidación lo re-pagan).</div>
     <div class="tw"><table>
       <thead><tr><th>#</th><th>Estado</th><th style="text-align:center">Personas</th><th style="text-align:right">Total</th><th>Creada</th><th></th></tr></thead>
       <tbody id="pp-liq-tbody"><tr><td colspan="6" style="text-align:center;color:var(--mut);padding:18px">Elegí una semana de pago.</td></tr></tbody>
@@ -5180,6 +5180,27 @@ function sgRepExport(){
         <button class="btn bo" onclick="document.getElementById('mb-pp-liq').classList.remove('on')">Cancelar</button>
         <button class="btn bb" onclick="ppLiqGuardar()">Guardar borrador</button>
       </div>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: emitir liquidación (descuento de caja + asiento contable) -->
+<div class="mb" id="mb-pp-liq-emit">
+  <div class="mbox" style="width:460px;max-width:96vw">
+    <div class="mhd"><div class="mht">💵 Emitir pago de liquidación</div>
+      <button class="mcl" onclick="document.getElementById('mb-pp-liq-emit').classList.remove('on')">×</button></div>
+    <div id="pp-liq-emit-info" style="font-size:13px;margin-bottom:12px"></div>
+    <div style="background:var(--bg2);border:1px solid var(--bor);border-radius:8px;padding:10px;font-size:11px;color:var(--mut);margin-bottom:12px">
+      Se generará <strong>un egreso</strong> en la caja por el total, <strong>un pago en cuenta corriente</strong> por persona y <strong>el asiento contable</strong> (DEBE rubros MO / HABER caja). Acción irreversible salvo anulación.
+    </div>
+    <label style="font-size:12px;color:var(--mut);display:block;margin-bottom:4px">Caja de dónde sale el pago *</label>
+    <select id="pp-liq-emit-caja" onchange="ppLiqEmitCajaChange()" style="width:100%;box-sizing:border-box;padding:6px 8px;font-size:13px;margin-bottom:6px"><option value="">— Elegí caja —</option></select>
+    <div id="pp-liq-emit-caja-aviso" style="font-size:11px;margin-bottom:10px;min-height:14px"></div>
+    <label style="font-size:12px;color:var(--mut);display:block;margin-bottom:4px">Fecha del pago</label>
+    <input type="date" id="pp-liq-emit-fecha" style="width:100%;box-sizing:border-box;padding:6px 8px;font-size:13px;margin-bottom:14px">
+    <div style="display:flex;justify-content:flex-end;gap:8px">
+      <button class="btn bo" onclick="document.getElementById('mb-pp-liq-emit').classList.remove('on')">Cancelar</button>
+      <button class="btn bb" id="pp-liq-emit-go" onclick="ppLiqEmitConfirm()">Emitir pago</button>
     </div>
   </div>
 </div>
@@ -21180,10 +21201,19 @@ function ppLiqCargar() {
       var badge = l.estado==='borrador' ? '<span class="tag" style="font-size:10px;color:var(--warn)">borrador</span>'
         : (l.estado==='emitida' ? '<span class="tag" style="font-size:10px;color:var(--ok)">emitida</span>'
         : '<span class="tag" style="font-size:10px">anulada</span>');
-      var acc = (l.estado==='borrador')
-        ? '<button class="btn bo bs" style="font-size:11px;padding:3px 8px" onclick="ppLiqEditar('+l.id+')">✏️ Editar</button> '
-          + '<button class="btn bd bs" style="font-size:11px;padding:3px 8px" onclick="ppLiqBorrar('+l.id+')">🗑️</button>'
-        : '<span style="font-size:10px;color:var(--mut)">—</span>';
+      if (l.estado==='emitida' && (l.fin_movimiento_id||l.asiento_id)) {
+        badge += '<div style="font-size:9px;color:var(--mut);margin-top:2px">Eg #'+(l.fin_movimiento_id||'—')+' · As #'+(l.asiento_id||'—')+(l.ambito?(' · '+esc(l.ambito)):'')+'</div>';
+      }
+      var acc;
+      if (l.estado==='borrador') {
+        acc = '<button class="btn bb bs" style="font-size:11px;padding:3px 8px" onclick="ppLiqEmitir('+l.id+')">💵 Emitir pago</button> '
+          + '<button class="btn bo bs" style="font-size:11px;padding:3px 8px" onclick="ppLiqEditar('+l.id+')">✏️ Editar</button> '
+          + '<button class="btn bd bs" style="font-size:11px;padding:3px 8px" onclick="ppLiqBorrar('+l.id+')">🗑️</button>';
+      } else if (l.estado==='emitida') {
+        acc = '<button class="btn bd bs" style="font-size:11px;padding:3px 8px" onclick="ppLiqAnular('+l.id+')">↩️ Anular</button>';
+      } else {
+        acc = '<span style="font-size:10px;color:var(--mut)">'+(l.anulada_motivo?esc(l.anulada_motivo):'—')+'</span>';
+      }
       return '<tr><td>#'+l.id+'</td><td>'+badge+'</td><td style="text-align:center">'+(l.n_personas||0)+'</td>'
         + '<td style="text-align:right"><strong>'+ppFmtARS(l.total||0)+'</strong></td>'
         + '<td style="font-size:11px">'+esc((l.creado_en||'').slice(0,10))+(l.creado_por_nombre?(' · '+esc(l.creado_por_nombre)):'')+'</td>'
@@ -21269,6 +21299,71 @@ function ppLiqBorrar(id) {
   paF('/api/pa/personal/liquidaciones/'+id, { method:'DELETE' }).then(function(r){
     if (!r || !r.ok) return toast((r&&r.error)||'Error', 'er');
     toast('Liquidación borrada'); ppLiqCargar();
+  });
+}
+// ── Emisión del pago (Fase 2): descuento de caja + pagos CC + asiento ─────────
+function ppLiqEmitir(id) {
+  Promise.all([
+    paF('/api/pa/personal/liquidaciones/'+id).then(function(r){ return r&&r.data; }),
+    paF('/api/pa/personal/cajas').then(function(r){ return (r&&r.data)||[]; })
+  ]).then(function(res){
+    var l = res[0], cajas = res[1];
+    if (!l) return toast('No se pudo cargar la liquidación', 'er');
+    if (l.estado !== 'borrador') return toast('Solo se emite una liquidación en borrador', 'er');
+    PP.liqEmit = { id: id, total: l.total, n: (l.items||[]).length, cajas: cajas };
+    document.getElementById('pp-liq-emit-info').innerHTML =
+      'Liquidación <strong>#'+id+'</strong> · '+PP.liqEmit.n+' persona(s) · Total <strong>'+ppFmtARS(l.total||0)+'</strong>';
+    document.getElementById('pp-liq-emit-caja').innerHTML = '<option value="">— Elegí caja —</option>' +
+      cajas.map(function(c){ return '<option value="'+c.id+'">'+esc(c.nombre)+' ('+esc(c.tipo||'')+(c.ambito?(' · '+esc(c.ambito)):'')+')</option>'; }).join('');
+    document.getElementById('pp-liq-emit-caja-aviso').innerHTML = '';
+    document.getElementById('pp-liq-emit-fecha').value = new Date().toISOString().slice(0,10);
+    document.getElementById('mb-pp-liq-emit').classList.add('on');
+  });
+}
+function ppLiqEmitCajaChange() {
+  var id = document.getElementById('pp-liq-emit-caja').value;
+  var av = document.getElementById('pp-liq-emit-caja-aviso');
+  var go = document.getElementById('pp-liq-emit-go');
+  var caja = (PP.liqEmit && PP.liqEmit.cajas || []).find(function(c){ return String(c.id)===String(id); });
+  if (!caja) { av.innerHTML = ''; go.disabled = false; return; }
+  if (!caja.cuenta_contable_id) {
+    av.innerHTML = '<span style="color:#d9534f">⚠ Esta caja no tiene cuenta contable asociada. Configurala en Config → Cajas antes de emitir.</span>';
+    go.disabled = true;
+  } else {
+    av.innerHTML = '<span style="color:var(--mut)">Ámbito: <strong>'+esc(caja.ambito||'fiscal')+'</strong> · HABER a la cuenta contable de la caja.</span>';
+    go.disabled = false;
+  }
+}
+function ppLiqEmitConfirm() {
+  var E = PP.liqEmit; if (!E) return;
+  var caja = document.getElementById('pp-liq-emit-caja').value;
+  if (!caja) return toast('Elegí la caja', 'er');
+  var fecha = document.getElementById('pp-liq-emit-fecha').value || null;
+  if (!confirm('¿Emitir el pago de la liquidación #'+E.id+' por '+ppFmtARS(E.total)+'?\nSe descontará de la caja y se generará el asiento contable.')) return;
+  var go = document.getElementById('pp-liq-emit-go'); go.disabled = true;
+  var body = { caja_id: parseInt(caja), fecha: fecha };
+  paF('/api/pa/personal/liquidaciones/'+E.id+'/emitir', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) }).then(function(r){
+    go.disabled = false;
+    if (r && r.requiere_acceso_sensible) { ppValPedirPassword(ppLiqEmitConfirm); return; }
+    if (!r || !r.ok) return toast((r&&r.error)||'Error al emitir', 'er');
+    toast('Pago emitido · '+r.data.n_personas+' persona(s) · '+ppFmtARS(r.data.total)+' · Egreso #'+r.data.fin_movimiento_id+' · Asiento #'+r.data.asiento_id);
+    document.getElementById('mb-pp-liq-emit').classList.remove('on');
+    ppLiqCargar();
+  });
+}
+function ppLiqAnular(id) {
+  var motivo = prompt('Anular la liquidación emitida #'+id+'.\nSe revierte la caja (ingreso compensatorio), los pagos en cuenta corriente y el asiento (reversa).\n\nMotivo de la anulación:');
+  if (motivo === null) return;
+  motivo = motivo.trim();
+  if (!motivo) return toast('El motivo es obligatorio', 'er');
+  ppLiqAnularPost(id, motivo);
+}
+function ppLiqAnularPost(id, motivo) {
+  paF('/api/pa/personal/liquidaciones/'+id+'/anular', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ motivo: motivo }) }).then(function(r){
+    if (r && r.requiere_acceso_sensible) { ppValPedirPassword(function(){ ppLiqAnularPost(id, motivo); }); return; }
+    if (!r || !r.ok) return toast((r&&r.error)||'Error al anular', 'er');
+    toast('Liquidación anulada · saldos y caja revertidos');
+    ppLiqCargar();
   });
 }
 function ppSemAvisoTxt(av) {
