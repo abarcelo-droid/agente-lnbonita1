@@ -268,12 +268,12 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
 
   <div class="ng" style="margin-top:8px">Abasto SG</div>
   <div class="ni" data-sec="sg-dashboard" data-admin-only="1"><span class="dot da"></span>📊 Dashboard</div>
-  <div class="ni" data-sec="sg-compras" data-admin-only="1"><span class="dot dd"></span>🛒 Compras</div>
+  <div class="ni" data-sec="sg-compras" data-admin-only="1"><span class="dot dd"></span>📥 Ingresos</div>
   <div class="ni" data-sec="sg-gvariables" data-admin-only="1"><span class="dot dd"></span>🏭 Gastos Variables</div>
   <div class="ni" data-sec="sg-stock" data-admin-only="1"><span class="dot db"></span>📦 Stock</div>
-  <div class="ni" data-sec="sg-ventas" data-admin-only="1"><span class="dot dc"></span>💰 Ventas</div>
+  <div class="ni" data-sec="sg-ventas" data-admin-only="1"><span class="dot dc"></span>📤 Egresos</div>
   <div class="ni" data-sec="sg-gastos-directos" data-admin-only="1"><span class="dot dd"></span>🧾 Gastos Directos</div>
-  <div class="ni" data-sec="sg-catalogo" data-admin-only="1"><span class="dot da"></span>📚 Catálogo</div>
+  <div class="ni" data-sec="sg-catalogo" data-admin-only="1"><span class="dot da"></span>📋 Maestros</div>
   <div class="ni" data-sec="sg-reportes" data-admin-only="1"><span class="dot de"></span>📈 Reportes</div>
 
   <div class="ng" style="margin-top:8px">General</div>
@@ -1890,7 +1890,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     </div>
   </div>
   <div class="sec sg-mod" id="sec-sg-compras">
-    <div class="ph"><div><div class="ph-t">🍅 San Gerónimo · Compras</div><div class="ph-s">Órdenes de compra, recepciones, lotes y gastos</div></div></div>
+    <div class="ph"><div><div class="ph-t">🍅 San Gerónimo · Ingresos</div><div class="ph-s">Órdenes de compra, recepciones, lotes y gastos</div></div></div>
     <style>
       .sg-mod .sgc-subtab{padding:7px 14px;cursor:pointer;font-size:12.5px;font-weight:600;border-radius:6px;color:var(--mut)}
       .sg-mod .sgc-subtab.on{background:var(--burg);color:#fff}
@@ -2009,7 +2009,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     </table></div>
   </div>
   <div class="sec sg-mod" id="sec-sg-ventas">
-    <div class="ph"><div><div class="ph-t">🍅 San Gerónimo · Ventas</div><div class="ph-s">Pedidos, despachos y cuenta corriente de clientes</div></div></div>
+    <div class="ph"><div><div class="ph-t">🍅 San Gerónimo · Egresos</div><div class="ph-s">Pedidos, despachos y cuenta corriente de clientes</div></div></div>
     <style>
       .sg-mod .sgv-subtab{padding:7px 14px;cursor:pointer;font-size:12.5px;font-weight:600;border-radius:6px;color:var(--mut)}
       .sg-mod .sgv-subtab.on{background:var(--burg);color:#fff}
@@ -2160,7 +2160,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
 
   <!-- Catálogo (operativo desde Fase 1) -->
   <div class="sec sg-mod" id="sec-sg-catalogo">
-    <div class="ph"><div><div class="ph-t">🍅 San Gerónimo · Catálogo</div><div class="ph-s">Productos, presentaciones, proveedores, clientes y condiciones de pago</div></div></div>
+    <div class="ph"><div><div class="ph-t">🍅 San Gerónimo · Maestros</div><div class="ph-s">Productos, presentaciones, proveedores, clientes y condiciones de pago</div></div></div>
     <div style="display:inline-flex;gap:2px;background:var(--bg);border:1px solid var(--bor);border-radius:8px;padding:3px;margin-bottom:16px;flex-wrap:wrap">
       <div class="sg-subtab on" data-sub="productos"     onclick="sgCatSub('productos')">🥦 Productos</div>
       <div class="sg-subtab" data-sub="presentaciones" onclick="sgCatSub('presentaciones')">📦 Presentaciones</div>
