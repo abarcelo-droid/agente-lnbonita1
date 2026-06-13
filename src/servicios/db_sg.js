@@ -694,7 +694,7 @@ db.exec(`
   INSERT OR IGNORE INTO sg_proveedor_categorias (nombre) VALUES
     ('Mercaderia Nacional'), ('Mercaderia Importada'), ('Insumos'), ('Comercio Exterior'),
     ('Servicios Logisticos'), ('Servicios Profesionales'), ('Servicios Financieros'),
-    ('Servicios Varios'), ('Servicios Otros'), ('Viaticos'), ('Otros');
+    ('Viaticos'), ('Otros');
 `);
 // columna FK categoria_id (nullable; el referenciado ya existe arriba). Self-healing.
 try {
@@ -705,6 +705,18 @@ try {
   }
 } catch (e) {
   console.error('[DB] SG migración sg_proveedores (categoria_id):', e.message);
+}
+// Fusión #401: el seed inicial de #424 traía 'Servicios Varios'/'Servicios Otros'.
+// Se fusionan en 'Otros' → el catálogo queda en 9 rubros. Idempotente: borra esas 2
+// filas SOLO si ningún proveedor las referencia (la migración de datos las mapea a Otros).
+try {
+  db.exec(`
+    DELETE FROM sg_proveedor_categorias
+     WHERE nombre IN ('Servicios Varios', 'Servicios Otros')
+       AND id NOT IN (SELECT categoria_id FROM sg_proveedores WHERE categoria_id IS NOT NULL)
+  `);
+} catch (e) {
+  console.error('[DB] SG fusión categorias (Servicios Varios/Otros → Otros):', e.message);
 }
 
 // A2) En el despacho se elige el fletero (FK lógica a sg_proveedores; sin REFERENCES inline
