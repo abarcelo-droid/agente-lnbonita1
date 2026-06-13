@@ -152,6 +152,10 @@ db.exec(`
   -- VENTAS SG — clientes, liquidaciones de producto, facturas, cobranzas (CC)
   -- ═══════════════════════════════════════════════════════════════════════════
 
+  -- ⚠️ DEPRECADA (#401, Camino A): el padrón maestro de clientes SG es sg_clientes.
+  -- Ventas SG (sg_ventas.js) opera sobre sg_clientes; las FK cliente_id de liquidaciones/
+  -- facturas/cobranzas apuntan a sg_clientes. Esta tabla queda vacía y SIN uso — NO borrar
+  -- todavía (se conserva por historial de esquema). No reintroducir en el CRUD.
   CREATE TABLE IF NOT EXISTS sg_ven_clientes (
     id                 INTEGER PRIMARY KEY AUTOINCREMENT,
     razon_social       TEXT NOT NULL,
@@ -173,7 +177,7 @@ db.exec(`
     id                  INTEGER PRIMARY KEY AUTOINCREMENT,
     numero              TEXT NOT NULL UNIQUE,
     fecha               TEXT NOT NULL DEFAULT (date('now','localtime')),
-    cliente_id          INTEGER NOT NULL REFERENCES sg_ven_clientes(id),
+    cliente_id          INTEGER NOT NULL REFERENCES sg_clientes(id),  -- re-apuntado #401 (Camino A)
     nro_remito          TEXT,
     observaciones       TEXT,
     precio_bruto        REAL NOT NULL DEFAULT 0,
@@ -205,7 +209,7 @@ db.exec(`
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     numero          TEXT NOT NULL UNIQUE,
     fecha           TEXT NOT NULL DEFAULT (date('now','localtime')),
-    cliente_id      INTEGER NOT NULL REFERENCES sg_ven_clientes(id),
+    cliente_id      INTEGER NOT NULL REFERENCES sg_clientes(id),  -- re-apuntado #401
     tipo            TEXT NOT NULL DEFAULT 'A' CHECK(tipo IN ('A','B','C')),
     concepto        TEXT,
     neto            REAL NOT NULL DEFAULT 0,
@@ -230,7 +234,7 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS sg_ven_cobranzas (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     fecha           TEXT NOT NULL DEFAULT (date('now','localtime')),
-    cliente_id      INTEGER NOT NULL REFERENCES sg_ven_clientes(id),
+    cliente_id      INTEGER NOT NULL REFERENCES sg_clientes(id),  -- re-apuntado #401
     monto           REAL NOT NULL,
     forma_pago      TEXT DEFAULT 'transferencia',
     referencia      TEXT,
@@ -421,6 +425,75 @@ db.exec(`
   ];
   for (const [clave, desc] of claves) ins.run(clave, desc);
 }
+
+// ── #401 (Camino A): Ventas SG re-apuntada a sg_clientes ───────────────────────
+// 1) sg_clientes += nombre_comercial (aditivo; alias/CF). sg_clientes ya existe (db_sg.js
+//    corre antes que este archivo). Self-healing.
+try {
+  const cols = db.prepare("PRAGMA table_info(sg_clientes)").all().map(c => c.name);
+  if (!cols.includes('nombre_comercial')) {
+    db.exec("ALTER TABLE sg_clientes ADD COLUMN nombre_comercial TEXT");
+    console.log('[DB] SG sg_clientes migrado (+nombre_comercial)');
+  }
+} catch (e) { console.error('[DB] SG migración sg_clientes (nombre_comercial):', e.message); }
+
+// 2) Re-apuntar FK cliente_id de liquidaciones/facturas/cobranzas → sg_clientes en DBs ya
+//    deployadas (las nuevas ya se crean con la FK correcta arriba). Idempotente: solo
+//    rebuildea si el DDL aún referencia sg_ven_clientes. DATA-SAFE: ABORTA si hay filas.
+function _repointClienteFK(table, newCreateSql) {
+  try {
+    const cur = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name=?").get(table);
+    if (!cur || !/REFERENCES sg_ven_clientes/.test(cur.sql)) return; // ya re-apuntada
+    const n = db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get().n;
+    if (n > 0) { console.error(`[DB] SG re-apuntar ${table}: ABORTA — tiene ${n} filas, no se rebuildea`); return; }
+    const fkPrev = db.pragma('foreign_keys', { simple: true });
+    db.pragma('foreign_keys = OFF');
+    db.transaction(() => {
+      db.exec(newCreateSql);                                   // crea <table>_new con FK a sg_clientes
+      db.exec(`INSERT INTO ${table}_new SELECT * FROM ${table}`);
+      db.exec(`DROP TABLE ${table}`);
+      db.exec(`ALTER TABLE ${table}_new RENAME TO ${table}`);
+    })();
+    db.pragma(`foreign_keys = ${fkPrev ? 'ON' : 'OFF'}`);
+    console.log(`[DB] SG ${table} re-apuntada a sg_clientes`);
+  } catch (e) { console.error(`[DB] SG re-apuntar ${table}:`, e.message); }
+}
+_repointClienteFK('sg_ven_liquidaciones', `
+  CREATE TABLE sg_ven_liquidaciones_new (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, numero TEXT NOT NULL UNIQUE,
+    fecha TEXT NOT NULL DEFAULT (date('now','localtime')),
+    cliente_id INTEGER NOT NULL REFERENCES sg_clientes(id),
+    nro_remito TEXT, observaciones TEXT,
+    precio_bruto REAL NOT NULL DEFAULT 0, desc_comision REAL NOT NULL DEFAULT 0,
+    desc_flete REAL NOT NULL DEFAULT 0, desc_carga_descarga REAL NOT NULL DEFAULT 0,
+    desc_otros REAL NOT NULL DEFAULT 0, ret_iva REAL NOT NULL DEFAULT 0,
+    ret_ganancias REAL NOT NULL DEFAULT 0, ret_iibb REAL NOT NULL DEFAULT 0,
+    ret_otras REAL NOT NULL DEFAULT 0, neto_acreditar REAL NOT NULL DEFAULT 0,
+    estado TEXT NOT NULL DEFAULT 'pendiente' CHECK(estado IN ('pendiente','cobrada','anulada')),
+    asiento_id INTEGER REFERENCES sg_asientos(id), usuario_id INTEGER,
+    creado_en TEXT DEFAULT (datetime('now','localtime'))
+  )`);
+_repointClienteFK('sg_ven_facturas', `
+  CREATE TABLE sg_ven_facturas_new (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, numero TEXT NOT NULL UNIQUE,
+    fecha TEXT NOT NULL DEFAULT (date('now','localtime')),
+    cliente_id INTEGER NOT NULL REFERENCES sg_clientes(id),
+    tipo TEXT NOT NULL DEFAULT 'A' CHECK(tipo IN ('A','B','C')),
+    concepto TEXT, neto REAL NOT NULL DEFAULT 0, iva REAL NOT NULL DEFAULT 0,
+    total REAL NOT NULL DEFAULT 0,
+    estado TEXT NOT NULL DEFAULT 'pendiente' CHECK(estado IN ('pendiente','cobrada','anulada')),
+    asiento_id INTEGER REFERENCES sg_asientos(id), notas TEXT, usuario_id INTEGER,
+    creado_en TEXT DEFAULT (datetime('now','localtime'))
+  )`);
+_repointClienteFK('sg_ven_cobranzas', `
+  CREATE TABLE sg_ven_cobranzas_new (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    fecha TEXT NOT NULL DEFAULT (date('now','localtime')),
+    cliente_id INTEGER NOT NULL REFERENCES sg_clientes(id),
+    monto REAL NOT NULL, forma_pago TEXT DEFAULT 'transferencia',
+    referencia TEXT, notas TEXT, anulada INTEGER NOT NULL DEFAULT 0,
+    usuario_id INTEGER, creado_en TEXT DEFAULT (datetime('now','localtime'))
+  )`);
 
 console.log("[SG] Esquema Contable/Ventas/Tesorería SG verificado (tablas sg_* vacías)");
 
