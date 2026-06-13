@@ -31,7 +31,7 @@ const listBackups = () => { try { return fs.readdirSync(backupDir()).filter(f =>
 
 // ── VERIFY ──
 router.get('/verify', requireAdmin, (req, res) => {
-  res.json({ ok: true, sg_proveedores: getProveedoresCount(getDb()), esperado: 955 });
+  res.json({ ok: true, sg_proveedores: getProveedoresCount(getDb()), esperado: 701 });
 });
 
 // ── BACKUP (online, WAL-safe; estado actual CON catálogo migrado) ──
