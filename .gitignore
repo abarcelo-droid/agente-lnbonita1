@@ -9,5 +9,11 @@ node_modules/
 *.log
 data/
  
-# Excepciones para archivos servidos al usuario 
-!data/Manual_Modulo_IFCO.pdf 
+# Excepciones para archivos servidos al usuario
+!data/Manual_Modulo_IFCO.pdf
+
+# Migración ABASTO→SG (#401): dumps y reportes, no commitear
+migracion/*.sql
+migracion/*.json
+migracion/reporte-*.txt
+migracion/ 
