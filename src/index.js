@@ -27,6 +27,9 @@ import orgRouter           from "./rutas/org.js";
 import sidebarRouter       from "./rutas/sidebar.js";
 import ventasRouter        from "./rutas/ventas.js";
 import sgRouter            from "./rutas/sg.js";
+import sgContableRouter    from "./rutas/sg_contable.js";
+import sgVentasRouter       from "./rutas/sg_ventas.js";
+import sgTesoreriaRouter    from "./rutas/sg_tesoreria.js";
 import adminRouter         from "./rutas/admin.js";
 import { guardarSnapshotCRM } from "./servicios/db.js";
 import { syncSheets } from "./servicios/sheets.js";
@@ -175,6 +178,12 @@ app.use("/api/ven",            ventasRouter);
 app.use("/api/pa/clima",        climaRouter);
 app.use("/api/pa",     produccionRouter);
 app.use("/api/pa/scout", scoutRouter);
+// Copias SG de Contable/Ventas/Tesorería (tablas sg_* físicamente separadas).
+// Van ANTES del sgRouter genérico para que /api/sg/contable|ventas|tesoreria no
+// caigan en el router de Abasto SG (que matchea /api/sg/*).
+app.use("/api/sg/contable",  sgContableRouter);
+app.use("/api/sg/ventas",    sgVentasRouter);
+app.use("/api/sg/tesoreria", sgTesoreriaRouter);
 app.use("/api/sg",     sgRouter);
 app.use("/api/admin",  adminRouter);
 
