@@ -669,6 +669,18 @@ try {
   console.error('[DB] SG migración sg_proveedores (consignacion):', e.message);
 }
 
+// ── MIGRACIÓN idempotente: sg_proveedores → +direccion, +codigo_postal ──
+// El padrón ABASTO trae Direccion + CodPostal pero sg_proveedores no tenía dónde guardarlos
+// (#401). Campos aditivos TEXT nullable → ALTER ADD COLUMN simple, sin rebuild. Self-healing.
+try {
+  const cols = db.prepare("PRAGMA table_info(sg_proveedores)").all().map(c => c.name);
+  const faltan = ['direccion', 'codigo_postal'].filter(c => !cols.includes(c));
+  for (const c of faltan) db.exec(`ALTER TABLE sg_proveedores ADD COLUMN ${c} TEXT`);
+  if (faltan.length) console.log('[DB] SG sg_proveedores migrado (+' + faltan.join(', +') + ')');
+} catch (e) {
+  console.error('[DB] SG migración sg_proveedores (direccion/cp):', e.message);
+}
+
 // A2) En el despacho se elige el fletero (FK lógica a sg_proveedores; sin REFERENCES inline
 //     por el límite de ALTER, se valida app-side). El transportista TEXT viejo queda intacto.
 try {
