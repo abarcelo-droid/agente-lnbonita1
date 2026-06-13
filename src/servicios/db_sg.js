@@ -669,6 +669,44 @@ try {
   console.error('[DB] SG migración sg_proveedores (consignacion):', e.message);
 }
 
+// ── MIGRACIÓN idempotente: sg_proveedores → +direccion, +codigo_postal (#401) ──
+// El padrón ABASTO trae Direccion + CodPostal pero sg_proveedores no tenía dónde guardarlos.
+// Campos aditivos TEXT nullable → ALTER ADD COLUMN simple, sin rebuild. Self-healing.
+try {
+  const cols = db.prepare("PRAGMA table_info(sg_proveedores)").all().map(c => c.name);
+  const faltan = ['direccion', 'codigo_postal'].filter(c => !cols.includes(c));
+  for (const c of faltan) db.exec(`ALTER TABLE sg_proveedores ADD COLUMN ${c} TEXT`);
+  if (faltan.length) console.log('[DB] SG sg_proveedores migrado (+' + faltan.join(', +') + ')');
+} catch (e) {
+  console.error('[DB] SG migración sg_proveedores (direccion/cp):', e.message);
+}
+
+// ── Catálogo de rubros de gasto del proveedor + FK categoria_id (#401) ──
+// El padrón ABASTO trae una CATEGORIA (rubro de gasto). Se guarda con FK, no texto libre.
+// Tabla catálogo idempotente (seed OR IGNORE) + columna categoria_id en sg_proveedores.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS sg_proveedor_categorias (
+    id        INTEGER PRIMARY KEY AUTOINCREMENT,
+    nombre    TEXT NOT NULL UNIQUE,
+    activo    INTEGER NOT NULL DEFAULT 1,
+    creado_en TEXT DEFAULT (datetime('now','localtime'))
+  );
+  INSERT OR IGNORE INTO sg_proveedor_categorias (nombre) VALUES
+    ('Mercaderia Nacional'), ('Mercaderia Importada'), ('Insumos'), ('Comercio Exterior'),
+    ('Servicios Logisticos'), ('Servicios Profesionales'), ('Servicios Financieros'),
+    ('Servicios Varios'), ('Servicios Otros'), ('Viaticos'), ('Otros');
+`);
+// columna FK categoria_id (nullable; el referenciado ya existe arriba). Self-healing.
+try {
+  const cols = db.prepare("PRAGMA table_info(sg_proveedores)").all().map(c => c.name);
+  if (!cols.includes('categoria_id')) {
+    db.exec('ALTER TABLE sg_proveedores ADD COLUMN categoria_id INTEGER REFERENCES sg_proveedor_categorias(id)');
+    console.log('[DB] SG sg_proveedores migrado (+categoria_id)');
+  }
+} catch (e) {
+  console.error('[DB] SG migración sg_proveedores (categoria_id):', e.message);
+}
+
 // A2) En el despacho se elige el fletero (FK lógica a sg_proveedores; sin REFERENCES inline
 //     por el límite de ALTER, se valida app-side). El transportista TEXT viejo queda intacto.
 try {
