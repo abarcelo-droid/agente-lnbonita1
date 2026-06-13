@@ -28,7 +28,6 @@ import sidebarRouter       from "./rutas/sidebar.js";
 import ventasRouter        from "./rutas/ventas.js";
 import sgRouter            from "./rutas/sg.js";
 import adminRouter         from "./rutas/admin.js";
-import etlAbastoSgRouter   from "./rutas/_etlAbastoSg.js"; // TEMPORAL #401 — remover tras verificar
 import { guardarSnapshotCRM } from "./servicios/db.js";
 import { syncSheets } from "./servicios/sheets.js";
 
@@ -178,7 +177,6 @@ app.use("/api/pa",     produccionRouter);
 app.use("/api/pa/scout", scoutRouter);
 app.use("/api/sg",     sgRouter);
 app.use("/api/admin",  adminRouter);
-app.use("/api/admin/_etl-abasto", etlAbastoSgRouter); // TEMPORAL #401 — remover tras verificar
 
 // Scout — app mobile para campo
 app.get("/scout", (req, res) => {
