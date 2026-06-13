@@ -555,6 +555,20 @@ try {
   console.error('[DB] SG migración sg_productos taxonomía:', e.message);
 }
 
+// ── MIGRACIÓN idempotente: sg_productos → +codigo_abasto, +ean (trazabilidad ABASTO) ──
+// Campos aditivos opcionales para la migración del padrón legacy ABASTO (#400/#401):
+// codigo_abasto = CodArt original (trazabilidad contra ABASTO durante la transición);
+// ean = código de barras (EAN). Ambos TEXT nullable sin CHECK → ALTER ADD COLUMN simple,
+// sin rebuild. Self-healing (corre solo si la columna falta). NO toca datos existentes.
+try {
+  const cols = db.prepare("PRAGMA table_info(sg_productos)").all().map(c => c.name);
+  const faltan = ['codigo_abasto', 'ean'].filter(c => !cols.includes(c));
+  for (const c of faltan) db.exec(`ALTER TABLE sg_productos ADD COLUMN ${c} TEXT`);
+  if (faltan.length) console.log('[DB] SG sg_productos migrado (+' + faltan.join(', +') + ')');
+} catch (e) {
+  console.error('[DB] SG migración sg_productos (abasto):', e.message);
+}
+
 // ── MIGRACIÓN idempotente: sg_proveedores → +'origen' (nacional/extranjero) y ──
 // CHECK de tipo_fiscal_habitual ampliado con 'invoice' (proveedor del exterior).
 // El CHECK no se puede ampliar con ALTER, así que reconstruimos la tabla (patrón
@@ -639,6 +653,21 @@ try {
     console.log('[DB] SG sg_proveedores.es_servicio agregado');
   }
 } catch (e) { console.error('[DB] SG migración sg_proveedores (es_servicio):', e.message); }
+
+// ── MIGRACIÓN idempotente: sg_proveedores → +trabaja_consignacion, +comision_pct ──
+// Defaults de consignación traídos del padrón ABASTO (mapean de `liquido` + `PorcLiquido`)
+// para precargar las liquidaciones por consignación (#400/#401). trabaja_consignacion =
+// INTEGER (0/1 booleano), comision_pct = REAL (% de comisión). Nullables → ALTER ADD COLUMN
+// simple, sin rebuild. Self-healing. Las retenciones Gan/IIBB NO van al master (decisión #400).
+try {
+  const cols = db.prepare("PRAGMA table_info(sg_proveedores)").all().map(c => c.name);
+  const add = [];
+  if (!cols.includes('trabaja_consignacion')) { db.exec('ALTER TABLE sg_proveedores ADD COLUMN trabaja_consignacion INTEGER'); add.push('trabaja_consignacion'); }
+  if (!cols.includes('comision_pct'))         { db.exec('ALTER TABLE sg_proveedores ADD COLUMN comision_pct REAL');         add.push('comision_pct'); }
+  if (add.length) console.log('[DB] SG sg_proveedores migrado (+' + add.join(', +') + ')');
+} catch (e) {
+  console.error('[DB] SG migración sg_proveedores (consignacion):', e.message);
+}
 
 // A2) En el despacho se elige el fletero (FK lógica a sg_proveedores; sin REFERENCES inline
 //     por el límite de ALTER, se valida app-side). El transportista TEXT viejo queda intacto.
