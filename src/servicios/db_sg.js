@@ -719,6 +719,20 @@ try {
   console.error('[DB] SG fusión categorias (Servicios Varios/Otros → Otros):', e.message);
 }
 
+// ── MIGRACIÓN idempotente: sg_clientes → +cuenta_contable_id (FK → sg_cuentas) (#401) ──
+// Camino A (cerrado con Pablo): cada cliente SG enlaza a su cuenta contable. INTEGER nullable
+// → ALTER ADD COLUMN simple, self-healing. SQLite permite REFERENCES a sg_cuentas aunque
+// db_sg_finanzas.js la cree después (la FK se valida en write, no en el ALTER).
+try {
+  const cols = db.prepare("PRAGMA table_info(sg_clientes)").all().map(c => c.name);
+  if (!cols.includes('cuenta_contable_id')) {
+    db.exec('ALTER TABLE sg_clientes ADD COLUMN cuenta_contable_id INTEGER REFERENCES sg_cuentas(id)');
+    console.log('[DB] SG sg_clientes migrado (+cuenta_contable_id)');
+  }
+} catch (e) {
+  console.error('[DB] SG migración sg_clientes (cuenta_contable_id):', e.message);
+}
+
 // A2) En el despacho se elige el fletero (FK lógica a sg_proveedores; sin REFERENCES inline
 //     por el límite de ALTER, se valida app-side). El transportista TEXT viejo queda intacto.
 try {
