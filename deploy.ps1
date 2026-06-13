@@ -1,4 +1,4 @@
-# deploy.ps1 — Smart deploy LNB APP
+﻿# deploy.ps1 — Smart deploy LNB APP
 # Detecta archivos del repo en Downloads, los copia, hace commit + push.
 
 # Forzar UTF-8 en todos los streams (entrada, salida, default de PowerShell)
