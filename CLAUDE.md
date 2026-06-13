@@ -14,6 +14,7 @@
 - Commits con Conventional Commits: `feat(scope):`, `fix(scope):`, `refactor(scope):`
 - Push + abrir PR siempre, NO mergees a main directo
 - Pegame el link del PR al terminar
+- Apenas crees un PR, abrí su URL en el navegador automáticamente (`Start-Process <url-del-PR>`), sin que lo pida
 
 ## Stack
 - Node.js v24 + Express + better-sqlite3 + ES Modules
