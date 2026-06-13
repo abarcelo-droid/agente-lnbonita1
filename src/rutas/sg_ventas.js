@@ -36,14 +36,26 @@ function requireAuth(req, res, next) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// PADRÓN DE CLIENTES
+// PADRÓN DE CLIENTES — opera sobre sg_clientes (#401 Camino A; sg_ven_clientes DEPRECADA)
 // ═══════════════════════════════════════════════════════════════════════════════
+
+// Mapea la condición de IVA del front a la categoria_fiscal de sg_clientes (respeta el CHECK).
+// Valor no reconocido → null (la columna es nullable, no viola el CHECK).
+function condIvaToCatFiscal(v) {
+  const m = {
+    responsable_inscripto: 'resp_inscripto', resp_inscripto: 'resp_inscripto',
+    monotributo: 'monotributista', monotributista: 'monotributista',
+    exento: 'exento',
+    consumidor_final: 'no_inscripto', no_inscripto: 'no_inscripto',
+  };
+  return m[String(v || '').trim().toLowerCase()] || null;
+}
 
 router.get('/clientes', (req, res) => {
   try {
     const { q, incluir_inactivos } = req.query;
     let sql = `SELECT c.*, pc.nombre as cuenta_nombre
-               FROM sg_ven_clientes c
+               FROM sg_clientes c
                LEFT JOIN sg_cuentas pc ON pc.id = c.cuenta_contable_id
                WHERE 1 = 1`;
     const params = [];
@@ -57,27 +69,29 @@ router.get('/clientes', (req, res) => {
 
 router.get('/clientes/:id', (req, res) => {
   try {
-    const c = db.prepare('SELECT * FROM sg_ven_clientes WHERE id=?').get(req.params.id);
+    const c = db.prepare('SELECT * FROM sg_clientes WHERE id=?').get(req.params.id);
     if (!c) return res.status(404).json({ ok: false, error: 'Cliente no encontrado' });
     res.json({ ok: true, data: c });
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
 router.post('/clientes', requireAuth, (req, res) => {
+  // contacto/rubro se descartan (no van a sg_clientes, decisión #401). direccion→direccion_entrega,
+  // notas→observaciones, condicion_iva→categoria_fiscal.
   const { razon_social, nombre_comercial, cuit, condicion_iva, direccion,
-          telefono, email, contacto, rubro, notas, cuenta_contable_id } = req.body || {};
+          telefono, email, notas, cuenta_contable_id } = req.body || {};
   if (!razon_social?.trim()) return res.status(400).json({ ok: false, error: 'Razón social requerida' });
   if (cuit) {
     const cv = validarCuit(cuit);
     if (!cv.valido) return res.status(400).json({ ok: false, error: 'CUIT inválido: ' + cv.msg });
   }
   try {
-    const r = db.prepare(`INSERT INTO sg_ven_clientes
-      (razon_social, nombre_comercial, cuit, condicion_iva, direccion, telefono, email, contacto, rubro, notas, cuenta_contable_id)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?)`)
+    const r = db.prepare(`INSERT INTO sg_clientes
+      (razon_social, nombre_comercial, cuit, categoria_fiscal, direccion_entrega, telefono, email, observaciones, cuenta_contable_id)
+      VALUES (?,?,?,?,?,?,?,?,?)`)
       .run(razon_social.trim(), nombre_comercial||null, cuit||null,
-           condicion_iva||'responsable_inscripto', direccion||null, telefono||null,
-           email||null, contacto||null, rubro||null, notas||null,
+           condIvaToCatFiscal(condicion_iva), direccion||null, telefono||null,
+           email||null, notas||null,
            cuenta_contable_id ? parseInt(cuenta_contable_id) : null);
     res.json({ ok: true, id: r.lastInsertRowid });
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
@@ -85,15 +99,15 @@ router.post('/clientes', requireAuth, (req, res) => {
 
 router.put('/clientes/:id', requireAuth, (req, res) => {
   const { razon_social, nombre_comercial, cuit, condicion_iva, direccion,
-          telefono, email, contacto, rubro, notas, cuenta_contable_id } = req.body || {};
+          telefono, email, notas, cuenta_contable_id } = req.body || {};
   try {
-    const actual = db.prepare('SELECT * FROM sg_ven_clientes WHERE id=?').get(req.params.id);
+    const actual = db.prepare('SELECT * FROM sg_clientes WHERE id=?').get(req.params.id);
     if (!actual) return res.status(404).json({ ok: false, error: 'Cliente no encontrado' });
-    db.prepare(`UPDATE sg_ven_clientes SET razon_social=?, nombre_comercial=?, cuit=?, condicion_iva=?,
-      direccion=?, telefono=?, email=?, contacto=?, rubro=?, notas=?, cuenta_contable_id=? WHERE id=?`)
+    db.prepare(`UPDATE sg_clientes SET razon_social=?, nombre_comercial=?, cuit=?, categoria_fiscal=?,
+      direccion_entrega=?, telefono=?, email=?, observaciones=?, cuenta_contable_id=? WHERE id=?`)
       .run(razon_social||actual.razon_social, nombre_comercial||null, cuit||null,
-           condicion_iva||actual.condicion_iva, direccion||null, telefono||null,
-           email||null, contacto||null, rubro||null, notas||null,
+           condicion_iva ? condIvaToCatFiscal(condicion_iva) : actual.categoria_fiscal,
+           direccion||null, telefono||null, email||null, notas||null,
            cuenta_contable_id ? parseInt(cuenta_contable_id) : null, req.params.id);
     res.json({ ok: true });
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
@@ -101,7 +115,7 @@ router.put('/clientes/:id', requireAuth, (req, res) => {
 
 router.delete('/clientes/:id', requireAuth, (req, res) => {
   try {
-    db.prepare('UPDATE sg_ven_clientes SET activo=0 WHERE id=?').run(req.params.id);
+    db.prepare('UPDATE sg_clientes SET activo=0 WHERE id=?').run(req.params.id);
     res.json({ ok: true });
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
@@ -124,7 +138,7 @@ router.get('/liquidaciones', (req, res) => {
     const { clienteId, estado } = req.query;
     let sql = `SELECT l.*, c.razon_social as cliente_nombre
                FROM sg_ven_liquidaciones l
-               JOIN sg_ven_clientes c ON c.id = l.cliente_id
+               JOIN sg_clientes c ON c.id = l.cliente_id
                WHERE 1 = 1`;
     const params = [];
     if (clienteId) { sql += ' AND l.cliente_id=?'; params.push(parseInt(clienteId)); }
@@ -141,7 +155,7 @@ router.get('/liquidaciones', (req, res) => {
 router.get('/liquidaciones/:id', (req, res) => {
   try {
     const l = db.prepare(`SELECT l.*, c.razon_social as cliente_nombre, c.cuit as cliente_cuit
-      FROM sg_ven_liquidaciones l JOIN sg_ven_clientes c ON c.id=l.cliente_id WHERE l.id=?`).get(req.params.id);
+      FROM sg_ven_liquidaciones l JOIN sg_clientes c ON c.id=l.cliente_id WHERE l.id=?`).get(req.params.id);
     if (!l) return res.status(404).json({ ok: false, error: 'Liquidación no encontrada' });
     l.items = db.prepare('SELECT * FROM sg_ven_liquidacion_items WHERE liquidacion_id=? ORDER BY id').all(l.id);
     res.json({ ok: true, data: l });
@@ -198,7 +212,7 @@ router.post('/liquidaciones', requireAuth, (req, res) => {
       // Generar asiento contable automático (libros SG)
       let asientoId = null;
       try {
-        const cliente = db.prepare('SELECT * FROM sg_ven_clientes WHERE id=?').get(parseInt(cliente_id));
+        const cliente = db.prepare('SELECT * FROM sg_clientes WHERE id=?').get(parseInt(cliente_id));
         const configImp = {};
         db.prepare('SELECT clave, cuenta_id FROM sg_config_impositiva WHERE cuenta_id IS NOT NULL').all()
           .forEach(row => { configImp[row.clave] = row.cuenta_id; });
@@ -270,7 +284,7 @@ router.get('/facturas', (req, res) => {
   try {
     const { clienteId, estado } = req.query;
     let sql = `SELECT f.*, c.razon_social as cliente_nombre
-               FROM sg_ven_facturas f JOIN sg_ven_clientes c ON c.id=f.cliente_id WHERE 1 = 1`;
+               FROM sg_ven_facturas f JOIN sg_clientes c ON c.id=f.cliente_id WHERE 1 = 1`;
     const params = [];
     if (clienteId) { sql += ' AND f.cliente_id=?'; params.push(parseInt(clienteId)); }
     if (estado)    { sql += ' AND f.estado=?'; params.push(estado); }
