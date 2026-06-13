@@ -31,6 +31,7 @@ import sgContableRouter    from "./rutas/sg_contable.js";
 import sgVentasRouter       from "./rutas/sg_ventas.js";
 import sgTesoreriaRouter    from "./rutas/sg_tesoreria.js";
 import adminRouter         from "./rutas/admin.js";
+import etlProveedoresSgRouter from "./rutas/_etlProveedoresSg.js"; // TEMPORAL #401 — remover tras verificar
 import { guardarSnapshotCRM } from "./servicios/db.js";
 import { syncSheets } from "./servicios/sheets.js";
 
@@ -186,6 +187,7 @@ app.use("/api/sg/ventas",    sgVentasRouter);
 app.use("/api/sg/tesoreria", sgTesoreriaRouter);
 app.use("/api/sg",     sgRouter);
 app.use("/api/admin",  adminRouter);
+app.use("/api/admin/_etl-proveedores", etlProveedoresSgRouter); // TEMPORAL #401 — remover tras verificar
 
 // Scout — app mobile para campo
 app.get("/scout", (req, res) => {
