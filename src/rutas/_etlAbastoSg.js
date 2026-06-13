@@ -61,6 +61,37 @@ router.get('/backup/download', requireAdmin, (req, res) => {
   res.download(full);
 });
 
+// ── RESET de tablas operativas + catálogo + OC de SG (NO toca IFCO/padrón/contable) ──
+// Whitelist hardcodeada (sin input → sin inyección), en orden hijo→padre. Exige backup + confirmo=SI.
+const TABLES_RESET = [
+  // OPERACIONES (hijo→padre)
+  'sg_despacho_items', 'sg_despachos', 'sg_pedido_items', 'sg_pedidos',
+  'sg_gastos_directos', 'sg_gastos_directos_lote', 'sg_gastos_globales_periodo',
+  'sg_lotes', 'sg_recepcion_fotos', 'sg_recepciones',
+  // OC
+  'sg_oc_vencimientos', 'sg_oc_items', 'sg_oc',
+  // CATÁLOGO
+  'sg_presentaciones', 'sg_productos', 'sg_variedades', 'sg_especies', 'sg_familias', 'sg_envases',
+];
+const PRESERVADO = ['sg_proveedores', 'sg_clientes', 'sg_condiciones_pago', 'sg_condiciones_pago_cuotas',
+  'ifco_* (intacto)', 'sg_cuentas/sg_asientos/sg_fin_* (contable, no se tocan)'];
+router.post('/reset', requireAdmin, (req, res) => {
+  if (String(req.query.confirmo) !== 'SI') return res.status(400).json({ ok: false, error: 'Falta ?confirmo=SI' });
+  if (listBackups().length === 0) return res.status(400).json({ ok: false, error: 'No hay backup previo. Hacé GET /backup primero.' });
+  const db = getDb();
+  const before = {};
+  for (const t of TABLES_RESET) { try { before[t] = db.prepare(`SELECT COUNT(*) n FROM ${t}`).get().n; } catch { before[t] = '(tabla no existe)'; } }
+  try {
+    const tx = db.transaction(() => {
+      const del = {};
+      for (const t of TABLES_RESET) { try { del[t] = db.prepare(`DELETE FROM ${t}`).run().changes; } catch (e) { del[t] = 'SKIP: ' + e.message; } }
+      return del;
+    });
+    const deleted = tx();
+    res.json({ ok: true, deleted, before, preservado: PRESERVADO });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
 // ── RUN ETL (exige backup previo + confirmación explícita) ──
 router.post('/run', requireAdmin, (req, res) => {
   if (String(req.query.confirmo) !== 'SI') return res.status(400).json({ ok: false, error: 'Falta ?confirmo=SI' });
