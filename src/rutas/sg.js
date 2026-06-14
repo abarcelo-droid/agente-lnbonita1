@@ -1582,7 +1582,7 @@ router.get('/lotes-disponibles', requireAuth, (req, res) => {
     if (!req.query.producto_id) return res.status(400).json({ ok: false, error: 'Falta producto_id' });
     const rows = db.prepare(`
       SELECT * FROM (
-        SELECT l.id, l.codigo_lote, l.producto_id, pr.nombre AS producto_nombre, l.calidad,
+        SELECT l.id, l.codigo_lote, l.producto_id, pr.nombre AS producto_nombre, l.calidad, l.semaforo,
           l.costo_final, l.kg_reales, l.precio_unitario_kg, l.fecha_vencimiento_estimada,
           CAST(julianday(l.fecha_vencimiento_estimada) - julianday(date('now','localtime')) AS INTEGER) AS dias_restantes,
           (l.kg_reales - COALESCE((SELECT SUM(di.kg_despachados) FROM sg_despacho_items di
