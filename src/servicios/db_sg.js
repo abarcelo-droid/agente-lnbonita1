@@ -1188,6 +1188,31 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_sg_reservas_peditem ON sg_reservas(pedido_item_id);
 `);
 
+// ── BRIEF 10: Corte operativo SG (stock inicial + saldo inicial de CC) — aditivo ───
+// (a) Parámetros de SG (clave/valor). fecha_corte = día del corte operativo (apertura).
+//     El asiento contable lo hace Pablo aparte; acá solo se guarda el parámetro operativo.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS sg_config (
+    clave         TEXT PRIMARY KEY,
+    valor         TEXT,
+    modificado_en TEXT,
+    modificado_por INTEGER
+  );
+  INSERT OR IGNORE INTO sg_config (clave, valor) VALUES ('fecha_corte', '2026-06-30');
+`);
+
+// (b) saldo_inicial al corte por cliente y por proveedor. Se SUMA al cálculo derivado de CC
+//     (no lo reemplaza): saldo_total = saldo_inicial + movimientos post-corte. Default 0.
+for (const tabla of ['sg_clientes', 'sg_proveedores']) {
+  try {
+    const cols = db.prepare(`PRAGMA table_info(${tabla})`).all().map(c => c.name);
+    if (!cols.includes('saldo_inicial')) {
+      db.exec(`ALTER TABLE ${tabla} ADD COLUMN saldo_inicial REAL NOT NULL DEFAULT 0`);
+      console.log(`[DB] SG ${tabla} migrado (+saldo_inicial)`);
+    }
+  } catch (e) { console.error(`[DB] SG migración ${tabla} (saldo_inicial):`, e.message); }
+}
+
 console.log('[DB] Módulo San Gerónimo (sg_*) inicializado');
 
 export default db;

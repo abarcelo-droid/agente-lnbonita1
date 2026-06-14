@@ -1921,6 +1921,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       <div class="sgc-subtab on" data-sub="oc"        onclick="sgComSub('oc')">📋 Órdenes de compra</div>
       <div class="sgc-subtab" data-sub="recepciones"  onclick="sgComSub('recepciones')">📥 Recepciones</div>
       <div class="sgc-subtab" data-sub="gdirectos"    onclick="sgComSub('gdirectos')">🧾 Gastos directos</div>
+      <div class="sgc-subtab" data-sub="ccprov"       onclick="sgComSub('ccprov')">💳 CC proveedores</div>
     </div>
 
     <!-- Órdenes de compra -->
@@ -1963,6 +1964,15 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       <div class="ab-table-wrap"><table class="pa-tbl">
         <thead><tr><th>Lote</th><th>Tipo</th><th>Proveedor del gasto</th><th>Fecha</th><th style="text-align:right">Monto</th><th></th></tr></thead>
         <tbody id="sg-tb-gdirectos"><tr><td colspan="6" class="emp">Cargando…</td></tr></tbody>
+      </table></div>
+    </div>
+
+    <!-- CC proveedores: saldo de apertura (al 30/6) + vencimientos de OC no pagados -->
+    <div class="sgc-sub" id="sgc-sub-ccprov">
+      <div style="font-size:12px;color:var(--mut);margin-bottom:8px">💡 Saldo = saldo de apertura (al 30/6, se carga en la ficha del proveedor) + vencimientos de OC pendientes de pago. No incluye la contabilidad (asientos) — eso es aparte.</div>
+      <div class="ab-table-wrap"><table class="pa-tbl">
+        <thead><tr><th>Proveedor</th><th style="text-align:right">Saldo apertura</th><th style="text-align:right">Vencimientos pendientes</th><th style="text-align:right">Saldo total</th></tr></thead>
+        <tbody id="sg-tb-ccprov"><tr><td colspan="4" class="emp">Cargando…</td></tr></tbody>
       </table></div>
     </div>
 
@@ -2014,6 +2024,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       <label style="font-size:12px;color:var(--mut)">Ingreso desde<br><input type="date" id="sg-st-desde" onchange="sgLoadStock()" style="padding:5px 8px;border-radius:6px;border:1px solid var(--bor);background:var(--bg)"></label>
       <label style="font-size:12px;color:var(--mut)">hasta<br><input type="date" id="sg-st-hasta" onchange="sgLoadStock()" style="padding:5px 8px;border-radius:6px;border:1px solid var(--bor);background:var(--bg)"></label>
       <button class="btn bo bs" onclick="sgStockReset()">Limpiar</button>
+      <button class="btn bb bs" onclick="sgApertOpen()" title="Cargar stock físico al corte (apertura)">📥 Carga inicial</button>
     </div>
     <div class="ab-table-wrap"><table class="pa-tbl">
       <thead><tr><th style="text-align:center" title="Semáforo">🚦</th><th>Producto</th><th>Categoría</th><th style="text-align:right">Kg disp</th><th>Calidad</th><th>Vence (días)</th><th style="text-align:right">Costo/kg</th><th style="text-align:center">Estado</th><th></th></tr></thead>
@@ -2053,10 +2064,10 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
 
     <!-- Cuenta corriente clientes -->
     <div class="sgv-sub" id="sgv-sub-cc">
-      <div style="font-size:12px;color:var(--mut);margin-bottom:8px">💡 V1: total facturado por despachos. Cobranzas/DSO llegan en V2 (total cobrado = 0 por ahora).</div>
+      <div style="font-size:12px;color:var(--mut);margin-bottom:8px">💡 Saldo total = saldo de apertura (al 30/6) + facturado por despachos. Cobranzas/DSO llegan en V2 (cobrado = 0 por ahora).</div>
       <div class="ab-table-wrap"><table class="pa-tbl">
-        <thead><tr><th>Cliente</th><th style="text-align:right">Facturado</th><th style="text-align:right">Cobrado</th><th style="text-align:right">Saldo</th><th style="text-align:right">Límite crédito</th></tr></thead>
-        <tbody id="sg-tb-cc"><tr><td colspan="5" class="emp">Cargando…</td></tr></tbody>
+        <thead><tr><th>Cliente</th><th style="text-align:right">Saldo apertura</th><th style="text-align:right">Facturado</th><th style="text-align:right">Cobrado</th><th style="text-align:right">Saldo total</th><th style="text-align:right">Límite</th></tr></thead>
+        <tbody id="sg-tb-cc"><tr><td colspan="6" class="emp">Cargando…</td></tr></tbody>
       </table></div>
     </div>
   </div>
@@ -2658,6 +2669,26 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
 </div>
 
 <!-- Modal Crear pedido -->
+<!-- Modal Carga inicial de inventario (apertura al corte) — BRIEF 10 -->
+<div class="ab-modal-overlay" id="sg-apert-modal">
+  <div class="ab-modal" style="width:880px;max-height:90vh;overflow-y:auto">
+    <div class="mhd"><div class="mht">📥 Carga inicial de inventario</div><button class="mcl" onclick="closeMB('sg-apert-modal')">×</button></div>
+    <div class="fg">
+      <div style="font-size:12px;color:var(--mut);margin-bottom:8px" id="sg-apert-cartel">Lotes de apertura — valuación al corte. Sin compra/proveedor/OC.</div>
+      <div style="display:grid;grid-template-columns:1.5fr 0.7fr 1.2fr 1fr 0.9fr 1fr auto;gap:6px;font-size:11px;color:var(--mut);padding:0 2px 4px">
+        <div>Producto</div><div style="text-align:right">kg</div><div>Costo (total o $/kg)</div><div style="text-align:right">equivale</div><div>Calidad</div><div>Semáforo</div><div></div>
+      </div>
+      <div id="sg-apert-rows"></div>
+      <button class="btn bo bs" style="margin-top:6px" onclick="sgApertAddRow()">+ Fila</button>
+      <div id="sg-apert-total" style="font-weight:700;font-size:13px;text-align:right;padding-top:8px;border-top:1px solid var(--bor);margin-top:8px"></div>
+    </div>
+    <div class="ab-modal-footer">
+      <button class="btn bo" onclick="closeMB('sg-apert-modal')">Cancelar</button>
+      <button class="btn bb" onclick="sgApertGuardar()">Cargar al stock</button>
+    </div>
+  </div>
+</div>
+
 <div class="ab-modal-overlay" id="sg-ped-modal">
   <div class="ab-modal" style="width:760px;max-height:90vh;overflow-y:auto">
     <div class="mhd"><div class="mht">Nuevo pedido</div><button class="mcl" onclick="closeMB('sg-ped-modal')">×</button></div>
@@ -2800,6 +2831,7 @@ var SG_SCHEMA = {
       {k:'provincia', l:'Provincia', t:'text'},
       {k:'telefono', l:'Teléfono', t:'text'},
       {k:'email', l:'Email', t:'text'},
+      {k:'saldo_inicial', l:'Saldo inicial al corte 30/6 ($)', t:'number'},
       {k:'observaciones', l:'Observaciones', t:'textarea'}
     ]
   },
@@ -2819,6 +2851,7 @@ var SG_SCHEMA = {
       {k:'direccion_entrega', l:'Dirección de entrega', t:'text'},
       {k:'telefono', l:'Teléfono', t:'text'},
       {k:'email', l:'Email', t:'text'},
+      {k:'saldo_inicial', l:'Saldo inicial al corte 30/6 ($)', t:'number'},
       {k:'observaciones', l:'Observaciones', t:'textarea'}
     ]
   }
@@ -3497,6 +3530,20 @@ function sgComSub(s){
   if (s==='oc') sgLoadOC();
   else if (s==='recepciones') sgLoadRecepciones();
   else if (s==='gdirectos') sgLoadGDirectos();
+  else if (s==='ccprov') sgLoadCcProv();
+}
+// BRIEF 10 — CC proveedores: saldo apertura + vencimientos pendientes.
+function sgLoadCcProv(){
+  api('/api/sg/cc-proveedores').then(function(r){
+    var rows=(r&&r.ok)?r.data:[];
+    eid('sg-tb-ccprov').innerHTML = rows.length ? rows.map(function(p){
+      var ap=Number(p.saldo_inicial)||0;
+      return '<tr><td>'+esc(p.razon_social)+'</td>'
+        +'<td style="text-align:right'+(ap?'':';color:var(--mut)')+'">'+(ap?sgMoney(ap):'—')+'</td>'
+        +'<td style="text-align:right">'+sgMoney(p.total_pendiente)+'</td>'
+        +'<td style="text-align:right;font-weight:700">'+sgMoney(p.saldo)+'</td></tr>';
+    }).join('') : '<tr><td colspan="4" class="emp">Sin saldos ni vencimientos pendientes.</td></tr>';
+  });
 }
 function sgOcBadge(e){
   var m={abierta:'bpe',recibida_parcial:'bcc',recibida_total:'bok',cerrada:'bok',anulada:'ber',borrador:'bpe'};
@@ -4164,6 +4211,55 @@ function sgStockInit(){
 function sgStockReset(){
   ['sg-st-prod','sg-st-cal','sg-st-est','sg-st-sem','sg-st-fam','sg-st-venc','sg-st-desde','sg-st-hasta'].forEach(function(id){ var el=eid(id); if(el) el.value=''; });
   sgLoadStock();
+}
+// BRIEF 10 — Carga inicial de inventario (lotes de apertura). Grilla de N filas; costo en total o $/kg.
+function sgApertOpen(){
+  SG.apertRows=[];
+  api('/api/sg/config').then(function(r){
+    var fc=(r&&r.ok&&r.data&&r.data.fecha_corte)||'2026-06-30';
+    eid('sg-apert-cartel').innerHTML='Lotes de <b>apertura</b> — valuación al corte <b>'+esc(fc)+'</b>. Sin compra/proveedor/OC; entran al stock/FEFO normal y quedan fuera de los reportes de compra y de deuda a proveedor.';
+  });
+  sgApertAddRow();
+  eid('sg-apert-modal').classList.add('on');
+}
+function sgApertAddRow(){ SG.apertRows.push({producto_id:'',kg:'',modo:'total',costo:'',calidad:'primera',semaforo:'verde'}); sgApertRender(); }
+function sgApertDelRow(i){ SG.apertRows.splice(i,1); sgApertRender(); }
+function sgApertUpd(i,c,v){ SG.apertRows[i][c]=v; sgApertRender(); }
+function sgApertRender(){
+  eid('sg-apert-rows').innerHTML=(SG.apertRows||[]).map(function(it,i){
+    var kg=Number(it.kg)||0, costo=Number(it.costo)||0;
+    var deriva = it.modo==='total' ? (kg>0?(sgMoney(costo/kg)+'/kg'):'—') : (sgMoney(costo*kg)+' total');
+    return '<div style="display:grid;grid-template-columns:1.5fr 0.7fr 1.2fr 1fr 0.9fr 1fr auto;gap:6px;align-items:center;margin-bottom:4px">'
+      +'<select onchange="sgApertUpd('+i+',\'producto_id\',this.value)">'+sgOpts(SG.cacheProd,'nombre',it.producto_id,'— Producto —')+'</select>'
+      +'<input type="number" placeholder="kg" value="'+(it.kg||'')+'" onchange="sgApertUpd('+i+',\'kg\',this.value)" style="text-align:right">'
+      +'<div style="display:flex;gap:4px;align-items:center">'
+        +'<select onchange="sgApertUpd('+i+',\'modo\',this.value)" style="width:78px"><option value="total"'+(it.modo==='total'?' selected':'')+'>total</option><option value="kg"'+(it.modo==='kg'?' selected':'')+'>$/kg</option></select>'
+        +'<input type="number" placeholder="$" value="'+(it.costo||'')+'" onchange="sgApertUpd('+i+',\'costo\',this.value)" style="text-align:right;flex:1;min-width:0">'
+      +'</div>'
+      +'<span style="font-size:11px;color:var(--mut);text-align:right">'+deriva+'</span>'
+      +'<select onchange="sgApertUpd('+i+',\'calidad\',this.value)">'+SG_CALIDAD.map(function(o){return '<option value="'+o[0]+'"'+(it.calidad===o[0]?' selected':'')+'>'+o[1]+'</option>';}).join('')+'</select>'
+      +'<select onchange="sgApertUpd('+i+',\'semaforo\',this.value)">'+SG_SEMAFORO.map(function(o){return '<option value="'+o[0]+'"'+(it.semaforo===o[0]?' selected':'')+'>'+o[1]+'</option>';}).join('')+'</select>'
+      +(SG.apertRows.length>1?'<button class="btn bd bs" onclick="sgApertDelRow('+i+')">×</button>':'<span></span>')
+      +'</div>';
+  }).join('');
+  var tk=0,tm=0; (SG.apertRows||[]).forEach(function(it){ var kg=Number(it.kg)||0, costo=Number(it.costo)||0; tk+=kg; tm+= it.modo==='total'?costo:costo*kg; });
+  eid('sg-apert-total').innerHTML='Total: '+nr(tk)+' kg · '+sgMoney(tm)+' (valuación de apertura)';
+}
+function sgApertGuardar(){
+  var items=[];
+  for(var i=0;i<SG.apertRows.length;i++){ var it=SG.apertRows[i];
+    if(!it.producto_id || !(Number(it.kg)>0)) continue;
+    var costo=Number(it.costo);
+    if(!(costo>=0) || it.costo===''){ toast('Fila '+(i+1)+': falta el costo','er'); return; }
+    var o={ producto_id:Number(it.producto_id), kg:Number(it.kg), calidad:it.calidad, semaforo:it.semaforo };
+    if(it.modo==='total') o.costo_total=costo; else o.costo_kg=costo;
+    items.push(o);
+  }
+  if(!items.length){ toast('Cargá al menos una fila con producto, kg y costo','er'); return; }
+  api('/api/sg/lotes/apertura','POST',{items:items}).then(function(r){
+    if(r&&r.ok){ toast((r.data.lotes||[]).length+' lote(s) de apertura cargados','ok'); closeMB('sg-apert-modal'); sgLoadStock(); }
+    else toast((r&&r.error)||'Error','er');
+  });
 }
 // Punto de color del semáforo (no tiñe la fila, solo el punto). Default verde.
 function sgSemDot(s){
@@ -4992,8 +5088,12 @@ function sgLoadCC(){
   api('/api/sg/cc-clientes').then(function(r){
     var rows=(r&&r.ok)?r.data:[];
     eid('sg-tb-cc').innerHTML = rows.length ? rows.map(function(c){
-      return '<tr><td>'+esc(c.razon_social)+'</td><td style="text-align:right">'+sgMoney(c.total_facturado)+'</td><td style="text-align:right">'+sgMoney(c.total_cobrado)+'</td><td style="text-align:right;font-weight:700">'+sgMoney(c.saldo)+'</td><td style="text-align:right">'+sgMoney(c.limite_credito)+'</td></tr>';
-    }).join('') : '<tr><td colspan="5" class="emp">Sin movimientos (todavía no hay despachos).</td></tr>';
+      var ap=Number(c.saldo_inicial)||0;
+      return '<tr><td>'+esc(c.razon_social)+'</td>'
+        +'<td style="text-align:right'+(ap?'':';color:var(--mut)')+'">'+(ap?sgMoney(ap):'—')+'</td>'
+        +'<td style="text-align:right">'+sgMoney(c.total_facturado)+'</td><td style="text-align:right">'+sgMoney(c.total_cobrado)+'</td>'
+        +'<td style="text-align:right;font-weight:700">'+sgMoney(c.saldo)+'</td><td style="text-align:right">'+sgMoney(c.limite_credito)+'</td></tr>';
+    }).join('') : '<tr><td colspan="6" class="emp">Sin saldos ni movimientos.</td></tr>';
   });
 }
 

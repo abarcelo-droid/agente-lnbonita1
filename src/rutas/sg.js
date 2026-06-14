@@ -432,7 +432,7 @@ montarCRUD('presentaciones', 'sg_presentaciones',
 montarCRUD('proveedores', 'sg_proveedores',
   ['razon_social', 'nombre_comercial', 'origen', 'cuit', 'tipo', 'categoria_fiscal', 'tipo_fiscal_habitual',
    'condicion_pago_habitual_id', 'cbu', 'alias_cbu', 'comercial_responsable_id', 'localidad', 'provincia',
-   'telefono', 'email', 'observaciones', 'adm_proveedor_id', 'es_servicio'],   // es_servicio: 1 = fletero/cooperativa
+   'telefono', 'email', 'observaciones', 'adm_proveedor_id', 'es_servicio', 'saldo_inicial'],   // es_servicio: 1 = fletero/cooperativa · saldo_inicial: apertura al corte (BRIEF 10)
   { orderBy: 'razon_social COLLATE NOCASE',
     // nombre de la categoría comercial (categoria_id → sg_proveedor_categorias). La usa el front
     // para filtrar el selector de la OC de mercadería (solo Mercaderia Nacional/Importada).
@@ -447,12 +447,82 @@ router.get('/proveedores-servicio', requireAuth, (req, res) => {
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
+// ── CONFIG SG (clave/valor) — BRIEF 10: fecha_corte del corte operativo (apertura) ──
+function getConfig(db, clave, def) {
+  const r = db.prepare('SELECT valor FROM sg_config WHERE clave=?').get(clave);
+  return (r && r.valor != null) ? r.valor : def;
+}
+router.get('/config', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const rows = db.prepare('SELECT clave, valor FROM sg_config').all();
+    const cfg = {}; for (const r of rows) cfg[r.clave] = r.valor;
+    if (cfg.fecha_corte == null) cfg.fecha_corte = '2026-06-30';
+    res.json({ ok: true, data: cfg });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+router.put('/config', requireAdmin, (req, res) => {
+  const db = getDb();
+  try {
+    const b = req.body || {};
+    const up = db.prepare(`INSERT INTO sg_config (clave, valor, modificado_en, modificado_por)
+      VALUES (?,?,datetime('now','localtime'),?)
+      ON CONFLICT(clave) DO UPDATE SET valor=excluded.valor, modificado_en=excluded.modificado_en, modificado_por=excluded.modificado_por`);
+    for (const k of Object.keys(b)) up.run(k, b[k] == null ? null : String(b[k]), uid(req));
+    res.json({ ok: true, data: { actualizadas: Object.keys(b) } });
+  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+
+// BRIEF 10 — CARGA INICIAL DE INVENTARIO (lotes de apertura, sin compra/proveedor/OC).
+// Valuación al corte DIRECTA (Andy). origen='apertura' → entran al stock/FEFO/despacho pero quedan
+// FUERA de prorrateo y de los reportes de compra/deuda (mismo criterio que transformado_de).
+// body: { fecha_corte?, items:[{producto_id, kg, costo_total | costo_kg, calidad, semaforo}] }.
+router.post('/lotes/apertura', requireAdmin, (req, res) => {
+  const db = getDb();
+  try {
+    const b = req.body || {};
+    const items = Array.isArray(b.items) ? b.items : [];
+    if (!items.length) return res.status(400).json({ ok: false, error: 'Sin items para cargar' });
+    const fechaCorte = val(b.fecha_corte) || getConfig(db, 'fecha_corte', '2026-06-30');
+    const SEM = ['verde', 'amarillo', 'rojo'], CAL = ['primera', 'segunda', 'tercera'];
+    // Validación previa (toda la carga o nada).
+    for (const it of items) {
+      if (!it.producto_id || !db.prepare('SELECT id FROM sg_productos WHERE id=? AND activo=1').get(it.producto_id)) {
+        return res.status(400).json({ ok: false, error: 'Producto inválido: ' + it.producto_id });
+      }
+      if (!(Number(it.kg) > 0)) return res.status(400).json({ ok: false, error: 'Cada item necesita kg > 0' });
+      const total = (it.costo_total != null && it.costo_total !== '') ? Number(it.costo_total)
+        : ((it.costo_kg != null && it.costo_kg !== '') ? Number(it.costo_kg) * Number(it.kg) : null);
+      if (total == null || !(total >= 0)) return res.status(400).json({ ok: false, error: 'Cada item necesita costo (total o $/kg)' });
+      if (it.semaforo && !SEM.includes(it.semaforo)) return res.status(400).json({ ok: false, error: 'semaforo inválido: ' + it.semaforo });
+      if (it.calidad && !CAL.includes(it.calidad)) return res.status(400).json({ ok: false, error: 'calidad inválida: ' + it.calidad });
+      it._total = +total.toFixed(2);
+    }
+    const ins = db.prepare(`INSERT INTO sg_lotes
+      (codigo_lote, recepcion_id, oc_item_id, producto_id, kg_reales, precio_unitario_kg, costo_base,
+       calidad, calibre, origen, fecha_ingreso, fecha_vencimiento_estimada, estado, costo_final, semaforo, creado_por)
+      VALUES (?, NULL, NULL, ?, ?, ?, ?, ?, NULL, 'apertura', ?, NULL, 'disponible', ?, ?, ?)`);
+    const out = [];
+    db.transaction(() => {
+      for (const it of items) {
+        const kg = Number(it.kg);
+        const precioKg = kg > 0 ? +(it._total / kg).toFixed(4) : 0;   // para que NO figure "pendiente" en Stock
+        const codigo = nextNumero(db, 'SG-LT', 'sg_lotes', 'codigo_lote');
+        const info = ins.run(codigo, Number(it.producto_id), kg, precioKg, it._total,
+          val(it.calidad), fechaCorte, it._total, it.semaforo || 'verde', uid(req));
+        out.push({ lote_id: info.lastInsertRowid, codigo_lote: codigo, kg, costo_total: it._total, costo_kg: precioKg });
+      }
+    })();
+    res.json({ ok: true, data: { fecha_corte: fechaCorte, lotes: out } });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
 // ── CLIENTES ──────────────────────────────────────────────────────────────────
 montarCRUD('clientes', 'sg_clientes',
   ['razon_social', 'cuit', 'tipo', 'categoria_fiscal', 'tipo_fiscal_habitual',
    'condicion_pago_habitual_id', 'comercial_responsable_id', 'modalidad_pedido',
    'limite_credito', 'localidad', 'provincia', 'direccion_entrega', 'telefono',
-   'email', 'observaciones'],
+   'email', 'observaciones', 'saldo_inicial'],   // saldo_inicial: apertura al corte (BRIEF 10)
   { orderBy: 'razon_social COLLATE NOCASE',
     // nombre de la categoría comercial (categoria_id → sg_cliente_categorias) para la grilla
     selectExtra: '(SELECT nombre FROM sg_cliente_categorias WHERE id = sg_clientes.categoria_id) AS categoria_nombre' });
@@ -590,7 +660,7 @@ function nextNumero(db, prefijo, tabla, col) {
 // Recalcula costo_final de un lote = costo_base + gastos directos + prorrateo global del período.
 // Prorrateo: monto global del período × (kg del lote / total kg activos del período).
 function recalcCostoLote(db, loteId) {
-  const lote = db.prepare('SELECT id, kg_reales, costo_base, fecha_ingreso, precio_unitario_kg, recepcion_id, transformado_de FROM sg_lotes WHERE id=?').get(loteId);
+  const lote = db.prepare('SELECT id, kg_reales, costo_base, fecha_ingreso, precio_unitario_kg, recepcion_id, transformado_de, origen FROM sg_lotes WHERE id=?').get(loteId);
   if (!lote) return 0;
   // LOTE TRANSFORMADO (caso 2): su costo viene CARGADO (snapshot del costo/kg del origen,
   // guardado en costo_base). NO corre prorrateo (no es compra → excluido del pool) ni descarga
@@ -602,6 +672,15 @@ function recalcCostoLote(db, loteId) {
     const cfT = (lote.costo_base || 0) + gdT - costoTransferido(db, loteId);
     db.prepare("UPDATE sg_lotes SET costo_final=?, modificado_en=datetime('now','localtime') WHERE id=?").run(cfT, loteId);
     return cfT;
+  }
+  // LOTE DE APERTURA (BRIEF 10): valuación al corte cargada DIRECTA (Andy). No es compra → fuera
+  // del prorrateo/descarga; un cambio de gasto global del período NO lo pisa. costo_final = costo
+  // cargado + sus propios gastos directos (si los hubiera). Mismo criterio que transformado_de.
+  if (lote.origen === 'apertura') {
+    const gdA = db.prepare('SELECT COALESCE(SUM(monto),0) s FROM sg_gastos_directos_lote WHERE lote_id=? AND activo=1').get(loteId).s;
+    const cfA = (lote.costo_base || 0) + gdA;
+    db.prepare("UPDATE sg_lotes SET costo_final=?, modificado_en=datetime('now','localtime') WHERE id=?").run(cfA, loteId);
+    return cfA;
   }
   // COSTO PENDIENTE: lote sin precio (recepción sin OC, o pizarra sin cerrar) → costo_final=0 y
   // NO se le suma prorrateo (sería un costo parcial engañoso que ensucia la rentabilidad).
@@ -615,9 +694,10 @@ function recalcCostoLote(db, loteId) {
   const periodo = (lote.fecha_ingreso || '').slice(0, 7);
   if (periodo) {
     const totalGlob = db.prepare('SELECT COALESCE(SUM(monto),0) s FROM sg_gastos_globales_periodo WHERE periodo=? AND activo=1').get(periodo).s;
-    // Pool de prorrateo: solo lotes de COMPRA (transformado_de IS NULL). Los transformados ya
-    // computaron sus kg vía el lote-origen → incluirlos duplicaría kg y diluiría el prorrateo.
-    const totalKg = db.prepare("SELECT COALESCE(SUM(kg_reales),0) s FROM sg_lotes WHERE activo=1 AND transformado_de IS NULL AND substr(fecha_ingreso,1,7)=?").get(periodo).s;
+    // Pool de prorrateo: solo lotes de COMPRA (transformado_de IS NULL y no apertura). Los
+    // transformados ya computaron sus kg vía el lote-origen → incluirlos duplicaría kg; los de
+    // apertura (BRIEF 10) no son compra → tampoco participan del reparto de gastos del período.
+    const totalKg = db.prepare("SELECT COALESCE(SUM(kg_reales),0) s FROM sg_lotes WHERE activo=1 AND transformado_de IS NULL AND COALESCE(origen,'')<>'apertura' AND substr(fecha_ingreso,1,7)=?").get(periodo).s;
     if (totalKg > 0) prorrateo = totalGlob * (lote.kg_reales / totalKg);
   }
   // FASE 2 — descarga de ingreso (cooperativa) VALORIZADA de la recepción del lote, prorrateada
@@ -1567,7 +1647,7 @@ router.get('/lotes/:id/trazabilidad', requireAuth, (req, res) => {
     let prorrateo = null;
     if (periodo) {
       const totalGlob = db.prepare('SELECT COALESCE(SUM(monto),0) s FROM sg_gastos_globales_periodo WHERE periodo=? AND activo=1').get(periodo).s;
-      const totalKg = db.prepare("SELECT COALESCE(SUM(kg_reales),0) s FROM sg_lotes WHERE activo=1 AND transformado_de IS NULL AND substr(fecha_ingreso,1,7)=?").get(periodo).s;
+      const totalKg = db.prepare("SELECT COALESCE(SUM(kg_reales),0) s FROM sg_lotes WHERE activo=1 AND transformado_de IS NULL AND COALESCE(origen,'')<>'apertura' AND substr(fecha_ingreso,1,7)=?").get(periodo).s;
       const share = totalKg > 0 ? totalGlob * (lote.kg_reales / totalKg) : 0;
       prorrateo = { periodo, total_global: totalGlob, kg_periodo: totalKg, kg_lote: lote.kg_reales, share };
     }
@@ -2365,18 +2445,39 @@ router.post('/gastos-servicio/valorizar', requireAdmin, (req, res) => {
 router.get('/cc-clientes', requireAuth, (req, res) => {
   const db = getDb();
   try {
+    // BRIEF 10 — LEFT JOIN para que un cliente con SOLO saldo de apertura (sin despachos) aparezca.
+    // saldo = saldo_inicial (apertura al corte) + (facturado − cobrado) post-corte. saldo_inicial va aparte.
     const rows = db.prepare(`
-      SELECT c.id, c.razon_social, c.limite_credito,
+      SELECT c.id, c.razon_social, c.limite_credito, COALESCE(c.saldo_inicial,0) AS saldo_inicial,
         COALESCE(SUM(di.subtotal),0) AS total_facturado,
         0 AS total_cobrado
       FROM sg_clientes c
-      JOIN sg_despachos d ON d.cliente_id=c.id AND d.activo=1
-      JOIN sg_despacho_items di ON di.despacho_id=d.id
+      LEFT JOIN sg_despachos d ON d.cliente_id=c.id AND d.activo=1
+      LEFT JOIN sg_despacho_items di ON di.despacho_id=d.id
       WHERE c.activo=1
-      GROUP BY c.id, c.razon_social, c.limite_credito
-      ORDER BY total_facturado DESC`).all();
-    for (const r of rows) r.saldo = (r.total_facturado || 0) - (r.total_cobrado || 0);
+      GROUP BY c.id, c.razon_social, c.limite_credito, c.saldo_inicial
+      HAVING total_facturado > 0 OR saldo_inicial <> 0
+      ORDER BY (COALESCE(c.saldo_inicial,0) + COALESCE(SUM(di.subtotal),0)) DESC`).all();
+    for (const r of rows) r.saldo = (r.saldo_inicial || 0) + (r.total_facturado || 0) - (r.total_cobrado || 0);
     res.json({ ok: true, data: rows });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// BRIEF 10 — CC de proveedores: deuda derivada de vencimientos de OC no pagados + saldo de apertura.
+// saldo = saldo_inicial (al corte) + Σ vencimientos pendientes post-corte. NO toca contabilidad.
+router.get('/cc-proveedores', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const rows = db.prepare(`
+      SELECT p.id, p.razon_social, COALESCE(p.saldo_inicial,0) AS saldo_inicial,
+        COALESCE((SELECT SUM(v.monto) FROM sg_oc_vencimientos v
+          JOIN sg_oc o ON o.id=v.oc_id
+          WHERE o.proveedor_id=p.id AND o.activo=1 AND o.estado<>'anulada' AND v.pagado=0),0) AS total_pendiente
+      FROM sg_proveedores p WHERE p.activo=1`).all();
+    const data = rows.map(r => ({ ...r, saldo: (r.saldo_inicial || 0) + (r.total_pendiente || 0) }))
+      .filter(r => r.total_pendiente !== 0 || r.saldo_inicial !== 0)
+      .sort((a, b) => b.saldo - a.saldo);
+    res.json({ ok: true, data });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
@@ -2411,10 +2512,11 @@ router.get('/dashboard', requireAuth, (req, res) => {
   try {
     const periodo = periodoActual(db, req.query.periodo);
 
-    // Compras del período (por fecha de ingreso del lote): kg + costo cargado
+    // Compras del período (por fecha de ingreso del lote): kg + costo cargado. Excluye transformados
+    // y aperturas (BRIEF 10): no son compra (no generan deuda a proveedor).
     const compras = db.prepare(`
       SELECT COALESCE(SUM(kg_reales),0) AS kg, COALESCE(SUM(costo_final),0) AS monto, COUNT(*) AS lotes
-      FROM sg_lotes WHERE activo=1 AND transformado_de IS NULL AND substr(fecha_ingreso,1,7)=?`).get(periodo);
+      FROM sg_lotes WHERE activo=1 AND transformado_de IS NULL AND COALESCE(origen,'')<>'apertura' AND substr(fecha_ingreso,1,7)=?`).get(periodo);
 
     // Ventas del período (por fecha de despacho): kg + facturado + margen (desde costo por kg)
     const ventas = db.prepare(`
