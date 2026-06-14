@@ -4451,6 +4451,39 @@ router.post('/ocr/remito-super', upload.single('foto'), async function(req, res)
   }
 });
 
+// LOOKUP de sellado por N° de remito (SQL + branching compartido). Lo usan tanto el OCR
+// (match-sellado, tras leer el N° de la foto) como la corrección manual (lookup-sellado,
+// cuando el operador re-ingresa el N°). NO muta nada: solo busca y decide la acción.
+// Devuelve el MISMO contrato que match-sellado: sellar / crear_nuevo / bloqueado / sin_numero.
+function _lookupSellado(nRemito, escaneo_path) {
+  nRemito = nRemito != null ? String(nRemito).trim() : '';
+  if (!nRemito) {
+    return { ok: false, accion: 'sin_numero', error: 'Falta el N° de remito', escaneo_path: escaneo_path };
+  }
+  const remito = db.prepare(`
+    SELECT r.*, p.nombre AS proveedor_origen_nombre
+    FROM ifco_remitos_super r
+    LEFT JOIN proveedores p ON r.proveedor_origen_id = p.id
+    WHERE r.n_remito_ifco = ? AND r.eliminado_en IS NULL
+    LIMIT 1
+  `).get(nRemito);
+
+  if (!remito) {
+    // No hay match → flujo de creación (el front pide el OCR completo a continuación).
+    return { ok: true, accion: 'crear_nuevo', n_remito_ifco: nRemito, escaneo_path: escaneo_path };
+  }
+  // Hay match — depende del estado.
+  if (remito.estado === 'sellado' || remito.estado === 'enviado' || remito.estado === 'presentado') {
+    return {
+      ok: false, accion: 'bloqueado', estado: remito.estado, n_remito_ifco: nRemito,
+      remito: remito, escaneo_path: escaneo_path,
+      error: 'El remito ' + nRemito + ' ya está en estado "' + remito.estado + '". No se puede volver a sellar desde este flujo.'
+    };
+  }
+  // Estado 'despachado' → listo para sellar.
+  return { ok: true, accion: 'sellar', n_remito_ifco: nRemito, remito: remito, escaneo_path: escaneo_path };
+}
+
 // MATCH-SELLADO: OCR de foto de remito sellado + busca en DB por N° remito
 // Devuelve uno de:
 //   { ok:true, accion:'sellar',     remito:{...}, escaneo_path, n_remito_ifco }     ← match con remito en estado 'despachado'
@@ -4514,47 +4547,18 @@ router.post('/ocr/match-sellado', upload.single('foto'), async function(req, res
     });
   }
 
-  // Buscar remito activo por número
-  const remito = db.prepare(`
-    SELECT r.*, p.nombre AS proveedor_origen_nombre
-    FROM ifco_remitos_super r
-    LEFT JOIN proveedores p ON r.proveedor_origen_id = p.id
-    WHERE r.n_remito_ifco = ? AND r.eliminado_en IS NULL
-    LIMIT 1
-  `).get(nRemito);
+  // Lookup + branching compartido (mismo SQL que la corrección manual).
+  return res.json(_lookupSellado(nRemito, escaneo_path));
+});
 
-  if (!remito) {
-    // No hay match → flujo de creación: pedir OCR completo en una segunda pasada
-    // Devolvemos solo el N° leído; el frontend va a llamar al OCR completo a continuación
-    return res.json({
-      ok: true,
-      accion: 'crear_nuevo',
-      n_remito_ifco: nRemito,
-      escaneo_path: escaneo_path
-    });
-  }
-
-  // Hay match — depende del estado
-  if (remito.estado === 'sellado' || remito.estado === 'enviado' || remito.estado === 'presentado') {
-    return res.json({
-      ok: false,
-      accion: 'bloqueado',
-      estado: remito.estado,
-      n_remito_ifco: nRemito,
-      remito: remito,
-      escaneo_path: escaneo_path,
-      error: 'El remito ' + nRemito + ' ya está en estado "' + remito.estado + '". No se puede volver a sellar desde este flujo.'
-    });
-  }
-
-  // Estado 'despachado' → listo para sellar
-  return res.json({
-    ok: true,
-    accion: 'sellar',
-    n_remito_ifco: nRemito,
-    remito: remito,
-    escaneo_path: escaneo_path
-  });
+// LOOKUP-SELLADO manual (#405): corrección del N° cuando el OCR leyó mal o no leyó.
+// Reusa EXACTAMENTE el SQL/branching de match-sellado (vía _lookupSellado). Solo re-ejecuta la
+// búsqueda con el N° corregido — NO toca el OCR, el schema ni números guardados. escaneo_path
+// se arrastra (la foto ya se subió en el match-sellado previo) para que el sellado conserve la imagen.
+router.post('/ocr/lookup-sellado', function(req, res) {
+  const b = req.body || {};
+  const n = b.n_remito_ifco != null ? String(b.n_remito_ifco).trim() : '';
+  res.json(_lookupSellado(n, b.escaneo_path || null));
 });
 
 // ═════════════════════════════════════════════════════════════════════════

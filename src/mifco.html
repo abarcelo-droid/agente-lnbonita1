@@ -296,8 +296,11 @@ body{padding-bottom:env(safe-area-inset-bottom)}
 <div class="view" id="view-confirmar-sellado">
   <div class="alert ok">✓ Remito identificado en la base. Revisá las cantidades.</div>
   <div class="card">
-    <div class="lbl">Remito</div>
-    <div style="font-family:monospace;font-size:18px;font-weight:600" id="cs-numero">—</div>
+    <div class="lbl">Remito <span style="color:var(--mut);font-weight:400">(editá si el OCR leyó mal)</span></div>
+    <div style="display:flex;gap:8px;align-items:center">
+      <input id="cs-numero" inputmode="text" autocomplete="off" style="font-family:monospace;font-size:18px;font-weight:600;flex:1;min-width:0">
+      <button class="btn bo" style="white-space:nowrap" onclick="reBuscarDesdeConfirmar()">🔍 Re-buscar</button>
+    </div>
     <div class="val muted" style="margin-top:4px;font-size:13px" id="cs-empresa">—</div>
     <div style="display:flex;gap:14px;margin-top:10px;font-size:13px">
       <div><span class="muted">Despachado:</span> <b id="cs-despachado">—</b></div>
@@ -454,6 +457,21 @@ body{padding-bottom:env(safe-area-inset-bottom)}
     <div style="font-size:16px;font-weight:600;margin-bottom:6px" id="err-titulo">Algo salió mal</div>
     <div style="font-size:14px;color:var(--mut);margin-bottom:18px" id="err-detalle">—</div>
     <button class="btn bb full" onclick="goHome()">Volver al inicio</button>
+  </div>
+</div>
+
+<!-- Corrección manual del N° (#405): cuando el OCR no leyó o el remito está bloqueado -->
+<div class="view" id="view-numero-manual">
+  <div class="card">
+    <div style="font-size:36px;margin-bottom:8px" id="nm-icon">✏️</div>
+    <div style="font-size:16px;font-weight:600;margin-bottom:6px" id="nm-titulo">Ingresá el N° a mano</div>
+    <div style="font-size:14px;color:var(--mut);margin-bottom:14px" id="nm-detalle">—</div>
+    <div class="fld" style="text-align:left">
+      <label>N° de remito IFCO</label>
+      <input id="nm-numero" inputmode="text" autocomplete="off" placeholder="00015-XXXXXXXX" style="font-family:monospace;font-size:18px">
+    </div>
+    <button class="btn bb full" style="margin-top:12px" onclick="buscarNumeroManual()">🔍 Buscar remito</button>
+    <button class="btn bo full" style="margin-top:8px" onclick="goHome()">Cancelar</button>
   </div>
 </div>
 
@@ -732,66 +750,124 @@ async function onFotoSellado(ev) {
     fd.append('foto', file);
     const r = await _fetchConFeedback('/api/ifco/ocr/match-sellado', { method:'POST', credentials:'include', body:fd }, { mensaje:'Buscando el N° de remito en la base…' });
     const data = await r.json();
+    aplicarMatchSellado(data, file);
+  } catch(e) {
+    showError('Error de conexión', e.message, '⚠️');
+  }
+}
 
-    if (data.escaneo_path) S.escaneoPath = data.escaneo_path;
+// Branching compartido del flujo de sellado: lo usan el OCR (onFotoSellado) y la corrección
+// manual del N° (#405). 'file' es la foto original (para el re-OCR si termina en crear_nuevo).
+function aplicarMatchSellado(data, file) {
+  if (data && data.escaneo_path) S.escaneoPath = data.escaneo_path;
 
-    if (data.accion === 'sin_numero' || (!data.ok && !data.accion)) {
-      showError('No se pudo leer el N° de remito', 'Probá con una foto más nítida o entrá al panel completo para cargarlo manualmente.', '📷');
+  if (!data || data.accion === 'sin_numero' || (!data.ok && !data.accion)) {
+    // En vez de cortar con error sin salida: pedir el N° a mano y re-buscar.
+    showNumeroManual(data, file, '✏️', 'Ingresá el N° a mano',
+      'No se pudo leer el número de la foto. Escribilo y buscamos el remito.');
+    return;
+  }
+  if (data.accion === 'bloqueado') {
+    // El N° existe pero está cerrado. Si el OCR leyó mal, el operador puede corregir y re-buscar.
+    showNumeroManual(data, file, '🚫', 'Remito ' + esc(data.n_remito_ifco||'') + ' ya cerrado',
+      'Está en estado <b>'+esc(data.estado)+'</b>. Si el OCR leyó mal el N°, corregilo y volvé a buscar.');
+    return;
+  }
+  if (data.accion === 'sellar' && data.remito) {
+    S.matchRemitoId = data.remito.id;
+    S.matchData = data.remito;
+    $('cs-numero').value = data.remito.n_remito_ifco;
+    $('cs-empresa').textContent = (data.remito.empresa||'') + (data.remito.sucursal ? ' — '+data.remito.sucursal : '');
+    $('cs-despachado').textContent = data.remito.cantidad_despachada + ' caj.';
+    $('cs-fecha').textContent = fmtFecha(data.remito.fecha_emision);
+    $('cs-recib').value = data.remito.cantidad_despachada;
+    $('cs-rech').value  = 0;
+    $('cs-rech-dest').value = 'san_geronimo';
+    toggleRechCS();
+    if (file) setFotoPrev('cs-foto-prev', file);
+    showView('view-confirmar-sellado', { title:'Confirmar sellado' });
+    return;
+  }
+  if (data.accion === 'crear_nuevo') {
+    crearNuevoDesdeFoto(data, file);
+    return;
+  }
+  showError('Respuesta inesperada', JSON.stringify(data), '⚠️');
+}
+
+// No hay match → OCR completo (segunda pasada) sobre la foto para prellenar el alta. El N° usa
+// el corregido por el operador si lo hubo (data.n_remito_ifco), con fallback al del OCR completo.
+async function crearNuevoDesdeFoto(data, file) {
+  if (!file) {
+    $('ns-numero').value = (data && data.n_remito_ifco) || '';
+    $('ns-fecha').value = todayISO();
+    aplicarDepositoUsuario('ns-origen', 'ns-prov-wrap', 'ns-prov');
+    showView('view-crear-sellado', { title:'Crear y sellar' });
+    return;
+  }
+  try {
+    $('loading-sub').textContent = 'No estaba en la base, leyendo todos los datos…';
+    showView('view-loading', { title:'Procesando…', push:false });
+    const fd2 = new FormData();
+    fd2.append('foto', file);
+    fd2.append('tipo', 'completo');
+    const r2 = await _fetchConFeedback('/api/ifco/ocr/remito-super', { method:'POST', credentials:'include', body:fd2 }, { mensaje:'Leyendo todos los datos del remito…' });
+    const d2 = await r2.json();
+    if (!r2.ok || !d2.datos) {
+      showError('No se pudieron leer los datos', d2.error || 'Probá manual desde el panel.', '📷');
       return;
     }
-    if (data.accion === 'bloqueado') {
-      showError('Remito ' + esc(data.n_remito_ifco) + ' ya cerrado',
-        'El remito está en estado <b>'+esc(data.estado)+'</b>. No se puede sellar desde acá.', '🚫');
-      return;
-    }
-    if (data.accion === 'sellar' && data.remito) {
-      // Match con despachado → confirmar
-      S.matchRemitoId = data.remito.id;
-      S.matchData = data.remito;
-      // Prellenar
-      $('cs-numero').textContent = data.remito.n_remito_ifco;
-      $('cs-empresa').textContent = (data.remito.empresa||'') + (data.remito.sucursal ? ' — '+data.remito.sucursal : '');
-      $('cs-despachado').textContent = data.remito.cantidad_despachada + ' caj.';
-      $('cs-fecha').textContent = fmtFecha(data.remito.fecha_emision);
-      $('cs-recib').value = data.remito.cantidad_despachada;
-      $('cs-rech').value  = 0;
-      $('cs-rech-dest').value = 'san_geronimo';
-      toggleRechCS();
-      setFotoPrev('cs-foto-prev', file);
-      showView('view-confirmar-sellado', { title:'Confirmar sellado' });
-      return;
-    }
-    if (data.accion === 'crear_nuevo') {
-      // No hay match → llamar OCR completo para prellenar todo
-      $('loading-sub').textContent = 'No estaba en la base, leyendo todos los datos…';
-      showView('view-loading', { title:'Procesando…', push:false });
-      const fd2 = new FormData();
-      fd2.append('foto', file);
-      fd2.append('tipo', 'completo');
-      const r2 = await _fetchConFeedback('/api/ifco/ocr/remito-super', { method:'POST', credentials:'include', body:fd2 }, { mensaje:'Leyendo todos los datos del remito…' });
-      const d2 = await r2.json();
-      if (!r2.ok || !d2.datos) {
-        showError('No se pudieron leer los datos', d2.error || 'Probá manual desde el panel.', '📷');
-        return;
-      }
-      S.escaneoPath = d2.escaneo_path;
-      S.ocrData = d2.datos;
-      // Prellenar (fecha y producto ignorados de OCR — fecha siempre = hoy, producto removido)
-      $('ns-numero').value = d2.datos.n_remito_ifco || data.n_remito_ifco || '';
-      $('ns-fecha').value  = todayISO();
-      $('ns-cadena').value = matchCadena(d2.datos.empresa);
-      $('ns-cant').value   = d2.datos.cantidad_despachada || '';
-      $('ns-recib').value  = d2.datos.cantidad_recibida != null ? d2.datos.cantidad_recibida : (d2.datos.cantidad_despachada || '');
-      $('ns-rech').value   = d2.datos.cantidad_rechazada || 0;
-      $('ns-origen').value = 'san_geronimo';
-      toggleProvOrigenNS();
-      toggleRechNS();
-      aplicarDepositoUsuario('ns-origen', 'ns-prov-wrap', 'ns-prov');
-      setFotoPrev('ns-foto-prev', file);
-      showView('view-crear-sellado', { title:'Crear y sellar' });
-      return;
-    }
-    showError('Respuesta inesperada', JSON.stringify(data), '⚠️');
+    S.escaneoPath = d2.escaneo_path;
+    S.ocrData = d2.datos;
+    $('ns-numero').value = (data && data.n_remito_ifco) || d2.datos.n_remito_ifco || '';   // N° corregido tiene prioridad
+    $('ns-fecha').value  = todayISO();
+    $('ns-cadena').value = matchCadena(d2.datos.empresa);
+    $('ns-cant').value   = d2.datos.cantidad_despachada || '';
+    $('ns-recib').value  = d2.datos.cantidad_recibida != null ? d2.datos.cantidad_recibida : (d2.datos.cantidad_despachada || '');
+    $('ns-rech').value   = d2.datos.cantidad_rechazada || 0;
+    $('ns-origen').value = 'san_geronimo';
+    toggleProvOrigenNS();
+    toggleRechNS();
+    aplicarDepositoUsuario('ns-origen', 'ns-prov-wrap', 'ns-prov');
+    setFotoPrev('ns-foto-prev', file);
+    showView('view-crear-sellado', { title:'Crear y sellar' });
+  } catch(e) {
+    showError('Error de conexión', e.message, '⚠️');
+  }
+}
+
+// Pantalla de corrección manual del N° (sin_numero / bloqueado).
+function showNumeroManual(data, file, icon, titulo, detalle) {
+  S.numManualFile = file || S.fotoFile || null;
+  $('nm-icon').textContent = icon || '✏️';
+  $('nm-titulo').textContent = titulo || 'Ingresá el N° a mano';
+  $('nm-detalle').innerHTML = detalle || '';
+  $('nm-numero').value = (data && data.n_remito_ifco) ? data.n_remito_ifco : '';
+  showView('view-numero-manual', { title:'Corregir N°' });
+  setTimeout(function(){ var el=$('nm-numero'); if(el){ el.focus(); el.select(); } }, 60);
+}
+function buscarNumeroManual() {
+  const n = ($('nm-numero').value || '').trim();
+  if (!n) { alert('Escribí el N° de remito'); return; }
+  reLookupSellado(n, S.numManualFile);
+}
+function reBuscarDesdeConfirmar() {
+  const n = ($('cs-numero').value || '').trim();
+  if (!n) { alert('Escribí el N° de remito'); return; }
+  reLookupSellado(n, S.fotoFile);
+}
+// Re-ejecuta la búsqueda con el N° corregido (endpoint número-only) y re-entra al branching.
+async function reLookupSellado(n, file) {
+  try {
+    showView('view-loading', { title:'Procesando…', push:false });
+    $('loading-sub').textContent = 'Buscando el remito ' + n + '…';
+    const r = await _fetchConFeedback('/api/ifco/ocr/lookup-sellado', {
+      method:'POST', credentials:'include',
+      headers:{ 'Content-Type':'application/json' },
+      body: JSON.stringify({ n_remito_ifco: n, escaneo_path: S.escaneoPath || null })
+    }, { mensaje:'Buscando el remito…' });
+    const data = await r.json();
+    aplicarMatchSellado(data, file || S.fotoFile);
   } catch(e) {
     showError('Error de conexión', e.message, '⚠️');
   }
