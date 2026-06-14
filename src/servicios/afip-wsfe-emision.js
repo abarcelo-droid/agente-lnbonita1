@@ -207,9 +207,27 @@ function actualizarFactura(database, facturaId, campos) {
   database.prepare(`UPDATE sg_ven_facturas SET ${sets.join(',')} WHERE id=?`).run(...vals);
 }
 
+// Confirma una factura AUTORIZADA: marca el estado/CAE y escribe el puente factura↔despacho
+// (sg_factura_despachos) en LA MISMA transacción. Atómico: una factura autorizada SIEMPRE queda
+// con su puente; nunca queda autorizada sin él (lo que haría reaparecer los kg como pendientes →
+// doble facturación). En rechazo NO se llama → no se escriben vínculos.
+function confirmarAutorizada(database, facturaId, campos, vinculos) {
+  database.transaction(() => {
+    actualizarFactura(database, facturaId, campos);
+    if (Array.isArray(vinculos) && vinculos.length) {
+      const ins = database.prepare(`INSERT INTO sg_factura_despachos (factura_id, despacho_id, despacho_item_id, kg) VALUES (?,?,?,?)`);
+      for (const v of vinculos) {
+        if (!v || v.despacho_id == null) continue;
+        ins.run(facturaId, Number(v.despacho_id), v.despacho_item_id != null ? Number(v.despacho_item_id) : null, v.kg != null ? Number(v.kg) : null);
+      }
+    }
+  })();
+}
+
 // Emite un comprobante: reserva número (lock PV+tipo) → persiste 'reservado' → FECAESolicitar →
-// A: guarda cae/cae_vto/autorizado · R: guarda obs/rechazado · timeout: FECompConsultar.
-export async function emitir(database, { ptoVta, clienteId, items, esNC, userId }) {
+// A: guarda cae/cae_vto/autorizado + puente factura↔despacho (atómico) · R: guarda obs/rechazado
+// (sin puente) · timeout: FECompConsultar. vinculos (opcional): [{despacho_id, despacho_item_id, kg}].
+export async function emitir(database, { ptoVta, clienteId, items, esNC, userId, vinculos }) {
   const comprobante = construirComprobante(database, { clienteId, items, esNC });
   const cbteTipo = comprobante.cbte_tipo;
   return serializar(ptoVta + ':' + cbteTipo, async () => {
@@ -237,8 +255,11 @@ export async function emitir(database, { ptoVta, clienteId, items, esNC, userId 
     }
 
     if (resp.resultado === 'A' && resp.cae) {
-      actualizarFactura(database, facturaId, { cae: resp.cae, cae_vto: resp.cae_vto, afip_resultado: 'A', afip_estado: 'autorizado', afip_obs: resp.obs });
-      return { ok: true, factura_id: facturaId, ambiente, pto_vta: ptoVta, cbte_tipo: cbteTipo, cbte_nro: cbteNro, cae: resp.cae, cae_vto: resp.cae_vto, imp_total: comprobante.imp_total };
+      // Atómico: estado autorizado + CAE + puente factura↔despacho en una sola transacción.
+      confirmarAutorizada(database, facturaId,
+        { cae: resp.cae, cae_vto: resp.cae_vto, afip_resultado: 'A', afip_estado: 'autorizado', afip_obs: resp.obs },
+        vinculos);
+      return { ok: true, factura_id: facturaId, ambiente, pto_vta: ptoVta, cbte_tipo: cbteTipo, cbte_nro: cbteNro, cae: resp.cae, cae_vto: resp.cae_vto, imp_total: comprobante.imp_total, vinculos: Array.isArray(vinculos) ? vinculos.length : 0 };
     }
     actualizarFactura(database, facturaId, { afip_resultado: resp.resultado || 'R', afip_estado: 'rechazado', afip_obs: resp.obs });
     return { ok: false, factura_id: facturaId, ambiente, pto_vta: ptoVta, cbte_tipo: cbteTipo, cbte_nro: cbteNro, resultado: resp.resultado || 'R', obs: resp.obs };
