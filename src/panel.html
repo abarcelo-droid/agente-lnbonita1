@@ -2173,8 +2173,8 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     <div class="sg-sub on" id="sg-sub-productos">
       <div style="display:flex;justify-content:flex-end;margin-bottom:10px"><button class="btn bb" onclick="sgOpenModal('productos')">+ Nuevo producto</button></div>
       <div class="ab-table-wrap"><table class="pa-tbl">
-        <thead><tr><th>Código</th><th>Especie</th><th>Variedad</th><th>Familia</th><th></th></tr></thead>
-        <tbody id="sg-tb-productos"><tr><td colspan="5" class="emp">Cargando…</td></tr></tbody>
+        <thead><tr><th>Código</th><th>Especie</th><th>Variedad</th><th>Familia</th><th>Envase</th><th></th></tr></thead>
+        <tbody id="sg-tb-productos"><tr><td colspan="6" class="emp">Cargando…</td></tr></tbody>
       </table></div>
     </div>
 
@@ -2202,8 +2202,8 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     <div class="sg-sub" id="sg-sub-clientes">
       <div style="display:flex;justify-content:flex-end;margin-bottom:10px"><button class="btn bb" onclick="sgOpenModal('clientes')">+ Nuevo cliente</button></div>
       <div class="ab-table-wrap"><table class="pa-tbl">
-        <thead><tr><th>Razón social</th><th>CUIT</th><th>Tipo</th><th>Modalidad</th><th style="text-align:right">Lím. crédito</th><th></th></tr></thead>
-        <tbody id="sg-tb-clientes"><tr><td colspan="6" class="emp">Cargando…</td></tr></tbody>
+        <thead><tr><th>Razón social</th><th>CUIT</th><th>Categoría</th><th>Alias</th><th>Modalidad</th><th style="text-align:right">Lím. crédito</th><th></th></tr></thead>
+        <tbody id="sg-tb-clientes"><tr><td colspan="7" class="emp">Cargando…</td></tr></tbody>
       </table></div>
     </div>
 
@@ -2832,7 +2832,7 @@ function sgLoad(entity){
 }
 
 function sgEmpty(entity){
-  var cols = {productos:5, presentaciones:6, proveedores:6, clientes:6, condiciones:4};
+  var cols = {productos:6, presentaciones:6, proveedores:6, clientes:7, condiciones:4};
   return '<tr><td colspan="'+(cols[entity]||6)+'" class="emp">Sin registros. Creá el primero con el botón de arriba.</td></tr>';
 }
 // IVA Fase 2 — ABM de alícuota por familia. Refresca SG.cacheFam para que la OC use el valor al día.
@@ -2865,8 +2865,11 @@ function sgActions(entity, id){
 
 function sgRow(entity, r){
   if (entity==='productos'){
+    // Envase: derivado de las presentaciones del producto (cache) → último segmento del código.
+    var _prs = sgPresDe(r.id);
+    var _env = _prs.length ? sgEnvNombre(_prs[0].envase_id) : '—';
     return '<tr><td><code>'+esc(r.codigo)+'</code></td><td>'+esc(r.nombre)+'</td><td>'+esc(r.variedad||'—')+'</td><td>'+esc(r.familia||'—')
-      +'</td>'+sgActions(entity,r.id)+'</tr>';
+      +'</td><td>'+esc(_env)+'</td>'+sgActions(entity,r.id)+'</tr>';
   }
   if (entity==='presentaciones'){
     return '<tr><td>'+esc(sgProdLabel(r.producto_id))+'</td><td>'+esc(r.nombre)+'</td><td style="text-align:right">'+(r.factor_conversion||0)+'</td><td>'+esc(sgEnvNombre(r.envase_id))+'</td><td style="text-align:right">'+(r.paletizado!=null&&r.paletizado!==''?r.paletizado:'—')+'</td>'+sgActions(entity,r.id)+'</tr>';
@@ -2877,8 +2880,8 @@ function sgRow(entity, r){
       +'</td><td>'+sgLbl(SG_FISCAL_LBL,r.tipo_fiscal_habitual)+'</td><td>'+esc(r.localidad||'')+'</td>'+sgActions(entity,r.id)+'</tr>';
   }
   if (entity==='clientes'){
-    return '<tr><td>'+esc(r.razon_social)+'</td><td>'+esc(r.cuit||'')+'</td><td>'+sgLbl(SG_TIPOCLI,r.tipo)
-      +'</td><td>'+sgLbl(SG_MODPED,r.modalidad_pedido)+'</td><td style="text-align:right">$'+nr(r.limite_credito)+'</td>'+sgActions(entity,r.id)+'</tr>';
+    return '<tr><td>'+esc(r.razon_social)+'</td><td>'+esc(r.cuit||'')+'</td><td>'+esc(r.categoria_nombre||'—')
+      +'</td><td>'+esc(r.nombre_comercial||'—')+'</td><td>'+sgLbl(SG_MODPED,r.modalidad_pedido)+'</td><td style="text-align:right">$'+nr(r.limite_credito)+'</td>'+sgActions(entity,r.id)+'</tr>';
   }
   return '';
 }
