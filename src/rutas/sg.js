@@ -679,9 +679,26 @@ function defaultsProveedor(db, proveedorId, body) {
 }
 
 // Crea los lotes de un item de recepción. Devuelve cantidad creada.
+// #reproceso item 3: si la recepción está observada (observada=1), el lote nace en 'amarillo'
+// con origen='observado' y se registra en el historial. Solo suma el seteo del semáforo; no
+// toca kg/costo/estado. _rec = fila de sg_recepciones con observada/calidad. No-op si no observada.
+function _aplicarObservado(db, loteId, _rec, userId) {
+  if (!_rec || !_rec.observada) return;
+  const partes = ['Recepción observada'];
+  if (_rec.calidad_pct_afectado != null && _rec.calidad_pct_afectado !== '') partes.push(_rec.calidad_pct_afectado + '% afectado');
+  if (_rec.calidad_observaciones) partes.push(String(_rec.calidad_observaciones));
+  db.prepare("UPDATE sg_lotes SET semaforo='amarillo', modificado_en=datetime('now','localtime') WHERE id=?").run(loteId);
+  db.prepare(`INSERT INTO sg_lote_semaforo_historial (lote_id, color_anterior, color_nuevo, motivo, origen, usuario_id)
+    VALUES (?, 'verde', 'amarillo', ?, 'observado', ?)`).run(loteId, partes.join(' · '), userId || null);
+}
+function _recObservada(db, recepcionId) {
+  return db.prepare('SELECT observada, calidad_pct_afectado, calidad_observaciones FROM sg_recepciones WHERE id=?').get(recepcionId);
+}
+
 function crearLotesDeItem(db, { recepcionId, ocItem, tipoPrecio, fechaIngreso, lotes, userId }) {
   const prod = db.prepare('SELECT vida_util_dias_default FROM sg_productos WHERE id=?').get(ocItem.producto_id);
   const vida = (prod && prod.vida_util_dias_default) || 0;
+  const _rec = _recObservada(db, recepcionId);
   const ins = db.prepare(`INSERT INTO sg_lotes
     (codigo_lote, recepcion_id, oc_item_id, producto_id, kg_reales, precio_unitario_kg, costo_base,
      calidad, calibre, origen, fecha_ingreso, fecha_vencimiento_estimada, estado, costo_final, creado_por)
@@ -697,6 +714,7 @@ function crearLotesDeItem(db, { recepcionId, ocItem, tipoPrecio, fechaIngreso, l
     const info = ins.run(codigo, recepcionId, ocItem.id, ocItem.producto_id, kg, precio, costoBase,
       val(lt.calidad), val(lt.calibre), val(lt.origen), fechaIngreso, venc, costoBase, userId);
     ids.push(info.lastInsertRowid);
+    _aplicarObservado(db, info.lastInsertRowid, _rec, userId);
   }
   return ids;
 }
@@ -708,6 +726,7 @@ function crearLotesSinOC(db, { recepcionId, productoId, fechaIngreso, lotes, use
   const prod = db.prepare('SELECT vida_util_dias_default FROM sg_productos WHERE id=?').get(productoId);
   if (!prod) throw new Error('Producto inválido: ' + productoId);
   const vida = prod.vida_util_dias_default || 0;
+  const _rec = _recObservada(db, recepcionId);
   const ins = db.prepare(`INSERT INTO sg_lotes
     (codigo_lote, recepcion_id, oc_item_id, producto_id, kg_reales, precio_unitario_kg, costo_base,
      calidad, calibre, origen, fecha_ingreso, fecha_vencimiento_estimada, estado, costo_final, creado_por)
@@ -720,6 +739,7 @@ function crearLotesSinOC(db, { recepcionId, productoId, fechaIngreso, lotes, use
     const codigo = nextNumero(db, 'SG-LT', 'sg_lotes', 'codigo_lote');
     const info = ins.run(codigo, recepcionId, productoId, kg, val(lt.calidad), fechaIngreso, venc, userId);
     ids.push(info.lastInsertRowid);
+    _aplicarObservado(db, info.lastInsertRowid, _rec, userId);
   }
   return ids;
 }
