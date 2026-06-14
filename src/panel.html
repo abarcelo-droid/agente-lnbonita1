@@ -2729,9 +2729,8 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
         <div class="fl"><label>Entrega solicitada</label><input type="date" id="sg-ped-entrega"></div>
         <div class="fl"><label>Dirección de entrega</label><input id="sg-ped-dir"></div>
       </div>
-      <div class="fl ff"><label>Buscar producto — stock 🟢 + en camino 🚚</label>
-        <select id="sg-ped-oferta-prod" onchange="sgPedOfertaLoad()"></select>
-        <div id="sg-ped-oferta" style="margin-top:8px;border:1px solid var(--bor);border-radius:8px;padding:8px;background:var(--bg)"></div>
+      <div class="fl ff"><label>Elegí productos — stock 🟢 + en camino 🚚</label>
+        <div id="sg-ped-oferta"></div>
       </div>
       <div class="fl ff"><label>Líneas del pedido</label><div id="sg-ped-lines"></div></div>
       <div class="fl ff"><label>Observaciones</label><textarea id="sg-ped-obs" rows="2"></textarea></div>
@@ -2759,8 +2758,11 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
         <div class="fl"><label>Cooperativa (carga) <span style="font-weight:400;color:var(--mut);font-size:11px">cobra por bulto</span></label><select id="sg-desp-coop"><option value="">— Sin carga —</option></select></div>
         <div class="fl"><label>Bultos cargados <span style="font-weight:400;color:var(--mut);font-size:11px">(si hay cooperativa)</span></label><input type="number" min="0" id="sg-desp-bultos" placeholder="nº de bultos"></div>
       </div>
-      <div class="fl ff"><label>Líneas (elegí producto → lote sugerido por FEFO)</label><div id="sg-desp-items"></div>
-        <button class="btn bo bs" style="margin-top:6px" onclick="sgDespAddItem()">+ Agregar línea</button></div>
+      <div class="fl ff"><label>Elegí lotes del stock 🟢 (FEFO sugiere el que vence antes)</label>
+        <div id="sg-desp-items"></div>
+        <div style="font-weight:600;font-size:12px;margin:10px 0 4px">Líneas a despachar</div>
+        <div id="sg-desp-lines"></div>
+      </div>
       <div class="fl ff"><label>Observaciones</label><textarea id="sg-desp-obs" rows="2"></textarea></div>
       <div id="sg-desp-total" style="font-weight:700;font-size:14px;text-align:right;padding-top:6px;border-top:1px solid var(--bor)"></div>
     </div>
@@ -4586,15 +4588,91 @@ function sgLoadPedidos(){
 }
 // BRIEF 8 — armado del pedido contra OFERTA (stock 🟢 + en camino 🚚). Cada línea reserva su
 // fuente (lote o oc_item). Reserva BLANDA (D1): informativa, no bloquea nada.
+function sgQ(s){ return "'"+String(s==null?'':s).replace(/\\/g,'\\\\').replace(/'/g,"\\'")+"'"; }  // string seguro para onclick
+
+// ── COMPONENTE COMPARTIDO sgItemPicker (Pedido + Despacho) ────────────────────────
+// Panel maestro (productos de /disponibilidad + buscador) → detalle por producto (/oferta:
+// lotes en stock + en camino si modo='pedido') → elegir lotes → kg + "+" → onAdd(tipo, fuenteId,
+// kg, meta). NO arma el body: solo dispara onAdd; el padre puebla SG.pedLines / SG.despItems.
+SG.itemPicker = SG.itemPicker || {};
+function sgItemPicker(opts){
+  var key=opts.contenedor;
+  var st={ modo:opts.modo, onAdd:opts.onAdd||function(){}, productos:[], q:'', sel:null, oferta:null, _prodNombre:'' };
+  SG.itemPicker[key]=st;
+  eid(key).innerHTML='<div style="display:grid;grid-template-columns:1fr 1.3fr;gap:10px">'
+    +'<div style="border:1px solid var(--bor);border-radius:8px;padding:8px;background:var(--card,#fff)">'
+      +'<input type="text" id="'+key+'-q" placeholder="Buscar producto…" oninput="sgIPBuscar('+sgQ(key)+',this.value)" style="width:100%;box-sizing:border-box;margin-bottom:6px;padding:5px 7px;border-radius:6px;border:1px solid var(--bor);background:var(--card,#fff)">'
+      +'<div id="'+key+'-list" style="max-height:260px;overflow:auto"><div style="font-size:11px;color:var(--mut)">Cargando…</div></div>'
+    +'</div>'
+    +'<div id="'+key+'-det" style="border:1px solid var(--bor);border-radius:8px;padding:8px;background:var(--bg)"><div style="font-size:12px;color:var(--mut)">Elegí un producto.</div></div>'
+    +'</div>';
+  api('/api/sg/disponibilidad?incluir_camino='+(opts.modo==='pedido'?1:0)).then(function(r){ st.productos=(r&&r.ok)?r.data:[]; sgIPRenderList(key); });
+}
+function sgIPBuscar(key,v){ SG.itemPicker[key].q=v; sgIPRenderList(key); }
+function sgIPRenderList(key){
+  var st=SG.itemPicker[key]; if(!eid(key+'-list')) return;
+  var inc=st.modo==='pedido', q=(st.q||'').toLowerCase();
+  var lista=st.productos.filter(function(p){ return !q || String(p.nombre).toLowerCase().indexOf(q)>=0; });
+  eid(key+'-list').innerHTML = lista.length ? lista.map(function(p){
+    var on=st.sel&&String(st.sel)===String(p.producto_id);
+    var sub=nr(p.kg_stock)+'kg'+(inc&&p.kg_camino>0?(' +'+nr(p.kg_camino)+'🚚'):'')+' · '+p.n_lotes+'L';
+    return '<div onclick="sgIPSel('+sgQ(key)+','+p.producto_id+')" style="padding:5px 7px;cursor:pointer;border-radius:6px;font-size:12.5px;'+(on?'background:var(--burl,#e8f0f8)':'')+'"><b>'+esc(p.nombre)+'</b> <span style="font-size:11px;color:var(--mut)">'+sub+'</span></div>';
+  }).join('') : '<div style="font-size:11px;color:var(--mut);padding:6px">— sin coincidencias —</div>';
+}
+function sgIPSel(key,pid){
+  var st=SG.itemPicker[key]; st.sel=String(pid); st.oferta=null;
+  st._prodNombre=(st.productos.find(function(x){return String(x.producto_id)===String(pid);})||{}).nombre||'';
+  sgIPRenderList(key);
+  eid(key+'-det').innerHTML='<div style="font-size:11px;color:var(--mut)">Cargando…</div>';
+  api('/api/sg/oferta?producto_id='+pid).then(function(r){ st.oferta=(r&&r.ok)?r.data:{stock:[],en_camino:[]}; sgIPRenderDetalle(key); });
+}
+// Detalle (generaliza sgPedOfertaRender): muestra 'en camino' solo en modo pedido.
+function sgIPRenderDetalle(key){
+  var st=SG.itemPicker[key]; var d=st.oferta||{}; var mostrarCamino=st.modo==='pedido';
+  var stock=d.stock||[], camino=d.en_camino||[], h='';
+  h+='<div style="font-weight:600;font-size:12px;margin-bottom:2px">🟢 En stock</div>';
+  h+= stock.length ? stock.map(function(l){
+    var ck=(l.kg_vigente>0?(l.costo_final||0)/l.kg_vigente:0), venc=(l.dias_restantes!=null?l.dias_restantes+'d':'—');
+    return '<div style="display:grid;grid-template-columns:auto 1fr 60px auto;gap:6px;align-items:center;padding:4px 0;border-bottom:1px solid var(--bor)">'
+      +'<span>'+sgSemEmoji(l.semaforo)+'</span>'
+      +'<span style="font-size:12px"><code>'+esc(l.codigo_lote)+'</code> · '+nr(l.kg_disponibles)+'kg · '+sgMoney(ck)+'/kg · '+venc+(l.kg_reservado>0?(' · <span style="color:var(--mut)">'+nr(l.kg_reservado)+'kg res.</span>'):'')+'</span>'
+      +'<input type="number" id="'+key+'-st-'+l.lote_id+'" placeholder="kg" style="width:100%;box-sizing:border-box;padding:3px 5px">'
+      +'<button class="btn bb bs" onclick="sgIPAdd('+sgQ(key)+',\'lote\','+l.lote_id+','+sgQ(key+'-st-'+l.lote_id)+','+sgQ(l.codigo_lote)+','+sgQ(l.semaforo||'verde')+')">+</button>'
+      +'</div>';
+  }).join('') : '<div style="font-size:11px;color:var(--mut)">— sin stock —</div>';
+  if(mostrarCamino){
+    h+='<div style="font-weight:600;font-size:12px;margin:8px 0 2px">🚚 En camino</div>';
+    h+= camino.length ? camino.map(function(o){
+      return '<div style="display:grid;grid-template-columns:auto 1fr 60px auto;gap:6px;align-items:center;padding:4px 0;border-bottom:1px solid var(--bor)">'
+        +'<span>🚚</span>'
+        +'<span style="font-size:12px"><b>'+esc(o.oc_numero||'')+'</b> · '+nr(o.disponible_camino)+'kg · '+esc(o.proveedor_nombre||'')+'</span>'
+        +'<input type="number" id="'+key+'-oc-'+o.oc_item_id+'" placeholder="kg" style="width:100%;box-sizing:border-box;padding:3px 5px">'
+        +'<button class="btn bb bs" onclick="sgIPAdd('+sgQ(key)+',\'oc_item\','+o.oc_item_id+','+sgQ(key+'-oc-'+o.oc_item_id)+','+sgQ((o.oc_numero||'')+' · '+(o.fecha_oc||''))+',null)">+</button>'
+        +'</div>';
+    }).join('') : '<div style="font-size:11px;color:var(--mut)">— nada en camino —</div>';
+  }
+  eid(key+'-det').innerHTML=h;
+}
+function sgIPAdd(key, tipo, fuenteId, inputId, label, semaforo){
+  var st=SG.itemPicker[key];
+  var kg=Number(eid(inputId).value);
+  if(!(kg>0)){ toast('Poné los kg','er'); return; }
+  // objeto completo del lote (de /oferta) → costo/kg + kg_disponibles para la línea de despacho.
+  var loteObj = tipo==='lote' ? ((st.oferta&&st.oferta.stock||[]).find(function(x){return String(x.lote_id)===String(fuenteId);})) : null;
+  var kgDisp = loteObj ? loteObj.kg_disponibles : 0;
+  var meta={ producto_id:st.sel, producto_nombre:st._prodNombre, codigo_lote:(tipo==='lote'?label:''), semaforo:semaforo, label:label, kg_disponibles:Number(kgDisp)||0, lote:loteObj };
+  eid(inputId).value='';
+  st.onAdd(tipo, fuenteId, kg, meta);
+}
+
 function sgPedOpen(){
-  SG.pedLines=[]; SG._pedProdId=''; SG._pedProdNombre='';
+  SG.pedLines=[];
   eid('sg-ped-cli').innerHTML=sgOpts(SG.cacheCli,'razon_social','','— Elegir —');
   eid('sg-ped-cond').innerHTML=sgOpts(SG.cacheCond,'nombre','','— Sin condición —');
   eid('sg-ped-fiscal').innerHTML=SG_FISCAL.map(function(o){return '<option value="'+o[0]+'">'+o[1]+'</option>';}).join('');
-  eid('sg-ped-oferta-prod').innerHTML=sgOpts(SG.cacheProd,'nombre','','— Elegir producto —');
-  eid('sg-ped-oferta').innerHTML='<div style="font-size:12px;color:var(--mut)">Elegí un producto para ver stock y mercadería en camino.</div>';
   eid('sg-ped-fecha').value=new Date().toISOString().slice(0,10);
   eid('sg-ped-entrega').value=''; eid('sg-ped-dir').value=''; eid('sg-ped-obs').value='';
+  sgItemPicker({ modo:'pedido', contenedor:'sg-ped-oferta', onAdd:sgPedOnAdd });
   sgPedLinesRender();
   eid('sg-ped-modal').classList.add('on');
 }
@@ -4602,47 +4680,10 @@ function sgPedCliChange(){
   var c=SG.cacheCli.find(function(x){return String(x.id)===String(eid('sg-ped-cli').value);});
   if(c){ if(c.tipo_fiscal_habitual)eid('sg-ped-fiscal').value=c.tipo_fiscal_habitual; if(c.condicion_pago_habitual_id)eid('sg-ped-cond').value=c.condicion_pago_habitual_id; if(c.direccion_entrega)eid('sg-ped-dir').value=c.direccion_entrega; }
 }
-function sgPedOfertaLoad(){
-  var pid=eid('sg-ped-oferta-prod').value;
-  SG._pedProdId=pid; SG._pedProdNombre=(SG.cacheProd.find(function(x){return String(x.id)===String(pid);})||{}).nombre||'';
-  if(!pid){ eid('sg-ped-oferta').innerHTML='<div style="font-size:12px;color:var(--mut)">Elegí un producto.</div>'; return; }
-  eid('sg-ped-oferta').innerHTML='<div style="font-size:12px;color:var(--mut)">Cargando…</div>';
-  api('/api/sg/oferta?producto_id='+pid).then(function(r){
-    if(!r||!r.ok){ eid('sg-ped-oferta').innerHTML='<div style="color:var(--err)">Error</div>'; return; }
-    sgPedOfertaRender(r.data);
-  });
-}
-function sgPedOfertaRender(d){
-  var stock=d.stock||[], camino=d.en_camino||[], h='';
-  h+='<div style="font-weight:600;font-size:12px;margin-bottom:2px">🟢 En stock</div>';
-  h+= stock.length ? stock.map(function(l){
-    var ck=(l.kg_vigente>0?(l.costo_final||0)/l.kg_vigente:0), venc=(l.dias_restantes!=null?l.dias_restantes+'d':'—');
-    return '<div style="display:grid;grid-template-columns:auto 1fr 72px auto;gap:6px;align-items:center;padding:4px 0;border-bottom:1px solid var(--bor)">'
-      +'<span>'+sgSemEmoji(l.semaforo)+'</span>'
-      +'<span style="font-size:12px"><code>'+esc(l.codigo_lote)+'</code> · '+nr(l.kg_disponibles)+'kg · '+sgMoney(ck)+'/kg · vence '+venc+(l.kg_reservado>0?(' · <span style="color:var(--mut)">'+nr(l.kg_reservado)+'kg reserv.</span>'):'')+'</span>'
-      +'<input type="number" id="of-st-'+l.lote_id+'" placeholder="kg" style="width:100%;box-sizing:border-box;padding:3px 5px">'
-      +'<button class="btn bb bs" onclick="sgPedAddLine(\'lote\','+l.lote_id+',\'of-st-'+l.lote_id+'\','+sgQ(l.codigo_lote)+','+sgQ(l.semaforo||'verde')+')">+</button>'
-      +'</div>';
-  }).join('') : '<div style="font-size:11px;color:var(--mut);margin-bottom:6px">— sin stock disponible —</div>';
-  h+='<div style="font-weight:600;font-size:12px;margin:8px 0 2px">🚚 En camino</div>';
-  h+= camino.length ? camino.map(function(o){
-    return '<div style="display:grid;grid-template-columns:auto 1fr 72px auto;gap:6px;align-items:center;padding:4px 0;border-bottom:1px solid var(--bor)">'
-      +'<span>🚚</span>'
-      +'<span style="font-size:12px"><b>'+esc(o.oc_numero||'')+'</b> · '+nr(o.disponible_camino)+'kg libres · '+esc(o.proveedor_nombre||'')+' · OC '+(o.fecha_oc||'—')+'</span>'
-      +'<input type="number" id="of-oc-'+o.oc_item_id+'" placeholder="kg" style="width:100%;box-sizing:border-box;padding:3px 5px">'
-      +'<button class="btn bb bs" onclick="sgPedAddLine(\'oc_item\','+o.oc_item_id+',\'of-oc-'+o.oc_item_id+'\','+sgQ((o.oc_numero||'')+' · '+(o.fecha_oc||''))+',null)">+</button>'
-      +'</div>';
-  }).join('') : '<div style="font-size:11px;color:var(--mut)">— nada en camino —</div>';
-  eid('sg-ped-oferta').innerHTML=h;
-}
-function sgQ(s){ return "'"+String(s==null?'':s).replace(/\\/g,'\\\\').replace(/'/g,"\\'")+"'"; }  // string seguro para onclick
-function sgPedAddLine(tipo, fuenteId, inputId, label, semaforo){
-  if(!SG._pedProdId){ toast('Elegí un producto','er'); return; }
-  var kg=Number(eid(inputId).value);
-  if(!(kg>0)){ toast('Poné los kg','er'); return; }
-  SG.pedLines.push({ producto_id:SG._pedProdId, producto_nombre:SG._pedProdNombre, fuente:(tipo==='lote'?'stock':'camino'),
-    tipo:tipo, fuente_id:fuenteId, label:label, semaforo:semaforo, kg:kg, precio:'' });
-  eid(inputId).value='';
+// onAdd del pedido → arma SG.pedLines con la MISMA forma de antes (body de POST /pedidos idéntico).
+function sgPedOnAdd(tipo, fuenteId, kg, meta){
+  SG.pedLines.push({ producto_id:meta.producto_id, producto_nombre:meta.producto_nombre, fuente:(tipo==='lote'?'stock':'camino'),
+    tipo:tipo, fuente_id:fuenteId, label:meta.label, semaforo:meta.semaforo, kg:kg, precio:'' });
   sgPedLinesRender();
 }
 function sgPedDelLine(i){ SG.pedLines.splice(i,1); sgPedLinesRender(); }
@@ -4740,43 +4781,39 @@ function sgDespOpen(){
     eid('sg-desp-fletero').innerHTML=opts.replace('{X}','— Sin fletero —');
     eid('sg-desp-coop').innerHTML=opts.replace('{X}','— Sin carga —');
   });
-  sgDespAddItem();
+  sgItemPicker({ modo:'despacho', contenedor:'sg-desp-items', onAdd:sgDespOnAdd });
+  sgDespRender();
   eid('sg-desp-modal').classList.add('on');
 }
-function sgDespAddItem(){ SG.despItems.push({producto_id:'',lote_id:'',kg:'',precio:'',lotes:[]}); sgDespRender(); }
-function sgDespDelItem(i){ SG.despItems.splice(i,1); sgDespRender(); }
-function sgDespProdChange(i,v){
-  SG.despItems[i].producto_id=v; SG.despItems[i].lote_id=''; SG.despItems[i].lotes=[];
-  if(v){
-    api('/api/sg/lotes-disponibles?producto_id='+v).then(function(r){
-      SG.despItems[i].lotes=(r&&r.ok)?r.data:[];
-      if(SG.despItems[i].lotes.length) SG.despItems[i].lote_id=SG.despItems[i].lotes[0].id; // FEFO sugerido
-      sgDespRender();
-    });
-  } else sgDespRender();
+// onAdd del despacho → SG.despItems con la MISMA forma de antes {producto_id, lote_id, kg, precio,
+// lotes:[...]}. 🔴 lotes lleva kg_disponibles (+ kg_vigente/costo_final) para que sgDespLoteDe y la
+// validación de sobre-despacho de sgDespGuardar sigan andando. Solo stock (despacho ignora camino).
+function sgDespOnAdd(tipo, fuenteId, kg, meta){
+  if(tipo!=='lote') return;
+  var l=meta.lote||{};
+  var loteLinea={ id:fuenteId, codigo_lote:(l.codigo_lote||meta.codigo_lote||meta.label),
+    kg_disponibles:(l.kg_disponibles!=null?l.kg_disponibles:meta.kg_disponibles), kg_vigente:l.kg_vigente, costo_final:l.costo_final, semaforo:(l.semaforo||meta.semaforo) };
+  SG.despItems.push({ producto_id:meta.producto_id, lote_id:fuenteId, kg:kg, precio:'', lotes:[loteLinea] });
+  sgDespRender();
 }
-function sgDespUpd(i,c,v){ SG.despItems[i][c]=v; sgDespRender(); }
+function sgDespDelItem(i){ SG.despItems.splice(i,1); sgDespRender(); }
 function sgDespUpdNR(i,c,v){ SG.despItems[i][c]=v; sgDespTotal(); }
 function sgDespLoteDe(it){ return (it.lotes||[]).find(function(l){return String(l.id)===String(it.lote_id);}); }
 function sgDespRender(){
-  eid('sg-desp-items').innerHTML=SG.despItems.map(function(it,i){
-    var loteOpts=(it.lotes||[]).map(function(l,idx){
-      var venc=l.dias_restantes!=null?(l.dias_restantes+'d'):'';
-      return '<option value="'+l.id+'"'+(String(l.id)===String(it.lote_id)?' selected':'')+'>'+(idx===0?'💡 ':'')+esc(l.codigo_lote)+' · '+nr(l.kg_disponibles)+'kg · vence '+venc+'</option>';
-    }).join('');
+  if(!SG.despItems.length){ eid('sg-desp-lines').innerHTML='<div style="font-size:12px;color:var(--mut)">Elegí lotes del stock 🟢 arriba con +.</div>'; sgDespTotal(); return; }
+  eid('sg-desp-lines').innerHTML=SG.despItems.map(function(it,i){
     var lote=sgDespLoteDe(it);
-    var _kv=lote?(lote.kg_vigente!=null?lote.kg_vigente:lote.kg_reales):0;  // kg vigentes (− decomiso) → costo/kg revaluado
+    var _kv=lote?(lote.kg_vigente!=null?lote.kg_vigente:lote.kg_disponibles):0;
     var costoKg=_kv>0?((lote.costo_final||0)/_kv):0;
     var kg=Number(it.kg)||0, precio=Number(it.precio)||0;
     var margen=kg*precio - kg*costoKg;
-    var info='';
-    if(lote){ info='<div style="font-size:11px;color:var(--mut);grid-column:1/-1;margin:-2px 0 4px">'+(it.lotes[0]&&String(it.lotes[0].id)===String(it.lote_id)?'💡 Sugerido FEFO · ':'')+'costo '+sgMoney(costoKg)+'/kg · disp '+nr(lote.kg_disponibles)+'kg · margen línea <b style="color:'+(margen>=0?'#16a34a':'#dc2626')+'">'+sgMoney(margen)+'</b></div>'; }
-    return '<div style="display:grid;grid-template-columns:1.4fr 1.8fr 0.8fr 0.8fr auto;gap:6px;align-items:center;margin-bottom:4px">'
-      +'<select onchange="sgDespProdChange('+i+',this.value)">'+sgOpts(SG.cacheProd,'nombre',it.producto_id,'— Producto —')+'</select>'
-      +'<select onchange="sgDespUpd('+i+',\'lote_id\',this.value)">'+(loteOpts||'<option value="">— sin stock —</option>')+'</select>'
+    var pnombre=(SG.cacheProd.find(function(x){return String(x.id)===String(it.producto_id);})||{}).nombre||'';
+    var info = lote ? '<div style="font-size:11px;color:var(--mut);grid-column:1/-1;margin:-2px 0 4px">disp '+nr(lote.kg_disponibles)+'kg'+(costoKg>0?(' · costo '+sgMoney(costoKg)+'/kg · margen <b style="color:'+(margen>=0?'#16a34a':'#dc2626')+'">'+sgMoney(margen)+'</b>'):'')+'</div>' : '';
+    return '<div style="display:grid;grid-template-columns:1.7fr 0.8fr 0.8fr auto;gap:6px;align-items:center;margin-bottom:4px">'
+      +'<span style="font-size:12px">'+(lote&&lote.semaforo?sgSemEmoji(lote.semaforo)+' ':'')+esc(pnombre)+' · <code>'+esc(lote?lote.codigo_lote:'')+'</code></span>'
       +'<input type="number" placeholder="kg" value="'+(it.kg||'')+'" onchange="sgDespUpdNR('+i+',\'kg\',this.value)">'
       +'<input type="number" placeholder="$/kg" value="'+(it.precio||'')+'" onchange="sgDespUpdNR('+i+',\'precio\',this.value)">'
-      +(SG.despItems.length>1?'<button class="btn bd bs" onclick="sgDespDelItem('+i+')">×</button>':'<span></span>')
+      +'<button class="btn bd bs" onclick="sgDespDelItem('+i+')">×</button>'
       +info+'</div>';
   }).join('');
   sgDespTotal();
