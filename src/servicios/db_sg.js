@@ -1124,6 +1124,43 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_sg_transf_destino ON sg_transformaciones(lote_destino_id);
 `);
 
+// ── #reproceso caso 1: REPROCESO con clasificación (1 madre → N hijos + merma) ──
+// Entra 1 lote madre + un gasto de proceso; salen N lotes hijos de distinta calidad + una merma.
+// Reúsa transformado_de (caso 2): los hijos son lotes con costo CARGADO, fuera de prorrateo/compra.
+// La cabecera captura el OUTFLOW COMPLETO de la madre (kg_procesados incl. merma + costo_madre_
+// consumido), que se suma al de sg_transformaciones para bajar disponible/costo de la madre.
+//
+// (a) Cabecera del reproceso. kg_procesados = lo consumido de la madre (aprovechable + merma);
+//     kg_merma = kg_procesados − Σ kg hijos (no genera lote: sus kg desaparecen del inventario y
+//     su costo lo absorben los hijos). costo_madre_consumido = snapshot kg_procesados × costo/kg
+//     madre (lo que SALE de la madre). gasto_proceso = input (mano de obra, etc.), va SOLO acá
+//     (no se espeja como gasto_directo → sin doble conteo). estado: 'revertido' reservado para V2.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS sg_reprocesos (
+    id                     INTEGER PRIMARY KEY AUTOINCREMENT,
+    lote_madre_id          INTEGER NOT NULL REFERENCES sg_lotes(id),
+    kg_procesados          REAL NOT NULL,
+    kg_merma               REAL NOT NULL DEFAULT 0,
+    costo_madre_consumido  REAL NOT NULL DEFAULT 0,
+    gasto_proceso          REAL NOT NULL DEFAULT 0,
+    gasto_descripcion      TEXT,
+    estado                 TEXT NOT NULL DEFAULT 'activo' CHECK(estado IN ('activo','revertido')),
+    usuario_id             INTEGER,
+    fecha                  TEXT DEFAULT (datetime('now','localtime'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_sg_reproc_madre ON sg_reprocesos(lote_madre_id);
+`);
+
+// (b) sg_lotes += reproceso_id: agrupa los hijos de un reproceso y los distingue de las cubetas
+//     del caso 2 (ambos tienen transformado_de, pero solo los hijos llevan reproceso_id).
+try {
+  const cols = db.prepare("PRAGMA table_info(sg_lotes)").all().map(c => c.name);
+  if (!cols.includes('reproceso_id')) {
+    db.exec("ALTER TABLE sg_lotes ADD COLUMN reproceso_id INTEGER REFERENCES sg_reprocesos(id)");
+    console.log('[DB] SG sg_lotes migrado (+reproceso_id)');
+  }
+} catch (e) { console.error('[DB] SG migración sg_lotes (reproceso_id):', e.message); }
+
 console.log('[DB] Módulo San Gerónimo (sg_*) inicializado');
 
 export default db;
