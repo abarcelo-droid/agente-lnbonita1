@@ -1161,6 +1161,33 @@ try {
   }
 } catch (e) { console.error('[DB] SG migración sg_lotes (reproceso_id):', e.message); }
 
+// ── BRIEF 8: Pedidos-contra-OC (RESERVAS) — 100% aditivo, sin ALTER ───────────────
+// Reserva BLANDA (D1): es INFORMATIVA, no descuenta el disponible ni bloquea el despacho.
+//   tipo='oc_item' → reserva sobre mercadería EN CAMINO (oc_item de una OC abierta).
+//   tipo='lote'    → reserva sobre STOCK (un lote concreto), o el resultado de concretar una
+//                    reserva de oc_item cuando llega la recepción (FIFO×FEFO, D4).
+// estados: activa (vigente) · concretada (oc_item → lote al recibir) · despachada (futuro) ·
+//   cancelada (remanente no cubierto D2, u OC anulada D3). origen_oc_item_id = trazabilidad
+//   de qué oc_item generó una reserva de lote. NO se hace ALTER a sg_pedido_items.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS sg_reservas (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    pedido_item_id    INTEGER NOT NULL REFERENCES sg_pedido_items(id),
+    tipo              TEXT NOT NULL CHECK(tipo IN ('lote','oc_item')),
+    lote_id           INTEGER REFERENCES sg_lotes(id),
+    oc_item_id        INTEGER REFERENCES sg_oc_items(id),
+    kg                REAL NOT NULL,
+    estado            TEXT NOT NULL DEFAULT 'activa' CHECK(estado IN ('activa','concretada','despachada','cancelada')),
+    origen_oc_item_id INTEGER REFERENCES sg_oc_items(id),
+    usuario_id        INTEGER,
+    creado_en         TEXT DEFAULT (datetime('now','localtime')),
+    concretada_en     TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_sg_reservas_lote    ON sg_reservas(lote_id);
+  CREATE INDEX IF NOT EXISTS idx_sg_reservas_ocitem  ON sg_reservas(oc_item_id);
+  CREATE INDEX IF NOT EXISTS idx_sg_reservas_peditem ON sg_reservas(pedido_item_id);
+`);
+
 console.log('[DB] Módulo San Gerónimo (sg_*) inicializado');
 
 export default db;
