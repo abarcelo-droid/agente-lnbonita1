@@ -181,7 +181,10 @@ function serializar(key, fn) {
 
 function persistirReservada(database, { comprobante, ptoVta, cbteTipo, cbteNro, ambiente, fecha, userId }) {
   const tipoLetra = (cbteTipo === 1 || cbteTipo === 3) ? 'A' : 'B';
-  const numero = 'AFIPH-' + ptoVta + '-' + cbteTipo + '-' + cbteNro + '-' + Date.now().toString(36); // único (homologación)
+  // Identificador interno único (NO es el número fiscal: ese es PV + cbte_nro + CAE). Prefijo
+  // ambiente-aware: AFIPH- en homologación (test), AFIP- en producción.
+  const prefijo = ambiente === 'homologacion' ? 'AFIPH-' : 'AFIP-';
+  const numero = prefijo + ptoVta + '-' + cbteTipo + '-' + cbteNro + '-' + Date.now().toString(36);
   let facturaId;
   database.transaction(() => {
     const info = database.prepare(`INSERT INTO sg_ven_facturas
