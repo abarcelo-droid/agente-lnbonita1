@@ -1037,11 +1037,51 @@ db.exec(`
     color_anterior TEXT,
     color_nuevo    TEXT NOT NULL CHECK(color_nuevo IN ('verde','amarillo','rojo')),
     motivo         TEXT,
-    origen         TEXT NOT NULL CHECK(origen IN ('reproceso','observado','manual','devolucion')),
+    origen         TEXT NOT NULL CHECK(origen IN ('reproceso','observado','manual','devolucion','decomiso')),
     usuario_id     INTEGER,
     fecha          TEXT DEFAULT (datetime('now','localtime'))
   );
   CREATE INDEX IF NOT EXISTS idx_sg_lote_sem_hist ON sg_lote_semaforo_historial(lote_id);
+`);
+
+// ── #reproceso caso 3: DECOMISO PARCIAL ────────────────────────────────────────
+// (a) origen del historial += 'decomiso'. El CHECK no se puede ALTER → rebuild idempotente
+//     para DBs ya deployadas (las nuevas ya se crean con el CHECK ampliado arriba).
+try {
+  const cur = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='sg_lote_semaforo_historial'").get();
+  if (cur && !/'decomiso'/.test(cur.sql)) {
+    const fkPrev = db.pragma('foreign_keys', { simple: true });
+    db.pragma('foreign_keys = OFF');
+    db.transaction(() => {
+      db.exec(`CREATE TABLE sg_lote_semaforo_historial_new (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        lote_id INTEGER NOT NULL REFERENCES sg_lotes(id),
+        color_anterior TEXT,
+        color_nuevo TEXT NOT NULL CHECK(color_nuevo IN ('verde','amarillo','rojo')),
+        motivo TEXT,
+        origen TEXT NOT NULL CHECK(origen IN ('reproceso','observado','manual','devolucion','decomiso')),
+        usuario_id INTEGER, fecha TEXT DEFAULT (datetime('now','localtime')))`);
+      db.exec("INSERT INTO sg_lote_semaforo_historial_new SELECT * FROM sg_lote_semaforo_historial");
+      db.exec("DROP TABLE sg_lote_semaforo_historial");
+      db.exec("ALTER TABLE sg_lote_semaforo_historial_new RENAME TO sg_lote_semaforo_historial");
+      db.exec("CREATE INDEX IF NOT EXISTS idx_sg_lote_sem_hist ON sg_lote_semaforo_historial(lote_id)");
+    })();
+    db.pragma(`foreign_keys = ${fkPrev ? 'ON' : 'OFF'}`);
+    console.log('[DB] SG sg_lote_semaforo_historial CHECK origen +decomiso');
+  }
+} catch (e) { console.error('[DB] SG migración historial (decomiso):', e.message); }
+
+// (b) Eventos de decomiso parcial: una fila por evento. Σ kg = merma del lote (NO toca kg_reales).
+db.exec(`
+  CREATE TABLE IF NOT EXISTS sg_lote_decomisos (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    lote_id    INTEGER NOT NULL REFERENCES sg_lotes(id),
+    kg         REAL NOT NULL,
+    motivo     TEXT,
+    usuario_id INTEGER,
+    fecha      TEXT DEFAULT (datetime('now','localtime'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_sg_lote_decom ON sg_lote_decomisos(lote_id);
 `);
 
 console.log('[DB] Módulo San Gerónimo (sg_*) inicializado');

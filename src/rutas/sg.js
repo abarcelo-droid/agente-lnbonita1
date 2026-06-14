@@ -1468,6 +1468,35 @@ router.post('/lotes/:id/baja', requireAdmin, (req, res) => {
   } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
 });
 
+// Decomiso PARCIAL de un lote: saca X kg (merma) SIN tocar kg_reales. Baja el disponible y revalúa
+// el costo/kg (costo_final fijo / kg vigentes). El lote SIGUE activo; pasa a 'amarillo' si estaba
+// verde. requireAuth (cualquiera con acceso, incl. operario). La baja TOTAL (disposal) es aparte.
+router.post('/lotes/:id/decomiso', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const kg = Number(req.body?.kg);
+    const motivo = String(req.body?.motivo || '').trim();
+    if (!(kg > 0)) return res.status(400).json({ ok: false, error: 'kg debe ser > 0' });
+    if (!motivo) return res.status(400).json({ ok: false, error: 'motivo requerido' });
+    const lote = db.prepare('SELECT id, kg_reales, estado, semaforo FROM sg_lotes WHERE id=? AND activo=1').get(req.params.id);
+    if (!lote) return res.status(404).json({ ok: false, error: 'Lote no encontrado' });
+    if (lote.estado === 'bajado') return res.status(400).json({ ok: false, error: 'El lote está dado de baja' });
+    const disp = (lote.kg_reales || 0) - kgDespachados(db, lote.id) - kgDecomisado(db, lote.id);
+    if (kg > disp + 0.01) return res.status(400).json({ ok: false, error: `No podés decomisar ${kg}kg: hay ${disp.toFixed(1)}kg disponibles` });
+    db.transaction(() => {
+      db.prepare('INSERT INTO sg_lote_decomisos (lote_id, kg, motivo, usuario_id) VALUES (?,?,?,?)').run(lote.id, kg, motivo, uid(req));
+      // semáforo → amarillo SOLO si estaba verde (si ya amarillo/rojo, no lo cambia ni registra).
+      if (lote.semaforo === 'verde') {
+        db.prepare("UPDATE sg_lotes SET semaforo='amarillo', modificado_en=datetime('now','localtime') WHERE id=?").run(lote.id);
+        db.prepare(`INSERT INTO sg_lote_semaforo_historial (lote_id, color_anterior, color_nuevo, motivo, origen, usuario_id)
+          VALUES (?, 'verde', 'amarillo', ?, 'decomiso', ?)`).run(lote.id, `Decomiso ${kg}kg · ${motivo}`, uid(req));
+      }
+      recalcEstadoLote(db, lote.id);   // umbral sobre kg vigentes → si no queda stock, despachado_total
+    })();
+    res.json({ ok: true, data: { id: lote.id, kg_decomisado: kg, kg_disponible: +(disp - kg).toFixed(2) } });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
 // ════════════════════════════════════════════════════════════════════════════
 // FASE 4 — VENTAS: Pedidos + Despachos (FEFO + margen) + CC clientes + traza forward
 // ════════════════════════════════════════════════════════════════════════════
@@ -1479,8 +1508,10 @@ function recalcEstadoLote(db, loteId) {
   const desp = db.prepare(`SELECT COALESCE(SUM(di.kg_despachados),0) s
     FROM sg_despacho_items di JOIN sg_despachos d ON d.id=di.despacho_id AND d.activo=1
     WHERE di.lote_id=?`).get(loteId).s;
+  // umbral sobre kg VIGENTES (kg_reales − Σ decomiso): si se despachó todo lo que quedaba → total.
+  const kgVig = (l.kg_reales || 0) - kgDecomisado(db, loteId);
   let estado = 'disponible';
-  if (desp >= (l.kg_reales || 0) - 0.01 && desp > 0) estado = 'despachado_total';
+  if (desp >= kgVig - 0.01 && desp > 0) estado = 'despachado_total';
   else if (desp > 0) estado = 'despachado_parcial';
   db.prepare("UPDATE sg_lotes SET estado=?, modificado_en=datetime('now','localtime') WHERE id=?").run(estado, loteId);
 }
@@ -1500,6 +1531,11 @@ function kgDespachados(db, loteId) {
   return db.prepare(`SELECT COALESCE(SUM(di.kg_despachados),0) s
     FROM sg_despacho_items di JOIN sg_despachos d ON d.id=di.despacho_id AND d.activo=1
     WHERE di.lote_id=?`).get(loteId).s;
+}
+
+// kg decomisados (merma) de un lote — Σ de sg_lote_decomisos. NO toca kg_reales.
+function kgDecomisado(db, loteId) {
+  return db.prepare('SELECT COALESCE(SUM(kg),0) s FROM sg_lote_decomisos WHERE lote_id=?').get(loteId).s;
 }
 
 // ── PEDIDOS ──────────────────────────────────────────────────────────────────
@@ -1583,10 +1619,14 @@ router.get('/lotes-disponibles', requireAuth, (req, res) => {
     const rows = db.prepare(`
       SELECT * FROM (
         SELECT l.id, l.codigo_lote, l.producto_id, pr.nombre AS producto_nombre, l.calidad, l.semaforo,
-          l.costo_final, l.kg_reales, l.precio_unitario_kg, l.fecha_vencimiento_estimada,
+          l.costo_final, l.kg_reales,
+          (l.kg_reales - COALESCE((SELECT SUM(kg) FROM sg_lote_decomisos WHERE lote_id=l.id),0)) AS kg_vigente,
+          l.precio_unitario_kg, l.fecha_vencimiento_estimada,
           CAST(julianday(l.fecha_vencimiento_estimada) - julianday(date('now','localtime')) AS INTEGER) AS dias_restantes,
-          (l.kg_reales - COALESCE((SELECT SUM(di.kg_despachados) FROM sg_despacho_items di
-             JOIN sg_despachos d ON d.id=di.despacho_id AND d.activo=1 WHERE di.lote_id=l.id),0)) AS kg_disponibles
+          (l.kg_reales
+             - COALESCE((SELECT SUM(kg) FROM sg_lote_decomisos WHERE lote_id=l.id),0)
+             - COALESCE((SELECT SUM(di.kg_despachados) FROM sg_despacho_items di
+                 JOIN sg_despachos d ON d.id=di.despacho_id AND d.activo=1 WHERE di.lote_id=l.id),0)) AS kg_disponibles
         FROM sg_lotes l LEFT JOIN sg_productos pr ON pr.id=l.producto_id
         WHERE l.activo=1 AND l.estado IN ('disponible','reservado','despachado_parcial') AND l.producto_id=?
       ) WHERE kg_disponibles > 0.01
@@ -1663,7 +1703,7 @@ router.post('/despachos', requireAdmin, (req, res) => {
       const lote = db.prepare('SELECT kg_reales, estado FROM sg_lotes WHERE id=? AND activo=1').get(loteId);
       if (!lote) return res.status(400).json({ ok: false, error: 'Lote inexistente: ' + loteId });
       if (lote.estado === 'bajado') return res.status(400).json({ ok: false, error: 'Lote dado de baja: ' + loteId });
-      const disp = (lote.kg_reales || 0) - kgDespachados(db, loteId);
+      const disp = (lote.kg_reales || 0) - kgDespachados(db, loteId) - kgDecomisado(db, loteId);
       if (pedidoLote[loteId] > disp + 0.01) {
         return res.status(400).json({ ok: false, error: `Lote ${loteId}: pedís ${pedidoLote[loteId]}kg pero hay ${disp.toFixed(1)}kg disponibles` });
       }
@@ -1691,9 +1731,10 @@ router.post('/despachos', requireAdmin, (req, res) => {
         const kg = Number(it.kg_despachados);
         const precio = Number(it.precio_por_kg || 0);
         const subtotal = kg * precio;
-        // costo_final del lote es el costo TOTAL del lote (no por kg) → prorratear por kg.
-        // (mismo cálculo que el front del modal: costo_final / kg_reales). Ver db_sg.js backfill.
-        const costoPorKg = lote.kg_reales > 0 ? (lote.costo_final || 0) / lote.kg_reales : 0;
+        // costo_final del lote es el costo TOTAL → costo/kg sobre kg VIGENTES (kg_reales − decomiso),
+        // así la merma revalúa lo despachado. (mismo cálculo que el front del modal.)
+        const kgVig = (lote.kg_reales || 0) - kgDecomisado(db, it.lote_id);
+        const costoPorKg = kgVig > 0 ? (lote.costo_final || 0) / kgVig : 0;
         const margen = subtotal - kg * costoPorKg;
         const bultos = Number(it.cantidad_presentaciones || 0);
         ins.run(despachoId, it.lote_id, lote.producto_id, it.presentacion_id || null,
@@ -1900,8 +1941,11 @@ router.get('/cc-clientes', requireAuth, (req, res) => {
 // FASE 5 — DASHBOARD + REPORTES (solo lectura, depende de F1-F4)
 // ════════════════════════════════════════════════════════════════════════════
 
-// Costo por kg de un lote = costo_final / kg_reales (costo_final es TOTAL del lote).
-const COSTO_KG = '(COALESCE(l.costo_final,0)/NULLIF(l.kg_reales,0))';
+// Costo por kg de un lote = costo_final / kg VIGENTES (costo_final es TOTAL del lote).
+// kg vigentes = kg_reales − Σ decomiso (merma). costo_final NO cambia → al bajar el
+// denominador, el costo/kg sube solo (revaluación inmediata sobre lo que queda).
+const KG_VIGENTE = '(l.kg_reales - COALESCE((SELECT SUM(kg) FROM sg_lote_decomisos WHERE lote_id=l.id),0))';
+const COSTO_KG = `(COALESCE(l.costo_final,0)/NULLIF(${KG_VIGENTE},0))`;
 // Margen de una línea de despacho calculado desde el costo por kg (no depende del
 // margen_estimado guardado → robusto frente a datos viejos).
 const MARGEN_LINEA = `(di.subtotal - di.kg_despachados*${COSTO_KG})`;

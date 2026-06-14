@@ -4148,7 +4148,8 @@ function sgDespRender(){
       return '<option value="'+l.id+'"'+(String(l.id)===String(it.lote_id)?' selected':'')+'>'+(idx===0?'💡 ':'')+esc(l.codigo_lote)+' · '+nr(l.kg_disponibles)+'kg · vence '+venc+'</option>';
     }).join('');
     var lote=sgDespLoteDe(it);
-    var costoKg=lote&&lote.kg_reales?((lote.costo_final||0)/lote.kg_reales):0;
+    var _kv=lote?(lote.kg_vigente!=null?lote.kg_vigente:lote.kg_reales):0;  // kg vigentes (− decomiso) → costo/kg revaluado
+    var costoKg=_kv>0?((lote.costo_final||0)/_kv):0;
     var kg=Number(it.kg)||0, precio=Number(it.precio)||0;
     var margen=kg*precio - kg*costoKg;
     var info='';
@@ -4165,7 +4166,7 @@ function sgDespRender(){
 }
 function sgDespTotal(){
   var tot=0, marg=0;
-  SG.despItems.forEach(function(it){ var lote=sgDespLoteDe(it); var kg=Number(it.kg)||0, precio=Number(it.precio)||0; var costoKg=lote&&lote.kg_reales?((lote.costo_final||0)/lote.kg_reales):0; tot+=kg*precio; marg+=kg*precio-kg*costoKg; });
+  SG.despItems.forEach(function(it){ var lote=sgDespLoteDe(it); var kg=Number(it.kg)||0, precio=Number(it.precio)||0; var _kv=lote?(lote.kg_vigente!=null?lote.kg_vigente:lote.kg_reales):0; var costoKg=_kv>0?((lote.costo_final||0)/_kv):0; tot+=kg*precio; marg+=kg*precio-kg*costoKg; });
   eid('sg-desp-total').innerHTML='Total: '+sgMoney(tot)+' · Margen estimado: <span style="color:'+(marg>=0?'#16a34a':'#dc2626')+'">'+sgMoney(marg)+'</span>';
 }
 function sgDespGuardar(){
