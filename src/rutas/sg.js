@@ -788,6 +788,26 @@ function crearLoteTransformado(db, { origen, productoDestinoId, kg, factor, user
   return { loteId: destinoId, codigoLote: codigo, costoTransferido: costoTransf, costoKgOrigen: +costoKgOrigen.toFixed(4) };
 }
 
+// #reproceso caso 1: crea un lote-HIJO de un reproceso (clasificación). Hermano de
+// crearLoteTransformado pero: producto_id LIBRE (igual o distinto a la madre), costo CARGADO =
+// costo_asignado (definido caso por caso, NO snapshot), y calidad + semáforo los ELIGE quien carga
+// (no se heredan: primera puede ser verde, segunda amarilla). transformado_de=madre → queda fuera
+// de prorrateo/compra. reproceso_id agrupa los hijos. NO recalcula la madre (lo hace el endpoint
+// una sola vez al cerrar). Hereda fecha_ingreso/vencimiento/origen de la madre (misma mercadería).
+function crearLoteHijo(db, { madre, reprocesoId, productoId, kg, costoAsignado, calidad, semaforo, userId }) {
+  const costo = +(+costoAsignado || 0).toFixed(2);
+  const codigo = nextNumero(db, 'SG-LT', 'sg_lotes', 'codigo_lote');
+  const info = db.prepare(`INSERT INTO sg_lotes
+    (codigo_lote, recepcion_id, oc_item_id, producto_id, kg_reales, precio_unitario_kg, costo_base,
+     calidad, calibre, origen, fecha_ingreso, fecha_vencimiento_estimada, estado, costo_final,
+     semaforo, transformado_de, reproceso_id, creado_por)
+    VALUES (?, NULL, NULL, ?, ?, NULL, ?, ?, ?, ?, ?, ?, 'disponible', ?, ?, ?, ?, ?)`).run(
+    codigo, productoId, kg, costo,
+    val(calidad), madre.calibre, madre.origen, madre.fecha_ingreso, madre.fecha_vencimiento_estimada,
+    costo, semaforo || 'verde', madre.id, reprocesoId, userId || null);
+  return { loteId: info.lastInsertRowid, codigoLote: codigo, costo };
+}
+
 // Actualiza estado de la OC según kg recibidos vs estimados.
 function actualizarEstadoOC(db, ocId) {
   const items = db.prepare('SELECT id, kg_estimados FROM sg_oc_items WHERE oc_id=?').all(ocId);
@@ -1607,6 +1627,103 @@ router.post('/transformaciones/:id/revertir', requireAuth, (req, res) => {
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
+// #reproceso caso 1: REPROCESO con clasificación. Entra 1 lote madre + un gasto de proceso; salen
+// N lotes hijos de distinta calidad + una merma. El costo (madre consumida + gasto) se reparte
+// entre los hijos vendibles; la merma NO recibe costo (su parte la absorben los hijos → el costo/kg
+// de lo aprovechable sube). La madre baja disponible por kg_procesados (incl. merma) y costo_final
+// por costo_madre_consumido; kg_reales INTACTO. requireAuth.
+// Body: { kg_procesados, gasto_proceso?, gasto_descripcion?, hijos:[{ producto_id, kg, calidad,
+//   semaforo, costo_asignado? }] }. Si los hijos no traen costo_asignado, se auto-reparte por kg
+//   el total (costo_madre_consumido + gasto_proceso); si lo traen, se valida conservación (±0.01).
+router.post('/lotes/:id/reproceso', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const b = req.body || {};
+    const hijos = Array.isArray(b.hijos) ? b.hijos : [];
+    if (!hijos.length) return res.status(400).json({ ok: false, error: 'El reproceso necesita al menos un lote hijo' });
+    const gasto = (b.gasto_proceso != null && b.gasto_proceso !== '') ? Number(b.gasto_proceso) : 0;
+    if (!(gasto >= 0)) return res.status(400).json({ ok: false, error: 'gasto_proceso inválido' });
+
+    const madre = db.prepare(`SELECT id, producto_id, kg_reales, costo_final, calibre, origen,
+      fecha_ingreso, fecha_vencimiento_estimada, estado FROM sg_lotes WHERE id=? AND activo=1`).get(req.params.id);
+    if (!madre) return res.status(404).json({ ok: false, error: 'Lote madre no encontrado' });
+    if (madre.estado === 'bajado') return res.status(400).json({ ok: false, error: 'El lote madre está dado de baja' });
+
+    // Validar/normalizar hijos: kg>0, producto válido (default=madre), calidad/semáforo válidos.
+    const SEM = ['verde', 'amarillo', 'rojo'];
+    let sumaKgHijos = 0;
+    for (const h of hijos) {
+      h.kg = Number(h.kg);
+      if (!(h.kg > 0)) return res.status(400).json({ ok: false, error: 'Cada hijo necesita kg > 0' });
+      h.producto_id = h.producto_id != null ? Number(h.producto_id) : madre.producto_id;
+      if (!db.prepare('SELECT id FROM sg_productos WHERE id=? AND activo=1').get(h.producto_id)) {
+        return res.status(400).json({ ok: false, error: 'Producto inválido en hijo: ' + h.producto_id });
+      }
+      if (h.semaforo && !SEM.includes(h.semaforo)) return res.status(400).json({ ok: false, error: 'semaforo inválido: ' + h.semaforo });
+      sumaKgHijos += h.kg;
+    }
+
+    // kg_procesados: si no viene, = aprovechable (sin merma). Debe ser ≥ Σ kg hijos (la diferencia
+    // es la merma) y ≤ disponible de la madre.
+    const disp = (madre.kg_reales || 0) - kgDespachados(db, madre.id) - kgDecomisado(db, madre.id) - kgTransformado(db, madre.id);
+    const kgProcesados = (b.kg_procesados != null && b.kg_procesados !== '') ? Number(b.kg_procesados) : +sumaKgHijos.toFixed(2);
+    if (!(kgProcesados > 0)) return res.status(400).json({ ok: false, error: 'kg_procesados debe ser > 0' });
+    if (kgProcesados < sumaKgHijos - 0.01) return res.status(400).json({ ok: false, error: `kg_procesados (${kgProcesados}) no puede ser menor que la suma de los hijos (${sumaKgHijos.toFixed(2)})` });
+    if (kgProcesados > disp + 0.01) return res.status(400).json({ ok: false, error: `No podés reprocesar ${kgProcesados}kg: hay ${disp.toFixed(1)}kg disponibles` });
+    const kgMerma = +(kgProcesados - sumaKgHijos).toFixed(2);
+
+    // costo que SALE de la madre = kg_procesados × costo/kg vigente (incluye el costo de la merma).
+    const kgVigMadre = (madre.kg_reales || 0) - kgDecomisado(db, madre.id) - kgTransformado(db, madre.id);
+    const costoKgMadre = kgVigMadre > 0 ? (madre.costo_final || 0) / kgVigMadre : 0;
+    const costoMadreConsumido = +(kgProcesados * costoKgMadre).toFixed(2);
+    const totalRepartir = +(costoMadreConsumido + gasto).toFixed(2);
+
+    // costo_asignado por hijo: default auto-repartido por kg (proporcional) si no vino; si vino,
+    // se valida conservación (Σ = costoMadreConsumido + gasto, ±0.01).
+    const traenCosto = hijos.some(h => h.costo_asignado != null && h.costo_asignado !== '');
+    if (traenCosto) {
+      const sumaCosto = hijos.reduce((a, h) => a + Number(h.costo_asignado || 0), 0);
+      if (Math.abs(sumaCosto - totalRepartir) > 0.01) {
+        return res.status(400).json({ ok: false, error: `La suma de costo_asignado (${sumaCosto.toFixed(2)}) debe igualar el total a repartir (${totalRepartir.toFixed(2)} = costo madre ${costoMadreConsumido.toFixed(2)} + gasto ${gasto.toFixed(2)})` });
+      }
+      for (const h of hijos) h._costo = +Number(h.costo_asignado || 0).toFixed(2);
+    } else {
+      // auto-reparto por kg; el último hijo absorbe el redondeo para que cuadre exacto.
+      let acum = 0;
+      hijos.forEach((h, i) => {
+        h._costo = i === hijos.length - 1 ? +(totalRepartir - acum).toFixed(2) : +(totalRepartir * (h.kg / sumaKgHijos)).toFixed(2);
+        acum = +(acum + h._costo).toFixed(2);
+      });
+    }
+
+    let out;
+    db.transaction(() => {
+      const info = db.prepare(`INSERT INTO sg_reprocesos
+        (lote_madre_id, kg_procesados, kg_merma, costo_madre_consumido, gasto_proceso, gasto_descripcion, usuario_id)
+        VALUES (?,?,?,?,?,?,?)`).run(madre.id, kgProcesados, kgMerma, costoMadreConsumido, gasto, val(b.gasto_descripcion), uid(req));
+      const reprocesoId = info.lastInsertRowid;
+      const hijosOut = hijos.map(h => {
+        const r = crearLoteHijo(db, { madre, reprocesoId, productoId: h.producto_id, kg: h.kg, costoAsignado: h._costo,
+          calidad: h.calidad, semaforo: h.semaforo, userId: uid(req) });
+        return { lote_id: r.loteId, codigo: r.codigoLote, producto_id: h.producto_id, kg: h.kg, calidad: val(h.calidad),
+          semaforo: h.semaforo || 'verde', costo_asignado: r.costo, costo_por_kg: +(r.costo / h.kg).toFixed(4) };
+      });
+      // la madre pierde kg_procesados de disponible y costo_madre_consumido de costo_final (recalc).
+      recalcCostoLote(db, madre.id);
+      recalcEstadoLote(db, madre.id);
+      out = { reprocesoId, hijosOut };
+    })();
+
+    res.json({ ok: true, data: {
+      reproceso_id: out.reprocesoId, lote_madre_id: madre.id,
+      kg_procesados: kgProcesados, kg_merma: kgMerma, kg_aprovechable: +sumaKgHijos.toFixed(2),
+      costo_madre_consumido: costoMadreConsumido, gasto_proceso: gasto, total_repartido: totalRepartir,
+      costo_kg_madre: +costoKgMadre.toFixed(4), kg_disponible_madre: +(disp - kgProcesados).toFixed(2),
+      hijos: out.hijosOut
+    } });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
 // ════════════════════════════════════════════════════════════════════════════
 // FASE 4 — VENTAS: Pedidos + Despachos (FEFO + margen) + CC clientes + traza forward
 // ════════════════════════════════════════════════════════════════════════════
@@ -1649,19 +1766,25 @@ function kgDecomisado(db, loteId) {
   return db.prepare('SELECT COALESCE(SUM(kg),0) s FROM sg_lote_decomisos WHERE lote_id=?').get(loteId).s;
 }
 
-// kg transformados (que SALIERON de este lote hacia otro) — Σ de sg_transformaciones.
-// NO toca kg_reales. Descuento PERMANENTE (la reversión crea lote nuevo, no devuelve acá):
-// por eso NO se filtra por estado. Baja el disponible Y el costo/kg-denominador del origen.
+// kg que SALIERON de este lote = transformaciones (caso 2) + reprocesos (caso 1, kg_procesados
+// incluye la merma). NO toca kg_reales. Descuento PERMANENTE (la reversión crea lote nuevo, no
+// devuelve acá): por eso NO se filtra por estado en sg_transformaciones. El reproceso sí filtra
+// estado='activo' (la reversión de reproceso, V2, marcará 'revertido'). Baja disponible + KG_VIGENTE.
 function kgTransformado(db, loteId) {
-  return db.prepare('SELECT COALESCE(SUM(kg_transformados),0) s FROM sg_transformaciones WHERE lote_origen_id=?').get(loteId).s;
+  const t = db.prepare('SELECT COALESCE(SUM(kg_transformados),0) s FROM sg_transformaciones WHERE lote_origen_id=?').get(loteId).s;
+  const r = db.prepare("SELECT COALESCE(SUM(kg_procesados),0) s FROM sg_reprocesos WHERE lote_madre_id=? AND estado='activo'").get(loteId).s;
+  return t + r;
 }
-// Costo total que SALIÓ de este lote por transformaciones (para reducir su costo_final en
-// recalcCostoLote → la valuación de inventario suma sin doble conteo, decisión 3/opción B).
+// Costo total que SALIÓ de este lote = transformaciones + reprocesos (costo_madre_consumido). Reduce
+// su costo_final en recalcCostoLote → la valuación de inventario suma sin doble conteo (decisión 3/B).
 function costoTransferido(db, loteId) {
-  return db.prepare('SELECT COALESCE(SUM(costo_transferido),0) s FROM sg_transformaciones WHERE lote_origen_id=?').get(loteId).s;
+  const t = db.prepare('SELECT COALESCE(SUM(costo_transferido),0) s FROM sg_transformaciones WHERE lote_origen_id=?').get(loteId).s;
+  const r = db.prepare("SELECT COALESCE(SUM(costo_madre_consumido),0) s FROM sg_reprocesos WHERE lote_madre_id=? AND estado='activo'").get(loteId).s;
+  return t + r;
 }
-// Fragmento SQL reutilizable: Σ kg transformados de un lote 'l' (mismo criterio que kgTransformado).
-const SUM_TRANSF = "COALESCE((SELECT SUM(kg_transformados) FROM sg_transformaciones WHERE lote_origen_id=l.id),0)";
+// Fragmento SQL reutilizable: Σ kg que salieron del lote 'l' (transformaciones + reprocesos activos).
+const SUM_TRANSF = "(COALESCE((SELECT SUM(kg_transformados) FROM sg_transformaciones WHERE lote_origen_id=l.id),0)"
+  + " + COALESCE((SELECT SUM(kg_procesados) FROM sg_reprocesos WHERE lote_madre_id=l.id AND estado='activo'),0))";
 
 // ── PEDIDOS ──────────────────────────────────────────────────────────────────
 router.post('/pedidos', requireAdmin, (req, res) => {
