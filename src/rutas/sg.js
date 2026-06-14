@@ -1366,6 +1366,29 @@ router.put('/lotes/:id', requireAdmin, (req, res) => {
   } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
 });
 
+// Semáforo del lote — cambio MANUAL (un comercial lo baja a amarillo/rojo). Pide motivo y
+// registra el cambio en el historial con origen='manual'. (reproceso/observado/devolucion
+// van por sus propios flujos.) requireAuth: cualquier usuario autenticado.
+const SEM_COLORES = ['verde', 'amarillo', 'rojo'];
+router.patch('/lotes/:id/semaforo', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const color = String(req.body?.color || '');
+    const motivo = String(req.body?.motivo || '').trim();
+    if (!SEM_COLORES.includes(color)) return res.status(400).json({ ok: false, error: 'color inválido (verde/amarillo/rojo)' });
+    if (!motivo) return res.status(400).json({ ok: false, error: 'motivo requerido' });
+    const lote = db.prepare('SELECT id, semaforo FROM sg_lotes WHERE id=?').get(req.params.id);
+    if (!lote) return res.status(404).json({ ok: false, error: 'Lote no encontrado' });
+    const anterior = lote.semaforo;
+    db.transaction(() => {
+      db.prepare("UPDATE sg_lotes SET semaforo=?, modificado_en=datetime('now','localtime') WHERE id=?").run(color, lote.id);
+      db.prepare(`INSERT INTO sg_lote_semaforo_historial (lote_id, color_anterior, color_nuevo, motivo, origen, usuario_id)
+        VALUES (?,?,?,?, 'manual', ?)`).run(lote.id, anterior, color, motivo, uid(req));
+    })();
+    res.json({ ok: true, data: { id: lote.id, color_anterior: anterior, color_nuevo: color } });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
 // Trazabilidad backward: proveedor → OC → recepción → gastos → (despachos: F4) → clientes.
 router.get('/lotes/:id/trazabilidad', requireAuth, (req, res) => {
   const db = getDb();

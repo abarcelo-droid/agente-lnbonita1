@@ -1018,6 +1018,32 @@ try {
   console.warn('[DB] SG backfill margen_estimado:', e.message);
 }
 
+// ── #reproceso/semáforo Paso 1: SEMÁFORO de lote (base, aditivo) ───────────────
+// sg_lotes += semaforo ('verde'/'amarillo'/'rojo', default 'verde' — todo lote nace verde).
+// SQLite permite ADD COLUMN con CHECK + DEFAULT; los lotes existentes quedan 'verde'.
+try {
+  const cols = db.prepare("PRAGMA table_info(sg_lotes)").all().map(c => c.name);
+  if (!cols.includes('semaforo')) {
+    db.exec("ALTER TABLE sg_lotes ADD COLUMN semaforo TEXT NOT NULL DEFAULT 'verde' CHECK(semaforo IN ('verde','amarillo','rojo'))");
+    console.log('[DB] SG sg_lotes migrado (+semaforo)');
+  }
+} catch (e) { console.error('[DB] SG migración sg_lotes (semaforo):', e.message); }
+
+// Historial de cambios de semáforo: cada cambio registra anterior→nuevo, motivo, origen, usuario.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS sg_lote_semaforo_historial (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    lote_id        INTEGER NOT NULL REFERENCES sg_lotes(id),
+    color_anterior TEXT,
+    color_nuevo    TEXT NOT NULL CHECK(color_nuevo IN ('verde','amarillo','rojo')),
+    motivo         TEXT,
+    origen         TEXT NOT NULL CHECK(origen IN ('reproceso','observado','manual','devolucion')),
+    usuario_id     INTEGER,
+    fecha          TEXT DEFAULT (datetime('now','localtime'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_sg_lote_sem_hist ON sg_lote_semaforo_historial(lote_id);
+`);
+
 console.log('[DB] Módulo San Gerónimo (sg_*) inicializado');
 
 export default db;
