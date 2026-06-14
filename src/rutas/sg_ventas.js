@@ -8,6 +8,7 @@
 
 import express from 'express';
 import db from '../servicios/db_sg_finanzas.js';
+import { generarFacturaPDF } from '../servicios/facturaPDF.js';
 
 const router = express.Router();
 
@@ -343,6 +344,28 @@ router.patch('/facturas/:id/anular', requireAuth, (req, res) => {
     db.prepare("UPDATE sg_ven_facturas SET estado='anulada' WHERE id=?").run(f.id);
     res.json({ ok: true });
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// PDF del comprobante fiscal AFIP (RG 1415 + QR ARCA). Solo si AFIP lo autorizó (tiene CAE).
+router.get('/facturas/:id/pdf', async (req, res) => {
+  try {
+    const f = db.prepare(`SELECT f.*, c.razon_social, c.cuit, c.categoria_fiscal,
+        c.direccion_entrega, c.localidad, c.provincia
+      FROM sg_ven_facturas f JOIN sg_clientes c ON c.id=f.cliente_id WHERE f.id=?`).get(req.params.id);
+    if (!f) return res.status(404).json({ ok: false, error: 'Factura no encontrada' });
+    if (f.afip_estado !== 'autorizado' || !f.cae) {
+      return res.status(400).json({ ok: false, error: 'La factura no está autorizada por AFIP (sin CAE)' });
+    }
+    f.cliente = { razon_social: f.razon_social, cuit: f.cuit, categoria_fiscal: f.categoria_fiscal,
+      direccion_entrega: f.direccion_entrega, localidad: f.localidad, provincia: f.provincia };
+    f.items = db.prepare('SELECT * FROM sg_ven_factura_items WHERE factura_id=? ORDER BY id').all(f.id);
+    const pdf = await generarFacturaPDF(f);
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `inline; filename="comprobante-${String(f.punto_venta||0).padStart(4,'0')}-${String(f.cbte_nro||0).padStart(8,'0')}.pdf"`
+    });
+    res.send(pdf);
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
