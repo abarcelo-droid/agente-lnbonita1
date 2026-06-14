@@ -1724,6 +1724,65 @@ router.post('/lotes/:id/reproceso', requireAuth, (req, res) => {
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
+// ── HISTORIALES #reproceso (read-only para la UI) ──────────────────────────────
+// Decomisos recientes (todos los lotes): código, producto, kg, motivo, fecha, usuario.
+router.get('/decomisos', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const rows = db.prepare(`
+      SELECT d.id, d.lote_id, l.codigo_lote, pr.nombre AS producto, d.kg, d.motivo, d.fecha, u.nombre AS usuario
+      FROM sg_lote_decomisos d
+      JOIN sg_lotes l ON l.id=d.lote_id
+      LEFT JOIN sg_productos pr ON pr.id=l.producto_id
+      LEFT JOIN usuarios u ON u.id=d.usuario_id
+      ORDER BY d.id DESC LIMIT 300`).all();
+    res.json({ ok: true, data: rows });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// Transformaciones recientes: origen→destino (códigos+productos), kg, costo, estado, fecha.
+// destino_disponible permite a la UI ofrecer "Revertir" solo si queda stock vigente del destino.
+router.get('/transformaciones', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const rows = db.prepare(`
+      SELECT t.id, t.lote_origen_id, lo.codigo_lote AS origen_codigo, po.nombre AS origen_producto,
+        t.lote_destino_id, ld.codigo_lote AS destino_codigo, pd.nombre AS destino_producto,
+        t.kg_transformados, t.factor, t.costo_transferido, t.estado, t.fecha,
+        (ld.kg_reales
+          - COALESCE((SELECT SUM(kg) FROM sg_lote_decomisos WHERE lote_id=ld.id),0)
+          - COALESCE((SELECT SUM(kg_transformados) FROM sg_transformaciones WHERE lote_origen_id=ld.id),0)
+          - COALESCE((SELECT SUM(kp.kg_procesados) FROM sg_reprocesos kp WHERE kp.lote_madre_id=ld.id AND kp.estado='activo'),0)
+          - COALESCE((SELECT SUM(di.kg_despachados) FROM sg_despacho_items di JOIN sg_despachos d ON d.id=di.despacho_id AND d.activo=1 WHERE di.lote_id=ld.id),0)
+        ) AS destino_disponible
+      FROM sg_transformaciones t
+      JOIN sg_lotes lo ON lo.id=t.lote_origen_id
+      LEFT JOIN sg_productos po ON po.id=lo.producto_id
+      JOIN sg_lotes ld ON ld.id=t.lote_destino_id
+      LEFT JOIN sg_productos pd ON pd.id=ld.producto_id
+      ORDER BY t.id DESC LIMIT 300`).all();
+    res.json({ ok: true, data: rows });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// Reprocesos recientes: madre, kg procesados/merma, costo madre, gasto, + códigos de los hijos.
+router.get('/reprocesos', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const rows = db.prepare(`
+      SELECT rp.id, rp.lote_madre_id, lm.codigo_lote AS madre_codigo, pm.nombre AS madre_producto,
+        rp.kg_procesados, rp.kg_merma, rp.costo_madre_consumido, rp.gasto_proceso, rp.gasto_descripcion,
+        rp.estado, rp.fecha,
+        (SELECT COUNT(*) FROM sg_lotes WHERE reproceso_id=rp.id) AS hijos_n,
+        (SELECT GROUP_CONCAT(codigo_lote, ', ') FROM sg_lotes WHERE reproceso_id=rp.id) AS hijos_codigos
+      FROM sg_reprocesos rp
+      JOIN sg_lotes lm ON lm.id=rp.lote_madre_id
+      LEFT JOIN sg_productos pm ON pm.id=lm.producto_id
+      ORDER BY rp.id DESC LIMIT 300`).all();
+    res.json({ ok: true, data: rows });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
 // ════════════════════════════════════════════════════════════════════════════
 // FASE 4 — VENTAS: Pedidos + Despachos (FEFO + margen) + CC clientes + traza forward
 // ════════════════════════════════════════════════════════════════════════════

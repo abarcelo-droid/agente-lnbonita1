@@ -271,6 +271,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   <div class="ni" data-sec="sg-compras" data-admin-only="1"><span class="dot dd"></span>📥 Ingresos</div>
   <div class="ni" data-sec="sg-gvariables" data-admin-only="1"><span class="dot dd"></span>🏭 Gastos Variables</div>
   <div class="ni" data-sec="sg-stock" data-admin-only="1"><span class="dot db"></span>📦 Stock</div>
+  <div class="ni" data-sec="sg-reprocesos" data-admin-only="1"><span class="dot db"></span>♻️ Reprocesos</div>
   <div class="ni" data-sec="sg-ventas" data-admin-only="1"><span class="dot dc"></span>📤 Egresos</div>
   <div class="ni" data-sec="sg-gastos-directos" data-admin-only="1"><span class="dot dd"></span>🧾 Gastos Directos</div>
   <div class="ni" data-sec="sg-catalogo" data-admin-only="1"><span class="dot da"></span>📋 Maestros</div>
@@ -2045,6 +2046,98 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       <div class="ab-table-wrap"><table class="pa-tbl">
         <thead><tr><th>Cliente</th><th style="text-align:right">Facturado</th><th style="text-align:right">Cobrado</th><th style="text-align:right">Saldo</th><th style="text-align:right">Límite crédito</th></tr></thead>
         <tbody id="sg-tb-cc"><tr><td colspan="5" class="emp">Cargando…</td></tr></tbody>
+      </table></div>
+    </div>
+  </div>
+  <!-- ══ Módulo Reprocesos (#reproceso): decomiso / transformación / reproceso con clasificación ══ -->
+  <div class="sec sg-mod" id="sec-sg-reprocesos">
+    <div class="ph"><div><div class="ph-t">🍅 San Gerónimo · Reprocesos</div><div class="ph-s">Decomiso parcial, transformación de unidad y reproceso con clasificación de lotes</div></div></div>
+    <style>
+      .sg-mod .sgr-subtab{padding:7px 14px;cursor:pointer;font-size:12.5px;font-weight:600;border-radius:6px;color:var(--mut)}
+      .sg-mod .sgr-subtab.on{background:var(--burg);color:#fff}
+      .sg-mod .sgr-sub{display:none} .sg-mod .sgr-sub.on{display:block}
+      .sg-mod .sgr-card{border:1px solid var(--bor);border-radius:10px;padding:14px;margin-bottom:14px;background:var(--bg)}
+      .sg-mod .sgr-card label{display:block;font-size:11.5px;color:var(--mut);margin-bottom:3px}
+      .sg-mod .sgr-card input,.sg-mod .sgr-card select,.sg-mod .sgr-card textarea{padding:6px 8px;border-radius:6px;border:1px solid var(--bor);background:var(--card,#fff)}
+      .sg-mod .sgr-confirm{border:1px solid var(--ok,#16a34a);border-radius:10px;padding:12px;margin-bottom:14px;background:rgba(22,163,74,.06);display:none}
+      .sg-mod .sgr-confirm.on{display:block}
+    </style>
+    <div style="display:inline-flex;gap:2px;background:var(--bg);border:1px solid var(--bor);border-radius:8px;padding:3px;margin-bottom:16px;flex-wrap:wrap">
+      <div class="sgr-subtab on" data-sub="reproceso"      onclick="sgrSub('reproceso')">♻️ Reproceso</div>
+      <div class="sgr-subtab" data-sub="transformacion"    onclick="sgrSub('transformacion')">🔄 Transformación</div>
+      <div class="sgr-subtab" data-sub="decomiso"          onclick="sgrSub('decomiso')">🗑️ Decomiso</div>
+    </div>
+
+    <!-- ── REPROCESO (clasificación: 1 madre → N hijos + merma) ── -->
+    <div class="sgr-sub on" id="sgr-sub-reproceso">
+      <div class="sgr-card">
+        <div style="font-weight:700;margin-bottom:8px">Nuevo reproceso</div>
+        <label>Lote madre</label>
+        <div id="sgr-pick-rep" style="margin-bottom:10px"></div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 2fr;gap:10px;margin-bottom:10px">
+          <div><label>kg procesados (incluye merma)</label><input type="number" id="sgr-rep-kgproc" placeholder="0" oninput="sgrReprRender()" style="width:100%;box-sizing:border-box"></div>
+          <div><label>Gasto de proceso ($)</label><input type="number" id="sgr-rep-gasto" placeholder="0" value="0" oninput="sgrReprAuto();sgrReprRender()" style="width:100%;box-sizing:border-box"></div>
+          <div><label>Descripción del gasto</label><input type="text" id="sgr-rep-gastodesc" placeholder="mano de obra, clasificación…" style="width:100%;box-sizing:border-box"></div>
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin:8px 0 4px">
+          <div style="font-weight:600;font-size:13px">Lotes hijos</div>
+          <div><button class="btn bo bs" onclick="sgrReprAutoBtn()">↻ Repartir por kg</button> <button class="btn bb bs" onclick="sgrReprAddHijo()">+ Hijo</button></div>
+        </div>
+        <div style="display:grid;grid-template-columns:1.4fr 0.9fr 0.9fr 0.7fr 0.9fr auto;gap:6px;font-size:11px;color:var(--mut);padding:0 2px 4px">
+          <div>Producto</div><div>Calidad</div><div>Semáforo</div><div style="text-align:right">kg</div><div style="text-align:right">$ asignado</div><div></div>
+        </div>
+        <div id="sgr-rep-hijos"></div>
+        <div id="sgr-rep-meta" style="margin-top:10px;font-size:12.5px"></div>
+        <div style="margin-top:12px;text-align:right"><button class="btn bb" id="sgr-rep-btn" onclick="sgrReprGuardar()">Registrar reproceso</button></div>
+      </div>
+      <div class="sgr-confirm" id="sgr-rep-confirm"></div>
+      <div style="font-weight:600;margin-bottom:6px">Historial de reprocesos</div>
+      <div class="ab-table-wrap"><table class="pa-tbl">
+        <thead><tr><th>Fecha</th><th>Madre</th><th style="text-align:right">Procesado</th><th style="text-align:right">Merma</th><th style="text-align:right">Costo madre</th><th style="text-align:right">Gasto</th><th>Hijos</th><th style="text-align:center">Estado</th></tr></thead>
+        <tbody id="sgr-tb-reproceso"><tr><td colspan="8" class="emp">Cargando…</td></tr></tbody>
+      </table></div>
+    </div>
+
+    <!-- ── TRANSFORMACIÓN (caja → cubetas) ── -->
+    <div class="sgr-sub" id="sgr-sub-transformacion">
+      <div class="sgr-card">
+        <div style="font-weight:700;margin-bottom:8px">Nueva transformación</div>
+        <label>Lote origen</label>
+        <div id="sgr-pick-tr" style="margin-bottom:10px"></div>
+        <div style="display:grid;grid-template-columns:2fr 1fr 1fr;gap:10px;align-items:end">
+          <div><label>Producto destino</label><select id="sgr-tr-dest" style="width:100%;box-sizing:border-box"></select></div>
+          <div><label>kg a transformar</label><input type="number" id="sgr-tr-kg" placeholder="(vacío = caja entera)" style="width:100%;box-sizing:border-box"></div>
+          <div><label>Factor (1 origen = N destino)</label><input type="number" id="sgr-tr-factor" placeholder="ej. 12" style="width:100%;box-sizing:border-box"></div>
+        </div>
+        <div style="margin-top:6px;font-size:11px;color:var(--mut)">Dejá kg vacío para transformar todo el disponible del lote ("1 caja entera"). El semáforo del destino se hereda del origen.</div>
+        <div style="margin-top:12px;text-align:right"><button class="btn bb" onclick="sgrTrGuardar()">Transformar</button></div>
+      </div>
+      <div class="sgr-confirm" id="sgr-tr-confirm"></div>
+      <div style="font-weight:600;margin-bottom:6px">Historial de transformaciones</div>
+      <div class="ab-table-wrap"><table class="pa-tbl">
+        <thead><tr><th>Fecha</th><th>Origen</th><th>Destino</th><th style="text-align:right">kg</th><th style="text-align:right">Costo transf.</th><th style="text-align:center">Estado</th><th></th></tr></thead>
+        <tbody id="sgr-tb-transformacion"><tr><td colspan="7" class="emp">Cargando…</td></tr></tbody>
+      </table></div>
+    </div>
+
+    <!-- ── DECOMISO (merma parcial) ── -->
+    <div class="sgr-sub" id="sgr-sub-decomiso">
+      <div class="sgr-card">
+        <div style="font-weight:700;margin-bottom:8px">Nuevo decomiso</div>
+        <label>Lote</label>
+        <div id="sgr-pick-dec" style="margin-bottom:10px"></div>
+        <div style="display:grid;grid-template-columns:1fr 2fr;gap:10px;align-items:end">
+          <div><label>kg a decomisar</label><input type="number" id="sgr-dec-kg" placeholder="0" style="width:100%;box-sizing:border-box"></div>
+          <div><label>Motivo</label><input type="text" id="sgr-dec-motivo" placeholder="podrido, golpeado…" style="width:100%;box-sizing:border-box"></div>
+        </div>
+        <div style="margin-top:6px;font-size:11px;color:var(--mut)">No toca kg_reales: baja el disponible y revalúa el costo/kg de lo que queda. Si el lote estaba verde pasa a 🟡.</div>
+        <div style="margin-top:12px;text-align:right"><button class="btn bb" onclick="sgrDecGuardar()">Registrar decomiso</button></div>
+      </div>
+      <div class="sgr-confirm" id="sgr-dec-confirm"></div>
+      <div style="font-weight:600;margin-bottom:6px">Historial de decomisos</div>
+      <div class="ab-table-wrap"><table class="pa-tbl">
+        <thead><tr><th>Fecha</th><th>Lote</th><th>Producto</th><th style="text-align:right">kg</th><th>Motivo</th><th>Usuario</th></tr></thead>
+        <tbody id="sgr-tb-decomiso"><tr><td colspan="6" class="emp">Cargando…</td></tr></tbody>
       </table></div>
     </div>
   </div>
@@ -4312,6 +4405,238 @@ function sgDespGuardar(){
 function sgDespAnular(id){
   if(!confirm('¿Anular despacho? (devuelve el stock de los lotes)')) return;
   api('/api/sg/despachos/'+id+'/anular','POST').then(function(r){ if(r&&r.ok){toast('Despacho anulado','ok');sgLoadDespachos();} else toast((r&&r.error)||'Error','er'); });
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// Módulo REPROCESOS (#reproceso): decomiso · transformación · reproceso con clasificación
+// ════════════════════════════════════════════════════════════════════════════
+var SG_CALIDAD = [['primera','Primera'],['segunda','Segunda'],['tercera','Tercera']];
+var SG_SEMAFORO = [['verde','🟢 Verde'],['amarillo','🟡 Amarillo'],['rojo','🔴 Rojo']];
+function sgSemEmoji(s){ return s==='rojo'?'🔴':(s==='amarillo'?'🟡':'🟢'); }
+
+// ── sgLotePicker REUSABLE (producto → /lotes-disponibles → lote con semáforo) ──
+// Extraído del selector inline de despacho; agrega el semáforo (🔴🟡🟢). Estado por 'key'
+// en SG.pickers; onChange(lote|null) avisa al padre (ej. reproceso recalcula costo madre).
+SG.pickers = SG.pickers || {};
+function sgPickerInit(key, onChange){
+  SG.pickers[key] = { productoId:'', loteId:'', lotes:[], onChange:onChange||function(){} };
+  sgPickerRender(key);
+}
+function sgPickerLote(key){ var p=SG.pickers[key]; if(!p) return null; return (p.lotes||[]).find(function(l){return String(l.id)===String(p.loteId);})||null; }
+function sgPickerProdChange(key, v){
+  var p=SG.pickers[key]; p.productoId=v; p.loteId=''; p.lotes=[];
+  if(v){ api('/api/sg/lotes-disponibles?producto_id='+v).then(function(r){
+      p.lotes=(r&&r.ok)?r.data:[]; if(p.lotes.length) p.loteId=p.lotes[0].id; // FEFO sugerido
+      sgPickerRender(key); p.onChange(sgPickerLote(key));
+    }); }
+  else { sgPickerRender(key); p.onChange(null); }
+}
+function sgPickerLoteChange(key, v){ SG.pickers[key].loteId=v; sgPickerRender(key); SG.pickers[key].onChange(sgPickerLote(key)); }
+function sgPickerCostoKg(l){ if(!l) return 0; var kv=(l.kg_vigente!=null?l.kg_vigente:l.kg_reales); return kv>0?((l.costo_final||0)/kv):0; }
+function sgPickerRender(key){
+  var p=SG.pickers[key]; if(!eid('sgr-pick-'+key)) return;
+  var loteOpts=(p.lotes||[]).map(function(l,idx){
+    var venc=(l.dias_restantes!=null)?(l.dias_restantes+'d'):'—';
+    return '<option value="'+l.id+'"'+(String(l.id)===String(p.loteId)?' selected':'')+'>'+(idx===0?'💡 ':'')+sgSemEmoji(l.semaforo)+' '+esc(l.codigo_lote)+' · '+esc(l.producto_nombre||'')+' · '+nr(l.kg_disponibles)+'kg · '+sgMoney(sgPickerCostoKg(l))+'/kg · '+venc+'</option>';
+  }).join('');
+  var lote=sgPickerLote(key), info='';
+  if(lote){ info='<div style="font-size:11px;color:var(--mut);margin-top:4px">'+sgSemEmoji(lote.semaforo)+' disponible <b>'+nr(lote.kg_disponibles)+'kg</b> · costo '+sgMoney(sgPickerCostoKg(lote))+'/kg · vence '+(lote.dias_restantes!=null?lote.dias_restantes+'d':'—')+'</div>'; }
+  eid('sgr-pick-'+key).innerHTML =
+    '<div style="display:grid;grid-template-columns:1fr 1.7fr;gap:6px;align-items:center">'
+    +'<select onchange="sgPickerProdChange(\''+key+'\',this.value)">'+sgOpts(SG.cacheProd,'nombre',p.productoId,'— Producto —')+'</select>'
+    +'<select onchange="sgPickerLoteChange(\''+key+'\',this.value)">'+(loteOpts||'<option value="">— sin stock —</option>')+'</select>'
+    +'</div>'+info;
+}
+function sgrConfirm(tab, html){ var el=eid('sgr-'+tab+'-confirm'); el.innerHTML=html; el.classList.add('on'); }
+
+// ── Navegación de sub-tabs ──
+function sgReprocesosInit(){ sgLoadCaches(function(){ sgrSub(SG.reprSub||'reproceso'); }); }
+function sgrSub(s){
+  SG.reprSub=s;
+  document.querySelectorAll('.sg-mod .sgr-subtab').forEach(function(el){ el.classList.toggle('on', el.dataset.sub===s); });
+  document.querySelectorAll('.sg-mod .sgr-sub').forEach(function(el){ el.classList.toggle('on', el.id==='sgr-sub-'+s); });
+  if(s==='reproceso'){
+    sgPickerInit('rep', function(){ sgrReprRender(); });
+    SG.reprHijos=[]; SG.reprAuto=true;
+    eid('sgr-rep-kgproc').value=''; eid('sgr-rep-gasto').value='0'; eid('sgr-rep-gastodesc').value='';
+    eid('sgr-rep-confirm').classList.remove('on');
+    sgrReprAddHijo(); sgrReprHist();
+  } else if(s==='transformacion'){
+    sgPickerInit('tr', null);
+    eid('sgr-tr-dest').innerHTML=sgOpts(SG.cacheProd,'nombre','','— Producto destino —');
+    eid('sgr-tr-kg').value=''; eid('sgr-tr-factor').value=''; eid('sgr-tr-confirm').classList.remove('on');
+    sgrTrHist();
+  } else if(s==='decomiso'){
+    sgPickerInit('dec', null);
+    eid('sgr-dec-kg').value=''; eid('sgr-dec-motivo').value=''; eid('sgr-dec-confirm').classList.remove('on');
+    sgrDecHist();
+  }
+}
+
+// ── DECOMISO ──
+function sgrDecGuardar(){
+  var lote=sgPickerLote('dec'); if(!lote){ toast('Elegí un lote','er'); return; }
+  var kg=Number(eid('sgr-dec-kg').value), motivo=eid('sgr-dec-motivo').value.trim();
+  if(!(kg>0)){ toast('kg debe ser > 0','er'); return; }
+  if(!motivo){ toast('Motivo requerido','er'); return; }
+  if(kg>lote.kg_disponibles+0.01){ toast('Supera lo disponible ('+nr(lote.kg_disponibles)+'kg)','er'); return; }
+  api('/api/sg/lotes/'+lote.id+'/decomiso','POST',{kg:kg,motivo:motivo}).then(function(r){
+    if(r&&r.ok){
+      toast('Decomiso registrado','ok');
+      sgrConfirm('dec','<b>'+esc(lote.codigo_lote)+'</b> · decomisados '+nr(r.data.kg_decomisado)+'kg · disponible restante <b>'+nr(r.data.kg_disponible)+'kg</b> · semáforo → '+(lote.semaforo==='verde'?'🟡 amarillo':sgSemEmoji(lote.semaforo)));
+      eid('sgr-dec-kg').value=''; eid('sgr-dec-motivo').value='';
+      sgPickerProdChange('dec', SG.pickers.dec.productoId);  // refresca disponible del picker
+      sgrDecHist();
+    } else toast((r&&r.error)||'Error','er');
+  });
+}
+function sgrDecHist(){
+  api('/api/sg/decomisos').then(function(r){
+    var rows=(r&&r.ok)?r.data:[];
+    eid('sgr-tb-decomiso').innerHTML = rows.length ? rows.map(function(d){
+      return '<tr><td>'+(d.fecha||'—')+'</td><td><code>'+esc(d.codigo_lote||'')+'</code></td><td>'+esc(d.producto||'—')+'</td><td style="text-align:right">'+nr(d.kg)+'kg</td><td>'+esc(d.motivo||'—')+'</td><td>'+esc(d.usuario||'—')+'</td></tr>';
+    }).join('') : '<tr><td colspan="6" class="emp">Sin decomisos.</td></tr>';
+  });
+}
+
+// ── TRANSFORMACIÓN ──
+function sgrTrGuardar(){
+  var lote=sgPickerLote('tr'); if(!lote){ toast('Elegí lote origen','er'); return; }
+  var dest=eid('sgr-tr-dest').value; if(!dest){ toast('Elegí producto destino','er'); return; }
+  if(String(dest)===String(lote.producto_id)){ toast('El destino debe ser distinto al origen','er'); return; }
+  var kgRaw=eid('sgr-tr-kg').value, factor=eid('sgr-tr-factor').value;
+  var body={ producto_destino_id:Number(dest) };
+  if(kgRaw!==''){ var kg=Number(kgRaw); if(!(kg>0)){ toast('kg inválido','er'); return; } if(kg>lote.kg_disponibles+0.01){ toast('Supera lo disponible ('+nr(lote.kg_disponibles)+'kg)','er'); return; } body.kg=kg; }
+  if(factor!=='') body.factor=Number(factor);
+  api('/api/sg/lotes/'+lote.id+'/transformar','POST',body).then(function(r){
+    if(r&&r.ok){
+      toast('Transformación registrada','ok');
+      var d=r.data;
+      sgrConfirm('tr','Nuevo lote <b>'+esc(d.codigo_destino)+'</b> '+sgSemEmoji(lote.semaforo)+' (semáforo heredado) · '+nr(d.kg_transformados)+'kg · costo transferido '+sgMoney(d.costo_transferido)+' · disponible origen '+nr(d.kg_disponible_origen)+'kg');
+      eid('sgr-tr-kg').value=''; eid('sgr-tr-factor').value='';
+      sgPickerProdChange('tr', SG.pickers.tr.productoId);
+      sgrTrHist();
+    } else toast((r&&r.error)||'Error','er');
+  });
+}
+function sgrTrRevertir(id, dispDestino){
+  var def = (dispDestino!=null) ? String(Math.round(dispDestino*100)/100) : '';
+  var kg=prompt('kg a revertir (vacío = todo lo disponible del lote-destino: '+nr(dispDestino||0)+'kg):', '');
+  if(kg===null) return;
+  var body={}; if(String(kg).trim()!==''){ var n=Number(kg); if(!(n>0)){ toast('kg inválido','er'); return; } body.kg=n; }
+  api('/api/sg/transformaciones/'+id+'/revertir','POST',body).then(function(r){
+    if(r&&r.ok){ toast('Reversión registrada','ok');
+      sgrConfirm('tr','Reconsolidado en nuevo lote <b>'+esc(r.data.codigo_nuevo)+'</b> · '+nr(r.data.kg_revertidos)+'kg · costo recalculado '+sgMoney(r.data.costo_recalculado)+' ('+sgMoney(r.data.costo_kg_cubeta)+'/kg vigente)');
+      sgrTrHist();
+    } else toast((r&&r.error)||'Error','er');
+  });
+}
+function sgrTrHist(){
+  api('/api/sg/transformaciones').then(function(r){
+    var rows=(r&&r.ok)?r.data:[];
+    eid('sgr-tb-transformacion').innerHTML = rows.length ? rows.map(function(t){
+      var activa=t.estado==='activa';
+      var disp=t.destino_disponible||0;
+      var acc=(activa && disp>0.01) ? '<button class="btn bo bs" onclick="sgrTrRevertir('+t.id+','+disp+')">↩ Revertir</button>' : '';
+      var estBdg='<span class="bdg '+(activa?'bcc':'ber')+'">'+(activa?'Activa':'Revertida')+'</span>';
+      return '<tr><td>'+(t.fecha||'—')+'</td><td><code>'+esc(t.origen_codigo||'')+'</code> <span style="color:var(--mut);font-size:11px">'+esc(t.origen_producto||'')+'</span></td>'
+        +'<td><code>'+esc(t.destino_codigo||'')+'</code> <span style="color:var(--mut);font-size:11px">'+esc(t.destino_producto||'')+'</span></td>'
+        +'<td style="text-align:right">'+nr(t.kg_transformados)+'kg</td><td style="text-align:right">'+sgMoney(t.costo_transferido)+'</td>'
+        +'<td style="text-align:center">'+estBdg+'</td><td style="text-align:right;white-space:nowrap">'+acc+'</td></tr>';
+    }).join('') : '<tr><td colspan="7" class="emp">Sin transformaciones.</td></tr>';
+  });
+}
+
+// ── REPROCESO (1 madre → N hijos + merma) ──
+function sgrReprMeta(){
+  var lote=sgPickerLote('rep');
+  var kgProc=Number(eid('sgr-rep-kgproc').value)||0, gasto=Number(eid('sgr-rep-gasto').value)||0;
+  var ck=sgPickerCostoKg(lote);
+  var costoMadre=Math.round(kgProc*ck*100)/100, total=Math.round((costoMadre+gasto)*100)/100;
+  var sumaKg=SG.reprHijos.reduce(function(a,h){ return a+(Number(h.kg)||0); }, 0);
+  return { costoKgMadre:ck, costoMadre:costoMadre, total:total, sumaKg:sumaKg, merma:Math.round((kgProc-sumaKg)*100)/100, kgProc:kgProc, gasto:gasto, dispMadre:lote?lote.kg_disponibles:0 };
+}
+function sgrReprAuto(){   // reparte 'total' por kg entre los hijos; el último absorbe el redondeo.
+  var m=sgrReprMeta(), hs=SG.reprHijos; if(!hs.length) return;
+  var acum=0;
+  hs.forEach(function(h,i){ var kg=Number(h.kg)||0;
+    var c=(i===hs.length-1) ? (m.total-acum) : (m.sumaKg>0 ? Math.round(m.total*(kg/m.sumaKg)*100)/100 : 0);
+    acum=Math.round((acum+c)*100)/100; h.costo=Math.round(c*100)/100;
+  });
+}
+function sgrReprAutoBtn(){ SG.reprAuto=true; sgrReprAuto(); sgrReprRender(); }
+function sgrReprAddHijo(){ SG.reprHijos.push({producto_id:'',calidad:'primera',semaforo:'amarillo',kg:'',costo:''}); sgrReprRender(); }
+function sgrReprDelHijo(i){ SG.reprHijos.splice(i,1); sgrReprRender(); }
+function sgrReprUpd(i,c,v){ SG.reprHijos[i][c]=v; sgrReprRender(); }
+function sgrReprUpdCosto(i,v){ SG.reprHijos[i].costo=v; SG.reprAuto=false; sgrReprRender(); }  // edición manual corta el auto
+function sgrReprRender(){
+  if(SG.reprAuto) sgrReprAuto();
+  var prodDef=sgPickerLote('rep'); var prodDefId=prodDef?prodDef.producto_id:'';
+  eid('sgr-rep-hijos').innerHTML = SG.reprHijos.map(function(h,i){
+    return '<div style="display:grid;grid-template-columns:1.4fr 0.9fr 0.9fr 0.7fr 0.9fr auto;gap:6px;align-items:center;margin-bottom:4px">'
+      +'<select onchange="sgrReprUpd('+i+',\'producto_id\',this.value)">'+sgOpts(SG.cacheProd,'nombre',h.producto_id||prodDefId,'— Producto —')+'</select>'
+      +'<select onchange="sgrReprUpd('+i+',\'calidad\',this.value)">'+SG_CALIDAD.map(function(o){return '<option value="'+o[0]+'"'+(h.calidad===o[0]?' selected':'')+'>'+o[1]+'</option>';}).join('')+'</select>'
+      +'<select onchange="sgrReprUpd('+i+',\'semaforo\',this.value)">'+SG_SEMAFORO.map(function(o){return '<option value="'+o[0]+'"'+(h.semaforo===o[0]?' selected':'')+'>'+o[1]+'</option>';}).join('')+'</select>'
+      +'<input type="number" placeholder="kg" value="'+(h.kg||'')+'" onchange="sgrReprUpd('+i+',\'kg\',this.value)" style="text-align:right">'
+      +'<input type="number" placeholder="$" value="'+(h.costo||'')+'" onchange="sgrReprUpdCosto('+i+',this.value)" style="text-align:right">'
+      +(SG.reprHijos.length>1?'<button class="btn bd bs" onclick="sgrReprDelHijo('+i+')">×</button>':'<span></span>')
+      +'</div>';
+  }).join('');
+  sgrReprRenderMeta();
+}
+function sgrReprRenderMeta(){
+  var m=sgrReprMeta();
+  var sumaCosto=Math.round(SG.reprHijos.reduce(function(a,h){return a+(Number(h.costo)||0);},0)*100)/100;
+  var dif=Math.abs(sumaCosto-m.total), cuadra=dif<0.01, mermaOk=m.merma>=-0.01;
+  var dentroDisp=m.kgProc<=m.dispMadre+0.01;
+  var h='';
+  h+='<div>Costo madre consumido <b>'+sgMoney(m.costoMadre)+'</b> ('+nr(m.kgProc)+'kg × '+sgMoney(m.costoKgMadre)+'/kg) + gasto '+sgMoney(m.gasto)+' = <b>'+sgMoney(m.total)+'</b> a repartir</div>';
+  h+='<div style="margin-top:3px">Merma <b style="color:'+(mermaOk?'var(--mut)':'#dc2626')+'">'+nr(m.merma)+'kg</b> = '+nr(m.kgProc)+' procesados − '+nr(m.sumaKg)+' aprovechables'+(mermaOk?'':' · ⚠ los hijos superan lo procesado')+(dentroDisp?'':' · ⚠ procesás más que el disponible ('+nr(m.dispMadre)+'kg)')+'</div>';
+  h+='<div style="margin-top:3px">Σ asignado <b>'+sgMoney(sumaCosto)+'</b> / '+sgMoney(m.total)+' — <b style="color:'+(cuadra?'var(--ok,#16a34a)':'#dc2626')+'">'+(cuadra?'✓ cuadra':'⚠ diferencia '+sgMoney(dif))+'</b></div>';
+  eid('sgr-rep-meta').innerHTML=h;
+  // producto del hijo: si no se eligió, hereda el de la madre (default visible en el select).
+  var hijosOk=SG.reprHijos.filter(function(x){return Number(x.kg)>0;}).length>0;
+  var valid=cuadra && mermaOk && dentroDisp && m.kgProc>0 && hijosOk;
+  var btn=eid('sgr-rep-btn'); btn.disabled=!valid; btn.style.opacity=valid?'1':'.5'; btn.style.cursor=valid?'pointer':'not-allowed';
+}
+function sgrReprGuardar(){
+  var lote=sgPickerLote('rep'); if(!lote){ toast('Elegí lote madre','er'); return; }
+  var m=sgrReprMeta();
+  if(!(m.kgProc>0)){ toast('kg procesados > 0','er'); return; }
+  if(m.kgProc>m.dispMadre+0.01){ toast('kg procesados supera el disponible','er'); return; }
+  if(m.merma<-0.01){ toast('La suma de hijos supera lo procesado','er'); return; }
+  var defPid=lote.producto_id;  // producto del hijo no elegido → hereda el de la madre
+  var hijos=SG.reprHijos.filter(function(h){ return Number(h.kg)>0; }).map(function(h){
+    return { producto_id:Number(h.producto_id||defPid), kg:Number(h.kg), calidad:h.calidad, semaforo:h.semaforo, costo_asignado:Number(h.costo)||0 }; });
+  if(!hijos.length){ toast('Agregá al menos un hijo con kg','er'); return; }
+  var sumaCosto=hijos.reduce(function(a,h){ return a+h.costo_asignado; }, 0);
+  if(Math.abs(sumaCosto-m.total)>0.01){ toast('La suma de costos no cuadra con el total a repartir','er'); return; }
+  var body={ kg_procesados:m.kgProc, gasto_proceso:m.gasto, gasto_descripcion:eid('sgr-rep-gastodesc').value, hijos:hijos };
+  api('/api/sg/lotes/'+lote.id+'/reproceso','POST',body).then(function(r){
+    if(r&&r.ok){
+      toast('Reproceso registrado','ok');
+      var d=r.data;
+      var lis=(d.hijos||[]).map(function(x){ return '<li>'+sgSemEmoji(x.semaforo)+' <b>'+esc(x.codigo)+'</b> · '+sgLbl(SG_CALIDAD,x.calidad)+' · '+nr(x.kg)+'kg · '+sgMoney(x.costo_asignado)+' ('+sgMoney(x.costo_por_kg)+'/kg)</li>'; }).join('');
+      sgrConfirm('rep','Reproceso de <b>'+esc(lote.codigo_lote)+'</b> · merma '+nr(d.kg_merma)+'kg · disponible madre '+nr(d.kg_disponible_madre)+'kg<ul style="margin:6px 0 0;padding-left:18px">'+lis+'</ul>');
+      SG.reprHijos=[]; SG.reprAuto=true;
+      eid('sgr-rep-kgproc').value=''; eid('sgr-rep-gasto').value='0'; eid('sgr-rep-gastodesc').value='';
+      sgPickerProdChange('rep', SG.pickers.rep.productoId);
+      sgrReprAddHijo(); sgrReprHist();
+    } else toast((r&&r.error)||'Error','er');
+  });
+}
+function sgrReprHist(){
+  api('/api/sg/reprocesos').then(function(r){
+    var rows=(r&&r.ok)?r.data:[];
+    eid('sgr-tb-reproceso').innerHTML = rows.length ? rows.map(function(p){
+      var activo=p.estado==='activo';
+      return '<tr><td>'+(p.fecha||'—')+'</td><td><code>'+esc(p.madre_codigo||'')+'</code> <span style="color:var(--mut);font-size:11px">'+esc(p.madre_producto||'')+'</span></td>'
+        +'<td style="text-align:right">'+nr(p.kg_procesados)+'kg</td><td style="text-align:right">'+nr(p.kg_merma)+'kg</td>'
+        +'<td style="text-align:right">'+sgMoney(p.costo_madre_consumido)+'</td><td style="text-align:right">'+sgMoney(p.gasto_proceso)+'</td>'
+        +'<td style="font-size:11px"><b>'+(p.hijos_n||0)+'</b> · '+esc(p.hijos_codigos||'—')+'</td>'
+        +'<td style="text-align:center"><span class="bdg '+(activo?'bcc':'ber')+'">'+(activo?'Activo':'Revertido')+'</span></td></tr>';
+    }).join('') : '<tr><td colspan="8" class="emp">Sin reprocesos.</td></tr>';
+  });
 }
 
 // ════ Módulo GASTOS DIRECTOS (servicio, valorización diferida) — Fase 1: Fletes de salida ════
@@ -10108,6 +10433,7 @@ function loadSec(s) {
     'sg-compras':    function(){ sgComInit(); },
     'sg-gvariables': function(){ sgLoadGGlobales(); },
     'sg-stock':      function(){ sgStockInit(); },
+    'sg-reprocesos': function(){ sgReprocesosInit(); },
     'sg-ventas':     function(){ sgVenInit(); },
     'sg-gastos-directos': function(){ sgGdsInit(); },
     'sg-catalogo':   function(){ sgLoadCaches(function(){ sgCatSub('productos'); }); },
