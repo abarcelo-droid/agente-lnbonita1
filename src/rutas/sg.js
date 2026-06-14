@@ -538,6 +538,105 @@ router.post('/afip/emitir-test', requireAdmin, async (req, res) => {
   }
 });
 
+// ── FACTURACIÓN (puente despacho → factura) ───────────────────────────────────────
+// kg ya facturados de un despacho_item = Σ kg de sg_factura_despachos cuyas facturas están
+// reservadas o autorizadas (las rechazadas no cuentan → ese kg sigue pendiente).
+function kgFacturadoItem(db, despachoItemId) {
+  return db.prepare(`SELECT COALESCE(SUM(fd.kg),0) s FROM sg_factura_despachos fd
+    JOIN sg_ven_facturas f ON f.id=fd.factura_id
+    WHERE fd.despacho_item_id=? AND f.afip_estado IN ('reservado','autorizado')`).get(despachoItemId).s;
+}
+// GET /facturable?cliente_id=X → despachos pendientes/parciales del cliente (solo kg_pendiente > 0).
+router.get('/facturable', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const clienteId = Number(req.query.cliente_id);
+    if (!(clienteId > 0)) return res.status(400).json({ ok: false, error: 'Falta cliente_id' });
+    const cliente = db.prepare('SELECT id, razon_social, cuit FROM sg_clientes WHERE id=?').get(clienteId);
+    if (!cliente) return res.status(404).json({ ok: false, error: 'Cliente no encontrado' });
+    const cuit = String(cliente.cuit || '').replace(/\D/g, '');
+    const tipo_cbte_sugerido = (/^\d{11}$/.test(cuit) && !/^0+$/.test(cuit)) ? 1 : 6; // con CUIT→A, sin→B
+    const rows = db.prepare(`
+      SELECT d.id AS despacho_id, d.numero AS despacho_numero, d.fecha_despacho,
+        di.id AS despacho_item_id, di.producto_id, pr.nombre AS producto_nombre,
+        fam.iva_alicuota, di.lote_id, l.codigo_lote, di.kg_despachados, di.precio_por_kg
+      FROM sg_despachos d
+      JOIN sg_despacho_items di ON di.despacho_id=d.id
+      LEFT JOIN sg_productos pr ON pr.id=di.producto_id
+      LEFT JOIN sg_familias fam ON fam.id=pr.familia_id
+      LEFT JOIN sg_lotes l ON l.id=di.lote_id
+      WHERE d.activo=1 AND d.cliente_id=? AND d.estado<>'rechazado_total'
+      ORDER BY d.fecha_despacho DESC, d.id, di.id`).all(clienteId);
+    const mapa = new Map();
+    for (const r of rows) {
+      const kgFact = kgFacturadoItem(db, r.despacho_item_id);
+      const kgDesp = Number(r.kg_despachados) || 0;
+      const kgPend = +(kgDesp - kgFact).toFixed(2);
+      if (!mapa.has(r.despacho_id)) mapa.set(r.despacho_id, { despacho_id: r.despacho_id, numero: r.despacho_numero, fecha: r.fecha_despacho, _desp: 0, _fact: 0, items: [] });
+      const g = mapa.get(r.despacho_id);
+      g._desp += kgDesp; g._fact += kgFact;
+      if (kgPend > 0.01) {
+        g.items.push({
+          despacho_item_id: r.despacho_item_id, producto_id: r.producto_id, producto: r.producto_nombre || '',
+          lote_id: r.lote_id, lote: r.codigo_lote || '', kg_despachado: kgDesp, kg_facturado: +kgFact.toFixed(2),
+          kg_pendiente: kgPend, precio_por_kg: Number(r.precio_por_kg) || 0,
+          alicuota: r.iva_alicuota != null ? Number(r.iva_alicuota) : null, exento: r.iva_alicuota == null
+        });
+      }
+    }
+    const despachos = [];
+    for (const g of mapa.values()) {
+      if (!g.items.length) continue;   // todo facturado → fuera de la lista
+      despachos.push({ despacho_id: g.despacho_id, numero: g.numero, fecha: g.fecha, estado_facturacion: g._fact <= 0.01 ? 'pendiente' : 'parcial', items: g.items });
+    }
+    res.json({ ok: true, cliente: { id: cliente.id, razon_social: cliente.razon_social, cuit: cliente.cuit }, tipo_cbte_sugerido, despachos });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// POST /facturas/emitir → orquesta la emisión desde despachos seleccionados. Convierte el precio a
+// NETO (si incluye IVA) y llama al motor con vinculos atómicos (E1). NO toca la facturación interna.
+router.post('/facturas/emitir', requireAdmin, async (req, res) => {
+  const db = getDb();
+  try {
+    const b = req.body || {};
+    const clienteId = Number(b.cliente_id), pv = Number(b.punto_venta);
+    if (!(clienteId > 0)) return res.status(400).json({ ok: false, error: 'Falta cliente_id' });
+    if (!(pv > 0)) return res.status(400).json({ ok: false, error: 'Falta punto_venta' });
+    const seleccion = Array.isArray(b.seleccion) ? b.seleccion : [];
+    if (!seleccion.length) return res.status(400).json({ ok: false, error: 'Sin selección de despachos' });
+    const facturaIncluyeIva = b.precio_incluye_iva === true;
+    const items = [], vinculos = [];
+    for (const sel of seleccion) {
+      const despachoId = Number(sel.despacho_id);
+      const desp = db.prepare('SELECT id, cliente_id, activo FROM sg_despachos WHERE id=?').get(despachoId);
+      if (!desp || !desp.activo) return res.status(400).json({ ok: false, error: 'Despacho inválido: ' + despachoId });
+      if (Number(desp.cliente_id) !== clienteId) return res.status(400).json({ ok: false, error: 'El despacho ' + despachoId + ' no es del cliente seleccionado' });
+      for (const it of (Array.isArray(sel.items) ? sel.items : [])) {
+        const diId = Number(it.despacho_item_id), kg = Number(it.kg);
+        if (!(kg > 0)) continue;
+        const di = db.prepare(`SELECT di.id, di.producto_id, di.kg_despachados, di.precio_por_kg, fam.iva_alicuota
+          FROM sg_despacho_items di
+          LEFT JOIN sg_productos pr ON pr.id=di.producto_id
+          LEFT JOIN sg_familias fam ON fam.id=pr.familia_id
+          WHERE di.id=? AND di.despacho_id=?`).get(diId, despachoId);
+        if (!di) return res.status(400).json({ ok: false, error: 'Ítem de despacho inválido: ' + diId });
+        const kgPend = (Number(di.kg_despachados) || 0) - kgFacturadoItem(db, diId);
+        if (kg > kgPend + 0.01) return res.status(400).json({ ok: false, error: `Ítem ${diId}: pedís ${kg}kg pero quedan ${kgPend.toFixed(2)}kg pendientes` });
+        const alic = di.iva_alicuota != null ? Number(di.iva_alicuota) : null;
+        const incluyeIva = (it.incluye_iva != null) ? (it.incluye_iva === true) : facturaIncluyeIva;
+        const precioBruto = Number(di.precio_por_kg) || 0;
+        const precioNeto = (incluyeIva && alic != null) ? +(precioBruto / (1 + alic / 100)).toFixed(4) : precioBruto; // al motor SIEMPRE neto
+        items.push({ producto_id: Number(di.producto_id), cantidad: kg, precio: precioNeto });
+        vinculos.push({ despacho_id: despachoId, despacho_item_id: diId, kg });
+      }
+    }
+    if (!items.length) return res.status(400).json({ ok: false, error: 'No hay líneas válidas para facturar' });
+    const r = await afipEmitir(db, { ptoVta: pv, clienteId, items, esNC: b.es_nc === true, userId: uid(req), vinculos });
+    if (r.ok) r.pdf_url = '/api/sg/ventas/facturas/' + r.factura_id + '/pdf';
+    res.json(r);
+  } catch (e) { res.status(502).json({ ok: false, error: e.message }); }
+});
+
 // BRIEF 10 — CARGA INICIAL DE INVENTARIO (lotes de apertura, sin compra/proveedor/OC).
 // Valuación al corte DIRECTA (Andy). origen='apertura' → entran al stock/FEFO/despacho pero quedan
 // FUERA de prorrateo y de los reportes de compra/deuda (mismo criterio que transformado_de).

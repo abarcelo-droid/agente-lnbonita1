@@ -2041,6 +2041,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     <div style="display:inline-flex;gap:2px;background:var(--bg);border:1px solid var(--bor);border-radius:8px;padding:3px;margin-bottom:16px;flex-wrap:wrap">
       <div class="sgv-subtab on" data-sub="pedidos"   onclick="sgVenSub('pedidos')">📝 Pedidos</div>
       <div class="sgv-subtab" data-sub="despachos"     onclick="sgVenSub('despachos')">🚚 Despachos</div>
+      <div class="sgv-subtab" data-sub="facturar"      onclick="sgVenSub('facturar')">🧾 Facturar</div>
       <div class="sgv-subtab" data-sub="cc"            onclick="sgVenSub('cc')">💳 Cuenta corriente</div>
     </div>
 
@@ -2060,6 +2061,33 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
         <thead><tr><th>N°</th><th>Fecha</th><th>Cliente</th><th>Pedido</th><th style="text-align:right">Total</th><th style="text-align:right">Margen</th><th style="text-align:center">Estado</th><th></th></tr></thead>
         <tbody id="sg-tb-despachos"><tr><td colspan="8" class="emp">Cargando…</td></tr></tbody>
       </table></div>
+    </div>
+
+    <!-- Facturar (puente despacho → factura AFIP) -->
+    <div class="sgv-sub" id="sgv-sub-facturar">
+      <div class="sgr-card">
+        <div style="display:flex;gap:14px;align-items:flex-end;flex-wrap:wrap;margin-bottom:10px">
+          <label style="font-size:11.5px;color:var(--mut)">Cliente<br>
+            <select id="sgf-cli" onchange="sgFacCliente()" style="min-width:240px;padding:6px 8px;border-radius:6px;border:1px solid var(--bor);background:var(--card,#fff)"></select>
+          </label>
+          <span id="sgf-tipo-badge" style="padding-bottom:6px"></span>
+          <label style="font-size:11.5px;color:var(--mut)">Punto de venta<br>
+            <select id="sgf-pv" style="padding:6px 8px;border-radius:6px;border:1px solid var(--bor);background:var(--card,#fff)">
+              <option value="7">7</option><option value="9">9</option><option value="11">11</option><option value="13">13</option>
+            </select>
+          </label>
+          <label style="font-size:12px;color:var(--mut);padding-bottom:7px"><input type="checkbox" id="sgf-incluye-iva" onchange="sgFacRenderLineas()"> precio incluye IVA</label>
+        </div>
+        <div id="sgf-despachos"><div style="font-size:12px;color:var(--mut)">Elegí un cliente para ver sus despachos facturables.</div></div>
+        <div style="font-weight:600;font-size:13px;margin:12px 0 4px">Ítems a facturar</div>
+        <div style="display:grid;grid-template-columns:1.4fr 0.8fr 0.7fr 0.8fr 0.8fr 0.7fr auto;gap:6px;font-size:11px;color:var(--mut);padding:0 2px 4px">
+          <div>Producto</div><div>Lote</div><div style="text-align:right">kg pend.</div><div style="text-align:right">kg facturar</div><div style="text-align:right">$/kg</div><div style="text-align:right">%IVA</div><div></div>
+        </div>
+        <div id="sgf-lineas"></div>
+        <div id="sgf-resumen" style="margin-top:12px;font-size:12.5px"></div>
+        <div style="text-align:right;margin-top:12px"><button class="btn bb" id="sgf-emitir-btn" onclick="sgFacEmitir()">Emitir comprobante</button></div>
+      </div>
+      <div class="sgr-confirm" id="sgf-confirm"></div>
     </div>
 
     <!-- Cuenta corriente clientes -->
@@ -4401,7 +4429,148 @@ function sgVenSub(s){
   document.querySelectorAll('.sg-mod .sgv-sub').forEach(function(el){ el.classList.toggle('on', el.id==='sgv-sub-'+s); });
   if (s==='pedidos') sgLoadPedidos();
   else if (s==='despachos') sgLoadDespachos();
+  else if (s==='facturar') sgFacInit();
   else if (s==='cc') sgLoadCC();
+}
+
+// ── BRIEF E2 — Pantalla de facturación (despacho → factura AFIP) ──────────────────
+function sgFacInit(){
+  SG.facData = null; SG.facSel = {}; SG.facLineas = [];
+  var sel = eid('sgf-cli');
+  sel.innerHTML = sgOpts(SG.cacheCli, 'razon_social', '', '— Elegí cliente —');
+  eid('sgf-tipo-badge').innerHTML = '';
+  eid('sgf-despachos').innerHTML = '<div style="font-size:12px;color:var(--mut)">Elegí un cliente para ver sus despachos facturables.</div>';
+  eid('sgf-confirm').classList.remove('on');
+  sgFacRenderLineas();
+}
+function sgFacCliente(){
+  var cid = eid('sgf-cli').value;
+  SG.facSel = {}; SG.facLineas = []; SG.facData = null;
+  eid('sgf-confirm').classList.remove('on');
+  if (!cid){ eid('sgf-tipo-badge').innerHTML=''; eid('sgf-despachos').innerHTML='<div style="font-size:12px;color:var(--mut)">Elegí un cliente.</div>'; sgFacRenderLineas(); return; }
+  eid('sgf-despachos').innerHTML = '<div style="font-size:12px;color:var(--mut)">Cargando…</div>';
+  api('/api/sg/facturable?cliente_id='+cid).then(function(r){
+    if(!r||!r.ok){ eid('sgf-despachos').innerHTML='<div style="color:var(--err)">'+esc((r&&r.error)||'Error')+'</div>'; return; }
+    SG.facData = r;
+    var letra = r.tipo_cbte_sugerido===1 ? 'A' : 'B';
+    eid('sgf-tipo-badge').innerHTML = '<span class="bdg bcc">Comprobante '+letra+'</span>';
+    sgFacRenderDespachos();
+  });
+}
+function sgFacRenderDespachos(){
+  var deps = (SG.facData && SG.facData.despachos) || [];
+  if(!deps.length){ eid('sgf-despachos').innerHTML='<div style="font-size:12px;color:var(--mut)">Sin despachos pendientes de facturar para este cliente.</div>'; sgFacRenderLineas(); return; }
+  eid('sgf-despachos').innerHTML = deps.map(function(d){
+    var badge = d.estado_facturacion==='parcial' ? '<span class="bdg bpe">🟡 parcial</span>' : '<span class="bdg ber">🔴 pendiente</span>';
+    var chk = SG.facSel[d.despacho_id] ? ' checked' : '';
+    return '<label style="display:flex;gap:8px;align-items:center;padding:4px 0;font-size:12.5px;cursor:pointer">'
+      +'<input type="checkbox"'+chk+' onchange="sgFacToggleDespacho('+d.despacho_id+')">'
+      +'<b>'+esc(d.numero||('Desp '+d.despacho_id))+'</b> · '+(d.fecha||'—')+' · '+d.items.length+' ítem(s) '+badge+'</label>';
+  }).join('');
+}
+function sgFacToggleDespacho(id){
+  if(SG.facSel[id]) delete SG.facSel[id]; else SG.facSel[id]=true;
+  sgFacRebuildLineas();
+}
+// Reconstruye las líneas desde los despachos tildados (default kg = pendiente). Conserva kg/override
+// de las líneas que ya estaban (por despacho_item_id) para no perder ediciones al tildar otro despacho.
+function sgFacRebuildLineas(){
+  var prev = {}; SG.facLineas.forEach(function(l){ prev[l.despacho_item_id]=l; });
+  var nuevas = [];
+  (SG.facData.despachos||[]).forEach(function(d){
+    if(!SG.facSel[d.despacho_id]) return;
+    d.items.forEach(function(it){
+      var p = prev[it.despacho_item_id];
+      nuevas.push({
+        despacho_id: d.despacho_id, despacho_item_id: it.despacho_item_id, producto: it.producto, lote: it.lote,
+        kg_pendiente: it.kg_pendiente, precio: it.precio_por_kg, alicuota: it.alicuota, exento: it.exento,
+        kg: p ? p.kg : it.kg_pendiente, incluye_iva_override: p ? p.incluye_iva_override : null
+      });
+    });
+  });
+  SG.facLineas = nuevas;
+  sgFacRenderLineas();
+}
+function sgFacDelLinea(i){ SG.facLineas.splice(i,1); sgFacRenderLineas(); }
+function sgFacUpd(i,campo,v){ SG.facLineas[i][campo]=v; sgFacResumen(); }
+function sgFacOverride(i,v){ SG.facLineas[i].incluye_iva_override = (v==='') ? null : (v==='si'); sgFacResumen(); }
+function sgFacRenderLineas(){
+  var cont = eid('sgf-lineas'); if(!cont) return;
+  if(!SG.facLineas.length){ cont.innerHTML='<div style="font-size:12px;color:var(--mut)">Tildá despachos arriba para traer sus ítems.</div>'; sgFacResumen(); return; }
+  cont.innerHTML = SG.facLineas.map(function(ln,i){
+    var ovr = ln.incluye_iva_override===null ? '' : (ln.incluye_iva_override ? 'si' : 'no');
+    var ivaTxt = ln.exento ? 'Exento' : (String(ln.alicuota).replace('.',',')+'%');
+    return '<div style="display:grid;grid-template-columns:1.4fr 0.8fr 0.7fr 0.8fr 0.8fr 0.7fr auto;gap:6px;align-items:center;margin-bottom:4px">'
+      +'<span style="font-size:12px">'+esc(ln.producto)+'</span>'
+      +'<span style="font-size:11px;color:var(--mut)"><code>'+esc(ln.lote)+'</code></span>'
+      +'<span style="text-align:right;font-size:11px">'+nr(ln.kg_pendiente)+'</span>'
+      +'<input type="number" value="'+(ln.kg||'')+'" onchange="sgFacUpd('+i+',\'kg\',this.value)" style="text-align:right">'
+      +'<input type="number" value="'+(ln.precio||'')+'" onchange="sgFacUpd('+i+',\'precio\',this.value)" style="text-align:right" title="$/kg del despacho (editable)">'
+      +'<span style="text-align:right;font-size:11px" title="Override IVA: '+(ovr||'general')+'"><select onchange="sgFacOverride('+i+',this.value)" style="font-size:10px;padding:1px"><option value=""'+(ovr===''?' selected':'')+'>'+ivaTxt+'</option><option value="si"'+(ovr==='si'?' selected':'')+'>c/IVA</option><option value="no"'+(ovr==='no'?' selected':'')+'>s/IVA</option></select></span>'
+      +'<button class="btn bd bs" onclick="sgFacDelLinea('+i+')">×</button>'
+      +'</div>';
+  }).join('');
+  sgFacResumen();
+}
+// Calcula neto/IVA/exento/total EN VIVO (mismo criterio que el backend: precio→neto si incluye IVA).
+function sgFacResumen(){
+  var gen = eid('sgf-incluye-iva') && eid('sgf-incluye-iva').checked;
+  var neto=0, exento=0, ivaPorAlic={};
+  SG.facLineas.forEach(function(ln){
+    var kg=Number(ln.kg)||0, precio=Number(ln.precio)||0;
+    var incl = ln.incluye_iva_override===null ? gen : ln.incluye_iva_override;
+    var alic = ln.exento ? null : ln.alicuota;
+    var pn = (incl && alic!=null) ? precio/(1+alic/100) : precio;
+    var ln_neto = pn*kg;
+    if(alic==null){ exento += ln_neto; }
+    else { neto += ln_neto; ivaPorAlic[alic]=(ivaPorAlic[alic]||0)+ln_neto*alic/100; }
+  });
+  var iva = Object.keys(ivaPorAlic).reduce(function(a,k){return a+ivaPorAlic[k];},0);
+  var total = neto + iva + exento;
+  var letra = (SG.facData && SG.facData.tipo_cbte_sugerido===1) ? 'A' : 'B';
+  var h = '<div style="display:flex;justify-content:space-between;border-top:1px solid var(--bor);padding-top:8px">'
+    +'<div><span class="bdg bcc">Comprobante '+letra+'</span> <span class="bdg bok">PV '+(eid('sgf-pv')?eid('sgf-pv').value:'7')+'</span></div>'
+    +'<div style="text-align:right">'
+      +'Neto gravado: <b>'+sgMoney(neto)+'</b>';
+  Object.keys(ivaPorAlic).map(Number).sort(function(a,b){return a-b;}).forEach(function(al){ h+=' · IVA '+String(al).replace('.',',')+'%: '+sgMoney(ivaPorAlic[al]); });
+  if(exento>0.001) h+=' · Exento: '+sgMoney(exento);
+  h+='<div style="font-size:15px;font-weight:700;margin-top:3px">Total: '+sgMoney(total)+'</div></div></div>';
+  eid('sgf-resumen').innerHTML = h;
+  var btn=eid('sgf-emitir-btn'); var valid = SG.facLineas.some(function(l){return Number(l.kg)>0;});
+  if(btn){ btn.disabled=!valid; btn.style.opacity=valid?'1':'.5'; btn.style.cursor=valid?'pointer':'not-allowed'; }
+}
+function sgFacEmitir(){
+  var cid = eid('sgf-cli').value; if(!cid){ toast('Elegí cliente','er'); return; }
+  var lineas = SG.facLineas.filter(function(l){return Number(l.kg)>0;});
+  if(!lineas.length){ toast('No hay líneas con kg','er'); return; }
+  // agrupar por despacho
+  var porDesp = {};
+  lineas.forEach(function(l){
+    if(!porDesp[l.despacho_id]) porDesp[l.despacho_id]={ despacho_id:l.despacho_id, items:[] };
+    var ovr = l.incluye_iva_override; var item = { despacho_item_id:l.despacho_item_id, kg:Number(l.kg) };
+    if(ovr!==null) item.incluye_iva = ovr;
+    porDesp[l.despacho_id].items.push(item);
+  });
+  var body = { cliente_id:Number(cid), punto_venta:Number(eid('sgf-pv').value), es_nc:false,
+    precio_incluye_iva: !!(eid('sgf-incluye-iva') && eid('sgf-incluye-iva').checked),
+    seleccion: Object.keys(porDesp).map(function(k){return porDesp[k];}) };
+  var btn=eid('sgf-emitir-btn'); btn.disabled=true; var prev=btn.textContent; btn.textContent='Emitiendo…';
+  api('/api/sg/facturas/emitir','POST',body).then(function(r){
+    btn.disabled=false; btn.textContent=prev;
+    if(r&&r.ok){
+      toast('Comprobante autorizado','ok');
+      var c=eid('sgf-confirm');
+      c.innerHTML = '✓ <b>Comprobante '+(r.cbte_tipo===1?'A':(r.cbte_tipo===6?'B':r.cbte_tipo))+'</b> · N° '
+        +String(r.pto_vta).padStart(4,'0')+'-'+String(r.cbte_nro).padStart(8,'0')
+        +' · <b>CAE '+esc(r.cae)+'</b> · Vto '+esc(r.cae_vto||'—')
+        +' &nbsp; <a class="btn bb bs" href="'+esc(r.pdf_url)+'" target="_blank">📄 Ver comprobante</a>';
+      c.classList.add('on');
+      sgFacCliente();   // refresca /facturable (lo facturado sale o pasa a parcial)
+    } else {
+      toast((r&&(r.obs||r.error))||'Rechazado','er');
+      var c=eid('sgf-confirm'); c.innerHTML='⚠ Rechazado: '+esc((r&&(r.obs||r.error))||'—'); c.classList.add('on'); c.style.borderColor='var(--err)';
+    }
+  });
 }
 
 // ── Pedidos ──
