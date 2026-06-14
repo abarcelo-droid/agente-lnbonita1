@@ -2322,6 +2322,48 @@ router.get('/oferta', requireAuth, (req, res) => {
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
+// DISPONIBILIDAD por producto (panel maestro del sgItemPicker). Usa las MISMAS expresiones que
+// /oferta agregadas por producto → "Tomate 160kg" == Σ kg_disponibles de sus lotes en el detalle.
+// NO descuenta kg_reservado (reserva blanda, igual que /oferta). kg_camino=0 si incluir_camino=0.
+router.get('/disponibilidad', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const incluirCamino = req.query.incluir_camino === '1' || req.query.incluir_camino === 'true';
+    const stock = db.prepare(`
+      SELECT producto_id, nombre, SUM(kg_disp) AS kg_stock, COUNT(*) AS n_lotes FROM (
+        SELECT l.producto_id, pr.nombre,
+          (l.kg_reales - COALESCE((SELECT SUM(kg) FROM sg_lote_decomisos WHERE lote_id=l.id),0) - ${SUM_TRANSF}
+             - COALESCE((SELECT SUM(di.kg_despachados) FROM sg_despacho_items di
+                 JOIN sg_despachos d ON d.id=di.despacho_id AND d.activo=1 WHERE di.lote_id=l.id),0)) AS kg_disp
+        FROM sg_lotes l LEFT JOIN sg_productos pr ON pr.id=l.producto_id
+        WHERE l.activo=1 AND l.estado IN ('disponible','reservado','despachado_parcial')
+      ) WHERE kg_disp > 0.01
+      GROUP BY producto_id, nombre`).all();
+    const camino = incluirCamino ? db.prepare(`
+      SELECT producto_id, SUM(disp) AS kg_camino FROM (
+        SELECT i.producto_id,
+          ( i.kg_estimados
+            - COALESCE((SELECT SUM(kg_reales) FROM sg_lotes WHERE oc_item_id=i.id AND activo=1),0)
+            - COALESCE((SELECT SUM(kg) FROM sg_reservas WHERE oc_item_id=i.id AND tipo='oc_item' AND estado='activa'),0)
+          ) AS disp
+        FROM sg_oc_items i JOIN sg_oc o ON o.id=i.oc_id
+        WHERE o.activo=1 AND o.estado IN ('abierta','recibida_parcial')
+      ) WHERE disp > 0.01
+      GROUP BY producto_id`).all() : [];
+    const mapa = new Map();
+    for (const s of stock) mapa.set(s.producto_id, { producto_id: s.producto_id, nombre: s.nombre || '', kg_stock: +Number(s.kg_stock).toFixed(2), kg_camino: 0, n_lotes: s.n_lotes });
+    for (const c of camino) {
+      let e = mapa.get(c.producto_id);
+      if (!e) { const pr = db.prepare('SELECT nombre FROM sg_productos WHERE id=?').get(c.producto_id); e = { producto_id: c.producto_id, nombre: (pr && pr.nombre) || '', kg_stock: 0, kg_camino: 0, n_lotes: 0 }; mapa.set(c.producto_id, e); }
+      e.kg_camino = +Number(c.kg_camino).toFixed(2);
+    }
+    const data = [...mapa.values()]
+      .filter(e => e.kg_stock > 0.01 || (incluirCamino && e.kg_camino > 0.01))
+      .sort((a, b) => String(a.nombre).localeCompare(String(b.nombre), 'es'));
+    res.json({ ok: true, data });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
 // ── DESPACHOS ──────────────────────────────────────────────────────────────────
 // PARTE B — sincroniza el gasto de FLETE DE SALIDA (pendiente_valorizar) de un despacho con el
 // fletero elegido. Idempotente: solo toca el gasto PENDIENTE (nunca uno ya valorizado).
