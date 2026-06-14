@@ -14,6 +14,7 @@ import '../servicios/db_sg.js'; // corre el DDL sg_* al importarse
 import { detectarDuplicado } from '../servicios/dedup.js';
 import { generarOcPDF } from '../servicios/ocPDF.js';
 import { generarRecepcionCalidadPDF } from '../servicios/recepcionCalidadPDF.js';
+import { autenticar as afipAutenticar, ambienteActual as afipAmbiente } from '../servicios/afip-wsaa.js';
 
 const router = express.Router();
 
@@ -471,6 +472,18 @@ router.put('/config', requireAdmin, (req, res) => {
     for (const k of Object.keys(b)) up.run(k, b[k] == null ? null : String(b[k]), uid(req));
     res.json({ ok: true, data: { actualizadas: Object.keys(b) } });
   } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+
+// ── AFIP/ARCA Paso 1 — prueba de AUTENTICACIÓN (WSAA). NO emite comprobantes ──────
+// Dispara el login contra WSAA (homologación) y confirma que cert + firma CMS + conectividad
+// andan. NO devuelve el token/sign (sensibles): solo hasta cuándo es válido. requireAdmin.
+router.get('/afip/test-auth', requireAdmin, async (req, res) => {
+  try {
+    const ta = await afipAutenticar('wsfe');
+    res.json({ ok: true, ambiente: afipAmbiente(), cacheado: !!ta.cacheado, token_valido_hasta: ta.expira || null });
+  } catch (e) {
+    res.status(502).json({ ok: false, ambiente: afipAmbiente(), error: e.message });
+  }
 });
 
 // BRIEF 10 — CARGA INICIAL DE INVENTARIO (lotes de apertura, sin compra/proveedor/OC).

@@ -1213,6 +1213,39 @@ for (const tabla of ['sg_clientes', 'sg_proveedores']) {
   } catch (e) { console.error(`[DB] SG migración ${tabla} (saldo_inicial):`, e.message); }
 }
 
+// ── FACTURACIÓN AFIP/ARCA — Paso 1: config + caché del TA (autenticación WSAA) ─────
+// Las CREDENCIALES (cert/key) viven SOLO en env vars (process.env), nunca en la DB ni en el repo.
+// Acá guardamos lo NO secreto: CUIT, ambiente, razón social (config) y el TA cacheado (token/sign
+// son tokens de sesión de corta vida que devuelve WSAA; se guardan server-side para reusarlos
+// hasta su expiración — AFIP rechaza pedir un TA nuevo si hay uno vigente).
+db.exec(`
+  CREATE TABLE IF NOT EXISTS sg_afip_config (
+    id            INTEGER PRIMARY KEY CHECK(id=1),
+    cuit          TEXT,
+    ambiente      TEXT,
+    razon_social  TEXT,
+    modificado_en TEXT
+  );
+  CREATE TABLE IF NOT EXISTS sg_afip_ta (
+    id        INTEGER PRIMARY KEY AUTOINCREMENT,
+    servicio  TEXT NOT NULL,
+    ambiente  TEXT NOT NULL,
+    token     TEXT,
+    sign      TEXT,
+    generado  TEXT,
+    expira    TEXT,
+    UNIQUE(servicio, ambiente)
+  );
+`);
+// Seed/sync de la config con las env vars (CUIT y ambiente NO son secretos). El cert/key NO se tocan.
+try {
+  const _cuit = process.env.AFIP_CUIT || null;
+  const _amb = (process.env.AFIP_AMBIENTE || 'homologacion');
+  const _rs = process.env.AFIP_RAZON_SOCIAL || null;
+  db.prepare('INSERT OR IGNORE INTO sg_afip_config (id, cuit, ambiente, razon_social) VALUES (1, ?, ?, ?)').run(_cuit, _amb, _rs);
+  db.prepare("UPDATE sg_afip_config SET cuit=COALESCE(?,cuit), ambiente=COALESCE(?,ambiente), modificado_en=datetime('now','localtime') WHERE id=1").run(_cuit, _amb);
+} catch (e) { console.error('[DB] SG seed sg_afip_config:', e.message); }
+
 console.log('[DB] Módulo San Gerónimo (sg_*) inicializado');
 
 export default db;
