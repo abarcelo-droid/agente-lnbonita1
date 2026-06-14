@@ -1279,6 +1279,8 @@ router.get('/lotes', requireAuth, (req, res) => {
     if (req.query.estado) { where.push('l.estado=?'); params.push(req.query.estado); }
     if (req.query.producto_id) { where.push('l.producto_id=?'); params.push(req.query.producto_id); }
     if (req.query.calidad) { where.push('l.calidad=?'); params.push(req.query.calidad); }
+    if (req.query.semaforo) { where.push('l.semaforo=?'); params.push(req.query.semaforo); }       // filtro planilla de stock
+    if (req.query.familia) { where.push('pr.familia=?'); params.push(req.query.familia); }           // categoría = familia del producto
     if (req.query.recepcion_id) { where.push('l.recepcion_id=?'); params.push(req.query.recepcion_id); }
     if (req.query.oc_id) { where.push('l.oc_item_id IN (SELECT id FROM sg_oc_items WHERE oc_id=?)'); params.push(req.query.oc_id); }
     if (req.query.sin_precio === '1') where.push('l.precio_unitario_kg IS NULL');
@@ -1292,7 +1294,20 @@ router.get('/lotes', requireAuth, (req, res) => {
     const rows = db.prepare(`
       SELECT l.*, pr.nombre AS producto_nombre, pr.familia AS producto_familia,
         r.numero_recepcion, o.numero AS oc_numero, pv.razon_social AS proveedor_nombre,
-        CAST(julianday(l.fecha_vencimiento_estimada) - julianday(date('now','localtime')) AS INTEGER) AS dias_restantes
+        CAST(julianday(l.fecha_vencimiento_estimada) - julianday(date('now','localtime')) AS INTEGER) AS dias_restantes,
+        -- kg vigentes (para costo/kg revaluado) = kg_reales − Σ decomiso − Σ transformado/reproceso
+        (l.kg_reales
+          - COALESCE((SELECT SUM(kg) FROM sg_lote_decomisos WHERE lote_id=l.id),0)
+          - COALESCE((SELECT SUM(kg_transformados) FROM sg_transformaciones WHERE lote_origen_id=l.id),0)
+          - COALESCE((SELECT SUM(kp.kg_procesados) FROM sg_reprocesos kp WHERE kp.lote_madre_id=l.id AND kp.estado='activo'),0)
+        ) AS kg_vigente,
+        -- kg disponibles (vendibles) = kg vigentes − Σ despachado
+        (l.kg_reales
+          - COALESCE((SELECT SUM(kg) FROM sg_lote_decomisos WHERE lote_id=l.id),0)
+          - COALESCE((SELECT SUM(kg_transformados) FROM sg_transformaciones WHERE lote_origen_id=l.id),0)
+          - COALESCE((SELECT SUM(kp.kg_procesados) FROM sg_reprocesos kp WHERE kp.lote_madre_id=l.id AND kp.estado='activo'),0)
+          - COALESCE((SELECT SUM(di.kg_despachados) FROM sg_despacho_items di JOIN sg_despachos d ON d.id=di.despacho_id AND d.activo=1 WHERE di.lote_id=l.id),0)
+        ) AS kg_disponibles
       FROM sg_lotes l
       LEFT JOIN sg_productos pr ON pr.id=l.producto_id
       LEFT JOIN sg_recepciones r ON r.id=l.recepcion_id

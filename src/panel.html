@@ -267,15 +267,15 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   <div class="ni" data-sec="personal-reportes" data-admin-only="1"><span class="dot de"></span>📈 Reportes</div>
 
   <div class="ng" style="margin-top:8px">Abasto SG</div>
-  <div class="ni" data-sec="sg-dashboard" data-admin-only="1"><span class="dot da"></span>📊 Dashboard</div>
+  <div class="ni" data-sec="sg-dashboard" data-admin-only="1"><span class="dot da"></span>📊 Dash</div>
   <div class="ni" data-sec="sg-compras" data-admin-only="1"><span class="dot dd"></span>📥 Ingresos</div>
-  <div class="ni" data-sec="sg-gvariables" data-admin-only="1"><span class="dot dd"></span>🏭 Gastos Variables</div>
+  <div class="ni" data-sec="sg-gvariables" data-admin-only="1"><span class="dot dd"></span>💸 Gastos Variables</div>
   <div class="ni" data-sec="sg-stock" data-admin-only="1"><span class="dot db"></span>📦 Stock</div>
-  <div class="ni" data-sec="sg-reprocesos" data-admin-only="1"><span class="dot db"></span>♻️ Reprocesos</div>
-  <div class="ni" data-sec="sg-ventas" data-admin-only="1"><span class="dot dc"></span>📤 Egresos</div>
+  <div class="ni" data-sec="sg-reprocesos" data-admin-only="1"><span class="dot db"></span>🔄 Reprocesos</div>
+  <div class="ni" data-sec="sg-ventas" data-admin-only="1"><span class="dot dc"></span>📤 Salidas</div>
   <div class="ni" data-sec="sg-gastos-directos" data-admin-only="1"><span class="dot dd"></span>🧾 Gastos Directos</div>
-  <div class="ni" data-sec="sg-catalogo" data-admin-only="1"><span class="dot da"></span>📋 Maestros</div>
-  <div class="ni" data-sec="sg-reportes" data-admin-only="1"><span class="dot de"></span>📈 Reportes</div>
+  <div class="ni" data-sec="sg-catalogo" data-admin-only="1"><span class="dot da"></span>🗂️ Maestros</div>
+  <div class="ni" data-sec="sg-reportes" data-admin-only="1"><span class="dot de"></span>📈 Informes</div>
 
   <div class="ng" style="margin-top:8px">General</div>
   <div class="ni on" data-sec="inicio"><span class="dot"></span>Inicio</div>
@@ -2000,6 +2000,14 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
           <option value="despachado_parcial">Despachado parcial</option><option value="despachado_total">Despachado total</option><option value="bajado">Bajado</option>
         </select>
       </label>
+      <label style="font-size:12px;color:var(--mut)">Semáforo<br>
+        <select id="sg-st-sem" onchange="sgLoadStock()" style="padding:5px 8px;border-radius:6px;border:1px solid var(--bor);background:var(--bg)">
+          <option value="">Todos</option><option value="verde">🟢 Verde</option><option value="amarillo">🟡 Amarillo</option><option value="rojo">🔴 Rojo</option>
+        </select>
+      </label>
+      <label style="font-size:12px;color:var(--mut)">Categoría<br>
+        <select id="sg-st-fam" onchange="sgLoadStock()" style="padding:5px 8px;border-radius:6px;border:1px solid var(--bor);background:var(--bg);min-width:130px"><option value="">Todas</option></select>
+      </label>
       <label style="font-size:12px;color:var(--mut)">Vence en (días)<br>
         <input type="number" id="sg-st-venc" placeholder="ej 5" onchange="sgLoadStock()" style="width:80px;padding:5px 8px;border-radius:6px;border:1px solid var(--bor);background:var(--bg)">
       </label>
@@ -2008,12 +2016,12 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       <button class="btn bo bs" onclick="sgStockReset()">Limpiar</button>
     </div>
     <div class="ab-table-wrap"><table class="pa-tbl">
-      <thead><tr><th>Código</th><th>Producto</th><th style="text-align:right">Kg</th><th>Calidad</th><th>Vence</th><th style="text-align:center">Días</th><th style="text-align:right">Costo final</th><th style="text-align:center">Estado</th><th></th></tr></thead>
+      <thead><tr><th style="text-align:center" title="Semáforo">🚦</th><th>Producto</th><th>Categoría</th><th style="text-align:right">Kg disp</th><th>Calidad</th><th>Vence (días)</th><th style="text-align:right">Costo/kg</th><th style="text-align:center">Estado</th><th></th></tr></thead>
       <tbody id="sg-tb-stock"><tr><td colspan="9" class="emp">Cargando…</td></tr></tbody>
     </table></div>
   </div>
   <div class="sec sg-mod" id="sec-sg-ventas">
-    <div class="ph"><div><div class="ph-t">🍅 San Gerónimo · Egresos</div><div class="ph-s">Pedidos, despachos y cuenta corriente de clientes</div></div></div>
+    <div class="ph"><div><div class="ph-t">🍅 San Gerónimo · Salidas</div><div class="ph-s">Pedidos, despachos y cuenta corriente de clientes</div></div></div>
     <style>
       .sg-mod .sgv-subtab{padding:7px 14px;cursor:pointer;font-size:12.5px;font-weight:600;border-radius:6px;color:var(--mut)}
       .sg-mod .sgv-subtab.on{background:var(--burg);color:#fff}
@@ -2188,7 +2196,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   </div>
 
   <div class="sec sg-mod" id="sec-sg-reportes">
-    <div class="ph"><div><div class="ph-t">🍅 San Gerónimo · Reportes</div><div class="ph-s">Compras, ventas, márgenes y merma</div></div></div>
+    <div class="ph"><div><div class="ph-t">🍅 San Gerónimo · Informes</div><div class="ph-s">Compras, ventas, márgenes y merma</div></div></div>
     <style>
       .sg-mod .sgr-subtab{padding:7px 14px;cursor:pointer;font-size:12.5px;font-weight:600;border-radius:6px;color:var(--mut)}
       .sg-mod .sgr-subtab.on{background:var(--burg);color:#fff}
@@ -4144,12 +4152,20 @@ function sgStockInit(){
   sgLoadCaches(function(){
     var sel=eid('sg-st-prod');
     if(sel){ var v=sel.value; sel.innerHTML='<option value="">— Todos —</option>'+SG.cacheProd.map(function(p){return '<option value="'+p.id+'">'+esc(p.nombre)+'</option>';}).join(''); sel.value=v; }
+    // Categoría = familia del producto (catálogo de familias). Valor = nombre denormalizado en producto.
+    var fam=eid('sg-st-fam');
+    if(fam){ var fv=fam.value; fam.innerHTML='<option value="">Todas</option>'+(SG.cacheFam||[]).map(function(f){return '<option value="'+esc(f.nombre)+'">'+esc(f.nombre)+'</option>';}).join(''); fam.value=fv; }
     sgLoadStock();
   });
 }
 function sgStockReset(){
-  ['sg-st-prod','sg-st-cal','sg-st-est','sg-st-venc','sg-st-desde','sg-st-hasta'].forEach(function(id){ var el=eid(id); if(el) el.value=''; });
+  ['sg-st-prod','sg-st-cal','sg-st-est','sg-st-sem','sg-st-fam','sg-st-venc','sg-st-desde','sg-st-hasta'].forEach(function(id){ var el=eid(id); if(el) el.value=''; });
   sgLoadStock();
+}
+// Punto de color del semáforo (no tiñe la fila, solo el punto). Default verde.
+function sgSemDot(s){
+  var c = s==='rojo' ? '#dc2626' : (s==='amarillo' ? '#f59e0b' : '#16a34a');
+  return '<span title="'+(s||'verde')+'" style="display:inline-block;width:12px;height:12px;border-radius:50%;background:'+c+';vertical-align:middle"></span>';
 }
 function sgDiasBadge(d, estado){
   if(estado==='bajado') return '<span class="bdg" style="background:#e5e7eb;color:#6b7280">—</span>';
@@ -4165,17 +4181,29 @@ function sgLoadStock(){
   var prod=eid('sg-st-prod').value; if(prod) q.push('producto_id='+prod);
   var cal=eid('sg-st-cal').value; if(cal) q.push('calidad='+cal);
   var est=eid('sg-st-est').value; if(est) q.push('estado='+est);
+  var sem=eid('sg-st-sem').value; if(sem) q.push('semaforo='+sem);
+  var fam=eid('sg-st-fam').value; if(fam) q.push('familia='+encodeURIComponent(fam));
   var venc=eid('sg-st-venc').value; if(venc!=='') q.push('por_vencer='+venc);
   var d=eid('sg-st-desde').value; if(d) q.push('ingreso_desde='+d);
   var h=eid('sg-st-hasta').value; if(h) q.push('ingreso_hasta='+h);
   api('/api/sg/lotes'+(q.length?('?'+q.join('&')):'')).then(function(r){
     var rows=(r&&r.ok)?r.data:[];
     eid('sg-tb-stock').innerHTML = rows.length ? rows.map(function(l){
-      return '<tr style="cursor:pointer" onclick="sgLoteVer('+l.id+')">'
-        +'<td><code>'+esc(l.codigo_lote)+'</code></td><td>'+esc(l.producto_nombre||'')+'</td>'
-        +'<td style="text-align:right">'+nr(l.kg_reales)+'</td><td>'+(l.calidad||'—')+'</td>'
-        +'<td>'+(l.fecha_vencimiento_estimada||'—')+'</td><td style="text-align:center">'+sgDiasBadge(l.dias_restantes,l.estado)+'</td>'
-        +'<td style="text-align:right">'+(l.precio_unitario_kg==null?'<span class="bdg bpe" title="Sin precio (recepción sin OC o pizarra sin cerrar)">pendiente</span>':sgMoney(l.costo_final))+'</td>'
+      // Orden: 🟢 | Producto | Categoría(familia) | Kg disp(vigente) | Calidad | Vence(días) | Costo/kg | Estado | ver
+      var kgVig=(l.kg_vigente!=null?l.kg_vigente:l.kg_reales);   // denominador del costo/kg (− decomiso/transformado)
+      var costoKgCell = (l.precio_unitario_kg==null)
+        ? '<span class="bdg bpe" title="Sin precio (recepción sin OC o pizarra sin cerrar)">pendiente</span>'
+        : sgMoney(kgVig>0 ? (l.costo_final||0)/kgVig : 0);
+      var venceCell = '<div style="white-space:nowrap">'+sgDiasBadge(l.dias_restantes,l.estado)+'</div>'
+        +(l.fecha_vencimiento_estimada?'<div style="font-size:10px;color:var(--mut)">'+l.fecha_vencimiento_estimada+'</div>':'');
+      return '<tr style="cursor:pointer" onclick="sgLoteVer('+l.id+')" title="Lote '+esc(l.codigo_lote)+'">'
+        +'<td style="text-align:center">'+sgSemDot(l.semaforo)+'</td>'
+        +'<td>'+esc(l.producto_nombre||'')+'</td>'
+        +'<td>'+esc(l.producto_familia||'—')+'</td>'
+        +'<td style="text-align:right">'+nr(l.kg_disponibles!=null?l.kg_disponibles:l.kg_reales)+'</td>'
+        +'<td>'+(l.calidad||'—')+'</td>'
+        +'<td>'+venceCell+'</td>'
+        +'<td style="text-align:right">'+costoKgCell+'</td>'
         +'<td style="text-align:center"><span class="bdg '+(l.estado==='bajado'?'ber':'bok')+'">'+(SG_ESTLOTE[l.estado]||l.estado)+'</span></td>'
         +'<td style="text-align:right"><button class="btn bo bs" onclick="event.stopPropagation();sgLoteVer('+l.id+')">🔍</button></td></tr>';
     }).join('') : '<tr><td colspan="9" class="emp">Sin lotes con esos filtros.</td></tr>';
