@@ -433,7 +433,10 @@ montarCRUD('proveedores', 'sg_proveedores',
   ['razon_social', 'nombre_comercial', 'origen', 'cuit', 'tipo', 'categoria_fiscal', 'tipo_fiscal_habitual',
    'condicion_pago_habitual_id', 'cbu', 'alias_cbu', 'comercial_responsable_id', 'localidad', 'provincia',
    'telefono', 'email', 'observaciones', 'adm_proveedor_id', 'es_servicio'],   // es_servicio: 1 = fletero/cooperativa
-  { orderBy: 'razon_social COLLATE NOCASE' });
+  { orderBy: 'razon_social COLLATE NOCASE',
+    // nombre de la categoría comercial (categoria_id → sg_proveedor_categorias). La usa el front
+    // para filtrar el selector de la OC de mercadería (solo Mercaderia Nacional/Importada).
+    selectExtra: '(SELECT nombre FROM sg_proveedor_categorias WHERE id = sg_proveedores.categoria_id) AS categoria_nombre' });
 
 // Fleteros / proveedores de servicio (es_servicio=1). Alimenta el selector del despacho y
 // el filtro del módulo Gastos Directos.

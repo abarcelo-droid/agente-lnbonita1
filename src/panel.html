@@ -1909,6 +1909,9 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       .sg-oc-card-top{display:grid;grid-template-columns:1fr 1fr auto;gap:8px;align-items:center;margin-bottom:8px}
       .sg-oc-card-bot{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
       .sg-oc-card-bot input{width:120px}
+      .sg-oc-search{position:relative}
+      .sg-oc-search input{width:100%;box-sizing:border-box}
+      .sg-oc-res-it:hover{background:var(--bg)}
       .sg-oc-sub{margin-left:auto;font-weight:700;font-size:13px;white-space:nowrap;color:var(--tx)}
       .sg-oc-add{width:100%;border:1.5px dashed var(--bor);background:transparent;color:var(--mut);border-radius:9px;padding:10px;font-size:13px;font-weight:600;cursor:pointer;margin-top:4px}
       .sg-oc-add:hover{border-color:var(--burg);color:var(--burg)}
@@ -3503,9 +3506,14 @@ function sgLoadOC(){
     }).join('') : '<tr><td colspan="9" class="emp">Sin órdenes. Creá una nueva.</td></tr>';
   });
 }
+// OC de mercadería: el proveedor debe ser de categoría "Mercaderia Nacional" o "Mercaderia
+// Importada" (categoria_id → sg_proveedor_categorias, expuesto como categoria_nombre). Viáticos,
+// servicios, etc. no aplican a una OC de mercadería.
+var SG_OC_PROV_CATS = { 'Mercaderia Nacional':1, 'Mercaderia Importada':1 };
+function sgOcProvOpts(){ return (SG.cacheProv||[]).filter(function(p){ return SG_OC_PROV_CATS[p.categoria_nombre]; }); }
 function sgOcOpen(){
   SG.ocItems=[];
-  eid('sg-oc-prov').innerHTML=sgOpts(SG.cacheProv,'razon_social','','— Elegir —');
+  eid('sg-oc-prov').innerHTML=sgOpts(sgOcProvOpts(),'razon_social','','— Elegir —');
   eid('sg-oc-cond').innerHTML=sgOpts(SG.cacheCond,'nombre','','— Sin condición —');
   eid('sg-oc-fiscal').innerHTML=SG_FISCAL.map(function(o){return '<option value="'+o[0]+'">'+o[1]+'</option>';}).join('');
   eid('sg-oc-fecha').value=new Date().toISOString().slice(0,10);
@@ -3538,7 +3546,7 @@ function sgFamAlic(producto_id){
   var f=(SG.cacheFam||[]).find(function(x){return String(x.id)===String(p.familia_id);});
   return (f && f.iva_alicuota!=null && f.iva_alicuota!=='') ? Number(f.iva_alicuota) : null;
 }
-function sgOcAddItem(){ SG.ocItems.push({producto_id:'',presentacion_id:'',cantidad:'',precio:'',modo:'kilo'}); sgOcRenderItems(); }
+function sgOcAddItem(){ SG.ocItems.push({producto_id:'',presentacion_id:'',cantidad:'',precio:'',modo:'bulto',q:''}); sgOcRenderItems(); }
 function sgOcDelItem(i){ SG.ocItems.splice(i,1); sgOcRenderItems(); }
 function sgOcUpd(i,c,v){ SG.ocItems[i][c]=v; if(c==='producto_id')SG.ocItems[i].presentacion_id=''; sgOcRenderItems(); }
 function sgOcUpdNR(i,c,v){ SG.ocItems[i][c]=v; sgOcTotales(); }
@@ -3574,6 +3582,38 @@ function sgOcProductos(){
     return String(a.codigo||'').localeCompare(String(b.codigo||''), 'es', { numeric:true });
   });
 }
+// Envases del producto (distintos, desde sus presentaciones) — para el buscador y su label.
+function sgOcEnvasesStr(p){
+  var seen={}, out=[];
+  sgPresDe(p.id).forEach(function(x){ var n=sgEnvNombre(x.envase_id); if(n&&n!=='—'&&!seen[n]){ seen[n]=1; out.push(n); } });
+  return out.join(', ');
+}
+// ── BUSCADOR de producto (item 2): filtra por especie+variedad+envase; render solo del dropdown ──
+function sgOcBuscar(i, q){
+  SG.ocItems[i].q = q; SG.ocItems[i].producto_id = '';   // tipear invalida la selección previa
+  var res = eid('sg-oc-res-'+i); if(!res) return;
+  var ql = String(q||'').trim().toLowerCase();
+  if(ql===''){ res.style.display='none'; res.innerHTML=''; sgOcTotales(); return; }
+  var terms = ql.split(/\s+/);
+  var matches = sgOcProductos().filter(function(p){
+    var hay = (sgOcProdLabel(p)+' '+sgOcEnvasesStr(p)).toLowerCase();
+    return terms.every(function(t){ return hay.indexOf(t) >= 0; });
+  }).slice(0, 40);
+  res.innerHTML = matches.length ? matches.map(function(p){
+    var env = sgOcEnvasesStr(p);
+    return '<div class="sg-oc-res-it" onmousedown="sgOcPickProd('+i+','+p.id+')" style="padding:7px 9px;cursor:pointer;font-size:12.5px;border-bottom:1px solid var(--bor)">'
+      +'<code>'+esc(p.codigo||'')+'</code> '+esc(p.nombre||'')+(p.variedad?' '+esc(p.variedad):'')
+      +(env?' <span style="color:var(--mut)">· '+esc(env)+'</span>':'')+'</div>';
+  }).join('') : '<div style="padding:8px 9px;color:var(--mut);font-size:12px">Sin coincidencias</div>';
+  res.style.display='block';
+}
+function sgOcPickProd(i, id){
+  SG.ocItems[i].producto_id = String(id); SG.ocItems[i].presentacion_id = ''; SG.ocItems[i].q = '';
+  var res = eid('sg-oc-res-'+i); if(res) res.style.display='none';
+  sgOcRenderItems();   // re-render: aparece el selector de presentaciones del producto elegido (item 3)
+}
+function sgOcQFocus(i, el){ if(SG.ocItems[i].producto_id){ el.select(); } else { sgOcBuscar(i, el.value); } }
+function sgOcBuscarBlur(i){ var res=eid('sg-oc-res-'+i); if(res) setTimeout(function(){ res.style.display='none'; }, 150); }
 function sgOcRenderItems(){
   var firme=sgOcPrecio()==='firme';
   eid('sg-oc-items').innerHTML=SG.ocItems.map(function(it,i){
@@ -3583,6 +3623,16 @@ function sgOcRenderItems(){
     var presSel = (it.producto_id && presList.length===0)
       ? '<select disabled title="Este producto no tiene presentaciones cargadas (cargalas en Catálogo)"><option>(sin presentaciones)</option></select>'
       : '<select onchange="sgOcUpdNR('+i+',\'presentacion_id\',this.value)">'+sgOpts(presList,sgPresLabel,it.presentacion_id,'— Present. —')+'</select>';
+    // BUSCADOR combinado (item 2): reemplaza el dropdown de producto. El operador tipea
+    // (especie · variedad · envase) y filtra; el dropdown de resultados se renderiza solo (no
+    // re-renderiza toda la lista → no pierde foco al tipear). Al elegir, sgOcPickProd fija el producto.
+    var prodSel = it.producto_id ? (SG.cacheProd||[]).find(function(x){ return String(x.id)===String(it.producto_id); }) : null;
+    var qVal = prodSel ? sgOcProdLabel(prodSel) : (it.q||'');
+    var prodCell = '<div class="sg-oc-search">'
+      +'<input type="text" id="sg-oc-q-'+i+'" autocomplete="off" placeholder="Buscar producto (especie · variedad · envase)…" value="'+esc(qVal)+'"'
+        +' oninput="sgOcBuscar('+i+',this.value)" onfocus="sgOcQFocus('+i+',this)" onblur="sgOcBuscarBlur('+i+')">'
+      +'<div id="sg-oc-res-'+i+'" class="sg-oc-res" style="display:none;position:absolute;z-index:30;left:0;right:0;top:100%;max-height:240px;overflow:auto;background:var(--card,#fff);border:1px solid var(--bor);border-radius:6px;box-shadow:0 6px 18px rgba(0,0,0,.12)"></div>'
+      +'</div>';
     // CAMBIO 2 — modo de carga por item. BULTO: cantidad=nº bultos, precio=$/bulto → kg=bultos×factor.
     // KILO (default): cantidad=kg, precio=$/kg → kg=cantidad. Internamente siempre se guardan kg y total reales.
     var bulto = it.modo==='bulto';
@@ -3597,7 +3647,7 @@ function sgOcRenderItems(){
     // El subtotal por item (#sg-oc-sub-i) lo completa sgOcTotales en vivo (cálculo intacto).
     return '<div class="sg-oc-card">'
       +'<div class="sg-oc-card-top">'
-        +'<select onchange="sgOcUpd('+i+',\'producto_id\',this.value)">'+sgOpts(sgOcProductos(),sgOcProdLabel,it.producto_id,'— Producto —')+'</select>'
+        +prodCell
         +presSel
         +(SG.ocItems.length>1?'<button class="btn bd bs" onclick="sgOcDelItem('+i+')" title="Quitar item">×</button>':'<span></span>')
       +'</div>'
