@@ -138,8 +138,12 @@ export async function autenticar(servicio = 'wsfe') {
   const cacheado = taEnCache(servicio, ambiente);
   if (cacheado) return { ...cacheado, cacheado: true, ambiente };
 
-  const certPem = pemDesdeEnv('AFIP_CERT_HOMO');
-  const keyPem = pemDesdeEnv('AFIP_KEY_HOMO');
+  // Credenciales SEGÚN AMBIENTE: homologación usa las _HOMO; producción las _PROD. Si la var del
+  // ambiente activo está vacía, pemDesdeEnv lanza claro y temprano (ej. PROD sin cert → no firma
+  // con el de homologación, que AFIP rechazaría).
+  const sufijo = ambiente === 'produccion' ? 'PROD' : 'HOMO';
+  const certPem = pemDesdeEnv('AFIP_CERT_' + sufijo);
+  const keyPem = pemDesdeEnv('AFIP_KEY_' + sufijo);
   const tra = construirTRA(servicio);
   const cms = firmarCMS(tra, certPem, keyPem);
   const { text } = await loginCms(cms);
