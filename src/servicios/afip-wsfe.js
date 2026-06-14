@@ -123,5 +123,13 @@ export async function ptosVenta() {
   return parseLista(text, 'PtoVenta');
 }
 
+// FEParamGetCondicionIvaReceptor: condiciones IVA del receptor vigentes (RG 5616). Sirve para
+// VERIFICAR los IDs (1=RI, 4=Exento, 5=Consumidor Final, 6=Monotributo) en vez de hardcodear a ciegas.
+export async function condicionesIvaReceptor() {
+  const text = await soapCall('FEParamGetCondicionIvaReceptor', await authXml());
+  const err = extraerErrores(text); if (err) throw new Error(err);
+  return parseLista(text, 'CondicionIvaReceptor');
+}
+
 // Helpers de bajo nivel reusados por el motor de emisión (afip-wsfe-emision.js).
 export { ambienteActual, soapCall, authXml, pick, pickAll, extraerErrores };

@@ -15,7 +15,7 @@ import { detectarDuplicado } from '../servicios/dedup.js';
 import { generarOcPDF } from '../servicios/ocPDF.js';
 import { generarRecepcionCalidadPDF } from '../servicios/recepcionCalidadPDF.js';
 import { autenticar as afipAutenticar, ambienteActual as afipAmbiente } from '../servicios/afip-wsaa.js';
-import { feDummy as afipFeDummy, ultimoComprobante as afipUltimoCbte, tiposCbte as afipTiposCbte, tiposIva as afipTiposIva, ptosVenta as afipPtosVenta } from '../servicios/afip-wsfe.js';
+import { feDummy as afipFeDummy, ultimoComprobante as afipUltimoCbte, tiposCbte as afipTiposCbte, tiposIva as afipTiposIva, ptosVenta as afipPtosVenta, condicionesIvaReceptor as afipCondIva } from '../servicios/afip-wsfe.js';
 import { emitir as afipEmitir } from '../servicios/afip-wsfe-emision.js';
 
 const router = express.Router();
@@ -510,6 +510,13 @@ router.get('/afip/parametros', requireAdmin, async (req, res) => {
   try {
     const [tipos_cbte, tipos_iva, ptos_venta] = await Promise.all([afipTiposCbte(), afipTiposIva(), afipPtosVenta()]);
     res.json({ ok: true, ambiente: afipAmbiente(), tipos_cbte, tipos_iva, ptos_venta });
+  } catch (e) { res.status(502).json({ ok: false, ambiente: afipAmbiente(), error: e.message }); }
+});
+
+// Condiciones IVA del receptor (RG 5616) — para verificar los IDs contra AFIP en vivo.
+router.get('/afip/condiciones-iva', requireAdmin, async (req, res) => {
+  try {
+    res.json({ ok: true, ambiente: afipAmbiente(), condiciones: await afipCondIva() });
   } catch (e) { res.status(502).json({ ok: false, ambiente: afipAmbiente(), error: e.message }); }
 });
 

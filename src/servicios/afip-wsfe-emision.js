@@ -64,6 +64,18 @@ function docDe(cliente, cbteTipo) {
   if (cbteTipo === 1 || cbteTipo === 3) return { doc_tipo: 80, doc_nro: cuit };
   return cuitOk ? { doc_tipo: 80, doc_nro: cuit } : { doc_tipo: 99, doc_nro: '0' };
 }
+// Condición frente al IVA del receptor (RG 5616, obligatorio desde 2025). Códigos AFIP —
+// verificables en vivo con FEParamGetCondicionIvaReceptor (GET /api/sg/afip/condiciones-iva):
+//   1=IVA Responsable Inscripto · 4=IVA Sujeto Exento · 5=Consumidor Final · 6=Responsable Monotributo.
+const CONDICION_IVA = { responsable_inscripto: 1, sujeto_exento: 4, consumidor_final: 5, monotributo: 6 };
+// Por ahora (brief): sin CUIT → Consumidor Final (5); con CUIT → Responsable Inscripto (1) por
+// defecto. La afinación por categoría fiscal real del cliente queda para más adelante (y debe ir
+// alineada con el tipo de comprobante: A exige receptor RI/Monotributo).
+function condicionIvaReceptorId(cliente) {
+  const cuit = cliente && cliente.cuit ? String(cliente.cuit).replace(/\D/g, '') : '';
+  const cuitOk = /^\d{11}$/.test(cuit) && !/^0+$/.test(cuit);
+  return cuitOk ? CONDICION_IVA.responsable_inscripto : CONDICION_IVA.consumidor_final;
+}
 function r2(n) { return Math.round((Number(n) || 0) * 100) / 100; }
 function fechaHoyAR() { return new Date(Date.now() - 3 * 3600 * 1000).toISOString().slice(0, 10); }
 
@@ -101,7 +113,8 @@ export function construirComprobante(database, { clienteId, items, esNC }) {
   if (!detalle.length) throw new Error('El comprobante necesita al menos un ítem');
   const impTotal = r2(impNeto + impIva + impOpEx);
   const iva = Object.keys(ivaMap).map(id => ({ Id: Number(id), BaseImp: ivaMap[id].base, Importe: ivaMap[id].importe }));
-  return { cliente, cbte_tipo: cbteTipo, doc_tipo, doc_nro, imp_neto: impNeto, imp_iva: impIva, imp_opex: impOpEx, imp_total: impTotal, iva, detalle, concepto: 1 };
+  return { cliente, cbte_tipo: cbteTipo, doc_tipo, doc_nro, cond_iva_receptor: condicionIvaReceptorId(cliente),
+    imp_neto: impNeto, imp_iva: impIva, imp_opex: impOpEx, imp_total: impTotal, iva, detalle, concepto: 1 };
 }
 
 // XML interno de FECAESolicitar (un comprobante). 'auth' = bloque <ar:Auth>.
@@ -126,6 +139,8 @@ export function xmlFECAESolicitar(auth, { ptoVta, cbteTipo, cbteNro, comprobante
     + '<ar:ImpIVA>' + c.imp_iva.toFixed(2) + '</ar:ImpIVA>'
     + '<ar:ImpTrib>0.00</ar:ImpTrib>'
     + '<ar:MonId>PES</ar:MonId><ar:MonCotiz>1</ar:MonCotiz>'
+    // RG 5616 — Condición frente al IVA del receptor. Va DESPUÉS de MonCotiz y ANTES de Iva (orden XSD).
+    + '<ar:CondicionIVAReceptorId>' + (c.cond_iva_receptor || 5) + '</ar:CondicionIVAReceptorId>'
     + ivaXml
     + '</ar:FECAEDetRequest></ar:FeDetReq>'
     + '</ar:FeCAEReq>';
