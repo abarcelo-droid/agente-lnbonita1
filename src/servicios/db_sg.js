@@ -733,6 +733,32 @@ try {
   console.error('[DB] SG migración sg_clientes (cuenta_contable_id):', e.message);
 }
 
+// ── Catálogo de categorías comerciales del cliente + FK categoria_id (#401 Paso 4) ──
+// El padrón ABASTO trae una categoria_abasto (segmento comercial). Se guarda con FK.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS sg_cliente_categorias (
+    id        INTEGER PRIMARY KEY AUTOINCREMENT,
+    nombre    TEXT NOT NULL UNIQUE,
+    activo    INTEGER NOT NULL DEFAULT 1,
+    creado_en TEXT DEFAULT (datetime('now','localtime'))
+  );
+  INSERT OR IGNORE INTO sg_cliente_categorias (nombre) VALUES
+    ('Dedicados'), ('Food Service'), ('Mayorista A'), ('Mayorista MCBA'),
+    ('Minorista MCBA'), ('Minorista Entrega'), ('Consumidor Final'), ('Retail');
+`);
+// Columnas aditivas en sg_clientes (#401 Paso 4): categoria_id (FK), comercial (vendedor),
+// y codigo_postal + codigo_abasto que el CSV mapea (la tabla no los tenía). Self-healing.
+try {
+  const cols = db.prepare("PRAGMA table_info(sg_clientes)").all().map(c => c.name);
+  if (!cols.includes('categoria_id'))   { db.exec('ALTER TABLE sg_clientes ADD COLUMN categoria_id INTEGER REFERENCES sg_cliente_categorias(id)'); }
+  if (!cols.includes('comercial'))      { db.exec('ALTER TABLE sg_clientes ADD COLUMN comercial TEXT'); }
+  if (!cols.includes('codigo_postal'))  { db.exec('ALTER TABLE sg_clientes ADD COLUMN codigo_postal TEXT'); }
+  if (!cols.includes('codigo_abasto'))  { db.exec('ALTER TABLE sg_clientes ADD COLUMN codigo_abasto TEXT'); }
+  console.log('[DB] SG sg_clientes migrado (+categoria_id/comercial/codigo_postal/codigo_abasto si faltaban)');
+} catch (e) {
+  console.error('[DB] SG migración sg_clientes (categoria_id/comercial/cp/abasto):', e.message);
+}
+
 // A2) En el despacho se elige el fletero (FK lógica a sg_proveedores; sin REFERENCES inline
 //     por el límite de ALTER, se valida app-side). El transportista TEXT viejo queda intacto.
 try {
