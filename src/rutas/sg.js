@@ -69,7 +69,8 @@ function val(v) {
 // fields: lista de columnas asignables desde el body.
 function montarCRUD(path, tabla, fields, opts = {}) {
   // dedup: nombre de columna a chequear contra duplicados al crear (null = sin chequeo).
-  const { orderBy = 'id DESC', listExtra = null, dedup = null } = opts;
+  // selectExtra: expresiones SELECT extra (display) para el listado, ej. nombre de una FK.
+  const { orderBy = 'id DESC', listExtra = null, dedup = null, selectExtra = null } = opts;
 
   // LISTAR (incluye inactivos solo si ?todos=1)
   router.get(`/${path}`, requireAuth, (req, res) => {
@@ -82,7 +83,8 @@ function montarCRUD(path, tabla, fields, opts = {}) {
         const ex = listExtra(req, params);
         if (ex) where += ` AND ${ex}`;
       }
-      const rows = db.prepare(`SELECT * FROM ${tabla} WHERE ${where} ORDER BY ${orderBy}`).all(...params);
+      const sel = selectExtra ? `*, ${selectExtra}` : '*';
+      const rows = db.prepare(`SELECT ${sel} FROM ${tabla} WHERE ${where} ORDER BY ${orderBy}`).all(...params);
       res.json({ ok: true, data: rows });
     } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
   });
@@ -448,7 +450,9 @@ montarCRUD('clientes', 'sg_clientes',
    'condicion_pago_habitual_id', 'comercial_responsable_id', 'modalidad_pedido',
    'limite_credito', 'localidad', 'provincia', 'direccion_entrega', 'telefono',
    'email', 'observaciones'],
-  { orderBy: 'razon_social COLLATE NOCASE' });
+  { orderBy: 'razon_social COLLATE NOCASE',
+    // nombre de la categoría comercial (categoria_id → sg_cliente_categorias) para la grilla
+    selectExtra: '(SELECT nombre FROM sg_cliente_categorias WHERE id = sg_clientes.categoria_id) AS categoria_nombre' });
 
 // ── CONDICIONES DE PAGO (+ cuotas) ────────────────────────────────────────────────
 // Las cuotas se manejan junto a la cabecera (deben sumar 100%).
