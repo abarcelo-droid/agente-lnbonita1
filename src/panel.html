@@ -2173,8 +2173,8 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     <div class="sg-sub on" id="sg-sub-productos">
       <div style="display:flex;justify-content:flex-end;margin-bottom:10px"><button class="btn bb" onclick="sgOpenModal('productos')">+ Nuevo producto</button></div>
       <div class="ab-table-wrap"><table class="pa-tbl">
-        <thead><tr><th>Código</th><th>Especie</th><th>Variedad</th><th>Familia</th><th>Envase</th><th></th></tr></thead>
-        <tbody id="sg-tb-productos"><tr><td colspan="6" class="emp">Cargando…</td></tr></tbody>
+        <thead id="sg-th-productos"><tr><th>Código</th><th>Especie</th><th>Variedad</th><th>Familia</th><th>Envase</th><th>Presentaciones</th><th></th></tr></thead>
+        <tbody id="sg-tb-productos"><tr><td colspan="7" class="emp">Cargando…</td></tr></tbody>
       </table></div>
     </div>
 
@@ -2186,7 +2186,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
         <button class="btn bb" onclick="sgOpenModal('presentaciones')">+ Nueva presentación</button>
       </div>
       <div class="ab-table-wrap"><table class="pa-tbl">
-        <thead><tr><th>Producto</th><th>Presentación</th><th style="text-align:right">Factor → unidad base</th><th>Envase</th><th style="text-align:right">Paletizado</th><th></th></tr></thead>
+        <thead id="sg-th-presentaciones"><tr><th>Producto</th><th>Presentación</th><th style="text-align:right">Factor → unidad base</th><th>Envase</th><th style="text-align:right">Paletizado</th><th></th></tr></thead>
         <tbody id="sg-tb-presentaciones"><tr><td colspan="6" class="emp">Cargando…</td></tr></tbody>
       </table></div>
     </div>
@@ -2194,7 +2194,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     <div class="sg-sub" id="sg-sub-proveedores">
       <div style="display:flex;justify-content:flex-end;margin-bottom:10px"><button class="btn bb" onclick="sgOpenModal('proveedores')">+ Nuevo proveedor</button></div>
       <div class="ab-table-wrap"><table class="pa-tbl">
-        <thead><tr><th>Razón social</th><th>CUIT</th><th>Tipo</th><th>Fiscal hab.</th><th>Localidad</th><th></th></tr></thead>
+        <thead id="sg-th-proveedores"><tr><th>Razón social</th><th>CUIT</th><th>Tipo</th><th>Fiscal hab.</th><th>Localidad</th><th></th></tr></thead>
         <tbody id="sg-tb-proveedores"><tr><td colspan="6" class="emp">Cargando…</td></tr></tbody>
       </table></div>
     </div>
@@ -2202,7 +2202,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     <div class="sg-sub" id="sg-sub-clientes">
       <div style="display:flex;justify-content:flex-end;margin-bottom:10px"><button class="btn bb" onclick="sgOpenModal('clientes')">+ Nuevo cliente</button></div>
       <div class="ab-table-wrap"><table class="pa-tbl">
-        <thead><tr><th>Razón social</th><th>CUIT</th><th>Categoría</th><th>Alias</th><th>Modalidad</th><th style="text-align:right">Lím. crédito</th><th></th></tr></thead>
+        <thead id="sg-th-clientes"><tr><th>Razón social</th><th>CUIT</th><th>Categoría</th><th>Alias</th><th>Modalidad</th><th style="text-align:right">Lím. crédito</th><th></th></tr></thead>
         <tbody id="sg-tb-clientes"><tr><td colspan="7" class="emp">Cargando…</td></tr></tbody>
       </table></div>
     </div>
@@ -2717,6 +2717,122 @@ var SG_SCHEMA = {
   }
 };
 
+// ── Grillas Maestros: orden + filtro por columna (capa genérica schema-driven) ──
+// SG_GRID describe, por entidad, las columnas en el MISMO orden que las pinta sgRow (la de
+// acciones queda implícita). Cada columna: {k clave/estado, l label, sort, filtro 'texto'|'enum',
+// right alinea derecha, num ordena numérico, disp(r) valor mostrado/comparable}. El motor
+// (sgGridHead/sgGridApply) filtra+ordena SG.last[entity] EN MEMORIA y re-pinta el tbody con el
+// sgRow existente. Estado en SG.gridState[entity], persiste al navegar entre subtabs.
+var SG_GRID = {
+  productos: [
+    {k:'codigo',   l:'Código',   sort:true,  filtro:'texto'},
+    {k:'nombre',   l:'Especie',  sort:true,  filtro:'texto'},
+    {k:'variedad', l:'Variedad', sort:true,  filtro:'texto', disp:function(r){ return r.variedad||''; }},
+    {k:'familia',  l:'Familia',  sort:true,  filtro:'enum',  disp:function(r){ return r.familia||''; }},
+    {k:'envase',   l:'Envase',   sort:true,  filtro:'texto', disp:function(r){ var p=sgPresDe(r.id); return p.length?sgEnvNombre(p[0].envase_id):''; }},
+    // Columna informativa (item 2): factor+unidad de cada presentación. No editable, sin sort/filtro.
+    {k:'presentaciones', l:'Presentaciones', sort:false, filtro:null, disp:function(r){ return sgPresStr(r.id); }}
+  ],
+  presentaciones: [
+    {k:'producto_id',       l:'Producto',             sort:true, filtro:'texto', disp:function(r){ return sgProdLabel(r.producto_id); }},
+    {k:'nombre',            l:'Presentación',         sort:true, filtro:'enum'},
+    {k:'factor_conversion', l:'Factor → unidad base', sort:true, filtro:'texto', right:true, num:true, disp:function(r){ return r.factor_conversion!=null?r.factor_conversion:''; }},
+    {k:'envase_id',         l:'Envase',               sort:true, filtro:'enum',  disp:function(r){ return sgEnvNombre(r.envase_id); }},
+    {k:'paletizado',        l:'Paletizado',           sort:true, filtro:'texto', right:true, num:true, disp:function(r){ return (r.paletizado!=null&&r.paletizado!=='')?r.paletizado:''; }}
+  ],
+  proveedores: [
+    {k:'razon_social',        l:'Razón social', sort:true, filtro:'texto'},
+    {k:'cuit',                l:'CUIT',         sort:true, filtro:'texto', disp:function(r){ return r.cuit||''; }},
+    {k:'tipo',                l:'Tipo',         sort:true, filtro:'enum',  disp:function(r){ return sgLbl(SG_TIPOPRV,r.tipo); }},
+    {k:'tipo_fiscal_habitual',l:'Fiscal hab.',  sort:true, filtro:'enum',  disp:function(r){ return sgLbl(SG_FISCAL_LBL,r.tipo_fiscal_habitual); }},
+    {k:'localidad',           l:'Localidad',    sort:true, filtro:'texto', disp:function(r){ return r.localidad||''; }}
+  ],
+  clientes: [
+    {k:'razon_social',    l:'Razón social', sort:true, filtro:'texto'},
+    {k:'cuit',            l:'CUIT',         sort:true, filtro:'texto', disp:function(r){ return r.cuit||''; }},
+    {k:'categoria_nombre',l:'Categoría',    sort:true, filtro:'enum',  disp:function(r){ return r.categoria_nombre||''; }},
+    {k:'nombre_comercial',l:'Alias',        sort:true, filtro:'texto', disp:function(r){ return r.nombre_comercial||''; }},
+    {k:'modalidad_pedido',l:'Modalidad',    sort:true, filtro:'enum',  disp:function(r){ return sgLbl(SG_MODPED,r.modalidad_pedido); }},
+    {k:'limite_credito',  l:'Lím. crédito', sort:true, filtro:'texto', right:true, num:true, disp:function(r){ return r.limite_credito!=null?r.limite_credito:''; }}
+  ]
+};
+// Valor mostrado/comparable de una columna (default = r[k]).
+function sgGridVal(c, r){ return c.disp ? c.disp(r) : (r[c.k]!=null ? r[c.k] : ''); }
+// Estado de grilla por entidad (lazy). Persiste mientras viva la página.
+function sgGridSt(entity){
+  if (!SG.gridState) SG.gridState = {};
+  if (!SG.gridState[entity]) SG.gridState[entity] = { sortK:null, sortDir:'asc', filtros:{} };
+  return SG.gridState[entity];
+}
+// Valores distintos presentes (para el <select> de un filtro enum) — acotado por los datos.
+function sgGridEnumOpts(entity, c){
+  var seen = {}, out = [];
+  (SG.last[entity]||[]).forEach(function(r){ var v = sgGridVal(c, r); if (v!=null && v!=='' && v!=='—' && !seen[v]){ seen[v]=1; out.push(v); } });
+  return out.sort(function(a,b){ return String(a).localeCompare(String(b),'es',{numeric:true}); });
+}
+// Factor+unidad de cada presentación del producto, unidos por coma ("20kg, 14kg"). "—" si ninguna.
+function sgPresStr(prodId){
+  var ps = sgPresDe(prodId);
+  if (!ps.length) return '—';
+  return ps.map(function(p){
+    var f = (p.factor_conversion!=null && p.factor_conversion!=='') ? p.factor_conversion : '';
+    return f + (/unidad/i.test(p.nombre||'') ? 'u' : 'kg');
+  }).join(', ');
+}
+// Pinta el thead dinámico: fila de headers clickeables (flecha ▲/▼) + fila de filtros (input/select).
+// Se re-pinta solo al cargar y al ordenar (NO al tipear → el input vive en el thead y no pierde foco).
+function sgGridHead(entity){
+  var cols = SG_GRID[entity]; if (!cols) return;
+  var st = sgGridSt(entity);
+  var hdr = cols.map(function(c){
+    var sty = 'white-space:nowrap' + (c.right ? ';text-align:right' : '');
+    if (c.sort === false) return '<th style="'+sty+'">'+esc(c.l)+'</th>';
+    var arrow = (st.sortK===c.k) ? (st.sortDir==='asc' ? ' ▲' : ' ▼') : '';
+    return '<th onclick="sgGridSort(\''+entity+'\',\''+c.k+'\')" style="cursor:pointer;user-select:none;'+sty+'">'+esc(c.l)+arrow+'</th>';
+  }).join('') + '<th></th>';
+  var inSty = 'width:100%;box-sizing:border-box;padding:3px 6px;border-radius:5px;border:1px solid var(--bor);background:var(--bg);font-size:12px;font-weight:400';
+  var filt = cols.map(function(c){
+    if (c.filtro==='texto'){
+      return '<th style="padding:2px 6px 8px"><input value="'+esc(st.filtros[c.k]||'')+'" oninput="sgGridFilter(\''+entity+'\',\''+c.k+'\',this.value)" placeholder="filtrar" style="'+inSty+'"></th>';
+    }
+    if (c.filtro==='enum'){
+      var cur = st.filtros[c.k]||'';
+      var opts = '<option value="">Todos</option>' + sgGridEnumOpts(entity,c).map(function(v){ return '<option value="'+esc(v)+'"'+(String(v)===String(cur)?' selected':'')+'>'+esc(v)+'</option>'; }).join('');
+      return '<th style="padding:2px 6px 8px"><select onchange="sgGridFilter(\''+entity+'\',\''+c.k+'\',this.value)" style="'+inSty+'">'+opts+'</select></th>';
+    }
+    return '<th></th>';
+  }).join('') + '<th></th>';
+  eid('sg-th-'+entity).innerHTML = '<tr>'+hdr+'</tr><tr>'+filt+'</tr>';
+}
+// Filtra + ordena SG.last[entity] en memoria y re-pinta el tbody (no toca el thead).
+function sgGridApply(entity){
+  var cols = SG_GRID[entity]; if (!cols){ return; }
+  var st = sgGridSt(entity);
+  var rows = (SG.last[entity]||[]).slice();
+  cols.forEach(function(c){
+    var fv = st.filtros[c.k];
+    if (fv==null || fv==='') return;
+    if (c.filtro==='texto'){ var q = String(fv).toLowerCase(); rows = rows.filter(function(r){ return String(sgGridVal(c,r)).toLowerCase().indexOf(q) >= 0; }); }
+    else if (c.filtro==='enum'){ rows = rows.filter(function(r){ return String(sgGridVal(c,r)) === String(fv); }); }
+  });
+  if (st.sortK){
+    var sc = cols.find(function(x){ return x.k===st.sortK; });
+    if (sc){ var dir = (st.sortDir==='asc') ? 1 : -1;
+      rows.sort(function(a,b){ var va = sgGridVal(sc,a), vb = sgGridVal(sc,b);
+        if (sc.num){ return ((Number(va)||0) - (Number(vb)||0)) * dir; }
+        return String(va).localeCompare(String(vb),'es',{numeric:true}) * dir; });
+    }
+  }
+  eid('sg-tb-'+entity).innerHTML = rows.length ? rows.map(function(r){ return sgRow(entity,r); }).join('') : sgEmpty(entity);
+}
+function sgGridSort(entity, k){
+  var st = sgGridSt(entity);
+  if (st.sortK===k){ st.sortDir = (st.sortDir==='asc') ? 'desc' : 'asc'; }
+  else { st.sortK = k; st.sortDir = 'asc'; }
+  sgGridHead(entity); sgGridApply(entity);
+}
+function sgGridFilter(entity, k, val){ sgGridSt(entity).filtros[k] = val; sgGridApply(entity); }
+
 // Navegación SG: cada módulo es ahora una sección propia del sidebar (loadSec).
 // sgInit/sgTab (tabs horizontales) quedaron obsoletos al separar en 6 módulos.
 
@@ -2827,12 +2943,13 @@ function sgLoad(entity){
   api(url).then(function(r){
     var rows = (r && r.ok) ? r.data : [];
     SG.last[entity] = rows;
-    eid('sg-tb-'+entity).innerHTML = rows.length ? rows.map(function(row){ return sgRow(entity, row); }).join('') : sgEmpty(entity);
+    sgGridHead(entity);   // thead dinámico (headers ordenables + fila de filtros)
+    sgGridApply(entity);  // filtra+ordena en memoria y pinta el tbody con sgRow
   });
 }
 
 function sgEmpty(entity){
-  var cols = {productos:6, presentaciones:6, proveedores:6, clientes:7, condiciones:4};
+  var cols = {productos:7, presentaciones:6, proveedores:6, clientes:7, condiciones:4};
   return '<tr><td colspan="'+(cols[entity]||6)+'" class="emp">Sin registros. Creá el primero con el botón de arriba.</td></tr>';
 }
 // IVA Fase 2 — ABM de alícuota por familia. Refresca SG.cacheFam para que la OC use el valor al día.
@@ -2869,7 +2986,7 @@ function sgRow(entity, r){
     var _prs = sgPresDe(r.id);
     var _env = _prs.length ? sgEnvNombre(_prs[0].envase_id) : '—';
     return '<tr><td><code>'+esc(r.codigo)+'</code></td><td>'+esc(r.nombre)+'</td><td>'+esc(r.variedad||'—')+'</td><td>'+esc(r.familia||'—')
-      +'</td><td>'+esc(_env)+'</td>'+sgActions(entity,r.id)+'</tr>';
+      +'</td><td>'+esc(_env)+'</td><td>'+esc(sgPresStr(r.id))+'</td>'+sgActions(entity,r.id)+'</tr>';
   }
   if (entity==='presentaciones'){
     return '<tr><td>'+esc(sgProdLabel(r.producto_id))+'</td><td>'+esc(r.nombre)+'</td><td style="text-align:right">'+(r.factor_conversion||0)+'</td><td>'+esc(sgEnvNombre(r.envase_id))+'</td><td style="text-align:right">'+(r.paletizado!=null&&r.paletizado!==''?r.paletizado:'—')+'</td>'+sgActions(entity,r.id)+'</tr>';
