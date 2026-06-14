@@ -738,6 +738,45 @@ function crearLotesDeItem(db, { recepcionId, ocItem, tipoPrecio, fechaIngreso, l
   return ids;
 }
 
+// BRIEF 8 (D4) — al recibir una OC, concreta las reservas tipo='oc_item' activas de un oc_item
+// sobre los lotes recién creados: FIFO por fecha de pedido × FEFO por vencimiento de lote.
+// Cubierto → reservas tipo='lote' 'concretada'. Remanente no cubierto (lotes agotados) → 'cancelada'
+// (D2: el proveedor no cumplió, no queda esperando). La reserva oc_item original pasa a 'concretada'.
+// Reserva BLANDA (D1): esto NO descuenta disponible ni toca el lote; es trazabilidad informativa.
+function concretarReservasOcItem(db, ocItemId, nuevosLoteIds, userId) {
+  if (!nuevosLoteIds || !nuevosLoteIds.length) return;
+  const reservas = db.prepare(`
+    SELECT rs.id, rs.kg, rs.pedido_item_id
+    FROM sg_reservas rs
+    JOIN sg_pedido_items pi ON pi.id=rs.pedido_item_id
+    JOIN sg_pedidos pe ON pe.id=pi.pedido_id
+    WHERE rs.oc_item_id=? AND rs.tipo='oc_item' AND rs.estado='activa'
+    ORDER BY pe.fecha_pedido ASC, rs.id ASC`).all(ocItemId);   // FIFO por pedido
+  if (!reservas.length) return;
+  const ph = nuevosLoteIds.map(() => '?').join(',');
+  const lotes = db.prepare(`SELECT id, kg_reales FROM sg_lotes WHERE id IN (${ph})
+    ORDER BY (fecha_vencimiento_estimada IS NULL), fecha_vencimiento_estimada ASC, id ASC`).all(...nuevosLoteIds); // FEFO
+  const cap = {}; lotes.forEach(l => { cap[l.id] = l.kg_reales || 0; });
+  const insLote = db.prepare(`INSERT INTO sg_reservas
+    (pedido_item_id, tipo, lote_id, kg, estado, origen_oc_item_id, usuario_id, concretada_en)
+    VALUES (?, 'lote', ?, ?, 'concretada', ?, ?, datetime('now','localtime'))`);
+  const insCancel = db.prepare(`INSERT INTO sg_reservas
+    (pedido_item_id, tipo, oc_item_id, kg, estado, origen_oc_item_id, usuario_id)
+    VALUES (?, 'oc_item', ?, ?, 'cancelada', ?, ?)`);
+  for (const r of reservas) {
+    let restante = r.kg;
+    for (const l of lotes) {
+      if (restante <= 0.01) break;
+      if (cap[l.id] <= 0.01) continue;
+      const take = Math.min(restante, cap[l.id]);
+      insLote.run(r.pedido_item_id, l.id, +take.toFixed(2), ocItemId, userId || null);
+      cap[l.id] -= take; restante -= take;
+    }
+    db.prepare("UPDATE sg_reservas SET estado='concretada', concretada_en=datetime('now','localtime') WHERE id=?").run(r.id);
+    if (restante > 0.01) insCancel.run(r.pedido_item_id, ocItemId, +restante.toFixed(2), ocItemId, userId || null); // D2
+  }
+}
+
 // Lotes de una recepción SIN OC: producto elegido a mano, sin oc_item_id y SIN precio
 // (costo pendiente). precio_unitario_kg=NULL → recalcCostoLote los deja en costo_final=0 y
 // los reportes los marcan "costo pendiente". Se completa al vincular la OC (baja el precio).
@@ -993,9 +1032,24 @@ router.post('/oc/:id/anular', requireAdmin, (req, res) => {
   try {
     const tieneRec = db.prepare('SELECT COUNT(*) c FROM sg_recepciones WHERE oc_id=? AND activo=1').get(req.params.id).c;
     if (tieneRec > 0) return res.status(400).json({ ok: false, error: 'La OC ya tiene recepciones; no se puede anular' });
-    db.prepare("UPDATE sg_oc SET estado='anulada', modificado_en=datetime('now','localtime'), modificado_por=? WHERE id=?").run(uid(req), req.params.id);
-    db.prepare('DELETE FROM sg_oc_vencimientos WHERE oc_id=? AND pagado=0').run(req.params.id);
-    res.json({ ok: true, data: { id: Number(req.params.id) } });
+    // BRIEF 8 (D3) — al anular la OC, cancelar las reservas tipo='oc_item' activas de sus items y
+    // avisar qué pedidos quedan afectados (su reserva en tránsito ya no existe).
+    const itemIds = db.prepare('SELECT id FROM sg_oc_items WHERE oc_id=?').all(req.params.id).map(x => x.id);
+    let pedidosAfectados = [];
+    const tx = db.transaction(() => {
+      db.prepare("UPDATE sg_oc SET estado='anulada', modificado_en=datetime('now','localtime'), modificado_por=? WHERE id=?").run(uid(req), req.params.id);
+      db.prepare('DELETE FROM sg_oc_vencimientos WHERE oc_id=? AND pagado=0').run(req.params.id);
+      if (itemIds.length) {
+        const ph = itemIds.map(() => '?').join(',');
+        pedidosAfectados = db.prepare(`SELECT DISTINCT pe.numero FROM sg_reservas rs
+          JOIN sg_pedido_items pi ON pi.id=rs.pedido_item_id JOIN sg_pedidos pe ON pe.id=pi.pedido_id
+          WHERE rs.oc_item_id IN (${ph}) AND rs.tipo='oc_item' AND rs.estado='activa'`).all(...itemIds).map(x => x.numero);
+        db.prepare(`UPDATE sg_reservas SET estado='cancelada' WHERE oc_item_id IN (${ph}) AND tipo='oc_item' AND estado='activa'`).run(...itemIds);
+      }
+    });
+    tx();
+    if (pedidosAfectados.length) console.warn(`[SG] OC ${req.params.id} anulada — reservas en tránsito canceladas. Pedidos afectados: ${pedidosAfectados.join(', ')}`);
+    res.json({ ok: true, data: { id: Number(req.params.id), pedidos_afectados: pedidosAfectados } });
   } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
 });
 
@@ -1069,6 +1123,7 @@ router.post('/recepciones', sgUpload.array('fotos', 12), requireAdmin, (req, res
           if (!ocItem) throw new Error('Item de OC inválido: ' + it.oc_item_id);
           const ids = crearLotesDeItem(db, { recepcionId: recId, ocItem, tipoPrecio: oc.tipo_precio, fechaIngreso, lotes: it.lotes, userId: uid(req) });
           nuevosLotes.push(...ids);
+          concretarReservasOcItem(db, ocItem.id, ids, uid(req));   // BRIEF 8 — reservas oc_item → lote (FIFO×FEFO)
         }
       }
       if (!sinOC) {
@@ -1885,13 +1940,23 @@ router.post('/pedidos', requireAdmin, (req, res) => {
       const ins = db.prepare(`INSERT INTO sg_pedido_items
         (pedido_id, producto_id, presentacion_id, cantidad_presentaciones, kg_solicitados, precio_por_kg, subtotal)
         VALUES (?,?,?,?,?,?,?)`);
+      // BRIEF 8 — reserva BLANDA (D1): se registra tal cual, sin validar contra disponible.
+      const insReserva = db.prepare(`INSERT INTO sg_reservas
+        (pedido_item_id, tipo, lote_id, oc_item_id, kg, origen_oc_item_id, usuario_id)
+        VALUES (?,?,?,?,?,?,?)`);
       for (const it of items) {
         const pres = it.presentacion_id ? db.prepare('SELECT factor_conversion FROM sg_presentaciones WHERE id=?').get(it.presentacion_id) : null;
         const factor = pres ? Number(pres.factor_conversion) : 1;
         const cant = Number(it.cantidad_presentaciones || 0);
         const kg = it.kg_solicitados != null ? Number(it.kg_solicitados) : cant * factor;
         const precio = Number(it.precio_por_kg || 0);
-        ins.run(pedidoId, it.producto_id, it.presentacion_id || null, cant, kg, precio, kg * precio);
+        const pedItemId = ins.run(pedidoId, it.producto_id, it.presentacion_id || null, cant, kg, precio, kg * precio).lastInsertRowid;
+        for (const rv of (Array.isArray(it.reservas) ? it.reservas : [])) {
+          const kgRv = Number(rv.kg || 0);
+          if (!(kgRv > 0)) continue;
+          if (rv.tipo === 'lote' && rv.lote_id) insReserva.run(pedItemId, 'lote', Number(rv.lote_id), null, kgRv, null, uid(req));
+          else if (rv.tipo === 'oc_item' && rv.oc_item_id) insReserva.run(pedItemId, 'oc_item', null, Number(rv.oc_item_id), kgRv, Number(rv.oc_item_id), uid(req));
+        }
       }
       return pedidoId;
     });
@@ -1923,6 +1988,16 @@ router.get('/pedidos/:id', requireAuth, (req, res) => {
     p.items = db.prepare(`SELECT i.*, pr.nombre AS producto_nombre, ps.nombre AS presentacion_nombre
       FROM sg_pedido_items i LEFT JOIN sg_productos pr ON pr.id=i.producto_id
       LEFT JOIN sg_presentaciones ps ON ps.id=i.presentacion_id WHERE i.pedido_id=?`).all(req.params.id);
+    // BRIEF 8 — reservas por ítem (fuente + estado): la UI muestra firme/tránsito/pendiente.
+    const qRes = db.prepare(`
+      SELECT rs.id, rs.tipo, rs.kg, rs.estado, rs.lote_id, rs.oc_item_id,
+        l.codigo_lote, l.semaforo, o.numero AS oc_numero, o.fecha_oc
+      FROM sg_reservas rs
+      LEFT JOIN sg_lotes l ON l.id=rs.lote_id
+      LEFT JOIN sg_oc_items oi ON oi.id=rs.oc_item_id
+      LEFT JOIN sg_oc o ON o.id=oi.oc_id
+      WHERE rs.pedido_item_id=? ORDER BY rs.id`);
+    for (const it of p.items) it.reservas = qRes.all(it.id);
     res.json({ ok: true, data: p });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
@@ -1958,6 +2033,48 @@ router.get('/lotes-disponibles', requireAuth, (req, res) => {
       ) WHERE kg_disponibles > 0.01
       ORDER BY fecha_vencimiento_estimada ASC, id ASC`).all(req.query.producto_id);
     res.json({ ok: true, data: rows });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// BRIEF 8 §2 — OFERTA de un producto: lo que hay para armar un pedido.
+//   stock     = lotes disponibles (FEFO) + semáforo + costo/kg + kg_reservado (info, D1 blanda).
+//   en_camino = oc_items de OCs abiertas/parciales con disponible_camino = (estimado − recibido)
+//               − Σ reservas tipo='oc_item' activas. Ordenado FIFO por fecha de OC.
+router.get('/oferta', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const pid = req.query.producto_id;
+    if (!pid) return res.status(400).json({ ok: false, error: 'Falta producto_id' });
+    const stock = db.prepare(`
+      SELECT * FROM (
+        SELECT l.id AS lote_id, l.codigo_lote, l.producto_id, pr.nombre AS producto_nombre, l.calidad, l.semaforo,
+          l.costo_final, l.fecha_vencimiento_estimada,
+          (l.kg_reales - COALESCE((SELECT SUM(kg) FROM sg_lote_decomisos WHERE lote_id=l.id),0) - ${SUM_TRANSF}) AS kg_vigente,
+          CAST(julianday(l.fecha_vencimiento_estimada) - julianday(date('now','localtime')) AS INTEGER) AS dias_restantes,
+          (l.kg_reales - COALESCE((SELECT SUM(kg) FROM sg_lote_decomisos WHERE lote_id=l.id),0) - ${SUM_TRANSF}
+             - COALESCE((SELECT SUM(di.kg_despachados) FROM sg_despacho_items di
+                 JOIN sg_despachos d ON d.id=di.despacho_id AND d.activo=1 WHERE di.lote_id=l.id),0)) AS kg_disponibles,
+          COALESCE((SELECT SUM(kg) FROM sg_reservas WHERE lote_id=l.id AND estado IN ('activa','concretada')),0) AS kg_reservado
+        FROM sg_lotes l LEFT JOIN sg_productos pr ON pr.id=l.producto_id
+        WHERE l.activo=1 AND l.estado IN ('disponible','reservado','despachado_parcial') AND l.producto_id=?
+      ) WHERE kg_disponibles > 0.01
+      ORDER BY fecha_vencimiento_estimada ASC, lote_id ASC`).all(pid);
+    const en_camino = db.prepare(`
+      SELECT * FROM (
+        SELECT i.id AS oc_item_id, i.oc_id, o.numero AS oc_numero, o.fecha_oc, o.estado AS oc_estado,
+          i.kg_estimados, pv.razon_social AS proveedor_nombre,
+          COALESCE((SELECT SUM(kg_reales) FROM sg_lotes WHERE oc_item_id=i.id AND activo=1),0) AS kg_recibidos,
+          ( i.kg_estimados
+            - COALESCE((SELECT SUM(kg_reales) FROM sg_lotes WHERE oc_item_id=i.id AND activo=1),0)
+            - COALESCE((SELECT SUM(kg) FROM sg_reservas WHERE oc_item_id=i.id AND tipo='oc_item' AND estado='activa'),0)
+          ) AS disponible_camino
+        FROM sg_oc_items i
+        JOIN sg_oc o ON o.id=i.oc_id
+        LEFT JOIN sg_proveedores pv ON pv.id=o.proveedor_id
+        WHERE i.producto_id=? AND o.activo=1 AND o.estado IN ('abierta','recibida_parcial')
+      ) WHERE disponible_camino > 0.01
+      ORDER BY fecha_oc ASC, oc_item_id ASC`).all(pid);
+    res.json({ ok: true, data: { stock, en_camino } });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
