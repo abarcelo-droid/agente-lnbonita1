@@ -15,6 +15,7 @@ import { detectarDuplicado } from '../servicios/dedup.js';
 import { generarOcPDF } from '../servicios/ocPDF.js';
 import { generarRecepcionCalidadPDF } from '../servicios/recepcionCalidadPDF.js';
 import { autenticar as afipAutenticar, ambienteActual as afipAmbiente } from '../servicios/afip-wsaa.js';
+import { feDummy as afipFeDummy, ultimoComprobante as afipUltimoCbte, tiposCbte as afipTiposCbte, tiposIva as afipTiposIva, ptosVenta as afipPtosVenta } from '../servicios/afip-wsfe.js';
 
 const router = express.Router();
 
@@ -484,6 +485,31 @@ router.get('/afip/test-auth', requireAdmin, async (req, res) => {
   } catch (e) {
     res.status(502).json({ ok: false, ambiente: afipAmbiente(), error: e.message });
   }
+});
+
+// ── AFIP/ARCA Paso 2 — WSFE en modo LECTURA (consulta, NO emite) ──────────────────
+// FEDummy: ping de salud del WSFE (appserver/dbserver/authserver).
+router.get('/afip/test-wsfe', requireAdmin, async (req, res) => {
+  try {
+    res.json({ ok: true, ambiente: afipAmbiente(), servicio: await afipFeDummy() });
+  } catch (e) { res.status(502).json({ ok: false, ambiente: afipAmbiente(), error: e.message }); }
+});
+
+// Último comprobante autorizado por punto de venta + tipo (ej. pv=7&tipo=6 → Factura B).
+router.get('/afip/ultimo-comprobante', requireAdmin, async (req, res) => {
+  try {
+    const pv = Number(req.query.pv), tipo = Number(req.query.tipo);
+    if (!(pv > 0) || !(tipo > 0)) return res.status(400).json({ ok: false, error: 'Faltan pv y tipo (> 0)' });
+    res.json({ ok: true, ambiente: afipAmbiente(), data: await afipUltimoCbte(pv, tipo) });
+  } catch (e) { res.status(502).json({ ok: false, ambiente: afipAmbiente(), error: e.message }); }
+});
+
+// Parámetros de AFIP (para validar contra lo esperado): tipos de cbte, alícuotas IVA, PVs.
+router.get('/afip/parametros', requireAdmin, async (req, res) => {
+  try {
+    const [tipos_cbte, tipos_iva, ptos_venta] = await Promise.all([afipTiposCbte(), afipTiposIva(), afipPtosVenta()]);
+    res.json({ ok: true, ambiente: afipAmbiente(), tipos_cbte, tipos_iva, ptos_venta });
+  } catch (e) { res.status(502).json({ ok: false, ambiente: afipAmbiente(), error: e.message }); }
 });
 
 // BRIEF 10 — CARGA INICIAL DE INVENTARIO (lotes de apertura, sin compra/proveedor/OC).
