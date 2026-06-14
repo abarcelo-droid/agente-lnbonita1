@@ -587,8 +587,19 @@ function nextNumero(db, prefijo, tabla, col) {
 // Recalcula costo_final de un lote = costo_base + gastos directos + prorrateo global del período.
 // Prorrateo: monto global del período × (kg del lote / total kg activos del período).
 function recalcCostoLote(db, loteId) {
-  const lote = db.prepare('SELECT id, kg_reales, costo_base, fecha_ingreso, precio_unitario_kg, recepcion_id FROM sg_lotes WHERE id=?').get(loteId);
+  const lote = db.prepare('SELECT id, kg_reales, costo_base, fecha_ingreso, precio_unitario_kg, recepcion_id, transformado_de FROM sg_lotes WHERE id=?').get(loteId);
   if (!lote) return 0;
+  // LOTE TRANSFORMADO (caso 2): su costo viene CARGADO (snapshot del costo/kg del origen,
+  // guardado en costo_base). NO corre prorrateo (no es compra → excluido del pool) ni descarga
+  // (la absorbió el lote-origen). costo_final = costo_base cargado + sus propios gastos directos.
+  if (lote.transformado_de != null) {
+    const gdT = db.prepare('SELECT COALESCE(SUM(monto),0) s FROM sg_gastos_directos_lote WHERE lote_id=? AND activo=1').get(loteId).s;
+    // resta lo que ESTE lote transfirió a su vez (ej. reversión cubeta→lote nuevo) → su costo/kg
+    // queda estable al re-consolidar. (mismo descuento que el path de compra, decisión 3.)
+    const cfT = (lote.costo_base || 0) + gdT - costoTransferido(db, loteId);
+    db.prepare("UPDATE sg_lotes SET costo_final=?, modificado_en=datetime('now','localtime') WHERE id=?").run(cfT, loteId);
+    return cfT;
+  }
   // COSTO PENDIENTE: lote sin precio (recepción sin OC, o pizarra sin cerrar) → costo_final=0 y
   // NO se le suma prorrateo (sería un costo parcial engañoso que ensucia la rentabilidad).
   // Se completa cuando se vincula la OC / se cierra el precio (ahí vuelve a correr este recalc).
@@ -601,7 +612,9 @@ function recalcCostoLote(db, loteId) {
   const periodo = (lote.fecha_ingreso || '').slice(0, 7);
   if (periodo) {
     const totalGlob = db.prepare('SELECT COALESCE(SUM(monto),0) s FROM sg_gastos_globales_periodo WHERE periodo=? AND activo=1').get(periodo).s;
-    const totalKg = db.prepare("SELECT COALESCE(SUM(kg_reales),0) s FROM sg_lotes WHERE activo=1 AND substr(fecha_ingreso,1,7)=?").get(periodo).s;
+    // Pool de prorrateo: solo lotes de COMPRA (transformado_de IS NULL). Los transformados ya
+    // computaron sus kg vía el lote-origen → incluirlos duplicaría kg y diluiría el prorrateo.
+    const totalKg = db.prepare("SELECT COALESCE(SUM(kg_reales),0) s FROM sg_lotes WHERE activo=1 AND transformado_de IS NULL AND substr(fecha_ingreso,1,7)=?").get(periodo).s;
     if (totalKg > 0) prorrateo = totalGlob * (lote.kg_reales / totalKg);
   }
   // FASE 2 — descarga de ingreso (cooperativa) VALORIZADA de la recepción del lote, prorrateada
@@ -614,7 +627,10 @@ function recalcCostoLote(db, loteId) {
       if (totKgRec > 0) descarga = dt * (lote.kg_reales / totKgRec);
     }
   }
-  const costoFinal = (lote.costo_base || 0) + gd + prorrateo + descarga;
+  // Caso 2 (decisión 3/opción B): el costo que SALIÓ por transformaciones se descuenta del
+  // origen, así inventario (origen remanente + lotes-cubeta) suma el total sin doble conteo.
+  const transferido = costoTransferido(db, loteId);
+  const costoFinal = (lote.costo_base || 0) + gd + prorrateo + descarga - transferido;
   db.prepare("UPDATE sg_lotes SET costo_final=?, modificado_en=datetime('now','localtime') WHERE id=?").run(costoFinal, loteId);
   return costoFinal;
 }
@@ -742,6 +758,34 @@ function crearLotesSinOC(db, { recepcionId, productoId, fechaIngreso, lotes, use
     _aplicarObservado(db, info.lastInsertRowid, _rec, userId);
   }
   return ids;
+}
+
+// #reproceso caso 2: crea el lote-DESTINO de una transformación (ej. caja → cubetas) y mueve el
+// costo del origen. El lote-destino: producto_id distinto, hereda traza física + semáforo del
+// origen, recepcion_id/oc_item_id=NULL (NO es compra → fuera de OC/recepción/proveedor/prorrateo),
+// transformado_de=origen, costo CARGADO = snapshot (kg × costo/kg vigente del origen). Registra
+// la fila en sg_transformaciones y reduce costo_final + estado del origen (recalc). Devuelve datos.
+function crearLoteTransformado(db, { origen, productoDestinoId, kg, factor, userId }) {
+  const kgVigOrigen = (origen.kg_reales || 0) - kgDecomisado(db, origen.id) - kgTransformado(db, origen.id);
+  const costoKgOrigen = kgVigOrigen > 0 ? (origen.costo_final || 0) / kgVigOrigen : 0;
+  const costoTransf = +(kg * costoKgOrigen).toFixed(2);
+  const codigo = nextNumero(db, 'SG-LT', 'sg_lotes', 'codigo_lote');
+  const info = db.prepare(`INSERT INTO sg_lotes
+    (codigo_lote, recepcion_id, oc_item_id, producto_id, kg_reales, precio_unitario_kg, costo_base,
+     calidad, calibre, origen, fecha_ingreso, fecha_vencimiento_estimada, estado, costo_final,
+     semaforo, transformado_de, creado_por)
+    VALUES (?, NULL, NULL, ?, ?, NULL, ?, ?, ?, ?, ?, ?, 'disponible', ?, ?, ?, ?)`).run(
+    codigo, productoDestinoId, kg, costoTransf,
+    origen.calidad, origen.calibre, origen.origen, origen.fecha_ingreso, origen.fecha_vencimiento_estimada,
+    costoTransf, origen.semaforo || 'verde', origen.id, userId || null);
+  const destinoId = info.lastInsertRowid;
+  db.prepare(`INSERT INTO sg_transformaciones
+    (lote_origen_id, lote_destino_id, kg_transformados, factor, costo_transferido, usuario_id)
+    VALUES (?,?,?,?,?,?)`).run(origen.id, destinoId, kg, factor != null ? factor : null, costoTransf, userId || null);
+  // el origen pierde el costo transferido (recalc resta Σcosto_transferido) y recalcula su estado.
+  recalcCostoLote(db, origen.id);
+  recalcEstadoLote(db, origen.id);
+  return { loteId: destinoId, codigoLote: codigo, costoTransferido: costoTransf, costoKgOrigen: +costoKgOrigen.toFixed(4) };
 }
 
 // Actualiza estado de la OC según kg recibidos vs estimados.
@@ -1430,7 +1474,7 @@ router.get('/lotes/:id/trazabilidad', requireAuth, (req, res) => {
     let prorrateo = null;
     if (periodo) {
       const totalGlob = db.prepare('SELECT COALESCE(SUM(monto),0) s FROM sg_gastos_globales_periodo WHERE periodo=? AND activo=1').get(periodo).s;
-      const totalKg = db.prepare("SELECT COALESCE(SUM(kg_reales),0) s FROM sg_lotes WHERE activo=1 AND substr(fecha_ingreso,1,7)=?").get(periodo).s;
+      const totalKg = db.prepare("SELECT COALESCE(SUM(kg_reales),0) s FROM sg_lotes WHERE activo=1 AND transformado_de IS NULL AND substr(fecha_ingreso,1,7)=?").get(periodo).s;
       const share = totalKg > 0 ? totalGlob * (lote.kg_reales / totalKg) : 0;
       prorrateo = { periodo, total_global: totalGlob, kg_periodo: totalKg, kg_lote: lote.kg_reales, share };
     }
@@ -1481,7 +1525,7 @@ router.post('/lotes/:id/decomiso', requireAuth, (req, res) => {
     const lote = db.prepare('SELECT id, kg_reales, estado, semaforo FROM sg_lotes WHERE id=? AND activo=1').get(req.params.id);
     if (!lote) return res.status(404).json({ ok: false, error: 'Lote no encontrado' });
     if (lote.estado === 'bajado') return res.status(400).json({ ok: false, error: 'El lote está dado de baja' });
-    const disp = (lote.kg_reales || 0) - kgDespachados(db, lote.id) - kgDecomisado(db, lote.id);
+    const disp = (lote.kg_reales || 0) - kgDespachados(db, lote.id) - kgDecomisado(db, lote.id) - kgTransformado(db, lote.id);
     if (kg > disp + 0.01) return res.status(400).json({ ok: false, error: `No podés decomisar ${kg}kg: hay ${disp.toFixed(1)}kg disponibles` });
     db.transaction(() => {
       db.prepare('INSERT INTO sg_lote_decomisos (lote_id, kg, motivo, usuario_id) VALUES (?,?,?,?)').run(lote.id, kg, motivo, uid(req));
@@ -1497,6 +1541,72 @@ router.post('/lotes/:id/decomiso', requireAuth, (req, res) => {
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
+// #reproceso caso 2: TRANSFORMACIÓN de unidad. Convierte stock del lote (producto-caja) en un lote
+// NUEVO de otro producto (producto-cubeta: mismo especie/variedad, otro envase). Operación INTERNA:
+// NO toca kg_reales del origen (el proveedor lo sigue viendo en cajas); baja su disponible por Σ
+// transformado y mueve su costo proporcional al lote-cubeta (sin merma → costo/kg estable). Dos
+// formas: { kg } explícito, o sin kg = "1 caja entera" (transforma todo el disponible del lote).
+router.post('/lotes/:id/transformar', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const productoDestinoId = Number(req.body?.producto_destino_id);
+    const factor = (req.body?.factor != null && req.body?.factor !== '') ? Number(req.body.factor) : null;
+    if (!productoDestinoId) return res.status(400).json({ ok: false, error: 'Falta producto_destino_id' });
+    const origen = db.prepare(`SELECT id, producto_id, kg_reales, costo_final, calidad, calibre, origen,
+      fecha_ingreso, fecha_vencimiento_estimada, semaforo, estado FROM sg_lotes WHERE id=? AND activo=1`).get(req.params.id);
+    if (!origen) return res.status(404).json({ ok: false, error: 'Lote no encontrado' });
+    if (origen.estado === 'bajado') return res.status(400).json({ ok: false, error: 'El lote está dado de baja' });
+    if (productoDestinoId === origen.producto_id) return res.status(400).json({ ok: false, error: 'El producto destino debe ser distinto al de origen' });
+    if (!db.prepare('SELECT id FROM sg_productos WHERE id=? AND activo=1').get(productoDestinoId)) {
+      return res.status(400).json({ ok: false, error: 'Producto destino inválido' });
+    }
+    const disp = (origen.kg_reales || 0) - kgDespachados(db, origen.id) - kgDecomisado(db, origen.id) - kgTransformado(db, origen.id);
+    // forma "1 caja entera": sin kg → todo el disponible; forma "X kg": kg explícito del body.
+    const kg = (req.body?.kg != null && req.body?.kg !== '') ? Number(req.body.kg) : +disp.toFixed(2);
+    if (!(kg > 0)) return res.status(400).json({ ok: false, error: 'kg a transformar debe ser > 0' });
+    if (kg > disp + 0.01) return res.status(400).json({ ok: false, error: `No podés transformar ${kg}kg: hay ${disp.toFixed(1)}kg disponibles` });
+    let out;
+    db.transaction(() => { out = crearLoteTransformado(db, { origen, productoDestinoId, kg, factor, userId: uid(req) }); })();
+    res.json({ ok: true, data: { lote_origen_id: origen.id, lote_destino_id: out.loteId, codigo_destino: out.codigoLote,
+      kg_transformados: kg, factor, costo_transferido: out.costoTransferido, costo_kg_origen: out.costoKgOrigen,
+      kg_disponible_origen: +(disp - kg).toFixed(2) } });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// #reproceso caso 2 — REVERSIÓN PARCIAL: re-consolida lo que QUEDA del lote-cubeta en un lote NUEVO
+// del producto-origen (decisión 2: NO devuelve al lote-caja original; lote nuevo = traza limpia).
+// El costo se RECALCULA al costo/kg VIGENTE del cubeta: si cambió por una merma en el medio, el
+// lote re-consolidado refleja el costo correcto. Internamente es otra transformación (cubeta→nuevo).
+router.post('/transformaciones/:id/revertir', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const tr = db.prepare('SELECT * FROM sg_transformaciones WHERE id=?').get(req.params.id);
+    if (!tr) return res.status(404).json({ ok: false, error: 'Transformación no encontrada' });
+    const cubeta = db.prepare(`SELECT id, producto_id, kg_reales, costo_final, calidad, calibre, origen,
+      fecha_ingreso, fecha_vencimiento_estimada, semaforo, estado FROM sg_lotes WHERE id=? AND activo=1`).get(tr.lote_destino_id);
+    if (!cubeta) return res.status(404).json({ ok: false, error: 'Lote-cubeta no encontrado' });
+    if (cubeta.estado === 'bajado') return res.status(400).json({ ok: false, error: 'El lote-cubeta está dado de baja' });
+    const prodOrigen = db.prepare('SELECT producto_id FROM sg_lotes WHERE id=?').get(tr.lote_origen_id);
+    if (!prodOrigen) return res.status(404).json({ ok: false, error: 'Lote-origen no encontrado' });
+    const dispCubeta = (cubeta.kg_reales || 0) - kgDespachados(db, cubeta.id) - kgDecomisado(db, cubeta.id) - kgTransformado(db, cubeta.id);
+    const kg = (req.body?.kg != null && req.body?.kg !== '') ? Number(req.body.kg) : +dispCubeta.toFixed(2);
+    if (!(kg > 0)) return res.status(400).json({ ok: false, error: 'kg a revertir debe ser > 0' });
+    if (kg > dispCubeta + 0.01) return res.status(400).json({ ok: false, error: `No podés revertir ${kg}kg: el lote-cubeta tiene ${dispCubeta.toFixed(1)}kg disponibles` });
+    let out;
+    db.transaction(() => {
+      // lote NUEVO del producto-origen; el costo se snapshotea al costo/kg vigente del cubeta.
+      out = crearLoteTransformado(db, { origen: cubeta, productoDestinoId: prodOrigen.producto_id, kg,
+        factor: (tr.factor && tr.factor !== 0) ? +(1 / tr.factor).toFixed(6) : null, userId: uid(req) });
+      // auditoría: si el cubeta quedó sin stock vigente, la transformación original pasa a 'revertida'.
+      const restante = (cubeta.kg_reales || 0) - kgDespachados(db, cubeta.id) - kgDecomisado(db, cubeta.id) - kgTransformado(db, cubeta.id);
+      if (restante <= 0.01) db.prepare("UPDATE sg_transformaciones SET estado='revertida' WHERE id=?").run(tr.id);
+    })();
+    res.json({ ok: true, data: { transformacion_id: tr.id, lote_cubeta_id: cubeta.id, lote_nuevo_id: out.loteId,
+      codigo_nuevo: out.codigoLote, kg_revertidos: kg, costo_recalculado: out.costoTransferido, costo_kg_cubeta: out.costoKgOrigen,
+      kg_disponible_cubeta: +(dispCubeta - kg).toFixed(2) } });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
 // ════════════════════════════════════════════════════════════════════════════
 // FASE 4 — VENTAS: Pedidos + Despachos (FEFO + margen) + CC clientes + traza forward
 // ════════════════════════════════════════════════════════════════════════════
@@ -1508,8 +1618,9 @@ function recalcEstadoLote(db, loteId) {
   const desp = db.prepare(`SELECT COALESCE(SUM(di.kg_despachados),0) s
     FROM sg_despacho_items di JOIN sg_despachos d ON d.id=di.despacho_id AND d.activo=1
     WHERE di.lote_id=?`).get(loteId).s;
-  // umbral sobre kg VIGENTES (kg_reales − Σ decomiso): si se despachó todo lo que quedaba → total.
-  const kgVig = (l.kg_reales || 0) - kgDecomisado(db, loteId);
+  // umbral sobre kg VIGENTES (kg_reales − Σ decomiso − Σ transformado): si se despachó todo
+  // lo que quedaba vendible (descontada merma y lo transformado a otro lote) → total.
+  const kgVig = (l.kg_reales || 0) - kgDecomisado(db, loteId) - kgTransformado(db, loteId);
   let estado = 'disponible';
   if (desp >= kgVig - 0.01 && desp > 0) estado = 'despachado_total';
   else if (desp > 0) estado = 'despachado_parcial';
@@ -1537,6 +1648,20 @@ function kgDespachados(db, loteId) {
 function kgDecomisado(db, loteId) {
   return db.prepare('SELECT COALESCE(SUM(kg),0) s FROM sg_lote_decomisos WHERE lote_id=?').get(loteId).s;
 }
+
+// kg transformados (que SALIERON de este lote hacia otro) — Σ de sg_transformaciones.
+// NO toca kg_reales. Descuento PERMANENTE (la reversión crea lote nuevo, no devuelve acá):
+// por eso NO se filtra por estado. Baja el disponible Y el costo/kg-denominador del origen.
+function kgTransformado(db, loteId) {
+  return db.prepare('SELECT COALESCE(SUM(kg_transformados),0) s FROM sg_transformaciones WHERE lote_origen_id=?').get(loteId).s;
+}
+// Costo total que SALIÓ de este lote por transformaciones (para reducir su costo_final en
+// recalcCostoLote → la valuación de inventario suma sin doble conteo, decisión 3/opción B).
+function costoTransferido(db, loteId) {
+  return db.prepare('SELECT COALESCE(SUM(costo_transferido),0) s FROM sg_transformaciones WHERE lote_origen_id=?').get(loteId).s;
+}
+// Fragmento SQL reutilizable: Σ kg transformados de un lote 'l' (mismo criterio que kgTransformado).
+const SUM_TRANSF = "COALESCE((SELECT SUM(kg_transformados) FROM sg_transformaciones WHERE lote_origen_id=l.id),0)";
 
 // ── PEDIDOS ──────────────────────────────────────────────────────────────────
 router.post('/pedidos', requireAdmin, (req, res) => {
@@ -1620,11 +1745,12 @@ router.get('/lotes-disponibles', requireAuth, (req, res) => {
       SELECT * FROM (
         SELECT l.id, l.codigo_lote, l.producto_id, pr.nombre AS producto_nombre, l.calidad, l.semaforo,
           l.costo_final, l.kg_reales,
-          (l.kg_reales - COALESCE((SELECT SUM(kg) FROM sg_lote_decomisos WHERE lote_id=l.id),0)) AS kg_vigente,
+          (l.kg_reales - COALESCE((SELECT SUM(kg) FROM sg_lote_decomisos WHERE lote_id=l.id),0) - ${SUM_TRANSF}) AS kg_vigente,
           l.precio_unitario_kg, l.fecha_vencimiento_estimada,
           CAST(julianday(l.fecha_vencimiento_estimada) - julianday(date('now','localtime')) AS INTEGER) AS dias_restantes,
           (l.kg_reales
              - COALESCE((SELECT SUM(kg) FROM sg_lote_decomisos WHERE lote_id=l.id),0)
+             - ${SUM_TRANSF}
              - COALESCE((SELECT SUM(di.kg_despachados) FROM sg_despacho_items di
                  JOIN sg_despachos d ON d.id=di.despacho_id AND d.activo=1 WHERE di.lote_id=l.id),0)) AS kg_disponibles
         FROM sg_lotes l LEFT JOIN sg_productos pr ON pr.id=l.producto_id
@@ -1703,7 +1829,7 @@ router.post('/despachos', requireAdmin, (req, res) => {
       const lote = db.prepare('SELECT kg_reales, estado FROM sg_lotes WHERE id=? AND activo=1').get(loteId);
       if (!lote) return res.status(400).json({ ok: false, error: 'Lote inexistente: ' + loteId });
       if (lote.estado === 'bajado') return res.status(400).json({ ok: false, error: 'Lote dado de baja: ' + loteId });
-      const disp = (lote.kg_reales || 0) - kgDespachados(db, loteId) - kgDecomisado(db, loteId);
+      const disp = (lote.kg_reales || 0) - kgDespachados(db, loteId) - kgDecomisado(db, loteId) - kgTransformado(db, loteId);
       if (pedidoLote[loteId] > disp + 0.01) {
         return res.status(400).json({ ok: false, error: `Lote ${loteId}: pedís ${pedidoLote[loteId]}kg pero hay ${disp.toFixed(1)}kg disponibles` });
       }
@@ -1731,9 +1857,9 @@ router.post('/despachos', requireAdmin, (req, res) => {
         const kg = Number(it.kg_despachados);
         const precio = Number(it.precio_por_kg || 0);
         const subtotal = kg * precio;
-        // costo_final del lote es el costo TOTAL → costo/kg sobre kg VIGENTES (kg_reales − decomiso),
-        // así la merma revalúa lo despachado. (mismo cálculo que el front del modal.)
-        const kgVig = (lote.kg_reales || 0) - kgDecomisado(db, it.lote_id);
+        // costo_final del lote es el costo TOTAL → costo/kg sobre kg VIGENTES (kg_reales − decomiso
+        // − transformado), así la merma revalúa lo despachado. (mismo cálculo que el front del modal.)
+        const kgVig = (lote.kg_reales || 0) - kgDecomisado(db, it.lote_id) - kgTransformado(db, it.lote_id);
         const costoPorKg = kgVig > 0 ? (lote.costo_final || 0) / kgVig : 0;
         const margen = subtotal - kg * costoPorKg;
         const bultos = Number(it.cantidad_presentaciones || 0);
@@ -1942,9 +2068,11 @@ router.get('/cc-clientes', requireAuth, (req, res) => {
 // ════════════════════════════════════════════════════════════════════════════
 
 // Costo por kg de un lote = costo_final / kg VIGENTES (costo_final es TOTAL del lote).
-// kg vigentes = kg_reales − Σ decomiso (merma). costo_final NO cambia → al bajar el
-// denominador, el costo/kg sube solo (revaluación inmediata sobre lo que queda).
-const KG_VIGENTE = '(l.kg_reales - COALESCE((SELECT SUM(kg) FROM sg_lote_decomisos WHERE lote_id=l.id),0))';
+// kg vigentes = kg_reales − Σ decomiso (merma) − Σ transformado (caso 2). El decomiso NO
+// baja costo_final → el costo/kg sube (concentración). La transformación SÍ baja costo_final
+// (decisión 3) y a la vez el denominador → el costo/kg queda ESTABLE (sin merma, el costo
+// viaja con la mercadería al lote-cubeta).
+const KG_VIGENTE = "(l.kg_reales - COALESCE((SELECT SUM(kg) FROM sg_lote_decomisos WHERE lote_id=l.id),0) - COALESCE((SELECT SUM(kg_transformados) FROM sg_transformaciones WHERE lote_origen_id=l.id),0))";
 const COSTO_KG = `(COALESCE(l.costo_final,0)/NULLIF(${KG_VIGENTE},0))`;
 // Margen de una línea de despacho calculado desde el costo por kg (no depende del
 // margen_estimado guardado → robusto frente a datos viejos).
@@ -1969,7 +2097,7 @@ router.get('/dashboard', requireAuth, (req, res) => {
     // Compras del período (por fecha de ingreso del lote): kg + costo cargado
     const compras = db.prepare(`
       SELECT COALESCE(SUM(kg_reales),0) AS kg, COALESCE(SUM(costo_final),0) AS monto, COUNT(*) AS lotes
-      FROM sg_lotes WHERE activo=1 AND substr(fecha_ingreso,1,7)=?`).get(periodo);
+      FROM sg_lotes WHERE activo=1 AND transformado_de IS NULL AND substr(fecha_ingreso,1,7)=?`).get(periodo);
 
     // Ventas del período (por fecha de despacho): kg + facturado + margen (desde costo por kg)
     const ventas = db.prepare(`
@@ -1989,13 +2117,13 @@ router.get('/dashboard', requireAuth, (req, res) => {
         FROM sg_despacho_items di JOIN sg_despachos d ON d.id=di.despacho_id AND d.activo=1
         GROUP BY di.lote_id)
       SELECT pr.familia AS familia,
-        COALESCE(SUM(l.kg_reales - COALESCE(de.kg,0)),0) AS kg,
-        COALESCE(SUM((l.kg_reales - COALESCE(de.kg,0))*${COSTO_KG}),0) AS valor
+        COALESCE(SUM(l.kg_reales - COALESCE(de.kg,0) - ${SUM_TRANSF}),0) AS kg,
+        COALESCE(SUM((l.kg_reales - COALESCE(de.kg,0) - ${SUM_TRANSF})*${COSTO_KG}),0) AS valor
       FROM sg_lotes l
       JOIN sg_productos pr ON pr.id=l.producto_id
       LEFT JOIN desp de ON de.lote_id=l.id
       WHERE l.activo=1 AND l.estado NOT IN ('bajado','despachado_total')
-        AND (l.kg_reales - COALESCE(de.kg,0)) > 0.01
+        AND (l.kg_reales - COALESCE(de.kg,0) - ${SUM_TRANSF}) > 0.01
       GROUP BY pr.familia ORDER BY valor DESC`).all();
 
     // Lotes próximos a vencer (≤5 días, incluye vencidos) con stock disponible
@@ -2005,7 +2133,7 @@ router.get('/dashboard', requireAuth, (req, res) => {
         FROM sg_despacho_items di JOIN sg_despachos d ON d.id=di.despacho_id AND d.activo=1
         GROUP BY di.lote_id)
       SELECT l.id, l.codigo_lote, pr.nombre AS producto_nombre, l.calidad,
-        (l.kg_reales - COALESCE(de.kg,0)) AS kg_disponibles,
+        (l.kg_reales - COALESCE(de.kg,0) - ${SUM_TRANSF}) AS kg_disponibles,
         l.fecha_vencimiento_estimada,
         CAST(julianday(l.fecha_vencimiento_estimada)-julianday(date('now','localtime')) AS INTEGER) AS dias_restantes
       FROM sg_lotes l
@@ -2014,7 +2142,7 @@ router.get('/dashboard', requireAuth, (req, res) => {
       WHERE l.activo=1 AND l.estado NOT IN ('bajado','despachado_total')
         AND l.fecha_vencimiento_estimada IS NOT NULL
         AND julianday(l.fecha_vencimiento_estimada)-julianday(date('now','localtime')) <= 5
-        AND (l.kg_reales - COALESCE(de.kg,0)) > 0.01
+        AND (l.kg_reales - COALESCE(de.kg,0) - ${SUM_TRANSF}) > 0.01
       ORDER BY l.fecha_vencimiento_estimada ASC LIMIT 20`).all();
 
     // Top 5 productos por margen del período

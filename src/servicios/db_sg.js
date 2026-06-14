@@ -1084,6 +1084,46 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_sg_lote_decom ON sg_lote_decomisos(lote_id);
 `);
 
+// ── #reproceso caso 2: TRANSFORMACIÓN de unidad (caja → cubetas) ───────────────
+// Operación INTERNA (no es compra): mueve stock+costo de un lote a otro con producto
+// distinto (mismo especie/variedad, otro envase). El kg_reales del origen es SAGRADO
+// (lo usan OC/CC proveedor/prorrateo/descarga) — la baja de disponible va por la Σ de
+// sg_transformaciones, igual patrón que el decomiso.
+//
+// (a) sg_lotes += transformado_de: id del lote-origen del que nació este lote por
+//     transformación (NULL = lote de compra normal). Los lotes con transformado_de IS NOT
+//     NULL se EXCLUYEN del pool de prorrateo y de los reportes de compra/deuda a proveedor
+//     (no son una compra); su costo viene CARGADO (snapshot del costo/kg del origen).
+try {
+  const cols = db.prepare("PRAGMA table_info(sg_lotes)").all().map(c => c.name);
+  if (!cols.includes('transformado_de')) {
+    db.exec("ALTER TABLE sg_lotes ADD COLUMN transformado_de INTEGER REFERENCES sg_lotes(id)");
+    console.log('[DB] SG sg_lotes migrado (+transformado_de)');
+  }
+} catch (e) { console.error('[DB] SG migración sg_lotes (transformado_de):', e.message); }
+
+// (b) Vínculo origen→destino de cada transformación (incl. reversiones, que son una
+//     transformación cubeta→caja). kg_transformados = kg que SALIERON del origen;
+//     costo_transferido = snapshot kg × costo/kg del origen al momento. La reversión NO
+//     devuelve al lote-origen: crea un lote NUEVO (decisión 2), así que el descuento de
+//     stock/costo por lote_origen_id es PERMANENTE. 'estado' es solo auditoría: la fila
+//     caja→cubeta pasa a 'revertida' cuando su destino se re-consolidó por completo.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS sg_transformaciones (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    lote_origen_id    INTEGER NOT NULL REFERENCES sg_lotes(id),
+    lote_destino_id   INTEGER NOT NULL REFERENCES sg_lotes(id),
+    kg_transformados  REAL NOT NULL,
+    factor            REAL,
+    costo_transferido REAL NOT NULL DEFAULT 0,
+    estado            TEXT NOT NULL DEFAULT 'activa' CHECK(estado IN ('activa','revertida')),
+    usuario_id        INTEGER,
+    fecha             TEXT DEFAULT (datetime('now','localtime'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_sg_transf_origen  ON sg_transformaciones(lote_origen_id);
+  CREATE INDEX IF NOT EXISTS idx_sg_transf_destino ON sg_transformaciones(lote_destino_id);
+`);
+
 console.log('[DB] Módulo San Gerónimo (sg_*) inicializado');
 
 export default db;
