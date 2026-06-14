@@ -15,6 +15,9 @@ const MODULOS_SG = [
   // En el sidebar va al lado de Compras (HTML estatico); orden 656 = ultimo en Config Modulos.
   ["sg-gvariables", "Gastos Variables", 656],
   ["sg-stock",      "Stock",            652],
+  // Reprocesos (#reproceso): decomiso parcial, transformacion de unidad y reproceso con
+  // clasificacion. Modulo propio en el sidebar, debajo de Stock.
+  ["sg-reprocesos", "Reprocesos",       658],
   ["sg-ventas",     "Ventas",           653],
   ["sg-catalogo",   "Catalogo",         654],
   ["sg-reportes",   "Reportes",         655],
