@@ -16,6 +16,7 @@ import { generarOcPDF } from '../servicios/ocPDF.js';
 import { generarRecepcionCalidadPDF } from '../servicios/recepcionCalidadPDF.js';
 import { autenticar as afipAutenticar, ambienteActual as afipAmbiente } from '../servicios/afip-wsaa.js';
 import { feDummy as afipFeDummy, ultimoComprobante as afipUltimoCbte, tiposCbte as afipTiposCbte, tiposIva as afipTiposIva, ptosVenta as afipPtosVenta } from '../servicios/afip-wsfe.js';
+import { emitir as afipEmitir } from '../servicios/afip-wsfe-emision.js';
 
 const router = express.Router();
 
@@ -510,6 +511,24 @@ router.get('/afip/parametros', requireAdmin, async (req, res) => {
     const [tipos_cbte, tipos_iva, ptos_venta] = await Promise.all([afipTiposCbte(), afipTiposIva(), afipPtosVenta()]);
     res.json({ ok: true, ambiente: afipAmbiente(), tipos_cbte, tipos_iva, ptos_venta });
   } catch (e) { res.status(502).json({ ok: false, ambiente: afipAmbiente(), error: e.message }); }
+});
+
+// ── AFIP/ARCA Paso 3 — EMISIÓN de prueba (FECAESolicitar). Homologación, PV 7. ──────
+// Arma el comprobante desde cliente_id + items, emite contra homologación y devuelve el CAE
+// (o el rechazo/obs). Persiste en sg_ven_facturas con las columnas fiscales (ambiente=homologacion).
+router.post('/afip/emitir-test', requireAdmin, async (req, res) => {
+  try {
+    const b = req.body || {};
+    const pv = Number(b.pv);
+    if (!(pv > 0)) return res.status(400).json({ ok: false, error: 'Falta pv (> 0)' });
+    if (!b.cliente_id) return res.status(400).json({ ok: false, error: 'Falta cliente_id' });
+    const items = Array.isArray(b.items) ? b.items : [];
+    if (!items.length) return res.status(400).json({ ok: false, error: 'Sin items' });
+    const r = await afipEmitir(getDb(), { ptoVta: pv, clienteId: Number(b.cliente_id), items, userId: uid(req) });
+    res.status(r.ok ? 200 : 200).json(r);
+  } catch (e) {
+    res.status(502).json({ ok: false, error: e.message });
+  }
 });
 
 // BRIEF 10 — CARGA INICIAL DE INVENTARIO (lotes de apertura, sin compra/proveedor/OC).

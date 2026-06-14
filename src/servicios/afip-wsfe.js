@@ -123,4 +123,5 @@ export async function ptosVenta() {
   return parseLista(text, 'PtoVenta');
 }
 
-export { ambienteActual };
+// Helpers de bajo nivel reusados por el motor de emisión (afip-wsfe-emision.js).
+export { ambienteActual, soapCall, authXml, pick, pickAll, extraerErrores };
