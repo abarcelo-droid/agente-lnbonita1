@@ -266,16 +266,21 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   <div class="ni" data-sec="personal-catalogo" data-admin-only="1"><span class="dot da"></span>📚 Catálogo</div>
   <div class="ni" data-sec="personal-reportes" data-admin-only="1"><span class="dot de"></span>📈 Reportes</div>
 
-  <div class="ng" style="margin-top:8px">Abasto SG</div>
-  <div class="ni" data-sec="sg-dashboard" data-admin-only="1"><span class="dot da"></span>📊 Dash</div>
-  <div class="ni" data-sec="sg-compras" data-admin-only="1"><span class="dot dd"></span>📥 Ingresos</div>
-  <div class="ni" data-sec="sg-gvariables" data-admin-only="1"><span class="dot dd"></span>💸 Gastos Variables</div>
-  <div class="ni" data-sec="sg-stock" data-admin-only="1"><span class="dot db"></span>📦 Stock</div>
-  <div class="ni" data-sec="sg-reprocesos" data-admin-only="1"><span class="dot db"></span>🔄 Reprocesos</div>
-  <div class="ni" data-sec="sg-ventas" data-admin-only="1"><span class="dot dc"></span>📤 Salidas</div>
-  <div class="ni" data-sec="sg-gastos-directos" data-admin-only="1"><span class="dot dd"></span>🧾 Gastos Directos</div>
-  <div class="ni" data-sec="sg-catalogo" data-admin-only="1"><span class="dot da"></span>🗂️ Maestros</div>
-  <div class="ni" data-sec="sg-reportes" data-admin-only="1"><span class="dot de"></span>📈 Informes</div>
+  <!-- Abasto SG — el sidebar VISIBLE lo renderiza sidebar-v2.js desde modulos_config
+       (/api/org/sidebar). Los LABELS viven ahí (ver ensure_modulo_sg.js), NO acá: editarlos
+       en este nav no tiene efecto (fue el bug de #463/sidebar). Estos .ni quedan SIN texto,
+       solo como PUENTE de navegación: sidebar-v2 navigateTo() clickea el .ni viejo (oculto)
+       para disparar loadSec(). Si los borrás, el fallback de sidebar-v2 no corre el init y las
+       secciones SG aparecen vacías → no los toques. -->
+  <div class="ni" data-sec="sg-dashboard" data-admin-only="1"></div>
+  <div class="ni" data-sec="sg-compras" data-admin-only="1"></div>
+  <div class="ni" data-sec="sg-gvariables" data-admin-only="1"></div>
+  <div class="ni" data-sec="sg-stock" data-admin-only="1"></div>
+  <div class="ni" data-sec="sg-reprocesos" data-admin-only="1"></div>
+  <div class="ni" data-sec="sg-ventas" data-admin-only="1"></div>
+  <div class="ni" data-sec="sg-gastos-directos" data-admin-only="1"></div>
+  <div class="ni" data-sec="sg-catalogo" data-admin-only="1"></div>
+  <div class="ni" data-sec="sg-reportes" data-admin-only="1"></div>
 
   <div class="ng" style="margin-top:8px">General</div>
   <div class="ni on" data-sec="inicio"><span class="dot"></span>Inicio</div>
