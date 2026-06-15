@@ -2068,6 +2068,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       <div class="sgr-card">
         <div style="display:flex;gap:14px;align-items:flex-end;flex-wrap:wrap;margin-bottom:10px">
           <label style="font-size:11.5px;color:var(--mut)">Cliente<br>
+            <input type="text" placeholder="🔎 alias o razón social" oninput="sgCliFiltrar('sgf-cli',this.value)" autocomplete="off" style="min-width:240px;padding:5px 8px;border-radius:6px;border:1px solid var(--bor);background:var(--card,#fff);margin-bottom:4px;display:block">
             <select id="sgf-cli" onchange="sgFacCliente()" style="min-width:240px;padding:6px 8px;border-radius:6px;border:1px solid var(--bor);background:var(--card,#fff)"></select>
           </label>
           <span id="sgf-tipo-badge" style="padding-bottom:6px"></span>
@@ -2722,7 +2723,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     <div class="mhd"><div class="mht">Nuevo pedido</div><button class="mcl" onclick="closeMB('sg-ped-modal')">×</button></div>
     <div class="fg">
       <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
-        <div class="fl"><label>Cliente <span style="color:var(--err)">*</span></label><select id="sg-ped-cli" onchange="sgPedCliChange()"></select></div>
+        <div class="fl"><label>Cliente <span style="color:var(--err)">*</span></label><input type="text" placeholder="🔎 alias o razón social" oninput="sgCliFiltrar('sg-ped-cli',this.value)" autocomplete="off" style="margin-bottom:4px"><select id="sg-ped-cli" onchange="sgPedCliChange()"></select></div>
         <div class="fl"><label>Tipo fiscal</label><select id="sg-ped-fiscal"></select></div>
         <div class="fl"><label>Condición de pago</label><select id="sg-ped-cond"></select></div>
         <div class="fl"><label>Fecha pedido</label><input type="date" id="sg-ped-fecha"></div>
@@ -2749,7 +2750,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     <div class="mhd"><div class="mht">Nuevo despacho</div><button class="mcl" onclick="closeMB('sg-desp-modal')">×</button></div>
     <div class="fg">
       <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
-        <div class="fl"><label>Cliente <span style="color:var(--err)">*</span></label><select id="sg-desp-cli"></select></div>
+        <div class="fl"><label>Cliente <span style="color:var(--err)">*</span></label><input type="text" placeholder="🔎 alias o razón social" oninput="sgCliFiltrar('sg-desp-cli',this.value)" autocomplete="off" style="margin-bottom:4px"><select id="sg-desp-cli"></select></div>
         <div class="fl"><label>Pedido (opcional)</label><select id="sg-desp-ped"><option value="">— Sin pedido —</option></select></div>
         <div class="fl"><label>Fecha despacho</label><input type="date" id="sg-desp-fecha"></div>
         <div class="fl"><label>Transporte</label><select id="sg-desp-transp"><option value="">—</option><option value="propio">Propio</option><option value="cliente">Cliente</option><option value="tercero">Tercero</option></select></div>
@@ -3037,6 +3038,28 @@ function sgOpts(list, labelKey, sel, blank){
   return (blank!==false ? '<option value="">'+(blank||'—')+'</option>' : '')
     + (list||[]).map(function(o){ return '<option value="'+o.id+'"'+(String(o.id)===String(sel)?' selected':'')+'>'+esc(String(lab(o)||''))+'</option>'; }).join('');
 }
+// ── Cliente SG: alias (nombre_comercial) como identificador PRINCIPAL, razón social secundaria ──
+// El operador conoce a los clientes por su alias. Etiqueta "Alias · Razón social" (cae a razón
+// social si no hay alias). La búsqueda matchea por alias Y por razón social, alias-matches primero.
+function sgCliLabel(c){
+  if(!c) return '';
+  var a=String(c.nombre_comercial||'').trim(), r=String(c.razon_social||'').trim();
+  if(a && r && a.toLowerCase()!==r.toLowerCase()) return a+'  ·  '+r;
+  return a||r;
+}
+function sgCliOpts(query, sel, blank){
+  var q=String(query||'').trim().toLowerCase();
+  var lista=(SG.cacheCli||[]).map(function(c){
+    var a=String(c.nombre_comercial||'').toLowerCase(), r=String(c.razon_social||'').toLowerCase();
+    var mA=!!q && a.indexOf(q)>=0, mR=!!q && r.indexOf(q)>=0;
+    return { c:c, match: !q || mA || mR, rank:(mA?0:(mR?1:2)) };
+  }).filter(function(x){ return x.match; });
+  lista.sort(function(x,y){ return (x.rank-y.rank) || sgCliLabel(x.c).localeCompare(sgCliLabel(y.c),'es'); });
+  return '<option value="">'+(blank||'— Elegir —')+'</option>'
+    + lista.map(function(x){ return '<option value="'+x.c.id+'"'+(String(x.c.id)===String(sel)?' selected':'')+'>'+esc(sgCliLabel(x.c))+'</option>'; }).join('');
+}
+// Filtra un <select> de cliente desde su input de búsqueda (preserva la selección si sigue visible).
+function sgCliFiltrar(selectId, q){ var el=eid(selectId); if(el) el.innerHTML=sgCliOpts(q, el.value); }
 // Presentaciones de un producto (desde cache)
 function sgPresDe(prodId){ return SG.cachePres.filter(function(p){ return String(p.producto_id)===String(prodId); }); }
 function sgFactor(presId){ var p = SG.cachePres.find(function(x){ return String(x.id)===String(presId); }); return p ? Number(p.factor_conversion) : 1; }
@@ -4439,7 +4462,7 @@ function sgVenSub(s){
 function sgFacInit(){
   SG.facData = null; SG.facSel = {}; SG.facLineas = [];
   var sel = eid('sgf-cli');
-  sel.innerHTML = sgOpts(SG.cacheCli, 'razon_social', '', '— Elegí cliente —');
+  sel.innerHTML = sgCliOpts('', '', '— Elegí cliente —');
   eid('sgf-tipo-badge').innerHTML = '';
   eid('sgf-despachos').innerHTML = '<div style="font-size:12px;color:var(--mut)">Elegí un cliente para ver sus despachos facturables.</div>';
   eid('sgf-confirm').classList.remove('on');
@@ -4667,7 +4690,7 @@ function sgIPAdd(key, tipo, fuenteId, inputId, label, semaforo){
 
 function sgPedOpen(){
   SG.pedLines=[];
-  eid('sg-ped-cli').innerHTML=sgOpts(SG.cacheCli,'razon_social','','— Elegir —');
+  eid('sg-ped-cli').innerHTML=sgCliOpts('','','— Elegir —');
   eid('sg-ped-cond').innerHTML=sgOpts(SG.cacheCond,'nombre','','— Sin condición —');
   eid('sg-ped-fiscal').innerHTML=SG_FISCAL.map(function(o){return '<option value="'+o[0]+'">'+o[1]+'</option>';}).join('');
   eid('sg-ped-fecha').value=new Date().toISOString().slice(0,10);
@@ -4766,7 +4789,7 @@ function sgLoadDespachos(){
 }
 function sgDespOpen(){
   SG.despItems=[]; SG.despLotes={};
-  eid('sg-desp-cli').innerHTML=sgOpts(SG.cacheCli,'razon_social','','— Elegir —');
+  eid('sg-desp-cli').innerHTML=sgCliOpts('','','— Elegir —');
   api('/api/sg/pedidos?estado=confirmado').then(function(r){
     var peds=(r&&r.ok)?r.data:[];
     eid('sg-desp-ped').innerHTML='<option value="">— Sin pedido —</option>'+peds.map(function(p){return '<option value="'+p.id+'" data-cli="'+p.cliente_id+'">'+esc(p.numero)+' — '+esc(p.cliente_nombre||'')+'</option>';}).join('');
@@ -5295,7 +5318,10 @@ function sgLoadCC(){
     var rows=(r&&r.ok)?r.data:[];
     eid('sg-tb-cc').innerHTML = rows.length ? rows.map(function(c){
       var ap=Number(c.saldo_inicial)||0;
-      return '<tr><td>'+esc(c.razon_social)+'</td>'
+      // alias (nombre_comercial) como identificador principal; se busca en cacheCli por id.
+      var cc=(SG.cacheCli||[]).find(function(x){return String(x.id)===String(c.id);});
+      var nom=sgCliLabel({ nombre_comercial:cc&&cc.nombre_comercial, razon_social:c.razon_social });
+      return '<tr><td>'+esc(nom||c.razon_social)+'</td>'
         +'<td style="text-align:right'+(ap?'':';color:var(--mut)')+'">'+(ap?sgMoney(ap):'—')+'</td>'
         +'<td style="text-align:right">'+sgMoney(c.total_facturado)+'</td><td style="text-align:right">'+sgMoney(c.total_cobrado)+'</td>'
         +'<td style="text-align:right;font-weight:700">'+sgMoney(c.saldo)+'</td><td style="text-align:right">'+sgMoney(c.limite_credito)+'</td></tr>';
