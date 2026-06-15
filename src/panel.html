@@ -4589,13 +4589,14 @@ function sgFacEmitir(){
     btn.disabled=false; btn.textContent=prev;
     if(r&&r.ok){
       toast('Comprobante autorizado','ok');
+      var fid = r.factura_id;
+      sgFacCliente();   // refresca /facturable PRIMERO (sgFacCliente oculta el confirm) y recién pintamos el panel
       var c=eid('sgf-confirm');
       c.innerHTML = '✓ <b>Comprobante '+(r.cbte_tipo===1?'A':(r.cbte_tipo===6?'B':r.cbte_tipo))+'</b> · N° '
         +String(r.pto_vta).padStart(4,'0')+'-'+String(r.cbte_nro).padStart(8,'0')
         +' · <b>CAE '+esc(r.cae)+'</b> · Vto '+esc(r.cae_vto||'—')
-        +' &nbsp; <a class="btn bb bs" href="'+esc(r.pdf_url)+'" target="_blank">📄 Ver comprobante</a>';
+        +' &nbsp; <button class="btn bb bs" type="button" onclick="window.open(\'/api/sg/ventas/facturas/'+fid+'/pdf\',\'_blank\')">📄 Ver comprobante</button>';
       c.classList.add('on');
-      sgFacCliente();   // refresca /facturable (lo facturado sale o pasa a parcial)
     } else {
       toast((r&&(r.obs||r.error))||'Rechazado','er');
       var c=eid('sgf-confirm'); c.innerHTML='⚠ Rechazado: '+esc((r&&(r.obs||r.error))||'—'); c.classList.add('on'); c.style.borderColor='var(--err)';
