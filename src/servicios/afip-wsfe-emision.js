@@ -28,6 +28,12 @@ _alter('sg_ven_facturas', 'afip_estado', 'afip_estado TEXT');           // borra
 // sg_ven_factura_items += producto + alícuota (para desglosar IVA)
 _alter('sg_ven_factura_items', 'producto_id', 'producto_id INTEGER');
 _alter('sg_ven_factura_items', 'alicuota_id', 'alicuota_id INTEGER');
+// F5 — metadata de PRESENTACIÓN por bulto (cajón). NO afecta importes: cantidad/precio_unitario/
+// subtotal siguen en kg×precio_kg (lo que va a AFIP). Estos campos solo alimentan el PDF.
+_alter('sg_ven_factura_items', 'bultos', 'bultos REAL');
+_alter('sg_ven_factura_items', 'kg_por_bulto', 'kg_por_bulto REAL');
+_alter('sg_ven_factura_items', 'precio_por_bulto', 'precio_por_bulto REAL');
+_alter('sg_ven_factura_items', 'unidad', 'unidad TEXT');
 // Vínculo N:N factura ↔ despacho (qué despacho/ítems ya se facturaron)
 db.exec(`
   CREATE TABLE IF NOT EXISTS sg_factura_despachos (
@@ -96,18 +102,26 @@ export function construirComprobante(database, { clienteId, items, esNC }) {
     const cant = Number(it.cantidad) || 0, precio = Number(it.precio) || 0;
     if (!(cant > 0)) throw new Error('Cantidad inválida en ' + (prod.nombre || it.producto_id));
     const neto = r2(cant * precio);                    // precio = unitario NETO (sin IVA)
+    // F5 — metadata de presentación por bulto (cajón). NO interviene en el cálculo de importes:
+    // el subtotal sigue siendo neto = cant(kg) × precio(kg). Solo viaja al detalle local para el PDF.
+    const bultoMeta = {
+      bultos:           it.bultos != null ? it.bultos : null,
+      kg_por_bulto:     it.kg_por_bulto != null ? it.kg_por_bulto : null,
+      precio_por_bulto: it.precio_por_bulto != null ? it.precio_por_bulto : null,
+      unidad:           it.unidad || null
+    };
     const id = alicuotaId(prod.iva_alicuota);
     if (id === undefined) throw new Error('Alícuota de IVA no soportada para ' + prod.nombre + ': ' + prod.iva_alicuota + '%');
     if (id === null) {                                  // exento → ImpOpEx
       impOpEx = r2(impOpEx + neto);
-      detalle.push({ producto_id: prod.id, descripcion: prod.nombre, cantidad: cant, precio_unitario: precio, subtotal: neto, alicuota_id: null });
+      detalle.push({ producto_id: prod.id, descripcion: prod.nombre, cantidad: cant, precio_unitario: precio, subtotal: neto, alicuota_id: null, ...bultoMeta });
     } else {
       const iva = r2(neto * Number(prod.iva_alicuota) / 100);
       impNeto = r2(impNeto + neto); impIva = r2(impIva + iva);
       if (!ivaMap[id]) ivaMap[id] = { base: 0, importe: 0 };
       ivaMap[id].base = r2(ivaMap[id].base + neto);
       ivaMap[id].importe = r2(ivaMap[id].importe + iva);
-      detalle.push({ producto_id: prod.id, descripcion: prod.nombre, cantidad: cant, precio_unitario: precio, subtotal: neto, alicuota_id: id });
+      detalle.push({ producto_id: prod.id, descripcion: prod.nombre, cantidad: cant, precio_unitario: precio, subtotal: neto, alicuota_id: id, ...bultoMeta });
     }
   }
   if (!detalle.length) throw new Error('El comprobante necesita al menos un ítem');
@@ -196,9 +210,10 @@ function persistirReservada(database, { comprobante, ptoVta, cbteTipo, cbteNro, 
       ptoVta, cbteTipo, cbteNro, ambiente, 'PRUEBA emisión homologación', userId || null);
     facturaId = info.lastInsertRowid;
     const insItem = database.prepare(`INSERT INTO sg_ven_factura_items
-      (factura_id, descripcion, cantidad, precio_unitario, subtotal, producto_id, alicuota_id)
-      VALUES (?,?,?,?,?,?,?)`);
-    for (const d of comprobante.detalle) insItem.run(facturaId, d.descripcion, d.cantidad, d.precio_unitario, d.subtotal, d.producto_id, d.alicuota_id);
+      (factura_id, descripcion, cantidad, precio_unitario, subtotal, producto_id, alicuota_id, bultos, kg_por_bulto, precio_por_bulto, unidad)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?)`);
+    for (const d of comprobante.detalle) insItem.run(facturaId, d.descripcion, d.cantidad, d.precio_unitario, d.subtotal, d.producto_id, d.alicuota_id,
+      d.bultos != null ? d.bultos : null, d.kg_por_bulto != null ? d.kg_por_bulto : null, d.precio_por_bulto != null ? d.precio_por_bulto : null, d.unidad || null);
   })();
   return facturaId;
 }

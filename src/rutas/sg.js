@@ -665,10 +665,12 @@ router.post('/facturas/emitir', requireAdmin, async (req, res) => {
       for (const it of (Array.isArray(sel.items) ? sel.items : [])) {
         const diId = Number(it.despacho_item_id), kg = Number(it.kg);
         if (!(kg > 0)) continue;
-        const di = db.prepare(`SELECT di.id, di.producto_id, di.kg_despachados, di.precio_por_kg, fam.iva_alicuota
+        const di = db.prepare(`SELECT di.id, di.producto_id, di.kg_despachados, di.precio_por_kg, di.presentacion_id,
+            ps.factor_conversion AS kg_por_bulto, fam.iva_alicuota
           FROM sg_despacho_items di
           LEFT JOIN sg_productos pr ON pr.id=di.producto_id
           LEFT JOIN sg_familias fam ON fam.id=pr.familia_id
+          LEFT JOIN sg_presentaciones ps ON ps.id=di.presentacion_id
           WHERE di.id=? AND di.despacho_id=?`).get(diId, despachoId);
         if (!di) return res.status(400).json({ ok: false, error: 'Ítem de despacho inválido: ' + diId });
         const kgPend = (Number(di.kg_despachados) || 0) - kgFacturadoItem(db, diId);
@@ -677,7 +679,13 @@ router.post('/facturas/emitir', requireAdmin, async (req, res) => {
         const incluyeIva = (it.incluye_iva != null) ? (it.incluye_iva === true) : facturaIncluyeIva;
         const precioBruto = Number(di.precio_por_kg) || 0;
         const precioNeto = (incluyeIva && alic != null) ? +(precioBruto / (1 + alic / 100)).toFixed(4) : precioBruto; // al motor SIEMPRE neto
-        items.push({ producto_id: Number(di.producto_id), cantidad: kg, precio: precioNeto });
+        // F5 — metadata de presentación por bulto (cajón), SOLO para el detalle local + PDF. cantidad
+        // (kg) y precio (precio_kg neto) NO cambian → el payload e importes a AFIP son idénticos a hoy.
+        const kpb = (di.kg_por_bulto != null && Number(di.kg_por_bulto) > 0) ? Number(di.kg_por_bulto) : null;
+        const bultosLinea = kpb != null ? +(kg / kpb).toFixed(4) : null;          // bultos facturados (display)
+        const precioPorBulto = kpb != null ? +(precioNeto * kpb).toFixed(4) : null; // = precio_kg neto × kg_por_bulto
+        items.push({ producto_id: Number(di.producto_id), cantidad: kg, precio: precioNeto,
+          bultos: bultosLinea, kg_por_bulto: kpb, precio_por_bulto: precioPorBulto, unidad: kpb != null ? 'cajón' : null });
         vinculos.push({ despacho_id: despachoId, despacho_item_id: diId, kg });
       }
     }

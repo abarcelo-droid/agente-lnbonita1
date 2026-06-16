@@ -127,12 +127,20 @@ export async function generarFacturaPDF(factura) {
     const sub = Number(it.subtotal) || 0;
     if (pct == null) { totExento += sub; }
     else { if (!grav[pct]) grav[pct] = { base: 0, iva: 0 }; grav[pct].base += sub; grav[pct].iva += sub * pct / 100; }
+    // F5 — presentación por BULTO (cajón) si la línea la trae; si no, kg como siempre. El Importe
+    // SIEMPRE es el subtotal almacenado (kg×precio_kg) → totales idénticos a la versión kg.
+    const kpb = (it.kg_por_bulto != null && Number(it.kg_por_bulto) > 0) ? Number(it.kg_por_bulto) : null;
+    const enBulto = kpb != null && it.bultos != null;
+    const cantTxt = enBulto ? String(Number(it.bultos)) : String(Number(it.cantidad) || 0);
+    const uMed = enBulto ? (it.unidad || 'cajón') : 'kg';
+    const pUnit = enBulto ? money(it.precio_por_bulto) : money(it.precio_unitario);
+    const desc = enBulto ? (String(it.descripcion || '') + ' × ' + Number(kpb) + 'kg') : String(it.descripcion || '');
     const fila = [
       String(it.producto_id || ''),
-      String(it.descripcion || ''),
-      String(Number(it.cantidad) || 0),
-      'kg',
-      money(it.precio_unitario),
+      desc,
+      cantTxt,
+      uMed,
+      pUnit,
       pct == null ? 'Exento' : (pct + '%'),
       money(sub)
     ];
