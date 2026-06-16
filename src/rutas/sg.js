@@ -2065,10 +2065,19 @@ router.post('/lotes/:id/reproceso', requireAuth, (req, res) => {
       }
       for (const h of hijos) h._costo = +Number(h.costo_asignado || 0).toFixed(2);
     } else {
-      // auto-reparto por kg; el último hijo absorbe el redondeo para que cuadre exacto.
+      // F4-B — reparto PLANO POR CAJÓN cuando todos los hijos vendibles tienen bultos (>0): mismo
+      // costo a cada cajón (1ra y 2da igual) = totalRepartir / Σ bultos. El costo de la merma lo
+      // absorben los cajones vendibles (totalRepartir ya incluye el costo de los kg de merma).
+      // FALLBACK: si algún hijo no tiene bultos (granel/kg puro legacy) → reparto por kg como antes.
+      // En ambos casos el último hijo absorbe el redondeo para que Σ costo_final == totalRepartir exacto.
+      const totalBultos = hijos.reduce((a, h) => a + (Number(h.bultos) || 0), 0);
+      const planoPorCajon = totalBultos > 0 && hijos.every(h => Number(h.bultos) > 0);
       let acum = 0;
       hijos.forEach((h, i) => {
-        h._costo = i === hijos.length - 1 ? +(totalRepartir - acum).toFixed(2) : +(totalRepartir * (h.kg / sumaKgHijos)).toFixed(2);
+        const cuota = planoPorCajon
+          ? (totalRepartir * (Number(h.bultos) / totalBultos))
+          : (totalRepartir * (h.kg / sumaKgHijos));
+        h._costo = i === hijos.length - 1 ? +(totalRepartir - acum).toFixed(2) : +cuota.toFixed(2);
         acum = +(acum + h._costo).toFixed(2);
       });
     }
