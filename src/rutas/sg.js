@@ -2214,6 +2214,33 @@ function costoTransferido(db, loteId) {
 const SUM_TRANSF = "(COALESCE((SELECT SUM(kg_transformados) FROM sg_transformaciones WHERE lote_origen_id=l.id),0)"
   + " + COALESCE((SELECT SUM(kg_procesados) FROM sg_reprocesos WHERE lote_madre_id=l.id AND estado='activo'),0))";
 
+// ── F3-A: disponibilidad en BULTOS, EN PARALELO al de kg (NO conectada a validación/estado/reservas
+// todavía; queda disponible para F3-B+). Mismo criterio de estado que kg: decomisos sin estado;
+// transformaciones permanentes; reprocesos estado='activo'. Las reservas (blandas) NO se restan. ──
+function bultosDespachados(db, loteId) {
+  return db.prepare(`SELECT COALESCE(SUM(di.bultos),0) s
+    FROM sg_despacho_items di JOIN sg_despachos d ON d.id=di.despacho_id AND d.activo=1
+    WHERE di.lote_id=?`).get(loteId).s;
+}
+function bultosDecomisado(db, loteId) {
+  return db.prepare('SELECT COALESCE(SUM(bultos),0) s FROM sg_lote_decomisos WHERE lote_id=?').get(loteId).s;
+}
+function bultosTransformado(db, loteId) {
+  const t = db.prepare('SELECT COALESCE(SUM(bultos_transformados),0) s FROM sg_transformaciones WHERE lote_origen_id=?').get(loteId).s;
+  const r = db.prepare("SELECT COALESCE(SUM(bultos_procesados),0) s FROM sg_reprocesos WHERE lote_madre_id=? AND estado='activo'").get(loteId).s;
+  return t + r;
+}
+// bultos disponibles = lote.bultos − Σ bultos de movimientos activos. null si el lote no tiene
+// bultos cargados (no contable en cajones). NO toca kg ni se conecta a nada aún.
+function bultosDisponibles(db, loteId) {
+  const l = db.prepare('SELECT bultos FROM sg_lotes WHERE id=?').get(loteId);
+  if (!l || l.bultos == null) return null;
+  return l.bultos - bultosDespachados(db, loteId) - bultosDecomisado(db, loteId) - bultosTransformado(db, loteId);
+}
+// Fragmento SQL espejo de SUM_TRANSF en bultos (transformaciones + reprocesos activos del lote 'l').
+const SUM_TRANSF_BULTOS = "(COALESCE((SELECT SUM(bultos_transformados) FROM sg_transformaciones WHERE lote_origen_id=l.id),0)"
+  + " + COALESCE((SELECT SUM(bultos_procesados) FROM sg_reprocesos WHERE lote_madre_id=l.id AND estado='activo'),0))";
+
 // ── FUENTE ÚNICA de la fórmula de kg de un lote (ligada al alias `l`) ────────────
 // Antes copy-pasteada en /lotes, /lotes-disponibles, /oferta y /disponibilidad. Estos fragmentos
 // son la verdad única; cualquier endpoint de lectura los compone. (KG_VIGENTE de costeo —línea

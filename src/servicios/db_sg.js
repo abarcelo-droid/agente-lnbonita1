@@ -1043,6 +1043,45 @@ try {
   if (add.length) console.log('[DB] SG sg_lotes migrado (+' + add.join(', +') + ')');
 } catch (e) { console.error('[DB] SG migración sg_lotes (bulto):', e.message); }
 
+// ── F3-A: bultos ADITIVO en tablas de movimiento (NULLABLE, idempotente) + backfill ─────────────
+// El cajón es la unidad operativa indivisible. Estas columnas CONVIVEN con las de kg (que siguen
+// siendo la verdad operativa en F3-A). Backfill = ROUND(kg_de_la_fila / kg_por_bulto) usando la
+// presentación del lote asociado; null donde el lote no tiene presentacion_id (no derivable).
+// NO flip de validación/estado/reservas (eso es F3-B+). cantidad_presentaciones (REAL) NO se toca:
+// se agrega un `bultos` INTEGER nuevo para no romper la carga cooperativa.
+try {
+  const addCol = (tabla, col, tipo) => {
+    const cols = db.prepare(`PRAGMA table_info(${tabla})`).all().map(c => c.name);
+    if (!cols.includes(col)) { db.exec(`ALTER TABLE ${tabla} ADD COLUMN ${col} ${tipo}`); return true; }
+    return false;
+  };
+  const added = [];
+  if (addCol('sg_lote_decomisos',   'bultos',               'INTEGER')) added.push('sg_lote_decomisos.bultos');
+  if (addCol('sg_transformaciones', 'bultos_transformados', 'INTEGER')) added.push('sg_transformaciones.bultos_transformados');
+  if (addCol('sg_reprocesos',       'bultos_procesados',    'INTEGER')) added.push('sg_reprocesos.bultos_procesados');
+  if (addCol('sg_reprocesos',       'bultos_merma',         'INTEGER')) added.push('sg_reprocesos.bultos_merma');
+  if (addCol('sg_reservas',         'bultos',               'INTEGER')) added.push('sg_reservas.bultos');
+  if (addCol('sg_despacho_items',   'bultos',               'INTEGER')) added.push('sg_despacho_items.bultos');
+  if (added.length) console.log('[DB] SG F3-A bultos movimiento (+' + added.join(', +') + ')');
+
+  // Backfill idempotente (solo bultos NULL) y derivable (lote con presentacion_id + factor>0). El
+  // EXISTS evita tocar filas no derivables; las reservas oc_item (lote_id NULL) no matchean → null.
+  const backfill = (tabla, colBultos, colKg, fkLote) => db.prepare(`
+    UPDATE ${tabla} SET ${colBultos} = (
+      SELECT CAST(ROUND(${tabla}.${colKg} / ps.factor_conversion) AS INTEGER)
+      FROM sg_lotes l JOIN sg_presentaciones ps ON ps.id=l.presentacion_id
+      WHERE l.id=${tabla}.${fkLote} AND ps.factor_conversion>0)
+    WHERE ${colBultos} IS NULL AND EXISTS (
+      SELECT 1 FROM sg_lotes l JOIN sg_presentaciones ps ON ps.id=l.presentacion_id
+      WHERE l.id=${tabla}.${fkLote} AND ps.factor_conversion>0)`).run();
+  backfill('sg_lote_decomisos',   'bultos',               'kg',               'lote_id');
+  backfill('sg_transformaciones', 'bultos_transformados', 'kg_transformados', 'lote_origen_id');
+  backfill('sg_reprocesos',       'bultos_procesados',    'kg_procesados',    'lote_madre_id');
+  backfill('sg_reprocesos',       'bultos_merma',         'kg_merma',         'lote_madre_id');
+  backfill('sg_reservas',         'bultos',               'kg',               'lote_id');
+  backfill('sg_despacho_items',   'bultos',               'kg_despachados',   'lote_id');
+} catch (e) { console.error('[DB] SG F3-A bultos movimiento:', e.message); }
+
 // Historial de cambios de semáforo: cada cambio registra anterior→nuevo, motivo, origen, usuario.
 db.exec(`
   CREATE TABLE IF NOT EXISTS sg_lote_semaforo_historial (
