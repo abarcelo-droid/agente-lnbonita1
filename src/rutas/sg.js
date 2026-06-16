@@ -2021,7 +2021,7 @@ router.post('/lotes/:id/reproceso', requireAuth, (req, res) => {
     const gasto = (b.gasto_proceso != null && b.gasto_proceso !== '') ? Number(b.gasto_proceso) : 0;
     if (!(gasto >= 0)) return res.status(400).json({ ok: false, error: 'gasto_proceso inválido' });
 
-    const madre = db.prepare(`SELECT id, producto_id, kg_reales, costo_final, calibre, origen,
+    const madre = db.prepare(`SELECT id, producto_id, kg_reales, bultos, costo_final, calibre, origen,
       fecha_ingreso, fecha_vencimiento_estimada, estado FROM sg_lotes WHERE id=? AND activo=1`).get(req.params.id);
     if (!madre) return res.status(404).json({ ok: false, error: 'Lote madre no encontrado' });
     if (madre.estado === 'bajado') return res.status(400).json({ ok: false, error: 'El lote madre está dado de baja' });
@@ -2048,6 +2048,46 @@ router.post('/lotes/:id/reproceso', requireAuth, (req, res) => {
     if (kgProcesados < sumaKgHijos - 0.01) return res.status(400).json({ ok: false, error: `kg_procesados (${kgProcesados}) no puede ser menor que la suma de los hijos (${sumaKgHijos.toFixed(2)})` });
     if (kgProcesados > disp + 0.01) return res.status(400).json({ ok: false, error: `No podés reprocesar ${kgProcesados}kg: hay ${disp.toFixed(1)}kg disponibles` });
     const kgMerma = +(kgProcesados - sumaKgHijos).toFixed(2);
+
+    // F4-C1 — CONSERVACIÓN EN CAJONES (cuando hay bultos). El cajón es indivisible: rechazar
+    // fracciones en cualquier hijo. Si la madre opera en cajones → igualdad exacta entera
+    // bultos_procesados == Σ bultos hijos + bultos merma, y ≤ bultos disponibles. Si la madre es
+    // GRANEL (kg, sin cajones) pero los hijos nacen en cajones → NO hay igualdad madre↔hijos (la
+    // madre no tiene cajones que conservar): solo se exigen hijos enteros (>0). Full kg legacy
+    // (sin bultos en ningún lado) → el check kg de arriba basta.
+    for (const h of hijos) {
+      if (h.bultos != null && h.bultos !== '' && Math.abs(Number(h.bultos) - Math.round(Number(h.bultos))) > 1e-6) {
+        return res.status(400).json({ ok: false, error: `Hijo con fracción de cajón (${Number(h.bultos)} bultos): el cajón es entero` });
+      }
+    }
+    const sumaBultosHijos = hijos.reduce((a, h) => a + (Number(h.bultos) || 0), 0);
+    let bultosProcReproceso = null, bultosMermaReproceso = null;
+    if (madre.bultos != null) {
+      // madre-bulto: conservación completa.
+      if (!hijos.every(h => Number(h.bultos) > 0)) {
+        return res.status(400).json({ ok: false, error: 'La madre opera en cajones: cada hijo necesita bultos enteros > 0' });
+      }
+      const bultosMerma = (b.bultos_merma != null && b.bultos_merma !== '') ? Number(b.bultos_merma) : 0;
+      if (bultosMerma < 0 || Math.abs(bultosMerma - Math.round(bultosMerma)) > 1e-6) {
+        return res.status(400).json({ ok: false, error: 'bultos_merma debe ser un entero ≥ 0 (cajón indivisible)' });
+      }
+      const bultosProcesados = (b.bultos_procesados != null && b.bultos_procesados !== '') ? Number(b.bultos_procesados) : (sumaBultosHijos + bultosMerma);
+      if (Math.abs(bultosProcesados - Math.round(bultosProcesados)) > 1e-6) {
+        return res.status(400).json({ ok: false, error: 'bultos_procesados debe ser entero (cajón indivisible)' });
+      }
+      if (Math.round(bultosProcesados) !== sumaBultosHijos + Math.round(bultosMerma)) {
+        return res.status(400).json({ ok: false, error: `Los cajones no cuadran: procesados ${Math.round(bultosProcesados)}, hijos ${sumaBultosHijos}, merma ${Math.round(bultosMerma)} (${sumaBultosHijos}+${Math.round(bultosMerma)}=${sumaBultosHijos + Math.round(bultosMerma)})` });
+      }
+      const dispB = bultosDisponibles(db, madre.id);
+      if (dispB != null && Math.round(bultosProcesados) > dispB) {
+        return res.status(400).json({ ok: false, error: `No podés reprocesar ${Math.round(bultosProcesados)} cajón(es): la madre tiene ${dispB} disponible(s)` });
+      }
+      bultosProcReproceso = Math.round(bultosProcesados);
+      bultosMermaReproceso = Math.round(bultosMerma);
+    }
+    // CASO GRANEL→BULTO (madre.bultos == null y algún hijo con bultos): solo se exigen hijos enteros
+    // (ya validado arriba). La madre se procesa por kg (el check kg gobierna kg_procesados); el
+    // reproceso no registra bultos_procesados (la madre no tiene cajones). bultos_merma no aplica.
 
     // costo que SALE de la madre = kg_procesados × costo/kg vigente (incluye el costo de la merma).
     const kgVigMadre = (madre.kg_reales || 0) - kgDecomisado(db, madre.id) - kgTransformado(db, madre.id);
@@ -2076,8 +2116,8 @@ router.post('/lotes/:id/reproceso', requireAuth, (req, res) => {
     let out;
     db.transaction(() => {
       const info = db.prepare(`INSERT INTO sg_reprocesos
-        (lote_madre_id, kg_procesados, kg_merma, costo_madre_consumido, gasto_proceso, gasto_descripcion, usuario_id)
-        VALUES (?,?,?,?,?,?,?)`).run(madre.id, kgProcesados, kgMerma, costoMadreConsumido, gasto, val(b.gasto_descripcion), uid(req));
+        (lote_madre_id, kg_procesados, kg_merma, bultos_procesados, bultos_merma, costo_madre_consumido, gasto_proceso, gasto_descripcion, usuario_id)
+        VALUES (?,?,?,?,?,?,?,?,?)`).run(madre.id, kgProcesados, kgMerma, bultosProcReproceso, bultosMermaReproceso, costoMadreConsumido, gasto, val(b.gasto_descripcion), uid(req));
       const reprocesoId = info.lastInsertRowid;
       const hijosOut = hijos.map(h => {
         const r = crearLoteHijo(db, { madre, reprocesoId, productoId: h.producto_id, kg: h.kg, costoAsignado: h._costo,
