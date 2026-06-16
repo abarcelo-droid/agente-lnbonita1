@@ -2271,7 +2271,9 @@ function derivarBultosLote(row) {
   row.kg_por_bulto = kpb;
   row.bultos_vigente     = (kpb != null && row.kg_vigente     != null) ? Number(row.kg_vigente)     / kpb : null;
   row.bultos_disponibles = (kpb != null && row.kg_disponibles != null) ? Number(row.kg_disponibles) / kpb : null;
-  if (row.kg_reservado != null) row.bultos_reservado = (kpb != null) ? Number(row.kg_reservado) / kpb : null;
+  // bultos_reservado: si el SQL ya lo trae (F3-D: Σ bultos reservas), se respeta; si no (callers sin
+  // esa columna), se deriva de kg_reservado / kg_por_bulto como en F2 (fallback legacy).
+  if (row.bultos_reservado == null && row.kg_reservado != null) row.bultos_reservado = (kpb != null) ? Number(row.kg_reservado) / kpb : null;
   return row;
 }
 
@@ -2297,10 +2299,13 @@ router.post('/pedidos', requireAdmin, (req, res) => {
       const ins = db.prepare(`INSERT INTO sg_pedido_items
         (pedido_id, producto_id, presentacion_id, cantidad_presentaciones, kg_solicitados, precio_por_kg, subtotal)
         VALUES (?,?,?,?,?,?,?)`);
-      // BRIEF 8 — reserva BLANDA (D1): se registra tal cual, sin validar contra disponible.
+      // F3-D — reserva en BULTOS ENTEROS (sigue BLANDA: no resta disponible, igual que D1). La unidad
+      // operativa es el cajón; se valida entero + ≤ disponible (sanity, no descuento). kg se DERIVA =
+      // bultos × kg_por_bulto. FALLBACK: lote/oc_item sin presentación (kpb desconocido) → reserva
+      // legacy en kg sin validar por bulto. Ahora persiste también la columna bultos (F3-A).
       const insReserva = db.prepare(`INSERT INTO sg_reservas
-        (pedido_item_id, tipo, lote_id, oc_item_id, kg, origen_oc_item_id, usuario_id)
-        VALUES (?,?,?,?,?,?,?)`);
+        (pedido_item_id, tipo, lote_id, oc_item_id, kg, bultos, origen_oc_item_id, usuario_id)
+        VALUES (?,?,?,?,?,?,?,?)`);
       for (const it of items) {
         const pres = it.presentacion_id ? db.prepare('SELECT factor_conversion FROM sg_presentaciones WHERE id=?').get(it.presentacion_id) : null;
         const factor = pres ? Number(pres.factor_conversion) : 1;
@@ -2310,9 +2315,46 @@ router.post('/pedidos', requireAdmin, (req, res) => {
         const pedItemId = ins.run(pedidoId, it.producto_id, it.presentacion_id || null, cant, kg, precio, kg * precio).lastInsertRowid;
         for (const rv of (Array.isArray(it.reservas) ? it.reservas : [])) {
           const kgRv = Number(rv.kg || 0);
-          if (!(kgRv > 0)) continue;
-          if (rv.tipo === 'lote' && rv.lote_id) insReserva.run(pedItemId, 'lote', Number(rv.lote_id), null, kgRv, null, uid(req));
-          else if (rv.tipo === 'oc_item' && rv.oc_item_id) insReserva.run(pedItemId, 'oc_item', null, Number(rv.oc_item_id), kgRv, Number(rv.oc_item_id), uid(req));
+          // bultos de la reserva: input rv.bultos o, si el front manda kg, derivado del kg. Entero.
+          const derivarBultosRv = (kpb) => {
+            let bl = (rv.bultos != null && rv.bultos !== '') ? Number(rv.bultos) : kgRv / kpb;
+            if (!(bl > 0)) return 0;
+            if (Math.abs(bl - Math.round(bl)) > 1e-6) throw new Error(`Reserva: el cajón es entero, no se admiten fracciones (${+bl.toFixed(3)} bultos)`);
+            return Math.round(bl);
+          };
+          if (rv.tipo === 'lote' && rv.lote_id) {
+            const loteId = Number(rv.lote_id);
+            const lp = db.prepare(`SELECT l.bultos, ps.factor_conversion AS kg_por_bulto
+              FROM sg_lotes l LEFT JOIN sg_presentaciones ps ON ps.id=l.presentacion_id WHERE l.id=?`).get(loteId);
+            const kpb = (lp && lp.bultos != null && lp.kg_por_bulto != null && Number(lp.kg_por_bulto) > 0) ? Number(lp.kg_por_bulto) : null;
+            if (kpb != null) {
+              const bultos = derivarBultosRv(kpb);
+              if (bultos <= 0) continue;
+              const dispB = bultosDisponibles(db, loteId);
+              if (dispB != null && bultos > dispB) throw new Error(`Reserva lote ${loteId}: pedís ${bultos} cajón(es) pero hay ${dispB} disponible(s)`);
+              insReserva.run(pedItemId, 'lote', loteId, null, +(bultos * kpb).toFixed(4), bultos, null, uid(req));
+            } else if (kgRv > 0) {   // legacy: lote sin presentación/bultos
+              insReserva.run(pedItemId, 'lote', loteId, null, kgRv, null, null, uid(req));
+            }
+          } else if (rv.tipo === 'oc_item' && rv.oc_item_id) {
+            const ocItemId = Number(rv.oc_item_id);
+            const oi = db.prepare(`SELECT oi.cantidad_estimada_presentaciones, oi.presentacion_id, ps.factor_conversion AS kg_por_bulto
+              FROM sg_oc_items oi LEFT JOIN sg_presentaciones ps ON ps.id=oi.presentacion_id WHERE oi.id=?`).get(ocItemId);
+            const kpb = (oi && oi.presentacion_id != null && oi.kg_por_bulto != null && Number(oi.kg_por_bulto) > 0) ? Number(oi.kg_por_bulto) : null;
+            if (kpb != null) {
+              const bultos = derivarBultosRv(kpb);
+              if (bultos <= 0) continue;
+              // bultos en tránsito = estimados − recibidos (Σ bultos de lotes de la OC) − Σ reservados oc_item activas.
+              const estim = Number(oi.cantidad_estimada_presentaciones) || 0;
+              const recib = db.prepare('SELECT COALESCE(SUM(bultos),0) s FROM sg_lotes WHERE oc_item_id=? AND activo=1').get(ocItemId).s;
+              const reserv = db.prepare("SELECT COALESCE(SUM(bultos),0) s FROM sg_reservas WHERE oc_item_id=? AND tipo='oc_item' AND estado='activa'").get(ocItemId).s;
+              const dispCamB = estim - recib - reserv;
+              if (bultos > dispCamB) throw new Error(`Reserva OC ${ocItemId}: pedís ${bultos} cajón(es) pero quedan ${dispCamB} en tránsito`);
+              insReserva.run(pedItemId, 'oc_item', null, ocItemId, +(bultos * kpb).toFixed(4), bultos, ocItemId, uid(req));
+            } else if (kgRv > 0) {   // legacy: oc_item sin presentación
+              insReserva.run(pedItemId, 'oc_item', null, ocItemId, kgRv, null, ocItemId, uid(req));
+            }
+          }
         }
       }
       return pedidoId;
@@ -2406,7 +2448,8 @@ router.get('/oferta', requireAuth, (req, res) => {
           ${KG_VIGENTE_STOCK} AS kg_vigente,
           CAST(julianday(l.fecha_vencimiento_estimada) - julianday(date('now','localtime')) AS INTEGER) AS dias_restantes,
           ${KG_DISPONIBLE} AS kg_disponibles,
-          COALESCE((SELECT SUM(kg) FROM sg_reservas WHERE lote_id=l.id AND estado IN ('activa','concretada')),0) AS kg_reservado
+          COALESCE((SELECT SUM(kg) FROM sg_reservas WHERE lote_id=l.id AND estado IN ('activa','concretada')),0) AS kg_reservado,
+          COALESCE((SELECT SUM(bultos) FROM sg_reservas WHERE lote_id=l.id AND estado IN ('activa','concretada')),0) AS bultos_reservado
         FROM sg_lotes l LEFT JOIN sg_productos pr ON pr.id=l.producto_id
         LEFT JOIN sg_presentaciones ps ON ps.id=l.presentacion_id
         WHERE l.activo=1 AND l.estado IN ('disponible','reservado','despachado_parcial') AND l.producto_id=?
@@ -2415,8 +2458,11 @@ router.get('/oferta', requireAuth, (req, res) => {
     const en_camino = db.prepare(`
       SELECT * FROM (
         SELECT i.id AS oc_item_id, i.oc_id, o.numero AS oc_numero, o.fecha_oc, o.estado AS oc_estado,
-          i.kg_estimados, pv.razon_social AS proveedor_nombre,
+          i.kg_estimados, i.presentacion_id, ps.factor_conversion AS kg_por_bulto,
+          i.cantidad_estimada_presentaciones AS bultos_estimados, pv.razon_social AS proveedor_nombre,
           COALESCE((SELECT SUM(kg_reales) FROM sg_lotes WHERE oc_item_id=i.id AND activo=1),0) AS kg_recibidos,
+          COALESCE((SELECT SUM(bultos) FROM sg_lotes WHERE oc_item_id=i.id AND activo=1),0) AS bultos_recibidos,
+          COALESCE((SELECT SUM(bultos) FROM sg_reservas WHERE oc_item_id=i.id AND tipo='oc_item' AND estado='activa'),0) AS bultos_reservado_camino,
           ( i.kg_estimados
             - COALESCE((SELECT SUM(kg_reales) FROM sg_lotes WHERE oc_item_id=i.id AND activo=1),0)
             - COALESCE((SELECT SUM(kg) FROM sg_reservas WHERE oc_item_id=i.id AND tipo='oc_item' AND estado='activa'),0)
@@ -2424,10 +2470,22 @@ router.get('/oferta', requireAuth, (req, res) => {
         FROM sg_oc_items i
         JOIN sg_oc o ON o.id=i.oc_id
         LEFT JOIN sg_proveedores pv ON pv.id=o.proveedor_id
+        LEFT JOIN sg_presentaciones ps ON ps.id=i.presentacion_id
         WHERE i.producto_id=? AND o.activo=1 AND o.estado IN ('abierta','recibida_parcial')
       ) WHERE disponible_camino > 0.01
       ORDER BY fecha_oc ASC, oc_item_id ASC`).all(pid);
-    res.json({ ok: true, data: { stock: stock.map(derivarBultosLote), en_camino } });
+    // bultos_camino = bultos estimados − recibidos − reservados en tránsito (null si el oc_item no
+    // tiene presentación → cae al disponible_camino en kg, fallback legacy). disponible_camino (kg) se
+    // mantiene para compat del front; bultos_camino es la unidad operativa F3-D.
+    const en_caminoB = en_camino.map(function(r) {
+      const kpb = (r.kg_por_bulto != null && Number(r.kg_por_bulto) > 0) ? Number(r.kg_por_bulto) : null;
+      r.kg_por_bulto = kpb;
+      r.bultos_camino = (r.presentacion_id != null && kpb != null)
+        ? (Number(r.bultos_estimados || 0) - Number(r.bultos_recibidos || 0) - Number(r.bultos_reservado_camino || 0))
+        : null;
+      return r;
+    });
+    res.json({ ok: true, data: { stock: stock.map(derivarBultosLote), en_camino: en_caminoB } });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
