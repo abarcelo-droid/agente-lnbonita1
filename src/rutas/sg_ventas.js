@@ -9,8 +9,27 @@
 import express from 'express';
 import db from '../servicios/db_sg_finanzas.js';
 import { generarFacturaPDF } from '../servicios/facturaPDF.js';
+import * as XLSX from 'xlsx';
 
 const router = express.Router();
+
+// Filtros compartidos por GET /facturas y GET /facturas/export.xlsx. Devuelve {sql, params}.
+// alias = nombre_comercial del cliente. solo_afip → solo comprobantes fiscales (con afip_estado).
+function buildFacturasQuery(req) {
+  const { clienteId, estado, afip_estado, tipo, desde, hasta, solo_afip } = req.query;
+  let sql = `SELECT f.*, c.razon_social as cliente_nombre, c.nombre_comercial as alias
+             FROM sg_ven_facturas f JOIN sg_clientes c ON c.id=f.cliente_id WHERE 1 = 1`;
+  const params = [];
+  if (clienteId)   { sql += ' AND f.cliente_id=?'; params.push(parseInt(clienteId)); }
+  if (estado)      { sql += ' AND f.estado=?'; params.push(estado); }
+  if (afip_estado) { sql += ' AND f.afip_estado=?'; params.push(afip_estado); }
+  if (tipo)        { sql += ' AND f.tipo=?'; params.push(tipo); }
+  if (desde)       { sql += ' AND f.fecha>=?'; params.push(desde); }
+  if (hasta)       { sql += ' AND f.fecha<=?'; params.push(hasta); }
+  if (solo_afip)   { sql += ' AND f.afip_estado IS NOT NULL'; }
+  sql += ' ORDER BY f.fecha DESC, f.id DESC';
+  return { sql, params };
+}
 
 function validarCuit(cuit) {
   if (!cuit) return { valido: true };
@@ -283,18 +302,42 @@ function generarNumFac(tipo) {
 
 router.get('/facturas', (req, res) => {
   try {
-    const { clienteId, estado } = req.query;
-    let sql = `SELECT f.*, c.razon_social as cliente_nombre
-               FROM sg_ven_facturas f JOIN sg_clientes c ON c.id=f.cliente_id WHERE 1 = 1`;
-    const params = [];
-    if (clienteId) { sql += ' AND f.cliente_id=?'; params.push(parseInt(clienteId)); }
-    if (estado)    { sql += ' AND f.estado=?'; params.push(estado); }
-    sql += ' ORDER BY f.fecha DESC, f.id DESC';
+    const { sql, params } = buildFacturasQuery(req);
     const facs = db.prepare(sql).all(...params);
     for (const f of facs) {
       f.items = db.prepare('SELECT * FROM sg_ven_factura_items WHERE factura_id=? ORDER BY id').all(f.id);
     }
     res.json({ ok: true, data: facs });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// GET /facturas/export.xlsx → genera el XLSX EN EL SERVIDOR (lib xlsx) respetando los mismos
+// filtros que el listado. Columnas = las de la tabla del front. Ruta literal: NO choca con
+// /facturas/:id/pdf (3 segmentos) ni /facturas/:id (handlers con :id).
+router.get('/facturas/export.xlsx', (req, res) => {
+  try {
+    const { sql, params } = buildFacturasQuery(req);
+    const facs = db.prepare(sql).all(...params);
+    const filas = facs.map(f => ({
+      'N°': String(f.punto_venta || 0).padStart(4, '0') + '-' + String(f.cbte_nro || 0).padStart(8, '0'),
+      'Fecha': f.fecha || '',
+      'Tipo': f.tipo || '',
+      'Alias': f.alias || '',
+      'Cliente': f.cliente_nombre || '',
+      'Total': Number(f.total) || 0,
+      'Estado': f.afip_estado || '',
+      'CAE': f.cae || '',
+      'Vto CAE': f.cae_vto || ''
+    }));
+    const ws = XLSX.utils.json_to_sheet(filas, { header: ['N°','Fecha','Tipo','Alias','Cliente','Total','Estado','CAE','Vto CAE'] });
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Facturas');
+    const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+    res.set({
+      'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'Content-Disposition': 'attachment; filename="facturas-sg.xlsx"'
+    });
+    res.send(buf);
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 

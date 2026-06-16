@@ -2047,6 +2047,8 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       <div class="sgv-subtab on" data-sub="pedidos"   onclick="sgVenSub('pedidos')">📝 Pedidos</div>
       <div class="sgv-subtab" data-sub="despachos"     onclick="sgVenSub('despachos')">🚚 Despachos</div>
       <div class="sgv-subtab" data-sub="facturar"      onclick="sgVenSub('facturar')">🧾 Facturar</div>
+      <div class="sgv-subtab" data-sub="facturas"      onclick="sgVenSub('facturas')">📑 Facturas</div>
+      <div class="sgv-subtab" data-sub="pendientes"    onclick="sgVenSub('pendientes')">📋 Pendientes de comprobante</div>
       <div class="sgv-subtab" data-sub="cc"            onclick="sgVenSub('cc')">💳 Cuenta corriente</div>
     </div>
 
@@ -2094,6 +2096,43 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
         <div style="text-align:right;margin-top:12px"><button class="btn bb" id="sgf-emitir-btn" onclick="sgFacEmitir()">Emitir comprobante</button></div>
       </div>
       <div class="sgr-confirm" id="sgf-confirm"></div>
+    </div>
+
+    <!-- 📑 Facturas — listado de comprobantes emitidos (autorizados + rechazados) -->
+    <div class="sgv-sub" id="sgv-sub-facturas">
+      <div class="sgr-card">
+        <div style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap;margin-bottom:12px">
+          <label style="font-size:11.5px;color:var(--mut)">Cliente<br>
+            <input type="text" placeholder="🔎 alias o razón social" oninput="sgCliFiltrar('sgfl-cli',this.value)" autocomplete="off" style="min-width:220px;padding:5px 8px;border-radius:6px;border:1px solid var(--bor);background:var(--card,#fff);margin-bottom:4px;display:block">
+            <select id="sgfl-cli" style="min-width:220px;padding:6px 8px;border-radius:6px;border:1px solid var(--bor);background:var(--card,#fff)"></select>
+          </label>
+          <label style="font-size:11.5px;color:var(--mut)">Desde<br><input type="date" id="sgfl-desde" style="padding:6px 8px;border-radius:6px;border:1px solid var(--bor);background:var(--card,#fff)"></label>
+          <label style="font-size:11.5px;color:var(--mut)">Hasta<br><input type="date" id="sgfl-hasta" style="padding:6px 8px;border-radius:6px;border:1px solid var(--bor);background:var(--card,#fff)"></label>
+          <label style="font-size:11.5px;color:var(--mut)">Estado<br>
+            <select id="sgfl-estado" style="padding:6px 8px;border-radius:6px;border:1px solid var(--bor);background:var(--card,#fff)"><option value="">Todos</option><option value="autorizado">Autorizado</option><option value="rechazado">Rechazado</option></select></label>
+          <label style="font-size:11.5px;color:var(--mut)">Tipo<br>
+            <select id="sgfl-tipo" style="padding:6px 8px;border-radius:6px;border:1px solid var(--bor);background:var(--card,#fff)"><option value="">Todos</option><option value="A">A</option><option value="B">B</option></select></label>
+          <button class="btn bb bs" onclick="sgFacListLoad()">Filtrar</button>
+          <button class="btn bs" onclick="sgFacListExport()">📥 Exportar</button>
+        </div>
+        <div class="ab-table-wrap" id="sgfl-tabla"><div style="font-size:12px;color:var(--mut)">Cargando…</div></div>
+      </div>
+    </div>
+
+    <!-- 📋 Pendientes de comprobante — despachos con kg sin facturar -->
+    <div class="sgv-sub" id="sgv-sub-pendientes">
+      <div class="sgr-card">
+        <div style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap;margin-bottom:12px">
+          <label style="font-size:11.5px;color:var(--mut)">Cliente<br>
+            <input type="text" placeholder="🔎 alias o razón social" oninput="sgCliFiltrar('sgpe-cli',this.value)" autocomplete="off" style="min-width:220px;padding:5px 8px;border-radius:6px;border:1px solid var(--bor);background:var(--card,#fff);margin-bottom:4px;display:block">
+            <select id="sgpe-cli" style="min-width:220px;padding:6px 8px;border-radius:6px;border:1px solid var(--bor);background:var(--card,#fff)"></select>
+          </label>
+          <label style="font-size:11.5px;color:var(--mut)">Desde<br><input type="date" id="sgpe-desde" style="padding:6px 8px;border-radius:6px;border:1px solid var(--bor);background:var(--card,#fff)"></label>
+          <label style="font-size:11.5px;color:var(--mut)">Hasta<br><input type="date" id="sgpe-hasta" style="padding:6px 8px;border-radius:6px;border:1px solid var(--bor);background:var(--card,#fff)"></label>
+          <button class="btn bb bs" onclick="sgPendLoad()">Filtrar</button>
+        </div>
+        <div class="ab-table-wrap" id="sgpe-tabla"><div style="font-size:12px;color:var(--mut)">Cargando…</div></div>
+      </div>
     </div>
 
     <!-- Cuenta corriente clientes -->
@@ -4460,6 +4499,8 @@ function sgVenSub(s){
   if (s==='pedidos') sgLoadPedidos();
   else if (s==='despachos') sgLoadDespachos();
   else if (s==='facturar') sgFacInit();
+  else if (s==='facturas') sgFacListInit();
+  else if (s==='pendientes') sgPendInit();
   else if (s==='cc') sgLoadCC();
 }
 
@@ -4473,6 +4514,85 @@ function sgFacInit(){
   eid('sgf-confirm').classList.remove('on');
   sgFacRenderLineas();
 }
+
+// ── 📑 Facturas (listado de comprobantes emitidos) ──
+function sgFacListInit(){
+  var sel=eid('sgfl-cli'); if(sel) sel.innerHTML=sgCliOpts('','','— Todos —');
+  sgFacListLoad();
+}
+function sgFacListQS(){
+  var qs=['solo_afip=1'];
+  var c=eid('sgfl-cli').value;     if(c) qs.push('clienteId='+encodeURIComponent(c));
+  var d=eid('sgfl-desde').value;   if(d) qs.push('desde='+encodeURIComponent(d));
+  var h=eid('sgfl-hasta').value;   if(h) qs.push('hasta='+encodeURIComponent(h));
+  var e=eid('sgfl-estado').value;  if(e) qs.push('afip_estado='+encodeURIComponent(e));
+  var t=eid('sgfl-tipo').value;    if(t) qs.push('tipo='+encodeURIComponent(t));
+  return qs.join('&');
+}
+function sgFacListLoad(){
+  eid('sgfl-tabla').innerHTML='<div style="font-size:12px;color:var(--mut)">Cargando…</div>';
+  api('/api/sg/ventas/facturas?'+sgFacListQS()).then(function(r){
+    if(!r||!r.ok){ eid('sgfl-tabla').innerHTML='<div style="color:var(--err)">'+esc((r&&r.error)||'Error')+'</div>'; return; }
+    var fs=r.data||[];
+    if(!fs.length){ eid('sgfl-tabla').innerHTML='<div style="font-size:12px;color:var(--mut)">Sin facturas para los filtros elegidos.</div>'; return; }
+    var body=fs.map(function(f){
+      var num=String(f.punto_venta||0).padStart(4,'0')+'-'+String(f.cbte_nro||0).padStart(8,'0');
+      var tipoB='<span class="bdg bcc">'+esc(f.tipo||'—')+'</span>';
+      var estB= f.afip_estado==='autorizado' ? '<span class="bdg bok">✓ autorizado</span>'
+              : '<span class="bdg ber">✗ '+esc(f.afip_estado||'—')+'</span>';
+      var pdf= f.afip_estado==='autorizado'
+        ? '<button class="btn bs" onclick="window.open(\'/api/sg/ventas/facturas/'+f.id+'/pdf\',\'_blank\')">📄</button>' : '—';
+      return '<tr><td>'+esc(num)+'</td><td>'+esc(f.fecha||'—')+'</td><td>'+tipoB+'</td>'
+        +'<td>'+esc(f.alias||'—')+'</td><td>'+esc(f.cliente_nombre||'—')+'</td>'
+        +'<td style="text-align:right">'+sgMoney(f.total)+'</td><td>'+estB+'</td>'
+        +'<td>'+esc(f.cae||'—')+'</td><td>'+esc(f.cae_vto||'—')+'</td>'
+        +'<td style="text-align:center">'+pdf+'</td></tr>';
+    }).join('');
+    eid('sgfl-tabla').innerHTML='<table class="pa-tbl"><thead><tr>'
+      +'<th>N°</th><th>Fecha</th><th>Tipo</th><th>Alias</th><th>Cliente</th>'
+      +'<th style="text-align:right">Total</th><th>Estado</th><th>CAE</th><th>Vto CAE</th><th style="text-align:center">PDF</th>'
+      +'</tr></thead><tbody>'+body+'</tbody></table>';
+  });
+}
+function sgFacListExport(){ window.open('/api/sg/ventas/facturas/export.xlsx?'+sgFacListQS(),'_blank'); }
+
+// ── 📋 Pendientes de comprobante (despachos con kg sin facturar) ──
+function sgPendInit(){
+  var sel=eid('sgpe-cli'); if(sel) sel.innerHTML=sgCliOpts('','','— Todos —');
+  sgPendLoad();
+}
+function sgPendLoad(){
+  eid('sgpe-tabla').innerHTML='<div style="font-size:12px;color:var(--mut)">Cargando…</div>';
+  var qs=[];
+  var c=eid('sgpe-cli').value;   if(c) qs.push('cliente_id='+encodeURIComponent(c));
+  var d=eid('sgpe-desde').value; if(d) qs.push('desde='+encodeURIComponent(d));
+  var h=eid('sgpe-hasta').value; if(h) qs.push('hasta='+encodeURIComponent(h));
+  api('/api/sg/despachos-pendientes'+(qs.length?'?'+qs.join('&'):'')).then(function(r){
+    if(!r||!r.ok){ eid('sgpe-tabla').innerHTML='<div style="color:var(--err)">'+esc((r&&r.error)||'Error')+'</div>'; return; }
+    var ds=r.despachos||[];
+    if(!ds.length){ eid('sgpe-tabla').innerHTML='<div style="font-size:12px;color:var(--mut)">No hay despachos pendientes de facturar.</div>'; return; }
+    var body=ds.map(function(d){
+      var vendido=(d.items||[]).map(function(it){ return esc(it.producto||'—')+' '+nr(it.kg_pendiente)+'kg'; }).join(', ');
+      var estB= d.estado_facturacion==='parcial' ? '<span class="bdg bpe">🟡 parcial</span>' : '<span class="bdg ber">🔴 pendiente</span>';
+      return '<tr><td><b>'+esc(d.numero||('Desp '+d.despacho_id))+'</b></td><td>'+esc(d.fecha||'—')+'</td>'
+        +'<td>'+esc(d.alias||'—')+'</td><td>'+esc(d.razon_social||'—')+'</td>'
+        +'<td>'+vendido+'</td><td style="text-align:right">'+sgMoney(d.total_pendiente)+'</td>'
+        +'<td>'+estB+'</td>'
+        +'<td style="text-align:center"><button class="btn bb bs" onclick="sgFacPrecargar('+d.cliente_id+','+d.despacho_id+')">Facturar</button></td></tr>';
+    }).join('');
+    eid('sgpe-tabla').innerHTML='<table class="pa-tbl"><thead><tr>'
+      +'<th>N° despacho</th><th>Fecha</th><th>Alias</th><th>Cliente</th><th>Qué se vendió</th>'
+      +'<th style="text-align:right">Total</th><th>Estado</th><th style="text-align:center"></th>'
+      +'</tr></thead><tbody>'+body+'</tbody></table>';
+  });
+}
+// "Facturar" → ir a la sub-tab 🧾 Facturar con cliente + despacho precargados.
+function sgFacPrecargar(clienteId, despachoId){
+  sgVenSub('facturar');                       // sgFacInit() resetea el form
+  var sel=eid('sgf-cli'); if(sel) sel.value=String(clienteId);
+  SG._facPreDesp=despachoId;                   // despacho a tildar cuando cargue /facturable
+  sgFacCliente();                              // carga despachos del cliente y aplica la precarga
+}
 function sgFacCliente(){
   var cid = eid('sgf-cli').value;
   SG.facSel = {}; SG.facLineas = []; SG.facData = null;
@@ -4485,6 +4605,14 @@ function sgFacCliente(){
     var letra = r.tipo_cbte_sugerido===1 ? 'A' : 'B';
     eid('sgf-tipo-badge').innerHTML = '<span class="bdg bcc">Comprobante '+letra+'</span>';
     sgFacRenderDespachos();
+    // Precarga desde "Pendientes de comprobante": tildar el despacho y armar sus líneas.
+    if(SG._facPreDesp){
+      var pd=SG._facPreDesp; SG._facPreDesp=null;
+      if((r.despachos||[]).some(function(x){ return String(x.despacho_id)===String(pd); })){
+        sgFacToggleDespacho(pd);   // selecciona + reconstruye líneas
+        sgFacRenderDespachos();    // refleja el checkbox tildado
+      }
+    }
   });
 }
 function sgFacRenderDespachos(){
