@@ -2158,17 +2158,27 @@ router.get('/reprocesos', requireAuth, (req, res) => {
 
 // Recalcula el estado de un lote según lo despachado (no toca lotes 'bajado').
 function recalcEstadoLote(db, loteId) {
-  const l = db.prepare('SELECT kg_reales, estado FROM sg_lotes WHERE id=?').get(loteId);
-  if (!l || l.estado === 'bajado') return;
-  const desp = db.prepare(`SELECT COALESCE(SUM(di.kg_despachados),0) s
-    FROM sg_despacho_items di JOIN sg_despachos d ON d.id=di.despacho_id AND d.activo=1
-    WHERE di.lote_id=?`).get(loteId).s;
-  // umbral sobre kg VIGENTES (kg_reales − Σ decomiso − Σ transformado): si se despachó todo
-  // lo que quedaba vendible (descontada merma y lo transformado a otro lote) → total.
-  const kgVig = (l.kg_reales || 0) - kgDecomisado(db, loteId) - kgTransformado(db, loteId);
+  const l = db.prepare('SELECT kg_reales, bultos, estado FROM sg_lotes WHERE id=?').get(loteId);
+  if (!l || l.estado === 'bajado') return;   // bajado/reservado se preservan igual que antes
   let estado = 'disponible';
-  if (desp >= kgVig - 0.01 && desp > 0) estado = 'despachado_total';
-  else if (desp > 0) estado = 'despachado_parcial';
+  if (l.bultos != null) {
+    // F3-C — umbral en BULTOS (cajón entero). vigentes = lote.bultos − Σ bultos decomisados − Σ
+    // bultos transformados/reprocesados (activos). Si se despacharon todos los cajones vigentes →
+    // total. Son enteros: comparación exacta, sin tolerancia.
+    const bultosVig = l.bultos - bultosDecomisado(db, loteId) - bultosTransformado(db, loteId);
+    const despB = bultosDespachados(db, loteId);
+    if (despB > 0 && despB >= bultosVig) estado = 'despachado_total';
+    else if (despB > 0) estado = 'despachado_parcial';
+  } else {
+    // FALLBACK legacy: lote sin bultos (sin presentación / no migrado) → umbral por kg como antes,
+    // sobre kg VIGENTES (kg_reales − Σ decomiso − Σ transformado), con tolerancia 0.01.
+    const desp = db.prepare(`SELECT COALESCE(SUM(di.kg_despachados),0) s
+      FROM sg_despacho_items di JOIN sg_despachos d ON d.id=di.despacho_id AND d.activo=1
+      WHERE di.lote_id=?`).get(loteId).s;
+    const kgVig = (l.kg_reales || 0) - kgDecomisado(db, loteId) - kgTransformado(db, loteId);
+    if (desp >= kgVig - 0.01 && desp > 0) estado = 'despachado_total';
+    else if (desp > 0) estado = 'despachado_parcial';
+  }
   db.prepare("UPDATE sg_lotes SET estado=?, modificado_en=datetime('now','localtime') WHERE id=?").run(estado, loteId);
 }
 
