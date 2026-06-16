@@ -1029,6 +1029,20 @@ try {
   }
 } catch (e) { console.error('[DB] SG migración sg_lotes (semaforo):', e.message); }
 
+// ── Identidad de BULTO en lote (aditivo, NULLABLE, sin backfill) ────────────────
+// sg_lotes += presentacion_id (qué presentación/bulto) + bultos (cuántos bultos). Ambas
+// NULLABLE: los lotes existentes quedan en null (NO backfill). NO reemplazan kg_reales ni
+// tocan el cálculo de stock/despacho/factura — conviven como metadato. Se persisten en la
+// recepción de OC cuando la OC/recepción conoce presentación y bultos; si no, quedan null.
+// SQLite valida la FK en el write, no en el ALTER (ADD COLUMN con REFERENCES es OK).
+try {
+  const cols = db.prepare("PRAGMA table_info(sg_lotes)").all().map(c => c.name);
+  const add = [];
+  if (!cols.includes('presentacion_id')) { db.exec("ALTER TABLE sg_lotes ADD COLUMN presentacion_id INTEGER REFERENCES sg_presentaciones(id)"); add.push('presentacion_id'); }
+  if (!cols.includes('bultos'))          { db.exec("ALTER TABLE sg_lotes ADD COLUMN bultos INTEGER"); add.push('bultos'); }
+  if (add.length) console.log('[DB] SG sg_lotes migrado (+' + add.join(', +') + ')');
+} catch (e) { console.error('[DB] SG migración sg_lotes (bulto):', e.message); }
+
 // Historial de cambios de semáforo: cada cambio registra anterior→nuevo, motivo, origen, usuario.
 db.exec(`
   CREATE TABLE IF NOT EXISTS sg_lote_semaforo_historial (

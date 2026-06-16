@@ -1015,8 +1015,9 @@ function crearLotesDeItem(db, { recepcionId, ocItem, tipoPrecio, fechaIngreso, l
   const _rec = _recObservada(db, recepcionId);
   const ins = db.prepare(`INSERT INTO sg_lotes
     (codigo_lote, recepcion_id, oc_item_id, producto_id, kg_reales, precio_unitario_kg, costo_base,
-     calidad, calibre, origen, fecha_ingreso, fecha_vencimiento_estimada, estado, costo_final, creado_por)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?, 'disponible', ?, ?)`);
+     calidad, calibre, origen, fecha_ingreso, fecha_vencimiento_estimada, estado, costo_final,
+     presentacion_id, bultos, creado_por)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?, 'disponible', ?, ?, ?, ?)`);
   const ids = [];
   for (const lt of lotes) {
     const kg = Number(lt.kg_reales || 0);
@@ -1024,9 +1025,14 @@ function crearLotesDeItem(db, { recepcionId, ocItem, tipoPrecio, fechaIngreso, l
     const costoBase = precio != null ? kg * precio : 0;
     let venc = val(lt.fecha_vencimiento_estimada);
     if (!venc && fechaIngreso && vida) venc = db.prepare('SELECT date(?, ?) d').get(fechaIngreso, `+${vida} days`).d;
+    // Identidad de bulto (aditivo): presentación del sub-lote o, en su defecto, la del ítem de OC;
+    // bultos solo si el payload lo trae por sub-lote. Ambos null si no se conocen (no rompe).
+    const presId = (lt.presentacion_id != null && lt.presentacion_id !== '') ? Number(lt.presentacion_id)
+      : (ocItem.presentacion_id != null ? Number(ocItem.presentacion_id) : null);
+    const bultos = (lt.bultos != null && lt.bultos !== '') ? Math.round(Number(lt.bultos)) : null;
     const codigo = nextNumero(db, 'SG-LT', 'sg_lotes', 'codigo_lote');
     const info = ins.run(codigo, recepcionId, ocItem.id, ocItem.producto_id, kg, precio, costoBase,
-      val(lt.calidad), val(lt.calibre), val(lt.origen), fechaIngreso, venc, costoBase, userId);
+      val(lt.calidad), val(lt.calibre), val(lt.origen), fechaIngreso, venc, costoBase, presId, bultos, userId);
     ids.push(info.lastInsertRowid);
     _aplicarObservado(db, info.lastInsertRowid, _rec, userId);
   }
@@ -1082,15 +1088,19 @@ function crearLotesSinOC(db, { recepcionId, productoId, fechaIngreso, lotes, use
   const _rec = _recObservada(db, recepcionId);
   const ins = db.prepare(`INSERT INTO sg_lotes
     (codigo_lote, recepcion_id, oc_item_id, producto_id, kg_reales, precio_unitario_kg, costo_base,
-     calidad, calibre, origen, fecha_ingreso, fecha_vencimiento_estimada, estado, costo_final, creado_por)
-    VALUES (?,?, NULL, ?,?, NULL, 0, ?, NULL, NULL, ?, ?, 'disponible', 0, ?)`);
+     calidad, calibre, origen, fecha_ingreso, fecha_vencimiento_estimada, estado, costo_final,
+     presentacion_id, bultos, creado_por)
+    VALUES (?,?, NULL, ?,?, NULL, 0, ?, NULL, NULL, ?, ?, 'disponible', 0, ?, ?, ?)`);
   const ids = [];
   for (const lt of lotes) {
     const kg = Number(lt.kg_reales || 0);
     let venc = val(lt.fecha_vencimiento_estimada);
     if (!venc && fechaIngreso && vida) venc = db.prepare('SELECT date(?, ?) d').get(fechaIngreso, `+${vida} days`).d;
+    // Sin OC no hay ítem del que heredar: presentación/bultos solo si el payload los trae (null si no).
+    const presId = (lt.presentacion_id != null && lt.presentacion_id !== '') ? Number(lt.presentacion_id) : null;
+    const bultos = (lt.bultos != null && lt.bultos !== '') ? Math.round(Number(lt.bultos)) : null;
     const codigo = nextNumero(db, 'SG-LT', 'sg_lotes', 'codigo_lote');
-    const info = ins.run(codigo, recepcionId, productoId, kg, val(lt.calidad), fechaIngreso, venc, userId);
+    const info = ins.run(codigo, recepcionId, productoId, kg, val(lt.calidad), fechaIngreso, venc, presId, bultos, userId);
     ids.push(info.lastInsertRowid);
     _aplicarObservado(db, info.lastInsertRowid, _rec, userId);
   }
@@ -1606,7 +1616,7 @@ router.post('/compra-retroactiva', requireAdmin, (req, res) => {
         const kgItem = lotes.reduce((a, l) => a + Number(l.kg_reales || 0), 0);
         const precio = tipoPrecio === 'pizarra' ? null : (it.precio_por_kg != null ? Number(it.precio_por_kg) : null);
         const itInfo = insItem.run(ocId, it.producto_id, it.presentacion_id || null, lotes.length, kgItem, precio, val(it.observaciones_item));
-        const ocItem = { id: itInfo.lastInsertRowid, producto_id: it.producto_id, precio_estimado_por_kg: precio };
+        const ocItem = { id: itInfo.lastInsertRowid, producto_id: it.producto_id, precio_estimado_por_kg: precio, presentacion_id: it.presentacion_id || null };
         crearLotesDeItem(db, { recepcionId: recId, ocItem, tipoPrecio, fechaIngreso, lotes, userId: uid(req) });
         totKg += kgItem;
         if (precio != null) totMonto += kgItem * precio;
