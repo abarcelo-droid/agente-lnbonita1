@@ -593,6 +593,57 @@ router.get('/facturable', requireAuth, (req, res) => {
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
+// GET /despachos-pendientes → MISMA lógica de kg_pendiente que /facturable pero para TODOS los
+// clientes (listado "Pendientes de comprobante"). Filtros opcionales: cliente_id, desde, hasta
+// (fecha_despacho). Devuelve por despacho: alias/cliente, qué se vendió (producto + kg pend),
+// total neto pendiente y estado (pendiente/parcial). Solo despachos con algún kg pendiente.
+router.get('/despachos-pendientes', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const where = ['d.activo=1', "d.estado<>'rechazado_total'"], params = [];
+    if (req.query.cliente_id) { where.push('d.cliente_id=?'); params.push(Number(req.query.cliente_id)); }
+    if (req.query.desde)      { where.push('d.fecha_despacho>=?'); params.push(String(req.query.desde)); }
+    if (req.query.hasta)      { where.push('d.fecha_despacho<=?'); params.push(String(req.query.hasta)); }
+    const rows = db.prepare(`
+      SELECT d.id AS despacho_id, d.numero AS despacho_numero, d.fecha_despacho, d.cliente_id,
+        c.razon_social, c.nombre_comercial,
+        di.id AS despacho_item_id, pr.nombre AS producto_nombre,
+        di.kg_despachados, di.precio_por_kg
+      FROM sg_despachos d
+      JOIN sg_despacho_items di ON di.despacho_id=d.id
+      LEFT JOIN sg_clientes c ON c.id=d.cliente_id
+      LEFT JOIN sg_productos pr ON pr.id=di.producto_id
+      WHERE ${where.join(' AND ')}
+      ORDER BY d.fecha_despacho DESC, d.id, di.id`).all(...params);
+    const mapa = new Map();
+    for (const r of rows) {
+      const kgFact = kgFacturadoItem(db, r.despacho_item_id);
+      const kgDesp = Number(r.kg_despachados) || 0;
+      const kgPend = +(kgDesp - kgFact).toFixed(2);
+      if (!mapa.has(r.despacho_id)) mapa.set(r.despacho_id, {
+        despacho_id: r.despacho_id, numero: r.despacho_numero, fecha: r.fecha_despacho,
+        cliente_id: r.cliente_id, razon_social: r.razon_social || '', alias: r.nombre_comercial || '',
+        _fact: 0, total_pendiente: 0, items: [] });
+      const g = mapa.get(r.despacho_id);
+      g._fact += kgFact;
+      if (kgPend > 0.01) {
+        g.items.push({ producto: r.producto_nombre || '', kg_pendiente: kgPend });
+        g.total_pendiente += kgPend * (Number(r.precio_por_kg) || 0);
+      }
+    }
+    const despachos = [];
+    for (const g of mapa.values()) {
+      if (!g.items.length) continue;
+      despachos.push({
+        despacho_id: g.despacho_id, numero: g.numero, fecha: g.fecha, cliente_id: g.cliente_id,
+        razon_social: g.razon_social, alias: g.alias,
+        estado_facturacion: g._fact <= 0.01 ? 'pendiente' : 'parcial',
+        total_pendiente: +g.total_pendiente.toFixed(2), items: g.items });
+    }
+    res.json({ ok: true, despachos });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
 // POST /facturas/emitir → orquesta la emisión desde despachos seleccionados. Convierte el precio a
 // NETO (si incluye IVA) y llama al motor con vinculos atómicos (E1). NO toca la facturación interna.
 router.post('/facturas/emitir', requireAdmin, async (req, res) => {
