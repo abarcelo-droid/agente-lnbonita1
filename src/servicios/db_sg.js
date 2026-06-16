@@ -1082,6 +1082,21 @@ try {
   backfill('sg_despacho_items',   'bultos',               'kg_despachados',   'lote_id');
 } catch (e) { console.error('[DB] SG F3-A bultos movimiento:', e.message); }
 
+// ── F3-B (complemento): backfill de sg_lotes.bultos = ROUND(kg_reales / kg_por_bulto) ───────────
+// F1 (#477) dejó sg_lotes.bultos NULL (sin backfill). F3-B valida el despacho contra
+// bultosDisponibles = lote.bultos − Σ bultos de movimientos, así que el lote NECESITA su capacidad
+// en bultos cargada o todo despacho se rechazaría. Backfill idempotente (solo bultos NULL) y
+// derivable (presentacion_id + factor>0). Lotes sin presentación quedan null (no despachables x bulto).
+try {
+  const r = db.prepare(`
+    UPDATE sg_lotes SET bultos = (
+      SELECT CAST(ROUND(sg_lotes.kg_reales / ps.factor_conversion) AS INTEGER)
+      FROM sg_presentaciones ps WHERE ps.id=sg_lotes.presentacion_id AND ps.factor_conversion>0)
+    WHERE bultos IS NULL AND presentacion_id IS NOT NULL AND EXISTS (
+      SELECT 1 FROM sg_presentaciones ps WHERE ps.id=sg_lotes.presentacion_id AND ps.factor_conversion>0)`).run();
+  if (r.changes) console.log('[DB] SG F3-B backfill sg_lotes.bultos (' + r.changes + ' lotes)');
+} catch (e) { console.error('[DB] SG F3-B backfill lotes.bultos:', e.message); }
+
 // Historial de cambios de semáforo: cada cambio registra anterior→nuevo, motivo, origen, usuario.
 db.exec(`
   CREATE TABLE IF NOT EXISTS sg_lote_semaforo_historial (

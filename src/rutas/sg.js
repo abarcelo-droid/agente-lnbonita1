@@ -2519,19 +2519,42 @@ router.post('/despachos', requireAdmin, (req, res) => {
     if (!b.cliente_id) return res.status(400).json({ ok: false, error: 'Falta cliente' });
     if (!items.length) return res.status(400).json({ ok: false, error: 'El despacho necesita al menos un item' });
 
-    // Validar disponibilidad por lote (suma de líneas del mismo lote incluida)
-    const pedidoLote = {};
+    // F3-B — el despacho mueve BULTOS ENTEROS (cajón indivisible). La cantidad operativa por línea
+    // es bultos; kg_despachados se DERIVA = bultos × kg_por_bulto nominal (factor_conversion de la
+    // presentación del lote). Se rechaza fracción de cajón y se valida contra bultosDisponibles
+    // (helper F3-A). NO se acepta kg libre: si el front manda kg, se deriva el bulto y debe ser entero.
+    const pedidoLote = {};   // Σ bultos por lote
+    const lineas = [];       // {it, loteId, bultos, kgPorBulto, kg}
     for (const it of items) {
-      if (!it.lote_id || !(Number(it.kg_despachados) > 0)) return res.status(400).json({ ok: false, error: 'Cada línea necesita lote y kg' });
-      pedidoLote[it.lote_id] = (pedidoLote[it.lote_id] || 0) + Number(it.kg_despachados);
+      const loteId = Number(it.lote_id);
+      if (!loteId) return res.status(400).json({ ok: false, error: 'Cada línea necesita lote' });
+      const lp = db.prepare(`SELECT l.presentacion_id, ps.factor_conversion AS kg_por_bulto
+        FROM sg_lotes l LEFT JOIN sg_presentaciones ps ON ps.id=l.presentacion_id WHERE l.id=? AND l.activo=1`).get(loteId);
+      if (!lp) return res.status(400).json({ ok: false, error: 'Lote inexistente: ' + loteId });
+      const kgPorBulto = (lp.presentacion_id != null && Number(lp.kg_por_bulto) > 0) ? Number(lp.kg_por_bulto) : null;
+      if (kgPorBulto == null) return res.status(400).json({ ok: false, error: `Lote ${loteId} sin presentación: no despachable por bulto (cargá su presentación/kg por bulto primero)` });
+      // bultos: input canónico it.bultos; si no vino, se deriva del kg_despachados que manda el front.
+      let bultos;
+      if (it.bultos != null && it.bultos !== '') bultos = Number(it.bultos);
+      else if (it.kg_despachados != null && it.kg_despachados !== '') bultos = Number(it.kg_despachados) / kgPorBulto;
+      else return res.status(400).json({ ok: false, error: `Lote ${loteId}: falta la cantidad de bultos` });
+      if (!(bultos > 0)) return res.status(400).json({ ok: false, error: `Lote ${loteId}: la cantidad de bultos debe ser > 0` });
+      if (Math.abs(bultos - Math.round(bultos)) > 1e-6) {
+        return res.status(400).json({ ok: false, error: `Lote ${loteId}: el despacho es por cajón entero, no se admiten fracciones (${+bultos.toFixed(3)} bultos)` });
+      }
+      bultos = Math.round(bultos);
+      const kg = +(bultos * kgPorBulto).toFixed(4);   // kg DERIVADO (nominal), nunca input libre
+      pedidoLote[loteId] = (pedidoLote[loteId] || 0) + bultos;
+      lineas.push({ it, loteId, bultos, kgPorBulto, kg, presentacionId: lp.presentacion_id });
     }
     for (const loteId of Object.keys(pedidoLote)) {
-      const lote = db.prepare('SELECT kg_reales, estado FROM sg_lotes WHERE id=? AND activo=1').get(loteId);
+      const lote = db.prepare('SELECT estado FROM sg_lotes WHERE id=? AND activo=1').get(loteId);
       if (!lote) return res.status(400).json({ ok: false, error: 'Lote inexistente: ' + loteId });
       if (lote.estado === 'bajado') return res.status(400).json({ ok: false, error: 'Lote dado de baja: ' + loteId });
-      const disp = (lote.kg_reales || 0) - kgDespachados(db, loteId) - kgDecomisado(db, loteId) - kgTransformado(db, loteId);
-      if (pedidoLote[loteId] > disp + 0.01) {
-        return res.status(400).json({ ok: false, error: `Lote ${loteId}: pedís ${pedidoLote[loteId]}kg pero hay ${disp.toFixed(1)}kg disponibles` });
+      const dispB = bultosDisponibles(db, Number(loteId));   // lote.bultos − Σ bultos de movimientos
+      if (dispB == null) return res.status(400).json({ ok: false, error: `Lote ${loteId} sin bultos cargados: no despachable por bulto` });
+      if (pedidoLote[loteId] > dispB) {
+        return res.status(400).json({ ok: false, error: `Lote ${loteId}: pedís ${pedidoLote[loteId]} cajón(es) pero hay ${dispB} disponible(s)` });
       }
     }
 
@@ -2548,25 +2571,29 @@ router.post('/despachos', requireAdmin, (req, res) => {
       // PARTE B — si se asignó fletero, queda un gasto de flete de salida PENDIENTE de valorizar.
       syncGastoFleteDespacho(db, despachoId, fleteroId, val(b.fecha_despacho), uid(req));
       const ins = db.prepare(`INSERT INTO sg_despacho_items
-        (despacho_id, lote_id, producto_id, presentacion_id, cantidad_presentaciones, kg_despachados, precio_por_kg, subtotal, margen_estimado)
-        VALUES (?,?,?,?,?,?,?,?,?)`);
+        (despacho_id, lote_id, producto_id, presentacion_id, cantidad_presentaciones, bultos, kg_despachados, precio_por_kg, subtotal, margen_estimado)
+        VALUES (?,?,?,?,?,?,?,?,?,?)`);
       const lotesAfectados = new Set();
       let totalBultos = 0;   // FASE 2 — bultos del despacho (para la carga de la cooperativa)
-      for (const it of items) {
-        const lote = db.prepare('SELECT producto_id, costo_final, kg_reales FROM sg_lotes WHERE id=?').get(it.lote_id);
-        const kg = Number(it.kg_despachados);
+      for (const ln of lineas) {
+        const it = ln.it;
+        const lote = db.prepare('SELECT producto_id, costo_final, kg_reales FROM sg_lotes WHERE id=?').get(ln.loteId);
+        const kg = ln.kg;                       // DERIVADO = bultos × kg_por_bulto
+        const bultos = ln.bultos;
         const precio = Number(it.precio_por_kg || 0);
         const subtotal = kg * precio;
         // costo_final del lote es el costo TOTAL → costo/kg sobre kg VIGENTES (kg_reales − decomiso
         // − transformado), así la merma revalúa lo despachado. (mismo cálculo que el front del modal.)
-        const kgVig = (lote.kg_reales || 0) - kgDecomisado(db, it.lote_id) - kgTransformado(db, it.lote_id);
+        const kgVig = (lote.kg_reales || 0) - kgDecomisado(db, ln.loteId) - kgTransformado(db, ln.loteId);
         const costoPorKg = kgVig > 0 ? (lote.costo_final || 0) / kgVig : 0;
         const margen = subtotal - kg * costoPorKg;
-        const bultos = Number(it.cantidad_presentaciones || 0);
-        ins.run(despachoId, it.lote_id, lote.producto_id, it.presentacion_id || null,
-          bultos, kg, precio, subtotal, margen);
+        // bultos va tanto a la columna F3-A (sg_despacho_items.bultos, que lee bultosDisponibles)
+        // como a cantidad_presentaciones (compat). presentacion_id se toma de la línea o del lote.
+        const presId = it.presentacion_id != null ? it.presentacion_id : (ln.presentacionId || null);
+        ins.run(despachoId, ln.loteId, lote.producto_id, presId,
+          bultos, bultos, kg, precio, subtotal, margen);
         totalBultos += bultos;
-        lotesAfectados.add(it.lote_id);
+        lotesAfectados.add(ln.loteId);
       }
       for (const loteId of lotesAfectados) recalcEstadoLote(db, loteId);
       // FASE 2 — si se asignó cooperativa, queda una CARGA DE SALIDA pendiente (cobra por bulto).
