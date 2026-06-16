@@ -1098,17 +1098,18 @@ function crearLotesSinOC(db, { recepcionId, productoId, fechaIngreso, lotes, use
     (codigo_lote, recepcion_id, oc_item_id, producto_id, kg_reales, precio_unitario_kg, costo_base,
      calidad, calibre, origen, fecha_ingreso, fecha_vencimiento_estimada, estado, costo_final,
      presentacion_id, bultos, creado_por)
-    VALUES (?,?, NULL, ?,?, NULL, 0, ?, NULL, NULL, ?, ?, 'disponible', 0, ?, ?, ?)`);
+    VALUES (?,?, NULL, ?,?, NULL, 0, ?, NULL, ?, ?, ?, 'disponible', 0, ?, ?, ?)`);
   const ids = [];
   for (const lt of lotes) {
     const kg = Number(lt.kg_reales || 0);
     let venc = val(lt.fecha_vencimiento_estimada);
     if (!venc && fechaIngreso && vida) venc = db.prepare('SELECT date(?, ?) d').get(fechaIngreso, `+${vida} days`).d;
     // Sin OC no hay ítem del que heredar: presentación/bultos solo si el payload los trae (null si no).
+    // F4-C2 — origen del sub-lote (ej. 'granel'): se persiste si viene; null si no (backward-compatible).
     const presId = (lt.presentacion_id != null && lt.presentacion_id !== '') ? Number(lt.presentacion_id) : null;
     const bultos = (lt.bultos != null && lt.bultos !== '') ? Math.round(Number(lt.bultos)) : null;
     const codigo = nextNumero(db, 'SG-LT', 'sg_lotes', 'codigo_lote');
-    const info = ins.run(codigo, recepcionId, productoId, kg, val(lt.calidad), fechaIngreso, venc, presId, bultos, userId);
+    const info = ins.run(codigo, recepcionId, productoId, kg, val(lt.calidad), val(lt.origen), fechaIngreso, venc, presId, bultos, userId);
     ids.push(info.lastInsertRowid);
     _aplicarObservado(db, info.lastInsertRowid, _rec, userId);
   }
@@ -2491,7 +2492,7 @@ router.get('/lotes-disponibles', requireAuth, (req, res) => {
           ${KG_DISPONIBLE} AS kg_disponibles
         FROM sg_lotes l LEFT JOIN sg_productos pr ON pr.id=l.producto_id
         LEFT JOIN sg_presentaciones ps ON ps.id=l.presentacion_id
-        WHERE l.activo=1 AND l.estado IN ('disponible','reservado','despachado_parcial') AND l.producto_id=?
+        WHERE l.activo=1 AND NOT (COALESCE(l.origen,'')='granel' AND l.presentacion_id IS NULL) AND l.estado IN ('disponible','reservado','despachado_parcial') AND l.producto_id=?
       ) WHERE kg_disponibles > 0.01
       ORDER BY fecha_vencimiento_estimada ASC, id ASC`).all(req.query.producto_id);
     res.json({ ok: true, data: rows.map(derivarBultosLote) });
@@ -2518,7 +2519,7 @@ router.get('/oferta', requireAuth, (req, res) => {
           COALESCE((SELECT SUM(bultos) FROM sg_reservas WHERE lote_id=l.id AND estado IN ('activa','concretada')),0) AS bultos_reservado
         FROM sg_lotes l LEFT JOIN sg_productos pr ON pr.id=l.producto_id
         LEFT JOIN sg_presentaciones ps ON ps.id=l.presentacion_id
-        WHERE l.activo=1 AND l.estado IN ('disponible','reservado','despachado_parcial') AND l.producto_id=?
+        WHERE l.activo=1 AND NOT (COALESCE(l.origen,'')='granel' AND l.presentacion_id IS NULL) AND l.estado IN ('disponible','reservado','despachado_parcial') AND l.producto_id=?
       ) WHERE kg_disponibles > 0.01
       ORDER BY fecha_vencimiento_estimada ASC, lote_id ASC`).all(pid);
     const en_camino = db.prepare(`
@@ -2567,7 +2568,7 @@ router.get('/disponibilidad', requireAuth, (req, res) => {
         SELECT l.producto_id, pr.nombre,
           ${KG_DISPONIBLE} AS kg_disp
         FROM sg_lotes l LEFT JOIN sg_productos pr ON pr.id=l.producto_id
-        WHERE l.activo=1 AND l.estado IN ('disponible','reservado','despachado_parcial')
+        WHERE l.activo=1 AND NOT (COALESCE(l.origen,'')='granel' AND l.presentacion_id IS NULL) AND l.estado IN ('disponible','reservado','despachado_parcial')
       ) WHERE kg_disp > 0.01
       GROUP BY producto_id, nombre`).all();
     const camino = incluirCamino ? db.prepare(`
@@ -2662,9 +2663,12 @@ router.post('/despachos', requireAdmin, (req, res) => {
     for (const it of items) {
       const loteId = Number(it.lote_id);
       if (!loteId) return res.status(400).json({ ok: false, error: 'Cada línea necesita lote' });
-      const lp = db.prepare(`SELECT l.presentacion_id, ps.factor_conversion AS kg_por_bulto
+      const lp = db.prepare(`SELECT l.presentacion_id, l.origen, ps.factor_conversion AS kg_por_bulto
         FROM sg_lotes l LEFT JOIN sg_presentaciones ps ON ps.id=l.presentacion_id WHERE l.id=? AND l.activo=1`).get(loteId);
       if (!lp) return res.status(400).json({ ok: false, error: 'Lote inexistente: ' + loteId });
+      // F4-C2 — el granel-de-entrada (origen='granel' + sin presentación) no se vende directo: entra a
+      // la venta como hijos-bulto post-reproceso (que SÍ tienen presentación, aunque hereden el origen).
+      if (String(lp.origen || '') === 'granel' && lp.presentacion_id == null) return res.status(400).json({ ok: false, error: `Lote ${loteId} es GRANEL: no se despacha directo, primero reprocesalo a cajones` });
       const kgPorBulto = (lp.presentacion_id != null && Number(lp.kg_por_bulto) > 0) ? Number(lp.kg_por_bulto) : null;
       if (kgPorBulto == null) return res.status(400).json({ ok: false, error: `Lote ${loteId} sin presentación: no despachable por bulto (cargá su presentación/kg por bulto primero)` });
       // bultos: input canónico it.bultos; si no vino, se deriva del kg_despachados que manda el front.
