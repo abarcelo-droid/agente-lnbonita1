@@ -1112,19 +1112,22 @@ function crearLotesSinOC(db, { recepcionId, productoId, fechaIngreso, lotes, use
 // origen, recepcion_id/oc_item_id=NULL (NO es compra → fuera de OC/recepción/proveedor/prorrateo),
 // transformado_de=origen, costo CARGADO = snapshot (kg × costo/kg vigente del origen). Registra
 // la fila en sg_transformaciones y reduce costo_final + estado del origen (recalc). Devuelve datos.
-function crearLoteTransformado(db, { origen, productoDestinoId, kg, factor, userId }) {
+function crearLoteTransformado(db, { origen, productoDestinoId, kg, factor, presentacionId, bultos, userId }) {
   const kgVigOrigen = (origen.kg_reales || 0) - kgDecomisado(db, origen.id) - kgTransformado(db, origen.id);
   const costoKgOrigen = kgVigOrigen > 0 ? (origen.costo_final || 0) / kgVigOrigen : 0;
   const costoTransf = +(kg * costoKgOrigen).toFixed(2);
+  // F4-A — identidad de bulto OPCIONAL en el destino: si vienen, nace lote-bulto; si no, kg puro (igual que hoy).
+  const presId = (presentacionId != null && presentacionId !== '') ? Number(presentacionId) : null;
+  const blt = (bultos != null && bultos !== '') ? Math.round(Number(bultos)) : null;
   const codigo = nextNumero(db, 'SG-LT', 'sg_lotes', 'codigo_lote');
   const info = db.prepare(`INSERT INTO sg_lotes
     (codigo_lote, recepcion_id, oc_item_id, producto_id, kg_reales, precio_unitario_kg, costo_base,
      calidad, calibre, origen, fecha_ingreso, fecha_vencimiento_estimada, estado, costo_final,
-     semaforo, transformado_de, creado_por)
-    VALUES (?, NULL, NULL, ?, ?, NULL, ?, ?, ?, ?, ?, ?, 'disponible', ?, ?, ?, ?)`).run(
+     semaforo, transformado_de, presentacion_id, bultos, creado_por)
+    VALUES (?, NULL, NULL, ?, ?, NULL, ?, ?, ?, ?, ?, ?, 'disponible', ?, ?, ?, ?, ?, ?)`).run(
     codigo, productoDestinoId, kg, costoTransf,
     origen.calidad, origen.calibre, origen.origen, origen.fecha_ingreso, origen.fecha_vencimiento_estimada,
-    costoTransf, origen.semaforo || 'verde', origen.id, userId || null);
+    costoTransf, origen.semaforo || 'verde', origen.id, presId, blt, userId || null);
   const destinoId = info.lastInsertRowid;
   db.prepare(`INSERT INTO sg_transformaciones
     (lote_origen_id, lote_destino_id, kg_transformados, factor, costo_transferido, usuario_id)
@@ -1141,18 +1144,22 @@ function crearLoteTransformado(db, { origen, productoDestinoId, kg, factor, user
 // (no se heredan: primera puede ser verde, segunda amarilla). transformado_de=madre → queda fuera
 // de prorrateo/compra. reproceso_id agrupa los hijos. NO recalcula la madre (lo hace el endpoint
 // una sola vez al cerrar). Hereda fecha_ingreso/vencimiento/origen de la madre (misma mercadería).
-function crearLoteHijo(db, { madre, reprocesoId, productoId, kg, costoAsignado, calidad, semaforo, userId }) {
+function crearLoteHijo(db, { madre, reprocesoId, productoId, kg, costoAsignado, calidad, semaforo, presentacionId, bultos, userId }) {
   const costo = +(+costoAsignado || 0).toFixed(2);
+  // F4-A — identidad de bulto OPCIONAL en el hijo: si vienen, nace lote-bulto (habilita granel→bulto y
+  // bulto→bulto); si no, kg puro (igual que hoy). NO toca el reparto de costo (sigue por kg en F4-A).
+  const presId = (presentacionId != null && presentacionId !== '') ? Number(presentacionId) : null;
+  const blt = (bultos != null && bultos !== '') ? Math.round(Number(bultos)) : null;
   const codigo = nextNumero(db, 'SG-LT', 'sg_lotes', 'codigo_lote');
   const info = db.prepare(`INSERT INTO sg_lotes
     (codigo_lote, recepcion_id, oc_item_id, producto_id, kg_reales, precio_unitario_kg, costo_base,
      calidad, calibre, origen, fecha_ingreso, fecha_vencimiento_estimada, estado, costo_final,
-     semaforo, transformado_de, reproceso_id, creado_por)
-    VALUES (?, NULL, NULL, ?, ?, NULL, ?, ?, ?, ?, ?, ?, 'disponible', ?, ?, ?, ?, ?)`).run(
+     semaforo, transformado_de, reproceso_id, presentacion_id, bultos, creado_por)
+    VALUES (?, NULL, NULL, ?, ?, NULL, ?, ?, ?, ?, ?, ?, 'disponible', ?, ?, ?, ?, ?, ?, ?)`).run(
     codigo, productoId, kg, costo,
     val(calidad), madre.calibre, madre.origen, madre.fecha_ingreso, madre.fecha_vencimiento_estimada,
-    costo, semaforo || 'verde', madre.id, reprocesoId, userId || null);
-  return { loteId: info.lastInsertRowid, codigoLote: codigo, costo };
+    costo, semaforo || 'verde', madre.id, reprocesoId, presId, blt, userId || null);
+  return { loteId: info.lastInsertRowid, codigoLote: codigo, costo, presentacion_id: presId, bultos: blt };
 }
 
 // Actualiza estado de la OC según kg recibidos vs estimados.
@@ -1955,7 +1962,8 @@ router.post('/lotes/:id/transformar', requireAuth, (req, res) => {
     if (!(kg > 0)) return res.status(400).json({ ok: false, error: 'kg a transformar debe ser > 0' });
     if (kg > disp + 0.01) return res.status(400).json({ ok: false, error: `No podés transformar ${kg}kg: hay ${disp.toFixed(1)}kg disponibles` });
     let out;
-    db.transaction(() => { out = crearLoteTransformado(db, { origen, productoDestinoId, kg, factor, userId: uid(req) }); })();
+    db.transaction(() => { out = crearLoteTransformado(db, { origen, productoDestinoId, kg, factor,
+      presentacionId: req.body?.presentacion_id, bultos: req.body?.bultos, userId: uid(req) }); })();
     res.json({ ok: true, data: { lote_origen_id: origen.id, lote_destino_id: out.loteId, codigo_destino: out.codigoLote,
       kg_transformados: kg, factor, costo_transferido: out.costoTransferido, costo_kg_origen: out.costoKgOrigen,
       kg_disponible_origen: +(disp - kg).toFixed(2) } });
@@ -2073,9 +2081,10 @@ router.post('/lotes/:id/reproceso', requireAuth, (req, res) => {
       const reprocesoId = info.lastInsertRowid;
       const hijosOut = hijos.map(h => {
         const r = crearLoteHijo(db, { madre, reprocesoId, productoId: h.producto_id, kg: h.kg, costoAsignado: h._costo,
-          calidad: h.calidad, semaforo: h.semaforo, userId: uid(req) });
+          calidad: h.calidad, semaforo: h.semaforo, presentacionId: h.presentacion_id, bultos: h.bultos, userId: uid(req) });
         return { lote_id: r.loteId, codigo: r.codigoLote, producto_id: h.producto_id, kg: h.kg, calidad: val(h.calidad),
-          semaforo: h.semaforo || 'verde', costo_asignado: r.costo, costo_por_kg: +(r.costo / h.kg).toFixed(4) };
+          semaforo: h.semaforo || 'verde', costo_asignado: r.costo, costo_por_kg: +(r.costo / h.kg).toFixed(4),
+          presentacion_id: r.presentacion_id, bultos: r.bultos };
       });
       // la madre pierde kg_procesados de disponible y costo_madre_consumido de costo_final (recalc).
       recalcCostoLote(db, madre.id);
