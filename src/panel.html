@@ -2174,12 +2174,20 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
           <div><label>Gasto de proceso ($)</label><input type="number" id="sgr-rep-gasto" placeholder="0" value="0" oninput="sgrReprAuto();sgrReprRender()" style="width:100%;box-sizing:border-box"></div>
           <div><label>Descripción del gasto</label><input type="text" id="sgr-rep-gastodesc" placeholder="mano de obra, clasificación…" style="width:100%;box-sizing:border-box"></div>
         </div>
+        <!-- F4-UI — caja de conservación en CAJONES. Visible solo si la madre opera en bultos
+             (presentacion_id != null). Granel/legacy → la madre se procesa en kg (caja oculta). -->
+        <div id="sgr-rep-bultobox" style="display:none;background:var(--bg);border:1px solid var(--bor);border-radius:8px;padding:8px 10px;margin-bottom:10px">
+          <div style="display:grid;grid-template-columns:200px 1fr;gap:12px;align-items:end">
+            <div><label>📦 Cajones procesados (madre)</label><input type="number" min="0" step="1" id="sgr-rep-bproc" placeholder="0" oninput="sgrReprRender()" style="width:100%;box-sizing:border-box"></div>
+            <div id="sgr-rep-bcheck" style="font-size:12.5px"></div>
+          </div>
+        </div>
         <div style="display:flex;justify-content:space-between;align-items:center;margin:8px 0 4px">
           <div style="font-weight:600;font-size:13px">Lotes hijos</div>
-          <div><button class="btn bo bs" onclick="sgrReprAutoBtn()">↻ Repartir por kg</button> <button class="btn bb bs" onclick="sgrReprAddHijo()">+ Hijo</button></div>
+          <div><button class="btn bo bs" onclick="sgrReprAutoBtn()">↻ Repartir auto</button> <button class="btn bb bs" onclick="sgrReprAddHijo()">+ Hijo</button></div>
         </div>
-        <div style="display:grid;grid-template-columns:1.4fr 0.9fr 0.9fr 0.7fr 0.9fr auto;gap:6px;font-size:11px;color:var(--mut);padding:0 2px 4px">
-          <div>Producto</div><div>Calidad</div><div>Semáforo</div><div style="text-align:right">kg</div><div style="text-align:right">$ asignado</div><div></div>
+        <div style="display:grid;grid-template-columns:1.3fr 0.8fr 0.8fr 1fr 0.6fr 0.7fr 0.8fr auto;gap:6px;font-size:11px;color:var(--mut);padding:0 2px 4px">
+          <div>Producto</div><div>Calidad</div><div>Semáforo</div><div>Presentación</div><div style="text-align:right">Cajones</div><div style="text-align:right">kg</div><div style="text-align:right">$ asignado</div><div></div>
         </div>
         <div id="sgr-rep-hijos"></div>
         <div id="sgr-rep-meta" style="margin-top:10px;font-size:12.5px"></div>
@@ -4392,16 +4400,19 @@ function sgLoadStock(){
         : sgMoney(kgVig>0 ? (l.costo_final||0)/kgVig : 0);
       var venceCell = '<div style="white-space:nowrap">'+sgDiasBadge(l.dias_restantes,l.estado)+'</div>'
         +(l.fecha_vencimiento_estimada?'<div style="font-size:10px;color:var(--mut)">'+l.fecha_vencimiento_estimada+'</div>':'');
+      var esGranel = String(l.origen||'')==='granel';
       return '<tr style="cursor:pointer" onclick="sgLoteVer('+l.id+')" title="Lote '+esc(l.codigo_lote)+'">'
         +'<td style="text-align:center">'+sgSemDot(l.semaforo)+'</td>'
-        +'<td>'+esc(l.producto_nombre||'')+'</td>'
+        +'<td>'+esc(l.producto_nombre||'')+(esGranel?' <span class="bdg bpe" style="font-size:10px" title="Granel: no se vende directo, va a reproceso">granel</span>':'')+'</td>'
         +'<td>'+esc(l.producto_familia||'—')+'</td>'
         +'<td style="text-align:right">'+nr(l.kg_disponibles!=null?l.kg_disponibles:l.kg_reales)+'</td>'
         +'<td>'+(l.calidad||'—')+'</td>'
         +'<td>'+venceCell+'</td>'
         +'<td style="text-align:right">'+costoKgCell+'</td>'
         +'<td style="text-align:center"><span class="bdg '+(l.estado==='bajado'?'ber':'bok')+'">'+(SG_ESTLOTE[l.estado]||l.estado)+'</span></td>'
-        +'<td style="text-align:right"><button class="btn bo bs" onclick="event.stopPropagation();sgLoteVer('+l.id+')">🔍</button></td></tr>';
+        +'<td style="text-align:right;white-space:nowrap">'
+          +(esGranel?'<button class="btn bb bs" onclick="event.stopPropagation();sgrReprPrecargar('+l.id+','+l.producto_id+')" title="Convertir el granel en cajones">♻️ Reprocesar</button> ':'')
+          +'<button class="btn bo bs" onclick="event.stopPropagation();sgLoteVer('+l.id+')">🔍</button></td></tr>';
     }).join('') : '<tr><td colspan="9" class="emp">Sin lotes con esos filtros.</td></tr>';
   });
 }
@@ -5059,9 +5070,11 @@ function sgrSub(s){
   if(s==='reproceso'){
     sgPickerInit('rep', function(){ sgrReprRender(); });
     SG.reprHijos=[]; SG.reprAuto=true;
-    eid('sgr-rep-kgproc').value=''; eid('sgr-rep-gasto').value='0'; eid('sgr-rep-gastodesc').value='';
+    eid('sgr-rep-kgproc').value=''; eid('sgr-rep-gasto').value='0'; eid('sgr-rep-gastodesc').value=''; eid('sgr-rep-bproc').value='';
     eid('sgr-rep-confirm').classList.remove('on');
     sgrReprAddHijo(); sgrReprHist();
+    // F4-UI — precarga de madre desde Stock (ej. botón Reprocesar en un lote granel).
+    if(SG._reprPre){ var pre=SG._reprPre; SG._reprPre=null; sgrReprInject(pre.loteId, pre.productoId); }
   } else if(s==='transformacion'){
     sgPickerInit('tr', null);
     eid('sgr-tr-dest').innerHTML=sgOpts(SG.cacheProd,'nombre','','— Producto destino —');
@@ -5151,34 +5164,69 @@ function sgrTrHist(){
 // ── REPROCESO (1 madre → N hijos + merma) ──
 function sgrReprMeta(){
   var lote=sgPickerLote('rep');
-  var kgProc=Number(eid('sgr-rep-kgproc').value)||0, gasto=Number(eid('sgr-rep-gasto').value)||0;
+  // F4-UI — madre-bulto si tiene presentación: la cantidad procesada se cuenta en CAJONES (bproc) y
+  // el kg se deriva (bproc × factor). Granel/legacy (sin presentación) → kgProc es el input kg.
+  var madreBulto = !!(lote && lote.presentacion_id != null && Number(lote.kg_por_bulto) > 0);
+  var madreFactor = madreBulto ? Number(lote.kg_por_bulto) : 0;
+  var gasto=Number(eid('sgr-rep-gasto').value)||0;
+  var bproc = Number(eid('sgr-rep-bproc').value)||0;
+  var kgProc = madreBulto ? Math.round(bproc*madreFactor*100)/100 : (Number(eid('sgr-rep-kgproc').value)||0);
   var ck=sgPickerCostoKg(lote);
   var costoMadre=Math.round(kgProc*ck*100)/100, total=Math.round((costoMadre+gasto)*100)/100;
   var sumaKg=SG.reprHijos.reduce(function(a,h){ return a+(Number(h.kg)||0); }, 0);
-  return { costoKgMadre:ck, costoMadre:costoMadre, total:total, sumaKg:sumaKg, merma:Math.round((kgProc-sumaKg)*100)/100, kgProc:kgProc, gasto:gasto, dispMadre:lote?lote.kg_disponibles:0 };
+  var sumaBultos=SG.reprHijos.reduce(function(a,h){ return a+(Number(h.bultos)||0); }, 0);
+  // hijos en cajones = los hijos con kg>0 TODOS tienen presentación + bultos (activa costeo plano).
+  var conKg=SG.reprHijos.filter(function(h){return Number(h.kg)>0;});
+  var todosHijoBulto = conKg.length>0 && conKg.every(function(h){ return Number(h.bultos)>0 && h.presentacion_id; });
+  return { lote:lote, madreBulto:madreBulto, madreFactor:madreFactor, costoKgMadre:ck, costoMadre:costoMadre, total:total,
+    sumaKg:sumaKg, sumaBultos:sumaBultos, todosHijoBulto:todosHijoBulto, bproc:bproc, bmerma:Math.round(bproc-sumaBultos),
+    merma:Math.round((kgProc-sumaKg)*100)/100, kgProc:kgProc, gasto:gasto, dispMadre:lote?lote.kg_disponibles:0,
+    dispBultos:(lote&&lote.bultos_disponibles!=null)?Math.floor(lote.bultos_disponibles+0.001):null };
 }
-function sgrReprAuto(){   // reparte 'total' por kg entre los hijos; el último absorbe el redondeo.
+function sgrReprAuto(){   // reparte 'total' entre los hijos: PLANO por cajón si todos en bultos, si no por kg.
   var m=sgrReprMeta(), hs=SG.reprHijos; if(!hs.length) return;
+  var plano = m.todosHijoBulto && m.sumaBultos>0;
   var acum=0;
-  hs.forEach(function(h,i){ var kg=Number(h.kg)||0;
-    var c=(i===hs.length-1) ? (m.total-acum) : (m.sumaKg>0 ? Math.round(m.total*(kg/m.sumaKg)*100)/100 : 0);
+  hs.forEach(function(h,i){
+    var c;
+    if(i===hs.length-1) c=m.total-acum;
+    else if(plano) c=Math.round(m.total*((Number(h.bultos)||0)/m.sumaBultos)*100)/100;
+    else c=(m.sumaKg>0 ? Math.round(m.total*((Number(h.kg)||0)/m.sumaKg)*100)/100 : 0);
     acum=Math.round((acum+c)*100)/100; h.costo=Math.round(c*100)/100;
   });
 }
 function sgrReprAutoBtn(){ SG.reprAuto=true; sgrReprAuto(); sgrReprRender(); }
-function sgrReprAddHijo(){ SG.reprHijos.push({producto_id:'',calidad:'primera',semaforo:'amarillo',kg:'',costo:''}); sgrReprRender(); }
+function sgrReprAddHijo(){ SG.reprHijos.push({producto_id:'',calidad:'primera',semaforo:'amarillo',presentacion_id:'',bultos:'',kg:'',costo:''}); sgrReprRender(); }
 function sgrReprDelHijo(i){ SG.reprHijos.splice(i,1); sgrReprRender(); }
-function sgrReprUpd(i,c,v){ SG.reprHijos[i][c]=v; sgrReprRender(); }
+// F4-UI — al cambiar presentación/cajones el kg se DERIVA (bultos × factor); cambiar producto resetea
+// la presentación (las presentaciones son por producto).
+function sgrReprRecalcKg(i){ var h=SG.reprHijos[i]; if(h.presentacion_id && Number(h.bultos)>0){ h.kg=Math.round(Number(h.bultos)*sgFactor(h.presentacion_id)*100)/100; } }
+function sgrReprUpd(i,c,v){
+  SG.reprHijos[i][c]=v;
+  if(c==='producto_id'){ SG.reprHijos[i].presentacion_id=''; SG.reprHijos[i].bultos=''; }
+  if(c==='presentacion_id'||c==='bultos') sgrReprRecalcKg(i);
+  sgrReprRender();
+}
 function sgrReprUpdCosto(i,v){ SG.reprHijos[i].costo=v; SG.reprAuto=false; sgrReprRender(); }  // edición manual corta el auto
 function sgrReprRender(){
   if(SG.reprAuto) sgrReprAuto();
   var prodDef=sgPickerLote('rep'); var prodDefId=prodDef?prodDef.producto_id:'';
   eid('sgr-rep-hijos').innerHTML = SG.reprHijos.map(function(h,i){
-    return '<div style="display:grid;grid-template-columns:1.4fr 0.9fr 0.9fr 0.7fr 0.9fr auto;gap:6px;align-items:center;margin-bottom:4px">'
+    var pid=h.producto_id||prodDefId;
+    var pres=sgPresDe(pid);
+    var presOpts='<option value="">— kg (granel) —</option>'+pres.map(function(p){ return '<option value="'+p.id+'"'+(String(h.presentacion_id)===String(p.id)?' selected':'')+'>'+esc(sgPresLabel(p))+'</option>'; }).join('');
+    var enBulto = h.presentacion_id && Number(h.bultos)>0;
+    // kg: read-only y derivado cuando el hijo va en cajones; editable cuando va en kg (legacy).
+    var kgInput = enBulto
+      ? '<input type="number" value="'+(h.kg||'')+'" readonly title="kg = cajones × factor" style="text-align:right;background:var(--bg);color:var(--mut)">'
+      : '<input type="number" placeholder="kg" value="'+(h.kg||'')+'" onchange="sgrReprUpd('+i+',\'kg\',this.value)" style="text-align:right">';
+    return '<div style="display:grid;grid-template-columns:1.3fr 0.8fr 0.8fr 1fr 0.6fr 0.7fr 0.8fr auto;gap:6px;align-items:center;margin-bottom:4px">'
       +'<select onchange="sgrReprUpd('+i+',\'producto_id\',this.value)">'+sgOpts(SG.cacheProd,'nombre',h.producto_id||prodDefId,'— Producto —')+'</select>'
       +'<select onchange="sgrReprUpd('+i+',\'calidad\',this.value)">'+SG_CALIDAD.map(function(o){return '<option value="'+o[0]+'"'+(h.calidad===o[0]?' selected':'')+'>'+o[1]+'</option>';}).join('')+'</select>'
       +'<select onchange="sgrReprUpd('+i+',\'semaforo\',this.value)">'+SG_SEMAFORO.map(function(o){return '<option value="'+o[0]+'"'+(h.semaforo===o[0]?' selected':'')+'>'+o[1]+'</option>';}).join('')+'</select>'
-      +'<input type="number" placeholder="kg" value="'+(h.kg||'')+'" onchange="sgrReprUpd('+i+',\'kg\',this.value)" style="text-align:right">'
+      +'<select onchange="sgrReprUpd('+i+',\'presentacion_id\',this.value)" title="cajón → costeo plano">'+presOpts+'</select>'
+      +'<input type="number" min="0" step="1" placeholder="cajones" value="'+(h.bultos||'')+'" onchange="sgrReprUpd('+i+',\'bultos\',this.value)" style="text-align:right"'+(h.presentacion_id?'':' disabled title="elegí presentación primero"')+'>'
+      +kgInput
       +'<input type="number" placeholder="$" value="'+(h.costo||'')+'" onchange="sgrReprUpdCosto('+i+',this.value)" style="text-align:right">'
       +(SG.reprHijos.length>1?'<button class="btn bd bs" onclick="sgrReprDelHijo('+i+')">×</button>':'<span></span>')
       +'</div>';
@@ -5187,18 +5235,50 @@ function sgrReprRender(){
 }
 function sgrReprRenderMeta(){
   var m=sgrReprMeta();
+  // F4-UI — caja de cajones visible solo en madre-bulto; ahí kg procesados pasa a derivado (read-only).
+  var box=eid('sgr-rep-bultobox'); if(box) box.style.display = m.madreBulto ? 'block' : 'none';
+  var kgIn=eid('sgr-rep-kgproc');
+  if(kgIn){ if(m.madreBulto){ kgIn.value=m.kgProc||''; kgIn.readOnly=true; kgIn.style.opacity='.6'; kgIn.title='derivado: cajones × kg por cajón'; }
+            else { kgIn.readOnly=false; kgIn.style.opacity='1'; kgIn.title=''; } }
   var sumaCosto=Math.round(SG.reprHijos.reduce(function(a,h){return a+(Number(h.costo)||0);},0)*100)/100;
   var dif=Math.abs(sumaCosto-m.total), cuadra=dif<0.01, mermaOk=m.merma>=-0.01;
   var dentroDisp=m.kgProc<=m.dispMadre+0.01;
+  // cuadre en cajones (madre-bulto): bproc == Σ bultos hijos + bmerma (bmerma derivado = bproc − Σ).
+  var bultosOk=true, bDentro=true;
+  if(m.madreBulto){
+    bultosOk = m.bmerma>=0 && m.todosHijoBulto && m.bproc>0;
+    bDentro = (m.dispBultos==null) || (m.bproc<=m.dispBultos);
+    var bc='📦 Cajones: procesados <b>'+nr(m.bproc)+'</b> = Σ hijos <b>'+nr(m.sumaBultos)+'</b> + merma <b style="color:'+(m.bmerma>=0?'var(--mut)':'#dc2626')+'">'+nr(m.bmerma)+'</b>';
+    bc+=' — <b style="color:'+(bultosOk&&bDentro?'var(--ok,#16a34a)':'#dc2626')+'">'+(!m.todosHijoBulto?'⚠ cada hijo necesita cajones':(m.bmerma<0?'⚠ los hijos superan lo procesado':(!bDentro?'⚠ supera el disponible ('+nr(m.dispBultos)+' cajones)':'✓ cuadra')))+'</b>';
+    if(eid('sgr-rep-bcheck')) eid('sgr-rep-bcheck').innerHTML=bc;
+  }
   var h='';
-  h+='<div>Costo madre consumido <b>'+sgMoney(m.costoMadre)+'</b> ('+nr(m.kgProc)+'kg × '+sgMoney(m.costoKgMadre)+'/kg) + gasto '+sgMoney(m.gasto)+' = <b>'+sgMoney(m.total)+'</b> a repartir</div>';
-  h+='<div style="margin-top:3px">Merma <b style="color:'+(mermaOk?'var(--mut)':'#dc2626')+'">'+nr(m.merma)+'kg</b> = '+nr(m.kgProc)+' procesados − '+nr(m.sumaKg)+' aprovechables'+(mermaOk?'':' · ⚠ los hijos superan lo procesado')+(dentroDisp?'':' · ⚠ procesás más que el disponible ('+nr(m.dispMadre)+'kg)')+'</div>';
+  if(m.madreBulto) h+='<div>'+nr(m.bproc)+' cajones × '+nr(m.madreFactor)+'kg = <b>'+nr(m.kgProc)+'kg</b> procesados</div>';
+  h+='<div'+(m.madreBulto?' style="margin-top:3px"':'')+'>Costo madre consumido <b>'+sgMoney(m.costoMadre)+'</b> ('+nr(m.kgProc)+'kg × '+sgMoney(m.costoKgMadre)+'/kg) + gasto '+sgMoney(m.gasto)+' = <b>'+sgMoney(m.total)+'</b> a repartir'+(m.todosHijoBulto?' · <span style="color:var(--ok,#16a34a)">costeo plano por cajón</span>':'')+'</div>';
+  if(!m.madreBulto) h+='<div style="margin-top:3px">Merma <b style="color:'+(mermaOk?'var(--mut)':'#dc2626')+'">'+nr(m.merma)+'kg</b> = '+nr(m.kgProc)+' procesados − '+nr(m.sumaKg)+' aprovechables'+(mermaOk?'':' · ⚠ los hijos superan lo procesado')+(dentroDisp?'':' · ⚠ procesás más que el disponible ('+nr(m.dispMadre)+'kg)')+'</div>';
   h+='<div style="margin-top:3px">Σ asignado <b>'+sgMoney(sumaCosto)+'</b> / '+sgMoney(m.total)+' — <b style="color:'+(cuadra?'var(--ok,#16a34a)':'#dc2626')+'">'+(cuadra?'✓ cuadra':'⚠ diferencia '+sgMoney(dif))+'</b></div>';
   eid('sgr-rep-meta').innerHTML=h;
-  // producto del hijo: si no se eligió, hereda el de la madre (default visible en el select).
   var hijosOk=SG.reprHijos.filter(function(x){return Number(x.kg)>0;}).length>0;
-  var valid=cuadra && mermaOk && dentroDisp && m.kgProc>0 && hijosOk;
+  var valid=cuadra && mermaOk && dentroDisp && m.kgProc>0 && hijosOk && (!m.madreBulto || (bultosOk && bDentro));
   var btn=eid('sgr-rep-btn'); btn.disabled=!valid; btn.style.opacity=valid?'1':'.5'; btn.style.cursor=valid?'pointer':'not-allowed';
+}
+// F4-UI — abrir el modal de reproceso con una madre precargada (ej. lote granel desde Stock). El granel
+// NO está en /lotes-disponibles, así que se inyecta directo en el picker desde /lotes.
+function sgrReprPrecargar(loteId, productoId){
+  SG._reprPre={ loteId:String(loteId), productoId:String(productoId) };
+  SG.reprSub='reproceso';
+  var ni=document.querySelector('.ni[data-sec="sg-reprocesos"]');
+  if(ni) ni.click(); else if(typeof loadSec==='function') loadSec('sg-reprocesos');
+}
+function sgrReprInject(loteId, productoId){
+  api('/api/sg/lotes?producto_id='+productoId).then(function(r){
+    var lote=((r&&r.ok)?r.data:[]).find(function(x){return String(x.id)===String(loteId);});
+    if(!lote){ toast('No se encontró el lote para reprocesar','er'); return; }
+    var p=SG.pickers.rep; if(!p){ sgPickerInit('rep',function(){ sgrReprRender(); }); p=SG.pickers.rep; }
+    p.productoId=String(productoId); p.lotes=[lote]; p.loteId=String(loteId);
+    sgPickerRender('rep'); sgrReprRender();
+    toast('Madre cargada: '+(lote.codigo_lote||''),'ok');
+  });
 }
 function sgrReprGuardar(){
   var lote=sgPickerLote('rep'); if(!lote){ toast('Elegí lote madre','er'); return; }
@@ -5208,11 +5288,16 @@ function sgrReprGuardar(){
   if(m.merma<-0.01){ toast('La suma de hijos supera lo procesado','er'); return; }
   var defPid=lote.producto_id;  // producto del hijo no elegido → hereda el de la madre
   var hijos=SG.reprHijos.filter(function(h){ return Number(h.kg)>0; }).map(function(h){
-    return { producto_id:Number(h.producto_id||defPid), kg:Number(h.kg), calidad:h.calidad, semaforo:h.semaforo, costo_asignado:Number(h.costo)||0 }; });
+    var o={ producto_id:Number(h.producto_id||defPid), kg:Number(h.kg), calidad:h.calidad, semaforo:h.semaforo, costo_asignado:Number(h.costo)||0 };
+    // F4-UI — si el hijo va en cajones, mandar presentación + bultos → el motor activa costeo plano (F4-B).
+    if(h.presentacion_id && Number(h.bultos)>0){ o.presentacion_id=Number(h.presentacion_id); o.bultos=Math.round(Number(h.bultos)); }
+    return o; });
   if(!hijos.length){ toast('Agregá al menos un hijo con kg','er'); return; }
   var sumaCosto=hijos.reduce(function(a,h){ return a+h.costo_asignado; }, 0);
   if(Math.abs(sumaCosto-m.total)>0.01){ toast('La suma de costos no cuadra con el total a repartir','er'); return; }
   var body={ kg_procesados:m.kgProc, gasto_proceso:m.gasto, gasto_descripcion:eid('sgr-rep-gastodesc').value, hijos:hijos };
+  // F4-UI — madre-bulto: mandar la conservación en cajones (el backend valida procesados == Σ hijos + merma).
+  if(m.madreBulto){ body.bultos_procesados=Math.round(m.bproc); body.bultos_merma=Math.round(m.bmerma); }
   api('/api/sg/lotes/'+lote.id+'/reproceso','POST',body).then(function(r){
     if(r&&r.ok){
       toast('Reproceso registrado','ok');
