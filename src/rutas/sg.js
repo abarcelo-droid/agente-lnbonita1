@@ -1654,27 +1654,18 @@ router.get('/lotes', requireAuth, (req, res) => {
     const rows = db.prepare(`
       SELECT l.*, pr.nombre AS producto_nombre, pr.familia AS producto_familia,
         r.numero_recepcion, o.numero AS oc_numero, pv.razon_social AS proveedor_nombre,
+        ps.factor_conversion AS kg_por_bulto,
         CAST(julianday(l.fecha_vencimiento_estimada) - julianday(date('now','localtime')) AS INTEGER) AS dias_restantes,
-        -- kg vigentes (para costo/kg revaluado) = kg_reales − Σ decomiso − Σ transformado/reproceso
-        (l.kg_reales
-          - COALESCE((SELECT SUM(kg) FROM sg_lote_decomisos WHERE lote_id=l.id),0)
-          - COALESCE((SELECT SUM(kg_transformados) FROM sg_transformaciones WHERE lote_origen_id=l.id),0)
-          - COALESCE((SELECT SUM(kp.kg_procesados) FROM sg_reprocesos kp WHERE kp.lote_madre_id=l.id AND kp.estado='activo'),0)
-        ) AS kg_vigente,
-        -- kg disponibles (vendibles) = kg vigentes − Σ despachado
-        (l.kg_reales
-          - COALESCE((SELECT SUM(kg) FROM sg_lote_decomisos WHERE lote_id=l.id),0)
-          - COALESCE((SELECT SUM(kg_transformados) FROM sg_transformaciones WHERE lote_origen_id=l.id),0)
-          - COALESCE((SELECT SUM(kp.kg_procesados) FROM sg_reprocesos kp WHERE kp.lote_madre_id=l.id AND kp.estado='activo'),0)
-          - COALESCE((SELECT SUM(di.kg_despachados) FROM sg_despacho_items di JOIN sg_despachos d ON d.id=di.despacho_id AND d.activo=1 WHERE di.lote_id=l.id),0)
-        ) AS kg_disponibles
+        ${KG_VIGENTE_STOCK} AS kg_vigente,     -- vigentes = kg_reales − decomiso − transf/reproceso
+        ${KG_DISPONIBLE} AS kg_disponibles     -- disponibles = vigentes − despachado
       FROM sg_lotes l
       LEFT JOIN sg_productos pr ON pr.id=l.producto_id
+      LEFT JOIN sg_presentaciones ps ON ps.id=l.presentacion_id
       LEFT JOIN sg_recepciones r ON r.id=l.recepcion_id
       LEFT JOIN sg_oc o ON o.id=r.oc_id
       LEFT JOIN sg_proveedores pv ON pv.id=o.proveedor_id
       WHERE ${where.join(' AND ')} ORDER BY l.fecha_vencimiento_estimada ASC, l.id DESC`).all(...params);
-    res.json({ ok: true, data: rows });
+    res.json({ ok: true, data: rows.map(derivarBultosLote) });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
@@ -2223,6 +2214,30 @@ function costoTransferido(db, loteId) {
 const SUM_TRANSF = "(COALESCE((SELECT SUM(kg_transformados) FROM sg_transformaciones WHERE lote_origen_id=l.id),0)"
   + " + COALESCE((SELECT SUM(kg_procesados) FROM sg_reprocesos WHERE lote_madre_id=l.id AND estado='activo'),0))";
 
+// ── FUENTE ÚNICA de la fórmula de kg de un lote (ligada al alias `l`) ────────────
+// Antes copy-pasteada en /lotes, /lotes-disponibles, /oferta y /disponibilidad. Estos fragmentos
+// son la verdad única; cualquier endpoint de lectura los compone. (KG_VIGENTE de costeo —línea
+// ~2760— es OTRA cosa: NO resta reprocesos; no se toca acá.)
+const SUM_DECOMISO   = "COALESCE((SELECT SUM(kg) FROM sg_lote_decomisos WHERE lote_id=l.id),0)";
+const SUM_DESPACHADO = "COALESCE((SELECT SUM(di.kg_despachados) FROM sg_despacho_items di"
+  + " JOIN sg_despachos d ON d.id=di.despacho_id AND d.activo=1 WHERE di.lote_id=l.id),0)";
+// kg vigentes (disponibilidad) = kg_reales − Σ decomisos − (transformaciones + reprocesos activos).
+const KG_VIGENTE_STOCK = `(l.kg_reales - ${SUM_DECOMISO} - ${SUM_TRANSF})`;
+// kg disponibles (vendibles) = kg vigentes − Σ despachado.
+const KG_DISPONIBLE = `(l.kg_reales - ${SUM_DECOMISO} - ${SUM_TRANSF} - ${SUM_DESPACHADO})`;
+
+// F2 — bultos derivados de kg (DISPLAY, no altera kg). kg_por_bulto = factor_conversion de la
+// presentación del lote (null si no hay presentacion_id). bultos_* = kg_* / kg_por_bulto SIN
+// redondear (puede dar fracción — esperado en F2; F3 lo corrige). Muta y devuelve la fila.
+function derivarBultosLote(row) {
+  const kpb = (row.kg_por_bulto != null && Number(row.kg_por_bulto) > 0) ? Number(row.kg_por_bulto) : null;
+  row.kg_por_bulto = kpb;
+  row.bultos_vigente     = (kpb != null && row.kg_vigente     != null) ? Number(row.kg_vigente)     / kpb : null;
+  row.bultos_disponibles = (kpb != null && row.kg_disponibles != null) ? Number(row.kg_disponibles) / kpb : null;
+  if (row.kg_reservado != null) row.bultos_reservado = (kpb != null) ? Number(row.kg_reservado) / kpb : null;
+  return row;
+}
+
 // ── PEDIDOS ──────────────────────────────────────────────────────────────────
 router.post('/pedidos', requireAdmin, (req, res) => {
   const db = getDb();
@@ -2324,20 +2339,17 @@ router.get('/lotes-disponibles', requireAuth, (req, res) => {
     const rows = db.prepare(`
       SELECT * FROM (
         SELECT l.id, l.codigo_lote, l.producto_id, pr.nombre AS producto_nombre, l.calidad, l.semaforo,
-          l.costo_final, l.kg_reales,
-          (l.kg_reales - COALESCE((SELECT SUM(kg) FROM sg_lote_decomisos WHERE lote_id=l.id),0) - ${SUM_TRANSF}) AS kg_vigente,
+          l.costo_final, l.kg_reales, l.presentacion_id, ps.factor_conversion AS kg_por_bulto,
+          ${KG_VIGENTE_STOCK} AS kg_vigente,
           l.precio_unitario_kg, l.fecha_vencimiento_estimada,
           CAST(julianday(l.fecha_vencimiento_estimada) - julianday(date('now','localtime')) AS INTEGER) AS dias_restantes,
-          (l.kg_reales
-             - COALESCE((SELECT SUM(kg) FROM sg_lote_decomisos WHERE lote_id=l.id),0)
-             - ${SUM_TRANSF}
-             - COALESCE((SELECT SUM(di.kg_despachados) FROM sg_despacho_items di
-                 JOIN sg_despachos d ON d.id=di.despacho_id AND d.activo=1 WHERE di.lote_id=l.id),0)) AS kg_disponibles
+          ${KG_DISPONIBLE} AS kg_disponibles
         FROM sg_lotes l LEFT JOIN sg_productos pr ON pr.id=l.producto_id
+        LEFT JOIN sg_presentaciones ps ON ps.id=l.presentacion_id
         WHERE l.activo=1 AND l.estado IN ('disponible','reservado','despachado_parcial') AND l.producto_id=?
       ) WHERE kg_disponibles > 0.01
       ORDER BY fecha_vencimiento_estimada ASC, id ASC`).all(req.query.producto_id);
-    res.json({ ok: true, data: rows });
+    res.json({ ok: true, data: rows.map(derivarBultosLote) });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
@@ -2353,14 +2365,13 @@ router.get('/oferta', requireAuth, (req, res) => {
     const stock = db.prepare(`
       SELECT * FROM (
         SELECT l.id AS lote_id, l.codigo_lote, l.producto_id, pr.nombre AS producto_nombre, l.calidad, l.semaforo,
-          l.costo_final, l.fecha_vencimiento_estimada,
-          (l.kg_reales - COALESCE((SELECT SUM(kg) FROM sg_lote_decomisos WHERE lote_id=l.id),0) - ${SUM_TRANSF}) AS kg_vigente,
+          l.costo_final, l.fecha_vencimiento_estimada, l.presentacion_id, ps.factor_conversion AS kg_por_bulto,
+          ${KG_VIGENTE_STOCK} AS kg_vigente,
           CAST(julianday(l.fecha_vencimiento_estimada) - julianday(date('now','localtime')) AS INTEGER) AS dias_restantes,
-          (l.kg_reales - COALESCE((SELECT SUM(kg) FROM sg_lote_decomisos WHERE lote_id=l.id),0) - ${SUM_TRANSF}
-             - COALESCE((SELECT SUM(di.kg_despachados) FROM sg_despacho_items di
-                 JOIN sg_despachos d ON d.id=di.despacho_id AND d.activo=1 WHERE di.lote_id=l.id),0)) AS kg_disponibles,
+          ${KG_DISPONIBLE} AS kg_disponibles,
           COALESCE((SELECT SUM(kg) FROM sg_reservas WHERE lote_id=l.id AND estado IN ('activa','concretada')),0) AS kg_reservado
         FROM sg_lotes l LEFT JOIN sg_productos pr ON pr.id=l.producto_id
+        LEFT JOIN sg_presentaciones ps ON ps.id=l.presentacion_id
         WHERE l.activo=1 AND l.estado IN ('disponible','reservado','despachado_parcial') AND l.producto_id=?
       ) WHERE kg_disponibles > 0.01
       ORDER BY fecha_vencimiento_estimada ASC, lote_id ASC`).all(pid);
@@ -2379,7 +2390,7 @@ router.get('/oferta', requireAuth, (req, res) => {
         WHERE i.producto_id=? AND o.activo=1 AND o.estado IN ('abierta','recibida_parcial')
       ) WHERE disponible_camino > 0.01
       ORDER BY fecha_oc ASC, oc_item_id ASC`).all(pid);
-    res.json({ ok: true, data: { stock, en_camino } });
+    res.json({ ok: true, data: { stock: stock.map(derivarBultosLote), en_camino } });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
@@ -2393,9 +2404,7 @@ router.get('/disponibilidad', requireAuth, (req, res) => {
     const stock = db.prepare(`
       SELECT producto_id, nombre, SUM(kg_disp) AS kg_stock, COUNT(*) AS n_lotes FROM (
         SELECT l.producto_id, pr.nombre,
-          (l.kg_reales - COALESCE((SELECT SUM(kg) FROM sg_lote_decomisos WHERE lote_id=l.id),0) - ${SUM_TRANSF}
-             - COALESCE((SELECT SUM(di.kg_despachados) FROM sg_despacho_items di
-                 JOIN sg_despachos d ON d.id=di.despacho_id AND d.activo=1 WHERE di.lote_id=l.id),0)) AS kg_disp
+          ${KG_DISPONIBLE} AS kg_disp
         FROM sg_lotes l LEFT JOIN sg_productos pr ON pr.id=l.producto_id
         WHERE l.activo=1 AND l.estado IN ('disponible','reservado','despachado_parcial')
       ) WHERE kg_disp > 0.01
