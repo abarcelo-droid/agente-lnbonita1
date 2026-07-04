@@ -1072,8 +1072,8 @@ function crearLotesDeItem(db, { recepcionId, ocItem, tipoPrecio, fechaIngreso, l
   const ins = db.prepare(`INSERT INTO sg_lotes
     (codigo_lote, recepcion_id, oc_item_id, producto_id, kg_reales, precio_unitario_kg, costo_base,
      calidad, calibre, origen, fecha_ingreso, fecha_vencimiento_estimada, estado, costo_final,
-     presentacion_id, bultos, creado_por)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?, 'disponible', ?, ?, ?, ?)`);
+     presentacion_id, bultos, kg_por_bulto, envase_id, creado_por)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?, 'disponible', ?, ?, ?, ?, ?, ?)`);
   const ids = [];
   for (const lt of lotes) {
     const kg = Number(lt.kg_reales || 0);
@@ -1086,9 +1086,15 @@ function crearLotesDeItem(db, { recepcionId, ocItem, tipoPrecio, fechaIngreso, l
     const presId = (lt.presentacion_id != null && lt.presentacion_id !== '') ? Number(lt.presentacion_id)
       : (ocItem.presentacion_id != null ? Number(ocItem.presentacion_id) : null);
     const bultos = (lt.bultos != null && lt.bultos !== '') ? Math.round(Number(lt.bultos)) : null;
+    // F2 — herencia del factor tipeado y el envase desde el oc_item (F1). kg_por_bulto: sub-lote
+    // o, en su defecto, el del oc_item; envase: el del oc_item. Ambos null si no se conocen (legacy
+    // con presentación → las lecturas caen a la presentación vía COALESCE).
+    const kpb = (lt.kg_por_bulto != null && lt.kg_por_bulto !== '') ? Number(lt.kg_por_bulto)
+      : (ocItem.kg_por_bulto != null ? Number(ocItem.kg_por_bulto) : null);
+    const envId = (ocItem.envase_id != null && ocItem.envase_id !== '') ? Number(ocItem.envase_id) : null;
     const codigo = nextNumero(db, 'SG-LT', 'sg_lotes', 'codigo_lote');
     const info = ins.run(codigo, recepcionId, ocItem.id, ocItem.producto_id, kg, precio, costoBase,
-      val(lt.calidad), val(lt.calibre), val(lt.origen), fechaIngreso, venc, costoBase, presId, bultos, userId);
+      val(lt.calidad), val(lt.calibre), val(lt.origen), fechaIngreso, venc, costoBase, presId, bultos, kpb, envId, userId);
     ids.push(info.lastInsertRowid);
     _aplicarObservado(db, info.lastInsertRowid, _rec, userId);
   }
@@ -1722,7 +1728,7 @@ router.get('/lotes', requireAuth, (req, res) => {
     const rows = db.prepare(`
       SELECT l.*, pr.nombre AS producto_nombre, pr.familia AS producto_familia,
         r.numero_recepcion, o.numero AS oc_numero, pv.razon_social AS proveedor_nombre,
-        ps.factor_conversion AS kg_por_bulto,
+        COALESCE(l.kg_por_bulto, ps.factor_conversion) AS kg_por_bulto,
         CAST(julianday(l.fecha_vencimiento_estimada) - julianday(date('now','localtime')) AS INTEGER) AS dias_restantes,
         ${KG_VIGENTE_STOCK} AS kg_vigente,     -- vigentes = kg_reales − decomiso − transf/reproceso
         ${KG_DISPONIBLE} AS kg_disponibles     -- disponibles = vigentes − despachado
@@ -2443,7 +2449,7 @@ router.post('/pedidos', requireAdmin, (req, res) => {
           };
           if (rv.tipo === 'lote' && rv.lote_id) {
             const loteId = Number(rv.lote_id);
-            const lp = db.prepare(`SELECT l.bultos, ps.factor_conversion AS kg_por_bulto
+            const lp = db.prepare(`SELECT l.bultos, COALESCE(l.kg_por_bulto, ps.factor_conversion) AS kg_por_bulto
               FROM sg_lotes l LEFT JOIN sg_presentaciones ps ON ps.id=l.presentacion_id WHERE l.id=?`).get(loteId);
             const kpb = (lp && lp.bultos != null && lp.kg_por_bulto != null && Number(lp.kg_por_bulto) > 0) ? Number(lp.kg_por_bulto) : null;
             if (kpb != null) {
@@ -2537,7 +2543,7 @@ router.get('/lotes-disponibles', requireAuth, (req, res) => {
     const rows = db.prepare(`
       SELECT * FROM (
         SELECT l.id, l.codigo_lote, l.producto_id, pr.nombre AS producto_nombre, l.calidad, l.semaforo,
-          l.costo_final, l.kg_reales, l.presentacion_id, ps.factor_conversion AS kg_por_bulto,
+          l.costo_final, l.kg_reales, l.presentacion_id, COALESCE(l.kg_por_bulto, ps.factor_conversion) AS kg_por_bulto,
           ${KG_VIGENTE_STOCK} AS kg_vigente,
           l.precio_unitario_kg, l.fecha_vencimiento_estimada,
           CAST(julianday(l.fecha_vencimiento_estimada) - julianday(date('now','localtime')) AS INTEGER) AS dias_restantes,
@@ -2563,7 +2569,7 @@ router.get('/oferta', requireAuth, (req, res) => {
     const stock = db.prepare(`
       SELECT * FROM (
         SELECT l.id AS lote_id, l.codigo_lote, l.producto_id, pr.nombre AS producto_nombre, l.calidad, l.semaforo,
-          l.costo_final, l.fecha_vencimiento_estimada, l.presentacion_id, ps.factor_conversion AS kg_por_bulto,
+          l.costo_final, l.fecha_vencimiento_estimada, l.presentacion_id, COALESCE(l.kg_por_bulto, ps.factor_conversion) AS kg_por_bulto,
           ${KG_VIGENTE_STOCK} AS kg_vigente,
           CAST(julianday(l.fecha_vencimiento_estimada) - julianday(date('now','localtime')) AS INTEGER) AS dias_restantes,
           ${KG_DISPONIBLE} AS kg_disponibles,
@@ -2715,7 +2721,7 @@ router.post('/despachos', requireAdmin, (req, res) => {
     for (const it of items) {
       const loteId = Number(it.lote_id);
       if (!loteId) return res.status(400).json({ ok: false, error: 'Cada línea necesita lote' });
-      const lp = db.prepare(`SELECT l.presentacion_id, l.origen, ps.factor_conversion AS kg_por_bulto
+      const lp = db.prepare(`SELECT l.presentacion_id, l.origen, COALESCE(l.kg_por_bulto, ps.factor_conversion) AS kg_por_bulto
         FROM sg_lotes l LEFT JOIN sg_presentaciones ps ON ps.id=l.presentacion_id WHERE l.id=? AND l.activo=1`).get(loteId);
       if (!lp) return res.status(400).json({ ok: false, error: 'Lote inexistente: ' + loteId });
       // F4-C2 — el granel-de-entrada (origen='granel' + sin presentación) no se vende directo: entra a

@@ -1056,6 +1056,18 @@ try {
   if (add.length) console.log('[DB] SG sg_lotes migrado (+' + add.join(', +') + ')');
 } catch (e) { console.error('[DB] SG migración sg_lotes (bulto):', e.message); }
 
+// F2 — el lote hereda del oc_item el factor tipeado (kg por bulto) y el envase (F1). Nullable:
+// los lotes legacy (con presentacion_id) quedan NULL y las lecturas caen a la presentación vía
+// COALESCE(l.kg_por_bulto, ps.factor_conversion). Sin REFERENCES inline; envase_id es FK lógica
+// a sg_envases.
+try {
+  const cols = db.prepare("PRAGMA table_info(sg_lotes)").all().map(c => c.name);
+  const add = [];
+  if (!cols.includes('kg_por_bulto')) { db.exec("ALTER TABLE sg_lotes ADD COLUMN kg_por_bulto REAL"); add.push('kg_por_bulto'); }
+  if (!cols.includes('envase_id'))    { db.exec("ALTER TABLE sg_lotes ADD COLUMN envase_id INTEGER"); add.push('envase_id'); }
+  if (add.length) console.log('[DB] SG sg_lotes migrado (+' + add.join(', +') + ')');
+} catch (e) { console.error('[DB] SG migración sg_lotes (envase/kilaje):', e.message); }
+
 // ── F3-A: bultos ADITIVO en tablas de movimiento (NULLABLE, idempotente) + backfill ─────────────
 // El cajón es la unidad operativa indivisible. Estas columnas CONVIVEN con las de kg (que siguen
 // siendo la verdad operativa en F3-A). Backfill = ROUND(kg_de_la_fila / kg_por_bulto) usando la
