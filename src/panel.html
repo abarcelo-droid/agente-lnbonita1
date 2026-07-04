@@ -3078,7 +3078,7 @@ function sgLoadCaches(cb){
     var sel = eid('sg-pres-filtro');
     if (sel){
       var v = sel.value;
-      sel.innerHTML = '<option value="">— Todos —</option>' + SG.cacheProd.map(function(p){ return '<option value="'+p.id+'">'+esc(p.nombre)+'</option>'; }).join('');
+      sel.innerHTML = '<option value="">— Todos —</option>' + SG.cacheProd.map(function(p){ return '<option value="'+p.id+'">'+esc(p.nombre + (p.variedad ? ' '+p.variedad : ''))+'</option>'; }).join('');
       sel.value = v;
     }
     if (cb) cb();
@@ -4306,7 +4306,7 @@ var SG_ESTLOTE={disponible:'Disponible',reservado:'Reservado',despachado_parcial
 function sgStockInit(){
   sgLoadCaches(function(){
     var sel=eid('sg-st-prod');
-    if(sel){ var v=sel.value; sel.innerHTML='<option value="">— Todos —</option>'+SG.cacheProd.map(function(p){return '<option value="'+p.id+'">'+esc(p.nombre)+'</option>';}).join(''); sel.value=v; }
+    if(sel){ var v=sel.value; sel.innerHTML='<option value="">— Todos —</option>'+SG.cacheProd.map(function(p){return '<option value="'+p.id+'">'+esc(p.nombre + (p.variedad ? ' '+p.variedad : ''))+'</option>';}).join(''); sel.value=v; }
     // Categoría = familia del producto (catálogo de familias). Valor = nombre denormalizado en producto.
     var fam=eid('sg-st-fam');
     if(fam){ var fv=fam.value; fam.innerHTML='<option value="">Todas</option>'+(SG.cacheFam||[]).map(function(f){return '<option value="'+esc(f.nombre)+'">'+esc(f.nombre)+'</option>';}).join(''); fam.value=fv; }
