@@ -60,11 +60,40 @@ router.patch('/proveedores/:id', (req, res) => {
   }
 });
 
-// Desactivar proveedor
+// Desactivar proveedor (galpón).
+// GUARD: no se puede eliminar un galpón que todavía tiene saldo de cajones IFCO
+// asociado. IFCO cuelga de proveedores(id) vía proveedor_id (ver ifco_stocks_reales,
+// ifco_envios_proveedor, ifco_talonarios). El chequeo es SOLO LECTURA sobre las tablas
+// IFCO — no las modifica. NO aplica a adm_proveedores/pa_proveedores (otras tablas).
 router.delete('/proveedores/:id', (req, res) => {
   const db = getDb();
   try {
-    db.prepare('UPDATE proveedores SET activo=0 WHERE id=?').run(req.params.id);
+    const id = req.params.id;
+    // stock real de cajones = último snapshot de conteo del galpón (ifco_stocks_reales
+    // guarda un snapshot por conteo, no deltas → tomamos el más reciente).
+    const stock = db.prepare(
+      "SELECT COALESCE(cantidad,0) AS c FROM ifco_stocks_reales " +
+      "WHERE deposito_tipo='proveedor' AND proveedor_id=? ORDER BY fecha DESC, id DESC LIMIT 1"
+    ).get(id)?.c || 0;
+    // envíos de cajones todavía en viaje (no recibidos ni anulados) y no borrados.
+    const envios = db.prepare(
+      "SELECT COUNT(*) AS n FROM ifco_envios_proveedor " +
+      "WHERE proveedor_id=? AND estado IN ('enviado','parcial') AND eliminado_en IS NULL"
+    ).get(id).n;
+    // talonarios de remitos asignados al galpón.
+    const talonarios = db.prepare(
+      "SELECT COUNT(*) AS n FROM ifco_talonarios WHERE proveedor_id=? AND activo=1"
+    ).get(id).n;
+
+    if (stock > 0 || envios > 0 || talonarios > 0) {
+      return res.status(409).json({
+        ok: false,
+        error: `No se puede eliminar el galpón: tiene ${stock} cajones en stock, ` +
+               `${envios} envíos activos y ${talonarios} talonarios asignados en IFCO.`
+      });
+    }
+
+    db.prepare('UPDATE proveedores SET activo=0 WHERE id=?').run(id);
     res.json({ ok: true });
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message });
