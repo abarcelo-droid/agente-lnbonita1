@@ -13789,9 +13789,24 @@ function abCargarProveedores() {
     AB.proveedores = res.data;
     var grid = document.getElementById('ab-proveedores-grid');
     if (!res.data.length) { grid.innerHTML = '<div class="ab-empty" style="grid-column:1/-1"><div class="ab-empty-icon">🏭</div>Sin proveedores</div>'; return; }
-    grid.innerHTML = res.data.map(function(p) {
-      return '<div class="ab-card"><div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px"><div><div style="font-weight:600;font-size:15px">'+p.nombre+'</div>'+(p.razon_social?'<div style="font-size:12px;color:var(--mut)">'+p.razon_social+'</div>':'')+'</div><button class="btn bo bs" onclick="abEditarProveedor('+p.id+')">✏️</button></div>'+(p.cuit?'<div style="font-size:12px;color:var(--mut);margin-bottom:3px">CUIT: '+p.cuit+'</div>':'')+(p.contacto?'<div style="font-size:12px;color:var(--mut);margin-bottom:3px">👤 '+p.contacto+'</div>':'')+(p.telefono?'<div style="font-size:12px;color:var(--mut);margin-bottom:3px">📱 '+p.telefono+'</div>':'')+(p.zona?'<div style="font-size:12px;color:var(--mut);margin-bottom:3px">📍 '+p.zona+'</div>':'')+'<div style="display:flex;gap:8px;margin-top:10px;padding-top:10px;border-top:1px solid var(--bor)"><span class="ab-badge ab-badge-azul">📦 '+p.total_partidas+' partidas</span>'+(p.bultos_en_stock>0?'<span class="ab-badge ab-badge-verde">'+abFmt(p.bultos_en_stock)+' bultos</span>':'')+'</div></div>';
-    }).join('');
+    // Saldo de cajones IFCO por galpón: 1 solo fetch al endpoint IFCO existente (sin N+1).
+    // Si falla o el galpón no está en el mapa → sin badge IFCO; NO rompe las cards ni el
+    // badge de mercadería ABASTO (partidas/bultos), que es otra cosa. Solo lectura sobre IFCO.
+    fetch('/api/ifco/proveedores-saldos', { credentials: 'same-origin' })
+      .then(function(r){ return r.ok ? r.json() : []; })
+      .catch(function(){ return []; })
+      .then(function(saldos){
+        var mapSaldo = {};
+        (Array.isArray(saldos) ? saldos : []).forEach(function(s){ mapSaldo[s.id] = s.saldo; });
+        grid.innerHTML = res.data.map(function(p) {
+          // Badge de cajones IFCO — visualmente distinto (ámbar) del de mercadería (azul/verde).
+          var saldoIfco = mapSaldo[p.id];
+          var badgeIfco = (saldoIfco > 0)
+            ? '<span class="ab-badge" style="background:#fef3c7;color:#92400e;border:1px solid #fbbf24" title="Cajones IFCO en poder del galpón, sin devolver a San Gerónimo (no es mercadería)">🟫 '+abFmt(saldoIfco)+' cajones sin devolver</span>'
+            : '';
+          return '<div class="ab-card"><div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px"><div><div style="font-weight:600;font-size:15px">'+p.nombre+'</div>'+(p.razon_social?'<div style="font-size:12px;color:var(--mut)">'+p.razon_social+'</div>':'')+'</div><button class="btn bo bs" onclick="abEditarProveedor('+p.id+')">✏️</button></div>'+(p.cuit?'<div style="font-size:12px;color:var(--mut);margin-bottom:3px">CUIT: '+p.cuit+'</div>':'')+(p.contacto?'<div style="font-size:12px;color:var(--mut);margin-bottom:3px">👤 '+p.contacto+'</div>':'')+(p.telefono?'<div style="font-size:12px;color:var(--mut);margin-bottom:3px">📱 '+p.telefono+'</div>':'')+(p.zona?'<div style="font-size:12px;color:var(--mut);margin-bottom:3px">📍 '+p.zona+'</div>':'')+'<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;padding-top:10px;border-top:1px solid var(--bor)"><span class="ab-badge ab-badge-azul">📦 '+p.total_partidas+' partidas</span>'+(p.bultos_en_stock>0?'<span class="ab-badge ab-badge-verde">'+abFmt(p.bultos_en_stock)+' bultos</span>':'')+badgeIfco+'</div><div style="margin-top:10px"><button class="btn bo bs" onclick="ifcoVerMovimientosProveedor('+p.id+')">📋 Movimientos IFCO</button></div></div>';
+        }).join('');
+      });
   });
 }
 
