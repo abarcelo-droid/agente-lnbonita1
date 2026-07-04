@@ -2756,8 +2756,12 @@ router.get('/despachos', requireAuth, (req, res) => {
     if (req.query.cliente_id) { where.push('d.cliente_id=?'); params.push(req.query.cliente_id); }
     if (req.query.estado) { where.push('d.estado=?'); params.push(req.query.estado); }
     const rows = db.prepare(`
-      SELECT d.*, c.razon_social AS cliente_nombre, p.numero AS pedido_numero,
+      SELECT d.*, c.razon_social AS cliente_nombre, c.nombre_comercial AS cliente_alias,
+        p.numero AS pedido_numero,
         f.razon_social AS fletero_nombre,
+        (SELECT GROUP_CONCAT(pr.nombre || ' ×' || COALESCE(di.bultos,'?') || ' cj', ', ')
+           FROM sg_despacho_items di JOIN sg_productos pr ON pr.id=di.producto_id
+          WHERE di.despacho_id=d.id) AS vendido,
         (SELECT COALESCE(SUM(subtotal),0) FROM sg_despacho_items WHERE despacho_id=d.id) AS total,
         (SELECT COALESCE(SUM(margen_estimado),0) FROM sg_despacho_items WHERE despacho_id=d.id) AS margen,
         (SELECT COALESCE(SUM(monto),0) FROM sg_gastos_directos WHERE despacho_id=d.id AND tipo_gasto='flete_salida' AND estado='valorizado' AND activo=1) AS flete_salida,
