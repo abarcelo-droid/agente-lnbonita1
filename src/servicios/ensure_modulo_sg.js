@@ -51,6 +51,14 @@ try {
   db.prepare("UPDATE modulos_config SET label='Liquidaciones' WHERE modulo='ab-liquidaciones'").run();
   console.log("[ORG] Labels Gestion Insumos verificados (grupo + Galpones Asociados + Liquidaciones)");
 
+  // ── Mover Liquidaciones de "Gestion Insumos" a "Abasto SG" — solo ubicacion en el nav ──
+  // El bloque de arriba (wildcard Abasto IFCO → Gestion Insumos) tocaba a ab-liquidaciones;
+  // este UPDATE corre DESPUES para reubicarlo en el grupo SG. Idempotente (no-op una vez aplicado).
+  // orden=659 lo deja al final del grupo Abasto SG (los sg-* van 650-658), no arriba de Dashboard.
+  // NO toca rutas ni endpoints de Liquidaciones (liquidaciones.js): solo modulos_config.
+  db.prepare("UPDATE modulos_config SET grupo='Abasto SG', orden=659 WHERE modulo='ab-liquidaciones'").run();
+  console.log("[ORG] Liquidaciones reubicado en grupo Abasto SG");
+
   // ── Labels Abasto SG (con emoji) — FIX: el sidebar real lo renderiza sidebar-v2.js desde
   // modulos_config (no el nav estatico de panel.html). El seed usa INSERT OR IGNORE → no
   // actualiza filas existentes en prod. Estos UPDATE corren SIEMPRE (idempotentes, no-op una vez
