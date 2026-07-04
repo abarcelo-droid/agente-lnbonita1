@@ -414,6 +414,54 @@ router.delete('/productos/:id', requireAdmin, (req, res) => {
   } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
 });
 
+// ── TEMPORAL (A REMOVER) — counts del maestro de artículos ─────────────────────────
+// Relevamiento del patrón real (productos/presentaciones/envases) para evaluar
+// simplificación del maestro. No hay consola SQL web → se lee por navegador y se
+// saca en el mismo PR. Admin-only. BORRAR junto con su registro tras leer.
+router.get('/_tmp_counts_articulos', requireAdmin, (req, res) => {
+  const db = getDb();
+  try {
+    const scalar = (sql) => db.prepare(sql).get().n;
+    // Presentaciones por producto (solo productos vivos, presentaciones activas).
+    const porProducto = db.prepare(`
+      SELECT p.id, COUNT(pr.id) AS n
+      FROM sg_productos p
+      LEFT JOIN sg_presentaciones pr ON pr.producto_id = p.id AND pr.activo = 1
+      WHERE p.eliminado_en IS NULL
+      GROUP BY p.id`).all();
+    const conPres = porProducto.filter(r => r.n >= 1);
+    const promedio = conPres.length
+      ? +(conPres.reduce((a, r) => a + r.n, 0) / conPres.length).toFixed(2)
+      : 0;
+
+    res.json({
+      ok: true,
+      data: {
+        total_productos:              scalar('SELECT COUNT(*) n FROM sg_productos WHERE eliminado_en IS NULL'),
+        total_presentaciones:         scalar('SELECT COUNT(*) n FROM sg_presentaciones WHERE activo=1'),
+        total_envases:                scalar('SELECT COUNT(*) n FROM sg_envases WHERE activo=1'),
+        productos_sin_presentacion:   porProducto.filter(r => r.n === 0).length,
+        productos_1_presentacion:     porProducto.filter(r => r.n === 1).length,
+        productos_2mas_presentaciones: porProducto.filter(r => r.n >= 2).length,
+        promedio_pres_por_producto:   promedio,
+        distribucion_factor: db.prepare(`
+          SELECT factor_conversion AS factor, COUNT(*) AS cantidad
+          FROM sg_presentaciones WHERE activo=1
+          GROUP BY factor_conversion ORDER BY cantidad DESC`).all(),
+        distribucion_unidad_base: db.prepare(`
+          SELECT unidad_base, COUNT(*) AS cantidad
+          FROM sg_productos WHERE eliminado_en IS NULL
+          GROUP BY unidad_base ORDER BY cantidad DESC`).all(),
+        uso_envase: {
+          con_envase: scalar('SELECT COUNT(*) n FROM sg_presentaciones WHERE activo=1 AND envase_id IS NOT NULL'),
+          sin_envase: scalar('SELECT COUNT(*) n FROM sg_presentaciones WHERE activo=1 AND envase_id IS NULL')
+        },
+        uso_paletizado: scalar('SELECT COUNT(*) n FROM sg_presentaciones WHERE activo=1 AND paletizado=1')
+      }
+    });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
 // ── ENVASES (catálogo editable: cajón, bolsa, bin, IFCO…) ─────────────────────────
 // CRUD completo vía helper (GET/POST/PUT/DELETE). El dropdown de presentaciones lo
 // lee por GET; el alta al vuelo usa POST. nombre es UNIQUE → duplicado da 400.
