@@ -98,9 +98,9 @@ export async function generarFacturaPDF(factura) {
   let y = 50;
   doc.setDrawColor(...GRIS).setLineWidth(0.3).rect(8, y, 194, 18);
   doc.setTextColor(...GRIS).setFont('helvetica', 'normal').setFontSize(8.5);
-  doc.text(rcpt.label + ': ' + (rcpt.tipo === 99 ? '—' : rcpt.nro), 12, y + 6);
+  doc.text(rcpt.label + ': ' + (rcpt.tipo === 99 ? '—' : rcpt.nro), 12, y + 6, { maxWidth: 54 });
   doc.text('Razón Social: ' + (cliente.razon_social || '—'), 70, y + 6, { maxWidth: 128 });
-  doc.text('Condición frente al IVA: ' + condIvaLabel(cliente, factura.cbte_tipo), 12, y + 12);
+  doc.text('Condición frente al IVA: ' + condIvaLabel(cliente, factura.cbte_tipo), 12, y + 12, { maxWidth: 54 });
   const domCli = [cliente.direccion_entrega, cliente.localidad, cliente.provincia].filter(Boolean).join(', ') || '—';
   doc.text('Domicilio: ' + domCli, 70, y + 12, { maxWidth: 128 });
 

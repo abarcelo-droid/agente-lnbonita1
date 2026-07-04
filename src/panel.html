@@ -2065,7 +2065,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     <div class="sgv-sub" id="sgv-sub-despachos">
       <div style="display:flex;justify-content:flex-end;margin-bottom:10px"><button class="btn bb" onclick="sgDespOpen()">+ Nuevo despacho</button></div>
       <div class="ab-table-wrap"><table class="pa-tbl">
-        <thead><tr><th>N°</th><th>Fecha</th><th>Cliente</th><th>Pedido</th><th style="text-align:right">Total</th><th style="text-align:right">Margen</th><th style="text-align:center">Estado</th><th></th></tr></thead>
+        <thead><tr><th>N°</th><th>Fecha</th><th>Alias</th><th>Cliente</th><th>Qué se vendió</th><th style="text-align:right">Total</th><th style="text-align:center">Estado</th><th></th></tr></thead>
         <tbody id="sg-tb-despachos"><tr><td colspan="8" class="emp">Cargando…</td></tr></tbody>
       </table></div>
     </div>
@@ -4923,12 +4923,7 @@ function sgLoadDespachos(){
   api('/api/sg/despachos').then(function(r){
     var rows=(r&&r.ok)?r.data:[];
     eid('sg-tb-despachos').innerHTML = rows.length ? rows.map(function(d){
-      // PARTE D — Margen NETO (descuenta el flete de salida valorizado). Si hay flete, se aclara en el title.
-      var mn=(d.margen_neto!=null?d.margen_neto:(d.margen||0));
-      var costoVenta=(Number(d.flete_salida)||0)+(Number(d.carga_salida)||0);
-      var fleteTip=(costoVenta>0)?(' title="Margen items '+sgMoney(d.margen)+(d.flete_salida>0?(' − flete '+sgMoney(d.flete_salida)):'')+(d.carga_salida>0?(' − carga '+sgMoney(d.carga_salida)):'')+'"'):'';
-      var fleteMark=(d.flete_salida>0?' 🚚':'')+(d.carga_salida>0?' 📦':'');
-      return '<tr><td><code>'+esc(d.numero||'')+'</code></td><td>'+(d.fecha_despacho||'—')+'</td><td>'+esc(d.cliente_nombre||'—')+'</td><td>'+esc(d.pedido_numero||'—')+'</td><td style="text-align:right">'+sgMoney(d.total)+'</td><td style="text-align:right;color:'+(mn>=0?'var(--ok,#16a34a)':'var(--err,#dc2626)')+'"'+fleteTip+'>'+sgMoney(mn)+fleteMark+'</td><td style="text-align:center"><span class="bdg bok">'+(SG_ESTDESP[d.estado]||d.estado)+'</span></td><td style="text-align:right;white-space:nowrap"><button class="btn bo bs" onclick="sgDespVer('+d.id+')">🔍</button> <button class="btn bd bs" onclick="sgDespAnular('+d.id+')">✖</button></td></tr>';
+      return '<tr><td><code>'+esc(d.numero||'')+'</code></td><td>'+(d.fecha_despacho||'—')+'</td><td>'+esc(d.cliente_alias||'—')+'</td><td>'+esc(d.cliente_nombre||'—')+'</td><td>'+esc(d.vendido||'—')+'</td><td style="text-align:right">'+sgMoney(d.total)+'</td><td style="text-align:center"><span class="bdg bok">'+(SG_ESTDESP[d.estado]||d.estado)+'</span></td><td style="text-align:right;white-space:nowrap"><button class="btn bo bs" onclick="sgDespVer('+d.id+')">🔍</button> <button class="btn bd bs" onclick="sgDespAnular('+d.id+')">✖</button></td></tr>';
     }).join('') : '<tr><td colspan="8" class="emp">Sin despachos.</td></tr>';
   });
 }
