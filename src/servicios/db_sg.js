@@ -892,6 +892,19 @@ try {
   if (faltan.length) console.log('[DB] SG sg_oc_items migrado (+' + faltan.join(', +') + ')');
 } catch (e) { console.error('[DB] SG migración sg_oc_items (iva):', e.message); }
 
+// 4) F1 — OC por especie+envase+kilaje al vuelo. El operario elige envase (sg_envases) y
+//    tipea el kilaje (kg por bulto) sin depender de una presentación pre-armada. Ambas
+//    columnas nullable: los items legacy (cargados con presentacion_id) quedan NULL y siguen
+//    andando. Sin REFERENCES inline (límite de ALTER ADD COLUMN en SQLite); envase_id es FK
+//    lógica a sg_envases.
+try {
+  const cols = db.prepare("PRAGMA table_info(sg_oc_items)").all().map(c => c.name);
+  const faltan = [];
+  if (!cols.includes('kg_por_bulto')) { db.exec('ALTER TABLE sg_oc_items ADD COLUMN kg_por_bulto REAL');    faltan.push('kg_por_bulto'); }
+  if (!cols.includes('envase_id'))    { db.exec('ALTER TABLE sg_oc_items ADD COLUMN envase_id INTEGER');    faltan.push('envase_id'); }
+  if (faltan.length) console.log('[DB] SG sg_oc_items migrado (+' + faltan.join(', +') + ')');
+} catch (e) { console.error('[DB] SG migración sg_oc_items (envase/kilaje):', e.message); }
+
 // ── BLOQUE A — Recepción SG: +documentación (factura/DTV) + paletizado recibido ──
 // Campos aditivos nullable sobre sg_recepciones (el remito ya existe en
 // numero_remito_proveedor). ALTER ADD COLUMN simple, sin rebuild: las recepciones

@@ -3713,6 +3713,23 @@ function sgOcAddItem(){ SG.ocItems.push({producto_id:'',presentacion_id:'',canti
 function sgOcDelItem(i){ SG.ocItems.splice(i,1); sgOcRenderItems(); }
 function sgOcUpd(i,c,v){ SG.ocItems[i][c]=v; if(c==='producto_id')SG.ocItems[i].presentacion_id=''; sgOcRenderItems(); }
 function sgOcUpdNR(i,c,v){ SG.ocItems[i][c]=v; sgOcTotales(); }
+// F1 — factor del item (kg por bulto): sale del kilaje tipeado al vuelo; si no hay (item
+// legacy con presentación pre-armada), cae a sgFactor(presentacion_id) → 1 por defecto.
+function sgOcFactor(it){ var k=Number(it.kg_por_bulto); if(k>0) return k; return sgFactor(it.presentacion_id); }
+// F1 — cambio de envase en la card de OC. "＋ nuevo envase" reutiliza el alta con dedup
+// (sgCrearConDedup) y refresca la card en vez del modal de presentaciones (sgEnvSync).
+function sgOcEnvChange(i, sel){
+  if(sel.value==='__new'){
+    var nombre=(prompt('Nombre del nuevo envase:')||'').trim();
+    if(!nombre){ sel.value=SG.ocItems[i].envase_id||''; return; }
+    sgCrearConDedup('envases', { nombre: nombre },
+      function(cand){ if(!(SG.cacheEnv||[]).some(function(e){return String(e.id)===String(cand.id);})) SG.cacheEnv.push(cand); SG.ocItems[i].envase_id=String(cand.id); sgOcRenderItems(); toast('Usando "'+cand.nombre+'"','ok'); },
+      function(row){ SG.cacheEnv.push(row); SG.cacheEnv.sort(function(a,b){ return String(a.nombre).localeCompare(String(b.nombre)); }); SG.ocItems[i].envase_id=String(row.id); sgOcRenderItems(); toast('Envase creado','ok'); }
+    );
+    return;
+  }
+  SG.ocItems[i].envase_id=sel.value; sgOcTotales();
+}
 
 // ── CAMBIO 1 — separador de miles (es-AR) SOLO visual en los inputs de la OC ─────
 // El valor REAL guardado en SG.ocItems es el número limpio (sgMilParse). El formato no
@@ -3780,12 +3797,18 @@ function sgOcBuscarBlur(i){ var res=eid('sg-oc-res-'+i); if(res) setTimeout(func
 function sgOcRenderItems(){
   var firme=sgOcPrecio()==='firme';
   eid('sg-oc-items').innerHTML=SG.ocItems.map(function(it,i){
-    // Presentación: SIEMPRE filtrada por el producto elegido. Si el producto no tiene
-    // presentaciones cargadas, mostrar vacío claro (deshabilitado).
-    var presList = sgPresDe(it.producto_id);
-    var presSel = (it.producto_id && presList.length===0)
-      ? '<select disabled title="Este producto no tiene presentaciones cargadas (cargalas en Catálogo)"><option>(sin presentaciones)</option></select>'
-      : '<select onchange="sgOcUpdNR('+i+',\'presentacion_id\',this.value)">'+sgOpts(presList,sgPresLabel,it.presentacion_id,'— Present. —')+'</select>';
+    // F1 — envase + kilaje AL VUELO (reemplaza el <select> de presentación pre-armada). El
+    // operario elige el envase (cache SG.cacheEnv, mismo patrón del modal de presentaciones)
+    // y tipea los kg por bulto. presentacion_id queda legacy (null en OC nuevas). El factor
+    // del item sale del kilaje tipeado (ver sgOcFactor). En modo "por kg" el kilaje es opcional.
+    var envOpts = '<option value="">— Envase —</option>'
+      + (SG.cacheEnv||[]).map(function(e){ return '<option value="'+e.id+'"'+(String(it.envase_id)===String(e.id)?' selected':'')+'>'+esc(e.nombre)+'</option>'; }).join('')
+      + '<option value="__new">＋ nuevo envase</option>';
+    var kgVal = (it.kg_por_bulto!=null && it.kg_por_bulto!=='') ? esc(String(it.kg_por_bulto)) : '';
+    var presSel = '<div class="sg-oc-envkg" style="display:flex;gap:6px;align-items:center">'
+      +'<select onchange="sgOcEnvChange('+i+',this)" title="Envase (cajón/bolsa/bin)">'+envOpts+'</select>'
+      +'<input type="number" min="0" step="0.01" placeholder="kg/bulto" value="'+kgVal+'" oninput="sgOcUpdNR('+i+',\'kg_por_bulto\',this.value)" title="Kilos por bulto (factor tipeado al vuelo)" style="width:88px">'
+      +'</div>';
     // BUSCADOR combinado (item 2): reemplaza el dropdown de producto. El operador tipea
     // (especie · variedad · envase) y filtra; el dropdown de resultados se renderiza solo (no
     // re-renderiza toda la lista → no pierde foco al tipear). Al elegir, sgOcPickProd fija el producto.
@@ -3829,7 +3852,7 @@ function sgOcTotales(){
   var firme=sgOcPrecio()==='firme', disc=sgOcDiscrimina(), incl=sgOcIncluyeIva();
   var tk=0, tBruto=0, tNeto=0, tIva=0;
   SG.ocItems.forEach(function(it,i){
-    var factor=sgFactor(it.presentacion_id), cant=Number(it.cantidad)||0, precio=Number(it.precio)||0;
+    var factor=sgOcFactor(it), cant=Number(it.cantidad)||0, precio=Number(it.precio)||0;
     var bulto = it.modo==='bulto';
     var kg = bulto ? cant*factor : cant;          // bulto: kg=bultos×factor · kilo: kg=cantidad
     tk += kg;
@@ -3872,12 +3895,16 @@ function sgOcGuardar(){
     // efectivo), sin importar el modo. Así el backend (kg×$/kg) calcula el total correcto y el stock/costeo
     // quedan 100% en kg. modo_carga solo registra cómo lo cargó el operador.
     items:items.map(function(it){
-      var factor=sgFactor(it.presentacion_id), cant=Number(it.cantidad)||0, bulto=it.modo==='bulto';
+      var factor=sgOcFactor(it), cant=Number(it.cantidad)||0, bulto=it.modo==='bulto';
       var kg = bulto ? cant*factor : cant;
       var precio = (firme && it.precio!=='' && it.precio!=null) ? Number(it.precio) : null;
       var precioKg = precio==null ? null : (bulto ? (factor>0?precio/factor:precio) : precio);  // $/bulto → $/kg
       var presCant = bulto ? cant : (factor>0 ? cant/factor : cant);  // cantidad en presentaciones (bultos) canónica
+      // F1 — se suman envase_id + kg_por_bulto (tipeados al vuelo); presentacion_id va null en
+      // OC nuevas (legacy). kg_estimados sigue canónico (bulto: cant×factor; kilo: cant).
       return { producto_id:Number(it.producto_id), presentacion_id:it.presentacion_id?Number(it.presentacion_id):null,
+        envase_id:(it.envase_id!=null && it.envase_id!=='')?Number(it.envase_id):null,
+        kg_por_bulto:(it.kg_por_bulto!=null && it.kg_por_bulto!=='')?Number(it.kg_por_bulto):null,
         cantidad_estimada_presentaciones:presCant, kg_estimados:kg, precio_estimado_por_kg:precioKg,
         modo_carga: bulto ? 'bulto' : 'kilo' }; }) };
   api('/api/sg/oc','POST',body).then(function(r){

@@ -1269,13 +1269,17 @@ router.post('/oc', requireAdmin, (req, res) => {
       const ocId = ocInfo.lastInsertRowid;
 
       const insItem = db.prepare(`INSERT INTO sg_oc_items
-        (oc_id, producto_id, presentacion_id, cantidad_estimada_presentaciones, kg_estimados, precio_estimado_por_kg, observaciones_item, modo_carga,
+        (oc_id, producto_id, presentacion_id, envase_id, kg_por_bulto, cantidad_estimada_presentaciones, kg_estimados, precio_estimado_por_kg, observaciones_item, modo_carga,
          iva_alicuota, neto_estimado, iva_estimado)
-        VALUES (?,?,?,?,?,?,?,?, ?,?,?)`);
+        VALUES (?,?,?,?,?,?,?,?,?,?, ?,?,?)`);
       let totKg = 0, totMonto = 0, totNeto = 0, totIva = 0;
       for (const it of items) {
+        // F1 — factor por item: kg por bulto tipeado al vuelo; fallback a la presentación
+        // legacy y, en última instancia, 1. Solo se usa como fallback de kg_estimados.
+        const kgPorBulto = (it.kg_por_bulto != null && it.kg_por_bulto !== '') ? Number(it.kg_por_bulto) : null;
+        const envaseId = (it.envase_id != null && it.envase_id !== '') ? Number(it.envase_id) : null;
         const pres = it.presentacion_id ? db.prepare('SELECT factor_conversion FROM sg_presentaciones WHERE id=?').get(it.presentacion_id) : null;
-        const factor = pres ? Number(pres.factor_conversion) : 1;
+        const factor = kgPorBulto != null ? kgPorBulto : (pres ? Number(pres.factor_conversion) : 1);
         const cant = Number(it.cantidad_estimada_presentaciones || 0);
         // El front manda kg_estimados y precio_estimado_por_kg YA canónicos (kg y $/kg efectivo),
         // sin importar el modo de carga → el costeo/stock siguen 100% en kg, intactos.
@@ -1293,7 +1297,7 @@ router.post('/oc', requireAdmin, (req, res) => {
             else            { neto = bruto;                     iva = bruto * alic / 100; } // se adiciona
           }
         }
-        insItem.run(ocId, it.producto_id, it.presentacion_id || null, cant, kg, precio, val(it.observaciones_item), modo,
+        insItem.run(ocId, it.producto_id, it.presentacion_id || null, envaseId, kgPorBulto, cant, kg, precio, val(it.observaciones_item), modo,
           alic, neto, iva);
         totKg += kg;
         if (precio != null) { totMonto += neto + iva; totNeto += neto; totIva += iva; } // total con IVA = neto+iva (= bruto si no discrimina o precio incluye IVA)
