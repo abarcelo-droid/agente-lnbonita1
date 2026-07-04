@@ -2375,6 +2375,10 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     </div>
 
     <div class="sg-sub" id="sg-sub-presentaciones">
+      <div style="margin-bottom:10px;padding:9px 12px;border-radius:8px;background:var(--bg);border:1px solid var(--bor);font-size:12.5px;color:var(--mut);display:flex;gap:8px;align-items:flex-start">
+        <span style="font-size:15px;line-height:1">💡</span>
+        <span>Las presentaciones son <b>plantillas opcionales</b>. Ya no hace falta pre-armarlas para operar: en la OC elegís especie + envase + kilaje al vuelo. Se mantienen para reuso rápido y para las OC/lotes cargados con presentación (legacy).</span>
+      </div>
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;gap:10px;flex-wrap:wrap">
         <label style="font-size:12px;color:var(--mut)">Producto
           <select id="sg-pres-filtro" onchange="sgLoad('presentaciones')" style="padding:5px 8px;border-radius:6px;border:1px solid var(--bor);background:var(--bg)"><option value="">— Todos —</option></select>
@@ -3790,7 +3794,7 @@ function sgOcBuscar(i, q){
 function sgOcPickProd(i, id){
   SG.ocItems[i].producto_id = String(id); SG.ocItems[i].presentacion_id = ''; SG.ocItems[i].q = '';
   var res = eid('sg-oc-res-'+i); if(res) res.style.display='none';
-  sgOcRenderItems();   // re-render: aparece el selector de presentaciones del producto elegido (item 3)
+  sgOcRenderItems();   // re-render: quedan habilitados envase + kilaje al vuelo para el producto elegido (F1)
 }
 function sgOcQFocus(i, el){ if(SG.ocItems[i].producto_id){ el.select(); } else { sgOcBuscar(i, el.value); } }
 function sgOcBuscarBlur(i){ var res=eid('sg-oc-res-'+i); if(res) setTimeout(function(){ res.style.display='none'; }, 150); }
