@@ -1087,6 +1087,11 @@ try {
   if (addCol('sg_reprocesos',       'bultos_merma',         'INTEGER')) added.push('sg_reprocesos.bultos_merma');
   if (addCol('sg_reservas',         'bultos',               'INTEGER')) added.push('sg_reservas.bultos');
   if (addCol('sg_despacho_items',   'bultos',               'INTEGER')) added.push('sg_despacho_items.bultos');
+  // F3 — el despacho snapshotea el factor tipeado (kg por bulto) y el envase del lote al momento
+  // del despacho, para no acoplar la factura a un lote editado después. Nullable; los ítems legacy
+  // quedan NULL y la lectura cae a la presentación vía COALESCE. envase_id es FK lógica a sg_envases.
+  if (addCol('sg_despacho_items',   'kg_por_bulto',         'REAL'))    added.push('sg_despacho_items.kg_por_bulto');
+  if (addCol('sg_despacho_items',   'envase_id',            'INTEGER')) added.push('sg_despacho_items.envase_id');
   if (added.length) console.log('[DB] SG F3-A bultos movimiento (+' + added.join(', +') + ')');
 
   // Backfill idempotente (solo bultos NULL) y derivable (lote con presentacion_id + factor>0). El

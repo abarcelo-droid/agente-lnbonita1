@@ -714,7 +714,7 @@ router.post('/facturas/emitir', requireAdmin, async (req, res) => {
         const diId = Number(it.despacho_item_id), kg = Number(it.kg);
         if (!(kg > 0)) continue;
         const di = db.prepare(`SELECT di.id, di.producto_id, di.kg_despachados, di.precio_por_kg, di.presentacion_id,
-            ps.factor_conversion AS kg_por_bulto, fam.iva_alicuota
+            COALESCE(di.kg_por_bulto, ps.factor_conversion) AS kg_por_bulto, fam.iva_alicuota
           FROM sg_despacho_items di
           LEFT JOIN sg_productos pr ON pr.id=di.producto_id
           LEFT JOIN sg_familias fam ON fam.id=pr.familia_id
@@ -2433,7 +2433,8 @@ router.post('/pedidos', requireAdmin, (req, res) => {
         VALUES (?,?,?,?,?,?,?,?)`);
       for (const it of items) {
         const pres = it.presentacion_id ? db.prepare('SELECT factor_conversion FROM sg_presentaciones WHERE id=?').get(it.presentacion_id) : null;
-        const factor = pres ? Number(pres.factor_conversion) : 1;
+        // F3 — factor del pedido: kg por bulto tipeado al vuelo (F1); fallback a la presentación → 1.
+        const factor = (it.kg_por_bulto != null && it.kg_por_bulto !== '') ? Number(it.kg_por_bulto) : (pres ? Number(pres.factor_conversion) : 1);
         const cant = Number(it.cantidad_presentaciones || 0);
         const kg = it.kg_solicitados != null ? Number(it.kg_solicitados) : cant * factor;
         const precio = Number(it.precio_por_kg || 0);
@@ -2721,14 +2722,17 @@ router.post('/despachos', requireAdmin, (req, res) => {
     for (const it of items) {
       const loteId = Number(it.lote_id);
       if (!loteId) return res.status(400).json({ ok: false, error: 'Cada línea necesita lote' });
-      const lp = db.prepare(`SELECT l.presentacion_id, l.origen, COALESCE(l.kg_por_bulto, ps.factor_conversion) AS kg_por_bulto
+      const lp = db.prepare(`SELECT l.presentacion_id, l.origen, l.envase_id, COALESCE(l.kg_por_bulto, ps.factor_conversion) AS kg_por_bulto
         FROM sg_lotes l LEFT JOIN sg_presentaciones ps ON ps.id=l.presentacion_id WHERE l.id=? AND l.activo=1`).get(loteId);
       if (!lp) return res.status(400).json({ ok: false, error: 'Lote inexistente: ' + loteId });
-      // F4-C2 — el granel-de-entrada (origen='granel' + sin presentación) no se vende directo: entra a
-      // la venta como hijos-bulto post-reproceso (que SÍ tienen presentación, aunque hereden el origen).
-      if (String(lp.origen || '') === 'granel' && lp.presentacion_id == null) return res.status(400).json({ ok: false, error: `Lote ${loteId} es GRANEL: no se despacha directo, primero reprocesalo a cajones` });
-      const kgPorBulto = (lp.presentacion_id != null && Number(lp.kg_por_bulto) > 0) ? Number(lp.kg_por_bulto) : null;
-      if (kgPorBulto == null) return res.status(400).json({ ok: false, error: `Lote ${loteId} sin presentación: no despachable por bulto (cargá su presentación/kg por bulto primero)` });
+      // F3 — el gate del despacho por bulto ahora es el FACTOR (kg por bulto coalesced: tipeado al
+      // vuelo o heredado de la presentación), NO la presentación en sí. Lotes al-vuelo (sin
+      // presentación pero con kg_por_bulto) pasan a despachables; para legacy el resultado es idéntico.
+      const kgPorBulto = (Number(lp.kg_por_bulto) > 0) ? Number(lp.kg_por_bulto) : null;
+      // F4-C2 — el granel-de-entrada (origen='granel' sin factor conocido) no se vende directo: entra a
+      // la venta como hijos-bulto post-reproceso (que SÍ tienen factor, aunque hereden el origen).
+      if (String(lp.origen || '') === 'granel' && kgPorBulto == null) return res.status(400).json({ ok: false, error: `Lote ${loteId} es GRANEL: no se despacha directo, primero reprocesalo a cajones` });
+      if (kgPorBulto == null) return res.status(400).json({ ok: false, error: `Lote ${loteId} sin factor: no despachable por bulto (cargá su envase/kg por bulto o presentación primero)` });
       // bultos: input canónico it.bultos; si no vino, se deriva del kg_despachados que manda el front.
       let bultos;
       if (it.bultos != null && it.bultos !== '') bultos = Number(it.bultos);
@@ -2741,7 +2745,7 @@ router.post('/despachos', requireAdmin, (req, res) => {
       bultos = Math.round(bultos);
       const kg = +(bultos * kgPorBulto).toFixed(4);   // kg DERIVADO (nominal), nunca input libre
       pedidoLote[loteId] = (pedidoLote[loteId] || 0) + bultos;
-      lineas.push({ it, loteId, bultos, kgPorBulto, kg, presentacionId: lp.presentacion_id });
+      lineas.push({ it, loteId, bultos, kgPorBulto, kg, presentacionId: lp.presentacion_id, envaseId: lp.envase_id });
     }
     for (const loteId of Object.keys(pedidoLote)) {
       const lote = db.prepare('SELECT estado FROM sg_lotes WHERE id=? AND activo=1').get(loteId);
@@ -2767,8 +2771,8 @@ router.post('/despachos', requireAdmin, (req, res) => {
       // PARTE B — si se asignó fletero, queda un gasto de flete de salida PENDIENTE de valorizar.
       syncGastoFleteDespacho(db, despachoId, fleteroId, val(b.fecha_despacho), uid(req));
       const ins = db.prepare(`INSERT INTO sg_despacho_items
-        (despacho_id, lote_id, producto_id, presentacion_id, cantidad_presentaciones, bultos, kg_despachados, precio_por_kg, subtotal, margen_estimado)
-        VALUES (?,?,?,?,?,?,?,?,?,?)`);
+        (despacho_id, lote_id, producto_id, presentacion_id, envase_id, kg_por_bulto, cantidad_presentaciones, bultos, kg_despachados, precio_por_kg, subtotal, margen_estimado)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`);
       const lotesAfectados = new Set();
       let totalBultos = 0;   // FASE 2 — bultos del despacho (para la carga de la cooperativa)
       for (const ln of lineas) {
@@ -2786,7 +2790,9 @@ router.post('/despachos', requireAdmin, (req, res) => {
         // bultos va tanto a la columna F3-A (sg_despacho_items.bultos, que lee bultosDisponibles)
         // como a cantidad_presentaciones (compat). presentacion_id se toma de la línea o del lote.
         const presId = it.presentacion_id != null ? it.presentacion_id : (ln.presentacionId || null);
+        // F3 — snapshot inmutable del factor+envase usados en este despacho (no se re-lee del lote).
         ins.run(despachoId, ln.loteId, lote.producto_id, presId,
+          (ln.envaseId != null ? ln.envaseId : null), (ln.kgPorBulto != null ? ln.kgPorBulto : null),
           bultos, bultos, kg, precio, subtotal, margen);
         totalBultos += bultos;
         lotesAfectados.add(ln.loteId);
