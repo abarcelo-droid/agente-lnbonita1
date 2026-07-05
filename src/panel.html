@@ -3780,14 +3780,13 @@ function sgOcBuscar(i, q){
   if(ql===''){ res.style.display='none'; res.innerHTML=''; sgOcTotales(); return; }
   var terms = ql.split(/\s+/);
   var matches = sgOcProductos().filter(function(p){
-    var hay = (sgOcProdLabel(p)+' '+sgOcEnvasesStr(p)).toLowerCase();
+    // Post-F1 el envase se elige aparte → el typeahead filtra solo por especie/variedad/código.
+    var hay = sgOcProdLabel(p).toLowerCase();
     return terms.every(function(t){ return hay.indexOf(t) >= 0; });
   }).slice(0, 40);
   res.innerHTML = matches.length ? matches.map(function(p){
-    var env = sgOcEnvasesStr(p);
     return '<div class="sg-oc-res-it" onmousedown="sgOcPickProd('+i+','+p.id+')" style="padding:7px 9px;cursor:pointer;font-size:12.5px;border-bottom:1px solid var(--bor)">'
-      +'<code>'+esc(p.codigo||'')+'</code> '+esc(p.nombre||'')+(p.variedad?' '+esc(p.variedad):'')
-      +(env?' <span style="color:var(--mut)">· '+esc(env)+'</span>':'')+'</div>';
+      +'<code>'+esc(p.codigo||'')+'</code> '+esc(p.nombre||'')+(p.variedad?' '+esc(p.variedad):'')+'</div>';
   }).join('') : '<div style="padding:8px 9px;color:var(--mut);font-size:12px">Sin coincidencias</div>';
   res.style.display='block';
 }
