@@ -470,6 +470,28 @@ async function _getAnthropic() {
   }
 }
 
+// Prepara la imagen del remito para el OCR: la redimensiona server-side antes de mandarla.
+// Haiku downscalea a 1568px lado largo igual, así que enviar el archivo crudo (hasta ~13MB en
+// base64 con el límite de multer) es peso muerto que rompe el socket (ERR_STREAM_PREMATURE_CLOSE).
+// 1568px + JPEG q80 = mismo detalle que ve el modelo, payload ~10-20× menor, y preserva la
+// legibilidad del texto manuscrito del sellado. Si el resize falla (sharp ausente/imagen rara),
+// hace fallback al archivo crudo → no rompe el flujo. Devuelve { dataB64, mediaType }.
+async function _ocrImagenB64(filePath, fallbackMediaType) {
+  const buf = fs.readFileSync(filePath);   // el caller captura errores de lectura
+  try {
+    const sharp = (await import('sharp')).default;
+    const resized = await sharp(buf)
+      .rotate()   // hornea la orientación EXIF (si no, al reencodear queda de costado y baja el OCR)
+      .resize({ width: 1568, height: 1568, fit: 'inside', withoutEnlargement: true })
+      .jpeg({ quality: 80 })
+      .toBuffer();
+    return { dataB64: resized.toString('base64'), mediaType: 'image/jpeg' };
+  } catch(reErr) {
+    console.warn('[IFCO][OCR] resize falló, uso imagen cruda:', reErr.message);
+    return { dataB64: buf.toString('base64'), mediaType: fallbackMediaType || 'image/jpeg' };
+  }
+}
+
 // ── Lazy load de exceljs para parsear Excel de IFCO ──────────────────────
 let _exceljsLib = null;
 async function _getExcelJS() {
@@ -763,7 +785,7 @@ const storage = multer.diskStorage({
     cb(null, tag + '_' + (req.params.id || 'x') + '_' + Date.now() + ext);
   }
 });
-const upload = multer({ storage: storage, limits: { fileSize: 10 * 1024 * 1024 } });
+const upload = multer({ storage: storage, limits: { fileSize: 5 * 1024 * 1024 } });
 
 // ── Auth desde cookie (sigue patrón del resto del panel) ──────────────────
 function getUser(req) {
@@ -4346,10 +4368,10 @@ router.post('/ocr/remito-super', upload.single('foto'), async function(req, res)
   if (mediaType === 'application/pdf') {
     return res.status(400).json({ error: 'PDF no soportado por OCR — subí JPG/PNG' });
   }
-  let dataB64;
+  let dataB64, sendMediaType;
   try {
-    const buf = fs.readFileSync(filePath);
-    dataB64 = buf.toString('base64');
+    const img = await _ocrImagenB64(filePath, mediaType);
+    dataB64 = img.dataB64; sendMediaType = img.mediaType;
   } catch(e) {
     return res.status(500).json({ error: 'No se pudo leer el archivo subido: ' + e.message });
   }
@@ -4421,7 +4443,7 @@ router.post('/ocr/remito-super', upload.single('foto'), async function(req, res)
       messages: [{
         role: 'user',
         content: [
-          { type: 'image', source: { type: 'base64', media_type: mediaType, data: dataB64 } },
+          { type: 'image', source: { type: 'base64', media_type: sendMediaType, data: dataB64 } },
           { type: 'text',  text: prompt }
         ]
       }]
@@ -4500,9 +4522,8 @@ router.post('/ocr/match-sellado', upload.single('foto'), async function(req, res
   const filePath = path.join(UPLOAD_DIR, req.file.filename);
   let dataB64, mediaType;
   try {
-    const buf = fs.readFileSync(filePath);
-    dataB64 = buf.toString('base64');
-    mediaType = req.file.mimetype || 'image/jpeg';
+    const img = await _ocrImagenB64(filePath, req.file.mimetype || 'image/jpeg');
+    dataB64 = img.dataB64; mediaType = img.mediaType;
   } catch(e) {
     return res.status(500).json({ error: 'No se pudo leer el archivo: ' + e.message });
   }
