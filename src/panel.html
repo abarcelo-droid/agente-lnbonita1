@@ -279,6 +279,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   <div class="ni" data-sec="sg-reprocesos" data-admin-only="1"></div>
   <div class="ni" data-sec="sg-ventas" data-admin-only="1"></div>
   <div class="ni" data-sec="sg-gastos-directos" data-admin-only="1"></div>
+  <div class="ni" data-sec="sg-importacion" data-admin-only="1"></div>
   <div class="ni" data-sec="sg-catalogo" data-admin-only="1"></div>
   <div class="ni" data-sec="sg-reportes" data-admin-only="1"></div>
 
@@ -2287,6 +2288,14 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     <div class="sggd-pane" id="sggd-pane-repaso"><div class="emp" style="padding:40px">🔁 Repasos — próximamente (Fase 3).</div></div>
   </div>
 
+  <div class="sec sg-mod" id="sec-sg-importacion">
+    <div class="ph"><div><div class="ph-t">🍅 San Gerónimo · Importación</div><div class="ph-s">Cotizador de embarque: costo neto por caja, ajuste por merma y margen proyectado. Estimado vs real.</div></div><button class="btn bb" onclick="sgImpOpen()">+ Nuevo embarque</button></div>
+    <div class="ab-table-wrap"><table class="pa-tbl">
+      <thead><tr><th>Embarque</th><th>Proveedor</th><th style="text-align:center">Estado</th><th style="text-align:right">Cajas</th><th style="text-align:right">Costo/caja neto</th><th style="text-align:right">Costo/caja c-imp.</th><th style="text-align:right">Margen proy.</th><th></th></tr></thead>
+      <tbody id="sg-tb-embarques"><tr><td colspan="8" class="emp">Cargando…</td></tr></tbody>
+    </table></div>
+  </div>
+
   <div class="sec sg-mod" id="sec-sg-reportes">
     <div class="ph"><div><div class="ph-t">🍅 San Gerónimo · Informes</div><div class="ph-s">Compras, ventas, márgenes y merma</div></div></div>
     <style>
@@ -2438,6 +2447,46 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
 </div>
 
 <!-- Modal Crear OC -->
+<div class="ab-modal-overlay" id="sg-emb-modal">
+  <div class="ab-modal" style="width:900px;max-height:92vh;overflow-y:auto">
+    <div class="mhd"><div class="mht" id="sg-emb-modal-tit">📥 Nuevo embarque</div><button class="mcl" onclick="closeMB('sg-emb-modal')">×</button></div>
+    <input type="hidden" id="sg-emb-id">
+    <div class="fg" style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px">
+      <div class="fl" style="grid-column:span 2"><label>Nombre del embarque</label><input type="text" id="sg-emb-nombre" placeholder="Camión 87 - Paltas Hass"></div>
+      <div class="fl" style="grid-column:span 2"><label>Proveedor (exterior)</label><select id="sg-emb-prov"></select></div>
+      <div class="fl"><label>País origen</label><input type="text" id="sg-emb-pais"></div>
+      <div class="fl"><label>Incoterm</label><input type="text" id="sg-emb-incoterm" value="FOB"></div>
+      <div class="fl"><label>NCM</label><input type="text" id="sg-emb-ncm"></div>
+      <div class="fl"><label>Cert. origen Mercosur</label><label style="display:flex;align-items:center;gap:6px;font-size:13px;margin-top:4px"><input type="checkbox" id="sg-emb-cert"> Sí</label></div>
+      <div class="fl"><label>Moneda embarque</label><select id="sg-emb-moneda"><option value="USD">USD</option><option value="ARS">ARS</option></select></div>
+      <div class="fl"><label>TC estimado</label><input type="number" step="0.01" id="sg-emb-tc-est" oninput="sgImpCalc()"></div>
+      <div class="fl"><label>TC real</label><input type="number" step="0.01" id="sg-emb-tc-real" oninput="sgImpCalc()"></div>
+      <div class="fl"><label>Estado</label><select id="sg-emb-estado"></select></div>
+      <div class="fl"><label>Cantidad de cajas</label><input type="number" step="1" min="0" id="sg-emb-cajas" oninput="sgImpCalc()"></div>
+      <div class="fl"><label>Merma esperada %</label><input type="number" step="0.1" min="0" id="sg-emb-merma" oninput="sgImpCalc()"></div>
+      <div class="fl"><label>Precio referencia $/caja</label><input type="number" step="0.01" min="0" id="sg-emb-precio-ref" oninput="sgImpCalc()"></div>
+      <div class="fl"><label>ETD</label><input type="date" id="sg-emb-etd"></div>
+      <div class="fl"><label>ETA</label><input type="date" id="sg-emb-eta"></div>
+      <div class="fl" style="grid-column:span 4"><label>Observaciones</label><input type="text" id="sg-emb-obs"></div>
+    </div>
+    <div style="display:grid;grid-template-columns:1.4fr 1fr;gap:16px;margin-top:8px">
+      <div>
+        <div style="font-size:12px;font-weight:600;color:var(--mut);margin-bottom:6px">RUBROS · estimado vs real (el gap Δ es el control central)</div>
+        <table class="pa-tbl" style="font-size:12px"><thead><tr><th>Rubro</th><th>Mon.</th><th style="text-align:right">Estimado</th><th style="text-align:right">Real</th><th style="text-align:right">Δ (real−est.)</th></tr></thead>
+          <tbody id="sg-emb-costos"></tbody></table>
+      </div>
+      <div>
+        <div style="font-size:12px;font-weight:600;color:var(--mut);margin-bottom:6px">RESULTADO (en vivo)</div>
+        <div id="sg-emb-result" style="border:1px solid var(--bor);border-radius:10px;padding:12px"></div>
+      </div>
+    </div>
+    <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px">
+      <button class="btn bo" onclick="closeMB('sg-emb-modal')">Cancelar</button>
+      <button class="btn bb" onclick="sgImpSave()">Guardar embarque</button>
+    </div>
+  </div>
+</div>
+
 <div class="ab-modal-overlay" id="sg-oc-modal">
   <div class="ab-modal" style="width:780px;max-height:90vh;overflow-y:auto">
     <div class="mhd"><div class="mht">🛒 Nueva orden de compra</div><button class="mcl" onclick="closeMB('sg-oc-modal')">×</button></div>
@@ -11154,6 +11203,7 @@ function loadSec(s) {
     'sg-reprocesos': function(){ sgReprocesosInit(); },
     'sg-ventas':     function(){ sgVenInit(); },
     'sg-gastos-directos': function(){ sgGdsInit(); },
+    'sg-importacion': function(){ sgImpInit(); },
     'sg-catalogo':   function(){ sgLoadCaches(function(){ sgCatSub('productos'); }); },
     'sg-reportes':   function(){ sgRepInit(); },
     'personal-padron':     function(){ ppOpenModulo('padron'); },
@@ -13637,6 +13687,172 @@ function abrirHistorico(producto, mes, event) {
       if (!popup.contains(e.target)) { popup.remove(); document.removeEventListener('click', handler); }
     });
   }, 100);
+}
+
+// ── MÓDULO IMPORTACIÓN (F1) — cotizador de embarque ──────────────────────────
+// Standalone: solo consume /api/sg/embarques*. El cálculo en vivo (sgImpCalc) espeja
+// calcEmbarque del server. Moneda por rubro (ARS default); USD se convierte con tc.
+var SG_EMB_CONCEPTOS = [
+  {k:'costo_mercaderia',          l:'Costo mercadería (FOB)',    cred:false},
+  {k:'anticipo_impuesto',         l:'Anticipo de impuesto',      cred:false},
+  {k:'gastos_despachante',        l:'Gastos despachante',        cred:false},
+  {k:'fletes',                    l:'Fletes',                    cred:false},
+  {k:'diferencia_cotizacion',     l:'Diferencia de cotización',  cred:false},
+  {k:'gastos_bancarios',          l:'Gastos bancarios',          cred:false},
+  {k:'iva_credito_computable',    l:'IVA crédito computable',    cred:true},
+  {k:'percepcion_iva_computable', l:'Percepción IVA computable', cred:true},
+  {k:'percepcion_iibb',           l:'Percepción IIBB',           cred:true}
+];
+var SG_EMB_ESTADOS = [['cotizacion','Cotización'],['abierto','Abierto'],['transito','En tránsito'],['recibido','Recibido'],['cerrado','Cerrado']];
+function sgEmbEstadoLbl(e){ var f=SG_EMB_ESTADOS.find(function(x){return x[0]===e;}); return f?f[1]:(e||'—'); }
+
+function sgImpInit(){
+  api('/api/sg/embarques').then(function(r){
+    var rows=(r&&r.ok)?r.data:[];
+    eid('sg-tb-embarques').innerHTML = rows.length ? rows.map(function(e){
+      var m=e.margen_proyectado_pct;
+      var mCol=(m==null)?'var(--mut)':(m>=0?'var(--ok,#16a34a)':'var(--err,#dc2626)');
+      return '<tr>'
+        +'<td><b>'+esc(e.nombre||'')+'</b></td>'
+        +'<td>'+esc(e.proveedor_nombre||'—')+'</td>'
+        +'<td style="text-align:center"><span class="bdg bok">'+esc(sgEmbEstadoLbl(e.estado))+'</span></td>'
+        +'<td style="text-align:right">'+(e.cantidad_cajas!=null?nr(e.cantidad_cajas):'—')+'</td>'
+        +'<td style="text-align:right">'+(e.costo_caja_neto!=null?sgMoney(Math.round(e.costo_caja_neto)):'—')+'</td>'
+        +'<td style="text-align:right">'+(e.costo_caja_c_impuestos!=null?sgMoney(Math.round(e.costo_caja_c_impuestos)):'—')+'</td>'
+        +'<td style="text-align:right;color:'+mCol+';font-weight:600">'+(m!=null?m.toFixed(1)+'%':'—')+'</td>'
+        +'<td style="text-align:right;white-space:nowrap"><button class="btn bo bs" onclick="sgImpOpen('+e.id+')">✏️</button> <button class="btn bd bs" onclick="sgImpDel('+e.id+')">×</button></td>'
+      +'</tr>';
+    }).join('') : '<tr><td colspan="8" class="emp">Sin embarques. Creá el primero con “+ Nuevo embarque”.</td></tr>';
+  });
+}
+function sgImpVal(v){ return (v==null)?'':String(v); }
+function sgImpProvOpts(sel){
+  return '<option value="">— Proveedor —</option>'+(SG.cacheProv||[]).map(function(p){
+    return '<option value="'+p.id+'"'+(String(sel)===String(p.id)?' selected':'')+'>'+esc(p.razon_social||p.nombre||('#'+p.id))+'</option>';
+  }).join('');
+}
+function sgImpOpen(id){
+  sgLoadCaches(function(){
+    SG._embId = id || null; SG._embCostos = {};
+    if(id){
+      api('/api/sg/embarques/'+id).then(function(r){
+        if(!r||!r.ok){ toast((r&&r.error)||'Error','er'); return; }
+        (r.data.costos||[]).forEach(function(c){ SG._embCostos[c.concepto]={monto_estimado:c.monto_estimado, monto_real:c.monto_real, moneda:c.moneda}; });
+        sgImpFill(r.data);
+      });
+    } else { sgImpFill(null); }
+  });
+}
+function sgImpFill(e){
+  e = e||{};
+  eid('sg-emb-id').value = e.id||'';
+  eid('sg-emb-modal-tit').textContent = e.id ? ('✏️ Embarque — '+(e.nombre||'')) : '📥 Nuevo embarque';
+  eid('sg-emb-nombre').value = sgImpVal(e.nombre);
+  eid('sg-emb-prov').innerHTML = sgImpProvOpts(e.proveedor_id);
+  eid('sg-emb-pais').value = sgImpVal(e.pais_origen);
+  eid('sg-emb-incoterm').value = sgImpVal(e.incoterm||'FOB');
+  eid('sg-emb-ncm').value = sgImpVal(e.ncm);
+  eid('sg-emb-cert').checked = !!e.certificado_origen_mercosur;
+  eid('sg-emb-moneda').value = e.moneda||'USD';
+  eid('sg-emb-tc-est').value = sgImpVal(e.tc_estimado);
+  eid('sg-emb-tc-real').value = sgImpVal(e.tc_real);
+  eid('sg-emb-estado').innerHTML = SG_EMB_ESTADOS.map(function(x){ return '<option value="'+x[0]+'"'+(((e.estado||'cotizacion')===x[0])?' selected':'')+'>'+x[1]+'</option>'; }).join('');
+  eid('sg-emb-cajas').value = sgImpVal(e.cantidad_cajas);
+  eid('sg-emb-merma').value = sgImpVal(e.merma_esperada_pct);
+  eid('sg-emb-precio-ref').value = sgImpVal(e.precio_referencia);
+  eid('sg-emb-etd').value = sgImpVal(e.fecha_etd);
+  eid('sg-emb-eta').value = sgImpVal(e.fecha_eta);
+  eid('sg-emb-obs').value = sgImpVal(e.observaciones);
+  sgImpRenderCostos();
+  sgImpCalc();
+  eid('sg-emb-modal').classList.add('on');
+}
+function sgImpRenderCostos(){
+  eid('sg-emb-costos').innerHTML = SG_EMB_CONCEPTOS.map(function(c){
+    var v = (SG._embCostos && SG._embCostos[c.k]) || {};
+    var mon = v.moneda || 'ARS';
+    return '<tr'+(c.cred?' style="background:rgba(16,163,74,.06)"':'')+'>'
+      +'<td>'+esc(c.l)+(c.cred?' <span style="color:var(--ok,#16a34a);font-size:10px">crédito</span>':'')+'</td>'
+      +'<td><select id="sg-emb-mon-'+c.k+'" onchange="sgImpCalc()"><option value="ARS"'+(mon==='ARS'?' selected':'')+'>ARS</option><option value="USD"'+(mon==='USD'?' selected':'')+'>USD</option></select></td>'
+      +'<td><input type="number" step="0.01" min="0" id="sg-emb-est-'+c.k+'" value="'+sgImpVal(v.monto_estimado)+'" oninput="sgImpCalc()" style="width:120px;text-align:right"></td>'
+      +'<td><input type="number" step="0.01" min="0" id="sg-emb-real-'+c.k+'" value="'+sgImpVal(v.monto_real)+'" oninput="sgImpCalc()" style="width:120px;text-align:right"></td>'
+      +'<td id="sg-emb-gap-'+c.k+'" style="text-align:right;color:var(--mut)">—</td>'
+    +'</tr>';
+  }).join('');
+}
+function sgImpCalc(){
+  var tc = parseFloat(eid('sg-emb-tc-real').value) || parseFloat(eid('sg-emb-tc-est').value) || null;
+  var aARS = function(x, mon){ if(x==null||x==='') return null; var m=Number(x)||0; return (mon==='USD'&&tc)?m*tc:m; };
+  var bruto=0, cred=0;
+  SG_EMB_CONCEPTOS.forEach(function(c){
+    var mon=eid('sg-emb-mon-'+c.k).value;
+    var est=aARS(eid('sg-emb-est-'+c.k).value, mon);
+    var real=aARS(eid('sg-emb-real-'+c.k).value, mon);
+    var efec = real!=null?real:(est!=null?est:0);
+    if(c.cred) cred+=efec; else bruto+=efec;
+    var g=eid('sg-emb-gap-'+c.k);
+    if(real!=null&&est!=null){ var d=real-est; g.textContent=(d>=0?'+':'')+sgMoney(Math.round(d)); g.style.color=(d>0?'var(--err,#dc2626)':(d<0?'var(--ok,#16a34a)':'var(--mut)')); }
+    else { g.textContent='—'; g.style.color='var(--mut)'; }
+  });
+  var neto=bruto-cred;
+  var cajas=parseInt(eid('sg-emb-cajas').value,10)||0;
+  var merma=parseFloat(eid('sg-emb-merma').value)||0;
+  var precioRef=parseFloat(eid('sg-emb-precio-ref').value)||null;
+  var ccn=cajas>0?neto/cajas:null;
+  var cci=cajas>0?bruto/cajas:null;
+  var ccv=(ccn!=null&&merma<100)?ccn/(1-merma/100):ccn;
+  var margen=(precioRef&&precioRef>0&&ccv!=null)?(precioRef-ccv)/precioRef*100:null;
+  var mCol=(margen==null)?'var(--mut)':(margen>=0?'#16a34a':'#dc2626');
+  function row(l,v){ return '<div style="display:flex;justify-content:space-between;font-size:13px;padding:2px 0"><span style="color:var(--mut)">'+l+'</span><span style="font-variant-numeric:tabular-nums">'+v+'</span></div>'; }
+  eid('sg-emb-result').innerHTML =
+     row('Total Costo Bruto', sgMoney(Math.round(bruto)))
+    +row('Total Créditos recuperables', '− '+sgMoney(Math.round(cred)))
+    +row('<b>Costo Neto</b>', '<b>'+sgMoney(Math.round(neto))+'</b>')
+    +'<hr style="border:none;border-top:1px solid var(--bor);margin:6px 0">'
+    +row('Costo / caja neto', ccn!=null?sgMoney(Math.round(ccn)):'—')
+    +row('Costo / caja c/impuestos', cci!=null?sgMoney(Math.round(cci)):'—')
+    +row('Costo / caja vendible (merma '+merma+'%)', ccv!=null?sgMoney(Math.round(ccv)):'—')
+    +'<div style="margin-top:8px;padding:8px 10px;border-radius:8px;background:'+(margen==null?'var(--bg)':(margen>=0?'rgba(16,163,74,.12)':'rgba(220,38,38,.12)'))+';display:flex;justify-content:space-between;align-items:center">'
+      +'<span style="font-weight:600">MARGEN PROYECTADO</span>'
+      +'<span style="font-size:20px;font-weight:700;color:'+mCol+'">'+(margen!=null?margen.toFixed(1)+'%':'—')+'</span>'
+    +'</div>';
+}
+function sgImpGather(){
+  return {
+    nombre: eid('sg-emb-nombre').value.trim(),
+    proveedor_id: eid('sg-emb-prov').value||null,
+    pais_origen: eid('sg-emb-pais').value.trim(),
+    incoterm: eid('sg-emb-incoterm').value.trim(),
+    ncm: eid('sg-emb-ncm').value.trim(),
+    certificado_origen_mercosur: eid('sg-emb-cert').checked?1:0,
+    moneda: eid('sg-emb-moneda').value,
+    tc_estimado: eid('sg-emb-tc-est').value,
+    tc_real: eid('sg-emb-tc-real').value,
+    estado: eid('sg-emb-estado').value,
+    cantidad_cajas: eid('sg-emb-cajas').value,
+    merma_esperada_pct: eid('sg-emb-merma').value,
+    precio_referencia: eid('sg-emb-precio-ref').value,
+    fecha_etd: eid('sg-emb-etd').value,
+    fecha_eta: eid('sg-emb-eta').value,
+    observaciones: eid('sg-emb-obs').value,
+    costos: SG_EMB_CONCEPTOS.map(function(c){
+      return { concepto:c.k, moneda:eid('sg-emb-mon-'+c.k).value,
+        monto_estimado:eid('sg-emb-est-'+c.k).value, monto_real:eid('sg-emb-real-'+c.k).value };
+    })
+  };
+}
+function sgImpSave(){
+  var b=sgImpGather();
+  if(!b.nombre){ toast('Poné un nombre al embarque','er'); return; }
+  var id=SG._embId;
+  (id ? api('/api/sg/embarques/'+id,'PUT',b) : api('/api/sg/embarques','POST',b)).then(function(r){
+    if(r&&r.ok){ toast(id?'Embarque actualizado':'Embarque creado','ok'); closeMB('sg-emb-modal'); sgImpInit(); }
+    else toast((r&&r.error)||'Error','er');
+  });
+}
+function sgImpDel(id){
+  if(!confirm('¿Eliminar este embarque?')) return;
+  api('/api/sg/embarques/'+id,'DELETE').then(function(r){ if(r&&r.ok){ toast('Embarque eliminado','ok'); sgImpInit(); } else toast((r&&r.error)||'Error','er'); });
 }
 
 // ── MÓDULO ABASTO ────────────────────────────────────────────

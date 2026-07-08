@@ -25,6 +25,8 @@ const MODULOS_SG = [
   // Gastos Directos (servicio con valorización diferida): Fletes de salida (Fase 1),
   // cargas/descargas y repasos (próximas fases). Modulo propio en el sidebar.
   ["sg-gastos-directos", "🧾 Gastos Directos", 657],
+  // Importación (F1): cotizador standalone de embarque (costo neto por caja, margen proyectado).
+  ["sg-importacion", "📥 Importación", 660],
 ];
 
 try {
