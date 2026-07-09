@@ -12,9 +12,9 @@ import db from "./db.js";
 const MODULOS_SG = [
   ["sg-dashboard",  "📊 Dash",            650],
   ["sg-compras",    "📥 Ingresos",        651],
-  // Gastos Variables: ex sub-tab "Gastos globales" de Compras, ahora modulo propio.
-  // En el sidebar va al lado de Compras (HTML estatico); orden 656 = ultimo en Config Modulos.
-  ["sg-gvariables", "💸 Gastos Variables", 656],
+  // Gastos Fijos del Período (ex "Gastos Variables" / "Gastos globales" de Compras): modulo propio.
+  // CG1 (#505) los sacó del costo del lote → van a resultado, no se prorratean. Orden 656.
+  ["sg-gvariables", "💸 Gastos Fijos", 656],
   ["sg-stock",      "📦 Stock",            652],
   // Reprocesos (#reproceso): decomiso parcial, transformacion de unidad y reproceso con
   // clasificacion. Modulo propio en el sidebar, debajo de Stock.
@@ -72,7 +72,7 @@ try {
   db.prepare("UPDATE modulos_config SET label='📈 Informes' WHERE modulo='sg-reportes'").run();
   db.prepare("UPDATE modulos_config SET label='📦 Stock'            WHERE modulo='sg-stock'").run();
   db.prepare("UPDATE modulos_config SET label='🔄 Reprocesos'       WHERE modulo='sg-reprocesos'").run();
-  db.prepare("UPDATE modulos_config SET label='💸 Gastos Variables' WHERE modulo='sg-gvariables'").run();
+  db.prepare("UPDATE modulos_config SET label='💸 Gastos Fijos' WHERE modulo='sg-gvariables'").run();
   db.prepare("UPDATE modulos_config SET label='🧾 Gastos Directos'  WHERE modulo='sg-gastos-directos'").run();
   console.log("[ORG] Labels Abasto SG (con emoji) verificados en modulos_config");
 } catch (e) { console.error("[ORG] Error ensureModuloSG:", e.message); }
