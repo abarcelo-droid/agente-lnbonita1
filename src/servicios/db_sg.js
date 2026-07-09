@@ -796,6 +796,59 @@ try {
   `);
 } catch (e) { console.error('[DB] SG sg_gastos_directos:', e.message); }
 
+// ── MÓDULO IMPORTACIÓN (F1) — cotizador standalone de embarque ──────────────────
+// ADITIVO Y AISLADO: no se relaciona con sg_lotes ni con el costeo ARS existente. El USD y
+// el tc viven SOLO acá; la conversión USD→ARS se hace intra-módulo. El enganche al lote es F2.
+// Un embarque agrupa costos (estimado + real) y da el costo NETO por caja para decidir comprar.
+try {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS sg_embarques (
+      id                          INTEGER PRIMARY KEY AUTOINCREMENT,
+      nombre                      TEXT NOT NULL,
+      proveedor_id                INTEGER REFERENCES sg_proveedores(id),
+      pais_origen                 TEXT,
+      incoterm                    TEXT DEFAULT 'FOB',
+      certificado_origen_mercosur INTEGER DEFAULT 0,
+      ncm                         TEXT,
+      moneda                      TEXT NOT NULL DEFAULT 'USD',
+      tc_estimado                 REAL,
+      tc_real                     REAL,
+      estado                      TEXT NOT NULL DEFAULT 'cotizacion' CHECK(estado IN ('cotizacion','abierto','transito','recibido','cerrado')),
+      cantidad_cajas              INTEGER,
+      merma_esperada_pct          REAL DEFAULT 0,
+      precio_referencia           REAL,
+      fecha_etd                   TEXT,
+      fecha_eta                   TEXT,
+      observaciones               TEXT,
+      activo                      INTEGER NOT NULL DEFAULT 1,
+      creado_en                   TEXT DEFAULT (datetime('now','localtime')),
+      creado_por                  INTEGER,
+      modificado_en               TEXT,
+      modificado_por              INTEGER,
+      eliminado_en                TEXT,
+      eliminado_por_id            INTEGER
+    );
+    CREATE TABLE IF NOT EXISTS sg_embarque_costos (
+      id                INTEGER PRIMARY KEY AUTOINCREMENT,
+      embarque_id       INTEGER NOT NULL REFERENCES sg_embarques(id),
+      concepto          TEXT NOT NULL CHECK(concepto IN ('costo_mercaderia','anticipo_impuesto','gastos_despachante','fletes','diferencia_cotizacion','gastos_bancarios','iva_credito_computable','percepcion_iva_computable','percepcion_iibb')),
+      es_credito        INTEGER NOT NULL DEFAULT 0,
+      moneda            TEXT DEFAULT 'ARS',
+      monto_estimado    REAL,
+      monto_real        REAL,
+      observaciones     TEXT,
+      activo            INTEGER NOT NULL DEFAULT 1,
+      creado_en         TEXT DEFAULT (datetime('now','localtime')),
+      creado_por        INTEGER,
+      modificado_en     TEXT,
+      modificado_por    INTEGER,
+      eliminado_en      TEXT,
+      eliminado_por_id  INTEGER
+    );
+    CREATE INDEX IF NOT EXISTS idx_sg_embarque_costos_emb ON sg_embarque_costos(embarque_id);
+  `);
+} catch (e) { console.error('[DB] SG sg_embarques:', e.message); }
+
 // ── FASE 2 (cargas y descargas, cooperativa): unidad de cobro + cantidad ────────
 // La cooperativa cobra por 'bulto' o 'pallet' (variable). Se guarda la unidad + la cantidad
 // (de sg_recepciones.bultos/pallets_recibidos para descarga_ingreso, o bultos del despacho

@@ -3305,4 +3305,177 @@ router.get('/reportes/rentabilidad-venta', requireAuth, (req, res) => {
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
+// ══════════════════════════════════════════════════════════════════════════════
+// MÓDULO IMPORTACIÓN (F1) — cotizador standalone de embarque. ADITIVO Y AISLADO:
+// no toca sg_lotes, recalcCostoLote, OC nacional, despacho ni factura. El USD + tc
+// viven solo acá; la conversión USD→ARS es intra-módulo. Enganche al lote = F2.
+// ══════════════════════════════════════════════════════════════════════════════
+const EMB_CONCEPTOS = ['costo_mercaderia','anticipo_impuesto','gastos_despachante','fletes','diferencia_cotizacion','gastos_bancarios','iva_credito_computable','percepcion_iva_computable','percepcion_iibb'];
+const EMB_CREDITOS  = new Set(['iva_credito_computable','percepcion_iva_computable','percepcion_iibb']);
+
+// Cálculo del embarque (server-side). Todos los montos se llevan a ARS con tc (real ?? estimado)
+// para los rubros en USD. Usa COALESCE(monto_real, monto_estimado) como monto EFECTIVO.
+function calcEmbarque(emb, costos) {
+  const tc = emb.tc_real != null ? Number(emb.tc_real) : (emb.tc_estimado != null ? Number(emb.tc_estimado) : null);
+  const aARS = (monto, moneda) => {
+    if (monto == null) return null;
+    const m = Number(monto) || 0;
+    return ((moneda || 'ARS') === 'USD' && tc) ? m * tc : m;
+  };
+  let bruto = 0, creditos = 0, total_estimado = 0, total_real = 0, gap_total = 0;
+  const detalle = costos.map(c => {
+    const est  = aARS(c.monto_estimado, c.moneda);
+    const real = aARS(c.monto_real, c.moneda);
+    const efectivo = real != null ? real : (est != null ? est : 0);   // COALESCE(real, estimado)
+    if (c.es_credito) creditos += efectivo; else bruto += efectivo;
+    if (est != null) total_estimado += est;
+    if (real != null) total_real += real;
+    const gap = (real != null && est != null) ? real - est : null;
+    if (gap != null) gap_total += gap;
+    return { ...c, monto_estimado_ars: est, monto_real_ars: real, efectivo_ars: efectivo, gap };
+  });
+  const neto  = bruto - creditos;
+  const cajas = Number(emb.cantidad_cajas) || 0;
+  const merma = Number(emb.merma_esperada_pct) || 0;
+  const precioRef = emb.precio_referencia != null ? Number(emb.precio_referencia) : null;
+  const costo_caja_neto        = cajas > 0 ? neto  / cajas : null;
+  const costo_caja_c_impuestos = cajas > 0 ? bruto / cajas : null;
+  const costo_caja_vendible    = (costo_caja_neto != null && merma < 100) ? costo_caja_neto / (1 - merma / 100) : costo_caja_neto;
+  const margen_proyectado_pct  = (precioRef && precioRef > 0 && costo_caja_vendible != null) ? (precioRef - costo_caja_vendible) / precioRef * 100 : null;
+  return { bruto, creditos, neto, costo_caja_neto, costo_caja_c_impuestos, costo_caja_vendible,
+    margen_proyectado_pct, total_estimado, total_real, gap_total, tc_aplicado: tc, detalle };
+}
+
+function embCostos(db, embId) {
+  return db.prepare('SELECT * FROM sg_embarque_costos WHERE embarque_id=? AND activo=1 ORDER BY id').all(embId);
+}
+
+// LISTA — cada embarque con su cálculo resumido.
+router.get('/embarques', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const embs = db.prepare(`SELECT e.*, p.razon_social AS proveedor_nombre
+      FROM sg_embarques e LEFT JOIN sg_proveedores p ON p.id=e.proveedor_id
+      WHERE e.activo=1 ORDER BY e.id DESC`).all();
+    const data = embs.map(e => {
+      const calc = calcEmbarque(e, embCostos(db, e.id));
+      return { ...e, costo_caja_neto: calc.costo_caja_neto, costo_caja_c_impuestos: calc.costo_caja_c_impuestos,
+        costo_caja_vendible: calc.costo_caja_vendible, margen_proyectado_pct: calc.margen_proyectado_pct,
+        neto: calc.neto, bruto: calc.bruto, creditos: calc.creditos };
+    });
+    res.json({ ok: true, data });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// DETALLE — cabecera + rubros + cálculo completo.
+router.get('/embarques/:id', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const emb = db.prepare(`SELECT e.*, p.razon_social AS proveedor_nombre
+      FROM sg_embarques e LEFT JOIN sg_proveedores p ON p.id=e.proveedor_id
+      WHERE e.id=? AND e.activo=1`).get(req.params.id);
+    if (!emb) return res.status(404).json({ ok: false, error: 'Embarque no encontrado' });
+    const costos = embCostos(db, emb.id);
+    res.json({ ok: true, data: { ...emb, costos, calculo: calcEmbarque(emb, costos) } });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// Normaliza el array de costos del body → filas válidas (concepto conocido).
+function embCostosDelBody(body) {
+  const arr = Array.isArray(body.costos) ? body.costos : [];
+  return arr.filter(c => EMB_CONCEPTOS.includes(c.concepto)).map(c => ({
+    concepto: c.concepto,
+    es_credito: EMB_CREDITOS.has(c.concepto) ? 1 : 0,
+    moneda: (c.moneda === 'USD' ? 'USD' : 'ARS'),
+    monto_estimado: (c.monto_estimado != null && c.monto_estimado !== '') ? Number(c.monto_estimado) : null,
+    monto_real: (c.monto_real != null && c.monto_real !== '') ? Number(c.monto_real) : null,
+    observaciones: val(c.observaciones)
+  }));
+}
+
+const EMB_HEADER_COLS = ['nombre','proveedor_id','pais_origen','incoterm','certificado_origen_mercosur','ncm','moneda','tc_estimado','tc_real','estado','cantidad_cajas','merma_esperada_pct','precio_referencia','fecha_etd','fecha_eta','observaciones'];
+function embHeaderVals(b) {
+  return {
+    nombre: val(b.nombre),
+    proveedor_id: b.proveedor_id ? Number(b.proveedor_id) : null,
+    pais_origen: val(b.pais_origen),
+    incoterm: val(b.incoterm) || 'FOB',
+    certificado_origen_mercosur: b.certificado_origen_mercosur ? 1 : 0,
+    ncm: val(b.ncm),
+    moneda: (b.moneda === 'ARS' ? 'ARS' : 'USD'),
+    tc_estimado: (b.tc_estimado != null && b.tc_estimado !== '') ? Number(b.tc_estimado) : null,
+    tc_real: (b.tc_real != null && b.tc_real !== '') ? Number(b.tc_real) : null,
+    estado: EMB_ESTADOS.has(b.estado) ? b.estado : 'cotizacion',
+    cantidad_cajas: (b.cantidad_cajas != null && b.cantidad_cajas !== '') ? Math.round(Number(b.cantidad_cajas)) : null,
+    merma_esperada_pct: (b.merma_esperada_pct != null && b.merma_esperada_pct !== '') ? Number(b.merma_esperada_pct) : 0,
+    precio_referencia: (b.precio_referencia != null && b.precio_referencia !== '') ? Number(b.precio_referencia) : null,
+    fecha_etd: val(b.fecha_etd),
+    fecha_eta: val(b.fecha_eta),
+    observaciones: val(b.observaciones)
+  };
+}
+const EMB_ESTADOS = new Set(['cotizacion','abierto','transito','recibido','cerrado']);
+
+// CREAR — cabecera + rubros en una transacción (patrón POST /oc).
+router.post('/embarques', requireAdmin, (req, res) => {
+  const db = getDb();
+  try {
+    const b = req.body || {};
+    if (!val(b.nombre)) return res.status(400).json({ ok: false, error: 'Falta el nombre del embarque' });
+    const h = embHeaderVals(b);
+    const costos = embCostosDelBody(b);
+    const tx = db.transaction(() => {
+      const info = db.prepare(`INSERT INTO sg_embarques
+        (${EMB_HEADER_COLS.join(', ')}, creado_por)
+        VALUES (${EMB_HEADER_COLS.map(() => '?').join(', ')}, ?)`).run(...EMB_HEADER_COLS.map(k => h[k]), uid(req));
+      const embId = info.lastInsertRowid;
+      const ins = db.prepare(`INSERT INTO sg_embarque_costos
+        (embarque_id, concepto, es_credito, moneda, monto_estimado, monto_real, observaciones, creado_por)
+        VALUES (?,?,?,?,?,?,?,?)`);
+      for (const c of costos) ins.run(embId, c.concepto, c.es_credito, c.moneda, c.monto_estimado, c.monto_real, c.observaciones, uid(req));
+      return embId;
+    });
+    res.json({ ok: true, data: { id: Number(tx()) } });
+  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+
+// EDITAR — cabecera y/o rubros. Upsert de costos por concepto (los 9 llegan del form).
+router.put('/embarques/:id', requireAdmin, (req, res) => {
+  const db = getDb();
+  try {
+    const emb = db.prepare('SELECT id FROM sg_embarques WHERE id=? AND activo=1').get(req.params.id);
+    if (!emb) return res.status(404).json({ ok: false, error: 'Embarque no encontrado' });
+    const b = req.body || {};
+    const h = embHeaderVals(b);
+    const costos = embCostosDelBody(b);
+    const tx = db.transaction(() => {
+      db.prepare(`UPDATE sg_embarques SET ${EMB_HEADER_COLS.map(k => k + '=?').join(', ')},
+        modificado_en=datetime('now','localtime'), modificado_por=? WHERE id=?`)
+        .run(...EMB_HEADER_COLS.map(k => h[k]), uid(req), emb.id);
+      const upd = db.prepare(`UPDATE sg_embarque_costos SET es_credito=?, moneda=?, monto_estimado=?, monto_real=?, observaciones=?,
+        modificado_en=datetime('now','localtime'), modificado_por=? WHERE embarque_id=? AND concepto=? AND activo=1`);
+      const ins = db.prepare(`INSERT INTO sg_embarque_costos
+        (embarque_id, concepto, es_credito, moneda, monto_estimado, monto_real, observaciones, creado_por)
+        VALUES (?,?,?,?,?,?,?,?)`);
+      for (const c of costos) {
+        const r = upd.run(c.es_credito, c.moneda, c.monto_estimado, c.monto_real, c.observaciones, uid(req), emb.id, c.concepto);
+        if (r.changes === 0) ins.run(emb.id, c.concepto, c.es_credito, c.moneda, c.monto_estimado, c.monto_real, c.observaciones, uid(req));
+      }
+    });
+    tx();
+    res.json({ ok: true });
+  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+
+// SOFT DELETE — no borra físico (patrón eliminado_en).
+router.delete('/embarques/:id', requireAdmin, (req, res) => {
+  const db = getDb();
+  try {
+    const info = db.prepare(`UPDATE sg_embarques SET activo=0, eliminado_en=datetime('now','localtime'), eliminado_por_id=?
+      WHERE id=? AND activo=1`).run(uid(req), req.params.id);
+    if (info.changes === 0) return res.status(404).json({ ok: false, error: 'Embarque no encontrado' });
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
 export default router;
