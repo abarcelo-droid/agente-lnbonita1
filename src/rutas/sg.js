@@ -3296,6 +3296,71 @@ router.get('/reportes/rentabilidad-venta', requireAuth, (req, res) => {
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
+// ── REPORTE CG3: Resultado del período (margen bruto − gastos fijos) ─────────────
+// 100% ADITIVO y read-only. Cruza el MARGEN BRUTO (reusa MARGEN_LINEA/COSTO_KG/KG_VIGENTE,
+// que tras CG1 es margen bruto verdadero) por mes de VENTA, con los GASTOS FIJOS del período
+// (sg_gastos_globales_periodo, imputados al mes en que se incurren). resultado = margen − fijos.
+// Reconocimiento: margen al mes de fecha_despacho; fijos al mes 'periodo'. Ambos YYYY-MM.
+router.get('/reportes/resultado-periodo', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    // Acepta YYYY-MM o YYYY-MM-DD (recorta a mes). Default: últimos 12 meses.
+    const mes = (s) => { const m = /^(\d{4}-\d{2})/.exec(s || ''); return m ? m[1] : null; };
+    const hasta = mes(req.query.hasta) || db.prepare("SELECT strftime('%Y-%m','now','localtime') p").get().p;
+    const desde = mes(req.query.desde) || db.prepare("SELECT strftime('%Y-%m','now','localtime','-11 months') p").get().p;
+
+    // A — margen bruto por mes de VENTA (fecha_despacho). Misma expresión que los otros reportes.
+    const ventas = db.prepare(`
+      SELECT substr(d.fecha_despacho,1,7) AS periodo,
+             COALESCE(SUM(di.subtotal),0) AS ventas,
+             COALESCE(SUM(${MARGEN_LINEA}),0) AS margen_bruto
+      FROM sg_despacho_items di
+      JOIN sg_despachos d ON d.id=di.despacho_id AND d.activo=1
+      JOIN sg_lotes l ON l.id=di.lote_id
+      WHERE substr(d.fecha_despacho,1,7) BETWEEN ? AND ?
+      GROUP BY periodo`).all(desde, hasta);
+
+    // B — gastos fijos por período (mes en que se incurren) + breakdown por tipo (drill-down).
+    const fijos = db.prepare(`
+      SELECT periodo, COALESCE(SUM(monto),0) AS fijos
+      FROM sg_gastos_globales_periodo
+      WHERE activo=1 AND periodo BETWEEN ? AND ?
+      GROUP BY periodo`).all(desde, hasta);
+    const fijosDet = db.prepare(`
+      SELECT periodo, tipo_gasto, COALESCE(SUM(monto),0) AS monto
+      FROM sg_gastos_globales_periodo
+      WHERE activo=1 AND periodo BETWEEN ? AND ?
+      GROUP BY periodo, tipo_gasto`).all(desde, hasta);
+
+    // Merge por período (no perder meses con solo ventas o solo fijos).
+    const map = {};
+    const slot = (p) => (map[p] || (map[p] = { periodo: p, ventas: 0, margen_bruto: 0, gastos_fijos: 0, fijos_detalle: [] }));
+    for (const v of ventas) { const r = slot(v.periodo); r.ventas = v.ventas; r.margen_bruto = v.margen_bruto; }
+    for (const f of fijos) { slot(f.periodo).gastos_fijos = f.fijos; }
+    for (const d of fijosDet) { slot(d.periodo).fijos_detalle.push({ tipo_gasto: d.tipo_gasto, monto: d.monto }); }
+    const rows = Object.values(map).map((r) => ({
+      periodo: r.periodo,
+      ventas: r.ventas,
+      costo_vendido: r.ventas - r.margen_bruto,   // MVP: una sola columna (no separa mercadería vs directos)
+      margen_bruto: r.margen_bruto,
+      gastos_fijos: r.gastos_fijos,
+      resultado: r.margen_bruto - r.gastos_fijos,
+      fijos_detalle: r.fijos_detalle
+    })).sort((a, b) => (a.periodo < b.periodo ? 1 : -1));   // más reciente primero
+
+    if (rows.length) {
+      const t = rows.reduce((a, r) => ({
+        ventas: a.ventas + r.ventas, costo_vendido: a.costo_vendido + r.costo_vendido,
+        margen_bruto: a.margen_bruto + r.margen_bruto, gastos_fijos: a.gastos_fijos + r.gastos_fijos,
+        resultado: a.resultado + r.resultado
+      }), { ventas: 0, costo_vendido: 0, margen_bruto: 0, gastos_fijos: 0, resultado: 0 });
+      t._total = 1; t.periodo = 'TOTAL'; t.fijos_detalle = [];
+      rows.push(t);
+    }
+    res.json({ ok: true, data: rows, rango: { desde, hasta } });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
 // ══════════════════════════════════════════════════════════════════════════════
 // MÓDULO IMPORTACIÓN (F1) — cotizador standalone de embarque. ADITIVO Y AISLADO:
 // no toca sg_lotes, recalcCostoLote, OC nacional, despacho ni factura. El USD + tc

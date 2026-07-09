@@ -2310,6 +2310,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       <div class="sgr-subtab" data-sub="ventas-cli"      onclick="sgRepSub('ventas-cli')">🏪 Ventas × cliente</div>
       <div class="sgr-subtab" data-sub="margen-prod"     onclick="sgRepSub('margen-prod')">📊 Margen × producto</div>
       <div class="sgr-subtab" data-sub="merma"           onclick="sgRepSub('merma')">♻️ Merma × destino</div>
+      <div class="sgr-subtab" data-sub="resultado"       onclick="sgRepSub('resultado')">📈 Resultado del período</div>
     </div>
     <div style="display:flex;gap:10px;align-items:flex-end;margin-bottom:14px;flex-wrap:wrap">
       <label style="font-size:12px;color:var(--mut)">Desde<br><input type="date" id="sg-rep-desde" style="padding:5px 8px;border-radius:6px;border:1px solid var(--bor);background:var(--bg)"></label>
@@ -2334,6 +2335,15 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       <div class="ab-table-wrap"><table class="pa-tbl">
         <thead><tr><th>Despacho</th><th>Fecha</th><th>Cliente</th><th style="text-align:right">Kg</th><th style="text-align:right">Venta</th><th style="text-align:right">Costo</th><th style="text-align:right">Margen</th><th style="text-align:right">Margen %</th></tr></thead>
         <tbody id="sg-rep-tb-rent-venta"><tr><td colspan="8" class="emp">Aplicá un filtro o tocá Aplicar.</td></tr></tbody>
+      </table></div>
+    </div>
+    <div class="sgr-sub" id="sgr-sub-resultado">
+      <div style="font-size:12px;color:var(--mut);margin-bottom:8px;padding:8px 10px;background:var(--bg);border:1px solid var(--bor);border-radius:6px;line-height:1.5">
+        💡 <b>Resultado del período.</b> VENTA − costo de lo vendido = <b>MARGEN BRUTO</b> (imputado al mes de venta); menos los <b>GASTOS FIJOS</b> del período (alquiler / RRHH / IIBB / luz, imputados al mes en que se incurren) = <b>RESULTADO</b>. El filtro Desde/Hasta agrupa por mes (YYYY-MM); sin filtro, últimos 12 meses. Clic en un período para el desglose.
+      </div>
+      <div class="ab-table-wrap"><table class="pa-tbl">
+        <thead><tr><th>Período</th><th style="text-align:right">Ventas</th><th style="text-align:right">Costo de lo vendido</th><th style="text-align:right">Margen Bruto</th><th style="text-align:right">Gastos Fijos</th><th style="text-align:right">RESULTADO</th></tr></thead>
+        <tbody id="sg-rep-tb-resultado"><tr><td colspan="6" class="emp">Cargando…</td></tr></tbody>
       </table></div>
     </div>
     <div class="sgr-sub" id="sgr-sub-compras-prov">
@@ -5690,7 +5700,14 @@ var SG_REP_CFG={
     xls:function(r){ return { Producto:r.producto, Familia:r.familia, Kg:r.kg, Venta:r.venta, Costo:r.costo, Margen:r.margen, 'Margen %':Math.round((r.margen_pct||0)*10)/10 }; } },
   'merma':{ path:'merma-destino', tb:'sg-rep-tb-merma', cols:4,
     row:function(r){ return '<tr><td>'+esc(r.destino||'')+'</td><td style="text-align:right">'+nr(r.lotes)+'</td><td style="text-align:right">'+nr(r.kg)+'</td><td style="text-align:right">'+sgMoney(r.valor_costo)+'</td></tr>'; },
-    xls:function(r){ return { Destino:r.destino, Lotes:r.lotes, Kg:r.kg, 'Valor a costo':r.valor_costo }; } }
+    xls:function(r){ return { Destino:r.destino, Lotes:r.lotes, Kg:r.kg, 'Valor a costo':r.valor_costo }; } },
+  'resultado':{ path:'resultado-periodo', tb:'sg-rep-tb-resultado', cols:6,
+    row:function(r){
+      var rc=(r.resultado||0)>=0?'#16a34a':'#dc2626';
+      if(r._total) return '<tr style="font-weight:700;background:var(--bg)"><td>TOTAL</td><td style="text-align:right">'+sgMoney(r.ventas)+'</td><td style="text-align:right">'+sgMoney(r.costo_vendido)+'</td><td style="text-align:right">'+sgMoney(r.margen_bruto)+'</td><td style="text-align:right">'+sgMoney(r.gastos_fijos)+'</td><td style="text-align:right;color:'+rc+'">'+sgMoney(r.resultado)+'</td></tr>';
+      return '<tr id="sg-rep-row-'+r.periodo+'" style="cursor:pointer" title="Clic para el desglose del mes" onclick="sgRepResultDrill(\''+r.periodo+'\')"><td><b>'+r.periodo+'</b></td><td style="text-align:right">'+sgMoney(r.ventas)+'</td><td style="text-align:right">'+sgMoney(r.costo_vendido)+'</td><td style="text-align:right">'+sgMoney(r.margen_bruto)+'</td><td style="text-align:right">'+sgMoney(r.gastos_fijos)+'</td><td style="text-align:right;font-weight:700;color:'+rc+'">'+sgMoney(r.resultado)+'</td></tr>';
+    },
+    xls:function(r){ return { 'Período':r._total?'TOTAL':r.periodo, Ventas:r.ventas, 'Costo de lo vendido':r.costo_vendido, 'Margen Bruto':r.margen_bruto, 'Gastos Fijos':r.gastos_fijos, Resultado:r.resultado }; } }
 };
 function sgRepInit(){ sgRepSub(SG_REP.sub); }
 function sgRepSub(s){
@@ -5714,6 +5731,27 @@ function sgRepLoad(){
   });
 }
 function sgRepReset(){ eid('sg-rep-desde').value=''; eid('sg-rep-hasta').value=''; sgRepLoad(); }
+// Drill-down del Resultado del período: clic en un mes → desglose de gastos fijos (ya viene en la
+// fila) + despachos del mes (reusa /reportes/rentabilidad-venta con el rango del mes). Toggle.
+function sgRepResultDrill(periodo){
+  if(!periodo || periodo==='TOTAL') return;
+  var open=eid('sg-rep-drill-'+periodo);
+  document.querySelectorAll('.sg-rep-drill').forEach(function(el){ if(el.parentNode) el.parentNode.removeChild(el); });
+  if(open) return;   // estaba abierto → toggle off
+  var row=(SG_REP.last['resultado']||[]).find(function(r){ return r.periodo===periodo; });
+  var det=(row&&row.fijos_detalle)||[];
+  var lbl={alquiler_puesto:'Alquiler',sueldo_descarga:'Sueldos/descarga',iibb:'IIBB',luz_camara:'Luz cámara',otros:'Otros'};
+  var fij=det.length ? det.map(function(d){ return (lbl[d.tipo_gasto]||d.tipo_gasto)+': '+sgMoney(d.monto); }).join(' · ') : 'sin gastos fijos cargados';
+  var anchor=eid('sg-rep-row-'+periodo); if(!anchor) return;
+  var tr=document.createElement('tr'); tr.id='sg-rep-drill-'+periodo; tr.className='sg-rep-drill';
+  tr.innerHTML='<td colspan="6" style="background:var(--bg);padding:10px 14px"><div style="font-size:12px"><b>Gastos fijos '+esc(periodo)+':</b> '+fij+'</div><div id="sg-rep-drill-desp-'+periodo+'" style="margin-top:6px;font-size:12px;color:var(--mut)">Cargando despachos del mes…</div></td>';
+  anchor.parentNode.insertBefore(tr, anchor.nextSibling);
+  api('/api/sg/reportes/rentabilidad-venta?desde='+periodo+'-01&hasta='+periodo+'-31').then(function(r){
+    var ds=(r&&r.ok)?(r.data||[]).filter(function(x){ return !x._total; }):[];
+    var box=eid('sg-rep-drill-desp-'+periodo); if(!box) return;
+    box.innerHTML= ds.length ? ('<b>'+ds.length+' despacho(s):</b> '+ds.map(function(x){ return esc(x.numero||'')+' ('+esc(x.cliente||'—')+') '+sgMoney(x.margen); }).join(' · ')) : 'Sin despachos en el mes.';
+  });
+}
 function sgRepExport(){
   if(typeof XLSX==='undefined'){ toast('La librería de Excel aún no cargó, reintentá','er'); return; }
   var cfg=SG_REP_CFG[SG_REP.sub], rows=SG_REP.last[SG_REP.sub]||[];
