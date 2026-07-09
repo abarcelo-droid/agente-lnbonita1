@@ -928,8 +928,9 @@ function nextNumero(db, prefijo, tabla, col) {
   return `${prefijo}-${fecha}-${String(n + 1).padStart(4, '0')}`;
 }
 
-// Recalcula costo_final de un lote = costo_base + gastos directos + prorrateo global del período.
-// Prorrateo: monto global del período × (kg del lote / total kg activos del período).
+// Recalcula costo_final de un lote = costo_base + gastos directos del lote + descarga de ingreso
+// − transferido (según rama). CG1: los gastos GLOBALES del período (fijos + IIBB) YA NO se
+// prorratean al costo — van a resultado del período (margen bruto real).
 function recalcCostoLote(db, loteId) {
   const lote = db.prepare('SELECT id, kg_reales, costo_base, fecha_ingreso, precio_unitario_kg, recepcion_id, transformado_de, origen FROM sg_lotes WHERE id=?').get(loteId);
   if (!lote) return 0;
@@ -961,16 +962,12 @@ function recalcCostoLote(db, loteId) {
     return 0;
   }
   const gd = db.prepare('SELECT COALESCE(SUM(monto),0) s FROM sg_gastos_directos_lote WHERE lote_id=? AND activo=1').get(loteId).s;
-  let prorrateo = 0;
-  const periodo = (lote.fecha_ingreso || '').slice(0, 7);
-  if (periodo) {
-    const totalGlob = db.prepare('SELECT COALESCE(SUM(monto),0) s FROM sg_gastos_globales_periodo WHERE periodo=? AND activo=1').get(periodo).s;
-    // Pool de prorrateo: solo lotes de COMPRA (transformado_de IS NULL y no apertura). Los
-    // transformados ya computaron sus kg vía el lote-origen → incluirlos duplicaría kg; los de
-    // apertura (BRIEF 10) no son compra → tampoco participan del reparto de gastos del período.
-    const totalKg = db.prepare("SELECT COALESCE(SUM(kg_reales),0) s FROM sg_lotes WHERE activo=1 AND transformado_de IS NULL AND COALESCE(origen,'')<>'apertura' AND substr(fecha_ingreso,1,7)=?").get(periodo).s;
-    if (totalKg > 0) prorrateo = totalGlob * (lote.kg_reales / totalKg);
-  }
+  // CG1 — los gastos GLOBALES del período (alquiler, sueldo_descarga, iibb, luz_camara) son costos
+  // FIJOS/estructura + un impuesto de ventas: NO se capitalizan al inventario, van a RESULTADO del
+  // período. El costo del lote = mercadería (costo_base) + gastos DIRECTOS del lote + descarga de
+  // ingreso valorizada − lo transferido. sg_gastos_globales_periodo se sigue cargando; solo dejó de
+  // prorratearse al costo. (OJO: 'descarga' de acá es descarga_ingreso valorizada de sg_gastos_directos,
+  // un directo genuino que SE QUEDA — NO confundir con el 'sueldo_descarga' del pool global.)
   // FASE 2 — descarga de ingreso (cooperativa) VALORIZADA de la recepción del lote, prorrateada
   // por kg entre los lotes de esa recepción (es costo de ingreso, igual que el flete de ingreso).
   let descarga = 0;
@@ -984,7 +981,7 @@ function recalcCostoLote(db, loteId) {
   // Caso 2 (decisión 3/opción B): el costo que SALIÓ por transformaciones se descuenta del
   // origen, así inventario (origen remanente + lotes-cubeta) suma el total sin doble conteo.
   const transferido = costoTransferido(db, loteId);
-  const costoFinal = (lote.costo_base || 0) + gd + prorrateo + descarga - transferido;
+  const costoFinal = (lote.costo_base || 0) + gd + descarga - transferido;
   db.prepare("UPDATE sg_lotes SET costo_final=?, modificado_en=datetime('now','localtime') WHERE id=?").run(costoFinal, loteId);
   return costoFinal;
 }
@@ -1840,7 +1837,7 @@ router.post('/gastos-globales', requireAdmin, (req, res) => {
     const info = db.prepare(`INSERT INTO sg_gastos_globales_periodo
       (periodo, tipo_gasto, monto, fecha, observaciones, creado_por) VALUES (?,?,?,?,?,?)`).run(
       val(b.periodo), val(b.tipo_gasto), Number(b.monto || 0), val(b.fecha), val(b.observaciones), uid(req));
-    recalcPeriodo(db, val(b.periodo));
+    // CG1 — un gasto global ya no afecta ningún costo_final (va a resultado) → no se recalcula nada.
     res.json({ ok: true, data: { id: Number(info.lastInsertRowid) } });
   } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
 });
@@ -1856,8 +1853,7 @@ router.put('/gastos-globales/:id', requireAdmin, (req, res) => {
     if (!sets.length) return res.status(400).json({ ok: false, error: 'Sin cambios' });
     sets.push(`modificado_en=datetime('now','localtime')`, 'modificado_por=?'); vals.push(uid(req), req.params.id);
     db.prepare(`UPDATE sg_gastos_globales_periodo SET ${sets.join(',')} WHERE id=?`).run(...vals);
-    recalcPeriodo(db, g.periodo);
-    if (req.body.periodo && req.body.periodo !== g.periodo) recalcPeriodo(db, val(req.body.periodo));
+    // CG1 — un gasto global ya no afecta ningún costo_final (va a resultado) → no se recalcula nada.
     res.json({ ok: true, data: { id: Number(req.params.id) } });
   } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
 });
@@ -1868,7 +1864,7 @@ router.delete('/gastos-globales/:id', requireAdmin, (req, res) => {
     const g = db.prepare('SELECT periodo FROM sg_gastos_globales_periodo WHERE id=? AND activo=1').get(req.params.id);
     if (!g) return res.status(404).json({ ok: false, error: 'No encontrado o ya eliminado' });
     db.prepare("UPDATE sg_gastos_globales_periodo SET activo=0, eliminado_en=datetime('now','localtime'), eliminado_por_id=? WHERE id=?").run(uid(req), req.params.id);
-    recalcPeriodo(db, g.periodo);
+    // CG1 — un gasto global ya no afecta ningún costo_final (va a resultado) → no se recalcula nada.
     res.json({ ok: true, data: { id: Number(req.params.id) } });
   } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
 });
@@ -1932,15 +1928,10 @@ router.get('/lotes/:id/trazabilidad', requireAuth, (req, res) => {
     const ocItem = lote.oc_item_id ? db.prepare('SELECT * FROM sg_oc_items WHERE id=?').get(lote.oc_item_id) : null;
     const gastosDirectos = db.prepare('SELECT * FROM sg_gastos_directos_lote WHERE lote_id=? AND activo=1 ORDER BY id').all(lote.id);
 
-    // Prorrateo global del período
-    const periodo = (lote.fecha_ingreso || '').slice(0, 7);
-    let prorrateo = null;
-    if (periodo) {
-      const totalGlob = db.prepare('SELECT COALESCE(SUM(monto),0) s FROM sg_gastos_globales_periodo WHERE periodo=? AND activo=1').get(periodo).s;
-      const totalKg = db.prepare("SELECT COALESCE(SUM(kg_reales),0) s FROM sg_lotes WHERE activo=1 AND transformado_de IS NULL AND COALESCE(origen,'')<>'apertura' AND substr(fecha_ingreso,1,7)=?").get(periodo).s;
-      const share = totalKg > 0 ? totalGlob * (lote.kg_reales / totalKg) : 0;
-      prorrateo = { periodo, total_global: totalGlob, kg_periodo: totalKg, kg_lote: lote.kg_reales, share };
-    }
+    // CG1 — los gastos del período ya NO se capitalizan al lote (van a resultado), así que el detalle
+    // de trazabilidad no muestra prorrateo. El front omite la línea (render guardado por `if(d.prorrateo)`);
+    // la limpieza de ese branch muerto + el rename del módulo es CG2.
+    const prorrateo = null;
 
     // Forward (despachos donde se usó este lote) — se completa en Fase 4.
     const despachos = db.prepare(`SELECT di.kg_despachados, di.precio_por_kg, di.subtotal, di.margen_estimado,
