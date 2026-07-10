@@ -8,7 +8,9 @@ import express from 'express';
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
+import { randomUUID } from 'crypto';
 import { fileURLToPath } from 'url';
+import { subirArchivo, obtenerArchivo, storageConfigurado } from '../servicios/storage.js';
 import { getDb } from '../servicios/db.js';
 import '../servicios/db_sg.js'; // corre el DDL sg_* al importarse
 import { detectarDuplicado } from '../servicios/dedup.js';
@@ -3720,6 +3722,96 @@ router.post('/embarques/:id/recibir', requireAdmin, (req, res) => {
     const loteIds = tx();
     res.json({ ok: true, data: { lotes: loteIds, costo_caja_neto: calc.costo_caja_neto } });
   } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+
+// ── EXPEDIENTE DOCUMENTAL DEL EMBARQUE (Importación F6) ──────────────────────────
+// Archiva los documentos de importación en Cloudflare R2 (persistente). Upload en MEMORIA
+// (memoryStorage: nunca toca el disco efímero) → subirArchivo() a R2 → fila con la storage_key.
+// El serving es por PROXY con requireAuth (no URL firmada). Molde: sg_gastos_directos.
+const DOC_TIPOS = new Set(['factura_comercial','packing_list','bl','poliza_seguro','despacho_aduana','cert_fitosanitario','cert_origen','otro']);
+const DOC_MIMES = new Set(['application/pdf','image/jpeg','image/png']);
+const DOC_MAX_BYTES = 10 * 1024 * 1024;
+const uploadDocMem = multer({ storage: multer.memoryStorage(), limits: { fileSize: DOC_MAX_BYTES } });
+
+// Sanitiza el nombre para usarlo en la storage_key: sin separadores de path ni '..', solo
+// alfanumérico + . _ - (evita path traversal y keys raras). El nombre_original SÍ se guarda tal cual.
+function sanitizarNombreDoc(n) {
+  return String(n || 'documento')
+    .replace(/[\/\\]/g, '_')       // sin separadores de path
+    .replace(/\.{2,}/g, '_')       // sin '..' (traversal)
+    .replace(/[^A-Za-z0-9._-]/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 120) || 'documento';
+}
+
+// Envuelve multer para devolver JSON limpio si el archivo excede el límite (en vez del HTML 500 de express).
+function uploadDoc(req, res, next) {
+  uploadDocMem.single('archivo')(req, res, (err) => {
+    if (err) return res.status(400).json({ ok: false, error: err.code === 'LIMIT_FILE_SIZE' ? 'El archivo supera 10MB' : err.message });
+    next();
+  });
+}
+
+// SUBIR — multer en memoria → R2 → INSERT. requireAdmin.
+router.post('/embarques/:id/documentos', requireAdmin, uploadDoc, async (req, res) => {
+  const db = getDb();
+  try {
+    if (!storageConfigurado()) return res.status(503).json({ ok: false, error: 'Almacenamiento R2 no configurado (faltan credenciales)' });
+    const emb = db.prepare('SELECT id FROM sg_embarques WHERE id=? AND activo=1').get(req.params.id);
+    if (!emb) return res.status(404).json({ ok: false, error: 'Embarque no encontrado' });
+    const f = req.file;
+    if (!f) return res.status(400).json({ ok: false, error: 'Falta el archivo' });
+    const tipo = val(req.body.tipo);
+    if (!DOC_TIPOS.has(tipo)) return res.status(400).json({ ok: false, error: 'Tipo de documento inválido' });
+    if (!DOC_MIMES.has(f.mimetype)) return res.status(400).json({ ok: false, error: 'Formato no permitido (solo PDF, JPG o PNG)' });
+    if (f.size > DOC_MAX_BYTES) return res.status(400).json({ ok: false, error: 'El archivo supera 10MB' });
+    const key = `embarques/${emb.id}/${randomUUID()}-${sanitizarNombreDoc(f.originalname)}`;
+    await subirArchivo(f.buffer, key, f.mimetype);
+    const info = db.prepare(`INSERT INTO sg_embarque_documentos
+      (embarque_id, tipo, storage_key, nombre_original, mime, tamano_bytes, fecha_documento, observaciones, creado_por)
+      VALUES (?,?,?,?,?,?,?,?,?)`)
+      .run(emb.id, tipo, key, String(f.originalname || 'documento').slice(0, 255), f.mimetype, f.size, val(req.body.fecha_documento), val(req.body.observaciones), uid(req));
+    res.json({ ok: true, data: { id: Number(info.lastInsertRowid) } });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// LISTAR — metadata de los documentos del embarque (no expone la storage_key). requireAuth.
+router.get('/embarques/:id/documentos', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const docs = db.prepare(`SELECT id, embarque_id, tipo, nombre_original, mime, tamano_bytes, fecha_documento, observaciones, creado_en
+      FROM sg_embarque_documentos WHERE embarque_id=? AND activo=1 ORDER BY id DESC`).all(req.params.id);
+    res.json({ ok: true, data: docs });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// DESCARGAR — PROXY por el backend. Verifica que el docId pertenezca al embarque (anti-IDOR)
+// → stream desde R2 con Content-Type y Content-Disposition. requireAuth.
+router.get('/embarques/:id/documentos/:docId/descargar', requireAuth, async (req, res) => {
+  const db = getDb();
+  try {
+    if (!storageConfigurado()) return res.status(503).json({ ok: false, error: 'Almacenamiento R2 no configurado' });
+    // El WHERE ata docId + embarque_id: un docId de otro embarque no matchea → 404 (evita IDOR).
+    const doc = db.prepare('SELECT * FROM sg_embarque_documentos WHERE id=? AND embarque_id=? AND activo=1').get(req.params.docId, req.params.id);
+    if (!doc) return res.status(404).json({ ok: false, error: 'Documento no encontrado' });
+    const stream = await obtenerArchivo(doc.storage_key);
+    res.setHeader('Content-Type', doc.mime || 'application/octet-stream');
+    res.setHeader('Content-Disposition', "attachment; filename*=UTF-8''" + encodeURIComponent(doc.nombre_original || 'documento'));
+    if (doc.tamano_bytes) res.setHeader('Content-Length', doc.tamano_bytes);
+    stream.on('error', () => { if (!res.headersSent) res.status(500).end(); });
+    stream.pipe(res);
+  } catch (e) { if (!res.headersSent) res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// ELIMINAR — soft delete (conserva el expediente; NO borra de R2). requireAdmin. Anti-IDOR en el WHERE.
+router.delete('/embarques/:id/documentos/:docId', requireAdmin, (req, res) => {
+  const db = getDb();
+  try {
+    const info = db.prepare(`UPDATE sg_embarque_documentos SET activo=0, eliminado_en=datetime('now','localtime'), eliminado_por_id=?
+      WHERE id=? AND embarque_id=? AND activo=1`).run(uid(req), req.params.docId, req.params.id);
+    if (info.changes === 0) return res.status(404).json({ ok: false, error: 'Documento no encontrado' });
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
 export default router;
