@@ -954,6 +954,17 @@ function recalcCostoLote(db, loteId) {
     db.prepare("UPDATE sg_lotes SET costo_final=?, modificado_en=datetime('now','localtime') WHERE id=?").run(cfA, loteId);
     return cfA;
   }
+  // LOTE IMPORTADO (Importación F2): nace de un embarque recibido con costo PROVISORIO cargado en
+  // costo_base (= costo_caja_neto del embarque × cajas del lote, ya convertido USD→ARS). Igual que
+  // apertura/transformado: es un costo cargado, NO es compra nacional → fuera de prorrateo y de la
+  // descarga de ingreso. costo_final = costo_base provisorio + sus propios gastos directos. El
+  // cierre de cambio (F3, ZONA PABLO) ajustará este costo_base más adelante y re-correrá este recalc.
+  if (lote.origen === 'importado') {
+    const gdI = db.prepare('SELECT COALESCE(SUM(monto),0) s FROM sg_gastos_directos_lote WHERE lote_id=? AND activo=1').get(loteId).s;
+    const cfI = (lote.costo_base || 0) + gdI;
+    db.prepare("UPDATE sg_lotes SET costo_final=?, modificado_en=datetime('now','localtime') WHERE id=?").run(cfI, loteId);
+    return cfI;
+  }
   // COSTO PENDIENTE: lote sin precio (recepción sin OC, o pizarra sin cerrar) → costo_final=0 y
   // NO se le suma prorrateo (sería un costo parcial engañoso que ensucia la rentabilidad).
   // Se completa cuando se vincula la OC / se cierra el precio (ahí vuelve a correr este recalc).
@@ -3406,6 +3417,37 @@ function embCostos(db, embId) {
   return db.prepare('SELECT * FROM sg_embarque_costos WHERE embarque_id=? AND activo=1 ORDER BY id').all(embId);
 }
 
+// Crea UN lote SG a partir de una línea de embarque recibido (Importación F2). Espeja
+// crearLotesDeItem pero para origen='importado': el costo es PROVISORIO y viene del embarque:
+// costo_base = costo_caja_neto (ARS, ya convertido USD→ARS por calcEmbarque) × cajas de la línea.
+// kg_reales = cajas × kg_por_bulto; precio_unitario_kg = costo_base/kg (informativo). No hay
+// recepción ni OC (recepcion_id/oc_item_id NULL); bultos = cajas; presentacion_id NULL (la
+// identidad de bulto vive en envase_id + kg_por_bulto, como en la OC al vuelo). El cierre de
+// cambio (F3, ZONA PABLO) ajustará costo_base y re-correrá recalcCostoLote.
+function crearLoteDeEmbarque(db, { emb, linea, costoCajaNeto, fechaIngreso, userId }) {
+  const prod = db.prepare('SELECT vida_util_dias_default FROM sg_productos WHERE id=?').get(linea.producto_id);
+  const vida = (prod && prod.vida_util_dias_default) || 0;
+  const cajas = Math.round(Number(linea.cajas) || 0);
+  const kpb = (linea.kg_por_bulto != null && linea.kg_por_bulto !== '') ? Number(linea.kg_por_bulto) : null;
+  const kg = kpb != null ? cajas * kpb : 0;
+  const costoBase = (Number(costoCajaNeto) || 0) * cajas;
+  const precio = kg > 0 ? costoBase / kg : null;
+  let venc = null;
+  if (fechaIngreso && vida) venc = db.prepare('SELECT date(?, ?) d').get(fechaIngreso, `+${vida} days`).d;
+  const envId = (linea.envase_id != null && linea.envase_id !== '') ? Number(linea.envase_id) : null;
+  const codigo = nextNumero(db, 'SG-LT', 'sg_lotes', 'codigo_lote');
+  const info = db.prepare(`INSERT INTO sg_lotes
+    (codigo_lote, recepcion_id, oc_item_id, producto_id, kg_reales, precio_unitario_kg, costo_base,
+     calidad, calibre, origen, fecha_ingreso, fecha_vencimiento_estimada, estado, costo_final,
+     presentacion_id, bultos, kg_por_bulto, envase_id, embarque_id, creado_por)
+    VALUES (?,?,?,?,?,?,?,?,?,'importado',?,?, 'disponible', ?, NULL, ?, ?, ?, ?, ?)`)
+    .run(codigo, null, null, linea.producto_id, kg, precio, costoBase,
+      val(linea.calidad), val(linea.calibre), fechaIngreso, venc, costoBase, cajas, kpb, envId, emb.id, userId);
+  const loteId = info.lastInsertRowid;
+  recalcCostoLote(db, loteId);
+  return loteId;
+}
+
 // LISTA — cada embarque con su cálculo resumido.
 router.get('/embarques', requireAuth, (req, res) => {
   const db = getDb();
@@ -3532,6 +3574,91 @@ router.delete('/embarques/:id', requireAdmin, (req, res) => {
     if (info.changes === 0) return res.status(404).json({ ok: false, error: 'Embarque no encontrado' });
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// ── LÍNEAS DE PRODUCTO DEL EMBARQUE (Importación F2) ────────────────────────────
+// Definen QUÉ lleva cada lote: producto, envase, kg por bulto y cajas. Al recibir se crea un
+// sg_lote importado por línea. Normaliza el array del body (descarta filas sin producto).
+function embLineasDelBody(body) {
+  const arr = Array.isArray(body.lineas) ? body.lineas : [];
+  return arr
+    .filter(l => l.producto_id != null && l.producto_id !== '')
+    .map(l => ({
+      producto_id: Number(l.producto_id),
+      envase_id: (l.envase_id != null && l.envase_id !== '') ? Number(l.envase_id) : null,
+      kg_por_bulto: (l.kg_por_bulto != null && l.kg_por_bulto !== '') ? Number(l.kg_por_bulto) : null,
+      cajas: (l.cajas != null && l.cajas !== '') ? Math.round(Number(l.cajas)) : 0,
+      calidad: val(l.calidad),
+      calibre: val(l.calibre),
+      observaciones: val(l.observaciones)
+    }));
+}
+
+// LISTA de líneas (con nombre de producto y envase).
+router.get('/embarques/:id/lineas', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const lineas = db.prepare(`SELECT l.*, pr.nombre AS producto_nombre, pr.variedad AS producto_variedad, e.nombre AS envase_nombre
+      FROM sg_embarque_lineas l
+      LEFT JOIN sg_productos pr ON pr.id=l.producto_id
+      LEFT JOIN sg_envases e ON e.id=l.envase_id
+      WHERE l.embarque_id=? AND l.activo=1 ORDER BY l.id`).all(req.params.id);
+    res.json({ ok: true, data: lineas });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// REEMPLAZAR líneas (replace-all). Solo si el embarque no fue recibido/cerrado (después ya generó
+// lotes y no se toca). Soft-delete de las activas + insert del set nuevo, en una transacción.
+router.put('/embarques/:id/lineas', requireAdmin, (req, res) => {
+  const db = getDb();
+  try {
+    const emb = db.prepare('SELECT id, estado FROM sg_embarques WHERE id=? AND activo=1').get(req.params.id);
+    if (!emb) return res.status(404).json({ ok: false, error: 'Embarque no encontrado' });
+    if (emb.estado === 'recibido' || emb.estado === 'cerrado')
+      return res.status(409).json({ ok: false, error: 'El embarque ya fue recibido: sus líneas no se pueden editar' });
+    const lineas = embLineasDelBody(req.body || {});
+    const tx = db.transaction(() => {
+      db.prepare(`UPDATE sg_embarque_lineas SET activo=0, eliminado_en=datetime('now','localtime'), eliminado_por_id=?
+        WHERE embarque_id=? AND activo=1`).run(uid(req), emb.id);
+      const ins = db.prepare(`INSERT INTO sg_embarque_lineas
+        (embarque_id, producto_id, envase_id, kg_por_bulto, cajas, calidad, calibre, observaciones, creado_por)
+        VALUES (?,?,?,?,?,?,?,?,?)`);
+      for (const l of lineas) ins.run(emb.id, l.producto_id, l.envase_id, l.kg_por_bulto, l.cajas, l.calidad, l.calibre, l.observaciones, uid(req));
+    });
+    tx();
+    res.json({ ok: true, data: { lineas: lineas.length } });
+  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+
+// ── RECIBIR EL EMBARQUE (Importación F2) — goods-in-transit → stock ─────────────
+// Transición transito→recibido. Crea un sg_lote importado por línea con costo PROVISORIO del
+// embarque (costo_caja_neto × cajas, ya en ARS). El lote entra a stock, se vende; el cierre de
+// cambio (F3, ZONA PABLO) ajustará el costo más adelante. Idempotente por estado: no recibe 2 veces.
+router.post('/embarques/:id/recibir', requireAdmin, (req, res) => {
+  const db = getDb();
+  try {
+    const emb = db.prepare('SELECT * FROM sg_embarques WHERE id=? AND activo=1').get(req.params.id);
+    if (!emb) return res.status(404).json({ ok: false, error: 'Embarque no encontrado' });
+    if (emb.estado === 'recibido' || emb.estado === 'cerrado')
+      return res.status(409).json({ ok: false, error: 'El embarque ya fue recibido' });
+    const lineas = db.prepare('SELECT * FROM sg_embarque_lineas WHERE embarque_id=? AND activo=1 ORDER BY id').all(emb.id);
+    if (!lineas.length) return res.status(400).json({ ok: false, error: 'El embarque no tiene líneas de producto para recibir' });
+    if (lineas.some(l => !(Number(l.cajas) > 0)))
+      return res.status(400).json({ ok: false, error: 'Todas las líneas deben tener cajas > 0' });
+    const calc = calcEmbarque(emb, embCostos(db, emb.id));
+    if (calc.costo_caja_neto == null)
+      return res.status(400).json({ ok: false, error: 'No se puede costear el embarque (falta cantidad de cajas o costos cargados)' });
+    const fechaIngreso = val(req.body && req.body.fecha_ingreso) || db.prepare("SELECT date('now','localtime') d").get().d;
+    const tx = db.transaction(() => {
+      const ids = [];
+      for (const linea of lineas)
+        ids.push(crearLoteDeEmbarque(db, { emb, linea, costoCajaNeto: calc.costo_caja_neto, fechaIngreso, userId: uid(req) }));
+      db.prepare("UPDATE sg_embarques SET estado='recibido', modificado_en=datetime('now','localtime'), modificado_por=? WHERE id=?").run(uid(req), emb.id);
+      return ids;
+    });
+    const loteIds = tx();
+    res.json({ ok: true, data: { lotes: loteIds, costo_caja_neto: calc.costo_caja_neto } });
+  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
 });
 
 export default router;
