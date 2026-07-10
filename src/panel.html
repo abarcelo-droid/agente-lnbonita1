@@ -2473,12 +2473,26 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       <div class="fl"><label>TC estimado</label><input type="number" step="0.01" id="sg-emb-tc-est" oninput="sgImpCalc()"></div>
       <div class="fl"><label>TC real</label><input type="number" step="0.01" id="sg-emb-tc-real" oninput="sgImpCalc()"></div>
       <div class="fl"><label>Estado</label><select id="sg-emb-estado"></select></div>
-      <div class="fl"><label>Cantidad de cajas</label><input type="number" step="1" min="0" id="sg-emb-cajas" oninput="sgImpCalc()"></div>
+      <div class="fl"><label>Cantidad de cajas <span style="font-weight:400;color:var(--mut);font-size:11px">(Σ líneas si hay desglose)</span></label><input type="number" step="1" min="0" id="sg-emb-cajas" oninput="sgImpCalc()"></div>
       <div class="fl"><label>Merma esperada %</label><input type="number" step="0.1" min="0" id="sg-emb-merma" oninput="sgImpCalc()"></div>
       <div class="fl"><label>Precio referencia $/caja</label><input type="number" step="0.01" min="0" id="sg-emb-precio-ref" oninput="sgImpCalc()"></div>
       <div class="fl"><label>ETD</label><input type="date" id="sg-emb-etd"></div>
       <div class="fl"><label>ETA</label><input type="date" id="sg-emb-eta"></div>
       <div class="fl" style="grid-column:span 4"><label>Observaciones</label><input type="text" id="sg-emb-obs"></div>
+    </div>
+    <!-- F5 — desglose de productos del embarque: un lote por línea al recibir. cantidad_cajas se deriva de Σ cajas. -->
+    <div style="margin-top:12px;border:1px solid var(--bor);border-radius:10px;padding:10px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+        <div style="font-size:12px;font-weight:600;color:var(--mut)">📦 PRODUCTOS DEL EMBARQUE · un lote por línea al recibir</div>
+        <button type="button" class="btn bo bs" onclick="sgEmbLineaAdd()">+ Agregar producto</button>
+      </div>
+      <table class="pa-tbl" style="font-size:12px"><thead><tr>
+        <th>Producto</th><th>Envase</th><th style="text-align:right">kg/bulto</th><th style="text-align:right">Cajas</th><th style="text-align:right">kg totales</th><th></th>
+      </tr></thead><tbody id="sg-emb-lineas"></tbody></table>
+      <div style="display:flex;justify-content:flex-end;gap:16px;margin-top:6px;font-size:12px">
+        <span style="color:var(--mut)">Σ cajas: <b id="sg-emb-lineas-cajas">0</b></span>
+        <span style="color:var(--mut)">Σ kg: <b id="sg-emb-lineas-kg">0</b> kg</span>
+      </div>
     </div>
     <div style="display:grid;grid-template-columns:1.4fr 1fr;gap:16px;margin-top:8px">
       <div>
@@ -13804,8 +13818,52 @@ function sgImpFill(e){
   eid('sg-emb-eta').value = sgImpVal(e.fecha_eta);
   eid('sg-emb-obs').value = sgImpVal(e.observaciones);
   sgImpRenderCostos();
+  // F5 — líneas de producto (un lote por línea). Copia liviana del detalle; [] en embarque nuevo.
+  SG._embLineas = (e.lineas||[]).map(function(l){
+    return { producto_id:l.producto_id, envase_id:l.envase_id, kg_por_bulto:l.kg_por_bulto, cajas:l.cajas };
+  });
+  sgEmbRenderLineas();
   sgImpCalc();
   eid('sg-emb-modal').classList.add('on');
+}
+// ── F5 — sub-form de líneas de producto del embarque (molde: sgOcRenderItems) ──────
+function sgEmbProdOpts(sel){ return '<option value="">— Producto —</option>'+(SG.cacheProd||[]).map(function(p){ return '<option value="'+p.id+'"'+(String(sel)===String(p.id)?' selected':'')+'>'+esc(p.nombre+(p.variedad?' '+p.variedad:''))+'</option>'; }).join(''); }
+function sgEmbEnvOpts(sel){ return '<option value="">— Envase —</option>'+(SG.cacheEnv||[]).map(function(en){ return '<option value="'+en.id+'"'+(String(sel)===String(en.id)?' selected':'')+'>'+esc(en.nombre)+'</option>'; }).join(''); }
+function sgEmbRenderLineas(){
+  var tb=eid('sg-emb-lineas'); if(!tb) return;
+  var rows=(SG._embLineas||[]).map(function(l,i){
+    return '<tr>'
+      +'<td><select onchange="sgEmbLineaUpd('+i+',\'producto_id\',this.value)">'+sgEmbProdOpts(l.producto_id)+'</select></td>'
+      +'<td><select onchange="sgEmbLineaUpd('+i+',\'envase_id\',this.value)">'+sgEmbEnvOpts(l.envase_id)+'</select></td>'
+      +'<td><input type="number" min="0" step="0.01" placeholder="kg/bulto" value="'+sgImpVal(l.kg_por_bulto)+'" oninput="sgEmbLineaNum('+i+',\'kg_por_bulto\',this.value)" style="width:82px;text-align:right"></td>'
+      +'<td><input type="number" min="0" step="1" placeholder="cajas" value="'+sgImpVal(l.cajas)+'" oninput="sgEmbLineaNum('+i+',\'cajas\',this.value)" style="width:82px;text-align:right"></td>'
+      +'<td id="sg-emb-lkg-'+i+'" style="text-align:right;color:var(--mut)">—</td>'
+      +'<td style="text-align:right"><button type="button" class="btn bd bs" onclick="sgEmbLineaDel('+i+')" title="Quitar">×</button></td>'
+    +'</tr>';
+  }).join('');
+  tb.innerHTML = rows || '<tr><td colspan="6" class="emp" style="text-align:center;color:var(--mut)">Sin productos. Agregá al menos uno para poder recibir el embarque.</td></tr>';
+  sgEmbLineasSync();
+}
+function sgEmbLineaAdd(){ if(!SG._embLineas) SG._embLineas=[]; SG._embLineas.push({producto_id:'',envase_id:'',kg_por_bulto:'',cajas:''}); sgEmbRenderLineas(); }
+function sgEmbLineaDel(i){ SG._embLineas.splice(i,1); sgEmbRenderLineas(); }
+function sgEmbLineaUpd(i,f,v){ SG._embLineas[i][f]=v; sgEmbRenderLineas(); }   // selects → re-render OK
+function sgEmbLineaNum(i,f,v){ SG._embLineas[i][f]=v; sgEmbLineasSync(); }      // inputs numéricos → NO re-render (no pierde foco)
+function sgEmbLineasSync(){
+  var sumC=0, sumK=0;
+  (SG._embLineas||[]).forEach(function(l,i){
+    var cj=parseInt(l.cajas,10)||0, kpb=parseFloat(l.kg_por_bulto)||0, kg=cj*kpb;
+    sumC+=cj; sumK+=kg;
+    var cell=eid('sg-emb-lkg-'+i); if(cell) cell.textContent = kg>0 ? nr(kg)+' kg' : '—';
+  });
+  var cE=eid('sg-emb-lineas-cajas'); if(cE) cE.textContent=nr(sumC);
+  var kE=eid('sg-emb-lineas-kg'); if(kE) kE.textContent=nr(sumK);
+  // cantidad_cajas DERIVADO cuando hay líneas: read-only + valor = Σ cajas. Sin líneas → manual (backward-compat).
+  var cajasInp=eid('sg-emb-cajas');
+  if(cajasInp){
+    if((SG._embLineas||[]).length){ cajasInp.value=sumC; cajasInp.readOnly=true; cajasInp.style.opacity='.7'; }
+    else { cajasInp.readOnly=false; cajasInp.style.opacity='1'; }
+  }
+  sgImpCalc();
 }
 // Una fila de rubro (input estimado/real/moneda + celda de gap). El fondo verde marca los créditos.
 function sgImpCostoRow(c){
@@ -13924,12 +13982,22 @@ function sgImpGather(){
     costos: SG_EMB_CONCEPTOS.map(function(c){
       return { concepto:c.k, moneda:eid('sg-emb-mon-'+c.k).value,
         monto_estimado:eid('sg-emb-est-'+c.k).value, monto_real:eid('sg-emb-real-'+c.k).value };
+    }),
+    // F5 — líneas de producto (descarta filas sin producto). El backend deriva cantidad_cajas = Σ cajas.
+    lineas: (SG._embLineas||[]).filter(function(l){ return l.producto_id!=null && l.producto_id!==''; }).map(function(l){
+      return { producto_id:l.producto_id, envase_id:l.envase_id||null, kg_por_bulto:l.kg_por_bulto, cajas:l.cajas };
     })
   };
 }
 function sgImpSave(){
   var b=sgImpGather();
   if(!b.nombre){ toast('Poné un nombre al embarque','er'); return; }
+  // F5 — cada producto cargado necesita kg/bulto y cajas > 0 (si no, el lote nace con 0 kg, no despachable).
+  var badLine=(SG._embLineas||[]).some(function(l){
+    var hasProd=l.producto_id!=null && l.producto_id!=='';
+    return hasProd && (!(parseFloat(l.kg_por_bulto)>0) || !(parseInt(l.cajas,10)>0));
+  });
+  if(badLine){ toast('Cada producto necesita kg/bulto y cajas mayores a 0','er'); return; }
   var id=SG._embId;
   (id ? api('/api/sg/embarques/'+id,'PUT',b) : api('/api/sg/embarques','POST',b)).then(function(r){
     if(r&&r.ok){ toast(id?'Embarque actualizado':'Embarque creado','ok'); closeMB('sg-emb-modal'); sgImpInit(); }
