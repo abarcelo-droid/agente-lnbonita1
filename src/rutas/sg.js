@@ -2347,6 +2347,23 @@ function costoTransferido(db, loteId) {
   const r = db.prepare("SELECT COALESCE(SUM(costo_madre_consumido),0) s FROM sg_reprocesos WHERE lote_madre_id=? AND estado='activo'").get(loteId).s;
   return t + r;
 }
+
+// Reescribe el margen_estimado (snapshot congelado al despachar) de TODOS los despachos activos de
+// un lote, derivándolo del costo_final ACTUAL. Se usa en el cierre de cambio (Importación F3): al
+// re-costear el lote importado, su margen histórico dejaría de reflejar el costo real. Usa la MISMA
+// fórmula que MARGEN_LINEA (subtotal − kg_despachados × costo_final/kgVigente) con el kg vigente
+// ACTUAL del lote (decisión Pablo: coherente con los reportes, aunque haya decomisos posteriores al
+// despacho). Idempotente: re-correrlo re-deriva del costo_final actual, sin acumulación. Scope
+// estricto: solo el lote indicado; nunca toca márgenes de otros lotes.
+function recalcMargenLote(db, loteId) {
+  const lote = db.prepare('SELECT costo_final, kg_reales FROM sg_lotes WHERE id=?').get(loteId);
+  if (!lote) return;
+  const kgVig = (lote.kg_reales || 0) - kgDecomisado(db, loteId) - kgTransformado(db, loteId);
+  const costoPorKg = kgVig > 0 ? (lote.costo_final || 0) / kgVig : 0;
+  db.prepare(`UPDATE sg_despacho_items
+       SET margen_estimado = subtotal - kg_despachados * ?
+     WHERE lote_id = ? AND despacho_id IN (SELECT id FROM sg_despachos WHERE activo=1)`).run(costoPorKg, loteId);
+}
 // Fragmento SQL reutilizable: Σ kg que salieron del lote 'l' (transformaciones + reprocesos activos).
 const SUM_TRANSF = "(COALESCE((SELECT SUM(kg_transformados) FROM sg_transformaciones WHERE lote_origen_id=l.id),0)"
   + " + COALESCE((SELECT SUM(kg_procesados) FROM sg_reprocesos WHERE lote_madre_id=l.id AND estado='activo'),0))";
@@ -3658,6 +3675,125 @@ router.post('/embarques/:id/recibir', requireAdmin, (req, res) => {
     });
     const loteIds = tx();
     res.json({ ok: true, data: { lotes: loteIds, costo_caja_neto: calc.costo_caja_neto } });
+  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+
+// ── CIERRE DE CAMBIO (Importación F3) ───────────────────────────────────────────
+// Al pagar (30/45 días) se fija tc_real → re-costea los lotes del embarque, reescribe el margen
+// histórico de sus despachos y genera el asiento de diferencia de cambio. Lo más delicado del
+// módulo: toca costeo, snapshot de márgenes y ledger. ZONA PABLO (monto/signos/alcance definidos).
+
+const CTA_DIF_CAMBIO = '4.1.08.01.000.0000';   // Diferencia Cierre de Cambio (lookup por código)
+
+// Monto en USD de la MERCADERÍA (rubro costo_mercaderia cargado en USD). Base del delta de TC.
+// Si el rubro está en ARS (o no existe) → 0: no hay exposición cambiaria sobre él.
+function mercaderiaUSD(costos) {
+  const m = (costos || []).find(c => c.concepto === 'costo_mercaderia' && (c.moneda || 'ARS') === 'USD');
+  if (!m) return 0;
+  const v = m.monto_real != null ? m.monto_real : m.monto_estimado;
+  return Number(v) || 0;
+}
+
+// tc vigente ANTES del cierre = tc_real ?? tc_estimado (mismo criterio que calcEmbarque).
+function tcVigente(emb) {
+  return emb.tc_real != null ? Number(emb.tc_real) : (emb.tc_estimado != null ? Number(emb.tc_estimado) : null);
+}
+
+// Arma las 2 líneas del asiento de diferencia de cambio según el signo del delta.
+// delta > 0 (dólar SUBIÓ, pagás más pesos = pérdida): DEBE dif. cambio, HABER banco.
+// delta < 0 (dólar BAJÓ = ganancia): invertido. Devuelve [] si falta alguna cuenta.
+function lineasAsientoCambio(ctaDifId, ctaBancoId, delta, nombreEmb, tcAnterior, tcReal) {
+  if (!ctaDifId || !ctaBancoId || !(Math.abs(delta) > 0.0001)) return [];
+  const monto = Math.abs(delta);
+  const dDif = `Dif. cambio embarque ${nombreEmb} (tc ${tcAnterior}→${tcReal})`;
+  const dBco = `Pago embarque ${nombreEmb}`;
+  return delta > 0
+    ? [{ cuenta_id: ctaDifId, debe: monto, haber: 0, descripcion: dDif }, { cuenta_id: ctaBancoId, debe: 0, haber: monto, descripcion: dBco }]
+    : [{ cuenta_id: ctaBancoId, debe: monto, haber: 0, descripcion: dBco }, { cuenta_id: ctaDifId, debe: 0, haber: monto, descripcion: dDif }];
+}
+
+// PREVIEW — calcula (sin persistir) tc anterior → real, delta, nuevo costo/caja neto y las líneas
+// del asiento que se generarían. Alimenta el modal de confirmación del front.
+router.post('/embarques/:id/cerrar-cambio/preview', requireAdmin, (req, res) => {
+  const db = getDb();
+  try {
+    const emb = db.prepare('SELECT * FROM sg_embarques WHERE id=? AND activo=1').get(req.params.id);
+    if (!emb) return res.status(404).json({ ok: false, error: 'Embarque no encontrado' });
+    const tcReal = Number(req.body && req.body.tc_real);
+    if (!(tcReal > 0)) return res.status(400).json({ ok: false, error: 'tc_real inválido' });
+    const finCuentaId = (req.body && req.body.fin_cuenta_id) ? Number(req.body.fin_cuenta_id) : null;
+    const finCuenta = finCuentaId ? db.prepare('SELECT * FROM sg_fin_cuentas WHERE id=? AND activo=1').get(finCuentaId) : null;
+    const tcAnterior = tcVigente(emb);
+    const costos = embCostos(db, emb.id);
+    const delta = (tcAnterior != null) ? mercaderiaUSD(costos) * (tcReal - tcAnterior) : 0;
+    const calcNuevo = calcEmbarque({ ...emb, tc_real: tcReal }, costos);
+    const ctaDif = db.prepare('SELECT id FROM sg_cuentas WHERE codigo=?').get(CTA_DIF_CAMBIO);
+    const lineas = lineasAsientoCambio(ctaDif && ctaDif.id, finCuenta && finCuenta.cuenta_contable_id, delta, emb.nombre || emb.id, tcAnterior, tcReal);
+    res.json({ ok: true, data: {
+      tc_anterior: tcAnterior, tc_real: tcReal, mercaderia_usd: mercaderiaUSD(costos), delta,
+      costo_caja_neto_nuevo: calcNuevo.costo_caja_neto, asiento_lineas: lineas } });
+  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+
+// CERRAR CAMBIO — fija tc_real, re-costea, reescribe márgenes y asienta la diferencia. En UNA
+// transacción; el asiento va en su propio try/catch (no rompe el re-costeo si falla). Idempotente
+// por estado: no cierra dos veces. NO registra egreso bancario (Pablo lo carga aparte).
+router.post('/embarques/:id/cerrar-cambio', requireAdmin, (req, res) => {
+  const db = getDb();
+  try {
+    const emb = db.prepare('SELECT * FROM sg_embarques WHERE id=? AND activo=1').get(req.params.id);
+    if (!emb) return res.status(404).json({ ok: false, error: 'Embarque no encontrado' });
+    if (emb.estado === 'cerrado') return res.status(409).json({ ok: false, error: 'El embarque ya tiene el cambio cerrado' });
+    const tcReal = Number(req.body && req.body.tc_real);
+    if (!(tcReal > 0)) return res.status(400).json({ ok: false, error: 'tc_real inválido' });
+    const finCuentaId = (req.body && req.body.fin_cuenta_id) ? Number(req.body.fin_cuenta_id) : null;
+    const finCuenta = finCuentaId ? db.prepare('SELECT * FROM sg_fin_cuentas WHERE id=? AND activo=1').get(finCuentaId) : null;
+    if (!finCuenta) return res.status(400).json({ ok: false, error: 'Falta la cuenta bancaria que pagó (fin_cuenta_id)' });
+    const fechaPago = val(req.body && req.body.fecha_pago) || db.prepare("SELECT date('now','localtime') d").get().d;
+
+    const tcAnterior = tcVigente(emb);                          // el vigente ANTES del cierre
+    const costos = embCostos(db, emb.id);
+    const delta = (tcAnterior != null) ? mercaderiaUSD(costos) * (tcReal - tcAnterior) : 0;
+
+    // 1) RE-COSTEO (transacción propia): fija tc_real, re-costea cada lote y reescribe su margen.
+    // Esto es lo que NO puede perderse. El asiento va DESPUÉS, aparte (el re-costeo ya está commiteado).
+    const reCostear = db.transaction(() => {
+      db.prepare("UPDATE sg_embarques SET tc_real=?, estado='cerrado', modificado_en=datetime('now','localtime'), modificado_por=? WHERE id=?")
+        .run(tcReal, uid(req), emb.id);
+      const calc = calcEmbarque({ ...emb, tc_real: tcReal }, costos);
+      const lotes = db.prepare('SELECT id, kg_reales, bultos FROM sg_lotes WHERE embarque_id=? AND activo=1').all(emb.id);
+      for (const l of lotes) {
+        const cajas = l.bultos != null ? l.bultos : 0;
+        const costoBase = (calc.costo_caja_neto || 0) * cajas;
+        const precio = (l.kg_reales > 0) ? costoBase / l.kg_reales : null;
+        db.prepare("UPDATE sg_lotes SET costo_base=?, precio_unitario_kg=?, modificado_en=datetime('now','localtime'), modificado_por=? WHERE id=?")
+          .run(costoBase, precio, uid(req), l.id);
+        recalcCostoLote(db, l.id);     // rama importado: costo_final = costo_base + gastos directos
+        recalcMargenLote(db, l.id);    // reescribe el margen histórico de sus despachos
+      }
+    });
+    reCostear();
+
+    // 2) ASIENTO de diferencia de cambio (⚠️ zona Pablo) — en su PROPIA transacción y try/catch:
+    // si falla, rollea SOLO el asiento (sin header huérfano) y NO toca el re-costeo ya commiteado.
+    let asientoId = null;
+    try {
+      const ctaDif = db.prepare('SELECT id FROM sg_cuentas WHERE codigo=?').get(CTA_DIF_CAMBIO);
+      const lineas = lineasAsientoCambio(ctaDif && ctaDif.id, finCuenta.cuenta_contable_id, delta, emb.nombre || emb.id, tcAnterior, tcReal);
+      if (lineas.length) {
+        const asentar = db.transaction(() => {
+          const a = db.prepare('INSERT INTO sg_asientos (fecha, descripcion, usuario_id, ref_codigo) VALUES (?,?,?,?)')
+            .run(fechaPago, `Diferencia cierre de cambio - Embarque ${emb.nombre || emb.id}`, uid(req), `EMB-${emb.id}`);
+          const aid = a.lastInsertRowid;
+          const ins = db.prepare('INSERT INTO sg_asientos_lineas (asiento_id, cuenta_id, debe, haber, descripcion) VALUES (?,?,?,?,?)');
+          for (const ln of lineas) ins.run(aid, ln.cuenta_id, ln.debe, ln.haber, ln.descripcion);
+          return aid;
+        });
+        asientoId = asentar();
+      }
+    } catch (eA) { console.error('[SG] Error asiento dif. cambio:', eA.message); }
+
+    res.json({ ok: true, data: { tc_anterior: tcAnterior, tc_real: tcReal, delta, asiento_id: asientoId } });
   } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
 });
 
