@@ -2505,6 +2505,20 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
         <div id="sg-emb-result" style="border:1px solid var(--bor);border-radius:10px;padding:12px"></div>
       </div>
     </div>
+    <!-- F6 — Expediente documental (persistente en R2). Solo visible al EDITAR un embarque (necesita id). -->
+    <div id="sg-emb-docs-wrap" style="margin-top:12px;border:1px solid var(--bor);border-radius:10px;padding:10px;display:none">
+      <div style="font-size:12px;font-weight:600;color:var(--mut);margin-bottom:6px">📎 EXPEDIENTE · documentos de importación (persistente en R2)</div>
+      <div id="sg-emb-docs-checklist" style="font-size:11px;margin-bottom:8px"></div>
+      <table class="pa-tbl" style="font-size:12px"><thead><tr><th>Tipo</th><th>Documento</th><th>Fecha</th><th style="text-align:right">Tamaño</th><th></th></tr></thead>
+        <tbody id="sg-emb-docs"></tbody></table>
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:10px;align-items:end">
+        <div class="fl"><label>Tipo</label><select id="sg-doc-tipo"></select></div>
+        <div class="fl"><label>Fecha documento</label><input type="date" id="sg-doc-fecha"></div>
+        <div class="fl" style="grid-column:span 2"><label>Archivo (PDF/JPG/PNG · ≤10MB)</label><input type="file" id="sg-doc-file" accept="application/pdf,image/jpeg,image/png"></div>
+        <div class="fl" style="grid-column:span 3"><label>Observaciones</label><input type="text" id="sg-doc-obs"></div>
+        <div><button type="button" class="btn bb" onclick="sgEmbDocSubir()">+ Subir documento</button></div>
+      </div>
+    </div>
     <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px">
       <button class="btn bo" onclick="closeMB('sg-emb-modal')">Cancelar</button>
       <button class="btn bb" onclick="sgImpSave()">Guardar embarque</button>
@@ -13824,7 +13838,73 @@ function sgImpFill(e){
   });
   sgEmbRenderLineas();
   sgImpCalc();
+  sgEmbDocsInit(e.id||null);   // F6 — expediente documental (solo al editar; necesita id)
   eid('sg-emb-modal').classList.add('on');
+}
+// ── F6 — expediente documental del embarque (uploads persistentes en R2 vía backend) ──
+var SG_DOC_TIPOS=[
+  ['factura_comercial','Factura comercial'],['packing_list','Packing list'],
+  ['bl','BL (conocimiento de embarque)'],['poliza_seguro','Póliza de seguro'],
+  ['despacho_aduana','Despacho de aduana'],['cert_fitosanitario','Cert. fitosanitario'],
+  ['cert_origen','Cert. de origen'],['otro','Otro']
+];
+function sgEmbDocTipoLbl(t){ var f=SG_DOC_TIPOS.find(function(x){return x[0]===t;}); return f?f[1]:(t||'—'); }
+function sgEmbFmtBytes(n){ n=Number(n)||0; if(n<1024) return n+' B'; if(n<1048576) return Math.round(n/1024)+' KB'; return (n/1048576).toFixed(1)+' MB'; }
+function sgEmbDocsInit(embId){
+  SG._embDocId=embId;
+  var wrap=eid('sg-emb-docs-wrap'); if(wrap) wrap.style.display=embId?'block':'none';
+  if(!embId) return;
+  var sel=eid('sg-doc-tipo'); if(sel) sel.innerHTML=SG_DOC_TIPOS.map(function(t){ return '<option value="'+t[0]+'">'+t[1]+'</option>'; }).join('');
+  sgEmbDocsLoad();
+}
+function sgEmbDocsLoad(){
+  if(!SG._embDocId) return;
+  api('/api/sg/embarques/'+SG._embDocId+'/documentos').then(function(r){ sgEmbRenderDocs((r&&r.ok)?r.data:[]); });
+}
+function sgEmbRenderDocs(docs){
+  var tb=eid('sg-emb-docs'); if(!tb) return;
+  tb.innerHTML = docs.length ? docs.map(function(d){
+    return '<tr>'
+      +'<td><span class="bdg bok">'+esc(sgEmbDocTipoLbl(d.tipo))+'</span></td>'
+      +'<td>'+esc(d.nombre_original||'')+'</td>'
+      +'<td>'+esc(d.fecha_documento||'—')+'</td>'
+      +'<td style="text-align:right">'+sgEmbFmtBytes(d.tamano_bytes)+'</td>'
+      +'<td style="text-align:right;white-space:nowrap">'
+        +'<a class="btn bo bs" href="/api/sg/embarques/'+d.embarque_id+'/documentos/'+d.id+'/descargar" target="_blank" rel="noopener" title="Descargar">⬇</a> '
+        +'<button type="button" class="btn bd bs" onclick="sgEmbDocDel('+d.id+')" title="Eliminar del expediente">🗑</button>'
+      +'</td>'
+    +'</tr>';
+  }).join('') : '<tr><td colspan="5" class="emp" style="text-align:center;color:var(--mut)">Sin documentos todavía.</td></tr>';
+  // Checklist de tipos clave faltantes (excluye "Otro"). Útil para no despachar sin fitosanitario.
+  var presentes={}; docs.forEach(function(d){ presentes[d.tipo]=true; });
+  var faltan=SG_DOC_TIPOS.filter(function(t){ return t[0]!=='otro' && !presentes[t[0]]; });
+  var cl=eid('sg-emb-docs-checklist');
+  if(cl){ cl.innerHTML = faltan.length
+    ? '<span style="color:var(--err,#dc2626)">⚠ Faltan: </span><span style="color:var(--mut)">'+faltan.map(function(t){ return esc(t[1]); }).join(' · ')+'</span>'
+    : '<span style="color:var(--ok,#16a34a)">✓ Expediente completo (todos los documentos clave cargados)</span>'; }
+}
+function sgEmbDocSubir(){
+  if(!SG._embDocId){ toast('Guardá el embarque primero','er'); return; }
+  var fileInp=eid('sg-doc-file'); var f=fileInp&&fileInp.files&&fileInp.files[0];
+  if(!f){ toast('Elegí un archivo','er'); return; }
+  if(f.size>10*1024*1024){ toast('El archivo supera 10MB','er'); return; }
+  var fd=new FormData();
+  fd.append('archivo', f);
+  fd.append('tipo', eid('sg-doc-tipo').value);
+  fd.append('fecha_documento', eid('sg-doc-fecha').value||'');
+  fd.append('observaciones', eid('sg-doc-obs').value||'');
+  fetch('/api/sg/embarques/'+SG._embDocId+'/documentos', { method:'POST', body:fd, credentials:'same-origin' })
+    .then(function(r){ return r.json(); })
+    .then(function(r){
+      if(r&&r.ok){ toast('Documento subido','ok'); if(fileInp) fileInp.value=''; eid('sg-doc-obs').value=''; sgEmbDocsLoad(); }
+      else toast((r&&r.error)||'Error al subir','er');
+    }).catch(function(e){ toast('Error al subir: '+e.message,'er'); });
+}
+function sgEmbDocDel(docId){
+  if(!confirm('¿Eliminar este documento del expediente?')) return;
+  api('/api/sg/embarques/'+SG._embDocId+'/documentos/'+docId,'DELETE').then(function(r){
+    if(r&&r.ok){ toast('Documento eliminado','ok'); sgEmbDocsLoad(); } else toast((r&&r.error)||'Error','er');
+  });
 }
 // ── F5 — sub-form de líneas de producto del embarque (molde: sgOcRenderItems) ──────
 function sgEmbProdOpts(sel){ return '<option value="">— Producto —</option>'+(SG.cacheProd||[]).map(function(p){ return '<option value="'+p.id+'"'+(String(sel)===String(p.id)?' selected':'')+'>'+esc(p.nombre+(p.variedad?' '+p.variedad:''))+'</option>'; }).join(''); }
