@@ -1984,16 +1984,17 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
 
   </div>
 
-  <!-- Gastos Variables (ex "Gastos globales" en Compras) — módulo propio del sidebar -->
+  <!-- Gastos Fijos del Período (ex "Gastos Variables" / "Gastos globales" en Compras) — módulo propio del sidebar.
+       CG1 (#505) sacó estos gastos del costo del lote: van a RESULTADO, ya NO se prorratean. -->
   <div class="sec sg-mod" id="sec-sg-gvariables">
-    <div class="ph"><div><div class="ph-t">🍅 San Gerónimo · Gastos Variables</div><div class="ph-s">Gastos del período que se prorratean por kg entre los lotes</div></div></div>
+    <div class="ph"><div><div class="ph-t">🍅 San Gerónimo · Gastos Fijos del Período</div><div class="ph-s">Gastos fijos/estructura del período — van a resultado, NO al costo del lote</div></div></div>
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;gap:10px;flex-wrap:wrap">
       <label style="font-size:12px;color:var(--mut)">Período
         <input type="month" id="sg-gg-filtro" onchange="sgLoadGGlobales()" style="padding:5px 8px;border-radius:6px;border:1px solid var(--bor);background:var(--bg)">
       </label>
-      <button class="btn bb" onclick="sgGgOpen()">+ Nuevo gasto variable</button>
+      <button class="btn bb" onclick="sgGgOpen()">+ Nuevo gasto fijo</button>
     </div>
-    <div style="font-size:12px;color:var(--mut);margin-bottom:8px">💡 Al guardar/editar un gasto variable se recalcula el costo final de todos los lotes del período (prorrateo por kg).</div>
+    <div style="font-size:12px;color:var(--mut);margin-bottom:8px">💡 Los gastos fijos del período (alquiler, sueldos, IIBB, luz) van a <b>resultado</b> — ver el reporte “Resultado del período” en Informes. NO se prorratean al costo del lote.</div>
     <div class="ab-table-wrap"><table class="pa-tbl">
       <thead><tr><th>Período</th><th>Tipo</th><th>Fecha</th><th>Observaciones</th><th style="text-align:right">Monto</th><th></th></tr></thead>
       <tbody id="sg-tb-gglobales"><tr><td colspan="6" class="emp">Cargando…</td></tr></tbody>
@@ -2322,7 +2323,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
 
     <div class="sgr-sub on" id="sgr-sub-rent-partida">
       <div style="font-size:12px;color:var(--mut);margin-bottom:8px;padding:8px 10px;background:var(--bg);border:1px solid var(--bor);border-radius:6px;line-height:1.5">
-        💡 <b>F0 — rentabilidad punta a punta con los datos de HOY.</b> Por cada partida (lote): costo acumulado conocido (compra + gastos directos + prorrateo global) contra lo vendido. El margen es <b>dinámico</b> (costo actual ÷ kg × kg vendidos) y <b>BRUTO</b>.<br>
+        💡 <b>F0 — rentabilidad punta a punta con los datos de HOY.</b> Por cada partida (lote): costo acumulado conocido (compra + gastos directos) contra lo vendido. El margen es <b>dinámico</b> (costo actual ÷ kg × kg vendidos) y <b>BRUTO</b>.<br>
         <b>Todavía NO captura</b> (es F1+): gastos de <b>salida</b> (carga, flete de entrega), gastos compartidos entre varias partidas (M:N), prorrateo manual, ni cierre de partida. <b>⚠</b> = partida sin costo cargado (ej. pizarra sin cerrar) → su margen está inflado.
       </div>
       <div class="ab-table-wrap"><table class="pa-tbl">
@@ -2771,10 +2772,10 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   </div>
 </div>
 
-<!-- Modal Gasto variable -->
+<!-- Modal Gasto fijo del período -->
 <div class="ab-modal-overlay" id="sg-gg-modal">
   <div class="ab-modal" style="width:520px">
-    <div class="mhd"><div class="mht" id="sg-gg-tit">Nuevo gasto variable</div><button class="mcl" onclick="closeMB('sg-gg-modal')">×</button></div>
+    <div class="mhd"><div class="mht" id="sg-gg-tit">Nuevo gasto fijo</div><button class="mcl" onclick="closeMB('sg-gg-modal')">×</button></div>
     <div class="fg">
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
         <div class="fl"><label>Período <span style="color:var(--err)">*</span></label><input type="month" id="sg-gg-periodo"></div>
@@ -4357,14 +4358,15 @@ function sgGdDel(id){
   api('/api/sg/gastos-directos/'+id,'DELETE').then(function(r){ if(r&&r.ok){toast('Eliminado','ok');sgLoadGDirectos();} else toast((r&&r.error)||'Error','er'); });
 }
 
-// ── Gastos Variables (endpoint/ids internos siguen siendo gastos-globales) ──
+// ── Gastos Fijos del Período (endpoint/ids internos siguen siendo gastos-globales) ──
+// CG1 (#505): estos gastos van a resultado, ya NO recalculan el costo de ningún lote.
 function sgLoadGGlobales(){
   var per=eid('sg-gg-filtro')?eid('sg-gg-filtro').value:'';
   api('/api/sg/gastos-globales'+(per?('?periodo='+per):'')).then(function(r){
     var rows=(r&&r.ok)?r.data:[];
     eid('sg-tb-gglobales').innerHTML = rows.length ? rows.map(function(g){
       return '<tr><td>'+esc(g.periodo)+'</td><td>'+esc(g.tipo_gasto||'—')+'</td><td>'+(g.fecha||'—')+'</td><td>'+esc(g.observaciones||'')+'</td><td style="text-align:right">'+sgMoney(g.monto)+'</td><td style="text-align:right"><button class="btn bd bs" onclick="sgGgDel('+g.id+')">🗑️</button></td></tr>';
-    }).join('') : '<tr><td colspan="6" class="emp">Sin gastos variables.</td></tr>';
+    }).join('') : '<tr><td colspan="6" class="emp">Sin gastos fijos cargados.</td></tr>';
   });
 }
 function sgGgOpen(){
@@ -4379,12 +4381,12 @@ function sgGgGuardar(){
   if(!(monto>0)){ toast('Monto inválido','er'); return; }
   var body={ periodo:per, tipo_gasto:eid('sg-gg-tipo').value, monto:monto, fecha:eid('sg-gg-fecha').value, observaciones:eid('sg-gg-obs').value };
   api('/api/sg/gastos-globales','POST',body).then(function(r){
-    if(r&&r.ok){ toast('Gasto variable cargado · lotes del período recalculados','ok'); closeMB('sg-gg-modal'); sgLoadGGlobales(); }
+    if(r&&r.ok){ toast('Gasto fijo cargado','ok'); closeMB('sg-gg-modal'); sgLoadGGlobales(); }
     else toast((r&&r.error)||'Error','er');
   });
 }
 function sgGgDel(id){
-  if(!confirm('¿Eliminar gasto variable? (recalcula lotes del período)')) return;
+  if(!confirm('¿Eliminar gasto fijo?')) return;
   api('/api/sg/gastos-globales/'+id,'DELETE').then(function(r){ if(r&&r.ok){toast('Eliminado','ok');sgLoadGGlobales();} else toast((r&&r.error)||'Error','er'); });
 }
 
