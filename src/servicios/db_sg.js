@@ -849,6 +849,45 @@ try {
   `);
 } catch (e) { console.error('[DB] SG sg_embarques:', e.message); }
 
+// ── MÓDULO IMPORTACIÓN (F2) — líneas de producto del embarque + enganche al lote ────
+// F1 modeló solo cantidad_cajas TOTAL. F2 necesita saber QUÉ lleva cada lote: producto, envase y
+// kg por bulto. sg_embarque_lineas describe la composición del embarque; al recibir (POST
+// /embarques/:id/recibir) se crea un sg_lote por línea con origen='importado' y costo provisorio
+// = costo_caja_neto × cajas. Aditivo: no toca sg_embarques ni sg_embarque_costos.
+try {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS sg_embarque_lineas (
+      id                INTEGER PRIMARY KEY AUTOINCREMENT,
+      embarque_id       INTEGER NOT NULL REFERENCES sg_embarques(id),
+      producto_id       INTEGER NOT NULL REFERENCES sg_productos(id),
+      envase_id         INTEGER REFERENCES sg_envases(id),
+      kg_por_bulto      REAL,
+      cajas             INTEGER NOT NULL DEFAULT 0,
+      calidad           TEXT,
+      calibre           TEXT,
+      observaciones     TEXT,
+      activo            INTEGER NOT NULL DEFAULT 1,
+      creado_en         TEXT DEFAULT (datetime('now','localtime')),
+      creado_por        INTEGER,
+      modificado_en     TEXT,
+      modificado_por    INTEGER,
+      eliminado_en      TEXT,
+      eliminado_por_id  INTEGER
+    );
+    CREATE INDEX IF NOT EXISTS idx_sg_embarque_lineas_emb ON sg_embarque_lineas(embarque_id);
+  `);
+} catch (e) { console.error('[DB] SG sg_embarque_lineas:', e.message); }
+
+// sg_lotes += embarque_id (F2): el lote importado apunta a su embarque de origen. Nullable —
+// solo los lotes con origen='importado' lo tienen; el resto queda NULL. FK lógica a sg_embarques.
+try {
+  const cols = db.prepare("PRAGMA table_info(sg_lotes)").all().map(c => c.name);
+  if (!cols.includes('embarque_id')) {
+    db.exec("ALTER TABLE sg_lotes ADD COLUMN embarque_id INTEGER");
+    console.log('[DB] SG sg_lotes migrado (+embarque_id)');
+  }
+} catch (e) { console.error('[DB] SG migración sg_lotes (embarque_id):', e.message); }
+
 // ── FASE 2 (cargas y descargas, cooperativa): unidad de cobro + cantidad ────────
 // La cooperativa cobra por 'bulto' o 'pallet' (variable). Se guarda la unidad + la cantidad
 // (de sg_recepciones.bultos/pallets_recibidos para descarga_ingreso, o bultos del despacho
