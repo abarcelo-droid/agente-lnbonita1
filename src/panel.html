@@ -13807,53 +13807,99 @@ function sgImpFill(e){
   sgImpCalc();
   eid('sg-emb-modal').classList.add('on');
 }
+// Una fila de rubro (input estimado/real/moneda + celda de gap). El fondo verde marca los créditos.
+function sgImpCostoRow(c){
+  var v = (SG._embCostos && SG._embCostos[c.k]) || {};
+  var mon = v.moneda || 'ARS';
+  return '<tr'+(c.cred?' style="background:rgba(16,163,74,.06)"':'')+'>'
+    +'<td>'+esc(c.l)+'</td>'
+    +'<td><select id="sg-emb-mon-'+c.k+'" onchange="sgImpCalc()"><option value="ARS"'+(mon==='ARS'?' selected':'')+'>ARS</option><option value="USD"'+(mon==='USD'?' selected':'')+'>USD</option></select></td>'
+    +'<td><input type="number" step="0.01" min="0" id="sg-emb-est-'+c.k+'" value="'+sgImpVal(v.monto_estimado)+'" oninput="sgImpCalc()" style="width:120px;text-align:right"></td>'
+    +'<td><input type="number" step="0.01" min="0" id="sg-emb-real-'+c.k+'" value="'+sgImpVal(v.monto_real)+'" oninput="sgImpCalc()" style="width:120px;text-align:right"></td>'
+    +'<td id="sg-emb-gap-'+c.k+'" style="text-align:right;color:var(--mut)">—</td>'
+  +'</tr>';
+}
+// F4a — dos bloques como la planilla real: COSTOS (bruto) y CRÉDITOS RECUPERABLES (se restan).
+// Cada bloque cierra con su subtotal Σestimado | Σreal | Σgap (los llena sgImpCalc en vivo).
 function sgImpRenderCostos(){
-  eid('sg-emb-costos').innerHTML = SG_EMB_CONCEPTOS.map(function(c){
-    var v = (SG._embCostos && SG._embCostos[c.k]) || {};
-    var mon = v.moneda || 'ARS';
-    return '<tr'+(c.cred?' style="background:rgba(16,163,74,.06)"':'')+'>'
-      +'<td>'+esc(c.l)+(c.cred?' <span style="color:var(--ok,#16a34a);font-size:10px">crédito</span>':'')+'</td>'
-      +'<td><select id="sg-emb-mon-'+c.k+'" onchange="sgImpCalc()"><option value="ARS"'+(mon==='ARS'?' selected':'')+'>ARS</option><option value="USD"'+(mon==='USD'?' selected':'')+'>USD</option></select></td>'
-      +'<td><input type="number" step="0.01" min="0" id="sg-emb-est-'+c.k+'" value="'+sgImpVal(v.monto_estimado)+'" oninput="sgImpCalc()" style="width:120px;text-align:right"></td>'
-      +'<td><input type="number" step="0.01" min="0" id="sg-emb-real-'+c.k+'" value="'+sgImpVal(v.monto_real)+'" oninput="sgImpCalc()" style="width:120px;text-align:right"></td>'
-      +'<td id="sg-emb-gap-'+c.k+'" style="text-align:right;color:var(--mut)">—</td>'
+  var grpHdr = function(txt, note){
+    return '<tr><td colspan="5" style="font-weight:700;font-size:11px;letter-spacing:.03em;color:var(--mut);padding-top:10px">'
+      +txt+(note?' <span style="font-weight:400;letter-spacing:0;text-transform:none">· '+note+'</span>':'')+'</td></tr>';
+  };
+  var subRow = function(id, lbl){
+    return '<tr style="border-top:2px solid var(--bor)">'
+      +'<td colspan="2" style="font-weight:700">'+lbl+'</td>'
+      +'<td id="'+id+'-est" style="text-align:right;font-weight:600;color:var(--mut)">—</td>'
+      +'<td id="'+id+'-real" style="text-align:right;font-weight:700">—</td>'
+      +'<td id="'+id+'-gap" style="text-align:right">—</td>'
     +'</tr>';
-  }).join('');
+  };
+  var costos = SG_EMB_CONCEPTOS.filter(function(c){ return !c.cred; });
+  var creds  = SG_EMB_CONCEPTOS.filter(function(c){ return  c.cred; });
+  eid('sg-emb-costos').innerHTML =
+      grpHdr('COSTOS')
+    + costos.map(sgImpCostoRow).join('')
+    + subRow('sg-emb-sub-bruto','Total Costo Mercadería (bruto)')
+    + grpHdr('CRÉDITOS RECUPERABLES','se restan del costo — crédito fiscal recuperable')
+    + creds.map(sgImpCostoRow).join('')
+    + subRow('sg-emb-sub-cred','Total Créditos');
 }
 function sgImpCalc(){
   var tc = parseFloat(eid('sg-emb-tc-real').value) || parseFloat(eid('sg-emb-tc-est').value) || null;
   var aARS = function(x, mon){ if(x==null||x==='') return null; var m=Number(x)||0; return (mon==='USD'&&tc)?m*tc:m; };
-  var bruto=0, cred=0;
+  var bruto=0, cred=0;                                  // efectivo (COALESCE real,est) → alimenta el neto
+  var sub={ bruto:{est:0,real:0}, cred:{est:0,real:0} }; // subtotales por bloque para la tabla de rubros
   SG_EMB_CONCEPTOS.forEach(function(c){
     var mon=eid('sg-emb-mon-'+c.k).value;
     var est=aARS(eid('sg-emb-est-'+c.k).value, mon);
     var real=aARS(eid('sg-emb-real-'+c.k).value, mon);
     var efec = real!=null?real:(est!=null?est:0);
+    var bk = c.cred?sub.cred:sub.bruto;
+    if(est!=null) bk.est+=est;
+    if(real!=null) bk.real+=real;
     if(c.cred) cred+=efec; else bruto+=efec;
     var g=eid('sg-emb-gap-'+c.k);
     if(real!=null&&est!=null){ var d=real-est; g.textContent=(d>=0?'+':'')+sgMoney(Math.round(d)); g.style.color=(d>0?'var(--err,#dc2626)':(d<0?'var(--ok,#16a34a)':'var(--mut)')); }
     else { g.textContent='—'; g.style.color='var(--mut)'; }
   });
+  // Subtotales de cada bloque (Σestimado | Σreal | Σgap).
+  function fillSub(id, s){
+    eid(id+'-est').textContent = sgMoney(Math.round(s.est));
+    eid(id+'-real').textContent = sgMoney(Math.round(s.real));
+    var gp=eid(id+'-gap'), d=s.real-s.est;
+    gp.textContent=(d>=0?'+':'')+sgMoney(Math.round(d));
+    gp.style.color=(d>0?'var(--err,#dc2626)':(d<0?'var(--ok,#16a34a)':'var(--mut)'));
+  }
+  fillSub('sg-emb-sub-bruto', sub.bruto);
+  fillSub('sg-emb-sub-cred', sub.cred);
+
   var neto=bruto-cred;
   var cajas=parseInt(eid('sg-emb-cajas').value,10)||0;
   var merma=parseFloat(eid('sg-emb-merma').value)||0;
   var precioRef=parseFloat(eid('sg-emb-precio-ref').value)||null;
-  var ccn=cajas>0?neto/cajas:null;
-  var cci=cajas>0?bruto/cajas:null;
+  var ccn=cajas>0?neto/cajas:null;                     // base del MARGEN (crédito recuperado)
+  var cci=cajas>0?bruto/cajas:null;                    // desembolso de caja (cash flow)
   var ccv=(ccn!=null&&merma<100)?ccn/(1-merma/100):ccn;
   var margen=(precioRef&&precioRef>0&&ccv!=null)?(precioRef-ccv)/precioRef*100:null;
   var mCol=(margen==null)?'var(--mut)':(margen>=0?'#16a34a':'#dc2626');
-  function row(l,v){ return '<div style="display:flex;justify-content:space-between;font-size:13px;padding:2px 0"><span style="color:var(--mut)">'+l+'</span><span style="font-variant-numeric:tabular-nums">'+v+'</span></div>'; }
+  // Costo/caja con 2 decimales (como la planilla: 42.747,62). Los totales van redondeados.
+  var money2 = function(n){ return (n==null)?'—':('$'+(Number(n)||0).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2})); };
+  function row(l,v,strong){ return '<div style="display:flex;justify-content:space-between;font-size:13px;padding:2px 0"><span style="color:var(--mut)">'+l+'</span><span style="font-variant-numeric:tabular-nums"'+(strong?' style="font-weight:700"':'')+'>'+v+'</span></div>'; }
+  // Mirada destacada: emoji + label + sublabel, con el número grande.
+  function big(emoji,l,sub,v,col,bg){ return '<div style="margin-top:6px;padding:8px 10px;border-radius:8px;background:'+bg+';display:flex;justify-content:space-between;align-items:center;gap:10px">'
+    +'<div><div style="font-weight:600">'+emoji+' '+l+'</div><div style="font-size:11px;color:var(--mut)">'+sub+'</div></div>'
+    +'<span style="font-size:18px;font-weight:700;color:'+(col||'inherit')+';font-variant-numeric:tabular-nums">'+v+'</span></div>'; }
   eid('sg-emb-result').innerHTML =
-     row('Total Costo Bruto', sgMoney(Math.round(bruto)))
-    +row('Total Créditos recuperables', '− '+sgMoney(Math.round(cred)))
-    +row('<b>Costo Neto</b>', '<b>'+sgMoney(Math.round(neto))+'</b>')
-    +'<hr style="border:none;border-top:1px solid var(--bor);margin:6px 0">'
-    +row('Costo / caja neto', ccn!=null?sgMoney(Math.round(ccn)):'—')
-    +row('Costo / caja c/impuestos', cci!=null?sgMoney(Math.round(cci)):'—')
-    +row('Costo / caja vendible (merma '+merma+'%)', ccv!=null?sgMoney(Math.round(ccv)):'—')
+     row('Total Costo Mercadería (bruto)', sgMoney(Math.round(bruto)))
+    +row('− Total Créditos', '− '+sgMoney(Math.round(cred)))
+    +row('= Costo Neto de Impuestos', sgMoney(Math.round(neto)), true)
+    +row('÷ cajas', nr(cajas)+' caja'+(cajas===1?'':'s'))
+    +'<hr style="border:none;border-top:1px solid var(--bor);margin:8px 0">'
+    +big('💰','Costo/caja NETO','base del margen (crédito recuperado)', money2(ccn), '#16a34a', 'rgba(16,163,74,.10)')
+    +big('💵','Costo/caja c/impuestos','desembolso de caja (cash flow)', money2(cci), 'var(--fg,inherit)', 'var(--bg)')
+    +big('📦','Costo/caja vendible','ajustado por merma '+merma+'%', money2(ccv), 'var(--fg,inherit)', 'var(--bg)')
     +'<div style="margin-top:8px;padding:8px 10px;border-radius:8px;background:'+(margen==null?'var(--bg)':(margen>=0?'rgba(16,163,74,.12)':'rgba(220,38,38,.12)'))+';display:flex;justify-content:space-between;align-items:center">'
-      +'<span style="font-weight:600">MARGEN PROYECTADO</span>'
+      +'<div><div style="font-weight:600">📈 MARGEN PROYECTADO</div><div style="font-size:11px;color:var(--mut)">sobre el costo NETO, no el c/impuestos</div></div>'
       +'<span style="font-size:20px;font-weight:700;color:'+mCol+'">'+(margen!=null?margen.toFixed(1)+'%':'—')+'</span>'
     +'</div>';
 }
