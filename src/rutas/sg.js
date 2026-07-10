@@ -3474,9 +3474,32 @@ router.get('/embarques/:id', requireAuth, (req, res) => {
       WHERE e.id=? AND e.activo=1`).get(req.params.id);
     if (!emb) return res.status(404).json({ ok: false, error: 'Embarque no encontrado' });
     const costos = embCostos(db, emb.id);
-    res.json({ ok: true, data: { ...emb, costos, calculo: calcEmbarque(emb, costos) } });
+    const lineas = db.prepare(`SELECT l.*, pr.nombre AS producto_nombre, pr.variedad AS producto_variedad, e.nombre AS envase_nombre
+      FROM sg_embarque_lineas l
+      LEFT JOIN sg_productos pr ON pr.id=l.producto_id
+      LEFT JOIN sg_envases e ON e.id=l.envase_id
+      WHERE l.embarque_id=? AND l.activo=1 ORDER BY l.id`).all(emb.id);
+    res.json({ ok: true, data: { ...emb, costos, lineas, calculo: calcEmbarque(emb, costos) } });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
+
+// F5 — persiste el desglose de líneas de un embarque (replace-all) y DERIVA cantidad_cajas = Σ cajas.
+// Solo reemplaza si el body trae un array `lineas` (backward-compat: un PUT sin líneas no las pisa) y
+// el embarque no fue recibido/cerrado (después ya generó lotes, las líneas quedan congeladas). Siempre
+// recalcula cantidad_cajas desde las líneas activas si hay alguna. Reutiliza embLineasDelBody.
+function embSyncLineas(db, embId, body, userId, estado) {
+  const puedeEditar = estado !== 'recibido' && estado !== 'cerrado';
+  if (Array.isArray(body.lineas) && puedeEditar) {
+    db.prepare(`UPDATE sg_embarque_lineas SET activo=0, eliminado_en=datetime('now','localtime'), eliminado_por_id=?
+      WHERE embarque_id=? AND activo=1`).run(userId, embId);
+    const ins = db.prepare(`INSERT INTO sg_embarque_lineas
+      (embarque_id, producto_id, envase_id, kg_por_bulto, cajas, calidad, calibre, observaciones, creado_por)
+      VALUES (?,?,?,?,?,?,?,?,?)`);
+    for (const l of embLineasDelBody(body)) ins.run(embId, l.producto_id, l.envase_id, l.kg_por_bulto, l.cajas, l.calidad, l.calibre, l.observaciones, userId);
+  }
+  const agg = db.prepare('SELECT COALESCE(SUM(cajas),0) s, COUNT(*) c FROM sg_embarque_lineas WHERE embarque_id=? AND activo=1').get(embId);
+  if (agg.c > 0) db.prepare('UPDATE sg_embarques SET cantidad_cajas=? WHERE id=?').run(agg.s, embId);   // derivado
+}
 
 // Normaliza el array de costos del body → filas válidas (concepto conocido).
 function embCostosDelBody(body) {
@@ -3531,6 +3554,7 @@ router.post('/embarques', requireAdmin, (req, res) => {
         (embarque_id, concepto, es_credito, moneda, monto_estimado, monto_real, observaciones, creado_por)
         VALUES (?,?,?,?,?,?,?,?)`);
       for (const c of costos) ins.run(embId, c.concepto, c.es_credito, c.moneda, c.monto_estimado, c.monto_real, c.observaciones, uid(req));
+      embSyncLineas(db, embId, b, uid(req), h.estado);   // F5 — desglose de productos + cantidad_cajas derivada
       return embId;
     });
     res.json({ ok: true, data: { id: Number(tx()) } });
@@ -3541,7 +3565,7 @@ router.post('/embarques', requireAdmin, (req, res) => {
 router.put('/embarques/:id', requireAdmin, (req, res) => {
   const db = getDb();
   try {
-    const emb = db.prepare('SELECT id FROM sg_embarques WHERE id=? AND activo=1').get(req.params.id);
+    const emb = db.prepare('SELECT id, estado FROM sg_embarques WHERE id=? AND activo=1').get(req.params.id);
     if (!emb) return res.status(404).json({ ok: false, error: 'Embarque no encontrado' });
     const b = req.body || {};
     const h = embHeaderVals(b);
@@ -3559,6 +3583,7 @@ router.put('/embarques/:id', requireAdmin, (req, res) => {
         const r = upd.run(c.es_credito, c.moneda, c.monto_estimado, c.monto_real, c.observaciones, uid(req), emb.id, c.concepto);
         if (r.changes === 0) ins.run(emb.id, c.concepto, c.es_credito, c.moneda, c.monto_estimado, c.monto_real, c.observaciones, uid(req));
       }
+      embSyncLineas(db, emb.id, b, uid(req), emb.estado);   // F5 — replace-all de líneas (si no está recibido) + cantidad_cajas derivada
     });
     tx();
     res.json({ ok: true });
@@ -3642,9 +3667,11 @@ router.post('/embarques/:id/recibir', requireAdmin, (req, res) => {
     if (emb.estado === 'recibido' || emb.estado === 'cerrado')
       return res.status(409).json({ ok: false, error: 'El embarque ya fue recibido' });
     const lineas = db.prepare('SELECT * FROM sg_embarque_lineas WHERE embarque_id=? AND activo=1 ORDER BY id').all(emb.id);
-    if (!lineas.length) return res.status(400).json({ ok: false, error: 'El embarque no tiene líneas de producto para recibir' });
+    if (!lineas.length) return res.status(400).json({ ok: false, error: 'El embarque no tiene líneas de producto. Cargá el desglose de productos antes de recibir.' });
     if (lineas.some(l => !(Number(l.cajas) > 0)))
       return res.status(400).json({ ok: false, error: 'Todas las líneas deben tener cajas > 0' });
+    if (lineas.some(l => !(Number(l.kg_por_bulto) > 0)))
+      return res.status(400).json({ ok: false, error: 'Todas las líneas deben tener kg por bulto > 0 (si no, el lote nace con 0 kg y no es despachable)' });
     const calc = calcEmbarque(emb, embCostos(db, emb.id));
     if (calc.costo_caja_neto == null)
       return res.status(400).json({ ok: false, error: 'No se puede costear el embarque (falta cantidad de cajas o costos cargados)' });
