@@ -888,6 +888,17 @@ try {
   }
 } catch (e) { console.error('[DB] SG migración sg_lotes (embarque_id):', e.message); }
 
+// sg_embarque_lineas += precio_unitario_usd (F7): FOB unitario en USD/caja por línea (calibre/
+// presentación tienen precios distintos). costo_mercaderia de la cabecera pasa a DERIVADO = Σ(cajas ×
+// precio_unitario_usd). Nullable por backward-compat (líneas F5 sin precio → costeo parejo por caja).
+try {
+  const cols = db.prepare("PRAGMA table_info(sg_embarque_lineas)").all().map(c => c.name);
+  if (!cols.includes('precio_unitario_usd')) {
+    db.exec("ALTER TABLE sg_embarque_lineas ADD COLUMN precio_unitario_usd REAL");
+    console.log('[DB] SG sg_embarque_lineas migrado (+precio_unitario_usd)');
+  }
+} catch (e) { console.error('[DB] SG migración sg_embarque_lineas (precio_unitario_usd):', e.message); }
+
 // ── FASE 2 (cargas y descargas, cooperativa): unidad de cobro + cantidad ────────
 // La cooperativa cobra por 'bulto' o 'pallet' (variable). Se guarda la unidad + la cantidad
 // (de sg_recepciones.bultos/pallets_recibidos para descarga_ingreso, o bultos del despacho

@@ -2487,12 +2487,14 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
         <button type="button" class="btn bo bs" onclick="sgEmbLineaAdd()">+ Agregar producto</button>
       </div>
       <table class="pa-tbl" style="font-size:12px"><thead><tr>
-        <th>Producto</th><th>Envase</th><th style="text-align:right">kg/bulto</th><th style="text-align:right">Cajas</th><th style="text-align:right">kg totales</th><th></th>
+        <th>Producto</th><th>Envase</th><th style="text-align:right">kg/bulto</th><th style="text-align:right">Cajas</th><th style="text-align:right">FOB USD/caja</th><th style="text-align:right">FOB USD</th><th style="text-align:right">kg totales</th><th></th>
       </tr></thead><tbody id="sg-emb-lineas"></tbody></table>
       <div style="display:flex;justify-content:flex-end;gap:16px;margin-top:6px;font-size:12px">
         <span style="color:var(--mut)">Σ cajas: <b id="sg-emb-lineas-cajas">0</b></span>
         <span style="color:var(--mut)">Σ kg: <b id="sg-emb-lineas-kg">0</b> kg</span>
+        <span style="color:var(--mut)">Σ FOB: <b id="sg-emb-lineas-fob">US$ 0</b></span>
       </div>
+      <div style="font-size:11px;color:var(--mut);margin-top:4px">El FOB unitario de cada línea deriva <b>Costo mercadería</b> (Σ cajas × FOB); los gastos se reparten parejo por caja.</div>
     </div>
     <div style="display:grid;grid-template-columns:1.4fr 1fr;gap:16px;margin-top:8px">
       <div>
@@ -13820,7 +13822,7 @@ function sgImpFill(e){
   sgImpRenderCostos();
   // F5 — líneas de producto (un lote por línea). Copia liviana del detalle; [] en embarque nuevo.
   SG._embLineas = (e.lineas||[]).map(function(l){
-    return { producto_id:l.producto_id, envase_id:l.envase_id, kg_por_bulto:l.kg_por_bulto, cajas:l.cajas };
+    return { producto_id:l.producto_id, envase_id:l.envase_id, kg_por_bulto:l.kg_por_bulto, cajas:l.cajas, precio_unitario_usd:l.precio_unitario_usd };
   });
   sgEmbRenderLineas();
   sgImpCalc();
@@ -13837,31 +13839,50 @@ function sgEmbRenderLineas(){
       +'<td><select onchange="sgEmbLineaUpd('+i+',\'envase_id\',this.value)">'+sgEmbEnvOpts(l.envase_id)+'</select></td>'
       +'<td><input type="number" min="0" step="0.01" placeholder="kg/bulto" value="'+sgImpVal(l.kg_por_bulto)+'" oninput="sgEmbLineaNum('+i+',\'kg_por_bulto\',this.value)" style="width:82px;text-align:right"></td>'
       +'<td><input type="number" min="0" step="1" placeholder="cajas" value="'+sgImpVal(l.cajas)+'" oninput="sgEmbLineaNum('+i+',\'cajas\',this.value)" style="width:82px;text-align:right"></td>'
+      +'<td><input type="number" min="0" step="0.01" placeholder="US$/caja" value="'+sgImpVal(l.precio_unitario_usd)+'" oninput="sgEmbLineaNum('+i+',\'precio_unitario_usd\',this.value)" title="Precio FOB unitario en USD por caja" style="width:92px;text-align:right"></td>'
+      +'<td id="sg-emb-lfob-'+i+'" style="text-align:right;color:var(--mut)">—</td>'
       +'<td id="sg-emb-lkg-'+i+'" style="text-align:right;color:var(--mut)">—</td>'
       +'<td style="text-align:right"><button type="button" class="btn bd bs" onclick="sgEmbLineaDel('+i+')" title="Quitar">×</button></td>'
     +'</tr>';
   }).join('');
-  tb.innerHTML = rows || '<tr><td colspan="6" class="emp" style="text-align:center;color:var(--mut)">Sin productos. Agregá al menos uno para poder recibir el embarque.</td></tr>';
+  tb.innerHTML = rows || '<tr><td colspan="8" class="emp" style="text-align:center;color:var(--mut)">Sin productos. Agregá al menos uno para poder recibir el embarque.</td></tr>';
   sgEmbLineasSync();
 }
-function sgEmbLineaAdd(){ if(!SG._embLineas) SG._embLineas=[]; SG._embLineas.push({producto_id:'',envase_id:'',kg_por_bulto:'',cajas:''}); sgEmbRenderLineas(); }
+function sgEmbLineaAdd(){ if(!SG._embLineas) SG._embLineas=[]; SG._embLineas.push({producto_id:'',envase_id:'',kg_por_bulto:'',cajas:'',precio_unitario_usd:''}); sgEmbRenderLineas(); }
 function sgEmbLineaDel(i){ SG._embLineas.splice(i,1); sgEmbRenderLineas(); }
 function sgEmbLineaUpd(i,f,v){ SG._embLineas[i][f]=v; sgEmbRenderLineas(); }   // selects → re-render OK
 function sgEmbLineaNum(i,f,v){ SG._embLineas[i][f]=v; sgEmbLineasSync(); }      // inputs numéricos → NO re-render (no pierde foco)
 function sgEmbLineasSync(){
-  var sumC=0, sumK=0;
+  var sumC=0, sumK=0, sumFob=0, conPrecio=false;
+  var money2usd=function(n){ return 'US$ '+(Number(n)||0).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2}); };
   (SG._embLineas||[]).forEach(function(l,i){
     var cj=parseInt(l.cajas,10)||0, kpb=parseFloat(l.kg_por_bulto)||0, kg=cj*kpb;
-    sumC+=cj; sumK+=kg;
-    var cell=eid('sg-emb-lkg-'+i); if(cell) cell.textContent = kg>0 ? nr(kg)+' kg' : '—';
+    var pu=(l.precio_unitario_usd!=null && l.precio_unitario_usd!=='')?(parseFloat(l.precio_unitario_usd)||0):null, fob=(pu!=null)?cj*pu:0;
+    if(pu!=null) conPrecio=true;
+    sumC+=cj; sumK+=kg; sumFob+=fob;
+    var kc=eid('sg-emb-lkg-'+i); if(kc) kc.textContent = kg>0 ? nr(kg)+' kg' : '—';
+    var fc=eid('sg-emb-lfob-'+i); if(fc) fc.textContent = (pu!=null && cj>0) ? money2usd(fob) : '—';
   });
   var cE=eid('sg-emb-lineas-cajas'); if(cE) cE.textContent=nr(sumC);
   var kE=eid('sg-emb-lineas-kg'); if(kE) kE.textContent=nr(sumK);
+  var fE=eid('sg-emb-lineas-fob'); if(fE) fE.textContent=money2usd(sumFob);
   // cantidad_cajas DERIVADO cuando hay líneas: read-only + valor = Σ cajas. Sin líneas → manual (backward-compat).
   var cajasInp=eid('sg-emb-cajas');
   if(cajasInp){
     if((SG._embLineas||[]).length){ cajasInp.value=sumC; cajasInp.readOnly=true; cajasInp.style.opacity='.7'; }
     else { cajasInp.readOnly=false; cajasInp.style.opacity='1'; }
+  }
+  // F7 — costo_mercaderia DERIVADO del FOB de las líneas (Σ cajas × precio, en USD): el rubro pasa a
+  // read-only y refleja el total. Si ninguna línea tiene precio, queda manual (backward-compat).
+  var mercEst=eid('sg-emb-est-costo_mercaderia'), mercMon=eid('sg-emb-mon-costo_mercaderia');
+  if(mercEst){
+    if(conPrecio){
+      mercEst.value=sumFob.toFixed(2); mercEst.readOnly=true; mercEst.style.opacity='.7';
+      if(mercMon){ mercMon.value='USD'; mercMon.disabled=true; }
+    } else {
+      mercEst.readOnly=false; mercEst.style.opacity='1';
+      if(mercMon) mercMon.disabled=false;
+    }
   }
   sgImpCalc();
 }
@@ -13985,7 +14006,7 @@ function sgImpGather(){
     }),
     // F5 — líneas de producto (descarta filas sin producto). El backend deriva cantidad_cajas = Σ cajas.
     lineas: (SG._embLineas||[]).filter(function(l){ return l.producto_id!=null && l.producto_id!==''; }).map(function(l){
-      return { producto_id:l.producto_id, envase_id:l.envase_id||null, kg_por_bulto:l.kg_por_bulto, cajas:l.cajas };
+      return { producto_id:l.producto_id, envase_id:l.envase_id||null, kg_por_bulto:l.kg_por_bulto, cajas:l.cajas, precio_unitario_usd:l.precio_unitario_usd };
     })
   };
 }

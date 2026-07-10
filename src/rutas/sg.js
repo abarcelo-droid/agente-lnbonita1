@@ -3424,14 +3424,37 @@ function embCostos(db, embId) {
 // recepción ni OC (recepcion_id/oc_item_id NULL); bultos = cajas; presentacion_id NULL (la
 // identidad de bulto vive en envase_id + kg_por_bulto, como en la OC al vuelo). El cierre de
 // cambio (F3, ZONA PABLO) ajustará costo_base y re-correrá recalcCostoLote.
-function crearLoteDeEmbarque(db, { emb, linea, costoCajaNeto, fechaIngreso, userId }) {
+// F7 — costo_base por línea con FOB unitario. El FOB (precio_unitario_usd → ARS con tc) DIFERENCIA las
+// líneas; el RESTO del neto (otros gastos − créditos) se reparte PAREJO POR CAJA (la carga es homogénea:
+// mismo producto, distinto calibre). Σ costo_base = costo NETO del embarque EXACTO (el último lote absorbe
+// el redondeo). Degrada a F5 (todo parejo por caja) si ninguna línea trae precio. Devuelve un array
+// alineado con `lineas`.
+function costoBaseLineasEmbarque(emb, costos, lineas) {
+  const calc = calcEmbarque(emb, costos);
+  const neto = calc.neto || 0;
+  const tc = calc.tc_aplicado;
+  const merc = costos.find(c => c.concepto === 'costo_mercaderia');
+  const mercUSD = merc && (merc.moneda || 'ARS') === 'USD';
+  const fobConv = p => { const v = Number(p) || 0; return (mercUSD && tc) ? v * tc : v; };   // FOB USD→ARS
+  const cajasTot = lineas.reduce((s, l) => s + (Number(l.cajas) || 0), 0);
+  const fobArs = lineas.map(l => (Number(l.cajas) || 0) * fobConv(l.precio_unitario_usd));
+  const restoNeto = neto - fobArs.reduce((a, b) => a + b, 0);   // gastos netos, parejo por caja
+  const bases = lineas.map((l, i) => fobArs[i] + (cajasTot > 0 ? restoNeto * ((Number(l.cajas) || 0) / cajasTot) : 0));
+  if (bases.length) {
+    const sumButLast = bases.slice(0, -1).reduce((a, b) => a + b, 0);
+    bases[bases.length - 1] = neto - sumButLast;   // el último absorbe el redondeo → Σ = neto exacto
+  }
+  return bases;
+}
+
+function crearLoteDeEmbarque(db, { emb, linea, costoBase, fechaIngreso, userId }) {
   const prod = db.prepare('SELECT vida_util_dias_default FROM sg_productos WHERE id=?').get(linea.producto_id);
   const vida = (prod && prod.vida_util_dias_default) || 0;
   const cajas = Math.round(Number(linea.cajas) || 0);
   const kpb = (linea.kg_por_bulto != null && linea.kg_por_bulto !== '') ? Number(linea.kg_por_bulto) : null;
   const kg = kpb != null ? cajas * kpb : 0;
-  const costoBase = (Number(costoCajaNeto) || 0) * cajas;
-  const precio = kg > 0 ? costoBase / kg : null;
+  const base = Number(costoBase) || 0;   // F7 — costo_base ya prorrateado (FOB por línea + gastos parejos)
+  const precio = kg > 0 ? base / kg : null;
   let venc = null;
   if (fechaIngreso && vida) venc = db.prepare('SELECT date(?, ?) d').get(fechaIngreso, `+${vida} days`).d;
   const envId = (linea.envase_id != null && linea.envase_id !== '') ? Number(linea.envase_id) : null;
@@ -3441,8 +3464,8 @@ function crearLoteDeEmbarque(db, { emb, linea, costoCajaNeto, fechaIngreso, user
      calidad, calibre, origen, fecha_ingreso, fecha_vencimiento_estimada, estado, costo_final,
      presentacion_id, bultos, kg_por_bulto, envase_id, embarque_id, creado_por)
     VALUES (?,?,?,?,?,?,?,?,?,'importado',?,?, 'disponible', ?, NULL, ?, ?, ?, ?, ?)`)
-    .run(codigo, null, null, linea.producto_id, kg, precio, costoBase,
-      val(linea.calidad), val(linea.calibre), fechaIngreso, venc, costoBase, cajas, kpb, envId, emb.id, userId);
+    .run(codigo, null, null, linea.producto_id, kg, precio, base,
+      val(linea.calidad), val(linea.calibre), fechaIngreso, venc, base, cajas, kpb, envId, emb.id, userId);
   const loteId = info.lastInsertRowid;
   recalcCostoLote(db, loteId);
   return loteId;
@@ -3493,12 +3516,21 @@ function embSyncLineas(db, embId, body, userId, estado) {
     db.prepare(`UPDATE sg_embarque_lineas SET activo=0, eliminado_en=datetime('now','localtime'), eliminado_por_id=?
       WHERE embarque_id=? AND activo=1`).run(userId, embId);
     const ins = db.prepare(`INSERT INTO sg_embarque_lineas
-      (embarque_id, producto_id, envase_id, kg_por_bulto, cajas, calidad, calibre, observaciones, creado_por)
-      VALUES (?,?,?,?,?,?,?,?,?)`);
-    for (const l of embLineasDelBody(body)) ins.run(embId, l.producto_id, l.envase_id, l.kg_por_bulto, l.cajas, l.calidad, l.calibre, l.observaciones, userId);
+      (embarque_id, producto_id, envase_id, kg_por_bulto, cajas, precio_unitario_usd, calidad, calibre, observaciones, creado_por)
+      VALUES (?,?,?,?,?,?,?,?,?,?)`);
+    for (const l of embLineasDelBody(body)) ins.run(embId, l.producto_id, l.envase_id, l.kg_por_bulto, l.cajas, l.precio_unitario_usd, l.calidad, l.calibre, l.observaciones, userId);
   }
   const agg = db.prepare('SELECT COALESCE(SUM(cajas),0) s, COUNT(*) c FROM sg_embarque_lineas WHERE embarque_id=? AND activo=1').get(embId);
   if (agg.c > 0) db.prepare('UPDATE sg_embarques SET cantidad_cajas=? WHERE id=?').run(agg.s, embId);   // derivado
+  // F7 — costo_mercaderia DERIVADO = Σ(cajas × precio_unitario_usd) de las líneas con precio, en USD.
+  // Solo si hay al menos una línea con precio; si no, respeta el valor manual del rubro. Upsert por concepto.
+  const fob = db.prepare("SELECT COALESCE(SUM(cajas*precio_unitario_usd),0) s, COUNT(precio_unitario_usd) c FROM sg_embarque_lineas WHERE embarque_id=? AND activo=1").get(embId);
+  if (fob.c > 0) {
+    const r = db.prepare(`UPDATE sg_embarque_costos SET monto_estimado=?, moneda='USD',
+      modificado_en=datetime('now','localtime'), modificado_por=? WHERE embarque_id=? AND concepto='costo_mercaderia' AND activo=1`).run(fob.s, userId, embId);
+    if (r.changes === 0) db.prepare(`INSERT INTO sg_embarque_costos (embarque_id, concepto, es_credito, moneda, monto_estimado, creado_por)
+      VALUES (?, 'costo_mercaderia', 0, 'USD', ?, ?)`).run(embId, fob.s, userId);
+  }
 }
 
 // Normaliza el array de costos del body → filas válidas (concepto conocido).
@@ -3613,6 +3645,7 @@ function embLineasDelBody(body) {
       envase_id: (l.envase_id != null && l.envase_id !== '') ? Number(l.envase_id) : null,
       kg_por_bulto: (l.kg_por_bulto != null && l.kg_por_bulto !== '') ? Number(l.kg_por_bulto) : null,
       cajas: (l.cajas != null && l.cajas !== '') ? Math.round(Number(l.cajas)) : 0,
+      precio_unitario_usd: (l.precio_unitario_usd != null && l.precio_unitario_usd !== '') ? Number(l.precio_unitario_usd) : null,   // F7 — FOB USD/caja
       calidad: val(l.calidad),
       calibre: val(l.calibre),
       observaciones: val(l.observaciones)
@@ -3676,10 +3709,11 @@ router.post('/embarques/:id/recibir', requireAdmin, (req, res) => {
     if (calc.costo_caja_neto == null)
       return res.status(400).json({ ok: false, error: 'No se puede costear el embarque (falta cantidad de cajas o costos cargados)' });
     const fechaIngreso = val(req.body && req.body.fecha_ingreso) || db.prepare("SELECT date('now','localtime') d").get().d;
+    // F7 — costo_base por línea: FOB unitario diferencia; gastos parejos por caja; Σ = neto exacto.
+    const bases = costoBaseLineasEmbarque(emb, embCostos(db, emb.id), lineas);
     const tx = db.transaction(() => {
       const ids = [];
-      for (const linea of lineas)
-        ids.push(crearLoteDeEmbarque(db, { emb, linea, costoCajaNeto: calc.costo_caja_neto, fechaIngreso, userId: uid(req) }));
+      lineas.forEach((linea, i) => ids.push(crearLoteDeEmbarque(db, { emb, linea, costoBase: bases[i], fechaIngreso, userId: uid(req) })));
       db.prepare("UPDATE sg_embarques SET estado='recibido', modificado_en=datetime('now','localtime'), modificado_por=? WHERE id=?").run(uid(req), emb.id);
       return ids;
     });
