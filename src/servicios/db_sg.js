@@ -888,33 +888,16 @@ try {
   }
 } catch (e) { console.error('[DB] SG migración sg_lotes (embarque_id):', e.message); }
 
-// ── MÓDULO IMPORTACIÓN (F6) — expediente documental del embarque ────────────────
-// Archiva los documentos de importación (factura comercial, packing list, BL, póliza, despacho
-// de aduana, certificados) en Cloudflare R2 (persistente). La fila solo guarda la storage_key +
-// metadata; el binario vive en R2 (servicios/storage.js). Aditivo: no toca sg_embarques.
+// sg_embarque_lineas += precio_unitario_usd (F7): FOB unitario en USD/caja por línea (calibre/
+// presentación tienen precios distintos). costo_mercaderia de la cabecera pasa a DERIVADO = Σ(cajas ×
+// precio_unitario_usd). Nullable por backward-compat (líneas F5 sin precio → costeo parejo por caja).
 try {
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS sg_embarque_documentos (
-      id                INTEGER PRIMARY KEY AUTOINCREMENT,
-      embarque_id       INTEGER NOT NULL REFERENCES sg_embarques(id),
-      tipo              TEXT NOT NULL CHECK(tipo IN ('factura_comercial','packing_list','bl','poliza_seguro','despacho_aduana','cert_fitosanitario','cert_origen','otro')),
-      storage_key       TEXT NOT NULL,
-      nombre_original   TEXT NOT NULL,
-      mime              TEXT NOT NULL,
-      tamano_bytes      INTEGER,
-      fecha_documento   TEXT,
-      observaciones     TEXT,
-      activo            INTEGER NOT NULL DEFAULT 1,
-      creado_en         TEXT DEFAULT (datetime('now','localtime')),
-      creado_por        INTEGER,
-      modificado_en     TEXT,
-      modificado_por    INTEGER,
-      eliminado_en      TEXT,
-      eliminado_por_id  INTEGER
-    );
-    CREATE INDEX IF NOT EXISTS idx_sg_emb_docs_emb ON sg_embarque_documentos(embarque_id);
-  `);
-} catch (e) { console.error('[DB] SG sg_embarque_documentos:', e.message); }
+  const cols = db.prepare("PRAGMA table_info(sg_embarque_lineas)").all().map(c => c.name);
+  if (!cols.includes('precio_unitario_usd')) {
+    db.exec("ALTER TABLE sg_embarque_lineas ADD COLUMN precio_unitario_usd REAL");
+    console.log('[DB] SG sg_embarque_lineas migrado (+precio_unitario_usd)');
+  }
+} catch (e) { console.error('[DB] SG migración sg_embarque_lineas (precio_unitario_usd):', e.message); }
 
 // ── FASE 2 (cargas y descargas, cooperativa): unidad de cobro + cantidad ────────
 // La cooperativa cobra por 'bulto' o 'pallet' (variable). Se guarda la unidad + la cantidad
