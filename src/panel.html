@@ -2387,7 +2387,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     </div>
 
     <div class="sg-sub on" id="sg-sub-productos">
-      <div style="display:flex;justify-content:flex-end;margin-bottom:10px"><button class="btn bb" onclick="sgOpenModal('productos')">+ Nuevo producto</button></div>
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-bottom:10px"><button class="btn bo" onclick="sgProductosExport()" title="Exportar el catálogo a Excel para limpiarlo">📥 Exportar productos</button><button class="btn bb" onclick="sgOpenModal('productos')">+ Nuevo producto</button></div>
       <div class="ab-table-wrap"><table class="pa-tbl">
         <thead id="sg-th-productos"><tr><th>Código</th><th>Especie</th><th>Variedad</th><th>Familia</th><th>Envase</th><th>Presentaciones</th><th></th></tr></thead>
         <tbody id="sg-tb-productos"><tr><td colspan="7" class="emp">Cargando…</td></tr></tbody>
@@ -4687,6 +4687,8 @@ function sgFacListLoad(){
   });
 }
 function sgFacListExport(){ window.open('/api/sg/ventas/facturas/export.xlsx?'+sgFacListQS(),'_blank'); }
+// Export del catálogo de productos SG a XLSX (server-side) para limpiarlo fuera del sistema.
+function sgProductosExport(){ window.open('/api/sg/productos/export.xlsx','_blank'); }
 
 // ── 📋 Pendientes de comprobante (despachos con kg sin facturar) ──
 function sgPendInit(){
