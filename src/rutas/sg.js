@@ -10,6 +10,7 @@ import path from 'path';
 import fs from 'fs';
 import { randomUUID } from 'crypto';
 import { fileURLToPath } from 'url';
+import * as XLSX from 'xlsx';
 import { subirArchivo, obtenerArchivo, storageConfigurado } from '../servicios/storage.js';
 import { getDb } from '../servicios/db.js';
 import '../servicios/db_sg.js'; // corre el DDL sg_* al importarse
@@ -363,6 +364,47 @@ router.get('/productos', requireAuth, (req, res) => {
   try {
     const where = req.query.todos === '1' ? '1=1' : 'activo=1';
     res.json({ ok: true, data: db.prepare(`SELECT * FROM sg_productos WHERE ${where} ORDER BY codigo`).all() });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+// EXPORT XLSX — una fila por producto para limpiar el catálogo fuera del sistema (read-only).
+// Ruta LITERAL: va ANTES de /productos/:id para no ser capturada por el handler con :id. Patrón
+// de generación server-side espejado de sg_ventas.js /facturas/export.xlsx (lib xlsx). Las columnas
+// de conteo (presentaciones, envases usados, lotes, OC, despachos) sirven para detectar duplicados
+// (mismo nombre+variedad) y productos con el envase metido en el nombre/variedad.
+router.get('/productos/export.xlsx', requireAdmin, (req, res) => {
+  const db = getDb();
+  try {
+    const prods = db.prepare(`
+      SELECT p.id, p.codigo, p.nombre, p.variedad, p.familia, p.unidad_base, p.activo,
+             es.nombre AS especie,
+             (SELECT COUNT(*) FROM sg_presentaciones ps WHERE ps.producto_id=p.id AND ps.activo=1) AS presentaciones_count,
+             (SELECT GROUP_CONCAT(DISTINCT e.nombre) FROM sg_presentaciones ps
+                JOIN sg_envases e ON e.id=ps.envase_id WHERE ps.producto_id=p.id AND ps.activo=1) AS envases_usados,
+             (SELECT COUNT(*) FROM sg_lotes l WHERE l.producto_id=p.id AND l.activo=1) AS lotes_count,
+             (SELECT COUNT(*) FROM sg_oc_items oi WHERE oi.producto_id=p.id) AS oc_count,
+             (SELECT COUNT(*) FROM sg_despacho_items di WHERE di.producto_id=p.id) AS despachos_count
+      FROM sg_productos p
+      LEFT JOIN sg_especies es ON es.id=p.especie_id
+      WHERE p.activo=1 OR ?=1
+      ORDER BY p.nombre COLLATE NOCASE, p.variedad COLLATE NOCASE`).all(req.query.todos === '1' ? 1 : 0);
+    const header = ['id','codigo','nombre','variedad','especie','familia','unidad_base',
+      'presentaciones_count','envases_usados','lotes_count','oc_count','despachos_count','activo'];
+    const filas = prods.map(p => ({
+      id: p.id, codigo: p.codigo || '', nombre: p.nombre || '', variedad: p.variedad || '',
+      especie: p.especie || '', familia: p.familia || '', unidad_base: p.unidad_base || '',
+      presentaciones_count: p.presentaciones_count || 0, envases_usados: p.envases_usados || '',
+      lotes_count: p.lotes_count || 0, oc_count: p.oc_count || 0, despachos_count: p.despachos_count || 0,
+      activo: p.activo ? 1 : 0
+    }));
+    const ws = XLSX.utils.json_to_sheet(filas, { header });
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Productos');
+    const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+    res.set({
+      'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'Content-Disposition': 'attachment; filename="productos-sg.xlsx"'
+    });
+    res.send(buf);
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 router.get('/productos/:id', requireAuth, (req, res) => {
