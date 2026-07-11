@@ -3421,7 +3421,7 @@ router.get('/reportes/resultado-periodo', requireAuth, (req, res) => {
 // no toca sg_lotes, recalcCostoLote, OC nacional, despacho ni factura. El USD + tc
 // viven solo acá; la conversión USD→ARS es intra-módulo. Enganche al lote = F2.
 // ══════════════════════════════════════════════════════════════════════════════
-const EMB_CONCEPTOS = ['costo_mercaderia','anticipo_impuesto','gastos_despachante','fletes','diferencia_cotizacion','gastos_bancarios','iva_credito_computable','percepcion_iva_computable','percepcion_iibb'];
+const EMB_CONCEPTOS = ['costo_mercaderia','anticipo_impuesto','gastos_despachante','fletes','diferencia_cotizacion','gastos_bancarios','otros_gastos_terminal','iva_credito_computable','percepcion_iva_computable','percepcion_iibb'];
 const EMB_CREDITOS  = new Set(['iva_credito_computable','percepcion_iva_computable','percepcion_iibb']);
 
 // Cálculo del embarque (server-side). Todos los montos se llevan a ARS con tc (real ?? estimado)
@@ -3590,7 +3590,7 @@ function embCostosDelBody(body) {
   }));
 }
 
-const EMB_HEADER_COLS = ['nombre','proveedor_id','pais_origen','incoterm','certificado_origen_mercosur','ncm','moneda','tc_estimado','tc_real','estado','cantidad_cajas','merma_esperada_pct','precio_referencia','fecha_etd','fecha_eta','observaciones'];
+const EMB_HEADER_COLS = ['nombre','proveedor_id','pais_origen','incoterm','certificado_origen_mercosur','ncm','moneda','tc_estimado','tc_real','estado','cantidad_cajas','merma_esperada_pct','precio_referencia','fecha_etd','fecha_eta','invoice_numero','fecha_vencimiento_pago','paso_fronterizo','observaciones'];
 function embHeaderVals(b) {
   return {
     nombre: val(b.nombre),
@@ -3608,6 +3608,9 @@ function embHeaderVals(b) {
     precio_referencia: (b.precio_referencia != null && b.precio_referencia !== '') ? Number(b.precio_referencia) : null,
     fecha_etd: val(b.fecha_etd),
     fecha_eta: val(b.fecha_eta),
+    invoice_numero: val(b.invoice_numero),
+    fecha_vencimiento_pago: val(b.fecha_vencimiento_pago),
+    paso_fronterizo: val(b.paso_fronterizo),
     observaciones: val(b.observaciones)
   };
 }

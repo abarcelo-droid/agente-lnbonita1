@@ -819,6 +819,9 @@ try {
       precio_referencia           REAL,
       fecha_etd                   TEXT,
       fecha_eta                   TEXT,
+      invoice_numero              TEXT,
+      fecha_vencimiento_pago      TEXT,
+      paso_fronterizo             TEXT,
       observaciones               TEXT,
       activo                      INTEGER NOT NULL DEFAULT 1,
       creado_en                   TEXT DEFAULT (datetime('now','localtime')),
@@ -831,7 +834,7 @@ try {
     CREATE TABLE IF NOT EXISTS sg_embarque_costos (
       id                INTEGER PRIMARY KEY AUTOINCREMENT,
       embarque_id       INTEGER NOT NULL REFERENCES sg_embarques(id),
-      concepto          TEXT NOT NULL CHECK(concepto IN ('costo_mercaderia','anticipo_impuesto','gastos_despachante','fletes','diferencia_cotizacion','gastos_bancarios','iva_credito_computable','percepcion_iva_computable','percepcion_iibb')),
+      concepto          TEXT NOT NULL CHECK(concepto IN ('costo_mercaderia','anticipo_impuesto','gastos_despachante','fletes','diferencia_cotizacion','gastos_bancarios','otros_gastos_terminal','iva_credito_computable','percepcion_iva_computable','percepcion_iibb')),
       es_credito        INTEGER NOT NULL DEFAULT 0,
       moneda            TEXT DEFAULT 'ARS',
       monto_estimado    REAL,
@@ -848,6 +851,65 @@ try {
     CREATE INDEX IF NOT EXISTS idx_sg_embarque_costos_emb ON sg_embarque_costos(embarque_id);
   `);
 } catch (e) { console.error('[DB] SG sg_embarques:', e.message); }
+
+// ── MIGRACIÓN idempotente: sg_embarques → +invoice_numero, +fecha_vencimiento_pago, +paso_fronterizo ──
+// Campos aditivos de cabecera, TEXT nullable sin CHECK → ALTER ADD COLUMN simple, sin rebuild.
+// invoice_numero = N° de invoice del proveedor; fecha_vencimiento_pago = plazo de pago (date, a futuro
+// se usa en el cierre de cambio F3, hoy solo informativo); paso_fronterizo = paso/puerto de ingreso.
+try {
+  const cols = db.prepare("PRAGMA table_info(sg_embarques)").all().map(c => c.name);
+  const faltan = ['invoice_numero', 'fecha_vencimiento_pago', 'paso_fronterizo'].filter(c => !cols.includes(c));
+  for (const c of faltan) db.exec(`ALTER TABLE sg_embarques ADD COLUMN ${c} TEXT`);
+  if (faltan.length) console.log('[DB] SG sg_embarques migrado (+' + faltan.join(', +') + ')');
+} catch (e) { console.error('[DB] SG migración sg_embarques cabecera:', e.message); }
+
+// ── MIGRACIÓN idempotente: sg_embarque_costos → ampliar CHECK(concepto) con 'otros_gastos_terminal' ──
+// SQLite no permite ALTER de un CHECK → rebuild estándar (FK off → tabla nueva → copia → drop → rename).
+// Idempotente: solo corre si el SQL actual de la tabla NO menciona ya 'otros_gastos_terminal'. Ninguna
+// otra tabla FK-referencia a sg_embarque_costos, así que el rebuild no invalida FKs externas.
+try {
+  const row = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='sg_embarque_costos'").get();
+  if (row && !row.sql.includes('otros_gastos_terminal')) {
+    db.pragma('foreign_keys = OFF');
+    const rebuild = db.transaction(() => {
+      db.exec(`
+        CREATE TABLE sg_embarque_costos_new (
+          id                INTEGER PRIMARY KEY AUTOINCREMENT,
+          embarque_id       INTEGER NOT NULL REFERENCES sg_embarques(id),
+          concepto          TEXT NOT NULL CHECK(concepto IN ('costo_mercaderia','anticipo_impuesto','gastos_despachante','fletes','diferencia_cotizacion','gastos_bancarios','otros_gastos_terminal','iva_credito_computable','percepcion_iva_computable','percepcion_iibb')),
+          es_credito        INTEGER NOT NULL DEFAULT 0,
+          moneda            TEXT DEFAULT 'ARS',
+          monto_estimado    REAL,
+          monto_real        REAL,
+          observaciones     TEXT,
+          activo            INTEGER NOT NULL DEFAULT 1,
+          creado_en         TEXT DEFAULT (datetime('now','localtime')),
+          creado_por        INTEGER,
+          modificado_en     TEXT,
+          modificado_por    INTEGER,
+          eliminado_en      TEXT,
+          eliminado_por_id  INTEGER
+        );
+        INSERT INTO sg_embarque_costos_new
+          (id, embarque_id, concepto, es_credito, moneda, monto_estimado, monto_real, observaciones,
+           activo, creado_en, creado_por, modificado_en, modificado_por, eliminado_en, eliminado_por_id)
+        SELECT
+           id, embarque_id, concepto, es_credito, moneda, monto_estimado, monto_real, observaciones,
+           activo, creado_en, creado_por, modificado_en, modificado_por, eliminado_en, eliminado_por_id
+        FROM sg_embarque_costos;
+        DROP TABLE sg_embarque_costos;
+        ALTER TABLE sg_embarque_costos_new RENAME TO sg_embarque_costos;
+        CREATE INDEX IF NOT EXISTS idx_sg_embarque_costos_emb ON sg_embarque_costos(embarque_id);
+      `);
+    });
+    rebuild();
+    db.pragma('foreign_keys = ON');
+    console.log('[DB] SG sg_embarque_costos migrado (+otros_gastos_terminal en CHECK concepto)');
+  }
+} catch (e) {
+  try { db.pragma('foreign_keys = ON'); } catch (_) {}
+  console.error('[DB] SG migración sg_embarque_costos:', e.message);
+}
 
 // ── MÓDULO IMPORTACIÓN (F2) — líneas de producto del embarque + enganche al lote ────
 // F1 modeló solo cantidad_cajas TOTAL. F2 necesita saber QUÉ lleva cada lote: producto, envase y
