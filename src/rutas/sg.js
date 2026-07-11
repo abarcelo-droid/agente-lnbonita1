@@ -3950,4 +3950,124 @@ router.all('/_wipe_prueba', requireAdmin, (req, res) => {
 });
 // ── fin TEMPORAL wipe ─────────────────────────────────────────────────────────
 
+// ══════════════════════════════════════════════════════════════════════════════
+// ⚠️ TEMPORAL — IMPORT de productos limpios desde Excel (a REMOVER en el commit final)
+// ──────────────────────────────────────────────────────────────────────────────
+// Siembra la taxonomía + los 145 productos desde migracion/productos-sg-limpio.xlsx sobre tablas
+// vacías (tras el wipe). Orden: 17 familias (iva_alicuota=10,5) → especies → variedades → productos.
+// El codigo del producto se guarda VERBATIM (FF.EE.VV.XX). La taxonomía se deriva de los segmentos
+// del codigo: FF=familia, EE=especie (dentro de la familia), VV=variedad (dentro de la especie).
+// Variedad NULL si la celda variedad del Excel viene vacía (aunque el codigo tenga VV). Puramente
+// aditivo e idempotente (find-or-create por clave única; producto por codigo → si existe, se omite).
+//
+// GATE: ?dry_run=0 escribe; sin eso (default) es DRY-RUN (reporta qué sembraría, sin escribir).
+router.all('/_import_productos', requireAdmin, (req, res) => {
+  const db = getDb();
+  const cnt = (t) => { try { return db.prepare(`SELECT COUNT(*) c FROM ${t}`).get().c; } catch (e) { return null; } };
+  try {
+    const rutaXlsx = path.join(__dirname, '../../migracion/productos-sg-limpio.xlsx');
+    let filas;
+    try {
+      const wb = XLSX.read(fs.readFileSync(rutaXlsx), { type: 'buffer' });
+      filas = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: '' });
+    } catch (e) { return res.status(500).json({ ok: false, error: 'No se pudo leer el Excel: ' + e.message }); }
+
+    // Deriva la taxonomía de los segmentos del codigo. Claves: familia por FF, especie por FF|EE,
+    // variedad por FF|EE|VV (solo si la celda variedad no está vacía).
+    const familias = new Map();    // famCod(int) -> nombre
+    const especies = new Map();    // 'FF|EE' -> { famCod, cod, nombre }
+    // Variedad identificada por NOMBRE dentro de la especie (NO por el segmento VV: el Excel reusa VV
+    // para variedades distintas — p.ej. Tomate Redondo/Perita ambos VV=01 —, así que keyear por VV las
+    // fusionaría y rompería el link. El codigo del producto es verbatim igual; sg_variedades.codigo se
+    // asigna secuencial por especie al sembrar). Clave: 'FF|EE|nombreLower'.
+    const variedades = new Map();  // 'FF|EE|nombreLower' -> { famCod, espCod, nombre }
+    const vvVisto = new Map();     // 'FF|EE|VV' -> nombre (para avisar reuso de VV entre variedades distintas)
+    const productos = [];
+    const anomalias = [];   // problemas reales (dup codigo, no numérico, conflicto de nombre)
+    const notasInfo = [];   // avisos no bloqueantes (p.ej. VV reusado entre variedades distintas)
+    const codVistos = new Set();
+    const vkey = (famCod, espCod, nombre) => famCod + '|' + espCod + '|' + nombre.toLowerCase();
+    for (const r of filas) {
+      const codigo = String(r.codigo == null ? '' : r.codigo).trim();
+      const seg = codigo.split('.');
+      if (seg.length < 3) { anomalias.push('codigo con menos de 3 segmentos: "' + codigo + '"'); continue; }
+      const famCod = parseInt(seg[0], 10), espCod = parseInt(seg[1], 10), varCod = parseInt(seg[2], 10);
+      const fam = String(r.familia || '').trim(), esp = String(r.especie || '').trim();
+      const varr = String(r.variedad || '').trim(), nom = String(r.nombre || '').trim();
+      if (!(famCod >= 0) || !(espCod >= 0)) { anomalias.push('segmentos no numéricos en codigo "' + codigo + '"'); continue; }
+      if (familias.has(famCod) && familias.get(famCod) !== fam) anomalias.push(`FF ${seg[0]} con 2 nombres de familia: "${familias.get(famCod)}" vs "${fam}"`);
+      familias.set(famCod, fam);
+      especies.set(famCod + '|' + espCod, { famCod, cod: espCod, nombre: esp });
+      if (varr) {
+        variedades.set(vkey(famCod, espCod, varr), { famCod, espCod, nombre: varr });
+        const vk = famCod + '|' + espCod + '|' + varCod;
+        if (vvVisto.has(vk) && vvVisto.get(vk).toLowerCase() !== varr.toLowerCase())
+          notasInfo.push(`VV ${seg[2]} reusado en ${esp}: "${vvVisto.get(vk)}" y "${varr}" (variedades diferenciadas por nombre — el codigo del producto queda verbatim)`);
+        vvVisto.set(vk, varr);
+      }
+      if (codVistos.has(codigo)) anomalias.push('codigo duplicado en el Excel: ' + codigo);
+      codVistos.add(codigo);
+      productos.push({ codigo, famCod, espCod, varCod, nombre: nom, variedad: varr, familia: fam });
+    }
+
+    const existente = { familias: cnt('sg_familias'), especies: cnt('sg_especies'), variedades: cnt('sg_variedades'), productos: cnt('sg_productos') };
+    const resumen = {
+      filas_excel: filas.length,
+      familias_a_sembrar: familias.size, especies_a_sembrar: especies.size,
+      variedades_a_sembrar: variedades.size, productos_a_sembrar: productos.length,
+      anomalias, notas_info: notasInfo, taxonomia_existente: existente
+    };
+
+    if (req.query.dry_run !== '0') {
+      return res.json({
+        ok: true, modo: 'DRY-RUN — no se escribió nada', ...resumen,
+        familias: [...familias.entries()].sort((a, b) => a[0] - b[0]).map(([c, n]) => ({ codigo: c, nombre: n, iva_alicuota: 10.5 })),
+        muestra_productos: productos.slice(0, 5),
+        para_ejecutar: 'Reenviar con ?dry_run=0'
+      });
+    }
+
+    // REAL — find-or-create en transacción.
+    const out = { familias: 0, especies: 0, variedades: 0, productos: 0, productos_omitidos: 0 };
+    const famId = {}, espId = {}, varId = {};
+    db.transaction(() => {
+      for (const [cod, nombre] of familias) {
+        let row = db.prepare('SELECT id FROM sg_familias WHERE codigo=?').get(cod);
+        if (!row) { const i = db.prepare('INSERT INTO sg_familias (codigo, nombre, iva_alicuota, creado_por) VALUES (?,?,?,?)').run(cod, nombre, 10.5, uid(req)); row = { id: i.lastInsertRowid }; out.familias++; }
+        famId[cod] = row.id;
+      }
+      for (const e of especies.values()) {
+        const fid = famId[e.famCod];
+        let row = db.prepare('SELECT id FROM sg_especies WHERE familia_id=? AND codigo=?').get(fid, e.cod);
+        if (!row) { const i = db.prepare('INSERT INTO sg_especies (familia_id, codigo, nombre, creado_por) VALUES (?,?,?,?)').run(fid, e.cod, e.nombre, uid(req)); row = { id: i.lastInsertRowid }; out.especies++; }
+        espId[e.famCod + '|' + e.cod] = row.id;
+      }
+      for (const v of variedades.values()) {
+        const eid = espId[v.famCod + '|' + v.espCod];
+        // find-or-create por (especie, nombre); codigo secuencial por especie (MAX+1), UNIQUE(especie,codigo).
+        let row = db.prepare('SELECT id FROM sg_variedades WHERE especie_id=? AND nombre=?').get(eid, v.nombre);
+        if (!row) {
+          const mx = db.prepare('SELECT COALESCE(MAX(codigo),0) m FROM sg_variedades WHERE especie_id=?').get(eid).m;
+          const i = db.prepare('INSERT INTO sg_variedades (especie_id, codigo, nombre, creado_por) VALUES (?,?,?,?)').run(eid, mx + 1, v.nombre, uid(req));
+          row = { id: i.lastInsertRowid }; out.variedades++;
+        }
+        varId[vkey(v.famCod, v.espCod, v.nombre)] = row.id;
+      }
+      for (const p of productos) {
+        if (db.prepare('SELECT id FROM sg_productos WHERE codigo=?').get(p.codigo)) { out.productos_omitidos++; continue; }
+        const vid = p.variedad ? varId[vkey(p.famCod, p.espCod, p.variedad)] : null;
+        db.prepare(`INSERT INTO sg_productos (codigo, familia_id, especie_id, variedad_id, nombre, variedad, familia, creado_por)
+          VALUES (?,?,?,?,?,?,?,?)`).run(p.codigo, famId[p.famCod], espId[p.famCod + '|' + p.espCod], vid, p.nombre, p.variedad || null, p.familia, uid(req));
+        out.productos++;
+      }
+    })();
+
+    res.json({
+      ok: true, modo: 'REAL — sembrado', sembrado: out, anomalias, notas_info: notasInfo,
+      totales_ahora: { familias: cnt('sg_familias'), especies: cnt('sg_especies'), variedades: cnt('sg_variedades'), productos: cnt('sg_productos') }
+    });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+// ── fin TEMPORAL import ───────────────────────────────────────────────────────
+
 export default router;
