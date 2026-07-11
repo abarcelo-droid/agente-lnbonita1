@@ -3870,8 +3870,13 @@ router.delete('/embarques/:id/documentos/:docId', requireAdmin, (req, res) => {
 //
 // GATE: solo borra con ?confirmar=WIPE_SG_PRUEBA. Sin ese token exacto → DRY-RUN (solo cuenta).
 const WIPE_SG_TABLAS = [
+  // Ventas de prueba (hijo → padre). Las facturas se ligan a despachos vía sg_factura_despachos;
+  // van ANTES de despachos/facturas. Facturas/cobranzas/liquidaciones NO referencian la cadena
+  // operativa (solo sg_clientes/sg_asientos, conservados). cobranza_docs.doc_id es link blando (sin FK).
+  'sg_ven_factura_items', 'sg_ven_cobranza_docs', 'sg_ven_liquidacion_items',
+  'sg_factura_despachos',      // ⚠️ puente: refs sg_ven_facturas + sg_despachos + sg_despacho_items → antes de los tres
+  'sg_ven_facturas', 'sg_ven_cobranzas', 'sg_ven_liquidaciones',
   // Cadena operativa (hijo → padre)
-  'sg_factura_despachos',      // ⚠️ puente ventas↔despachos: refs sg_despachos/sg_despacho_items (si no, deja despacho_id colgado)
   'sg_despacho_items', 'sg_despachos',
   'sg_reservas',
   'sg_lote_decomisos', 'sg_reprocesos', 'sg_transformaciones', 'sg_lote_semaforo_historial',
@@ -3896,8 +3901,8 @@ const WIPE_IFCO_TABLAS = [
 // Maestros/ledger SG que se CONSERVAN (fuera de alcance) — se reportan para dar visibilidad.
 const WIPE_SG_CONSERVA = [
   'sg_proveedores', 'sg_clientes', 'sg_envases', 'sg_condiciones_pago',
-  'sg_cuentas', 'sg_asientos', 'sg_movimientos_contables',
-  'sg_ven_facturas', 'sg_ven_liquidaciones', 'sg_ven_cobranzas', 'sg_fin_movimientos'
+  'sg_cuentas', 'sg_asientos', 'sg_movimientos_contables', 'sg_fin_movimientos'
+  // sg_ven_facturas/liquidaciones/cobranzas: MOVIDAS al wipe (son de prueba, sus despachos se borran)
 ];
 router.all('/_wipe_prueba', requireAdmin, (req, res) => {
   const db = getDb();
