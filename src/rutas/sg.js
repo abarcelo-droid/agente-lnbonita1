@@ -3856,4 +3856,98 @@ router.delete('/embarques/:id/documentos/:docId', requireAdmin, (req, res) => {
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
+// ══════════════════════════════════════════════════════════════════════════════
+// ⚠️ TEMPORAL — WIPE de la cadena SG de prueba + taxonomía (a REMOVER en el commit final)
+// ──────────────────────────────────────────────────────────────────────────────
+// Vacía la cadena operativa SG de prueba + la taxonomía (variedades→especies→productos→las 5
+// familias viejas) para recargar productos limpios (import en PR aparte). Orden hijo→padre, con
+// foreign_keys=OFF durante la transacción (FK enforcement global está ON — db.js:22 — y hay que
+// apagarlo FUERA de la tx porque better-sqlite3 ignora el pragma dentro).
+//
+// ⚠️ IFCO INTOCABLE: no toca ninguna ifco_* ni proveedores (galpones). sg_transformaciones es
+// SG-only (FK a sg_lotes en ambos lados; ifco.js no la referencia) → se vacía completa, sin WHERE.
+// Ventas/finanzas/asientos/cuentas y maestros (proveedores/clientes/envases/condiciones) NO se tocan.
+//
+// GATE: solo borra con ?confirmar=WIPE_SG_PRUEBA. Sin ese token exacto → DRY-RUN (solo cuenta).
+const WIPE_SG_TABLAS = [
+  // Cadena operativa (hijo → padre)
+  'sg_factura_despachos',      // ⚠️ puente ventas↔despachos: refs sg_despachos/sg_despacho_items (si no, deja despacho_id colgado)
+  'sg_despacho_items', 'sg_despachos',
+  'sg_reservas',
+  'sg_lote_decomisos', 'sg_reprocesos', 'sg_transformaciones', 'sg_lote_semaforo_historial',
+  'sg_gastos_directos_lote', 'sg_gastos_directos',
+  'sg_embarque_documentos', 'sg_embarque_lineas', 'sg_embarque_costos', 'sg_embarques',
+  'sg_oc_vencimientos', 'sg_oc_items', 'sg_oc',
+  'sg_pedido_items', 'sg_pedidos',
+  'sg_lotes',
+  'sg_recepcion_fotos', 'sg_recepciones',
+  'sg_gastos_globales_periodo',
+  // Taxonomía (hijo → padre) — se recarga entera desde el Excel en el import
+  'sg_presentaciones',         // ⚠️ cuelga NOT NULL de sg_productos (si no, huérfana)
+  'sg_productos', 'sg_variedades', 'sg_especies', 'sg_familias'
+];
+// IFCO + galpones: se cuentan antes/después para PROBAR que no se tocan.
+const WIPE_IFCO_TABLAS = [
+  'ifco_movimientos', 'ifco_stocks_reales', 'ifco_recepciones_proveedor', 'ifco_envios_proveedor',
+  'ifco_envios_log', 'ifco_consolidaciones', 'ifco_consolidacion_revisar', 'ifco_autorizaciones_retiro',
+  'ifco_remitos_super', 'ifco_talonarios', 'ifco_talonarios_log', 'ifco_numeros_anulados',
+  'ifco_faltantes_sg', 'ifco_mails_log', 'ifco_hard_delete_log', 'proveedores'
+];
+// Maestros/ledger SG que se CONSERVAN (fuera de alcance) — se reportan para dar visibilidad.
+const WIPE_SG_CONSERVA = [
+  'sg_proveedores', 'sg_clientes', 'sg_envases', 'sg_condiciones_pago',
+  'sg_cuentas', 'sg_asientos', 'sg_movimientos_contables',
+  'sg_ven_facturas', 'sg_ven_liquidaciones', 'sg_ven_cobranzas', 'sg_fin_movimientos'
+];
+router.all('/_wipe_prueba', requireAdmin, (req, res) => {
+  const db = getDb();
+  try {
+    const cnt = (t) => { try { return db.prepare(`SELECT COUNT(*) c FROM ${t}`).get().c; } catch (e) { return null; } };
+    const snap = (tabs) => tabs.reduce((o, t) => (o[t] = cnt(t), o), {});
+    const aBorrar = snap(WIPE_SG_TABLAS);
+    const ifcoAntes = snap(WIPE_IFCO_TABLAS);
+    const conservadas = snap(WIPE_SG_CONSERVA);
+    const totalABorrar = Object.values(aBorrar).reduce((a, b) => a + (b || 0), 0);
+    const notas = [
+      'sg_transformaciones: SG-only (FK a sg_lotes; IFCO no la referencia) → se vacía completa, sin WHERE.',
+      'sg_presentaciones y sg_factura_despachos entran por FK (cuelgan de productos/despachos); si no, quedarían huérfanas.',
+      'sg_familias: se borran las 5 (taxonomía se recarga entera desde el Excel en el import).',
+      'IFCO (ifco_* + proveedores) y ventas/finanzas/cuentas: NO se tocan (ver ifco/conservadas).',
+      'DELETE físico (no soft): las tablas quedan en 0 para que el import arranque limpio.'
+    ];
+
+    const real = req.query.confirmar === 'WIPE_SG_PRUEBA';
+    if (!real) {
+      return res.json({
+        ok: true, modo: 'DRY-RUN — no se borró nada',
+        total_a_borrar: totalABorrar, a_borrar_por_tabla: aBorrar,
+        ifco_intocable: ifcoAntes, conservadas, notas,
+        para_ejecutar: 'Reenviar con ?confirmar=WIPE_SG_PRUEBA'
+      });
+    }
+
+    // REAL — FK OFF fuera de la tx (better-sqlite3 ignora el pragma dentro).
+    const fkPrev = db.pragma('foreign_keys', { simple: true });
+    db.pragma('foreign_keys = OFF');
+    const borrado = {};
+    try {
+      db.transaction(() => {
+        for (const t of WIPE_SG_TABLAS) borrado[t] = db.prepare(`DELETE FROM ${t}`).run().changes;
+      })();
+    } finally {
+      db.pragma(`foreign_keys = ${fkPrev ? 'ON' : 'OFF'}`);
+    }
+    const ifcoDespues = snap(WIPE_IFCO_TABLAS);
+    const ifcoIntacto = WIPE_IFCO_TABLAS.every((t) => ifcoAntes[t] === ifcoDespues[t]);
+    res.json({
+      ok: true, modo: 'REAL — ejecutado',
+      total_borrado: Object.values(borrado).reduce((a, b) => a + (b || 0), 0),
+      borrado_por_tabla: borrado,
+      ifco_antes: ifcoAntes, ifco_despues: ifcoDespues, ifco_intacto: ifcoIntacto,
+      conservadas, notas
+    });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+// ── fin TEMPORAL wipe ─────────────────────────────────────────────────────────
+
 export default router;
