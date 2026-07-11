@@ -2478,6 +2478,21 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       <div class="fl"><label>Precio referencia $/caja</label><input type="number" step="0.01" min="0" id="sg-emb-precio-ref" oninput="sgImpCalc()"></div>
       <div class="fl"><label>ETD</label><input type="date" id="sg-emb-etd"></div>
       <div class="fl"><label>ETA</label><input type="date" id="sg-emb-eta"></div>
+      <div class="fl"><label>N° Invoice</label><input type="text" id="sg-emb-invoice" placeholder="INV-0001"></div>
+      <div class="fl"><label>Venc. pago</label><input type="date" id="sg-emb-venc-pago"></div>
+      <div class="fl" style="grid-column:span 2"><label>Paso fronterizo</label><input type="text" id="sg-emb-paso" list="sg-emb-paso-list" placeholder="Paso o puerto de ingreso"><datalist id="sg-emb-paso-list">
+        <option value="Cristo Redentor (Mendoza-Chile)"></option>
+        <option value="Paso de Jama (Jujuy-Chile/Bolivia)"></option>
+        <option value="Iguazú/Tancredo Neves (Misiones-Brasil)"></option>
+        <option value="Paso de los Libres (Corrientes-Brasil)"></option>
+        <option value="Santo Tomé (Corrientes-Brasil)"></option>
+        <option value="Clorinda (Formosa-Paraguay)"></option>
+        <option value="Cardenal Samoré (Neuquén-Chile)"></option>
+        <option value="Pino Hachado (Neuquén-Chile)"></option>
+        <option value="Puerto de Buenos Aires"></option>
+        <option value="Puerto de Zárate"></option>
+        <option value="Puerto de Rosario"></option>
+      </datalist></div>
       <div class="fl" style="grid-column:span 4"><label>Observaciones</label><input type="text" id="sg-emb-obs"></div>
     </div>
     <!-- F5 — desglose de productos del embarque: un lote por línea al recibir. cantidad_cajas se deriva de Σ cajas. -->
@@ -13771,6 +13786,7 @@ var SG_EMB_CONCEPTOS = [
   {k:'fletes',                    l:'Fletes',                    cred:false},
   {k:'diferencia_cotizacion',     l:'Diferencia de cotización',  cred:false},
   {k:'gastos_bancarios',          l:'Gastos bancarios',          cred:false},
+  {k:'otros_gastos_terminal',     l:'Otros gastos de terminal',  cred:false},
   {k:'iva_credito_computable',    l:'IVA crédito computable',    cred:true},
   {k:'percepcion_iva_computable', l:'Percepción IVA computable', cred:true},
   {k:'percepcion_iibb',           l:'Percepción IIBB',           cred:true}
@@ -13834,6 +13850,9 @@ function sgImpFill(e){
   eid('sg-emb-precio-ref').value = sgImpVal(e.precio_referencia);
   eid('sg-emb-etd').value = sgImpVal(e.fecha_etd);
   eid('sg-emb-eta').value = sgImpVal(e.fecha_eta);
+  eid('sg-emb-invoice').value = sgImpVal(e.invoice_numero);
+  eid('sg-emb-venc-pago').value = sgImpVal(e.fecha_vencimiento_pago);
+  eid('sg-emb-paso').value = sgImpVal(e.paso_fronterizo);
   eid('sg-emb-obs').value = sgImpVal(e.observaciones);
   sgImpRenderCostos();
   // F5 — líneas de producto (un lote por línea). Copia liviana del detalle; [] en embarque nuevo.
@@ -14081,6 +14100,9 @@ function sgImpGather(){
     precio_referencia: eid('sg-emb-precio-ref').value,
     fecha_etd: eid('sg-emb-etd').value,
     fecha_eta: eid('sg-emb-eta').value,
+    invoice_numero: eid('sg-emb-invoice').value.trim(),
+    fecha_vencimiento_pago: eid('sg-emb-venc-pago').value,
+    paso_fronterizo: eid('sg-emb-paso').value.trim(),
     observaciones: eid('sg-emb-obs').value,
     costos: SG_EMB_CONCEPTOS.map(function(c){
       return { concepto:c.k, moneda:eid('sg-emb-mon-'+c.k).value,
