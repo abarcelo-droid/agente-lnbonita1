@@ -961,6 +961,17 @@ try {
   }
 } catch (e) { console.error('[DB] SG migración sg_embarque_lineas (precio_unitario_usd):', e.message); }
 
+// sg_embarque_lineas += precio_venta_ars: precio de VENTA en ARS/caja por línea (calibre). NO confundir
+// con precio_unitario_usd (que es el FOB de COMPRA). Alimenta el margen proyectado por línea (costo
+// pooled por caja + FOB propio vs. precio de venta). Nullable → margen null para esa línea (no rompe).
+try {
+  const cols = db.prepare("PRAGMA table_info(sg_embarque_lineas)").all().map(c => c.name);
+  if (!cols.includes('precio_venta_ars')) {
+    db.exec("ALTER TABLE sg_embarque_lineas ADD COLUMN precio_venta_ars REAL");
+    console.log('[DB] SG sg_embarque_lineas migrado (+precio_venta_ars)');
+  }
+} catch (e) { console.error('[DB] SG migración sg_embarque_lineas (precio_venta_ars):', e.message); }
+
 // ── FASE 2 (cargas y descargas, cooperativa): unidad de cobro + cantidad ────────
 // La cooperativa cobra por 'bulto' o 'pallet' (variable). Se guarda la unidad + la cantidad
 // (de sg_recepciones.bultos/pallets_recibidos para descarga_ingreso, o bultos del despacho

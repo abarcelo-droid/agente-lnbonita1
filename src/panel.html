@@ -2475,7 +2475,6 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       <div class="fl"><label>Estado</label><select id="sg-emb-estado"></select></div>
       <div class="fl"><label>Cantidad de cajas <span style="font-weight:400;color:var(--mut);font-size:11px">(Σ líneas si hay desglose)</span></label><input type="number" step="1" min="0" id="sg-emb-cajas" oninput="sgImpCalc()"></div>
       <div class="fl"><label>Merma esperada %</label><input type="number" step="0.1" min="0" id="sg-emb-merma" oninput="sgImpCalc()"></div>
-      <div class="fl"><label>Precio referencia $/caja</label><input type="number" step="0.01" min="0" id="sg-emb-precio-ref" oninput="sgImpCalc()"></div>
       <div class="fl"><label>ETD</label><input type="date" id="sg-emb-etd"></div>
       <div class="fl"><label>ETA</label><input type="date" id="sg-emb-eta"></div>
       <div class="fl"><label>N° Invoice</label><input type="text" id="sg-emb-invoice" placeholder="INV-0001"></div>
@@ -2502,7 +2501,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
         <button type="button" class="btn bo bs" onclick="sgEmbLineaAdd()">+ Agregar producto</button>
       </div>
       <table class="pa-tbl" style="font-size:12px"><thead><tr>
-        <th>Producto</th><th>Envase</th><th style="text-align:right">kg/bulto</th><th style="text-align:right">Cajas</th><th style="text-align:right">FOB USD/caja</th><th style="text-align:right">FOB USD</th><th style="text-align:right">kg totales</th><th></th>
+        <th>Producto</th><th>Envase</th><th style="text-align:right">kg/bulto</th><th style="text-align:right">Cajas</th><th style="text-align:right">FOB USD/caja</th><th style="text-align:right">Venta $/caja</th><th style="text-align:right">FOB USD</th><th style="text-align:right">kg totales</th><th style="text-align:right">Margen</th><th></th>
       </tr></thead><tbody id="sg-emb-lineas"></tbody></table>
       <div style="display:flex;justify-content:flex-end;gap:16px;margin-top:6px;font-size:12px">
         <span style="color:var(--mut)">Σ cajas: <b id="sg-emb-lineas-cajas">0</b></span>
@@ -13798,7 +13797,7 @@ function sgImpInit(){
   api('/api/sg/embarques').then(function(r){
     var rows=(r&&r.ok)?r.data:[];
     eid('sg-tb-embarques').innerHTML = rows.length ? rows.map(function(e){
-      var m=e.margen_proyectado_pct;
+      var m=e.margen_total_pct;
       var mCol=(m==null)?'var(--mut)':(m>=0?'var(--ok,#16a34a)':'var(--err,#dc2626)');
       return '<tr>'
         +'<td><b>'+esc(e.nombre||'')+'</b></td>'
@@ -13847,7 +13846,6 @@ function sgImpFill(e){
   eid('sg-emb-estado').innerHTML = SG_EMB_ESTADOS.map(function(x){ return '<option value="'+x[0]+'"'+(((e.estado||'cotizacion')===x[0])?' selected':'')+'>'+x[1]+'</option>'; }).join('');
   eid('sg-emb-cajas').value = sgImpVal(e.cantidad_cajas);
   eid('sg-emb-merma').value = sgImpVal(e.merma_esperada_pct);
-  eid('sg-emb-precio-ref').value = sgImpVal(e.precio_referencia);
   eid('sg-emb-etd').value = sgImpVal(e.fecha_etd);
   eid('sg-emb-eta').value = sgImpVal(e.fecha_eta);
   eid('sg-emb-invoice').value = sgImpVal(e.invoice_numero);
@@ -13857,7 +13855,7 @@ function sgImpFill(e){
   sgImpRenderCostos();
   // F5 — líneas de producto (un lote por línea). Copia liviana del detalle; [] en embarque nuevo.
   SG._embLineas = (e.lineas||[]).map(function(l){
-    return { producto_id:l.producto_id, envase_id:l.envase_id, kg_por_bulto:l.kg_por_bulto, cajas:l.cajas, precio_unitario_usd:l.precio_unitario_usd };
+    return { producto_id:l.producto_id, envase_id:l.envase_id, kg_por_bulto:l.kg_por_bulto, cajas:l.cajas, precio_unitario_usd:l.precio_unitario_usd, precio_venta_ars:l.precio_venta_ars };
   });
   sgEmbRenderLineas();
   sgImpCalc();
@@ -13940,16 +13938,18 @@ function sgEmbRenderLineas(){
       +'<td><select onchange="sgEmbLineaUpd('+i+',\'envase_id\',this.value)">'+sgEmbEnvOpts(l.envase_id)+'</select></td>'
       +'<td><input type="number" min="0" step="0.01" placeholder="kg/bulto" value="'+sgImpVal(l.kg_por_bulto)+'" oninput="sgEmbLineaNum('+i+',\'kg_por_bulto\',this.value)" style="width:82px;text-align:right"></td>'
       +'<td><input type="number" min="0" step="1" placeholder="cajas" value="'+sgImpVal(l.cajas)+'" oninput="sgEmbLineaNum('+i+',\'cajas\',this.value)" style="width:82px;text-align:right"></td>'
-      +'<td><input type="number" min="0" step="0.01" placeholder="US$/caja" value="'+sgImpVal(l.precio_unitario_usd)+'" oninput="sgEmbLineaNum('+i+',\'precio_unitario_usd\',this.value)" title="Precio FOB unitario en USD por caja" style="width:92px;text-align:right"></td>'
+      +'<td><input type="number" min="0" step="0.01" placeholder="US$/caja" value="'+sgImpVal(l.precio_unitario_usd)+'" oninput="sgEmbLineaNum('+i+',\'precio_unitario_usd\',this.value)" title="Precio FOB unitario en USD por caja (COMPRA)" style="width:92px;text-align:right"></td>'
+      +'<td><input type="number" min="0" step="0.01" placeholder="$/caja" value="'+sgImpVal(l.precio_venta_ars)+'" oninput="sgEmbLineaNum('+i+',\'precio_venta_ars\',this.value)" title="Precio de VENTA en ARS por caja → margen proyectado de la línea" style="width:100px;text-align:right"></td>'
       +'<td id="sg-emb-lfob-'+i+'" style="text-align:right;color:var(--mut)">—</td>'
       +'<td id="sg-emb-lkg-'+i+'" style="text-align:right;color:var(--mut)">—</td>'
+      +'<td id="sg-emb-lmargen-'+i+'" style="text-align:right;color:var(--mut)">—</td>'
       +'<td style="text-align:right"><button type="button" class="btn bd bs" onclick="sgEmbLineaDel('+i+')" title="Quitar">×</button></td>'
     +'</tr>';
   }).join('');
-  tb.innerHTML = rows || '<tr><td colspan="8" class="emp" style="text-align:center;color:var(--mut)">Sin productos. Agregá al menos uno para poder recibir el embarque.</td></tr>';
+  tb.innerHTML = rows || '<tr><td colspan="10" class="emp" style="text-align:center;color:var(--mut)">Sin productos. Agregá al menos uno para poder recibir el embarque.</td></tr>';
   sgEmbLineasSync();
 }
-function sgEmbLineaAdd(){ if(!SG._embLineas) SG._embLineas=[]; SG._embLineas.push({producto_id:'',envase_id:'',kg_por_bulto:'',cajas:'',precio_unitario_usd:''}); sgEmbRenderLineas(); }
+function sgEmbLineaAdd(){ if(!SG._embLineas) SG._embLineas=[]; SG._embLineas.push({producto_id:'',envase_id:'',kg_por_bulto:'',cajas:'',precio_unitario_usd:'',precio_venta_ars:''}); sgEmbRenderLineas(); }
 function sgEmbLineaDel(i){ SG._embLineas.splice(i,1); sgEmbRenderLineas(); }
 function sgEmbLineaUpd(i,f,v){ SG._embLineas[i][f]=v; sgEmbRenderLineas(); }   // selects → re-render OK
 function sgEmbLineaNum(i,f,v){ SG._embLineas[i][f]=v; sgEmbLineasSync(); }      // inputs numéricos → NO re-render (no pierde foco)
@@ -14056,11 +14056,34 @@ function sgImpCalc(){
   var neto=bruto-cred;
   var cajas=parseInt(eid('sg-emb-cajas').value,10)||0;
   var merma=parseFloat(eid('sg-emb-merma').value)||0;
-  var precioRef=parseFloat(eid('sg-emb-precio-ref').value)||null;
-  var ccn=cajas>0?neto/cajas:null;                     // base del MARGEN (crédito recuperado)
+  var ccn=cajas>0?neto/cajas:null;                     // costo/caja NETO (crédito recuperado)
   var cci=cajas>0?bruto/cajas:null;                    // desembolso de caja (cash flow)
   var ccv=(ccn!=null&&merma<100)?ccn/(1-merma/100):ccn;
-  var margen=(precioRef&&precioRef>0&&ccv!=null)?(precioRef-ccv)/precioRef*100:null;
+  // ── MARGEN POR LÍNEA (espejo de margenLineasEmbarque) — costo pooled uniforme por caja + FOB propio ──
+  // vs. precio de venta ARS de la línea. Línea sin precio de venta → margen null (no rompe). Fija las
+  // celdas "Margen" del sub-form y acumula el total del embarque (Σ montos / Σ venta×cajas).
+  var mercMonEl=eid('sg-emb-mon-costo_mercaderia'), mercMon=mercMonEl?mercMonEl.value:'ARS';
+  var fobConv=function(pu){ var v=parseFloat(pu)||0; return (mercMon==='USD'&&tc)?v*tc:v; };
+  var vendFactor=merma<100?(1-merma/100):1;
+  var lns=SG._embLineas||[];
+  var cajasTot=lns.reduce(function(s,l){ return s+(parseInt(l.cajas,10)||0); },0);
+  var fobArsTot=lns.reduce(function(s,l){ return s+(parseInt(l.cajas,10)||0)*fobConv(l.precio_unitario_usd); },0);
+  var gastoPorCaja=cajasTot>0?(neto-fobArsTot)/cajasTot:0;
+  var mgTotal=0, baseTotal=0;
+  lns.forEach(function(l,i){
+    var cj=parseInt(l.cajas,10)||0;
+    var pv=(l.precio_venta_ars!=null && l.precio_venta_ars!=='')?(parseFloat(l.precio_venta_ars)||0):null;
+    var ccl=fobConv(l.precio_unitario_usd)+gastoPorCaja;
+    var cclv=ccl/vendFactor;
+    var mgPct=null, mgMonto=null;
+    if(pv!=null && pv>0){ mgPct=(pv-cclv)/pv*100; mgMonto=(pv-cclv)*cj; mgTotal+=mgMonto; baseTotal+=pv*cj; }
+    var cell=eid('sg-emb-lmargen-'+i);
+    if(cell){
+      if(mgPct==null){ cell.textContent='—'; cell.style.color='var(--mut)'; cell.title=''; }
+      else { cell.textContent=mgPct.toFixed(1)+'%'; cell.style.color=(mgPct>=0?'#16a34a':'#dc2626'); cell.title='Margen '+sgMoney(Math.round(mgMonto))+' · costo vendible/caja '+sgMoney(Math.round(cclv)); }
+    }
+  });
+  var margen=baseTotal>0?mgTotal/baseTotal*100:null;   // margen TOTAL del embarque
   var mCol=(margen==null)?'var(--mut)':(margen>=0?'#16a34a':'#dc2626');
   // Costo/caja con 2 decimales (como la planilla: 42.747,62). Los totales van redondeados.
   var money2 = function(n){ return (n==null)?'—':('$'+(Number(n)||0).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2})); };
@@ -14079,7 +14102,7 @@ function sgImpCalc(){
     +big('💵','Costo/caja c/impuestos','desembolso de caja (cash flow)', money2(cci), 'var(--fg,inherit)', 'var(--bg)')
     +big('📦','Costo/caja vendible','ajustado por merma '+merma+'%', money2(ccv), 'var(--fg,inherit)', 'var(--bg)')
     +'<div style="margin-top:8px;padding:8px 10px;border-radius:8px;background:'+(margen==null?'var(--bg)':(margen>=0?'rgba(16,163,74,.12)':'rgba(220,38,38,.12)'))+';display:flex;justify-content:space-between;align-items:center">'
-      +'<div><div style="font-weight:600">📈 MARGEN PROYECTADO</div><div style="font-size:11px;color:var(--mut)">sobre el costo NETO, no el c/impuestos</div></div>'
+      +'<div><div style="font-weight:600">📈 MARGEN TOTAL PROYECTADO</div><div style="font-size:11px;color:var(--mut)">'+(baseTotal>0?('sobre venta '+sgMoney(Math.round(baseTotal))+' · '+(mgTotal>=0?'+':'')+sgMoney(Math.round(mgTotal))):'cargá precio de venta por línea')+'</div></div>'
       +'<span style="font-size:20px;font-weight:700;color:'+mCol+'">'+(margen!=null?margen.toFixed(1)+'%':'—')+'</span>'
     +'</div>';
 }
@@ -14097,7 +14120,6 @@ function sgImpGather(){
     estado: eid('sg-emb-estado').value,
     cantidad_cajas: eid('sg-emb-cajas').value,
     merma_esperada_pct: eid('sg-emb-merma').value,
-    precio_referencia: eid('sg-emb-precio-ref').value,
     fecha_etd: eid('sg-emb-etd').value,
     fecha_eta: eid('sg-emb-eta').value,
     invoice_numero: eid('sg-emb-invoice').value.trim(),
@@ -14110,7 +14132,7 @@ function sgImpGather(){
     }),
     // F5 — líneas de producto (descarta filas sin producto). El backend deriva cantidad_cajas = Σ cajas.
     lineas: (SG._embLineas||[]).filter(function(l){ return l.producto_id!=null && l.producto_id!==''; }).map(function(l){
-      return { producto_id:l.producto_id, envase_id:l.envase_id||null, kg_por_bulto:l.kg_por_bulto, cajas:l.cajas, precio_unitario_usd:l.precio_unitario_usd };
+      return { producto_id:l.producto_id, envase_id:l.envase_id||null, kg_por_bulto:l.kg_por_bulto, cajas:l.cajas, precio_unitario_usd:l.precio_unitario_usd, precio_venta_ars:l.precio_venta_ars };
     })
   };
 }
