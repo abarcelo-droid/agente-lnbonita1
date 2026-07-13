@@ -3457,6 +3457,45 @@ function calcEmbarque(emb, costos) {
     margen_proyectado_pct, total_estimado, total_real, gap_total, tc_aplicado: tc, detalle };
 }
 
+// MARGEN PROYECTADO POR LÍNEA (+ total del embarque). NO toca calcEmbarque (la conversión de moneda por
+// rubro vive ahí y queda intacta). Modelo POOLED: los gastos netos se reparten PAREJO por caja
+// (gasto_por_caja uniforme, igual que costoBaseLineasEmbarque); el FOB propio de cada línea la diferencia.
+//   costo_caja_linea          = fob_caja_ars(línea) + gasto_por_caja_pooled
+//   costo_caja_vendible_linea = costo_caja_linea / (1 − merma/100)
+//   margen_linea_pct          = (precio_venta_ars − vendible) / precio_venta_ars × 100
+//   margen_linea_monto        = (precio_venta_ars − vendible) × cajas
+// Línea sin precio_venta_ars → margen null (no rompe). Total: Σ montos; total_pct sobre Σ(venta × cajas).
+function margenLineasEmbarque(emb, costos, lineas) {
+  const calc = calcEmbarque(emb, costos);
+  const neto = calc.neto || 0;
+  const tc = calc.tc_aplicado;
+  const merc = costos.find(c => c.concepto === 'costo_mercaderia');
+  const mercUSD = merc && (merc.moneda || 'ARS') === 'USD';
+  const fobConv = p => { const v = Number(p) || 0; return (mercUSD && tc) ? v * tc : v; };   // FOB USD→ARS
+  const merma = Number(emb.merma_esperada_pct) || 0;
+  const vendibleFactor = merma < 100 ? (1 - merma / 100) : 1;
+  const cajasTot = lineas.reduce((s, l) => s + (Number(l.cajas) || 0), 0);
+  const fobArsTot = lineas.reduce((s, l) => s + (Number(l.cajas) || 0) * fobConv(l.precio_unitario_usd), 0);
+  const gasto_por_caja = cajasTot > 0 ? (neto - fobArsTot) / cajasTot : 0;   // resto neto (gastos−créditos) parejo
+  let margen_total = 0, base_total = 0;
+  const det = lineas.map(l => {
+    const cajas = Number(l.cajas) || 0;
+    const pv = (l.precio_venta_ars != null && l.precio_venta_ars !== '') ? Number(l.precio_venta_ars) : null;
+    const costo_caja_linea = fobConv(l.precio_unitario_usd) + gasto_por_caja;
+    const costo_caja_vendible_linea = costo_caja_linea / vendibleFactor;
+    let margen_linea_pct = null, margen_linea_monto = null;
+    if (pv != null && pv > 0) {
+      margen_linea_pct = (pv - costo_caja_vendible_linea) / pv * 100;
+      margen_linea_monto = (pv - costo_caja_vendible_linea) * cajas;
+      margen_total += margen_linea_monto;
+      base_total += pv * cajas;
+    }
+    return { id: l.id, precio_venta_ars: pv, costo_caja_linea, costo_caja_vendible_linea, margen_linea_pct, margen_linea_monto };
+  });
+  const margen_total_pct = base_total > 0 ? margen_total / base_total * 100 : null;
+  return { gasto_por_caja, lineas: det, margen_total, margen_total_pct };
+}
+
 function embCostos(db, embId) {
   return db.prepare('SELECT * FROM sg_embarque_costos WHERE embarque_id=? AND activo=1 ORDER BY id').all(embId);
 }
@@ -3523,9 +3562,12 @@ router.get('/embarques', requireAuth, (req, res) => {
       FROM sg_embarques e LEFT JOIN sg_proveedores p ON p.id=e.proveedor_id
       WHERE e.activo=1 ORDER BY e.id DESC`).all();
     const data = embs.map(e => {
-      const calc = calcEmbarque(e, embCostos(db, e.id));
+      const costos = embCostos(db, e.id);
+      const lineas = db.prepare('SELECT * FROM sg_embarque_lineas WHERE embarque_id=? AND activo=1').all(e.id);
+      const calc = calcEmbarque(e, costos);
+      const mg = margenLineasEmbarque(e, costos, lineas);
       return { ...e, costo_caja_neto: calc.costo_caja_neto, costo_caja_c_impuestos: calc.costo_caja_c_impuestos,
-        costo_caja_vendible: calc.costo_caja_vendible, margen_proyectado_pct: calc.margen_proyectado_pct,
+        costo_caja_vendible: calc.costo_caja_vendible, margen_total_pct: mg.margen_total_pct, margen_total: mg.margen_total,
         neto: calc.neto, bruto: calc.bruto, creditos: calc.creditos };
     });
     res.json({ ok: true, data });
@@ -3546,7 +3588,7 @@ router.get('/embarques/:id', requireAuth, (req, res) => {
       LEFT JOIN sg_productos pr ON pr.id=l.producto_id
       LEFT JOIN sg_envases e ON e.id=l.envase_id
       WHERE l.embarque_id=? AND l.activo=1 ORDER BY l.id`).all(emb.id);
-    res.json({ ok: true, data: { ...emb, costos, lineas, calculo: calcEmbarque(emb, costos) } });
+    res.json({ ok: true, data: { ...emb, costos, lineas, calculo: calcEmbarque(emb, costos), margen: margenLineasEmbarque(emb, costos, lineas) } });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
@@ -3560,9 +3602,9 @@ function embSyncLineas(db, embId, body, userId, estado) {
     db.prepare(`UPDATE sg_embarque_lineas SET activo=0, eliminado_en=datetime('now','localtime'), eliminado_por_id=?
       WHERE embarque_id=? AND activo=1`).run(userId, embId);
     const ins = db.prepare(`INSERT INTO sg_embarque_lineas
-      (embarque_id, producto_id, envase_id, kg_por_bulto, cajas, precio_unitario_usd, calidad, calibre, observaciones, creado_por)
-      VALUES (?,?,?,?,?,?,?,?,?,?)`);
-    for (const l of embLineasDelBody(body)) ins.run(embId, l.producto_id, l.envase_id, l.kg_por_bulto, l.cajas, l.precio_unitario_usd, l.calidad, l.calibre, l.observaciones, userId);
+      (embarque_id, producto_id, envase_id, kg_por_bulto, cajas, precio_unitario_usd, precio_venta_ars, calidad, calibre, observaciones, creado_por)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?)`);
+    for (const l of embLineasDelBody(body)) ins.run(embId, l.producto_id, l.envase_id, l.kg_por_bulto, l.cajas, l.precio_unitario_usd, l.precio_venta_ars, l.calidad, l.calibre, l.observaciones, userId);
   }
   const agg = db.prepare('SELECT COALESCE(SUM(cajas),0) s, COUNT(*) c FROM sg_embarque_lineas WHERE embarque_id=? AND activo=1').get(embId);
   if (agg.c > 0) db.prepare('UPDATE sg_embarques SET cantidad_cajas=? WHERE id=?').run(agg.s, embId);   // derivado
@@ -3590,7 +3632,9 @@ function embCostosDelBody(body) {
   }));
 }
 
-const EMB_HEADER_COLS = ['nombre','proveedor_id','pais_origen','incoterm','certificado_origen_mercosur','ncm','moneda','tc_estimado','tc_real','estado','cantidad_cajas','merma_esperada_pct','precio_referencia','fecha_etd','fecha_eta','invoice_numero','fecha_vencimiento_pago','paso_fronterizo','observaciones'];
+// precio_referencia DEPRECADO: el margen ahora va por línea (precio_venta_ars). La columna sigue en la
+// tabla (no se borra) pero el form dejó de exponerla y el header ya no la escribe.
+const EMB_HEADER_COLS = ['nombre','proveedor_id','pais_origen','incoterm','certificado_origen_mercosur','ncm','moneda','tc_estimado','tc_real','estado','cantidad_cajas','merma_esperada_pct','fecha_etd','fecha_eta','invoice_numero','fecha_vencimiento_pago','paso_fronterizo','observaciones'];
 function embHeaderVals(b) {
   return {
     nombre: val(b.nombre),
@@ -3605,7 +3649,6 @@ function embHeaderVals(b) {
     estado: EMB_ESTADOS.has(b.estado) ? b.estado : 'cotizacion',
     cantidad_cajas: (b.cantidad_cajas != null && b.cantidad_cajas !== '') ? Math.round(Number(b.cantidad_cajas)) : null,
     merma_esperada_pct: (b.merma_esperada_pct != null && b.merma_esperada_pct !== '') ? Number(b.merma_esperada_pct) : 0,
-    precio_referencia: (b.precio_referencia != null && b.precio_referencia !== '') ? Number(b.precio_referencia) : null,
     fecha_etd: val(b.fecha_etd),
     fecha_eta: val(b.fecha_eta),
     invoice_numero: val(b.invoice_numero),
@@ -3692,7 +3735,8 @@ function embLineasDelBody(body) {
       envase_id: (l.envase_id != null && l.envase_id !== '') ? Number(l.envase_id) : null,
       kg_por_bulto: (l.kg_por_bulto != null && l.kg_por_bulto !== '') ? Number(l.kg_por_bulto) : null,
       cajas: (l.cajas != null && l.cajas !== '') ? Math.round(Number(l.cajas)) : 0,
-      precio_unitario_usd: (l.precio_unitario_usd != null && l.precio_unitario_usd !== '') ? Number(l.precio_unitario_usd) : null,   // F7 — FOB USD/caja
+      precio_unitario_usd: (l.precio_unitario_usd != null && l.precio_unitario_usd !== '') ? Number(l.precio_unitario_usd) : null,   // F7 — FOB USD/caja (COMPRA)
+      precio_venta_ars: (l.precio_venta_ars != null && l.precio_venta_ars !== '') ? Number(l.precio_venta_ars) : null,   // precio de VENTA ARS/caja → margen por línea
       calidad: val(l.calidad),
       calibre: val(l.calibre),
       observaciones: val(l.observaciones)
