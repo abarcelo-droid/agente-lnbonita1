@@ -3262,6 +3262,73 @@ router.get('/proveedores', function(req, res) {
   res.json(rows);
 });
 
+// ════════════════════════════════════════════════════════════════════════════
+// ENDPOINT TEMPORAL — DIAGNÓSTICO read-only del dropdown de proveedores IFCO
+// (branch andy/fix-galpones-tipo-naturaleza). Se remueve en el mismo PR tras leerlo.
+// NO escribe nada: solo SELECTs. admin-only. Sirve para ver POR QUÉ el dropdown del
+// modal de usuario queda en "Cargando proveedores" en prod, ya que el filtro
+// tipo_naturaleza='GALPON' del brief NO existe en el código (la columna no existe).
+//   GET /api/ifco/_diag_galpones
+// ════════════════════════════════════════════════════════════════════════════
+router.get('/_diag_galpones', function(req, res) {
+  if (!req.user || req.user.rol !== 'admin') return res.status(403).json({ error: 'Solo admin' });
+  const safe = (label, fn) => { try { return fn(); } catch (e) { return { error: e.message, _label: label }; } };
+
+  // 1) Lo que DE VERDAD dispara el front (relevado en panel.html):
+  const front = {
+    dropdown_modal_usuario: 'GET /api/ifco/proveedores  (usrCargarProveedoresIfco → panel.html)',
+    dropdown_galpones_asociados_OK: 'GET /api/abasto/proveedores  (abCargarProveedores → panel.html)',
+    nota: 'Ninguno filtra por tipo_naturaleza: esa columna/filtro no existe en el código.'
+  };
+
+  // 2) Qué devuelve el endpoint del dropdown ROTO (misma query exacta que /proveedores).
+  const endpoint_ifco = safe('ifco', () => {
+    const q = "SELECT id, nombre, razon_social, cuit FROM proveedores WHERE activo = 1 ORDER BY nombre";
+    const rows = db.prepare(q).all();
+    return { query: q, count: rows.length, sample: rows.slice(0, 15) };
+  });
+
+  // 3) Qué devuelve el endpoint del dropdown que SÍ funciona (Galpones Asociados).
+  const endpoint_abasto = safe('abasto', () => {
+    const q = "SELECT p.id, p.nombre, p.activo FROM proveedores p LEFT JOIN partidas pa ON pa.proveedor_id = p.id AND pa.estado IN ('activa','parcial') WHERE p.activo = 1 GROUP BY p.id ORDER BY p.nombre";
+    const rows = db.prepare(q).all();
+    return { query: q, count: rows.length };
+  });
+
+  // 4) Estado crudo de la tabla proveedores.
+  const tabla_proveedores = safe('tabla', () => ({
+    total:     db.prepare("SELECT COUNT(*) c FROM proveedores").get().c,
+    activos:   db.prepare("SELECT COUNT(*) c FROM proveedores WHERE activo = 1").get().c,
+    inactivos: db.prepare("SELECT COUNT(*) c FROM proveedores WHERE activo = 0 OR activo IS NULL").get().c
+  }));
+
+  // 5) HIPÓTESIS CLAVE: ¿los galpones que IFCO REALMENTE usa están activo=1? Si están en
+  //    activo=0 (o borrados), el WHERE activo=1 los saca del dropdown → "no aparecen".
+  //    proveedor_id usados por IFCO = UNION de las 3 tablas de movimientos (sin NULL).
+  const galpones_ifco_usados = safe('galpones', () => {
+    const ids = new Set();
+    const collect = (sql) => { try { db.prepare(sql).all().forEach(r => { if (r.proveedor_id != null) ids.add(r.proveedor_id); }); } catch (_) {} };
+    collect("SELECT DISTINCT proveedor_id FROM ifco_stocks_reales WHERE deposito_tipo='proveedor'");
+    collect("SELECT DISTINCT proveedor_id FROM ifco_envios_proveedor WHERE eliminado_en IS NULL");
+    collect("SELECT DISTINCT origen_proveedor_id AS proveedor_id FROM ifco_envios_proveedor WHERE origen_proveedor_id IS NOT NULL AND eliminado_en IS NULL");
+    collect("SELECT DISTINCT proveedor_id FROM ifco_recepciones_proveedor WHERE eliminado_en IS NULL");
+    const detalle = [...ids].sort((a, b) => a - b).map(id => {
+      const p = db.prepare("SELECT id, nombre, activo FROM proveedores WHERE id = ?").get(id);
+      return { proveedor_id: id, existe: !!p, nombre: p ? p.nombre : null, activo: p ? p.activo : null,
+        en_dropdown_ifco: !!(p && p.activo === 1) };
+    });
+    return {
+      galpones_usados: detalle.length,
+      en_dropdown: detalle.filter(d => d.en_dropdown_ifco).length,
+      faltan_del_dropdown: detalle.filter(d => !d.en_dropdown_ifco).length,
+      detalle
+    };
+  });
+
+  res.json({ ok: true, generado: db.prepare("SELECT datetime('now','localtime') t").get().t,
+    diagnostico: { front, endpoint_ifco, endpoint_abasto, tabla_proveedores, galpones_ifco_usados } });
+});
+
 router.get('/clientes-dedicados', function(req, res) {
   // dedicados_clientes existe pero no está creada en db.js — la query es defensiva
   try {
