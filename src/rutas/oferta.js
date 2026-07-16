@@ -130,11 +130,11 @@ router.get("/pricing/pdf/:tipo", async (req, res) => {
 
   // Caso especial: Disponible Piso (May MCBA + Min MCBA en dos columnas)
   if (tipo === 'disponible_piso') {
-    // Incluir disponibles (1), próximamente (2), consignación, y MNC (-1)
+    // Incluir disponibles (1), próximamente (2), consignación, MNC (-1) y bajo pedido 48hs (3)
     const todosProds = db.prepare(`
       SELECT * FROM oferta_productos
       WHERE oferta = 'oferta1' AND activo = 1
-        AND disponible_general IN (1, 2, -1)
+        AND disponible_general IN (1, 2, -1, 3)
       ORDER BY categoria, nombre
     `).all();
 
@@ -178,8 +178,9 @@ router.get("/pricing/pdf/:tipo", async (req, res) => {
       const pMay = mapMay[p.id]; const pMin = mapMin[p.id];
       const cons = p.consignacion ? ' <span class="cons-badge">consignación</span>' : '';
       const prox = p.disponible_general === 2 ? ' <span class="prox-badge">⏳</span>' : '';
+      const pedido = p.disponible_general === 3 ? ' <span class="pedido-badge">bajo pedido 48hs</span>' : '';
       let r = '<tr>';
-      r += '<td style="font-weight:700">' + p.nombre + cons + prox + '</td>';
+      r += '<td style="font-weight:700">' + p.nombre + cons + prox + pedido + '</td>';
       r += '<td>' + (p.kilaje||'-') + '</td>';
       const provText = p.proveedor ? (p.marca ? p.proveedor + ' (' + p.marca + ')' : p.proveedor) : '-';
       r += '<td>' + provText + '</td>';
@@ -240,6 +241,7 @@ router.get("/pricing/pdf/:tipo", async (req, res) => {
       'tr.cat td{background:#e8f0f8;font-size:10px;font-weight:700;color:#0f2540;text-transform:uppercase;padding:6px 10px;letter-spacing:.05em}',
       '.cons-badge{display:inline-block;background:#dcfce7;color:#166534;border:1px solid #86efac;border-radius:3px;font-size:9px;padding:0 4px;margin-left:4px;font-weight:700;vertical-align:middle}',
       '.prox-badge{display:inline-block;background:#dbeafe;color:#1e40af;border:1px solid #93c5fd;border-radius:3px;font-size:9px;padding:0 3px;margin-left:4px;font-weight:700;vertical-align:middle}',
+      '.pedido-badge{display:inline-block;background:#ede9fe;color:#6d28d9;border:1px solid #c4b5fd;border-radius:3px;font-size:9px;padding:0 4px;margin-left:4px;font-weight:700;vertical-align:middle;text-transform:uppercase;letter-spacing:.03em}',
       '.footer{margin-top:28px;font-size:10px;color:#b09080;text-align:center;border-top:1px solid #e8ddd0;padding-top:10px}',
       '.btn-print{position:fixed;bottom:24px;right:24px;background:#0f2540;color:#fff;border:none;border-radius:8px;padding:12px 22px;font-size:13px;font-weight:700;cursor:pointer;box-shadow:0 4px 12px rgba(0,0,0,.2);z-index:999}',
       '.btn-print:hover{background:#1a3a6e}',
@@ -250,7 +252,7 @@ router.get("/pricing/pdf/:tipo", async (req, res) => {
       '<img src="' + logoUrl + '" class="logo-img" alt="La Nina Bonita">',
       '<div class="header-right"><div class="header-sub">San Geronimo SA</div><strong style="font-size:14px;color:#0f2540">Disponible Piso</strong><div class="header-sub">Fecha: ' + fecha + '</div></div>',
       '</div>',
-      '<div class="leyenda"><span><span class="cons-badge">consignación</span> Sin costo propio — precio de referencia</span><span style="margin-left:16px"><span class="prox-badge">⏳</span> Próximamente</span></div>',
+      '<div class="leyenda"><span><span class="cons-badge">consignación</span> Sin costo propio — precio de referencia</span><span style="margin-left:16px"><span class="prox-badge">⏳</span> Próximamente</span><span style="margin-left:16px"><span class="pedido-badge">bajo pedido 48hs</span> Se pide y llega en 48hs</span></div>',
       '<table>',
       '<thead><tr><th>Producto</th><th>Kilos</th><th>Proveedor</th><th>Origen</th><th class="num">May. MCBA</th><th class="num">Min. MCBA</th></tr></thead>',
       '<tbody>' + rows + '</tbody>',
@@ -289,7 +291,8 @@ router.get("/pricing/pdf/:tipo", async (req, res) => {
       catActual = p.categoria;
       rows += '<tr class="cat"><td colspan="4">' + (catActual||'Sin categoria') + '</td></tr>';
     }
-    rows += '<tr><td>' + p.nombre + '</td><td style="color:#7a6055">' + (p.descripcion||'') + '</td><td style="color:#7a6055">' + (p.origen||'') + ' ' + (p.kilaje||'') + '</td><td class="num">$' + Number(prec.precio||0).toLocaleString('es-AR') + '</td></tr>';
+    const pedidoTag = p.disponible_general === 3 ? ' <span style="display:inline-block;background:#ede9fe;color:#6d28d9;border:1px solid #c4b5fd;border-radius:3px;font-size:9px;padding:0 4px;font-weight:700;text-transform:uppercase;letter-spacing:.03em;vertical-align:middle">bajo pedido 48hs</span>' : '';
+    rows += '<tr><td>' + p.nombre + pedidoTag + '</td><td style="color:#7a6055">' + (p.descripcion||'') + '</td><td style="color:#7a6055">' + (p.origen||'') + ' ' + (p.kilaje||'') + '</td><td class="num">$' + Number(prec.precio||0).toLocaleString('es-AR') + '</td></tr>';
   });
 
   const html = [
