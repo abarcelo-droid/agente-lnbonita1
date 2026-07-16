@@ -34,7 +34,9 @@ router.get("/oferta/:oferta", (req, res) => {
   const soloDisponibles = req.query.disponibles === "1";
   if (!['oferta1','oferta2'].includes(oferta)) return res.status(400).json({ error: "Oferta invalida" });
   let productos = listarProductos(oferta);
-  if (soloDisponibles) productos = productos.filter(p => p.disponible_general === 1 || p.disponible_general === 2);
+  // "Bajo pedido 48hs" (3) se muestra en Pricing como Disponible(1)/Próximamente(2): tiene precio
+  // editable y sí se puede pedir. Solo se filtran Sin stock (0) y MNC (-1).
+  if (soloDisponibles) productos = productos.filter(p => p.disponible_general === 1 || p.disponible_general === 2 || p.disponible_general === 3);
   res.json(productos);
 });
 
