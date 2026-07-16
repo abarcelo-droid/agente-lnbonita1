@@ -8,7 +8,7 @@ import { fileURLToPath as ftu } from "url";
 const __d2 = path.dirname(ftu(import.meta.url));
 const db = new Database(path.join(__d2, "../../data/clientes.db"));
 
-import { documento as pdfDocumento, badgesHtml, catRow, ordenarPorCategoria, presentacionText } from "../servicios/pricingPdfEstilo.js";
+import { documento as pdfDocumento, badgesHtml, marcaPrefix, catRow, ordenarPorCategoria, presentacionText, NOTA_BAJO_PEDIDO } from "../servicios/pricingPdfEstilo.js";
 import {
   listarProductos, obtenerProducto, upsertProducto,
   actualizarPrecio, eliminarProducto,
@@ -221,6 +221,7 @@ router.get("/pricing/pdf/:tipo", async (req, res) => {
       theadHtml: '<thead><tr><th>Producto</th><th>Presentación</th><th>Proveedor</th><th>Origen</th><th class="num">May. MCBA</th><th class="num">Min. MCBA</th></tr></thead>',
       tbodyHtml: rows,
       extraHtml: mncSection,
+      notaAlPie: prodsNormales.some(function(p){ return p.disponible_general === 3; }) ? NOTA_BAJO_PEDIDO : '',
     });
 
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
@@ -250,6 +251,7 @@ router.get("/pricing/pdf/:tipo", async (req, res) => {
 
   let rows = '';
   let catActual = '';
+  let hayBajoPedido = false;
   prods.forEach(function(p) {
     const prec = precMap[p.id];
     // Mostrar si está disponible para este cliente, O si es "bajo pedido 48hs" (3) con precio
@@ -262,8 +264,9 @@ router.get("/pricing/pdf/:tipo", async (req, res) => {
       catActual = p.categoria;
       rows += catRow(catActual, 5);
     }
-    // Origen y Presentación en columnas separadas; la presentación aclara la unidad ("13 kg").
-    rows += '<tr><td style="font-weight:700">' + p.nombre + badgesHtml(p, badgeOpts) + '</td><td style="color:#7a6055">' + (p.descripcion||'') + '</td><td style="color:#7a6055">' + (p.origen||'-') + '</td><td style="color:#7a6055;white-space:nowrap">' + (presentacionText(p.kilaje) || '-') + '</td><td class="num">$' + Number(prec.precio||0).toLocaleString('es-AR') + '</td></tr>';
+    if (p.disponible_general === 3) hayBajoPedido = true;
+    // Marca protagonista ANTES del nombre (clientes); origen y presentación en columnas separadas.
+    rows += '<tr><td style="font-weight:700">' + marcaPrefix(p, badgeOpts) + p.nombre + badgesHtml(p, badgeOpts) + '</td><td style="color:#7a6055">' + (p.descripcion||'') + '</td><td style="color:#7a6055">' + (p.origen||'-') + '</td><td style="color:#7a6055;white-space:nowrap">' + (presentacionText(p.kilaje) || '-') + '</td><td class="num">$' + Number(prec.precio||0).toLocaleString('es-AR') + '</td></tr>';
   });
 
   // Mismo formato institucional que el Piso (helper): logo LNB + header + paleta + leyenda
@@ -273,6 +276,7 @@ router.get("/pricing/pdf/:tipo", async (req, res) => {
     fecha,
     theadHtml: '<thead><tr><th style="width:34%">Producto</th><th style="width:24%">Variedad</th><th style="width:16%">Origen</th><th style="width:14%">Presentación</th><th class="num" style="width:12%">Precio</th></tr></thead>',
     tbodyHtml: rows,
+    notaAlPie: hayBajoPedido ? NOTA_BAJO_PEDIDO : '',
   });
 
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
