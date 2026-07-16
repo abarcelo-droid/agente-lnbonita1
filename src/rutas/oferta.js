@@ -8,6 +8,7 @@ import { fileURLToPath as ftu } from "url";
 const __d2 = path.dirname(ftu(import.meta.url));
 const db = new Database(path.join(__d2, "../../data/clientes.db"));
 
+import { documento as pdfDocumento, badgesHtml, catRow } from "../servicios/pricingPdfEstilo.js";
 import {
   listarProductos, obtenerProducto, upsertProducto,
   actualizarPrecio, eliminarProducto,
@@ -177,12 +178,8 @@ router.get("/pricing/pdf/:tipo", async (req, res) => {
     }
 
     function buildRow(p) {
-      const pMay = mapMay[p.id]; const pMin = mapMin[p.id];
-      const cons = p.consignacion ? ' <span class="cons-badge">consignación</span>' : '';
-      const prox = p.disponible_general === 2 ? ' <span class="prox-badge">⏳</span>' : '';
-      const pedido = p.disponible_general === 3 ? ' <span class="pedido-badge">bajo pedido 48hs</span>' : '';
       let r = '<tr>';
-      r += '<td style="font-weight:700">' + p.nombre + cons + prox + pedido + '</td>';
+      r += '<td style="font-weight:700">' + p.nombre + badgesHtml(p) + '</td>';
       r += '<td>' + (p.kilaje||'-') + '</td>';
       const provText = p.proveedor ? (p.marca ? p.proveedor + ' (' + p.marca + ')' : p.proveedor) : '-';
       r += '<td>' + provText + '</td>';
@@ -197,7 +194,7 @@ router.get("/pricing/pdf/:tipo", async (req, res) => {
     prodsNormales.forEach(function(p) {
       if (p.categoria !== catActual) {
         catActual = p.categoria;
-        rows += '<tr class="cat"><td colspan="6">' + (catActual||'Sin categoria') + '</td></tr>';
+        rows += catRow(catActual, 6);
       }
       rows += buildRow(p);
     });
@@ -223,47 +220,16 @@ router.get("/pricing/pdf/:tipo", async (req, res) => {
         </table>
       </div>` : '';
 
-    const logoUrl = 'https://agente-lnbonita1-production.up.railway.app/static/logo.jpg';
-
-    const html = [
-      '<!DOCTYPE html><html><head><meta charset="UTF-8">',
-      '<style>',
-      '@page{size:A4 portrait!important;margin:15mm}',
-      'html,body{width:100%;max-width:210mm}',
-      'body{font-family:Arial,sans-serif;font-size:11px;color:#2c1810;margin:0;padding:0}',
-      '.header{display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;padding-bottom:14px;border-bottom:3px solid #0f2540}',
-      '.logo-img{height:56px;object-fit:contain}',
-      '.header-right{text-align:right}',
-      '.header-sub{font-size:11px;color:#7a6055;margin-top:2px}',
-      'table{width:100%;border-collapse:collapse;margin-top:8px}',
-      'th{padding:8px 10px;background:#0f2540;color:#fff;text-align:left;font-size:10px;text-transform:uppercase;white-space:nowrap}',
-      'th.num{text-align:right}',
-      'td{padding:7px 10px;border-bottom:1px solid #e8ddd0;vertical-align:top;font-size:12px}',
-      'td.num{text-align:right;font-weight:600;color:#0f2540;font-variant-numeric:tabular-nums}',
-      'tr.cat td{background:#e8f0f8;font-size:10px;font-weight:700;color:#0f2540;text-transform:uppercase;padding:6px 10px;letter-spacing:.05em}',
-      '.cons-badge{display:inline-block;background:#dcfce7;color:#166534;border:1px solid #86efac;border-radius:3px;font-size:9px;padding:0 4px;margin-left:4px;font-weight:700;vertical-align:middle}',
-      '.prox-badge{display:inline-block;background:#dbeafe;color:#1e40af;border:1px solid #93c5fd;border-radius:3px;font-size:9px;padding:0 3px;margin-left:4px;font-weight:700;vertical-align:middle}',
-      '.pedido-badge{display:inline-block;background:#ede9fe;color:#6d28d9;border:1px solid #c4b5fd;border-radius:3px;font-size:9px;padding:0 4px;margin-left:4px;font-weight:700;vertical-align:middle;text-transform:uppercase;letter-spacing:.03em}',
-      '.footer{margin-top:28px;font-size:10px;color:#b09080;text-align:center;border-top:1px solid #e8ddd0;padding-top:10px}',
-      '.btn-print{position:fixed;bottom:24px;right:24px;background:#0f2540;color:#fff;border:none;border-radius:8px;padding:12px 22px;font-size:13px;font-weight:700;cursor:pointer;box-shadow:0 4px 12px rgba(0,0,0,.2);z-index:999}',
-      '.btn-print:hover{background:#1a3a6e}',
-      '@media print{.btn-print{display:none}}',
-      '.leyenda{font-size:10px;color:#7a6055;margin-bottom:12px;display:flex;gap:16px}',
-      '</style></head><body>',
-      '<div class="header">',
-      '<img src="' + logoUrl + '" class="logo-img" alt="La Nina Bonita">',
-      '<div class="header-right"><div class="header-sub">San Geronimo SA</div><strong style="font-size:14px;color:#0f2540">Disponible Piso</strong><div class="header-sub">Fecha: ' + fecha + '</div></div>',
-      '</div>',
-      '<div class="leyenda"><span><span class="cons-badge">consignación</span> Sin costo propio — precio de referencia</span><span style="margin-left:16px"><span class="prox-badge">⏳</span> Próximamente</span><span style="margin-left:16px"><span class="pedido-badge">bajo pedido 48hs</span> Se pide y llega en 48hs</span></div>',
-      '<table>',
-      '<thead><tr><th>Producto</th><th>Kilos</th><th>Proveedor</th><th>Origen</th><th class="num">May. MCBA</th><th class="num">Min. MCBA</th></tr></thead>',
-      '<tbody>' + rows + '</tbody>',
-      '</table>',
-      mncSection,
-      '<div class="footer">La Nina Bonita - Mercado Central de Buenos Aires, Nave 4, Puestos 2-4-6 | a.barcelo@lnbonita.com.ar</div>',
-      '<button class="btn-print" onclick="window.print()">🖨 Imprimir / Guardar PDF</button>',
-      '</body></html>'
-    ].join('');
+    // Formato institucional compartido (helper). El thead de 6 columnas y la sección MNC
+    // son propios del Piso; el resto (logo, paleta, header, leyenda, badges, grupos) viene
+    // del helper — misma fuente que usan los 4 PDFs por tipo de cliente.
+    const html = pdfDocumento({
+      titulo: 'Disponible Piso',
+      fecha,
+      theadHtml: '<thead><tr><th>Producto</th><th>Kilos</th><th>Proveedor</th><th>Origen</th><th class="num">May. MCBA</th><th class="num">Min. MCBA</th></tr></thead>',
+      tbodyHtml: rows,
+      extraHtml: mncSection,
+    });
 
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     res.setHeader('Content-Disposition', 'inline; filename="disponible-piso.html"');
@@ -288,42 +254,27 @@ router.get("/pricing/pdf/:tipo", async (req, res) => {
   let catActual = '';
   prods.forEach(function(p) {
     const prec = precMap[p.id];
-    if (!prec || prec.disponible_text !== 'disponible') return;
+    // Mostrar si está disponible para este cliente, O si es "bajo pedido 48hs" (3) con precio
+    // cargado: el producto está sin stock ahora pero se puede pedir (llega en 48hs), así que sale
+    // con su precio + etiqueta. Los sin_stock comunes (sin el flag) siguen ocultos.
+    if (!prec) return;
+    const mostrar = prec.disponible_text === 'disponible' || (p.disponible_general === 3 && Number(prec.precio) > 0);
+    if (!mostrar) return;
     if (p.categoria !== catActual) {
       catActual = p.categoria;
-      rows += '<tr class="cat"><td colspan="4">' + (catActual||'Sin categoria') + '</td></tr>';
+      rows += catRow(catActual, 4);
     }
-    const pedidoTag = p.disponible_general === 3 ? ' <span style="display:inline-block;background:#ede9fe;color:#6d28d9;border:1px solid #c4b5fd;border-radius:3px;font-size:9px;padding:0 4px;font-weight:700;text-transform:uppercase;letter-spacing:.03em;vertical-align:middle">bajo pedido 48hs</span>' : '';
-    rows += '<tr><td>' + p.nombre + pedidoTag + '</td><td style="color:#7a6055">' + (p.descripcion||'') + '</td><td style="color:#7a6055">' + (p.origen||'') + ' ' + (p.kilaje||'') + '</td><td class="num">$' + Number(prec.precio||0).toLocaleString('es-AR') + '</td></tr>';
+    rows += '<tr><td style="font-weight:700">' + p.nombre + badgesHtml(p) + '</td><td style="color:#7a6055">' + (p.descripcion||'') + '</td><td style="color:#7a6055">' + (p.origen||'') + ' ' + (p.kilaje||'') + '</td><td class="num">$' + Number(prec.precio||0).toLocaleString('es-AR') + '</td></tr>';
   });
 
-  const html = [
-    '<!DOCTYPE html><html><head><meta charset="UTF-8">',
-    '<style>',
-    'body{font-family:Arial,sans-serif;font-size:13px;color:#2c1810;margin:0;padding:32px}',
-    '@page{size:A4 portrait;margin:20mm}',
-    '.header{display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:24px;padding-bottom:16px;border-bottom:3px solid #6b1212}',
-    '.logo-text{font-size:22px;font-weight:700;color:#6b1212}',
-    'table{width:100%;border-collapse:collapse;margin-top:8px}',
-    'th{padding:9px 12px;background:#6b1212;color:#fff;text-align:left;font-size:11px;text-transform:uppercase}',
-    'th.num{text-align:right}',
-    'td{padding:8px 12px;border-bottom:1px solid #e8ddd0;vertical-align:top}',
-    'td.num{text-align:right;font-weight:600;color:#6b1212;font-variant-numeric:tabular-nums}',
-    'tr.cat td{background:#faf3dc;font-size:11px;font-weight:700;color:#6b1212;text-transform:uppercase;padding:7px 12px}',
-    '.footer{margin-top:32px;font-size:10px;color:#b09080;text-align:center;border-top:1px solid #e8ddd0;padding-top:12px}',
-    '</style></head><body>',
-    '<div class="header">',
-    '<div><div class="logo-text">La Nina Bonita</div><div style="font-size:11px;color:#7a6055">Frutas y Hortalizas - desde 1945</div></div>',
-    '<div style="text-align:right;font-size:12px;color:#7a6055"><strong style="color:#2c1810;font-size:15px;display:block;margin-bottom:4px">Lista de precios - ' + label + '</strong>Fecha: ' + fecha + '</div>',
-    '</div>',
-    '<table>',
-    '<thead><tr><th>Producto</th><th>Variedad</th><th>Origen / Presentacion</th><th class="num">Precio</th></tr></thead>',
-    '<tbody>' + rows + '</tbody>',
-    '</table>',
-    '<div class="footer">La Nina Bonita - Mercado Central de Buenos Aires, Nave 4, Puestos 2-4-6 | a.barcelo@lnbonita.com.ar</div>',
-    '<button class="btn-print" onclick="window.print()">🖨 Imprimir / Guardar PDF</button>',
-      '</body></html>'
-  ].join('');
+  // Mismo formato institucional que el Piso (helper): logo LNB + header + paleta + leyenda
+  // de badges. Título parametrizado por tipo de cliente; una sola columna de precio (la del tipo).
+  const html = pdfDocumento({
+    titulo: 'Lista de precios - ' + label,
+    fecha,
+    theadHtml: '<thead><tr><th>Producto</th><th>Variedad</th><th>Origen / Presentacion</th><th class="num">Precio</th></tr></thead>',
+    tbodyHtml: rows,
+  });
 
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
   res.setHeader('Content-Disposition', 'inline; filename="precios-' + tipo + '.html"');
