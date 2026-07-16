@@ -92,6 +92,14 @@ export function badgesHtml(p, opts = {}) {
   return cons + prox + pedido + marca;
 }
 
+// Presentación con unidad: un kilaje "pelado" (ej. "13") se muestra como "13 kg". Si ya trae
+// texto/unidad (ej. "caja 20kg", "20kg", "bolsa x 5"), se respeta tal cual. Vacío → ''.
+export function presentacionText(kilaje) {
+  const k = (kilaje == null ? '' : String(kilaje)).trim();
+  if (!k) return '';
+  return /^\d+([.,]\d+)?$/.test(k) ? k + ' kg' : k;
+}
+
 // Fila de encabezado de categoría (grupo).
 export function catRow(cat, colspan) {
   return '<tr class="cat"><td colspan="' + colspan + '">' + (cat || 'Sin categoria') + '</td></tr>';

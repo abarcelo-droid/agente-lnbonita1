@@ -8,7 +8,7 @@ import { fileURLToPath as ftu } from "url";
 const __d2 = path.dirname(ftu(import.meta.url));
 const db = new Database(path.join(__d2, "../../data/clientes.db"));
 
-import { documento as pdfDocumento, badgesHtml, catRow, ordenarPorCategoria } from "../servicios/pricingPdfEstilo.js";
+import { documento as pdfDocumento, badgesHtml, catRow, ordenarPorCategoria, presentacionText } from "../servicios/pricingPdfEstilo.js";
 import {
   listarProductos, obtenerProducto, upsertProducto,
   actualizarPrecio, eliminarProducto,
@@ -172,7 +172,7 @@ router.get("/pricing/pdf/:tipo", async (req, res) => {
     function buildRow(p) {
       let r = '<tr>';
       r += '<td style="font-weight:700">' + p.nombre + badgesHtml(p) + '</td>';
-      r += '<td>' + (p.kilaje||'-') + '</td>';
+      r += '<td>' + (presentacionText(p.kilaje) || '-') + '</td>';
       const provText = p.proveedor ? (p.marca ? p.proveedor + ' (' + p.marca + ')' : p.proveedor) : '-';
       r += '<td>' + provText + '</td>';
       r += '<td style="color:#7a6055">' + (p.origen||'-') + '</td>';
@@ -202,7 +202,7 @@ router.get("/pricing/pdf/:tipo", async (req, res) => {
         <table style="width:100%;border-collapse:collapse;font-size:11px">
           <thead><tr style="background:#fee2e2">
             <th style="padding:5px 8px;text-align:left">Producto</th>
-            <th style="padding:5px 8px;text-align:left">Kilos</th>
+            <th style="padding:5px 8px;text-align:left">Presentación</th>
             <th style="padding:5px 8px;text-align:left">Proveedor</th>
             <th style="padding:5px 8px;text-align:left">Origen</th>
             <th style="padding:5px 8px;text-align:right">May MCBA</th>
@@ -218,7 +218,7 @@ router.get("/pricing/pdf/:tipo", async (req, res) => {
     const html = pdfDocumento({
       titulo: 'Disponible Piso',
       fecha,
-      theadHtml: '<thead><tr><th>Producto</th><th>Kilos</th><th>Proveedor</th><th>Origen</th><th class="num">May. MCBA</th><th class="num">Min. MCBA</th></tr></thead>',
+      theadHtml: '<thead><tr><th>Producto</th><th>Presentación</th><th>Proveedor</th><th>Origen</th><th class="num">May. MCBA</th><th class="num">Min. MCBA</th></tr></thead>',
       tbodyHtml: rows,
       extraHtml: mncSection,
     });
@@ -243,9 +243,10 @@ router.get("/pricing/pdf/:tipo", async (req, res) => {
 
   const fecha = new Date().toLocaleDateString('es-AR', {day:'2-digit',month:'2-digit',year:'numeric'});
 
-  // Minorista MCBA va a clientes: en vez del badge "consignación" (modalidad interna de compra),
-  // muestra la MARCA del producto. El resto de los tipos sigue mostrando consignación como hoy.
-  const badgeOpts = tipo === 'minorista_mcba' ? { consignacion: false, marca: true } : {};
+  // PDFs a CLIENTES (Mayorista A y Minorista MCBA): en vez del badge "consignación" (modalidad
+  // interna de compra) muestran la MARCA del producto. Los internos (May MCBA, Min Entrega, Piso)
+  // siguen mostrando consignación y sin marca.
+  const badgeOpts = ['mayorista_a', 'minorista_mcba'].includes(tipo) ? { consignacion: false, marca: true } : {};
 
   let rows = '';
   let catActual = '';
@@ -259,9 +260,10 @@ router.get("/pricing/pdf/:tipo", async (req, res) => {
     if (!mostrar) return;
     if (p.categoria !== catActual) {
       catActual = p.categoria;
-      rows += catRow(catActual, 4);
+      rows += catRow(catActual, 5);
     }
-    rows += '<tr><td style="font-weight:700">' + p.nombre + badgesHtml(p, badgeOpts) + '</td><td style="color:#7a6055">' + (p.descripcion||'') + '</td><td style="color:#7a6055">' + (p.origen||'') + ' ' + (p.kilaje||'') + '</td><td class="num">$' + Number(prec.precio||0).toLocaleString('es-AR') + '</td></tr>';
+    // Origen y Presentación en columnas separadas; la presentación aclara la unidad ("13 kg").
+    rows += '<tr><td style="font-weight:700">' + p.nombre + badgesHtml(p, badgeOpts) + '</td><td style="color:#7a6055">' + (p.descripcion||'') + '</td><td style="color:#7a6055">' + (p.origen||'-') + '</td><td style="color:#7a6055;white-space:nowrap">' + (presentacionText(p.kilaje) || '-') + '</td><td class="num">$' + Number(prec.precio||0).toLocaleString('es-AR') + '</td></tr>';
   });
 
   // Mismo formato institucional que el Piso (helper): logo LNB + header + paleta + leyenda
@@ -269,7 +271,7 @@ router.get("/pricing/pdf/:tipo", async (req, res) => {
   const html = pdfDocumento({
     titulo: 'Lista de precios - ' + label,
     fecha,
-    theadHtml: '<thead><tr><th>Producto</th><th>Variedad</th><th>Origen / Presentacion</th><th class="num">Precio</th></tr></thead>',
+    theadHtml: '<thead><tr><th style="width:34%">Producto</th><th style="width:24%">Variedad</th><th style="width:16%">Origen</th><th style="width:14%">Presentación</th><th class="num" style="width:12%">Precio</th></tr></thead>',
     tbodyHtml: rows,
   });
 
