@@ -8,7 +8,7 @@ import { fileURLToPath as ftu } from "url";
 const __d2 = path.dirname(ftu(import.meta.url));
 const db = new Database(path.join(__d2, "../../data/clientes.db"));
 
-import { documento as pdfDocumento, badgesHtml, catRow } from "../servicios/pricingPdfEstilo.js";
+import { documento as pdfDocumento, badgesHtml, catRow, ordenarPorCategoria } from "../servicios/pricingPdfEstilo.js";
 import {
   listarProductos, obtenerProducto, upsertProducto,
   actualizarPrecio, eliminarProducto,
@@ -147,12 +147,9 @@ router.get("/pricing/pdf/:tipo", async (req, res) => {
     const mapMin = {}; preciosMin.forEach(function(p){ mapMin[p.producto_id] = p; });
     const fecha = new Date().toLocaleDateString('es-AR', {day:'2-digit',month:'2-digit',year:'numeric'});
 
-    // Orden de categorías
-    const ORDEN_CAT = ['Frutas Nacionales','Frutas Importadas','Hortaliza Liviana','Hortaliza Pesada'];
-
     // Separar MNC del resto
     // Regla: incluir si tiene precio en May o Min, O si es consignación disponible (con o sin precio)
-    const prodsNormales = todosProds.filter(function(p) {
+    const prodsNormalesRaw = todosProds.filter(function(p) {
       if (p.disponible_general === -1) return false; // MNC va aparte
       const pMay = mapMay[p.id]; const pMin = mapMin[p.id];
       const tienePrecio = (pMay && pMay.precio > 0) || (pMin && pMin.precio > 0);
@@ -163,13 +160,8 @@ router.get("/pricing/pdf/:tipo", async (req, res) => {
       return p.disponible_general === -1;
     });
 
-    // Ordenar normales por categoría según ORDEN_CAT, resto al final
-    prodsNormales.sort(function(a,b) {
-      const ia = ORDEN_CAT.indexOf(a.categoria); const ib = ORDEN_CAT.indexOf(b.categoria);
-      const oa = ia >= 0 ? ia : 99; const ob = ib >= 0 ? ib : 99;
-      if (oa !== ob) return oa - ob;
-      return (a.nombre||'').localeCompare(b.nombre||'');
-    });
+    // Orden fijo de grupos (helper): Nacionales → Importadas → Hortalizas; nuevas al final.
+    const prodsNormales = ordenarPorCategoria(prodsNormalesRaw);
 
     function fmtPrecio(pMap, id, cons) {
       const p = pMap[id];
@@ -243,12 +235,17 @@ router.get("/pricing/pdf/:tipo", async (req, res) => {
   const OFERTA = ['mayorista_a','mayorista_mcba','minorista_mcba','minorista_entrega'].includes(tipo) ? 'oferta1' : 'oferta2';
   const label = LABELS[tipo] || tipo;
 
-  const prods = db.prepare("SELECT * FROM oferta_productos WHERE oferta = ? AND activo = 1 ORDER BY categoria, nombre").all(OFERTA);
+  const prodsRaw = db.prepare("SELECT * FROM oferta_productos WHERE oferta = ? AND activo = 1 ORDER BY categoria, nombre").all(OFERTA);
+  const prods = ordenarPorCategoria(prodsRaw);   // orden fijo de grupos (Nacionales → Importadas → Hortalizas)
   const precios = db.prepare("SELECT producto_id, precio, COALESCE(disponible_text, CASE WHEN disponible=1 THEN 'disponible' ELSE 'sin_stock' END) as disponible_text FROM oferta_precios WHERE tipo_cliente = ?").all(tipo);
   const precMap = {};
   precios.forEach(function(p){ precMap[p.producto_id] = p; });
 
   const fecha = new Date().toLocaleDateString('es-AR', {day:'2-digit',month:'2-digit',year:'numeric'});
+
+  // Minorista MCBA va a clientes: en vez del badge "consignación" (modalidad interna de compra),
+  // muestra la MARCA del producto. El resto de los tipos sigue mostrando consignación como hoy.
+  const badgeOpts = tipo === 'minorista_mcba' ? { consignacion: false, marca: true } : {};
 
   let rows = '';
   let catActual = '';
@@ -264,7 +261,7 @@ router.get("/pricing/pdf/:tipo", async (req, res) => {
       catActual = p.categoria;
       rows += catRow(catActual, 4);
     }
-    rows += '<tr><td style="font-weight:700">' + p.nombre + badgesHtml(p) + '</td><td style="color:#7a6055">' + (p.descripcion||'') + '</td><td style="color:#7a6055">' + (p.origen||'') + ' ' + (p.kilaje||'') + '</td><td class="num">$' + Number(prec.precio||0).toLocaleString('es-AR') + '</td></tr>';
+    rows += '<tr><td style="font-weight:700">' + p.nombre + badgesHtml(p, badgeOpts) + '</td><td style="color:#7a6055">' + (p.descripcion||'') + '</td><td style="color:#7a6055">' + (p.origen||'') + ' ' + (p.kilaje||'') + '</td><td class="num">$' + Number(prec.precio||0).toLocaleString('es-AR') + '</td></tr>';
   });
 
   // Mismo formato institucional que el Piso (helper): logo LNB + header + paleta + leyenda

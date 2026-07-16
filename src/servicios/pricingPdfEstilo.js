@@ -21,8 +21,21 @@ export const PALETA = {
   mncTh:       '#fee2e2',
 };
 
-// CSS compartido (idéntico, línea por línea, al del Piso). Se une con '' → una sola
-// cadena; cada regla es autocontenida, así que el separador vacío no las mezcla.
+// Orden fijo de los grupos (categorías) en TODOS los PDFs: Nacionales → Importadas →
+// Hortalizas. Una categoría no contemplada cae al final (índice 99). Fuente única.
+export const ORDEN_CAT = ['Frutas Nacionales', 'Frutas Importadas', 'Hortaliza Liviana', 'Hortaliza Pesada'];
+
+export function ordenarPorCategoria(arr) {
+  return arr.slice().sort(function (a, b) {
+    const ia = ORDEN_CAT.indexOf(a.categoria); const ib = ORDEN_CAT.indexOf(b.categoria);
+    const oa = ia >= 0 ? ia : 99; const ob = ib >= 0 ? ib : 99;
+    if (oa !== ob) return oa - ob;
+    return (a.nombre || '').localeCompare(b.nombre || '');
+  });
+}
+
+// CSS compartido. Se une con '' → una sola cadena; cada regla es autocontenida, así que el
+// separador vacío no las mezcla.
 export function estilosCss() {
   return [
     '@page{size:A4 portrait!important;margin:15mm}',
@@ -37,10 +50,13 @@ export function estilosCss() {
     'th.num{text-align:right}',
     'td{padding:7px 10px;border-bottom:1px solid #e8ddd0;vertical-align:top;font-size:12px}',
     'td.num{text-align:right;font-weight:600;color:#0f2540;font-variant-numeric:tabular-nums}',
-    'tr.cat td{background:#e8f0f8;font-size:10px;font-weight:700;color:#0f2540;text-transform:uppercase;padding:6px 10px;letter-spacing:.05em}',
+    // Título de grupo (categoría): azul institucional saturado + barra de acento, para que
+    // resalte claramente sobre las filas blancas. Texto navy sigue legible sobre este fondo.
+    'tr.cat td{background:#9dbfe3;font-size:10px;font-weight:700;color:#0f2540;text-transform:uppercase;padding:6px 10px;letter-spacing:.05em;border-left:4px solid #0f2540}',
     '.cons-badge{display:inline-block;background:#dcfce7;color:#166534;border:1px solid #86efac;border-radius:3px;font-size:9px;padding:0 4px;margin-left:4px;font-weight:700;vertical-align:middle}',
     '.prox-badge{display:inline-block;background:#dbeafe;color:#1e40af;border:1px solid #93c5fd;border-radius:3px;font-size:9px;padding:0 3px;margin-left:4px;font-weight:700;vertical-align:middle}',
     '.pedido-badge{display:inline-block;background:#ede9fe;color:#6d28d9;border:1px solid #c4b5fd;border-radius:3px;font-size:9px;padding:0 4px;margin-left:4px;font-weight:700;vertical-align:middle;text-transform:uppercase;letter-spacing:.03em}',
+    '.marca-badge{display:inline-block;background:#f1f5f9;color:#334155;border:1px solid #cbd5e1;border-radius:3px;font-size:9px;padding:0 4px;margin-left:4px;font-weight:700;vertical-align:middle}',
     '.footer{margin-top:28px;font-size:10px;color:#b09080;text-align:center;border-top:1px solid #e8ddd0;padding-top:10px}',
     '.btn-print{position:fixed;bottom:24px;right:24px;background:#0f2540;color:#fff;border:none;border-radius:8px;padding:12px 22px;font-size:13px;font-weight:700;cursor:pointer;box-shadow:0 4px 12px rgba(0,0,0,.2);z-index:999}',
     '.btn-print:hover{background:#1a3a6e}',
@@ -64,12 +80,16 @@ export function leyendaHtml() {
   return '<div class="leyenda"><span><span class="cons-badge">consignación</span> Sin costo propio — precio de referencia</span><span style="margin-left:16px"><span class="prox-badge">⏳</span> Próximamente</span><span style="margin-left:16px"><span class="pedido-badge">bajo pedido 48hs</span> Se pide y llega en 48hs</span></div>';
 }
 
-// Badges por producto (mismo orden y strings que el Piso): consignación + prox + pedido.
-export function badgesHtml(p) {
-  const cons   = p.consignacion ? ' <span class="cons-badge">consignación</span>' : '';
+// Badges por producto: consignación + prox + pedido (+ marca opcional). `opts` (default {})
+// preserva el comportamiento histórico de los 5 PDFs sin cambios:
+//   opts.consignacion === false → NO muestra el badge "consignación" (ej. lista a clientes).
+//   opts.marca === true          → muestra la MARCA como chip si el producto la tiene.
+export function badgesHtml(p, opts = {}) {
+  const cons   = (opts.consignacion === false) ? '' : (p.consignacion ? ' <span class="cons-badge">consignación</span>' : '');
   const prox   = p.disponible_general === 2 ? ' <span class="prox-badge">⏳</span>' : '';
   const pedido = p.disponible_general === 3 ? ' <span class="pedido-badge">bajo pedido 48hs</span>' : '';
-  return cons + prox + pedido;
+  const marca  = (opts.marca && p.marca) ? ' <span class="marca-badge">' + p.marca + '</span>' : '';
+  return cons + prox + pedido + marca;
 }
 
 // Fila de encabezado de categoría (grupo).
