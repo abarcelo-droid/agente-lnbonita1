@@ -1181,6 +1181,9 @@ async function confirmarDespacho() {
   const btn = event.target;
   btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>Guardando…';
   try {
+    // FormData FRESCO en cada envío (nunca se reusa un body ya enviado). La foto es S.fotoFile,
+    // un File/Blob re-leíble que onFotoDespacho fija por remito (resetState lo limpia entre cargas),
+    // así el 2do despacho manda SU foto, no la del primero.
     const fd = new FormData();
     fd.append('n_remito_ifco', numero);
     const numSG = $('d-numero-sg').value.trim();
@@ -1198,6 +1201,9 @@ async function confirmarDespacho() {
     showOk('✓ Despacho creado', numero + ' — ' + cadena);
   } catch(e) {
     showError('No se pudo guardar', e.message, '⚠️');
+  } finally {
+    // Re-habilitar SIEMPRE (éxito, error o timeout). Sin esto, tras un guardado OK el botón queda
+    // disabled con "Guardando…", y el 2do despacho llega a esta misma vista con el botón trabado.
     btn.disabled = false; btn.innerHTML = '✓ Crear despacho';
   }
 }
