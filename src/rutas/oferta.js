@@ -249,9 +249,9 @@ router.get("/pricing/pdf/:tipo", async (req, res) => {
   // siguen mostrando consignación y sin marca.
   const badgeOpts = ['mayorista_a', 'minorista_mcba'].includes(tipo) ? { consignacion: false, marca: true } : {};
 
-  // Minorista MCBA (lista a clientes): además de lo disponible, incluye los productos en
-  // CONSIGNACIÓN aunque no tengan precio cargado, mostrando "Consultar" (espeja al Piso, que ya
-  // los lista con "(cons.)"). Aislado a este tipo; los otros 3 por-tipo no cambian.
+  // Minorista MCBA (lista a clientes) filtra por ESTADO, no por precio: oculta SOLO el "sin stock
+  // puro" (sin_stock y NO bajo pedido). Todo lo demás aparece — disponible (con precio), bajo pedido
+  // 48hs (asterisco), consignación sin precio ("Consultar"). Aislado a este tipo; los otros 3 no cambian.
   const esMinMcba = tipo === 'minorista_mcba';
 
   let rows = '';
@@ -259,14 +259,16 @@ router.get("/pricing/pdf/:tipo", async (req, res) => {
   let hayBajoPedido = false;
   prods.forEach(function(p) {
     const prec = precMap[p.id];
-    const consigMcba = esMinMcba && p.consignacion === 1;   // consignación en Min MCBA: siempre visible
-    // Mostrar si está disponible para este cliente, O si es "bajo pedido 48hs" (3) con precio
-    // cargado, O (solo Min MCBA) si es consignación aunque no tenga precio. Los sin_stock comunes
-    // (sin flag ni consignación) siguen ocultos.
-    if (!prec && !consigMcba) return;
-    const mostrar = (prec && prec.disponible_text === 'disponible')
-      || (prec && p.disponible_general === 3 && Number(prec.precio) > 0)
-      || consigMcba;
+    let mostrar;
+    if (esMinMcba) {
+      // Sin fila de precio para este cliente = sin_stock. "Sin stock gana" (incluso sobre consignación):
+      // un producto sin_stock que no es bajo pedido se oculta aunque sea consignación.
+      const dispText = prec ? prec.disponible_text : 'sin_stock';
+      mostrar = !(dispText === 'sin_stock' && p.disponible_general !== 3);
+    } else {
+      if (!prec) return;
+      mostrar = prec.disponible_text === 'disponible' || (p.disponible_general === 3 && Number(prec.precio) > 0);
+    }
     if (!mostrar) return;
     if (p.categoria !== catActual) {
       catActual = p.categoria;
