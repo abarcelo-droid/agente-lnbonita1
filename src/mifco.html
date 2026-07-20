@@ -284,11 +284,19 @@ body{padding-bottom:env(safe-area-inset-bottom)}
   <div class="alert info">
     📸 Sacale foto al remito ANTES de despacharlo. La IA prelee los datos.
   </div>
-  <input id="inp-foto-despacho" type="file" accept="image/*" style="display:none" onchange="onFotoDespacho(event)">
-  <button class="cam-btn" onclick="document.getElementById('inp-foto-despacho').click()">
+  <!-- Dos accesos que alimentan el MISMO handler (onFotoDespacho): cámara con capture="environment"
+       (abre la trasera directo, arregla que en Android "Tomar foto" fuera a galería) y galería sin capture. -->
+  <input id="inp-foto-despacho-cam" type="file" accept="image/*" capture="environment" style="display:none" onchange="onFotoDespacho(event)">
+  <input id="inp-foto-despacho-gal" type="file" accept="image/*" style="display:none" onchange="onFotoDespacho(event)">
+  <button class="cam-btn" onclick="document.getElementById('inp-foto-despacho-cam').click()">
     <div class="ico">📷</div>
     <div>Tomar foto</div>
-    <div class="sub">o seleccionar de la galería</div>
+    <div class="sub">Abre la cámara</div>
+  </button>
+  <button class="cam-btn" style="margin-top:10px" onclick="document.getElementById('inp-foto-despacho-gal').click()">
+    <div class="ico">🖼️</div>
+    <div>Elegir de galería</div>
+    <div class="sub">Fotos o archivos del teléfono</div>
   </button>
 </div>
 
@@ -681,7 +689,8 @@ function resetState() {
   S.matchData = null;
   S.ocrData = null;
   $('inp-foto-sellado').value = '';
-  $('inp-foto-despacho').value = '';
+  const _dc = $('inp-foto-despacho-cam'); if (_dc) _dc.value = '';
+  const _dg = $('inp-foto-despacho-gal'); if (_dg) _dg.value = '';
 }
 
 function logout() {
@@ -1086,14 +1095,18 @@ async function enviarStockReal() {
 }
 
 async function onFotoDespacho(ev) {
-  let file = ev.target.files && ev.target.files[0];
+  const input = ev.target;
+  let file = input.files && input.files[0];
   if (!file) return;
   $('loading-sub').textContent = 'Optimizando foto…';
-  showView('view-loading', { title:'Procesando…' });
-  file = await _comprimirImagen(file);
-  S.fotoFile = file;
-  $('loading-sub').textContent = 'Leyendo los datos del remito…';
+  // push:false → la pantalla "Procesando" NO queda en el historial: al volver atrás no se puede
+  // caer en el spinner sin proceso corriendo ("trabado en procesando").
+  showView('view-loading', { title:'Procesando…', push:false });
   try {
+    // La compresión va DENTRO del try: si fallara, cae al catch y no deja la app colgada en loading.
+    file = await _comprimirImagen(file);
+    S.fotoFile = file;
+    $('loading-sub').textContent = 'Leyendo los datos del remito…';
     const fd = new FormData();
     fd.append('foto', file);
     fd.append('tipo', 'despacho');
@@ -1117,6 +1130,10 @@ async function onFotoDespacho(ev) {
     showView('view-confirmar-despacho', { title:'Confirmar despacho' });
   } catch(e) {
     showError('Error de conexión', e.message, '⚠️');
+  } finally {
+    // SIEMPRE limpiar el input usado (éxito, error o timeout): así el próximo remito —aunque sea
+    // la misma foto— vuelve a disparar el change y no queda un archivo del remito anterior pegado.
+    input.value = '';
   }
 }
 
