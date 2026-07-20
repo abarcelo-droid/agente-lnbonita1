@@ -249,24 +249,37 @@ router.get("/pricing/pdf/:tipo", async (req, res) => {
   // siguen mostrando consignación y sin marca.
   const badgeOpts = ['mayorista_a', 'minorista_mcba'].includes(tipo) ? { consignacion: false, marca: true } : {};
 
+  // Minorista MCBA (lista a clientes): además de lo disponible, incluye los productos en
+  // CONSIGNACIÓN aunque no tengan precio cargado, mostrando "Consultar" (espeja al Piso, que ya
+  // los lista con "(cons.)"). Aislado a este tipo; los otros 3 por-tipo no cambian.
+  const esMinMcba = tipo === 'minorista_mcba';
+
   let rows = '';
   let catActual = '';
   let hayBajoPedido = false;
   prods.forEach(function(p) {
     const prec = precMap[p.id];
+    const consigMcba = esMinMcba && p.consignacion === 1;   // consignación en Min MCBA: siempre visible
     // Mostrar si está disponible para este cliente, O si es "bajo pedido 48hs" (3) con precio
-    // cargado: el producto está sin stock ahora pero se puede pedir (llega en 48hs), así que sale
-    // con su precio + etiqueta. Los sin_stock comunes (sin el flag) siguen ocultos.
-    if (!prec) return;
-    const mostrar = prec.disponible_text === 'disponible' || (p.disponible_general === 3 && Number(prec.precio) > 0);
+    // cargado, O (solo Min MCBA) si es consignación aunque no tenga precio. Los sin_stock comunes
+    // (sin flag ni consignación) siguen ocultos.
+    if (!prec && !consigMcba) return;
+    const mostrar = (prec && prec.disponible_text === 'disponible')
+      || (prec && p.disponible_general === 3 && Number(prec.precio) > 0)
+      || consigMcba;
     if (!mostrar) return;
     if (p.categoria !== catActual) {
       catActual = p.categoria;
       rows += catRow(catActual, 5);
     }
     if (p.disponible_general === 3) hayBajoPedido = true;
+    // Precio: monto si hay; en Min MCBA sin precio → "Consultar" (los otros tipos no llegan acá sin precio).
+    const precioNum = prec ? Number(prec.precio || 0) : 0;
+    const precioCell = precioNum > 0
+      ? '<td class="num">$' + precioNum.toLocaleString('es-AR') + '</td>'
+      : (esMinMcba ? '<td class="num" style="color:#7a6055;font-weight:600">Consultar</td>' : '<td class="num">$0</td>');
     // Marca protagonista ANTES del nombre (clientes); origen y presentación en columnas separadas.
-    rows += '<tr><td style="font-weight:700">' + marcaPrefix(p, badgeOpts) + p.nombre + badgesHtml(p, badgeOpts) + '</td><td style="color:#7a6055">' + (p.descripcion||'') + '</td><td style="color:#7a6055">' + (p.origen||'-') + '</td><td style="color:#7a6055;white-space:nowrap">' + (presentacionText(p.kilaje) || '-') + '</td><td class="num">$' + Number(prec.precio||0).toLocaleString('es-AR') + '</td></tr>';
+    rows += '<tr><td style="font-weight:700">' + marcaPrefix(p, badgeOpts) + p.nombre + badgesHtml(p, badgeOpts) + '</td><td style="color:#7a6055">' + (p.descripcion||'') + '</td><td style="color:#7a6055">' + (p.origen||'-') + '</td><td style="color:#7a6055;white-space:nowrap">' + (presentacionText(p.kilaje) || '-') + '</td>' + precioCell + '</tr>';
   });
 
   // Mismo formato institucional que el Piso (helper): logo LNB + header + paleta + leyenda
