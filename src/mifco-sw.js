@@ -5,7 +5,7 @@
 // IMPORTANTE: este SW NO cachea el HTML/JS de la app. Eso evita el bug de
 // "los operadores siguen viendo la versión vieja después del deploy".
 
-const CACHE_NAME = 'lnb-mifco-v4';
+const CACHE_NAME = 'lnb-mifco-v5';
 
 // Recursos que SÍ cacheamos como fallback offline (no HTML del app):
 const STATIC_FALLBACKS = [
