@@ -42,6 +42,30 @@ const UNIDADES_CONTABLES = new Set([
 ]);
 const esContable = (u) => UNIDADES_CONTABLES.has(String(u || '').trim().toLowerCase());
 
+// Aritmética de fechas en UTC a propósito: sumar/restar días sobre la hora local
+// se corre un día cuando cambia el horario de verano.
+export function restarDias(fechaISO, dias) {
+  const s = String(fechaISO || '');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return null;
+  const p = s.split('-').map(Number);
+  const dt = new Date(Date.UTC(p[0], p[1] - 1, p[2]) - (Number(dias) || 0) * 86400000);
+  const dd = (n) => String(n).padStart(2, '0');
+  return `${dt.getUTCFullYear()}-${dd(dt.getUTCMonth() + 1)}-${dd(dt.getUTCDate())}`;
+}
+
+// Lunes de la semana ISO que contiene la fecha. Los baldes de tiempo son semanas
+// y se identifican por su lunes, así que cualquier fecha que cargue el usuario se
+// normaliza acá y dos fechas de la misma semana caen en el mismo balde.
+export function lunesDe(fechaISO) {
+  const s = String(fechaISO || '');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return null;
+  const p = s.split('-').map(Number);
+  const t = Date.UTC(p[0], p[1] - 1, p[2]);
+  const dow = new Date(t).getUTCDay();          // 0 = domingo
+  const corr = (dow === 0 ? 6 : dow - 1);       // días desde el lunes
+  return restarDias(s, corr);
+}
+
 // Formato es-AR para los textos de fórmula que lee el usuario.
 function fmtNum(n, dec = 4) {
   const v = Number(n) || 0;
@@ -73,7 +97,11 @@ function fmtFormula(q, unidadProd, linea, aporte, unidadUso) {
  *   recetas     Map(producto_id -> [linea, ...])   ya filtradas por versión vigente
  *   insumos     Map(insumo_id -> insumo)
  *   existencias Map(insumo_id -> cantidad en unidad de uso)
+ *   comprado    Map(insumo_id -> bultos ya comprados, en unidad de compra)
  * @returns {{lineas, cobertura, totales_por_moneda, advertencias}}
+ *
+ * Cada línea trae además `buckets[]`: el detalle por semana de cosecha con la
+ * fecha límite de pedido (semana − lead time) y el arrastre de sobrante.
  */
 export function calcularPlan(ctx) {
   const productos   = ctx.productos || [];
@@ -81,6 +109,9 @@ export function calcularPlan(ctx) {
   const recetas     = ctx.recetas || new Map();
   const insumos     = ctx.insumos || new Map();
   const existencias = ctx.existencias || new Map();
+  // Lo ya comprado por insumo, en UNIDAD DE COMPRA. Cubre necesidad igual que la
+  // existencia, y se aplica a las semanas más tempranas primero.
+  const comprado    = ctx.comprado || new Map();
 
   const porId    = new Map(productos.map(p => [p.id, p]));
   const porPadre = new Map();
@@ -148,7 +179,7 @@ export function calcularPlan(ctx) {
 
   // ── Paso 1 y 2 — recorrido del árbol y aplicación de recetas ────────────
 
-  function aplicarReceta(nodo, q, ruta) {
+  function aplicarReceta(nodo, q, ruta, bucket) {
     const lineas = recetas.get(nodo.id) || [];
     if (!lineas.length) {
       cobertura.nodos_sin_receta.push({ id: nodo.id, ruta: ruta.slice(), nombre: nodo.nombre });
@@ -203,12 +234,17 @@ export function calcularPlan(ctx) {
       const mn  = q * cMin / porCada / divMerma;
       const mx  = q * cMax / porCada / divMerma;
 
-      const a = acc.get(l.insumo_id) || { bruta: 0, min: 0, max: 0 };
+      // Acumulación por insumo Y por balde de tiempo. El balde es la semana de
+      // cosecha ('' = plan sin fechas, que es como quedan los planes viejos).
+      if (!acc.has(l.insumo_id)) acc.set(l.insumo_id, new Map());
+      const porBucket = acc.get(l.insumo_id);
+      const a = porBucket.get(bucket) || { bruta: 0, min: 0, max: 0 };
       a.bruta += nom; a.min += mn; a.max += mx;        // acumulación EXACTA
-      acc.set(l.insumo_id, a);
+      porBucket.set(bucket, a);
 
       desg.push({
         insumo_id: l.insumo_id,
+        bucket_ini: bucket,
         ruta: ruta.slice(),
         producto_id: nodo.id,
         cantidad_producto: q,
@@ -234,7 +270,7 @@ export function calcularPlan(ctx) {
     }
   }
 
-  function explotar(nodo, q, ruta, pila) {
+  function explotar(nodo, q, ruta, pila, bucket) {
     if (pila.length > MAX_DEPTH) {
       const e = new Error(`Árbol demasiado profundo (>${MAX_DEPTH} niveles) en "${nodo.nombre}"`);
       e.status = 400; throw e;
@@ -270,7 +306,7 @@ export function calcularPlan(ctx) {
     else qRet = qEf;                                                 // 'adicional': el padre no se reduce
 
     if (qRet > EPS) {
-      aplicarReceta(nodo, qRet, ruta);
+      aplicarReceta(nodo, qRet, ruta, bucket);
     } else if (hijos.length && (recetas.get(nodo.id) || []).length) {
       // Padre 'particiona' con 100% repartido: su receta existe pero no computa.
       // Reportarlo convierte un error silencioso en un aviso visible.
@@ -282,7 +318,7 @@ export function calcularPlan(ctx) {
     }
 
     for (const h of hijos) {
-      explotar(h, qEf * num(h.share_pct) / 100, [...ruta, h.nombre], [...pila, nodo.id]);
+      explotar(h, qEf * num(h.share_pct) / 100, [...ruta, h.nombre], [...pila, nodo.id], bucket);
     }
   }
 
@@ -313,7 +349,7 @@ export function calcularPlan(ctx) {
       cobertura.objetivos_en_cero.push({ id: nodo.id, nombre: nodo.nombre });
       continue;
     }
-    explotar(nodo, q, [nodo.nombre], []);
+    explotar(nodo, q, [nodo.nombre], [], String(o.bucket_ini || ''));
   }
 
   // Productos raíz sin objetivo cargado
@@ -334,44 +370,17 @@ export function calcularPlan(ctx) {
   const lineas = [];
   const totales_por_moneda = {};
 
-  for (const [insumoId, a] of acc) {
-    const ins = insumos.get(insumoId);
-    if (!ins) continue;
-
-    // Paso 4 — netting contra existencia declarada (en unidad de USO)
-    const declarada = num(existencias.get(insumoId));
-    const existencia = Math.min(declarada, a.bruta);
-    if (declarada > a.bruta + EPS) {
-      // El clamp absorbía en silencio un tipeo de 120.000 por 12.000 y la fila
-      // mostraba "a comprar 0" como si fuera correcto.
-      cobertura.existencia_supera_necesidad.push({
-        insumo_id: insumoId, insumo: ins.nombre,
-        declarada, necesidad: a.bruta, unidad_uso: ins.unidad_uso
-      });
-    }
-    const neta = Math.max(0, a.bruta - existencia);
-    const netaMin = Math.max(0, a.min - existencia);
-    const netaMax = Math.max(0, a.max - existencia);
-
-    // Paso 5 — conversión a unidad de compra
-    const factor = num(ins.factor_compra, 1) || 1;
-    const bultosTeoricos = neta / factor;
-
-    // Paso 6 — lot sizing. ÚNICO redondeo del motor.
-    // ceil y no round: comprar de menos frena la línea en plena temporada;
-    // comprar de más es capital inmovilizado. En packing gana ceil.
-    const multiplo = num(ins.multiplo_compra);
-    const moq = num(ins.moq);
-    let b = bultosTeoricos;
+  // Lot sizing de un tramo: múltiplo y después mínimo del proveedor.
+  function lotear(bultosNecesarios, multiplo, moq) {
+    let b = bultosNecesarios;
     let excesoMultiplo = 0, excesoMoq = 0, moqForzado = 0;
-
     if (b > 0 && b < UMBRAL_MATERIAL) {
       // Necesidad despreciable (residuo de reparto o ruido de float): no dispara
       // la orden mínima completa del proveedor.
       b = 0;
-    } else {
+    } else if (b > 0) {
       if (multiplo > 0) b = ceilTol(b, multiplo);
-      excesoMultiplo = b - bultosTeoricos;
+      excesoMultiplo = b - bultosNecesarios;
       if (b > 0 && b < moq) {
         const antes = b;
         b = moq;
@@ -379,14 +388,111 @@ export function calcularPlan(ctx) {
         excesoMoq = b - antes;
         moqForzado = 1;
       }
+    } else {
+      b = 0;
     }
-    const excesoTotal = b - bultosTeoricos;
+    return { b, excesoMultiplo, excesoMoq, moqForzado };
+  }
+
+  for (const [insumoId, porBucket] of acc) {
+    const ins = insumos.get(insumoId);
+    if (!ins) continue;
+
+    const factor = num(ins.factor_compra, 1) || 1;
+    const multiplo = num(ins.multiplo_compra);
+    const moq = num(ins.moq);
+    const leadTime = Math.max(0, num(ins.lead_time_dias));
+
+    // Baldes en orden cronológico. '' (plan sin fechas) ordena primero, así que
+    // un plan viejo sin semanas se comporta exactamente como antes.
+    const buckets = Array.from(porBucket.keys()).sort();
+    const brutaTotal = buckets.reduce((s, k) => s + porBucket.get(k).bruta, 0);
+    const minTotal   = buckets.reduce((s, k) => s + porBucket.get(k).min, 0);
+    const maxTotal   = buckets.reduce((s, k) => s + porBucket.get(k).max, 0);
+
+    // Paso 4 — netting contra existencia declarada (en unidad de USO)
+    const declarada = num(existencias.get(insumoId));
+    const existencia = Math.min(declarada, brutaTotal);
+    if (declarada > brutaTotal + EPS) {
+      // El clamp absorbía en silencio un tipeo de 120.000 por 12.000 y la fila
+      // mostraba "a comprar 0" como si fuera correcto.
+      cobertura.existencia_supera_necesidad.push({
+        insumo_id: insumoId, insumo: ins.nombre,
+        declarada, necesidad: brutaTotal, unidad_uso: ins.unidad_uso
+      });
+    }
+
+    // Lo ya comprado también cubre necesidad, y se aplica a las semanas más
+    // tempranas primero (lo que compraste sirve para la cosecha que viene).
+    const compradoBultos = num(comprado.get(insumoId));
+
+    // Paso 5 y 6 — por balde, CON ARRASTRE DEL REMANENTE.
+    //
+    // Redondear cada semana por su cuenta infla la compra siempre hacia arriba:
+    // 4 semanas de 82,5 millares dan 83×4 = 332 en vez de 330. El sobrante de
+    // cada pedido se arrastra a la semana siguiente, así el total termina igual
+    // que redondeando una sola vez, pero comprando semana a semana.
+    let existRest = existencia;           // en unidad de uso
+    let cubiertoRest = compradoBultos;    // en unidad de compra
+    let sobrante = 0;                     // en unidad de compra
+    let totalComprar = 0, totalExcMult = 0, totalExcMoq = 0, moqForzadoAlguno = 0;
+    const detalleBuckets = [];
+
+    for (const k of buckets) {
+      const brutaB = porBucket.get(k).bruta;
+      const usaExist = Math.min(existRest, brutaB);
+      existRest -= usaExist;
+      const netaB = Math.max(0, brutaB - usaExist);
+      const teoricosB = netaB / factor;
+
+      // Lo ya pedido cubre primero las semanas más tempranas.
+      const usaComprado = Math.min(cubiertoRest, teoricosB);
+      cubiertoRest -= usaComprado;
+      const pendienteB = teoricosB - usaComprado;
+
+      // El sobrante de pedidos anteriores cubre parte de esta semana.
+      const necesarioB = pendienteB - sobrante;
+      let r = { b: 0, excesoMultiplo: 0, excesoMoq: 0, moqForzado: 0 };
+      if (necesarioB > EPS) {
+        r = lotear(necesarioB, multiplo, moq);
+        sobrante = sobrante + r.b - pendienteB;
+      } else {
+        sobrante = sobrante - pendienteB;   // alcanza con el sobrante
+      }
+      if (sobrante < 0) sobrante = 0;       // guarda contra ruido de float
+
+      totalComprar += r.b;
+      totalExcMult += r.excesoMultiplo;
+      totalExcMoq  += r.excesoMoq;
+      if (r.moqForzado) moqForzadoAlguno = 1;
+
+      detalleBuckets.push({
+        bucket_ini: k,
+        cant_bruta_uso: brutaB,
+        existencia_aplicada: usaExist,
+        cant_neta_uso: netaB,
+        bultos_teoricos: teoricosB,
+        ya_comprado: usaComprado,
+        bultos_a_comprar: r.b,
+        sobrante_arrastrado: sobrante,
+        // Fechas: el insumo tiene que ESTAR el primer día de la semana de cosecha,
+        // así que la fecha límite de pedido es esa fecha menos el lead time.
+        fecha_necesidad: k || null,
+        fecha_pedido_limite: k ? restarDias(k, leadTime) : null,
+        lead_time_dias: leadTime
+      });
+    }
+
+    const netaTotal = Math.max(0, brutaTotal - existencia);
+    const teoricosTotal = netaTotal / factor;
+    const netaMin = Math.max(0, minTotal - existencia);
+    const netaMax = Math.max(0, maxTotal - existencia);
 
     // Paso 7 — costo. Nunca se suman monedas distintas con un TC implícito.
     const precio = num(ins.precio_ref);
     const sinPrecio = precio <= 0 ? 1 : 0;
     const moneda = ins.moneda || 'ARS';
-    const costo = b * precio;
+    const costo = totalComprar * precio;
     if (sinPrecio) {
       cobertura.insumos_sin_precio.push({ insumo_id: insumoId, insumo: ins.nombre });
     } else {
@@ -403,23 +509,27 @@ export function calcularPlan(ctx) {
       factor_compra: factor,
       multiplo_compra: multiplo,
       moq,
-      cant_bruta_uso: a.bruta,
+      lead_time_dias: leadTime,
+      cant_bruta_uso: brutaTotal,
       cant_min_uso: netaMin,
       cant_max_uso: netaMax,
       existencia,
       existencia_declarada: declarada,
-      cant_neta_uso: neta,
-      bultos_teoricos: bultosTeoricos,
-      bultos_a_comprar: b,
-      exceso_multiplo: excesoMultiplo,
-      exceso_moq: excesoMoq,
-      exceso_uso: excesoTotal * factor,
-      moq_forzado: moqForzado,
+      cant_neta_uso: netaTotal,
+      bultos_teoricos: teoricosTotal,
+      bultos_a_comprar: totalComprar,
+      ya_comprado_bultos: compradoBultos,
+      pendiente_bultos: Math.max(0, totalComprar),
+      exceso_multiplo: totalExcMult,
+      exceso_moq: totalExcMoq,
+      exceso_uso: (totalComprar + compradoBultos - teoricosTotal) * factor,
+      moq_forzado: moqForzadoAlguno,
       precio_unit_snapshot: precio,
       moneda_snapshot: moneda,
       precio_fecha_snapshot: ins.precio_fecha || null,
       costo_estimado: costo,
       sin_precio: sinPrecio,
+      buckets: detalleBuckets,
       desglose: desgPorInsumo.get(insumoId) || []
     });
   }
