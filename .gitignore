@@ -17,3 +17,6 @@ migracion/*.sql
 migracion/*.json
 migracion/reporte-*.txt
 migracion/ 
+
+# Configuracion local de Claude Code, no commitear
+.claude/
