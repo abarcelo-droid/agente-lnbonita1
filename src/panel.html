@@ -15991,31 +15991,6 @@ function admModCargarCuentas(cb) {
     .catch(function(){ cb(); });
 }
 
-// Opciones de cuenta para el modelo, con buscador y bloqueo de no imputables.
-// Las no imputables aparecen deshabilitadas con la leyenda "NO IMPUTABLE".
-function admModCuentaOptions(query, selectedId) {
-  query = (query || '').toLowerCase().trim();
-  var html = '<option value="">— Seleccioná cuenta —</option>';
-  ADM_MOD_CUENTAS.forEach(function(c) {
-    var txt = (c.codigo ? '[' + c.codigo + '] ' : '') + c.nombre;
-    if (query && txt.toLowerCase().indexOf(query) === -1) return;
-    if (c.imputable === 0) {
-      html += '<option value="" disabled style="color:#9ca3af">' + txt + ' — 🔒 NO IMPUTABLE</option>';
-    } else {
-      html += '<option value="' + c.id + '"' + (c.id == selectedId ? ' selected' : '') + '>' + txt + '</option>';
-    }
-  });
-  return html;
-}
-
-// Filtra el select hermano al tipear en el buscador de una línea del modelo
-function admModFiltrarCuentas(input) {
-  var tr = input.closest('tr');
-  var sel = tr.querySelector('.adm-mod-cuenta');
-  var actual = sel.value;
-  sel.innerHTML = admModCuentaOptions(input.value, actual);
-}
-
 function admModCargar() {
   admModApi('/modelos').then(function(r) {
     var data = r.data || [];
