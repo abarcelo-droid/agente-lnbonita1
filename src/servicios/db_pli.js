@@ -281,6 +281,33 @@ db.exec(`
     ON pli_plan_resultado(plan_id, insumo_id, bucket_ini);
   CREATE INDEX IF NOT EXISTS idx_pli_res_plan ON pli_plan_resultado(plan_id);
 
+  -- Seguimiento de compras: lo que ya se pidió contra lo que el plan requiere.
+  -- La cantidad va en UNIDAD DE COMPRA (la misma en la que el plan dice "a
+  -- comprar"), porque es la unidad en la que se pide y se factura.
+  -- Cubre necesidad igual que la existencia, aplicándose a las semanas más
+  -- tempranas primero: lo que ya compraste sirve para la cosecha que viene.
+  CREATE TABLE IF NOT EXISTS pli_compras (
+    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    plan_id            INTEGER NOT NULL REFERENCES pli_planes(id),
+    insumo_id          INTEGER NOT NULL REFERENCES pli_insumos(id),
+    fecha              TEXT    NOT NULL,                  -- YYYY-MM-DD del pedido
+    cantidad           REAL    NOT NULL CHECK(cantidad > 0),  -- en unidad de compra
+    proveedor_texto    TEXT,
+    nro_orden          TEXT,
+    estado             TEXT    NOT NULL DEFAULT 'pedido'
+                               CHECK(estado IN ('pedido','recibido','cancelado')),
+    fecha_entrega      TEXT,                              -- RESERVADO v1: entrega comprometida
+    notas              TEXT,
+    creado_en          TEXT DEFAULT (datetime('now','localtime')),
+    creado_por_id      INTEGER,
+    actualizado_en     TEXT DEFAULT (datetime('now','localtime')),
+    actualizado_por_id INTEGER,
+    eliminado_en       TEXT,
+    eliminado_por_id   INTEGER
+  );
+  CREATE INDEX IF NOT EXISTS idx_pli_comp_plan   ON pli_compras(plan_id, insumo_id);
+  CREATE INDEX IF NOT EXISTS idx_pli_comp_fecha  ON pli_compras(fecha);
+
   -- Auditoría (molde pa_cuentas_log). El historial no se puede reconstruir
   -- retroactivamente: escribirlo es de la beta, la pantalla que lo muestra no.
   CREATE TABLE IF NOT EXISTS pli_log (
