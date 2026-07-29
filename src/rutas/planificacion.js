@@ -540,6 +540,18 @@ router.patch('/productos/:id', wrap((req, res) => {
     throw bad('El modo de reparto tiene que ser "particiona" o "adicional"');
   const activo = b.activo === undefined ? a.activo : (b.activo ? 1 : 0);
 
+  // Nombre repetido en el mismo nivel: sin esto choca contra idx_pli_prod_nombre
+  // y sale un 500 con el mensaje de SQLite en inglés (el PATCH de insumos ya
+  // devolvía 409; era una asimetría dentro del mismo archivo).
+  if (String(nombre).toLowerCase() !== String(a.nombre).toLowerCase()) {
+    const dup = db.prepare(`
+      SELECT id FROM pli_productos
+      WHERE sociedad_id=? AND temporada_id=? AND IFNULL(padre_id,0)=? AND nombre=? COLLATE NOCASE
+        AND eliminado_en IS NULL AND id<>?
+    `).get(soc, a.temporada_id, a.padre_id || 0, nombre, id);
+    if (dup) throw conflict(`Ya existe "${nombre}" en el mismo nivel`);
+  }
+
   // La unidad de un hijo la manda el padre; la de una raíz se puede editar.
   let unidad = a.unidad;
   if (!a.padre_id && b.unidad !== undefined) unidad = vTexto(b.unidad, 'La unidad', { req: true, max: 30 });
@@ -585,8 +597,26 @@ router.delete('/productos/:id', wrap((req, res) => {
     WHERE o.producto_id=? AND p.estado='confirmado' AND p.eliminado_en IS NULL
   `).get(id).n;
   if (enConfirmados) throw conflict(`"${a.nombre}" es objetivo de ${enConfirmados} plan(es) confirmado(s).`);
-  db.prepare(`UPDATE pli_productos SET eliminado_en=${AHORA}, eliminado_por_id=?, activo=0 WHERE id=?`).run(req.user.id, id);
-  logPli('producto', id, 'baja', { nombre: a.nombre }, req.user.id);
+
+  // Los planes confirmados ya quedaron bloqueados arriba. En los borradores la
+  // fila de pli_plan_objetivos quedaba huérfana (el soft delete no dispara FK):
+  // el motor la ignoraba y el plan compraba de menos. Se purga en la misma
+  // transacción y queda registrada en el log con las cantidades descartadas.
+  const huerfanos = db.prepare(`
+    SELECT o.plan_id, o.cantidad FROM pli_plan_objetivos o
+    JOIN pli_planes p ON p.id = o.plan_id
+    WHERE o.producto_id=? AND p.sociedad_id=? AND p.estado<>'confirmado' AND p.eliminado_en IS NULL
+  `).all(id, soc);
+  db.transaction(() => {
+    db.prepare(`
+      DELETE FROM pli_plan_objetivos
+      WHERE producto_id=? AND plan_id IN (
+        SELECT id FROM pli_planes WHERE sociedad_id=? AND estado<>'confirmado' AND eliminado_en IS NULL
+      )
+    `).run(id, soc);
+    db.prepare(`UPDATE pli_productos SET eliminado_en=${AHORA}, eliminado_por_id=?, activo=0 WHERE id=?`).run(req.user.id, id);
+  })();
+  logPli('producto', id, 'baja', { nombre: a.nombre, objetivos_purgados: huerfanos }, req.user.id);
   res.json({ ok: true });
 }));
 
@@ -815,6 +845,10 @@ router.put('/planes/:id/objetivos', wrap((req, res) => {
         SELECT * FROM pli_productos WHERE id=? AND sociedad_id=? AND temporada_id=? AND eliminado_en IS NULL
       `).get(pid, soc, plan.temporada_id);
       if (!prod) throw bad('Hay un objetivo que apunta a un producto de otra temporada o inexistente');
+      // Mismo producto dos veces: choca contra idx_pli_obj_unico y saldría un 500
+      // con el texto crudo de SQLite, perdiendo el guardado entero.
+      if (ids.some(function (x) { return x.id === pid; }))
+        throw bad(`"${prod.nombre}" está dos veces en los objetivos`);
       // Padre e hijo a la vez se contarían dos veces, sin ningún error visible.
       for (const otro of ids) {
         const dsc = descendientes(otro.id);
@@ -1042,10 +1076,23 @@ router.get('/planes/:id/export.xlsx', wrap((req, res) => {
     ? `CONFIRMADO el ${plan.confirmado_en || ''}`
     : 'BORRADOR — NO CONFIRMADO — los números pueden cambiar';
 
+  // Mismo orden que la tabla del panel: el archivo se usa para salir a comprar,
+  // así que tiene que poder agruparse por proveedor igual que la pantalla.
+  const orden = ['insumo', 'costo', 'proveedor', 'categoria'].includes(req.query.orden)
+    ? req.query.orden : 'insumo';
+  const cmpNombre = (a, b) => String(a.insumo_nombre).localeCompare(String(b.insumo_nombre), 'es');
+  const claveGrupo = (l) => orden === 'categoria'
+    ? (l.categoria || 'Sin categoria')
+    : (l.proveedor_texto || 'Sin proveedor asignado');
+  if (orden === 'costo') r.lineas.sort((a, b) => (b.costo_estimado - a.costo_estimado) || cmpNombre(a, b));
+  else if (orden === 'insumo') r.lineas.sort(cmpNombre);
+  else r.lineas.sort((a, b) => String(claveGrupo(a)).localeCompare(String(claveGrupo(b)), 'es') || cmpNombre(a, b));
+
   const compras = [
     { A: `PLAN: ${plan.nombre}` },
     { A: `ESTADO: ${estadoTxt}` },
     { A: `Generado por: ${req.user.nombre || req.user.id}` },
+    { A: `Ordenado por: ${orden}` },
     {},
     {
       A: 'Insumo', B: 'Categoria', C: 'Proveedor', D: 'Necesidad bruta (uso)', E: 'Unidad uso',
