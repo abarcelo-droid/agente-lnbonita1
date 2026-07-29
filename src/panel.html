@@ -211,6 +211,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     <div class="ni" data-sec="pa-ordenes"><span class="dot de"></span>Órdenes de Aplicación</div>
     <div class="ni" data-sec="pa-combustible"><span class="dot da"></span>⛽ Combustible</div>
     <div class="ni" data-sec="pa-panol"><span class="dot dd"></span>🔧 Pañol</div>
+    <div class="ni" data-sec="pli-planificacion"><span class="dot dc"></span>📦 Planificación Insumos</div>
   </div>
 
   <div class="ni-grp" data-grp="pa-admin">Administración<span class="ni-caret">▾</span></div>
@@ -10835,6 +10836,251 @@ function sgRepExport(){
   </div>
 </div></div>
 
+<!-- ══════════════════════════════════════════════════════════════════════
+     PLANIFICACIÓN INSUMOS (módulo pli — independiente del resto)
+     Todo lo de este módulo usa prefijo pli / PLI y NO toca el namespace PA.
+     ══════════════════════════════════════════════════════════════════════ -->
+<div class="sec" id="sec-pli-planificacion">
+  <div class="ph">
+    <div>
+      <div class="ph-t">📦 Planificación de Insumos</div>
+      <div class="ph-s">Cuánto material de empaque comprar según el plan de producción</div>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center">
+      <select id="pli-temporada" onchange="pliCambiarTemporada()" style="min-width:170px"></select>
+      <button class="btn bo bs" onclick="pliNuevaTemporada()" style="font-size:11px">+ Temporada</button>
+    </div>
+  </div>
+
+  <style>
+    .pli-tab { padding:10px 16px; cursor:pointer; border-bottom:2px solid transparent; color:var(--mut); font-weight:600 }
+    .pli-tab.on { color: var(--burg); border-bottom-color: var(--burg) }
+    .pli-pane { display:none }
+    .pli-pane.on { display:block }
+    .pli-arbol-nodo { padding:8px 10px; border:1px solid var(--bor); border-radius:8px; margin-bottom:6px; background:var(--sur) }
+    .pli-arbol-hijo { margin-left:26px }
+    .pli-badge { display:inline-block; padding:2px 8px; border-radius:10px; font-size:11px; font-weight:600 }
+    .pli-ok   { background:#dcfce7; color:#166534 }
+    .pli-warn { background:#fef3c7; color:#92400e }
+    .pli-err  { background:#fee2e2; color:#991b1b }
+    .pli-gris { background:#f1f5f9; color:#64748b }
+    .pli-fila-sin-receta td { color:#94a3b8; font-style:italic }
+    .pli-desglose { background:var(--bg2,#f8fafc); font-family:ui-monospace,Consolas,monospace; font-size:11px; white-space:pre-wrap; padding:10px 14px; line-height:1.6 }
+    .pli-num { text-align:right; font-family:ui-monospace,Consolas,monospace }
+    .pli-cel-chica { font-size:11px; color:var(--mut) }
+  </style>
+
+  <div style="display:flex;border-bottom:1px solid var(--bor);margin-bottom:14px">
+    <div class="pli-tab on" data-pli="insumos"   onclick="pliTab('insumos')">🧱 Insumos</div>
+    <div class="pli-tab"    data-pli="productos" onclick="pliTab('productos')">🍈 Productos y recetas</div>
+    <div class="pli-tab"    data-pli="planes"    onclick="pliTab('planes')">📊 Planes</div>
+  </div>
+
+  <!-- ── SOLAPA INSUMOS ─────────────────────────────────────────────── -->
+  <div class="pli-pane on" id="pli-pane-insumos">
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px;align-items:center">
+      <input id="pli-ins-q" placeholder="🔍 Buscar insumo..." style="flex:1;min-width:200px" oninput="pliInsRender()">
+      <select id="pli-ins-cat" onchange="pliInsRender()" style="min-width:150px"><option value="">Todas las categorías</option></select>
+      <label style="display:flex;align-items:center;gap:5px;font-size:12px;color:var(--mut)">
+        <input type="checkbox" id="pli-ins-inact" onchange="pliInsCargar()"> ver inactivos
+      </label>
+      <button class="btn bo bs" onclick="pliPegarAbrir()" style="font-size:11px">📋 Pegar desde Excel</button>
+      <button class="btn bb" onclick="pliInsAbrir(null)">+ Insumo</button>
+    </div>
+    <div class="ab-table-wrap">
+      <table class="pa-tbl" style="font-size:12px">
+        <thead><tr>
+          <th>Insumo</th><th>Categoría</th><th>Proveedor</th>
+          <th>Unidad de uso</th><th>Se compra por</th><th>Equivalencia</th>
+          <th style="text-align:right">Múltiplo</th><th style="text-align:right">Mínimo</th>
+          <th style="text-align:right">Precio</th><th style="width:80px"></th>
+        </tr></thead>
+        <tbody id="pli-ins-tbody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ── SOLAPA PRODUCTOS Y RECETAS ─────────────────────────────────── -->
+  <div class="pli-pane" id="pli-pane-productos">
+    <div style="display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap">
+      <div style="flex:1;min-width:320px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+          <div style="font-size:12px;font-weight:600">Productos de la temporada</div>
+          <button class="btn bo bs" onclick="pliProdAbrir(null,null)" style="font-size:11px">+ Producto</button>
+        </div>
+        <div id="pli-arbol"></div>
+      </div>
+      <div style="flex:1.3;min-width:380px">
+        <div id="pli-receta-cont">
+          <div class="emp" style="padding:30px;text-align:center;color:var(--mut)">
+            Elegí un producto de la izquierda para cargar su receta.
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── SOLAPA PLANES ──────────────────────────────────────────────── -->
+  <div class="pli-pane" id="pli-pane-planes">
+    <div id="pli-planes-lista">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+        <div style="font-size:12px;font-weight:600">Planes de la temporada</div>
+        <button class="btn bb" onclick="pliPlanNuevo()">+ Plan</button>
+      </div>
+      <div class="ab-table-wrap">
+        <table class="pa-tbl" style="font-size:12px">
+          <thead><tr>
+            <th>Plan</th><th>Estado</th><th style="text-align:center">Objetivos</th>
+            <th>Confirmado</th><th style="width:170px"></th>
+          </tr></thead>
+          <tbody id="pli-planes-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div id="pli-plan-detalle" style="display:none"></div>
+  </div>
+</div>
+
+<!-- Modal: insumo -->
+<div class="ab-modal-overlay" id="pli-mb-insumo">
+<div class="ab-modal" style="width:640px;max-height:90vh;overflow-y:auto">
+  <div class="mhd">
+    <div><div class="mht" id="pli-ins-tit">Nuevo insumo</div></div>
+    <button class="mcl" onclick="document.getElementById('pli-mb-insumo').classList.remove('on')">×</button>
+  </div>
+  <input type="hidden" id="pli-ins-id">
+  <div class="fg">
+    <div class="fl ff"><label>Nombre *</label><input id="pli-ins-nombre" placeholder="Ej: Caja de cartón 10kg"></div>
+    <div class="fl"><label>Categoría</label><input id="pli-ins-categoria" list="pli-dl-cat" placeholder="Ej: cartón"></div>
+  </div>
+  <div class="fg">
+    <div class="fl ff"><label>Proveedor (opcional)</label><input id="pli-ins-prov" list="pli-dl-prov" placeholder="Para agrupar el pedido de compras"></div>
+    <div class="fl"><label>Código (opcional)</label><input id="pli-ins-codigo"></div>
+  </div>
+
+  <div style="margin-top:12px;padding:10px 12px;background:var(--bg2,#f8fafc);border-radius:8px">
+    <div style="font-size:12px;font-weight:700;margin-bottom:8px">Unidades</div>
+    <div class="fg">
+      <div class="fl"><label>Unidad de uso *</label>
+        <input id="pli-ins-uuso" list="pli-dl-uni" placeholder="unidad / gr / m" oninput="pliInsPreview()">
+        <div class="pli-cel-chica">La que vas a escribir en la receta</div>
+      </div>
+      <div class="fl"><label>Se compra por *</label>
+        <input id="pli-ins-ucompra" list="pli-dl-uni" placeholder="millar / bolsón / rollo" oninput="pliInsPreview()">
+        <div class="pli-cel-chica">La que te factura el proveedor</div>
+      </div>
+      <div class="fl"><label>Equivalencia *</label>
+        <input id="pli-ins-factor" type="number" step="any" min="0.000001" value="1" oninput="pliInsPreview()">
+        <div class="pli-cel-chica">Unidades de uso que trae 1 de compra</div>
+      </div>
+    </div>
+    <div id="pli-ins-preview" style="margin-top:8px;font-size:12px;font-weight:600;color:var(--burg)"></div>
+  </div>
+
+  <div class="fg" style="margin-top:12px">
+    <div class="fl"><label>Múltiplo de compra</label>
+      <input id="pli-ins-multiplo" type="number" step="any" min="0" value="1">
+      <div class="pli-cel-chica">0 = permite fracción (granel)</div>
+    </div>
+    <div class="fl"><label>Mínimo por pedido</label>
+      <input id="pli-ins-moq" type="number" step="any" min="0" value="0">
+      <div class="pli-cel-chica">En unidad de compra. 0 = sin mínimo</div>
+    </div>
+    <div class="fl"><label>Precio por unidad de compra</label><input id="pli-ins-precio" type="number" step="any" min="0" value="0"></div>
+    <div class="fl"><label>Moneda</label>
+      <select id="pli-ins-moneda"><option value="ARS">ARS</option><option value="USD">USD</option></select>
+    </div>
+  </div>
+  <div class="fl ff" style="margin-top:8px"><label>Notas</label><input id="pli-ins-notas"></div>
+
+  <div class="ab-modal-footer">
+    <button class="btn bo" onclick="document.getElementById('pli-mb-insumo').classList.remove('on')">Cancelar</button>
+    <button class="btn bb" onclick="pliInsGuardar()">Guardar insumo</button>
+  </div>
+</div>
+</div>
+<datalist id="pli-dl-cat"></datalist>
+<datalist id="pli-dl-uni"></datalist>
+<datalist id="pli-dl-prov"></datalist>
+
+<!-- Modal: pegar insumos desde Excel -->
+<div class="ab-modal-overlay" id="pli-mb-pegar">
+<div class="ab-modal" style="width:820px;max-height:90vh;overflow-y:auto">
+  <div class="mhd">
+    <div><div class="mht">📋 Pegar insumos desde Excel</div></div>
+    <button class="mcl" onclick="document.getElementById('pli-mb-pegar').classList.remove('on')">×</button>
+  </div>
+  <div style="font-size:12px;color:var(--mut);margin-bottom:8px">
+    Copiá las filas de tu planilla y pegalas acá. Una fila por insumo, columnas separadas por TAB, en este orden:
+    <div style="margin-top:6px;font-family:ui-monospace,Consolas,monospace;font-size:11px;color:var(--txt)">
+      nombre · categoría · unidad de uso · unidad de compra · equivalencia · múltiplo · mínimo · precio · moneda · proveedor
+    </div>
+    <div style="margin-top:4px">Desde la 5.ª columna en adelante podés dejar vacío: toma los valores por defecto (equivalencia 1, múltiplo 1, mínimo 0, precio 0, ARS).</div>
+  </div>
+  <textarea id="pli-pegar-txt" rows="8" style="width:100%;font-family:ui-monospace,Consolas,monospace;font-size:12px"
+            placeholder="Caja de cartón&#9;cartón&#9;unidad&#9;unidad&#9;1&#9;1&#9;0&#9;200&#9;ARS&#9;Cartocor"></textarea>
+  <div style="margin-top:8px"><button class="btn bo bs" onclick="pliPegarValidar()">Previsualizar</button></div>
+  <div id="pli-pegar-preview" style="margin-top:10px"></div>
+  <div class="ab-modal-footer">
+    <button class="btn bo" onclick="document.getElementById('pli-mb-pegar').classList.remove('on')">Cancelar</button>
+    <button class="btn bb" id="pli-pegar-btn" onclick="pliPegarConfirmar()" disabled style="opacity:.5">Importar</button>
+  </div>
+</div>
+</div>
+
+<!-- Modal: producto -->
+<div class="ab-modal-overlay" id="pli-mb-producto">
+<div class="ab-modal" style="width:560px">
+  <div class="mhd">
+    <div><div class="mht" id="pli-prod-tit">Nuevo producto</div></div>
+    <button class="mcl" onclick="document.getElementById('pli-mb-producto').classList.remove('on')">×</button>
+  </div>
+  <input type="hidden" id="pli-prod-id"><input type="hidden" id="pli-prod-padre">
+  <div class="fg">
+    <div class="fl ff"><label>Nombre *</label><input id="pli-prod-nombre" placeholder="Ej: Melón — o — Caja chica"></div>
+    <div class="fl" id="pli-prod-unidad-wrap"><label>Unidad</label><input id="pli-prod-unidad" value="caja"></div>
+  </div>
+  <div id="pli-prod-share-wrap" style="display:none">
+    <div class="fl" style="margin-top:8px"><label>Porcentaje del producto padre *</label>
+      <input id="pli-prod-share" type="number" step="any" min="0.0001" max="100" value="100" oninput="pliProdPreview()">
+      <div class="pli-cel-chica" id="pli-prod-share-info"></div>
+    </div>
+  </div>
+  <div id="pli-prod-modo-wrap" style="margin-top:12px;padding:10px 12px;background:var(--bg2,#f8fafc);border-radius:8px">
+    <div style="font-size:12px;font-weight:700;margin-bottom:6px">¿Cómo se reparte entre sus subproductos?</div>
+    <label style="display:block;font-size:13px;margin-bottom:4px;cursor:pointer">
+      <input type="radio" name="pli-prod-modo" value="particiona" checked onchange="pliProdPreview()">
+      <strong>Particiona</strong> — del total, el X% es cada subproducto
+    </label>
+    <label style="display:block;font-size:13px;cursor:pointer">
+      <input type="radio" name="pli-prod-modo" value="adicional" onchange="pliProdPreview()">
+      <strong>Adicional</strong> — además del total salen los subproductos
+    </label>
+    <div id="pli-prod-modo-preview" style="margin-top:8px;font-size:12px;color:var(--burg);font-weight:600"></div>
+  </div>
+  <div class="ab-modal-footer">
+    <button class="btn bo" onclick="document.getElementById('pli-mb-producto').classList.remove('on')">Cancelar</button>
+    <button class="btn bb" onclick="pliProdGuardar()">Guardar</button>
+  </div>
+</div>
+</div>
+
+<!-- Modal: confirmar plan -->
+<div class="ab-modal-overlay" id="pli-mb-confirmar">
+<div class="ab-modal" style="width:560px">
+  <div class="mhd">
+    <div><div class="mht">Confirmar plan</div></div>
+    <button class="mcl" onclick="document.getElementById('pli-mb-confirmar').classList.remove('on')">×</button>
+  </div>
+  <div id="pli-conf-cuerpo" style="font-size:13px"></div>
+  <div class="ab-modal-footer">
+    <button class="btn bo" onclick="document.getElementById('pli-mb-confirmar').classList.remove('on')">Cancelar</button>
+    <button class="btn bb" onclick="pliConfirmarOk()">Confirmar</button>
+  </div>
+</div>
+</div>
+
 </main>
 </div>
 
@@ -16533,6 +16779,7 @@ var USR_SECCIONES = [
     { id: 'pa-costos', label: 'Costos por Lote' },
     { id: 'pa-lotes', label: 'Fincas y Lotes' },
     { id: 'pa-scout', label: 'Scout — Campo' },
+    { id: 'pli-planificacion', label: '📦 Planificación Insumos' },
     { id: 'pa-combustible', label: '⛽ Combustible' },
     { id: 'personal-padron', label: '👥 Personal — Padrón' },
     { id: 'personal-asistencia', label: '📝 Personal — Asistencia Diaria' },
@@ -35180,6 +35427,946 @@ function cmBulkOculto(grupo, val) {
     });
 }
 
+</script>
+
+<!-- ══════════════════════════════════════════════════════════════════════
+     PLANIFICACIÓN INSUMOS — lógica del módulo (bloque propio y aislado)
+     Namespace PLI. No usa ni toca PA.* (namespace compartido de insumos,
+     órdenes y compras). Vive en un bloque propio al final del archivo para no
+     arriesgar los bloques de JS ya existentes.
+     ══════════════════════════════════════════════════════════════════════ -->
+<script>
+var PLI = {
+  temporadas: [], temporadaId: null,
+  insumos: [], categorias: [], unidades: [], proveedores: [],
+  productos: [], arbol: [],
+  recetaProd: null, recetaVersion: 0, recetaLineas: [],
+  planes: [], plan: null, calculo: null,
+  pegarFilas: [],
+  prodCargados: false,
+  seq: 0
+};
+
+function pliApi(path, opts) {
+  opts = opts || {};
+  opts.credentials = 'include';
+  opts.headers = opts.headers || { 'Content-Type': 'application/json' };
+  return fetch('/api/pli' + path, opts)
+    .then(function(r) { return r.json(); })
+    .catch(function() { return { ok: false, error: 'Error de red' }; });
+}
+
+// Escape para texto que se inyecta como HTML. El esc() global del panel escapa
+// comillas para contextos de atributo/JS, no entidades HTML.
+function pliEsc(s) {
+  return String(s === null || s === undefined ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+function pliN(n, dec) {
+  var v = Number(n) || 0;
+  var d = (dec === undefined) ? (Number.isInteger(v) ? 0 : 2) : dec;
+  return v.toLocaleString('es-AR', { minimumFractionDigits: d, maximumFractionDigits: d });
+}
+function pliErr(r) { toast(r && r.error ? r.error : 'Error', 'er'); }
+
+// ── Init y solapas ────────────────────────────────────────────────────────
+
+function pliInit() {
+  pliCargarTemporadas(function() {
+    pliInsCargar();
+    pliProdCargar();
+    pliPlanesCargar();
+  });
+}
+
+function pliTab(t) {
+  document.querySelectorAll('#sec-pli-planificacion .pli-tab').forEach(function(el) {
+    el.classList.toggle('on', el.getAttribute('data-pli') === t);
+  });
+  document.querySelectorAll('#sec-pli-planificacion .pli-pane').forEach(function(el) {
+    el.classList.toggle('on', el.id === 'pli-pane-' + t);
+  });
+}
+
+// ── Temporadas ────────────────────────────────────────────────────────────
+
+function pliCargarTemporadas(cb) {
+  pliApi('/temporadas').then(function(r) {
+    if (!r.ok) { pliErr(r); return; }
+    PLI.temporadas = r.data || [];
+    var act = PLI.temporadas.filter(function(t) { return t.activa; })[0] || PLI.temporadas[0];
+    PLI.temporadaId = act ? act.id : null;
+    var sel = document.getElementById('pli-temporada');
+    sel.innerHTML = PLI.temporadas.map(function(t) {
+      return '<option value="' + t.id + '"' + (t.id === PLI.temporadaId ? ' selected' : '') + '>'
+        + pliEsc(t.nombre) + (t.activa ? ' ✓' : '') + '</option>';
+    }).join('') || '<option value="">— sin temporadas —</option>';
+    if (cb) cb();
+  });
+}
+
+function pliCambiarTemporada() {
+  var id = parseInt(document.getElementById('pli-temporada').value, 10);
+  if (!id) return;
+  pliApi('/temporadas/' + id + '/activar', { method: 'POST' }).then(function(r) {
+    if (!r.ok) { pliErr(r); return; }
+    PLI.temporadaId = id;
+    PLI.plan = null;
+    document.getElementById('pli-plan-detalle').style.display = 'none';
+    document.getElementById('pli-planes-lista').style.display = '';
+    pliProdCargar(); pliPlanesCargar();
+  });
+}
+
+function pliNuevaTemporada() {
+  var nombre = prompt('Nombre de la temporada nueva:', 'Temporada ' + new Date().getFullYear());
+  if (!nombre) return;
+  pliApi('/temporadas', { method: 'POST', body: JSON.stringify({ nombre: nombre }) }).then(function(r) {
+    if (!r.ok) { pliErr(r); return; }
+    pliApi('/temporadas/' + r.id + '/activar', { method: 'POST' }).then(function() {
+      toast('✓ Temporada creada', 'ok');
+      pliCargarTemporadas(function() { pliProdCargar(); pliPlanesCargar(); });
+    });
+  });
+}
+
+// ── Insumos ───────────────────────────────────────────────────────────────
+
+function pliInsCargar() {
+  var inact = document.getElementById('pli-ins-inact').checked ? '?incluir_inactivos=1' : '';
+  pliApi('/insumos' + inact).then(function(r) {
+    if (!r.ok) { pliErr(r); return; }
+    PLI.insumos = r.data || [];
+    PLI.categorias = r.categorias || [];
+    PLI.unidades = r.unidades || [];
+    PLI.proveedores = r.proveedores || [];
+    var sel = document.getElementById('pli-ins-cat');
+    var actual = sel.value;
+    sel.innerHTML = '<option value="">Todas las categorías</option>'
+      + PLI.categorias.map(function(c) { return '<option value="' + pliEsc(c) + '">' + pliEsc(c) + '</option>'; }).join('');
+    sel.value = actual;
+    document.getElementById('pli-dl-cat').innerHTML = PLI.categorias.map(function(c) { return '<option value="' + pliEsc(c) + '">'; }).join('');
+    document.getElementById('pli-dl-uni').innerHTML = PLI.unidades.map(function(u) { return '<option value="' + pliEsc(u) + '">'; }).join('');
+    document.getElementById('pli-dl-prov').innerHTML = PLI.proveedores.map(function(p) { return '<option value="' + pliEsc(p) + '">'; }).join('');
+    pliInsRender();
+  });
+}
+
+function pliInsRender() {
+  var q = (document.getElementById('pli-ins-q').value || '').toLowerCase().trim();
+  var cat = document.getElementById('pli-ins-cat').value;
+  var arr = PLI.insumos.filter(function(i) {
+    if (cat && i.categoria !== cat) return false;
+    if (!q) return true;
+    return (i.nombre + ' ' + (i.categoria || '') + ' ' + (i.codigo || '')).toLowerCase().indexOf(q) !== -1;
+  });
+  var tb = document.getElementById('pli-ins-tbody');
+  if (!arr.length) {
+    tb.innerHTML = '<tr><td colspan="10" class="emp">Sin insumos. '
+      + '<button class="btn bo bs" onclick="pliInsAbrir(null)">+ Cargar el primero</button> o '
+      + '<button class="btn bo bs" onclick="pliPegarAbrir()">📋 pegar desde Excel</button></td></tr>';
+    return;
+  }
+  tb.innerHTML = arr.map(function(i) {
+    var equiv = '1 ' + pliEsc(i.unidad_compra) + ' = ' + pliN(i.factor_compra) + ' ' + pliEsc(i.unidad_uso);
+    return '<tr' + (i.activo ? '' : ' style="opacity:.5"') + '>'
+      + '<td><strong>' + pliEsc(i.nombre) + '</strong>' + (i.activo ? '' : ' <span class="pli-badge pli-gris">inactivo</span>') + '</td>'
+      + '<td>' + pliEsc(i.categoria || '—') + '</td>'
+      + '<td>' + pliEsc(i.proveedor_texto || '—') + '</td>'
+      + '<td>' + pliEsc(i.unidad_uso) + '</td>'
+      + '<td>' + pliEsc(i.unidad_compra) + '</td>'
+      + '<td class="pli-cel-chica">' + equiv + '</td>'
+      + '<td class="pli-num">' + (Number(i.multiplo_compra) === 0 ? '—' : pliN(i.multiplo_compra)) + '</td>'
+      + '<td class="pli-num">' + (Number(i.moq) === 0 ? '—' : pliN(i.moq)) + '</td>'
+      + '<td class="pli-num">' + (Number(i.precio_ref) > 0 ? pliEsc(i.moneda) + ' ' + pliN(i.precio_ref, 2) : '<span style="color:#f59e0b">sin precio</span>') + '</td>'
+      + '<td style="text-align:right;white-space:nowrap">'
+        + '<button class="btn bo bs" onclick="pliInsAbrir(' + i.id + ')" style="padding:2px 6px;font-size:11px">✏️</button> '
+        + '<button class="btn bd bs" onclick="pliInsBorrar(' + i.id + ')" style="padding:2px 6px;font-size:11px">🗑</button>'
+      + '</td></tr>';
+  }).join('');
+}
+
+function pliInsPreview() {
+  var uu = document.getElementById('pli-ins-uuso').value.trim();
+  var uc = document.getElementById('pli-ins-ucompra').value.trim();
+  var f = Number(document.getElementById('pli-ins-factor').value) || 0;
+  var el = document.getElementById('pli-ins-preview');
+  el.textContent = (uu && uc && f > 0)
+    ? 'Comprando 1 ' + uc + ' recibís ' + pliN(f) + ' ' + uu
+    : '';
+}
+
+function pliInsAbrir(id) {
+  var i = id ? PLI.insumos.filter(function(x) { return x.id === id; })[0] : null;
+  document.getElementById('pli-ins-tit').textContent = i ? 'Editar insumo' : 'Nuevo insumo';
+  document.getElementById('pli-ins-id').value = i ? i.id : '';
+  document.getElementById('pli-ins-nombre').value = i ? i.nombre : '';
+  document.getElementById('pli-ins-categoria').value = i ? (i.categoria || '') : '';
+  document.getElementById('pli-ins-prov').value = i ? (i.proveedor_texto || '') : '';
+  document.getElementById('pli-ins-codigo').value = i ? (i.codigo || '') : '';
+  document.getElementById('pli-ins-uuso').value = i ? i.unidad_uso : '';
+  document.getElementById('pli-ins-ucompra').value = i ? i.unidad_compra : '';
+  document.getElementById('pli-ins-factor').value = i ? i.factor_compra : 1;
+  document.getElementById('pli-ins-multiplo').value = i ? i.multiplo_compra : 1;
+  document.getElementById('pli-ins-moq').value = i ? i.moq : 0;
+  document.getElementById('pli-ins-precio').value = i ? i.precio_ref : 0;
+  document.getElementById('pli-ins-moneda').value = i ? i.moneda : 'ARS';
+  document.getElementById('pli-ins-notas').value = i ? (i.notas || '') : '';
+  pliInsPreview();
+  document.getElementById('pli-mb-insumo').classList.add('on');
+}
+
+function pliInsGuardar() {
+  var id = document.getElementById('pli-ins-id').value;
+  var body = {
+    nombre: document.getElementById('pli-ins-nombre').value.trim(),
+    categoria: document.getElementById('pli-ins-categoria').value.trim(),
+    proveedor_texto: document.getElementById('pli-ins-prov').value.trim(),
+    codigo: document.getElementById('pli-ins-codigo').value.trim(),
+    unidad_uso: document.getElementById('pli-ins-uuso').value.trim(),
+    unidad_compra: document.getElementById('pli-ins-ucompra').value.trim(),
+    factor_compra: document.getElementById('pli-ins-factor').value,
+    multiplo_compra: document.getElementById('pli-ins-multiplo').value,
+    moq: document.getElementById('pli-ins-moq').value,
+    precio_ref: document.getElementById('pli-ins-precio').value,
+    moneda: document.getElementById('pli-ins-moneda').value,
+    notas: document.getElementById('pli-ins-notas').value.trim()
+  };
+  if (!body.nombre) return toast('El nombre es obligatorio', 'er');
+  if (!body.unidad_uso || !body.unidad_compra) return toast('Faltan las unidades', 'er');
+  var p = id ? pliApi('/insumos/' + id, { method: 'PATCH', body: JSON.stringify(body) })
+             : pliApi('/insumos', { method: 'POST', body: JSON.stringify(body) });
+  p.then(function(r) {
+    if (!r.ok) {
+      // El 409 por unidades en uso viene con la lista de recetas afectadas.
+      if (r.usos && r.usos.length) {
+        alert(r.error + '\n\nRecetas afectadas:\n' + r.usos.map(function(u) { return '· ' + u.nombre; }).join('\n'));
+      } else pliErr(r);
+      return;
+    }
+    toast('✓ Insumo guardado', 'ok');
+    document.getElementById('pli-mb-insumo').classList.remove('on');
+    pliInsCargar();
+  });
+}
+
+function pliInsBorrar(id) {
+  var i = PLI.insumos.filter(function(x) { return x.id === id; })[0];
+  if (!i || !confirm('¿Eliminar "' + i.nombre + '"?')) return;
+  pliApi('/insumos/' + id, { method: 'DELETE' }).then(function(r) {
+    if (!r.ok) {
+      if (r.usos && r.usos.length) {
+        alert(r.error + '\n\nSe usa en:\n' + r.usos.map(function(u) { return '· ' + u.nombre; }).join('\n'));
+      } else pliErr(r);
+      return;
+    }
+    toast('✓ Eliminado', 'ok');
+    pliInsCargar();
+  });
+}
+
+// ── Pegar desde Excel ─────────────────────────────────────────────────────
+
+function pliPegarAbrir() {
+  document.getElementById('pli-pegar-txt').value = '';
+  document.getElementById('pli-pegar-preview').innerHTML = '';
+  var b = document.getElementById('pli-pegar-btn');
+  b.disabled = true; b.style.opacity = '.5';
+  PLI.pegarFilas = [];
+  document.getElementById('pli-mb-pegar').classList.add('on');
+}
+
+function pliPegarParsear() {
+  var txt = document.getElementById('pli-pegar-txt').value || '';
+  return txt.split(/\r?\n/).map(function(l) { return l.trim(); }).filter(Boolean).map(function(l) {
+    var c = l.split('\t');
+    return {
+      nombre: (c[0] || '').trim(),
+      categoria: (c[1] || '').trim(),
+      unidad_uso: (c[2] || '').trim(),
+      unidad_compra: (c[3] || '').trim(),
+      factor_compra: (c[4] || '').trim() || 1,
+      multiplo_compra: (c[5] || '').trim() || 1,
+      moq: (c[6] || '').trim() || 0,
+      precio_ref: (c[7] || '').trim() || 0,
+      moneda: ((c[8] || '').trim() || 'ARS').toUpperCase(),
+      proveedor_texto: (c[9] || '').trim()
+    };
+  });
+}
+
+function pliPegarValidar() {
+  var filas = pliPegarParsear();
+  if (!filas.length) return toast('No hay nada para importar', 'er');
+  pliApi('/insumos/bulk/validar', { method: 'POST', body: JSON.stringify({ filas: filas }) }).then(function(r) {
+    if (!r.ok) { pliErr(r); return; }
+    PLI.pegarFilas = filas;
+    var html = '<div style="font-size:12px;margin-bottom:6px"><strong>' + r.validas + '</strong> fila(s) listas'
+      + (r.con_error ? ' · <span style="color:var(--err)"><strong>' + r.con_error + '</strong> con problemas</span>' : '') + '</div>'
+      + '<div class="ab-table-wrap" style="max-height:260px;overflow:auto"><table class="pa-tbl" style="font-size:11px"><thead><tr>'
+      + '<th>#</th><th>Nombre</th><th>Uso</th><th>Compra</th><th>Equiv.</th><th>Precio</th><th>Estado</th>'
+      + '</tr></thead><tbody>'
+      + (r.data || []).map(function(f) {
+          return '<tr' + (f.ok ? '' : ' style="background:#fef2f2"') + '>'
+            + '<td>' + f.fila + '</td>'
+            + '<td>' + pliEsc(f.datos.nombre || '') + '</td>'
+            + '<td>' + pliEsc(f.datos.unidad_uso || '') + '</td>'
+            + '<td>' + pliEsc(f.datos.unidad_compra || '') + '</td>'
+            + '<td class="pli-num">' + pliEsc(String(f.datos.factor_compra || '')) + '</td>'
+            + '<td class="pli-num">' + pliEsc(String(f.datos.precio_ref || '')) + '</td>'
+            + '<td>' + (f.ok ? '<span class="pli-badge pli-ok">ok</span>' : '<span class="pli-badge pli-err">' + pliEsc(f.error) + '</span>') + '</td>'
+            + '</tr>';
+        }).join('')
+      + '</tbody></table></div>';
+    if (r.con_error) html += '<div style="margin-top:8px;font-size:12px;color:var(--err)">Corregí las filas marcadas: la importación es todo o nada.</div>';
+    document.getElementById('pli-pegar-preview').innerHTML = html;
+    var b = document.getElementById('pli-pegar-btn');
+    b.disabled = r.con_error > 0 || r.validas === 0;
+    b.style.opacity = b.disabled ? '.5' : '';
+  });
+}
+
+function pliPegarConfirmar() {
+  if (!PLI.pegarFilas.length) return;
+  pliApi('/insumos/bulk', { method: 'POST', body: JSON.stringify({ filas: PLI.pegarFilas }) }).then(function(r) {
+    if (!r.ok) { pliErr(r); return; }
+    toast('✓ ' + r.importados + ' insumos importados', 'ok');
+    document.getElementById('pli-mb-pegar').classList.remove('on');
+    pliInsCargar();
+  });
+}
+
+// ── Productos (árbol) ─────────────────────────────────────────────────────
+
+function pliProdCargar(cb) {
+  if (!PLI.temporadaId) {
+    document.getElementById('pli-arbol').innerHTML = '<div class="emp">Creá una temporada primero.</div>';
+    PLI.prodCargados = true;
+    if (cb) cb();
+    return;
+  }
+  pliApi('/productos?temporada_id=' + PLI.temporadaId).then(function(r) {
+    if (!r.ok) { pliErr(r); return; }
+    PLI.arbol = r.data || [];
+    PLI.productos = r.todos || [];
+    PLI.prodCargados = true;
+    pliArbolRender();
+    if (cb) cb();
+  });
+}
+
+function pliArbolRender() {
+  var cont = document.getElementById('pli-arbol');
+  if (!PLI.arbol.length) {
+    cont.innerHTML = '<div class="emp" style="padding:20px;text-align:center;color:var(--mut)">'
+      + 'Sin productos. <button class="btn bo bs" onclick="pliProdAbrir(null,null)">+ Crear el primero</button></div>';
+    return;
+  }
+  cont.innerHTML = PLI.arbol.map(function(p) {
+    var hijos = (p.hijos || []).filter(function(h) { return h.activo === 1; });
+    var suma = p.suma_hijos_pct || 0;
+    var badge = '';
+    if (hijos.length) {
+      if (suma > 100.000001) badge = '<span class="pli-badge pli-err">' + pliN(suma, 2) + '% — supera el 100%</span>';
+      else if (suma < 99.999999) badge = '<span class="pli-badge pli-warn">' + pliN(suma, 2) + '% — sin asignar ' + pliN(100 - suma, 2) + '%</span>';
+      else badge = '<span class="pli-badge pli-ok">100%</span>';
+    }
+    var head = '<div class="pli-arbol-nodo">'
+      + '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px">'
+        + '<div><strong>' + pliEsc(p.nombre) + '</strong> '
+          + '<span class="pli-cel-chica">objetivo en ' + pliEsc(p.unidad) + '</span> '
+          + '<span class="pli-badge ' + (p.receta_lineas ? 'pli-ok' : 'pli-gris') + '">receta: ' + p.receta_lineas + '</span> '
+          + badge + '</div>'
+        + '<div style="white-space:nowrap">'
+          + '<button class="btn bo bs" onclick="pliRecetaAbrir(' + p.id + ')" style="padding:2px 6px;font-size:11px">🧾 receta</button> '
+          + '<button class="btn bo bs" onclick="pliProdAbrir(null,' + p.id + ')" style="padding:2px 6px;font-size:11px">+ sub</button> '
+          + '<button class="btn bo bs" onclick="pliProdAbrir(' + p.id + ',null)" style="padding:2px 6px;font-size:11px">✏️</button> '
+          + '<button class="btn bd bs" onclick="pliProdBorrar(' + p.id + ')" style="padding:2px 6px;font-size:11px">🗑</button>'
+        + '</div></div>'
+      + '<div class="pli-cel-chica" style="margin-top:3px">reparto: <strong>' + pliEsc(p.modo_reparto) + '</strong>'
+        + (p.modo_reparto === 'particiona' ? ' — el total se reparte entre los subproductos' : ' — los subproductos salen ADEMÁS del total') + '</div>'
+      + '</div>';
+    var subs = hijos.map(function(h) {
+      return '<div class="pli-arbol-nodo pli-arbol-hijo">'
+        + '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px">'
+          + '<div>' + pliEsc(h.nombre) + ' <strong>' + pliN(h.share_pct, 2) + '%</strong> '
+            + '<span class="pli-badge ' + (h.receta_lineas ? 'pli-ok' : 'pli-gris') + '">receta: ' + h.receta_lineas + '</span></div>'
+          + '<div style="white-space:nowrap">'
+            + '<button class="btn bo bs" onclick="pliRecetaAbrir(' + h.id + ')" style="padding:2px 6px;font-size:11px">🧾 receta</button> '
+            + '<button class="btn bo bs" onclick="pliProdAbrir(' + h.id + ',null)" style="padding:2px 6px;font-size:11px">✏️</button> '
+            + '<button class="btn bd bs" onclick="pliProdBorrar(' + h.id + ')" style="padding:2px 6px;font-size:11px">🗑</button>'
+          + '</div></div></div>';
+    }).join('');
+    return head + subs;
+  }).join('');
+}
+
+function pliProdAbrir(id, padreId) {
+  var p = id ? PLI.productos.filter(function(x) { return x.id === id; })[0] : null;
+  var padre = padreId ? PLI.productos.filter(function(x) { return x.id === padreId; })[0]
+                      : (p && p.padre_id ? PLI.productos.filter(function(x) { return x.id === p.padre_id; })[0] : null);
+  document.getElementById('pli-prod-tit').textContent = p ? 'Editar producto' : (padre ? 'Nuevo subproducto de ' + padre.nombre : 'Nuevo producto');
+  document.getElementById('pli-prod-id').value = p ? p.id : '';
+  document.getElementById('pli-prod-padre').value = padre ? padre.id : '';
+  document.getElementById('pli-prod-nombre').value = p ? p.nombre : '';
+  document.getElementById('pli-prod-unidad').value = p ? p.unidad : (padre ? padre.unidad : 'caja');
+  // La unidad de un subproducto la hereda del padre: si divergieran, el reparto
+  // por % transferiría la cantidad sin conversión (40.000 kg -> 32.000 cajas).
+  document.getElementById('pli-prod-unidad').disabled = !!padre;
+  document.getElementById('pli-prod-share-wrap').style.display = padre ? '' : 'none';
+  document.getElementById('pli-prod-share').value = p ? p.share_pct : 100;
+  var modo = p ? p.modo_reparto : 'particiona';
+  document.querySelectorAll('input[name="pli-prod-modo"]').forEach(function(r) { r.checked = (r.value === modo); });
+  pliProdPreview();
+  document.getElementById('pli-mb-producto').classList.add('on');
+}
+
+function pliProdPreview() {
+  var modo = (document.querySelector('input[name="pli-prod-modo"]:checked') || {}).value || 'particiona';
+  var el = document.getElementById('pli-prod-modo-preview');
+  el.textContent = modo === 'particiona'
+    ? 'Ejemplo: 40.000 → 80% = 32.000 y 20% = 8.000 (el padre no aporta nada por su cuenta)'
+    : 'Ejemplo: 40.000 → los subproductos salen ADEMÁS de esas 40.000';
+  var padreId = document.getElementById('pli-prod-padre').value;
+  if (padreId) {
+    var padre = PLI.productos.filter(function(x) { return x.id === parseInt(padreId, 10); })[0];
+    var yo = parseInt(document.getElementById('pli-prod-id').value || '0', 10);
+    if (padre) {
+      var otros = PLI.productos.filter(function(x) {
+        return x.padre_id === padre.id && x.activo === 1 && x.id !== yo;
+      }).reduce(function(a, h) { return a + Number(h.share_pct || 0); }, 0);
+      var mio = Number(document.getElementById('pli-prod-share').value) || 0;
+      var tot = otros + mio;
+      var info = document.getElementById('pli-prod-share-info');
+      info.textContent = 'Con este quedan ' + pliN(tot, 2) + '% asignados de ' + pliEsc(padre.nombre);
+      info.style.color = tot > 100.000001 ? 'var(--err)' : (tot < 99.999999 ? '#b45309' : 'var(--ok)');
+    }
+  }
+}
+
+function pliProdGuardar() {
+  var id = document.getElementById('pli-prod-id').value;
+  var padreId = document.getElementById('pli-prod-padre').value;
+  var body = {
+    temporada_id: PLI.temporadaId,
+    nombre: document.getElementById('pli-prod-nombre').value.trim(),
+    unidad: document.getElementById('pli-prod-unidad').value.trim() || 'caja',
+    modo_reparto: (document.querySelector('input[name="pli-prod-modo"]:checked') || {}).value || 'particiona'
+  };
+  if (!body.nombre) return toast('El nombre es obligatorio', 'er');
+  if (padreId) { body.padre_id = parseInt(padreId, 10); body.share_pct = Number(document.getElementById('pli-prod-share').value); }
+  var p = id ? pliApi('/productos/' + id, { method: 'PATCH', body: JSON.stringify(body) })
+             : pliApi('/productos', { method: 'POST', body: JSON.stringify(body) });
+  p.then(function(r) {
+    if (!r.ok) { pliErr(r); return; }
+    toast('✓ Guardado', 'ok');
+    document.getElementById('pli-mb-producto').classList.remove('on');
+    pliProdCargar();
+  });
+}
+
+function pliProdBorrar(id) {
+  var p = PLI.productos.filter(function(x) { return x.id === id; })[0];
+  if (!p || !confirm('¿Eliminar "' + p.nombre + '"?')) return;
+  pliApi('/productos/' + id, { method: 'DELETE' }).then(function(r) {
+    if (!r.ok) { pliErr(r); return; }
+    toast('✓ Eliminado', 'ok');
+    if (PLI.recetaProd && PLI.recetaProd.id === id) {
+      PLI.recetaProd = null;
+      document.getElementById('pli-receta-cont').innerHTML = '';
+    }
+    pliProdCargar();
+  });
+}
+
+// ── Editor de receta ──────────────────────────────────────────────────────
+
+function pliRecetaAbrir(prodId) {
+  pliApi('/productos/' + prodId + '/receta').then(function(r) {
+    if (!r.ok) { pliErr(r); return; }
+    PLI.recetaProd = r.data.producto;
+    PLI.recetaVersion = r.data.receta_version;
+    PLI.recetaLineas = (r.data.lineas || []).map(function(l) {
+      return {
+        uid: ++PLI.seq, insumo_id: l.insumo_id, insumo_nombre: l.insumo_nombre,
+        unidad: l.unidad, cantidad: l.cantidad, por_cada: l.por_cada,
+        modo_ratio: l.modo_ratio, cant_min: l.cant_min, cant_max: l.cant_max,
+        merma_pct: l.merma_pct, motivo: l.motivo
+      };
+    });
+    pliRecetaRender();
+  });
+}
+
+function pliRecetaRender() {
+  var p = PLI.recetaProd;
+  var cont = document.getElementById('pli-receta-cont');
+  if (!p) { cont.innerHTML = ''; return; }
+  var otros = PLI.productos.filter(function(x) { return x.id !== p.id && x.receta_lineas > 0; });
+
+  var html = '<div style="border:1px solid var(--bor);border-radius:10px;padding:12px;background:var(--sur)">'
+    + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">'
+      + '<div style="font-size:13px;font-weight:700">🧾 Receta de ' + pliEsc(p.nombre) + '</div>'
+      + '<span class="pli-cel-chica">versión ' + PLI.recetaVersion + '</span>'
+    + '</div>'
+    + '<div class="pli-cel-chica" style="margin-bottom:10px">Cuánto insumo lleva <strong>1 ' + pliEsc(p.unidad) + '</strong> de este producto.</div>';
+
+  if (otros.length) {
+    html += '<div style="margin-bottom:10px;display:flex;gap:6px;align-items:center">'
+      + '<select id="pli-receta-copiar" style="flex:1;font-size:12px"><option value="">— copiar receta de… —</option>'
+      + otros.map(function(o) { return '<option value="' + o.id + '">' + pliEsc(o.nombre) + ' (' + o.receta_lineas + ' líneas)</option>'; }).join('')
+      + '</select><button class="btn bo bs" onclick="pliRecetaCopiar()" style="font-size:11px">Copiar</button></div>';
+  }
+
+  html += '<div class="ab-table-wrap"><table class="pa-tbl" style="font-size:11px"><thead><tr>'
+    + '<th style="min-width:150px">Insumo</th><th style="width:70px">Cantidad</th>'
+    + '<th style="width:110px">cada</th><th style="width:90px">Rango (opc.)</th>'
+    + '<th style="width:60px">Merma %</th><th style="width:30px"></th>'
+    + '</tr></thead><tbody id="pli-receta-tbody"></tbody></table></div>'
+    + '<div style="margin-top:8px;display:flex;justify-content:space-between;align-items:center">'
+      + '<button class="btn bo bs" onclick="pliRecetaAgregar()" style="font-size:11px">+ agregar insumo</button>'
+      + '<button class="btn bb" onclick="pliRecetaGuardar()">Guardar receta</button>'
+    + '</div></div>';
+  cont.innerHTML = html;
+  pliRecetaFilas();
+}
+
+function pliRecetaFilas() {
+  var p = PLI.recetaProd;
+  var tb = document.getElementById('pli-receta-tbody');
+  if (!tb) return;
+  if (!PLI.recetaLineas.length) {
+    tb.innerHTML = '<tr><td colspan="6" class="emp">Sin líneas todavía.</td></tr>';
+    return;
+  }
+  tb.innerHTML = PLI.recetaLineas.map(function(l) {
+    var ins = PLI.insumos.filter(function(x) { return x.id === l.insumo_id; })[0];
+    var uso = ins ? ins.unidad_uso : (l.unidad || '');
+    var opts = PLI.insumos.map(function(i) {
+      return '<option value="' + i.id + '"' + (i.id === l.insumo_id ? ' selected' : '') + '>'
+        + pliEsc(i.nombre) + ' (' + pliEsc(i.unidad_uso) + ')</option>';
+    }).join('');
+    // El denominador ("cajas") lo imprime el sistema y NO se puede editar: es la
+    // unidad del producto. Así se elimina el error de confundir la base
+    // ("por caja" vs "por pallet"), que es el error de carga más caro.
+    return '<tr>'
+      + '<td><select onchange="pliRecetaSet(' + l.uid + ',\'insumo_id\',this.value)" style="width:100%;font-size:11px">'
+        + '<option value="">— elegir insumo —</option>' + opts + '</select></td>'
+      + '<td><div style="display:flex;align-items:center;gap:3px">'
+        + '<input type="number" step="any" min="0" value="' + pliEsc(String(l.cantidad)) + '" style="width:60px;font-size:11px"'
+        + ' onchange="pliRecetaSet(' + l.uid + ',\'cantidad\',this.value)">'
+        + '<span class="pli-cel-chica">' + pliEsc(uso) + '</span></div></td>'
+      + '<td><div style="display:flex;align-items:center;gap:3px"><span class="pli-cel-chica">cada</span>'
+        + '<input type="number" step="any" min="0.000001" value="' + pliEsc(String(l.por_cada)) + '" style="width:48px;font-size:11px"'
+        + ' onchange="pliRecetaSet(' + l.uid + ',\'por_cada\',this.value)">'
+        + '<span class="pli-cel-chica">' + pliEsc(p.unidad) + '</span></div></td>'
+      + '<td><div style="display:flex;align-items:center;gap:2px">'
+        + '<input type="number" step="any" min="0" placeholder="mín" value="' + (l.cant_min === null || l.cant_min === undefined ? '' : pliEsc(String(l.cant_min))) + '" style="width:38px;font-size:11px"'
+        + ' onchange="pliRecetaSet(' + l.uid + ',\'cant_min\',this.value)">'
+        + '<input type="number" step="any" min="0" placeholder="máx" value="' + (l.cant_max === null || l.cant_max === undefined ? '' : pliEsc(String(l.cant_max))) + '" style="width:38px;font-size:11px"'
+        + ' onchange="pliRecetaSet(' + l.uid + ',\'cant_max\',this.value)"></div></td>'
+      + '<td><input type="number" step="any" min="0" max="99" value="' + pliEsc(String(l.merma_pct || 0)) + '" style="width:46px;font-size:11px"'
+        + ' onchange="pliRecetaSet(' + l.uid + ',\'merma_pct\',this.value)"></td>'
+      + '<td><button class="btn bd bs" onclick="pliRecetaQuitar(' + l.uid + ')" style="padding:1px 5px;font-size:11px">✕</button></td>'
+      + '</tr>';
+  }).join('');
+}
+
+function pliRecetaSet(uid, campo, valor) {
+  var l = PLI.recetaLineas.filter(function(x) { return x.uid === uid; })[0];
+  if (!l) return;
+  if (campo === 'insumo_id') {
+    l.insumo_id = valor ? parseInt(valor, 10) : null;
+    var ins = PLI.insumos.filter(function(x) { return x.id === l.insumo_id; })[0];
+    l.unidad = ins ? ins.unidad_uso : '';
+    pliRecetaFilas();
+    return;
+  }
+  if (campo === 'cant_min' || campo === 'cant_max') {
+    l[campo] = (valor === '' || valor === null) ? null : Number(valor);
+  } else {
+    l[campo] = Number(valor);
+  }
+  // Alerta blanda del error de carga más probable: "cada 6" en vez de "cada 60".
+  if ((campo === 'cantidad' || campo === 'por_cada') && l.insumo_id) {
+    var i2 = PLI.insumos.filter(function(x) { return x.id === l.insumo_id; })[0];
+    var contable = i2 && ['unidad', 'unidades', 'caja', 'cajas', 'pallet', 'pallets', 'bolsa', 'rollo'].indexOf(String(i2.unidad_uso).toLowerCase()) !== -1;
+    var ratio = (Number(l.cantidad) || 0) / (Number(l.por_cada) || 1);
+    if (contable && ratio > 10) {
+      toast('¿Seguro? Son ' + pliN(ratio, 2) + ' ' + i2.unidad_uso + ' por ' + PLI.recetaProd.unidad, 'er');
+    }
+  }
+}
+
+function pliRecetaAgregar() {
+  PLI.recetaLineas.push({ uid: ++PLI.seq, insumo_id: null, unidad: '', cantidad: 1, por_cada: 1, modo_ratio: 'por_unidad', cant_min: null, cant_max: null, merma_pct: 0 });
+  pliRecetaFilas();
+}
+function pliRecetaQuitar(uid) {
+  PLI.recetaLineas = PLI.recetaLineas.filter(function(x) { return x.uid !== uid; });
+  pliRecetaFilas();
+}
+
+function pliRecetaCopiar() {
+  var id = parseInt(document.getElementById('pli-receta-copiar').value, 10);
+  if (!id) return;
+  pliApi('/productos/' + id + '/receta').then(function(r) {
+    if (!r.ok) { pliErr(r); return; }
+    PLI.recetaLineas = (r.data.lineas || []).map(function(l) {
+      return {
+        uid: ++PLI.seq, insumo_id: l.insumo_id, insumo_nombre: l.insumo_nombre, unidad: l.unidad,
+        cantidad: l.cantidad, por_cada: l.por_cada, modo_ratio: l.modo_ratio,
+        cant_min: l.cant_min, cant_max: l.cant_max, merma_pct: l.merma_pct, motivo: l.motivo
+      };
+    });
+    toast('Receta copiada — revisala y guardá', 'ok');
+    pliRecetaFilas();
+  });
+}
+
+function pliRecetaGuardar() {
+  var lineas = PLI.recetaLineas.filter(function(l) { return l.insumo_id; }).map(function(l) {
+    return {
+      insumo_id: l.insumo_id, cantidad: l.cantidad, por_cada: l.por_cada,
+      modo_ratio: Number(l.por_cada) === 1 ? 'por_unidad' : 'cada_n',
+      unidad: l.unidad, cant_min: l.cant_min, cant_max: l.cant_max,
+      merma_pct: l.merma_pct || 0, motivo: l.motivo || null
+    };
+  });
+  pliApi('/productos/' + PLI.recetaProd.id + '/receta', {
+    method: 'PUT',
+    body: JSON.stringify({ receta_version: PLI.recetaVersion, lineas: lineas })
+  }).then(function(r) {
+    if (!r.ok) { pliErr(r); return; }
+    toast('✓ Receta guardada (v' + r.receta_version + ')', 'ok');
+    PLI.recetaVersion = r.receta_version;
+    pliProdCargar();
+    pliRecetaAbrir(PLI.recetaProd.id);
+  });
+}
+
+// ── Planes ────────────────────────────────────────────────────────────────
+
+function pliPlanesCargar() {
+  if (!PLI.temporadaId) return;
+  pliApi('/planes?temporada_id=' + PLI.temporadaId).then(function(r) {
+    if (!r.ok) { pliErr(r); return; }
+    PLI.planes = r.data || [];
+    var tb = document.getElementById('pli-planes-tbody');
+    if (!PLI.planes.length) {
+      tb.innerHTML = '<tr><td colspan="5" class="emp">Sin planes. <button class="btn bo bs" onclick="pliPlanNuevo()">+ Crear el primero</button></td></tr>';
+      return;
+    }
+    tb.innerHTML = PLI.planes.map(function(p) {
+      var badge = p.estado === 'confirmado'
+        ? '<span class="pli-badge pli-ok">confirmado</span>'
+        : '<span class="pli-badge pli-gris">borrador</span>';
+      return '<tr><td><strong>' + pliEsc(p.nombre) + '</strong></td>'
+        + '<td>' + badge + '</td>'
+        + '<td style="text-align:center">' + p.n_objetivos + '</td>'
+        + '<td class="pli-cel-chica">' + pliEsc(p.confirmado_en || '—') + '</td>'
+        + '<td style="text-align:right;white-space:nowrap">'
+          + '<button class="btn bo bs" onclick="pliPlanAbrir(' + p.id + ')" style="padding:2px 8px;font-size:11px">Abrir</button> '
+          + '<button class="btn bo bs" onclick="pliPlanDuplicar(' + p.id + ')" style="padding:2px 6px;font-size:11px">⧉</button> '
+          + '<button class="btn bd bs" onclick="pliPlanBorrar(' + p.id + ')" style="padding:2px 6px;font-size:11px">🗑</button>'
+        + '</td></tr>';
+    }).join('');
+  });
+}
+
+function pliPlanNuevo() {
+  if (!PLI.temporadaId) return toast('Creá una temporada primero', 'er');
+  var nombre = prompt('Nombre del plan:', 'Plan base');
+  if (!nombre) return;
+  pliApi('/planes', { method: 'POST', body: JSON.stringify({ temporada_id: PLI.temporadaId, nombre: nombre }) }).then(function(r) {
+    if (!r.ok) { pliErr(r); return; }
+    toast('✓ Plan creado', 'ok');
+    pliPlanesCargar();
+    pliPlanAbrir(r.id);
+  });
+}
+
+function pliPlanDuplicar(id) {
+  var p = PLI.planes.filter(function(x) { return x.id === id; })[0];
+  var nombre = prompt('Nombre del plan nuevo:', (p ? p.nombre : 'Plan') + ' (copia)');
+  if (!nombre) return;
+  pliApi('/planes/' + id + '/duplicar', { method: 'POST', body: JSON.stringify({ nombre: nombre }) }).then(function(r) {
+    if (!r.ok) { pliErr(r); return; }
+    toast('✓ Plan duplicado', 'ok');
+    pliPlanesCargar();
+    pliPlanAbrir(r.id);
+  });
+}
+
+function pliPlanBorrar(id) {
+  if (!confirm('¿Eliminar este plan?')) return;
+  pliApi('/planes/' + id, { method: 'DELETE' }).then(function(r) {
+    if (!r.ok) { pliErr(r); return; }
+    toast('✓ Eliminado', 'ok');
+    pliPlanesCargar();
+  });
+}
+
+function pliPlanVolver() {
+  PLI.plan = null; PLI.calculo = null;
+  document.getElementById('pli-plan-detalle').style.display = 'none';
+  document.getElementById('pli-planes-lista').style.display = '';
+  pliPlanesCargar();
+}
+
+function pliPlanAbrir(id) {
+  // El detalle dibuja una fila de objetivo por producto raíz, así que el árbol
+  // tiene que estar cargado antes de renderizar (si no, la primera apertura
+  // muestra "no hay productos" aunque los haya). Se espera a que la carga haya
+  // RESPONDIDO, no a que traiga algo: un árbol vacío es un estado legítimo.
+  if (!PLI.prodCargados) {
+    pliProdCargar(function() { pliPlanAbrir(id); });
+    return;
+  }
+  pliApi('/planes/' + id).then(function(r) {
+    if (!r.ok) { pliErr(r); return; }
+    PLI.plan = r.data.plan;
+    PLI.plan.objetivos = r.data.objetivos || [];
+    document.getElementById('pli-planes-lista').style.display = 'none';
+    document.getElementById('pli-plan-detalle').style.display = '';
+    pliPlanRender();
+    pliCalcular();
+  });
+}
+
+function pliPlanRender() {
+  var p = PLI.plan;
+  var conf = p.estado === 'confirmado';
+  var raices = PLI.arbol;
+  var porProd = {};
+  (p.objetivos || []).forEach(function(o) { porProd[o.producto_id] = o.cantidad; });
+
+  var html = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">'
+    + '<div><button class="btn bo bs" onclick="pliPlanVolver()" style="font-size:11px">← Planes</button> '
+      + '<strong style="margin-left:8px;font-size:15px">' + pliEsc(p.nombre) + '</strong> '
+      + (conf ? '<span class="pli-badge pli-ok">confirmado ' + pliEsc(p.confirmado_en || '') + '</span>'
+              : '<span class="pli-badge pli-gris">borrador</span>') + '</div>'
+    + '<div style="display:flex;gap:6px">'
+      + '<button class="btn bo bs" onclick="pliExportar()" style="font-size:11px">⬇ Excel</button>'
+      + (conf ? '<button class="btn bo bs" onclick="pliReabrir()" style="font-size:11px">↩ Reabrir</button>'
+              : '<button class="btn bb" onclick="pliConfirmarAbrir()">Confirmar plan</button>')
+    + '</div></div>';
+
+  // Objetivos
+  html += '<div style="border:1px solid var(--bor);border-radius:10px;padding:12px;margin-bottom:12px;background:var(--sur)">'
+    + '<div style="font-size:12px;font-weight:700;margin-bottom:8px">🎯 Objetivo de producción</div>';
+  if (!raices.length) {
+    html += '<div class="pli-cel-chica">No hay productos cargados en esta temporada.</div>';
+  } else {
+    html += raices.map(function(pr) {
+      return '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">'
+        + '<div style="min-width:160px">' + pliEsc(pr.nombre) + '</div>'
+        + '<input type="number" step="any" min="0" id="pli-obj-' + pr.id + '" value="' + (porProd[pr.id] || 0) + '"'
+        + (conf ? ' disabled' : '') + ' style="width:130px" onchange="pliObjGuardar()">'
+        + '<span class="pli-cel-chica">' + pliEsc(pr.unidad) + '</span></div>';
+    }).join('');
+  }
+  html += '</div><div id="pli-resultado"></div>';
+
+  document.getElementById('pli-plan-detalle').innerHTML = html;
+}
+
+function pliObjGuardar() {
+  var objetivos = PLI.arbol.map(function(pr) {
+    var el = document.getElementById('pli-obj-' + pr.id);
+    return { producto_id: pr.id, cantidad: Number(el ? el.value : 0) || 0 };
+  });
+  pliApi('/planes/' + PLI.plan.id + '/objetivos', { method: 'PUT', body: JSON.stringify({ objetivos: objetivos }) })
+    .then(function(r) {
+      if (!r.ok) { pliErr(r); return; }
+      pliCalcular();
+    });
+}
+
+// Calcular es GET a propósito: así funciona también para usuarios solo lectura
+// (el bloqueo global de escritura del panel devuelve 403 a todo POST).
+function pliCalcular() {
+  document.getElementById('pli-resultado').innerHTML = '<div class="emp">Calculando…</div>';
+  pliApi('/planes/' + PLI.plan.id + '/calculo').then(function(r) {
+    if (!r.ok) { document.getElementById('pli-resultado').innerHTML = '<div class="emp" style="color:var(--err)">' + pliEsc(r.error) + '</div>'; return; }
+    PLI.calculo = r.data;
+    pliResultadoRender();
+  });
+}
+
+function pliCoberturaHtml(c) {
+  var items = [];
+  if (c.plan_sin_objetivos) items.push('No hay ningún objetivo cargado');
+  (c.objetivos_en_cero || []).forEach(function(o) { items.push('"' + o.nombre + '" tiene objetivo en 0'); });
+  (c.objetivos_solapados || []).forEach(function(o) { items.push('"' + o.hijo + '" ya está incluido dentro de "' + o.padre + '"'); });
+  (c.nodos_sin_receta || []).forEach(function(n) { items.push('"' + (n.ruta || []).join(' › ') + '" no tiene receta'); });
+  (c.insumo_inexistente || []).forEach(function(i) { items.push('Falta un insumo usado en la receta de "' + i.producto + '"'); });
+  (c.unidad_desincronizada || []).forEach(function(u) { items.push('"' + u.insumo + '" cambió de unidad (' + u.unidad_receta + ' → ' + u.unidad_insumo + '): regrabá la receta de "' + u.producto + '"'); });
+  (c.mix_excedido || []).forEach(function(m) { items.push('"' + m.nombre + '": los subproductos suman ' + pliN(m.suma_pct, 2) + '% (más de 100)'); });
+  (c.existencia_supera_necesidad || []).forEach(function(e) { items.push('"' + e.insumo + '": declaraste ' + pliN(e.declarada) + ' ' + e.unidad_uso + ' pero la necesidad es ' + pliN(e.necesidad)); });
+
+  if (!items.length) return '<div class="pli-badge pli-ok" style="display:block;padding:8px 12px">✔ Cobertura completa</div>';
+  return '<div style="background:rgba(239,68,68,.1);border:1px solid var(--err);border-radius:8px;padding:10px 12px;font-size:12px">'
+    + '<strong style="color:var(--err)">Revisá antes de confirmar:</strong><ul style="margin:6px 0 0 18px">'
+    + items.map(function(i) { return '<li>' + pliEsc(i) + '</li>'; }).join('') + '</ul></div>';
+}
+
+function pliResultadoRender() {
+  var d = PLI.calculo;
+  var conf = PLI.plan.estado === 'confirmado';
+  var html = pliCoberturaHtml(d.cobertura || {});
+
+  if (d.advertencias && d.advertencias.length) {
+    html += '<div style="background:rgba(245,158,11,.12);border-radius:8px;padding:8px 12px;font-size:12px;margin-top:8px">'
+      + '⚠ ' + d.advertencias.map(function(a) { return pliEsc(a); }).join(' · ') + '</div>';
+  }
+  if (d.origen === 'snapshot') {
+    html += '<div style="margin-top:8px;font-size:12px;color:var(--mut)">🔒 Valores congelados al confirmar el plan. Editar recetas ahora no los cambia.</div>';
+  }
+
+  if (!d.lineas || !d.lineas.length) {
+    html += '<div class="emp" style="padding:24px;text-align:center;margin-top:10px">Sin insumos para comprar. Cargá el objetivo y las recetas.</div>';
+    document.getElementById('pli-resultado').innerHTML = html;
+    return;
+  }
+
+  html += '<div class="ab-table-wrap" style="margin-top:12px"><table class="pa-tbl" style="font-size:12px"><thead><tr>'
+    + '<th>Insumo</th><th style="text-align:right">Necesidad bruta<div class="pli-cel-chica">incluye merma</div></th>'
+    + '<th style="text-align:right">Rango</th>'
+    + '<th style="text-align:right">Existencia</th><th style="text-align:right">Neto</th>'
+    + '<th style="text-align:right">A COMPRAR</th><th style="text-align:right">Exceso</th>'
+    + '<th style="text-align:right">Costo est.</th><th style="width:28px"></th>'
+    + '</tr></thead><tbody>';
+
+  d.lineas.forEach(function(l) {
+    var rango = (l.cant_min_uso !== l.cant_max_uso)
+      ? pliN(l.cant_min_uso) + '–' + pliN(l.cant_max_uso) : '—';
+    html += '<tr>'
+      + '<td><strong>' + pliEsc(l.insumo_nombre) + '</strong>'
+        + (l.proveedor_texto ? '<div class="pli-cel-chica">' + pliEsc(l.proveedor_texto) + '</div>' : '') + '</td>'
+      + '<td class="pli-num">' + pliN(l.cant_bruta_uso) + ' <span class="pli-cel-chica">' + pliEsc(l.unidad_uso) + '</span></td>'
+      + '<td class="pli-num pli-cel-chica">' + rango + '</td>'
+      + '<td class="pli-num"><input type="number" step="any" min="0" value="' + (l.existencia_declarada || 0) + '"'
+        + (conf ? ' disabled' : '') + ' style="width:90px;font-size:11px;text-align:right"'
+        + ' onchange="pliExistSet(' + l.insumo_id + ',this.value)">'
+        + '<div class="pli-cel-chica">' + pliEsc(l.unidad_uso) + '</div></td>'
+      + '<td class="pli-num">' + pliN(l.cant_neta_uso) + '</td>'
+      + '<td class="pli-num"><strong style="font-size:14px">' + pliN(l.bultos_a_comprar) + '</strong> '
+        + '<span class="pli-cel-chica">' + pliEsc(l.unidad_compra) + '</span>'
+        + (l.moq_forzado ? '<div class="pli-cel-chica" style="color:#b45309">mínimo del proveedor</div>' : '') + '</td>'
+      + '<td class="pli-num pli-cel-chica">' + pliN(l.exceso_uso) + ' ' + pliEsc(l.unidad_uso) + '</td>'
+      + '<td class="pli-num">' + (l.sin_precio ? '<span style="color:#f59e0b">sin precio</span>'
+          : pliEsc(l.moneda_snapshot) + ' ' + pliN(l.costo_estimado, 2)) + '</td>'
+      + '<td><button class="btn bo bs" onclick="pliDesglose(' + l.insumo_id + ')" style="padding:1px 5px;font-size:11px">▾</button></td>'
+      + '</tr>'
+      + '<tr id="pli-dg-' + l.insumo_id + '" style="display:none"><td colspan="9" class="pli-desglose"></td></tr>';
+  });
+
+  html += '</tbody></table></div>';
+
+  var tot = d.totales_por_moneda || {};
+  var partes = Object.keys(tot).map(function(m) { return '<strong>Total ' + m + ' ' + pliN(tot[m], 2) + '</strong>'; });
+  var sinPrecio = (d.lineas || []).filter(function(l) { return l.sin_precio; }).length;
+  html += '<div style="margin-top:10px;display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px;font-size:13px">'
+    + '<div class="pli-cel-chica" style="max-width:520px">El neto descuenta únicamente la existencia que declarás en esta tabla. '
+      + 'No se consulta el stock del sistema.</div>'
+    + '<div>' + (partes.join(' · ') || '—')
+      + (sinPrecio ? ' <span class="pli-cel-chica">(parcial: ' + sinPrecio + ' sin precio)</span>' : '') + '</div></div>';
+
+  document.getElementById('pli-resultado').innerHTML = html;
+}
+
+// Ningún total se muestra sin su desglose a un click: es lo que hace que el
+// usuario reporte un ratio mal cargado en vez de irse a Excel en silencio.
+function pliDesglose(insumoId) {
+  var tr = document.getElementById('pli-dg-' + insumoId);
+  if (!tr) return;
+  if (tr.style.display !== 'none') { tr.style.display = 'none'; return; }
+  var l = (PLI.calculo.lineas || []).filter(function(x) { return x.insumo_id === insumoId; })[0];
+  if (!l) return;
+  var txt = l.insumo_nombre + ' — ' + pliN(l.bultos_a_comprar) + ' ' + l.unidad_compra + '\n';
+  (l.desglose || []).forEach(function(d) {
+    txt += '  ' + (d.ruta || []).join(' › ') + ':  ' + d.formula + '\n';
+  });
+  txt += '  ' + '·'.repeat(52) + '\n';
+  txt += '  Subtotal exacto ............. ' + pliN(l.cant_bruta_uso, 4) + ' ' + l.unidad_uso + '\n';
+  txt += '  − existencia declarada ...... ' + pliN(l.existencia, 4) + '\n';
+  txt += '  Neto ........................ ' + pliN(l.cant_neta_uso, 4) + ' ' + l.unidad_uso + '\n';
+  txt += '  ÷ equivalencia (1 ' + l.unidad_compra + ' = ' + pliN(l.factor_compra) + ' ' + l.unidad_uso + ') = ' + pliN(l.bultos_teoricos, 4) + '\n';
+  if (l.exceso_multiplo > 0) txt += '  redondeo a múltiplo de ' + pliN(l.multiplo_compra) + ' ... +' + pliN(l.exceso_multiplo, 4) + '\n';
+  if (l.moq_forzado) txt += '  mínimo del proveedor (' + pliN(l.moq) + ') ... +' + pliN(l.exceso_moq, 4) + '\n';
+  txt += '  A COMPRAR ................... ' + pliN(l.bultos_a_comprar) + ' ' + l.unidad_compra + '\n';
+  if (!l.sin_precio) txt += '  × ' + l.moneda_snapshot + ' ' + pliN(l.precio_unit_snapshot, 2) + ' = ' + l.moneda_snapshot + ' ' + pliN(l.costo_estimado, 2) + '\n';
+  else txt += '  (sin precio cargado — no suma al total)\n';
+  tr.querySelector('td').textContent = txt;
+  tr.style.display = '';
+}
+
+function pliExistSet(insumoId, valor) {
+  pliApi('/planes/' + PLI.plan.id + '/existencias/' + insumoId, {
+    method: 'PUT', body: JSON.stringify({ cantidad: Number(valor) || 0 })
+  }).then(function(r) {
+    if (!r.ok) { pliErr(r); return; }
+    pliCalcular();
+  });
+}
+
+function pliExportar() {
+  window.open('/api/pli/planes/' + PLI.plan.id + '/export.xlsx', '_blank');
+}
+
+function pliConfirmarAbrir() {
+  var d = PLI.calculo;
+  if (!d) return;
+  var tot = d.totales_por_moneda || {};
+  var partes = Object.keys(tot).map(function(m) { return m + ' ' + pliN(tot[m], 2); });
+  var ok = d.cobertura && d.cobertura.ok;
+  var html = '<div style="margin-bottom:10px">Se van a congelar <strong>' + (d.lineas || []).length + '</strong> líneas de compra.</div>'
+    + '<div style="margin-bottom:10px">Total estimado: <strong>' + (partes.join(' · ') || '—') + '</strong></div>'
+    + pliCoberturaHtml(d.cobertura || {});
+  if (!ok) {
+    html += '<label style="display:flex;gap:6px;align-items:flex-start;margin-top:12px;font-size:12px;cursor:pointer">'
+      + '<input type="checkbox" id="pli-conf-forzar"> '
+      + '<span>Entiendo que el plan tiene los problemas listados arriba y quiero confirmarlo igual.</span></label>';
+  }
+  html += '<div style="margin-top:10px;font-size:12px;color:var(--mut)">Después de confirmar, los números quedan congelados: '
+    + 'editar una receta ya no los cambia. Para recalcular, reabrí el plan o duplicalo.</div>';
+  document.getElementById('pli-conf-cuerpo').innerHTML = html;
+  document.getElementById('pli-mb-confirmar').classList.add('on');
+}
+
+function pliConfirmarOk() {
+  var chk = document.getElementById('pli-conf-forzar');
+  var ok = PLI.calculo && PLI.calculo.cobertura && PLI.calculo.cobertura.ok;
+  if (!ok && (!chk || !chk.checked)) return toast('Marcá la casilla para confirmar igual', 'er');
+  pliApi('/planes/' + PLI.plan.id + '/confirmar', { method: 'POST', body: JSON.stringify({ forzar: !ok }) })
+    .then(function(r) {
+      if (!r.ok) { pliErr(r); return; }
+      toast('✓ Plan confirmado', 'ok');
+      document.getElementById('pli-mb-confirmar').classList.remove('on');
+      pliPlanAbrir(PLI.plan.id);
+    });
+}
+
+function pliReabrir() {
+  if (!confirm('¿Reabrir el plan? Se borra el resultado congelado y vuelve a borrador.')) return;
+  pliApi('/planes/' + PLI.plan.id + '/reabrir', { method: 'POST' }).then(function(r) {
+    if (!r.ok) { pliErr(r); return; }
+    toast('✓ Plan reabierto', 'ok');
+    pliPlanAbrir(PLI.plan.id);
+  });
+}
+
+// ── Routing ───────────────────────────────────────────────────────────────
+// Se envuelve loadSec (que a esta altura ya fue redefinido por el bloque de
+// arriba) en vez de tocarlo, para no arriesgar los módulos existentes.
+(function() {
+  var anterior = loadSec;
+  loadSec = function(s) {
+    if (s === 'pli-planificacion') { pliInit(); return; }
+    anterior(s);
+  };
+})();
 </script>
 
 
