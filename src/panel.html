@@ -10877,12 +10877,17 @@ function sgRepExport(){
     .pli-inp-num[type=number] { -moz-appearance:textfield }
     #sec-pli-planificacion .pa-tbl th { white-space:nowrap }
     .pli-grp-head td { background:var(--bg2,#f1f5f9); font-weight:700; font-size:12px; padding:7px 10px }
+    .pli-vista { color:var(--mut); background:var(--sur) }
+    .pli-vista.on { background:var(--burg); color:#fff }
+    .pli-sem-vencida td  { background:rgba(239,68,68,.07) }
+    .pli-sem-urgente td  { background:rgba(245,158,11,.09) }
   </style>
 
   <div style="display:flex;border-bottom:1px solid var(--bor);margin-bottom:14px">
     <div class="pli-tab on" data-pli="insumos"   onclick="pliTab('insumos')">🧱 Insumos</div>
     <div class="pli-tab"    data-pli="productos" onclick="pliTab('productos')">🍈 Productos y recetas</div>
     <div class="pli-tab"    data-pli="planes"    onclick="pliTab('planes')">📊 Planes</div>
+    <div class="pli-tab"    data-pli="comprar"   onclick="pliTab('comprar')">🛒 Comprar</div>
   </div>
 
   <!-- ── SOLAPA INSUMOS ─────────────────────────────────────────────── -->
@@ -10949,6 +10954,61 @@ function sgRepExport(){
 
     <div id="pli-plan-detalle" style="display:none"></div>
   </div>
+
+  <!-- ── SOLAPA COMPRAR ─────────────────────────────────────────────── -->
+  <div class="pli-pane" id="pli-pane-comprar">
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:12px">
+      <span class="pli-cel-chica">Plan:</span>
+      <select id="pli-cmp-plan" class="pli-inp" onchange="pliCmpCargar()" style="min-width:220px"></select>
+      <div style="display:flex;border:1px solid var(--bor);border-radius:8px;overflow:hidden">
+        <div class="pli-vista on" data-pli-vista="agenda" onclick="pliCmpVista('agenda')"
+             style="padding:6px 12px;cursor:pointer;font-size:12px;font-weight:600">📅 Agenda de pedidos</div>
+        <div class="pli-vista" data-pli-vista="semanas" onclick="pliCmpVista('semanas')"
+             style="padding:6px 12px;cursor:pointer;font-size:12px;font-weight:600">🍈 Por semana de cosecha</div>
+        <div class="pli-vista" data-pli-vista="hechas" onclick="pliCmpVista('hechas')"
+             style="padding:6px 12px;cursor:pointer;font-size:12px;font-weight:600">✅ Compras registradas</div>
+      </div>
+      <button class="btn bb" onclick="pliCompraAbrir(null)">+ Registrar compra</button>
+    </div>
+    <div id="pli-cmp-cont"></div>
+  </div>
+</div>
+
+<!-- Modal: registrar compra -->
+<div class="ab-modal-overlay" id="pli-mb-compra">
+<div class="ab-modal" style="width:560px">
+  <div class="mhd">
+    <div><div class="mht" id="pli-cmp-tit">Registrar compra</div></div>
+    <button class="mcl" onclick="document.getElementById('pli-mb-compra').classList.remove('on')">×</button>
+  </div>
+  <input type="hidden" id="pli-cmp-id">
+  <div class="fl ff"><label>Insumo *</label>
+    <select id="pli-cmp-insumo" class="pli-inp" onchange="pliCompraUnidad()" style="width:100%"></select>
+  </div>
+  <div class="fg" style="margin-top:8px">
+    <div class="fl"><label>Fecha del pedido *</label><input id="pli-cmp-fecha" type="date" class="pli-inp"></div>
+    <div class="fl"><label>Cantidad *</label>
+      <input id="pli-cmp-cant" type="number" step="any" min="0" class="pli-inp pli-inp-num">
+      <div class="pli-cel-chica" id="pli-cmp-unidad">en unidad de compra</div>
+    </div>
+    <div class="fl"><label>Estado</label>
+      <select id="pli-cmp-estado" class="pli-inp">
+        <option value="pedido">Pedido</option>
+        <option value="recibido">Recibido</option>
+        <option value="cancelado">Cancelado (no cuenta)</option>
+      </select>
+    </div>
+  </div>
+  <div class="fg" style="margin-top:8px">
+    <div class="fl ff"><label>Proveedor</label><input id="pli-cmp-prov" list="pli-dl-prov" class="pli-inp"></div>
+    <div class="fl"><label>Nº de orden</label><input id="pli-cmp-orden" class="pli-inp"></div>
+  </div>
+  <div class="fl ff" style="margin-top:8px"><label>Notas</label><input id="pli-cmp-notas" class="pli-inp"></div>
+  <div class="ab-modal-footer">
+    <button class="btn bo" onclick="document.getElementById('pli-mb-compra').classList.remove('on')">Cancelar</button>
+    <button class="btn bb" onclick="pliCompraGuardar()">Guardar</button>
+  </div>
+</div>
 </div>
 
 <!-- Modal: insumo -->
@@ -10999,6 +11059,21 @@ function sgRepExport(){
     <div class="fl"><label>Precio por unidad de compra</label><input id="pli-ins-precio" type="number" step="any" min="0" value="0"></div>
     <div class="fl"><label>Moneda</label>
       <select id="pli-ins-moneda"><option value="ARS">ARS</option><option value="USD">USD</option></select>
+    </div>
+  </div>
+  <div class="fg" style="margin-top:8px">
+    <div class="fl"><label>Días de anticipación para pedirlo</label>
+      <input id="pli-ins-lead" type="number" step="1" min="0" max="365" value="15" class="pli-inp pli-inp-num">
+      <div class="pli-cel-chica">La agenda de compras avisa con este plazo antes de la semana de cosecha</div>
+    </div>
+    <div class="fl ff"><label>¿Cómo se consigue?</label>
+      <select id="pli-ins-modo" class="pli-inp">
+        <option value="compra">Se compra</option>
+        <option value="alquiler_uso">Alquiler por uso (pool retornable, ej. IFCO)</option>
+        <option value="comodato">Comodato</option>
+        <option value="provee_cliente">Lo provee el cliente</option>
+      </select>
+      <div class="pli-cel-chica">Lo que no se compra queda FUERA de la lista de compra y del total</div>
     </div>
   </div>
   <div class="fl ff" style="margin-top:8px"><label>Notas</label><input id="pli-ins-notas"></div>
@@ -35453,7 +35528,9 @@ var PLI = {
   planes: [], plan: null, calculo: null,
   pegarFilas: [],
   prodCargados: false,
-  orden: 'insumo',   // orden de la lista de compra: insumo | costo | proveedor | categoria
+  orden: 'insumo',        // orden de la lista de compra: insumo | costo | proveedor | categoria
+  semanasExtra: [],       // semanas agregadas en la grilla que todavía no tienen cantidades
+  cmpPlanId: null, cmpCalculo: null, cmpCompras: [], cmpVista: 'agenda',
   seq: 0
 };
 
@@ -35496,6 +35573,9 @@ function pliTab(t) {
   document.querySelectorAll('#sec-pli-planificacion .pli-pane').forEach(function(el) {
     el.classList.toggle('on', el.id === 'pli-pane-' + t);
   });
+  // La agenda depende de las recetas y de las compras, que pueden haber cambiado
+  // en otra solapa: se recarga al entrar en vez de mostrar algo viejo.
+  if (t === 'comprar') pliCmpInit();
 }
 
 // ── Temporadas ────────────────────────────────────────────────────────────
@@ -35631,6 +35711,8 @@ function pliInsAbrir(id) {
   document.getElementById('pli-ins-moq').value = i ? i.moq : 0;
   document.getElementById('pli-ins-precio').value = i ? i.precio_ref : 0;
   document.getElementById('pli-ins-moneda').value = i ? i.moneda : 'ARS';
+  document.getElementById('pli-ins-lead').value = i ? (i.lead_time_dias === null || i.lead_time_dias === undefined ? 15 : i.lead_time_dias) : 15;
+  document.getElementById('pli-ins-modo').value = i ? (i.modo_provision || 'compra') : 'compra';
   document.getElementById('pli-ins-notas').value = i ? (i.notas || '') : '';
   pliInsPreview();
   document.getElementById('pli-mb-insumo').classList.add('on');
@@ -35650,6 +35732,8 @@ function pliInsGuardar() {
     moq: document.getElementById('pli-ins-moq').value,
     precio_ref: document.getElementById('pli-ins-precio').value,
     moneda: document.getElementById('pli-ins-moneda').value,
+    lead_time_dias: document.getElementById('pli-ins-lead').value,
+    modo_provision: document.getElementById('pli-ins-modo').value,
     notas: document.getElementById('pli-ins-notas').value.trim()
   };
   if (!body.nombre) return toast('El nombre es obligatorio', 'er');
@@ -36178,9 +36262,6 @@ function pliPlanAbrir(id) {
 function pliPlanRender() {
   var p = PLI.plan;
   var conf = p.estado === 'confirmado';
-  var raices = PLI.arbol;
-  var porProd = {};
-  (p.objetivos || []).forEach(function(o) { porProd[o.producto_id] = o.cantidad; });
 
   var html = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">'
     + '<div><button class="btn bo bs" onclick="pliPlanVolver()" style="font-size:11px">← Planes</button> '
@@ -36194,33 +36275,153 @@ function pliPlanRender() {
               : '<button class="btn bb" onclick="pliConfirmarAbrir()">Confirmar plan</button>')
     + '</div></div>';
 
-  // Objetivos
-  html += '<div style="border:1px solid var(--bor);border-radius:10px;padding:12px;margin-bottom:12px;background:var(--sur)">'
-    + '<div style="font-size:12px;font-weight:700;margin-bottom:8px">🎯 Objetivo de producción</div>';
-  if (!raices.length) {
-    html += '<div class="pli-cel-chica">No hay productos cargados en esta temporada.</div>';
-  } else {
-    html += raices.map(function(pr) {
-      return '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">'
-        + '<div style="min-width:160px">' + pliEsc(pr.nombre) + '</div>'
-        + '<input type="number" step="any" min="0" id="pli-obj-' + pr.id + '" value="' + (porProd[pr.id] || 0) + '"'
-        + (conf ? ' disabled' : '') + ' style="width:130px" onchange="pliObjGuardar()">'
-        + '<span class="pli-cel-chica">' + pliEsc(pr.unidad) + '</span></div>';
-    }).join('');
-  }
-  html += '</div><div id="pli-resultado"></div>';
-
+  html += '<div id="pli-objetivos"></div><div id="pli-resultado"></div>';
   document.getElementById('pli-plan-detalle').innerHTML = html;
+  pliObjRender();
+}
+
+// ── Curva de producción: grilla semanas × productos ───────────────────────
+// La carga es manual, semana por semana. Cada celda es (producto raíz, semana de
+// cosecha); las celdas en 0 no se persisten. Un plan sin semanas usa la fila
+// "sin fecha", que es como quedan los planes viejos.
+
+function pliObjClave(semana, pid) { return semana + '|' + pid; }
+
+function pliObjEstado() {
+  var mapa = {}, semanas = {};
+  (PLI.plan.objetivos || []).forEach(function(o) {
+    var s = o.bucket_ini || '';
+    mapa[pliObjClave(s, o.producto_id)] = o.cantidad;
+    semanas[s] = true;
+  });
+  (PLI.semanasExtra || []).forEach(function(s) { semanas[s] = true; });
+  var lista = Object.keys(semanas).sort();
+  if (!lista.length) lista = [''];
+  return { mapa: mapa, semanas: lista };
+}
+
+function pliObjRender() {
+  var cont = document.getElementById('pli-objetivos');
+  if (!cont) return;
+  var conf = PLI.plan.estado === 'confirmado';
+  var raices = PLI.arbol;
+  var est = pliObjEstado();
+
+  var html = '<div style="border:1px solid var(--bor);border-radius:10px;padding:12px;margin-bottom:12px;background:var(--sur)">'
+    + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">'
+      + '<div style="font-size:12px;font-weight:700">🎯 Curva de producción por semana de cosecha</div>'
+      + (conf ? '' : '<button class="btn bo bs" onclick="pliObjAgregarSemana()" style="font-size:11px">+ semana</button>')
+    + '</div>';
+
+  if (!raices.length) {
+    cont.innerHTML = html + '<div class="pli-cel-chica">No hay productos cargados en esta temporada.</div></div>';
+    return;
+  }
+
+  html += '<div class="pli-cel-chica" style="margin-bottom:8px">Cargá cuánto vas a empacar en cada semana. '
+    + 'La semana se identifica por su lunes. Lo que dejes en 0 no se guarda.</div>';
+
+  html += '<div class="ab-table-wrap"><table class="pa-tbl" style="font-size:12px"><thead><tr>'
+    + '<th style="min-width:150px">Semana de cosecha</th>'
+    + raices.map(function(pr) {
+        return '<th style="text-align:right;min-width:130px">' + pliEsc(pr.nombre)
+          + '<div class="pli-cel-chica">' + pliEsc(pr.unidad) + '</div></th>';
+      }).join('')
+    + '<th style="text-align:right;min-width:100px">Total</th>'
+    + (conf ? '' : '<th style="width:36px"></th>')
+    + '</tr></thead><tbody>';
+
+  var totCol = {}, totGen = 0;
+  est.semanas.forEach(function(s) {
+    var totFila = 0;
+    var celdas = raices.map(function(pr) {
+      var v = Number(est.mapa[pliObjClave(s, pr.id)] || 0);
+      totFila += v;
+      totCol[pr.id] = (totCol[pr.id] || 0) + v;
+      return '<td class="pli-num"><input type="number" step="any" min="0" class="pli-inp pli-inp-num"'
+        + ' style="width:120px" value="' + v + '"' + (conf ? ' disabled' : '')
+        + ' data-pli-sem="' + pliEsc(s) + '" data-pli-prod="' + pr.id + '"'
+        + ' onchange="pliObjGuardar()"></td>';
+    }).join('');
+    totGen += totFila;
+    html += '<tr><td><strong>' + (s ? pliEsc(pliFechaCorta(s)) : '<em>sin fecha</em>') + '</strong>'
+      + (s ? '<div class="pli-cel-chica">' + pliEsc(s) + '</div>' : '') + '</td>'
+      + celdas
+      + '<td class="pli-num"><strong>' + pliN(totFila) + '</strong></td>'
+      + (conf ? '' : '<td><button class="btn bd bs" onclick="pliObjQuitarSemana(\'' + pliEsc(s) + '\')"'
+          + ' style="padding:2px 6px;font-size:11px" title="Quitar la semana">✕</button></td>')
+      + '</tr>';
+  });
+
+  html += '</tbody><tfoot><tr class="pli-grp-head"><td>TOTAL</td>'
+    + raices.map(function(pr) { return '<td class="pli-num">' + pliN(totCol[pr.id] || 0) + '</td>'; }).join('')
+    + '<td class="pli-num">' + pliN(totGen) + '</td>' + (conf ? '' : '<td></td>')
+    + '</tr></tfoot></table></div></div>';
+
+  cont.innerHTML = html;
+}
+
+// "lun 9 nov" — la fecha completa igual queda debajo, para no perder el año.
+function pliFechaCorta(iso) {
+  var p = String(iso).split('-');
+  if (p.length !== 3) return iso;
+  var d = new Date(Date.UTC(+p[0], +p[1] - 1, +p[2]));
+  var mes = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'][d.getUTCMonth()];
+  return 'sem ' + d.getUTCDate() + ' ' + mes;
+}
+
+function pliObjAgregarSemana() {
+  var hoy = new Date();
+  var sug = hoy.toISOString().slice(0, 10);
+  var f = prompt('Fecha de la semana de cosecha (AAAA-MM-DD).\nSe normaliza al lunes de esa semana.', sug);
+  if (!f) return;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(f.trim())) return toast('Formato inválido: usá AAAA-MM-DD', 'er');
+  var lunes = pliLunesDe(f.trim());
+  if (!lunes) return toast('Fecha inválida', 'er');
+  PLI.semanasExtra = PLI.semanasExtra || [];
+  if (PLI.semanasExtra.indexOf(lunes) === -1) PLI.semanasExtra.push(lunes);
+  pliObjRender();
+}
+
+// Espejo de lunesDe() del backend. Se calcula en UTC porque hacer aritmética de
+// días en hora local se corre un día cuando cambia el horario de verano.
+function pliLunesDe(iso) {
+  var p = String(iso).split('-').map(Number);
+  if (p.length !== 3) return null;
+  var t = Date.UTC(p[0], p[1] - 1, p[2]);
+  var dow = new Date(t).getUTCDay();
+  var d = new Date(t - ((dow === 0 ? 6 : dow - 1) * 86400000));
+  var dd = function(n) { return String(n).padStart(2, '0'); };
+  return d.getUTCFullYear() + '-' + dd(d.getUTCMonth() + 1) + '-' + dd(d.getUTCDate());
+}
+
+function pliObjQuitarSemana(s) {
+  if (!confirm('¿Quitar' + (s ? ' la semana del ' + s : ' la fila sin fecha') + '? Se borran sus cantidades.')) return;
+  PLI.semanasExtra = (PLI.semanasExtra || []).filter(function(x) { return x !== s; });
+  PLI.plan.objetivos = (PLI.plan.objetivos || []).filter(function(o) { return (o.bucket_ini || '') !== s; });
+  pliObjRender();
+  pliObjGuardar();
 }
 
 function pliObjGuardar() {
-  var objetivos = PLI.arbol.map(function(pr) {
-    var el = document.getElementById('pli-obj-' + pr.id);
-    return { producto_id: pr.id, cantidad: Number(el ? el.value : 0) || 0 };
+  var objetivos = [];
+  document.querySelectorAll('#pli-objetivos input[data-pli-prod]').forEach(function(el) {
+    var v = Number(el.value) || 0;
+    if (v <= 0) return;   // las celdas vacías no se persisten
+    objetivos.push({
+      producto_id: parseInt(el.getAttribute('data-pli-prod'), 10),
+      cantidad: v,
+      bucket_ini: el.getAttribute('data-pli-sem') || ''
+    });
   });
-  pliApi('/planes/' + PLI.plan.id + '/objetivos', { method: 'PUT', body: JSON.stringify({ objetivos: objetivos }) })
+  var planId = PLI.plan.id;
+  pliApi('/planes/' + planId + '/objetivos', { method: 'PUT', body: JSON.stringify({ objetivos: objetivos }) })
     .then(function(r) {
       if (!r.ok) { pliErr(r); return; }
+      if (!PLI.plan || PLI.plan.id !== planId) return;
+      PLI.plan.objetivos = objetivos.map(function(o) {
+        return { producto_id: o.producto_id, cantidad: o.cantidad, bucket_ini: o.bucket_ini };
+      });
       pliCalcular();
     });
 }
@@ -36500,6 +36701,306 @@ function pliReabrir() {
     if (!r.ok) { pliErr(r); return; }
     toast('✓ Plan reabierto', 'ok');
     pliPlanAbrir(PLI.plan.id);
+  });
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// SOLAPA COMPRAR — qué pedir, cuándo, y qué se pidió ya
+// ══════════════════════════════════════════════════════════════════════════
+// La agenda corre adelantada respecto de la cosecha: el insumo tiene que ESTAR
+// el primer día de la semana en que se consume, así que la fecha límite de
+// pedido es esa semana menos el plazo de entrega del insumo.
+
+function pliCmpVista(v) {
+  PLI.cmpVista = v;
+  document.querySelectorAll('#sec-pli-planificacion .pli-vista').forEach(function(el) {
+    el.classList.toggle('on', el.getAttribute('data-pli-vista') === v);
+  });
+  pliCmpRender();
+}
+
+function pliCmpInit() {
+  var sel = document.getElementById('pli-cmp-plan');
+  var planes = PLI.planes.filter(function(p) { return p.estado !== 'anulado'; });
+  var actual = sel.value;
+  sel.innerHTML = planes.map(function(p) {
+    return '<option value="' + p.id + '">' + pliEsc(p.nombre)
+      + (p.estado === 'confirmado' ? ' (confirmado)' : '') + '</option>';
+  }).join('') || '<option value="">— sin planes —</option>';
+  if (actual && planes.some(function(p) { return String(p.id) === actual; })) sel.value = actual;
+  pliCmpCargar();
+}
+
+function pliCmpCargar() {
+  var id = parseInt(document.getElementById('pli-cmp-plan').value, 10);
+  var cont = document.getElementById('pli-cmp-cont');
+  if (!id) { cont.innerHTML = '<div class="emp" style="padding:24px;text-align:center">Creá un plan primero.</div>'; return; }
+  cont.innerHTML = '<div class="emp">Cargando…</div>';
+  PLI.cmpPlanId = id;
+  // El cálculo ya trae el detalle por semana con las fechas límite; las compras
+  // se piden aparte para poder listarlas y editarlas.
+  pliApi('/planes/' + id + '/calculo').then(function(rc) {
+    if (PLI.cmpPlanId !== id) return;
+    if (!rc.ok) { cont.innerHTML = '<div class="emp" style="color:var(--err)">' + pliEsc(rc.error) + '</div>'; return; }
+    PLI.cmpCalculo = rc.data;
+    pliApi('/planes/' + id + '/compras').then(function(rp) {
+      if (PLI.cmpPlanId !== id) return;
+      PLI.cmpCompras = rp.ok ? (rp.data || []) : [];
+      pliCmpRender();
+    });
+  });
+}
+
+function pliHoyISO() {
+  var d = new Date();
+  var dd = function(n) { return String(n).padStart(2, '0'); };
+  return d.getFullYear() + '-' + dd(d.getMonth() + 1) + '-' + dd(d.getDate());
+}
+
+function pliCmpRender() {
+  var cont = document.getElementById('pli-cmp-cont');
+  if (!cont || !PLI.cmpCalculo) return;
+  var v = PLI.cmpVista || 'agenda';
+  if (v === 'hechas') return pliCmpRenderHechas(cont);
+  if (v === 'semanas') return pliCmpRenderSemanas(cont);
+  pliCmpRenderAgenda(cont);
+}
+
+// ── Vista 1: agenda de pedidos (la que se usa para trabajar) ──────────────
+function pliCmpRenderAgenda(cont) {
+  var hoy = pliHoyISO();
+  var filas = [];
+  (PLI.cmpCalculo.lineas || []).forEach(function(l) {
+    (l.buckets || []).forEach(function(b) {
+      if (!(b.bultos_a_comprar > 0)) return;   // ya cubierto por stock o por lo comprado
+      filas.push({ l: l, b: b });
+    });
+  });
+  // Sin fecha límite (plan sin semanas) va al final: no se puede agendar.
+  filas.sort(function(x, y) {
+    var fx = x.b.fecha_pedido_limite || '9999-99-99';
+    var fy = y.b.fecha_pedido_limite || '9999-99-99';
+    return fx.localeCompare(fy) || String(x.l.insumo_nombre).localeCompare(String(y.l.insumo_nombre), 'es');
+  });
+
+  if (!filas.length) {
+    cont.innerHTML = '<div class="pli-badge pli-ok" style="display:block;padding:12px">'
+      + '✔ No queda nada por pedir para este plan.</div>';
+    return;
+  }
+
+  var vencidas = filas.filter(function(f) { return f.b.fecha_pedido_limite && f.b.fecha_pedido_limite < hoy; }).length;
+  var html = '';
+  if (vencidas) {
+    html += '<div style="background:rgba(239,68,68,.1);border:1px solid var(--err);border-radius:8px;padding:10px 12px;font-size:13px;margin-bottom:10px">'
+      + '<strong style="color:var(--err)">' + vencidas + ' pedido(s) con la fecha límite pasada.</strong> '
+      + 'Si no se piden ya, el insumo no llega para esa semana de cosecha.</div>';
+  }
+  html += '<div class="ab-table-wrap"><table class="pa-tbl" style="font-size:12px"><thead><tr>'
+    + '<th style="min-width:130px">Pedir hasta</th><th>Insumo</th><th>Proveedor</th>'
+    + '<th style="text-align:right">Cantidad</th><th style="min-width:120px">Para cosecha</th>'
+    + '<th style="text-align:right">Plazo</th><th style="width:110px"></th>'
+    + '</tr></thead><tbody>';
+
+  filas.forEach(function(f) {
+    var lim = f.b.fecha_pedido_limite;
+    var clase = '';
+    var etiqueta = '';
+    if (!lim) { etiqueta = '<span class="pli-badge pli-gris">sin fecha</span>'; }
+    else if (lim < hoy) { clase = 'pli-sem-vencida'; etiqueta = '<span class="pli-badge pli-err">vencida</span>'; }
+    else if (lim <= pliMasDias(hoy, 7)) { clase = 'pli-sem-urgente'; etiqueta = '<span class="pli-badge pli-warn">esta semana</span>'; }
+    html += '<tr class="' + clase + '">'
+      + '<td><strong>' + (lim ? pliEsc(lim) : '—') + '</strong> ' + etiqueta + '</td>'
+      + '<td><strong>' + pliEsc(f.l.insumo_nombre) + '</strong></td>'
+      + '<td class="pli-cel-chica">' + pliEsc(f.l.proveedor_texto || '—') + '</td>'
+      + '<td class="pli-num"><strong style="font-size:14px">' + pliN(f.b.bultos_a_comprar) + '</strong> '
+        + '<span class="pli-cel-chica">' + pliEsc(f.l.unidad_compra) + '</span></td>'
+      + '<td>' + (f.b.fecha_necesidad ? pliEsc(pliFechaCorta(f.b.fecha_necesidad)) : '<em class="pli-cel-chica">sin fecha</em>') + '</td>'
+      + '<td class="pli-num pli-cel-chica">' + (f.l.lead_time_dias || 0) + ' d</td>'
+      + '<td><button class="btn bo bs" style="font-size:11px;padding:3px 8px"'
+        + ' onclick="pliCompraDesdeAgenda(' + f.l.insumo_id + ',' + f.b.bultos_a_comprar + ')">Registrar</button></td>'
+      + '</tr>';
+  });
+  html += '</tbody></table></div>'
+    + '<div class="pli-cel-chica" style="margin-top:8px">La fecha límite es la semana de cosecha menos el plazo de '
+    + 'entrega de cada insumo. Lo que ya registrás como comprado desaparece de esta agenda.</div>';
+  cont.innerHTML = html;
+}
+
+function pliMasDias(iso, dias) {
+  var p = String(iso).split('-').map(Number);
+  var d = new Date(Date.UTC(p[0], p[1] - 1, p[2]) + dias * 86400000);
+  var dd = function(n) { return String(n).padStart(2, '0'); };
+  return d.getUTCFullYear() + '-' + dd(d.getUTCMonth() + 1) + '-' + dd(d.getUTCDate());
+}
+
+// ── Vista 2: por semana de cosecha (cuánto se consume cada semana) ────────
+function pliCmpRenderSemanas(cont) {
+  var porSemana = {};
+  (PLI.cmpCalculo.lineas || []).forEach(function(l) {
+    (l.buckets || []).forEach(function(b) {
+      var k = b.fecha_necesidad || '';
+      if (!porSemana[k]) porSemana[k] = [];
+      porSemana[k].push({ l: l, b: b });
+    });
+  });
+  var semanas = Object.keys(porSemana).sort();
+  if (!semanas.length) {
+    cont.innerHTML = '<div class="emp" style="padding:24px;text-align:center">Sin necesidades calculadas.</div>';
+    return;
+  }
+  var html = '';
+  semanas.forEach(function(s) {
+    html += '<div style="border:1px solid var(--bor);border-radius:10px;padding:10px 12px;margin-bottom:10px;background:var(--sur)">'
+      + '<div style="font-size:13px;font-weight:700;margin-bottom:6px">'
+      + (s ? '🍈 ' + pliEsc(pliFechaCorta(s)) + ' <span class="pli-cel-chica">(' + pliEsc(s) + ')</span>'
+           : '🍈 <em>sin fecha asignada</em>') + '</div>'
+      + '<div class="ab-table-wrap"><table class="pa-tbl" style="font-size:12px"><thead><tr>'
+      + '<th>Insumo</th><th style="text-align:right">Necesidad</th><th style="text-align:right">Del stock</th>'
+      + '<th style="text-align:right">Ya comprado</th><th style="text-align:right">A pedir</th>'
+      + '<th style="min-width:120px">Pedir hasta</th></tr></thead><tbody>';
+    porSemana[s].sort(function(a, b) {
+      return String(a.l.insumo_nombre).localeCompare(String(b.l.insumo_nombre), 'es');
+    }).forEach(function(f) {
+      html += '<tr><td>' + pliEsc(f.l.insumo_nombre) + '</td>'
+        + '<td class="pli-num">' + pliN(f.b.cant_bruta_uso) + ' <span class="pli-cel-chica">' + pliEsc(f.l.unidad_uso) + '</span></td>'
+        + '<td class="pli-num pli-cel-chica">' + (f.b.existencia_aplicada > 0 ? pliN(f.b.existencia_aplicada) : '—') + '</td>'
+        + '<td class="pli-num pli-cel-chica">' + (f.b.ya_comprado > 0 ? pliN(f.b.ya_comprado) + ' ' + pliEsc(f.l.unidad_compra) : '—') + '</td>'
+        + '<td class="pli-num"><strong>' + pliN(f.b.bultos_a_comprar) + '</strong> '
+          + '<span class="pli-cel-chica">' + pliEsc(f.l.unidad_compra) + '</span></td>'
+        + '<td class="pli-cel-chica">' + pliEsc(f.b.fecha_pedido_limite || '—') + '</td></tr>';
+    });
+    html += '</tbody></table></div></div>';
+  });
+  cont.innerHTML = html;
+}
+
+// ── Vista 3: compras registradas, con requerido vs comprado vs pendiente ──
+function pliCmpRenderHechas(cont) {
+  var lineas = PLI.cmpCalculo.lineas || [];
+  var html = '<div class="ab-table-wrap" style="margin-bottom:14px"><table class="pa-tbl" style="font-size:12px"><thead><tr>'
+    + '<th>Insumo</th><th style="text-align:right">Requerido total</th>'
+    + '<th style="text-align:right">Ya comprado</th><th style="text-align:right">Pendiente</th>'
+    + '<th style="min-width:130px">Avance</th></tr></thead><tbody>';
+  lineas.forEach(function(l) {
+    var req = (l.ya_comprado_bultos || 0) + (l.bultos_a_comprar || 0);
+    var pct = req > 0 ? Math.min(100, (l.ya_comprado_bultos || 0) / req * 100) : 100;
+    html += '<tr><td><strong>' + pliEsc(l.insumo_nombre) + '</strong></td>'
+      + '<td class="pli-num">' + pliN(req) + ' <span class="pli-cel-chica">' + pliEsc(l.unidad_compra) + '</span></td>'
+      + '<td class="pli-num">' + pliN(l.ya_comprado_bultos || 0) + '</td>'
+      + '<td class="pli-num"><strong>' + pliN(l.bultos_a_comprar) + '</strong></td>'
+      + '<td><div style="background:var(--bor);border-radius:6px;height:14px;position:relative;overflow:hidden">'
+        + '<div style="background:var(--ok,#16a34a);height:100%;width:' + pct.toFixed(1) + '%"></div></div>'
+        + '<div class="pli-cel-chica">' + pct.toFixed(0) + '%</div></td></tr>';
+  });
+  html += '</tbody></table></div>';
+
+  html += '<div style="font-size:12px;font-weight:700;margin-bottom:6px">Compras registradas</div>';
+  if (!PLI.cmpCompras || !PLI.cmpCompras.length) {
+    html += '<div class="emp" style="padding:18px;text-align:center">Todavía no registraste ninguna compra.</div>';
+  } else {
+    html += '<div class="ab-table-wrap"><table class="pa-tbl" style="font-size:12px"><thead><tr>'
+      + '<th>Fecha</th><th>Insumo</th><th style="text-align:right">Cantidad</th><th>Proveedor</th>'
+      + '<th>Nº orden</th><th>Estado</th><th style="width:80px"></th></tr></thead><tbody>';
+    PLI.cmpCompras.forEach(function(c) {
+      var badge = c.estado === 'recibido' ? 'pli-ok' : (c.estado === 'cancelado' ? 'pli-gris' : 'pli-warn');
+      html += '<tr' + (c.estado === 'cancelado' ? ' style="opacity:.55"' : '') + '>'
+        + '<td>' + pliEsc(c.fecha) + '</td>'
+        + '<td>' + pliEsc(c.insumo_nombre) + '</td>'
+        + '<td class="pli-num">' + pliN(c.cantidad) + ' <span class="pli-cel-chica">' + pliEsc(c.unidad_compra) + '</span></td>'
+        + '<td class="pli-cel-chica">' + pliEsc(c.proveedor_texto || '—') + '</td>'
+        + '<td class="pli-cel-chica">' + pliEsc(c.nro_orden || '—') + '</td>'
+        + '<td><span class="pli-badge ' + badge + '">' + pliEsc(c.estado) + '</span></td>'
+        + '<td style="text-align:right;white-space:nowrap">'
+          + '<button class="btn bo bs" onclick="pliCompraAbrir(' + c.id + ')" style="padding:2px 6px;font-size:11px">✏️</button> '
+          + '<button class="btn bd bs" onclick="pliCompraBorrar(' + c.id + ')" style="padding:2px 6px;font-size:11px">🗑</button>'
+        + '</td></tr>';
+    });
+    html += '</tbody></table></div>';
+  }
+  html += '<div class="pli-cel-chica" style="margin-top:8px">Las canceladas no cuentan como cubiertas. '
+    + 'Las pedidas sí, porque ya están comprometidas.</div>';
+  cont.innerHTML = html;
+}
+
+// ── Alta y edición de compras ─────────────────────────────────────────────
+
+function pliCompraOpcionesInsumo(sel) {
+  var s = document.getElementById('pli-cmp-insumo');
+  s.innerHTML = '<option value="">— elegir insumo —</option>'
+    + PLI.insumos.filter(function(i) { return i.modo_provision === 'compra' || !i.modo_provision; })
+        .map(function(i) {
+          return '<option value="' + i.id + '"' + (i.id === sel ? ' selected' : '') + '>'
+            + pliEsc(i.nombre) + ' (' + pliEsc(i.unidad_compra) + ')</option>';
+        }).join('');
+}
+
+function pliCompraUnidad() {
+  var id = parseInt(document.getElementById('pli-cmp-insumo').value, 10);
+  var i = PLI.insumos.filter(function(x) { return x.id === id; })[0];
+  document.getElementById('pli-cmp-unidad').textContent = i
+    ? 'en ' + i.unidad_compra + ' (1 ' + i.unidad_compra + ' = ' + pliN(i.factor_compra) + ' ' + i.unidad_uso + ')'
+    : 'en unidad de compra';
+  if (i && i.proveedor_texto && !document.getElementById('pli-cmp-prov').value) {
+    document.getElementById('pli-cmp-prov').value = i.proveedor_texto;
+  }
+}
+
+function pliCompraAbrir(id) {
+  if (!PLI.cmpPlanId) return toast('Elegí un plan primero', 'er');
+  var c = id ? (PLI.cmpCompras || []).filter(function(x) { return x.id === id; })[0] : null;
+  document.getElementById('pli-cmp-tit').textContent = c ? 'Editar compra' : 'Registrar compra';
+  document.getElementById('pli-cmp-id').value = c ? c.id : '';
+  pliCompraOpcionesInsumo(c ? c.insumo_id : null);
+  document.getElementById('pli-cmp-fecha').value = c ? c.fecha : pliHoyISO();
+  document.getElementById('pli-cmp-cant').value = c ? c.cantidad : '';
+  document.getElementById('pli-cmp-estado').value = c ? c.estado : 'pedido';
+  document.getElementById('pli-cmp-prov').value = c ? (c.proveedor_texto || '') : '';
+  document.getElementById('pli-cmp-orden').value = c ? (c.nro_orden || '') : '';
+  document.getElementById('pli-cmp-notas').value = c ? (c.notas || '') : '';
+  pliCompraUnidad();
+  document.getElementById('pli-mb-compra').classList.add('on');
+}
+
+// Desde la agenda: precarga insumo y la cantidad exacta que falta pedir.
+function pliCompraDesdeAgenda(insumoId, cantidad) {
+  pliCompraAbrir(null);
+  pliCompraOpcionesInsumo(insumoId);
+  document.getElementById('pli-cmp-cant').value = cantidad;
+  pliCompraUnidad();
+}
+
+function pliCompraGuardar() {
+  var id = document.getElementById('pli-cmp-id').value;
+  var body = {
+    insumo_id: parseInt(document.getElementById('pli-cmp-insumo').value, 10),
+    fecha: document.getElementById('pli-cmp-fecha').value,
+    cantidad: document.getElementById('pli-cmp-cant').value,
+    estado: document.getElementById('pli-cmp-estado').value,
+    proveedor_texto: document.getElementById('pli-cmp-prov').value.trim(),
+    nro_orden: document.getElementById('pli-cmp-orden').value.trim(),
+    notas: document.getElementById('pli-cmp-notas').value.trim()
+  };
+  if (!body.insumo_id) return toast('Elegí el insumo', 'er');
+  if (!body.fecha) return toast('Falta la fecha', 'er');
+  if (!(Number(body.cantidad) > 0)) return toast('La cantidad tiene que ser mayor que 0', 'er');
+  var base = '/planes/' + PLI.cmpPlanId + '/compras';
+  var p = id ? pliApi(base + '/' + id, { method: 'PATCH', body: JSON.stringify(body) })
+             : pliApi(base, { method: 'POST', body: JSON.stringify(body) });
+  p.then(function(r) {
+    if (!r.ok) { pliErr(r); return; }
+    toast('✓ Compra registrada', 'ok');
+    document.getElementById('pli-mb-compra').classList.remove('on');
+    pliCmpCargar();
+  });
+}
+
+function pliCompraBorrar(id) {
+  if (!confirm('¿Borrar este registro de compra?')) return;
+  pliApi('/planes/' + PLI.cmpPlanId + '/compras/' + id, { method: 'DELETE' }).then(function(r) {
+    if (!r.ok) { pliErr(r); return; }
+    toast('✓ Borrado', 'ok');
+    pliCmpCargar();
   });
 }
 

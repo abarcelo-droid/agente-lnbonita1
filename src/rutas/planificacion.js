@@ -13,7 +13,7 @@
 import express from 'express';
 import * as XLSX from 'xlsx';
 import db from '../servicios/db_pli.js';   // este import es el que crea el schema pli_*
-import { calcularPlan } from '../servicios/pli_motor.js';
+import { calcularPlan, lunesDe } from '../servicios/pli_motor.js';
 
 const router = express.Router();
 
@@ -241,6 +241,18 @@ function leerInsumoBody(body, parcialDe = null) {
     }),
     precio_fecha:    g('precio_fecha',    () => vFecha(b.precio_fecha, 'La fecha del precio')),
     proveedor_texto: g('proveedor_texto', () => vTexto(b.proveedor_texto, 'El proveedor', { max: 120 })),
+    // Días de anticipación con los que hay que pedirlo. El default 15 es el piso
+    // operativo que se maneja; el IFCO importado tiene plazos mucho más largos.
+    lead_time_dias:  g('lead_time_dias',  () => vNum(b.lead_time_dias, 'El plazo de entrega', { min: 0, max: 365, def: 15, entero: true })),
+    // Los insumos que NO se compran (IFCO y todo lo que va por pool retornable,
+    // comodato o lo pone el cliente) quedan fuera de la lista de compra y del
+    // total: el motor solo explota los que tienen modo 'compra'.
+    modo_provision:  g('modo_provision',  () => {
+      const m = vTexto(b.modo_provision, 'El modo de provisión') || 'compra';
+      if (!['compra', 'alquiler_uso', 'comodato', 'provee_cliente'].includes(m))
+        throw bad('Modo de provisión inválido');
+      return m;
+    }),
     notas:           g('notas',           () => vTexto(b.notas, 'Las notas', { max: 500 }))
   };
 }
@@ -255,12 +267,12 @@ router.post('/insumos', wrap((req, res) => {
   const r = db.prepare(`
     INSERT INTO pli_insumos
       (sociedad_id, codigo, nombre, categoria, unidad_uso, unidad_compra, factor_compra,
-       multiplo_compra, moq, precio_ref, moneda, precio_fecha, proveedor_texto, notas,
-       creado_por_id, actualizado_por_id)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+       multiplo_compra, moq, precio_ref, moneda, precio_fecha, proveedor_texto,
+       lead_time_dias, modo_provision, notas, creado_por_id, actualizado_por_id)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
   `).run(soc, d.codigo, d.nombre, d.categoria, d.unidad_uso, d.unidad_compra, d.factor_compra,
-         d.multiplo_compra, d.moq, d.precio_ref, d.moneda, d.precio_fecha, d.proveedor_texto, d.notas,
-         req.user.id, req.user.id);
+         d.multiplo_compra, d.moq, d.precio_ref, d.moneda, d.precio_fecha, d.proveedor_texto,
+         d.lead_time_dias, d.modo_provision, d.notas, req.user.id, req.user.id);
   logPli('insumo', r.lastInsertRowid, 'alta', d, req.user.id);
   res.json({ ok: true, id: r.lastInsertRowid });
 }));
@@ -302,15 +314,15 @@ router.post('/insumos/bulk', wrap((req, res) => {
   const ins = db.prepare(`
     INSERT INTO pli_insumos
       (sociedad_id, codigo, nombre, categoria, unidad_uso, unidad_compra, factor_compra,
-       multiplo_compra, moq, precio_ref, moneda, precio_fecha, proveedor_texto, notas,
-       creado_por_id, actualizado_por_id)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+       multiplo_compra, moq, precio_ref, moneda, precio_fecha, proveedor_texto,
+       lead_time_dias, modo_provision, notas, creado_por_id, actualizado_por_id)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
   `);
   db.transaction(() => {
     for (const d of validas) {
       ins.run(soc, d.codigo, d.nombre, d.categoria, d.unidad_uso, d.unidad_compra, d.factor_compra,
-              d.multiplo_compra, d.moq, d.precio_ref, d.moneda, d.precio_fecha, d.proveedor_texto, d.notas,
-              req.user.id, req.user.id);
+              d.multiplo_compra, d.moq, d.precio_ref, d.moneda, d.precio_fecha, d.proveedor_texto,
+              d.lead_time_dias, d.modo_provision, d.notas, req.user.id, req.user.id);
     }
   })();
   logPli('insumo', null, 'alta_masiva', { cantidad: validas.length }, req.user.id);
@@ -372,10 +384,12 @@ router.patch('/insumos/:id', wrap((req, res) => {
     UPDATE pli_insumos SET
       codigo=?, nombre=?, categoria=?, unidad_uso=?, unidad_compra=?, factor_compra=?,
       multiplo_compra=?, moq=?, precio_ref=?, moneda=?, precio_fecha=?, proveedor_texto=?,
+      lead_time_dias=?, modo_provision=?,
       notas=?, activo=?, actualizado_en=${AHORA}, actualizado_por_id=?
     WHERE id=?
   `).run(d.codigo, d.nombre, d.categoria, d.unidad_uso, d.unidad_compra, d.factor_compra,
          d.multiplo_compra, d.moq, d.precio_ref, d.moneda, d.precio_fecha, d.proveedor_texto,
+         d.lead_time_dias, d.modo_provision,
          d.notas, activo, req.user.id, id);
   logPli('insumo', id, 'edicion', { antes: actual, despues: d }, req.user.id);
   res.json({ ok: true });
@@ -838,30 +852,61 @@ router.put('/planes/:id/objetivos', wrap((req, res) => {
       INSERT INTO pli_plan_objetivos (plan_id, producto_id, cantidad, unidad, bucket_ini, notas)
       VALUES (?,?,?,?,?,?)
     `);
-    const ids = [];
+    // Con semanas, el MISMO producto aparece en varias filas a propósito (una por
+    // semana de cosecha). Así que lo que no puede repetirse es el par
+    // producto+semana, y el solapamiento padre/hijo se valida DENTRO de cada
+    // semana: melón en la semana 1 e IFCO en la semana 2 no se solapan.
+    const vistas = new Set();
+    const porSemana = new Map();   // semana -> [{id, nombre}]
+    let guardados = 0;
+
     for (const o of objetivos) {
       const pid = vNum(o.producto_id, 'El producto', { entero: true, min: 1 });
       const prod = db.prepare(`
         SELECT * FROM pli_productos WHERE id=? AND sociedad_id=? AND temporada_id=? AND eliminado_en IS NULL
       `).get(pid, soc, plan.temporada_id);
       if (!prod) throw bad('Hay un objetivo que apunta a un producto de otra temporada o inexistente');
-      // Mismo producto dos veces: choca contra idx_pli_obj_unico y saldría un 500
-      // con el texto crudo de SQLite, perdiendo el guardado entero.
-      if (ids.some(function (x) { return x.id === pid; }))
-        throw bad(`"${prod.nombre}" está dos veces en los objetivos`);
+
+      // bucket_ini es la semana de cosecha, identificada por su lunes. Cualquier
+      // fecha que manden se normaliza al lunes de su semana, así dos fechas de la
+      // misma semana caen en el mismo balde en vez de crear dos filas.
+      const semana = o.bucket_ini ? (lunesDe(o.bucket_ini) || '') : '';
+      if (o.bucket_ini && !semana)
+        throw bad(`La fecha de semana "${o.bucket_ini}" no es válida (AAAA-MM-DD)`);
+
+      const clave = pid + '|' + semana;
+      if (vistas.has(clave)) {
+        // Chocaría contra idx_pli_obj_unico y saldría un 500 con el texto crudo
+        // de SQLite, perdiendo el guardado entero.
+        throw bad(`"${prod.nombre}" está repetido${semana ? ' en la semana del ' + semana : ''}`);
+      }
+      vistas.add(clave);
+
+      if (!porSemana.has(semana)) porSemana.set(semana, []);
+      const hermanos = porSemana.get(semana);
       // Padre e hijo a la vez se contarían dos veces, sin ningún error visible.
-      for (const otro of ids) {
-        const dsc = descendientes(otro.id);
-        if (dsc.includes(pid)) throw bad(`"${prod.nombre}" ya está incluido dentro del objetivo de "${otro.nombre}"`);
+      for (const otro of hermanos) {
+        if (descendientes(otro.id).includes(pid))
+          throw bad(`"${prod.nombre}" ya está incluido dentro del objetivo de "${otro.nombre}"`);
         if (descendientes(pid).includes(otro.id))
           throw bad(`"${otro.nombre}" ya está incluido dentro del objetivo de "${prod.nombre}"`);
       }
-      ids.push({ id: pid, nombre: prod.nombre });
-      ins.run(plan.id, pid, vNum(o.cantidad, 'La cantidad', { min: 0, def: 0 }), prod.unidad, '',
-              vTexto(o.notas, 'Las notas', { max: 300 }));
+      hermanos.push({ id: pid, nombre: prod.nombre });
+
+      // Las semanas en 0 no se guardan: con una grilla de semanas × productos la
+      // mayoría de las celdas quedan vacías y no tiene sentido persistirlas (y
+      // además dispararían el bloqueante de "objetivo en cero").
+      const cant = vNum(o.cantidad, 'La cantidad', { min: 0, def: 0 });
+      if (cant <= 0) continue;
+      ins.run(plan.id, pid, cant, prod.unidad, semana, vTexto(o.notas, 'Las notas', { max: 300 }));
+      guardados++;
+    }
+    if (!guardados && objetivos.length) {
+      // No es un error: puede querer vaciar el plan. Solo se registra.
+      logPli('plan', plan.id, 'objetivos_vacios', null, req.user.id);
     }
   })();
-  logPli('plan', plan.id, 'objetivos', { cantidad: objetivos.length }, req.user.id);
+  logPli('plan', plan.id, 'objetivos', { filas: objetivos.length }, req.user.id);
   res.json({ ok: true });
 }));
 
@@ -909,6 +954,79 @@ router.put('/planes/:id/existencias/:insumoId', wrap((req, res) => {
   res.json({ ok: true });
 }));
 
+// ── Compras (seguimiento de lo pedido contra lo que el plan requiere) ─────
+// La cantidad va en UNIDAD DE COMPRA, la misma en la que el plan dice "a comprar".
+
+router.get('/planes/:id/compras', wrap((req, res) => {
+  const soc = getSociedadId(req);
+  const plan = getPlan(soc, parseInt(req.params.id, 10));
+  const data = db.prepare(`
+    SELECT c.*, i.nombre AS insumo_nombre, i.unidad_compra
+    FROM pli_compras c
+    JOIN pli_insumos i ON i.id = c.insumo_id
+    WHERE c.plan_id=? AND c.eliminado_en IS NULL
+    ORDER BY c.fecha DESC, c.id DESC
+  `).all(plan.id);
+  res.json({ ok: true, data });
+}));
+
+router.post('/planes/:id/compras', wrap((req, res) => {
+  const soc = getSociedadId(req);
+  const plan = getPlan(soc, parseInt(req.params.id, 10));
+  const b = req.body || {};
+  const insumoId = vNum(b.insumo_id, 'El insumo', { entero: true, min: 1 });
+  const ins = db.prepare('SELECT * FROM pli_insumos WHERE id=? AND sociedad_id=? AND eliminado_en IS NULL').get(insumoId, soc);
+  if (!ins) throw bad('El insumo no existe o es de otra sociedad');
+  const fecha = vFecha(b.fecha, 'La fecha');
+  if (!fecha) throw bad('La fecha es obligatoria');
+  const cantidad = vNum(b.cantidad, 'La cantidad', { min: 1e-9 });
+  const estado = ['pedido', 'recibido', 'cancelado'].includes(b.estado) ? b.estado : 'pedido';
+  const r = db.prepare(`
+    INSERT INTO pli_compras (plan_id, insumo_id, fecha, cantidad, proveedor_texto, nro_orden, estado, notas, creado_por_id, actualizado_por_id)
+    VALUES (?,?,?,?,?,?,?,?,?,?)
+  `).run(plan.id, insumoId, fecha, cantidad,
+         vTexto(b.proveedor_texto, 'El proveedor', { max: 120 }) || ins.proveedor_texto || null,
+         vTexto(b.nro_orden, 'El número de orden', { max: 60 }), estado,
+         vTexto(b.notas, 'Las notas', { max: 300 }), req.user.id, req.user.id);
+  logPli('compra', r.lastInsertRowid, 'alta',
+    { plan_id: plan.id, insumo: ins.nombre, cantidad, unidad: ins.unidad_compra, fecha }, req.user.id);
+  res.json({ ok: true, id: r.lastInsertRowid });
+}));
+
+router.patch('/planes/:id/compras/:compraId', wrap((req, res) => {
+  const soc = getSociedadId(req);
+  const plan = getPlan(soc, parseInt(req.params.id, 10));
+  const cid = parseInt(req.params.compraId, 10);
+  const a = db.prepare('SELECT * FROM pli_compras WHERE id=? AND plan_id=? AND eliminado_en IS NULL').get(cid, plan.id);
+  if (!a) throw notFound('Compra no encontrada');
+  const b = req.body || {};
+  const estado = b.estado === undefined ? a.estado : String(b.estado);
+  if (!['pedido', 'recibido', 'cancelado'].includes(estado)) throw bad('Estado inválido');
+  db.prepare(`
+    UPDATE pli_compras SET fecha=?, cantidad=?, proveedor_texto=?, nro_orden=?, estado=?, notas=?,
+      actualizado_en=${AHORA}, actualizado_por_id=? WHERE id=?
+  `).run(b.fecha === undefined ? a.fecha : vFecha(b.fecha, 'La fecha'),
+         b.cantidad === undefined ? a.cantidad : vNum(b.cantidad, 'La cantidad', { min: 1e-9 }),
+         b.proveedor_texto === undefined ? a.proveedor_texto : vTexto(b.proveedor_texto, 'El proveedor', { max: 120 }),
+         b.nro_orden === undefined ? a.nro_orden : vTexto(b.nro_orden, 'El número de orden', { max: 60 }),
+         estado,
+         b.notas === undefined ? a.notas : vTexto(b.notas, 'Las notas', { max: 300 }),
+         req.user.id, cid);
+  logPli('compra', cid, 'edicion', { antes: a, despues: b }, req.user.id);
+  res.json({ ok: true });
+}));
+
+router.delete('/planes/:id/compras/:compraId', wrap((req, res) => {
+  const soc = getSociedadId(req);
+  const plan = getPlan(soc, parseInt(req.params.id, 10));
+  const cid = parseInt(req.params.compraId, 10);
+  const a = db.prepare('SELECT * FROM pli_compras WHERE id=? AND plan_id=? AND eliminado_en IS NULL').get(cid, plan.id);
+  if (!a) throw notFound('Compra no encontrada');
+  db.prepare(`UPDATE pli_compras SET eliminado_en=${AHORA}, eliminado_por_id=? WHERE id=?`).run(req.user.id, cid);
+  logPli('compra', cid, 'baja', { insumo_id: a.insumo_id, cantidad: a.cantidad }, req.user.id);
+  res.json({ ok: true });
+}));
+
 // ── El cálculo ────────────────────────────────────────────────────────────
 
 // Arma el ctx del motor leyendo todo de una sola vez (nada de queries adentro
@@ -938,7 +1056,16 @@ function armarContexto(soc, plan) {
     db.prepare('SELECT insumo_id, cantidad FROM pli_plan_existencias WHERE plan_id=?').all(plan.id)
       .map(e => [e.insumo_id, e.cantidad])
   );
-  return { plan, productos, objetivos, recetas, insumos, existencias };
+  // Lo ya pedido cubre necesidad igual que la existencia. Las canceladas no
+  // cuentan; las pedidas y las recibidas sí (lo pedido ya está comprometido).
+  const comprado = new Map(
+    db.prepare(`
+      SELECT insumo_id, SUM(cantidad) AS total FROM pli_compras
+      WHERE plan_id=? AND eliminado_en IS NULL AND estado <> 'cancelado'
+      GROUP BY insumo_id
+    `).all(plan.id).map(c => [c.insumo_id, c.total])
+  );
+  return { plan, productos, objetivos, recetas, insumos, existencias, comprado };
 }
 
 // Lee el resultado materializado de un plan confirmado (no corre el motor).
@@ -1124,8 +1251,29 @@ router.get('/planes/:id/export.xlsx', wrap((req, res) => {
     }
   }
 
+  // Agenda de pedidos: una fila por (insumo × semana) que todavía haya que pedir,
+  // ordenada por fecha límite. Es la hoja que se le manda a Compras.
+  const agenda = [{
+    A: 'Pedir hasta', B: 'Insumo', C: 'Proveedor', D: 'Cantidad', E: 'Unidad de compra',
+    F: 'Para cosecha (semana)', G: 'Plazo (dias)'
+  }];
+  const filasAgenda = [];
+  for (const l of r.lineas) {
+    for (const b of (l.buckets || [])) {
+      if (!(b.bultos_a_comprar > 0)) continue;
+      filasAgenda.push({
+        A: b.fecha_pedido_limite || 'sin fecha', B: l.insumo_nombre, C: l.proveedor_texto || '',
+        D: b.bultos_a_comprar, E: l.unidad_compra, F: b.fecha_necesidad || 'sin fecha',
+        G: l.lead_time_dias || 0
+      });
+    }
+  }
+  filasAgenda.sort((x, y) => String(x.A).localeCompare(String(y.A)) || String(x.B).localeCompare(String(y.B), 'es'));
+  agenda.push(...filasAgenda);
+
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(compras, { skipHeader: true }), 'Compras');
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(agenda, { skipHeader: true }), 'Agenda');
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(desglose, { skipHeader: true }), 'Desglose');
   const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
 
