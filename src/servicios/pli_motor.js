@@ -101,6 +101,7 @@ export function calcularPlan(ctx) {
     ok: true,
     plan_sin_objetivos: false,
     objetivos_en_cero: [],
+    objetivo_huerfano: [],
     objetivos_solapados: [],
     productos_sin_objetivo: [],
     nodos_sin_receta: [],
@@ -190,9 +191,17 @@ export function calcularPlan(ctx) {
       // primero el cociente premultiplicado, que es exactamente lo que este
       // modelo existe para evitar. Verificado: 525*(1/75) = 7.000000000000001
       // mientras que 525*1/75 = 7 exacto.
+      // OJO con el fallback del rango: num(null, def) NO devuelve def, devuelve 0,
+      // porque Number(null) es 0 y 0 es finito. Sin el chequeo explícito de vacío,
+      // una línea con mínimo cargado y máximo vacío producía una banda invertida
+      // tipo "168.000–0" (visto en datos reales). Vacío = usar el nominal.
+      const vacio = (v) => v === null || v === undefined || v === '';
+      const cMin = vacio(l.cant_min) ? cantidad : num(l.cant_min, cantidad);
+      const cMax = vacio(l.cant_max) ? cantidad : num(l.cant_max, cantidad);
+
       const nom = q * cantidad / porCada / divMerma;
-      const mn  = q * num(l.cant_min, cantidad) / porCada / divMerma;
-      const mx  = q * num(l.cant_max, cantidad) / porCada / divMerma;
+      const mn  = q * cMin / porCada / divMerma;
+      const mx  = q * cMax / porCada / divMerma;
 
       const a = acc.get(l.insumo_id) || { bruta: 0, min: 0, max: 0 };
       a.bruta += nom; a.min += mn; a.max += mx;        // acumulación EXACTA
@@ -286,7 +295,16 @@ export function calcularPlan(ctx) {
   const conObjetivo = new Set();
   for (const o of objetivos) {
     const nodo = porId.get(o.producto_id);
-    if (!nodo) continue;
+    // El objetivo apunta a un producto que ya no está en el árbol (se dio de baja
+    // mientras el plan seguía en borrador). Descartarlo en silencio hacía que el
+    // plan comprara de menos MOSTRANDO "cobertura completa". Bloqueante, mismo
+    // criterio que un insumo faltante.
+    if (!nodo) {
+      cobertura.objetivo_huerfano.push({
+        producto_id: o.producto_id, cantidad: num(o.cantidad), unidad: o.unidad || ''
+      });
+      continue;
+    }
     conObjetivo.add(o.producto_id);
     const q = num(o.cantidad);
     // Un objetivo en 0 devolvía tabla vacía y cartel verde "cobertura completa".
@@ -421,6 +439,7 @@ export function calcularPlan(ctx) {
   cobertura.ok = (
     cobertura.plan_sin_objetivos === false &&
     cobertura.objetivos_en_cero.length === 0 &&
+    cobertura.objetivo_huerfano.length === 0 &&
     cobertura.objetivos_solapados.length === 0 &&
     cobertura.nodos_sin_receta.length === 0 &&
     cobertura.insumo_inexistente.length === 0 &&
