@@ -3,6 +3,7 @@ import express from "express";
 import path    from "path";
 import { fileURLToPath } from "url";
 import cookieParser from "cookie-parser";
+import sesionFirmada, { cookieSecret } from "./servicios/auth_sesion.js";
 import { routearMensaje } from "./agentes/router.js";
 import panelRouter        from "./rutas/panel.js";
 import nuevosRouter       from "./rutas/nuevos.js";
@@ -69,7 +70,9 @@ const app = express();
 
 app.use(express.json({ limit: '20mb' }));
 app.use(express.urlencoded({ extended: false, limit: '20mb' }));
-app.use(cookieParser());
+// cookieParser CON secreto: habilita req.signedCookies, que es lo que hace
+// verificable la identidad (ver src/servicios/auth_sesion.js).
+app.use(cookieParser(cookieSecret()));
 
 // Archivos estaticos
 app.use("/static",       express.static(path.join(__dirname, ".")));
@@ -79,6 +82,14 @@ app.use("/data/fichas",      express.static(path.join(__dirname, "../data/fichas
 app.use("/data/remitos_pa", express.static(path.join(__dirname, "../data/remitos_pa")));
 app.use("/data/ifco",       express.static(path.join(__dirname, "../data/ifco")));
 app.use("/data/sg",         express.static(path.join(__dirname, "../data/sg"))); // fotos informe de calidad SG (patrón IFCO)
+
+// Identidad verificada. Relee el usuario de la base a partir de la cookie FIRMADA
+// (lnb_auth) y reescribe req.cookies.lnb_user con los datos reales; si no hay firma
+// válida, descarta esa cookie para que nadie autorice con una cookie editada a mano.
+// Va acá: después de los estáticos (para no consultar la base por cada archivo) y
+// ANTES del guard de solo-lectura, del guard de /panel y de todos los routers, que
+// son los que leen req.cookies.lnb_user. Ver src/servicios/auth_sesion.js.
+app.use(sesionFirmada);
 
 // Solo-lectura: bloquea escrituras (POST/PUT/PATCH/DELETE) para usuarios con
 // solo_lectura=1 que no son admin. Debe ir antes de cualquier router /api.

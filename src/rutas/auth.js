@@ -4,6 +4,8 @@ import bcrypt from 'bcrypt';
 import crypto from 'crypto';
 import { getDb } from '../servicios/db.js';
 import { enviarMail } from '../servicios/mail.js';
+// Cookie de identidad firmada. El por qué está en src/servicios/auth_sesion.js.
+import { AUTH_COOKIE, authCookieOpts } from '../servicios/auth_sesion.js';
 
 const router = express.Router();
 const BCRYPT_ROUNDS = 10;
@@ -60,6 +62,25 @@ function cookieOpts(req) {
     path: '/',
     maxAge: esMovil(req) ? COOKIE_MAX_AGE_MOBILE : COOKIE_MAX_AGE_DESKTOP
   };
+}
+
+// Emite las DOS cookies de sesión:
+//   lnb_user — JSON sin firmar, legible por JS (scout.html:1498 la lee). Solo
+//              presentación: el backend no le cree nada.
+//   lnb_auth — solo el id, FIRMADA y httpOnly. Es la identidad verificable.
+// Un middleware global relee el usuario de la base a partir de lnb_auth y
+// sobrescribe lnb_user con los datos reales (src/servicios/auth_sesion.js).
+function emitirSesion(req, res, userData) {
+  const maxAge = esMovil(req) ? COOKIE_MAX_AGE_MOBILE : COOKIE_MAX_AGE_DESKTOP;
+  res.cookie('lnb_user', JSON.stringify(userData), cookieOpts(req));
+  res.cookie(AUTH_COOKIE, String(userData.id), authCookieOpts(maxAge));
+}
+
+// Cerrar sesión: hay que borrar las DOS. Si quedara lnb_auth, el middleware
+// reconstruiría la sesión desde la base y el logout no tendría efecto.
+function limpiarSesion(res) {
+  res.clearCookie('lnb_user', { path: '/' });
+  res.clearCookie(AUTH_COOKIE, { path: '/' });
 }
 
 const parseSecciones = (s) => { try { return JSON.parse(s || '["*"]'); } catch(e) { return ['*']; } };
@@ -208,7 +229,7 @@ router.post('/login', async (req, res) => {
       deposito_proveedor_id: user.deposito_proveedor_id || null,
       solo_lectura: !!user.solo_lectura
     };
-    res.cookie('lnb_user', JSON.stringify(userData), cookieOpts(req));
+    emitirSesion(req, res, userData);
 
     // Whitelist de rutas internas válidas para el parámetro ?next=
     // Se aceptan rutas que empiecen con /scout, /panel o /m (mobile IFCO)
@@ -235,7 +256,7 @@ router.post('/login', async (req, res) => {
 });
 
 router.post('/logout', (req, res) => {
-  res.clearCookie('lnb_user', { path: '/' });
+  limpiarSesion(res);
   res.json({ ok: true });
 });
 
@@ -285,7 +306,7 @@ router.post('/setear-password', async (req, res) => {
       deposito_proveedor_id: user.deposito_proveedor_id || null,
       solo_lectura: !!user.solo_lectura
     };
-    res.cookie('lnb_user', JSON.stringify(userData), cookieOpts(req));
+    emitirSesion(req, res, userData);
 
     // Mismo manejo de redirect que el login
     const RUTAS_VALIDAS = ['/scout', '/panel', '/m'];
@@ -313,7 +334,7 @@ router.get('/me', (req, res) => {
     const user = JSON.parse(cookie);
     const db = getDb();
     const u = db.prepare('SELECT activo, deposito_tipo, deposito_proveedor_id, username, solo_lectura FROM usuarios WHERE id=?').get(user.id);
-    if (!u || !u.activo) { res.clearCookie('lnb_user', { path: '/' }); return res.status(401).json({ ok: false, error: 'Sesión expirada' }); }
+    if (!u || !u.activo) { limpiarSesion(res); return res.status(401).json({ ok: false, error: 'Sesión expirada' }); }
     // Refrescar campos que pueden cambiar desde admin sin re-loguear
     user.deposito_tipo = u.deposito_tipo || null;
     user.deposito_proveedor_id = u.deposito_proveedor_id || null;
@@ -329,7 +350,7 @@ router.get('/me', (req, res) => {
     // TEMPORAL: forzar acceso total hasta que se corrijan permisos desde el panel
     user.secciones = ['*'];
     res.json({ ok: true, user });
-  } catch(e) { res.clearCookie('lnb_user', { path: '/' }); res.status(401).json({ ok: false, error: 'Sesión inválida' }); }
+  } catch(e) { limpiarSesion(res); res.status(401).json({ ok: false, error: 'Sesión inválida' }); }
 });
 
 function requireAuth(req, res, next) {
