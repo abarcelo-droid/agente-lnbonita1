@@ -501,6 +501,7 @@ function moduleIcon(m){
     'pa-panol':          '🔧',
     'pa-personal':       '👷',
     'pa-scout':          '📱',
+    'pli-planificacion': '📦',
     // Abasto IFCO
     'ab-dashboard':      '📊',
     'ab-gastos':         '💸',
