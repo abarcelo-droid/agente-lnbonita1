@@ -38034,6 +38034,35 @@ function spDetalleRender() {
         }).join('') + '</div>';
   }
 
+  // Cómo se paga. Es lo primero que necesita el que confecciona la orden: cuántos
+  // cheques emitir, por cuánto y con qué vencimiento.
+  if ((d.pagos || []).length) {
+    var porTipo = {};
+    d.pagos.forEach(function(p) { (porTipo[p.tipo] = porTipo[p.tipo] || []).push(p); });
+    var totalPagos = d.pagos.reduce(function(a, p) { return a + Number(p.importe || 0); }, 0);
+    html += '<div style="border:1px solid var(--bor);border-radius:10px;padding:11px;margin-bottom:12px;background:var(--sur)">'
+      + '<div style="font-size:12px;font-weight:700;margin-bottom:6px">💵 Cómo se paga</div>'
+      + '<div class="ab-table-wrap"><table class="pa-tbl" style="font-size:12px"><thead><tr>'
+      + '<th>Medio</th><th style="text-align:right">Importe</th><th>Fecha</th><th>Código</th>'
+      + '</tr></thead><tbody>'
+      + ['transferencia', 'cheque_propio', 'cheque_terceros'].map(function(t) {
+          var arr = porTipo[t];
+          if (!arr || !arr.length) return '';
+          var sub = arr.reduce(function(a, p) { return a + Number(p.importe || 0); }, 0);
+          return '<tr class="sp-grp"><td colspan="4" style="background:var(--bg2,#f1f5f9);font-weight:700;font-size:11px">'
+            + spEsc(SP_PAGO_ETQ[t]) + ' — ' + arr.length + ' — ' + spEsc(spMoney(sub, s.moneda)) + '</td></tr>'
+            + arr.map(function(p) {
+                return '<tr><td class="sp-chica">' + spEsc(SP_PAGO_ETQ[t]) + '</td>'
+                  + '<td class="sp-num">' + spEsc(spMoney(p.importe, s.moneda)) + '</td>'
+                  + '<td class="sp-chica">' + spEsc(p.fecha || '—') + '</td>'
+                  + '<td class="sp-chica">' + spEsc(p.codigo || '—') + '</td></tr>';
+              }).join('');
+        }).join('')
+      + '<tr><td><strong>TOTAL</strong></td><td class="sp-num"><strong>' + spEsc(spMoney(totalPagos, s.moneda))
+      + '</strong></td><td colspan="2"></td></tr>'
+      + '</tbody></table></div></div>';
+  }
+
   // Camino del circuito: dónde está y qué falta. Es lo que el comprador necesita
   // ver para no llamar por teléfono.
   html += '<div style="font-size:12px;font-weight:700;margin:14px 0 6px">Recorrido del circuito</div>'
@@ -38129,7 +38158,23 @@ function spAccionAbrir(id, accion) {
     + '<div style="margin-bottom:10px">Acción: <strong>' + spEsc(acc ? acc.etiqueta : accion) + '</strong></div>';
 
   if (pideFecha) {
-    html += '<div class="fl ff"><label>Fecha de pago *</label><input id="sp-acc-fecha" type="date" class="sp-inp"></div>';
+    html += '<div class="fl ff"><label>Fecha de pago *</label>'
+      + '<input id="sp-acc-fecha" type="date" class="sp-inp" onchange="spPagoRender()"></div>'
+      + '<div style="margin-top:12px">'
+        + '<div style="font-size:12px;font-weight:700;margin-bottom:4px">¿Cómo se paga?</div>'
+        + '<div class="sp-chica" style="margin-bottom:8px">Podés combinar los tres medios. '
+          + 'La suma tiene que dar ' + spEsc(spMoney(s.monto, s.moneda)) + '.</div>'
+        + '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px">'
+          + '<button type="button" class="btn bo bs" style="font-size:11px" onclick="spPagoAgregar(\'transferencia\')">+ Transferencia</button>'
+          + '<button type="button" class="btn bo bs" style="font-size:11px" onclick="spPagoAgregar(\'cheque_propio\')">+ Cheque propio</button>'
+          + '<button type="button" class="btn bo bs" style="font-size:11px" onclick="spPagoAgregar(\'cheque_terceros\')">+ Cheque de terceros</button>'
+        + '</div>'
+        + '<div id="sp-pago-lineas"></div>'
+        + '<div id="sp-pago-total" style="margin-top:8px;font-size:13px;font-weight:600"></div>'
+      + '</div>';
+    SP.pagos = [];
+    SP.pagoMonto = s.monto;
+    SP.pagoMoneda = s.moneda;
   }
   if (pideComprob) {
     html += '<label style="display:flex;gap:6px;align-items:flex-start;font-size:12px;margin-bottom:8px;cursor:pointer">'
@@ -38150,6 +38195,92 @@ function spAccionAbrir(id, accion) {
   document.getElementById('sp-acc-tit').textContent = acc ? acc.etiqueta : 'Resolver';
   document.getElementById('sp-acc-cuerpo').innerHTML = html;
   document.getElementById('sp-mb-accion').classList.add('on');
+  if (pideFecha) {
+    // Arranca con una transferencia por el total: es el caso más común y evita
+    // empezar de cero cuando no hay cheques.
+    SP.pagos = [{ tipo: 'transferencia', importe: s.monto, fecha: '', codigo: '' }];
+    spPagoRender();
+  }
+}
+
+// ── Composición del pago (paso de fechas) ─────────────────────────────────
+
+var SP_PAGO_ETQ = { transferencia: 'Transferencia', cheque_propio: 'Cheque propio', cheque_terceros: 'Cheque de terceros' };
+
+function spPagoAgregar(tipo) {
+  SP.pagos = SP.pagos || [];
+  if (SP.pagos.filter(function(p) { return p.tipo === tipo; }).length >= 20) {
+    return toast('Máximo 20 ' + SP_PAGO_ETQ[tipo].toLowerCase() + '(s)', 'er');
+  }
+  // El importe que falta para llegar al total: en la mayoría de los casos es el que
+  // se quiere, y si no se corrige de una.
+  var falta = Math.round((Number(SP.pagoMonto || 0) - spPagoSuma()) * 100) / 100;
+  SP.pagos.push({ tipo: tipo, importe: falta > 0 ? falta : '', fecha: '', codigo: '' });
+  spPagoRender();
+}
+
+function spPagoQuitar(i) { SP.pagos.splice(i, 1); spPagoRender(); }
+
+function spPagoSet(i, campo, valor) {
+  if (!SP.pagos[i]) return;
+  SP.pagos[i][campo] = (campo === 'importe') ? valor : valor;
+  if (campo === 'importe') spPagoTotalRender();
+}
+
+function spPagoSuma() {
+  return Math.round((SP.pagos || []).reduce(function(a, p) { return a + (Number(p.importe) || 0); }, 0) * 100) / 100;
+}
+
+function spPagoRender() {
+  var cont = document.getElementById('sp-pago-lineas');
+  if (!cont) return;
+  var fechaGral = (document.getElementById('sp-acc-fecha') || {}).value || '';
+  if (!SP.pagos.length) {
+    cont.innerHTML = '<div class="emp" style="padding:12px">Agregá al menos un medio de pago.</div>';
+    spPagoTotalRender();
+    return;
+  }
+  cont.innerHTML = '<div class="ab-table-wrap"><table class="pa-tbl" style="font-size:12px"><thead><tr>'
+    + '<th>Medio</th><th style="width:130px">Importe</th><th style="width:145px">Fecha</th>'
+    + '<th style="width:130px">Código</th><th style="width:34px"></th></tr></thead><tbody>'
+    + SP.pagos.map(function(p, i) {
+        var esTerceros = p.tipo === 'cheque_terceros';
+        var esCheque = p.tipo !== 'transferencia';
+        return '<tr><td><strong>' + spEsc(SP_PAGO_ETQ[p.tipo]) + '</strong></td>'
+          + '<td><input type="number" step="any" min="0" class="sp-inp sp-num" style="width:120px"'
+            + ' value="' + spEsc(String(p.importe === '' ? '' : p.importe)) + '"'
+            + ' onchange="spPagoSet(' + i + ',\'importe\',this.value)"></td>'
+          // Los cheques llevan su propio vencimiento; la transferencia va con la
+          // fecha de pago general.
+          + '<td>' + (esCheque
+              ? '<input type="date" class="sp-inp" style="width:135px" value="' + spEsc(p.fecha || '') + '"'
+                + ' onchange="spPagoSet(' + i + ',\'fecha\',this.value)">'
+              : '<span class="sp-chica">' + spEsc(fechaGral || 'la de pago') + '</span>') + '</td>'
+          + '<td>' + (esTerceros
+              ? '<input class="sp-inp" style="width:120px" placeholder="nº cheque" value="' + spEsc(p.codigo || '') + '"'
+                + ' onchange="spPagoSet(' + i + ',\'codigo\',this.value)">'
+              : '<span class="sp-chica">—</span>') + '</td>'
+          + '<td><button type="button" class="btn bd bs" style="padding:2px 6px;font-size:11px"'
+            + ' onclick="spPagoQuitar(' + i + ')">✕</button></td></tr>';
+      }).join('')
+    + '</tbody></table></div>';
+  spPagoTotalRender();
+}
+
+// El total contra el monto autorizado, en vivo: es lo que evita mandar una
+// composición que no cierra y tener que volver a hacerla.
+function spPagoTotalRender() {
+  var el = document.getElementById('sp-pago-total');
+  if (!el) return;
+  var suma = spPagoSuma();
+  var monto = Number(SP.pagoMonto) || 0;
+  var dif = Math.round((monto - suma) * 100) / 100;
+  if (Math.abs(dif) < 0.01) {
+    el.innerHTML = '<span class="sp-bad sp-ok">✔ Suma ' + spEsc(spMoney(suma, SP.pagoMoneda)) + ' — coincide</span>';
+  } else {
+    el.innerHTML = '<span class="sp-bad sp-err">Suma ' + spEsc(spMoney(suma, SP.pagoMoneda)) + ' — '
+      + (dif > 0 ? 'faltan ' : 'sobran ') + spEsc(spMoney(Math.abs(dif), SP.pagoMoneda)) + '</span>';
+  }
 }
 
 function spAccionConfirmar() {
@@ -38159,7 +38290,25 @@ function spAccionConfirmar() {
   var com = document.getElementById('sp-acc-com');
   if (com) body.comentario = com.value.trim();
   var f = document.getElementById('sp-acc-fecha');
-  if (f) body.fecha_pago = f.value || null;
+  if (f) {
+    body.fecha_pago = f.value || null;
+    if (!body.fecha_pago) return toast('Falta la fecha de pago', 'er');
+    if (!(SP.pagos || []).length) return toast('Cargá cómo se va a pagar', 'er');
+    var dif = Math.round(((Number(SP.pagoMonto) || 0) - spPagoSuma()) * 100) / 100;
+    if (Math.abs(dif) >= 0.01) {
+      return toast('La composición no cierra: ' + (dif > 0 ? 'faltan ' : 'sobran ')
+        + spMoney(Math.abs(dif), SP.pagoMoneda), 'er');
+    }
+    for (var i = 0; i < SP.pagos.length; i++) {
+      var p = SP.pagos[i];
+      if (p.tipo === 'cheque_terceros' && !String(p.codigo || '').trim()) {
+        return toast('Falta el código del cheque de terceros de la línea ' + (i + 1), 'er');
+      }
+    }
+    body.pagos = SP.pagos.map(function(p) {
+      return { tipo: p.tipo, importe: p.importe, fecha: p.fecha || null, codigo: p.codigo || null };
+    });
+  }
   var om = document.getElementById('sp-acc-otromedio');
   if (om && om.checked) body.enviado_por_otro_medio = true;
 
