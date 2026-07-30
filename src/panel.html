@@ -10936,6 +10936,10 @@ function sgRepExport(){
     .pli-viz-chip[aria-pressed="false"] .pli-viz-tra { opacity:.3 }
     .pli-viz-chip.on { border-color:var(--bor2); background:var(--bg2,#f1f5f9) }
     .pli-viz-tra { width:14px; height:3px; border-radius:2px; flex:0 0 14px }
+    /* Mismo aspecto que .pli-vista pero clase propia: la de la solapa Comprar la
+       apaga por querySelectorAll y despintaba estos botones. */
+    .pli-viz-modo { color:var(--mut); background:var(--sur) }
+    .pli-viz-modo.on { background:var(--burg); color:#fff }
   </style>
 
   <div style="display:flex;border-bottom:1px solid var(--bor);margin-bottom:14px">
@@ -36880,13 +36884,43 @@ function pliVizSlots() {
   return m;
 }
 
+// EL EJE X ES TIEMPO, NO UNA LISTA.
+// La grilla solo tiene las semanas que el usuario dejó cargadas, y entre dos
+// puede haber un hueco: si hay una fila en la S40 y la siguiente es la S47,
+// dibujarlas una al lado de la otra pinta un derrumbe de 50.000 a 0 en UNA
+// semana cuando en realidad pasan siete. La curva mentía sobre el tiempo.
+//
+// Se completan todas las semanas intermedias en cero, que además es lo que
+// significan: una semana que no está en la grilla es una semana en la que no se
+// empaca nada. Así el hueco se ve como lo que es y las distancias del eje son
+// proporcionales al calendario.
+function pliVizSemanasContinuas(semanas) {
+  if (semanas.length < 2) return semanas.slice();
+  var res = [], cur = semanas[0], fin = semanas[semanas.length - 1], guarda = 0;
+  while (cur <= fin && guarda++ < 200) {
+    res.push(cur);
+    var p = cur.split('-').map(Number);
+    var d = new Date(Date.UTC(p[0], p[1] - 1, p[2]) + 7 * 86400000);
+    var dd = function(x) { return String(x).padStart(2, '0'); };
+    cur = d.getUTCFullYear() + '-' + dd(d.getUTCMonth() + 1) + '-' + dd(d.getUTCDate());
+  }
+  // Fechas que no caen en lunes o un rango disparatado: se deja lo cargado antes
+  // que dibujar cualquier cosa. El último tiene que estar sí o sí.
+  if (res.indexOf(fin) === -1) return semanas.slice();
+  return res;
+}
+
 function pliVizSeries(est) {
   var cfg = pliVizCfg(), slots = pliVizSlots();
   // La fila "sin fecha" no tiene lugar en una línea de tiempo: queda fuera del
   // gráfico y sigue viéndose en la grilla.
-  var semanas = est.semanas.filter(function(s) { return !!s; });
+  var semanas = pliVizSemanasContinuas(est.semanas.filter(function(s) { return !!s; }));
   var vis = (PLI.arbol || []).filter(function(p) { return !cfg.sel || cfg.sel.indexOf(p.id) !== -1; });
-  var series = [], otros = [];
+  // `indiv` guarda los productos DE A UNO, antes del plegado a "Otros". Hace falta
+  // para saber cuáles están vacíos: después del plegado, tres productos en cero
+  // son UNA serie sintética con id 'otros', que no matchea contra ningún id de
+  // producto — la leyenda terminaba prometiendo tres líneas que no se dibujaban.
+  var series = [], otros = [], indiv = [];
 
   vis.forEach(function(p) {
     var slot = slots[p.id];
@@ -36897,6 +36931,7 @@ function pliVizSeries(est) {
       pts0: pts, pts: pts,
       total: pts.reduce(function(a, b) { return a + b; }, 0)
     };
+    indiv.push(it);
     if (slot < 8) series.push(it); else otros.push(it);
   });
 
@@ -36921,13 +36956,31 @@ function pliVizSeries(est) {
     });
   }
 
+  // Un producto sin NINGUNA cantidad cargada es una línea recta pegada al eje: no
+  // dice nada y tapa el cero de los demás. Con cinco así, el gráfico es una banda
+  // de rayas sobre la base. Se sacan del dibujo pero siguen en la leyenda, y si se
+  // los clickea se muestran igual — pedir ver uno vacío es una pregunta legítima.
+  // Qué productos están sin cargar se calcula SIEMPRE, porque es lo que marca a
+  // cada chip. Sobre `indiv` y no sobre `series`: es por producto, y después del
+  // plegado tres productos vacíos son UNA serie con id 'otros' que no matchea
+  // contra ningún id. Lo que solo pasa con el filtro en "Todos" es sacarlos del
+  // dibujo.
+  var vacias = indiv.filter(function(it) { return !(it.total > 0); });
+  if (!cfg.sel) {
+    var conDatos = series.filter(function(sr) { return sr.total > 0; });
+    if (conDatos.length) series = conDatos;   // si están TODAS vacías se dibujan igual
+  }
+
   // Sumar cajas con kilos no significa nada: el total solo se muestra si todas
   // las series visibles están en la misma unidad.
   var unis = {};
   series.forEach(function(sr) { unis[sr.unidad] = true; });
   var claves = Object.keys(unis);
 
-  return { semanas: semanas, series: series, unicaUnidad: claves.length === 1 ? claves[0] : null };
+  return {
+    semanas: semanas, series: series, vacias: vacias,
+    unicaUnidad: claves.length === 1 ? claves[0] : null
+  };
 }
 
 // Techo "redondo" para el eje: 38.412 → 40.000. Un eje que termina en el máximo
@@ -36936,11 +36989,79 @@ function pliVizNiceMax(v) {
   if (!(v > 0)) return 10;
   var exp = Math.pow(10, Math.floor(Math.log(v) / Math.LN10));
   var f = v / exp;
-  // Escalones cerrados: con solo 1/2/5 un pico de 3.200 estira el eje hasta 5.000
-  // y la curva queda aplastada contra el piso usando dos tercios del alto.
-  var esc = [1, 1.2, 1.5, 2, 2.5, 3, 4, 5, 6, 8, 10];
+  // Escalones de a cuartos: todos dan cuatro marcas redondas al dividir por 4, y
+  // están lo bastante juntos como para no desperdiciar alto. Con la escala clásica
+  // 1/2/5, un pico de 15.100 estiraba el eje hasta 20.000 y sobraba un cuarto de
+  // la pantalla.
+  var esc = [1, 1.2, 1.6, 2, 2.4, 2.8, 3.2, 4, 5, 6, 8, 10];
   for (var i = 0; i < esc.length; i++) if (f <= esc[i] + 1e-9) return esc[i] * exp;
   return 10 * exp;
+}
+
+// ── Suavizado ─────────────────────────────────────────────────────────────
+// Spline cúbica MONÓTONA (Fritsch–Carlson, 1980), no una Bézier cualquiera ni
+// una Catmull-Rom. La diferencia no es estética, es de honestidad del dato:
+//
+//   · Una spline común SOBREPASA. Entre una semana de 15.100 y una de 9.500
+//     dibujaría una panza por encima de 15.100 — un pico de producción que el
+//     plan no tiene. Y después de una semana en 0 se metería en NEGATIVO, que
+//     para "cajas a empacar" directamente no existe.
+//   · La monótona garantiza que en cada tramo la curva se queda ENTRE los dos
+//     valores de sus extremos. Nunca inventa un máximo ni baja de cero, y donde
+//     el dato sube la curva sube.
+//
+// Los puntos siguen dibujándose encima: la curva une, los puntos son el dato.
+function pliVizTangentes(y, h) {
+  var n = y.length, d = [], m = [], i;
+  for (i = 0; i < n - 1; i++) d.push((y[i + 1] - y[i]) / h);
+  m.push(d[0]);
+  for (i = 1; i < n - 1; i++) m.push((d[i - 1] + d[i]) / 2);
+  m.push(d[n - 2]);
+  // Condición de Fritsch–Carlson: es lo único que impide el sobrepaso.
+  for (i = 0; i < n - 1; i++) {
+    if (d[i] === 0) { m[i] = 0; m[i + 1] = 0; continue; }
+    var a = m[i] / d[i], b = m[i + 1] / d[i];
+    // Tangente que apunta en contra de la pendiente del tramo: se anula, si no
+    // la curva arrancaría para el lado equivocado antes de darse vuelta.
+    if (a < 0) { m[i] = 0; a = 0; }
+    if (b < 0) { m[i + 1] = 0; b = 0; }
+    var s = a * a + b * b;
+    if (s > 9) {
+      var t = 3 / Math.sqrt(s);
+      m[i] = t * a * d[i];
+      m[i + 1] = t * b * d[i];
+    }
+  }
+  return m;
+}
+
+// Devuelve el atributo `d` de la curva. Con menos de 3 puntos no hay nada que
+// suavizar: una recta entre dos puntos ya es la única respuesta correcta.
+function pliVizPath(vals, xF, yF) {
+  var n = vals.length, i;
+  if (!n) return '';
+  if (n === 1) return 'M' + xF(0).toFixed(1) + ' ' + yF(vals[0]).toFixed(1);
+  if (n === 2) {
+    return 'M' + xF(0).toFixed(1) + ' ' + yF(vals[0]).toFixed(1)
+         + 'L' + xF(1).toFixed(1) + ' ' + yF(vals[1]).toFixed(1);
+  }
+  // Se trabaja en unidades del gráfico (píxeles del viewBox), no en cajas: así el
+  // suavizado se ve igual sea el eje de 100 o de 100.000.
+  var px = [], py = [];
+  for (i = 0; i < n; i++) { px.push(xF(i)); py.push(yF(vals[i])); }
+  var h = px[1] - px[0];
+  var m = pliVizTangentes(py, h);
+
+  var d = 'M' + px[0].toFixed(1) + ' ' + py[0].toFixed(1);
+  for (i = 0; i < n - 1; i++) {
+    // Hermite → Bézier: los tiradores van a un tercio del tramo.
+    var c1x = px[i] + h / 3, c1y = py[i] + m[i] * h / 3;
+    var c2x = px[i + 1] - h / 3, c2y = py[i + 1] - m[i + 1] * h / 3;
+    d += 'C' + c1x.toFixed(1) + ' ' + c1y.toFixed(1)
+       + ' ' + c2x.toFixed(1) + ' ' + c2y.toFixed(1)
+       + ' ' + px[i + 1].toFixed(1) + ' ' + py[i + 1].toFixed(1);
+  }
+  return d;
 }
 
 function pliGrafRender() {
@@ -36965,8 +37086,12 @@ function pliGrafRender() {
     + '<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px">'
       + '<div style="font-size:12px;font-weight:700">📈 Curva del plan</div>'
       + '<div style="display:flex;gap:4px">'
-        + '<button class="btn bo bs pli-vista' + (cfg.modo === 'semanal' ? ' on' : '') + '" onclick="pliVizModo(\'semanal\')" style="font-size:11px">Por semana</button>'
-        + '<button class="btn bo bs pli-vista' + (cfg.modo === 'acumulado' ? ' on' : '') + '" onclick="pliVizModo(\'acumulado\')" style="font-size:11px" title="Cuánto llevás empacado hasta cada semana">Acumulado</button>'
+        // Clase PROPIA, no .pli-vista: pliCmpVista() de la solapa Comprar hace un
+        // querySelectorAll('#sec-pli-planificacion .pli-vista') y le apaga el
+        // resaltado a todo lo que no tenga su data-pli-vista. Compartir la clase
+        // hacía que cambiar de vista en Comprar despintara estos dos botones.
+        + '<button class="btn bo bs pli-viz-modo' + (cfg.modo === 'semanal' ? ' on' : '') + '" onclick="pliVizModo(\'semanal\')" style="font-size:11px">Por semana</button>'
+        + '<button class="btn bo bs pli-viz-modo' + (cfg.modo === 'acumulado' ? ' on' : '') + '" onclick="pliVizModo(\'acumulado\')" style="font-size:11px" title="Cuánto llevás empacado hasta cada semana">Acumulado</button>'
       + '</div>'
     + '</div>';
 
@@ -36976,11 +37101,18 @@ function pliGrafRender() {
     + '<button class="pli-viz-chip' + (cfg.sel ? '' : ' on') + '" aria-pressed="' + (cfg.sel ? 'false' : 'true') + '"'
       + ' onclick="pliVizTodos()">Todos</button>'
     + raices.map(function(p) {
-        var act = !cfg.sel || cfg.sel.indexOf(p.id) !== -1;
+        // Sin filtro, el producto vacío no se dibuja y su chip no puede figurar
+        // como encendido: diría que hay una línea suya en pantalla. Con filtro sí
+        // se dibuja (la recta en cero, que es lo que se pidió ver), así que va
+        // encendido.
+        var vacio = (mod.vacias || []).some(function(v) { return v.id === p.id; });
+        var act = cfg.sel ? (cfg.sel.indexOf(p.id) !== -1) : !vacio;
         var col = slots[p.id] < 8 ? PLI_VIZ_COL[slots[p.id]] : PLI_VIZ_OTROS;
         return '<button class="pli-viz-chip' + (cfg.sel && act ? ' on' : '') + '" aria-pressed="' + (act ? 'true' : 'false') + '"'
-          + ' onclick="pliVizToggle(' + p.id + ')" title="Clic para ver solo este producto">'
-          + '<span class="pli-viz-tra" style="background:' + col + '"></span>' + pliEsc(p.nombre) + '</button>';
+          + ' onclick="pliVizToggle(' + p.id + ')" title="'
+          + (vacio ? 'No tiene cantidades cargadas. Clic para verlo igual.' : 'Clic para ver solo este producto') + '">'
+          + '<span class="pli-viz-tra" style="background:' + col + '"></span>' + pliEsc(p.nombre)
+          + (vacio ? ' <span style="opacity:.6">· sin datos</span>' : '') + '</button>';
       }).join('')
     + '</div>';
 
@@ -36991,8 +37123,15 @@ function pliGrafRender() {
   }
   var maxDato = 0;
   series.forEach(function(sr) { sr.pts.forEach(function(v) { if (v > maxDato) maxDato = v; }); });
-  if (!(maxDato > 0)) {
-    cont.innerHTML = html + '<div class="pli-cel-chica">Todavía no cargaste cantidades: cuando escribas la primera, la curva aparece acá.</div></div>';
+  // Si el usuario PIDIÓ ver un producto vacío, se le muestra: la recta en cero es
+  // exactamente la información que fue a buscar. Cambiarle el gráfico por un
+  // cartel es no cumplir lo que promete el chip ("clic para verlo igual") y
+  // encima le hace perder de vista lo que estaba mirando. El cartel queda solo
+  // para el plan que todavía no tiene nada cargado.
+  if (!(maxDato > 0) && !cfg.sel) {
+    cont.innerHTML = html + '<div class="pli-cel-chica">'
+      + 'Todavía no cargaste cantidades: cuando escribas la primera, la curva aparece acá.'
+      + '</div></div>';
     PLI.vizModel = null;
     return;
   }
@@ -37006,7 +37145,14 @@ function pliGrafRender() {
   var iPico = semTot.indexOf(Math.max.apply(null, semTot));
   var rots = semanas.map(function(s) { return pliRotuloSemana(s); });
   var conDatos = semTot.filter(function(v) { return v > 0; }).length;
-  if (mod.unicaUnidad !== null) {
+  // Filtro puesto sobre algo que está todo en cero: se dibuja igual la recta,
+  // pero conviene decir por qué está pegada al piso en vez de dejar al usuario
+  // preguntándose si el gráfico se rompió.
+  if (!(maxDato > 0)) {
+    html += '<div class="pli-cel-chica" style="margin-bottom:6px">'
+      + 'Lo que seleccionaste no tiene cantidades cargadas en este plan: la curva va en cero. '
+      + 'Tocá <strong>Todos</strong> para volver.</div>';
+  } else if (mod.unicaUnidad !== null) {
     html += '<div class="pli-cel-chica" style="margin-bottom:6px">'
       + '<strong style="font-size:15px;color:var(--txt)">' + pliN(totVis) + '</strong> '
       + pliEsc(mod.unicaUnidad || 'unidades') + ' en ' + conDatos + ' semana(s)'
@@ -37058,15 +37204,16 @@ function pliGrafRender() {
     + ' style="fill:var(--sub)">semana de cosecha (ISO)</text>';
 
   // Las líneas: finas (2px), sin relleno y con las uniones redondeadas.
+  // Con la curva suavizada los puntos importan MÁS, no menos: son la marca de
+  // dónde está el dato real y dónde la curva solo está uniendo. Se dibujan
+  // siempre que entren sin amontonarse (paso >= 22 unidades ~ hasta 37 semanas).
+  var conPuntos = paso === 0 || paso >= 22;
   series.forEach(function(sr) {
-    var d = sr.pts.map(function(v, i) { return (i ? 'L' : 'M') + xF(i).toFixed(1) + ' ' + yF(v).toFixed(1); }).join(' ');
-    svg += '<path d="' + d + '" fill="none" stroke="' + sr.color + '" stroke-width="2"'
+    svg += '<path d="' + pliVizPath(sr.pts, xF, yF) + '" fill="none" stroke="' + sr.color + '" stroke-width="2"'
       + ' stroke-linejoin="round" stroke-linecap="round"/>';
-    // Los puntos solo cuando son pocos: con 30 semanas, un marcador por dato es
-    // una fila de manchas y la forma de la curva se pierde.
-    if (semanas.length <= 16) {
+    if (conPuntos) {
       sr.pts.forEach(function(v, i) {
-        svg += '<circle cx="' + xF(i).toFixed(1) + '" cy="' + yF(v).toFixed(1) + '" r="4" fill="' + sr.color + '"'
+        svg += '<circle cx="' + xF(i).toFixed(1) + '" cy="' + yF(v).toFixed(1) + '" r="3.5" fill="' + sr.color + '"'
           + ' style="stroke:var(--sur)" stroke-width="2"/>';
       });
     }
@@ -37120,7 +37267,12 @@ function pliGrafRender() {
     + '<div id="pli-viz-tip" class="pli-viz-tip"></div></div>';
 
   html += '<div class="pli-cel-chica" style="margin-top:6px">Pasá el mouse (o usá ← →) para ver los números de cada semana. '
-    + 'Clic en un producto para verlo solo.</div>';
+    + 'Clic en un producto para verlo solo. Los puntos son las semanas cargadas; la curva solo las une '
+    + '<span title="Spline monótona: no sobrepasa el máximo real ni baja de cero">(sin inventar picos ni bajar de cero)</span>.'
+    + ((mod.vacias || []).length
+        ? ' <strong>' + mod.vacias.length + '</strong> producto(s) sin cantidades no se dibujan — clic en su chip para verlos igual.'
+        : '')
+    + '</div>';
 
   cont.innerHTML = html + '</div>';
 
