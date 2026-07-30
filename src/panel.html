@@ -10903,6 +10903,39 @@ function sgRepExport(){
     .pli-vista.on { background:var(--burg); color:#fff }
     .pli-sem-vencida td  { background:rgba(239,68,68,.07) }
     .pli-sem-urgente td  { background:rgba(245,158,11,.09) }
+    /* Gráfico de la curva. Marcas finas, grilla en hairline y los textos con los
+       tokens de texto del panel: el color va SOLO en la línea, nunca en la letra.
+       El SVG se dibuja en un viewBox fijo y escala con el ancho, así no hace falta
+       recalcular geometría al redimensionar la ventana. */
+    .pli-viz { position:relative }
+    .pli-viz svg { display:block; width:100%; height:auto; touch-action:none }
+    .pli-viz svg:focus { outline:2px solid var(--burg); outline-offset:2px; border-radius:6px }
+    .pli-viz-tip { position:absolute; pointer-events:none; z-index:20; min-width:150px;
+      background:var(--sur); border:1px solid var(--bor2); border-radius:8px;
+      box-shadow:0 6px 20px rgba(11,11,11,.14); padding:8px 10px; font-size:12px;
+      opacity:0; transition:opacity .08s linear }
+    .pli-viz-tip.on { opacity:1 }
+    .pli-viz-tip .tt-sem { font-weight:700; font-size:12px; margin-bottom:5px; color:var(--txt) }
+    .pli-viz-tip .tt-fila { display:flex; align-items:center; gap:7px; padding:1px 0; white-space:nowrap }
+    /* Fila del tooltip: primero el valor (que es lo que se vino a buscar) y el
+       nombre atrás en tinta secundaria. La serie se identifica con un trazo, no
+       con un cuadrado: a esta densidad un bloque lleno pesa más que el dato. */
+    .pli-viz-tip .tt-key { flex:0 0 14px; height:2px; border-radius:1px }
+    .pli-viz-tip .tt-val { font-family:ui-monospace,Consolas,monospace; font-weight:700;
+      color:var(--txt); margin-left:auto }
+    .pli-viz-tip .tt-nom { color:var(--mut) }
+    .pli-viz-tip .tt-tot { border-top:1px solid var(--bor); margin-top:5px; padding-top:5px }
+    /* Los chips son a la vez leyenda y filtro: si fueran solo leyenda habría que
+       poner otro control al lado para lo mismo. */
+    .pli-viz-chip { display:inline-flex; align-items:center; gap:6px; cursor:pointer;
+      border:1px solid var(--bor); background:var(--sur); color:var(--txt);
+      border-radius:14px; padding:4px 11px; font-size:12px; line-height:1.3;
+      min-height:26px; font-family:inherit }
+    .pli-viz-chip:hover { border-color:var(--bor2) }
+    .pli-viz-chip[aria-pressed="false"] { color:var(--sub) }
+    .pli-viz-chip[aria-pressed="false"] .pli-viz-tra { opacity:.3 }
+    .pli-viz-chip.on { border-color:var(--bor2); background:var(--bg2,#f1f5f9) }
+    .pli-viz-tra { width:14px; height:3px; border-radius:2px; flex:0 0 14px }
   </style>
 
   <div style="display:flex;border-bottom:1px solid var(--bor);margin-bottom:14px">
@@ -36579,7 +36612,7 @@ function pliPlanRender() {
               : '<button class="btn bb" onclick="pliConfirmarAbrir()">Confirmar plan</button>')
     + '</div></div>';
 
-  html += '<div id="pli-objetivos"></div><div id="pli-resultado"></div>';
+  html += '<div id="pli-objetivos"></div><div id="pli-grafico"></div><div id="pli-resultado"></div>';
   document.getElementById('pli-plan-detalle').innerHTML = html;
 
   // Plan nuevo: se precargan todas las semanas de la temporada para que el usuario
@@ -36753,6 +36786,408 @@ function pliObjRender() {
     + '</tr></tfoot></table></div></div>';
 
   cont.innerHTML = html;
+  pliGrafRender();
+}
+
+// ── Gráfico de la curva de producción ─────────────────────────────────────
+// El dato es una magnitud a lo largo del tiempo con una serie por producto: eso
+// es una línea, y con UN SOLO eje. Nunca un segundo eje: alinear dos escalas es
+// arbitrario e inventa una correlación que no está en los datos.
+//
+// El color identifica al PRODUCTO, no a su posición ni a su tamaño. El slot se
+// asigna por id ascendente, así que reordenar las columnas con ◀ ▶ o filtrar
+// productos NO repinta a los que quedan: si aprendiste que el melón es azul,
+// sigue siendo azul. Los 8 tonos están validados para daltonismo sobre fondo
+// blanco (separación adyacente ΔE ≥ 8 en OKLab, protan/deutan/tritan). Del 9°
+// producto en adelante NO se inventa un tono: se pliegan a "Otros" en gris,
+// porque un 9° color es indistinguible de alguno de los 8 bajo daltonismo.
+//
+// La grilla de arriba es la vista en tabla del gráfico: todo valor que muestra
+// el tooltip se puede leer sin pasar el mouse. Eso es obligatorio, porque tres
+// de los tonos quedan por debajo de 3:1 contra el blanco.
+var PLI_VIZ_COL = ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4', '#008300', '#4a3aa7', '#e34948'];
+var PLI_VIZ_OTROS = '#898781';
+var PLI_VIZ_W = 1000, PLI_VIZ_H = 380;
+var PLI_VIZ_M = { top: 16, der: 134, aba: 50, izq: 70 };
+var pliVizIdx = -1;
+
+function pliVizCfg() {
+  if (!PLI.viz) PLI.viz = { sel: null, modo: 'semanal' };
+  return PLI.viz;
+}
+
+// Slot de color por producto, por id ascendente. El orden de las columnas lo
+// mueve el usuario y el color no puede moverse con él.
+function pliVizSlots() {
+  var ids = (PLI.arbol || []).map(function(p) { return p.id; }).sort(function(a, b) { return a - b; });
+  var m = {};
+  ids.forEach(function(id, i) { m[id] = i; });
+  return m;
+}
+
+function pliVizSeries(est) {
+  var cfg = pliVizCfg(), slots = pliVizSlots();
+  // La fila "sin fecha" no tiene lugar en una línea de tiempo: queda fuera del
+  // gráfico y sigue viéndose en la grilla.
+  var semanas = est.semanas.filter(function(s) { return !!s; });
+  var vis = (PLI.arbol || []).filter(function(p) { return !cfg.sel || cfg.sel.indexOf(p.id) !== -1; });
+  var series = [], otros = [];
+
+  vis.forEach(function(p) {
+    var slot = slots[p.id];
+    var pts = semanas.map(function(s) { return Number(est.mapa[pliObjClave(s, p.id)] || 0); });
+    var it = {
+      id: p.id, nombre: p.nombre || ('#' + p.id), unidad: p.unidad || '',
+      color: slot < 8 ? PLI_VIZ_COL[slot] : PLI_VIZ_OTROS,
+      pts0: pts, pts: pts,
+      total: pts.reduce(function(a, b) { return a + b; }, 0)
+    };
+    if (slot < 8) series.push(it); else otros.push(it);
+  });
+
+  // Uno solo del excedente visible se muestra con su nombre: es gris, pero al ser
+  // el único gris no hay con qué confundirlo. Dos o más se suman en "Otros".
+  if (otros.length === 1) series.push(otros[0]);
+  else if (otros.length > 1) {
+    var sum = semanas.map(function(_, i) {
+      return otros.reduce(function(a, o) { return a + o.pts0[i]; }, 0);
+    });
+    series.push({
+      id: 'otros', nombre: 'Otros (' + otros.length + ')', unidad: otros[0].unidad,
+      color: PLI_VIZ_OTROS, pts0: sum, pts: sum,
+      total: sum.reduce(function(a, b) { return a + b; }, 0)
+    });
+  }
+
+  if (cfg.modo === 'acumulado') {
+    series.forEach(function(sr) {
+      var acc = 0;
+      sr.pts = sr.pts0.map(function(v) { acc += v; return acc; });
+    });
+  }
+
+  // Sumar cajas con kilos no significa nada: el total solo se muestra si todas
+  // las series visibles están en la misma unidad.
+  var unis = {};
+  series.forEach(function(sr) { unis[sr.unidad] = true; });
+  var claves = Object.keys(unis);
+
+  return { semanas: semanas, series: series, unicaUnidad: claves.length === 1 ? claves[0] : null };
+}
+
+// Techo "redondo" para el eje: 38.412 → 40.000. Un eje que termina en el máximo
+// exacto deja la última marca pegada al borde y con un número ilegible.
+function pliVizNiceMax(v) {
+  if (!(v > 0)) return 10;
+  var exp = Math.pow(10, Math.floor(Math.log(v) / Math.LN10));
+  var f = v / exp;
+  // Escalones cerrados: con solo 1/2/5 un pico de 3.200 estira el eje hasta 5.000
+  // y la curva queda aplastada contra el piso usando dos tercios del alto.
+  var esc = [1, 1.2, 1.5, 2, 2.5, 3, 4, 5, 6, 8, 10];
+  for (var i = 0; i < esc.length; i++) if (f <= esc[i] + 1e-9) return esc[i] * exp;
+  return 10 * exp;
+}
+
+function pliGrafRender() {
+  var cont = document.getElementById('pli-grafico');
+  if (!cont) return;
+  pliVizIdx = -1;
+  var raices = PLI.arbol || [];
+  if (!raices.length) { cont.innerHTML = ''; PLI.vizModel = null; return; }
+
+  var cfg = pliVizCfg(), slots = pliVizSlots();
+  // El filtro sobrevive al cambio de plan o de temporada, donde los ids ya no
+  // existen. Sin esto el gráfico queda vacío y parece que no hay datos cargados.
+  if (cfg.sel) {
+    cfg.sel = cfg.sel.filter(function(id) { return slots[id] !== undefined; });
+    if (!cfg.sel.length) cfg.sel = null;
+  }
+  var est = pliObjEstado();
+  var mod = pliVizSeries(est);
+  var semanas = mod.semanas, series = mod.series;
+
+  var html = '<div style="border:1px solid var(--bor);border-radius:10px;padding:12px;margin-bottom:12px;background:var(--sur)">'
+    + '<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px">'
+      + '<div style="font-size:12px;font-weight:700">📈 Curva del plan</div>'
+      + '<div style="display:flex;gap:4px">'
+        + '<button class="btn bo bs pli-vista' + (cfg.modo === 'semanal' ? ' on' : '') + '" onclick="pliVizModo(\'semanal\')" style="font-size:11px">Por semana</button>'
+        + '<button class="btn bo bs pli-vista' + (cfg.modo === 'acumulado' ? ' on' : '') + '" onclick="pliVizModo(\'acumulado\')" style="font-size:11px" title="Cuánto llevás empacado hasta cada semana">Acumulado</button>'
+      + '</div>'
+    + '</div>';
+
+  // Leyenda y filtro son el mismo control: la leyenda ya lista los productos con
+  // su color, hacerla clickeable evita duplicar ese listado en un select aparte.
+  html += '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px">'
+    + '<button class="pli-viz-chip' + (cfg.sel ? '' : ' on') + '" aria-pressed="' + (cfg.sel ? 'false' : 'true') + '"'
+      + ' onclick="pliVizTodos()">Todos</button>'
+    + raices.map(function(p) {
+        var act = !cfg.sel || cfg.sel.indexOf(p.id) !== -1;
+        var col = slots[p.id] < 8 ? PLI_VIZ_COL[slots[p.id]] : PLI_VIZ_OTROS;
+        return '<button class="pli-viz-chip' + (cfg.sel && act ? ' on' : '') + '" aria-pressed="' + (act ? 'true' : 'false') + '"'
+          + ' onclick="pliVizToggle(' + p.id + ')" title="Clic para ver solo este producto">'
+          + '<span class="pli-viz-tra" style="background:' + col + '"></span>' + pliEsc(p.nombre) + '</button>';
+      }).join('')
+    + '</div>';
+
+  if (!semanas.length) {
+    cont.innerHTML = html + '<div class="pli-cel-chica">Agregá semanas en la grilla para ver la curva.</div></div>';
+    PLI.vizModel = null;
+    return;
+  }
+  var maxDato = 0;
+  series.forEach(function(sr) { sr.pts.forEach(function(v) { if (v > maxDato) maxDato = v; }); });
+  if (!(maxDato > 0)) {
+    cont.innerHTML = html + '<div class="pli-cel-chica">Todavía no cargaste cantidades: cuando escribas la primera, la curva aparece acá.</div></div>';
+    PLI.vizModel = null;
+    return;
+  }
+
+  // Resumen arriba del gráfico: el número gordo del plan, que si no hay que ir a
+  // buscarlo al pie de una tabla de 30 filas.
+  var totVis = series.reduce(function(a, sr) { return a + sr.total; }, 0);
+  var semTot = semanas.map(function(_, i) {
+    return series.reduce(function(a, sr) { return a + sr.pts0[i]; }, 0);
+  });
+  var iPico = semTot.indexOf(Math.max.apply(null, semTot));
+  var rots = semanas.map(function(s) { return pliRotuloSemana(s); });
+  var conDatos = semTot.filter(function(v) { return v > 0; }).length;
+  if (mod.unicaUnidad !== null) {
+    html += '<div class="pli-cel-chica" style="margin-bottom:6px">'
+      + '<strong style="font-size:15px;color:var(--txt)">' + pliN(totVis) + '</strong> '
+      + pliEsc(mod.unicaUnidad || 'unidades') + ' en ' + conDatos + ' semana(s)'
+      + (semTot[iPico] > 0 ? ' · pico en <strong style="color:var(--txt)">' + pliEsc(rots[iPico].corto) + '</strong> con ' + pliN(semTot[iPico]) : '')
+      + '</div>';
+  } else {
+    html += '<div class="pli-cel-chica" style="margin-bottom:6px">Los productos visibles están en unidades distintas: se grafica cada curva por separado y no se muestra un total.</div>';
+  }
+
+  var M = PLI_VIZ_M, pw = PLI_VIZ_W - M.izq - M.der, ph = PLI_VIZ_H - M.top - M.aba;
+  var maxY = pliVizNiceMax(maxDato);
+  var paso = semanas.length > 1 ? pw / (semanas.length - 1) : 0;
+  var xF = function(i) { return semanas.length > 1 ? M.izq + i * paso : M.izq + pw / 2; };
+  var yF = function(v) { return M.top + ph - (v / maxY) * ph; };
+
+  // Grilla y eje: hairline sólido, un tono por encima del fondo. Nunca punteado:
+  // el punteado se lee como "proyección" o "umbral" cuando es solo una grilla.
+  var svg = '';
+  for (var t = 0; t <= 4; t++) {
+    var vy = maxY * t / 4, py = yF(vy);
+    svg += '<line x1="' + M.izq + '" x2="' + (M.izq + pw) + '" y1="' + py + '" y2="' + py + '"'
+      + ' style="stroke:' + (t === 0 ? 'var(--bor2)' : 'var(--bor)') + '" stroke-width="1"/>'
+      + '<text x="' + (M.izq - 8) + '" y="' + (py + 3.5) + '" text-anchor="end" font-size="10"'
+      + ' style="fill:var(--mut);font-variant-numeric:tabular-nums">' + pliEsc(pliN(vy)) + '</text>';
+  }
+  svg += '<text x="' + M.izq + '" y="' + (M.top - 4) + '" font-size="10" style="fill:var(--sub)">'
+    + pliEsc(mod.unicaUnidad || 'cantidad') + (cfg.modo === 'acumulado' ? ' (acumulado)' : '') + '</text>';
+
+  // Rótulos del eje X: se saltean los que no entran, y el año se escribe solo
+  // cuando cambia — con 30 semanas, repetir "2026" 30 veces es puro ruido.
+  var cada = Math.max(1, Math.ceil(semanas.length * 46 / Math.max(pw, 1)));
+  var ultX = -999, ultAnio = null;
+  semanas.forEach(function(s, i) {
+    var forzada = (i === semanas.length - 1);
+    if (i % cada !== 0 && !forzada) return;
+    var px = xF(i);
+    if (px - ultX < 40) return;
+    ultX = px;
+    var r = rots[i], anio = String(r.corto).slice(0, 4), num = String(r.corto).slice(5);
+    svg += '<text x="' + px + '" y="' + (M.top + ph + 15) + '" text-anchor="middle" font-size="10"'
+      + ' style="fill:var(--mut);font-variant-numeric:tabular-nums">' + pliEsc(num) + '</text>';
+    if (anio !== ultAnio) {
+      svg += '<text x="' + px + '" y="' + (M.top + ph + 28) + '" text-anchor="middle" font-size="10"'
+        + ' style="fill:var(--sub);font-variant-numeric:tabular-nums">' + pliEsc(anio) + '</text>';
+      ultAnio = anio;
+    }
+  });
+  svg += '<text x="' + (M.izq + pw / 2) + '" y="' + (PLI_VIZ_H - 6) + '" text-anchor="middle" font-size="10"'
+    + ' style="fill:var(--sub)">semana de cosecha (ISO)</text>';
+
+  // Las líneas: finas (2px), sin relleno y con las uniones redondeadas.
+  series.forEach(function(sr) {
+    var d = sr.pts.map(function(v, i) { return (i ? 'L' : 'M') + xF(i).toFixed(1) + ' ' + yF(v).toFixed(1); }).join(' ');
+    svg += '<path d="' + d + '" fill="none" stroke="' + sr.color + '" stroke-width="2"'
+      + ' stroke-linejoin="round" stroke-linecap="round"/>';
+    // Los puntos solo cuando son pocos: con 30 semanas, un marcador por dato es
+    // una fila de manchas y la forma de la curva se pierde.
+    if (semanas.length <= 16) {
+      sr.pts.forEach(function(v, i) {
+        svg += '<circle cx="' + xF(i).toFixed(1) + '" cy="' + yF(v).toFixed(1) + '" r="4" fill="' + sr.color + '"'
+          + ' style="stroke:var(--sur)" stroke-width="2"/>';
+      });
+    }
+  });
+
+  // Etiqueta al lado de la línea, solo hasta 4 series: más que eso se pisan entre
+  // sí y la leyenda ya identifica a cada una. El nombre va en tinta, NO en el
+  // color de la serie — el color lo lleva el punto.
+  //
+  // Se ancla en la ÚLTIMA SEMANA CON DATOS de cada producto, no en la última
+  // semana del plan: la temporada de cada uno termina en 0, así que anclar al
+  // final apila las cuatro etiquetas encima del eje X. Anclando donde cada
+  // producto termina, además, quedan repartidas a lo ancho.
+  if (series.length <= 4) {
+    var puestas = [];
+    series.forEach(function(sr) {
+      var k = -1;
+      for (var q = sr.pts0.length - 1; q >= 0; q--) { if (sr.pts0[q] > 0) { k = q; break; } }
+      if (k < 0) return;
+      var n = sr.nombre.length > 18 ? sr.nombre.slice(0, 17) + '…' : sr.nombre;
+      var ancho = n.length * 5.6 + 12;
+      var px = xF(k), py = yF(sr.pts[k]);
+      // Si no entra a la derecha se escribe a la izquierda del punto.
+      var der = px + 9 + ancho <= PLI_VIZ_W - 4;
+      var choca = function(yy) {
+        return puestas.some(function(p) { return Math.abs(p.x - px) < 110 && Math.abs(p.y - yy) < 13; });
+      };
+      var offs = [0, -14, 14, -28, 28, -42, 42], y = null;
+      for (var oi = 0; oi < offs.length; oi++) {
+        var cand = py + offs[oi];
+        if (cand < M.top + 4 || cand > M.top + ph - 2) continue;
+        if (!choca(cand)) { y = cand; break; }
+      }
+      if (y === null) return;   // no hay lugar limpio: la leyenda ya la identifica
+      puestas.push({ x: px, y: y });
+      svg += '<circle cx="' + px.toFixed(1) + '" cy="' + py.toFixed(1) + '" r="3" fill="' + sr.color + '"/>'
+        + '<text x="' + (der ? px + 9 : px - 9).toFixed(1) + '" y="' + (y + 3.5).toFixed(1) + '" font-size="11"'
+        + (der ? '' : ' text-anchor="end"') + ' style="fill:var(--mut)">' + pliEsc(n) + '</text>';
+    });
+  }
+
+  // Capa de hover: toda el área del gráfico es zona sensible y se engancha a la
+  // semana MÁS CERCANA. Nadie tiene que apuntarle a una línea de 2px.
+  svg += '<line id="pli-viz-cross" y1="' + M.top + '" y2="' + (M.top + ph) + '" x1="0" x2="0"'
+    + ' style="stroke:var(--bor2)" stroke-width="1" visibility="hidden"/>'
+    + '<g id="pli-viz-caps"></g>';
+
+  html += '<div class="pli-viz">'
+    + '<svg id="pli-viz-svg" viewBox="0 0 ' + PLI_VIZ_W + ' ' + PLI_VIZ_H + '" tabindex="0" role="img"'
+    + ' aria-label="Curva del plan por semana. Los valores están en la grilla de arriba.">' + svg + '</svg>'
+    + '<div id="pli-viz-tip" class="pli-viz-tip"></div></div>';
+
+  html += '<div class="pli-cel-chica" style="margin-top:6px">Pasá el mouse (o usá ← →) para ver los números de cada semana. '
+    + 'Clic en un producto para verlo solo.</div>';
+
+  cont.innerHTML = html + '</div>';
+
+  PLI.vizModel = {
+    semanas: semanas, series: series, rot: rots, unicaUnidad: mod.unicaUnidad,
+    pw: pw, paso: paso, x: xF, y: yF
+  };
+  var el = document.getElementById('pli-viz-svg');
+  if (el) {
+    el.addEventListener('pointermove', pliVizHover);
+    el.addEventListener('pointerleave', function() { pliVizPintar(-1); });
+    el.addEventListener('keydown', pliVizTeclas);
+    el.addEventListener('blur', function() { pliVizPintar(-1); });
+  }
+}
+
+// Un clic aísla el producto (que es lo que uno quiere el 90% de las veces);
+// clics sucesivos van sumando. Si se apaga el último, vuelve a "todos": un
+// gráfico vacío no le sirve a nadie.
+function pliVizToggle(id) {
+  var cfg = pliVizCfg();
+  if (!cfg.sel) cfg.sel = [id];
+  else if (cfg.sel.indexOf(id) === -1) cfg.sel = cfg.sel.concat([id]);
+  else {
+    cfg.sel = cfg.sel.filter(function(x) { return x !== id; });
+    if (!cfg.sel.length) cfg.sel = null;
+  }
+  pliGrafRender();
+}
+
+function pliVizTodos() { pliVizCfg().sel = null; pliGrafRender(); }
+function pliVizModo(m) { pliVizCfg().modo = m; pliGrafRender(); }
+
+function pliVizHover(evt) {
+  var m = PLI.vizModel;
+  if (!m || !m.semanas.length) return;
+  var r = evt.currentTarget.getBoundingClientRect();
+  if (!r.width) return;
+  var xv = (evt.clientX - r.left) / r.width * PLI_VIZ_W;
+  var i = m.paso ? Math.round((xv - PLI_VIZ_M.izq) / m.paso) : 0;
+  if (i < 0) i = 0;
+  if (i > m.semanas.length - 1) i = m.semanas.length - 1;
+  if (i !== pliVizIdx) pliVizPintar(i);
+}
+
+function pliVizTeclas(evt) {
+  var m = PLI.vizModel;
+  if (!m) return;
+  if (evt.key === 'ArrowRight' || evt.key === 'ArrowLeft') {
+    evt.preventDefault();
+    var i = pliVizIdx < 0 ? 0 : pliVizIdx + (evt.key === 'ArrowRight' ? 1 : -1);
+    if (i < 0) i = 0;
+    if (i > m.semanas.length - 1) i = m.semanas.length - 1;
+    pliVizPintar(i);
+  } else if (evt.key === 'Escape') {
+    pliVizPintar(-1);
+  }
+}
+
+// El tooltip muestra TODAS las series de esa semana: no hay que cazar una línea
+// para leer un número. Los nombres se insertan con textContent, nunca armando
+// HTML: vienen cargados por el usuario.
+function pliVizPintar(i) {
+  var m = PLI.vizModel;
+  var svg = document.getElementById('pli-viz-svg');
+  var tip = document.getElementById('pli-viz-tip');
+  var cross = document.getElementById('pli-viz-cross');
+  var caps = document.getElementById('pli-viz-caps');
+  if (!m || !svg || !tip) return;
+
+  if (i < 0 || i >= m.semanas.length) {
+    pliVizIdx = -1;
+    if (cross) cross.setAttribute('visibility', 'hidden');
+    if (caps) caps.innerHTML = '';
+    tip.className = 'pli-viz-tip';
+    return;
+  }
+  pliVizIdx = i;
+  var x = m.x(i);
+  if (cross) {
+    cross.setAttribute('x1', x); cross.setAttribute('x2', x);
+    cross.setAttribute('visibility', 'visible');
+  }
+  if (caps) {
+    caps.innerHTML = m.series.map(function(sr) {
+      return '<circle cx="' + x.toFixed(1) + '" cy="' + m.y(sr.pts[i]).toFixed(1) + '" r="4.5" fill="' + sr.color + '"'
+        + ' style="stroke:var(--sur)" stroke-width="2"/>';
+    }).join('');
+  }
+
+  while (tip.firstChild) tip.removeChild(tip.firstChild);
+  var cab = document.createElement('div');
+  cab.className = 'tt-sem';
+  cab.textContent = m.rot[i].corto + (m.rot[i].largo ? ' · ' + m.rot[i].largo : '');
+  tip.appendChild(cab);
+  var tot = 0;
+  m.series.forEach(function(sr) {
+    var f = document.createElement('div'); f.className = 'tt-fila';
+    var k = document.createElement('span'); k.className = 'tt-key'; k.style.background = sr.color;
+    var n = document.createElement('span'); n.className = 'tt-nom'; n.textContent = sr.nombre;
+    var v = document.createElement('span'); v.className = 'tt-val'; v.textContent = pliN(sr.pts[i]);
+    f.appendChild(k); f.appendChild(n); f.appendChild(v);
+    tip.appendChild(f);
+    tot += sr.pts[i];
+  });
+  if (m.series.length > 1 && m.unicaUnidad !== null) {
+    var ft = document.createElement('div'); ft.className = 'tt-fila tt-tot';
+    var fn = document.createElement('span'); fn.className = 'tt-nom';
+    fn.textContent = 'Total' + (m.unicaUnidad ? ' ' + m.unicaUnidad : '');
+    var fv = document.createElement('span'); fv.className = 'tt-val'; fv.textContent = pliN(tot);
+    ft.appendChild(fn); ft.appendChild(fv);
+    tip.appendChild(ft);
+  }
+
+  var r = svg.getBoundingClientRect();
+  var esc = r.width / PLI_VIZ_W;
+  tip.className = 'pli-viz-tip on';
+  var px = x * esc, izq = px + 16;
+  if (izq + tip.offsetWidth > r.width - 4) izq = px - tip.offsetWidth - 16;
+  if (izq < 0) izq = 4;
+  tip.style.left = Math.round(izq) + 'px';
+  tip.style.top = Math.round(PLI_VIZ_M.top * esc + 8) + 'px';
 }
 
 // "lun 9 nov" — la fecha completa igual queda debajo, para no perder el año.
@@ -36898,6 +37333,9 @@ function pliObjGuardar() {
       PLI.plan.objetivos = objetivos.map(function(o) {
         return { producto_id: o.producto_id, cantidad: o.cantidad, bucket_ini: o.bucket_ini };
       });
+      // Solo el gráfico, NO la grilla: redibujarla mientras se tipea le saca el
+      // foco al usuario en medio de la carga.
+      pliGrafRender();
       pliCalcular();
     });
 }
