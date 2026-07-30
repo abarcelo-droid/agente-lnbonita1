@@ -36325,6 +36325,13 @@ function pliPlanRender() {
 
   html += '<div id="pli-objetivos"></div><div id="pli-resultado"></div>';
   document.getElementById('pli-plan-detalle').innerHTML = html;
+
+  // Plan nuevo: se precargan todas las semanas de la temporada para que el usuario
+  // solo tenga que llenar las que usa y borrar el resto. Si el plan YA tiene
+  // objetivos no se toca nada: sería deshacerle la limpieza que hizo antes.
+  if (!conf && !(p.objetivos || []).length && !(PLI.semanasExtra || []).length) {
+    pliObjGenerarSemanas(true);
+  }
   pliObjRender();
 }
 
@@ -36348,6 +36355,69 @@ function pliObjEstado() {
   return { mapa: mapa, semanas: lista };
 }
 
+// Todas las semanas de la temporada, precargadas. Es lo que pidió el usuario: que
+// aparezcan por default y él va borrando las que no necesita.
+// Rango: las fechas de la temporada si están cargadas; si no, el año entero.
+function pliSemanasDeTemporada() {
+  var t = (PLI.temporadas || []).filter(function(x) { return x.id === PLI.temporadaId; })[0];
+  var desde = t && t.fecha_desde, hasta = t && t.fecha_hasta;
+  if (!desde || !hasta) {
+    // Sin fechas de temporada: el año que figure en el nombre, o el año en curso.
+    var m = t && t.nombre ? String(t.nombre).match(/(20\d{2})/) : null;
+    var anio = m ? Number(m[1]) : new Date().getFullYear();
+    var out = [];
+    for (var n = 1; n <= 53; n++) {
+      var l = pliLunesDeSemana(anio, n);
+      if (l) out.push(l);
+    }
+    return out;
+  }
+  var ini = pliLunesDe(desde), fin = pliLunesDe(hasta);
+  if (!ini || !fin || fin < ini) return [];
+  var res = [], cur = ini, guarda = 0;
+  while (cur <= fin && guarda++ < 120) {
+    res.push(cur);
+    var p = cur.split('-').map(Number);
+    var d = new Date(Date.UTC(p[0], p[1] - 1, p[2]) + 7 * 86400000);
+    var dd = function(x) { return String(x).padStart(2, '0'); };
+    cur = d.getUTCFullYear() + '-' + dd(d.getUTCMonth() + 1) + '-' + dd(d.getUTCDate());
+  }
+  return res;
+}
+
+function pliObjGenerarSemanas(silencioso) {
+  var gen = pliSemanasDeTemporada();
+  if (!gen.length) {
+    if (!silencioso) toast('No se pudo determinar el rango de la temporada', 'er');
+    return false;
+  }
+  PLI.semanasExtra = PLI.semanasExtra || [];
+  var agregadas = 0;
+  gen.forEach(function(s) {
+    if (PLI.semanasExtra.indexOf(s) === -1) { PLI.semanasExtra.push(s); agregadas++; }
+  });
+  if (!silencioso) toast('✓ ' + agregadas + ' semana(s) agregadas — borrá las que no uses', 'ok');
+  return true;
+}
+
+// Después de cargar los números, saca de una todas las filas que quedaron en cero.
+function pliObjLimpiarVacias() {
+  var est = pliObjEstado();
+  var conDatos = {};
+  Object.keys(est.mapa).forEach(function(k) {
+    if (Number(est.mapa[k]) > 0) conDatos[k.split('|')[0]] = true;
+  });
+  // Lo que el usuario esté tipeando ahora mismo también cuenta como "con datos".
+  document.querySelectorAll('#pli-objetivos input[data-pli-prod]').forEach(function(el) {
+    if (Number(el.value) > 0) conDatos[el.getAttribute('data-pli-sem') || ''] = true;
+  });
+  var antes = (PLI.semanasExtra || []).length;
+  PLI.semanasExtra = (PLI.semanasExtra || []).filter(function(s) { return conDatos[s]; });
+  var quitadas = antes - PLI.semanasExtra.length;
+  pliObjRender();
+  toast(quitadas ? '✓ ' + quitadas + ' semana(s) vacías quitadas' : 'No había semanas vacías', 'ok');
+}
+
 function pliObjRender() {
   var cont = document.getElementById('pli-objetivos');
   if (!cont) return;
@@ -36358,7 +36428,11 @@ function pliObjRender() {
   var html = '<div style="border:1px solid var(--bor);border-radius:10px;padding:12px;margin-bottom:12px;background:var(--sur)">'
     + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">'
       + '<div style="font-size:12px;font-weight:700">🎯 Curva de producción por semana de cosecha</div>'
-      + (conf ? '' : '<button class="btn bo bs" onclick="pliObjAgregarSemana()" style="font-size:11px">+ semana</button>')
+      + (conf ? '' : '<div style="display:flex;gap:6px">'
+          + '<button class="btn bo bs" onclick="pliObjGenerarSemanas();pliObjRender()" style="font-size:11px" title="Precarga todas las semanas de la temporada">↻ generar semanas</button>'
+          + '<button class="btn bo bs" onclick="pliObjLimpiarVacias()" style="font-size:11px" title="Quita las filas que quedaron en cero">🧹 quitar vacías</button>'
+          + '<button class="btn bo bs" onclick="pliObjAgregarSemana()" style="font-size:11px">+ semana</button>'
+        + '</div>')
     + '</div>';
 
   if (!raices.length) {
@@ -36367,10 +36441,12 @@ function pliObjRender() {
   }
 
   html += '<div class="pli-cel-chica" style="margin-bottom:8px">Cargá cuánto vas a empacar en cada semana. '
-    + 'La semana se identifica por su lunes. Lo que dejes en 0 no se guarda.</div>';
+    + 'Las semanas son ISO (la 1 es la que contiene el primer jueves del año). '
+    + 'Lo que dejes en 0 no se guarda, así que podés borrar las que no uses o usar 🧹.</div>';
 
-  html += '<div class="ab-table-wrap"><table class="pa-tbl" style="font-size:12px"><thead><tr>'
-    + '<th style="min-width:150px">Semana de cosecha</th>'
+  html += '<div class="ab-table-wrap" style="max-height:420px;overflow:auto">'
+    + '<table class="pa-tbl" style="font-size:12px"><thead><tr>'
+    + '<th style="min-width:110px">Semana</th>'
     + raices.map(function(pr) {
         return '<th style="text-align:right;min-width:130px">' + pliEsc(pr.nombre)
           + '<div class="pli-cel-chica">' + pliEsc(pr.unidad) + '</div></th>';
@@ -36392,8 +36468,14 @@ function pliObjRender() {
         + ' onchange="pliObjGuardar()"></td>';
     }).join('');
     totGen += totFila;
-    html += '<tr><td><strong>' + (s ? pliEsc(pliFechaCorta(s)) : '<em>sin fecha</em>') + '</strong>'
-      + (s ? '<div class="pli-cel-chica">' + pliEsc(s) + '</div>' : '') + '</td>'
+    var rot = pliRotuloSemana(s);
+    // Las filas con datos se destacan: con 50 semanas en pantalla, encontrar las
+    // cargadas a ojo es imposible si todas se ven igual.
+    html += '<tr' + (totFila > 0 ? ' style="background:rgba(74,222,128,.07)"' : '') + '>'
+      + '<td>' + (s
+          ? '<strong style="font-size:14px">' + pliEsc(rot.corto) + '</strong>'
+            + '<div class="pli-cel-chica">' + pliEsc(rot.largo) + '</div>'
+          : '<em class="pli-cel-chica">sin fecha</em>') + '</td>'
       + celdas
       + '<td class="pli-num"><strong>' + pliN(totFila) + '</strong></td>'
       + (conf ? '' : '<td><button class="btn bd bs" onclick="pliObjQuitarSemana(\'' + pliEsc(s) + '\')"'
@@ -36418,14 +36500,27 @@ function pliFechaCorta(iso) {
   return 'sem ' + d.getUTCDate() + ' ' + mes;
 }
 
+// Se pide el NÚMERO de semana, que es como se maneja el calendario agrícola.
+// También acepta una fecha, por si alguien la tiene a mano.
 function pliObjAgregarSemana() {
-  var hoy = new Date();
-  var sug = hoy.toISOString().slice(0, 10);
-  var f = prompt('Fecha de la semana de cosecha (AAAA-MM-DD).\nSe normaliza al lunes de esa semana.', sug);
-  if (!f) return;
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(f.trim())) return toast('Formato inválido: usá AAAA-MM-DD', 'er');
-  var lunes = pliLunesDe(f.trim());
-  if (!lunes) return toast('Fecha inválida', 'er');
+  var t = (PLI.temporadas || []).filter(function(x) { return x.id === PLI.temporadaId; })[0];
+  var m = t && t.nombre ? String(t.nombre).match(/(20\d{2})/) : null;
+  var anioDef = m ? Number(m[1]) : new Date().getFullYear();
+  var v = prompt('Número de semana (1 a 53).\nTambién podés poner "46/2027" o una fecha AAAA-MM-DD.', '');
+  if (!v) return;
+  v = String(v).trim();
+  var lunes = null;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(v)) {
+    lunes = pliLunesDe(v);
+  } else {
+    var partes = v.split(/[\/\-\s]/).filter(Boolean);
+    var n = Number(partes[0]);
+    var anio = partes[1] ? Number(partes[1]) : anioDef;
+    if (!(n >= 1 && n <= 53)) return toast('La semana tiene que estar entre 1 y 53', 'er');
+    lunes = pliLunesDeSemana(anio, n);
+    if (!lunes) return toast('La semana ' + n + ' no existe en ' + anio, 'er');
+  }
+  if (!lunes) return toast('No se entendió la semana', 'er');
   PLI.semanasExtra = PLI.semanasExtra || [];
   if (PLI.semanasExtra.indexOf(lunes) === -1) PLI.semanasExtra.push(lunes);
   pliObjRender();
@@ -36441,6 +36536,46 @@ function pliLunesDe(iso) {
   var d = new Date(t - ((dow === 0 ? 6 : dow - 1) * 86400000));
   var dd = function(n) { return String(n).padStart(2, '0'); };
   return d.getUTCFullYear() + '-' + dd(d.getUTCMonth() + 1) + '-' + dd(d.getUTCDate());
+}
+
+// ── Semanas ISO ───────────────────────────────────────────────────────────
+// El calendario agrícola se maneja por NÚMERO de semana, así que ése es el rótulo
+// principal en toda la UI. Espejo de semanaISO()/lunesDeSemanaISO() del motor.
+// ISO 8601: la semana 1 es la que contiene el primer jueves del año, y por eso los
+// primeros días de enero pueden caer en la semana 52/53 del año anterior.
+function pliSemISO(iso) {
+  var s = String(iso || '');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return null;
+  var p = s.split('-').map(Number);
+  var d = new Date(Date.UTC(p[0], p[1] - 1, p[2]));
+  var dow = (d.getUTCDay() + 6) % 7;
+  d.setUTCDate(d.getUTCDate() - dow + 3);
+  var anio = d.getUTCFullYear();
+  var pj = new Date(Date.UTC(anio, 0, 4));
+  var dowPj = (pj.getUTCDay() + 6) % 7;
+  pj.setUTCDate(pj.getUTCDate() - dowPj + 3);
+  return { anio: anio, semana: 1 + Math.round((d.getTime() - pj.getTime()) / (7 * 86400000)) };
+}
+
+function pliLunesDeSemana(anio, semana) {
+  var a = Number(anio), n = Number(semana);
+  if (!(n >= 1 && n <= 53)) return null;
+  var pj = new Date(Date.UTC(a, 0, 4));
+  var dowPj = (pj.getUTCDay() + 6) % 7;
+  var lunesS1 = new Date(pj.getTime() - dowPj * 86400000);
+  var d = new Date(lunesS1.getTime() + (n - 1) * 7 * 86400000);
+  var dd = function(x) { return String(x).padStart(2, '0'); };
+  var iso = d.getUTCFullYear() + '-' + dd(d.getUTCMonth() + 1) + '-' + dd(d.getUTCDate());
+  var chk = pliSemISO(iso);
+  // Semana 53 en un año que no la tiene: cae en el siguiente, se rechaza.
+  return (chk && chk.semana === n) ? iso : null;
+}
+
+// "S46" grande + la fecha abajo, que es lo que permite ubicarse igual.
+function pliRotuloSemana(iso) {
+  var s = pliSemISO(iso);
+  if (!s) return { corto: 'sin fecha', largo: '' };
+  return { corto: 'S' + s.semana, largo: pliFechaCorta(iso).replace('sem ', '') + ' ' + s.anio };
 }
 
 function pliObjQuitarSemana(s) {
@@ -37123,7 +37258,10 @@ function pliCmpRenderAgenda(cont) {
       + '<td class="pli-cel-chica">' + pliEsc(f.l.proveedor_texto || '—') + '</td>'
       + '<td class="pli-num"><strong style="font-size:14px">' + pliN(f.b.bultos_a_comprar) + '</strong> '
         + '<span class="pli-cel-chica">' + pliEsc(f.l.unidad_compra) + '</span></td>'
-      + '<td>' + (f.b.fecha_necesidad ? pliEsc(pliFechaCorta(f.b.fecha_necesidad)) : '<em class="pli-cel-chica">sin fecha</em>') + '</td>'
+      + '<td>' + (f.b.fecha_necesidad
+          ? '<strong>' + pliEsc(pliRotuloSemana(f.b.fecha_necesidad).corto) + '</strong>'
+            + ' <span class="pli-cel-chica">' + pliEsc(pliRotuloSemana(f.b.fecha_necesidad).largo) + '</span>'
+          : '<em class="pli-cel-chica">sin fecha</em>') + '</td>'
       + '<td class="pli-num pli-cel-chica">' + (f.l.lead_time_dias || 0) + ' d</td>'
       + '<td><button class="btn bo bs" style="font-size:11px;padding:3px 8px"'
         + ' onclick="pliCompraDesdeAgenda(' + f.l.insumo_id + ',' + f.b.bultos_a_comprar + ')">Registrar</button></td>'
@@ -37161,7 +37299,8 @@ function pliCmpRenderSemanas(cont) {
   semanas.forEach(function(s) {
     html += '<div style="border:1px solid var(--bor);border-radius:10px;padding:10px 12px;margin-bottom:10px;background:var(--sur)">'
       + '<div style="font-size:13px;font-weight:700;margin-bottom:6px">'
-      + (s ? '🍈 ' + pliEsc(pliFechaCorta(s)) + ' <span class="pli-cel-chica">(' + pliEsc(s) + ')</span>'
+      + (s ? '🍈 Semana ' + pliEsc(String((pliSemISO(s) || {}).semana || '?'))
+             + ' <span class="pli-cel-chica">(' + pliEsc(pliRotuloSemana(s).largo) + ')</span>'
            : '🍈 <em>sin fecha asignada</em>') + '</div>'
       + '<div class="ab-table-wrap"><table class="pa-tbl" style="font-size:12px"><thead><tr>'
       + '<th>Insumo</th><th style="text-align:right">Necesidad</th><th style="text-align:right">Del stock</th>'

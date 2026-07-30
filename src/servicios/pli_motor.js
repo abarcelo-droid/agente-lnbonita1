@@ -66,6 +66,42 @@ export function lunesDe(fechaISO) {
   return restarDias(s, corr);
 }
 
+// Número de semana ISO 8601. El calendario agrícola se maneja por número de
+// semana, así que es la etiqueta principal de cada balde.
+// ISO 8601: la semana 1 es la que contiene el primer jueves del año, y por eso
+// los primeros días de enero pueden pertenecer a la semana 52/53 del año anterior.
+export function semanaISO(fechaISO) {
+  const s = String(fechaISO || '');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return null;
+  const p = s.split('-').map(Number);
+  const d = new Date(Date.UTC(p[0], p[1] - 1, p[2]));
+  const dow = (d.getUTCDay() + 6) % 7;                 // 0 = lunes
+  d.setUTCDate(d.getUTCDate() - dow + 3);              // jueves de esa semana
+  const anio = d.getUTCFullYear();
+  const pj = new Date(Date.UTC(anio, 0, 4));           // 4 de enero cae siempre en la semana 1
+  const dowPj = (pj.getUTCDay() + 6) % 7;
+  pj.setUTCDate(pj.getUTCDate() - dowPj + 3);
+  const semana = 1 + Math.round((d.getTime() - pj.getTime()) / (7 * 86400000));
+  return { anio, semana };
+}
+
+// Inversa: el lunes de la semana N de un año. Sirve para que el usuario cargue
+// "semana 46" en vez de tener que buscar la fecha.
+export function lunesDeSemanaISO(anio, semana) {
+  const a = Number(anio), n = Number(semana);
+  if (!Number.isInteger(a) || !Number.isInteger(n) || n < 1 || n > 53) return null;
+  const pj = new Date(Date.UTC(a, 0, 4));
+  const dowPj = (pj.getUTCDay() + 6) % 7;
+  const lunesS1 = new Date(pj.getTime() - dowPj * 86400000);
+  const d = new Date(lunesS1.getTime() + (n - 1) * 7 * 86400000);
+  // Una semana 53 en un año que no la tiene cae en el año siguiente: se rechaza
+  // para no crear un balde fuera de rango.
+  const chk = semanaISO(`${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`);
+  if (!chk || chk.semana !== n) return null;
+  const dd = (x) => String(x).padStart(2, '0');
+  return `${d.getUTCFullYear()}-${dd(d.getUTCMonth() + 1)}-${dd(d.getUTCDate())}`;
+}
+
 // Formato es-AR para los textos de fórmula que lee el usuario.
 function fmtNum(n, dec = 4) {
   const v = Number(n) || 0;
@@ -475,8 +511,11 @@ export function calcularPlan(ctx) {
       totalExcMoq  += r.excesoMoq;
       if (r.moqForzado) moqForzadoAlguno = 1;
 
+      const iso = k ? semanaISO(k) : null;
       detalleBuckets.push({
         bucket_ini: k,
+        semana_iso: iso ? iso.semana : null,
+        anio_iso: iso ? iso.anio : null,
         cant_bruta_uso: brutaB,
         existencia_aplicada: usaExist,
         cant_neta_uso: netaB,

@@ -1519,7 +1519,7 @@ router.get('/planes/:id/export.xlsx', wrap((req, res) => {
   // ordenada por fecha límite. Es la hoja que se le manda a Compras.
   const agenda = [{
     A: 'Pedir hasta', B: 'Insumo', C: 'Proveedor', D: 'Cantidad', E: 'Unidad de compra',
-    F: 'Para cosecha (semana)', G: 'Plazo (dias)'
+    F: 'Semana de cosecha', G: 'Lunes de esa semana', H: 'Plazo (dias)'
   }];
   const filasAgenda = [];
   for (const l of r.lineas) {
@@ -1527,8 +1527,11 @@ router.get('/planes/:id/export.xlsx', wrap((req, res) => {
       if (!(b.bultos_a_comprar > 0)) continue;
       filasAgenda.push({
         A: b.fecha_pedido_limite || 'sin fecha', B: l.insumo_nombre, C: l.proveedor_texto || '',
-        D: b.bultos_a_comprar, E: l.unidad_compra, F: b.fecha_necesidad || 'sin fecha',
-        G: l.lead_time_dias || 0
+        D: b.bultos_a_comprar, E: l.unidad_compra,
+        // El calendario agricola se maneja por numero de semana: va primero.
+        F: b.semana_iso ? ('S' + b.semana_iso) : 'sin fecha',
+        G: b.fecha_necesidad || '',
+        H: l.lead_time_dias || 0
       });
     }
   }
