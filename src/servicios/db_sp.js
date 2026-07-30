@@ -251,6 +251,30 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_sp_outbox_pend ON sp_outbox(estado, intentos);
 `);
 
+// ── MIGRACIONES IDEMPOTENTES ──────────────────────────────────────────────
+// Molde de db_pa.js: PRAGMA table_info + ALTER guardado. Nunca throw en el
+// top-level, que tumbaría el arranque de todo el server.
+function addCol(tabla, col, def) {
+  try {
+    const cols = db.prepare(`PRAGMA table_info(${tabla})`).all().map(c => c.name);
+    if (!cols.includes(col)) {
+      db.exec(`ALTER TABLE ${tabla} ADD COLUMN ${col} ${def}`);
+      console.log(`[SP] Columna ${col} agregada en ${tabla}`);
+    }
+  } catch (e) {
+    console.error(`[SP] Error agregando ${col} en ${tabla}:`, e.message);
+  }
+}
+
+try {
+  // Cuerpo HTML del aviso. Va aparte del texto porque los botones de acción los
+  // arma el sistema y no la plantilla editable: si el HTML fuera configurable, un
+  // error de tipeo rompería el mail de todo el circuito.
+  addCol('sp_outbox', 'cuerpo_html', 'TEXT');
+} catch (e) {
+  console.error('[SP] Error en migraciones:', e.message);
+}
+
 // ── SEED: el circuito de 6 pasos ──────────────────────────────────────────
 // Corre solo si sp_flujos está vacía. Los autorizados arrancan como rol='admin'
 // en todos los pasos para que funcione el día 1; después se ajustan desde el

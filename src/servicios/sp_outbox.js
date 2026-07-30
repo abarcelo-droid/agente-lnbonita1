@@ -36,7 +36,7 @@ export function render(texto, vars) {
  * dedupKey hace el encolado idempotente: si el mismo aviso se intenta encolar dos
  * veces (doble submit, reintento), la segunda no inserta nada.
  */
-export function encolar({ solicitudId, eventoId, dedupKey, destinatarios, asunto, cuerpo }) {
+export function encolar({ solicitudId, eventoId, dedupKey, destinatarios, asunto, cuerpo, html }) {
   const dest = (Array.isArray(destinatarios) ? destinatarios : [destinatarios])
     .map(x => String(x || '').trim()).filter(Boolean);
   if (!dest.length) {
@@ -53,9 +53,9 @@ export function encolar({ solicitudId, eventoId, dedupKey, destinatarios, asunto
   }
   try {
     const r = db.prepare(`
-      INSERT OR IGNORE INTO sp_outbox (solicitud_id, evento_id, dedup_key, destinatarios, asunto, cuerpo_texto)
-      VALUES (?,?,?,?,?,?)
-    `).run(solicitudId || null, eventoId || null, dedupKey, dest.join(','), asunto, cuerpo);
+      INSERT OR IGNORE INTO sp_outbox (solicitud_id, evento_id, dedup_key, destinatarios, asunto, cuerpo_texto, cuerpo_html)
+      VALUES (?,?,?,?,?,?,?)
+    `).run(solicitudId || null, eventoId || null, dedupKey, dest.join(','), asunto, cuerpo, html || null);
     return r.changes ? r.lastInsertRowid : null;
   } catch (e) {
     console.error('[SP][outbox] Error encolando:', e.message);
@@ -93,11 +93,12 @@ export async function procesarCola() {
     const r = await enviarMail({
       to: f.destinatarios.split(','),
       asunto: f.asunto,
+      // Se manda texto Y html: el texto es el respaldo para clientes que no
+      // renderizan HTML, y el html es el que trae los botones de acción.
       cuerpo_texto: f.cuerpo_texto,
-      // Se manda también como HTML mínimo (solo saltos de línea) porque muchos
-      // clientes de mail muestran el texto plano apretado.
-      cuerpo_html: '<pre style="font-family:inherit;white-space:pre-wrap;margin:0">'
-        + String(f.cuerpo_texto).replace(/&/g, '&amp;').replace(/</g, '&lt;') + '</pre>'
+      cuerpo_html: f.cuerpo_html
+        || ('<pre style="font-family:inherit;white-space:pre-wrap;margin:0">'
+            + String(f.cuerpo_texto).replace(/&/g, '&amp;').replace(/</g, '&lt;') + '</pre>')
     });
 
     if (r && r.success) {
