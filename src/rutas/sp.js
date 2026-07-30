@@ -960,6 +960,73 @@ router.post('/probar-mail', wrap((req, res) => {
   res.json({ ok: true, email: u.email, nombre: u.nombre });
 }));
 
+// ══════════════════════════════════════════════════════════════════════════
+// INSTRUCTIVO DE USO
+// ══════════════════════════════════════════════════════════════════════════
+// Se arma desde el CIRCUITO configurado, no escrito a mano: los nombres de cada
+// paso salen de los habilitados de verdad, así el instructivo no queda
+// desactualizado cuando cambia quién hace qué. Para capacitar a alguien nuevo, el
+// "quién lo hace hoy" es lo que traduce el rol a una persona.
+
+router.get('/instructivo', wrap((req, res) => {
+  const v = versionActiva();
+  if (!v) throw noEncontrado('No hay circuito activo');
+  const def = armarSnapshot(v.id);
+  const ficticia = { id: 0, solicitante_id: 0 };
+
+  const pasos = (def.pasos || [])
+    .filter(p => p.tipo !== 'final_ok' && p.tipo !== 'final_rechazo')
+    .map(p => {
+      const { resolutores, watchers } = resolverAutorizados(def, p.clave, ficticia);
+      const salidas = (def.transiciones || [])
+        .filter(t => t.desde === p.clave)
+        .map(t => ({ etiqueta: t.etiqueta, clase: t.clase, hasta: t.hasta,
+                     hasta_nombre: (def.pasos.find(x => x.clave === t.hasta) || {}).nombre || t.hasta }));
+      return {
+        clave: p.clave, nombre: p.nombre, hito: p.hito, orden: p.orden,
+        modo_captura: p.modo_captura, sla_horas: p.sla_horas,
+        instrucciones: p.instrucciones,
+        // Quién lo hace HOY. Es lo que traduce "rol admin" a nombres concretos.
+        personas: resolutores.map(u => ({ nombre: u.nombre, email: u.email })),
+        avisados: watchers.map(u => ({ nombre: u.nombre, email: u.email })),
+        acciones: salidas
+      };
+    })
+    .sort((a, b) => a.orden - b.orden);
+
+  const incomp = (def.incompatibilidades || []).map(i => ({ a: i.hito_a, b: i.hito_b }));
+  res.json({
+    ok: true,
+    data: {
+      flujo: { nombre: v.flujo_nombre, version: v.version },
+      pasos,
+      incompatibilidades: incomp,
+      generado_en: new Date().toISOString().slice(0, 10)
+    }
+  });
+}));
+
+// Se manda el instructivo por mail. Va por la misma cola que los avisos del
+// circuito, así queda registrado a quién se le mandó y cuándo.
+router.post('/instructivo/enviar', wrap((req, res) => {
+  const uid = vNum(req.body?.usuario_id, 'El usuario', { min: 1 });
+  const u = db.prepare('SELECT id, nombre, email FROM usuarios WHERE id=? AND activo=1').get(uid);
+  if (!u) throw bad('El usuario no existe o está inactivo');
+  if (!u.email) throw bad(`${u.nombre} no tiene mail cargado en su usuario`);
+  const texto = vTexto(req.body?.texto, 'El texto', { req: true, max: 60000 });
+
+  const marca = new Date().toISOString().replace(/[^0-9]/g, '');
+  encolar({
+    solicitudId: null, eventoId: null,
+    dedupKey: 'instructivo:' + uid + ':' + marca,
+    destinatarios: [u.email],
+    asunto: 'Cómo usar el circuito de Órdenes de Pago',
+    cuerpo: `Hola ${u.nombre},\n\n${texto}\n\nEntrá al panel: ${PANEL_URL}/panel\n`
+  });
+  procesarEnBackground();
+  res.json({ ok: true, email: u.email, nombre: u.nombre });
+}));
+
 // Estado de la cola de mails: es lo que permite decir "esto se avisó" o "no salió".
 router.get('/outbox', wrap((req, res) => {
   if (!esAdmin(req)) throw Object.assign(new Error('Solo administradores'), { status: 403 });
