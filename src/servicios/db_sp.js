@@ -271,6 +271,10 @@ try {
   // arma el sistema y no la plantilla editable: si el HTML fuera configurable, un
   // error de tipeo rompería el mail de todo el circuito.
   addCol('sp_outbox', 'cuerpo_html', 'TEXT');
+  // A quién le pide el OK el solicitante. Puntero blando a usuarios, SIN
+  // REFERENCES. Dirige el AVISO, no el permiso: cualquier habilitado del paso
+  // sigue pudiendo resolver, así el pedido no se traba si el elegido no está.
+  addCol('sp_solicitudes', 'autorizador_id', 'INTEGER');
 } catch (e) {
   console.error('[SP] Error en migraciones:', e.message);
 }

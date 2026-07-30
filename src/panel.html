@@ -11146,6 +11146,11 @@ function sgRepExport(){
     <div class="fl"><label>Nº de comprobante</label><input id="sp-n-cnum" class="sp-inp"></div>
     <div class="fl"><label>Se necesita pagado el</label><input id="sp-n-fecha" type="date" class="sp-inp"></div>
   </div>
+  <div class="fl ff" style="margin-top:8px"><label>¿A quién le pedís el OK? *</label>
+    <select id="sp-n-autorizador" class="sp-inp" style="width:100%"></select>
+    <div class="sp-chica">El aviso por mail va solo a esa persona. Los demás habilitados igual la ven
+      en su bandeja y pueden resolverla, así no se traba si no está.</div>
+  </div>
   <div id="sp-n-dup" style="display:none;margin-top:10px;background:rgba(245,158,11,.14);border-radius:8px;padding:10px 12px;font-size:12px"></div>
   <div class="ab-modal-footer">
     <button class="btn bo" onclick="document.getElementById('sp-mb-nueva').classList.remove('on')">Cancelar</button>
@@ -37823,9 +37828,12 @@ function spTablaHtml(arr, vista) {
         + (s.fecha_pago_confirmada ? '<div class="sp-chica">pago: ' + spEsc(s.fecha_pago_confirmada) + '</div>' : '') + '</td>'
       + '<td class="sp-chica">' + spEsc(String(s.paso_actual_desde || '').slice(0, 16))
         + (s.vencida ? '<div style="color:var(--err);font-weight:600">vencido</div>' : '')
-        // A quién le toca de verdad: es lo primero que se pregunta el que no puede actuar.
+        // A quién se le pidió el OK, y a quién le toca de verdad. Es lo primero que
+        // se pregunta el que no puede actuar.
+        + (s.autorizador_nombre && s.paso_actual_hito === 'autorizacion'
+            ? '<div>OK pedido a: <strong>' + spEsc(s.autorizador_nombre) + '</strong></div>' : '')
         + (vista === 'frenadas' && (s.esperando_a || []).length
-            ? '<div>lo tiene que resolver: <strong>' + spEsc(s.esperando_a.join(', ')) + '</strong></div>'
+            ? '<div>lo puede resolver: <strong>' + spEsc(s.esperando_a.join(', ')) + '</strong></div>'
             : '') + '</td>'
       + (vista === 'mias' ? '' : '<td class="sp-chica">' + spEsc(s.solicitante_nombre || '') + '</td>')
       + '<td style="text-align:right;white-space:nowrap">'
@@ -37852,6 +37860,7 @@ function spNuevaAbrir(id) {
   document.getElementById('sp-n-prio').value = 'normal';
   document.getElementById('sp-n-dup').style.display = 'none';
   SP.justifDup = null;
+  spCargarAutorizadores(id);
   if (id) {
     var s = (SP.listas.mias || []).concat(SP.listas.todas || []).filter(function(x) { return x.id === id; })[0];
     if (s) {
@@ -37869,6 +37878,33 @@ function spNuevaAbrir(id) {
   document.getElementById('sp-mb-nueva').classList.add('on');
 }
 
+// Los elegibles los resuelve el backend a partir del circuito, sacando a quien la
+// separación de funciones dejaría afuera para ESTE solicitante (empezando por él).
+function spCargarAutorizadores(idEdicion) {
+  var sel = document.getElementById('sp-n-autorizador');
+  sel.innerHTML = '<option value="">— cargando —</option>';
+  spApi('/autorizadores').then(function(r) {
+    var arr = (r.ok && r.data) ? r.data : [];
+    SP.autorizadores = arr;
+    if (!arr.length) {
+      sel.innerHTML = '<option value="">— no hay nadie habilitado para autorizarte —</option>';
+      return;
+    }
+    var actual = null;
+    if (idEdicion) {
+      var s = (SP.listas.mias || []).filter(function(x) { return x.id === idEdicion; })[0];
+      if (s) actual = s.autorizador_id;
+    }
+    sel.innerHTML = (arr.length > 1 ? '<option value="">— elegí a quién —</option>' : '')
+      + arr.map(function(u) {
+          return '<option value="' + u.id + '"' + (u.id === actual ? ' selected' : '') + '>'
+            + spEsc(u.nombre) + ' (' + spEsc(u.email) + ')</option>';
+        }).join('');
+    // Con un solo candidato no tiene sentido hacer elegir.
+    if (arr.length === 1) sel.value = String(arr[0].id);
+  });
+}
+
 function spNuevaGuardar() {
   var id = document.getElementById('sp-nueva-id').value;
   var body = {
@@ -37880,9 +37916,13 @@ function spNuevaGuardar() {
     prioridad: document.getElementById('sp-n-prio').value,
     comprobante_tipo: document.getElementById('sp-n-ctipo').value.trim(),
     comprobante_numero: document.getElementById('sp-n-cnum').value.trim(),
-    fecha_necesidad: document.getElementById('sp-n-fecha').value || null
+    fecha_necesidad: document.getElementById('sp-n-fecha').value || null,
+    autorizador_id: document.getElementById('sp-n-autorizador').value || null
   };
   if (!body.proveedor_texto) return toast('Falta el proveedor', 'er');
+  if (!body.autorizador_id && (SP.autorizadores || []).length) {
+    return toast('Elegí a quién le pedís el OK', 'er');
+  }
   if (!body.cuenta_texto) return toast('Falta la cuenta corriente: es el número con el que se rastrea el pago', 'er');
   if (!/^\d{1,20}$/.test(body.cuenta_texto)) return toast('La cuenta corriente tiene que ser un número', 'er');
   if (!body.concepto) return toast('Falta el concepto', 'er');
@@ -37951,8 +37991,10 @@ function spDetalleRender() {
       + '<div class="sp-chica" style="margin-top:5px">' + spEsc(s.concepto) + '</div></div>'
     + '<div style="flex:1;min-width:230px;border:1px solid var(--bor);border-radius:10px;padding:11px;background:var(--sur)">'
       + '<div class="sp-chica">Estado</div><div style="margin:4px 0">' + estado + '</div>'
+      + (s.autorizador_nombre
+          ? '<div class="sp-chica">OK pedido a: <strong>' + spEsc(s.autorizador_nombre) + '</strong></div>' : '')
       + (s.estado_global === 'en_curso' && d.esperando_a && d.esperando_a.length
-          ? '<div class="sp-chica">Esperando a: ' + d.esperando_a.map(function(u) { return spEsc(u.nombre); }).join(', ') + '</div>'
+          ? '<div class="sp-chica">Lo puede resolver: ' + d.esperando_a.map(function(u) { return spEsc(u.nombre); }).join(', ') + '</div>'
           : '')
       + (s.fecha_pago_confirmada ? '<div class="sp-chica">Fecha de pago: <strong>' + spEsc(s.fecha_pago_confirmada) + '</strong></div>' : '')
       + '</div>'
