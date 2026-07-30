@@ -6,7 +6,10 @@
 // procesa después de responder (ver servicios/sp_outbox.js).
 
 import express from 'express';
+import multer from 'multer';
+import { randomUUID } from 'crypto';
 import db from '../servicios/db_sp.js';     // este import crea el schema sp_*
+import { subirArchivo, obtenerArchivo, storageConfigurado } from '../servicios/storage.js';
 import {
   armarSnapshot, validarDefinicion, resolverAutorizados, bloqueadoPorSoD, sodOmitida,
   accionesDisponibles, aplicarCambioDePaso, registrarEvento
@@ -14,6 +17,21 @@ import {
 import { encolar, render, procesarEnBackground } from '../servicios/sp_outbox.js';
 
 const router = express.Router();
+
+// Los adjuntos van a R2 y no a disco: el disco del contenedor de Railway es
+// efímero y se pierde en cada redeploy. Un PDF de cuenta corriente que respalda
+// una orden de pago no puede desaparecer en el próximo deploy.
+const subida = multer({ storage: multer.memoryStorage(), limits: { fileSize: 15 * 1024 * 1024 } });
+
+// Vocabulario de tipos de adjunto. Se valida acá y no con un CHECK en la tabla:
+// ampliar un CHECK en SQLite exige recrear la tabla, y el repo ya se comió esa.
+const TIPOS_ADJUNTO = {
+  cuenta_corriente: 'PDF de cuenta corriente del proveedor',
+  factura: 'Factura',
+  orden: 'Orden de pago',
+  comprobante_pago: 'Comprobante de pago',
+  otro: 'Otro'
+};
 
 router.use((req, res, next) => {
   try { const c = req.cookies?.lnb_user; if (c) req.user = JSON.parse(c); } catch (_) {}
@@ -575,6 +593,92 @@ router.get('/solicitudes/:id', wrap((req, res) => {
   });
 }));
 
+// ── Adjuntos ──────────────────────────────────────────────────────────────
+
+router.get('/solicitudes/:id/adjuntos', wrap((req, res) => {
+  const soc = getSociedadId(req);
+  const s = getSol(soc, parseInt(req.params.id, 10));
+  const data = db.prepare(`
+    SELECT id, nombre, mime, tamano, tipo, descripcion, creado_en, creado_por_id
+    FROM sp_adjuntos WHERE solicitud_id=? AND eliminado_en IS NULL ORDER BY id DESC
+  `).all(s.id);
+  res.json({ ok: true, data, tipos: TIPOS_ADJUNTO, storage_ok: storageConfigurado() });
+}));
+
+// No usa wrap() porque subir a R2 es async y el helper es síncrono.
+router.post('/solicitudes/:id/adjuntos', subida.single('archivo'), async (req, res) => {
+  try {
+    const soc = getSociedadId(req);
+    const s = db.prepare('SELECT * FROM sp_solicitudes WHERE id=? AND sociedad_id=? AND eliminado_en IS NULL')
+      .get(parseInt(req.params.id, 10), soc);
+    if (!s) return res.status(404).json({ ok: false, error: 'Solicitud no encontrada' });
+    if (!storageConfigurado()) {
+      return res.status(503).json({ ok: false, error: 'El almacenamiento de archivos no está configurado (faltan credenciales de R2)' });
+    }
+    if (!req.file) return res.status(400).json({ ok: false, error: 'Falta el archivo' });
+    const tipo = TIPOS_ADJUNTO[req.body?.tipo] ? req.body.tipo : 'otro';
+
+    const limpio = String(req.file.originalname || 'archivo').replace(/[^\w.\-]+/g, '_').slice(-80);
+    const key = `sp/solicitudes/${s.id}/${randomUUID()}-${limpio}`;
+    await subirArchivo(req.file.buffer, key, req.file.mimetype || 'application/octet-stream');
+
+    const r = db.prepare(`
+      INSERT INTO sp_adjuntos (solicitud_id, storage_key, nombre, mime, tamano, tipo, descripcion, creado_por_id)
+      VALUES (?,?,?,?,?,?,?,?)
+    `).run(s.id, key, req.file.originalname || limpio, req.file.mimetype || null,
+           req.file.size || null, tipo, (req.body?.descripcion || '').slice(0, 300) || null, req.user.id);
+
+    // Queda en el historial: un adjunto que respalda una orden de pago tiene que
+    // poder rastrearse igual que una decisión.
+    registrarEvento(s.id, {
+      paso_desde: s.paso_actual_clave, paso_hasta: s.paso_actual_clave, accion: 'adjuntar',
+      actor_id: req.user.id, actor_nombre: req.user.nombre, actor_rol: req.user.rol,
+      datos_json: { adjunto_id: r.lastInsertRowid, nombre: req.file.originalname, tipo }
+    });
+    res.json({ ok: true, id: r.lastInsertRowid });
+  } catch (e) {
+    console.error('[SP] Error subiendo adjunto:', e.message);
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+router.get('/adjuntos/:adjId', async (req, res) => {
+  try {
+    const soc = getSociedadId(req);
+    const a = db.prepare(`
+      SELECT a.* FROM sp_adjuntos a JOIN sp_solicitudes s ON s.id = a.solicitud_id
+      WHERE a.id=? AND s.sociedad_id=? AND a.eliminado_en IS NULL
+    `).get(parseInt(req.params.adjId, 10), soc);
+    if (!a) return res.status(404).json({ ok: false, error: 'Adjunto no encontrado' });
+    if (!storageConfigurado()) return res.status(503).json({ ok: false, error: 'Almacenamiento no configurado' });
+    const stream = await obtenerArchivo(a.storage_key);
+    res.set({
+      'Content-Type': a.mime || 'application/octet-stream',
+      'Content-Disposition': `inline; filename="${String(a.nombre).replace(/"/g, '')}"`
+    });
+    stream.pipe(res);
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+// Baja lógica. El archivo se conserva en R2: un respaldo de pago no se borra por
+// un click equivocado.
+router.delete('/adjuntos/:adjId', wrap((req, res) => {
+  const soc = getSociedadId(req);
+  const a = db.prepare(`
+    SELECT a.* FROM sp_adjuntos a JOIN sp_solicitudes s ON s.id = a.solicitud_id
+    WHERE a.id=? AND s.sociedad_id=? AND a.eliminado_en IS NULL
+  `).get(parseInt(req.params.adjId, 10), soc);
+  if (!a) throw noEncontrado('Adjunto no encontrado');
+  db.prepare("UPDATE sp_adjuntos SET eliminado_en=datetime('now','localtime') WHERE id=?").run(a.id);
+  registrarEvento(a.solicitud_id, {
+    accion: 'quitar_adjunto', actor_id: req.user.id, actor_nombre: req.user.nombre,
+    actor_rol: req.user.rol, datos_json: { adjunto_id: a.id, nombre: a.nombre, tipo: a.tipo }
+  });
+  res.json({ ok: true });
+}));
+
 // ── La acción: avanzar, devolver o rechazar ───────────────────────────────
 router.post('/solicitudes/:id/accion', wrap((req, res) => {
   const soc = getSociedadId(req);
@@ -624,6 +728,20 @@ router.post('/solicitudes/:id/accion', wrap((req, res) => {
     pagos = validarComposicion(b.pagos, s, datos.fecha_pago);
     datos.composicion = pagos.map(p => ({ tipo: p.tipo, importe: p.importe, fecha: p.fecha, codigo: p.codigo }));
   }
+  // Adjunto OBLIGATORIO del paso. El caso concreto: no se puede mandar a firmar una
+  // orden sin el PDF de cuenta corriente del proveedor que la respalda.
+  // El paso de comprobantes queda afuera porque tiene su propia regla blanda.
+  if (paso.requiere_adjunto_tipo && tr.clase === 'avanza' && paso.modo_captura !== 'envia_comprobantes') {
+    const n = db.prepare(`
+      SELECT COUNT(*) AS n FROM sp_adjuntos
+      WHERE solicitud_id=? AND tipo=? AND eliminado_en IS NULL
+    `).get(s.id, paso.requiere_adjunto_tipo).n;
+    if (!n) {
+      const etq = TIPOS_ADJUNTO[paso.requiere_adjunto_tipo] || paso.requiere_adjunto_tipo;
+      throw bad(`Antes de avanzar tenés que adjuntar: ${etq}.`);
+    }
+  }
+
   if (paso.modo_captura === 'envia_comprobantes' && tr.clase === 'avanza') {
     const tieneAdj = db.prepare(`
       SELECT COUNT(*) AS n FROM sp_adjuntos

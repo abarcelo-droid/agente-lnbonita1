@@ -298,6 +298,49 @@ try {
   // REFERENCES. Dirige el AVISO, no el permiso: cualquier habilitado del paso
   // sigue pudiendo resolver, así el pedido no se traba si el elegido no está.
   addCol('sp_solicitudes', 'autorizador_id', 'INTEGER');
+
+  // sp_adjuntos nació con CHECK(tipo IN (...)) y hace falta un tipo más
+  // ('cuenta_corriente'). En SQLite sacar o ampliar un CHECK exige recrear la
+  // tabla, y es exactamente el problema que ya tuvo pa_insumos. Se recrea UNA vez,
+  // sin CHECK: el vocabulario de tipos se valida en JS, que es donde se puede
+  // cambiar sin migrar.
+  const def = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='sp_adjuntos'").get();
+  if (def && /CHECK\s*\(\s*tipo/i.test(def.sql)) {
+    db.transaction(() => {
+      db.exec(`
+        CREATE TABLE sp_adjuntos_nuevo (
+          id            INTEGER PRIMARY KEY AUTOINCREMENT,
+          solicitud_id  INTEGER NOT NULL REFERENCES sp_solicitudes(id),
+          storage_key   TEXT NOT NULL,
+          nombre        TEXT NOT NULL,
+          mime          TEXT,
+          tamano        INTEGER,
+          tipo          TEXT NOT NULL DEFAULT 'otro',
+          descripcion   TEXT,
+          creado_en     TEXT DEFAULT (datetime('now','localtime')),
+          creado_por_id INTEGER,
+          eliminado_en  TEXT
+        );
+        INSERT INTO sp_adjuntos_nuevo
+          (id, solicitud_id, storage_key, nombre, mime, tamano, tipo, creado_en, creado_por_id, eliminado_en)
+          SELECT id, solicitud_id, storage_key, nombre, mime, tamano, tipo, creado_en, creado_por_id, eliminado_en
+          FROM sp_adjuntos;
+        DROP TABLE sp_adjuntos;
+        ALTER TABLE sp_adjuntos_nuevo RENAME TO sp_adjuntos;
+        CREATE INDEX IF NOT EXISTS idx_sp_adj_sol ON sp_adjuntos(solicitud_id);
+      `);
+    })();
+    console.log('[SP] sp_adjuntos recreada sin CHECK de tipo');
+  }
+  addCol('sp_adjuntos', 'descripcion', 'TEXT');
+
+  // El paso de confección exige el PDF de cuenta corriente del proveedor. Se setea
+  // solo si está sin definir, para no pisar una configuración hecha a mano.
+  // No afecta a las solicitudes en vuelo: cada una lleva su propio snapshot.
+  db.prepare(`
+    UPDATE sp_pasos SET requiere_adjunto_tipo='cuenta_corriente'
+    WHERE hito='confeccion' AND (requiere_adjunto_tipo IS NULL OR requiere_adjunto_tipo='')
+  `).run();
 } catch (e) {
   console.error('[SP] Error en migraciones:', e.message);
 }
@@ -320,8 +363,8 @@ function seed() {
       'Revisá proveedor, cuenta, monto y concepto. Si algo no cierra, devolvé al comprador con el motivo.'],
     ['fechas',       'Fechas de pago',          3, 'intermedio',    'fechas',       'informa_fecha',      48,   0, null,
       'Informá la fecha en que se va a pagar. Si todavía no hay fondos, dejalo en espera con el motivo.'],
-    ['confeccion',   'Confección de la orden',  4, 'intermedio',    'confeccion',   'confecciona',        24,   0, null,
-      'Confeccioná la orden de pago y adjuntala si corresponde.'],
+    ['confeccion',   'Confección de la orden',  4, 'intermedio',    'confeccion',   'confecciona',        24,   0, 'cuenta_corriente',
+      'Confeccioná la orden y adjuntá el PDF de la cuenta corriente del proveedor. Sin ese adjunto no se puede avanzar a la firma.'],
     ['firma',        'Firma',                   5, 'intermedio',    'firma',        'firma',              24,   0, null,
       'Firmá la orden. No podés firmar una orden que confeccionaste vos.'],
     ['comprobantes', 'Envío de comprobantes',   6, 'intermedio',    'comprobantes', 'envia_comprobantes', 48,   0, null,
