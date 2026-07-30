@@ -11055,12 +11055,48 @@ function sgRepExport(){
   </div>
   <div id="pli-ficha-archivos"></div>
 
+  <div style="font-size:12px;font-weight:700;margin:18px 0 8px">🏭 Proveedores y precios de referencia</div>
+  <div class="pli-cel-chica" style="margin-bottom:8px">El insumo se le puede comprar a varios.
+    El marcado como <strong>preferido</strong> es el que define el precio con el que costea el plan;
+    todos aparecen igual en la lista de compra para poder comparar.</div>
+  <div id="pli-ficha-provs"></div>
+  <div style="background:var(--bg2,#f8fafc);border-radius:8px;padding:10px 12px;margin:8px 0 10px">
+    <input type="hidden" id="pli-pv-id">
+    <div class="fg">
+      <div class="fl" style="min-width:180px"><label>Proveedor *</label>
+        <input id="pli-pv-nombre" class="pli-inp" placeholder="Ej: Cartocor" maxlength="120"></div>
+      <div class="fl"><label>Precio por unidad de compra</label>
+        <input id="pli-pv-precio" type="number" step="any" min="0" class="pli-inp pli-inp-num"></div>
+      <div class="fl"><label>Moneda</label>
+        <select id="pli-pv-moneda" class="pli-inp"><option value="ARS">ARS</option><option value="USD">USD</option></select>
+      </div>
+      <div class="fl"><label>Fecha del precio</label><input id="pli-pv-fecha" type="date" class="pli-inp"></div>
+      <div class="fl"><label>Código del proveedor</label>
+        <input id="pli-pv-codigo" class="pli-inp" placeholder="opcional" maxlength="60"></div>
+      <div class="fl"><label>Mínimo de compra</label>
+        <input id="pli-pv-moq" type="number" step="any" min="0" class="pli-inp pli-inp-num" placeholder="el del insumo"></div>
+      <div class="fl"><label>Plazo (días)</label>
+        <input id="pli-pv-lead" type="number" step="1" min="0" max="365" class="pli-inp pli-inp-num" placeholder="opcional"></div>
+      <div class="fl" style="min-width:180px"><label>Contacto</label>
+        <input id="pli-pv-contacto" class="pli-inp" placeholder="opcional" maxlength="200"></div>
+    </div>
+    <div style="display:flex;gap:10px;align-items:center;margin-top:8px;flex-wrap:wrap">
+      <label style="display:flex;gap:5px;align-items:center;font-size:12px;cursor:pointer">
+        <input type="checkbox" id="pli-pv-pref"> Marcarlo como preferido
+      </label>
+      <button class="btn bb" onclick="pliProvGuardar()" id="pli-pv-btn">+ Agregar proveedor</button>
+      <button class="btn bo" onclick="pliProvCancelar()" id="pli-pv-cancel" style="display:none">Cancelar</button>
+    </div>
+  </div>
+
   <div style="font-size:12px;font-weight:700;margin:18px 0 8px">📈 Evolución del precio</div>
   <div style="background:var(--bg2,#f8fafc);border-radius:8px;padding:10px 12px;margin-bottom:10px">
     <div class="pli-cel-chica" style="margin-bottom:6px">Cargá acá los precios que ya tenías registrados.
       Si sabés el tipo de cambio de esa fecha, ponelo: si no, se usa la cotización más cercana anterior
       y se aclara cuál se usó.</div>
     <div class="fg">
+      <div class="fl"><label>Proveedor</label>
+        <select id="pli-pr-prov" class="pli-inp"><option value="">(sin proveedor)</option></select></div>
       <div class="fl"><label>Fecha *</label><input id="pli-pr-fecha" type="date" class="pli-inp"></div>
       <div class="fl"><label>Precio *</label>
         <input id="pli-pr-precio" type="number" step="any" min="0" class="pli-inp pli-inp-num"></div>
@@ -35923,7 +35959,12 @@ function pliInsRender() {
     return '<tr' + (i.activo ? '' : ' style="opacity:.5"') + '>'
       + '<td><strong>' + pliEsc(i.nombre) + '</strong>' + (i.activo ? '' : ' <span class="pli-badge pli-gris">inactivo</span>') + '</td>'
       + '<td>' + pliEsc(i.categoria || '—') + '</td>'
-      + '<td>' + pliEsc(i.proveedor_texto || '—') + '</td>'
+      // Con más de uno, el que se muestra es el preferido (que es con el que se
+      // costea) y al lado cuántos hay: si no, la tabla haría creer que es el único.
+      + '<td>' + pliEsc(i.proveedor_texto || '—')
+        + (i.proveedores_n > 1
+            ? ' <span class="pli-badge pli-gris" title="Ver todos en la ficha 📎">+' + (i.proveedores_n - 1) + '</span>' : '')
+        + '</td>'
       + '<td>' + pliEsc(i.unidad_uso) + '</td>'
       + '<td>' + pliEsc(i.unidad_compra) + '</td>'
       + '<td class="pli-cel-chica">' + equiv + '</td>'
@@ -37050,7 +37091,7 @@ function pliResultadoRender() {
       ? pliN(l.cant_min_uso) + ' a ' + pliN(l.cant_max_uso) : '—';
     html += '<tr>'
       + '<td><strong>' + pliEsc(l.insumo_nombre) + '</strong>'
-        + (l.proveedor_texto ? '<div class="pli-cel-chica">' + pliEsc(l.proveedor_texto) + '</div>' : '') + '</td>'
+        + pliProvsDeLinea(l) + '</td>'
       + '<td class="pli-num">' + pliN(l.cant_bruta_uso) + ' <span class="pli-cel-chica">' + pliEsc(l.unidad_uso) + '</span></td>'
       + '<td class="pli-num pli-cel-chica">' + rango + '</td>'
       + '<td class="pli-num"><input id="pli-exist-' + l.insumo_id + '" type="number" step="any" min="0"'
@@ -37191,9 +37232,12 @@ function pliFichaAbrir(id) {
   document.getElementById('pli-ficha-file').value = '';
   document.getElementById('pli-ficha-desc').value = '';
   document.getElementById('pli-ficha-archivos').innerHTML = '<div class="emp">Cargando…</div>';
+  document.getElementById('pli-ficha-provs').innerHTML = '<div class="emp">Cargando…</div>';
   document.getElementById('pli-ficha-precios').innerHTML = '<div class="emp">Cargando…</div>';
   document.getElementById('pli-mb-ficha').classList.add('on');
+  pliProvCancelar();
   pliFichaArchivos();
+  pliFichaProvs();
   pliFichaPrecios();
 }
 
@@ -37289,6 +37333,9 @@ function pliPrecioAgregar() {
     precio: document.getElementById('pli-pr-precio').value,
     moneda: document.getElementById('pli-pr-moneda').value,
     tc: document.getElementById('pli-pr-tc').value || null,
+    // De quién es el precio. Con varios proveedores, un precio suelto no se puede
+    // comparar contra nada porque no se sabe quién lo cotizó.
+    proveedor_id: document.getElementById('pli-pr-prov').value || null,
     vigente: document.getElementById('pli-pr-vigente').checked ? 1 : 0
   };
   if (!body.fecha) return toast('Poné la fecha del precio', 'er');
@@ -37300,6 +37347,7 @@ function pliPrecioAgregar() {
     document.getElementById('pli-pr-tc').value = '';
     document.getElementById('pli-pr-vigente').checked = false;
     pliFichaPrecios();
+    pliFichaProvs();  // si era el vigente del proveedor, su precio de referencia cambió
     pliInsCargar();   // si pasó a vigente, la tabla de insumos lo tiene que reflejar
   });
 }
@@ -37310,6 +37358,214 @@ function pliPrecioBorrar(precioId) {
     if (!r.ok) { pliErr(r); return; }
     toast('✓ Borrado', 'ok');
     pliFichaPrecios();
+  });
+}
+
+// Los proveedores de un insumo dentro de la lista de compra. Se muestran TODOS
+// con su precio y con lo que saldría comprarle a cada uno la cantidad que hay que
+// comprar: es la cuenta que el comprador hace igual, y hacerla a mano por 40
+// insumos es donde aparecen los errores.
+function pliProvsDeLinea(l) {
+  var ps = l.proveedores || [];
+  if (!ps.length) {
+    return l.proveedor_texto ? '<div class="pli-cel-chica">' + pliEsc(l.proveedor_texto) + '</div>' : '';
+  }
+  if (ps.length === 1) {
+    var u = ps[0];
+    return '<div class="pli-cel-chica">' + pliEsc(u.nombre)
+      + (u.precio_ref > 0 ? ' · ' + pliEsc(u.moneda) + ' ' + pliN(u.precio_ref, 2) : ' · a cotizar') + '</div>';
+  }
+  return '<div style="margin-top:3px">' + ps.map(function(p) {
+    var d = p.dif_vs_preferido_pct;
+    return '<div class="pli-cel-chica" style="display:flex;gap:6px;align-items:baseline;flex-wrap:wrap">'
+      + '<span style="width:11px;display:inline-block">' + (p.preferido ? '★' : '') + '</span>'
+      + '<strong style="color:var(--txt)">' + pliEsc(p.nombre) + '</strong>'
+      + (p.precio_ref > 0
+          ? '<span>' + pliEsc(p.moneda) + ' ' + pliN(p.precio_ref, 2) + '</span>'
+            + (p.costo_total !== null && p.costo_total !== undefined
+                ? '<span>→ <strong style="color:var(--txt)">' + pliEsc(p.moneda) + ' ' + pliN(p.costo_total, 2) + '</strong></span>' : '')
+          : '<span style="color:#b45309">a cotizar</span>')
+      // Contra el preferido, que es con el que están hechos los números de la fila.
+      + (d !== null && d !== undefined
+          ? '<span style="color:' + (d > 0 ? 'var(--err)' : 'var(--ok)') + '">'
+            + (d > 0 ? '+' : '−') + pliN(Math.abs(d), 1) + '%</span>' : '')
+      + (p.bajo_minimo ? '<span style="color:#b45309" title="Hace falta menos que su mínimo">bajo su mínimo (' + pliN(p.moq) + ')</span>' : '')
+      + (p.codigo_proveedor ? '<span>cód. ' + pliEsc(p.codigo_proveedor) + '</span>' : '')
+      + '</div>';
+  }).join('') + '</div>';
+}
+
+// ── Proveedores del insumo ────────────────────────────────────────────────
+// El insumo se le compra a varios y la compra se parte a propósito. El preferido
+// es el que define el precio con el que costea el plan; los demás están para
+// comparar y para tenerlos a mano cuando se sale a comprar.
+
+function pliFichaProvs() {
+  var id = parseInt(document.getElementById('pli-ficha-id').value, 10);
+  pliApi('/insumos/' + id + '/proveedores').then(function(r) {
+    var cont = document.getElementById('pli-ficha-provs');
+    if (!cont) return;
+    if (!r.ok) { cont.innerHTML = '<div class="emp" style="color:var(--err)">' + pliEsc(r.error) + '</div>'; return; }
+    PLI.provs = r.data || [];
+    PLI.provCotiz = r.cotizacion || null;
+
+    // El select del historial se llena con los mismos proveedores: cargar un
+    // precio histórico sin decir de quién es no se puede comparar contra nada.
+    var sel = document.getElementById('pli-pr-prov');
+    if (sel) {
+      var prev = sel.value;
+      sel.innerHTML = '<option value="">(sin proveedor)</option>'
+        + PLI.provs.map(function(p) {
+            return '<option value="' + p.id + '">' + pliEsc(p.nombre) + (p.preferido ? ' ★' : '') + '</option>';
+          }).join('');
+      var pref = PLI.provs.filter(function(p) { return p.preferido; })[0];
+      sel.value = prev || (pref ? String(pref.id) : '');
+    }
+
+    if (!PLI.provs.length) {
+      cont.innerHTML = '<div class="emp" style="padding:12px">Todavía no hay proveedores cargados. '
+        + 'Mientras no haya ninguno, el precio del insumo se edita desde su ficha como hasta ahora.</div>';
+      return;
+    }
+
+    var c = PLI.provCotiz;
+    var html = '<div class="ab-table-wrap"><table class="pa-tbl" style="font-size:12px"><thead><tr>'
+      + '<th style="width:34px" title="Preferido">★</th><th>Proveedor</th>'
+      + '<th style="text-align:right">Precio</th><th style="text-align:right">Comparable</th>'
+      + '<th style="text-align:right">vs preferido</th><th>Fecha</th>'
+      + '<th style="text-align:right">Mín.</th><th style="text-align:right">Plazo</th>'
+      + '<th style="width:70px"></th></tr></thead><tbody>'
+      + PLI.provs.map(function(p) {
+          var d = p.dif_vs_preferido_pct;
+          var dTxt = (d === null || d === undefined) ? '—'
+            : (d > 0 ? '▲ ' : (d < 0 ? '▼ ' : '=')) + pliN(Math.abs(d), 1) + '%';
+          // Más caro que el preferido se lee en rojo, más barato en verde: es la
+          // señal de que quizá convenga cambiarlo.
+          var dCol = (d === null || d === undefined) ? 'var(--mut)' : (d > 0 ? 'var(--err)' : 'var(--ok)');
+          return '<tr' + (p.activo ? '' : ' style="opacity:.55"') + '>'
+            + '<td style="text-align:center">' + (p.preferido
+                ? '<span title="Es el que usa el plan para costear" style="font-size:15px">★</span>'
+                : '<button class="btn bo bs" title="Marcarlo como preferido" onclick="pliProvPreferir(' + p.id + ')"'
+                  + ' style="padding:1px 5px;font-size:12px">☆</button>') + '</td>'
+            + '<td><strong>' + pliEsc(p.nombre) + '</strong>'
+              + (p.es_mas_barato && PLI.provs.length > 1 ? ' <span class="pli-badge pli-ok">más barato</span>' : '')
+              + (p.activo ? '' : ' <span class="pli-badge pli-gris">inactivo</span>')
+              + (p.codigo_proveedor ? '<div class="pli-cel-chica">cód. ' + pliEsc(p.codigo_proveedor) + '</div>' : '')
+              + (p.contacto ? '<div class="pli-cel-chica">' + pliEsc(p.contacto) + '</div>' : '') + '</td>'
+            + '<td class="pli-num">' + (p.precio_ref > 0
+                ? '<strong>' + pliEsc(p.moneda) + ' ' + pliN(p.precio_ref, 2) + '</strong>'
+                : '<span style="color:#b45309">a cotizar</span>') + '</td>'
+            + '<td class="pli-num pli-cel-chica">' + (p.precio_comparable !== null && p.precio_comparable !== undefined
+                ? '$ ' + pliN(p.precio_comparable, 2) : '—') + '</td>'
+            + '<td class="pli-num" style="color:' + dCol + ';font-weight:600">' + dTxt + '</td>'
+            + '<td class="pli-cel-chica">' + pliEsc(p.precio_fecha || '—') + '</td>'
+            + '<td class="pli-num pli-cel-chica">' + (p.moq === null || p.moq === undefined ? '—' : pliN(p.moq)) + '</td>'
+            + '<td class="pli-num pli-cel-chica">' + (p.lead_time_dias === null || p.lead_time_dias === undefined ? '—' : p.lead_time_dias + ' d') + '</td>'
+            + '<td style="white-space:nowrap">'
+              + '<button class="btn bo bs" onclick="pliProvEditar(' + p.id + ')" style="padding:1px 5px;font-size:11px">✎</button> '
+              + '<button class="btn bd bs" onclick="pliProvBorrar(' + p.id + ')" style="padding:1px 5px;font-size:11px">✕</button>'
+            + '</td></tr>';
+        }).join('')
+      + '</tbody></table></div>';
+
+    // La cotización con la que se comparan las monedas, siempre a la vista.
+    html += '<div class="pli-cel-chica" style="margin-top:6px">'
+      + (c ? 'La columna <strong>comparable</strong> pasa todo a pesos con el dólar <strong>' + pliEsc(c.tipo)
+             + '</strong> a $ ' + pliN(c.venta, 2) + ' (' + pliEsc(c.fecha) + ')'
+             + (c.desactualizada ? ' — <span style="color:#b45309">no es de hoy</span>' : '') + '.'
+           : '<span style="color:#b45309">No hay cotización del dólar: los precios en USD no se pueden comparar contra los de pesos.</span>')
+      + ' La diferencia se mide contra el <strong>preferido</strong>, que es con el que se costea el plan.</div>';
+    cont.innerHTML = html;
+  });
+}
+
+function pliProvLeer() {
+  var v = function(id) { return (document.getElementById(id).value || '').trim(); };
+  return {
+    nombre: v('pli-pv-nombre'),
+    precio_ref: v('pli-pv-precio') === '' ? 0 : Number(v('pli-pv-precio')),
+    moneda: document.getElementById('pli-pv-moneda').value,
+    precio_fecha: v('pli-pv-fecha') || null,
+    codigo_proveedor: v('pli-pv-codigo'),
+    // Vacío se manda como null, NO como 0: "no tiene mínimo" y "no lo sé" son
+    // cosas distintas y 0 no las distingue.
+    moq: v('pli-pv-moq') === '' ? null : Number(v('pli-pv-moq')),
+    lead_time_dias: v('pli-pv-lead') === '' ? null : Number(v('pli-pv-lead')),
+    contacto: v('pli-pv-contacto'),
+    preferido: document.getElementById('pli-pv-pref').checked ? 1 : 0
+  };
+}
+
+function pliProvGuardar() {
+  var insId = parseInt(document.getElementById('pli-ficha-id').value, 10);
+  var provId = document.getElementById('pli-pv-id').value;
+  var b = pliProvLeer();
+  if (!b.nombre) return toast('Falta el nombre del proveedor', 'er');
+  if (b.precio_ref > 0 && !b.precio_fecha) b.precio_fecha = new Date().toISOString().slice(0, 10);
+
+  var p = provId
+    ? pliApi('/proveedores/' + provId, { method: 'PATCH', body: JSON.stringify(b) })
+    : pliApi('/insumos/' + insId + '/proveedores', { method: 'POST', body: JSON.stringify(b) });
+  p.then(function(r) {
+    if (!r.ok) { pliErr(r); return; }
+    toast(provId ? '✓ Proveedor actualizado' : '✓ Proveedor agregado', 'ok');
+    pliProvCancelar();
+    pliFichaProvs();
+    pliFichaPrecios();
+    // El precio vigente del insumo puede haber cambiado (si se tocó el preferido),
+    // así que la tabla de atrás tiene que reflejarlo.
+    pliInsCargar();
+  });
+}
+
+function pliProvEditar(id) {
+  var p = (PLI.provs || []).filter(function(x) { return x.id === id; })[0];
+  if (!p) return;
+  document.getElementById('pli-pv-id').value = p.id;
+  document.getElementById('pli-pv-nombre').value = p.nombre || '';
+  document.getElementById('pli-pv-precio').value = p.precio_ref || '';
+  document.getElementById('pli-pv-moneda').value = p.moneda || 'ARS';
+  document.getElementById('pli-pv-fecha').value = p.precio_fecha || '';
+  document.getElementById('pli-pv-codigo').value = p.codigo_proveedor || '';
+  document.getElementById('pli-pv-moq').value = (p.moq === null || p.moq === undefined) ? '' : p.moq;
+  document.getElementById('pli-pv-lead').value = (p.lead_time_dias === null || p.lead_time_dias === undefined) ? '' : p.lead_time_dias;
+  document.getElementById('pli-pv-contacto').value = p.contacto || '';
+  document.getElementById('pli-pv-pref').checked = !!p.preferido;
+  document.getElementById('pli-pv-btn').textContent = 'Guardar cambios';
+  document.getElementById('pli-pv-cancel').style.display = '';
+  document.getElementById('pli-pv-nombre').focus();
+}
+
+function pliProvCancelar() {
+  ['pli-pv-id','pli-pv-nombre','pli-pv-precio','pli-pv-fecha','pli-pv-codigo',
+   'pli-pv-moq','pli-pv-lead','pli-pv-contacto'].forEach(function(id) {
+    document.getElementById(id).value = '';
+  });
+  document.getElementById('pli-pv-moneda').value = 'ARS';
+  document.getElementById('pli-pv-pref').checked = false;
+  document.getElementById('pli-pv-btn').textContent = '+ Agregar proveedor';
+  document.getElementById('pli-pv-cancel').style.display = 'none';
+}
+
+function pliProvPreferir(id) {
+  pliApi('/proveedores/' + id + '/preferido', { method: 'POST' }).then(function(r) {
+    if (!r.ok) { pliErr(r); return; }
+    toast('✓ Ahora el plan costea con este proveedor', 'ok');
+    pliFichaProvs();
+    pliInsCargar();
+  });
+}
+
+function pliProvBorrar(id) {
+  var p = (PLI.provs || []).filter(function(x) { return x.id === id; })[0];
+  if (!confirm('¿Quitar a "' + (p ? p.nombre : '') + '" de este insumo?\n\nEl historial de precios que cargó no se borra.')) return;
+  pliApi('/proveedores/' + id, { method: 'DELETE' }).then(function(r) {
+    if (!r.ok) { pliErr(r); return; }
+    // Si era el preferido, el backend promueve al más barato de los que quedan.
+    // Decirlo importa: cambia el precio con el que se costea el plan.
+    toast(r.promovido ? '✓ Quitado. Ahora el plan costea con "' + r.promovido.nombre + '"' : '✓ Proveedor quitado', 'ok');
+    pliFichaProvs();
+    pliInsCargar();
   });
 }
 
@@ -37325,7 +37581,7 @@ function pliFichaPrecios() {
       return;
     }
     cont.innerHTML = '<div class="ab-table-wrap"><table class="pa-tbl" style="font-size:12px"><thead><tr>'
-      + '<th>Fecha</th><th style="text-align:right">Precio cargado</th>'
+      + '<th>Fecha</th><th>Proveedor</th><th style="text-align:right">Precio cargado</th>'
       + '<th style="text-align:right">En pesos</th><th style="text-align:right">En dólares</th>'
       + '<th>Cotización usada</th><th style="text-align:right">Variación</th>'
       + '<th>Origen</th><th style="width:34px"></th>'
@@ -37336,6 +37592,11 @@ function pliFichaPrecios() {
             : (v > 0 ? '▲ ' : (v < 0 ? '▼ ' : '')) + pliN(Math.abs(v), 1) + '%';
           var color = (v === null || v === undefined) ? 'var(--mut)' : (v > 0 ? 'var(--err)' : (v < 0 ? 'var(--ok)' : 'var(--mut)'));
           return '<tr><td><strong>' + pliEsc(p.fecha) + '</strong></td>'
+            // Los registros anteriores a los proveedores no tienen a cuál
+            // atribuirse: se dice, no se adivina.
+            + '<td class="pli-cel-chica">' + (p.proveedor_nombre
+                ? pliEsc(p.proveedor_nombre) + (p.proveedor_preferido ? ' ★' : '')
+                : (p.proveedor_texto ? pliEsc(p.proveedor_texto) : '<em>sin proveedor</em>')) + '</td>'
             + '<td class="pli-num"><strong>' + pliEsc(p.moneda) + ' ' + pliN(p.precio, 2) + '</strong></td>'
             + '<td class="pli-num">' + (p.precio_ars !== null && p.precio_ars !== undefined ? '$ ' + pliN(p.precio_ars, 2) : '—') + '</td>'
             + '<td class="pli-num">' + (p.precio_usd !== null && p.precio_usd !== undefined ? 'USD ' + pliN(p.precio_usd, 2) : '—') + '</td>'
@@ -37351,7 +37612,8 @@ function pliFichaPrecios() {
         }).join('')
       + '</tbody></table></div>'
       + '<div class="pli-cel-chica" style="margin-top:6px">La variación compara contra el registro anterior '
-      + '<strong>de la misma moneda</strong>: comparar un precio en dólares contra uno en pesos daría un porcentaje sin sentido. '
+      + '<strong>del mismo proveedor y la misma moneda</strong>: comparar la cartonera contra la otra, '
+      + 'o un precio en dólares contra uno en pesos, daría un porcentaje sin sentido. '
       + 'La conversión usa la cotización de cada fecha, no la de hoy.</div>';
   });
 }

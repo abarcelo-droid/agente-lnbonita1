@@ -190,6 +190,16 @@ router.get('/insumos', wrap((req, res) => {
   if (categoria) { sql += ' AND categoria = ?'; params.push(categoria); }
   sql += ' ORDER BY categoria, nombre COLLATE NOCASE';
   const data = db.prepare(sql).all(...params);
+  // Cuántos proveedores tiene cada uno, para que la tabla muestre "2 proveedores"
+  // sin pedir un endpoint por fila.
+  const cuentas = new Map(db.prepare(`
+    SELECT p.insumo_id AS id, COUNT(*) AS n
+      FROM pli_insumo_proveedores p
+      JOIN pli_insumos i ON i.id = p.insumo_id
+     WHERE i.sociedad_id=? AND p.eliminado_en IS NULL AND p.activo=1
+     GROUP BY p.insumo_id
+  `).all(soc).map(r => [r.id, r.n]));
+  for (const d of data) d.proveedores_n = cuentas.get(d.id) || 0;
   // Valores ya usados: alimentan los <datalist> del front (texto libre, sin enum rígido)
   const categorias = db.prepare(`
     SELECT DISTINCT categoria FROM pli_insumos
@@ -282,7 +292,11 @@ router.post('/insumos', wrap((req, res) => {
   `).run(soc, d.codigo, d.nombre, d.categoria, d.unidad_uso, d.unidad_compra, d.factor_compra,
          d.multiplo_compra, d.moq, d.precio_ref, d.moneda, d.precio_fecha, d.proveedor_texto,
          d.lead_time_dias, d.modo_provision, d.notas, req.user.id, req.user.id);
-  registrarPrecio(r.lastInsertRowid, d, 'alta', req.user.id);
+  // Si el alta trae proveedor, el precio queda atribuido a él; si no, suelto en la
+  // serie del insumo. Uno u otro, nunca los dos: serían dos filas para el mismo precio.
+  if (!asegurarProveedorDesdeTexto(r.lastInsertRowid, d, req.user.id)) {
+    registrarPrecio(r.lastInsertRowid, d, 'alta', req.user.id);
+  }
   logPli('insumo', r.lastInsertRowid, 'alta', d, req.user.id);
   res.json({ ok: true, id: r.lastInsertRowid });
 }));
@@ -401,13 +415,34 @@ router.patch('/insumos/:id', wrap((req, res) => {
          d.multiplo_compra, d.moq, d.precio_ref, d.moneda, d.precio_fecha, d.proveedor_texto,
          d.lead_time_dias, d.modo_provision,
          d.notas, activo, req.user.id, id);
-  // Solo se registra si el precio o la moneda cambiaron de verdad: si no, editar
-  // cualquier otro campo ensuciaría la serie con filas repetidas.
-  if (Number(d.precio_ref) !== Number(actual.precio_ref) || d.moneda !== actual.moneda) {
+  // Si el insumo tiene proveedores cargados, el precio de la ficha es el del
+  // PREFERIDO: se escribe ahí y el campo del insumo se vuelve a espejar. Sin
+  // esto, editar el precio acá y el del proveedor allá dejaría dos números
+  // distintos para exactamente lo mismo.
+  // Si todavía no tiene ninguno y acá se escribió un proveedor, se crea: si no,
+  // la ficha seguiría diciendo "no hay proveedores" con uno escrito al lado.
+  // Cuando lo crea ya registra el precio a su nombre, así que no se vuelve a registrar.
+  const reciencreado = asegurarProveedorDesdeTexto(id, d, req.user.id);
+  const pref = proveedorPreferido(id);
+  const cambioPrecio = Number(d.precio_ref) !== Number(actual.precio_ref) || d.moneda !== actual.moneda;
+  if (reciencreado) {
+    sincronizarVigente(id, req.user.id);
+  } else if (pref) {
+    if (Number(d.precio_ref) !== Number(pref.precio_ref) || d.moneda !== pref.moneda) {
+      db.prepare(`
+        UPDATE pli_insumo_proveedores SET precio_ref=?, moneda=?, precio_fecha=?,
+          actualizado_en=${AHORA}, actualizado_por_id=? WHERE id=?
+      `).run(d.precio_ref, d.moneda, d.precio_fecha, req.user.id, pref.id);
+      registrarPrecioProveedor(id, pref.id, { ...d, nombre: pref.nombre }, 'edicion', req.user.id);
+    }
+    sincronizarVigente(id, req.user.id);
+  } else if (cambioPrecio) {
+    // Solo se registra si el precio o la moneda cambiaron de verdad: si no, editar
+    // cualquier otro campo ensuciaría la serie con filas repetidas.
     registrarPrecio(id, d, 'edicion', req.user.id);
   }
   logPli('insumo', id, 'edicion', { antes: actual, despues: d }, req.user.id);
-  res.json({ ok: true });
+  res.json({ ok: true, proveedor_preferido: pref ? pref.nombre : null });
 }));
 
 router.delete('/insumos/:id', wrap((req, res) => {
@@ -439,6 +474,269 @@ router.post('/insumos/:id/restaurar', wrap((req, res) => {
   res.json({ ok: true });
 }));
 
+// ── Proveedores del insumo ────────────────────────────────────────────────
+// Un insumo se le compra a más de uno: la caja la cotizan dos cartoneras y la
+// compra se parte a propósito para no depender de una sola. Hacen falta los dos
+// precios juntos a la hora de comprar.
+//
+// El precio VIGENTE del insumo (pli_insumos.precio_ref) es un ESPEJO del
+// proveedor preferido. El motor sigue leyendo el insumo y no cambia una línea;
+// acá está el único lugar que escribe ese espejo.
+
+function proveedoresDe(insumoId) {
+  return db.prepare(`
+    SELECT * FROM pli_insumo_proveedores
+     WHERE insumo_id=? AND eliminado_en IS NULL
+     ORDER BY preferido DESC, activo DESC, nombre COLLATE NOCASE
+  `).all(insumoId);
+}
+
+function proveedorPreferido(insumoId) {
+  return db.prepare(`
+    SELECT * FROM pli_insumo_proveedores
+     WHERE insumo_id=? AND preferido=1 AND eliminado_en IS NULL LIMIT 1
+  `).get(insumoId) || null;
+}
+
+// Copia el precio del preferido al insumo. Un solo lugar a propósito: si cada
+// endpoint escribiera el espejo por su cuenta, olvidarse en uno alcanzaría para
+// que el plan costee con un precio que la pantalla ya no muestra.
+function sincronizarVigente(insumoId, userId) {
+  const pref = proveedorPreferido(insumoId);
+  if (!pref) return null;   // sin preferido no se pisa nada de lo que ya había
+  db.prepare(`
+    UPDATE pli_insumos
+       SET precio_ref=?, moneda=?, precio_fecha=?, proveedor_texto=?, proveedor_ref_id=?,
+           actualizado_en=${AHORA}, actualizado_por_id=?
+     WHERE id=?
+  `).run(pref.precio_ref, pref.moneda, pref.precio_fecha, pref.nombre,
+         pref.proveedor_ref_id || null, userId || null, insumoId);
+  return pref;
+}
+
+// Marcar preferido: apagar el anterior y prender el nuevo va SÍ O SÍ en una
+// transacción — el índice único parcial rechaza el estado intermedio con dos.
+const marcarPreferido = db.transaction((insumoId, provId, userId) => {
+  db.prepare('UPDATE pli_insumo_proveedores SET preferido=0 WHERE insumo_id=? AND preferido=1').run(insumoId);
+  db.prepare(`
+    UPDATE pli_insumo_proveedores SET preferido=1, actualizado_en=${AHORA}, actualizado_por_id=? WHERE id=?
+  `).run(userId || null, provId);
+  sincronizarVigente(insumoId, userId);
+});
+
+// Un insumo dado de alta con el proveedor escrito en su ficha arranca con ESE
+// proveedor cargado y preferido. Sin esto, la ficha diría "no hay proveedores"
+// mientras la tabla de al lado muestra uno, y no se resolvería hasta el próximo
+// arranque (la migración del schema corre solo al bootear).
+// Mismo guardia que la migración: solo si el insumo no tiene NINGUNO.
+function asegurarProveedorDesdeTexto(insumoId, d, userId) {
+  const nombre = (d.proveedor_texto || '').trim();
+  if (!nombre) return null;
+  if (proveedoresDe(insumoId).length) return null;
+  try {
+    const r = db.prepare(`
+      INSERT INTO pli_insumo_proveedores
+        (insumo_id, nombre, preferido, precio_ref, moneda, precio_fecha, notas, creado_por_id, actualizado_por_id)
+      VALUES (?,?,1,?,?,?,?,?,?)
+    `).run(insumoId, nombre, d.precio_ref || 0, d.moneda || 'ARS', d.precio_fecha || null,
+           'Creado desde el proveedor cargado en la ficha del insumo', userId || null, userId || null);
+    // El precio queda atribuido a ÉL y no suelto: es de quien lo cotizó.
+    registrarPrecioProveedor(insumoId, r.lastInsertRowid, { ...d, nombre }, 'alta', userId);
+    return r.lastInsertRowid;
+  } catch (e) {
+    console.error('[PLI] Error creando el proveedor desde el texto:', e.message);
+    return null;
+  }
+}
+
+function leerProveedorBody(body, parcialDe = null) {
+  const b = body || {};
+  const g = (campo, fn) => (b[campo] === undefined && parcialDe) ? parcialDe[campo] : fn();
+  return {
+    nombre:           g('nombre',           () => vTexto(b.nombre, 'El nombre del proveedor', { req: true, max: 120 })),
+    proveedor_ref_id: g('proveedor_ref_id', () => (b.proveedor_ref_id ? vNum(b.proveedor_ref_id, 'El proveedor del sistema', { min: 1, entero: true }) : null)),
+    precio_ref:       g('precio_ref',       () => vNum(b.precio_ref, 'El precio', { min: 0, def: 0 })),
+    moneda:           g('moneda',           () => {
+      const m = (vTexto(b.moneda, 'La moneda') || 'ARS').toUpperCase();
+      if (!['ARS', 'USD'].includes(m)) throw bad('La moneda tiene que ser ARS o USD');
+      return m;
+    }),
+    precio_fecha:     g('precio_fecha',     () => vFecha(b.precio_fecha, 'La fecha del precio')),
+    // NULL a propósito: 0 es un valor legítimo ("no tiene mínimo") y si se
+    // guardara 0 por defecto no habría forma de distinguirlo de "no lo sé".
+    moq:              g('moq',              () => (b.moq === '' || b.moq === null || b.moq === undefined ? null : vNum(b.moq, 'El mínimo del proveedor', { min: 0 }))),
+    lead_time_dias:   g('lead_time_dias',   () => (b.lead_time_dias === '' || b.lead_time_dias === null || b.lead_time_dias === undefined ? null : vNum(b.lead_time_dias, 'El plazo de entrega', { min: 0, max: 365, entero: true }))),
+    codigo_proveedor: g('codigo_proveedor', () => vTexto(b.codigo_proveedor, 'El código del proveedor', { max: 60 })),
+    contacto:         g('contacto',         () => vTexto(b.contacto, 'El contacto', { max: 200 })),
+    notas:            g('notas',            () => vTexto(b.notas, 'Las notas', { max: 300 }))
+  };
+}
+
+// Comparación entre proveedores. Sin pasar todo a una misma moneda, "1.200 ARS"
+// y "1,10 USD" no se pueden comparar y la pantalla obligaría a hacer la cuenta
+// a mano. La cotización usada se devuelve siempre para que esté a la vista.
+function compararProveedores(lista, tc) {
+  const eq = (p) => {
+    if (!(p.precio_ref > 0)) return null;
+    if (p.moneda === 'ARS') return p.precio_ref;
+    return tc > 0 ? p.precio_ref * tc : null;
+  };
+  const conPrecio = lista.filter(p => eq(p) !== null);
+  const minimo = conPrecio.length ? Math.min(...conPrecio.map(eq)) : null;
+  const pref = lista.filter(p => p.preferido)[0];
+  const base = pref ? eq(pref) : null;
+  return lista.map(p => {
+    const v = eq(p);
+    return {
+      ...p,
+      precio_comparable: v,                                   // en ARS, con la cotización de abajo
+      es_mas_barato: v !== null && minimo !== null && Math.abs(v - minimo) < 1e-9,
+      // Contra el preferido, que es el que efectivamente se está usando para costear.
+      dif_vs_preferido_pct: (v !== null && base !== null && base > 0 && !p.preferido)
+        ? ((v - base) / base) * 100 : null
+    };
+  });
+}
+
+router.get('/insumos/:id/proveedores', async (req, res) => {
+  try {
+    const soc = getSociedadId(req);
+    const id = parseInt(req.params.id, 10);
+    const ins = db.prepare('SELECT * FROM pli_insumos WHERE id=? AND sociedad_id=?').get(id, soc);
+    if (!ins) return res.status(404).json({ ok: false, error: 'Insumo no encontrado' });
+
+    const tipo = TIPOS_DOLAR.includes(req.query.tc_tipo) ? req.query.tc_tipo : 'oficial';
+    const cotiz = await cotizacionVigente(tipo);
+    const tc = cotiz && cotiz.venta > 0 ? cotiz.venta : null;
+
+    res.json({
+      ok: true,
+      data: compararProveedores(proveedoresDe(id), tc),
+      cotizacion: cotiz,
+      insumo: { id: ins.id, nombre: ins.nombre, unidad_compra: ins.unidad_compra, moq: ins.moq }
+    });
+  } catch (e) {
+    console.error('[PLI] Error listando proveedores:', e.message);
+    res.status(e.status || 500).json({ ok: false, error: e.message });
+  }
+});
+
+router.post('/insumos/:id/proveedores', wrap((req, res) => {
+  const soc = getSociedadId(req);
+  const id = parseInt(req.params.id, 10);
+  const ins = db.prepare('SELECT * FROM pli_insumos WHERE id=? AND sociedad_id=? AND eliminado_en IS NULL').get(id, soc);
+  if (!ins) throw notFound('Insumo no encontrado');
+  const d = leerProveedorBody(req.body);
+
+  const dup = db.prepare(`
+    SELECT id FROM pli_insumo_proveedores
+     WHERE insumo_id=? AND nombre=? COLLATE NOCASE AND eliminado_en IS NULL
+  `).get(id, d.nombre);
+  if (dup) throw conflict(`"${d.nombre}" ya está cargado como proveedor de este insumo`);
+
+  const hayOtros = proveedoresDe(id).length > 0;
+  // El primero entra como preferido: si no, el insumo quedaría con proveedores
+  // cargados y sin ninguno que defina su precio.
+  const pref = req.body?.preferido !== undefined ? (req.body.preferido ? 1 : 0) : (hayOtros ? 0 : 1);
+
+  const r = db.prepare(`
+    INSERT INTO pli_insumo_proveedores
+      (insumo_id, nombre, proveedor_ref_id, preferido, precio_ref, moneda, precio_fecha,
+       moq, lead_time_dias, codigo_proveedor, contacto, notas, creado_por_id, actualizado_por_id)
+    VALUES (?,?,?,0,?,?,?,?,?,?,?,?,?,?)
+  `).run(id, d.nombre, d.proveedor_ref_id, d.precio_ref, d.moneda, d.precio_fecha,
+         d.moq, d.lead_time_dias, d.codigo_proveedor, d.contacto, d.notas, req.user.id, req.user.id);
+
+  if (pref) marcarPreferido(id, r.lastInsertRowid, req.user.id);
+  if (d.precio_ref > 0) {
+    registrarPrecioProveedor(id, r.lastInsertRowid, d, 'alta', req.user.id);
+  }
+  logPli('insumo_proveedor', r.lastInsertRowid, 'alta', { insumo_id: id, ...d, preferido: !!pref }, req.user.id);
+  res.json({ ok: true, id: r.lastInsertRowid, preferido: !!pref });
+}));
+
+function proveedorDeSociedad(provId, soc) {
+  return db.prepare(`
+    SELECT p.*, i.nombre AS insumo_nombre, i.unidad_compra
+      FROM pli_insumo_proveedores p
+      JOIN pli_insumos i ON i.id = p.insumo_id
+     WHERE p.id=? AND i.sociedad_id=? AND p.eliminado_en IS NULL
+  `).get(provId, soc);
+}
+
+router.patch('/proveedores/:provId', wrap((req, res) => {
+  const soc = getSociedadId(req);
+  const actual = proveedorDeSociedad(parseInt(req.params.provId, 10), soc);
+  if (!actual) throw notFound('Proveedor no encontrado');
+  const d = leerProveedorBody(req.body, actual);
+
+  if (String(d.nombre).toLowerCase() !== String(actual.nombre).toLowerCase()) {
+    const dup = db.prepare(`
+      SELECT id FROM pli_insumo_proveedores
+       WHERE insumo_id=? AND nombre=? COLLATE NOCASE AND eliminado_en IS NULL AND id<>?
+    `).get(actual.insumo_id, d.nombre, actual.id);
+    if (dup) throw conflict(`"${d.nombre}" ya está cargado como proveedor de este insumo`);
+  }
+  const activo = req.body?.activo === undefined ? actual.activo : (req.body.activo ? 1 : 0);
+
+  db.prepare(`
+    UPDATE pli_insumo_proveedores SET
+      nombre=?, proveedor_ref_id=?, precio_ref=?, moneda=?, precio_fecha=?,
+      moq=?, lead_time_dias=?, codigo_proveedor=?, contacto=?, notas=?, activo=?,
+      actualizado_en=${AHORA}, actualizado_por_id=?
+    WHERE id=?
+  `).run(d.nombre, d.proveedor_ref_id, d.precio_ref, d.moneda, d.precio_fecha,
+         d.moq, d.lead_time_dias, d.codigo_proveedor, d.contacto, d.notas, activo,
+         req.user.id, actual.id);
+
+  // La serie de precios es POR proveedor: solo se escribe si el precio de ESE
+  // proveedor cambió de verdad, si no editar el teléfono ensucia el historial.
+  if (Number(d.precio_ref) !== Number(actual.precio_ref) || d.moneda !== actual.moneda) {
+    registrarPrecioProveedor(actual.insumo_id, actual.id, d, 'edicion', req.user.id);
+  }
+  if (actual.preferido) sincronizarVigente(actual.insumo_id, req.user.id);
+  logPli('insumo_proveedor', actual.id, 'edicion', { antes: actual, despues: d }, req.user.id);
+  res.json({ ok: true });
+}));
+
+router.post('/proveedores/:provId/preferido', wrap((req, res) => {
+  const soc = getSociedadId(req);
+  const p = proveedorDeSociedad(parseInt(req.params.provId, 10), soc);
+  if (!p) throw notFound('Proveedor no encontrado');
+  if (!p.activo) throw bad('El proveedor está inactivo: activalo antes de marcarlo como preferido');
+  marcarPreferido(p.insumo_id, p.id, req.user.id);
+  logPli('insumo_proveedor', p.id, 'preferido', { insumo_id: p.insumo_id, nombre: p.nombre }, req.user.id);
+  res.json({ ok: true });
+}));
+
+router.delete('/proveedores/:provId', wrap((req, res) => {
+  const soc = getSociedadId(req);
+  const p = proveedorDeSociedad(parseInt(req.params.provId, 10), soc);
+  if (!p) throw notFound('Proveedor no encontrado');
+
+  db.prepare(`
+    UPDATE pli_insumo_proveedores SET preferido=0, eliminado_en=${AHORA}, eliminado_por_id=? WHERE id=?
+  `).run(req.user.id, p.id);
+
+  // Si el que se borró era el preferido, el insumo quedaría costeando con el
+  // precio de un proveedor que ya no está. Pasa a serlo el más barato de los que
+  // quedan y se avisa: dejarlo sin preferido sería peor, porque el número viejo
+  // se quedaría en pantalla sin que nada lo indique.
+  let promovido = null;
+  if (p.preferido) {
+    const quedan = proveedoresDe(p.insumo_id).filter(x => x.activo && x.precio_ref > 0);
+    if (quedan.length) {
+      const { tc } = tcParaFecha(hoyISO());
+      const eq = (x) => x.moneda === 'USD' ? (tc > 0 ? x.precio_ref * tc : Infinity) : x.precio_ref;
+      promovido = quedan.slice().sort((a, b) => eq(a) - eq(b))[0];
+      marcarPreferido(p.insumo_id, promovido.id, req.user.id);
+    }
+  }
+  logPli('insumo_proveedor', p.id, 'baja',
+    { insumo_id: p.insumo_id, nombre: p.nombre, promovido: promovido ? promovido.nombre : null }, req.user.id);
+  res.json({ ok: true, promovido: promovido ? { id: promovido.id, nombre: promovido.nombre } : null });
+}));
+
 // ── Historial de precios ──────────────────────────────────────────────────
 // pli_insumos.precio_ref sigue siendo el precio VIGENTE (es el que snapshotea el
 // plan al confirmar). Acá se acumula la serie para ver la evolución.
@@ -454,6 +752,27 @@ function registrarPrecio(insumoId, d, origen, userId, fecha) {
            d.unidad_compra || null, origen, d.proveedor_texto || null, userId || null);
   } catch (e) {
     console.error('[PLI] Error registrando precio:', e.message);
+  }
+}
+
+// Igual que registrarPrecio pero atado al proveedor, para que la serie de cada
+// uno sea la suya: la variación se compara contra el precio anterior de ESE
+// proveedor, no contra el del otro, que daría un porcentaje sin sentido.
+function registrarPrecioProveedor(insumoId, provId, d, origen, userId) {
+  if (!(Number(d.precio_ref) > 0)) return;
+  try {
+    const fecha = d.precio_fecha || hoyISO();
+    const { tc, origen: tcOrigen } = tcParaFecha(fecha);
+    const ins = db.prepare('SELECT unidad_compra FROM pli_insumos WHERE id=?').get(insumoId);
+    db.prepare(`
+      INSERT INTO pli_insumo_precios
+        (insumo_id, proveedor_id, fecha, precio, moneda, unidad_compra, origen, proveedor_texto,
+         tc_usado, tc_origen, creado_por_id)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?)
+    `).run(insumoId, provId, fecha, d.precio_ref, d.moneda, ins ? ins.unidad_compra : null,
+           origen, d.nombre || null, tc, tcOrigen, userId || null);
+  } catch (e) {
+    console.error('[PLI] Error registrando precio de proveedor:', e.message);
   }
 }
 
@@ -508,24 +827,47 @@ router.post('/insumos/:id/precios', wrap((req, res) => {
     tc = r.tc; tcOrigen = r.origen;
   }
 
+  // De qué proveedor es este precio. Si el insumo tiene proveedores cargados, la
+  // serie se lleva por proveedor: un precio suelto no se puede comparar contra
+  // nada porque no se sabe quién lo cotizó.
+  let prov = null;
+  if (b.proveedor_id) {
+    prov = db.prepare(`
+      SELECT * FROM pli_insumo_proveedores WHERE id=? AND insumo_id=? AND eliminado_en IS NULL
+    `).get(parseInt(b.proveedor_id, 10), id);
+    if (!prov) throw bad('El proveedor elegido no es de este insumo');
+  }
+
   const r = db.prepare(`
     INSERT INTO pli_insumo_precios
-      (insumo_id, fecha, precio, moneda, unidad_compra, origen, proveedor_texto, notas,
+      (insumo_id, proveedor_id, fecha, precio, moneda, unidad_compra, origen, proveedor_texto, notas,
        tc_usado, tc_origen, creado_por_id)
-    VALUES (?,?,?,?,?, 'manual', ?,?,?,?,?)
-  `).run(id, fecha, precio, moneda, ins.unidad_compra,
-         vTexto(b.proveedor_texto, 'El proveedor', { max: 120 }) || ins.proveedor_texto || null,
+    VALUES (?,?,?,?,?,?, 'manual', ?,?,?,?,?)
+  `).run(id, prov ? prov.id : null, fecha, precio, moneda, ins.unidad_compra,
+         (prov && prov.nombre) || vTexto(b.proveedor_texto, 'El proveedor', { max: 120 }) || ins.proveedor_texto || null,
          vTexto(b.notas, 'Las notas', { max: 300 }), tc, tcOrigen, req.user.id);
 
   // Solo si lo piden explícitamente pasa a ser el precio vigente. Cargar un precio
   // viejo NO puede pisar el actual, que es el que usa el plan.
   if (b.vigente) {
-    db.prepare(`
-      UPDATE pli_insumos SET precio_ref=?, moneda=?, precio_fecha=?, actualizado_en=${AHORA}, actualizado_por_id=?
-      WHERE id=?
-    `).run(precio, moneda, fecha, req.user.id, id);
+    if (prov) {
+      // Con proveedor, el vigente es el de ESE proveedor. El del insumo se
+      // recalcula solo, y únicamente si el proveedor es el preferido: cargarle un
+      // precio al segundo proveedor no puede cambiar con qué costea el plan.
+      db.prepare(`
+        UPDATE pli_insumo_proveedores SET precio_ref=?, moneda=?, precio_fecha=?,
+          actualizado_en=${AHORA}, actualizado_por_id=? WHERE id=?
+      `).run(precio, moneda, fecha, req.user.id, prov.id);
+      if (prov.preferido) sincronizarVigente(id, req.user.id);
+    } else {
+      db.prepare(`
+        UPDATE pli_insumos SET precio_ref=?, moneda=?, precio_fecha=?, actualizado_en=${AHORA}, actualizado_por_id=?
+        WHERE id=?
+      `).run(precio, moneda, fecha, req.user.id, id);
+    }
   }
-  logPli('insumo', id, 'precio_historico', { fecha, precio, moneda, tc, vigente: !!b.vigente }, req.user.id);
+  logPli('insumo', id, 'precio_historico',
+    { fecha, precio, moneda, tc, vigente: !!b.vigente, proveedor: prov ? prov.nombre : null }, req.user.id);
   res.json({ ok: true, id: r.lastInsertRowid, tc, tc_origen: tcOrigen });
 }));
 
@@ -550,17 +892,27 @@ router.get('/insumos/:id/precios', wrap((req, res) => {
   const id = parseInt(req.params.id, 10);
   const ins = db.prepare('SELECT * FROM pli_insumos WHERE id=? AND sociedad_id=?').get(id, soc);
   if (!ins) throw notFound('Insumo no encontrado');
+  // Se puede pedir la serie de UN proveedor, que es como se mira cuando hay más
+  // de uno: mezclar las dos series en un mismo listado no deja ver la evolución
+  // de ninguna.
+  const filtroProv = req.query.proveedor_id ? parseInt(req.query.proveedor_id, 10) : null;
   const filas = db.prepare(`
-    SELECT * FROM pli_insumo_precios WHERE insumo_id=? ORDER BY fecha DESC, id DESC
-  `).all(id);
-  // Variación contra el registro inmediatamente anterior de la MISMA moneda: comparar
-  // un precio en USD contra uno en ARS daría un porcentaje sin sentido.
+    SELECT pr.*, pv.nombre AS proveedor_nombre, pv.preferido AS proveedor_preferido
+      FROM pli_insumo_precios pr
+      LEFT JOIN pli_insumo_proveedores pv ON pv.id = pr.proveedor_id
+     WHERE pr.insumo_id=? ${filtroProv ? 'AND pr.proveedor_id=?' : ''}
+     ORDER BY pr.fecha DESC, pr.id DESC
+  `).all(...(filtroProv ? [id, filtroProv] : [id]));
+  // Variación contra el registro anterior del MISMO proveedor y la MISMA moneda:
+  // comparar un precio en USD contra uno en ARS, o el de una cartonera contra el
+  // de la otra, daría un porcentaje sin sentido.
   const porMoneda = {};
   const cronologico = filas.slice().reverse();
   for (const f of cronologico) {
-    const prev = porMoneda[f.moneda];
+    const clave = (f.proveedor_id || 0) + '|' + f.moneda;
+    const prev = porMoneda[clave];
     f.variacion_pct = (prev && prev > 0) ? ((f.precio - prev) / prev) * 100 : null;
-    porMoneda[f.moneda] = f.precio;
+    porMoneda[clave] = f.precio;
 
     // Equivalente en la otra moneda, con la cotización de ESA fecha. Los registros
     // viejos no la tienen guardada, así que se resuelve al vuelo y se aclara de
@@ -577,7 +929,11 @@ router.get('/insumos/:id/precios', wrap((req, res) => {
       f.precio_usd = f.moneda === 'USD' ? f.precio : null;
     }
   }
-  res.json({ ok: true, data: filas, insumo: { id: ins.id, nombre: ins.nombre, unidad_compra: ins.unidad_compra } });
+  res.json({
+    ok: true, data: filas,
+    insumo: { id: ins.id, nombre: ins.nombre, unidad_compra: ins.unidad_compra },
+    proveedores: proveedoresDe(id).map(p => ({ id: p.id, nombre: p.nombre, preferido: p.preferido }))
+  });
 }));
 
 // ── Adjuntos del insumo (registro técnico: foto, ficha, especificación) ────
@@ -1594,6 +1950,49 @@ function resultadoMaterializado(plan) {
   };
 }
 
+// A la hora de comprar hacen falta LOS DOS precios juntos, no solo el del
+// preferido. Se agrega acá y no en el motor: el motor calcula cuánto hay que
+// comprar, no a quién comprarle.
+//
+// Son los proveedores de HOY incluso en un plan confirmado, y eso es lo correcto:
+// el snapshot congela con qué se costeó, pero la compra se hace ahora y con los
+// precios de ahora.
+function adjuntarProveedores(lineas) {
+  const ids = [...new Set(lineas.map(l => l.insumo_id).filter(Boolean))];
+  const { tc, origen } = tcParaFecha(hoyISO());
+  if (!ids.length) return { tc, tc_origen: origen };
+
+  const marcas = ids.map(() => '?').join(',');
+  const filas = db.prepare(`
+    SELECT * FROM pli_insumo_proveedores
+     WHERE insumo_id IN (${marcas}) AND eliminado_en IS NULL AND activo=1
+     ORDER BY preferido DESC, nombre COLLATE NOCASE
+  `).all(...ids);
+
+  const porInsumo = new Map();
+  for (const f of filas) {
+    if (!porInsumo.has(f.insumo_id)) porInsumo.set(f.insumo_id, []);
+    porInsumo.get(f.insumo_id).push(f);
+  }
+  for (const l of lineas) {
+    const lista = compararProveedores(porInsumo.get(l.insumo_id) || [], tc);
+    // Cuánto sale comprarle a cada uno la cantidad que hay que comprar. Es la
+    // cuenta que el comprador hace igual; hacerla a mano por 40 insumos es
+    // exactamente donde aparecen los errores.
+    const bultos = Number(l.bultos_a_comprar || 0);
+    l.proveedores = lista.map(p => ({
+      id: p.id, nombre: p.nombre, preferido: p.preferido,
+      precio_ref: p.precio_ref, moneda: p.moneda, precio_fecha: p.precio_fecha,
+      codigo_proveedor: p.codigo_proveedor, moq: p.moq, lead_time_dias: p.lead_time_dias,
+      dif_vs_preferido_pct: p.dif_vs_preferido_pct, es_mas_barato: p.es_mas_barato,
+      costo_total: p.precio_ref > 0 ? Math.round(p.precio_ref * bultos * 100) / 100 : null,
+      // El mínimo del proveedor puede no llegar a cubrirse con lo que hace falta.
+      bajo_minimo: p.moq !== null && p.moq > 0 && bultos > 0 && bultos < p.moq
+    }));
+  }
+  return { tc, tc_origen: origen };
+}
+
 // GET a propósito (ver la nota del encabezado): tiene que funcionar para
 // usuarios solo_lectura.
 //
@@ -1606,15 +2005,17 @@ router.get('/planes/:id/calculo', wrap((req, res) => {
 
   if (plan.estado === 'confirmado' && req.query.simular !== '1') {
     const r = resultadoMaterializado(plan);
+    const tcp = adjuntarProveedores(r.lineas);
     return res.json({
       ok: true,
-      data: { plan, ...r, origen: 'snapshot', confirmado_en: plan.confirmado_en }
+      data: { plan, ...r, ...tcp, origen: 'snapshot', confirmado_en: plan.confirmado_en }
     });
   }
   const r = calcularPlan(armarContexto(soc, plan));
+  const tcp = adjuntarProveedores(r.lineas);
   res.json({
     ok: true,
-    data: { plan, ...r, origen: plan.estado === 'confirmado' ? 'simulacion' : 'calculo' }
+    data: { plan, ...r, ...tcp, origen: plan.estado === 'confirmado' ? 'simulacion' : 'calculo' }
   });
 }));
 
