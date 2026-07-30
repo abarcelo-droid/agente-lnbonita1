@@ -281,6 +281,62 @@ db.exec(`
     ON pli_plan_resultado(plan_id, insumo_id, bucket_ini);
   CREATE INDEX IF NOT EXISTS idx_pli_res_plan ON pli_plan_resultado(plan_id);
 
+  -- Registro técnico del insumo: fotos y documentos (ficha, especificación, plano).
+  -- Los archivos van a Cloudflare R2 y acá se guarda la key, NO el binario.
+  -- Importante: los uploads a disco del repo (multer con dest:) viven en el disco
+  -- EFÍMERO del contenedor y se pierden en cada redeploy de Railway; para un
+  -- registro técnico eso no sirve, así que se usa R2 vía servicios/storage.js.
+  CREATE TABLE IF NOT EXISTS pli_insumo_archivos (
+    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    insumo_id          INTEGER NOT NULL REFERENCES pli_insumos(id),
+    storage_key        TEXT    NOT NULL,                  -- key en R2
+    nombre             TEXT    NOT NULL,                  -- nombre original del archivo
+    mime               TEXT,
+    tamano             INTEGER,                           -- bytes
+    tipo               TEXT    NOT NULL DEFAULT 'documento'
+                               CHECK(tipo IN ('foto','documento')),
+    descripcion        TEXT,
+    creado_en          TEXT DEFAULT (datetime('now','localtime')),
+    creado_por_id      INTEGER,
+    eliminado_en       TEXT,
+    eliminado_por_id   INTEGER
+  );
+  CREATE INDEX IF NOT EXISTS idx_pli_arch_insumo ON pli_insumo_archivos(insumo_id);
+
+  -- Historial de precios del insumo. pli_insumos.precio_ref queda como el precio
+  -- VIGENTE (es el que snapshotea el plan al confirmar); acá queda la serie para
+  -- poder ver la evolución. Se escribe una fila cada vez que el precio cambia.
+  CREATE TABLE IF NOT EXISTS pli_insumo_precios (
+    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    insumo_id          INTEGER NOT NULL REFERENCES pli_insumos(id),
+    fecha              TEXT    NOT NULL,                  -- YYYY-MM-DD de vigencia
+    precio             REAL    NOT NULL CHECK(precio >= 0),
+    moneda             TEXT    NOT NULL DEFAULT 'ARS' CHECK(moneda IN ('ARS','USD')),
+    unidad_compra      TEXT,                              -- snapshot: el precio es POR esta unidad
+    origen             TEXT    NOT NULL DEFAULT 'manual'
+                               CHECK(origen IN ('manual','alta','edicion','importacion')),
+    proveedor_texto    TEXT,
+    notas              TEXT,
+    creado_en          TEXT DEFAULT (datetime('now','localtime')),
+    creado_por_id      INTEGER
+  );
+  CREATE INDEX IF NOT EXISTS idx_pli_prec_insumo ON pli_insumo_precios(insumo_id, fecha);
+
+  -- Cotización del dólar por día y tipo. Se cachea para no pegarle a la API en
+  -- cada cálculo y, sobre todo, para que un costo histórico se pueda reproducir
+  -- con la cotización que se usó ese día.
+  CREATE TABLE IF NOT EXISTS pli_cotizaciones (
+    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    fecha              TEXT    NOT NULL,                  -- YYYY-MM-DD
+    tipo               TEXT    NOT NULL,                  -- oficial | mayorista | blue | tarjeta | manual
+    compra             REAL,
+    venta              REAL    NOT NULL CHECK(venta > 0),
+    fuente             TEXT,                              -- de dónde salió
+    obtenido_en        TEXT DEFAULT (datetime('now','localtime')),
+    creado_por_id      INTEGER
+  );
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_pli_cotiz_unica ON pli_cotizaciones(fecha, tipo);
+
   -- Seguimiento de compras: lo que ya se pidió contra lo que el plan requiere.
   -- La cantidad va en UNIDAD DE COMPRA (la misma en la que el plan dice "a
   -- comprar"), porque es la unidad en la que se pide y se factura.

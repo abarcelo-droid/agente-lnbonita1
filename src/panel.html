@@ -11011,6 +11011,51 @@ function sgRepExport(){
 </div>
 </div>
 
+<!-- Modal: ficha técnica del insumo (adjuntos + historial de precios) -->
+<div class="ab-modal-overlay" id="pli-mb-ficha">
+<div class="ab-modal" style="width:760px;max-height:90vh;overflow-y:auto">
+  <div class="mhd">
+    <div><div class="mht" id="pli-ficha-tit">Ficha del insumo</div></div>
+    <button class="mcl" onclick="document.getElementById('pli-mb-ficha').classList.remove('on')">×</button>
+  </div>
+  <input type="hidden" id="pli-ficha-id">
+
+  <div style="font-size:12px;font-weight:700;margin-bottom:8px">📎 Fotos y documentos</div>
+  <div id="pli-ficha-storage" style="display:none;background:rgba(245,158,11,.12);border-radius:8px;padding:8px 12px;font-size:12px;margin-bottom:8px"></div>
+  <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;margin-bottom:10px">
+    <div class="fl" style="flex:1;min-width:200px"><label>Archivo</label>
+      <input type="file" id="pli-ficha-file" class="pli-inp" accept="image/*,.pdf,.doc,.docx,.xls,.xlsx">
+    </div>
+    <div class="fl" style="flex:1;min-width:160px"><label>Descripción (opcional)</label>
+      <input id="pli-ficha-desc" class="pli-inp" placeholder="Ej: ficha técnica del proveedor">
+    </div>
+    <button class="btn bb" onclick="pliArchivoSubir()">Subir</button>
+  </div>
+  <div id="pli-ficha-archivos"></div>
+
+  <div style="font-size:12px;font-weight:700;margin:18px 0 8px">📈 Evolución del precio</div>
+  <div id="pli-ficha-precios"></div>
+
+  <div class="ab-modal-footer">
+    <button class="btn bo" onclick="document.getElementById('pli-mb-ficha').classList.remove('on')">Cerrar</button>
+  </div>
+</div>
+</div>
+
+<!-- Modal: costo del producto según su receta -->
+<div class="ab-modal-overlay" id="pli-mb-costo">
+<div class="ab-modal" style="width:860px;max-height:90vh;overflow-y:auto">
+  <div class="mhd">
+    <div><div class="mht" id="pli-costo-tit">Costo del producto</div></div>
+    <button class="mcl" onclick="document.getElementById('pli-mb-costo').classList.remove('on')">×</button>
+  </div>
+  <div id="pli-costo-cont"></div>
+  <div class="ab-modal-footer">
+    <button class="btn bo" onclick="document.getElementById('pli-mb-costo').classList.remove('on')">Cerrar</button>
+  </div>
+</div>
+</div>
+
 <!-- Modal: insumo -->
 <div class="ab-modal-overlay" id="pli-mb-insumo">
 <div class="ab-modal" style="width:640px;max-height:90vh;overflow-y:auto">
@@ -35680,6 +35725,7 @@ function pliInsRender() {
       + '<td class="pli-num">' + (Number(i.moq) === 0 ? '—' : pliN(i.moq)) + '</td>'
       + '<td class="pli-num">' + (Number(i.precio_ref) > 0 ? pliEsc(i.moneda) + ' ' + pliN(i.precio_ref, 2) : '<span style="color:#f59e0b">sin precio</span>') + '</td>'
       + '<td style="text-align:right;white-space:nowrap">'
+        + '<button class="btn bo bs" onclick="pliFichaAbrir(' + i.id + ')" style="padding:2px 6px;font-size:11px" title="Fotos, documentos y evolución del precio">📎</button> '
         + '<button class="btn bo bs" onclick="pliInsAbrir(' + i.id + ')" style="padding:2px 6px;font-size:11px">✏️</button> '
         + '<button class="btn bd bs" onclick="pliInsBorrar(' + i.id + ')" style="padding:2px 6px;font-size:11px">🗑</button>'
       + '</td></tr>';
@@ -35883,6 +35929,7 @@ function pliArbolRender() {
           + badge + '</div>'
         + '<div style="white-space:nowrap">'
           + '<button class="btn bo bs" onclick="pliRecetaAbrir(' + p.id + ')" style="padding:2px 6px;font-size:11px">🧾 receta</button> '
+          + '<button class="btn bo bs" onclick="pliCostoAbrir(' + p.id + ')" style="padding:2px 6px;font-size:11px" title="Costo en insumos por unidad">💲 costo</button> '
           + '<button class="btn bo bs" onclick="pliProdAbrir(null,' + p.id + ')" style="padding:2px 6px;font-size:11px">+ sub</button> '
           + '<button class="btn bo bs" onclick="pliProdAbrir(' + p.id + ',null)" style="padding:2px 6px;font-size:11px">✏️</button> '
           + '<button class="btn bd bs" onclick="pliProdBorrar(' + p.id + ')" style="padding:2px 6px;font-size:11px">🗑</button>'
@@ -35897,6 +35944,7 @@ function pliArbolRender() {
             + '<span class="pli-badge ' + (h.receta_lineas ? 'pli-ok' : 'pli-gris') + '">receta: ' + h.receta_lineas + '</span></div>'
           + '<div style="white-space:nowrap">'
             + '<button class="btn bo bs" onclick="pliRecetaAbrir(' + h.id + ')" style="padding:2px 6px;font-size:11px">🧾 receta</button> '
+            + '<button class="btn bo bs" onclick="pliCostoAbrir(' + h.id + ')" style="padding:2px 6px;font-size:11px" title="Costo en insumos por unidad">💲 costo</button> '
             + '<button class="btn bo bs" onclick="pliProdAbrir(' + h.id + ',null)" style="padding:2px 6px;font-size:11px">✏️</button> '
             + '<button class="btn bd bs" onclick="pliProdBorrar(' + h.id + ')" style="padding:2px 6px;font-size:11px">🗑</button>'
           + '</div></div></div>';
@@ -36701,6 +36749,266 @@ function pliReabrir() {
     if (!r.ok) { pliErr(r); return; }
     toast('✓ Plan reabierto', 'ok');
     pliPlanAbrir(PLI.plan.id);
+  });
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// FICHA DEL INSUMO — adjuntos y evolución del precio
+// ══════════════════════════════════════════════════════════════════════════
+
+function pliFichaAbrir(id) {
+  var i = PLI.insumos.filter(function(x) { return x.id === id; })[0];
+  document.getElementById('pli-ficha-id').value = id;
+  document.getElementById('pli-ficha-tit').textContent = 'Ficha de ' + (i ? i.nombre : 'insumo');
+  document.getElementById('pli-ficha-file').value = '';
+  document.getElementById('pli-ficha-desc').value = '';
+  document.getElementById('pli-ficha-archivos').innerHTML = '<div class="emp">Cargando…</div>';
+  document.getElementById('pli-ficha-precios').innerHTML = '<div class="emp">Cargando…</div>';
+  document.getElementById('pli-mb-ficha').classList.add('on');
+  pliFichaArchivos();
+  pliFichaPrecios();
+}
+
+function pliFichaArchivos() {
+  var id = parseInt(document.getElementById('pli-ficha-id').value, 10);
+  pliApi('/insumos/' + id + '/archivos').then(function(r) {
+    var aviso = document.getElementById('pli-ficha-storage');
+    if (r.ok && r.storage_ok === false) {
+      aviso.style.display = '';
+      aviso.textContent = '⚠ El almacenamiento de archivos no está configurado (faltan las credenciales de R2). '
+        + 'Se pueden ver los archivos ya subidos pero no cargar nuevos.';
+    } else { aviso.style.display = 'none'; }
+
+    var cont = document.getElementById('pli-ficha-archivos');
+    if (!r.ok) { cont.innerHTML = '<div class="emp" style="color:var(--err)">' + pliEsc(r.error) + '</div>'; return; }
+    var arr = r.data || [];
+    if (!arr.length) { cont.innerHTML = '<div class="emp" style="padding:14px">Sin archivos todavía.</div>'; return; }
+
+    var fotos = arr.filter(function(a) { return a.tipo === 'foto'; });
+    var docs = arr.filter(function(a) { return a.tipo !== 'foto'; });
+    var html = '';
+    if (fotos.length) {
+      html += '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px">'
+        + fotos.map(function(a) {
+            return '<div style="width:130px;border:1px solid var(--bor);border-radius:8px;overflow:hidden;background:var(--sur)">'
+              + '<a href="/api/pli/archivos/' + a.id + '" target="_blank">'
+              + '<img src="/api/pli/archivos/' + a.id + '" alt="' + pliEsc(a.nombre) + '"'
+              + ' style="width:100%;height:95px;object-fit:cover;display:block"></a>'
+              + '<div style="padding:5px 6px">'
+                + '<div class="pli-cel-chica" style="word-break:break-all">' + pliEsc(a.nombre) + '</div>'
+                + (a.descripcion ? '<div class="pli-cel-chica">' + pliEsc(a.descripcion) + '</div>' : '')
+                + '<button class="btn bd bs" onclick="pliArchivoBorrar(' + a.id + ')" style="padding:1px 5px;font-size:10px;margin-top:3px">🗑</button>'
+              + '</div></div>';
+          }).join('') + '</div>';
+    }
+    if (docs.length) {
+      html += '<div class="ab-table-wrap"><table class="pa-tbl" style="font-size:12px"><thead><tr>'
+        + '<th>Documento</th><th>Descripción</th><th style="text-align:right">Tamaño</th><th>Subido</th><th style="width:70px"></th>'
+        + '</tr></thead><tbody>'
+        + docs.map(function(a) {
+            var kb = a.tamano ? (a.tamano / 1024 >= 1024 ? (a.tamano / 1048576).toFixed(1) + ' MB' : Math.round(a.tamano / 1024) + ' KB') : '—';
+            return '<tr><td><a href="/api/pli/archivos/' + a.id + '" target="_blank">' + pliEsc(a.nombre) + '</a></td>'
+              + '<td class="pli-cel-chica">' + pliEsc(a.descripcion || '—') + '</td>'
+              + '<td class="pli-num pli-cel-chica">' + kb + '</td>'
+              + '<td class="pli-cel-chica">' + pliEsc(a.creado_en || '') + '</td>'
+              + '<td style="text-align:right"><button class="btn bd bs" onclick="pliArchivoBorrar(' + a.id + ')" style="padding:2px 6px;font-size:11px">🗑</button></td>'
+              + '</tr>';
+          }).join('')
+        + '</tbody></table></div>';
+    }
+    cont.innerHTML = html;
+  });
+}
+
+// La subida va por multipart, así que NO usa pliApi (que fuerza JSON). Tampoco se
+// setea Content-Type a mano: el browser tiene que poner el boundary del FormData.
+function pliArchivoSubir() {
+  var id = parseInt(document.getElementById('pli-ficha-id').value, 10);
+  var input = document.getElementById('pli-ficha-file');
+  var f = input.files && input.files[0];
+  if (!f) return toast('Elegí un archivo', 'er');
+  if (f.size > 10 * 1024 * 1024) return toast('El archivo supera los 10 MB', 'er');
+  var fd = new FormData();
+  fd.append('archivo', f);
+  fd.append('descripcion', document.getElementById('pli-ficha-desc').value.trim());
+  fetch('/api/pli/insumos/' + id + '/archivos', { method: 'POST', credentials: 'include', body: fd })
+    .then(function(r) { return r.json(); })
+    .catch(function() { return { ok: false, error: 'Error de red' }; })
+    .then(function(r) {
+      if (!r.ok) { pliErr(r); return; }
+      toast('✓ Archivo subido', 'ok');
+      input.value = '';
+      document.getElementById('pli-ficha-desc').value = '';
+      pliFichaArchivos();
+    });
+}
+
+function pliArchivoBorrar(archivoId) {
+  if (!confirm('¿Quitar este archivo de la ficha?')) return;
+  pliApi('/archivos/' + archivoId, { method: 'DELETE' }).then(function(r) {
+    if (!r.ok) { pliErr(r); return; }
+    toast('✓ Quitado', 'ok');
+    pliFichaArchivos();
+  });
+}
+
+function pliFichaPrecios() {
+  var id = parseInt(document.getElementById('pli-ficha-id').value, 10);
+  pliApi('/insumos/' + id + '/precios').then(function(r) {
+    var cont = document.getElementById('pli-ficha-precios');
+    if (!r.ok) { cont.innerHTML = '<div class="emp" style="color:var(--err)">' + pliEsc(r.error) + '</div>'; return; }
+    var arr = r.data || [];
+    if (!arr.length) {
+      cont.innerHTML = '<div class="emp" style="padding:14px">Todavía no hay historial. '
+        + 'Se registra automáticamente cada vez que cambia el precio del insumo.</div>';
+      return;
+    }
+    cont.innerHTML = '<div class="ab-table-wrap"><table class="pa-tbl" style="font-size:12px"><thead><tr>'
+      + '<th>Fecha</th><th style="text-align:right">Precio</th><th>Moneda</th><th>Por</th>'
+      + '<th style="text-align:right">Variación</th><th>Origen</th><th>Proveedor</th>'
+      + '</tr></thead><tbody>'
+      + arr.map(function(p) {
+          var v = p.variacion_pct;
+          var vTxt = (v === null || v === undefined) ? '—'
+            : (v > 0 ? '▲ ' : (v < 0 ? '▼ ' : '')) + pliN(Math.abs(v), 1) + '%';
+          var color = (v === null || v === undefined) ? 'var(--mut)' : (v > 0 ? 'var(--err)' : (v < 0 ? 'var(--ok)' : 'var(--mut)'));
+          return '<tr><td>' + pliEsc(p.fecha) + '</td>'
+            + '<td class="pli-num"><strong>' + pliN(p.precio, 2) + '</strong></td>'
+            + '<td>' + pliEsc(p.moneda) + '</td>'
+            + '<td class="pli-cel-chica">' + pliEsc(p.unidad_compra || '—') + '</td>'
+            + '<td class="pli-num" style="color:' + color + ';font-weight:600">' + vTxt + '</td>'
+            + '<td class="pli-cel-chica">' + pliEsc(p.origen) + '</td>'
+            + '<td class="pli-cel-chica">' + pliEsc(p.proveedor_texto || '—') + '</td>'
+            + '</tr>';
+        }).join('')
+      + '</tbody></table></div>'
+      + '<div class="pli-cel-chica" style="margin-top:6px">La variación compara contra el registro anterior '
+      + '<strong>de la misma moneda</strong>: comparar un precio en dólares contra uno en pesos daría un porcentaje sin sentido.</div>';
+  });
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// COSTO DEL PRODUCTO — según su receta, en las dos monedas
+// ══════════════════════════════════════════════════════════════════════════
+
+function pliCostoAbrir(prodId) {
+  PLI.costoProdId = prodId;
+  document.getElementById('pli-costo-tit').textContent = 'Costo del producto';
+  document.getElementById('pli-costo-cont').innerHTML = '<div class="emp">Calculando y buscando la cotización…</div>';
+  document.getElementById('pli-mb-costo').classList.add('on');
+  pliCostoCargar();
+}
+
+function pliCostoCargar(tcTipo) {
+  var t = tcTipo || PLI.costoTc || 'oficial';
+  PLI.costoTc = t;
+  pliApi('/productos/' + PLI.costoProdId + '/costo?tc_tipo=' + encodeURIComponent(t)).then(function(r) {
+    if (!r.ok) {
+      document.getElementById('pli-costo-cont').innerHTML =
+        '<div class="emp" style="color:var(--err)">' + pliEsc(r.error) + '</div>';
+      return;
+    }
+    PLI.costo = r.data;
+    pliCostoRender();
+  });
+}
+
+function pliCostoRender() {
+  var d = PLI.costo;
+  var c = d.cotizacion;
+  document.getElementById('pli-costo-tit').textContent = 'Costo de ' + d.producto.nombre;
+
+  // La cotización se muestra SIEMPRE y con su procedencia: un costo en dólares no
+  // significa nada si no se sabe a qué tipo de cambio se convirtió.
+  var html = '';
+  if (c) {
+    var etiqueta = c.origen === 'manual' ? 'cargada a mano'
+      : (c.origen === 'ultima_disponible' ? 'última disponible — no se pudo consultar hoy'
+      : (c.origen === 'cache' ? 'ya consultada hoy' : 'consultada ahora'));
+    html += '<div style="background:' + (c.desactualizada ? 'rgba(245,158,11,.14)' : 'rgba(74,222,128,.12)')
+      + ';border-radius:8px;padding:9px 12px;font-size:12px;margin-bottom:10px;display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:center">'
+      + '<div>' + (c.desactualizada ? '⚠ ' : '💱 ')
+        + 'Dólar <strong>' + pliEsc(c.tipo) + '</strong> — venta <strong>$ ' + pliN(c.venta, 2) + '</strong>'
+        + ' · ' + pliEsc(c.fecha) + ' · ' + pliEsc(c.fuente || '') + ' <span class="pli-cel-chica">(' + etiqueta + ')</span>'
+        + (c.desactualizada ? '<div class="pli-cel-chica">No es de hoy: el costo convertido puede estar corrido.</div>' : '')
+      + '</div>'
+      + '<div style="display:flex;gap:5px;align-items:center">'
+        + '<select class="pli-inp" onchange="pliCostoCargar(this.value)" style="font-size:11px">'
+        + ['oficial','mayorista','blue','tarjeta'].map(function(t) {
+            return '<option value="' + t + '"' + (t === PLI.costoTc ? ' selected' : '') + '>' + t + '</option>';
+          }).join('')
+        + '</select>'
+        + '<button class="btn bo bs" onclick="pliCotizManual()" style="font-size:11px">Fijar a mano</button>'
+      + '</div></div>';
+  } else {
+    html += '<div style="background:rgba(239,68,68,.1);border:1px solid var(--err);border-radius:8px;padding:9px 12px;font-size:12px;margin-bottom:10px">'
+      + '<strong style="color:var(--err)">No hay cotización del dólar.</strong> Se muestran los costos por moneda sin convertir. '
+      + '<button class="btn bo bs" onclick="pliCotizManual()" style="font-size:11px;margin-left:6px">Cargar a mano</button></div>';
+  }
+
+  // Los dos totales, que es lo que se pidió
+  var tot = d.totales_por_moneda || {};
+  html += '<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:12px">'
+    + '<div style="flex:1;min-width:190px;border:1px solid var(--bor);border-radius:10px;padding:12px;background:var(--sur)">'
+      + '<div class="pli-cel-chica">Costo por 1 ' + pliEsc(d.producto.unidad) + ' — en pesos</div>'
+      + '<div style="font-size:24px;font-weight:700">' + (d.total_en_ars !== null ? '$ ' + pliN(d.total_en_ars, 2) : '—') + '</div>'
+    + '</div>'
+    + '<div style="flex:1;min-width:190px;border:1px solid var(--bor);border-radius:10px;padding:12px;background:var(--sur)">'
+      + '<div class="pli-cel-chica">Costo por 1 ' + pliEsc(d.producto.unidad) + ' — en dólares</div>'
+      + '<div style="font-size:24px;font-weight:700">' + (d.total_en_usd !== null ? 'USD ' + pliN(d.total_en_usd, 4) : '—') + '</div>'
+    + '</div>'
+    + '<div style="flex:1;min-width:190px;border:1px solid var(--bor);border-radius:10px;padding:12px;background:var(--sur)">'
+      + '<div class="pli-cel-chica">Sin convertir, por moneda</div>'
+      + '<div style="font-size:13px;font-weight:600;margin-top:4px">'
+        + 'ARS ' + pliN(tot.ARS || 0, 2) + '<br>USD ' + pliN(tot.USD || 0, 4) + '</div>'
+    + '</div></div>';
+
+  if (d.insumos_sin_precio && d.insumos_sin_precio.length) {
+    html += '<div style="background:rgba(245,158,11,.12);border-radius:8px;padding:8px 12px;font-size:12px;margin-bottom:10px">'
+      + '⚠ El costo es <strong>parcial</strong>: '
+      + d.insumos_sin_precio.map(function(x) { return pliEsc(x.insumo); }).join(', ')
+      + ' no tienen precio cargado.</div>';
+  }
+  if (!d.lineas.length) {
+    html += '<div class="emp" style="padding:20px;text-align:center">Este producto no tiene receta, así que no hay costo que calcular.</div>';
+    document.getElementById('pli-costo-cont').innerHTML = html;
+    return;
+  }
+
+  html += '<div class="ab-table-wrap"><table class="pa-tbl" style="font-size:12px"><thead><tr>'
+    + '<th>Insumo</th><th style="text-align:right">Cantidad por ' + pliEsc(d.producto.unidad) + '</th>'
+    + '<th style="text-align:right">Precio unitario</th>'
+    + '<th style="text-align:right">Costo ARS</th><th style="text-align:right">Costo USD</th>'
+    + '<th style="text-align:right">% del total</th></tr></thead><tbody>';
+  d.lineas.forEach(function(l) {
+    var pct = (d.total_en_ars && l.costo_en_ars !== null) ? (l.costo_en_ars / d.total_en_ars) * 100 : null;
+    html += '<tr><td><strong>' + pliEsc(l.insumo_nombre) + '</strong>'
+      + (l.categoria ? '<div class="pli-cel-chica">' + pliEsc(l.categoria) + '</div>' : '') + '</td>'
+      + '<td class="pli-num">' + pliN(l.cantidad_por_unidad, 4) + ' <span class="pli-cel-chica">' + pliEsc(l.unidad_uso) + '</span></td>'
+      + '<td class="pli-num pli-cel-chica">' + (l.sin_precio ? '<span style="color:#f59e0b">sin precio</span>'
+          : pliEsc(l.moneda) + ' ' + pliN(l.precio_unit_compra, 2) + ' / ' + pliEsc(l.unidad_compra)) + '</td>'
+      + '<td class="pli-num">' + (l.costo_en_ars !== null ? '$ ' + pliN(l.costo_en_ars, 2) : '—') + '</td>'
+      + '<td class="pli-num">' + (l.costo_en_usd !== null ? pliN(l.costo_en_usd, 4) : '—') + '</td>'
+      + '<td class="pli-num pli-cel-chica">' + (pct !== null ? pliN(pct, 1) + '%' : '—') + '</td>'
+      + '</tr>';
+  });
+  html += '</tbody></table></div>'
+    + '<div class="pli-cel-chica" style="margin-top:8px">' + pliEsc(d.nota)
+    + ' Si el producto tiene subproductos, el costo es el <strong>promedio ponderado</strong> por el porcentaje de cada uno.</div>';
+
+  document.getElementById('pli-costo-cont').innerHTML = html;
+}
+
+function pliCotizManual() {
+  var v = prompt('Cotización del dólar a usar (valor de venta, en pesos):',
+    PLI.costo && PLI.costo.cotizacion ? String(PLI.costo.cotizacion.venta) : '');
+  if (!v) return;
+  var n = Number(String(v).replace(',', '.'));
+  if (!(n > 0)) return toast('Tiene que ser un número mayor que 0', 'er');
+  pliApi('/cotizacion', { method: 'POST', body: JSON.stringify({ venta: n }) }).then(function(r) {
+    if (!r.ok) { pliErr(r); return; }
+    toast('✓ Cotización fijada', 'ok');
+    pliCostoCargar();
   });
 }
 

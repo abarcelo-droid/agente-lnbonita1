@@ -113,6 +113,12 @@ export function calcularPlan(ctx) {
   // existencia, y se aplica a las semanas más tempranas primero.
   const comprado    = ctx.comprado || new Map();
 
+  // MODO COSTEO: se usa para sacar el costo unitario de un producto, no para
+  // comprar. Apaga el lot sizing (múltiplo, mínimo del proveedor y ceil) porque
+  // el costo de UNA caja no puede depender de que el pallet se venda de a uno:
+  // con loteo, "1 pallet cada 60 cajas" costearía 1 pallet entero por caja.
+  const costeo = ctx.modo === 'costeo';
+
   const porId    = new Map(productos.map(p => [p.id, p]));
   const porPadre = new Map();
   for (const p of productos) {
@@ -453,7 +459,10 @@ export function calcularPlan(ctx) {
       // El sobrante de pedidos anteriores cubre parte de esta semana.
       const necesarioB = pendienteB - sobrante;
       let r = { b: 0, excesoMultiplo: 0, excesoMoq: 0, moqForzado: 0 };
-      if (necesarioB > EPS) {
+      if (costeo) {
+        // Cantidad exacta, sin redondear ni arrastrar: es un costo, no un pedido.
+        r = { b: pendienteB, excesoMultiplo: 0, excesoMoq: 0, moqForzado: 0 };
+      } else if (necesarioB > EPS) {
         r = lotear(necesarioB, multiplo, moq);
         sobrante = sobrante + r.b - pendienteB;
       } else {
@@ -538,8 +547,15 @@ export function calcularPlan(ctx) {
   lineas.sort((x, y) => (y.costo_estimado - x.costo_estimado)
     || String(x.insumo_nombre).localeCompare(String(y.insumo_nombre), 'es'));
 
-  for (const k of Object.keys(totales_por_moneda)) {
-    totales_por_moneda[k] = round2(totales_por_moneda[k]);
+  // En modo compra los totales son plata a pagar: van a 2 decimales.
+  // En modo COSTEO no se redondean: el costo de UNA caja puede ser USD 0,5983 y
+  // redondearlo a 0,60 rompe el número en cuanto se multiplica por el volumen
+  // (sobre 40.000 cajas, 0,0017 de diferencia son USD 68). El redondeo, si hace
+  // falta, es de la presentación.
+  if (!costeo) {
+    for (const k of Object.keys(totales_por_moneda)) {
+      totales_por_moneda[k] = round2(totales_por_moneda[k]);
+    }
   }
 
   // ── Paso 8 — veredicto de cobertura ─────────────────────────────────────
