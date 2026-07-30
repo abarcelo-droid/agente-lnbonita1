@@ -377,6 +377,46 @@ db.exec(`
   );
   CREATE INDEX IF NOT EXISTS idx_pli_log_ent   ON pli_log(entidad, entidad_id);
   CREATE INDEX IF NOT EXISTS idx_pli_log_fecha ON pli_log(creado_en);
+
+  -- Proveedores del insumo, con el precio de referencia de cada uno. La cartonera
+  -- y la fábrica de etiquetas cotizan la misma caja distinto, y la compra se parte
+  -- a propósito para no depender de uno solo: hacen falta los dos precios juntos.
+  --
+  -- pli_insumos.precio_ref / moneda / precio_fecha / proveedor_texto siguen siendo
+  -- el precio VIGENTE del insumo (es lo que lee el motor y lo que snapshotea el
+  -- plan al confirmar). Cuando el insumo tiene proveedores cargados, esos campos
+  -- son un ESPEJO del proveedor PREFERIDO y los sincroniza el router. Así el motor
+  -- no cambia una línea y no hay dos fuentes de verdad para el costo.
+  CREATE TABLE IF NOT EXISTS pli_insumo_proveedores (
+    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    insumo_id          INTEGER NOT NULL REFERENCES pli_insumos(id),
+    nombre             TEXT    NOT NULL,
+    proveedor_ref_id   INTEGER,                           -- puntero blando a adm_proveedores. SIN REFERENCES.
+    preferido          INTEGER NOT NULL DEFAULT 0,
+    precio_ref         REAL    NOT NULL DEFAULT 0,        -- POR unidad_compra del insumo
+    moneda             TEXT    NOT NULL DEFAULT 'ARS' CHECK(moneda IN ('ARS','USD')),
+    precio_fecha       TEXT,
+    -- Propios del proveedor. NULL = usar el del insumo: 0 es un valor legítimo
+    -- ("no tiene mínimo") y no se puede distinguir de "no lo sé" si no es NULL.
+    moq                REAL,
+    lead_time_dias     INTEGER,
+    codigo_proveedor   TEXT,                              -- el código con el que ESE proveedor lo identifica
+    contacto           TEXT,
+    notas              TEXT,
+    activo             INTEGER NOT NULL DEFAULT 1,
+    creado_en          TEXT DEFAULT (datetime('now','localtime')),
+    creado_por_id      INTEGER,
+    actualizado_en     TEXT DEFAULT (datetime('now','localtime')),
+    actualizado_por_id INTEGER,
+    eliminado_en       TEXT,
+    eliminado_por_id   INTEGER
+  );
+  CREATE INDEX IF NOT EXISTS idx_pli_insprov_insumo ON pli_insumo_proveedores(insumo_id);
+  -- UN solo preferido por insumo, garantizado por la base y no por la buena
+  -- voluntad del router: si quedaran dos, el costo del producto dependería de
+  -- cuál devuelve primero el ORDER BY.
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_pli_insprov_pref
+    ON pli_insumo_proveedores(insumo_id) WHERE preferido = 1 AND eliminado_en IS NULL;
 `);
 
 // ── MIGRACIONES IDEMPOTENTES ──────────────────────────────────────────────
@@ -415,8 +455,32 @@ try {
   // da una serie en pesos que no significa nada.
   addCol('pli_insumo_precios', 'tc_usado',      'REAL');
   addCol('pli_insumo_precios', 'tc_origen',     'TEXT');
+  // De qué proveedor es ese precio. NULL en los registros viejos: son del insumo,
+  // cuando todavía no había proveedores. No se puede adivinar a cuál corresponden.
+  addCol('pli_insumo_precios', 'proveedor_id',  'INTEGER');
 } catch (e) {
   console.error('[PLI] Error en migraciones:', e.message);
+}
+
+// El insumo que ya tenía proveedor cargado como texto arranca con ESE proveedor
+// como preferido y con el precio que ya tenía. Si no, estrenar la pantalla sería
+// volver a tipear todo lo cargado, y hasta hacerlo el insumo aparecería como si
+// no tuviera proveedor.
+// Idempotente: solo toca insumos que todavía no tienen NINGÚN proveedor.
+try {
+  const r = db.prepare(`
+    INSERT INTO pli_insumo_proveedores
+      (insumo_id, nombre, proveedor_ref_id, preferido, precio_ref, moneda, precio_fecha, notas)
+    SELECT i.id, TRIM(i.proveedor_texto), i.proveedor_ref_id, 1, i.precio_ref, i.moneda, i.precio_fecha,
+           'Migrado del proveedor que ya tenía cargado el insumo'
+      FROM pli_insumos i
+     WHERE TRIM(COALESCE(i.proveedor_texto,'')) <> ''
+       AND i.eliminado_en IS NULL
+       AND NOT EXISTS (SELECT 1 FROM pli_insumo_proveedores p WHERE p.insumo_id = i.id)
+  `).run();
+  if (r.changes) console.log(`[PLI] Seed: ${r.changes} proveedor(es) migrados desde el texto del insumo`);
+} catch (e) {
+  console.error('[PLI] Error migrando proveedores del insumo:', e.message);
 }
 
 // ── SEED ──────────────────────────────────────────────────────────────────
