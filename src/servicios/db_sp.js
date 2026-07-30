@@ -334,12 +334,22 @@ try {
   }
   addCol('sp_adjuntos', 'descripcion', 'TEXT');
 
-  // El paso de confección exige el PDF de cuenta corriente del proveedor. Se setea
-  // solo si está sin definir, para no pisar una configuración hecha a mano.
-  // No afecta a las solicitudes en vuelo: cada una lleva su propio snapshot.
+  // Condición de pago: la escribe el comprador a mano porque manejan varias y no
+  // entran en una lista fija.
+  addCol('sp_solicitudes', 'condicion_pago', 'TEXT');
+
+  // El paso de confección exige el PDF de cuenta corriente del proveedor, y el de
+  // solicitud exige que el comprador adjunte el respaldo ('*' = cualquier tipo: el
+  // comprobante puede ser factura, proforma o remito según el caso).
+  // Se setean solo si están sin definir, para no pisar una configuración hecha a
+  // mano. No afectan a las solicitudes en vuelo: cada una lleva su propio snapshot.
   db.prepare(`
     UPDATE sp_pasos SET requiere_adjunto_tipo='cuenta_corriente'
     WHERE hito='confeccion' AND (requiere_adjunto_tipo IS NULL OR requiere_adjunto_tipo='')
+  `).run();
+  db.prepare(`
+    UPDATE sp_pasos SET requiere_adjunto_tipo='*'
+    WHERE tipo='inicio' AND (requiere_adjunto_tipo IS NULL OR requiere_adjunto_tipo='')
   `).run();
 } catch (e) {
   console.error('[SP] Error en migraciones:', e.message);
