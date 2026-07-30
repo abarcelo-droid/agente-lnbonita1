@@ -38037,6 +38037,50 @@ function spDetalleRender() {
         }).join('') + '</div>';
   }
 
+  // Adjuntos. Si el paso actual exige uno y falta, se avisa ACÁ, antes de que el
+  // usuario intente avanzar y le rebote.
+  var faltaAdj = (d.paso && d.paso.requiere_adjunto_tipo && d.acciones.length)
+    ? !(d.adjuntos || []).some(function(a) { return a.tipo === d.paso.requiere_adjunto_tipo; })
+    : false;
+  html += '<div style="border:1px solid ' + (faltaAdj ? 'var(--err)' : 'var(--bor)')
+    + ';border-radius:10px;padding:11px;margin-bottom:12px;background:var(--sur)">'
+    + '<div style="font-size:12px;font-weight:700;margin-bottom:6px">📎 Adjuntos</div>';
+  if (faltaAdj) {
+    html += '<div style="background:rgba(239,68,68,.1);border-radius:8px;padding:8px 11px;font-size:12px;margin-bottom:8px">'
+      + '<strong style="color:var(--err)">Falta el adjunto obligatorio de este paso:</strong> '
+      + spEsc(SP_ADJ_ETQ[d.paso.requiere_adjunto_tipo] || d.paso.requiere_adjunto_tipo)
+      + '. Sin eso no vas a poder avanzar.</div>';
+  }
+  if ((d.adjuntos || []).length) {
+    html += '<div class="ab-table-wrap"><table class="pa-tbl" style="font-size:12px"><thead><tr>'
+      + '<th>Archivo</th><th>Tipo</th><th style="text-align:right">Tamaño</th><th>Subido</th><th style="width:40px"></th>'
+      + '</tr></thead><tbody>'
+      + d.adjuntos.map(function(a) {
+          var kb = a.tamano ? (a.tamano >= 1048576 ? (a.tamano / 1048576).toFixed(1) + ' MB' : Math.round(a.tamano / 1024) + ' KB') : '—';
+          return '<tr><td><a href="/api/sp/adjuntos/' + a.id + '" target="_blank">' + spEsc(a.nombre) + '</a></td>'
+            + '<td class="sp-chica">' + spEsc(SP_ADJ_ETQ[a.tipo] || a.tipo) + '</td>'
+            + '<td class="sp-num sp-chica">' + kb + '</td>'
+            + '<td class="sp-chica">' + spEsc(String(a.creado_en || '').slice(0, 16)) + '</td>'
+            + '<td><button class="btn bd bs" onclick="spAdjBorrar(' + a.id + ')" style="padding:2px 6px;font-size:11px">🗑</button></td>'
+            + '</tr>';
+        }).join('') + '</tbody></table></div>';
+  } else {
+    html += '<div class="sp-chica" style="margin-bottom:6px">Todavía no hay adjuntos.</div>';
+  }
+  if (s.estado_global === 'en_curso') {
+    html += '<div style="display:flex;gap:6px;align-items:flex-end;flex-wrap:wrap;margin-top:8px">'
+      + '<div class="fl" style="flex:1;min-width:180px"><label>Archivo</label>'
+        + '<input type="file" id="sp-adj-file" class="sp-inp" accept=".pdf,image/*,.doc,.docx,.xls,.xlsx"></div>'
+      + '<div class="fl"><label>Tipo</label><select id="sp-adj-tipo" class="sp-inp">'
+        + Object.keys(SP_ADJ_ETQ).map(function(k) {
+            var sel = (d.paso && d.paso.requiere_adjunto_tipo === k) ? ' selected' : '';
+            return '<option value="' + k + '"' + sel + '>' + spEsc(SP_ADJ_ETQ[k]) + '</option>';
+          }).join('')
+      + '</select></div>'
+      + '<button class="btn bb" onclick="spAdjSubir(' + s.id + ')">Subir</button></div>';
+  }
+  html += '</div>';
+
   // Cómo se paga. Es lo primero que necesita el que confecciona la orden: cuántos
   // cheques emitir, por cuánto y con qué vencimiento.
   if ((d.pagos || []).length) {
@@ -38209,6 +38253,45 @@ function spAccionAbrir(id, accion) {
 // ── Composición del pago (paso de fechas) ─────────────────────────────────
 
 var SP_PAGO_ETQ = { transferencia: 'Transferencia', cheque_propio: 'Cheque propio', cheque_terceros: 'Cheque de terceros' };
+
+// Espejo del vocabulario del backend. Se valida allá; acá es solo para mostrar.
+var SP_ADJ_ETQ = {
+  cuenta_corriente: 'PDF de cuenta corriente del proveedor',
+  factura: 'Factura',
+  orden: 'Orden de pago',
+  comprobante_pago: 'Comprobante de pago',
+  otro: 'Otro'
+};
+
+// La subida va por multipart, así que no usa spApi (que fuerza JSON) y NO setea
+// Content-Type a mano: el browser tiene que poner el boundary del FormData.
+function spAdjSubir(solId) {
+  var input = document.getElementById('sp-adj-file');
+  var f = input && input.files && input.files[0];
+  if (!f) return toast('Elegí un archivo', 'er');
+  if (f.size > 15 * 1024 * 1024) return toast('El archivo supera los 15 MB', 'er');
+  var fd = new FormData();
+  fd.append('archivo', f);
+  fd.append('tipo', document.getElementById('sp-adj-tipo').value);
+  fetch('/api/sp/solicitudes/' + solId + '/adjuntos', { method: 'POST', credentials: 'include', body: fd })
+    .then(function(r) { return r.json(); })
+    .catch(function() { return { ok: false, error: 'Error de red' }; })
+    .then(function(r) {
+      if (!r.ok) { spErr(r); return; }
+      toast('✓ Adjunto subido', 'ok');
+      spDetalleAbrir(solId);
+    });
+}
+
+function spAdjBorrar(adjId) {
+  if (!confirm('¿Quitar este adjunto? El archivo se conserva, solo deja de figurar.')) return;
+  var solId = SP.det ? SP.det.solicitud.id : null;
+  spApi('/adjuntos/' + adjId, { method: 'DELETE' }).then(function(r) {
+    if (!r.ok) { spErr(r); return; }
+    toast('✓ Quitado', 'ok');
+    if (solId) spDetalleAbrir(solId);
+  });
+}
 
 function spPagoAgregar(tipo) {
   SP.pagos = SP.pagos || [];
@@ -38439,6 +38522,9 @@ function spAyudaHtml(d) {
     + '<li>Te llega un mail con <strong>el detalle completo de cómo se paga</strong>: cuántos cheques, por cuánto '
       + 'y con qué vencimiento, más el total. No hace falta entrar al panel a averiguarlo.</li>'
     + '<li>El mismo detalle está en la solicitud, en <strong>Cómo se paga</strong>.</li>'
+    + '<li><strong>Adjuntá el PDF de la cuenta corriente del proveedor.</strong> Es obligatorio: sin ese '
+      + 'archivo el sistema no te deja mandarla a la firma. Se sube desde la solicitud, en <em>Adjuntos</em>, '
+      + 'eligiendo el tipo "PDF de cuenta corriente del proveedor".</li>'
     + '<li>Confeccionás la orden y marcás <strong>Confeccionada</strong>, que la manda a la firma.</li>'
     + '<li>Si algo no cierra, <strong>Devolver a fechas</strong> con el motivo.</li>'
     + '</ol>';
