@@ -638,6 +638,8 @@ router.get('/productos', wrap((req, res) => {
     const hijos = (porPadre.get(p.id) || []).filter(h => h.activo === 1);
     p.hijos = porPadre.get(p.id) || [];
     p.suma_hijos_pct = hijos.reduce((a, h) => a + Number(h.share_pct || 0), 0);
+    // Insumos que están en TODOS los subproductos y le corresponden al padre.
+    p.sugerencias = hijos.length >= 2 ? sugerenciasDe(p, hijos) : [];
   }
   res.json({ ok: true, data: porPadre.get(0) || [], temporada_id: temp, todos: filas });
 }));
@@ -904,6 +906,130 @@ router.put('/productos/:id/receta', wrap((req, res) => {
   })();
 
   res.json({ ok: true, receta_version: nueva });
+}));
+
+// ── Insumos comunes: propuesta de subirlos al producto ────────────────────
+// Si TODOS los subproductos activos de un producto llevan el mismo insumo, es un
+// insumo común y le corresponde al padre. Dejarlo repetido en cada hijo no cambia
+// el número (la receta del padre se aplica a la cantidad completa, así que da lo
+// mismo), pero sí hace que mantenerlo sea un problema: cambiar la cantidad exige
+// editar N recetas y alcanza con olvidarse una para que el plan quede mal.
+
+function recetaVigente(productoId) {
+  const p = db.prepare('SELECT receta_version FROM pli_productos WHERE id=?').get(productoId);
+  if (!p) return [];
+  return db.prepare('SELECT * FROM pli_receta_lineas WHERE producto_id=? AND version=? ORDER BY orden, id')
+    .all(productoId, p.receta_version);
+}
+
+function sugerenciasDe(padre, hijosActivos) {
+  if (!hijosActivos || hijosActivos.length < 2) return [];
+  const porHijo = hijosActivos.map(h => ({ hijo: h, lineas: recetaVigente(h.id) }));
+  if (porHijo.some(x => !x.lineas.length)) return [];   // con un hijo sin receta no hay nada común
+
+  const yaEnPadre = new Set(recetaVigente(padre.id).map(l => l.insumo_id));
+  // Intersección de insumos entre todos los hijos
+  let comunes = porHijo[0].lineas.map(l => l.insumo_id);
+  for (const x of porHijo.slice(1)) {
+    const s = new Set(x.lineas.map(l => l.insumo_id));
+    comunes = comunes.filter(id => s.has(id));
+  }
+  comunes = comunes.filter(id => !yaEnPadre.has(id));
+
+  const out = [];
+  for (const insumoId of comunes) {
+    const ins = db.prepare('SELECT nombre, unidad_uso FROM pli_insumos WHERE id=?').get(insumoId);
+    if (!ins) continue;
+    const lineas = porHijo.map(x => ({
+      hijo: x.hijo.nombre,
+      l: x.lineas.filter(l => l.insumo_id === insumoId)[0]
+    }));
+    // Si el mismo insumo aparece dos veces en una receta (distinto motivo), no se
+    // propone: consolidarlo requeriría decidir cuál de las dos líneas sube.
+    if (porHijo.some(x => x.lineas.filter(l => l.insumo_id === insumoId).length > 1)) continue;
+
+    const ref = lineas[0].l;
+    const iguales = lineas.every(x =>
+      Number(x.l.cantidad) === Number(ref.cantidad) &&
+      Number(x.l.por_cada) === Number(ref.por_cada) &&
+      Number(x.l.merma_pct) === Number(ref.merma_pct));
+
+    out.push({
+      producto_id: padre.id, producto: padre.nombre,
+      insumo_id: insumoId, insumo: ins.nombre, unidad_uso: ins.unidad_uso,
+      en_hijos: lineas.map(x => ({
+        hijo: x.hijo, cantidad: x.l.cantidad, por_cada: x.l.por_cada, merma_pct: x.l.merma_pct
+      })),
+      iguales,
+      // Solo se puede consolidar de una si los valores coinciden. Si difieren hay
+      // que decidir con qué cantidad sube, y ésa es una decisión del usuario.
+      consolidable: iguales,
+      sugerencia: iguales
+        ? `"${ins.nombre}" está en los ${lineas.length} subproductos con la misma cantidad. Conviene cargarlo en "${padre.nombre}".`
+        : `"${ins.nombre}" está en los ${lineas.length} subproductos pero con cantidades distintas. Si en realidad es el mismo consumo, unificalo y subilo a "${padre.nombre}".`
+    });
+  }
+  return out;
+}
+
+// Reescribe la receta de un producto: bumpea la versión e inserta las líneas
+// nuevas, igual que el PUT. No borra nada: el historial queda.
+function reescribirReceta(productoId, lineas, userId) {
+  const p = db.prepare('SELECT receta_version FROM pli_productos WHERE id=?').get(productoId);
+  const v = p.receta_version + 1;
+  const ins = db.prepare(`
+    INSERT INTO pli_receta_lineas
+      (producto_id, version, insumo_id, cantidad, por_cada, modo_ratio, unidad,
+       cant_min, cant_max, merma_pct, base, orden, motivo, notas, creado_por_id)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+  `);
+  lineas.forEach((l, i) => {
+    ins.run(productoId, v, l.insumo_id, l.cantidad, l.por_cada, l.modo_ratio || 'por_unidad',
+            l.unidad, l.cant_min, l.cant_max, l.merma_pct, l.base || 'producto', i,
+            l.motivo || null, l.notas || null, userId);
+  });
+  db.prepare(`UPDATE pli_productos SET receta_version=?, actualizado_en=${AHORA}, actualizado_por_id=? WHERE id=?`)
+    .run(v, userId, productoId);
+  return v;
+}
+
+// Sube un insumo común de los subproductos al producto padre, en una sola
+// transacción: lo agrega arriba y lo saca de cada hijo.
+router.post('/productos/:id/consolidar-insumo', wrap((req, res) => {
+  const soc = getSociedadId(req);
+  const id = parseInt(req.params.id, 10);
+  const padre = db.prepare('SELECT * FROM pli_productos WHERE id=? AND sociedad_id=? AND eliminado_en IS NULL').get(id, soc);
+  if (!padre) throw notFound('Producto no encontrado');
+  const insumoId = vNum(req.body?.insumo_id, 'El insumo', { entero: true, min: 1 });
+
+  const hijos = db.prepare(`
+    SELECT * FROM pli_productos WHERE padre_id=? AND activo=1 AND eliminado_en IS NULL ORDER BY orden, id
+  `).all(id);
+  if (hijos.length < 2) throw bad('El producto no tiene al menos dos subproductos activos');
+
+  const sug = sugerenciasDe(padre, hijos).filter(s => s.insumo_id === insumoId)[0];
+  if (!sug) throw bad('Ese insumo no está en todos los subproductos, o ya está en el producto');
+  if (!sug.consolidable) {
+    throw conflict('Las cantidades difieren entre los subproductos. Unificalas primero y volvé a intentar.',
+      { en_hijos: sug.en_hijos });
+  }
+
+  const resumen = db.transaction(() => {
+    // La línea que sube: se toma del primer hijo, que ya se validó que son iguales.
+    const modelo = recetaVigente(hijos[0].id).filter(l => l.insumo_id === insumoId)[0];
+    const nuevasPadre = recetaVigente(padre.id).concat([modelo]);
+    const vPadre = reescribirReceta(padre.id, nuevasPadre, req.user.id);
+    const vHijos = hijos.map(h => ({
+      id: h.id, nombre: h.nombre,
+      version: reescribirReceta(h.id, recetaVigente(h.id).filter(l => l.insumo_id !== insumoId), req.user.id)
+    }));
+    logPli('receta', padre.id, 'consolidar_insumo',
+      { insumo_id: insumoId, insumo: sug.insumo, padre: padre.nombre, version_padre: vPadre, hijos: vHijos },
+      req.user.id);
+    return { version_padre: vPadre, hijos: vHijos };
+  })();
+
+  res.json({ ok: true, ...resumen, mensaje: `"${sug.insumo}" quedó en "${padre.nombre}" y se quitó de los subproductos.` });
 }));
 
 // ── Costo del producto según su receta ────────────────────────────────────
@@ -1528,8 +1654,10 @@ router.get('/planes/:id/export.xlsx', wrap((req, res) => {
       filasAgenda.push({
         A: b.fecha_pedido_limite || 'sin fecha', B: l.insumo_nombre, C: l.proveedor_texto || '',
         D: b.bultos_a_comprar, E: l.unidad_compra,
-        // El calendario agricola se maneja por numero de semana: va primero.
-        F: b.semana_iso ? ('S' + b.semana_iso) : 'sin fecha',
+        // AÑO-semana: la temporada va de octubre a abril, así que sin el año la
+        // S03 parece anterior a la S45. Con la semana en dos dígitos el orden
+        // alfabético de esta columna coincide con el cronológico.
+        F: b.semana_iso ? (b.anio_iso + '-S' + String(b.semana_iso).padStart(2, '0')) : 'sin fecha',
         G: b.fecha_necesidad || '',
         H: l.lead_time_dias || 0
       });

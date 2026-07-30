@@ -182,6 +182,9 @@ export function calcularPlan(ctx) {
     unidad_desincronizada: [],
     mix_excedido: [],
     mix_incompleto: [],
+    // Se deja declarado y siempre vacío: los planes ya confirmados guardaron su
+    // cobertura en JSON y la UI lo lee. Desde que la receta del padre se aplica a
+    // la cantidad completa, este caso no existe más.
     receta_no_computa: [],
     existencia_supera_necesidad: [],
     insumos_sin_precio: [],
@@ -341,23 +344,16 @@ export function calcularPlan(ctx) {
       }
     }
 
-    // A qué cantidad se aplica la receta del nodo: a su cantidad RETENIDA.
-    let qRet;
-    if (!hijos.length) qRet = qEf;                                   // hoja: todo
-    else if (nodo.modo_reparto === 'particiona') qRet = qEf * (100 - suma) / 100;
-    else qRet = qEf;                                                 // 'adicional': el padre no se reduce
-
-    if (qRet > EPS) {
-      aplicarReceta(nodo, qRet, ruta, bucket);
-    } else if (hijos.length && (recetas.get(nodo.id) || []).length) {
-      // Padre 'particiona' con 100% repartido: su receta existe pero no computa.
-      // Reportarlo convierte un error silencioso en un aviso visible.
-      cobertura.receta_no_computa.push({
-        id: nodo.id, nombre: nodo.nombre,
-        lineas: (recetas.get(nodo.id) || []).length,
-        motivo: '100% repartido a subproductos'
-      });
-    }
+    // LA RECETA DEL PADRE ES COMÚN A TODOS SUS SUBPRODUCTOS.
+    // Se aplica a la cantidad COMPLETA del nodo, no al resto sin asignar. Cargarle
+    // un insumo al producto significa "esto lo lleva toda la producción de este
+    // producto, sin importar en qué formato se empaque".
+    //
+    // Antes se aplicaba a la cantidad retenida —qEf × (100−Σpct)/100—, así que con
+    // los subproductos sumando 100% la receta del padre quedaba multiplicada por
+    // cero y el insumo desaparecía del plan y del costo sin que nada lo dijera.
+    // Los subproductos suman ADEMÁS lo suyo, cada uno sobre su porcentaje.
+    if (qEf > EPS) aplicarReceta(nodo, qEf, ruta, bucket);
 
     for (const h of hijos) {
       explotar(h, qEf * num(h.share_pct) / 100, [...ruta, h.nombre], [...pila, nodo.id], bucket);
