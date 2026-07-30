@@ -416,10 +416,12 @@ function seed() {
   const PLANTILLAS = [
     ['paso:ok_supervisor', 'Autorización pendiente · {{numero}} · {{proveedor}}',
       'Hola {{destinatario}},\n\n{{solicitante}} pidió autorización para un pago:\n\n' +
-      '  Proveedor: {{proveedor}}\n  Cuenta: {{cuenta}}\n  Monto: {{monto}}\n  Concepto: {{concepto}}\n\n' +
+      '  Proveedor: {{proveedor}}\n  Cuenta corriente: {{cuenta}}\n  Monto: {{monto}}\n' +
+      '  Concepto: {{concepto}}\n  Condición de pago: {{condicion_pago}}\n\n' +
       'Entrá al panel para autorizarlo o devolverlo:\n{{link}}\n'],
     ['paso:fechas', 'Fecha de pago pendiente · {{numero}} · {{proveedor}}',
-      'Hola {{destinatario}},\n\nEl pago a {{proveedor}} por {{monto}} está autorizado y espera fecha.\n\n{{link}}\n'],
+      'Hola {{destinatario}},\n\nEl pago a {{proveedor}} por {{monto}} está autorizado y espera fecha.\n\n' +
+      '  Cuenta corriente: {{cuenta}}\n  Condición de pago: {{condicion_pago}}\n\n{{link}}\n'],
     ['paso:confeccion', 'Orden para confeccionar · {{numero}} · {{proveedor}}',
       'Hola {{destinatario}},\n\nHay que confeccionar la orden de pago a {{proveedor}} por {{monto}}.\n' +
       'Fecha de pago confirmada: {{fecha_pago}}\n\n{{link}}\n'],

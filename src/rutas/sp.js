@@ -185,16 +185,25 @@ function avisarPaso(def, sol, pasoClave, eventoId) {
   const comp = textoComposicion(pagosDe(sol.id), sol.moneda);
   const vars = varsDe(sol, { destinatario: 'equipo', composicion: comp });
   let texto = render(cuerpo, vars);
-  // Si la plantilla es vieja y no tiene el placeholder, se agrega igual: hacer que
-  // dependa de editar la plantilla sería que no llegue justo cuando más sirve.
-  if (comp && paso.hito === 'confeccion' && texto.indexOf(comp) === -1) {
-    texto += '\nCómo se paga:\n' + comp + '\n';
+  // Los bloques que la plantilla no tiene se agregan igual, pero ANTES del link:
+  // pegados al final quedan después del "entrá al panel", que es donde el ojo deja
+  // de leer. Si la plantilla ya los trae, no se duplican.
+  const url = linkA(sol.id);
+  const insertar = (txt, bloque) => {
+    if (!bloque) return txt;
+    const i = txt.indexOf(url);
+    if (i === -1) return txt + '\n' + bloque + '\n';
+    return txt.slice(0, i) + bloque + '\n\n' + txt.slice(i);
+  };
+
+  // La condición de pago la escribió el comprador y es lo que hace falta para
+  // decidir: el que autoriza necesita saber si corresponde pagar ahora, Tesorería
+  // para poner la fecha, y el que confecciona y firma para controlar contra ella.
+  if (sol.condicion_pago && texto.indexOf(sol.condicion_pago) === -1) {
+    texto = insertar(texto, 'Condición de pago: ' + sol.condicion_pago);
   }
-  // La condición de pago es lo que Tesorería necesita leer para poner la fecha, y
-  // lo que el que autoriza necesita para saber si corresponde pagar ahora.
-  if (sol.condicion_pago && ['autorizacion', 'fechas'].includes(paso.hito)
-      && texto.indexOf(sol.condicion_pago) === -1) {
-    texto += '\nCondición de pago: ' + sol.condicion_pago + '\n';
+  if (comp && paso.hito === 'confeccion' && texto.indexOf(comp) === -1) {
+    texto = insertar(texto, 'Cómo se paga:\n' + comp);
   }
 
   // Botones de acción en el mail. Llevan al panel con la acción ya elegida: si hay
