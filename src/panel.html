@@ -11082,6 +11082,7 @@ function sgRepExport(){
     <div class="sp-tab"    data-sp="mias"      onclick="spTab('mias')">🧾 Mis solicitudes</div>
     <div class="sp-tab"    data-sp="todas"     onclick="spTab('todas')">📊 Todas</div>
     <div class="sp-tab"    data-sp="tiempos"   onclick="spTab('tiempos')">⏱️ Tiempos</div>
+    <div class="sp-tab"    data-sp="ayuda"     onclick="spTab('ayuda')">📖 Cómo se usa</div>
     <div class="sp-tab"    data-sp="circuito"  onclick="spTab('circuito')">⚙️ Circuito y avisos</div>
   </div>
 
@@ -11089,6 +11090,7 @@ function sgRepExport(){
   <div class="sp-pane"    id="sp-pane-mias"><div id="sp-lista-mias"></div></div>
   <div class="sp-pane"    id="sp-pane-todas"><div id="sp-lista-todas"></div></div>
   <div class="sp-pane"    id="sp-pane-tiempos"><div id="sp-tiempos"></div></div>
+  <div class="sp-pane"    id="sp-pane-ayuda"><div id="sp-ayuda"></div></div>
   <div class="sp-pane"    id="sp-pane-circuito"><div id="sp-circuito"></div></div>
 </div>
 
@@ -37727,6 +37729,7 @@ function spTab(t) {
   });
   if (t === 'circuito') spCircuitoCargar();
   else if (t === 'tiempos') spTiemposCargar();
+  else if (t === 'ayuda') spAyudaCargar();
   else spListaCargar(t);
 }
 
@@ -38325,6 +38328,210 @@ function spAccionConfirmar() {
     document.getElementById('sp-mb-detalle').classList.remove('on');
     spListaCargar(SP.vista === 'circuito' ? 'pendiente' : SP.vista);
     if (SP.vista !== 'pendiente') spListaCargar('pendiente');
+  });
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// INSTRUCTIVO DE USO
+// ══════════════════════════════════════════════════════════════════════════
+// Se arma desde el circuito configurado: los nombres de cada paso salen de los
+// habilitados reales, así no queda desactualizado cuando cambia quién hace qué.
+
+function spAyudaCargar() {
+  var cont = document.getElementById('sp-ayuda');
+  cont.innerHTML = '<div class="emp">Cargando…</div>';
+  spApi('/instructivo').then(function(r) {
+    if (!r.ok) { cont.innerHTML = '<div class="emp" style="color:var(--err)">' + spEsc(r.error) + '</div>'; return; }
+    SP.ayuda = r.data;
+    spApi('/usuarios').then(function(ru) {
+      SP.usuarios = ru.ok ? (ru.data || []) : [];
+      cont.innerHTML = spAyudaHtml(r.data);
+    });
+  });
+}
+
+// Nombres de los que hacen un paso, buscado por su etiqueta interna (el hito).
+function spQuien(d, hito) {
+  var p = (d.pasos || []).filter(function(x) { return x.hito === hito; })[0];
+  if (!p || !p.personas.length) return 'nadie asignado todavía';
+  return p.personas.map(function(u) { return u.nombre; }).join(', ');
+}
+function spPasoDe(d, hito) {
+  return (d.pasos || []).filter(function(x) { return x.hito === hito; })[0] || null;
+}
+
+function spAyudaHtml(d) {
+  var html = '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">'
+    + '<button class="btn bo bs" onclick="spAyudaImprimir()" style="font-size:11px">🖨 Imprimir o guardar PDF</button>'
+    + '<button class="btn bo bs" onclick="spAyudaCopiar()" style="font-size:11px">📋 Copiar como texto</button>'
+    + '<button class="btn bb" onclick="spAyudaEnviar()" style="font-size:11px">✉ Enviárselo a alguien</button>'
+    + '</div>'
+    + '<div id="sp-ayuda-doc" style="max-width:900px;line-height:1.6;font-size:14px">';
+
+  html += '<h2 style="margin:0 0 4px">Cómo usar el circuito de Órdenes de Pago</h2>'
+    + '<div class="sp-chica" style="margin-bottom:14px">Este documento se arma solo con la configuración '
+    + 'vigente del circuito, así que los nombres que ves son los que están asignados hoy.</div>';
+
+  html += '<div style="background:rgba(59,130,246,.10);border-radius:8px;padding:11px 14px;margin-bottom:16px">'
+    + '<strong>Qué es esto.</strong> Es el seguimiento de las solicitudes de pago: quién lo pidió, quién lo '
+    + 'autorizó, cuándo se paga y en qué estado está. <strong>No reemplaza al sistema donde se cargan los '
+    + 'pagos</strong>: por eso la cuenta corriente se pone con el número, para poder cruzar los dos.</div>';
+
+  // El recorrido, con los nombres reales
+  html += '<h3>El recorrido</h3><div style="margin-bottom:14px">'
+    + (d.pasos || []).map(function(p, i) {
+        return '<div style="display:flex;gap:10px;padding:9px 0;border-bottom:1px solid var(--bor)">'
+          + '<div style="min-width:26px;font-weight:700;color:var(--mut)">' + (i + 1) + '</div>'
+          + '<div style="flex:1">'
+            + '<strong>' + spEsc(p.nombre) + '</strong>'
+            + (p.sla_horas ? ' <span class="sp-chica">— se espera respuesta en ' + p.sla_horas + ' h</span>' : '')
+            + '<div class="sp-chica">Quién lo hace hoy: <strong>'
+              + spEsc(p.personas.map(function(u) { return u.nombre; }).join(', ') || 'nadie asignado') + '</strong></div>'
+            + (p.instrucciones ? '<div style="font-size:13px;margin-top:2px">' + spEsc(p.instrucciones) + '</div>' : '')
+          + '</div></div>';
+      }).join('') + '</div>';
+
+  // ── Comprador ──
+  var pAut = spPasoDe(d, 'autorizacion');
+  html += '<h3>Si vos pedís pagos</h3><ol style="padding-left:20px">'
+    + '<li><strong>+ Solicitar un pago</strong> y completá: proveedor, <strong>cuenta corriente (solo números)</strong>, '
+      + 'concepto, monto y moneda. La cuenta es obligatoria porque es con lo que se rastrea el pago en el sistema.</li>'
+    + '<li>Elegí <strong>a quién le pedís el OK</strong>. El aviso por mail le llega solo a esa persona. '
+      + (pAut ? 'Hoy podés elegir entre: <strong>' + spEsc(spQuien(d, 'autorizacion')) + '</strong>. ' : '')
+      + 'Los demás igual la ven en su bandeja, así que si esa persona no está, otra la puede resolver.</li>'
+    + '<li>Guardala y después usá <strong>Enviar a autorizar</strong>. Hasta que no la enviás, no le llega a nadie.</li>'
+    + '<li>Seguí el estado en <strong>Mis solicitudes</strong>. Ahí ves en qué paso está y hace cuánto.</li>'
+    + '<li>Te va a llegar un mail cuando: te la <strong>devuelvan</strong> (con el motivo), te la <strong>rechacen</strong>, '
+      + 'cuando <strong>haya fecha de pago</strong> —que es lo que le tenés que confirmar al proveedor— y cuando se cierre.</li>'
+    + '</ol>'
+    + '<div style="background:rgba(245,158,11,.12);border-radius:8px;padding:10px 13px;margin:10px 0 16px">'
+    + '<strong>Si te la devuelven:</strong> abrí la solicitud, leé el motivo en el historial, corregí lo que haga falta '
+    + 'y volvé a enviarla. No hace falta crear una nueva.<br>'
+    + '<strong>No podés autorizar tu propio pedido</strong>, aunque estés habilitado para autorizar. '
+    + 'Si te aparece en "Me toca a mí" con un candado, ahí dice quién lo tiene que resolver.</div>';
+
+  // ── Autoriza ──
+  html += '<h3>Si autorizás pagos <span class="sp-chica">(' + spEsc(spQuien(d, 'autorizacion')) + ')</span></h3><ol style="padding-left:20px">'
+    + '<li>Te llega un mail con el proveedor, la cuenta, el monto y el concepto, y con los botones para resolver.</li>'
+    + '<li>El botón te lleva al panel. Si ya tenés la sesión abierta, es un solo click.</li>'
+    + '<li>También lo ves en la solapa <strong>Me toca a mí</strong>, sin depender del mail.</li>'
+    + '<li><strong>Autorizar</strong> lo manda al paso de fechas. <strong>Devolver</strong> se lo devuelve al comprador '
+      + '(hay que poner el motivo: es lo que va a leer él). <strong>Rechazar</strong> lo cierra.</li>'
+    + '</ol>';
+
+  // ── Fechas ──
+  var pF = spPasoDe(d, 'fechas');
+  html += '<h3>Si informás las fechas de pago <span class="sp-chica">(' + spEsc(spQuien(d, 'fechas')) + ')</span></h3><ol style="padding-left:20px">'
+    + '<li>Poné la <strong>fecha de pago</strong> y cargá <strong>cómo se va a pagar</strong>.</li>'
+    + '<li>Podés combinar los tres medios: <strong>transferencia</strong> (importe), '
+      + '<strong>cheque propio</strong> (importe y vencimiento) y <strong>cheque de terceros</strong> '
+      + '(importe, vencimiento y <strong>código del cheque</strong>, que es obligatorio).</li>'
+    + '<li>Se agregan con los botones <em>+ Transferencia</em>, <em>+ Cheque propio</em>, <em>+ Cheque de terceros</em>. '
+      + 'Hasta 20 de cada uno.</li>'
+    + '<li><strong>La suma tiene que dar el monto autorizado.</strong> Abajo se ve en vivo: en verde si cierra, '
+      + 'en rojo con la diferencia exacta si no. No se puede confirmar hasta que cierre.</li>'
+    + '<li>Si todavía no hay fondos, usá <strong>Todavía sin fecha</strong> y dejá el motivo. La solicitud queda '
+      + 'esperando ahí sin trabarse.</li>'
+    + '</ol>';
+
+  // ── Confecciona ──
+  html += '<h3>Si confeccionás las órdenes <span class="sp-chica">(' + spEsc(spQuien(d, 'confeccion')) + ')</span></h3><ol style="padding-left:20px">'
+    + '<li>Te llega un mail con <strong>el detalle completo de cómo se paga</strong>: cuántos cheques, por cuánto '
+      + 'y con qué vencimiento, más el total. No hace falta entrar al panel a averiguarlo.</li>'
+    + '<li>El mismo detalle está en la solicitud, en <strong>Cómo se paga</strong>.</li>'
+    + '<li>Confeccionás la orden y marcás <strong>Confeccionada</strong>, que la manda a la firma.</li>'
+    + '<li>Si algo no cierra, <strong>Devolver a fechas</strong> con el motivo.</li>'
+    + '</ol>';
+
+  // ── Firma y comprobantes ──
+  html += '<h3>Si firmás <span class="sp-chica">(' + spEsc(spQuien(d, 'firma')) + ')</span></h3>'
+    + '<p><strong>No podés firmar una orden que confeccionaste vos.</strong> Es a propósito: son dos controles '
+    + 'distintos y los tiene que hacer gente distinta.</p>';
+
+  html += '<h3>Si mandás los comprobantes <span class="sp-chica">(' + spEsc(spQuien(d, 'comprobantes')) + ')</span></h3>'
+    + '<p>Mandale el comprobante al proveedor y cerrá el circuito. Podés <strong>adjuntarlo</strong> o marcar que '
+    + '<strong>lo enviaste por otro medio</strong> (WhatsApp, mail directo) explicando por dónde en el comentario. '
+    + 'Si el pago finalmente no se hizo, usá <strong>El pago no se hizo</strong> y vuelve a confección.</p>';
+
+  // ── Reglas ──
+  html += '<h3>Cosas que conviene saber</h3><ul style="padding-left:20px">'
+    + '<li>Los mails salen de <strong>erp@lnbonita.com.ar</strong>. Si no te llegan, fijate en spam y avisá: '
+      + 'la dirección que se usa es la que tenés cargada en tu usuario.</li>'
+    + '<li>Todo queda registrado: quién hizo qué, cuándo y con qué comentario. El historial está en cada solicitud.</li>'
+    + '<li>Los administradores pueden resolver cualquier paso, incluso los propios. Cuando lo hacen, queda marcado '
+      + 'en el historial.</li>'
+    + '<li>Si una solicitud lleva mucho tiempo frenada, se ve en la solapa <strong>Tiempos</strong>, que muestra '
+      + 'dónde se están juntando las demoras.</li>'
+    + (d.incompatibilidades && d.incompatibilidades.length
+        ? '<li>Una misma persona no puede hacer estos pares de pasos sobre la misma solicitud: '
+          + d.incompatibilidades.map(function(i) { return spEsc(i.a) + ' y ' + spEsc(i.b); }).join('; ') + '.</li>'
+        : '')
+    + '</ul>';
+
+  html += '<div class="sp-chica" style="margin-top:18px;padding-top:10px;border-top:1px solid var(--bor)">'
+    + 'Generado el ' + spEsc(d.generado_en) + ' desde la configuración vigente del circuito '
+    + '(versión ' + d.flujo.version + ').</div>';
+
+  return html + '</div>';
+}
+
+// Ventana aparte para imprimir: mismo patrón que ya usa el panel en otros lados.
+function spAyudaImprimir() {
+  var doc = document.getElementById('sp-ayuda-doc');
+  if (!doc) return;
+  var v = window.open('', '_blank');
+  if (!v) return toast('El navegador bloqueó la ventana', 'er');
+  v.document.write('<html><head><meta charset="utf-8"><title>Cómo usar el circuito de Órdenes de Pago</title>'
+    + '<style>body{font-family:system-ui,-apple-system,Segoe UI,sans-serif;line-height:1.6;max-width:820px;'
+    + 'margin:26px auto;padding:0 18px;color:#1e293b}h2{margin:0 0 6px}h3{margin:20px 0 6px;color:#0f172a}'
+    + 'ol,ul{padding-left:20px}li{margin-bottom:5px}.sp-chica{font-size:12px;color:#64748b}</style></head><body>'
+    + doc.innerHTML + '</body></html>');
+  v.document.close();
+  setTimeout(function() { v.print(); }, 250);
+}
+
+// Versión en texto plano, para pegar en un mail o un WhatsApp.
+function spAyudaTexto() {
+  var doc = document.getElementById('sp-ayuda-doc');
+  if (!doc) return '';
+  var tmp = doc.cloneNode(true);
+  // Los <li> se convierten en viñetas para que el texto se lea sin formato.
+  tmp.querySelectorAll('li').forEach(function(li) { li.textContent = '- ' + li.textContent; });
+  tmp.querySelectorAll('h2,h3,div,p,li').forEach(function(el) { el.textContent = el.textContent + '\n'; });
+  return String(tmp.textContent).replace(/\n{3,}/g, '\n\n').trim();
+}
+
+function spAyudaCopiar() {
+  var txt = spAyudaTexto();
+  if (!txt) return;
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(txt).then(
+      function() { toast('✓ Copiado — pegalo donde quieras', 'ok'); },
+      function() { spAyudaCopiarFallback(txt); });
+  } else spAyudaCopiarFallback(txt);
+}
+function spAyudaCopiarFallback(txt) {
+  var ta = document.createElement('textarea');
+  ta.value = txt; ta.style.position = 'fixed'; ta.style.opacity = '0';
+  document.body.appendChild(ta); ta.select();
+  try { document.execCommand('copy'); toast('✓ Copiado', 'ok'); }
+  catch (e) { toast('No se pudo copiar: seleccionalo a mano', 'er'); }
+  document.body.removeChild(ta);
+}
+
+function spAyudaEnviar() {
+  var lista = (SP.usuarios || []).map(function(u, i) {
+    return (i + 1) + ') ' + u.nombre + ' — ' + (u.email || 'SIN MAIL');
+  }).join('\n');
+  var v = prompt('¿A quién le mando el instructivo?\nEscribí el número.\n\n' + lista, '');
+  if (!v) return;
+  var u = SP.usuarios[parseInt(v, 10) - 1];
+  if (!u) return toast('No existe esa opción', 'er');
+  spApi('/instructivo/enviar', {
+    method: 'POST', body: JSON.stringify({ usuario_id: u.id, texto: spAyudaTexto() })
+  }).then(function(r) {
+    if (!r.ok) { spErr(r); return; }
+    toast('✓ Enviado a ' + r.email, 'ok');
   });
 }
 
