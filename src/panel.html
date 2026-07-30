@@ -36201,11 +36201,21 @@ function pliArbolRender() {
       else if (suma < 99.999999) badge = '<span class="pli-badge pli-warn">' + pliN(suma, 2) + '% — sin asignar ' + pliN(100 - suma, 2) + '%</span>';
       else badge = '<span class="pli-badge pli-ok">100%</span>';
     }
+    // Un padre que reparte el 100% entre subproductos con receta NO necesita
+    // receta propia: la suya es lo COMÚN a todos, y no tener nada común es
+    // normal. Un "receta: 0" en gris ahí se lee como que falta algo — y de hecho
+    // hizo dudar de si el plan estaba bien calculado. Se dice qué significa.
+    var delegaTodo = hijos.length && p.modo_reparto === 'particiona' && suma >= 99.999999;
+    var bRec = p.receta_lineas
+      ? '<span class="pli-badge pli-ok">receta: ' + p.receta_lineas + '</span>'
+      : (delegaTodo
+          ? '<span class="pli-badge pli-gris" title="No hace falta: cada subproducto tiene la suya. Si cargás una acá, se suma a TODOS.">sin insumo común</span>'
+          : '<span class="pli-badge pli-warn" title="No va a aportar ningún insumo al plan">sin receta</span>');
     var head = '<div class="pli-arbol-nodo">'
       + '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px">'
         + '<div><strong>' + pliEsc(p.nombre) + '</strong> '
           + '<span class="pli-cel-chica">objetivo en ' + pliEsc(p.unidad) + '</span> '
-          + '<span class="pli-badge ' + (p.receta_lineas ? 'pli-ok' : 'pli-gris') + '">receta: ' + p.receta_lineas + '</span> '
+          + bRec + ' '
           + badge + '</div>'
         + '<div style="white-space:nowrap">'
           + '<button class="btn bo bs" onclick="pliRecetaAbrir(' + p.id + ')" style="padding:2px 6px;font-size:11px">🧾 receta</button> '
@@ -36219,7 +36229,11 @@ function pliArbolRender() {
       + (p.receta_lineas
           ? '<div class="pli-cel-chica" style="margin-top:2px">Su receta es <strong>común a todos los subproductos</strong>: '
             + 'se aplica a la producción completa.</div>'
-          : '')
+          : (delegaTodo
+              ? '<div class="pli-cel-chica" style="margin-top:2px">No tiene receta propia y <strong>está bien</strong>: '
+                + 'reparte el 100% y cada subproducto lleva la suya. Cargale una solo si hay un insumo que '
+                + 'llevan <strong>todos</strong>.</div>'
+              : ''))
       // Insumos que están en TODOS los subproductos y le corresponden al padre.
       + (p.sugerencias || []).map(function(s) {
           return '<div style="margin-top:6px;background:rgba(59,130,246,.10);border-radius:8px;padding:7px 10px;font-size:12px">'

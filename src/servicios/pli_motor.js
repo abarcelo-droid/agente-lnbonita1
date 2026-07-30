@@ -224,10 +224,14 @@ export function calcularPlan(ctx) {
 
   // ── Paso 1 y 2 — recorrido del árbol y aplicación de recetas ────────────
 
-  function aplicarReceta(nodo, q, ruta, bucket) {
+  // avisarSinReceta llega en false cuando el nodo reparte TODO entre sus
+  // subproductos: ahí no tener receta propia no es una falta, ver más abajo.
+  function aplicarReceta(nodo, q, ruta, bucket, avisarSinReceta = true) {
     const lineas = recetas.get(nodo.id) || [];
     if (!lineas.length) {
-      cobertura.nodos_sin_receta.push({ id: nodo.id, ruta: ruta.slice(), nombre: nodo.nombre });
+      if (avisarSinReceta) {
+        cobertura.nodos_sin_receta.push({ id: nodo.id, ruta: ruta.slice(), nombre: nodo.nombre });
+      }
       return;
     }
     for (const l of lineas) {
@@ -353,7 +357,24 @@ export function calcularPlan(ctx) {
     // los subproductos sumando 100% la receta del padre quedaba multiplicada por
     // cero y el insumo desaparecía del plan y del costo sin que nada lo dijera.
     // Los subproductos suman ADEMÁS lo suyo, cada uno sobre su porcentaje.
-    if (qEf > EPS) aplicarReceta(nodo, qEf, ruta, bucket);
+    //
+    // Y JUSTO POR ESO, un producto que reparte el 100% entre sus subproductos NO
+    // necesita receta propia: la receta del padre es lo COMÚN a todos, y no tener
+    // nada común es un caso perfectamente normal (cada formato lleva su etiqueta
+    // y nada más). Avisar "no tiene receta" ahí mandaba a revisar un plan bien
+    // calculado y encima marcaba la cobertura como incompleta, obligando a tildar
+    // "entiendo que el plan tiene problemas" para confirmar algo que no los tenía.
+    //
+    // Se sigue avisando cuando el nodo NO delega todo:
+    //   · sin hijos          -> nadie más aporta insumos por él
+    //   · particiona < 100%  -> la parte sin asignar no produce nada (mix_incompleto
+    //                           lo dice además con el porcentaje que falta)
+    //   · adicional          -> el padre produce igual su cantidad completa, los
+    //                           hijos son producción EXTRA, no un reparto
+    const delegaTodo = hijos.length > 0
+      && nodo.modo_reparto === 'particiona'
+      && suma >= 100 - 1e-6;
+    if (qEf > EPS) aplicarReceta(nodo, qEf, ruta, bucket, !delegaTodo);
 
     for (const h of hijos) {
       explotar(h, qEf * num(h.share_pct) / 100, [...ruta, h.nombre], [...pila, nodo.id], bucket);
