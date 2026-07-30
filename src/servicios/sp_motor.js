@@ -138,7 +138,10 @@ export function resolverAutorizados(def, pasoClave, solicitud) {
 // ── Segregación de funciones ──────────────────────────────────────────────
 // Quien ya resolvió un hito incompatible en ESTA solicitud no puede resolver el otro.
 
-export function bloqueadoPorSoD(def, solicitud, pasoClave, usuarioId) {
+// Evalúa la separación de funciones SIN mirar el rol. Se usa para dos cosas: para
+// bloquear al que corresponde, y para poder decir qué habría bloqueado cuando un
+// administrador pasa por encima.
+function evaluarSoD(def, solicitud, pasoClave, usuarioId) {
   const paso = pasoDe(def, pasoClave);
   if (!paso || !paso.hito) return null;
   if (paso.permite_autoaprobacion) return null;
@@ -160,6 +163,34 @@ export function bloqueadoPorSoD(def, solicitud, pasoClave, usuarioId) {
     return `Ya interviniste en esta solicitud resolviendo "${choque}", y no puede ser la misma persona.`;
   }
   return null;
+}
+
+// El rol se lee de la BASE, no del que llama: la cookie la puede editar el usuario.
+function esAdminId(usuarioId) {
+  try {
+    const u = db.prepare('SELECT rol FROM usuarios WHERE id=? AND activo=1').get(usuarioId);
+    return !!u && u.rol === 'admin';
+  } catch (e) { return false; }
+}
+
+/**
+ * Bloqueo efectivo. Los ADMINISTRADORES pasan por encima de la separación de
+ * funciones: decisión explícita del dueño del sistema, porque en una estructura
+ * chica el admin suele ser el único que puede destrabar.
+ *
+ * No queda invisible: sodOmitida() devuelve qué habría bloqueado, y el motor lo
+ * registra en el evento. Así una autorización sobre la propia solicitud se puede
+ * distinguir de una normal cuando alguien audite, en vez de quedar indistinguible.
+ */
+export function bloqueadoPorSoD(def, solicitud, pasoClave, usuarioId) {
+  if (esAdminId(usuarioId)) return null;
+  return evaluarSoD(def, solicitud, pasoClave, usuarioId);
+}
+
+// Qué separación se está salteando. Devuelve null si no hay ninguna.
+export function sodOmitida(def, solicitud, pasoClave, usuarioId) {
+  if (!esAdminId(usuarioId)) return null;
+  return evaluarSoD(def, solicitud, pasoClave, usuarioId);
 }
 
 // ── Acciones disponibles para un usuario ──────────────────────────────────

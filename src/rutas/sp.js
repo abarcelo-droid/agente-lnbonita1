@@ -8,7 +8,7 @@
 import express from 'express';
 import db from '../servicios/db_sp.js';     // este import crea el schema sp_*
 import {
-  armarSnapshot, validarDefinicion, resolverAutorizados, bloqueadoPorSoD,
+  armarSnapshot, validarDefinicion, resolverAutorizados, bloqueadoPorSoD, sodOmitida,
   accionesDisponibles, aplicarCambioDePaso, registrarEvento
 } from '../servicios/sp_motor.js';
 import { encolar, render, procesarEnBackground } from '../servicios/sp_outbox.js';
@@ -417,6 +417,9 @@ router.get('/solicitudes/:id', wrap((req, res) => {
       pasos: def.pasos,
       acciones: accionesDisponibles(def, s, req.user),
       bloqueo_sod: bloqueadoPorSoD(def, s, s.paso_actual_clave, req.user.id),
+      // Para admins: qué separación estarían salteando si resuelven. Se avisa antes
+      // de actuar, no después.
+      sod_omitida: sodOmitida(def, s, s.paso_actual_clave, req.user.id),
       esperando_a: resolutores.map(u => ({ id: u.id, nombre: u.nombre })),
       eventos, adjuntos,
       tiempos: t
@@ -450,10 +453,14 @@ router.post('/solicitudes/:id/accion', wrap((req, res) => {
   if (!esAdmin(req) && !resolutores.some(u => u.id === req.user.id)) {
     throw Object.assign(new Error('No estás habilitado para resolver este paso'), { status: 403 });
   }
-  // Segregación de funciones. Aplica también a los admin: si no, el control se cae
-  // con el usuario que más lo necesita.
+  // Segregación de funciones. Los administradores pasan por encima (decisión del
+  // dueño del sistema); para el resto bloquea.
   const sod = bloqueadoPorSoD(def, s, paso.clave, req.user.id);
   if (sod) throw Object.assign(new Error(sod), { status: 403 });
+  // Si un admin está salteando una separación, queda registrado en el evento: es lo
+  // que permite distinguir después una autorización sobre la propia solicitud de
+  // una normal.
+  const omitida = sodOmitida(def, s, paso.clave, req.user.id);
 
   const comentario = vTexto(b.comentario, 'El comentario', { max: 1000 });
   if ((tr.requiere_comentario || paso.requiere_comentario) && !comentario) {
@@ -488,10 +495,13 @@ router.post('/solicitudes/:id/accion', wrap((req, res) => {
     if (datos.fecha_pago) {
       db.prepare('UPDATE sp_solicitudes SET fecha_pago_confirmada=? WHERE id=?').run(datos.fecha_pago, s.id);
     }
+    const detalle = { ...datos };
+    if (omitida) detalle.sod_omitida = omitida;
     const evId = registrarEvento(s.id, {
       paso_desde: paso.clave, paso_hasta: tr.hasta, accion, hito: paso.hito, clase: tr.clase,
       actor_id: req.user.id, actor_nombre: req.user.nombre, actor_rol: req.user.rol,
-      comentario, datos_json: Object.keys(datos).length ? datos : null
+      comentario, datos_json: Object.keys(detalle).length ? detalle : null,
+      via: omitida ? 'admin' : 'panel'
     });
 
     // Los mails se ENCOLAN acá (dentro de la transacción, así el aviso existe si y
