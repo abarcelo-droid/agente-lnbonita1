@@ -35,13 +35,21 @@
 // JS) porque scout.html:1498 la lee. Pasa a ser solo de presentación: el backend
 // ya no le cree nada.
 //
-// LÍMITES CONOCIDOS (documentados a propósito, no olvidados)
-// - No hay revocación del lado del server: una cookie robada sirve hasta que expira
-//   (1 día en desktop, 30 en móvil). Para revocar haría falta una tabla de sesiones
-//   o una columna de época en usuarios; queda como paso siguiente.
-// - El campo `secciones` se sigue tomando de la cookie. Hoy no restringe nada del
-//   lado del server (auth.js:330 fuerza secciones=['*'] en /me), así que no se
-//   cambia para no alterar comportamiento; los endpoints tienen sus propios guards.
+// NADA SE HEREDA DE LA COOKIE
+// La identidad se arma SOLO con la fila de la base. No se hace spread del JSON que
+// vino en lnb_user: si se heredara, cualquier clave fuera de la lista sobreviviría
+// tal como la escribió el usuario y viajaría como si fuera identidad verificada.
+// Y no es hipotético: `secciones` SÍ autoriza del lado del server —
+// produccion.js:2516 permite registrar cargas de combustible en estación con
+// `u.secciones.includes(...)`— así que también se relee de la base.
+// Para los honestos no cambia nada: la cookie ya traía el valor de la base
+// (auth.js la emite con parseSecciones(user.secciones) al loguear). Lo único que
+// deja de funcionar es editarla a mano.
+//
+// LÍMITE CONOCIDO (documentado a propósito, no olvidado)
+// No hay revocación del lado del server: una cookie robada sirve hasta que expira
+// (1 día en desktop, 30 en móvil). Para revocar haría falta una tabla de sesiones o
+// una columna de época en usuarios; queda como paso siguiente.
 
 import crypto from 'crypto';
 import { getDb } from './db.js';
@@ -95,7 +103,15 @@ export const AUTH_COOKIE = 'lnb_auth';
 // guard de solo lectura, porque todos ellos leen req.cookies.lnb_user.
 
 const CAMPOS_DB = `id, nombre, email, rol, username, activo, solo_lectura,
-                   deposito_tipo, deposito_proveedor_id`;
+                   deposito_tipo, deposito_proveedor_id, secciones, depositos`;
+
+// Mismos defaults que auth.js, para no cambiarle el comportamiento a los usuarios
+// que todavía no tienen el campo seteado.
+const parseSecciones = (s) => { try { return JSON.parse(s || '["*"]'); } catch (e) { return ['*']; } };
+const parseDepositos = (s) => {
+  try { return JSON.parse(s || '["MCBA","FINCA","SAN PEDRO"]'); }
+  catch (e) { return ['MCBA', 'FINCA', 'SAN PEDRO']; }
+};
 
 export function sesionFirmada(req, res, next) {
   const descartar = () => {
@@ -112,14 +128,10 @@ export function sesionFirmada(req, res, next) {
     const u = getDb().prepare(`SELECT ${CAMPOS_DB} FROM usuarios WHERE id = ?`).get(id);
     if (!u || !u.activo) { descartar(); return next(); }
 
-    // Los campos de presentación (depositos, secciones) se conservan de la cookie;
-    // los que deciden permisos se sobrescriben SIEMPRE con lo que dice la base.
-    let base = {};
-    try { base = JSON.parse(req.cookies?.lnb_user || '{}') || {}; } catch (_) { base = {}; }
-
+    // Se arma DESDE CERO con la fila de la base. Sin spread de la cookie: cualquier
+    // clave heredada de ahí sería forjable y viajaría como identidad verificada.
     req.cookies = req.cookies || {};
     req.cookies.lnb_user = JSON.stringify({
-      ...base,
       id: u.id,
       nombre: u.nombre,
       email: u.email,
@@ -127,7 +139,9 @@ export function sesionFirmada(req, res, next) {
       username: u.username || null,
       solo_lectura: !!u.solo_lectura,
       deposito_tipo: u.deposito_tipo || null,
-      deposito_proveedor_id: u.deposito_proveedor_id || null
+      deposito_proveedor_id: u.deposito_proveedor_id || null,
+      secciones: parseSecciones(u.secciones),
+      depositos: parseDepositos(u.depositos)
     });
     // Para quien quiera la fila cruda sin volver a consultar.
     req.usuarioDb = u;
