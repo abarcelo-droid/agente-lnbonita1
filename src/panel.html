@@ -37977,6 +37977,13 @@ function spDetalleRender() {
     html += '<div style="background:rgba(245,158,11,.14);border-radius:8px;padding:9px 12px;font-size:12px;margin-bottom:10px">'
       + '🔒 ' + spEsc(d.bloqueo_sod) + '</div>';
   }
+  // Admin salteando una separación de funciones: se avisa ANTES de actuar, y queda
+  // registrado en el historial si igual lo hace.
+  if (d.sod_omitida) {
+    html += '<div style="background:rgba(245,158,11,.18);border:1px solid #f59e0b;border-radius:8px;padding:9px 12px;font-size:12px;margin-bottom:10px">'
+      + '⚠ <strong>Estás resolviendo con permisos de administrador.</strong> '
+      + spEsc(d.sod_omitida) + ' Podés hacerlo igual, y va a quedar marcado en el historial.</div>';
+  }
   if (d.acciones.length) {
     html += '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">'
       + d.acciones.map(function(a) {
@@ -38010,9 +38017,16 @@ function spDetalleRender() {
     + (d.eventos || []).slice().reverse().map(function(e) {
         var cls = e.clase === 'avanza' ? 'sp-av' : (e.clase === 'devuelve' ? 'sp-dv' : (e.clase === 'rechaza' ? 'sp-rc' : ''));
         var dat = '';
+        var marcaAdmin = '';
         try { var j = e.datos_json ? JSON.parse(e.datos_json) : null;
           if (j && j.fecha_pago) dat = ' · fecha de pago ' + j.fecha_pago;
           if (j && j.enviado_por_otro_medio) dat = ' · enviado por otro medio';
+          // Resuelto por un admin salteando una separación de funciones: se marca
+          // para que se pueda distinguir de una autorización normal.
+          if (j && j.sod_omitida) {
+            marcaAdmin = '<div class="sp-bad sp-warn" style="margin-top:3px">⚠ resuelto con permisos de admin — '
+              + spEsc(j.sod_omitida) + '</div>';
+          }
         } catch (_) {}
         return '<li class="' + cls + '">'
           + '<div style="font-size:12px"><strong>' + spEsc(e.accion) + '</strong>'
@@ -38024,6 +38038,7 @@ function spDetalleRender() {
           + '</div>'
           + (e.comentario ? '<div style="font-size:12px;margin-top:2px;padding:5px 8px;background:var(--bg2,#f8fafc);border-radius:6px">'
               + spEsc(e.comentario) + '</div>' : '')
+          + marcaAdmin
           + '</li>';
       }).join('') + '</ul>';
 
@@ -38078,6 +38093,11 @@ function spAccionAbrir(id, accion) {
     html += '<label style="display:flex;gap:6px;align-items:flex-start;font-size:12px;margin-bottom:8px;cursor:pointer">'
       + '<input type="checkbox" id="sp-acc-otromedio"> '
       + '<span>Ya se lo mandé por otro medio (WhatsApp, mail directo). Explicá por dónde en el comentario.</span></label>';
+  }
+  // Si es un admin salteando una separación, se le dice antes de confirmar.
+  if (SP.det && SP.det.solicitud.id === id && SP.det.sod_omitida) {
+    html += '<div style="background:rgba(245,158,11,.18);border:1px solid #f59e0b;border-radius:8px;padding:8px 11px;font-size:12px;margin-bottom:10px">'
+      + '⚠ ' + spEsc(SP.det.sod_omitida) + ' Lo hacés con permisos de administrador y queda marcado en el historial.</div>';
   }
   html += '<div class="fl ff"><label>Comentario' + (acc && acc.requiere_comentario ? ' *' : ' (opcional)') + '</label>'
     + '<textarea id="sp-acc-com" rows="3" class="sp-inp" style="width:100%"></textarea></div>';
