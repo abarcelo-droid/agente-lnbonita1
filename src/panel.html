@@ -10936,6 +10936,10 @@ function sgRepExport(){
     .pli-viz-chip[aria-pressed="false"] .pli-viz-tra { opacity:.3 }
     .pli-viz-chip.on { border-color:var(--bor2); background:var(--bg2,#f1f5f9) }
     .pli-viz-tra { width:14px; height:3px; border-radius:2px; flex:0 0 14px }
+    /* Mismo aspecto que .pli-vista pero clase propia: la de la solapa Comprar la
+       apaga por querySelectorAll y despintaba estos botones. */
+    .pli-viz-modo { color:var(--mut); background:var(--sur) }
+    .pli-viz-modo.on { background:var(--burg); color:#fff }
   </style>
 
   <div style="display:flex;border-bottom:1px solid var(--bor);margin-bottom:14px">
@@ -36898,7 +36902,11 @@ function pliVizSeries(est) {
   // gráfico y sigue viéndose en la grilla.
   var semanas = pliVizSemanasContinuas(est.semanas.filter(function(s) { return !!s; }));
   var vis = (PLI.arbol || []).filter(function(p) { return !cfg.sel || cfg.sel.indexOf(p.id) !== -1; });
-  var series = [], otros = [];
+  // `indiv` guarda los productos DE A UNO, antes del plegado a "Otros". Hace falta
+  // para saber cuáles están vacíos: después del plegado, tres productos en cero
+  // son UNA serie sintética con id 'otros', que no matchea contra ningún id de
+  // producto — la leyenda terminaba prometiendo tres líneas que no se dibujaban.
+  var series = [], otros = [], indiv = [];
 
   vis.forEach(function(p) {
     var slot = slots[p.id];
@@ -36909,6 +36917,7 @@ function pliVizSeries(est) {
       pts0: pts, pts: pts,
       total: pts.reduce(function(a, b) { return a + b; }, 0)
     };
+    indiv.push(it);
     if (slot < 8) series.push(it); else otros.push(it);
   });
 
@@ -36937,10 +36946,14 @@ function pliVizSeries(est) {
   // dice nada y tapa el cero de los demás. Con cinco así, el gráfico es una banda
   // de rayas sobre la base. Se sacan del dibujo pero siguen en la leyenda, y si se
   // los clickea se muestran igual — pedir ver uno vacío es una pregunta legítima.
-  var vacias = [];
+  // Qué productos están sin cargar se calcula SIEMPRE, porque es lo que marca a
+  // cada chip. Sobre `indiv` y no sobre `series`: es por producto, y después del
+  // plegado tres productos vacíos son UNA serie con id 'otros' que no matchea
+  // contra ningún id. Lo que solo pasa con el filtro en "Todos" es sacarlos del
+  // dibujo.
+  var vacias = indiv.filter(function(it) { return !(it.total > 0); });
   if (!cfg.sel) {
     var conDatos = series.filter(function(sr) { return sr.total > 0; });
-    vacias = series.filter(function(sr) { return !(sr.total > 0); });
     if (conDatos.length) series = conDatos;   // si están TODAS vacías se dibujan igual
   }
 
@@ -37059,8 +37072,12 @@ function pliGrafRender() {
     + '<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px">'
       + '<div style="font-size:12px;font-weight:700">📈 Curva del plan</div>'
       + '<div style="display:flex;gap:4px">'
-        + '<button class="btn bo bs pli-vista' + (cfg.modo === 'semanal' ? ' on' : '') + '" onclick="pliVizModo(\'semanal\')" style="font-size:11px">Por semana</button>'
-        + '<button class="btn bo bs pli-vista' + (cfg.modo === 'acumulado' ? ' on' : '') + '" onclick="pliVizModo(\'acumulado\')" style="font-size:11px" title="Cuánto llevás empacado hasta cada semana">Acumulado</button>'
+        // Clase PROPIA, no .pli-vista: pliCmpVista() de la solapa Comprar hace un
+        // querySelectorAll('#sec-pli-planificacion .pli-vista') y le apaga el
+        // resaltado a todo lo que no tenga su data-pli-vista. Compartir la clase
+        // hacía que cambiar de vista en Comprar despintara estos dos botones.
+        + '<button class="btn bo bs pli-viz-modo' + (cfg.modo === 'semanal' ? ' on' : '') + '" onclick="pliVizModo(\'semanal\')" style="font-size:11px">Por semana</button>'
+        + '<button class="btn bo bs pli-viz-modo' + (cfg.modo === 'acumulado' ? ' on' : '') + '" onclick="pliVizModo(\'acumulado\')" style="font-size:11px" title="Cuánto llevás empacado hasta cada semana">Acumulado</button>'
       + '</div>'
     + '</div>';
 
@@ -37070,10 +37087,12 @@ function pliGrafRender() {
     + '<button class="pli-viz-chip' + (cfg.sel ? '' : ' on') + '" aria-pressed="' + (cfg.sel ? 'false' : 'true') + '"'
       + ' onclick="pliVizTodos()">Todos</button>'
     + raices.map(function(p) {
-        // El producto sin cantidades no se dibuja, así que su chip no puede
-        // figurar como encendido: diría que hay una línea suya en pantalla.
+        // Sin filtro, el producto vacío no se dibuja y su chip no puede figurar
+        // como encendido: diría que hay una línea suya en pantalla. Con filtro sí
+        // se dibuja (la recta en cero, que es lo que se pidió ver), así que va
+        // encendido.
         var vacio = (mod.vacias || []).some(function(v) { return v.id === p.id; });
-        var act = (!cfg.sel || cfg.sel.indexOf(p.id) !== -1) && !vacio;
+        var act = cfg.sel ? (cfg.sel.indexOf(p.id) !== -1) : !vacio;
         var col = slots[p.id] < 8 ? PLI_VIZ_COL[slots[p.id]] : PLI_VIZ_OTROS;
         return '<button class="pli-viz-chip' + (cfg.sel && act ? ' on' : '') + '" aria-pressed="' + (act ? 'true' : 'false') + '"'
           + ' onclick="pliVizToggle(' + p.id + ')" title="'
@@ -37090,11 +37109,14 @@ function pliGrafRender() {
   }
   var maxDato = 0;
   series.forEach(function(sr) { sr.pts.forEach(function(v) { if (v > maxDato) maxDato = v; }); });
-  if (!(maxDato > 0)) {
+  // Si el usuario PIDIÓ ver un producto vacío, se le muestra: la recta en cero es
+  // exactamente la información que fue a buscar. Cambiarle el gráfico por un
+  // cartel es no cumplir lo que promete el chip ("clic para verlo igual") y
+  // encima le hace perder de vista lo que estaba mirando. El cartel queda solo
+  // para el plan que todavía no tiene nada cargado.
+  if (!(maxDato > 0) && !cfg.sel) {
     cont.innerHTML = html + '<div class="pli-cel-chica">'
-      + (cfg.sel
-          ? 'Lo que seleccionaste no tiene cantidades cargadas en este plan. Tocá <strong>Todos</strong> para volver.'
-          : 'Todavía no cargaste cantidades: cuando escribas la primera, la curva aparece acá.')
+      + 'Todavía no cargaste cantidades: cuando escribas la primera, la curva aparece acá.'
       + '</div></div>';
     PLI.vizModel = null;
     return;
@@ -37109,7 +37131,14 @@ function pliGrafRender() {
   var iPico = semTot.indexOf(Math.max.apply(null, semTot));
   var rots = semanas.map(function(s) { return pliRotuloSemana(s); });
   var conDatos = semTot.filter(function(v) { return v > 0; }).length;
-  if (mod.unicaUnidad !== null) {
+  // Filtro puesto sobre algo que está todo en cero: se dibuja igual la recta,
+  // pero conviene decir por qué está pegada al piso en vez de dejar al usuario
+  // preguntándose si el gráfico se rompió.
+  if (!(maxDato > 0)) {
+    html += '<div class="pli-cel-chica" style="margin-bottom:6px">'
+      + 'Lo que seleccionaste no tiene cantidades cargadas en este plan: la curva va en cero. '
+      + 'Tocá <strong>Todos</strong> para volver.</div>';
+  } else if (mod.unicaUnidad !== null) {
     html += '<div class="pli-cel-chica" style="margin-bottom:6px">'
       + '<strong style="font-size:15px;color:var(--txt)">' + pliN(totVis) + '</strong> '
       + pliEsc(mod.unicaUnidad || 'unidades') + ' en ' + conDatos + ' semana(s)'
