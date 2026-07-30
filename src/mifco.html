@@ -271,11 +271,19 @@ body{padding-bottom:env(safe-area-inset-bottom)}
   <div class="alert info">
     📸 Sacale foto al remito YA SELLADO. El sistema busca por el N° si ya estaba despachado, o lo crea nuevo.
   </div>
-  <input id="inp-foto-sellado" type="file" accept="image/*" style="display:none" onchange="onFotoSellado(event)">
-  <button class="cam-btn" onclick="document.getElementById('inp-foto-sellado').click()">
+  <!-- Dos accesos que alimentan el MISMO handler (onFotoSellado): cámara con capture="environment"
+       (abre la trasera directo, arregla que en Android "Tomar foto" fuera a galería) y galería sin capture. -->
+  <input id="inp-foto-sellado-cam" type="file" accept="image/*" capture="environment" style="display:none" onchange="onFotoSellado(event)">
+  <input id="inp-foto-sellado-gal" type="file" accept="image/*" style="display:none" onchange="onFotoSellado(event)">
+  <button class="cam-btn" onclick="document.getElementById('inp-foto-sellado-cam').click()">
     <div class="ico">📷</div>
     <div>Tomar foto</div>
-    <div class="sub">o seleccionar de la galería</div>
+    <div class="sub">Abre la cámara</div>
+  </button>
+  <button class="cam-btn" style="margin-top:10px" onclick="document.getElementById('inp-foto-sellado-gal').click()">
+    <div class="ico">🖼️</div>
+    <div>Elegir de galería</div>
+    <div class="sub">Fotos o archivos del teléfono</div>
   </button>
 </div>
 
@@ -688,7 +696,8 @@ function resetState() {
   S.matchRemitoId = null;
   S.matchData = null;
   S.ocrData = null;
-  $('inp-foto-sellado').value = '';
+  const _sc = $('inp-foto-sellado-cam'); if (_sc) _sc.value = '';
+  const _sg = $('inp-foto-sellado-gal'); if (_sg) _sg.value = '';
   const _dc = $('inp-foto-despacho-cam'); if (_dc) _dc.value = '';
   const _dg = $('inp-foto-despacho-gal'); if (_dg) _dg.value = '';
 }
