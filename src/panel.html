@@ -36866,11 +36866,37 @@ function pliVizSlots() {
   return m;
 }
 
+// EL EJE X ES TIEMPO, NO UNA LISTA.
+// La grilla solo tiene las semanas que el usuario dejó cargadas, y entre dos
+// puede haber un hueco: si hay una fila en la S40 y la siguiente es la S47,
+// dibujarlas una al lado de la otra pinta un derrumbe de 50.000 a 0 en UNA
+// semana cuando en realidad pasan siete. La curva mentía sobre el tiempo.
+//
+// Se completan todas las semanas intermedias en cero, que además es lo que
+// significan: una semana que no está en la grilla es una semana en la que no se
+// empaca nada. Así el hueco se ve como lo que es y las distancias del eje son
+// proporcionales al calendario.
+function pliVizSemanasContinuas(semanas) {
+  if (semanas.length < 2) return semanas.slice();
+  var res = [], cur = semanas[0], fin = semanas[semanas.length - 1], guarda = 0;
+  while (cur <= fin && guarda++ < 200) {
+    res.push(cur);
+    var p = cur.split('-').map(Number);
+    var d = new Date(Date.UTC(p[0], p[1] - 1, p[2]) + 7 * 86400000);
+    var dd = function(x) { return String(x).padStart(2, '0'); };
+    cur = d.getUTCFullYear() + '-' + dd(d.getUTCMonth() + 1) + '-' + dd(d.getUTCDate());
+  }
+  // Fechas que no caen en lunes o un rango disparatado: se deja lo cargado antes
+  // que dibujar cualquier cosa. El último tiene que estar sí o sí.
+  if (res.indexOf(fin) === -1) return semanas.slice();
+  return res;
+}
+
 function pliVizSeries(est) {
   var cfg = pliVizCfg(), slots = pliVizSlots();
   // La fila "sin fecha" no tiene lugar en una línea de tiempo: queda fuera del
   // gráfico y sigue viéndose en la grilla.
-  var semanas = est.semanas.filter(function(s) { return !!s; });
+  var semanas = pliVizSemanasContinuas(est.semanas.filter(function(s) { return !!s; }));
   var vis = (PLI.arbol || []).filter(function(p) { return !cfg.sel || cfg.sel.indexOf(p.id) !== -1; });
   var series = [], otros = [];
 
