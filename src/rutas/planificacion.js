@@ -463,6 +463,88 @@ function hoyISO() {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
 }
 
+// Cotización aplicable a una fecha: la de ese día si existe, y si no la más
+// cercana ANTERIOR. Nunca una posterior: convertir un precio de octubre con la
+// cotización de diciembre sería inventar.
+function tcParaFecha(fecha) {
+  try {
+    const exacta = db.prepare(`
+      SELECT venta, tipo, fecha FROM pli_cotizaciones WHERE fecha=?
+      ORDER BY CASE tipo WHEN 'manual' THEN 0 ELSE 1 END LIMIT 1
+    `).get(fecha);
+    if (exacta) return { tc: exacta.venta, origen: `${exacta.tipo} ${exacta.fecha}` };
+    const previa = db.prepare(`
+      SELECT venta, tipo, fecha FROM pli_cotizaciones WHERE fecha <= ?
+      ORDER BY fecha DESC LIMIT 1
+    `).get(fecha);
+    if (previa) return { tc: previa.venta, origen: `${previa.tipo} ${previa.fecha} (la más cercana anterior)` };
+  } catch (e) { /* sin cotizaciones todavía */ }
+  return { tc: null, origen: null };
+}
+
+// Alta manual de un precio histórico. Sirve para cargar la serie que ya se tenía
+// registrada afuera, sin tener que "editar el insumo" una vez por cada precio.
+router.post('/insumos/:id/precios', wrap((req, res) => {
+  const soc = getSociedadId(req);
+  const id = parseInt(req.params.id, 10);
+  const ins = db.prepare('SELECT * FROM pli_insumos WHERE id=? AND sociedad_id=? AND eliminado_en IS NULL').get(id, soc);
+  if (!ins) throw notFound('Insumo no encontrado');
+  const b = req.body || {};
+
+  const fecha = vFecha(b.fecha, 'La fecha');
+  if (!fecha) throw bad('La fecha del precio es obligatoria');
+  const precio = vNum(b.precio, 'El precio', { min: 0 });
+  const moneda = (vTexto(b.moneda, 'La moneda') || 'ARS').toUpperCase();
+  if (!['ARS', 'USD'].includes(moneda)) throw bad('La moneda tiene que ser ARS o USD');
+
+  // Si se informa el tipo de cambio de esa fecha, se guarda; si no, se resuelve
+  // con lo que haya y se deja constancia de de dónde salió.
+  let tc = null, tcOrigen = null;
+  if (b.tc !== undefined && b.tc !== null && b.tc !== '') {
+    tc = vNum(b.tc, 'El tipo de cambio', { min: 1e-9 });
+    tcOrigen = 'informado a mano';
+  } else {
+    const r = tcParaFecha(fecha);
+    tc = r.tc; tcOrigen = r.origen;
+  }
+
+  const r = db.prepare(`
+    INSERT INTO pli_insumo_precios
+      (insumo_id, fecha, precio, moneda, unidad_compra, origen, proveedor_texto, notas,
+       tc_usado, tc_origen, creado_por_id)
+    VALUES (?,?,?,?,?, 'manual', ?,?,?,?,?)
+  `).run(id, fecha, precio, moneda, ins.unidad_compra,
+         vTexto(b.proveedor_texto, 'El proveedor', { max: 120 }) || ins.proveedor_texto || null,
+         vTexto(b.notas, 'Las notas', { max: 300 }), tc, tcOrigen, req.user.id);
+
+  // Solo si lo piden explícitamente pasa a ser el precio vigente. Cargar un precio
+  // viejo NO puede pisar el actual, que es el que usa el plan.
+  if (b.vigente) {
+    db.prepare(`
+      UPDATE pli_insumos SET precio_ref=?, moneda=?, precio_fecha=?, actualizado_en=${AHORA}, actualizado_por_id=?
+      WHERE id=?
+    `).run(precio, moneda, fecha, req.user.id, id);
+  }
+  logPli('insumo', id, 'precio_historico', { fecha, precio, moneda, tc, vigente: !!b.vigente }, req.user.id);
+  res.json({ ok: true, id: r.lastInsertRowid, tc, tc_origen: tcOrigen });
+}));
+
+router.delete('/precios/:precioId', wrap((req, res) => {
+  const soc = getSociedadId(req);
+  const p = db.prepare(`
+    SELECT pr.*, i.nombre FROM pli_insumo_precios pr
+    JOIN pli_insumos i ON i.id = pr.insumo_id
+    WHERE pr.id=? AND i.sociedad_id=?
+  `).get(parseInt(req.params.precioId, 10), soc);
+  if (!p) throw notFound('Registro de precio no encontrado');
+  // Borrado real: la serie histórica se está cargando a mano y un error de tipeo
+  // no tiene por qué quedar para siempre. El log guarda qué se borró.
+  db.prepare('DELETE FROM pli_insumo_precios WHERE id=?').run(p.id);
+  logPli('insumo', p.insumo_id, 'precio_borrado',
+    { fecha: p.fecha, precio: p.precio, moneda: p.moneda }, req.user.id);
+  res.json({ ok: true });
+}));
+
 router.get('/insumos/:id/precios', wrap((req, res) => {
   const soc = getSociedadId(req);
   const id = parseInt(req.params.id, 10);
@@ -479,6 +561,21 @@ router.get('/insumos/:id/precios', wrap((req, res) => {
     const prev = porMoneda[f.moneda];
     f.variacion_pct = (prev && prev > 0) ? ((f.precio - prev) / prev) * 100 : null;
     porMoneda[f.moneda] = f.precio;
+
+    // Equivalente en la otra moneda, con la cotización de ESA fecha. Los registros
+    // viejos no la tienen guardada, así que se resuelve al vuelo y se aclara de
+    // dónde salió: un precio convertido sin decir a qué cambio no sirve.
+    if (f.tc_usado === null || f.tc_usado === undefined) {
+      const r = tcParaFecha(f.fecha);
+      f.tc_usado = r.tc; f.tc_origen = r.origen; f.tc_resuelto = 1;
+    }
+    if (f.tc_usado > 0) {
+      f.precio_ars = f.moneda === 'USD' ? f.precio * f.tc_usado : f.precio;
+      f.precio_usd = f.moneda === 'USD' ? f.precio : f.precio / f.tc_usado;
+    } else {
+      f.precio_ars = f.moneda === 'ARS' ? f.precio : null;
+      f.precio_usd = f.moneda === 'USD' ? f.precio : null;
+    }
   }
   res.json({ ok: true, data: filas, insumo: { id: ins.id, nombre: ins.nombre, unidad_compra: ins.unidad_compra } });
 }));

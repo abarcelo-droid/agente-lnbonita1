@@ -410,6 +410,11 @@ try {
   addCol('pli_plan_resultado', 'moq_forzado',           'INTEGER NOT NULL DEFAULT 0');
   addCol('pli_plan_resultado', 'precio_fecha_snapshot', 'TEXT');
   addCol('pli_plan_resultado', 'sin_precio',            'INTEGER NOT NULL DEFAULT 0');
+  // Cotización con la que se convierte ESE precio. Se guarda junto al registro
+  // porque convertir una serie histórica en dólares con el tipo de cambio de hoy
+  // da una serie en pesos que no significa nada.
+  addCol('pli_insumo_precios', 'tc_usado',      'REAL');
+  addCol('pli_insumo_precios', 'tc_origen',     'TEXT');
 } catch (e) {
   console.error('[PLI] Error en migraciones:', e.message);
 }
