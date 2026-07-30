@@ -11081,13 +11081,36 @@ function sgRepExport(){
     <div class="sp-tab on" data-sp="pendiente" onclick="spTab('pendiente')">📥 Me toca a mí <span id="sp-cnt-pend"></span></div>
     <div class="sp-tab"    data-sp="mias"      onclick="spTab('mias')">🧾 Mis solicitudes</div>
     <div class="sp-tab"    data-sp="todas"     onclick="spTab('todas')">📊 Todas</div>
-    <div class="sp-tab"    data-sp="circuito"  onclick="spTab('circuito')">⚙️ Circuito</div>
+    <div class="sp-tab"    data-sp="tiempos"   onclick="spTab('tiempos')">⏱️ Tiempos</div>
+    <div class="sp-tab"    data-sp="circuito"  onclick="spTab('circuito')">⚙️ Circuito y avisos</div>
   </div>
 
   <div class="sp-pane on" id="sp-pane-pendiente"><div id="sp-lista-pendiente"></div></div>
   <div class="sp-pane"    id="sp-pane-mias"><div id="sp-lista-mias"></div></div>
   <div class="sp-pane"    id="sp-pane-todas"><div id="sp-lista-todas"></div></div>
+  <div class="sp-pane"    id="sp-pane-tiempos"><div id="sp-tiempos"></div></div>
   <div class="sp-pane"    id="sp-pane-circuito"><div id="sp-circuito"></div></div>
+</div>
+
+<!-- Modal: quién está habilitado en un paso -->
+<div class="ab-modal-overlay" id="sp-mb-aut">
+<div class="ab-modal" style="width:640px;max-height:90vh;overflow-y:auto">
+  <div class="mhd">
+    <div><div class="mht" id="sp-aut-tit">Habilitados</div></div>
+    <button class="mcl" onclick="document.getElementById('sp-mb-aut').classList.remove('on')">×</button>
+  </div>
+  <input type="hidden" id="sp-aut-paso">
+  <div class="sp-chica" style="margin-bottom:10px">
+    El aviso va al <strong>mail del usuario</strong>, el que tiene cargado en su ficha.
+    No se configura aparte: si la dirección está mal, hay que corregirla en Usuarios.
+    Los marcados como <em>solo aviso</em> reciben el mail pero no pueden resolver el paso.
+  </div>
+  <div id="sp-aut-lista"></div>
+  <div class="ab-modal-footer">
+    <button class="btn bo" onclick="document.getElementById('sp-mb-aut').classList.remove('on')">Cancelar</button>
+    <button class="btn bb" onclick="spAutGuardar()">Guardar habilitados</button>
+  </div>
+</div>
 </div>
 
 <!-- Modal: nueva solicitud de pago -->
@@ -37599,7 +37622,21 @@ function spTab(t) {
   document.querySelectorAll('#sec-sp-pagos .sp-pane').forEach(function(el) {
     el.classList.toggle('on', el.id === 'sp-pane-' + t);
   });
-  if (t === 'circuito') spCircuitoCargar(); else spListaCargar(t);
+  if (t === 'circuito') spCircuitoCargar();
+  else if (t === 'tiempos') spTiemposCargar();
+  else spListaCargar(t);
+}
+
+// Horas a texto legible. "38 h" no se lee igual que "1 d 14 h".
+function spHoras(h) {
+  if (h === null || h === undefined) return '—';
+  var n = Number(h);
+  if (!isFinite(n)) return '—';
+  if (n < 1) return Math.round(n * 60) + ' min';
+  if (n < 48) return (Math.round(n * 10) / 10) + ' h';
+  var d = Math.floor(n / 24);
+  var r = Math.round(n % 24);
+  return d + ' d' + (r ? ' ' + r + ' h' : '');
 }
 
 function spListaCargar(vista) {
@@ -37785,6 +37822,18 @@ function spDetalleRender() {
           ? '<div class="sp-chica">Esperando a: ' + d.esperando_a.map(function(u) { return spEsc(u.nombre); }).join(', ') + '</div>'
           : '')
       + (s.fecha_pago_confirmada ? '<div class="sp-chica">Fecha de pago: <strong>' + spEsc(s.fecha_pago_confirmada) + '</strong></div>' : '')
+      + '</div>'
+    // Tiempos: es lo que responde "¿cuánto lleva esto dando vueltas?"
+    + '<div style="flex:1;min-width:200px;border:1px solid var(--bor);border-radius:10px;padding:11px;background:var(--sur)">'
+      + '<div class="sp-chica">Tiempo</div>'
+      + '<div style="font-size:16px;font-weight:700">' + spEsc(spHoras(d.tiempos ? d.tiempos.horas_transcurridas : null)) + '</div>'
+      + '<div class="sp-chica">desde que se solicitó</div>'
+      + (d.tiempos && d.tiempos.horas_hasta_firma !== null
+          ? '<div class="sp-chica">hasta la firma: <strong>' + spEsc(spHoras(d.tiempos.horas_hasta_firma)) + '</strong></div>' : '')
+      + (d.tiempos && d.tiempos.abierto
+          ? '<div class="sp-chica">esperando en este paso: <strong>' + spEsc(spHoras(d.tiempos.abierto.horas)) + '</strong></div>' : '')
+      + (d.tiempos && d.tiempos.devoluciones
+          ? '<div class="sp-chica" style="color:#b45309">' + d.tiempos.devoluciones + ' devolución(es)</div>' : '')
       + '</div></div>';
 
   if (d.paso && d.paso.instrucciones && d.acciones.length) {
@@ -37817,6 +37866,13 @@ function spDetalleRender() {
       }).join('<span class="sp-chica">›</span>')
     + '</div>';
 
+  // Duración de cada tramo, indexada por el evento que lo resolvió, para poder
+  // mostrar cuánto tardó cada paso en la propia línea de tiempo.
+  var durPorEvento = {};
+  (d.tiempos && d.tiempos.tramos || []).forEach(function(tr) {
+    if (tr.hasta) durPorEvento[tr.hasta] = tr.horas;
+  });
+
   html += '<div style="font-size:12px;font-weight:700;margin-bottom:8px">Historial</div><ul class="sp-tl">'
     + (d.eventos || []).slice().reverse().map(function(e) {
         var cls = e.clase === 'avanza' ? 'sp-av' : (e.clase === 'devuelve' ? 'sp-dv' : (e.clase === 'rechaza' ? 'sp-rc' : ''));
@@ -37829,7 +37885,10 @@ function spDetalleRender() {
           + '<div style="font-size:12px"><strong>' + spEsc(e.accion) + '</strong>'
           + (e.paso_hasta ? ' <span class="sp-chica">→ ' + spEsc(e.paso_hasta) + '</span>' : '') + spEsc(dat) + '</div>'
           + '<div class="sp-chica">' + spEsc(e.actor_nombre || 'sistema')
-          + (e.actor_rol ? ' (' + spEsc(e.actor_rol) + ')' : '') + ' · ' + spEsc(e.creado_en) + '</div>'
+          + (e.actor_rol ? ' (' + spEsc(e.actor_rol) + ')' : '') + ' · ' + spEsc(e.creado_en)
+          + (durPorEvento[e.creado_en] !== undefined
+              ? ' · <strong>tardó ' + spEsc(spHoras(durPorEvento[e.creado_en])) + '</strong>' : '')
+          + '</div>'
           + (e.comentario ? '<div style="font-size:12px;margin-top:2px;padding:5px 8px;background:var(--bg2,#f8fafc);border-radius:6px">'
               + spEsc(e.comentario) + '</div>' : '')
           + '</li>';
@@ -37935,7 +37994,11 @@ function spCircuitoCargar() {
     SP.circuito = r.data;
     spApi('/usuarios').then(function(ru) {
       SP.usuarios = ru.ok ? (ru.data || []) : [];
-      spCircuitoRender();
+      // La cola es solo para admin: si vuelve 403 se dibuja el resto igual.
+      spApi('/outbox').then(function(ro) {
+        SP.outbox = ro.ok ? ro : null;
+        spCircuitoRender();
+      });
     });
   });
 }
@@ -37981,36 +38044,127 @@ function spCircuitoRender() {
       + ' style="padding:2px 7px;font-size:11px">Cambiar</button></td></tr>';
   });
   html += '</tbody></table></div>';
+
+  // ── Avisos por mail ─────────────────────────────────────────────────────
+  html += '<div style="font-size:12px;font-weight:700;margin:18px 0 6px">Avisos por mail</div>'
+    + '<div class="sp-chica" style="margin-bottom:8px">El aviso va al <strong>mail cargado en la ficha del usuario</strong>. '
+    + 'No hay una configuración de mails aparte: si una dirección está mal, se corrige en Usuarios. '
+    + 'El mail avisa y linkea al panel; aprobar exige iniciar sesión, para que la autorización quede atribuida a una persona.</div>'
+    + '<div style="margin-bottom:10px"><button class="btn bo bs" onclick="spProbarMail()" style="font-size:11px">✉ Mandar un mail de prueba</button></div>';
+
+  if (SP.outbox) {
+    var res = {};
+    (SP.outbox.resumen || []).forEach(function(x) { res[x.estado] = x.n; });
+    html += '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px;font-size:12px">'
+      + '<span class="sp-bad sp-ok">enviados: ' + (res.enviado || 0) + '</span>'
+      + '<span class="sp-bad sp-warn">pendientes: ' + (res.pendiente || 0) + '</span>'
+      + '<span class="sp-bad sp-err">con error: ' + (res.error || 0) + '</span>'
+      + '<span class="sp-bad sp-gris">descartados: ' + (res.descartado || 0) + '</span>'
+      + '</div>';
+    if (res.descartado) {
+      html += '<div style="background:rgba(245,158,11,.12);border-radius:8px;padding:8px 12px;font-size:12px;margin-bottom:8px">'
+        + '⚠ Hay avisos <strong>descartados</strong>: son pasos que quedaron sin ningún destinatario con mail cargado. '
+        + 'Esa gente no se enteró de nada.</div>';
+    }
+    var filas = (SP.outbox.data || []).slice(0, 25);
+    if (filas.length) {
+      html += '<div class="ab-table-wrap" style="max-height:320px;overflow:auto">'
+        + '<table class="pa-tbl" style="font-size:11px"><thead><tr>'
+        + '<th>Cuándo</th><th>Nº</th><th>A</th><th>Asunto</th><th>Estado</th><th>Detalle</th>'
+        + '</tr></thead><tbody>'
+        + filas.map(function(o) {
+            var b = o.estado === 'enviado' ? 'sp-ok' : (o.estado === 'error' ? 'sp-err'
+              : (o.estado === 'descartado' ? 'sp-gris' : 'sp-warn'));
+            return '<tr><td class="sp-chica">' + spEsc(String(o.creado_en || '').slice(5, 16)) + '</td>'
+              + '<td class="sp-chica">' + spEsc(o.numero || '—') + '</td>'
+              + '<td class="sp-chica">' + spEsc(o.destinatarios || '—') + '</td>'
+              + '<td class="sp-chica">' + spEsc(String(o.asunto || '').slice(0, 46)) + '</td>'
+              + '<td><span class="sp-bad ' + b + '">' + spEsc(o.estado) + '</span>'
+                + (o.intentos > 1 ? ' <span class="sp-chica">' + o.intentos + ' int.</span>' : '') + '</td>'
+              + '<td class="sp-chica" style="color:var(--err)">' + spEsc(String(o.ultimo_error || '').slice(0, 60)) + '</td>'
+              + '</tr>';
+          }).join('') + '</tbody></table></div>';
+    } else {
+      html += '<div class="emp" style="padding:14px">Todavía no se encoló ningún aviso.</div>';
+    }
+  } else {
+    html += '<div class="sp-chica">La cola de avisos la ve un administrador.</div>';
+  }
+
   document.getElementById('sp-circuito').innerHTML = html;
 }
 
-// Asignación simple por prompt: alcanza para la beta y evita construir un
-// configurador completo antes de saber cómo se usa.
+// Asignación de habilitados. Muestra el MAIL de cada uno: es a esa dirección que
+// va a llegar el aviso, así que verlo acá es lo que evita descubrir después que
+// nadie se enteró porque el mail estaba mal.
 function spAutorizadosAbrir(pasoClave) {
   var def = SP.circuito.def;
+  var paso = (def.pasos || []).filter(function(p) { return p.clave === pasoClave; })[0];
   var actuales = (def.autorizados || {})[pasoClave] || [];
-  var lista = (SP.usuarios || []).map(function(u, i) { return (i + 1) + ') ' + u.nombre + ' — ' + u.rol; }).join('\n');
-  var yaTxt = actuales.map(function(a) {
-    return a.tipo === 'rol' ? ('rol:' + a.rol) : (a.tipo === 'usuario' ? String(a.usuario_id) : a.tipo);
-  }).join(', ');
-  var v = prompt('Habilitados para "' + pasoClave + '".\n\nEscribí los números separados por coma.\n'
-    + 'También podés poner "rol:admin" o "solicitante".\n\nActual: ' + yaTxt + '\n\n' + lista, '');
-  if (v === null) return;
-  var partes = String(v).split(',').map(function(x) { return x.trim(); }).filter(Boolean);
-  if (!partes.length) return toast('No se cambió nada', 'er');
-  var out = [];
-  for (var i = 0; i < partes.length; i++) {
-    var t = partes[i];
-    if (t === 'solicitante') { out.push({ tipo: 'solicitante' }); continue; }
-    if (t.indexOf('rol:') === 0) { out.push({ tipo: 'rol', rol: t.slice(4) }); continue; }
-    var n = parseInt(t, 10);
-    var u = SP.usuarios[n - 1];
-    if (!u) return toast('No existe la opción "' + t + '"', 'er');
-    out.push({ tipo: 'usuario', usuario_id: u.id });
+  document.getElementById('sp-aut-paso').value = pasoClave;
+  document.getElementById('sp-aut-tit').textContent = 'Habilitados para: ' + (paso ? paso.nombre : pasoClave);
+
+  var marcado = {}, watcher = {};
+  var rolAdmin = false, solicitante = false;
+  actuales.forEach(function(a) {
+    if (a.tipo === 'usuario') { marcado[a.usuario_id] = true; if (a.watcher) watcher[a.usuario_id] = true; }
+    if (a.tipo === 'rol' && a.rol === 'admin') rolAdmin = true;
+    if (a.tipo === 'solicitante') solicitante = true;
+  });
+
+  var html = '<label style="display:flex;gap:7px;align-items:center;padding:6px 4px;font-size:13px;cursor:pointer;border-bottom:1px solid var(--bor)">'
+    + '<input type="checkbox" id="sp-aut-rol-admin"' + (rolAdmin ? ' checked' : '') + '>'
+    + '<span><strong>Todos los administradores</strong>'
+    + '<div class="sp-chica">Conviene dejarlo mientras se prueba, para que nunca quede un paso sin nadie</div></span></label>';
+
+  if (paso && paso.tipo === 'inicio') {
+    html += '<label style="display:flex;gap:7px;align-items:center;padding:6px 4px;font-size:13px;cursor:pointer;border-bottom:1px solid var(--bor)">'
+      + '<input type="checkbox" id="sp-aut-solicitante"' + (solicitante ? ' checked' : '') + '>'
+      + '<span><strong>El propio solicitante</strong>'
+      + '<div class="sp-chica">Es lo que le permite al comprador enviar SU solicitud</div></span></label>';
   }
+
+  html += '<div style="font-size:12px;font-weight:700;margin:12px 0 4px">Personas</div>'
+    + '<div class="ab-table-wrap" style="max-height:320px;overflow:auto">'
+    + '<table class="pa-tbl" style="font-size:12px"><thead><tr>'
+    + '<th style="width:40px">Sí</th><th>Nombre</th><th>Mail al que le llega</th><th>Rol</th>'
+    + '<th style="width:80px">Solo aviso</th></tr></thead><tbody>'
+    + (SP.usuarios || []).map(function(u) {
+        return '<tr><td><input type="checkbox" class="sp-aut-u" data-uid="' + u.id + '"'
+          + (marcado[u.id] ? ' checked' : '') + '></td>'
+          + '<td>' + spEsc(u.nombre) + '</td>'
+          + '<td class="sp-chica">' + spEsc(u.email || '') + '</td>'
+          + '<td class="sp-chica">' + spEsc(u.rol) + '</td>'
+          + '<td><input type="checkbox" class="sp-aut-w" data-uid="' + u.id + '"'
+          + (watcher[u.id] ? ' checked' : '') + ' title="Recibe el aviso pero no puede resolver"></td>'
+          + '</tr>';
+      }).join('')
+    + '</tbody></table></div>';
+
+  document.getElementById('sp-aut-lista').innerHTML = html;
+  document.getElementById('sp-mb-aut').classList.add('on');
+}
+
+function spAutGuardar() {
+  var pasoClave = document.getElementById('sp-aut-paso').value;
+  var out = [];
+  if (document.getElementById('sp-aut-rol-admin').checked) out.push({ tipo: 'rol', rol: 'admin' });
+  var sol = document.getElementById('sp-aut-solicitante');
+  if (sol && sol.checked) out.push({ tipo: 'solicitante' });
+  document.querySelectorAll('.sp-aut-u').forEach(function(chk) {
+    if (!chk.checked) return;
+    var uid = parseInt(chk.getAttribute('data-uid'), 10);
+    var w = document.querySelector('.sp-aut-w[data-uid="' + uid + '"]');
+    out.push({ tipo: 'usuario', usuario_id: uid, watcher: w && w.checked ? 1 : 0 });
+  });
+  if (!out.length) return toast('Tiene que quedar al menos uno habilitado, o el paso se traba', 'er');
+
   spApi('/circuito/pasos/' + encodeURIComponent(pasoClave) + '/autorizados',
     { method: 'PUT', body: JSON.stringify({ autorizados: out }) }).then(function(r) {
       if (!r.ok) { spErr(r); return; }
+      document.getElementById('sp-mb-aut').classList.remove('on');
+      // El validador corre DESPUÉS de guardar: si la edición dejó el circuito
+      // trabado hay que verlo ahora, no cuando una solicitud se clave.
       if (r.validacion && !r.validacion.ok) {
         alert('Se guardó, pero el circuito quedó con problemas:\n\n' + r.validacion.errores.join('\n'));
       } else {
@@ -38018,6 +38172,119 @@ function spAutorizadosAbrir(pasoClave) {
       }
       spCircuitoCargar();
     });
+}
+
+// Mail de prueba: verifica el camino completo (cola incluida) antes de lanzar.
+function spProbarMail() {
+  var lista = (SP.usuarios || []).map(function(u, i) {
+    return (i + 1) + ') ' + u.nombre + ' — ' + (u.email || 'SIN MAIL');
+  }).join('\n');
+  var v = prompt('¿A quién le mando el mail de prueba?\nEscribí el número.\n\n' + lista, '1');
+  if (!v) return;
+  var u = SP.usuarios[parseInt(v, 10) - 1];
+  if (!u) return toast('No existe esa opción', 'er');
+  spApi('/probar-mail', { method: 'POST', body: JSON.stringify({ usuario_id: u.id }) }).then(function(r) {
+    if (!r.ok) { spErr(r); return; }
+    toast('✓ Encolado a ' + r.email + ' — mirá la cola abajo', 'ok');
+    setTimeout(spCircuitoCargar, 2500);   // dar tiempo a que el worker lo mande
+  });
+}
+
+// ── Tablero de tiempos ────────────────────────────────────────────────────
+
+function spTiemposCargar() {
+  var cont = document.getElementById('sp-tiempos');
+  cont.innerHTML = '<div class="emp">Calculando…</div>';
+  spApi('/metricas').then(function(r) {
+    if (!r.ok) { cont.innerHTML = '<div class="emp" style="color:var(--err)">' + spEsc(r.error) + '</div>'; return; }
+    if (r.data.vacio) {
+      cont.innerHTML = '<div class="emp" style="padding:26px;text-align:center">'
+        + 'Todavía no hay solicitudes. Los tiempos se calculan a partir del historial real.</div>';
+      return;
+    }
+    SP.metricas = r.data;
+    spTiemposRender();
+  });
+}
+
+function spTiemposRender() {
+  var d = SP.metricas, g = d.global;
+  var html = '<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:14px">'
+    + '<div style="flex:1;min-width:200px;border:1px solid var(--bor);border-radius:10px;padding:12px;background:var(--sur)">'
+      + '<div class="sp-chica">De la solicitud a la firma — promedio</div>'
+      + '<div style="font-size:24px;font-weight:700">' + spEsc(spHoras(g.horas_prom_hasta_firma)) + '</div>'
+      + '<div class="sp-chica">mediana ' + spEsc(spHoras(g.horas_p50_hasta_firma))
+        + ' · peor caso ' + spEsc(spHoras(g.horas_max_hasta_firma)) + '</div>'
+      + '<div class="sp-chica">sobre ' + g.n_firmadas + ' firmada(s)</div></div>'
+    + '<div style="flex:1;min-width:200px;border:1px solid var(--bor);border-radius:10px;padding:12px;background:var(--sur)">'
+      + '<div class="sp-chica">Circuito completo — promedio</div>'
+      + '<div style="font-size:24px;font-weight:700">' + spEsc(spHoras(g.horas_prom_hasta_cierre)) + '</div>'
+      + '<div class="sp-chica">' + g.n_cerradas + ' completada(s)</div></div>'
+    + '<div style="flex:1;min-width:200px;border:1px solid var(--bor);border-radius:10px;padding:12px;background:var(--sur)">'
+      + '<div class="sp-chica">En curso ahora</div>'
+      + '<div style="font-size:24px;font-weight:700">' + g.n_en_curso + '</div>'
+      + '<div class="sp-chica">' + g.devoluciones + ' devolución(es) en total</div></div>'
+    + '</div>';
+
+  html += '<div style="font-size:12px;font-weight:700;margin-bottom:6px">Cuánto tarda cada paso</div>'
+    + '<div class="ab-table-wrap"><table class="pa-tbl" style="font-size:12px"><thead><tr>'
+    + '<th>Paso</th><th style="text-align:right">Veces resuelto</th>'
+    + '<th style="text-align:right">Promedio</th><th style="text-align:right">Mediana</th>'
+    + '<th style="text-align:right">Peor caso</th><th style="text-align:right">Frenadas ahí ahora</th>'
+    + '</tr></thead><tbody>';
+  var peor = (d.pasos[0] || {}).horas_prom || 0;
+  d.pasos.forEach(function(p) {
+    // Se resalta el paso más lento: es la respuesta a "dónde están las demoras".
+    var esPeor = peor > 0 && p.horas_prom === peor;
+    html += '<tr' + (esPeor ? ' style="background:rgba(245,158,11,.10)"' : '') + '>'
+      + '<td><strong>' + spEsc(p.nombre) + '</strong>'
+        + (esPeor ? ' <span class="sp-bad sp-warn">el más lento</span>' : '') + '</td>'
+      + '<td class="sp-num">' + p.n + '</td>'
+      + '<td class="sp-num"><strong>' + spEsc(spHoras(p.horas_prom)) + '</strong></td>'
+      + '<td class="sp-num">' + spEsc(spHoras(p.horas_p50)) + '</td>'
+      + '<td class="sp-num">' + spEsc(spHoras(p.horas_max)) + '</td>'
+      + '<td class="sp-num">' + (p.en_espera ? p.en_espera + ' <span class="sp-chica">(máx '
+          + spEsc(spHoras(p.en_espera_horas_max)) + ')</span>' : '—') + '</td></tr>';
+  });
+  html += '</tbody></table></div>'
+    + '<div class="sp-chica" style="margin-top:6px">El <strong>promedio</strong> puede estar corrido por un caso '
+    + 'extremo; la <strong>mediana</strong> es lo que pasa habitualmente. "Frenadas ahí ahora" distingue un paso '
+    + 'que siempre es lento de uno que está tapado hoy.</div>';
+
+  if ((d.mas_demoradas || []).length) {
+    html += '<div style="font-size:12px;font-weight:700;margin:16px 0 6px">Las que más están esperando</div>'
+      + '<div class="ab-table-wrap"><table class="pa-tbl" style="font-size:12px"><thead><tr>'
+      + '<th>Nº</th><th>Proveedor</th><th style="text-align:right">Monto</th><th>Frenada en</th>'
+      + '<th style="text-align:right">Esperando</th><th style="text-align:right">Total</th>'
+      + '<th style="width:60px"></th></tr></thead><tbody>'
+      + d.mas_demoradas.map(function(x) {
+          return '<tr><td>' + spEsc(x.numero) + '</td><td>' + spEsc(x.proveedor) + '</td>'
+            + '<td class="sp-num">' + spEsc(spMoney(x.monto, x.moneda)) + '</td>'
+            + '<td>' + spEsc(x.paso_nombre) + '</td>'
+            + '<td class="sp-num"><strong>' + spEsc(spHoras(x.esperando_horas)) + '</strong></td>'
+            + '<td class="sp-num sp-chica">' + spEsc(spHoras(x.horas_transcurridas)) + '</td>'
+            + '<td><button class="btn bo bs" onclick="spDetalleAbrir(' + x.id + ')" style="padding:2px 6px;font-size:11px">Ver</button></td>'
+            + '</tr>';
+        }).join('') + '</tbody></table></div>';
+  }
+
+  if ((d.mas_lentas_firmadas || []).length) {
+    html += '<div style="font-size:12px;font-weight:700;margin:16px 0 6px">Las que tardaron más en llegar a la firma</div>'
+      + '<div class="ab-table-wrap"><table class="pa-tbl" style="font-size:12px"><thead><tr>'
+      + '<th>Nº</th><th>Proveedor</th><th style="text-align:right">Hasta la firma</th>'
+      + '<th style="text-align:right">Devoluciones</th><th style="width:60px"></th></tr></thead><tbody>'
+      + d.mas_lentas_firmadas.map(function(x) {
+          return '<tr><td>' + spEsc(x.numero) + '</td><td>' + spEsc(x.proveedor) + '</td>'
+            + '<td class="sp-num"><strong>' + spEsc(spHoras(x.horas_hasta_firma)) + '</strong></td>'
+            + '<td class="sp-num">' + (x.devoluciones || '—') + '</td>'
+            + '<td><button class="btn bo bs" onclick="spDetalleAbrir(' + x.id + ')" style="padding:2px 6px;font-size:11px">Ver</button></td>'
+            + '</tr>';
+        }).join('') + '</tbody></table></div>'
+      + '<div class="sp-chica" style="margin-top:6px">Las devoluciones son la explicación más común de un tiempo alto: '
+      + 'cada vuelta atrás reinicia el recorrido.</div>';
+  }
+
+  document.getElementById('sp-tiempos').innerHTML = html;
 }
 
 // ── Routing ───────────────────────────────────────────────────────────────

@@ -334,6 +334,10 @@ router.get('/solicitudes/:id', wrap((req, res) => {
   const eventos = db.prepare('SELECT * FROM sp_eventos WHERE solicitud_id=? ORDER BY seq').all(s.id);
   const adjuntos = db.prepare('SELECT id, nombre, mime, tamano, tipo, creado_en FROM sp_adjuntos WHERE solicitud_id=? AND eliminado_en IS NULL').all(s.id);
   const { resolutores } = resolverAutorizados(def, s.paso_actual_clave, s);
+  // tiempos.tramos trae la duración de cada paso resuelto, en el mismo orden que
+  // los eventos que lo resolvieron: el historial dice quién hizo qué, y esto dice
+  // cuánto tardó cada tramo.
+  const t = tiemposDe(s, eventos);
   res.json({
     ok: true,
     data: {
@@ -343,7 +347,8 @@ router.get('/solicitudes/:id', wrap((req, res) => {
       acciones: accionesDisponibles(def, s, req.user),
       bloqueo_sod: bloqueadoPorSoD(def, s, s.paso_actual_clave, req.user.id),
       esperando_a: resolutores.map(u => ({ id: u.id, nombre: u.nombre })),
-      eventos, adjuntos
+      eventos, adjuntos,
+      tiempos: t
     }
   });
 }));
@@ -528,6 +533,186 @@ router.post('/solicitudes/:id/cancelar', wrap((req, res) => {
   })();
   procesarEnBackground();
   res.json({ ok: true });
+}));
+
+// ══════════════════════════════════════════════════════════════════════════
+// TIEMPOS — dónde están las demoras
+// ══════════════════════════════════════════════════════════════════════════
+// Los timestamps se guardan como texto 'YYYY-MM-DD HH:MM:SS'. Se parsean con
+// Date.UTC a propósito: los dos lados de cada resta salen del mismo reloj, así que
+// la diferencia es exacta sin importar la zona horaria del contenedor.
+function msDe(t) {
+  const m = String(t || '').match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):(\d{2})/);
+  return m ? Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]) : null;
+}
+const horasEntre = (a, b) => {
+  const x = msDe(a), y = msDe(b);
+  return (x === null || y === null) ? null : (y - x) / 3600000;
+};
+function percentil(arr, p) {
+  if (!arr.length) return null;
+  const s = arr.slice().sort((a, b) => a - b);
+  const i = Math.min(s.length - 1, Math.max(0, Math.round((p / 100) * (s.length - 1))));
+  return s[i];
+}
+const prom = (arr) => (arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : null);
+
+// Duración de cada paso de UNA solicitud. El tiempo en un paso va desde que se
+// entró (el evento anterior, o la creación) hasta que se resolvió.
+function tiemposDe(sol, eventos) {
+  const evs = eventos.slice().sort((a, b) => a.seq - b.seq);
+  const tramos = [];
+  let entradaEn = sol.creado_en;
+  let entradaPaso = evs.length ? (evs[0].paso_hasta || sol.paso_actual_clave) : sol.paso_actual_clave;
+
+  for (const e of evs) {
+    if (e.accion === 'crear' || e.accion === 'editar') { entradaEn = e.creado_en; continue; }
+    tramos.push({
+      paso: e.paso_desde, accion: e.accion, hito: e.hito, clase: e.clase,
+      desde: entradaEn, hasta: e.creado_en,
+      horas: horasEntre(entradaEn, e.creado_en),
+      actor: e.actor_nombre
+    });
+    entradaEn = e.creado_en;
+    entradaPaso = e.paso_hasta;
+  }
+  // Si sigue abierta, el paso actual lleva tiempo corriendo.
+  let abierto = null;
+  if (sol.estado_global === 'en_curso') {
+    abierto = { paso: sol.paso_actual_clave, desde: sol.paso_actual_desde || entradaEn, horas: null };
+    abierto.horas = horasEntre(abierto.desde, new Date().toISOString().slice(0, 19).replace('T', ' '));
+  }
+
+  const evFirma = evs.find(e => e.hito === 'firma' && e.clase === 'avanza');
+  const devoluciones = evs.filter(e => e.clase === 'devuelve').length;
+
+  return {
+    tramos, abierto, devoluciones,
+    horas_hasta_firma: evFirma ? horasEntre(sol.creado_en, evFirma.creado_en) : null,
+    horas_hasta_cierre: sol.cerrado_en ? horasEntre(sol.creado_en, sol.cerrado_en) : null,
+    horas_transcurridas: horasEntre(sol.creado_en,
+      sol.cerrado_en || new Date().toISOString().slice(0, 19).replace('T', ' '))
+  };
+}
+
+// Tablero de tiempos: es lo que responde "dónde tenemos las demoras".
+router.get('/metricas', wrap((req, res) => {
+  const soc = getSociedadId(req);
+  const sols = db.prepare(`
+    SELECT * FROM sp_solicitudes WHERE sociedad_id=? AND eliminado_en IS NULL
+  `).all(soc);
+  if (!sols.length) return res.json({ ok: true, data: { vacio: true } });
+
+  const evs = db.prepare(`
+    SELECT e.* FROM sp_eventos e JOIN sp_solicitudes s ON s.id = e.solicitud_id
+    WHERE s.sociedad_id=? AND s.eliminado_en IS NULL ORDER BY e.solicitud_id, e.seq
+  `).all(soc);
+  const porSol = new Map();
+  for (const e of evs) {
+    if (!porSol.has(e.solicitud_id)) porSol.set(e.solicitud_id, []);
+    porSol.get(e.solicitud_id).push(e);
+  }
+
+  // Nombres de paso: se toman del snapshot de cada solicitud, que es la definición
+  // con la que efectivamente se rigió.
+  const nombrePaso = {};
+  const porPaso = {};          // clave -> horas[]
+  const esperandoAhora = {};   // clave -> horas[] de las que están frenadas ahí
+  const hastaFirma = [];
+  const hastaCierre = [];
+  let devolucionesTot = 0;
+  const detalle = [];
+
+  for (const s of sols) {
+    let def = null;
+    try { def = JSON.parse(s.def_snapshot_json); } catch (_) {}
+    (def?.pasos || []).forEach(p => { nombrePaso[p.clave] = p.nombre; });
+
+    const t = tiemposDe(s, porSol.get(s.id) || []);
+    devolucionesTot += t.devoluciones;
+    for (const tr of t.tramos) {
+      if (tr.horas === null || !tr.paso) continue;
+      (porPaso[tr.paso] = porPaso[tr.paso] || []).push(tr.horas);
+    }
+    if (t.abierto && t.abierto.horas !== null) {
+      (esperandoAhora[t.abierto.paso] = esperandoAhora[t.abierto.paso] || []).push(t.abierto.horas);
+    }
+    if (t.horas_hasta_firma !== null) hastaFirma.push(t.horas_hasta_firma);
+    if (t.horas_hasta_cierre !== null) hastaCierre.push(t.horas_hasta_cierre);
+
+    detalle.push({
+      id: s.id, numero: s.numero, proveedor: s.proveedor_texto,
+      monto: s.monto, moneda: s.moneda, estado: s.estado_global,
+      paso: s.paso_actual_clave, paso_nombre: nombrePaso[s.paso_actual_clave] || s.paso_actual_clave,
+      devoluciones: t.devoluciones,
+      horas_hasta_firma: t.horas_hasta_firma,
+      horas_transcurridas: t.horas_transcurridas,
+      esperando_horas: t.abierto ? t.abierto.horas : null
+    });
+  }
+
+  const pasos = Object.keys(porPaso).map(clave => ({
+    clave, nombre: nombrePaso[clave] || clave,
+    n: porPaso[clave].length,
+    horas_prom: prom(porPaso[clave]),
+    horas_p50: percentil(porPaso[clave], 50),
+    horas_max: Math.max(...porPaso[clave]),
+    // Lo que está frenado AHÍ en este momento: distingue "este paso es lento" de
+    // "este paso está tapado hoy".
+    en_espera: (esperandoAhora[clave] || []).length,
+    en_espera_horas_max: (esperandoAhora[clave] || []).length ? Math.max(...esperandoAhora[clave]) : null
+  })).sort((a, b) => (b.horas_prom || 0) - (a.horas_prom || 0));
+
+  res.json({
+    ok: true,
+    data: {
+      global: {
+        n_total: sols.length,
+        n_firmadas: hastaFirma.length,
+        n_cerradas: hastaCierre.length,
+        n_en_curso: sols.filter(s => s.estado_global === 'en_curso').length,
+        devoluciones: devolucionesTot,
+        horas_prom_hasta_firma: prom(hastaFirma),
+        horas_p50_hasta_firma: percentil(hastaFirma, 50),
+        horas_max_hasta_firma: hastaFirma.length ? Math.max(...hastaFirma) : null,
+        horas_prom_hasta_cierre: prom(hastaCierre)
+      },
+      pasos,
+      // Las más demoradas, que es donde se mira primero.
+      mas_demoradas: detalle.slice()
+        .filter(d => d.estado === 'en_curso')
+        .sort((a, b) => (b.esperando_horas || 0) - (a.esperando_horas || 0)).slice(0, 15),
+      mas_lentas_firmadas: detalle.slice()
+        .filter(d => d.horas_hasta_firma !== null)
+        .sort((a, b) => b.horas_hasta_firma - a.horas_hasta_firma).slice(0, 10)
+    }
+  });
+}));
+
+// Mail de prueba: sirve para verificar, ANTES de lanzar, que Brevo esté
+// configurado y que la dirección del usuario sea la correcta. Encola igual que un
+// aviso real, así se prueba el camino completo y no solo la API de Brevo.
+router.post('/probar-mail', wrap((req, res) => {
+  if (!esAdmin(req)) throw Object.assign(new Error('Solo administradores'), { status: 403 });
+  const uid = vNum(req.body?.usuario_id, 'El usuario', { min: 1 });
+  const u = db.prepare('SELECT id, nombre, email FROM usuarios WHERE id=? AND activo=1').get(uid);
+  if (!u) throw bad('El usuario no existe o está inactivo');
+  if (!u.email) throw bad(`${u.nombre} no tiene mail cargado en su usuario: no hay a dónde avisarle.`);
+
+  // dedup_key con marca de tiempo para poder mandar varias pruebas.
+  const marca = new Date().toISOString().replace(/[^0-9]/g, '');
+  encolar({
+    solicitudId: null, eventoId: null,
+    dedupKey: 'prueba:' + uid + ':' + marca,
+    destinatarios: [u.email],
+    asunto: 'Prueba de avisos · Órdenes de Pago',
+    cuerpo: `Hola ${u.nombre},\n\n`
+      + 'Este es un mail de prueba del circuito de órdenes de pago. Si lo estás leyendo, '
+      + 'los avisos del circuito te van a llegar a esta dirección.\n\n'
+      + `Enviado por ${req.user.nombre || 'un administrador'} desde el panel.\n\n${PANEL_URL}\n`
+  });
+  procesarEnBackground();
+  res.json({ ok: true, email: u.email, nombre: u.nombre });
 }));
 
 // Estado de la cola de mails: es lo que permite decir "esto se avisó" o "no salió".
