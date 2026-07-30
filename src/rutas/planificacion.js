@@ -644,6 +644,24 @@ router.get('/productos', wrap((req, res) => {
   res.json({ ok: true, data: porPadre.get(0) || [], temporada_id: temp, todos: filas });
 }));
 
+// Orden de los productos. Define el orden de las columnas de la grilla de
+// objetivos y del árbol, así se pueden agrupar los melones juntos o los propios
+// juntos. Reemplazo total del orden de los ids que se manden.
+router.put('/productos/orden', wrap((req, res) => {
+  const soc = getSociedadId(req);
+  const ids = req.body?.ids;
+  if (!Array.isArray(ids) || !ids.length) throw bad('Faltan los productos a ordenar');
+  db.transaction(() => {
+    const upd = db.prepare(`UPDATE pli_productos SET orden=?, actualizado_en=${AHORA} WHERE id=? AND sociedad_id=?`);
+    ids.forEach((id, i) => {
+      const pid = parseInt(id, 10);
+      if (!Number.isInteger(pid)) throw bad('Hay un producto inválido en el orden');
+      upd.run(i + 1, pid, soc);
+    });
+  })();
+  res.json({ ok: true });
+}));
+
 // Descendientes de un nodo (para validar ciclos y borrados)
 function descendientes(id, guarda = 0) {
   if (guarda > 20) return [];

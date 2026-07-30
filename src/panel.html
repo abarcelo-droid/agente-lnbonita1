@@ -10878,6 +10878,27 @@ function sgRepExport(){
     .pli-inp-num[type=number] { -moz-appearance:textfield }
     #sec-pli-planificacion .pa-tbl th { white-space:nowrap }
     .pli-grp-head td { background:var(--bg2,#f1f5f9); font-weight:700; font-size:12px; padding:7px 10px }
+    /* Grilla de objetivos: encabezado y totales fijos, y la columna de la semana
+       pegada a la izquierda. Con 50 semanas y 6 productos, sin esto uno se pierde
+       tanto para abajo como para el costado. Las celdas fijas necesitan fondo
+       opaco, si no se transparenta el contenido que pasa por debajo. */
+    #pli-objetivos .pli-grilla { max-height:460px; overflow:auto }
+    #pli-objetivos .pli-grilla table { border-collapse:separate; border-spacing:0 }
+    #pli-objetivos .pli-grilla thead th { position:sticky; top:0; z-index:3;
+      background:var(--sur); box-shadow:inset 0 -1px 0 var(--bor) }
+    #pli-objetivos .pli-grilla tfoot td { position:sticky; bottom:0; z-index:3;
+      background:var(--bg2,#f1f5f9); box-shadow:inset 0 1px 0 var(--bor); font-weight:700 }
+    #pli-objetivos .pli-grilla th:first-child,
+    #pli-objetivos .pli-grilla td:first-child { position:sticky; left:0; z-index:2; background:var(--sur) }
+    #pli-objetivos .pli-grilla thead th:first-child,
+    #pli-objetivos .pli-grilla tfoot td:first-child { z-index:4 }
+    /* La fila con datos se resalta entera, incluida la celda fija de la izquierda:
+       si no, la primera columna queda blanca y rompe la lectura de la fila. */
+    #pli-objetivos .pli-grilla tr.pli-con-datos td,
+    #pli-objetivos .pli-grilla tr.pli-con-datos td:first-child { background:#eafaf0 }
+    .pli-mover { border:none; background:transparent; cursor:pointer; color:var(--mut);
+      font-size:11px; padding:0 2px; line-height:1 }
+    .pli-mover:hover { color:var(--burg) }
     .pli-vista { color:var(--mut); background:var(--sur) }
     .pli-vista.on { background:var(--burg); color:#fff }
     .pli-sem-vencida td  { background:rgba(239,68,68,.07) }
@@ -36655,11 +36676,19 @@ function pliObjRender() {
     + 'Las semanas son ISO (la 1 es la que contiene el primer jueves del año). '
     + 'Lo que dejes en 0 no se guarda, así que podés borrar las que no uses o usar 🧹.</div>';
 
-  html += '<div class="ab-table-wrap" style="max-height:420px;overflow:auto">'
+  html += '<div class="pli-grilla">'
     + '<table class="pa-tbl" style="font-size:12px"><thead><tr>'
     + '<th style="min-width:110px">Semana</th>'
-    + raices.map(function(pr) {
-        return '<th style="text-align:right;min-width:130px">' + pliEsc(pr.nombre)
+    // Las flechas mueven la columna: así se agrupan los melones juntos o los
+    // productos propios juntos. El orden se guarda y vale también para el árbol.
+    + raices.map(function(pr, i) {
+        return '<th style="text-align:right;min-width:130px">'
+          + (conf ? '' :
+              '<div style="float:left">'
+              + (i > 0 ? '<button class="pli-mover" title="Mover a la izquierda" onclick="pliMoverCol(' + i + ',-1)">◀</button>' : '')
+              + (i < raices.length - 1 ? '<button class="pli-mover" title="Mover a la derecha" onclick="pliMoverCol(' + i + ',1)">▶</button>' : '')
+              + '</div>')
+          + pliEsc(pr.nombre)
           + '<div class="pli-cel-chica">' + pliEsc(pr.unidad) + '</div></th>';
       }).join('')
     + '<th style="text-align:right;min-width:100px">Total</th>'
@@ -36682,7 +36711,7 @@ function pliObjRender() {
     var rot = pliRotuloSemana(s);
     // Las filas con datos se destacan: con 50 semanas en pantalla, encontrar las
     // cargadas a ojo es imposible si todas se ven igual.
-    html += '<tr' + (totFila > 0 ? ' style="background:rgba(74,222,128,.07)"' : '') + '>'
+    html += '<tr' + (totFila > 0 ? ' class="pli-con-datos"' : '') + '>'
       + '<td>' + (s
           ? '<strong style="font-size:14px">' + pliEsc(rot.corto) + '</strong>'
             + '<div class="pli-cel-chica">' + pliEsc(rot.largo) + '</div>'
@@ -36694,7 +36723,9 @@ function pliObjRender() {
       + '</tr>';
   });
 
-  html += '</tbody><tfoot><tr class="pli-grp-head"><td>TOTAL</td>'
+  // El total va en tfoot FIJO al pie del scroll. Antes quedaba después de las 50
+  // semanas, o sea fuera de la vista: el número existía y no se veía nunca.
+  html += '</tbody><tfoot><tr><td>TOTAL</td>'
     + raices.map(function(pr) { return '<td class="pli-num">' + pliN(totCol[pr.id] || 0) + '</td>'; }).join('')
     + '<td class="pli-num">' + pliN(totGen) + '</td>' + (conf ? '' : '<td></td>')
     + '</tr></tfoot></table></div></div>';
@@ -36713,6 +36744,27 @@ function pliFechaCorta(iso) {
 
 // Se pide el NÚMERO de semana, que es como se maneja el calendario agrícola.
 // También acepta una fecha, por si alguien la tiene a mano.
+// Mueve una columna de producto. Se guarda antes de redibujar, porque el orden
+// vale también para el árbol y para cualquier plan que se abra después.
+function pliMoverCol(i, dir) {
+  var arr = PLI.arbol.slice();
+  var j = i + dir;
+  if (j < 0 || j >= arr.length) return;
+  var tmp = arr[i]; arr[i] = arr[j]; arr[j] = tmp;
+  PLI.arbol = arr;
+  pliObjRender();   // respuesta inmediata; el guardado va en paralelo
+  pliApi('/productos/orden', {
+    method: 'PUT',
+    body: JSON.stringify({ ids: arr.map(function(p) { return p.id; }) })
+  }).then(function(r) {
+    // El árbol de la otra solapa usa el mismo orden, así que se recarga y se
+    // vuelve a dibujar la grilla con lo que quedó guardado de verdad.
+    PLI.prodCargados = false;
+    pliProdCargar(function() { pliObjRender(); });
+    if (!r.ok) pliErr(r);
+  });
+}
+
 function pliObjAgregarSemana() {
   var t = (PLI.temporadas || []).filter(function(x) { return x.id === PLI.temporadaId; })[0];
   var m = t && t.nombre ? String(t.nombre).match(/(20\d{2})/) : null;
