@@ -131,7 +131,20 @@ function avisarPaso(def, sol, pasoClave, eventoId) {
   // tocar, y después la bandeja le aparece vacía. El caso típico es el solicitante,
   // que suele estar habilitado para autorizar pero no sobre su propio pedido.
   const puedenActuar = resolutores.filter(u => !bloqueadoPorSoD(def, sol, pasoClave, u.id));
-  const dest = [...puedenActuar, ...watchers].map(u => u.email).filter(Boolean);
+
+  // Si el solicitante eligió a quién le pide el OK, el aviso va SOLO a esa persona.
+  // "rol admin" se expande a todos los administradores, así que sin esto una
+  // solicitud dispara un mail a cada uno y nadie se siente responsable.
+  //
+  // Dirige el AVISO, no el permiso: los demás habilitados siguen viendo la
+  // solicitud en su bandeja y pueden resolverla. Si el elegido está de licencia, el
+  // pedido no se traba, solo que los otros no recibieron el mail.
+  let destinatarios = puedenActuar;
+  if (paso.hito === 'autorizacion' && sol.autorizador_id) {
+    const elegido = puedenActuar.filter(u => u.id === sol.autorizador_id);
+    if (elegido.length) destinatarios = elegido;
+  }
+  const dest = [...destinatarios, ...watchers].map(u => u.email).filter(Boolean);
 
   const pl = plantillaDe(def, 'paso:' + pasoClave);
   const asunto = pl ? pl.asunto : 'Te toca revisar {{numero}} · {{proveedor}}';
@@ -256,6 +269,28 @@ router.put('/circuito/pasos/:clave/autorizados', wrap((req, res) => {
   res.json({ ok: true, validacion: val });
 }));
 
+// A quién le puede pedir el OK el solicitante: los habilitados del paso de
+// autorización, sacando a los que la separación de funciones dejaría afuera para
+// ESTE solicitante (empezando por él mismo).
+router.get('/autorizadores', wrap((req, res) => {
+  const v = versionActiva();
+  if (!v) throw noEncontrado('No hay circuito activo');
+  const def = armarSnapshot(v.id);
+  const paso = (def.pasos || []).find(p => p.hito === 'autorizacion');
+  if (!paso) return res.json({ ok: true, data: [], paso: null });
+
+  // Solicitud ficticia con el usuario actual como solicitante: alcanza para que la
+  // separación de funciones descarte a quien no podría autorizarle a él.
+  const ficticia = { id: 0, solicitante_id: req.user.id };
+  const { resolutores } = resolverAutorizados(def, paso.clave, ficticia);
+  const data = resolutores
+    .filter(u => u.email)
+    .filter(u => !bloqueadoPorSoD(def, ficticia, paso.clave, u.id))
+    .map(u => ({ id: u.id, nombre: u.nombre, email: u.email, rol: u.rol }))
+    .sort((a, b) => String(a.nombre).localeCompare(String(b.nombre), 'es'));
+  res.json({ ok: true, data, paso: { clave: paso.clave, nombre: paso.nombre } });
+}));
+
 // Usuarios elegibles para el configurador
 router.get('/usuarios', wrap((req, res) => {
   const data = db.prepare(`
@@ -268,6 +303,13 @@ router.get('/usuarios', wrap((req, res) => {
 // ══════════════════════════════════════════════════════════════════════════
 // SOLICITUDES
 // ══════════════════════════════════════════════════════════════════════════
+
+const nombreDe = (uid) => {
+  try {
+    const u = db.prepare('SELECT nombre FROM usuarios WHERE id=?').get(uid);
+    return u ? u.nombre : null;
+  } catch (e) { return null; }
+};
 
 function getSol(soc, id) {
   const s = db.prepare('SELECT * FROM sp_solicitudes WHERE id=? AND sociedad_id=? AND eliminado_en IS NULL').get(id, soc);
@@ -323,27 +365,44 @@ router.post('/solicitudes', wrap((req, res) => {
     }
   }
 
+  // A quién le pide el OK. Se valida contra los elegibles reales: si el solicitante
+  // manda cualquier id, el aviso iría a alguien que no puede resolver.
+  let autorizadorId = null;
+  if (b.autorizador_id) {
+    const pasoAut = (def.pasos || []).find(p => p.hito === 'autorizacion');
+    const ficticia = { id: 0, solicitante_id: req.user.id };
+    const elegibles = pasoAut
+      ? resolverAutorizados(def, pasoAut.clave, ficticia).resolutores
+          .filter(u => u.email && !bloqueadoPorSoD(def, ficticia, pasoAut.clave, u.id))
+      : [];
+    const el = elegibles.filter(u => u.id === Number(b.autorizador_id))[0];
+    if (!el) throw bad('La persona elegida para autorizar no está habilitada para este paso');
+    autorizadorId = el.id;
+  }
+
   const id = db.transaction(() => {
     const numero = numeroNuevo(soc);
     const r = db.prepare(`
       INSERT INTO sp_solicitudes
         (sociedad_id, numero, flujo_version_id, def_snapshot_json, solicitante_id, solicitante_nombre,
          proveedor_texto, cuenta_texto, concepto, monto, moneda, comprobante_tipo, comprobante_numero,
-         fecha_necesidad, prioridad, justificacion_duplicado,
+         fecha_necesidad, prioridad, justificacion_duplicado, autorizador_id,
          paso_actual_clave, paso_actual_hito, paso_actual_desde, estado_global)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now','localtime'),'en_curso')
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now','localtime'),'en_curso')
     `).run(soc, numero, v.id, JSON.stringify(def), req.user.id, req.user.nombre || null,
            proveedor, vCuenta(b.cuenta_texto), concepto, monto, moneda,
            vTexto(b.comprobante_tipo, 'El tipo de comprobante', { max: 30 }), cbteNum,
            vFecha(b.fecha_necesidad, 'La fecha de necesidad'),
            b.prioridad === 'urgente' ? 'urgente' : 'normal',
-           vTexto(b.justificacion_duplicado, 'La justificación', { max: 500 }),
+           vTexto(b.justificacion_duplicado, 'La justificación', { max: 500 }), autorizadorId,
            inicio.clave, inicio.hito || null);
     const solId = r.lastInsertRowid;
     registrarEvento(solId, {
       paso_hasta: inicio.clave, accion: 'crear', hito: null,
       actor_id: req.user.id, actor_nombre: req.user.nombre, actor_rol: req.user.rol,
-      datos_json: { monto, moneda, proveedor }
+      // Queda registrado A QUIÉN se le pidió el OK. Sirve para el seguimiento y
+      // para que se pueda ver si alguien siempre le pide a la misma persona.
+      datos_json: { monto, moneda, proveedor, autorizador_id: autorizadorId }
     });
     return solId;
   })();
@@ -385,6 +444,7 @@ router.get('/solicitudes', wrap((req, res) => {
       paso_nombre: paso ? paso.nombre : s.paso_actual_clave,
       paso_instrucciones: paso ? paso.instrucciones : null,
       acciones, bloqueo_sod: bloqueo,
+      autorizador_nombre: s.autorizador_id ? nombreDe(s.autorizador_id) : null,
       // A quién le toca de verdad: es lo que el usuario necesita saber cuando no
       // puede actuar él.
       esperando_a: resolutores
@@ -412,7 +472,8 @@ router.get('/solicitudes/:id', wrap((req, res) => {
   res.json({
     ok: true,
     data: {
-      solicitud: { ...s, def_snapshot_json: undefined },
+      solicitud: { ...s, def_snapshot_json: undefined,
+                   autorizador_nombre: s.autorizador_id ? nombreDe(s.autorizador_id) : null },
       paso: paso || null,
       pasos: def.pasos,
       acciones: accionesDisponibles(def, s, req.user),
