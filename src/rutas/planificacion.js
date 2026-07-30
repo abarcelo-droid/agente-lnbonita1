@@ -1929,12 +1929,62 @@ function armarContexto(soc, plan) {
   return { plan, productos, objetivos, recetas, insumos, existencias, comprado };
 }
 
+// Los planes confirmados ANTES de que existiera buckets_json no tienen el
+// desglose semanal guardado, y son justo los que ya están en producción. Se
+// recalcula sobre el SNAPSHOT CONGELADO del plan —los mismos productos, recetas,
+// insumos y objetivos con los que se confirmó— así que da exactamente el mismo
+// reparto que dio ese día. No se toca ningún número persistido: de esta corrida
+// se usan SOLO los buckets.
+//
+// Si no hay snapshot (plan viejísimo o JSON roto) se devuelve null y la pantalla
+// lo dice, en vez de mostrar una agenda inventada.
+function bucketsDesdeSnapshot(plan) {
+  if (!plan.receta_snapshot_json) return null;
+  try {
+    const s = JSON.parse(plan.receta_snapshot_json);
+    if (!s || !s.productos || !s.objetivos) return null;
+    const r = calcularPlan({
+      plan: { id: plan.id },
+      productos: s.productos,
+      objetivos: s.objetivos,
+      recetas: new Map(s.recetas || []),
+      insumos: new Map((s.insumos || []).map(i => [i.id, i])),
+      existencias: new Map(
+        db.prepare('SELECT insumo_id, cantidad FROM pli_plan_existencias WHERE plan_id=?').all(plan.id)
+          .map(e => [e.insumo_id, e.cantidad])
+      ),
+      comprado: new Map(
+        db.prepare(`
+          SELECT insumo_id, SUM(cantidad) AS total FROM pli_compras
+          WHERE plan_id=? AND eliminado_en IS NULL AND estado <> 'cancelado'
+          GROUP BY insumo_id
+        `).all(plan.id).map(c => [c.insumo_id, c.total])
+      )
+    });
+    const m = new Map();
+    for (const l of r.lineas) m.set(l.insumo_id, l.buckets || []);
+    return m;
+  } catch (e) {
+    console.error('[PLI] No se pudieron reconstruir los buckets del plan', plan.id, e.message);
+    return null;
+  }
+}
+
 // Lee el resultado materializado de un plan confirmado (no corre el motor).
 function resultadoMaterializado(plan) {
   const filas = db.prepare('SELECT * FROM pli_plan_resultado WHERE plan_id=? ORDER BY costo_estimado DESC').all(plan.id);
+  // Se reconstruye una sola vez para todo el plan, no una por fila.
+  const faltan = filas.length > 0 && filas.every(f => !f.buckets_json);
+  const recuperados = faltan ? bucketsDesdeSnapshot(plan) : null;
+  // Los buckets son la agenda de compra semana por semana. Sin restaurarlos, las
+  // dos vistas de la pestaña Comprar (agenda de pedidos y por semana de cosecha)
+  // se quedaban en "Sin necesidades calculadas" justo cuando el plan ya estaba
+  // confirmado, que es cuando se sale a comprar.
   const lineas = filas.map(f => ({
     ...f,
-    desglose: f.detalle_json ? JSON.parse(f.detalle_json) : []
+    desglose: f.detalle_json ? JSON.parse(f.detalle_json) : [],
+    buckets: f.buckets_json ? JSON.parse(f.buckets_json)
+           : (recuperados ? (recuperados.get(f.insumo_id) || []) : [])
   }));
   const totales_por_moneda = {};
   for (const l of lineas) {
@@ -1946,6 +1996,10 @@ function resultadoMaterializado(plan) {
     lineas,
     cobertura: plan.cobertura_json ? JSON.parse(plan.cobertura_json) : { ok: true },
     totales_por_moneda,
+    // Para que la pantalla pueda decir de dónde salió la agenda semanal en vez de
+    // presentarla como si se hubiera congelado con el plan.
+    buckets_reconstruidos: faltan ? !!recuperados : false,
+    buckets_sin_recuperar: faltan && !recuperados,
     advertencias: []
   };
 }
@@ -2040,8 +2094,9 @@ router.post('/planes/:id/confirmar', wrap((req, res) => {
          cant_bruta_uso, cant_min_uso, cant_max_uso, existencia, existencia_declarada,
          cant_neta_uso, bultos_teoricos, bultos_a_comprar,
          exceso_multiplo, exceso_moq, exceso_uso, moq_forzado,
-         precio_unit_snapshot, moneda_snapshot, precio_fecha_snapshot, costo_estimado, sin_precio, detalle_json)
-      VALUES (?,?,'',?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+         precio_unit_snapshot, moneda_snapshot, precio_fecha_snapshot, costo_estimado, sin_precio,
+         detalle_json, buckets_json)
+      VALUES (?,?,'',?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     `);
     for (const l of r.lineas) {
       ins.run(plan.id, l.insumo_id, l.insumo_nombre, l.categoria, l.proveedor_texto,
@@ -2050,7 +2105,10 @@ router.post('/planes/:id/confirmar', wrap((req, res) => {
               l.cant_neta_uso, l.bultos_teoricos, l.bultos_a_comprar,
               l.exceso_multiplo, l.exceso_moq, l.exceso_uso, l.moq_forzado,
               l.precio_unit_snapshot, l.moneda_snapshot, l.precio_fecha_snapshot,
-              l.costo_estimado, l.sin_precio, JSON.stringify(l.desglose || []));
+              l.costo_estimado, l.sin_precio,
+              // El desglose por semana se congela igual que el resto: la pestaña
+              // Comprar trabaja SOBRE el plan confirmado, no sobre el borrador.
+              JSON.stringify(l.desglose || []), JSON.stringify(l.buckets || []));
     }
     // El snapshot es la única defensa contra "el plan que mandé a comprar
     // cambió solo porque alguien editó una receta".

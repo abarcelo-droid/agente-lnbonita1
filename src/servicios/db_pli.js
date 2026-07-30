@@ -272,6 +272,10 @@ db.exec(`
     costo_estimado       REAL    NOT NULL DEFAULT 0,
     sin_precio           INTEGER NOT NULL DEFAULT 0,
     detalle_json         TEXT,                    -- desglose por producto
+    -- Desglose por SEMANA DE COSECHA: cuánto se consume cada semana, cuánto hay
+    -- que pedir y hasta cuándo. Es lo que alimenta la pestaña Comprar, o sea la
+    -- razón por la que se confirma un plan. Si no se congela acá se pierde.
+    buckets_json         TEXT,
     creado_en            TEXT DEFAULT (datetime('now','localtime'))
   );
   -- Este UNIQUE ES la definición de la clave de agregación de insumos
@@ -453,6 +457,10 @@ try {
   // Cotización con la que se convierte ESE precio. Se guarda junto al registro
   // porque convertir una serie histórica en dólares con el tipo de cambio de hoy
   // da una serie en pesos que no significa nada.
+  // Desglose por semana de cosecha, congelado junto con el resto del resultado.
+  // Sin esto, un plan CONFIRMADO perdía el reparto semanal y la pestaña Comprar
+  // —que es para lo que se confirma un plan— quedaba vacía.
+  addCol('pli_plan_resultado', 'buckets_json',  'TEXT');
   addCol('pli_insumo_precios', 'tc_usado',      'REAL');
   addCol('pli_insumo_precios', 'tc_origen',     'TEXT');
   // De qué proveedor es ese precio. NULL en los registros viejos: son del insumo,
