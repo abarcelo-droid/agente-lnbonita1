@@ -38257,6 +38257,27 @@ function pliCmpRender() {
   pliCmpRenderAgenda(cont);
 }
 
+// Los planes confirmados antes de que se guardara el desglose semanal muestran
+// una agenda RECALCULADA sobre el snapshot congelado. Da lo mismo que ese día,
+// pero conviene decirlo en vez de presentarla como si viniera congelada.
+function pliCmpAvisoBuckets() {
+  var d = PLI.cmpCalculo || {};
+  if (d.buckets_sin_recuperar) {
+    return '<div style="background:rgba(239,68,68,.1);border:1px solid var(--err);border-radius:8px;'
+      + 'padding:9px 12px;font-size:12px;margin-bottom:10px">'
+      + '<strong style="color:var(--err)">Este plan no tiene el desglose por semana.</strong> '
+      + 'Se confirmó antes de que se guardara y no quedó el snapshot para reconstruirlo. '
+      + 'Reabrilo y confirmalo de nuevo para tener la agenda de compra.</div>';
+  }
+  if (d.buckets_reconstruidos) {
+    return '<div style="background:rgba(245,158,11,.12);border-radius:8px;padding:9px 12px;'
+      + 'font-size:12px;margin-bottom:10px">🔁 El reparto por semana se reconstruyó sobre el '
+      + '<strong>snapshot congelado del plan</strong> (este plan se confirmó antes de que se guardara). '
+      + 'Los totales son los del plan; el reparto semanal descuenta además lo que ya registraste como comprado.</div>';
+  }
+  return '';
+}
+
 // ── Vista 1: agenda de pedidos (la que se usa para trabajar) ──────────────
 function pliCmpRenderAgenda(cont) {
   var hoy = pliHoyISO();
@@ -38275,13 +38296,20 @@ function pliCmpRenderAgenda(cont) {
   });
 
   if (!filas.length) {
-    cont.innerHTML = '<div class="pli-badge pli-ok" style="display:block;padding:12px">'
-      + '✔ No queda nada por pedir para este plan.</div>';
+    // OJO: sin desglose semanal no hay NADA que agendar, y eso NO es lo mismo que
+    // "ya está todo pedido". Cantar el visto bueno verde ahí es mandar al
+    // comprador a no comprar nada.
+    var sinDatos = !(PLI.cmpCalculo.lineas || []).some(function(l) { return (l.buckets || []).length; });
+    cont.innerHTML = pliCmpAvisoBuckets()
+      + (sinDatos
+          ? '<div class="emp" style="padding:24px;text-align:center">No hay desglose por semana para agendar los pedidos.</div>'
+          : '<div class="pli-badge pli-ok" style="display:block;padding:12px">'
+            + '✔ No queda nada por pedir para este plan.</div>');
     return;
   }
 
   var vencidas = filas.filter(function(f) { return f.b.fecha_pedido_limite && f.b.fecha_pedido_limite < hoy; }).length;
-  var html = '';
+  var html = pliCmpAvisoBuckets();
   if (vencidas) {
     html += '<div style="background:rgba(239,68,68,.1);border:1px solid var(--err);border-radius:8px;padding:10px 12px;font-size:13px;margin-bottom:10px">'
       + '<strong style="color:var(--err)">' + vencidas + ' pedido(s) con la fecha límite pasada.</strong> '
@@ -38340,10 +38368,11 @@ function pliCmpRenderSemanas(cont) {
   });
   var semanas = Object.keys(porSemana).sort();
   if (!semanas.length) {
-    cont.innerHTML = '<div class="emp" style="padding:24px;text-align:center">Sin necesidades calculadas.</div>';
+    cont.innerHTML = pliCmpAvisoBuckets()
+      + '<div class="emp" style="padding:24px;text-align:center">Sin necesidades calculadas.</div>';
     return;
   }
-  var html = '';
+  var html = pliCmpAvisoBuckets();
   semanas.forEach(function(s) {
     html += '<div style="border:1px solid var(--bor);border-radius:10px;padding:10px 12px;margin-bottom:10px;background:var(--sur)">'
       + '<div style="font-size:13px;font-weight:700;margin-bottom:6px">'
