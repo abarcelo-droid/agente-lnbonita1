@@ -35799,9 +35799,21 @@ function pliCambiarTemporada() {
 }
 
 function pliNuevaTemporada() {
-  var nombre = prompt('Nombre de la temporada nueva:', 'Temporada ' + new Date().getFullYear());
+  var a = new Date().getFullYear();
+  var nombre = prompt('Nombre de la temporada nueva:', 'Temporada ' + a + '/' + String(a + 1).slice(2));
   if (!nombre) return;
-  pliApi('/temporadas', { method: 'POST', body: JSON.stringify({ nombre: nombre }) }).then(function(r) {
+  // Se piden las fechas porque la temporada cruza el año (octubre a abril) y de ahí
+  // sale el rango de semanas que se precarga en los planes.
+  var desde = prompt('¿Cuándo arranca la cosecha? (AAAA-MM-DD)', a + '-10-01');
+  if (!desde) return;
+  var hasta = prompt('¿Cuándo termina? (AAAA-MM-DD)', (a + 1) + '-04-30');
+  if (!hasta) return;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(desde.trim()) || !/^\d{4}-\d{2}-\d{2}$/.test(hasta.trim())) {
+    return toast('Las fechas van en formato AAAA-MM-DD', 'er');
+  }
+  pliApi('/temporadas', { method: 'POST', body: JSON.stringify({
+    nombre: nombre, fecha_desde: desde.trim(), fecha_hasta: hasta.trim()
+  }) }).then(function(r) {
     if (!r.ok) { pliErr(r); return; }
     pliApi('/temporadas/' + r.id + '/activar', { method: 'POST' }).then(function() {
       toast('✓ Temporada creada', 'ok');
@@ -36071,6 +36083,25 @@ function pliArbolRender() {
         + '</div></div>'
       + '<div class="pli-cel-chica" style="margin-top:3px">reparto: <strong>' + pliEsc(p.modo_reparto) + '</strong>'
         + (p.modo_reparto === 'particiona' ? ' — el total se reparte entre los subproductos' : ' — los subproductos salen ADEMÁS del total') + '</div>'
+      + (p.receta_lineas
+          ? '<div class="pli-cel-chica" style="margin-top:2px">Su receta es <strong>común a todos los subproductos</strong>: '
+            + 'se aplica a la producción completa.</div>'
+          : '')
+      // Insumos que están en TODOS los subproductos y le corresponden al padre.
+      + (p.sugerencias || []).map(function(s) {
+          return '<div style="margin-top:6px;background:rgba(59,130,246,.10);border-radius:8px;padding:7px 10px;font-size:12px">'
+            + '💡 ' + pliEsc(s.sugerencia)
+            + (s.consolidable
+                ? ' <button class="btn bo bs" style="padding:2px 7px;font-size:11px;margin-left:4px"'
+                  + ' onclick="pliConsolidar(' + s.producto_id + ',' + s.insumo_id + ')">Pasarlo al producto</button>'
+                : '<div class="pli-cel-chica" style="margin-top:3px">'
+                  + s.en_hijos.map(function(h) {
+                      return pliEsc(h.hijo) + ': ' + pliN(h.cantidad) + ' cada ' + pliN(h.por_cada)
+                        + (h.merma_pct ? ' (merma ' + pliN(h.merma_pct, 1) + '%)' : '');
+                    }).join(' · ')
+                  + '</div>')
+            + '</div>';
+        }).join('')
       + '</div>';
     var subs = hijos.map(function(h) {
       return '<div class="pli-arbol-nodo pli-arbol-hijo">'
@@ -36086,6 +36117,33 @@ function pliArbolRender() {
     }).join('');
     return head + subs;
   }).join('');
+}
+
+// Sube un insumo común de los subproductos al producto. No cambia el número
+// —la receta del padre se aplica a la producción completa— pero deja de haber N
+// copias que hay que mantener sincronizadas a mano.
+function pliConsolidar(prodId, insumoId) {
+  var p = PLI.productos.filter(function(x) { return x.id === prodId; })[0];
+  var s = ((p || {}).sugerencias || []).filter(function(x) { return x.insumo_id === insumoId; })[0];
+  if (!s) return;
+  if (!confirm('Se va a cargar "' + s.insumo + '" en "' + s.producto + '" y quitarlo de los '
+    + s.en_hijos.length + ' subproductos.\n\nEl total del plan no cambia: la receta del producto se aplica a '
+    + 'toda su producción.\n\n¿Seguimos?')) return;
+  pliApi('/productos/' + prodId + '/consolidar-insumo',
+    { method: 'POST', body: JSON.stringify({ insumo_id: insumoId }) }).then(function(r) {
+      if (!r.ok) {
+        if (r.en_hijos) {
+          alert(r.error + '\n\n' + r.en_hijos.map(function(h) {
+            return '· ' + h.hijo + ': ' + h.cantidad + ' cada ' + h.por_cada;
+          }).join('\n'));
+        } else pliErr(r);
+        return;
+      }
+      toast('✓ ' + r.mensaje, 'ok');
+      pliProdCargar();
+      if (PLI.recetaProd) pliRecetaAbrir(PLI.recetaProd.id);
+      if (PLI.plan && PLI.plan.estado !== 'confirmado') pliCalcular();
+    });
 }
 
 function pliProdAbrir(id, padreId) {
@@ -36209,7 +36267,11 @@ function pliRecetaRender() {
       + '<div style="font-size:13px;font-weight:700">🧾 Receta de ' + pliEsc(pliRutaDe(p)) + '</div>'
       + '<span class="pli-cel-chica">versión ' + PLI.recetaVersion + '</span>'
     + '</div>'
-    + '<div class="pli-cel-chica" style="margin-bottom:10px">Cuánto insumo lleva <strong>1 ' + pliEsc(p.unidad) + '</strong> de este producto.</div>';
+    + '<div class="pli-cel-chica" style="margin-bottom:10px">Cuánto insumo lleva <strong>1 ' + pliEsc(p.unidad) + '</strong> de este producto.'
+      + (p.padre_id
+          ? ' Es específico de este subproducto: se aplica sobre su porcentaje.'
+          : ' Al ser el producto, lo que cargues acá es <strong>común a todos sus subproductos</strong> y se aplica a la producción completa.')
+      + '</div>';
 
   if (otros.length) {
     html += '<div style="margin-bottom:10px;display:flex;gap:6px;align-items:center">'
@@ -36497,15 +36559,13 @@ function pliSemanasDeTemporada() {
   var t = (PLI.temporadas || []).filter(function(x) { return x.id === PLI.temporadaId; })[0];
   var desde = t && t.fecha_desde, hasta = t && t.fecha_hasta;
   if (!desde || !hasta) {
-    // Sin fechas de temporada: el año que figure en el nombre, o el año en curso.
+    // Sin fechas cargadas se asume la temporada real: octubre de un año a abril del
+    // siguiente. Generar el año calendario completo daría 53 semanas de las cuales
+    // la mitad no existen para esta operación.
     var m = t && t.nombre ? String(t.nombre).match(/(20\d{2})/) : null;
     var anio = m ? Number(m[1]) : new Date().getFullYear();
-    var out = [];
-    for (var n = 1; n <= 53; n++) {
-      var l = pliLunesDeSemana(anio, n);
-      if (l) out.push(l);
-    }
-    return out;
+    desde = anio + '-10-01';
+    hasta = (anio + 1) + '-04-30';
   }
   var ini = pliLunesDe(desde), fin = pliLunesDe(hasta);
   if (!ini || !fin || fin < ini) return [];
@@ -36706,11 +36766,19 @@ function pliLunesDeSemana(anio, semana) {
   return (chk && chk.semana === n) ? iso : null;
 }
 
-// "S46" grande + la fecha abajo, que es lo que permite ubicarse igual.
+// AÑO-SEMANA, no solo el número. La planificación va de octubre a abril del año
+// siguiente, así que la temporada arranca en la S40 de un año y termina en la S17
+// del otro: mostrando solo "S17" parece que va ANTES de la S43. Con el año adelante
+// y la semana en dos dígitos, además, el orden alfabético coincide con el
+// cronológico (2026-S43 < 2027-S01), que es lo que hace que ordene bien en la
+// grilla y en el Excel.
 function pliRotuloSemana(iso) {
   var s = pliSemISO(iso);
   if (!s) return { corto: 'sin fecha', largo: '' };
-  return { corto: 'S' + s.semana, largo: pliFechaCorta(iso).replace('sem ', '') + ' ' + s.anio };
+  return {
+    corto: s.anio + '-S' + String(s.semana).padStart(2, '0'),
+    largo: pliFechaCorta(iso).replace('sem ', '')
+  };
 }
 
 function pliObjQuitarSemana(s) {
@@ -37434,7 +37502,7 @@ function pliCmpRenderSemanas(cont) {
   semanas.forEach(function(s) {
     html += '<div style="border:1px solid var(--bor);border-radius:10px;padding:10px 12px;margin-bottom:10px;background:var(--sur)">'
       + '<div style="font-size:13px;font-weight:700;margin-bottom:6px">'
-      + (s ? '🍈 Semana ' + pliEsc(String((pliSemISO(s) || {}).semana || '?'))
+      + (s ? '🍈 ' + pliEsc(pliRotuloSemana(s).corto)
              + ' <span class="pli-cel-chica">(' + pliEsc(pliRotuloSemana(s).largo) + ')</span>'
            : '🍈 <em>sin fecha asignada</em>') + '</div>'
       + '<div class="ab-table-wrap"><table class="pa-tbl" style="font-size:12px"><thead><tr>'
