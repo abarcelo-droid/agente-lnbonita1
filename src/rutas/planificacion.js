@@ -11,11 +11,20 @@
 //   POST /planes/:id/confirmar -> corre el motor y materializa. Requiere escritura.
 
 import express from 'express';
+import multer from 'multer';
+import { randomUUID } from 'crypto';
 import * as XLSX from 'xlsx';
 import db from '../servicios/db_pli.js';   // este import es el que crea el schema pli_*
 import { calcularPlan, lunesDe } from '../servicios/pli_motor.js';
+import { subirArchivo, obtenerArchivo, storageConfigurado } from '../servicios/storage.js';
+import { cotizacionVigente, fijarCotizacionManual, TIPOS as TIPOS_DOLAR } from '../servicios/cotizacion_dolar.js';
 
 const router = express.Router();
+
+// Los adjuntos del insumo van a R2, no a disco: el disco del contenedor de Railway
+// es efímero y se pierde en cada redeploy (ver el encabezado de servicios/storage.js).
+// memoryStorage porque subirArchivo() recibe un buffer.
+const subida = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 
 // ── Helpers de request ────────────────────────────────────────────────────
 
@@ -273,6 +282,7 @@ router.post('/insumos', wrap((req, res) => {
   `).run(soc, d.codigo, d.nombre, d.categoria, d.unidad_uso, d.unidad_compra, d.factor_compra,
          d.multiplo_compra, d.moq, d.precio_ref, d.moneda, d.precio_fecha, d.proveedor_texto,
          d.lead_time_dias, d.modo_provision, d.notas, req.user.id, req.user.id);
+  registrarPrecio(r.lastInsertRowid, d, 'alta', req.user.id);
   logPli('insumo', r.lastInsertRowid, 'alta', d, req.user.id);
   res.json({ ok: true, id: r.lastInsertRowid });
 }));
@@ -391,6 +401,11 @@ router.patch('/insumos/:id', wrap((req, res) => {
          d.multiplo_compra, d.moq, d.precio_ref, d.moneda, d.precio_fecha, d.proveedor_texto,
          d.lead_time_dias, d.modo_provision,
          d.notas, activo, req.user.id, id);
+  // Solo se registra si el precio o la moneda cambiaron de verdad: si no, editar
+  // cualquier otro campo ensuciaría la serie con filas repetidas.
+  if (Number(d.precio_ref) !== Number(actual.precio_ref) || d.moneda !== actual.moneda) {
+    registrarPrecio(id, d, 'edicion', req.user.id);
+  }
   logPli('insumo', id, 'edicion', { antes: actual, despues: d }, req.user.id);
   res.json({ ok: true });
 }));
@@ -422,6 +437,167 @@ router.post('/insumos/:id/restaurar', wrap((req, res) => {
   db.prepare(`UPDATE pli_insumos SET eliminado_en=NULL, eliminado_por_id=NULL, activo=1, actualizado_en=${AHORA} WHERE id=?`).run(id);
   logPli('insumo', id, 'restaurar', null, req.user.id);
   res.json({ ok: true });
+}));
+
+// ── Historial de precios ──────────────────────────────────────────────────
+// pli_insumos.precio_ref sigue siendo el precio VIGENTE (es el que snapshotea el
+// plan al confirmar). Acá se acumula la serie para ver la evolución.
+
+function registrarPrecio(insumoId, d, origen, userId, fecha) {
+  if (!(Number(d.precio_ref) > 0)) return;   // no se registran precios en 0
+  try {
+    db.prepare(`
+      INSERT INTO pli_insumo_precios
+        (insumo_id, fecha, precio, moneda, unidad_compra, origen, proveedor_texto, creado_por_id)
+      VALUES (?,?,?,?,?,?,?,?)
+    `).run(insumoId, fecha || d.precio_fecha || hoyISO(), d.precio_ref, d.moneda,
+           d.unidad_compra || null, origen, d.proveedor_texto || null, userId || null);
+  } catch (e) {
+    console.error('[PLI] Error registrando precio:', e.message);
+  }
+}
+
+function hoyISO() {
+  const d = new Date();
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
+router.get('/insumos/:id/precios', wrap((req, res) => {
+  const soc = getSociedadId(req);
+  const id = parseInt(req.params.id, 10);
+  const ins = db.prepare('SELECT * FROM pli_insumos WHERE id=? AND sociedad_id=?').get(id, soc);
+  if (!ins) throw notFound('Insumo no encontrado');
+  const filas = db.prepare(`
+    SELECT * FROM pli_insumo_precios WHERE insumo_id=? ORDER BY fecha DESC, id DESC
+  `).all(id);
+  // Variación contra el registro inmediatamente anterior de la MISMA moneda: comparar
+  // un precio en USD contra uno en ARS daría un porcentaje sin sentido.
+  const porMoneda = {};
+  const cronologico = filas.slice().reverse();
+  for (const f of cronologico) {
+    const prev = porMoneda[f.moneda];
+    f.variacion_pct = (prev && prev > 0) ? ((f.precio - prev) / prev) * 100 : null;
+    porMoneda[f.moneda] = f.precio;
+  }
+  res.json({ ok: true, data: filas, insumo: { id: ins.id, nombre: ins.nombre, unidad_compra: ins.unidad_compra } });
+}));
+
+// ── Adjuntos del insumo (registro técnico: foto, ficha, especificación) ────
+
+router.get('/insumos/:id/archivos', wrap((req, res) => {
+  const soc = getSociedadId(req);
+  const id = parseInt(req.params.id, 10);
+  const ins = db.prepare('SELECT id FROM pli_insumos WHERE id=? AND sociedad_id=?').get(id, soc);
+  if (!ins) throw notFound('Insumo no encontrado');
+  const data = db.prepare(`
+    SELECT id, insumo_id, nombre, mime, tamano, tipo, descripcion, creado_en
+    FROM pli_insumo_archivos WHERE insumo_id=? AND eliminado_en IS NULL
+    ORDER BY creado_en DESC, id DESC
+  `).all(id);
+  res.json({ ok: true, data, storage_ok: storageConfigurado() });
+}));
+
+// Subida. No usa wrap() porque necesita await (subir a R2 es async) y el helper es
+// síncrono; va con su propio try/catch.
+router.post('/insumos/:id/archivos', subida.single('archivo'), async (req, res) => {
+  try {
+    const soc = getSociedadId(req);
+    const id = parseInt(req.params.id, 10);
+    const ins = db.prepare('SELECT id, nombre FROM pli_insumos WHERE id=? AND sociedad_id=? AND eliminado_en IS NULL').get(id, soc);
+    if (!ins) return res.status(404).json({ ok: false, error: 'Insumo no encontrado' });
+    if (!storageConfigurado()) {
+      return res.status(503).json({ ok: false, error: 'El almacenamiento de archivos no está configurado (faltan credenciales de R2)' });
+    }
+    if (!req.file) return res.status(400).json({ ok: false, error: 'Falta el archivo' });
+
+    const mime = req.file.mimetype || 'application/octet-stream';
+    const esFoto = mime.startsWith('image/');
+    const tipo = req.body?.tipo === 'foto' || req.body?.tipo === 'documento'
+      ? req.body.tipo : (esFoto ? 'foto' : 'documento');
+
+    // La key lleva un uuid para que dos archivos con el mismo nombre no se pisen.
+    const limpio = String(req.file.originalname || 'archivo').replace(/[^\w.\-]+/g, '_').slice(-80);
+    const key = `pli/insumos/${id}/${randomUUID()}-${limpio}`;
+    await subirArchivo(req.file.buffer, key, mime);
+
+    const r = db.prepare(`
+      INSERT INTO pli_insumo_archivos
+        (insumo_id, storage_key, nombre, mime, tamano, tipo, descripcion, creado_por_id)
+      VALUES (?,?,?,?,?,?,?,?)
+    `).run(id, key, req.file.originalname || limpio, mime, req.file.size || null, tipo,
+           (req.body?.descripcion || '').slice(0, 300) || null, req.user.id);
+    logPli('insumo', id, 'archivo_alta', { archivo_id: r.lastInsertRowid, nombre: req.file.originalname, tipo }, req.user.id);
+    res.json({ ok: true, id: r.lastInsertRowid });
+  } catch (e) {
+    console.error('[PLI] Error subiendo archivo:', e.message);
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+// Descarga: hace proxy del stream de R2. inline para que la foto se pueda mostrar
+// en el panel y el PDF se abra en el visor del navegador.
+router.get('/archivos/:archivoId', async (req, res) => {
+  try {
+    const soc = getSociedadId(req);
+    const a = db.prepare(`
+      SELECT ar.* FROM pli_insumo_archivos ar
+      JOIN pli_insumos i ON i.id = ar.insumo_id
+      WHERE ar.id=? AND i.sociedad_id=? AND ar.eliminado_en IS NULL
+    `).get(parseInt(req.params.archivoId, 10), soc);
+    if (!a) return res.status(404).json({ ok: false, error: 'Archivo no encontrado' });
+    if (!storageConfigurado()) return res.status(503).json({ ok: false, error: 'Almacenamiento no configurado' });
+    const stream = await obtenerArchivo(a.storage_key);
+    res.set({
+      'Content-Type': a.mime || 'application/octet-stream',
+      'Content-Disposition': `inline; filename="${String(a.nombre).replace(/"/g, '')}"`
+    });
+    stream.pipe(res);
+  } catch (e) {
+    console.error('[PLI] Error bajando archivo:', e.message);
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+// Soft delete: el archivo se conserva en R2 a propósito (mismo criterio que el
+// expediente documental de SG), así una baja por error no pierde el original.
+router.delete('/archivos/:archivoId', wrap((req, res) => {
+  const soc = getSociedadId(req);
+  const a = db.prepare(`
+    SELECT ar.id, ar.nombre FROM pli_insumo_archivos ar
+    JOIN pli_insumos i ON i.id = ar.insumo_id
+    WHERE ar.id=? AND i.sociedad_id=? AND ar.eliminado_en IS NULL
+  `).get(parseInt(req.params.archivoId, 10), soc);
+  if (!a) throw notFound('Archivo no encontrado');
+  db.prepare(`UPDATE pli_insumo_archivos SET eliminado_en=${AHORA}, eliminado_por_id=? WHERE id=?`)
+    .run(req.user.id, a.id);
+  logPli('insumo', null, 'archivo_baja', { archivo_id: a.id, nombre: a.nombre }, req.user.id);
+  res.json({ ok: true });
+}));
+
+// ── Cotización del dólar ──────────────────────────────────────────────────
+// GET a propósito: es lectura, y tiene que funcionar para usuarios solo lectura.
+
+router.get('/cotizacion', async (req, res) => {
+  try {
+    const tipo = TIPOS_DOLAR.includes(req.query.tipo) ? req.query.tipo : 'oficial';
+    const c = await cotizacionVigente(tipo, { forzar: req.query.refrescar === '1' });
+    if (!c) {
+      return res.json({
+        ok: true, data: null,
+        error: 'No se pudo obtener la cotización y no hay ninguna guardada. Cargala a mano.'
+      });
+    }
+    res.json({ ok: true, data: c, tipos: TIPOS_DOLAR });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+router.post('/cotizacion', wrap((req, res) => {
+  const c = fijarCotizacionManual(req.body?.venta, req.user.id, vFecha(req.body?.fecha, 'La fecha'));
+  logPli('cotizacion', null, 'manual', { venta: c.venta, fecha: c.fecha }, req.user.id);
+  res.json({ ok: true, data: c });
 }));
 
 // ══════════════════════════════════════════════════════════════════════════
@@ -729,6 +905,94 @@ router.put('/productos/:id/receta', wrap((req, res) => {
 
   res.json({ ok: true, receta_version: nueva });
 }));
+
+// ── Costo del producto según su receta ────────────────────────────────────
+// Corre el motor en modo COSTEO (sin loteo) sobre 1 unidad del producto. Da el
+// costo unitario exacto, separado por moneda, y convertido a las dos monedas con
+// la cotización del día, que se devuelve explícita.
+//
+// GET a propósito: es lectura, tiene que funcionar para usuarios solo lectura.
+router.get('/productos/:id/costo', async (req, res) => {
+  try {
+    const soc = getSociedadId(req);
+    const id = parseInt(req.params.id, 10);
+    const prod = db.prepare('SELECT * FROM pli_productos WHERE id=? AND sociedad_id=? AND eliminado_en IS NULL').get(id, soc);
+    if (!prod) return res.status(404).json({ ok: false, error: 'Producto no encontrado' });
+
+    const productos = productosDeTemporada(soc, prod.temporada_id);
+    const recetas = new Map();
+    const filas = db.prepare(`
+      SELECT rl.* FROM pli_receta_lineas rl
+      JOIN pli_productos p ON p.id = rl.producto_id AND rl.version = p.receta_version
+      WHERE p.sociedad_id=? AND p.temporada_id=? AND p.eliminado_en IS NULL
+      ORDER BY rl.orden, rl.id
+    `).all(soc, prod.temporada_id);
+    for (const f of filas) {
+      if (!recetas.has(f.producto_id)) recetas.set(f.producto_id, []);
+      recetas.get(f.producto_id).push(f);
+    }
+    const insumos = new Map(
+      db.prepare('SELECT * FROM pli_insumos WHERE sociedad_id=?').all(soc).map(i => [i.id, i])
+    );
+
+    const r = calcularPlan({
+      plan: { id: 0 },
+      objetivos: [{ producto_id: id, cantidad: 1, unidad: prod.unidad, bucket_ini: '' }],
+      productos, recetas, insumos,
+      existencias: new Map(), comprado: new Map(),
+      modo: 'costeo'
+    });
+
+    const tipo = TIPOS_DOLAR.includes(req.query.tc_tipo) ? req.query.tc_tipo : 'oficial';
+    const cotiz = await cotizacionVigente(tipo);
+
+    const totARS = Number(r.totales_por_moneda.ARS || 0);
+    const totUSD = Number(r.totales_por_moneda.USD || 0);
+    const tc = cotiz && cotiz.venta > 0 ? cotiz.venta : null;
+
+    // Sin cotización no se inventa nada: se devuelven los dos totales en null y la
+    // UI muestra los parciales por moneda con el aviso.
+    const total_en_ars = tc !== null ? totARS + totUSD * tc : null;
+    const total_en_usd = tc !== null ? totUSD + totARS / tc : null;
+
+    const lineas = r.lineas.map(l => ({
+      insumo_id: l.insumo_id,
+      insumo_nombre: l.insumo_nombre,
+      categoria: l.categoria,
+      unidad_uso: l.unidad_uso,
+      cantidad_por_unidad: l.cant_bruta_uso,        // incluye merma
+      unidad_compra: l.unidad_compra,
+      factor_compra: l.factor_compra,
+      precio_unit_compra: l.precio_unit_snapshot,   // por unidad de COMPRA
+      moneda: l.moneda_snapshot,
+      costo_unitario: l.costo_estimado,             // por 1 unidad de producto
+      costo_en_ars: tc !== null ? (l.moneda_snapshot === 'USD' ? l.costo_estimado * tc : l.costo_estimado) : null,
+      costo_en_usd: tc !== null ? (l.moneda_snapshot === 'USD' ? l.costo_estimado : l.costo_estimado / tc) : null,
+      sin_precio: l.sin_precio,
+      desglose: l.desglose
+    }));
+    // Del que más pesa al que menos, que es el orden en que se mira un costo.
+    lineas.sort((a, b) => (b.costo_en_ars || 0) - (a.costo_en_ars || 0));
+
+    res.json({
+      ok: true,
+      data: {
+        producto: { id: prod.id, nombre: prod.nombre, unidad: prod.unidad, padre_id: prod.padre_id },
+        lineas,
+        totales_por_moneda: r.totales_por_moneda,
+        total_en_ars, total_en_usd,
+        cotizacion: cotiz,
+        insumos_sin_precio: r.cobertura.insumos_sin_precio,
+        cobertura: r.cobertura,
+        advertencias: r.advertencias,
+        nota: 'Costo por 1 ' + prod.unidad + ' — incluye merma, sin redondeo por bulto de compra.'
+      }
+    });
+  } catch (e) {
+    console.error('[PLI] Error calculando costo:', e.message);
+    res.status(e.status || 500).json({ ok: false, error: e.message });
+  }
+});
 
 // ══════════════════════════════════════════════════════════════════════════
 // PLANES
