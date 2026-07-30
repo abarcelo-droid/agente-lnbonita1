@@ -11134,6 +11134,11 @@ function sgRepExport(){
   <div class="fl ff" style="margin-top:8px"><label>Concepto *</label>
     <input id="sp-n-concepto" class="sp-inp" placeholder="Por qué se paga">
   </div>
+  <div class="fl ff" style="margin-top:8px"><label>Condición de pago *</label>
+    <input id="sp-n-condicion" class="sp-inp" placeholder="Ej: 30 días fecha factura · contado contra entrega · 50% anticipo y 50% a 60 días">
+    <div class="sp-chica">Escribila como la acordaste con el proveedor. La lee el que autoriza y Tesorería
+      para poner la fecha.</div>
+  </div>
   <div class="fg" style="margin-top:8px">
     <div class="fl"><label>Monto *</label><input id="sp-n-monto" type="number" step="any" min="0" class="sp-inp sp-num"></div>
     <div class="fl"><label>Moneda</label>
@@ -37856,7 +37861,7 @@ function spTablaHtml(arr, vista) {
 function spNuevaAbrir(id) {
   document.getElementById('sp-nueva-id').value = id || '';
   document.getElementById('sp-nueva-tit').textContent = id ? 'Editar solicitud' : 'Solicitar un pago';
-  ['sp-n-prov','sp-n-cuenta','sp-n-concepto','sp-n-monto','sp-n-ctipo','sp-n-cnum','sp-n-fecha'].forEach(function(k) {
+  ['sp-n-prov','sp-n-cuenta','sp-n-concepto','sp-n-condicion','sp-n-monto','sp-n-ctipo','sp-n-cnum','sp-n-fecha'].forEach(function(k) {
     document.getElementById(k).value = '';
   });
   document.getElementById('sp-n-moneda').value = 'ARS';
@@ -37870,6 +37875,7 @@ function spNuevaAbrir(id) {
       document.getElementById('sp-n-prov').value = s.proveedor_texto || '';
       document.getElementById('sp-n-cuenta').value = s.cuenta_texto || '';
       document.getElementById('sp-n-concepto').value = s.concepto || '';
+      document.getElementById('sp-n-condicion').value = s.condicion_pago || '';
       document.getElementById('sp-n-monto').value = s.monto;
       document.getElementById('sp-n-moneda').value = s.moneda;
       document.getElementById('sp-n-prio').value = s.prioridad;
@@ -37914,6 +37920,7 @@ function spNuevaGuardar() {
     proveedor_texto: document.getElementById('sp-n-prov').value.trim(),
     cuenta_texto: document.getElementById('sp-n-cuenta').value.trim(),
     concepto: document.getElementById('sp-n-concepto').value.trim(),
+    condicion_pago: document.getElementById('sp-n-condicion').value.trim(),
     monto: document.getElementById('sp-n-monto').value,
     moneda: document.getElementById('sp-n-moneda').value,
     prioridad: document.getElementById('sp-n-prio').value,
@@ -37929,6 +37936,7 @@ function spNuevaGuardar() {
   if (!body.cuenta_texto) return toast('Falta la cuenta corriente: es el número con el que se rastrea el pago', 'er');
   if (!/^\d{1,20}$/.test(body.cuenta_texto)) return toast('La cuenta corriente tiene que ser un número', 'er');
   if (!body.concepto) return toast('Falta el concepto', 'er');
+  if (!body.condicion_pago) return toast('Escribí la condición de pago acordada con el proveedor', 'er');
   if (!(Number(body.monto) > 0)) return toast('El monto tiene que ser mayor que 0', 'er');
   if (SP.justifDup) body.justificacion_duplicado = SP.justifDup;
 
@@ -37991,7 +37999,11 @@ function spDetalleRender() {
   var html = '<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:12px">'
     + '<div style="flex:1;min-width:230px;border:1px solid var(--bor);border-radius:10px;padding:11px;background:var(--sur)">'
       + '<div class="sp-chica">Monto</div><div style="font-size:20px;font-weight:700">' + spEsc(spMoney(s.monto, s.moneda)) + '</div>'
-      + '<div class="sp-chica" style="margin-top:5px">' + spEsc(s.concepto) + '</div></div>'
+      + '<div class="sp-chica" style="margin-top:5px">' + spEsc(s.concepto) + '</div>'
+      + (s.condicion_pago
+          ? '<div class="sp-chica" style="margin-top:4px">Condición de pago: <strong>'
+            + spEsc(s.condicion_pago) + '</strong></div>' : '')
+      + '</div>'
     + '<div style="flex:1;min-width:230px;border:1px solid var(--bor);border-radius:10px;padding:11px;background:var(--sur)">'
       + '<div class="sp-chica">Estado</div><div style="margin:4px 0">' + estado + '</div>'
       + (s.autorizador_nombre
@@ -38479,6 +38491,12 @@ function spAyudaHtml(d) {
   html += '<h3>Si vos pedís pagos</h3><ol style="padding-left:20px">'
     + '<li><strong>+ Solicitar un pago</strong> y completá: proveedor, <strong>cuenta corriente (solo números)</strong>, '
       + 'concepto, monto y moneda. La cuenta es obligatoria porque es con lo que se rastrea el pago en el sistema.</li>'
+    + '<li>Escribí la <strong>condición de pago</strong> como la acordaste con el proveedor '
+      + '(por ejemplo: <em>30 días fecha factura</em>, <em>contado contra entrega</em>, '
+      + '<em>50% anticipo y 50% a 60 días</em>). Es texto libre porque manejamos varias, y la leen '
+      + 'el que autoriza y Tesorería para poner la fecha.</li>'
+    + '<li><strong>Adjuntá el respaldo</strong> —factura, proforma o remito— desde la solicitud, en '
+      + '<em>Adjuntos</em>. Es obligatorio: sin al menos un archivo no vas a poder enviarla a autorizar.</li>'
     + '<li>Elegí <strong>a quién le pedís el OK</strong>. El aviso por mail le llega solo a esa persona. '
       + (pAut ? 'Hoy podés elegir entre: <strong>' + spEsc(spQuien(d, 'autorizacion')) + '</strong>. ' : '')
       + 'Los demás igual la ven en su bandeja, así que si esa persona no está, otra la puede resolver.</li>'

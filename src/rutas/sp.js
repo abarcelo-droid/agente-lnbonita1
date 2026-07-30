@@ -104,6 +104,17 @@ const vFecha = (v, campo) => {
 // como texto rompe justamente lo que este módulo tiene que permitir.
 // Se aceptan solo dígitos (se conservan los ceros a la izquierda, por eso queda
 // como texto y no como entero).
+// Condición de pago. Obligatoria y de TEXTO LIBRE: manejan varias y una lista
+// cerrada obligaría a elegir "otro" en la mitad de los casos, que es peor que
+// escribirla. Es lo que Tesorería necesita leer para poner la fecha.
+function vCondicion(v) {
+  const s = String(v === undefined || v === null ? '' : v).trim();
+  if (!s) throw bad('Escribí la condición de pago acordada con el proveedor');
+  if (s.length < 3) throw bad('La condición de pago es demasiado corta para que se entienda');
+  if (s.length > 300) throw bad('La condición de pago no puede superar los 300 caracteres');
+  return s;
+}
+
 function vCuenta(v) {
   const s = String(v === undefined || v === null ? '' : v).trim();
   if (!s) throw bad('La cuenta corriente es obligatoria: es el número con el que se rastrea el pago en el sistema');
@@ -132,6 +143,7 @@ function varsDe(sol, extra) {
   return {
     numero: sol.numero, proveedor: sol.proveedor_texto, cuenta: sol.cuenta_texto,
     monto: money(sol.monto, sol.moneda), concepto: sol.concepto,
+    condicion_pago: sol.condicion_pago,
     solicitante: sol.solicitante_nombre, fecha_pago: sol.fecha_pago_confirmada,
     link: linkA(sol.id), ...(extra || {})
   };
@@ -177,6 +189,12 @@ function avisarPaso(def, sol, pasoClave, eventoId) {
   // dependa de editar la plantilla sería que no llegue justo cuando más sirve.
   if (comp && paso.hito === 'confeccion' && texto.indexOf(comp) === -1) {
     texto += '\nCómo se paga:\n' + comp + '\n';
+  }
+  // La condición de pago es lo que Tesorería necesita leer para poner la fecha, y
+  // lo que el que autoriza necesita para saber si corresponde pagar ahora.
+  if (sol.condicion_pago && ['autorizacion', 'fechas'].includes(paso.hito)
+      && texto.indexOf(sol.condicion_pago) === -1) {
+    texto += '\nCondición de pago: ' + sol.condicion_pago + '\n';
   }
 
   // Botones de acción en el mail. Llevan al panel con la acción ya elegida: si hay
@@ -451,6 +469,9 @@ router.post('/solicitudes', wrap((req, res) => {
   const monto = vNum(b.monto, 'El monto', { min: 0.01 });
   const moneda = (vTexto(b.moneda, 'La moneda') || 'ARS').toUpperCase();
   if (!['ARS', 'USD'].includes(moneda)) throw bad('La moneda tiene que ser ARS o USD');
+  // Texto libre y obligatoria: manejan varias condiciones y no entran en una lista
+  // fija. La escribe el comprador, que es el que la negoció.
+  const condicion = vCondicion(b.condicion_pago);
 
   // Control BLANDO de comprobante repetido: pagar una factura en dos veces
   // (anticipo y saldo, cuotas) es rutina, así que no se bloquea. Se avisa, se
@@ -490,15 +511,15 @@ router.post('/solicitudes', wrap((req, res) => {
       INSERT INTO sp_solicitudes
         (sociedad_id, numero, flujo_version_id, def_snapshot_json, solicitante_id, solicitante_nombre,
          proveedor_texto, cuenta_texto, concepto, monto, moneda, comprobante_tipo, comprobante_numero,
-         fecha_necesidad, prioridad, justificacion_duplicado, autorizador_id,
+         fecha_necesidad, prioridad, justificacion_duplicado, autorizador_id, condicion_pago,
          paso_actual_clave, paso_actual_hito, paso_actual_desde, estado_global)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now','localtime'),'en_curso')
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now','localtime'),'en_curso')
     `).run(soc, numero, v.id, JSON.stringify(def), req.user.id, req.user.nombre || null,
            proveedor, vCuenta(b.cuenta_texto), concepto, monto, moneda,
            vTexto(b.comprobante_tipo, 'El tipo de comprobante', { max: 30 }), cbteNum,
            vFecha(b.fecha_necesidad, 'La fecha de necesidad'),
            b.prioridad === 'urgente' ? 'urgente' : 'normal',
-           vTexto(b.justificacion_duplicado, 'La justificación', { max: 500 }), autorizadorId,
+           vTexto(b.justificacion_duplicado, 'La justificación', { max: 500 }), autorizadorId, condicion,
            inicio.clave, inicio.hito || null);
     const solId = r.lastInsertRowid;
     registrarEvento(solId, {
@@ -732,13 +753,19 @@ router.post('/solicitudes/:id/accion', wrap((req, res) => {
   // orden sin el PDF de cuenta corriente del proveedor que la respalda.
   // El paso de comprobantes queda afuera porque tiene su propia regla blanda.
   if (paso.requiere_adjunto_tipo && tr.clase === 'avanza' && paso.modo_captura !== 'envia_comprobantes') {
-    const n = db.prepare(`
-      SELECT COUNT(*) AS n FROM sp_adjuntos
-      WHERE solicitud_id=? AND tipo=? AND eliminado_en IS NULL
-    `).get(s.id, paso.requiere_adjunto_tipo).n;
+    // '*' = hace falta un respaldo pero el tipo lo decide quien lo sube: el del
+    // comprador puede ser factura, proforma o remito según el caso.
+    const cualquiera = paso.requiere_adjunto_tipo === '*';
+    const n = cualquiera
+      ? db.prepare('SELECT COUNT(*) AS n FROM sp_adjuntos WHERE solicitud_id=? AND eliminado_en IS NULL').get(s.id).n
+      : db.prepare(`
+          SELECT COUNT(*) AS n FROM sp_adjuntos
+          WHERE solicitud_id=? AND tipo=? AND eliminado_en IS NULL
+        `).get(s.id, paso.requiere_adjunto_tipo).n;
     if (!n) {
-      const etq = TIPOS_ADJUNTO[paso.requiere_adjunto_tipo] || paso.requiere_adjunto_tipo;
-      throw bad(`Antes de avanzar tenés que adjuntar: ${etq}.`);
+      throw bad(cualquiera
+        ? 'Antes de enviarla tenés que adjuntar el respaldo (factura, proforma o remito).'
+        : `Antes de avanzar tenés que adjuntar: ${TIPOS_ADJUNTO[paso.requiere_adjunto_tipo] || paso.requiere_adjunto_tipo}.`);
     }
   }
 
@@ -833,7 +860,7 @@ router.patch('/solicitudes/:id', wrap((req, res) => {
   const b = req.body || {};
   db.prepare(`
     UPDATE sp_solicitudes SET proveedor_texto=?, cuenta_texto=?, concepto=?, monto=?, moneda=?,
-      comprobante_tipo=?, comprobante_numero=?, fecha_necesidad=?, prioridad=?, rev=rev+1
+      comprobante_tipo=?, comprobante_numero=?, fecha_necesidad=?, prioridad=?, condicion_pago=?, rev=rev+1
     WHERE id=?
   `).run(
     b.proveedor_texto === undefined ? s.proveedor_texto : vTexto(b.proveedor_texto, 'El proveedor', { req: true, max: 200 }),
@@ -848,6 +875,9 @@ router.patch('/solicitudes/:id', wrap((req, res) => {
     b.comprobante_numero === undefined ? s.comprobante_numero : vTexto(b.comprobante_numero, 'El número', { max: 60 }),
     b.fecha_necesidad === undefined ? s.fecha_necesidad : vFecha(b.fecha_necesidad, 'La fecha'),
     b.prioridad === undefined ? s.prioridad : (b.prioridad === 'urgente' ? 'urgente' : 'normal'),
+    // Se valida el valor FINAL: una solicitud vieja sin condición obliga a
+    // completarla al editarla.
+    vCondicion(b.condicion_pago === undefined ? s.condicion_pago : b.condicion_pago),
     s.id
   );
   registrarEvento(s.id, {
