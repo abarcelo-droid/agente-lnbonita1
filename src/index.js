@@ -33,6 +33,8 @@ import sgVentasRouter       from "./rutas/sg_ventas.js";
 import sgTesoreriaRouter    from "./rutas/sg_tesoreria.js";
 import adminRouter         from "./rutas/admin.js";
 import planificacionRouter from "./rutas/planificacion.js";
+import spRouter            from "./rutas/sp.js";
+import { programarProcesoCola as spProgramarCola } from "./servicios/sp_outbox.js";
 import { guardarSnapshotCRM } from "./servicios/db.js";
 import { syncSheets } from "./servicios/sheets.js";
 
@@ -199,6 +201,7 @@ app.use("/api/sg/tesoreria", sgTesoreriaRouter);
 app.use("/api/sg",     sgRouter);
 app.use("/api/admin",  adminRouter);
 app.use("/api/pli",    planificacionRouter);   // Planificación Insumos (módulo independiente)
+app.use("/api/sp",     spRouter);              // Seguimiento de Órdenes de Pago (circuito de autorización)
 
 // Scout — app mobile para campo
 app.get("/scout", (req, res) => {
@@ -291,6 +294,9 @@ const server = app.listen(PORT, () => {
   console.log(`   Panel:   http://localhost:${PORT}/panel`);
   console.log(`   Webhook: POST http://localhost:${PORT}/webhook\n`);
   programarSnapshotCRM();
+  // Reintento de los avisos del circuito de pagos que quedaron pendientes (por
+  // ejemplo si Brevo estaba caído cuando se encolaron).
+  spProgramarCola(10);
 });
 
 // ── GRACEFUL SHUTDOWN ─────────────────────────────────────────────────────

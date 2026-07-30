@@ -318,6 +318,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   <div class="ni" data-sec="ab-mandata"><span class="dot de"></span>Mandata</div>
   <div class="ni" data-sec="ab-gastos"><span class="dot de"></span>Gastos</div>
   <div class="ni" data-sec="ab-liquidaciones"><span class="dot db"></span>📄 Liquidaciones</div>
+  <div class="ni" data-sec="sp-pagos"><span class="dot dc"></span>💸 Órdenes de Pago</div>
   <!-- Ingreso de Factura: suelto, no pertenece a Gestión Insumos; margin-top lo separa -->
   <div class="ni" data-sec="ingreso-factura" style="margin-top:8px"><span class="dot db"></span>Ingreso de Factura</div>
   <div class="ng" style="margin-top:8px">Administracion</div>
@@ -11042,6 +11043,116 @@ function sgRepExport(){
 </div>
 </div>
 
+<!-- ══════════════════════════════════════════════════════════════════════
+     SP · SEGUIMIENTO DE ÓRDENES DE PAGO
+     Circuito de solicitud y autorización. Prefijo sp / SP.
+     ══════════════════════════════════════════════════════════════════════ -->
+<div class="sec" id="sec-sp-pagos">
+  <div class="ph">
+    <div>
+      <div class="ph-t">💸 Órdenes de Pago — Seguimiento</div>
+      <div class="ph-s">Solicitud, autorización, fechas, confección, firma y comprobantes</div>
+    </div>
+    <button class="btn bb" onclick="spNuevaAbrir()">+ Solicitar un pago</button>
+  </div>
+
+  <style>
+    .sp-tab { padding:10px 16px; cursor:pointer; border-bottom:2px solid transparent; color:var(--mut); font-weight:600 }
+    .sp-tab.on { color: var(--burg); border-bottom-color: var(--burg) }
+    .sp-pane { display:none } .sp-pane.on { display:block }
+    .sp-bad { display:inline-block; padding:2px 8px; border-radius:10px; font-size:11px; font-weight:600 }
+    .sp-ok { background:#dcfce7; color:#166534 } .sp-warn { background:#fef3c7; color:#92400e }
+    .sp-err { background:#fee2e2; color:#991b1b } .sp-gris { background:#f1f5f9; color:#64748b }
+    .sp-fila-venc td { background:rgba(239,68,68,.06) }
+    .sp-num { text-align:right; font-family:ui-monospace,Consolas,monospace }
+    .sp-chica { font-size:11px; color:var(--mut) }
+    .sp-inp { font-size:13px; padding:5px 7px; min-height:30px; box-sizing:border-box }
+    /* Línea de tiempo del expediente */
+    .sp-tl { list-style:none; margin:0; padding:0 0 0 18px; border-left:2px solid var(--bor) }
+    .sp-tl li { position:relative; padding:0 0 14px 14px }
+    .sp-tl li::before { content:''; position:absolute; left:-25px; top:3px; width:10px; height:10px;
+      border-radius:50%; background:var(--bor) }
+    .sp-tl li.sp-av::before { background:var(--ok,#16a34a) }
+    .sp-tl li.sp-dv::before { background:#f59e0b }
+    .sp-tl li.sp-rc::before { background:var(--err) }
+  </style>
+
+  <div style="display:flex;border-bottom:1px solid var(--bor);margin-bottom:14px;flex-wrap:wrap">
+    <div class="sp-tab on" data-sp="pendiente" onclick="spTab('pendiente')">📥 Me toca a mí <span id="sp-cnt-pend"></span></div>
+    <div class="sp-tab"    data-sp="mias"      onclick="spTab('mias')">🧾 Mis solicitudes</div>
+    <div class="sp-tab"    data-sp="todas"     onclick="spTab('todas')">📊 Todas</div>
+    <div class="sp-tab"    data-sp="circuito"  onclick="spTab('circuito')">⚙️ Circuito</div>
+  </div>
+
+  <div class="sp-pane on" id="sp-pane-pendiente"><div id="sp-lista-pendiente"></div></div>
+  <div class="sp-pane"    id="sp-pane-mias"><div id="sp-lista-mias"></div></div>
+  <div class="sp-pane"    id="sp-pane-todas"><div id="sp-lista-todas"></div></div>
+  <div class="sp-pane"    id="sp-pane-circuito"><div id="sp-circuito"></div></div>
+</div>
+
+<!-- Modal: nueva solicitud de pago -->
+<div class="ab-modal-overlay" id="sp-mb-nueva">
+<div class="ab-modal" style="width:660px;max-height:90vh;overflow-y:auto">
+  <div class="mhd">
+    <div><div class="mht" id="sp-nueva-tit">Solicitar un pago</div></div>
+    <button class="mcl" onclick="document.getElementById('sp-mb-nueva').classList.remove('on')">×</button>
+  </div>
+  <input type="hidden" id="sp-nueva-id">
+  <div class="fg">
+    <div class="fl ff"><label>Proveedor *</label><input id="sp-n-prov" class="sp-inp" placeholder="A quién se le paga"></div>
+    <div class="fl ff"><label>Cuenta corriente</label><input id="sp-n-cuenta" class="sp-inp" placeholder="Cuenta o referencia"></div>
+  </div>
+  <div class="fl ff" style="margin-top:8px"><label>Concepto *</label>
+    <input id="sp-n-concepto" class="sp-inp" placeholder="Por qué se paga">
+  </div>
+  <div class="fg" style="margin-top:8px">
+    <div class="fl"><label>Monto *</label><input id="sp-n-monto" type="number" step="any" min="0" class="sp-inp sp-num"></div>
+    <div class="fl"><label>Moneda</label>
+      <select id="sp-n-moneda" class="sp-inp"><option value="ARS">ARS</option><option value="USD">USD</option></select>
+    </div>
+    <div class="fl"><label>Prioridad</label>
+      <select id="sp-n-prio" class="sp-inp"><option value="normal">Normal</option><option value="urgente">Urgente</option></select>
+    </div>
+  </div>
+  <div class="fg" style="margin-top:8px">
+    <div class="fl"><label>Tipo de comprobante</label><input id="sp-n-ctipo" class="sp-inp" placeholder="Factura A, etc."></div>
+    <div class="fl"><label>Nº de comprobante</label><input id="sp-n-cnum" class="sp-inp"></div>
+    <div class="fl"><label>Se necesita pagado el</label><input id="sp-n-fecha" type="date" class="sp-inp"></div>
+  </div>
+  <div id="sp-n-dup" style="display:none;margin-top:10px;background:rgba(245,158,11,.14);border-radius:8px;padding:10px 12px;font-size:12px"></div>
+  <div class="ab-modal-footer">
+    <button class="btn bo" onclick="document.getElementById('sp-mb-nueva').classList.remove('on')">Cancelar</button>
+    <button class="btn bb" onclick="spNuevaGuardar()">Guardar</button>
+  </div>
+</div>
+</div>
+
+<!-- Modal: detalle del expediente -->
+<div class="ab-modal-overlay" id="sp-mb-detalle">
+<div class="ab-modal" style="width:880px;max-height:92vh;overflow-y:auto">
+  <div class="mhd">
+    <div><div class="mht" id="sp-det-tit">Solicitud</div></div>
+    <button class="mcl" onclick="document.getElementById('sp-mb-detalle').classList.remove('on')">×</button>
+  </div>
+  <div id="sp-det-cont"></div>
+</div>
+</div>
+
+<!-- Modal: resolver un paso -->
+<div class="ab-modal-overlay" id="sp-mb-accion">
+<div class="ab-modal" style="width:560px">
+  <div class="mhd">
+    <div><div class="mht" id="sp-acc-tit">Resolver</div></div>
+    <button class="mcl" onclick="document.getElementById('sp-mb-accion').classList.remove('on')">×</button>
+  </div>
+  <div id="sp-acc-cuerpo" style="font-size:13px"></div>
+  <div class="ab-modal-footer">
+    <button class="btn bo" onclick="document.getElementById('sp-mb-accion').classList.remove('on')">Cancelar</button>
+    <button class="btn bb" id="sp-acc-btn" onclick="spAccionConfirmar()">Confirmar</button>
+  </div>
+</div>
+</div>
+
 <!-- Modal: costo del producto según su receta -->
 <div class="ab-modal-overlay" id="pli-mb-costo">
 <div class="ab-modal" style="width:860px;max-height:90vh;overflow-y:auto">
@@ -16909,6 +17020,7 @@ var USR_SECCIONES = [
     { id: 'pa-lotes', label: 'Fincas y Lotes' },
     { id: 'pa-scout', label: 'Scout — Campo' },
     { id: 'pli-planificacion', label: '📦 Planificación Insumos' },
+    { id: 'sp-pagos', label: '💸 Órdenes de Pago — Seguimiento' },
     { id: 'pa-combustible', label: '⛽ Combustible' },
     { id: 'personal-padron', label: '👥 Personal — Padrón' },
     { id: 'personal-asistencia', label: '📝 Personal — Asistencia Diaria' },
@@ -37451,6 +37563,463 @@ function pliCompraBorrar(id) {
   });
 }
 
+// ══════════════════════════════════════════════════════════════════════════
+// SP · SEGUIMIENTO DE ÓRDENES DE PAGO
+// ══════════════════════════════════════════════════════════════════════════
+// Namespace SP. El circuito y los permisos los resuelve el backend: el front
+// dibuja los botones que el servidor dice que este usuario puede usar en este
+// paso, y el servidor los vuelve a validar al recibirlos.
+
+var SP = { vista: 'pendiente', listas: {}, det: null, accion: null, circuito: null };
+
+function spApi(path, opts) {
+  opts = opts || {};
+  opts.credentials = 'include';
+  opts.headers = opts.headers || { 'Content-Type': 'application/json' };
+  return fetch('/api/sp' + path, opts)
+    .then(function(r) { return r.json(); })
+    .catch(function() { return { ok: false, error: 'Error de red' }; });
+}
+function spEsc(s) {
+  return String(s === null || s === undefined ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+function spMoney(m, mon) {
+  return (mon || 'ARS') + ' ' + (Number(m) || 0).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+function spErr(r) { toast(r && r.error ? r.error : 'Error', 'er'); }
+
+function spInit() { spTab(SP.vista || 'pendiente'); }
+
+function spTab(t) {
+  SP.vista = t;
+  document.querySelectorAll('#sec-sp-pagos .sp-tab').forEach(function(el) {
+    el.classList.toggle('on', el.getAttribute('data-sp') === t);
+  });
+  document.querySelectorAll('#sec-sp-pagos .sp-pane').forEach(function(el) {
+    el.classList.toggle('on', el.id === 'sp-pane-' + t);
+  });
+  if (t === 'circuito') spCircuitoCargar(); else spListaCargar(t);
+}
+
+function spListaCargar(vista) {
+  var cont = document.getElementById('sp-lista-' + vista);
+  if (!cont) return;
+  cont.innerHTML = '<div class="emp">Cargando…</div>';
+  spApi('/solicitudes?vista=' + encodeURIComponent(vista)).then(function(r) {
+    if (!r.ok) { cont.innerHTML = '<div class="emp" style="color:var(--err)">' + spEsc(r.error) + '</div>'; return; }
+    SP.listas[vista] = r.data || [];
+    if (vista === 'pendiente') {
+      var n = SP.listas.pendiente.length;
+      document.getElementById('sp-cnt-pend').innerHTML = n
+        ? '<span class="sp-bad sp-err" style="margin-left:4px">' + n + '</span>' : '';
+    }
+    spListaRender(vista);
+  });
+}
+
+function spListaRender(vista) {
+  var arr = SP.listas[vista] || [];
+  var cont = document.getElementById('sp-lista-' + vista);
+  if (!arr.length) {
+    cont.innerHTML = '<div class="emp" style="padding:26px;text-align:center">'
+      + (vista === 'pendiente' ? '✔ No tenés nada esperando tu decisión.'
+        : (vista === 'mias' ? 'Todavía no pediste ningún pago. <button class="btn bo bs" onclick="spNuevaAbrir()">+ Solicitar uno</button>'
+        : 'Sin solicitudes.')) + '</div>';
+    return;
+  }
+  var html = '<div class="ab-table-wrap"><table class="pa-tbl" style="font-size:12px"><thead><tr>'
+    + '<th>Nº</th><th>Proveedor</th><th style="text-align:right">Monto</th><th>Concepto</th>'
+    + '<th>En qué paso está</th><th>Espera desde</th>'
+    + (vista === 'mias' ? '' : '<th>Pidió</th>')
+    + '<th style="width:190px"></th></tr></thead><tbody>';
+
+  arr.forEach(function(s) {
+    var badge;
+    if (s.estado_global === 'aprobada_final') badge = '<span class="sp-bad sp-ok">completada</span>';
+    else if (s.estado_global === 'rechazada') badge = '<span class="sp-bad sp-err">rechazada</span>';
+    else if (s.estado_global === 'cancelada') badge = '<span class="sp-bad sp-gris">cancelada</span>';
+    else badge = '<span class="sp-bad ' + (s.vencida ? 'sp-err' : 'sp-warn') + '">' + spEsc(s.paso_nombre) + '</span>';
+
+    // Los botones que dibuja el front son EXACTAMENTE los que el backend dijo que
+    // este usuario puede usar en este paso. Sin eso, la bandeja no dice qué hacer.
+    var acciones = (s.acciones || []).map(function(a) {
+      var clase = a.clase === 'rechaza' ? 'bd' : 'bo';
+      return '<button class="btn ' + clase + ' bs" style="padding:2px 7px;font-size:11px;margin-left:3px"'
+        + ' onclick="spAccionAbrir(' + s.id + ',\'' + spEsc(a.accion) + '\')">' + spEsc(a.etiqueta) + '</button>';
+    }).join('');
+
+    html += '<tr class="' + (s.vencida && s.estado_global === 'en_curso' ? 'sp-fila-venc' : '') + '">'
+      + '<td><strong>' + spEsc(s.numero) + '</strong>'
+        + (s.prioridad === 'urgente' ? ' <span class="sp-bad sp-err">urgente</span>' : '') + '</td>'
+      + '<td>' + spEsc(s.proveedor_texto) + (s.cuenta_texto ? '<div class="sp-chica">' + spEsc(s.cuenta_texto) + '</div>' : '') + '</td>'
+      + '<td class="sp-num"><strong>' + spEsc(spMoney(s.monto, s.moneda)) + '</strong></td>'
+      + '<td class="sp-chica">' + spEsc(String(s.concepto || '').slice(0, 60)) + '</td>'
+      + '<td>' + badge
+        + (s.fecha_pago_confirmada ? '<div class="sp-chica">pago: ' + spEsc(s.fecha_pago_confirmada) + '</div>' : '') + '</td>'
+      + '<td class="sp-chica">' + spEsc(String(s.paso_actual_desde || '').slice(0, 16))
+        + (s.vencida ? '<div style="color:var(--err);font-weight:600">vencido</div>' : '') + '</td>'
+      + (vista === 'mias' ? '' : '<td class="sp-chica">' + spEsc(s.solicitante_nombre || '') + '</td>')
+      + '<td style="text-align:right;white-space:nowrap">'
+        + '<button class="btn bo bs" onclick="spDetalleAbrir(' + s.id + ')" style="padding:2px 7px;font-size:11px">Ver</button>'
+        + acciones + '</td></tr>';
+  });
+  html += '</tbody></table></div>';
+  if (vista === 'pendiente') {
+    html += '<div class="sp-chica" style="margin-top:8px">Los botones que ves son los que podés usar vos en el paso '
+      + 'en que está cada solicitud. Si no hay ninguno, es porque le toca a otra persona o porque ya interviniste antes.</div>';
+  }
+  cont.innerHTML = html;
+}
+
+// ── Nueva solicitud ───────────────────────────────────────────────────────
+
+function spNuevaAbrir(id) {
+  document.getElementById('sp-nueva-id').value = id || '';
+  document.getElementById('sp-nueva-tit').textContent = id ? 'Editar solicitud' : 'Solicitar un pago';
+  ['sp-n-prov','sp-n-cuenta','sp-n-concepto','sp-n-monto','sp-n-ctipo','sp-n-cnum','sp-n-fecha'].forEach(function(k) {
+    document.getElementById(k).value = '';
+  });
+  document.getElementById('sp-n-moneda').value = 'ARS';
+  document.getElementById('sp-n-prio').value = 'normal';
+  document.getElementById('sp-n-dup').style.display = 'none';
+  SP.justifDup = null;
+  if (id) {
+    var s = (SP.listas.mias || []).concat(SP.listas.todas || []).filter(function(x) { return x.id === id; })[0];
+    if (s) {
+      document.getElementById('sp-n-prov').value = s.proveedor_texto || '';
+      document.getElementById('sp-n-cuenta').value = s.cuenta_texto || '';
+      document.getElementById('sp-n-concepto').value = s.concepto || '';
+      document.getElementById('sp-n-monto').value = s.monto;
+      document.getElementById('sp-n-moneda').value = s.moneda;
+      document.getElementById('sp-n-prio').value = s.prioridad;
+      document.getElementById('sp-n-ctipo').value = s.comprobante_tipo || '';
+      document.getElementById('sp-n-cnum').value = s.comprobante_numero || '';
+      document.getElementById('sp-n-fecha').value = s.fecha_necesidad || '';
+    }
+  }
+  document.getElementById('sp-mb-nueva').classList.add('on');
+}
+
+function spNuevaGuardar() {
+  var id = document.getElementById('sp-nueva-id').value;
+  var body = {
+    proveedor_texto: document.getElementById('sp-n-prov').value.trim(),
+    cuenta_texto: document.getElementById('sp-n-cuenta').value.trim(),
+    concepto: document.getElementById('sp-n-concepto').value.trim(),
+    monto: document.getElementById('sp-n-monto').value,
+    moneda: document.getElementById('sp-n-moneda').value,
+    prioridad: document.getElementById('sp-n-prio').value,
+    comprobante_tipo: document.getElementById('sp-n-ctipo').value.trim(),
+    comprobante_numero: document.getElementById('sp-n-cnum').value.trim(),
+    fecha_necesidad: document.getElementById('sp-n-fecha').value || null
+  };
+  if (!body.proveedor_texto) return toast('Falta el proveedor', 'er');
+  if (!body.concepto) return toast('Falta el concepto', 'er');
+  if (!(Number(body.monto) > 0)) return toast('El monto tiene que ser mayor que 0', 'er');
+  if (SP.justifDup) body.justificacion_duplicado = SP.justifDup;
+
+  var p = id ? spApi('/solicitudes/' + id, { method: 'PATCH', body: JSON.stringify(body) })
+             : spApi('/solicitudes', { method: 'POST', body: JSON.stringify(body) });
+  p.then(function(r) {
+    if (!r.ok) {
+      // Comprobante repetido: control BLANDO. Se muestran las anteriores y se pide
+      // una justificación, que queda registrada. Pagar una factura en dos veces es
+      // rutina, así que no se bloquea.
+      if (r.codigo === 'comprobante_ya_solicitado') {
+        var d = document.getElementById('sp-n-dup');
+        d.style.display = '';
+        d.innerHTML = '<strong>⚠ ' + spEsc(r.error) + '</strong>'
+          + '<ul style="margin:6px 0 6px 18px">'
+          + (r.solicitudes || []).map(function(x) {
+              return '<li>' + spEsc(x.numero) + ' — ' + spEsc(spMoney(x.monto, x.moneda))
+                + ' — ' + spEsc(x.estado_global) + '</li>';
+            }).join('')
+          + '</ul>'
+          + '<div>Si es un pago parcial (anticipo, saldo, cuota) está bien. Explicá por qué y volvé a guardar:</div>'
+          + '<input id="sp-n-justif" class="sp-inp" style="width:100%;margin-top:5px" '
+          + 'placeholder="Ej: es el saldo, el anticipo se pagó en la SP-2026-0012" '
+          + 'onchange="SP.justifDup=this.value.trim()">';
+        return;
+      }
+      spErr(r); return;
+    }
+    toast(id ? '✓ Guardada' : '✓ Solicitud creada — usá "Enviar a autorizar"', 'ok');
+    document.getElementById('sp-mb-nueva').classList.remove('on');
+    spListaCargar('mias');
+    if (!id) spTab('mias');
+  });
+}
+
+// ── Detalle con la línea de tiempo ────────────────────────────────────────
+
+function spDetalleAbrir(id) {
+  document.getElementById('sp-det-cont').innerHTML = '<div class="emp">Cargando…</div>';
+  document.getElementById('sp-mb-detalle').classList.add('on');
+  spApi('/solicitudes/' + id).then(function(r) {
+    if (!r.ok) {
+      document.getElementById('sp-det-cont').innerHTML = '<div class="emp" style="color:var(--err)">' + spEsc(r.error) + '</div>';
+      return;
+    }
+    SP.det = r.data;
+    spDetalleRender();
+  });
+}
+
+function spDetalleRender() {
+  var d = SP.det, s = d.solicitud;
+  document.getElementById('sp-det-tit').textContent = s.numero + ' · ' + s.proveedor_texto;
+
+  var estado = s.estado_global === 'en_curso'
+    ? '<span class="sp-bad sp-warn">' + spEsc(d.paso ? d.paso.nombre : s.paso_actual_clave) + '</span>'
+    : '<span class="sp-bad ' + (s.estado_global === 'aprobada_final' ? 'sp-ok' : (s.estado_global === 'rechazada' ? 'sp-err' : 'sp-gris')) + '">'
+      + spEsc(s.estado_global) + '</span>';
+
+  var html = '<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:12px">'
+    + '<div style="flex:1;min-width:230px;border:1px solid var(--bor);border-radius:10px;padding:11px;background:var(--sur)">'
+      + '<div class="sp-chica">Monto</div><div style="font-size:20px;font-weight:700">' + spEsc(spMoney(s.monto, s.moneda)) + '</div>'
+      + '<div class="sp-chica" style="margin-top:5px">' + spEsc(s.concepto) + '</div></div>'
+    + '<div style="flex:1;min-width:230px;border:1px solid var(--bor);border-radius:10px;padding:11px;background:var(--sur)">'
+      + '<div class="sp-chica">Estado</div><div style="margin:4px 0">' + estado + '</div>'
+      + (s.estado_global === 'en_curso' && d.esperando_a && d.esperando_a.length
+          ? '<div class="sp-chica">Esperando a: ' + d.esperando_a.map(function(u) { return spEsc(u.nombre); }).join(', ') + '</div>'
+          : '')
+      + (s.fecha_pago_confirmada ? '<div class="sp-chica">Fecha de pago: <strong>' + spEsc(s.fecha_pago_confirmada) + '</strong></div>' : '')
+      + '</div></div>';
+
+  if (d.paso && d.paso.instrucciones && d.acciones.length) {
+    html += '<div style="background:rgba(59,130,246,.1);border-radius:8px;padding:9px 12px;font-size:12px;margin-bottom:10px">'
+      + 'ℹ ' + spEsc(d.paso.instrucciones) + '</div>';
+  }
+  if (d.bloqueo_sod) {
+    html += '<div style="background:rgba(245,158,11,.14);border-radius:8px;padding:9px 12px;font-size:12px;margin-bottom:10px">'
+      + '🔒 ' + spEsc(d.bloqueo_sod) + '</div>';
+  }
+  if (d.acciones.length) {
+    html += '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">'
+      + d.acciones.map(function(a) {
+          return '<button class="btn ' + (a.clase === 'rechaza' ? 'bd' : (a.clase === 'avanza' ? 'bb' : 'bo')) + '"'
+            + ' onclick="spAccionAbrir(' + s.id + ',\'' + spEsc(a.accion) + '\')">' + spEsc(a.etiqueta) + '</button>';
+        }).join('') + '</div>';
+  }
+
+  // Camino del circuito: dónde está y qué falta. Es lo que el comprador necesita
+  // ver para no llamar por teléfono.
+  html += '<div style="font-size:12px;font-weight:700;margin:14px 0 6px">Recorrido del circuito</div>'
+    + '<div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:14px">'
+    + (d.pasos || []).filter(function(p) { return p.tipo !== 'final_rechazo'; }).map(function(p) {
+        var paso = (d.eventos || []).some(function(e) { return e.paso_desde === p.clave && e.clase === 'avanza'; });
+        var actual = p.clave === s.paso_actual_clave;
+        var bg = actual ? 'var(--burg)' : (paso ? 'var(--ok,#16a34a)' : 'var(--bor)');
+        var col = (actual || paso) ? '#fff' : 'var(--mut)';
+        return '<span style="padding:3px 9px;border-radius:12px;font-size:11px;font-weight:600;background:' + bg + ';color:' + col + '">'
+          + spEsc(p.nombre) + '</span>';
+      }).join('<span class="sp-chica">›</span>')
+    + '</div>';
+
+  html += '<div style="font-size:12px;font-weight:700;margin-bottom:8px">Historial</div><ul class="sp-tl">'
+    + (d.eventos || []).slice().reverse().map(function(e) {
+        var cls = e.clase === 'avanza' ? 'sp-av' : (e.clase === 'devuelve' ? 'sp-dv' : (e.clase === 'rechaza' ? 'sp-rc' : ''));
+        var dat = '';
+        try { var j = e.datos_json ? JSON.parse(e.datos_json) : null;
+          if (j && j.fecha_pago) dat = ' · fecha de pago ' + j.fecha_pago;
+          if (j && j.enviado_por_otro_medio) dat = ' · enviado por otro medio';
+        } catch (_) {}
+        return '<li class="' + cls + '">'
+          + '<div style="font-size:12px"><strong>' + spEsc(e.accion) + '</strong>'
+          + (e.paso_hasta ? ' <span class="sp-chica">→ ' + spEsc(e.paso_hasta) + '</span>' : '') + spEsc(dat) + '</div>'
+          + '<div class="sp-chica">' + spEsc(e.actor_nombre || 'sistema')
+          + (e.actor_rol ? ' (' + spEsc(e.actor_rol) + ')' : '') + ' · ' + spEsc(e.creado_en) + '</div>'
+          + (e.comentario ? '<div style="font-size:12px;margin-top:2px;padding:5px 8px;background:var(--bg2,#f8fafc);border-radius:6px">'
+              + spEsc(e.comentario) + '</div>' : '')
+          + '</li>';
+      }).join('') + '</ul>';
+
+  // Cancelar y editar: el backend decide si están permitidos, acá solo se ofrecen.
+  html += '<div class="ab-modal-footer" style="margin-top:14px">';
+  if (s.estado_global === 'en_curso') {
+    html += '<button class="btn bd bs" onclick="spCancelar(' + s.id + ')" style="font-size:11px">Cancelar solicitud</button>';
+  }
+  html += '<button class="btn bo" onclick="document.getElementById(\'sp-mb-detalle\').classList.remove(\'on\')">Cerrar</button></div>';
+
+  document.getElementById('sp-det-cont').innerHTML = html;
+}
+
+function spCancelar(id) {
+  var m = prompt('¿Por qué se cancela? (queda registrado, mínimo 10 caracteres)');
+  if (!m) return;
+  if (m.trim().length < 10) return toast('El motivo tiene que explicar por qué', 'er');
+  spApi('/solicitudes/' + id + '/cancelar', { method: 'POST', body: JSON.stringify({ motivo: m.trim() }) })
+    .then(function(r) {
+      if (!r.ok) { spErr(r); return; }
+      toast('✓ Cancelada', 'ok');
+      document.getElementById('sp-mb-detalle').classList.remove('on');
+      spListaCargar(SP.vista === 'circuito' ? 'mias' : SP.vista);
+    });
+}
+
+// ── Resolver un paso ──────────────────────────────────────────────────────
+
+function spAccionAbrir(id, accion) {
+  var s = null;
+  ['pendiente', 'mias', 'todas'].forEach(function(v) {
+    (SP.listas[v] || []).forEach(function(x) { if (x.id === id) s = x; });
+  });
+  if (!s && SP.det && SP.det.solicitud.id === id) s = SP.det.solicitud;
+  if (!s) return toast('Recargá la lista', 'er');
+
+  var acc = (s.acciones || (SP.det ? SP.det.acciones : []) || []).filter(function(a) { return a.accion === accion; })[0];
+  SP.accion = { id: id, accion: accion, rev: s.rev, acc: acc };
+
+  var pasoClave = s.paso_actual_clave;
+  var pideFecha = pasoClave === 'fechas' && (acc && acc.clase === 'avanza' || accion === 'confirmar_fecha');
+  var pideComprob = pasoClave === 'comprobantes' && accion === 'enviar_comprobantes';
+
+  var html = '<div style="margin-bottom:10px">' + spEsc(s.numero) + ' · ' + spEsc(s.proveedor_texto)
+    + ' · <strong>' + spEsc(spMoney(s.monto, s.moneda)) + '</strong></div>'
+    + '<div style="margin-bottom:10px">Acción: <strong>' + spEsc(acc ? acc.etiqueta : accion) + '</strong></div>';
+
+  if (pideFecha) {
+    html += '<div class="fl ff"><label>Fecha de pago *</label><input id="sp-acc-fecha" type="date" class="sp-inp"></div>';
+  }
+  if (pideComprob) {
+    html += '<label style="display:flex;gap:6px;align-items:flex-start;font-size:12px;margin-bottom:8px;cursor:pointer">'
+      + '<input type="checkbox" id="sp-acc-otromedio"> '
+      + '<span>Ya se lo mandé por otro medio (WhatsApp, mail directo). Explicá por dónde en el comentario.</span></label>';
+  }
+  html += '<div class="fl ff"><label>Comentario' + (acc && acc.requiere_comentario ? ' *' : ' (opcional)') + '</label>'
+    + '<textarea id="sp-acc-com" rows="3" class="sp-inp" style="width:100%"></textarea></div>';
+  if (acc && acc.requiere_comentario) {
+    html += '<div class="sp-chica">Este paso pide que expliques el motivo: es lo que va a leer el comprador.</div>';
+  }
+
+  document.getElementById('sp-acc-tit').textContent = acc ? acc.etiqueta : 'Resolver';
+  document.getElementById('sp-acc-cuerpo').innerHTML = html;
+  document.getElementById('sp-mb-accion').classList.add('on');
+}
+
+function spAccionConfirmar() {
+  var a = SP.accion;
+  if (!a) return;
+  var body = { accion: a.accion, rev: a.rev };
+  var com = document.getElementById('sp-acc-com');
+  if (com) body.comentario = com.value.trim();
+  var f = document.getElementById('sp-acc-fecha');
+  if (f) body.fecha_pago = f.value || null;
+  var om = document.getElementById('sp-acc-otromedio');
+  if (om && om.checked) body.enviado_por_otro_medio = true;
+
+  if (a.acc && a.acc.requiere_comentario && !body.comentario) {
+    return toast('Falta el comentario', 'er');
+  }
+  var btn = document.getElementById('sp-acc-btn');
+  btn.disabled = true; btn.style.opacity = '.5';
+  spApi('/solicitudes/' + a.id + '/accion', { method: 'POST', body: JSON.stringify(body) }).then(function(r) {
+    btn.disabled = false; btn.style.opacity = '';
+    if (!r.ok) { spErr(r); return; }
+    toast('✓ ' + (r.paso_nombre ? 'Pasó a: ' + r.paso_nombre : 'Listo'), 'ok');
+    document.getElementById('sp-mb-accion').classList.remove('on');
+    document.getElementById('sp-mb-detalle').classList.remove('on');
+    spListaCargar(SP.vista === 'circuito' ? 'pendiente' : SP.vista);
+    if (SP.vista !== 'pendiente') spListaCargar('pendiente');
+  });
+}
+
+// ── Circuito: quién está habilitado en cada paso ──────────────────────────
+
+function spCircuitoCargar() {
+  var cont = document.getElementById('sp-circuito');
+  cont.innerHTML = '<div class="emp">Cargando…</div>';
+  spApi('/circuito').then(function(r) {
+    if (!r.ok) { cont.innerHTML = '<div class="emp" style="color:var(--err)">' + spEsc(r.error) + '</div>'; return; }
+    SP.circuito = r.data;
+    spApi('/usuarios').then(function(ru) {
+      SP.usuarios = ru.ok ? (ru.data || []) : [];
+      spCircuitoRender();
+    });
+  });
+}
+
+function spCircuitoRender() {
+  var c = SP.circuito, def = c.def, val = c.validacion;
+  var html = '';
+  if (val && (!val.ok || val.warnings.length)) {
+    if (!val.ok) {
+      html += '<div style="background:rgba(239,68,68,.1);border:1px solid var(--err);border-radius:8px;padding:10px 12px;font-size:12px;margin-bottom:10px">'
+        + '<strong style="color:var(--err)">El circuito tiene problemas y no se pueden crear solicitudes:</strong>'
+        + '<ul style="margin:6px 0 0 18px">' + val.errores.map(function(e) { return '<li>' + spEsc(e) + '</li>'; }).join('') + '</ul></div>';
+    }
+    if (val.warnings.length) {
+      html += '<div style="background:rgba(245,158,11,.12);border-radius:8px;padding:9px 12px;font-size:12px;margin-bottom:10px">'
+        + '⚠ ' + val.warnings.map(function(w) { return spEsc(w); }).join(' · ') + '</div>';
+    }
+  } else {
+    html += '<div class="sp-bad sp-ok" style="display:block;padding:9px 12px;margin-bottom:10px">✔ El circuito está consistente</div>';
+  }
+
+  html += '<div class="sp-chica" style="margin-bottom:10px">Versión ' + c.version.version
+    + ' · Los pasos y las plantillas de mail se editan por API; acá se asigna <strong>quién está habilitado</strong> '
+    + 'en cada paso, que es lo que hace falta para que el circuito no dependa de los administradores.</div>';
+
+  html += '<div class="ab-table-wrap"><table class="pa-tbl" style="font-size:12px"><thead><tr>'
+    + '<th>Paso</th><th>Etiqueta interna</th><th>Habilitados hoy</th><th style="width:110px"></th>'
+    + '</tr></thead><tbody>';
+  (def.pasos || []).forEach(function(p) {
+    if (p.tipo === 'final_ok' || p.tipo === 'final_rechazo') return;
+    var auts = (def.autorizados || {})[p.clave] || [];
+    var txt = auts.map(function(a) {
+      var base = a.tipo === 'rol' ? 'rol ' + a.rol
+        : (a.tipo === 'usuario' ? ((SP.usuarios || []).filter(function(u) { return u.id === a.usuario_id; })[0] || {}).nombre || ('usuario ' + a.usuario_id)
+        : (a.tipo === 'area' ? 'área ' + a.area_id : 'el solicitante'));
+      return base + (a.watcher ? ' (solo aviso)' : '');
+    }).join(', ');
+    html += '<tr><td><strong>' + spEsc(p.nombre) + '</strong>'
+      + (p.sla_horas ? '<div class="sp-chica">SLA ' + p.sla_horas + ' h</div>' : '') + '</td>'
+      + '<td class="sp-chica">' + spEsc(p.hito || '—') + '</td>'
+      + '<td>' + spEsc(txt || '—') + '</td>'
+      + '<td style="text-align:right"><button class="btn bo bs" onclick="spAutorizadosAbrir(\'' + spEsc(p.clave) + '\')"'
+      + ' style="padding:2px 7px;font-size:11px">Cambiar</button></td></tr>';
+  });
+  html += '</tbody></table></div>';
+  document.getElementById('sp-circuito').innerHTML = html;
+}
+
+// Asignación simple por prompt: alcanza para la beta y evita construir un
+// configurador completo antes de saber cómo se usa.
+function spAutorizadosAbrir(pasoClave) {
+  var def = SP.circuito.def;
+  var actuales = (def.autorizados || {})[pasoClave] || [];
+  var lista = (SP.usuarios || []).map(function(u, i) { return (i + 1) + ') ' + u.nombre + ' — ' + u.rol; }).join('\n');
+  var yaTxt = actuales.map(function(a) {
+    return a.tipo === 'rol' ? ('rol:' + a.rol) : (a.tipo === 'usuario' ? String(a.usuario_id) : a.tipo);
+  }).join(', ');
+  var v = prompt('Habilitados para "' + pasoClave + '".\n\nEscribí los números separados por coma.\n'
+    + 'También podés poner "rol:admin" o "solicitante".\n\nActual: ' + yaTxt + '\n\n' + lista, '');
+  if (v === null) return;
+  var partes = String(v).split(',').map(function(x) { return x.trim(); }).filter(Boolean);
+  if (!partes.length) return toast('No se cambió nada', 'er');
+  var out = [];
+  for (var i = 0; i < partes.length; i++) {
+    var t = partes[i];
+    if (t === 'solicitante') { out.push({ tipo: 'solicitante' }); continue; }
+    if (t.indexOf('rol:') === 0) { out.push({ tipo: 'rol', rol: t.slice(4) }); continue; }
+    var n = parseInt(t, 10);
+    var u = SP.usuarios[n - 1];
+    if (!u) return toast('No existe la opción "' + t + '"', 'er');
+    out.push({ tipo: 'usuario', usuario_id: u.id });
+  }
+  spApi('/circuito/pasos/' + encodeURIComponent(pasoClave) + '/autorizados',
+    { method: 'PUT', body: JSON.stringify({ autorizados: out }) }).then(function(r) {
+      if (!r.ok) { spErr(r); return; }
+      if (r.validacion && !r.validacion.ok) {
+        alert('Se guardó, pero el circuito quedó con problemas:\n\n' + r.validacion.errores.join('\n'));
+      } else {
+        toast('✓ Habilitados actualizados', 'ok');
+      }
+      spCircuitoCargar();
+    });
+}
+
 // ── Routing ───────────────────────────────────────────────────────────────
 // Se envuelve loadSec (que a esta altura ya fue redefinido por el bloque de
 // arriba) en vez de tocarlo, para no arriesgar los módulos existentes.
@@ -37458,6 +38027,7 @@ function pliCompraBorrar(id) {
   var anterior = loadSec;
   loadSec = function(s) {
     if (s === 'pli-planificacion') { pliInit(); return; }
+    if (s === 'sp-pagos') { spInit(); return; }
     anterior(s);
   };
 })();
