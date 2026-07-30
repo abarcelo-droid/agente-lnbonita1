@@ -37696,6 +37696,24 @@ function spMoney(m, mon) {
 }
 function spErr(r) { toast(r && r.error ? r.error : 'Error', 'er'); }
 
+// Copiar al portapapeles con respaldo para navegadores que no exponen la API.
+function spCopiar(txt) {
+  var t = String(txt || '');
+  if (!t) return;
+  var ok = function() { toast('✓ Copiado: ' + t, 'ok'); };
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(t).then(ok, function() { spCopiarFallback(t, ok); });
+  } else spCopiarFallback(t, ok);
+}
+function spCopiarFallback(t, ok) {
+  var ta = document.createElement('textarea');
+  ta.value = t; ta.style.position = 'fixed'; ta.style.opacity = '0';
+  document.body.appendChild(ta); ta.select();
+  try { document.execCommand('copy'); ok(); }
+  catch (e) { toast('No se pudo copiar', 'er'); }
+  document.body.removeChild(ta);
+}
+
 function spInit() {
   spTab(SP.vista || 'pendiente');
   // Los avisos linkean a /panel?sp=123[&accion=aprobar]. Se abre la solicitud
@@ -37829,7 +37847,12 @@ function spTablaHtml(arr, vista) {
     html += '<tr class="' + (s.vencida && s.estado_global === 'en_curso' ? 'sp-fila-venc' : '') + '">'
       + '<td><strong>' + spEsc(s.numero) + '</strong>'
         + (s.prioridad === 'urgente' ? ' <span class="sp-bad sp-err">urgente</span>' : '') + '</td>'
-      + '<td>' + spEsc(s.proveedor_texto) + (s.cuenta_texto ? '<div class="sp-chica">' + spEsc(s.cuenta_texto) + '</div>' : '') + '</td>'
+      // La cuenta va en monoespaciada y rotulada: se lee como código, que es lo que
+      // es, y se distingue de un nombre o una referencia cualquiera.
+      + '<td>' + spEsc(s.proveedor_texto)
+        + (s.cuenta_texto
+            ? '<div class="sp-chica">cta. <span style="font-family:ui-monospace,Consolas,monospace;font-weight:600">'
+              + spEsc(s.cuenta_texto) + '</span></div>' : '') + '</td>'
       + '<td class="sp-num"><strong>' + spEsc(spMoney(s.monto, s.moneda)) + '</strong></td>'
       + '<td class="sp-chica">' + spEsc(String(s.concepto || '').slice(0, 60)) + '</td>'
       + '<td>' + badge
@@ -37996,7 +38019,26 @@ function spDetalleRender() {
     : '<span class="sp-bad ' + (s.estado_global === 'aprobada_final' ? 'sp-ok' : (s.estado_global === 'rechazada' ? 'sp-err' : 'sp-gris')) + '">'
       + spEsc(s.estado_global) + '</span>';
 
+  // La cuenta corriente es el puente con el otro sistema: va en tarjeta propia,
+  // grande y copiable, no escondida entre los datos.
+  var pdfCta = (d.adjuntos || []).filter(function(a) { return a.tipo === 'cuenta_corriente'; })[0];
+
   var html = '<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:12px">'
+    + '<div style="flex:1;min-width:200px;border:2px solid var(--burg);border-radius:10px;padding:11px;background:var(--sur)">'
+      + '<div class="sp-chica">Cuenta corriente</div>'
+      + '<div style="display:flex;align-items:center;gap:8px">'
+        + '<div style="font-size:22px;font-weight:700;font-family:ui-monospace,Consolas,monospace;letter-spacing:.03em">'
+          + spEsc(s.cuenta_texto || '—') + '</div>'
+        + (s.cuenta_texto
+            ? '<button class="btn bo bs" style="padding:2px 7px;font-size:11px" title="Copiar para buscarla en el sistema"'
+              + ' onclick="spCopiar(\'' + spEsc(s.cuenta_texto) + '\')">📋</button>' : '')
+      + '</div>'
+      + '<div class="sp-chica" style="margin-top:5px">'
+        + (pdfCta
+            ? '📄 <a href="/api/sp/adjuntos/' + pdfCta.id + '" target="_blank"><strong>Ver PDF de cuenta corriente</strong></a>'
+            : '<span style="color:#b45309">PDF de cuenta corriente: todavía no adjunto</span>')
+      + '</div>'
+    + '</div>'
     + '<div style="flex:1;min-width:230px;border:1px solid var(--bor);border-radius:10px;padding:11px;background:var(--sur)">'
       + '<div class="sp-chica">Monto</div><div style="font-size:20px;font-weight:700">' + spEsc(spMoney(s.monto, s.moneda)) + '</div>'
       + '<div class="sp-chica" style="margin-top:5px">' + spEsc(s.concepto) + '</div>'
