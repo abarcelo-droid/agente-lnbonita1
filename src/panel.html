@@ -11123,7 +11123,11 @@ function sgRepExport(){
   <input type="hidden" id="sp-nueva-id">
   <div class="fg">
     <div class="fl ff"><label>Proveedor *</label><input id="sp-n-prov" class="sp-inp" placeholder="A quién se le paga"></div>
-    <div class="fl ff"><label>Cuenta corriente</label><input id="sp-n-cuenta" class="sp-inp" placeholder="Cuenta o referencia"></div>
+    <div class="fl ff"><label>Cuenta corriente (nº) *</label>
+      <input id="sp-n-cuenta" class="sp-inp sp-num" inputmode="numeric" placeholder="Ej: 471"
+             oninput="this.value=this.value.replace(/[^0-9]/g,'')">
+      <div class="sp-chica">Solo números. Es con lo que se rastrea el pago en el sistema.</div>
+    </div>
   </div>
   <div class="fl ff" style="margin-top:8px"><label>Concepto *</label>
     <input id="sp-n-concepto" class="sp-inp" placeholder="Por qué se paga">
@@ -37680,7 +37684,33 @@ function spMoney(m, mon) {
 }
 function spErr(r) { toast(r && r.error ? r.error : 'Error', 'er'); }
 
-function spInit() { spTab(SP.vista || 'pendiente'); }
+function spInit() {
+  spTab(SP.vista || 'pendiente');
+  // Los avisos linkean a /panel?sp=123[&accion=aprobar]. Se abre la solicitud
+  // directamente, y si el link traía la acción se abre también ese diálogo: con la
+  // sesión abierta, el botón del mail termina siendo un solo click.
+  if (SP.deepLinkHecho) return;
+  try {
+    var q = new URLSearchParams(window.location.search);
+    var id = parseInt(q.get('sp'), 10);
+    if (!id) return;
+    SP.deepLinkHecho = true;
+    var accion = q.get('accion');
+    spApi('/solicitudes/' + id).then(function(r) {
+      if (!r.ok) { toast('No se encontró la solicitud del link', 'er'); return; }
+      SP.det = r.data;
+      spDetalleRender();
+      document.getElementById('sp-mb-detalle').classList.add('on');
+      // Solo se abre el diálogo si esa acción sigue disponible para este usuario:
+      // entre que salió el mail y el click, otro pudo haberla resuelto.
+      if (accion && (r.data.acciones || []).some(function(a) { return a.accion === accion; })) {
+        spAccionAbrir(id, accion);
+      } else if (accion) {
+        toast('Esa acción ya no está disponible: mirá el estado actual', 'er');
+      }
+    });
+  } catch (_) { /* URL rara: se ignora y queda la bandeja normal */ }
+}
 
 function spTab(t) {
   SP.vista = t;
@@ -37726,6 +37756,31 @@ function spListaCargar(vista) {
 function spListaRender(vista) {
   var arr = SP.listas[vista] || [];
   var cont = document.getElementById('sp-lista-' + vista);
+
+  // En "me toca a mí" se separan las que puedo resolver de las que estoy
+  // habilitado pero frenado por la separación de funciones. Mostrarlas mezcladas
+  // confunde; esconderlas es peor: recibiste el aviso y la bandeja parece rota.
+  if (vista === 'pendiente') {
+    var puedo = arr.filter(function(s) { return (s.acciones || []).length > 0; });
+    var frenadas = arr.filter(function(s) { return !(s.acciones || []).length && s.bloqueo_sod; });
+    var h = '';
+    if (!puedo.length) {
+      h += '<div class="emp" style="padding:20px;text-align:center">✔ No tenés nada esperando tu decisión.</div>';
+    } else {
+      SP.listas.pendiente = puedo;
+      h += spTablaHtml(puedo, 'pendiente');
+      SP.listas.pendiente = arr;
+    }
+    if (frenadas.length) {
+      h += '<div style="margin-top:16px;background:rgba(245,158,11,.12);border-radius:8px;padding:10px 12px;font-size:12px">'
+        + '<strong>🔒 ' + frenadas.length + ' solicitud(es) donde estás habilitado pero no podés resolver</strong>'
+        + '<div style="margin-top:3px">' + spEsc(frenadas[0].bloqueo_sod) + '</div></div>'
+        + spTablaHtml(frenadas, 'frenadas');
+    }
+    cont.innerHTML = h;
+    return;
+  }
+
   if (!arr.length) {
     cont.innerHTML = '<div class="emp" style="padding:26px;text-align:center">'
       + (vista === 'pendiente' ? '✔ No tenés nada esperando tu decisión.'
@@ -37733,6 +37788,10 @@ function spListaRender(vista) {
         : 'Sin solicitudes.')) + '</div>';
     return;
   }
+  cont.innerHTML = spTablaHtml(arr, vista);
+}
+
+function spTablaHtml(arr, vista) {
   var html = '<div class="ab-table-wrap"><table class="pa-tbl" style="font-size:12px"><thead><tr>'
     + '<th>Nº</th><th>Proveedor</th><th style="text-align:right">Monto</th><th>Concepto</th>'
     + '<th>En qué paso está</th><th>Espera desde</th>'
@@ -37763,7 +37822,11 @@ function spListaRender(vista) {
       + '<td>' + badge
         + (s.fecha_pago_confirmada ? '<div class="sp-chica">pago: ' + spEsc(s.fecha_pago_confirmada) + '</div>' : '') + '</td>'
       + '<td class="sp-chica">' + spEsc(String(s.paso_actual_desde || '').slice(0, 16))
-        + (s.vencida ? '<div style="color:var(--err);font-weight:600">vencido</div>' : '') + '</td>'
+        + (s.vencida ? '<div style="color:var(--err);font-weight:600">vencido</div>' : '')
+        // A quién le toca de verdad: es lo primero que se pregunta el que no puede actuar.
+        + (vista === 'frenadas' && (s.esperando_a || []).length
+            ? '<div>lo tiene que resolver: <strong>' + spEsc(s.esperando_a.join(', ')) + '</strong></div>'
+            : '') + '</td>'
       + (vista === 'mias' ? '' : '<td class="sp-chica">' + spEsc(s.solicitante_nombre || '') + '</td>')
       + '<td style="text-align:right;white-space:nowrap">'
         + '<button class="btn bo bs" onclick="spDetalleAbrir(' + s.id + ')" style="padding:2px 7px;font-size:11px">Ver</button>'
@@ -37772,9 +37835,9 @@ function spListaRender(vista) {
   html += '</tbody></table></div>';
   if (vista === 'pendiente') {
     html += '<div class="sp-chica" style="margin-top:8px">Los botones que ves son los que podés usar vos en el paso '
-      + 'en que está cada solicitud. Si no hay ninguno, es porque le toca a otra persona o porque ya interviniste antes.</div>';
+      + 'en que está cada solicitud.</div>';
   }
-  cont.innerHTML = html;
+  return html;
 }
 
 // ── Nueva solicitud ───────────────────────────────────────────────────────
@@ -37820,6 +37883,8 @@ function spNuevaGuardar() {
     fecha_necesidad: document.getElementById('sp-n-fecha').value || null
   };
   if (!body.proveedor_texto) return toast('Falta el proveedor', 'er');
+  if (!body.cuenta_texto) return toast('Falta la cuenta corriente: es el número con el que se rastrea el pago', 'er');
+  if (!/^\d{1,20}$/.test(body.cuenta_texto)) return toast('La cuenta corriente tiene que ser un número', 'er');
   if (!body.concepto) return toast('Falta el concepto', 'er');
   if (!(Number(body.monto) > 0)) return toast('El monto tiene que ser mayor que 0', 'er');
   if (SP.justifDup) body.justificacion_duplicado = SP.justifDup;
@@ -38365,6 +38430,21 @@ function spTiemposRender() {
     if (s === 'sp-pagos') { spInit(); return; }
     anterior(s);
   };
+})();
+
+// Deep link desde el mail: /panel?sp=123 entra directo a Órdenes de Pago. Sin esto
+// el panel abre en la pantalla inicial y hay que ir a buscar la solicitud a mano,
+// que es exactamente la fricción que el link viene a sacar.
+(function() {
+  try {
+    if (!new URLSearchParams(window.location.search).get('sp')) return;
+    var ir = function() {
+      var ni = document.querySelector('.ni[data-sec="sp-pagos"]');
+      if (ni) ni.click();   // reusa el handler de navegación, que ya llama a loadSec
+    };
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', ir);
+    else setTimeout(ir, 0);
+  } catch (_) { /* URL rara: el panel abre normal */ }
 })();
 </script>
 

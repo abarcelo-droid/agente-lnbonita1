@@ -103,7 +103,14 @@ app.use("/api/auth", authRouter);
 // Panel web — protegido: si no hay cookie redirige a login
 app.get("/panel", (req, res) => {
   const cookie = req.cookies?.lnb_user;
-  if (!cookie) return res.redirect('/login');
+  if (!cookie) {
+    // Se preserva el destino: los avisos por mail linkean a /panel?sp=123, y sin
+    // esto el login te dejaba en la pantalla inicial y había que buscar la
+    // solicitud a mano, que es exactamente la fricción que el link evita.
+    const destino = req.originalUrl && req.originalUrl.startsWith('/panel')
+      ? req.originalUrl : '/panel';
+    return res.redirect('/login?next=' + encodeURIComponent(destino));
+  }
   try {
     const user = JSON.parse(cookie);
     // Usuarios de campo solo pueden ir al Scout

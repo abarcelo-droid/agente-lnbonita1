@@ -81,11 +81,31 @@ const vFecha = (v, campo) => {
   return s;
 };
 
+// La cuenta corriente es OBLIGATORIA y NUMÉRICA: es el número con el que se
+// rastrea el pago en el otro sistema, así que una cuenta vacía o escrita a mano
+// como texto rompe justamente lo que este módulo tiene que permitir.
+// Se aceptan solo dígitos (se conservan los ceros a la izquierda, por eso queda
+// como texto y no como entero).
+function vCuenta(v) {
+  const s = String(v === undefined || v === null ? '' : v).trim();
+  if (!s) throw bad('La cuenta corriente es obligatoria: es el número con el que se rastrea el pago en el sistema');
+  if (!/^\d{1,20}$/.test(s)) {
+    throw bad(`La cuenta corriente tiene que ser un número (llegó "${s.slice(0, 30)}")`);
+  }
+  return s;
+}
+
 const PANEL_URL = process.env.PANEL_BASE_URL || 'https://agente-lnbonita1-production.up.railway.app';
-// El mail LINKEA al panel y la acción exige login. Un botón "Aprobar" que funciona
-// desde el mail se reenvía y lo aprieta cualquiera: la autorización dejaría de ser
-// atribuible, que es justo lo único que este circuito tiene que garantizar.
-const linkA = (id) => `${PANEL_URL}/login?next=${encodeURIComponent('/panel?sp=' + id)}`;
+// El link apunta DIRECTO al panel con la solicitud (y opcionalmente la acción) en la
+// URL. Si hay sesión abierta —lo normal en la oficina— es un solo click; si no, el
+// guard de /panel manda al login preservando el destino y vuelve acá.
+//
+// A propósito NO se usa un token que apruebe sin iniciar sesión: un mail reenviado
+// lo aprieta cualquiera y la autorización dejaría de ser atribuible, que es lo único
+// que este circuito tiene que garantizar. Con la sesión abierta, la diferencia en
+// clicks es cero.
+const linkA = (id, accion) =>
+  `${PANEL_URL}/panel?sp=${id}` + (accion ? `&accion=${encodeURIComponent(accion)}` : '');
 
 const plantillaDe = (def, clave) => (def.plantillas || []).find(p => p.clave === clave) || null;
 const money = (m, mon) => (mon || 'ARS') + ' ' + Number(m || 0).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -105,18 +125,57 @@ function avisarPaso(def, sol, pasoClave, eventoId) {
   const paso = (def.pasos || []).find(p => p.clave === pasoClave);
   if (!paso || paso.tipo === 'final_ok' || paso.tipo === 'final_rechazo') return;
   const { resolutores, watchers } = resolverAutorizados(def, pasoClave, sol);
-  const dest = [...resolutores, ...watchers].map(u => u.email).filter(Boolean);
+
+  // A quien la segregación de funciones le impide resolver ESTE paso en ESTA
+  // solicitud NO se le avisa: recibiría un "te toca a vos" sobre algo que no puede
+  // tocar, y después la bandeja le aparece vacía. El caso típico es el solicitante,
+  // que suele estar habilitado para autorizar pero no sobre su propio pedido.
+  const puedenActuar = resolutores.filter(u => !bloqueadoPorSoD(def, sol, pasoClave, u.id));
+  const dest = [...puedenActuar, ...watchers].map(u => u.email).filter(Boolean);
+
   const pl = plantillaDe(def, 'paso:' + pasoClave);
   const asunto = pl ? pl.asunto : 'Te toca revisar {{numero}} · {{proveedor}}';
   const cuerpo = pl ? pl.cuerpo
     : 'Hola {{destinatario}},\n\nTenés una solicitud de pago esperándote: {{numero}} · {{proveedor}} · {{monto}}.\n\n{{link}}\n';
   const vars = varsDe(sol, { destinatario: 'equipo' });
+  const texto = render(cuerpo, vars);
+
+  // Botones de acción en el mail. Llevan al panel con la acción ya elegida: si hay
+  // sesión abierta es un click, y si no, pasa por el login y vuelve acá. La acción
+  // se ejecuta DENTRO del panel autenticado, así queda atribuida a una persona.
+  const acciones = (def.transiciones || [])
+    .filter(t => t.desde === pasoClave)
+    .map(t => ({ etiqueta: t.etiqueta, clase: t.clase, url: linkA(sol.id, t.accion) }));
+
   encolar({
     solicitudId: sol.id, eventoId,
     dedupKey: `paso:${sol.id}:${pasoClave}:${eventoId}`,
     destinatarios: dest,
-    asunto: render(asunto, vars), cuerpo: render(cuerpo, vars)
+    asunto: render(asunto, vars),
+    cuerpo: texto,
+    html: htmlConBotones(texto, acciones)
   });
+}
+
+// Mail en HTML con botones. Se arma acá y no en una plantilla editable a propósito:
+// si el HTML fuera configurable, un error de tipeo rompe el mail de todo el
+// circuito. Lo editable es el TEXTO; los botones los pone el sistema.
+function htmlConBotones(texto, acciones) {
+  const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  const color = (c) => c === 'rechaza' ? '#b91c1c' : (c === 'avanza' ? '#15803d' : '#475569');
+  const botones = (acciones || []).map(a =>
+    `<a href="${esc(a.url)}" style="display:inline-block;padding:10px 18px;margin:4px 6px 4px 0;`
+    + `background:${color(a.clase)};color:#fff;text-decoration:none;border-radius:6px;`
+    + `font-family:system-ui,sans-serif;font-size:14px;font-weight:600">${esc(a.etiqueta)}</a>`
+  ).join('');
+  return '<div style="font-family:system-ui,-apple-system,Segoe UI,sans-serif;font-size:14px;line-height:1.55;color:#1e293b">'
+    + '<div style="white-space:pre-wrap">' + esc(texto) + '</div>'
+    + (botones ? '<div style="margin-top:16px">' + botones + '</div>' : '')
+    + '<div style="margin-top:14px;font-size:12px;color:#64748b">'
+    + 'Los botones te llevan al panel. Si ya tenés la sesión abierta es un solo click; '
+    + 'si no, te pide iniciar sesión y después te deja en la solicitud. '
+    + 'La aprobación se registra a tu nombre, así que no se puede resolver desde un mail reenviado.'
+    + '</div></div>';
 }
 
 // Avisos al SOLICITANTE. El destinatario es fijo en el código, no configurable:
@@ -274,7 +333,7 @@ router.post('/solicitudes', wrap((req, res) => {
          paso_actual_clave, paso_actual_hito, paso_actual_desde, estado_global)
       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now','localtime'),'en_curso')
     `).run(soc, numero, v.id, JSON.stringify(def), req.user.id, req.user.nombre || null,
-           proveedor, vTexto(b.cuenta_texto, 'La cuenta', { max: 200 }), concepto, monto, moneda,
+           proveedor, vCuenta(b.cuenta_texto), concepto, monto, moneda,
            vTexto(b.comprobante_tipo, 'El tipo de comprobante', { max: 30 }), cbteNum,
            vFecha(b.fecha_necesidad, 'La fecha de necesidad'),
            b.prioridad === 'urgente' ? 'urgente' : 'normal',
@@ -314,15 +373,27 @@ router.get('/solicitudes', wrap((req, res) => {
     const def = defDe(s);
     const acciones = accionesDisponibles(def, s, req.user);
     const paso = (def.pasos || []).find(p => p.clave === s.paso_actual_clave);
+    // Habilitado en el paso pero frenado por segregación de funciones. Se informa
+    // en vez de esconderse: si no, el usuario ve la bandeja vacía sabiendo que le
+    // llegó un aviso, y concluye que la herramienta no funciona.
+    const { resolutores } = resolverAutorizados(def, s.paso_actual_clave, s);
+    const habilitado = req.user.rol === 'admin' || resolutores.some(u => u.id === req.user.id);
+    const bloqueo = (habilitado && s.estado_global === 'en_curso')
+      ? bloqueadoPorSoD(def, s, s.paso_actual_clave, req.user.id) : null;
     return {
       ...s, def_snapshot_json: undefined,
       paso_nombre: paso ? paso.nombre : s.paso_actual_clave,
       paso_instrucciones: paso ? paso.instrucciones : null,
-      acciones,
+      acciones, bloqueo_sod: bloqueo,
+      // A quién le toca de verdad: es lo que el usuario necesita saber cuando no
+      // puede actuar él.
+      esperando_a: resolutores
+        .filter(u => !bloqueadoPorSoD(def, s, s.paso_actual_clave, u.id))
+        .map(u => u.nombre),
       vencida: !!(s.vence_en && s.estado_global === 'en_curso' && s.vence_en < new Date().toISOString().slice(0, 19).replace('T', ' '))
     };
   });
-  if (vista === 'pendiente') filas = filas.filter(s => s.acciones.length > 0);
+  if (vista === 'pendiente') filas = filas.filter(s => s.acciones.length > 0 || s.bloqueo_sod);
   res.json({ ok: true, data: filas, vista });
 }));
 
@@ -477,7 +548,10 @@ router.patch('/solicitudes/:id', wrap((req, res) => {
     WHERE id=?
   `).run(
     b.proveedor_texto === undefined ? s.proveedor_texto : vTexto(b.proveedor_texto, 'El proveedor', { req: true, max: 200 }),
-    b.cuenta_texto === undefined ? s.cuenta_texto : vTexto(b.cuenta_texto, 'La cuenta', { max: 200 }),
+    // Se valida el valor FINAL, no solo el que llega: si la solicitud es vieja y
+    // tiene la cuenta vacía, editarla obliga a completarla, que es lo que hace que
+    // el dato sirva para rastrear.
+    vCuenta(b.cuenta_texto === undefined ? s.cuenta_texto : b.cuenta_texto),
     b.concepto === undefined ? s.concepto : vTexto(b.concepto, 'El concepto', { req: true, max: 500 }),
     b.monto === undefined ? s.monto : vNum(b.monto, 'El monto', { min: 0.01 }),
     b.moneda === undefined ? s.moneda : String(b.moneda).toUpperCase(),
