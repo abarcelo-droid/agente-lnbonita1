@@ -150,8 +150,16 @@ function avisarPaso(def, sol, pasoClave, eventoId) {
   const asunto = pl ? pl.asunto : 'Te toca revisar {{numero}} · {{proveedor}}';
   const cuerpo = pl ? pl.cuerpo
     : 'Hola {{destinatario}},\n\nTenés una solicitud de pago esperándote: {{numero}} · {{proveedor}} · {{monto}}.\n\n{{link}}\n';
-  const vars = varsDe(sol, { destinatario: 'equipo' });
-  const texto = render(cuerpo, vars);
+  // La composición del pago viaja al que confecciona: sin ella tiene que entrar al
+  // panel a averiguar cuántos cheques emitir y por cuánto.
+  const comp = textoComposicion(pagosDe(sol.id), sol.moneda);
+  const vars = varsDe(sol, { destinatario: 'equipo', composicion: comp });
+  let texto = render(cuerpo, vars);
+  // Si la plantilla es vieja y no tiene el placeholder, se agrega igual: hacer que
+  // dependa de editar la plantilla sería que no llegue justo cuando más sirve.
+  if (comp && paso.hito === 'confeccion' && texto.indexOf(comp) === -1) {
+    texto += '\nCómo se paga:\n' + comp + '\n';
+  }
 
   // Botones de acción en el mail. Llevan al panel con la acción ya elegida: si hay
   // sesión abierta es un click, y si no, pasa por el login y vuelve acá. La acción
@@ -303,6 +311,84 @@ router.get('/usuarios', wrap((req, res) => {
 // ══════════════════════════════════════════════════════════════════════════
 // SOLICITUDES
 // ══════════════════════════════════════════════════════════════════════════
+
+// ── Composición del pago ──────────────────────────────────────────────────
+// Transferencia, cheque propio, cheque de terceros, o el mix de los tres.
+
+const TIPOS_PAGO = ['transferencia', 'cheque_propio', 'cheque_terceros'];
+const ETIQUETA_PAGO = {
+  transferencia: 'Transferencia',
+  cheque_propio: 'Cheque propio',
+  cheque_terceros: 'Cheque de terceros'
+};
+const MAX_POR_TIPO = 20;
+const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
+
+function validarComposicion(lista, sol, fechaPago) {
+  if (!Array.isArray(lista) || !lista.length) {
+    throw bad('Cargá cómo se va a pagar: transferencia, cheques, o la combinación');
+  }
+  const cuenta = {};
+  const out = lista.map((p, i) => {
+    const tipo = String(p.tipo || '').trim();
+    if (!TIPOS_PAGO.includes(tipo)) throw bad(`La línea ${i + 1} no tiene un medio de pago válido`);
+    cuenta[tipo] = (cuenta[tipo] || 0) + 1;
+    if (cuenta[tipo] > MAX_POR_TIPO) {
+      throw bad(`Máximo ${MAX_POR_TIPO} ${ETIQUETA_PAGO[tipo].toLowerCase()}(s) por solicitud`);
+    }
+    const importe = vNum(p.importe, `El importe de la línea ${i + 1}`, { min: 0.01 });
+    // El cheque de terceros se identifica por su código: sin eso, el que confecciona
+    // no sabe qué cheque endosar.
+    let codigo = null;
+    if (tipo === 'cheque_terceros') {
+      codigo = vTexto(p.codigo, `El código del cheque de la línea ${i + 1}`, { req: true, max: 40 });
+    }
+    // Los cheques llevan su propia fecha de vencimiento, que es justamente el punto
+    // de un cheque diferido. Si no viene, se asume la fecha de pago.
+    const fecha = vFecha(p.fecha, `La fecha de la línea ${i + 1}`) || fechaPago;
+    return { tipo, importe: round2(importe), fecha, codigo, notas: vTexto(p.notas, 'Las notas', { max: 200 }) };
+  });
+
+  // La suma tiene que dar el monto: si no, la orden se confecciona por un importe
+  // distinto al autorizado. Se informa la diferencia exacta para que sea corregible
+  // de una, en vez de un "no coincide" que obliga a sacar la cuenta a mano.
+  const suma = round2(out.reduce((a, p) => a + p.importe, 0));
+  const monto = round2(sol.monto);
+  if (Math.abs(suma - monto) > 0.009) {
+    const dif = round2(Math.abs(suma - monto));
+    throw bad(
+      `La composición suma ${money(suma, sol.moneda)} y el pago autorizado es ${money(monto, sol.moneda)}. `
+      + (suma < monto ? `Faltan ${money(dif, sol.moneda)}.` : `Sobran ${money(dif, sol.moneda)}.`)
+    );
+  }
+  return out;
+}
+
+// Texto de la composición para el mail y las pantallas.
+function textoComposicion(pagos, moneda) {
+  if (!pagos || !pagos.length) return '';
+  const porTipo = {};
+  for (const p of pagos) (porTipo[p.tipo] = porTipo[p.tipo] || []).push(p);
+  const lineas = [];
+  for (const tipo of TIPOS_PAGO) {
+    const arr = porTipo[tipo];
+    if (!arr || !arr.length) continue;
+    const sub = round2(arr.reduce((a, p) => a + p.importe, 0));
+    lineas.push(`${ETIQUETA_PAGO[tipo]} — ${arr.length} — ${money(sub, moneda)}`);
+    for (const p of arr) {
+      lineas.push('   · ' + money(p.importe, moneda)
+        + (p.fecha ? ' · ' + p.fecha : '')
+        + (p.codigo ? ' · cheque ' + p.codigo : ''));
+    }
+  }
+  const total = round2(pagos.reduce((a, p) => a + p.importe, 0));
+  lineas.push(`TOTAL: ${money(total, moneda)}`);
+  return lineas.join('\n');
+}
+
+function pagosDe(solicitudId) {
+  return db.prepare('SELECT * FROM sp_pago_detalle WHERE solicitud_id=? ORDER BY orden, id').all(solicitudId);
+}
 
 const nombreDe = (uid) => {
   try {
@@ -483,6 +569,7 @@ router.get('/solicitudes/:id', wrap((req, res) => {
       sod_omitida: sodOmitida(def, s, s.paso_actual_clave, req.user.id),
       esperando_a: resolutores.map(u => ({ id: u.id, nombre: u.nombre })),
       eventos, adjuntos,
+      pagos: pagosDe(s.id),
       tiempos: t
     }
   });
@@ -530,9 +617,12 @@ router.post('/solicitudes/:id/accion', wrap((req, res) => {
 
   // Requisitos por modo de captura
   const datos = {};
+  let pagos = null;
   if (paso.modo_captura === 'informa_fecha' && tr.clase === 'avanza') {
     datos.fecha_pago = vFecha(b.fecha_pago, 'La fecha de pago');
     if (!datos.fecha_pago) throw bad('Tenés que informar la fecha de pago');
+    pagos = validarComposicion(b.pagos, s, datos.fecha_pago);
+    datos.composicion = pagos.map(p => ({ tipo: p.tipo, importe: p.importe, fecha: p.fecha, codigo: p.codigo }));
   }
   if (paso.modo_captura === 'envia_comprobantes' && tr.clase === 'avanza') {
     const tieneAdj = db.prepare(`
@@ -555,6 +645,16 @@ router.post('/solicitudes/:id/accion', wrap((req, res) => {
     const cambio = aplicarCambioDePaso(def, s, tr.hasta, { sumaCiclo: tr.clase === 'devuelve' });
     if (datos.fecha_pago) {
       db.prepare('UPDATE sp_solicitudes SET fecha_pago_confirmada=? WHERE id=?').run(datos.fecha_pago, s.id);
+    }
+    if (pagos) {
+      // Reemplazo total: si vuelve a pasar por el paso (devolución), la composición
+      // se rehace entera y no quedan líneas viejas mezcladas con las nuevas.
+      db.prepare('DELETE FROM sp_pago_detalle WHERE solicitud_id=?').run(s.id);
+      const insP = db.prepare(`
+        INSERT INTO sp_pago_detalle (solicitud_id, tipo, importe, fecha, codigo, notas, orden, creado_por_id)
+        VALUES (?,?,?,?,?,?,?,?)
+      `);
+      pagos.forEach((p, i) => insP.run(s.id, p.tipo, p.importe, p.fecha, p.codigo, p.notas, i, req.user.id));
     }
     const detalle = { ...datos };
     if (omitida) detalle.sod_omitida = omitida;

@@ -226,6 +226,29 @@ db.exec(`
   );
   CREATE INDEX IF NOT EXISTS idx_sp_adj_sol ON sp_adjuntos(solicitud_id);
 
+  -- Cómo se va a pagar: transferencia, cheque propio, cheque de terceros, o el mix
+  -- de los tres. Lo carga Tesorería al confirmar la fecha y es lo que necesita el
+  -- que confecciona la orden.
+  --
+  -- Una fila por instrumento, no un campo con el total: un pago de 3 cheques
+  -- propios con vencimientos distintos más una transferencia no entra en un solo
+  -- número, y el que confecciona necesita el detalle para emitir cada cheque.
+  CREATE TABLE IF NOT EXISTS sp_pago_detalle (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    solicitud_id  INTEGER NOT NULL REFERENCES sp_solicitudes(id),
+    tipo          TEXT    NOT NULL
+                       CHECK(tipo IN ('transferencia','cheque_propio','cheque_terceros')),
+    importe       REAL    NOT NULL CHECK(importe > 0),
+    fecha         TEXT,                       -- vencimiento del cheque / fecha de la transferencia
+    codigo        TEXT,                       -- número del cheque de terceros
+    banco         TEXT,                       -- RESERVADO v1
+    notas         TEXT,
+    orden         INTEGER NOT NULL DEFAULT 0,
+    creado_en     TEXT DEFAULT (datetime('now','localtime')),
+    creado_por_id INTEGER
+  );
+  CREATE INDEX IF NOT EXISTS idx_sp_pago_sol ON sp_pago_detalle(solicitud_id, orden);
+
   -- Cola de salida de mails. El envío NO puede ir dentro de la transacción que
   -- cambia el estado: enviarMail es async y better-sqlite3 no acepta una función
   -- async dentro de db.transaction() (tira TypeError). Y sin cola no hay forma de
