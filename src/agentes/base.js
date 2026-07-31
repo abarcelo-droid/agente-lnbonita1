@@ -1,4 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
+import { MODELO_CHAT } from "../config/ia.js";
 import { obtenerSesion, guardarSesion } from "../servicios/db.js";
 import {
   registrarActividad,
@@ -42,7 +43,7 @@ Aplicá esta instrucción en tu próxima respuesta de forma natural, como si fue
   sesion.mensajes.push({ role: "user", content: mensajeUsuario });
 
   const response = await client.messages.create({
-    model:      "claude-sonnet-4-20250514",
+    model:      MODELO_CHAT,
     max_tokens: 1024,
     system:     promptFinal,
     messages:   sesion.mensajes,
@@ -76,7 +77,7 @@ export async function generarResumen(telefono) {
   if (!sesion.mensajes.length) return "Sin mensajes aún.";
 
   const response = await client.messages.create({
-    model:      "claude-sonnet-4-20250514",
+    model:      MODELO_CHAT,
     max_tokens: 300,
     system:     "Sos un asistente que resume conversaciones de ventas de forma muy breve. Máximo 3 líneas. Incluí: qué quiere el cliente, en qué punto está la charla, y si hay algo pendiente.",
     messages:   [{ role: "user", content: `Resumí esta conversación:\n${JSON.stringify(sesion.mensajes)}` }],

@@ -6,6 +6,7 @@ import fs from 'fs';
 import path from 'path';
 import bcrypt from 'bcrypt';
 import { fileURLToPath } from 'url';
+import { MODELO_CHAT } from '../config/ia.js';
 import { getDb } from '../servicios/db.js';
 import dbPa from '../servicios/db_pa.js'; // DB contable — asientos, proveedores
 
@@ -903,7 +904,7 @@ router.post('/leer-remito', requireAuth, async (req, res) => {
         'anthropic-version': '2023-06-01'
       },
       body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
+        model: MODELO_CHAT,
         max_tokens: 1000,
         messages: [{
           role: 'user',
@@ -959,7 +960,8 @@ Solo devolvé el JSON, sin texto adicional.`
       return res.status(500).json({ ok: false, error: data.error?.message || 'Error de API' });
     }
 
-    const txt = (data.content?.[0]?.text || '').replace(/```json|```/g, '').trim();
+    const txt = (data.content || []).filter(b => b.type === 'text').map(b => b.text).join('\n')
+      .replace(/```json|```/g, '').trim();
     let parsed;
     try { parsed = JSON.parse(txt); }
     catch(e) { return res.status(422).json({ ok: false, error: 'No se pudo parsear la respuesta', raw: txt }); }
@@ -2888,7 +2890,7 @@ router.post('/combustible/leer-ticket', requireAuth, async (req, res) => {
         'anthropic-version': '2023-06-01'
       },
       body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
+        model: MODELO_CHAT,
         max_tokens: 500,
         messages: [{
           role: 'user',
@@ -2916,7 +2918,8 @@ Solo devolvé el JSON, sin texto adicional.` }
     const data = await response.json();
     if (!response.ok)
       return res.status(500).json({ ok: false, error: data.error?.message || 'Error de API' });
-    const txt = (data.content?.[0]?.text || '').replace(/```json|```/g, '').trim();
+    const txt = (data.content || []).filter(b => b.type === 'text').map(b => b.text).join('\n')
+      .replace(/```json|```/g, '').trim();
     let parsed;
     try { parsed = JSON.parse(txt); }
     catch(e) { return res.status(422).json({ ok: false, error: 'No se pudo parsear la respuesta', raw: txt }); }

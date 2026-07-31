@@ -15,6 +15,7 @@
 // NO toca zona contable de Pablo.
 
 import Anthropic from '@anthropic-ai/sdk';
+import { MODELO_RAPIDO } from '../config/ia.js';
 
 // ── CONFIG (calibrable sin tocar la lógica) ───────────────────────────────────
 // Umbral de similitud [0..1] que dispara el BLOQUEO en el fuzzy. Subilo para ser
@@ -25,7 +26,7 @@ export const UMBRAL_BLOQUEO = 0.80;
 // Capa semántica (IA) encendida. Si no hay ANTHROPIC_API_KEY se saltea sola.
 export const SEMANTICO_ACTIVADO = true;
 // Modelo para el chequeo semántico (decisión Andy: Haiku por costo/latencia).
-export const MODELO_SEMANTICO = 'claude-haiku-4-5';
+export const MODELO_SEMANTICO = MODELO_RAPIDO;
 
 // Normaliza para comparar: sin acentos, minúsculas, espacios colapsados, tokens ordenados.
 export function normalizar(s) {

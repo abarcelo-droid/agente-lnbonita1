@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { MODELO_CHAT } from '../config/ia.js';
 import db from '../servicios/db.js';
 import { buscarProductoCompras, buscarProductoVentas, buscarClienteVentas, historialClienteVentas, estadoSync, syncSheets, calendarioEstacional, proveedoresPorProductoMes, debugCalendario } from '../servicios/sheets.js';
 
@@ -187,14 +188,14 @@ router.post('/factura/analizar', async (req, res) => {
       method: 'POST',
       headers,
       body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
+        model: MODELO_CHAT,
         max_tokens: 1500,
         messages: [{ role: 'user', content: [contenido, { type: 'text', text: prompt }] }]
       })
     });
 
     const data = await response.json();
-    const txt = data.content && data.content[0] && data.content[0].text;
+    const txt = (data.content || []).filter(b => b.type === 'text').map(b => b.text).join('\n');
     if (!txt) return res.status(500).json({ error: 'Sin respuesta de IA' });
 
     const clean = txt.replace(/```json|```/g, '').trim();
