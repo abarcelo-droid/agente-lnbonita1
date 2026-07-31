@@ -351,6 +351,21 @@ try {
     UPDATE sp_pasos SET requiere_adjunto_tipo='*'
     WHERE tipo='inicio' AND (requiere_adjunto_tipo IS NULL OR requiere_adjunto_tipo='')
   `).run();
+
+  // El paso inicial no lleva rol=admin. La semilla original lo agregaba en TODOS
+  // los pasos, así que cada administrador tenía los borradores ajenos en su
+  // bandeja con el botón de enviarlos a autorizar. El borrador es de quien lo
+  // escribió. La garantía real está en sp_motor.js (que además cubre las
+  // solicitudes con el snapshot ya congelado); esto limpia la configuración para
+  // que lo que se ve en "Circuito y avisos" coincida con lo que pasa.
+  const limpio = db.prepare(`
+    DELETE FROM sp_paso_autorizados
+     WHERE tipo='rol' AND rol='admin'
+       AND paso_id IN (SELECT id FROM sp_pasos WHERE tipo='inicio')
+  `).run();
+  if (limpio.changes) {
+    console.log(`[SP] Migración: rol=admin quitado del paso inicial (${limpio.changes} fila/s)`);
+  }
 } catch (e) {
   console.error('[SP] Error en migraciones:', e.message);
 }
@@ -486,8 +501,11 @@ function seed() {
       `);
       for (const p of PASOS) {
         if (p[3] === 'final_ok' || p[3] === 'final_rechazo') continue;
+        // El paso inicial NO lleva rol=admin: el borrador es de quien lo escribió.
+        // Habilitar ahí a todos los administradores les metía los borradores ajenos
+        // en su bandeja, con el botón de enviarlos a autorizar.
+        if (p[3] === 'inicio') { insAut.run(ids[p[0]], 'solicitante', null, null, null, 0); continue; }
         insAut.run(ids[p[0]], 'rol', null, 'admin', null, 0);
-        if (p[3] === 'inicio') insAut.run(ids[p[0]], 'solicitante', null, null, null, 0);
       }
 
       const insInc = db.prepare('INSERT INTO sp_incompatibilidades (version_id, hito_a, hito_b, fijo) VALUES (?,?,?,?)');
