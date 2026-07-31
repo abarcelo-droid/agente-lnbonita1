@@ -4,6 +4,7 @@
   "description": "Agente de ventas multi-cliente La Nina Bonita",
   "type": "module",
   "scripts": {
+    "test": "node --test \"test/**/*.test.js\"",
     "start": "node src/index.js",
     "dev": "node --watch src/index.js"
   },

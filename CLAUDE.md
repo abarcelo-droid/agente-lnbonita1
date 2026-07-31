@@ -37,4 +37,6 @@
 
 ## Limitaciones del entorno
 - Si npm install falla en Windows, ya está resuelto: tenemos Node y npm OK
-- No hay tests automáticos, validación es manual
+- Casi todo se valida a mano. La única suite automática es `npm test`
+  (node:test, sin dependencias): hoy cubre Órdenes de Trabajo
+  (`test/ordenes_trabajo.test.js`). Usa node:sqlite en memoria, no la DB real.
