@@ -40616,7 +40616,20 @@ function trEntrar() {
     return;
   }
   var t = setInterval(function() {
-    if (w.closed) { clearInterval(t); trRecargar(); toast('Recargando el dashboard…', 'ok'); }
+    if (!w.closed) return;
+    clearInterval(t);
+    trRecargar();
+    toast('Recargando el dashboard…', 'ok');
+    // Después de volver del login es cuando aparece el caso que NO se puede
+    // resolver desde acá. Se deja la explicación a mano en vez de que el usuario
+    // se quede mirando el error de Google sin saber qué hacer.
+    var d = document.getElementById('tr-diag');
+    if (d && !d.innerHTML) {
+      d.innerHTML = '<div class="pli-cel-chica" style="margin-bottom:8px">'
+        + '¿Volvió a aparecer el error de Google? '
+        + '<a href="#" onclick="trPorQue();return false" style="color:var(--burg);font-weight:600">'
+        + 'Acá está por qué y qué pedir</a>.</div>';
+    }
   }, 800);
   // Guarda por si la ventana queda abierta para siempre: no se deja un timer vivo.
   setTimeout(function() { clearInterval(t); }, 10 * 60 * 1000);
@@ -40648,26 +40661,92 @@ function trDiagnostico() {
       }
       h += '</div>';
 
-      // El caso REAL que se dio acá: el dashboard sí se deja embeber, pero adentro
-      // aparece su pantalla de login, y la de Google no corre dentro de un marco
-      // (política de Google: devuelve 403). Eso no se arregla del lado del panel.
-      if (r.permite !== false) {
-        h += '<div style="background:rgba(59,130,246,.10);border-radius:8px;padding:10px 12px;font-size:12px;margin-bottom:8px">'
-          + '<strong>Si adentro del recuadro ves la pantalla de login:</strong> es lo esperable la primera vez. '
-          + 'Usá <strong>🔑 Entrar con Google</strong> — esa pantalla no puede mostrarse dentro de un marco, '
-          + 'por una política de Google, no por algo de tu dashboard.'
-          + '<div style="margin-top:8px">Si después de entrar el recuadro <strong>sigue pidiendo login</strong>, '
-          + 'el motivo es que el navegador está bloqueando la cookie de sesión de tu dashboard por ser '
-          + '“de terceros” dentro del panel. Eso se resuelve con un cambio chico de tu lado:</div>'
-          + '<div style="margin-top:6px;font-family:ui-monospace,Consolas,monospace;font-size:11px;'
-          + 'background:var(--sur);border:1px solid var(--bor);border-radius:6px;padding:7px 9px;word-break:break-all">'
-          + 'Set-Cookie: ...; SameSite=None; Secure; Partitioned</div>'
-          + '<div style="margin-top:6px;color:var(--mut)">Es agregarle esos tres atributos a la cookie de sesión '
-          + 'del dashboard. Mientras tanto, <strong>Abrir en pestaña nueva</strong> funciona siempre.</div>'
-          + '</div>';
-      }
+      if (r.permite !== false) h += trTextoLogin();
       d.innerHTML = h;
     });
+}
+
+// La explicación completa del caso que se dio en la práctica, con el pedido para
+// el desarrollador del dashboard listo para copiar.
+//
+// LO QUE PASA, EN ORDEN:
+//   1. El dashboard SÍ se deja mostrar dentro del panel (sus cabeceras lo permiten).
+//   2. Adentro del recuadro pide login, y la pantalla de Google NO corre dentro de
+//      un marco: es política de Google, devuelve 403.
+//   3. Se hace el login en una ventana aparte y funciona… pero esa sesión queda en
+//      un almacenamiento distinto del que ve el recuadro. El navegador separa las
+//      cookies "de terceros" por sitio contenedor. Por eso el recuadro vuelve a
+//      pedir login y se cae de nuevo en el 403.
+//
+// El atributo Partitioned SOLO no alcanza: crea el cajón separado, pero la sesión
+// se genera en la ventana aparte y va al cajón normal, así que el recuadro sigue
+// sin verla. Hace falta que la página, ESTANDO adentro del marco, pida permiso con
+// requestStorageAccess(). Eso ya no se puede hacer desde el panel.
+function trTextoLogin() {
+  var pedido =
+    'Hola, queremos ver el dashboard de Transporte adentro de nuestro panel de gestión, '
+    + 'en un iframe. Ya probamos y el dashboard se deja mostrar bien: el problema es la sesión.\n\n'
+    + 'Lo que pasa: adentro del iframe el dashboard pide login, y la pantalla de Google no corre '
+    + 'dentro de un iframe (política de Google, devuelve 403). Hacemos el login en una ventana '
+    + 'aparte y funciona, pero esa cookie de sesión queda en el almacenamiento de primera parte '
+    + 'y el iframe no la ve, porque el navegador particiona las cookies de terceros.\n\n'
+    + 'Hay dos formas de resolverlo, elegí la que te resulte más cómoda:\n\n'
+    + 'A) STORAGE ACCESS API (el cambio más chico)\n'
+    + '   1. Serví la cookie de sesión con: SameSite=None; Secure; Partitioned\n'
+    + '   2. En el dashboard, cuando detectes que está dentro de un iframe '
+    + '(window.self !== window.top) y no hay sesión, mostrá un botón "Continuar" que llame a '
+    + 'document.requestStorageAccess() y, si resuelve OK, recargue la página.\n'
+    + '   Ese permiso lo tiene que pedir la página estando adentro del iframe y con un clic '
+    + 'del usuario; no se puede pedir desde afuera.\n\n'
+    + 'B) TOKEN COMPARTIDO (más trabajo tuyo, pero no depende del navegador)\n'
+    + '   Que el dashboard acepte, para las visitas que vienen del panel, un token firmado que '
+    + 'le mandamos nosotros en lugar del login de Google. Nos ponemos de acuerdo en el secreto '
+    + 'y en cómo validarlo.\n\n'
+    + 'Si ninguna de las dos se puede, no pasa nada: dejamos el acceso por pestaña nueva, que '
+    + 'anda perfecto.';
+
+  return '<div style="background:rgba(59,130,246,.10);border-radius:8px;padding:11px 13px;font-size:12px;margin-bottom:8px">'
+    + '<strong>Por qué el recuadro vuelve a mostrar el error de Google</strong>'
+    + '<ol style="margin:6px 0 6px 18px;padding:0">'
+    + '<li>Tu dashboard <strong>sí</strong> se deja mostrar acá adentro. Eso ya funciona.</li>'
+    + '<li>Adentro pide login, y la pantalla de Google no corre dentro de un marco: es política '
+    + 'de Google, no algo de tu dashboard.</li>'
+    + '<li>Entrás en la ventana aparte y funciona, pero <strong>esa sesión queda en otro lugar '
+    + 'del que ve el recuadro</strong>: el navegador separa las cookies según qué sitio las '
+    + 'contiene. Por eso el recuadro vuelve a pedir login y cae en el mismo 403.</li>'
+    + '</ol>'
+    + '<div>Esto ya no se puede resolver desde el panel: el permiso lo tiene que pedir tu '
+    + 'dashboard estando adentro del marco. Son pocas líneas de su lado.</div>'
+    + '<div style="margin-top:9px">'
+    + '<button class="btn bb bs" style="font-size:11px" onclick="trCopiarPedido()">📋 Copiar el pedido para tu desarrollador</button>'
+    + '</div>'
+    + '<textarea id="tr-pedido" readonly style="width:100%;height:120px;margin-top:8px;font-size:11px;'
+    + 'font-family:ui-monospace,Consolas,monospace;border:1px solid var(--bor);border-radius:6px;'
+    + 'padding:7px 9px;resize:vertical">' + trEsc(pedido) + '</textarea>'
+    + '<div style="margin-top:6px;color:var(--mut)">Mientras tanto <strong>Abrir en pestaña nueva</strong> '
+    + 'funciona siempre y no requiere tocar nada.</div>'
+    + '</div>';
+}
+
+// La explicación sola, sin ir al servidor: cuando el problema es la sesión, las
+// cabeceras ya se sabe que están bien y consultarlas de nuevo no aporta nada.
+function trPorQue() {
+  var d = document.getElementById('tr-diag');
+  if (d) d.innerHTML = trTextoLogin();
+}
+
+function trCopiarPedido() {
+  var ta = document.getElementById('tr-pedido');
+  if (!ta) return;
+  ta.select();
+  var ok = function() { toast('✓ Copiado — mandáselo a quien mantiene el dashboard', 'ok'); };
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(ta.value).then(ok, function() {
+      try { document.execCommand('copy'); ok(); } catch (_) { toast('Copialo a mano desde el cuadro', 'er'); }
+    });
+  } else {
+    try { document.execCommand('copy'); ok(); } catch (_) { toast('Copialo a mano desde el cuadro', 'er'); }
+  }
 }
 
 function trGuardar(borrar) {
