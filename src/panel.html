@@ -40356,20 +40356,54 @@ function trVerAca() {
   cont.innerHTML =
     '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px">'
     + '<button class="btn bo bs" onclick="trInit()" style="font-size:11px">← Volver</button>'
+    // La pantalla de Google NO corre adentro de un marco: es política de Google y
+    // devuelve un 403. Por eso el login se hace en una ventana aparte y después se
+    // recarga el recuadro, que es la forma soportada de hacerlo.
+    + '<button class="btn bb bs" onclick="trEntrar()" style="font-size:11px">🔑 Entrar con Google</button>'
+    + '<button class="btn bo bs" onclick="trRecargar()" style="font-size:11px">🔄 Recargar</button>'
     + '<a class="btn bo bs" href="' + trEsc(e.url) + '" target="_blank" rel="noopener noreferrer"'
     + ' style="font-size:11px;text-decoration:none">↗ Abrir en pestaña nueva</a>'
-    + '<button class="btn bo bs" onclick="trDiagnostico()" style="font-size:11px">¿Queda en blanco?</button>'
+    + '<button class="btn bo bs" onclick="trDiagnostico()" style="font-size:11px">¿No carga?</button>'
     + '<span class="pli-cel-chica" style="margin-left:auto">' + trEsc(e.url) + '</span>'
     + '</div>'
+    + '<div class="pli-cel-chica" style="margin-bottom:8px">Si adentro del recuadro te pide entrar con Google, '
+    + 'usá <strong>🔑 Entrar con Google</strong>: esa pantalla no puede mostrarse acá adentro, '
+    + 'se abre aparte y al cerrarla el recuadro se recarga solo.</div>'
     + '<div id="tr-diag"></div>'
     // sandbox NO: el dashboard es de ellos y necesita su propia sesión y scripts.
     // Poner un sandbox restrictivo lo rompería sin ganar nada — el riesgo de un
     // iframe está en embeber sitios ajenos, y éste es propio.
     + '<div style="border:1px solid var(--bor);border-radius:10px;overflow:hidden;background:var(--sur)">'
-    + '<iframe src="' + trEsc(e.url) + '" title="Dashboard de Barceló Transporte"'
-    + ' style="display:block;width:100%;height:calc(100vh - 230px);min-height:420px;border:0"'
+    + '<iframe id="tr-frame" src="' + trEsc(e.url) + '" title="Dashboard de Barceló Transporte"'
+    + ' style="display:block;width:100%;height:calc(100vh - 260px);min-height:420px;border:0"'
     + ' referrerpolicy="no-referrer-when-downgrade"></iframe>'
     + '</div>';
+}
+
+// Recarga el recuadro. Se reasigna el src en vez de usar location.reload(), que
+// desde acá no se puede: el contenido es de otro dominio.
+function trRecargar() {
+  var f = document.getElementById('tr-frame');
+  if (!f || !TR.enlace) return;
+  f.src = TR.enlace.url + (TR.enlace.url.indexOf('?') >= 0 ? '&' : '?') + '_r=' + Date.now();
+}
+
+// El login de Google en una ventana APARTE, que es la única forma en que Google lo
+// permite. No se puede saber desde acá cuándo terminó —es otro dominio— pero sí se
+// puede ver cuándo el usuario cierra la ventana, y ahí se recarga el recuadro.
+function trEntrar() {
+  if (!TR.enlace || !TR.enlace.url) return;
+  var w = window.open(TR.enlace.url, 'tr_login',
+    'width=560,height=700,menubar=no,toolbar=no,location=yes');
+  if (!w) {
+    toast('El navegador bloqueó la ventana. Permitila y probá de nuevo, o usá "Abrir en pestaña nueva"', 'er');
+    return;
+  }
+  var t = setInterval(function() {
+    if (w.closed) { clearInterval(t); trRecargar(); toast('Recargando el dashboard…', 'ok'); }
+  }, 800);
+  // Guarda por si la ventana queda abierta para siempre: no se deja un timer vivo.
+  setTimeout(function() { clearInterval(t); }, 10 * 60 * 1000);
 }
 
 function trDiagnostico() {
@@ -40397,6 +40431,25 @@ function trDiagnostico() {
           + 'eso funciona siempre y no requiere tocar nada.</div>';
       }
       h += '</div>';
+
+      // El caso REAL que se dio acá: el dashboard sí se deja embeber, pero adentro
+      // aparece su pantalla de login, y la de Google no corre dentro de un marco
+      // (política de Google: devuelve 403). Eso no se arregla del lado del panel.
+      if (r.permite !== false) {
+        h += '<div style="background:rgba(59,130,246,.10);border-radius:8px;padding:10px 12px;font-size:12px;margin-bottom:8px">'
+          + '<strong>Si adentro del recuadro ves la pantalla de login:</strong> es lo esperable la primera vez. '
+          + 'Usá <strong>🔑 Entrar con Google</strong> — esa pantalla no puede mostrarse dentro de un marco, '
+          + 'por una política de Google, no por algo de tu dashboard.'
+          + '<div style="margin-top:8px">Si después de entrar el recuadro <strong>sigue pidiendo login</strong>, '
+          + 'el motivo es que el navegador está bloqueando la cookie de sesión de tu dashboard por ser '
+          + '“de terceros” dentro del panel. Eso se resuelve con un cambio chico de tu lado:</div>'
+          + '<div style="margin-top:6px;font-family:ui-monospace,Consolas,monospace;font-size:11px;'
+          + 'background:var(--sur);border:1px solid var(--bor);border-radius:6px;padding:7px 9px;word-break:break-all">'
+          + 'Set-Cookie: ...; SameSite=None; Secure; Partitioned</div>'
+          + '<div style="margin-top:6px;color:var(--mut)">Es agregarle esos tres atributos a la cookie de sesión '
+          + 'del dashboard. Mientras tanto, <strong>Abrir en pestaña nueva</strong> funciona siempre.</div>'
+          + '</div>';
+      }
       d.innerHTML = h;
     });
 }
