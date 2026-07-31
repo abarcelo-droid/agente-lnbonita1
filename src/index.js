@@ -14,6 +14,7 @@ import buscarRouter       from "./rutas/buscar.js";
 import abastoRouter       from "./rutas/abasto.js";
 import authRouter, { bloquearSiSoloLectura } from "./rutas/auth.js";
 import produccionRouter   from "./rutas/produccion.js";
+import ordenesTrabajoRouter from "./rutas/ordenes_trabajo.js";
 import scoutRouter        from "./rutas/scout.js";
 import cuentasRouter      from "./rutas/cuentas.js";
 import climaRouter        from "./rutas/clima.js";
@@ -176,6 +177,9 @@ app.use("/api/fin",             bancosRouter);
 app.use("/api/fin/ordenes",     ordenesRouter);
 app.use("/api/ven",            ventasRouter);
 app.use("/api/pa/clima",        climaRouter);
+// Órdenes de Trabajo (servicios de terceros sobre lotes). Va ANTES del mount
+// genérico de /api/pa para que produccionRouter no capture /ordenes-trabajo.
+app.use("/api/pa/ordenes-trabajo", ordenesTrabajoRouter);
 app.use("/api/pa",     produccionRouter);
 app.use("/api/pa/scout", scoutRouter);
 // Copias SG de Contable/Ventas/Tesorería (tablas sg_* físicamente separadas).

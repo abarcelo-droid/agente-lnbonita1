@@ -209,6 +209,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   <div class="ni-grp-items">
     <div class="ni" data-sec="pa-insumos"><span class="dot db"></span>Fertilizantes / Insumos</div>
     <div class="ni" data-sec="pa-ordenes"><span class="dot de"></span>Órdenes de Aplicación</div>
+    <div class="ni" data-sec="pa-ordenes-trabajo"><span class="dot de"></span>Órdenes de Trabajo</div>
     <div class="ni" data-sec="pa-combustible"><span class="dot da"></span>⛽ Combustible</div>
     <div class="ni" data-sec="pa-panol"><span class="dot dd"></span>🔧 Pañol</div>
   </div>
@@ -1803,6 +1804,34 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
 <div class="pa-wrap"><div class="ab-table-wrap"><table class="pa-tbl">
   <thead><tr><th>N° Orden</th><th>Fecha</th><th>Tipo</th><th>Lotes</th><th>Cultivo</th><th>Productos</th><th style="text-align:right">Costo</th><th>Asignado a</th><th>Estado</th><th></th></tr></thead>
   <tbody id="pa-ord-tbody"><tr><td colspan="10" class="emp">Cargando...</td></tr></tbody>
+</table></div></div>
+</div>
+
+<!-- ─── PA ÓRDENES DE TRABAJO ─────────────────────────────────── -->
+<div class="sec" id="sec-pa-ordenes-trabajo">
+<div class="ph"><div><div class="ph-t">🛠️ Órdenes de Trabajo</div><div class="ph-s">Servicios de terceros sobre lotes — el monto se prorratea por hectáreas</div></div>
+<div style="display:flex;gap:8px">
+  <button class="btn bo" onclick="otAbrirTareas()" title="Catálogo de tareas">⚙️ Tareas</button>
+  <button class="btn bb" onclick="otAbrirNueva()">+ Nueva orden de trabajo</button>
+</div></div>
+<div class="filt">
+  <select id="ot-fil-campania" onchange="otLoad()"><option value="">Todas las campañas</option></select>
+  <select id="ot-fil-temporada" onchange="otLoad()" style="margin-left:10px"><option value="">Todas las temporadas</option></select>
+  <select id="ot-fil-proveedor" onchange="otLoad()" style="margin-left:10px"><option value="">Todos los proveedores</option></select>
+  <select id="ot-fil-tarea" onchange="otLoad()" style="margin-left:10px"><option value="">Todas las tareas</option></select>
+  <select id="ot-fil-estado" onchange="otLoad()" style="margin-left:10px">
+    <option value="">Todos los estados</option>
+    <option value="pendiente">Pendientes</option>
+    <option value="ejecutada">Ejecutadas</option>
+  </select>
+  <input type="date" id="ot-fil-desde" onchange="otLoad()" title="Desde" style="margin-left:10px;width:auto">
+  <input type="date" id="ot-fil-hasta" onchange="otLoad()" title="Hasta" style="margin-left:6px;width:auto">
+  <button class="btn bo bs" onclick="otLimpiarFiltros()" style="margin-left:10px">Limpiar</button>
+</div>
+<div id="ot-resumen" style="font-size:12px;color:var(--mut);padding:8px 4px"></div>
+<div class="pa-wrap"><div class="ab-table-wrap"><table class="pa-tbl">
+  <thead><tr><th>N°</th><th>Fecha</th><th>Proveedor</th><th>Tarea</th><th>Lotes</th><th style="text-align:right">Ha</th><th style="text-align:right">Monto</th><th>Cuenta de gasto</th><th>Estado</th><th></th></tr></thead>
+  <tbody id="ot-tbody"><tr><td colspan="10" class="emp">Cargando...</td></tr></tbody>
 </table></div></div>
 </div>
 
@@ -11263,6 +11292,7 @@ function loadSec(s) {
     'pa-insumos':    function(){ paLoadInsumos(); },
     'pa-compras':    function(){ paLoadCompras(); },
     'pa-ordenes':    function(){ paLoadOrdenes(); },
+    'pa-ordenes-trabajo': function(){ otInit(); },
     'pa-costos':     function(){ paCostosInit(); },
     'pa-lotes':      function(){ paLoadLotes(); },
     'pa-scout':      function(){ paLoadScout(); },
@@ -12983,7 +13013,7 @@ var SOC_NOMBRES = {};  // id → nombre (para la barra de contexto)
   } catch(_){}
 })();
 (function instalarInterceptorSociedad(){
-  var AWARE = /^\/api\/(fin|ven|pa\/cuentas|pa\/proveedores|pa\/pagos)(\/|\?|$)/;
+  var AWARE = /^\/api\/(fin|ven|pa\/cuentas|pa\/proveedores|pa\/pagos|pa\/ordenes-trabajo)(\/|\?|$)/;
   var _fetch = window.fetch.bind(window);
   window.fetch = function(url, opts){
     if (typeof url === 'string' && AWARE.test(url)){
@@ -16555,6 +16585,7 @@ var USR_SECCIONES = [
     { id: 'pa-insumos', label: 'Fertilizantes / Insumos' },
     { id: 'pa-compras', label: 'Ingreso de Factura' },
     { id: 'pa-ordenes', label: 'Órdenes de Aplicación' },
+    { id: 'pa-ordenes-trabajo', label: 'Órdenes de Trabajo' },
     { id: 'pa-costos', label: 'Costos por Lote' },
     { id: 'pa-lotes', label: 'Fincas y Lotes' },
     { id: 'pa-scout', label: 'Scout — Campo' },
@@ -17235,6 +17266,98 @@ if(_inpGondola) _inpGondola.addEventListener('keydown', function(e){
     <button class="btn bo" onclick="document.getElementById('pa-mb-orden-det').classList.remove('on')">Cerrar</button>
     <button class="btn bb" id="pa-ord-det-ejec-btn" onclick="paToggleEjecForm()" style="display:none">Registrar ejecución</button>
     <button class="btn bb" id="pa-ord-det-ejec-confirm-btn" onclick="paRegistrarEjecucionMulti()" style="display:none">✓ Registrar ejecución</button>
+  </div>
+</div></div>
+
+<!-- Modal orden de trabajo (alta / edición) -->
+<div class="ab-modal-overlay" id="ot-mb-orden">
+<div class="ab-modal" style="width:740px">
+  <div class="mhd"><div class="mht" id="ot-mb-tit">Nueva Orden de Trabajo</div><button class="mcl" onclick="document.getElementById('ot-mb-orden').classList.remove('on')">×</button></div>
+  <div class="fg">
+    <!-- 1. Fecha -->
+    <div class="fl"><label>Fecha <span style="color:var(--err)">*</span></label><input type="date" id="ot-f-fecha"></div>
+    <!-- 2. Campaña + Temporada (mismos selectores que Orden de Aplicación) -->
+    <div class="fl"><label>Campaña <span style="color:var(--err)">*</span></label>
+      <select id="ot-f-campania" class="ab-form-select"><option value="">— Elegir —</option></select>
+    </div>
+    <div class="fl"><label>Temporada</label>
+      <select id="ot-f-temporada" class="ab-form-select"><option value="">— Ninguna —</option></select>
+    </div>
+  </div>
+  <!-- 3. Proveedor (buscador sobre el maestro) -->
+  <div style="margin:12px 0 8px;font-size:12px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.06em">Proveedor <span style="color:var(--err)">*</span></div>
+  <input type="text" id="ot-prov-busc" placeholder="🔍 Buscar proveedor por razón social, nombre comercial o CUIT…" oninput="otFiltrarProveedores()" style="width:100%;padding:7px 10px;font-size:13px;border:1px solid var(--bor2);border-radius:6px;margin-bottom:6px">
+  <select id="ot-prov-id" class="ab-form-select" style="width:100%"><option value="">— Seleccioná un proveedor del padrón —</option></select>
+  <!-- 4. Tarea -->
+  <div style="margin:12px 0 8px;font-size:12px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.06em">Tarea <span style="color:var(--err)">*</span></div>
+  <select id="ot-f-tarea" class="ab-form-select" style="width:100%" onchange="otTareaChange()">
+    <option value="">— Seleccioná una tarea —</option>
+  </select>
+  <div id="ot-f-tarea-otra-wrap" style="display:none;margin-top:6px">
+    <input type="text" id="ot-f-tarea-otra" placeholder="Describí la tarea" style="width:100%;padding:7px 10px;font-size:13px;border:1px solid var(--bor2);border-radius:6px">
+  </div>
+  <!-- 5. Lotes (mismo componente que Orden de Aplicación, con ha editables) -->
+  <div style="margin:12px 0 8px;font-size:12px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.06em">Lotes alcanzados <span style="color:var(--err)">*</span></div>
+  <input type="text" id="ot-lotes-busc" placeholder="🔍 Buscar lote, finca o cultivo…" oninput="otFiltrarLotes()" style="width:100%;padding:7px 10px;font-size:13px;border:1px solid var(--bor2);border-radius:6px;margin-bottom:6px">
+  <div id="ot-lotes-sel" style="max-height:200px;overflow-y:auto;border:1px solid var(--bor2);border-radius:8px;padding:8px"></div>
+  <div id="ot-ha-total" style="font-size:12px;color:var(--mut);padding:6px 4px;display:none">Total seleccionado: <strong id="ot-ha-num">0</strong> ha</div>
+  <!-- 6. Monto total + Cuenta de gasto -->
+  <div class="fg" style="margin-top:12px">
+    <div class="fl"><label>Monto total <span style="color:var(--err)">*</span></label>
+      <input type="number" id="ot-f-monto" step="0.01" min="0" value="0" oninput="otRecalcular()">
+    </div>
+    <div class="fl ff"><label>Cuenta de gasto <span style="color:var(--err)">*</span></label>
+      <select id="ot-f-cuenta" class="ab-form-select"><option value="">— Elegir cuenta —</option></select>
+    </div>
+    <!-- 7. Observaciones -->
+    <div class="fl ff"><label>Observaciones</label><textarea id="ot-f-obs" rows="2"></textarea></div>
+    <div class="fl"><label>Estado</label>
+      <select id="ot-f-estado" class="ab-form-select">
+        <option value="pendiente">Pendiente</option>
+        <option value="ejecutada">Ejecutada</option>
+      </select>
+    </div>
+  </div>
+  <!-- Prorrateo en vivo -->
+  <div id="ot-prorrateo" style="display:none;margin-top:16px;padding:14px;background:var(--burl);border-radius:10px;border:1px solid var(--bor2)">
+    <div style="font-size:11px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">Prorrateo por lote</div>
+    <div id="ot-prorrateo-body" style="font-size:13px"></div>
+    <div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--bor);display:flex;justify-content:space-between;align-items:center">
+      <span style="font-size:13px;font-weight:600;color:var(--txt)">Total asignado</span>
+      <span style="font-size:18px;font-weight:700;color:var(--burg)" id="ot-prorrateo-total">$0</span>
+    </div>
+  </div>
+  <div class="ab-modal-footer">
+    <button class="btn bo" onclick="document.getElementById('ot-mb-orden').classList.remove('on')">Cancelar</button>
+    <button class="btn bb" id="ot-btn-guardar" onclick="otGuardar()">✓ Guardar orden</button>
+  </div>
+</div></div>
+
+<!-- Modal detalle orden de trabajo -->
+<div class="ab-modal-overlay" id="ot-mb-det">
+<div class="ab-modal" style="width:680px">
+  <div class="mhd">
+    <div><div class="mht" id="ot-det-tit">Orden de Trabajo</div><div style="font-size:12px;color:var(--mut)" id="ot-det-sub"></div></div>
+    <button class="mcl" onclick="document.getElementById('ot-mb-det').classList.remove('on')">×</button>
+  </div>
+  <div id="ot-det-body"></div>
+  <div class="ab-modal-footer">
+    <button class="btn bo" onclick="document.getElementById('ot-mb-det').classList.remove('on')">Cerrar</button>
+    <button class="btn bb" id="ot-det-btn-editar" onclick="otEditarDesdeDetalle()">Editar</button>
+  </div>
+</div></div>
+
+<!-- Modal catálogo de tareas (ABM chico: alta + baja lógica) -->
+<div class="ab-modal-overlay" id="ot-mb-tareas">
+<div class="ab-modal" style="width:460px">
+  <div class="mhd"><div class="mht">Catálogo de tareas</div><button class="mcl" onclick="document.getElementById('ot-mb-tareas').classList.remove('on')">×</button></div>
+  <div style="display:flex;gap:8px;margin-bottom:12px">
+    <input type="text" id="ot-tarea-nueva" placeholder="Nueva tarea (ej: ARMAR CAMAS)" style="flex:1;padding:7px 10px;font-size:13px;border:1px solid var(--bor2);border-radius:6px">
+    <button class="btn bb bs" onclick="otCrearTarea()">+ Agregar</button>
+  </div>
+  <div id="ot-tareas-lista" style="max-height:320px;overflow-y:auto"></div>
+  <div class="ab-modal-footer">
+    <button class="btn bo" onclick="document.getElementById('ot-mb-tareas').classList.remove('on')">Cerrar</button>
   </div>
 </div></div>
 
@@ -35204,6 +35327,586 @@ function cmBulkOculto(grupo, val) {
       if (res.ok) { toast('✓ '+res.actualizados+' módulos actualizados','ok'); cmCargar(); }
       else { toast('Error: '+res.error,'er'); }
     });
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ÓRDENES DE TRABAJO — servicios de terceros sobre lotes
+// Un proveedor externo hace una tarea (ARMAR CAMAS, PODA…) en uno o más lotes
+// por un monto total que se prorratea entre los lotes según hectáreas.
+// El interceptor de sociedad ya inyecta sociedad_id en /api/pa/ordenes-trabajo.
+// ═══════════════════════════════════════════════════════════════════════════
+var OT = { lotes: [], tareas: [], proveedores: [], cuentas: [], ordenes: [], editId: null, cargado: false };
+
+function otApi(path, opts) {
+  return fetch('/api/pa/ordenes-trabajo' + path, opts)
+    .then(function(r){ return r.json(); })
+    .catch(function(){ return { ok:false, error:'Error de red' }; });
+}
+function otEsc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function otRound2(n){ return Math.round((Number(n)||0)*100)/100; }
+function otMoney(n){ return '$ ' + otRound2(n).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+function otFecha(s){ if(!s) return '—'; var p=String(s).slice(0,10).split('-'); return p[2]+'/'+p[1]+'/'+p[0]; }
+function otEsAdmin(){ return !!(window.LNB_USER && LNB_USER.rol === 'admin'); }
+function otBadgeEstado(e){
+  var m = { pendiente:['pa-amarillo-bg','Pendiente'], ejecutada:['pa-verde-bg','Ejecutada'] };
+  var d = m[e] || ['pa-gris-bg', e||'—'];
+  return '<span class="pa-badge '+d[0]+'">'+d[1]+'</span>';
+}
+
+// Prorrateo: proporcional a las hectáreas; si la suma de ha es 0, partes iguales.
+// El último lote absorbe la diferencia de redondeo para que la suma cierre exacta.
+// Espeja 1:1 el cálculo del backend (src/rutas/ordenes_trabajo.js → prorratear).
+function otProrratear(lotes, montoTotal){
+  var n = lotes.length;
+  if (!n) return [];
+  var total = otRound2(montoTotal);
+  var sumHa = lotes.reduce(function(s,l){ return s + (Number(l.hectareas)||0); }, 0);
+  var acum = 0;
+  return lotes.map(function(l, i){
+    var monto;
+    if (i === n-1) {
+      monto = otRound2(total - acum);
+    } else {
+      var peso = sumHa > 0 ? (Number(l.hectareas)||0)/sumHa : 1/n;
+      monto = otRound2(total * peso);
+      acum = otRound2(acum + monto);
+    }
+    return { lote_id:l.lote_id, nombre:l.nombre, hectareas:l.hectareas, monto_asignado:monto };
+  });
+}
+
+// ── Init: caches + filtros + listado ───────────────────────────────────────
+function otInit(){
+  var pend = [];
+  if (!(PA.campañas && PA.campañas.length)) {
+    pend.push(paF('/api/pa/campanas').then(function(r){ PA.campañas = r.data || []; }));
+  }
+  if (!(PA.lotes && PA.lotes.length)) {
+    pend.push(paF('/api/pa/lotes').then(function(r){ PA.lotes = r.data || []; }));
+  }
+  pend.push(otApi('/tareas').then(function(r){ OT.tareas = r.data || []; }));
+  pend.push(fetch('/api/pa/proveedores').then(function(r){ return r.json(); }).then(function(r){
+    OT.proveedores = (r.data || []).filter(function(p){ return p.activo; });
+  }).catch(function(){ OT.proveedores = []; }));
+  pend.push(paF('/api/pa/cuentas').then(function(r){
+    // Solo cuentas de gasto activas (sección 4 del plan de cuentas). Solo lectura.
+    OT.cuentas = (r.data || []).filter(function(c){
+      return c.activo !== 0 && Number(c.seccion_codigo) === 4;
+    });
+  }).catch(function(){ OT.cuentas = []; }));
+
+  Promise.all(pend).then(function(){
+    OT.lotes = (PA.lotes || []).filter(function(l){ return l.activo !== 0; });
+    OT.cargado = true;
+    otPoblarFiltros();
+    otLoad();
+  });
+}
+
+function otPoblarFiltros(){
+  var camps = PA.campañas || [];
+  var anuales = camps.filter(function(c){ return (c.tipo||'anual') === 'anual'; });
+  var estac   = camps.filter(function(c){ return c.tipo === 'estacional'; });
+
+  var fc = document.getElementById('ot-fil-campania');
+  if (fc) {
+    var prevC = fc.value;
+    fc.innerHTML = '<option value="">Todas las campañas</option>'
+      + anuales.map(function(c){ return '<option value="'+c.id+'">'+otEsc(c.nombre)+'</option>'; }).join('');
+    fc.value = prevC;
+  }
+  var ft = document.getElementById('ot-fil-temporada');
+  if (ft) {
+    var prevT = ft.value;
+    ft.innerHTML = '<option value="">Todas las temporadas</option>'
+      + estac.map(function(c){ return '<option value="'+c.id+'">'+otEsc(c.nombre)+'</option>'; }).join('');
+    ft.value = prevT;
+  }
+  var fp = document.getElementById('ot-fil-proveedor');
+  if (fp) {
+    var prevP = fp.value;
+    fp.innerHTML = '<option value="">Todos los proveedores</option>'
+      + OT.proveedores.map(function(p){ return '<option value="'+p.id+'">'+otEsc(p.razon_social)+'</option>'; }).join('');
+    fp.value = prevP;
+  }
+  var fta = document.getElementById('ot-fil-tarea');
+  if (fta) {
+    var prevTa = fta.value;
+    fta.innerHTML = '<option value="">Todas las tareas</option>'
+      + OT.tareas.map(function(t){ return '<option value="'+t.id+'">'+otEsc(t.nombre)+'</option>'; }).join('');
+    fta.value = prevTa;
+  }
+}
+
+function otLimpiarFiltros(){
+  ['ot-fil-campania','ot-fil-temporada','ot-fil-proveedor','ot-fil-tarea','ot-fil-estado','ot-fil-desde','ot-fil-hasta']
+    .forEach(function(id){ var el = document.getElementById(id); if (el) el.value = ''; });
+  otLoad();
+}
+
+function otLoad(){
+  var qs = [];
+  var mapa = {
+    campania: 'ot-fil-campania', temporada: 'ot-fil-temporada', proveedor_id: 'ot-fil-proveedor',
+    tarea_id: 'ot-fil-tarea', estado: 'ot-fil-estado', desde: 'ot-fil-desde', hasta: 'ot-fil-hasta'
+  };
+  Object.keys(mapa).forEach(function(k){
+    var el = document.getElementById(mapa[k]);
+    if (el && el.value) qs.push(k + '=' + encodeURIComponent(el.value));
+  });
+  otApi('/' + (qs.length ? '?' + qs.join('&') : '')).then(function(r){
+    if (!r.ok) { toast(r.error || 'Error al cargar', 'er'); return; }
+    OT.ordenes = r.data || [];
+    otRenderTabla();
+  });
+}
+
+function otRenderTabla(){
+  var tb = document.getElementById('ot-tbody');
+  var res = document.getElementById('ot-resumen');
+  if (!tb) return;
+  var rows = OT.ordenes || [];
+  if (!rows.length) {
+    tb.innerHTML = '<tr><td colspan="10" class="emp">Sin órdenes de trabajo para los filtros elegidos</td></tr>';
+    if (res) res.textContent = '';
+    return;
+  }
+  var totMonto = rows.reduce(function(s,o){ return s + (Number(o.monto_total)||0); }, 0);
+  var totHa    = rows.reduce(function(s,o){ return s + (Number(o.hectareas_total)||0); }, 0);
+  if (res) res.innerHTML = '<strong>'+rows.length+'</strong> orden(es) · <strong>'+totHa.toFixed(1)+'</strong> ha · <strong>'+otMoney(totMonto)+'</strong>';
+
+  tb.innerHTML = rows.map(function(o){
+    var lotesTxt = (o.lotes||[]).map(function(l){ return l.lote_nombre; }).join(', ');
+    var cuenta = o.cuenta_codigo ? (o.cuenta_codigo + ' — ' + (o.cuenta_nombre||'')) : '—';
+    return '<tr>'
+      + '<td style="font-weight:600">OT-' + String(o.numero).padStart(5,'0') + '</td>'
+      + '<td>' + otFecha(o.fecha) + '</td>'
+      + '<td>' + otEsc(o.proveedor_nombre||'—') + '</td>'
+      + '<td>' + otEsc(o.tarea_label||'—') + '</td>'
+      + '<td style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+otEsc(lotesTxt)+'">'
+        + o.lotes_count + (lotesTxt ? ' <span style="color:var(--mut);font-size:11px">('+otEsc(lotesTxt)+')</span>' : '') + '</td>'
+      + '<td style="text-align:right">' + (Number(o.hectareas_total)||0).toFixed(1) + '</td>'
+      + '<td style="text-align:right;font-weight:600">' + otMoney(o.monto_total) + '</td>'
+      + '<td style="font-size:11px;color:var(--mut)">' + otEsc(cuenta) + '</td>'
+      + '<td>' + otBadgeEstado(o.estado) + '</td>'
+      + '<td style="white-space:nowrap;text-align:right">'
+        + '<button class="btn bo bs" style="margin-right:5px" onclick="otVerDetalle('+o.id+')">Detalle</button>'
+        + '<button class="btn bo bs" style="margin-right:5px" onclick="otAbrirEditar('+o.id+')">Editar</button>'
+        + '<button class="btn bd bs" onclick="otEliminar('+o.id+')">🗑</button>'
+      + '</td>'
+      + '</tr>';
+  }).join('');
+}
+
+// ── Modal: alta / edición ──────────────────────────────────────────────────
+function otAbrirNueva(){
+  if (!OT.cargado) { toast('Cargando datos…'); otInit(); return; }
+  OT.editId = null;
+  document.getElementById('ot-mb-tit').textContent = 'Nueva Orden de Trabajo';
+  document.getElementById('ot-btn-guardar').textContent = '✓ Guardar orden';
+  document.getElementById('ot-f-fecha').value = new Date().toISOString().slice(0,10);
+  paPoblarCampañasModal('ot-f-campania','ot-f-temporada');   // mismo default que Orden de Aplicación
+  document.getElementById('ot-prov-busc').value = '';
+  otPoblarProveedores(null);
+  otPoblarTareas(null);
+  document.getElementById('ot-f-tarea-otra').value = '';
+  document.getElementById('ot-f-tarea-otra-wrap').style.display = 'none';
+  document.getElementById('ot-lotes-busc').value = '';
+  otRenderLotes([]);
+  document.getElementById('ot-f-monto').value = '0';
+  otPoblarCuentas(null);
+  document.getElementById('ot-f-obs').value = '';
+  document.getElementById('ot-f-estado').value = 'pendiente';
+  otRecalcular();
+  document.getElementById('ot-mb-orden').classList.add('on');
+}
+
+function otPoblarProveedores(seleccionarId){
+  var sel = document.getElementById('ot-prov-id');
+  if (!sel) return;
+  sel.innerHTML = '<option value="">— Seleccioná un proveedor del padrón —</option>'
+    + OT.proveedores.map(function(p){
+        var label = p.razon_social + (p.nombre_comercial ? ' ('+p.nombre_comercial+')' : '');
+        var busca = ((p.razon_social||'')+' '+(p.nombre_comercial||'')+' '+(p.cuit||'')).toLowerCase();
+        return '<option value="'+p.id+'" data-search="'+otEsc(busca)+'">'+otEsc(label)+'</option>';
+      }).join('');
+  if (seleccionarId) sel.value = seleccionarId;
+}
+
+// Buscador sobre el maestro de proveedores: filtra las opciones del select.
+function otFiltrarProveedores(){
+  var q = (document.getElementById('ot-prov-busc').value||'').trim().toLowerCase();
+  var sel = document.getElementById('ot-prov-id');
+  if (!sel) return;
+  var visibles = 0;
+  Array.prototype.forEach.call(sel.options, function(op){
+    if (!op.value) return;
+    var s = op.getAttribute('data-search') || '';
+    var ok = !q || s.indexOf(q) !== -1;
+    op.hidden = !ok;
+    op.disabled = !ok;
+    if (ok) visibles++;
+  });
+  // Si la selección actual quedó filtrada, la limpiamos para no guardar algo invisible
+  var actual = sel.options[sel.selectedIndex];
+  if (actual && actual.value && actual.hidden) sel.value = '';
+  if (visibles === 1 && !sel.value) {
+    Array.prototype.some.call(sel.options, function(op){
+      if (op.value && !op.hidden) { sel.value = op.value; return true; }
+      return false;
+    });
+  }
+}
+
+function otPoblarTareas(seleccionarId){
+  var sel = document.getElementById('ot-f-tarea');
+  if (!sel) return;
+  sel.innerHTML = '<option value="">— Seleccioná una tarea —</option>'
+    + OT.tareas.map(function(t){ return '<option value="'+t.id+'">'+otEsc(t.nombre)+'</option>'; }).join('')
+    + '<option value="__otra__">Otra…</option>';
+  if (seleccionarId) sel.value = seleccionarId;
+}
+
+function otTareaChange(){
+  var v = document.getElementById('ot-f-tarea').value;
+  var wrap = document.getElementById('ot-f-tarea-otra-wrap');
+  if (wrap) wrap.style.display = (v === '__otra__') ? 'block' : 'none';
+}
+
+function otPoblarCuentas(seleccionarId){
+  var sel = document.getElementById('ot-f-cuenta');
+  if (!sel) return;
+  sel.innerHTML = '<option value="">— Elegir cuenta —</option>'
+    + OT.cuentas.map(function(c){
+        return '<option value="'+c.id+'">'+otEsc(c.codigo+' — '+c.nombre)+'</option>';
+      }).join('');
+  if (seleccionarId) sel.value = seleccionarId;
+}
+
+// Selector de lotes: mismo componente que Orden de Aplicación, con las
+// hectáreas a trabajar editables por lote (default = ha totales del lote).
+// `preSel` = [{lote_id, hectareas}] para el modo edición.
+function otRenderLotes(preSel){
+  var sel = {};
+  (preSel||[]).forEach(function(l){ sel[l.lote_id] = l.hectareas; });
+  var campAct = (PA.campañas||[]).find(function(c){ return c.activa && (c.tipo||'anual')==='anual'; });
+  var campNombre = campAct ? campAct.nombre : '';
+  var cont = document.getElementById('ot-lotes-sel');
+  if (!cont) return;
+  cont.innerHTML = OT.lotes.map(function(l){
+    var cd = l.cultivos && l.cultivos[campNombre];
+    var cult = cd ? (typeof cd === 'string' ? cd : cd.cultivo) : '';
+    var col = (typeof cultColor === 'function') ? cultColor(cult) : { bg:'#e0f2fe', fg:'#075985' };
+    var cultBadge = cult
+      ? ' <span style="background:'+col.bg+';color:'+col.fg+';padding:1px 7px;border-radius:10px;font-size:10px;font-weight:600;margin-left:4px">'+otEsc(cult)+'</span>'
+      : ' <span style="color:var(--mut);font-size:10px;font-style:italic;margin-left:4px">sin cultivo</span>';
+    var searchText = ((l.nombre||'')+' '+(l.finca||'')+' '+cult).toLowerCase();
+    var marcado = Object.prototype.hasOwnProperty.call(sel, l.id);
+    var ha = marcado ? sel[l.id] : l.hectareas;
+    return '<div class="ot-lote-row" data-search="'+otEsc(searchText)+'" data-lote-id="'+l.id+'" style="border-radius:6px">'
+      + '<label style="display:flex;align-items:center;gap:8px;padding:6px 8px;cursor:pointer;font-size:13px">'
+      + '<input type="checkbox" class="ot-lote-cb" value="'+l.id+'" data-ha="'+l.hectareas+'"'+(marcado?' checked':'')+' style="width:auto" onchange="otLoteToggle(this)"> '
+      + '<span><strong>'+otEsc(l.nombre)+'</strong>'+(l.finca?'<span style="color:var(--mut)"> — '+otEsc(l.finca)+'</span>':'')
+      + ' <span style="color:var(--sub);font-size:11px">('+l.hectareas+' ha)</span>'
+      + cultBadge+'</span></label>'
+      + '<div class="ot-lote-extra" id="ot-extra-'+l.id+'" style="display:'+(marcado?'block':'none')+';padding:0 8px 8px 32px">'
+        + '<span style="font-size:12px;color:var(--mut)">Hectáreas a trabajar: </span>'
+        + '<input type="number" class="ot-ha-inp" id="ot-ha-'+l.id+'" data-lote-id="'+l.id+'" data-ha-max="'+l.hectareas+'" step="0.1" min="0" max="'+l.hectareas+'" value="'+ha+'" oninput="otHaInput(this)" style="width:90px;padding:4px 8px;font-size:12px"> '
+        + '<span style="font-size:11px;color:var(--sub)">de '+l.hectareas+' ha totales</span>'
+      + '</div>'
+      + '</div>';
+  }).join('') || '<div class="emp">Sin lotes. Cargá lotes primero desde Fincas y Lotes.</div>';
+  otRecalcular();
+}
+
+function otFiltrarLotes(){
+  var q = (document.getElementById('ot-lotes-busc').value||'').trim().toLowerCase();
+  document.querySelectorAll('#ot-lotes-sel .ot-lote-row').forEach(function(row){
+    var s = row.getAttribute('data-search')||'';
+    row.style.display = (!q || s.indexOf(q) !== -1) ? '' : 'none';
+  });
+}
+
+function otLoteToggle(cb){
+  var extra = document.getElementById('ot-extra-'+cb.value);
+  if (extra) extra.style.display = cb.checked ? 'block' : 'none';
+  otRecalcular();
+}
+
+// Clamp: las ha a trabajar no pueden superar las del lote.
+function otHaInput(inp){
+  var max = parseFloat(inp.dataset.haMax)||0;
+  var v = parseFloat(inp.value);
+  if (!isNaN(v) && v > max) inp.value = max;
+  otRecalcular();
+}
+
+// [{lote_id, nombre, hectareas, ha_max}] de los lotes tildados
+function otLotesSeleccionados(){
+  var out = [];
+  document.querySelectorAll('#ot-lotes-sel input.ot-lote-cb:checked').forEach(function(cb){
+    var id = Number(cb.value);
+    var inp = document.getElementById('ot-ha-'+id);
+    var haMax = parseFloat(cb.dataset.ha)||0;
+    var ha = inp ? parseFloat(inp.value) : haMax;
+    if (isNaN(ha)) ha = 0;
+    var lote = OT.lotes.find(function(l){ return l.id === id; });
+    out.push({ lote_id:id, nombre: lote ? lote.nombre : ('#'+id), hectareas: ha, ha_max: haMax });
+  });
+  return out;
+}
+
+// Prorrateo en vivo (ha y $ por lote) antes de guardar
+function otRecalcular(){
+  var sel = otLotesSeleccionados();
+  var total = sel.reduce(function(s,l){ return s + (Number(l.hectareas)||0); }, 0);
+  var haBox = document.getElementById('ot-ha-total');
+  var haNum = document.getElementById('ot-ha-num');
+  if (haBox && haNum) {
+    if (total > 0) { haBox.style.display = 'block'; haNum.textContent = total.toFixed(1); }
+    else { haBox.style.display = 'none'; }
+  }
+
+  var monto = parseFloat((document.getElementById('ot-f-monto')||{}).value) || 0;
+  var box = document.getElementById('ot-prorrateo');
+  var body = document.getElementById('ot-prorrateo-body');
+  var totEl = document.getElementById('ot-prorrateo-total');
+  if (!box || !body) return;
+  if (!sel.length) { box.style.display = 'none'; return; }
+
+  var repartido = otProrratear(sel, monto);
+  var sumHa = sel.reduce(function(s,l){ return s + (Number(l.hectareas)||0); }, 0);
+  box.style.display = 'block';
+  body.innerHTML = '<table style="width:100%;border-collapse:collapse;font-size:12.5px">'
+    + '<thead><tr style="color:var(--mut);text-align:left">'
+      + '<th style="padding:3px 0">Lote</th>'
+      + '<th style="text-align:right">Ha</th>'
+      + '<th style="text-align:right">%</th>'
+      + '<th style="text-align:right">Monto</th>'
+    + '</tr></thead><tbody>'
+    + repartido.map(function(l){
+        var pct = sumHa > 0 ? ((Number(l.hectareas)||0)/sumHa*100) : (100/repartido.length);
+        return '<tr>'
+          + '<td style="padding:3px 0">'+otEsc(l.nombre)+'</td>'
+          + '<td style="text-align:right">'+(Number(l.hectareas)||0).toFixed(1)+'</td>'
+          + '<td style="text-align:right;color:var(--mut)">'+pct.toFixed(1)+'%</td>'
+          + '<td style="text-align:right;font-weight:600">'+otMoney(l.monto_asignado)+'</td>'
+          + '</tr>';
+      }).join('')
+    + '</tbody></table>'
+    + (sumHa === 0 ? '<div style="margin-top:6px;font-size:11px;color:var(--mut)">Sin hectáreas cargadas: se reparte en partes iguales.</div>' : '');
+  if (totEl) totEl.textContent = otMoney(repartido.reduce(function(s,l){ return s + l.monto_asignado; }, 0));
+}
+
+// ── Guardar (alta o edición) ───────────────────────────────────────────────
+function otGuardar(){
+  var fecha = document.getElementById('ot-f-fecha').value;
+  if (!fecha) return toast('Elegí la fecha','er');
+
+  var campania = document.getElementById('ot-f-campania').value;
+  if (!campania) return toast('Elegí la campaña','er');
+  var temporada = document.getElementById('ot-f-temporada').value || null;
+
+  var proveedorId = document.getElementById('ot-prov-id').value;
+  if (!proveedorId) return toast('Elegí el proveedor','er');
+
+  var tareaSel = document.getElementById('ot-f-tarea').value;
+  if (!tareaSel) return toast('Elegí la tarea','er');
+  var tareaId = null, tareaOtra = null;
+  if (tareaSel === '__otra__') {
+    tareaOtra = (document.getElementById('ot-f-tarea-otra').value||'').trim();
+    if (!tareaOtra) {
+      toast('Escribí cuál es la tarea','er');
+      document.getElementById('ot-f-tarea-otra').focus();
+      return;
+    }
+  } else {
+    tareaId = Number(tareaSel);
+  }
+
+  var sel = otLotesSeleccionados();
+  if (!sel.length) return toast('Seleccioná al menos un lote','er');
+  for (var i=0; i<sel.length; i++) {
+    if (!(sel[i].hectareas >= 0)) return toast('Hectáreas inválidas en '+sel[i].nombre,'er');
+    if (sel[i].hectareas > sel[i].ha_max + 1e-6) {
+      return toast('Lote '+sel[i].nombre+': las ha superan las del lote','er');
+    }
+  }
+
+  var monto = parseFloat(document.getElementById('ot-f-monto').value);
+  if (isNaN(monto) || monto < 0) return toast('El monto total no puede ser negativo','er');
+
+  var cuentaId = document.getElementById('ot-f-cuenta').value;
+  if (!cuentaId) return toast('Elegí la cuenta de gasto','er');
+
+  var body = {
+    fecha: fecha,
+    campania: Number(campania),
+    temporada: temporada ? Number(temporada) : null,
+    proveedor_id: Number(proveedorId),
+    tarea_id: tareaId,
+    tarea_otra: tareaOtra,
+    cuenta_gasto_id: Number(cuentaId),
+    monto_total: monto,
+    observaciones: (document.getElementById('ot-f-obs').value||'').trim(),
+    estado: document.getElementById('ot-f-estado').value || 'pendiente',
+    lotes: sel.map(function(l){ return { lote_id:l.lote_id, hectareas:l.hectareas }; })
+  };
+
+  var esEdicion = !!OT.editId;
+  var path = esEdicion ? ('/' + OT.editId) : '/';
+  otApi(path, {
+    method: esEdicion ? 'PUT' : 'POST',
+    headers: { 'Content-Type':'application/json' },
+    body: JSON.stringify(body)
+  }).then(function(r){
+    if (!r.ok) return toast(r.error || 'Error al guardar','er');
+    toast(esEdicion ? 'Orden de trabajo actualizada' : ('Orden ' + (r.nro||'') + ' creada'));
+    document.getElementById('ot-mb-orden').classList.remove('on');
+    OT.editId = null;
+    otLoad();
+  });
+}
+
+// ── Edición ────────────────────────────────────────────────────────────────
+function otAbrirEditar(id){
+  otApi('/' + id).then(function(r){
+    if (!r.ok) return toast(r.error || 'Error','er');
+    var o = r.data;
+    otAbrirNueva();                       // resetea el modal y arma la lista de lotes
+    OT.editId = id;
+    document.getElementById('ot-mb-tit').textContent = 'Editar OT-' + String(o.numero).padStart(5,'0');
+    document.getElementById('ot-btn-guardar').textContent = '✓ Guardar cambios';
+    document.getElementById('ot-f-fecha').value = (o.fecha||'').slice(0,10);
+    paPoblarCampañasModal('ot-f-campania','ot-f-temporada', o.campania, o.temporada);
+    otPoblarProveedores(o.proveedor_id);
+    otPoblarTareas(o.tarea_id ? o.tarea_id : '__otra__');
+    if (!o.tarea_id) {
+      document.getElementById('ot-f-tarea-otra-wrap').style.display = 'block';
+      document.getElementById('ot-f-tarea-otra').value = o.tarea_otra || '';
+    }
+    otRenderLotes((o.lotes||[]).map(function(l){ return { lote_id:l.lote_id, hectareas:l.hectareas }; }));
+    document.getElementById('ot-f-monto').value = o.monto_total;
+    otPoblarCuentas(o.cuenta_gasto_id);
+    document.getElementById('ot-f-obs').value = o.observaciones || '';
+    document.getElementById('ot-f-estado').value = o.estado || 'pendiente';
+    otRecalcular();
+  });
+}
+
+function otEditarDesdeDetalle(){
+  var id = OT._detId;
+  document.getElementById('ot-mb-det').classList.remove('on');
+  if (id) otAbrirEditar(id);
+}
+
+// ── Detalle ────────────────────────────────────────────────────────────────
+function otVerDetalle(id){
+  otApi('/' + id).then(function(r){
+    if (!r.ok) return toast(r.error || 'Error','er');
+    var o = r.data;
+    OT._detId = id;
+    document.getElementById('ot-det-tit').textContent = 'OT-' + String(o.numero).padStart(5,'0');
+    document.getElementById('ot-det-sub').textContent =
+      otFecha(o.fecha) + ' · ' + (o.proveedor_nombre||'') + ' · ' + (o.tarea_label||'');
+
+    var filas = (o.lotes||[]).map(function(l){
+      return '<tr>'
+        + '<td style="padding:4px 0">'+otEsc(l.lote_nombre)+(l.finca?'<span style="color:var(--mut)"> — '+otEsc(l.finca)+'</span>':'')+'</td>'
+        + '<td style="text-align:right">'+(Number(l.hectareas)||0).toFixed(1)+'</td>'
+        + '<td style="text-align:right;font-weight:600">'+otMoney(l.monto_asignado)+'</td>'
+        + '</tr>';
+    }).join('');
+    var sumaAsignada = (o.lotes||[]).reduce(function(s,l){ return s + (Number(l.monto_asignado)||0); }, 0);
+
+    document.getElementById('ot-det-body').innerHTML =
+      '<div class="fg" style="margin-bottom:12px">'
+      + otDetCampo('Fecha', otFecha(o.fecha))
+      + otDetCampo('Estado', otBadgeEstado(o.estado))
+      + otDetCampo('Campaña', otEsc(o.campania_nombre||'—'))
+      + otDetCampo('Temporada', otEsc(o.temporada_nombre||'—'))
+      + otDetCampo('Proveedor', otEsc(o.proveedor_nombre||'—'))
+      + otDetCampo('Tarea', otEsc(o.tarea_label||'—'))
+      + otDetCampo('Cuenta de gasto', otEsc(o.cuenta_codigo ? (o.cuenta_codigo+' — '+(o.cuenta_nombre||'')) : '—'))
+      + otDetCampo('Monto total', '<strong>'+otMoney(o.monto_total)+'</strong>')
+      + otDetCampo('Cargada por', otEsc(o.usuario_nombre||'—'))
+      + '</div>'
+      + (o.observaciones ? '<div style="margin-bottom:12px;font-size:13px"><span style="color:var(--mut)">Observaciones:</span> '+otEsc(o.observaciones)+'</div>' : '')
+      + '<div style="font-size:11px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">Prorrateo por lote</div>'
+      + '<table style="width:100%;border-collapse:collapse;font-size:13px">'
+        + '<thead><tr style="color:var(--mut);text-align:left"><th style="padding:3px 0">Lote</th><th style="text-align:right">Ha</th><th style="text-align:right">Monto</th></tr></thead>'
+        + '<tbody>' + (filas || '<tr><td colspan="3" class="emp">Sin lotes</td></tr>') + '</tbody>'
+        + '<tfoot><tr style="border-top:1px solid var(--bor)"><td style="padding-top:5px;font-weight:600">Total</td><td></td>'
+          + '<td style="text-align:right;padding-top:5px;font-weight:700">'+otMoney(sumaAsignada)+'</td></tr></tfoot>'
+      + '</table>';
+    document.getElementById('ot-mb-det').classList.add('on');
+  });
+}
+function otDetCampo(label, valor){
+  return '<div class="fl"><label>'+label+'</label>'
+    + '<div style="padding:6px 0;font-size:13px">'+valor+'</div></div>';
+}
+
+// ── Baja ───────────────────────────────────────────────────────────────────
+function otEliminar(id){
+  var o = (OT.ordenes||[]).find(function(x){ return x.id === id; });
+  var nro = o ? ('OT-'+String(o.numero).padStart(5,'0')) : ('#'+id);
+  if (!confirm('¿Eliminar la orden de trabajo '+nro+'?')) return;
+  otApi('/'+id, { method:'DELETE' }).then(function(r){
+    if (!r.ok) return toast(r.error || 'Error al eliminar','er');
+    toast('Orden '+nro+' eliminada');
+    otLoad();
+  });
+}
+
+// ── ABM de tareas (modal chico: alta + baja lógica) ────────────────────────
+function otAbrirTareas(){
+  otRenderTareas();
+  document.getElementById('ot-mb-tareas').classList.add('on');
+}
+
+function otRenderTareas(){
+  otApi('/tareas').then(function(r){
+    OT.tareas = r.data || [];
+    var cont = document.getElementById('ot-tareas-lista');
+    if (!cont) return;
+    var admin = otEsAdmin();
+    cont.innerHTML = OT.tareas.length
+      ? OT.tareas.map(function(t){
+          return '<div style="display:flex;align-items:center;justify-content:space-between;padding:6px 4px;border-bottom:1px solid var(--bor)">'
+            + '<span style="font-size:13px">'+otEsc(t.nombre)+'</span>'
+            + (admin ? '<button class="btn bd bs" onclick="otBajaTarea('+t.id+',\''+otEsc(t.nombre).replace(/'/g,"\\'")+'\')">Dar de baja</button>' : '')
+            + '</div>';
+        }).join('')
+      : '<div class="emp">Sin tareas cargadas</div>';
+    if (!admin) {
+      cont.innerHTML += '<div style="margin-top:10px;font-size:11px;color:var(--mut)">Solo los administradores pueden agregar o dar de baja tareas.</div>';
+    }
+    otPoblarFiltros();
+  });
+}
+
+function otCrearTarea(){
+  var inp = document.getElementById('ot-tarea-nueva');
+  var nombre = (inp.value||'').trim();
+  if (!nombre) return toast('Escribí el nombre de la tarea','er');
+  otApi('/tareas', {
+    method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ nombre: nombre })
+  }).then(function(r){
+    if (!r.ok) return toast(r.error || 'Error al crear la tarea','er');
+    inp.value = '';
+    toast(r.reactivada ? 'Tarea reactivada' : 'Tarea agregada');
+    otRenderTareas();
+  });
+}
+
+function otBajaTarea(id, nombre){
+  if (!confirm('¿Dar de baja la tarea "'+nombre+'"?\nLas órdenes ya cargadas la conservan.')) return;
+  otApi('/tareas/'+id, { method:'DELETE' }).then(function(r){
+    if (!r.ok) return toast(r.error || 'Error','er');
+    toast('Tarea dada de baja');
+    otRenderTareas();
+  });
 }
 
 </script>
