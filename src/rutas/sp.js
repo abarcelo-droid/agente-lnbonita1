@@ -620,6 +620,21 @@ router.get('/solicitudes', wrap((req, res) => {
     // entonces cada administrador ve TODO en su bandeja, que es lo mismo que no
     // tener bandeja.
     const dirig = dirigidaA(def, s, puedenActuar);
+
+    // "ME TOCA A MÍ" = SOY UNO DE LOS DESIGNADOS PARA ESTE PASO.
+    // Poder resolverlo por ser administrador NO es lo mismo. Esa regla existe
+    // para DESTRABAR —que un pago no quede clavado porque el responsable no
+    // está— no para meterle en la bandeja a cada admin el trabajo de todos.
+    //
+    // Sin esta distinción, un admin ve la confección, la firma y el envío de
+    // comprobantes de todas las solicitudes, aunque haya alguien designado para
+    // cada paso. Con seis pagos en curso la bandeja deja de significar algo.
+    const soyDesignado = puedenActuar.some(u => u.id === req.user.id);
+    // Si NADIE puede resolverlo, la solicitud está trabada de verdad: ahí sí
+    // tiene que aparecerle al admin, que es el único que puede destrabarla.
+    const nadiePuede = puedenActuar.length === 0;
+    const soloPorSerAdmin = !soyDesignado && !nadiePuede && acciones.length > 0;
+
     return {
       ...s, def_snapshot_json: undefined,
       paso_nombre: paso ? paso.nombre : s.paso_actual_clave,
@@ -627,16 +642,19 @@ router.get('/solicitudes', wrap((req, res) => {
       acciones, bloqueo_sod: bloqueo,
       autorizador_nombre: s.autorizador_id ? nombreDe(s.autorizador_id) : null,
       dirigida_a: dirig ? dirig.nombre : null,
-      dirigida_a_otro: !!(dirig && dirig.id !== req.user.id),
+      dirigida_a_otro: !!(dirig && dirig.id !== req.user.id) || soloPorSerAdmin,
+      // Para que la pantalla pueda decir POR QUÉ no es suya: se la pidieron a
+      // alguien, o simplemente el paso es de otro.
+      solo_por_ser_admin: soloPorSerAdmin,
       // A quién le toca de verdad: es lo que el usuario necesita saber cuando no
       // puede actuar él.
       esperando_a: puedenActuar.map(u => u.nombre),
       vencida: !!(s.vence_en && s.estado_global === 'en_curso' && s.vence_en < new Date().toISOString().slice(0, 19).replace('T', ' '))
     };
   });
-  // "Me toca a mí" es lo que está esperando POR MÍ. Lo que se le pidió a otro
-  // sigue siendo resolvible —si el elegido está de licencia el pedido no se
-  // traba— pero vive en su propia solapa en vez de ensuciar la bandeja.
+  // "Me toca a mí" es lo que está esperando POR MÍ. Lo que le toca a otro sigue
+  // siendo resolvible —si esa persona no está, el pedido no se traba— pero vive
+  // en su propia solapa en vez de ensuciar la bandeja.
   if (vista === 'pendiente') {
     filas = filas.filter(s => (s.acciones.length > 0 || s.bloqueo_sod) && !s.dirigida_a_otro);
   }
