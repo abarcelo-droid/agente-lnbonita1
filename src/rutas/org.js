@@ -560,6 +560,77 @@ router.put('/enlaces/:modulo', requireAdmin, (req, res) => {
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
+// ¿El sistema externo se deja mostrar DENTRO del panel?
+// Lo decide el propio sistema con dos cabeceras: X-Frame-Options y el
+// frame-ancestors de Content-Security-Policy. Sin este diagnóstico, cuando no se
+// deja el usuario ve un recuadro en blanco y no tiene forma de saber por qué ni
+// qué pedir. Con esto, se le puede dar el texto exacto para su desarrollador.
+//
+// Solo admin, y SOLO contra la URL guardada: no acepta una dirección por
+// parámetro. Un endpoint que busca cualquier URL que le manden convierte al
+// servidor del panel en un escáner de la red interna.
+router.get('/enlaces/:modulo/embebible', requireAdmin, async (req, res) => {
+  try {
+    const cur = db().prepare("SELECT * FROM modulos_config WHERE modulo=? AND tipo='externo'")
+      .get(req.params.modulo);
+    if (!cur) return res.status(404).json({ ok: false, error: 'No es un módulo externo' });
+    if (!cur.url) return res.json({ ok: true, permite: null, motivo: 'Todavía no cargaste la dirección.' });
+
+    const origenPanel = (req.headers['x-forwarded-proto'] || req.protocol || 'https')
+      + '://' + (req.headers.host || '');
+
+    let r;
+    try {
+      // redirect manual: si redirige a otro host, ese otro host es el que manda y
+      // seguirlo a ciegas es lo que convierte esto en un salto hacia adentro.
+      r = await fetch(cur.url, {
+        method: 'GET', redirect: 'manual',
+        signal: AbortSignal.timeout(6000),
+        headers: { 'User-Agent': 'panel-lnb/1.0 (chequeo de embebido)' }
+      });
+    } catch (e) {
+      return res.json({
+        ok: true, permite: null,
+        motivo: 'No se pudo consultar el dashboard desde el servidor del panel ('
+          + (e.name === 'TimeoutError' ? 'no respondió a tiempo' : e.message) + '). '
+          + 'Puede estar en una red interna, y eso no impide que se vea desde tu navegador.'
+      });
+    }
+
+    const xfo = (r.headers.get('x-frame-options') || '').trim();
+    const csp = (r.headers.get('content-security-policy') || '');
+    const fa = (csp.match(/frame-ancestors([^;]*)/i) || [])[1];
+    const faLista = fa ? fa.trim() : null;
+
+    let permite = true;
+    const motivos = [];
+    if (xfo) {
+      const v = xfo.toUpperCase();
+      if (v.includes('DENY')) { permite = false; motivos.push('manda X-Frame-Options: DENY'); }
+      else if (v.includes('SAMEORIGIN')) { permite = false; motivos.push('manda X-Frame-Options: SAMEORIGIN'); }
+    }
+    if (faLista !== null) {
+      const ok = faLista.split(/\s+/).some(t =>
+        t === '*' || t.toLowerCase() === origenPanel.toLowerCase() || t === "'self'" && false);
+      if (!ok) { permite = false; motivos.push('su frame-ancestors no incluye a ' + origenPanel + ' (dice: ' + faLista + ')'); }
+    }
+    // Un 3xx con redirect:manual es lo normal cuando hay login de por medio: el
+    // servidor manda al usuario a autenticarse. Eso no dice nada del framing.
+    const redirige = r.status >= 300 && r.status < 400;
+
+    res.json({
+      ok: true, permite, redirige, status: r.status,
+      motivo: permite
+        ? (redirige
+            ? 'Las cabeceras no lo impiden, pero el dashboard redirige al login. Dentro del panel eso puede quedar en blanco, porque la pantalla de Google no se deja mostrar en un recuadro.'
+            : 'Las cabeceras del dashboard no impiden mostrarlo dentro del panel.')
+        : 'El dashboard no se deja mostrar dentro de otra página: ' + motivos.join(' y ') + '.',
+      header_sugerido: 'Content-Security-Policy: frame-ancestors ' + origenPanel,
+      origen_panel: origenPanel
+    });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
 // POST /modulos/bulk — actualización masiva (filtros por grupo o prefijo)
 // Body: { filter: { grupo?, prefix? }, update: { sociedad_id?, area_id?, tipo?, oculto? } }
 router.post('/modulos/bulk', requireAdmin, (req, res) => {
