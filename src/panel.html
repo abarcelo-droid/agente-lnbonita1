@@ -11195,6 +11195,10 @@ function sgRepExport(){
 
   <div style="display:flex;border-bottom:1px solid var(--bor);margin-bottom:14px;flex-wrap:wrap">
     <div class="sp-tab on" data-sp="pendiente" onclick="spTab('pendiente')">📥 Me toca a mí <span id="sp-cnt-pend"></span></div>
+    <!-- Lo que PUEDO resolver pero el comprador se lo pidió a otro. Vive acá y no
+         en "Me toca a mí": si no, con rol=admin habilitado en todos los pasos,
+         cada administrador ve TODO y la bandeja deja de significar algo. -->
+    <div class="sp-tab"    data-sp="otros"     onclick="spTab('otros')">👥 Dirigidas a otro <span id="sp-cnt-otros"></span></div>
     <div class="sp-tab"    data-sp="mias"      onclick="spTab('mias')">🧾 Mis solicitudes</div>
     <div class="sp-tab"    data-sp="todas"     onclick="spTab('todas')">📊 Todas</div>
     <div class="sp-tab"    data-sp="tiempos"   onclick="spTab('tiempos')">⏱️ Tiempos</div>
@@ -11203,6 +11207,12 @@ function sgRepExport(){
   </div>
 
   <div class="sp-pane on" id="sp-pane-pendiente"><div id="sp-lista-pendiente"></div></div>
+  <div class="sp-pane"    id="sp-pane-otros">
+    <div class="sp-chica" style="margin-bottom:10px">Estas las podés resolver, pero el comprador le pidió
+      el OK a otra persona. Están acá para que el pedido no se trabe si esa persona no está —
+      <strong>si resolvés una, queda registrado que lo hiciste en su lugar</strong>.</div>
+    <div id="sp-lista-otros"></div>
+  </div>
   <div class="sp-pane"    id="sp-pane-mias"><div id="sp-lista-mias"></div></div>
   <div class="sp-pane"    id="sp-pane-todas"><div id="sp-lista-todas"></div></div>
   <div class="sp-pane"    id="sp-pane-tiempos"><div id="sp-tiempos"></div></div>
@@ -38726,6 +38736,10 @@ function spCopiarFallback(t, ok) {
 
 function spInit() {
   spTab(SP.vista || 'pendiente');
+  // El contador de "Dirigidas a otro" se precarga: si solo se llenara al entrar a
+  // la solapa, nadie entraría nunca y ahí es justo donde queda un pedido trabado
+  // cuando el elegido no está.
+  if (SP.vista !== 'otros') spListaCargar('otros');
   // Los avisos linkean a /panel?sp=123[&accion=aprobar]. Se abre la solicitud
   // directamente, y si el link traía la acción se abre también ese diálogo: con la
   // sesión abierta, el botón del mail termina siendo un solo click.
@@ -38785,10 +38799,12 @@ function spListaCargar(vista) {
   spApi('/solicitudes?vista=' + encodeURIComponent(vista)).then(function(r) {
     if (!r.ok) { cont.innerHTML = '<div class="emp" style="color:var(--err)">' + spEsc(r.error) + '</div>'; return; }
     SP.listas[vista] = r.data || [];
-    if (vista === 'pendiente') {
-      var n = SP.listas.pendiente.length;
-      document.getElementById('sp-cnt-pend').innerHTML = n
-        ? '<span class="sp-bad sp-err" style="margin-left:4px">' + n + '</span>' : '';
+    var cnt = { pendiente: 'sp-cnt-pend', otros: 'sp-cnt-otros' }[vista];
+    if (cnt) {
+      var n = SP.listas[vista].length;
+      // Las dirigidas a otro no van en rojo: no son un reclamo hacia mí.
+      document.getElementById(cnt).innerHTML = n
+        ? '<span class="sp-bad ' + (vista === 'pendiente' ? 'sp-err' : 'sp-gris') + '" style="margin-left:4px">' + n + '</span>' : '';
     }
     spListaRender(vista);
   });
@@ -38872,7 +38888,8 @@ function spTablaHtml(arr, vista) {
         // A quién se le pidió el OK, y a quién le toca de verdad. Es lo primero que
         // se pregunta el que no puede actuar.
         + (s.autorizador_nombre && s.paso_actual_hito === 'autorizacion'
-            ? '<div>OK pedido a: <strong>' + spEsc(s.autorizador_nombre) + '</strong></div>' : '')
+            ? '<div>OK pedido a: <strong>' + spEsc(s.autorizador_nombre) + '</strong>'
+              + (s.dirigida_a_otro ? ' <span class="sp-bad sp-gris">no es tuya</span>' : '') + '</div>' : '')
         + (vista === 'frenadas' && (s.esperando_a || []).length
             ? '<div>lo puede resolver: <strong>' + spEsc(s.esperando_a.join(', ')) + '</strong></div>'
             : '') + '</td>'
@@ -39209,6 +39226,12 @@ function spDetalleRender() {
             marcaAdmin = '<div class="sp-bad sp-warn" style="margin-top:3px">⚠ resuelto con permisos de admin — '
               + spEsc(j.sod_omitida) + '</div>';
           }
+          // Lo resolvió alguien distinto al que el comprador eligió. Después
+          // siempre aparece la pregunta de por qué autorizó quien autorizó.
+          if (j && j.en_lugar_de) {
+            marcaAdmin += '<div class="sp-bad sp-gris" style="margin-top:3px">👥 en lugar de '
+              + spEsc(j.en_lugar_de) + '</div>';
+          }
         } catch (_) {}
         return '<li class="' + cls + '">'
           + '<div style="font-size:12px"><strong>' + spEsc(e.accion) + '</strong>'
@@ -39296,6 +39319,13 @@ function spAccionAbrir(id, accion) {
     html += '<label style="display:flex;gap:6px;align-items:flex-start;font-size:12px;margin-bottom:8px;cursor:pointer">'
       + '<input type="checkbox" id="sp-acc-otromedio"> '
       + '<span>Ya se lo mandé por otro medio (WhatsApp, mail directo). Explicá por dónde en el comentario.</span></label>';
+  }
+  // Resolver algo que el comprador le pidió a otro no está prohibido, pero tiene
+  // que ser una decisión y no un descuido: se avisa antes, no después.
+  if (s.dirigida_a_otro && s.autorizador_nombre) {
+    html += '<div style="background:rgba(59,130,246,.12);border-radius:8px;padding:8px 11px;font-size:12px;margin-bottom:10px">'
+      + '👥 El comprador le pidió el OK a <strong>' + spEsc(s.autorizador_nombre) + '</strong>. '
+      + 'Si lo resolvés vos, queda registrado en el historial que lo hiciste en su lugar.</div>';
   }
   // Si es un admin salteando una separación, se le dice antes de confirmar.
   if (SP.det && SP.det.solicitud.id === id && SP.det.sod_omitida) {

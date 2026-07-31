@@ -544,13 +544,27 @@ router.post('/solicitudes', wrap((req, res) => {
   res.json({ ok: true, id, siguiente: 'Cargala y usá "Enviar a autorizar" cuando esté lista.' });
 }));
 
+// A quién se le pidió ESTE paso, si es que se le pidió a alguien. Hoy solo el
+// hito de autorización lo tiene: el comprador elige a qué administrador le manda
+// el OK, justamente para no dispararle un mail a todos.
+//
+// Devuelve null cuando no hay nadie designado, o cuando el designado no puede
+// resolverlo (lo dieron de baja, o la segregación de funciones lo frena): en ese
+// caso vuelve a ser de todos, que es lo que evita que un pedido quede trabado.
+function dirigidaA(def, sol, puedenActuar) {
+  const paso = (def.pasos || []).find(p => p.clave === sol.paso_actual_clave);
+  if (!paso || paso.hito !== 'autorizacion' || !sol.autorizador_id) return null;
+  return puedenActuar.filter(u => u.id === sol.autorizador_id)[0] || null;
+}
+
 // Bandejas. Todo GET: tienen que funcionar para usuarios solo lectura.
 //   mias      — lo que pedí yo (la vista del comprador)
-//   pendiente — lo que me toca resolver a mí
+//   pendiente — lo que me toca resolver A MÍ
+//   otros     — lo que puedo resolver pero se lo pidieron a otro
 //   todas     — el tablero (admin)
 router.get('/solicitudes', wrap((req, res) => {
   const soc = getSociedadId(req);
-  const vista = ['mias', 'pendiente', 'todas'].includes(req.query.vista) ? req.query.vista : 'mias';
+  const vista = ['mias', 'pendiente', 'otros', 'todas'].includes(req.query.vista) ? req.query.vista : 'mias';
   const params = [soc];
   let sql = `
     SELECT s.*, (SELECT COUNT(*) FROM sp_eventos e WHERE e.solicitud_id = s.id) AS n_eventos
@@ -573,21 +587,34 @@ router.get('/solicitudes', wrap((req, res) => {
     const habilitado = req.user.rol === 'admin' || resolutores.some(u => u.id === req.user.id);
     const bloqueo = (habilitado && s.estado_global === 'en_curso')
       ? bloqueadoPorSoD(def, s, s.paso_actual_clave, req.user.id) : null;
+    const puedenActuar = resolutores.filter(u => !bloqueadoPorSoD(def, s, s.paso_actual_clave, u.id));
+    // El comprador eligió a quién le pide el OK. Si se lo pidió a OTRO, esto no
+    // es "me toca a mí": puedo resolverlo, pero la pelota es de esa persona.
+    // Sin esta distinción, la semilla habilita rol=admin en todos los pasos y
+    // entonces cada administrador ve TODO en su bandeja, que es lo mismo que no
+    // tener bandeja.
+    const dirig = dirigidaA(def, s, puedenActuar);
     return {
       ...s, def_snapshot_json: undefined,
       paso_nombre: paso ? paso.nombre : s.paso_actual_clave,
       paso_instrucciones: paso ? paso.instrucciones : null,
       acciones, bloqueo_sod: bloqueo,
       autorizador_nombre: s.autorizador_id ? nombreDe(s.autorizador_id) : null,
+      dirigida_a: dirig ? dirig.nombre : null,
+      dirigida_a_otro: !!(dirig && dirig.id !== req.user.id),
       // A quién le toca de verdad: es lo que el usuario necesita saber cuando no
       // puede actuar él.
-      esperando_a: resolutores
-        .filter(u => !bloqueadoPorSoD(def, s, s.paso_actual_clave, u.id))
-        .map(u => u.nombre),
+      esperando_a: puedenActuar.map(u => u.nombre),
       vencida: !!(s.vence_en && s.estado_global === 'en_curso' && s.vence_en < new Date().toISOString().slice(0, 19).replace('T', ' '))
     };
   });
-  if (vista === 'pendiente') filas = filas.filter(s => s.acciones.length > 0 || s.bloqueo_sod);
+  // "Me toca a mí" es lo que está esperando POR MÍ. Lo que se le pidió a otro
+  // sigue siendo resolvible —si el elegido está de licencia el pedido no se
+  // traba— pero vive en su propia solapa en vez de ensuciar la bandeja.
+  if (vista === 'pendiente') {
+    filas = filas.filter(s => (s.acciones.length > 0 || s.bloqueo_sod) && !s.dirigida_a_otro);
+  }
+  if (vista === 'otros') filas = filas.filter(s => s.acciones.length > 0 && s.dirigida_a_otro);
   res.json({ ok: true, data: filas, vista });
 }));
 
@@ -607,7 +634,12 @@ router.get('/solicitudes/:id', wrap((req, res) => {
     ok: true,
     data: {
       solicitud: { ...s, def_snapshot_json: undefined,
-                   autorizador_nombre: s.autorizador_id ? nombreDe(s.autorizador_id) : null },
+                   autorizador_nombre: s.autorizador_id ? nombreDe(s.autorizador_id) : null,
+                   // Mismo dato que en la bandeja, para que el diálogo de acción
+                   // avise igual cuando se entra por el link del mail y no por la lista.
+                   dirigida_a_otro: !!dirigidaA(def, s,
+                     resolutores.filter(u => !bloqueadoPorSoD(def, s, s.paso_actual_clave, u.id))
+                   ) && s.autorizador_id !== req.user.id },
       paso: paso || null,
       pasos: def.pasos,
       acciones: accionesDisponibles(def, s, req.user),
@@ -812,6 +844,13 @@ router.post('/solicitudes/:id/accion', wrap((req, res) => {
     }
     const detalle = { ...datos };
     if (omitida) detalle.sod_omitida = omitida;
+    // Resolver un paso que el comprador le pidió a OTRA persona queda registrado.
+    // No está prohibido —para eso está la solapa "Dirigidas a otro", que es lo que
+    // destraba un pedido cuando el elegido no está— pero después alguien va a
+    // preguntar por qué firmó quien firmó, y el historial tiene que contestarlo.
+    if (paso.hito === 'autorizacion' && s.autorizador_id && s.autorizador_id !== req.user.id) {
+      detalle.en_lugar_de = nombreDe(s.autorizador_id);
+    }
     const evId = registrarEvento(s.id, {
       paso_desde: paso.clave, paso_hasta: tr.hasta, accion, hito: paso.hito, clase: tr.clase,
       actor_id: req.user.id, actor_nombre: req.user.nombre, actor_rol: req.user.rol,
