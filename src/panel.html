@@ -11264,7 +11264,7 @@ function sgRepExport(){
 <div class="ab-modal" style="width:660px;max-height:90vh;overflow-y:auto">
   <div class="mhd">
     <div><div class="mht" id="sp-nueva-tit">Solicitar un pago</div></div>
-    <button class="mcl" onclick="document.getElementById('sp-mb-nueva').classList.remove('on')">×</button>
+    <button class="mcl" onclick="spNuevaCerrar()">×</button>
   </div>
   <input type="hidden" id="sp-nueva-id">
   <div class="fg">
@@ -11284,7 +11284,12 @@ function sgRepExport(){
       para poner la fecha.</div>
   </div>
   <div class="fg" style="margin-top:8px">
-    <div class="fl"><label>Monto *</label><input id="sp-n-monto" type="number" step="any" min="0" class="sp-inp sp-num"></div>
+    <!-- type="text" y no "number": un campo numérico no admite separadores de
+         miles, y 4230000.33 sin puntos se lee mal y se tipea peor. El formato se
+         arma mientras se escribe y se devuelve el número crudo al guardar. -->
+    <div class="fl"><label>Monto *</label>
+      <input id="sp-n-monto" type="text" inputmode="decimal" class="sp-inp sp-num"
+             placeholder="0,00" autocomplete="off" oninput="spMontoFormatear(this)"></div>
     <div class="fl"><label>Moneda</label>
       <select id="sp-n-moneda" class="sp-inp"><option value="ARS">ARS</option><option value="USD">USD</option></select>
     </div>
@@ -11302,9 +11307,26 @@ function sgRepExport(){
     <div class="sp-chica">El aviso por mail va solo a esa persona. Los demás habilitados igual la ven
       en su bandeja y pueden resolverla, así no se traba si no está.</div>
   </div>
+  <!-- El respaldo se adjunta ACÁ, en el mismo paso. Antes había que guardar la
+       solicitud, abrirla de nuevo y recién ahí subirlo: dos viajes para una sola
+       cosa, y el paso de enviar a autorizar lo exige igual. -->
+  <div class="fl ff" style="margin-top:12px;border-top:1px solid var(--bor);padding-top:12px">
+    <label>Respaldo (cuenta corriente, factura o remito)</label>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <input type="file" id="sp-n-file" class="sp-inp" style="flex:1;min-width:230px"
+             accept=".pdf,image/*,.doc,.docx,.xls,.xlsx">
+      <select id="sp-n-ftipo" class="sp-inp" style="min-width:190px">
+        <option value="cuenta_corriente">PDF de cuenta corriente</option>
+        <option value="factura">Factura</option>
+        <option value="otro">Otro</option>
+      </select>
+    </div>
+    <div class="sp-chica">Se sube junto con la solicitud. Sin respaldo no vas a poder enviarla a autorizar,
+      así que conviene adjuntarlo ahora.</div>
+  </div>
   <div id="sp-n-dup" style="display:none;margin-top:10px;background:rgba(245,158,11,.14);border-radius:8px;padding:10px 12px;font-size:12px"></div>
   <div class="ab-modal-footer">
-    <button class="btn bo" onclick="document.getElementById('sp-mb-nueva').classList.remove('on')">Cancelar</button>
+    <button class="btn bo" onclick="spNuevaCerrar()">Cancelar</button>
     <button class="btn bb" onclick="spNuevaGuardar()">Guardar</button>
   </div>
 </div>
@@ -39042,6 +39064,117 @@ function spTablaHtml(arr, vista) {
 
 // ── Nueva solicitud ───────────────────────────────────────────────────────
 
+// ── Monto con separadores ─────────────────────────────────────────────────
+// Puntos para miles y coma para decimales, mientras se escribe. Un campo
+// type="number" no admite separadores, así que el campo es de texto y el número
+// crudo se reconstruye al guardar.
+//
+// Lo delicado es el CURSOR: al insertar un punto, si se reasigna el valor el
+// cursor se va al final y escribir un monto largo se vuelve imposible. Por eso se
+// cuenta cuántos DÍGITOS había antes del cursor y se lo vuelve a poner después
+// del mismo dígito, que es una posición que los separadores no mueven.
+function spMontoFormatear(inp) {
+  var caret = inp.selectionStart;
+  var previo = inp.value;
+  // Dígitos a la izquierda del cursor: es el ancla que sobrevive al reformateo.
+  var digitosAntes = (previo.slice(0, caret).match(/\d/g) || []).length;
+
+  var v = previo.replace(/[^\d,]/g, '');       // fuera todo menos dígitos y coma
+  var partes = v.split(',');
+  var ent = partes[0].replace(/^0+(?=\d)/, '');  // sin ceros a la izquierda
+  var dec = partes.length > 1 ? partes.slice(1).join('').slice(0, 2) : null;  // una sola coma, 2 decimales
+
+  var conPuntos = ent.replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+  var salida = conPuntos + (dec !== null ? ',' + dec : '');
+  inp.value = salida;
+
+  // Se recoloca el cursor después del mismo dígito que tenía antes.
+  var vistos = 0, pos = salida.length;
+  for (var i = 0; i < salida.length; i++) {
+    if (/\d/.test(salida[i])) {
+      vistos++;
+      if (vistos === digitosAntes) { pos = i + 1; break; }
+    }
+  }
+  if (digitosAntes === 0) pos = 0;
+  try { inp.setSelectionRange(pos, pos); } catch (_) {}
+}
+
+// "4.230.000,33" → 4230000.33. Vacío o basura → null, nunca NaN disfrazado de 0:
+// un monto en 0 pasaría validaciones que un vacío tiene que frenar.
+function spMontoValor(txt) {
+  var s = String(txt == null ? '' : txt).replace(/\./g, '').replace(',', '.').trim();
+  if (!s) return null;
+  var n = Number(s);
+  return isFinite(n) ? n : null;
+}
+
+// 4230000.33 → "4.230.000,33", para cargar el campo al editar.
+function spMontoTexto(n) {
+  if (n === null || n === undefined || n === '') return '';
+  var num = Number(n);
+  if (!isFinite(num)) return '';
+  var partes = String(Math.abs(num).toFixed(2)).split('.');
+  var ent = partes[0].replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+  return (num < 0 ? '-' : '') + ent + (partes[1] === '00' ? '' : ',' + partes[1]);
+}
+
+// ── No perder lo cargado ──────────────────────────────────────────────────
+// Un operador reportó que al seleccionar texto con el mouse a veces se sale del
+// formulario y hay que cargar todo de nuevo. No pude reproducir QUÉ lo dispara,
+// así que se ataca la consecuencia, que es la que duele: lo escrito se guarda en
+// el navegador con cada tecla y vuelve solo al reabrir. Aunque el formulario se
+// cierre por cualquier motivo —un clic raro, un F5, una sesión vencida— no se
+// pierde nada.
+var SP_BORRADOR = 'lnb-sp-nueva-borrador';
+var SP_CAMPOS = ['sp-n-prov','sp-n-cuenta','sp-n-concepto','sp-n-condicion','sp-n-monto',
+                 'sp-n-moneda','sp-n-prio','sp-n-ctipo','sp-n-cnum','sp-n-fecha','sp-n-autorizador'];
+
+function spBorradorGuardar() {
+  // Solo el alta: en la edición el original está en la base y restaurar un
+  // borrador viejo encima sería peor que perderlo.
+  if (document.getElementById('sp-nueva-id').value) return;
+  try {
+    var d = {};
+    SP_CAMPOS.forEach(function(k) {
+      var el = document.getElementById(k);
+      if (el) d[k] = el.value;
+    });
+    var algo = SP_CAMPOS.some(function(k) { return k !== 'sp-n-moneda' && k !== 'sp-n-prio' && d[k]; });
+    if (algo) localStorage.setItem(SP_BORRADOR, JSON.stringify(d));
+    else localStorage.removeItem(SP_BORRADOR);
+  } catch (_) { /* sin localStorage el formulario funciona igual */ }
+}
+
+function spBorradorLeer() {
+  try {
+    var t = localStorage.getItem(SP_BORRADOR);
+    return t ? JSON.parse(t) : null;
+  } catch (_) { return null; }
+}
+
+function spBorradorBorrar() {
+  try { localStorage.removeItem(SP_BORRADOR); } catch (_) {}
+}
+
+function spNuevaHayDatos() {
+  return SP_CAMPOS.some(function(k) {
+    if (k === 'sp-n-moneda' || k === 'sp-n-prio' || k === 'sp-n-autorizador') return false;
+    var el = document.getElementById(k);
+    return el && String(el.value || '').trim();
+  });
+}
+
+// Cerrar con datos cargados pregunta. Y aunque se cierre, el borrador queda: la
+// pregunta es para no sorprender, no para ser la única defensa.
+function spNuevaCerrar() {
+  if (spNuevaHayDatos() && !document.getElementById('sp-nueva-id').value) {
+    if (!confirm('¿Cerrar sin guardar?\n\nLo que escribiste queda guardado en este navegador '
+      + 'y vuelve a aparecer la próxima vez que abras el formulario.')) return;
+  }
+  document.getElementById('sp-mb-nueva').classList.remove('on');
+}
+
 function spNuevaAbrir(id) {
   document.getElementById('sp-nueva-id').value = id || '';
   document.getElementById('sp-nueva-tit').textContent = id ? 'Editar solicitud' : 'Solicitar un pago';
@@ -39051,8 +39184,25 @@ function spNuevaAbrir(id) {
   document.getElementById('sp-n-moneda').value = 'ARS';
   document.getElementById('sp-n-prio').value = 'normal';
   document.getElementById('sp-n-dup').style.display = 'none';
+  var f = document.getElementById('sp-n-file');
+  if (f) f.value = '';
   SP.justifDup = null;
   spCargarAutorizadores(id);
+
+  // Alta: si quedó algo escrito de la vez anterior, se restaura y se avisa. Se
+  // hace ANTES de cargar los autorizadores porque ése select se llena por red;
+  // el valor guardado se reaplica en spCargarAutorizadores cuando termina.
+  if (!id) {
+    var b = spBorradorLeer();
+    if (b) {
+      SP_CAMPOS.forEach(function(k) {
+        var el = document.getElementById(k);
+        if (el && b[k] !== undefined && k !== 'sp-n-autorizador') el.value = b[k];
+      });
+      SP.borradorAut = b['sp-n-autorizador'] || '';
+      toast('Se recuperó lo que habías escrito', 'ok');
+    } else { SP.borradorAut = ''; }
+  }
   if (id) {
     var s = (SP.listas.mias || []).concat(SP.listas.todas || []).filter(function(x) { return x.id === id; })[0];
     if (s) {
@@ -39060,7 +39210,7 @@ function spNuevaAbrir(id) {
       document.getElementById('sp-n-cuenta').value = s.cuenta_texto || '';
       document.getElementById('sp-n-concepto').value = s.concepto || '';
       document.getElementById('sp-n-condicion').value = s.condicion_pago || '';
-      document.getElementById('sp-n-monto').value = s.monto;
+      document.getElementById('sp-n-monto').value = spMontoTexto(s.monto);
       document.getElementById('sp-n-moneda').value = s.moneda;
       document.getElementById('sp-n-prio').value = s.prioridad;
       document.getElementById('sp-n-ctipo').value = s.comprobante_tipo || '';
@@ -39069,6 +39219,16 @@ function spNuevaAbrir(id) {
     }
   }
   document.getElementById('sp-mb-nueva').classList.add('on');
+  // Cada tecla guarda el borrador. Es barato y es lo que hace que perder el
+  // formulario deje de importar.
+  SP_CAMPOS.forEach(function(k) {
+    var el = document.getElementById(k);
+    if (el && !el._spWatch) {
+      el._spWatch = 1;
+      el.addEventListener('input', spBorradorGuardar);
+      el.addEventListener('change', spBorradorGuardar);
+    }
+  });
 }
 
 // Los elegibles los resuelve el backend a partir del circuito, sacando a quien la
@@ -39095,6 +39255,12 @@ function spCargarAutorizadores(idEdicion) {
         }).join('');
     // Con un solo candidato no tiene sentido hacer elegir.
     if (arr.length === 1) sel.value = String(arr[0].id);
+    // El select se llena por red, así que el valor del borrador se reaplica acá:
+    // ponerlo antes no habría tenido opciones donde encajar.
+    if (!idEdicion && SP.borradorAut) {
+      if (sel.querySelector('option[value="' + SP.borradorAut + '"]')) sel.value = SP.borradorAut;
+      SP.borradorAut = '';
+    }
   });
 }
 
@@ -39105,7 +39271,8 @@ function spNuevaGuardar() {
     cuenta_texto: document.getElementById('sp-n-cuenta').value.trim(),
     concepto: document.getElementById('sp-n-concepto').value.trim(),
     condicion_pago: document.getElementById('sp-n-condicion').value.trim(),
-    monto: document.getElementById('sp-n-monto').value,
+    // El campo muestra "4.230.000,33"; al backend va el número crudo.
+    monto: spMontoValor(document.getElementById('sp-n-monto').value),
     moneda: document.getElementById('sp-n-moneda').value,
     prioridad: document.getElementById('sp-n-prio').value,
     comprobante_tipo: document.getElementById('sp-n-ctipo').value.trim(),
@@ -39149,10 +39316,42 @@ function spNuevaGuardar() {
       }
       spErr(r); return;
     }
-    toast(id ? '✓ Guardada' : '✓ Solicitud creada — usá "Enviar a autorizar"', 'ok');
-    document.getElementById('sp-mb-nueva').classList.remove('on');
-    spListaCargar('mias');
-    if (!id) spTab('mias');
+    // Guardado OK: el borrador ya no hace falta.
+    spBorradorBorrar();
+    var solId = id || r.id;
+    var f = document.getElementById('sp-n-file');
+    var arch = f && f.files && f.files[0];
+
+    var cerrar = function(msg, clase) {
+      toast(msg, clase || 'ok');
+      document.getElementById('sp-mb-nueva').classList.remove('on');
+      spListaCargar('mias');
+      if (!id) spTab('mias');
+    };
+
+    if (!arch || !solId) {
+      cerrar(id ? '✓ Guardada' : '✓ Solicitud creada — usá "Enviar a autorizar"');
+      return;
+    }
+    if (arch.size > 15 * 1024 * 1024) {
+      // La solicitud YA se guardó: no se puede perder por el archivo. Se avisa y
+      // queda para adjuntar desde el detalle.
+      cerrar('✓ Solicitud guardada, pero el archivo supera los 15 MB: subilo desde el detalle', 'er');
+      return;
+    }
+    var fd = new FormData();
+    fd.append('archivo', arch);
+    fd.append('tipo', document.getElementById('sp-n-ftipo').value);
+    fetch('/api/sp/solicitudes/' + solId + '/adjuntos', { method: 'POST', credentials: 'include', body: fd })
+      .then(function(x) { return x.json(); })
+      .catch(function() { return { ok: false, error: 'Error de red' }; })
+      .then(function(x) {
+        // Si el adjunto falla, la solicitud igual quedó creada: decirlo es mejor
+        // que un "listo" que esconde que falta el respaldo para poder enviarla.
+        cerrar(x.ok ? '✓ Solicitud creada con el respaldo adjunto'
+                    : '✓ Solicitud creada, pero el adjunto falló (' + (x.error || '') + '). Subilo desde el detalle.',
+               x.ok ? 'ok' : 'er');
+      });
   });
 }
 
