@@ -39274,11 +39274,16 @@ function spAccionAbrir(id, accion) {
       + '<div style="margin-top:12px">'
         + '<div style="font-size:12px;font-weight:700;margin-bottom:4px">¿Cómo se paga?</div>'
         + '<div class="sp-chica" style="margin-bottom:8px">Podés combinar los tres medios. '
-          + 'La suma tiene que dar ' + spEsc(spMoney(s.monto, s.moneda)) + '.</div>'
+          + 'La suma tiene que dar ' + spEsc(spMoney(s.monto, s.moneda)) + '. '
+          + 'Cada cheque propio que agregás <strong>se lleva su parte del saldo</strong> — '
+          + 'si ponés 4, sale partido en 4. Escribí un importe a mano para fijarlo y el resto '
+          + 'se reparte entre los demás; borralo para devolverlo al reparto.</div>'
         + '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px">'
           + '<button type="button" class="btn bo bs" style="font-size:11px" onclick="spPagoAgregar(\'transferencia\')">+ Transferencia</button>'
           + '<button type="button" class="btn bo bs" style="font-size:11px" onclick="spPagoAgregar(\'cheque_propio\')">+ Cheque propio</button>'
           + '<button type="button" class="btn bo bs" style="font-size:11px" onclick="spPagoAgregar(\'cheque_terceros\')">+ Cheque de terceros</button>'
+          + '<button type="button" class="btn bo bs" style="font-size:11px" onclick="spPagoRepartirTodo()"'
+            + ' title="Vuelve a partir el saldo en partes iguales entre todos los cheques propios">⟲ repartir en partes iguales</button>'
         + '</div>'
         + '<div id="sp-pago-lineas"></div>'
         + '<div id="sp-pago-total" style="margin-top:8px;font-size:13px;font-weight:600"></div>'
@@ -39308,8 +39313,9 @@ function spAccionAbrir(id, accion) {
   document.getElementById('sp-mb-accion').classList.add('on');
   if (pideFecha) {
     // Arranca con una transferencia por el total: es el caso más común y evita
-    // empezar de cero cuando no hay cheques.
-    SP.pagos = [{ tipo: 'transferencia', importe: s.monto, fecha: '', codigo: '' }];
+    // empezar de cero cuando no hay cheques. Queda en 'auto', así que apenas se
+    // agrega el primer cheque propio cede el saldo y se saca sola.
+    SP.pagos = [{ tipo: 'transferencia', importe: s.monto, fecha: '', codigo: '', auto: true }];
     spPagoRender();
   }
 }
@@ -39357,24 +39363,93 @@ function spAdjBorrar(adjId) {
   });
 }
 
+// ── Reparto automático del saldo entre los cheques propios ────────────────
+// Los cheques propios los emitís vos, así que su importe es el que vos decidas:
+// si ponés 4, lo natural es que el saldo salga partido en 4 y no tener que sacar
+// la cuenta a mano y tipear cada uno.
+//
+// Los cheques de TERCEROS no se reparten: cada uno vale lo que dice el cheque que
+// ya tenés en la mano. Y una transferencia con importe escrito a mano tampoco:
+// se respeta y los cheques se reparten lo que queda.
+//
+// Escribir un importe a mano saca esa línea del reparto (nadie quiere que el
+// número que acaba de tipear se le mueva solo). Borrarlo la devuelve al reparto.
+function spPagoRepartir() {
+  var total = Number(SP.pagoMonto) || 0;
+  var propios = [], transfer = [], fijo = 0;
+  (SP.pagos || []).forEach(function(p) {
+    if (p.auto && p.tipo === 'cheque_propio') { propios.push(p); return; }
+    if (p.auto && p.tipo === 'transferencia') { transfer.push(p); return; }
+    fijo += Number(p.importe) || 0;
+  });
+  var resto = Math.round((total - fijo) * 100) / 100;
+  if (resto < 0) resto = 0;
+
+  if (propios.length) {
+    // El reparto tiene que SUMAR EXACTO: la validación del backend exige que dé
+    // el monto autorizado, así que los centavos que no dividen no se pueden
+    // perder. Se reparten DE A UNO desde el primero, no todos juntos al último:
+    // 1,00 entre 7 da 0,15 · 0,15 · 0,14 × 5, y no 0,14 × 6 · 0,16, que deja un
+    // cheque desparejo sin ninguna razón.
+    var centavos = Math.round(resto * 100);
+    var base = Math.floor(centavos / propios.length);
+    var sobran = centavos - base * propios.length;
+    propios.forEach(function(p, k) {
+      p.importe = (base + (k < sobran ? 1 : 0)) / 100;
+    });
+    resto = 0;
+  }
+  // La transferencia que no tocaste absorbe lo que quede: el total si no hay
+  // cheques, cero si los cheques ya lo cubren.
+  transfer.forEach(function(p, k) { p.importe = (k === 0 ? resto : 0); });
+  // Y si le quedó cero, se saca en vez de dejar una línea muerta que además el
+  // backend rechaza (exige importe > 0 en cada línea).
+  SP.pagos = SP.pagos.filter(function(p) {
+    return !(p.tipo === 'transferencia' && p.auto && !(Number(p.importe) > 0));
+  });
+}
+
 function spPagoAgregar(tipo) {
   SP.pagos = SP.pagos || [];
   if (SP.pagos.filter(function(p) { return p.tipo === tipo; }).length >= 20) {
     return toast('Máximo 20 ' + SP_PAGO_ETQ[tipo].toLowerCase() + '(s)', 'er');
   }
-  // El importe que falta para llegar al total: en la mayoría de los casos es el que
-  // se quiere, y si no se corrige de una.
-  var falta = Math.round((Number(SP.pagoMonto || 0) - spPagoSuma()) * 100) / 100;
-  SP.pagos.push({ tipo: tipo, importe: falta > 0 ? falta : '', fecha: '', codigo: '' });
+  // Lo que falta se mide contra las líneas FIJAS solamente: las que están en el
+  // reparto (la transferencia inicial, los cheques propios) ceden. Si no, agregar
+  // un cheque de terceros con la transferencia todavía por el total proponía cero.
+  var fijo = SP.pagos.reduce(function(a, p) { return a + (p.auto ? 0 : (Number(p.importe) || 0)); }, 0);
+  var falta = Math.round((Number(SP.pagoMonto || 0) - fijo) * 100) / 100;
+  SP.pagos.push(tipo === 'cheque_propio'
+    ? { tipo: tipo, importe: '', fecha: '', codigo: '', auto: true }
+    // Transferencia y cheque de terceros: se propone lo que falta y queda fijo.
+    : { tipo: tipo, importe: falta > 0 ? falta : '', fecha: '', codigo: '', auto: false });
+  spPagoRepartir();
   spPagoRender();
 }
 
-function spPagoQuitar(i) { SP.pagos.splice(i, 1); spPagoRender(); }
+// Vuelve a poner TODOS los cheques propios en el reparto, para deshacer los
+// importes escritos a mano sin tener que borrarlos uno por uno.
+function spPagoRepartirTodo() {
+  (SP.pagos || []).forEach(function(p) { if (p.tipo === 'cheque_propio') p.auto = true; });
+  spPagoRepartir();
+  spPagoRender();
+}
+
+function spPagoQuitar(i) {
+  SP.pagos.splice(i, 1);
+  spPagoRepartir();   // sacar una línea cambia el saldo a repartir
+  spPagoRender();
+}
 
 function spPagoSet(i, campo, valor) {
   if (!SP.pagos[i]) return;
-  SP.pagos[i][campo] = (campo === 'importe') ? valor : valor;
-  if (campo === 'importe') spPagoTotalRender();
+  SP.pagos[i][campo] = valor;
+  if (campo !== 'importe') return;
+  // Vaciar el importe devuelve la línea al reparto: es la forma de deshacer un
+  // número puesto a mano sin tener que adivinar cuál era el automático.
+  SP.pagos[i].auto = String(valor).trim() === '';
+  spPagoRepartir();
+  spPagoRender();
 }
 
 function spPagoSuma() {
@@ -39396,10 +39471,22 @@ function spPagoRender() {
     + SP.pagos.map(function(p, i) {
         var esTerceros = p.tipo === 'cheque_terceros';
         var esCheque = p.tipo !== 'transferencia';
-        return '<tr><td><strong>' + spEsc(SP_PAGO_ETQ[p.tipo]) + '</strong></td>'
+        // Numerados: con 4 cheques propios en pantalla, "el de 66.725.075" no
+        // identifica a ninguno.
+        var nro = p.tipo === 'transferencia' ? '' :
+          ' <span class="sp-chica">#' + (SP.pagos.filter(function(q, j) {
+            return q.tipo === p.tipo && j <= i; }).length) + '</span>';
+        return '<tr><td><strong>' + spEsc(SP_PAGO_ETQ[p.tipo]) + '</strong>' + nro + '</td>'
           + '<td><input type="number" step="any" min="0" class="sp-inp sp-num" style="width:120px"'
             + ' value="' + spEsc(String(p.importe === '' ? '' : p.importe)) + '"'
-            + ' onchange="spPagoSet(' + i + ',\'importe\',this.value)"></td>'
+            + (p.auto && p.tipo === 'cheque_propio'
+                ? ' title="Se reparte solo entre los cheques propios. Escribí un importe para fijarlo."'
+                : '')
+            + ' onchange="spPagoSet(' + i + ',\'importe\',this.value)">'
+          // Se marca cuál se está repartiendo solo: si no, ver moverse un número
+          // que uno no tocó da la sensación de que el panel hace cualquier cosa.
+          + (p.auto && p.tipo === 'cheque_propio' ? '<div class="sp-chica">repartido</div>' : '')
+          + '</td>'
           // Los cheques llevan su propio vencimiento; la transferencia va con la
           // fecha de pago general.
           + '<td>' + (esCheque
@@ -39451,6 +39538,12 @@ function spAccionConfirmar() {
     }
     for (var i = 0; i < SP.pagos.length; i++) {
       var p = SP.pagos[i];
+      // El backend exige importe > 0 en CADA línea. Sin este chequeo, una línea
+      // vacía cuya falta cubren las otras pasaba la suma y volvía como un 400.
+      if (!(Number(p.importe) > 0)) {
+        return toast('La línea ' + (i + 1) + ' (' + SP_PAGO_ETQ[p.tipo] + ') no tiene importe. '
+          + 'Poné uno o quitala.', 'er');
+      }
       if (p.tipo === 'cheque_terceros' && !String(p.codigo || '').trim()) {
         return toast('Falta el código del cheque de terceros de la línea ' + (i + 1), 'er');
       }
