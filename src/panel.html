@@ -18287,13 +18287,14 @@ function paLoadCalendario(){
         +'</div>';
     }).join('');
 
-    // Card Sin Uso unificada con detalle verano/invierno
-    if (haSinUsoVer > 0 || haSinUsoInv > 0) {
-      var totalSinUso = haSinUsoVer + haSinUsoInv;
+    // Card Sin Uso — SOLO verano. Las ha sin uso de invierno (haSinUsoInv) se
+    // siguen calculando pero no se muestran acá: un lote sin cultivo de invierno
+    // no es un lote ocioso, es el ciclo normal. Igual siguen sumando en totalHa,
+    // así que la card TOTAL no cambia.
+    if (haSinUsoVer > 0) {
+      var totalSinUso = haSinUsoVer;
       var pctSinUso = totalHa > 0 ? Math.round(totalSinUso/totalHa*100) : 0;
-      var detalle = [];
-      if (haSinUsoVer > 0) detalle.push('☀️ '+haSinUsoVer.toFixed(1));
-      if (haSinUsoInv > 0) detalle.push('❄️ '+haSinUsoInv.toFixed(1));
+      var detalle = ['☀️ '+haSinUsoVer.toFixed(1)];
       resumenHtml += '<div style="background:#f1f5f9;color:#64748b;border-radius:8px;padding:7px 11px;min-width:88px;flex:0 0 auto;cursor:pointer" '
         +'onclick="paFiltrarCalendario(\'Sin uso\')" title="Sin uso / sin asignar">'
         +'<div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;opacity:.8;margin-bottom:2px">Sin uso</div>'
