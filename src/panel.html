@@ -40305,10 +40305,16 @@ function trRender() {
     try { dominio = new URL(e.url).host; } catch (_) { dominio = e.url; }
     html += '<div style="font-size:13px;margin-bottom:4px">Dashboard operativo de <strong>Barceló Transporte</strong></div>'
       + '<div style="font-size:11px;color:var(--mut);margin-bottom:14px">'
-      + 'Se abre en una pestaña nueva, con el login de Google de siempre. '
-      + 'El panel no lee estos datos: entrás al sistema de Transporte tal cual.</div>'
-      + '<a class="btn bb" href="' + trEsc(e.url) + '" target="_blank" rel="noopener noreferrer"'
-      + ' style="display:inline-block;text-decoration:none">🚚 Abrir el dashboard</a>'
+      + 'Entrás al sistema de Transporte tal cual, con el login de Google de siempre. '
+      + 'El panel no lee estos datos.</div>'
+      + '<div style="display:flex;gap:8px;flex-wrap:wrap">'
+      // Verlo acá adentro es lo cómodo; la pestaña nueva es lo que SIEMPRE funciona.
+      // Las dos quedan a mano: si el dashboard no se deja embeber, el usuario no
+      // se queda mirando un recuadro en blanco sin salida.
+      + '<button class="btn bb" onclick="trVerAca()">👁 Ver acá dentro</button>'
+      + '<a class="btn bo" href="' + trEsc(e.url) + '" target="_blank" rel="noopener noreferrer"'
+      + ' style="display:inline-block;text-decoration:none">↗ Abrir en pestaña nueva</a>'
+      + '</div>'
       + '<div style="font-size:11px;color:var(--sub);margin-top:10px">' + trEsc(dominio) + '</div>';
   } else {
     html += '<div style="font-size:13px;margin-bottom:6px">Todavía no está cargada la dirección del dashboard.</div>'
@@ -40332,6 +40338,67 @@ function trRender() {
   }
 
   cont.innerHTML = html + '</div>';
+}
+
+// ── Verlo adentro del panel ───────────────────────────────────────────────
+// Un sitio ajeno solo se deja mostrar en un recuadro si ÉL lo permite (cabeceras
+// X-Frame-Options y frame-ancestors). No hay forma confiable de detectar desde el
+// navegador que lo bloqueó: el recuadro simplemente queda en blanco. Por eso:
+//   · la salida a pestaña nueva queda SIEMPRE arriba, no escondida;
+//   · hay un botón que le pregunta al servidor qué cabeceras manda el dashboard y
+//     devuelve el texto exacto para pedirle al que lo mantiene.
+// Sin eso, "queda en blanco y no sé por qué" no tiene salida.
+function trVerAca() {
+  var e = TR.enlace;
+  if (!e || !e.url) return;
+  var cont = document.getElementById('tr-cont');
+  if (!cont) return;
+  cont.innerHTML =
+    '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px">'
+    + '<button class="btn bo bs" onclick="trInit()" style="font-size:11px">← Volver</button>'
+    + '<a class="btn bo bs" href="' + trEsc(e.url) + '" target="_blank" rel="noopener noreferrer"'
+    + ' style="font-size:11px;text-decoration:none">↗ Abrir en pestaña nueva</a>'
+    + '<button class="btn bo bs" onclick="trDiagnostico()" style="font-size:11px">¿Queda en blanco?</button>'
+    + '<span class="pli-cel-chica" style="margin-left:auto">' + trEsc(e.url) + '</span>'
+    + '</div>'
+    + '<div id="tr-diag"></div>'
+    // sandbox NO: el dashboard es de ellos y necesita su propia sesión y scripts.
+    // Poner un sandbox restrictivo lo rompería sin ganar nada — el riesgo de un
+    // iframe está en embeber sitios ajenos, y éste es propio.
+    + '<div style="border:1px solid var(--bor);border-radius:10px;overflow:hidden;background:var(--sur)">'
+    + '<iframe src="' + trEsc(e.url) + '" title="Dashboard de Barceló Transporte"'
+    + ' style="display:block;width:100%;height:calc(100vh - 230px);min-height:420px;border:0"'
+    + ' referrerpolicy="no-referrer-when-downgrade"></iframe>'
+    + '</div>';
+}
+
+function trDiagnostico() {
+  var d = document.getElementById('tr-diag');
+  if (!d) return;
+  d.innerHTML = '<div class="emp" style="padding:10px">Preguntándole al dashboard…</div>';
+  fetch('/api/org/enlaces/tr-dashboard/embebible', { credentials: 'include' })
+    .then(function(r) { return r.json(); })
+    .catch(function() { return { ok: false, error: 'Error de red' }; })
+    .then(function(r) {
+      if (!r.ok) { d.innerHTML = '<div class="emp" style="color:var(--err)">' + trEsc(r.error) + '</div>'; return; }
+      var col = r.permite === false ? 'rgba(239,68,68,.1)'
+              : (r.permite === null ? 'rgba(148,163,184,.15)' : 'rgba(245,158,11,.12)');
+      var h = '<div style="background:' + col + ';border-radius:8px;padding:10px 12px;font-size:12px;margin-bottom:8px">'
+        + trEsc(r.motivo);
+      // El texto para reenviarle al que mantiene el dashboard. Es lo único
+      // accionable que puede salir de acá.
+      if (r.permite === false && r.header_sugerido) {
+        h += '<div style="margin-top:8px">Para que se pueda ver acá adentro, quien mantiene el dashboard '
+          + 'tiene que hacer que responda con esta cabecera:</div>'
+          + '<div style="margin-top:5px;font-family:ui-monospace,Consolas,monospace;font-size:11px;'
+          + 'background:var(--sur);border:1px solid var(--bor);border-radius:6px;padding:7px 9px;'
+          + 'word-break:break-all">' + trEsc(r.header_sugerido) + '</div>'
+          + '<div style="margin-top:6px;color:var(--mut)">Mientras tanto, usá <strong>Abrir en pestaña nueva</strong>: '
+          + 'eso funciona siempre y no requiere tocar nada.</div>';
+      }
+      h += '</div>';
+      d.innerHTML = h;
+    });
 }
 
 function trGuardar(borrar) {
