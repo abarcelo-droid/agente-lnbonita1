@@ -37,9 +37,10 @@ export function prorratear(lotes, montoTotal) {
 // Devuelve { error } o { lotes: [{lote_id, hectareas}] }.
 //
 // NOTA (multisociedad): no se valida que el lote pertenezca a la sociedad de la
-// orden porque pa_lotes NO tiene columna sociedad_id (ver db_pa.js, CREATE TABLE
-// pa_lotes) — ni la hereda de pa_sectores, que tampoco la tiene. Cuando exista,
-// el chequeo va acá, con la misma forma que el de cuenta_gasto_id.
+// orden porque pa_lotes NO tiene columna sociedad_id — no entró en ninguna de
+// las 3 fases (Fase 1 contable, Fase 2 fin_*, Fase 3 adm_proveedores/ven_*) y
+// tampoco la hereda de pa_sectores. Cuando exista, el chequeo va acá con la
+// misma forma que el de proveedor_id / cuenta_gasto_id en validarCabecera.
 export function normalizarLotes(db, rawLotes) {
   if (!Array.isArray(rawLotes) || !rawLotes.length) {
     return { error: 'Seleccioná al menos un lote' };
@@ -78,10 +79,17 @@ export function validarCabecera(db, body, sociedadId) {
 
   const proveedorId = Number(body.proveedor_id);
   if (!Number.isInteger(proveedorId) || proveedorId <= 0) return { error: 'Proveedor requerido' };
-  // NOTA (multisociedad): adm_proveedores tampoco tiene sociedad_id, así que el
-  // padrón de proveedores es global. Solo se verifica existencia.
-  const prov = db.prepare('SELECT id FROM adm_proveedores WHERE id = ?').get(proveedorId);
+  const prov = db.prepare('SELECT id, razon_social, sociedad_id FROM adm_proveedores WHERE id = ?').get(proveedorId);
   if (!prov) return { error: 'El proveedor no existe en el padrón' };
+  // El padrón de proveedores es por sociedad desde la Fase 3 de multisociedad
+  // (db_pa.js: adm_proveedores.sociedad_id NOT NULL DEFAULT PC).
+  if (Number(prov.sociedad_id) !== Number(sociedadId)) {
+    const soc = db.prepare('SELECT nombre FROM sociedades WHERE id = ?').get(prov.sociedad_id);
+    return {
+      error: `El proveedor ${prov.razon_social} pertenece a ${soc?.nombre || 'otra sociedad'}`
+           + ' y la orden es de otra sociedad. Elegí un proveedor del padrón de la sociedad de la orden.',
+    };
+  }
 
   const campania = body.campania ? Number(body.campania) : null;
   if (!campania) return { error: 'Campaña requerida' };

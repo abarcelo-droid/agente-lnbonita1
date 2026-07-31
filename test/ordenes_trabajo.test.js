@@ -23,7 +23,7 @@ beforeEach(() => {
   db.exec(`
     CREATE TABLE sociedades (id INTEGER PRIMARY KEY, nombre TEXT);
     CREATE TABLE pa_cuentas (id INTEGER PRIMARY KEY, codigo TEXT, nombre TEXT, sociedad_id INTEGER);
-    CREATE TABLE adm_proveedores (id INTEGER PRIMARY KEY, razon_social TEXT);
+    CREATE TABLE adm_proveedores (id INTEGER PRIMARY KEY, razon_social TEXT, sociedad_id INTEGER);
     CREATE TABLE pa_tareas (id INTEGER PRIMARY KEY, nombre TEXT);
     CREATE TABLE pa_lotes (id INTEGER PRIMARY KEY, nombre TEXT, hectareas REAL);
 
@@ -31,7 +31,9 @@ beforeEach(() => {
     INSERT INTO pa_cuentas (id, codigo, nombre, sociedad_id) VALUES
       (10,'5.1.03','Servicios de terceros', 1),
       (20,'5.1.03','Servicios de terceros', 2);
-    INSERT INTO adm_proveedores (id, razon_social) VALUES (7,'EL GRANADINO SRL');
+    INSERT INTO adm_proveedores (id, razon_social, sociedad_id) VALUES
+      (7,'EL GRANADINO SRL', 1),
+      (8,'PROVEEDOR DE SG', 2);
     INSERT INTO pa_tareas (id, nombre) VALUES (3,'ARMAR CAMAS');
     INSERT INTO pa_lotes (id, nombre, hectareas) VALUES (100,'Lote A',10), (200,'Lote B',30);
   `);
@@ -115,6 +117,28 @@ describe('tarea "Otra"', () => {
   });
 });
 
+// ── Sociedad del proveedor ─────────────────────────────────────────────────
+// adm_proveedores.sociedad_id existe desde la Fase 3 de multisociedad: cada
+// sociedad tiene su propio padrón.
+describe('proveedor_id vs sociedad de la orden', () => {
+  test('acepta un proveedor de la misma sociedad', () => {
+    const r = validarCabecera(db, cabOK({ proveedor_id: 7 }), SOC_PC);
+    assert.equal(r.error, undefined);
+    assert.equal(r.datos.proveedor_id, 7);
+  });
+
+  test('rechaza un proveedor de otra sociedad y lo nombra', () => {
+    const r = validarCabecera(db, cabOK({ proveedor_id: 8 }), SOC_PC);
+    assert.match(r.error, /PROVEEDOR DE SG/);
+    assert.match(r.error, /San Gerónimo/);
+  });
+
+  test('ese mismo proveedor sí sirve para una orden de su sociedad', () => {
+    const r = validarCabecera(db, cabOK({ proveedor_id: 8, cuenta_gasto_id: CTA_SG }), SOC_SG);
+    assert.equal(r.error, undefined);
+  });
+});
+
 // ── Sociedad de la cuenta de gasto ─────────────────────────────────────────
 describe('cuenta_gasto_id vs sociedad de la orden', () => {
   test('acepta una cuenta de la misma sociedad', () => {
@@ -130,7 +154,8 @@ describe('cuenta_gasto_id vs sociedad de la orden', () => {
   });
 
   test('el mismo código de cuenta en la otra sociedad sigue siendo válido para esa orden', () => {
-    const r = validarCabecera(db, cabOK({ cuenta_gasto_id: CTA_SG }), SOC_SG);
+    // proveedor 8 es el de SG: la orden tiene que ser coherente en todo.
+    const r = validarCabecera(db, cabOK({ cuenta_gasto_id: CTA_SG, proveedor_id: 8 }), SOC_SG);
     assert.equal(r.error, undefined);
   });
 
