@@ -38811,27 +38811,136 @@ function spHoras(h) {
   return d + ' d' + (r ? ' ' + r + ' h' : '');
 }
 
+// ── Filtros de la bandeja ─────────────────────────────────────────────────
+// Van al SERVIDOR y no se resuelven en el navegador. El listado tiene tope de 400
+// filas: filtrando de este lado, buscar un proveedor de hace cuatro meses daría
+// vacío —porque esa fila nunca llegó— y el comprador concluiría que el pago no
+// existe. Filtrando en la consulta, el tope recorta lo que sobra de lo ya filtrado.
+//
+// Los filtros son POR BANDEJA: cada solapa recuerda los suyos. Compartirlos haría
+// que volver a "Me toca a mí" muestre vacío por un filtro puesto en "Todas".
+SP.filtros = SP.filtros || {};
+
+function spFiltro(vista) {
+  if (!SP.filtros[vista]) SP.filtros[vista] = { q: '', estado: '', paso: '', solicitante_id: '' };
+  return SP.filtros[vista];
+}
+
+function spFiltroSet(vista, campo, valor) {
+  var f = spFiltro(vista);
+  f[campo] = valor;
+  // Estado y paso se pisan entre sí: "cancelada" y "está en confección" no pueden
+  // ser ciertas a la vez, y dejar las dos puestas devuelve vacío sin explicar por qué.
+  if (campo === 'estado' && valor) f.paso = '';
+  if (campo === 'paso' && valor) f.estado = '';
+  spListaCargar(vista);
+}
+
+function spFiltroLimpiar(vista) {
+  SP.filtros[vista] = { q: '', estado: '', paso: '', solicitante_id: '' };
+  spListaCargar(vista);
+}
+
+// El buscador dispara al soltar la tecla, con un respiro: sin esto, escribir
+// "sanchez" son siete consultas.
+var _spDebounce = null;
+function spFiltroTexto(vista, valor) {
+  clearTimeout(_spDebounce);
+  _spDebounce = setTimeout(function() { spFiltroSet(vista, 'q', valor); }, 350);
+}
+
+var SP_ESTADOS = [
+  ['en_curso', 'En curso'],
+  ['aprobada_final', 'Completadas'],
+  ['cancelada', 'Canceladas'],
+  ['rechazada', 'Rechazadas']
+];
+
+function spFiltrosRender(vista, r) {
+  var f = spFiltro(vista);
+  var opts = (r && r.opciones) || SP.opciones || {};
+  var hayFiltro = !!(f.q || f.estado || f.paso || f.solicitante_id);
+
+  var sel = function(id, campo, vacio, lista, valorActual) {
+    return '<select id="' + id + '" class="sp-inp" style="font-size:12px;min-width:150px"'
+      + ' onchange="spFiltroSet(\'' + vista + '\',\'' + campo + '\',this.value)">'
+      + '<option value="">' + spEsc(vacio) + '</option>'
+      + lista.map(function(o) {
+          return '<option value="' + spEsc(String(o[0])) + '"'
+            + (String(o[0]) === String(valorActual) ? ' selected' : '') + '>' + spEsc(o[1]) + '</option>';
+        }).join('')
+      + '</select>';
+  };
+
+  var html = '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px">'
+    + '<input id="sp-f-q-' + vista + '" class="sp-inp" style="font-size:12px;min-width:230px"'
+    + ' placeholder="Buscar nº, proveedor, concepto o cuenta…" value="' + spEsc(f.q) + '"'
+    + ' oninput="spFiltroTexto(\'' + vista + '\',this.value)">'
+    + sel('sp-f-est-' + vista, 'estado', 'Todos los estados', SP_ESTADOS, f.estado)
+    + sel('sp-f-paso-' + vista, 'paso', 'Cualquier paso',
+        (opts.pasos || []).map(function(p) { return [p.clave, p.nombre]; }), f.paso);
+
+  // En "Mis solicitudes" filtrar por solicitante no tiene sentido: son todas mías.
+  if (vista !== 'mias') {
+    html += sel('sp-f-sol-' + vista, 'solicitante_id', 'Cualquiera que pidió',
+      (opts.solicitantes || []).map(function(s) { return [s.id, s.nombre]; }), f.solicitante_id);
+  }
+  if (hayFiltro) {
+    html += '<button class="btn bo bs" style="font-size:11px" onclick="spFiltroLimpiar(\'' + vista + '\')">✕ limpiar</button>';
+  }
+
+  // Cuántas se están viendo y si quedaron afuera. El tope de 400 callado es una
+  // trampa: 400 se leen como "son todas".
+  var n = (SP.listas[vista] || []).length;
+  var total = r && typeof r.total === 'number' ? r.total : null;
+  html += '<span class="sp-chica" style="margin-left:auto">' + n + ' resultado(s)';
+  if (total !== null && total > (r.tope || 400)) {
+    html += ' — <strong>hay ' + total + ' en total, se muestran las ' + (r.tope || 400)
+      + ' más recientes.</strong> Afiná la búsqueda.';
+  }
+  html += '</span></div>';
+  return html;
+}
+
 function spListaCargar(vista) {
   var cont = document.getElementById('sp-lista-' + vista);
   if (!cont) return;
-  cont.innerHTML = '<div class="emp">Cargando…</div>';
-  spApi('/solicitudes?vista=' + encodeURIComponent(vista)).then(function(r) {
+  var f = spFiltro(vista);
+  var qs = '/solicitudes?vista=' + encodeURIComponent(vista);
+  ['q', 'estado', 'paso', 'solicitante_id'].forEach(function(k) {
+    if (f[k]) qs += '&' + k + '=' + encodeURIComponent(f[k]);
+  });
+  // Los filtros se dejan en pantalla mientras carga: si se los reemplaza por
+  // "Cargando…", el campo pierde el foco en medio de la escritura.
+  var previo = document.getElementById('sp-f-q-' + vista);
+  cont.innerHTML = previo ? cont.innerHTML : '<div class="emp">Cargando…</div>';
+
+  spApi(qs).then(function(r) {
     if (!r.ok) { cont.innerHTML = '<div class="emp" style="color:var(--err)">' + spEsc(r.error) + '</div>'; return; }
     SP.listas[vista] = r.data || [];
+    SP.opciones = r.opciones || SP.opciones;
+    SP.meta = SP.meta || {};
+    SP.meta[vista] = { total: r.total, tope: r.tope };
     var cnt = { pendiente: 'sp-cnt-pend', otros: 'sp-cnt-otros' }[vista];
-    if (cnt) {
+    // El contador de la solapa cuenta SIN filtros: si no, filtrar por proveedor
+    // bajaría el número de la pestaña y parecería que se resolvieron pagos.
+    if (cnt && !(f.q || f.estado || f.paso || f.solicitante_id)) {
       var n = SP.listas[vista].length;
       // Las dirigidas a otro no van en rojo: no son un reclamo hacia mí.
       document.getElementById(cnt).innerHTML = n
         ? '<span class="sp-bad ' + (vista === 'pendiente' ? 'sp-err' : 'sp-gris') + '" style="margin-left:4px">' + n + '</span>' : '';
     }
-    spListaRender(vista);
+    spListaRender(vista, r);
   });
 }
 
-function spListaRender(vista) {
+function spListaRender(vista, r) {
   var arr = SP.listas[vista] || [];
   var cont = document.getElementById('sp-lista-' + vista);
+  // La fila de filtros va SIEMPRE, incluso con la tabla vacía: si desapareciera al
+  // no haber resultados, no habría forma de deshacer el filtro que dejó vacío.
+  var filtros = spFiltrosRender(vista, r || { total: (SP.meta || {})[vista] && SP.meta[vista].total,
+                                              tope: (SP.meta || {})[vista] && SP.meta[vista].tope });
 
   // En "me toca a mí" se separan las que puedo resolver de las que estoy
   // habilitado pero frenado por la separación de funciones. Mostrarlas mezcladas
@@ -38853,18 +38962,24 @@ function spListaRender(vista) {
         + '<div style="margin-top:3px">' + spEsc(frenadas[0].bloqueo_sod) + '</div></div>'
         + spTablaHtml(frenadas, 'frenadas');
     }
-    cont.innerHTML = h;
+    cont.innerHTML = filtros + h;
     return;
   }
 
   if (!arr.length) {
-    cont.innerHTML = '<div class="emp" style="padding:26px;text-align:center">'
-      + (vista === 'pendiente' ? '✔ No tenés nada esperando tu decisión.'
+    var f = spFiltro(vista);
+    var conFiltro = !!(f.q || f.estado || f.paso || f.solicitante_id);
+    cont.innerHTML = filtros + '<div class="emp" style="padding:26px;text-align:center">'
+      // Vacío por un filtro NO es lo mismo que vacío porque no hay nada. Decir
+      // "Sin solicitudes" con un filtro puesto hace pensar que se perdieron.
+      + (conFiltro ? 'Ningún pago coincide con la búsqueda. '
+          + '<button class="btn bo bs" onclick="spFiltroLimpiar(\'' + vista + '\')">Limpiar filtros</button>'
+        : (vista === 'pendiente' ? '✔ No tenés nada esperando tu decisión.'
         : (vista === 'mias' ? 'Todavía no pediste ningún pago. <button class="btn bo bs" onclick="spNuevaAbrir()">+ Solicitar uno</button>'
-        : 'Sin solicitudes.')) + '</div>';
+        : 'Sin solicitudes.'))) + '</div>';
     return;
   }
-  cont.innerHTML = spTablaHtml(arr, vista);
+  cont.innerHTML = filtros + spTablaHtml(arr, vista);
 }
 
 function spTablaHtml(arr, vista) {

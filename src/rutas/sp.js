@@ -565,13 +565,39 @@ function dirigidaA(def, sol, puedenActuar) {
 router.get('/solicitudes', wrap((req, res) => {
   const soc = getSociedadId(req);
   const vista = ['mias', 'pendiente', 'otros', 'todas'].includes(req.query.vista) ? req.query.vista : 'mias';
+  // Los filtros van en SQL y NO en el navegador, justamente por el LIMIT 400:
+  // filtrando del lado del cliente, buscar un proveedor de hace cuatro meses
+  // devolvería vacío —porque esa fila nunca llegó— y el comprador concluiría que
+  // el pago no existe. Filtrando en la consulta, el límite recorta lo que sobra
+  // del resultado ya filtrado.
   const params = [soc];
-  let sql = `
+  let where = ' WHERE s.sociedad_id=? AND s.eliminado_en IS NULL';
+  if (vista === 'mias') { where += ' AND s.solicitante_id = ?'; params.push(req.user.id); }
+  if (req.query.estado) { where += ' AND s.estado_global = ?'; params.push(req.query.estado); }
+  if (req.query.paso)   { where += ' AND s.paso_actual_clave = ?'; params.push(req.query.paso); }
+  if (req.query.solicitante_id) {
+    where += ' AND s.solicitante_id = ?';
+    params.push(parseInt(req.query.solicitante_id, 10) || 0);
+  }
+  // Buscador libre: número, proveedor, concepto y cuenta corriente. Son los
+  // cuatro campos por los que se busca un pago en la vida real — y la cuenta
+  // corriente entra porque es con lo que se rastrea en el otro sistema.
+  const q = String(req.query.q || '').trim();
+  if (q) {
+    where += ` AND (s.numero LIKE ? OR s.proveedor_texto LIKE ? OR s.concepto LIKE ?
+                    OR s.cuenta_texto LIKE ?)`;
+    const like = `%${q}%`;
+    params.push(like, like, like, like);
+  }
+
+  // Cuántas hay ANTES del tope, para poder decir "400 de 1.230" en vez de mostrar
+  // 400 como si fueran todas.
+  const total = db.prepare(`SELECT COUNT(*) AS n FROM sp_solicitudes s${where}`).get(...params).n;
+
+  const sql = `
     SELECT s.*, (SELECT COUNT(*) FROM sp_eventos e WHERE e.solicitud_id = s.id) AS n_eventos
-    FROM sp_solicitudes s WHERE s.sociedad_id=? AND s.eliminado_en IS NULL`;
-  if (vista === 'mias') { sql += ' AND s.solicitante_id = ?'; params.push(req.user.id); }
-  if (req.query.estado) { sql += ' AND s.estado_global = ?'; params.push(req.query.estado); }
-  sql += ' ORDER BY CASE s.prioridad WHEN \'urgente\' THEN 0 ELSE 1 END, s.id DESC LIMIT 400';
+    FROM sp_solicitudes s${where}
+    ORDER BY CASE s.prioridad WHEN 'urgente' THEN 0 ELSE 1 END, s.id DESC LIMIT 400`;
   let filas = db.prepare(sql).all(...params);
 
   // Se calculan las acciones POR FILA: una bandeja que no dice qué hacer obliga a
@@ -615,7 +641,37 @@ router.get('/solicitudes', wrap((req, res) => {
     filas = filas.filter(s => (s.acciones.length > 0 || s.bloqueo_sod) && !s.dirigida_a_otro);
   }
   if (vista === 'otros') filas = filas.filter(s => s.acciones.length > 0 && s.dirigida_a_otro);
-  res.json({ ok: true, data: filas, vista });
+
+  // Las opciones de los filtros salen de la definición vigente del circuito y de
+  // los solicitantes que REALMENTE pidieron algo, no de una lista escrita a mano:
+  // si mañana se agrega un paso al circuito, aparece solo en el desplegable.
+  // defDe() lee el snapshot congelado de UNA solicitud; para las opciones hace
+  // falta la definición VIGENTE, que es la de la versión activa del circuito.
+  let pasos = [];
+  try {
+    const v = versionActiva();
+    if (v) {
+      pasos = (armarSnapshot(v.id).pasos || [])
+        .filter(p => p.tipo !== 'final_ok' && p.tipo !== 'final_rechazo')
+        .map(p => ({ clave: p.clave, nombre: p.nombre }));
+    }
+  } catch (e) {
+    console.error('[SP] No se pudieron armar las opciones de paso:', e.message);
+  }
+  const solicitantes = db.prepare(`
+    SELECT DISTINCT s.solicitante_id AS id, s.solicitante_nombre AS nombre
+      FROM sp_solicitudes s
+     WHERE s.sociedad_id=? AND s.eliminado_en IS NULL AND s.solicitante_nombre IS NOT NULL
+     ORDER BY s.solicitante_nombre COLLATE NOCASE
+  `).all(soc);
+
+  res.json({
+    ok: true, data: filas, vista,
+    // total es ANTES del tope de 400 y ANTES del filtrado por bandeja; sirve para
+    // avisar que hay más de lo que se está viendo.
+    total, tope: 400,
+    opciones: { pasos, solicitantes }
+  });
 }));
 
 router.get('/solicitudes/:id', wrap((req, res) => {
