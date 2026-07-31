@@ -11229,9 +11229,12 @@ function sgRepExport(){
 
   <div class="sp-pane on" id="sp-pane-pendiente"><div id="sp-lista-pendiente"></div></div>
   <div class="sp-pane"    id="sp-pane-otros">
-    <div class="sp-chica" style="margin-bottom:10px">Estas las podés resolver, pero el comprador le pidió
-      el OK a otra persona. Están acá para que el pedido no se trabe si esa persona no está —
-      <strong>si resolvés una, queda registrado que lo hiciste en su lugar</strong>.</div>
+    <div class="sp-chica" style="margin-bottom:10px">Estas las podés resolver, pero el paso le toca a otra
+      persona: o el comprador le pidió el OK a alguien puntual, o vos solo podés tocarlas por ser
+      administrador. Están acá para que el pedido no se trabe si esa persona no está —
+      <strong>si resolvés una, queda registrado</strong>.
+      <br>¿Aparecen acá pasos que deberían ser de alguien en particular? Asigná quién los hace en
+      <strong>Circuito y avisos</strong>.</div>
     <div id="sp-lista-otros"></div>
   </div>
   <div class="sp-pane"    id="sp-pane-mias"><div id="sp-lista-mias"></div></div>
@@ -39059,6 +39062,11 @@ function spTablaHtml(arr, vista) {
         + (s.autorizador_nombre && s.paso_actual_hito === 'autorizacion'
             ? '<div>OK pedido a: <strong>' + spEsc(s.autorizador_nombre) + '</strong>'
               + (s.dirigida_a_otro ? ' <span class="sp-bad sp-gris">no es tuya</span>' : '') + '</div>' : '')
+        // Este paso le toca a otro: se dice a quién, que es lo primero que uno se
+        // pregunta al ver algo en "dirigidas a otro".
+        + (s.solo_por_ser_admin
+            ? '<div>le toca a: <strong>' + spEsc((s.esperando_a || []).join(', ') || '—') + '</strong>'
+              + ' <span class="sp-bad sp-gris">no es tuya</span></div>' : '')
         + (vista === 'frenadas' && (s.esperando_a || []).length
             ? '<div>lo puede resolver: <strong>' + spEsc(s.esperando_a.join(', ')) + '</strong></div>'
             : '') + '</td>'
@@ -39668,10 +39676,12 @@ function spAccionAbrir(id, accion) {
   }
   // Resolver algo que el comprador le pidió a otro no está prohibido, pero tiene
   // que ser una decisión y no un descuido: se avisa antes, no después.
-  if (s.dirigida_a_otro && s.autorizador_nombre) {
+  if (s.dirigida_a_otro) {
+    var dequien = (s.autorizador_nombre && s.paso_actual_hito === 'autorizacion')
+      ? 'El comprador le pidió el OK a <strong>' + spEsc(s.autorizador_nombre) + '</strong>.'
+      : 'Este paso le toca a <strong>' + spEsc((s.esperando_a || []).join(', ') || 'otra persona') + '</strong>.';
     html += '<div style="background:rgba(59,130,246,.12);border-radius:8px;padding:8px 11px;font-size:12px;margin-bottom:10px">'
-      + '👥 El comprador le pidió el OK a <strong>' + spEsc(s.autorizador_nombre) + '</strong>. '
-      + 'Si lo resolvés vos, queda registrado en el historial que lo hiciste en su lugar.</div>';
+      + '👥 ' + dequien + ' Podés resolverlo igual —para eso está— y queda registrado en el historial.</div>';
   }
   // Si es un admin salteando una separación, se le dice antes de confirmar.
   if (SP.det && SP.det.solicitud.id === id && SP.det.sod_omitida) {
