@@ -38842,6 +38842,21 @@ function spInit() {
     if (!id) return;
     SP.deepLinkHecho = true;
     var accion = q.get('accion');
+
+    // SE LIMPIA LA URL ANTES DE HACER NADA. El link del mail se consume UNA vez:
+    // si los parámetros quedan pegados, cada vez que el usuario vuelve a entrar al
+    // panel —o recarga, o el navegador le restaura la pestaña— se le vuelve a
+    // abrir esa solicitud y a intentar la misma acción, que a esa altura ya se
+    // resolvió. Resultado: un modal que aparece solo y un error, todos los días.
+    // Va antes del fetch para que valga también si la solicitud no existe.
+    try {
+      var u = new URL(window.location.href);
+      u.searchParams.delete('sp');
+      u.searchParams.delete('accion');
+      var qs = u.searchParams.toString();
+      window.history.replaceState({}, '', u.pathname + (qs ? '?' + qs : '') + u.hash);
+    } catch (_) { /* navegador sin history API: el link igual funciona */ }
+
     spApi('/solicitudes/' + id).then(function(r) {
       if (!r.ok) { toast('No se encontró la solicitud del link', 'er'); return; }
       SP.det = r.data;
@@ -38852,7 +38867,10 @@ function spInit() {
       if (accion && (r.data.acciones || []).some(function(a) { return a.accion === accion; })) {
         spAccionAbrir(id, accion);
       } else if (accion) {
-        toast('Esa acción ya no está disponible: mirá el estado actual', 'er');
+        // No es un error: que otro haya resuelto antes es el funcionamiento normal
+        // del circuito. Se avisa en tono neutro y se deja el detalle abierto, que
+        // es donde el usuario ve qué pasó.
+        toast('Eso ya se resolvió. Mirá cómo quedó en el historial.', 'ok');
       }
     });
   } catch (_) { /* URL rara: se ignora y queda la bandeja normal */ }
