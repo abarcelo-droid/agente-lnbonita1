@@ -6,6 +6,7 @@ import multer  from "multer";
 import path    from "path";
 import fs      from "fs";
 import { fileURLToPath } from "url";
+import { MODELO_OCR } from "../config/ia.js";
 import db from "../servicios/db.js";
 import { enviarMail } from "../servicios/mail.js";
 import nodemailer from "nodemailer";
@@ -454,7 +455,7 @@ try {
 // ── Configuración OCR vía Claude API ───────────────────────────────────────
 const OCR_ENABLED = String(process.env.IFCO_OCR_ENABLED || '').toLowerCase() === 'true';
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || '';
-const OCR_MODEL = 'claude-haiku-4-5-20251001';
+const OCR_MODEL = MODELO_OCR;
 let _anthropicClient = null;
 async function _getAnthropic() {
   if (!OCR_ENABLED || !ANTHROPIC_API_KEY) return null;

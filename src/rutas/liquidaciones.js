@@ -8,6 +8,7 @@ import express from 'express';
 import path    from 'path';
 import fs      from 'fs';
 import { fileURLToPath } from 'url';
+import { MODELO_RAPIDO } from '../config/ia.js';
 import db from '../servicios/db.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -211,7 +212,7 @@ router.post('/parse', async function(req, res) {
     ].join('\n');
 
     const message = await client.messages.create({
-      model: 'claude-haiku-4-5-20251001',
+      model: MODELO_RAPIDO,
       max_tokens: 4096,
       messages: [{ role: 'user', content: prompt }]
     });
