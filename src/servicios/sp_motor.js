@@ -132,6 +132,25 @@ export function resolverAutorizados(def, pasoClave, solicitud) {
     }
     for (const f of filas) (a.watcher ? watchers : resolutores).set(f.id, f);
   }
+
+  // El borrador es de quien lo escribió. Sea cual sea la configuración —y la
+  // sembrada habilita rol=admin en TODOS los pasos— el paso inicial lo resuelve
+  // solo su autor: ver el borrador ajeno en la bandeja propia, y peor, poder
+  // enviarlo a autorizar, no es una opción de configuración, es un error.
+  //
+  // Va en código y no en la config a propósito: la definición se congela por
+  // solicitud, así que arreglarlo solo en la config dejaría a las solicitudes ya
+  // creadas con el comportamiento viejo para siempre.
+  const paso = (def.pasos || []).find(p => p.clave === pasoClave);
+  if (paso && paso.tipo === 'inicio' && solicitud) {
+    const autor = resolutores.get(solicitud.solicitante_id)
+      || db.prepare('SELECT id, nombre, email, rol FROM usuarios WHERE id=? AND activo=1')
+           .get(solicitud.solicitante_id);
+    // Los watchers se conservan: alguien puede querer enterarse de que se creó
+    // una solicitud sin por eso poder empujarla.
+    return { resolutores: autor ? [autor] : [], watchers: [...watchers.values()] };
+  }
+
   return { resolutores: [...resolutores.values()], watchers: [...watchers.values()] };
 }
 
@@ -201,7 +220,13 @@ export function accionesDisponibles(def, solicitud, usuario) {
   if (!paso) return [];
   const { resolutores } = resolverAutorizados(def, paso.clave, solicitud);
   const esAdmin = usuario.rol === 'admin';
-  const habilitado = esAdmin || resolutores.some(u => u.id === usuario.id);
+  // EL PASO INICIAL ES LA EXCEPCIÓN A "LOS ADMINISTRADORES PUEDEN SIEMPRE".
+  // Un borrador todavía no entró al circuito: es el trabajo sin terminar de quien
+  // lo escribió, no un pago esperando una decisión. La regla de admin existe para
+  // que un pago no quede trabado esperando a alguien que no está; un borrador no
+  // está trabado, está sin terminar, y empujarlo sería mandar a autorizar algo que
+  // su autor todavía no dio por listo.
+  const habilitado = (esAdmin && paso.tipo !== 'inicio') || resolutores.some(u => u.id === usuario.id);
   if (!habilitado) return [];
   const sod = bloqueadoPorSoD(def, solicitud, paso.clave, usuario.id);
   if (sod) return [];
