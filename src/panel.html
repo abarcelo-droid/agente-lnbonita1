@@ -40575,14 +40575,25 @@ function trRender() {
       + '<div style="font-size:11px;color:var(--mut);margin-bottom:14px">'
       + 'Entrás al sistema de Transporte tal cual, con el login de Google de siempre. '
       + 'El panel no lee estos datos.</div>'
-      + '<div style="display:flex;gap:8px;flex-wrap:wrap">'
-      // Verlo acá adentro es lo cómodo; la pestaña nueva es lo que SIEMPRE funciona.
-      // Las dos quedan a mano: si el dashboard no se deja embeber, el usuario no
-      // se queda mirando un recuadro en blanco sin salida.
-      + '<button class="btn bb" onclick="trVerAca()">👁 Ver acá dentro</button>'
-      + '<a class="btn bo" href="' + trEsc(e.url) + '" target="_blank" rel="noopener noreferrer"'
-      + ' style="display:inline-block;text-decoration:none">↗ Abrir en pestaña nueva</a>'
+      + '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">'
+      // La pestaña es la acción PRINCIPAL, y es un cambio a conciencia: verificado
+      // en la práctica, el recuadro no puede tener la sesión del dashboard hasta
+      // que ellos hagan un cambio de su lado. Dejar "ver acá dentro" como botón
+      // principal es mandar al usuario contra la misma pared todos los días.
+      //
+      // target con NOMBRE FIJO y no _blank: así reusa la misma pestaña del
+      // dashboard si ya está abierta, en vez de acumular una por cada clic.
+      + '<a class="btn bb" href="' + trEsc(e.url) + '" target="tr_dashboard" rel="noopener noreferrer"'
+      + ' style="display:inline-block;text-decoration:none">↗ Abrir el dashboard</a>'
+      + '<button class="btn bo" onclick="trVerAca()">👁 Probar acá dentro</button>'
       + '</div>'
+      + '<div style="font-size:11px;color:var(--mut);margin-top:10px">'
+      + 'Se abre en su pestaña —si ya la tenés abierta, la trae al frente— con tu sesión de Google. '
+      + '<strong>Verlo acá adentro todavía no funciona</strong>: el navegador no le pasa tu sesión al '
+      + 'recuadro, y eso se resuelve con un cambio del lado del dashboard. '
+      + '<a href="#" onclick="trPorQueSuelto();return false" style="color:var(--burg);font-weight:600">Ver qué hay que pedir</a>.'
+      + '</div>'
+      + '<div id="tr-diag" style="margin-top:10px"></div>'
       + '<div style="font-size:11px;color:var(--sub);margin-top:10px">' + trEsc(dominio) + '</div>';
   } else {
     html += '<div style="font-size:13px;margin-bottom:6px">Todavía no está cargada la dirección del dashboard.</div>'
@@ -40785,6 +40796,14 @@ function trTextoLogin() {
 function trPorQue() {
   var d = document.getElementById('tr-diag');
   if (d) d.innerHTML = trTextoLogin();
+}
+
+// Igual, pero desde la pantalla principal: se puede plegar para no dejar el
+// bloque de texto ocupando la pantalla cuando ya se leyó.
+function trPorQueSuelto() {
+  var d = document.getElementById('tr-diag');
+  if (!d) return;
+  d.innerHTML = d.innerHTML ? '' : trTextoLogin();
 }
 
 function trCopiarPedido() {
