@@ -18300,9 +18300,34 @@ function paFecha(s){if(!s)return'—';var p=s.slice(0,10).split('-');return p[2]
 function paBadgeEstado(e){var m={borrador:['pa-gris-bg','Borrador'],emitida:['pa-azul-bg','Emitida'],en_ejecucion:['pa-amarillo-bg','En ejecución'],ejecutada:['pa-verde-bg','Ejecutada'],parcial:['pa-amarillo-bg','Parcial'],anulada:['pa-rojo-bg','Anulada']};var d=m[e]||['pa-gris-bg',e];return'<span class="pa-badge '+d[0]+'">'+d[1]+'</span>';}
 function paBadgeTipo(t){var m={fertilizante:['pa-verde-bg','Fertilizante'],herbicida:['pa-amarillo-bg','Herbicida'],fungicida:['pa-azul-bg','Fungicida'],insecticida:['pa-rojo-bg','Insecticida'],abono:['pa-verde-bg','Abono'],agroquimico:['pa-azul-bg','Agroquímico'],semilla:['pa-amarillo-bg','Semilla'],otro:['pa-gris-bg','Otro']};var d=m[t]||['pa-gris-bg',t];return'<span class="pa-badge '+d[0]+'">'+d[1]+'</span>';}
 
+// Campaña anual vigente según la fecha del sistema. La campaña arranca el 1 de
+// julio, así que de julio a diciembre es AAAA/AA+1 y de enero a junio AAAA-1/AA.
+// Devuelve el nombre con el formato exacto de pa_campañas.nombre ("2026/27").
+function campaniaVigente(hoy){
+  var d    = hoy || new Date();
+  var mes  = d.getMonth()+1;                       // 1..12
+  var base = (mes>=7) ? d.getFullYear() : d.getFullYear()-1;
+  return base+'/'+String(base+1).slice(-2);
+}
+
+// Id de la campaña anual que debe quedar seleccionada por defecto: la vigente
+// por fecha si existe en la lista, y si no la más reciente que exista.
+function campaniaAnualPorDefecto(anuales){
+  if(!anuales||!anuales.length) return '';
+  var vig=campaniaVigente();
+  var m=anuales.find(function(c){return c.nombre===vig;});
+  if(m) return String(m.id);
+  var reciente=anuales.slice().sort(function(a,b){
+    return String(b.fecha_inicio||b.nombre).localeCompare(String(a.fecha_inicio||a.nombre));
+  })[0];
+  return reciente?String(reciente.id):'';
+}
+
 // Pobla los selects duales (anual + estacional) de Calendario y Costos a partir
-// de PA.campañas. Anual por defecto = anual activa; estacional por defecto = la
-// estacional activa, con opción "(sin filtrar)" arriba.
+// de PA.campañas. Estacional por defecto = la estacional activa, con opción
+// "(sin filtrar)" arriba. Para la anual el default depende del módulo:
+//   - Calendario → campaña vigente por fecha (ver campaniaAnualPorDefecto).
+//   - Costos     → campaña marcada como activa (comportamiento histórico).
 function paPoblarSelectsCampaña(){
   var camps=PA.campañas||[];
   var anuales=camps.filter(function(c){return (c.tipo||'anual')==='anual';});
@@ -18311,17 +18336,33 @@ function paPoblarSelectsCampaña(){
   var estacAct=estac.find(function(c){return c.activa;});
   var anualOpts=anuales.map(function(c){return'<option value="'+c.id+'">'+c.nombre+'</option>';}).join('');
   var estacOpts=estac.map(function(c){return'<option value="'+c.id+'">'+c.nombre+'</option>';}).join('');
-  ['cal-campaña-anual-sel','pa-cos-campaña-anual'].forEach(function(id){
-    var el=document.getElementById(id);if(!el)return;
-    el.innerHTML='<option value="">Campaña anual</option>'+anualOpts;
-    if(anualAct){el.value=String(anualAct.id);}
-    else{var o=Array.from(el.options).find(function(x){return x.text==='2026/27';});if(o)el.value=o.value;}
-  });
+  // Calendario (vista Tabla y vista Mapa leen este mismo select): arranca en la
+  // campaña vigente calculada por fecha, no en el flag `activa` — que queda
+  // desactualizado si nadie lo cambia a mano al pasar de año.
+  var calEl=document.getElementById('cal-campaña-anual-sel');
+  if(calEl){
+    calEl.innerHTML='<option value="">Campaña anual</option>'+anualOpts;
+    calEl.value=campaniaAnualPorDefecto(anuales);
+  }
+  // Costos: sin cambios respecto del comportamiento previo.
+  var cosEl=document.getElementById('pa-cos-campaña-anual');
+  if(cosEl){
+    cosEl.innerHTML='<option value="">Campaña anual</option>'+anualOpts;
+    if(anualAct){cosEl.value=String(anualAct.id);}
+    else{var o=Array.from(cosEl.options).find(function(x){return x.text==='2026/27';});if(o)cosEl.value=o.value;}
+  }
   ['cal-campaña-estacional-sel','pa-cos-campaña-estacional'].forEach(function(id){
     var el=document.getElementById(id);if(!el)return;
     el.innerHTML='<option value="">(sin filtrar)</option>'+estacOpts;
     if(estacAct){el.value=String(estacAct.id);}
   });
+  // Las campañas llegan async: si el Calendario ya está a la vista, se renderizó
+  // con el select todavía vacío. Re-renderizamos para que tome el default.
+  var secCal=document.getElementById('sec-pa-calendario');
+  if(secCal&&secCal.classList.contains('on')){
+    if(typeof paLoadCalendario==='function')   paLoadCalendario();
+    if(typeof paCalRefrescarMapa==='function') paCalRefrescarMapa();
+  }
 }
 
 // Puebla los 2 selects de campaña de un modal (orden / compra). Default: las
