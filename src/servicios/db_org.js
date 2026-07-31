@@ -165,6 +165,10 @@ db.exec(`
 // FASE 3.A v2 — agregar área específica del módulo + flag de oculto (idempotente)
 try { db.exec("ALTER TABLE modulos_config ADD COLUMN area_id INTEGER REFERENCES areas(id)"); } catch(_) {}
 try { db.exec("ALTER TABLE modulos_config ADD COLUMN oculto INTEGER NOT NULL DEFAULT 0"); } catch(_) {}
+// Dirección del sistema externo, para los módulos tipo='externo'. Vive en la base y
+// no en el código: la URL de un dashboard de terceros cambia (dominio nuevo, ruta
+// nueva) y no puede depender de un deploy. La edita un admin desde el panel.
+try { db.exec("ALTER TABLE modulos_config ADD COLUMN url TEXT"); } catch(_) {}
 try { db.exec("CREATE INDEX IF NOT EXISTS idx_modulos_area ON modulos_config(area_id)"); } catch(_) {}
 
 // Seed inicial de los 65 módulos detectados del sidebar.
@@ -295,3 +299,4 @@ import "./ensure_modulo_personal.js";
 import "./ensure_modulo_actividad.js";
 import "./ensure_modulo_pli.js";
 import "./ensure_modulo_sp.js";
+import "./ensure_modulo_transporte.js";

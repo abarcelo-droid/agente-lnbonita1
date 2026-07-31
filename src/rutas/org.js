@@ -505,6 +505,61 @@ router.patch('/modulos/:modulo', requireAdmin, (req, res) => {
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
+// ─── ENLACES A SISTEMAS EXTERNOS (modulos_config.url) ──────────────────
+// Un módulo tipo 'externo' no lo dibuja el panel: lleva al sistema donde viven
+// esos datos. Hoy el único es el dashboard de Barceló Transporte.
+//
+// La URL vive en la base y no en el código: la dirección de un sistema de terceros
+// cambia y no puede depender de un deploy.
+
+// Solo http/https, y NUNCA javascript: ni data:. Ese link se pinta en el panel y
+// se abre con un clic: un javascript: ahí es un XSS servido por nosotros mismos.
+function urlExternaValida(u) {
+  const s = String(u || '').trim();
+  if (!s) return null;
+  let parsed;
+  try { parsed = new URL(s); } catch (_) { return false; }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false;
+  if (s.length > 500) return false;
+  return parsed.toString();
+}
+
+// Lectura: cualquiera con sesión. Devuelve solo lo necesario para pintar el acceso.
+router.get('/enlaces', (req, res) => {
+  try {
+    if (!req.user) return res.status(401).json({ ok: false, error: 'No autenticado' });
+    const rows = db().prepare(`
+      SELECT m.modulo, m.label, m.grupo, m.url, m.oculto, s.nombre AS sociedad
+        FROM modulos_config m
+        LEFT JOIN sociedades s ON s.id = m.sociedad_id
+       WHERE m.tipo = 'externo' AND m.oculto = 0
+       ORDER BY m.orden, m.label
+    `).all();
+    res.json({ ok: true, enlaces: rows, puede_editar: req.user.rol === 'admin' });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+router.put('/enlaces/:modulo', requireAdmin, (req, res) => {
+  try {
+    const cur = db().prepare("SELECT * FROM modulos_config WHERE modulo = ? AND tipo = 'externo'")
+      .get(req.params.modulo);
+    if (!cur) return res.status(404).json({ ok: false, error: 'No es un módulo externo' });
+
+    const cruda = req.body?.url;
+    // Vacío = borrar el enlace. Es la forma de sacar un acceso que dejó de servir.
+    if (cruda === '' || cruda === null) {
+      db().prepare("UPDATE modulos_config SET url = NULL WHERE modulo = ?").run(cur.modulo);
+      return res.json({ ok: true, url: null });
+    }
+    const url = urlExternaValida(cruda);
+    if (url === false) {
+      return res.status(400).json({ ok: false, error: 'La dirección tiene que empezar con http:// o https://' });
+    }
+    db().prepare("UPDATE modulos_config SET url = ? WHERE modulo = ?").run(url, cur.modulo);
+    res.json({ ok: true, url });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
 // POST /modulos/bulk — actualización masiva (filtros por grupo o prefijo)
 // Body: { filter: { grupo?, prefix? }, update: { sociedad_id?, area_id?, tipo?, oculto? } }
 router.post('/modulos/bulk', requireAdmin, (req, res) => {

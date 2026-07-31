@@ -212,6 +212,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     <div class="ni" data-sec="pa-combustible"><span class="dot da"></span>⛽ Combustible</div>
     <div class="ni" data-sec="pa-panol"><span class="dot dd"></span>🔧 Pañol</div>
     <div class="ni" data-sec="pli-planificacion"><span class="dot dc"></span>📦 Planificación Insumos</div>
+    <div class="ni" data-sec="tr-dashboard"><span class="dot da"></span>🚚 Barceló Transporte</div>
   </div>
 
   <div class="ni-grp" data-grp="pa-admin">Administración<span class="ni-caret">▾</span></div>
@@ -11160,6 +11161,23 @@ function sgRepExport(){
 </div>
 
 <!-- ══════════════════════════════════════════════════════════════════════
+     TR · BARCELÓ TRANSPORTE — acceso al dashboard
+     El dashboard es una app propia de Transporte, con login de Google, y anda
+     bien. Esto NO la toca: es un acceso, no una integración. Se eligió así a
+     propósito, para no arriesgar nada de un sistema que ya funciona.
+     La dirección vive en modulos_config.url y la carga un admin desde acá.
+     ══════════════════════════════════════════════════════════════════════ -->
+<div class="sec" id="sec-tr-dashboard">
+  <div class="ph">
+    <div>
+      <div class="ph-t">🚚 Barceló Transporte — Dashboard</div>
+      <div class="ph-s">El sistema de Transporte, a un clic del panel</div>
+    </div>
+  </div>
+  <div id="tr-cont"></div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════════════
      SP · SEGUIMIENTO DE ÓRDENES DE PAGO
      Circuito de solicitud y autorización. Prefijo sp / SP.
      ══════════════════════════════════════════════════════════════════════ -->
@@ -17186,6 +17204,7 @@ var USR_SECCIONES = [
     { id: 'pa-scout', label: 'Scout — Campo' },
     { id: 'pli-planificacion', label: '📦 Planificación Insumos' },
     { id: 'sp-pagos', label: '💸 Órdenes de Pago — Seguimiento' },
+    { id: 'tr-dashboard', label: '🚚 Barceló Transporte — Dashboard' },
     { id: 'pa-combustible', label: '⛽ Combustible' },
     { id: 'personal-padron', label: '👥 Personal — Padrón' },
     { id: 'personal-asistencia', label: '📝 Personal — Asistencia Diaria' },
@@ -40117,6 +40136,107 @@ function spTiemposRender() {
   document.getElementById('sp-tiempos').innerHTML = html;
 }
 
+// ══════════════════════════════════════════════════════════════════════════
+// TR · BARCELÓ TRANSPORTE — acceso al dashboard
+// ══════════════════════════════════════════════════════════════════════════
+// El dashboard de Transporte es una app propia de ellos y funciona bien. Esto NO
+// la toca: es un acceso, no una integración. Decisión explícita del usuario —
+// "no quiero romper nada de ahí" — y es la correcta para empezar: cero cambios
+// del otro lado, y el día que se quieran traer los números, este acceso sigue
+// sirviendo igual.
+//
+// El link se abre en una pestaña nueva con rel="noopener": sin eso, la página que
+// se abre puede reescribir la pestaña del panel desde window.opener.
+
+var TR = { enlace: null, puedeEditar: false };
+
+function trEsc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, function(c) {
+    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+  });
+}
+
+function trInit() {
+  var cont = document.getElementById('tr-cont');
+  if (!cont) return;
+  cont.innerHTML = '<div class="emp">Cargando…</div>';
+  fetch('/api/org/enlaces', { credentials: 'include' })
+    .then(function(r) { return r.json(); })
+    .catch(function() { return { ok: false, error: 'Error de red' }; })
+    .then(function(r) {
+      if (!r.ok) { cont.innerHTML = '<div class="emp" style="color:var(--err)">' + trEsc(r.error) + '</div>'; return; }
+      TR.enlace = (r.enlaces || []).filter(function(e) { return e.modulo === 'tr-dashboard'; })[0] || null;
+      TR.puedeEditar = !!r.puede_editar;
+      trRender();
+    });
+}
+
+function trRender() {
+  var cont = document.getElementById('tr-cont');
+  if (!cont) return;
+  var e = TR.enlace;
+
+  if (!e) {
+    cont.innerHTML = '<div class="emp" style="padding:20px">El acceso no está registrado. '
+      + 'Se crea solo al reiniciar el sistema; si sigue sin aparecer, avisá.</div>';
+    return;
+  }
+
+  var html = '<div style="border:1px solid var(--bor);border-radius:10px;padding:18px;background:var(--sur);max-width:640px">';
+
+  if (e.url) {
+    // El dominio a la vista: antes de mandar a alguien afuera, que vea adónde va.
+    var dominio = '';
+    try { dominio = new URL(e.url).host; } catch (_) { dominio = e.url; }
+    html += '<div style="font-size:13px;margin-bottom:4px">Dashboard operativo de <strong>Barceló Transporte</strong></div>'
+      + '<div style="font-size:11px;color:var(--mut);margin-bottom:14px">'
+      + 'Se abre en una pestaña nueva, con el login de Google de siempre. '
+      + 'El panel no lee estos datos: entrás al sistema de Transporte tal cual.</div>'
+      + '<a class="btn bb" href="' + trEsc(e.url) + '" target="_blank" rel="noopener noreferrer"'
+      + ' style="display:inline-block;text-decoration:none">🚚 Abrir el dashboard</a>'
+      + '<div style="font-size:11px;color:var(--sub);margin-top:10px">' + trEsc(dominio) + '</div>';
+  } else {
+    html += '<div style="font-size:13px;margin-bottom:6px">Todavía no está cargada la dirección del dashboard.</div>'
+      + '<div style="font-size:11px;color:var(--mut)">'
+      + (TR.puedeEditar ? 'Pegala acá abajo y queda guardada para todos.'
+                        : 'Pedile a un administrador que la cargue.') + '</div>';
+  }
+
+  if (TR.puedeEditar) {
+    html += '<div style="border-top:1px solid var(--bor);margin-top:16px;padding-top:14px">'
+      + '<div style="font-size:11px;font-weight:700;margin-bottom:6px">Dirección del dashboard</div>'
+      + '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">'
+      + '<input id="tr-url" class="pli-inp" style="flex:1;min-width:260px" placeholder="https://…"'
+      + ' value="' + trEsc(e.url || '') + '">'
+      + '<button class="btn bb" onclick="trGuardar()">Guardar</button>'
+      + (e.url ? '<button class="btn bd" onclick="trGuardar(true)">Quitar</button>' : '')
+      + '</div>'
+      + '<div style="font-size:11px;color:var(--mut);margin-top:6px">'
+      + 'Tiene que empezar con http:// o https://. Cambiarla no requiere volver a publicar el sistema.</div>'
+      + '</div>';
+  }
+
+  cont.innerHTML = html + '</div>';
+}
+
+function trGuardar(borrar) {
+  var inp = document.getElementById('tr-url');
+  var url = borrar ? '' : (inp ? inp.value.trim() : '');
+  if (borrar && !confirm('¿Quitar el acceso al dashboard?')) return;
+  fetch('/api/org/enlaces/tr-dashboard', {
+    method: 'PUT', credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url: url })
+  })
+    .then(function(r) { return r.json(); })
+    .catch(function() { return { ok: false, error: 'Error de red' }; })
+    .then(function(r) {
+      if (!r.ok) { toast(r.error || 'No se pudo guardar', 'er'); return; }
+      toast(borrar ? '✓ Acceso quitado' : '✓ Dirección guardada', 'ok');
+      trInit();
+    });
+}
+
 // ── Routing ───────────────────────────────────────────────────────────────
 // Se envuelve loadSec (que a esta altura ya fue redefinido por el bloque de
 // arriba) en vez de tocarlo, para no arriesgar los módulos existentes.
@@ -40125,6 +40245,7 @@ function spTiemposRender() {
   loadSec = function(s) {
     if (s === 'pli-planificacion') { pliInit(); return; }
     if (s === 'sp-pagos') { spInit(); return; }
+    if (s === 'tr-dashboard') { trInit(); return; }
     anterior(s);
   };
 })();
