@@ -11219,7 +11219,10 @@ function sgRepExport(){
     <div class="sp-tab"    data-sp="otros"     onclick="spTab('otros')">👥 Dirigidas a otro <span id="sp-cnt-otros"></span></div>
     <div class="sp-tab"    data-sp="mias"      onclick="spTab('mias')">🧾 Mis solicitudes</div>
     <div class="sp-tab"    data-sp="todas"     onclick="spTab('todas')">📊 Todas</div>
-    <div class="sp-tab"    data-sp="tiempos"   onclick="spTab('tiempos')">⏱️ Tiempos</div>
+    <!-- Solo administradores: es un tablero de desempeño y dice quién demora.
+         Arranca oculta y la muestra spInit() si el usuario es admin; al revés
+         —visible y esconderla después— parpadea a la vista de todos. -->
+    <div class="sp-tab"    data-sp="tiempos"   onclick="spTab('tiempos')" style="display:none">⏱️ Tiempos</div>
     <div class="sp-tab"    data-sp="ayuda"     onclick="spTab('ayuda')">📖 Cómo se usa</div>
     <div class="sp-tab"    data-sp="circuito"  onclick="spTab('circuito')">⚙️ Circuito y avisos</div>
   </div>
@@ -38776,6 +38779,9 @@ function spCopiarFallback(t, ok) {
 }
 
 function spInit() {
+  // La solapa de Tiempos viene oculta del HTML y solo se muestra si corresponde.
+  var tabT = document.querySelector('#sec-sp-pagos .sp-tab[data-sp="tiempos"]');
+  if (tabT) tabT.style.display = spEsAdmin() ? '' : 'none';
   spTab(SP.vista || 'pendiente');
   // El contador de "Dirigidas a otro" se precarga: si solo se llenara al entrar a
   // la solapa, nadie entraría nunca y ahí es justo donde queda un pedido trabado
@@ -38807,7 +38813,14 @@ function spInit() {
   } catch (_) { /* URL rara: se ignora y queda la bandeja normal */ }
 }
 
+function spEsAdmin() {
+  return !!(window.LNB_USER && window.LNB_USER.rol === 'admin');
+}
+
 function spTab(t) {
+  // Aunque la solapa esté oculta se puede llegar acá por un estado guardado o
+  // por consola: se manda a la bandeja en vez de intentar cargar y comer un 403.
+  if (t === 'tiempos' && !spEsAdmin()) t = 'pendiente';
   SP.vista = t;
   document.querySelectorAll('#sec-sp-pagos .sp-tab').forEach(function(el) {
     el.classList.toggle('on', el.getAttribute('data-sp') === t);
@@ -40072,8 +40085,12 @@ function spAyudaHtml(d) {
     + '<li>Todo queda registrado: quién hizo qué, cuándo y con qué comentario. El historial está en cada solicitud.</li>'
     + '<li>Los administradores pueden resolver cualquier paso, incluso los propios. Cuando lo hacen, queda marcado '
       + 'en el historial.</li>'
-    + '<li>Si una solicitud lleva mucho tiempo frenada, se ve en la solapa <strong>Tiempos</strong>, que muestra '
-      + 'dónde se están juntando las demoras.</li>'
+    // La solapa Tiempos es solo para administradores: mandar a un comprador a una
+    // pantalla que no puede ver es peor que no mencionarla.
+    + (spEsAdmin()
+        ? '<li>Si una solicitud lleva mucho tiempo frenada, se ve en la solapa <strong>Tiempos</strong>, que muestra '
+          + 'dónde se están juntando las demoras.</li>'
+        : '')
     + (d.incompatibilidades && d.incompatibilidades.length
         ? '<li>Una misma persona no puede hacer estos pares de pasos sobre la misma solicitud: '
           + d.incompatibilidades.map(function(i) { return spEsc(i.a) + ' y ' + spEsc(i.b); }).join('; ') + '.</li>'

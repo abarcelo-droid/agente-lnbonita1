@@ -1093,7 +1093,12 @@ function tiemposDe(sol, eventos) {
 }
 
 // Tablero de tiempos: es lo que responde "dónde tenemos las demoras".
+// SOLO ADMINISTRADORES. Es un tablero de desempeño: dice cuánto tarda cada paso y,
+// por lo tanto, quién demora. Esconder la solapa en el panel no alcanza — el
+// endpoint responde igual a cualquiera con sesión, y la URL está a la vista en el
+// código que el navegador se descarga.
 router.get('/metricas', wrap((req, res) => {
+  if (!esAdmin(req)) throw Object.assign(new Error('Solo administradores'), { status: 403 });
   const soc = getSociedadId(req);
   const sols = db.prepare(`
     SELECT * FROM sp_solicitudes WHERE sociedad_id=? AND eliminado_en IS NULL
