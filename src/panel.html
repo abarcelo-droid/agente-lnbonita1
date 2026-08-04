@@ -38675,7 +38675,11 @@ function pliSobranteDetalle(l) {
 function pliCmpRenderHechas(cont) {
   var lineas = PLI.cmpCalculo.lineas || [];
   var html = '<div class="ab-table-wrap" style="margin-bottom:14px"><table class="pa-tbl" style="font-size:12px"><thead><tr>'
-    + '<th>Insumo</th><th style="text-align:right">Requerido total</th>'
+    // "Necesidad" y no "Requerido": es lo que el plan CONSUME, y no cambia
+    // porque haya stock o compras. El requerido viejo salía del congelado neto y
+    // daba 0 en cuanto el stock tapaba la necesidad.
+    + '<th>Insumo</th>'
+    + '<th style="text-align:right">Necesidad del plan<div class="pli-cel-chica">consumo, incluye merma</div></th>'
     // El stock a la vista: si no, cargar existencias hace bajar el pendiente y no
     // se entiende por qué.
     + '<th style="text-align:right">Stock<div class="pli-cel-chica">en depósito</div></th>'
@@ -38685,8 +38689,11 @@ function pliCmpRenderHechas(cont) {
   lineas.forEach(function(l) {
     // El backend manda los tres números ya normalizados, esté el plan confirmado o
     // en borrador. El fallback cubre una respuesta vieja en caché del navegador.
-    var req = (l.requerido_bultos !== undefined) ? l.requerido_bultos
-            : (l.ya_comprado_bultos || 0) + (l.bultos_a_comprar || 0);
+    // La necesidad es la base de todo. El fallback cubre una respuesta vieja en
+    // caché del navegador.
+    var req = (l.necesidad_bultos !== undefined) ? l.necesidad_bultos
+            : (l.requerido_bultos !== undefined ? l.requerido_bultos
+            : (l.ya_comprado_bultos || 0) + (l.bultos_a_comprar || 0));
     var comp = l.ya_comprado_bultos || 0;
     var pend = (l.pendiente_bultos !== undefined) ? l.pendiente_bultos : l.bultos_a_comprar;
     // La cobertura mira stock + compras contra el consumo: es lo que responde
