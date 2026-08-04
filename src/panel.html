@@ -10967,6 +10967,7 @@ function sgRepExport(){
           <th>Insumo</th><th>Categoría</th><th>Proveedor</th>
           <th>Unidad de uso</th><th>Se compra por</th><th>Equivalencia</th>
           <th style="text-align:right">Múltiplo</th><th style="text-align:right">Mínimo</th>
+          <th style="text-align:right">Stock</th>
           <th style="text-align:right">Precio</th><th style="width:80px"></th>
         </tr></thead>
         <tbody id="pli-ins-tbody"></tbody>
@@ -11426,6 +11427,12 @@ function sgRepExport(){
     <div class="fl"><label>Precio por unidad de compra</label><input id="pli-ins-precio" type="number" step="any" min="0" value="0"></div>
     <div class="fl"><label>Moneda</label>
       <select id="pli-ins-moneda"><option value="ARS">ARS</option><option value="USD">USD</option></select>
+    </div>
+    <!-- El stock vive acá y no en el plan: un insumo puede tener stock aunque
+         ningún plan lo use, y el depósito es uno solo. -->
+    <div class="fl"><label>Stock en depósito</label>
+      <input id="pli-ins-stock" type="number" step="any" min="0" value="0" oninput="pliInsStockEquiv()">
+      <div class="pli-cel-chica" id="pli-ins-stock-eq">En unidad de uso. Se descuenta de la necesidad de todos los planes.</div>
     </div>
   </div>
   <div class="fg" style="margin-top:8px">
@@ -36106,6 +36113,11 @@ function pliInsRender() {
       + '<td class="pli-cel-chica">' + equiv + '</td>'
       + '<td class="pli-num">' + (Number(i.multiplo_compra) === 0 ? '—' : pliN(i.multiplo_compra)) + '</td>'
       + '<td class="pli-num">' + (Number(i.moq) === 0 ? '—' : pliN(i.moq)) + '</td>'
+      // El stock a la vista en la lista: es lo primero que se quiere revisar
+      // cuando se sale a comprar, y abrir insumo por insumo para verlo no sirve.
+      + '<td class="pli-num">' + (Number(i.stock_inicial) > 0
+          ? pliN(i.stock_inicial) + ' <span class="pli-cel-chica">' + pliEsc(i.unidad_uso) + '</span>'
+          : '<span class="pli-cel-chica">—</span>') + '</td>'
       + '<td class="pli-num">' + (Number(i.precio_ref) > 0 ? pliEsc(i.moneda) + ' ' + pliN(i.precio_ref, 2) : '<span style="color:#f59e0b">sin precio</span>') + '</td>'
       + '<td style="text-align:right;white-space:nowrap">'
         + '<button class="btn bo bs" onclick="pliFichaAbrir(' + i.id + ')" style="padding:2px 6px;font-size:11px" title="Fotos, documentos y evolución del precio">📎</button> '
@@ -36139,6 +36151,8 @@ function pliInsAbrir(id) {
   document.getElementById('pli-ins-multiplo').value = i ? i.multiplo_compra : 1;
   document.getElementById('pli-ins-moq').value = i ? i.moq : 0;
   document.getElementById('pli-ins-precio').value = i ? i.precio_ref : 0;
+  document.getElementById('pli-ins-stock').value = i ? (i.stock_inicial || 0) : 0;
+  pliInsStockEquiv();
   document.getElementById('pli-ins-moneda').value = i ? i.moneda : 'ARS';
   document.getElementById('pli-ins-lead').value = i ? (i.lead_time_dias === null || i.lead_time_dias === undefined ? 15 : i.lead_time_dias) : 15;
   document.getElementById('pli-ins-modo').value = i ? (i.modo_provision || 'compra') : 'compra';
@@ -36160,6 +36174,7 @@ function pliInsGuardar() {
     multiplo_compra: document.getElementById('pli-ins-multiplo').value,
     moq: document.getElementById('pli-ins-moq').value,
     precio_ref: document.getElementById('pli-ins-precio').value,
+    stock_inicial: document.getElementById('pli-ins-stock').value,
     moneda: document.getElementById('pli-ins-moneda').value,
     lead_time_dias: document.getElementById('pli-ins-lead').value,
     modo_provision: document.getElementById('pli-ins-modo').value,
@@ -37804,14 +37819,15 @@ function pliResultadoRender() {
         + pliProvsDeLinea(l) + '</td>'
       + '<td class="pli-num">' + pliN(l.cant_bruta_uso) + ' <span class="pli-cel-chica">' + pliEsc(l.unidad_uso) + '</span></td>'
       + '<td class="pli-num pli-cel-chica">' + rango + '</td>'
-      // La existencia SE EDITA aunque el plan esté confirmado: lo que hay en
-      // depósito es estado de hoy, no parte del compromiso del plan. Congelarla
-      // obligaba a reabrir y reconfirmar todo el plan para anotar un recuento.
+      // El stock vive en el INSUMO, no en el plan. Se deja editable desde acá
+      // porque es donde se lo mira al salir a comprar, pero se avisa que el
+      // número es del insumo: cambiarlo vale para todos los planes.
       + '<td class="pli-num"><input id="pli-exist-' + l.insumo_id + '" type="number" step="any" min="0"'
         + ' value="' + (l.existencia_declarada || 0) + '"'
         + ' class="pli-inp pli-inp-num" style="width:120px"'
+        + ' title="Es el stock del insumo: vale para todos los planes. También se edita en la solapa Insumos."'
         + ' onchange="pliExistSet(' + l.insumo_id + ',this.value)">'
-        + '<div class="pli-cel-chica">' + pliEsc(l.unidad_uso) + '</div></td>'
+        + '<div class="pli-cel-chica">' + pliEsc(l.unidad_uso) + ' · del insumo</div></td>'
       + '<td class="pli-num">' + pliN(l.cant_neta_uso) + '</td>'
       + '<td class="pli-num"><strong style="font-size:15px">' + pliN(l.bultos_a_comprar) + '</strong> '
         + '<span class="pli-cel-chica">' + pliEsc(l.unidad_compra) + '</span>'
@@ -37937,6 +37953,25 @@ function pliReabrir() {
 // ══════════════════════════════════════════════════════════════════════════
 // FICHA DEL INSUMO — adjuntos y evolución del precio
 // ══════════════════════════════════════════════════════════════════════════
+
+// El stock se carga en unidad de USO, pero el depósito se cuenta en la unidad que
+// se compra: nadie cuenta viruta en gramos, cuenta bolsones. Se muestra la
+// equivalencia al lado para que quien carga vea si puso el número que quería.
+function pliInsStockEquiv() {
+  var el = document.getElementById('pli-ins-stock-eq');
+  if (!el) return;
+  var v = Number(document.getElementById('pli-ins-stock').value) || 0;
+  var uUso = (document.getElementById('pli-ins-uuso').value || '').trim();
+  var uCompra = (document.getElementById('pli-ins-ucompra').value || '').trim();
+  var factor = Number(document.getElementById('pli-ins-factor').value) || 1;
+  var base = 'En ' + (uUso ? pliEsc(uUso) : 'unidad de uso')
+    + '. Se descuenta de la necesidad de todos los planes.';
+  // La equivalencia solo aporta cuando las unidades son distintas.
+  if (v > 0 && factor > 0 && uCompra && uCompra !== uUso) {
+    base += ' Equivale a <strong>' + pliN(v / factor, 2) + ' ' + pliEsc(uCompra) + '</strong>.';
+  }
+  el.innerHTML = base;
+}
 
 function pliFichaAbrir(id) {
   var i = PLI.insumos.filter(function(x) { return x.id === id; })[0];

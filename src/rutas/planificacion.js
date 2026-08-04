@@ -253,6 +253,9 @@ function leerInsumoBody(body, parcialDe = null) {
     multiplo_compra: g('multiplo_compra', () => vNum(b.multiplo_compra, 'El múltiplo de compra', { min: 0, def: 1 })),
     moq:             g('moq',             () => vNum(b.moq, 'El mínimo de compra', { min: 0, def: 0 })),
     precio_ref:      g('precio_ref',      () => vNum(b.precio_ref, 'El precio', { min: 0, def: 0 })),
+    // Stock en depósito, en unidad de USO. Vive acá y no en el plan: un insumo
+    // puede tener stock aunque ningún plan lo use.
+    stock_inicial:   g('stock_inicial',   () => vNum(b.stock_inicial, 'El stock', { min: 0, def: 0 })),
     moneda:          g('moneda',          () => {
       const m = (vTexto(b.moneda, 'La moneda') || 'ARS').toUpperCase();
       if (!['ARS', 'USD'].includes(m)) throw bad('La moneda tiene que ser ARS o USD');
@@ -287,11 +290,11 @@ router.post('/insumos', wrap((req, res) => {
     INSERT INTO pli_insumos
       (sociedad_id, codigo, nombre, categoria, unidad_uso, unidad_compra, factor_compra,
        multiplo_compra, moq, precio_ref, moneda, precio_fecha, proveedor_texto,
-       lead_time_dias, modo_provision, notas, creado_por_id, actualizado_por_id)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+       lead_time_dias, modo_provision, notas, stock_inicial, creado_por_id, actualizado_por_id)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
   `).run(soc, d.codigo, d.nombre, d.categoria, d.unidad_uso, d.unidad_compra, d.factor_compra,
          d.multiplo_compra, d.moq, d.precio_ref, d.moneda, d.precio_fecha, d.proveedor_texto,
-         d.lead_time_dias, d.modo_provision, d.notas, req.user.id, req.user.id);
+         d.lead_time_dias, d.modo_provision, d.notas, d.stock_inicial, req.user.id, req.user.id);
   // Si el alta trae proveedor, el precio queda atribuido a él; si no, suelto en la
   // serie del insumo. Uno u otro, nunca los dos: serían dos filas para el mismo precio.
   if (!asegurarProveedorDesdeTexto(r.lastInsertRowid, d, req.user.id)) {
@@ -408,12 +411,12 @@ router.patch('/insumos/:id', wrap((req, res) => {
     UPDATE pli_insumos SET
       codigo=?, nombre=?, categoria=?, unidad_uso=?, unidad_compra=?, factor_compra=?,
       multiplo_compra=?, moq=?, precio_ref=?, moneda=?, precio_fecha=?, proveedor_texto=?,
-      lead_time_dias=?, modo_provision=?,
+      lead_time_dias=?, modo_provision=?, stock_inicial=?,
       notas=?, activo=?, actualizado_en=${AHORA}, actualizado_por_id=?
     WHERE id=?
   `).run(d.codigo, d.nombre, d.categoria, d.unidad_uso, d.unidad_compra, d.factor_compra,
          d.multiplo_compra, d.moq, d.precio_ref, d.moneda, d.precio_fecha, d.proveedor_texto,
-         d.lead_time_dias, d.modo_provision,
+         d.lead_time_dias, d.modo_provision, d.stock_inicial,
          d.notas, activo, req.user.id, id);
   // Si el insumo tiene proveedores cargados, el precio de la ficha es el del
   // PREFERIDO: se escribe ahí y el campo del insumo se vuelve a espejar. Sin
@@ -774,6 +777,20 @@ function registrarPrecioProveedor(insumoId, provId, d, origen, userId) {
   } catch (e) {
     console.error('[PLI] Error registrando precio de proveedor:', e.message);
   }
+}
+
+// EL STOCK VIVE EN EL INSUMO.
+// Antes colgaba del plan (pli_plan_existencias), y eso tenía dos problemas: había
+// que cargar el mismo número en cada plan, y un insumo que no estaba en ningún
+// plan no tenía dónde anotar su stock aunque el depósito lo tuviera.
+// En unidad de USO, que es en la que la receta lo consume.
+function stockDeInsumos(soc) {
+  return new Map(
+    db.prepare('SELECT id, stock_inicial FROM pli_insumos WHERE sociedad_id=? AND eliminado_en IS NULL')
+      .all(soc)
+      .filter(i => Number(i.stock_inicial) > 0)
+      .map(i => [i.id, Number(i.stock_inicial)])
+  );
 }
 
 function hoyISO() {
@@ -1688,10 +1705,9 @@ router.post('/planes/:id/duplicar', wrap((req, res) => {
       INSERT INTO pli_plan_objetivos (plan_id, producto_id, cantidad, unidad, bucket_ini, notas)
       SELECT ?, producto_id, cantidad, unidad, bucket_ini, notas FROM pli_plan_objetivos WHERE plan_id=?
     `).run(id, plan.id);
-    db.prepare(`
-      INSERT INTO pli_plan_existencias (plan_id, insumo_id, cantidad, bucket_ini, origen, notas, actualizado_por_id)
-      SELECT ?, insumo_id, cantidad, bucket_ini, origen, notas, ? FROM pli_plan_existencias WHERE plan_id=?
-    `).run(id, req.user.id, plan.id);
+    // El stock YA NO se copia: vive en el insumo y es el mismo para todos los
+    // planes. Copiarlo era necesario cuando colgaba del plan; ahora duplicaría un
+    // número que no tiene dos versiones.
     return id;
   })();
   logPli('plan', nuevoId, 'duplicar', { de: plan.id, nombre }, req.user.id);
@@ -1784,19 +1800,19 @@ router.put('/planes/:id/existencias', wrap((req, res) => {
   // que aparecieron 5.000 cajas al contar el depósito.
   // Lo que sigue congelado es la NECESIDAD: cuánto se va a empacar y qué lleva
   // cada cosa. Eso no lo cambia el stock.
+  //
+  // Y VIVE EN EL INSUMO, no en el plan: el depósito es uno solo. Este endpoint se
+  // conserva por la carga masiva, pero escribe el stock del insumo — o sea que
+  // vale para todos los planes, que es lo correcto.
   const existencias = req.body?.existencias;
   if (!Array.isArray(existencias)) throw bad('Faltan las existencias');
   db.transaction(() => {
-    db.prepare('DELETE FROM pli_plan_existencias WHERE plan_id=?').run(plan.id);
-    const ins = db.prepare(`
-      INSERT INTO pli_plan_existencias (plan_id, insumo_id, cantidad, bucket_ini, actualizado_por_id)
-      VALUES (?,?,?,'',?)
-    `);
+    const upd = db.prepare(`UPDATE pli_insumos SET stock_inicial=?, stock_actualizado_en=${AHORA} WHERE id=?`);
     for (const e of existencias) {
       const iid = vNum(e.insumo_id, 'El insumo', { entero: true, min: 1 });
       const ok = db.prepare('SELECT id FROM pli_insumos WHERE id=? AND sociedad_id=? AND eliminado_en IS NULL').get(iid, soc);
       if (!ok) throw bad('Hay una existencia que apunta a un insumo inexistente o de otra sociedad');
-      ins.run(plan.id, iid, vNum(e.cantidad, 'La cantidad', { min: 0, def: 0 }), req.user.id);
+      upd.run(vNum(e.cantidad, 'La cantidad', { min: 0, def: 0 }), iid);
     }
   })();
   res.json({ ok: true });
@@ -1811,12 +1827,11 @@ router.put('/planes/:id/existencias/:insumoId', wrap((req, res) => {
   const ok = db.prepare('SELECT id FROM pli_insumos WHERE id=? AND sociedad_id=? AND eliminado_en IS NULL').get(iid, soc);
   if (!ok) throw bad('El insumo no existe o es de otra sociedad');
   const cantidad = vNum(req.body?.cantidad, 'La cantidad', { min: 0, def: 0 });
-  db.prepare(`
-    INSERT INTO pli_plan_existencias (plan_id, insumo_id, cantidad, bucket_ini, actualizado_por_id)
-    VALUES (?,?,?,'',?)
-    ON CONFLICT(plan_id, insumo_id, bucket_ini)
-    DO UPDATE SET cantidad=excluded.cantidad, actualizado_en=${AHORA}, actualizado_por_id=excluded.actualizado_por_id
-  `).run(plan.id, iid, cantidad, req.user.id);
+  // Escribe el stock del INSUMO: la casilla del plan y la de la solapa Insumos
+  // son dos puertas al mismo número. Editarlo desde acá vale para todos los planes.
+  db.prepare(`UPDATE pli_insumos SET stock_inicial=?, stock_actualizado_en=${AHORA} WHERE id=?`)
+    .run(cantidad, iid);
+  logPli('insumo', iid, 'stock', { cantidad, desde_plan: plan.id }, req.user.id);
   res.json({ ok: true });
 }));
 
@@ -1918,10 +1933,9 @@ function armarContexto(soc, plan) {
   const insumos = new Map(
     db.prepare('SELECT * FROM pli_insumos WHERE sociedad_id=?').all(soc).map(i => [i.id, i])
   );
-  const existencias = new Map(
-    db.prepare('SELECT insumo_id, cantidad FROM pli_plan_existencias WHERE plan_id=?').all(plan.id)
-      .map(e => [e.insumo_id, e.cantidad])
-  );
+  // El stock vive en el INSUMO, no en el plan: es lo que hay en el depósito, uno
+  // solo, y el mismo para cualquier plan que se calcule.
+  const existencias = stockDeInsumos(soc);
   // Lo ya pedido cubre necesidad igual que la existencia. Las canceladas no
   // cuentan; las pedidas y las recibidas sí (lo pedido ya está comprometido).
   const comprado = new Map(
@@ -1954,10 +1968,7 @@ function bucketsDesdeSnapshot(plan) {
       objetivos: s.objetivos,
       recetas: new Map(s.recetas || []),
       insumos: new Map((s.insumos || []).map(i => [i.id, i])),
-      existencias: new Map(
-        db.prepare('SELECT insumo_id, cantidad FROM pli_plan_existencias WHERE plan_id=?').all(plan.id)
-          .map(e => [e.insumo_id, e.cantidad])
-      ),
+      existencias: stockDeInsumos(plan.sociedad_id),
       comprado: new Map(
         db.prepare(`
           SELECT insumo_id, SUM(cantidad) AS total FROM pli_compras
@@ -2040,10 +2051,7 @@ function resultadoMaterializado(plan) {
   // El stock también es de HOY. bucketsDesdeSnapshot ya recalcula con él, pero la
   // fila congelada trae el que había al confirmar y es la que alimenta el
   // sobrante: sin esto, cargar existencias no movía nada.
-  const stockVivo = new Map(
-    db.prepare('SELECT insumo_id, cantidad FROM pli_plan_existencias WHERE plan_id=?').all(plan.id)
-      .map(e => [e.insumo_id, e.cantidad])
-  );
+  const stockVivo = stockDeInsumos(plan.sociedad_id);
 
   // EL NOMBRE NO ES UN NÚMERO: se muestra el de HOY.
   // Congelarlo hacía que corregir un nombre en el catálogo —"500*400*210" que en
