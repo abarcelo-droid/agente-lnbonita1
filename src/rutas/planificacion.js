@@ -1962,7 +1962,13 @@ function bucketsDesdeSnapshot(plan) {
       )
     });
     const m = new Map();
-    for (const l of r.lineas) m.set(l.insumo_id, l.buckets || []);
+    for (const l of r.lineas) {
+      m.set(l.insumo_id, {
+        buckets: l.buckets || [],
+        ya_comprado_bultos: l.ya_comprado_bultos || 0,
+        bultos_a_comprar: l.bultos_a_comprar || 0
+      });
+    }
     return m;
   } catch (e) {
     console.error('[PLI] No se pudieron reconstruir los buckets del plan', plan.id, e.message);
@@ -1973,19 +1979,39 @@ function bucketsDesdeSnapshot(plan) {
 // Lee el resultado materializado de un plan confirmado (no corre el motor).
 function resultadoMaterializado(plan) {
   const filas = db.prepare('SELECT * FROM pli_plan_resultado WHERE plan_id=? ORDER BY costo_estimado DESC').all(plan.id);
-  // Se reconstruye una sola vez para todo el plan, no una por fila.
-  const faltan = filas.length > 0 && filas.every(f => !f.buckets_json);
-  const recuperados = faltan ? bucketsDesdeSnapshot(plan) : null;
-  // Los buckets son la agenda de compra semana por semana. Sin restaurarlos, las
-  // dos vistas de la pestaña Comprar (agenda de pedidos y por semana de cosecha)
-  // se quedaban en "Sin necesidades calculadas" justo cuando el plan ya estaba
-  // confirmado, que es cuando se sale a comprar.
-  const lineas = filas.map(f => ({
-    ...f,
-    desglose: f.detalle_json ? JSON.parse(f.detalle_json) : [],
-    buckets: f.buckets_json ? JSON.parse(f.buckets_json)
-           : (recuperados ? (recuperados.get(f.insumo_id) || []) : [])
-  }));
+
+  // LA NECESIDAD SE CONGELA; EL AVANCE DE COMPRA NO.
+  // Cuánto se lleva comprado cambia todos los días — es justamente lo que la
+  // pestaña Comprar existe para mostrar. Congelarlo hacía que registrar una
+  // compra no descontara nada: la fila seguía diciendo "0 comprado" y el
+  // pendiente no bajaba nunca.
+  //
+  // Se recalcula SIEMPRE sobre el snapshot congelado del plan (mismos productos,
+  // recetas, insumos y objetivos) pero con las compras de HOY. Así la necesidad
+  // sale idéntica a la del día que se confirmó y lo único que se mueve es lo ya
+  // comprado, que es lo correcto.
+  const vivo = bucketsDesdeSnapshot(plan);
+  const lineas = filas.map(f => {
+    const v = vivo ? vivo.get(f.insumo_id) : null;
+    // Requerido TOTAL del plan: lo congelado ya trae la necesidad completa
+    // (al confirmar no había compras aplicadas). Si el plan se confirmó con
+    // compras ya registradas, la columna congelada las descuenta y se suman acá.
+    const requerido = (f.bultos_a_comprar || 0) + (f.ya_comprado_bultos || 0);
+    const yaComprado = v ? Math.min(v.ya_comprado_bultos, requerido) : (f.ya_comprado_bultos || 0);
+    return {
+      ...f,
+      desglose: f.detalle_json ? JSON.parse(f.detalle_json) : [],
+      // Los buckets salen del recálculo con compras de hoy; los congelados son el
+      // respaldo por si no hay snapshot para reconstruir.
+      buckets: (v && v.buckets.length) ? v.buckets
+             : (f.buckets_json ? JSON.parse(f.buckets_json) : []),
+      // Los tres números que mira el comprador, normalizados para que la pantalla
+      // no tenga que saber si el plan está confirmado o en borrador.
+      requerido_bultos: requerido,
+      ya_comprado_bultos: yaComprado,
+      pendiente_bultos: Math.max(0, Math.round((requerido - yaComprado) * 1e6) / 1e6)
+    };
+  });
   const totales_por_moneda = {};
   for (const l of lineas) {
     if (l.sin_precio) continue;
@@ -1996,10 +2022,11 @@ function resultadoMaterializado(plan) {
     lineas,
     cobertura: plan.cobertura_json ? JSON.parse(plan.cobertura_json) : { ok: true },
     totales_por_moneda,
-    // Para que la pantalla pueda decir de dónde salió la agenda semanal en vez de
-    // presentarla como si se hubiera congelado con el plan.
-    buckets_reconstruidos: faltan ? !!recuperados : false,
-    buckets_sin_recuperar: faltan && !recuperados,
+    // Sin snapshot no se puede recalcular el avance: la pantalla lo dice en vez de
+    // mostrar un "0 comprado" que sería mentira.
+    buckets_reconstruidos: false,
+    buckets_sin_recuperar: !vivo && lineas.every(l => !l.buckets.length),
+    avance_congelado: !vivo,
     advertencias: []
   };
 }
@@ -2066,6 +2093,14 @@ router.get('/planes/:id/calculo', wrap((req, res) => {
     });
   }
   const r = calcularPlan(armarContexto(soc, plan));
+  // Mismos tres números que devuelve el plan confirmado, para que la pantalla no
+  // tenga que saber en qué estado está. Acá el motor ya trabajó con las compras,
+  // así que bultos_a_comprar YA viene neto.
+  for (const l of r.lineas) {
+    l.ya_comprado_bultos = l.ya_comprado_bultos || 0;
+    l.requerido_bultos = l.ya_comprado_bultos + (l.bultos_a_comprar || 0);
+    l.pendiente_bultos = l.bultos_a_comprar || 0;
+  }
   const tcp = adjuntarProveedores(r.lineas);
   res.json({
     ok: true,
