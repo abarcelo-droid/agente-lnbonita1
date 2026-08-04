@@ -1971,7 +1971,12 @@ function bucketsDesdeSnapshot(plan) {
       m.set(l.insumo_id, {
         buckets: l.buckets || [],
         ya_comprado_bultos: l.ya_comprado_bultos || 0,
-        bultos_a_comprar: l.bultos_a_comprar || 0
+        bultos_a_comprar: l.bultos_a_comprar || 0,
+        // La necesidad sale de ACÁ y no de la fila congelada: así necesidad,
+        // pendiente y sobrante vienen los tres del mismo cálculo. Sacando cada
+        // uno de una fuente distinta, la resta de la pantalla puede no cerrar.
+        cant_bruta_uso: l.cant_bruta_uso || 0,
+        factor_compra: l.factor_compra || 1
       });
     }
     return m;
@@ -2061,24 +2066,34 @@ function resultadoMaterializado(plan) {
     const fConStock = vivo
       ? { ...f, existencia_declarada: stockVivo.has(f.insumo_id) ? stockVivo.get(f.insumo_id) : 0 }
       : f;
-    // Requerido TOTAL del plan: lo congelado ya trae la necesidad completa
-    // (al confirmar no había compras aplicadas). Si el plan se confirmó con
-    // compras ya registradas, la columna congelada las descuenta y se suman acá.
-    const requerido = (f.bultos_a_comprar || 0) + (f.ya_comprado_bultos || 0);
-    // DOS NÚMEROS DISTINTOS Y NO SE PUEDEN MEZCLAR:
-    //   comprado TOTAL  — todo lo que se compró, tal cual se cargó.
-    //   ya comprado     — la parte que cubre la necesidad, tapada en el requerido.
-    // El avance usa el segundo (comprar de más no es estar al 130%); el sobrante
-    // usa el PRIMERO, porque el sobrante ES justamente la diferencia entre los dos.
-    // Pasarle el tapado a remanenteDe hacía que el sobrante diera siempre cero.
-    const compradoTotal = v ? (v.ya_comprado_bultos || 0) : (f.ya_comprado_bultos || 0);
-    const yaComprado = Math.min(compradoTotal, requerido);
-    // LO QUE FALTA COMPRAR lo dice el recálculo, que ya tuvo en cuenta el stock de
+    // TODO SE APOYA EN LA NECESIDAD, QUE ES LA ÚNICA BASE ESTABLE.
+    //
+    //   necesidad − stock − comprado = lo que hay que comprar
+    //   stock + comprado − necesidad = lo que va a sobrar
+    //
+    // Antes la base era bultos_a_comprar congelado, que NO es la necesidad: es
+    // "lo que faltaba comprar el día que se confirmó". Si el plan se confirmó con
+    // stock o compras ya cargados, ese número viene NETO —hasta 0— y entonces un
+    // insumo que el plan consume igual aparecía con Requerido total 0. Es lo que
+    // pasó con CAJA GRANDE: consume 19.530 y mostraba 0 porque había 28.080 en
+    // depósito al confirmar.
+    //
+    // La necesidad sale de cant_bruta_uso, que sí es el consumo del plan con la
+    // merma incluida y no lo toca ni el stock ni las compras.
+    // Del recálculo si está, para que necesidad y pendiente sean del mismo
+    // cálculo; si no, del congelado.
+    const base = v || f;
+    const factor = Number(base.factor_compra) > 0 ? Number(base.factor_compra) : 1;
+    const r6 = (n) => Math.round(n * 1e6) / 1e6;
+    const necesidad = r6((Number(base.cant_bruta_uso) || 0) / factor);
+    // Comprado TOTAL (sin tapar) para el sobrante; tapado a la necesidad para la
+    // columna "ya comprado", porque comprar de más no es haber cubierto de más.
+    const compradoTotal = v ? (v.ya_comprado_bultos || 0) : 0;
+    const yaComprado = r6(Math.min(compradoTotal, necesidad));
+    // Lo que falta comprar lo dice el recálculo: ya tuvo en cuenta el stock de
     // hoy, las compras de hoy y el loteo (múltiplos y mínimos del proveedor).
-    // Restar a mano requerido − comprado ignoraría el stock, y entonces cargar
-    // existencias no bajaría nada.
-    const pendiente = v ? (v.bultos_a_comprar || 0)
-                        : Math.max(0, Math.round((requerido - yaComprado) * 1e6) / 1e6);
+    const pendiente = v ? (v.bultos_a_comprar || 0) : (f.bultos_a_comprar || 0);
+    const requerido = necesidad;
     const ins = nombreVivo.get(f.insumo_id);
     return {
       ...f,
@@ -2100,7 +2115,11 @@ function resultadoMaterializado(plan) {
       ya_comprado_bultos: yaComprado,
       comprado_total_bultos: compradoTotal,
       pendiente_bultos: pendiente,
-      ...remanenteDe(fConStock, compradoTotal)
+      ...remanenteDe({ ...fConStock, cant_bruta_uso: base.cant_bruta_uso, factor_compra: factor },
+                     compradoTotal),
+      // La necesidad manda: si el recálculo no está disponible, igual se informa,
+      // así la columna nunca queda en 0 para un insumo que el plan consume.
+      necesidad_bultos: necesidad
     };
   });
   const totales_por_moneda = {};
@@ -2187,17 +2206,16 @@ router.get('/planes/:id/calculo', wrap((req, res) => {
   // Mismos tres números que devuelve el plan confirmado, para que la pantalla no
   // tenga que saber en qué estado está. Acá el motor ya trabajó con las compras,
   // así que bultos_a_comprar YA viene neto.
+  // Mismo criterio que el plan confirmado: TODO se apoya en la necesidad.
+  //   necesidad − stock − comprado = lo que hay que comprar
+  //   stock + comprado − necesidad = lo que va a sobrar
   for (const l of r.lineas) {
-    // El motor devuelve TODO lo comprado. La parte que efectivamente cubre la
-    // necesidad es la que fue tapando semana a semana: sumarla da el aplicado.
-    // Sin esta distinción, comprar 150.000 para una necesidad de 112.001 hacía
-    // que el "requerido" pasara a 150.000, o sea que comprar de más agrandaba
-    // el plan.
+    const factor = Number(l.factor_compra) > 0 ? Number(l.factor_compra) : 1;
+    const necesidad = Math.round(((Number(l.cant_bruta_uso) || 0) / factor) * 1e6) / 1e6;
     const total = l.ya_comprado_bultos || 0;
-    const aplicado = (l.buckets || []).reduce((a, b) => a + (b.ya_comprado || 0), 0);
     l.comprado_total_bultos = total;
-    l.ya_comprado_bultos = Math.round(aplicado * 1e6) / 1e6;
-    l.requerido_bultos = Math.round((aplicado + (l.bultos_a_comprar || 0)) * 1e6) / 1e6;
+    l.ya_comprado_bultos = Math.round(Math.min(total, necesidad) * 1e6) / 1e6;
+    l.requerido_bultos = necesidad;
     l.pendiente_bultos = l.bultos_a_comprar || 0;
     Object.assign(l, remanenteDe(l, total));
   }
