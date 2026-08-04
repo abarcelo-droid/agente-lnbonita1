@@ -38651,11 +38651,23 @@ function pliCmpRenderSemanas(cont) {
 }
 
 // ── Vista 3: compras registradas, con requerido vs comprado vs pendiente ──
+// De dónde sale el sobrante, en una línea. Va en el title del número: un "+37.999"
+// solo obliga a rehacer la cuenta a mano para creerle.
+function pliSobranteDetalle(l) {
+  var u = l.unidad_compra || '';
+  return 'Stock ' + pliN(l.stock_bultos || 0) + ' ' + u
+    + ' + comprado ' + pliN(l.ya_comprado_bultos || 0) + ' ' + u
+    + ' − consumo del plan ' + pliN(l.necesidad_bultos || 0) + ' ' + u
+    + ' = sobran ' + pliN(l.remanente_bultos || 0) + ' ' + u
+    + '. El consumo incluye la merma.';
+}
+
 function pliCmpRenderHechas(cont) {
   var lineas = PLI.cmpCalculo.lineas || [];
   var html = '<div class="ab-table-wrap" style="margin-bottom:14px"><table class="pa-tbl" style="font-size:12px"><thead><tr>'
     + '<th>Insumo</th><th style="text-align:right">Requerido total</th>'
     + '<th style="text-align:right">Ya comprado</th><th style="text-align:right">Pendiente</th>'
+    + '<th style="text-align:right">Va a sobrar<div class="pli-cel-chica">stock + compras − consumo</div></th>'
     + '<th style="min-width:130px">Avance</th></tr></thead><tbody>';
   lineas.forEach(function(l) {
     // El backend manda los tres números ya normalizados, esté el plan confirmado o
@@ -38669,6 +38681,12 @@ function pliCmpRenderHechas(cont) {
       + '<td class="pli-num">' + pliN(req) + ' <span class="pli-cel-chica">' + pliEsc(l.unidad_compra) + '</span></td>'
       + '<td class="pli-num">' + pliN(comp) + '</td>'
       + '<td class="pli-num"><strong>' + pliN(pend) + '</strong></td>'
+      // Solo el sobrante: lo que falta ya lo dice la columna Pendiente, y mostrar
+      // el mismo dato dos veces con signo distinto confunde más de lo que suma.
+      + '<td class="pli-num">' + (l.remanente_bultos > 0.0001
+          ? '<strong style="color:#b45309" title="' + pliEsc(pliSobranteDetalle(l)) + '">+'
+            + pliN(l.remanente_bultos) + '</strong>'
+          : '<span class="pli-cel-chica">—</span>') + '</td>'
       + '<td><div style="background:var(--bor);border-radius:6px;height:14px;position:relative;overflow:hidden">'
         + '<div style="background:var(--ok,#16a34a);height:100%;width:' + pct.toFixed(1) + '%"></div></div>'
         + '<div class="pli-cel-chica">' + pct.toFixed(0) + '%</div></td></tr>';
