@@ -37797,9 +37797,12 @@ function pliResultadoRender() {
         + pliProvsDeLinea(l) + '</td>'
       + '<td class="pli-num">' + pliN(l.cant_bruta_uso) + ' <span class="pli-cel-chica">' + pliEsc(l.unidad_uso) + '</span></td>'
       + '<td class="pli-num pli-cel-chica">' + rango + '</td>'
+      // La existencia SE EDITA aunque el plan esté confirmado: lo que hay en
+      // depósito es estado de hoy, no parte del compromiso del plan. Congelarla
+      // obligaba a reabrir y reconfirmar todo el plan para anotar un recuento.
       + '<td class="pli-num"><input id="pli-exist-' + l.insumo_id + '" type="number" step="any" min="0"'
         + ' value="' + (l.existencia_declarada || 0) + '"'
-        + (conf ? ' disabled' : '') + ' class="pli-inp pli-inp-num" style="width:120px"'
+        + ' class="pli-inp pli-inp-num" style="width:120px"'
         + ' onchange="pliExistSet(' + l.insumo_id + ',this.value)">'
         + '<div class="pli-cel-chica">' + pliEsc(l.unidad_uso) + '</div></td>'
       + '<td class="pli-num">' + pliN(l.cant_neta_uso) + '</td>'
@@ -38666,6 +38669,9 @@ function pliCmpRenderHechas(cont) {
   var lineas = PLI.cmpCalculo.lineas || [];
   var html = '<div class="ab-table-wrap" style="margin-bottom:14px"><table class="pa-tbl" style="font-size:12px"><thead><tr>'
     + '<th>Insumo</th><th style="text-align:right">Requerido total</th>'
+    // El stock a la vista: si no, cargar existencias hace bajar el pendiente y no
+    // se entiende por qué.
+    + '<th style="text-align:right">Stock<div class="pli-cel-chica">en depósito</div></th>'
     + '<th style="text-align:right">Ya comprado</th><th style="text-align:right">Pendiente</th>'
     + '<th style="text-align:right">Va a sobrar<div class="pli-cel-chica">stock + compras − consumo</div></th>'
     + '<th style="min-width:130px">Avance</th></tr></thead><tbody>';
@@ -38676,9 +38682,15 @@ function pliCmpRenderHechas(cont) {
             : (l.ya_comprado_bultos || 0) + (l.bultos_a_comprar || 0);
     var comp = l.ya_comprado_bultos || 0;
     var pend = (l.pendiente_bultos !== undefined) ? l.pendiente_bultos : l.bultos_a_comprar;
-    var pct = req > 0 ? Math.min(100, comp / req * 100) : 100;
+    // La cobertura mira stock + compras contra el consumo: es lo que responde
+    // "¿cuánto de lo que voy a usar ya lo tengo?". Contar solo lo comprado dejaba
+    // en 0% un insumo que está entero en el depósito.
+    var stk = l.stock_bultos || 0;
+    var nec = l.necesidad_bultos || req;
+    var pct = nec > 0 ? Math.min(100, (stk + comp) / nec * 100) : 100;
     html += '<tr><td><strong>' + pliEsc(l.insumo_nombre) + '</strong></td>'
       + '<td class="pli-num">' + pliN(req) + ' <span class="pli-cel-chica">' + pliEsc(l.unidad_compra) + '</span></td>'
+      + '<td class="pli-num">' + (stk > 0 ? pliN(stk) : '<span class="pli-cel-chica">—</span>') + '</td>'
       + '<td class="pli-num">' + pliN(comp) + '</td>'
       + '<td class="pli-num"><strong>' + pliN(pend) + '</strong></td>'
       // Solo el sobrante: lo que falta ya lo dice la columna Pendiente, y mostrar
