@@ -2033,7 +2033,14 @@ function resultadoMaterializado(plan) {
     // (al confirmar no había compras aplicadas). Si el plan se confirmó con
     // compras ya registradas, la columna congelada las descuenta y se suman acá.
     const requerido = (f.bultos_a_comprar || 0) + (f.ya_comprado_bultos || 0);
-    const yaComprado = v ? Math.min(v.ya_comprado_bultos, requerido) : (f.ya_comprado_bultos || 0);
+    // DOS NÚMEROS DISTINTOS Y NO SE PUEDEN MEZCLAR:
+    //   comprado TOTAL  — todo lo que se compró, tal cual se cargó.
+    //   ya comprado     — la parte que cubre la necesidad, tapada en el requerido.
+    // El avance usa el segundo (comprar de más no es estar al 130%); el sobrante
+    // usa el PRIMERO, porque el sobrante ES justamente la diferencia entre los dos.
+    // Pasarle el tapado a remanenteDe hacía que el sobrante diera siempre cero.
+    const compradoTotal = v ? (v.ya_comprado_bultos || 0) : (f.ya_comprado_bultos || 0);
+    const yaComprado = Math.min(compradoTotal, requerido);
     return {
       ...f,
       desglose: f.detalle_json ? JSON.parse(f.detalle_json) : [],
@@ -2045,8 +2052,9 @@ function resultadoMaterializado(plan) {
       // no tenga que saber si el plan está confirmado o en borrador.
       requerido_bultos: requerido,
       ya_comprado_bultos: yaComprado,
+      comprado_total_bultos: compradoTotal,
       pendiente_bultos: Math.max(0, Math.round((requerido - yaComprado) * 1e6) / 1e6),
-      ...remanenteDe(f, yaComprado)
+      ...remanenteDe(f, compradoTotal)
     };
   });
   const totales_por_moneda = {};
@@ -2134,10 +2142,18 @@ router.get('/planes/:id/calculo', wrap((req, res) => {
   // tenga que saber en qué estado está. Acá el motor ya trabajó con las compras,
   // así que bultos_a_comprar YA viene neto.
   for (const l of r.lineas) {
-    l.ya_comprado_bultos = l.ya_comprado_bultos || 0;
-    l.requerido_bultos = l.ya_comprado_bultos + (l.bultos_a_comprar || 0);
+    // El motor devuelve TODO lo comprado. La parte que efectivamente cubre la
+    // necesidad es la que fue tapando semana a semana: sumarla da el aplicado.
+    // Sin esta distinción, comprar 150.000 para una necesidad de 112.001 hacía
+    // que el "requerido" pasara a 150.000, o sea que comprar de más agrandaba
+    // el plan.
+    const total = l.ya_comprado_bultos || 0;
+    const aplicado = (l.buckets || []).reduce((a, b) => a + (b.ya_comprado || 0), 0);
+    l.comprado_total_bultos = total;
+    l.ya_comprado_bultos = Math.round(aplicado * 1e6) / 1e6;
+    l.requerido_bultos = Math.round((aplicado + (l.bultos_a_comprar || 0)) * 1e6) / 1e6;
     l.pendiente_bultos = l.bultos_a_comprar || 0;
-    Object.assign(l, remanenteDe(l, l.ya_comprado_bultos));
+    Object.assign(l, remanenteDe(l, total));
   }
   const tcp = adjuntarProveedores(r.lineas);
   res.json({
