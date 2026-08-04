@@ -1778,7 +1778,12 @@ router.put('/planes/:id/objetivos', wrap((req, res) => {
 router.put('/planes/:id/existencias', wrap((req, res) => {
   const soc = getSociedadId(req);
   const plan = getPlan(soc, parseInt(req.params.id, 10));
-  if (plan.estado === 'confirmado') throw conflict('El plan está confirmado. Reabrilo para editarlo.');
+  // El stock SE PUEDE cargar con el plan confirmado. Lo que hay en depósito es
+  // estado de hoy, igual que las compras: congelarlo obligaba a reabrir y
+  // reconfirmar el plan entero —recalculando precios y todo— solo para anotar
+  // que aparecieron 5.000 cajas al contar el depósito.
+  // Lo que sigue congelado es la NECESIDAD: cuánto se va a empacar y qué lleva
+  // cada cosa. Eso no lo cambia el stock.
   const existencias = req.body?.existencias;
   if (!Array.isArray(existencias)) throw bad('Faltan las existencias');
   db.transaction(() => {
@@ -1801,7 +1806,7 @@ router.put('/planes/:id/existencias', wrap((req, res) => {
 router.put('/planes/:id/existencias/:insumoId', wrap((req, res) => {
   const soc = getSociedadId(req);
   const plan = getPlan(soc, parseInt(req.params.id, 10));
-  if (plan.estado === 'confirmado') throw conflict('El plan está confirmado. Reabrilo para editarlo.');
+  // Editable con el plan confirmado: ver la nota del endpoint de arriba.
   const iid = parseInt(req.params.insumoId, 10);
   const ok = db.prepare('SELECT id FROM pli_insumos WHERE id=? AND sociedad_id=? AND eliminado_en IS NULL').get(iid, soc);
   if (!ok) throw bad('El insumo no existe o es de otra sociedad');
@@ -2027,8 +2032,19 @@ function resultadoMaterializado(plan) {
   // sale idéntica a la del día que se confirmó y lo único que se mueve es lo ya
   // comprado, que es lo correcto.
   const vivo = bucketsDesdeSnapshot(plan);
+  // El stock también es de HOY. bucketsDesdeSnapshot ya recalcula con él, pero la
+  // fila congelada trae el que había al confirmar y es la que alimenta el
+  // sobrante: sin esto, cargar existencias no movía nada.
+  const stockVivo = new Map(
+    db.prepare('SELECT insumo_id, cantidad FROM pli_plan_existencias WHERE plan_id=?').all(plan.id)
+      .map(e => [e.insumo_id, e.cantidad])
+  );
   const lineas = filas.map(f => {
     const v = vivo ? vivo.get(f.insumo_id) : null;
+    // Si hay recálculo, el stock sale de la tabla viva; si no, queda el congelado.
+    const fConStock = vivo
+      ? { ...f, existencia_declarada: stockVivo.has(f.insumo_id) ? stockVivo.get(f.insumo_id) : 0 }
+      : f;
     // Requerido TOTAL del plan: lo congelado ya trae la necesidad completa
     // (al confirmar no había compras aplicadas). Si el plan se confirmó con
     // compras ya registradas, la columna congelada las descuenta y se suman acá.
@@ -2041,20 +2057,27 @@ function resultadoMaterializado(plan) {
     // Pasarle el tapado a remanenteDe hacía que el sobrante diera siempre cero.
     const compradoTotal = v ? (v.ya_comprado_bultos || 0) : (f.ya_comprado_bultos || 0);
     const yaComprado = Math.min(compradoTotal, requerido);
+    // LO QUE FALTA COMPRAR lo dice el recálculo, que ya tuvo en cuenta el stock de
+    // hoy, las compras de hoy y el loteo (múltiplos y mínimos del proveedor).
+    // Restar a mano requerido − comprado ignoraría el stock, y entonces cargar
+    // existencias no bajaría nada.
+    const pendiente = v ? (v.bultos_a_comprar || 0)
+                        : Math.max(0, Math.round((requerido - yaComprado) * 1e6) / 1e6);
     return {
       ...f,
+      existencia_declarada: fConStock.existencia_declarada,
       desglose: f.detalle_json ? JSON.parse(f.detalle_json) : [],
-      // Los buckets salen del recálculo con compras de hoy; los congelados son el
-      // respaldo por si no hay snapshot para reconstruir.
+      // Los buckets salen del recálculo con compras y stock de hoy; los congelados
+      // son el respaldo por si no hay snapshot para reconstruir.
       buckets: (v && v.buckets.length) ? v.buckets
              : (f.buckets_json ? JSON.parse(f.buckets_json) : []),
-      // Los tres números que mira el comprador, normalizados para que la pantalla
-      // no tenga que saber si el plan está confirmado o en borrador.
+      // Los números que mira el comprador, normalizados para que la pantalla no
+      // tenga que saber si el plan está confirmado o en borrador.
       requerido_bultos: requerido,
       ya_comprado_bultos: yaComprado,
       comprado_total_bultos: compradoTotal,
-      pendiente_bultos: Math.max(0, Math.round((requerido - yaComprado) * 1e6) / 1e6),
-      ...remanenteDe(f, compradoTotal)
+      pendiente_bultos: pendiente,
+      ...remanenteDe(fConStock, compradoTotal)
     };
   });
   const totales_por_moneda = {};
