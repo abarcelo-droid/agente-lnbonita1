@@ -1976,6 +1976,42 @@ function bucketsDesdeSnapshot(plan) {
   }
 }
 
+// CUÁNTO VA A SOBRAR de un insumo. Sale de tres cosas que hoy están en pantallas
+// distintas y nadie cruza a mano: lo que hay en depósito, lo que ya se compró, y
+// lo que el plan se va a consumir.
+//
+//   sobrante = stock declarado + ya comprado − necesidad bruta
+//
+// La necesidad es la BRUTA (con merma incluida), no la neta: la neta ya le restó
+// el stock, así que usarla contaría el stock dos veces y el sobrante saldría al
+// doble.
+//
+// El stock es el DECLARADO, no el aplicado. El motor recorta el aplicado al techo
+// de lo que hace falta —no tiene sentido "usar" más stock del que se consume— y
+// con ese número el stock de más quedaría invisible, que es justo lo que acá se
+// quiere ver.
+//
+// Todo en unidad de COMPRA, que es la que se lee en esta tabla y en la que se
+// registran las compras. La necesidad y el stock viven en unidad de uso: se
+// dividen por el factor.
+//
+// El sobrante por LOTEO (comprar de a pallets, mínimos del proveedor) queda
+// incluido solo: si se compró exactamente lo que el plan pedía y ese número ya
+// venía redondeado hacia arriba, la diferencia contra la necesidad aparece acá.
+function remanenteDe(f, yaComprado) {
+  const factor = Number(f.factor_compra) > 0 ? Number(f.factor_compra) : 1;
+  const r6 = (n) => Math.round(n * 1e6) / 1e6;
+  const necesidad = r6((Number(f.cant_bruta_uso) || 0) / factor);
+  const stock = r6((Number(f.existencia_declarada) || 0) / factor);
+  return {
+    necesidad_bultos: necesidad,
+    stock_bultos: stock,
+    // Negativo = todavía falta. La pantalla solo muestra el positivo, porque lo
+    // que falta ya lo dice la columna Pendiente.
+    remanente_bultos: r6(stock + (yaComprado || 0) - necesidad)
+  };
+}
+
 // Lee el resultado materializado de un plan confirmado (no corre el motor).
 function resultadoMaterializado(plan) {
   const filas = db.prepare('SELECT * FROM pli_plan_resultado WHERE plan_id=? ORDER BY costo_estimado DESC').all(plan.id);
@@ -2009,7 +2045,8 @@ function resultadoMaterializado(plan) {
       // no tenga que saber si el plan está confirmado o en borrador.
       requerido_bultos: requerido,
       ya_comprado_bultos: yaComprado,
-      pendiente_bultos: Math.max(0, Math.round((requerido - yaComprado) * 1e6) / 1e6)
+      pendiente_bultos: Math.max(0, Math.round((requerido - yaComprado) * 1e6) / 1e6),
+      ...remanenteDe(f, yaComprado)
     };
   });
   const totales_por_moneda = {};
@@ -2100,6 +2137,7 @@ router.get('/planes/:id/calculo', wrap((req, res) => {
     l.ya_comprado_bultos = l.ya_comprado_bultos || 0;
     l.requerido_bultos = l.ya_comprado_bultos + (l.bultos_a_comprar || 0);
     l.pendiente_bultos = l.bultos_a_comprar || 0;
+    Object.assign(l, remanenteDe(l, l.ya_comprado_bultos));
   }
   const tcp = adjuntarProveedores(r.lineas);
   res.json({
