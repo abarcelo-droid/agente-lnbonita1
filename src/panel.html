@@ -38658,12 +38658,17 @@ function pliCmpRenderHechas(cont) {
     + '<th style="text-align:right">Ya comprado</th><th style="text-align:right">Pendiente</th>'
     + '<th style="min-width:130px">Avance</th></tr></thead><tbody>';
   lineas.forEach(function(l) {
-    var req = (l.ya_comprado_bultos || 0) + (l.bultos_a_comprar || 0);
-    var pct = req > 0 ? Math.min(100, (l.ya_comprado_bultos || 0) / req * 100) : 100;
+    // El backend manda los tres números ya normalizados, esté el plan confirmado o
+    // en borrador. El fallback cubre una respuesta vieja en caché del navegador.
+    var req = (l.requerido_bultos !== undefined) ? l.requerido_bultos
+            : (l.ya_comprado_bultos || 0) + (l.bultos_a_comprar || 0);
+    var comp = l.ya_comprado_bultos || 0;
+    var pend = (l.pendiente_bultos !== undefined) ? l.pendiente_bultos : l.bultos_a_comprar;
+    var pct = req > 0 ? Math.min(100, comp / req * 100) : 100;
     html += '<tr><td><strong>' + pliEsc(l.insumo_nombre) + '</strong></td>'
       + '<td class="pli-num">' + pliN(req) + ' <span class="pli-cel-chica">' + pliEsc(l.unidad_compra) + '</span></td>'
-      + '<td class="pli-num">' + pliN(l.ya_comprado_bultos || 0) + '</td>'
-      + '<td class="pli-num"><strong>' + pliN(l.bultos_a_comprar) + '</strong></td>'
+      + '<td class="pli-num">' + pliN(comp) + '</td>'
+      + '<td class="pli-num"><strong>' + pliN(pend) + '</strong></td>'
       + '<td><div style="background:var(--bor);border-radius:6px;height:14px;position:relative;overflow:hidden">'
         + '<div style="background:var(--ok,#16a34a);height:100%;width:' + pct.toFixed(1) + '%"></div></div>'
         + '<div class="pli-cel-chica">' + pct.toFixed(0) + '%</div></td></tr>';
@@ -40599,10 +40604,12 @@ function trRender() {
       // que ellos hagan un cambio de su lado. Dejar "ver acá dentro" como botón
       // principal es mandar al usuario contra la misma pared todos los días.
       //
-      // target con NOMBRE FIJO y no _blank: así reusa la misma pestaña del
-      // dashboard si ya está abierta, en vez de acumular una por cada clic.
-      + '<a class="btn bb" href="' + trEsc(e.url) + '" target="tr_dashboard" rel="noopener noreferrer"'
-      + ' style="display:inline-block;text-decoration:none">↗ Abrir el dashboard</a>'
+      // El reuso de pestaña se hace por JS y NO con target+rel en el <a>: ver
+      // trAbrirDashboard(). Con rel="noopener" (y noreferrer, que lo implica) el
+      // navegador crea la pestaña en otro grupo de contextos, así que la búsqueda
+      // por nombre no la encuentra nunca y cada clic abría una pestaña más —
+      // justo lo contrario de lo que el target con nombre buscaba.
+      + '<button class="btn bb" onclick="trAbrirDashboard()">↗ Abrir el dashboard</button>'
       + '<button class="btn bo" onclick="trVerAca()">👁 Probar acá dentro</button>'
       + '</div>'
       + '<div style="font-size:11px;color:var(--mut);margin-top:10px">'
@@ -40807,6 +40814,31 @@ function trTextoLogin() {
     + '<div style="margin-top:6px;color:var(--mut)">Mientras tanto <strong>Abrir en pestaña nueva</strong> '
     + 'funciona siempre y no requiere tocar nada.</div>'
     + '</div>';
+}
+
+// Abre el dashboard reusando SU pestaña. No se puede hacer con target+rel en un
+// <a>: rel="noopener" —y "noreferrer", que lo implica— crea la pestaña en otro
+// grupo de contextos, así que buscarla por nombre no la encuentra nunca y cada
+// clic abre una más. Justo lo contrario de lo que se buscaba.
+//
+// Se abre en blanco (mismo origen), se corta el window.opener para que la página
+// del dashboard no pueda redirigir la pestaña del panel, y recién ahí se navega.
+// Así se tiene el reuso por nombre Y la protección que daba noopener.
+function trAbrirDashboard() {
+  var e = TR.enlace;
+  if (!e || !e.url) return;
+  // Si ya la abrimos en esta sesión de la página, alcanza con traerla al frente:
+  // volver a navegar recargaría el dashboard sin motivo.
+  if (TR.win && !TR.win.closed) { try { TR.win.focus(); return; } catch (_) {} }
+  var w = window.open('', 'tr_dashboard');
+  if (!w) {
+    toast('El navegador bloqueó la ventana. Permitila para este sitio y probá de nuevo.', 'er');
+    return;
+  }
+  try { w.opener = null; } catch (_) {}
+  try { w.location.href = e.url; } catch (_) {}
+  try { w.focus(); } catch (_) {}
+  TR.win = w;
 }
 
 // La explicación sola, sin ir al servidor: cuando el problema es la sesión, las
