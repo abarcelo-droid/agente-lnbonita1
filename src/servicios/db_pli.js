@@ -466,8 +466,38 @@ try {
   // De qué proveedor es ese precio. NULL en los registros viejos: son del insumo,
   // cuando todavía no había proveedores. No se puede adivinar a cuál corresponden.
   addCol('pli_insumo_precios', 'proveedor_id',  'INTEGER');
+  // STOCK EN DEPÓSITO, en el INSUMO y no en el plan.
+  // Un insumo puede tener stock aunque ningún plan lo use, y lo que hay en el
+  // depósito es uno solo: colgarlo del plan obligaba a cargar el mismo número en
+  // cada plan y hacía que un insumo fuera de plan no tuviera dónde anotarse.
+  // En unidad de USO, que es la que consume la receta.
+  addCol('pli_insumos', 'stock_inicial', 'REAL NOT NULL DEFAULT 0');
+  addCol('pli_insumos', 'stock_actualizado_en', 'TEXT');
 } catch (e) {
   console.error('[PLI] Error en migraciones:', e.message);
+}
+
+// El stock que ya estaba cargado en los planes se sube al insumo, para no
+// perderlo ni obligar a recontar el depósito.
+//
+// Se toma el MÁXIMO entre los planes, no la suma: dos planes de la misma
+// temporada son alternativas —qué pasa si empaco esto o aquello—, no consumos que
+// se acumulan. Sumarlos inventaría stock que no existe.
+//
+// Idempotente: solo toca insumos que todavía tienen el stock en 0, así correrlo
+// de nuevo no pisa lo que el usuario haya cargado después a mano.
+try {
+  const r = db.prepare(`
+    UPDATE pli_insumos SET stock_inicial = (
+      SELECT MAX(e.cantidad) FROM pli_plan_existencias e WHERE e.insumo_id = pli_insumos.id
+    )
+    WHERE stock_inicial = 0
+      AND EXISTS (SELECT 1 FROM pli_plan_existencias e
+                   WHERE e.insumo_id = pli_insumos.id AND e.cantidad > 0)
+  `).run();
+  if (r.changes) console.log(`[PLI] Migración: stock de ${r.changes} insumo(s) subido del plan al insumo`);
+} catch (e) {
+  console.error('[PLI] Error migrando el stock al insumo:', e.message);
 }
 
 // El insumo que ya tenía proveedor cargado como texto arranca con ESE proveedor
