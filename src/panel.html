@@ -36517,6 +36517,7 @@ function pliRecetaAbrir(prodId) {
         merma_pct: l.merma_pct, motivo: l.motivo
       };
     });
+    PLI.recetaHeredadas = r.data.heredadas || [];
     pliRecetaRender();
   });
 }
@@ -36553,9 +36554,52 @@ function pliRecetaRender() {
     + '<div style="margin-top:8px;display:flex;justify-content:space-between;align-items:center">'
       + '<button class="btn bo bs" onclick="pliRecetaAgregar()" style="font-size:11px">+ agregar insumo</button>'
       + '<button class="btn bb" onclick="pliRecetaGuardar()">Guardar receta</button>'
-    + '</div></div>';
+    + '</div>'
+    // LO QUE HEREDA DEL PADRE. La receta del producto madre es común a todos sus
+    // subproductos, así que cada caja de éste la lleva también. Sin verla acá, uno
+    // revisa la receta del hijo, la ve completa, y le falta lo del padre.
+    // Va de solo lectura: se edita donde vive.
+    + pliRecetaHeredadaHtml()
+    + '</div>';
   cont.innerHTML = html;
   pliRecetaFilas();
+}
+
+function pliRecetaHeredadaHtml() {
+  var h = PLI.recetaHeredadas || [];
+  if (!h.length) return '';
+  // Agrupadas por producto: con dos niveles de herencia, mezclarlas no deja ver
+  // de dónde sale cada una.
+  var porProd = {};
+  h.forEach(function(l) {
+    var k = l.de_producto_id;
+    if (!porProd[k]) porProd[k] = { nombre: l.de_producto, lineas: [] };
+    porProd[k].lineas.push(l);
+  });
+
+  var html = '<div style="margin-top:14px;border-top:1px solid var(--bor);padding-top:12px">'
+    + '<div style="font-size:12px;font-weight:700;margin-bottom:3px">➕ Además lleva, heredado del producto</div>'
+    + '<div class="pli-cel-chica" style="margin-bottom:8px">Estos insumos están cargados en el producto madre y '
+    + 'valen para <strong>todos</strong> sus subproductos. Se suman a la receta de arriba y al costo de este '
+    + 'subproducto. Para cambiarlos, editá la receta del producto madre.</div>'
+    + '<div class="ab-table-wrap"><table class="pa-tbl" style="font-size:12px"><thead><tr>'
+    + '<th>Insumo</th><th style="text-align:right">Cantidad</th><th>cada</th>'
+    + '<th style="text-align:right">Merma</th><th>Viene de</th></tr></thead><tbody>';
+
+  Object.keys(porProd).forEach(function(k) {
+    porProd[k].lineas.forEach(function(l) {
+      html += '<tr style="background:rgba(59,130,246,.05)">'
+        + '<td>' + pliEsc(l.insumo_nombre) + '</td>'
+        + '<td class="pli-num">' + pliN(l.cantidad) + ' <span class="pli-cel-chica">' + pliEsc(l.unidad) + '</span></td>'
+        + '<td class="pli-cel-chica">cada ' + pliN(l.por_cada) + ' ' + pliEsc(PLI.recetaProd.unidad) + '</td>'
+        + '<td class="pli-num pli-cel-chica">' + (Number(l.merma_pct) > 0 ? pliN(l.merma_pct) + '%' : '—') + '</td>'
+        + '<td><span class="pli-badge pli-gris">' + pliEsc(porProd[k].nombre) + '</span> '
+          + '<button class="btn bo bs" style="padding:1px 6px;font-size:11px"'
+          + ' onclick="pliRecetaAbrir(' + k + ')" title="Editar la receta del producto madre">✎</button></td>'
+        + '</tr>';
+    });
+  });
+  return html + '</tbody></table></div></div>';
 }
 
 function pliRecetaFilas() {

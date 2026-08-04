@@ -1315,7 +1315,32 @@ router.get('/productos/:id/receta', wrap((req, res) => {
     WHERE rl.producto_id=? AND rl.version=?
     ORDER BY rl.orden, rl.id
   `).all(id, p.receta_version);
-  res.json({ ok: true, data: { producto: p, receta_version: p.receta_version, lineas } });
+  // LO QUE HEREDA DEL PADRE.
+  // La receta del producto madre es COMÚN a todos sus subproductos: se aplica a la
+  // producción completa. Mirando solo la receta del hijo no se ve lo que igual va
+  // a consumir, y ahí es donde se escapa un insumo o un costo al revisar.
+  // Se manda aparte y de solo lectura: se edita donde vive, en el padre.
+  const heredadas = [];
+  let cur = p, guarda = 0;
+  while (cur && cur.padre_id && guarda++ < 10) {
+    const padre = db.prepare('SELECT * FROM pli_productos WHERE id=? AND eliminado_en IS NULL').get(cur.padre_id);
+    if (!padre) break;
+    const suyas = db.prepare(`
+      SELECT rl.*, i.nombre AS insumo_nombre, i.unidad_uso AS insumo_unidad_uso,
+             i.unidad_compra, i.factor_compra, i.categoria
+      FROM pli_receta_lineas rl
+      JOIN pli_insumos i ON i.id = rl.insumo_id
+      WHERE rl.producto_id=? AND rl.version=?
+      ORDER BY rl.orden, rl.id
+    `).all(padre.id, padre.receta_version);
+    for (const l of suyas) heredadas.push({ ...l, de_producto_id: padre.id, de_producto: padre.nombre });
+    cur = padre;
+  }
+
+  res.json({
+    ok: true,
+    data: { producto: p, receta_version: p.receta_version, lineas, heredadas }
+  });
 }));
 
 // Reemplazo total y transaccional. No borra: bumpea la versión e inserta filas
@@ -1549,10 +1574,32 @@ router.get('/productos/:id/costo', async (req, res) => {
       db.prepare('SELECT * FROM pli_insumos WHERE sociedad_id=?').all(soc).map(i => [i.id, i])
     );
 
+    // EL COSTO DE UN SUBPRODUCTO INCLUYE LO QUE HEREDA DEL PADRE.
+    // La receta del producto madre es común a todos sus subproductos y se aplica a
+    // la producción completa: cada caja del hijo lleva también lo del padre.
+    // Calculando solo desde el hijo, ese consumo no aparecía y el costo salía de
+    // menos — justo el número que se mira para decidir precios.
+    //
+    // Se arma un árbol PLANO: cada ancestro y el propio producto como raíces sin
+    // hijos, con un objetivo de 1 cada uno. Así el motor aplica la receta de cada
+    // uno UNA vez sobre 1 unidad y suma, sin explotar a los hermanos —que es lo
+    // que pasaría si se calculara desde el padre— y sin reimplementar merma,
+    // ratios ni unidades acá.
+    const cadena = [prod];
+    let nodo = prod, guardaC = 0;
+    while (nodo && nodo.padre_id && guardaC++ < 10) {
+      nodo = db.prepare('SELECT * FROM pli_productos WHERE id=? AND eliminado_en IS NULL').get(nodo.padre_id);
+      // Solo los ancestros que APORTAN algo. Uno sin receta no suma consumo, y
+      // metiéndolo igual el motor lo reportaría como "no tiene receta" — un aviso
+      // que en esta pantalla no significa nada: acá se está costeando al hijo.
+      if (nodo && (recetas.get(nodo.id) || []).length) cadena.push(nodo);
+    }
+    const planos = cadena.map(x => ({ ...x, padre_id: null, share_pct: 100 }));
+
     const r = calcularPlan({
       plan: { id: 0 },
-      objetivos: [{ producto_id: id, cantidad: 1, unidad: prod.unidad, bucket_ini: '' }],
-      productos, recetas, insumos,
+      objetivos: cadena.map(x => ({ producto_id: x.id, cantidad: 1, unidad: prod.unidad, bucket_ini: '' })),
+      productos: planos, recetas, insumos,
       existencias: new Map(), comprado: new Map(),
       modo: 'costeo'
     });
