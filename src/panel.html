@@ -37794,6 +37794,13 @@ function pliResultadoRender() {
       ? pliN(l.cant_min_uso) + ' a ' + pliN(l.cant_max_uso) : '—';
     html += '<tr>'
       + '<td><strong>' + pliEsc(l.insumo_nombre) + '</strong>'
+        // Se renombró después de confirmar. Se muestra el nombre de hoy —es el
+        // que sirve para cruzar contra el catálogo y contra el proveedor— y el
+        // viejo queda al lado, chiquito, para que el plan viejo se siga
+        // reconociendo.
+        + (l.nombre_al_confirmar
+            ? '<div class="pli-cel-chica" title="Así se llamaba cuando se confirmó el plan">'
+              + 'antes: ' + pliEsc(l.nombre_al_confirmar) + '</div>' : '')
         + pliProvsDeLinea(l) + '</td>'
       + '<td class="pli-num">' + pliN(l.cant_bruta_uso) + ' <span class="pli-cel-chica">' + pliEsc(l.unidad_uso) + '</span></td>'
       + '<td class="pli-num pli-cel-chica">' + rango + '</td>'

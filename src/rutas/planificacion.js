@@ -2039,6 +2039,22 @@ function resultadoMaterializado(plan) {
     db.prepare('SELECT insumo_id, cantidad FROM pli_plan_existencias WHERE plan_id=?').all(plan.id)
       .map(e => [e.insumo_id, e.cantidad])
   );
+
+  // EL NOMBRE NO ES UN NÚMERO: se muestra el de HOY.
+  // Congelarlo hacía que corregir un nombre en el catálogo —"500*400*210" que en
+  // realidad era "180"— dejara al plan mostrando el nombre viejo para siempre, y
+  // el comprador no lo puede cruzar contra el catálogo ni contra el proveedor.
+  //
+  // Las UNIDADES sí siguen congeladas, y eso no es una inconsistencia: la unidad
+  // le da significado a las cantidades congeladas. Cambiarla ya está bloqueado por
+  // el propio módulo cuando el insumo está en recetas.
+  //
+  // Si el nombre cambió, el viejo queda en nombre_al_confirmar: el historial no se
+  // pierde, solo deja de ser lo que se muestra.
+  const nombreVivo = new Map(
+    db.prepare('SELECT id, nombre, categoria FROM pli_insumos WHERE sociedad_id=?').all(plan.sociedad_id)
+      .map(i => [i.id, i])
+  );
   const lineas = filas.map(f => {
     const v = vivo ? vivo.get(f.insumo_id) : null;
     // Si hay recálculo, el stock sale de la tabla viva; si no, queda el congelado.
@@ -2063,8 +2079,15 @@ function resultadoMaterializado(plan) {
     // existencias no bajaría nada.
     const pendiente = v ? (v.bultos_a_comprar || 0)
                         : Math.max(0, Math.round((requerido - yaComprado) * 1e6) / 1e6);
+    const ins = nombreVivo.get(f.insumo_id);
     return {
       ...f,
+      insumo_nombre: (ins && ins.nombre) || f.insumo_nombre,
+      categoria: (ins && ins.categoria) || f.categoria,
+      // Solo se informa si de verdad cambió: si no, la pantalla mostraría un
+      // "antes se llamaba" idéntico al nombre actual.
+      nombre_al_confirmar: (ins && ins.nombre && ins.nombre !== f.insumo_nombre)
+        ? f.insumo_nombre : null,
       existencia_declarada: fConStock.existencia_declarada,
       desglose: f.detalle_json ? JSON.parse(f.detalle_json) : [],
       // Los buckets salen del recálculo con compras y stock de hoy; los congelados
