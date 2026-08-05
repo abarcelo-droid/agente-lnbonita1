@@ -34,6 +34,7 @@ import sgTesoreriaRouter    from "./rutas/sg_tesoreria.js";
 import adminRouter         from "./rutas/admin.js";
 import planificacionRouter from "./rutas/planificacion.js";
 import spRouter            from "./rutas/sp.js";
+import fpRouter            from "./rutas/fp.js";
 import { programarProcesoCola as spProgramarCola } from "./servicios/sp_outbox.js";
 import { guardarSnapshotCRM } from "./servicios/db.js";
 import { syncSheets } from "./servicios/sheets.js";
@@ -209,6 +210,7 @@ app.use("/api/sg",     sgRouter);
 app.use("/api/admin",  adminRouter);
 app.use("/api/pli",    planificacionRouter);   // Planificación Insumos (módulo independiente)
 app.use("/api/sp",     spRouter);              // Seguimiento de Órdenes de Pago (circuito de autorización)
+app.use("/api/fp",     fpRouter);              // Planificación Financiera SG (flujo de fondos semanal)
 
 // Scout — app mobile para campo
 app.get("/scout", (req, res) => {
