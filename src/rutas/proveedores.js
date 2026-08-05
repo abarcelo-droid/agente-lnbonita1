@@ -50,8 +50,19 @@ router.get('/', (req, res) => {
   if (soloSinModelo) { sql += ' AND (asiento_modelo_id IS NULL)'; }
   sql += ' ORDER BY razon_social';
   const data = db.prepare(sql).all(...params);
-  // Flag derivado para la UI: el proveedor tiene asiento modelo asignado
-  data.forEach(p => { p.tiene_asiento_modelo = p.asiento_modelo_id ? 1 : 0; });
+  // Flags derivados para la UI. Tener asiento modelo NO alcanza: si el modelo no
+  // tiene una línea marcada como 'proveedores', la factura no se puede registrar
+  // (produccion.js:103 corta con 400). Antes la columna mostraba "✓ Sí" igual, así
+  // que el problema recién aparecía al cargar la factura, con un mensaje que
+  // además decía otra cosa.
+  const modelosConProv = new Set(
+    db.prepare("SELECT DISTINCT modelo_id FROM adm_asientos_modelo_lineas WHERE tipo_linea = 'proveedores'")
+      .all().map(r => r.modelo_id)
+  );
+  data.forEach(p => {
+    p.tiene_asiento_modelo = p.asiento_modelo_id ? 1 : 0;
+    p.modelo_sin_linea_proveedores = (p.asiento_modelo_id && !modelosConProv.has(p.asiento_modelo_id)) ? 1 : 0;
+  });
   res.json({ ok: true, data });
 });
 
@@ -59,6 +70,13 @@ router.get('/', (req, res) => {
 router.get('/:id', (req, res) => {
   const p = db.prepare('SELECT * FROM adm_proveedores WHERE id = ?').get(parseInt(req.params.id));
   if (!p) return res.status(404).json({ error: 'proveedor no encontrado' });
+  if (p.asiento_modelo_id) {
+    const m = db.prepare('SELECT nombre FROM adm_asientos_modelo WHERE id = ?').get(p.asiento_modelo_id);
+    p.asiento_modelo_nombre = m ? m.nombre : null;
+    p.modelo_sin_linea_proveedores = db.prepare(
+      "SELECT COUNT(*) n FROM adm_asientos_modelo_lineas WHERE modelo_id = ? AND tipo_linea = 'proveedores'"
+    ).get(p.asiento_modelo_id).n ? 0 : 1;
+  }
   res.json({ ok: true, data: p });
 });
 
