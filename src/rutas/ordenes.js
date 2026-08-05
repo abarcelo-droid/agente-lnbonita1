@@ -184,6 +184,7 @@ router.post('/', (req, res) => {
       // Debe: cuenta Proveedores (tomada del asiento de la factura original)
       // Haber: cuenta bancaria/caja con que se pagó
       let asientoId = null;
+      let avisoAsiento = null;   // por qué NO hay asiento, para poder mostrarlo
       try {
         // 1. Cuenta contable del banco
         let cuentaBancariaContableId = null;
@@ -259,17 +260,43 @@ router.post('/', (req, res) => {
           db.prepare('UPDATE fin_ordenes_pago SET asiento_id=? WHERE id=?').run(asientoId, opId);
           console.log(`[OP] Asiento #${asientoId} generado para ${numero} — Prov. cta ${cuentaProveedorId} / Banco cta ${cuentaBancariaContableId}`);
         } else {
-          console.log(`[OP] ${numero} sin asiento: falta ${!cuentaProveedorId ? 'cuenta proveedores (cargá la factura con asiento primero)' : 'cuenta contable del banco'}`);
+          avisoAsiento = !cuentaProveedorId
+            ? 'La orden se emitió SIN asiento contable: no se encontró la cuenta de Proveedores. Revisá que el asiento modelo del proveedor tenga una línea marcada como "Proveedores (Haber)".'
+            : 'La orden se emitió SIN asiento contable: la cuenta bancaria no tiene cuenta contable asociada.';
+          console.log(`[OP] ${numero} sin asiento: ${avisoAsiento}`);
         }
       } catch(eAsiento) {
+        // Este catch está DENTRO de la transacción y no relanza, así que la
+        // transacción commitea igual. Sin la limpieza de abajo, un error entre el
+        // INSERT de la cabecera y el de las líneas dejaba un asiento con 0 o 1
+        // línea: desbalanceado, huérfano (asiento_id se setea recién después) y
+        // por lo tanto imposible de anular desde ningún lado.
+        //
+        // No se relanza a propósito: la OP puede existir sin asiento — es lo que
+        // ya pasa cuando falta alguna cuenta. Lo que no puede quedar es un asiento
+        // a medias.
+        if (asientoId) {
+          try {
+            db.prepare('DELETE FROM pa_asientos_lineas WHERE asiento_id = ?').run(asientoId);
+            db.prepare('DELETE FROM pa_asientos WHERE id = ?').run(asientoId);
+            console.error(`[OP] Asiento #${asientoId} incompleto: se descartó entero.`);
+          } catch (eLimpieza) {
+            console.error('[OP] No se pudo limpiar el asiento incompleto:', eLimpieza.message);
+          }
+          asientoId = null;
+        }
+        avisoAsiento = 'La orden se emitió, pero el asiento contable no se pudo generar: ' + eAsiento.message;
         console.error(`[OP] Error generando asiento para ${numero}:`, eAsiento.message);
       }
 
-      return { opId, numero, asientoId };
+      return { opId, numero, asientoId, avisoAsiento };
     });
 
     const result = crear();
-    res.json({ ok: true, id: result.opId, numero: result.numero, asiento_id: result.asientoId });
+    // El aviso viaja al panel: antes esto era solo un console.log del servidor, así
+    // que una OP sin asiento se veía idéntica a una con asiento.
+    res.json({ ok: true, id: result.opId, numero: result.numero,
+               asiento_id: result.asientoId, asiento_aviso: result.avisoAsiento || null });
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 

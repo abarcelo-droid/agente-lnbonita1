@@ -16915,12 +16915,32 @@ function admModGuardar() {
   var body = { nombre: nombre, descripcion: descripcion, lineas: lineas };
   var url = id ? '/modelos/' + id : '/modelos';
   var method = id ? 'PUT' : 'POST';
+  admModEnviar(url, method, body);
+}
+
+// El backend rechaza un modelo sin línea de Proveedores, porque con ese modelo no
+// se puede registrar una factura de compra ni emitir una orden de pago. Pero hay
+// modelos legítimos que no son de compras (ventas, sueldos), así que se ofrece
+// guardarlo igual — explícitamente, nunca por omisión, que es como se llegó al
+// problema que esto viene a cerrar.
+function admModEnviar(url, method, body) {
   admModApi(url, { method: method, body: JSON.stringify(body) }).then(function(r) {
     if (r.ok) {
       toast('✓ Modelo guardado', 'ok');
       document.getElementById('adm-mb-modelo').classList.remove('on');
       admModCargar();
-    } else toast('Error: ' + (r.error || 'desconocido'), 'er');
+      return;
+    }
+    if (r.codigo === 'SIN_LINEA_PROVEEDORES' && !body.permitir_sin_proveedores) {
+      var seguir = confirm(
+        'Este modelo no tiene ninguna línea marcada como "Proveedores (Haber)".\n\n' +
+        'Así NO vas a poder registrar facturas de compra ni emitir órdenes de pago con él.\n\n' +
+        '¿Es un modelo de otra cosa (ventas, sueldos) y lo guardás igual?');
+      if (!seguir) return;
+      body.permitir_sin_proveedores = true;
+      return admModEnviar(url, method, body);
+    }
+    toast('Error: ' + (r.error || 'desconocido'), 'er');
   });
 }
 

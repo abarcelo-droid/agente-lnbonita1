@@ -46,10 +46,27 @@ Estas notas son del área contable/administrativa (módulos MD). Respetarlas al 
 - Cuando trabaja Pablo, la rama va con prefijo `pablo/feat-...` o `pablo/fix-...` (no `andy/...`).
 - Path local de Pablo: `C:\Users\pablo\Documents\agente-lnbonita1`
 
-### DOS bases de datos (¡importante no confundirlas!)
-- `src/servicios/db.js` (getDb) → base OPERATIVA: stock/producción. Tabla `pa_insumos` (con cuenta_codigo, categoria_v2, etc). Es la que usan los endpoints de insumos.
-- `src/servicios/db_pa.js` (dbPa) → base CONTABLE: `pa_cuentas`, `pa_cuentas_titulos`, `pa_cuentas_secciones`, `pa_asientos`, `adm_proveedores`, `adm_asientos_modelo(_lineas)`, `adm_config_impositiva`, `fin_cuentas`, `fin_movimientos`, `pa_insumo_modelo`.
-- Son archivos SQLite SEPARADOS. No se pueden hacer JOINs entre una y otra; si se necesita cruzar datos, se lee de cada una y se combina en JS.
+### UNA sola base de datos (esto decía lo contrario y era falso)
+- Hay **un solo archivo SQLite**: `data/clientes.db`. Verificado: las 6 llamadas a
+  `new Database(...)` del repo (db.js, db2.js, catalogo.js, catalogo_v2.js,
+  conversaciones.js, rutas/oferta.js) abren todas el mismo path, y `db_pa.js` hace
+  `import db from './db.js'` y lo re-exporta: `dbPa === getDb()`, es el mismo handle.
+- Los dos nombres siguen siendo útiles como criterio de ORGANIZACIÓN, no de archivo:
+  - `src/servicios/db.js` → tablas operativas: stock/producción, `pa_insumos`.
+  - `src/servicios/db_pa.js` → tablas contables: `pa_cuentas`, `pa_cuentas_titulos`,
+    `pa_cuentas_secciones`, `pa_asientos`, `adm_proveedores`,
+    `adm_asientos_modelo(_lineas)`, `adm_config_impositiva`, `fin_cuentas`,
+    `fin_movimientos`, `pa_insumo_modelo`.
+- **Sí se pueden hacer JOINs entre unas y otras.** Antes esto decía que no y que había
+  que leer de cada una y combinar en JS: eso es trabajo de más y código más frágil.
+- Lo que sí sigue valiendo: **no poner foreign keys hacia tablas de otro módulo**. Con
+  `foreign_keys=ON` (db.js:22), una FK desde una tabla nueva hacia, por ejemplo,
+  `sg_oc`, hace fallar los DELETE de ese módulo. JOINs de lectura sí, FKs no.
+- Ojo también: `eliminado_en` está declarado `TEXT` en las 39 tablas que lo usan, no
+  `TIMESTAMP`.
+- No abrir un handle nuevo sobre otro archivo `.db`: el graceful shutdown de
+  `index.js` hace el checkpoint del WAL sobre el handle de `db.js` únicamente, y el
+  backup del volume de Railway cubre ese archivo.
 
 ### Variable cirílica — NO tocar
 - En `panel.html` existe la variable `PA._compraНето` donde "Нето" está en CIRÍLICO (no es "Neto" con N latina). Es preexistente y funciona. NO renombrar ni "corregir": romper esto rompe la carga de facturas.
