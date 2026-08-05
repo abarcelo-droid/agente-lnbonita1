@@ -18077,6 +18077,15 @@ if(_inpGondola) _inpGondola.addEventListener('keydown', function(e){
         <option value="otro">Otro</option>
       </select>
     </div>
+    <div class="fl">
+      <label>&nbsp;</label>
+      <label style="display:flex;align-items:center;gap:7px;cursor:pointer;font-weight:600;
+                    padding:7px 10px;border:1px solid var(--bor2);border-radius:6px;white-space:nowrap"
+             title="Destildalo si el comprobante no lleva IVA ni va a los subdiarios (igual es un gasto)">
+        <input type="checkbox" id="pa-comp-fiscal" checked onchange="paCompFiscalCambio()" style="width:auto;margin:0">
+        Comprobante fiscal
+      </label>
+    </div>
     <div class="fl"><label>Campaña anual <span style="color:var(--err)">*</span></label>
       <select id="pa-comp-campaña-anual" class="ab-form-select"><option value="">— Elegir —</option></select>
     </div>
@@ -18100,6 +18109,8 @@ if(_inpGondola) _inpGondola.addEventListener('keydown', function(e){
     </div>
     <div class="fl ff"><label>Notas</label><textarea id="pa-comp-notas" rows="2"></textarea></div>
   </div>
+  <div id="pa-comp-fiscal-aviso" style="display:none;background:#fef3c7;border:1px solid #fcd34d;
+       border-radius:6px;padding:8px 12px;font-size:12px;color:#92400e;margin:6px 0 10px"></div>
 
   <!-- PRODUCTOS (compra de bienes) -->
   <div id="pa-comp-zona-productos">
@@ -20897,6 +20908,17 @@ function paAbrirNuevaCompra(){
   document.getElementById('pa-comp-fecha').value=new Date().toISOString().slice(0,10);
   document.getElementById('pa-comp-factura').value='';
   document.getElementById('pa-comp-tipo-comp').value='factura';
+  // Vuelve a FISCAL, que es el caso normal, y re-habilita los controles de IVA:
+  // sin esto, después de cargar una no fiscal la siguiente factura abre con los
+  // campos de IVA deshabilitados y no hay forma de volver atrás.
+  var _fis = document.getElementById('pa-comp-fiscal');
+  if (_fis) _fis.checked = true;
+  PA._fiscalPrevio = null;
+  var _avi = document.getElementById('pa-comp-fiscal-aviso');
+  if (_avi) _avi.style.display = 'none';
+  ['pa-comp-percep-iva','pa-comp-percep-gan','pa-comp-percep-iibb'].forEach(function(id){
+    var el = document.getElementById(id); if (el) el.disabled = false;
+  });
   paPoblarCampañasModal('pa-comp-campaña-anual','pa-comp-campaña-estacional'); // default: activas
   paCompRecargarProveedores(null);
   document.getElementById('pa-comp-notas').value='';
@@ -21006,6 +21028,7 @@ function paAgregarItemServicio(){
       +'</div>'
     +'</div>';
   document.getElementById('pa-comp-items-srv').appendChild(row);
+  paCompFiscalAplicarAFila('pa-cs-iva-'+n);
   paActTotalComp();
 }
 function paGuardarCompra(){
@@ -21154,7 +21177,8 @@ function paGuardarCompra(){
     campaña_anual_id: compCampAnual, campaña_estacional_id: compCampEstac||null,
     percep_iva: PA._compraPercep?.iva || 0,
     percep_ganancias: PA._compraPercep?.gan || 0,
-    percep_iibb: PA._compraPercep?.iibb || 0
+    percep_iibb: PA._compraPercep?.iibb || 0,
+    es_fiscal: paCompEsFiscal() ? 1 : 0
   };
   if (esServicio) body.tipo_factura = 'servicio';
 
@@ -21173,6 +21197,14 @@ function paGuardarCompra(){
       if (!esServicio) paF('/api/pa/insumos').then(function(r2){PA.insumos=r2.data||[];});
     } else toast(r.error||'Error','er');
   });
+}
+// Una fila agregada mientras el comprobante está en NO FISCAL tiene que nacer en
+// 0 y deshabilitada. El total ya sale bien igual (paActTotalComp fuerza el cero),
+// pero mostrar "21%" en una factura sin IVA es una contradicción en pantalla.
+function paCompFiscalAplicarAFila(sel) {
+  if (paCompEsFiscal()) return;
+  var el = document.getElementById(sel);
+  if (el) { el.value = '0'; el.disabled = true; }
 }
 function paAgregarItemCompra(){
   var n=PA.compN++;
@@ -21282,6 +21314,7 @@ function paAgregarItemCompra(){
       +'<select id="pa-ci-cuenta-sel-'+n+'" style="width:100%;font-size:12px"><option value="">— Elegí —</option></select>'
     +'</div>';
   document.getElementById('pa-comp-items').appendChild(row);
+  paCompFiscalAplicarAFila('pa-ci-iva-'+n);
   // Inicializar tipos según la categoría default (herramientas_panol)
   paNewProdCatCambio(n);
 }
@@ -21646,6 +21679,47 @@ function paOnModoCambio(n){
   paActTotalComp();
 }
 
+// ── Comprobante fiscal / no fiscal ────────────────────────────────────────
+// Un comprobante NO FISCAL no lleva IVA ni percepciones y no va a los subdiarios,
+// pero sigue siendo un gasto y sigue yendo a la cuenta corriente del proveedor.
+function paCompEsFiscal() {
+  var el = document.getElementById('pa-comp-fiscal');
+  return !el || el.checked;   // ausente ⇒ fiscal, que es el caso normal
+}
+
+// Al destildar se ponen las alícuotas y las percepciones en CERO y se deshabilitan
+// los controles. La alternativa —guardarlos escondidos y reponerlos— deja una
+// factura con IVA cargado que no se ve en ningún lado, y eso reaparece en un total
+// meses después sin que nadie entienda de dónde salió. Los valores se recuerdan
+// solo para poder deshacer el destildado en el momento, y ese recuerdo vive en
+// memoria: no se manda ni se guarda.
+function paCompFiscalCambio() {
+  var fiscal = paCompEsFiscal();
+  var ivas = [];
+  document.querySelectorAll('[id^=pa-ci-iva-],[id^=pa-cs-iva-]').forEach(function(el){ ivas.push(el); });
+  var percep = ['pa-comp-percep-iva','pa-comp-percep-gan','pa-comp-percep-iibb']
+    .map(function(id){ return document.getElementById(id); }).filter(Boolean);
+
+  if (!fiscal) {
+    PA._fiscalPrevio = { iva: ivas.map(function(e){ return e.value; }),
+                         percep: percep.map(function(e){ return e.value; }) };
+    ivas.forEach(function(e){ e.value = '0'; e.disabled = true; });
+    percep.forEach(function(e){ e.value = '0'; e.disabled = true; });
+  } else {
+    var prev = PA._fiscalPrevio;
+    ivas.forEach(function(e, i){ e.disabled = false; if (prev && prev.iva[i] !== undefined) e.value = prev.iva[i]; });
+    percep.forEach(function(e, i){ e.disabled = false; if (prev && prev.percep[i] !== undefined) e.value = prev.percep[i]; });
+    PA._fiscalPrevio = null;
+  }
+  var aviso = document.getElementById('pa-comp-fiscal-aviso');
+  if (aviso) {
+    aviso.style.display = fiscal ? 'none' : '';
+    aviso.textContent = 'Comprobante NO FISCAL: se pusieron en cero el IVA y las percepciones. '
+      + 'El asiento no va a llevar línea de IVA, aunque el asiento modelo la tenga.';
+  }
+  paActTotalComp();
+}
+
 function paActTotalComp(){
   var neto=0, iva=0;
   document.querySelectorAll('[id^=pa-ci-row-]').forEach(function(row){
@@ -21693,11 +21767,17 @@ function paActTotalComp(){
     if (sub) sub.textContent = paMoney2(sTotal);
     neto += monto; iva += sIva;
   });
-  var total=neto+iva;
   // Sumar percepciones
   var percepIva  = parseFloat((document.getElementById('pa-comp-percep-iva')  || {}).value || 0);
   var percepGan  = parseFloat((document.getElementById('pa-comp-percep-gan')  || {}).value || 0);
   var percepIibb = parseFloat((document.getElementById('pa-comp-percep-iibb') || {}).value || 0);
+
+  // NO FISCAL: sin IVA ni percepciones. La guarda es acá y no solo en el
+  // deshabilitado de los controles, porque el lector de comprobantes escribe las
+  // alícuotas por código y saltearía cualquier control visual.
+  if (!paCompEsFiscal()) { iva = 0; percepIva = percepGan = percepIibb = 0; }
+
+  var total=neto+iva;
   var percepciones = percepIva + percepGan + percepIibb;
   total += percepciones;
   PA._compraTotal   = total;

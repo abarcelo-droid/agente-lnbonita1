@@ -384,6 +384,23 @@ export function getCampañaActiva() {
   } catch(e) { console.error('[PA] Error migrando pa_compras:', e.message); }
 })();
 
+// ── MIGRACIÓN: es_fiscal en pa_compras ────────────────────────────────────
+// Un comprobante NO FISCAL no lleva IVA ni percepciones y no va a los subdiarios
+// de IVA, pero sigue siendo un gasto de la empresa.
+//
+// DEFAULT 1 (fiscal) NO es negociable: con default 0 todas las compras ya
+// cargadas pasarían a interpretarse como no fiscales, que es exactamente el tipo
+// de error que dejó a tipo_linea en 'libre' para todo el histórico.
+(function() {
+  try {
+    const cols = db.prepare("PRAGMA table_info(pa_compras)").all().map(c => c.name);
+    if (!cols.includes('es_fiscal')) {
+      db.exec("ALTER TABLE pa_compras ADD COLUMN es_fiscal INTEGER NOT NULL DEFAULT 1");
+      console.log("[PA] es_fiscal agregado en pa_compras (default 1 = fiscal)");
+    }
+  } catch(e) { console.error('[PA] Error migrando es_fiscal:', e.message); }
+})();
+
 // ── MIGRACIÓN: iva_porcentaje / iva_monto en pa_compras_items ─────────────
 (function() {
   try {

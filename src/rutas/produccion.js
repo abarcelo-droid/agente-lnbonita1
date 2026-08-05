@@ -73,9 +73,11 @@ function round2(n) { return Math.round((Number(n) || 0) * 100) / 100; }
 //   DEBE  → IVA Crédito Fiscal (config impositiva global)
 //   DEBE  → percepciones (config impositiva global) si hay montos
 //   HABER → Proveedores (del asiento modelo del proveedor) = total
+// NO FISCAL (es_fiscal = 0): sin línea de IVA ni de percepciones, aunque el asiento
+//   modelo las tenga. total = neto. Es un gasto real que no computa IVA.
 // Para bienes, cada item debe traer it._modeloLineas (líneas del modelo del insumo).
 // Lanza Error con mensaje claro si falta una cuenta o un modelo.
-function construirLineasAsientoCompra({ dbPa, items, neto_total, iva_total, percep, total, modeloLineas, configImp, esServicio }) {
+function construirLineasAsientoCompra({ dbPa, items, neto_total, iva_total, percep, total, modeloLineas, configImp, esServicio, esFiscal = true }) {
   const lineas = [];
   const TIPOS_NO_GASTO = ['proveedores', 'iva', 'percepcion_iva', 'percepcion_iibb', 'percepcion_ganancias', 'retencion'];
 
@@ -133,20 +135,26 @@ function construirLineasAsientoCompra({ dbPa, items, neto_total, iva_total, perc
   }
 
   // 2) DEBE — IVA Crédito Fiscal (global)
-  if (round2(iva_total) > 0) {
+  // En un comprobante NO FISCAL no hay línea de IVA aunque el asiento modelo la
+  // tenga: el modelo describe la forma habitual del asiento, no una obligación.
+  // (El caller ya puso iva_total en 0, así que esto es la segunda red.)
+  if (esFiscal && round2(iva_total) > 0) {
     if (!configImp.iva_credito_fiscal) {
       throw new Error('Falta configurar la cuenta de IVA Crédito Fiscal en Configuración Impositiva Global');
     }
     lineas.push({ cuenta_id: configImp.iva_credito_fiscal, debe: round2(iva_total), haber: 0, descripcion: 'IVA Crédito Fiscal' });
   }
 
-  // 3) DEBE — percepciones (global) si tienen monto
-  [['percepcion_iva', percep.iva], ['percepcion_iibb', percep.iibb], ['percepcion_ganancias', percep.gan]].forEach(function(par) {
-    const clave = par[0], monto = round2(par[1]);
-    if (monto > 0 && configImp[clave]) {
-      lineas.push({ cuenta_id: configImp[clave], debe: monto, haber: 0, descripcion: clave.replace(/_/g, ' ') });
-    }
-  });
+  // 3) DEBE — percepciones (global) si tienen monto. Tampoco en un no fiscal:
+  // una percepción es un impuesto, y un comprobante sin IVA no las tiene.
+  if (esFiscal) {
+    [['percepcion_iva', percep.iva], ['percepcion_iibb', percep.iibb], ['percepcion_ganancias', percep.gan]].forEach(function(par) {
+      const clave = par[0], monto = round2(par[1]);
+      if (monto > 0 && configImp[clave]) {
+        lineas.push({ cuenta_id: configImp[clave], debe: monto, haber: 0, descripcion: clave.replace(/_/g, ' ') });
+      }
+    });
+  }
 
   // 4) HABER — Proveedores (cuenta determinada arriba: del modelo del proveedor en servicios,
   //    del modelo de los insumos en bienes). Una sola línea consolidada por el total.
@@ -1014,8 +1022,13 @@ router.post('/compras', requireAuth, (req, res) => {
   const db = getDb();
   const { fecha, proveedor_id, proveedor_txt, nro_factura, tipo_comprobante, campaña_id,
           campaña_anual_id, campaña_estacional_id, items, notas, remito_foto_b64,
-          tipo_factura } = req.body;
+          tipo_factura, es_fiscal } = req.body;
   if (!items?.length) return res.status(400).json({ ok: false, error: 'Debe incluir al menos un item' });
+  // COMPROBANTE NO FISCAL: no lleva IVA ni percepciones y no va a los subdiarios,
+  // pero sigue siendo un gasto y sigue yendo a la cuenta corriente del proveedor.
+  // Ausente ⇒ FISCAL: cualquier cliente que no mande el campo (el lector de
+  // comprobantes, un script) sigue comportándose como antes.
+  const esFiscal = !(es_fiscal === 0 || es_fiscal === false || es_fiscal === '0' || es_fiscal === 'false');
   // Validar que el proveedor esté en el padrón ADM
   if (!proveedor_id) return res.status(400).json({ ok: false, error: 'Debe seleccionar un proveedor del padrón' });
   const proveedorPadron = db.prepare('SELECT id FROM adm_proveedores WHERE id = ? AND activo = 1').get(parseInt(proveedor_id));
@@ -1092,9 +1105,24 @@ router.post('/compras', requireAuth, (req, res) => {
     if (req.body.iva_monto != null && !items.some(it => it.iva_porcentaje != null)) {
       iva_total = Number(req.body.iva_monto);
     }
-    const percep_iva       = parseFloat(req.body.percep_iva       || 0);
-    const percep_ganancias = parseFloat(req.body.percep_ganancias || 0);
-    const percep_iibb      = parseFloat(req.body.percep_iibb      || 0);
+    let percep_iva       = parseFloat(req.body.percep_iva       || 0);
+    let percep_ganancias = parseFloat(req.body.percep_ganancias || 0);
+    let percep_iibb      = parseFloat(req.body.percep_iibb      || 0);
+    // NO FISCAL: sin IVA ni percepciones, pase lo que pase. El servidor no confía
+    // en que el front los haya puesto en cero.
+    //
+    // Va DESPUÉS del override de iva_monto de arriba a propósito: si fuera antes,
+    // un body con iva_monto reinyectaría IVA en un comprobante marcado no fiscal.
+    //
+    // Y se ponen en cero los montos ADEMÁS de sacar la línea del asiento: si solo
+    // se sacara la línea, el haber (Proveedores = total, con IVA) quedaría mayor
+    // que el debe y la verificación de partida doble cortaría con "el asiento no
+    // cuadra". Las dos cosas van juntas o no funciona ninguna.
+    if (!esFiscal) {
+      iva_total = 0;
+      percep_iva = percep_ganancias = percep_iibb = 0;
+      for (const it of items) { it.iva_porcentaje = null; it._ivaMonto = 0; }
+    }
     const total = neto_total + iva_total + percep_iva + percep_ganancias + percep_iibb;
 
     // ── VALIDACIÓN + CONSTRUCCIÓN DEL ASIENTO (antes de crear la compra) ──────
@@ -1139,7 +1167,7 @@ router.post('/compras', requireAuth, (req, res) => {
         lineasAsientoPrebuilt = construirLineasAsientoCompra({
           dbPa, items, neto_total, iva_total,
           percep: { iva: percep_iva, gan: percep_ganancias, iibb: percep_iibb },
-          total, modeloLineas: modeloLineasProveedor, configImp, esServicio,
+          total, modeloLineas: modeloLineasProveedor, configImp, esServicio, esFiscal,
         });
       } catch (eBuild) {
         return res.status(400).json({ ok: false, error: eBuild.message });
@@ -1175,8 +1203,8 @@ router.post('/compras', requireAuth, (req, res) => {
         INSERT INTO pa_compras (fecha, proveedor_id, proveedor_txt, nro_factura, tipo_comprobante, campaña_id,
                                 campaña_anual_id, campaña_estacional_id,
                                 subtotal, iva_monto, total, notas, remito_foto_path,
-                                iva_total, neto_total, tipo_factura)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                                iva_total, neto_total, tipo_factura, es_fiscal)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
       `).run(fecha||new Date().toISOString().slice(0,10),
              null,  // proveedor_id siempre NULL — evita FK con pa_proveedores
              proveedorNombre,
@@ -1185,7 +1213,8 @@ router.post('/compras', requireAuth, (req, res) => {
              anualFinal, estacionalFinal,
              neto_total, iva_total, total, notas||null, remito_foto_path,
              iva_total, neto_total,
-             esServicio ? 'servicio' : 'compra');
+             esServicio ? 'servicio' : 'compra',
+             esFiscal ? 1 : 0);
       const compraId = r.lastInsertRowid;
 
       // Helper: detectar si un insumo es de la categoría pañol
@@ -1329,7 +1358,10 @@ router.post('/compras', requireAuth, (req, res) => {
         if (ultimo?.ref_codigo) { const p = ultimo.ref_codigo.split('-'); seq = (parseInt(p[2])||0)+1; }
         const refCodigo = `FAC-${año}-${String(seq).padStart(4,'0')}`;
         const prov = dbPa.prepare('SELECT razon_social FROM adm_proveedores WHERE id=?').get(parseInt(proveedor_id));
-        const desc = `${refCodigo} | ${prov?.razon_social||'Proveedor'} | ${nro_factura||'S/N'}`;
+        // El "| NO FISCAL" en la descripción es la única huella del flag dentro del
+        // asiento: pa_asientos no tiene columna propia, y sin esto un asiento sin
+        // línea de IVA se ve igual a uno de un proveedor exento.
+        const desc = `${refCodigo} | ${prov?.razon_social||'Proveedor'} | ${nro_factura||'S/N'}${esFiscal ? '' : ' | NO FISCAL'}`;
         const fechaCompra = req.body.fecha || new Date().toISOString().slice(0,10);
 
         const txAsiento = dbPa.transaction(() => {
