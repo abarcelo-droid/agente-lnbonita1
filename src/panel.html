@@ -16728,6 +16728,7 @@ function paCompAsientoCargar(provId) {
           // "el asiento modelo no tiene línea de Proveedores" sin nombrarlo obliga
           // a adivinar entre todos los modelos.
           PA._asientoModeloNombre = (rp.data && rp.data.asiento_modelo_nombre) || null;
+          PA._provRubro = (rp.data && rp.data.rubro) || null;
           if (modeloId) {
             admModApi('/modelos/' + modeloId).then(function(rm) {
               PA._asientoLineasModelo = (rm.data && rm.data.lineas) || [];
@@ -16768,6 +16769,7 @@ function paCompAsientoRebuild() {
   var lineas = [];
   var faltanCuentas = [];
   var provCuentaId = null;   // cuenta de Proveedores (Haber)
+  var diag = null;           // por qué no se resolvió, solo en bienes
   var TIPOS_NO_GASTO = ['proveedores','iva','percepcion_iva','percepcion_iibb','percepcion_ganancias','retencion'];
 
   function gastoLineaDe(mLineas){
@@ -16795,6 +16797,10 @@ function paCompAsientoRebuild() {
   } else {
     // Bienes: gasto agrupado por la cuenta de gasto del modelo de CADA insumo
     var netoPorCuentaId = {}; // cuenta_id → neto
+    // Por qué NO se pudo resolver la cuenta de Proveedores. Sin esto el preview
+    // culpaba al modelo del proveedor, que en una factura de bienes ni siquiera
+    // se usa: acá el asiento sale del modelo de cada PRODUCTO.
+    diag = { conProducto: 0, sinModelo: [], sinLineaProv: [] };
     document.querySelectorAll('[id^=pa-ci-row-]').forEach(function(row){
       var n = row.dataset.n;
       var insEl = document.getElementById('pa-ci-ins-'+n);
@@ -16805,13 +16811,14 @@ function paCompAsientoRebuild() {
       var sNeto = cantBul * prec;
       if (sNeto <= 0) return;
       var nombreItem = insEl.selectedOptions[0] ? insEl.selectedOptions[0].textContent : ('producto '+n);
+      diag.conProducto++;
       var ins = (PA.insumos||[]).find(function(i){ return String(i.id) === String(insId); });
       var mLineas = ins ? ins.asiento_modelo_lineas : null;
-      if (!mLineas || !mLineas.length) { faltanCuentas.push(nombreItem); return; }
+      if (!mLineas || !mLineas.length) { faltanCuentas.push(nombreItem); diag.sinModelo.push(nombreItem); return; }
       var gl = gastoLineaDe(mLineas);
       if (!gl) { faltanCuentas.push(nombreItem); return; }
       netoPorCuentaId[gl.cuenta_id] = paRound2((netoPorCuentaId[gl.cuenta_id]||0) + sNeto);
-      if (!provCuentaId) { var pl = provLineaDe(mLineas); if (pl) provCuentaId = pl.cuenta_id; }
+      if (!provCuentaId) { var pl = provLineaDe(mLineas); if (pl) provCuentaId = pl.cuenta_id; else diag.sinLineaProv.push(nombreItem); }
     });
     Object.keys(netoPorCuentaId).forEach(function(cid){
       var cuenta = paCompCuentaPorId(cid);
@@ -16854,14 +16861,28 @@ function paCompAsientoRebuild() {
     // de línea se agregó por migración con default 'libre', a los modelos viejos
     // les pasa a todos. Decirle "sin asiento modelo" manda a asignar uno que ya
     // está asignado, y el problema no se resuelve nunca.
-    var hayModelo = !!(PA._asientoLineasModelo && PA._asientoLineasModelo.length);
-    var quien = esServicio ? 'El proveedor' : 'El producto';
     var msg;
-    if (!hayModelo) {
-      msg = '⚠ ' + quien + ' no tiene asiento modelo asignado';
+    if (esServicio) {
+      // Servicios: la cuenta sale del modelo del PROVEEDOR.
+      var hayModelo = !!(PA._asientoLineasModelo && PA._asientoLineasModelo.length);
+      msg = !hayModelo
+        ? '⚠ El proveedor no tiene asiento modelo asignado'
+        : '⚠ El asiento modelo' + (PA._asientoModeloNombre ? ' "' + PA._asientoModeloNombre + '"' : '') +
+          ' no tiene ninguna línea marcada como "Proveedores (Haber)"';
+    } else if (!diag || !diag.conProducto) {
+      // Bienes sin ningún producto elegido. Antes acá se culpaba al modelo del
+      // proveedor, que en una factura de bienes ni se mira: el mensaje mandaba a
+      // corregir algo que estaba bien y el problema no se resolvía nunca.
+      msg = '⚠ Todavía no elegiste ningún producto';
+      if (PA._provRubro === 'servicios') {
+        msg += ' — ojo: este proveedor es de rubro Servicios, ¿va en la solapa "Servicio"?';
+      }
+    } else if (diag.sinModelo.length) {
+      msg = '⚠ El producto "' + diag.sinModelo[0] + '" no tiene asiento modelo asignado'
+          + (diag.sinModelo.length > 1 ? ' (y ' + (diag.sinModelo.length - 1) + ' más)' : '');
     } else {
-      msg = '⚠ El asiento modelo' + (esServicio && PA._asientoModeloNombre ? ' "' + PA._asientoModeloNombre + '"' : '') +
-            ' no tiene ninguna línea marcada como "Proveedores (Haber)"';
+      msg = '⚠ El asiento modelo del producto "' + (diag.sinLineaProv[0] || '') +
+            '" no tiene ninguna línea marcada como "Proveedores (Haber)"';
     }
     lineas.push({ cuenta_codigo: '', cuenta_nombre: msg, debe: 0, haber: paRound2(total), descripcion: 'Proveedores' });
   }
