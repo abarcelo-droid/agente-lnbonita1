@@ -716,6 +716,26 @@ router.post('/modelos', requireAdmin, (req, res) => {
   const tieneHaber = lineas.some(l => l.lado === 'haber');
   if (!tieneDebе || !tieneHaber)
     return res.status(400).json({ error: 'El modelo debe tener al menos 1 línea en el debe y 1 en el haber' });
+  // Sin una línea marcada "Proveedores (Haber)" el modelo no sirve: la factura de
+  // compra se corta con 400 y la orden de pago no encuentra la cuenta. Se valida
+  // acá y no solo en el editor porque cada guardado hace `l.tipo_linea || 'libre'`
+  // más abajo: un navegador con el panel cacheado viejo, o cualquier otro cliente
+  // HTTP, volvería a romper el modelo en silencio.
+  //
+  // No se adivina la línea al elegir HABER en el front: en un modelo de venta
+  // (HABER Ventas) esa adivinanza marcaría Ventas como cuenta de Proveedores y
+  // generaría asientos balanceados pero contablemente falsos, que se descubren
+  // meses después. Un 400 con el usuario parado en el editor es preferible.
+  const _prov = lineas.filter(l => l.tipo_linea === 'proveedores');
+  if (_prov.length > 1)
+    return res.status(400).json({ error: 'El modelo no puede tener más de una línea de tipo "Proveedores".' });
+  if (_prov.length === 1 && _prov[0].lado !== 'haber')
+    return res.status(400).json({ error: 'La línea de tipo "Proveedores" tiene que ir en el HABER.' });
+  if (_prov.length === 0 && req.body.permitir_sin_proveedores !== true)
+    return res.status(400).json({
+      codigo: 'SIN_LINEA_PROVEEDORES',
+      error: 'El modelo no tiene ninguna línea marcada como "Proveedores (Haber)". Sin ella no se pueden registrar facturas de compra ni emitir órdenes de pago con este modelo.'
+    });
   // Bloquear cuentas NO imputables (rubros agrupadores: cuentas padre)
   for (const l of lineas) {
     if (l.cuenta_id && !cuentaEsImputable(db, parseInt(l.cuenta_id))) {
@@ -749,6 +769,26 @@ router.put('/modelos/:id', requireAdmin, (req, res) => {
   const tieneHaber = lineas.some(l => l.lado === 'haber');
   if (!tieneDebе || !tieneHaber)
     return res.status(400).json({ error: 'El modelo debe tener al menos 1 línea en el debe y 1 en el haber' });
+  // Sin una línea marcada "Proveedores (Haber)" el modelo no sirve: la factura de
+  // compra se corta con 400 y la orden de pago no encuentra la cuenta. Se valida
+  // acá y no solo en el editor porque cada guardado hace `l.tipo_linea || 'libre'`
+  // más abajo: un navegador con el panel cacheado viejo, o cualquier otro cliente
+  // HTTP, volvería a romper el modelo en silencio.
+  //
+  // No se adivina la línea al elegir HABER en el front: en un modelo de venta
+  // (HABER Ventas) esa adivinanza marcaría Ventas como cuenta de Proveedores y
+  // generaría asientos balanceados pero contablemente falsos, que se descubren
+  // meses después. Un 400 con el usuario parado en el editor es preferible.
+  const _prov = lineas.filter(l => l.tipo_linea === 'proveedores');
+  if (_prov.length > 1)
+    return res.status(400).json({ error: 'El modelo no puede tener más de una línea de tipo "Proveedores".' });
+  if (_prov.length === 1 && _prov[0].lado !== 'haber')
+    return res.status(400).json({ error: 'La línea de tipo "Proveedores" tiene que ir en el HABER.' });
+  if (_prov.length === 0 && req.body.permitir_sin_proveedores !== true)
+    return res.status(400).json({
+      codigo: 'SIN_LINEA_PROVEEDORES',
+      error: 'El modelo no tiene ninguna línea marcada como "Proveedores (Haber)". Sin ella no se pueden registrar facturas de compra ni emitir órdenes de pago con este modelo.'
+    });
   for (const l of lineas) {
     if (l.cuenta_id && !cuentaEsImputable(db, parseInt(l.cuenta_id))) {
       const c = db.prepare('SELECT codigo, nombre FROM pa_cuentas WHERE id = ?').get(parseInt(l.cuenta_id));
@@ -924,10 +964,21 @@ router.get('/config-impositiva', (req, res) => {
 router.put('/config-impositiva', requireAuth, (req, res) => {
   const { clave, cuenta_id } = req.body || {};
   if (!clave) return res.status(400).json({ ok: false, error: 'clave requerida' });
+  // Whitelist: el UPSERT de abajo crearía una fila nueva con cualquier clave que
+  // llegue, y esa fila después aparece en la pantalla de configuración.
+  const CLAVES = ['iva_credito_fiscal', 'iva_debito_fiscal', 'percepcion_iva',
+                  'percepcion_iibb', 'percepcion_ganancias', 'retencion'];
+  if (!CLAVES.includes(clave)) return res.status(400).json({ ok: false, error: 'clave desconocida: ' + clave });
   try {
-    db.prepare(`
-      UPDATE adm_config_impositiva SET cuenta_id = ? WHERE clave = ?
-    `).run(cuenta_id ? parseInt(cuenta_id) : null, clave);
+    // UPSERT y no UPDATE: si la clave no estaba sembrada, el UPDATE afectaba 0
+    // filas y el panel igual mostraba "✓ Configuración guardada". Así quedó
+    // iva_credito_fiscal, que ni siquiera estaba en el seed: imposible de
+    // configurar, y sin ella ninguna factura con IVA se puede registrar.
+    const r = db.prepare(`
+      INSERT INTO adm_config_impositiva (clave, cuenta_id) VALUES (?, ?)
+      ON CONFLICT(clave) DO UPDATE SET cuenta_id = excluded.cuenta_id
+    `).run(clave, cuenta_id ? parseInt(cuenta_id) : null);
+    if (!r.changes) return res.status(500).json({ ok: false, error: 'No se pudo guardar la configuración' });
     res.json({ ok: true });
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });

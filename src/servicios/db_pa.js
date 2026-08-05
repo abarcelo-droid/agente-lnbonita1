@@ -373,6 +373,14 @@ export function getCampañaActiva() {
       db.exec("ALTER TABLE pa_compras ADD COLUMN neto_total REAL");
       console.log("[PA] neto_total agregado en pa_compras");
     }
+    // MIGRACIÓN PERDIDA: produccion.js escribe tipo_factura en el INSERT de la
+    // compra (:1178) y filtra por él en el GET (:992), pero en el repo no había
+    // ningún ALTER que creara la columna. Sobre una base nueva, registrar una
+    // factura moría con "table pa_compras has no column named tipo_factura".
+    if (!cols.includes('tipo_factura')) {
+      db.exec("ALTER TABLE pa_compras ADD COLUMN tipo_factura TEXT DEFAULT 'compra'");
+      console.log("[PA] tipo_factura agregado en pa_compras");
+    }
   } catch(e) { console.error('[PA] Error migrando pa_compras:', e.message); }
 })();
 
@@ -408,6 +416,21 @@ export function getCampañaActiva() {
     if (!cols.includes('precio_modo')) {
       db.exec("ALTER TABLE pa_compras_items ADD COLUMN precio_modo TEXT DEFAULT 'base'");
       console.log("[PA] precio_modo agregado en pa_compras_items");
+    }
+    // MIGRACIONES PERDIDAS: las tres se escriben en el INSERT de items de una
+    // factura de servicios (produccion.js:1219-1236) y se leen en el detalle
+    // (:1004-1005), pero no existía el ALTER que las creara.
+    if (!cols.includes('concepto')) {
+      db.exec("ALTER TABLE pa_compras_items ADD COLUMN concepto TEXT");
+      console.log("[PA] concepto agregado en pa_compras_items");
+    }
+    if (!cols.includes('lote_id')) {
+      db.exec("ALTER TABLE pa_compras_items ADD COLUMN lote_id INTEGER");
+      console.log("[PA] lote_id agregado en pa_compras_items");
+    }
+    if (!cols.includes('cuenta_codigo')) {
+      db.exec("ALTER TABLE pa_compras_items ADD COLUMN cuenta_codigo TEXT");
+      console.log("[PA] cuenta_codigo agregado en pa_compras_items");
     }
   } catch(e) { console.error('[PA] Error migrando pa_compras_items:', e.message); }
 })();
@@ -2617,6 +2640,13 @@ db.exec(`
     `);
     // Insertar claves si no existen
     const claves = [
+      // iva_credito_fiscal FALTABA, y es la que más se usa: produccion.js:137-139
+      // corta con 400 toda factura con IVA > 0 si no está configurada. Como el PUT
+      // era un UPDATE sobre una fila inexistente (0 filas afectadas) y el panel
+      // igual toasteaba "guardado", la cuenta era imposible de configurar desde la
+      // UI. O sea: ninguna factura con IVA se podía registrar.
+      ['iva_credito_fiscal',   'IVA Crédito Fiscal'],
+      ['iva_debito_fiscal',    'IVA Débito Fiscal'],
       ['percepcion_iva',       'Percepción IVA'],
       ['percepcion_iibb',      'Percepción IIBB'],
       ['percepcion_ganancias', 'Percepción Ganancias'],
@@ -3567,6 +3597,151 @@ db.exec(`
       console.log(`[PA-MIGRACION] Normalización de códigos: ${arregladas} cuenta(s) renumeradas, ${omitidas} omitida(s).`);
     }
   } catch(e) { console.error('[PA-MIGRACION] Error normalizando códigos de cuentas:', e.message); }
+})();
+
+// ── MIGRACIÓN: reparar tipo_linea en los asientos modelo ────────────────────
+// La columna tipo_linea se agregó por ALTER con DEFAULT 'libre' (más arriba en
+// este mismo archivo), así que TODA línea creada antes de esa migración quedó en
+// 'libre' — incluida la de Proveedores. Consecuencias, las dos silenciosas:
+//   · produccion.js corta con 400 cualquier factura de compra contra ese modelo,
+//     con un mensaje que además decía "el proveedor no tiene asiento modelo";
+//   · ordenes.js no encuentra la cuenta del proveedor y la OP se emite sin ella.
+//
+// La reparación va en dos pasadas con criterios muy distintos, y por eso tienen
+// políticas de corrida distintas:
+//
+//   PASADA 1 — EXACTA. Marca iva / percepciones / retención cruzando la cuenta de
+//   la línea contra las cuentas configuradas en adm_config_impositiva. No hay
+//   nada que adivinar: si la línea apunta a la cuenta de IVA Crédito Fiscal, es
+//   la línea de IVA. Corre EN CADA ARRANQUE, porque la cuenta de IVA CF recién se
+//   puede configurar ahora (antes el PUT no guardaba), y una migración de una
+//   sola vez se perdería la marca para siempre.
+//
+//   Por qué importa más de lo que parece: gastoLineaDe() (produccion.js) toma la
+//   PRIMERA línea del debe cuyo tipo no sea impositivo, leyendo por id. Si en un
+//   modelo la línea de IVA quedó en 'libre' y se cargó antes que la de gasto,
+//   TODO el neto se imputa a IVA Crédito Fiscal — con la partida doble cerrando y
+//   sin un solo error a la vista.
+//
+//   PASADA 2 — HEURÍSTICA. Marca 'proveedores'. Corre UNA SOLA VEZ, con marca en
+//   pa_cuentas_log: si corriera siempre, le revertiría al admin cualquier línea
+//   que él haya puesto a propósito en "Libre".
+//
+// Se marca solo cuando hay UN candidato al haber, anclado por el nombre de la
+// SECCIÓN del plan de cuentas (la sembrada es '2.01 PROVEEDORES'). Descartados a
+// propósito:
+//   · "la única línea del haber": un modelo de venta (DEBE Caja / HABER Ventas)
+//     también tiene una sola, y quedaría con Ventas marcada como Proveedores. Eso
+//     no falla: genera un asiento balanceado y contablemente basura, que aparece
+//     semanas después en el balance.
+//   · el código '2.01.%' literal: la normalización de códigos de más arriba los
+//     renumera en cada arranque.
+//   · buscar 'PROVEEDOR' en el nombre de la cuenta a secas: "Anticipos a
+//     Proveedores" es un ACTIVO (otros créditos) y daría falso positivo.
+// Lo ambiguo (2+ candidatos) y lo que no tiene candidato NO se toca: se loguea
+// con nombre y con a cuántos proveedores e insumos afecta. Preferible dejarlo
+// para corrección manual antes que imputar mal.
+(function repararTipoLineaModelos() {
+  const MARCA = 'migracion_tipo_linea_v1';
+  try {
+    const hayTabla = db.prepare(
+      "SELECT 1 FROM sqlite_master WHERE type='table' AND name='adm_asientos_modelo_lineas'").get();
+    if (!hayTabla) return;
+
+    // ── PASADA 1 — exacta, en cada arranque ──────────────────────────────
+    // IVA y percepciones solo al DEBE: una línea de IVA al haber sería Débito
+    // Fiscal, de un modelo de venta. La retención va en los dos lados.
+    const MAPA = [
+      ['iva_credito_fiscal',   'iva',                  " AND lado = 'debe'"],
+      ['percepcion_iva',       'percepcion_iva',       " AND lado = 'debe'"],
+      ['percepcion_iibb',      'percepcion_iibb',      " AND lado = 'debe'"],
+      ['percepcion_ganancias', 'percepcion_ganancias', " AND lado = 'debe'"],
+      ['retencion',            'retencion',            ''],
+    ];
+    let impositivas = 0;
+    for (const [clave, tipo, filtroLado] of MAPA) {
+      const r = db.prepare(
+        `UPDATE adm_asientos_modelo_lineas SET tipo_linea = ?
+          WHERE tipo_linea = 'libre'${filtroLado}
+            AND cuenta_id IN (SELECT cuenta_id FROM adm_config_impositiva
+                               WHERE clave = ? AND cuenta_id IS NOT NULL)`).run(tipo, clave);
+      impositivas += r.changes;
+    }
+    if (impositivas) console.log(`[PA-MIGRACION] tipo_linea: ${impositivas} línea(s) impositiva(s) clasificada(s).`);
+
+    // ── PASADA 2 — heurística, una sola vez ──────────────────────────────
+    const yaCorrio = db.prepare('SELECT 1 FROM pa_cuentas_log WHERE accion = ?').get(MARCA);
+    if (!yaCorrio) {
+      const candidatos = db.prepare(`
+        SELECT l.id AS linea_id, l.modelo_id, m.nombre AS modelo_nombre,
+               c.codigo AS cuenta_codigo, c.nombre AS cuenta_nombre
+          FROM adm_asientos_modelo_lineas l
+          JOIN adm_asientos_modelo m       ON m.id = l.modelo_id
+          JOIN pa_cuentas c                ON c.id = l.cuenta_id
+          LEFT JOIN pa_cuentas_secciones s ON s.id = c.seccion_id
+         WHERE l.lado = 'haber'
+           AND l.tipo_linea = 'libre'
+           AND (   upper(s.nombre) LIKE '%PROVEEDOR%'
+                OR upper(s.nombre) LIKE '%ACREEDOR%'
+                OR (s.grupo = 'pasivo' AND upper(c.nombre) LIKE 'PROVEEDOR%'))
+           AND l.modelo_id NOT IN (SELECT modelo_id FROM adm_asientos_modelo_lineas
+                                    WHERE tipo_linea = 'proveedores')
+         ORDER BY l.modelo_id, l.orden, l.id`).all();
+
+      const porModelo = {};
+      for (const c of candidatos) (porModelo[c.modelo_id] = porModelo[c.modelo_id] || []).push(c);
+
+      const audit = { marcados: [], ambiguos: [] };
+      const upd = db.prepare(
+        "UPDATE adm_asientos_modelo_lineas SET tipo_linea='proveedores' WHERE id=? AND tipo_linea='libre'");
+
+      db.transaction(() => {
+        for (const mid of Object.keys(porModelo)) {
+          const arr = porModelo[mid];
+          if (arr.length === 1) {
+            upd.run(arr[0].linea_id);
+            audit.marcados.push({ modelo_id: +mid, modelo: arr[0].modelo_nombre, linea_id: arr[0].linea_id,
+                                  anterior: 'libre', cuenta: arr[0].cuenta_codigo + ' — ' + arr[0].cuenta_nombre });
+          } else {
+            audit.ambiguos.push({ modelo_id: +mid, modelo: arr[0].modelo_nombre,
+                                  candidatas: arr.map(a => a.cuenta_codigo + ' — ' + a.cuenta_nombre) });
+          }
+        }
+        // El detalle guarda linea_id y el valor anterior de cada línea tocada, así
+        // que revertir esto es un UPDATE con esos ids.
+        db.prepare('INSERT INTO pa_cuentas_log (accion, detalle) VALUES (?, ?)')
+          .run(MARCA, JSON.stringify(audit));
+      })();
+
+      console.log(`[PA-MIGRACION] tipo_linea: ${audit.marcados.length} modelo(s) con Proveedores marcado, ` +
+                  `${audit.ambiguos.length} ambiguo(s).`);
+      audit.marcados.forEach(m =>
+        console.log(`[PA-MIGRACION]   ✓ Modelo #${m.modelo_id} "${m.modelo}" → ${m.cuenta}`));
+      audit.ambiguos.forEach(m =>
+        console.warn(`[PA-MIGRACION]   ⚠ Modelo #${m.modelo_id} "${m.modelo}": ${m.candidatas.length} candidatas al haber ` +
+                     `(${m.candidatas.join(' | ')}) — MARCAR A MANO`));
+    }
+
+    // ── Reporte en cada arranque: qué sigue roto Y en uso ────────────────
+    // Se acota a los modelos vinculados a un proveedor o a un insumo: son los que
+    // efectivamente van a fallar. Los de venta o sueldos no tienen por qué tener
+    // línea de proveedores y llenarían el log de ruido.
+    const rotos = db.prepare(`
+      SELECT m.id, m.nombre, m.activo,
+             (SELECT COUNT(*) FROM adm_proveedores p   WHERE p.asiento_modelo_id  = m.id) AS provs,
+             (SELECT COUNT(*) FROM pa_insumo_modelo im WHERE im.asiento_modelo_id = m.id) AS insumos
+        FROM adm_asientos_modelo m
+       WHERE NOT EXISTS (SELECT 1 FROM adm_asientos_modelo_lineas l
+                          WHERE l.modelo_id = m.id AND l.tipo_linea = 'proveedores')
+         AND (   EXISTS (SELECT 1 FROM adm_proveedores p   WHERE p.asiento_modelo_id  = m.id)
+              OR EXISTS (SELECT 1 FROM pa_insumo_modelo im WHERE im.asiento_modelo_id = m.id))
+       ORDER BY m.id`).all();
+    rotos.forEach(m => console.warn(
+      `[PA-MIGRACION]   ✗ Modelo #${m.id} "${m.nombre}" sigue SIN línea de Proveedores ` +
+      `(lo usan ${m.provs} proveedor/es y ${m.insumos} insumo/s): marcala a mano en Asientos Modelo.`));
+  } catch (e) {
+    console.error('[PA-MIGRACION] Error reparando tipo_linea:', e.message);
+  }
 })();
 
 export { db };
