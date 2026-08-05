@@ -21721,15 +21721,18 @@ function paCompFiscalCambio() {
   var percep = ['pa-comp-percep-iva','pa-comp-percep-gan','pa-comp-percep-iibb']
     .map(function(id){ return document.getElementById(id); }).filter(Boolean);
 
+  // Los valores se recuerdan POR ID, no por posición: si entre destildar y volver a
+  // tildar se borra un renglón, con índices los porcentajes se corren de fila (el
+  // 10,5% aparece donde iba el 21%) y el IVA sale mal — y así se guarda.
   if (!fiscal) {
-    PA._fiscalPrevio = { iva: ivas.map(function(e){ return e.value; }),
-                         percep: percep.map(function(e){ return e.value; }) };
-    ivas.forEach(function(e){ e.value = '0'; e.disabled = true; });
-    percep.forEach(function(e){ e.value = '0'; e.disabled = true; });
+    PA._fiscalPrevio = {};
+    ivas.concat(percep).forEach(function(e){ PA._fiscalPrevio[e.id] = e.value; e.value = '0'; e.disabled = true; });
   } else {
-    var prev = PA._fiscalPrevio;
-    ivas.forEach(function(e, i){ e.disabled = false; if (prev && prev.iva[i] !== undefined) e.value = prev.iva[i]; });
-    percep.forEach(function(e, i){ e.disabled = false; if (prev && prev.percep[i] !== undefined) e.value = prev.percep[i]; });
+    var prev = PA._fiscalPrevio || {};
+    ivas.concat(percep).forEach(function(e){
+      e.disabled = false;
+      if (prev[e.id] !== undefined) e.value = prev[e.id];   // una fila nueva no está: se deja como vino
+    });
     PA._fiscalPrevio = null;
   }
   var aviso = document.getElementById('pa-comp-fiscal-aviso');

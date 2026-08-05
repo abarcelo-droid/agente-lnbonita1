@@ -384,6 +384,61 @@ export function getCampañaActiva() {
   } catch(e) { console.error('[PA] Error migrando pa_compras:', e.message); }
 })();
 
+// ── MIGRACIÓN: insumo_id nullable en pa_compras_items ─────────────────────
+// Una factura de SERVICIOS no tiene productos: produccion.js inserta insumo_id en
+// null a propósito. Pero la tabla nació con insumo_id NOT NULL el primer día del
+// módulo y ninguna migración lo cambió, así que TODA factura de servicios moría
+// con "NOT NULL constraint failed: pa_compras_items.insumo_id".
+//
+// No se notaba porque el error estaba tapado: la validación del asiento modelo
+// cortaba antes con 400. Al destrabar eso, este muro quedó a la vista.
+//
+// SQLite no puede sacar un NOT NULL con ALTER: hay que reconstruir la tabla. Las
+// columnas se leen de PRAGMA table_info en vez de escribirlas a mano, porque la
+// tabla acumuló 10 columnas por ALTER a lo largo del tiempo y una lista fija se
+// olvidaría de las que se agreguen después.
+(function() {
+  try {
+    const cols = db.prepare("PRAGMA table_info(pa_compras_items)").all();
+    if (!cols.length) return;
+    const insumo = cols.find(c => c.name === 'insumo_id');
+    if (!insumo || !insumo.notnull) return;      // ya está nullable: nada que hacer
+
+    // foreign_keys se apaga FUERA de la transacción (SQLite ignora el pragma si se
+    // cambia adentro) y se vuelve a prender al final, pase lo que pase.
+    db.pragma('foreign_keys = OFF');
+    try {
+      const defs = cols.map(c => {
+        const partes = ['"' + c.name + '"', c.type || ''];
+        if (c.pk) partes.push('PRIMARY KEY AUTOINCREMENT');
+        // El NOT NULL se conserva en todas MENOS en insumo_id, que es el objetivo.
+        else if (c.notnull && c.name !== 'insumo_id') partes.push('NOT NULL');
+        if (c.dflt_value !== null && c.dflt_value !== undefined) partes.push('DEFAULT ' + c.dflt_value);
+        return partes.filter(Boolean).join(' ');
+      });
+      defs.push('FOREIGN KEY (compra_id) REFERENCES pa_compras(id)');
+      defs.push('FOREIGN KEY (insumo_id) REFERENCES pa_insumos(id)');
+      const lista = cols.map(c => '"' + c.name + '"').join(', ');
+
+      db.transaction(() => {
+        db.exec('CREATE TABLE pa_compras_items_nueva (' + defs.join(', ') + ')');
+        db.exec('INSERT INTO pa_compras_items_nueva (' + lista + ') SELECT ' + lista + ' FROM pa_compras_items');
+        db.exec('DROP TABLE pa_compras_items');
+        db.exec('ALTER TABLE pa_compras_items_nueva RENAME TO pa_compras_items');
+      })();
+
+      const rotas = db.prepare('PRAGMA foreign_key_check(pa_compras_items)').all();
+      if (rotas.length) console.warn('[PA] pa_compras_items: ' + rotas.length + ' fila(s) con FK rota tras la reconstrucción');
+      const n = db.prepare('SELECT COUNT(*) n FROM pa_compras_items').get().n;
+      console.log('[PA] pa_compras_items reconstruida: insumo_id ahora acepta NULL (facturas de servicio). ' + n + ' fila(s) conservadas.');
+    } finally {
+      db.pragma('foreign_keys = ON');
+    }
+  } catch(e) {
+    console.error('[PA] Error haciendo insumo_id nullable:', e.message);
+  }
+})();
+
 // ── MIGRACIÓN: es_fiscal en pa_compras ────────────────────────────────────
 // Un comprobante NO FISCAL no lleva IVA ni percepciones y no va a los subdiarios
 // de IVA, pero sigue siendo un gasto de la empresa.
