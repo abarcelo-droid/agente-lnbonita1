@@ -1206,7 +1206,10 @@ router.post('/compras', requireAuth, (req, res) => {
                                 iva_total, neto_total, tipo_factura, es_fiscal)
         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
       `).run(fecha||new Date().toISOString().slice(0,10),
-             null,  // proveedor_id siempre NULL — evita FK con pa_proveedores
+             proveedor_id ? parseInt(proveedor_id) : null,   // vínculo con adm_proveedores
+             // Antes iba NULL porque la FK apuntaba a pa_proveedores, una tabla
+             // vieja. Sin el vínculo, la cuenta corriente del proveedor daba $0 y
+             // la orden de pago no encontraba ninguna factura pendiente.
              proveedorNombre,
              nro_factura||null, tipo_comprobante||'factura',
              anualFinal,  // campaña_id viejo = anual (retrocompat)

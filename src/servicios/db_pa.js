@@ -413,7 +413,10 @@ export function getCampañaActiva() {
         if (c.pk) partes.push('PRIMARY KEY AUTOINCREMENT');
         // El NOT NULL se conserva en todas MENOS en insumo_id, que es el objetivo.
         else if (c.notnull && c.name !== 'insumo_id') partes.push('NOT NULL');
-        if (c.dflt_value !== null && c.dflt_value !== undefined) partes.push('DEFAULT ' + c.dflt_value);
+        // Entre paréntesis SIEMPRE: PRAGMA table_info devuelve el default SIN los
+        // paréntesis externos, y "DEFAULT date('now','localtime')" pelado es un
+        // error de sintaxis en SQLite. Envolver un literal también es válido.
+        if (c.dflt_value !== null && c.dflt_value !== undefined) partes.push('DEFAULT (' + c.dflt_value + ')');
         return partes.filter(Boolean).join(' ');
       });
       defs.push('FOREIGN KEY (compra_id) REFERENCES pa_compras(id)');
@@ -436,6 +439,102 @@ export function getCampañaActiva() {
     }
   } catch(e) {
     console.error('[PA] Error haciendo insumo_id nullable:', e.message);
+  }
+})();
+
+// ── MIGRACIÓN: pa_compras.proveedor_id apunta al padrón que se usa de verdad ──
+// La foreign key de proveedor_id apuntaba a pa_proveedores, una tabla vieja, pero
+// el padrón real es adm_proveedores. Para no violar la FK, el alta de facturas
+// guardaba proveedor_id en NULL — y las pantallas que muestran la deuda buscan
+// justamente por esa columna:
+//   · GET /api/pa/cc/proveedores hace LEFT JOIN pa_compras ON c.proveedor_id = p.id
+//     (produccion.js), así que la cuenta corriente daba $0 para todos;
+//   · pagos.js filtra las facturas pendientes por c.proveedor_id, así que el modal
+//     de Nueva Orden de Pago decía "sin facturas pendientes" siempre.
+// El módulo de combustible no lo sufre porque cruza por nombre (produccion.js).
+//
+// La FK NO se reemplaza por otra hacia adm_proveedores: queda como puntero blando,
+// que es la convención del repo para apuntar a otro módulo. Con foreign_keys=ON,
+// una FK dura haría fallar el borrado de un proveedor que tenga facturas, y eso es
+// una decisión del padrón, no de la tabla de compras.
+(function() {
+  try {
+    const cols = db.prepare("PRAGMA table_info(pa_compras)").all();
+    if (!cols.length) return;
+    const fks = db.prepare("PRAGMA foreign_key_list(pa_compras)").all();
+    const sobra = fks.find(f => f.from === 'proveedor_id');
+    if (!sobra) {                       // ya migrada: solo queda rellenar
+      rellenarProveedorId();
+      return;
+    }
+
+    db.pragma('foreign_keys = OFF');
+    try {
+      const defs = cols.map(c => {
+        const partes = ['"' + c.name + '"', c.type || ''];
+        if (c.pk) partes.push('PRIMARY KEY AUTOINCREMENT');
+        else if (c.notnull) partes.push('NOT NULL');
+        // Entre paréntesis SIEMPRE: PRAGMA table_info devuelve el default SIN los
+        // paréntesis externos, y "DEFAULT date('now','localtime')" pelado es un
+        // error de sintaxis en SQLite. Envolver un literal también es válido.
+        if (c.dflt_value !== null && c.dflt_value !== undefined) partes.push('DEFAULT (' + c.dflt_value + ')');
+        return partes.filter(Boolean).join(' ');
+      });
+      // Se conservan TODAS las foreign keys menos la de proveedor_id.
+      for (const f of fks) {
+        if (f.from === 'proveedor_id') continue;
+        defs.push('FOREIGN KEY ("' + f.from + '") REFERENCES "' + f.table + '"("' + f.to + '")');
+      }
+      const lista = cols.map(c => '"' + c.name + '"').join(', ');
+
+      db.transaction(() => {
+        db.exec('CREATE TABLE pa_compras_nueva (' + defs.join(', ') + ')');
+        db.exec('INSERT INTO pa_compras_nueva (' + lista + ') SELECT ' + lista + ' FROM pa_compras');
+        db.exec('DROP TABLE pa_compras');
+        db.exec('ALTER TABLE pa_compras_nueva RENAME TO pa_compras');
+      })();
+      const n = db.prepare('SELECT COUNT(*) n FROM pa_compras').get().n;
+      console.log('[PA] pa_compras reconstruida: proveedor_id ya no está atado a pa_proveedores. ' + n + ' factura(s) conservadas.');
+    } finally {
+      db.pragma('foreign_keys = ON');
+    }
+
+    rellenarProveedorId();
+  } catch (e) {
+    console.error('[PA] Error migrando proveedor_id de pa_compras:', e.message);
+  }
+
+  // Rellena el vínculo de las facturas viejas cruzando por razón social. Solo
+  // cuando el nombre identifica a UN proveedor: con dos homónimos, adivinar
+  // mandaría la deuda a la cuenta corriente equivocada, que es peor que dejarla
+  // sin vincular.
+  function rellenarProveedorId() {
+    try {
+      const sinVinculo = db.prepare(
+        "SELECT COUNT(*) n FROM pa_compras WHERE proveedor_id IS NULL AND IFNULL(proveedor_txt,'') <> ''").get().n;
+      if (!sinVinculo) return;
+
+      const r = db.prepare(`
+        UPDATE pa_compras SET proveedor_id = (
+          SELECT p.id FROM adm_proveedores p
+           WHERE p.razon_social = pa_compras.proveedor_txt COLLATE NOCASE)
+         WHERE proveedor_id IS NULL
+           AND IFNULL(proveedor_txt,'') <> ''
+           AND (SELECT COUNT(*) FROM adm_proveedores p2
+                 WHERE p2.razon_social = pa_compras.proveedor_txt COLLATE NOCASE) = 1`).run();
+
+      const quedan = db.prepare(
+        "SELECT COUNT(*) n FROM pa_compras WHERE proveedor_id IS NULL AND IFNULL(proveedor_txt,'') <> ''").get().n;
+      console.log('[PA] Cuenta corriente: ' + r.changes + ' factura(s) vinculadas a su proveedor por razón social' +
+                  (quedan ? ', ' + quedan + ' sin vincular (nombre que no está en el padrón o repetido)' : '.'));
+      if (quedan) {
+        db.prepare(`SELECT DISTINCT proveedor_txt FROM pa_compras
+                     WHERE proveedor_id IS NULL AND IFNULL(proveedor_txt,'') <> '' LIMIT 20`).all()
+          .forEach(x => console.warn('[PA]   · sin vincular: "' + x.proveedor_txt + '"'));
+      }
+    } catch (e) {
+      console.error('[PA] Error rellenando proveedor_id:', e.message);
+    }
   }
 })();
 
