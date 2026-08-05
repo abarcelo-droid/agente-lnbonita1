@@ -11201,6 +11201,19 @@ function sgRepExport(){
     .sp-err { background:#fee2e2; color:#991b1b } .sp-gris { background:#f1f5f9; color:#64748b }
     .sp-fila-venc td { background:rgba(239,68,68,.06) }
     .sp-num { text-align:right; font-family:ui-monospace,Consolas,monospace }
+    /* Campo de plata con el signo $ fijo adelante. El signo va en un span aparte y
+       NO dentro del value: si estuviera en el value habría que sacarlo en cada
+       lectura, y alcanza con que alguien se olvide una vez para guardar un cero. */
+    .sp-money { position:relative; display:inline-block }
+    .sp-money > .sp-money-sig { position:absolute; left:7px; top:50%; transform:translateY(-50%);
+      color:var(--mut); font-size:12px; pointer-events:none; font-family:ui-monospace,Consolas,monospace }
+    .sp-money > input { padding-left:19px }
+    /* Sin flechitas de subir/bajar: en un importe estorban para escribir, ocupan
+       justo donde uno apunta a hacer click, y con el foco puesto la rueda del mouse
+       cambia el número sin que nadie lo haya pedido. */
+    .sp-num[type=number]::-webkit-outer-spin-button,
+    .sp-num[type=number]::-webkit-inner-spin-button { -webkit-appearance:none; margin:0 }
+    .sp-num[type=number] { -moz-appearance:textfield }
     .sp-chica { font-size:11px; color:var(--mut) }
     .sp-inp { font-size:13px; padding:5px 7px; min-height:30px; box-sizing:border-box }
     /* Línea de tiempo del expediente */
@@ -11296,8 +11309,9 @@ function sgRepExport(){
          miles, y 4230000.33 sin puntos se lee mal y se tipea peor. El formato se
          arma mientras se escribe y se devuelve el número crudo al guardar. -->
     <div class="fl"><label>Monto *</label>
-      <input id="sp-n-monto" type="text" inputmode="decimal" class="sp-inp sp-num"
-             placeholder="0,00" autocomplete="off" oninput="spMontoFormatear(this)"></div>
+      <span class="sp-money" style="display:block"><span class="sp-money-sig">$</span>
+      <input id="sp-n-monto" type="text" inputmode="decimal" class="sp-inp sp-num" style="width:100%"
+             placeholder="0,00" autocomplete="off" oninput="spMontoFormatear(this)"></span></div>
     <div class="fl"><label>Moneda</label>
       <select id="sp-n-moneda" class="sp-inp"><option value="ARS">ARS</option><option value="USD">USD</option></select>
     </div>
@@ -40450,11 +40464,15 @@ function spPagoQuitar(i) {
 
 function spPagoSet(i, campo, valor) {
   if (!SP.pagos[i]) return;
-  SP.pagos[i][campo] = valor;
-  if (campo !== 'importe') return;
+  if (campo !== 'importe') { SP.pagos[i][campo] = valor; return; }
+  // El campo MUESTRA "1.234.567,89" pero acá se guarda el NÚMERO: spPagoSuma hace
+  // Number(p.importe) y con los puntos de miles daría NaN — o sea 0 — y la
+  // composición del pago cerraría mal sin que se note.
+  var n = spMontoValor(valor);
+  SP.pagos[i].importe = (n === null ? '' : n);
   // Vaciar el importe devuelve la línea al reparto: es la forma de deshacer un
   // número puesto a mano sin tener que adivinar cuál era el automático.
-  SP.pagos[i].auto = String(valor).trim() === '';
+  SP.pagos[i].auto = (n === null);
   spPagoRepartir();
   spPagoRender();
 }
@@ -40484,12 +40502,14 @@ function spPagoRender() {
           ' <span class="sp-chica">#' + (SP.pagos.filter(function(q, j) {
             return q.tipo === p.tipo && j <= i; }).length) + '</span>';
         return '<tr><td><strong>' + spEsc(SP_PAGO_ETQ[p.tipo]) + '</strong>' + nro + '</td>'
-          + '<td><input type="number" step="any" min="0" class="sp-inp sp-num" style="width:120px"'
-            + ' value="' + spEsc(String(p.importe === '' ? '' : p.importe)) + '"'
+          + '<td><span class="sp-money"><span class="sp-money-sig">$</span>'
+          + '<input type="text" inputmode="decimal" autocomplete="off" class="sp-inp sp-num" style="width:120px"'
+            + ' value="' + spEsc(spMontoTexto(p.importe)) + '"'
             + (p.auto && p.tipo === 'cheque_propio'
                 ? ' title="Se reparte solo entre los cheques propios. Escribí un importe para fijarlo."'
                 : '')
-            + ' onchange="spPagoSet(' + i + ',\'importe\',this.value)">'
+            + ' oninput="spMontoFormatear(this)"'
+            + ' onchange="spPagoSet(' + i + ',\'importe\',this.value)"></span>'
           // Se marca cuál se está repartiendo solo: si no, ver moverse un número
           // que uno no tocó da la sensación de que el panel hace cualquier cosa.
           + (p.auto && p.tipo === 'cheque_propio' ? '<div class="sp-chica">repartido</div>' : '')
