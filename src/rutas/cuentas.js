@@ -676,8 +676,14 @@ router.get('/asientos/:id(\\d+)', (req, res) => {
 
 // GET /api/pa/cuentas/modelos
 router.get('/modelos', (req, res) => {
+  // tiene_linea_proveedores: sin una línea marcada 'proveedores' el modelo NO
+  // sirve para facturas de compra ni para órdenes de pago — construirLineasAsientoCompra
+  // (produccion.js:103) corta con 400, y ordenes.js:222 no encuentra la cuenta.
+  // Como tipo_linea se agregó por migración con DEFAULT 'libre', todos los modelos
+  // anteriores a esa migración quedaron sin la marca aunque la línea exista.
   const modelos = db.prepare(`
-    SELECT m.*, COUNT(l.id) as cant_lineas
+    SELECT m.*, COUNT(l.id) as cant_lineas,
+           MAX(CASE WHEN l.tipo_linea = 'proveedores' THEN 1 ELSE 0 END) AS tiene_linea_proveedores
     FROM adm_asientos_modelo m
     LEFT JOIN adm_asientos_modelo_lineas l ON l.modelo_id = m.id
     WHERE m.activo = 1

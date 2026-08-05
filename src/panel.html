@@ -16381,7 +16381,7 @@ function admPcEliminarTitulo(id) {
 // ═══════════════════════════════════════════════════════════════════════════
 var ADM_PROV_CB = null;
 function admProvApi(path,opts){opts=opts||{};opts.headers=opts.headers||{'Content-Type':'application/json'};return fetch('/api/pa/proveedores'+path,opts).then(function(r){return r.json();}).catch(function(){return{ok:false,error:'Error de red'};});}
-function admProvCargar(){var q=(document.getElementById('adm-prov-buscar')||{}).value||'';var rubro=(document.getElementById('adm-prov-rubro')||{}).value||'';var verInact=(document.getElementById('adm-prov-ver-inact')||{}).checked;var sinModelo=(document.getElementById('adm-prov-sin-modelo')||{}).checked;var qs=[];if(q)qs.push('q='+encodeURIComponent(q));if(rubro)qs.push('rubro='+encodeURIComponent(rubro));if(verInact)qs.push('activo=todos');if(sinModelo)qs.push('sin_modelo=1');admProvApi('?'+qs.join('&')).then(function(r){var data=r.data||[];var tb=document.getElementById('adm-prov-tbody');if(!data.length){tb.innerHTML='<tr><td colspan="9" class="emp">Sin proveedores. <button class="btn bo bs" onclick="admProvAbrirNuevo()">+ Agregar el primero</button></td></tr>';return;}var ivaL={responsable_inscripto:'RI',monotributista:'Monotrib.',exento:'Exento',no_responsable:'No Resp.'};var rubL={insumos:'Insumos',servicios:'Servicios',transporte:'Transporte',construccion:'Construcción',combustible:'Combustible',otro:'Otro'};var pagL={contado:'Contado','15_dias':'15 días','30_dias':'30 días','60_dias':'60 días','90_dias':'90 días'};tb.innerHTML=data.map(function(p){var rs=p.activo?'':' style="opacity:.5"';var est=p.activo?'<span class="pa-badge pa-verde-bg">Activo</span>':'<span class="pa-badge pa-gris-bg">Inactivo</span>';var asiento=p.tiene_asiento_modelo?'<span class="pa-badge pa-verde-bg" style="font-size:10px">✓ Sí</span>':'<span class="pa-badge" style="background:#fee2e2;color:#991b1b;font-size:10px">✗ Falta</span>';var btn=p.activo?'<button class="btn bd bs" onclick="admProvDesactivar('+p.id+')" style="padding:3px 8px;font-size:11px">🗑</button>':'<button class="btn bo bs" onclick="admProvReactivar('+p.id+')" style="padding:3px 8px;font-size:11px;color:var(--ok);border-color:var(--ok)">↺</button>';return'<tr'+rs+'><td><strong>'+(p.razon_social||'—')+'</strong>'+(p.nombre_comercial?'<div style="font-size:11px;color:var(--mut)">'+p.nombre_comercial+'</div>':'')+(p.contacto?'<div style="font-size:10px;color:var(--sub)">👤 '+p.contacto+'</div>':'')+'</td><td style="font-family:monospace;font-size:12px">'+(p.cuit||'—')+'</td><td><span class="pa-badge pa-azul-bg" style="font-size:10px">'+(ivaL[p.condicion_iva]||p.condicion_iva||'—')+'</span></td><td style="font-size:12px;color:var(--mut)">'+(rubL[p.rubro]||p.rubro||'—')+'</td><td style="font-size:12px">'+(p.telefono||'—')+(p.email?'<div style="font-size:10px;color:var(--mut)">'+p.email+'</div>':'')+'</td><td style="font-size:12px;color:var(--mut)">'+(pagL[p.condicion_pago]||p.condicion_pago||'—')+'</td><td style="text-align:center">'+asiento+'</td><td style="text-align:center">'+est+'</td><td style="text-align:right;white-space:nowrap"><button class="btn bo bs" onclick="admProvEditar('+p.id+')" style="padding:3px 8px;font-size:11px;margin-right:4px">✏️</button>'+btn+'</td></tr>';}).join('');});}
+function admProvCargar(){var q=(document.getElementById('adm-prov-buscar')||{}).value||'';var rubro=(document.getElementById('adm-prov-rubro')||{}).value||'';var verInact=(document.getElementById('adm-prov-ver-inact')||{}).checked;var sinModelo=(document.getElementById('adm-prov-sin-modelo')||{}).checked;var qs=[];if(q)qs.push('q='+encodeURIComponent(q));if(rubro)qs.push('rubro='+encodeURIComponent(rubro));if(verInact)qs.push('activo=todos');if(sinModelo)qs.push('sin_modelo=1');admProvApi('?'+qs.join('&')).then(function(r){var data=r.data||[];var tb=document.getElementById('adm-prov-tbody');if(!data.length){tb.innerHTML='<tr><td colspan="9" class="emp">Sin proveedores. <button class="btn bo bs" onclick="admProvAbrirNuevo()">+ Agregar el primero</button></td></tr>';return;}var ivaL={responsable_inscripto:'RI',monotributista:'Monotrib.',exento:'Exento',no_responsable:'No Resp.'};var rubL={insumos:'Insumos',servicios:'Servicios',transporte:'Transporte',construccion:'Construcción',combustible:'Combustible',otro:'Otro'};var pagL={contado:'Contado','15_dias':'15 días','30_dias':'30 días','60_dias':'60 días','90_dias':'90 días'};tb.innerHTML=data.map(function(p){var rs=p.activo?'':' style="opacity:.5"';var est=p.activo?'<span class="pa-badge pa-verde-bg">Activo</span>':'<span class="pa-badge pa-gris-bg">Inactivo</span>';var asiento=!p.tiene_asiento_modelo?'<span class="pa-badge" style="background:#fee2e2;color:#991b1b;font-size:10px">✗ Falta</span>':(p.modelo_sin_linea_proveedores?'<span class="pa-badge" style="background:#fef3c7;color:#92400e;font-size:10px" title="El modelo está asignado pero ninguna de sus líneas está marcada como Proveedores (Haber), así que la factura no se va a poder registrar">⚠ Sin línea Prov.</span>':'<span class="pa-badge pa-verde-bg" style="font-size:10px">✓ Sí</span>');var btn=p.activo?'<button class="btn bd bs" onclick="admProvDesactivar('+p.id+')" style="padding:3px 8px;font-size:11px">🗑</button>':'<button class="btn bo bs" onclick="admProvReactivar('+p.id+')" style="padding:3px 8px;font-size:11px;color:var(--ok);border-color:var(--ok)">↺</button>';return'<tr'+rs+'><td><strong>'+(p.razon_social||'—')+'</strong>'+(p.nombre_comercial?'<div style="font-size:11px;color:var(--mut)">'+p.nombre_comercial+'</div>':'')+(p.contacto?'<div style="font-size:10px;color:var(--sub)">👤 '+p.contacto+'</div>':'')+'</td><td style="font-family:monospace;font-size:12px">'+(p.cuit||'—')+'</td><td><span class="pa-badge pa-azul-bg" style="font-size:10px">'+(ivaL[p.condicion_iva]||p.condicion_iva||'—')+'</span></td><td style="font-size:12px;color:var(--mut)">'+(rubL[p.rubro]||p.rubro||'—')+'</td><td style="font-size:12px">'+(p.telefono||'—')+(p.email?'<div style="font-size:10px;color:var(--mut)">'+p.email+'</div>':'')+'</td><td style="font-size:12px;color:var(--mut)">'+(pagL[p.condicion_pago]||p.condicion_pago||'—')+'</td><td style="text-align:center">'+asiento+'</td><td style="text-align:center">'+est+'</td><td style="text-align:right;white-space:nowrap"><button class="btn bo bs" onclick="admProvEditar('+p.id+')" style="padding:3px 8px;font-size:11px;margin-right:4px">✏️</button>'+btn+'</td></tr>';}).join('');});}
 function admProvCargarModelosSelect(selectedId) {
   var sel = document.getElementById('adm-prov-modelo-id');
   if (!sel) return;
@@ -16452,6 +16452,10 @@ function paCompAsientoCargar(provId) {
         .then(function(rp) {
           wrap.style.display = '';
           var modeloId = rp.data && rp.data.asiento_modelo_id;
+          // Se guarda el nombre del modelo para poder decir CUÁL hay que arreglar:
+          // "el asiento modelo no tiene línea de Proveedores" sin nombrarlo obliga
+          // a adivinar entre todos los modelos.
+          PA._asientoModeloNombre = (rp.data && rp.data.asiento_modelo_nombre) || null;
           if (modeloId) {
             admModApi('/modelos/' + modeloId).then(function(rm) {
               PA._asientoLineasModelo = (rm.data && rm.data.lineas) || [];
@@ -16572,7 +16576,22 @@ function paCompAsientoRebuild() {
     var pc = paCompCuentaPorId(provCuentaId);
     lineas.push({ cuenta_codigo: pc?pc.codigo:'', cuenta_nombre: pc?pc.nombre:'Proveedores', debe: 0, haber: paRound2(total), descripcion: 'Proveedores' });
   } else {
-    lineas.push({ cuenta_codigo: '', cuenta_nombre: esServicio?'⚠ Proveedor sin asiento modelo':'⚠ Producto sin asiento modelo', debe: 0, haber: paRound2(total), descripcion: 'Proveedores' });
+    // Dos causas distintas que antes daban el MISMO mensaje, y el que se mostraba
+    // era el equivocado en el caso más común: el proveedor sí tiene modelo, pero
+    // ninguna de sus líneas está marcada como "Proveedores (Haber)". Como el tipo
+    // de línea se agregó por migración con default 'libre', a los modelos viejos
+    // les pasa a todos. Decirle "sin asiento modelo" manda a asignar uno que ya
+    // está asignado, y el problema no se resuelve nunca.
+    var hayModelo = !!(PA._asientoLineasModelo && PA._asientoLineasModelo.length);
+    var quien = esServicio ? 'El proveedor' : 'El producto';
+    var msg;
+    if (!hayModelo) {
+      msg = '⚠ ' + quien + ' no tiene asiento modelo asignado';
+    } else {
+      msg = '⚠ El asiento modelo' + (esServicio && PA._asientoModeloNombre ? ' "' + PA._asientoModeloNombre + '"' : '') +
+            ' no tiene ninguna línea marcada como "Proveedores (Haber)"';
+    }
+    lineas.push({ cuenta_codigo: '', cuenta_nombre: msg, debe: 0, haber: paRound2(total), descripcion: 'Proveedores' });
   }
 
   paCompAsientoRender(lineas, faltanCuentas);
@@ -16706,7 +16725,14 @@ function admModCargar() {
     tb.innerHTML = data.map(function(m) {
       return '<tr>'
         + '<td><strong>' + m.nombre + '</strong></td>'
-        + '<td style="text-align:center"><span class="pa-badge pa-azul-bg">' + (m.cant_lineas||0) + ' líneas</span></td>'
+        + '<td style="text-align:center"><span class="pa-badge pa-azul-bg">' + (m.cant_lineas||0) + ' líneas</span>'
+          // Sin línea de Proveedores el modelo no sirve para facturas de compra.
+          // Se marca acá para poder detectar de un vistazo cuáles hay que corregir,
+          // en vez de descubrirlo de a uno al cargar cada factura.
+          + (m.cant_lineas && !m.tiene_linea_proveedores
+              ? ' <span class="pa-badge" style="background:#fef3c7;color:#92400e;font-size:10px" title="Ninguna línea está marcada como Proveedores (Haber): con este modelo no se pueden registrar facturas de compra">⚠ sin Proveedores</span>'
+              : '')
+        + '</td>'
         + '<td style="font-size:12px;color:var(--mut)">' + (m.descripcion||'—') + '</td>'
         + '<td style="text-align:right">'
           + '<button class="btn bo bs" onclick="admModEditar(' + m.id + ')" style="padding:3px 8px;font-size:11px;margin-right:4px">✏️</button>'
@@ -16880,15 +16906,26 @@ function admModValidarDoble() {
   var div = document.getElementById('adm-mod-doble');
   if (lineas.length < 2) { div.style.display = 'none'; return; }
   var ok = debeCant >= 1 && haberCant >= 1;
+  // La partida doble no alcanza para que el modelo SIRVA. Sin una línea marcada
+  // "Proveedores (Haber)" no se puede registrar una factura de compra con este
+  // modelo (produccion.js corta con 400) ni sale la cuenta en la orden de pago.
+  // Antes acá decía "✅ Modelo válido" igual, y el problema recién aparecía al
+  // cargar la factura — que es donde no se puede arreglar.
+  var tieneProv = lineas.some(function(l){ return l.tipo_linea === 'proveedores'; });
   div.style.display = '';
-  if (ok) {
-    div.style.background = 'rgba(74,222,128,.12)';
-    div.style.color = 'var(--ok)';
-    div.textContent = '✅ Modelo válido — tiene líneas en el debe y en el haber';
-  } else {
+  if (!ok) {
     div.style.background = 'rgba(239,68,68,.12)';
     div.style.color = 'var(--err)';
     div.textContent = '❌ El modelo necesita al menos 1 línea en el DEBE y 1 en el HABER';
+  } else if (!tieneProv) {
+    div.style.background = 'rgba(245,158,11,.14)';
+    div.style.color = '#92400e';
+    div.textContent = '⚠ Falta la línea de Proveedores. La partida doble cierra, pero sin marcar una '
+      + 'línea con Tipo = "Proveedores (Haber)" este modelo no sirve para registrar facturas de compra.';
+  } else {
+    div.style.background = 'rgba(74,222,128,.12)';
+    div.style.color = 'var(--ok)';
+    div.textContent = '✅ Modelo válido — partida doble y línea de Proveedores';
   }
 }
 
