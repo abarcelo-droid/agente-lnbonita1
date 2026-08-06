@@ -21838,8 +21838,17 @@ function paCompFiscalCambio() {
 }
 
 function paActTotalComp(){
+  // Solo cuenta la zona de la solapa ACTIVA. Las filas de la otra quedan en el DOM
+  // (ocultas) para no perder lo cargado si se alterna, pero sumarlas duplicaba el
+  // total: el lector con IA crea una fila de PRODUCTO aunque estés en Servicio, y
+  // al cargar el concepto el subtotal salía por el doble.
+  //
+  // Peor todavía: al guardar, paGuardarCompra descarta los items de la otra zona
+  // (hace items=[] cuando es servicio), así que la pantalla mostraba un número y
+  // se registraba otro. Esta condición es la misma que usa el guardado.
+  var esServicio = (PA.tipoFacturaActual === 'servicio');
   var neto=0, iva=0;
-  document.querySelectorAll('[id^=pa-ci-row-]').forEach(function(row){
+  if (!esServicio) document.querySelectorAll('[id^=pa-ci-row-]').forEach(function(row){
     var n=row.dataset.n;
     var modo=document.getElementById('pa-ci-modo-'+n).value;
     var cantBul=parseFloat(document.getElementById('pa-ci-cantb-'+n).value)||0;
@@ -21872,8 +21881,9 @@ function paActTotalComp(){
 
     neto+=sNeto; iva+=sIva;
   });
-  // Items de servicio (zona pa-comp-items-srv): cada uno tiene monto neto + IVA
-  document.querySelectorAll('[id^=pa-cs-row-]').forEach(function(row){
+  // Items de servicio (zona pa-comp-items-srv): cada uno tiene monto neto + IVA.
+  // Entre todos tienen que justificar el total de la factura.
+  if (esServicio) document.querySelectorAll('[id^=pa-cs-row-]').forEach(function(row){
     var n = row.dataset.n;
     var monto = parseFloat(document.getElementById('pa-cs-monto-'+n).value)||0;
     var ivaEl = document.getElementById('pa-cs-iva-'+n);
