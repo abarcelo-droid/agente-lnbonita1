@@ -11610,6 +11610,13 @@ function sgRepExport(){
     .fp-kpi .k { font-size:11px; color:var(--mut); font-weight:600; text-transform:uppercase; letter-spacing:.04em }
     .fp-kpi .v { font-size:19px; font-weight:800; font-family:ui-monospace,Consolas,monospace; margin-top:3px }
     .fp-vacio { padding:26px; text-align:center; color:var(--mut); font-size:13px }
+    /* Fichas de préstamo: una grilla que en el celular se apila sola. */
+    .fp-cards { display:grid; gap:10px; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)) }
+    .fp-card { border:1px solid var(--bor); border-radius:10px; padding:11px 13px; background:var(--sur) }
+    .fp-card-datos { display:grid; grid-template-columns:repeat(auto-fit,minmax(110px,1fr));
+      gap:7px 12px; margin-top:9px; font-size:12px }
+    .fp-mes-fila:hover td { background:#f1f5f9 }
+    .fp-mas { display:inline-block; width:14px; font-weight:800; color:var(--burg) }
     #sec-fp-flujo .pa-tbl th { white-space:nowrap }
   </style>
 
@@ -11646,11 +11653,45 @@ function sgRepExport(){
 
   <!-- ── PRÉSTAMOS ─────────────────────────────────────────────────────── -->
   <div class="fp-pane" id="fp-pane-prestamos">
-    <div style="display:flex;gap:10px;align-items:center;margin-bottom:10px">
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
       <button class="btn bb" onclick="fpPrestamoNuevo()">+ Préstamo</button>
+      <label class="fp-chica" style="display:flex;align-items:center;gap:6px;cursor:pointer">
+        <input type="checkbox" id="fp-prest-ocultar-saldados" style="width:auto" onchange="fpPrestPintarLista()">
+        Ocultar saldados
+      </label>
+      <div style="flex:1"></div>
       <div class="fp-chica" id="fp-prest-resumen"></div>
     </div>
+
+    <!-- Los tres números grandes -->
+    <div class="fp-kpi" id="fp-prest-kpis"></div>
+
+    <!-- Flujo mensual, agrupado por año -->
+    <div style="font-size:12px;font-weight:700;color:var(--mut);text-transform:uppercase;
+                letter-spacing:.06em;margin:16px 0 6px">Flujo de fondos mensual</div>
+    <div class="fp-grilla" id="fp-prest-flujo"><div class="fp-vacio">Cargando…</div></div>
+    <div class="fp-chica" style="margin-top:6px">
+      Tocá un mes para ver qué préstamo compone esa cuota. <b>FF</b> es lo que sale de caja.
+      Capital e interés son la parte pura estimada y pueden no sumar exactamente la cuota:
+      la diferencia son impuestos, sellos y percepciones.
+    </div>
+
+    <!-- Intereses por ejercicio -->
+    <div style="font-size:12px;font-weight:700;color:var(--mut);text-transform:uppercase;
+                letter-spacing:.06em;margin:18px 0 6px">Previsión de intereses por ejercicio</div>
+    <div id="fp-prest-ejercicios"></div>
+
+    <!-- Las fichas -->
+    <div style="font-size:12px;font-weight:700;color:var(--mut);text-transform:uppercase;
+                letter-spacing:.06em;margin:18px 0 6px">Préstamos</div>
     <div id="fp-prest-lista"></div>
+
+    <div class="fp-chica" style="margin-top:14px;padding:10px 13px;background:var(--bg2,#f8fafc);
+         border:1px solid var(--bor);border-radius:8px">
+      Todo lo que se muestra es <b>estimado</b> a partir del sistema de amortización y la tasa
+      cargada. Verificá contra el cronograma real del banco: si difiere, cargá la
+      <b>cuota fin</b> del préstamo y el flujo va a usar ese importe.
+    </div>
   </div>
 
   <!-- ── CHEQUES ───────────────────────────────────────────────────────── -->
@@ -11706,14 +11747,26 @@ function sgRepExport(){
   </div>
   <input type="hidden" id="fp-prest-id">
   <div class="fg">
+    <div class="fl ff"><label>Alias</label>
+      <input id="fp-prest-alias" placeholder="Ej: Préstamo camión Nación"></div>
+  </div>
+  <div class="fg">
     <div class="fl"><label>Banco *</label><input id="fp-prest-banco" placeholder="Ej: Galicia"></div>
     <div class="fl"><label>N° de préstamo *</label><input id="fp-prest-numero"></div>
   </div>
   <div class="fg">
     <div class="fl"><label>Sistema</label>
       <select id="fp-prest-sistema">
-        <option value="frances">Francés</option><option value="aleman">Alemán</option>
-        <option value="cuota_unica">Cuota única</option>
+        <option value="frances">Francés — cuota fija</option>
+        <option value="aleman">Alemán — capital fijo</option>
+        <option value="americano">Americano — capital al final</option>
+      </select>
+    </div>
+    <div class="fl"><label>Periodicidad</label>
+      <select id="fp-prest-periodicidad">
+        <option value="Mensual">Mensual</option><option value="Bimestral">Bimestral</option>
+        <option value="Trimestral">Trimestral</option><option value="Semestral">Semestral</option>
+        <option value="Anual">Anual</option>
       </select>
     </div>
     <div class="fl"><label>Tipo de tasa</label>
@@ -11734,6 +11787,16 @@ function sgRepExport(){
         <option value="1">1ª semana del mes</option><option value="2">2ª semana</option>
         <option value="3">3ª semana</option><option value="4">4ª semana</option>
       </select>
+    </div>
+  </div>
+  <div class="fg">
+    <div class="fl"><label>Cuotas pendientes</label>
+      <input id="fp-prest-pend" type="number" min="0" max="600" placeholder="(automático)">
+      <div class="fp-chica">Vacío = lo calcula el calendario. Si lo cargás, manda este número.</div>
+    </div>
+    <div class="fl"><label>Cuota fin (real del banco)</label>
+      <input id="fp-prest-cuotafin" class="fp-num" placeholder="0,00">
+      <div class="fp-chica">Con impuestos y sellos. Si la cargás, es la que va al flujo.</div>
     </div>
   </div>
   <div class="fg">
@@ -11767,6 +11830,22 @@ function sgRepExport(){
     <div class="fp-chica" style="flex:1">Recalcula todas las cuotas. Las ya marcadas pagadas se respetan.</div>
   </div>
   <div id="fp-cuo-lista" style="max-height:420px;overflow:auto"></div>
+</div>
+</div>
+
+<!-- Modal: cronograma completo de un préstamo -->
+<div class="ab-modal-overlay" id="fp-mb-cronograma">
+<div class="ab-modal" style="width:640px">
+  <div class="mhd">
+    <div><div class="mht" id="fp-cro-tit">Cronograma</div>
+         <div class="fp-chica" id="fp-cro-sub"></div></div>
+    <button class="mcl" onclick="document.getElementById('fp-mb-cronograma').classList.remove('on')">×</button>
+  </div>
+  <div class="fp-chica" style="margin-bottom:8px">
+    Estimado con el sistema de amortización y la tasa cargada. Compará contra el cronograma
+    del banco: si difiere, cargá la <b>cuota fin</b> en la ficha del préstamo.
+  </div>
+  <div id="fp-cro-lista" style="max-height:440px;overflow:auto"></div>
 </div>
 </div>
 
@@ -41785,59 +41864,13 @@ function fpConceptoGuardar() {
 // PRÉSTAMOS
 // ══════════════════════════════════════════════════════════════════════════
 
-function fpPrestamosCargar() {
-  var cont = document.getElementById('fp-prest-lista');
-  cont.innerHTML = '<div class="fp-vacio">Cargando…</div>';
-  fpApi('/prestamos').then(function(r) {
-    if (!r.ok) { cont.innerHTML = '<div class="fp-vacio">' + fpEsc(r.error) + '</div>'; return; }
-    FP.prestamos = r.data;
-    if (!r.data.length) {
-      cont.innerHTML = '<div class="fp-vacio">Todavía no hay préstamos. Agregá el primero con <b>+ Préstamo</b>.</div>';
-      document.getElementById('fp-prest-resumen').textContent = '';
-      return;
-    }
-    var totOrigen = 0, totSaldo = 0, sinCal = 0;
-    r.data.forEach(function(p) {
-      totOrigen += Number(p.monto_origen) || 0;
-      totSaldo += Number(p.saldo_pendiente) || 0;
-      if (!p.cuotas_cargadas) sinCal++;
-    });
-    document.getElementById('fp-prest-resumen').innerHTML =
-      r.data.length + ' operaciones · origen ' + fpN(totOrigen) + ' · <b>saldo pendiente ' + fpN(totSaldo) + '</b>' +
-      (sinCal ? ' · <span style="color:#b45309">' + sinCal + ' sin calendario</span>' : '');
-
-    var h = '<table class="pa-tbl"><thead><tr><th>Banco</th><th>N°</th><th>Sistema</th><th>Tasa</th>' +
-            '<th class="fp-num">Origen</th><th>Débito</th><th class="fp-num">Cuotas</th>' +
-            '<th class="fp-num">Saldo pendiente</th><th></th></tr></thead><tbody>';
-    r.data.forEach(function(p) {
-      var sis = { frances: 'Francés', aleman: 'Alemán', cuota_unica: 'Cuota única' }[p.sistema] || (p.sistema || '');
-      h += '<tr' + (p.estado === 'cancelado' ? ' style="opacity:.5"' : '') + '>' +
-        '<td><b>' + fpEsc(p.banco) + '</b></td>' +
-        '<td>' + fpEsc(p.numero) + '</td>' +
-        '<td>' + fpEsc(sis) + '</td>' +
-        '<td>' + fpEsc(p.tna_texto || (p.tna ? (p.tna * 100).toFixed(0) + '%' : '—')) + '</td>' +
-        '<td class="fp-num">' + fpN(p.monto_origen) + '</td>' +
-        '<td>' + (p.semana_debito || 1) + 'ª sem</td>' +
-        '<td class="fp-num">' + (p.cuotas_cargadas
-            ? p.cuotas_pendientes + '/' + p.cuotas_cargadas
-            : '<span class="fp-badge fp-warn">sin calendario</span>') + '</td>' +
-        '<td class="fp-num"><b>' + fpN(p.saldo_pendiente) + '</b></td>' +
-        '<td style="white-space:nowrap">' +
-          '<button class="btn bo bs" onclick="fpCuotasAbrir(' + p.id + ')">Calendario</button> ' +
-          '<button class="btn bo bs" onclick="fpPrestamoEditar(' + p.id + ')">✎</button> ' +
-          '<button class="btn bo bs" onclick="fpPrestamoBorrar(' + p.id + ')">🗑</button>' +
-        '</td></tr>';
-    });
-    h += '</tbody></table>';
-    cont.innerHTML = h;
-  });
-}
-
 function fpPrestamoNuevo() {
-  ['id', 'banco', 'numero', 'tnatexto', 'tna', 'monto', 'cuotas', 'inicio', 'fin', 'condicion'].forEach(function(k) {
+  ['id', 'alias', 'banco', 'numero', 'tnatexto', 'tna', 'monto', 'cuotas', 'inicio', 'fin',
+   'condicion', 'pend', 'cuotafin'].forEach(function(k) {
     var el = document.getElementById('fp-prest-' + k); if (el) el.value = '';
   });
   document.getElementById('fp-prest-sistema').value = 'frances';
+  document.getElementById('fp-prest-periodicidad').value = 'Mensual';
   document.getElementById('fp-prest-tipotasa').value = 'fija';
   document.getElementById('fp-prest-debito').value = '1';
   document.getElementById('fp-prest-estado').value = 'vigente';
@@ -41852,7 +41885,15 @@ function fpPrestamoEditar(id) {
   document.getElementById('fp-prest-id').value = p.id;
   document.getElementById('fp-prest-banco').value = p.banco || '';
   document.getElementById('fp-prest-numero').value = p.numero || '';
-  document.getElementById('fp-prest-sistema').value = p.sistema || 'frances';
+  document.getElementById('fp-prest-alias').value = p.alias || '';
+  // 'cuota_unica' es el nombre viejo de 'americano': se muestra en la opción nueva
+  // para que editar un préstamo cargado antes no lo cambie de sistema sin querer.
+  document.getElementById('fp-prest-sistema').value =
+    (p.sistema === 'cuota_unica') ? 'americano' : (p.sistema || 'frances');
+  document.getElementById('fp-prest-periodicidad').value = p.periodicidad || 'Mensual';
+  document.getElementById('fp-prest-pend').value =
+    (p.cuotas_pend_manual === null || p.cuotas_pend_manual === undefined) ? '' : p.cuotas_pend_manual;
+  document.getElementById('fp-prest-cuotafin').value = p.cuota_fin ? fpN(p.cuota_fin, 2) : '';
   document.getElementById('fp-prest-tipotasa').value = p.tipo_tasa || 'fija';
   document.getElementById('fp-prest-tnatexto').value = p.tna_texto || '';
   document.getElementById('fp-prest-tna').value = p.tna || '';
@@ -41869,7 +41910,14 @@ function fpPrestamoEditar(id) {
 
 function fpPrestamoGuardar() {
   var id = document.getElementById('fp-prest-id').value;
+  var pend = document.getElementById('fp-prest-pend').value.trim();
   var body = {
+    alias: document.getElementById('fp-prest-alias').value,
+    periodicidad: document.getElementById('fp-prest-periodicidad').value,
+    // Vacío se manda como cadena vacía y el backend lo guarda NULL: es la señal de
+    // "que lo calcule el calendario".
+    cuotas_pend_manual: pend === '' ? '' : parseInt(pend, 10),
+    cuota_fin: fpParseNum(document.getElementById('fp-prest-cuotafin').value),
     banco: document.getElementById('fp-prest-banco').value,
     numero: document.getElementById('fp-prest-numero').value,
     sistema: document.getElementById('fp-prest-sistema').value,
@@ -41965,6 +42013,209 @@ function fpCuotasGenerar() {
     toast(r.generadas + ' cuotas generadas' + (r.conservadas_pagadas ? ' (' + r.conservadas_pagadas + ' pagadas conservadas)' : ''));
     fpCuotasAbrir(FP.cuotasDe.id);
     fpPrestamosCargar();
+  });
+}
+
+// ── PRÉSTAMOS FINANCIEROS ─────────────────────────────────────────────────
+// Todo lo que se muestra acá lo calcula el backend (fp_prestamos.js). El front
+// solo pinta: si replicara la matemática, la misma cuenta viviría en dos lados y
+// tarde o temprano dan distinto.
+
+var FP_MESES = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
+function fpMesEtq(m) {
+  var p = String(m || '').split('-');
+  return p.length === 2 ? (FP_MESES[+p[1] - 1] || p[1]) + ' ' + p[0] : (m || '');
+}
+function fpPesos(n) { return '$ ' + fpN(n); }
+
+function fpPrestamosCargar() {
+  var cont = document.getElementById('fp-prest-flujo');
+  if (cont) cont.innerHTML = '<div class="fp-vacio">Calculando…</div>';
+  fpApi('/flujo-prestamos').then(function(r) {
+    if (!r.ok) {
+      if (cont) cont.innerHTML = '<div class="fp-vacio">' + fpEsc(r.error) + '</div>';
+      return fpErr(r);
+    }
+    FP.prest = r.data;
+    FP.prestamos = r.data.prestamos;
+    FP.mesAbierto = null;
+    fpPrestPintarKpis();
+    fpPrestPintarFlujo();
+    fpPrestPintarEjercicios();
+    fpPrestPintarLista();
+  });
+}
+
+function fpPrestPintarKpis() {
+  var k = FP.prest.kpis, h = '';
+  h += '<div><div class="k">Deuda total</div><div class="v">' + fpPesos(k.deuda_total) + '</div>' +
+       '<div class="fp-chica">capital de todas las cuotas pendientes</div></div>';
+  h += '<div><div class="k">Deuda corriente</div><div class="v">' + fpPesos(k.deuda_corriente) + '</div>' +
+       '<div class="fp-chica">capital de los próximos 12 meses</div></div>';
+  h += '<div><div class="k">Flujo promedio mensual</div><div class="v">' + fpPesos(k.flujo_promedio) + '</div>' +
+       '<div class="fp-chica">' + (k.horizonte ? 'sobre ' + k.horizonte + ' mes(es)' : 'sin cuotas pendientes') + '</div></div>';
+  document.getElementById('fp-prest-kpis').innerHTML = h;
+}
+
+function fpPrestPintarFlujo() {
+  var cont = document.getElementById('fp-prest-flujo');
+  var meses = FP.prest.meses || [];
+  if (!meses.length) {
+    cont.innerHTML = '<div class="fp-vacio">No hay cuotas pendientes.</div>';
+    return;
+  }
+  var h = '<table><thead><tr><th style="text-align:left">Mes</th>' +
+          '<th>Cuota total (FF)</th><th>Capital</th><th>Interés</th></tr></thead><tbody>';
+  var anioActual = null;
+
+  meses.forEach(function(m, i) {
+    var anio = m.mes.slice(0, 4);
+    if (anio !== anioActual) {
+      anioActual = anio;
+      var sub = meses.filter(function(x) { return x.mes.slice(0, 4) === anio; })
+                     .reduce(function(a, x) { return a + x.total; }, 0);
+      // El color del texto va INLINE en cada celda: las reglas generales de tabla
+      // del panel pisan el color heredado y el año quedaría invisible sobre el
+      // fondo oscuro.
+      h += '<tr class="fp-anio"><td style="background:#1e293b;color:#fff;font-weight:800">' + anio + '</td>' +
+           '<td style="background:#1e293b;color:#fff;font-weight:800;text-align:right;' +
+           'font-family:ui-monospace,Consolas,monospace">' + fpPesos(sub) + '</td>' +
+           '<td style="background:#1e293b;color:#fff"></td><td style="background:#1e293b;color:#fff"></td></tr>';
+    }
+    var abierto = FP.mesAbierto === m.mes;
+    h += '<tr class="fp-mes-fila" onclick="fpPrestToggleMes(\'' + m.mes + '\')" style="cursor:pointer">' +
+      '<td style="text-align:left"><span class="fp-mas">' + (abierto ? '−' : '+') + '</span> ' + fpMesEtq(m.mes) + '</td>' +
+      '<td class="fp-num"><b>' + fpPesos(m.total) + '</b></td>' +
+      '<td class="fp-num">' + fpPesos(m.capital) + '</td>' +
+      '<td class="fp-num">' + fpPesos(m.interes) + '</td></tr>';
+
+    if (abierto) {
+      h += '<tr><td colspan="4" style="padding:0;background:var(--bg2,#f8fafc)">' +
+fpPrestDetalleHtml(m) +
+        '</td></tr>';
+    }
+  });
+  h += '</tbody></table>';
+  cont.innerHTML = h;
+}
+
+function fpPrestDetalleHtml(m) {
+  var d = m.detalle || [];
+  if (!d.length) return '<div class="fp-chica" style="padding:10px 14px">Sin detalle</div>';
+  var h = '<table style="width:100%;font-size:11px"><thead><tr>' +
+          '<th style="text-align:left">Préstamo</th><th>Cuota FF</th><th>Capital</th><th>Interés</th></tr></thead><tbody>';
+  d.forEach(function(x) {
+    h += '<tr><td style="text-align:left">' + fpEsc(x.alias || x.entidad) +
+         ' <span class="fp-chica">cuota ' + x.nro_cuota + ' de ' + x.de + '</span>' +
+         (x.usa_cuota_fin ? ' <span class="fp-badge fp-gris">cuota fin</span>' : '') + '</td>' +
+         '<td class="fp-num">' + fpPesos(x.cuota) + '</td>' +
+         '<td class="fp-num">' + fpPesos(x.capital) + '</td>' +
+         '<td class="fp-num">' + fpPesos(x.interes) + '</td></tr>';
+  });
+  return h + '</tbody></table>';
+}
+
+function fpPrestToggleMes(mes) {
+  FP.mesAbierto = (FP.mesAbierto === mes) ? null : mes;
+  fpPrestPintarFlujo();
+}
+
+function fpPrestPintarEjercicios() {
+  var ej = FP.prest.ejercicios || [];
+  var cont = document.getElementById('fp-prest-ejercicios');
+  if (!ej.length) { cont.innerHTML = '<div class="fp-chica">Sin intereses a devengar.</div>'; return; }
+  var total = ej.reduce(function(a, x) { return a + x.interes; }, 0);
+  var h = '<div class="fp-chica" style="margin-bottom:6px">Total a devengar: <b>' + fpPesos(total) + '</b></div>';
+  h += '<table class="pa-tbl" style="max-width:420px"><thead><tr>' +
+       '<th style="text-align:left">Ejercicio</th><th class="fp-num">Intereses estimados</th></tr></thead><tbody>';
+  ej.forEach(function(x) {
+    h += '<tr><td>' + fpEsc(x.ejercicio) + '</td><td class="fp-num">' + fpPesos(x.interes) + '</td></tr>';
+  });
+  cont.innerHTML = h + '</tbody></table>';
+}
+
+function fpPrestPintarLista() {
+  var cont = document.getElementById('fp-prest-lista');
+  var lista = (FP.prestamos || []).slice();
+  var ocultar = (document.getElementById('fp-prest-ocultar-saldados') || {}).checked;
+  if (ocultar) lista = lista.filter(function(p) { return !p.saldado; });
+
+  if (!lista.length) {
+    cont.innerHTML = '<div class="fp-vacio">' +
+      (ocultar ? 'Todos los préstamos están saldados.' : 'Todavía no hay préstamos. Agregá el primero con <b>+ Préstamo</b>.') +
+      '</div>';
+    document.getElementById('fp-prest-resumen').textContent = '';
+    return;
+  }
+  // Juntas las del mismo banco: con 15 créditos, verlas mezcladas no deja
+  // comparar cuánto pesa cada entidad.
+  lista.sort(function(a, b) {
+    var ba = a.banco_info.etiqueta, bb = b.banco_info.etiqueta;
+    if (ba !== bb) return ba < bb ? -1 : 1;
+    return (a.alias_mostrar || '') < (b.alias_mostrar || '') ? -1 : 1;
+  });
+
+  var totOrigen = 0;
+  lista.forEach(function(p) { totOrigen += Number(p.monto_origen) || 0; });
+  document.getElementById('fp-prest-resumen').innerHTML =
+    lista.length + ' préstamo(s) · origen ' + fpPesos(totOrigen);
+
+  var SIS = { frances: 'Francés', aleman: 'Alemán', americano: 'Americano', cuota_unica: 'Americano' };
+  var h = '<div class="fp-cards">';
+  lista.forEach(function(p) {
+    var b = p.banco_info;
+    h += '<div class="fp-card" style="border-left:4px solid ' + b.color + (p.saldado ? ';opacity:.55' : '') + '">' +
+      '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">' +
+        '<div><div style="font-weight:700">' + fpEsc(p.alias_mostrar) + '</div>' +
+        '<span class="fp-badge" style="background:' + b.color + ';color:#fff">' + fpEsc(b.etiqueta) + '</span>' +
+        (p.estado === 'cancelado' ? ' <span class="fp-badge fp-gris">cancelado</span>' : '') +
+        (p.saldado && p.estado !== 'cancelado' ? ' <span class="fp-badge fp-ok">saldado</span>' : '') +
+        '</div>' +
+        '<div style="white-space:nowrap">' +
+          '<button class="btn bo bs" onclick="fpCronogramaAbrir(' + p.id + ')" title="Ver el cronograma completo">📋</button> ' +
+          '<button class="btn bo bs" onclick="fpPrestamoEditar(' + p.id + ')">✎</button> ' +
+          '<button class="btn bo bs" onclick="fpPrestamoBorrar(' + p.id + ')">🗑</button>' +
+        '</div>' +
+      '</div>' +
+      '<div class="fp-card-datos">' +
+        fpDato('Monto', fpPesos(p.monto_origen)) +
+        fpDato('Tasa', p.tna ? (p.tna * 100).toLocaleString('es-AR', { maximumFractionDigits: 2 }) + '% TNA' : (p.tna_texto || '—')) +
+        fpDato('Cuotas', p.cuotas_pend + ' de ' + (p.cuotas_totales || 0) +
+               (p.cuotas_pend_es_manual ? ' <span class="fp-badge fp-warn" style="font-size:9px">manual</span>' : '')) +
+        fpDato('Periodicidad', fpEsc(p.periodicidad || 'Mensual')) +
+        fpDato('Amortización', SIS[p.sistema] || p.sistema || '—') +
+        fpDato('1ª cuota', p.fecha_inicio || '—') +
+        fpDato('Próxima estimada', p.proxima_cuota_estimada ? fpPesos(p.proxima_cuota_estimada) : '—') +
+        fpDato('Cuota fin', p.cuota_fin ? fpPesos(p.cuota_fin) : '—') +
+      '</div>' +
+    '</div>';
+  });
+  cont.innerHTML = h + '</div>';
+}
+function fpDato(k, v) {
+  return '<div><span class="fp-chica">' + k + '</span><div>' + v + '</div></div>';
+}
+
+// El cronograma completo, para poder compararlo contra el papel del banco.
+function fpCronogramaAbrir(id) {
+  fpApi('/prestamos/' + id + '/cronograma').then(function(r) {
+    if (!r.ok) return fpErr(r);
+    var d = r.data;
+    document.getElementById('fp-cro-tit').textContent = d.prestamo.alias_mostrar || d.prestamo.banco;
+    document.getElementById('fp-cro-sub').textContent =
+      d.pendientes + ' de ' + d.cuotas.length + ' cuotas pendientes · ' +
+      (d.prestamo.periodicidad || 'Mensual');
+    var h = '<table class="pa-tbl" style="font-size:12px"><thead><tr><th>#</th><th>Mes</th>' +
+            '<th class="fp-num">Capital</th><th class="fp-num">Interés</th><th class="fp-num">Cuota</th></tr></thead><tbody>';
+    d.cuotas.forEach(function(c) {
+      h += '<tr' + (c.pagada ? ' style="opacity:.45"' : '') + '><td>' + c.nro + '</td>' +
+        '<td>' + fpEsc(c.mes || '') + '</td>' +
+        '<td class="fp-num">' + fpPesos(c.capital) + '</td>' +
+        '<td class="fp-num">' + fpPesos(c.interes) + '</td>' +
+        '<td class="fp-num"><b>' + fpPesos(c.cuota) + '</b></td></tr>';
+    });
+    document.getElementById('fp-cro-lista').innerHTML = h + '</tbody></table>';
+    document.getElementById('fp-mb-cronograma').classList.add('on');
   });
 }
 
