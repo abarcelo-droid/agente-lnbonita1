@@ -39287,8 +39287,46 @@ function pliSobranteDetalle(l) {
     + '. El consumo incluye la merma.';
 }
 
+// Prepara cada línea con lo que hace falta para ORDENARLA: cuánto falta, qué tan
+// cubierta está y para cuándo hay que pedirla.
+function pliCmpUrgenciaDe(l) {
+  var req = (l.necesidad_bultos !== undefined) ? l.necesidad_bultos
+          : (l.requerido_bultos !== undefined ? l.requerido_bultos
+          : (l.ya_comprado_bultos || 0) + (l.bultos_a_comprar || 0));
+  var comp = l.ya_comprado_bultos || 0;
+  var stk = l.stock_bultos || 0;
+  var nec = l.necesidad_bultos || req;
+  var pend = (l.pendiente_bultos !== undefined) ? l.pendiente_bultos : l.bultos_a_comprar;
+  var pct = nec > 0 ? Math.min(100, (stk + comp) / nec * 100) : 100;
+  // La fecha que apura es la del PRIMER pedido que todavía falta hacer, no la del
+  // primer bucket: si la semana 1 ya está comprada, lo que corre es la semana 2.
+  var limite = null;
+  (l.buckets || []).forEach(function(b) {
+    if (!(b.bultos_a_comprar > 0) || !b.fecha_pedido_limite) return;
+    if (!limite || b.fecha_pedido_limite < limite) limite = b.fecha_pedido_limite;
+  });
+  return { l: l, req: req, comp: comp, stk: stk, nec: nec, pend: pend, pct: pct,
+           limite: limite, falta: pend > 0.0001 };
+}
+
 function pliCmpRenderHechas(cont) {
-  var lineas = PLI.cmpCalculo.lineas || [];
+  // Arriba lo que falta comprar y más apura; abajo lo que ya está cubierto o tiene
+  // tiempo. Sin esto la lista venía en el orden del cálculo y había que recorrerla
+  // entera para encontrar lo urgente.
+  var hoy = pliHoyISO();
+  var lineas = (PLI.cmpCalculo.lineas || []).map(pliCmpUrgenciaDe).sort(function(a, b) {
+    // 1) Lo que falta va primero, siempre.
+    if (a.falta !== b.falta) return a.falta ? -1 : 1;
+    if (a.falta) {
+      // 2) Entre lo que falta, manda la fecha límite de pedido. Sin fecha va
+      //    después de las fechadas: no se puede saber si apura.
+      var fa = a.limite || '9999-99-99', fb = b.limite || '9999-99-99';
+      if (fa !== fb) return fa < fb ? -1 : 1;
+      // 3) A igual fecha, primero lo menos cubierto: es donde falta más trabajo.
+      if (Math.abs(a.pct - b.pct) > 0.01) return a.pct - b.pct;
+    }
+    return String(a.l.insumo_nombre).localeCompare(String(b.l.insumo_nombre), 'es');
+  });
   var html = '<div class="ab-table-wrap" style="margin-bottom:14px"><table class="pa-tbl" style="font-size:12px"><thead><tr>'
     // "Necesidad" y no "Requerido": es lo que el plan CONSUME, y no cambia
     // porque haya stock o compras. El requerido viejo salía del congelado neto y
@@ -39301,23 +39339,37 @@ function pliCmpRenderHechas(cont) {
     + '<th style="text-align:right">Ya comprado</th><th style="text-align:right">Pendiente</th>'
     + '<th style="text-align:right">Va a sobrar<div class="pli-cel-chica">stock + compras − consumo</div></th>'
     + '<th style="min-width:130px">Avance</th></tr></thead><tbody>';
-  lineas.forEach(function(l) {
-    // El backend manda los tres números ya normalizados, esté el plan confirmado o
-    // en borrador. El fallback cubre una respuesta vieja en caché del navegador.
-    // La necesidad es la base de todo. El fallback cubre una respuesta vieja en
-    // caché del navegador.
-    var req = (l.necesidad_bultos !== undefined) ? l.necesidad_bultos
-            : (l.requerido_bultos !== undefined ? l.requerido_bultos
-            : (l.ya_comprado_bultos || 0) + (l.bultos_a_comprar || 0));
-    var comp = l.ya_comprado_bultos || 0;
-    var pend = (l.pendiente_bultos !== undefined) ? l.pendiente_bultos : l.bultos_a_comprar;
-    // La cobertura mira stock + compras contra el consumo: es lo que responde
-    // "¿cuánto de lo que voy a usar ya lo tengo?". Contar solo lo comprado dejaba
-    // en 0% un insumo que está entero en el depósito.
-    var stk = l.stock_bultos || 0;
-    var nec = l.necesidad_bultos || req;
-    var pct = nec > 0 ? Math.min(100, (stk + comp) / nec * 100) : 100;
-    html += '<tr><td><strong>' + pliEsc(l.insumo_nombre) + '</strong></td>'
+  // Los números ya vienen calculados por pliCmpUrgenciaDe, que es la MISMA cuenta
+  // que decide el orden: si se recalcularan acá, la lista podría ordenarse por un
+  // criterio y mostrar otro.
+  var yaCerrado = false;
+  lineas.forEach(function(u) {
+    var l = u.l, req = u.req, comp = u.comp, pend = u.pend, stk = u.stk, pct = u.pct;
+
+    // La raya que separa lo que falta de lo que ya está. Se dibuja una sola vez,
+    // al pasar del primer grupo al segundo.
+    if (!u.falta && !yaCerrado) {
+      yaCerrado = true;
+      html += '<tr><td colspan="7" style="background:var(--bg2,#f1f5f9);font-size:11px;'
+        + 'font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.04em;'
+        + 'padding:7px 10px">Ya cubierto — stock y compras alcanzan la necesidad</td></tr>';
+    }
+
+    // Se marca la fila por lo apurada que está: vencida si la fecha de pedido ya
+    // pasó, urgente si vence dentro de la semana.
+    var clase = '', etq = '';
+    if (u.falta && u.limite) {
+      if (u.limite < hoy) {
+        clase = 'pli-sem-vencida';
+        etq = ' <span class="pli-badge pli-err" title="La fecha para pedir ya pasó">vencida ' + pliEsc(u.limite) + '</span>';
+      } else if (u.limite <= pliMasDias(hoy, 7)) {
+        clase = 'pli-sem-urgente';
+        etq = ' <span class="pli-badge pli-warn" title="Hay que pedirlo esta semana">pedir hasta ' + pliEsc(u.limite) + '</span>';
+      } else {
+        etq = ' <span class="pli-cel-chica">pedir hasta ' + pliEsc(u.limite) + '</span>';
+      }
+    }
+    html += '<tr class="' + clase + '"><td><strong>' + pliEsc(l.insumo_nombre) + '</strong>' + etq + '</td>'
       + '<td class="pli-num">' + pliN(req) + ' <span class="pli-cel-chica">' + pliEsc(l.unidad_compra) + '</span></td>'
       + '<td class="pli-num">' + (stk > 0 ? pliN(stk) : '<span class="pli-cel-chica">—</span>') + '</td>'
       + '<td class="pli-num">' + pliN(comp) + '</td>'
