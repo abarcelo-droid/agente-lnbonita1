@@ -267,8 +267,24 @@ function addCol(tabla, col, def) {
 }
 
 try {
-  // (sin migraciones todavía — el módulo nace con este schema)
   addCol('fp_prestamos', 'notas', 'TEXT');
+  // ── Préstamos financieros: la ficha completa del crédito ────────────────
+  // Nombre para mostrar. El banco + número identifica, pero "Préstamo camión
+  // Nación" es lo que la persona reconoce en una lista de 15 créditos.
+  addCol('fp_prestamos', 'alias', 'TEXT');
+  // Cada cuánto vence una cuota. Antes se asumía mensual; con esto la misma
+  // ficha sirve para un crédito trimestral o semestral, que son los que más se
+  // confunden al proyectar.
+  addCol('fp_prestamos', 'periodicidad', "TEXT NOT NULL DEFAULT 'Mensual'");
+  // Cuotas pendientes puestas A MANO. Si está en NULL manda el calendario; si
+  // tiene un número, ese gana. Existe porque el banco a veces adelanta o difiere
+  // cuotas y el calendario teórico deja de coincidir con la realidad.
+  addCol('fp_prestamos', 'cuotas_pend_manual', 'INTEGER');
+  // La cuota REAL que debita el banco, con impuestos, sellos y percepciones. Si
+  // está cargada reemplaza a la cuota estimada en el flujo de fondos, pero NO
+  // toca capital ni interés: esos siguen siendo los puros del sistema de
+  // amortización, y la diferencia es justamente lo impositivo.
+  addCol('fp_prestamos', 'cuota_fin', 'REAL');
 } catch (e) {
   console.error('[FP] Error en migraciones:', e.message);
 }

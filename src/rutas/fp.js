@@ -18,6 +18,8 @@
 import express from 'express';
 import db from '../servicios/db_fp.js';   // este import es el que crea el schema fp_*
 import { proyectar, generarCuotas, lunesDe, sumarMeses } from '../servicios/fp_motor.js';
+import { cronograma, flujoMensual, kpisPrestamos, interesesPorEjercicio,
+         pendientesDe, mesDeCuota, bancoDe } from '../servicios/fp_prestamos.js';
 
 const router = express.Router();
 
@@ -141,7 +143,10 @@ function logFp(entidad, entidadId, accion, detalle, userId) {
 }
 
 const AHORA = "datetime('now','localtime')";
-const SISTEMAS = ['frances', 'aleman', 'cuota_unica'];
+// 'cuota_unica' se conserva junto a 'americano': son el mismo sistema y hay
+// préstamos ya cargados con el nombre viejo.
+const SISTEMAS = ['frances', 'aleman', 'americano', 'cuota_unica'];
+const PERIODICIDADES = ['Mensual', 'Bimestral', 'Trimestral', 'Semestral', 'Anual'];
 const TASAS = ['fija', 'variable'];
 
 // ══════════════════════════════════════════════════════════════════════════
@@ -188,6 +193,17 @@ function leerPrestamo(body, parcialDe) {
     monto_origen:   tomar('monto_origen',   () => vNum(body.monto_origen, 'Monto de origen', { min: 0, def: 0 })),
     estado:         tomar('estado',         () => vEnum(body.estado, 'Estado', ['vigente', 'cancelado'], 'vigente')),
     notas:          tomar('notas',          () => vTexto(body.notas, 'Notas', { max: 1000 })),
+    // ── Ficha del préstamo financiero ──────────────────────────────────────
+    alias:          tomar('alias',          () => vTexto(body.alias, 'Alias', { max: 120 })),
+    periodicidad:   tomar('periodicidad',   () => vEnum(body.periodicidad, 'Periodicidad', PERIODICIDADES, 'Mensual')),
+    // null = manda el calendario. Un número gana sobre el calendario, porque el
+    // banco a veces adelanta o difiere cuotas.
+    cuotas_pend_manual: tomar('cuotas_pend_manual', () =>
+      (body.cuotas_pend_manual === '' || body.cuotas_pend_manual === null || body.cuotas_pend_manual === undefined)
+        ? null : vNum(body.cuotas_pend_manual, 'Cuotas pendientes', { min: 0, max: 600, entero: true })),
+    // La cuota real que debita el banco, con impuestos y sellos. 0 o vacío = usar
+    // la estimada.
+    cuota_fin:      tomar('cuota_fin',      () => vNum(body.cuota_fin, 'Cuota fin', { min: 0, def: 0 })),
   };
 }
 
@@ -201,9 +217,11 @@ router.post('/prestamos', wrap((req, res) => {
 
   const info = db.prepare(`INSERT INTO fp_prestamos
       (sociedad_id, banco, numero, sistema, tipo_tasa, tna_texto, tna, fecha_inicio, fecha_fin,
-       cuotas_totales, semana_debito, condicion, monto_origen, estado, notas, creado_por_id)
+       cuotas_totales, semana_debito, condicion, monto_origen, estado, notas,
+       alias, periodicidad, cuotas_pend_manual, cuota_fin, creado_por_id)
       VALUES (@sociedad_id,@banco,@numero,@sistema,@tipo_tasa,@tna_texto,@tna,@fecha_inicio,@fecha_fin,
-              @cuotas_totales,@semana_debito,@condicion,@monto_origen,@estado,@notas,@uid)`)
+              @cuotas_totales,@semana_debito,@condicion,@monto_origen,@estado,@notas,
+              @alias,@periodicidad,@cuotas_pend_manual,@cuota_fin,@uid)`)
     .run({ ...d, sociedad_id: soc, uid: req.user.id });
 
   logFp('prestamo', info.lastInsertRowid, 'alta', { banco: d.banco, numero: d.numero }, req.user.id);
@@ -217,6 +235,8 @@ router.patch('/prestamos/:id', wrap((req, res) => {
       tna_texto=@tna_texto, tna=@tna, fecha_inicio=@fecha_inicio, fecha_fin=@fecha_fin,
       cuotas_totales=@cuotas_totales, semana_debito=@semana_debito, condicion=@condicion,
       monto_origen=@monto_origen, estado=@estado, notas=@notas,
+      alias=@alias, periodicidad=@periodicidad, cuotas_pend_manual=@cuotas_pend_manual,
+      cuota_fin=@cuota_fin,
       actualizado_en=${AHORA}, actualizado_por_id=@uid WHERE id=@id`)
     .run({ ...d, id: p.id, uid: req.user.id });
   logFp('prestamo', p.id, 'edicion', null, req.user.id);
@@ -285,6 +305,95 @@ router.patch('/cuotas/:id', wrap((req, res) => {
     .run(estado || c.estado, (estado || c.estado) === 'pagada' ? (c.pagada_en || new Date().toISOString().slice(0, 10)) : null,
          capital, interes, c.id);
   res.json({ ok: true });
+}));
+
+// ══════════════════════════════════════════════════════════════════════════
+// PRÉSTAMOS FINANCIEROS — flujo mensual, KPIs y previsión de intereses
+// ══════════════════════════════════════════════════════════════════════════
+
+// La fila de la base tiene los nombres del schema; el motor trabaja con los
+// nombres de la ficha. El mapeo va en un solo lugar para que no se desincronice.
+function fichaDe(row) {
+  return {
+    id: row.id,
+    alias: row.alias || null,
+    entidad: row.banco || '',
+    numero: row.numero || '',
+    monto: Number(row.monto_origen) || 0,
+    tna: Number(row.tna) || 0,
+    cuotas: parseInt(row.cuotas_totales, 10) || 0,
+    cuotasPend: (row.cuotas_pend_manual === null || row.cuotas_pend_manual === undefined)
+      ? null : parseInt(row.cuotas_pend_manual, 10),
+    periodicidad: row.periodicidad || 'Mensual',
+    sistema: row.sistema || 'frances',
+    fecha1: row.fecha_inicio || null,
+    cuotaFin: Number(row.cuota_fin) || 0,
+  };
+}
+
+// GET, no POST: no persiste nada y un usuario de solo lectura tiene que poder
+// mirarlo (bloquearSiSoloLectura corta todo POST sobre /api).
+router.get('/flujo-prestamos', wrap((req, res) => {
+  const soc = getSociedadId(req);
+  const hoy = new Date().toISOString().slice(0, 10);
+  // Mes de inicio del ejercicio fiscal. Julio por defecto; se puede pasar 1 para
+  // ejercicio calendario sin tocar nada más.
+  const mesEjercicio = vNum(req.query.mes_ejercicio, 'Mes de ejercicio',
+    { min: 1, max: 12, def: 7, entero: true });
+
+  // Los cancelados no proyectan pero se siguen viendo en la lista.
+  const filas = db.prepare(`SELECT * FROM fp_prestamos
+     WHERE sociedad_id = ? AND eliminado_en IS NULL
+     ORDER BY banco COLLATE NOCASE, numero COLLATE NOCASE`).all(soc);
+  const vigentes = filas.filter(r => r.estado !== 'cancelado');
+
+  const meses = flujoMensual(vigentes.map(fichaDe), hoy);
+  const kpis = kpisPrestamos(meses);
+  const ejercicios = interesesPorEjercicio(meses, mesEjercicio);
+
+  // La lista de tarjetas, con todo lo derivado ya calculado: si lo calculara el
+  // front, la misma cuenta viviría en dos lados y se separarían.
+  const prestamos = filas.map(row => {
+    const f = fichaDe(row);
+    const plan = cronograma(f);
+    const pend = pendientesDe(f, hoy);
+    const prox = plan[pend.pagadas] || null;
+    return {
+      ...row,
+      alias_mostrar: f.alias || (f.entidad + (f.numero ? ' ' + f.numero : '')),
+      banco_info: bancoDe(f.entidad),
+      periodicidad: f.periodicidad,
+      cuotas_pend: pend.pendientes,
+      cuotas_pend_es_manual: !!pend.manual,
+      proxima_cuota_estimada: prox ? prox.cuota : 0,
+      proxima_cuota_mes: prox ? mesDeCuota(f.fecha1, pend.pagadas, f.periodicidad) : null,
+      // Lo que efectivamente sale de caja: la cuota fin manda sobre la estimada.
+      proxima_cuota_ff: f.cuotaFin > 0 ? f.cuotaFin : (prox ? prox.cuota : 0),
+      saldado: pend.pendientes === 0,
+    };
+  });
+
+  res.json({ ok: true, data: {
+    hoy, mes_ejercicio: mesEjercicio, kpis, ejercicios, prestamos,
+    // Array ordenado y no un objeto: el orden de las claves de un objeto no está
+    // garantizado al serializar y la tabla va cronológica.
+    meses: Object.keys(meses).sort().map(m => ({ mes: m, ...meses[m] })),
+  } });
+}));
+
+// El cronograma completo de un préstamo, para revisarlo contra el del banco.
+router.get('/prestamos/:id/cronograma', wrap((req, res) => {
+  const row = unoDe('fp_prestamos', req, req.params.id, 'Préstamo');
+  const f = fichaDe(row);
+  const hoy = new Date().toISOString().slice(0, 10);
+  const pend = pendientesDe(f, hoy);
+  const filas = cronograma(f).map((c, k) => ({
+    ...c,
+    mes: mesDeCuota(f.fecha1, k, f.periodicidad),
+    pagada: k < pend.pagadas,
+  }));
+  res.json({ ok: true, data: { prestamo: { ...row, alias_mostrar: f.alias || f.entidad },
+                               cuotas: filas, pagadas: pend.pagadas, pendientes: pend.pendientes } });
 }));
 
 // ══════════════════════════════════════════════════════════════════════════
