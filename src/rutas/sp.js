@@ -13,7 +13,7 @@ import { subirArchivo, obtenerArchivo, storageConfigurado } from '../servicios/s
 import {
   armarSnapshot, validarDefinicion, resolverAutorizados, bloqueadoPorSoD, sodOmitida,
   accionesDisponibles, aplicarCambioDePaso, registrarEvento
-} from '../servicios/sp_motor.js';
+, destinoDevolucion, pasoInicio} from '../servicios/sp_motor.js';
 import { encolar, render, procesarEnBackground } from '../servicios/sp_outbox.js';
 
 const router = express.Router();
@@ -901,8 +901,14 @@ router.post('/solicitudes/:id/accion', wrap((req, res) => {
     }
   }
 
+  // Una devolución vuelve SIEMPRE al que pidió el pago, sin importar qué diga la
+  // transición del grafo. Se calcula una sola vez y se usa para el cambio de paso,
+  // para el evento del historial y para los avisos: si alguno usara tr.hasta, el
+  // historial contaría un viaje distinto al que realmente pasó.
+  const destino = destinoDevolucion(def, tr);
+
   const salida = db.transaction(() => {
-    const cambio = aplicarCambioDePaso(def, s, tr.hasta, { sumaCiclo: tr.clase === 'devuelve' });
+    const cambio = aplicarCambioDePaso(def, s, destino, { sumaCiclo: tr.clase === 'devuelve' });
     if (datos.fecha_pago) {
       db.prepare('UPDATE sp_solicitudes SET fecha_pago_confirmada=? WHERE id=?').run(datos.fecha_pago, s.id);
     }
@@ -926,7 +932,7 @@ router.post('/solicitudes/:id/accion', wrap((req, res) => {
       detalle.en_lugar_de = nombreDe(s.autorizador_id);
     }
     const evId = registrarEvento(s.id, {
-      paso_desde: paso.clave, paso_hasta: tr.hasta, accion, hito: paso.hito, clase: tr.clase,
+      paso_desde: paso.clave, paso_hasta: destino, accion, hito: paso.hito, clase: tr.clase,
       actor_id: req.user.id, actor_nombre: req.user.nombre, actor_rol: req.user.rol,
       comentario, datos_json: Object.keys(detalle).length ? detalle : null,
       via: omitida ? 'admin' : 'panel'
@@ -935,18 +941,29 @@ router.post('/solicitudes/:id/accion', wrap((req, res) => {
     // Los mails se ENCOLAN acá (dentro de la transacción, así el aviso existe si y
     // solo si el cambio se guardó) y se mandan después, afuera.
     const solFresca = { ...s, ...datos, fecha_pago_confirmada: datos.fecha_pago || s.fecha_pago_confirmada };
-    avisarPaso(def, solFresca, tr.hasta, evId);
-    if (tr.clase === 'devuelve' && tr.hasta === (def.pasos.find(p => p.tipo === 'inicio') || {}).clave) {
-      avisarSolicitante(def, solFresca, 'devuelto', evId, { actor: req.user.nombre, comentario });
+    avisarPaso(def, solFresca, destino, evId);
+
+    // El solicitante se entera de TODOS los movimientos: es el que le da la cara al
+    // proveedor. Se lleva la cuenta de si ya se le avisó por una vía específica,
+    // para no mandarle dos mails por el mismo click.
+    let avisado = false;
+    if (tr.clase === 'devuelve') {
+      // Ya no hace falta preguntar si el destino es el inicio: con destinoDevolucion
+      // toda devolución vuelve al solicitante.
+      avisarSolicitante(def, solFresca, 'devuelto', evId, {
+        actor: req.user.nombre, comentario, paso_origen: paso.nombre || paso.clave });
+      avisado = true;
     }
     if (tr.clase === 'rechaza') {
       avisarSolicitante(def, solFresca, 'rechazado', evId, { actor: req.user.nombre, comentario });
+      avisado = true;
     }
     if (datos.fecha_pago) {
       // El paso que más le importa al comprador: es lo único que tiene que
       // contestarle al proveedor. Sin este aviso entra al panel todos los días o
       // le escribe por WhatsApp a Tesorería.
       avisarSolicitante(def, solFresca, 'fecha_confirmada', evId, {});
+      avisado = true;
     }
     // FIRMADA: para el comprador, acá termina el proceso de pago. La orden está
     // autorizada, con fecha, confeccionada y firmada — puede cerrar el seguimiento
@@ -959,9 +976,27 @@ router.post('/solicitudes/:id/accion', wrap((req, res) => {
     if (paso.hito === 'firma' && tr.clase === 'avanza'
         && cambio.estado !== 'aprobada_final' && req.user.id !== s.solicitante_id) {
       avisarSolicitante(def, solFresca, 'firmado', evId, { actor: req.user.nombre });
+      avisado = true;
     }
     if (cambio.estado === 'aprobada_final') {
       avisarSolicitante(def, solFresca, 'cerrado', evId, {});
+      avisado = true;
+    }
+
+    // Cualquier OTRO movimiento: un avance normal, una espera, lo que sea. Sin esto
+    // el comprador solo se enteraba de los hitos que alguien pensó en avisar, y una
+    // solicitud podía quedar frenada sin que él lo supiera.
+    //
+    // No se manda si el propio solicitante hizo el movimiento (ya lo sabe) ni si el
+    // destino es su propio paso: ahí ya recibió el "te toca a vos" de avisarPaso.
+    if (!avisado && req.user.id !== s.solicitante_id) {
+      const ini = pasoInicio(def);
+      if (!(ini && destino === ini.clave)) {
+        const pd = (def.pasos || []).find(p => p.clave === destino) || {};
+        avisarSolicitante(def, solFresca, 'movimiento', evId, {
+          actor: req.user.nombre, comentario,
+          paso: pd.nombre || destino, paso_origen: paso.nombre || paso.clave });
+      }
     }
     return { estado: cambio.estado, destino: cambio.destino };
   })();

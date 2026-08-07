@@ -231,9 +231,51 @@ export function accionesDisponibles(def, solicitud, usuario) {
   const sod = bloqueadoPorSoD(def, solicitud, paso.clave, usuario.id);
   if (sod) return [];
   return salidasDe(def, paso.clave).map(t => ({
-    accion: t.accion, etiqueta: t.etiqueta, clase: t.clase,
-    requiere_comentario: !!t.requiere_comentario || !!paso.requiere_comentario
+    accion: t.accion,
+    // La etiqueta dice a dónde va DE VERDAD. En el grafo sembrado decía "Devolver
+    // a fechas" o "Devolver a confección"; con ese texto el botón prometería una
+    // cosa y el sistema haría otra.
+    etiqueta: t.clase === 'devuelve' ? 'Devolver al solicitante' : t.etiqueta,
+    clase: t.clase,
+    destino: destinoDevolucion(def, t),
+    // Devolver siempre exige motivo: es lo único que le dice al comprador qué
+    // corregir, y sin eso la devolución es un rebote sin explicación.
+    requiere_comentario: t.clase === 'devuelve'
+      || !!t.requiere_comentario || !!paso.requiere_comentario
   }));
+}
+
+/** EL PASO DE INICIO del circuito: donde vive el que pidió el pago. */
+export function pasoInicio(def) {
+  return (def.pasos || []).find(p => p.tipo === 'inicio') || null;
+}
+
+/**
+ * A dónde va REALMENTE una devolución: SIEMPRE al paso de inicio, o sea al que
+ * solicitó el pago.
+ *
+ * Va acá y no en la configuración del circuito a propósito. La arquitectura del
+ * módulo separa tres capas y esta es de la tercera:
+ *   GRAFO     — pasos y transiciones: los edita el usuario.
+ *   SEMÁNTICA — enums cerrados.
+ *   EFECTOS   — reglas del negocio, en código, que ninguna edición desactiva.
+ * "Devolver es devolver al que pidió" es una regla del negocio, no un dibujo del grafo.
+ *
+ * Y hay una razón práctica: cada solicitud lleva CONGELADO su propio snapshot del
+ * circuito. Si esto se hubiera hecho editando las transiciones, las solicitudes ya
+ * en curso habrían seguido con el comportamiento viejo hasta terminarse.
+ * Resolviéndolo acá, aplica desde el minuto cero a todas.
+ *
+ * POR QUÉ SIEMPRE AL SOLICITANTE: alguien puede aprobar y recién dos pasos después
+ * descubrirse el error. Devolver al paso anterior deja el problema en manos de
+ * quien no lo puede arreglar —el error casi siempre es del pedido: proveedor,
+ * cuenta, monto o comprobante— y obliga a una cadena de devoluciones. Volviendo al
+ * origen, el que puede corregirlo lo corrige y el circuito se rehace entero.
+ */
+export function destinoDevolucion(def, transicion) {
+  if (!transicion || transicion.clase !== 'devuelve') return transicion ? transicion.hasta : null;
+  const ini = pasoInicio(def);
+  return ini ? ini.clave : transicion.hasta;   // sin paso de inicio, se respeta el grafo
 }
 
 // ── ÚNICO escritor del paso actual ────────────────────────────────────────

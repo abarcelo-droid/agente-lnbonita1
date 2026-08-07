@@ -402,22 +402,22 @@ function seed() {
   const TRANS = [
     ['solicitud',     'enviar',            'ok_supervisor', 'Enviar a autorizar',    'avanza',   0, 0],
     ['ok_supervisor', 'aprobar',           'fechas',        'Autorizar',             'avanza',   0, 0],
-    ['ok_supervisor', 'devolver',          'solicitud',     'Devolver al comprador', 'devuelve', 1, 1],
+    ['ok_supervisor', 'devolver',          'solicitud',     'Devolver al solicitante','devuelve', 1, 1],
     ['ok_supervisor', 'rechazar',          'rechazada',     'Rechazar',              'rechaza',  1, 0],
     ['fechas',        'confirmar_fecha',   'confeccion',    'Confirmar fecha',       'avanza',   0, 0],
     ['fechas',        'sin_fecha',         'fechas',        'Todavía sin fecha',     'espera',   1, 0],
-    ['fechas',        'devolver',          'ok_supervisor', 'Devolver',              'devuelve', 1, 0],
+    ['fechas',        'devolver',          'solicitud',     'Devolver al solicitante','devuelve', 1, 1],
     ['fechas',        'rechazar',          'rechazada',     'Rechazar',              'rechaza',  1, 0],
     ['confeccion',    'confeccionar',      'firma',         'Confeccionada',         'avanza',   0, 0],
-    ['confeccion',    'devolver',          'fechas',        'Devolver a fechas',     'devuelve', 1, 0],
+    ['confeccion',    'devolver',          'solicitud',     'Devolver al solicitante','devuelve', 1, 1],
     ['confeccion',    'rechazar',          'rechazada',     'Rechazar',              'rechaza',  1, 0],
     ['firma',         'firmar',            'comprobantes',  'Firmar',                'avanza',   0, 0],
-    ['firma',         'devolver',          'confeccion',    'Devolver a confección', 'devuelve', 1, 0],
+    ['firma',         'devolver',          'solicitud',     'Devolver al solicitante','devuelve', 1, 1],
     ['firma',         'rechazar',          'rechazada',     'Rechazar',              'rechaza',  1, 0],
     ['comprobantes',  'enviar_comprobantes','cerrada',      'Comprobantes enviados', 'avanza',   0, 0],
     // Salida por si el pago no se concretó: sin esto, comprobantes es un callejón
     // sin salida y las solicitudes se acumulan ahí para siempre.
-    ['comprobantes',  'pago_no_realizado', 'confeccion',    'El pago no se hizo',    'devuelve', 1, 1]
+    ['comprobantes',  'pago_no_realizado', 'solicitud',     'El pago no se hizo',    'devuelve', 1, 1]
   ];
 
   // Pares de hitos que no puede resolver la misma persona. Los fijos no se
@@ -447,7 +447,8 @@ function seed() {
     // Avisos al solicitante. El destinatario es fijo en el código, no configurable.
     ['evento:devuelto', 'Te devolvieron la solicitud {{numero}}',
       'Hola {{destinatario}},\n\n{{actor}} devolvió tu solicitud de pago a {{proveedor}}.\n\n' +
-      'Motivo: {{comentario}}\n\nCorregila y volvé a enviarla:\n{{link}}\n'],
+      'Volvió desde: {{paso_origen}}\nMotivo: {{comentario}}\n\n' +
+      'Corregila y volvé a enviarla. El circuito arranca de nuevo desde el principio:\n{{link}}\n'],
     ['evento:rechazado', 'Rechazaron la solicitud {{numero}}',
       'Hola {{destinatario}},\n\n{{actor}} rechazó tu solicitud de pago a {{proveedor}} por {{monto}}.\n\n' +
       'Motivo: {{comentario}}\n\n{{link}}\n'],
@@ -456,6 +457,9 @@ function seed() {
       'Ya se lo podés confirmar al proveedor.\n\n{{link}}\n'],
     ['evento:cerrado', 'Pago completado · {{numero}} · {{proveedor}}',
       'Hola {{destinatario}},\n\nSe completó el circuito del pago a {{proveedor}} por {{monto}}.\n\n{{link}}\n'],
+    ['evento:movimiento', 'Avanzó tu solicitud {{numero}} · {{proveedor}}',
+      'Hola {{destinatario}},\n\n{{actor}} movió tu solicitud de pago a {{proveedor}} por {{monto}}.\n\n' +
+      'De: {{paso_origen}}\nA: {{paso}}\n{{comentario}}\n\n{{link}}\n'],
     ['evento:firmado', 'Orden firmada · {{numero}} · {{proveedor}}',
       'Hola {{destinatario}},\n\n{{actor}} firmó la orden de pago a {{proveedor}} por {{monto}}.\n\n' +
       'El pago ya está resuelto: podés cerrar el seguimiento con el proveedor.\n' +
@@ -541,6 +545,9 @@ try { seed(); } catch (e) { console.error('[SP] Seed falló:', e.message); }
 // se activa una versión vieja, el aviso tiene que seguir existiendo.
 (function plantillasFaltantes() {
   const NUEVAS = [
+    ['evento:movimiento', 'Avanzó tu solicitud {{numero}} · {{proveedor}}',
+      'Hola {{destinatario}},\n\n{{actor}} movió tu solicitud de pago a {{proveedor}} por {{monto}}.\n\n' +
+      'De: {{paso_origen}}\nA: {{paso}}\n{{comentario}}\n\n{{link}}\n'],
     ['evento:firmado', 'Orden firmada · {{numero}} · {{proveedor}}',
       'Hola {{destinatario}},\n\n{{actor}} firmó la orden de pago a {{proveedor}} por {{monto}}.\n\n' +
       'El pago ya está resuelto: podés cerrar el seguimiento con el proveedor.\n' +
