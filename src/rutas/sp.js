@@ -948,6 +948,18 @@ router.post('/solicitudes/:id/accion', wrap((req, res) => {
       // le escribe por WhatsApp a Tesorería.
       avisarSolicitante(def, solFresca, 'fecha_confirmada', evId, {});
     }
+    // FIRMADA: para el comprador, acá termina el proceso de pago. La orden está
+    // autorizada, con fecha, confeccionada y firmada — puede cerrar el seguimiento
+    // con el proveedor. Antes solo se enteraba al llegar a "cerrada", que depende
+    // de que alguien mande los comprobantes y puede tardar días o no pasar nunca.
+    //
+    // No se manda si el destino ya es el cierre (circuito sin paso de
+    // comprobantes): ahí alcanza con el aviso de cerrado y serían dos mails por el
+    // mismo click. Y tampoco si el que firmó ES el comprador: ya lo sabe.
+    if (paso.hito === 'firma' && tr.clase === 'avanza'
+        && cambio.estado !== 'aprobada_final' && req.user.id !== s.solicitante_id) {
+      avisarSolicitante(def, solFresca, 'firmado', evId, { actor: req.user.nombre });
+    }
     if (cambio.estado === 'aprobada_final') {
       avisarSolicitante(def, solFresca, 'cerrado', evId, {});
     }
