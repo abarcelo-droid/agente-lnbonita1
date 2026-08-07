@@ -455,7 +455,11 @@ function seed() {
       'Hola {{destinatario}},\n\nEl pago a {{proveedor}} por {{monto}} tiene fecha: {{fecha_pago}}.\n\n' +
       'Ya se lo podés confirmar al proveedor.\n\n{{link}}\n'],
     ['evento:cerrado', 'Pago completado · {{numero}} · {{proveedor}}',
-      'Hola {{destinatario}},\n\nSe completó el circuito del pago a {{proveedor}} por {{monto}}.\n\n{{link}}\n']
+      'Hola {{destinatario}},\n\nSe completó el circuito del pago a {{proveedor}} por {{monto}}.\n\n{{link}}\n'],
+    ['evento:firmado', 'Orden firmada · {{numero}} · {{proveedor}}',
+      'Hola {{destinatario}},\n\n{{actor}} firmó la orden de pago a {{proveedor}} por {{monto}}.\n\n' +
+      'El pago ya está resuelto: podés cerrar el seguimiento con el proveedor.\n' +
+      'Queda pendiente el envío de comprobantes, que no depende de vos.\n\n{{link}}\n']
   ];
 
   try {
@@ -526,6 +530,37 @@ function seed() {
 }
 
 try { seed(); } catch (e) { console.error('[SP] Seed falló:', e.message); }
+
+// ── Plantillas que se agregan después del seed ────────────────────────────
+// seed() sale temprano si sp_flujos ya tiene datos, o sea que en producción no
+// corre nunca. Sin esto, una plantilla nueva del array solo existiría en una
+// instalación desde cero, y el aviso correspondiente no se enviaría jamás:
+// avisarSolicitante() hace `if (!pl) return` sin decir nada.
+//
+// Se inserta en TODAS las versiones del circuito, no solo en la activa: si mañana
+// se activa una versión vieja, el aviso tiene que seguir existiendo.
+(function plantillasFaltantes() {
+  const NUEVAS = [
+    ['evento:firmado', 'Orden firmada · {{numero}} · {{proveedor}}',
+      'Hola {{destinatario}},\n\n{{actor}} firmó la orden de pago a {{proveedor}} por {{monto}}.\n\n' +
+      'El pago ya está resuelto: podés cerrar el seguimiento con el proveedor.\n' +
+      'Queda pendiente el envío de comprobantes, que no depende de vos.\n\n{{link}}\n'],
+  ];
+  try {
+    const versiones = db.prepare('SELECT id FROM sp_flujo_versiones').all();
+    if (!versiones.length) return;
+    // INSERT OR IGNORE contra el UNIQUE(version_id, clave): si alguien editó el
+    // texto desde el configurador, no se lo pisa.
+    const ins = db.prepare('INSERT OR IGNORE INTO sp_plantillas (version_id, clave, asunto, cuerpo) VALUES (?,?,?,?)');
+    let n = 0;
+    db.transaction(() => {
+      for (const v of versiones) for (const p of NUEVAS) n += ins.run(v.id, p[0], p[1], p[2]).changes;
+    })();
+    if (n) console.log(`[SP] ${n} plantilla(s) de aviso agregadas a versiones existentes.`);
+  } catch (e) {
+    console.error('[SP] Error agregando plantillas nuevas:', e.message);
+  }
+})();
 
 console.log('[SP] Schema inicializado');
 
