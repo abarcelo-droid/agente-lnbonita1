@@ -339,6 +339,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   <div class="ni" data-sec="config-modulos" data-admin-only="1"><span class="dot db"></span>⚙️ Config Módulos</div>
   <div class="ni" data-sec="admin-actividad" data-admin-only="1"><span class="dot da"></span>📊 Actividad Usuarios</div>
   <div class="ni" data-sec="fp-flujo" data-admin-only="1"><span class="dot dc"></span>💹 Planificación Financiera</div>
+  <div class="ni" data-sec="bt-viajes"><span class="dot da"></span>🚚 Viajes y Cargas</div>
     <a href="/scout" style="display:flex;align-items:center;justify-content:center;gap:8px;
        margin:14px 12px 8px;padding:11px 14px;
        background:linear-gradient(135deg,#059669 0%,#047857 100%);
@@ -11902,6 +11903,97 @@ function sgRepExport(){
     <button class="btn bb" onclick="fpConceptoGuardar()">Guardar</button>
   </div>
 </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════════════
+     BARCELÓ TRANSPORTE · VIAJES Y CARGAS (espejo de lectura de Transoft)
+     ══════════════════════════════════════════════════════════════════════ -->
+<div class="sec" id="sec-bt-viajes">
+  <div class="ph">
+    <div>
+      <div class="ph-t">🚚 Viajes y Cargas</div>
+      <div class="ph-s">Barceló Transporte — datos leídos de Transoft</div>
+    </div>
+  </div>
+
+  <style>
+    .bt-tab { padding:10px 16px; cursor:pointer; border-bottom:2px solid transparent; color:var(--mut); font-weight:600 }
+    .bt-tab.on { color:var(--burg); border-bottom-color:var(--burg) }
+    .bt-pane { display:none } .bt-pane.on { display:block }
+    .bt-num { text-align:right; font-family:ui-monospace,Consolas,monospace; white-space:nowrap }
+    .bt-chica { font-size:11px; color:var(--mut) }
+    .bt-badge { display:inline-block; padding:2px 8px; border-radius:10px; font-size:11px; font-weight:600 }
+    .bt-ok { background:#dcfce7; color:#166534 } .bt-warn { background:#fef3c7; color:#92400e }
+    .bt-err { background:#fee2e2; color:#991b1b } .bt-gris { background:#f1f5f9; color:#64748b }
+    .bt-kpi { display:flex; gap:10px; flex-wrap:wrap; margin:12px 0 }
+    .bt-kpi > div { flex:1; min-width:165px; border:1px solid var(--bor); border-radius:10px;
+      padding:10px 14px; background:var(--sur) }
+    .bt-kpi .k { font-size:11px; color:var(--mut); font-weight:600; text-transform:uppercase; letter-spacing:.04em }
+    .bt-kpi .v { font-size:19px; font-weight:800; font-family:ui-monospace,Consolas,monospace; margin-top:3px }
+    .bt-vacio { padding:26px; text-align:center; color:var(--mut); font-size:13px }
+    .bt-fila:hover td { background:#f1f5f9; cursor:pointer }
+    .bt-det { background:var(--bg2,#f8fafc) }
+    .bt-det table { width:100%; font-size:11px }
+    #sec-bt-viajes .pa-tbl th { white-space:nowrap }
+    /* La barra de frescura. Un espejo que no dice de cuándo son sus datos miente
+       con total naturalidad cuando el agente deja de correr. */
+    .bt-sync { display:flex; gap:12px; align-items:center; flex-wrap:wrap; font-size:12px;
+      padding:9px 13px; border-radius:8px; margin-bottom:12px; border:1px solid var(--bor) }
+    .bt-sync.fresco { background:#f0fdf4; border-color:#86efac }
+    .bt-sync.viejo  { background:#fef3c7; border-color:#fcd34d }
+    .bt-sync.nunca  { background:#fee2e2; border-color:#fca5a5 }
+  </style>
+
+  <div id="bt-sync"></div>
+
+  <div style="display:flex;gap:2px;border-bottom:1px solid var(--bor);margin-bottom:14px">
+    <div class="bt-tab on" data-pane="viajes" onclick="btTab('viajes')">Viajes</div>
+    <div class="bt-tab"    data-pane="cargas" onclick="btTab('cargas')">Cargas</div>
+  </div>
+
+  <!-- ── VIAJES ────────────────────────────────────────────────────────── -->
+  <div class="bt-pane on" id="bt-pane-viajes">
+    <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap">
+      <div class="fl"><label>Desde</label><input type="date" id="bt-v-desde"></div>
+      <div class="fl"><label>Hasta</label><input type="date" id="bt-v-hasta"></div>
+      <div class="fl"><label>Estado</label>
+        <select id="bt-v-estado">
+          <option value="">Todos</option>
+          <option value="IN">En curso (IN)</option>
+          <option value="CI">Cerrados (CI)</option>
+        </select>
+      </div>
+      <div class="fl ff"><label>Buscar</label>
+        <input id="bt-v-q" placeholder="Nº de viaje, camión, chofer, origen o destino"
+               onkeyup="if(event.key==='Enter')btViajesCargar()">
+      </div>
+      <button class="btn bb lnb-ok-readonly" onclick="btViajesCargar()">Buscar</button>
+    </div>
+    <div class="bt-kpi" id="bt-v-kpis"></div>
+    <div id="bt-v-lista"></div>
+  </div>
+
+  <!-- ── CARGAS ────────────────────────────────────────────────────────── -->
+  <div class="bt-pane" id="bt-pane-cargas">
+    <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap">
+      <div class="fl"><label>Desde</label><input type="date" id="bt-c-desde"></div>
+      <div class="fl"><label>Hasta</label><input type="date" id="bt-c-hasta"></div>
+      <div class="fl ff"><label>Buscar</label>
+        <input id="bt-c-q" placeholder="Nº de carga, cliente, origen o destino"
+               onkeyup="if(event.key==='Enter')btCargasCargar()">
+      </div>
+      <button class="btn bb lnb-ok-readonly" onclick="btCargasCargar()">Buscar</button>
+    </div>
+    <div class="bt-kpi" id="bt-c-kpis"></div>
+    <div id="bt-c-lista"></div>
+  </div>
+
+  <div class="bt-chica" style="margin-top:14px;padding:10px 13px;background:var(--bg2,#f8fafc);
+       border:1px solid var(--bor);border-radius:8px">
+    Esto es un <b>espejo de solo lectura</b> de Transoft: se puede mirar y comparar, pero no se
+    edita desde acá. Mientras Transoft sea el sistema de registro hay una sola verdad, y es la de
+    Transoft. La <b>rentabilidad</b> es lo cobrado por las cargas del viaje menos lo que costó el viaje.
+  </div>
 </div>
 
 </main>
@@ -41605,6 +41697,266 @@ function trGuardar(borrar) {
     });
 }
 
+/* ══════════════════════════════════════════════════════════════════════════
+   BARCELÓ TRANSPORTE · Viajes y Cargas — espejo de lectura de Transoft
+   ══════════════════════════════════════════════════════════════════════════
+   Todos los números los calcula el backend (rutas/bt.js). Acá solo se pinta: la
+   rentabilidad es LA cuenta del módulo y tiene que salir de un solo lugar.
+*/
+
+var BT = { viajes: [], cargas: [], abierto: null, pane: 'viajes' };
+
+function btApi(path) {
+  return fetch('/api/bt' + path, { credentials: 'include' })
+    .then(function(r) { return r.json(); })
+    .catch(function() { return { ok: false, error: 'Error de red' }; });
+}
+// El esc() global escapa comillas para atributos, no entidades HTML.
+function btEsc(s) {
+  return String(s === null || s === undefined ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+function btN(n, dec) {
+  var v = Number(n) || 0;
+  return v.toLocaleString('es-AR', { minimumFractionDigits: dec || 0, maximumFractionDigits: dec || 0 });
+}
+function btPesos(n) { return '$ ' + btN(n); }
+function btFecha(f) {
+  var m = /^(\d{4})-(\d{2})-(\d{2})/.exec(f || '');
+  return m ? m[3] + '/' + m[2] + '/' + m[1] : (f || '—');
+}
+function btErr(r) { toast(r && r.error ? r.error : 'Error', 'er'); }
+
+function btInit() {
+  btEstado();
+  btViajesCargar();
+}
+
+function btTab(p) {
+  BT.pane = p;
+  var t = document.querySelectorAll('#sec-bt-viajes .bt-tab');
+  for (var i = 0; i < t.length; i++) t[i].classList.toggle('on', t[i].getAttribute('data-pane') === p);
+  var n = document.querySelectorAll('#sec-bt-viajes .bt-pane');
+  for (var j = 0; j < n.length; j++) n[j].classList.toggle('on', n[j].id === 'bt-pane-' + p);
+  if (p === 'cargas' && !BT.cargas.length) btCargasCargar();
+}
+
+// ── De cuándo son los datos ───────────────────────────────────────────────
+// Es lo primero de la pantalla a propósito. Un espejo que no dice su antigüedad
+// muestra números de hace tres días como si fueran de hoy, y nadie se entera.
+function btEstado() {
+  var cont = document.getElementById('bt-sync');
+  btApi('/estado').then(function(r) {
+    if (!r.ok) { cont.innerHTML = ''; return; }
+    var d = r.data, lote = d.ultimo_lote;
+    var totalFilas = 0;
+    for (var k in d.tablas) totalFilas += d.tablas[k].filas;
+
+    if (!totalFilas) {
+      cont.className = 'bt-sync nunca';
+      cont.innerHTML = '<div><b>Todavía no llegaron datos de Transoft.</b> ' +
+        'Hay que correr el sincronizador en el servidor donde están los archivos ' +
+        '(<code>scripts/bt_sync.py</code>). Hasta entonces esta pantalla va a estar vacía.</div>';
+      return;
+    }
+    // "Viejo" a partir de las 24 horas: la operación es diaria, así que un espejo
+    // de ayer todavía sirve para mirar, pero hay que saber que lo es.
+    var ult = lote && lote.terminado_en ? lote.terminado_en : null;
+    var horas = ult ? (Date.now() - Date.parse(ult.replace(' ', 'T'))) / 3600000 : 999;
+    cont.className = 'bt-sync ' + (horas <= 24 ? 'fresco' : 'viejo');
+    var estado = lote && lote.estado === 'error'
+      ? '<span class="bt-badge bt-err">la última sincronización falló</span>'
+      : (lote && lote.estado === 'en_curso'
+          ? '<span class="bt-badge bt-warn">quedó a medias</span>'
+          : '<span class="bt-badge bt-ok">completa</span>');
+    cont.innerHTML =
+      '<div><b>Datos de Transoft al ' + btEsc(ult ? ult.slice(0, 16).replace('T', ' ') : '—') + '</b> ' + estado +
+      (horas > 24 ? ' <b>· hace ' + Math.floor(horas / 24) + ' día(s)</b>' : '') + '</div>' +
+      '<div class="bt-chica">' + btN(d.tablas.viajes.filas) + ' viajes · ' +
+      btN(d.tablas.cargas.filas) + ' cargas · ' + btN(d.tablas.carga_viaje.filas) + ' asignaciones</div>' +
+      (lote && lote.error ? '<div class="bt-chica" style="color:#b91c1c">' + btEsc(lote.error) + '</div>' : '');
+  });
+}
+
+// ── VIAJES ────────────────────────────────────────────────────────────────
+
+function btViajesCargar() {
+  var q = '?desde=' + encodeURIComponent((document.getElementById('bt-v-desde') || {}).value || '') +
+          '&hasta=' + encodeURIComponent((document.getElementById('bt-v-hasta') || {}).value || '') +
+          '&estado=' + encodeURIComponent((document.getElementById('bt-v-estado') || {}).value || '') +
+          '&q=' + encodeURIComponent(((document.getElementById('bt-v-q') || {}).value || '').trim());
+  var cont = document.getElementById('bt-v-lista');
+  cont.innerHTML = '<div class="bt-vacio">Buscando…</div>';
+  btApi('/viajes' + q).then(function(r) {
+    if (!r.ok) { cont.innerHTML = '<div class="bt-vacio">' + btEsc(r.error) + '</div>'; return; }
+    BT.viajes = r.data;
+    BT.abierto = null;
+    btViajesKpis(r);
+    btViajesPintar(r);
+  });
+}
+
+function btViajesKpis(r) {
+  var cob = 0, cos = 0, km = 0;
+  r.data.forEach(function(v) { cob += v.cobrado || 0; cos += v.costo || 0; km += v.kmreal || 0; });
+  var rent = cob - cos;
+  var pct = cob > 0 ? (rent / cob * 100) : 0;
+  var color = rent < 0 ? 'color:#b91c1c' : 'color:#166534';
+  document.getElementById('bt-v-kpis').innerHTML =
+    '<div><div class="k">Viajes</div><div class="v">' + btN(r.data.length) + '</div>' +
+      '<div class="bt-chica">' + (r.total > r.tope ? 'de ' + btN(r.total) + ', se muestran los primeros ' + r.tope : 'en el período') + '</div></div>' +
+    '<div><div class="k">Se cobró</div><div class="v">' + btPesos(cob) + '</div>' +
+      '<div class="bt-chica">fletes de sus cargas</div></div>' +
+    '<div><div class="k">Costó</div><div class="v">' + btPesos(cos) + '</div>' +
+      '<div class="bt-chica">flete, gasoil, peajes</div></div>' +
+    '<div><div class="k">Rentabilidad</div><div class="v" style="' + color + '">' + btPesos(rent) + '</div>' +
+      '<div class="bt-chica">' + (cob > 0 ? pct.toFixed(1) + '% de lo cobrado' : 'sin ingresos cargados') + '</div></div>';
+}
+
+function btViajesPintar(r) {
+  var cont = document.getElementById('bt-v-lista');
+  if (!r.data.length) {
+    cont.innerHTML = '<div class="bt-vacio">No hay viajes con ese filtro.</div>';
+    return;
+  }
+  var h = '<div class="ab-table-wrap"><table class="pa-tbl" style="font-size:12px"><thead><tr>' +
+    '<th>Fecha</th><th>Nº</th><th>Camión</th><th>Chofer</th><th>Ruta</th>' +
+    '<th class="bt-num">Km</th><th class="bt-num">Cargas</th>' +
+    '<th class="bt-num">Cobrado</th><th class="bt-num">Costo</th><th class="bt-num">Rentab.</th>' +
+    '<th>Estado</th></tr></thead><tbody>';
+  r.data.forEach(function(v) {
+    var clave = v.filial + '-' + v.nrovia;
+    var abierto = BT.abierto === clave;
+    var rc = v.rentabilidad < 0 ? ' style="color:#b91c1c;font-weight:700"' : '';
+    h += '<tr class="bt-fila" onclick="btViajeAbrir(\'' + v.filial + '\',' + v.nrovia + ')">' +
+      '<td>' + btFecha(v.fecviaje) + '</td>' +
+      '<td><b>' + (abierto ? '−' : '+') + ' ' + btEsc(v.filial) + '-' + v.nrovia + '</b></td>' +
+      '<td>' + btEsc(v.camion_patente || v.camion || '—') +
+        (v.semi ? ' <span class="bt-chica">+ ' + btEsc(v.semi) + '</span>' : '') + '</td>' +
+      '<td>' + btEsc(v.chofer_nombre || v.chresum || '—') + '</td>' +
+      '<td>' + btEsc(v.origen || '—') + ' → ' + btEsc(v.destino || '—') + '</td>' +
+      '<td class="bt-num">' + (v.kmreal ? btN(v.kmreal) : '—') + '</td>' +
+      '<td class="bt-num">' + btN(v.cant_cargas) + '</td>' +
+      '<td class="bt-num">' + btPesos(v.cobrado) + '</td>' +
+      '<td class="bt-num">' + btPesos(v.costo) + '</td>' +
+      '<td class="bt-num"' + rc + '>' + btPesos(v.rentabilidad) + '</td>' +
+      '<td><span class="bt-badge ' + (v.estado === 'CI' ? 'bt-gris' : 'bt-ok') + '">' +
+        (v.estado === 'CI' ? 'cerrado' : (v.estado === 'IN' ? 'en curso' : btEsc(v.estado || '—'))) + '</span></td></tr>';
+    if (abierto) {
+      h += '<tr class="bt-det"><td colspan="11" id="bt-det-' + clave + '" style="padding:10px 14px">' +
+           '<div class="bt-chica">Cargando el detalle…</div></td></tr>';
+    }
+  });
+  cont.innerHTML = h + '</tbody></table></div>';
+}
+
+// El detalle: qué cargas lleva y de dónde sale la plata. Un viaje puede llevar
+// ocho cargas de clientes distintos, así que el total solo no alcanza.
+function btViajeAbrir(filial, nro) {
+  var clave = filial + '-' + nro;
+  if (BT.abierto === clave) { BT.abierto = null; btViajesPintar({ data: BT.viajes, total: BT.viajes.length, tope: 300 }); return; }
+  BT.abierto = clave;
+  btViajesPintar({ data: BT.viajes, total: BT.viajes.length, tope: 300 });
+
+  btApi('/viajes/' + encodeURIComponent(filial) + '/' + nro).then(function(r) {
+    var celda = document.getElementById('bt-det-' + clave);
+    if (!celda) return;
+    if (!r.ok) { celda.innerHTML = '<div class="bt-chica">' + btEsc(r.error) + '</div>'; return; }
+    var d = r.data, h = '';
+
+    h += '<div style="font-weight:700;font-size:12px;margin-bottom:5px">Cargas de este viaje</div>';
+    if (!d.cargas.length) {
+      h += '<div class="bt-chica">Este viaje no tiene cargas asignadas.</div>';
+    } else {
+      h += '<table class="pa-tbl"><thead><tr><th>Carga</th><th>Cliente</th><th>Ruta</th>' +
+        '<th class="bt-num">Kg embarcados</th><th class="bt-num">Saldo</th>' +
+        '<th class="bt-num">Flete</th><th>Estado</th></tr></thead><tbody>';
+      d.cargas.forEach(function(c) {
+        // El saldo es lo que quedo sin embarcar de esa carga: si es mayor a cero,
+        // la carga viaja partida y falta una parte en otro viaje.
+        var saldo = (Number(c.saldokg) || 0);
+        h += '<tr><td><b>' + btEsc(c.cargasuc) + '-' + c.carganro + '</b></td>' +
+          '<td>' + btEsc(c.cliente || c.cliente_razon || '-') + '</td>' +
+          '<td>' + btEsc(c.c_origen || '-') + ' -> ' + btEsc(c.c_destino || '-') + '</td>' +
+          '<td class="bt-num">' + (c.kgembar ? btN(c.kgembar) : '-') + '</td>' +
+          '<td class="bt-num"' + (saldo > 0 ? ' style="color:#b45309"' : '') + '>' +
+            (saldo > 0 ? btN(saldo) : '-') + '</td>' +
+          '<td class="bt-num">' + btPesos(c.impflete) + '</td>' +
+          '<td><span class="bt-badge bt-gris">' + btEsc(c.estado || c.c_estado || '-') + '</span></td></tr>';
+      });
+      h += '</tbody></table>';
+    }
+
+    h += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px;margin-top:12px">';
+    h += '<div><div style="font-weight:700;font-size:12px;margin-bottom:5px">Lo que costó</div>';
+    h += d.costos.length ? btMini(d.costos, 'concepto', 'importe') : '<div class="bt-chica">Sin costos cargados.</div>';
+    h += '</div><div><div style="font-weight:700;font-size:12px;margin-bottom:5px">Lo que se cobró</div>';
+    h += d.cobros.length ? btMini(d.cobros, 'concepto', 'importe') : '<div class="bt-chica">Sin ingresos cargados.</div>';
+    h += '</div></div>';
+
+    var rc = d.totales.rentabilidad < 0 ? 'color:#b91c1c' : 'color:#166534';
+    h += '<div style="margin-top:10px;padding-top:8px;border-top:1px solid var(--bor);font-size:12px">' +
+      'Cobrado <b>' + btPesos(d.totales.cobrado) + '</b> − Costo <b>' + btPesos(d.totales.costo) + '</b> = ' +
+      '<b style="' + rc + '">' + btPesos(d.totales.rentabilidad) + '</b></div>';
+    celda.innerHTML = h;
+  });
+}
+
+function btMini(filas, kCol, kImp) {
+  var h = '<table class="pa-tbl"><tbody>';
+  var tot = 0;
+  filas.forEach(function(f) {
+    tot += Number(f[kImp]) || 0;
+    h += '<tr><td>' + btEsc(f[kCol] || '—') +
+         (f.descrip ? ' <span class="bt-chica">' + btEsc(f.descrip) + '</span>' : '') + '</td>' +
+         '<td class="bt-num">' + btPesos(f[kImp]) + '</td></tr>';
+  });
+  return h + '<tr><td><b>Total</b></td><td class="bt-num"><b>' + btPesos(tot) + '</b></td></tr></tbody></table>';
+}
+
+// ── CARGAS ────────────────────────────────────────────────────────────────
+
+function btCargasCargar() {
+  var q = '?desde=' + encodeURIComponent((document.getElementById('bt-c-desde') || {}).value || '') +
+          '&hasta=' + encodeURIComponent((document.getElementById('bt-c-hasta') || {}).value || '') +
+          '&q=' + encodeURIComponent(((document.getElementById('bt-c-q') || {}).value || '').trim());
+  var cont = document.getElementById('bt-c-lista');
+  cont.innerHTML = '<div class="bt-vacio">Buscando…</div>';
+  btApi('/cargas' + q).then(function(r) {
+    if (!r.ok) { cont.innerHTML = '<div class="bt-vacio">' + btEsc(r.error) + '</div>'; return; }
+    BT.cargas = r.data;
+    var cob = 0, sinViaje = 0;
+    r.data.forEach(function(c) { cob += c.cobrado || 0; if (!c.en_viajes) sinViaje++; });
+    document.getElementById('bt-c-kpis').innerHTML =
+      '<div><div class="k">Cargas</div><div class="v">' + btN(r.data.length) + '</div>' +
+        '<div class="bt-chica">' + (r.total > r.tope ? 'de ' + btN(r.total) : 'en el período') + '</div></div>' +
+      '<div><div class="k">Se cobró</div><div class="v">' + btPesos(cob) + '</div></div>' +
+      '<div><div class="k">Sin viaje asignado</div><div class="v"' +
+        (sinViaje ? ' style="color:#b45309"' : '') + '>' + btN(sinViaje) + '</div>' +
+        '<div class="bt-chica">todavía no subieron a ningún camión</div></div>';
+
+    if (!r.data.length) { cont.innerHTML = '<div class="bt-vacio">No hay cargas con ese filtro.</div>'; return; }
+    var h = '<div class="ab-table-wrap"><table class="pa-tbl" style="font-size:12px"><thead><tr>' +
+      '<th>Fecha</th><th>Nº</th><th>Cliente</th><th>Ruta</th><th>Tipo</th>' +
+      '<th class="bt-num">Kg</th><th class="bt-num">Bultos</th><th class="bt-num">Viajes</th>' +
+      '<th class="bt-num">Cobrado</th><th>Estado</th></tr></thead><tbody>';
+    r.data.forEach(function(c) {
+      h += '<tr><td>' + btFecha(c.fechaing) + '</td>' +
+        '<td><b>' + btEsc(c.filial) + '-' + c.nrocar + '</b></td>' +
+        '<td>' + btEsc(c.cliente || '—') + '</td>' +
+        '<td>' + btEsc(c.origen || '—') + ' → ' + btEsc(c.destino || '—') + '</td>' +
+        '<td>' + btEsc(c.tipocarga || '—') + '</td>' +
+        '<td class="bt-num">' + (c.kg ? btN(c.kg) : '—') + '</td>' +
+        '<td class="bt-num">' + (c.bultos ? btN(c.bultos) : '—') + '</td>' +
+        '<td class="bt-num">' + (c.en_viajes ? btN(c.en_viajes)
+            : '<span class="bt-badge bt-warn">sin viaje</span>') + '</td>' +
+        '<td class="bt-num">' + btPesos(c.cobrado) + '</td>' +
+        '<td><span class="bt-badge bt-gris">' + btEsc(c.estado || '—') + '</span></td></tr>';
+    });
+    cont.innerHTML = h + '</tbody></table></div>';
+  });
+}
+
 // ── Routing ───────────────────────────────────────────────────────────────
 // Se envuelve loadSec (que a esta altura ya fue redefinido por el bloque de
 // arriba) en vez de tocarlo, para no arriesgar los módulos existentes.
@@ -41615,6 +41967,7 @@ function trGuardar(borrar) {
     if (s === 'sp-pagos') { spInit(); return; }
     if (s === 'tr-dashboard') { trInit(); return; }
     if (s === 'fp-flujo') { fpInit(); return; }
+    if (s === 'bt-viajes') { btInit(); return; }
     anterior(s);
   };
 })();
