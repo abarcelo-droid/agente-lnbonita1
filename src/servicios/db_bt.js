@@ -55,7 +55,7 @@ const ESPEJO = `
 
 db.exec(`
   -- El camión saliendo a la ruta.
-  CREATE TABLE IF NOT EXISTS bt_viajes (
+  CREATE TABLE IF NOT EXISTS bt_tr_viajes (
     filial      TEXT    NOT NULL,          -- CC | BA
     nrovia      INTEGER NOT NULL,
     fecviaje    TEXT,
@@ -84,11 +84,11 @@ db.exec(`
     ${ESPEJO},
     PRIMARY KEY (filial, nrovia)
   );
-  CREATE INDEX IF NOT EXISTS idx_bt_via_fecha  ON bt_viajes(fecviaje);
-  CREATE INDEX IF NOT EXISTS idx_bt_via_estado ON bt_viajes(estado, anulado);
+  CREATE INDEX IF NOT EXISTS idx_bt_tr_via_fecha  ON bt_tr_viajes(fecviaje);
+  CREATE INDEX IF NOT EXISTS idx_bt_tr_via_estado ON bt_tr_viajes(estado, anulado);
 
   -- El pedido de transporte.
-  CREATE TABLE IF NOT EXISTS bt_cargas (
+  CREATE TABLE IF NOT EXISTS bt_tr_cargas (
     filial      TEXT    NOT NULL,
     nrocar      INTEGER NOT NULL,
     fechaing    TEXT,
@@ -116,15 +116,15 @@ db.exec(`
     ${ESPEJO},
     PRIMARY KEY (filial, nrocar)
   );
-  CREATE INDEX IF NOT EXISTS idx_bt_car_fecha  ON bt_cargas(fechaing);
-  CREATE INDEX IF NOT EXISTS idx_bt_car_cli    ON bt_cargas(clisuc, clinro);
-  CREATE INDEX IF NOT EXISTS idx_bt_car_estado ON bt_cargas(estado, anulado);
+  CREATE INDEX IF NOT EXISTS idx_bt_tr_car_fecha  ON bt_tr_cargas(fechaing);
+  CREATE INDEX IF NOT EXISTS idx_bt_tr_car_cli    ON bt_tr_cargas(clisuc, clinro);
+  CREATE INDEX IF NOT EXISTS idx_bt_tr_car_estado ON bt_tr_cargas(estado, anulado);
 
   -- EL CORAZÓN DEL MÓDULO: qué carga va en qué viaje y cuánto de cada una.
   -- Una carga puede repartirse en varios viajes y un viaje lleva muchas cargas,
   -- así que la clave necesita el renglón de los dos lados: sin él, una carga
   -- partida en dos tramos del mismo viaje se pisaría a sí misma.
-  CREATE TABLE IF NOT EXISTS bt_carga_viaje (
+  CREATE TABLE IF NOT EXISTS bt_tr_carga_viaje (
     cargasuc    TEXT    NOT NULL,
     carganro    INTEGER NOT NULL,
     renglon     INTEGER NOT NULL DEFAULT 0,
@@ -142,8 +142,8 @@ db.exec(`
     ${ESPEJO},
     PRIMARY KEY (cargasuc, carganro, renglon, viajesuc, viajenro, rengvia)
   );
-  CREATE INDEX IF NOT EXISTS idx_bt_cv_viaje ON bt_carga_viaje(viajesuc, viajenro);
-  CREATE INDEX IF NOT EXISTS idx_bt_cv_carga ON bt_carga_viaje(cargasuc, carganro);
+  CREATE INDEX IF NOT EXISTS idx_bt_tr_cv_viaje ON bt_tr_carga_viaje(viajesuc, viajenro);
+  CREATE INDEX IF NOT EXISTS idx_bt_tr_cv_carga ON bt_tr_carga_viaje(cargasuc, carganro);
 `);
 
 // ── LA PLATA: DOS LADOS QUE NO SE MEZCLAN ─────────────────────────────────
@@ -155,7 +155,7 @@ db.exec(`
 
 db.exec(`
   -- Lo que se le COBRA al cliente.
-  CREATE TABLE IF NOT EXISTS bt_valor_carga (
+  CREATE TABLE IF NOT EXISTS bt_tr_valor_carga (
     cargasuc    TEXT    NOT NULL,
     carganro    INTEGER NOT NULL,
     renglon     INTEGER NOT NULL DEFAULT 0,
@@ -171,11 +171,11 @@ db.exec(`
     ${ESPEJO},
     PRIMARY KEY (cargasuc, carganro, renglon)
   );
-  CREATE INDEX IF NOT EXISTS idx_bt_vc_carga ON bt_valor_carga(cargasuc, carganro);
-  CREATE INDEX IF NOT EXISTS idx_bt_vc_fac   ON bt_valor_carga(facsuc, facnro);
+  CREATE INDEX IF NOT EXISTS idx_bt_tr_vc_carga ON bt_tr_valor_carga(cargasuc, carganro);
+  CREATE INDEX IF NOT EXISTS idx_bt_tr_vc_fac   ON bt_tr_valor_carga(facsuc, facnro);
 
   -- Lo que CUESTA el viaje.
-  CREATE TABLE IF NOT EXISTS bt_valor_viaje (
+  CREATE TABLE IF NOT EXISTS bt_tr_valor_viaje (
     viajesuc    TEXT    NOT NULL,
     viajenro    INTEGER NOT NULL,
     renglon     INTEGER NOT NULL DEFAULT 0,
@@ -190,14 +190,14 @@ db.exec(`
     ${ESPEJO},
     PRIMARY KEY (viajesuc, viajenro, renglon)
   );
-  CREATE INDEX IF NOT EXISTS idx_bt_vv_viaje ON bt_valor_viaje(viajesuc, viajenro);
+  CREATE INDEX IF NOT EXISTS idx_bt_tr_vv_viaje ON bt_tr_valor_viaje(viajesuc, viajenro);
 `);
 
 // ── ALREDEDOR DEL NÚCLEO ──────────────────────────────────────────────────
 
 db.exec(`
   -- Los remitos del cliente por carga.
-  CREATE TABLE IF NOT EXISTS bt_documentos (
+  CREATE TABLE IF NOT EXISTS bt_tr_documentos (
     cargasuc    TEXT    NOT NULL,
     carganro    INTEGER NOT NULL,
     renglon     INTEGER NOT NULL DEFAULT 0,
@@ -211,10 +211,10 @@ db.exec(`
     ${ESPEJO},
     PRIMARY KEY (cargasuc, carganro, renglon)
   );
-  CREATE INDEX IF NOT EXISTS idx_bt_doc_carga ON bt_documentos(cargasuc, carganro);
+  CREATE INDEX IF NOT EXISTS idx_bt_tr_doc_carga ON bt_tr_documentos(cargasuc, carganro);
 
   -- Órdenes de abastecimiento (gasoil) por viaje.
-  CREATE TABLE IF NOT EXISTS bt_ordenes (
+  CREATE TABLE IF NOT EXISTS bt_tr_ordenes (
     tiporden    TEXT    NOT NULL,          -- OA abastecimiento
     nroorden    INTEGER NOT NULL,
     tipuni      TEXT, unidad TEXT,
@@ -230,10 +230,10 @@ db.exec(`
     ${ESPEJO},
     PRIMARY KEY (tiporden, nroorden)
   );
-  CREATE INDEX IF NOT EXISTS idx_bt_ord_viaje ON bt_ordenes(viajesuc, viajenro);
+  CREATE INDEX IF NOT EXISTS idx_bt_tr_ord_viaje ON bt_tr_ordenes(viajesuc, viajenro);
 
   -- Hoja de ruta de paquetería: agrupa guías.
-  CREATE TABLE IF NOT EXISTS bt_fojas (
+  CREATE TABLE IF NOT EXISTS bt_tr_fojas (
     fojasuc     TEXT    NOT NULL,
     fojanro     INTEGER NOT NULL,
     fojacamion  TEXT, fojaplaca TEXT,
@@ -254,7 +254,7 @@ db.exec(`
 // son otra empresa y otro padrón.
 
 db.exec(`
-  CREATE TABLE IF NOT EXISTS bt_clientes (
+  CREATE TABLE IF NOT EXISTS bt_tr_clientes (
     codsuc      TEXT    NOT NULL,
     fichanro    INTEGER NOT NULL,
     resum       TEXT,                      -- nombre corto, es lo que se muestra
@@ -268,9 +268,9 @@ db.exec(`
     ${ESPEJO},
     PRIMARY KEY (codsuc, fichanro)
   );
-  CREATE INDEX IF NOT EXISTS idx_bt_cli_resum ON bt_clientes(resum COLLATE NOCASE);
+  CREATE INDEX IF NOT EXISTS idx_bt_tr_cli_resum ON bt_tr_clientes(resum COLLATE NOCASE);
 
-  CREATE TABLE IF NOT EXISTS bt_choferes (
+  CREATE TABLE IF NOT EXISTS bt_tr_choferes (
     codsuc      TEXT    NOT NULL,
     cuenta      TEXT    NOT NULL,
     nombre      TEXT,
@@ -280,7 +280,7 @@ db.exec(`
     PRIMARY KEY (codsuc, cuenta)
   );
 
-  CREATE TABLE IF NOT EXISTS bt_unidades (
+  CREATE TABLE IF NOT EXISTS bt_tr_unidades (
     tipuni      TEXT    NOT NULL,          -- C camión | S semi
     unidad      TEXT    NOT NULL,
     patente     TEXT,
@@ -290,7 +290,7 @@ db.exec(`
     PRIMARY KEY (tipuni, unidad)
   );
 
-  CREATE TABLE IF NOT EXISTS bt_localidades (
+  CREATE TABLE IF NOT EXISTS bt_tr_localidades (
     localidad   TEXT PRIMARY KEY,
     descrip     TEXT,
     provin      TEXT,
@@ -300,7 +300,7 @@ db.exec(`
     ${ESPEJO}
   );
 
-  CREATE TABLE IF NOT EXISTS bt_provincias (
+  CREATE TABLE IF NOT EXISTS bt_tr_provincias (
     provincia   TEXT PRIMARY KEY,
     descrip     TEXT,
     pais        TEXT,
@@ -315,7 +315,7 @@ db.exec(`
 // agregar una lista nueva no toca el schema.
 
 db.exec(`
-  CREATE TABLE IF NOT EXISTS bt_catalogos (
+  CREATE TABLE IF NOT EXISTS bt_tr_catalogos (
     catalogo    TEXT NOT NULL,             -- tipo_carga | estado_carga | ...
     codigo      TEXT NOT NULL,
     descrip     TEXT,
@@ -331,7 +331,7 @@ db.exec(`
 // cuántas filas trajo, cuánto tardó y si falló.
 
 db.exec(`
-  CREATE TABLE IF NOT EXISTS bt_sync_lotes (
+  CREATE TABLE IF NOT EXISTS bt_tr_sync_lotes (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
     iniciado_en   TEXT NOT NULL DEFAULT (datetime('now','localtime')),
     terminado_en  TEXT,
@@ -342,7 +342,7 @@ db.exec(`
     error         TEXT,
     usuario_id    INTEGER
   );
-  CREATE INDEX IF NOT EXISTS idx_bt_lote_fecha ON bt_sync_lotes(iniciado_en);
+  CREATE INDEX IF NOT EXISTS idx_bt_tr_lote_fecha ON bt_tr_sync_lotes(iniciado_en);
 `);
 
 // ── Migraciones idempotentes ──────────────────────────────────────────────
@@ -363,7 +363,7 @@ function addCol(tabla, col, def) {
 
 try {
   // (el módulo nace con este schema)
-  addCol('bt_viajes', 'cierre', 'TEXT');
+  addCol('bt_tr_viajes', 'cierre', 'TEXT');
 } catch (e) {
   console.error('[BT] Error en migraciones:', e.message);
 }
