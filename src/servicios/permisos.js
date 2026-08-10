@@ -133,26 +133,37 @@ export function soloSociedad(nombreLike) {
 //     lo tienen en NULL y los ve cualquiera).
 //   · usuarios.secciones — la lista de módulos habilitados, que hoy está anulada
 //     con ['*'] en auth.js y que este cruce vuelve a poner en uso.
-export function modulosVisibles(usuario) {
+// LA REGLA, EN UN SOLO LUGAR.
+// Esto estuvo escrito dos veces —acá y en el router del sidebar— y sólo una de las
+// dos miraba la tabla nueva. Resultado: la pantalla de permisos guardaba bien, el
+// menú seguía armándose con el campo viejo, y lo que se tildaba no cambiaba nada.
+// Todo lo que decida qué módulos ve alguien tiene que pasar por acá.
+export function filtrarModulos(usuario, modulos) {
+  if (!usuario || !usuario.id) return [];
   const socs = sociedadesDe(usuario);
-  const todos = db.prepare('SELECT * FROM modulos_config WHERE oculto = 0 ORDER BY orden, label').all();
+  const esAdmin = usuario.rol === 'admin';
   const secciones = seccionesDe(usuario);
   const todasLasSecciones = secciones.includes('*');
 
-  // Si tiene permisos cargados en la tabla nueva, mandan esos. Si no, rigen las
-  // secciones de siempre — así esto se puede soltar sin haber configurado a nadie.
-  const tienePermisos = !!db.prepare(
+  // Si tiene accesos cargados en la tabla nueva, mandan esos. Si no, rigen las
+  // secciones de siempre: es lo que permite que esto conviva sin configurar a nadie.
+  const tienePermisos = !esAdmin && !!db.prepare(
     'SELECT 1 FROM usuario_modulos WHERE usuario_id = ? LIMIT 1'
   ).get(usuario.id);
 
-  return todos.filter(m => {
-    // De otra empresa: no se ve, aunque tenga el módulo habilitado. La empresa
-    // manda sobre el módulo, no al revés.
-    if (m.sociedad_id !== null && !socs.includes(m.sociedad_id)) return false;
-    if (usuario.rol === 'admin') return true;
+  return modulos.filter(m => {
+    // La empresa manda sobre el módulo, no al revés: de otra empresa no se ve
+    // aunque el módulo esté habilitado.
+    if (m.sociedad_id !== null && m.sociedad_id !== undefined && !socs.includes(m.sociedad_id)) return false;
+    if (esAdmin) return true;
     if (tienePermisos) return !!nivelEnModulo(usuario, m.modulo);
     return todasLasSecciones || secciones.includes(m.modulo);
   }).map(m => ({ ...m, nivel: nivelEnModulo(usuario, m.modulo) || 'operar' }));
+}
+
+export function modulosVisibles(usuario) {
+  const todos = db.prepare('SELECT * FROM modulos_config WHERE oculto = 0 ORDER BY orden, label').all();
+  return filtrarModulos(usuario, todos);
 }
 
 // ── HASTA DÓNDE LLEGA DENTRO DE UN MENÚ ───────────────────────────────────
