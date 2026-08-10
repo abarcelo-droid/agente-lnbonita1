@@ -115,6 +115,8 @@ const MAESTROS_VIEJOS = [
   ['bt_tr_clientes', 'anulado'],   // la columna que delata la forma vieja
   ['bt_tr_unidades', 'anulado'],
   ['bt_tr_choferes', 'codsuc'],
+  // avfoja tampoco tiene ANULADO: tiene FOJAANU, que es una fecha.
+  ['bt_tr_fojas', 'anulado'],
 ];
 
 function rehacerMaestro(tabla, columnaVieja) {

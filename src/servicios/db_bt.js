@@ -212,6 +212,9 @@ ddl(`
     cargasuc    TEXT    NOT NULL,
     carganro    INTEGER NOT NULL,
     renglon     INTEGER NOT NULL DEFAULT 0,
+    -- Un documento cuelga de una CARGA o de una GUÍA de expreso. Cuando va por
+    -- guía, la carga viene vacía; sin este par la fila entra sin decir de qué es.
+    guiasuc     TEXT, guianroint INTEGER,
     tipodoc     TEXT,                      -- RE remito | FC factura
     letra       TEXT,
     centro      TEXT,
@@ -253,7 +256,10 @@ ddl(`
     fojadest    TEXT,
     fojaguia    REAL,
     fecha       TEXT,
-    anulado     INTEGER NOT NULL DEFAULT 0,
+    -- OJO: avfoja no tiene ANULADO. Tiene FOJAANU, y es una FECHA de anulación
+    -- (vacía = vigente), igual que la BAJA de clientes, choferes y unidades.
+    -- Pedir 'anulado' traía una columna que allá no existe.
+    fojaanu     TEXT,
     ${ESPEJO},
     PRIMARY KEY (fojasuc, fojanro)
   );
@@ -421,6 +427,12 @@ function addCol(tabla, col, def) {
 try {
   // (el módulo nace con este schema)
   addCol('bt_tr_viajes', 'cierre', 'TEXT');
+  // El vínculo con la guía de expreso: la tabla ya existía sin estas columnas y
+  // CREATE TABLE IF NOT EXISTS no las agrega. Se suman, que es lo no destructivo:
+  // rehacer la tabla entera por dos columnas nuevas sería tirar los datos que ya
+  // estén adentro.
+  addCol('bt_tr_documentos', 'guiasuc', 'TEXT');
+  addCol('bt_tr_documentos', 'guianroint', 'INTEGER');
 } catch (e) {
   console.error('[BT] Error en migraciones:', e.message);
 }
