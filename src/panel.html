@@ -41762,8 +41762,15 @@ function trGuardar(borrar) {
 
 var BT = { viajes: [], cargas: [], abierto: null, pane: 'viajes' };
 
-function btApi(path) {
-  return fetch('/api/bt' + path, { credentials: 'include' })
+function btApi(path, opts) {
+  // OJO: esta función nació aceptando SOLO el path, y cuando se le empezaron a
+  // pasar opciones las ignoraba en silencio: un POST salía como GET. El pedido
+  // llegaba al servidor, contestaba 200 y el front daba por hecho que había
+  // funcionado — así "Generar llave" devolvía una configuración sin llave.
+  var o = { credentials: 'include' };
+  for (var k in (opts || {})) o[k] = opts[k];
+  if (o.body && !o.headers) o.headers = { 'Content-Type': 'application/json' };
+  return fetch('/api/bt' + path, o)
     .then(function(r) { return r.json(); })
     .catch(function() { return { ok: false, error: 'Error de red' }; });
 }
@@ -41802,6 +41809,9 @@ function btLlaveGenerar() {
   var nombre = (document.getElementById('bt-llave-nombre').value || '').trim() || 'servidor Transoft';
   btApi('/llaves', { method: 'POST', body: JSON.stringify({ nombre: nombre }) }).then(function(r) {
     if (!r.ok) return btErr(r);
+    // Sin esto, un token vacío se convertía en una configuración a la que le
+    // faltaba una línea, y el error recién aparecía al correr el agente.
+    if (!r.token) return toast('El servidor no devolvió la llave. Reintentá.', 'er');
     var caja = document.getElementById('bt-llave-nueva');
     var url = window.location.origin;
     // El JSON entero armado, para que sea copiar y pegar y no armarlo a mano.
