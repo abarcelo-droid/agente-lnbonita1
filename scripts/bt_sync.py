@@ -156,11 +156,12 @@ def _valor(crudo, tipo, dec):
 # ── QUE SE SINCRONIZA ─────────────────────────────────────────────────────
 # (clave en el ERP, archivo .dbf, columnas a traer)
 # Los nombres de columna son los de Transoft; el ERP los espeja tal cual.
-CGRALES = os.path.join(DATOS, "CGRALES")
-GENERAL = os.path.join(DATOS, "GENERAL")
-UNIDADES = os.path.join(DATOS, "UNIDADES")
-
-PLAN = [
+def armar_plan(datos):
+    """Arma la lista de que sincronizar a partir de la carpeta de datos."""
+    CGRALES = os.path.join(datos, "CGRALES")
+    GENERAL = os.path.join(datos, "GENERAL")
+    UNIDADES = os.path.join(datos, "UNIDADES")
+    return [
     ("catalogos",  None, None),          # se arma aparte, mas abajo
     ("localidades", os.path.join(GENERAL, "localida.dbf"),
      ["LOCALIDAD", "DESCRIP", "PROVIN", "CENTRO", "ZONA", "SUCURSAL"]),
@@ -206,10 +207,10 @@ PLAN = [
      ["TIPORDEN", "NROORDEN", "TIPUNI", "UNIDAD", "CHRESUM", "VIAJESUC", "VIAJENRO",
       "ESSUC", "ESFICHA", "IMPORTE", "LITROS", "KM", "REMLETRA", "REMCE", "REMNRO",
       "FECHA", "ANULADO"]),
-    ("fojas",      os.path.join(DATOS, "ENCOMIEN", "avfoja.dbf"),
+    ("fojas",      os.path.join(datos, "ENCOMIEN", "avfoja.dbf"),
      ["FOJASUC", "FOJANRO", "FOJACAMION", "FOJAPLACA", "FOJASEMI", "PLACASEMI",
       "FOJACHOF", "FOJADEST", "FOJAGUIA", "ANULADO"]),
-]
+    ]
 
 # Los catalogos son ocho tablitas de referencia. Van todas a bt_tr_catalogos con
 # una columna que dice de cual son.
@@ -226,7 +227,7 @@ CATALOGOS = [
 ]
 
 
-def leer_catalogos():
+def leer_catalogos(CGRALES):
     """Junta las tablitas de referencia en una sola lista."""
     filas = []
     for (nombre, archivo) in CATALOGOS:
@@ -298,19 +299,26 @@ def postear(cfg, camino, cuerpo):
 
 def main():
     cfg = cargar_config()
+    datos = cfg.get("datos") or DATOS_DEFECTO
+    if not os.path.isdir(datos):
+        log("NO ENCUENTRO LA CARPETA DE TRANSOFT: %s" % datos)
+        log('Si esta en otro lado, agregalo al config:  "datos": "D:\\\\ruta\\\\Datos"')
+        return 1
+    plan = armar_plan(datos)
     origen = socket.gethostname()
     log("=" * 70)
     log("Sincronizando Transoft -> ERP  (origen: %s)" % origen)
+    log("Leyendo de: %s   (SOLO LECTURA)" % datos)
 
     lote = None
     resumen = {}
     hubo_error = None
     t0 = time.time()
 
-    for (clave, ruta, columnas) in PLAN:
+    for (clave, ruta, columnas) in plan:
         try:
             if clave == "catalogos":
-                filas = leer_catalogos()
+                filas = leer_catalogos(os.path.join(datos, "CGRALES"))
             else:
                 if not os.path.isfile(ruta):
                     log("  %-13s NO ESTA: %s" % (clave, ruta))
