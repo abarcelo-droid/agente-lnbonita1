@@ -297,6 +297,44 @@ try { db.exec("CREATE INDEX IF NOT EXISTS idx_modulos_area ON modulos_config(are
   }
 })();
 
+// ── VENTAS ES DE PUENTE CORDÓN, NO DE SAN GERÓNIMO ───────────────────────
+// Las pantallas ven-* (Clientes, Facturas, Cobranzas, CC y Liquidaciones de
+// Ventas) figuraban bajo San Gerónimo, pero su contabilidad la escriben en las
+// tablas de Puente Cordón: ventas.js hace INSERT INTO pa_asientos.
+//
+// O sea que un usuario de San Gerónimo cargando una factura por ahí le metía el
+// asiento en los libros de Puente Cordón. Es exactamente lo que no puede pasar
+// entre dos sociedades fiscales distintas.
+//
+// San Gerónimo NO se queda sin ventas: tiene su propio módulo completo, con sus
+// tablas sg_ven_* y sus asientos en sg_asientos (rutas/sg_ventas.js).
+//
+// Se hace por migración y no cambiando el seed porque el seed sólo corre con la
+// tabla vacía (`if (n > 0) return`), y en producción ya tiene filas.
+//
+// SOLO se mueven las que siguen en San Gerónimo: si un admin ya las reasignó a
+// mano desde la pantalla de módulos, esa decisión es más nueva que ésta y manda.
+(function migrarVentasAPuenteCordon() {
+  try {
+    const sid = (n) => db.prepare("SELECT id FROM sociedades WHERE nombre = ?").get(n)?.id ?? null;
+    const SG = sid('San Gerónimo SA');
+    const PC = sid('Puente Cordón SA');
+    if (!SG || !PC) return;
+
+    const VENTAS = ['ven-clientes', 'ven-facturas', 'ven-cobranzas', 'ven-cc', 'ven-liquidaciones'];
+    const upd = db.prepare(
+      'UPDATE modulos_config SET sociedad_id = ? WHERE modulo = ? AND sociedad_id = ?');
+    let n = 0;
+    db.transaction(() => { for (const m of VENTAS) n += upd.run(PC, m, SG).changes; })();
+    if (n) {
+      console.log(`[ORG] ${n} pantalla(s) de Ventas pasaron de San Gerónimo a Puente Cordón: ` +
+                  `su contabilidad se escribe en las tablas de PC. San Gerónimo usa sg_ventas.`);
+    }
+  } catch (e) {
+    console.error('[ORG] Error reasignando Ventas:', e.message);
+  }
+})();
+
 console.log("[ORG] Schema organizacional inicializado");
 import "./ensure_modulo_sg.js";
 import "./ensure_modulo_personal.js";
