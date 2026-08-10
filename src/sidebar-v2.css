@@ -602,3 +602,59 @@
   }
   .sb2.mobile-open{ transform: translateX(0) }
 }
+
+/* ═══════════════════════════════════════════════════════════════════════
+   IDENTIDAD POR EMPRESA — que se vea sin leer
+   ═══════════════════════════════════════════════════════════════════════
+   Tres empresas comparten las mismas pantallas. Saber sobre cuál se está
+   trabajando no puede depender de leer un nombre chico arriba: el menú
+   entero cambia de color.
+
+   Los tonos salen del logo de la casa — el bordó del lettering y el ocre
+   del medallón. Que sean los de la marca y no colores inventados es lo que
+   hace que se reconozcan de reojo.
+
+   El azul queda para Barceló, que no está en el logo original.
+   ══════════════════════════════════════════════════════════════════════ */
+
+/* San Gerónimo — ocre del medallón */
+.sb2[data-soc-color="ocre"]{
+  --sb2-navy:      #6E5411;
+  --sb2-navy-deep: #4A3809;
+  --sb2-navy-soft: #8A6A18;
+  --sb2-gold:      #F2CB4E;
+}
+/* Puente Cordón — bordó del lettering */
+.sb2[data-soc-color="bordo"]{
+  --sb2-navy:      #7A1D21;
+  --sb2-navy-deep: #521315;
+  --sb2-navy-soft: #9B2A2F;
+  --sb2-gold:      #E8C547;
+}
+/* Barceló Transporte — azul */
+.sb2[data-soc-color="azul"]{
+  --sb2-navy:      #1B3A6B;
+  --sb2-navy-deep: #0F2647;
+  --sb2-navy-soft: #2E5896;
+  --sb2-gold:      #6FB6E8;
+}
+/* Familia y "Todas": el azul de siempre, para que se note que no se está
+   parado en ninguna empresa en particular. */
+
+/* Una franja del color de la empresa arriba de todo: es lo que se ve primero
+   al mirar la pantalla, antes de leer nada. */
+.sb2[data-soc-color]:not([data-soc-color="todas"]) .sb2-brand{
+  box-shadow: inset 0 3px 0 0 var(--sb2-gold);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   GRUPOS QUE SE PLIEGAN
+   ═══════════════════════════════════════════════════════════════════════
+   El JS ya ponía la clase y la guardaba entre sesiones; lo que faltaba era
+   esta regla, así que el grupo se marcaba como plegado y seguía abierto.
+   Con nueve grupos abiertos, llegar al último es scrollear a ciegas.
+   ══════════════════════════════════════════════════════════════════════ */
+.sb2-grp{ cursor: pointer; user-select: none }
+.sb2-grp-caret{ transition: transform .16s ease }
+.sb2-grp.collapsed .sb2-grp-caret{ transform: rotate(-90deg) }
+.sb2-grp.collapsed + .sb2-grp-items{ display: none }
