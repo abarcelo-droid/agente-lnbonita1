@@ -42,7 +42,10 @@
 //   · Renglones: una carga o un viaje se descomponen en renglones para valorizar
 //     y asignar por partes.
 import db from './db.js';
-import './db_org.js';   // 'sociedades' tiene que existir antes de la FK
+import './db_org.js';      // 'sociedades' tiene que existir antes de la FK
+import './db_bt_migra.js'; // ANTES de cualquier CREATE: libera los nombres bt_* que
+                           // dejó ocupados el espejo del #601 (ver ese archivo)
+import { ddl } from './bt_ddl.js';   // db.exec que no puede voltear el servidor
 
 // Toda tabla espejo lleva estas dos columnas. `sincronizado_en` es lo que permite
 // contestar "¿de cuándo son estos datos?" — sin eso, un agente caído muestra
@@ -53,7 +56,7 @@ const ESPEJO = `
 
 // ── NÚCLEO: VIAJE, CARGA Y EL PUENTE ──────────────────────────────────────
 
-db.exec(`
+ddl(`
   -- El camión saliendo a la ruta.
   CREATE TABLE IF NOT EXISTS bt_tr_viajes (
     filial      TEXT    NOT NULL,          -- CC | BA
@@ -153,7 +156,7 @@ db.exec(`
 // a acordarse del signo en cada consulta, y el día que alguien se olvide la
 // rentabilidad va a dar cualquier cosa.
 
-db.exec(`
+ddl(`
   -- Lo que se le COBRA al cliente.
   CREATE TABLE IF NOT EXISTS bt_tr_valor_carga (
     cargasuc    TEXT    NOT NULL,
@@ -195,7 +198,7 @@ db.exec(`
 
 // ── ALREDEDOR DEL NÚCLEO ──────────────────────────────────────────────────
 
-db.exec(`
+ddl(`
   -- Los remitos del cliente por carga.
   CREATE TABLE IF NOT EXISTS bt_tr_documentos (
     cargasuc    TEXT    NOT NULL,
@@ -253,7 +256,7 @@ db.exec(`
 // acá y NO se reusan las tablas de proveedores/clientes de los otros módulos:
 // son otra empresa y otro padrón.
 
-db.exec(`
+ddl(`
   CREATE TABLE IF NOT EXISTS bt_tr_clientes (
     codsuc      TEXT    NOT NULL,
     fichanro    INTEGER NOT NULL,
@@ -314,7 +317,7 @@ db.exec(`
 // listas de tres a diez filas cada una, y ocho tablas para eso es ruido. Con esto,
 // agregar una lista nueva no toca el schema.
 
-db.exec(`
+ddl(`
   CREATE TABLE IF NOT EXISTS bt_tr_catalogos (
     catalogo    TEXT NOT NULL,             -- tipo_carga | estado_carga | ...
     codigo      TEXT NOT NULL,
@@ -330,7 +333,7 @@ db.exec(`
 // muestra números viejos con total naturalidad. Cada corrida deja su rastro:
 // cuántas filas trajo, cuánto tardó y si falló.
 
-db.exec(`
+ddl(`
   CREATE TABLE IF NOT EXISTS bt_tr_sync_lotes (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
     iniciado_en   TEXT NOT NULL DEFAULT (datetime('now','localtime')),
