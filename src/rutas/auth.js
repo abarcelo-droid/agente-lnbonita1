@@ -584,9 +584,18 @@ router.get('/usuarios/:id/permisos', requireAuth, soloAdmin, (req, res) => {
       });
     }
 
+    // Los depósitos son un permiso más —a qué depósitos entra— y estaban sueltos
+    // en la ficha de la persona. Van con el resto para que "los accesos de
+    // fulano" se configuren en un solo lugar.
+    let depositos = [];
+    try { depositos = JSON.parse(db.prepare('SELECT depositos FROM usuarios WHERE id=?').get(id)?.depositos || '[]'); }
+    catch { depositos = []; }
+
     res.json({
       ok: true,
       usuario: u,
+      depositos_todos: ['MCBA', 'FINCA', 'SAN PEDRO'],
+      depositos: Array.isArray(depositos) ? depositos : [],
       // Un admin entra a todo por su rol: se avisa para que no parezca que la
       // pantalla no guarda lo que se marca.
       es_admin: u.rol === 'admin',
@@ -619,6 +628,14 @@ router.put('/usuarios/:id/permisos', requireAuth, soloAdmin, (req, res) => {
     const filtrados = items.filter(i => i && permitidos.has(i.modulo));
     const rechazados = items.length - filtrados.length;
     const n = guardarPermisos(id, filtrados, req.user.id);
+
+    // Los depósitos viajan en el mismo guardado: son parte de los accesos.
+    // Sólo se tocan si vinieron — así un pedido que no los manda no los borra.
+    if (Array.isArray(req.body?.depositos)) {
+      const VALIDOS = new Set(['MCBA', 'FINCA', 'SAN PEDRO']);
+      const deps = [...new Set(req.body.depositos.filter(d => VALIDOS.has(d)))];
+      db.prepare('UPDATE usuarios SET depositos = ? WHERE id = ?').run(JSON.stringify(deps), id);
+    }
 
     res.json({
       ok: true, guardados: n,
