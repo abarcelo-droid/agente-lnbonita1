@@ -204,16 +204,19 @@ def armar_plan(datos):
     ("valor_viaje", os.path.join(CGRALES, "cgvalvia.dbf"),
      ["VIAJESUC", "VIAJENRO", "RENGLON", "CONCEPTO", "TARIFARIO", "PRECIO", "IMPORTE",
       "LIQUIDAR", "EXENTO", "ORDENSUC", "ORDENNRO", "ANULADO"]),
+    # cgdocum no tiene ANULADO. Y el documento puede colgar de una CARGA o de una
+    # GUIA de expreso: por eso van tambien GUIASUC+GUIANROINT.
     ("documentos", os.path.join(CGRALES, "cgdocum.dbf"),
-     ["CARGASUC", "CARGANRO", "RENGLON", "TIPODOC", "LETRA", "CENTRO", "NUMERO", "FECHA",
-      "DESCRIP", "ANULADO"]),
+     ["CARGASUC", "CARGANRO", "GUIASUC", "GUIANROINT", "RENGLON", "TIPODOC", "LETRA",
+      "CENTRO", "NUMERO", "FECHA", "DESCRIP"]),
     ("ordenes",    os.path.join(CGRALES, "cgorden.dbf"),
      ["TIPORDEN", "NROORDEN", "TIPUNI", "UNIDAD", "CHRESUM", "VIAJESUC", "VIAJENRO",
       "ESSUC", "ESFICHA", "IMPORTE", "LITROS", "KM", "REMLETRA", "REMCE", "REMNRO",
       "FECHA", "ANULADO"]),
     ("fojas",      os.path.join(datos, "ENCOMIEN", "avfoja.dbf"),
      ["FOJASUC", "FOJANRO", "FOJACAMION", "FOJAPLACA", "FOJASEMI", "PLACASEMI",
-      "FOJACHOF", "FOJADEST", "FOJAGUIA", "ANULADO"]),
+      # avfoja no tiene ANULADO: la anulacion es FOJAANU y es una FECHA.
+      "FOJACHOF", "FOJADEST", "FOJAGUIA", "FOJAANU"]),
     ]
 
 # Los catalogos son ocho tablitas de referencia. Van todas a bt_tr_catalogos con
