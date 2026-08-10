@@ -432,6 +432,56 @@ export { bloquearSiSoloLectura };
 // empresa asignada las reciben todas (ver servicios/db_permisos.js). Restringir es
 // después, de a uno, desde esta pantalla.
 
+// ── TODOS LOS USUARIOS CON SUS PERMISOS, DE UN VISTAZO ───────────────────
+// Para saber cómo está configurada la gente había que abrir persona por persona.
+// Con veinte usuarios eso no se hace: se configura al que se está mirando y del
+// resto no se sabe nada. Acá está todo junto, que es lo que permite darse cuenta
+// de que a alguien se le quedó todo abierto.
+router.get('/usuarios-permisos', requireAuth, soloAdmin, (req, res) => {
+  const db = getDb();
+  try {
+    const usuarios = db.prepare(`
+      SELECT u.id, u.nombre, u.email, u.username, u.rol, u.activo, u.solo_lectura
+        FROM usuarios u
+       ORDER BY u.activo DESC, u.nombre COLLATE NOCASE
+    `).all();
+
+    const socsDe = db.prepare(`
+      SELECT s.id, s.nombre FROM usuario_sociedades us
+        JOIN sociedades s ON s.id = us.sociedad_id AND s.activa = 1
+       WHERE us.usuario_id = ? ORDER BY s.id
+    `);
+    const cuenta = db.prepare(
+      'SELECT nivel, COUNT(*) n FROM usuario_modulos WHERE usuario_id = ? GROUP BY nivel'
+    );
+    const todasLasSocs = db.prepare('SELECT id, nombre FROM sociedades WHERE activa = 1 ORDER BY id').all();
+
+    const filas = usuarios.map(u => {
+      // Un admin entra a todo por su rol: mostrar sus filas de la tabla sería
+      // decir algo que no gobierna nada.
+      const esAdmin = u.rol === 'admin';
+      const socs = esAdmin ? todasLasSocs : socsDe.all(u.id);
+      const porNivel = { ver: 0, operar: 0, borrar: 0 };
+      let total = 0;
+      if (!esAdmin) {
+        for (const r of cuenta.all(u.id)) { porNivel[r.nivel] = r.n; total += r.n; }
+      }
+      return {
+        ...u,
+        es_admin: esAdmin,
+        sociedades: socs,
+        menus_total: total,
+        menus_por_nivel: porNivel,
+        // Sin ningún menú cargado todavía rige el esquema viejo: entra a todo lo
+        // de sus empresas. Es el estado que hay que poder detectar de un vistazo.
+        sin_configurar: !esAdmin && total === 0,
+      };
+    });
+
+    res.json({ ok: true, usuarios: filas, sociedades: todasLasSocs });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
 router.get('/usuarios/:id/sociedades', requireAuth, soloAdmin, (req, res) => {
   const db = getDb();
   try {

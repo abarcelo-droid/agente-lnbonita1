@@ -1030,15 +1030,33 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
 <!-- MAESTRO USUARIOS -->
 <div class="sec" id="sec-maestro-usuarios">
   <div class="ph">
-    <div><div class="ph-t">Usuarios</div><div class="ph-s">Este módulo se movió</div></div>
+    <div><div class="ph-t">Usuarios y accesos</div>
+    <div class="ph-s">Quién entra a qué empresa, a qué menús, y hasta dónde</div></div>
   </div>
-  <div style="background:var(--sur); border:1px dashed var(--bor); border-radius:12px; padding:32px 24px; text-align:center; margin-top:20px">
-    <div style="font-size:40px; margin-bottom:12px">🏢</div>
-    <div style="font-size:16px; font-weight:600; margin-bottom:8px">La gestión de accesos ahora se hace desde Equipo</div>
-    <div style="color:var(--mut); max-width:520px; margin:0 auto 18px; line-height:1.5; font-size:13px">
-      Cada persona del organigrama puede tener acceso al panel. Username, contraseña, rol y depósitos se configuran al editar la persona en el módulo <strong>🏢 Equipo</strong>.
+
+  <div id="up-aviso" style="display:none;background:#fffbeb;border:1px solid #fcd34d;border-radius:8px;
+       padding:10px 13px;margin:14px 0;font-size:13px;color:#92400e"></div>
+
+  <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:14px 0">
+    <div class="fl ff" style="min-width:230px;margin:0">
+      <input id="up-buscar" placeholder="Buscar por nombre o usuario" onkeyup="upCargar()">
     </div>
-    <button class="btn bb" onclick="show('equipo')">Ir a Equipo →</button>
+    <label style="display:flex;align-items:center;gap:7px;font-size:12px;cursor:pointer;color:var(--mut)">
+      <input type="checkbox" id="up-solo-pendientes" onchange="upCargar()" style="width:16px;height:16px">
+      Solo los que faltan configurar
+    </label>
+    <button class="btn" onclick="upCargar()">Actualizar</button>
+    <button class="btn" style="margin-left:auto" onclick="show('equipo')">
+      Crear o editar personas en Equipo →</button>
+  </div>
+
+  <div id="up-lista"></div>
+
+  <div style="margin-top:14px;padding:10px 13px;background:var(--bg2,#f8fafc);border:1px solid var(--bor);
+       border-radius:8px;font-size:12px;color:var(--mut);line-height:1.6">
+    Los usuarios, contraseñas y depósitos se administran en <b>🏢 Equipo</b>, al editar cada persona.
+    Acá se define <b>a qué entra</b>: primero las empresas, después los menús de cada una y si puede
+    <b>operar</b> o también <b>borrar</b>.
   </div>
 </div>
 
@@ -12515,7 +12533,7 @@ function loadSec(s) {
     'calendario': loadCalendario,
     conv: loadConvs, guardias: loadGuardias, cobranza: loadCob,
     'retail-prod': loadRP, 'retail-gastos': loadGastos,
-    'maestro-usuarios': function(){ /* deprecado: ahora se gestiona desde Equipo */ },
+    'maestro-usuarios': function(){ upCargar(); },
     'config-modulos': cmCargar,
     'admin-actividad': admActInit,
     'ab-dashboard': abDashboard,
@@ -14224,7 +14242,11 @@ function bCls(t){
 }
 function ecl(e){ var m={pendiente:'pe',entregado:'ok',facturado:'cc',cancelado:'er'}; return m[e]||'pe'; }
 function bPago(m){ var lm={cuenta_corriente:'Cta.Cte.',transferencia:'Transf.',cancelado:'CANCELADO'}; var cm={cuenta_corriente:'bcc',transferencia:'bok',cancelado:'ber'}; return '<span class="bdg '+(cm[m]||'bcc')+'" style="font-size:10px">'+(lm[m]||'Cta.Cte.')+'</span>'; }
-function closeMB(id){ var el=eid(id); if(el) el.classList.remove('on'); }
+function closeMB(id){ var el=eid(id); if(el) el.classList.remove('on');
+  if (id === 'mb-permisos' && typeof UP !== 'undefined' && UP.alCerrar) {
+    UP.alCerrar = false; if (eid('up-lista')) upCargar();
+  }
+}
 
 // ══════════════════════════════════════════════════════════════════════════
 // EMPRESAS Y ACCESOS DE UN USUARIO
@@ -14237,6 +14259,106 @@ var PERM = { id: null, nombre: '' };
 // Desde el modal de Equipo, que es por donde se administra la gente de verdad.
 // El permiso cuelga del USUARIO, no de la persona del organigrama: una persona sin
 // login no tiene a qué entrar.
+
+// ══════════════════════════════════════════════════════════════════════════
+// USUARIOS Y ACCESOS — todo a la vista
+// ══════════════════════════════════════════════════════════════════════════
+// Antes, para saber cómo estaba configurada la gente había que abrir persona por
+// persona. Con veinte usuarios eso no se hace: se configura al que se está
+// mirando y del resto no se sabe nada. Acá está todo junto, que es justamente lo
+// que permite darse cuenta de que a alguien se le quedó todo abierto.
+function upCargar() {
+  var cont = eid('up-lista');
+  if (!cont) return;
+  cont.innerHTML = '<div style="padding:26px;text-align:center;color:var(--mut)">Cargando…</div>';
+  fetch('/api/auth/usuarios-permisos', { credentials: 'include' })
+    .then(function(r) { return r.json(); })
+    .then(function(res) {
+      if (!res.ok) {
+        cont.innerHTML = '<div style="padding:26px;text-align:center;color:var(--mut)">'
+          + permEsc(res.error || 'No se pudo leer') + '</div>';
+        return;
+      }
+      var q = (eid('up-buscar').value || '').toLowerCase();
+      var soloPend = eid('up-solo-pendientes').checked;
+      var lista = res.usuarios.filter(function(u) {
+        if (soloPend && !u.sin_configurar) return false;
+        if (!q) return true;
+        return ((u.nombre || '') + ' ' + (u.username || '') + ' ' + (u.email || '')).toLowerCase().indexOf(q) >= 0;
+      });
+
+      var pend = res.usuarios.filter(function(u) { return u.sin_configurar; }).length;
+      var av = eid('up-aviso');
+      if (pend) {
+        av.style.display = '';
+        av.innerHTML = '<b>' + pend + ' usuario(s) sin accesos configurados.</b> '
+          + 'Hasta que se les marque el primer menú, entran a <b>todo lo de sus empresas</b>.';
+      } else { av.style.display = 'none'; }
+
+      if (!lista.length) {
+        cont.innerHTML = '<div style="padding:26px;text-align:center;color:var(--mut)">Sin resultados.</div>';
+        return;
+      }
+
+      var h = '<table class="pa-tbl" style="width:100%"><thead><tr>'
+        + '<th>Usuario</th><th>Empresas</th><th>Menús</th><th></th></tr></thead><tbody>';
+      lista.forEach(function(u) {
+        var emp = u.es_admin
+          ? '<span style="font-size:11px;color:var(--mut)">todas (es administrador)</span>'
+          : (u.sociedades.length
+              ? u.sociedades.map(function(s) {
+                  return '<span style="display:inline-block;background:#f1f5f9;border-radius:10px;'
+                    + 'padding:2px 9px;font-size:11px;margin:1px 3px 1px 0">' + permEsc(s.nombre) + '</span>';
+                }).join('')
+              : '<span style="color:#b91c1c;font-size:11px">sin empresas — no entra a nada</span>');
+
+        var menus;
+        if (u.es_admin) {
+          menus = '<span style="font-size:11px;color:var(--mut)">todos</span>';
+        } else if (u.sin_configurar) {
+          menus = '<span style="background:#fef3c7;color:#92400e;border-radius:10px;padding:2px 9px;'
+            + 'font-size:11px;font-weight:600">sin configurar</span>';
+        } else {
+          var n = u.menus_por_nivel;
+          menus = '<b style="font-size:13px">' + u.menus_total + '</b>'
+            + '<span style="font-size:11px;color:var(--mut)"> · '
+            + (n.ver ? n.ver + ' ver ' : '') + (n.operar ? n.operar + ' operar ' : '')
+            + (n.borrar ? n.borrar + ' con borrado' : '') + '</span>';
+        }
+
+        h += '<tr>'
+          + '<td><div style="font-size:13px;font-weight:600">' + permEsc(u.nombre || '(sin nombre)')
+          + (u.activo ? '' : ' <span style="background:#fee2e2;color:#991b1b;border-radius:8px;'
+              + 'padding:1px 7px;font-size:10px">inactivo</span>')
+          + (u.solo_lectura ? ' <span style="background:#fef3c7;color:#92400e;border-radius:8px;'
+              + 'padding:1px 7px;font-size:10px">solo lectura</span>' : '')
+          + '</div><div style="font-size:11px;color:var(--mut)">'
+          + permEsc(u.username || u.email || '') + ' · ' + permEsc(u.rol) + '</div></td>'
+          + '<td>' + emp + '</td>'
+          + '<td style="white-space:nowrap">' + menus + '</td>'
+          + '<td style="text-align:right"><button class="btn bb" style="font-size:12px;padding:5px 12px"'
+          + ' onclick="upConfigurar(' + u.id + ')">Configurar</button></td>'
+          + '</tr>';
+      });
+      cont.innerHTML = h + '</tbody></table>';
+      UP.usuarios = res.usuarios;
+    })
+    .catch(function() {
+      cont.innerHTML = '<div style="padding:26px;text-align:center;color:var(--mut)">Error de red.</div>';
+    });
+}
+
+var UP = { usuarios: [] };
+
+function upConfigurar(id) {
+  var u = null;
+  for (var i = 0; i < UP.usuarios.length; i++) if (UP.usuarios[i].id === id) u = UP.usuarios[i];
+  permAbrirPara(id, u ? (u.nombre || u.username || '') : '');
+  // Al cerrar la pantalla de permisos, la lista se refresca sola: si no, muestra
+  // los números viejos y parece que no se guardó.
+  UP.alCerrar = true;
+}
+
 function permAbrirDesdeEquipo() {
   var u = (typeof EQ_ACCESO !== 'undefined' && EQ_ACCESO) ? EQ_ACCESO.usuario : null;
   if (!u || !u.id) {
