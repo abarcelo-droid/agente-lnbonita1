@@ -32,6 +32,30 @@ db.exec(`
     PRIMARY KEY (usuario_id, sociedad_id)
   );
   CREATE INDEX IF NOT EXISTS idx_usoc_usuario ON usuario_sociedades(usuario_id);
+
+  -- ── QUÉ PUEDE HACER EN CADA MENÚ ────────────────────────────────────────
+  -- Un permiso por (persona, módulo). Que la fila exista es el tilde: sin fila,
+  -- no entra. El nivel dice hasta dónde llega adentro.
+  --
+  -- Tres niveles y no dos, porque la diferencia entre mirar y cargar es tan real
+  -- como la que hay entre cargar y borrar:
+  --   ver    → entra y mira. No puede tocar nada.
+  --   operar → carga y edita. Es lo normal.
+  --   borrar → además puede borrar o anular.
+  --
+  -- Borrar va aparte a propósito: es la única acción que destruye trabajo hecho, y
+  -- en un sistema donde nada se borra de verdad (todo es baja lógica) igual deja
+  -- afuera de los informes algo que alguien cargó. No es "editar un poco más".
+  CREATE TABLE IF NOT EXISTS usuario_modulos (
+    usuario_id   INTEGER NOT NULL,
+    modulo       TEXT    NOT NULL,
+    nivel        TEXT    NOT NULL DEFAULT 'operar'
+                      CHECK(nivel IN ('ver','operar','borrar')),
+    creado_en    TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+    creado_por_id INTEGER,
+    PRIMARY KEY (usuario_id, modulo)
+  );
+  CREATE INDEX IF NOT EXISTS idx_umod_usuario ON usuario_modulos(usuario_id);
 `);
 
 // ── SIEMBRA: NADIE PIERDE ACCESO EL DÍA QUE ESTO SE DESPLIEGA ─────────────

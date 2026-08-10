@@ -6,7 +6,7 @@ import { getDb } from '../servicios/db.js';
 import { enviarMail } from '../servicios/mail.js';
 // Cookie de identidad firmada. El por qué está en src/servicios/auth_sesion.js.
 import { AUTH_COOKIE, authCookieOpts } from '../servicios/auth_sesion.js';
-import { seccionesDe, sociedadesConNombreDe, sociedadesDe } from '../servicios/permisos.js';
+import { seccionesDe, sociedadesConNombreDe, sociedadesDe, guardarPermisos, permisosDe } from '../servicios/permisos.js';
 
 const router = express.Router();
 const BCRYPT_ROUNDS = 10;
@@ -484,6 +484,98 @@ router.put('/usuarios/:id/sociedades', requireAuth, soloAdmin, (req, res) => {
     })();
 
     res.json({ ok: true, sociedades: limpias });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// ── LOS MENÚS DE CADA USUARIO, CON SU NIVEL ──────────────────────────────
+// Devuelve los módulos AGRUPADOS POR EMPRESA y sólo de las empresas que el usuario
+// tiene asignadas: primero se elige la empresa, después qué menús de esa empresa.
+// Mostrar módulos de una empresa que no tiene sería ofrecer algo que no va a poder
+// usar, y confunde al que configura.
+router.get('/usuarios/:id/permisos', requireAuth, soloAdmin, (req, res) => {
+  const db = getDb();
+  try {
+    const id = parseInt(req.params.id, 10);
+    const u = db.prepare('SELECT id, nombre, rol FROM usuarios WHERE id = ?').get(id);
+    if (!u) return res.status(404).json({ ok: false, error: 'No existe ese usuario' });
+
+    const misSocs = db.prepare(
+      'SELECT sociedad_id FROM usuario_sociedades WHERE usuario_id = ?'
+    ).all(id).map(r => r.sociedad_id);
+
+    const actuales = Object.fromEntries(db.prepare(
+      'SELECT modulo, nivel FROM usuario_modulos WHERE usuario_id = ?'
+    ).all(id).map(r => [r.modulo, r.nivel]));
+
+    const modulos = db.prepare(`
+      SELECT m.modulo, m.label, m.grupo, m.sociedad_id, m.tipo,
+             s.nombre AS sociedad_nombre
+        FROM modulos_config m
+        LEFT JOIN sociedades s ON s.id = m.sociedad_id
+       WHERE m.oculto = 0
+       ORDER BY m.sociedad_id IS NULL DESC, s.nombre, m.orden, m.label
+    `).all().filter(m => m.sociedad_id === null || misSocs.includes(m.sociedad_id));
+
+    // Agrupados por empresa, que es el orden en que se configura.
+    const porEmpresa = {};
+    for (const m of modulos) {
+      const k = m.sociedad_id === null ? 0 : m.sociedad_id;
+      if (!porEmpresa[k]) {
+        porEmpresa[k] = {
+          sociedad_id: m.sociedad_id,
+          sociedad_nombre: m.sociedad_nombre || 'Transversales (todas las empresas)',
+          modulos: [],
+        };
+      }
+      porEmpresa[k].modulos.push({
+        modulo: m.modulo, label: m.label, grupo: m.grupo, tipo: m.tipo,
+        habilitado: Object.prototype.hasOwnProperty.call(actuales, m.modulo),
+        nivel: actuales[m.modulo] || 'operar',
+      });
+    }
+
+    res.json({
+      ok: true,
+      usuario: u,
+      // Un admin entra a todo por su rol: se avisa para que no parezca que la
+      // pantalla no guarda lo que se marca.
+      es_admin: u.rol === 'admin',
+      // Sin ninguno cargado, el usuario todavía se rige por el esquema viejo.
+      sin_configurar: Object.keys(actuales).length === 0,
+      empresas: Object.values(porEmpresa),
+    });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+router.put('/usuarios/:id/permisos', requireAuth, soloAdmin, (req, res) => {
+  const db = getDb();
+  try {
+    const id = parseInt(req.params.id, 10);
+    const u = db.prepare('SELECT id, rol FROM usuarios WHERE id = ?').get(id);
+    if (!u) return res.status(404).json({ ok: false, error: 'No existe ese usuario' });
+
+    const items = Array.isArray(req.body?.modulos) ? req.body.modulos : null;
+    if (!items) return res.status(400).json({ ok: false, error: 'Falta la lista de menús' });
+
+    // Sólo se aceptan módulos de las empresas que el usuario tiene. Sin esto, se
+    // podría habilitar un menú de una empresa a la que no pertenece.
+    const misSocs = new Set(db.prepare(
+      'SELECT sociedad_id FROM usuario_sociedades WHERE usuario_id = ?'
+    ).all(id).map(r => r.sociedad_id));
+    const permitidos = new Set(db.prepare(
+      'SELECT modulo, sociedad_id FROM modulos_config'
+    ).all().filter(m => m.sociedad_id === null || misSocs.has(m.sociedad_id)).map(m => m.modulo));
+
+    const filtrados = items.filter(i => i && permitidos.has(i.modulo));
+    const rechazados = items.length - filtrados.length;
+    const n = guardarPermisos(id, filtrados, req.user.id);
+
+    res.json({
+      ok: true, guardados: n,
+      // Se informa en vez de descartar en silencio: si el que configura marcó algo
+      // que no corresponde, tiene que enterarse.
+      ...(rechazados ? { ignorados: rechazados, aviso: 'Se ignoraron menús de empresas que el usuario no tiene asignadas.' } : {}),
+    });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 

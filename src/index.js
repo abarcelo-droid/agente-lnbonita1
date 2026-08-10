@@ -14,6 +14,7 @@ import crmRouter          from "./rutas/crm.js";
 import buscarRouter       from "./rutas/buscar.js";
 import abastoRouter       from "./rutas/abasto.js";
 import authRouter, { bloquearSiSoloLectura } from "./rutas/auth.js";
+import { exigirNivel } from "./servicios/permisos.js";
 import produccionRouter   from "./rutas/produccion.js";
 import scoutRouter        from "./rutas/scout.js";
 import cuentasRouter      from "./rutas/cuentas.js";
@@ -98,6 +99,9 @@ app.use(sesionFirmada);
 // Solo-lectura: bloquea escrituras (POST/PUT/PATCH/DELETE) para usuarios con
 // solo_lectura=1 que no son admin. Debe ir antes de cualquier router /api.
 app.use("/api", bloquearSiSoloLectura);
+// Y después, el nivel por menú: distingue POR MÓDULO y separa borrar de editar,
+// que es lo que el flag global de solo_lectura no puede hacer.
+app.use("/api", exigirNivel);
 
 // Auth
 app.use("/api/auth", authRouter);
