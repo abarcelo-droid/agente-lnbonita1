@@ -1044,6 +1044,52 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
 
 <!-- Modal Usuario -->
 
+<!-- ══════════════════════════════════════════════════════════════════════
+     EMPRESAS Y ACCESOS DE UN USUARIO
+     Se configura en el orden en que se piensa: primero sobre qué empresas puede
+     actuar, y recién después qué menús DE ESAS EMPRESAS puede usar y hasta dónde.
+     Los menús aparecen agrupados por empresa porque es como está organizado el
+     trabajo: nadie piensa "el módulo de facturas", piensa "las facturas de tal".
+     ══════════════════════════════════════════════════════════════════════ -->
+<div class="mb" id="mb-permisos">
+<div class="mbox" style="width:760px;max-height:92vh;overflow-y:auto">
+  <div class="mhd">
+    <div class="mht" id="perm-tit">Empresas y accesos</div>
+    <button class="mcl" onclick="closeMB('mb-permisos')">×</button>
+  </div>
+
+  <div id="perm-aviso-admin" style="display:none;background:#eff6ff;border:1px solid #bfdbfe;
+       border-radius:8px;padding:10px 13px;margin-bottom:14px;font-size:13px;color:#1e40af">
+    Este usuario es <b>administrador</b>: entra a todo por su rol, sin importar lo que se marque acá.
+    Lo que configures queda guardado y empieza a valer el día que deje de ser administrador.
+  </div>
+
+  <div id="perm-aviso-nuevo" style="display:none;background:#fffbeb;border:1px solid #fcd34d;
+       border-radius:8px;padding:10px 13px;margin-bottom:14px;font-size:13px;color:#92400e">
+    Todavía no tiene accesos configurados, así que <b>entra a todo lo de sus empresas</b>.
+    En cuanto marques el primer menú, pasa a entrar <b>sólo</b> a lo que marques.
+  </div>
+
+  <!-- ── PASO 1 ────────────────────────────────────────────────────────── -->
+  <div style="font-size:12px;font-weight:700;color:var(--mut);text-transform:uppercase;
+       letter-spacing:.05em;margin:4px 0 8px">1 · ¿Sobre qué empresas puede actuar?</div>
+  <div id="perm-empresas" style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:6px"></div>
+  <div style="font-size:11px;color:var(--mut);margin-bottom:18px">
+    Al cambiar esto se guarda solo, y abajo aparecen los menús de las empresas marcadas.
+  </div>
+
+  <!-- ── PASO 2 ────────────────────────────────────────────────────────── -->
+  <div style="font-size:12px;font-weight:700;color:var(--mut);text-transform:uppercase;
+       letter-spacing:.05em;margin:4px 0 8px">2 · ¿A qué menús entra, y hasta dónde?</div>
+  <div id="perm-menus"></div>
+
+  <div class="mft" style="margin-top:16px">
+    <button class="btn bo" onclick="closeMB('mb-permisos')">Cerrar</button>
+    <button class="btn bb" onclick="permGuardar()">Guardar accesos</button>
+  </div>
+</div>
+</div>
+
 <div class="mb" id="mb-usuario">
 <div class="mbox" style="width:580px;max-height:90vh;overflow-y:auto">
   <div class="mhd"><div class="mht" id="mb-usr-tit">Nuevo usuario</div><button class="mcl" onclick="closeMB('mb-usuario')">×</button></div>
@@ -1093,6 +1139,8 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     </div>
   </div>
   <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:20px">
+    <button class="btn" id="usr-btn-permisos" onclick="permAbrir()" style="margin-right:auto">
+      🏢 Empresas y accesos</button>
     <button class="btn bo" onclick="closeMB('mb-usuario')">Cancelar</button>
     <button class="btn bb" onclick="usrGuardar()">Guardar</button>
   </div>
@@ -14164,6 +14212,146 @@ function bCls(t){
 function ecl(e){ var m={pendiente:'pe',entregado:'ok',facturado:'cc',cancelado:'er'}; return m[e]||'pe'; }
 function bPago(m){ var lm={cuenta_corriente:'Cta.Cte.',transferencia:'Transf.',cancelado:'CANCELADO'}; var cm={cuenta_corriente:'bcc',transferencia:'bok',cancelado:'ber'}; return '<span class="bdg '+(cm[m]||'bcc')+'" style="font-size:10px">'+(lm[m]||'Cta.Cte.')+'</span>'; }
 function closeMB(id){ var el=eid(id); if(el) el.classList.remove('on'); }
+
+// ══════════════════════════════════════════════════════════════════════════
+// EMPRESAS Y ACCESOS DE UN USUARIO
+// ══════════════════════════════════════════════════════════════════════════
+// El orden de la pantalla es el orden en que se decide: primero las empresas,
+// después los menús DE esas empresas. Por eso las empresas se guardan solas al
+// tildarlas — sin ellas guardadas, el servidor no sabe qué menús ofrecer.
+var PERM = { id: null, nombre: '' };
+
+function permAbrir() {
+  var id = eid('usr-id').value;
+  if (!id) return toast('Guardá el usuario primero y después configurá sus accesos', 'er');
+  PERM.id = parseInt(id, 10);
+  PERM.nombre = eid('usr-nombre').value || '';
+  eid('perm-tit').textContent = 'Empresas y accesos · ' + PERM.nombre;
+  eid('mb-permisos').classList.add('on');
+  permCargarEmpresas();
+}
+
+function permEsc(s) {
+  return String(s === null || s === undefined ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+function permCargarEmpresas() {
+  fetch('/api/auth/usuarios/' + PERM.id + '/sociedades', { credentials: 'include' })
+    .then(function(r) { return r.json(); })
+    .then(function(res) {
+      if (!res.ok) return toast(res.error || 'No se pudieron leer las empresas', 'er');
+      eid('perm-aviso-admin').style.display = res.es_admin ? '' : 'none';
+      var h = '';
+      (res.sociedades || []).forEach(function(sc) {
+        h += '<label style="display:flex;align-items:center;gap:8px;padding:9px 14px;border:1px solid '
+          + (sc.asignada ? 'var(--burg)' : 'var(--bor)') + ';border-radius:9px;cursor:pointer;background:'
+          + (sc.asignada ? '#fdf2f8' : 'var(--sur)') + ';font-size:13px;font-weight:600">'
+          + '<input type="checkbox" class="perm-emp" value="' + sc.id + '"'
+          + (sc.asignada ? ' checked' : '')
+          + ' onchange="permGuardarEmpresas()" style="width:17px;height:17px">'
+          + permEsc(sc.nombre) + '</label>';
+      });
+      eid('perm-empresas').innerHTML = h || '<div style="font-size:12px;color:var(--mut)">No hay empresas activas.</div>';
+      permCargarMenus();
+    });
+}
+
+// Las empresas se guardan al tildarlas y NO al apretar "Guardar accesos": el paso 2
+// depende de ellas. Pedir dos guardados en una pantalla que se lee de arriba hacia
+// abajo es la forma más simple de que alguien marque empresas, marque menús, y
+// pierda la mitad de lo que hizo.
+function permGuardarEmpresas() {
+  var ids = [], cbs = document.querySelectorAll('.perm-emp');
+  for (var i = 0; i < cbs.length; i++) if (cbs[i].checked) ids.push(parseInt(cbs[i].value, 10));
+  fetch('/api/auth/usuarios/' + PERM.id + '/sociedades', {
+    method: 'PUT', credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ sociedades: ids })
+  }).then(function(r) { return r.json(); }).then(function(res) {
+    if (!res.ok) toast(res.error || 'No se pudo guardar', 'er');
+    permCargarEmpresas();
+  });
+}
+
+function permCargarMenus() {
+  fetch('/api/auth/usuarios/' + PERM.id + '/permisos', { credentials: 'include' })
+    .then(function(r) { return r.json(); })
+    .then(function(res) {
+      if (!res.ok) return toast(res.error || 'No se pudieron leer los accesos', 'er');
+      eid('perm-aviso-nuevo').style.display = res.sin_configurar ? '' : 'none';
+      var cont = eid('perm-menus');
+      if (!res.empresas || !res.empresas.length) {
+        cont.innerHTML = '<div style="padding:22px;text-align:center;color:var(--mut);font-size:13px">'
+          + 'Marcá al menos una empresa arriba para ver sus menús.</div>';
+        return;
+      }
+      var h = '';
+      res.empresas.forEach(function(emp, gi) {
+        h += '<div style="border:1px solid var(--bor);border-radius:10px;margin-bottom:12px;overflow:hidden">'
+          + '<div style="background:var(--bg2,#f8fafc);padding:9px 13px;display:flex;align-items:center;'
+          + 'justify-content:space-between;gap:10px;border-bottom:1px solid var(--bor)">'
+          + '<b style="font-size:13px">' + permEsc(emp.sociedad_nombre) + '</b>'
+          + '<span style="display:flex;gap:6px">'
+          + '<button class="btn" style="font-size:11px;padding:3px 9px" onclick="permTodos(' + gi + ',1)">Todos</button>'
+          + '<button class="btn" style="font-size:11px;padding:3px 9px" onclick="permTodos(' + gi + ',0)">Ninguno</button>'
+          + '</span></div><div style="padding:2px 0">';
+        emp.modulos.forEach(function(m) {
+          h += '<div style="display:flex;align-items:center;gap:10px;padding:6px 13px;'
+            + 'border-bottom:1px solid var(--bg2,#f1f5f9)">'
+            + '<input type="checkbox" class="perm-mod g' + gi + '" data-mod="' + permEsc(m.modulo) + '"'
+            + (m.habilitado ? ' checked' : '')
+            + ' onchange="permNivelToggle(this)" style="width:17px;height:17px">'
+            + '<div style="flex:1;min-width:0">'
+            + '<div style="font-size:13px">' + permEsc(m.label) + '</div>'
+            + '<div style="font-size:10px;color:var(--mut)">' + permEsc(m.grupo || '') + '</div></div>'
+            + '<select class="perm-niv" data-mod="' + permEsc(m.modulo) + '" style="width:172px;font-size:12px"'
+            + (m.habilitado ? '' : ' disabled') + '>'
+            + '<option value="ver"' + (m.nivel === 'ver' ? ' selected' : '') + '>Solo ver</option>'
+            + '<option value="operar"' + (m.nivel === 'operar' ? ' selected' : '') + '>Operar</option>'
+            + '<option value="borrar"' + (m.nivel === 'borrar' ? ' selected' : '') + '>Operar y borrar</option>'
+            + '</select></div>';
+        });
+        h += '</div></div>';
+      });
+      cont.innerHTML = h;
+    });
+}
+
+// El nivel sin el tilde no significa nada: se apaga, para que no parezca que un
+// menú destildado igual tiene un permiso guardado.
+function permNivelToggle(cb) {
+  var sel = document.querySelector('.perm-niv[data-mod="' + cb.getAttribute('data-mod') + '"]');
+  if (sel) sel.disabled = !cb.checked;
+}
+
+function permTodos(gi, prender) {
+  var cbs = document.querySelectorAll('.perm-mod.g' + gi);
+  for (var i = 0; i < cbs.length; i++) { cbs[i].checked = !!prender; permNivelToggle(cbs[i]); }
+}
+
+function permGuardar() {
+  var items = [], cbs = document.querySelectorAll('.perm-mod');
+  for (var i = 0; i < cbs.length; i++) {
+    if (!cbs[i].checked) continue;
+    var mod = cbs[i].getAttribute('data-mod');
+    var sel = document.querySelector('.perm-niv[data-mod="' + mod + '"]');
+    items.push({ modulo: mod, nivel: sel ? sel.value : 'operar' });
+  }
+  fetch('/api/auth/usuarios/' + PERM.id + '/permisos', {
+    method: 'PUT', credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ modulos: items })
+  }).then(function(r) { return r.json(); }).then(function(res) {
+    if (!res.ok) return toast(res.error || 'No se pudo guardar', 'er');
+    toast(items.length
+      ? 'Guardado: entra a ' + items.length + ' menú(s)'
+      : 'Guardado: sin menús marcados, no entra a ninguno', 'ok');
+    if (res.aviso) toast(res.aviso, 'er');
+    permCargarMenus();
+  });
+}
+
 var tT; function toast(msg,tipo){ var el=eid('toast'); el.textContent=msg; el.className='on '+(tipo||'ok'); clearTimeout(tT); tT=setTimeout(function(){el.className='';},3200); }
 function startPoll(){ setInterval(function(){if(navAct==='conv') loadConvs();},15000); }
 
