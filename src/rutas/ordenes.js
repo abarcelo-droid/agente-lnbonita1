@@ -204,13 +204,16 @@ router.post('/', (req, res) => {
             SELECT l.cuenta_id, SUM(l.haber) as total_haber
             FROM pa_asientos a
             JOIN pa_asientos_lineas l ON l.asiento_id = a.id
+            JOIN pa_cuentas c ON c.id = l.cuenta_id
             WHERE a.ref_compra_id IN (${placeholders})
               AND a.anulado = 0
               AND l.haber > 0
+              AND a.sociedad_id = ?
+              AND c.sociedad_id = ?
             GROUP BY l.cuenta_id
             ORDER BY total_haber DESC
             LIMIT 1
-          `).get(...compraIds);
+          `).get(...compraIds, sociedadId, sociedadId);
           cuentaProveedorId = lineaProv?.cuenta_id || null;
         }
 

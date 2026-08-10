@@ -235,8 +235,16 @@ router.post('/liquidaciones', requireAuth, (req, res) => {
       let asientoId = null;
       try {
         const cliente = db.prepare('SELECT * FROM ven_clientes WHERE id=?').get(parseInt(cliente_id));
+        // FILTRADO POR EMPRESA. Desde que adm_config_impositiva tiene una fila
+        // por (sociedad, clave), esta consulta sin filtro devolvía las filas de
+        // las TRES y ganaba la última: el IVA de una liquidación de Puente
+        // Cordón podía imputarse a la cuenta de otra sociedad. Es la misma
+        // sociedad con la que se graba el asiento doce líneas más abajo — si
+        // salieran de lugares distintos, el asiento quedaría partido entre dos
+        // empresas y cuadrando igual.
         const configImp = {};
-        db.prepare('SELECT clave, cuenta_id FROM adm_config_impositiva WHERE cuenta_id IS NOT NULL').all()
+        db.prepare('SELECT clave, cuenta_id FROM adm_config_impositiva WHERE cuenta_id IS NOT NULL AND sociedad_id = ?')
+          .all(sociedadId)
           .forEach(row => { configImp[row.clave] = row.cuenta_id; });
 
         // Cuentas necesarias
