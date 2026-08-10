@@ -13,7 +13,7 @@ import { subirArchivo, obtenerArchivo, storageConfigurado } from '../servicios/s
 import {
   armarSnapshot, validarDefinicion, resolverAutorizados, bloqueadoPorSoD, sodOmitida,
   accionesDisponibles, aplicarCambioDePaso, registrarEvento
-, destinoDevolucion, pasoInicio} from '../servicios/sp_motor.js';
+, destinoDevolucion, pasoInicio, destinosDevolucion} from '../servicios/sp_motor.js';
 import { encolar, render, procesarEnBackground } from '../servicios/sp_outbox.js';
 
 const router = express.Router();
@@ -246,6 +246,28 @@ function htmlConBotones(texto, acciones) {
 
 // Avisos al SOLICITANTE. El destinatario es fijo en el código, no configurable:
 // es lo que hace que el comprador no tenga que entrar a mirar todos los días.
+// Quién confeccionó la orden. No hay un campo con eso: la respuesta está en el
+// historial, en el último evento que resolvió el paso de confección. Se busca ahí y
+// no se guarda en la solicitud a propósito — si el paso se rehace (porque justamente
+// se devolvió), el que vale es el último, y un campo copiado quedaría viejo.
+function quienConfecciono(solicitudId) {
+  try {
+    return db.prepare(
+      `SELECT actor_id, actor_nombre FROM sp_eventos
+        WHERE solicitud_id = ? AND hito = 'confeccion' AND clase = 'avanza'
+        ORDER BY seq DESC LIMIT 1`
+    ).get(solicitudId) || null;
+  } catch (e) {
+    return null;
+  }
+}
+
+// El contexto que necesita el motor para saber a qué pasos se puede devolver.
+function ctxDevolucion(solicitudId) {
+  const c = quienConfecciono(solicitudId);
+  return { confeccionadoPor: c ? { id: c.actor_id, nombre: c.actor_nombre } : null };
+}
+
 function avisarSolicitante(def, sol, evento, eventoId, extra) {
   const u = db.prepare('SELECT nombre, email FROM usuarios WHERE id=?').get(sol.solicitante_id);
   if (!u || !u.email) return;
@@ -604,7 +626,7 @@ router.get('/solicitudes', wrap((req, res) => {
   // abrir cada solicitud de a una, y con 40 pedidos nadie hace eso.
   filas = filas.map(s => {
     const def = defDe(s);
-    const acciones = accionesDisponibles(def, s, req.user);
+    const acciones = accionesDisponibles(def, s, req.user, ctxDevolucion(s.id));
     const paso = (def.pasos || []).find(p => p.clave === s.paso_actual_clave);
     // Habilitado en el paso pero frenado por segregación de funciones. Se informa
     // en vez de esconderse: si no, el usuario ve la bandeja vacía sabiendo que le
@@ -716,7 +738,7 @@ router.get('/solicitudes/:id', wrap((req, res) => {
                    ) && s.autorizador_id !== req.user.id },
       paso: paso || null,
       pasos: def.pasos,
-      acciones: accionesDisponibles(def, s, req.user),
+      acciones: accionesDisponibles(def, s, req.user, ctxDevolucion(s.id)),
       bloqueo_sod: bloqueadoPorSoD(def, s, s.paso_actual_clave, req.user.id),
       // Para admins: qué separación estarían salteando si resuelven. Se avisa antes
       // de actuar, no después.
@@ -901,11 +923,30 @@ router.post('/solicitudes/:id/accion', wrap((req, res) => {
     }
   }
 
-  // Una devolución vuelve SIEMPRE al que pidió el pago, sin importar qué diga la
-  // transición del grafo. Se calcula una sola vez y se usa para el cambio de paso,
-  // para el evento del historial y para los avisos: si alguno usara tr.hasta, el
-  // historial contaría un viaje distinto al que realmente pasó.
-  const destino = destinoDevolucion(def, tr);
+  // A DÓNDE VUELVE UNA DEVOLUCIÓN.
+  // Depende de quién sea el error, y eso lo sabe el que devuelve: si el pedido está
+  // mal, vuelve al que lo pidió; si la orden se confeccionó mal, al que la armó.
+  // El botón manda su destino, pero NO se le cree: se valida contra la lista que el
+  // motor considera válida para esta solicitud en este paso. Sin esa validación,
+  // cualquiera podría mandar una solicitud a un paso arbitrario del circuito —
+  // saltearse la firma, por ejemplo— con sólo editar el pedido del navegador.
+  //
+  // Se calcula una sola vez y se usa para el cambio de paso, el evento del historial
+  // y los avisos: si alguno usara otro valor, el historial contaría un viaje
+  // distinto al que realmente pasó.
+  let destino = destinoDevolucion(def, tr);
+  let destinoMotivo = null;
+  if (tr.clase === 'devuelve') {
+    const validos = destinosDevolucion(def, s, ctxDevolucion(s.id));
+    const pedido = String(req.body?.destino || '').trim();
+    const elegido = validos.find(d => d.clave === pedido);
+    if (pedido && !elegido) {
+      throw bad('Ese no es un destino válido para devolver esta orden.');
+    }
+    // Sin destino explícito se mantiene el comportamiento de siempre: al solicitante.
+    const usar = elegido || validos.find(d => d.motivo === 'solicitante') || null;
+    if (usar) { destino = usar.clave; destinoMotivo = usar.motivo; }
+  }
 
   const salida = db.transaction(() => {
     const cambio = aplicarCambioDePaso(def, s, destino, { sumaCiclo: tr.clase === 'devuelve' });
@@ -924,6 +965,9 @@ router.post('/solicitudes/:id/accion', wrap((req, res) => {
     }
     const detalle = { ...datos };
     if (omitida) detalle.sod_omitida = omitida;
+    // Queda escrito a quién volvió: dentro de un mes, "se devolvió" no
+    // alcanza — la pregunta es siempre a quién le tocó rehacerlo.
+    if (destinoMotivo) detalle.devuelta_a = destinoMotivo;
     // Resolver un paso que el comprador le pidió a OTRA persona queda registrado.
     // No está prohibido —para eso está la solapa "Dirigidas a otro", que es lo que
     // destraba un pedido cuando el elegido no está— pero después alguien va a
@@ -948,10 +992,13 @@ router.post('/solicitudes/:id/accion', wrap((req, res) => {
     // para no mandarle dos mails por el mismo click.
     let avisado = false;
     if (tr.clase === 'devuelve') {
-      // Ya no hace falta preguntar si el destino es el inicio: con destinoDevolucion
-      // toda devolución vuelve al solicitante.
+      // El solicitante se entera SIEMPRE, vuelva a él o a confección: es el que le
+      // da la cara al proveedor y no puede enterarse de que su pago se frenó porque
+      // alguien se lo comenta. A quien le toca rehacer el trabajo ya le avisó
+      // avisarPaso, que notifica a los del paso destino.
       avisarSolicitante(def, solFresca, 'devuelto', evId, {
-        actor: req.user.nombre, comentario, paso_origen: paso.nombre || paso.clave });
+        actor: req.user.nombre, comentario, paso_origen: paso.nombre || paso.clave,
+        volvio_a: destinoMotivo === 'confeccion' ? 'confección' : 'vos' });
       avisado = true;
     }
     if (tr.clase === 'rechaza') {

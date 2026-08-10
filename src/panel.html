@@ -39955,7 +39955,7 @@ function spTablaHtml(arr, vista) {
     var acciones = (s.acciones || []).map(function(a) {
       var clase = a.clase === 'rechaza' ? 'bd' : 'bo';
       return '<button class="btn ' + clase + ' bs" style="padding:2px 7px;font-size:11px;margin-left:3px"'
-        + ' onclick="spAccionAbrir(' + s.id + ',\'' + spEsc(a.accion) + '\')">' + spEsc(a.etiqueta) + '</button>';
+        + ' onclick="spAccionAbrir(' + s.id + ',\'' + spEsc(a.accion) + '\',\'' + spEsc(a.destino || '') + '\')">' + spEsc(a.etiqueta) + '</button>';
     }).join('');
 
     html += '<tr class="' + (s.vencida && s.estado_global === 'en_curso' ? 'sp-fila-venc' : '') + '">'
@@ -40384,7 +40384,7 @@ function spDetalleRender() {
     html += '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">'
       + d.acciones.map(function(a) {
           return '<button class="btn ' + (a.clase === 'rechaza' ? 'bd' : (a.clase === 'avanza' ? 'bb' : 'bo')) + '"'
-            + ' onclick="spAccionAbrir(' + s.id + ',\'' + spEsc(a.accion) + '\')">' + spEsc(a.etiqueta) + '</button>';
+            + ' onclick="spAccionAbrir(' + s.id + ',\'' + spEsc(a.accion) + '\',\'' + spEsc(a.destino || '') + '\')">' + spEsc(a.etiqueta) + '</button>';
         }).join('') + '</div>';
   }
 
@@ -40542,7 +40542,7 @@ function spCancelar(id) {
 
 // ── Resolver un paso ──────────────────────────────────────────────────────
 
-function spAccionAbrir(id, accion) {
+function spAccionAbrir(id, accion, destino) {
   var s = null;
   ['pendiente', 'mias', 'todas'].forEach(function(v) {
     (SP.listas[v] || []).forEach(function(x) { if (x.id === id) s = x; });
@@ -40550,8 +40550,15 @@ function spAccionAbrir(id, accion) {
   if (!s && SP.det && SP.det.solicitud.id === id) s = SP.det.solicitud;
   if (!s) return toast('Recargá la lista', 'er');
 
-  var acc = (s.acciones || (SP.det ? SP.det.acciones : []) || []).filter(function(a) { return a.accion === accion; })[0];
-  SP.accion = { id: id, accion: accion, rev: s.rev, acc: acc };
+  // Se busca por accion Y destino: una devolución se abre en varios botones que
+  // comparten la acción ('devolver') y se diferencian en a dónde vuelven. Filtrando
+  // sólo por acción, los dos botones harían lo mismo.
+  var todas = (s.acciones || (SP.det ? SP.det.acciones : []) || []);
+  var acc = todas.filter(function(a) {
+    return a.accion === accion && (!destino || a.destino === destino);
+  })[0] || todas.filter(function(a) { return a.accion === accion; })[0];
+  SP.accion = { id: id, accion: accion, rev: s.rev, acc: acc,
+                destino: (acc && acc.destino) || destino || null };
 
   var pasoClave = s.paso_actual_clave;
   var pideFecha = pasoClave === 'fechas' && (acc && acc.clase === 'avanza' || accion === 'confirmar_fecha');
@@ -40832,6 +40839,7 @@ function spAccionConfirmar() {
   var a = SP.accion;
   if (!a) return;
   var body = { accion: a.accion, rev: a.rev };
+  if (a.destino) body.destino = a.destino;
   var com = document.getElementById('sp-acc-com');
   if (com) body.comentario = com.value.trim();
   var f = document.getElementById('sp-acc-fecha');
