@@ -20,6 +20,11 @@ import '../servicios/db_bt_op.js';       // y este el modelo operativo bt_*
 import { sembrarContadores } from '../servicios/bt_continuo.js';
 import { fallasEsquema } from '../servicios/bt_ddl.js';
 import { verificarToken, generarToken, listarTokens, revocarToken } from '../servicios/bt_token.js';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __dirBt = path.dirname(fileURLToPath(import.meta.url));
 
 const router = express.Router();
 
@@ -262,6 +267,22 @@ router.post('/llaves/:id/revocar', wrap((req, res) => {
   if (!revocarToken(id)) throw bad('No hay una llave activa con ese número');
   res.json({ ok: true });
 }));
+
+// El script del agente, para bajarlo desde el panel. Sin esto hay que ir a buscarlo
+// a GitHub, y cada vez que se corrija el agente hay que acordarse de volver a
+// bajarlo: acá siempre es el que está corriendo en este ERP, que es el que importa.
+router.get('/agente/script', (req, res) => {
+  if (!esAdmin(req)) return res.status(403).json({ ok: false, error: 'Solo un administrador' });
+  const ruta = path.join(__dirBt, '../../scripts/bt_sync.py');
+  fs.readFile(ruta, 'utf8', (err, texto) => {
+    if (err) {
+      return res.status(500).json({ ok: false, error: 'No encuentro el script del agente en el servidor' });
+    }
+    res.setHeader('Content-Type', 'text/x-python; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="bt_sync.py"');
+    res.send(texto);
+  });
+});
 
 router.get('/estado', wrap((req, res) => {
   // Cada tabla en su propio try: desde que el DDL ya no puede voltear el arranque

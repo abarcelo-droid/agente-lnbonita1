@@ -12020,7 +12020,9 @@ function sgRepExport(){
 
       <h4 style="margin:22px 0 8px;font-size:14px">Los tres pasos en el servidor de Transoft</h4>
       <ol style="font-size:13px;line-height:1.9;color:var(--tex);padding-left:20px;margin:0">
-        <li>Copiar el archivo <code>bt_sync.py</code> a una carpeta del servidor.</li>
+        <li>Bajar el agente y dejarlo en una carpeta del servidor:
+            <button class="btn" style="margin-left:6px" onclick="btBajarAgente()">
+              Descargar bt_sync.py</button></li>
         <li>Al lado, crear <code>bt_sync_config.json</code> con la llave (el texto exacto
             aparece cuando la generás arriba).</li>
         <li>Correrlo una vez a mano para mirar que entre todo:
@@ -41814,6 +41816,12 @@ function btLlaveGenerar() {
       '</div>';
     btLlavesCargar();
   }).catch(function() { toast('No se pudo generar la llave', 'er'); });
+}
+
+function btBajarAgente() {
+  // Se baja del ERP y no de otro lado: así siempre es la versión que este ERP
+  // espera, y una corrección del agente llega sin tener que avisar por dónde.
+  window.location.href = '/api/bt/agente/script';
 }
 
 function btLlaveOcultar() {
