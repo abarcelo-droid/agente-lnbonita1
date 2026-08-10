@@ -214,7 +214,7 @@ export function sodOmitida(def, solicitud, pasoClave, usuarioId) {
 
 // ── Acciones disponibles para un usuario ──────────────────────────────────
 
-export function accionesDisponibles(def, solicitud, usuario) {
+export function accionesDisponibles(def, solicitud, usuario, ctx = {}) {
   if (solicitud.estado_global !== 'en_curso') return [];
   const paso = pasoDe(def, solicitud.paso_actual_clave);
   if (!paso) return [];
@@ -230,19 +230,45 @@ export function accionesDisponibles(def, solicitud, usuario) {
   if (!habilitado) return [];
   const sod = bloqueadoPorSoD(def, solicitud, paso.clave, usuario.id);
   if (sod) return [];
-  return salidasDe(def, paso.clave).map(t => ({
-    accion: t.accion,
-    // La etiqueta dice a dónde va DE VERDAD. En el grafo sembrado decía "Devolver
-    // a fechas" o "Devolver a confección"; con ese texto el botón prometería una
-    // cosa y el sistema haría otra.
-    etiqueta: t.clase === 'devuelve' ? 'Devolver al solicitante' : t.etiqueta,
-    clase: t.clase,
-    destino: destinoDevolucion(def, t),
-    // Devolver siempre exige motivo: es lo único que le dice al comprador qué
+  const out = [];
+  for (const t of salidasDe(def, paso.clave)) {
+    // Devolver siempre exige motivo: es lo único que le dice al que la recibe qué
     // corregir, y sin eso la devolución es un rebote sin explicación.
-    requiere_comentario: t.clase === 'devuelve'
-      || !!t.requiere_comentario || !!paso.requiere_comentario
-  }));
+    const pideMotivo = t.clase === 'devuelve'
+      || !!t.requiere_comentario || !!paso.requiere_comentario;
+
+    if (t.clase !== 'devuelve') {
+      out.push({
+        accion: t.accion, etiqueta: t.etiqueta, clase: t.clase,
+        destino: destinoDevolucion(def, t), requiere_comentario: pideMotivo,
+      });
+      continue;
+    }
+
+    // Una devolución se abre en tantos botones como destinos válidos haya. La
+    // etiqueta dice a dónde va DE VERDAD y a quién le llega: en el grafo sembrado
+    // decía "Devolver a fechas" o "Devolver a confección", y con ese texto el
+    // botón prometía una cosa y el sistema hacía otra.
+    const destinos = destinosDevolucion(def, solicitud, ctx);
+    if (!destinos.length) {
+      out.push({
+        accion: t.accion, etiqueta: 'Devolver al solicitante', clase: t.clase,
+        destino: destinoDevolucion(def, t), requiere_comentario: pideMotivo,
+      });
+      continue;
+    }
+    for (const d of destinos) {
+      out.push({
+        accion: t.accion,
+        etiqueta: d.quien ? `${d.etiqueta} (${d.quien})` : d.etiqueta,
+        clase: t.clase,
+        destino: d.clave,
+        destino_motivo: d.motivo,
+        requiere_comentario: pideMotivo,
+      });
+    }
+  }
+  return out;
 }
 
 /** EL PASO DE INICIO del circuito: donde vive el que pidió el pago. */
@@ -276,6 +302,51 @@ export function destinoDevolucion(def, transicion) {
   if (!transicion || transicion.clase !== 'devuelve') return transicion ? transicion.hasta : null;
   const ini = pasoInicio(def);
   return ini ? ini.clave : transicion.hasta;   // sin paso de inicio, se respeta el grafo
+}
+
+export function pasoPorHito(def, hito) {
+  return (def.pasos || []).find(p => p.hito === hito) || null;
+}
+
+// ── A DÓNDE PUEDE VOLVER UNA DEVOLUCIÓN ───────────────────────────────────
+// Un error tiene autor, y no siempre es el mismo. Si el pedido está mal —proveedor
+// equivocado, monto que no cierra— lo tiene que corregir quien lo pidió. Pero si la
+// orden se confeccionó mal, mandarla al solicitante es hacerle rebotar algo que él
+// no escribió: el que tiene que rehacerla es el que la armó.
+//
+// Por eso la devolución no tiene UN destino: tiene los que correspondan, y el que
+// devuelve elige según de quién sea el error.
+//
+// Sólo se ofrecen pasos por los que la solicitud YA PASÓ. Devolver a un paso que
+// todavía no ocurrió sería empujarla hacia adelante con un botón que dice devolver,
+// y además no habría a quién avisarle.
+export function destinosDevolucion(def, solicitud, ctx = {}) {
+  const actual = solicitud.paso_actual_clave;
+  const destinos = [];
+
+  const ini = pasoInicio(def);
+  if (ini && ini.clave !== actual) {
+    destinos.push({
+      clave: ini.clave,
+      etiqueta: 'Devolver al solicitante',
+      quien: solicitud.solicitante_nombre || null,
+      motivo: 'solicitante',
+    });
+  }
+
+  // El paso de confección, sólo si alguien ya confeccionó. Antes de eso no hay a
+  // quién devolverle: el paso existe en el circuito pero todavía no lo tocó nadie.
+  const conf = pasoPorHito(def, 'confeccion');
+  if (conf && conf.clave !== actual && ctx.confeccionadoPor) {
+    destinos.push({
+      clave: conf.clave,
+      etiqueta: 'Devolver a quien confeccionó',
+      quien: ctx.confeccionadoPor.nombre || null,
+      motivo: 'confeccion',
+    });
+  }
+
+  return destinos;
 }
 
 // ── ÚNICO escritor del paso actual ────────────────────────────────────────
