@@ -189,11 +189,15 @@ def armar_plan(datos):
      ["FILIAL", "NROCAR", "FECHAING", "CLISUC", "CLINRO", "AFCSUC", "AFCNRO", "REMSUC", "REMNRO",
       "DESSUC", "DESNRO", "TIPOCARGA", "SERVICIO", "M3", "KG", "BULTOS", "TIPOBULTO",
       "ORIGEN", "DESTINO", "TRAYECTO", "IMPFLETE", "VALORDEC", "FOJASUC", "FOJANRO",
-      "CONFORME", "CERRADA", "ESTADO", "COMENT", "ANULADO"]),
+      # OJO: cgcarga1 NO tiene ESTADO. El estado fisico de la carga (TT/ED/NE/...)
+      # vive en el cruce carga-viaje, en cgcarvia.ESTADO. Lo que cgcarga1 si tiene
+      # es CERRADA, que es el flag de "esta terminada".
+      "CONFORME", "CERRADA", "COMENT", "ANULADO"]),
     ("carga_viaje", os.path.join(CGRALES, "cgcarvia.dbf"),
      ["CARGASUC", "CARGANRO", "RENGLON", "VIAJESUC", "VIAJENRO", "RENGVIA", "TRAMOSUC", "TRAMONRO",
       "CANTIDAD", "M3EMBAR", "KGEMBAR", "BULEMBAR", "SALDOM3", "SALDOKG", "SALDOBUL",
-      "ESTADO", "CONFORME", "ULTIMO", "ANULADO"]),
+      # cgcarvia tampoco tiene ANULADO (lo confirma el aviso [OJO] de la corrida).
+      "ESTADO", "CONFORME", "ULTIMO"]),
     ("valor_carga", os.path.join(CGRALES, "cgvalcar.dbf"),
      ["CARGASUC", "CARGANRO", "RENGLON", "CONCEPTO", "DESCRIP", "CLIFCSUC", "CLIFCNRO",
       "PRECIO", "IMPORTE", "CONIVA", "PERCIB", "FACSUC", "FACNRO", "ANULADO"]),
@@ -353,6 +357,12 @@ def main():
             if r.get("errores"):
                 log("  %-13s %d fila(s) con problema, ej: %s"
                     % (clave, len(r["errores"]), r["errores"][0].get("error", "")[:120]))
+            # Columnas que Transoft no trajo y el ERP completo con su default. Se
+            # muestra para que no pase inadvertido que una tabla llego sin un dato.
+            rel = r.get("rellenos") or {}
+            if rel:
+                detalle = ", ".join("%s(%d)" % (k, v) for k, v in sorted(rel.items()))
+                log("  %-13s completadas por defecto: %s" % (clave, detalle))
 
         resumen[clave] = enviadas
         log("  %-13s %6d filas" % (clave, enviadas))

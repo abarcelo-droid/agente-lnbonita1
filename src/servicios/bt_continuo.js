@@ -182,6 +182,19 @@ export function viajeCerrado(v) {
   return !!String(v.cierre || '').trim();
 }
 
+// OJO CON EL ESTADO DE LA CARGA, QUE NO ESTÁ DONDE PARECE.
+// cgcarga1 —la cabecera de la carga— NO tiene columna ESTADO. Se comprobó contra
+// los .dbf reales: el agente pedía ESTADO y Transoft no lo tiene. Lo que la
+// cabecera sí tiene es CERRADA, el flag de "esta carga está terminada".
+//
+// El estado físico (TT en tránsito, ED entregada, NE no entregada) vive en el
+// CRUCE carga-viaje, en cgcarvia.ESTADO, y tiene sentido: una carga puede ir
+// partida en dos viajes y estar entregada por uno y en tránsito por el otro.
+//
+// Por eso esta función acepta las dos formas: si se la llama con la fila de la
+// carga, decide por `cerrada`; si se la llama con el renglón del cruce, decide por
+// su `estado`. Quien escriba la migración de la historia tiene que traer el estado
+// del cruce — mirando sólo la cabecera, ninguna carga parecería entregada.
 export function cargaCerrada(c) {
   if (!c || Number(c.anulado) === 1) return false;
   if (Number(c.cerrada) === 1) return true;
