@@ -156,11 +156,45 @@ router.post('/sync', wrap((req, res) => {
       .run(String(req.body?.origen || 'desconocido').slice(0, 120), req.user.id).lastInsertRowid;
   }
 
-  // El tipo de cada columna, para no deformar los números al guardarlos (abajo).
-  const tipoDe = new Map(
+  // La forma de cada columna: tipo, si admite vacío y qué default declara. Se usa
+  // para no deformar los números y para rellenar lo obligatorio (ver más abajo).
+  const meta = new Map(
     db.prepare(`PRAGMA table_info(${def.tabla})`).all()
-      .map(c => [c.name, String(c.type || '').toUpperCase()])
+      .map(c => [c.name, { tipo: String(c.type || '').toUpperCase(), notnull: !!c.notnull, dflt: c.dflt_value }])
   );
+  const tipoDe = new Map([...meta].map(([k, v]) => [k, v.tipo]));
+
+  // QUÉ PONER CUANDO TRANSOFT NO TRAE EL DATO.
+  // Dos casos reales, y los dos tiraban la fila entera:
+  //   · La columna no existe en el .dbf. cgcarvia no tiene ANULADO, así que las
+  //     81.000 filas del cruce carga-viaje llegaban con anulado en blanco y las
+  //     rechazaba el NOT NULL — el 100% de la tabla.
+  //   · La columna existe pero viene vacía. En FoxPro un campo de texto vacío son
+  //     espacios, y el agente los convierte a blanco; si esa columna es parte de
+  //     la clave (viajesuc), la fila tampoco entraba.
+  //
+  // La respuesta NO es aflojar el NOT NULL: es rellenar con lo que el esquema ya
+  // declara. Si la columna dice DEFAULT 0, el valor correcto es 0 — que además es
+  // lo que Transoft tiene ahí (un lógico en blanco es falso, no "desconocido").
+  // Sin default, se usa el vacío del tipo: '' para texto, 0 para número. Un campo
+  // vacío en FoxPro es exactamente eso, no un dato ausente.
+  //
+  // Y hace falta que sea un valor y no NULL por una razón concreta: viajesuc es
+  // parte de la clave, y en SQLite dos NULL no son iguales entre sí — con NULL, el
+  // UPSERT dejaría de reconocer la fila y cada sincronización la duplicaría.
+  const rellenos = new Map();
+  function rellenoDe(col) {
+    const m = meta.get(col);
+    if (!m || !m.notnull) return null;              // admite vacío: se deja null
+    if (m.dflt !== null && m.dflt !== undefined) {
+      const d = String(m.dflt).trim();
+      if (/^-?\d+(\.\d+)?$/.test(d)) return Number(d);           // DEFAULT 0
+      const txt = /^'(.*)'$/.exec(d);
+      if (txt) return txt[1];                                    // DEFAULT 'algo'
+      return null;   // una expresión, tipo (datetime(...)): la resuelve SQLite
+    }
+    return /INT|REAL|NUM|FLOA|DOUB/.test(m.tipo) ? 0 : '';
+  }
   const cols = columnasDe(def.tabla);
   const usables = cols.filter(c => c !== 'sincronizado_en' && c !== 'origen_lote');
   const lista = [...usables, 'sincronizado_en', 'origen_lote'];
@@ -192,6 +226,13 @@ router.post('/sync', wrap((req, res) => {
         // guardaba como "1.0" — y en la pantalla vieja dice "1". Con eso, comparar
         // los dos sistemas falla y un filtro por filial='1' no encuentra nada.
         if (typeof v === 'number' && tipoDe.get(c) === 'TEXT') v = String(v);
+        // Lo obligatorio que Transoft no trajo se completa con lo que declara el
+        // esquema, y se lleva la cuenta: rellenar en silencio esconde que una tabla
+        // entera no tiene ese dato.
+        if (v === null) {
+          const r = rellenoDe(c);
+          if (r !== null) { v = r; rellenos.set(c, (rellenos.get(c) || 0) + 1); }
+        }
         fila[c] = v;
       }
       try { ins.run(fila); escritas++; }
@@ -200,7 +241,13 @@ router.post('/sync', wrap((req, res) => {
     db.prepare(`UPDATE bt_tr_sync_lotes SET filas_total = filas_total + ? WHERE id = ?`).run(escritas, loteId);
   })();
 
-  res.json({ ok: true, lote_id: loteId, recibidas: filas.length, escritas, errores });
+  // `rellenos` viaja de vuelta para que el agente lo muestre: si una tabla entera
+  // llega sin una columna, eso hay que verlo en la corrida y no descubrirlo meses
+  // después mirando por qué un informe da todo en cero.
+  res.json({
+    ok: true, lote_id: loteId, recibidas: filas.length, escritas, errores,
+    rellenos: Object.fromEntries(rellenos),
+  });
 }));
 
 // Cierra el lote. El agente lo llama al terminar; si nunca llega, el lote queda
