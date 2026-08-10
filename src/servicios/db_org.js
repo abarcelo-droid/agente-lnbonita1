@@ -165,6 +165,10 @@ db.exec(`
 // FASE 3.A v2 — agregar área específica del módulo + flag de oculto (idempotente)
 try { db.exec("ALTER TABLE modulos_config ADD COLUMN area_id INTEGER REFERENCES areas(id)"); } catch(_) {}
 try { db.exec("ALTER TABLE modulos_config ADD COLUMN oculto INTEGER NOT NULL DEFAULT 0"); } catch(_) {}
+// Prefijos de API del módulo, separados por coma ('sg,sg-ventas'). Es lo que
+// permite saber a qué menú pertenece un pedido y aplicarle el nivel del usuario
+// (ver servicios/permisos.js). Vacío = ese módulo no se controla por nivel.
+try { db.exec("ALTER TABLE modulos_config ADD COLUMN api_prefijos TEXT"); } catch(_) {}
 // Dirección del sistema externo, para los módulos tipo='externo'. Vive en la base y
 // no en el código: la URL de un dashboard de terceros cambia (dominio nuevo, ruta
 // nueva) y no puede depender de un deploy. La edita un admin desde el panel.

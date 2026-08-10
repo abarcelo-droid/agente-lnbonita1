@@ -139,11 +139,73 @@ export function modulosVisibles(usuario) {
   const secciones = seccionesDe(usuario);
   const todasLasSecciones = secciones.includes('*');
 
+  // Si tiene permisos cargados en la tabla nueva, mandan esos. Si no, rigen las
+  // secciones de siempre — así esto se puede soltar sin haber configurado a nadie.
+  const tienePermisos = !!db.prepare(
+    'SELECT 1 FROM usuario_modulos WHERE usuario_id = ? LIMIT 1'
+  ).get(usuario.id);
+
   return todos.filter(m => {
-    // De otra empresa: no se ve, aunque el usuario tenga la sección habilitada.
+    // De otra empresa: no se ve, aunque tenga el módulo habilitado. La empresa
+    // manda sobre el módulo, no al revés.
     if (m.sociedad_id !== null && !socs.includes(m.sociedad_id)) return false;
+    if (usuario.rol === 'admin') return true;
+    if (tienePermisos) return !!nivelEnModulo(usuario, m.modulo);
     return todasLasSecciones || secciones.includes(m.modulo);
-  });
+  }).map(m => ({ ...m, nivel: nivelEnModulo(usuario, m.modulo) || 'operar' }));
+}
+
+// ── HASTA DÓNDE LLEGA DENTRO DE UN MENÚ ───────────────────────────────────
+// Devuelve 'ver' | 'operar' | 'borrar', o null si no tiene acceso al módulo.
+//
+// Mientras un usuario no tenga NINGÚN permiso cargado en la tabla nueva, se
+// comporta como antes: entra a lo que le habiliten las secciones y opera normal.
+// Es lo que permite soltar esto sin configurar a nadie primero.
+export function nivelEnModulo(usuario, modulo) {
+  if (!usuario || !usuario.id || !modulo) return null;
+  if (usuario.rol === 'admin') return 'borrar';
+
+  const fila = db.prepare(
+    'SELECT nivel FROM usuario_modulos WHERE usuario_id = ? AND modulo = ?'
+  ).get(usuario.id, modulo);
+  if (fila) return fila.nivel;
+
+  // Sin permisos cargados para esta persona: rige lo de antes.
+  const tieneAlguno = db.prepare(
+    'SELECT 1 FROM usuario_modulos WHERE usuario_id = ? LIMIT 1'
+  ).get(usuario.id);
+  if (!tieneAlguno) {
+    const secc = seccionesDe(usuario);
+    return (secc.includes('*') || secc.includes(modulo)) ? 'operar' : null;
+  }
+  return null;   // ya tiene permisos configurados y este módulo no está: no entra
+}
+
+export function permisosDe(usuario) {
+  if (!usuario || !usuario.id) return {};
+  const filas = db.prepare(
+    'SELECT modulo, nivel FROM usuario_modulos WHERE usuario_id = ?'
+  ).all(usuario.id);
+  return Object.fromEntries(filas.map(f => [f.modulo, f.nivel]));
+}
+
+// Guarda de una sola vez los módulos de un usuario. Reemplazo total: lo que no
+// viene en la lista, se le saca. Es lo que hace que destildar signifique algo.
+export function guardarPermisos(usuarioId, items, porId = null) {
+  const validos = new Set(db.prepare('SELECT modulo FROM modulos_config').all().map(r => r.modulo));
+  const NIVELES = new Set(['ver', 'operar', 'borrar']);
+  const limpios = (Array.isArray(items) ? items : [])
+    .filter(i => i && validos.has(i.modulo))
+    .map(i => ({ modulo: i.modulo, nivel: NIVELES.has(i.nivel) ? i.nivel : 'operar' }));
+
+  db.transaction(() => {
+    db.prepare('DELETE FROM usuario_modulos WHERE usuario_id = ?').run(usuarioId);
+    const ins = db.prepare(
+      'INSERT OR REPLACE INTO usuario_modulos (usuario_id, modulo, nivel, creado_por_id) VALUES (?,?,?,?)'
+    );
+    for (const i of limpios) ins.run(usuarioId, i.modulo, i.nivel, porId);
+  })();
+  return limpios.length;
 }
 
 export function seccionesDe(usuario) {
@@ -161,3 +223,80 @@ export function seccionesDe(usuario) {
 
 export default { sociedadesDe, sociedadesConNombreDe, puedeVerSociedad, resolverSociedad,
                  conSociedad, soloSociedad, modulosVisibles, seccionesDe };
+
+// ══════════════════════════════════════════════════════════════════════════
+// QUE EL NIVEL SE APLIQUE, NO SÓLO SE GUARDE
+// ══════════════════════════════════════════════════════════════════════════
+// Un permiso que se configura y no se verifica es peor que no tenerlo: el que lo
+// configuró se queda tranquilo creyendo que alguien no puede borrar, y puede.
+//
+// El módulo de cada pedido sale de `modulos_config.api_prefijos`, una lista de
+// prefijos de API por módulo ('sg,sg-abasto' → /api/sg/...). Los módulos que
+// todavía no lo declaran NO se controlan por nivel: siguen rigiéndose por el menú.
+// Es a propósito — inventar la correspondencia entre 31 routers y 88 módulos
+// terminaría bloqueando cosas que no corresponde, y un permiso que bloquea de más
+// se desactiva entero a los dos días.
+
+let _mapaApi = null;
+function mapaApi() {
+  if (_mapaApi) return _mapaApi;
+  _mapaApi = [];
+  try {
+    for (const m of db.prepare(
+      "SELECT modulo, api_prefijos FROM modulos_config WHERE api_prefijos IS NOT NULL AND api_prefijos <> ''"
+    ).all()) {
+      for (const p of String(m.api_prefijos).split(',').map(x => x.trim()).filter(Boolean)) {
+        _mapaApi.push({ prefijo: '/api/' + p.replace(/^\/*(api\/)?/, ''), modulo: m.modulo });
+      }
+    }
+    // El más largo primero: /api/sg/ventas tiene que ganarle a /api/sg.
+    _mapaApi.sort((a, b) => b.prefijo.length - a.prefijo.length);
+  } catch { _mapaApi = []; }
+  return _mapaApi;
+}
+export function limpiarCacheApi() { _mapaApi = null; }
+
+export function moduloDeRuta(url) {
+  const limpia = String(url || '').split('?')[0];
+  for (const e of mapaApi()) {
+    if (limpia === e.prefijo || limpia.startsWith(e.prefijo + '/')) return e.modulo;
+  }
+  return null;
+}
+
+// Middleware. Se monta DESPUÉS de bloquearSiSoloLectura y hace lo que ese no
+// puede: distinguir por módulo y separar borrar de editar.
+export function exigirNivel(req, res, next) {
+  const metodo = req.method;
+  if (metodo === 'GET' || metodo === 'HEAD' || metodo === 'OPTIONS') return next();
+
+  let user;
+  try { user = JSON.parse(req.cookies?.lnb_user || 'null'); } catch { user = null; }
+  if (!user || !user.id) return next();          // que el endpoint conteste el 401
+  if (user.rol === 'admin') return next();
+
+  const modulo = moduloDeRuta(req.originalUrl || req.url);
+  if (!modulo) return next();                    // módulo sin prefijo declarado
+
+  const nivel = nivelEnModulo(user, modulo);
+  if (!nivel) {
+    return res.status(403).json({ ok: false, error: 'No tenés acceso a este módulo.' });
+  }
+  if (nivel === 'ver') {
+    return res.status(403).json({
+      ok: false, error: 'Tu acceso a este módulo es de solo lectura.', solo_lectura: true,
+    });
+  }
+  // Borrar y anular es lo único que se separa de editar: es la acción que deja
+  // afuera trabajo ya hecho. DELETE es explícito; el resto de las bajas del
+  // sistema son lógicas y viajan como POST/PATCH a rutas que lo dicen.
+  const borra = metodo === 'DELETE'
+    || /\/(anular|eliminar|borrar)(\/|$|\?)/i.test(String(req.originalUrl || req.url).split('?')[0]);
+  if (borra && nivel !== 'borrar') {
+    return res.status(403).json({
+      ok: false,
+      error: 'Tu usuario puede operar en este módulo, pero no borrar ni anular.',
+    });
+  }
+  next();
+}
