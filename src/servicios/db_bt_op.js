@@ -34,6 +34,11 @@
 //   · NADA SE BORRA. Igual que allá, pero con motivo obligatorio y quién lo hizo.
 import db from './db.js';
 import './db_org.js';
+import './db_bt_migra.js';   // los nombres bt_clientes, bt_viajes y bt_cargas los
+                             // ocupaba el espejo del #601: hay que liberarlos antes
+import { ddl as ddlBt } from './bt_ddl.js';
+
+const ddl = (sql) => ddlBt(sql, 'BT-OP');
 
 // Cola de auditoría de toda tabla operativa. Sin esto, dentro de seis meses
 // "¿quién cargó este viaje?" no tiene respuesta.
@@ -48,7 +53,7 @@ const AUDITORIA = `
 
 // ── MAESTROS ──────────────────────────────────────────────────────────────
 
-db.exec(`
+ddl(`
   -- Padrón único. La misma ficha puede ser cliente, remitente y destinatario de
   -- distintas cargas: en Transoft es una sola tabla usada en los tres roles y está
   -- bien resuelto. Separarlas obligaría a cargar la misma empresa tres veces.
@@ -125,7 +130,7 @@ db.exec(`
 // la clave es el id. Así el número puede repetirse entre sucursales sin que nada
 // se rompa, que es exactamente lo que pasa allá.
 
-db.exec(`
+ddl(`
   CREATE TABLE IF NOT EXISTS bt_sucursales (
     id       INTEGER PRIMARY KEY AUTOINCREMENT,
     codigo   TEXT NOT NULL UNIQUE,          -- CC | BA
@@ -146,7 +151,7 @@ db.exec(`
 
 // ── EL NÚCLEO: CARGA, VIAJE Y EL CRUCE ────────────────────────────────────
 
-db.exec(`
+ddl(`
   -- El pedido de transporte.
   CREATE TABLE IF NOT EXISTS bt_cargas (
     id             INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -254,7 +259,7 @@ db.exec(`
 // obligaría a acordarse del signo en cada consulta, y el día que alguien se olvide
 // la rentabilidad da cualquier cosa.
 
-db.exec(`
+ddl(`
   CREATE TABLE IF NOT EXISTS bt_carga_valores (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
     carga_id     INTEGER NOT NULL,
@@ -314,7 +319,7 @@ db.exec(`
 //   supervisor → además valoriza (toca la plata) y anula
 //   admin      → además administra maestros y permisos
 
-db.exec(`
+ddl(`
   CREATE TABLE IF NOT EXISTS bt_usuarios (
     usuario_id  INTEGER PRIMARY KEY,        -- puntero blando a usuarios
     rol         TEXT NOT NULL DEFAULT 'operador',

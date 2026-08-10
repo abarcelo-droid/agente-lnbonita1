@@ -16,6 +16,7 @@
 import express from 'express';
 import db from '../servicios/db_bt.js';   // este import crea el schema bt_tr_* (espejo)
 import '../servicios/db_bt_op.js';       // y este el modelo operativo bt_*
+import { fallasEsquema } from '../servicios/bt_ddl.js';
 
 const router = express.Router();
 
@@ -175,13 +176,33 @@ router.post('/sync/cerrar', wrap((req, res) => {
 // De cuándo son los datos. Es lo primero que hay que poder contestar: sin esto, un
 // agente caído hace tres días muestra sus números como si fueran de hoy.
 router.get('/estado', wrap((req, res) => {
+  // Cada tabla en su propio try: desde que el DDL ya no puede voltear el arranque
+  // (ver bt_ddl.js), puede faltar una tabla y el resto estar perfecto. Que la
+  // consulta de estado se caiga entera por eso sería tapar justo el diagnóstico.
   const conteo = {};
   for (const [k, d] of Object.entries(TABLAS)) {
-    const r = db.prepare(`SELECT COUNT(*) n, MAX(sincronizado_en) ult FROM ${d.tabla}`).get();
-    conteo[k] = { filas: r.n, ultima_sync: r.ult };
+    try {
+      const r = db.prepare(`SELECT COUNT(*) n, MAX(sincronizado_en) ult FROM ${d.tabla}`).get();
+      conteo[k] = { filas: r.n, ultima_sync: r.ult };
+    } catch (e) {
+      conteo[k] = { filas: null, ultima_sync: null, error: e.message };
+    }
   }
-  const lote = db.prepare('SELECT * FROM bt_tr_sync_lotes ORDER BY id DESC LIMIT 1').get() || null;
-  res.json({ ok: true, data: { tablas: conteo, ultimo_lote: lote } });
+  let lote = null;
+  try {
+    lote = db.prepare('SELECT * FROM bt_tr_sync_lotes ORDER BY id DESC LIMIT 1').get() || null;
+  } catch (_) { /* la tabla no se pudo crear; ya está reportado en esquema */ }
+
+  res.json({
+    ok: true,
+    data: {
+      tablas: conteo,
+      ultimo_lote: lote,
+      // Vacío es lo normal. Con algo adentro, el módulo anda a medias y esto dice
+      // exactamente qué falta, en vez de dejar que la pantalla tire 500 sin motivo.
+      esquema: { ok: fallasEsquema.length === 0, fallas: fallasEsquema },
+    },
+  });
 }));
 
 // Los viajes, con lo que se cobró y lo que costó ya sumado. La rentabilidad se

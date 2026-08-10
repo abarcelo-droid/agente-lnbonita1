@@ -186,8 +186,8 @@ PLAN = [
       "FOJACHOF", "FOJADEST", "FOJAGUIA", "ANULADO"]),
 ]
 
-# Los catalogos son ocho tablitas de referencia. Van todas a bt_catalogos con una
-# columna que dice de cual son.
+# Los catalogos son ocho tablitas de referencia. Van todas a bt_tr_catalogos con
+# una columna que dice de cual son.
 CATALOGOS = [
     ("tipo_carga",    "cgtipcar.dbf"),
     ("tipo_bulto",    "cgtipbul.dbf"),
