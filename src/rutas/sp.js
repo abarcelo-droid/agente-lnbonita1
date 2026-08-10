@@ -1120,8 +1120,24 @@ router.post('/solicitudes/:id/cancelar', wrap((req, res) => {
     WHERE solicitud_id=? AND hito IN ('autorizacion','fechas','confeccion','firma','comprobantes')
   `).get(s.id).n > 0;
   const esSolicitante = s.solicitante_id === req.user.id;
-  if (hubodecision && !esAdmin(req)) {
-    throw Object.assign(new Error('Ya hubo decisiones sobre esta solicitud: solo un administrador puede cancelarla.'), { status: 403 });
+
+  // SI VOLVIÓ AL SOLICITANTE, LA PELOTA ES SUYA Y PUEDE ANULARLA.
+  // La regla de abajo existe para que nadie cancele algo que está en manos de
+  // otro: si el pago está esperando una firma, el que lo pidió no puede tirarlo
+  // abajo por su cuenta. Pero cuando la solicitud fue DEVUELTA, vuelve al paso
+  // del solicitante y no hay nadie esperando: le toca a él rehacerla o
+  // descartarla. Obligarlo a pedirle a un administrador que la cancele es hacer
+  // que dos personas resuelvan lo que resuelve una — y el caso real es el más
+  // común de todos: la factura estaba mal y ese pago no va más.
+  const ini = pasoInicio(def);
+  const volvioAlSolicitante = !!ini && s.paso_actual_clave === ini.clave;
+
+  if (hubodecision && !esAdmin(req) && !(esSolicitante && volvioAlSolicitante)) {
+    throw Object.assign(new Error(
+      esSolicitante
+        ? 'Esta solicitud está en manos de otra persona. Pedile que te la devuelva y ahí vas a poder anularla, o pedile a un administrador que la cancele.'
+        : 'Ya hubo decisiones sobre esta solicitud: solo un administrador puede cancelarla.'
+    ), { status: 403 });
   }
   if (!hubodecision && !esSolicitante && !esAdmin(req)) {
     throw Object.assign(new Error('Solo el solicitante puede cancelarla'), { status: 403 });
