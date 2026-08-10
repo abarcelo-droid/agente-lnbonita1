@@ -335,6 +335,47 @@ try { db.exec("CREATE INDEX IF NOT EXISTS idx_modulos_area ON modulos_config(are
   }
 })();
 
+// ── LA CONTABILIDAD ES DE CADA EMPRESA, NO DE "FAMILIA" ──────────────────
+// Las 7 pantallas contables (Asientos, Plan de Cuentas, Proveedores, CC
+// Proveedores, Modelos, Caja/Bancos y Órdenes de Pago) estaban asignadas a
+// Familia, pero operan sobre los datos de Puente Cordón. Parado en Puente
+// Cordón no veías tu contabilidad; parado en Familia veías la de PC. Esa era
+// buena parte de la sensación de que "está todo mezclado": no estaba mezclado
+// en los datos, estaba mal etiquetado en el menú.
+//
+// Pasan a sociedad_id = NULL, que en este sistema significa "aparece en todas
+// las empresas" (sidebar-v2.js:124 y permisos.js:157). Cada una entra a LA
+// MISMA pantalla y ve LO SUYO: las consultas ya filtran por sociedad.
+//
+// ESTO VA DESPUÉS DE TAPAR LAS FILTRACIONES DE LECTURA, NO ANTES. Abrirlas con
+// una consulta sin filtrar habría sido peor que dejarlas escondidas: un usuario
+// de San Gerónimo entrando a "Plan de Cuentas" vería las 268 cuentas de Puente
+// Cordón. Escondido es un problema de usabilidad; abierto y sin filtrar es que
+// una sociedad fiscal vea los libros de otra.
+//
+// Igual que con Ventas: sólo se mueven las que siguen donde las dejó el seed.
+// Si un admin ya la reasignó a mano, esa decisión es más nueva y manda.
+(function migrarContabilidadATodasLasEmpresas() {
+  try {
+    const fam = db.prepare("SELECT id FROM sociedades WHERE nombre = 'Familia'").get();
+    if (!fam) return;
+
+    const CONTABLES = ['adm-asientos', 'adm-cc-proveedores', 'adm-modelos',
+                       'adm-plan-cuentas', 'adm-proveedores',
+                       'fin-caja-bancos', 'fin-ordenes-pago'];
+    const upd = db.prepare(
+      'UPDATE modulos_config SET sociedad_id = NULL WHERE modulo = ? AND sociedad_id = ?');
+    let n = 0;
+    db.transaction(() => { for (const m of CONTABLES) n += upd.run(m, fam.id).changes; })();
+    if (n) {
+      console.log(`[ORG] ${n} pantalla(s) contable(s) pasaron de Familia a todas las empresas: ` +
+                  `cada una entra a la misma pantalla y ve sus propios datos.`);
+    }
+  } catch (e) {
+    console.error('[ORG] Error abriendo la contabilidad a todas las empresas:', e.message);
+  }
+})();
+
 console.log("[ORG] Schema organizacional inicializado");
 import "./ensure_modulo_sg.js";
 import "./ensure_modulo_personal.js";
