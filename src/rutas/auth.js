@@ -441,7 +441,11 @@ router.get('/usuarios-permisos', requireAuth, soloAdmin, (req, res) => {
   const db = getDb();
   try {
     const usuarios = db.prepare(`
-      SELECT u.id, u.nombre, u.email, u.username, u.rol, u.activo, u.solo_lectura
+      -- persona_id viaja para que la pantalla de accesos pueda configurar también
+      -- el usuario y la clave, no sólo las empresas y los menús: esas cosas se
+      -- guardan contra /personas/:id/usuario y sin este dato no hay contra qué.
+      SELECT u.id, u.nombre, u.email, u.username, u.rol, u.activo, u.solo_lectura,
+             u.persona_id
         FROM usuarios u
        ORDER BY u.activo DESC, u.nombre COLLATE NOCASE
     `).all();
