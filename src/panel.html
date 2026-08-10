@@ -40614,7 +40614,11 @@ function spNuevaAbrir(id) {
     } else { SP.borradorAut = ''; }
   }
   if (id) {
-    var s = (SP.listas.mias || []).concat(SP.listas.todas || []).filter(function(x) { return x.id === id; })[0];
+    var s = (SP.listas.mias || []).concat(SP.listas.todas || [], SP.listas.pendiente || [])
+      .filter(function(x) { return x.id === id; })[0];
+    // Se llegó por el link del mail: la solicitud no está en ninguna lista, pero
+    // sí en el detalle que se acaba de mirar.
+    if (!s && SP.det && SP.det.solicitud && SP.det.solicitud.id === id) s = SP.det.solicitud;
     if (s) {
       document.getElementById('sp-n-prov').value = s.proveedor_texto || '';
       document.getElementById('sp-n-cuenta').value = s.cuenta_texto || '';
@@ -40993,11 +40997,25 @@ function spDetalleRender() {
   // Cancelar y editar: el backend decide si están permitidos, acá solo se ofrecen.
   html += '<div class="ab-modal-footer" style="margin-top:14px">';
   if (s.estado_global === 'en_curso') {
+    // EDITAR CUANDO VOLVIÓ. Una devolución vuelve al paso del solicitante
+    // justamente para que corrija algo: sin este botón, la única forma de
+    // arreglar un monto era cancelar y cargar todo de nuevo. El endpoint y el
+    // formulario ya existían; lo único que faltaba era ofrecerlo.
+    var pIni = (SP.det && SP.det.pasos || []).filter(function(p) { return p.tipo === 'inicio'; })[0];
+    if (pIni && s.paso_actual_clave === pIni.clave) {
+      html += '<button class="btn bo bs" onclick="spEditarDesdeDetalle(' + s.id + ')"'
+        + ' style="font-size:11px">✎ Editar datos</button>';
+    }
     html += '<button class="btn bd bs" onclick="spCancelar(' + s.id + ')" style="font-size:11px">Cancelar solicitud</button>';
   }
   html += '<button class="btn bo" onclick="document.getElementById(\'sp-mb-detalle\').classList.remove(\'on\')">Cerrar</button></div>';
 
   document.getElementById('sp-det-cont').innerHTML = html;
+}
+
+function spEditarDesdeDetalle(id) {
+  document.getElementById('sp-mb-detalle').classList.remove('on');
+  spNuevaAbrir(id);
 }
 
 function spCancelar(id) {
