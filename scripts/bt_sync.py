@@ -84,6 +84,14 @@ def leer_dbf(ruta, columnas=None):
         quiero = None
         if columnas:
             quiero = set(c.upper() for c in columnas)
+            # Una columna que se pide y no esta se ignoraba en silencio: la fila
+            # salia sin ese dato y nadie se enteraba. Asi estuvo pidiendose ANULADO
+            # en clientes/choferes/unidades, que no lo tienen, y CODSUC+CUENTA en
+            # choferes, que directamente son la clave equivocada. Ahora avisa.
+            faltan = sorted(quiero - set(n for (n, _t, _l, _d, _p) in campos))
+            if faltan:
+                print("  [OJO] %s no tiene estas columnas: %s"
+                      % (os.path.basename(ruta), ", ".join(faltan)))
 
         f.seek(inicio)
         filas = []
@@ -149,12 +157,20 @@ PLAN = [
      ["LOCALIDAD", "DESCRIP", "PROVIN", "CENTRO", "ZONA", "SUCURSAL"]),
     ("provincias", os.path.join(GENERAL, "provin.dbf"),
      ["PROVINCIA", "DESCRIP", "PAIS"]),
+    # OJO con la baja de los maestros: clientes, choferes y unidades NO tienen
+    # ANULADO. Tienen BAJA, y es una FECHA (con fecha = dado de baja).
     ("clientes",   os.path.join(GENERAL, "clientes.dbf"),
-     ["CODSUC", "FICHANRO", "RESUM", "RAZSOCC", "CUIT", "IVA", "ZONA", "CTACTE", "CONDVTA", "ANULADO"]),
+     ["CODSUC", "FICHANRO", "RESUM", "RAZSOCC", "CUIT", "IVA", "ZONA", "CTACTE", "CONDVTA", "BAJA"]),
+    # El chofer se identifica por CHRESUM, no por sucursal+numero como el resto.
     ("choferes",   os.path.join(GENERAL, "choferes.dbf"),
-     ["CODSUC", "CUENTA", "NOMBRE", "RESUMEN", "ANULADO"]),
+     ["CHRESUM", "NOMBRE", "LEGAJO", "CUIT", "DOCUMEN", "REGISTRO", "TELEFONO",
+      "CHOFERPROP", "PVCODSUC", "PVCUENTA", "BAJA"]),
     ("unidades",   os.path.join(UNIDADES, "unpadron.dbf"),
-     ["TIPUNI", "UNIDAD", "PATENTE", "DESCRIP", "ANULADO"]),
+     ["TIPUNI", "UNIDAD", "PATENTE", "DESCRIP", "MARCA", "ANIO", "KM", "CHOFER", "BAJA"]),
+    # Dos filas, y de las mas importantes: ULTCARGA y ULTVIAJE son los contadores
+    # desde donde el ERP tiene que seguir numerando para no pisar la historia.
+    ("filiales",   os.path.join(CGRALES, "cgfilial.dbf"),
+     ["FILIAL", "DESCRIP", "SUCURSAL", "ULTCARGA", "ULTVIAJE", "ESTVIAINI"]),
     ("viajes",     os.path.join(CGRALES, "cgviaje1.dbf"),
      ["FILIAL", "NROVIA", "FECVIAJE", "TIPOVIAJE", "CAMION", "SEMI", "SEMI2", "CHRESUM",
       "CHOFERPROP", "ORIGEN", "DESTINO", "TRAYECTO", "KMSTD", "KMREAL", "KMINI", "KMFIN",

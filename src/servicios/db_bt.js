@@ -16,7 +16,15 @@
 // QUÉ ES ESTO: UN ESPEJO, NO UN SISTEMA
 // ══════════════════════════════════════════════════════════════════════════
 // La empresa opera hoy en TRANSOFT (K&DAT, Visual FoxPro, tablas .dbf en un
-// servidor Windows). El ERP nuevo LEE de ahí y NUNCA ESCRIBE: mientras Transoft
+// servidor Windows).
+//
+// EL ESPEJO NO SE BORRA CUANDO TRANSOFT MUERA: SE CONGELA. Es la copia fiel del
+// original, y la historia cerrada se migra desde acá a las tablas operativas (ver
+// db_bt_op.js, "EL CONTINUO"). Si en dos años se descubre que una conversión estaba
+// mal, se rehace desde este espejo: volver a leer archivos .dbf de un servidor que
+// ya no existe no es una opción.
+//
+// El ERP nuevo LEE de ahí y NUNCA ESCRIBE: mientras Transoft
 // sea el sistema de registro tiene que haber UNA sola verdad.
 //
 // Esa regla acá no es una promesa: es que no existe el camino. El ERP corre en
@@ -267,20 +275,32 @@ ddl(`
     zona        TEXT,
     ctacte      TEXT,
     condvta     TEXT,
-    anulado     INTEGER NOT NULL DEFAULT 0,
+    -- En clientes.dbf la baja NO es ANULADO (ese campo no existe): es BAJA, y es una
+    -- FECHA. Con fecha = cliente dado de baja; vacío = activo.
+    baja        TEXT,
     ${ESPEJO},
     PRIMARY KEY (codsuc, fichanro)
   );
   CREATE INDEX IF NOT EXISTS idx_bt_tr_cli_resum ON bt_tr_clientes(resum COLLATE NOCASE);
 
+  -- OJO CON LA CLAVE: el chofer NO se identifica por sucursal+número como casi todo
+  -- lo demás. Su clave es CHRESUM, un código corto ("ROMERO CAR"), y así lo
+  -- referencian los viajes y las órdenes. Esta tabla decía codsuc+cuenta —campos que
+  -- en choferes.dbf no existen—, así que no habría traído ni un chofer.
+  -- Tampoco tiene ANULADO: la baja es BAJA, y es una FECHA (con fecha = dado de baja).
   CREATE TABLE IF NOT EXISTS bt_tr_choferes (
-    codsuc      TEXT    NOT NULL,
-    cuenta      TEXT    NOT NULL,
+    chresum     TEXT    NOT NULL,          -- el código con que lo llaman los viajes
     nombre      TEXT,
-    resumen     TEXT,
-    anulado     INTEGER NOT NULL DEFAULT 0,
+    legajo      INTEGER,
+    cuit        TEXT,
+    documen     TEXT,
+    registro    TEXT,                      -- licencia de conducir
+    telefono    TEXT,
+    choferprop  INTEGER,                   -- propio (1) o de un fletero (0)
+    pvcodsuc    TEXT, pvcuenta INTEGER,    -- su cuenta de proveedor: por ahí se le paga
+    baja        TEXT,                      -- FECHA de baja; vacío = activo
     ${ESPEJO},
-    PRIMARY KEY (codsuc, cuenta)
+    PRIMARY KEY (chresum)
   );
 
   CREATE TABLE IF NOT EXISTS bt_tr_unidades (
@@ -288,7 +308,12 @@ ddl(`
     unidad      TEXT    NOT NULL,
     patente     TEXT,
     descrip     TEXT,
-    anulado     INTEGER NOT NULL DEFAULT 0,
+    marca       TEXT,
+    anio        INTEGER,
+    km          REAL,                      -- odómetro acumulado
+    chofer      TEXT,                      -- chofer asignado (-> bt_tr_choferes)
+    -- Igual que clientes y choferes: en unpadron.dbf la baja es BAJA (fecha).
+    baja        TEXT,
     ${ESPEJO},
     PRIMARY KEY (tipuni, unidad)
   );
@@ -325,6 +350,35 @@ ddl(`
     orden       INTEGER NOT NULL DEFAULT 0,
     ${ESPEJO},
     PRIMARY KEY (catalogo, codigo)
+  );
+`);
+
+// ── LOS CONTADORES DE TRANSOFT (cgfilial) ─────────────────────────────────
+// Tabla chica —dos filas— y absolutamente crítica para EL CONTINUO.
+//
+// Transoft numera las cargas y los viajes con un contador por filial: ULTCARGA y
+// ULTVIAJE guardan el ÚLTIMO número entregado. Casa Central va por la carga 20.857
+// y el viaje 11.271.
+//
+// Por qué hay que traerlo y no alcanza con mirar los datos migrados: el contador NO
+// es la cantidad de filas. Hay 20.847 cargas pero el contador dice 20.857 — diez
+// números que se entregaron y cuya fila ya no está (anuladas, borradas). Si el ERP
+// arrancara desde el número más alto que ve, volvería a entregar esos diez, y dos
+// cargas distintas terminarían con el mismo número: una vieja en la historia y una
+// nueva. Justo lo que el continuo tiene que impedir.
+//
+// Ver bt_continuo.js, que es quien usa esto para sembrar bt_contadores.
+
+ddl(`
+  CREATE TABLE IF NOT EXISTS bt_tr_filiales (
+    filial      INTEGER NOT NULL,          -- 1 = Casa Central | 2 = Buenos Aires
+    descrip     TEXT,
+    sucursal    TEXT,                      -- la letra: CC | BA (el puente 1<->CC)
+    ultcarga    INTEGER NOT NULL DEFAULT 0,
+    ultviaje    INTEGER NOT NULL DEFAULT 0,
+    estviaini   TEXT,                      -- estado inicial del viaje (IN)
+    ${ESPEJO},
+    PRIMARY KEY (filial)
   );
 `);
 

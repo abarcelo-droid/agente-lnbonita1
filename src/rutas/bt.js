@@ -16,6 +16,8 @@
 import express from 'express';
 import db from '../servicios/db_bt.js';   // este import crea el schema bt_tr_* (espejo)
 import '../servicios/db_bt_op.js';       // y este el modelo operativo bt_*
+import '../servicios/bt_continuo.js';   // vocabulario compartido + contadores que
+                                        // arrancan donde terminó Transoft
 import { fallasEsquema } from '../servicios/bt_ddl.js';
 
 const router = express.Router();
@@ -86,11 +88,15 @@ const TABLAS = {
   ordenes:      { tabla: 'bt_tr_ordenes',      clave: ['tiporden', 'nroorden'] },
   fojas:        { tabla: 'bt_tr_fojas',        clave: ['fojasuc', 'fojanro'] },
   clientes:     { tabla: 'bt_tr_clientes',     clave: ['codsuc', 'fichanro'] },
-  choferes:     { tabla: 'bt_tr_choferes',     clave: ['codsuc', 'cuenta'] },
+  // El chofer se identifica por CHRESUM, no por sucursal+número como el resto.
+  choferes:     { tabla: 'bt_tr_choferes',     clave: ['chresum'] },
   unidades:     { tabla: 'bt_tr_unidades',     clave: ['tipuni', 'unidad'] },
   localidades:  { tabla: 'bt_tr_localidades',  clave: ['localidad'] },
   provincias:   { tabla: 'bt_tr_provincias',   clave: ['provincia'] },
   catalogos:    { tabla: 'bt_tr_catalogos',    clave: ['catalogo', 'codigo'] },
+  // Dos filas y críticas: traen ULTCARGA/ULTVIAJE, los contadores desde los que el
+  // ERP tiene que seguir numerando para no pisar la historia (ver bt_continuo.js).
+  filiales:     { tabla: 'bt_tr_filiales',     clave: ['filial'] },
 };
 
 // Las columnas reales de cada tabla, para descartar lo que el agente mande de más.

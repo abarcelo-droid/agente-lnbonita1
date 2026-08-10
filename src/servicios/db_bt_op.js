@@ -5,7 +5,8 @@
 // NO CONFUNDIR CON EL ESPEJO. Son dos cosas distintas y por eso tienen nombres
 // distintos:
 //   bt_tr_*  → espejo de Transoft. Solo lectura, se pisa entero en cada
-//              sincronización, y muere el día que Transoft deje de usarse.
+//              sincronización. NO muere cuando Transoft deje de usarse: se congela
+//              como archivo del original (ver EL CONTINUO, más abajo).
 //   bt_*     → el sistema propio. Acá nace la información y nadie la sobreescribe.
 // Si fueran las mismas tablas, la primera sincronización borraría todo lo cargado
 // a mano. Por eso están separadas aunque se parezcan.
@@ -50,6 +51,36 @@ const AUDITORIA = `
     anulado_en       TEXT,
     anulado_por_id   INTEGER,
     anulado_motivo   TEXT`;
+
+// ══════════════════════════════════════════════════════════════════════════
+// EL CONTINUO: LA HISTORIA NO SE PIERDE AL CAMBIAR DE SISTEMA
+// ══════════════════════════════════════════════════════════════════════════
+// El día que Transoft se apague, los indicadores tienen que seguir viendo hacia
+// atrás: comparar contra el año anterior, ver la estacionalidad, la evolución de la
+// rentabilidad por cliente. Si la historia quedara solo en el espejo, ese día el
+// sistema arranca de cero y se pierde lo más valioso que hay: veinte mil cargas de
+// comportamiento real.
+//
+// Por eso la historia NO se espeja: se MIGRA. Los datos de Transoft se parten:
+//   · LO CERRADO (viajes terminados, cargas entregadas, períodos facturados) se
+//     migra UNA sola vez a estas tablas y queda para siempre, con origen='transoft'
+//     y migrado_en con la fecha. Los indicadores no distinguen: consultan una sola
+//     tabla y ven todo.
+//   · LO VIVO sigue en el espejo bt_tr_* y se resincroniza mientras se opere allá.
+//
+// TRES REGLAS QUE HACEN QUE ESTO NO SE ROMPA
+//   1. Una fila con origen='transoft' es HISTORIA: no se edita ni se anula desde el
+//      ERP. Editar un viaje de 2021 sería reescribir el pasado, y el pasado ya está
+//      facturado y declarado.
+//   2. La migración es idempotente por ref_transoft: correrla dos veces no duplica
+//      nada. Va a haber que correrla varias veces mientras se afina la conversión.
+//   3. La sincronización del espejo NUNCA toca estas tablas. Son dos caminos
+//      distintos: el espejo se pisa entero, esto no se pisa nunca.
+//
+// Y EL ESPEJO NO SE BORRA CUANDO TRANSOFT MUERA: se congela. Es la copia fiel del
+// original. Si dentro de dos años se descubre que una conversión estaba mal, se
+// rehace desde ahí — volver a leer archivos .dbf de un servidor que ya no existe,
+// no es una opción.
 
 // ── MAESTROS ──────────────────────────────────────────────────────────────
 
@@ -141,12 +172,46 @@ ddl(`
   -- Un contador por sucursal y tipo. El próximo número se saca en la misma
   -- transacción que el alta: si se sacara antes, dos altas simultáneas se llevarían
   -- el mismo número y nadie se enteraría hasta que alguien busque uno y encuentre dos.
+  --
+  -- ARRANCA DONDE TERMINÓ TRANSOFT, no en cero. Si arrancara en cero, la primera
+  -- carga del ERP pediría el número 1 y chocaría con la carga 1 de 2016 que trajo la
+  -- migración. Lo siembra bt_continuo.js desde bt_tr_filiales.
   CREATE TABLE IF NOT EXISTS bt_contadores (
     sucursal_id INTEGER NOT NULL,
     tipo        TEXT    NOT NULL,           -- carga | viaje
     ultimo      INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (sucursal_id, tipo)
   );
+`);
+
+// ── EL VOCABULARIO COMPARTIDO ─────────────────────────────────────────────
+// La otra mitad del continuo, y la que no se ve venir.
+//
+// Que la historia esté en la misma tabla no alcanza para que los indicadores
+// funcionen: tiene que estar dicha con las MISMAS PALABRAS. La historia de Transoft
+// trae el concepto "FLETE". Si mañana alguien carga "Flete", el informe de
+// facturación por concepto muestra dos líneas donde va una, y nadie lo nota hasta
+// que los números no cierran contra el año pasado.
+//
+// Por eso los códigos no son texto libre: son este catálogo, sembrado con los
+// códigos EXACTOS de Transoft (cgtipcar, cgtipbul, cgestado, cgestvia, cgconfor,
+// cgconcar, cgconvia). Un viaje de 2019 y uno de mañana hablan el mismo idioma.
+//
+// `cierra` es lo que define qué se considera terminado, y de ahí sale qué se migra
+// (ver bt_continuo.js). Viene del flag CIERRA de Transoft, no de una interpretación.
+
+ddl(`
+  CREATE TABLE IF NOT EXISTS bt_catalogos (
+    tipo        TEXT NOT NULL,     -- tipo_carga | estado_carga | concepto_carga | ...
+    codigo      TEXT NOT NULL,
+    descripcion TEXT NOT NULL,
+    cierra      INTEGER NOT NULL DEFAULT 0,   -- este estado da por terminada la carga/viaje
+    no_facturar INTEGER NOT NULL DEFAULT 0,
+    orden       INTEGER NOT NULL DEFAULT 0,
+    activo      INTEGER NOT NULL DEFAULT 1,
+    PRIMARY KEY (tipo, codigo)
+  );
+  CREATE INDEX IF NOT EXISTS idx_btcat_tipo ON bt_catalogos(tipo, orden);
 `);
 
 // ── EL NÚCLEO: CARGA, VIAJE Y EL CRUCE ────────────────────────────────────
@@ -183,12 +248,16 @@ ddl(`
     estado         TEXT NOT NULL DEFAULT 'pendiente',
     conformidad    TEXT NOT NULL DEFAULT 'P',
     observaciones  TEXT,
+    -- 'erp' = nacio aca. 'transoft' = historia migrada. Ver EL CONTINUO, arriba.
+    origen         TEXT NOT NULL DEFAULT 'erp',
+    migrado_en     TEXT,
     ${AUDITORIA}
   );
   CREATE UNIQUE INDEX IF NOT EXISTS idx_btca_nro ON bt_cargas(sucursal_id, numero);
   CREATE INDEX IF NOT EXISTS idx_btca_fecha  ON bt_cargas(fecha);
   CREATE INDEX IF NOT EXISTS idx_btca_cli    ON bt_cargas(cliente_id);
   CREATE INDEX IF NOT EXISTS idx_btca_estado ON bt_cargas(estado);
+  -- Los índices de origen y ref_transoft NO van acá: ver el bloque del final.
 
   -- El camión en la ruta.
   CREATE TABLE IF NOT EXISTS bt_viajes (
@@ -218,11 +287,14 @@ ddl(`
     salida_en      TEXT,
     llegada_en     TEXT,
     observaciones  TEXT,
+    origen         TEXT NOT NULL DEFAULT 'erp',
+    migrado_en     TEXT,
     ${AUDITORIA}
   );
   CREATE UNIQUE INDEX IF NOT EXISTS idx_btvi_nro ON bt_viajes(sucursal_id, numero);
   CREATE INDEX IF NOT EXISTS idx_btvi_fecha  ON bt_viajes(fecha);
   CREATE INDEX IF NOT EXISTS idx_btvi_estado ON bt_viajes(estado);
+  -- Ídem: los de origen y ref_transoft van al final, después de las migraciones.
 
   -- EL CRUCE. Una carga puede repartirse en varios viajes y un viaje lleva muchas
   -- cargas. Lo embarcado se guarda; el saldo NO se guarda, se calcula contra la
@@ -376,9 +448,31 @@ function addCol(tabla, col, def) {
 
 try {
   addCol('bt_cargas', 'observaciones', 'TEXT');
+  addCol('bt_cargas', 'origen', "TEXT NOT NULL DEFAULT 'erp'");
+  addCol('bt_cargas', 'migrado_en', 'TEXT');
+  addCol('bt_viajes', 'origen', "TEXT NOT NULL DEFAULT 'erp'");
+  addCol('bt_viajes', 'migrado_en', 'TEXT');
 } catch (e) {
   console.error('[BT-OP] Error en migraciones:', e.message);
 }
+
+// ── ÍNDICES SOBRE COLUMNAS AGREGADAS DESPUÉS ──────────────────────────────
+// Van acá y no arriba, y la razón es concreta: en una base que YA tenía bt_cargas,
+// el CREATE TABLE IF NOT EXISTS no hace nada, así que la columna `origen` todavía no
+// existe cuando se leen los CREATE INDEX de ese bloque — y el índice falla. La
+// columna aparece recién con el addCol de arriba. Cualquier índice sobre una columna
+// que llega por migración tiene que crearse después de la migración.
+ddl(`
+  CREATE INDEX IF NOT EXISTS idx_btca_origen ON bt_cargas(origen, fecha);
+  CREATE INDEX IF NOT EXISTS idx_btvi_origen ON bt_viajes(origen, fecha);
+
+  -- Lo que hace que la migración de la historia se pueda correr veinte veces sin
+  -- duplicar nada: el segundo intento choca contra este índice en vez de insertar.
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_btca_reftr ON bt_cargas(ref_transoft)
+    WHERE ref_transoft IS NOT NULL AND ref_transoft <> '';
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_btvi_reftr ON bt_viajes(ref_transoft)
+    WHERE ref_transoft IS NOT NULL AND ref_transoft <> '';
+`);
 
 console.log('[BT-OP] Modelo operativo inicializado');
 
