@@ -10,7 +10,7 @@
 import express from 'express';
 import { getDb } from '../servicios/db.js';
 import '../servicios/db_favoritos.js';  // inicializa schema al primer import
-import { sociedadesDe, seccionesDe } from '../servicios/permisos.js';
+import { filtrarModulos } from '../servicios/permisos.js';
 
 const router = express.Router();
 const db = () => getDb();
@@ -55,13 +55,11 @@ router.get('/org/sidebar', requireAuth, (req, res) => {
     //
     // Los módulos con sociedad_id en NULL son transversales (no son de ninguna
     // empresa en particular) y los sigue viendo cualquiera.
-    const misSocs = sociedadesDe(req.user);
-    const secciones = seccionesDe(req.user);
-    const todas = secciones.includes('*');
-    const visibles = modulos.filter(m => {
-      if (m.sociedad_id !== null && !misSocs.includes(m.sociedad_id)) return false;
-      return todas || secciones.includes(m.modulo);
-    });
+    // La regla vive en servicios/permisos.js y NO se copia acá. Esta misma
+    // condición estaba escrita a mano en este archivo y miraba sólo el campo
+    // viejo `secciones`: por eso lo que se tildaba en la pantalla de accesos se
+    // guardaba bien y el menú seguía mostrando lo de antes.
+    const visibles = filtrarModulos(req.user, modulos);
 
     // Agrupar por `grupo`
     const grupos = {};
