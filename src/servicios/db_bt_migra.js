@@ -101,8 +101,42 @@ function migrar(viejo, nuevo, esEspejo) {
   return `⚠ ${viejo} y ${nuevo} tienen datos los dos → el viejo quedó como ${apartado}, revisar a mano`;
 }
 
+// ── MAESTROS DEL ESPEJO QUE PEDÍAN COLUMNAS INEXISTENTES ──────────────────
+// bt_tr_clientes, bt_tr_choferes y bt_tr_unidades se escribieron con `anulado`, y
+// en clientes.dbf / choferes.dbf / unpadron.dbf ese campo NO existe: la baja es
+// BAJA y es una fecha. Peor: bt_tr_choferes tenía clave codsuc+cuenta, dos campos
+// que tampoco existen — la clave real es CHRESUM. Con esa forma no habría entrado
+// ni un chofer, y el lector de .dbf ignora en silencio lo que no encuentra.
+//
+// Como el agente de sincronización todavía no corrió, están vacías y se pueden
+// rehacer sin perder nada. La regla es la misma que arriba: vacía se rehace, con
+// una sola fila se conserva y se avisa.
+const MAESTROS_VIEJOS = [
+  ['bt_tr_clientes', 'anulado'],   // la columna que delata la forma vieja
+  ['bt_tr_unidades', 'anulado'],
+  ['bt_tr_choferes', 'codsuc'],
+];
+
+function rehacerMaestro(tabla, columnaVieja) {
+  if (!existe(tabla)) return null;
+  const cols = db.prepare(`PRAGMA table_info("${tabla}")`).all().map(c => c.name);
+  if (!cols.includes(columnaVieja)) return null;   // ya tiene la forma nueva
+
+  const n = filas(tabla);
+  if (n === 0) {
+    db.exec(`DROP TABLE "${tabla}"`);
+    return `${tabla} vacía y con la forma vieja → se rehace`;
+  }
+  return `⚠ ${tabla} tiene ${n} filas con la forma vieja (columna ${columnaVieja}), revisar a mano`;
+}
+
 try {
   const hechos = [];
+
+  for (const [tabla, col] of MAESTROS_VIEJOS) {
+    const r = rehacerMaestro(tabla, col);
+    if (r) hechos.push(r);
+  }
 
   for (const n of ESPEJO_DATOS) {
     const r = migrar(`bt_${n}`, `bt_tr_${n}`, true);
@@ -118,7 +152,7 @@ try {
     for (const i of INDICES_601) {
       try { db.exec(`DROP INDEX IF EXISTS ${i}`); } catch { /* si no está, mejor */ }
     }
-    console.log(`[BT-MIGRA] Espejo del #601 reubicado (${hechos.length} tablas):`);
+    console.log(`[BT-MIGRA] Tablas del espejo ajustadas (${hechos.length}):`);
     for (const h of hechos) console.log(`[BT-MIGRA]   ${h}`);
   }
 } catch (e) {
