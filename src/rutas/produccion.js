@@ -740,7 +740,10 @@ router.put('/insumos/:id/asiento-modelo', requireAuth, (req, res) => {
     const insumoId = parseInt(req.params.id, 10);
     const mid = req.body?.asiento_modelo_id ? parseInt(req.body.asiento_modelo_id, 10) : null;
     if (mid) {
-      const modelo = dbPa.prepare('SELECT id FROM adm_asientos_modelo WHERE id = ?').get(mid);
+      // El modelo tiene que ser del plan de esta empresa: sus líneas apuntan a
+      // pa_cuentas, así que un modelo de otra sociedad entrega cuentas ajenas.
+      const modelo = dbPa.prepare('SELECT id FROM adm_asientos_modelo WHERE id = ? AND sociedad_id = ?')
+        .get(mid, paSociedadPCId());
       if (!modelo) return res.status(400).json({ ok: false, error: 'asiento_modelo_id inválido' });
       dbPa.prepare(`INSERT INTO pa_insumo_modelo (insumo_id, asiento_modelo_id, actualizado_en)
                     VALUES (?, ?, datetime('now','localtime'))
@@ -1213,9 +1216,13 @@ router.post('/compras', requireAuth, (req, res) => {
         }
       }
 
-      // Config impositiva global (IVA CF y percepciones)
+      // Config impositiva DE ESTA EMPRESA (IVA CF y percepciones). Antes era una
+      // sola para todo el sistema: la cuenta de IVA Crédito Fiscal de Puente
+      // Cordón se le aplicaba a cualquiera. El asiento salía cuadrado y con el
+      // IVA imputado al balance de otra sociedad.
       const configImp = {};
-      dbPa.prepare('SELECT clave, cuenta_id FROM adm_config_impositiva WHERE cuenta_id IS NOT NULL').all()
+      dbPa.prepare('SELECT clave, cuenta_id FROM adm_config_impositiva WHERE cuenta_id IS NOT NULL AND sociedad_id = ?')
+        .all(paSociedadPCId())
         .forEach(function(r){ configImp[r.clave] = r.cuenta_id; });
 
       try {

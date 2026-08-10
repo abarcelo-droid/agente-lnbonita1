@@ -3915,5 +3915,115 @@ db.exec(`
   }
 })();
 
+// ═══════════════════════════════════════════════════════════════════════════
+// FASE 4 MULTISOCIEDAD — LA CONFIGURACIÓN CONTABLE TAMBIÉN ES DE CADA EMPRESA
+// ═══════════════════════════════════════════════════════════════════════════
+// Faltaban las dos tablas que DECIDEN qué cuenta usa cada asiento automático:
+//
+//   adm_config_impositiva  → de acá sale la cuenta de IVA Crédito Fiscal, la que
+//                            lleva el IVA de TODA factura de compra. Tenía
+//                            `clave TEXT PRIMARY KEY`: UNA sola fila por clave
+//                            para todo el sistema. O sea UNA sola cuenta de IVA
+//                            para las tres empresas. San Gerónimo cargando una
+//                            factura habría imputado el IVA a la cuenta de
+//                            Puente Cordón — el asiento parecería correcto y
+//                            estaría en el balance equivocado.
+//
+//   adm_asientos_modelo    → el molde del asiento de cada insumo y de cada
+//   (+ _lineas)              proveedor de servicios. Sus líneas apuntan a
+//                            pa_cuentas, que sí tiene empresa: un modelo global
+//                            entrega cuentas de PC a quien sea.
+//
+// Existentes → Puente Cordón, que es de quien son. Y a cada empresa activa se le
+// siembran sus 6 claves impositivas VACÍAS: sin cuenta asignada, no con la de PC.
+// Vacía obliga a configurarla; heredada se usa sin que nadie se entere.
+//
+// ROLLBACK DE VERDAD. Las fases 1 a 3 usan BEGIN/COMMIT crudo adentro de
+// db.exec y no tienen ROLLBACK: si una sentencia falla, exec corta, el COMMIT
+// nunca corre y la transacción queda ABIERTA para todo el proceso — con
+// foreign_keys apagado, porque PRAGMA foreign_keys es un no-op mientras haya
+// una transacción abierta. Acá se usa db.transaction(), que revierte solo
+// cuando algo tira. No se repite ese patrón.
+(function migrarMultisociedadFase4() {
+  try {
+    const pc = db.prepare("SELECT id FROM sociedades WHERE nombre = 'Puente Cordón SA'").get()
+            || db.prepare("SELECT id FROM sociedades WHERE funcion = 'productiva' ORDER BY id LIMIT 1").get();
+    if (!pc) {
+      console.warn('[PA][MS-F4] Sociedad Puente Cordón no encontrada — Fase 4 NO aplicada');
+      return;
+    }
+    const PC = pc.id;
+    const tieneCol = (t, c) => db.prepare(`PRAGMA table_info(${t})`).all().some(x => x.name === c);
+
+    // ── 1) adm_asientos_modelo: ADD COLUMN, sin rebuild ──────────────────
+    if (!tieneCol('adm_asientos_modelo', 'sociedad_id')) {
+      db.transaction(() => {
+        db.exec(`ALTER TABLE adm_asientos_modelo ADD COLUMN sociedad_id INTEGER NOT NULL DEFAULT ${PC}`);
+        db.exec('CREATE INDEX IF NOT EXISTS idx_adm_modelo_sociedad ON adm_asientos_modelo(sociedad_id)');
+      })();
+      console.log('[PA][MS-F4] adm_asientos_modelo.sociedad_id agregado (existentes → PC)');
+    }
+
+    // ── 2) adm_config_impositiva: rebuild con PK (sociedad_id, clave) ────
+    // Hace falta rebuild y no ADD COLUMN porque la PRIMARY KEY tiene que pasar
+    // a ser compuesta: con `clave` sola, la segunda empresa no puede tener su
+    // propia fila 'iva_credito_fiscal'.
+    if (!tieneCol('adm_config_impositiva', 'sociedad_id')) {
+      const fkPrev = db.pragma('foreign_keys', { simple: true });
+      db.pragma('foreign_keys = OFF');
+      try {
+        db.transaction(() => {
+          // DROP previo: si una corrida anterior murió después del CREATE, la
+          // tabla _v2 huérfana queda en la base y el reintento falla para siempre
+          // con "table already exists".
+          db.exec('DROP TABLE IF EXISTS adm_config_impositiva_v2');
+          db.exec(`
+            CREATE TABLE adm_config_impositiva_v2 (
+              sociedad_id INTEGER NOT NULL REFERENCES sociedades(id),
+              clave       TEXT    NOT NULL,
+              cuenta_id   INTEGER REFERENCES pa_cuentas(id),
+              descripcion TEXT,
+              PRIMARY KEY (sociedad_id, clave)
+            );
+          `);
+          db.exec(`INSERT INTO adm_config_impositiva_v2 (sociedad_id, clave, cuenta_id, descripcion)
+                   SELECT ${PC}, clave, cuenta_id, descripcion FROM adm_config_impositiva`);
+          db.exec('DROP TABLE adm_config_impositiva');
+          db.exec('ALTER TABLE adm_config_impositiva_v2 RENAME TO adm_config_impositiva');
+        })();
+        console.log('[PA][MS-F4] adm_config_impositiva: PK ahora es (sociedad_id, clave); existentes → PC');
+      } finally {
+        // Se restaura ANTES de que pueda quedar una transacción abierta: si el
+        // transaction() de arriba tiró, ya revirtió y cerró, así que este pragma
+        // sí tiene efecto (a diferencia de las fases 1 y 2).
+        db.pragma(`foreign_keys = ${fkPrev ? 'ON' : 'OFF'}`);
+      }
+    }
+
+    // ── 3) Cada empresa activa, sus 6 claves — VACÍAS ────────────────────
+    // Sin cuenta asignada a propósito. Que San Gerónimo arranque con la cuenta
+    // de IVA de Puente Cordón sería exactamente el problema que esto arregla:
+    // el asiento saldría bien y estaría en el balance de otro.
+    const CLAVES = [
+      ['iva_credito_fiscal',   'IVA Crédito Fiscal'],
+      ['iva_debito_fiscal',    'IVA Débito Fiscal'],
+      ['percepcion_iva',       'Percepción IVA'],
+      ['percepcion_iibb',      'Percepción IIBB'],
+      ['percepcion_ganancias', 'Percepción Ganancias'],
+      ['retencion',            'Retención'],
+    ];
+    const socs = db.prepare('SELECT id, nombre FROM sociedades WHERE activa = 1').all();
+    const insC = db.prepare(
+      'INSERT OR IGNORE INTO adm_config_impositiva (sociedad_id, clave, descripcion) VALUES (?,?,?)');
+    let sembradas = 0;
+    db.transaction(() => {
+      for (const s of socs) for (const [k, d] of CLAVES) sembradas += insC.run(s.id, k, d).changes;
+    })();
+    if (sembradas) console.log(`[PA][MS-F4] ${sembradas} clave(s) impositiva(s) sembradas (sin cuenta, a configurar)`);
+  } catch (e) {
+    console.error('[PA][MS-F4] Error:', e.message);
+  }
+})();
+
 export { db };
 export default db;

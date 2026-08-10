@@ -306,11 +306,18 @@ router.get('/', (req, res) => {
 });
 
 // Helper backend: ¿la cuenta es imputable? (no es padre de ninguna otra)
+// Se busca el hijo DENTRO DEL MISMO PLAN. Los códigos se repiten entre empresas
+// —el UNIQUE es (sociedad_id, codigo), no codigo— así que sin filtrar, la cuenta
+// 1.01.01.0001 de Puente Cordón dejaba de ser imputable porque San Gerónimo
+// tenía una 1.01.01.0001.5 en SU plan. El asiento se rechazaba por culpa del
+// plan de cuentas de otra empresa.
 function cuentaEsImputable(db, cuentaId) {
-  const c = db.prepare('SELECT codigo FROM pa_cuentas WHERE id = ?').get(cuentaId);
+  const c = db.prepare('SELECT codigo, sociedad_id FROM pa_cuentas WHERE id = ?').get(cuentaId);
   if (!c) return false;
   const cod = String(c.codigo);
-  const hijo = db.prepare("SELECT 1 FROM pa_cuentas WHERE codigo LIKE ? AND codigo != ? LIMIT 1").get(cod + '.%', cod);
+  const hijo = db.prepare(
+    "SELECT 1 FROM pa_cuentas WHERE codigo LIKE ? AND codigo != ? AND sociedad_id = ? LIMIT 1"
+  ).get(cod + '.%', cod, c.sociedad_id);
   return !hijo;
 }
 
@@ -652,12 +659,15 @@ router.get('/asientos', (req, res) => {
 // GET /api/pa/cuentas/asientos/:id — detalle con líneas
 router.get('/asientos/:id(\\d+)', (req, res) => {
   const id = parseInt(req.params.id, 10);
+  // El LISTADO filtra por sociedad pero el DETALLE no lo hacía: pegándole
+  // directo a /asientos/123 se veía el asiento completo —importes, cuentas y
+  // descripción— de otra empresa. Un id es fácil de adivinar: son correlativos.
   const asiento = db.prepare(`
     SELECT a.*, u.nombre AS usuario_nombre
       FROM pa_asientos a
       LEFT JOIN usuarios u ON u.id = a.usuario_id
-     WHERE a.id = ?
-  `).get(id);
+     WHERE a.id = ? AND a.sociedad_id = ?
+  `).get(id, getSociedadId(req));
   if (!asiento) return res.status(404).json({ error: 'asiento no encontrado' });
   const lineas = db.prepare(`
     SELECT l.*, c.codigo AS cuenta_codigo, c.nombre AS cuenta_nombre
@@ -686,9 +696,9 @@ router.get('/modelos', (req, res) => {
            MAX(CASE WHEN l.tipo_linea = 'proveedores' THEN 1 ELSE 0 END) AS tiene_linea_proveedores
     FROM adm_asientos_modelo m
     LEFT JOIN adm_asientos_modelo_lineas l ON l.modelo_id = m.id
-    WHERE m.activo = 1
+    WHERE m.activo = 1 AND m.sociedad_id = ?
     GROUP BY m.id ORDER BY m.nombre
-  `).all();
+  `).all(getSociedadId(req));
   res.json({ ok: true, data: modelos });
 });
 
@@ -962,8 +972,9 @@ router.get('/config-impositiva', (req, res) => {
         c.nombre as cuenta_nombre, c.codigo as cuenta_codigo
       FROM adm_config_impositiva ci
       LEFT JOIN pa_cuentas c ON c.id = ci.cuenta_id
+      WHERE ci.sociedad_id = ?
       ORDER BY ci.clave
-    `).all();
+    `).all(getSociedadId(req));
     res.json({ ok: true, data: rows });
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
@@ -982,10 +993,24 @@ router.put('/config-impositiva', requireAuth, (req, res) => {
     // filas y el panel igual mostraba "✓ Configuración guardada". Así quedó
     // iva_credito_fiscal, que ni siquiera estaba en el seed: imposible de
     // configurar, y sin ella ninguna factura con IVA se puede registrar.
+    // La cuenta que se asigna tiene que ser DE ESTA EMPRESA. Sin este control,
+    // configurar el IVA Crédito Fiscal de San Gerónimo apuntando a la cuenta de
+    // Puente Cordón deja todas sus facturas imputando al balance de PC — y el
+    // asiento se ve perfecto, cuadra, y está en los libros del otro.
+    const soc = getSociedadId(req);
+    const cid = cuenta_id ? parseInt(cuenta_id) : null;
+    if (cid) {
+      const cu = db.prepare('SELECT sociedad_id, codigo FROM pa_cuentas WHERE id = ?').get(cid);
+      if (!cu) return res.status(400).json({ ok: false, error: 'La cuenta no existe' });
+      if (cu.sociedad_id !== soc) {
+        return res.status(400).json({ ok: false,
+          error: `La cuenta ${cu.codigo} es del plan de cuentas de otra sociedad` });
+      }
+    }
     const r = db.prepare(`
-      INSERT INTO adm_config_impositiva (clave, cuenta_id) VALUES (?, ?)
-      ON CONFLICT(clave) DO UPDATE SET cuenta_id = excluded.cuenta_id
-    `).run(clave, cuenta_id ? parseInt(cuenta_id) : null);
+      INSERT INTO adm_config_impositiva (sociedad_id, clave, cuenta_id) VALUES (?, ?, ?)
+      ON CONFLICT(sociedad_id, clave) DO UPDATE SET cuenta_id = excluded.cuenta_id
+    `).run(soc, clave, cid);
     if (!r.changes) return res.status(500).json({ ok: false, error: 'No se pudo guardar la configuración' });
     res.json({ ok: true });
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
