@@ -6,6 +6,7 @@
 import express from 'express';
 import { getDb } from '../servicios/db.js';
 import '../servicios/db_org.js';  // inicializa schema al primer import
+import { informeContable } from '../servicios/diagnostico_contable.js';
 
 const router = express.Router();
 const db = () => getDb();
@@ -932,6 +933,29 @@ router.post('/usuarios/:id/vincular-persona', requireAdmin, (req, res) => {
   } catch(e) {
     console.error('[ORG] Error vincular-persona:', e.message);
     res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+// ─── DIAGNÓSTICO CONTABLE POR SOCIEDAD ─────────────────────────────────
+// El informe existe como comando de consola, pero para correrlo hay que entrar
+// al servidor. Acá sale por el navegador, que es donde de verdad se va a mirar.
+//
+// Devuelve texto plano y no JSON a propósito: es un informe para LEER, y el
+// navegador lo muestra tal cual, sin pantalla que programar.
+//
+// SOLO ADMIN. No porque escriba —no escribe nada— sino porque muestra el mapa
+// completo de qué hay en cada empresa, y eso es exactamente lo que el resto del
+// sistema se está ocupando de que cada usuario NO vea de las otras.
+router.get('/diagnostico-contable', requireAdmin, (req, res) => {
+  try {
+    // Se usa el handle que ya tiene el servidor en vez de abrir la base otra vez:
+    // un segundo handle sobre el mismo archivo compite con el checkpoint del WAL
+    // que index.js hace al apagarse.
+    res.type('text/plain; charset=utf-8').send(informeContable(db()));
+  } catch (e) {
+    console.error('[ORG] Error en diagnóstico contable:', e.message);
+    res.status(500).type('text/plain; charset=utf-8')
+       .send('No se pudo armar el informe: ' + e.message);
   }
 });
 
