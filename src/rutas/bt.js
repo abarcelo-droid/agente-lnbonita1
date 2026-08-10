@@ -19,7 +19,7 @@ import '../servicios/db_bt_op.js';       // y este el modelo operativo bt_*
 // vocabulario compartido + contadores que arrancan donde terminó Transoft
 import { sembrarContadores } from '../servicios/bt_continuo.js';
 import { fallasEsquema } from '../servicios/bt_ddl.js';
-import { verificarToken } from '../servicios/bt_token.js';
+import { verificarToken, generarToken, listarTokens, revocarToken } from '../servicios/bt_token.js';
 
 const router = express.Router();
 
@@ -232,6 +232,37 @@ router.post('/sync/cerrar', wrap((req, res) => {
 
 // De cuándo son los datos. Es lo primero que hay que poder contestar: sin esto, un
 // agente caído hace tres días muestra sus números como si fueran de hoy.
+// ══════════════════════════════════════════════════════════════════════════
+// LAS LLAVES DEL AGENTE — desde el panel, no por consola
+// ══════════════════════════════════════════════════════════════════════════
+// La llave se genera donde vive la base, y la base vive en Railway: pedirle al
+// dueño que abra una consola allá para correr un comando es pedirle algo que no
+// tiene por qué saber hacer. Desde acá es un botón.
+//
+// Sólo admin. Y la llave se devuelve UNA vez, en el momento de crearla: después no
+// existe en ningún lado más que en el archivo del servidor de Transoft.
+
+router.get('/llaves', wrap((req, res) => {
+  if (!esAdmin(req)) return res.status(403).json({ ok: false, error: 'Solo un administrador' });
+  res.json({ ok: true, data: listarTokens() });
+}));
+
+router.post('/llaves', wrap((req, res) => {
+  if (!esAdmin(req)) return res.status(403).json({ ok: false, error: 'Solo un administrador' });
+  const nombre = String(req.body?.nombre || '').trim() || 'servidor Transoft';
+  const token = generarToken(nombre.slice(0, 60), req.user?.nombre || null);
+  // La única respuesta que incluye la llave en texto. No se loguea ni se guarda.
+  res.json({ ok: true, token, aviso: 'Copiala ahora: no se vuelve a mostrar.' });
+}));
+
+router.post('/llaves/:id/revocar', wrap((req, res) => {
+  if (!esAdmin(req)) return res.status(403).json({ ok: false, error: 'Solo un administrador' });
+  const id = parseInt(req.params.id, 10);
+  if (!id) throw bad('Falta el número de la llave');
+  if (!revocarToken(id)) throw bad('No hay una llave activa con ese número');
+  res.json({ ok: true });
+}));
+
 router.get('/estado', wrap((req, res) => {
   // Cada tabla en su propio try: desde que el DDL ya no puede voltear el arranque
   // (ver bt_ddl.js), puede faltar una tabla y el resto estar perfecto. Que la

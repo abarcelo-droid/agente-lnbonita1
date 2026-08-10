@@ -11949,6 +11949,8 @@ function sgRepExport(){
   <div style="display:flex;gap:2px;border-bottom:1px solid var(--bor);margin-bottom:14px">
     <div class="bt-tab on" data-pane="viajes" onclick="btTab('viajes')">Viajes</div>
     <div class="bt-tab"    data-pane="cargas" onclick="btTab('cargas')">Cargas</div>
+    <div class="bt-tab"    data-pane="agente" onclick="btTab('agente')"
+         id="bt-tab-agente" style="display:none">Agente</div>
   </div>
 
   <!-- ── VIAJES ────────────────────────────────────────────────────────── -->
@@ -11986,6 +11988,50 @@ function sgRepExport(){
     </div>
     <div class="bt-kpi" id="bt-c-kpis"></div>
     <div id="bt-c-lista"></div>
+  </div>
+
+  <!-- ── AGENTE: la llave y cómo ponerlo a andar (solo admin) ───────────── -->
+  <div class="bt-pane" id="bt-pane-agente">
+    <div style="max-width:820px">
+      <p style="font-size:13px;color:var(--mut);line-height:1.6;margin:0 0 14px">
+        El <b>agente</b> es un programa chico que corre <b>en el servidor donde está Transoft</b>.
+        Lee los archivos y los manda para acá. Nunca escribe en Transoft: solo lee.
+        Para que pueda entrar necesita una <b>llave</b>, que se genera acá.
+      </p>
+
+      <div style="border:1px solid var(--bor);border-radius:10px;padding:14px;background:var(--sur)">
+        <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap">
+          <div class="fl ff" style="min-width:240px">
+            <label>¿Para qué máquina es esta llave?</label>
+            <input id="bt-llave-nombre" placeholder="servidor Transoft" maxlength="60">
+          </div>
+          <button class="btn bb" onclick="btLlaveGenerar()">Generar llave</button>
+        </div>
+        <div class="bt-chica" style="margin-top:8px">
+          Se muestra <b>una sola vez</b>. Después queda guardada de forma que ni el sistema
+          puede volver a leerla — si la perdés, generás otra y listo.
+        </div>
+      </div>
+
+      <div id="bt-llave-nueva" style="display:none;margin-top:14px"></div>
+
+      <h4 style="margin:22px 0 8px;font-size:14px">Llaves generadas</h4>
+      <div id="bt-llaves-lista"></div>
+
+      <h4 style="margin:22px 0 8px;font-size:14px">Los tres pasos en el servidor de Transoft</h4>
+      <ol style="font-size:13px;line-height:1.9;color:var(--tex);padding-left:20px;margin:0">
+        <li>Copiar el archivo <code>bt_sync.py</code> a una carpeta del servidor.</li>
+        <li>Al lado, crear <code>bt_sync_config.json</code> con la llave (el texto exacto
+            aparece cuando la generás arriba).</li>
+        <li>Correrlo una vez a mano para mirar que entre todo:
+            <code>python bt_sync.py</code></li>
+      </ol>
+      <div class="bt-chica" style="margin-top:10px;padding:10px 13px;background:var(--bg2,#f8fafc);
+           border:1px solid var(--bor);border-radius:8px">
+        Cuando esa primera corrida salga bien, se programa en el Programador de tareas de
+        Windows para que corra sola de madrugada. La llave <b>no vence</b>.
+      </div>
+    </div>
   </div>
 
   <div class="bt-chica" style="margin-top:14px;padding:10px 13px;background:var(--bg2,#f8fafc);
@@ -41730,6 +41776,98 @@ function btErr(r) { toast(r && r.error ? r.error : 'Error', 'er'); }
 function btInit() {
   btEstado();
   btViajesCargar();
+  // La solapa del agente es cosa de administrador: es donde se generan las llaves.
+  if (LNB_USER && LNB_USER.rol === 'admin') {
+    var t = document.getElementById('bt-tab-agente');
+    if (t) t.style.display = '';
+  }
+}
+
+// ── EL AGENTE Y SU LLAVE ──────────────────────────────────────────────────
+// La llave se genera donde vive la base, y la base vive en la nube. Pedirle a
+// alguien que abra una consola allá para correr un comando es pedirle algo que no
+// tiene por qué saber hacer: acá es un botón.
+
+function btLlaveGenerar() {
+  var nombre = (document.getElementById('bt-llave-nombre').value || '').trim() || 'servidor Transoft';
+  btApi('/llaves', { method: 'POST', body: JSON.stringify({ nombre: nombre }) }).then(function(r) {
+    if (!r.ok) return btErr(r);
+    var caja = document.getElementById('bt-llave-nueva');
+    var url = window.location.origin;
+    // El JSON entero armado, para que sea copiar y pegar y no armarlo a mano.
+    var cfg = JSON.stringify({ url: url, token: r.token }, null, 2);
+    caja.style.display = '';
+    caja.innerHTML =
+      '<div style="border:2px solid #f59e0b;border-radius:10px;padding:14px;background:#fffbeb">' +
+        '<div style="font-weight:700;color:#92400e;margin-bottom:6px">' +
+          'Copiala ahora — no se vuelve a mostrar</div>' +
+        '<div class="bt-chica" style="margin-bottom:10px">Este es el contenido completo del ' +
+          'archivo <code>bt_sync_config.json</code>. Copialo tal cual y guardalo al lado de ' +
+          '<code>bt_sync.py</code> en el servidor de Transoft.</div>' +
+        '<textarea id="bt-llave-cfg" readonly style="width:100%;height:110px;font-family:' +
+          'ui-monospace,Consolas,monospace;font-size:12px;padding:9px;border:1px solid #fcd34d;' +
+          'border-radius:7px;background:#fff">' + cfg.replace(/</g, '&lt;') + '</textarea>' +
+        '<div style="display:flex;gap:8px;margin-top:9px">' +
+          '<button class="btn bb" onclick="btLlaveCopiar()">Copiar</button>' +
+          '<button class="btn" onclick="btLlaveOcultar()">Ya la guardé</button>' +
+        '</div>' +
+      '</div>';
+    btLlavesCargar();
+  }).catch(function() { toast('No se pudo generar la llave', 'er'); });
+}
+
+function btLlaveOcultar() {
+  document.getElementById('bt-llave-nueva').style.display = 'none';
+}
+
+function btLlaveCopiar() {
+  var t = document.getElementById('bt-llave-cfg');
+  t.select();
+  try {
+    if (navigator.clipboard) navigator.clipboard.writeText(t.value);
+    else document.execCommand('copy');
+    toast('Copiado. Pegalo en bt_sync_config.json', 'ok');
+  } catch (e) { toast('Seleccionalo y copialo a mano', 'er'); }
+}
+
+function btLlavesCargar() {
+  var c = document.getElementById('bt-llaves-lista');
+  btApi('/llaves').then(function(r) {
+    if (!r.ok) { c.innerHTML = ''; return; }
+    if (!r.data.length) {
+      c.innerHTML = '<div class="bt-vacio">Todavía no generaste ninguna llave.</div>';
+      return;
+    }
+    var h = '<table class="pa-tbl"><thead><tr><th>Máquina</th><th>Generada</th>' +
+            '<th>Último uso</th><th class="bt-num">Usos</th><th></th></tr></thead><tbody>';
+    for (var i = 0; i < r.data.length; i++) {
+      var k = r.data[i];
+      // "nunca usada" es el dato importante: si el agente corrió, esto tiene fecha.
+      var uso = k.ultimo_uso_en
+        ? btFecha(k.ultimo_uso_en) + ' ' + String(k.ultimo_uso_en).slice(11, 16)
+        : '<span class="bt-badge bt-warn">nunca usada</span>';
+      h += '<tr>' +
+        '<td>' + (k.nombre || '') + (k.revocado_en
+            ? ' <span class="bt-badge bt-err">revocada</span>'
+            : ' <span class="bt-badge bt-ok">activa</span>') + '</td>' +
+        '<td class="bt-chica">' + btFecha(k.creado_en) + '</td>' +
+        '<td class="bt-chica">' + uso + '</td>' +
+        '<td class="bt-num">' + (k.usos || 0) + '</td>' +
+        '<td>' + (k.revocado_en ? '' :
+          '<button class="btn" onclick="btLlaveRevocar(' + k.id + ')">Revocar</button>') + '</td>' +
+      '</tr>';
+    }
+    c.innerHTML = h + '</tbody></table>';
+  });
+}
+
+function btLlaveRevocar(id) {
+  if (!confirm('Revocar esta llave: el agente que la esté usando va a dejar de entrar. ¿Seguro?')) return;
+  btApi('/llaves/' + id + '/revocar', { method: 'POST' }).then(function(r) {
+    if (!r.ok) return btErr(r);
+    toast('Llave revocada', 'ok');
+    btLlavesCargar();
+  });
 }
 
 function btTab(p) {
@@ -41739,6 +41877,7 @@ function btTab(p) {
   var n = document.querySelectorAll('#sec-bt-viajes .bt-pane');
   for (var j = 0; j < n.length; j++) n[j].classList.toggle('on', n[j].id === 'bt-pane-' + p);
   if (p === 'cargas' && !BT.cargas.length) btCargasCargar();
+  if (p === 'agente') btLlavesCargar();
 }
 
 // ── De cuándo son los datos ───────────────────────────────────────────────
