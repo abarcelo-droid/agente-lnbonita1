@@ -10,6 +10,7 @@
 import express from 'express';
 import { getDb } from '../servicios/db.js';
 import '../servicios/db_favoritos.js';  // inicializa schema al primer import
+import { sociedadesDe, seccionesDe } from '../servicios/permisos.js';
 
 const router = express.Router();
 const db = () => getDb();
@@ -46,15 +47,31 @@ router.get('/org/sidebar', requireAuth, (req, res) => {
       ORDER BY m.orden ASC, m.label ASC
     `).all();
 
+    // ── CADA EMPRESA ES AUTÓNOMA: EL MENÚ NO MUESTRA LO AJENO ─────────────
+    // Hasta acá este endpoint devolvía TODOS los módulos a cualquiera que
+    // estuviera autenticado: alguien de San Gerónimo veía en su menú los módulos
+    // de Puente Cordón y de Barceló. Que al entrar el router le contestara 403 no
+    // arregla lo importante — el menú ya le dijo qué áreas tiene la otra empresa.
+    //
+    // Los módulos con sociedad_id en NULL son transversales (no son de ninguna
+    // empresa en particular) y los sigue viendo cualquiera.
+    const misSocs = sociedadesDe(req.user);
+    const secciones = seccionesDe(req.user);
+    const todas = secciones.includes('*');
+    const visibles = modulos.filter(m => {
+      if (m.sociedad_id !== null && !misSocs.includes(m.sociedad_id)) return false;
+      return todas || secciones.includes(m.modulo);
+    });
+
     // Agrupar por `grupo`
     const grupos = {};
-    for (const m of modulos) {
+    for (const m of visibles) {
       const g = m.grupo || 'General';
       if (!grupos[g]) grupos[g] = { grupo: g, sociedad_nombre: m.sociedad_nombre, items: [] };
       grupos[g].items.push(m);
     }
 
-    res.json({ ok: true, grupos: Object.values(grupos), total: modulos.length });
+    res.json({ ok: true, grupos: Object.values(grupos), total: visibles.length });
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message });
   }
