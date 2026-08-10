@@ -193,6 +193,59 @@ export function informeContable(db) {
     w('  pa_asientos no tiene ref_codigo o no tiene marca de empresa.');
   }
 
+  // ── 3.bis. EL PLAN DE CUENTAS, HACIA ADENTRO ────────────────────────────
+  // El chequeo 2 mira los asientos contra las cuentas. Este mira el plan de
+  // cuentas contra sí mismo: sección → título → cuenta. Cada eslabón tiene su
+  // propia marca de empresa, así que pueden discrepar entre ellos.
+  //
+  // Importa antes de limpiar secciones que parecen sobrar: una sección de otra
+  // empresa que igual tiene cuentas colgando NO se puede borrar, y una cuenta
+  // colgada del padre equivocado aparece en el balance de la empresa de al lado.
+  titulo('3.bis. EL PLAN DE CUENTAS, CONSIGO MISMO');
+  w('  Sección, título y cuenta llevan cada uno su empresa. Si un eslabón no');
+  w('  coincide con su padre, la cuenta termina contada en el balance de otra.');
+  w();
+
+  let mixHijos = 0;
+  const cadena = [
+    ['pa_cuentas_titulos',  'seccion_id', 'pa_cuentas_secciones', 'títulos colgados de una sección'],
+    ['pa_cuentas',          'seccion_id', 'pa_cuentas_secciones', 'cuentas colgadas de una sección'],
+  ];
+  for (const [hijo, fk, padre, etiqueta] of cadena) {
+    if (!existe(hijo) || !existe(padre)) continue;
+    if (!columnas(hijo).includes('sociedad_id') || !columnas(hijo).includes(fk)) continue;
+    if (!columnas(padre).includes('sociedad_id')) continue;
+    const malos = db.prepare(`
+      SELECT h.sociedad_id sh, p.sociedad_id sp, COUNT(*) c
+        FROM ${hijo} h JOIN ${padre} p ON p.id = h.${fk}
+       WHERE h.sociedad_id <> p.sociedad_id
+       GROUP BY sh, sp`).all();
+    for (const m of malos) {
+      mixHijos += m.c;
+      w(`  ${String(m.c).padStart(6)} ${etiqueta} de otra empresa:`);
+      w(`          ${nombreSoc(m.sh)} colgado de ${nombreSoc(m.sp)}`);
+    }
+  }
+  if (!mixHijos) w('  Cada título y cada cuenta cuelgan de un padre de su misma empresa.');
+
+  // Secciones y títulos sin nada abajo: los candidatos a limpiar. Se listan por
+  // empresa porque el caso que interesa es el de una empresa que tiene secciones
+  // sembradas acá pero lleva su contabilidad en otra tabla.
+  if (existe('pa_cuentas_secciones') && columnas('pa_cuentas_secciones').includes('sociedad_id')
+      && existe('pa_cuentas') && columnas('pa_cuentas').includes('seccion_id')) {
+    const vacias = db.prepare(`
+      SELECT s.sociedad_id sid, COUNT(*) c FROM pa_cuentas_secciones s
+       WHERE NOT EXISTS (SELECT 1 FROM pa_cuentas c WHERE c.seccion_id = s.id)
+         AND NOT EXISTS (SELECT 1 FROM pa_cuentas_titulos t WHERE t.seccion_id = s.id)
+       GROUP BY s.sociedad_id ORDER BY c DESC`).all();
+    if (vacias.length) {
+      w();
+      w('  Secciones sin un solo título ni cuenta abajo:');
+      for (const v of vacias) w(`   · ${String(v.c).padStart(4)}  ${nombreSoc(v.sid)}`);
+      w('  Vacías se pueden sacar sin tocar ningún asiento. Con algo abajo, no.');
+    }
+  }
+
   // ── 4. TABLAS CONTABLES SIN MARCA DE EMPRESA ────────────────────────────
   titulo('4. TABLAS CONTABLES SIN MARCA DE EMPRESA');
   w('  Las que tienen datos y no distinguen empresa son las que hoy están de verdad');

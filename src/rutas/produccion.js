@@ -62,6 +62,40 @@ function campañasActivas(db) {
 // ── Redondeo contable a 2 decimales ─────────────────────────────────────────
 function round2(n) { return Math.round((Number(n) || 0) * 100) / 100; }
 
+// ── DE QUÉ EMPRESA ES ESTA CONTABILIDAD ───────────────────────────────────
+// Las tablas pa_*/adm_* son la contabilidad de Puente Cordón: los 70 asientos,
+// las 268 cuentas del plan y los 32 proveedores que hay cargados son suyos, sin
+// una sola fila de otra empresa. Lo que NO existe es la garantía de que siga
+// así, y estas dos funciones son el pedazo que falta.
+//
+// Se resuelve por nombre igual que en cuentas.js, y se cachea porque la
+// respuesta no cambia mientras el proceso viva.
+let _paPC = null;
+function paSociedadPC() {
+  if (_paPC) return _paPC;
+  const db = getDb();
+  _paPC = db.prepare("SELECT id, nombre FROM sociedades WHERE nombre = 'Puente Cordón SA'").get()
+       || db.prepare("SELECT id, nombre FROM sociedades WHERE funcion = 'productiva' ORDER BY id LIMIT 1").get()
+       || { id: 1, nombre: 'Puente Cordón' };
+  return _paPC;
+}
+const paSociedadPCId = () => paSociedadPC().id;
+const paNombrePC     = () => paSociedadPC().nombre;
+
+// La empresa que pide el navegador, o null si no mandó ninguna.
+//
+// Devolver null y NO caer a Puente Cordón es la diferencia que importa: quien
+// llama sin decir la empresa es el panel de siempre, y tiene que seguir
+// andando igual. Quien la dice y dice otra, se frena. Caer a PC en silencio
+// —como hace getSociedadId en los otros routers— es justamente lo que hace que
+// un asiento termine en los libros equivocados sin que nadie se entere.
+function paSociedadPedida(req) {
+  const raw = req.body?.sociedad_id ?? req.query?.sociedad_id;
+  if (raw === undefined || raw === null || raw === '') return null;
+  const id = parseInt(raw, 10);
+  return Number.isInteger(id) ? id : null;
+}
+
 // ── Construcción autoritativa del asiento de una factura de compra ──────────
 // BIENES (el asiento sale del asiento modelo de cada INSUMO):
 //   DEBE  → cuenta de gasto del modelo de cada insumo, agrupando netos por cuenta
@@ -1024,6 +1058,27 @@ router.post('/compras', requireAuth, (req, res) => {
           campaña_anual_id, campaña_estacional_id, items, notas, remito_foto_b64,
           tipo_factura, es_fiscal } = req.body;
   if (!items?.length) return res.status(400).json({ ok: false, error: 'Debe incluir al menos un item' });
+
+  // ── EL CERROJO ────────────────────────────────────────────────────────
+  // El asiento de esta factura se escribe SIN sociedad_id y toma el DEFAULT de
+  // la columna, que es Puente Cordón. Eso hoy no rompe nada porque las 138
+  // facturas cargadas son de Puente Cordón — pero es por costumbre, no por
+  // diseño: el día que alguien cargue una factura parado en San Gerónimo, el
+  // asiento va a caer igual en los libros de Puente Cordón y sin avisar.
+  //
+  // Son sociedades fiscales distintas. Antes que escribir en la empresa
+  // equivocada, esto corta y lo dice.
+  const socPedida = paSociedadPedida(req);
+  if (socPedida !== null && socPedida !== paSociedadPCId()) {
+    const nom = db.prepare('SELECT nombre FROM sociedades WHERE id = ?').get(socPedida);
+    return res.status(403).json({
+      ok: false,
+      error: `Esta pantalla carga facturas de ${paNombrePC()}, y estás parado en `
+           + `${nom?.nombre || 'otra empresa'}. Cambiá de empresa arriba, o cargá `
+           + `la factura desde el módulo que corresponda: el asiento tiene que ir `
+           + `a los libros de la sociedad que emitió la compra.`,
+    });
+  }
   // COMPROBANTE NO FISCAL: no lleva IVA ni percepciones y no va a los subdiarios,
   // pero sigue siendo un gasto y sigue yendo a la cuenta corriente del proveedor.
   // Ausente ⇒ FISCAL: cualquier cliente que no mande el campo (el lector de
@@ -1362,11 +1417,12 @@ router.post('/compras', requireAuth, (req, res) => {
         // con huecos y sin ser correlativo, que es lo único que un libro contable
         // no puede ser. Son sociedades fiscales distintas: cada una lleva su serie.
         //
-        // Este INSERT no pasa sociedad_id, así que la fila toma el DEFAULT de la
-        // columna (Puente Cordón); el correlativo mira exactamente esa misma.
-        const socAsiento = dbPa.prepare(
-          "SELECT dflt_value v FROM pragma_table_info('pa_asientos') WHERE name='sociedad_id'"
-        ).get()?.v || 1;
+        // La empresa del asiento se dice EXPLÍCITAMENTE. Antes esto se apoyaba en
+        // el DEFAULT de la columna y lo leía con un PRAGMA, que además devuelve
+        // TEXTO ("1"), no número: cualquier comparación contra un id de la base
+        // fallaba en silencio. Con el cerrojo de arriba ya está garantizado que
+        // esta factura es de Puente Cordón, así que se escribe y punto.
+        const socAsiento = paSociedadPCId();
         const ultimo = dbPa.prepare(
           `SELECT ref_codigo FROM pa_asientos
             WHERE ref_codigo LIKE 'FAC-${año}-%' AND sociedad_id = ?
@@ -1382,13 +1438,25 @@ router.post('/compras', requireAuth, (req, res) => {
         const fechaCompra = req.body.fecha || new Date().toISOString().slice(0,10);
 
         const txAsiento = dbPa.transaction(() => {
-          const ra = dbPa.prepare('INSERT INTO pa_asientos (fecha, descripcion, usuario_id, ref_compra_id, ref_codigo) VALUES (?,?,?,?,?)')
-            .run(fechaCompra, desc, req.user?.id||null, id, refCodigo);
+          const ra = dbPa.prepare('INSERT INTO pa_asientos (fecha, descripcion, usuario_id, ref_compra_id, ref_codigo, sociedad_id) VALUES (?,?,?,?,?,?)')
+            .run(fechaCompra, desc, req.user?.id||null, id, refCodigo, socAsiento);
           const ins = dbPa.prepare('INSERT INTO pa_asientos_lineas (asiento_id, cuenta_id, debe, haber, descripcion) VALUES (?,?,?,?,?)');
           for (const l of lineas) {
-            const cuentaExiste = dbPa.prepare('SELECT id FROM pa_cuentas WHERE id=?').get(parseInt(l.cuenta_id));
-            if (!cuentaExiste) {
+            // Se pide también la empresa de la cuenta, no sólo que exista. Las
+            // líneas del asiento no llevan empresa —la heredan de la cabecera—
+            // pero apuntan a un plan de cuentas que sí la tiene. Un asiento de
+            // una empresa imputado a la cuenta de otra ensucia los dos balances
+            // a la vez y no se ve en ninguna pantalla: no aparece en el listado
+            // de asientos de ninguna de las dos.
+            const cuenta = dbPa.prepare('SELECT id, codigo, sociedad_id FROM pa_cuentas WHERE id=?')
+              .get(parseInt(l.cuenta_id));
+            if (!cuenta) {
               throw new Error(`Cuenta ID ${l.cuenta_id} no existe en el plan de cuentas`);
+            }
+            if (cuenta.sociedad_id !== socAsiento) {
+              throw new Error(
+                `La cuenta ${cuenta.codigo} no es del plan de cuentas de ${paNombrePC()}. ` +
+                `Un asiento no puede imputarse a cuentas de otra sociedad.`);
             }
             ins.run(ra.lastInsertRowid, l.cuenta_id, round2(l.debe)||0, round2(l.haber)||0, l.descripcion||null);
           }

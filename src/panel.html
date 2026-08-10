@@ -14777,7 +14777,11 @@ var SOC_NOMBRES = {};  // id → nombre (para la barra de contexto)
   } catch(_){}
 })();
 (function instalarInterceptorSociedad(){
-  var AWARE = /^\/api\/(fin|ven|pa\/cuentas|pa\/proveedores|pa\/pagos)(\/|\?|$)/;
+  // pa/compras entró acá porque es por donde pasa TODA factura de compra —el
+  // escritor de asientos de mayor volumen— y estaba afuera: la empresa elegida
+  // arriba nunca llegaba al backend, así que el asiento se escribía siempre en
+  // Puente Cordón sin importar dónde estuviera parado el que cargaba.
+  var AWARE = /^\/api\/(fin|ven|pa\/cuentas|pa\/proveedores|pa\/pagos|pa\/compras)(\/|\?|$)/;
   var _fetch = window.fetch.bind(window);
   window.fetch = function(url, opts){
     if (typeof url === 'string' && AWARE.test(url)){
