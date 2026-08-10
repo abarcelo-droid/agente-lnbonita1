@@ -7261,9 +7261,22 @@ function sgRepExport(){
         <!-- Acciones de password -->
         <div id="eq-per-pwd-acciones" style="display:flex; gap:8px; margin-top:12px; flex-wrap:wrap"></div>
 
-        <!-- Información de permisos efectivos (Fase 3.B) -->
-        <div style="margin-top:12px; padding:8px 10px; background:#fef3c7; border-left:3px solid #f59e0b; border-radius:4px; font-size:11px; color:#92400e">
-          ℹ️ Los módulos visibles se calculan automáticamente según el <strong>nivel de acceso</strong> + sociedades/áreas asignadas. Configurar visibilidad por módulo desde <strong>⚙️ Config Módulos</strong>.
+        <!-- Empresas y accesos: acá se decide a qué empresas entra y a qué menús
+             de cada una, con su nivel. Va DENTRO del bloque de acceso porque sin
+             usuario no hay nada que permisar. -->
+        <div id="eq-per-permisos-wrap" style="margin-top:14px; padding:12px 13px;
+             background:#f0f9ff; border:1px solid #bae6fd; border-radius:8px; display:none">
+          <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap">
+            <div style="flex:1; min-width:220px">
+              <div style="font-size:13px; font-weight:600; color:#0c4a6e">🏢 Empresas y accesos</div>
+              <div style="font-size:11px; color:#0369a1; margin-top:2px">
+                Sobre qué empresas puede actuar, a qué menús de cada una entra,
+                y si puede operar o también borrar.
+              </div>
+            </div>
+            <button class="btn bb" type="button" onclick="permAbrirDesdeEquipo()">Configurar</button>
+          </div>
+          <div id="eq-per-permisos-resumen" style="font-size:11px; color:#0369a1; margin-top:8px"></div>
         </div>
       </div>
     </div>
@@ -14220,6 +14233,51 @@ function closeMB(id){ var el=eid(id); if(el) el.classList.remove('on'); }
 // después los menús DE esas empresas. Por eso las empresas se guardan solas al
 // tildarlas — sin ellas guardadas, el servidor no sabe qué menús ofrecer.
 var PERM = { id: null, nombre: '' };
+
+// Desde el modal de Equipo, que es por donde se administra la gente de verdad.
+// El permiso cuelga del USUARIO, no de la persona del organigrama: una persona sin
+// login no tiene a qué entrar.
+function permAbrirDesdeEquipo() {
+  var u = (typeof EQ_ACCESO !== 'undefined' && EQ_ACCESO) ? EQ_ACCESO.usuario : null;
+  if (!u || !u.id) {
+    return toast('Primero dale acceso al panel y guardá; después configurás sus empresas', 'er');
+  }
+  var nom = document.getElementById('eq-per-nombre');
+  var ape = document.getElementById('eq-per-apellido');
+  permAbrirPara(u.id, ((nom ? nom.value : '') + ' ' + (ape ? ape.value : '')).trim() || u.username || '');
+}
+
+function permAbrirPara(usuarioId, nombre) {
+  PERM.id = usuarioId;
+  PERM.nombre = nombre || '';
+  eid('perm-tit').textContent = 'Empresas y accesos · ' + PERM.nombre;
+  eid('mb-permisos').classList.add('on');
+  permCargarEmpresas();
+}
+
+// Un renglón con lo que ya tiene, para no tener que abrir la pantalla sólo para
+// mirar: sin esto, la única forma de saber si alguien está configurado es entrar.
+function permResumen(usuarioId) {
+  var c = document.getElementById('eq-per-permisos-resumen');
+  if (!c) return;
+  c.textContent = '';
+  fetch('/api/auth/usuarios/' + usuarioId + '/permisos', { credentials: 'include' })
+    .then(function(r) { return r.json(); })
+    .then(function(res) {
+      if (!res.ok) return;
+      var emps = (res.empresas || []).filter(function(e) { return e.sociedad_id !== null; });
+      var marcados = (res.empresas || []).reduce(function(n, e) {
+        return n + e.modulos.filter(function(m) { return m.habilitado; }).length;
+      }, 0);
+      if (res.es_admin) { c.textContent = 'Es administrador: entra a todo.'; return; }
+      if (!emps.length) { c.textContent = 'Sin empresas asignadas todavía.'; return; }
+      var nombres = emps.map(function(e) { return e.sociedad_nombre; }).join(' · ');
+      c.textContent = res.sin_configurar
+        ? nombres + ' — entra a todos los menús de esas empresas.'
+        : nombres + ' — ' + marcados + ' menú(s) habilitado(s).';
+    })
+    .catch(function() {});
+}
 
 function permAbrir() {
   var id = eid('usr-id').value;
@@ -35766,6 +35824,9 @@ function eqPoblarAcceso(persona, usuario) {
   var cb = document.getElementById('eq-per-tiene-login');
   var detalle = document.getElementById('eq-per-acceso-detalle');
 
+  var pwOff = document.getElementById('eq-per-permisos-wrap');
+  if (pwOff) pwOff.style.display = 'none';
+
   if (!persona) {
     // Persona nueva: ocultar bloque hasta que se guarde
     cb.checked = false;
@@ -35798,6 +35859,10 @@ function eqPoblarAcceso(persona, usuario) {
 
     // Estado de password
     eqRenderPwdEstado(usuario);
+    // Los permisos cuelgan del USUARIO, no de la persona: sin login no hay nada
+    // que configurar.
+    var pw = document.getElementById('eq-per-permisos-wrap');
+    if (pw) { pw.style.display = ''; permResumen(usuario.id); }
   } else {
     cb.checked = false;
     detalle.style.display = 'none';
