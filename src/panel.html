@@ -70,6 +70,20 @@ label{font-size:12px;color:var(--mut);letter-spacing:.05em;text-transform:upperc
 input,select,textarea{background:var(--sur);border:1px solid var(--bor2);border-radius:7px;color:var(--txt);font-family:var(--sans);font-size:13.5px;padding:9px 12px;outline:none;transition:border-color .15s;width:100%}
 input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 0 3px rgba(26,58,92,.12)}
 .mb{display:none;position:fixed;inset:0;background:rgba(10,20,40,.55);z-index:100;align-items:center;justify-content:center}
+/* La pantalla de accesos se abre DESDE otro modal (Editar persona). Con el
+   mismo z-index gana el que está más abajo en el archivo, y quedaba atrás. */
+#mb-permisos{z-index:200}
+/* Filas compactas: son 88 menús y con el alto normal no entra ni un grupo. */
+.pm-fila{display:flex;align-items:center;gap:9px;padding:3px 12px;border-bottom:1px solid var(--bg2,#f1f5f9)}
+.pm-fila:hover{background:var(--bg2,#f8fafc)}
+.pm-fila label{flex:1;min-width:0;font-size:12.5px;cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pm-niv{display:flex;gap:0;border:1px solid var(--bor);border-radius:6px;overflow:hidden}
+.pm-niv button{border:0;background:var(--sur);font-size:10.5px;padding:3px 8px;cursor:pointer;color:var(--mut);font-weight:600}
+.pm-niv button+button{border-left:1px solid var(--bor)}
+.pm-niv button.on{background:var(--burg);color:#fff}
+.pm-niv button:disabled{opacity:.35;cursor:default}
+.pm-grp{background:var(--bg2,#f8fafc);padding:4px 12px;font-size:10.5px;font-weight:700;
+  color:var(--mut);text-transform:uppercase;letter-spacing:.04em;border-bottom:1px solid var(--bor)}
 .mb.on{display:flex}
 .mbox{background:var(--sur);border:1px solid var(--bor);border-radius:14px;padding:28px;width:620px;max-width:95vw;max-height:90vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.15)}
 /* Modal mapa: sin padding para que el mapa ocupe todo */
@@ -1098,7 +1112,11 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
 
   <!-- ── PASO 2 ────────────────────────────────────────────────────────── -->
   <div style="font-size:12px;font-weight:700;color:var(--mut);text-transform:uppercase;
-       letter-spacing:.05em;margin:4px 0 8px">2 · ¿A qué menús entra, y hasta dónde?</div>
+       letter-spacing:.05em;margin:4px 0 8px">2 · ¿A qué depósitos entra?</div>
+  <div id="perm-depositos" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:18px"></div>
+
+  <div style="font-size:12px;font-weight:700;color:var(--mut);text-transform:uppercase;
+       letter-spacing:.05em;margin:4px 0 8px">3 · ¿A qué menús entra, y hasta dónde?</div>
   <div id="perm-menus"></div>
 
   <div class="mft" style="margin-top:16px">
@@ -7255,14 +7273,14 @@ function sgRepExport(){
               </div>
             </label>
           </div>
-          <div class="fl ff" style="margin-top:4px">
-            <label>Depósitos habilitados</label>
-            <div style="display:flex; gap:14px; margin-top:6px; flex-wrap:wrap">
-              <label style="display:flex; align-items:center; gap:6px; font-size:13px; text-transform:none; color:var(--txt); cursor:pointer"><input type="checkbox" id="eq-per-dep-mcba" value="MCBA" checked> MCBA</label>
-              <label style="display:flex; align-items:center; gap:6px; font-size:13px; text-transform:none; color:var(--txt); cursor:pointer"><input type="checkbox" id="eq-per-dep-finca" value="FINCA" checked> FINCA</label>
-              <label style="display:flex; align-items:center; gap:6px; font-size:13px; text-transform:none; color:var(--txt); cursor:pointer"><input type="checkbox" id="eq-per-dep-sanpedro" value="SAN PEDRO" checked> SAN PEDRO</label>
-            </div>
-          </div>
+          <!-- Los depósitos se configuran junto con el resto de los accesos, en
+           "Empresas y accesos". Los inputs quedan ocultos porque eqPoblarAcceso
+           y eqGuardarPersona los siguen leyendo. -->
+      <div style="display:none">
+        <input type="checkbox" id="eq-per-dep-mcba" value="MCBA">
+        <input type="checkbox" id="eq-per-dep-finca" value="FINCA">
+        <input type="checkbox" id="eq-per-dep-sanpedro" value="SAN PEDRO">
+      </div>
           <div class="fl ff" style="margin-top:8px">
             <label>Depósito IFCO <span style="color:var(--sub); font-weight:400">(fija origen al cargar remitos desde mobile)</span></label>
             <select id="eq-per-dep-ifco-tipo" onchange="eqToggleDepIfcoProv()" style="margin-top:4px">
@@ -14460,54 +14478,123 @@ function permCargarMenus() {
     .then(function(res) {
       if (!res.ok) return toast(res.error || 'No se pudieron leer los accesos', 'er');
       eid('perm-aviso-nuevo').style.display = res.sin_configurar ? '' : 'none';
+      PERM.niveles = {};
+
+      // Los depósitos son un permiso más y estaban sueltos en la ficha de la
+      // persona: van acá, con el resto.
+      var dep = eid('perm-depositos');
+      if (dep) {
+        var hay = res.depositos || [];
+        dep.innerHTML = (res.depositos_todos || []).map(function(d) {
+          var on = hay.indexOf(d) >= 0;
+          return '<label style="display:flex;align-items:center;gap:6px;padding:5px 11px;border:1px solid '
+            + (on ? 'var(--burg)' : 'var(--bor)') + ';border-radius:7px;cursor:pointer;font-size:12px;'
+            + 'background:' + (on ? '#fdf2f8' : 'var(--sur)') + '">'
+            + '<input type="checkbox" class="perm-dep" value="' + permEsc(d) + '"' + (on ? ' checked' : '')
+            + ' style="width:15px;height:15px">' + permEsc(d) + '</label>';
+        }).join('');
+      }
+
       var cont = eid('perm-menus');
       if (!res.empresas || !res.empresas.length) {
-        cont.innerHTML = '<div style="padding:22px;text-align:center;color:var(--mut);font-size:13px">'
+        cont.innerHTML = '<div style="padding:20px;text-align:center;color:var(--mut);font-size:12.5px">'
           + 'Marcá al menos una empresa arriba para ver sus menús.</div>';
         return;
       }
+
       var h = '';
       res.empresas.forEach(function(emp, gi) {
-        h += '<div style="border:1px solid var(--bor);border-radius:10px;margin-bottom:12px;overflow:hidden">'
-          + '<div style="background:var(--bg2,#f8fafc);padding:9px 13px;display:flex;align-items:center;'
-          + 'justify-content:space-between;gap:10px;border-bottom:1px solid var(--bor)">'
-          + '<b style="font-size:13px">' + permEsc(emp.sociedad_nombre) + '</b>'
-          + '<span style="display:flex;gap:6px">'
-          + '<button class="btn" style="font-size:11px;padding:3px 9px" onclick="permTodos(' + gi + ',1)">Todos</button>'
-          + '<button class="btn" style="font-size:11px;padding:3px 9px" onclick="permTodos(' + gi + ',0)">Ninguno</button>'
-          + '</span></div><div style="padding:2px 0">';
+        // Dentro de cada empresa se subagrupa por el grupo del menú (Comercial,
+        // Abasto SG…): con 88 filas seguidas no se encuentra nada.
+        var porGrupo = {}, orden = [];
         emp.modulos.forEach(function(m) {
-          h += '<div style="display:flex;align-items:center;gap:10px;padding:6px 13px;'
-            + 'border-bottom:1px solid var(--bg2,#f1f5f9)">'
-            + '<input type="checkbox" class="perm-mod g' + gi + '" data-mod="' + permEsc(m.modulo) + '"'
-            + (m.habilitado ? ' checked' : '')
-            + ' onchange="permNivelToggle(this)" style="width:17px;height:17px">'
-            + '<div style="flex:1;min-width:0">'
-            + '<div style="font-size:13px">' + permEsc(m.label) + '</div>'
-            + '<div style="font-size:10px;color:var(--mut)">' + permEsc(m.grupo || '') + '</div></div>'
-            + '<select class="perm-niv" data-mod="' + permEsc(m.modulo) + '" style="width:172px;font-size:12px"'
-            + (m.habilitado ? '' : ' disabled') + '>'
-            + '<option value="ver"' + (m.nivel === 'ver' ? ' selected' : '') + '>Solo ver</option>'
-            + '<option value="operar"' + (m.nivel === 'operar' ? ' selected' : '') + '>Operar</option>'
-            + '<option value="borrar"' + (m.nivel === 'borrar' ? ' selected' : '') + '>Operar y borrar</option>'
-            + '</select></div>';
+          var g = m.grupo || 'General';
+          if (!porGrupo[g]) { porGrupo[g] = []; orden.push(g); }
+          porGrupo[g].push(m);
+          PERM.niveles[m.modulo] = m.habilitado ? m.nivel : null;
         });
-        h += '</div></div>';
+
+        var marcados = emp.modulos.filter(function(m) { return m.habilitado; }).length;
+        h += '<div style="border:1px solid var(--bor);border-radius:9px;margin-bottom:9px;overflow:hidden">'
+          + '<div style="background:#eef2ff;padding:7px 12px;display:flex;align-items:center;'
+          + 'justify-content:space-between;gap:8px;border-bottom:1px solid var(--bor)">'
+          + '<b style="font-size:12.5px">' + permEsc(emp.sociedad_nombre)
+          + ' <span id="perm-cnt-' + gi + '" style="font-weight:400;color:var(--mut);font-size:11px">('
+          + marcados + '/' + emp.modulos.length + ')</span></b>'
+          + '<span style="display:flex;gap:5px">'
+          + '<button class="btn" type="button" style="font-size:10.5px;padding:2px 8px" onclick="permTodos(' + gi + ',1)">Todos</button>'
+          + '<button class="btn" type="button" style="font-size:10.5px;padding:2px 8px" onclick="permTodos(' + gi + ',0)">Ninguno</button>'
+          + '</span></div>';
+
+        orden.forEach(function(g) {
+          h += '<div class="pm-grp">' + permEsc(g) + '</div>';
+          porGrupo[g].forEach(function(m) {
+            var id = 'pm_' + m.modulo.replace(/[^a-zA-Z0-9]/g, '_');
+            h += '<div class="pm-fila">'
+              + '<input type="checkbox" class="perm-mod g' + gi + '" id="' + id + '"'
+              + ' data-mod="' + permEsc(m.modulo) + '" data-g="' + gi + '"'
+              + (m.habilitado ? ' checked' : '') + ' onchange="permTildeCambio(this)"'
+              + ' style="width:15px;height:15px">'
+              + '<label for="' + id + '">' + permEsc(m.label) + '</label>'
+              + permNivelHTML(m.modulo, m.habilitado ? m.nivel : 'operar', m.habilitado)
+              + '</div>';
+          });
+        });
+        h += '</div>';
       });
       cont.innerHTML = h;
     });
 }
 
+// Tres botones en vez de un desplegable: se ve de un vistazo quién puede borrar,
+// que es el dato que hay que poder auditar sin abrir nada.
+function permNivelHTML(modulo, nivel, activo) {
+  var op = [['ver', 'Ver'], ['operar', 'Operar'], ['borrar', 'Borrar']];
+  return '<span class="pm-niv" data-mod="' + permEsc(modulo) + '">'
+    + op.map(function(o) {
+        // El nivel viaja en un atributo y NO como argumento del onclick: meter una
+        // cadena entre comillas dentro de un atributo HTML que a su vez está dentro
+        // de un string de JavaScript es la forma más rápida de romper el archivo.
+        return '<button type="button" data-niv="' + o[0] + '"'
+          + (o[0] === nivel ? ' class="on"' : '') + (activo ? '' : ' disabled')
+          + ' onclick="permSetNivel(this)">' + o[1] + '</button>';
+      }).join('')
+    + '</span>';
+}
+
+function permSetNivel(btn) {
+  var nivel = btn.getAttribute('data-niv');
+  var cont = btn.parentElement;
+  var bs = cont.querySelectorAll('button');
+  for (var i = 0; i < bs.length; i++) bs[i].classList.remove('on');
+  btn.classList.add('on');
+  PERM.niveles[cont.getAttribute('data-mod')] = nivel;
+}
+
 // El nivel sin el tilde no significa nada: se apaga, para que no parezca que un
-// menú destildado igual tiene un permiso guardado.
-function permNivelToggle(cb) {
-  var sel = document.querySelector('.perm-niv[data-mod="' + cb.getAttribute('data-mod') + '"]');
-  if (sel) sel.disabled = !cb.checked;
+// menú destildado igual tiene permiso.
+function permTildeCambio(cb) {
+  var mod = cb.getAttribute('data-mod');
+  var cont = document.querySelector('.pm-niv[data-mod="' + mod + '"]');
+  if (cont) {
+    var bs = cont.querySelectorAll('button');
+    for (var i = 0; i < bs.length; i++) bs[i].disabled = !cb.checked;
+  }
+  PERM.niveles[mod] = cb.checked ? (PERM.niveles[mod] || 'operar') : null;
+  permContar(cb.getAttribute('data-g'));
+}
+
+function permContar(gi) {
+  var el = document.getElementById('perm-cnt-' + gi);
+  if (!el) return;
+  var cbs = document.querySelectorAll('.perm-mod.g' + gi), n = 0;
+  for (var i = 0; i < cbs.length; i++) if (cbs[i].checked) n++;
+  el.textContent = '(' + n + '/' + cbs.length + ')';
 }
 
 function permTodos(gi, prender) {
   var cbs = document.querySelectorAll('.perm-mod.g' + gi);
-  for (var i = 0; i < cbs.length; i++) { cbs[i].checked = !!prender; permNivelToggle(cbs[i]); }
+  for (var i = 0; i < cbs.length; i++) { cbs[i].checked = !!prender; permTildeCambio(cbs[i]); }
 }
 
 function permGuardar() {
@@ -14515,22 +14602,33 @@ function permGuardar() {
   for (var i = 0; i < cbs.length; i++) {
     if (!cbs[i].checked) continue;
     var mod = cbs[i].getAttribute('data-mod');
-    var sel = document.querySelector('.perm-niv[data-mod="' + mod + '"]');
-    items.push({ modulo: mod, nivel: sel ? sel.value : 'operar' });
+    items.push({ modulo: mod, nivel: PERM.niveles[mod] || 'operar' });
   }
+  var deps = [], dcs = document.querySelectorAll('.perm-dep');
+  for (var k = 0; k < dcs.length; k++) if (dcs[k].checked) deps.push(dcs[k].value);
+
   fetch('/api/auth/usuarios/' + PERM.id + '/permisos', {
     method: 'PUT', credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ modulos: items })
+    body: JSON.stringify({ modulos: items, depositos: deps })
   }).then(function(r) { return r.json(); }).then(function(res) {
     if (!res.ok) return toast(res.error || 'No se pudo guardar', 'er');
     toast(items.length
-      ? 'Guardado: entra a ' + items.length + ' menú(s)'
+      ? 'Guardado: ' + items.length + ' menú(s) y ' + deps.length + ' depósito(s)'
       : 'Guardado: sin menús marcados, no entra a ninguno', 'ok');
     if (res.aviso) toast(res.aviso, 'er');
     permCargarMenus();
   });
 }
+
+
+// El nivel sin el tilde no significa nada: se apaga, para que no parezca que un
+// menú destildado igual tiene un permiso guardado.
+
+
+
+
+
 
 var tT; function toast(msg,tipo){ var el=eid('toast'); el.textContent=msg; el.className='on '+(tipo||'ok'); clearTimeout(tT); tT=setTimeout(function(){el.className='';},3200); }
 function startPoll(){ setInterval(function(){if(navAct==='conv') loadConvs();},15000); }
