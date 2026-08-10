@@ -16,8 +16,8 @@
 import express from 'express';
 import db from '../servicios/db_bt.js';   // este import crea el schema bt_tr_* (espejo)
 import '../servicios/db_bt_op.js';       // y este el modelo operativo bt_*
-import '../servicios/bt_continuo.js';   // vocabulario compartido + contadores que
-                                        // arrancan donde terminó Transoft
+// vocabulario compartido + contadores que arrancan donde terminó Transoft
+import { sembrarContadores } from '../servicios/bt_continuo.js';
 import { fallasEsquema } from '../servicios/bt_ddl.js';
 import { verificarToken } from '../servicios/bt_token.js';
 
@@ -151,6 +151,11 @@ router.post('/sync', wrap((req, res) => {
       .run(String(req.body?.origen || 'desconocido').slice(0, 120), req.user.id).lastInsertRowid;
   }
 
+  // El tipo de cada columna, para no deformar los números al guardarlos (abajo).
+  const tipoDe = new Map(
+    db.prepare(`PRAGMA table_info(${def.tabla})`).all()
+      .map(c => [c.name, String(c.type || '').toUpperCase()])
+  );
   const cols = columnasDe(def.tabla);
   const usables = cols.filter(c => c !== 'sincronizado_en' && c !== 'origen_lote');
   const lista = [...usables, 'sincronizado_en', 'origen_lote'];
@@ -177,6 +182,11 @@ router.post('/sync', wrap((req, res) => {
         // Los lógicos de FoxPro llegan como true/false y SQLite guarda enteros.
         if (v === true) v = 1;
         if (v === false) v = 0;
+        // Un número que va a una columna de texto: hay que pasarlo a texto acá.
+        // En JavaScript todo número es decimal, así que el 1 de Transoft se
+        // guardaba como "1.0" — y en la pantalla vieja dice "1". Con eso, comparar
+        // los dos sistemas falla y un filtro por filial='1' no encuentra nada.
+        if (typeof v === 'number' && tipoDe.get(c) === 'TEXT') v = String(v);
         fila[c] = v;
       }
       try { ins.run(fila); escritas++; }
@@ -201,7 +211,19 @@ router.post('/sync/cerrar', wrap((req, res) => {
   db.prepare(`UPDATE bt_tr_sync_lotes SET terminado_en = datetime('now','localtime'),
      estado = ?, tablas = ?, error = ? WHERE id = ?`)
     .run(err ? 'error' : 'ok', JSON.stringify(req.body?.tablas || {}), err, id);
-  res.json({ ok: true });
+
+  // Recién ahora llegaron los contadores de Transoft (cgfilial), así que este es el
+  // momento de reajustar los del ERP. Sembrarlos sólo al arrancar el servidor no
+  // alcanzaba: el arranque pasa ANTES de que el agente traiga nada, así que los
+  // contadores quedaban en cero hasta el siguiente reinicio — y una carga dada de
+  // alta en el medio se llevaba un número que la historia ya tiene.
+  let contadores = [];
+  try { contadores = sembrarContadores(); } catch (e) {
+    console.error('[BT] No se pudieron reajustar los contadores:', e.message);
+  }
+  if (contadores.length) console.log('[BT] Contadores reajustados:', contadores.join(' · '));
+
+  res.json({ ok: true, contadores });
 }));
 
 // ══════════════════════════════════════════════════════════════════════════
