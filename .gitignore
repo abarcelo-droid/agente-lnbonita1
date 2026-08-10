@@ -20,3 +20,7 @@ migracion/
 
 # Configuracion local de Claude Code, no commitear
 .claude/
+
+# Python: cache de compilación (lo genera py_compile al validar el agente)
+__pycache__/
+*.pyc
