@@ -6,6 +6,7 @@ import { getDb } from '../servicios/db.js';
 import { enviarMail } from '../servicios/mail.js';
 // Cookie de identidad firmada. El por qué está en src/servicios/auth_sesion.js.
 import { AUTH_COOKIE, authCookieOpts } from '../servicios/auth_sesion.js';
+import { seccionesDe, sociedadesConNombreDe, sociedadesDe } from '../servicios/permisos.js';
 
 const router = express.Router();
 const BCRYPT_ROUNDS = 10;
@@ -347,8 +348,15 @@ router.get('/me', (req, res) => {
       const p = db.prepare('SELECT nombre FROM proveedores WHERE id=?').get(user.deposito_proveedor_id);
       user.deposito_proveedor_nombre = p ? p.nombre : null;
     }
-    // TEMPORAL: forzar acceso total hasta que se corrijan permisos desde el panel
-    user.secciones = ['*'];
+    // Acá vivía un `user.secciones = ['*']` marcado como TEMPORAL que le daba acceso
+    // total a cualquiera que iniciara sesión. Ya no: las secciones se leen frescas
+    // de la base, igual que solo_lectura, para que un cambio desde el panel tenga
+    // efecto sin obligar a nadie a volver a entrar.
+    user.secciones = seccionesDe(user);
+    // Las empresas del usuario. El selector del panel se arma con ESTO y no con la
+    // lista completa: si alguien no ve la empresa en el selector, no la pide, y si
+    // igual la pidiera el servidor la rechaza (ver servicios/permisos.js).
+    user.sociedades = sociedadesConNombreDe(user);
     res.json({ ok: true, user });
   } catch(e) { limpiarSesion(res); res.status(401).json({ ok: false, error: 'Sesión inválida' }); }
 });
@@ -413,6 +421,71 @@ function bloquearSiSoloLectura(req, res, next) {
 
 // Exportar el middleware para que index.js lo monte globalmente
 export { bloquearSiSoloLectura };
+
+// ══════════════════════════════════════════════════════════════════════════
+// LAS EMPRESAS DE CADA USUARIO
+// ══════════════════════════════════════════════════════════════════════════
+// El pedido del dueño: cada empresa es autónoma y la información no se mezcla.
+// Acá se define quién entra a cada una. Solo un administrador puede tocarlo.
+//
+// Al desplegar esto nadie pierde acceso: los usuarios que no tenían ninguna
+// empresa asignada las reciben todas (ver servicios/db_permisos.js). Restringir es
+// después, de a uno, desde esta pantalla.
+
+router.get('/usuarios/:id/sociedades', requireAuth, soloAdmin, (req, res) => {
+  const db = getDb();
+  try {
+    const id = parseInt(req.params.id, 10);
+    const asignadas = db.prepare(
+      'SELECT sociedad_id FROM usuario_sociedades WHERE usuario_id = ?'
+    ).all(id).map(r => r.sociedad_id);
+    const todas = db.prepare(
+      'SELECT id, nombre FROM sociedades WHERE activa = 1 ORDER BY id'
+    ).all();
+    const u = db.prepare('SELECT rol FROM usuarios WHERE id = ?').get(id);
+    res.json({
+      ok: true,
+      sociedades: todas.map(s => ({ ...s, asignada: asignadas.includes(s.id) })),
+      // Un admin las ve todas por su rol, sin importar lo que diga la tabla. Se
+      // avisa para que no parezca que la pantalla no guarda lo que se marca.
+      es_admin: u?.rol === 'admin',
+    });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+router.put('/usuarios/:id/sociedades', requireAuth, soloAdmin, (req, res) => {
+  const db = getDb();
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!db.prepare('SELECT 1 FROM usuarios WHERE id=?').get(id)) {
+      return res.status(404).json({ ok: false, error: 'No existe ese usuario' });
+    }
+    const pedidas = Array.isArray(req.body?.sociedades) ? req.body.sociedades : null;
+    if (!pedidas) return res.status(400).json({ ok: false, error: 'Falta la lista de empresas' });
+
+    // Solo se aceptan empresas que existen y están activas: sin esto, un id
+    // inventado quedaría guardado y después nadie entiende qué significa.
+    const validas = new Set(db.prepare('SELECT id FROM sociedades WHERE activa = 1').all().map(r => r.id));
+    const limpias = [...new Set(pedidas.map(n => parseInt(n, 10)).filter(n => validas.has(n)))];
+
+    // Un administrador no puede quedarse sin empresas: es el único que puede
+    // volver a asignarlas, y sin ninguna no entraría ni a arreglarlo.
+    const u = db.prepare('SELECT rol FROM usuarios WHERE id=?').get(id);
+    if (!limpias.length && u?.rol === 'admin') {
+      return res.status(400).json({ ok: false, error: 'Un administrador no puede quedarse sin empresas' });
+    }
+
+    db.transaction(() => {
+      db.prepare('DELETE FROM usuario_sociedades WHERE usuario_id = ?').run(id);
+      const ins = db.prepare(
+        'INSERT OR IGNORE INTO usuario_sociedades (usuario_id, sociedad_id, creado_por_id) VALUES (?,?,?)'
+      );
+      for (const sid of limpias) ins.run(id, sid, req.user.id);
+    })();
+
+    res.json({ ok: true, sociedades: limpias });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
 
 // GET usuarios — accesible para cualquier usuario autenticado (necesario para Scout y asignaciones)
 // Incluye datos de la persona vinculada (nivel_acceso, áreas, cargo)
