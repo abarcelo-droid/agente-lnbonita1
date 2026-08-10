@@ -19,18 +19,41 @@ import '../servicios/db_bt_op.js';       // y este el modelo operativo bt_*
 import '../servicios/bt_continuo.js';   // vocabulario compartido + contadores que
                                         // arrancan donde terminó Transoft
 import { fallasEsquema } from '../servicios/bt_ddl.js';
+import { verificarToken } from '../servicios/bt_token.js';
 
 const router = express.Router();
+
+// Sólo la sincronización acepta la llave del agente. Todo lo demás —ver viajes,
+// listar cargas— sigue exigiendo una persona con sesión.
+const RUTAS_DEL_AGENTE = new Set(['/sync', '/sync/cerrar']);
 
 router.use((req, res, next) => {
   try {
     const c = req.cookies?.lnb_user;
     if (c) req.user = JSON.parse(c);
   } catch (_) { /* cookie corrupta: no autenticado */ }
+
+  // El agente de sincronización corre solo en el servidor de Transoft y no puede
+  // usar la cookie de una persona: la de escritorio dura un día. Trae su propia
+  // llave, que abre esto y nada más (ver servicios/bt_token.js).
+  if (!req.user && RUTAS_DEL_AGENTE.has(req.path)) {
+    const t = req.get('X-BT-Token') || '';
+    const fila = verificarToken(t, req.ip);
+    if (fila) {
+      // id negativo: no puede chocar con el de ninguna persona, y en cualquier log
+      // se ve de una que la escribió el agente y no alguien.
+      req.user = { id: -1, nombre: `agente:${fila.nombre}`, esAgente: true };
+      req.agenteSync = fila;
+    }
+  }
   next();
 });
 
 function requireAuth(req, res, next) {
+  // El agente de sincronización se autentica con su llave, no con una sesión.
+  // Explícito y no por el `id`: un id 0 haría fallar el chequeo de abajo sin que
+  // se entienda por qué, que es justo lo que pasó la primera vez.
+  if (req.agenteSync) return next();
   if (!req.user || !req.user.id) return res.status(401).json({ ok: false, error: 'No autenticado' });
   next();
 }
@@ -106,7 +129,10 @@ const columnasDe = (tabla) =>
   db.prepare(`PRAGMA table_info(${tabla})`).all().map(c => c.name);
 
 router.post('/sync', wrap((req, res) => {
-  if (!esAdmin(req)) return res.status(403).json({ ok: false, error: 'Solo un administrador puede sincronizar' });
+  // Sincroniza el agente con su llave, o un administrador a mano desde el panel.
+  if (!req.agenteSync && !esAdmin(req)) {
+    return res.status(403).json({ ok: false, error: 'Solo un administrador o el agente pueden sincronizar' });
+  }
 
   const clave = String(req.body?.tabla || '');
   const def = TABLAS[clave];
@@ -165,7 +191,10 @@ router.post('/sync', wrap((req, res) => {
 // Cierra el lote. El agente lo llama al terminar; si nunca llega, el lote queda
 // 'en_curso' y eso mismo es la señal de que la corrida se cortó a la mitad.
 router.post('/sync/cerrar', wrap((req, res) => {
-  if (!esAdmin(req)) return res.status(403).json({ ok: false, error: 'Solo un administrador puede sincronizar' });
+  // Sincroniza el agente con su llave, o un administrador a mano desde el panel.
+  if (!req.agenteSync && !esAdmin(req)) {
+    return res.status(403).json({ ok: false, error: 'Solo un administrador o el agente pueden sincronizar' });
+  }
   const id = parseInt(req.body?.lote_id, 10);
   if (!id) throw bad('Falta lote_id');
   const err = req.body?.error ? String(req.body.error).slice(0, 2000) : null;

@@ -29,9 +29,18 @@ import urllib.request
 import urllib.error
 
 # ── CONFIGURACION ─────────────────────────────────────────────────────────
-# La URL y la clave se leen de un archivo al lado de este script para no tener
+# La URL y la llave se leen de un archivo al lado de este script para no tener
 # secretos escritos en el codigo ni pasandose por chat.
-#   bt_sync_config.json  ->  {"url": "https://...", "cookie": "lnb_auth=..."}
+#
+#   bt_sync_config.json  ->  {"url": "https://TU-ERP", "token": "btsync_..."}
+#
+# La llave se genera UNA vez en el ERP con:
+#     node scripts/bt_token.mjs "servidor Transoft"
+#
+# NO es la cookie de una persona. Antes esto pedia una cookie de sesion y no podia
+# funcionar: la cookie de escritorio dura UN DIA, asi que al dia siguiente el agente
+# daba 401 y habia que entrar a copiar una nueva a mano. La llave no vence; si se
+# filtra, se revoca desde el ERP.
 AQUI = os.path.dirname(os.path.abspath(__file__))
 CONFIG = os.path.join(AQUI, "bt_sync_config.json")
 DATOS = r"C:\transoft\Datos"
@@ -257,21 +266,31 @@ def leer_catalogos():
 def cargar_config():
     if not os.path.isfile(CONFIG):
         log("FALTA EL ARCHIVO DE CONFIGURACION: %s" % CONFIG)
-        log('Tiene que tener: {"url": "https://TU-ERP", "cookie": "lnb_auth=..."}')
+        log('Tiene que tener: {"url": "https://TU-ERP", "token": "btsync_..."}')
+        log('La llave se genera en el ERP con: node scripts/bt_token.mjs "servidor Transoft"')
         sys.exit(1)
     with open(CONFIG, "r", encoding="utf-8") as f:
         c = json.load(f)
-    if not c.get("url") or not c.get("cookie"):
-        log("La configuracion tiene que tener 'url' y 'cookie'.")
+    if not c.get("url"):
+        log("La configuracion tiene que tener 'url'.")
+        sys.exit(1)
+    if not c.get("token") and not c.get("cookie"):
+        log("La configuracion tiene que tener 'token' (la llave del agente).")
+        log('Se genera en el ERP con: node scripts/bt_token.mjs "servidor Transoft"')
         sys.exit(1)
     return c
 
 
 def postear(cfg, camino, cuerpo):
     datos = json.dumps(cuerpo).encode("utf-8")
+    cabeceras = {"Content-Type": "application/json"}
+    if cfg.get("token"):
+        cabeceras["X-BT-Token"] = cfg["token"]
+    if cfg.get("cookie"):          # compatibilidad con una config vieja
+        cabeceras["Cookie"] = cfg["cookie"]
     req = urllib.request.Request(
         cfg["url"].rstrip("/") + camino, data=datos, method="POST",
-        headers={"Content-Type": "application/json", "Cookie": cfg["cookie"]})
+        headers=cabeceras)
     ctx = ssl.create_default_context()
     with urllib.request.urlopen(req, timeout=180, context=ctx) as r:
         return json.loads(r.read().decode("utf-8"))

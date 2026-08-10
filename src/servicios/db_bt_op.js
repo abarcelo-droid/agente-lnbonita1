@@ -415,6 +415,31 @@ ddl(`
   );
   CREATE INDEX IF NOT EXISTS idx_btlog_ent ON bt_op_log(entidad, entidad_id);
   CREATE INDEX IF NOT EXISTS idx_btlog_fec ON bt_op_log(creado_en);
+
+  -- ── LA LLAVE DEL AGENTE DE SINCRONIZACIÓN ───────────────────────────────
+  -- El agente corre solo, todas las noches, en el servidor de Transoft. No puede
+  -- autenticarse con la cookie de una persona: la de escritorio dura UN DÍA, así
+  -- que al día siguiente el agente deja de funcionar y hay que ir a copiarla de
+  -- nuevo a mano. Un proceso desatendido necesita su propia llave.
+  --
+  -- SE GUARDA EL HASH, NUNCA EL TOKEN. Si alguien se lleva la base, no se lleva
+  -- llaves que sirvan. El token se muestra UNA sola vez, cuando se genera.
+  -- (SHA-256 y no bcrypt: bcrypt es para contraseñas que una persona puede
+  -- adivinar; esto es un valor aleatorio de 32 bytes, no hay nada que adivinar,
+  -- y bcrypt costaría ~100 ms en cada uno de los 165 requests de una corrida.)
+  --
+  -- Esta llave abre SOLO sincronizar. No sirve para ver ni para operar.
+  CREATE TABLE IF NOT EXISTS bt_sync_tokens (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    nombre        TEXT NOT NULL,            -- "servidor Transoft", para saber cuál revocar
+    token_hash    TEXT NOT NULL UNIQUE,
+    creado_en     TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+    creado_por    TEXT,
+    ultimo_uso_en TEXT,                     -- para ver si el agente sigue vivo
+    ultima_ip     TEXT,
+    usos          INTEGER NOT NULL DEFAULT 0,
+    revocado_en   TEXT
+  );
 `);
 
 // ── SIEMBRA MÍNIMA ────────────────────────────────────────────────────────
