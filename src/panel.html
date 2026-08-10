@@ -1102,22 +1102,91 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     En cuanto marques el primer menú, pasa a entrar <b>sólo</b> a lo que marques.
   </div>
 
-  <!-- ── PASO 1 ────────────────────────────────────────────────────────── -->
+  <!-- ── PASO 1 · ENTRA O NO ENTRA ─────────────────────────────────────
+       Este bloque vivía dentro de la ficha de la persona. Está acá porque es
+       la primera pregunta de esta pantalla: si no entra al panel, no hay
+       empresas ni menús que configurar. Los ids se mantienen intactos —
+       eqPoblarAcceso y eqSincronizarAcceso los siguen leyendo igual. -->
   <div style="font-size:12px;font-weight:700;color:var(--mut);text-transform:uppercase;
-       letter-spacing:.05em;margin:4px 0 8px">1 · ¿Sobre qué empresas puede actuar?</div>
-  <div id="perm-empresas" style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:6px"></div>
-  <div style="font-size:11px;color:var(--mut);margin-bottom:18px">
-    Al cambiar esto se guarda solo, y abajo aparecen los menús de las empresas marcadas.
+       letter-spacing:.05em;margin:4px 0 8px">1 · ¿Entra al panel?</div>
+
+  <label style="display:flex;align-items:center;gap:8px;margin:0 0 10px;cursor:pointer;font-size:13px">
+    <input type="checkbox" id="eq-per-tiene-login" onchange="eqToggleAccesoBloque()">
+    <span>Esta persona tiene acceso al panel</span>
+  </label>
+
+  <div id="eq-per-acceso-detalle" style="display:none;background:var(--bg);border-radius:8px;padding:12px;margin-bottom:18px">
+    <div id="eq-per-pwd-estado" style="margin-bottom:12px;padding:8px 10px;background:#fff;border-radius:6px;border:1px solid var(--bor);font-size:12px"></div>
+
+    <div class="fg">
+      <div class="fl"><label>Username *</label><input id="eq-per-username" placeholder="ej: pbarcelo" style="font-family:monospace"></div>
+      <div class="fl"><label>Rol del sistema</label>
+        <select id="eq-per-rol-sistema" onchange="eqOnRolSistemaCambio()">
+          <option value="admin">Administrador</option>
+          <option value="operador" selected>Operador</option>
+          <option value="consulta">Solo consulta</option>
+          <option value="campo">🌿 Solo Scout (campo)</option>
+        </select>
+      </div>
+      <div class="fl ff" id="eq-per-fl-solo-lectura" style="margin-top:4px">
+        <label style="display:flex;align-items:center;gap:8px;text-transform:none;font-weight:500;cursor:pointer;background:#fef3c7;padding:8px 12px;border-radius:6px;border:1px solid #fbbf24">
+          <input type="checkbox" id="eq-per-solo-lectura" style="width:18px;height:18px">
+          <div>
+            <span style="color:#78350f;font-weight:600">👁 Modo solo lectura</span>
+            <div style="font-size:11px;color:#92400e;margin-top:2px;font-weight:400">El usuario puede ver todo pero NO puede crear, editar ni borrar. Útil para auditores, contadores, externos.</div>
+          </div>
+        </label>
+      </div>
+      <!-- Los depósitos se marcan abajo, en el paso 3. Estos inputs quedan
+           ocultos porque eqPoblarAcceso y eqSincronizarAcceso los siguen leyendo. -->
+      <div style="display:none">
+        <input type="checkbox" id="eq-per-dep-mcba" value="MCBA">
+        <input type="checkbox" id="eq-per-dep-finca" value="FINCA">
+        <input type="checkbox" id="eq-per-dep-sanpedro" value="SAN PEDRO">
+      </div>
+      <div class="fl ff" style="margin-top:8px">
+        <label>Depósito IFCO <span style="color:var(--sub); font-weight:400">(fija origen al cargar remitos desde mobile)</span></label>
+        <select id="eq-per-dep-ifco-tipo" onchange="eqToggleDepIfcoProv()" style="margin-top:4px">
+          <option value="">Sin asignar (puede elegir el origen al cargar)</option>
+          <option value="san_geronimo">San Gerónimo (siempre)</option>
+          <option value="proveedor">Proveedor específico (siempre)</option>
+        </select>
+        <div id="eq-per-dep-ifco-prov-wrap" style="display:none; margin-top:6px">
+          <select id="eq-per-dep-ifco-prov"><option value="">— Cargando proveedores —</option></select>
+        </div>
+      </div>
+    </div>
+
+    <div id="eq-per-pwd-acciones" style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap"></div>
   </div>
 
-  <!-- ── PASO 2 ────────────────────────────────────────────────────────── -->
-  <div style="font-size:12px;font-weight:700;color:var(--mut);text-transform:uppercase;
-       letter-spacing:.05em;margin:4px 0 8px">2 · ¿A qué depósitos entra?</div>
-  <div id="perm-depositos" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:18px"></div>
+  <!-- Sin usuario todavía no hay a quién darle empresas ni menús: en vez de
+       mostrar los pasos 2 a 4 vacíos y que parezca que están rotos, se dice qué
+       falta hacer. -->
+  <div id="perm-falta-usuario" style="display:none;background:#fffbeb;border:1px solid #fcd34d;
+       border-radius:8px;padding:11px 13px;font-size:12.5px;color:#92400e">
+    Marcá <b>«Esta persona tiene acceso al panel»</b>, poné un usuario y apretá
+    <b>Guardar accesos</b>. Recién ahí se pueden elegir empresas y menús.
+  </div>
 
-  <div style="font-size:12px;font-weight:700;color:var(--mut);text-transform:uppercase;
-       letter-spacing:.05em;margin:4px 0 8px">3 · ¿A qué menús entra, y hasta dónde?</div>
-  <div id="perm-menus"></div>
+  <div id="perm-resto">
+    <!-- ── PASO 2 ──────────────────────────────────────────────────────── -->
+    <div style="font-size:12px;font-weight:700;color:var(--mut);text-transform:uppercase;
+         letter-spacing:.05em;margin:4px 0 8px">2 · ¿Sobre qué empresas puede actuar?</div>
+    <div id="perm-empresas" style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:6px"></div>
+    <div style="font-size:11px;color:var(--mut);margin-bottom:18px">
+      Al cambiar esto se guarda solo, y abajo aparecen los menús de las empresas marcadas.
+    </div>
+
+    <!-- ── PASO 3 ──────────────────────────────────────────────────────── -->
+    <div style="font-size:12px;font-weight:700;color:var(--mut);text-transform:uppercase;
+         letter-spacing:.05em;margin:4px 0 8px">3 · ¿A qué depósitos entra?</div>
+    <div id="perm-depositos" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:18px"></div>
+
+    <div style="font-size:12px;font-weight:700;color:var(--mut);text-transform:uppercase;
+         letter-spacing:.05em;margin:4px 0 8px">4 · ¿A qué menús entra, y hasta dónde?</div>
+    <div id="perm-menus"></div>
+  </div>
 
   <div class="mft" style="margin-top:16px">
     <button class="btn bo" onclick="closeMB('mb-permisos')">Cerrar</button>
@@ -7237,83 +7306,25 @@ function sgRepExport(){
       </div>
     </div>
 
-    <!-- ─── BLOQUE: ACCESO AL SISTEMA (Fase 2.D) ─────────────────────────── -->
+    <!-- ─── ACCESO AL SISTEMA: SÓLO EL RESUMEN ───────────────────────────
+         Todo lo de acceso —usuario, rol, clave, depósitos, empresas y menús—
+         se configura en "Empresas y accesos". Acá queda un renglón que dice
+         cómo está y un botón para ir.
+
+         Esta ficha es QUIÉN ES la persona; la otra pantalla es QUÉ PUEDE HACER.
+         Mezcladas, la ficha pedía scrollear por media pantalla de permisos para
+         llegar a un teléfono, y los permisos se configuraban en dos lugares
+         distintos según por dónde se hubiera entrado. -->
     <div id="eq-per-acceso-box" style="margin-top:16px; padding-top:16px; border-top:1px solid var(--bor)">
       <label style="font-size:11px; color:var(--mut); font-weight:600; text-transform:uppercase; letter-spacing:.05em; display:flex; align-items:center; gap:6px">
         🔐 Acceso al sistema
       </label>
-
-      <!-- Toggle: tiene login o no -->
-      <label style="display:flex; align-items:center; gap:8px; margin:10px 0; cursor:pointer; font-size:13px">
-        <input type="checkbox" id="eq-per-tiene-login" onchange="eqToggleAccesoBloque()">
-        <span>Esta persona tiene acceso al panel</span>
-      </label>
-
-      <!-- Caja que aparece solo si tiene login -->
-      <div id="eq-per-acceso-detalle" style="display:none; background:var(--bg); border-radius:8px; padding:12px; margin-top:8px">
-        <!-- Estado de password -->
-        <div id="eq-per-pwd-estado" style="margin-bottom:12px; padding:8px 10px; background:#fff; border-radius:6px; border:1px solid var(--bor); font-size:12px"></div>
-
-        <div class="fg">
-          <div class="fl"><label>Username *</label><input id="eq-per-username" placeholder="ej: pbarcelo" style="font-family:monospace"></div>
-          <div class="fl"><label>Rol del sistema</label>
-            <select id="eq-per-rol-sistema" onchange="eqOnRolSistemaCambio()">
-              <option value="admin">Administrador</option>
-              <option value="operador" selected>Operador</option>
-              <option value="consulta">Solo consulta</option>
-              <option value="campo">🌿 Solo Scout (campo)</option>
-            </select>
-          </div>
-          <div class="fl ff" id="eq-per-fl-solo-lectura" style="margin-top:4px">
-            <label style="display:flex;align-items:center;gap:8px;text-transform:none;font-weight:500;cursor:pointer;background:#fef3c7;padding:8px 12px;border-radius:6px;border:1px solid #fbbf24">
-              <input type="checkbox" id="eq-per-solo-lectura" style="width:18px;height:18px">
-              <div>
-                <span style="color:#78350f;font-weight:600">👁 Modo solo lectura</span>
-                <div style="font-size:11px;color:#92400e;margin-top:2px;font-weight:400">El usuario puede ver todo pero NO puede crear, editar ni borrar. Útil para auditores, contadores, externos.</div>
-              </div>
-            </label>
-          </div>
-          <!-- Los depósitos se configuran junto con el resto de los accesos, en
-           "Empresas y accesos". Los inputs quedan ocultos porque eqPoblarAcceso
-           y eqGuardarPersona los siguen leyendo. -->
-      <div style="display:none">
-        <input type="checkbox" id="eq-per-dep-mcba" value="MCBA">
-        <input type="checkbox" id="eq-per-dep-finca" value="FINCA">
-        <input type="checkbox" id="eq-per-dep-sanpedro" value="SAN PEDRO">
-      </div>
-          <div class="fl ff" style="margin-top:8px">
-            <label>Depósito IFCO <span style="color:var(--sub); font-weight:400">(fija origen al cargar remitos desde mobile)</span></label>
-            <select id="eq-per-dep-ifco-tipo" onchange="eqToggleDepIfcoProv()" style="margin-top:4px">
-              <option value="">Sin asignar (puede elegir el origen al cargar)</option>
-              <option value="san_geronimo">San Gerónimo (siempre)</option>
-              <option value="proveedor">Proveedor específico (siempre)</option>
-            </select>
-            <div id="eq-per-dep-ifco-prov-wrap" style="display:none; margin-top:6px">
-              <select id="eq-per-dep-ifco-prov"><option value="">— Cargando proveedores —</option></select>
-            </div>
-          </div>
-        </div>
-
-        <!-- Acciones de password -->
-        <div id="eq-per-pwd-acciones" style="display:flex; gap:8px; margin-top:12px; flex-wrap:wrap"></div>
-
-        <!-- Empresas y accesos: acá se decide a qué empresas entra y a qué menús
-             de cada una, con su nivel. Va DENTRO del bloque de acceso porque sin
-             usuario no hay nada que permisar. -->
-        <div id="eq-per-permisos-wrap" style="margin-top:14px; padding:12px 13px;
-             background:#f0f9ff; border:1px solid #bae6fd; border-radius:8px; display:none">
-          <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap">
-            <div style="flex:1; min-width:220px">
-              <div style="font-size:13px; font-weight:600; color:#0c4a6e">🏢 Empresas y accesos</div>
-              <div style="font-size:11px; color:#0369a1; margin-top:2px">
-                Sobre qué empresas puede actuar, a qué menús de cada una entra,
-                y si puede operar o también borrar.
-              </div>
-            </div>
-            <button class="btn bb" type="button" onclick="permAbrirDesdeEquipo()">Configurar</button>
-          </div>
-          <div id="eq-per-permisos-resumen" style="font-size:11px; color:#0369a1; margin-top:8px"></div>
-        </div>
+      <div id="eq-per-acceso-resumen" style="display:flex; align-items:center; gap:12px;
+           flex-wrap:wrap; margin-top:9px; padding:11px 13px; background:var(--bg);
+           border:1px solid var(--bor); border-radius:8px">
+        <div id="eq-per-acceso-texto" style="flex:1; min-width:220px; font-size:12.5px"></div>
+        <button class="btn bb" type="button" id="eq-per-acceso-btn"
+                onclick="permAbrirDesdeEquipo()">Configurar accesos</button>
       </div>
     </div>
     <!-- ─── FIN BLOQUE ACCESO ──────────────────────────────────────────── -->
@@ -14272,7 +14283,7 @@ function closeMB(id){ var el=eid(id); if(el) el.classList.remove('on');
 // El orden de la pantalla es el orden en que se decide: primero las empresas,
 // después los menús DE esas empresas. Por eso las empresas se guardan solas al
 // tildarlas — sin ellas guardadas, el servidor no sabe qué menús ofrecer.
-var PERM = { id: null, nombre: '' };
+var PERM = { id: null, nombre: '', personaId: null };
 
 // Desde el modal de Equipo, que es por donde se administra la gente de verdad.
 // El permiso cuelga del USUARIO, no de la persona del organigrama: una persona sin
@@ -14371,62 +14382,118 @@ var UP = { usuarios: [] };
 function upConfigurar(id) {
   var u = null;
   for (var i = 0; i < UP.usuarios.length; i++) if (UP.usuarios[i].id === id) u = UP.usuarios[i];
-  permAbrirPara(id, u ? (u.nombre || u.username || '') : '');
+  // La persona viaja para que desde acá también se pueda tocar el usuario y la
+  // clave, no sólo las empresas y los menús.
+  permAbrirPara(id, u ? (u.nombre || u.username || '') : '', u ? u.persona_id : null);
   // Al cerrar la pantalla de permisos, la lista se refresca sola: si no, muestra
   // los números viejos y parece que no se guardó.
   UP.alCerrar = true;
 }
 
+// Desde la ficha de la persona. Ya NO exige que el usuario exista: crear el
+// acceso es justamente el paso 1 de esta pantalla. Antes mandaba a "dale acceso
+// y guardá, después volvé", que era mandar a otra pantalla a hacer la mitad.
 function permAbrirDesdeEquipo() {
   var u = (typeof EQ_ACCESO !== 'undefined' && EQ_ACCESO) ? EQ_ACCESO.usuario : null;
-  if (!u || !u.id) {
-    return toast('Primero dale acceso al panel y guardá; después configurás sus empresas', 'er');
+  var personaId = (typeof EQ !== 'undefined' && EQ) ? EQ.personaActual : null;
+  if (!personaId) {
+    return toast('Primero guardá la persona y después configurá su acceso', 'er');
   }
   var nom = document.getElementById('eq-per-nombre');
   var ape = document.getElementById('eq-per-apellido');
-  permAbrirPara(u.id, ((nom ? nom.value : '') + ' ' + (ape ? ape.value : '')).trim() || u.username || '');
+  var nombre = ((nom ? nom.value : '') + ' ' + (ape ? ape.value : '')).trim()
+            || (u ? u.username : '') || '';
+  permAbrirPara(u ? u.id : null, nombre, personaId);
 }
 
-function permAbrirPara(usuarioId, nombre) {
-  PERM.id = usuarioId;
+// usuarioId puede venir null: es una persona a la que todavía no se le dio
+// acceso. personaId es contra quién se guarda el usuario y la clave.
+function permAbrirPara(usuarioId, nombre, personaId) {
+  PERM.id = usuarioId || null;
   PERM.nombre = nombre || '';
+  PERM.personaId = personaId || null;
   eid('perm-tit').textContent = 'Empresas y accesos · ' + PERM.nombre;
+  permPintarPaso1();
   eid('mb-permisos').classList.add('on');
-  permCargarEmpresas();
+  if (PERM.id) permCargarEmpresas();
 }
 
-// Un renglón con lo que ya tiene, para no tener que abrir la pantalla sólo para
-// mirar: sin esto, la única forma de saber si alguien está configurado es entrar.
-function permResumen(usuarioId) {
-  var c = document.getElementById('eq-per-permisos-resumen');
+// Los pasos 2 a 4 cuelgan del USUARIO. Sin usuario se esconden y se dice qué
+// falta, en vez de dejarlos vacíos y que parezcan rotos.
+//
+// El paso 1 sólo se puede tocar si sabemos contra qué persona guardar: entrando
+// desde un usuario suelto —uno sin ficha de persona— no hay a qué endpoint
+// pegarle, así que se muestra apagado en lugar de fingir que guarda.
+function permPintarPaso1() {
+  var hayUsuario = !!PERM.id;
+  var falta = eid('perm-falta-usuario');
+  var resto = eid('perm-resto');
+  if (falta) falta.style.display = hayUsuario ? 'none' : '';
+  if (resto) resto.style.display = hayUsuario ? '' : 'none';
+
+  var cb = eid('eq-per-tiene-login');
+  var det = eid('eq-per-acceso-detalle');
+  if (!cb || !det) return;
+
+  if (!PERM.personaId) {
+    cb.disabled = true;
+    cb.parentElement.title = 'Este usuario no tiene ficha de persona: su usuario y '
+      + 'clave se administran desde la ficha del equipo';
+    det.style.display = 'none';
+    return;
+  }
+  cb.disabled = false;
+  cb.parentElement.title = '';
+  det.style.display = cb.checked ? 'block' : 'none';
+}
+
+// El renglón de la ficha de la persona: en qué estado está su acceso, sin tener
+// que abrir la pantalla de accesos sólo para mirar. Es la contrapartida de haber
+// sacado los campos de la ficha — si al sacarlos no quedara nada, para saber si
+// alguien tiene acceso habría que entrar a otra pantalla.
+function permResumen(usuario) {
+  var c = document.getElementById('eq-per-acceso-texto');
+  var btn = document.getElementById('eq-per-acceso-btn');
   if (!c) return;
-  c.textContent = '';
-  fetch('/api/auth/usuarios/' + usuarioId + '/permisos', { credentials: 'include' })
+
+  if (!usuario) {
+    c.innerHTML = '<span style="color:var(--mut)">No entra al panel.</span>';
+    if (btn) btn.textContent = 'Dar acceso';
+    return;
+  }
+  if (btn) btn.textContent = 'Configurar accesos';
+  c.innerHTML = '<b style="font-family:monospace">' + permEsc(usuario.username || '—') + '</b>'
+    + ' <span style="color:var(--mut)">· ' + permEsc(usuario.rol || '') + '</span>'
+    + (usuario.solo_lectura ? ' <span style="background:#fef3c7;color:#92400e;border-radius:8px;'
+        + 'padding:1px 7px;font-size:10.5px">solo lectura</span>' : '')
+    + '<div id="eq-per-acceso-perms" style="color:var(--mut);margin-top:3px;font-size:11.5px">…</div>';
+
+  var p = document.getElementById('eq-per-acceso-perms');
+  fetch('/api/auth/usuarios/' + usuario.id + '/permisos', { credentials: 'include' })
     .then(function(r) { return r.json(); })
     .then(function(res) {
-      if (!res.ok) return;
+      if (!p) return;
+      if (!res.ok) { p.textContent = ''; return; }
       var emps = (res.empresas || []).filter(function(e) { return e.sociedad_id !== null; });
       var marcados = (res.empresas || []).reduce(function(n, e) {
         return n + e.modulos.filter(function(m) { return m.habilitado; }).length;
       }, 0);
-      if (res.es_admin) { c.textContent = 'Es administrador: entra a todo.'; return; }
-      if (!emps.length) { c.textContent = 'Sin empresas asignadas todavía.'; return; }
+      if (res.es_admin) { p.textContent = 'Es administrador: entra a todo.'; return; }
+      if (!emps.length) { p.textContent = 'Sin empresas asignadas todavía.'; return; }
       var nombres = emps.map(function(e) { return e.sociedad_nombre; }).join(' · ');
-      c.textContent = res.sin_configurar
+      p.textContent = res.sin_configurar
         ? nombres + ' — entra a todos los menús de esas empresas.'
         : nombres + ' — ' + marcados + ' menú(s) habilitado(s).';
     })
-    .catch(function() {});
+    .catch(function() { if (p) p.textContent = ''; });
 }
 
 function permAbrir() {
   var id = eid('usr-id').value;
   if (!id) return toast('Guardá el usuario primero y después configurá sus accesos', 'er');
-  PERM.id = parseInt(id, 10);
-  PERM.nombre = eid('usr-nombre').value || '';
-  eid('perm-tit').textContent = 'Empresas y accesos · ' + PERM.nombre;
-  eid('mb-permisos').classList.add('on');
-  permCargarEmpresas();
+  // Sin ficha de persona: el paso 1 se muestra apagado (no hay contra qué
+  // guardar el usuario) y se configuran empresas y menús igual.
+  permAbrirPara(parseInt(id, 10), eid('usr-nombre').value || '', null);
 }
 
 function permEsc(s) {
@@ -14597,7 +14664,56 @@ function permTodos(gi, prender) {
   for (var i = 0; i < cbs.length; i++) { cbs[i].checked = !!prender; permTildeCambio(cbs[i]); }
 }
 
+// Un solo botón guarda toda la pantalla, en el orden en que se lee: primero el
+// acceso (paso 1), después las empresas y los menús. El orden importa — si el
+// usuario recién se crea acá, hasta que no exista no hay a quién ponerle menús.
 function permGuardar() {
+  // Los depósitos del paso 3 se mandan en el mismo PUT que los menús, pero los
+  // checkboxes ocultos del paso 1 son los que lee eqSincronizarAcceso: se los
+  // deja iguales antes de sincronizar, para que un guardado no pise al otro.
+  permVolcarDepositos();
+
+  if (!PERM.personaId) return permGuardarModulos();
+
+  eqSincronizarAcceso(PERM.personaId).then(function() {
+    // Si el usuario acaba de nacer, hay que releer para saber su id: sin eso, el
+    // PUT de menús iría contra null y se perdería todo lo marcado.
+    if (PERM.id) return permGuardarModulos();
+    return fetch('/api/org/personas/' + PERM.personaId, { credentials: 'include' })
+      .then(function(r) { return r.json(); })
+      .then(function(res) {
+        var u = res && res.ok ? res.usuario : null;
+        if (!u || !u.id) {
+          toast('Acceso guardado. Volvé a abrir para configurar empresas y menús', 'ok');
+          return;
+        }
+        PERM.id = u.id;
+        if (typeof EQ_ACCESO !== 'undefined') EQ_ACCESO.usuario = u;
+        permPintarPaso1();
+        permCargarEmpresas();
+        toast('Acceso creado: ahora elegí empresas y menús', 'ok');
+      });
+  }).catch(function(err) {
+    toast('No se pudo guardar el acceso: ' + (err && err.message ? err.message : err), 'er');
+  });
+}
+
+// Los tres depósitos viven duplicados: los tildes que se ven (paso 3) y unos
+// inputs ocultos que eqSincronizarAcceso lee. Sin esto, guardar desde acá
+// mandaría los depósitos viejos y borraría lo que se acaba de marcar.
+function permVolcarDepositos() {
+  var marcados = {}, dcs = document.querySelectorAll('.perm-dep');
+  if (!dcs.length) return;                     // no se llegó a pintar el paso 3
+  for (var i = 0; i < dcs.length; i++) if (dcs[i].checked) marcados[dcs[i].value] = true;
+  var pares = [['eq-per-dep-mcba', 'MCBA'], ['eq-per-dep-finca', 'FINCA'],
+               ['eq-per-dep-sanpedro', 'SAN PEDRO']];
+  for (var k = 0; k < pares.length; k++) {
+    var el = document.getElementById(pares[k][0]);
+    if (el) el.checked = !!marcados[pares[k][1]];
+  }
+}
+
+function permGuardarModulos() {
   var items = [], cbs = document.querySelectorAll('.perm-mod');
   for (var i = 0; i < cbs.length; i++) {
     if (!cbs[i].checked) continue;
@@ -14607,7 +14723,7 @@ function permGuardar() {
   var deps = [], dcs = document.querySelectorAll('.perm-dep');
   for (var k = 0; k < dcs.length; k++) if (dcs[k].checked) deps.push(dcs[k].value);
 
-  fetch('/api/auth/usuarios/' + PERM.id + '/permisos', {
+  return fetch('/api/auth/usuarios/' + PERM.id + '/permisos', {
     method: 'PUT', credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ modulos: items, depositos: deps })
@@ -14618,6 +14734,9 @@ function permGuardar() {
       : 'Guardado: sin menús marcados, no entra a ninguno', 'ok');
     if (res.aviso) toast(res.aviso, 'er');
     permCargarMenus();
+    // La ficha de la persona muestra un resumen de esto: si no se refresca,
+    // queda mostrando los números viejos y parece que no se guardó.
+    if (typeof EQ_ACCESO !== 'undefined' && EQ_ACCESO.usuario) permResumen(EQ_ACCESO.usuario);
   });
 }
 
@@ -36020,18 +36139,13 @@ function eqGuardarPersona() {
   var url = id ? '/personas/' + id : '/personas';
   eqApi(url, { method: id ? 'PATCH' : 'POST', body: body }).then(function(r) {
     if (!r.ok) { toast('Error: ' + r.error, 'er'); return; }
-    var personaId = id ? parseInt(id) : r.id;
-
-    // Sincronizar el bloque "Acceso al sistema" (Fase 2.D)
-    eqSincronizarAcceso(personaId).then(function(){
-      toast('Persona guardada', 'ok');
-      closeMB('mb-eq-persona');
-      eqCargarPersonas();
-    }).catch(function(err){
-      toast('Persona guardada, pero falló acceso: ' + (err.message || err), 'er');
-      closeMB('mb-eq-persona');
-      eqCargarPersonas();
-    });
+    // Guardar la ficha ya NO toca el usuario ni la clave. Esos campos se fueron a
+    // "Empresas y accesos" y se guardan con su propio botón: si esto siguiera
+    // sincronizando, un guardado de la ficha mandaría un PATCH del usuario con
+    // valores que quien apretó el botón no vio en ninguna pantalla.
+    toast('Persona guardada', 'ok');
+    closeMB('mb-eq-persona');
+    eqCargarPersonas();
   });
 }
 
@@ -36044,19 +36158,29 @@ function eqPoblarAcceso(persona, usuario) {
   var cb = document.getElementById('eq-per-tiene-login');
   var detalle = document.getElementById('eq-per-acceso-detalle');
 
-  var pwOff = document.getElementById('eq-per-permisos-wrap');
-  if (pwOff) pwOff.style.display = 'none';
+  permResumen(persona ? usuario : null);
 
   if (!persona) {
-    // Persona nueva: ocultar bloque hasta que se guarde
+    // Persona nueva: todavía no hay a quién darle acceso. El botón de la ficha se
+    // apaga hasta que se guarde, en vez de abrir una pantalla que no puede guardar.
     cb.checked = false;
     cb.disabled = true;
     detalle.style.display = 'none';
-    var label = cb.parentElement;
-    if (label) label.title = 'Primero guardá la persona para poder darle acceso';
+    var btnNueva = document.getElementById('eq-per-acceso-btn');
+    if (btnNueva) {
+      btnNueva.disabled = true;
+      btnNueva.title = 'Primero guardá la persona para poder darle acceso';
+    }
+    var txtNueva = document.getElementById('eq-per-acceso-texto');
+    if (txtNueva) {
+      txtNueva.innerHTML = '<span style="color:var(--mut)">Guardá la persona y después '
+        + 'configurá su acceso.</span>';
+    }
     return;
   }
   cb.disabled = false;
+  var btnOk = document.getElementById('eq-per-acceso-btn');
+  if (btnOk) { btnOk.disabled = false; btnOk.title = ''; }
 
   if (usuario) {
     cb.checked = true;
@@ -36079,10 +36203,6 @@ function eqPoblarAcceso(persona, usuario) {
 
     // Estado de password
     eqRenderPwdEstado(usuario);
-    // Los permisos cuelgan del USUARIO, no de la persona: sin login no hay nada
-    // que configurar.
-    var pw = document.getElementById('eq-per-permisos-wrap');
-    if (pw) { pw.style.display = ''; permResumen(usuario.id); }
   } else {
     cb.checked = false;
     detalle.style.display = 'none';
