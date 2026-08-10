@@ -146,8 +146,8 @@ function buildSidebar(){
     <!-- Brand -->
     <div class="sb2-brand">
       <div class="sb2-brand-text">
-        <div class="sb2-brand-name">La Niña Bonita</div>
-        <div class="sb2-brand-sub">Sistema de gestión</div>
+        <div class="sb2-brand-name" id="sb2-brand-name">La Niña Bonita</div>
+        <div class="sb2-brand-sub" id="sb2-brand-sub">Sistema de gestión</div>
       </div>
       <div class="sb2-avatar" title="${escapeHtml(userName)}${userRole ? ' · ' + escapeHtml(userRole) : ''}" data-action="user-menu">
         ${escapeHtml(initials)}
@@ -239,14 +239,17 @@ function buildSidebar(){
 function sociedadColor(sociedad){
   if (!sociedad) return 'todas';
   const nombre = (sociedad.nombre || '').toLowerCase();
-  if (nombre.includes('san gerónimo') || nombre.includes('san geronimo')) return 'amarillo';
-  if (nombre.includes('puente cordón')   || nombre.includes('puente cordon')) return 'verde';
-  if (nombre.includes('barceló transporte') || nombre.includes('barcelo transporte')) return 'celeste';
+  // Los dos primeros salen del logo de la casa: el bordó del lettering y el ocre
+  // del medallón. Que el color sea el de la marca y no uno inventado es lo que
+  // hace que se reconozca sin tener que leer el nombre.
+  if (nombre.includes('san gerónimo') || nombre.includes('san geronimo')) return 'ocre';
+  if (nombre.includes('puente cordón')   || nombre.includes('puente cordon')) return 'bordo';
+  if (nombre.includes('barceló transporte') || nombre.includes('barcelo transporte')) return 'azul';
   if (nombre.includes('familia')) return 'carbon';
   // Fallback por función si el nombre no matchea exactamente
-  if (sociedad.funcion === 'productiva')  return 'verde';
-  if (sociedad.funcion === 'comercial')   return 'amarillo';
-  if (sociedad.funcion === 'transporte')  return 'celeste';
+  if (sociedad.funcion === 'productiva')  return 'bordo';
+  if (sociedad.funcion === 'comercial')   return 'ocre';
+  if (sociedad.funcion === 'transporte')  return 'azul';
   if (sociedad.funcion === 'estructura')  return 'carbon';
   return 'todas';
 }
@@ -263,6 +266,18 @@ function renderSocSelector(){
     : SOCIEDADES.find(s => s.id === CURRENT_SOCIEDAD);
   const currentLabel = activeSoc ? activeSoc.nombre : 'Todas las sociedades';
   const currentColor = activeSoc ? sociedadColor(activeSoc) : 'todas';
+
+  // El color pinta el MENÚ COMPLETO y el título dice la empresa. Antes el color
+  // llegaba sólo al botón del selector: había que buscarlo para saber dónde se
+  // estaba parado, y con tres empresas que comparten pantallas eso se pasa por alto.
+  const sb2 = document.querySelector('.sb2');
+  if (sb2) sb2.setAttribute('data-soc-color', currentColor);
+  const bn = document.getElementById('sb2-brand-name');
+  const bs = document.getElementById('sb2-brand-sub');
+  if (bn && bs) {
+    bn.textContent = activeSoc ? activeSoc.nombre.replace(/\s+(SA|SRL|S\.A\.|S\.R\.L\.)$/i, '') : 'La Niña Bonita';
+    bs.textContent = activeSoc ? 'Sistema de gestión' : 'Todas las sociedades';
+  }
 
   const FUNC_LABELS = {
     'productiva':  'Producción',
