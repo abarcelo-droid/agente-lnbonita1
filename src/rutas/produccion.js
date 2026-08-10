@@ -1356,7 +1356,21 @@ router.post('/compras', requireAuth, (req, res) => {
 
       if (lineas && lineas.length >= 2) {
         const año = new Date().getFullYear();
-        const ultimo = dbPa.prepare(`SELECT ref_codigo FROM pa_asientos WHERE ref_codigo LIKE 'FAC-${año}-%' ORDER BY id DESC LIMIT 1`).get();
+        // EL CORRELATIVO ES POR SOCIEDAD. Sin el filtro, las tres empresas
+        // compartían una sola serie: Puente Cordón sacaba el FAC-2026-0001, San
+        // Gerónimo el 0002 y Puente Cordón el 0003. El libro de cada una quedaba
+        // con huecos y sin ser correlativo, que es lo único que un libro contable
+        // no puede ser. Son sociedades fiscales distintas: cada una lleva su serie.
+        //
+        // Este INSERT no pasa sociedad_id, así que la fila toma el DEFAULT de la
+        // columna (Puente Cordón); el correlativo mira exactamente esa misma.
+        const socAsiento = dbPa.prepare(
+          "SELECT dflt_value v FROM pragma_table_info('pa_asientos') WHERE name='sociedad_id'"
+        ).get()?.v || 1;
+        const ultimo = dbPa.prepare(
+          `SELECT ref_codigo FROM pa_asientos
+            WHERE ref_codigo LIKE 'FAC-${año}-%' AND sociedad_id = ?
+            ORDER BY id DESC LIMIT 1`).get(socAsiento);
         let seq = 1;
         if (ultimo?.ref_codigo) { const p = ultimo.ref_codigo.split('-'); seq = (parseInt(p[2])||0)+1; }
         const refCodigo = `FAC-${año}-${String(seq).padStart(4,'0')}`;

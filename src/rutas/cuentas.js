@@ -837,7 +837,15 @@ router.post('/modelos/desde-factura', requireAuth, (req, res) => {
 
   // Generar código FAC-YYYY-NNNN
   const año = new Date().getFullYear();
-  const ultimo = db.prepare(`SELECT ref_codigo FROM pa_asientos WHERE ref_codigo LIKE 'FAC-${año}-%' ORDER BY id DESC LIMIT 1`).get();
+  // EL CORRELATIVO ES POR SOCIEDAD. Sin el filtro, las tres empresas compartían
+  // una sola numeración: Puente Cordón sacaba el FAC-2026-0001, San Gerónimo el
+  // 0002 y Puente Cordón el 0003. El libro de cada una quedaba con huecos y sin
+  // ser correlativo, que es exactamente lo que un libro contable no puede ser.
+  // Son sociedades fiscales distintas: cada una lleva su propia serie.
+  const ultimo = db.prepare(
+    `SELECT ref_codigo FROM pa_asientos
+      WHERE ref_codigo LIKE 'FAC-${año}-%' AND sociedad_id = ?
+      ORDER BY id DESC LIMIT 1`).get(sociedadPCId());
   let seq = 1;
   if (ultimo?.ref_codigo) {
     const partes = ultimo.ref_codigo.split('-');
