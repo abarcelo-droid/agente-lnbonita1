@@ -417,6 +417,12 @@ db.exec(`
     "INSERT OR IGNORE INTO sg_config_impositiva (clave, cuenta_id, descripcion) VALUES (?, NULL, ?)"
   );
   const claves = [
+    // Estas dos FALTABAN y son las que más se usan: sin iva_credito_fiscal no se
+    // puede registrar ninguna factura con IVA. Puente Cordón ya pasó por este
+    // mismo agujero (db_pa.js), y ahí además el PUT era un UPDATE sobre una fila
+    // inexistente: afectaba 0 filas y la pantalla igual decía "guardado".
+    ['iva_credito_fiscal',   'IVA Crédito Fiscal'],
+    ['iva_debito_fiscal',    'IVA Débito Fiscal'],
     ['percepcion_iva',       'Percepción IVA'],
     ['percepcion_iibb',      'Percepción IIBB'],
     ['percepcion_ganancias', 'Percepción Ganancias'],
