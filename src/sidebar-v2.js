@@ -36,7 +36,7 @@ const MAX_RECIENTES = 4;
 // SE ACTUALIZA A MANO, en el mismo cambio que se mergea. Sacarlo de git en el
 // arranque sonaba mejor, pero Railway despliega desde una copia sin historial:
 // diría siempre lo mismo y mentiría, que es peor que no estar.
-const VERSION = 'V644';
+const VERSION = 'V645';
 
 let SIDEBAR_DATA = { grupos: [], modulos: [] };
 let SOCIEDADES = [];                             // array de {id, nombre, funcion}
@@ -388,7 +388,7 @@ function renderFavoritos(){
         </div>
         <div class="sb2-empty-fav">
           <span class="star-pulse">★</span>
-          <span>${FAVORITOS.length ? 'No hay favoritos en esta sociedad. Cambiá a “Todas” para verlos.' : 'Marcá tus secciones más usadas con la estrella para acceso rápido desde acá.'}</span>
+          <span>${FAVORITOS.length ? 'No hay favoritos en esta empresa. Marcá con ★ los que uses seguido.' : 'Marcá tus secciones más usadas con la estrella para acceso rápido desde acá.'}</span>
         </div>
       </div>
     `;
@@ -687,38 +687,30 @@ function navigateTo(modulo){
 }
 
 function hookCurrentSection(){
-  // Detectar qué sección está activa en el nav viejo y marcar la nueva igual
+  // ── DÓNDE ABRE EL PANEL ─────────────────────────────────────────────────
+  // Los módulos que esta empresa tiene. Es la única lista que vale: el menú ya
+  // no muestra lo de las otras.
+  const suyos = (SIDEBAR_DATA.grupos || []).flatMap(g => g.items || []).filter(shouldShow);
+
+  // El nav viejo trae "Inicio" marcado como activo en el HTML (panel.html:312).
+  // Eso se respetaba SIEMPRE, así que el panel abría en Inicio pase lo que pase
+  // — y como Inicio es de San Gerónimo, parado en Puente Cordón o en Barceló se
+  // veían los pedidos y el CRM de San Gerónimo con el cartel diciendo otra cosa.
+  //
+  // Ahora se respeta sólo si ese módulo es DE ESTA EMPRESA. Si no, se ignora.
   const onItem = document.querySelector('nav .ni.on');
-  if (onItem){
-    const sec = onItem.dataset.sec;
-    if (sec) navigateTo(sec);
-  } else {
-    // ── DÓNDE ABRE EL PANEL ───────────────────────────────────────────────
-    // Inicio ya no es de todas: es de San Gerónimo, porque muestra SUS datos
-    // (pedidos del día, clientes activos, CRM de Dedicados). Desde que el
-    // selector manda, parado en otra empresa ese módulo no está en el menú.
-    //
-    // Pero la sección de inicio viene marcada como activa en el HTML desde
-    // siempre, así que el panel abría ahí igual y mostraba los datos de San
-    // Gerónimo con el cartel diciendo Puente Cordón. Justo la confusión que el
-    // selector vino a sacar.
-    //
-    // Ahora abre en el primer módulo QUE ESA EMPRESA TENGA. Cuando cada una
-    // tenga su propio Inicio, este camino deja de usarse solo.
-    const suyos = SIDEBAR_DATA.grupos
-      ? SIDEBAR_DATA.grupos.flatMap(g => g.items || []).filter(shouldShow)
-      : [];
-    const inicio = suyos.find(m => m.modulo === 'inicio');
-    const primero = inicio || suyos[0];
-    if (primero) {
-      navigateTo(primero.modulo);
-    } else {
-      // Sin un solo módulo no hay dónde ir: se apaga la sección de inicio para
-      // no dejar en pantalla los datos de otra empresa.
-      const sec = document.getElementById('sec-inicio');
-      if (sec) sec.classList.remove('on');
-    }
-  }
+  const pedido = onItem && onItem.dataset ? onItem.dataset.sec : null;
+  const sirve = pedido && suyos.some(m => m.modulo === pedido);
+
+  if (sirve){ navigateTo(pedido); return; }
+
+  const inicio = suyos.find(m => m.modulo === 'inicio');
+  const primero = inicio || suyos[0];
+  if (primero){ navigateTo(primero.modulo); return; }
+
+  // Sin un solo módulo no hay dónde ir: se apagan TODAS las secciones para no
+  // dejar en pantalla los datos de otra empresa.
+  document.querySelectorAll('.sec').forEach(sec => sec.classList.remove('on'));
 }
 
 async function toggleFavorito(modulo){
