@@ -36,11 +36,14 @@ const MAX_RECIENTES = 4;
 // SE ACTUALIZA A MANO, en el mismo cambio que se mergea. Sacarlo de git en el
 // arranque sonaba mejor, pero Railway despliega desde una copia sin historial:
 // diría siempre lo mismo y mentiría, que es peor que no estar.
-const VERSION = 'V642';
+const VERSION = 'V643';
 
 let SIDEBAR_DATA = { grupos: [], modulos: [] };
 let SOCIEDADES = [];                             // array de {id, nombre, funcion}
-let CURRENT_SOCIEDAD = 'all';                    // 'all' o sociedad_id (number)
+// SIEMPRE hay una empresa elegida. La opción "Todas" se sacó: con ella el menú
+// mostraba los ítems de las cuatro y no se sabía sobre qué datos trabajaba cada
+// pantalla. Arranca en null sólo hasta que fetchSidebarData elige una.
+let CURRENT_SOCIEDAD = null;                     // sociedad_id (number), nunca 'all'
 let FAVORITOS = [];
 let RECIENTES = [];
 let MODULO_INDEX = {};
@@ -118,13 +121,18 @@ async function fetchSidebarData(){
     ? socResp.value.sociedades
     : [];
 
-  // Restaurar selección previa
+  // ── SIEMPRE UNA EMPRESA ELEGIDA ──────────────────────────────────────
+  // Se restaura la última, y si no hay ninguna guardada —o la guardada ya no
+  // existe, o decía 'all' de antes— se elige la primera. Dejarlo sin elegir
+  // sería volver a "Todas" con otro nombre: el menú no sabría qué mostrar y las
+  // llamadas al servidor irían sin empresa.
   const saved = localStorage.getItem(LS_SOCIEDAD);
-  if (saved && saved !== 'all'){
-    const id = parseInt(saved, 10);
-    if (!isNaN(id) && SOCIEDADES.some(s => s.id === id)){
-      CURRENT_SOCIEDAD = id;
-    }
+  const id = saved && saved !== 'all' ? parseInt(saved, 10) : NaN;
+  if (!isNaN(id) && SOCIEDADES.some(s => s.id === id)){
+    CURRENT_SOCIEDAD = id;
+  } else if (SOCIEDADES.length){
+    CURRENT_SOCIEDAD = SOCIEDADES[0].id;
+    localStorage.setItem(LS_SOCIEDAD, String(CURRENT_SOCIEDAD));
   }
 
   RECIENTES = getRecientes().filter(m => MODULO_INDEX[m]);
@@ -133,8 +141,13 @@ async function fetchSidebarData(){
 
 // Helper: ¿este módulo debe mostrarse según el filtro actual de sociedad?
 function shouldShow(m){
-  if (CURRENT_SOCIEDAD === 'all') return true;
-  if (!m.sociedad_id) return true;  // transversales (sin sociedad) siempre
+  // Sin empresa elegida todavía (el primer instante de la carga) no se filtra:
+  // si no, el menú parpadearía vacío.
+  if (CURRENT_SOCIEDAD === null) return true;
+  // Un módulo sin empresa se ve desde todas. No debería quedar ninguno —
+  // ensure_modulo_empresas.js los asigna y avisa por consola si sobra alguno—
+  // pero si aparece uno nuevo es mejor que se vea a que desaparezca sin rastro.
+  if (!m.sociedad_id) return true;
   return m.sociedad_id === CURRENT_SOCIEDAD;
 }
 
@@ -276,10 +289,8 @@ function renderSocSelector(){
     return;
   }
 
-  const activeSoc = CURRENT_SOCIEDAD === 'all'
-    ? null
-    : SOCIEDADES.find(s => s.id === CURRENT_SOCIEDAD);
-  const currentLabel = activeSoc ? activeSoc.nombre : 'Todas las sociedades';
+  const activeSoc = SOCIEDADES.find(s => s.id === CURRENT_SOCIEDAD) || SOCIEDADES[0];
+  const currentLabel = activeSoc ? activeSoc.nombre : '—';
   const currentColor = activeSoc ? sociedadColor(activeSoc) : 'todas';
 
   // El color pinta el MENÚ COMPLETO y el título dice la empresa. Antes el color
@@ -291,7 +302,7 @@ function renderSocSelector(){
   const bs = document.getElementById('sb2-brand-sub');
   if (bn && bs) {
     bn.textContent = activeSoc ? activeSoc.nombre.replace(/\s+(SA|SRL|S\.A\.|S\.R\.L\.)$/i, '') : 'La Niña Bonita';
-    bs.textContent = activeSoc ? 'Sistema de gestión' : 'Todas las sociedades';
+    bs.textContent = 'Sistema de gestión';
   }
 
   const FUNC_LABELS = {
@@ -307,13 +318,9 @@ function renderSocSelector(){
     byFunc[k].push(s);
   }
 
-  let menuHTML = `
-    <div class="sb2-soc-item ${CURRENT_SOCIEDAD === 'all' ? 'active' : ''}" data-soc="all" data-soc-color="todas">
-      <span class="check"></span>
-      <span>Todas las sociedades</span>
-      <span class="soc-dot"></span>
-    </div>
-  `;
+  // Sin opción "Todas": el selector manda sobre qué empresa y qué tablas se
+  // trabaja, así que tiene que decir una.
+  let menuHTML = '';
   const ordenFunc = ['productiva','comercial','transporte','estructura','otra'];
   for (const k of ordenFunc){
     if (!byFunc[k]) continue;
@@ -352,16 +359,11 @@ function closeSocMenu(){
 }
 
 function selectSociedad(value){
-  const prev = localStorage.getItem(LS_SOCIEDAD) || 'all';
-  let nuevo;
-  if (value === 'all'){
-    nuevo = 'all';
-  } else {
-    const id = parseInt(value, 10);
-    if (isNaN(id)) return;
-    nuevo = String(id);
-  }
-  CURRENT_SOCIEDAD = (nuevo === 'all') ? 'all' : parseInt(nuevo, 10);
+  const prev = localStorage.getItem(LS_SOCIEDAD) || '';
+  const id = parseInt(value, 10);
+  if (isNaN(id)) return;          // 'all' ya no existe: se ignora
+  const nuevo = String(id);
+  CURRENT_SOCIEDAD = id;
   localStorage.setItem(LS_SOCIEDAD, nuevo);
   closeSocMenu();
   // Cambio real de sociedad = cambio de contexto de datos. Recarga limpia para que
