@@ -4025,5 +4025,109 @@ db.exec(`
   }
 })();
 
+// ═══════════════════════════════════════════════════════════════════════════
+// FASE 5 — EL ESQUELETO DEL PLAN DE CUENTAS PARA CADA EMPRESA
+// ═══════════════════════════════════════════════════════════════════════════
+// Desde que las 7 pantallas contables se ven desde cualquier empresa, San
+// Gerónimo y Barceló abren "Plan de Cuentas" y no ven nada. Esto les copia el
+// ESQUELETO del plan de Puente Cordón: las secciones y los títulos.
+//
+// LAS CUENTAS NO SE COPIAN, y es a propósito. La sección "5.03 Gastos de
+// Comercialización" le sirve a cualquiera; la cuenta "5.03.01.0012 Flete Camión
+// Scania" es de quien tiene ese camión. Copiar 268 cuentas de un productor
+// agrícola a un comercializador y a una transportista deja a cada contador
+// borrando cuentas que no usa — más trabajo que armarlas, y con el riesgo de
+// que queden cuentas ajenas imputadas por error.
+//
+// Los TÍTULOS sí, porque son la parte genérica de la jerarquía (Sección →
+// Título → Cuenta) y sin ellos no hay de dónde colgar una cuenta nueva: el
+// backend exige que toda cuenta cuelgue de un título.
+//
+// SOLO SIEMBRA LO QUE FALTA. Se mira por separado si la empresa tiene secciones
+// y si tiene títulos, porque hay un caso real: una migración vieja ya le espejó
+// 29 secciones a San Gerónimo pero ningún título. Guardando por secciones, SG se
+// quedaba sin títulos para siempre.
+//
+// Y NO PISA NADA. Si el contador ya cargó o borró algo, eso manda: sólo se
+// insertan los códigos que no existen en esa empresa.
+(function sembrarEsqueletoPlanDeCuentas() {
+  try {
+    const pc = db.prepare("SELECT id FROM sociedades WHERE nombre = 'Puente Cordón SA'").get()
+            || db.prepare("SELECT id FROM sociedades WHERE funcion = 'productiva' ORDER BY id LIMIT 1").get();
+    if (!pc) return;
+    const PC = pc.id;
+
+    const secsPC = db.prepare(
+      "SELECT codigo, nombre, orden, activo, grupo FROM pa_cuentas_secciones WHERE sociedad_id = ? ORDER BY codigo"
+    ).all(PC);
+    if (!secsPC.length) return;   // sin molde no hay nada que copiar
+
+    const titsPC = db.prepare(`
+      SELECT t.codigo, t.nombre, t.orden, t.activo, s.codigo AS seccion_codigo
+        FROM pa_cuentas_titulos t
+        JOIN pa_cuentas_secciones s ON s.id = t.seccion_id
+       WHERE t.sociedad_id = ? ORDER BY t.codigo`).all(PC);
+
+    const otras = db.prepare(
+      'SELECT id, nombre FROM sociedades WHERE activa = 1 AND id <> ?').all(PC);
+
+    const haySec = db.prepare(
+      'SELECT id FROM pa_cuentas_secciones WHERE sociedad_id = ? AND codigo = ?');
+    const insSec = db.prepare(
+      'INSERT INTO pa_cuentas_secciones (sociedad_id, codigo, nombre, orden, activo, grupo) VALUES (?,?,?,?,?,?)');
+    const hayTit = db.prepare(
+      'SELECT 1 FROM pa_cuentas_titulos WHERE sociedad_id = ? AND codigo = ?');
+    const insTit = db.prepare(
+      'INSERT INTO pa_cuentas_titulos (sociedad_id, seccion_id, codigo, nombre, orden, activo) VALUES (?,?,?,?,?,?)');
+
+    const cuantasSec = db.prepare('SELECT COUNT(*) c FROM pa_cuentas_secciones WHERE sociedad_id = ?');
+    const cuantosTit = db.prepare('SELECT COUNT(*) c FROM pa_cuentas_titulos WHERE sociedad_id = ?');
+
+    for (const soc of otras) {
+      // SE SIEMBRA UNA SOLA VEZ, y el "una sola vez" es que la empresa no tenga
+      // NADA de ese nivel. Sin este guard, el contador que borra el título
+      // "Fletes" porque su empresa no hace fletes se lo encuentra de vuelta al
+      // otro día: el arranque se lo repone. Un plan de cuentas que se
+      // autorepara contra la decisión del contador es peor que uno vacío.
+      //
+      // Los dos niveles se miran por separado porque hay un caso real: una
+      // migración vieja le espejó 29 secciones a San Gerónimo y ningún título.
+      // Con un guard único, SG se quedaba sin títulos para siempre.
+      const sembrarSec = cuantasSec.get(soc.id).c === 0;
+      const sembrarTit = cuantosTit.get(soc.id).c === 0;
+      if (!sembrarSec && !sembrarTit) continue;
+
+      let s = 0, t = 0, huerfanos = 0;
+      db.transaction(() => {
+        if (sembrarSec) for (const x of secsPC) {
+          if (haySec.get(soc.id, x.codigo)) continue;
+          insSec.run(soc.id, x.codigo, x.nombre, x.orden, x.activo, x.grupo || 'gastos');
+          s++;
+        }
+        if (sembrarTit) for (const x of titsPC) {
+          if (hayTit.get(soc.id, x.codigo)) continue;
+          // El título cuelga de la sección DE ESTA EMPRESA con el mismo código,
+          // no de la de Puente Cordón: apuntar al seccion_id de PC metería el
+          // título de una empresa adentro del plan de otra.
+          const secDestino = haySec.get(soc.id, x.seccion_codigo);
+          if (!secDestino) { huerfanos++; continue; }
+          insTit.run(soc.id, secDestino.id, x.codigo, x.nombre, x.orden, x.activo);
+          t++;
+        }
+      })();
+      if (s || t) {
+        console.log(`[PA][MS-F5] ${soc.nombre}: ${s} sección(es) y ${t} título(s) sembrados ` +
+                    `(0 cuentas — las carga el contador).`);
+      }
+      if (huerfanos) {
+        console.warn(`[PA][MS-F5] ${soc.nombre}: ${huerfanos} título(s) no se pudieron sembrar ` +
+                     `porque su sección no existe en esa empresa. Revisar el plan de cuentas.`);
+      }
+    }
+  } catch (e) {
+    console.error('[PA][MS-F5] Error sembrando el esqueleto del plan de cuentas:', e.message);
+  }
+})();
+
 export { db };
 export default db;
