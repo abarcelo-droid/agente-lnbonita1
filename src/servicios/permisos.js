@@ -152,11 +152,23 @@ export function filtrarModulos(usuario, modulos) {
   ).get(usuario.id);
 
   return modulos.filter(m => {
-    // La empresa manda sobre el módulo, no al revés: de otra empresa no se ve
-    // aunque el módulo esté habilitado.
-    if (m.sociedad_id !== null && m.sociedad_id !== undefined && !socs.includes(m.sociedad_id)) return false;
+    // EL ADMINISTRADOR VE TODO. Antes el filtro por empresa corría ANTES que
+    // esta línea, así que un admin no asignado a "Familia" no veía las pantallas
+    // de contabilidad —que estaban en Familia— y no había forma de darse cuenta:
+    // el menú simplemente no las tenía. Un administrador que no ve un módulo no
+    // puede ni configurarlo ni descubrir que existe.
     if (esAdmin) return true;
+
+    // LO QUE EL ADMINISTRADOR TILDÓ ES LA VERDAD. Si alguien se tomó el trabajo
+    // de habilitarle un módulo a una persona, no se lo saca por atrás un segundo
+    // filtro: eso es lo que hacía que tildar un acceso no tuviera efecto y no
+    // hubiera manera de entender por qué.
     if (tienePermisos) return !!nivelEnModulo(usuario, m.modulo);
+
+    // SIN CONFIGURAR: sigue rigiendo lo de antes —lo de sus empresas— para que
+    // nadie se quede sin menú ni pase a ver de más el día que esto se despliega.
+    // Acá el filtro por empresa SÍ tiene sentido: es el único que hay.
+    if (m.sociedad_id !== null && m.sociedad_id !== undefined && !socs.includes(m.sociedad_id)) return false;
     return todasLasSecciones || secciones.includes(m.modulo);
   }).map(m => ({ ...m, nivel: nivelEnModulo(usuario, m.modulo) || 'operar' }));
 }
