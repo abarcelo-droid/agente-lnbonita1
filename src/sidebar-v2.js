@@ -25,6 +25,19 @@ const LS_COLLAPSED = 'lnb-sidebar-collapsed-groups';
 const LS_SOCIEDAD  = 'lnb-sidebar-sociedad';
 const MAX_RECIENTES = 4;
 
+// ── QUÉ VERSIÓN ESTÁS VIENDO ──────────────────────────────────────────────
+// El número del último cambio mergeado (el número del PR). Se muestra abajo, al
+// lado del usuario.
+//
+// Para qué: mirando una pantalla no hay forma de saber si el arreglo que se
+// acaba de mergear ya está o todavía estás viendo la página vieja del navegador.
+// Media hora de "no funciona" que en realidad era un Ctrl+F5.
+//
+// SE ACTUALIZA A MANO, en el mismo cambio que se mergea. Sacarlo de git en el
+// arranque sonaba mejor, pero Railway despliega desde una copia sin historial:
+// diría siempre lo mismo y mentiría, que es peor que no estar.
+const VERSION = 'V633';
+
 let SIDEBAR_DATA = { grupos: [], modulos: [] };
 let SOCIEDADES = [];                             // array de {id, nombre, funcion}
 let CURRENT_SOCIEDAD = 'all';                    // 'all' o sociedad_id (number)
@@ -198,7 +211,9 @@ function buildSidebar(){
     <div class="sb2-user">
       <div class="sb2-user-meta">
         <div class="sb2-user-name">${escapeHtml(userName)}</div>
-        <div class="sb2-user-role">${escapeHtml(userRole || 'Operador')}</div>
+        <div class="sb2-user-role">${escapeHtml(userRole || 'Operador')}
+          <span class="sb2-version" title="Versión desplegada — es el número del último cambio que se mergeó">${VERSION}</span>
+        </div>
       </div>
       <button class="sb2-user-cog" data-action="cog" title="Cambiar contraseña / Cerrar sesión">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h0a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h0a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>

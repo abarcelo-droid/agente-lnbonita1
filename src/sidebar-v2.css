@@ -495,6 +495,13 @@
   font-size: 9.5px; color: rgba(255,255,255,.5);
   text-transform: uppercase; letter-spacing: .12em;
 }
+/* La versión, al lado del rol. Discreta pero legible: se mira sólo cuando algo
+   no cuadra, y en ese momento tiene que poder leerse sin buscarla. */
+.sb2-version{
+  display: inline-block; margin-left: 6px; padding: 1px 5px;
+  border-radius: 5px; background: rgba(255,255,255,.14);
+  color: rgba(255,255,255,.85); font-size: 9px; letter-spacing: .06em;
+}
 .sb2-user-cog{
   width: 28px; height: 28px; border-radius: 6px;
   display: flex; align-items: center; justify-content: center;
