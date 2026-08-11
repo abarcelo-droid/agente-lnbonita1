@@ -497,4 +497,136 @@ _repointClienteFK('sg_ven_cobranzas', `
 
 console.log("[SG] Esquema Contable/Ventas/Tesorería SG verificado (tablas sg_* vacías)");
 
+// ═══════════════════════════════════════════════════════════════════════════
+// EL PLAN DE CUENTAS DE SAN GERÓNIMO VA EN LAS TABLAS DE SAN GERÓNIMO
+// ═══════════════════════════════════════════════════════════════════════════
+// Arregla un error propio. El PR #630 le sembró a San Gerónimo el esqueleto del
+// plan de cuentas DENTRO de las tablas de Puente Cordón (pa_cuentas_secciones y
+// pa_cuentas_titulos, marcadas con sociedad_id), en vez de en las suyas. Quedó
+// con dos medios planes: unas secciones y títulos adentro del plan de PC, y sus
+// 28 tablas propias vacías. Es exactamente lo contrario de que cada empresa
+// tenga lo suyo.
+//
+// Hace dos cosas, en este orden:
+//   1. SIEMBRA el esqueleto en sg_cuentas_secciones y sg_cuentas_titulos.
+//   2. SACA de las tablas de Puente Cordón lo que había quedado de SG.
+//
+// EL PASO 2 NO BORRA A CIEGAS. pa_cuentas referencia tanto secciones como
+// títulos, así que antes de borrar cada fila se comprueba que NADA la esté
+// usando. Si algo la usa, no se toca y se avisa por consola con el detalle. Una
+// fila de más molesta; una cuenta contable que apunta a una sección que ya no
+// existe rompe el plan de cuentas entero.
+//
+// Todo dentro de db.transaction(): si algo falla, no queda a medias.
+(function moverPlanDeCuentasSGaSusTablas() {
+  try {
+    const hayTabla = (t) =>
+      !!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(t);
+    // Las tablas pa_* las crea db_pa.js. Según el orden de imports puede no haber
+    // corrido todavía: en ese caso no hay nada que mover y se sale sin ruido.
+    if (!hayTabla('pa_cuentas_secciones') || !hayTabla('pa_cuentas_titulos')) return;
+
+    const tieneCol = (t, c) => db.prepare(`PRAGMA table_info(${t})`).all().some(x => x.name === c);
+    if (!tieneCol('pa_cuentas_secciones', 'sociedad_id')) return;   // sin multisociedad, nada que separar
+
+    const soc = (n) => db.prepare('SELECT id FROM sociedades WHERE nombre = ?').get(n)?.id ?? null;
+    const SG = soc('San Gerónimo SA');
+    const PC = soc('Puente Cordón SA')
+            ?? db.prepare("SELECT id FROM sociedades WHERE funcion='productiva' ORDER BY id LIMIT 1").get()?.id;
+    if (!SG || !PC) return;
+
+    // ── 1) Sembrar el esqueleto en las tablas de San Gerónimo ─────────────
+    // Sólo si están vacías: si el contador ya empezó a cargar el plan de SG,
+    // esto no tiene nada que hacer ahí.
+    const nSecSG = db.prepare('SELECT COUNT(*) c FROM sg_cuentas_secciones').get().c;
+    const nTitSG = db.prepare('SELECT COUNT(*) c FROM sg_cuentas_titulos').get().c;
+
+    if (nSecSG === 0 || nTitSG === 0) {
+      const secsPC = db.prepare(`SELECT codigo, nombre, orden, activo, grupo
+                                   FROM pa_cuentas_secciones WHERE sociedad_id = ? ORDER BY codigo`).all(PC);
+      const titsPC = db.prepare(`SELECT t.codigo, t.nombre, t.orden, t.activo, s.codigo AS sec
+                                   FROM pa_cuentas_titulos t
+                                   JOIN pa_cuentas_secciones s ON s.id = t.seccion_id
+                                  WHERE t.sociedad_id = ? ORDER BY t.codigo`).all(PC);
+      if (secsPC.length) {
+        const haySec = db.prepare('SELECT id FROM sg_cuentas_secciones WHERE codigo = ?');
+        const insSec = db.prepare(
+          'INSERT INTO sg_cuentas_secciones (codigo, nombre, orden, activo, grupo) VALUES (?,?,?,?,?)');
+        const hayTit = db.prepare('SELECT 1 FROM sg_cuentas_titulos WHERE codigo = ?');
+        const insTit = db.prepare(
+          'INSERT INTO sg_cuentas_titulos (seccion_id, codigo, nombre, orden, activo) VALUES (?,?,?,?,?)');
+        let s = 0, t = 0;
+        db.transaction(() => {
+          if (nSecSG === 0) for (const x of secsPC) {
+            if (haySec.get(x.codigo)) continue;
+            insSec.run(x.codigo, x.nombre, x.orden, x.activo, x.grupo || 'gastos');
+            s++;
+          }
+          if (nTitSG === 0) for (const x of titsPC) {
+            if (hayTit.get(x.codigo)) continue;
+            const dest = haySec.get(x.sec);
+            if (!dest) continue;              // sin su sección, el título no tiene dónde ir
+            insTit.run(dest.id, x.codigo, x.nombre, x.orden, x.activo);
+            t++;
+          }
+        })();
+        if (s || t) {
+          console.log(`[SG] Plan de cuentas propio: ${s} sección(es) y ${t} título(s) sembrados ` +
+                      `en sg_cuentas_secciones/sg_cuentas_titulos (0 cuentas — las carga el contador).`);
+        }
+      }
+    }
+
+    // ── 2) Sacar de las tablas de Puente Cordón lo que era de SG ──────────
+    // Primero los títulos, después las secciones: al revés, borrar una sección
+    // dejaría títulos apuntando a algo que ya no existe.
+    const paTieneTitulo = tieneCol('pa_cuentas', 'titulo_id');
+    const usaTitulo = paTieneTitulo
+      ? db.prepare('SELECT COUNT(*) c FROM pa_cuentas WHERE titulo_id = ?')
+      : null;
+    const usaSeccion  = db.prepare('SELECT COUNT(*) c FROM pa_cuentas WHERE seccion_id = ?');
+    const titEnSeccion = db.prepare('SELECT COUNT(*) c FROM pa_cuentas_titulos WHERE seccion_id = ?');
+
+    const titsSG = db.prepare(
+      'SELECT id, codigo FROM pa_cuentas_titulos WHERE sociedad_id = ?').all(SG);
+    const secsSG = db.prepare(
+      'SELECT id, codigo FROM pa_cuentas_secciones WHERE sociedad_id = ?').all(SG);
+    if (!titsSG.length && !secsSG.length) return;
+
+    const delTit = db.prepare('DELETE FROM pa_cuentas_titulos WHERE id = ?');
+    const delSec = db.prepare('DELETE FROM pa_cuentas_secciones WHERE id = ?');
+    let borradosT = 0, borradasS = 0;
+    const enUso = [];
+
+    db.transaction(() => {
+      for (const t of titsSG) {
+        const n = usaTitulo ? usaTitulo.get(t.id).c : 0;
+        if (n > 0) { enUso.push(`título ${t.codigo} (usado por ${n} cuenta(s))`); continue; }
+        delTit.run(t.id); borradosT++;
+      }
+      for (const s of secsSG) {
+        const nc = usaSeccion.get(s.id).c;
+        const nt = titEnSeccion.get(s.id).c;
+        if (nc > 0 || nt > 0) {
+          enUso.push(`sección ${s.codigo} (usada por ${nc} cuenta(s) y ${nt} título(s))`);
+          continue;
+        }
+        delSec.run(s.id); borradasS++;
+      }
+    })();
+
+    if (borradosT || borradasS) {
+      console.log(`[SG] Sacadas de las tablas de Puente Cordón: ${borradasS} sección(es) y ` +
+                  `${borradosT} título(s) que eran de San Gerónimo. Su plan vive en sg_*.`);
+    }
+    if (enUso.length) {
+      console.warn(`[SG] NO se sacaron ${enUso.length} fila(s) de las tablas de Puente Cordón ` +
+                   `porque algo las está usando — se dejan para revisar a mano:`);
+      for (const x of enUso.slice(0, 12)) console.warn(`     · ${x}`);
+    }
+  } catch (e) {
+    console.error('[SG] Error moviendo el plan de cuentas de San Gerónimo a sus tablas:', e.message);
+  }
+})();
+
 export default db;
