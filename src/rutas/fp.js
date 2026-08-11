@@ -18,6 +18,10 @@
 import express from 'express';
 import db from '../servicios/db_fp.js';   // este import es el que crea el schema fp_*
 import { proyectar, generarCuotas, lunesDe, sumarMeses } from '../servicios/fp_motor.js';
+// El cerrojo de empresa. Antes cada router tenia su propia copia de esta
+// logica y todas ADIVINABAN cuando no les llegaba el dato: siete caian a
+// Puente Cordon y dos a San Geronimo. El por que esta en el servicio.
+import { exigirEmpresa, empresaFija, SAN_GERONIMO } from '../servicios/sociedad_modulo.js';
 import { cronograma, flujoMensual, kpisPrestamos, interesesPorEjercicio,
          pendientesDe, mesDeCuota, bancoDe } from '../servicios/fp_prestamos.js';
 
@@ -51,22 +55,15 @@ router.use(soloAdmin);
 // La sociedad la resuelve el backend: el interceptor de fetch del panel inyecta
 // sociedad_id solo a un whitelist de rutas que no incluye /api/fp. Default a San
 // Gerónimo, que es de quien es este flujo.
-let _sgId = null;
-function sociedadSGId() {
-  if (_sgId) return _sgId;
-  const r = db.prepare("SELECT id FROM sociedades WHERE nombre = 'San Gerónimo SA'").get()
-         || db.prepare('SELECT id FROM sociedades ORDER BY id LIMIT 1').get();
-  _sgId = r ? r.id : 1;
-  return _sgId;
-}
+
+// Delega en el cerrojo compartido. Se conserva el nombre para no tocar los
+// llamadores: lo que cambia es que ya no adivina.
+//
+// Para LEER devuelve siempre la empresa de este modulo. Para ESCRIBIR hay que
+// usar exigirEmpresa(req, res, ...), que ademas CORTA si el pedido viene con
+// otra empresa.
 function getSociedadId(req) {
-  const raw = req.body?.sociedad_id ?? req.query?.sociedad_id;
-  const id = (raw !== undefined && raw !== null && raw !== '') ? parseInt(raw, 10) : null;
-  if (Number.isInteger(id)) {
-    const ok = db.prepare('SELECT id FROM sociedades WHERE id = ?').get(id);
-    if (ok) return id;
-  }
-  return sociedadSGId();
+  return empresaFija(SAN_GERONIMO);
 }
 
 // Errores tipados: el wrap los convierte en la respuesta correcta.

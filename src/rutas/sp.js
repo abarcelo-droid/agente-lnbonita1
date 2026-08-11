@@ -15,6 +15,10 @@ import {
   accionesDisponibles, aplicarCambioDePaso, registrarEvento
 , destinoDevolucion, pasoInicio, destinosDevolucion} from '../servicios/sp_motor.js';
 import { encolar, render, procesarEnBackground } from '../servicios/sp_outbox.js';
+// El cerrojo de empresa. Antes cada router tenia su propia copia de esta
+// logica y todas ADIVINABAN cuando no les llegaba el dato: siete caian a
+// Puente Cordon y dos a San Geronimo. El por que esta en el servicio.
+import { exigirEmpresa, empresaFija, SAN_GERONIMO } from '../servicios/sociedad_modulo.js';
 
 const router = express.Router();
 
@@ -47,19 +51,15 @@ const esAdmin = (req) => req.user.rol === 'admin';
 
 // Sociedad resuelta en el backend: el interceptor del panel solo inyecta
 // sociedad_id a un whitelist de rutas que no incluye /api/sp. Molde de proveedores.js.
-let _socId = null;
-function sociedadDefault() {
-  if (_socId) return _socId;
-  const r = db.prepare("SELECT id FROM sociedades WHERE nombre = 'San Gerónimo SA'").get()
-         || db.prepare('SELECT id FROM sociedades ORDER BY id LIMIT 1').get();
-  _socId = r ? r.id : 1;
-  return _socId;
-}
+
+// Delega en el cerrojo compartido. Se conserva el nombre para no tocar los
+// llamadores: lo que cambia es que ya no adivina.
+//
+// Para LEER devuelve siempre la empresa de este modulo. Para ESCRIBIR hay que
+// usar exigirEmpresa(req, res, ...), que ademas CORTA si el pedido viene con
+// otra empresa.
 function getSociedadId(req) {
-  const raw = req.body?.sociedad_id ?? req.query?.sociedad_id;
-  const id = (raw !== undefined && raw !== null && raw !== '') ? parseInt(raw, 10) : null;
-  if (Number.isInteger(id) && db.prepare('SELECT id FROM sociedades WHERE id=?').get(id)) return id;
-  return sociedadDefault();
+  return empresaFija(SAN_GERONIMO);
 }
 
 const bad = (m) => Object.assign(new Error(m), { status: 400 });
