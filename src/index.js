@@ -15,6 +15,7 @@ import buscarRouter       from "./rutas/buscar.js";
 import abastoRouter       from "./rutas/abasto.js";
 import authRouter, { bloquearSiSoloLectura } from "./rutas/auth.js";
 import { exigirNivel } from "./servicios/permisos.js";
+import portonApi from "./servicios/porton_api.js";
 import produccionRouter   from "./rutas/produccion.js";
 import scoutRouter        from "./rutas/scout.js";
 import cuentasRouter      from "./rutas/cuentas.js";
@@ -95,6 +96,15 @@ app.use("/data/sg",         express.static(path.join(__dirname, "../data/sg")));
 // ANTES del guard de solo-lectura, del guard de /panel y de todos los routers, que
 // son los que leen req.cookies.lnb_user. Ver src/servicios/auth_sesion.js.
 app.use(sesionFirmada);
+
+// ── EL PORTÓN: PARA ENTRAR A /api HAY QUE ESTAR LOGUEADO ──────────────────
+// Va acá y no más abajo: DESPUÉS de sesionFirmada, que es quien puebla req.user,
+// y ANTES de todos los routers, incluido el de auth. El por qué —y la lista de
+// las pocas rutas que por definición llegan sin sesión— está en el servicio.
+//
+// Antes de esto los dos middlewares de abajo dejaban pasar sin usuario, así que
+// se llegaba a unas 130 escrituras sin loguearse.
+app.use("/api", portonApi);
 
 // Solo-lectura: bloquea escrituras (POST/PUT/PATCH/DELETE) para usuarios con
 // solo_lectura=1 que no son admin. Debe ir antes de cualquier router /api.
