@@ -5,6 +5,10 @@
 
 import express from 'express';
 import db from '../servicios/db.js';
+// El cerrojo de empresa. Antes cada router tenia su propia copia de esta
+// logica y todas ADIVINABAN cuando no les llegaba el dato: siete caian a
+// Puente Cordon y dos a San Geronimo. El por que esta en el servicio.
+import { exigirEmpresa, empresaFija, PUENTE_CORDON } from '../servicios/sociedad_modulo.js';
 
 const router = express.Router();
 
@@ -54,24 +58,17 @@ function logAccion({ cuenta_id = null, seccion_id = null, accion, detalle = null
 // una sociedad. Si el request no manda sociedad_id, se usa Puente Cordón (PC)
 // por defecto, para mantener compatibilidad con el panel actual (que todavía no
 // envía la dimensión). El cableado del selector en la UI es follow-up.
-let _pcId = null;
-function sociedadPCId() {
-  if (_pcId) return _pcId;
-  const r = db.prepare("SELECT id FROM sociedades WHERE nombre = 'Puente Cordón SA'").get()
-         || db.prepare("SELECT id FROM sociedades WHERE funcion = 'productiva' ORDER BY id LIMIT 1").get();
-  _pcId = r ? r.id : 1;
-  return _pcId;
-}
+
 // Resuelve la sociedad del request (query o body). Valida que exista; si no
 // viene o es inválida, cae a PC.
+// Delega en el cerrojo compartido. Se conserva el nombre para no tocar los
+// llamadores: lo que cambia es que ya no adivina.
+//
+// Para LEER devuelve siempre la empresa de este modulo. Para ESCRIBIR hay que
+// usar exigirEmpresa(req, res, ...), que ademas CORTA si el pedido viene con
+// otra empresa.
 function getSociedadId(req) {
-  const raw = req.body?.sociedad_id ?? req.query?.sociedad_id;
-  const id = (raw !== undefined && raw !== null && raw !== '') ? parseInt(raw, 10) : null;
-  if (Number.isInteger(id)) {
-    const ok = db.prepare('SELECT id FROM sociedades WHERE id = ?').get(id);
-    if (ok) return id;
-  }
-  return sociedadPCId();
+  return empresaFija(PUENTE_CORDON);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -782,8 +779,12 @@ router.post('/modelos', requireAdmin, (req, res) => {
   }
   try {
     const tx = db.transaction(() => {
-      const r = db.prepare(`INSERT INTO adm_asientos_modelo (nombre, descripcion) VALUES (?, ?)`)
-        .run(String(nombre).trim(), descripcion || null);
+      // La empresa va EXPLICITA. La columna tiene DEFAULT Puente Cordon, asi que
+      // sin pasarla todo modelo nuevo nacia marcado como de PC sin importar
+      // desde donde se creara — el mismo mecanismo exacto que hacia caer las
+      // facturas de compra en la empresa equivocada.
+      const r = db.prepare(`INSERT INTO adm_asientos_modelo (nombre, descripcion, sociedad_id) VALUES (?, ?, ?)`)
+        .run(String(nombre).trim(), descripcion || null, getSociedadId(req));
       const modeloId = r.lastInsertRowid;
       const ins = db.prepare(`INSERT INTO adm_asientos_modelo_lineas (modelo_id, cuenta_id, lado, descripcion, orden, tipo_linea) VALUES (?, ?, ?, ?, ?, ?)`);
       lineas.forEach((l, i) => ins.run(modeloId, l.cuenta_id, l.lado, l.descripcion || null, i, l.tipo_linea || 'libre'));

@@ -18,6 +18,10 @@ import db from '../servicios/db_pli.js';   // este import es el que crea el sche
 import { calcularPlan, lunesDe } from '../servicios/pli_motor.js';
 import { subirArchivo, obtenerArchivo, storageConfigurado } from '../servicios/storage.js';
 import { cotizacionVigente, fijarCotizacionManual, TIPOS as TIPOS_DOLAR } from '../servicios/cotizacion_dolar.js';
+// El cerrojo de empresa. Antes cada router tenia su propia copia de esta
+// logica y todas ADIVINABAN cuando no les llegaba el dato: siete caian a
+// Puente Cordon y dos a San Geronimo. El por que esta en el servicio.
+import { exigirEmpresa, empresaFija, PUENTE_CORDON } from '../servicios/sociedad_modulo.js';
 
 const router = express.Router();
 
@@ -49,23 +53,15 @@ router.use(requireAuth);
 // No se agrega pli al whitelist a propósito: cuando el selector del sidebar está
 // en "Todas", ese interceptor BLOQUEA toda escritura con un toast, lo que sería
 // peor UX en una beta que ni siquiera tiene selector de sociedad.
-let _pcId = null;
-function sociedadPCId() {
-  if (_pcId) return _pcId;
-  const r = db.prepare("SELECT id FROM sociedades WHERE nombre = 'Puente Cordón SA'").get()
-         || db.prepare("SELECT id FROM sociedades WHERE funcion = 'productiva' ORDER BY id LIMIT 1").get()
-         || db.prepare('SELECT id FROM sociedades ORDER BY id LIMIT 1').get();
-  _pcId = r ? r.id : 1;
-  return _pcId;
-}
+
+// Delega en el cerrojo compartido. Se conserva el nombre para no tocar los
+// llamadores: lo que cambia es que ya no adivina.
+//
+// Para LEER devuelve siempre la empresa de este modulo. Para ESCRIBIR hay que
+// usar exigirEmpresa(req, res, ...), que ademas CORTA si el pedido viene con
+// otra empresa.
 function getSociedadId(req) {
-  const raw = req.body?.sociedad_id ?? req.query?.sociedad_id;
-  const id = (raw !== undefined && raw !== null && raw !== '') ? parseInt(raw, 10) : null;
-  if (Number.isInteger(id)) {
-    const ok = db.prepare('SELECT id FROM sociedades WHERE id = ?').get(id);
-    if (ok) return id;
-  }
-  return sociedadPCId();
+  return empresaFija(PUENTE_CORDON);
 }
 
 // Errores tipados: el wrap los convierte en la respuesta correcta.

@@ -2,6 +2,10 @@
 // ── ÓRDENES DE PAGO ──────────────────────────────────────────────────────────
 import express from 'express';
 import db from '../servicios/db_pa.js';
+// El cerrojo de empresa. Antes cada router tenia su propia copia de esta
+// logica y todas ADIVINABAN cuando no les llegaba el dato: siete caian a
+// Puente Cordon y dos a San Geronimo. El por que esta en el servicio.
+import { exigirEmpresa, empresaFija, PUENTE_CORDON } from '../servicios/sociedad_modulo.js';
 
 const router = express.Router();
 
@@ -13,22 +17,15 @@ function getUser(req) {
 // ── Multisociedad (Fase 2) ──────────────────────────────────────────────────
 // La OP pertenece a la sociedad que paga (la de su cuenta/caja; si paga con cheque,
 // la del proveedor). La numeración OP-AAAA-NNNN es por sociedad.
-let _pcId = null;
-function sociedadPCId() {
-  if (_pcId) return _pcId;
-  const r = db.prepare("SELECT id FROM sociedades WHERE nombre = 'Puente Cordón SA'").get()
-         || db.prepare("SELECT id FROM sociedades WHERE funcion = 'productiva' ORDER BY id LIMIT 1").get();
-  _pcId = r ? r.id : 1;
-  return _pcId;
-}
+
+// Delega en el cerrojo compartido. Se conserva el nombre para no tocar los
+// llamadores: lo que cambia es que ya no adivina.
+//
+// Para LEER devuelve siempre la empresa de este modulo. Para ESCRIBIR hay que
+// usar exigirEmpresa(req, res, ...), que ademas CORTA si el pedido viene con
+// otra empresa.
 function getSociedadId(req) {
-  const raw = req.body?.sociedad_id ?? req.query?.sociedad_id;
-  const id = (raw !== undefined && raw !== null && raw !== '') ? parseInt(raw, 10) : null;
-  if (Number.isInteger(id)) {
-    const ok = db.prepare('SELECT id FROM sociedades WHERE id = ?').get(id);
-    if (ok) return id;
-  }
-  return sociedadPCId();
+  return empresaFija(PUENTE_CORDON);
 }
 function sociedadDeCuenta(cuentaId) {
   const c = db.prepare('SELECT sociedad_id FROM fin_cuentas WHERE id = ?').get(parseInt(cuentaId));
@@ -219,13 +216,20 @@ router.post('/', (req, res) => {
 
         // 3. Fallback: buscar en el modelo del proveedor si no encontramos en los asientos
         if (!cuentaProveedorId) {
+          // FILTRADO POR EMPRESA, igual que el intento de arriba. Sin esto, el
+          // fallback podia traer la cuenta de Proveedores del modelo de OTRA
+          // sociedad y la orden de pago quedaba imputada a un libro ajeno. Es el
+          // unico de los dos caminos que no lo hacia.
           const lineaMod = db.prepare(`
             SELECT aml.cuenta_id
             FROM adm_asientos_modelo_lineas aml
             JOIN adm_proveedores ap ON ap.asiento_modelo_id = aml.modelo_id
+            JOIN adm_asientos_modelo am ON am.id = aml.modelo_id
+            JOIN pa_cuentas c ON c.id = aml.cuenta_id
             WHERE ap.id = ? AND aml.tipo_linea = 'proveedores'
+              AND ap.sociedad_id = ? AND am.sociedad_id = ? AND c.sociedad_id = ?
             LIMIT 1
-          `).get(parseInt(proveedor_id));
+          `).get(parseInt(proveedor_id), sociedadId, sociedadId, sociedadId);
           cuentaProveedorId = lineaMod?.cuenta_id || null;
         }
 
