@@ -87,8 +87,7 @@ function esPublica(metodo, ruta) {
   return false;
 }
 
-// El portón. Se monta DESPUÉS de sesionFirmada —que es quien puebla req.user— y
-// ANTES de todos los routers.
+// El portón. Se monta DESPUÉS de sesionFirmada y ANTES de todos los routers.
 export default function portonApi(req, res, next) {
   // OPTIONS es el pedido que el navegador manda solo antes de un POST a otro
   // dominio. No lleva cookies y no hace nada: pedirle sesión rompería sin motivo.
@@ -100,6 +99,29 @@ export default function portonApi(req, res, next) {
   const ruta = (req.baseUrl || '') + (req.path || '');
   if (esPublica(req.method, ruta)) return next();
 
+  // ── DE DÓNDE SALE LA IDENTIDAD ────────────────────────────────────────
+  // De req.cookies.lnb_user, NO de req.user. Esto tiró producción abajo una vez
+  // y vale la pena que quede escrito.
+  //
+  // sesionFirmada NO puebla req.user. Lo que hace es verificar la cookie firmada
+  // lnb_auth, releer al usuario de la base y REESCRIBIR req.cookies.lnb_user con
+  // los datos verdaderos; si la identidad no es válida, BORRA esa cookie. Recién
+  // adentro de cada router, que la parsea por su cuenta, aparece req.user.
+  //
+  // O sea que acá req.user está siempre vacío, y preguntarle a él daba 401 para
+  // todo el mundo: el panel cargaba, la primera llamada contestaba 401, el panel
+  // mandaba al login, el login andaba, volvía al panel y otra vez 401. Loop.
+  //
+  // Confiar en que la cookie exista es exactamente lo mismo que confiar en la
+  // firma: si la firma no valida, sesionFirmada ya la borró antes de llegar acá.
+  const crudo = req.cookies && req.cookies.lnb_user;
+  if (crudo) {
+    try {
+      const u = typeof crudo === 'string' ? JSON.parse(crudo) : crudo;
+      if (u && u.id) return next();
+    } catch (e) { /* cookie ilegible: se trata como sin sesión */ }
+  }
+  // Por si algún middleware anterior sí lo dejó puesto (los routers lo hacen).
   if (req.user && req.user.id) return next();
 
   // El cuerpo va en JSON SÍ O SÍ. Scout llama a r.json() sobre toda respuesta
