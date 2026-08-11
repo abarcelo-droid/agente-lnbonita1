@@ -597,7 +597,11 @@ router.get('/asientos', (req, res) => {
     const lineas = db.prepare(`
       SELECT l.*, c.codigo AS cuenta_codigo, c.nombre AS cuenta_nombre
         FROM sg_asientos_lineas l
-        JOIN sg_cuentas c ON c.id = l.cuenta_id
+        -- LEFT y no JOIN interno: si una línea quedó apuntando a una cuenta que
+        -- ya no está, un JOIN interno la descarta y el asiento se muestra
+        -- descuadrado sin que nada avise. Mejor que salga sin nombre de cuenta y
+        -- se vea el problema.
+        LEFT JOIN sg_cuentas c ON c.id = l.cuenta_id
        WHERE l.asiento_id IN (${ids.map(() => '?').join(',')})
        ORDER BY l.id`).all(...ids);
     const porAsiento = {};

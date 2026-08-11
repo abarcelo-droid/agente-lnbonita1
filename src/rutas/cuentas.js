@@ -653,7 +653,34 @@ router.get('/asientos', (req, res) => {
   if (desde) { sql += ' AND a.fecha >= ?'; params.push(desde); }
   if (hasta) { sql += ' AND a.fecha <= ?'; params.push(hasta); }
   sql += ' ORDER BY a.fecha DESC, a.id DESC LIMIT 200';
-  res.json({ ok: true, data: db.prepare(sql).all(...params) });
+  const asientos = db.prepare(sql).all(...params);
+
+  // LAS LÍNEAS VIAJAN CON LA CABECERA. Sin esto la tabla muestra Debe y Haber en
+  // $0,00 en todas las filas —los suma sobre a.lineas— y el Excel sale con 11
+  // valores contra 12 encabezados: el estado cae bajo la columna Haber, el
+  // usuario bajo Estado, y no hay ni una cuenta ni un importe en todo el
+  // archivo. Un libro diario exportado sin importes no sirve para nada.
+  //
+  // Se traen todas de una sola consulta y se reparten en JS: una consulta por
+  // asiento serían 200 para pintar una tabla.
+  //
+  // El JOIN a pa_cuentas es LEFT a propósito: si una línea quedó apuntando a una
+  // cuenta que ya no está, con un JOIN interno esa línea desaparece y el asiento
+  // se muestra descuadrado sin que nada avise. Mejor que aparezca sin nombre de
+  // cuenta y se vea el problema.
+  if (asientos.length) {
+    const ids = asientos.map(a => a.id);
+    const lineas = db.prepare(`
+      SELECT l.*, c.codigo AS cuenta_codigo, c.nombre AS cuenta_nombre
+        FROM pa_asientos_lineas l
+        LEFT JOIN pa_cuentas c ON c.id = l.cuenta_id
+       WHERE l.asiento_id IN (${ids.map(() => '?').join(',')})
+       ORDER BY l.id`).all(...ids);
+    const porAsiento = {};
+    for (const l of lineas) (porAsiento[l.asiento_id] = porAsiento[l.asiento_id] || []).push(l);
+    for (const a of asientos) a.lineas = porAsiento[a.id] || [];
+  }
+  res.json({ ok: true, data: asientos });
 });
 
 // GET /api/pa/cuentas/asientos/:id — detalle con líneas
