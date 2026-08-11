@@ -53,7 +53,12 @@ const HIJAS = new Set([
   'pa_liquidaciones_items', 'pa_cuentas_titulos', 'pa_cuentas_log',
 ]);
 
-export function informeContable(db) {
+// Se recibe por parámetro con default, en vez de importar db_pa.js, para no
+// atar este informe al orden de arranque de los módulos: si algún día se
+// invierte el orden de los imports, un ciclo acá dejaría el diagnóstico sin
+// poder cargarse, que es justo cuando más se lo necesita.
+export function informeContable(db, fallasMigracion) {
+  fallasMigracion = fallasMigracion || [];
   const L = [];
   const w = (s = '') => L.push(s);
   const raya = (c = '─') => w('  ' + c.repeat(74));
@@ -362,6 +367,26 @@ export function informeContable(db) {
           (r.oculto ? '   ← OCULTA' : ''));
       }
     }
+  }
+
+  // ── 6. MIGRACIONES QUE FALLARON AL ARRANCAR ─────────────────────────────
+  // Las migraciones cambian la forma de las tablas al prender el servidor. Si
+  // una falla, el error va a la consola y el servidor arranca igual: Railway lo
+  // ve responder y da el deploy por bueno, en verde. El problema aparece días
+  // después, cuando alguien no puede cargar algo y nadie relaciona una cosa con
+  // la otra.
+  //
+  // Acá se ven. Que estén a la vista es la diferencia entre enterarse hoy y
+  // enterarse cuando ya hay datos cargados encima.
+  titulo('6. MIGRACIONES QUE FALLARON AL ARRANCAR');
+  if (!fallasMigracion.length) {
+    w('  Ninguna. Todas las tablas se rehicieron completas, o no hubo que tocarlas.');
+  } else {
+    w(`  ${fallasMigracion.length} migración(es) fallaron y se revirtieron enteras.`);
+    w('  La tabla quedó como estaba: no hay datos a medio migrar. Pero el cambio');
+    w('  que se quería hacer NO se hizo, y se va a reintentar en cada arranque.');
+    w();
+    for (const f of fallasMigracion) w(`   · ${f.tabla}: ${f.error}`);
   }
 
   // ── RESUMEN ─────────────────────────────────────────────────────────────

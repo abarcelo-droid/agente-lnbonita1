@@ -7,6 +7,9 @@ import express from 'express';
 import { getDb } from '../servicios/db.js';
 import '../servicios/db_org.js';  // inicializa schema al primer import
 import { informeContable } from '../servicios/diagnostico_contable.js';
+// La lista de migraciones que fallaron al arrancar. Va al informe para que se
+// vean: si no, el error queda en la consola de Railway y nadie lo mira.
+import { fallasMigracion } from '../servicios/db_pa.js';
 
 const router = express.Router();
 const db = () => getDb();
@@ -951,7 +954,7 @@ router.get('/diagnostico-contable', requireAdmin, (req, res) => {
     // Se usa el handle que ya tiene el servidor en vez de abrir la base otra vez:
     // un segundo handle sobre el mismo archivo compite con el checkpoint del WAL
     // que index.js hace al apagarse.
-    res.type('text/plain; charset=utf-8').send(informeContable(db()));
+    res.type('text/plain; charset=utf-8').send(informeContable(db(), fallasMigracion));
   } catch (e) {
     console.error('[ORG] Error en diagnóstico contable:', e.message);
     res.status(500).type('text/plain; charset=utf-8')
