@@ -29,6 +29,58 @@ try {
 // Exportar referencia al path para que otros módulos puedan hacer checkpoint/backup
 export const dbPath = DB_PATH;
 
+// ═══════════════════════════════════════════════════════════════════════════
+// REHACER UNA TABLA SIN DEJAR LA BASE A MEDIO CAMINO
+// ═══════════════════════════════════════════════════════════════════════════
+// Para cambiar la forma de una tabla en SQLite hay que rehacerla entera: crear
+// la nueva, copiar las filas, borrar la vieja, renombrar. Eso son cuatro pasos
+// que tienen que pasar todos o ninguno.
+//
+// LO QUE ESTABA MAL. Se hacía con BEGIN; ... COMMIT; escrito adentro de un
+// db.exec() y SIN ROLLBACK. Si una sentencia del medio falla, exec corta ahí: el
+// COMMIT nunca corre, y como tampoco hay ROLLBACK, la transacción queda ABIERTA
+// para todo lo que dure el proceso. A partir de ese momento:
+//
+//   · PRAGMA foreign_keys no hace NADA mientras haya una transacción abierta, así
+//     que el `finally` que las vuelve a prender es un no-op y quedan apagadas.
+//   · El catch de la migración sólo imprime el error. El servidor arranca igual.
+//   · Railway ve que responde y da el deploy por bueno, en verde.
+//   · La tabla _v2 huérfana queda en la base, y el próximo arranque falla con
+//     "table already exists": la migración queda trabada para siempre.
+//
+// O sea: base a medio migrar, sin protecciones de integridad, y todo verde.
+//
+// LO QUE HACE ESTO. db.transaction() de better-sqlite3 revierte solo cuando algo
+// tira, así que o queda la tabla nueva completa o queda la vieja intacta. Nunca
+// la mitad. Y borra la _v2 antes de empezar, para que un intento anterior que
+// murió no trabe el siguiente.
+//
+// Las fallas se anotan en `fallasMigracion` en vez de perderse en la consola: un
+// esquema roto en silencio es lo que hace que el problema aparezca tres días
+// después, cuando alguien no puede cargar una factura.
+export const fallasMigracion = [];
+
+export function rehacerTabla(nombre, sentencias) {
+  const fkPrev = db.pragma('foreign_keys', { simple: true });
+  db.pragma('foreign_keys = OFF');
+  try {
+    db.transaction(() => {
+      db.exec(`DROP TABLE IF EXISTS ${nombre}_v2`);
+      db.exec(sentencias);
+    })();
+    return true;
+  } catch (e) {
+    fallasMigracion.push({ tabla: nombre, error: e.message });
+    console.error(`[PA][MIGRACION] "${nombre}" FALLÓ y se revirtió entera: ${e.message}`);
+    console.error(`[PA][MIGRACION] La tabla quedó como estaba. Revisar antes del próximo deploy.`);
+    return false;
+  } finally {
+    // Acá el pragma SÍ tiene efecto: db.transaction() ya cerró (commit o
+    // rollback), así que no queda ninguna transacción abierta bloqueándolo.
+    db.pragma(`foreign_keys = ${fkPrev ? 'ON' : 'OFF'}`);
+  }
+}
+
 // ── Esquema ────────────────────────────────────────────────────────────────
 db.exec(`
   CREATE TABLE IF NOT EXISTS clientes (
@@ -585,8 +637,7 @@ db.exec(`
   } catch(e) {
     // CHECK constraint no permite 'campo' → recrear tabla sin CHECK
     try {
-      db.exec(`
-        BEGIN;
+      rehacerTabla('usuarios', `
         CREATE TABLE usuarios_v2 (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           nombre TEXT NOT NULL,
@@ -601,7 +652,6 @@ db.exec(`
         INSERT INTO usuarios_v2 SELECT * FROM usuarios;
         DROP TABLE usuarios;
         ALTER TABLE usuarios_v2 RENAME TO usuarios;
-        COMMIT;
       `);
       console.log("[DB] usuarios recreada — rol campo habilitado");
     } catch(e2) { console.error("[DB] Error migrando rol campo:", e2.message); }

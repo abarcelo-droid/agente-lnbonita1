@@ -12,6 +12,12 @@ import path from 'path';
 // db_org.js NO importa db_pa.js → no hay ciclo.
 import './db_org.js';
 
+// El helper para rehacer tablas vive en db.js, que es el modulo base: la
+// migracion de `usuarios` esta alla y necesita exactamente lo mismo. Se
+// re-exporta para no romper a quien ya lo importa de aca.
+export { rehacerTabla, fallasMigracion } from './db.js';
+import { rehacerTabla } from './db.js';
+
 // ── TABLAS MAESTRAS ────────────────────────────────────────────────────────
 
 db.exec(`
@@ -295,8 +301,7 @@ export function getCampañaActiva() {
     const test = db2.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='pa_lotes'").get();
     if (test && test.sql && test.sql.includes("Norte")) {
       // Recrear tabla sin el CHECK
-      db2.exec(`
-        BEGIN;
+      rehacerTabla('pa_lotes', `
         CREATE TABLE pa_lotes_v2 (
           id          INTEGER PRIMARY KEY AUTOINCREMENT,
           nombre      TEXT NOT NULL,
@@ -312,7 +317,6 @@ export function getCampañaActiva() {
         INSERT INTO pa_lotes_v2 SELECT id,nombre,sector_id,finca,hectareas,poligono_maps,red_agua,activo,notas,creado_en FROM pa_lotes;
         DROP TABLE pa_lotes;
         ALTER TABLE pa_lotes_v2 RENAME TO pa_lotes;
-        COMMIT;
       `);
       console.log("[PA] pa_lotes recreada — red_agua sin CHECK restrictivo");
     }
@@ -772,8 +776,7 @@ export function getCampañaActiva() {
       console.log("[PA] Columna tipo (anual/estacional) agregada en pa_campañas");
     } else if (t && t.sql && /CHECK\(tipo IN \('verano','invierno'\)\)/.test(t.sql)) {
       db.pragma('foreign_keys = OFF');
-      db.exec(`
-        BEGIN;
+      rehacerTabla('pa_campañas', `
         CREATE TABLE pa_campañas_v2 (
           id           INTEGER PRIMARY KEY AUTOINCREMENT,
           nombre       TEXT NOT NULL UNIQUE,
@@ -788,7 +791,6 @@ export function getCampañaActiva() {
           FROM pa_campañas;
         DROP TABLE pa_campañas;
         ALTER TABLE pa_campañas_v2 RENAME TO pa_campañas;
-        COMMIT;
       `);
       const fk = db.prepare("PRAGMA foreign_key_check").all();
       if (fk.length > 0) console.error('[PA] ⚠️  FK check tras migrar pa_campañas:', fk);
@@ -1010,8 +1012,7 @@ export function getCampañaActiva() {
 
       const cols = db.prepare("PRAGMA table_info(pa_insumos)").all().map(c => c.name);
       const colsStr = cols.join(',');
-      db.exec(`
-        BEGIN;
+      rehacerTabla('pa_insumos', `
         CREATE TABLE pa_insumos_v2 (
           id            INTEGER PRIMARY KEY AUTOINCREMENT,
           nombre        TEXT NOT NULL,
@@ -1029,7 +1030,6 @@ export function getCampañaActiva() {
         INSERT INTO pa_insumos_v2 (${colsStr}) SELECT ${colsStr} FROM pa_insumos;
         DROP TABLE pa_insumos;
         ALTER TABLE pa_insumos_v2 RENAME TO pa_insumos;
-        COMMIT;
       `);
 
       // Verificar integridad de FK antes de reactivar (debe estar vacío)
@@ -3162,8 +3162,7 @@ db.exec(`
 
     // ── 1) pa_cuentas_secciones: rebuild con sociedad_id + UNIQUE(sociedad_id,codigo) ──
     if (!tieneCol('pa_cuentas_secciones', 'sociedad_id')) {
-      db.exec(`
-        BEGIN;
+      rehacerTabla('pa_cuentas_secciones', `
         CREATE TABLE pa_cuentas_secciones_v2 (
           id              INTEGER PRIMARY KEY AUTOINCREMENT,
           sociedad_id     INTEGER NOT NULL REFERENCES sociedades(id),
@@ -3183,15 +3182,13 @@ db.exec(`
         DROP TABLE pa_cuentas_secciones;
         ALTER TABLE pa_cuentas_secciones_v2 RENAME TO pa_cuentas_secciones;
         CREATE INDEX IF NOT EXISTS idx_pa_secciones_sociedad ON pa_cuentas_secciones(sociedad_id);
-        COMMIT;
       `);
       console.log('[PA][MS-F1] pa_cuentas_secciones: sociedad_id agregado (existentes → PC), UNIQUE(sociedad_id,codigo)');
     }
 
     // ── 2) pa_cuentas: rebuild con sociedad_id + UNIQUE(sociedad_id,codigo) ──
     if (!tieneCol('pa_cuentas', 'sociedad_id')) {
-      db.exec(`
-        BEGIN;
+      rehacerTabla('pa_cuentas', `
         CREATE TABLE pa_cuentas_v2 (
           id                INTEGER PRIMARY KEY AUTOINCREMENT,
           sociedad_id       INTEGER NOT NULL REFERENCES sociedades(id),
@@ -3217,7 +3214,6 @@ db.exec(`
         CREATE INDEX IF NOT EXISTS idx_pa_cuentas_seccion  ON pa_cuentas(seccion_id);
         CREATE INDEX IF NOT EXISTS idx_pa_cuentas_codigo   ON pa_cuentas(codigo);
         CREATE INDEX IF NOT EXISTS idx_pa_cuentas_sociedad ON pa_cuentas(sociedad_id);
-        COMMIT;
       `);
       console.log('[PA][MS-F1] pa_cuentas: sociedad_id agregado (existentes → PC), UNIQUE(sociedad_id,codigo)');
     }
@@ -3375,8 +3371,7 @@ db.exec(`
       const fkPrev = db.pragma('foreign_keys', { simple: true });
       db.pragma('foreign_keys = OFF');
       try {
-        db.exec(`
-          BEGIN;
+        rehacerTabla('fin_ordenes_pago', `
           CREATE TABLE fin_ordenes_pago_v2 (
             id              INTEGER PRIMARY KEY AUTOINCREMENT,
             sociedad_id     INTEGER NOT NULL REFERENCES sociedades(id),
@@ -3406,7 +3401,6 @@ db.exec(`
           DROP TABLE fin_ordenes_pago;
           ALTER TABLE fin_ordenes_pago_v2 RENAME TO fin_ordenes_pago;
           CREATE INDEX IF NOT EXISTS idx_fin_ordenes_pago_sociedad ON fin_ordenes_pago(sociedad_id);
-          COMMIT;
         `);
         console.log('[PA][MS-F2] fin_ordenes_pago: sociedad_id agregado (existentes → PC), UNIQUE(sociedad_id,numero)');
       } finally {
