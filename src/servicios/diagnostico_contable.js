@@ -281,6 +281,58 @@ export function informeContable(db) {
     w('   ' + hijas.map(x => x.t).join(', '));
   }
 
+  // ── 5. DÓNDE ESTÁ CADA PANTALLA CONTABLE EN EL MENÚ ─────────────────────
+  // Los datos pueden estar perfectos y la pantalla no aparecer igual. El menú
+  // filtra por dos cosas antes de mostrar algo: el flag `oculto` y la empresa
+  // del módulo (rutas/sidebar.js). Si una pantalla no se ve, la respuesta está
+  // acá y no en las tablas.
+  titulo('5. DÓNDE ESTÁ CADA PANTALLA CONTABLE EN EL MENÚ');
+  w('  Una pantalla aparece si NO está oculta y si su empresa es la que estás');
+  w('  mirando. "todas las empresas" quiere decir que la ve cualquiera, con sus');
+  w('  propios datos — que es como tienen que estar las 7 contables.');
+  w();
+
+  const PANTALLAS = [
+    ['adm-asientos',       'Asientos'],
+    ['adm-plan-cuentas',   'Plan de Cuentas'],
+    ['adm-proveedores',    'Proveedores'],
+    ['adm-cc-proveedores', 'CC Proveedores'],
+    ['adm-modelos',        'Modelos'],
+    ['fin-caja-bancos',    'Caja / Bancos'],
+    ['fin-ordenes-pago',   'Órdenes de Pago'],
+  ];
+  let malMenu = 0;
+  if (!existe('modulos_config')) {
+    w('  No existe modulos_config: no se puede saber.');
+  } else {
+    const cols = columnas('modulos_config');
+    const q = db.prepare(`SELECT modulo, label, grupo, sociedad_id${cols.includes('oculto') ? ', oculto' : ''}
+                            FROM modulos_config WHERE modulo = ?`);
+    for (const [mod, nombre] of PANTALLAS) {
+      const r = q.get(mod);
+      if (!r) { w(`  ${nombre.padEnd(18)} NO EXISTE en el menú`); malMenu++; continue; }
+      const donde = (r.sociedad_id === null || r.sociedad_id === undefined)
+        ? 'todas las empresas'
+        : `SOLO ${nombreSoc(r.sociedad_id)}`;
+      const esc = r.oculto ? '   ← OCULTA: no la ve nadie' : '';
+      if (r.sociedad_id !== null && r.sociedad_id !== undefined) malMenu++;
+      if (r.oculto) malMenu++;
+      w(`  ${nombre.padEnd(18)} ${String(r.grupo || '').padEnd(14)} ${donde}${esc}`);
+    }
+    if (malMenu) {
+      w();
+      w('  Las que dicen "SOLO <empresa>" se ven ÚNICAMENTE parado en esa empresa.');
+      w('  Las 7 tendrían que decir "todas las empresas": cada una entra a la misma');
+      w('  pantalla y ve lo suyo. Se arregla desde Configuración → Módulos, o con la');
+      w('  migración que las mueve (db_org.js, migrarContabilidadATodasLasEmpresas),');
+      w('  que sólo toca las que siguen asignadas a Familia.');
+    } else {
+      w();
+      w('  Las 7 están visibles para todas las empresas. Si aun así no aparecen en');
+      w('  el menú, es la página cacheada: recargar con Ctrl+F5.');
+    }
+  }
+
   // ── RESUMEN ─────────────────────────────────────────────────────────────
   titulo('EN UNA LÍNEA');
   const asi = repartos.find(r => r.t === 'pa_asientos');
@@ -296,6 +348,9 @@ export function informeContable(db) {
   w(propias.length
     ? `  ${propias.length} tabla(s) contable(s) con datos todavía no distinguen empresa.`
     : '  Toda tabla contable con datos propios distingue empresa.');
+  w(malMenu
+    ? `  ${malMenu} pantalla(s) contable(s) NO están disponibles para todas las empresas.`
+    : '  Las 7 pantallas contables están disponibles para todas las empresas.');
   w();
   w('  Esto es el paso 1 (medir). No modificó nada.');
   w();
