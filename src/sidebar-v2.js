@@ -36,7 +36,7 @@ const MAX_RECIENTES = 4;
 // SE ACTUALIZA A MANO, en el mismo cambio que se mergea. Sacarlo de git en el
 // arranque sonaba mejor, pero Railway despliega desde una copia sin historial:
 // diría siempre lo mismo y mentiría, que es peor que no estar.
-const VERSION = 'V643';
+const VERSION = 'V644';
 
 let SIDEBAR_DATA = { grupos: [], modulos: [] };
 let SOCIEDADES = [];                             // array de {id, nombre, funcion}
@@ -693,8 +693,31 @@ function hookCurrentSection(){
     const sec = onItem.dataset.sec;
     if (sec) navigateTo(sec);
   } else {
-    // Default: inicio
-    if (MODULO_INDEX['inicio']) navigateTo('inicio');
+    // ── DÓNDE ABRE EL PANEL ───────────────────────────────────────────────
+    // Inicio ya no es de todas: es de San Gerónimo, porque muestra SUS datos
+    // (pedidos del día, clientes activos, CRM de Dedicados). Desde que el
+    // selector manda, parado en otra empresa ese módulo no está en el menú.
+    //
+    // Pero la sección de inicio viene marcada como activa en el HTML desde
+    // siempre, así que el panel abría ahí igual y mostraba los datos de San
+    // Gerónimo con el cartel diciendo Puente Cordón. Justo la confusión que el
+    // selector vino a sacar.
+    //
+    // Ahora abre en el primer módulo QUE ESA EMPRESA TENGA. Cuando cada una
+    // tenga su propio Inicio, este camino deja de usarse solo.
+    const suyos = SIDEBAR_DATA.grupos
+      ? SIDEBAR_DATA.grupos.flatMap(g => g.items || []).filter(shouldShow)
+      : [];
+    const inicio = suyos.find(m => m.modulo === 'inicio');
+    const primero = inicio || suyos[0];
+    if (primero) {
+      navigateTo(primero.modulo);
+    } else {
+      // Sin un solo módulo no hay dónde ir: se apaga la sección de inicio para
+      // no dejar en pantalla los datos de otra empresa.
+      const sec = document.getElementById('sec-inicio');
+      if (sec) sec.classList.remove('on');
+    }
   }
 }
 
