@@ -46,6 +46,18 @@ function requireAuth(req, res, next) {
 function getSociedadId(req) {
   return empresaFija(PUENTE_CORDON);
 }
+// ── EL CERROJO, CONECTADO ─────────────────────────────────────────────────
+// Corre ANTES que cualquier endpoint de este router. Si el pedido viene con OTRA
+// empresa, corta con 403 y explica cuál esperaba.
+//
+// Estaba escrito y NO se llamaba: el PR que lo introdujo dejó el import puesto y
+// ninguna llamada, así que getSociedadId devolvía la empresa del módulo pase lo
+// que pase. Parado en San Gerónimo, este router contestaba con los datos de
+// Puente Cordón en vez de cortar — exactamente al revés de lo que buscaba.
+router.use((req, res, next) => {
+  if (exigirEmpresa(req, res, PUENTE_CORDON) === null) return;   // ya contestó 403
+  next();
+});
 // Deriva la sociedad de un cliente del padrón (cae a PC si no se encuentra).
 function sociedadDeCliente(clienteId) {
   const c = db.prepare('SELECT sociedad_id FROM ven_clientes WHERE id = ?').get(parseInt(clienteId));

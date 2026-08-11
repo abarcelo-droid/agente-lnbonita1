@@ -65,6 +65,18 @@ router.use(soloAdmin);
 function getSociedadId(req) {
   return empresaFija(SAN_GERONIMO);
 }
+// ── EL CERROJO, CONECTADO ─────────────────────────────────────────────────
+// Corre ANTES que cualquier endpoint de este router. Si el pedido viene con OTRA
+// empresa, corta con 403 y explica cuál esperaba.
+//
+// Estaba escrito y NO se llamaba: el PR que lo introdujo dejó el import puesto y
+// ninguna llamada, así que getSociedadId devolvía la empresa del módulo pase lo
+// que pase. Parado en San Gerónimo, este router contestaba con los datos de
+// Puente Cordón en vez de cortar — exactamente al revés de lo que buscaba.
+router.use((req, res, next) => {
+  if (exigirEmpresa(req, res, SAN_GERONIMO) === null) return;   // ya contestó 403
+  next();
+});
 
 // Errores tipados: el wrap los convierte en la respuesta correcta.
 const bad = (msg) => Object.assign(new Error(msg), { status: 400 });
