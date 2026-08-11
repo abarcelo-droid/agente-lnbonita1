@@ -568,7 +568,16 @@ router.get('/usuarios/:id/permisos', requireAuth, soloAdmin, (req, res) => {
         LEFT JOIN sociedades s ON s.id = m.sociedad_id
        WHERE m.oculto = 0
        ORDER BY m.sociedad_id IS NULL DESC, s.nombre, m.orden, m.label
-    `).all().filter(m => m.sociedad_id === null || misSocs.includes(m.sociedad_id));
+    `).all();
+    // SE LISTAN TODOS, y es a propósito. Antes se filtraba por las empresas del
+    // usuario, así que para darle un módulo de una empresa nueva había que
+    // acordarse de tildarle primero la empresa arriba — y hasta entonces el
+    // módulo no figuraba en ningún lado. Quien configura no puede adivinar que
+    // existe algo que la pantalla no muestra.
+    //
+    // El administrador ve todo y decide. Las empresas que el usuario NO tiene
+    // asignadas se marcan abajo para que se vea que están de más, pero se
+    // muestran igual: esconderlas es lo que hacía imposible configurarlas.
 
     // Agrupados por empresa, que es el orden en que se configura.
     const porEmpresa = {};
@@ -577,7 +586,10 @@ router.get('/usuarios/:id/permisos', requireAuth, soloAdmin, (req, res) => {
       if (!porEmpresa[k]) {
         porEmpresa[k] = {
           sociedad_id: m.sociedad_id,
-          sociedad_nombre: m.sociedad_nombre || 'Transversales (todas las empresas)',
+          sociedad_nombre: m.sociedad_nombre || 'Todas las empresas',
+          // La persona no trabaja en esta empresa. Se muestra igual —tildar acá
+          // es válido y funciona— pero avisado, para que no parezca un error.
+          ajena: m.sociedad_id !== null && !misSocs.includes(m.sociedad_id),
           modulos: [],
         };
       }

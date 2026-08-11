@@ -14587,7 +14587,15 @@ function permCargarMenus() {
           + 'justify-content:space-between;gap:8px;border-bottom:1px solid var(--bor)">'
           + '<b style="font-size:12.5px">' + permEsc(emp.sociedad_nombre)
           + ' <span id="perm-cnt-' + gi + '" style="font-weight:400;color:var(--mut);font-size:11px">('
-          + marcados + '/' + emp.modulos.length + ')</span></b>'
+          + marcados + '/' + emp.modulos.length + ')</span>'
+          // Se muestran TODAS las empresas, no sólo las de la persona: si sólo
+          // salieran las suyas, para darle un módulo de otra habría que adivinar
+          // que existe. Marcada, pero tildable — tildar acá funciona.
+          + (emp.ajena
+              ? ' <span style="font-weight:400;background:#fef3c7;color:#92400e;border-radius:8px;'
+                + 'padding:1px 7px;font-size:10.5px">no trabaja en esta empresa</span>'
+              : '')
+          + '</b>'
           + '<span style="display:flex;gap:5px">'
           + '<button class="btn" type="button" style="font-size:10.5px;padding:2px 8px" onclick="permTodos(' + gi + ',1)">Todos</button>'
           + '<button class="btn" type="button" style="font-size:10.5px;padding:2px 8px" onclick="permTodos(' + gi + ',0)">Ninguno</button>'
