@@ -179,14 +179,14 @@ export function modulosVisibles(usuario) {
 }
 
 // ── HASTA DÓNDE LLEGA DENTRO DE UN MENÚ ───────────────────────────────────
-// Devuelve 'ver' | 'operar' | 'borrar', o null si no tiene acceso al módulo.
+// Devuelve 'ver' | 'operar' | 'anular', o null si no tiene acceso al módulo.
 //
 // Mientras un usuario no tenga NINGÚN permiso cargado en la tabla nueva, se
 // comporta como antes: entra a lo que le habiliten las secciones y opera normal.
 // Es lo que permite soltar esto sin configurar a nadie primero.
 export function nivelEnModulo(usuario, modulo) {
   if (!usuario || !usuario.id || !modulo) return null;
-  if (usuario.rol === 'admin') return 'borrar';
+  if (usuario.rol === 'admin') return 'anular';
 
   const fila = db.prepare(
     'SELECT nivel FROM usuario_modulos WHERE usuario_id = ? AND modulo = ?'
@@ -216,7 +216,9 @@ export function permisosDe(usuario) {
 // viene en la lista, se le saca. Es lo que hace que destildar signifique algo.
 export function guardarPermisos(usuarioId, items, porId = null) {
   const validos = new Set(db.prepare('SELECT modulo FROM modulos_config').all().map(r => r.modulo));
-  const NIVELES = new Set(['ver', 'operar', 'borrar']);
+  // 'borrar' se acepta por compatibilidad con lo guardado antes de renombrarlo:
+  // la migración lo pasa a 'anular', pero un pedido viejo en vuelo no puede fallar.
+  const NIVELES = new Set(['ver', 'operar', 'anular', 'borrar']);
   const limpios = (Array.isArray(items) ? items : [])
     .filter(i => i && validos.has(i.modulo))
     .map(i => ({ modulo: i.modulo, nivel: NIVELES.has(i.nivel) ? i.nivel : 'operar' }));
@@ -269,7 +271,19 @@ function mapaApi() {
       "SELECT modulo, api_prefijos FROM modulos_config WHERE api_prefijos IS NOT NULL AND api_prefijos <> ''"
     ).all()) {
       for (const p of String(m.api_prefijos).split(',').map(x => x.trim()).filter(Boolean)) {
-        _mapaApi.push({ prefijo: '/api/' + p.replace(/^\/*(api\/)?/, ''), modulo: m.modulo });
+        // Se normaliza en los DOS extremos, y no es cosmético:
+        //
+        // · La barra del final. Sin sacarla, un prefijo escrito 'pli/' queda
+        //   '/api/pli/' y no matchea NADA: la comparación pide '/api/pli/' exacto
+        //   o que empiece con '/api/pli//'. El módulo se queda sin control y el
+        //   síntoma es "todo sigue funcionando", así que nadie se entera. Y esta
+        //   columna se llena a mano.
+        // · Las mayúsculas. Express rutea sin distinguirlas —/API/pa/compras
+        //   llega al mismo handler— pero la comparación de acá abajo sí
+        //   distingue. O sea que el mismo endpoint que se bloquea en minúscula
+        //   pasaba escrito en mayúscula. Una puerta de servicio.
+        const limpio = p.replace(/^\/*(api\/)?/i, '').replace(/\/+$/, '').toLowerCase();
+        if (limpio) _mapaApi.push({ prefijo: '/api/' + limpio, modulo: m.modulo });
       }
     }
     // El más largo primero: /api/sg/ventas tiene que ganarle a /api/sg.
@@ -280,7 +294,8 @@ function mapaApi() {
 export function limpiarCacheApi() { _mapaApi = null; }
 
 export function moduloDeRuta(url) {
-  const limpia = String(url || '').split('?')[0];
+  // A minúsculas para comparar: los prefijos del mapa ya vienen así.
+  const limpia = String(url || '').split('?')[0].toLowerCase();
   for (const e of mapaApi()) {
     if (limpia === e.prefijo || limpia.startsWith(e.prefijo + '/')) return e.modulo;
   }
@@ -310,15 +325,16 @@ export function exigirNivel(req, res, next) {
       ok: false, error: 'Tu acceso a este módulo es de solo lectura.', solo_lectura: true,
     });
   }
-  // Borrar y anular es lo único que se separa de editar: es la acción que deja
-  // afuera trabajo ya hecho. DELETE es explícito; el resto de las bajas del
-  // sistema son lógicas y viajan como POST/PATCH a rutas que lo dicen.
-  const borra = metodo === 'DELETE'
-    || /\/(anular|eliminar|borrar)(\/|$|\?)/i.test(String(req.originalUrl || req.url).split('?')[0]);
-  if (borra && nivel !== 'borrar') {
+  // ANULAR es lo único que se separa de editar: es la acción que deja afuera
+  // trabajo ya hecho. En este sistema casi nada se borra de verdad —todo es baja
+  // lógica— así que mirar sólo el método HTTP no alcanzaría: anular una orden de
+  // pago viaja como POST a /anular, no como DELETE. Se miran las dos cosas.
+  const anula = metodo === 'DELETE'
+    || /\/(anular|eliminar|borrar|desactivar|baja)(\/|$|\?)/i.test(String(req.originalUrl || req.url).split('?')[0]);
+  if (anula && nivel !== 'anular' && nivel !== 'borrar') {
     return res.status(403).json({
       ok: false,
-      error: 'Tu usuario puede operar en este módulo, pero no borrar ni anular.',
+      error: 'Tu usuario puede operar en este módulo, pero no anular.',
     });
   }
   next();
