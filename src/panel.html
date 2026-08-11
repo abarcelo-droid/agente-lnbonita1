@@ -299,6 +299,15 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   <div class="ni" data-sec="sg-catalogo" data-admin-only="1"></div>
   <div class="ni" data-sec="sg-reportes" data-admin-only="1"></div>
 
+  <!-- Contabilidad San Gerónimo — mismo criterio que los .ni de Abasto SG de arriba:
+       el sidebar VISIBLE lo arma sidebar-v2.js desde modulos_config (ver
+       ensure_modulo_sgct.js). Estos .ni quedan SIN texto, solo como PUENTE:
+       navigateTo() clickea el .ni viejo para disparar loadSec(). Si los borrás,
+       las tres pantallas abren EN BLANCO y sin ningún error. -->
+  <div class="ni" data-sec="sgct-plan-cuentas" data-admin-only="1"></div>
+  <div class="ni" data-sec="sgct-asientos" data-admin-only="1"></div>
+  <div class="ni" data-sec="sgct-modelos" data-admin-only="1"></div>
+
   <div class="ng" style="margin-top:8px">General</div>
   <div class="ni on" data-sec="inicio"><span class="dot"></span>Inicio</div>
   <div class="ni" data-sec="crm"><span class="dot dd"></span>CRM</div>
@@ -8120,6 +8129,219 @@ function sgRepExport(){
 </div>
 
 <!-- ─── SECCIÓN: Caja y Bancos ────────────────────────────────────────── -->
+
+<!-- ══════════════════════════════════════════════════════════════════
+     CONTABILIDAD SAN GERÓNIMO
+     Clon de las pantallas de Puente Cordón apuntando a /api/sg/contable y a
+     las tablas sg_*. TODO está renombrado con prefijo sgct: funciones, ids y
+     clases. No comparte NADA con las de Puente Cordón — ni una función, ni un
+     id. Si algo se compartiera, la última definición ganaría para todo el
+     archivo y Puente Cordón terminaría leyendo los datos de San Gerónimo.
+     ══════════════════════════════════════════════════════════════════ -->
+<div class="sec" id="sec-sgct-plan-cuentas">
+<div class="ph">
+  <div>
+    <div class="ph-t">📊 Plan de Cuentas</div>
+    <div class="ph-s">1 · Activo &nbsp;·&nbsp; 2 · Pasivo &nbsp;·&nbsp; 3 · Patrimonio &nbsp;·&nbsp; 4 · Ingresos &nbsp;·&nbsp; 5 · Egresos</div>
+  </div>
+  <div style="display:flex;gap:8px">
+    <button class="btn bb" onclick="sgctPcAbrirNuevaCuenta()">+ Cuenta</button>
+    <button class="btn bo" onclick="sgctPcAbrirNuevoTitulo()">+ Título</button>
+    <button class="btn bo" onclick="sgctPcAbrirNuevaSeccion()">+ Sección</button>
+    <button class="btn bo" id="sgct-pc-modo-edicion-btn" onclick="sgctPcToggleModoEdicion()">🔓 Modo edición</button>
+  </div>
+</div>
+
+<div id="sgct-pc-modo-banner" style="display:none;background:#fef3c7;border:1px solid #f59e0b;border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:13px;color:#92400e">
+  ✋ <strong>Modo edición activo.</strong> Arrastrá las cuentas y soltalas dentro de un título (o en "Sin título asignado") para reubicarlas. El código se renumera automáticamente (X.XX.XX.XXXX). Los asientos existentes siguen vinculados — no se rompe nada.
+</div>
+
+<!-- Tabs por grupo -->
+<div style="display:flex;gap:2px;border-bottom:2px solid var(--bor);margin-bottom:20px;flex-wrap:wrap" id="sgct-pc-tabs">
+  <div class="sgct-pc-tab on" data-grupo="activo"         onclick="sgctPcTab(this)" style="padding:10px 18px;cursor:pointer;font-size:13px;font-weight:700;border-bottom:3px solid transparent;color:var(--mut)">1 · Activo</div>
+  <div class="sgct-pc-tab"    data-grupo="pasivo"          onclick="sgctPcTab(this)" style="padding:10px 18px;cursor:pointer;font-size:13px;font-weight:700;border-bottom:3px solid transparent;color:var(--mut)">2 · Pasivo</div>
+  <div class="sgct-pc-tab"    data-grupo="patrimonio_neto" onclick="sgctPcTab(this)" style="padding:10px 18px;cursor:pointer;font-size:13px;font-weight:700;border-bottom:3px solid transparent;color:var(--mut)">3 · Patrimonio</div>
+  <div class="sgct-pc-tab"    data-grupo="ingresos"        onclick="sgctPcTab(this)" style="padding:10px 18px;cursor:pointer;font-size:13px;font-weight:700;border-bottom:3px solid transparent;color:var(--mut)">4 · Ingresos</div>
+  <div class="sgct-pc-tab"    data-grupo="gastos"          onclick="sgctPcTab(this)" style="padding:10px 18px;cursor:pointer;font-size:13px;font-weight:700;border-bottom:3px solid transparent;color:var(--mut)">5 · Egresos</div>
+</div>
+
+<div id="sgct-pc-contenido">
+  <div class="emp">Seleccioná un grupo para ver las cuentas</div>
+</div>
+</div>
+<div class="sec" id="sec-sgct-asientos">
+<div class="ph">
+  <div>
+    <div class="ph-t">📒 Asientos Contables</div>
+    <div class="ph-s">Partida doble — debe siempre igual a haber</div>
+  </div>
+  <button class="btn bb" onclick="sgctAbrirNuevoAsiento()">+ Nuevo asiento</button>
+</div>
+
+<!-- Filtros -->
+<div class="filt" style="margin-bottom:16px">
+  <label style="font-size:12px;color:var(--mut)">Desde: <input type="date" id="sgct-as-desde" onchange="sgctLoadAsientos()" style="padding:5px 8px;font-size:12px"></label>
+  <label style="font-size:12px;color:var(--mut)">Hasta: <input type="date" id="sgct-as-hasta" onchange="sgctLoadAsientos()" style="padding:5px 8px;font-size:12px"></label>
+  <label style="display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--mut);cursor:pointer">
+    <input type="checkbox" id="sgct-as-anulados" onchange="sgctLoadAsientos()" style="width:auto">
+    Ver anulados
+  </label>
+  <button class="btn bo bs" onclick="sgctLoadAsientos()">↻ Actualizar</button>
+  <button class="btn bo bs" onclick="sgctExportarAsientos()" title="Exportar a Excel">📥 Excel</button>
+</div>
+
+<!-- Tabla asientos -->
+<div class="pa-wrap">
+  <div class="ab-table-wrap">
+    <table class="pa-tbl" id="sgct-as-table">
+      <thead>
+        <tr>
+          <th style="width:40px">#</th>
+          <th style="width:90px">Fecha</th>
+          <th style="width:130px">Referencia</th>
+          <th style="width:130px">Nro. Factura</th>
+          <th>Descripción</th>
+          <th style="text-align:right;width:120px">Debe</th>
+          <th style="text-align:right;width:120px">Haber</th>
+          <th style="width:80px;text-align:center">Estado</th>
+          <th style="width:100px;text-align:center">Cargado por</th>
+          <th style="width:60px"></th>
+        </tr>
+        <tr id="sgct-as-filtros" style="background:var(--bg)">
+          <th></th>
+          <th><input type="text" placeholder="Filtrar..." oninput="tablaFiltrar('sgct-as-tbody',1,this.value)" style="width:100%;font-size:11px;padding:3px 5px;border:1px solid var(--bor2);border-radius:4px"></th>
+          <th><input type="text" placeholder="Filtrar..." oninput="tablaFiltrar('sgct-as-tbody',2,this.value)" style="width:100%;font-size:11px;padding:3px 5px;border:1px solid var(--bor2);border-radius:4px"></th>
+          <th><input type="text" placeholder="Filtrar..." oninput="tablaFiltrar('sgct-as-tbody',3,this.value)" style="width:100%;font-size:11px;padding:3px 5px;border:1px solid var(--bor2);border-radius:4px"></th>
+          <th><input type="text" placeholder="Filtrar..." oninput="tablaFiltrar('sgct-as-tbody',4,this.value)" style="width:100%;font-size:11px;padding:3px 5px;border:1px solid var(--bor2);border-radius:4px"></th>
+          <th></th><th></th>
+          <th><input type="text" placeholder="Filtrar..." oninput="tablaFiltrar('sgct-as-tbody',7,this.value)" style="width:100%;font-size:11px;padding:3px 5px;border:1px solid var(--bor2);border-radius:4px"></th>
+          <th><input type="text" placeholder="Filtrar..." oninput="tablaFiltrar('sgct-as-tbody',8,this.value)" style="width:100%;font-size:11px;padding:3px 5px;border:1px solid var(--bor2);border-radius:4px"></th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="sgct-as-tbody">
+        <tr><td colspan="10" class="emp">Cargando...</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+</div>
+<div class="sec" id="sec-sgct-modelos">
+<div class="ph">
+  <div>
+    <div class="ph-t">📐 Asiento Modelo</div>
+    <div class="ph-s">Plantillas contables por proveedor</div>
+  </div>
+  <button class="btn bb" onclick="sgctModAbrirNuevo()">+ Nuevo modelo</button>
+</div>
+
+<!-- Configuración Impositiva Global -->
+<div style="background:#fffbeb;border:1px solid #fcd34d;border-radius:10px;padding:16px;margin-bottom:20px">
+  <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
+    <span style="font-size:16px">⚙️</span>
+    <div>
+      <div style="font-weight:700;font-size:13px">Configuración Impositiva Global</div>
+      <div style="font-size:11px;color:var(--mut)">Estas cuentas se usan automáticamente en todos los asientos</div>
+    </div>
+  </div>
+
+  <!-- IVA -->
+  <div style="font-size:10px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px;padding-left:2px">IVA</div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px">
+    <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:12px">
+      <label style="font-size:11px;font-weight:700;color:#1e40af;text-transform:uppercase;display:block;margin-bottom:4px">IVA Crédito Fiscal (Compras)</label>
+      <div style="font-size:10px;color:#3b82f6;margin-bottom:6px">Débito al comprar — cuenta Activo</div>
+      <select id="sgct-cfg-imp-iva_credito_fiscal" onchange="sgctGuardarConfigImp('iva_credito_fiscal',this.value)" style="width:100%;font-size:12px"></select>
+    </div>
+    <div style="background:#f0fdf4;border:1px solid #86efac;border-radius:8px;padding:12px">
+      <label style="font-size:11px;font-weight:700;color:#15803d;text-transform:uppercase;display:block;margin-bottom:4px">IVA Débito Fiscal (Ventas)</label>
+      <div style="font-size:10px;color:#16a34a;margin-bottom:6px">Crédito al vender — cuenta Pasivo</div>
+      <select id="sgct-cfg-imp-iva_debito_fiscal" onchange="sgctGuardarConfigImp('iva_debito_fiscal',this.value)" style="width:100%;font-size:12px"></select>
+    </div>
+  </div>
+
+  <!-- Percepciones y Retenciones -->
+  <div style="font-size:10px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px;padding-left:2px">Percepciones y Retenciones</div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px" id="sgct-config-imp-grid">
+    <div style="background:#fff;border:1px solid var(--bor);border-radius:8px;padding:12px">
+      <label style="font-size:11px;font-weight:700;color:var(--mut);text-transform:uppercase;display:block;margin-bottom:6px">Percepción IVA</label>
+      <select id="sgct-cfg-imp-percepcion_iva" onchange="sgctGuardarConfigImp('percepcion_iva',this.value)" style="width:100%;font-size:12px"></select>
+    </div>
+    <div style="background:#fff;border:1px solid var(--bor);border-radius:8px;padding:12px">
+      <label style="font-size:11px;font-weight:700;color:var(--mut);text-transform:uppercase;display:block;margin-bottom:6px">Percepción IIBB</label>
+      <select id="sgct-cfg-imp-percepcion_iibb" onchange="sgctGuardarConfigImp('percepcion_iibb',this.value)" style="width:100%;font-size:12px"></select>
+    </div>
+    <div style="background:#fff;border:1px solid var(--bor);border-radius:8px;padding:12px">
+      <label style="font-size:11px;font-weight:700;color:var(--mut);text-transform:uppercase;display:block;margin-bottom:6px">Percepción Ganancias</label>
+      <select id="sgct-cfg-imp-percepcion_ganancias" onchange="sgctGuardarConfigImp('percepcion_ganancias',this.value)" style="width:100%;font-size:12px"></select>
+    </div>
+    <div style="background:#fff;border:1px solid var(--bor);border-radius:8px;padding:12px">
+      <label style="font-size:11px;font-weight:700;color:var(--mut);text-transform:uppercase;display:block;margin-bottom:6px">Retención</label>
+      <select id="sgct-cfg-imp-retencion" onchange="sgctGuardarConfigImp('retencion',this.value)" style="width:100%;font-size:12px"></select>
+    </div>
+  </div>
+</div>
+<div class="pa-wrap">
+  <div class="ab-table-wrap">
+    <table class="pa-tbl">
+      <thead><tr>
+        <th>Nombre</th>
+        <th style="width:80px;text-align:center">Líneas</th>
+        <th style="width:200px">Descripción</th>
+        <th style="width:120px;text-align:right"></th>
+      </tr></thead>
+      <tbody id="sgct-mod-tbody">
+        <tr><td colspan="4" class="emp">Cargando...</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+</div>
+
+<!-- El modal de Asiento Modelo NO se inyecta por JS como los otros cinco:
+     en Puente Cordon es HTML estatico. Por eso la primera version del clon lo
+     dejo afuera y el boton de nuevo modelo no hacia absolutamente nada — ni
+     modal ni error visible, solo un TypeError en la consola. -->
+<div class="ab-modal-overlay" id="sgct-mb-modelo">
+<div class="ab-modal" style="width:720px;max-height:90vh;overflow-y:auto">
+  <div class="mhd">
+    <div><div class="mht" id="sgct-mod-tit">Nuevo Asiento Modelo</div></div>
+    <button class="mcl" onclick="document.getElementById('sgct-mb-modelo').classList.remove('on')">×</button>
+  </div>
+  <input type="hidden" id="sgct-mod-id">
+  <div class="fg">
+    <div class="fl ff"><label>Nombre del modelo *</label><input id="sgct-mod-nombre" placeholder="Ej: Factura Insumos Agrícolas"></div>
+    <div class="fl ff"><label>Descripción</label><input id="sgct-mod-desc" placeholder="Descripción opcional"></div>
+  </div>
+
+  <!-- Tabla de líneas -->
+  <div style="margin-top:16px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+      <div style="font-size:12px;font-weight:600;color:var(--txt)">Líneas del modelo</div>
+      <button class="btn bo bs" onclick="sgctModAgregarLinea()" style="font-size:11px;padding:4px 10px">+ Línea</button>
+    </div>
+    <table class="pa-tbl" style="font-size:12px">
+      <thead><tr>
+        <th>Cuenta Contable</th>
+        <th style="width:100px;text-align:center">Lado</th>
+        <th style="width:180px">Tipo de línea</th>
+        <th style="width:140px">Descripción</th>
+        <th style="width:40px"></th>
+      </tr></thead>
+      <tbody id="sgct-mod-lineas"></tbody>
+    </table>
+
+    <!-- Validación partida doble -->
+    <div id="sgct-mod-doble" style="margin-top:10px;padding:8px 12px;border-radius:6px;font-size:12px;font-weight:600;display:none"></div>
+  </div>
+
+  <div class="ab-modal-footer">
+    <button class="btn bo" onclick="document.getElementById('sgct-mb-modelo').classList.remove('on')">Cancelar</button>
+    <button class="btn bb" onclick="sgctModGuardar()">Guardar modelo</button>
+  </div>
+</div>
+</div>
+
 <div class="sec" id="sec-fin-caja-bancos">
 <div class="ph">
   <div><div class="ph-t">🏦 Caja y Bancos</div><div class="ph-s">Cuentas, chequeras y movimientos</div></div>
@@ -14829,7 +15051,10 @@ function actualizarBarraSociedad(){
     document.body.appendChild(bar);
   }
   var activa = document.querySelector('.sec.on');
-  var contable = activa && /^sec-(adm|fin|ven)-/.test(activa.id || '');
+  // sgct = las pantallas contables de San Gerónimo. Entran acá para que también
+  // digan sobre qué empresa se está trabajando: son las que más fácil se
+  // confunden con las de Puente Cordón, porque hacen lo mismo.
+  var contable = activa && /^sec-(adm|fin|ven|sgct)-/.test(activa.id || '');
   if (!contable){ bar.style.display = 'none'; return; }
   bar.style.display = '';
   var soc = socActual();
@@ -43626,5 +43851,1028 @@ function fpSaldoBorrar(id) {
 </script>
 
 
+
+<!-- ══════════════════════════════════════════════════════════════════
+     CONTABILIDAD SAN GERÓNIMO — JS
+     Bloque propio y ÚLTIMO a propósito: no se toca el bloque de JS donde vive
+     la contabilidad de Puente Cordón, que hoy funciona y se usa todos los días.
+     (Ojo: en un comentario HTML no se puede escribir la etiqueta de script
+     literal — parte el bloque en dos y el archivo deja de parsear.)
+     ══════════════════════════════════════════════════════════════════ -->
+<script>
+// Clon de las funciones contables de Puente Cordón, apuntando a
+// /api/sg/contable. Generado renombrando mecánicamente el original (funciones,
+// globales, ids y URLs) y verificando que no sobreviviera ni una referencia a
+// Puente Cordón: copiar 900 líneas a mano es exactamente como se escapa un
+// nombre, y un nombre que se escapa hace que las dos pantallas se pisen.
+var SGCT_EXPORT = { asientos: [] };
+
+var SGCT = { lineasN: 0, cuentas: [], secciones: [], titulos: [], asientoActualId: null, grupoActual: 'activo' };
+
+var SGCT_EDIT_MODE = false;
+
+var SGCT_DRAG_ID = null;
+
+var SGCT_GRUPOS = {
+  activo:         { label: '🏦 Activo',          color: '#1d4ed8', colorDark: '#1e3a8a', bg: '#dbeafe' },
+  pasivo:         { label: '💳 Pasivo',           color: '#9a3412', colorDark: '#7c2d12', bg: '#fed7aa' },
+  patrimonio_neto:{ label: '🏛️ Patrimonio Neto', color: '#6b21a8', colorDark: '#4c1d95', bg: '#e9d5ff' },
+  ingresos:       { label: '📈 Ingresos',         color: '#166534', colorDark: '#14532d', bg: '#dcfce7' },
+  gastos:         { label: '📉 Gastos',           color: '#991b1b', colorDark: '#7f1d1d', bg: '#fee2e2' },
+};
+
+var SGCT_MOD_CUENTAS = [];
+
+var SGCT_MOD_LINEA_SEQ = 0;
+
+function sgctApi(path, opts) {
+  opts = opts || {};
+  opts.headers = opts.headers || { 'Content-Type': 'application/json' };
+  return fetch('/api/sg/contable' + path, opts)
+    .then(function(r){ return r.json(); })
+    .catch(function(){ return { ok: false, error: 'Error de red' }; });
+}
+
+function sgctMoney(n) {
+  return '$ ' + Number(n||0).toLocaleString('es-AR', { minimumFractionDigits:2, maximumFractionDigits:2 });
+}
+
+function sgctCargarCuentas() {
+  return Promise.all([
+    sgctApi('?incluir_inactivas=0').then(function(r){ SGCT.cuentas = r.data || []; }),
+    sgctApi('/secciones').then(function(r){ SGCT.secciones = r.data || []; }),
+    sgctApi('/titulos').then(function(r){ SGCT.titulos = r.data || []; })
+  ]);
+}
+
+function sgctCuentasOpts(seleccionado) {
+  if (!SGCT.cuentas.length) return '<option value="">— Sin cuentas —</option>';
+  // Agrupar por sección
+  var porSec = {};
+  SGCT.cuentas.forEach(function(c){
+    if (!porSec[c.seccion_id]) porSec[c.seccion_id] = { nombre: c.seccion_nombre, codigo: c.seccion_codigo, items: [] };
+    porSec[c.seccion_id].items.push(c);
+  });
+  var html = '<option value="">— Elegí cuenta —</option>';
+  Object.values(porSec).sort(function(a,b){ return a.codigo - b.codigo; }).forEach(function(g){
+    html += '<optgroup label="'+g.codigo+' — '+g.nombre+'">';
+    g.items.forEach(function(c){
+      if (c.imputable === 0) {
+        html += '<option value="" disabled style="color:#9ca3af">'+c.codigo+' — '+c.nombre+' — 🔒 NO IMPUTABLE</option>';
+      } else {
+        html += '<option value="'+c.id+'"'+(c.id==seleccionado?' selected':'')+'>'+c.codigo+' — '+c.nombre+'</option>';
+      }
+    });
+    html += '</optgroup>';
+  });
+  return html;
+}
+
+function sgctPcToggleModoEdicion() {
+  if (!SGCT_EDIT_MODE) {
+    if (!confirm('¿Activar modo edición?\n\nVas a poder arrastrar cuentas entre títulos y se renumerarán automáticamente. Usalo solo durante el período de armado del plan de cuentas.')) return;
+  }
+  SGCT_EDIT_MODE = !SGCT_EDIT_MODE;
+  var btn = document.getElementById('sgct-pc-modo-edicion-btn');
+  var banner = document.getElementById('sgct-pc-modo-banner');
+  if (SGCT_EDIT_MODE) {
+    btn.innerHTML = '🔒 Salir de edición';
+    btn.style.background = '#f59e0b'; btn.style.color = '#fff'; btn.style.borderColor = '#f59e0b';
+    if (banner) banner.style.display = 'block';
+  } else {
+    btn.innerHTML = '🔓 Modo edición';
+    btn.style.background = ''; btn.style.color = ''; btn.style.borderColor = '';
+    if (banner) banner.style.display = 'none';
+  }
+  sgctPcLoadGrupo(SGCT.grupoActual);
+}
+
+function sgctPcDragStart(ev, cuentaId) {
+  SGCT_DRAG_ID = cuentaId;
+  ev.dataTransfer.effectAllowed = 'move';
+  try { ev.dataTransfer.setData('text/plain', String(cuentaId)); } catch(e){}
+}
+
+function sgctPcDragOver(ev) {
+  if (!SGCT_EDIT_MODE) return;
+  ev.preventDefault();
+  ev.dataTransfer.dropEffect = 'move';
+  ev.currentTarget.style.background = '#dcfce7';
+  ev.currentTarget.style.outline = '2px dashed #16a34a';
+}
+
+function sgctPcDragLeave(ev) {
+  ev.currentTarget.style.background = '';
+  ev.currentTarget.style.outline = '';
+}
+
+function sgctPcDrop(ev, tituloId) {
+  if (!SGCT_EDIT_MODE) return;
+  ev.preventDefault();
+  ev.currentTarget.style.background = '';
+  ev.currentTarget.style.outline = '';
+  var cuentaId = SGCT_DRAG_ID || parseInt(ev.dataTransfer.getData('text/plain'), 10);
+  SGCT_DRAG_ID = null;
+  if (!cuentaId) return;
+  var cuenta = SGCT.cuentas.find(function(c){ return c.id === cuentaId; });
+  if (cuenta && cuenta.titulo_id === tituloId) return;
+  sgctApi('/' + cuentaId + '/reasignar-titulo', {
+    method: 'POST',
+    body: JSON.stringify({ titulo_id: tituloId }),
+  }).then(function(r){
+    if (!r.ok) { toast(r.error || 'Error al mover', 'er'); return; }
+    toast('✓ Cuenta movida → ' + r.codigo, 'ok');
+    sgctPcLoadGrupo(SGCT.grupoActual);
+  });
+}
+
+function sgctPcTab(el) {
+  document.querySelectorAll('.sgct-pc-tab').forEach(function(t){
+    t.style.borderBottomColor = 'transparent';
+    t.style.color = 'var(--mut)';
+  });
+  var grupo = el.getAttribute('data-grupo');
+  var col = SGCT_GRUPOS[grupo] ? SGCT_GRUPOS[grupo].color : 'var(--burg)';
+  el.style.borderBottomColor = col;
+  el.style.color = col;
+  SGCT.grupoActual = grupo;
+  sgctPcLoadGrupo(grupo);
+}
+
+function sgctPcLoadGrupo(grupo) {
+  sgctCargarCuentas().then(function(){
+    var secciones = SGCT.secciones.filter(function(s){ return s.grupo === grupo; });
+    var cont = document.getElementById('sgct-pc-contenido');
+    var g = SGCT_GRUPOS[grupo] || {};
+    if (!secciones.length) {
+      cont.innerHTML = '<div style="text-align:center;padding:40px;color:var(--mut)">'
+        + '<div style="font-size:32px;margin-bottom:10px">'+(g.label||grupo)+'</div>'
+        + '<div style="font-size:13px;margin-bottom:16px">No hay secciones en este grupo todavía.</div>'
+        + '<button class="btn bb" onclick="sgctPcAbrirNuevaSeccion()">+ Agregar primera sección</button>'
+        + '</div>';
+      return;
+    }
+    cont.innerHTML = secciones.map(function(s){
+      var titsSec = SGCT.titulos.filter(function(t){ return t.seccion_id === s.id && t.activo; })
+        .sort(function(a,b){ return a.codigo.localeCompare(b.codigo); });
+      var cuentasSinTit = SGCT.cuentas.filter(function(c){ return c.seccion_id === s.id && !c.titulo_id; });
+
+      function filaCuenta(c) {
+        var canDrag = SGCT_EDIT_MODE && c.activo && !c.es_sistema;
+        var dragAttrs = canDrag ? ' draggable="true" ondragstart="sgctPcDragStart(event,'+c.id+')"' : '';
+        var rowStyle = canDrag ? ' style="cursor:grab;'+(c.activo?'':'opacity:.5')+'"' : (c.activo ? '' : ' style="opacity:.5"');
+        var handle = canDrag ? '<span style="color:#94a3b8;margin-right:6px;cursor:grab" title="Arrastrar">⠿</span>' : '';
+        return '<tr'+dragAttrs+rowStyle+'>'
+          + '<td style="font-family:monospace;font-size:12px;padding-left:'+(SGCT_EDIT_MODE?'20':'40')+'px;color:#1e293b">'+handle+c.codigo+'</td>'
+          + '<td style="padding-left:8px">'+c.nombre+(c.es_sistema?' <span title="Sistema" style="color:#b88600">🔒</span>':'')+'</td>'
+          + '<td style="text-align:center;font-size:11px;color:var(--mut)">'+(c.tipo==='resultado'?'ER':'Patr.')+'</td>'
+          + '<td style="text-align:center">'+(c.permite_lote?'✓':'—')+'</td>'
+          + '<td style="text-align:center">'+(c.permite_campania?'✓':'—')+'</td>'
+          + '<td style="text-align:right;white-space:nowrap">'
+            + '<button class="btn bo" style="padding:2px 7px;font-size:11px;margin-right:4px" onclick="sgctPcEditarCuenta('+c.id+')">✏️</button>'
+            + (c.activo && !c.es_sistema
+              ? '<button class="btn bo" style="padding:2px 7px;font-size:11px;color:var(--err);border-color:var(--err)" onclick="sgctPcDesactivarCuenta('+c.id+')">🗑</button>'
+              : (!c.activo ? '<button class="btn bo" style="padding:2px 7px;font-size:11px;color:var(--ok);border-color:var(--ok)" onclick="sgctPcReactivarCuenta('+c.id+')">↺</button>' : ''))
+          + '</td>'
+          + '</tr>';
+      }
+
+      function filaTitulo(t) {
+        var cuentasTit = SGCT.cuentas.filter(function(c){ return c.titulo_id === t.id; });
+        var dropAttrs = SGCT_EDIT_MODE ? ' ondragover="sgctPcDragOver(event)" ondragleave="sgctPcDragLeave(event)" ondrop="sgctPcDrop(event,'+t.id+')"' : '';
+        return '<tr'+dropAttrs+' style="background:#dbeafe;border-left:4px solid #3b82f6">'
+          + '<td colspan="5" style="padding:8px 14px 8px 18px">'
+            + '<div style="display:flex;align-items:center;gap:10px">'
+              + (SGCT_EDIT_MODE ? '<span style="color:#2563eb;font-size:13px" title="Soltá cuentas acá">⬇</span>' : '<span style="color:#2563eb;font-size:13px">▸</span>')
+              + '<span style="font-weight:700;font-size:13px;color:#1e3a5f;letter-spacing:.2px">'+t.codigo+' — '+t.nombre+'</span>'
+              + '<span style="background:#bfdbfe;color:#1d4ed8;font-size:10px;font-weight:600;padding:2px 7px;border-radius:20px;letter-spacing:.5px">NO IMPUTABLE</span>'
+            + '</div>'
+          + '</td>'
+          + '<td style="text-align:right;white-space:nowrap;padding-right:8px">'
+            + '<button class="btn bo" style="padding:2px 8px;font-size:10px;background:#eff6ff;border-color:#93c5fd;color:#1d4ed8" onclick="sgctPcAbrirNuevaCuentaEnTitulo('+s.id+','+t.id+')">+ Cuenta</button> '
+            + '<button class="btn bo" style="padding:2px 7px;font-size:11px" onclick="sgctPcEditarTitulo('+t.id+')">✏️</button> '
+            + '<button class="btn bo" style="padding:2px 7px;font-size:11px" onclick="sgctPcEliminarTitulo('+t.id+')">🗑</button>'
+          + '</td>'
+          + '</tr>'
+          + cuentasTit.map(filaCuenta).join('');
+      }
+
+      return '<div class="pa-wrap" style="margin-bottom:20px">'
+        + '<div style="background:linear-gradient(135deg,'+g.color+','+g.colorDark+');padding:11px 16px;display:flex;justify-content:space-between;align-items:center">'
+          + '<div style="display:flex;align-items:center;gap:10px">'
+            + '<strong style="color:#fff;font-size:14px;letter-spacing:.3px">'+s.codigo+' — '+s.nombre+'</strong>'
+            + (s.activo ? '' : '<span style="font-size:11px;color:rgba(255,255,255,.7);font-style:italic">(inactiva)</span>')
+            + '<span style="background:rgba(255,255,255,.18);color:#fff;font-size:10px;font-weight:600;padding:2px 8px;border-radius:20px;letter-spacing:.5px;border:1px solid rgba(255,255,255,.3)">NO IMPUTABLE</span>'
+          + '</div>'
+          + '<div style="display:flex;gap:6px">'
+            + '<button class="btn bo" style="padding:3px 9px;font-size:11px;background:rgba(255,255,255,.15);border-color:rgba(255,255,255,.4);color:#fff" onclick="sgctPcAbrirNuevoTituloEnSeccion('+s.id+')">+ Título</button>'
+            + '<button class="btn bo" style="padding:3px 9px;font-size:11px;background:rgba(255,255,255,.15);border-color:rgba(255,255,255,.4);color:#fff" onclick="sgctPcEditarSeccion('+s.id+')">✏️</button>'
+            + '<button class="btn bo" style="padding:3px 9px;font-size:11px;background:rgba(255,255,255,.15);border-color:rgba(255,255,255,.4);color:#fff" onclick="sgctPcEliminarSeccion('+s.id+')">🗑</button>'
+          + '</div>'
+        + '</div>'
+        + '<div class="ab-table-wrap"><table class="pa-tbl">'
+          + '<thead><tr>'
+            + '<th style="width:150px">Código</th>'
+            + '<th>Nombre</th>'
+            + '<th style="width:80px;text-align:center">Tipo</th>'
+            + '<th style="width:60px;text-align:center">Lote</th>'
+            + '<th style="width:80px;text-align:center">Campaña</th>'
+            + '<th style="width:180px;text-align:right"></th>'
+          + '</tr></thead>'
+          + '<tbody>'
+            + titsSec.map(filaTitulo).join('')
+            + ((cuentasSinTit.length || SGCT_EDIT_MODE)
+              ? '<tr'+(SGCT_EDIT_MODE ? ' ondragover="sgctPcDragOver(event)" ondragleave="sgctPcDragLeave(event)" ondrop="sgctPcDrop(event,null)"' : '')+' style="background:#f1f5f9"><td colspan="6" style="padding:5px 14px;font-size:11px;color:var(--mut);font-style:italic">📌 Sin título asignado'+(SGCT_EDIT_MODE?' <span style="color:#16a34a">(soltá acá para quitar de un título)</span>':'')+'</td></tr>'
+                + cuentasSinTit.map(filaCuenta).join('')
+              : '')
+          + '</tbody>'
+        + '</table></div>'
+      + '</div>';
+    }).join('');
+  });
+}
+
+function sgctPcAbrirNuevaSeccion() {
+  document.getElementById('sgct-sec-id').value = '';
+  document.getElementById('sgct-sec-tit').textContent = 'Nueva sección';
+  document.getElementById('sgct-sec-codigo').value = '';
+  document.getElementById('sgct-sec-nombre').value = '';
+  document.getElementById('sgct-sec-grupo').value = SGCT.grupoActual;
+  document.getElementById('sgct-mb-seccion').classList.add('on');
+}
+
+function sgctPcEditarSeccion(id) {
+  var s = SGCT.secciones.find(function(x){ return x.id === id; });
+  if (!s) return;
+  document.getElementById('sgct-sec-id').value = s.id;
+  document.getElementById('sgct-sec-tit').textContent = 'Editar sección';
+  document.getElementById('sgct-sec-codigo').value = s.codigo;
+  document.getElementById('sgct-sec-nombre').value = s.nombre;
+  document.getElementById('sgct-sec-grupo').value = s.grupo || SGCT.grupoActual;
+  document.getElementById('sgct-mb-seccion').classList.add('on');
+}
+
+function sgctPcGuardarSeccion() {
+  var id     = document.getElementById('sgct-sec-id').value;
+  var codigo = document.getElementById('sgct-sec-codigo').value.trim();
+  var nombre = document.getElementById('sgct-sec-nombre').value.trim();
+  var grupo  = document.getElementById('sgct-sec-grupo').value;
+  if (!codigo || !nombre) return toast('Completá código y nombre', 'er');
+  var url    = id ? '/secciones/' + id : '/secciones';
+  var method = id ? 'PUT' : 'POST';
+  sgctApi(url, { method: method, body: JSON.stringify({ codigo: codigo, nombre: nombre, grupo: grupo }) })
+    .then(function(r){
+      if (r.ok) {
+        if (id) {
+          sgctApi('/secciones/' + id, { method: 'PUT', body: JSON.stringify({ nombre: nombre, grupo: grupo }) });
+        }
+        toast('✓ Sección guardada', 'ok');
+        document.getElementById('sgct-mb-seccion').classList.remove('on');
+        sgctPcLoadGrupo(SGCT.grupoActual);
+      } else toast('Error: ' + (r.error||'desconocido'), 'er');
+    });
+}
+
+function sgctPcEliminarSeccion(id) {
+  if (!confirm('¿Desactivar esta sección? Debe estar vacía.')) return;
+  sgctApi('/secciones/' + id, { method: 'DELETE' }).then(function(r){
+    if (r.ok) { toast('✓ Desactivada', 'ok'); sgctPcLoadGrupo(SGCT.grupoActual); }
+    else toast('Error: ' + (r.error||'desconocido'), 'er');
+  });
+}
+
+function sgctPcAbrirNuevaCuenta(seccionId) {
+  sgctPcAbrirNuevaCuentaEnTitulo(seccionId, null);
+}
+
+function sgctPcAbrirNuevaCuentaEnTitulo(seccionId, tituloId) {
+  document.getElementById('sgct-cu-id').value = '';
+  document.getElementById('sgct-cu-tit').textContent = 'Nueva cuenta';
+  document.getElementById('sgct-cu-codigo').value = '';
+  document.getElementById('sgct-cu-nombre').value = '';
+  document.getElementById('sgct-cu-tipo').value = 'resultado';
+  document.getElementById('sgct-cu-lote').checked = false;
+  document.getElementById('sgct-cu-camp').checked = false;
+  document.getElementById('sgct-cu-codigo-sug').textContent = '';
+  var secs = SGCT.secciones.filter(function(s){ return s.activo; });
+  document.getElementById('sgct-cu-seccion').innerHTML =
+    secs.map(function(s){ return '<option value="'+s.id+'"'+(s.id==seccionId?' selected':'')+'>'+s.codigo+' — '+s.nombre+'</option>'; }).join('');
+  sgctPcPoblarTitulosModal(seccionId, tituloId);
+  sgctPcSugerirCodigo();
+  document.getElementById('sgct-mb-cuenta').classList.add('on');
+}
+
+function sgctPcPoblarTitulosModal(seccionId, tituloIdSeleccionado) {
+  var sId = seccionId || parseInt((document.getElementById('sgct-cu-seccion')||{}).value, 10);
+  var titsSec = SGCT.titulos.filter(function(t){ return t.seccion_id === sId && t.activo; });
+  var sel = document.getElementById('sgct-cu-titulo');
+  if (!sel) return;
+  sel.innerHTML = '<option value="">— Sin título —</option>' +
+    titsSec.map(function(t){ return '<option value="'+t.id+'"'+(t.id===tituloIdSeleccionado?' selected':'')+'>'+t.codigo+' — '+t.nombre+'</option>'; }).join('');
+}
+
+function sgctPcOnSeccionChange() {
+  sgctPcPoblarTitulosModal(parseInt(document.getElementById('sgct-cu-seccion').value, 10), null);
+  sgctPcSugerirCodigo();
+}
+
+function sgctPcSugerirCodigo() {
+  var sId = parseInt(document.getElementById('sgct-cu-seccion').value, 10);
+  var titId = parseInt((document.getElementById('sgct-cu-titulo')||{}).value, 10);
+  if (!sId) return;
+  var sec = SGCT.secciones.find(function(s){ return s.id === sId; });
+  if (!sec) return;
+  var sugerido = '';
+  if (titId) {
+    var tit = SGCT.titulos.find(function(t){ return t.id === titId; });
+    if (tit) {
+      var cuentasTit = SGCT.cuentas.filter(function(c){ return c.titulo_id === titId; });
+      var max = 0;
+      cuentasTit.forEach(function(c){
+        var partes = String(c.codigo).split('.');
+        if (partes.length === 4) { var ult = parseInt(partes[3], 10); if (ult > max) max = ult; }
+      });
+      sugerido = tit.codigo + '.' + String(max + 1).padStart(4, '0');
+    }
+  }
+  var sugEl = document.getElementById('sgct-cu-codigo-sug');
+  if (!titId) {
+    sugEl.textContent = 'Elegí un título para generar el código (formato X.XX.XX.XXXX)';
+    sugEl.style.color = '#b45309';
+    return;
+  }
+  sugEl.style.color = 'var(--mut)';
+  sugEl.textContent = sugerido ? 'Sugerido: ' + sugerido : '';
+  if (!document.getElementById('sgct-cu-id').value) document.getElementById('sgct-cu-codigo').value = sugerido;
+}
+
+function sgctPcEditarCuenta(id) {
+  var c = SGCT.cuentas.find(function(x){ return x.id === id; });
+  if (!c) return;
+  document.getElementById('sgct-cu-id').value = c.id;
+  document.getElementById('sgct-cu-tit').textContent = 'Editar cuenta ' + c.codigo;
+  var secs = SGCT.secciones.filter(function(s){ return s.activo; });
+  document.getElementById('sgct-cu-seccion').innerHTML =
+    secs.map(function(s){ return '<option value="'+s.id+'"'+(s.id===c.seccion_id?' selected':'')+'>'+s.codigo+' — '+s.nombre+'</option>'; }).join('');
+  sgctPcPoblarTitulosModal(c.seccion_id, c.titulo_id);
+  document.getElementById('sgct-cu-codigo').value = c.codigo;
+  document.getElementById('sgct-cu-nombre').value = c.nombre;
+  document.getElementById('sgct-cu-tipo').value   = c.tipo;
+  document.getElementById('sgct-cu-lote').checked = !!c.permite_lote;
+  document.getElementById('sgct-cu-camp').checked = !!c.permite_campania;
+  document.getElementById('sgct-cu-codigo-sug').textContent = '';
+  document.getElementById('sgct-mb-cuenta').classList.add('on');
+}
+
+function sgctPcGuardarCuenta() {
+  var id   = document.getElementById('sgct-cu-id').value;
+  var titVal = (document.getElementById('sgct-cu-titulo')||{}).value;
+  var body = {
+    codigo:           document.getElementById('sgct-cu-codigo').value.trim(),
+    nombre:           document.getElementById('sgct-cu-nombre').value.trim(),
+    seccion_id:       parseInt(document.getElementById('sgct-cu-seccion').value, 10),
+    titulo_id:        titVal ? parseInt(titVal, 10) : null,
+    tipo:             document.getElementById('sgct-cu-tipo').value,
+    permite_lote:     document.getElementById('sgct-cu-lote').checked ? 1 : 0,
+    permite_campania: document.getElementById('sgct-cu-camp').checked ? 1 : 0,
+  };
+  if (!body.codigo || !body.nombre || !body.seccion_id) return toast('Completá código, nombre y sección', 'er');
+  var url    = id ? '/' + id : '';
+  var method = id ? 'PUT' : 'POST';
+  sgctApi(url, { method: method, body: JSON.stringify(body) }).then(function(r){
+    if (r.ok) {
+      toast('✓ Cuenta guardada', 'ok');
+      document.getElementById('sgct-mb-cuenta').classList.remove('on');
+      sgctPcLoadGrupo(SGCT.grupoActual);
+    } else toast('Error: ' + (r.error||'desconocido'), 'er');
+  });
+}
+
+function sgctPcDesactivarCuenta(id) {
+  if (!confirm('¿Desactivar esta cuenta?')) return;
+  sgctApi('/' + id, { method: 'DELETE' }).then(function(r){
+    if (r.ok) { toast('✓ Desactivada', 'ok'); sgctPcLoadGrupo(SGCT.grupoActual); }
+    else toast('Error: ' + (r.error||'desconocido'), 'er');
+  });
+}
+
+function sgctPcReactivarCuenta(id) {
+  sgctApi('/' + id + '/reactivar', { method: 'POST' }).then(function(r){
+    if (r.ok) { toast('✓ Reactivada', 'ok'); sgctPcLoadGrupo(SGCT.grupoActual); }
+    else toast('Error: ' + (r.error||'desconocido'), 'er');
+  });
+}
+
+function sgctPcAbrirNuevoTitulo() {
+  sgctPcAbrirNuevoTituloEnSeccion(null);
+}
+
+function sgctPcAbrirNuevoTituloEnSeccion(seccionId) {
+  document.getElementById('sgct-tit-id').value = '';
+  document.getElementById('sgct-tit-modal-tit').textContent = 'Nuevo título';
+  document.getElementById('sgct-tit-codigo').value = '';
+  document.getElementById('sgct-tit-nombre').value = '';
+  var sel = document.getElementById('sgct-tit-seccion');
+  sel.innerHTML = SGCT.secciones.filter(function(s){ return s.activo; })
+    .map(function(s){ return '<option value="'+s.id+'"'+(s.id===seccionId?' selected':'')+'>'+s.codigo+' — '+s.nombre+'</option>'; }).join('');
+  sgctPcTitSugerirCodigo();
+  document.getElementById('sgct-mb-titulo').classList.add('on');
+}
+
+function sgctPcEditarTitulo(id) {
+  var t = SGCT.titulos.find(function(x){ return x.id === id; });
+  if (!t) return;
+  document.getElementById('sgct-tit-id').value = t.id;
+  document.getElementById('sgct-tit-modal-tit').textContent = 'Editar título ' + t.codigo;
+  var sel = document.getElementById('sgct-tit-seccion');
+  sel.innerHTML = SGCT.secciones.filter(function(s){ return s.activo; })
+    .map(function(s){ return '<option value="'+s.id+'"'+(s.id===t.seccion_id?' selected':'')+'>'+s.codigo+' — '+s.nombre+'</option>'; }).join('');
+  document.getElementById('sgct-tit-codigo').value = t.codigo;
+  document.getElementById('sgct-tit-nombre').value = t.nombre;
+  document.getElementById('sgct-tit-codigo-sug').textContent = '';
+  document.getElementById('sgct-mb-titulo').classList.add('on');
+}
+
+function sgctPcTitSugerirCodigo() {
+  var sId = parseInt((document.getElementById('sgct-tit-seccion')||{}).value, 10);
+  if (!sId) return;
+  var sec = SGCT.secciones.find(function(s){ return s.id === sId; });
+  if (!sec) return;
+  var titsSec = SGCT.titulos.filter(function(t){ return t.seccion_id === sId; });
+  var max = 0;
+  titsSec.forEach(function(t){
+    var partes = String(t.codigo).split('.');
+    var sub = parseInt(partes[2]||'0', 10);
+    if (sub > max) max = sub;
+  });
+  var sugerido = sec.codigo + '.' + String(max + 1).padStart(2, '0');
+  document.getElementById('sgct-tit-codigo-sug').textContent = 'Sugerido: ' + sugerido;
+  if (!document.getElementById('sgct-tit-id').value) document.getElementById('sgct-tit-codigo').value = sugerido;
+}
+
+function sgctPcGuardarTitulo() {
+  var id = document.getElementById('sgct-tit-id').value;
+  var body = {
+    codigo:     document.getElementById('sgct-tit-codigo').value.trim(),
+    nombre:     document.getElementById('sgct-tit-nombre').value.trim(),
+    seccion_id: parseInt(document.getElementById('sgct-tit-seccion').value, 10),
+  };
+  if (!body.codigo || !body.nombre || !body.seccion_id) return toast('Completá código, nombre y sección', 'er');
+  var url = id ? '/titulos/' + id : '/titulos';
+  sgctApi(url, { method: id ? 'PUT' : 'POST', body: JSON.stringify(body) }).then(function(r){
+    if (r.ok) {
+      toast('✓ Título guardado', 'ok');
+      document.getElementById('sgct-mb-titulo').classList.remove('on');
+      sgctPcLoadGrupo(SGCT.grupoActual);
+    } else toast('Error: ' + (r.error||'desconocido'), 'er');
+  });
+}
+
+function sgctPcEliminarTitulo(id) {
+  if (!confirm('¿Desactivar este título?')) return;
+  sgctApi('/titulos/' + id, { method: 'DELETE' }).then(function(r){
+    if (r.ok) { toast('✓ Título desactivado', 'ok'); sgctPcLoadGrupo(SGCT.grupoActual); }
+    else toast('Error: ' + (r.error||'desconocido'), 'er');
+  });
+}
+
+function sgctLoadAsientos() {
+  var desde  = document.getElementById('sgct-as-desde').value;
+  var hasta  = document.getElementById('sgct-as-hasta').value;
+  var anulados = document.getElementById('sgct-as-anulados').checked ? '1' : '0';
+  var qs = [];
+  if (desde)   qs.push('desde=' + desde);
+  if (hasta)   qs.push('hasta=' + hasta);
+  if (anulados === '1') qs.push('anulados=1');
+  sgctApi('/asientos' + (qs.length ? '?' + qs.join('&') : '')).then(function(r) {
+    var data = r.data || [];
+    SGCT_EXPORT.asientos = data;
+    var tb = document.getElementById('sgct-as-tbody');
+    if (!data.length) {
+      tb.innerHTML = '<tr><td colspan="10" class="emp">Sin asientos en el período</td></tr>';
+      return;
+    }
+    tb.innerHTML = data.map(function(a) {
+      var totalDebe  = 0, totalHaber = 0;
+      (a.lineas || []).forEach(function(l){ totalDebe += l.debe||0; totalHaber += l.haber||0; });
+      // Extraer nro_factura de la descripción: "FAC-2026-0001 | Proveedor | 0016-00086384"
+      var partes = (a.descripcion||'').split('|');
+      var ref       = (a.ref_codigo || (partes[0]||'')).trim();
+      var nroFact   = partes.length >= 3 ? partes[partes.length-1].trim() : '—';
+      var desc      = partes.length >= 2 ? partes[1].trim() : (a.descripcion||'');
+      var estado = a.anulado
+        ? '<span class="pa-badge pa-rojo-bg">Anulado</span>'
+        : '<span class="pa-badge pa-verde-bg">Vigente</span>';
+      var rowStyle = a.anulado ? ' style="opacity:.5;text-decoration:line-through"' : '';
+      return '<tr'+rowStyle+'>'
+        + '<td style="font-family:monospace;font-size:11px;color:var(--mut)">#'+a.id+'</td>'
+        + '<td style="font-size:12px">'+paFecha(a.fecha)+'</td>'
+        + '<td style="font-family:monospace;font-size:11px">'+ref+'</td>'
+        + '<td style="font-size:12px">'+nroFact+'</td>'
+        + '<td><strong>'+desc+'</strong></td>'
+        + '<td style="text-align:right;font-variant-numeric:tabular-nums">'+sgctMoney(totalDebe)+'</td>'
+        + '<td style="text-align:right;font-variant-numeric:tabular-nums">'+sgctMoney(totalHaber)+'</td>'
+        + '<td style="text-align:center">'+estado+'</td>'
+        + '<td style="font-size:11px;color:var(--mut);text-align:center">'+(a.usuario_nombre||'—')+'</td>'
+        + '<td style="text-align:right"><button class="btn bo bs" onclick="sgctVerAsiento('+a.id+')" style="padding:3px 8px;font-size:11px">Ver</button></td>'
+        + '</tr>';
+    }).join('');
+  });
+}
+
+function sgctAbrirNuevoAsiento() {
+  SGCT.lineasN = 0;
+  document.getElementById('sgct-as-fecha').value = new Date().toISOString().slice(0,10);
+  document.getElementById('sgct-as-desc').value = '';
+  document.getElementById('sgct-as-lineas').innerHTML = '';
+  document.getElementById('sgct-as-tot-debe').textContent = '$0';
+  document.getElementById('sgct-as-tot-haber').textContent = '$0';
+  document.getElementById('sgct-as-balance').textContent = '—';
+  document.getElementById('sgct-as-balance').style.color = 'var(--mut)';
+  sgctCargarCuentas().then(function(){
+    sgctAgregarLinea();
+    sgctAgregarLinea();
+    document.getElementById('sgct-mb-asiento').classList.add('on');
+  });
+}
+
+function sgctAgregarLinea() {
+  var n = SGCT.lineasN++;
+  var row = document.createElement('div');
+  row.id = 'sgct-lin-' + n;
+  row.style.cssText = 'display:grid;grid-template-columns:1fr 130px 130px auto;gap:8px;align-items:center;padding:6px 0;border-bottom:1px solid var(--bor)';
+  row.innerHTML =
+    '<select id="sgct-li-cu-'+n+'" style="font-size:13px">'+sgctCuentasOpts()+'</select>'
+    + '<input type="number" id="sgct-li-debe-'+n+'" placeholder="0.00" step="0.01" min="0" oninput="sgctCalcTotales()" style="text-align:right;font-size:13px">'
+    + '<input type="number" id="sgct-li-haber-'+n+'" placeholder="0.00" step="0.01" min="0" oninput="sgctCalcTotales()" style="text-align:right;font-size:13px">'
+    + '<button class="btn bd bs" onclick="document.getElementById(\'sgct-lin-'+n+'\').remove();sgctCalcTotales()" style="padding:3px 8px">✕</button>';
+  document.getElementById('sgct-as-lineas').appendChild(row);
+}
+
+function sgctCalcTotales() {
+  var debe = 0, haber = 0;
+  document.querySelectorAll('[id^="sgct-lin-"]').forEach(function(row){
+    var n = row.id.split('-')[2];
+    debe  += parseFloat(document.getElementById('sgct-li-debe-'+n).value)  || 0;
+    haber += parseFloat(document.getElementById('sgct-li-haber-'+n).value) || 0;
+  });
+  document.getElementById('sgct-as-tot-debe').textContent  = sgctMoney(debe);
+  document.getElementById('sgct-as-tot-haber').textContent = sgctMoney(haber);
+  var bal = document.getElementById('sgct-as-balance');
+  var dif = Math.abs(debe - haber);
+  if (dif < 0.01) {
+    bal.textContent = '✓ Cuadra';
+    bal.style.color = 'var(--ok)';
+  } else {
+    bal.textContent = '⚠ Diferencia: ' + sgctMoney(dif);
+    bal.style.color = 'var(--err)';
+  }
+}
+
+function sgctGuardarAsiento() {
+  var fecha = document.getElementById('sgct-as-fecha').value;
+  var desc  = document.getElementById('sgct-as-desc').value.trim();
+  if (!fecha || !desc) return toast('Completá fecha y descripción', 'er');
+  var lineas = [];
+  document.querySelectorAll('[id^="sgct-lin-"]').forEach(function(row){
+    var n  = row.id.split('-')[2];
+    var cu = document.getElementById('sgct-li-cu-'+n).value;
+    var db = parseFloat(document.getElementById('sgct-li-debe-'+n).value)  || 0;
+    var hb = parseFloat(document.getElementById('sgct-li-haber-'+n).value) || 0;
+    if (cu && (db > 0 || hb > 0)) lineas.push({ cuenta_id: parseInt(cu), debe: db, haber: hb });
+  });
+  if (lineas.length < 2) return toast('El asiento necesita al menos 2 líneas', 'er');
+  var totD = lineas.reduce(function(s,l){ return s+l.debe; }, 0);
+  var totH = lineas.reduce(function(s,l){ return s+l.haber; }, 0);
+  if (Math.abs(totD - totH) > 0.01) return toast('El debe y haber no cuadran', 'er');
+  sgctApi('/asientos', {
+    method: 'POST',
+    body: JSON.stringify({ fecha: fecha, descripcion: desc, lineas: lineas })
+  }).then(function(r){
+    if (r.ok) {
+      toast('✓ Asiento registrado', 'ok');
+      document.getElementById('sgct-mb-asiento').classList.remove('on');
+      sgctLoadAsientos();
+    } else toast('Error: ' + (r.error||'desconocido'), 'er');
+  });
+}
+
+function sgctVerAsiento(id) {
+  sgctApi('/asientos/' + id).then(function(r){
+    if (!r.ok) return toast(r.error||'Error', 'er');
+    var a = r.data;
+    SGCT.asientoActualId = a.id;
+    document.getElementById('sgct-as-det-tit').textContent = 'Asiento #' + a.id;
+    document.getElementById('sgct-as-det-sub').textContent = paFecha(a.fecha) + ' — ' + a.descripcion;
+    var totD = 0, totH = 0;
+    var rows = (a.lineas||[]).map(function(l){
+      totD += l.debe||0; totH += l.haber||0;
+      return '<tr>'
+        + '<td style="font-family:monospace;font-size:12px">'+l.cuenta_codigo+'</td>'
+        + '<td>'+l.cuenta_nombre+'</td>'
+        + '<td style="text-align:right;font-variant-numeric:tabular-nums">'+(l.debe>0 ? sgctMoney(l.debe) : '—')+'</td>'
+        + '<td style="text-align:right;font-variant-numeric:tabular-nums">'+(l.haber>0 ? sgctMoney(l.haber) : '—')+'</td>'
+        + '</tr>';
+    }).join('');
+    var html = '<table class="pa-tbl" style="margin-bottom:14px">'
+      + '<thead><tr><th style="width:80px">Código</th><th>Cuenta</th><th style="text-align:right;width:130px">Debe</th><th style="text-align:right;width:130px">Haber</th></tr></thead>'
+      + '<tbody>' + rows + '</tbody>'
+      + '<tfoot><tr style="font-weight:700;background:var(--bg)">'
+      + '<td colspan="2" style="text-align:right;padding:8px 12px">TOTALES</td>'
+      + '<td style="text-align:right;padding:8px 12px">'+sgctMoney(totD)+'</td>'
+      + '<td style="text-align:right;padding:8px 12px">'+sgctMoney(totH)+'</td>'
+      + '</tr></tfoot>'
+      + '</table>'
+      + (a.anulado ? '<div style="background:#fef2f2;border:1px solid #fca5a5;border-radius:8px;padding:10px 14px;font-size:13px;color:#991b1b">⚠ Asiento anulado el '+(a.anulado_en||'').slice(0,10)+'</div>' : '');
+    document.getElementById('sgct-as-det-body').innerHTML = html;
+    document.getElementById('sgct-as-det-anular-btn').style.display = a.anulado ? 'none' : '';
+    document.getElementById('sgct-mb-asiento-det').classList.add('on');
+  });
+}
+
+function sgctAnularAsientoActual() {
+  if (!SGCT.asientoActualId) return;
+  if (!confirm('¿Anular este asiento? La operación queda registrada en el historial.')) return;
+  sgctApi('/asientos/' + SGCT.asientoActualId + '/anular', { method: 'POST', body: '{}' }).then(function(r){
+    if (r.ok) {
+      toast('✓ Asiento anulado', 'ok');
+      document.getElementById('sgct-mb-asiento-det').classList.remove('on');
+      sgctLoadAsientos();
+    } else toast('Error: ' + (r.error||'desconocido'), 'er');
+  });
+}
+
+function sgctModApi(path, opts) {
+  opts = opts || {};
+  opts.headers = opts.headers || { 'Content-Type': 'application/json' };
+  return fetch('/api/sg/contable' + path, opts)
+    .then(function(r){ return r.json(); })
+    .catch(function(){ return { ok: false, error: 'Error de red' }; });
+}
+
+function sgctModCargarCuentas(cb) {
+  if (SGCT_MOD_CUENTAS.length) { cb(); return; }
+  fetch('/api/sg/contable', { headers: { 'Content-Type': 'application/json' } })
+    .then(function(r){ return r.json(); })
+    .then(function(r) {
+      SGCT_MOD_CUENTAS = (r.data || []).filter(function(c){ return c.activo; });
+      // El backend ya envía c.imputable; por las dudas lo recalculamos si falta.
+      var codigos = SGCT_MOD_CUENTAS.map(function(c){ return String(c.codigo); });
+      SGCT_MOD_CUENTAS.forEach(function(c){
+        if (c.imputable === undefined || c.imputable === null) {
+          var cod = String(c.codigo);
+          c.imputable = codigos.some(function(o){ return o !== cod && o.indexOf(cod + '.') === 0; }) ? 0 : 1;
+        }
+      });
+      cb();
+    })
+    .catch(function(){ cb(); });
+}
+
+function sgctModCargar() {
+  sgctModApi('/modelos').then(function(r) {
+    var data = r.data || [];
+    var tb = document.getElementById('sgct-mod-tbody');
+    if (!data.length) {
+      tb.innerHTML = '<tr><td colspan="4" class="emp">Sin modelos. <button class="btn bo bs" onclick="sgctModAbrirNuevo()">+ Crear el primero</button></td></tr>';
+      return;
+    }
+    tb.innerHTML = data.map(function(m) {
+      return '<tr>'
+        + '<td><strong>' + m.nombre + '</strong></td>'
+        + '<td style="text-align:center"><span class="pa-badge pa-azul-bg">' + (m.cant_lineas||0) + ' líneas</span>'
+          // Sin línea de Proveedores el modelo no sirve para facturas de compra.
+          // Se marca acá para poder detectar de un vistazo cuáles hay que corregir,
+          // en vez de descubrirlo de a uno al cargar cada factura.
+          + (m.cant_lineas && !m.tiene_linea_proveedores
+              ? ' <span class="pa-badge" style="background:#fef3c7;color:#92400e;font-size:10px" title="Ninguna línea está marcada como Proveedores (Haber): con este modelo no se pueden registrar facturas de compra">⚠ sin Proveedores</span>'
+              : '')
+        + '</td>'
+        + '<td style="font-size:12px;color:var(--mut)">' + (m.descripcion||'—') + '</td>'
+        + '<td style="text-align:right">'
+          + '<button class="btn bo bs" onclick="sgctModEditar(' + m.id + ')" style="padding:3px 8px;font-size:11px;margin-right:4px">✏️</button>'
+          + '<button class="btn bd bs" onclick="sgctModEliminar(' + m.id + ')" style="padding:3px 8px;font-size:11px">🗑</button>'
+        + '</td></tr>';
+    }).join('');
+  });
+}
+
+function sgctCargarConfigImp() {
+  sgctModCargarCuentas(function() {
+    var opts = '<option value="">— Sin asignar —</option>'
+      + SGCT_MOD_CUENTAS.map(function(c){
+          return '<option value="'+c.id+'">'+(c.codigo?c.codigo+' — ':'')+c.nombre+'</option>';
+        }).join('');
+    ['iva_credito_fiscal','iva_debito_fiscal','percepcion_iva','percepcion_iibb','percepcion_ganancias','retencion'].forEach(function(clave) {
+      var sel = document.getElementById('sgct-cfg-imp-'+clave);
+      if (sel) sel.innerHTML = opts;
+    });
+    // Cargar valores actuales
+    sgctModApi('/config-impositiva').then(function(r) {
+      if (!r.ok) return;
+      (r.data||[]).forEach(function(row) {
+        var sel = document.getElementById('sgct-cfg-imp-'+row.clave);
+        if (sel && row.cuenta_id) sel.value = row.cuenta_id;
+      });
+    });
+  });
+}
+
+function sgctGuardarConfigImp(clave, cuentaId) {
+  sgctModApi('/config-impositiva', {
+    method: 'PUT',
+    body: JSON.stringify({ clave, cuenta_id: cuentaId ? parseInt(cuentaId) : null })
+  }).then(function(r) {
+    if (r.ok) toast('✓ Configuración guardada', 'ok');
+    else toast(r.error||'Error al guardar', 'er');
+  });
+}
+
+function sgctModAbrirNuevo() {
+  document.getElementById('sgct-mod-id').value = '';
+  document.getElementById('sgct-mod-tit').textContent = 'Nuevo Asiento Modelo';
+  document.getElementById('sgct-mod-nombre').value = '';
+  document.getElementById('sgct-mod-desc').value = '';
+  document.getElementById('sgct-mod-lineas').innerHTML = '';
+  document.getElementById('sgct-mod-doble').style.display = 'none';
+  SGCT_MOD_CUENTAS = []; // forzar recarga para incluir cuentas recién creadas
+  sgctModCargarCuentas(function() {
+    sgctModAgregarLinea('debe');
+    sgctModAgregarLinea('haber');
+    document.getElementById('sgct-mb-modelo').classList.add('on');
+  });
+}
+
+function sgctModEditar(id) {
+  SGCT_MOD_CUENTAS = []; // forzar recarga para incluir cuentas recién creadas
+  sgctModCargarCuentas(function() {
+    sgctModApi('/modelos/' + id).then(function(r) {
+      if (!r.ok) return toast(r.error || 'Error', 'er');
+      var m = r.data;
+      document.getElementById('sgct-mod-id').value = m.id;
+      document.getElementById('sgct-mod-tit').textContent = 'Editar — ' + m.nombre;
+      document.getElementById('sgct-mod-nombre').value = m.nombre || '';
+      document.getElementById('sgct-mod-desc').value = m.descripcion || '';
+      document.getElementById('sgct-mod-lineas').innerHTML = '';
+      (m.lineas || []).forEach(function(l) { sgctModAgregarLinea(l.lado, l.cuenta_id, l.descripcion, l.tipo_linea); });
+      sgctModValidarDoble();
+      document.getElementById('sgct-mb-modelo').classList.add('on');
+    });
+  });
+}
+
+function sgctModCuTexto(c){ return (c.codigo ? '['+c.codigo+'] ' : '') + c.nombre; }
+
+function sgctModCuBuscar(lid){
+  var inp = document.getElementById('sgct-mod-cuq-'+lid); if(!inp) return;
+  var box = document.getElementById('sgct-mod-culist-'+lid); if(!box) return;
+  var q = (inp.value||'').toLowerCase().trim();
+  var arr = SGCT_MOD_CUENTAS.filter(function(c){
+    return !q || sgctModCuTexto(c).toLowerCase().indexOf(q) !== -1;
+  });
+  var top = arr.slice(0, 50);
+  box.innerHTML = top.length
+    ? top.map(function(c){
+        if (c.imputable === 0) {
+          return '<div class="pa-ac-item" style="color:#9ca3af;cursor:not-allowed" title="Rubro agrupador, no imputable">'
+            + sgctModCuTexto(c) + ' <span style="font-size:10px">🔒 NO IMPUTABLE</span></div>';
+        }
+        return '<div class="pa-ac-item" data-id="'+c.id+'" onmousedown="sgctModCuPick('+lid+','+c.id+')">'
+          + sgctModCuTexto(c) + '</div>';
+      }).join('') + (arr.length>top.length ? '<div class="pa-ac-more">… '+(arr.length-top.length)+' más — seguí escribiendo</div>' : '')
+    : '<div class="pa-ac-empty">Sin resultados</div>';
+  box.style.display='';
+}
+
+function sgctModCuPick(lid, cuentaId){
+  var c = SGCT_MOD_CUENTAS.find(function(x){ return x.id == cuentaId; });
+  if (!c || c.imputable === 0) return;
+  var hid = document.getElementById('sgct-mod-cuhid-'+lid);
+  var inp = document.getElementById('sgct-mod-cuq-'+lid);
+  var box = document.getElementById('sgct-mod-culist-'+lid);
+  if (hid) hid.value = c.id;
+  if (inp) inp.value = sgctModCuTexto(c);
+  if (box) box.style.display='none';
+  sgctModValidarDoble();
+}
+
+function sgctModCuBlur(lid){
+  setTimeout(function(){ var b=document.getElementById('sgct-mod-culist-'+lid); if(b) b.style.display='none'; }, 150);
+}
+
+function sgctModCuKey(ev, lid){
+  var box=document.getElementById('sgct-mod-culist-'+lid); if(!box) return;
+  if(ev.key==='Escape'){ box.style.display='none'; return; }
+  if(ev.key!=='ArrowDown' && ev.key!=='ArrowUp' && ev.key!=='Enter') return;
+  if(box.style.display==='none' && ev.key!=='Enter') sgctModCuBuscar(lid);
+  var items=box.querySelectorAll('.pa-ac-item[data-id]'); if(!items.length) return;
+  var cur=-1,k; for(k=0;k<items.length;k++){ if(items[k].classList.contains('pa-ac-on')){ cur=k; break; } }
+  if(ev.key==='Enter'){ ev.preventDefault(); var pick=(cur>=0)?items[cur]:items[0]; sgctModCuPick(lid, parseInt(pick.dataset.id,10)); return; }
+  ev.preventDefault();
+  var ni = ev.key==='ArrowDown' ? Math.min(cur+1, items.length-1) : Math.max(cur-1, 0);
+  if(cur<0 && ev.key==='ArrowDown') ni=0;
+  for(k=0;k<items.length;k++) items[k].classList.toggle('pa-ac-on', k===ni);
+  items[ni].scrollIntoView({block:'nearest'});
+}
+
+function sgctModAgregarLinea(lado, cuentaId, desc, tipoLinea) {
+  lado = lado || 'debe';
+  tipoLinea = tipoLinea || 'libre';
+  var tbody = document.getElementById('sgct-mod-lineas');
+  var lid = ++SGCT_MOD_LINEA_SEQ;
+  // Texto inicial si viene una cuenta (modo edición)
+  var cuIni = cuentaId ? SGCT_MOD_CUENTAS.find(function(c){ return c.id == cuentaId; }) : null;
+  var cuTxt = cuIni ? sgctModCuTexto(cuIni).replace(/"/g,'&quot;') : '';
+  var tipoOpts = [
+    ['libre',                '— Libre (neto/compras) —'],
+    ['iva',                  'IVA Crédito Fiscal'],
+    ['percepcion_iva',       'Percepción IVA'],
+    ['percepcion_iibb',      'Percepción IIBB'],
+    ['percepcion_ganancias', 'Percepción Ganancias'],
+    ['retencion',            'Retención'],
+    ['proveedores',          'Proveedores (Haber)']
+  ].map(function(t){ return '<option value="' + t[0] + '"' + (t[0]===tipoLinea?' selected':'') + '>' + t[1] + '</option>'; }).join('');
+  var tr = document.createElement('tr');
+  tr.innerHTML = '<td>'
+    + '<div style="position:relative">'
+      + '<input id="sgct-mod-cuq-'+lid+'" type="text" autocomplete="off" placeholder="🔍 Escribí código o nombre…" value="'+cuTxt+'" '
+        + 'oninput="sgctModCuBuscar('+lid+')" onfocus="sgctModCuBuscar('+lid+')" onblur="sgctModCuBlur('+lid+')" onkeydown="sgctModCuKey(event,'+lid+')" style="width:100%">'
+      + '<input type="hidden" class="sgct-mod-cuenta" id="sgct-mod-cuhid-'+lid+'" value="'+(cuentaId||'')+'">'
+      + '<div id="sgct-mod-culist-'+lid+'" class="pa-ac-list" style="display:none"></div>'
+    + '</div></td>'
+    + '<td style="text-align:center"><select class="sgct-mod-lado" onchange="sgctModValidarDoble()" style="width:90px">'
+    + '<option value="debe"' + (lado==='debe'?' selected':'') + '>DEBE</option>'
+    + '<option value="haber"' + (lado==='haber'?' selected':'') + '>HABER</option>'
+    + '</select></td>'
+    + '<td><select class="sgct-mod-tipo" style="width:100%;font-size:11px">' + tipoOpts + '</select></td>'
+    + '<td><input class="sgct-mod-linea-desc" placeholder="Descripción" value="' + (desc||'') + '" style="width:100%"></td>'
+    + '<td><button class="btn bd bs" onclick="this.closest(\'tr\').remove();sgctModValidarDoble()" style="padding:2px 6px;font-size:11px">✕</button></td>';
+  tbody.appendChild(tr);
+  sgctModValidarDoble();
+}
+
+function sgctModValidarDoble() {
+  var lineas = sgctModLeerLineas();
+  var debeCant = lineas.filter(function(l){ return l.lado === 'debe'; }).length;
+  var haberCant = lineas.filter(function(l){ return l.lado === 'haber'; }).length;
+  var div = document.getElementById('sgct-mod-doble');
+  if (lineas.length < 2) { div.style.display = 'none'; return; }
+  var ok = debeCant >= 1 && haberCant >= 1;
+  // La partida doble no alcanza para que el modelo SIRVA. Sin una línea marcada
+  // "Proveedores (Haber)" no se puede registrar una factura de compra con este
+  // modelo (produccion.js corta con 400) ni sale la cuenta en la orden de pago.
+  // Antes acá decía "✅ Modelo válido" igual, y el problema recién aparecía al
+  // cargar la factura — que es donde no se puede arreglar.
+  var tieneProv = lineas.some(function(l){ return l.tipo_linea === 'proveedores'; });
+  div.style.display = '';
+  if (!ok) {
+    div.style.background = 'rgba(239,68,68,.12)';
+    div.style.color = 'var(--err)';
+    div.textContent = '❌ El modelo necesita al menos 1 línea en el DEBE y 1 en el HABER';
+  } else if (!tieneProv) {
+    div.style.background = 'rgba(245,158,11,.14)';
+    div.style.color = '#92400e';
+    div.textContent = '⚠ Falta la línea de Proveedores. La partida doble cierra, pero sin marcar una '
+      + 'línea con Tipo = "Proveedores (Haber)" este modelo no sirve para registrar facturas de compra.';
+  } else {
+    div.style.background = 'rgba(74,222,128,.12)';
+    div.style.color = 'var(--ok)';
+    div.textContent = '✅ Modelo válido — partida doble y línea de Proveedores';
+  }
+}
+
+function sgctModLeerLineas() {
+  var rows = document.querySelectorAll('#sgct-mod-lineas tr');
+  var lineas = [];
+  rows.forEach(function(tr) {
+    var cuenta_id = tr.querySelector('.sgct-mod-cuenta')?.value;
+    var lado = tr.querySelector('.sgct-mod-lado')?.value;
+    var tipo_linea = tr.querySelector('.sgct-mod-tipo')?.value || 'libre';
+    var desc = tr.querySelector('.sgct-mod-linea-desc')?.value?.trim();
+    if (cuenta_id && lado) lineas.push({ cuenta_id: parseInt(cuenta_id), lado: lado, tipo_linea: tipo_linea, descripcion: desc || null });
+  });
+  return lineas;
+}
+
+function sgctModGuardar() {
+  var id = document.getElementById('sgct-mod-id').value;
+  var nombre = document.getElementById('sgct-mod-nombre').value.trim();
+  var descripcion = document.getElementById('sgct-mod-desc').value.trim() || null;
+  if (!nombre) return toast('El nombre es requerido', 'er');
+  var lineas = sgctModLeerLineas();
+  if (lineas.length < 2) return toast('El modelo necesita al menos 2 líneas', 'er');
+  var body = { nombre: nombre, descripcion: descripcion, lineas: lineas };
+  var url = id ? '/modelos/' + id : '/modelos';
+  var method = id ? 'PUT' : 'POST';
+  sgctModEnviar(url, method, body);
+}
+
+function sgctModEnviar(url, method, body) {
+  sgctModApi(url, { method: method, body: JSON.stringify(body) }).then(function(r) {
+    if (r.ok) {
+      toast('✓ Modelo guardado', 'ok');
+      document.getElementById('sgct-mb-modelo').classList.remove('on');
+      sgctModCargar();
+      return;
+    }
+    if (r.codigo === 'SIN_LINEA_PROVEEDORES' && !body.permitir_sin_proveedores) {
+      var seguir = confirm(
+        'Este modelo no tiene ninguna línea marcada como "Proveedores (Haber)".\n\n' +
+        'Así NO vas a poder registrar facturas de compra ni emitir órdenes de pago con él.\n\n' +
+        '¿Es un modelo de otra cosa (ventas, sueldos) y lo guardás igual?');
+      if (!seguir) return;
+      body.permitir_sin_proveedores = true;
+      return sgctModEnviar(url, method, body);
+    }
+    toast('Error: ' + (r.error || 'desconocido'), 'er');
+  });
+}
+
+function sgctModEliminar(id) {
+  if (!confirm('¿Eliminar este modelo?')) return;
+  sgctModApi('/modelos/' + id, { method: 'DELETE' }).then(function(r) {
+    if (r.ok) { toast('✓ Eliminado', 'ok'); sgctModCargar(); }
+    else toast(r.error || 'Error', 'er');
+  });
+}
+
+function sgctExportarAsientos(){
+  var d=document.getElementById('sgct-as-desde').value;
+  var h=document.getElementById('sgct-as-hasta').value;
+  var filas = [];
+  (SGCT_EXPORT.asientos||[]).forEach(function(a) {
+    var partes = (a.descripcion||'').split('|');
+    var ref     = (a.ref_codigo || (partes[0]||'')).trim();
+    var prov    = partes.length>=2 ? partes[1].trim() : (a.descripcion||'');
+    var nroFact = partes.length>=3 ? partes[partes.length-1].trim() : '';
+    var estado  = a.anulado ? 'Anulado' : 'Vigente';
+    var usuario = a.usuario_nombre || '';
+    var lineas  = a.lineas || [];
+    if (!lineas.length) {
+      filas.push([a.id, fmtFecha(a.fecha), ref, nroFact, prov, '', '', '', '', estado, usuario]);
+    } else {
+      lineas.forEach(function(l){
+        filas.push([
+          a.id, fmtFecha(a.fecha), ref, nroFact, prov,
+          l.cuenta_codigo||'', l.cuenta_nombre||'', l.descripcion||'',
+          fmtNum(l.debe), fmtNum(l.haber),
+          estado, usuario
+        ]);
+      });
+    }
+  });
+  var cols = ['ID Asiento','Fecha','Referencia','Nro. Factura','Proveedor','Cta. Código','Cta. Nombre','Descripción Línea','Debe','Haber','Estado','Usuario'];
+  var tab='\t', nl='\r\n';
+  var contenido = '\uFEFF' + cols.join(tab) + nl + filas.map(function(r){ return r.join(tab); }).join(nl);
+  var blob = new Blob([contenido], { type: 'text/tab-separated-values;charset=utf-8' });
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement('a');
+  a.href=url; a.download='asientos'+(d?'_'+d:'')+(h?'_al_'+h:'')+'.xls';
+  document.body.appendChild(a); a.click();
+  document.body.removeChild(a); URL.revokeObjectURL(url);
+  toast('✅ Descargado: asientos.xls', 'ok');
+}
+
+// Los modales NO van en el HTML. Los de Puente Cordón están en el archivo pero
+// son código MUERTO: un IIFE los borra al arrancar y appendea estas versiones,
+// que además divergieron del HTML estático. Se clonó el IIFE, no el HTML.
+(function() {
+  // Eliminar modales rotos si existen
+  ['sgct-mb-asiento','sgct-mb-asiento-det','sgct-mb-seccion','sgct-mb-titulo','sgct-mb-cuenta'].forEach(function(id){
+    var el = document.getElementById(id); if(el) el.remove();
+  });
+  var div = document.createElement('div');
+  div.innerHTML = '<div class="ab-modal-overlay" id="sgct-mb-asiento"><div class="ab-modal" style="width:780px"><div class="mhd"><div><div class="mht">📒 Asiento contable</div><div style="font-size:12px;color:var(--mut)">El debe debe ser igual al haber</div></div><button class="mcl" onclick="document.getElementById(\'sgct-mb-asiento\').classList.remove(\'on\')">×</button></div><div class="fg" style="margin-bottom:14px"><div class="fl"><label>Fecha *</label><input type="date" id="sgct-as-fecha"></div><div class="fl ff"><label>Descripción *</label><input id="sgct-as-desc" placeholder="Ej: Pago factura proveedor"></div></div><div style="display:grid;grid-template-columns:1fr 130px 130px auto;gap:8px;padding:0 0 6px;border-bottom:1px solid var(--bor);font-size:10px;font-weight:700;color:var(--mut);text-transform:uppercase"><div>Cuenta</div><div style="text-align:right">Debe $</div><div style="text-align:right">Haber $</div><div></div></div><div id="sgct-as-lineas" style="margin:8px 0"></div><button class="btn bo bs" onclick="sgctAgregarLinea()" style="margin-bottom:16px">+ Agregar línea</button><div style="background:var(--bg);border:1px solid var(--bor);border-radius:8px;padding:12px 14px;display:flex;justify-content:flex-end;gap:32px;font-size:14px;margin-bottom:16px"><div>Total Debe: <strong id="sgct-as-tot-debe" style="font-size:16px;color:var(--burd)">$0</strong></div><div>Total Haber: <strong id="sgct-as-tot-haber" style="font-size:16px;color:var(--burd)">$0</strong></div><div id="sgct-as-balance" style="font-weight:700;font-size:16px;color:var(--ok)">✓ Cuadra</div></div><div class="ab-modal-footer"><button class="btn bo" onclick="document.getElementById(\'sgct-mb-asiento\').classList.remove(\'on\')">Cancelar</button><button class="btn bb" onclick="sgctGuardarAsiento()">Registrar asiento</button></div></div></div>'
+  + '<div class="ab-modal-overlay" id="sgct-mb-asiento-det"><div class="ab-modal" style="width:680px"><div class="mhd"><div><div class="mht" id="sgct-as-det-tit">Asiento</div><div style="font-size:12px;color:var(--mut)" id="sgct-as-det-sub"></div></div><button class="mcl" onclick="document.getElementById(\'sgct-mb-asiento-det\').classList.remove(\'on\')">×</button></div><div id="sgct-as-det-body"></div><div class="ab-modal-footer" style="justify-content:space-between"><button class="btn bd" id="sgct-as-det-anular-btn" onclick="sgctAnularAsientoActual()">Anular asiento</button><button class="btn bo" onclick="document.getElementById(\'sgct-mb-asiento-det\').classList.remove(\'on\')">Cerrar</button></div></div></div>'
+  + '<div class="ab-modal-overlay" id="sgct-mb-seccion"><div class="ab-modal" style="width:460px"><div class="mhd"><div><div class="mht" id="sgct-sec-tit">Nueva sección</div></div><button class="mcl" onclick="document.getElementById(\'sgct-mb-seccion\').classList.remove(\'on\')">×</button></div><input type="hidden" id="sgct-sec-id"><div class="fg"><div class="fl"><label>Código * <span style="font-size:10px;color:var(--mut)">formato X.XX</span></label><input id="sgct-sec-codigo" placeholder="Ej: 1.08"></div><div class="fl ff"><label>Nombre *</label><input id="sgct-sec-nombre" placeholder="Ej: CAJA Y BANCOS"></div><div class="fl ff"><label>Grupo *</label><select id="sgct-sec-grupo"><option value="activo">🏦 Activo</option><option value="pasivo">💳 Pasivo</option><option value="patrimonio_neto">🏛️ Patrimonio Neto</option><option value="ingresos">📈 Ingresos</option><option value="gastos">📉 Gastos</option></select></div></div><div class="ab-modal-footer"><button class="btn bo" onclick="document.getElementById(\'sgct-mb-seccion\').classList.remove(\'on\')">Cancelar</button><button class="btn bb" onclick="sgctPcGuardarSeccion()">Guardar</button></div></div></div>'
+  + '<div class="ab-modal-overlay" id="sgct-mb-titulo"><div class="ab-modal" style="width:460px"><div class="mhd"><div><div class="mht" id="sgct-tit-modal-tit">Nuevo título</div></div><button class="mcl" onclick="document.getElementById(\'sgct-mb-titulo\').classList.remove(\'on\')">×</button></div><input type="hidden" id="sgct-tit-id"><div class="fg"><div class="fl ff"><label>Sección *</label><select id="sgct-tit-seccion" onchange="sgctPcTitSugerirCodigo()"></select></div><div class="fl"><label>Código * <span style="font-size:10px;color:var(--mut)">formato X.XX.XX</span></label><input id="sgct-tit-codigo" placeholder="1.01.03"><div id="sgct-tit-codigo-sug" style="font-size:10px;color:var(--mut);margin-top:3px"></div></div><div class="fl ff"><label>Nombre *</label><input id="sgct-tit-nombre" placeholder="Ej: Caja y Efectivo"></div><div style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:6px;padding:8px 10px;font-size:12px;color:#0369a1;margin-top:4px">ℹ️ Los títulos agrupan cuentas dentro de una sección. <strong>No son imputables</strong> en asientos.</div></div><div class="ab-modal-footer"><button class="btn bo" onclick="document.getElementById(\'sgct-mb-titulo\').classList.remove(\'on\')">Cancelar</button><button class="btn bb" onclick="sgctPcGuardarTitulo()">Guardar</button></div></div></div>'
+  + '<div class="ab-modal-overlay" id="sgct-mb-cuenta"><div class="ab-modal" style="width:520px"><div class="mhd"><div><div class="mht" id="sgct-cu-tit">Nueva cuenta</div></div><button class="mcl" onclick="document.getElementById(\'sgct-mb-cuenta\').classList.remove(\'on\')">×</button></div><input type="hidden" id="sgct-cu-id"><div class="fg"><div class="fl ff"><label>Sección *</label><select id="sgct-cu-seccion" onchange="sgctPcOnSeccionChange()"></select></div><div class="fl ff"><label>Título <span style="font-size:10px;color:var(--mut)">(organiza dentro de la sección)</span></label><select id="sgct-cu-titulo"><option value="">— Sin título —</option></select></div><div class="fl"><label>Código * <span style="font-size:10px;color:var(--mut)">X.XX.XX.XXXX</span></label><input id="sgct-cu-codigo" placeholder="1.01.01.0001"><div id="sgct-cu-codigo-sug" style="font-size:10px;color:var(--mut);margin-top:3px"></div></div><div class="fl ff"><label>Nombre *</label><input id="sgct-cu-nombre" placeholder="Ej: Caja pesos"></div><div class="fl"><label>Tipo</label><select id="sgct-cu-tipo"><option value="resultado">Resultado (ER)</option><option value="patrimonial">Patrimonial</option></select></div><div class="fl ff" style="display:flex;gap:18px;align-items:center;padding-top:8px"><label style="display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--mut);cursor:pointer"><input type="checkbox" id="sgct-cu-lote" style="width:auto"> Permite lote</label><label style="display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--mut);cursor:pointer"><input type="checkbox" id="sgct-cu-camp" style="width:auto"> Permite campaña</label></div></div><div class="ab-modal-footer"><button class="btn bo" onclick="document.getElementById(\'sgct-mb-cuenta\').classList.remove(\'on\')">Cancelar</button><button class="btn bb" onclick="sgctPcGuardarCuenta()">Guardar</button></div></div></div>';
+  document.body.appendChild(div);
+})();
+
+// ── ENGANCHE CON EL MENÚ ──────────────────────────────────────────────────
+// loadSec ya viene envuelto dos veces (panel.html: el wrapper de adm-*/ven-*/fin-*
+// y el de pli/sp/tr/fp/bt). Este es el TERCERO y sigue el mismo patrón: captura
+// el anterior y delega. Redeclarar `function loadSec` en vez de envolver pisaría
+// toda la cadena y rompería de una a Puente Cordón, ventas, fp, bt y sp.
+(function(){
+  var anterior = loadSec;
+  loadSec = function(s){
+    if (s === 'sgct-plan-cuentas') {
+      // La pestaña activa manda: si ya hay una elegida se respeta, y si no se
+      // arranca por Activo. Se busca DENTRO de la sección y no en todo el
+      // documento, que es como el de Puente Cordón se pisaría con éste.
+      var cont = document.getElementById('sec-sgct-plan-cuentas');
+      var act  = cont ? cont.querySelector('.sgct-pc-tab.on') : null;
+      sgctCargarCuentas();
+      sgctPcLoadGrupo(act ? act.getAttribute('data-grupo') : 'activo');
+      return;
+    }
+    if (s === 'sgct-asientos') { sgctCargarCuentas(); sgctLoadAsientos(); return; }
+    if (s === 'sgct-modelos')  { sgctModCargarCuentas(function(){ sgctModCargar(); }); sgctCargarConfigImp(); return; }
+    return anterior(s);
+  };
+})();
+</script>
 </body>
 </html>

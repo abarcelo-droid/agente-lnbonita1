@@ -315,21 +315,52 @@ export function informeContable(db) {
         ? 'todas las empresas'
         : `SOLO ${nombreSoc(r.sociedad_id)}`;
       const esc = r.oculto ? '   ← OCULTA: no la ve nadie' : '';
-      if (r.sociedad_id !== null && r.sociedad_id !== undefined) malMenu++;
+      // ESTAR ASIGNADA A PUENTE CORDÓN NO ES UN ERROR, ES LO CORRECTO. Estas 7
+      // pantallas leen y escriben tablas pa_*, así que son de Puente Cordón.
+      // Antes estaban en "todas las empresas", que tenía sentido mientras eran
+      // las únicas; desde que San Gerónimo tiene las suyas (sgct-*, sobre sg_*),
+      // dejarlas abiertas a todos le pone dos "Plan de Cuentas" en el menú
+      // apuntando a libros distintos.
+      //
+      // Lo que SÍ es un problema es que estén ocultas, o asignadas a una empresa
+      // que no es la dueña de esas tablas.
+      const dePC = r.sociedad_id !== null && r.sociedad_id !== undefined
+                && nombreSoc(r.sociedad_id).indexOf('Puente Cord') === 0;
+      const marca = r.oculto ? esc
+                  : (dePC ? '' : '   ← revisar: no es la empresa dueña de estas tablas');
+      if (!r.oculto && !dePC) malMenu++;
       if (r.oculto) malMenu++;
-      w(`  ${nombre.padEnd(18)} ${String(r.grupo || '').padEnd(14)} ${donde}${esc}`);
+      w(`  ${nombre.padEnd(18)} ${String(r.grupo || '').padEnd(14)} ${donde}${marca}`);
     }
+    w();
     if (malMenu) {
-      w();
-      w('  Las que dicen "SOLO <empresa>" se ven ÚNICAMENTE parado en esa empresa.');
-      w('  Las 7 tendrían que decir "todas las empresas": cada una entra a la misma');
-      w('  pantalla y ve lo suyo. Se arregla desde Configuración → Módulos, o con la');
-      w('  migración que las mueve (db_org.js, migrarContabilidadATodasLasEmpresas),');
-      w('  que sólo toca las que siguen asignadas a Familia.');
+      w('  Las marcadas hay que revisarlas: estas 7 operan sobre las tablas de');
+      w('  Puente Cordón, así que tendrían que estar asignadas a Puente Cordón.');
+      w('  "todas las empresas" ya no sirve acá: San Gerónimo tiene sus propias');
+      w('  pantallas contables (sobre sg_*), y con las dos visibles se ven dos');
+      w('  "Plan de Cuentas" iguales que escriben en libros distintos.');
+      w('  Se ajusta desde Configuración → Módulos.');
     } else {
+      w('  Las 7 están donde corresponde: en Puente Cordón, que es la dueña de las');
+      w('  tablas que usan. San Gerónimo entra por las suyas (Plan de Cuentas SG,');
+      w('  Asientos SG, Asientos Modelo SG). Si aun así no aparecen en el menú, es');
+      w('  la página cacheada: recargar con Ctrl+F5.');
+    }
+
+    // Las de San Gerónimo, para que el informe muestre el cuadro completo.
+    const SG_PANTALLAS = [['sgct-plan-cuentas', 'Plan de Cuentas SG'],
+                          ['sgct-asientos', 'Asientos SG'],
+                          ['sgct-modelos', 'Asientos Modelo SG']];
+    const hay = SG_PANTALLAS.map(([m, n]) => [n, q.get(m)]).filter(x => x[1]);
+    if (hay.length) {
       w();
-      w('  Las 7 están visibles para todas las empresas. Si aun así no aparecen en');
-      w('  el menú, es la página cacheada: recargar con Ctrl+F5.');
+      w('  CONTABILIDAD DE SAN GERÓNIMO (tablas sg_*, aparte de las de arriba):');
+      for (const [n, r] of hay) {
+        const donde = (r.sociedad_id === null || r.sociedad_id === undefined)
+          ? 'todas las empresas' : `SOLO ${nombreSoc(r.sociedad_id)}`;
+        w(`  ${n.padEnd(21)} ${String(r.grupo || '').padEnd(14)} ${donde}` +
+          (r.oculto ? '   ← OCULTA' : ''));
+      }
     }
   }
 

@@ -583,7 +583,28 @@ router.get('/asientos', (req, res) => {
   if (desde) { sql += ' AND a.fecha >= ?'; params.push(desde); }
   if (hasta) { sql += ' AND a.fecha <= ?'; params.push(hasta); }
   sql += ' ORDER BY a.fecha DESC, a.id DESC LIMIT 200';
-  res.json({ ok: true, data: db.prepare(sql).all(...params) });
+  const asientos = db.prepare(sql).all(...params);
+
+  // LAS LÍNEAS VIAJAN CON LA CABECERA. Sin esto la pantalla muestra Debe y Haber
+  // en $0,00 en todas las filas —los suma sobre a.lineas— y el Excel sale sin un
+  // solo importe y corrido una columna, porque la rama "asiento sin líneas" arma
+  // 11 valores contra 12 encabezados.
+  //
+  // Se traen todas de una sola consulta y se reparten en JS: hacerlo con un
+  // SELECT por asiento serían 200 consultas para pintar una tabla.
+  if (asientos.length) {
+    const ids = asientos.map(a => a.id);
+    const lineas = db.prepare(`
+      SELECT l.*, c.codigo AS cuenta_codigo, c.nombre AS cuenta_nombre
+        FROM sg_asientos_lineas l
+        JOIN sg_cuentas c ON c.id = l.cuenta_id
+       WHERE l.asiento_id IN (${ids.map(() => '?').join(',')})
+       ORDER BY l.id`).all(...ids);
+    const porAsiento = {};
+    for (const l of lineas) (porAsiento[l.asiento_id] = porAsiento[l.asiento_id] || []).push(l);
+    for (const a of asientos) a.lineas = porAsiento[a.id] || [];
+  }
+  res.json({ ok: true, data: asientos });
 });
 
 router.get('/asientos/:id(\\d+)', (req, res) => {
@@ -611,7 +632,12 @@ router.get('/asientos/:id(\\d+)', (req, res) => {
 
 router.get('/modelos', (req, res) => {
   const modelos = db.prepare(`
-    SELECT m.*, COUNT(l.id) as cant_lineas
+    -- tiene_linea_proveedores lo consume la tabla de la pantalla para marcar los
+    -- modelos incompletos. Sin esta columna llega undefined, la condición del
+    -- front da siempre verdadero y TODOS los modelos salen con el cartel
+    -- "sin Proveedores", incluso los que la tienen.
+    SELECT m.*, COUNT(l.id) as cant_lineas,
+           MAX(CASE WHEN l.tipo_linea = 'proveedores' THEN 1 ELSE 0 END) AS tiene_linea_proveedores
     FROM sg_asientos_modelo m
     LEFT JOIN sg_asientos_modelo_lineas l ON l.modelo_id = m.id
     WHERE m.activo = 1
@@ -642,6 +668,21 @@ router.post('/modelos', requireAdmin, (req, res) => {
   const tieneHaber = lineas.some(l => l.lado === 'haber');
   if (!tieneDebe || !tieneHaber)
     return res.status(400).json({ error: 'El modelo debe tener al menos 1 línea en el debe y 1 en el haber' });
+  // ── LA LÍNEA DE PROVEEDORES ────────────────────────────────────────────
+  // Misma regla que Puente Cordón (cuentas.js). Sin esta validación el modelo se
+  // guarda igual y el problema aparece meses después: un asiento balanceado pero
+  // contablemente falso, porque nadie sabe cuál de las líneas del haber era la
+  // del proveedor. Un 400 con el usuario parado en el editor es preferible.
+  const _prov = lineas.filter(l => l.tipo_linea === 'proveedores');
+  if (_prov.length > 1)
+    return res.status(400).json({ error: 'El modelo no puede tener más de una línea de tipo "Proveedores".' });
+  if (_prov.length === 1 && _prov[0].lado !== 'haber')
+    return res.status(400).json({ error: 'La línea de tipo "Proveedores" tiene que ir en el HABER.' });
+  if (_prov.length === 0 && req.body.permitir_sin_proveedores !== true)
+    return res.status(400).json({
+      codigo: 'SIN_LINEA_PROVEEDORES',
+      error: 'El modelo no tiene ninguna línea marcada como "Proveedores (Haber)". Sin ella no se pueden registrar facturas de compra ni emitir órdenes de pago con este modelo.'
+    });
   for (const l of lineas) {
     if (l.cuenta_id && !cuentaEsImputable(db, parseInt(l.cuenta_id))) {
       const c = db.prepare('SELECT codigo, nombre FROM sg_cuentas WHERE id = ?').get(parseInt(l.cuenta_id));
@@ -673,6 +714,21 @@ router.put('/modelos/:id', requireAdmin, (req, res) => {
   const tieneHaber = lineas.some(l => l.lado === 'haber');
   if (!tieneDebe || !tieneHaber)
     return res.status(400).json({ error: 'El modelo debe tener al menos 1 línea en el debe y 1 en el haber' });
+  // ── LA LÍNEA DE PROVEEDORES ────────────────────────────────────────────
+  // Misma regla que Puente Cordón (cuentas.js). Sin esta validación el modelo se
+  // guarda igual y el problema aparece meses después: un asiento balanceado pero
+  // contablemente falso, porque nadie sabe cuál de las líneas del haber era la
+  // del proveedor. Un 400 con el usuario parado en el editor es preferible.
+  const _prov = lineas.filter(l => l.tipo_linea === 'proveedores');
+  if (_prov.length > 1)
+    return res.status(400).json({ error: 'El modelo no puede tener más de una línea de tipo "Proveedores".' });
+  if (_prov.length === 1 && _prov[0].lado !== 'haber')
+    return res.status(400).json({ error: 'La línea de tipo "Proveedores" tiene que ir en el HABER.' });
+  if (_prov.length === 0 && req.body.permitir_sin_proveedores !== true)
+    return res.status(400).json({
+      codigo: 'SIN_LINEA_PROVEEDORES',
+      error: 'El modelo no tiene ninguna línea marcada como "Proveedores (Haber)". Sin ella no se pueden registrar facturas de compra ni emitir órdenes de pago con este modelo.'
+    });
   for (const l of lineas) {
     if (l.cuenta_id && !cuentaEsImputable(db, parseInt(l.cuenta_id))) {
       const c = db.prepare('SELECT codigo, nombre FROM sg_cuentas WHERE id = ?').get(parseInt(l.cuenta_id));
@@ -786,9 +842,24 @@ router.get('/config-impositiva', (req, res) => {
 router.put('/config-impositiva', requireAuth, (req, res) => {
   const { clave, cuenta_id } = req.body || {};
   if (!clave) return res.status(400).json({ ok: false, error: 'clave requerida' });
+  // Whitelist: el UPSERT de abajo crearía una fila nueva con cualquier clave que
+  // llegue, y esa fila después aparece en la pantalla de configuración.
+  const CLAVES = ['iva_credito_fiscal', 'iva_debito_fiscal', 'percepcion_iva',
+                  'percepcion_iibb', 'percepcion_ganancias', 'retencion', 'ventas'];
+  if (!CLAVES.includes(clave)) return res.status(400).json({ ok: false, error: 'clave desconocida: ' + clave });
   try {
-    db.prepare(`UPDATE sg_config_impositiva SET cuenta_id = ? WHERE clave = ?`)
-      .run(cuenta_id ? parseInt(cuenta_id) : null, clave);
+    const cid = cuenta_id ? parseInt(cuenta_id) : null;
+    if (cid && !db.prepare('SELECT 1 FROM sg_cuentas WHERE id = ?').get(cid)) {
+      return res.status(400).json({ ok: false, error: 'La cuenta no existe en el plan de San Gerónimo' });
+    }
+    // UPSERT y no UPDATE: si la clave no estaba sembrada, el UPDATE afectaba 0
+    // filas y el panel igual mostraba "✓ Configuración guardada". Puente Cordón
+    // ya tuvo exactamente este bug y por eso su endpoint es un UPSERT.
+    const r = db.prepare(`
+      INSERT INTO sg_config_impositiva (clave, cuenta_id) VALUES (?, ?)
+      ON CONFLICT(clave) DO UPDATE SET cuenta_id = excluded.cuenta_id
+    `).run(clave, cid);
+    if (!r.changes) return res.status(500).json({ ok: false, error: 'No se pudo guardar la configuración' });
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
