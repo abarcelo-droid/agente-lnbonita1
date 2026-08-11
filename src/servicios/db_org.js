@@ -386,3 +386,6 @@ import "./ensure_modulo_transporte.js";
 import "./ensure_modulo_fp.js";
 import "./ensure_modulo_bt.js";
 import "./ensure_modulo_sgct.js";
+// VA ULTIMO: asigna empresa a los modulos que quedaron sin ella, y para eso
+// los demas ensure_* ya tienen que haber corrido.
+import "./ensure_modulo_empresas.js";

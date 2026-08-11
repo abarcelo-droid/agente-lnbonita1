@@ -15011,7 +15011,12 @@ var SOC_NOMBRES = {};  // id → nombre (para la barra de contexto)
   // escritor de asientos de mayor volumen— y estaba afuera: la empresa elegida
   // arriba nunca llegaba al backend, así que el asiento se escribía siempre en
   // Puente Cordón sin importar dónde estuviera parado el que cargaba.
-  var AWARE = /^\/api\/(fin|ven|pa\/cuentas|pa\/proveedores|pa\/pagos|pa\/compras)(\/|\?|$)/;
+  // pli, sp y fp entran ahora que el selector siempre tiene una empresa puesta.
+  // Estaban afuera a propósito mientras existía "Todas" —sus routers lo
+  // documentan— pero eso los dejaba sin que el cerrojo del backend pudiera
+  // actuar: parado en Puente Cordón se podía operar Planificación Financiera,
+  // que es de San Gerónimo. Con la empresa viajando, el backend corta.
+  var AWARE = /^\/api\/(fin|ven|pa\/cuentas|pa\/proveedores|pa\/pagos|pa\/compras|pli|sp|fp)(\/|\?|$)/;
   var _fetch = window.fetch.bind(window);
   window.fetch = function(url, opts){
     if (typeof url === 'string' && AWARE.test(url)){
@@ -15021,7 +15026,7 @@ var SOC_NOMBRES = {};  // id → nombre (para la barra de contexto)
       var soc = socActual();
       if (soc === null){
         if (escritura){
-          if (typeof toast === 'function') toast('Elegí una sociedad (no "Todas") para crear o editar acá', 'er');
+          if (typeof toast === 'function') toast('Esperá a que cargue el menú: todavía no hay empresa seleccionada', 'er');
           return Promise.resolve(new Response(
             JSON.stringify({ ok:false, error:'Seleccioná una sociedad para operar', _bloqueado:true }),
             { status:200, headers:{ 'Content-Type':'application/json' } }
@@ -15059,11 +15064,15 @@ function actualizarBarraSociedad(){
   bar.style.display = '';
   var soc = socActual();
   if (soc === null){
+    // Ya no existe la opción "Todas": si no hay empresa elegida es porque el
+    // menú todavía no terminó de cargar, o porque quedó guardada la selección
+    // vieja que decía "all". El sidebar la reemplaza por la primera apenas
+    // carga. Se avisa en vez de mostrar un dato que no se sabe de quién es.
     bar.style.background = '#fef3c7'; bar.style.color = '#92400e';
-    bar.textContent = '⚠ Mostrando Puente Cordón (PC) — NO es consolidado (el consolidado de las 3 sociedades llega con Familia)';
+    bar.textContent = '⚠ Sin empresa seleccionada — elegí una arriba para saber sobre qué datos estás trabajando';
   } else {
     bar.style.background = '#dbeafe'; bar.style.color = '#1e40af';
-    bar.textContent = '● Operando en: ' + (SOC_NOMBRES[soc] || ('Sociedad #' + soc));
+    bar.textContent = '● Trabajando sobre: ' + (SOC_NOMBRES[soc] || ('Sociedad #' + soc));
   }
 }
 setInterval(actualizarBarraSociedad, 800);
