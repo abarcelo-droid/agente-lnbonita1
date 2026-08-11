@@ -104,7 +104,24 @@ app.use(sesionFirmada);
 //
 // Antes de esto los dos middlewares de abajo dejaban pasar sin usuario, así que
 // se llegaba a unas 130 escrituras sin loguearse.
-app.use("/api", portonApi);
+// DESACTIVADO — TIRÓ PRODUCCIÓN ABAJO. El portón preguntaba por req.user, y en
+// este punto de la cadena req.user está SIEMPRE vacío: sesionFirmada no lo
+// puebla, sólo verifica la cookie firmada y reescribe req.cookies.lnb_user. Cada
+// router parsea esa cookie por su cuenta y recién ahí aparece req.user.
+//
+// Resultado: 401 en todas las llamadas para todo el mundo. El panel cargaba, la
+// primera llamada a la API contestaba 401, el panel mandaba al login, el login
+// andaba bien, volvía al panel y otra vez 401. Loop, sin poder trabajar.
+//
+// Se desactiva en vez de borrarse: el agujero que tapa es real —unas 130
+// escrituras alcanzables sin sesión— y hay que volver a montarlo bien. La lista
+// de excepciones de porton_api.js quedó relevada y probada; lo que falla es de
+// dónde saca la identidad.
+//
+// Antes de reactivarlo: probarlo montado DETRÁS de sesionFirmada de verdad, con
+// las dos cookies que emite el login. El test que lo dio por bueno ponía
+// req.user a mano — justo lo que sesionFirmada NO hace.
+// app.use("/api", portonApi);
 
 // Solo-lectura: bloquea escrituras (POST/PUT/PATCH/DELETE) para usuarios con
 // solo_lectura=1 que no son admin. Debe ir antes de cualquier router /api.
