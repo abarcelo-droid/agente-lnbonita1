@@ -14846,14 +14846,19 @@ function permCargarMenus() {
 // Tres botones en vez de un desplegable: se ve de un vistazo quién puede borrar,
 // que es el dato que hay que poder auditar sin abrir nada.
 function permNivelHTML(modulo, nivel, activo) {
-  var op = [['ver', 'Ver'], ['operar', 'Operar'], ['borrar', 'Borrar']];
+  // "Anular" y no "Borrar": en este sistema casi nada se borra de verdad, todo
+  // es baja lógica. El botón prometía algo que no pasa, y encima es LA acción
+  // que hay que controlar — la que deja afuera trabajo ya hecho.
+  var op = [['ver', 'Ver'], ['operar', 'Operar'], ['anular', 'Anular']];
   return '<span class="pm-niv" data-mod="' + permEsc(modulo) + '">'
     + op.map(function(o) {
         // El nivel viaja en un atributo y NO como argumento del onclick: meter una
         // cadena entre comillas dentro de un atributo HTML que a su vez está dentro
         // de un string de JavaScript es la forma más rápida de romper el archivo.
+        // Lo guardado antes del renombre dice 'borrar'; es el mismo nivel.
+        var esteNivel = (nivel === 'borrar') ? 'anular' : nivel;
         return '<button type="button" data-niv="' + o[0] + '"'
-          + (o[0] === nivel ? ' class="on"' : '') + (activo ? '' : ' disabled')
+          + (o[0] === esteNivel ? ' class="on"' : '') + (activo ? '' : ' disabled')
           + ' onclick="permSetNivel(this)">' + o[1] + '</button>';
       }).join('')
     + '</span>';

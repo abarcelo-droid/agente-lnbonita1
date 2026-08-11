@@ -389,3 +389,6 @@ import "./ensure_modulo_sgct.js";
 // VA ULTIMO: asigna empresa a los modulos que quedaron sin ella, y para eso
 // los demas ensure_* ya tienen que haber corrido.
 import "./ensure_modulo_empresas.js";
+// VA AL FINAL: declara qué dirección de API es de cada menú, y para eso todos
+// los módulos ya tienen que estar registrados.
+import "./ensure_api_prefijos.js";
