@@ -40621,7 +40621,7 @@ function spHoras(h) {
 SP.filtros = SP.filtros || {};
 
 function spFiltro(vista) {
-  if (!SP.filtros[vista]) SP.filtros[vista] = { q: '', estado: '', paso: '', solicitante_id: '' };
+  if (!SP.filtros[vista]) SP.filtros[vista] = { q: '', estado: '', paso: '', solicitante_id: '', aviso: '' };
   return SP.filtros[vista];
 }
 
@@ -40636,7 +40636,7 @@ function spFiltroSet(vista, campo, valor) {
 }
 
 function spFiltroLimpiar(vista) {
-  SP.filtros[vista] = { q: '', estado: '', paso: '', solicitante_id: '' };
+  SP.filtros[vista] = { q: '', estado: '', paso: '', solicitante_id: '', aviso: '' };
   spListaCargar(vista);
 }
 
@@ -40684,6 +40684,11 @@ function spFiltrosRender(vista, r) {
     html += sel('sp-f-sol-' + vista, 'solicitante_id', 'Cualquiera que pidió',
       (opts.solicitantes || []).map(function(s) { return [s.id, s.nombre]; }), f.solicitante_id);
   }
+  // El filtro del tilde: es la mitad de para qué sirve la marca. Sin él habría
+  // que repasar las sesenta filas con la vista para encontrar las que faltan.
+  html += sel('sp-f-aviso-' + vista, 'aviso', 'Avisado al proveedor: todas',
+    [['no', 'Me falta avisar'], ['si', 'Ya avisé']], f.aviso);
+
   if (hayFiltro) {
     html += '<button class="btn bo bs" style="font-size:11px" onclick="spFiltroLimpiar(\'' + vista + '\')">✕ limpiar</button>';
   }
@@ -40701,12 +40706,42 @@ function spFiltrosRender(vista, r) {
   return html;
 }
 
+// ── EL TILDE DE "YA LE AVISÉ AL PROVEEDOR" ────────────────────────────────
+// Se guarda al toque, sin botón de confirmar: es una marca, no un formulario.
+// El checkbox se deshabilita mientras viaja para que dos clics seguidos no
+// manden dos pedidos cruzados, y si el servidor rechaza vuelve a como estaba —
+// dejarlo tildado en pantalla cuando no se guardó es peor que no tener el tilde.
+function spAvisoMarcar(id, el) {
+  var queria = el.checked;
+  el.disabled = true;
+  spApi('/solicitudes/' + id + '/aviso-proveedor',
+        { method: 'PATCH', body: JSON.stringify({ avisado: queria }) })
+    .then(function(r) {
+      el.disabled = false;
+      if (!r || r.ok !== true) {
+        el.checked = !queria;
+        return toast((r && r.error) || 'No se pudo guardar', 'er');
+      }
+      // Se refleja en la fila que ya está en memoria para que el filtro
+      // "me falta avisar" no muestre algo que se acaba de tildar.
+      Object.keys(SP.listas || {}).forEach(function(v) {
+        (SP.listas[v] || []).forEach(function(x) {
+          if (x.id === id) { x.aviso_prov = r.aviso_prov; x.aviso_prov_en = r.aviso_prov_en; }
+        });
+      });
+      var f = spFiltro(SP.vista || 'todas');
+      if (f.aviso) spListaCargar(SP.vista || 'todas');   // sale de la lista filtrada
+      else toast(queria ? '✓ Avisado al proveedor' : 'Marca sacada', 'ok');
+    })
+    .catch(function() { el.disabled = false; el.checked = !queria; toast('Error de red', 'er'); });
+}
+
 function spListaCargar(vista) {
   var cont = document.getElementById('sp-lista-' + vista);
   if (!cont) return;
   var f = spFiltro(vista);
   var qs = '/solicitudes?vista=' + encodeURIComponent(vista);
-  ['q', 'estado', 'paso', 'solicitante_id'].forEach(function(k) {
+  ['q', 'estado', 'paso', 'solicitante_id', 'aviso'].forEach(function(k) {
     if (f[k]) qs += '&' + k + '=' + encodeURIComponent(f[k]);
   });
   // Los filtros se dejan en pantalla mientras carga: si se los reemplaza por
@@ -40723,7 +40758,7 @@ function spListaCargar(vista) {
     var cnt = { pendiente: 'sp-cnt-pend', otros: 'sp-cnt-otros' }[vista];
     // El contador de la solapa cuenta SIN filtros: si no, filtrar por proveedor
     // bajaría el número de la pestaña y parecería que se resolvieron pagos.
-    if (cnt && !(f.q || f.estado || f.paso || f.solicitante_id)) {
+    if (cnt && !(f.q || f.estado || f.paso || f.solicitante_id || f.aviso)) {
       var n = SP.listas[vista].length;
       // Las dirigidas a otro no van en rojo: no son un reclamo hacia mí.
       document.getElementById(cnt).innerHTML = n
@@ -40786,6 +40821,7 @@ function spTablaHtml(arr, vista) {
     + '<th>Nº</th><th>Proveedor</th><th style="text-align:right">Monto</th><th>Concepto</th>'
     + '<th>En qué paso está</th><th>Espera desde</th>'
     + (vista === 'mias' ? '' : '<th>Pidió</th>')
+    + '<th style="width:74px;text-align:center" title="Marcá cuando ya le avisaste al proveedor y le mandaste los comprobantes">Avisé al<br>proveedor</th>'
     + '<th style="width:190px"></th></tr></thead><tbody>';
 
   arr.forEach(function(s) {
@@ -40832,6 +40868,19 @@ function spTablaHtml(arr, vista) {
             ? '<div>lo puede resolver: <strong>' + spEsc(s.esperando_a.join(', ')) + '</strong></div>'
             : '') + '</td>'
       + (vista === 'mias' ? '' : '<td class="sp-chica">' + spEsc(s.solicitante_nombre || '') + '</td>')
+      // El tilde de "ya le avisé al proveedor". Sólo lo puede tocar quien pidió
+      // el pago: para el resto se ve, pero apagado y sin poder cambiarlo.
+      + '<td style="text-align:center">'
+        + '<input type="checkbox" style="width:17px;height:17px;cursor:' + (s.puede_avisar ? 'pointer' : 'not-allowed') + '"'
+        + (s.aviso_prov ? ' checked' : '')
+        + (s.puede_avisar ? '' : ' disabled')
+        + ' onchange="spAvisoMarcar(' + s.id + ',this)"'
+        + ' title="' + (s.aviso_prov
+            ? 'Avisado' + (s.aviso_prov_en ? ' el ' + spEsc(String(s.aviso_prov_en).slice(0, 16)) : '')
+            : (s.puede_avisar ? 'Marca cuando le hayas avisado al proveedor' : 'Lo marca quien pidio el pago')) + '">'
+        + (s.aviso_prov && s.aviso_prov_en
+            ? '<div class="sp-chica" style="font-size:10px">' + spEsc(String(s.aviso_prov_en).slice(5, 10)) + '</div>' : '')
+      + '</td>'
       + '<td style="text-align:right;white-space:nowrap">'
         + '<button class="btn bo bs" onclick="spDetalleAbrir(' + s.id + ')" style="padding:2px 7px;font-size:11px">Ver</button>'
         + acciones + '</td></tr>';
