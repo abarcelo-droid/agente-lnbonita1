@@ -7,8 +7,22 @@
 
 import express from 'express';
 import db from '../servicios/db_sg_finanzas.js';
+import { exigirEmpresa, SAN_GERONIMO } from '../servicios/sociedad_modulo.js';
 
 const router = express.Router();
+
+// ── EL CERROJO DE EMPRESA, CONECTADO ──────────────────────────────────────
+// Corre ANTES que cualquier endpoint de este router. Si el pedido viene con OTRA
+// empresa, corta con 403 y explica cuál esperaba.
+//
+// Puente Cordón ya lo tenía en sus nueve routers; el lado de San Gerónimo había
+// quedado sin poner. La regla del dueño vale para los dos lados: parado en una
+// sociedad no se tocan las tablas de otra, ni siquiera teniendo permiso para
+// entrar a esa otra — hay que cambiar el selector y operar desde ahí.
+router.use((req, res, next) => {
+  if (exigirEmpresa(req, res, SAN_GERONIMO) === null) return;   // ya contestó 403
+  next();
+});
 
 // ── helpers ────────────────────────────────────────────────────────────────
 function getUser(req) {
@@ -1113,7 +1127,13 @@ router.get('/config-impositiva', (req, res) => {
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
-router.put('/config-impositiva', requireAuth, (req, res) => {
+// requireAdmin y no requireAuth: era el ÚNICO de los 21 endpoints de escritura
+// de este router que pedía nada más estar logueado, y justo es el que decide a
+// qué cuenta contable van el IVA Crédito Fiscal, el Débito Fiscal, las
+// percepciones y las retenciones de San Gerónimo. Se midió: un usuario sin una
+// sola fila de permisos cargados lo reescribía. Es configuración contable, no
+// operación diaria.
+router.put('/config-impositiva', requireAdmin, (req, res) => {
   const { clave, cuenta_id } = req.body || {};
   if (!clave) return res.status(400).json({ ok: false, error: 'clave requerida' });
   // Whitelist: el UPSERT de abajo crearía una fila nueva con cualquier clave que

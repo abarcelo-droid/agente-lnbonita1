@@ -14,6 +14,7 @@
 
 import express from 'express';
 import db from '../servicios/db_sg_finanzas.js';
+import { exigirEmpresa, SAN_GERONIMO } from '../servicios/sociedad_modulo.js';
 
 const router = express.Router();
 
@@ -21,6 +22,36 @@ function getUser(req) {
   try { return req.cookies?.lnb_user ? JSON.parse(req.cookies.lnb_user) : null; }
   catch(e) { return null; }
 }
+
+// ── ESTE ROUTER NO TENÍA UN SOLO CONTROL ──────────────────────────────────
+// Sus dieciséis endpoints de escritura no llevaban NADA: ni requireAuth, ni
+// requireAdmin, ni cerrojo de empresa. Lo único que quedaba era el portón /api,
+// que sólo pide que haya una sesión válida. Y el nivel Ver/Operar/Anular tampoco
+// actuaba: /api/sg/tesoreria no está declarado en ensure_api_prefijos.js, así
+// que moduloDeRuta devuelve null y exigirNivel deja pasar.
+//
+// Resultado medido, con la cadena real de index.js y un usuario real: la
+// contadora de Puente Cordón —rol operador, asignada SOLO a Puente Cordón, con
+// un único módulo tildado— creaba una caja en San Gerónimo, le metía un
+// movimiento de $999.999 y la borraba. Todo 200. El menú le escondía la pantalla,
+// pero la dirección de la API contestaba igual.
+//
+// Se cierra con las mismas dos llaves que el resto: sesión de admin para
+// escribir, y el cerrojo de empresa para que parado en otra sociedad no se
+// pueda tocar ésta.
+function requireAdmin(req, res, next) {
+  const u = getUser(req);
+  if (!u || u.rol !== 'admin') return res.status(403).json({ error: 'solo admin' });
+  req._user = u;
+  next();
+}
+
+// Corre ANTES que cualquier endpoint: si el pedido viene con OTRA empresa, corta
+// con 403 y dice cuál esperaba.
+router.use((req, res, next) => {
+  if (exigirEmpresa(req, res, SAN_GERONIMO) === null) return;   // ya contestó 403
+  next();
+});
 
 // ────────────────────────────────────────────────────────────────────────────
 // CUENTAS
@@ -55,7 +86,7 @@ router.get('/cuentas/:id', (req, res) => {
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
-router.post('/cuentas', (req, res) => {
+router.post('/cuentas', requireAdmin, (req, res) => {
   const { nombre, tipo, banco, nro_cuenta, cbu, alias, moneda, saldo_inicial, cuenta_contable_id, ambito } = req.body || {};
   if (!nombre) return res.status(400).json({ ok: false, error: 'Nombre requerido' });
   const ambitoFinal = (tipo === 'caja' && ambito === 'interno') ? 'interno' : 'fiscal';
@@ -68,7 +99,7 @@ router.post('/cuentas', (req, res) => {
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
-router.put('/cuentas/:id', (req, res) => {
+router.put('/cuentas/:id', requireAdmin, (req, res) => {
   const { nombre, tipo, banco, nro_cuenta, cbu, alias, moneda, saldo_inicial, cuenta_contable_id, ambito } = req.body || {};
   try {
     const actual = db.prepare('SELECT * FROM sg_fin_cuentas WHERE id=?').get(req.params.id);
@@ -82,7 +113,7 @@ router.put('/cuentas/:id', (req, res) => {
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
-router.delete('/cuentas/:id', (req, res) => {
+router.delete('/cuentas/:id', requireAdmin, (req, res) => {
   try {
     db.prepare('UPDATE sg_fin_cuentas SET activo=0 WHERE id=?').run(req.params.id);
     res.json({ ok: true });
@@ -104,7 +135,7 @@ router.get('/chequeras', (req, res) => {
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
-router.post('/chequeras', (req, res) => {
+router.post('/chequeras', requireAdmin, (req, res) => {
   const { cuenta_id, nro_chequera, desde, hasta } = req.body || {};
   if (!cuenta_id || !desde || !hasta) return res.status(400).json({ ok: false, error: 'cuenta_id, desde y hasta son requeridos' });
   try {
@@ -114,7 +145,7 @@ router.post('/chequeras', (req, res) => {
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
-router.delete('/chequeras/:id', (req, res) => {
+router.delete('/chequeras/:id', requireAdmin, (req, res) => {
   try {
     db.prepare('UPDATE sg_fin_chequeras SET activo=0 WHERE id=?').run(req.params.id);
     res.json({ ok: true });
@@ -137,7 +168,7 @@ router.get('/cheques-propios', (req, res) => {
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
-router.post('/cheques-propios', (req, res) => {
+router.post('/cheques-propios', requireAdmin, (req, res) => {
   const { chequera_id, nro_cheque, monto, beneficiario, fecha_emision, fecha_vto, notas, pago_id } = req.body || {};
   if (!chequera_id || !nro_cheque || !monto) return res.status(400).json({ ok: false, error: 'chequera_id, nro_cheque y monto son requeridos' });
   try {
@@ -149,7 +180,7 @@ router.post('/cheques-propios', (req, res) => {
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
-router.patch('/cheques-propios/:id/estado', (req, res) => {
+router.patch('/cheques-propios/:id/estado', requireAdmin, (req, res) => {
   const { estado } = req.body || {};
   const estados = ['emitido','cobrado','rechazado','anulado'];
   if (!estados.includes(estado)) return res.status(400).json({ ok: false, error: 'Estado inválido' });
@@ -174,7 +205,7 @@ router.get('/cheques-terceros', (req, res) => {
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
-router.post('/cheques-terceros', (req, res) => {
+router.post('/cheques-terceros', requireAdmin, (req, res) => {
   const { banco, nro_cheque, librador, monto, fecha_recepcion, fecha_vto, notas, cuenta_contable_id } = req.body || {};
   if (!monto) return res.status(400).json({ ok: false, error: 'Monto requerido' });
   try {
@@ -187,7 +218,7 @@ router.post('/cheques-terceros', (req, res) => {
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
-router.patch('/cheques-terceros/:id/estado', (req, res) => {
+router.patch('/cheques-terceros/:id/estado', requireAdmin, (req, res) => {
   const { estado } = req.body || {};
   const estados = ['en_cartera','depositado','endosado','rechazado'];
   if (!estados.includes(estado)) return res.status(400).json({ ok: false, error: 'Estado inválido' });
@@ -215,7 +246,7 @@ router.get('/movimientos', (req, res) => {
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
-router.post('/movimientos', (req, res) => {
+router.post('/movimientos', requireAdmin, (req, res) => {
   const u = getUser(req);
   const { cuenta_id, fecha, tipo, concepto, monto, referencia, pago_id } = req.body || {};
   if (!cuenta_id || !tipo || !concepto || !monto) return res.status(400).json({ ok: false, error: 'Faltan campos requeridos' });
@@ -228,7 +259,7 @@ router.post('/movimientos', (req, res) => {
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
-router.delete('/movimientos/:id', (req, res) => {
+router.delete('/movimientos/:id', requireAdmin, (req, res) => {
   try {
     db.prepare('DELETE FROM sg_fin_movimientos WHERE id=?').run(req.params.id);
     res.json({ ok: true });
@@ -266,7 +297,7 @@ router.get('/conciliacion', (req, res) => {
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
-router.post('/conciliacion/extracto', (req, res) => {
+router.post('/conciliacion/extracto', requireAdmin, (req, res) => {
   const { cuenta_id, periodo, lineas } = req.body || {};
   if (!cuenta_id || !lineas?.length) return res.status(400).json({ ok: false, error: 'cuenta_id y lineas requeridos' });
   try {
@@ -284,7 +315,7 @@ router.post('/conciliacion/extracto', (req, res) => {
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
-router.patch('/conciliacion/conciliar', (req, res) => {
+router.patch('/conciliacion/conciliar', requireAdmin, (req, res) => {
   const { extracto_id, movimiento_id } = req.body || {};
   if (!extracto_id) return res.status(400).json({ ok: false, error: 'extracto_id requerido' });
   try {
@@ -297,7 +328,7 @@ router.patch('/conciliacion/conciliar', (req, res) => {
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
-router.patch('/conciliacion/desconciliar', (req, res) => {
+router.patch('/conciliacion/desconciliar', requireAdmin, (req, res) => {
   const { extracto_id } = req.body || {};
   if (!extracto_id) return res.status(400).json({ ok: false, error: 'extracto_id requerido' });
   try {
@@ -310,7 +341,7 @@ router.patch('/conciliacion/desconciliar', (req, res) => {
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
-router.delete('/conciliacion/extracto/:id', (req, res) => {
+router.delete('/conciliacion/extracto/:id', requireAdmin, (req, res) => {
   try {
     const linea = db.prepare('SELECT * FROM sg_fin_extracto_lineas WHERE id=?').get(req.params.id);
     if (linea?.movimiento_id) {
@@ -321,7 +352,7 @@ router.delete('/conciliacion/extracto/:id', (req, res) => {
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
-router.post('/conciliacion/auto-match', (req, res) => {
+router.post('/conciliacion/auto-match', requireAdmin, (req, res) => {
   const { cuenta_id, periodo } = req.body || {};
   if (!cuenta_id) return res.status(400).json({ ok:false, error:'cuenta_id requerido' });
   try {

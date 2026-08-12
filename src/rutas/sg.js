@@ -20,8 +20,22 @@ import { generarRecepcionCalidadPDF } from '../servicios/recepcionCalidadPDF.js'
 import { autenticar as afipAutenticar, ambienteActual as afipAmbiente } from '../servicios/afip-wsaa.js';
 import { feDummy as afipFeDummy, ultimoComprobante as afipUltimoCbte, tiposCbte as afipTiposCbte, tiposIva as afipTiposIva, ptosVenta as afipPtosVenta, condicionesIvaReceptor as afipCondIva } from '../servicios/afip-wsfe.js';
 import { emitir as afipEmitir } from '../servicios/afip-wsfe-emision.js';
+import { exigirEmpresa, SAN_GERONIMO } from '../servicios/sociedad_modulo.js';
 
 const router = express.Router();
+
+// ── EL CERROJO DE EMPRESA, CONECTADO ──────────────────────────────────────
+// Corre ANTES que cualquier endpoint de este router. Si el pedido viene con OTRA
+// empresa, corta con 403 y explica cuál esperaba.
+//
+// Puente Cordón ya lo tenía en sus nueve routers; el lado de San Gerónimo había
+// quedado sin poner. La regla del dueño vale para los dos lados: parado en una
+// sociedad no se tocan las tablas de otra, ni siquiera teniendo permiso para
+// entrar a esa otra — hay que cambiar el selector y operar desde ahí.
+router.use((req, res, next) => {
+  if (exigirEmpresa(req, res, SAN_GERONIMO) === null) return;   // ya contestó 403
+  next();
+});
 
 // ── BLOQUE B — almacenamiento de fotos del informe de calidad (REUSA patrón IFCO:
 // archivo físico en data/sg/, en DB solo la ruta; servido estático en index.js). ──

@@ -138,13 +138,14 @@ export function soloSociedad(nombreLike) {
 // dos miraba la tabla nueva. Resultado: la pantalla de permisos guardaba bien, el
 // menú seguía armándose con el campo viejo, y lo que se tildaba no cambiaba nada.
 // Todo lo que decida qué módulos ve alguien tiene que pasar por acá.
+//
+// LO QUE VE EL MENÚ Y LO QUE DEJA PASAR EL SERVIDOR SALEN DEL MISMO LUGAR.
+// Acá había una copia de la regla —"¿tiene permisos cargados?"— que decidía por
+// su cuenta, y en nivelEnModulo había otra que decidía distinto. El menú quedaba
+// en blanco y la API contestaba igual. Ahora esto NO decide nada: pregunta.
 export function filtrarModulos(usuario, modulos) {
   if (!usuario || !usuario.id) return [];
   const esAdmin = usuario.rol === 'admin';
-
-  const tienePermisos = !esAdmin && !!db.prepare(
-    'SELECT 1 FROM usuario_modulos WHERE usuario_id = ? LIMIT 1'
-  ).get(usuario.id);
 
   return modulos.filter(m => {
     // EL ADMINISTRADOR VE TODO. Antes el filtro por empresa corría ANTES que
@@ -154,25 +155,18 @@ export function filtrarModulos(usuario, modulos) {
     // puede ni configurarlo ni descubrir que existe.
     if (esAdmin) return true;
 
-    // LO QUE EL ADMINISTRADOR TILDÓ ES LA VERDAD. Si alguien se tomó el trabajo
-    // de habilitarle un módulo a una persona, no se lo saca por atrás un segundo
-    // filtro: eso es lo que hacía que tildar un acceso no tuviera efecto y no
-    // hubiera manera de entender por qué.
-    if (tienePermisos) return !!nivelEnModulo(usuario, m.modulo);
-
-    // SIN PERMISOS CARGADOS NO SE VE NADA. Decisión del dueño: "en caso de que
-    // un usuario no tenga permisos cargados, debe pedirle a un administrador que
-    // se los dé, esa es la única manera de avanzar."
+    // LO QUE EL ADMINISTRADOR TILDÓ ES LA VERDAD, y sin permisos cargados no se
+    // ve nada. Las dos cosas las resuelve nivelEnModulo, que es la MISMA función
+    // que usa exigirNivel para dejar pasar o no un pedido a la API. Mientras
+    // salgan de ahí, el menú no puede prometer algo que el servidor niegue, ni al
+    // revés.
     //
-    // Antes, el que nunca se había configurado veía TODO lo de sus empresas. Era
-    // una red para no dejar a nadie sin trabajar el día que se soltaron los
-    // permisos, pero con la red puesta el sistema nunca terminaba de cerrar: el
-    // acceso lo daba el olvido, no una decisión.
-    //
-    // El menú vacío no es un error, es la respuesta: el usuario tiene que pedir
-    // acceso. El panel le muestra el aviso con esas palabras en vez de dejarlo
-    // mirando una pantalla en blanco.
-    return false;
+    // Decisión del dueño: "en caso de que un usuario no tenga permisos cargados,
+    // debe pedirle a un administrador que se los dé, esa es la única manera de
+    // avanzar." El menú vacío no es un error, es la respuesta; el panel le
+    // muestra el aviso con esas palabras en vez de dejarlo mirando una pantalla
+    // en blanco.
+    return !!nivelEnModulo(usuario, m.modulo);
   }).map(m => ({ ...m, nivel: nivelEnModulo(usuario, m.modulo) || 'operar' }));
 }
 
@@ -184,9 +178,22 @@ export function modulosVisibles(usuario) {
 // ── HASTA DÓNDE LLEGA DENTRO DE UN MENÚ ───────────────────────────────────
 // Devuelve 'ver' | 'operar' | 'anular', o null si no tiene acceso al módulo.
 //
-// Mientras un usuario no tenga NINGÚN permiso cargado en la tabla nueva, se
-// comporta como antes: entra a lo que le habiliten las secciones y opera normal.
-// Es lo que permite soltar esto sin configurar a nadie primero.
+// ── EL MENÚ Y EL SERVIDOR DECÍAN COSAS DISTINTAS ──────────────────────────
+// Cuando una persona no tiene NINGUNA fila en usuario_modulos, esto devolvía
+// 'operar' mirando la columna vieja `secciones`. Pero filtrarModulos —desde que
+// se cerró el menú— a esa misma persona no le muestra NADA. O sea: el menú en
+// blanco y la API contestando que sí.
+//
+// Y no es teórico. Un usuario sin una sola fila de permisos llegaba a reescribir
+// la configuración impositiva de San Gerónimo —a qué cuenta contable va el IVA
+// Crédito Fiscal— porque el endpoint pedía sesión y el nivel decía 'operar'.
+// Alcanza con tener la dirección: la pantalla escondida no protege la API.
+//
+// Ahora manda la tabla de permisos, igual que el menú: sin permisos cargados no
+// se entra a ningún lado. Es lo que pidió el dueño con todas las letras — el que
+// no tiene permisos se los pide a un administrador, y ésa es la única forma de
+// avanzar. El admin (rol 'admin') sigue entrando a todo, y por eso siempre hay
+// alguien que puede darlos.
 export function nivelEnModulo(usuario, modulo) {
   if (!usuario || !usuario.id || !modulo) return null;
   if (usuario.rol === 'admin') return 'anular';
@@ -194,17 +201,7 @@ export function nivelEnModulo(usuario, modulo) {
   const fila = db.prepare(
     'SELECT nivel FROM usuario_modulos WHERE usuario_id = ? AND modulo = ?'
   ).get(usuario.id, modulo);
-  if (fila) return fila.nivel;
-
-  // Sin permisos cargados para esta persona: rige lo de antes.
-  const tieneAlguno = db.prepare(
-    'SELECT 1 FROM usuario_modulos WHERE usuario_id = ? LIMIT 1'
-  ).get(usuario.id);
-  if (!tieneAlguno) {
-    const secc = seccionesDe(usuario);
-    return (secc.includes('*') || secc.includes(modulo)) ? 'operar' : null;
-  }
-  return null;   // ya tiene permisos configurados y este módulo no está: no entra
+  return fila ? fila.nivel : null;
 }
 
 export function permisosDe(usuario) {
