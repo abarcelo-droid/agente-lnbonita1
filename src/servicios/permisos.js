@@ -293,13 +293,47 @@ function mapaApi() {
 }
 export function limpiarCacheApi() { _mapaApi = null; }
 
-export function moduloDeRuta(url) {
-  // A minúsculas para comparar: los prefijos del mapa ya vienen así.
+// ── UNA DIRECCIÓN PUEDE SER DE VARIOS MENÚS ────────────────────────────────
+// Esto devolvía UN módulo, y por eso 52 pantallas quedaron sin control: sus
+// direcciones las comparten varias —las diez de Comercial llaman todas a
+// /api/clientes y /api/pedidos— y declarársela a una sola dejaba a las otras
+// nueve sin poder trabajar. La salida fue no declarar ninguna, o sea dejar 122
+// endpoints de escritura sin nivel. Peor.
+//
+// Ahora el prefijo puede pertenecer a VARIAS, y alcanza con tener acceso a
+// cualquiera de ellas. Es más grueso que un permiso por pantalla, pero es la
+// verdad del sistema: si esa dirección se llama desde diez pantallas, quien
+// entra a cualquiera de las diez la usa legítimamente. Y deja afuera a quien no
+// entra a ninguna, que es todo lo que hoy NO se está haciendo.
+//
+// Devuelve los dueños del prefijo MÁS LARGO que matchea. Los más largos ganan:
+// /api/ifco/remitos le gana a /api/ifco.
+export function modulosDeRuta(url) {
   const limpia = String(url || '').split('?')[0].toLowerCase();
-  for (const e of mapaApi()) {
-    if (limpia === e.prefijo || limpia.startsWith(e.prefijo + '/')) return e.modulo;
+  const coinciden = mapaApi().filter(
+    e => limpia === e.prefijo || limpia.startsWith(e.prefijo + '/'));
+  if (!coinciden.length) return [];
+  // No alcanza con tomar el primero: mapaApi() ordena por LARGO, y dos prefijos
+  // distintos del mismo largo pueden quedar intercalados entre los dueños de uno
+  // compartido. Se elige el largo máximo y se juntan todos los que lo tienen.
+  const mejor = coinciden.reduce((a, b) => (b.prefijo.length > a.prefijo.length ? b : a)).prefijo;
+  return [...new Set(coinciden.filter(e => e.prefijo === mejor).map(e => e.modulo))];
+}
+
+export function moduloDeRuta(url) {
+  const duenos = modulosDeRuta(url);
+  return duenos.length ? duenos[0] : null;
+}
+
+// El mayor nivel que la persona tenga entre los dueños de la dirección.
+const ORDEN_NIVEL = { ver: 1, operar: 2, borrar: 3, anular: 3 };
+export function mejorNivel(usuario, modulos) {
+  let mejor = null;
+  for (const m of modulos) {
+    const n = nivelEnModulo(usuario, m);
+    if (n && (!mejor || (ORDEN_NIVEL[n] || 0) > (ORDEN_NIVEL[mejor] || 0))) mejor = n;
   }
-  return null;
+  return mejor;
 }
 
 // Middleware. Se monta DESPUÉS de bloquearSiSoloLectura y hace lo que ese no
@@ -313,10 +347,12 @@ export function exigirNivel(req, res, next) {
   if (!user || !user.id) return next();          // que el endpoint conteste el 401
   if (user.rol === 'admin') return next();
 
-  const modulo = moduloDeRuta(req.originalUrl || req.url);
-  if (!modulo) return next();                    // módulo sin prefijo declarado
+  const modulos = modulosDeRuta(req.originalUrl || req.url);
+  if (!modulos.length) return next();            // dirección sin prefijo declarado
 
-  const nivel = nivelEnModulo(user, modulo);
+  // Con varios dueños alcanza el mayor nivel que tenga entre ellos: si entra a
+  // Pedidos con 'operar' y a CRM con 'ver', sobre /api/pedidos opera.
+  const nivel = mejorNivel(user, modulos);
   if (!nivel) {
     return res.status(403).json({ ok: false, error: 'No tenés acceso a este módulo.' });
   }
