@@ -115,7 +115,7 @@ router.post('/titulos', requireAdmin, (req, res) => {
   if (!sec) return res.status(400).json({ error: 'seccion_id inválido' });
   const sociedadId = sec.sociedad_id;
   const choque = codigoEnUso(db, sociedadId, codigoStr);
-  if (choque) return res.status(400).json({ error: `El código ${codigoStr} ya está en uso por un${choque.nivel === 'sección' ? 'a' : ''} ${choque.nivel}. No puede repetirse entre secciones, títulos y cuentas.` });
+  if (choque) return res.status(400).json({ error: mensajeChoque(codigoStr, choque) });
   try {
     const r = db.prepare(`
       INSERT INTO pa_cuentas_titulos (sociedad_id, seccion_id, codigo, nombre, orden, activo)
@@ -139,7 +139,7 @@ router.put('/titulos/:id', requireAdmin, (req, res) => {
       return res.status(400).json({ error: 'El código del título debe tener formato X.XX.XX (ej: 1.01.01)' });
     }
     const choque = codigoEnUso(db, tit.sociedad_id, codigoStr, { tabla: 'titulos', id });
-    if (choque) return res.status(400).json({ error: `El código ${codigoStr} ya está en uso por un${choque.nivel === 'sección' ? 'a' : ''} ${choque.nivel}. No puede repetirse entre secciones, títulos y cuentas.` });
+    if (choque) return res.status(400).json({ error: mensajeChoque(codigoStr, choque) });
     db.prepare("UPDATE pa_cuentas_titulos SET codigo = ?, actualizado_en = datetime('now','localtime') WHERE id = ?").run(codigoStr, id);
   }
   if (nombre && String(nombre).trim() !== tit.nombre) {
@@ -191,7 +191,7 @@ router.post('/secciones', requireAdmin, (req, res) => {
   }
   const sociedadId = getSociedadId(req);
   const choque = codigoEnUso(db, sociedadId, codigoStr);
-  if (choque) return res.status(400).json({ error: `El código ${codigoStr} ya está en uso por un${choque.nivel === 'sección' ? 'a' : ''} ${choque.nivel}. No puede repetirse entre secciones, títulos y cuentas.` });
+  if (choque) return res.status(400).json({ error: mensajeChoque(codigoStr, choque) });
   try {
     const r = db.prepare(`
       INSERT INTO pa_cuentas_secciones (sociedad_id, codigo, nombre, orden, activo, grupo)
@@ -213,7 +213,7 @@ router.put('/secciones/:id', requireAdmin, (req, res) => {
   if (codigo !== undefined && String(codigo).trim() !== String(sec.codigo)) {
     const codigoStr = String(codigo).trim();
     const choque = codigoEnUso(db, sec.sociedad_id, codigoStr, { tabla: 'secciones', id });
-    if (choque) return res.status(400).json({ error: `El código ${codigoStr} ya está en uso por un${choque.nivel === 'sección' ? 'a' : ''} ${choque.nivel}. No puede repetirse entre secciones, títulos y cuentas.` });
+    if (choque) return res.status(400).json({ error: mensajeChoque(codigoStr, choque) });
     db.prepare("UPDATE pa_cuentas_secciones SET codigo = ?, actualizado_en = datetime('now','localtime') WHERE id = ?").run(codigoStr, id);
   }
   if (nombre && String(nombre).trim() !== sec.nombre) {
@@ -333,16 +333,33 @@ function cuentaEsImputable(db, cuentaId) {
 // Helper: ¿el código ya está en uso en CUALQUIER nivel (sección, título o cuenta)?
 // Evita que un título/sección/cuenta compartan numeración. `excepto` permite
 // ignorar el propio registro al editar: { tabla: 'cuentas'|'titulos'|'secciones', id }
-function codigoEnUso(db, sociedadId, codigo, excepto) {
+function codigoEnUso(db, codigo, excepto) {
   const cod = String(codigo).trim();
   excepto = excepto || {};
-  const sec = db.prepare('SELECT id FROM pa_cuentas_secciones WHERE codigo = ? AND sociedad_id = ?').get(cod, sociedadId);
-  if (sec && !(excepto.tabla === 'secciones' && excepto.id === sec.id)) return { nivel: 'sección', id: sec.id };
-  const tit = db.prepare('SELECT id FROM pa_cuentas_titulos WHERE codigo = ? AND sociedad_id = ?').get(cod, sociedadId);
-  if (tit && !(excepto.tabla === 'titulos' && excepto.id === tit.id)) return { nivel: 'título', id: tit.id };
-  const cta = db.prepare('SELECT id FROM pa_cuentas WHERE codigo = ? AND sociedad_id = ?').get(cod, sociedadId);
-  if (cta && !(excepto.tabla === 'cuentas' && excepto.id === cta.id)) return { nivel: 'cuenta', id: cta.id };
-  return null;
+  // Se devuelve el NOMBRE y si está desactivada, no sólo "existe". El chequeo
+  // mira TODO el plan —las tres tablas, activas y desactivadas— pero la pantalla
+  // muestra sólo las activas del grupo de la pestaña abierta. Así que el choque
+  // más común es contra algo que el usuario NO PUEDE VER, y el mensaje anterior
+  // lo dejaba buscando un código que no aparecía en ningún lado.
+  const buscar = (tabla, etiqueta, extra) => {
+    const r = db.prepare(`SELECT id, nombre, activo${extra || ''} FROM ${tabla} WHERE codigo = ?`).get(cod);
+    if (!r) return null;
+    if (excepto.tabla === tabla.replace('pa_cuentas_', '').replace('pa_cuentas', 'cuentas') && excepto.id === r.id) return null;
+    return { nivel: etiqueta, id: r.id, nombre: r.nombre, activo: !!r.activo, grupo: r.grupo };
+  };
+  return buscar('pa_cuentas_secciones', 'sección', ', grupo')
+      || buscar('pa_cuentas_titulos', 'título')
+      || buscar('pa_cuentas', 'cuenta');
+}
+
+// El mensaje que ve el usuario. Dice DÓNDE está el código, que es lo único que
+// le sirve para poder resolverlo.
+function mensajeChoque(codigo, choque) {
+  const art = choque.nivel === 'sección' || choque.nivel === 'cuenta' ? 'la' : 'el';
+  let m = `El código ${codigo} ya lo usa ${art} ${choque.nivel} "${choque.nombre}"`;
+  if (choque.grupo) m += ` (grupo ${choque.grupo})`;
+  if (!choque.activo) m += ', que está DESACTIVADA y por eso no aparece en la lista';
+  return m + '. Los códigos no se pueden repetir entre secciones, títulos y cuentas.';
 }
 
 // GET /api/pa/cuentas/:id  (debe ir DESPUÉS de /secciones y /log)
@@ -389,7 +406,7 @@ router.post('/', requireAdmin, (req, res) => {
 
   // El código no puede coincidir con el de una sección, un título u otra cuenta.
   const choque = codigoEnUso(db, sociedadId, codigo);
-  if (choque) return res.status(400).json({ error: `El código ${codigo} ya está en uso por un${choque.nivel === 'sección' ? 'a' : ''} ${choque.nivel}. No puede repetirse entre secciones, títulos y cuentas.` });
+  if (choque) return res.status(400).json({ error: mensajeChoque(codigoStr, choque) });
 
   try {
     const ordenMax = db.prepare('SELECT COALESCE(MAX(orden), 0) AS m FROM pa_cuentas WHERE seccion_id = ?').get(seccion_id).m;
@@ -437,7 +454,7 @@ router.put('/:id(\\d+)', requireAdmin, (req, res) => {
       return res.status(400).json({ error: 'Código inválido. Las cuentas deben respetar el formato X.XX.XX.XXXX (ej: 1.01.01.0001).' });
     }
     const choque = codigoEnUso(db, cuenta.sociedad_id, codigo, { tabla: 'cuentas', id });
-    if (choque) return res.status(400).json({ error: `El código ${codigo} ya está en uso por un${choque.nivel === 'sección' ? 'a' : ''} ${choque.nivel}. No puede repetirse entre secciones, títulos y cuentas.` });
+    if (choque) return res.status(400).json({ error: mensajeChoque(codigoStr, choque) });
   }
   if (tipo && !['resultado', 'patrimonial'].includes(tipo)) {
     return res.status(400).json({ error: 'tipo inválido' });
