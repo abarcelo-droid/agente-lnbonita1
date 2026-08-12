@@ -411,5 +411,89 @@ export function informeContable(db, fallasMigracion) {
   w('  Esto es el paso 1 (medir). No modificó nada.');
   w();
 
+  // ═══════════════════════════════════════════════════════════════════════
+  // DOS PREGUNTAS QUE HAY QUE CONTESTAR CON DATOS Y NO SUPONIENDO
+  // ═══════════════════════════════════════════════════════════════════════
+
+  // ── 1) ¿Se pueden cerrar los endpoints que usa la app de celular? ──────
+  // La app de IFCO (mifco.html) no es un menú, así que su nivel no se puede
+  // controlar. Si se le declaran sus direcciones a 'ab-ifcos', el que la usa sin
+  // ese menú tildado se queda sin poder trabajar. Acá se mira QUIÉNES cargaron
+  // de verdad por ahí y qué tienen tildado.
+  titulo('¿SE PUEDE CERRAR LA APP DE CELULAR DE IFCO?');
+  try {
+    const conAutor = [
+      ['ifco_remitos', 'usuario_id'], ['ifco_remitos', 'creado_por'],
+      ['ifco_recepciones_proveedor', 'usuario_id'], ['ifco_recepciones_proveedor', 'creado_por'],
+      ['ifco_stocks_reales', 'usuario_id'], ['ifco_stocks_reales', 'creado_por'],
+    ].filter(([t, c]) => existe(t) && columnas(t).includes(c));
+
+    if (!conAutor.length) {
+      w('  No hay tablas de IFCO con autor: no se puede saber quién carga desde el');
+      w('  teléfono. Las direcciones quedan como están.');
+    } else {
+      const ids = new Set();
+      for (const [t, c] of conAutor) {
+        for (const r of db.prepare(
+          `SELECT DISTINCT ${c} AS u FROM ${t} WHERE ${c} IS NOT NULL`).all()) ids.add(r.u);
+      }
+      const sinMenu = [], conMenu = [];
+      for (const id of ids) {
+        const u = db.prepare('SELECT id, nombre, rol FROM usuarios WHERE id = ?').get(id);
+        if (!u) continue;
+        if (u.rol === 'admin') { conMenu.push(u.nombre + ' (admin)'); continue; }
+        const tiene = db.prepare(
+          "SELECT 1 FROM usuario_modulos WHERE usuario_id = ? AND modulo = 'ab-ifcos'").get(id);
+        (tiene ? conMenu : sinMenu).push(u.nombre);
+      }
+      w(`  Cargaron algo por IFCO: ${ids.size} usuario(s).`);
+      w(`  · CON el menú "IFCOs" tildado: ${conMenu.length}`);
+      w(`  · SIN el menú "IFCOs": ${sinMenu.length}${sinMenu.length ? ' → ' + sinMenu.join(', ') : ''}`);
+      w();
+      if (sinMenu.length) {
+        w(`  VEREDICTO: NO cerrar todavía. A esos ${sinMenu.length} hay que tildarles "IFCOs"`);
+        w('  primero, o se quedan sin poder sellar un remito desde el teléfono.');
+      } else {
+        w('  VEREDICTO: SE PUEDE CERRAR. Todos los que cargan tienen el menú tildado,');
+        w('  así que declarar sus direcciones no deja a nadie afuera.');
+      }
+    }
+  } catch (e) { w('  No se pudo medir: ' + e.message); }
+
+  // ── 2) ¿Se pueden apretar los formatos del plan de Puente Cordón? ──────
+  // En San Gerónimo ya se apretaron: la sección es X.XX, el título X.XX.XX y la
+  // cuenta X.XX.XX.XXXX, todos con UN dígito de grupo. Antes de hacer lo mismo
+  // acá hay que ver qué formas existen de verdad en lo que ya está cargado.
+  titulo('¿SE PUEDEN APRETAR LOS FORMATOS DEL PLAN DE PUENTE CORDÓN?');
+  try {
+    const REGLAS = [
+      ['pa_cuentas_secciones', /^\d(\.\d{2})?$/,             'sección  X.XX'],
+      ['pa_cuentas_titulos',   /^\d\.\d{2}\.\d{2}$/,         'título   X.XX.XX'],
+      ['pa_cuentas',           /^\d\.\d{2}\.\d{2}\.\d{4}$/,  'cuenta   X.XX.XX.XXXX'],
+    ];
+    let raros = 0;
+    for (const [tabla, re, etiqueta] of REGLAS) {
+      if (!existe(tabla)) continue;
+      const filas = db.prepare(`SELECT codigo, nombre, activo FROM ${tabla} ORDER BY codigo`).all();
+      const malos = filas.filter(f => !re.test(String(f.codigo || '')));
+      raros += malos.length;
+      w(`  ${etiqueta}:  ${filas.length} fila(s), ${malos.length} fuera de formato`);
+      for (const m of malos.slice(0, 15)) {
+        w(`      ${String(m.codigo).padEnd(18)} ${String(m.nombre).slice(0, 40)}${m.activo ? '' : '  (desactivada)'}`);
+      }
+      if (malos.length > 15) w(`      … y ${malos.length - 15} más`);
+    }
+    w();
+    if (raros) {
+      w(`  VEREDICTO: hay ${raros} código(s) fuera de formato. Apretar las reglas NO los`);
+      w('  toca (sólo se valida al CAMBIAR un código), pero para corregirlos hay que');
+      w('  renumerarlos a mano. Decidilo mirando la lista de arriba.');
+    } else {
+      w('  VEREDICTO: SE PUEDE APRETAR. Todos los códigos ya respetan el formato,');
+      w('  así que aplicar las mismas reglas que en San Gerónimo no traba nada.');
+    }
+  } catch (e) { w('  No se pudo medir: ' + e.message); }
+
+  w();
   return L.join('\n');
 }

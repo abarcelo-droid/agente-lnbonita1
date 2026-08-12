@@ -51,7 +51,7 @@ import "./db_permisos.js";
 const PREFIJOS = [
   // ── Contabilidad de Puente Cordón ──────────────────────────────────────
   ['adm-asientos',       'pa/cuentas/asientos'],
-  ['adm-plan-cuentas',   'pa/cuentas/secciones,pa/cuentas/titulos,pa/cuentas/config-impositiva'],
+  ['adm-plan-cuentas',   'pa/cuentas,pa/cuentas/secciones,pa/cuentas/titulos,pa/cuentas/config-impositiva'],
   ['adm-modelos',        'pa/cuentas/modelos'],
   ['adm-proveedores',    'pa/proveedores'],
   // La pantalla usa DOS direcciones: el saldo sale de /pa/cc y los pagos de
@@ -240,11 +240,7 @@ const PREFIJOS = [
 //     de empresa. El día que se arme la pantalla, declarar acá su prefijo — si
 //     no, el nivel Ver/Operar/Anular no se le aplica.
 //
-// DOS QUE NECESITAN UNA DECISIÓN, NO CÓDIGO:
-//   · 'pa-cuentas' y 'adm-plan-cuentas' son DOS pantallas de Plan de Cuentas
-//     sobre la MISMA dirección. El prefijo lo puede tener una sola. Lo natural
-//     es dejárselo a adm-plan-cuentas y retirar la otra, pero eso es decisión de
-//     producto.
+// UNA QUE NECESITA UNA DECISIÓN, NO CÓDIGO:
 //   · POST /personal/permisos, /personal/acceso-sensible y /personal/admin son
 //     transversales al módulo Personal y no son de ninguna de sus seis pantallas.
 //
@@ -345,3 +341,23 @@ try {
 }
 
 export default db;
+
+// ── UNA SOLA PANTALLA DE PLAN DE CUENTAS EN PUENTE CORDÓN ──────────────────
+// Había DOS sobre la misma dirección: 'pa-cuentas' y 'adm-plan-cuentas'. Además
+// de confundir —dos menús que muestran lo mismo y se pisan— hacían que la
+// dirección no se pudiera declarar a ninguna, porque declarársela a una dejaba
+// a la otra sin poder trabajar. Seis escrituras sin control por una duplicación.
+//
+// Queda 'adm-plan-cuentas', que es la que tiene modo edición y arrastre — la
+// misma estructura que la de San Gerónimo, que se clonó de ella. 'pa-cuentas'
+// no tiene nada de eso.
+//
+// Se OCULTA, no se borra: la fila queda por si alguien le tenía permisos, y
+// volver atrás es poner oculto = 0.
+try {
+  const r = db.prepare("UPDATE modulos_config SET oculto = 1 WHERE modulo = 'pa-cuentas' AND oculto = 0").run();
+  if (r.changes) {
+    console.log('[NIVEL] Plan de Cuentas de Puente Cordón: se retiró la pantalla duplicada ' +
+                '(pa-cuentas). Queda adm-plan-cuentas, que es la que se puede editar.');
+  }
+} catch (e) { console.error('[NIVEL] No se pudo retirar pa-cuentas:', e.message); }
