@@ -74,6 +74,64 @@ function cuentaEsImputable(db, cuentaId) {
   return !hijo;
 }
 
+// ── EL PRÓXIMO CÓDIGO LIBRE BAJO UN PREFIJO ───────────────────────────────
+// Lo usan las DOS formas de mover una cuenta: el arrastre del árbol y el
+// selector de la pantalla de edición. Tiene que vivir en un solo lugar — si
+// cada una numerara a su manera, mover por un camino o por el otro daría
+// códigos distintos para la misma cuenta.
+function proximoCodigoLibre(prefijo, exceptoId) {
+  const excepto = exceptoId ? { tabla: 'cuentas', id: exceptoId } : undefined;
+  let n = 0;
+  for (const h of db.prepare('SELECT codigo FROM sg_cuentas WHERE codigo LIKE ?').all(prefijo + '.%')) {
+    const p = String(h.codigo).split('.');
+    if (p.length !== 4) continue;
+    const u = parseInt(p[3], 10);
+    if (Number.isInteger(u) && u > n) n = u;
+  }
+  while (n < 9999) {
+    n++;
+    const cand = `${prefijo}.${String(n).padStart(4, '0')}`;
+    if (!codigoEnUso(db, cand, excepto)) return cand;
+  }
+  return primerHueco(prefijo, exceptoId);
+}
+
+// El tramo de tres niveles del que cuelga una cuenta: el código del título si lo
+// tiene, y si no el de la sección con el tramo .00, que es el de "sin título".
+// Devuelve { prefijo } o { error } con un mensaje que dice qué hacer.
+function prefijoDestino(sec, tit) {
+  if (tit) {
+    if (!RE_TITULO.test(String(tit.codigo))) {
+      return { error: `Abajo del título ${tit.codigo} no puede colgar ninguna cuenta: su código no `
+                    + `respeta el formato X.XX.XX. Editalo y ponele uno válido —por ejemplo `
+                    + `${sugerirTitulo(tit.codigo)}— y recién ahí movés la cuenta.` };
+    }
+    return { prefijo: String(tit.codigo) };
+  }
+  if (!/^\d\.\d{2}$/.test(String(sec.codigo))) {
+    return { error: `En la sección ${sec.codigo} no se pueden poner cuentas SIN TÍTULO: para eso su `
+                  + `código tiene que ser X.XX. Elegí un título de esa sección, o corregile el código `
+                  + `a la sección (por ejemplo ${sugerirSeccion(sec.codigo)}).` };
+  }
+  return { prefijo: `${sec.codigo}.00` };
+}
+
+// ── NO SE CRUZA DE GRUPO ──────────────────────────────────────────────────
+// Una cuenta de Activo no se manda a Ingresos. El grupo es LO QUE LA CUENTA ES:
+// moverla no la reordena, le cambia la naturaleza, y los asientos que ya la
+// usaron quedan diciendo otra cosa de la que dijeron el día que se hicieron.
+const NOMBRE_GRUPO = { activo: 'Activo', pasivo: 'Pasivo', patrimonio_neto: 'Patrimonio',
+                       ingresos: 'Ingresos', gastos: 'Egresos' };
+function chocaDeGrupo(seccionOrigenId, seccionDestinoId) {
+  const g = (secId) =>
+    db.prepare('SELECT grupo FROM sg_cuentas_secciones WHERE id = ?').get(secId)?.grupo || null;
+  const a = g(seccionOrigenId), b = g(seccionDestinoId);
+  if (!a || !b || a === b) return null;
+  return `No se puede mover una cuenta de ${NOMBRE_GRUPO[a] || a} a ${NOMBRE_GRUPO[b] || b}: el grupo `
+       + `dice qué ES la cuenta, y los asientos que ya la usaron quedarían diciendo otra cosa. Si de `
+       + `verdad va en el otro grupo, creá la cuenta nueva allá y desactivá ésta.`;
+}
+
 // ── QUIÉN PUEDE USAR UNA CUENTA ────────────────────────────────────────────
 // Una cuenta SIN nadie tildado la usa cualquiera que entre al módulo — o sea,
 // como funcionaba hasta ahora. Apenas se tilda a UNA persona pasa a ser
@@ -566,7 +624,7 @@ router.post('/', requireAdmin, (req, res) => {
   if (!['resultado', 'patrimonial'].includes(tipo)) {
     return res.status(400).json({ error: 'tipo inválido' });
   }
-  const sec = db.prepare('SELECT id FROM sg_cuentas_secciones WHERE id = ?').get(seccion_id);
+  const sec = db.prepare('SELECT id, codigo FROM sg_cuentas_secciones WHERE id = ?').get(seccion_id);
   if (!sec) return res.status(400).json({ error: 'seccion_id inválido' });
 
   const choque = codigoEnUso(db, codigoStr);
@@ -582,6 +640,15 @@ router.post('/', requireAdmin, (req, res) => {
       const cuelga = noCuelgaDe(codigoStr, tit.codigo, 'el título');
       if (cuelga) return res.status(400).json({ error: cuelga });
       titIdFinal = tit.id;
+    } else {
+      // ── ACÁ FALTABA EL CONTROL, Y ENTRABA CUALQUIER COSA ───────────────
+      // Sólo se validaba la jerarquía cuando la cuenta colgaba de un título. Sin
+      // título no se miraba nada, así que en la sección 1.01 se guardó una cuenta
+      // 1.02.00.0003 y quedó ahí, en el lugar equivocado, con un número que dice
+      // que es de otro lado. El plan de cuentas se lee por el código: si el
+      // código miente, no sirve de nada.
+      const cuelga = noCuelgaDe(codigoStr, sec.codigo, 'la sección');
+      if (cuelga) return res.status(400).json({ error: cuelga });
     }
 
     const r = db.prepare(`
@@ -770,20 +837,60 @@ router.put('/:id(\\d+)', requireAdmin, (req, res) => {
 
   const { codigo, nombre, seccion_id, titulo_id, tipo, permite_lote, permite_campania } = req.body || {};
 
-  if (codigo && codigo !== cuenta.codigo) {
+  if (tipo && !['resultado', 'patrimonial'].includes(tipo)) {
+    return res.status(400).json({ error: 'tipo inválido' });
+  }
+
+  // ── MOVER LA CUENTA DESDE ACÁ ─────────────────────────────────────────
+  // Cambiar la sección o el título en la pantalla de edición ES mover la cuenta,
+  // y mover una cuenta le cambia el número. Antes había que acordarse de
+  // corregir el código a mano: si no, quedaba en la sección nueva con el número
+  // de la vieja — que es como una cuenta 1.02.00.0003 terminó viviendo en la
+  // sección 1.01.
+  //
+  // Ahora se renumera SOLA al tramo del destino. El código que venga en el
+  // pedido se ignora cuando hubo mudanza: manda el destino, y así no hay forma
+  // de que los dos se contradigan.
+  const destinoSecId = seccion_id ? parseInt(seccion_id, 10) : cuenta.seccion_id;
+  const destinoTitId = titulo_id === undefined ? cuenta.titulo_id
+                     : (titulo_id ? parseInt(titulo_id, 10) : null);
+  const seMudo = destinoSecId !== cuenta.seccion_id || destinoTitId !== cuenta.titulo_id;
+
+  const secDestino = db.prepare('SELECT id, codigo FROM sg_cuentas_secciones WHERE id = ?').get(destinoSecId);
+  if (!secDestino) return res.status(400).json({ error: 'seccion_id inválido' });
+  let titDestino = null;
+  if (destinoTitId) {
+    titDestino = db.prepare('SELECT id, codigo, seccion_id FROM sg_cuentas_titulos WHERE id = ?').get(destinoTitId);
+    if (!titDestino) return res.status(400).json({ error: 'titulo_id inválido' });
+    if (titDestino.seccion_id !== secDestino.id) {
+      return res.status(400).json({ error: 'Ese título no pertenece a la sección elegida.' });
+    }
+  }
+
+  let codigoFinal = null;
+  if (seMudo) {
+    const choque = chocaDeGrupo(cuenta.seccion_id, secDestino.id);
+    if (choque) return res.status(400).json({ error: choque });
+    const dest = prefijoDestino(secDestino, titDestino);
+    if (dest.error) return res.status(400).json({ error: dest.error });
+    codigoFinal = proximoCodigoLibre(dest.prefijo, id);
+    if (!codigoFinal) {
+      return res.status(400).json({ error: `No quedan códigos libres bajo ${dest.prefijo}.` });
+    }
+  } else if (codigo && codigo !== cuenta.codigo) {
+    // Sin mudanza, el código lo escribe el usuario: se valida el formato, que no
+    // esté repetido, y que cuelgue de donde la cuenta está parada.
     const codigoStr = String(codigo).trim();
     if (!RE_CUENTA.test(codigoStr)) {
       return res.status(400).json({ error: 'Código inválido. Las cuentas deben respetar el formato X.XX.XX.XXXX (ej: 1.01.01.0001).' });
     }
     const choque = codigoEnUso(db, codigoStr, { tabla: 'cuentas', id });
     if (choque) return res.status(400).json({ error: mensajeChoque(codigoStr, choque) });
-  }
-  if (tipo && !['resultado', 'patrimonial'].includes(tipo)) {
-    return res.status(400).json({ error: 'tipo inválido' });
-  }
-  if (seccion_id) {
-    const sec = db.prepare('SELECT id FROM sg_cuentas_secciones WHERE id = ?').get(seccion_id);
-    if (!sec) return res.status(400).json({ error: 'seccion_id inválido' });
+    const cuelga = titDestino
+      ? noCuelgaDe(codigoStr, titDestino.codigo, 'el título')
+      : noCuelgaDe(codigoStr, secDestino.codigo, 'la sección');
+    if (cuelga) return res.status(400).json({ error: cuelga });
+    codigoFinal = codigoStr;
   }
 
   try {
@@ -799,11 +906,11 @@ router.put('/:id(\\d+)', requireAdmin, (req, res) => {
              actualizado_en    = datetime('now','localtime')
        WHERE id = ?
     `).run(
-      codigo ?? null,
+      codigoFinal,
       nombre ? String(nombre).trim() : null,
-      seccion_id ?? null,
-      titulo_id !== undefined ? 1 : null,
-      titulo_id !== undefined ? (titulo_id || null) : null,
+      destinoSecId,
+      1,
+      destinoTitId,
       tipo ?? null,
       permite_lote === undefined ? null : (permite_lote ? 1 : 0),
       permite_campania === undefined ? null : (permite_campania ? 1 : 0),
@@ -821,7 +928,7 @@ router.put('/:id(\\d+)', requireAdmin, (req, res) => {
       detalle: { antes: cuenta, despues: req.body },
       usuario_id: req._user?.id,
     });
-    res.json({ ok: true, usuarios_ids: usuarios });
+    res.json({ ok: true, usuarios_ids: usuarios, codigo: codigoFinal || cuenta.codigo, movida: seMudo });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -949,21 +1056,7 @@ router.post('/:id(\\d+)/reasignar-titulo', requireAdmin, (req, res) => {
   // mismo que usa el alta por lote, cumple el formato, y no se pisa con nada
   // porque el choque se chequea contra las TRES tablas.
   const prefijoSinTitulo = (sec) => `${sec.codigo}.00`;
-  const proximoLibre = (prefijo) => {
-    let n = 0;
-    for (const h of db.prepare('SELECT codigo FROM sg_cuentas WHERE codigo LIKE ?').all(prefijo + '.%')) {
-      const p = String(h.codigo).split('.');
-      if (p.length !== 4) continue;
-      const u = parseInt(p[3], 10);
-      if (Number.isInteger(u) && u > n) n = u;
-    }
-    while (n < 9999) {
-      n++;
-      const cand = `${prefijo}.${String(n).padStart(4, '0')}`;
-      if (!codigoEnUso(db, cand, { tabla: 'cuentas', id })) return cand;
-    }
-    return primerHueco(prefijo, id);   // ver el comentario de primerHueco
-  };
+  const proximoLibre = (prefijo) => proximoCodigoLibre(prefijo, id);
 
   // ── NO SE CRUZA DE GRUPO ──────────────────────────────────────────────
   // Una cuenta de Activo no se arrastra a Ingresos. No es una preferencia de
