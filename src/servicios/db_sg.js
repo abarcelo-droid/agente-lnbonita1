@@ -726,6 +726,23 @@ try {
 // Va como ALTER y no en el CREATE: las bases que ya existen no vuelven a correr
 // el CREATE TABLE, así que una columna nueva ahí adentro no llegaría nunca.
 try { db.exec("ALTER TABLE sg_oc ADD COLUMN trazabilidad TEXT"); } catch (_) {}
+
+// ── EL FLETE SE PACTA DE TRES FORMAS ──────────────────────────────────────
+// Un monto total, o un precio por bulto, o un precio por pallet. Antes había un
+// solo campo de monto: el que lo pactaba por bulto tenía que multiplicar a mano
+// y guardar el resultado, y a los dos días nadie sabía si esos $5.000.000 eran
+// el total o el precio unitario, ni cuántos bultos se habían tomado.
+//
+// Se guardan las TRES cosas —cómo se pactó, la cantidad y el precio unitario— y
+// además el total calculado en flete_monto, que es lo que ya leen la ficha y el
+// PDF. El total se recalcula al guardar: no se le pide al usuario que lo haga.
+//
+// El IVA va aparte porque el flete se pacta de las dos maneras y saberlo importa
+// para el costo real. Sigue siendo informativo: no suma al total de la orden.
+try { db.exec("ALTER TABLE sg_oc ADD COLUMN flete_modalidad TEXT"); } catch (_) {}   // total | bulto | pallet
+try { db.exec("ALTER TABLE sg_oc ADD COLUMN flete_cantidad REAL"); } catch (_) {}
+try { db.exec("ALTER TABLE sg_oc ADD COLUMN flete_precio_unit REAL"); } catch (_) {}
+try { db.exec("ALTER TABLE sg_oc ADD COLUMN flete_con_iva INTEGER"); } catch (_) {}
 try { db.exec("CREATE INDEX IF NOT EXISTS idx_sg_oc_trazabilidad ON sg_oc(trazabilidad)"); } catch (_) {}
 
 // ── MIGRACIÓN idempotente: sg_clientes → +cuenta_contable_id (FK → sg_cuentas) (#401) ──
