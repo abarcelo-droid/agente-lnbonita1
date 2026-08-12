@@ -53,6 +53,32 @@ function logAccion({ cuenta_id = null, seccion_id = null, accion, detalle = null
   );
 }
 
+// ── DE QUÉ HABLA CADA RENGLÓN DEL LOG ──────────────────────────────────────
+// El log resolvía el código y el nombre con un JOIN contra la fila. Eso
+// funcionaba mientras "borrar" era en realidad "desactivar" y la fila seguía
+// ahí. Desde que el borrado es real, la fila NO ESTÁ: el JOIN no encuentra
+// nada y el renglón queda "borrar — — —", que en un plan de cuentas no sirve
+// para nada, justo en el único caso en que el log importa.
+//
+// Por eso los borrados guardan código y nombre dentro de `detalle`, y esto los
+// lee de ahí cuando la fila ya no existe. El orden es: primero la fila viva
+// (puede haberse renombrado desde entonces, y ahí lo que vale es el nombre de
+// hoy), y recién si no está, lo que quedó anotado.
+//
+// El caso del TÍTULO es aparte: su renglón guarda el seccion_id del PADRE, que
+// sigue existiendo, así que el JOIN devuelve la sección y no el título. Para
+// las acciones de título manda siempre el detalle.
+const REF_LOG = `
+           CASE WHEN l.cuenta_id IS NOT NULL
+                THEN COALESCE(c.codigo, json_extract(l.detalle, '$.codigo')) END AS cuenta_codigo,
+           CASE WHEN l.cuenta_id IS NOT NULL
+                THEN COALESCE(c.nombre, json_extract(l.detalle, '$.nombre')) END AS cuenta_nombre,
+           CASE WHEN l.seccion_id IS NULL THEN NULL ELSE COALESCE(
+                CASE WHEN s.id IS NULL OR l.accion LIKE '%titulo%'
+                     THEN NULLIF(TRIM(COALESCE(json_extract(l.detalle, '$.codigo'), '') || ' ' ||
+                                      COALESCE(json_extract(l.detalle, '$.nombre'), '')), '') END,
+                s.codigo || ' — ' || s.nombre) END AS seccion_nombre`;
+
 // ── Multisociedad (Fase 1) ──────────────────────────────────────────────────
 // El plan de cuentas es UNO POR SOCIEDAD. Las lecturas/escrituras se acotan a
 // una sociedad. Si el request no manda sociedad_id, se usa Puente Cordón (PC)
@@ -151,6 +177,11 @@ router.put('/titulos/:id', requireAdmin, (req, res) => {
 
 router.delete('/titulos/:id', requireAdmin, (req, res) => {
   const id = parseInt(req.params.id, 10);
+  // Se lee ANTES de borrar: después de un borrado real la fila ya no existe y no
+  // hay forma de saber qué era. Va al log en `detalle`, que es lo único que
+  // sobrevive. Ver el comentario largo en REF_LOG.
+  const tit = db.prepare('SELECT * FROM pa_cuentas_titulos WHERE id = ?').get(id);
+  if (!tit) return res.status(404).json({ error: 'título no encontrado' });
   // Mismo criterio que la sección: es estructura, se borra de verdad y libera el
   // código. Se cuentan las cuentas activas Y las desactivadas: las dos apuntan acá.
   const ctas = db.prepare('SELECT COUNT(*) c FROM pa_cuentas WHERE titulo_id = ?').get(id).c;
@@ -161,6 +192,8 @@ router.delete('/titulos/:id', requireAdmin, (req, res) => {
     });
   }
   db.prepare('DELETE FROM pa_cuentas_titulos WHERE id = ?').run(id);
+  logAccion({ seccion_id: tit.seccion_id, accion: 'borrar_titulo',
+              detalle: { codigo: tit.codigo, nombre: tit.nombre }, usuario_id: req._user?.id });
   res.json({ ok: true });
 });
 
@@ -231,6 +264,8 @@ router.put('/secciones/:id', requireAdmin, (req, res) => {
 
 router.delete('/secciones/:id', requireAdmin, (req, res) => {
   const id = parseInt(req.params.id, 10);
+  const sec = db.prepare('SELECT * FROM pa_cuentas_secciones WHERE id = ?').get(id);
+  if (!sec) return res.status(404).json({ error: 'sección no encontrada' });
   // BORRA DE VERDAD. Antes esto sólo ponía activo = 0: la sección quedaba en la
   // base, invisible en la pantalla, y con su CÓDIGO TOMADO PARA SIEMPRE. Después
   // alguien quería usar ese código y el sistema lo rechazaba por algo que no
@@ -252,7 +287,9 @@ router.delete('/secciones/:id', requireAdmin, (req, res) => {
     });
   }
   db.prepare('DELETE FROM pa_cuentas_secciones WHERE id = ?').run(id);
-  logAccion({ seccion_id: id, accion: 'borrar', usuario_id: req._user?.id });
+  logAccion({ seccion_id: id, accion: 'borrar',
+              detalle: { codigo: sec.codigo, nombre: sec.nombre, grupo: sec.grupo },
+              usuario_id: req._user?.id });
   res.json({ ok: true });
 });
 
@@ -273,9 +310,7 @@ router.get('/log/general', (req, res) => {
   let sql = `
     SELECT l.*,
            u.nombre AS usuario_nombre,
-           c.codigo AS cuenta_codigo,
-           c.nombre AS cuenta_nombre,
-           s.nombre AS seccion_nombre
+           ${REF_LOG}
       FROM pa_cuentas_log l
       LEFT JOIN usuarios u            ON u.id = l.usuario_id
       LEFT JOIN pa_cuentas c          ON c.id = l.cuenta_id
@@ -350,7 +385,11 @@ function cuentaEsImputable(db, cuentaId) {
 // Helper: ¿el código ya está en uso en CUALQUIER nivel (sección, título o cuenta)?
 // Evita que un título/sección/cuenta compartan numeración. `excepto` permite
 // ignorar el propio registro al editar: { tabla: 'cuentas'|'titulos'|'secciones', id }
-function codigoEnUso(db, codigo, excepto) {
+//
+// EL sociedadId NO ES OPCIONAL. Estas tres tablas guardan el plan de MÁS DE UNA
+// sociedad y el UNIQUE es (sociedad_id, codigo): sin filtrar, el 1.01.01.0001 de
+// una empresa bloquearía el de la otra. Las siete llamadas lo pasan.
+function codigoEnUso(db, sociedadId, codigo, excepto) {
   const cod = String(codigo).trim();
   excepto = excepto || {};
   // Se devuelve el NOMBRE y si está desactivada, no sólo "existe". El chequeo
@@ -359,7 +398,9 @@ function codigoEnUso(db, codigo, excepto) {
   // más común es contra algo que el usuario NO PUEDE VER, y el mensaje anterior
   // lo dejaba buscando un código que no aparecía en ningún lado.
   const buscar = (tabla, etiqueta, extra) => {
-    const r = db.prepare(`SELECT id, nombre, activo${extra || ''} FROM ${tabla} WHERE codigo = ?`).get(cod);
+    const r = db.prepare(
+      `SELECT id, nombre, activo${extra || ''} FROM ${tabla} WHERE codigo = ? AND sociedad_id = ?`
+    ).get(cod, sociedadId);
     if (!r) return null;
     if (excepto.tabla === tabla.replace('pa_cuentas_', '').replace('pa_cuentas', 'cuentas') && excepto.id === r.id) return null;
     return { nivel: etiqueta, id: r.id, nombre: r.nombre, activo: !!r.activo, grupo: r.grupo };
@@ -409,8 +450,12 @@ router.post('/', requireAdmin, (req, res) => {
   if (!codigo || !nombre || !seccion_id) {
     return res.status(400).json({ error: 'codigo, nombre y seccion_id son requeridos' });
   }
+  // Se trabaja siempre sobre el código YA limpio. Antes se validaba el trim pero
+  // se guardaba el original: un espacio de más al pegar el código entraba a la
+  // base y después no coincidía con nada.
+  const codigoStr = String(codigo).trim();
   // Formato OBLIGATORIO para cuentas imputables: X.XX.XX.XXXX (4 niveles, ej: 1.01.01.0001)
-  if (!/^\d\.\d{2}\.\d{2}\.\d{4}$/.test(String(codigo).trim())) {
+  if (!/^\d\.\d{2}\.\d{2}\.\d{4}$/.test(codigoStr)) {
     return res.status(400).json({ error: 'Código inválido. Las cuentas deben respetar el formato X.XX.XX.XXXX (ej: 1.01.01.0001).' });
   }
   if (!['resultado', 'patrimonial'].includes(tipo)) {
@@ -422,7 +467,7 @@ router.post('/', requireAdmin, (req, res) => {
   const sociedadId = sec.sociedad_id;
 
   // El código no puede coincidir con el de una sección, un título u otra cuenta.
-  const choque = codigoEnUso(db, sociedadId, codigo);
+  const choque = codigoEnUso(db, sociedadId, codigoStr);
   if (choque) return res.status(400).json({ error: mensajeChoque(codigoStr, choque) });
 
   try {
@@ -442,7 +487,7 @@ router.post('/', requireAdmin, (req, res) => {
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, 1)
     `).run(
       sociedadId,
-      codigo,
+      codigoStr,
       String(nombre).trim(),
       seccion_id,
       titIdFinal,
@@ -467,10 +512,11 @@ router.put('/:id(\\d+)', requireAdmin, (req, res) => {
   const { codigo, nombre, seccion_id, titulo_id, tipo, permite_lote, permite_campania } = req.body || {};
 
   if (codigo && codigo !== cuenta.codigo) {
-    if (!/^\d\.\d{2}\.\d{2}\.\d{4}$/.test(String(codigo).trim())) {
+    const codigoStr = String(codigo).trim();
+    if (!/^\d\.\d{2}\.\d{2}\.\d{4}$/.test(codigoStr)) {
       return res.status(400).json({ error: 'Código inválido. Las cuentas deben respetar el formato X.XX.XX.XXXX (ej: 1.01.01.0001).' });
     }
-    const choque = codigoEnUso(db, cuenta.sociedad_id, codigo, { tabla: 'cuentas', id });
+    const choque = codigoEnUso(db, cuenta.sociedad_id, codigoStr, { tabla: 'cuentas', id });
     if (choque) return res.status(400).json({ error: mensajeChoque(codigoStr, choque) });
   }
   if (tipo && !['resultado', 'patrimonial'].includes(tipo)) {
@@ -520,7 +566,7 @@ router.put('/:id(\\d+)', requireAdmin, (req, res) => {
   }
 });
 
-// DELETE /api/pa/cuentas/:id (soft delete)
+// DELETE /api/pa/cuentas/:id
 router.delete('/:id(\\d+)', requireAdmin, (req, res) => {
   const id = parseInt(req.params.id, 10);
   const cuenta = db.prepare('SELECT * FROM pa_cuentas WHERE id = ?').get(id);
@@ -540,7 +586,9 @@ router.delete('/:id(\\d+)', requireAdmin, (req, res) => {
   const usos = db.prepare('SELECT COUNT(*) c FROM pa_asientos_lineas WHERE cuenta_id = ?').get(id).c;
   if (usos) {
     db.prepare("UPDATE pa_cuentas SET activo = 0, actualizado_en = datetime('now','localtime') WHERE id = ?").run(id);
-    logAccion({ cuenta_id: id, accion: 'desactivar', usuario_id: req._user?.id });
+    logAccion({ cuenta_id: id, accion: 'desactivar',
+                detalle: { codigo: cuenta.codigo, nombre: cuenta.nombre, usos },
+                usuario_id: req._user?.id });
     return res.json({
       ok: true, desactivada: true,
       aviso: `La cuenta se usó en ${usos} línea(s) de asiento, así que no se puede borrar `
@@ -549,7 +597,12 @@ router.delete('/:id(\\d+)', requireAdmin, (req, res) => {
     });
   }
   db.prepare('DELETE FROM pa_cuentas WHERE id = ?').run(id);
-  logAccion({ cuenta_id: id, accion: 'borrar', usuario_id: req._user?.id });
+  // El código y el nombre van en `detalle` porque la fila que los tenía se acaba
+  // de ir: el JOIN del log ya no la encuentra. Sin esto el renglón queda
+  // "borrar — — —", que en un plan de cuentas no sirve para nada.
+  logAccion({ cuenta_id: id, accion: 'borrar',
+              detalle: { codigo: cuenta.codigo, nombre: cuenta.nombre },
+              usuario_id: req._user?.id });
   res.json({ ok: true, borrada: true });
 });
 
