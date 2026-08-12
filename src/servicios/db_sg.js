@@ -244,6 +244,9 @@ db.exec(`
     eliminado_por_id            INTEGER
   );
 
+  -- El código con el que se rastrea la partida que entra por esta compra.
+  -- PPPP.DD.MM.AAAA.XX — proveedor, fecha, y el orden de la compra dentro del día.
+  -- Se llena al crear la OC; ver codigoTrazabilidad() en rutas/sg.js.
   CREATE TABLE IF NOT EXISTS sg_oc_items (
     id                              INTEGER PRIMARY KEY AUTOINCREMENT,
     oc_id                           INTEGER NOT NULL REFERENCES sg_oc(id),
@@ -718,6 +721,12 @@ try {
 } catch (e) {
   console.error('[DB] SG fusión categorias (Servicios Varios/Otros → Otros):', e.message);
 }
+
+// El código de trazabilidad de la partida que entra por cada orden de compra.
+// Va como ALTER y no en el CREATE: las bases que ya existen no vuelven a correr
+// el CREATE TABLE, así que una columna nueva ahí adentro no llegaría nunca.
+try { db.exec("ALTER TABLE sg_oc ADD COLUMN trazabilidad TEXT"); } catch (_) {}
+try { db.exec("CREATE INDEX IF NOT EXISTS idx_sg_oc_trazabilidad ON sg_oc(trazabilidad)"); } catch (_) {}
 
 // ── MIGRACIÓN idempotente: sg_clientes → +cuenta_contable_id (FK → sg_cuentas) (#401) ──
 // Camino A (cerrado con Pablo): cada cliente SG enlaza a su cuenta contable. INTEGER nullable

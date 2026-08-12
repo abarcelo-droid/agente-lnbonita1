@@ -2080,8 +2080,17 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       /* Los recuadros de cabecera de la OC: tantos por fila como entren, con un
          ancho mínimo legible. Arriba se alinean, para que no queden escalonados
          cuando uno tiene más campos que otro. */
-      .sg-oc-fila{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:12px;align-items:start}
-      .sg-oc-fila > .sg-oc-box{margin-top:0}
+      /* Los tres recuadros de cabecera: tantos por fila como entren.
+         · stretch, para que terminen todos a la misma altura y el bloque de
+           abajo arranque parejo.
+         · las etiquetas con alto fijo de dos renglones: "COMPROBANTE FISCAL" y
+           "FECHA RECEPCIÓN ESTIMADA" ocupan dos y las demás una, y sin esto
+           cada campo arrancaba a una altura distinta. Es lo que se veía torcido. */
+      .sg-oc-fila{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:12px;align-items:stretch}
+      .sg-oc-fila > .sg-oc-box{margin-top:0;display:flex;flex-direction:column}
+      .sg-oc-fila label{min-height:2.1em;display:flex;align-items:flex-end;line-height:1.05}
+      .sg-oc-traza{font-family:ui-monospace,Consolas,monospace;font-size:12.5px;font-weight:700;
+                   color:var(--burg);letter-spacing:.06em;margin-top:3px}
       .sg-oc-box-tit{font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--mut);margin-bottom:10px}
       .sg-oc-card{border:1px solid var(--bor);border-radius:10px;padding:10px;margin-bottom:8px;background:var(--sur)}
       .sg-oc-card-top{display:grid;grid-template-columns:1fr 1fr auto;gap:8px;align-items:center;margin-bottom:8px}
@@ -2702,7 +2711,16 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
 
 <div class="ab-modal-overlay" id="sg-oc-modal">
   <div class="ab-modal" style="width:min(1180px,96vw);max-height:92vh;overflow-y:auto">
-    <div class="mhd"><div class="mht">🛒 Nueva orden de compra</div><button class="mcl" onclick="closeMB('sg-oc-modal')">×</button></div>
+    <div class="mhd">
+      <div>
+        <div class="mht">🛒 Nueva orden de compra</div>
+        <!-- El código con el que se va a rastrear la partida. Se arma solo a
+             medida que se elige proveedor y fecha, y se ve desde el principio:
+             es el dato con el que después se busca la mercadería. -->
+        <div id="sg-oc-traza" class="sg-oc-traza">— elegí proveedor y fecha —</div>
+      </div>
+      <button class="mcl" onclick="closeMB('sg-oc-modal')">×</button>
+    </div>
     <div class="fg">
       <!-- Modalidad como tabs -->
       <div class="fl ff"><label>Modalidad</label>
@@ -2737,7 +2755,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       <div class="sg-oc-box">
         <div class="sg-oc-box-tit">📅 Fechas</div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
-          <div class="fl"><label>Fecha OC</label><input type="date" id="sg-oc-fecha"></div>
+          <div class="fl"><label>Fecha OC</label><input type="date" id="sg-oc-fecha" onchange="sgOcTrazaRefrescar()"></div>
           <div class="fl"><label>Fecha recepción estimada</label><input type="date" id="sg-oc-fecharec"></div>
         </div>
       </div>
@@ -3958,9 +3976,32 @@ function sgOcOpen(){
   document.querySelector('input[name="sg-oc-inciva"][value="si"]').checked=true; // IVA Fase 2
   sgOcAddItem();
   sgOcUpdIvaBox();
+  sgOcTrazaRefrescar();
   eid('sg-oc-modal').classList.add('on');
 }
+
+// ── EL CÓDIGO DE TRAZABILIDAD, EN VIVO ────────────────────────────────────
+// Se arma en el servidor y no acá: el último tramo es "cuál de las de hoy es",
+// y eso sólo lo sabe quien ve todas las órdenes. Se muestra como provisorio
+// hasta guardar, porque hasta ese momento otro puede quedarse con el número.
+function sgOcTrazaRefrescar(){
+  var el=eid('sg-oc-traza'); if(!el) return;
+  var prov=eid('sg-oc-prov').value, fecha=eid('sg-oc-fecha').value;
+  if(!prov||!fecha){ el.textContent='— elegí proveedor y fecha —'; el.style.opacity=.6; return; }
+  el.style.opacity=1;
+  fetch('/api/sg/oc/trazabilidad-preview?proveedor_id='+encodeURIComponent(prov)
+        +'&fecha_oc='+encodeURIComponent(fecha),{credentials:'include'})
+    .then(function(r){return r.json();})
+    .then(function(r){
+      el.textContent = (r&&r.ok) ? ('Partida  ' + r.codigo) : '—';
+      el.title = 'Proveedor (4 dígitos) · día · mes · año · número de orden del día. '
+               + 'Se confirma al guardar.';
+    })
+    .catch(function(){ el.textContent='—'; });
+}
+
 function sgOcProvChange(){
+  sgOcTrazaRefrescar();
   var p=SG.cacheProv.find(function(x){return String(x.id)===String(eid('sg-oc-prov').value);});
   if(p){ if(p.tipo_fiscal_habitual)eid('sg-oc-fiscal').value=p.tipo_fiscal_habitual; if(p.condicion_pago_habitual_id)eid('sg-oc-cond').value=p.condicion_pago_habitual_id; }
   sgOcUpdIvaBox(); sgOcTotales();   // el comprobante del proveedor puede activar/desactivar IVA
