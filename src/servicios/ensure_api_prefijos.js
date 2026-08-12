@@ -41,7 +41,10 @@ const PREFIJOS = [
   ['adm-plan-cuentas',   'pa/cuentas/secciones,pa/cuentas/titulos,pa/cuentas/config-impositiva'],
   ['adm-modelos',        'pa/cuentas/modelos'],
   ['adm-proveedores',    'pa/proveedores'],
-  ['adm-cc-proveedores', 'pa/cc'],
+  // La pantalla usa DOS direcciones: el saldo sale de /pa/cc y los pagos de
+  // /pa/pagos (dos routers distintos). Si falta una, media pantalla queda sin
+  // control.
+  ['adm-cc-proveedores', 'pa/cc,pa/pagos'],
 
   // ── Financiero de Puente Cordón ────────────────────────────────────────
   // Ojo con el orden implícito: /api/fin/ordenes es más largo que /api/fin, y
@@ -70,7 +73,65 @@ const PREFIJOS = [
   // 'auth/usuarios' y NO 'auth': ver el comentario de arriba.
   ['maestro-usuarios',   'auth/usuarios,auth/asignar-password-inicial'],
   ['equipo',             'org/personas,org/areas,org/ubicaciones'],
+
+  // ── Producción Agrícola (Puente Cordón) ────────────────────────────────
+  // produccion.js tiene 165 rutas y sirve a muchos menús, así que van
+  // sub-prefijos. NUNCA 'pa' pelado: se llevaría las 165 y se las daría a uno.
+  ['pa-lotes',           'pa/lotes,pa/aplicaciones,pa/cultivos'],
+  ['pa-insumos',         'pa/insumos'],
+  ['pa-combustible',     'pa/combustible'],
+  ['pa-panol',           'pa/panol'],
+  ['pa-ordenes',         'pa/ordenes'],
+  // /leer-remito es el OCR que dispara la carga de la factura: es la misma acción.
+  ['pa-compras',         'pa/compras,pa/leer-remito'],
+  ['pa-scout',           'pa/scout'],
+
+  // ── Personal (Puente Cordón) ───────────────────────────────────────────
+  // Las 77 rutas /personal/* viven todas en produccion.js y las comparten seis
+  // pantallas. Se separan por sub-path.
+  ['personal-padron',     'pa/personal/padron,pa/personal/grupos,pa/personal/cuadrillas'],
+  ['personal-asistencia', 'pa/personal/asistencias'],
+  ['personal-valorizar',  'pa/personal/valorizar,pa/personal/liquidaciones,pa/personal/semanas-pago,pa/personal/pago-masivo,pa/personal/tarifas-persona,pa/personal/tarifas-rol'],
+  ['personal-cc',         'pa/personal/cc'],
+  ['personal-catalogo',   'pa/personal/rubros,pa/personal/tareas-tipos'],
+
+  // ── Abasto San Gerónimo ────────────────────────────────────────────────
+  // Los diez comparten /api/sg. Se separan por sub-path; el desempate por
+  // longitud hace que sg/ventas le gane a sg, igual que en el montaje real.
+  ['sg-compras',         'sg/recepciones,sg/oc,sg/compra-retroactiva'],
+  ['sg-stock',           'sg/lotes,sg/disponibilidad,sg/decomisos'],
+  ['sg-ventas',          'sg/despachos,sg/pedidos,sg/ventas'],
+  ['sg-catalogo',        'sg/productos,sg/familias,sg/especies,sg/variedades,sg/proveedores,sg/condiciones-pago,sg/envases,sg/config'],
+  ['sg-gvariables',      'sg/gastos-globales'],
+  ['sg-gastos-directos', 'sg/gastos-directos,sg/gastos-servicio,sg/proveedores-servicio'],
+  ['sg-reprocesos',      'sg/reprocesos,sg/transformaciones'],
+  ['sg-importacion',     'sg/embarques'],
 ];
+
+// ── LO QUE QUEDA SIN NIVEL, Y POR QUÉ ──────────────────────────────────────
+// No es olvido: en estos casos la dirección NO alcanza para saber de qué menú se
+// trata, y declarar un prefijo compartido bloquearía pantallas que se usan todos
+// los días. Protegerlos mal es peor que no protegerlos.
+//
+//   Comercial (10 pantallas)  → /api/clientes y /api/pedidos, compartidos entre
+//                               CRM, Dedicados, Food Service, los mayoristas,
+//                               los minoristas y Pedidos.
+//   Abasto IFCO (9)           → /api/abasto y /api/ifco, compartidos.
+//   Logística (5), Pricing (4), Retail (4), Cobranzas (2) → idem.
+//   pa-dashboard, pa-costos, pa-clima, pa-calendario, sg-dashboard, sg-reportes,
+//   personal-reportes → sólo leen, no tienen escrituras propias.
+//   pa-despachos y pa-electricidad → pantallas en construcción, sin endpoints.
+//
+// DOS QUE NECESITAN UNA DECISIÓN, NO CÓDIGO:
+//   · 'pa-cuentas' y 'adm-plan-cuentas' son DOS pantallas de Plan de Cuentas
+//     sobre la MISMA dirección. El prefijo lo puede tener una sola. Lo natural
+//     es dejárselo a adm-plan-cuentas y retirar la otra, pero eso es decisión de
+//     producto.
+//   · POST /personal/permisos, /personal/acceso-sensible y /personal/admin son
+//     transversales al módulo Personal y no son de ninguna de sus seis pantallas.
+//
+// Para cerrarlos hay que separarles las rutas a los routers compartidos. Es
+// trabajo prolijo y sin decisiones, pero es otro cambio.
 
 try {
   const upd = db.prepare('UPDATE modulos_config SET api_prefijos = ? WHERE modulo = ?');
