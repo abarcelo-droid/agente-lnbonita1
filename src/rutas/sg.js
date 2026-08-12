@@ -14,6 +14,9 @@ import * as XLSX from 'xlsx';
 import { subirArchivo, obtenerArchivo, storageConfigurado } from '../servicios/storage.js';
 import { getDb } from '../servicios/db.js';
 import '../servicios/db_sg.js'; // corre el DDL sg_* al importarse
+// Las condiciones de pago que se usan de verdad, y el código de trazabilidad
+// de las órdenes que se cargaron antes de que existiera.
+import '../servicios/sg_oc_condiciones_y_traza.js';
 import { detectarDuplicado } from '../servicios/dedup.js';
 import { generarOcPDF } from '../servicios/ocPDF.js';
 import { generarRecepcionCalidadPDF } from '../servicios/recepcionCalidadPDF.js';
@@ -1108,8 +1111,17 @@ function generarVencimientos(db, ocId) {
 // Autocompleta tipo_fiscal/condicion_pago desde el proveedor si no vinieron en el body.
 function defaultsProveedor(db, proveedorId, body) {
   const p = proveedorId ? db.prepare('SELECT tipo_fiscal_habitual, condicion_pago_habitual_id FROM sg_proveedores WHERE id=?').get(proveedorId) : null;
+  let tipo = val(body.tipo_fiscal) || (p && p.tipo_fiscal_habitual) || 'factura_a';
+  // ── EL COMPROBANTE TIENE QUE ENCAJAR CON LA CONDICIÓN COMERCIAL ────────
+  // Una liquidación de venta no se factura: su comprobante es "liquidación".
+  // Y una compra a precio cerrado se factura, así que no puede ser liquidación.
+  // La pantalla ya sólo ofrece lo que corresponde, pero el habitual del
+  // proveedor entra por atrás y podía dejar la combinación imposible guardada.
+  const esLiquidacion = (val(body.tipo_precio) || 'firme') === 'pizarra';
+  if (esLiquidacion) tipo = 'liquidacion';
+  else if (tipo === 'liquidacion') tipo = 'factura_a';
   return {
-    tipo_fiscal: val(body.tipo_fiscal) || (p && p.tipo_fiscal_habitual) || 'factura_a',
+    tipo_fiscal: tipo,
     condicion_pago_id: body.condicion_pago_id != null ? body.condicion_pago_id : (p && p.condicion_pago_habitual_id) || null
   };
 }
