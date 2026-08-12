@@ -169,6 +169,9 @@ try { db.exec("ALTER TABLE modulos_config ADD COLUMN oculto INTEGER NOT NULL DEF
 // permite saber a qué menú pertenece un pedido y aplicarle el nivel del usuario
 // (ver servicios/permisos.js). Vacío = ese módulo no se controla por nivel.
 try { db.exec("ALTER TABLE modulos_config ADD COLUMN api_prefijos TEXT"); } catch(_) {}
+// Direcciones que esta pantalla puede LEER aunque no sean suyas. Va aparte de
+// api_prefijos porque ahí adentro significaría que además puede ESCRIBIR.
+try { db.exec("ALTER TABLE modulos_config ADD COLUMN api_lectura TEXT"); } catch(_) {}
 // Dirección del sistema externo, para los módulos tipo='externo'. Vive en la base y
 // no en el código: la URL de un dashboard de terceros cambia (dominio nuevo, ruta
 // nueva) y no puede depender de un deploy. La edita un admin desde el panel.

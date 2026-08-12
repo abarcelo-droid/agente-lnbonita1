@@ -251,8 +251,47 @@ const PREFIJOS = [
 // Para cerrarlos hay que separarles las rutas a los routers compartidos. Es
 // trabajo prolijo y sin decisiones, pero es otro cambio.
 
+
+// ── LO QUE UNA PANTALLA PUEDE LEER SIN QUE SEA SUYO ────────────────────────
+// Desde ahora el nivel también se aplica a las LECTURAS, pero sólo en las
+// direcciones donde se pudo verificar quién lee (ver LECTURA_CONTROLADA en
+// permisos.js: la plata y los sueldos). Estas dos son las pantallas que leen
+// ahí adentro sin ser dueñas — se relevaron mirando TODAS las llamadas del
+// panel a esos prefijos, una por una, no por convención de nombres.
+//
+// Va en una columna aparte de api_prefijos a propósito: adentro de ésa,
+// "puede leer" se convertiría en "puede escribir". Pañol necesita el padrón
+// para saber a quién le entrega una herramienta, y no por eso tiene que poder
+// tocar un legajo.
+const LECTURA = [
+  // panel.html:26950 — pnInit lee el padrón para poblar el selector de a quién
+  // se le entrega la herramienta.
+  ['pa-panol',              'pa/personal/padron'],
+
+  // LAS SEIS PANTALLAS DE PERSONAL SE LEEN ENTRE ELLAS AL ABRIR.
+  // ppCargarBase (panel.html:24916-24926) trae el padrón, los rubros y los
+  // tipos de tarea PARA LAS SEIS, sin importar en cuál estés parado: son los
+  // datos con los que se dibujan los desplegables. Las escrituras sí están bien
+  // repartidas —el padrón lo escribe Padrón, los rubros el Catálogo— y eso no se
+  // toca. Sin estas líneas, Asistencia se abría vacía para quien no tuviera
+  // además tildado Padrón.
+  ['personal-padron',       'pa/personal/rubros,pa/personal/tareas-tipos'],
+  ['personal-catalogo',     'pa/personal/padron'],
+  ['personal-asistencia',   'pa/personal/padron,pa/personal/rubros,pa/personal/tareas-tipos'],
+  ['personal-valorizar',    'pa/personal/padron,pa/personal/rubros,pa/personal/tareas-tipos'],
+  ['personal-cc',           'pa/personal/padron,pa/personal/rubros,pa/personal/tareas-tipos'],
+  ['personal-reportes',     'pa/personal/padron,pa/personal/rubros,pa/personal/tareas-tipos'],
+];
+
 try {
+  // La columna la crea db_org.js, pero ESTE archivo lo importa db_org ANTES de
+  // correr su propio cuerpo (los import se hoistean), así que acá todavía puede
+  // no existir. Sin esto el UPDATE fallaba y el try/catch se lo comía: las
+  // lecturas declaradas no se aplicaban y nadie se enteraba.
+  try { db.exec('ALTER TABLE modulos_config ADD COLUMN api_lectura TEXT'); } catch (_) {}
+
   const upd = db.prepare('UPDATE modulos_config SET api_prefijos = ? WHERE modulo = ?');
+  const updLec = db.prepare('UPDATE modulos_config SET api_lectura = ? WHERE modulo = ?');
   const hay = db.prepare('SELECT 1 FROM modulos_config WHERE modulo = ?');
   let n = 0;
   const faltan = [];
@@ -260,6 +299,10 @@ try {
     for (const [modulo, prefijos] of PREFIJOS) {
       if (!hay.get(modulo)) { faltan.push(modulo); continue; }
       n += upd.run(prefijos, modulo).changes;
+    }
+    for (const [modulo, prefijos] of LECTURA) {
+      if (!hay.get(modulo)) { faltan.push(modulo + ' (lectura)'); continue; }
+      updLec.run(prefijos, modulo);
     }
   })();
   if (n) console.log(`[NIVEL] ${n} módulo(s) con su dirección de API declarada: el nivel Ver/Operar/Anular ya se aplica ahí.`);
