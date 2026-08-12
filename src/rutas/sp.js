@@ -613,6 +613,11 @@ router.get('/solicitudes', wrap((req, res) => {
     where += ' AND s.solicitante_id = ?';
     params.push(parseInt(req.query.solicitante_id, 10) || 0);
   }
+  // El filtro del tilde. Es la mitad de para qué sirve la marca: sin poder
+  // pedirle "mostrame las que me faltan avisar", el tilde obliga igual a repasar
+  // la lista entera con la vista.
+  if (req.query.aviso === 'si')  where += ' AND s.aviso_prov = 1';
+  if (req.query.aviso === 'no')  where += ' AND COALESCE(s.aviso_prov, 0) = 0';
   // Buscador libre: número, proveedor, concepto y cuenta corriente. Son los
   // cuatro campos por los que se busca un pago en la vida real — y la cuenta
   // corriente entra porque es con lo que se rastrea en el otro sistema.
@@ -683,6 +688,10 @@ router.get('/solicitudes', wrap((req, res) => {
       // A quién le toca de verdad: es lo que el usuario necesita saber cuando no
       // puede actuar él.
       esperando_a: puedenActuar.map(u => u.nombre),
+      // El tilde de "ya le avisé al proveedor" lo pone SÓLO quien pidió el pago:
+      // es su propia nota para acordarse. El admin también, para poder corregir.
+      puede_avisar: s.solicitante_id === req.user.id || esAdmin(req),
+      aviso_prov: !!s.aviso_prov,
       vencida: !!(s.vence_en && s.estado_global === 'en_curso' && s.vence_en < new Date().toISOString().slice(0, 19).replace('T', ' '))
     };
   });
@@ -1068,6 +1077,38 @@ router.post('/solicitudes/:id/accion', wrap((req, res) => {
     estado_global: salida.estado,
     paso: salida.destino.clave,
     paso_nombre: salida.destino.nombre
+  });
+}));
+
+// ── "YA LE AVISÉ AL PROVEEDOR" ────────────────────────────────────────────
+// La marca del solicitante para acordarse de si ya avisó y mandó comprobantes.
+// Es una nota al costado, NO un paso del circuito: no cambia el estado, no
+// dispara mails y no bloquea nada. Por eso se puede poner y sacar cuando sea,
+// incluso con la solicitud ya cerrada — que es justo cuando más se usa, porque
+// el aviso al proveedor suele venir DESPUÉS del pago.
+//
+// La pone SÓLO quien pidió el pago. Es su recordatorio: si lo pudiera tildar
+// cualquiera, dejaría de querer decir "yo avisé".
+router.patch('/solicitudes/:id/aviso-proveedor', wrap((req, res) => {
+  const soc = getSociedadId(req);
+  const s = getSol(soc, parseInt(req.params.id, 10));
+  if (s.solicitante_id !== req.user.id && !esAdmin(req)) {
+    throw bad('El tilde de aviso al proveedor lo pone quien pidió el pago.');
+  }
+  const avisado = req.body?.avisado ? 1 : 0;
+  db.prepare(`
+    UPDATE sp_solicitudes
+       SET aviso_prov = ?,
+           aviso_prov_en  = CASE WHEN ? = 1 THEN datetime('now','localtime') ELSE NULL END,
+           aviso_prov_por = CASE WHEN ? = 1 THEN ? ELSE NULL END
+     WHERE id = ?
+  `).run(avisado, avisado, avisado, req.user.id, s.id);
+  res.json({
+    ok: true,
+    aviso_prov: !!avisado,
+    aviso_prov_en: avisado
+      ? db.prepare('SELECT aviso_prov_en x FROM sp_solicitudes WHERE id = ?').get(s.id).x
+      : null,
   });
 }));
 

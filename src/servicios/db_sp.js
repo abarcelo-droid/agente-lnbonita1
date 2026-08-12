@@ -569,6 +569,27 @@ try { seed(); } catch (e) { console.error('[SP] Seed falló:', e.message); }
   }
 })();
 
+// ── EL TILDE DE "YA LE AVISÉ AL PROVEEDOR" ────────────────────────────────
+// Lo pidió el dueño: el que solicita un pago necesita acordarse de si ya le
+// avisó al proveedor y le mandó los comprobantes. Sin esto hay que abrir las
+// órdenes de a una para acordarse, y con sesenta en pantalla nadie hace eso.
+//
+// Es una nota del SOLICITANTE, no un paso del circuito — por eso NO es un hito
+// más: el circuito es un contrato que se congela al nacer la solicitud (ver
+// def_snapshot_json), y meterle un paso obligaría a versionar el flujo y a
+// tocar las que ya están en vuelo. Esto es una marca al costado, que cada uno
+// pone y saca cuando quiere.
+//
+// Se guarda quién y cuándo, no sólo el sí/no: cuando el proveedor llama diciendo
+// que no le llegó nada, lo que hace falta es la fecha.
+for (const [col, tipo] of [
+  ['aviso_prov',     'INTEGER NOT NULL DEFAULT 0'],
+  ['aviso_prov_en',  'TEXT'],
+  ['aviso_prov_por', 'INTEGER'],
+]) {
+  try { db.exec(`ALTER TABLE sp_solicitudes ADD COLUMN ${col} ${tipo}`); } catch (_) {}
+}
+
 console.log('[SP] Schema inicializado');
 
 export default db;
