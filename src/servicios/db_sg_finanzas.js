@@ -573,7 +573,37 @@ console.log("[SG] Esquema Contable/Ventas/Tesorería SG verificado (tablas sg_* 
     const nSecSG = db.prepare('SELECT COUNT(*) c FROM sg_cuentas_secciones').get().c;
     const nTitSG = db.prepare('SELECT COUNT(*) c FROM sg_cuentas_titulos').get().c;
 
-    if (nSecSG === 0 || nTitSG === 0) {
+    // ── ESTO SEMBRABA CADA VEZ QUE EL PLAN QUEDABA VACÍO, Y ESO ESTÁ MAL ──
+    // La condición era "si no hay secciones o no hay títulos, copiá el esqueleto
+    // de Puente Cordón". Funcionó mientras "borrar" un rubro era en realidad
+    // "desactivarlo": la tabla nunca quedaba vacía, así que sembraba una sola vez
+    // y no se notaba.
+    //
+    // Desde que el borrado es REAL, vaciar el plan es algo que el contable hace a
+    // propósito mientras lo arma — y al siguiente despliegue le volvían las 26
+    // secciones de Puente Cordón, Activo incluido. Borraba, se iba, volvía al día
+    // siguiente y estaban de nuevo.
+    //
+    // Ahora la semilla se planta UNA VEZ y queda anotada. Vaciar el plan es una
+    // decisión del que lo está armando, y el sistema no la discute.
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS sistema_flags (
+        key          TEXT PRIMARY KEY,
+        valor        TEXT,
+        ejecutado_en TEXT DEFAULT (datetime('now','localtime'))
+      );
+    `);
+    const MARCA_SEMILLA = 'sg_plan_semilla_v1';
+    const yaSembro = !!db.prepare('SELECT key FROM sistema_flags WHERE key = ?').get(MARCA_SEMILLA);
+
+    // Si el plan YA tiene algo, la semilla está puesta aunque nadie la haya
+    // anotado: es una base de antes de esta marca. Se anota y no se siembra.
+    if (!yaSembro && (nSecSG > 0 || nTitSG > 0)) {
+      db.prepare('INSERT OR IGNORE INTO sistema_flags (key, valor) VALUES (?, ?)')
+        .run(MARCA_SEMILLA, JSON.stringify({ ya_estaba: true, secciones: nSecSG, titulos: nTitSG }));
+    }
+
+    if (!yaSembro && nSecSG === 0 && nTitSG === 0) {
       const secsPC = db.prepare(`SELECT codigo, nombre, orden, activo, grupo
                                    FROM pa_cuentas_secciones WHERE sociedad_id = ? ORDER BY codigo`).all(PC);
       const titsPC = db.prepare(`SELECT t.codigo, t.nombre, t.orden, t.activo, s.codigo AS sec
@@ -602,9 +632,12 @@ console.log("[SG] Esquema Contable/Ventas/Tesorería SG verificado (tablas sg_* 
             t++;
           }
         })();
+        db.prepare('INSERT OR IGNORE INTO sistema_flags (key, valor) VALUES (?, ?)')
+          .run(MARCA_SEMILLA, JSON.stringify({ secciones: s, titulos: t }));
         if (s || t) {
           console.log(`[SG] Plan de cuentas propio: ${s} sección(es) y ${t} título(s) sembrados ` +
-                      `en sg_cuentas_secciones/sg_cuentas_titulos (0 cuentas — las carga el contador).`);
+                      `en sg_cuentas_secciones/sg_cuentas_titulos (0 cuentas — las carga el contador). ` +
+                      `Se siembra UNA sola vez: si después se vacía el plan, no vuelve.`);
         }
       }
     }
