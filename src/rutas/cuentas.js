@@ -134,12 +134,14 @@ router.post('/titulos', requireAdmin, (req, res) => {
   }
   const codigoStr = String(codigo).trim();
   // Formato obligatorio: X.XX.XX  (3 partes, ej: 1.01.01)
-  if (!/^\d+\.\d{2}\.\d{2}$/.test(codigoStr)) {
-    return res.status(400).json({ error: 'El código del título debe tener formato X.XX.XX (ej: 1.01.01)' });
+  if (!RE_TITULO.test(codigoStr)) {
+    return res.status(400).json({ error: `"${codigoStr}" no sirve como código de título. ${AYUDA_TITULO}` });
   }
-  const sec = db.prepare('SELECT id, sociedad_id FROM pa_cuentas_secciones WHERE id = ?').get(parseInt(seccion_id, 10));
+  const sec = db.prepare('SELECT id, sociedad_id, codigo FROM pa_cuentas_secciones WHERE id = ?').get(parseInt(seccion_id, 10));
   if (!sec) return res.status(400).json({ error: 'seccion_id inválido' });
   const sociedadId = sec.sociedad_id;
+  const cuelga = noCuelgaDe(codigoStr, sec.codigo, 'la sección');
+  if (cuelga) return res.status(400).json({ error: cuelga });
   const choque = codigoEnUso(db, sociedadId, codigoStr);
   if (choque) return res.status(400).json({ error: mensajeChoque(codigoStr, choque) });
   try {
@@ -161,8 +163,8 @@ router.put('/titulos/:id', requireAdmin, (req, res) => {
   const { nombre, codigo } = req.body || {};
   if (codigo !== undefined && String(codigo).trim() !== String(tit.codigo)) {
     const codigoStr = String(codigo).trim();
-    if (!/^\d+\.\d{2}\.\d{2}$/.test(codigoStr)) {
-      return res.status(400).json({ error: 'El código del título debe tener formato X.XX.XX (ej: 1.01.01)' });
+    if (!RE_TITULO.test(codigoStr)) {
+      return res.status(400).json({ error: `"${codigoStr}" no sirve como código de título. ${AYUDA_TITULO}` });
     }
     const choque = codigoEnUso(db, tit.sociedad_id, codigoStr, { tabla: 'titulos', id });
     if (choque) return res.status(400).json({ error: mensajeChoque(codigoStr, choque) });
@@ -222,8 +224,8 @@ router.post('/secciones', requireAdmin, (req, res) => {
   if (!codigo || !nombre) return res.status(400).json({ error: 'codigo y nombre son requeridos' });
   // Aceptar tanto enteros (5) como decimales (5.08)
   const codigoStr = String(codigo).trim();
-  if (!/^\d+(\.\d+)?$/.test(codigoStr)) {
-    return res.status(400).json({ error: 'codigo debe tener formato N o N.NN (ej: 5 o 5.08)' });
+  if (!RE_SECCION.test(codigoStr)) {
+    return res.status(400).json({ error: `"${codigoStr}" no sirve como código de sección. ${AYUDA_SECCION}` });
   }
   const sociedadId = getSociedadId(req);
   const choque = codigoEnUso(db, sociedadId, codigoStr);
@@ -248,6 +250,13 @@ router.put('/secciones/:id', requireAdmin, (req, res) => {
   const { nombre, codigo, grupo } = req.body || {};
   if (codigo !== undefined && String(codigo).trim() !== String(sec.codigo)) {
     const codigoStr = String(codigo).trim();
+    // El alta validaba el formato y la edición NO: por acá se le podía poner a
+    // una sección cualquier código, incluso uno donde después no entra ninguna
+    // cuenta. Sólo corre cuando el código CAMBIA, así que cambiarle el nombre a
+    // una sección vieja de formato raro sigue andando.
+    if (!RE_SECCION.test(codigoStr)) {
+      return res.status(400).json({ error: `"${codigoStr}" no sirve como código de sección. ${AYUDA_SECCION}` });
+    }
     const choque = codigoEnUso(db, sec.sociedad_id, codigoStr, { tabla: 'secciones', id });
     if (choque) return res.status(400).json({ error: mensajeChoque(codigoStr, choque) });
     db.prepare("UPDATE pa_cuentas_secciones SET codigo = ?, actualizado_en = datetime('now','localtime') WHERE id = ?").run(codigoStr, id);
@@ -410,6 +419,81 @@ function codigoEnUso(db, sociedadId, codigo, excepto) {
       || buscar('pa_cuentas', 'cuenta');
 }
 
+// ── LOS TRES FORMATOS, Y POR QUÉ SON ASÍ ───────────────────────────────────
+// El formato de la CUENTA no es negociable: X.XX.XX.XXXX, con UN SOLO dígito de
+// grupo. De ahí para arriba todo lo demás se deduce, porque el código de una
+// cuenta es el de su título más cuatro dígitos, y el del título es el de su
+// sección más dos.
+//
+// Antes las tres reglas no encajaban entre sí: la sección aceptaba `\d+` con
+// decimales libres ("10.01", "4.1", "4.001") y el título `\d+` de grupo
+// ("10.01.01"). Los dos se pueden crear, y los dos son CALLEJONES SIN SALIDA:
+// abajo de un título 10.01.01 no entra ninguna cuenta, porque 10.01.01.0001 no
+// pasa la regex de cuenta. Se creaban en silencio y el problema aparecía
+// después, al intentar colgarles algo.
+//
+// Ahora no se pueden crear. Lo que YA exista con otra forma no se toca: la
+// validación corre sólo cuando el código CAMBIA, así que renombrar una sección
+// vieja sigue funcionando.
+const RE_SECCION = /^\d(\.\d{2})?$/;        // 4   ó  4.01
+const RE_TITULO  = /^\d\.\d{2}\.\d{2}$/;    // 4.01.01
+const RE_CUENTA  = /^\d\.\d{2}\.\d{2}\.\d{4}$/;  // 4.01.01.0001
+
+const AYUDA_SECCION = 'El código de una sección es X.XX (por ejemplo 4.01), o el dígito del grupo solo '
+                    + '(4). Un grupo es un solo dígito: 1 Activo, 2 Pasivo, 3 Patrimonio, 4 Ingresos, '
+                    + '5 Egresos.';
+const AYUDA_TITULO  = 'El código de un título es X.XX.XX (por ejemplo 4.01.01), y tiene que empezar con '
+                    + 'el código de su sección. El primer dígito es el grupo.';
+
+// El primer código libre bajo un prefijo, barriendo desde 0001. Es el plan B de
+// la numeración correlativa: se usa sólo cuando el correlativo llegó al 9999,
+// que en la práctica pasa porque alguien cargó UNA cuenta terminada en 9999 y no
+// porque haya diez mil. Sin esto, esa única cuenta dejaba el alta por lote sin
+// poder crear nada y el arrastre sin poder mover nada.
+function primerHueco(prefijo, exceptoId) {
+  const excepto = exceptoId ? { tabla: 'cuentas', id: exceptoId } : undefined;
+  for (let i = 1; i <= 9999; i++) {
+    const cand = `${prefijo}.${String(i).padStart(4, '0')}`;
+    if (!codigoEnUso(db, cand, excepto)) return cand;
+  }
+  return null;
+}
+
+// Para el mensaje: qué código VÁLIDO se parece al que está mal. Sirve para no
+// dejar al contador adivinando qué le pasa a "10.01.01" — se le muestra el
+// "1.00.01" que sí entraría, y de ahí se entiende que el grupo es un dígito.
+function sugerir(codigo, tramos) {
+  const partes = String(codigo).split('.');
+  // El grupo es UN dígito: de "10" se propone el "1". Los tramos de abajo se
+  // llevan a dos dígitos, que es lo único que acepta el formato.
+  const salida = [(partes[0] || '4').replace(/\D/g, '').charAt(0) || '4'];
+  for (let i = 1; i < tramos; i++) {
+    const t = (partes[i] || '').replace(/\D/g, '');
+    salida.push((t.slice(0, 2) || '01').padStart(2, '0'));
+  }
+  return salida.join('.');
+}
+const sugerirSeccion = (codigo) => sugerir(codigo, 2);
+const sugerirTitulo  = (codigo) => sugerir(codigo, 3);
+
+// ── EL CÓDIGO TIENE QUE COLGAR DE SU PADRE ─────────────────────────────────
+// El plan de cuentas se lee por el código: 4.01.01.0002 se entiende porque
+// arranca con el 4.01.01 de su título, que arranca con el 4.01 de su sección.
+// Eso no se estaba validando en ningún lado: se podía crear el título 5.01.01
+// adentro de la sección 4.01, o colgar la cuenta 4.07.99.0001 del título
+// 4.01.01. El árbol de la pantalla los mostraba en su lugar —agrupa por id, no
+// por código— pero quedaban ordenados en cualquier parte y el código dejaba de
+// querer decir algo.
+//
+// Devuelve el mensaje de error, o null si está bien.
+function noCuelgaDe(codigoHijo, codigoPadre, quePadre) {
+  if (String(codigoHijo).startsWith(String(codigoPadre) + '.')) return null;
+  const de = quePadre === 'el título' ? 'del título' : `de ${quePadre}`;
+  return `El código ${codigoHijo} no cuelga ${de} ${codigoPadre}: tiene que empezar `
+       + `con "${codigoPadre}.". Así se lee el plan de cuentas — el código dice dónde está la `
+       + `cuenta sin tener que buscarla.`;
+}
+
 // El mensaje que ve el usuario. Dice DÓNDE está el código, que es lo único que
 // le sirve para poder resolverlo.
 function mensajeChoque(codigo, choque) {
@@ -455,7 +539,7 @@ router.post('/', requireAdmin, (req, res) => {
   // base y después no coincidía con nada.
   const codigoStr = String(codigo).trim();
   // Formato OBLIGATORIO para cuentas imputables: X.XX.XX.XXXX (4 niveles, ej: 1.01.01.0001)
-  if (!/^\d\.\d{2}\.\d{2}\.\d{4}$/.test(codigoStr)) {
+  if (!RE_CUENTA.test(codigoStr)) {
     return res.status(400).json({ error: 'Código inválido. Las cuentas deben respetar el formato X.XX.XX.XXXX (ej: 1.01.01.0001).' });
   }
   if (!['resultado', 'patrimonial'].includes(tipo)) {
@@ -476,8 +560,10 @@ router.post('/', requireAdmin, (req, res) => {
     // Validar titulo_id si se manda
     let titIdFinal = null;
     if (titulo_id) {
-      const tit = db.prepare('SELECT id FROM pa_cuentas_titulos WHERE id = ? AND seccion_id = ?').get(parseInt(titulo_id, 10), sec.id);
+      const tit = db.prepare('SELECT id, codigo FROM pa_cuentas_titulos WHERE id = ? AND seccion_id = ?').get(parseInt(titulo_id, 10), sec.id);
       if (!tit) return res.status(400).json({ error: 'titulo_id no pertenece a la sección indicada' });
+      const cuelga = noCuelgaDe(codigoStr, tit.codigo, 'el título');
+      if (cuelga) return res.status(400).json({ error: cuelga });
       titIdFinal = tit.id;
     }
 
@@ -513,7 +599,7 @@ router.put('/:id(\\d+)', requireAdmin, (req, res) => {
 
   if (codigo && codigo !== cuenta.codigo) {
     const codigoStr = String(codigo).trim();
-    if (!/^\d\.\d{2}\.\d{2}\.\d{4}$/.test(codigoStr)) {
+    if (!RE_CUENTA.test(codigoStr)) {
       return res.status(400).json({ error: 'Código inválido. Las cuentas deben respetar el formato X.XX.XX.XXXX (ej: 1.01.01.0001).' });
     }
     const choque = codigoEnUso(db, cuenta.sociedad_id, codigoStr, { tabla: 'cuentas', id });
