@@ -74,6 +74,54 @@ function cuentaEsImputable(db, cuentaId) {
   return !hijo;
 }
 
+// ── QUIÉN PUEDE USAR UNA CUENTA ────────────────────────────────────────────
+// Una cuenta SIN nadie tildado la usa cualquiera que entre al módulo — o sea,
+// como funcionaba hasta ahora. Apenas se tilda a UNA persona pasa a ser
+// restringida y sólo esa gente la puede imputar. El admin siempre puede: si no,
+// una cuenta restringida a alguien que se fue quedaría sin nadie que la use ni
+// la pueda destrabar.
+function usuariosDeCuenta(cuentaId) {
+  return db.prepare('SELECT usuario_id FROM sg_cuentas_usuarios WHERE cuenta_id = ?')
+           .all(cuentaId).map(r => r.usuario_id);
+}
+
+function puedeUsarCuenta(usuario, cuentaId) {
+  if (!usuario) return false;
+  if (usuario.rol === 'admin') return true;
+  const permitidos = usuariosDeCuenta(cuentaId);
+  return permitidos.length === 0 || permitidos.includes(usuario.id);
+}
+
+// El mensaje dice QUIÉNES pueden, que es lo único que le sirve al que se topa
+// con el bloqueo: así sabe a quién pedirle que la cargue.
+function mensajeRestringida(cuenta) {
+  const nombres = db.prepare(`
+    SELECT u.nombre FROM sg_cuentas_usuarios cu
+      JOIN usuarios u ON u.id = cu.usuario_id
+     WHERE cu.cuenta_id = ? ORDER BY u.nombre`).all(cuenta.id).map(r => r.nombre);
+  return `La cuenta ${cuenta.codigo} — ${cuenta.nombre} está restringida`
+       + (nombres.length ? `: la pueden usar ${nombres.join(', ')}.` : '.')
+       + ' Pedile a alguno de ellos que cargue el asiento, o a un administrador que te habilite.';
+}
+
+// Reemplazo total de la lista, como la pantalla de permisos: lo que no viene en
+// la lista se saca. Es lo que hace que destildar signifique algo.
+function guardarUsuariosDeCuenta(cuentaId, ids) {
+  const limpios = [...new Set((Array.isArray(ids) ? ids : [])
+    .map(x => parseInt(x, 10)).filter(Number.isInteger))];
+  // Sólo usuarios que existan y estén activos: guardar el id de alguien dado de
+  // baja deja una cuenta restringida a un fantasma.
+  const vale = db.prepare('SELECT 1 FROM usuarios WHERE id = ? AND activo = 1');
+  const validos = limpios.filter(id => vale.get(id));
+  const borrar = db.prepare('DELETE FROM sg_cuentas_usuarios WHERE cuenta_id = ?');
+  const poner  = db.prepare('INSERT OR IGNORE INTO sg_cuentas_usuarios (cuenta_id, usuario_id) VALUES (?, ?)');
+  db.transaction(() => {
+    borrar.run(cuentaId);
+    for (const id of validos) poner.run(cuentaId, id);
+  })();
+  return validos;
+}
+
 // Helper: ¿el código ya está en uso en CUALQUIER nivel (sección, título o cuenta)?
 // `excepto` permite ignorar el propio registro al editar.
 function codigoEnUso(db, codigo, excepto) {
@@ -422,6 +470,14 @@ router.get('/log/general', (req, res) => {
   res.json({ ok: true, data: db.prepare(sql).all(...params) });
 });
 
+// La gente a la que se le puede restringir una cuenta. Se listan los usuarios
+// activos y nada más: el modal sólo necesita nombre e id, y devolver mails o
+// roles sería contar de más en una pantalla contable.
+router.get('/usuarios-posibles', requireAdmin, (req, res) => {
+  res.json({ ok: true, data: db.prepare(
+    "SELECT id, nombre FROM usuarios WHERE activo = 1 ORDER BY nombre").all() });
+});
+
 // ═══════════════════════════════════════════════════════════════════════════
 // CUENTAS
 // ═══════════════════════════════════════════════════════════════════════════
@@ -450,10 +506,24 @@ router.get('/', (req, res) => {
   sql += ' ORDER BY c.codigo';
   const data = db.prepare(sql).all(...params);
   const codigos = data.map(c => String(c.codigo));
+  // Los permisos por cuenta se traen de UNA consulta y no de una por fila: con
+  // doscientas cuentas, preguntar de a una son doscientas consultas por cada vez
+  // que se abre la pantalla.
+  const permisos = {};
+  for (const r of db.prepare('SELECT cuenta_id, usuario_id FROM sg_cuentas_usuarios').all()) {
+    (permisos[r.cuenta_id] ||= []).push(r.usuario_id);
+  }
+  const yo = getUser(req);
   data.forEach(c => {
     const cod = String(c.codigo);
     const esPadre = codigos.some(otro => otro !== cod && otro.startsWith(cod + '.'));
     c.imputable = esPadre ? 0 : 1;
+    const permitidos = permisos[c.id] || [];
+    c.usuarios_ids = permitidos;
+    c.restringida = permitidos.length > 0;
+    // Lo que la pantalla necesita para deshabilitarla en el selector sin tener
+    // que saber la regla.
+    c.puede_usar = !!yo && (yo.rol === 'admin' || !permitidos.length || permitidos.includes(yo.id));
   });
   res.json({ ok: true, data });
 });
@@ -528,8 +598,9 @@ router.post('/', requireAdmin, (req, res) => {
       permite_campania ? 1 : 0,
       ordenMax + 10
     );
+    const usuarios = guardarUsuariosDeCuenta(r.lastInsertRowid, req.body?.usuarios_ids);
     logAccion({ cuenta_id: r.lastInsertRowid, accion: 'crear', detalle: req.body, usuario_id: req._user?.id });
-    res.json({ ok: true, id: r.lastInsertRowid });
+    res.json({ ok: true, id: r.lastInsertRowid, usuarios_ids: usuarios });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -738,13 +809,19 @@ router.put('/:id(\\d+)', requireAdmin, (req, res) => {
       permite_campania === undefined ? null : (permite_campania ? 1 : 0),
       id
     );
+    // Sólo se toca la lista si el pedido la trae: un PUT que no habla de
+    // usuarios no le tiene que borrar la restricción a la cuenta.
+    let usuarios;
+    if (req.body && req.body.usuarios_ids !== undefined) {
+      usuarios = guardarUsuariosDeCuenta(id, req.body.usuarios_ids);
+    }
     logAccion({
       cuenta_id: id,
       accion: 'editar',
       detalle: { antes: cuenta, despues: req.body },
       usuario_id: req._user?.id,
     });
-    res.json({ ok: true });
+    res.json({ ok: true, usuarios_ids: usuarios });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -1074,6 +1151,10 @@ router.post('/modelos', requireAdmin, (req, res) => {
       const c = db.prepare('SELECT codigo, nombre FROM sg_cuentas WHERE id = ?').get(parseInt(l.cuenta_id));
       return res.status(400).json({ error: `La cuenta ${c ? c.codigo + ' — ' + c.nombre : '#' + l.cuenta_id} no es imputable (es un rubro agrupador). Elegí una cuenta final.` });
     }
+    if (l.cuenta_id && !puedeUsarCuenta(req._user, parseInt(l.cuenta_id))) {
+      const c = db.prepare('SELECT id, codigo, nombre FROM sg_cuentas WHERE id = ?').get(parseInt(l.cuenta_id));
+      return res.status(403).json({ error: mensajeRestringida(c) });
+    }
   }
   try {
     const tx = db.transaction(() => {
@@ -1120,6 +1201,10 @@ router.put('/modelos/:id', requireAdmin, (req, res) => {
       const c = db.prepare('SELECT codigo, nombre FROM sg_cuentas WHERE id = ?').get(parseInt(l.cuenta_id));
       return res.status(400).json({ error: `La cuenta ${c ? c.codigo + ' — ' + c.nombre : '#' + l.cuenta_id} no es imputable (es un rubro agrupador). Elegí una cuenta final.` });
     }
+    if (l.cuenta_id && !puedeUsarCuenta(req._user, parseInt(l.cuenta_id))) {
+      const c = db.prepare('SELECT id, codigo, nombre FROM sg_cuentas WHERE id = ?').get(parseInt(l.cuenta_id));
+      return res.status(403).json({ error: mensajeRestringida(c) });
+    }
   }
   try {
     db.transaction(() => {
@@ -1139,7 +1224,19 @@ router.delete('/modelos/:id', requireAdmin, (req, res) => {
 });
 
 // POST /asientos — crear asiento (partida doble)
-router.post('/asientos', requireAdmin, (req, res) => {
+// ── QUIÉN CARGA UN ASIENTO ────────────────────────────────────────────────
+// Pasa de "sólo admin" a "quien tenga el módulo Asientos SG", y no es un
+// aflojamiento: cuando esto se escribió, el nivel por módulo no se aplicaba a
+// nada, así que pedir admin era la única defensa que había. Hoy sí se aplica —
+// /api/sg/contable/asientos está declarado en ensure_api_prefijos.js— y el
+// guardián corta con 403 al que no tenga el módulo, y también al que lo tenga
+// sólo en "Ver". Dos controles para lo mismo, y el de acá era el que impedía
+// que la restricción por cuenta sirviera para algo: el operador nunca llegaba
+// hasta ella.
+//
+// Anular sigue siendo aparte: la dirección lleva /anular, así que exigirNivel
+// pide nivel "anular", que es más que "operar".
+router.post('/asientos', requireAuth, (req, res) => {
   const { fecha, descripcion, lineas } = req.body || {};
 
   if (!descripcion) return res.status(400).json({ error: 'descripcion es requerida' });
@@ -1162,6 +1259,13 @@ router.post('/asientos', requireAdmin, (req, res) => {
     if (!cuentaEsImputable(db, parseInt(l.cuenta_id))) {
       const cc = db.prepare('SELECT codigo, nombre FROM sg_cuentas WHERE id = ?').get(parseInt(l.cuenta_id));
       return res.status(400).json({ error: `La cuenta ${cc ? cc.codigo + ' — ' + cc.nombre : '#' + l.cuenta_id} no es imputable (es un rubro agrupador). Elegí una cuenta final.` });
+    }
+    // La restricción por usuario. Va acá, en el ALTA DEL ASIENTO, porque es el
+    // momento en que la cuenta se usa de verdad: bloquearla sólo en el selector
+    // del front la dejaría abierta para cualquiera que mande el pedido a mano.
+    if (!puedeUsarCuenta(req._user, parseInt(l.cuenta_id))) {
+      const cc = db.prepare('SELECT id, codigo, nombre FROM sg_cuentas WHERE id = ?').get(parseInt(l.cuenta_id));
+      return res.status(403).json({ error: mensajeRestringida(cc) });
     }
   }
 

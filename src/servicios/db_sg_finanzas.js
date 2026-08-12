@@ -432,6 +432,32 @@ db.exec(`
   for (const [clave, desc] of claves) ins.run(clave, desc);
 }
 
+// ── CUENTAS QUE SÓLO PUEDE USAR CIERTA GENTE ──────────────────────────────
+// Lo pidió el dueño: hay cuentas que no las tiene que poder tocar cualquiera.
+//
+// CÓMO FUNCIONA, en una línea: una cuenta SIN nadie tildado la usa cualquiera
+// que entre al módulo — que es como funcionaba hasta ahora, así que esto no le
+// saca acceso a nadie de un día para el otro. Apenas se tilda a UNA persona, la
+// cuenta pasa a ser restringida y sólo esa gente la puede imputar.
+//
+// Es una lista blanca y no un flag "restringida": si fuera un flag más una
+// lista, se podrían contradecir —restringida sin nadie adentro deja la cuenta
+// inutilizable, o no restringida con gente adentro no quiere decir nada— y
+// alguien tendría que acordarse de mantener los dos coherentes. Con la lista
+// sola no hay estado imposible.
+//
+// El ADMIN siempre puede: si no, una cuenta restringida a alguien que se va de
+// la empresa quedaría sin nadie que la pueda usar ni destrabar.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS sg_cuentas_usuarios (
+    cuenta_id  INTEGER NOT NULL REFERENCES sg_cuentas(id) ON DELETE CASCADE,
+    usuario_id INTEGER NOT NULL,
+    creado_en  TEXT DEFAULT (datetime('now','localtime')),
+    PRIMARY KEY (cuenta_id, usuario_id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_sg_ctas_usr_usuario ON sg_cuentas_usuarios(usuario_id);
+`);
+
 // ── #401 (Camino A): Ventas SG re-apuntada a sg_clientes ───────────────────────
 // 1) sg_clientes += nombre_comercial (aditivo; alias/CF). sg_clientes ya existe (db_sg.js
 //    corre antes que este archivo). Self-healing.

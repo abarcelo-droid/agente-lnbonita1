@@ -43995,6 +43995,10 @@ function sgctCuentasOpts(seleccionado) {
     g.items.forEach(function(c){
       if (c.imputable === 0) {
         html += '<option value="" disabled style="color:#9ca3af">'+c.codigo+' — '+sgctEsc(c.nombre)+' — 🔒 NO IMPUTABLE</option>';
+      } else if (c.puede_usar === false) {
+        // Restringida a otra gente: se muestra para que se entienda por qué no
+        // está, en vez de desaparecer y que parezca que la cuenta no existe.
+        html += '<option value="" disabled style="color:#9ca3af">'+c.codigo+' — '+sgctEsc(c.nombre)+' — 🔒 RESTRINGIDA</option>';
       } else {
         html += '<option value="'+c.id+'"'+(c.id==seleccionado?' selected':'')+'>'+c.codigo+' — '+sgctEsc(c.nombre)+'</option>';
       }
@@ -44100,10 +44104,14 @@ function sgctPcLoadGrupo(grupo) {
         var handle = canDrag ? '<span style="color:#94a3b8;margin-right:6px;cursor:grab" title="Arrastrar">⠿</span>' : '';
         return '<tr'+dragAttrs+rowStyle+'>'
           + '<td style="font-family:monospace;font-size:12px;padding-left:'+(SGCT_EDIT_MODE?'20':'40')+'px;color:#1e293b">'+handle+c.codigo+'</td>'
-          + '<td style="padding-left:8px">'+sgctEsc(c.nombre)+(c.es_sistema?' <span title="Sistema" style="color:#b88600">🔒</span>':'')+'</td>'
+          + '<td style="padding-left:8px">'+sgctEsc(c.nombre)
+            +(c.es_sistema?' <span title="Sistema" style="color:#b88600">🔒</span>':'')
+            +(c.restringida?' <span class="pa-badge" style="background:#fef3c7;color:#92400e;font-size:10px" title="Sólo la puede usar la gente que tenga tildada">RESTRINGIDA</span>':'')+'</td>'
           + '<td style="text-align:center;font-size:11px;color:var(--mut)">'+(c.tipo==='resultado'?'ER':'Patr.')+'</td>'
-          + '<td style="text-align:center">'+(c.permite_lote?'✓':'—')+'</td>'
-          + '<td style="text-align:center">'+(c.permite_campania?'✓':'—')+'</td>'
+          // "Permite lote" y "Permite campaña" son de la producción agrícola de
+          // Puente Cordón —un lote es una parcela, una campaña una temporada— y
+          // en San Gerónimo no quieren decir nada. Se sacan de la pantalla; las
+          // columnas quedan en la base sin molestar a nadie.
           + '<td style="text-align:right;white-space:nowrap">'
             + '<button class="btn bo" style="padding:2px 7px;font-size:11px;margin-right:4px" onclick="sgctPcEditarCuenta('+c.id+')">✏️</button>'
             + (c.activo && !c.es_sistema
@@ -44117,7 +44125,7 @@ function sgctPcLoadGrupo(grupo) {
         var cuentasTit = SGCT.cuentas.filter(function(c){ return c.titulo_id === t.id; });
         var dropAttrs = SGCT_EDIT_MODE ? ' ondragover="sgctPcDragOver(event)" ondragleave="sgctPcDragLeave(event)" ondrop="sgctPcDrop(event,'+t.id+')"' : '';
         return '<tr'+dropAttrs+' style="background:#dbeafe;border-left:4px solid #3b82f6">'
-          + '<td colspan="5" style="padding:8px 14px 8px 18px">'
+          + '<td colspan="3" style="padding:8px 14px 8px 18px">'
             + '<div style="display:flex;align-items:center;gap:10px">'
               + (SGCT_EDIT_MODE ? '<span style="color:#2563eb;font-size:13px" title="Soltá cuentas acá">⬇</span>' : '<span style="color:#2563eb;font-size:13px">▸</span>')
               + '<span style="font-weight:700;font-size:13px;color:#1e3a5f;letter-spacing:.2px">'+t.codigo+' — '+sgctEsc(t.nombre)+'</span>'
@@ -44153,14 +44161,13 @@ function sgctPcLoadGrupo(grupo) {
             + '<th style="width:150px">Código</th>'
             + '<th>Nombre</th>'
             + '<th style="width:80px;text-align:center">Tipo</th>'
-            + '<th style="width:60px;text-align:center">Lote</th>'
-            + '<th style="width:80px;text-align:center">Campaña</th>'
+
             + '<th style="width:180px;text-align:right"></th>'
           + '</tr></thead>'
           + '<tbody>'
             + titsSec.map(filaTitulo).join('')
             + ((cuentasSinTit.length || SGCT_EDIT_MODE)
-              ? '<tr'+(SGCT_EDIT_MODE ? ' ondragover="sgctPcDragOver(event)" ondragleave="sgctPcDragLeave(event)" ondrop="sgctPcDrop(event,null)"' : '')+' style="background:#f1f5f9"><td colspan="6" style="padding:5px 14px;font-size:11px;color:var(--mut);font-style:italic">📌 Sin título asignado'+(SGCT_EDIT_MODE?' <span style="color:#16a34a">(soltá acá para quitar de un título)</span>':'')+'</td></tr>'
+              ? '<tr'+(SGCT_EDIT_MODE ? ' ondragover="sgctPcDragOver(event)" ondragleave="sgctPcDragLeave(event)" ondrop="sgctPcDrop(event,null)"' : '')+' style="background:#f1f5f9"><td colspan="4" style="padding:5px 14px;font-size:11px;color:var(--mut);font-style:italic">📌 Sin título asignado'+(SGCT_EDIT_MODE?' <span style="color:#16a34a">(soltá acá para quitar de un título)</span>':'')+'</td></tr>'
                 + cuentasSinTit.map(filaCuenta).join('')
               : '')
           + '</tbody>'
@@ -44229,8 +44236,7 @@ function sgctPcAbrirNuevaCuentaEnTitulo(seccionId, tituloId) {
   document.getElementById('sgct-cu-codigo').value = '';
   document.getElementById('sgct-cu-nombre').value = '';
   document.getElementById('sgct-cu-tipo').value = 'resultado';
-  document.getElementById('sgct-cu-lote').checked = false;
-  document.getElementById('sgct-cu-camp').checked = false;
+  sgctCuUsuariosRender([]);
   document.getElementById('sgct-cu-codigo-sug').textContent = '';
   var secs = SGCT.secciones.filter(function(s){ return s.activo; });
   document.getElementById('sgct-cu-seccion').innerHTML =
@@ -44296,8 +44302,7 @@ function sgctPcEditarCuenta(id) {
   document.getElementById('sgct-cu-codigo').value = c.codigo;
   document.getElementById('sgct-cu-nombre').value = c.nombre;
   document.getElementById('sgct-cu-tipo').value   = c.tipo;
-  document.getElementById('sgct-cu-lote').checked = !!c.permite_lote;
-  document.getElementById('sgct-cu-camp').checked = !!c.permite_campania;
+  sgctCuUsuariosRender(c.usuarios_ids || []);
   document.getElementById('sgct-cu-codigo-sug').textContent = '';
   document.getElementById('sgct-mb-cuenta').classList.add('on');
 }
@@ -44311,8 +44316,7 @@ function sgctPcGuardarCuenta() {
     seccion_id:       parseInt(document.getElementById('sgct-cu-seccion').value, 10),
     titulo_id:        titVal ? parseInt(titVal, 10) : null,
     tipo:             document.getElementById('sgct-cu-tipo').value,
-    permite_lote:     document.getElementById('sgct-cu-lote').checked ? 1 : 0,
-    permite_campania: document.getElementById('sgct-cu-camp').checked ? 1 : 0,
+    usuarios_ids:     sgctCuUsuariosElegidos(),
   };
   if (!body.codigo || !body.nombre || !body.seccion_id) return toast('Completá código, nombre y sección', 'er');
   var url    = id ? '/' + id : '';
@@ -44346,6 +44350,53 @@ function sgctPcReactivarCuenta(id) {
 // a una, tipeando el código correlativo a mano, es media tarde. Acá se pega la
 // lista de nombres —una por línea, como sale de una columna de Excel o de un
 // mail— y el servidor arma los códigos.
+// ── QUIÉN PUEDE USAR UNA CUENTA ───────────────────────────────────────────
+// La lista de gente se pide UNA vez y queda cacheada: el modal se abre muchas
+// veces seguidas mientras se arma el plan de cuentas.
+var SGCT_USUARIOS = null;
+
+function sgctCuUsuariosRender(elegidos) {
+  var cont = document.getElementById('sgct-cu-usuarios');
+  if (!cont) return;
+  var marcados = elegidos || [];
+  function pintar() {
+    if (!SGCT_USUARIOS || !SGCT_USUARIOS.length) {
+      cont.innerHTML = '<div class="emp" style="font-size:12px">No hay usuarios para elegir.</div>';
+      return;
+    }
+    cont.innerHTML = SGCT_USUARIOS.map(function(u) {
+      var tildado = marcados.indexOf(u.id) !== -1;
+      return '<label style="display:flex;align-items:center;gap:8px;padding:3px 0;font-size:13px;cursor:pointer">'
+        + '<input type="checkbox" class="sgct-cu-usr" value="' + u.id + '"' + (tildado ? ' checked' : '')
+        + ' style="width:auto" onchange="sgctCuUsuariosAviso()">'
+        + sgctEsc(u.nombre) + '</label>';
+    }).join('');
+    sgctCuUsuariosAviso();
+  }
+  cont.innerHTML = '<div class="emp" style="font-size:12px">Cargando…</div>';
+  if (SGCT_USUARIOS) return pintar();
+  sgctApi('/usuarios-posibles').then(function(r) {
+    SGCT_USUARIOS = (r && r.data) || [];
+    pintar();
+  });
+}
+
+// Se dice en el momento si la cuenta queda abierta o restringida: el que tilda
+// tiene que ver la consecuencia sin guardar para enterarse.
+function sgctCuUsuariosAviso() {
+  var cont = document.getElementById('sgct-cu-usuarios');
+  if (!cont) return;
+  var n = sgctCuUsuariosElegidos().length;
+  cont.style.borderColor = n ? 'var(--burg)' : 'var(--bor)';
+}
+
+function sgctCuUsuariosElegidos() {
+  var ids = [];
+  var cajas = document.querySelectorAll('#sgct-cu-usuarios .sgct-cu-usr');
+  for (var i = 0; i < cajas.length; i++) if (cajas[i].checked) ids.push(parseInt(cajas[i].value, 10));
+  return ids;
+}
+
 function sgctPcAbrirLote(seccionId, tituloId) {
   var activas = SGCT.secciones.filter(function(s){ return s.activo; });
   if (!activas.length) return toast('Primero creá una sección donde poner las cuentas', 'er');
@@ -45008,7 +45059,7 @@ function sgctExportarAsientos(){
   + '<div class="ab-modal-overlay" id="sgct-mb-asiento-det"><div class="ab-modal" style="width:680px"><div class="mhd"><div><div class="mht" id="sgct-as-det-tit">Asiento</div><div style="font-size:12px;color:var(--mut)" id="sgct-as-det-sub"></div></div><button class="mcl" onclick="document.getElementById(\'sgct-mb-asiento-det\').classList.remove(\'on\')">×</button></div><div id="sgct-as-det-body"></div><div class="ab-modal-footer" style="justify-content:space-between"><button class="btn bd" id="sgct-as-det-anular-btn" onclick="sgctAnularAsientoActual()">Anular asiento</button><button class="btn bo" onclick="document.getElementById(\'sgct-mb-asiento-det\').classList.remove(\'on\')">Cerrar</button></div></div></div>'
   + '<div class="ab-modal-overlay" id="sgct-mb-seccion"><div class="ab-modal" style="width:460px"><div class="mhd"><div><div class="mht" id="sgct-sec-tit">Nueva sección</div></div><button class="mcl" onclick="document.getElementById(\'sgct-mb-seccion\').classList.remove(\'on\')">×</button></div><input type="hidden" id="sgct-sec-id"><div class="fg"><div class="fl"><label>Código * <span style="font-size:10px;color:var(--mut)">formato X.XX</span></label><input id="sgct-sec-codigo" placeholder="Ej: 1.08"></div><div class="fl ff"><label>Nombre *</label><input id="sgct-sec-nombre" placeholder="Ej: CAJA Y BANCOS"></div><div class="fl ff"><label>Grupo *</label><select id="sgct-sec-grupo"><option value="activo">🏦 Activo</option><option value="pasivo">💳 Pasivo</option><option value="patrimonio_neto">🏛️ Patrimonio Neto</option><option value="ingresos">📈 Ingresos</option><option value="gastos">📉 Gastos</option></select></div></div><div class="ab-modal-footer"><button class="btn bo" onclick="document.getElementById(\'sgct-mb-seccion\').classList.remove(\'on\')">Cancelar</button><button class="btn bb" onclick="sgctPcGuardarSeccion()">Guardar</button></div></div></div>'
   + '<div class="ab-modal-overlay" id="sgct-mb-titulo"><div class="ab-modal" style="width:460px"><div class="mhd"><div><div class="mht" id="sgct-tit-modal-tit">Nuevo título</div></div><button class="mcl" onclick="document.getElementById(\'sgct-mb-titulo\').classList.remove(\'on\')">×</button></div><input type="hidden" id="sgct-tit-id"><div class="fg"><div class="fl ff"><label>Sección *</label><select id="sgct-tit-seccion" onchange="sgctPcTitSugerirCodigo()"></select></div><div class="fl"><label>Código * <span style="font-size:10px;color:var(--mut)">formato X.XX.XX</span></label><input id="sgct-tit-codigo" placeholder="1.01.03"><div id="sgct-tit-codigo-sug" style="font-size:10px;color:var(--mut);margin-top:3px"></div></div><div class="fl ff"><label>Nombre *</label><input id="sgct-tit-nombre" placeholder="Ej: Caja y Efectivo"></div><div style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:6px;padding:8px 10px;font-size:12px;color:#0369a1;margin-top:4px">ℹ️ Los títulos agrupan cuentas dentro de una sección. <strong>No son imputables</strong> en asientos.</div></div><div class="ab-modal-footer"><button class="btn bo" onclick="document.getElementById(\'sgct-mb-titulo\').classList.remove(\'on\')">Cancelar</button><button class="btn bb" onclick="sgctPcGuardarTitulo()">Guardar</button></div></div></div>'
-  + '<div class="ab-modal-overlay" id="sgct-mb-cuenta"><div class="ab-modal" style="width:520px"><div class="mhd"><div><div class="mht" id="sgct-cu-tit">Nueva cuenta</div></div><button class="mcl" onclick="document.getElementById(\'sgct-mb-cuenta\').classList.remove(\'on\')">×</button></div><input type="hidden" id="sgct-cu-id"><div class="fg"><div class="fl ff"><label>Sección *</label><select id="sgct-cu-seccion" onchange="sgctPcOnSeccionChange()"></select></div><div class="fl ff"><label>Título <span style="font-size:10px;color:var(--mut)">(organiza dentro de la sección)</span></label><select id="sgct-cu-titulo"><option value="">— Sin título —</option></select></div><div class="fl"><label>Código * <span style="font-size:10px;color:var(--mut)">X.XX.XX.XXXX</span></label><input id="sgct-cu-codigo" placeholder="1.01.01.0001"><div id="sgct-cu-codigo-sug" style="font-size:10px;color:var(--mut);margin-top:3px"></div></div><div class="fl ff"><label>Nombre *</label><input id="sgct-cu-nombre" placeholder="Ej: Caja pesos"></div><div class="fl"><label>Tipo</label><select id="sgct-cu-tipo"><option value="resultado">Resultado (ER)</option><option value="patrimonial">Patrimonial</option></select></div><div class="fl ff" style="display:flex;gap:18px;align-items:center;padding-top:8px"><label style="display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--mut);cursor:pointer"><input type="checkbox" id="sgct-cu-lote" style="width:auto"> Permite lote</label><label style="display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--mut);cursor:pointer"><input type="checkbox" id="sgct-cu-camp" style="width:auto"> Permite campaña</label></div></div><div class="ab-modal-footer"><button class="btn bo" onclick="document.getElementById(\'sgct-mb-cuenta\').classList.remove(\'on\')">Cancelar</button><button class="btn bb" onclick="sgctPcGuardarCuenta()">Guardar</button></div></div></div>'
+  + '<div class="ab-modal-overlay" id="sgct-mb-cuenta"><div class="ab-modal" style="width:520px"><div class="mhd"><div><div class="mht" id="sgct-cu-tit">Nueva cuenta</div></div><button class="mcl" onclick="document.getElementById(\'sgct-mb-cuenta\').classList.remove(\'on\')">×</button></div><input type="hidden" id="sgct-cu-id"><div class="fg"><div class="fl ff"><label>Sección *</label><select id="sgct-cu-seccion" onchange="sgctPcOnSeccionChange()"></select></div><div class="fl ff"><label>Título <span style="font-size:10px;color:var(--mut)">(organiza dentro de la sección)</span></label><select id="sgct-cu-titulo"><option value="">— Sin título —</option></select></div><div class="fl"><label>Código * <span style="font-size:10px;color:var(--mut)">X.XX.XX.XXXX</span></label><input id="sgct-cu-codigo" placeholder="1.01.01.0001"><div id="sgct-cu-codigo-sug" style="font-size:10px;color:var(--mut);margin-top:3px"></div></div><div class="fl ff"><label>Nombre *</label><input id="sgct-cu-nombre" placeholder="Ej: Caja pesos"></div><div class="fl"><label>Tipo</label><select id="sgct-cu-tipo"><option value="resultado">Resultado (ER)</option><option value="patrimonial">Patrimonial</option></select></div><div class="fl ff" style="padding-top:6px"><label>Quién puede usarla <span style="font-size:10px;color:var(--mut)">(en blanco = cualquiera del módulo)</span></label><div id="sgct-cu-usuarios" style="max-height:150px;overflow:auto;border:1px solid var(--bor);border-radius:7px;padding:8px 10px;background:var(--bg)"></div><div style="font-size:11px;color:var(--mut);margin-top:5px">Si tildás a alguien, la cuenta pasa a ser <strong>restringida</strong>: sólo esa gente la va a poder usar en un asiento. Los administradores siempre pueden.</div></div></div><div class="ab-modal-footer"><button class="btn bo" onclick="document.getElementById(\'sgct-mb-cuenta\').classList.remove(\'on\')">Cancelar</button><button class="btn bb" onclick="sgctPcGuardarCuenta()">Guardar</button></div></div></div>'
   + '<div class="ab-modal-overlay" id="sgct-mb-lote"><div class="ab-modal" style="width:580px"><div class="mhd"><div><div class="mht">Varias cuentas de una vez</div><div style="font-size:12px;color:var(--mut)">Un nombre por línea. Los códigos los arma el sistema.</div></div><button class="mcl" onclick="document.getElementById(\'sgct-mb-lote\').classList.remove(\'on\')">×</button></div><div class="fg"><div class="fl ff"><label>Sección *</label><select id="sgct-lote-seccion" onchange="sgctPcLotePoblarTitulos(null)"></select></div><div class="fl ff"><label>Título <span style="font-size:10px;color:var(--mut)">(opcional)</span></label><select id="sgct-lote-titulo"></select></div><div class="fl"><label>Tipo</label><select id="sgct-lote-tipo"><option value="resultado">Resultado (ER)</option><option value="patrimonial">Patrimonial</option></select></div><div class="fl ff"><label>Nombres * <span style="font-size:10px;color:var(--mut)">uno por línea</span></label><textarea id="sgct-lote-nombres" rows="9" spellcheck="false" placeholder="VENTAS&#10;Fletes Ganados - Liquidaciones&#10;Comisiones Ganadas - Liquidaciones" style="width:100%;font-family:inherit;font-size:13px;padding:8px 10px;border:1px solid var(--bor);border-radius:6px;resize:vertical"></textarea></div><div style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:6px;padding:8px 10px;font-size:12px;color:#0369a1;margin-top:4px">ℹ️ Sin título elegido, las cuentas quedan en <strong>“Sin título asignado”</strong> abajo de la sección. Desde <strong>Modo edición</strong> se arrastran al título que corresponda y se renumeran solas.<br>Las que ya existan con el mismo nombre en la sección <strong>se saltean</strong>: podés volver a pegar la lista sin duplicar nada.</div></div><div id="sgct-lote-result"></div><div class="ab-modal-footer"><button class="btn bo" onclick="document.getElementById(\'sgct-mb-lote\').classList.remove(\'on\')">Cerrar</button><button class="btn bb" id="sgct-lote-btn" onclick="sgctPcGuardarLote()">Crear cuentas</button></div></div></div>';
   document.body.appendChild(div);
 })();
