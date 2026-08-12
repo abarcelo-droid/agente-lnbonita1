@@ -1307,6 +1307,54 @@ function actualizarEstadoOC(db, ocId) {
 // ── ÓRDENES DE COMPRA ────────────────────────────────────────────────────────
 
 // Crear OC (cabecera + items) en transacción. "Cerrar OC" en el modal = este POST.
+// ── EL CÓDIGO CON EL QUE SE RASTREA LA PARTIDA ────────────────────────────
+// PPPP.DD.MM.AAAA.XX
+//   PPPP  el proveedor, en cuatro dígitos
+//   DD.MM.AAAA  la fecha de la orden
+//   XX    en qué lugar entró esa orden dentro del día: 01, 02, 03…
+//
+// Para qué: identificar la partida que entra por esta compra sin depender del
+// número interno del sistema. El código se lee y dice de quién vino, cuándo, y
+// cuál de las del día es — que es lo que se necesita cuando hay que rastrear una
+// mercadería hacia atrás con el remito en la mano.
+//
+// LOS CUATRO DÍGITOS DEL PROVEEDOR son su id con ceros adelante. La tabla de
+// proveedores no tiene un código propio, y hacer uno nuevo ahora sería inventar
+// una segunda identidad para lo mismo: el id ya es único y no cambia nunca.
+//
+// EL XX CUENTA POR DÍA, no por proveedor: es "la orden número tal de hoy". Con
+// el proveedor ya en el código, igual no se repite.
+function codigoTrazabilidad(db, proveedorId, fechaISO) {
+  const prov = String(parseInt(proveedorId, 10) || 0).padStart(4, '0');
+  // La fecha llega como YYYY-MM-DD del <input type=date>. Si viene vacía o rara,
+  // se usa hoy: un código sin fecha no sirve para rastrear nada.
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(fechaISO || ''));
+  const hoy = new Date();
+  const [aaaa, mm, dd] = m
+    ? [m[1], m[2], m[3]]
+    : [String(hoy.getFullYear()), String(hoy.getMonth() + 1).padStart(2, '0'),
+       String(hoy.getDate()).padStart(2, '0')];
+  const fecha = `${aaaa}-${mm}-${dd}`;
+
+  // Cuántas órdenes ya entraron ESE día. Se cuentan las anuladas también: el
+  // número dice el orden de entrada, y saltear el de una anulada haría que dos
+  // órdenes distintas hayan tenido el mismo código en algún momento.
+  const n = db.prepare(
+    "SELECT COUNT(*) AS n FROM sg_oc WHERE date(fecha_oc) = date(?)").get(fecha).n;
+  return { codigo: `${prov}.${dd}.${mm}.${aaaa}.${String(n + 1).padStart(2, '0')}`, fecha };
+}
+
+// Lo que la pantalla muestra en el encabezado MIENTRAS se arma la orden. Es una
+// previsión: el definitivo se asigna al guardar, porque hasta ese momento otro
+// puede haber cargado una orden y quedarse con el número.
+router.get('/oc/trazabilidad-preview', requireAuth, (req, res) => {
+  try {
+    const db = getDb();
+    const t = codigoTrazabilidad(db, req.query.proveedor_id, req.query.fecha_oc);
+    res.json({ ok: true, codigo: t.codigo, provisorio: true });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
 router.post('/oc', requireAdmin, (req, res) => {
   const db = getDb();
   try {
@@ -1330,14 +1378,20 @@ router.post('/oc', requireAdmin, (req, res) => {
 
     const tx = db.transaction(() => {
       const numero = nextNumero(db, 'SG-OC', 'sg_oc', 'numero');
+      // El código de trazabilidad de la partida. Se calcula ACÁ ADENTRO de la
+      // transacción, junto con el número: si se calculara antes, dos altas
+      // simultáneas podrían llevarse el mismo XX.
+      const traza = codigoTrazabilidad(db, b.proveedor_id, val(b.fecha_oc)).codigo;
       const ocInfo = db.prepare(`INSERT INTO sg_oc
         (numero, modalidad, proveedor_id, tipo_fiscal, tipo_precio, condicion_pago_id, fecha_oc,
          fecha_recepcion_estimada, comercial_id, estado, observaciones, flete_a_cargo, flete_monto,
-         precio_incluye_iva, iva_alicuota_oc, total_estimado_kg, total_estimado_monto, creado_por)
-        VALUES (?,?,?,?,?,?,?,?,?, 'abierta', ?,?,?, ?,?, 0, 0, ?)`).run(
+         precio_incluye_iva, iva_alicuota_oc, total_estimado_kg, total_estimado_monto, creado_por,
+         trazabilidad)
+        VALUES (?,?,?,?,?,?,?,?,?, 'abierta', ?,?,?, ?,?, 0, 0, ?, ?)`).run(
         numero, val(b.modalidad) || 'normal', b.proveedor_id || null, dft.tipo_fiscal, tipoPrecio,
         dft.condicion_pago_id, val(b.fecha_oc), val(b.fecha_recepcion_estimada), b.comercial_id || null,
-        val(b.observaciones), fleteCargo, fleteMonto, (discrimina ? incluyeIva : null), alicOverride, uid(req));
+        val(b.observaciones), fleteCargo, fleteMonto, (discrimina ? incluyeIva : null), alicOverride, uid(req),
+        traza);
       const ocId = ocInfo.lastInsertRowid;
 
       const insItem = db.prepare(`INSERT INTO sg_oc_items
