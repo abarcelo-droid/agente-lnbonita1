@@ -1117,9 +1117,11 @@ function defaultsProveedor(db, proveedorId, body) {
   // Y una compra a precio cerrado se factura, así que no puede ser liquidación.
   // La pantalla ya sólo ofrece lo que corresponde, pero el habitual del
   // proveedor entra por atrás y podía dejar la combinación imposible guardada.
+  // Precio cerrado admite las tres: hay productores que facturan y otros que
+  // liquidan. Lo único imposible es al revés — una liquidación de venta no se
+  // documenta con factura.
   const esLiquidacion = (val(body.tipo_precio) || 'firme') === 'pizarra';
   if (esLiquidacion) tipo = 'liquidacion';
-  else if (tipo === 'liquidacion') tipo = 'factura_a';
   return {
     tipo_fiscal: tipo,
     condicion_pago_id: body.condicion_pago_id != null ? body.condicion_pago_id : (p && p.condicion_pago_habitual_id) || null
@@ -1377,7 +1379,25 @@ router.post('/oc', requireAdmin, (req, res) => {
     // Flete INFORMATIVO: se guarda quién paga + el monto que carga el comercial, pero
     // NO entra al total (el total sigue saliendo solo del loop de items, más abajo).
     const fleteCargo = (b.flete_a_cargo === 'comprador' || b.flete_a_cargo === 'vendedor') ? b.flete_a_cargo : null;
-    const fleteMonto = (b.flete_monto != null && b.flete_monto !== '') ? Number(b.flete_monto) : null;
+    // ── EL FLETE: TOTAL, POR BULTO O POR PALLET ─────────────────────────
+    // El total se CALCULA acá y no se le pide al usuario: si lo multiplicara él
+    // y se equivocara, el número guardado y el pacto real dirían cosas
+    // distintas, y meses después nadie sabría cuál valía.
+    const fleteModalidad = ['total', 'bulto', 'pallet'].includes(b.flete_modalidad)
+      ? b.flete_modalidad : (b.flete_monto != null && b.flete_monto !== '' ? 'total' : null);
+    const nOno = (v) => (v != null && v !== '' && !isNaN(Number(v))) ? Number(v) : null;
+    const fleteCantidad = fleteModalidad && fleteModalidad !== 'total' ? nOno(b.flete_cantidad) : null;
+    const fletePrecioUnit = fleteModalidad && fleteModalidad !== 'total' ? nOno(b.flete_precio_unit) : null;
+    const fleteMonto = fleteModalidad === 'total'
+      ? nOno(b.flete_monto)
+      : (fleteCantidad != null && fletePrecioUnit != null
+          ? Math.round(fleteCantidad * fletePrecioUnit * 100) / 100
+          : null);
+    // Si no se dijo nada del IVA queda en null: null es "no se aclaró", que no es
+    // lo mismo que "sin IVA". Con el flete informativo, inventar el dato sería
+    // peor que no tenerlo.
+    const fleteConIva = (b.flete_con_iva === undefined || b.flete_con_iva === null || b.flete_con_iva === '')
+      ? null : (b.flete_con_iva ? 1 : 0);
     const dft = defaultsProveedor(db, b.proveedor_id, b);
     // ── IVA Fase 2 — la OC discrimina IVA solo con Factura A + precio firme. En Liquidación
     // (o pizarra) NO se discrimina (el IVA se resuelve después). precio_incluye_iva: el
@@ -1398,12 +1418,12 @@ router.post('/oc', requireAdmin, (req, res) => {
         (numero, modalidad, proveedor_id, tipo_fiscal, tipo_precio, condicion_pago_id, fecha_oc,
          fecha_recepcion_estimada, comercial_id, estado, observaciones, flete_a_cargo, flete_monto,
          precio_incluye_iva, iva_alicuota_oc, total_estimado_kg, total_estimado_monto, creado_por,
-         trazabilidad)
-        VALUES (?,?,?,?,?,?,?,?,?, 'abierta', ?,?,?, ?,?, 0, 0, ?, ?)`).run(
+         trazabilidad, flete_modalidad, flete_cantidad, flete_precio_unit, flete_con_iva)
+        VALUES (?,?,?,?,?,?,?,?,?, 'abierta', ?,?,?, ?,?, 0, 0, ?, ?, ?,?,?,?)`).run(
         numero, val(b.modalidad) || 'normal', b.proveedor_id || null, dft.tipo_fiscal, tipoPrecio,
         dft.condicion_pago_id, val(b.fecha_oc), val(b.fecha_recepcion_estimada), b.comercial_id || null,
         val(b.observaciones), fleteCargo, fleteMonto, (discrimina ? incluyeIva : null), alicOverride, uid(req),
-        traza);
+        traza, fleteModalidad, fleteCantidad, fletePrecioUnit, fleteConIva);
       const ocId = ocInfo.lastInsertRowid;
 
       const insItem = db.prepare(`INSERT INTO sg_oc_items

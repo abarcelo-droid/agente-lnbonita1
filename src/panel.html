@@ -2771,7 +2771,21 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
               <option value="vendedor">Vendedor</option>
             </select>
           </div>
-          <div class="fl"><label>Monto de flete ($)</label><input type="number" id="sg-oc-flete-monto" min="0" step="0.01" placeholder="informativo"></div>
+          <div class="fl"><label>Cómo se pactó</label>
+            <select id="sg-oc-flete-modo" onchange="sgOcFleteModo()">
+              <option value="total">Monto total</option>
+              <option value="bulto">Por bulto</option>
+              <option value="pallet">Por pallet</option>
+            </select>
+          </div>
+          <div class="fl" id="sg-oc-flete-total-wrap"><label>Monto de flete ($)</label><input type="number" id="sg-oc-flete-monto" min="0" step="0.01" placeholder="informativo" oninput="sgOcFleteCalc()"></div>
+          <div class="fl" id="sg-oc-flete-cant-wrap" style="display:none"><label id="sg-oc-flete-cant-lbl">Bultos</label><input type="number" id="sg-oc-flete-cant" min="0" step="1" oninput="sgOcFleteCalc()"></div>
+          <div class="fl" id="sg-oc-flete-pu-wrap" style="display:none"><label id="sg-oc-flete-pu-lbl">$ por bulto</label><input type="number" id="sg-oc-flete-pu" min="0" step="0.01" oninput="sgOcFleteCalc()"></div>
+          <div class="fl ff" style="display:flex;flex-direction:row;gap:16px;align-items:center;flex-wrap:wrap">
+            <label style="text-transform:none;letter-spacing:0;font-size:12.5px;display:inline-flex;align-items:center;gap:5px;min-height:0"><input type="radio" name="sg-oc-flete-iva" value="si" style="width:auto"> Con IVA</label>
+            <label style="text-transform:none;letter-spacing:0;font-size:12.5px;display:inline-flex;align-items:center;gap:5px;min-height:0"><input type="radio" name="sg-oc-flete-iva" value="no" style="width:auto"> Sin IVA</label>
+            <span id="sg-oc-flete-calc" style="margin-left:auto;font-size:12.5px;font-weight:700;color:var(--burg)"></span>
+          </div>
         </div>
       </div>
       </div><!-- /sg-oc-fila -->
@@ -3022,9 +3036,9 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
 
 <!-- Modal Ver OC (detalle) -->
 <div class="ab-modal-overlay" id="sg-ocver-modal">
-  <div class="ab-modal" style="width:720px;max-height:90vh;overflow-y:auto">
+  <div class="ab-modal" style="width:min(900px,96vw);max-height:90vh;overflow-y:auto">
     <div class="mhd"><div class="mht" id="sg-ocver-tit">OC</div><button class="mcl" onclick="closeMB('sg-ocver-modal')">×</button></div>
-    <div class="fg" id="sg-ocver-body"></div>
+    <div id="sg-ocver-body" style="display:grid;grid-template-columns:1fr;gap:14px"></div>
     <div class="ab-modal-footer"><button class="btn bo" onclick="closeMB('sg-ocver-modal')">Cerrar</button></div>
   </div>
 </div>
@@ -3978,6 +3992,9 @@ function sgOcOpen(){
   eid('sg-oc-fecha').value=new Date().toISOString().slice(0,10);
   eid('sg-oc-fecharec').value=''; eid('sg-oc-obs').value='';
   eid('sg-oc-flete-cargo').value=''; eid('sg-oc-flete-monto').value='';
+  eid('sg-oc-flete-modo').value='total'; eid('sg-oc-flete-cant').value=''; eid('sg-oc-flete-pu').value='';
+  var ivaF=document.querySelector('input[name="sg-oc-flete-iva"]:checked'); if(ivaF) ivaF.checked=false;
+  sgOcFleteModo();
   document.querySelector('input[name="sg-oc-mod"][value="normal"]').checked=true;
   document.querySelector('input[name="sg-oc-precio"][value="firme"]').checked=true;
   document.querySelector('input[name="sg-oc-inciva"][value="si"]').checked=true; // IVA Fase 2
@@ -4036,9 +4053,12 @@ function sgOcFiscalOpts(){
   var sel = eid('sg-oc-fiscal');
   if (!sel) return;
   var antes = sel.value;
+  // Precio cerrado se puede documentar de las tres formas —hay productores que
+  // facturan y otros que liquidan—. Lo que NO existe es una liquidación de venta
+  // documentada con factura: ahí el comprobante es Liquidación y punto.
   var opciones = esLiquidacion
     ? [['liquidacion','Liquidación']]
-    : [['factura_a','Factura A'], ['factura_b','Factura B']];
+    : [['factura_a','Factura A'], ['factura_b','Factura B'], ['liquidacion','Liquidación']];
   sel.innerHTML = opciones.map(function(o){ return '<option value="'+o[0]+'">'+o[1]+'</option>'; }).join('');
   // Se conserva lo elegido si sigue siendo válido; si no, queda la primera.
   sel.value = opciones.some(function(o){ return o[0] === antes; }) ? antes : opciones[0][0];
@@ -4047,6 +4067,52 @@ function sgOcFiscalOpts(){
   sel.disabled = opciones.length === 1;
   sel.title = esLiquidacion
     ? 'Una liquidación de venta no se factura: el comprobante es Liquidación.'
+    : '';
+}
+
+// ── EL FLETE: TOTAL, POR BULTO O POR PALLET ───────────────────────────────
+// Se muestra sólo lo que hace falta según cómo se pactó, y el total se calcula
+// solo. Antes había un único campo de monto: el que lo pactaba por bulto tenía
+// que multiplicar a mano, y a los dos días nadie sabía si ese número era el
+// total o el precio unitario, ni sobre cuántos bultos se había hecho la cuenta.
+function sgOcFleteModo(){
+  var modo = eid('sg-oc-flete-modo').value;
+  var porUnidad = modo === 'bulto' || modo === 'pallet';
+  eid('sg-oc-flete-total-wrap').style.display = porUnidad ? 'none' : '';
+  eid('sg-oc-flete-cant-wrap').style.display  = porUnidad ? '' : 'none';
+  eid('sg-oc-flete-pu-wrap').style.display    = porUnidad ? '' : 'none';
+  if (porUnidad) {
+    var esBulto = modo === 'bulto';
+    eid('sg-oc-flete-cant-lbl').textContent = esBulto ? 'Bultos' : 'Pallets';
+    eid('sg-oc-flete-pu-lbl').textContent   = esBulto ? '$ por bulto' : '$ por pallet';
+    // Los bultos ya los sabe la orden: se proponen los de los ítems para no
+    // hacer contar dos veces lo mismo. Se puede corregir a mano.
+    if (esBulto && !eid('sg-oc-flete-cant').value) {
+      var b = sgOcBultosTotales();
+      if (b) eid('sg-oc-flete-cant').value = b;
+    }
+  }
+  sgOcFleteCalc();
+}
+
+// Los bultos de la orden, sumando los ítems cargados por bulto.
+function sgOcBultosTotales(){
+  var t = 0;
+  (SG.ocItems || []).forEach(function(it){
+    if (it.modo === 'bulto') t += Number(it.cantidad) || 0;
+    else { var f = sgOcFactor(it); if (f > 0) t += (Number(it.cantidad) || 0) / f; }
+  });
+  return t ? Math.round(t) : 0;
+}
+
+function sgOcFleteCalc(){
+  var el = eid('sg-oc-flete-calc'); if (!el) return;
+  var modo = eid('sg-oc-flete-modo').value;
+  if (modo === 'total') { el.textContent = ''; return; }
+  var c = Number(eid('sg-oc-flete-cant').value) || 0;
+  var pu = Number(eid('sg-oc-flete-pu').value) || 0;
+  el.textContent = (c && pu)
+    ? ('Flete: ' + sgMoney(Math.round(c * pu * 100) / 100))
     : '';
 }
 
@@ -4243,7 +4309,14 @@ function sgOcGuardar(){
   var body={ modalidad:document.querySelector('input[name="sg-oc-mod"]:checked').value, proveedor_id:Number(prov),
     tipo_fiscal:eid('sg-oc-fiscal').value, tipo_precio:sgOcPrecio(), condicion_pago_id:eid('sg-oc-cond').value?Number(eid('sg-oc-cond').value):null,
     fecha_oc:eid('sg-oc-fecha').value, fecha_recepcion_estimada:eid('sg-oc-fecharec').value, observaciones:eid('sg-oc-obs').value,
-    flete_a_cargo:eid('sg-oc-flete-cargo').value||null, flete_monto:(eid('sg-oc-flete-monto').value!==''?Number(eid('sg-oc-flete-monto').value):null),
+    flete_a_cargo:eid('sg-oc-flete-cargo').value||null,
+    flete_monto:(eid('sg-oc-flete-monto').value!==''?Number(eid('sg-oc-flete-monto').value):null),
+    // El total del flete lo calcula el backend con estos tres datos: acá se
+    // manda cómo se pactó, no una cuenta ya hecha.
+    flete_modalidad:eid('sg-oc-flete-modo').value||null,
+    flete_cantidad:(eid('sg-oc-flete-cant').value!==''?Number(eid('sg-oc-flete-cant').value):null),
+    flete_precio_unit:(eid('sg-oc-flete-pu').value!==''?Number(eid('sg-oc-flete-pu').value):null),
+    flete_con_iva:(function(){var r=document.querySelector('input[name="sg-oc-flete-iva"]:checked');return r?(r.value==='si'?1:0):null;})(),
     precio_incluye_iva: sgOcIncluyeIva()?1:0,   // IVA Fase 2 (el backend solo lo usa si discrimina: Factura A + firme)
     // CAMBIO 2 — se envían SIEMPRE valores canónicos: kg_estimados (kg reales) y precio_estimado_por_kg ($/kg
     // efectivo), sin importar el modo. Así el backend (kg×$/kg) calcula el total correcto y el stock/costeo
@@ -4299,14 +4372,30 @@ function sgOcVer(id){
         + ficha('Comprobante', esc(sgLbl(SG_FISCAL, o.tipo_fiscal) || '—'), 110)
         + ficha('Condición de pago', esc(sgCondNombre(o.condicion_pago_id)), 140)
         + (o.flete_a_cargo
-            ? ficha('Flete', esc(o.flete_a_cargo) + (o.flete_monto != null ? ' · ' + sgMoney(o.flete_monto) : ''), 150)
+            ? ficha('Flete', esc(o.flete_a_cargo)
+                + (o.flete_monto != null ? ' · ' + sgMoney(o.flete_monto) : '')
+                // Cómo se pactó, no sólo cuánto dio: sin esto el total es un
+                // número suelto y nadie puede rehacer la cuenta.
+                + (o.flete_modalidad === 'bulto' || o.flete_modalidad === 'pallet'
+                    ? '<div style="font-size:11px;font-weight:400;color:var(--mut)">'
+                      + nr(o.flete_cantidad) + ' ' + (o.flete_modalidad === 'bulto' ? 'bultos' : 'pallets')
+                      + ' × ' + sgMoney(o.flete_precio_unit) + '</div>'
+                    : '')
+                + (o.flete_con_iva != null
+                    ? '<div style="font-size:11px;font-weight:400;color:var(--mut)">'
+                      + (o.flete_con_iva ? 'con IVA' : 'sin IVA') + '</div>'
+                    : ''), 175)
             : '')
       + '</div>'
       + '<button class="btn bb bs" onclick="window.open(\'/api/sg/oc/' + id + '/pdf\',\'_blank\')">📄 Descargar PDF</button>'
       + '</div>';
-    h+='<table class="pa-tbl" style="margin-bottom:12px"><thead><tr><th>Producto</th><th>Present.</th><th style="text-align:right">Kg est.</th><th style="text-align:right">$/kg</th><th style="text-align:right">Kg recibidos</th></tr></thead><tbody>';
+    // La tabla arranca con su propio rótulo y separada de la ficha: pegada
+    // arriba, el encabezado se leía como parte de los datos de la orden.
+    h+='<div style="border-top:1px solid var(--bor);padding-top:12px">'
+      +'<div style="font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--mut);margin-bottom:8px">📦 Productos</div>';
+    h+='<table class="pa-tbl" style="margin-bottom:12px"><thead><tr><th style="padding-top:10px;padding-bottom:10px">Producto</th><th>Present.</th><th style="text-align:right">Kg est.</th><th style="text-align:right">$/kg</th><th style="text-align:right">Kg recibidos</th></tr></thead><tbody>';
     (o.items||[]).forEach(function(it){ h+='<tr><td>'+esc(it.producto_nombre||'')+'</td><td>'+esc(it.presentacion_nombre||'—')+'</td><td style="text-align:right">'+nr(it.kg_estimados)+'</td><td style="text-align:right">'+(it.precio_estimado_por_kg!=null?sgMoney(it.precio_estimado_por_kg):'—')+'</td><td style="text-align:right">'+nr(it.kg_recibidos)+'</td></tr>'; });
-    h+='</tbody></table>';
+    h+='</tbody></table></div>';
     if(lotes.length){
       h+='<div style="font-weight:700;font-size:12px;text-transform:uppercase;color:var(--mut);margin-bottom:6px">Lotes</div>';
       h+='<table class="pa-tbl" style="margin-bottom:12px"><thead><tr><th>Código</th><th style="text-align:right">Kg</th><th>Calidad</th><th style="text-align:right">$/kg</th><th style="text-align:right">Costo final</th><th></th></tr></thead><tbody>';
