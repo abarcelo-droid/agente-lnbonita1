@@ -435,6 +435,154 @@ router.post('/', requireAdmin, (req, res) => {
   }
 });
 
+// ── ALTA DE VARIAS CUENTAS DE UNA VEZ ──────────────────────────────────────
+// El plan de San Gerónimo arrancó con el esqueleto de secciones y títulos
+// copiado de Puente Cordón, pero SIN NINGUNA CUENTA: ésas las carga el
+// contador, y son unas doscientas. De a una, por el modal, es media tarde de
+// tipear códigos correlativos a mano.
+//
+// Esto recibe una LISTA DE NOMBRES y arma los códigos solo, correlativos, bajo
+// el título elegido. Sin título, van al tramo .00 de la sección, que es el
+// grupo "Sin título asignado" que la pantalla muestra abajo de todo para
+// arrastrarlas después a su lugar definitivo.
+//
+// NO PISA NADA. Si en esa sección ya hay una cuenta con ese nombre, la saltea y
+// lo informa. Apretar Guardar dos veces no deja duplicados, y volver a pegar
+// una lista más larga carga sólo lo que falta.
+//
+// Es de a lotes y no un import de archivo a propósito: pegar texto es lo que el
+// contador ya tiene a mano —una columna de Excel, un mail— y no hay formato que
+// aprender ni archivo que se pueda subir equivocado.
+router.post('/lote', requireAdmin, (req, res) => {
+  const seccionId = parseInt(req.body?.seccion_id, 10);
+  const titRaw    = req.body?.titulo_id;
+  const tituloId  = (titRaw === null || titRaw === undefined || titRaw === '') ? null : parseInt(titRaw, 10);
+  const tipo      = req.body?.tipo || 'resultado';
+
+  if (!Number.isInteger(seccionId)) return res.status(400).json({ error: 'Falta la sección.' });
+  if (!['resultado', 'patrimonial'].includes(tipo)) return res.status(400).json({ error: 'tipo inválido' });
+
+  const sec = db.prepare('SELECT * FROM sg_cuentas_secciones WHERE id = ?').get(seccionId);
+  if (!sec) return res.status(400).json({ error: 'La sección no existe.' });
+
+  let tit = null;
+  if (tituloId) {
+    tit = db.prepare('SELECT * FROM sg_cuentas_titulos WHERE id = ?').get(tituloId);
+    if (!tit) return res.status(400).json({ error: 'El título no existe.' });
+    if (tit.seccion_id !== sec.id) {
+      return res.status(400).json({ error: 'Ese título no pertenece a la sección elegida.' });
+    }
+  }
+
+  // Los tres primeros niveles del código de la cuenta. Con título es el código
+  // del título; sin título, el de la sección + el tramo 00, que se lee como
+  // "todavía no tiene título" y que reasignar-titulo reemplaza en cuanto se
+  // arrastra la cuenta a su lugar.
+  let prefijo;
+  if (tit) {
+    if (!/^\d\.\d{2}\.\d{2}$/.test(String(tit.codigo))) {
+      return res.status(400).json({
+        error: `El título ${tit.codigo} no respeta el formato X.XX.XX, así que no se pueden `
+             + `numerar cuentas abajo suyo. Corregilo primero.`,
+      });
+    }
+    prefijo = String(tit.codigo);
+  } else {
+    if (!/^\d\.\d{2}$/.test(String(sec.codigo))) {
+      return res.status(400).json({
+        error: `La sección ${sec.codigo} no respeta el formato X.XX, así que no se pueden `
+             + `numerar cuentas abajo suyo. Corregila primero, o elegí un título.`,
+      });
+    }
+    prefijo = `${sec.codigo}.00`;
+  }
+
+  // Una cuenta por línea. Se acepta también un array, para poder llamarlo desde
+  // afuera del panel.
+  const crudo = req.body?.nombres;
+  const lista = (Array.isArray(crudo) ? crudo : String(crudo ?? '').split(/\r?\n/))
+    .map(n => String(n ?? '').trim())
+    .filter(Boolean);
+  if (!lista.length) return res.status(400).json({ error: 'No hay ningún nombre en la lista.' });
+  if (lista.length > 300) {
+    return res.status(400).json({ error: `Son ${lista.length} nombres: van de a 300 como máximo.` });
+  }
+
+  // Lo que ya está en la sección, por nombre. Se compara sin mayúsculas ni
+  // espacios de más, que es como se duplican las cuentas en la vida real.
+  const clave = (s) => String(s).trim().toLowerCase().replace(/\s+/g, ' ');
+  const yaEstan = new Map();
+  for (const c of db.prepare('SELECT codigo, nombre FROM sg_cuentas WHERE seccion_id = ?').all(sec.id)) {
+    yaEstan.set(clave(c.nombre), c);
+  }
+
+  // Desde qué número sigue la numeración bajo este prefijo.
+  let ultimo = 0;
+  for (const h of db.prepare('SELECT codigo FROM sg_cuentas WHERE codigo LIKE ?').all(prefijo + '.%')) {
+    const p = String(h.codigo).split('.');
+    if (p.length !== 4) continue;
+    const n = parseInt(p[3], 10);
+    if (Number.isInteger(n) && n > ultimo) ultimo = n;
+  }
+
+  const ordenBase = db.prepare('SELECT COALESCE(MAX(orden), 0) AS m FROM sg_cuentas WHERE seccion_id = ?')
+                      .get(sec.id).m;
+
+  const insertar = db.prepare(`
+    INSERT INTO sg_cuentas
+      (codigo, nombre, seccion_id, titulo_id, tipo, permite_lote, permite_campania, es_sistema, orden, activo)
+    VALUES (?, ?, ?, ?, ?, 0, 0, 0, ?, 1)
+  `);
+
+  const creadas = [], omitidas = [];
+  try {
+    db.transaction(() => {
+      let n = ultimo, orden = ordenBase;
+      for (const nombre of lista) {
+        const k = clave(nombre);
+        const previa = yaEstan.get(k);
+        if (previa) {
+          omitidas.push({ nombre, motivo: `ya existe en esta sección como ${previa.codigo}` });
+          continue;
+        }
+
+        // Próximo código libre. El choque puede ser contra una cuenta, un título
+        // o una sección: los códigos no se repiten entre los tres niveles.
+        let codigo = null;
+        while (n < 9999) {
+          n++;
+          const cand = `${prefijo}.${String(n).padStart(4, '0')}`;
+          if (!codigoEnUso(db, cand)) { codigo = cand; break; }
+        }
+        if (!codigo) {
+          omitidas.push({ nombre, motivo: `no quedan códigos libres bajo ${prefijo}` });
+          continue;
+        }
+
+        orden += 10;
+        const r = insertar.run(codigo, nombre, sec.id, tit ? tit.id : null, tipo, orden);
+        logAccion({
+          cuenta_id: r.lastInsertRowid, accion: 'crear',
+          detalle: { codigo, nombre, lote: true }, usuario_id: req._user?.id,
+        });
+        // Se anota acá también: dos renglones iguales dentro de la MISMA lista
+        // pegada tienen que salteársele al segundo igual que a los ya existentes.
+        yaEstan.set(k, { codigo, nombre });
+        creadas.push({ id: r.lastInsertRowid, codigo, nombre });
+      }
+    })();
+  } catch (e) {
+    return res.status(500).json({ error: e.message });
+  }
+
+  res.json({
+    ok: true,
+    creadas,
+    omitidas,
+    donde: tit ? `${tit.codigo} — ${tit.nombre}` : `${sec.codigo} — ${sec.nombre} (sin título asignado)`,
+  });
+});
+
 router.put('/:id(\\d+)', requireAdmin, (req, res) => {
   const id = parseInt(req.params.id, 10);
   const cuenta = db.prepare('SELECT * FROM sg_cuentas WHERE id = ?').get(id);
@@ -596,42 +744,63 @@ router.post('/:id(\\d+)/reasignar-titulo', requireAdmin, (req, res) => {
   let seccionId = cuenta.seccion_id;
   let nuevoCodigo = null;
 
+  // ── SACAR UNA CUENTA DE SU TÍTULO LE ROMPÍA EL CÓDIGO ──────────────────
+  // Al soltarla en "Sin título asignado", el código que se le armaba era
+  // seccion.codigo + '.' + dos dígitos → para la sección 4.01 salía "4.01.06":
+  // TRES tramos, con forma de TÍTULO. Una cuenta así no cumple el formato
+  // X.XX.XX.XXXX, el PUT la rechaza (no se la puede volver a editar), pasa a ser
+  // "padre" de cualquier 4.01.06.XXXX y por lo tanto NO IMPUTABLE, y encima el
+  // chequeo de choque miraba sólo sg_cuentas, así que podía quedar con el mismo
+  // código que un título de verdad.
+  //
+  // Ahora el tramo "sin título" es el .00 de la sección: 4.01.00.NNNN. Es el
+  // mismo que usa el alta por lote, cumple el formato, y no se pisa con nada
+  // porque el choque se chequea contra las TRES tablas.
+  const prefijoSinTitulo = (sec) => `${sec.codigo}.00`;
+  const proximoLibre = (prefijo) => {
+    let n = 0;
+    for (const h of db.prepare('SELECT codigo FROM sg_cuentas WHERE codigo LIKE ?').all(prefijo + '.%')) {
+      const p = String(h.codigo).split('.');
+      if (p.length !== 4) continue;
+      const u = parseInt(p[3], 10);
+      if (Number.isInteger(u) && u > n) n = u;
+    }
+    while (n < 9999) {
+      n++;
+      const cand = `${prefijo}.${String(n).padStart(4, '0')}`;
+      if (!codigoEnUso(db, cand, { tabla: 'cuentas', id })) return cand;
+    }
+    return null;
+  };
+
   try {
     if (tituloId) {
       const tit = db.prepare('SELECT * FROM sg_cuentas_titulos WHERE id = ?').get(tituloId);
       if (!tit) return res.status(400).json({ error: 'titulo_id inválido' });
+      if (!/^\d\.\d{2}\.\d{2}$/.test(String(tit.codigo))) {
+        return res.status(400).json({
+          error: `El título ${tit.codigo} no respeta el formato X.XX.XX, así que no se pueden `
+               + `numerar cuentas abajo suyo. Corregilo primero.`,
+        });
+      }
       seccionId = tit.seccion_id;
-
-      const hermanas = db.prepare('SELECT codigo FROM sg_cuentas WHERE titulo_id = ?').all(tituloId);
-      let max = 0;
-      hermanas.forEach(h => {
-        const partes = String(h.codigo).split('.');
-        const ult = parseInt(partes[partes.length - 1], 10);
-        if (Number.isInteger(ult) && ult > max) max = ult;
-      });
-      let n = max + 1;
-      do {
-        nuevoCodigo = tit.codigo + '.' + String(n).padStart(4, '0');
-        const choca = db.prepare('SELECT id FROM sg_cuentas WHERE codigo = ? AND id != ?').get(nuevoCodigo, id);
-        if (!choca) break;
-        n++;
-      } while (n < 10000);
+      nuevoCodigo = proximoLibre(String(tit.codigo));
+      if (!nuevoCodigo) {
+        return res.status(400).json({ error: `No quedan códigos libres bajo el título ${tit.codigo}.` });
+      }
     } else {
       const sec = db.prepare('SELECT * FROM sg_cuentas_secciones WHERE id = ?').get(seccionId);
       if (!sec) return res.status(400).json({ error: 'la cuenta no tiene sección válida' });
-      const sinTit = db.prepare('SELECT codigo FROM sg_cuentas WHERE seccion_id = ? AND titulo_id IS NULL AND id != ?').all(seccionId, id);
-      let max = 0;
-      sinTit.forEach(h => {
-        const sub = parseInt(String(h.codigo).split('.')[1] || '0', 10);
-        if (Number.isInteger(sub) && sub > max) max = sub;
-      });
-      let n = max + 5;
-      do {
-        nuevoCodigo = sec.codigo + '.' + String(n).padStart(2, '0');
-        const choca = db.prepare('SELECT id FROM sg_cuentas WHERE codigo = ? AND id != ?').get(nuevoCodigo, id);
-        if (!choca) break;
-        n++;
-      } while (n < 100);
+      if (!/^\d\.\d{2}$/.test(String(sec.codigo))) {
+        return res.status(400).json({
+          error: `La sección ${sec.codigo} no respeta el formato X.XX, así que no se puede `
+               + `numerar una cuenta sin título abajo suyo. Corregila primero.`,
+        });
+      }
+      nuevoCodigo = proximoLibre(prefijoSinTitulo(sec));
+      if (!nuevoCodigo) {
+        return res.status(400).json({ error: `No quedan códigos libres bajo ${prefijoSinTitulo(sec)}.` });
+      }
     }
 
     db.prepare(`

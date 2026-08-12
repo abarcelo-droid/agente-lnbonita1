@@ -395,3 +395,8 @@ import "./ensure_api_prefijos.js";
 // Libera los códigos que quedaron tomados por rubros desactivados y vacíos,
 // de cuando "eliminar" no eliminaba.
 import "./limpiar_rubros_zombis.js";
+// Las primeras cuentas de Ingresos de San Gerónimo. Corre una sola vez (marca
+// en sistema_flags) y VA DESPUÉS del limpiador: si la sección 4.01 estaba
+// desactivada y vacía, el limpiador la borra primero y acá ya no está — que es
+// lo correcto, no hay que colgarle cuentas a un rubro que se está borrando.
+import "./sembrar_cuentas_sg_ingresos.js";
