@@ -154,13 +154,16 @@ router.put('/titulos/:id', requireAdmin, (req, res) => {
 
 router.delete('/titulos/:id', requireAdmin, (req, res) => {
   const id = parseInt(req.params.id, 10);
-  const conCuentas = db.prepare('SELECT COUNT(*) AS c FROM sg_cuentas WHERE titulo_id = ? AND activo = 1').get(id);
-  if (conCuentas.c > 0) {
+  // Mismo criterio que la sección: es estructura, se borra de verdad y libera el
+  // código. Se cuentan las cuentas activas Y las desactivadas: las dos apuntan acá.
+  const ctas = db.prepare('SELECT COUNT(*) c FROM sg_cuentas WHERE titulo_id = ?').get(id).c;
+  if (ctas) {
     return res.status(400).json({
-      error: `el título tiene ${conCuentas.c} cuenta(s) activa(s); desactivelas o muevalas primero`,
+      error: `No se puede borrar: el título todavía tiene ${ctas} cuenta(s). `
+           + `Movelas o borralas primero.`,
     });
   }
-  db.prepare("UPDATE sg_cuentas_titulos SET activo = 0, actualizado_en = datetime('now','localtime') WHERE id = ?").run(id);
+  db.prepare('DELETE FROM sg_cuentas_titulos WHERE id = ?').run(id);
   res.json({ ok: true });
 });
 
@@ -227,14 +230,28 @@ router.put('/secciones/:id', requireAdmin, (req, res) => {
 
 router.delete('/secciones/:id', requireAdmin, (req, res) => {
   const id = parseInt(req.params.id, 10);
-  const conCuentas = db.prepare('SELECT COUNT(*) AS c FROM sg_cuentas WHERE seccion_id = ? AND activo = 1').get(id);
-  if (conCuentas.c > 0) {
+  // BORRA DE VERDAD. Antes esto sólo ponía activo = 0: la sección quedaba en la
+  // base, invisible en la pantalla, y con su CÓDIGO TOMADO PARA SIEMPRE. Después
+  // alguien quería usar ese código y el sistema lo rechazaba por algo que no
+  // podía ver ni recuperar.
+  //
+  // Una sección es estructura, no historia: no hay ningún asiento que dependa de
+  // ella. Si no tiene nada colgando, se va y libera el código.
+  const tits = db.prepare('SELECT COUNT(*) c FROM sg_cuentas_titulos WHERE seccion_id = ?').get(id).c;
+  const ctas = db.prepare('SELECT COUNT(*) c FROM sg_cuentas WHERE seccion_id = ?').get(id).c;
+  if (tits || ctas) {
+    // Se cuentan TODAS, activas o no: una cuenta desactivada sigue apuntando acá,
+    // y borrar el padre la dejaría huérfana.
+    const partes = [];
+    if (tits) partes.push(`${tits} título(s)`);
+    if (ctas) partes.push(`${ctas} cuenta(s)`);
     return res.status(400).json({
-      error: `la sección tiene ${conCuentas.c} cuenta(s) activa(s); desactivelas o muevalas primero`,
+      error: `No se puede borrar: la sección todavía tiene ${partes.join(' y ')}. `
+           + `Movelos o borralos primero.`,
     });
   }
-  db.prepare("UPDATE sg_cuentas_secciones SET activo = 0, actualizado_en = datetime('now','localtime') WHERE id = ?").run(id);
-  logAccion({ seccion_id: id, accion: 'desactivar', usuario_id: req._user?.id });
+  db.prepare('DELETE FROM sg_cuentas_secciones WHERE id = ?').run(id);
+  logAccion({ seccion_id: id, accion: 'borrar', usuario_id: req._user?.id });
   res.json({ ok: true });
 });
 
@@ -441,11 +458,31 @@ router.delete('/:id(\\d+)', requireAdmin, (req, res) => {
   const cuenta = db.prepare('SELECT * FROM sg_cuentas WHERE id = ?').get(id);
   if (!cuenta) return res.status(404).json({ error: 'cuenta no encontrada' });
   if (cuenta.es_sistema) {
-    return res.status(400).json({ error: 'cuenta del sistema, no se puede desactivar' });
+    return res.status(400).json({ error: 'Es una cuenta del sistema: no se puede borrar.' });
   }
-  db.prepare("UPDATE sg_cuentas SET activo = 0, actualizado_en = datetime('now','localtime') WHERE id = ?").run(id);
-  logAccion({ cuenta_id: id, accion: 'desactivar', usuario_id: req._user?.id });
-  res.json({ ok: true });
+
+  // ── ACÁ SÍ HAY UNA DIFERENCIA REAL, Y ES CONTABLE ───────────────────────
+  // Una cuenta que YA SE USÓ en un asiento no se puede borrar: el asiento
+  // quedaría apuntando a una cuenta que no existe y el libro dejaría de cuadrar.
+  // Esa se desactiva, y su código sigue tomado — correctamente, porque esa cuenta
+  // existe en la historia.
+  //
+  // Una cuenta que NUNCA se usó no es historia, es un error de carga: se borra
+  // de verdad y libera el código.
+  const usos = db.prepare('SELECT COUNT(*) c FROM sg_asientos_lineas WHERE cuenta_id = ?').get(id).c;
+  if (usos) {
+    db.prepare("UPDATE sg_cuentas SET activo = 0, actualizado_en = datetime('now','localtime') WHERE id = ?").run(id);
+    logAccion({ cuenta_id: id, accion: 'desactivar', usuario_id: req._user?.id });
+    return res.json({
+      ok: true, desactivada: true,
+      aviso: `La cuenta se usó en ${usos} línea(s) de asiento, así que no se puede borrar `
+           + `sin romper esos asientos: quedó DESACTIVADA. No aparece más para elegir, pero `
+           + `sigue en los libros y su código sigue ocupado.`,
+    });
+  }
+  db.prepare('DELETE FROM sg_cuentas WHERE id = ?').run(id);
+  logAccion({ cuenta_id: id, accion: 'borrar', usuario_id: req._user?.id });
+  res.json({ ok: true, borrada: true });
 });
 
 router.post('/:id(\\d+)/reactivar', requireAdmin, (req, res) => {

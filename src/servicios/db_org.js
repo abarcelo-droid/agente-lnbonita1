@@ -392,3 +392,6 @@ import "./ensure_modulo_empresas.js";
 // VA AL FINAL: declara qué dirección de API es de cada menú, y para eso todos
 // los módulos ya tienen que estar registrados.
 import "./ensure_api_prefijos.js";
+// Libera los códigos que quedaron tomados por rubros desactivados y vacíos,
+// de cuando "eliminar" no eliminaba.
+import "./limpiar_rubros_zombis.js";
