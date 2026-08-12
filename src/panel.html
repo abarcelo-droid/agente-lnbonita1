@@ -2110,6 +2110,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     <div style="display:inline-flex;gap:2px;background:var(--bg);border:1px solid var(--bor);border-radius:8px;padding:3px;margin-bottom:16px;flex-wrap:wrap">
       <div class="sgc-subtab on" data-sub="oc"        onclick="sgComSub('oc')">📋 Órdenes de compra</div>
       <div class="sgc-subtab" data-sub="recepciones"  onclick="sgComSub('recepciones')">📥 Recepciones</div>
+      <div class="sgc-subtab" data-sub="ocrecibidas" onclick="sgComSub('ocrecibidas')">✅ OC recibidas</div>
       <div class="sgc-subtab" data-sub="gdirectos"    onclick="sgComSub('gdirectos')">🧾 Gastos directos</div>
       <div class="sgc-subtab" data-sub="ccprov"       onclick="sgComSub('ccprov')">💳 CC proveedores</div>
     </div>
@@ -2136,10 +2137,41 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
 
     <!-- Recepciones -->
     <div class="sgc-sub" id="sgc-sub-recepciones">
-      <div style="display:flex;justify-content:flex-end;margin-bottom:10px"><button class="btn bb" onclick="sgRecOpen()">+ Recibir mercadería</button></div>
+      <!-- ── LO QUE FALTA RECIBIR, ARRIBA DE TODO ────────────────────────
+           La solapa mostraba sólo las recepciones ya hechas: el operador
+           entraba, veía "Sin recepciones" y no tenía de dónde agarrarse. Lo
+           que necesita es la lista de órdenes que están esperando mercadería,
+           con el botón para recibir cada una al lado. -->
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;gap:10px;flex-wrap:wrap">
+        <div style="font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--mut)">
+          ⏳ Pendientes de recibir <span id="sg-pend-n" style="font-weight:400;text-transform:none;letter-spacing:0"></span>
+        </div>
+        <button class="btn bb" onclick="sgRecOpen()">+ Recibir mercadería</button>
+      </div>
+      <div class="ab-table-wrap" style="margin-bottom:22px"><table class="pa-tbl">
+        <thead><tr><th>Partida</th><th>Fecha</th><th>Proveedor</th><th>Producto</th>
+          <th style="text-align:right">Kg pedidos</th><th style="text-align:right">Kg recibidos</th>
+          <th style="text-align:right">Falta</th><th></th></tr></thead>
+        <tbody id="sg-tb-pendientes"><tr><td colspan="8" class="emp">Cargando…</td></tr></tbody>
+      </table></div>
+
+      <div style="font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--mut);margin-bottom:8px">
+        📥 Recepciones hechas
+      </div>
       <div class="ab-table-wrap"><table class="pa-tbl">
         <thead><tr><th>N° recepción</th><th>Fecha</th><th>OC</th><th>Proveedor</th><th>Remito prov.</th><th style="text-align:right">Lotes</th><th></th></tr></thead>
         <tbody id="sg-tb-recepciones"><tr><td colspan="7" class="emp">Cargando…</td></tr></tbody>
+      </table></div>
+    </div>
+
+    <!-- Órdenes ya recibidas: lo cerrado, para consultar sin ensuciar la
+         bandeja de lo que falta hacer. -->
+    <div class="sgc-sub" id="sgc-sub-ocrecibidas">
+      <div class="ab-table-wrap"><table class="pa-tbl">
+        <thead><tr><th>Partida</th><th>Fecha</th><th>Proveedor</th>
+          <th style="text-align:right">Kg pedidos</th><th style="text-align:right">Kg recibidos</th>
+          <th style="text-align:center">Estado</th><th></th></tr></thead>
+        <tbody id="sg-tb-ocrecibidas"><tr><td colspan="7" class="emp">Cargando…</td></tr></tbody>
       </table></div>
     </div>
 
@@ -2782,7 +2814,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
             </select>
           </div>
           <div class="fl" id="sg-oc-flete-total-wrap"><label>Monto de flete ($)</label><input type="number" id="sg-oc-flete-monto" min="0" step="0.01" placeholder="informativo" oninput="sgOcFleteCalc()"></div>
-          <div class="fl" id="sg-oc-flete-cant-wrap" style="display:none"><label id="sg-oc-flete-cant-lbl">Bultos</label><input type="number" id="sg-oc-flete-cant" min="0" step="1" oninput="sgOcFleteCalc()"></div>
+          <div class="fl" id="sg-oc-flete-cant-wrap" style="display:none"><label id="sg-oc-flete-cant-lbl">Bultos</label><input type="number" id="sg-oc-flete-cant" min="0" step="1" oninput="SG._fleteCantManual=true;sgOcFleteCalc()"><div id="sg-oc-flete-cant-sub" style="font-size:11px;color:var(--mut);margin-top:3px"></div></div>
           <div class="fl" id="sg-oc-flete-pu-wrap" style="display:none"><label id="sg-oc-flete-pu-lbl">$ por bulto</label><input type="number" id="sg-oc-flete-pu" min="0" step="0.01" oninput="sgOcFleteCalc()"></div>
           <div class="fl ff" style="display:flex;flex-direction:row;gap:16px;align-items:center;flex-wrap:wrap">
             <label style="text-transform:none;letter-spacing:0;font-size:12.5px;display:inline-flex;align-items:center;gap:5px;min-height:0"><input type="radio" name="sg-oc-flete-iva" value="si" style="width:auto"> Con IVA</label>
@@ -3945,7 +3977,8 @@ function sgComSub(s){
   document.querySelectorAll('.sg-mod .sgc-subtab').forEach(function(el){ el.classList.toggle('on', el.dataset.sub===s); });
   document.querySelectorAll('.sg-mod .sgc-sub').forEach(function(el){ el.classList.toggle('on', el.id==='sgc-sub-'+s); });
   if (s==='oc') sgLoadOC();
-  else if (s==='recepciones') sgLoadRecepciones();
+  else if (s==='recepciones') { sgLoadPendientesRecibir(); sgLoadRecepciones(); }
+  else if (s==='ocrecibidas') sgLoadOcRecibidas();
   else if (s==='gdirectos') sgLoadGDirectos();
   else if (s==='ccprov') sgLoadCcProv();
 }
@@ -3996,6 +4029,7 @@ function sgOcOpen(){
   eid('sg-oc-fecharec').value=''; eid('sg-oc-obs').value='';
   eid('sg-oc-flete-cargo').value=''; eid('sg-oc-flete-monto').value='';
   eid('sg-oc-flete-modo').value='total'; eid('sg-oc-flete-cant').value=''; eid('sg-oc-flete-pu').value='';
+  SG._fleteCantManual=false;
   var ivaF=document.querySelector('input[name="sg-oc-flete-iva"]:checked'); if(ivaF) ivaF.checked=false;
   sgOcFleteModo();
   document.querySelector('input[name="sg-oc-mod"][value="normal"]').checked=true;
@@ -4088,11 +4122,13 @@ function sgOcFleteModo(){
     var esBulto = modo === 'bulto';
     eid('sg-oc-flete-cant-lbl').textContent = esBulto ? 'Bultos' : 'Pallets';
     eid('sg-oc-flete-pu-lbl').textContent   = esBulto ? '$ por bulto' : '$ por pallet';
-    // Los bultos ya los sabe la orden: se proponen los de los ítems para no
-    // hacer contar dos veces lo mismo. Se puede corregir a mano.
-    if (esBulto && !eid('sg-oc-flete-cant').value) {
-      var b = sgOcBultosTotales();
-      if (b) eid('sg-oc-flete-cant').value = b;
+    // Los bultos SALEN DE LA ORDEN. Contarlos de nuevo a mano es contar dos
+    // veces lo mismo, y si los dos números no coinciden nadie sabe cuál vale.
+    // Se puede corregir —a veces el flete se pacta sobre otra cantidad— y desde
+    // ese momento el campo deja de recalcularse solo: lo que escribió una
+    // persona no se pisa.
+    if (esBulto && !SG._fleteCantManual) {
+      eid('sg-oc-flete-cant').value = sgOcBultosTotales() || '';
     }
   }
   sgOcFleteCalc();
@@ -4108,8 +4144,24 @@ function sgOcBultosTotales(){
   return t ? Math.round(t) : 0;
 }
 
+// Cuando cambian los ítems, los bultos del flete se ponen al día: son los
+// mismos bultos. Si el usuario los escribió a mano, no se le tocan.
+function sgOcFleteSyncBultos(){
+  if (eid('sg-oc-flete-modo') && eid('sg-oc-flete-modo').value === 'bulto' && !SG._fleteCantManual) {
+    eid('sg-oc-flete-cant').value = sgOcBultosTotales() || '';
+    sgOcFleteCalc();
+  }
+}
+
 function sgOcFleteCalc(){
   var el = eid('sg-oc-flete-calc'); if (!el) return;
+  var sub = eid('sg-oc-flete-cant-sub');
+  if (sub) {
+    var dela = sgOcBultosTotales();
+    sub.textContent = (eid('sg-oc-flete-modo').value === 'bulto' && dela)
+      ? (SG._fleteCantManual ? 'la orden tiene ' + nr(dela) : 'salen de los ítems de la orden')
+      : '';
+  }
   var modo = eid('sg-oc-flete-modo').value;
   if (modo === 'total') { el.textContent = ''; return; }
   var c = Number(eid('sg-oc-flete-cant').value) || 0;
@@ -4271,6 +4323,9 @@ function sgOcRenderItems(){
   sgOcTotales();
 }
 function sgOcTotales(){
+  // Los bultos del flete son los mismos de la orden: cada vez que cambian los
+  // ítems se ponen al día solos.
+  if (typeof sgOcFleteSyncBultos === 'function') sgOcFleteSyncBultos();
   // CAMBIO 2 — kg/total respetan el modo. IVA Fase 2 — con Factura A discrimina neto/IVA/total.
   var firme=sgOcPrecio()==='firme', disc=sgOcDiscrimina(), incl=sgOcIncluyeIva();
   var tk=0, tBruto=0, tNeto=0, tIva=0;
@@ -4457,6 +4512,93 @@ function sgOcVer(id){
 }
 
 // ── Recepciones ──
+// ── LO QUE FALTA RECIBIR ──────────────────────────────────────────────────
+// La solapa de Recepciones mostraba sólo lo ya hecho: el operador entraba, veía
+// "Sin recepciones" y no tenía de dónde agarrarse. Lo que necesita es la lista
+// de órdenes que están esperando mercadería.
+//
+// "Pendiente" es la orden abierta o recibida a medias que todavía tiene kilos
+// sin entrar. Se calcula por ÍTEM: una orden con dos productos donde entró uno
+// solo sigue pendiente, y hay que ver cuál falta.
+function sgLoadPendientesRecibir(){
+  api('/api/sg/oc').then(function(r){
+    var ocs = (r && r.ok) ? r.data : [];
+    var abiertas = ocs.filter(function(o){
+      return o.activo !== 0 && (o.estado === 'abierta' || o.estado === 'recibida_parcial');
+    });
+    var tb = eid('sg-tb-pendientes');
+    if (!tb) return;
+    if (!abiertas.length) {
+      tb.innerHTML = '<tr><td colspan="8" class="emp">No hay órdenes esperando mercadería.</td></tr>';
+      var n0 = eid('sg-pend-n'); if (n0) n0.textContent = '';
+      return;
+    }
+    // El detalle de cada orden trae los ítems con lo recibido. Se piden todos y
+    // se dibuja cuando están: son pocas y así el renglón dice qué falta de qué
+    // producto, que es lo que el operador necesita para recibir.
+    Promise.all(abiertas.map(function(o){ return api('/api/sg/oc/' + o.id); })).then(function(dets){
+      var filas = [];
+      dets.forEach(function(d, i){
+        if (!d || !d.ok) return;
+        var o = d.data;
+        (o.items || []).forEach(function(it, k){
+          var falta = Math.max(0, (Number(it.kg_estimados) || 0) - (Number(it.kg_recibidos) || 0));
+          if (falta <= 0) return;      // ese producto ya entró entero
+          filas.push({ o: o, it: it, falta: falta, primero: k === 0 });
+        });
+      });
+      if (!filas.length) {
+        tb.innerHTML = '<tr><td colspan="8" class="emp">No hay órdenes esperando mercadería.</td></tr>';
+        var n1 = eid('sg-pend-n'); if (n1) n1.textContent = '';
+        return;
+      }
+      var nOrdenes = {};
+      filas.forEach(function(f){ nOrdenes[f.o.id] = 1; });
+      var cuantas = Object.keys(nOrdenes).length;
+      var nEl = eid('sg-pend-n');
+      if (nEl) nEl.textContent = '· ' + cuantas + (cuantas === 1 ? ' orden' : ' órdenes');
+      tb.innerHTML = filas.map(function(f){
+        // El botón va una sola vez por orden: repetirlo en cada producto haría
+        // pensar que se recibe de a un ítem.
+        var accion = f.primero
+          ? '<button class="btn bb bs" onclick="sgRecOpen(' + f.o.id + ')">Recibir</button>'
+          : '';
+        return '<tr>'
+          + '<td>' + (f.primero ? '<code>' + esc(sgOcId(f.o)) + '</code>' : '') + '</td>'
+          + '<td>' + (f.primero ? esc(f.o.fecha_oc || '—') : '') + '</td>'
+          + '<td>' + (f.primero ? esc(f.o.proveedor_nombre || '—') : '') + '</td>'
+          + '<td>' + esc(f.it.producto_nombre || '—') + '</td>'
+          + '<td style="text-align:right">' + nr(f.it.kg_estimados) + '</td>'
+          + '<td style="text-align:right">' + nr(f.it.kg_recibidos) + '</td>'
+          + '<td style="text-align:right;font-weight:700">' + nr(f.falta) + '</td>'
+          + '<td style="text-align:right">' + accion + '</td></tr>';
+      }).join('');
+    });
+  });
+}
+
+// Las órdenes ya recibidas. Van aparte para que la bandeja de lo que falta
+// hacer no se llene de lo que ya está resuelto.
+function sgLoadOcRecibidas(){
+  api('/api/sg/oc').then(function(r){
+    var ocs = ((r && r.ok) ? r.data : []).filter(function(o){
+      return o.activo !== 0 && (o.estado === 'recibida_total' || o.estado === 'cerrada');
+    });
+    var tb = eid('sg-tb-ocrecibidas');
+    if (!tb) return;
+    tb.innerHTML = ocs.length ? ocs.map(function(o){
+      return '<tr>'
+        + '<td><code>' + esc(sgOcId(o)) + '</code></td>'
+        + '<td>' + esc(o.fecha_oc || '—') + '</td>'
+        + '<td>' + esc(o.proveedor_nombre || '—') + '</td>'
+        + '<td style="text-align:right">' + nr(o.total_estimado_kg) + '</td>'
+        + '<td style="text-align:right">' + nr(o.kg_recibidos_total) + '</td>'
+        + '<td style="text-align:center">' + sgOcBadge(o.estado) + '</td>'
+        + '<td style="text-align:right"><button class="btn bo bs" onclick="sgOcVer(' + o.id + ')">Ver</button></td>'
+        + '</tr>';
+    }).join('') : '<tr><td colspan="7" class="emp">Todavía no se recibió ninguna orden completa.</td></tr>';
+  });
+}
 function sgLoadRecepciones(){
   api('/api/sg/recepciones').then(function(r){
     var rows=(r&&r.ok)?r.data:[];

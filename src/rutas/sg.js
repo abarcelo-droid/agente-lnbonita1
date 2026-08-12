@@ -1481,7 +1481,13 @@ router.get('/oc', requireAuth, (req, res) => {
     if (req.query.desde) { where.push('o.fecha_oc>=?'); params.push(req.query.desde); }
     if (req.query.hasta) { where.push('o.fecha_oc<=?'); params.push(req.query.hasta); }
     const rows = db.prepare(`
-      SELECT o.*, p.razon_social AS proveedor_nombre
+      SELECT o.*, p.razon_social AS proveedor_nombre,
+             -- Kilos que ya entraron por esta orden. La bandeja de recepciones
+             -- necesita saber cuánto falta sin abrir cada orden de a una.
+             (SELECT COALESCE(SUM(l.kg_reales), 0)
+                FROM sg_lotes l
+                JOIN sg_oc_items i ON i.id = l.oc_item_id
+               WHERE i.oc_id = o.id AND l.activo = 1) AS kg_recibidos_total
       FROM sg_oc o LEFT JOIN sg_proveedores p ON p.id=o.proveedor_id
       WHERE ${where.join(' AND ')} ORDER BY o.id DESC`).all(...params);
     res.json({ ok: true, data: rows });
