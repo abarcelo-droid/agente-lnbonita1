@@ -262,6 +262,31 @@ export default { sociedadesDe, sociedadesConNombreDe, puedeVerSociedad, resolver
 // terminaría bloqueando cosas que no corresponde, y un permiso que bloquea de más
 // se desactiva entero a los dos días.
 
+// ── LAS DIRECCIONES DONDE TAMBIÉN SE CONTROLA LEER ────────────────────────
+// El nivel se aplicaba SÓLO a las escrituras: cualquiera con sesión podía LEER
+// lo que quisiera escribiendo la dirección a mano, aunque el menú no se lo
+// mostrara. Cerrarlo para TODO el sistema es un salto al vacío —hay pantallas
+// que leen datos de otro módulo y quedarían rotas sin que nadie lo note—, así
+// que se cierra donde se pudo verificar QUIÉN lee, una por una, mirando todas
+// las llamadas del panel.
+//
+// Éstas son la plata y los sueldos, que es donde de verdad importa:
+const LECTURA_CONTROLADA = new Set([
+  '/api/sg/contable',   // contabilidad de San Gerónimo — sólo la lee su propia familia
+  '/api/fin',           // caja, bancos y órdenes de pago de Puente Cordón
+  '/api/sp',            // seguimiento de órdenes de pago
+  '/api/fp',            // flujo de fondos
+  '/api/pli',           // planificación de insumos
+  '/api/ven',           // ventas de Puente Cordón
+  '/api/pa/personal',   // el padrón, las tarifas, las liquidaciones: los SUELDOS
+]);
+
+// Cuando una pantalla necesita LEER algo de otro módulo. Va aparte de
+// api_prefijos a propósito: si se lo agregara ahí, además de leer podría
+// ESCRIBIR. Pañol necesita el padrón para saber a quién le entrega una
+// herramienta, y no por eso puede tocar los legajos.
+let _mapaLectura = null;
+
 let _mapaApi = null;
 function mapaApi() {
   if (_mapaApi) return _mapaApi;
@@ -291,7 +316,22 @@ function mapaApi() {
   } catch { _mapaApi = []; }
   return _mapaApi;
 }
-export function limpiarCacheApi() { _mapaApi = null; }
+function mapaLectura() {
+  if (_mapaLectura) return _mapaLectura;
+  _mapaLectura = [];
+  try {
+    for (const m of db.prepare(
+      "SELECT modulo, api_lectura FROM modulos_config WHERE api_lectura IS NOT NULL AND api_lectura <> ''"
+    ).all()) {
+      for (const p of String(m.api_lectura).split(',').map(x => x.trim()).filter(Boolean)) {
+        const limpio = p.replace(/^\/*(api\/)?/i, '').replace(/\/+$/, '').toLowerCase();
+        if (limpio) _mapaLectura.push({ prefijo: '/api/' + limpio, modulo: m.modulo });
+      }
+    }
+  } catch { _mapaLectura = []; }   // la columna puede no existir todavía
+  return _mapaLectura;
+}
+export function limpiarCacheApi() { _mapaApi = null; _mapaLectura = null; }
 
 // ── UNA DIRECCIÓN PUEDE SER DE VARIOS MENÚS ────────────────────────────────
 // Esto devolvía UN módulo, y por eso 52 pantallas quedaron sin control: sus
@@ -308,9 +348,12 @@ export function limpiarCacheApi() { _mapaApi = null; }
 //
 // Devuelve los dueños del prefijo MÁS LARGO que matchea. Los más largos ganan:
 // /api/ifco/remitos le gana a /api/ifco.
-export function modulosDeRuta(url) {
+// `conLectura` suma los módulos que sólo tienen permitido LEER esa dirección.
+// Se usa para los GET; para escribir manda únicamente api_prefijos.
+export function modulosDeRuta(url, conLectura = false) {
   const limpia = String(url || '').split('?')[0].toLowerCase();
-  const coinciden = mapaApi().filter(
+  const mapa = conLectura ? mapaApi().concat(mapaLectura()) : mapaApi();
+  const coinciden = mapa.filter(
     e => limpia === e.prefijo || limpia.startsWith(e.prefijo + '/'));
   if (!coinciden.length) return [];
   // No alcanza con tomar el primero: mapaApi() ordena por LARGO, y dos prefijos
@@ -323,6 +366,19 @@ export function modulosDeRuta(url) {
 export function moduloDeRuta(url) {
   const duenos = modulosDeRuta(url);
   return duenos.length ? duenos[0] : null;
+}
+
+// ¿Esta dirección es de las que además controlan la LECTURA? Se compara contra
+// la URL y no contra el prefijo que resolvió el mapa: /api/fin/ordenes/9 resuelve
+// a '/api/fin/ordenes' —el más largo— y en la lista está '/api/fin'. Comparar
+// prefijo contra prefijo dejaría afuera justamente a las sub-rutas, que es donde
+// están los datos.
+export function lecturaControlada(url) {
+  const limpia = String(url || '').split('?')[0].toLowerCase().replace(/\/+$/, '');
+  for (const p of LECTURA_CONTROLADA) {
+    if (limpia === p || limpia.startsWith(p + '/')) return true;
+  }
+  return false;
 }
 
 // El mayor nivel que la persona tenga entre los dueños de la dirección.
@@ -340,12 +396,31 @@ export function mejorNivel(usuario, modulos) {
 // puede: distinguir por módulo y separar borrar de editar.
 export function exigirNivel(req, res, next) {
   const metodo = req.method;
-  if (metodo === 'GET' || metodo === 'HEAD' || metodo === 'OPTIONS') return next();
+  const soloLee = metodo === 'GET' || metodo === 'HEAD' || metodo === 'OPTIONS';
 
   let user;
   try { user = JSON.parse(req.cookies?.lnb_user || 'null'); } catch { user = null; }
   if (!user || !user.id) return next();          // que el endpoint conteste el 401
   if (user.rol === 'admin') return next();
+
+  // ── LEER TAMBIÉN SE CONTROLA, PERO SÓLO DONDE SE VERIFICÓ QUIÉN LEE ────
+  // Antes acá había un `return next()` para todos los GET. O sea: el menú te
+  // escondía la pantalla, y vos entrabas igual escribiendo la dirección.
+  //
+  // No se cierra para todo el sistema de una: hay pantallas que leen datos de
+  // otro módulo, y bloquearlas rompería trabajo diario sin que nadie entienda
+  // por qué. Se cierra donde se pudo mirar TODAS las llamadas del panel y
+  // confirmar quiénes leen — la plata y los sueldos. El resto sigue como está,
+  // y ampliar la lista es agregar un renglón después de hacer ese laburo.
+  if (soloLee) {
+    if (!lecturaControlada(req.originalUrl || req.url)) return next();
+    const duenos = modulosDeRuta(req.originalUrl || req.url, true);
+    if (!duenos.length) return next();
+    if (!mejorNivel(user, duenos)) {
+      return res.status(403).json({ ok: false, error: 'No tenés acceso a este módulo.' });
+    }
+    return next();
+  }
 
   const modulos = modulosDeRuta(req.originalUrl || req.url);
   if (!modulos.length) return next();            // dirección sin prefijo declarado
