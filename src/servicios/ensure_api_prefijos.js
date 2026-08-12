@@ -35,6 +35,19 @@ import "./db_permisos.js";
 
 // modulo → prefijos (separados por coma, sin /api adelante).
 // Cada uno verificado contra las rutas reales de su router.
+//
+// ── LA REGLA QUE MÁS CARO SALE OLVIDAR ────────────────────────────────────
+// ESTO COMPARA POR PREFIJO. Un prefijo sólo sirve si la parte VARIABLE de la
+// ruta va al FINAL. Si la ruta real es /abasto/partidas/:id/ajuste, el prefijo
+// 'abasto/partidas/ajuste' NO MATCHEA NUNCA — hay un número en el medio.
+//
+// El daño es doble y silencioso: la pantalla que dependía de ese prefijo se
+// queda sin poder trabajar, y la dirección que se quería proteger sigue
+// abierta. Nadie se entera, porque el síntoma es "a fulano no le anda el botón".
+//
+// Antes de agregar un prefijo de tres tramos o más, mirá la ruta en el router:
+// si tiene un :id antes del último tramo, declaralo hasta el tramo anterior y
+// asumí que se comparte. Es lo que se hizo con 'abasto/partidas'.
 const PREFIJOS = [
   // ── Contabilidad de Puente Cordón ──────────────────────────────────────
   ['adm-asientos',       'pa/cuentas/asientos'],
@@ -112,6 +125,88 @@ const PREFIJOS = [
   ['sg-gastos-directos', 'sg/gastos-directos,sg/gastos-servicio,sg/proveedores-servicio'],
   ['sg-reprocesos',      'sg/reprocesos,sg/transformaciones'],
   ['sg-importacion',     'sg/embarques'],
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // LAS QUE FALTABAN. Se declaran POR QUIÉN ESCRIBE, no por quién llama.
+  //
+  // Esa distinción es la que hace que esto sea seguro. Muchas direcciones las
+  // LEEN pantallas que nunca escriben ahí: /api/abasto/partidas lo leen Stock,
+  // Remitos, Gastos y Mandata, pero la única que da de alta partidas es
+  // Partidas. Si se declarara "a todos los que la llaman", cualquiera de esas
+  // cuatro podría crear partidas — y con /api/auth/usuarios, que lo leen ocho
+  // pantallas de Producción, se estarían dando de alta usuarios desde el padrón
+  // de personal. Como el nivel hoy sólo se aplica a las ESCRITURAS, declarar por
+  // escritor no le saca nada a nadie: el que sólo lee sigue leyendo igual.
+  //
+  // Todo esto salió de relevar pantalla por pantalla qué direcciones llama, con
+  // archivo y línea. Lo que no se pudo atar a una pantalla quedó sin declarar y
+  // está anotado abajo.
+  // ═══════════════════════════════════════════════════════════════════════
+
+  // ── Gestión Insumos (Abasto) ──────────────────────────────────────────
+  ['ab-gastos',          'abasto/gastos'],
+  ['ab-proveedores',     'abasto/proveedores'],
+  ['ab-remitos',         'abasto/remitos'],
+  // ── HASTA DÓNDE SE PUEDE AFINAR ────────────────────────────────────────
+  // El botón "Ajuste" está en Partidas Y en Stock, y su dirección es
+  // /api/abasto/partidas/:id/ajuste. Sería lindo declarar sólo ese tramo a
+  // Stock y dejarle el alta de partidas a Partidas, pero NO SE PUEDE: la
+  // variable está en el MEDIO, y esto compara por prefijo. 'abasto/partidas/
+  // ajuste' no matchea nunca, y el efecto sería dejar a Stock sin poder
+  // ajustar — un menú que hoy funciona, roto en silencio.
+  // Así que el prefijo va entero a las dos pantallas. Se gana precisión donde
+  // se puede y se es honesto donde no: Stock queda pudiendo dar de alta una
+  // partida, que es de su mismo grupo y su mismo trabajo.
+  ['ab-partidas',        'abasto/partidas'],
+  ['ab-stock',           'abasto/partidas,abasto/mandatas,abasto/caja'],
+  ['ab-mandata',         'abasto/mandatas,abasto/caja'],
+  // IFCO: sólo los tramos que escribe ÚNICAMENTE el panel. Los que también usa
+  // la app de celular quedan afuera a propósito — ver la nota al final.
+  ['ab-ifcos',           'ifco/talonarios,ifco/envios,ifco/movimientos,ifco/autorizaciones-retiro,'
+                       + 'ifco/consolidacion,ifco/consolidacion-revisar,ifco/consolidar,'
+                       + 'ifco/faltantes-sg,ifco/papelera,ifco/admin'],
+  ['ab-liquidaciones',   'liquidaciones'],
+
+  // ── Comercial ─────────────────────────────────────────────────────────
+  // Las seis pantallas de clientes son literalmente la misma función
+  // —loadCli(tipo, tabla)— así que todas escriben en /api/clientes. Pedidos,
+  // Remitos IFCO, Mandata y Stock la leen, y por eso NO están acá.
+  ['may-a',              'clientes'],
+  ['may-mcba',           'clientes'],
+  ['min-mcba',           'clientes'],
+  ['min-ent',            'clientes'],
+  ['food',               'clientes'],
+  ['cons-final',         'clientes'],
+  ['pedidos',            'pedidos'],
+  ['crm',                'crm'],
+  ['dedicados',          'dedicados,crm'],   // guardar un dedicado con teléfono da de alta en CRM
+  ['repet',              'enviar-repeticion'],
+
+  // ── Logística ─────────────────────────────────────────────────────────
+  // El cambio de estado de un pedido se dispara desde tres pantallas distintas.
+  ['logistica',          'logistica,pedidos'],
+  ['preparacion',        'pedidos,abasto/etiqueta'],
+  ['envios',             'enviar-listado'],
+  ['guardias',           'guardias,turnos-base,comerciales'],
+
+  // ── Pricing y Retail ──────────────────────────────────────────────────
+  ['oferta1',            'oferta'],
+  ['oferta2',            'oferta'],
+  ['pricing1',           'oferta/precio'],
+  ['pricing2',           'oferta/precio'],
+  ['retail-gastos',      'retail/gastos'],
+  ['retail-prod',        'retail/productos'],
+
+  // ── Cobranzas y el resto ──────────────────────────────────────────────
+  ['cobranza',           'cobranza'],
+  ['conv',               'conversaciones'],
+  ['calendario',         'calendario,buscar'],
+  ['ingreso-factura',    'factura'],
+  ['admin-actividad',    'admin/actividad'],
+  ['tr-dashboard',       'org/enlaces'],
+  ['bt-viajes',          'bt/llaves'],
+  ['sg-dashboard',       'sg/dashboard'],
+  ['sg-reportes',        'sg/reportes'],
 ];
 
 // ── LO QUE QUEDA SIN NIVEL, Y POR QUÉ ──────────────────────────────────────
@@ -119,11 +214,22 @@ const PREFIJOS = [
 // trata, y declarar un prefijo compartido bloquearía pantallas que se usan todos
 // los días. Protegerlos mal es peor que no protegerlos.
 //
-//   Comercial (10 pantallas)  → /api/clientes y /api/pedidos, compartidos entre
-//                               CRM, Dedicados, Food Service, los mayoristas,
-//                               los minoristas y Pedidos.
-//   Abasto IFCO (9)           → /api/abasto y /api/ifco, compartidos.
-//   Logística (5), Pricing (4), Retail (4), Cobranzas (2) → idem.
+//   LA APP DE CELULAR DE IFCO (src/mifco.html, servida en /m/ifco) escribe en
+//   seis direcciones y NO ES UN MÓDULO DEL MENÚ: no hay nada que tildarle a
+//   nadie. Si se declararan a 'ab-ifcos', el día que un galponero sin ese menú
+//   sellara un remito desde el teléfono, se quedaría sin poder trabajar. Son:
+//     ifco/remitos (y /sellar, /sellado-directo), ifco/recepciones-proveedor,
+//     ifco/stocks-reales, ifco/ocr, ifco/proveedores, ifco/san-geronimo.
+//   Por eso tampoco se declara 'ifco' a secas: taparía a las seis.
+//   PARA CERRARLAS hace falta saber qué menú tiene la gente que usa el teléfono.
+//   Es una pregunta para el dueño, no una decisión técnica.
+//
+//   /api/auth NO se declara nunca: mezcla la administración de usuarios con el
+//   circuito de sesión (/auth/me, /auth/logout) que llama TODO el panel, la app
+//   de celular y scout.html. Declararlo deja a cualquiera sin poder salir.
+//
+//   /api/bt/sync lo llama el agente que corre en la máquina de Transoft, no una
+//   pantalla. Va sin declarar.
 //   pa-dashboard, pa-costos, pa-clima, pa-calendario, sg-dashboard, sg-reportes,
 //   personal-reportes → sólo leen, no tienen escrituras propias.
 //   pa-despachos y pa-electricidad → pantallas en construcción, sin endpoints.
@@ -157,6 +263,7 @@ try {
     }
   })();
   if (n) console.log(`[NIVEL] ${n} módulo(s) con su dirección de API declarada: el nivel Ver/Operar/Anular ya se aplica ahí.`);
+
   if (faltan.length) console.warn(`[NIVEL] ${faltan.length} módulo(s) del mapa no existen en modulos_config: ${faltan.join(', ')}`);
 
   // ── El nivel "borrar" pasa a llamarse "anular" ─────────────────────────
