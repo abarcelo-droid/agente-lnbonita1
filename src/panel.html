@@ -44582,7 +44582,7 @@ function sgctVerAsiento(id) {
       totD += l.debe||0; totH += l.haber||0;
       return '<tr>'
         + '<td style="font-family:monospace;font-size:12px">'+l.cuenta_codigo+'</td>'
-        + '<td>'+l.cuenta_nombre+'</td>'
+        + '<td>'+sgctEsc(l.cuenta_nombre)+'</td>'
         + '<td style="text-align:right;font-variant-numeric:tabular-nums">'+(l.debe>0 ? sgctMoney(l.debe) : '—')+'</td>'
         + '<td style="text-align:right;font-variant-numeric:tabular-nums">'+(l.haber>0 ? sgctMoney(l.haber) : '—')+'</td>'
         + '</tr>';
@@ -44652,7 +44652,7 @@ function sgctModCargar() {
     }
     tb.innerHTML = data.map(function(m) {
       return '<tr>'
-        + '<td><strong>' + m.nombre + '</strong></td>'
+        + '<td><strong>' + sgctEsc(m.nombre) + '</strong></td>'
         + '<td style="text-align:center"><span class="pa-badge pa-azul-bg">' + (m.cant_lineas||0) + ' líneas</span>'
           // Sin línea de Proveedores el modelo no sirve para facturas de compra.
           // Se marca acá para poder detectar de un vistazo cuáles hay que corregir,
@@ -44674,7 +44674,7 @@ function sgctCargarConfigImp() {
   sgctModCargarCuentas(function() {
     var opts = '<option value="">— Sin asignar —</option>'
       + SGCT_MOD_CUENTAS.map(function(c){
-          return '<option value="'+c.id+'">'+(c.codigo?c.codigo+' — ':'')+c.nombre+'</option>';
+          return '<option value="'+c.id+'">'+(c.codigo?c.codigo+' — ':'')+sgctEsc(c.nombre)+'</option>';
         }).join('');
     ['iva_credito_fiscal','iva_debito_fiscal','percepcion_iva','percepcion_iibb','percepcion_ganancias','retencion'].forEach(function(clave) {
       var sel = document.getElementById('sgct-cfg-imp-'+clave);
@@ -44748,10 +44748,10 @@ function sgctModCuBuscar(lid){
     ? top.map(function(c){
         if (c.imputable === 0) {
           return '<div class="pa-ac-item" style="color:#9ca3af;cursor:not-allowed" title="Rubro agrupador, no imputable">'
-            + sgctModCuTexto(c) + ' <span style="font-size:10px">🔒 NO IMPUTABLE</span></div>';
+            + sgctEsc(sgctModCuTexto(c)) + ' <span style="font-size:10px">🔒 NO IMPUTABLE</span></div>';
         }
         return '<div class="pa-ac-item" data-id="'+c.id+'" onmousedown="sgctModCuPick('+lid+','+c.id+')">'
-          + sgctModCuTexto(c) + '</div>';
+          + sgctEsc(sgctModCuTexto(c)) + '</div>';
       }).join('') + (arr.length>top.length ? '<div class="pa-ac-more">… '+(arr.length-top.length)+' más — seguí escribiendo</div>' : '')
     : '<div class="pa-ac-empty">Sin resultados</div>';
   box.style.display='';
