@@ -60,8 +60,14 @@ const PREFIJOS = [
   ['ven-liquidaciones',  'ven/liquidaciones'],
 
   // ── Contabilidad de San Gerónimo ───────────────────────────────────────
+  // 'sg/contable' a secas va en el Plan de Cuentas y NO sobra: la lista de
+  // cuentas cuelga de la raíz del router (GET /api/sg/contable, POST para crear
+  // una, /lote, /:id, /:id/mover…) y sin declararla moduloDeRuta devolvía null y
+  // exigirNivel dejaba pasar. Se medía: cualquier sesión válida leía el plan de
+  // cuentas entero de San Gerónimo. Las tres direcciones más largas de abajo le
+  // ganan igual, porque gana el prefijo MÁS LARGO.
   ['sgct-asientos',      'sg/contable/asientos'],
-  ['sgct-plan-cuentas',  'sg/contable/secciones,sg/contable/titulos,sg/contable/config-impositiva'],
+  ['sgct-plan-cuentas',  'sg/contable,sg/contable/secciones,sg/contable/titulos,sg/contable/config-impositiva'],
   ['sgct-modelos',       'sg/contable/modelos'],
 
   // ── Los tres módulos de una sola empresa, con router propio ────────────
@@ -121,6 +127,12 @@ const PREFIJOS = [
 //   pa-dashboard, pa-costos, pa-clima, pa-calendario, sg-dashboard, sg-reportes,
 //   personal-reportes → sólo leen, no tienen escrituras propias.
 //   pa-despachos y pa-electricidad → pantallas en construcción, sin endpoints.
+//   sg/tesoreria (Caja y Bancos de San Gerónimo) → el router existe y está
+//     montado, pero TODAVÍA NO HAY PANTALLA: panel.html no lo llama ni una vez,
+//     así que no hay módulo de menú al que colgarle el prefijo. Mientras tanto
+//     NO queda abierto: sus dieciséis escrituras piden admin y tiene el cerrojo
+//     de empresa. El día que se arme la pantalla, declarar acá su prefijo — si
+//     no, el nivel Ver/Operar/Anular no se le aplica.
 //
 // DOS QUE NECESITAN UNA DECISIÓN, NO CÓDIGO:
 //   · 'pa-cuentas' y 'adm-plan-cuentas' son DOS pantallas de Plan de Cuentas
