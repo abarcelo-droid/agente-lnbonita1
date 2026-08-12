@@ -1,5 +1,6 @@
 // src/rutas/abasto.js
 import express from 'express';
+import crypto from 'crypto';
 
 import { getDb } from '../servicios/db.js';
 const router = express.Router();
@@ -424,11 +425,57 @@ router.post('/remitos', (req, res) => {
 // PDF / IMPRESIÓN DE REMITO
 // ============================================================
 
+// ── EL REMITO QUE SE MANDA POR WHATSAPP LLEVA TOKEN ────────────────────────
+// El link se le manda al CLIENTE, que no tiene cuenta, así que el endpoint es
+// público. Pero hasta ahora no llevaba nada: con el número de remito —que es
+// correlativo— cualquiera veía el remito de cualquier otro cliente. Los de IFCO
+// ya usan un token en la URL; éste no.
+//
+// LOS LINKS QUE YA ESTÁN CIRCULANDO NO SE ROMPEN. Los remitos que ya se mandaron
+// por WhatsApp antes de este cambio quedan marcados y siguen abriéndose sin
+// token: esos links están en el teléfono de un cliente y no se pueden reemplazar.
+// De acá en adelante todos llevan token.
+try { getDb().exec("ALTER TABLE remitos_salida ADD COLUMN pdf_token TEXT"); } catch(_) {}
+try { getDb().exec("ALTER TABLE remitos_salida ADD COLUMN pdf_link_legado INTEGER DEFAULT 0"); } catch(_) {}
+(function tokensDeRemito() {
+  try {
+    const db = getDb();
+    // Los ya enviados quedan como "link viejo": se siguen abriendo sin token.
+    const legado = db.prepare(
+      "UPDATE remitos_salida SET pdf_link_legado = 1 WHERE whatsapp_enviado = 1 AND pdf_token IS NULL").run().changes;
+    // Y a todos se les genera el suyo, para los envíos que vengan.
+    const sinToken = db.prepare(
+      "SELECT id FROM remitos_salida WHERE pdf_token IS NULL OR pdf_token = ''").all();
+    if (sinToken.length) {
+      const upd = db.prepare("UPDATE remitos_salida SET pdf_token = ? WHERE id = ?");
+      db.transaction(() => {
+        for (const r of sinToken) upd.run(crypto.randomBytes(16).toString('hex'), r.id);
+      })();
+      console.log(`[AB] ${sinToken.length} remito(s) con token de PDF` +
+                  (legado ? `; ${legado} con link ya enviado que se sigue respetando` : ''));
+    }
+  } catch (e) { console.error('[AB] Error generando tokens de remito:', e.message); }
+})();
+
 router.get('/remitos/:id/pdf', (req, res) => {
   const db = getDb();
   try {
     const remito = db.prepare(`SELECT * FROM remitos_salida WHERE id = ?`).get(req.params.id);
     if (!remito) return res.status(404).json({ ok: false, error: 'Remito no encontrado' });
+
+    // ── QUIÉN PUEDE VERLO ──────────────────────────────────────────────
+    // Con sesión: es alguien del panel, pasa.
+    // Sin sesión: tiene que traer el token del link, salvo que sea un link de
+    // los que ya se habían mandado antes de que existiera el token.
+    let deLaCasa = false;
+    try { deLaCasa = !!JSON.parse(req.cookies?.lnb_user || 'null')?.id; } catch (_) {}
+    if (!deLaCasa && !remito.pdf_link_legado) {
+      const t = String(req.query.t || '');
+      if (!t || !remito.pdf_token || t !== remito.pdf_token) {
+        // 404 y no 403: no se confirma que ese remito exista.
+        return res.status(404).json({ ok: false, error: 'Remito no encontrado' });
+      }
+    }
 
     const items = db.prepare(`
       SELECT ri.*,
@@ -732,7 +779,14 @@ router.post('/remitos/:id/whatsapp', async (req, res) => {
     if (!telefono) return res.status(400).json({ ok: false, error: 'Se requiere número de WhatsApp del cliente' });
 
     const baseUrl = process.env.BASE_URL || `https://agente-lnbonita1-production.up.railway.app`;
-    const pdfUrl = `${baseUrl}/api/abasto/remitos/${remito.id}/pdf`;
+    // El token va en el link: es lo único que autoriza a verlo, porque el
+    // destinatario es un cliente sin cuenta.
+    let tok = remito.pdf_token;
+    if (!tok) {
+      tok = crypto.randomBytes(16).toString('hex');
+      db.prepare('UPDATE remitos_salida SET pdf_token = ? WHERE id = ?').run(tok, remito.id);
+    }
+    const pdfUrl = `${baseUrl}/api/abasto/remitos/${remito.id}/pdf?t=${tok}`;
 
     const mensaje = `🧾 *Remito ${remito.nro_remito}*\n` +
       `Fecha: ${remito.fecha}\n` +

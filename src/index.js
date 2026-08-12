@@ -16,6 +16,7 @@ import abastoRouter       from "./rutas/abasto.js";
 import authRouter, { bloquearSiSoloLectura } from "./rutas/auth.js";
 import { exigirNivel } from "./servicios/permisos.js";
 import portonApi from "./servicios/porton_api.js";
+import estaticosPublicos from "./servicios/estaticos_publicos.js";
 import produccionRouter   from "./rutas/produccion.js";
 import scoutRouter        from "./rutas/scout.js";
 import cuentasRouter      from "./rutas/cuentas.js";
@@ -81,6 +82,10 @@ app.use(express.urlencoded({ extended: false, limit: '20mb' }));
 app.use(cookieParser(cookieSecret()));
 
 // Archivos estaticos
+// El filtro va ANTES del express.static: sin él, /static servía la carpeta
+// entera del servidor —servicios/, rutas/, index.js, panel.html— a cualquiera
+// sin sesión. El por qué de cada regla está en el servicio.
+app.use("/static", estaticosPublicos);
 app.use("/static",       express.static(path.join(__dirname, ".")));
 app.use("/data/uploads", express.static(path.join(__dirname, "../data/uploads")));
 app.use("/data/conformados", express.static(path.join(__dirname, "../data/conformados")));
