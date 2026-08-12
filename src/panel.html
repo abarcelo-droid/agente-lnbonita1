@@ -3160,6 +3160,12 @@ var SG_TIPOPRV = [['productor','Productor'],['importador','Importador'],['mayori
 var SG_TIPOCLI = [['horeca','HORECA'],['supermercado','Supermercado'],['mayorista_regional','Mayorista regional'],['minorista','Minorista'],['consumidor_final','Consumidor final'],['otros','Otros']];
 var SG_CATFISC = [['resp_inscripto','Resp. Inscripto'],['monotributista','Monotributista'],['exento','Exento'],['no_inscripto','No inscripto']];
 var SG_FISCAL  = [['factura_a','Factura A'],['factura_b','Factura B'],['liquidacion','Liquidación']];
+
+// Cómo se llama una orden de compra EN PANTALLA: el código de trazabilidad
+// (PPPP.DD.MM.AAAA.XX). El SG-OC-… es el número interno del sistema y no dice
+// nada de la partida. Las órdenes viejas, hasta que se les calcule el código,
+// siguen mostrando el número — mejor eso que un renglón sin identificar.
+function sgOcId(o){ return (o && (o.trazabilidad || o.numero)) || ''; }
 // Para mostrar el tipo fiscal en listados: incluye 'invoice' (proveedor extranjero).
 // El selector nacional del alta sigue usando SG_FISCAL (A/B/Liq), sin Invoice.
 var SG_FISCAL_LBL = SG_FISCAL.concat([['invoice','Invoice']]);
@@ -3954,7 +3960,7 @@ function sgLoadOC(){
       var acc='<button class="btn bo bs" onclick="sgOcVer('+o.id+')">👁</button> ';
       if(o.estado==='abierta'||o.estado==='recibida_parcial') acc+='<button class="btn bo bs" onclick="sgRecOpen('+o.id+')">📥</button> ';
       if(o.estado==='abierta') acc+='<button class="btn bd bs" onclick="sgOcAnular('+o.id+')">✖</button>';
-      return '<tr><td><code>'+esc(o.numero||'')+'</code></td><td>'+(o.fecha_oc||'—')+'</td><td>'+esc(o.proveedor_nombre||'—')+'</td><td>'+esc(o.modalidad)+'</td><td>'+(o.tipo_precio==='pizarra'?'<span class="bdg bpe">Liquidación de Venta</span>':'Precio Cerrado')+'</td><td style="text-align:right">'+nr(o.total_estimado_kg)+'</td><td style="text-align:right">'+sgMoney(o.total_estimado_monto)+'</td><td style="text-align:center">'+sgOcBadge(o.estado)+'</td><td style="text-align:right;white-space:nowrap">'+acc+'</td></tr>';
+      return '<tr><td><code>'+esc(sgOcId(o))+'</code></td><td>'+(o.fecha_oc||'—')+'</td><td>'+esc(o.proveedor_nombre||'—')+'</td><td>'+esc(o.modalidad)+'</td><td>'+(o.tipo_precio==='pizarra'?'<span class="bdg bpe">Liquidación de Venta</span>':'Precio Cerrado')+'</td><td style="text-align:right">'+nr(o.total_estimado_kg)+'</td><td style="text-align:right">'+sgMoney(o.total_estimado_monto)+'</td><td style="text-align:center">'+sgOcBadge(o.estado)+'</td><td style="text-align:right;white-space:nowrap">'+acc+'</td></tr>';
     }).join('') : '<tr><td colspan="9" class="emp">Sin órdenes. Creá una nueva.</td></tr>';
   });
 }
@@ -3967,13 +3973,15 @@ function sgOcOpen(){
   SG.ocItems=[];
   eid('sg-oc-prov').innerHTML=sgOpts(sgOcProvOpts(),'razon_social','','— Elegir —');
   eid('sg-oc-cond').innerHTML=sgOpts(SG.cacheCond,'nombre','','— Sin condición —');
-  eid('sg-oc-fiscal').innerHTML=SG_FISCAL.map(function(o){return '<option value="'+o[0]+'">'+o[1]+'</option>';}).join('');
+  // El desplegable de comprobante lo arma sgOcFiscalOpts() según la condición
+  // comercial, más abajo, una vez que los radios están en su valor inicial.
   eid('sg-oc-fecha').value=new Date().toISOString().slice(0,10);
   eid('sg-oc-fecharec').value=''; eid('sg-oc-obs').value='';
   eid('sg-oc-flete-cargo').value=''; eid('sg-oc-flete-monto').value='';
   document.querySelector('input[name="sg-oc-mod"][value="normal"]').checked=true;
   document.querySelector('input[name="sg-oc-precio"][value="firme"]').checked=true;
   document.querySelector('input[name="sg-oc-inciva"][value="si"]').checked=true; // IVA Fase 2
+  sgOcFiscalOpts();
   sgOcAddItem();
   sgOcUpdIvaBox();
   sgOcTrazaRefrescar();
@@ -4003,11 +4011,46 @@ function sgOcTrazaRefrescar(){
 function sgOcProvChange(){
   sgOcTrazaRefrescar();
   var p=SG.cacheProv.find(function(x){return String(x.id)===String(eid('sg-oc-prov').value);});
-  if(p){ if(p.tipo_fiscal_habitual)eid('sg-oc-fiscal').value=p.tipo_fiscal_habitual; if(p.condicion_pago_habitual_id)eid('sg-oc-cond').value=p.condicion_pago_habitual_id; }
+  // El comprobante habitual del proveedor se respeta SÓLO si encaja con la
+  // condición comercial elegida: un proveedor que factura A no puede imponerle
+  // Factura A a una liquidación de venta.
+  if(p){
+    if(p.tipo_fiscal_habitual){
+      var sel=eid('sg-oc-fiscal');
+      var existe=Array.prototype.some.call(sel.options,function(o){return o.value===p.tipo_fiscal_habitual;});
+      if(existe) sel.value=p.tipo_fiscal_habitual;
+    }
+    if(p.condicion_pago_habitual_id) eid('sg-oc-cond').value=p.condicion_pago_habitual_id;
+  }
   sgOcUpdIvaBox(); sgOcTotales();   // el comprobante del proveedor puede activar/desactivar IVA
 }
 function sgOcPrecio(){ return document.querySelector('input[name="sg-oc-precio"]:checked').value; }
-function sgOcPrecioChange(){ sgOcUpdIvaBox(); sgOcRenderItems(); }
+// ── EL COMPROBANTE SALE DE LA CONDICIÓN COMERCIAL ─────────────────────────
+// Precio cerrado se factura: Factura A o Factura B, según el proveedor.
+// Liquidación de venta NO se factura, se liquida: el comprobante es Liquidación
+// y no hay otra opción. Ofrecer las tres siempre dejaba armar combinaciones que
+// no existen —una liquidación con Factura A— y el error aparecía después, al
+// querer registrarla.
+function sgOcFiscalOpts(){
+  var esLiquidacion = sgOcPrecio() === 'pizarra';
+  var sel = eid('sg-oc-fiscal');
+  if (!sel) return;
+  var antes = sel.value;
+  var opciones = esLiquidacion
+    ? [['liquidacion','Liquidación']]
+    : [['factura_a','Factura A'], ['factura_b','Factura B']];
+  sel.innerHTML = opciones.map(function(o){ return '<option value="'+o[0]+'">'+o[1]+'</option>'; }).join('');
+  // Se conserva lo elegido si sigue siendo válido; si no, queda la primera.
+  sel.value = opciones.some(function(o){ return o[0] === antes; }) ? antes : opciones[0][0];
+  // Con una sola opción el desplegable no decide nada: se muestra apagado para
+  // que se entienda que es consecuencia de la condición comercial.
+  sel.disabled = opciones.length === 1;
+  sel.title = esLiquidacion
+    ? 'Una liquidación de venta no se factura: el comprobante es Liquidación.'
+    : '';
+}
+
+function sgOcPrecioChange(){ sgOcFiscalOpts(); sgOcUpdIvaBox(); sgOcRenderItems(); }
 // ── IVA Fase 2 — helpers de discriminación en la OC ──
 // Discrimina solo con Factura A + Precio Cerrado (firme). Liquidación/pizarra: no discrimina.
 function sgOcDiscrimina(){ return sgOcPrecio()==='firme' && eid('sg-oc-fiscal').value==='factura_a'; }
@@ -4231,10 +4274,36 @@ function sgOcVer(id){
   Promise.all([api('/api/sg/oc/'+id), api('/api/sg/lotes?oc_id='+id)]).then(function(res){
     var r=res[0]; if(!r||!r.ok){ toast('Error','er'); return; }
     var o=r.data; var lotes=(res[1]&&res[1].ok)?res[1].data:[];
-    eid('sg-ocver-tit').textContent='OC '+(o.numero||'');
-    var h='<div style="display:flex;justify-content:flex-end;margin-bottom:8px"><button class="btn bb bs" onclick="window.open(\'/api/sg/oc/'+id+'/pdf\',\'_blank\')">📄 Descargar PDF</button></div>';
-    h+='<div style="font-size:13px;margin-bottom:10px">Proveedor: <b>'+esc(o.proveedor_nombre||'—')+'</b> · '+sgOcBadge(o.estado)+' · '+(o.tipo_precio==='pizarra'?'Liquidación de Venta':'Precio Cerrado')+' · '+sgLbl(SG_FISCAL,o.tipo_fiscal)
-      +(o.flete_a_cargo?(' · Flete: '+o.flete_a_cargo+(o.flete_monto!=null?(' ('+sgMoney(o.flete_monto)+')'):'')):'')+'</div>';
+    eid('sg-ocver-tit').textContent='Orden de compra  '+sgOcId(o);
+    // ── LA FICHA DE LA ORDEN ──────────────────────────────────────────────
+    // Antes era un renglón corrido: "Proveedor: X · Abierta · Liquidación de
+    // Venta · Liquidación · Flete: comprador ($5.000.000)". Todo pegado, sin
+    // decir qué es cada cosa, y con dos palabras parecidas seguidas
+    // —"Liquidación de Venta" y "Liquidación"— que son cosas distintas: una es
+    // la condición comercial y la otra el comprobante.
+    //
+    // Ahora es una ficha: cada dato con su etiqueta, y el código de
+    // trazabilidad primero, que es con lo que se busca la partida.
+    var ficha = function(rot, val, ancho) {
+      return '<div style="min-width:' + (ancho || 130) + 'px">'
+        + '<div style="font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut);margin-bottom:2px">' + rot + '</div>'
+        + '<div style="font-size:13px;font-weight:600">' + val + '</div></div>';
+    };
+    var h = '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:14px;margin-bottom:12px;flex-wrap:wrap">'
+      + '<div style="display:flex;gap:22px;flex-wrap:wrap;align-items:flex-start">'
+        + ficha('Partida', '<code style="font-size:13px;letter-spacing:.05em">' + esc(sgOcId(o)) + '</code>', 175)
+        + ficha('Proveedor', esc(o.proveedor_nombre || '—'), 170)
+        + ficha('Fecha', esc(o.fecha_oc || '—'), 95)
+        + ficha('Estado', sgOcBadge(o.estado), 95)
+        + ficha('Condición comercial', (o.tipo_precio === 'pizarra' ? 'Liquidación de Venta' : 'Precio Cerrado'), 150)
+        + ficha('Comprobante', esc(sgLbl(SG_FISCAL, o.tipo_fiscal) || '—'), 110)
+        + ficha('Condición de pago', esc(sgCondNombre(o.condicion_pago_id)), 140)
+        + (o.flete_a_cargo
+            ? ficha('Flete', esc(o.flete_a_cargo) + (o.flete_monto != null ? ' · ' + sgMoney(o.flete_monto) : ''), 150)
+            : '')
+      + '</div>'
+      + '<button class="btn bb bs" onclick="window.open(\'/api/sg/oc/' + id + '/pdf\',\'_blank\')">📄 Descargar PDF</button>'
+      + '</div>';
     h+='<table class="pa-tbl" style="margin-bottom:12px"><thead><tr><th>Producto</th><th>Present.</th><th style="text-align:right">Kg est.</th><th style="text-align:right">$/kg</th><th style="text-align:right">Kg recibidos</th></tr></thead><tbody>';
     (o.items||[]).forEach(function(it){ h+='<tr><td>'+esc(it.producto_nombre||'')+'</td><td>'+esc(it.presentacion_nombre||'—')+'</td><td style="text-align:right">'+nr(it.kg_estimados)+'</td><td style="text-align:right">'+(it.precio_estimado_por_kg!=null?sgMoney(it.precio_estimado_por_kg):'—')+'</td><td style="text-align:right">'+nr(it.kg_recibidos)+'</td></tr>'; });
     h+='</tbody></table>';
@@ -4287,7 +4356,7 @@ function sgRecVincularOpen(id, numero){
   eid('sg-recvinc-tit').textContent='Vincular '+(numero||'recepción')+' a una OC';
   Promise.all([api('/api/sg/oc?estado=abierta'), api('/api/sg/oc?estado=recibida_parcial')]).then(function(res){
     var ocs=((res[0]&&res[0].ok)?res[0].data:[]).concat((res[1]&&res[1].ok)?res[1].data:[]);
-    eid('sg-recvinc-oc').innerHTML='<option value="">— Elegir OC —</option>'+ocs.map(function(o){return '<option value="'+o.id+'">'+esc(o.numero)+' — '+esc(o.proveedor_nombre||'')+' · '+(o.fecha_oc||'')+'</option>';}).join('');
+    eid('sg-recvinc-oc').innerHTML='<option value="">— Elegir OC —</option>'+ocs.map(function(o){return '<option value="'+o.id+'">'+esc(sgOcId(o))+' — '+esc(o.proveedor_nombre||'')+' · '+(o.fecha_oc||'')+'</option>';}).join('');
   });
   eid('sg-recvinc-modal').classList.add('on');
 }
@@ -4305,7 +4374,7 @@ function sgRecOpen(ocId){
   Promise.all([api('/api/sg/oc?estado=abierta'), api('/api/sg/oc?estado=recibida_parcial')]).then(function(res){
     var ocs=((res[0]&&res[0].ok)?res[0].data:[]).concat((res[1]&&res[1].ok)?res[1].data:[]);
     // OC OPCIONAL: se puede recibir SIN OC → queda "OC pendiente" y se vincula después.
-    eid('sg-rec-oc').innerHTML='<option value="">— Elegir OC —</option><option value="__sinoc__">— Sin OC (regularizar después) —</option>'+ocs.map(function(o){return '<option value="'+o.id+'">'+esc(o.numero)+' — '+esc(o.proveedor_nombre||'')+'</option>';}).join('');
+    eid('sg-rec-oc').innerHTML='<option value="">— Elegir OC —</option><option value="__sinoc__">— Sin OC (regularizar después) —</option>'+ocs.map(function(o){return '<option value="'+o.id+'">'+esc(sgOcId(o))+' — '+esc(o.proveedor_nombre||'')+'</option>';}).join('');
     eid('sg-rec-fecha').value=new Date().toISOString().slice(0,10);
     eid('sg-rec-remito').value=''; eid('sg-rec-obs').value='';
     // PASO 1 — reset documentación + paletizado
