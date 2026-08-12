@@ -140,13 +140,8 @@ export function soloSociedad(nombreLike) {
 // Todo lo que decida qué módulos ve alguien tiene que pasar por acá.
 export function filtrarModulos(usuario, modulos) {
   if (!usuario || !usuario.id) return [];
-  const socs = sociedadesDe(usuario);
   const esAdmin = usuario.rol === 'admin';
-  const secciones = seccionesDe(usuario);
-  const todasLasSecciones = secciones.includes('*');
 
-  // Si tiene accesos cargados en la tabla nueva, mandan esos. Si no, rigen las
-  // secciones de siempre: es lo que permite que esto conviva sin configurar a nadie.
   const tienePermisos = !esAdmin && !!db.prepare(
     'SELECT 1 FROM usuario_modulos WHERE usuario_id = ? LIMIT 1'
   ).get(usuario.id);
@@ -165,11 +160,19 @@ export function filtrarModulos(usuario, modulos) {
     // hubiera manera de entender por qué.
     if (tienePermisos) return !!nivelEnModulo(usuario, m.modulo);
 
-    // SIN CONFIGURAR: sigue rigiendo lo de antes —lo de sus empresas— para que
-    // nadie se quede sin menú ni pase a ver de más el día que esto se despliega.
-    // Acá el filtro por empresa SÍ tiene sentido: es el único que hay.
-    if (m.sociedad_id !== null && m.sociedad_id !== undefined && !socs.includes(m.sociedad_id)) return false;
-    return todasLasSecciones || secciones.includes(m.modulo);
+    // SIN PERMISOS CARGADOS NO SE VE NADA. Decisión del dueño: "en caso de que
+    // un usuario no tenga permisos cargados, debe pedirle a un administrador que
+    // se los dé, esa es la única manera de avanzar."
+    //
+    // Antes, el que nunca se había configurado veía TODO lo de sus empresas. Era
+    // una red para no dejar a nadie sin trabajar el día que se soltaron los
+    // permisos, pero con la red puesta el sistema nunca terminaba de cerrar: el
+    // acceso lo daba el olvido, no una decisión.
+    //
+    // El menú vacío no es un error, es la respuesta: el usuario tiene que pedir
+    // acceso. El panel le muestra el aviso con esas palabras en vez de dejarlo
+    // mirando una pantalla en blanco.
+    return false;
   }).map(m => ({ ...m, nivel: nivelEnModulo(usuario, m.modulo) || 'operar' }));
 }
 

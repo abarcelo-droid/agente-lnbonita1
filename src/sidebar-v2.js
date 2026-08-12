@@ -437,7 +437,25 @@ function renderGrupos(){
     .filter(g => g.items.length > 0);
 
   if (!gruposFiltrados.length){
-    wrap.innerHTML = `<div style="padding:14px 16px;font-size:11.5px;color:rgba(255,255,255,.5);text-align:center">No hay módulos para esta sociedad.</div>`;
+    // Sin un solo módulo hay dos motivos posibles, y decir el equivocado manda a
+    // la persona a buscar donde no es:
+    //
+    //  · No tiene NINGÚN acceso cargado. Desde que rige "sin permisos no se ve
+    //    nada", el menú vacío no es un error: es la respuesta. Pero hay que
+    //    decirle qué hacer, o se queda mirando una pantalla en blanco pensando
+    //    que el sistema se rompió.
+    //  · Tiene accesos, pero ninguno en la empresa que eligió arriba.
+    const tieneEnOtra = (SIDEBAR_DATA.grupos || [])
+      .some(g => (g.items || []).length > 0);
+    wrap.innerHTML = tieneEnOtra
+      ? `<div style="padding:14px 16px;font-size:11.5px;color:rgba(255,255,255,.55);text-align:center;line-height:1.5">
+           No tenés accesos en esta empresa.<br>Probá cambiándola arriba.
+         </div>`
+      : `<div style="padding:18px 16px;font-size:12px;color:rgba(255,255,255,.75);text-align:center;line-height:1.6">
+           <div style="font-size:22px;margin-bottom:6px">🔑</div>
+           <b>Todavía no tenés accesos asignados.</b><br>
+           <span style="color:rgba(255,255,255,.55)">Pedile a un administrador que te dé permiso a los módulos que necesitás.</span>
+         </div>`;
     return;
   }
 
