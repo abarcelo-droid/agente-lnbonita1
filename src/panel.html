@@ -44046,7 +44046,7 @@ function sgctPcDragLeave(ev) {
   ev.currentTarget.style.outline = '';
 }
 
-function sgctPcDrop(ev, tituloId) {
+function sgctPcDrop(ev, tituloId, seccionId) {
   if (!SGCT_EDIT_MODE) return;
   ev.preventDefault();
   ev.currentTarget.style.background = '';
@@ -44055,10 +44055,14 @@ function sgctPcDrop(ev, tituloId) {
   SGCT_DRAG_ID = null;
   if (!cuentaId) return;
   var cuenta = SGCT.cuentas.find(function(c){ return c.id === cuentaId; });
-  if (cuenta && cuenta.titulo_id === tituloId) return;
+  // Soltarla donde ya estaba no es un movimiento. Se mira el título Y la sección:
+  // sacarla a "sin título" de OTRA sección sí es un movimiento aunque los dos
+  // títulos sean null.
+  if (cuenta && cuenta.titulo_id === tituloId
+      && (!seccionId || cuenta.seccion_id === seccionId)) return;
   sgctApi('/' + cuentaId + '/reasignar-titulo', {
     method: 'POST',
-    body: JSON.stringify({ titulo_id: tituloId }),
+    body: JSON.stringify({ titulo_id: tituloId, seccion_id: seccionId || null }),
   }).then(function(r){
     if (!r.ok) { toast(r.error || 'Error al mover', 'er'); return; }
     toast('✓ Cuenta movida → ' + r.codigo, 'ok');
@@ -44143,7 +44147,10 @@ function sgctPcLoadGrupo(grupo) {
       }
 
       return '<div class="pa-wrap" style="margin-bottom:20px">'
-        + '<div style="background:linear-gradient(135deg,'+g.color+','+g.colorDark+');padding:11px 16px;display:flex;justify-content:space-between;align-items:center">'
+        + '<div'
+          + (SGCT_EDIT_MODE ? ' ondragover="sgctPcDragOver(event)" ondragleave="sgctPcDragLeave(event)"'
+                            + ' ondrop="sgctPcDrop(event,null,'+s.id+')" title="Soltá una cuenta acá para traerla a esta sección"' : '')
+          + ' style="background:linear-gradient(135deg,'+g.color+','+g.colorDark+');padding:11px 16px;display:flex;justify-content:space-between;align-items:center">'
           + '<div style="display:flex;align-items:center;gap:10px">'
             + '<strong style="color:#fff;font-size:14px;letter-spacing:.3px">'+s.codigo+' — '+sgctEsc(s.nombre)+'</strong>'
             + (s.activo ? '' : '<span style="font-size:11px;color:rgba(255,255,255,.7);font-style:italic">(inactiva)</span>')
@@ -44167,7 +44174,7 @@ function sgctPcLoadGrupo(grupo) {
           + '<tbody>'
             + titsSec.map(filaTitulo).join('')
             + ((cuentasSinTit.length || SGCT_EDIT_MODE)
-              ? '<tr'+(SGCT_EDIT_MODE ? ' ondragover="sgctPcDragOver(event)" ondragleave="sgctPcDragLeave(event)" ondrop="sgctPcDrop(event,null)"' : '')+' style="background:#f1f5f9"><td colspan="4" style="padding:5px 14px;font-size:11px;color:var(--mut);font-style:italic">📌 Sin título asignado'+(SGCT_EDIT_MODE?' <span style="color:#16a34a">(soltá acá para quitar de un título)</span>':'')+'</td></tr>'
+              ? '<tr'+(SGCT_EDIT_MODE ? ' ondragover="sgctPcDragOver(event)" ondragleave="sgctPcDragLeave(event)" ondrop="sgctPcDrop(event,null,'+s.id+')"' : '')+' style="background:#f1f5f9"><td colspan="4" style="padding:5px 14px;font-size:11px;color:var(--mut);font-style:italic">📌 Sin título asignado'+(SGCT_EDIT_MODE?' <span style="color:#16a34a">(soltá acá para quitar de un título)</span>':'')+'</td></tr>'
                 + cuentasSinTit.map(filaCuenta).join('')
               : '')
           + '</tbody>'

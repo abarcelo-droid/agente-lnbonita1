@@ -926,6 +926,12 @@ router.post('/:id(\\d+)/reasignar-titulo', requireAdmin, (req, res) => {
   const tituloIdRaw = req.body?.titulo_id;
   const tituloId = (tituloIdRaw === null || tituloIdRaw === undefined || tituloIdRaw === '')
     ? null : parseInt(tituloIdRaw, 10);
+  // Soltarla en OTRA SECCIÓN, sin título. Antes este parámetro se declaraba en el
+  // comentario de la ruta y no se leía: la cuenta se quedaba siempre en su propia
+  // sección, así que sacarla de un título para llevarla a otro lado no se podía.
+  const seccionPedidaRaw = req.body?.seccion_id;
+  const seccionPedida = (seccionPedidaRaw === null || seccionPedidaRaw === undefined || seccionPedidaRaw === '')
+    ? null : parseInt(seccionPedidaRaw, 10);
 
   let seccionId = cuenta.seccion_id;
   let nuevoCodigo = null;
@@ -959,6 +965,32 @@ router.post('/:id(\\d+)/reasignar-titulo', requireAdmin, (req, res) => {
     return primerHueco(prefijo, id);   // ver el comentario de primerHueco
   };
 
+  // ── NO SE CRUZA DE GRUPO ──────────────────────────────────────────────
+  // Una cuenta de Activo no se arrastra a Ingresos. No es una preferencia de
+  // pantalla: el grupo es LO QUE LA CUENTA ES. Mover un Activo a Ingresos no
+  // reordena nada, cambia la naturaleza de la cuenta — y los asientos que ya la
+  // usaron se quedan diciendo otra cosa de la que dijeron el día que se hicieron.
+  //
+  // Se chequea en el servidor y no sólo en la pantalla: el árbol muestra un grupo
+  // por vez, así que arrastrando no se llega a otro, pero el pedido a mano sí.
+  const grupoDe = (secId) =>
+    db.prepare('SELECT grupo FROM sg_cuentas_secciones WHERE id = ?').get(secId)?.grupo || null;
+  const destinoSec = tituloId
+    ? db.prepare('SELECT seccion_id FROM sg_cuentas_titulos WHERE id = ?').get(tituloId)?.seccion_id
+    : (seccionPedida || cuenta.seccion_id);
+  const grupoOrigen  = grupoDe(cuenta.seccion_id);
+  const grupoDestino = destinoSec ? grupoDe(destinoSec) : null;
+  if (grupoOrigen && grupoDestino && grupoOrigen !== grupoDestino) {
+    const nombre = { activo: 'Activo', pasivo: 'Pasivo', patrimonio_neto: 'Patrimonio',
+                     ingresos: 'Ingresos', gastos: 'Egresos' };
+    return res.status(400).json({
+      error: `No se puede mover una cuenta de ${nombre[grupoOrigen] || grupoOrigen} a `
+           + `${nombre[grupoDestino] || grupoDestino}: el grupo dice qué ES la cuenta, y los `
+           + `asientos que ya la usaron quedarían diciendo otra cosa. Si de verdad va en el otro `
+           + `grupo, creá la cuenta nueva allá y desactivá ésta.`,
+    });
+  }
+
   try {
     if (tituloId) {
       const tit = db.prepare('SELECT * FROM sg_cuentas_titulos WHERE id = ?').get(tituloId);
@@ -976,8 +1008,9 @@ router.post('/:id(\\d+)/reasignar-titulo', requireAdmin, (req, res) => {
         return res.status(400).json({ error: `No quedan códigos libres bajo el título ${tit.codigo}.` });
       }
     } else {
+      if (seccionPedida) seccionId = seccionPedida;
       const sec = db.prepare('SELECT * FROM sg_cuentas_secciones WHERE id = ?').get(seccionId);
-      if (!sec) return res.status(400).json({ error: 'la cuenta no tiene sección válida' });
+      if (!sec) return res.status(400).json({ error: 'la sección de destino no existe' });
       if (!/^\d\.\d{2}$/.test(String(sec.codigo))) {
         return res.status(400).json({
           error: `Esta cuenta no puede quedar SIN TÍTULO en la sección ${sec.codigo}: para eso `
