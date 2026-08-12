@@ -2089,6 +2089,9 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       .sg-oc-fila{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:12px;align-items:stretch}
       .sg-oc-fila > .sg-oc-box{margin-top:0;display:flex;flex-direction:column}
       .sg-oc-fila label{min-height:2.1em;display:flex;align-items:flex-end;line-height:1.05}
+      /* El dato derivado, debajo del pactado: se lee como aclaración y no compite
+         con el número que de verdad importa. */
+      .sg-oc-sub{font-size:11px;font-weight:400;color:var(--mut);margin-top:1px}
       .sg-oc-traza{font-family:ui-monospace,Consolas,monospace;font-size:12.5px;font-weight:700;
                    color:var(--burg);letter-spacing:.06em;margin-top:3px}
       .sg-oc-box-tit{font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--mut);margin-bottom:10px}
@@ -4393,8 +4396,45 @@ function sgOcVer(id){
     // arriba, el encabezado se leía como parte de los datos de la orden.
     h+='<div style="border-top:1px solid var(--bor);padding-top:12px">'
       +'<div style="font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--mut);margin-bottom:8px">📦 Productos</div>';
-    h+='<table class="pa-tbl" style="margin-bottom:12px"><thead><tr><th style="padding-top:10px;padding-bottom:10px">Producto</th><th>Present.</th><th style="text-align:right">Kg est.</th><th style="text-align:right">$/kg</th><th style="text-align:right">Kg recibidos</th></tr></thead><tbody>';
-    (o.items||[]).forEach(function(it){ h+='<tr><td>'+esc(it.producto_nombre||'')+'</td><td>'+esc(it.presentacion_nombre||'—')+'</td><td style="text-align:right">'+nr(it.kg_estimados)+'</td><td style="text-align:right">'+(it.precio_estimado_por_kg!=null?sgMoney(it.precio_estimado_por_kg):'—')+'</td><td style="text-align:right">'+nr(it.kg_recibidos)+'</td></tr>'; });
+    h+='<table class="pa-tbl" style="margin-bottom:12px"><thead><tr><th style="padding-top:10px;padding-bottom:10px">Producto</th><th>Present.</th><th style="text-align:right">Pactado</th><th style="text-align:right">Precio</th><th style="text-align:right">Kg est.</th><th style="text-align:right">Kg recibidos</th></tr></thead><tbody>';
+    // ── LA COMPRA, COMO SE PACTÓ ──────────────────────────────────────────
+    // La tabla mostraba sólo kg y $/kg, que es la unidad en la que el sistema
+    // costea. Pero la compra se pactó en bultos y a tanto el bulto: al abrir la
+    // orden para verificarla contra lo que se habló, había que hacer la cuenta
+    // al revés y a mano.
+    //
+    // Ahora se muestran las dos: primero la unidad EN QUE SE PACTÓ —que es la
+    // que se controla contra el proveedor— y debajo, en chico, la que usa el
+    // sistema. Los kilos no se van: son los que mandan para el stock y el costo.
+    (o.items || []).forEach(function(it) {
+      var porBulto = it.modo_carga === 'bulto';
+      // Kilos que entran en un bulto. Si no quedó guardado, se deduce de lo
+      // cargado; sin eso no se puede pasar de $/kg a $/bulto.
+      var kgBulto = (it.kg_por_bulto != null && it.kg_por_bulto > 0)
+        ? Number(it.kg_por_bulto)
+        : ((it.cantidad_estimada_presentaciones > 0 && it.kg_estimados > 0)
+            ? it.kg_estimados / it.cantidad_estimada_presentaciones : null);
+      var precioKg = it.precio_estimado_por_kg;
+      var precioBulto = (precioKg != null && kgBulto) ? precioKg * kgBulto : null;
+
+      var pactado = porBulto
+        ? nr(it.cantidad_estimada_presentaciones) + ' bultos'
+          + (kgBulto ? '<div class="sg-oc-sub">de ' + nr(kgBulto) + ' kg</div>' : '')
+        : nr(it.kg_estimados) + ' kg';
+      var precio = porBulto
+        ? (precioBulto != null
+            ? sgMoney(precioBulto) + ' /bulto'
+              + (precioKg != null ? '<div class="sg-oc-sub">' + sgMoney(precioKg) + ' /kg</div>' : '')
+            : '—')
+        : (precioKg != null ? sgMoney(precioKg) + ' /kg' : '—');
+
+      h += '<tr><td>' + esc(it.producto_nombre || '') + '</td>'
+        + '<td>' + esc(it.presentacion_nombre || '—') + '</td>'
+        + '<td style="text-align:right"><strong>' + pactado + '</strong></td>'
+        + '<td style="text-align:right"><strong>' + precio + '</strong></td>'
+        + '<td style="text-align:right">' + nr(it.kg_estimados) + '</td>'
+        + '<td style="text-align:right">' + nr(it.kg_recibidos) + '</td></tr>';
+    });
     h+='</tbody></table></div>';
     if(lotes.length){
       h+='<div style="font-weight:700;font-size:12px;text-transform:uppercase;color:var(--mut);margin-bottom:6px">Lotes</div>';
