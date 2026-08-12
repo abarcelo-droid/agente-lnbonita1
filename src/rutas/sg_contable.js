@@ -65,13 +65,30 @@ function cuentaEsImputable(db, cuentaId) {
 function codigoEnUso(db, codigo, excepto) {
   const cod = String(codigo).trim();
   excepto = excepto || {};
-  const sec = db.prepare('SELECT id FROM sg_cuentas_secciones WHERE codigo = ?').get(cod);
-  if (sec && !(excepto.tabla === 'secciones' && excepto.id === sec.id)) return { nivel: 'sección', id: sec.id };
-  const tit = db.prepare('SELECT id FROM sg_cuentas_titulos WHERE codigo = ?').get(cod);
-  if (tit && !(excepto.tabla === 'titulos' && excepto.id === tit.id)) return { nivel: 'título', id: tit.id };
-  const cta = db.prepare('SELECT id FROM sg_cuentas WHERE codigo = ?').get(cod);
-  if (cta && !(excepto.tabla === 'cuentas' && excepto.id === cta.id)) return { nivel: 'cuenta', id: cta.id };
-  return null;
+  // Se devuelve el NOMBRE y si está desactivada, no sólo "existe". El chequeo
+  // mira TODO el plan —las tres tablas, activas y desactivadas— pero la pantalla
+  // muestra sólo las activas del grupo de la pestaña abierta. Así que el choque
+  // más común es contra algo que el usuario NO PUEDE VER, y el mensaje anterior
+  // lo dejaba buscando un código que no aparecía en ningún lado.
+  const buscar = (tabla, etiqueta, extra) => {
+    const r = db.prepare(`SELECT id, nombre, activo${extra || ''} FROM ${tabla} WHERE codigo = ?`).get(cod);
+    if (!r) return null;
+    if (excepto.tabla === tabla.replace('sg_cuentas_', '').replace('sg_cuentas', 'cuentas') && excepto.id === r.id) return null;
+    return { nivel: etiqueta, id: r.id, nombre: r.nombre, activo: !!r.activo, grupo: r.grupo };
+  };
+  return buscar('sg_cuentas_secciones', 'sección', ', grupo')
+      || buscar('sg_cuentas_titulos', 'título')
+      || buscar('sg_cuentas', 'cuenta');
+}
+
+// El mensaje que ve el usuario. Dice DÓNDE está el código, que es lo único que
+// le sirve para poder resolverlo.
+function mensajeChoque(codigo, choque) {
+  const art = choque.nivel === 'sección' || choque.nivel === 'cuenta' ? 'la' : 'el';
+  let m = `El código ${codigo} ya lo usa ${art} ${choque.nivel} "${choque.nombre}"`;
+  if (choque.grupo) m += ` (grupo ${choque.grupo})`;
+  if (!choque.activo) m += ', que está DESACTIVADA y por eso no aparece en la lista';
+  return m + '. Los códigos no se pueden repetir entre secciones, títulos y cuentas.';
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -101,7 +118,7 @@ router.post('/titulos', requireAdmin, (req, res) => {
   const sec = db.prepare('SELECT id FROM sg_cuentas_secciones WHERE id = ?').get(parseInt(seccion_id, 10));
   if (!sec) return res.status(400).json({ error: 'seccion_id inválido' });
   const choque = codigoEnUso(db, codigoStr);
-  if (choque) return res.status(400).json({ error: `El código ${codigoStr} ya está en uso por un${choque.nivel === 'sección' ? 'a' : ''} ${choque.nivel}. No puede repetirse entre secciones, títulos y cuentas.` });
+  if (choque) return res.status(400).json({ error: mensajeChoque(codigoStr, choque) });
   try {
     const r = db.prepare(`
       INSERT INTO sg_cuentas_titulos (seccion_id, codigo, nombre, orden, activo)
@@ -125,7 +142,7 @@ router.put('/titulos/:id', requireAdmin, (req, res) => {
       return res.status(400).json({ error: 'El código del título debe tener formato X.XX.XX (ej: 1.01.01)' });
     }
     const choque = codigoEnUso(db, codigoStr, { tabla: 'titulos', id });
-    if (choque) return res.status(400).json({ error: `El código ${codigoStr} ya está en uso por un${choque.nivel === 'sección' ? 'a' : ''} ${choque.nivel}. No puede repetirse entre secciones, títulos y cuentas.` });
+    if (choque) return res.status(400).json({ error: mensajeChoque(codigoStr, choque) });
     db.prepare("UPDATE sg_cuentas_titulos SET codigo = ?, actualizado_en = datetime('now','localtime') WHERE id = ?").run(codigoStr, id);
   }
   if (nombre && String(nombre).trim() !== tit.nombre) {
@@ -173,7 +190,7 @@ router.post('/secciones', requireAdmin, (req, res) => {
     return res.status(400).json({ error: 'codigo debe tener formato N o N.NN (ej: 5 o 5.08)' });
   }
   const choque = codigoEnUso(db, codigoStr);
-  if (choque) return res.status(400).json({ error: `El código ${codigoStr} ya está en uso por un${choque.nivel === 'sección' ? 'a' : ''} ${choque.nivel}. No puede repetirse entre secciones, títulos y cuentas.` });
+  if (choque) return res.status(400).json({ error: mensajeChoque(codigoStr, choque) });
   try {
     const r = db.prepare(`
       INSERT INTO sg_cuentas_secciones (codigo, nombre, orden, activo, grupo)
@@ -195,7 +212,7 @@ router.put('/secciones/:id', requireAdmin, (req, res) => {
   if (codigo !== undefined && String(codigo).trim() !== String(sec.codigo)) {
     const codigoStr = String(codigo).trim();
     const choque = codigoEnUso(db, codigoStr, { tabla: 'secciones', id });
-    if (choque) return res.status(400).json({ error: `El código ${codigoStr} ya está en uso por un${choque.nivel === 'sección' ? 'a' : ''} ${choque.nivel}. No puede repetirse entre secciones, títulos y cuentas.` });
+    if (choque) return res.status(400).json({ error: mensajeChoque(codigoStr, choque) });
     db.prepare("UPDATE sg_cuentas_secciones SET codigo = ?, actualizado_en = datetime('now','localtime') WHERE id = ?").run(codigoStr, id);
   }
   if (nombre && String(nombre).trim() !== sec.nombre) {
@@ -329,7 +346,7 @@ router.post('/', requireAdmin, (req, res) => {
   if (!sec) return res.status(400).json({ error: 'seccion_id inválido' });
 
   const choque = codigoEnUso(db, codigo);
-  if (choque) return res.status(400).json({ error: `El código ${codigo} ya está en uso por un${choque.nivel === 'sección' ? 'a' : ''} ${choque.nivel}. No puede repetirse entre secciones, títulos y cuentas.` });
+  if (choque) return res.status(400).json({ error: mensajeChoque(codigoStr, choque) });
 
   try {
     const ordenMax = db.prepare('SELECT COALESCE(MAX(orden), 0) AS m FROM sg_cuentas WHERE seccion_id = ?').get(seccion_id).m;
@@ -374,7 +391,7 @@ router.put('/:id(\\d+)', requireAdmin, (req, res) => {
       return res.status(400).json({ error: 'Código inválido. Las cuentas deben respetar el formato X.XX.XX.XXXX (ej: 1.01.01.0001).' });
     }
     const choque = codigoEnUso(db, codigo, { tabla: 'cuentas', id });
-    if (choque) return res.status(400).json({ error: `El código ${codigo} ya está en uso por un${choque.nivel === 'sección' ? 'a' : ''} ${choque.nivel}. No puede repetirse entre secciones, títulos y cuentas.` });
+    if (choque) return res.status(400).json({ error: mensajeChoque(codigoStr, choque) });
   }
   if (tipo && !['resultado', 'patrimonial'].includes(tipo)) {
     return res.status(400).json({ error: 'tipo inválido' });
