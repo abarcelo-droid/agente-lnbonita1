@@ -162,9 +162,14 @@ const PREFIJOS = [
   ['ab-mandata',         'abasto/mandatas,abasto/caja'],
   // IFCO: sólo los tramos que escribe ÚNICAMENTE el panel. Los que también usa
   // la app de celular quedan afuera a propósito — ver la nota al final.
-  ['ab-ifcos',           'ifco/talonarios,ifco/envios,ifco/movimientos,ifco/autorizaciones-retiro,'
-                       + 'ifco/consolidacion,ifco/consolidacion-revisar,ifco/consolidar,'
-                       + 'ifco/faltantes-sg,ifco/papelera,ifco/admin'],
+  // 'ifco' A SECAS, y ahora sí: cubre TODAS las direcciones de IFCO, incluidas
+  // las seis que usa la app de celular. Antes quedaban afuera porque la app no
+  // es un menú y no había a quién tildárselo — el que sellaba remitos desde el
+  // teléfono se habría quedado sin poder trabajar. Eso lo resuelve la migración
+  // ifco_menu_a_quien_carga.js, que le da el menú "IFCOs" a quien YA venía
+  // cargando por ahí, mirando los datos. Primero se reparte el acceso, después
+  // se cierra la puerta.
+  ['ab-ifcos',           'ifco'],
   ['ab-liquidaciones',   'liquidaciones'],
 
   // ── Comercial ─────────────────────────────────────────────────────────
@@ -214,15 +219,8 @@ const PREFIJOS = [
 // trata, y declarar un prefijo compartido bloquearía pantallas que se usan todos
 // los días. Protegerlos mal es peor que no protegerlos.
 //
-//   LA APP DE CELULAR DE IFCO (src/mifco.html, servida en /m/ifco) escribe en
-//   seis direcciones y NO ES UN MÓDULO DEL MENÚ: no hay nada que tildarle a
-//   nadie. Si se declararan a 'ab-ifcos', el día que un galponero sin ese menú
-//   sellara un remito desde el teléfono, se quedaría sin poder trabajar. Son:
-//     ifco/remitos (y /sellar, /sellado-directo), ifco/recepciones-proveedor,
-//     ifco/stocks-reales, ifco/ocr, ifco/proveedores, ifco/san-geronimo.
-//   Por eso tampoco se declara 'ifco' a secas: taparía a las seis.
-//   PARA CERRARLAS hace falta saber qué menú tiene la gente que usa el teléfono.
-//   Es una pregunta para el dueño, no una decisión técnica.
+//   (La app de celular de IFCO ya NO está en esta lista: se cerró. Ver el
+//   comentario de 'ab-ifcos' arriba y la migración ifco_menu_a_quien_carga.js.)
 //
 //   /api/auth NO se declara nunca: mezcla la administración de usuarios con el
 //   circuito de sesión (/auth/me, /auth/logout) que llama TODO el panel, la app
