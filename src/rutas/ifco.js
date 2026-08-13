@@ -529,6 +529,19 @@ function _numTalonario(n_remito_sg, n_remito_ifco) {
   return digits ? parseInt(digits, 10) : null;
 }
 
+// UNA DEVOLUCIÓN DE CAJAS. En el archivo de IFCO viene del lado de los egresos,
+// con un número que NO tiene el formato de remito de despacho (no lleva la "R":
+// "0008176103" contra "0015R01653325"). No es un despacho a un supermercado: son
+// cajas que vuelven a IFCO, así que se anotan como un RETIRO EN NEGATIVO — el
+// retiro es lo que sacamos de IFCO, y devolver lo baja.
+//
+// La regla vive acá y el backend la vuelve a aplicar antes de escribir: si el
+// criterio lo decidiera el navegador, cualquiera podría pedir que se grabe un
+// retiro negativo por algo que no es una devolución.
+function _esDevolucionIfco(detalle) {
+  return /devoluc/i.test(String(detalle || ''));
+}
+
 // Convierte el formato del archivo IFCO al formato canónico del sistema
 // "0015R01508545" → "00015-01508545"
 function _archivoANumeroSistema(s) {
@@ -678,7 +691,12 @@ function _parsearFormatoNuevo(ws) {
       fecha:                fechaIso,
       cliente:              detalleStr || null,
       detalle:              detalleStr || null,
-      cantidad:             cant
+      cantidad:             cant,
+      // El archivo trae DOS columnas, INGRESOS y EGRESOS, y hasta acá se sabía
+      // de cuál venía cada fila — después se perdía y en pantalla no había
+      // forma de saber si un renglón sumaba o restaba. Ahora viaja.
+      direccion:            cantEgr > 0 ? 'egreso' : 'ingreso',
+      es_devolucion:        _esDevolucionIfco(detalleStr)
     };
 
     // Clasificar la fila por contenido del detalle
@@ -4778,6 +4796,7 @@ router.post('/consolidar/preview', upload.single('archivo'), async function(req,
       desp.no_encontrados.push({
         n_remito_archivo: arch.n_remito_archivo, n_remito_sistema: arch.n_remito_sistema,
         fecha: arch.fecha, detalle: arch.detalle, cantidad: arch.cantidad,
+        direccion: arch.direccion, es_devolucion: arch.es_devolucion,
         cadena_sugerida: _matchCadenaIFCO(arch.detalle)
       });
     });
@@ -4798,7 +4817,8 @@ router.post('/consolidar/preview', upload.single('archivo'), async function(req,
       if (!sis) {
         ing.no_encontrados.push({
           n_remito_archivo: arch.n_remito_archivo, n_remito_sistema: arch.n_remito_sistema,
-          fecha: arch.fecha, detalle: arch.detalle, cantidad: arch.cantidad
+          fecha: arch.fecha, detalle: arch.detalle, cantidad: arch.cantidad,
+          direccion: arch.direccion, es_devolucion: arch.es_devolucion
         });
       } else if (sis.consolidado_en) {
         ing.ya_consolidados.push({ archivo: arch, sistema: sis });
@@ -4821,7 +4841,8 @@ router.post('/consolidar/preview', upload.single('archivo'), async function(req,
       if (!sis) {
         r22out.no_encontrados.push({
           n_remito_archivo: arch.n_remito_archivo, n_remito_sistema: arch.n_remito_sistema,
-          fecha: arch.fecha, detalle: arch.detalle, cantidad: arch.cantidad
+          fecha: arch.fecha, detalle: arch.detalle, cantidad: arch.cantidad,
+          direccion: arch.direccion, es_devolucion: arch.es_devolucion
         });
       } else if (sis.consolidado_en) {
         r22out.ya_consolidados.push({ archivo: arch, sistema: sis });
@@ -5384,7 +5405,40 @@ router.post('/consolidar/aplicar', express.json(), function(req, res) {
       for (let i = 0; i < (desp.crear || []).length; i++) {
         const n = desp.crear[i];
         try {
-          if (!n.n_remito_sistema || !n.cantidad) { result.despachos.errores.push({ idx: i, error: 'Faltan datos' }); continue; }
+          const cant = Math.abs(parseInt(n.cantidad, 10) || 0);
+          if (!cant) { result.despachos.errores.push({ n_remito: n.n_remito_archivo || null, error: 'Sin cantidad' }); continue; }
+
+          // DEVOLUCIÓN. No es un despacho: son cajas que vuelven a IFCO. Se
+          // graba como movimiento tipo 'retiro' con cantidad NEGATIVA, que es
+          // como se cargan a mano, y queda consolidada de una porque el número
+          // salió del propio archivo de IFCO.
+          //
+          // El criterio se vuelve a evaluar acá sobre el detalle: el navegador
+          // no decide que algo se grabe en negativo.
+          if (_esDevolucionIfco(n.detalle)) {
+            const nRem = String(n.n_remito_archivo || n.n_remito_sistema || '').trim() || null;
+            if (nRem) {
+              const yaEsta = db.prepare(
+                "SELECT id FROM ifco_movimientos WHERE n_remito = ? AND eliminado_en IS NULL").get(nRem);
+              if (yaEsta) { result.despachos.errores.push({ n_remito: nRem, error: 'Ya existe' }); continue; }
+            }
+            db.prepare(`INSERT INTO ifco_movimientos
+              (fecha, tipo, cantidad, n_remito, notas, usuario_id, pendiente, consolidado_en)
+              VALUES (?, 'retiro', ?, ?, ?, ?, 0, datetime('now','localtime'))`)
+              .run(n.fecha || null, -cant, nRem,
+                   'Devolución importada del archivo IFCO' + (n.detalle ? ' — ' + String(n.detalle).slice(0, 120) : ''),
+                   userId);
+            result.despachos.creados++;
+            continue;
+          }
+
+          // Un despacho necesita el número en formato de remito (NNNNRNNNNNNNN).
+          // Decir "faltan datos" no ayudaba a nadie: lo que falta es eso.
+          if (!n.n_remito_sistema) {
+            result.despachos.errores.push({ n_remito: n.n_remito_archivo || null,
+              error: 'El número del archivo no tiene formato de remito (NNNNRNNNNNNNN) y el detalle no dice que sea una devolución' });
+            continue;
+          }
           const ex = db.prepare("SELECT id FROM ifco_remitos_super WHERE n_remito_ifco=? AND eliminado_en IS NULL").get(n.n_remito_sistema);
           if (ex) { result.despachos.errores.push({ n_remito: n.n_remito_sistema, error: 'Ya existe' }); continue; }
           db.prepare(`INSERT INTO ifco_remitos_super (

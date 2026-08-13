@@ -31534,6 +31534,7 @@ function _ifcoCsRender() {
         '<th style="padding:6px 8px;text-align:left">N° Remito</th>' +
         '<th style="padding:6px 8px;text-align:left">Fecha archivo</th>' +
         '<th style="padding:6px 8px;text-align:left">Detalle</th>' +
+        '<th style="padding:6px 8px;text-align:left;width:100px">Mov.</th>' +
         '<th style="padding:6px 8px;text-align:right">Cant.</th>' +
       '</tr></thead><tbody>';
     d.a_marcar.forEach(function(it) {
@@ -31543,6 +31544,7 @@ function _ifcoCsRender() {
         '<td style="padding:5px 8px;font-family:monospace">'+_ifcoEsc(it.archivo.n_remito_archivo)+'</td>' +
         '<td style="padding:5px 8px">'+(it.archivo.fecha?_ifcoFecha(it.archivo.fecha):'—')+'</td>' +
         '<td style="padding:5px 8px;color:var(--mut)">'+_ifcoEsc(it.archivo.detalle||'—')+'</td>' +
+        '<td style="padding:5px 8px">'+_ifcoDirBadge(it.archivo)+'</td>' +
         '<td style="padding:5px 8px;text-align:right;font-variant-numeric:tabular-nums"><b>'+_ifcoFmt(it.archivo.cantidad)+'</b></td>' +
       '</tr>';
     });
@@ -31580,12 +31582,29 @@ function _ifcoCsRender() {
   document.getElementById('ifco-cs2-btn-aplicar').style.display = _ifcoCs2.step === 3 ? '' : 'none';
 }
 
+// ¿Este renglón suma o resta? Sale de las columnas INGRESOS / EGRESOS del propio
+// archivo de IFCO, no de una interpretación nuestra. Sin esto había que adivinar
+// mirando el nombre de la solapa, y en la solapa de Despachos hay renglones que
+// en realidad entran (las devoluciones).
+function _ifcoDirBadge(it) {
+  var esDev = it && it.es_devolucion;
+  if (esDev) {
+    return '<span class="ifco-badge" style="background:#e0e7ff;color:#3730a3" ' +
+           'title="Cajas que vuelven a IFCO. Se graba como retiro en negativo.">↩ Devolución</span>';
+  }
+  if (!it || !it.direccion) return '';
+  return it.direccion === 'ingreso'
+    ? '<span class="ifco-badge" style="background:#dcfce7;color:#166534" title="Entra: suma al stock">↓ Ingreso</span>'
+    : '<span class="ifco-badge" style="background:#fee2e2;color:#991b1b" title="Sale: resta del stock">↑ Egreso</span>';
+}
+
 // Tabla de no encontrados con campos editables según la categoría
 function _ifcoCsTblNoEncontrados(cat, noArr) {
   let head = '<th style="padding:6px 8px;text-align:left;width:30px"></th>' +
              '<th style="padding:6px 8px;text-align:left">N° Remito</th>' +
              '<th style="padding:6px 8px;text-align:left">Fecha</th>' +
              '<th style="padding:6px 8px;text-align:left">Detalle</th>' +
+             '<th style="padding:6px 8px;text-align:left;width:100px">Mov.</th>' +
              '<th style="padding:6px 8px;text-align:right">Cant.</th>';
   if (cat === 'ingresos') head += '<th style="padding:6px 8px;text-align:left;width:140px">Sucursal IFCO *</th><th style="padding:6px 8px;text-align:left;width:80px">Modelo</th>';
   else if (cat === 'r22') head += '<th style="padding:6px 8px;text-align:left;width:160px">Proveedor (opcional)</th>';
@@ -31596,7 +31615,9 @@ function _ifcoCsTblNoEncontrados(cat, noArr) {
       '<td style="padding:5px 8px;font-family:monospace">'+_ifcoEsc(it.n_remito_archivo)+'</td>' +
       '<td style="padding:5px 8px">'+(it.fecha?_ifcoFecha(it.fecha):'—')+'</td>' +
       '<td style="padding:5px 8px;color:var(--mut)">'+_ifcoEsc(it.detalle||'—')+'</td>' +
-      '<td style="padding:5px 8px;text-align:right;font-variant-numeric:tabular-nums"><b>'+_ifcoFmt(it.cantidad)+'</b></td>';
+      '<td style="padding:5px 8px">'+_ifcoDirBadge(it)+'</td>' +
+      '<td style="padding:5px 8px;text-align:right;font-variant-numeric:tabular-nums"><b>'+
+        (it.es_devolucion ? '−' : '')+_ifcoFmt(it.cantidad)+'</b></td>';
     if (cat === 'ingresos') {
       html += '<td style="padding:5px 8px"><select onchange="_ifcoCs2.sel.ingresos.no['+idx+'].sucursal_ifco=this.value" style="font-size:12px;width:100%;padding:4px;border-radius:4px;border:1px solid var(--bor)">' +
                 '<option value="">— Elegí —</option>' +
@@ -31653,7 +31674,12 @@ async function ifcoConsolidarAplicar() {
       });
       _ifcoCs2.sel[cat].no.forEach(function(it){
         if (!it.create) return;
-        const obj = { n_remito_sistema: it.n_remito_sistema, fecha: it.fecha, cantidad: it.cantidad };
+        // n_remito_archivo y detalle van SIEMPRE: son los que necesita el
+        // backend para reconocer una devolución (el número no tiene formato de
+        // remito, así que n_remito_sistema viene vacío y antes esto se caía con
+        // "Faltan datos").
+        const obj = { n_remito_sistema: it.n_remito_sistema, n_remito_archivo: it.n_remito_archivo,
+                      detalle: it.detalle, fecha: it.fecha, cantidad: it.cantidad };
         if (cat === 'despachos') obj.empresa = it.cadena_sugerida || null;
         else if (cat === 'ingresos') { obj.sucursal_ifco = it.sucursal_ifco; obj.modelo = it.modelo || null; }
         else if (cat === 'r22') obj.proveedor_id = it.proveedor_id || null;
@@ -32913,7 +32939,11 @@ async function ifcoCargarMovimientos() {
       return;
     }
     tb.innerHTML = rows.map(function(r){
-      const tipoBadge = r.tipo === 'retiro'
+      // Un retiro en negativo no es un retiro: son cajas que volvieron a IFCO.
+      // Mostrarlo como "Retiro −305" se lee mal y se carga peor.
+      const tipoBadge = (r.tipo === 'retiro' && Number(r.cantidad) < 0)
+        ? '<span class="ifco-badge" style="background:#e0e7ff;color:#3730a3" title="Cajas devueltas a IFCO">↩ Devolución</span>'
+        : r.tipo === 'retiro'
         ? '<span class="ifco-badge" style="background:#dbeafe;color:#1e40af">Retiro</span>'
         : '<span class="ifco-badge" style="background:#fee2e2;color:#991b1b">Pérdida</span>';
       const pendBadge = r.pendiente
