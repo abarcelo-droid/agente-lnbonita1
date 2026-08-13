@@ -298,6 +298,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   <div class="ni" data-sec="sg-importacion" data-admin-only="1"></div>
   <div class="ni" data-sec="sg-catalogo" data-admin-only="1"></div>
   <div class="ni" data-sec="sg-reportes" data-admin-only="1"></div>
+  <div class="ni" data-sec="sg-control-coop" data-admin-only="1"></div>
 
   <!-- Contabilidad San Gerónimo — mismo criterio que los .ni de Abasto SG de arriba:
        el sidebar VISIBLE lo arma sidebar-v2.js desde modulos_config (ver
@@ -2093,7 +2094,67 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
          con el número que de verdad importa. */
       .sg-oc-sub{font-size:11px;font-weight:400;color:var(--mut);margin-top:1px}
       /* Miniaturas de las fotos de la recepción. */
-      .sg-rec-prev{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
+      /* ── RECEPCIÓN DE MERCADERÍA — ASISTENTE A PANTALLA COMPLETA ──────────────
+   La recepción se hace parado en la playa, muchas veces con el teléfono en la
+   mano y el camión esperando. Antes era un modal angosto con todo apilado: el
+   cuerpo colgaba de un .fg (grid de dos columnas), así que cada paso ocupaba
+   la MITAD del ancho aunque el modal midiera 1100px. Ahora ocupa la pantalla
+   entera y va de a un paso, que es como se hace el trabajo.
+   Todo scopeado a #sg-rec-modal: .ab-modal y .mhd/.mht/.mcl las comparten
+   cuarenta modales del panel y no se tocan. */
+#sg-rec-modal .sg-rec-shell{width:100vw;max-width:100vw;height:100vh;max-height:100vh;height:100dvh;max-height:100dvh;border-radius:0;border:none;padding:0;display:flex;flex-direction:column;overflow:hidden}
+#sg-rec-modal .sg-rec-head{display:flex;align-items:center;gap:16px;padding:12px 24px;border-bottom:1px solid var(--bor);background:var(--sur);flex:0 0 auto}
+#sg-rec-modal .sg-rec-traza{padding:5px 12px;border:1px solid var(--bor);border-radius:8px;background:var(--bg);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* El riel: en pantalla chica scrollea de costado en vez de comerse el alto. */
+#sg-rec-modal .sg-rec-rail{display:flex;align-items:center;gap:2px;padding:9px 24px;border-bottom:1px solid var(--bor);background:var(--bg);overflow-x:auto;flex:0 0 auto}
+#sg-rec-modal .sg-rec-step{display:flex;align-items:center;gap:7px;padding:6px 12px;border-radius:999px;font-size:12.5px;font-weight:600;color:var(--mut);white-space:nowrap;cursor:pointer;border:1px solid transparent}
+#sg-rec-modal .sg-rec-step:hover{background:var(--sur)}
+#sg-rec-modal .sg-rec-step .n{width:22px;height:22px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;border:2px solid var(--bor2);font-size:11.5px;font-weight:700;flex:0 0 auto}
+#sg-rec-modal .sg-rec-step.on{color:var(--txt);background:var(--sur);border-color:var(--bor)}
+#sg-rec-modal .sg-rec-step.on .n{background:var(--burg);border-color:var(--burg);color:#fff}
+#sg-rec-modal .sg-rec-step.ok .n{background:#2e9e5b;border-color:#2e9e5b;color:#fff}
+#sg-rec-modal .sg-rec-sep{flex:0 0 14px;height:2px;background:var(--bor);border-radius:2px}
+/* overscroll-behavior: sin esto, al llegar al final del paso el scroll se
+   encadena a la página de atrás y el operador termina en otro lado. */
+#sg-rec-modal .sg-rec-body{flex:1 1 auto;overflow-y:auto;overscroll-behavior:contain;padding:24px 28px 30px;background:var(--sur)}
+#sg-rec-modal .sg-rec-paso{display:none}
+#sg-rec-modal .sg-rec-paso.on{display:block}
+#sg-rec-modal .sg-rec-tit{font-size:19px;font-weight:700;color:var(--txt);margin-bottom:4px}
+#sg-rec-modal .sg-rec-sub{font-size:12.5px;color:var(--mut);margin-bottom:18px;max-width:920px;line-height:1.5}
+#sg-rec-modal .sg-rec-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:14px}
+/* 16px es el mínimo que no dispara el zoom automático de iOS al enfocar. Esto
+   se carga desde el teléfono: con 13.5px la pantalla salta en cada campo. */
+#sg-rec-modal input,#sg-rec-modal select,#sg-rec-modal textarea{font-size:16px}
+#sg-rec-modal .btn{min-height:40px}
+/* Los números que el operador cuenta: grandes, porque se tipean con guantes. */
+#sg-rec-modal .sg-rec-conteo{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:18px;max-width:760px}
+#sg-rec-modal input.sg-rec-num{font-size:26px;font-weight:700;padding:12px 14px;height:auto}
+#sg-rec-modal .sg-rec-cmp{margin-top:16px;padding:12px 16px;border-radius:10px;font-size:13.5px;max-width:760px}
+#sg-rec-modal .sg-rec-cmp.ok{border:1px solid #2e9e5b;background:rgba(46,158,91,.10)}
+#sg-rec-modal .sg-rec-cmp.dif{border:1px solid #e0a72e;background:rgba(224,167,46,.14)}
+/* Sí / no como dos tarjetas: en el teléfono un radio chiquito se falla. */
+#sg-rec-modal .sg-rec-opciones{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px;max-width:900px}
+#sg-rec-modal .sg-rec-opcion{display:flex;align-items:flex-start;gap:11px;padding:15px 17px;border:1px solid var(--bor);border-radius:12px;background:var(--bg);cursor:pointer;text-transform:none;letter-spacing:0;min-height:0;font-weight:400}
+#sg-rec-modal .sg-rec-opcion.sel{border-color:var(--burg);background:var(--sur);box-shadow:inset 0 0 0 1px var(--burg)}
+#sg-rec-modal .sg-rec-opcion input{width:auto;margin:3px 0 0;flex:0 0 auto}
+#sg-rec-modal .sg-rec-opcion b{display:block;font-size:14px;color:var(--txt)}
+#sg-rec-modal .sg-rec-opcion small{display:block;font-size:12px;color:var(--mut);margin-top:2px}
+#sg-rec-modal .sg-rec-radios{display:flex;gap:18px;align-items:center;padding-top:6px}
+#sg-rec-modal .sg-rec-radios label{text-transform:none;letter-spacing:0;font-size:13px;display:inline-flex;align-items:center;gap:6px;min-height:0;font-weight:500}
+#sg-rec-modal .sg-rec-radios input{width:auto}
+#sg-rec-modal .sg-rec-foot{display:flex;align-items:center;gap:10px;padding:12px 24px;border-top:1px solid var(--bor);background:var(--sur);flex:0 0 auto}
+#sg-rec-modal .sg-rec-falta{flex:1;font-size:12.5px;color:var(--err);min-width:0}
+@media (max-width:820px){
+  #sg-rec-modal .sg-rec-head{padding:10px 14px;gap:10px}
+  #sg-rec-modal .sg-rec-head .mht{font-size:15px}
+  #sg-rec-modal .sg-rec-traza{display:none!important}   /* la partida ya se ve en el paso 1 */
+  #sg-rec-modal .sg-rec-rail{padding:8px 14px}
+  #sg-rec-modal .sg-rec-body{padding:18px 14px 24px}
+  #sg-rec-modal .sg-rec-foot{padding:10px 14px;flex-wrap:wrap}
+  #sg-rec-modal .sg-rec-falta{order:-1;flex:1 0 100%}
+  #sg-rec-modal .sg-rec-tit{font-size:16.5px}
+}
+.sg-rec-prev{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
       .sg-rec-thumb{position:relative;width:62px;height:62px;border-radius:8px;overflow:hidden;border:1px solid var(--bor)}
       .sg-rec-thumb img{width:100%;height:100%;object-fit:cover;display:block}
       .sg-rec-thumb button{position:absolute;top:-6px;right:-6px;width:20px;height:20px;border-radius:50%;
@@ -2511,6 +2572,44 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     <div class="sggd-pane" id="sggd-pane-repaso"><div class="emp" style="padding:40px">🔁 Repasos — próximamente (Fase 3).</div></div>
   </div>
 
+  <!-- ══ San Gerónimo · CONTROL COOPERATIVA ══
+       Lo que la cooperativa descargó, acumulado. Se alimenta solo: cada vez que
+       una recepción contesta "con descarga" en el paso 3, la descarga entra
+       acá. Antes esto sólo se veía dentro de Gastos Directos, mezclado con las
+       cargas de salida y sin filtro por fecha. -->
+  <div class="sec sg-mod" id="sec-sg-control-coop">
+    <div class="ph">
+      <div><div class="ph-t">🤝 San Gerónimo · Control Cooperativa</div>
+        <div class="ph-s">Las descargas de ingreso declaradas en la recepción, por cooperativa y por período</div></div>
+      <button class="btn bo" onclick="sgCcoopLoad()">↻ Actualizar</button>
+    </div>
+
+    <div style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap;margin-bottom:16px">
+      <div class="fl"><label>Desde</label><input type="date" id="sgcc-desde" onchange="sgCcoopLoad()"></div>
+      <div class="fl"><label>Hasta</label><input type="date" id="sgcc-hasta" onchange="sgCcoopLoad()"></div>
+      <div class="fl"><label>Cooperativa</label><select id="sgcc-coop" onchange="sgCcoopLoad()"><option value="">— Todas —</option></select></div>
+      <div style="display:inline-flex;gap:2px;background:var(--bg);border:1px solid var(--bor);border-radius:8px;padding:3px">
+        <div class="sgcc-est on" data-e=""                     onclick="sgCcoopEstado('')">Todas</div>
+        <div class="sgcc-est"    data-e="sin_coop"             onclick="sgCcoopEstado('sin_coop')">⚠️ Sin cooperativa</div>
+        <div class="sgcc-est"    data-e="pendiente_valorizar"  onclick="sgCcoopEstado('pendiente_valorizar')">⏳ A valorizar</div>
+        <div class="sgcc-est"    data-e="valorizado"           onclick="sgCcoopEstado('valorizado')">✅ Valorizadas</div>
+      </div>
+    </div>
+    <style>
+      .sg-mod .sgcc-est{padding:5px 12px;cursor:pointer;font-size:12px;font-weight:600;border-radius:6px;color:var(--mut)}
+      .sg-mod .sgcc-est.on{background:var(--burg);color:#fff}
+      .sg-mod .sgcc-kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:18px}
+      .sg-mod .sgcc-kpi{border:1px solid var(--bor);border-radius:10px;padding:12px 14px;background:var(--bg)}
+      .sg-mod .sgcc-kpi .v{font-size:22px;font-weight:700;color:var(--txt);line-height:1.15}
+      .sg-mod .sgcc-kpi .r{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--mut);margin-top:3px}
+      .sg-mod .sgcc-kpi.alerta{border-color:#e0a72e;background:rgba(224,167,46,.12)}
+    </style>
+
+    <div id="sgcc-kpis" class="sgcc-kpis"></div>
+    <div id="sgcc-coops"></div>
+    <div id="sgcc-detalle"><div class="emp">Cargando…</div></div>
+  </div>
+
   <div class="sec sg-mod" id="sec-sg-importacion">
     <div class="ph"><div><div class="ph-t">🍅 San Gerónimo · Importación</div><div class="ph-s">Cotizador de embarque: costo neto por caja, ajuste por merma y margen proyectado. Estimado vs real.</div></div><button class="btn bb" onclick="sgImpOpen()">+ Nuevo embarque</button></div>
     <div class="ab-table-wrap"><table class="pa-tbl">
@@ -2858,146 +2957,173 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   </div>
 </div>
 
-<!-- Modal Recepción de mercadería — FLUJO EN 2 PASOS (rediseño).
-     PASO 1 (sg-rec-paso1): recepción operativa — OC/fecha + documentación + paletizado + items + obs.
-     PASO 2 (sg-rec-paso2): control de calidad opcional (toggle ámbar) — informe + fotos + PDF.
-     El backend (multipart + fotos + PDF) se reusa de #377; acá solo cambia la UI + preview PDF. -->
+<!-- Modal Recepción de mercadería — ASISTENTE DE 7 PASOS, A PANTALLA COMPLETA.
+     1 Documentación · 2 Pallets y bultos · 3 Descarga · 4 Mercadería y peso ·
+     5 Items a recibir · 6 Diferencias contra la orden · 7 Control de calidad.
+     Cada paso es una etapa real del trabajo. Lo que se conteste en el paso 3
+     alimenta la pantalla Control Cooperativa. El backend (multipart + fotos +
+     PDF) es el mismo: acá sólo cambia por dónde entra el dato. -->
 <div class="ab-modal-overlay" id="sg-rec-modal">
-  <div class="ab-modal" style="width:1100px;max-width:96vw;max-height:92vh;overflow-y:auto">
-    <div class="mhd"><div class="mht">📦 Recepción de mercadería</div><button class="mcl" onclick="closeMB('sg-rec-modal')">×</button></div>
+  <div class="ab-modal sg-rec-shell">
 
-    <!-- La partida que se está recibiendo, a la vista todo el tiempo -->
-    <div id="sg-rec-traza" style="display:none;margin:2px 2px 12px;padding:8px 12px;border:1px solid var(--bor);border-radius:8px;background:var(--bg)"></div>
-
-    <!-- Indicador de pasos -->
-    <div style="display:flex;align-items:center;gap:12px;margin:4px 2px 16px">
-      <div id="sg-rec-chip1" style="display:flex;align-items:center;gap:8px;font-weight:600;font-size:13px">
-        <span id="sg-rec-num1">1</span> Recepción
-      </div>
-      <div id="sg-rec-bar" style="flex:1;height:2px;background:var(--bor);border-radius:2px"></div>
-      <div id="sg-rec-chip2" style="display:flex;align-items:center;gap:8px;font-weight:600;font-size:13px;opacity:.55">
-        <span id="sg-rec-num2">2</span> Control de calidad
-      </div>
+    <!-- ── ENCABEZADO FIJO ─────────────────────────────────────────────── -->
+    <div class="sg-rec-head">
+      <div class="mht" style="margin:0">📦 Recepción de mercadería</div>
+      <div id="sg-rec-traza" class="sg-rec-traza" style="display:none"></div>
+      <div style="flex:1"></div>
+      <button class="mcl" onclick="closeMB('sg-rec-modal')">×</button>
     </div>
 
-    <div class="fg">
+    <!-- ── RIEL DE PASOS ───────────────────────────────────────────────
+         Cada etapa es un paso. Antes eran dos pantallas largas donde había
+         que bajar buscando qué faltaba; ahora se ve de una en qué punto de
+         la recepción está el operador y qué le queda. -->
+    <div class="sg-rec-rail" id="sg-rec-rail"></div>
 
-      <!-- ════════ PASO 1 — Recepción ════════ -->
-      <div id="sg-rec-paso1">
-        <div style="display:grid;grid-template-columns:2fr 1fr;gap:10px">
-          <div class="fl"><label>Orden de compra <span style="font-weight:400;color:var(--mut);font-size:11px">(o recibir sin OC)</span></label><select id="sg-rec-oc" onchange="sgRecOcChange()"></select></div>
-          <div class="fl"><label>Fecha recepción</label><input type="date" id="sg-rec-fecha"></div>
+    <!-- ── CUERPO ──────────────────────────────────────────────────────── -->
+    <div class="sg-rec-body">
+
+      <!-- ════════ 1 · DOCUMENTACIÓN ════════ -->
+      <div class="sg-rec-paso on" data-paso="1">
+        <div class="sg-rec-tit">📄 Documentación</div>
+        <div class="sg-rec-sub">Qué orden se está recibiendo y con qué papeles llegó.</div>
+        <div class="sg-rec-grid">
+          <div class="fl" style="grid-column:span 2"><label>Orden de compra <span style="font-weight:400;color:var(--mut);font-size:11px">(o recibir sin OC)</span></label><select id="sg-rec-oc" onchange="sgRecOcChange()"></select></div>
+          <div class="fl"><label>Fecha recepción</label><input type="date" id="sg-rec-fecha" onchange="sgRecValidar()"></div>
+          <div class="fl"><label>Remito N°</label><input id="sg-rec-remito" placeholder="N° remito proveedor"></div>
+          <div class="fl"><label>Factura N°</label><input id="sg-rec-factura" placeholder="N° factura"></div>
+          <div class="fl"><label>DTV — SENASA</label><input id="sg-rec-dtv" placeholder="código de cierre"></div>
         </div>
+        <!-- La foto del papel vale más que el número tipeado: cuando hay que
+             reclamar, lo que se manda es la foto del remito. -->
+        <div class="sg-oc-box">
+          <div class="sg-oc-box-tit">📷 Fotos del remito / factura / DTV</div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <button class="btn bb bs" type="button" onclick="eid('sg-rec-f-doc-cam').click()">📷 Cámara</button>
+            <button class="btn bo bs" type="button" onclick="eid('sg-rec-f-doc').click()">🖼️ Galería</button>
+          </div>
+          <input type="file" accept="image/*" multiple capture="environment" id="sg-rec-f-doc-cam" style="display:none" onchange="sgRecAddFotos(this,'documentacion')">
+          <input type="file" accept="image/*" multiple id="sg-rec-f-doc" style="display:none" onchange="sgRecAddFotos(this,'documentacion')">
+          <div id="sg-rec-prev-documentacion" class="sg-rec-prev"></div>
+        </div>
+      </div>
 
-        <div class="sg-oc-fila">
-            <!-- ── DOCUMENTACIÓN ────────────────────────────────────────── -->
-            <div class="sg-oc-box">
-              <div class="sg-oc-box-tit">📄 Documentación</div>
-              <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
-                <div class="fl"><label>Remito N°</label><input id="sg-rec-remito" placeholder="N° remito proveedor"></div>
-                <div class="fl"><label>Factura N°</label><input id="sg-rec-factura" placeholder="N° factura"></div>
-                <div class="fl"><label>DTV — SENASA</label><input id="sg-rec-dtv" placeholder="código de cierre"></div>
-                <div class="fl"><label>Peso recepcionado (kg)</label><input type="number" min="0" step="0.01" id="sg-rec-peso" placeholder="el de la balanza"></div>
-              </div>
-              <!-- La foto del papel vale más que el número tipeado: cuando hay
-                   que reclamar, lo que se manda es la foto del remito. -->
-              <div style="margin-top:10px">
-                <label style="display:block;margin-bottom:5px">Fotos del remito / factura / DTV</label>
-                <input type="file" accept="image/*" multiple capture="environment" id="sg-rec-f-doc"
-                       onchange="sgRecAddFotos(this,'documentacion')" style="font-size:12px">
-                <div id="sg-rec-prev-documentacion" class="sg-rec-prev"></div>
-              </div>
-            </div>
+      <!-- ════════ 2 · PALLETS Y BULTOS RECIBIDOS ════════ -->
+      <div class="sg-rec-paso" data-paso="2">
+        <div class="sg-rec-tit">📦 Pallets y bultos recibidos</div>
+        <div class="sg-rec-sub">Lo que se cuenta en la playa, antes de abrir nada.</div>
+        <div class="sg-rec-conteo">
+          <div class="fl"><label>Pallets recibidos</label>
+            <input type="number" min="0" id="sg-rec-pallets" class="sg-rec-num" placeholder="0" oninput="sgRecValidar()"></div>
+          <!-- Los bultos los CUENTA y los escribe el que recibe. No se proponen
+               desde la orden: el punto es que alguien los mire. -->
+          <div class="fl"><label>Bultos recibidos <span style="color:var(--err)">*</span></label>
+            <input type="number" min="0" id="sg-rec-bultos" class="sg-rec-num" placeholder="contalos y anotalos" oninput="sgRecValidar();sgRecBultosCmp()"></div>
+        </div>
+        <!-- El contraste contra la orden aparece DESPUÉS de que escribió el
+             número, nunca antes: sugerírselo sería contestarle la pregunta. -->
+        <div id="sg-rec-bultos-cmp" class="sg-rec-cmp" style="display:none"></div>
+      </div>
 
-            <!-- ── LO QUE ENTRÓ ─────────────────────────────────────────── -->
-            <div class="sg-oc-box">
-              <div class="sg-oc-box-tit">📦 Paletizado recibido</div>
-              <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
-                <div class="fl"><label>Pallets recibidos</label><input type="number" min="0" id="sg-rec-pallets" placeholder="nº de pallets"></div>
-                <!-- Los bultos los CUENTA y los escribe el que recibe. No se
-                     proponen desde la orden: el punto es que alguien los mire. -->
-                <div class="fl"><label>Bultos recibidos <span style="color:var(--err)">*</span></label>
-                  <input type="number" min="0" id="sg-rec-bultos" placeholder="contalos y anotalos" oninput="sgRecValidar()"></div>
-              </div>
-              <div style="margin-top:10px">
-                <label style="display:block;margin-bottom:5px">Fotos de la mercadería y del peso</label>
-                <input type="file" accept="image/*" multiple capture="environment" id="sg-rec-f-merc"
-                       onchange="sgRecAddFotos(this,'mercaderia')" style="font-size:12px">
-                <div id="sg-rec-prev-mercaderia" class="sg-rec-prev"></div>
-              </div>
-            </div>
-
-            <!-- ── DESCARGA ─────────────────────────────────────────────── -->
-            <div class="sg-oc-box">
-              <div class="sg-oc-box-tit">🧑‍🌾 Descarga</div>
-              <!-- Se pregunta SÍ O NO. Antes el único indicio era si habían
-                   elegido cooperativa, así que "no hubo descarga" y "me olvidé
-                   de cargarla" se veían igual. -->
-              <div class="fl"><label>¿Hubo descarga?</label>
-                <div style="display:flex;gap:16px;align-items:center;padding-top:2px">
-                  <label style="text-transform:none;letter-spacing:0;font-size:13px;display:inline-flex;align-items:center;gap:5px;min-height:0">
-                    <input type="radio" name="sg-rec-descarga" value="no" checked onchange="sgRecDescarga()" style="width:auto"> Sin descarga</label>
-                  <label style="text-transform:none;letter-spacing:0;font-size:13px;display:inline-flex;align-items:center;gap:5px;min-height:0">
-                    <input type="radio" name="sg-rec-descarga" value="si" onchange="sgRecDescarga()" style="width:auto"> Con descarga</label>
-                </div>
-              </div>
-              <div id="sg-rec-coop-wrap" style="display:none;margin-top:10px">
-                <div class="fl"><label>Cooperativa</label><select id="sg-rec-coop"><option value="">— Elegir —</option></select></div>
-                <div class="fl" style="margin-top:8px"><label>Cobra por</label>
-                  <div style="display:flex;gap:16px;align-items:center;padding-top:2px">
-                    <label style="text-transform:none;letter-spacing:0;font-size:13px;display:inline-flex;align-items:center;gap:5px;min-height:0"><input type="radio" name="sg-rec-coop-unidad" value="bulto" checked style="width:auto"> Bulto</label>
-                    <label style="text-transform:none;letter-spacing:0;font-size:13px;display:inline-flex;align-items:center;gap:5px;min-height:0"><input type="radio" name="sg-rec-coop-unidad" value="pallet" style="width:auto"> Pallet</label>
-                  </div>
-                </div>
+      <!-- ════════ 3 · DESCARGA ════════ -->
+      <div class="sg-rec-paso" data-paso="3">
+        <div class="sg-rec-tit">🧑‍🌾 Descarga</div>
+        <div class="sg-rec-sub">Se pregunta sí o no. Antes el único indicio era si habían elegido cooperativa,
+          así que "no hubo descarga" y "me olvidé de cargarla" se veían igual. Lo que se responda acá se
+          acumula en <b>Control Cooperativa</b>.</div>
+        <div class="sg-rec-opciones">
+          <label class="sg-rec-opcion"><input type="radio" name="sg-rec-descarga" value="no" checked onchange="sgRecDescarga()">
+            <span><b>Sin descarga</b><small>La bajó el proveedor o el personal propio</small></span></label>
+          <label class="sg-rec-opcion"><input type="radio" name="sg-rec-descarga" value="si" onchange="sgRecDescarga()">
+            <span><b>Con descarga</b><small>La bajó una cooperativa y va a facturar</small></span></label>
+        </div>
+        <div id="sg-rec-coop-wrap" class="sg-oc-box" style="display:none">
+          <div class="sg-oc-box-tit">Cooperativa que descargó</div>
+          <div class="sg-rec-grid">
+            <div class="fl" style="grid-column:span 2"><label>Cooperativa <span style="color:var(--err)">*</span></label>
+              <select id="sg-rec-coop" onchange="sgRecValidar()"><option value="">— Elegir —</option></select></div>
+            <div class="fl"><label>Cobra por</label>
+              <div class="sg-rec-radios">
+                <label><input type="radio" name="sg-rec-coop-unidad" value="bulto" checked onchange="sgRecValidar()"> Bulto</label>
+                <label><input type="radio" name="sg-rec-coop-unidad" value="pallet" onchange="sgRecValidar()"> Pallet</label>
               </div>
             </div>
           </div>
-
-        <!-- Items a recibir -->
-        <div style="margin-top:14px">
-          <div style="font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--mut);margin-bottom:8px">📥 Items a recibir <span style="font-weight:400;text-transform:none;letter-spacing:0">· dividí por calidad si hace falta</span></div>
-          <div id="sg-rec-items"><div class="emp">Elegí una OC abierta…</div></div>
         </div>
-        <!-- ── ¿COINCIDE CON LA ORDEN? ─────────────────────────────────
-             Es la pregunta que decide el resto. Si no hay diferencias, el
-             operador termina acá. Si las hay, se le abren los campos para
-             explicar qué pasó — y recién ahí puede tocar las cantidades, para
-             que la corrección quede justificada y no sea un número cambiado
-             sin que nadie sepa por qué. -->
-        <div class="sg-oc-box" id="sg-rec-var-pregunta" style="margin-top:14px">
-          <div class="sg-oc-box-tit">🔍 ¿Los productos recibidos presentan variaciones respecto de la orden?</div>
-          <div style="display:flex;gap:20px;align-items:center">
-            <label style="text-transform:none;letter-spacing:0;font-size:13.5px;display:inline-flex;align-items:center;gap:6px;min-height:0">
-              <input type="radio" name="sg-rec-variaciones" value="no" onchange="sgRecVariaciones()" style="width:auto"> No, coincide</label>
-            <label style="text-transform:none;letter-spacing:0;font-size:13.5px;display:inline-flex;align-items:center;gap:6px;min-height:0">
-              <input type="radio" name="sg-rec-variaciones" value="si" onchange="sgRecVariaciones()" style="width:auto"> Sí, hay diferencias</label>
+      </div>
+
+      <!-- ════════ 4 · FOTOS DE MERCADERÍA Y PESO ════════ -->
+      <div class="sg-rec-paso" data-paso="4">
+        <div class="sg-rec-tit">⚖️ Mercadería y peso</div>
+        <div class="sg-rec-sub">La foto de lo que entró y lo que marcó la balanza.</div>
+        <div class="sg-rec-grid">
+          <div class="fl"><label>Peso recepcionado (kg)</label>
+            <input type="number" min="0" step="0.01" id="sg-rec-peso" class="sg-rec-num" placeholder="el de la balanza"></div>
+        </div>
+        <div class="sg-oc-box">
+          <div class="sg-oc-box-tit">📷 Fotos de la mercadería y del peso</div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <button class="btn bb bs" type="button" onclick="eid('sg-rec-f-merc-cam').click()">📷 Cámara</button>
+            <button class="btn bo bs" type="button" onclick="eid('sg-rec-f-merc').click()">🖼️ Galería</button>
           </div>
-          <div id="sg-rec-var-box" style="display:none;margin-top:12px;border-top:1px solid var(--bor);padding-top:12px">
-            <div style="font-size:12px;color:var(--mut);margin-bottom:8px">
-              Corregí arriba los bultos, los kg y la calidad de cada producto, y explicá qué pasó.
-            </div>
-            <div class="fl ff"><label>¿Qué diferencia hubo? <span style="color:var(--err)">*</span></label>
+          <input type="file" accept="image/*" multiple capture="environment" id="sg-rec-f-merc-cam" style="display:none" onchange="sgRecAddFotos(this,'mercaderia')">
+          <input type="file" accept="image/*" multiple id="sg-rec-f-merc" style="display:none" onchange="sgRecAddFotos(this,'mercaderia')">
+          <div id="sg-rec-prev-mercaderia" class="sg-rec-prev"></div>
+        </div>
+      </div>
+
+      <!-- ════════ 5 · ITEMS A RECIBIR ════════ -->
+      <div class="sg-rec-paso" data-paso="5">
+        <div class="sg-rec-tit">📥 Items a recibir</div>
+        <div class="sg-rec-sub">Lo que la orden dice que tiene que entrar. Si algo no coincide, se corrige en el paso siguiente.</div>
+        <div id="sg-rec-items"><div class="emp">Elegí una OC…</div></div>
+      </div>
+
+      <!-- ════════ 6 · ¿COINCIDE CON LA ORDEN? ════════
+           Es la pregunta que decide el resto. Si no hay diferencias, termina
+           acá. Si las hay, se le abren los campos para explicar qué pasó — y
+           recién ahí puede tocar las cantidades, para que la corrección quede
+           justificada y no sea un número cambiado sin que nadie sepa por qué. -->
+      <div class="sg-rec-paso" data-paso="6">
+        <div class="sg-rec-tit" id="sg-rec-var-tit">🔍 ¿Los productos recibidos presentan variaciones respecto de la orden?</div>
+        <div class="sg-rec-sub" id="sg-rec-var-sub">Cantidad de bultos, kg por bulto, calidad.</div>
+        <div class="sg-rec-opciones" id="sg-rec-var-pregunta">
+          <label class="sg-rec-opcion"><input type="radio" name="sg-rec-variaciones" value="no" onchange="sgRecVariaciones()">
+            <span><b>No, coincide</b><small>Entró lo que decía la orden</small></span></label>
+          <label class="sg-rec-opcion"><input type="radio" name="sg-rec-variaciones" value="si" onchange="sgRecVariaciones()">
+            <span><b>Sí, hay diferencias</b><small>Hay que corregir y justificar</small></span></label>
+        </div>
+        <div id="sg-rec-var-sinoc" class="emp" style="display:none;padding:26px">
+          Recibiendo sin orden de compra no hay contra qué comparar: las cantidades se cargan
+          libres en el paso 5. La orden se vincula después, desde Recepciones.
+        </div>
+        <div id="sg-rec-var-box" style="display:none">
+          <div class="sg-oc-box">
+            <div class="sg-oc-box-tit">Corregí lo que realmente entró</div>
+            <div id="sg-rec-items-edit"></div>
+          </div>
+          <div class="sg-oc-box">
+            <div class="sg-oc-box-tit">Justificación <span style="color:var(--err)">*</span></div>
+            <div class="fl ff"><label>¿Qué diferencia hubo?</label>
               <textarea id="sg-rec-var-motivo" rows="2" placeholder="ej. vinieron 8 bultos menos · 3 cajones con golpes · pesaron 40 kg menos que el remito" oninput="sgRecValidar()"></textarea></div>
-            <div class="fl ff" style="margin-top:8px"><label>Fotos que lo respaldan</label>
-              <input type="file" accept="image/*" multiple capture="environment" id="sg-rec-f-var"
-                     onchange="sgRecAddFotos(this,'variacion')" style="font-size:12px">
+            <div class="fl ff" style="margin-top:10px"><label>Fotos que lo respaldan</label>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <button class="btn bb bs" type="button" onclick="eid('sg-rec-f-var-cam').click()">📷 Cámara</button>
+            <button class="btn bo bs" type="button" onclick="eid('sg-rec-f-var').click()">🖼️ Galería</button>
+          </div>
+          <input type="file" accept="image/*" multiple capture="environment" id="sg-rec-f-var-cam" style="display:none" onchange="sgRecAddFotos(this,'variacion')">
+          <input type="file" accept="image/*" multiple id="sg-rec-f-var" style="display:none" onchange="sgRecAddFotos(this,'variacion')">
               <div id="sg-rec-prev-variacion" class="sg-rec-prev"></div>
             </div>
           </div>
         </div>
-
-        <div class="fl ff" style="margin-top:10px"><label>Observaciones generales</label><textarea id="sg-rec-obs" rows="2"></textarea></div>
-        <div id="sg-rec-falta" style="font-size:12px;color:var(--err);margin-top:6px"></div>
-
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:16px">
-          <button class="btn bo" onclick="closeMB('sg-rec-modal')">Cancelar</button>
-          <button class="btn bb" id="sg-rec-btn-sig" onclick="sgRecToPaso2()">Siguiente: Control de calidad →</button>
-        </div>
+        <div class="fl ff" style="margin-top:14px"><label>Observaciones generales</label><textarea id="sg-rec-obs" rows="2"></textarea></div>
       </div>
 
-      <!-- ════════ PASO 2 — Control de calidad ════════ -->
-      <div id="sg-rec-paso2" style="display:none">
-        <!-- Toggle destacado (ámbar) -->
+      <!-- ════════ 7 · CONTROL DE CALIDAD ════════ -->
+      <div class="sg-rec-paso" data-paso="7">
+        <div class="sg-rec-tit">⚠️ Control de calidad</div>
+        <div class="sg-rec-sub">Sólo si la mercadería entró con problemas.</div>
         <div style="border:1px solid #e0a72e;background:rgba(224,167,46,.12);border-radius:10px;padding:14px">
           <label style="display:flex;align-items:center;gap:10px;cursor:pointer;font-weight:700;font-size:13px">
             <input type="checkbox" id="sg-rec-observada" onchange="sgRecToggleObs()" style="width:auto;margin:0"> ⚠️ Mercadería observada — generar informe de calidad con fotos y PDF
@@ -3006,28 +3132,57 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
         </div>
 
         <div id="sg-rec-calidad" style="display:none;margin-top:12px;border:1px solid var(--bor);border-radius:10px;padding:14px">
-          <div style="display:grid;grid-template-columns:2fr 1fr;gap:10px">
-            <div class="fl"><label>Estado general</label><input id="sg-rec-cal-estado" placeholder="ej. regular, con deterioro…"></div>
+          <div class="sg-rec-grid">
+            <div class="fl" style="grid-column:span 2"><label>Estado general</label><input id="sg-rec-cal-estado" placeholder="ej. regular, con deterioro…"></div>
             <div class="fl"><label>% afectado</label><input type="number" min="0" max="100" id="sg-rec-cal-pct" placeholder="0–100"></div>
+            <div class="fl" style="grid-column:span 3"><label>Defectos detectados</label><input id="sg-rec-cal-defectos" placeholder="ej. golpes, pudrición, sobremaduro…"></div>
           </div>
-          <div class="fl ff" style="margin-top:8px"><label>Defectos detectados</label><input id="sg-rec-cal-defectos" placeholder="ej. golpes, pudrición, sobremaduro…"></div>
-          <div class="fl ff"><label>Observaciones del informe</label><textarea id="sg-rec-cal-obs" rows="2"></textarea></div>
-          <div class="fl ff"><label>Fotos del informe</label>
+          <div class="fl ff" style="margin-top:10px"><label>Observaciones del informe</label><textarea id="sg-rec-cal-obs" rows="2"></textarea></div>
+          <div class="fl ff" style="margin-top:10px"><label>Fotos del informe</label>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <button class="btn bb bs" type="button" onclick="eid('sg-rec-fotos-cam').click()">📷 Cámara</button>
+            <button class="btn bo bs" type="button" onclick="eid('sg-rec-fotos').click()">🖼️ Galería</button>
+          </div>
+          <input type="file" accept="image/*" multiple capture="environment" id="sg-rec-fotos-cam" style="display:none" onchange="sgRecAddFotos(this,'calidad')">
+          <input type="file" accept="image/*" multiple id="sg-rec-fotos" style="display:none" onchange="sgRecAddFotos(this,'calidad')">
             <div id="sg-rec-prev-calidad" class="sg-rec-prev"></div>
-            <input type="file" id="sg-rec-fotos" accept="image/jpeg,image/png,image/webp" multiple style="display:none" onchange="sgRecAddFotos(this,'calidad')">
-            <button class="btn bo bs" type="button" onclick="eid('sg-rec-fotos').click()">+ Agregar fotos</button>
-          </div>
-        </div>
-
-        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:16px">
-          <button class="btn bo" onclick="sgRecToPaso1()">← Atrás</button>
-          <div style="display:flex;gap:8px">
-            <button class="btn bo" id="sg-rec-preview-btn" style="display:none" onclick="sgRecPreviewPDF()">👁 Vista previa PDF</button>
-            <button class="btn bb" onclick="sgRecGuardar()">Confirmar recepción</button>
           </div>
         </div>
       </div>
 
+    </div>
+
+    <!-- ── PIE FIJO ────────────────────────────────────────────────────── -->
+    <div class="sg-rec-foot">
+      <button class="btn bo" onclick="closeMB('sg-rec-modal')">Cancelar</button>
+      <div id="sg-rec-falta" class="sg-rec-falta"></div>
+      <button class="btn bo" id="sg-rec-btn-atras" onclick="sgRecIr(-1)">← Atrás</button>
+      <button class="btn bo" id="sg-rec-preview-btn" style="display:none" onclick="sgRecPreviewPDF()">👁 Vista previa PDF</button>
+      <button class="btn bb" id="sg-rec-btn-sig" onclick="sgRecIr(1)">Siguiente →</button>
+      <button class="btn bb" id="sg-rec-btn-guardar" style="display:none" onclick="sgRecGuardar()">Confirmar recepción</button>
+    </div>
+
+  </div>
+</div>
+
+<!-- Asignar la cooperativa de una descarga que se declaró sin saber de quién fue.
+     Es la única forma de cerrar ese caso: no hay edición de recepciones. -->
+<div class="ab-modal-overlay" id="sgcc-asig-modal">
+  <div class="ab-modal" style="width:520px">
+    <div class="mhd"><div class="mht">🤝 ¿Quién descargó?</div><button class="mcl" onclick="closeMB('sgcc-asig-modal')">×</button></div>
+    <div class="fg">
+      <div class="ff" style="font-size:12.5px;color:var(--mut)" id="sgcc-asig-ref"></div>
+      <div class="fl ff"><label>Cooperativa <span style="color:var(--err)">*</span></label><select id="sgcc-asig-coop"></select></div>
+      <div class="fl ff"><label>Cobra por</label>
+        <div style="display:flex;gap:18px;align-items:center;padding-top:2px">
+          <label style="text-transform:none;letter-spacing:0;font-size:13px;display:inline-flex;align-items:center;gap:6px;min-height:0"><input type="radio" name="sgcc-asig-unidad" value="bulto" checked style="width:auto"> Bulto</label>
+          <label style="text-transform:none;letter-spacing:0;font-size:13px;display:inline-flex;align-items:center;gap:6px;min-height:0"><input type="radio" name="sgcc-asig-unidad" value="pallet" style="width:auto"> Pallet</label>
+        </div>
+      </div>
+    </div>
+    <div class="ab-modal-footer">
+      <button class="btn bo" onclick="closeMB('sgcc-asig-modal')">Cancelar</button>
+      <button class="btn bb" onclick="sgCcoopAsigGuardar()">Asignar</button>
     </div>
   </div>
 </div>
@@ -4713,85 +4868,264 @@ function sgRecVincularGuardar(){
     else toast((r&&r.error)||'Error','er');
   });
 }
+// ── LA RECEPCIÓN, PASO A PASO ─────────────────────────────────────────────
+// Cada etapa del trabajo es un paso. Antes eran dos pantallas largas con todo
+// apilado: el operador bajaba buscando qué le faltaba y el botón no le decía
+// dónde estaba el problema. Ahora el riel de arriba muestra en qué punto está y
+// el pie dice qué falta para poder seguir. Y ocupa la pantalla entera, porque
+// esto se hace parado en la playa con el camión esperando.
+var SG_REC_PASOS = [
+  { n: 1, corto: 'Documentación',  icono: '📄' },
+  { n: 2, corto: 'Pallets/bultos', icono: '📦' },
+  { n: 3, corto: 'Descarga',       icono: '🧑‍🌾' },
+  { n: 4, corto: 'Mercadería',     icono: '⚖️' },
+  { n: 5, corto: 'Items',          icono: '📥' },
+  { n: 6, corto: 'Diferencias',    icono: '🔍' },
+  { n: 7, corto: 'Calidad',        icono: '⚠️' }
+];
+var SG_REC_ULT = SG_REC_PASOS[SG_REC_PASOS.length - 1].n;
+
+// Lo que falta para poder salir de un paso. Devuelve una lista de textos; si
+// está vacía, el paso está completo. Todo lo que bloquea vive acá y en ningún
+// otro lado: si el botón "Siguiente" y el riel preguntaran cada uno por su
+// cuenta, tarde o temprano se contradicen.
+function sgRecFaltaEn(p){
+  var f = [];
+  if (p === 1) {
+    if (!eid('sg-rec-oc').value) f.push('elegir la orden de compra (o "sin OC")');
+    if (!eid('sg-rec-fecha').value) f.push('la fecha de recepción');
+  } else if (p === 2) {
+    var b = eid('sg-rec-bultos');
+    if (!b || b.value === '' || Number(b.value) < 0) f.push('los bultos recibidos');
+  } else if (p === 3) {
+    // Si hubo descarga hay que decir QUIÉN la hizo: es lo que se acumula en
+    // Control Cooperativa y lo que después se le termina pagando.
+    var d = document.querySelector('input[name="sg-rec-descarga"]:checked');
+    if (d && d.value === 'si') {
+      if (!eid('sg-rec-coop').value) f.push('qué cooperativa descargó');
+      // Si cobra por pallet, la cantidad sale de los pallets del paso 2. Sin
+      // ese número el gasto nace vacío y después se valoriza en cero.
+      var u = document.querySelector('input[name="sg-rec-coop-unidad"]:checked');
+      var pal = eid('sg-rec-pallets');
+      if (u && u.value === 'pallet' && (!pal || pal.value === '' || Number(pal.value) <= 0)) {
+        f.push('los pallets recibidos (paso 2), que es lo que la cooperativa cobra');
+      }
+    }
+  } else if (p === 5 && SG.recSinOc) {
+    // Con OC los kg vienen de la orden y acá están bloqueados a propósito: se
+    // corrigen en el paso 6, con su justificación. Exigirlos en este paso
+    // dejaba trabado al que recibe una orden sin saldo pendiente. El control de
+    // que haya algo que recibir está al confirmar.
+    var hayKg = (SG.recItems || []).some(function(it){
+      return it.producto_id && (it.lotes || []).some(function(l){ return Number(l.kg_reales) > 0; });
+    });
+    if (!hayKg) f.push('cargar producto y kg en al menos una línea');
+  } else if (p === 6) {
+    // Sin OC no hay contra qué comparar: la pregunta no se hace.
+    if (!SG.recSinOc) {
+      var v = document.querySelector('input[name="sg-rec-variaciones"]:checked');
+      if (!v) f.push('contestar si hay variaciones respecto de la orden');
+      else if (v.value === 'si' && !String((eid('sg-rec-var-motivo') || {}).value || '').trim()) f.push('el motivo de la diferencia');
+    }
+  }
+  return f;
+}
+
+// Repinta el pie y el riel según el paso en el que está.
+function sgRecValidar(){
+  var p = SG._recPaso || 1;
+  var faltan = sgRecFaltaEn(p);
+  var msg = eid('sg-rec-falta');
+  if (msg) msg.textContent = faltan.length ? ('Falta ' + faltan.join(', ') + '.') : '';
+  var sig = eid('sg-rec-btn-sig'), atras = eid('sg-rec-btn-atras'), guardar = eid('sg-rec-btn-guardar');
+  if (sig) { sig.style.display = (p < SG_REC_ULT) ? '' : 'none'; sig.disabled = faltan.length > 0; }
+  if (atras) atras.style.display = (p > 1) ? '' : 'none';
+  if (guardar) guardar.style.display = (p === SG_REC_ULT) ? '' : 'none';
+  // El pie es uno solo para los siete pasos: la vista previa del informe sólo
+  // tiene sentido parado en el paso de calidad y con el informe pedido.
+  var prev = eid('sg-rec-preview-btn'), obs = eid('sg-rec-observada');
+  if (prev) prev.style.display = (p === SG_REC_ULT && obs && obs.checked) ? '' : 'none';
+  sgRecRail();
+  return faltan.length === 0;
+}
+
+function sgRecRail(){
+  var cont = eid('sg-rec-rail'); if (!cont) return;
+  var act = SG._recPaso || 1;
+  cont.innerHTML = SG_REC_PASOS.map(function(x, i){
+    // Verde = está completo. No alcanza con "ya pasé por ahí": si volvió y
+    // borró un dato, el paso tiene que dejar de estar en verde.
+    var listo = x.n < act && sgRecFaltaEn(x.n).length === 0;
+    var cls = 'sg-rec-step' + (x.n === act ? ' on' : '') + (listo ? ' ok' : '');
+    return (i ? '<div class="sg-rec-sep"></div>' : '')
+      + '<div class="' + cls + '" onclick="sgRecVerPaso(' + x.n + ')" title="Paso ' + x.n + '">'
+      + '<span class="n">' + (listo ? '✓' : x.n) + '</span>' + x.icono + ' ' + esc(x.corto) + '</div>';
+  }).join('');
+}
+
+// Ir a un paso. Para atrás siempre se puede. Para adelante hay que tener
+// completo todo lo que quedó en el medio — y si algo falta, en vez de un "no se
+// puede" lo lleva justo al paso que falta y se lo dice.
+function sgRecVerPaso(n){
+  n = Math.max(1, Math.min(SG_REC_ULT, n));
+  var act = SG._recPaso || 1;
+  if (n > act) {
+    for (var p = act; p < n; p++) {
+      var f = sgRecFaltaEn(p);
+      if (f.length) {
+        SG._recPaso = p; sgRecPintarPaso(); sgRecValidar();
+        toast('Falta ' + f.join(', ') + '.', 'er');
+        return;
+      }
+    }
+  }
+  SG._recPaso = n;
+  sgRecPintarPaso();
+  sgRecValidar();
+}
+function sgRecIr(delta){ sgRecVerPaso((SG._recPaso || 1) + delta); }
+
+function sgRecPintarPaso(){
+  var act = SG._recPaso || 1;
+  document.querySelectorAll('#sg-rec-modal .sg-rec-paso').forEach(function(el){
+    el.classList.toggle('on', Number(el.getAttribute('data-paso')) === act);
+  });
+  // Los items se dibujan en dos lugares (paso 5 mirar, paso 6 corregir). Se
+  // repintan al cambiar de paso y NO mientras se tipea: si no, cada tecla
+  // rearmaría el HTML y el cursor saltaría fuera del campo.
+  if (act === 5 || act === 6) sgRecRenderItems();
+  var body = document.querySelector('#sg-rec-modal .sg-rec-body');
+  if (body) body.scrollTop = 0;
+}
+
 function sgRecOpen(ocId){
-  SG.recItems=[]; SG._recFotos=[]; SG.recSinOc=false;
+  SG.recItems=[]; SG._recFotos=[]; SG.recSinOc=false; SG.recOcBultos=0; SG.recItemsOrig=null; SG._recPaso=1;
   Promise.all([api('/api/sg/oc?estado=abierta'), api('/api/sg/oc?estado=recibida_parcial')]).then(function(res){
     var ocs=((res[0]&&res[0].ok)?res[0].data:[]).concat((res[1]&&res[1].ok)?res[1].data:[]);
     // OC OPCIONAL: se puede recibir SIN OC → queda "OC pendiente" y se vincula después.
     eid('sg-rec-oc').innerHTML='<option value="">— Elegir OC —</option><option value="__sinoc__">— Sin OC (regularizar después) —</option>'+ocs.map(function(o){return '<option value="'+o.id+'">'+esc(sgOcId(o))+' — '+esc(o.proveedor_nombre||'')+'</option>';}).join('');
     eid('sg-rec-fecha').value=new Date().toISOString().slice(0,10);
-    // Estado inicial de lo que se agregó: sin descarga, sin contestar lo de las
-    // variaciones —para que el operador tenga que decirlo— y sin fotos.
+    // Estado inicial: sin descarga, sin contestar lo de las variaciones —para
+    // que el operador tenga que decirlo— y sin fotos.
     var sinD=document.querySelector('input[name="sg-rec-descarga"][value="no"]'); if(sinD) sinD.checked=true;
     document.querySelectorAll('input[name="sg-rec-variaciones"]').forEach(function(x){ x.checked=false; });
-    ['sg-rec-peso','sg-rec-var-motivo'].forEach(function(id){ var e=eid(id); if(e) e.value=''; });
-    sgRecDescarga(); sgRecVariaciones(); sgRecRenderFotos(); sgRecValidar();
-    eid('sg-rec-remito').value=''; eid('sg-rec-obs').value='';
-    // PASO 1 — reset documentación + paletizado
-    eid('sg-rec-factura').value=''; eid('sg-rec-dtv').value=''; eid('sg-rec-pallets').value=''; eid('sg-rec-bultos').value='';
-    // FASE 2 — cooperativa (descarga): selector de proveedores de servicio + unidad bulto/pallet.
+    ['sg-rec-peso','sg-rec-var-motivo','sg-rec-remito','sg-rec-obs','sg-rec-factura','sg-rec-dtv',
+     'sg-rec-pallets','sg-rec-bultos'].forEach(function(id){ var e=eid(id); if(e) e.value=''; });
+    // Cooperativa (descarga): selector de proveedores de servicio + unidad bulto/pallet.
     eid('sg-rec-coop').value=''; document.querySelector('input[name="sg-rec-coop-unidad"][value="bulto"]').checked=true;
-    api('/api/sg/proveedores-servicio').then(function(rr){ var fls=(rr&&rr.ok)?rr.data:[]; eid('sg-rec-coop').innerHTML='<option value="">— Sin descarga —</option>'+fls.map(function(f){return '<option value="'+f.id+'">'+esc(f.razon_social)+'</option>';}).join(''); });
-    // PASO 2 — reset informe de calidad + fotos
+    api('/api/sg/proveedores-servicio').then(function(rr){ var fls=(rr&&rr.ok)?rr.data:[]; var sel=eid('sg-rec-coop'); var eleg=sel.value;
+      sel.innerHTML='<option value="">— Elegir —</option>'+fls.map(function(f){return '<option value="'+f.id+'">'+esc(f.razon_social)+'</option>';}).join('')+'<option value="__pendiente__">— No sé todavía (queda pendiente en Control Cooperativa) —</option>';
+      if(eleg) sel.value=eleg;   // la lista llega por AJAX: no puede borrar lo que ya eligió
+      sgRecValidar(); });
+    // Informe de calidad
     eid('sg-rec-observada').checked=false; eid('sg-rec-calidad').style.display='none'; eid('sg-rec-preview-btn').style.display='none';
     eid('sg-rec-cal-estado').value=''; eid('sg-rec-cal-pct').value=''; eid('sg-rec-cal-defectos').value=''; eid('sg-rec-cal-obs').value='';
-    eid('sg-rec-fotos').value=''; sgRecRenderFotos();
-    eid('sg-rec-items').innerHTML='<div class="emp">Elegí una OC…</div>';
-    sgRecTraza(null);
-    sgRecPaso(1);
-    if(ocId){ eid('sg-rec-oc').value=ocId; sgRecOcChange(); }
+    eid('sg-rec-fotos').value='';
+    sgRecTraza(null); sgRecBultosCmp(); sgRecDescarga(); sgRecVariaciones(); sgRecRenderFotos();
+    sgRecPintarPaso(); sgRecValidar();
+    if(ocId){
+      eid('sg-rec-oc').value=ocId;
+      // Si la lista no trajo esa orden (falló la consulta, o la orden se cerró
+      // mientras tanto), el select queda vacío y el paso 1 pide elegir una orden
+      // que el operador creía elegida. Mejor decirlo.
+      if(!eid('sg-rec-oc').value) toast('No se pudo abrir esa orden de compra. Elegila de la lista.','er');
+      else sgRecOcChange();
+    }
     eid('sg-rec-modal').classList.add('on');
   });
 }
-// ── Navegación del flujo en 2 pasos + indicador de progreso ──
-function sgRecPaso(n){
-  SG._recPaso=n;
-  eid('sg-rec-paso1').style.display=(n===1)?'block':'none';
-  eid('sg-rec-paso2').style.display=(n===2)?'block':'none';
-  var base='display:inline-flex;width:26px;height:26px;border-radius:50%;align-items:center;justify-content:center;font-size:13px;font-weight:700;';
-  var done='background:#2e9e5b;color:#fff;'+base, active='background:var(--err);color:#fff;'+base,
-      idle='background:transparent;color:var(--mut);border:2px solid var(--bor);'+base;
-  eid('sg-rec-num1').style.cssText=(n>1)?done:active; eid('sg-rec-num1').textContent=(n>1)?'✓':'1';
-  eid('sg-rec-num2').style.cssText=(n===2)?active:idle;
-  eid('sg-rec-chip1').style.opacity='1';
-  eid('sg-rec-chip2').style.opacity=(n===2)?'1':'.55';
-  eid('sg-rec-bar').style.background=(n===2)?'#2e9e5b':'var(--bor)';
-}
-function sgRecToPaso1(){ sgRecPaso(1); }
-function sgRecToPaso2(){
-  // Validar el paso 1 antes de avanzar (OC o "Sin OC" + al menos una línea con kg).
-  if(!eid('sg-rec-oc').value){ toast('Elegí una OC o "Sin OC"','er'); return; }
-  // Los bultos contados y la respuesta sobre las variaciones no son opcionales:
-  // son el control físico de la recepción. Sin eso no se avanza.
-  if(!sgRecValidar()){ toast(eid('sg-rec-falta').textContent || 'Faltan datos','er'); return; }
-  if(SG.recSinOc){
-    var okp=SG.recItems.some(function(it){ return it.producto_id && it.lotes.some(function(l){return Number(l.kg_reales)>0;}); });
-    if(!okp){ toast('Cargá producto y kg en al menos una línea','er'); return; }
-  } else {
-    var any=SG.recItems.some(function(it){ return it.lotes.some(function(l){return Number(l.kg_reales)>0;}); });
-    if(!any){ toast('Cargá kg en al menos un item','er'); return; }
+
+function sgRecOcChange(){
+  var ocId=eid('sg-rec-oc').value;
+  if(ocId==='__sinoc__'){   // SIN OC → líneas manuales (producto + kg), costo pendiente
+    SG.recSinOc=true; SG.recOcBultos=0; SG.recItemsOrig=null; sgRecTraza(null); sgRecBultosCmp();
+    // La pregunta de variaciones deja de tener sentido: se borra lo contestado.
+    document.querySelectorAll('input[name="sg-rec-variaciones"]').forEach(function(x){ x.checked=false; });
+    if(eid('sg-rec-var-motivo')) eid('sg-rec-var-motivo').value='';
+    SG.recItems=[{producto_id:'',producto_nombre:'',lotes:[{kg_reales:'',calidad:''}]}];
+    sgRecRenderItems(); sgRecVariaciones(); return;
   }
-  sgRecPaso(2);
+  SG.recSinOc=false;
+  if(!ocId){
+    eid('sg-rec-items').innerHTML='<div class="emp">Elegí una OC…</div>'; SG.recItems=[]; SG.recOcBultos=0;
+    sgRecTraza(null); sgRecBultosCmp(); sgRecVariaciones(); return;
+  }
+  api('/api/sg/oc/'+ocId).then(function(r){
+    if(!r||!r.ok){
+      // Quedarse callado acá dejaba el asistente trabado en el paso 1, pidiendo
+      // que eligiera la orden que acababa de elegir.
+      toast((r&&r.error)||'No se pudo leer la orden de compra','er');
+      eid('sg-rec-oc').value=''; SG.recItems=[]; SG.recOcBultos=0;
+      sgRecTraza(null); sgRecRenderItems(); sgRecValidar();
+      return;
+    }
+    sgRecTraza(r.data);
+    // Los bultos que la orden dice. NO se copian al campo: se usan sólo para
+    // avisarle si lo que contó no da. Proponérselos sería contestarle la
+    // pregunta que se le está haciendo.
+    SG.recOcBultos=(r.data.items||[]).reduce(function(a,it){ return a+(Number(it.cantidad_estimada_presentaciones)||0); },0);
+    SG.recItems=(r.data.items||[]).map(function(it){
+      var pend=Math.max(0,(it.kg_estimados||0)-(it.kg_recibidos||0));
+      return { oc_item_id:it.id, producto_nombre:it.producto_nombre, kg_estimados:it.kg_estimados, kg_recibidos:it.kg_recibidos, lotes:[{kg_reales:pend||'',calidad:''}] };
+    });
+    // Cómo venía la orden, para poder volver acá si el operador se arrepiente
+    // de haber declarado diferencias.
+    SG.recItemsOrig=JSON.parse(JSON.stringify(SG.recItems));
+    sgRecRenderItems(); sgRecBultosCmp(); sgRecVariaciones();
+  });
 }
-// PASO 2 — toggle del informe de calidad (muestra/oculta campos + botón de preview PDF).
+
+// El código de trazabilidad de la OC es el que identifica la partida que entra.
+// Se muestra arriba de todo mientras se recibe, igual que en la orden de compra.
+function sgRecTraza(oc){
+  var el=eid('sg-rec-traza'); if(!el) return;
+  if(!oc){ el.style.display='none'; el.textContent=''; return; }
+  el.style.display='';
+  el.innerHTML='<span style="color:var(--mut);font-weight:600;font-size:11px;letter-spacing:.04em">PARTIDA</span> '
+    +'<code style="font-size:13.5px;font-weight:700">'+esc(sgOcId(oc))+'</code>'
+    +'<span style="color:var(--mut);font-size:12px;margin-left:10px">'+esc(oc.proveedor_nombre||'')+'</span>';
+}
+
+// El contraste contra la orden aparece DESPUÉS de que escribió el número, nunca
+// antes. Si no coincide no bloquea nada: el que decide qué pasó es él, en el
+// paso de las diferencias.
+function sgRecBultosCmp(){
+  var el=eid('sg-rec-bultos-cmp'); if(!el) return;
+  var v=eid('sg-rec-bultos') ? eid('sg-rec-bultos').value : '';
+  var esperados=Number(SG.recOcBultos)||0;
+  if(v===''||!esperados||SG.recSinOc){ el.style.display='none'; el.className='sg-rec-cmp'; el.textContent=''; return; }
+  var contados=Number(v)||0, dif=contados-esperados;
+  el.style.display='';
+  if(dif===0){ el.className='sg-rec-cmp ok'; el.innerHTML='✅ Coincide con la orden: <b>'+nr(esperados)+'</b> bultos.'; }
+  else { el.className='sg-rec-cmp dif';
+    el.innerHTML='⚠️ La orden dice <b>'+nr(esperados)+'</b> bultos y anotaste <b>'+nr(contados)+'</b> — '
+      +(dif<0?('faltan <b>'+nr(-dif)+'</b>'):('sobran <b>'+nr(dif)+'</b>'))
+      +'. Lo vas a poder justificar en el paso de diferencias.'; }
+}
+
+// Informe de calidad: muestra/oculta campos + botón de preview PDF.
 function sgRecToggleObs(){
   var on=eid('sg-rec-observada').checked;
   eid('sg-rec-calidad').style.display=on?'block':'none';
   eid('sg-rec-preview-btn').style.display=on?'inline-flex':'none';
 }
-// PASO 2 — fotos del informe: acumulables con "+ Agregar", thumbnails con × para quitar.
-// REUSA el compresor de imágenes de IFCO (_ifcoComprimirImagen).
+
 // ── LAS FOTOS DE LA RECEPCIÓN, ROTULADAS ──────────────────────────────────
-// Antes había una sola bolsa de fotos y sólo se guardaban si la recepción salía
-// observada. Ahora cada foto sabe de qué es —el remito, la mercadería, la
-// balanza, lo que justifica una diferencia— y se guardan siempre. Un montón de
-// fotos sin decir qué muestran no sirve cuando hay que reclamarle a un
-// proveedor tres semanas después.
-//
-// Se comprimen con el mismo helper que usa IFCO: las saca un teléfono y sin
-// comprimir son varios megas cada una.
+// Cada foto sabe de qué es —el remito, la mercadería, la balanza, lo que
+// justifica una diferencia— y se guardan siempre. Un montón de fotos sin decir
+// qué muestran no sirve cuando hay que reclamarle a un proveedor tres semanas
+// después. Se comprimen con el mismo helper que usa IFCO: las saca un teléfono
+// y sin comprimir son varios megas cada una.
+var SG_REC_MAX_FOTOS = 40;   // tiene que coincidir con sgUpload.array('fotos', N) de sg.js
 async function sgRecAddFotos(input, categoria){
   var files = input.files || [];
+  var lugar = SG_REC_MAX_FOTOS - (SG._recFotos || []).length;
+  if (files.length > lugar) {
+    // Avisar acá y quedarse con las que entran es mejor que dejarlo cargar 50 y
+    // que el servidor rechace la recepción completa cuando aprieta Confirmar.
+    toast('Entran hasta ' + SG_REC_MAX_FOTOS + ' fotos: se agregaron ' + Math.max(0, lugar) + '.', 'er');
+    files = Array.prototype.slice.call(files, 0, Math.max(0, lugar));
+  }
   for (var i = 0; i < files.length; i++) {
     var comprimida = await _ifcoComprimirImagen(files[i]);
     SG._recFotos.push({ file: comprimida, categoria: categoria });
@@ -4817,130 +5151,158 @@ function sgRecRenderFotos(){
   });
 }
 
+// La cooperativa elegida, o null si contestó "no sé todavía". Ese caso NO es lo
+// mismo que no contestar: la descarga queda declarada y aparece pendiente de
+// asignar en Control Cooperativa.
+function sgRecCoopId(){
+  var v = (eid('sg-rec-coop') || {}).value || '';
+  return (v && v !== '__pendiente__') ? Number(v) : null;
+}
+
 // ── ¿HUBO DESCARGA? ───────────────────────────────────────────────────────
+// Se pregunta sí o no. Antes el único indicio era si habían elegido
+// cooperativa, así que "no hubo descarga" y "me olvidé de cargarla" se veían
+// igual. Lo que se conteste acá alimenta Control Cooperativa.
 function sgRecDescarga(){
   var el = document.querySelector('input[name="sg-rec-descarga"]:checked');
   var con = el && el.value === 'si';
   var w = eid('sg-rec-coop-wrap');
   if (w) w.style.display = con ? '' : 'none';
   if (!con && eid('sg-rec-coop')) eid('sg-rec-coop').value = '';
+  sgRecMarcarOpciones();
+  sgRecValidar();
 }
 
 // ── ¿LO QUE LLEGÓ COINCIDE CON LO QUE SE PIDIÓ? ───────────────────────────
-// Es la pregunta que el operador tiene que contestar sí o sí. Si dice que no
-// hay diferencias, no se le pide nada más y termina. Si dice que sí, se le
-// abren los campos para explicar QUÉ pasó — y recién ahí puede tocar las
-// cantidades, que es lo que hace que la modificación quede justificada y no
-// sea un número cambiado sin que nadie sepa por qué.
+// Si dice que no hay diferencias, no se le pide nada más. Si dice que sí, se le
+// abren el motivo, las fotos y una copia EDITABLE de los items: recién ahí
+// puede tocar las cantidades. Eso es lo que hace que la corrección quede
+// justificada y no sea un número cambiado sin que nadie sepa por qué.
 // Recibiendo SIN OC no hay contra qué comparar: la pregunta no se hace y las
-// cantidades se cargan libres, que es todo lo que se puede hacer ahí.
+// cantidades se cargan libres en el paso 5, que es todo lo que se puede hacer.
 function sgRecVariaciones(){
   var el = document.querySelector('input[name="sg-rec-variaciones"]:checked');
   var hay = el && el.value === 'si';
   var conOC = !SG.recSinOc;
-  var pregunta = eid('sg-rec-var-pregunta');
-  if (pregunta) pregunta.style.display = conOC ? '' : 'none';
+  // "No, coincide" quiere decir que entró lo que decía la orden. Si antes había
+  // dicho que sí y corrigió cantidades, hay que volver todo a como estaba: si
+  // no, se guardaba una recepción que dice que no hubo diferencias y por dentro
+  // tiene los números cambiados y el motivo escrito.
+  if (conOC && el && !hay) sgRecDeshacerVariaciones();
+  var preg = eid('sg-rec-var-pregunta');
+  if (preg) preg.style.display = conOC ? '' : 'none';
+  var sub = eid('sg-rec-var-sub');
+  if (sub) sub.style.display = conOC ? '' : 'none';
+  var tit = eid('sg-rec-var-tit');
+  if (tit) tit.textContent = conOC
+    ? '🔍 ¿Los productos recibidos presentan variaciones respecto de la orden?'
+    : '🔍 Sin orden de compra';
+  var nada = eid('sg-rec-var-sinoc');
+  if (nada) nada.style.display = conOC ? 'none' : '';
   var box = eid('sg-rec-var-box');
   if (box) box.style.display = (conOC && hay) ? '' : 'none';
-  // Los renglones de ítems se abren para editar sólo si declaró diferencias.
-  var bloquear = conOC && !hay;
-  document.querySelectorAll('#sg-rec-items input, #sg-rec-items select').forEach(function(x){
-    x.disabled = bloquear;
-    x.title = bloquear ? 'Para corregir cantidades, marcá que hay variaciones respecto de la orden.' : '';
-  });
+  sgRecMarcarOpciones();
+  sgRecRenderItems();
   sgRecValidar();
 }
 
-// ── LO QUE NO SE PUEDE DEJAR EN BLANCO ────────────────────────────────────
-// Los bultos los cuenta y los escribe el que recibe: es el control físico
-// contra el papel, y proponérselos desde la orden sería contestarle la pregunta
-// que se le está haciendo.
-function sgRecValidar(){
-  var faltan = [];
-  var b = eid('sg-rec-bultos');
-  if (!b || b.value === '' || Number(b.value) < 0) faltan.push('los bultos recibidos');
-  var vr = document.querySelector('input[name="sg-rec-variaciones"]:checked');
-  if (!SG.recSinOc) {
-    if (!vr) faltan.push('si hay variaciones respecto de la orden');
-    else if (vr.value === 'si' && !(eid('sg-rec-var-motivo') || {}).value) {
-      faltan.push('el motivo de la diferencia');
-    }
-  }
-  var btn = eid('sg-rec-btn-sig');
-  var msg = eid('sg-rec-falta');
-  if (btn) btn.disabled = faltan.length > 0;
-  if (msg) msg.textContent = faltan.length ? ('Falta ' + faltan.join(', ') + '.') : '';
-  return faltan.length === 0;
+// Volver atrás de "sí hay diferencias". No alcanza con ocultar la caja: lo que
+// se escribió y se corrigió sigue en memoria y se guardaría igual.
+function sgRecDeshacerVariaciones(){
+  if (SG.recItemsOrig) SG.recItems = JSON.parse(JSON.stringify(SG.recItemsOrig));
+  var m = eid('sg-rec-var-motivo'); if (m) m.value = '';
+  SG._recFotos = (SG._recFotos || []).filter(function(f){ return f.categoria !== 'variacion'; });
+  sgRecRenderFotos();
 }
-function sgRecOcChange(){
-  var ocId=eid('sg-rec-oc').value;
-  if(ocId==='__sinoc__'){   // SIN OC → líneas manuales (producto + kg), costo pendiente
-    SG.recSinOc=true; sgRecTraza(null);
-    SG.recItems=[{producto_id:'',producto_nombre:'',lotes:[{kg_reales:'',calidad:''}]}];
-    sgRecRenderItems(); return;
-  }
-  SG.recSinOc=false;
-  if(!ocId){ eid('sg-rec-items').innerHTML='<div class="emp">Elegí una OC…</div>'; SG.recItems=[]; sgRecTraza(null); sgRecVariaciones(); return; }
-  api('/api/sg/oc/'+ocId).then(function(r){
-    if(!r||!r.ok) return;
-    sgRecTraza(r.data);
-    SG.recItems=(r.data.items||[]).map(function(it){
-      var pend=Math.max(0,(it.kg_estimados||0)-(it.kg_recibidos||0));
-      return { oc_item_id:it.id, producto_nombre:it.producto_nombre, kg_estimados:it.kg_estimados, kg_recibidos:it.kg_recibidos, lotes:[{kg_reales:pend||'',calidad:''}] };
-    });
-    sgRecRenderItems();
+
+// El :has() del CSS pinta la tarjeta elegida; esta clase hace lo mismo por si
+// el navegador del galpón es viejo. Cuesta tres líneas y no se rompe.
+function sgRecMarcarOpciones(){
+  document.querySelectorAll('#sg-rec-modal .sg-rec-opcion').forEach(function(l){
+    var i = l.querySelector('input');
+    l.classList.toggle('sel', !!(i && i.checked));
   });
 }
-// El código de trazabilidad de la OC es el que identifica la partida que entra.
-// Se muestra arriba de todo mientras se recibe, igual que en la orden de compra.
-function sgRecTraza(oc){
-  var el=eid('sg-rec-traza'); if(!el) return;
-  if(!oc){ el.style.display='none'; el.textContent=''; return; }
-  el.style.display='';
-  el.innerHTML='<span style="color:var(--mut);font-weight:600;font-size:11px;letter-spacing:.04em">PARTIDA</span> '
-    +'<code style="font-size:14px;font-weight:700">'+esc(sgOcId(oc))+'</code>'
-    +'<span style="color:var(--mut);font-size:12px;margin-left:10px">'+esc(oc.proveedor_nombre||'')+'</span>';
-}
+
 // SIN OC — líneas manuales: agregar/quitar producto + elegir producto.
 function sgRecAddItem(){ SG.recItems.push({producto_id:'',producto_nombre:'',lotes:[{kg_reales:'',calidad:''}]}); sgRecRenderItems(); }
 function sgRecDelItem(i){ SG.recItems.splice(i,1); if(!SG.recItems.length) SG.recItems=[{producto_id:'',producto_nombre:'',lotes:[{kg_reales:'',calidad:''}]}]; sgRecRenderItems(); }
-function sgRecProdChange(i,v){ SG.recItems[i].producto_id=v; var p=(SG.cacheProd||[]).find(function(x){return String(x.id)===String(v);}); SG.recItems[i].producto_nombre=p?((p.nombre||'')+(p.variedad?(' '+p.variedad):'')):''; }
+function sgRecProdChange(i,v){ SG.recItems[i].producto_id=v; var p=(SG.cacheProd||[]).find(function(x){return String(x.id)===String(v);}); SG.recItems[i].producto_nombre=p?((p.nombre||'')+(p.variedad?(' '+p.variedad):'')):''; sgRecValidar(); }
 function sgRecAddLote(i){ SG.recItems[i].lotes.push({kg_reales:'',calidad:''}); sgRecRenderItems(); }
 function sgRecDelLote(i,j){ SG.recItems[i].lotes.splice(j,1); sgRecRenderItems(); }
-function sgRecUpd(i,j,c,v){ SG.recItems[i].lotes[j][c]=v; sgRecSuma(); }
+function sgRecUpd(i,j,c,v){ SG.recItems[i].lotes[j][c]=v; sgRecSuma(); sgRecValidar(); }
+// Los items se dibujan en DOS lugares: en el paso 5 —lo que la orden dice que
+// tiene que entrar, sólo para mirar— y adentro del paso 6, editable, pero
+// únicamente si el operador declaró que hay diferencias. Es el mismo modelo en
+// memoria: se toca en un lado y los dos quedan iguales. Así la corrección de
+// una cantidad siempre llega con su justificación al lado, en vez de ser un
+// número cambiado sin que nadie sepa por qué.
 function sgRecRenderItems(){
-  eid('sg-rec-items').innerHTML=SG.recItems.map(function(it,i){
-    var lotesH=it.lotes.map(function(lt,j){
-      var calOpts=['','primera','segunda','tercera'].map(function(c){return '<option value="'+c+'"'+(c===lt.calidad?' selected':'')+'>'+(c||'(calidad)')+'</option>';}).join('');
-      // BLOQUE A · punto 3 — se quitaron los campos "calibre" y "origen" (no se usan).
+  // Sin OC no hay orden contra la cual comparar: se carga libre en el paso 5.
+  var vr = document.querySelector('input[name="sg-rec-variaciones"]:checked');
+  var hayVar = !!(vr && vr.value === 'si');
+  sgRecPintarItems('sg-rec-items',      SG.recSinOc ? false : true);
+  sgRecPintarItems('sg-rec-items-edit', false);
+  sgRecSuma();
+  if (!SG.recSinOc && !hayVar) {
+    // El paso 6 todavía no dijo que sí: la copia editable no se muestra igual,
+    // pero se deja bloqueada por si alguien la abre con el inspector.
+    document.querySelectorAll('#sg-rec-items-edit input, #sg-rec-items-edit select').forEach(function(x){ x.disabled = true; });
+  }
+}
+
+function sgRecPintarItems(contId, bloqueado){
+  var cont = eid(contId); if (!cont) return;
+  // Sin OC elegida no hay items: hay que decirlo, no dejar el paso en blanco.
+  if (!SG.recItems.length) {
+    cont.innerHTML = '<div class="emp">Elegí una orden de compra en el paso 1.</div>';
+    return;
+  }
+  var dis = bloqueado ? ' disabled' : '';
+  cont.innerHTML = SG.recItems.map(function(it,i){
+    var lotesH = it.lotes.map(function(lt,j){
+      var calOpts = ['','primera','segunda','tercera'].map(function(c){ return '<option value="'+c+'"'+(c===lt.calidad?' selected':'')+'>'+(c||'(calidad)')+'</option>'; }).join('');
       return '<div style="display:grid;grid-template-columns:1fr 1.4fr auto;gap:6px;align-items:center;margin-bottom:5px">'
-        +'<input type="number" placeholder="kg" value="'+(lt.kg_reales||'')+'" onchange="sgRecUpd('+i+','+j+',\'kg_reales\',this.value)">'
-        +'<select onchange="sgRecUpd('+i+','+j+',\'calidad\',this.value)">'+calOpts+'</select>'
-        +(it.lotes.length>1?'<button class="btn bd bs" onclick="sgRecDelLote('+i+','+j+')">×</button>':'<span></span>')
+        +'<input type="number" placeholder="kg" value="'+(lt.kg_reales||'')+'"'+dis+' onchange="sgRecUpd('+i+','+j+',\'kg_reales\',this.value)">'
+        +'<select'+dis+' onchange="sgRecUpd('+i+','+j+',\'calidad\',this.value)">'+calOpts+'</select>'
+        +(it.lotes.length>1&&!bloqueado?'<button class="btn bd bs" onclick="sgRecDelLote('+i+','+j+')">×</button>':'<span></span>')
         +'</div>';
     }).join('');
-    // SIN OC: el encabezado es un selector de producto (no hay item de OC). Con OC: nombre fijo + estimado.
+    // SIN OC: el encabezado es un selector de producto (no hay item de OC).
+    // Con OC: nombre fijo + lo estimado, para tener el contraste a la vista.
     var head = SG.recSinOc
       ? '<div style="display:flex;gap:8px;align-items:center;margin-bottom:6px">'
-          +'<select style="flex:1" onchange="sgRecProdChange('+i+',this.value)">'+sgOpts(sgOcProductos(),sgOcProdLabel,it.producto_id,'— Producto —')+'</select>'
-          +(SG.recItems.length>1?'<button class="btn bd bs" onclick="sgRecDelItem('+i+')">×</button>':'')
+          +'<select style="flex:1"'+dis+' onchange="sgRecProdChange('+i+',this.value)">'+sgOpts(sgOcProductos(),sgOcProdLabel,it.producto_id,'— Producto —')+'</select>'
+          +(SG.recItems.length>1&&!bloqueado?'<button class="btn bd bs" onclick="sgRecDelItem('+i+')">×</button>':'')
         +'</div>'
       : '<div style="font-weight:600;font-size:13px;margin-bottom:6px">'+esc(it.producto_nombre||'')+' <span style="color:var(--mut);font-weight:400">— est. '+nr(it.kg_estimados)+'kg'+(it.kg_recibidos?(', recibidos '+nr(it.kg_recibidos)+'kg'):'')+'</span></div>';
     return '<div style="border:1px solid var(--bor);border-radius:8px;padding:10px;margin-bottom:8px">'
       +head
-      +lotesH+'<button class="btn bo bs" onclick="sgRecAddLote('+i+')">+ dividir por calidad</button> <span style="font-size:12px;color:var(--mut)" id="sg-rec-suma-'+i+'"></span>'
+      +lotesH
+      +(bloqueado?'':'<button class="btn bo bs" onclick="sgRecAddLote('+i+')">+ dividir por calidad</button> ')
+      +'<span style="font-size:12px;color:var(--mut)" data-suma="'+i+'"></span>'
       +'</div>';
   }).join('')
-    + (SG.recSinOc ? '<button class="btn bo bs" style="margin-top:4px" onclick="sgRecAddItem()">+ Agregar producto</button>'
-        +'<div style="font-size:11px;color:var(--mut);margin-top:6px">Sin OC: la mercadería queda con <b>costo pendiente</b> hasta vincular una OC.</div>' : '');
-  sgRecSuma();
-  // Redibujar los renglones borra el candado: hay que volver a ponerlo, o
-  // después de elegir la OC las cantidades quedan editables sin haber
-  // declarado ninguna diferencia.
-  sgRecVariaciones();
+    + (SG.recSinOc && !bloqueado
+        ? '<button class="btn bo bs" style="margin-top:4px" onclick="sgRecAddItem()">+ Agregar producto</button>'
+          +'<div style="font-size:11px;color:var(--mut);margin-top:6px">Sin OC: la mercadería queda con <b>costo pendiente</b> hasta vincular una OC.</div>'
+        : '');
+  if (bloqueado) {
+    cont.querySelectorAll('input, select').forEach(function(x){ x.disabled = true; });
+    if (SG.recItems.length) {
+      cont.insertAdjacentHTML('beforeend',
+        '<div style="font-size:11.5px;color:var(--mut)">Para corregir cantidades, marcá en el paso 6 que hay variaciones respecto de la orden.</div>');
+    }
+  }
 }
+
+// Los Σ kg van a los dos renders a la vez: data-suma en vez de un id, porque un
+// id repetido en dos contenedores sólo actualizaría el primero.
 function sgRecSuma(){
-  SG.recItems.forEach(function(it,i){ var s=it.lotes.reduce(function(a,l){return a+(Number(l.kg_reales)||0);},0); var el=eid('sg-rec-suma-'+i); if(el)el.textContent='Σ '+nr(s)+'kg'; });
+  SG.recItems.forEach(function(it,i){
+    var s = it.lotes.reduce(function(a,l){ return a+(Number(l.kg_reales)||0); },0);
+    document.querySelectorAll('#sg-rec-modal [data-suma="'+i+'"]').forEach(function(el){ el.textContent='Σ '+nr(s)+'kg'; });
+  });
 }
 // Arma el payload de la recepción (PASO 1 + PASO 2). requireItems=false → para la vista
 // previa PDF (permite previsualizar el informe aunque falten items). Devuelve null si inválido.
@@ -4968,7 +5330,11 @@ function sgRecBuildBody(requireItems){
     numero_remito_proveedor:eid('sg-rec-remito').value, observaciones:eid('sg-rec-obs').value,
     factura_numero:eid('sg-rec-factura').value, dtv_codigo:eid('sg-rec-dtv').value,           // PASO 1 · documentación
     pallets_recibidos:num('sg-rec-pallets'), bultos_recibidos:num('sg-rec-bultos'),           // PASO 1 · paletizado
-    cooperativa_id: eid('sg-rec-coop').value?Number(eid('sg-rec-coop').value):null,           // FASE 2 · descarga
+    // "__pendiente__" = hubo descarga pero todavía no se sabe de quién. Va sin
+    // cooperativa y aparece marcada en Control Cooperativa, que es donde se
+    // completa. Sin esta salida, el operador que no sabe queda trabado en la
+    // tranquera con el camión esperando.
+    cooperativa_id: sgRecCoopId(),                                                            // FASE 2 · descarga
     cooperativa_unidad: (document.querySelector('input[name="sg-rec-coop-unidad"]:checked')||{}).value||'bulto',
     observada:observada,                                                                       // PASO 2 · informe de calidad
     calidad_estado_general:observada?eid('sg-rec-cal-estado').value:null,
@@ -4979,11 +5345,40 @@ function sgRecBuildBody(requireItems){
     // si lo recibido coincide con lo pedido.
     peso_recepcionado:(eid('sg-rec-peso').value!==''?Number(eid('sg-rec-peso').value):null),
     con_descarga:(function(){var r=document.querySelector('input[name="sg-rec-descarga"]:checked');return r?(r.value==='si'?1:0):null;})(),
-    hay_variaciones:(function(){var r=document.querySelector('input[name="sg-rec-variaciones"]:checked');return r?(r.value==='si'?1:0):null;})(),
-    variacion_motivo:(eid('sg-rec-var-motivo')||{}).value||null,
+    // Sin OC la pregunta no se hace: si quedó contestada de antes (eligió una
+    // OC, contestó, y después se pasó a "sin OC"), no puede viajar igual.
+    hay_variaciones: sinOc ? null : (function(){var r=document.querySelector('input[name="sg-rec-variaciones"]:checked');return r?(r.value==='si'?1:0):null;})(),
+    variacion_motivo: sinOc ? null : ((eid('sg-rec-var-motivo')||{}).value||null),
     items:items };
 }
 function sgRecGuardar(){
+  // Última red antes de mandar: se revisan LOS SIETE pasos, no sólo el que está
+  // a la vista. El botón de confirmar vive en el paso 7 y para llegar hay que
+  // pasar por los otros, pero si mañana aparece otro camino —un atajo, una
+  // tecla— la recepción no se guarda incompleta y el operador va a parar justo
+  // al paso que le falta.
+  for (var p = 1; p <= SG_REC_ULT; p++) {
+    var falta = sgRecFaltaEn(p);
+    if (falta.length) { sgRecVerPaso(p); toast('Falta ' + falta.join(', ') + '.', 'er'); return; }
+  }
+  // Que haya algo que recibir se controla acá y no en el paso 5, porque con OC
+  // los kg del paso 5 están bloqueados: si los borró, los tiene que volver a
+  // poner en el paso 6, que es donde están editables. Mandarlo al 5 lo dejaría
+  // mirando campos grises sin poder hacer nada.
+  var hayKg = (SG.recItems || []).some(function(it){
+    return (!SG.recSinOc || it.producto_id) && (it.lotes || []).some(function(l){ return Number(l.kg_reales) > 0; });
+  });
+  if (!hayKg) {
+    sgRecVerPaso(SG.recSinOc ? 5 : 6);
+    if (!SG.recSinOc) {
+      var si = document.querySelector('input[name="sg-rec-variaciones"][value="si"]');
+      if (si && !si.checked) { si.checked = true; sgRecVariaciones(); }
+      toast('No quedaron kg cargados: corregilos acá y explicá la diferencia.', 'er');
+    } else {
+      toast('Cargá producto y kg en al menos una línea.', 'er');
+    }
+    return;
+  }
   var body=sgRecBuildBody(true); if(!body) return;
   // Multipart (payload JSON + fotos). Reusa el patrón IFCO de subida (FormData + fetch).
   var fd=new FormData();
@@ -6317,6 +6712,189 @@ function sgCdsEstado(e){
   document.querySelectorAll('.sg-mod .sgcd-est').forEach(function(el){var on=el.dataset.e===e; el.classList.toggle('on',on); el.style.background=on?'var(--burg)':''; el.style.color=on?'#fff':'var(--mut)';});
   sgCdsLoad();
 }
+// ── CONTROL COOPERATIVA ───────────────────────────────────────────────────
+// Lo que la cooperativa descargó, acumulado. Se alimenta solo desde el paso 3
+// de la recepción: no hay nada que cargar acá, sólo que mirar.
+//
+// La fila que más importa no es la que está pendiente de valorizar sino la que
+// dice "hubo descarga" y no tiene cooperativa asignada: ese trabajo se hizo,
+// alguien lo va a cobrar, y hoy no está anotado en ningún lado.
+var SGCC = { estado: '', filas: [], por: [], tot: null };
+
+function sgCcoopInit(){
+  // Arranca mostrando el mes en curso: es el corte con el que se paga.
+  var hoy = new Date();
+  var d1 = new Date(hoy.getFullYear(), hoy.getMonth(), 1);
+  if (eid('sgcc-desde') && !eid('sgcc-desde').value) eid('sgcc-desde').value = d1.toISOString().slice(0,10);
+  if (eid('sgcc-hasta') && !eid('sgcc-hasta').value) eid('sgcc-hasta').value = hoy.toISOString().slice(0,10);
+  // Primero el filtro, después los datos: al revés, la pantalla se cargaba
+  // filtrada por la cooperativa de la visita anterior mientras el desplegable
+  // ya decía "Todas".
+  var sel = eid('sgcc-coop');
+  var eleg = sel ? sel.value : '';
+  api('/api/sg/proveedores-servicio').then(function(r){
+    var ps = (r && r.ok) ? r.data : [];
+    if (sel) {
+      sel.innerHTML = '<option value="">— Todas —</option>' + ps.map(function(p){
+        return '<option value="' + p.id + '">' + esc(p.razon_social) + '</option>'; }).join('');
+      sel.value = eleg;
+    }
+    sgCcoopLoad();
+  });
+}
+
+function sgCcoopEstado(e){
+  SGCC.estado = e;
+  document.querySelectorAll('#sec-sg-control-coop .sgcc-est').forEach(function(x){
+    x.classList.toggle('on', (x.getAttribute('data-e') || '') === e);
+  });
+  // "Sin cooperativa" y "esta cooperativa" son incompatibles: juntas no devuelven
+  // nunca nada y parece que no hay descargas.
+  var sel = eid('sgcc-coop');
+  if (sel) {
+    if (e === 'sin_coop') { sel.value = ''; sel.disabled = true; sel.title = 'Estas descargas todavía no tienen cooperativa asignada'; }
+    else { sel.disabled = false; sel.title = ''; }
+  }
+  sgCcoopLoad();
+}
+
+function sgCcoopLoad(){
+  var q = [];
+  if (eid('sgcc-desde') && eid('sgcc-desde').value) q.push('desde=' + eid('sgcc-desde').value);
+  if (eid('sgcc-hasta') && eid('sgcc-hasta').value) q.push('hasta=' + eid('sgcc-hasta').value);
+  if (eid('sgcc-coop')  && eid('sgcc-coop').value)  q.push('cooperativa_id=' + eid('sgcc-coop').value);
+  if (SGCC.estado) q.push('estado=' + SGCC.estado);
+  api('/api/sg/control-coop' + (q.length ? ('?' + q.join('&')) : '')).then(function(r){
+    if (!r || !r.ok) {
+      // Sin esto, un error del servidor se veía igual que un período sin
+      // descargas: "no hay nada" cuando en realidad no se pudo preguntar.
+      eid('sgcc-kpis').innerHTML = ''; eid('sgcc-coops').innerHTML = '';
+      eid('sgcc-detalle').innerHTML = '<div class="emp" style="padding:34px;color:var(--err)">No se pudieron leer las descargas'
+        + ((r && r.error) ? (': ' + esc(r.error)) : '.') + ' Probá de nuevo con ↻ Actualizar.</div>';
+      return;
+    }
+    var d = r.data;
+    SGCC.filas = d.filas || []; SGCC.tot = d.totales; SGCC.por = d.por_cooperativa || [];
+    sgCcoopRender();
+  });
+}
+
+function sgCcoopRender(){
+  var t = SGCC.tot || { descargas:0, bultos:0, pallets:0, sin_coop:0, pendientes:0, valorizadas:0, monto:0 };
+  var kpi = function(v, r, alerta){
+    return '<div class="sgcc-kpi' + (alerta && Number(v) > 0 ? ' alerta' : '') + '">'
+      + '<div class="v">' + v + '</div><div class="r">' + r + '</div></div>';
+  };
+  eid('sgcc-kpis').innerHTML =
+      kpi(nr(t.descargas), 'descargas')
+    + kpi(nr(t.bultos), 'bultos')
+    + kpi(nr(t.pallets), 'pallets')
+    + kpi(nr(t.sin_coop), 'sin cooperativa', true)
+    + kpi(nr(t.pendientes), 'a valorizar')   // mismo criterio que la columna del corte
+    + kpi(sgMoney(t.monto), 'valorizado');
+
+  // El corte por cooperativa es como se paga: una cuenta por cooperativa.
+  eid('sgcc-coops').innerHTML = SGCC.por.length
+    ? '<div class="ab-table-wrap" style="margin-bottom:18px"><table class="pa-tbl"><thead><tr>'
+      + '<th>Cooperativa</th><th style="text-align:right">Descargas</th><th style="text-align:right">Bultos</th>'
+      + '<th style="text-align:right">Pallets</th><th style="text-align:right">A valorizar</th>'
+      + '<th style="text-align:right">Sin asignar</th>'
+      + '<th style="text-align:right">Valorizado</th></tr></thead><tbody>'
+      + SGCC.por.map(function(c){
+          return '<tr>'
+            + '<td>' + (c.cooperativa_id
+                ? '<b>' + esc(c.cooperativa_nombre || '—') + '</b>'
+                : '<span class="bdg bpe">⚠️ sin asignar</span>') + '</td>'
+            + '<td style="text-align:right">' + nr(c.descargas) + '</td>'
+            + '<td style="text-align:right">' + nr(c.bultos) + '</td>'
+            + '<td style="text-align:right">' + nr(c.pallets) + '</td>'
+            + '<td style="text-align:right">' + nr(c.pendientes) + '</td>'
+            + '<td style="text-align:right">' + (c.sin_asignar ? '<b>' + nr(c.sin_asignar) + '</b>' : '—') + '</td>'
+            + '<td style="text-align:right">' + sgMoney(c.monto) + '</td></tr>';
+        }).join('')
+      + '</tbody></table></div>'
+    : '';
+
+  if (!SGCC.filas.length) {
+    eid('sgcc-detalle').innerHTML = '<div class="emp" style="padding:34px">Ninguna recepción del período declaró descarga de cooperativa.</div>';
+    return;
+  }
+  eid('sgcc-detalle').innerHTML = '<div class="ab-table-wrap"><table class="pa-tbl"><thead><tr>'
+    + '<th>Fecha</th><th>Partida</th><th>Recepción</th><th>Proveedor</th><th>Cooperativa</th><th>Recibió</th>'
+    + '<th style="text-align:right">Bultos</th><th style="text-align:right">Pallets</th>'
+    + '<th>Cobra por</th><th>Estado</th><th style="text-align:right">Monto</th><th></th></tr></thead><tbody>'
+    + SGCC.filas.map(function(f){
+        // Sin cooperativa la descarga no llegó a generar el gasto: el trabajo se
+        // hizo y no está anotado. Es lo primero que hay que ver.
+        var estado = !f.gasto_id ? '<span class="bdg bpe">⚠️ sin cooperativa</span>'
+          : f.estado === 'valorizado' ? '<span class="bdg bok">✅ valorizada</span>'
+          : '<span class="bdg bcc">⏳ a valorizar</span>';
+        return '<tr>'
+          + '<td>' + esc(f.fecha || '—') + '</td>'
+          + '<td>' + (f.partida ? '<code>' + esc(f.partida) + '</code>' : '—') + '</td>'
+          + '<td>' + esc(f.numero_recepcion || '—') + '</td>'
+          + '<td>' + esc(f.proveedor_nombre || '—') + '</td>'
+          + '<td>' + (f.cooperativa_nombre ? esc(f.cooperativa_nombre) : '<span style="color:var(--mut)">—</span>') + '</td>'
+          + '<td>' + esc(f.recibido_por_nombre || '—') + '</td>'
+          + '<td style="text-align:right">' + nr(f.bultos_recibidos) + '</td>'
+          + '<td style="text-align:right">' + nr(f.pallets_recibidos) + '</td>'
+          + '<td>' + esc(f.unidad || '—') + '</td>'
+          + '<td>' + estado + '</td>'
+          + '<td style="text-align:right">' + (f.monto != null ? sgMoney(f.monto) : '—') + '</td>'
+          // La descarga sin cooperativa es el único caso accionable desde acá: el
+          // resto ya tiene dueño y se valoriza en Gastos Directos.
+          + '<td style="text-align:right">' + (!f.gasto_id
+              ? '<button class="btn bb bs" onclick="sgCcoopAsignar(' + f.recepcion_id + ')">Asignar</button>'
+              : '') + '</td>'
+          + '</tr>';
+      }).join('')
+    + '</tbody></table></div>'
+    + '<div style="font-size:11.5px;color:var(--mut);margin-top:10px">La plata se carga en '
+    + '<b>Gastos Directos → Cargas y Descargas</b>, que es donde se valoriza la cuenta de cada cooperativa. '
+    + 'Recién ahí la descarga entra al costo del lote.</div>';
+}
+
+// Asignar la cooperativa de una descarga que entró sin saber de quién fue.
+// Cierra el caso que abre la opción "no sé todavía" del paso 3 de la recepción:
+// sin esto esas filas serían un callejón sin salida, porque las recepciones no
+// se pueden editar.
+function sgCcoopAsignar(recepcionId){
+  var f = SGCC.filas.find(function(x){ return x.recepcion_id === recepcionId; });
+  if (!f) return;
+  SGCC.asig = recepcionId;
+  eid('sgcc-asig-ref').innerHTML = 'Recepción <b>' + esc(f.numero_recepcion || '—') + '</b>'
+    + (f.partida ? (' · partida <code>' + esc(f.partida) + '</code>') : '')
+    + ' · ' + nr(f.bultos_recibidos) + ' bultos, ' + nr(f.pallets_recibidos) + ' pallets.';
+  var origen = eid('sgcc-coop');
+  var opts = Array.prototype.slice.call(origen.options).filter(function(o){ return o.value; });
+  var pintar = function(lista){
+    eid('sgcc-asig-coop').innerHTML = '<option value="">— Elegir —</option>'
+      + lista.map(function(o){ return '<option value="' + o.v + '">' + esc(o.t) + '</option>'; }).join('');
+  };
+  if (opts.length) pintar(opts.map(function(o){ return { v: o.value, t: o.textContent }; }));
+  else {
+    // El filtro todavía no cargó: se pide de nuevo en vez de abrir un
+    // desplegable vacío que no deja asignar nada.
+    pintar([]);
+    api('/api/sg/proveedores-servicio').then(function(r){
+      pintar(((r && r.ok) ? r.data : []).map(function(p){ return { v: p.id, t: p.razon_social }; }));
+    });
+  }
+  document.querySelector('input[name="sgcc-asig-unidad"][value="bulto"]').checked = true;
+  eid('sgcc-asig-modal').classList.add('on');
+}
+
+function sgCcoopAsigGuardar(){
+  var coop = eid('sgcc-asig-coop').value;
+  if (!coop) { toast('Elegí la cooperativa', 'er'); return; }
+  var unidad = (document.querySelector('input[name="sgcc-asig-unidad"]:checked') || {}).value || 'bulto';
+  api('/api/sg/control-coop/' + SGCC.asig + '/cooperativa', 'POST',
+      { cooperativa_id: Number(coop), unidad: unidad }).then(function(r){
+    if (r && r.ok) { toast('Descarga asignada', 'ok'); closeMB('sgcc-asig-modal'); sgCcoopLoad(); }
+    else toast((r && r.error) || 'No se pudo asignar', 'er');
+  });
+}
+
 function sgCdsLoad(){
   var prov=eid('sgcd-filtro-coop').value;
   api('/api/sg/gastos-servicio?tipo=carga_salida,descarga_ingreso&estado='+SGCD.estado+(prov?('&proveedor_id='+prov):'')).then(function(r){
@@ -13395,6 +13973,7 @@ function loadSec(s) {
     'sg-reprocesos': function(){ sgReprocesosInit(); },
     'sg-ventas':     function(){ sgVenInit(); },
     'sg-gastos-directos': function(){ sgGdsInit(); },
+    'sg-control-coop': function(){ sgCcoopInit(); },
     'sg-importacion': function(){ sgImpInit(); },
     'sg-catalogo':   function(){ sgLoadCaches(function(){ sgCatSub('productos'); }); },
     'sg-reportes':   function(){ sgRepInit(); },
@@ -16764,7 +17343,12 @@ function abCerrarModal(id) { var el = document.getElementById(id); if(el) el.cla
 
 // Cerrar modales abasto al click fuera
 document.querySelectorAll('.ab-modal-overlay').forEach(function(el){
-  el.addEventListener('click', function(e){ if(e.target===el) el.classList.remove('on'); });
+  el.addEventListener('click', function(e){
+    // La recepción NO: es un asistente de siete pasos con fotos ya sacadas.
+    // Un click al costado cerraba todo y no había forma de recuperarlo.
+    if (el.id === 'sg-rec-modal') return;
+    if(e.target===el) el.classList.remove('on');
+  });
 });
 
 // ─── DASHBOARD ──────────────────────────────────────────────

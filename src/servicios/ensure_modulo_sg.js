@@ -27,6 +27,10 @@ const MODULOS_SG = [
   ["sg-gastos-directos", "🧾 Gastos Directos", 657],
   // Importación (F1): cotizador standalone de embarque (costo neto por caja, margen proyectado).
   ["sg-importacion", "📥 Importación", 660],
+  // Control Cooperativa: las descargas de ingreso declaradas en la recepción,
+  // acumuladas por cooperativa y por período. Se alimenta sola desde el paso de
+  // descarga de la recepción; acá no se carga nada, sólo se controla.
+  ["sg-control-coop", "🤝 Control Cooperativa", 662],
 ];
 
 try {
@@ -77,6 +81,7 @@ try {
   db.prepare("UPDATE modulos_config SET label='🔄 Reprocesos'       WHERE modulo='sg-reprocesos'").run();
   db.prepare("UPDATE modulos_config SET label='💸 Gastos Fijos' WHERE modulo='sg-gvariables'").run();
   db.prepare("UPDATE modulos_config SET label='🧾 Gastos Directos'  WHERE modulo='sg-gastos-directos'").run();
+  db.prepare("UPDATE modulos_config SET label='🤝 Control Cooperativa' WHERE modulo='sg-control-coop'").run();
   db.prepare("UPDATE modulos_config SET label='📄 Liquidaciones'      WHERE modulo='ab-liquidaciones'").run();
   // ── EL MENÚ DE SAN GERÓNIMO, ORDENADO POR CÓMO SE TRABAJA ────────────────
   // Antes había un solo grupo, "Abasto SG", con once pantallas apiladas en el
@@ -110,11 +115,14 @@ try {
 
     ['Administración de Compras',     660,  'sg-catalogo'],
     ['Administración de Compras',     661,  'sg-compras'],
-    ['Administración de Compras',     662,  'sg-gvariables'],
-    ['Administración de Compras',     663,  'sg-gastos-directos'],
-    ['Administración de Compras',     664,  'sg-reprocesos'],
-    ['Administración de Compras',     665,  'ab-liquidaciones'],
-    ['Administración de Compras',     666,  'sp-pagos'],
+    // Control Cooperativa va pegado a Ingresos porque se alimenta de ahí: cada
+    // recepción que contesta "con descarga" cae en esta pantalla.
+    ['Administración de Compras',     662,  'sg-control-coop'],
+    ['Administración de Compras',     663,  'sg-gvariables'],
+    ['Administración de Compras',     664,  'sg-gastos-directos'],
+    ['Administración de Compras',     665,  'sg-reprocesos'],
+    ['Administración de Compras',     666,  'ab-liquidaciones'],
+    ['Administración de Compras',     667,  'sp-pagos'],
 
     ['Informes',                      670,  'sg-dashboard'],
     ['Informes',                      671,  'sg-reportes'],

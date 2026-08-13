@@ -1143,7 +1143,16 @@ try {
           calidad_defectos        TEXT,
           calidad_pct_afectado    REAL,
           calidad_observaciones   TEXT,
-          oc_pendiente            INTEGER
+          oc_pendiente            INTEGER,
+          -- Estas cuatro las agrega un ALTER más arriba, pero este rebuild copia
+          -- sólo la INTERSECCIÓN de columnas: si no están acá, en una base nueva
+          -- se crean, se borran en el rebuild y la recepción entera queda rota
+          -- ("no such column: con_descarga"). Toda columna nueva de
+          -- sg_recepciones tiene que agregarse también en esta lista.
+          con_descarga            INTEGER,
+          hay_variaciones         INTEGER,
+          variacion_motivo        TEXT,
+          peso_recepcionado       REAL
         );`);
       const nuevas = db.prepare("PRAGMA table_info(sg_recepciones_new)").all().map(c => c.name);
       const viejas = new Set(db.prepare("PRAGMA table_info(sg_recepciones)").all().map(c => c.name));

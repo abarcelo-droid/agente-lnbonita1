@@ -1595,7 +1595,7 @@ router.post('/oc/:id/anular', requireAdmin, (req, res) => {
 // Recibir mercadería: crea recepción + lotes (con división por calidad), recalcula costos y vencimientos.
 // BLOQUE A+B — multipart: campos de texto en req.body.payload (JSON) + fotos en req.files.
 // upload.array corre primero para poblar req.body/req.files; requireAdmin no lee el body.
-router.post('/recepciones', sgUpload.array('fotos', 12), requireAdmin, (req, res) => {
+router.post('/recepciones', sgUpload.array('fotos', 40), requireAdmin, (req, res) => {
   const db = getDb();
   try {
     const b = req.body && req.body.payload ? JSON.parse(req.body.payload) : (req.body || {});
@@ -1800,7 +1800,7 @@ router.get('/recepciones/:id/calidad.pdf', requireAuth, async (req, res) => {
 // ── PASO 2 — VISTA PREVIA del informe de calidad (sin persistir). Recibe el payload de la
 // recepción en curso + las fotos (en memoria) y devuelve el PDF para previsualizar antes de
 // confirmar. NO escribe en DB ni en disco. Reusa el mismo generador que el PDF definitivo. ──
-router.post('/recepciones/preview-calidad.pdf', sgUploadMem.array('fotos', 12), requireAuth, async (req, res) => {
+router.post('/recepciones/preview-calidad.pdf', sgUploadMem.array('fotos', 40), requireAuth, async (req, res) => {
   const db = getDb();
   try {
     const b = (req.body && req.body.payload) ? JSON.parse(req.body.payload) : {};
@@ -3079,6 +3079,131 @@ router.post('/despachos/:id/anular', requireAdmin, (req, res) => {
 // ══ MÓDULO GASTOS DIRECTOS (servicio, valorización diferida) — Fase 1: Flete de Salida ══
 // Listado de gastos de servicio con datos de la operación (despacho → remito, cliente, kg).
 // Filtros: tipo (default flete_salida), estado (pendiente_valorizar/valorizado), proveedor.
+// ── CONTROL COOPERATIVA ─────────────────────────────────────────────────────
+// Todo lo que la cooperativa descargó, junto y en un solo lugar. Hasta ahora la
+// descarga sólo se veía dentro de "Gastos Directos → Cargas y Descargas",
+// mezclada con las cargas de salida y sin poder filtrar por fecha: para saber
+// cuánto se le debe a una cooperativa por un mes había que ir recepción por
+// recepción.
+//
+// La fila SALE DE LA RECEPCIÓN, no del gasto. Es a propósito: si el operador
+// dijo "hubo descarga" y no cargó la cooperativa, el gasto nunca se crea
+// (syncGastoCoop necesita proveedor) y esa descarga desaparecía sin dejar
+// rastro. Acá aparece igual, marcada como incompleta, que es justamente lo que
+// hay que controlar.
+router.get('/control-coop', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const where = ['r.activo=1'], params = [];
+    // Recepciones con descarga declarada. El OR cubre las de antes de que
+    // existiera con_descarga: ahí el único indicio es que tengan el gasto.
+    where.push('(r.con_descarga=1 OR g.id IS NOT NULL)');
+    if (req.query.desde) { where.push('COALESCE(r.fecha_recepcion, date(r.creado_en)) >= ?'); params.push(String(req.query.desde)); }
+    if (req.query.hasta) { where.push('COALESCE(r.fecha_recepcion, date(r.creado_en)) <= ?'); params.push(String(req.query.hasta)); }
+    if (req.query.cooperativa_id) { where.push('g.proveedor_servicio_id = ?'); params.push(Number(req.query.cooperativa_id)); }
+    // estado: sin_coop | pendiente_valorizar | valorizado
+    if (req.query.estado === 'sin_coop') where.push('g.id IS NULL');
+    else if (req.query.estado) { where.push('g.estado = ?'); params.push(String(req.query.estado)); }
+
+    const filas = db.prepare(`
+      SELECT r.id                AS recepcion_id,
+             r.numero_recepcion,
+             COALESCE(r.fecha_recepcion, date(r.creado_en)) AS fecha,
+             r.bultos_recibidos, r.pallets_recibidos, r.con_descarga,
+             o.trazabilidad     AS partida,
+             pr.razon_social    AS proveedor_nombre,
+             g.id               AS gasto_id,
+             g.proveedor_servicio_id AS cooperativa_id,
+             co.razon_social    AS cooperativa_nombre,
+             g.unidad, g.cantidad, g.estado, g.monto, g.fecha_valorizacion, g.cuenta_ref,
+             u.nombre           AS recibido_por_nombre
+      FROM sg_recepciones r
+      LEFT JOIN sg_gastos_directos g
+             ON g.recepcion_id = r.id AND g.tipo_gasto='descarga_ingreso'
+            AND g.activo=1 AND g.estado!='anulado'
+      LEFT JOIN sg_oc o          ON o.id  = r.oc_id
+      LEFT JOIN sg_proveedores pr ON pr.id = o.proveedor_id
+      LEFT JOIN sg_proveedores co ON co.id = g.proveedor_servicio_id
+      LEFT JOIN usuarios u        ON u.id  = r.creado_por
+      WHERE ${where.join(' AND ')}
+      ORDER BY fecha DESC, r.id DESC
+    `).all(...params);
+
+    // Los totales salen de las MISMAS filas que se muestran: si se calcularan
+    // con otra consulta, un filtro nuevo tendría que acordarse de los dos lados.
+    const num = (v) => Number(v) || 0;
+    const totales = {
+      descargas: filas.length,
+      bultos:    filas.reduce((a, f) => a + num(f.bultos_recibidos), 0),
+      pallets:   filas.reduce((a, f) => a + num(f.pallets_recibidos), 0),
+      sin_coop:  filas.filter((f) => !f.gasto_id).length,
+      pendientes: filas.filter((f) => f.estado === 'pendiente_valorizar').length,
+      valorizadas: filas.filter((f) => f.estado === 'valorizado').length,
+      monto:     filas.reduce((a, f) => a + num(f.monto), 0),
+    };
+    // Y el corte por cooperativa, que es como se paga.
+    const porCoop = {};
+    for (const f of filas) {
+      const k = f.cooperativa_id || 0;
+      if (!porCoop[k]) porCoop[k] = { cooperativa_id: f.cooperativa_id || null, cooperativa_nombre: f.cooperativa_nombre || null, descargas: 0, bultos: 0, pallets: 0, pendientes: 0, sin_asignar: 0, monto: 0 };
+      const c = porCoop[k];
+      c.descargas++;
+      c.bultos += num(f.bultos_recibidos);
+      c.pallets += num(f.pallets_recibidos);
+      if (f.estado === 'pendiente_valorizar') c.pendientes++;
+      if (!f.gasto_id) c.sin_asignar++;
+      c.monto += num(f.monto);
+    }
+    res.json({ ok: true, data: { filas, totales, por_cooperativa: Object.values(porCoop) } });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// Asignar (o corregir) la cooperativa de una descarga ya declarada. Es la
+// contracara de la salida "no sé todavía" del paso 3: la recepción no se traba
+// en la tranquera, pero la descarga queda marcada acá hasta que alguien diga de
+// quién fue. Sin esto, la fila sin cooperativa sería un callejón sin salida —
+// no hay PUT de recepciones.
+//
+// Reusa syncGastoCoop, que ya es idempotente y no pisa un gasto ya valorizado.
+router.post('/control-coop/:id/cooperativa', requireAdmin, (req, res) => {
+  const db = getDb();
+  try {
+    const rec = db.prepare('SELECT * FROM sg_recepciones WHERE id=? AND activo=1').get(req.params.id);
+    if (!rec) return res.status(404).json({ ok: false, error: 'Recepción inexistente' });
+    const coopId = req.body && req.body.cooperativa_id ? Number(req.body.cooperativa_id) : null;
+    if (!coopId) return res.status(400).json({ ok: false, error: 'Falta la cooperativa' });
+    const coop = db.prepare('SELECT id FROM sg_proveedores WHERE id=? AND activo=1 AND es_servicio=1').get(coopId);
+    if (!coop) return res.status(400).json({ ok: false, error: 'Esa no es una cooperativa / proveedor de servicio activo' });
+
+    const yaVal = db.prepare(`SELECT id FROM sg_gastos_directos
+      WHERE recepcion_id=? AND tipo_gasto='descarga_ingreso' AND activo=1 AND estado='valorizado'`).get(rec.id);
+    // Ya se le pagó: cambiarle la cooperativa acá dejaría la cuenta pagada a
+    // nombre de otro. Hay que anular esa valorización primero.
+    if (yaVal) return res.status(400).json({ ok: false, error: 'Esa descarga ya está valorizada: no se le puede cambiar la cooperativa sin dar de baja la valorización' });
+
+    const unidad = (req.body.unidad === 'pallet') ? 'pallet' : 'bulto';
+    const cantidad = unidad === 'pallet' ? rec.pallets_recibidos : rec.bultos_recibidos;
+    // Sin cantidad, el gasto queda en NULL y cuando se valoriza la cuenta el
+    // prorrateo le asigna $0 a esta descarga sin decir nada. Mejor no dejar
+    // crearla: que elija la unidad que la recepción sí contó.
+    if (!cantidad) {
+      return res.status(400).json({ ok: false,
+        error: 'La recepción no tiene ' + (unidad === 'pallet' ? 'pallets' : 'bultos')
+          + ' cargados: elegí la otra unidad o corregí la recepción, o la descarga se valoriza en cero.' });
+    }
+    db.transaction(() => {
+      // Si la recepción venía sin declarar descarga, asignarle cooperativa ES
+      // declararla: si no, la fila desaparecería del listado al recargar.
+      if (rec.con_descarga !== 1) db.prepare('UPDATE sg_recepciones SET con_descarga=1 WHERE id=?').run(rec.id);
+      syncGastoCoop(db, {
+        tipo: 'descarga_ingreso', recepcionId: rec.id, proveedorId: coopId,
+        unidad, cantidad, fechaServicio: rec.fecha_recepcion, userId: uid(req),
+      });
+    })();
+    res.json({ ok: true, data: { recepcion_id: rec.id, cooperativa_id: coopId, unidad, cantidad } });
+  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+
 router.get('/gastos-servicio', requireAuth, (req, res) => {
   const db = getDb();
   try {
