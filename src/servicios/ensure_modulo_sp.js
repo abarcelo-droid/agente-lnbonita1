@@ -25,12 +25,12 @@ try {
 
   db.prepare(
     'INSERT OR IGNORE INTO modulos_config (modulo, label, grupo, sociedad_id, tipo, orden) VALUES (?,?,?,?,?,?)'
-  // El 667 tiene que coincidir con el de MENU_SG en ensure_modulo_sg.js. En una
+  // El 668 tiene que coincidir con el de MENU_SG en ensure_modulo_sg.js. En una
   // base nueva este INSERT corre DESPUÉS (ensure_modulo_sg se importa antes y no
   // encuentra la fila para actualizarla), así que el número que se ponga acá es
   // el que manda en la primera arrancada. Con el 666 viejo quedaba empatado con
   // Liquidaciones hasta el segundo arranque.
-  ).run('sp-pagos', '💸 Órdenes de Pago — Seguimiento', 'Administración de Compras', socId, 'operativo', 667);
+  ).run('sp-pagos', '💸 Órdenes de Pago — Seguimiento', 'Administración de Compras', socId, 'operativo', 668);
 
   // Sin `grupo` ni `orden`: los pone ensure_modulo_sg.js, que es donde vive el
   // orden del menú de San Gerónimo completo.

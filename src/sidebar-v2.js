@@ -36,7 +36,7 @@ const MAX_RECIENTES = 4;
 // SE ACTUALIZA A MANO, en el mismo cambio que se mergea. Sacarlo de git en el
 // arranque sonaba mejor, pero Railway despliega desde una copia sin historial:
 // diría siempre lo mismo y mentiría, que es peor que no estar.
-const VERSION = 'V672';
+const VERSION = 'V673';
 
 let SIDEBAR_DATA = { grupos: [], modulos: [] };
 let SOCIEDADES = [];                             // array de {id, nombre, funcion}
@@ -500,6 +500,20 @@ function stripIconFromLabel(label){
   return label.replace(/^[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]\uFE0F?\s*/u, '');
 }
 
+// El autoelevador de Control Cooperativa. Va como SVG y no como emoji porque
+// autoelevador NO EXISTE en Unicode: lo más cercano es un tractor, que no es lo
+// que hace una cooperativa en el galpón. Dibujado con el mismo trazo que el
+// resto del sidebar (currentColor + stroke 2), así que se pinta solo cuando el
+// ítem está activo, cosa que un emoji no hace.
+const ICO_AUTOELEVADOR = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" '
+  + 'stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+  + '<path d="M3 17v-5h5l2-4h3v9"/>'   // la cabina, con el parabrisas inclinado
+  + '<circle cx="6" cy="19" r="2"/><circle cx="13" cy="19" r="2"/>'
+  + '<path d="M17 20V4"/>'             // el mástil
+  + '<path d="M17 5h3"/>'              // el respaldo de carga, arriba
+  + '<path d="M17 17h4"/>'             // la uña, a la altura del piso
+  + '</svg>';
+
 function moduleIcon(m){
   // 1) Mapping manual prioritario — emojis por módulo según el panel original
   const map = {
@@ -553,6 +567,8 @@ function moduleIcon(m){
     'pa-scout':          '📱',
     'pli-planificacion': '📦',
     'sp-pagos':          '💸',
+    // San Gerónimo
+    'sg-control-coop':   ICO_AUTOELEVADOR,
     // Abasto IFCO
     'ab-dashboard':      '📊',
     'ab-gastos':         '💸',

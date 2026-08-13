@@ -30,7 +30,7 @@ const MODULOS_SG = [
   // Control Cooperativa: las descargas de ingreso declaradas en la recepción,
   // acumuladas por cooperativa y por período. Se alimenta sola desde el paso de
   // descarga de la recepción; acá no se carga nada, sólo se controla.
-  ["sg-control-coop", "🤝 Control Cooperativa", 662],
+  ["sg-control-coop", "🚜 Control Cooperativa", 662],
 ];
 
 try {
@@ -81,7 +81,7 @@ try {
   db.prepare("UPDATE modulos_config SET label='🔄 Reprocesos'       WHERE modulo='sg-reprocesos'").run();
   db.prepare("UPDATE modulos_config SET label='💸 Gastos Fijos' WHERE modulo='sg-gvariables'").run();
   db.prepare("UPDATE modulos_config SET label='🧾 Gastos Directos'  WHERE modulo='sg-gastos-directos'").run();
-  db.prepare("UPDATE modulos_config SET label='🤝 Control Cooperativa' WHERE modulo='sg-control-coop'").run();
+  db.prepare("UPDATE modulos_config SET label='🚜 Control Cooperativa' WHERE modulo='sg-control-coop'").run();
   db.prepare("UPDATE modulos_config SET label='📄 Liquidaciones'      WHERE modulo='ab-liquidaciones'").run();
   // ── EL MENÚ DE SAN GERÓNIMO, ORDENADO POR CÓMO SE TRABAJA ────────────────
   // Antes había un solo grupo, "Abasto SG", con once pantallas apiladas en el
@@ -90,11 +90,16 @@ try {
   // estado cuando se hicieron.
   //
   // Ahora se agrupan por circuito, que es como se usan de verdad:
-  //   · Administración de VENTAS   — lo que sale: Stock, Salidas, Importación.
+  //   · Administración de VENTAS   — lo que sale: Stock y Salidas.
   //   · Administración de COMPRAS  — lo que entra y lo que se paga, de punta a
-  //     punta: Maestros, Ingresos, los dos tipos de gasto, Reprocesos,
-  //     Liquidaciones y el Seguimiento de Órdenes de Pago.
+  //     punta: Maestros, Ingresos, Control Cooperativa, Importación, los dos
+  //     tipos de gasto, Reprocesos, Liquidaciones y el Seguimiento de Órdenes
+  //     de Pago.
   //   · Informes                   — lo que se mira, no lo que se carga.
+  //
+  // IMPORTACIÓN pasó de Ventas a Compras: cotiza un embarque que se COMPRA
+  // (costo por caja, margen proyectado). Estaba del lado de las ventas porque
+  // ahí nació, no porque sea una venta.
   //
   // El SEGUIMIENTO DE ÓRDENES DE PAGO se muda de "Gestión Insumos", donde estaba
   // por accidente. Ya era de San Gerónimo (misma sociedad_id), así que mudarlo es
@@ -111,18 +116,18 @@ try {
     // grupo                          orden  módulo
     ['Administración de Ventas',      650,  'sg-stock'],
     ['Administración de Ventas',      651,  'sg-ventas'],
-    ['Administración de Ventas',      652,  'sg-importacion'],
 
     ['Administración de Compras',     660,  'sg-catalogo'],
     ['Administración de Compras',     661,  'sg-compras'],
     // Control Cooperativa va pegado a Ingresos porque se alimenta de ahí: cada
     // recepción que contesta "con descarga" cae en esta pantalla.
     ['Administración de Compras',     662,  'sg-control-coop'],
-    ['Administración de Compras',     663,  'sg-gvariables'],
-    ['Administración de Compras',     664,  'sg-gastos-directos'],
-    ['Administración de Compras',     665,  'sg-reprocesos'],
-    ['Administración de Compras',     666,  'ab-liquidaciones'],
-    ['Administración de Compras',     667,  'sp-pagos'],
+    ['Administración de Compras',     663,  'sg-importacion'],
+    ['Administración de Compras',     664,  'sg-gvariables'],
+    ['Administración de Compras',     665,  'sg-gastos-directos'],
+    ['Administración de Compras',     666,  'sg-reprocesos'],
+    ['Administración de Compras',     667,  'ab-liquidaciones'],
+    ['Administración de Compras',     668,  'sp-pagos'],
 
     ['Informes',                      670,  'sg-dashboard'],
     ['Informes',                      671,  'sg-reportes'],
