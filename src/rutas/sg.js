@@ -1632,18 +1632,37 @@ router.post('/recepciones', sgUpload.array('fotos', 12), requireAdmin, (req, res
       const recInfo = db.prepare(`INSERT INTO sg_recepciones
         (oc_id, numero_recepcion, fecha_recepcion, recibido_por, numero_remito_proveedor, observaciones, creado_por,
          factura_numero, dtv_codigo, pallets_recibidos, bultos_recibidos,
-         observada, calidad_estado_general, calidad_defectos, calidad_pct_afectado, calidad_observaciones, oc_pendiente)
-        VALUES (?,?,?,?,?,?,?, ?,?,?,?, ?,?,?,?,?, ?)`).run(
+         observada, calidad_estado_general, calidad_defectos, calidad_pct_afectado, calidad_observaciones, oc_pendiente,
+         con_descarga, hay_variaciones, variacion_motivo, peso_recepcionado)
+        VALUES (?,?,?,?,?,?,?, ?,?,?,?, ?,?,?,?,?, ?, ?,?,?,?)`).run(
         sinOC ? null : b.oc_id, numero, fechaIngreso, b.recibido_por || null, val(b.numero_remito_proveedor), val(b.observaciones), uid(req),
         val(b.factura_numero), val(b.dtv_codigo), numN(b.pallets_recibidos), numN(b.bultos_recibidos),
         b.observada ? 1 : 0, val(b.calidad_estado_general), val(b.calidad_defectos), numN(b.calidad_pct_afectado), val(b.calidad_observaciones),
-        sinOC ? 1 : 0);
+        sinOC ? 1 : 0,
+        // "Hubo descarga" se pregunta y se guarda. Antes el único indicio era si
+        // habían elegido cooperativa: "no hubo" y "me olvidé" se veían igual.
+        (b.con_descarga === undefined || b.con_descarga === null) ? null : (b.con_descarga ? 1 : 0),
+        (b.hay_variaciones === undefined || b.hay_variaciones === null) ? null : (b.hay_variaciones ? 1 : 0),
+        val(b.variacion_motivo), numN(b.peso_recepcionado));
       const recId = recInfo.lastInsertRowid;
-      // BLOQUE B — fotos del informe (patrón IFCO: ruta /data/sg/<archivo>).
-      for (const f of (req.files || [])) {
-        db.prepare('INSERT INTO sg_recepcion_fotos (recepcion_id, ruta, nombre_original, creado_por) VALUES (?,?,?,?)')
-          .run(recId, '/data/sg/' + f.filename, f.originalname || null, uid(req));
-      }
+      // ── LAS FOTOS, SIEMPRE Y ROTULADAS ────────────────────────────────
+      // Antes sólo se guardaban las del informe de calidad. Ahora entra todo lo
+      // que el operador saca —el remito, la mercadería, la balanza, lo que
+      // justifica una diferencia— y cada foto sabe de qué es. Un montón de
+      // fotos sin decir qué muestran no sirve cuando hay que reclamarle a un
+      // proveedor tres semanas después.
+      //
+      // La categoría viaja en un arreglo paralelo, en el mismo orden en que se
+      // subieron los archivos: multer conserva el orden dentro de un mismo
+      // campo. Si falta o no coincide, la foto se guarda igual sin categoría —
+      // perder la foto por no saber rotularla sería peor.
+      const cats = Array.isArray(b.fotos_categorias) ? b.fotos_categorias : [];
+      const VALIDAS = ['documentacion', 'mercaderia', 'peso', 'variacion', 'calidad'];
+      (req.files || []).forEach((f, i) => {
+        const cat = VALIDAS.includes(cats[i]) ? cats[i] : null;
+        db.prepare('INSERT INTO sg_recepcion_fotos (recepcion_id, ruta, nombre_original, creado_por, categoria) VALUES (?,?,?,?,?)')
+          .run(recId, '/data/sg/' + f.filename, f.originalname || null, uid(req), cat);
+      });
       // FASE 2 — si se asignó cooperativa, queda una DESCARGA DE INGRESO pendiente. La unidad
       // (bulto/pallet) define la cantidad: bultos_recibidos o pallets_recibidos de la recepción.
       const coopId = b.cooperativa_id ? Number(b.cooperativa_id) : null;

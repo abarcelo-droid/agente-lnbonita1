@@ -743,6 +743,26 @@ try { db.exec("ALTER TABLE sg_oc ADD COLUMN flete_modalidad TEXT"); } catch (_) 
 try { db.exec("ALTER TABLE sg_oc ADD COLUMN flete_cantidad REAL"); } catch (_) {}
 try { db.exec("ALTER TABLE sg_oc ADD COLUMN flete_precio_unit REAL"); } catch (_) {}
 try { db.exec("ALTER TABLE sg_oc ADD COLUMN flete_con_iva INTEGER"); } catch (_) {}
+
+// ── LA RECEPCIÓN GUARDA MÁS QUE NÚMEROS ───────────────────────────────────
+// Las fotos existían pero se guardaban SÓLO si la recepción salía observada:
+// eran las del informe de calidad. Ahora se guardan siempre y se sabe DE QUÉ es
+// cada una — el remito, la mercadería, la balanza, o lo que justifica una
+// diferencia. Un montón de fotos sin decir qué muestran no sirve para nada
+// cuando hay que reclamarle a un proveedor tres semanas después.
+try { db.exec("ALTER TABLE sg_recepcion_fotos ADD COLUMN categoria TEXT"); } catch (_) {}
+
+// La descarga se pregunta SÍ O NO. Antes el único indicio era si se había
+// elegido cooperativa, así que "no hubo descarga" y "me olvidé de cargarla" se
+// veían igual. Es un dato que se va a usar más adelante para valorizarla.
+try { db.exec("ALTER TABLE sg_recepciones ADD COLUMN con_descarga INTEGER"); } catch (_) {}
+
+// Lo que llegó, ¿coincide con lo que se pidió? Es la pregunta que el operador
+// tiene que contestar sí o sí, y de la que cuelga todo el reclamo posterior.
+try { db.exec("ALTER TABLE sg_recepciones ADD COLUMN hay_variaciones INTEGER"); } catch (_) {}
+try { db.exec("ALTER TABLE sg_recepciones ADD COLUMN variacion_motivo TEXT"); } catch (_) {}
+// El peso que marcó la balanza, que puede no ser el de los ítems.
+try { db.exec("ALTER TABLE sg_recepciones ADD COLUMN peso_recepcionado REAL"); } catch (_) {}
 try { db.exec("CREATE INDEX IF NOT EXISTS idx_sg_oc_trazabilidad ON sg_oc(trazabilidad)"); } catch (_) {}
 
 // ── MIGRACIÓN idempotente: sg_clientes → +cuenta_contable_id (FK → sg_cuentas) (#401) ──
