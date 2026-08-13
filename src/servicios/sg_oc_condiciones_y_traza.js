@@ -71,15 +71,22 @@ try {
        WHERE (trazabilidad IS NULL OR trazabilidad = '')
        ORDER BY date(fecha_oc), id`).all();
 
+    // El número que sigue sale del MÁXIMO YA ASIGNADO de cada día, leyendo el
+    // propio código. Antes esto contaba filas mientras el alta contaba otra cosa:
+    // los dos criterios se desincronizaban y podían asignar el mismo XX a dos
+    // órdenes distintas. Ahora los dos leen lo mismo.
+    const yaEnElDia = new Map();
+    for (const r of db.prepare(
+      "SELECT trazabilidad FROM sg_oc WHERE trazabilidad IS NOT NULL AND trazabilidad <> ''").all()) {
+      const p = String(r.trazabilidad).split('.');
+      if (p.length < 5) continue;
+      const dia = `${p[3]}-${p[2]}-${p[1]}`;          // AAAA-MM-DD
+      const xx = parseInt(p[4], 10);
+      if (isNaN(xx)) continue;
+      if (!yaEnElDia.has(dia) || xx > yaEnElDia.get(dia)) yaEnElDia.set(dia, xx);
+    }
+
     if (sinCodigo.length) {
-      // Cuántas ya tienen código en cada día, para seguir la numeración y no
-      // pisar una que ya se generó.
-      const yaEnElDia = new Map();
-      for (const r of db.prepare(`
-        SELECT date(fecha_oc) AS d, COUNT(*) AS n FROM sg_oc
-         WHERE trazabilidad IS NOT NULL AND trazabilidad <> '' GROUP BY date(fecha_oc)`).all()) {
-        yaEnElDia.set(r.d, r.n);
-      }
       const poner = db.prepare('UPDATE sg_oc SET trazabilidad = ? WHERE id = ?');
       let n = 0;
       db.transaction(() => {
@@ -100,6 +107,44 @@ try {
         console.warn(`[SG] ${sinFecha} orden(es) quedaron sin código porque no tienen fecha. ` +
                      'Se las sigue identificando con su número interno.');
       }
+    }
+
+    // EL CERROJO. La partida identifica toda la vida de la mercadería: desde
+    // acá cuelgan los lotes, y dos órdenes con el mismo código sería el mismo
+    // lote para dos compras distintas. El índice único lo hace imposible.
+    //
+    // Si en la base ya hay repetidos (los había: dos contadores distintos), no
+    // se puede crear el índice. En vez de fallar en silencio se los renumera:
+    // el primero por id se queda con el código y a los demás se les da el
+    // siguiente libre de ese día.
+    try {
+      const dup = db.prepare(`
+        SELECT trazabilidad, COUNT(*) c FROM sg_oc
+         WHERE trazabilidad IS NOT NULL AND trazabilidad <> ''
+         GROUP BY trazabilidad HAVING c > 1`).all();
+      if (dup.length) {
+        const arreglar = db.prepare('UPDATE sg_oc SET trazabilidad = ? WHERE id = ?');
+        let renumeradas = 0;
+        db.transaction(() => {
+          for (const d of dup) {
+            const filas = db.prepare(
+              'SELECT id, proveedor_id, trazabilidad FROM sg_oc WHERE trazabilidad = ? ORDER BY id').all(d.trazabilidad);
+            const p = String(d.trazabilidad).split('.');
+            const dia = `${p[3]}-${p[2]}-${p[1]}`;
+            for (let i = 1; i < filas.length; i++) {          // el primero se queda como está
+              let siguiente = (yaEnElDia.get(dia) || 0) + 1;
+              yaEnElDia.set(dia, siguiente);
+              const prov = String(filas[i].proveedor_id || 0).padStart(4, '0');
+              arreglar.run(`${prov}.${p[1]}.${p[2]}.${p[3]}.${String(siguiente).padStart(2, '0')}`, filas[i].id);
+              renumeradas++;
+            }
+          }
+        })();
+        console.warn(`[SG] Había ${dup.length} código(s) de partida repetido(s): se renumeraron ${renumeradas} orden(es).`);
+      }
+      db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_sg_oc_trazabilidad_unica ON sg_oc(trazabilidad) WHERE trazabilidad IS NOT NULL AND trazabilidad <> \'\'');
+    } catch (e) {
+      console.error('[SG] No se pudo poner el cerrojo de partida única:', e.message);
     }
   }
 } catch (e) {

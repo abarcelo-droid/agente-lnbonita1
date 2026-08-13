@@ -2957,12 +2957,14 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   </div>
 </div>
 
-<!-- Modal Recepción de mercadería — ASISTENTE DE 7 PASOS, A PANTALLA COMPLETA.
-     1 Documentación · 2 Pallets y bultos · 3 Descarga · 4 Mercadería y peso ·
-     5 Items a recibir · 6 Diferencias contra la orden · 7 Control de calidad.
+<!-- Modal Recepción de mercadería — ASISTENTE DE 6 PASOS, A PANTALLA COMPLETA.
+     1 Documentación · 2 Artículos recibidos · 3 Descarga · 4 Mercadería y peso ·
+     5 Diferencias contra la orden · 6 Control de calidad.
      Cada paso es una etapa real del trabajo. Lo que se conteste en el paso 3
-     alimenta la pantalla Control Cooperativa. El backend (multipart + fotos +
-     PDF) es el mismo: acá sólo cambia por dónde entra el dato. -->
+     alimenta la pantalla Control Cooperativa.
+     LA RECEPCIÓN ES POR ARTÍCULO: una orden puede traer varios productos y cada
+     uno entra con sus propios pallets, bultos y kilos. El total de la recepción
+     se arma sumándolos, nunca al revés. -->
 <div class="ab-modal-overlay" id="sg-rec-modal">
   <div class="ab-modal sg-rec-shell">
 
@@ -3009,20 +3011,16 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       </div>
 
       <!-- ════════ 2 · PALLETS Y BULTOS RECIBIDOS ════════ -->
+      <!-- Una orden puede traer varios productos, y cada uno entra con sus
+           propios pallets, bultos y kilos. Contarlos juntos y repartirlos después
+           era inventar el reparto: acá se cuenta artículo por artículo, que es
+           como llega el camión. -->
       <div class="sg-rec-paso" data-paso="2">
-        <div class="sg-rec-tit">📦 Pallets y bultos recibidos</div>
-        <div class="sg-rec-sub">Lo que se cuenta en la playa, antes de abrir nada.</div>
-        <div class="sg-rec-conteo">
-          <div class="fl"><label>Pallets recibidos</label>
-            <input type="number" min="0" id="sg-rec-pallets" class="sg-rec-num" placeholder="0" oninput="sgRecValidar()"></div>
-          <!-- Los bultos los CUENTA y los escribe el que recibe. No se proponen
-               desde la orden: el punto es que alguien los mire. -->
-          <div class="fl"><label>Bultos recibidos <span style="color:var(--err)">*</span></label>
-            <input type="number" min="0" id="sg-rec-bultos" class="sg-rec-num" placeholder="contalos y anotalos" oninput="sgRecValidar();sgRecBultosCmp()"></div>
-        </div>
-        <!-- El contraste contra la orden aparece DESPUÉS de que escribió el
-             número, nunca antes: sugerírselo sería contestarle la pregunta. -->
-        <div id="sg-rec-bultos-cmp" class="sg-rec-cmp" style="display:none"></div>
+        <div class="sg-rec-tit">📦 Artículos recibidos</div>
+        <div class="sg-rec-sub">Lo que entró de cada producto de la orden. Los bultos los cuenta y los
+          escribe el que recibe: no se proponen desde la orden, porque el punto es que alguien los mire.</div>
+        <div id="sg-rec-arts"><div class="emp">Elegí una orden de compra en el paso 1.</div></div>
+        <div id="sg-rec-arts-tot" class="sg-rec-cmp" style="display:none"></div>
       </div>
 
       <!-- ════════ 3 · DESCARGA ════════ -->
@@ -3072,19 +3070,12 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
         </div>
       </div>
 
-      <!-- ════════ 5 · ITEMS A RECIBIR ════════ -->
-      <div class="sg-rec-paso" data-paso="5">
-        <div class="sg-rec-tit">📥 Items a recibir</div>
-        <div class="sg-rec-sub">Lo que la orden dice que tiene que entrar. Si algo no coincide, se corrige en el paso siguiente.</div>
-        <div id="sg-rec-items"><div class="emp">Elegí una OC…</div></div>
-      </div>
-
-      <!-- ════════ 6 · ¿COINCIDE CON LA ORDEN? ════════
+      <!-- ════════ 5 · ¿COINCIDE CON LA ORDEN? ════════
            Es la pregunta que decide el resto. Si no hay diferencias, termina
            acá. Si las hay, se le abren los campos para explicar qué pasó — y
            recién ahí puede tocar las cantidades, para que la corrección quede
            justificada y no sea un número cambiado sin que nadie sepa por qué. -->
-      <div class="sg-rec-paso" data-paso="6">
+      <div class="sg-rec-paso" data-paso="5">
         <div class="sg-rec-tit" id="sg-rec-var-tit">🔍 ¿Los productos recibidos presentan variaciones respecto de la orden?</div>
         <div class="sg-rec-sub" id="sg-rec-var-sub">Cantidad de bultos, kg por bulto, calidad.</div>
         <div class="sg-rec-opciones" id="sg-rec-var-pregunta">
@@ -3120,8 +3111,8 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
         <div class="fl ff" style="margin-top:14px"><label>Observaciones generales</label><textarea id="sg-rec-obs" rows="2"></textarea></div>
       </div>
 
-      <!-- ════════ 7 · CONTROL DE CALIDAD ════════ -->
-      <div class="sg-rec-paso" data-paso="7">
+      <!-- ════════ 6 · CONTROL DE CALIDAD ════════ -->
+      <div class="sg-rec-paso" data-paso="6">
         <div class="sg-rec-tit">⚠️ Control de calidad</div>
         <div class="sg-rec-sub">Sólo si la mercadería entró con problemas.</div>
         <div style="border:1px solid #e0a72e;background:rgba(224,167,46,.12);border-radius:10px;padding:14px">
@@ -4837,7 +4828,11 @@ function sgLoadRecepciones(){
       // RECEPCIÓN SIN OC: badge "OC pendiente" en la columna OC + botón para vincular.
       var ocCol = x.oc_pendiente ? '<span class="bdg bpe" title="Recibida sin OC — falta regularizar">OC pendiente</span>' : esc(x.oc_numero||'—');
       var vinc = x.oc_pendiente ? ' <button class="btn bb bs" onclick="sgRecVincularOpen('+x.id+',\''+esc(x.numero_recepcion||'')+'\')" title="Vincular a una OC">🔗</button>' : '';
-      return '<tr><td><code>'+esc(x.numero_recepcion||'')+'</code>'+obs+'</td><td>'+(x.fecha_recepcion||'—')+'</td><td>'+ocCol+'</td><td>'+esc(x.proveedor_nombre||'—')+'</td><td>'+esc(x.numero_remito_proveedor||'—')+'</td><td style="text-align:right">'+x.lotes+'</td><td style="text-align:right;white-space:nowrap"><button class="btn bo bs" onclick="sgRecVer('+x.id+')">👁</button>'+pdf+vinc+'</td></tr>';
+      // UN SOLO NÚMERO EN TODO EL RECORRIDO: el de la partida, que es el de la
+      // orden de compra. El número interno de recepción sigue existiendo en la
+      // base pero no se muestra: dos formas de nombrar la misma mercadería es
+      // exactamente lo que había que sacar.
+      return '<tr><td><code>'+esc(x.partida||x.numero_recepcion||'')+'</code>'+obs+'</td><td>'+(x.fecha_recepcion||'—')+'</td><td>'+ocCol+'</td><td>'+esc(x.proveedor_nombre||'—')+'</td><td>'+esc(x.numero_remito_proveedor||'—')+'</td><td style="text-align:right">'+x.lotes+'</td><td style="text-align:right;white-space:nowrap"><button class="btn bo bs" onclick="sgRecVer('+x.id+')">👁</button>'+pdf+vinc+'</td></tr>';
     }).join('') : '<tr><td colspan="7" class="emp">Sin recepciones.</td></tr>';
   });
 }
@@ -4846,7 +4841,7 @@ function sgRecVer(id){
     if(!r||!r.ok) return; var x=r.data;
     var h=(x.lotes||[]).map(function(l){ var c=(l.precio_unitario_kg==null)?'COSTO PENDIENTE':sgMoney(l.costo_final); return '• '+l.codigo_lote+' — '+(l.producto_nombre||'')+' '+nr(l.kg_reales)+'kg'+(l.calidad?(' ('+l.calidad+')'):'')+' · costo '+c; }).join('\n');
     var ocTxt = x.oc_pendiente ? 'OC PENDIENTE — vincular desde la lista (🔗)' : ('OC '+(x.oc_numero||''));
-    alert('Recepción '+x.numero_recepcion+' ('+ocTxt+')\n\nLotes:\n'+(h||'—'));
+    alert('Partida '+(x.partida||x.numero_recepcion)+'\n\nLotes:\n'+(h||'—'));
   });
 }
 // VINCULAR una recepción "OC pendiente" a una OC (baja el precio de la OC a los lotes).
@@ -4875,13 +4870,12 @@ function sgRecVincularGuardar(){
 // el pie dice qué falta para poder seguir. Y ocupa la pantalla entera, porque
 // esto se hace parado en la playa con el camión esperando.
 var SG_REC_PASOS = [
-  { n: 1, corto: 'Documentación',  icono: '📄' },
-  { n: 2, corto: 'Pallets/bultos', icono: '📦' },
-  { n: 3, corto: 'Descarga',       icono: '🧑‍🌾' },
-  { n: 4, corto: 'Mercadería',     icono: '⚖️' },
-  { n: 5, corto: 'Items',          icono: '📥' },
-  { n: 6, corto: 'Diferencias',    icono: '🔍' },
-  { n: 7, corto: 'Calidad',        icono: '⚠️' }
+  { n: 1, corto: 'Documentación', icono: '📄' },
+  { n: 2, corto: 'Artículos',     icono: '📦' },
+  { n: 3, corto: 'Descarga',      icono: '🧑‍🌾' },
+  { n: 4, corto: 'Mercadería',    icono: '⚖️' },
+  { n: 5, corto: 'Diferencias',   icono: '🔍' },
+  { n: 6, corto: 'Calidad',       icono: '⚠️' }
 ];
 var SG_REC_ULT = SG_REC_PASOS[SG_REC_PASOS.length - 1].n;
 
@@ -4895,8 +4889,17 @@ function sgRecFaltaEn(p){
     if (!eid('sg-rec-oc').value) f.push('elegir la orden de compra (o "sin OC")');
     if (!eid('sg-rec-fecha').value) f.push('la fecha de recepción');
   } else if (p === 2) {
-    var b = eid('sg-rec-bultos');
-    if (!b || b.value === '' || Number(b.value) < 0) f.push('los bultos recibidos');
+    // Cada artículo tiene que tener sus bultos contados. Uno solo sin contar
+    // deja media recepción sin control físico.
+    var sinContar = (SG.recItems || []).filter(function(it){
+      return it.bultos === '' || it.bultos == null || Number(it.bultos) < 0;
+    });
+    if (!(SG.recItems || []).length) f.push('elegir la orden de compra en el paso 1');
+    else if (sinContar.length) {
+      f.push(sinContar.length === 1
+        ? ('los bultos de ' + (sinContar[0].producto_nombre || 'un artículo'))
+        : ('los bultos de ' + sinContar.length + ' artículos'));
+    }
   } else if (p === 3) {
     // Si hubo descarga hay que decir QUIÉN la hizo: es lo que se acumula en
     // Control Cooperativa y lo que después se le termina pagando.
@@ -4906,29 +4909,49 @@ function sgRecFaltaEn(p){
       // Si cobra por pallet, la cantidad sale de los pallets del paso 2. Sin
       // ese número el gasto nace vacío y después se valoriza en cero.
       var u = document.querySelector('input[name="sg-rec-coop-unidad"]:checked');
-      var pal = eid('sg-rec-pallets');
-      if (u && u.value === 'pallet' && (!pal || pal.value === '' || Number(pal.value) <= 0)) {
-        f.push('los pallets recibidos (paso 2), que es lo que la cooperativa cobra');
+      // Si cobra por pallet, la cantidad sale de los pallets de los artículos
+      // (paso 2). Sin ese número el gasto nace vacío y se valoriza en cero.
+      if (u && u.value === 'pallet' && !sgRecSumaArts('pallets')) {
+        f.push('los pallets de los artículos (paso 2), que es lo que la cooperativa cobra');
       }
     }
-  } else if (p === 5 && SG.recSinOc) {
-    // Con OC los kg vienen de la orden y acá están bloqueados a propósito: se
-    // corrigen en el paso 6, con su justificación. Exigirlos en este paso
-    // dejaba trabado al que recibe una orden sin saldo pendiente. El control de
-    // que haya algo que recibir está al confirmar.
-    var hayKg = (SG.recItems || []).some(function(it){
-      return it.producto_id && (it.lotes || []).some(function(l){ return Number(l.kg_reales) > 0; });
-    });
-    if (!hayKg) f.push('cargar producto y kg en al menos una línea');
-  } else if (p === 6) {
+  } else if (p === 5) {
     // Sin OC no hay contra qué comparar: la pregunta no se hace.
     if (!SG.recSinOc) {
       var v = document.querySelector('input[name="sg-rec-variaciones"]:checked');
       if (!v) f.push('contestar si hay variaciones respecto de la orden');
+      else if (v.value === 'no' && sgRecDifieren().length) {
+        // Lo que se contó NO da con la orden. Decir que coincide sería guardar
+        // una recepción que se contradice a sí misma.
+        f.push('marcar que SÍ hay diferencias: lo contado no coincide con la orden');
+      }
       else if (v.value === 'si' && !String((eid('sg-rec-var-motivo') || {}).value || '').trim()) f.push('el motivo de la diferencia');
     }
   }
   return f;
+}
+
+// EN QUÉ NO DA. Compara artículo por artículo lo contado contra lo que dice la
+// orden. Es la lista que decide si el operador puede contestar "coincide": si
+// acá hay algo, no puede.
+function sgRecDifieren(){
+  if (SG.recSinOc) return [];
+  var out = [];
+  (SG.recItems || []).forEach(function(it){
+    var nom = it.producto_nombre || 'artículo';
+    var bultosOC = Number(it.bultos_oc) || 0;
+    var bultos = (it.bultos === '' || it.bultos == null) ? null : Number(it.bultos);
+    if (bultosOC && bultos != null && bultos !== bultosOC) {
+      out.push(nom + ': ' + nr(bultos) + ' bultos contra ' + nr(bultosOC) + ' de la orden');
+    }
+    var kgOC = Number(it.kg_estimados) || 0;
+    var kg = (it.lotes || []).reduce(function(a, l){ return a + (Number(l.kg_reales) || 0); }, 0);
+    // Un kilo de diferencia en una balanza de camión no es una diferencia.
+    if (kgOC && Math.abs(kg - kgOC) > 1) {
+      out.push(nom + ': ' + nr(kg) + ' kg contra ' + nr(kgOC) + ' de la orden');
+    }
+  });
+  return out;
 }
 
 // Repinta el pie y el riel según el paso en el que está.
@@ -4993,7 +5016,8 @@ function sgRecPintarPaso(){
   // Los items se dibujan en dos lugares (paso 5 mirar, paso 6 corregir). Se
   // repintan al cambiar de paso y NO mientras se tipea: si no, cada tecla
   // rearmaría el HTML y el cursor saltaría fuera del campo.
-  if (act === 5 || act === 6) sgRecRenderItems();
+  if (act === 2) sgRecRenderArts();
+  if (act === 5) sgRecRenderItems();
   var body = document.querySelector('#sg-rec-modal .sg-rec-body');
   if (body) body.scrollTop = 0;
 }
@@ -5010,7 +5034,7 @@ function sgRecOpen(ocId){
     var sinD=document.querySelector('input[name="sg-rec-descarga"][value="no"]'); if(sinD) sinD.checked=true;
     document.querySelectorAll('input[name="sg-rec-variaciones"]').forEach(function(x){ x.checked=false; });
     ['sg-rec-peso','sg-rec-var-motivo','sg-rec-remito','sg-rec-obs','sg-rec-factura','sg-rec-dtv',
-     'sg-rec-pallets','sg-rec-bultos'].forEach(function(id){ var e=eid(id); if(e) e.value=''; });
+     ].forEach(function(id){ var e=eid(id); if(e) e.value=''; });
     // Cooperativa (descarga): selector de proveedores de servicio + unidad bulto/pallet.
     eid('sg-rec-coop').value=''; document.querySelector('input[name="sg-rec-coop-unidad"][value="bulto"]').checked=true;
     api('/api/sg/proveedores-servicio').then(function(rr){ var fls=(rr&&rr.ok)?rr.data:[]; var sel=eid('sg-rec-coop'); var eleg=sel.value;
@@ -5021,7 +5045,7 @@ function sgRecOpen(ocId){
     eid('sg-rec-observada').checked=false; eid('sg-rec-calidad').style.display='none'; eid('sg-rec-preview-btn').style.display='none';
     eid('sg-rec-cal-estado').value=''; eid('sg-rec-cal-pct').value=''; eid('sg-rec-cal-defectos').value=''; eid('sg-rec-cal-obs').value='';
     eid('sg-rec-fotos').value='';
-    sgRecTraza(null); sgRecBultosCmp(); sgRecDescarga(); sgRecVariaciones(); sgRecRenderFotos();
+    sgRecTraza(null); sgRecRenderArts(); sgRecDescarga(); sgRecVariaciones(); sgRecRenderFotos();
     sgRecPintarPaso(); sgRecValidar();
     if(ocId){
       eid('sg-rec-oc').value=ocId;
@@ -5038,17 +5062,17 @@ function sgRecOpen(ocId){
 function sgRecOcChange(){
   var ocId=eid('sg-rec-oc').value;
   if(ocId==='__sinoc__'){   // SIN OC → líneas manuales (producto + kg), costo pendiente
-    SG.recSinOc=true; SG.recOcBultos=0; SG.recItemsOrig=null; sgRecTraza(null); sgRecBultosCmp();
+    SG.recSinOc=true; SG.recOcBultos=0; SG.recItemsOrig=null; sgRecTraza(null);
     // La pregunta de variaciones deja de tener sentido: se borra lo contestado.
     document.querySelectorAll('input[name="sg-rec-variaciones"]').forEach(function(x){ x.checked=false; });
     if(eid('sg-rec-var-motivo')) eid('sg-rec-var-motivo').value='';
-    SG.recItems=[{producto_id:'',producto_nombre:'',lotes:[{kg_reales:'',calidad:''}]}];
-    sgRecRenderItems(); sgRecVariaciones(); return;
+    SG.recItems=[{producto_id:'',producto_nombre:'',bultos:'',pallets:'',bultos_oc:0,lotes:[{kg_reales:'',calidad:'',bultos:''}]}];
+    sgRecRenderItems(); sgRecRenderArts(); sgRecVariaciones(); return;
   }
   SG.recSinOc=false;
   if(!ocId){
-    eid('sg-rec-items').innerHTML='<div class="emp">Elegí una OC…</div>'; SG.recItems=[]; SG.recOcBultos=0;
-    sgRecTraza(null); sgRecBultosCmp(); sgRecVariaciones(); return;
+    SG.recItems=[]; SG.recOcBultos=0;
+    sgRecTraza(null); sgRecRenderArts(); sgRecVariaciones(); return;
   }
   api('/api/sg/oc/'+ocId).then(function(r){
     if(!r||!r.ok){
@@ -5066,12 +5090,18 @@ function sgRecOcChange(){
     SG.recOcBultos=(r.data.items||[]).reduce(function(a,it){ return a+(Number(it.cantidad_estimada_presentaciones)||0); },0);
     SG.recItems=(r.data.items||[]).map(function(it){
       var pend=Math.max(0,(it.kg_estimados||0)-(it.kg_recibidos||0));
-      return { oc_item_id:it.id, producto_nombre:it.producto_nombre, kg_estimados:it.kg_estimados, kg_recibidos:it.kg_recibidos, lotes:[{kg_reales:pend||'',calidad:''}] };
+      return { oc_item_id:it.id, producto_nombre:it.producto_nombre,
+               kg_estimados:it.kg_estimados, kg_recibidos:it.kg_recibidos,
+               // Lo que la orden dice de ESTE artículo, para poder contrastar.
+               // Los bultos arrancan VACÍOS: los cuenta el que recibe.
+               bultos_oc: Number(it.cantidad_estimada_presentaciones) || 0,
+               bultos: '', pallets: '',
+               lotes:[{kg_reales:pend||'',calidad:'',bultos:''}] };
     });
     // Cómo venía la orden, para poder volver acá si el operador se arrepiente
     // de haber declarado diferencias.
     SG.recItemsOrig=JSON.parse(JSON.stringify(SG.recItems));
-    sgRecRenderItems(); sgRecBultosCmp(); sgRecVariaciones();
+    sgRecRenderItems(); sgRecRenderArts(); sgRecVariaciones();
   });
 }
 
@@ -5084,23 +5114,6 @@ function sgRecTraza(oc){
   el.innerHTML='<span style="color:var(--mut);font-weight:600;font-size:11px;letter-spacing:.04em">PARTIDA</span> '
     +'<code style="font-size:13.5px;font-weight:700">'+esc(sgOcId(oc))+'</code>'
     +'<span style="color:var(--mut);font-size:12px;margin-left:10px">'+esc(oc.proveedor_nombre||'')+'</span>';
-}
-
-// El contraste contra la orden aparece DESPUÉS de que escribió el número, nunca
-// antes. Si no coincide no bloquea nada: el que decide qué pasó es él, en el
-// paso de las diferencias.
-function sgRecBultosCmp(){
-  var el=eid('sg-rec-bultos-cmp'); if(!el) return;
-  var v=eid('sg-rec-bultos') ? eid('sg-rec-bultos').value : '';
-  var esperados=Number(SG.recOcBultos)||0;
-  if(v===''||!esperados||SG.recSinOc){ el.style.display='none'; el.className='sg-rec-cmp'; el.textContent=''; return; }
-  var contados=Number(v)||0, dif=contados-esperados;
-  el.style.display='';
-  if(dif===0){ el.className='sg-rec-cmp ok'; el.innerHTML='✅ Coincide con la orden: <b>'+nr(esperados)+'</b> bultos.'; }
-  else { el.className='sg-rec-cmp dif';
-    el.innerHTML='⚠️ La orden dice <b>'+nr(esperados)+'</b> bultos y anotaste <b>'+nr(contados)+'</b> — '
-      +(dif<0?('faltan <b>'+nr(-dif)+'</b>'):('sobran <b>'+nr(dif)+'</b>'))
-      +'. Lo vas a poder justificar en el paso de diferencias.'; }
 }
 
 // Informe de calidad: muestra/oculta campos + botón de preview PDF.
@@ -5149,6 +5162,18 @@ function sgRecRenderFotos(){
     });
     cont.innerHTML = html;
   });
+}
+
+// El total de un campo, sumando los artículos. Devuelve null si no cargó ninguno,
+// para no grabar un cero que parezca un dato.
+function sgRecSumaArts(campo){
+  var hay = false, t = 0;
+  (SG.recItems || []).forEach(function(it){
+    var v = campo === 'bultos' ? it.bultos : it.pallets;
+    if (v === '' || v == null) return;
+    hay = true; t += Number(v) || 0;
+  });
+  return hay ? t : null;
 }
 
 // La cooperativa elegida, o null si contestó "no sé todavía". Ese caso NO es lo
@@ -5231,6 +5256,78 @@ function sgRecProdChange(i,v){ SG.recItems[i].producto_id=v; var p=(SG.cacheProd
 function sgRecAddLote(i){ SG.recItems[i].lotes.push({kg_reales:'',calidad:''}); sgRecRenderItems(); }
 function sgRecDelLote(i,j){ SG.recItems[i].lotes.splice(j,1); sgRecRenderItems(); }
 function sgRecUpd(i,j,c,v){ SG.recItems[i].lotes[j][c]=v; sgRecSuma(); sgRecValidar(); }
+// LOS ARTÍCULOS DE LA ORDEN, cada uno con lo que entró de él. Reemplaza al par
+// "pallets y bultos globales" + "items a recibir": eran el mismo dato partido en
+// dos pantallas, y ninguna de las dos servía para una orden con más de un
+// producto.
+function sgRecRenderArts(){
+  var cont = eid('sg-rec-arts'); if (!cont) return;
+  if (!(SG.recItems || []).length) {
+    cont.innerHTML = '<div class="emp">Elegí una orden de compra en el paso 1.</div>';
+    var t0 = eid('sg-rec-arts-tot'); if (t0) t0.style.display = 'none';
+    return;
+  }
+  var calOpts = function(v){
+    return ['', 'primera', 'segunda', 'tercera'].map(function(c){
+      return '<option value="' + c + '"' + (c === (v || '') ? ' selected' : '') + '>' + (c || '(calidad)') + '</option>';
+    }).join('');
+  };
+  cont.innerHTML = SG.recItems.map(function(it, i){
+    var esperado = [];
+    if (Number(it.bultos_oc)) esperado.push(nr(it.bultos_oc) + ' bultos');
+    if (Number(it.kg_estimados)) esperado.push(nr(it.kg_estimados) + ' kg');
+    var kg = (it.lotes || []).reduce(function(a, l){ return a + (Number(l.kg_reales) || 0); }, 0);
+    return '<div class="sg-oc-box">'
+      + '<div class="sg-oc-box-tit">' + esc(it.producto_nombre || ('Artículo ' + (i + 1)))
+        + (esperado.length ? ' <span style="text-transform:none;letter-spacing:0;font-weight:400">— la orden dice ' + esc(esperado.join(' · ')) + '</span>' : '')
+        + '</div>'
+      + '<div class="sg-rec-grid">'
+        + '<div class="fl"><label>Pallets</label>'
+          + '<input type="number" min="0" value="' + esc(it.pallets == null ? '' : it.pallets) + '" placeholder="0"'
+          + ' oninput="sgRecArtUpd(' + i + ',\'pallets\',this.value)"></div>'
+        + '<div class="fl"><label>Bultos <span style="color:var(--err)">*</span></label>'
+          + '<input type="number" min="0" value="' + esc(it.bultos == null ? '' : it.bultos) + '" placeholder="contalos"'
+          + ' oninput="sgRecArtUpd(' + i + ',\'bultos\',this.value)"></div>'
+        + '<div class="fl"><label>Kg recibidos</label>'
+          + '<input type="number" min="0" step="0.01" value="' + esc(kg || '') + '" placeholder="0"'
+          + ' oninput="sgRecArtUpd(' + i + ',\'kg\',this.value)"></div>'
+        + '<div class="fl"><label>Calidad</label>'
+          + '<select onchange="sgRecArtUpd(' + i + ',\'calidad\',this.value)">' + calOpts((it.lotes[0] || {}).calidad) + '</select></div>'
+      + '</div></div>';
+  }).join('');
+  sgRecArtsTotales();
+}
+
+// El total de la recepción sale de sumar los artículos, no de un número aparte:
+// así no puede haber dos verdades sobre los mismos bultos.
+function sgRecArtsTotales(){
+  var el = eid('sg-rec-arts-tot'); if (!el) return;
+  var b = 0, p = 0, k = 0, faltan = 0;
+  (SG.recItems || []).forEach(function(it){
+    if (it.bultos === '' || it.bultos == null) faltan++; else b += Number(it.bultos) || 0;
+    p += Number(it.pallets) || 0;
+    k += (it.lotes || []).reduce(function(a, l){ return a + (Number(l.kg_reales) || 0); }, 0);
+  });
+  var dif = sgRecDifieren();
+  el.style.display = '';
+  el.className = 'sg-rec-cmp' + (dif.length ? ' dif' : (faltan ? '' : ' ok'));
+  el.innerHTML = '<b>Total recibido:</b> ' + nr(b) + ' bultos · ' + nr(p) + ' pallets · ' + nr(k) + ' kg'
+    + (faltan ? ('<div style="margin-top:6px">Falta contar ' + faltan + ' artículo(s).</div>') : '')
+    + (dif.length ? ('<div style="margin-top:6px">⚠️ No da con la orden:<br>· ' + dif.map(esc).join('<br>· ')
+        + '<br><span style="font-size:12.5px">Lo vas a tener que justificar en el paso de diferencias.</span></div>') : '');
+}
+
+function sgRecArtUpd(i, campo, v){
+  var it = SG.recItems[i]; if (!it) return;
+  if (campo === 'kg') { it.lotes[0] = it.lotes[0] || {}; it.lotes[0].kg_reales = v; }
+  else if (campo === 'calidad') { it.lotes[0] = it.lotes[0] || {}; it.lotes[0].calidad = v; }
+  else it[campo] = v;
+  // Los bultos del lote son los del artículo: es el mismo número.
+  if (campo === 'bultos') { it.lotes[0] = it.lotes[0] || {}; it.lotes[0].bultos = v; }
+  sgRecArtsTotales();
+  sgRecValidar();
+}
+
 // Los items se dibujan en DOS lugares: en el paso 5 —lo que la orden dice que
 // tiene que entrar, sólo para mirar— y adentro del paso 6, editable, pero
 // únicamente si el operador declaró que hay diferencias. Es el mismo modelo en
@@ -5241,7 +5338,8 @@ function sgRecRenderItems(){
   // Sin OC no hay orden contra la cual comparar: se carga libre en el paso 5.
   var vr = document.querySelector('input[name="sg-rec-variaciones"]:checked');
   var hayVar = !!(vr && vr.value === 'si');
-  sgRecPintarItems('sg-rec-items',      SG.recSinOc ? false : true);
+  // La única copia editable vive en el paso de Diferencias: la pantalla de
+  // "Items a recibir" se eliminó porque mostraba lo mismo sin dejar tocar nada.
   sgRecPintarItems('sg-rec-items-edit', false);
   sgRecSuma();
   if (!SG.recSinOc && !hayVar) {
@@ -5319,7 +5417,12 @@ function sgRecBuildBody(requireItems){
     var suma=lotes.reduce(function(a,l){return a+Number(l.kg_reales);},0);
     // producto_nombre se incluye solo para la vista previa PDF; el POST real lo ignora.
     var item={ producto_nombre:it.producto_nombre, kg_reales_item:suma,
-      lotes:lotes.map(function(l){return {kg_reales:Number(l.kg_reales),calidad:l.calidad||null};}) };
+      // Los bultos y los pallets van POR ARTÍCULO: el total de la recepción se
+      // arma sumándolos, no al revés.
+      bultos:(it.bultos===''||it.bultos==null)?null:Number(it.bultos),
+      pallets:(it.pallets===''||it.pallets==null)?null:Number(it.pallets),
+      lotes:lotes.map(function(l){return {kg_reales:Number(l.kg_reales),calidad:l.calidad||null,
+        bultos:(l.bultos===''||l.bultos==null)?null:Number(l.bultos)};}) };
     if(sinOc) item.producto_id=Number(it.producto_id); else item.oc_item_id=it.oc_item_id;
     items.push(item);
   }
@@ -5329,7 +5432,9 @@ function sgRecBuildBody(requireItems){
   return { oc_id: sinOc?null:Number(ocVal), fecha_recepcion:eid('sg-rec-fecha').value,
     numero_remito_proveedor:eid('sg-rec-remito').value, observaciones:eid('sg-rec-obs').value,
     factura_numero:eid('sg-rec-factura').value, dtv_codigo:eid('sg-rec-dtv').value,           // PASO 1 · documentación
-    pallets_recibidos:num('sg-rec-pallets'), bultos_recibidos:num('sg-rec-bultos'),           // PASO 1 · paletizado
+    // El total de la recepción es la SUMA de los artículos. Lo siguen usando el
+    // flete y la cuenta de la cooperativa, así que se manda calculado, no tipeado.
+    pallets_recibidos: sgRecSumaArts('pallets'), bultos_recibidos: sgRecSumaArts('bultos'),
     // "__pendiente__" = hubo descarga pero todavía no se sabe de quién. Va sin
     // cooperativa y aparece marcada en Control Cooperativa, que es donde se
     // completa. Sin esta salida, el operador que no sabe queda trabado en la
@@ -5701,8 +5806,8 @@ function sgLoteVer(id){
     h+='<div style="margin-top:8px;font-size:13px;line-height:1.7;border-left:3px solid var(--burg);padding-left:12px">';
     if(d.proveedor){ h+='🚜 <b>Proveedor:</b> '+esc(d.proveedor.razon_social)+(d.proveedor.localidad?(' ('+esc(d.proveedor.localidad)+')'):'')+'<br>'; }
     else { h+='🚜 <b>Proveedor:</b> — (lote sin OC / finca propia)<br>'; }
-    if(d.oc){ h+='📋 <b>OC:</b> '+esc(d.oc.numero)+' · '+(d.oc.tipo_precio==='pizarra'?'pizarra':'firme')+' · '+(d.oc.fecha_oc||'')+'<br>'; }
-    if(d.recepcion){ h+='📥 <b>Recepción:</b> '+esc(d.recepcion.numero_recepcion)+' · '+(d.recepcion.fecha_recepcion||'')+(d.recepcion.numero_remito_proveedor?(' · remito '+esc(d.recepcion.numero_remito_proveedor)):'')+'<br>'; }
+    if(d.oc){ h+='📋 <b>Partida:</b> '+esc(d.oc.trazabilidad||d.oc.numero||'')+' · '+(d.oc.tipo_precio==='pizarra'?'pizarra':'firme')+' · '+(d.oc.fecha_oc||'')+'<br>'; }
+    if(d.recepcion){ h+='📥 <b>Recibido:</b> '+(d.recepcion.fecha_recepcion||'')+(d.recepcion.numero_remito_proveedor?(' · remito del proveedor '+esc(d.recepcion.numero_remito_proveedor)):'')+'<br>'; }
     h+='📦 <b>Costo base:</b> '+sgMoney(l.costo_base)+(l.precio_unitario_kg!=null?(' ('+sgMoney(l.precio_unitario_kg)+'/kg)'):' <span class="bdg bpe">pizarra sin precio</span>')+'<br>';
     if((d.gastos_directos||[]).length){
       h+='🧾 <b>Gastos directos:</b><br>';

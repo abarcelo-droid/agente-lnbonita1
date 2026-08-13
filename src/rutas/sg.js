@@ -1145,6 +1145,35 @@ function _recObservada(db, recepcionId) {
   return db.prepare('SELECT observada, calidad_pct_afectado, calidad_observaciones FROM sg_recepciones WHERE id=?').get(recepcionId);
 }
 
+// EL CÓDIGO DEL LOTE SALE DE LA PARTIDA. Una compra tiene UN número —el de la
+// orden— y ese número identifica la mercadería toda su vida. Cada línea de
+// producto agrega un dígito: la partida 0008.12.08.2026.02 con dos productos da
+// 0008.12.08.2026.02.1 y 0008.12.08.2026.02.2.
+//
+// El dígito cuenta los lotes que ya cuelgan de esa orden, incluidos los dados de
+// baja: un código que existió no puede volver a existir con otra mercadería
+// adentro. Si la orden se recibe en dos veces, la numeración sigue.
+//
+// Sin partida (recepción sin OC, apertura de inventario, reproceso,
+// transformación, importación) se conserva el SG-LT de siempre: esos lotes no
+// vienen de ninguna compra y no hay partida de la cual colgar.
+function codigoLoteDePartida(db, ocItemId) {
+  if (!ocItemId) return nextNumero(db, 'SG-LT', 'sg_lotes', 'codigo_lote');
+  const oc = db.prepare(`SELECT o.id, o.trazabilidad FROM sg_oc_items i
+                          JOIN sg_oc o ON o.id = i.oc_id WHERE i.id = ?`).get(ocItemId);
+  if (!oc || !oc.trazabilidad) return nextNumero(db, 'SG-LT', 'sg_lotes', 'codigo_lote');
+  const usados = db.prepare(`SELECT COUNT(*) c FROM sg_lotes l
+                              JOIN sg_oc_items i ON i.id = l.oc_item_id
+                             WHERE i.oc_id = ?`).get(oc.id).c;
+  // codigo_lote es UNIQUE: si por lo que sea el número ya está tomado, se sigue
+  // buscando en vez de reventar la transacción entera de la recepción.
+  for (let n = usados + 1; n <= usados + 50; n++) {
+    const codigo = `${oc.trazabilidad}.${n}`;
+    if (!db.prepare('SELECT 1 FROM sg_lotes WHERE codigo_lote = ?').get(codigo)) return codigo;
+  }
+  return nextNumero(db, 'SG-LT', 'sg_lotes', 'codigo_lote');
+}
+
 function crearLotesDeItem(db, { recepcionId, ocItem, tipoPrecio, fechaIngreso, lotes, userId }) {
   const prod = db.prepare('SELECT vida_util_dias_default FROM sg_productos WHERE id=?').get(ocItem.producto_id);
   const vida = (prod && prod.vida_util_dias_default) || 0;
@@ -1172,7 +1201,7 @@ function crearLotesDeItem(db, { recepcionId, ocItem, tipoPrecio, fechaIngreso, l
     const kpb = (lt.kg_por_bulto != null && lt.kg_por_bulto !== '') ? Number(lt.kg_por_bulto)
       : (ocItem.kg_por_bulto != null ? Number(ocItem.kg_por_bulto) : null);
     const envId = (ocItem.envase_id != null && ocItem.envase_id !== '') ? Number(ocItem.envase_id) : null;
-    const codigo = nextNumero(db, 'SG-LT', 'sg_lotes', 'codigo_lote');
+    const codigo = codigoLoteDePartida(db, ocItem.id);
     const info = ins.run(codigo, recepcionId, ocItem.id, ocItem.producto_id, kg, precio, costoBase,
       val(lt.calidad), val(lt.calibre), val(lt.origen), fechaIngreso, venc, costoBase, presId, bultos, kpb, envId, userId);
     ids.push(info.lastInsertRowid);
@@ -1338,6 +1367,25 @@ function actualizarEstadoOC(db, ocId) {
 //
 // EL XX CUENTA POR DÍA, no por proveedor: es "la orden número tal de hoy". Con
 // el proveedor ya en el código, igual no se repite.
+// El XX más alto ya usado en un día. Lee el propio código, que es la única
+// fuente que no puede desincronizarse de sí misma.
+function maxSecuenciaDelDia(db, fechaISO) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(fechaISO || ''));
+  if (!m) return 0;
+  const sufijo = `.${m[3]}.${m[2]}.${m[1]}.`;          // .DD.MM.AAAA.
+  const filas = db.prepare(
+    "SELECT trazabilidad FROM sg_oc WHERE trazabilidad LIKE ?").all('%' + sufijo + '%');
+  let max = 0;
+  for (const f of filas) {
+    // El código es PPPP.DD.MM.AAAA.XX — la secuencia es el último tramo.
+    const p = String(f.trazabilidad).split('.');
+    if (p.length < 5) continue;
+    const xx = parseInt(p[4], 10);
+    if (!isNaN(xx) && xx > max) max = xx;
+  }
+  return max;
+}
+
 function codigoTrazabilidad(db, proveedorId, fechaISO) {
   const prov = String(parseInt(proveedorId, 10) || 0).padStart(4, '0');
   // La fecha llega como YYYY-MM-DD del <input type=date>. Si viene vacía o rara,
@@ -1350,11 +1398,17 @@ function codigoTrazabilidad(db, proveedorId, fechaISO) {
        String(hoy.getDate()).padStart(2, '0')];
   const fecha = `${aaaa}-${mm}-${dd}`;
 
-  // Cuántas órdenes ya entraron ESE día. Se cuentan las anuladas también: el
-  // número dice el orden de entrada, y saltear el de una anulada haría que dos
-  // órdenes distintas hayan tenido el mismo código en algún momento.
-  const n = db.prepare(
-    "SELECT COUNT(*) AS n FROM sg_oc WHERE date(fecha_oc) = date(?)").get(fecha).n;
+  // El número que sigue sale de MIRAR LOS CÓDIGOS YA ASIGNADOS de ese día, no de
+  // contar filas. Contar filas era el problema: el alta contaba TODAS las órdenes
+  // del día y el backfill de arranque contaba sólo las que ya tenían código, así
+  // que los dos podían llegar al mismo XX. Con la partida identificando toda la
+  // vida de la partida, dos órdenes con el mismo código es un error que se
+  // arrastra hasta el último lote.
+  //
+  // Se toma el máximo asignado y se le suma uno: no reusa el número de una
+  // anulada (su código ya existió y no puede volver a existir) y no depende de
+  // cuántas filas haya.
+  const n = maxSecuenciaDelDia(db, fecha);
   return { codigo: `${prov}.${dd}.${mm}.${aaaa}.${String(n + 1).padStart(2, '0')}`, fecha };
 }
 
@@ -1700,7 +1754,7 @@ router.get('/recepciones', requireAuth, (req, res) => {
     const where = ['r.activo=1'], params = [];
     if (req.query.oc_id) { where.push('r.oc_id=?'); params.push(req.query.oc_id); }
     const rows = db.prepare(`
-      SELECT r.*, o.numero AS oc_numero, p.razon_social AS proveedor_nombre,
+      SELECT r.*, o.numero AS oc_numero, o.trazabilidad AS partida, p.razon_social AS proveedor_nombre,
         (SELECT COUNT(*) FROM sg_lotes WHERE recepcion_id=r.id AND activo=1) AS lotes
       FROM sg_recepciones r
       LEFT JOIN sg_oc o ON o.id=r.oc_id
@@ -1713,7 +1767,8 @@ router.get('/recepciones', requireAuth, (req, res) => {
 router.get('/recepciones/:id', requireAuth, (req, res) => {
   const db = getDb();
   try {
-    const rec = db.prepare(`SELECT r.*, o.numero AS oc_numero FROM sg_recepciones r LEFT JOIN sg_oc o ON o.id=r.oc_id WHERE r.id=?`).get(req.params.id);
+    const rec = db.prepare(`SELECT r.*, o.numero AS oc_numero, o.trazabilidad AS partida
+      FROM sg_recepciones r LEFT JOIN sg_oc o ON o.id=r.oc_id WHERE r.id=?`).get(req.params.id);
     if (!rec) return res.status(404).json({ ok: false, error: 'No encontrado' });
     rec.lotes = db.prepare(`SELECT l.*, pr.nombre AS producto_nombre FROM sg_lotes l
       LEFT JOIN sg_productos pr ON pr.id=l.producto_id WHERE l.recepcion_id=? AND l.activo=1`).all(req.params.id);
