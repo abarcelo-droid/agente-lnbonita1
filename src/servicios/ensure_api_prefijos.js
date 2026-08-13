@@ -125,6 +125,14 @@ const PREFIJOS = [
   ['sg-gastos-directos', 'sg/gastos-directos,sg/gastos-servicio,sg/proveedores-servicio'],
   ['sg-reprocesos',      'sg/reprocesos,sg/transformaciones'],
   ['sg-importacion',     'sg/embarques'],
+  // Control Cooperativa es casi todo lectura, pero tiene UNA escritura: asignar
+  // la cooperativa de una descarga que entró sin saber de quién fue
+  // (POST /sg/control-coop/:id/cooperativa). Esa es la que el prefijo cierra.
+  // El GET del listado NO queda cerrado por esto: exigirNivel deja pasar los GET
+  // salvo en los prefijos de LECTURA_CONTROLADA (permisos.js), donde /api/sg no
+  // está. El prefijo se declara igual, corto: la parte variable va al final, así
+  // que '/sg/control-coop/12/cooperativa' matchea con 'sg/control-coop'.
+  ['sg-control-coop',    'sg/control-coop'],
 
   // ═══════════════════════════════════════════════════════════════════════
   // LAS QUE FALTABAN. Se declaran POR QUIÉN ESCRIBE, no por quién llama.
@@ -275,6 +283,13 @@ const LECTURA = [
   ['personal-valorizar',    'pa/personal/padron,pa/personal/rubros,pa/personal/tareas-tipos'],
   ['personal-cc',           'pa/personal/padron,pa/personal/rubros,pa/personal/tareas-tipos'],
   ['personal-reportes',     'pa/personal/padron,pa/personal/rubros,pa/personal/tareas-tipos'],
+
+  // Control Cooperativa arma su filtro con el catálogo de cooperativas, que es
+  // de Gastos Directos. Hoy no hace falta —/api/sg no está en la lista de
+  // lecturas controladas de permisos.js, así que el GET pasa igual— pero la
+  // dependencia queda declarada: el día que /api/sg se cierre para lectura,
+  // esta pantalla no se abre vacía sin que nadie entienda por qué.
+  ['sg-control-coop',       'sg/proveedores-servicio'],
 ];
 
 try {
