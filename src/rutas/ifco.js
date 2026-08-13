@@ -3263,6 +3263,60 @@ router.get('/proveedores', function(req, res) {
   res.json(rows);
 });
 
+// ── LOS GALPONES ASOCIADOS ──────────────────────────────────────────────────
+// Es la lista que se ve en el módulo IFCO bajo ese nombre. La sirve /proveedores
+// (de ahí sale el mismo padrón), pero acá se devuelve con el envoltorio
+// {ok,data} y con UN dato más: si ese galpón realmente mueve IFCOs.
+//
+// Para qué sirve la distinción: el padrón tiene proveedores que nunca operaron
+// con envases. En el desplegable de "a qué galpón entra este usuario" mezclarlos
+// con los que sí operan hace elegir mal, y elegir mal ahí significa que los
+// remitos que ese operador carga desde el celular salen con el origen cambiado.
+//
+// No se filtran los que no operan: un galpón recién dado de alta todavía no
+// movió nada y es justo cuando hay que asignarle la gente. Se marcan, nada más.
+router.get('/galpones', function (req, res) {
+  try {
+    // Las columnas de IFCO cambiaron con el tiempo (origen_proveedor_id no está
+    // en todas las bases). Se pregunta antes de nombrarlas: una columna que no
+    // existe voltea la consulta entera y el desplegable queda vacío.
+    const cols = (t) => {
+      try { return new Set(db.prepare(`PRAGMA table_info(${t})`).all().map((c) => c.name)); }
+      catch (_) { return new Set(); }
+    };
+    const envios = cols('ifco_envios_proveedor');
+    const recep = cols('ifco_recepciones_proveedor');
+    const stocks = cols('ifco_stocks_reales');
+
+    const partes = [];
+    if (stocks.has('proveedor_id')) {
+      partes.push(`(SELECT COUNT(*) FROM ifco_stocks_reales s
+                    WHERE s.deposito_tipo='proveedor' AND s.proveedor_id = p.id)`);
+    }
+    if (envios.has('proveedor_id')) {
+      const orig = envios.has('origen_proveedor_id') ? ' OR e.origen_proveedor_id = p.id' : '';
+      partes.push(`(SELECT COUNT(*) FROM ifco_envios_proveedor e
+                    WHERE e.eliminado_en IS NULL AND (e.proveedor_id = p.id${orig}))`);
+    }
+    if (recep.has('proveedor_id')) {
+      partes.push(`(SELECT COUNT(*) FROM ifco_recepciones_proveedor r
+                    WHERE r.eliminado_en IS NULL AND r.proveedor_id = p.id)`);
+    }
+    const movs = partes.length ? partes.join(' + ') : '0';
+
+    const rows = db.prepare(`
+      SELECT p.id, p.nombre, p.razon_social, p.cuit, (${movs}) AS movimientos_ifco
+      FROM proveedores p
+      WHERE p.activo = 1
+      ORDER BY p.nombre
+    `).all();
+    res.json({ ok: true, data: rows.map((g) => ({ ...g, opera_en_ifco: g.movimientos_ifco > 0 })) });
+  } catch (e) {
+    // Contestar el error en vez de morir en silencio: el desplegable lo muestra.
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
 // ════════════════════════════════════════════════════════════════════════════
 // ENDPOINT TEMPORAL — DIAGNÓSTICO read-only del dropdown de proveedores IFCO
 // (branch andy/fix-galpones-tipo-naturaleza). Se remueve en el mismo PR tras leerlo.
