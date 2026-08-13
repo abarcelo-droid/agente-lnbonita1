@@ -1159,10 +1159,10 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
         <select id="eq-per-dep-ifco-tipo" onchange="eqToggleDepIfcoProv()" style="margin-top:4px">
           <option value="">Sin asignar (puede elegir el origen al cargar)</option>
           <option value="san_geronimo">San Gerónimo (siempre)</option>
-          <option value="proveedor">Proveedor específico (siempre)</option>
+          <option value="proveedor">Galpón asociado (siempre)</option>
         </select>
         <div id="eq-per-dep-ifco-prov-wrap" style="display:none; margin-top:6px">
-          <select id="eq-per-dep-ifco-prov"><option value="">— Cargando proveedores —</option></select>
+          <select id="eq-per-dep-ifco-prov"><option value="">— Cargando galpones —</option></select>
         </div>
       </div>
     </div>
@@ -1236,10 +1236,10 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       <select id="usr-dep-ifco-tipo" onchange="usrToggleDepIfcoProv()" style="margin-top:4px">
         <option value="">Sin asignar (puede elegir el origen al cargar)</option>
         <option value="san_geronimo">San Gerónimo (siempre)</option>
-        <option value="proveedor">Proveedor específico (siempre)</option>
+        <option value="proveedor">Galpón asociado (siempre)</option>
       </select>
       <div id="usr-dep-ifco-prov-wrap" style="display:none;margin-top:6px">
-        <select id="usr-dep-ifco-prov"><option value="">— Cargando proveedores —</option></select>
+        <select id="usr-dep-ifco-prov"><option value="">— Cargando galpones —</option></select>
       </div>
     </div>
     <div class="fl ff" style="margin-top:8px">
@@ -20000,19 +20000,54 @@ function usrToggleDepIfcoProv() {
   document.getElementById('usr-dep-ifco-prov-wrap').style.display = v === 'proveedor' ? 'block' : 'none';
 }
 
-// Cargar lista de proveedores en el select del modal usuario
-function usrCargarProveedoresIfco(seleccionado) {
-  var sel = document.getElementById('usr-dep-ifco-prov');
-  fetch('/api/ifco/proveedores', { credentials:'include' })
-    .then(function(r){return r.json();})
-    .then(function(provs){
-      sel.innerHTML = '<option value="">— Seleccionar proveedor —</option>' +
-        (provs||[]).map(function(p){
-          var selAttr = (seleccionado && parseInt(seleccionado) === p.id) ? ' selected' : '';
-          return '<option value="'+p.id+'"'+selAttr+'>'+p.nombre+'</option>';
-        }).join('');
+// ── EL GALPÓN AL QUE ENTRA EL USUARIO ───────────────────────────────────────
+// Lo que se elige acá fija el ORIGEN de los remitos que esa persona carga desde
+// el celular. Por eso la lista tiene que ser la de GALPONES ASOCIADOS del módulo
+// IFCO —los que están dados de alta ahí— y no el padrón crudo de proveedores.
+//
+// Un solo cargador para los dos modales (el de Equipo y el viejo de Usuarios):
+// antes había dos, cada uno esperaba una respuesta con forma distinta, y el del
+// modal de Equipo se quedaba en "Cargando proveedores" para siempre porque
+// preguntaba por un res.ok que ese endpoint nunca devolvió.
+var GALPONES_IFCO = null;          // cache: se piden una vez por sesión
+
+function ifcoCargarGalpones(selectId, seleccionado) {
+  var sel = document.getElementById(selectId);
+  if (!sel) return;
+
+  var pintar = function(lista) {
+    sel.innerHTML = '<option value="">— Elegir galpón —</option>' + lista.map(function(g){
+      var sel2 = (seleccionado != null && String(seleccionado) === String(g.id)) ? ' selected' : '';
+      // Un galpón que todavía no movió ningún IFCO se marca, no se esconde:
+      // recién dado de alta es justo cuando hay que asignarle la gente.
+      var nota = g.opera_en_ifco ? '' : '  (sin movimientos IFCO)';
+      return '<option value="' + g.id + '"' + sel2 + '>' + esc(g.nombre || ('#' + g.id)) + esc(nota) + '</option>';
+    }).join('');
+  };
+
+  if (GALPONES_IFCO) { pintar(GALPONES_IFCO); return; }
+  sel.innerHTML = '<option value="">— Cargando galpones —</option>';
+  fetch('/api/ifco/galpones', { credentials: 'include' })
+    .then(function(r){ return r.json(); })
+    .then(function(res){
+      // Quedarse callado acá era el bug: el desplegable mostraba "Cargando…"
+      // para siempre y no había forma de saber que había fallado.
+      if (!res || !res.ok) {
+        sel.innerHTML = '<option value="">(no se pudieron cargar los galpones' + (res && res.error ? ': ' + esc(res.error) : '') + ')</option>';
+        return;
+      }
+      GALPONES_IFCO = res.data || [];
+      if (!GALPONES_IFCO.length) {
+        sel.innerHTML = '<option value="">(no hay galpones asociados dados de alta en IFCO)</option>';
+        return;
+      }
+      pintar(GALPONES_IFCO);
     })
-    .catch(function(){ sel.innerHTML = '<option value="">(error cargando proveedores)</option>'; });
+    .catch(function(){ sel.innerHTML = '<option value="">(no se pudieron cargar los galpones)</option>'; });
+}
+
+function usrCargarProveedoresIfco(seleccionado) {
+  ifcoCargarGalpones('usr-dep-ifco-prov', seleccionado);
 }
 
 function usrGuardar() {
@@ -37567,7 +37602,7 @@ function eqGuardarPersona() {
 
 // ─── BLOQUE ACCESO AL SISTEMA (Fase 2.D) ─────────────────────────────────
 // Estado local del bloque (refleja lo que vino del backend al abrir el modal)
-var EQ_ACCESO = { usuario: null, proveedoresIfco: [] };
+var EQ_ACCESO = { usuario: null };   // los galpones los cachea ifcoCargarGalpones
 
 function eqPoblarAcceso(persona, usuario) {
   EQ_ACCESO.usuario = usuario || null;
@@ -37691,23 +37726,7 @@ function eqToggleDepIfcoProv() {
 }
 
 function eqCargarProveedoresIfcoEq(selectedId) {
-  var sel = document.getElementById('eq-per-dep-ifco-prov');
-  // Cache simple: si ya cargamos, reusar
-  if (EQ_ACCESO.proveedoresIfco.length > 0) {
-    var opts = '<option value="">— elegí proveedor —</option>';
-    EQ_ACCESO.proveedoresIfco.forEach(function(p){
-      opts += '<option value="' + p.id + '"' + (selectedId == p.id ? ' selected' : '') + '>' + eqEsc(p.nombre) + '</option>';
-    });
-    sel.innerHTML = opts;
-    return;
-  }
-  fetch('/api/ifco/proveedores', { credentials: 'include' })
-    .then(function(r){ return r.json(); })
-    .then(function(res){
-      if (!res.ok) return;
-      EQ_ACCESO.proveedoresIfco = res.proveedores || [];
-      eqCargarProveedoresIfcoEq(selectedId);  // reentrar con cache
-    });
+  ifcoCargarGalpones('eq-per-dep-ifco-prov', selectedId);
 }
 
 // Sincronizar el bloque Acceso después de guardar la persona.
