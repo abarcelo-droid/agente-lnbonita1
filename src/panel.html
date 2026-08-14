@@ -2188,7 +2188,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
         <label style="font-size:12px;color:var(--mut)">Estado
           <select id="sg-oc-filtro" onchange="sgLoadOC()" style="padding:5px 8px;border-radius:6px;border:1px solid var(--bor);background:var(--bg)">
             <option value="">Todas</option><option value="abierta">Abierta</option><option value="recibida_parcial">Recibida parcial</option>
-            <option value="recibida_total">Recibida total</option><option value="cerrada">Cerrada</option><option value="anulada">Anulada</option>
+            <option value="recibida_total">Recibida total</option><option value="cerrada">Confirmada</option><option value="anulada">Anulada</option>
           </select>
         </label>
         <div style="display:flex;gap:8px">
@@ -4248,9 +4248,13 @@ function sgLoadCcProv(){
     }).join('') : '<tr><td colspan="4" class="emp">Sin saldos ni vencimientos pendientes.</td></tr>';
   });
 }
+// "Confirmada" es el estado 'cerrada' de la base. Se lo llama así en pantalla
+// porque es la palabra con la que se pidió: la orden que alguien dio por
+// terminada. No se usó 'recibida_total' para esto: "Recibida total" sobre una
+// orden de 1188 kg de la que entraron 38 sería mentir en tres pantallas.
 function sgOcBadge(e){
   var m={abierta:'bpe',recibida_parcial:'bcc',recibida_total:'bok',cerrada:'bok',anulada:'ber',borrador:'bpe'};
-  var l={abierta:'Abierta',recibida_parcial:'Rec. parcial',recibida_total:'Rec. total',cerrada:'Cerrada',anulada:'Anulada',borrador:'Borrador'};
+  var l={abierta:'Abierta',recibida_parcial:'Rec. parcial',recibida_total:'Rec. total',cerrada:'Confirmada',anulada:'Anulada',borrador:'Borrador'};
   return '<span class="bdg '+(m[e]||'bpe')+'">'+(l[e]||e)+'</span>';
 }
 
@@ -4678,7 +4682,14 @@ function sgOcVer(id){
         + ficha('Partida', '<code style="font-size:13px;letter-spacing:.05em">' + esc(sgOcId(o)) + '</code>', 175)
         + ficha('Proveedor', esc(o.proveedor_nombre || '—'), 170)
         + ficha('Fecha', esc(o.fecha_oc || '—'), 95)
-        + ficha('Estado', sgOcBadge(o.estado), 95)
+        + ficha('Estado', sgOcBadge(o.estado)
+            // Por qué se dio por terminada. Sin esto, la orden queda diciendo
+            // que faltaron kilos y no hay dónde leer por qué no vinieron.
+            + (o.cerrada_en
+                ? '<div style="font-size:11px;font-weight:400;color:var(--mut);margin-top:3px">'
+                  + esc(String(o.cerrada_en).slice(0, 10))
+                  + (o.cierre_motivo ? ' · ' + esc(o.cierre_motivo) : '') + '</div>'
+                : ''), 95)
         + ficha('Condición comercial', (o.tipo_precio === 'pizarra' ? 'Liquidación de Venta' : 'Precio Cerrado'), 150)
         + ficha('Comprobante', esc(sgLbl(SG_FISCAL, o.tipo_fiscal) || '—'), 110)
         + ficha('Condición de pago', esc(sgCondNombre(o.condicion_pago_id)), 140)
@@ -4811,10 +4822,19 @@ function sgLoadPendientesRecibir(){
       var nEl = eid('sg-pend-n');
       if (nEl) nEl.textContent = '· ' + cuantas + (cuantas === 1 ? ' orden' : ' órdenes');
       tb.innerHTML = filas.map(function(f){
-        // El botón va una sola vez por orden: repetirlo en cada producto haría
-        // pensar que se recibe de a un ítem.
+        // Los botones van una sola vez por orden: repetirlos en cada producto
+        // haría pensar que se recibe de a un ítem.
+        //
+        // "Terminada" es la salida que no existía: la orden que recibió menos de
+        // lo pedido y no va a recibir más se quedaba en esta bandeja para
+        // siempre. Sólo aparece si YA entró algo — una orden que no recibió nada
+        // se anula, no se da por terminada.
         var accion = f.primero
           ? '<button class="btn bb bs" onclick="sgRecOpen(' + f.o.id + ')">Recibir</button>'
+            + (Number(f.o.entradas) > 0
+                ? ' <button class="btn bo bs" title="Dar la orden por terminada: pasa a OC recibidas"'
+                  + ' onclick="sgOcCerrar(' + f.o.id + ')">✅ Terminada</button>'
+                : '')
           : '';
         return '<tr>'
           + '<td>' + (f.primero ? '<code>' + esc(sgOcId(f.o)) + '</code>' : '') + '</td>'
@@ -4855,9 +4875,56 @@ function sgLoadOcRecibidas(){
         + '<td>' + esc(o.remitos_proveedor || '—') + '</td>'
         + '<td style="text-align:center">' + entradas + '</td>'
         + '<td style="text-align:center">' + sgOcBadge(o.estado) + '</td>'
-        + '<td style="text-align:right"><button class="btn bo bs" onclick="sgOcVer(' + o.id + ')">Ver</button></td>'
-        + '</tr>';
+        + '<td style="text-align:right;white-space:nowrap">'
+          + '<button class="btn bo bs" onclick="sgOcVer(' + o.id + ')">Ver</button>'
+          // La mercadería que se daba por perdida apareció: se reabre y vuelve a
+          // la bandeja de pendientes para poder recibirla.
+          + (o.cerrada_en
+              ? ' <button class="btn bo bs" title="Volver a abrirla para recibir"'
+                + ' onclick="sgOcReabrir(' + o.id + ')">↩ Reabrir</button>'
+              : '')
+        + '</td></tr>';
     }).join('') : '<tr><td colspan="9" class="emp">Todavía no se recibió ninguna orden.</td></tr>';
+  });
+}
+
+// DAR LA ORDEN POR TERMINADA. El motivo se pide sólo si quedó saldo: si entró
+// todo, no hay nada que explicar. El backend igual lo vuelve a exigir — acá se
+// pide para no hacer ir y volver.
+function sgOcCerrar(id){
+  api('/api/sg/oc/'+id).then(function(r){
+    if(!r||!r.ok){ toast('No se pudo leer la orden','er'); return; }
+    var falta=(r.data.items||[]).reduce(function(a,it){
+      return a+Math.max(0,(Number(it.kg_estimados)||0)-(Number(it.kg_recibidos)||0));
+    },0);
+    var motivo=null;
+    if(falta>0.01){
+      motivo=prompt('Faltan '+nr(Math.round(falta))+' kg de esta orden.\n\n'
+        +'¿Por qué se da por terminada? (el proveedor no manda más, se cerró la temporada, etc.)');
+      if(motivo===null) return;                       // canceló
+      if(!String(motivo).trim()){ toast('Escribí por qué se da por terminada','er'); return; }
+    } else if(!confirm('¿Dar la orden por terminada? Pasa a OC recibidas.')){ return; }
+    api('/api/sg/oc/'+id+'/cerrar','POST',{motivo:motivo}).then(function(r2){
+      if(!r2||!r2.ok){ toast((r2&&r2.error)||'No se pudo confirmar','er'); return; }
+      var af=r2.data.pedidos_afectados||[], sp=r2.data.lotes_sin_precio||[];
+      toast('Orden confirmada — pasa a OC recibidas'
+        +(af.length?('. Se cancelaron las reservas en tránsito de: '+af.join(', ')):'')
+        // Aviso, no bloqueo: el precio de una liquidación se cierra cuando se
+        // vende, y se puede seguir cerrando con la orden ya confirmada.
+        +(sp.length?('. Ojo: '+sp.length+' lote(s) siguen sin precio cerrado'):''),'ok');
+      sgLoadPendientesRecibir(); sgLoadOcRecibidas(); sgLoadOC();
+    });
+  });
+}
+
+function sgOcReabrir(id){
+  if(!confirm('¿Reabrir la orden para recibir?\n\n'
+    +'Ojo: las reservas en tránsito que se cancelaron al confirmarla NO vuelven; '
+    +'hay que rearmarlas a mano.')) return;
+  api('/api/sg/oc/'+id+'/reabrir','POST',{}).then(function(r){
+    if(!r||!r.ok){ toast((r&&r.error)||'No se pudo reabrir','er'); return; }
+    toast('Orden reabierta — vuelve a Recepciones pendientes','ok');
+    sgLoadPendientesRecibir(); sgLoadOcRecibidas(); sgLoadOC();
   });
 }
 // LO QUE ENTRÓ SIN ORDEN. Es lo único que la tabla de órdenes no puede mostrar:
@@ -5334,7 +5401,6 @@ function sgRecOcChange(){
     // pregunta que se le está haciendo.
     SG.recOcBultos=(r.data.items||[]).reduce(function(a,it){ return a+(Number(it.cantidad_estimada_presentaciones)||0); },0);
     SG.recItems=(r.data.items||[]).map(function(it){
-      var pend=Math.max(0,(it.kg_estimados||0)-(it.kg_recibidos||0));
       return { oc_item_id:it.id, producto_nombre:it.producto_nombre,
                kg_estimados:it.kg_estimados, kg_recibidos:it.kg_recibidos,
                // Lo que la orden dice de ESTE artículo, para poder contrastar.
@@ -5343,7 +5409,14 @@ function sgRecOcChange(){
                // El factor con el que se sacan los kilos sin pesar.
                kg_por_bulto: it.kg_por_bulto,
                bultos: '', pallets: '', peso: '',
-               lotes:[{kg_reales:pend||'',calidad:'',bultos:''}] };
+               // LOS KILOS TAMBIÉN ARRANCAN VACÍOS. Antes este campo venía
+               // prellenado con lo que faltaba de la orden, y sólo se pisaba si
+               // el operador pesaba en el paso 4: el que contaba bultos y no
+               // pesaba grababa los kilos PEDIDOS como si hubieran entrado. La
+               // orden se marcaba recibida entera con mercadería que nunca vino,
+               // y el asistente ya dice, dos pasos más abajo, que si no se pesó
+               // los kilos salen de bultos × kg por bulto.
+               lotes:[{kg_reales:'',calidad:'',bultos:''}] };
     });
     // Cómo venía la orden, para poder volver acá si el operador se arrepiente
     // de haber declarado diferencias.
