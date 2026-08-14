@@ -132,7 +132,7 @@ const PREFIJOS = [
   // salvo en los prefijos de LECTURA_CONTROLADA (permisos.js), donde /api/sg no
   // está. El prefijo se declara igual, corto: la parte variable va al final, así
   // que '/sg/control-coop/12/cooperativa' matchea con 'sg/control-coop'.
-  ['sg-control-coop',    'sg/control-coop'],
+  ['sg-control-coop',    'sg/control-coop,sg/cooperativas'],
 
   // ═══════════════════════════════════════════════════════════════════════
   // LAS QUE FALTABAN. Se declaran POR QUIÉN ESCRIBE, no por quién llama.

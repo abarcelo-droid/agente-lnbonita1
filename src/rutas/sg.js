@@ -1185,7 +1185,24 @@ function crearLotesDeItem(db, { recepcionId, ocItem, tipoPrecio, fechaIngreso, l
     VALUES (?,?,?,?,?,?,?,?,?,?,?,?, 'disponible', ?, ?, ?, ?, ?, ?)`);
   const ids = [];
   for (const lt of lotes) {
-    const kg = Number(lt.kg_reales || 0);
+    // LOS KILOS YA NO SE TIPEAN EN EL CONTEO. El operador cuenta bultos; los
+    // kilos salen de bultos × kg por bulto, que es el factor que la propia orden
+    // ya trae (el despacho hace exactamente lo mismo al revés). Si en el paso de
+    // la balanza se pesó de verdad, ese peso manda: es el dato medido.
+    //
+    // Un lote en 0 kg no es "un lote sin peso": es mercadería que no se puede
+    // vender, no cierra la orden, no toma el costo de la descarga y queda de
+    // fantasma en la planilla de stock. Por eso, si no hay ni peso ni factor, la
+    // recepción se corta acá y dice qué falta.
+    const kpbItem = (lt.kg_por_bulto != null && lt.kg_por_bulto !== '') ? Number(lt.kg_por_bulto)
+      : (ocItem.kg_por_bulto != null ? Number(ocItem.kg_por_bulto) : null);
+    const bultosLt = (lt.bultos != null && lt.bultos !== '') ? Number(lt.bultos) : null;
+    let kg = Number(lt.kg_reales || 0);
+    if (!(kg > 0) && bultosLt > 0 && kpbItem > 0) kg = bultosLt * kpbItem;
+    if (!(kg > 0)) {
+      throw new Error('No se puede sacar el peso de "' + (ocItem.producto_nombre || 'un artículo')
+        + '": cargá el peso de la balanza, o poné los kg por bulto en la orden de compra.');
+    }
     const precio = tipoPrecio === 'firme' ? (ocItem.precio_estimado_por_kg != null ? Number(ocItem.precio_estimado_por_kg) : null) : null;
     const costoBase = precio != null ? kg * precio : 0;
     let venc = val(lt.fecha_vencimiento_estimada);
@@ -1720,19 +1737,41 @@ router.post('/recepciones', sgUpload.array('fotos', 40), requireAdmin, (req, res
       // subieron los archivos: multer conserva el orden dentro de un mismo
       // campo. Si falta o no coincide, la foto se guarda igual sin categoría —
       // perder la foto por no saber rotularla sería peor.
-      const cats = Array.isArray(b.fotos_categorias) ? b.fotos_categorias : [];
+      // La metadata viaja como UN arreglo de objetos alineado con los archivos,
+      // no como dos arreglos paralelos. Con dos, un desfase de un solo elemento
+      // no perdía la foto: le adjudicaba la balanza AL ARTÍCULO EQUIVOCADO, que
+      // es peor, porque nadie lo nota.
+      const meta = Array.isArray(b.fotos_meta) ? b.fotos_meta
+        : (Array.isArray(b.fotos_categorias) ? b.fotos_categorias.map((c) => ({ categoria: c })) : []);
       const VALIDAS = ['documentacion', 'mercaderia', 'peso', 'variacion', 'calidad'];
+      // Los ítems que de verdad son de esta orden: una foto no puede quedar
+      // colgada de un ítem de otra compra.
+      const itemsOk = new Set(items.map((it) => Number(it.oc_item_id)).filter(Boolean));
       (req.files || []).forEach((f, i) => {
-        const cat = VALIDAS.includes(cats[i]) ? cats[i] : null;
-        db.prepare('INSERT INTO sg_recepcion_fotos (recepcion_id, ruta, nombre_original, creado_por, categoria) VALUES (?,?,?,?,?)')
-          .run(recId, '/data/sg/' + f.filename, f.originalname || null, uid(req), cat);
+        const m = meta[i] || {};
+        const cat = VALIDAS.includes(m.categoria) ? m.categoria : null;
+        const it = itemsOk.has(Number(m.oc_item_id)) ? Number(m.oc_item_id) : null;
+        db.prepare(`INSERT INTO sg_recepcion_fotos
+          (recepcion_id, ruta, nombre_original, creado_por, categoria, oc_item_id) VALUES (?,?,?,?,?,?)`)
+          .run(recId, '/data/sg/' + f.filename, f.originalname || null, uid(req), cat, it);
       });
       // FASE 2 — si se asignó cooperativa, queda una DESCARGA DE INGRESO pendiente. La unidad
       // (bulto/pallet) define la cantidad: bultos_recibidos o pallets_recibidos de la recepción.
-      const coopId = b.cooperativa_id ? Number(b.cooperativa_id) : null;
+      // La cooperativa se elige del catálogo (Control Cooperativa) y de ahí sale
+      // el proveedor al que se le paga. El gasto sigue apuntando al PROVEEDOR
+      // —de ahí cuelga toda la valorización— y además guarda qué cuadrilla
+      // trabajó. Se acepta todavía un proveedor suelto para no romper lo que ya
+      // esté cargado, pero lo que manda el asistente es la cooperativa.
+      const coopCatId = b.cooperativa_catalogo_id ? Number(b.cooperativa_catalogo_id) : null;
+      let coopId = b.cooperativa_id ? Number(b.cooperativa_id) : null;
+      if (coopCatId) {
+        const c = db.prepare('SELECT id, proveedor_id FROM sg_cooperativas WHERE id=? AND activo=1').get(coopCatId);
+        if (!c) throw new Error('La cooperativa elegida no existe o está dada de baja');
+        coopId = c.proveedor_id;
+      }
       const coopUnidad = b.cooperativa_unidad === 'pallet' ? 'pallet' : 'bulto';
       const coopCant = coopUnidad === 'pallet' ? numN(b.pallets_recibidos) : numN(b.bultos_recibidos);
-      syncGastoCoop(db, { tipo: 'descarga_ingreso', recepcionId: recId, proveedorId: coopId, unidad: coopUnidad, cantidad: coopCant, fechaServicio: fechaIngreso, userId: uid(req) });
+      syncGastoCoop(db, { tipo: 'descarga_ingreso', recepcionId: recId, proveedorId: coopId, cooperativaId: coopCatId, unidad: coopUnidad, cantidad: coopCant, fechaServicio: fechaIngreso, userId: uid(req) });
       const nuevosLotes = [];
       for (const it of items) {
         if (sinOC) {
@@ -2920,7 +2959,7 @@ function syncGastoFleteDespacho(db, despachoId, fleteroId, fechaServicio, userId
 // FASE 2 — sincroniza el gasto de la COOPERATIVA (carga/descarga) de una operación. Genérico:
 // tipo='descarga_ingreso' cuelga de recepcion_id; tipo='carga_salida' cuelga de despacho_id.
 // Idempotente: un solo pendiente por (operación, tipo). Sin proveedor → anula el pendiente.
-function syncGastoCoop(db, { tipo, despachoId, recepcionId, proveedorId, unidad, cantidad, fechaServicio, userId }) {
+function syncGastoCoop(db, { tipo, despachoId, recepcionId, proveedorId, cooperativaId, unidad, cantidad, fechaServicio, userId }) {
   const col = despachoId ? 'despacho_id' : 'recepcion_id';
   const opId = despachoId || recepcionId;
   if (!opId) return;
@@ -2931,14 +2970,16 @@ function syncGastoCoop(db, { tipo, despachoId, recepcionId, proveedorId, unidad,
   }
   if (existente) {
     if (existente.estado === 'pendiente_valorizar') {
-      db.prepare("UPDATE sg_gastos_directos SET proveedor_servicio_id=?, unidad=?, cantidad=?, fecha_servicio=? WHERE id=?")
-        .run(proveedorId, unidad || null, (cantidad != null ? Number(cantidad) : null), fechaServicio, existente.id);
+      db.prepare("UPDATE sg_gastos_directos SET proveedor_servicio_id=?, cooperativa_id=?, unidad=?, cantidad=?, fecha_servicio=? WHERE id=?")
+        .run(proveedorId, cooperativaId || null, unidad || null, (cantidad != null ? Number(cantidad) : null), fechaServicio, existente.id);
     }
     return; // ya valorizado → no se re-asigna
   }
+  // proveedor_servicio_id = a quién se le paga (de ahí cuelga la valorización).
+  // cooperativa_id = qué cuadrilla trabajó. Son dos datos distintos.
   db.prepare(`INSERT INTO sg_gastos_directos
-    (tipo_gasto, ${col}, proveedor_servicio_id, unidad, cantidad, estado, fecha_servicio, creado_por)
-    VALUES (?,?,?,?,?, 'pendiente_valorizar', ?, ?)`).run(tipo, opId, proveedorId, unidad || null, (cantidad != null ? Number(cantidad) : null), fechaServicio, userId);
+    (tipo_gasto, ${col}, proveedor_servicio_id, cooperativa_id, unidad, cantidad, estado, fecha_servicio, creado_por)
+    VALUES (?,?,?,?,?,?, 'pendiente_valorizar', ?, ?)`).run(tipo, opId, proveedorId, cooperativaId || null, unidad || null, (cantidad != null ? Number(cantidad) : null), fechaServicio, userId);
 }
 
 router.post('/despachos', requireAdmin, (req, res) => {
@@ -3144,6 +3185,80 @@ router.post('/despachos/:id/anular', requireAdmin, (req, res) => {
 // ══ MÓDULO GASTOS DIRECTOS (servicio, valorización diferida) — Fase 1: Flete de Salida ══
 // Listado de gastos de servicio con datos de la operación (despacho → remito, cliente, kg).
 // Filtros: tipo (default flete_salida), estado (pendiente_valorizar/valorizado), proveedor.
+// ── ALTA DE COOPERATIVAS ────────────────────────────────────────────────────
+// El catálogo vive en Control Cooperativa. Una cooperativa es la CUADRILLA que
+// descarga; el proveedor asociado es a QUIÉN SE LE PAGA, y por eso es
+// obligatorio: una descarga cargada a una cuadrilla sin proveedor no se puede
+// liquidar y termina siendo un dato que no sirve.
+router.get('/cooperativas', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const rows = db.prepare(`
+      SELECT c.*, p.razon_social AS proveedor_nombre, p.cuit AS proveedor_cuit,
+             (SELECT COUNT(*) FROM sg_gastos_directos g
+               WHERE g.cooperativa_id = c.id AND g.activo = 1 AND g.estado != 'anulado') AS descargas
+      FROM sg_cooperativas c
+      LEFT JOIN sg_proveedores p ON p.id = c.proveedor_id
+      WHERE c.activo = 1
+      ORDER BY c.nombre COLLATE NOCASE`).all();
+    res.json({ ok: true, data: rows });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+router.post('/cooperativas', requireAdmin, (req, res) => {
+  const db = getDb();
+  try {
+    const b = req.body || {};
+    const nombre = val(b.nombre);
+    if (!nombre) return res.status(400).json({ ok: false, error: 'Falta el nombre de la cooperativa' });
+    // La atadura al proveedor no es opcional: es la única forma de pagarle.
+    const provId = b.proveedor_id ? Number(b.proveedor_id) : null;
+    if (!provId) return res.status(400).json({ ok: false, error: 'Elegí el proveedor al que se le factura esta cooperativa' });
+    const prov = db.prepare('SELECT id FROM sg_proveedores WHERE id=? AND activo=1').get(provId);
+    if (!prov) return res.status(400).json({ ok: false, error: 'Ese proveedor no existe o está dado de baja' });
+    const rep = db.prepare('SELECT id FROM sg_cooperativas WHERE nombre = ? COLLATE NOCASE AND activo=1').get(nombre);
+    if (rep) return res.status(400).json({ ok: false, error: 'Ya hay una cooperativa con ese nombre' });
+
+    const info = db.prepare(`INSERT INTO sg_cooperativas (nombre, proveedor_id, contacto, notas, creado_por)
+      VALUES (?,?,?,?,?)`).run(nombre, provId, val(b.contacto), val(b.notas), uid(req));
+    res.json({ ok: true, data: { id: Number(info.lastInsertRowid) } });
+  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+
+router.put('/cooperativas/:id', requireAdmin, (req, res) => {
+  const db = getDb();
+  try {
+    const b = req.body || {};
+    const c = db.prepare('SELECT * FROM sg_cooperativas WHERE id=? AND activo=1').get(req.params.id);
+    if (!c) return res.status(404).json({ ok: false, error: 'No encontrada' });
+    const nombre = val(b.nombre) || c.nombre;
+    const provId = b.proveedor_id ? Number(b.proveedor_id) : c.proveedor_id;
+    if (!provId) return res.status(400).json({ ok: false, error: 'La cooperativa tiene que tener un proveedor' });
+    const prov = db.prepare('SELECT id FROM sg_proveedores WHERE id=? AND activo=1').get(provId);
+    if (!prov) return res.status(400).json({ ok: false, error: 'Ese proveedor no existe o está dado de baja' });
+    const rep = db.prepare('SELECT id FROM sg_cooperativas WHERE nombre = ? COLLATE NOCASE AND activo=1 AND id<>?').get(nombre, c.id);
+    if (rep) return res.status(400).json({ ok: false, error: 'Ya hay otra cooperativa con ese nombre' });
+
+    db.prepare(`UPDATE sg_cooperativas SET nombre=?, proveedor_id=?, contacto=?, notas=?,
+      modificado_en=datetime('now','localtime'), modificado_por=? WHERE id=?`)
+      .run(nombre, provId, val(b.contacto), val(b.notas), uid(req), c.id);
+    res.json({ ok: true, data: { id: c.id } });
+  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+
+// Baja lógica. Las descargas ya cargadas la siguen nombrando: borrarla de verdad
+// dejaría gastos apuntando a una cooperativa que no existe.
+router.delete('/cooperativas/:id', requireAdmin, (req, res) => {
+  const db = getDb();
+  try {
+    const c = db.prepare('SELECT * FROM sg_cooperativas WHERE id=? AND activo=1').get(req.params.id);
+    if (!c) return res.status(404).json({ ok: false, error: 'No encontrada' });
+    db.prepare(`UPDATE sg_cooperativas SET activo=0, eliminado_en=datetime('now','localtime'),
+      eliminado_por_id=? WHERE id=?`).run(uid(req), c.id);
+    res.json({ ok: true, data: { id: c.id } });
+  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+
 // ── CONTROL COOPERATIVA ─────────────────────────────────────────────────────
 // Todo lo que la cooperativa descargó, junto y en un solo lugar. Hasta ahora la
 // descarga sólo se veía dentro de "Gastos Directos → Cargas y Descargas",
@@ -3246,6 +3361,10 @@ router.post('/control-coop/:id/cooperativa', requireAdmin, (req, res) => {
     // nombre de otro. Hay que anular esa valorización primero.
     if (yaVal) return res.status(400).json({ ok: false, error: 'Esa descarga ya está valorizada: no se le puede cambiar la cooperativa sin dar de baja la valorización' });
 
+    // Desde el catálogo: la cooperativa dice a qué proveedor se le paga.
+    const coopCat = req.body.cooperativa_catalogo_id
+      ? db.prepare('SELECT id, proveedor_id FROM sg_cooperativas WHERE id=? AND activo=1').get(Number(req.body.cooperativa_catalogo_id))
+      : null;
     const unidad = (req.body.unidad === 'pallet') ? 'pallet' : 'bulto';
     const cantidad = unidad === 'pallet' ? rec.pallets_recibidos : rec.bultos_recibidos;
     // Sin cantidad, el gasto queda en NULL y cuando se valoriza la cuenta el
@@ -3261,7 +3380,9 @@ router.post('/control-coop/:id/cooperativa', requireAdmin, (req, res) => {
       // declararla: si no, la fila desaparecería del listado al recargar.
       if (rec.con_descarga !== 1) db.prepare('UPDATE sg_recepciones SET con_descarga=1 WHERE id=?').run(rec.id);
       syncGastoCoop(db, {
-        tipo: 'descarga_ingreso', recepcionId: rec.id, proveedorId: coopId,
+        tipo: 'descarga_ingreso', recepcionId: rec.id,
+        proveedorId: coopCat ? coopCat.proveedor_id : coopId,
+        cooperativaId: coopCat ? coopCat.id : null,
         unidad, cantidad, fechaServicio: rec.fecha_recepcion, userId: uid(req),
       });
     })();
