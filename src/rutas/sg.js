@@ -1214,8 +1214,20 @@ function crearLotesDeItem(db, { recepcionId, ocItem, tipoPrecio, fechaIngreso, l
     // vender, no cierra la orden, no toma el costo de la descarga y queda de
     // fantasma en la planilla de stock. Por eso, si no hay ni peso ni factor, la
     // recepción se corta acá y dice qué falta.
+    // El factor sale, en orden: del sub-lote, del ítem de la orden, o de la
+    // PRESENTACIÓN del ítem. Ese último escalón faltaba y es el que rompía las
+    // órdenes viejas: kg_por_bulto se agregó por migración y en las filas de
+    // antes quedó en NULL, aunque su presentación sí diga cuántos kilos entran
+    // por cajón. El resto del módulo —la oferta, los pedidos, el despacho— ya
+    // cae a factor_conversion; acá no, y la recepción moría con un error que
+    // además mandaba a "poné los kg por bulto en la orden", que no se puede
+    // hacer: no hay pantalla que edite los ítems de una orden ya cargada.
     const kpbItem = (lt.kg_por_bulto != null && lt.kg_por_bulto !== '') ? Number(lt.kg_por_bulto)
-      : (ocItem.kg_por_bulto != null ? Number(ocItem.kg_por_bulto) : null);
+      : (ocItem.kg_por_bulto != null ? Number(ocItem.kg_por_bulto)
+        : (ocItem.presentacion_id
+            ? (db.prepare('SELECT factor_conversion f FROM sg_presentaciones WHERE id=?')
+                 .get(ocItem.presentacion_id) || {}).f ?? null
+            : null));
     const bultosLt = (lt.bultos != null && lt.bultos !== '') ? Number(lt.bultos) : null;
     let kg = Number(lt.kg_reales || 0);
     if (!(kg > 0) && bultosLt > 0 && kpbItem > 0) kg = bultosLt * kpbItem;
@@ -1624,6 +1636,11 @@ router.get('/oc/:id', requireAuth, (req, res) => {
       LEFT JOIN sg_proveedores p ON p.id=o.proveedor_id WHERE o.id=?`).get(req.params.id);
     if (!oc) return res.status(404).json({ ok: false, error: 'No encontrado' });
     oc.items = db.prepare(`SELECT i.*, pr.nombre AS producto_nombre, ps.nombre AS presentacion_nombre,
+      -- Los kilos por cajón, con el mismo escalón que usa la recepción: si el
+      -- ítem no los tiene (las órdenes viejas quedaron en NULL), los da la
+      -- presentación. Sin esto el asistente muestra 0 kg y el operador cree que
+      -- tiene que pesar sí o sí.
+      COALESCE(i.kg_por_bulto, ps.factor_conversion) AS kg_por_bulto_efectivo,
       (SELECT COALESCE(SUM(kg_reales),0) FROM sg_lotes WHERE oc_item_id=i.id AND activo=1) AS kg_recibidos
       FROM sg_oc_items i
       LEFT JOIN sg_productos pr ON pr.id=i.producto_id

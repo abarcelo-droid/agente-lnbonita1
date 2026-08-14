@@ -4688,7 +4688,7 @@ function sgOcVer(id){
             + (o.cerrada_en
                 ? '<div style="font-size:11px;font-weight:400;color:var(--mut);margin-top:3px">'
                   + esc(String(o.cerrada_en).slice(0, 10))
-                  + (o.cierre_motivo ? ' · ' + esc(o.cierre_motivo) : '') + '</div>'
+                  + (o.cierre_motivo ? ' · ' + escH(o.cierre_motivo) : '') + '</div>'
                 : ''), 95)
         + ficha('Condición comercial', (o.tipo_precio === 'pizarra' ? 'Liquidación de Venta' : 'Precio Cerrado'), 150)
         + ficha('Comprobante', esc(sgLbl(SG_FISCAL, o.tipo_fiscal) || '—'), 110)
@@ -4802,13 +4802,22 @@ function sgLoadPendientesRecibir(){
     // producto, que es lo que el operador necesita para recibir.
     Promise.all(abiertas.map(function(o){ return api('/api/sg/oc/' + o.id); })).then(function(dets){
       var filas = [];
+      // "Primero" es la primera fila QUE SE DIBUJA de esta orden, no el primer
+      // ítem de la orden. Con el índice del ítem, una orden cuyo primer producto
+      // ya entró completo se quedaba sin ninguna fila marcada: se dibujaba sin
+      // partida, sin fecha, sin proveedor y SIN BOTONES — ni Recibir ni
+      // Terminada. La orden quedaba atrapada en la bandeja, que es justo lo que
+      // el botón vino a resolver.
+      var vistas = {};
       dets.forEach(function(d, i){
         if (!d || !d.ok) return;
         var o = d.data;
         (o.items || []).forEach(function(it, k){
           var falta = Math.max(0, (Number(it.kg_estimados) || 0) - (Number(it.kg_recibidos) || 0));
           if (falta <= 0) return;      // ese producto ya entró entero
-          filas.push({ o: o, it: it, falta: falta, primero: k === 0 });
+          var esPrimera = !vistas[o.id];
+          vistas[o.id] = 1;
+          filas.push({ o: o, it: it, falta: falta, primero: esPrimera });
         });
       });
       if (!filas.length) {
@@ -5028,6 +5037,19 @@ function sgRecFaltaEn(p){
         f.push('los pallets de los artículos (paso 2), que es lo que la cooperativa cobra');
       }
     }
+  } else if (p === 4) {
+    // EL PESO, CUANDO NO HAY DE DÓNDE SACARLO. Los kilos salen de bultos × kg
+    // por cajón; si la orden no trae ese factor, el único camino es la balanza.
+    // Este paso no validaba nada: el operador seguía hasta el final, subía las
+    // fotos y recién ahí el servidor cortaba con "no se puede sacar el peso" —
+    // con el camión esperando y todo el trabajo hecho. Ahora frena acá, que es
+    // donde está el campo.
+    (SG.recItems || []).forEach(function(it){
+      var bultos = Number(it.bultos) || 0;
+      if (bultos <= 0) return;                       // ese producto no entró
+      if (sgRecKgArt(it) > 0) return;                // se pesó, o sale del factor
+      f.push('el peso de ' + (it.producto_nombre || 'un artículo'));
+    });
   } else if (p === 5) {
     // Sin OC no hay contra qué comparar: no hay resumen que confirmar.
     if (!SG.recSinOc) {
@@ -5406,8 +5428,12 @@ function sgRecOcChange(){
                // Lo que la orden dice de ESTE artículo, para poder contrastar.
                // Los bultos arrancan VACÍOS: los cuenta el que recibe.
                bultos_oc: Number(it.cantidad_estimada_presentaciones) || 0,
-               // El factor con el que se sacan los kilos sin pesar.
-               kg_por_bulto: it.kg_por_bulto,
+               // El factor con el que se sacan los kilos sin pesar. Si el ítem no
+               // lo tiene —las órdenes viejas quedaron en NULL— lo da su
+               // presentación, que es lo mismo que hace el backend al crear el
+               // lote. Sin esto el asistente mostraba 0 kg en una orden que sí
+               // sabe cuántos kilos entran por cajón.
+               kg_por_bulto: (it.kg_por_bulto != null ? it.kg_por_bulto : it.kg_por_bulto_efectivo),
                bultos: '', pallets: '', peso: '',
                // LOS KILOS TAMBIÉN ARRANCAN VACÍOS. Antes este campo venía
                // prellenado con lo que faltaba de la orden, y sólo se pisaba si
@@ -16042,6 +16068,14 @@ function api(url,method,body){
 function eid(id){ return document.getElementById(id); }
 function elv(id,val){ var el=eid(id); if(val!==undefined){if(el) el.value=val; return;} return el?el.value.trim():''; }
 function esc(s){ return (s||'').replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/"/g,'&quot;'); }
+// esc() escapa para meter texto DENTRO de un atributo o de un onclick, pero no
+// toca < ni &. Para texto libre que se dibuja como contenido —lo que escribió el
+// operador, un nombre, una observación— hace falta este: sin él, "faltaron <100
+// kg" se lo come el navegador como si fuera una etiqueta.
+function escH(s){
+  return String(s == null ? '' : s)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
 function nr(n){ return Math.round(parseFloat(n)||0).toLocaleString('es-AR'); }
 
 // ─── Panel de actividad / adopción (admin, read-only) ───────────────────────
