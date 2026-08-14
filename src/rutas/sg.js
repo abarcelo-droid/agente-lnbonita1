@@ -3350,10 +3350,14 @@ router.post('/control-coop/:id/cooperativa', requireAdmin, (req, res) => {
   try {
     const rec = db.prepare('SELECT * FROM sg_recepciones WHERE id=? AND activo=1').get(req.params.id);
     if (!rec) return res.status(404).json({ ok: false, error: 'Recepción inexistente' });
+    // Del catálogo, que es lo que manda la pantalla. Se sigue aceptando un id
+    // de proveedor suelto para no romper lo que ya estuviera cargado.
     const coopId = req.body && req.body.cooperativa_id ? Number(req.body.cooperativa_id) : null;
-    if (!coopId) return res.status(400).json({ ok: false, error: 'Falta la cooperativa' });
-    const coop = db.prepare('SELECT id FROM sg_proveedores WHERE id=? AND activo=1 AND es_servicio=1').get(coopId);
-    if (!coop) return res.status(400).json({ ok: false, error: 'Esa no es una cooperativa / proveedor de servicio activo' });
+    if (!coopId && !req.body.cooperativa_catalogo_id) return res.status(400).json({ ok: false, error: 'Falta la cooperativa' });
+    if (coopId && !req.body.cooperativa_catalogo_id) {
+      const coop = db.prepare('SELECT id FROM sg_proveedores WHERE id=? AND activo=1 AND es_servicio=1').get(coopId);
+      if (!coop) return res.status(400).json({ ok: false, error: 'Esa no es una cooperativa / proveedor de servicio activo' });
+    }
 
     const yaVal = db.prepare(`SELECT id FROM sg_gastos_directos
       WHERE recepcion_id=? AND tipo_gasto='descarga_ingreso' AND activo=1 AND estado='valorizado'`).get(rec.id);

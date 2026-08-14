@@ -2595,7 +2595,10 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     <div class="ph">
       <div><div class="ph-t">🤝 San Gerónimo · Control Cooperativa</div>
         <div class="ph-s">Las descargas de ingreso declaradas en la recepción, por cooperativa y por período</div></div>
-      <button class="btn bo" onclick="sgCcoopLoad()">↻ Actualizar</button>
+      <div style="display:flex;gap:8px">
+        <button class="btn bb" onclick="sgCoopOpen()">+ Nueva cooperativa</button>
+        <button class="btn bo" onclick="sgCcoopLoad()">↻ Actualizar</button>
+      </div>
     </div>
 
     <div style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap;margin-bottom:16px">
@@ -2618,6 +2621,18 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       .sg-mod .sgcc-kpi .r{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--mut);margin-top:3px}
       .sg-mod .sgcc-kpi.alerta{border-color:#e0a72e;background:rgba(224,167,46,.12)}
     </style>
+
+    <!-- El catálogo. Una cooperativa es la cuadrilla que descarga y SIEMPRE
+         cuelga de un proveedor, que es a quién se le paga: sin eso, una descarga
+         cargada no se puede liquidar. -->
+    <div style="font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--mut);margin-bottom:8px">
+      🤝 Cooperativas dadas de alta
+    </div>
+    <div class="ab-table-wrap" style="margin-bottom:22px"><table class="pa-tbl">
+      <thead><tr><th>Cooperativa</th><th>Se le factura a</th><th>Contacto</th>
+        <th style="text-align:right">Descargas</th><th></th></tr></thead>
+      <tbody id="sg-tb-coops"><tr><td colspan="5" class="emp">Cargando…</td></tr></tbody>
+    </table></div>
 
     <div id="sgcc-kpis" class="sgcc-kpis"></div>
     <div id="sgcc-coops"></div>
@@ -3066,15 +3081,16 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       </div>
 
       <!-- ════════ 4 · FOTOS DE MERCADERÍA Y PESO ════════ -->
+      <!-- El peso es POR PRODUCTO. Un solo número para todo el camión no es de
+           ninguno de los dos productos que trae: no sirve para costear ni para
+           reclamar. Cada artículo de la orden tiene acá su balanza y su foto. -->
       <div class="sg-rec-paso" data-paso="4">
-        <div class="sg-rec-tit">⚖️ Mercadería y peso</div>
-        <div class="sg-rec-sub">La foto de lo que entró y lo que marcó la balanza.</div>
-        <div class="sg-rec-grid">
-          <div class="fl"><label>Peso recepcionado (kg)</label>
-            <input type="number" min="0" step="0.01" id="sg-rec-peso" class="sg-rec-num" placeholder="el de la balanza"></div>
-        </div>
+        <div class="sg-rec-tit">⚖️ Peso por producto</div>
+        <div class="sg-rec-sub">Lo que marcó la balanza para cada artículo de la orden, con su foto.
+          Si un producto no se pesa, sus kilos salen de los bultos contados por el peso por bulto de la orden.</div>
+        <div id="sg-rec-pesos"><div class="emp">Elegí una orden de compra en el paso 1.</div></div>
         <div class="sg-oc-box">
-          <div class="sg-oc-box-tit">📷 Fotos de la mercadería y del peso</div>
+          <div class="sg-oc-box-tit">📷 Fotos generales de la mercadería <span style="text-transform:none;letter-spacing:0;font-weight:400">(opcional — lo que no es de un producto en particular)</span></div>
           <div style="display:flex;gap:8px;flex-wrap:wrap">
             <button class="btn bb bs" type="button" onclick="eid('sg-rec-f-merc-cam').click()">📷 Cámara</button>
             <button class="btn bo bs" type="button" onclick="eid('sg-rec-f-merc').click()">🖼️ Galería</button>
@@ -3090,35 +3106,32 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
            acá. Si las hay, se le abren los campos para explicar qué pasó — y
            recién ahí puede tocar las cantidades, para que la corrección quede
            justificada y no sea un número cambiado sin que nadie sepa por qué. -->
+      <!-- El paso 5 dejó de ser una pregunta de sí o no y pasó a ser el RESUMEN.
+           Producto por producto: lo que pidió la orden, lo que entró, la
+           diferencia en bultos y en kilos, y un Confirmar que el operador tiene
+           que apretar mirando el número. Contestar "coincide" sin mirar era
+           demasiado fácil; acá hay que dar el OK de cada uno. -->
       <div class="sg-rec-paso" data-paso="5">
-        <div class="sg-rec-tit" id="sg-rec-var-tit">🔍 ¿Los productos recibidos presentan variaciones respecto de la orden?</div>
-        <div class="sg-rec-sub" id="sg-rec-var-sub">Cantidad de bultos, kg por bulto, calidad.</div>
-        <div class="sg-rec-opciones" id="sg-rec-var-pregunta">
-          <label class="sg-rec-opcion"><input type="radio" name="sg-rec-variaciones" value="no" onchange="sgRecVariaciones()">
-            <span><b>No, coincide</b><small>Entró lo que decía la orden</small></span></label>
-          <label class="sg-rec-opcion"><input type="radio" name="sg-rec-variaciones" value="si" onchange="sgRecVariaciones()">
-            <span><b>Sí, hay diferencias</b><small>Hay que corregir y justificar</small></span></label>
-        </div>
+        <div class="sg-rec-tit">🔍 Resumen: revisá y confirmá cada producto</div>
+        <div class="sg-rec-sub" id="sg-rec-var-sub">Lo que pidió la orden contra lo que entró. Confirmá uno por uno:
+          después de guardar no hay forma de corregir las cantidades.</div>
+        <div id="sg-rec-resumen"><div class="emp">Elegí una orden de compra en el paso 1.</div></div>
         <div id="sg-rec-var-sinoc" class="emp" style="display:none;padding:26px">
-          Recibiendo sin orden de compra no hay contra qué comparar: las cantidades se cargan
-          libres en el paso 5. La orden se vincula después, desde Recepciones.
+          Recibiendo sin orden de compra no hay contra qué comparar: lo que se carga es lo que entró.
+          La orden se vincula después, desde Recepciones.
         </div>
         <div id="sg-rec-var-box" style="display:none">
           <div class="sg-oc-box">
-            <div class="sg-oc-box-tit">Corregí lo que realmente entró</div>
-            <div id="sg-rec-items-edit"></div>
-          </div>
-          <div class="sg-oc-box">
-            <div class="sg-oc-box-tit">Justificación <span style="color:var(--err)">*</span></div>
-            <div class="fl ff"><label>¿Qué diferencia hubo?</label>
+            <div class="sg-oc-box-tit">Justificación de las diferencias <span style="color:var(--err)">*</span></div>
+            <div class="fl ff"><label>¿Qué pasó?</label>
               <textarea id="sg-rec-var-motivo" rows="2" placeholder="ej. vinieron 8 bultos menos · 3 cajones con golpes · pesaron 40 kg menos que el remito" oninput="sgRecValidar()"></textarea></div>
             <div class="fl ff" style="margin-top:10px"><label>Fotos que lo respaldan</label>
-          <div style="display:flex;gap:8px;flex-wrap:wrap">
-            <button class="btn bb bs" type="button" onclick="eid('sg-rec-f-var-cam').click()">📷 Cámara</button>
-            <button class="btn bo bs" type="button" onclick="eid('sg-rec-f-var').click()">🖼️ Galería</button>
-          </div>
-          <input type="file" accept="image/*" multiple capture="environment" id="sg-rec-f-var-cam" style="display:none" onchange="sgRecAddFotos(this,'variacion')">
-          <input type="file" accept="image/*" multiple id="sg-rec-f-var" style="display:none" onchange="sgRecAddFotos(this,'variacion')">
+              <div style="display:flex;gap:8px;flex-wrap:wrap">
+                <button class="btn bb bs" type="button" onclick="eid('sg-rec-f-var-cam').click()">📷 Cámara</button>
+                <button class="btn bo bs" type="button" onclick="eid('sg-rec-f-var').click()">🖼️ Galería</button>
+              </div>
+              <input type="file" accept="image/*" multiple capture="environment" id="sg-rec-f-var-cam" style="display:none" onchange="sgRecAddFotos(this,'variacion')">
+              <input type="file" accept="image/*" multiple id="sg-rec-f-var" style="display:none" onchange="sgRecAddFotos(this,'variacion')">
               <div id="sg-rec-prev-variacion" class="sg-rec-prev"></div>
             </div>
           </div>
@@ -3168,6 +3181,29 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       <button class="btn bb" id="sg-rec-btn-guardar" style="display:none" onclick="sgRecGuardar()">Confirmar recepción</button>
     </div>
 
+  </div>
+</div>
+
+<!-- Alta / edición de una cooperativa. El proveedor NO es opcional: es a quién
+     se le factura el trabajo de la cuadrilla. -->
+<div class="ab-modal-overlay" id="sg-coop-modal">
+  <div class="ab-modal" style="width:560px">
+    <div class="mhd"><div class="mht" id="sg-coop-tit">🤝 Nueva cooperativa</div><button class="mcl" onclick="closeMB('sg-coop-modal')">×</button></div>
+    <div class="fg">
+      <input type="hidden" id="sg-coop-id">
+      <div class="fl ff"><label>Nombre de la cooperativa <span style="color:var(--err)">*</span></label>
+        <input id="sg-coop-nombre" placeholder="ej. Cuadrilla Norte"></div>
+      <div class="fl ff"><label>Proveedor al que se le factura <span style="color:var(--err)">*</span></label>
+        <select id="sg-coop-prov"><option value="">— Elegir —</option></select>
+        <div style="font-size:11.5px;color:var(--mut);margin-top:4px">La cooperativa descarga; el proveedor cobra.
+          Sin esto, la descarga queda cargada pero no se puede liquidar.</div></div>
+      <div class="fl ff"><label>Contacto</label><input id="sg-coop-contacto" placeholder="nombre y teléfono"></div>
+      <div class="fl ff"><label>Notas</label><textarea id="sg-coop-notas" rows="2"></textarea></div>
+    </div>
+    <div class="ab-modal-footer">
+      <button class="btn bo" onclick="closeMB('sg-coop-modal')">Cancelar</button>
+      <button class="btn bb" onclick="sgCoopGuardar()">Guardar</button>
+    </div>
   </div>
 </div>
 
@@ -4943,19 +4979,134 @@ function sgRecFaltaEn(p){
       }
     }
   } else if (p === 5) {
-    // Sin OC no hay contra qué comparar: la pregunta no se hace.
+    // Sin OC no hay contra qué comparar: no hay resumen que confirmar.
     if (!SG.recSinOc) {
-      var v = document.querySelector('input[name="sg-rec-variaciones"]:checked');
-      if (!v) f.push('contestar si hay variaciones respecto de la orden');
-      else if (v.value === 'no' && sgRecDifieren().length) {
-        // Lo que se contó NO da con la orden. Decir que coincide sería guardar
-        // una recepción que se contradice a sí misma.
-        f.push('marcar que SÍ hay diferencias: lo contado no coincide con la orden');
+      // Cada producto se confirma mirando su número. Es el reemplazo de la
+      // pregunta de sí o no, que se podía contestar sin leer nada.
+      var faltanOk = (SG.recItems || []).filter(function(_, i){ return !(SG._recOk || {})[i]; }).length;
+      if (faltanOk) {
+        f.push(faltanOk === 1 ? 'confirmar 1 producto del resumen'
+                              : ('confirmar ' + faltanOk + ' productos del resumen'));
       }
-      else if (v.value === 'si' && !String((eid('sg-rec-var-motivo') || {}).value || '').trim()) f.push('el motivo de la diferencia');
+      // Y si algo no da, hay que decir qué pasó. No se le pregunta si hubo
+      // diferencias: se las muestra y se le pide la explicación.
+      if (sgRecDifieren().length && !String((eid('sg-rec-var-motivo') || {}).value || '').trim()) {
+        f.push('explicar la diferencia contra la orden');
+      }
     }
   }
   return f;
+}
+
+// PASO 4 — LA BALANZA, PRODUCTO POR PRODUCTO. Antes había UN peso y UNA foto
+// para toda la recepción: con dos productos en el mismo camión, ese número no
+// era de ninguno de los dos, y la foto no probaba nada.
+function sgRecRenderPesos(){
+  var cont = eid('sg-rec-pesos'); if (!cont) return;
+  if (!(SG.recItems || []).length) {
+    cont.innerHTML = '<div class="emp">Elegí una orden de compra en el paso 1.</div>';
+    return;
+  }
+  cont.innerHTML = SG.recItems.map(function(it, i){
+    var kpb = Number(it.kg_por_bulto) || 0;
+    var bultos = Number(it.bultos) || 0;
+    var derivado = (kpb > 0 && bultos > 0) ? (bultos * kpb) : 0;
+    var fotos = (SG._recFotos || []).filter(function(x){
+      return x.categoria === 'peso' && String(x.art) === String(i);
+    }).length;
+    return '<div class="sg-oc-box">'
+      + '<div class="sg-oc-box-tit">' + esc(it.producto_nombre || ('Artículo ' + (i + 1)))
+        + ' <span style="text-transform:none;letter-spacing:0;font-weight:400">— '
+        + (bultos ? (nr(bultos) + ' bultos contados') : 'todavía sin contar')
+        + (derivado ? (' · sin pesar serían ' + nr(derivado) + ' kg') : '')
+        + '</span></div>'
+      + '<div class="sg-rec-grid">'
+        + '<div class="fl"><label>Peso de balanza (kg)</label>'
+          + '<input type="number" min="0" step="0.01" value="' + _sgN(it.peso) + '"'
+          + ' placeholder="' + (derivado ? ('sin pesar: ' + nr(derivado)) : 'el de la balanza') + '"'
+          + ' oninput="sgRecArtUpd(' + i + ',\'peso\',this.value)"></div>'
+        + '<div class="fl"><label>Foto de la balanza</label>'
+          + '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;padding-top:2px">'
+            + '<button class="btn bb bs" type="button" onclick="eid(\'sg-rec-bal-' + i + '-cam\').click()">📷 Cámara</button>'
+            + '<button class="btn bo bs" type="button" onclick="eid(\'sg-rec-bal-' + i + '\').click()">🖼️ Galería</button>'
+            + (fotos ? ('<span style="font-size:12px;color:#166534">✓ ' + fotos + '</span>') : '')
+          + '</div>'
+          + '<input type="file" accept="image/*" multiple capture="environment" id="sg-rec-bal-' + i + '-cam" style="display:none"'
+            + ' onchange="sgRecAddFotos(this,\'peso\',' + i + ')">'
+          + '<input type="file" accept="image/*" multiple id="sg-rec-bal-' + i + '" style="display:none"'
+            + ' onchange="sgRecAddFotos(this,\'peso\',' + i + ')">'
+        + '</div>'
+      + '</div>'
+      + '<div id="sg-rec-prev-peso-' + i + '" class="sg-rec-prev"></div>'
+      + '</div>';
+  }).join('');
+  sgRecRenderFotos();
+}
+
+// PASO 5 — EL RESUMEN. Producto por producto: lo que pidió la orden, lo que
+// entró, la diferencia en BULTOS y en KILOS, y un Confirmar que hay que apretar
+// mirando el número. Antes era una pregunta de sí o no, y contestar "coincide"
+// sin mirar era demasiado fácil.
+function sgRecRenderResumen(){
+  var cont = eid('sg-rec-resumen'); if (!cont) return;
+  if (SG.recSinOc || !(SG.recItems || []).length) {
+    cont.innerHTML = SG.recSinOc ? '' : '<div class="emp">Elegí una orden de compra en el paso 1.</div>';
+    return;
+  }
+  SG._recOk = SG._recOk || {};
+  var hayDif = false;
+  cont.innerHTML = SG.recItems.map(function(it, i){
+    var bOC = Number(it.bultos_oc) || 0, b = Number(it.bultos) || 0;
+    var kOC = Number(it.kg_estimados) || 0, k = sgRecKgArt(it);
+    var pesado = Number(it.peso) > 0;
+    var dB = bOC ? (b - bOC) : 0;
+    // Los kilos sólo se comparan si se pesó: un número derivado de los bultos no
+    // es una medición, y compararlo daría "diferencia" en cada recepción.
+    var dK = (kOC && pesado) ? (k - kOC) : 0;
+    if (dB || Math.abs(dK) > 1) hayDif = true;
+    var ok = !!SG._recOk[i];
+    var celda = function(rot, pedido, entro, dif, unidad, comparable){
+      var txt = !comparable ? '<span style="color:var(--mut)">—</span>'
+        : (dif === 0 ? '<span style="color:#166534">coincide</span>'
+          : '<b style="color:' + (dif < 0 ? 'var(--err)' : '#9a3412') + '">'
+            + (dif > 0 ? '+' : '') + nr(dif) + '</b>');
+      return '<div><div style="font-size:11px;color:var(--mut);text-transform:uppercase;letter-spacing:.04em">' + rot + '</div>'
+        + '<div style="font-size:13.5px">' + (pedido ? nr(pedido) : '—') + ' → <b>' + (entro ? nr(entro) : '—') + '</b> ' + unidad + '</div>'
+        + '<div style="font-size:12.5px;margin-top:2px">' + txt + '</div></div>';
+    };
+    return '<div class="sg-oc-box" style="' + (ok ? 'border-color:#2e9e5b' : (dB || Math.abs(dK) > 1 ? 'border-color:#e0a72e' : '')) + '">'
+      + '<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">'
+        + '<div style="font-weight:700;font-size:14px">' + esc(it.producto_nombre || ('Artículo ' + (i + 1))) + '</div>'
+        + '<button class="btn ' + (ok ? 'bb' : 'bo') + ' bs" type="button" onclick="sgRecConfirmar(' + i + ')">'
+          + (ok ? '✓ Confirmado' : 'Confirmar') + '</button>'
+      + '</div>'
+      + '<div class="sg-rec-grid" style="margin-top:10px">'
+        + celda('Bultos', bOC, b, dB, 'bultos', !!bOC)
+        + celda('Kilos', kOC, k, dK, 'kg', !!(kOC && pesado))
+        + '<div><div style="font-size:11px;color:var(--mut);text-transform:uppercase;letter-spacing:.04em">Peso</div>'
+          + '<div style="font-size:13.5px">' + (pesado ? 'de balanza' : 'calculado de los bultos') + '</div></div>'
+      + '</div></div>';
+  }).join('');
+  // Si algo no da, hay que explicarlo. La caja aparece sola: no se le pregunta
+  // al operador si hubo diferencias — se las mostramos.
+  var box = eid('sg-rec-var-box');
+  if (box) box.style.display = hayDif ? '' : 'none';
+  var sub = eid('sg-rec-var-sub');
+  if (sub) sub.textContent = hayDif
+    ? 'Hay diferencias contra la orden. Confirmá cada producto y explicá abajo qué pasó.'
+    : 'Lo que pidió la orden contra lo que entró. Confirmá uno por uno: después de guardar no hay forma de corregir las cantidades.';
+}
+
+function sgRecConfirmar(i){
+  SG._recOk = SG._recOk || {};
+  SG._recOk[i] = !SG._recOk[i];
+  sgRecRenderResumen();
+  sgRecValidar();
+}
+
+// ¿Hay algo que no dé contra la orden? Es lo que decide si se pide justificación.
+function sgRecHayDiferencias(){
+  return sgRecDifieren().length > 0;
 }
 
 // Los kilos de un artículo: el peso de la balanza si se pesó, y si no lo que
@@ -5056,13 +5207,15 @@ function sgRecPintarPaso(){
   // repintan al cambiar de paso y NO mientras se tipea: si no, cada tecla
   // rearmaría el HTML y el cursor saltaría fuera del campo.
   if (act === 2) sgRecRenderArts();
-  if (act === 5) sgRecRenderItems();
+  if (act === 4) sgRecRenderPesos();
+  if (act === 5) sgRecRenderResumen();
   var body = document.querySelector('#sg-rec-modal .sg-rec-body');
   if (body) body.scrollTop = 0;
 }
 
 function sgRecOpen(ocId){
   SG.recItems=[]; SG._recFotos=[]; SG.recSinOc=false; SG.recOcBultos=0; SG.recItemsOrig=null; SG._recPaso=1;
+  SG._recOk={};   // los OK del resumen: una recepción nueva se confirma de nuevo
   Promise.all([api('/api/sg/oc?estado=abierta'), api('/api/sg/oc?estado=recibida_parcial')]).then(function(res){
     var ocs=((res[0]&&res[0].ok)?res[0].data:[]).concat((res[1]&&res[1].ok)?res[1].data:[]);
     // OC OPCIONAL: se puede recibir SIN OC → queda "OC pendiente" y se vincula después.
@@ -5072,12 +5225,14 @@ function sgRecOpen(ocId){
     // que el operador tenga que decirlo— y sin fotos.
     var sinD=document.querySelector('input[name="sg-rec-descarga"][value="no"]'); if(sinD) sinD.checked=true;
     document.querySelectorAll('input[name="sg-rec-variaciones"]').forEach(function(x){ x.checked=false; });
-    ['sg-rec-peso','sg-rec-var-motivo','sg-rec-remito','sg-rec-obs','sg-rec-factura','sg-rec-dtv',
+    ['sg-rec-var-motivo','sg-rec-remito','sg-rec-obs','sg-rec-factura','sg-rec-dtv',
      ].forEach(function(id){ var e=eid(id); if(e) e.value=''; });
     // Cooperativa (descarga): selector de proveedores de servicio + unidad bulto/pallet.
     eid('sg-rec-coop').value=''; document.querySelector('input[name="sg-rec-coop-unidad"][value="bulto"]').checked=true;
-    api('/api/sg/proveedores-servicio').then(function(rr){ var fls=(rr&&rr.ok)?rr.data:[]; var sel=eid('sg-rec-coop'); var eleg=sel.value;
-      sel.innerHTML='<option value="">— Elegir —</option>'+fls.map(function(f){return '<option value="'+f.id+'">'+esc(f.razon_social)+'</option>';}).join('')+'<option value="__pendiente__">— No sé todavía (queda pendiente en Control Cooperativa) —</option>';
+    api('/api/sg/cooperativas').then(function(rr){ var fls=(rr&&rr.ok)?rr.data:[]; SG_COOPS=fls; var sel=eid('sg-rec-coop'); var eleg=sel.value;
+      // Del catálogo de Control Cooperativa: cada una ya viene atada al
+      // proveedor al que se le factura.
+      sel.innerHTML='<option value="">— Elegir —</option>'+fls.map(function(f){return '<option value="'+f.id+'">'+esc(f.nombre)+(f.proveedor_nombre?(' — se factura a '+esc(f.proveedor_nombre)):'')+'</option>';}).join('')+(fls.length?'':'<option value="" disabled>(no hay cooperativas: cargalas en Control Cooperativa)</option>')+'<option value="__pendiente__">— No sé todavía (queda pendiente en Control Cooperativa) —</option>';
       if(eleg) sel.value=eleg;   // la lista llega por AJAX: no puede borrar lo que ya eligió
       sgRecValidar(); });
     // Informe de calidad
@@ -5106,7 +5261,7 @@ function sgRecOcChange(){
     document.querySelectorAll('input[name="sg-rec-variaciones"]').forEach(function(x){ x.checked=false; });
     if(eid('sg-rec-var-motivo')) eid('sg-rec-var-motivo').value='';
     SG.recItems=[{producto_id:'',producto_nombre:'',bultos:'',pallets:'',bultos_oc:0,lotes:[{kg_reales:'',calidad:'',bultos:''}]}];
-    sgRecRenderItems(); sgRecRenderArts(); sgRecVariaciones(); return;
+    sgRecRenderArts(); sgRecVariaciones(); return;
   }
   SG.recSinOc=false;
   if(!ocId){
@@ -5119,7 +5274,7 @@ function sgRecOcChange(){
       // que eligiera la orden que acababa de elegir.
       toast((r&&r.error)||'No se pudo leer la orden de compra','er');
       eid('sg-rec-oc').value=''; SG.recItems=[]; SG.recOcBultos=0;
-      sgRecTraza(null); sgRecRenderItems(); sgRecValidar();
+      sgRecTraza(null); sgRecRenderArts(); sgRecValidar();
       return;
     }
     sgRecTraza(r.data);
@@ -5142,7 +5297,8 @@ function sgRecOcChange(){
     // Cómo venía la orden, para poder volver acá si el operador se arrepiente
     // de haber declarado diferencias.
     SG.recItemsOrig=JSON.parse(JSON.stringify(SG.recItems));
-    sgRecRenderItems(); sgRecRenderArts(); sgRecVariaciones();
+    SG._recOk={};   // otra orden, otros productos: lo confirmado no vale más
+    sgRecRenderArts(); sgRecVariaciones();
   });
 }
 
@@ -5171,7 +5327,7 @@ function sgRecToggleObs(){
 // después. Se comprimen con el mismo helper que usa IFCO: las saca un teléfono
 // y sin comprimir son varios megas cada una.
 var SG_REC_MAX_FOTOS = 40;   // tiene que coincidir con sgUpload.array('fotos', N) de sg.js
-async function sgRecAddFotos(input, categoria){
+async function sgRecAddFotos(input, categoria, art){
   var files = input.files || [];
   var lugar = SG_REC_MAX_FOTOS - (SG._recFotos || []).length;
   if (files.length > lugar) {
@@ -5182,7 +5338,9 @@ async function sgRecAddFotos(input, categoria){
   }
   for (var i = 0; i < files.length; i++) {
     var comprimida = await _ifcoComprimirImagen(files[i]);
-    SG._recFotos.push({ file: comprimida, categoria: categoria });
+    // 'art' es el ÍNDICE del artículo en la pantalla. Se traduce a oc_item_id
+    // al mandar: acá todavía puede no haber orden elegida.
+    SG._recFotos.push({ file: comprimida, categoria: categoria, art: (art == null ? null : art) });
   }
   input.value = '';                     // permite volver a elegir la misma foto
   sgRecRenderFotos();
@@ -5191,6 +5349,16 @@ async function sgRecAddFotos(input, categoria){
 function sgRecDelFoto(i){ SG._recFotos.splice(i, 1); sgRecRenderFotos(); }
 
 function sgRecRenderFotos(){
+  // Las de balanza tienen un contenedor por artículo; el resto, uno por categoría.
+  (SG.recItems || []).forEach(function(_, i){
+    var c = eid('sg-rec-prev-peso-' + i);
+    if (!c) return;
+    c.innerHTML = (SG._recFotos || []).map(function(f, k){
+      if (f.categoria !== 'peso' || String(f.art) !== String(i)) return '';
+      return '<div class="sg-rec-thumb"><img src="' + URL.createObjectURL(f.file) + '" alt="">'
+        + '<button type="button" onclick="sgRecDelFoto(' + k + ')" title="Quitar">×</button></div>';
+    }).join('');
+  });
   ['documentacion', 'mercaderia', 'variacion', 'calidad'].forEach(function(cat){
     var cont = eid('sg-rec-prev-' + cat);
     if (!cont) return;
@@ -5246,39 +5414,19 @@ function sgRecDescarga(){
 // justificada y no sea un número cambiado sin que nadie sepa por qué.
 // Recibiendo SIN OC no hay contra qué comparar: la pregunta no se hace y las
 // cantidades se cargan libres en el paso 5, que es todo lo que se puede hacer.
+// Ya no hay pregunta de sí o no: el resumen del paso 5 MUESTRA las diferencias
+// y pide la justificación sólo cuando las hay. Contestar "coincide" sin mirar
+// era demasiado fácil. Esta función quedó para lo único que sigue haciendo
+// falta: acomodar la pantalla según haya orden de compra o no.
 function sgRecVariaciones(){
-  var el = document.querySelector('input[name="sg-rec-variaciones"]:checked');
-  var hay = el && el.value === 'si';
   var conOC = !SG.recSinOc;
-  // "No, coincide" quiere decir que entró lo que decía la orden. Si antes había
-  // dicho que sí y corrigió cantidades, hay que volver todo a como estaba: si
-  // no, se guardaba una recepción que dice que no hubo diferencias y por dentro
-  // tiene los números cambiados y el motivo escrito.
-  if (conOC && el && !hay) sgRecDeshacerVariaciones();
-  var preg = eid('sg-rec-var-pregunta');
-  if (preg) preg.style.display = conOC ? '' : 'none';
   var sub = eid('sg-rec-var-sub');
   if (sub) sub.style.display = conOC ? '' : 'none';
-  var tit = eid('sg-rec-var-tit');
-  if (tit) tit.textContent = conOC
-    ? '🔍 ¿Los productos recibidos presentan variaciones respecto de la orden?'
-    : '🔍 Sin orden de compra';
   var nada = eid('sg-rec-var-sinoc');
   if (nada) nada.style.display = conOC ? 'none' : '';
-  var box = eid('sg-rec-var-box');
-  if (box) box.style.display = (conOC && hay) ? '' : 'none';
-  sgRecMarcarOpciones();
-  sgRecRenderItems();
+  if (!conOC) { var box = eid('sg-rec-var-box'); if (box) box.style.display = 'none'; }
+  sgRecRenderResumen();
   sgRecValidar();
-}
-
-// Volver atrás de "sí hay diferencias". No alcanza con ocultar la caja: lo que
-// se escribió y se corrigió sigue en memoria y se guardaría igual.
-function sgRecDeshacerVariaciones(){
-  if (SG.recItemsOrig) SG.recItems = JSON.parse(JSON.stringify(SG.recItemsOrig));
-  var m = eid('sg-rec-var-motivo'); if (m) m.value = '';
-  SG._recFotos = (SG._recFotos || []).filter(function(f){ return f.categoria !== 'variacion'; });
-  sgRecRenderFotos();
 }
 
 // El :has() del CSS pinta la tarjeta elegida; esta clase hace lo mismo por si
@@ -5291,16 +5439,27 @@ function sgRecMarcarOpciones(){
 }
 
 // SIN OC — líneas manuales: agregar/quitar producto + elegir producto.
-function sgRecAddItem(){ SG.recItems.push({producto_id:'',producto_nombre:'',lotes:[{kg_reales:'',calidad:''}]}); sgRecRenderItems(); }
-function sgRecDelItem(i){ SG.recItems.splice(i,1); if(!SG.recItems.length) SG.recItems=[{producto_id:'',producto_nombre:'',lotes:[{kg_reales:'',calidad:''}]}]; sgRecRenderItems(); }
+var _sgLineaVacia = function(){ return {producto_id:'',producto_nombre:'',bultos:'',pallets:'',peso:'',bultos_oc:0,lotes:[{kg_reales:'',calidad:'',bultos:''}]}; };
+function sgRecAddItem(){ SG.recItems.push(_sgLineaVacia()); sgRecRenderArts(); }
+function sgRecDelItem(i){ SG.recItems.splice(i,1); if(!SG.recItems.length) SG.recItems=[_sgLineaVacia()]; sgRecRenderArts(); }
 function sgRecProdChange(i,v){ SG.recItems[i].producto_id=v; var p=(SG.cacheProd||[]).find(function(x){return String(x.id)===String(v);}); SG.recItems[i].producto_nombre=p?((p.nombre||'')+(p.variedad?(' '+p.variedad):'')):''; sgRecValidar(); }
-function sgRecAddLote(i){ SG.recItems[i].lotes.push({kg_reales:'',calidad:''}); sgRecRenderItems(); }
-function sgRecDelLote(i,j){ SG.recItems[i].lotes.splice(j,1); sgRecRenderItems(); }
-function sgRecUpd(i,j,c,v){ SG.recItems[i].lotes[j][c]=v; sgRecSuma(); sgRecValidar(); }
+// Partir un artículo en varias calidades se hace después, editando el lote: en
+// la recepción se cuenta lo que entra, no se lo clasifica.
+// Quedó de la copia editable que se eliminó: nada la llama ya. Se saca para
+// que nadie la use creyendo que dibuja algo.
 // LOS ARTÍCULOS DE LA ORDEN, cada uno con lo que entró de él. Reemplaza al par
 // "pallets y bultos globales" + "items a recibir": eran el mismo dato partido en
 // dos pantallas, y ninguna de las dos servía para una orden con más de un
 // producto.
+// Un número para meter en un value=. El esc() del panel hace (s||'').replace(…)
+// y revienta con un número, así que acá no se lo puede usar: son valores de un
+// <input type=number>, no hay nada que escapar.
+function _sgN(v){
+  if (v === '' || v == null) return '';
+  var x = Number(v);
+  return isNaN(x) ? '' : x;
+}
+
 function sgRecRenderArts(){
   var cont = eid('sg-rec-arts'); if (!cont) return;
   if (!(SG.recItems || []).length) {
@@ -5308,21 +5467,24 @@ function sgRecRenderArts(){
     var t0 = eid('sg-rec-arts-tot'); if (t0) t0.style.display = 'none';
     return;
   }
-  // Un número para meter en un value=. Sin comillas ni nada que escapar; lo que
-  // no sea un número se descarta antes de llegar al HTML.
-  var _n = function(v){
-    if (v === '' || v == null) return '';
-    var x = Number(v);
-    return isNaN(x) ? '' : x;
-  };
   cont.innerHTML = SG.recItems.map(function(it, i){
     var esperado = [];
     if (Number(it.bultos_oc)) esperado.push(nr(it.bultos_oc) + ' bultos');
     if (Number(it.kg_estimados)) esperado.push(nr(it.kg_estimados) + ' kg');
-    return '<div class="sg-oc-box">'
-      + '<div class="sg-oc-box-tit">' + esc(it.producto_nombre || ('Artículo ' + (i + 1)))
-        + (esperado.length ? ' <span style="text-transform:none;letter-spacing:0;font-weight:400">— la orden dice ' + esc(esperado.join(' · ')) + '</span>' : '')
+    // SIN ORDEN el producto lo elige el operador: no hay lista de la cual salir.
+    // Este editor vivía en el paso 5, que pasó a ser un resumen de sólo lectura;
+    // sin esto, lo que entra sin orden se quedaba sin pantalla donde cargarse.
+    var cabecera = SG.recSinOc
+      ? '<div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">'
+          + '<select style="flex:1" onchange="sgRecProdChange(' + i + ',this.value)">'
+            + sgOpts(sgOcProductos(), sgOcProdLabel, it.producto_id, '— Producto —') + '</select>'
+          + (SG.recItems.length > 1 ? '<button class="btn bd bs" onclick="sgRecDelItem(' + i + ')">×</button>' : '')
         + '</div>'
+      : '<div class="sg-oc-box-tit">' + esc(it.producto_nombre || ('Artículo ' + (i + 1)))
+          + (esperado.length ? ' <span style="text-transform:none;letter-spacing:0;font-weight:400">— la orden dice ' + esc(esperado.join(' · ')) + '</span>' : '')
+        + '</div>';
+    return '<div class="sg-oc-box">'
+      + cabecera
       + '<div class="sg-rec-grid">'
         // OJO: acá NO se puede usar esc(). El esc() del panel hace
         // (s||'').replace(...) y revienta con un número — y los kilos vienen de
@@ -5330,13 +5492,18 @@ function sgRecRenderArts(){
         // cartel de "elegí una orden" aunque la orden estuviera elegida.
         // Son valores numéricos de un <input type=number>: no hay nada que escapar.
         + '<div class="fl"><label>Pallets</label>'
-          + '<input type="number" min="0" value="' + _n(it.pallets) + '" placeholder="0"'
+          + '<input type="number" min="0" value="' + _sgN(it.pallets) + '" placeholder="0"'
           + ' oninput="sgRecArtUpd(' + i + ',\'pallets\',this.value)"></div>'
         + '<div class="fl"><label>Bultos <span style="color:var(--err)">*</span></label>'
-          + '<input type="number" min="0" value="' + _n(it.bultos) + '" placeholder="contalos"'
+          + '<input type="number" min="0" value="' + _sgN(it.bultos) + '" placeholder="contalos"'
           + ' oninput="sgRecArtUpd(' + i + ',\'bultos\',this.value)"></div>'
       + '</div></div>';
-  }).join('');
+  }).join('')
+    + (SG.recSinOc
+        ? '<button class="btn bo bs" style="margin-top:4px" onclick="sgRecAddItem()">+ Agregar producto</button>'
+          + '<div style="font-size:11px;color:var(--mut);margin-top:6px">Sin orden de compra la mercadería queda con '
+          + '<b>costo pendiente</b> hasta vincularla. El peso se carga en el paso 4.</div>'
+        : '');
   sgRecArtsTotales();
 }
 
@@ -5368,84 +5535,17 @@ function sgRecArtUpd(i, campo, v){
   it.lotes[0] = it.lotes[0] || {};
   if (campo === 'bultos') it.lotes[0].bultos = v;
   if (campo === 'peso') it.lotes[0].kg_reales = v;
+  // Si cambia el número, el OK que se dio antes era sobre otro número.
+  if (SG._recOk) SG._recOk[i] = false;
   sgRecArtsTotales();
   sgRecValidar();
 }
 
-// Los items se dibujan en DOS lugares: en el paso 5 —lo que la orden dice que
-// tiene que entrar, sólo para mirar— y adentro del paso 6, editable, pero
-// únicamente si el operador declaró que hay diferencias. Es el mismo modelo en
-// memoria: se toca en un lado y los dos quedan iguales. Así la corrección de
-// una cantidad siempre llega con su justificación al lado, en vez de ser un
-// número cambiado sin que nadie sepa por qué.
-function sgRecRenderItems(){
-  // Sin OC no hay orden contra la cual comparar: se carga libre en el paso 5.
-  var vr = document.querySelector('input[name="sg-rec-variaciones"]:checked');
-  var hayVar = !!(vr && vr.value === 'si');
-  // La única copia editable vive en el paso de Diferencias: la pantalla de
-  // "Items a recibir" se eliminó porque mostraba lo mismo sin dejar tocar nada.
-  sgRecPintarItems('sg-rec-items-edit', false);
-  sgRecSuma();
-  if (!SG.recSinOc && !hayVar) {
-    // El paso 6 todavía no dijo que sí: la copia editable no se muestra igual,
-    // pero se deja bloqueada por si alguien la abre con el inspector.
-    document.querySelectorAll('#sg-rec-items-edit input, #sg-rec-items-edit select').forEach(function(x){ x.disabled = true; });
-  }
-}
-
-function sgRecPintarItems(contId, bloqueado){
-  var cont = eid(contId); if (!cont) return;
-  // Sin OC elegida no hay items: hay que decirlo, no dejar el paso en blanco.
-  if (!SG.recItems.length) {
-    cont.innerHTML = '<div class="emp">Elegí una orden de compra en el paso 1.</div>';
-    return;
-  }
-  var dis = bloqueado ? ' disabled' : '';
-  cont.innerHTML = SG.recItems.map(function(it,i){
-    var lotesH = it.lotes.map(function(lt,j){
-      var calOpts = ['','primera','segunda','tercera'].map(function(c){ return '<option value="'+c+'"'+(c===lt.calidad?' selected':'')+'>'+(c||'(calidad)')+'</option>'; }).join('');
-      return '<div style="display:grid;grid-template-columns:1fr 1.4fr auto;gap:6px;align-items:center;margin-bottom:5px">'
-        +'<input type="number" placeholder="kg" value="'+(lt.kg_reales||'')+'"'+dis+' onchange="sgRecUpd('+i+','+j+',\'kg_reales\',this.value)">'
-        +'<select'+dis+' onchange="sgRecUpd('+i+','+j+',\'calidad\',this.value)">'+calOpts+'</select>'
-        +(it.lotes.length>1&&!bloqueado?'<button class="btn bd bs" onclick="sgRecDelLote('+i+','+j+')">×</button>':'<span></span>')
-        +'</div>';
-    }).join('');
-    // SIN OC: el encabezado es un selector de producto (no hay item de OC).
-    // Con OC: nombre fijo + lo estimado, para tener el contraste a la vista.
-    var head = SG.recSinOc
-      ? '<div style="display:flex;gap:8px;align-items:center;margin-bottom:6px">'
-          +'<select style="flex:1"'+dis+' onchange="sgRecProdChange('+i+',this.value)">'+sgOpts(sgOcProductos(),sgOcProdLabel,it.producto_id,'— Producto —')+'</select>'
-          +(SG.recItems.length>1&&!bloqueado?'<button class="btn bd bs" onclick="sgRecDelItem('+i+')">×</button>':'')
-        +'</div>'
-      : '<div style="font-weight:600;font-size:13px;margin-bottom:6px">'+esc(it.producto_nombre||'')+' <span style="color:var(--mut);font-weight:400">— est. '+nr(it.kg_estimados)+'kg'+(it.kg_recibidos?(', recibidos '+nr(it.kg_recibidos)+'kg'):'')+'</span></div>';
-    return '<div style="border:1px solid var(--bor);border-radius:8px;padding:10px;margin-bottom:8px">'
-      +head
-      +lotesH
-      +(bloqueado?'':'<button class="btn bo bs" onclick="sgRecAddLote('+i+')">+ dividir por calidad</button> ')
-      +'<span style="font-size:12px;color:var(--mut)" data-suma="'+i+'"></span>'
-      +'</div>';
-  }).join('')
-    + (SG.recSinOc && !bloqueado
-        ? '<button class="btn bo bs" style="margin-top:4px" onclick="sgRecAddItem()">+ Agregar producto</button>'
-          +'<div style="font-size:11px;color:var(--mut);margin-top:6px">Sin OC: la mercadería queda con <b>costo pendiente</b> hasta vincular una OC.</div>'
-        : '');
-  if (bloqueado) {
-    cont.querySelectorAll('input, select').forEach(function(x){ x.disabled = true; });
-    if (SG.recItems.length) {
-      cont.insertAdjacentHTML('beforeend',
-        '<div style="font-size:11.5px;color:var(--mut)">Para corregir cantidades, marcá en el paso 6 que hay variaciones respecto de la orden.</div>');
-    }
-  }
-}
-
-// Los Σ kg van a los dos renders a la vez: data-suma en vez de un id, porque un
-// id repetido en dos contenedores sólo actualizaría el primero.
-function sgRecSuma(){
-  SG.recItems.forEach(function(it,i){
-    var s = it.lotes.reduce(function(a,l){ return a+(Number(l.kg_reales)||0); },0);
-    document.querySelectorAll('#sg-rec-modal [data-suma="'+i+'"]').forEach(function(el){ el.textContent='Σ '+nr(s)+'kg'; });
-  });
-}
+// LAS CANTIDADES SE CORRIGEN DONDE SE CARGAN: los bultos en el paso 2 y el peso
+// en el paso 4. El paso 5 es un resumen de sólo lectura con su Confirmar por
+// producto. Tener un tercer lugar para escribir el mismo número era el problema,
+// no la solución: por eso se fueron sgRecRenderItems, su copia bloqueada y los Σ
+// que la acompañaban.
 // Arma el payload de la recepción (PASO 1 + PASO 2). requireItems=false → para la vista
 // previa PDF (permite previsualizar el informe aunque falten items). Devuelve null si inválido.
 function sgRecBuildBody(requireItems){
@@ -5496,7 +5596,7 @@ function sgRecBuildBody(requireItems){
     // cooperativa y aparece marcada en Control Cooperativa, que es donde se
     // completa. Sin esta salida, el operador que no sabe queda trabado en la
     // tranquera con el camión esperando.
-    cooperativa_id: sgRecCoopId(),                                                            // FASE 2 · descarga
+    cooperativa_catalogo_id: sgRecCoopId(),                                                   // FASE 2 · descarga
     cooperativa_unidad: (document.querySelector('input[name="sg-rec-coop-unidad"]:checked')||{}).value||'bulto',
     observada:observada,                                                                       // PASO 2 · informe de calidad
     calidad_estado_general:observada?eid('sg-rec-cal-estado').value:null,
@@ -5505,7 +5605,14 @@ function sgRecBuildBody(requireItems){
     calidad_observaciones:observada?eid('sg-rec-cal-obs').value:null,
     // Lo que se agregó en el paso 1: el peso de la balanza, si hubo descarga, y
     // si lo recibido coincide con lo pedido.
-    peso_recepcionado:(eid('sg-rec-peso').value!==''?Number(eid('sg-rec-peso').value):null),
+    // El peso de la recepción es la suma de lo que se pesó por producto. El
+    // campo global se fue: con dos productos en el camión, ese número no era de
+    // ninguno de los dos. Si no se pesó nada va null, no cero.
+    peso_recepcionado:(function(){
+      var t=0,hay=false;
+      (SG.recItems||[]).forEach(function(it){ var p=Number(it.peso)||0; if(p>0){hay=true;t+=p;} });
+      return hay?t:null;
+    })(),
     con_descarga:(function(){var r=document.querySelector('input[name="sg-rec-descarga"]:checked');return r?(r.value==='si'?1:0):null;})(),
     // Sin OC la pregunta no se hace: si quedó contestada de antes (eligió una
     // OC, contestó, y después se pasó a "sin OC"), no puede viajar igual.
@@ -5551,7 +5658,12 @@ function sgRecGuardar(){
   // en un arreglo paralelo, en el mismo orden en que se agregan los archivos:
   // así el backend sabe de qué es cada una sin inventar nombres de campo.
   var fotos = SG._recFotos || [];
-  body.fotos_categorias = fotos.map(function(f){ return f.categoria || null; });
+  // Un objeto por foto, alineado con los archivos. Dos arreglos paralelos
+  // hacían que un desfase de uno le adjudicara la balanza a otro artículo.
+  body.fotos_meta = fotos.map(function(f){
+    var it = (f.art != null && SG.recItems[f.art]) ? SG.recItems[f.art] : null;
+    return { categoria: f.categoria || null, oc_item_id: it ? (it.oc_item_id || null) : null };
+  });
   fd.append('payload', JSON.stringify(body));
   fotos.forEach(function(f){ fd.append('fotos', f.file); });
   fetch('/api/sg/recepciones',{method:'POST',credentials:'include',body:fd})
@@ -6888,6 +7000,77 @@ function sgCdsEstado(e){
 // alguien lo va a cobrar, y hoy no está anotado en ningún lado.
 var SGCC = { estado: '', filas: [], por: [], tot: null };
 
+// ── EL CATÁLOGO DE COOPERATIVAS ───────────────────────────────────────────
+// Una cooperativa es la cuadrilla que descarga. Siempre cuelga de un proveedor,
+// que es a quién se le factura: sin eso, la descarga queda cargada y no se puede
+// liquidar. Por eso el alta vive acá, en la pantalla donde se controlan.
+var SG_COOPS = [];
+
+function sgCoopLoad(){
+  api('/api/sg/cooperativas').then(function(r){
+    SG_COOPS = (r && r.ok) ? r.data : [];
+    var tb = eid('sg-tb-coops'); if (!tb) return;
+    tb.innerHTML = SG_COOPS.length ? SG_COOPS.map(function(c){
+      return '<tr>'
+        + '<td><b>' + esc(c.nombre) + '</b></td>'
+        + '<td>' + esc(c.proveedor_nombre || '—') + (c.proveedor_cuit ? ('<span style="color:var(--mut)"> · ' + esc(c.proveedor_cuit) + '</span>') : '') + '</td>'
+        + '<td>' + esc(c.contacto || '—') + '</td>'
+        + '<td style="text-align:right">' + nr(c.descargas) + '</td>'
+        + '<td style="text-align:right;white-space:nowrap">'
+          + '<button class="btn bo bs" onclick="sgCoopOpen(' + c.id + ')">✏️</button> '
+          + '<button class="btn bd bs" onclick="sgCoopBaja(' + c.id + ')">🗑</button></td>'
+        + '</tr>';
+    }).join('') : '<tr><td colspan="5" class="emp">Todavía no hay ninguna cooperativa dada de alta.</td></tr>';
+  });
+}
+
+function sgCoopOpen(id){
+  var c = id ? SG_COOPS.find(function(x){ return x.id === id; }) : null;
+  eid('sg-coop-tit').textContent = c ? '🤝 Editar cooperativa' : '🤝 Nueva cooperativa';
+  eid('sg-coop-id').value = c ? c.id : '';
+  eid('sg-coop-nombre').value = c ? c.nombre : '';
+  eid('sg-coop-contacto').value = (c && c.contacto) || '';
+  eid('sg-coop-notas').value = (c && c.notas) || '';
+  // El desplegable son los proveedores de San Gerónimo: la cooperativa se
+  // factura a uno de ellos.
+  api('/api/sg/proveedores').then(function(r){
+    var ps = (r && r.ok) ? r.data : [];
+    eid('sg-coop-prov').innerHTML = '<option value="">— Elegir —</option>' + ps.map(function(p){
+      return '<option value="' + p.id + '"' + ((c && c.proveedor_id === p.id) ? ' selected' : '') + '>'
+        + esc(p.razon_social) + '</option>';
+    }).join('');
+  });
+  eid('sg-coop-modal').classList.add('on');
+}
+
+function sgCoopGuardar(){
+  var id = eid('sg-coop-id').value;
+  var body = {
+    nombre: eid('sg-coop-nombre').value.trim(),
+    proveedor_id: eid('sg-coop-prov').value ? Number(eid('sg-coop-prov').value) : null,
+    contacto: eid('sg-coop-contacto').value.trim(),
+    notas: eid('sg-coop-notas').value.trim(),
+  };
+  if (!body.nombre) { toast('Poné el nombre de la cooperativa', 'er'); return; }
+  if (!body.proveedor_id) { toast('Elegí a qué proveedor se le factura', 'er'); return; }
+  api('/api/sg/cooperativas' + (id ? ('/' + id) : ''), id ? 'PUT' : 'POST', body).then(function(r){
+    if (r && r.ok) { toast(id ? 'Cooperativa actualizada' : 'Cooperativa dada de alta', 'ok');
+      closeMB('sg-coop-modal'); sgCoopLoad(); }
+    else toast((r && r.error) || 'No se pudo guardar', 'er');
+  });
+}
+
+function sgCoopBaja(id){
+  var c = SG_COOPS.find(function(x){ return x.id === id; });
+  if (!c) return;
+  // Las descargas ya cargadas la siguen nombrando: es baja lógica, no borrado.
+  if (!confirm('¿Dar de baja "' + c.nombre + '"?\n\nLas descargas ya cargadas la siguen nombrando; sólo deja de ofrecerse al recibir.')) return;
+  api('/api/sg/cooperativas/' + id, 'DELETE').then(function(r){
+    if (r && r.ok) { toast('Cooperativa dada de baja', 'ok'); sgCoopLoad(); }
+    else toast((r && r.error) || 'No se pudo dar de baja', 'er');
+  });
+}
+
 function sgCcoopInit(){
   // Arranca mostrando el mes en curso: es el corte con el que se paga.
   var hoy = new Date();
@@ -6908,6 +7091,7 @@ function sgCcoopInit(){
     }
     sgCcoopLoad();
   });
+  sgCoopLoad();
 }
 
 function sgCcoopEstado(e){
@@ -7029,23 +7213,26 @@ function sgCcoopAsignar(recepcionId){
   var f = SGCC.filas.find(function(x){ return x.recepcion_id === recepcionId; });
   if (!f) return;
   SGCC.asig = recepcionId;
-  eid('sgcc-asig-ref').innerHTML = 'Recepción <b>' + esc(f.numero_recepcion || '—') + '</b>'
-    + (f.partida ? (' · partida <code>' + esc(f.partida) + '</code>') : '')
+  // UN SOLO NÚMERO: la partida. El interno de recepción sólo aparece cuando
+  // todavía no hay partida (mercadería que entró sin orden).
+  eid('sgcc-asig-ref').innerHTML = 'Partida <code>' + esc(f.partida || f.numero_recepcion || '—') + '</code>'
+    + (f.proveedor_nombre ? (' · ' + esc(f.proveedor_nombre)) : '')
     + ' · ' + nr(f.bultos_recibidos) + ' bultos, ' + nr(f.pallets_recibidos) + ' pallets.';
-  var origen = eid('sgcc-coop');
-  var opts = Array.prototype.slice.call(origen.options).filter(function(o){ return o.value; });
+  // Del CATÁLOGO de cooperativas, no del padrón de proveedores de servicio: es
+  // el mismo que ofrece el paso 3 de la recepción, y trae atado el proveedor al
+  // que se le factura.
   var pintar = function(lista){
-    eid('sgcc-asig-coop').innerHTML = '<option value="">— Elegir —</option>'
-      + lista.map(function(o){ return '<option value="' + o.v + '">' + esc(o.t) + '</option>'; }).join('');
+    eid('sgcc-asig-coop').innerHTML = lista.length
+      ? ('<option value="">— Elegir —</option>' + lista.map(function(c){
+          return '<option value="' + c.id + '">' + esc(c.nombre)
+            + (c.proveedor_nombre ? (' — se factura a ' + esc(c.proveedor_nombre)) : '') + '</option>';
+        }).join(''))
+      : '<option value="">(no hay cooperativas dadas de alta — creá una arriba)</option>';
   };
-  if (opts.length) pintar(opts.map(function(o){ return { v: o.value, t: o.textContent }; }));
+  if (SG_COOPS && SG_COOPS.length) pintar(SG_COOPS);
   else {
-    // El filtro todavía no cargó: se pide de nuevo en vez de abrir un
-    // desplegable vacío que no deja asignar nada.
     pintar([]);
-    api('/api/sg/proveedores-servicio').then(function(r){
-      pintar(((r && r.ok) ? r.data : []).map(function(p){ return { v: p.id, t: p.razon_social }; }));
-    });
+    api('/api/sg/cooperativas').then(function(r){ SG_COOPS = (r && r.ok) ? r.data : []; pintar(SG_COOPS); });
   }
   document.querySelector('input[name="sgcc-asig-unidad"][value="bulto"]').checked = true;
   eid('sgcc-asig-modal').classList.add('on');
@@ -7056,7 +7243,7 @@ function sgCcoopAsigGuardar(){
   if (!coop) { toast('Elegí la cooperativa', 'er'); return; }
   var unidad = (document.querySelector('input[name="sgcc-asig-unidad"]:checked') || {}).value || 'bulto';
   api('/api/sg/control-coop/' + SGCC.asig + '/cooperativa', 'POST',
-      { cooperativa_id: Number(coop), unidad: unidad }).then(function(r){
+      { cooperativa_catalogo_id: Number(coop), unidad: unidad }).then(function(r){
     if (r && r.ok) { toast('Descarga asignada', 'ok'); closeMB('sgcc-asig-modal'); sgCcoopLoad(); }
     else toast((r && r.error) || 'No se pudo asignar', 'er');
   });
