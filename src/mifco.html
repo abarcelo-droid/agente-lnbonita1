@@ -271,11 +271,19 @@ body{padding-bottom:env(safe-area-inset-bottom)}
   <div class="alert info">
     📸 Sacale foto al remito YA SELLADO. El sistema busca por el N° si ya estaba despachado, o lo crea nuevo.
   </div>
-  <input id="inp-foto-sellado" type="file" accept="image/*" style="display:none" onchange="onFotoSellado(event)">
-  <button class="cam-btn" onclick="document.getElementById('inp-foto-sellado').click()">
+  <!-- Dos accesos que alimentan el MISMO handler (onFotoSellado): cámara con capture="environment"
+       (abre la trasera directo, arregla que en Android "Tomar foto" fuera a galería) y galería sin capture. -->
+  <input id="inp-foto-sellado-cam" type="file" accept="image/*" capture="environment" style="display:none" onchange="onFotoSellado(event)">
+  <input id="inp-foto-sellado-gal" type="file" accept="image/*" style="display:none" onchange="onFotoSellado(event)">
+  <button class="cam-btn" onclick="document.getElementById('inp-foto-sellado-cam').click()">
     <div class="ico">📷</div>
     <div>Tomar foto</div>
-    <div class="sub">o seleccionar de la galería</div>
+    <div class="sub">Abre la cámara</div>
+  </button>
+  <button class="cam-btn" style="margin-top:10px" onclick="document.getElementById('inp-foto-sellado-gal').click()">
+    <div class="ico">🖼️</div>
+    <div>Elegir de galería</div>
+    <div class="sub">Fotos o archivos del teléfono</div>
   </button>
 </div>
 
@@ -688,7 +696,8 @@ function resetState() {
   S.matchRemitoId = null;
   S.matchData = null;
   S.ocrData = null;
-  $('inp-foto-sellado').value = '';
+  const _sc = $('inp-foto-sellado-cam');  if (_sc) _sc.value = '';
+  const _sg = $('inp-foto-sellado-gal');  if (_sg) _sg.value = '';
   const _dc = $('inp-foto-despacho-cam'); if (_dc) _dc.value = '';
   const _dg = $('inp-foto-despacho-gal'); if (_dg) _dg.value = '';
 }
@@ -746,22 +755,37 @@ function goCargarSellado() {
 }
 
 async function onFotoSellado(ev) {
-  let file = ev.target.files && ev.target.files[0];
+  const input = ev.target;
+  let file = input.files && input.files[0];
   if (!file) return;
   $('loading-sub').textContent = 'Optimizando foto…';
-  showView('view-loading', { title:'Procesando…' });
-  file = await _comprimirImagen(file);
-  S.fotoFile = file;
-  $('loading-sub').textContent = 'Buscando el N° de remito en la base…';
-
+  // push:false → la pantalla "Procesando" NO queda en el historial: al volver atrás no se puede
+  // caer en el spinner sin proceso corriendo ("trabado en procesando").
+  showView('view-loading', { title:'Procesando…', push:false });
   try {
+    // La compresión va DENTRO del try: si fallara, cae al catch y no deja la app colgada en loading.
+    file = await _comprimirImagen(file);
+    S.fotoFile = file;
+    $('loading-sub').textContent = 'Buscando el N° de remito en la base…';
     const fd = new FormData();
     fd.append('foto', file);
     const r = await _fetchConFeedback('/api/ifco/ocr/match-sellado', { method:'POST', credentials:'include', body:fd }, { mensaje:'Buscando el N° de remito en la base…' });
     const data = await r.json();
+    // OJO: este endpoint NO responde como el de Despachos. Devuelve {ok, accion, remito…},
+    // nunca `datos`, y aplicarMatchSellado ya ramifica por `accion` — incluida la recuperación
+    // pidiendo el N° a mano cuando el OCR no lo leyó. Por eso acá solo cortamos si el HTTP falló
+    // Y además no vino una accion que sepamos manejar (500/503 con {error}).
+    if (!r.ok && !(data && data.accion)) {
+      showError('No se pudo procesar la foto', (data && data.error) || 'Probá con una foto mejor.', '📷');
+      return;
+    }
     aplicarMatchSellado(data, file);
   } catch(e) {
     showError('Error de conexión', e.message, '⚠️');
+  } finally {
+    // SIEMPRE limpiar el input usado (éxito, error o timeout): así el próximo remito —aunque sea
+    // la misma foto— vuelve a disparar el change y no queda un archivo del remito anterior pegado.
+    input.value = '';
   }
 }
 
