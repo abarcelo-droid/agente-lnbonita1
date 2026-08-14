@@ -1541,7 +1541,17 @@ router.get('/oc', requireAuth, (req, res) => {
              (SELECT COALESCE(SUM(l.kg_reales), 0)
                 FROM sg_lotes l
                 JOIN sg_oc_items i ON i.id = l.oc_item_id
-               WHERE i.oc_id = o.id AND l.activo = 1) AS kg_recibidos_total
+               WHERE i.oc_id = o.id AND l.activo = 1) AS kg_recibidos_total,
+             -- En cuántas veces entró la mercadería, y con qué remitos. Sin
+             -- esto había que listar las recepciones en una tabla aparte, que
+             -- para la orden que entró de una sola vez repetía la misma fila.
+             (SELECT COUNT(*) FROM sg_recepciones r
+               WHERE r.oc_id = o.id AND r.activo = 1) AS entradas,
+             (SELECT GROUP_CONCAT(r.numero_remito_proveedor, ' · ')
+                FROM sg_recepciones r
+               WHERE r.oc_id = o.id AND r.activo = 1
+                 AND r.numero_remito_proveedor IS NOT NULL
+                 AND r.numero_remito_proveedor <> '') AS remitos_proveedor
       FROM sg_oc o LEFT JOIN sg_proveedores p ON p.id=o.proveedor_id
       WHERE ${where.join(' AND ')} ORDER BY o.id DESC`).all(...params);
     res.json({ ok: true, data: rows });
