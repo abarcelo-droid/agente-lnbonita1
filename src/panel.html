@@ -2231,22 +2231,29 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
          los dos. -->
     <div class="sgc-sub" id="sgc-sub-ocrecibidas">
       <div style="font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--mut);margin-bottom:8px">
-        ✅ Órdenes recibidas por completo
-      </div>
-      <div class="ab-table-wrap" style="margin-bottom:22px"><table class="pa-tbl">
-        <thead><tr><th>Partida</th><th>Fecha</th><th>Proveedor</th>
-          <th style="text-align:right">Kg pedidos</th><th style="text-align:right">Kg recibidos</th>
-          <th style="text-align:center">Estado</th><th></th></tr></thead>
-        <tbody id="sg-tb-ocrecibidas"><tr><td colspan="7" class="emp">Cargando…</td></tr></tbody>
-      </table></div>
-
-      <div style="font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--mut);margin-bottom:8px">
-        📥 Entradas de mercadería <span style="font-weight:400;text-transform:none;letter-spacing:0">· incluye las entregas parciales</span>
+        ✅ Órdenes recibidas
       </div>
       <div class="ab-table-wrap"><table class="pa-tbl">
-        <thead><tr><th>Partida</th><th>Fecha</th><th>Proveedor</th><th>Remito prov.</th><th style="text-align:right">Lotes</th><th></th></tr></thead>
-        <tbody id="sg-tb-recepciones"><tr><td colspan="6" class="emp">Cargando…</td></tr></tbody>
+        <thead><tr><th>Partida</th><th>Fecha</th><th>Proveedor</th>
+          <th style="text-align:right">Kg pedidos</th><th style="text-align:right">Kg recibidos</th>
+          <th>Remito prov.</th><th style="text-align:center">Entradas</th>
+          <th style="text-align:center">Estado</th><th></th></tr></thead>
+        <tbody id="sg-tb-ocrecibidas"><tr><td colspan="9" class="emp">Cargando…</td></tr></tbody>
       </table></div>
+
+      <!-- Y sólo lo que NO está representado arriba: la mercadería que entró sin
+           orden. Esa no tiene partida todavía y hay que vincularla. El bloque se
+           esconde cuando no hay ninguna: una tabla vacía permanente enseña a no
+           mirar la pantalla. -->
+      <div id="sg-sinoc-wrap" style="display:none;margin-top:22px">
+        <div style="font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--warn);margin-bottom:8px">
+          ⚠️ Entró sin orden de compra <span style="font-weight:400;text-transform:none;letter-spacing:0">· falta vincularla a una orden</span>
+        </div>
+        <div class="ab-table-wrap"><table class="pa-tbl">
+          <thead><tr><th>Recepción</th><th>Fecha</th><th>Remito prov.</th><th style="text-align:right">Lotes</th><th></th></tr></thead>
+          <tbody id="sg-tb-recepciones"></tbody>
+        </table></div>
+      </div>
     </div>
 
     <!-- Gastos directos -->
@@ -4813,36 +4820,44 @@ function sgLoadOcRecibidas(){
     var tb = eid('sg-tb-ocrecibidas');
     if (!tb) return;
     tb.innerHTML = ocs.length ? ocs.map(function(o){
+      // En cuántas veces entró. Una sola es lo normal y no se destaca; más de
+      // una es una entrega partida y sí importa verlo.
+      var n = Number(o.entradas) || 0;
+      var entradas = n > 1
+        ? '<b title="Entró en ' + n + ' veces">' + n + '</b>'
+        : (n === 1 ? '1' : '—');
       return '<tr>'
         + '<td><code>' + esc(sgOcId(o)) + '</code></td>'
         + '<td>' + esc(o.fecha_oc || '—') + '</td>'
         + '<td>' + esc(o.proveedor_nombre || '—') + '</td>'
         + '<td style="text-align:right">' + nr(o.total_estimado_kg) + '</td>'
         + '<td style="text-align:right">' + nr(o.kg_recibidos_total) + '</td>'
+        + '<td>' + esc(o.remitos_proveedor || '—') + '</td>'
+        + '<td style="text-align:center">' + entradas + '</td>'
         + '<td style="text-align:center">' + sgOcBadge(o.estado) + '</td>'
         + '<td style="text-align:right"><button class="btn bo bs" onclick="sgOcVer(' + o.id + ')">Ver</button></td>'
         + '</tr>';
-    }).join('') : '<tr><td colspan="7" class="emp">Todavía no se recibió ninguna orden completa.</td></tr>';
+    }).join('') : '<tr><td colspan="9" class="emp">Todavía no se recibió ninguna orden.</td></tr>';
   });
 }
+// LO QUE ENTRÓ SIN ORDEN. Es lo único que la tabla de órdenes no puede mostrar:
+// no tiene partida todavía. Listar acá TODAS las recepciones repetía, fila por
+// fila, la misma partida que ya estaba arriba.
 function sgLoadRecepciones(){
   api('/api/sg/recepciones').then(function(r){
-    var rows=(r&&r.ok)?r.data:[];
-    eid('sg-tb-recepciones').innerHTML = rows.length ? rows.map(function(x){
+    var rows=((r&&r.ok)?r.data:[]).filter(function(x){ return x.oc_pendiente; });
+    var wrap = eid('sg-sinoc-wrap');
+    if (wrap) wrap.style.display = rows.length ? '' : 'none';
+    if (!rows.length) { eid('sg-tb-recepciones').innerHTML = ''; return; }
+    eid('sg-tb-recepciones').innerHTML = rows.map(function(x){
       // BLOQUE B — si entró observada, link directo al informe de calidad en PDF.
       var pdf = x.observada ? ' <a class="btn bo bs" href="/api/sg/recepciones/'+x.id+'/calidad.pdf" target="_blank" title="Informe de calidad PDF">📄</a>' : '';
       var obs = x.observada ? ' <span title="Mercadería observada" style="color:var(--err)">⚠</span>' : '';
-      // RECEPCIÓN SIN OC: todavía no tiene partida, así que se la marca y se
-      // ofrece vincularla. Es el único caso en que la columna no lleva un código.
-      var vinc = x.oc_pendiente ? ' <button class="btn bb bs" onclick="sgRecVincularOpen('+x.id+',\''+esc(x.numero_recepcion||'')+'\')" title="Vincular a una OC">🔗</button>' : '';
-      // UN SOLO NÚMERO EN TODO EL RECORRIDO: la partida. Antes esta fila tenía
-      // DOS columnas para lo mismo —el número de recepción y el de la orden— que
-      // es justo lo que había que sacar.
-      var id = x.oc_pendiente
-        ? '<span class="bdg bpe" title="Recibida sin OC — falta regularizar">sin partida</span>'
-        : '<code>'+esc(x.partida||x.numero_recepcion||'—')+'</code>';
-      return '<tr><td>'+id+obs+'</td><td>'+(x.fecha_recepcion||'—')+'</td><td>'+esc(x.proveedor_nombre||'—')+'</td><td>'+esc(x.numero_remito_proveedor||'—')+'</td><td style="text-align:right">'+x.lotes+'</td><td style="text-align:right;white-space:nowrap"><button class="btn bo bs" onclick="sgRecVer('+x.id+')">👁</button>'+pdf+vinc+'</td></tr>';
-    }).join('') : '<tr><td colspan="6" class="emp">Todavía no entró mercadería.</td></tr>';
+      // Sin orden todavía no hay partida: se la identifica con su número interno
+      // hasta que alguien la vincule, que es lo que hace el botón 🔗.
+      var vinc = ' <button class="btn bb bs" onclick="sgRecVincularOpen('+x.id+',\''+esc(x.numero_recepcion||'')+'\')" title="Vincular a una orden de compra">🔗 Vincular</button>';
+      return '<tr><td><code>'+esc(x.numero_recepcion||'—')+'</code>'+obs+'</td><td>'+(x.fecha_recepcion||'—')+'</td><td>'+esc(x.numero_remito_proveedor||'—')+'</td><td style="text-align:right">'+x.lotes+'</td><td style="text-align:right;white-space:nowrap"><button class="btn bo bs" onclick="sgRecVer('+x.id+')">👁</button>'+pdf+vinc+'</td></tr>';
+    }).join('');
   });
 }
 function sgRecVer(id){
@@ -4868,7 +4883,9 @@ function sgRecVincularGuardar(){
   var ocId=eid('sg-recvinc-oc').value;
   if(!ocId){ toast('Elegí una OC','er'); return; }
   api('/api/sg/recepciones/'+SG._vincRec+'/vincular-oc','POST',{oc_id:Number(ocId)}).then(function(r){
-    if(r&&r.ok){ toast('Vinculada — '+r.data.conPrecio+'/'+r.data.lotes+' lote(s) con precio','ok'); closeMB('sg-recvinc-modal'); sgLoadRecepciones(); }
+    // Al vincularla deja de estar sin orden y pasa a la tabla de arriba: hay
+    // que recargar las dos, o la fila queda en los dos lados.
+    if(r&&r.ok){ toast('Vinculada — '+r.data.conPrecio+'/'+r.data.lotes+' lote(s) con precio','ok'); closeMB('sg-recvinc-modal'); sgLoadRecepciones(); sgLoadOcRecibidas(); }
     else toast((r&&r.error)||'Error','er');
   });
 }
@@ -5276,6 +5293,13 @@ function sgRecRenderArts(){
     var t0 = eid('sg-rec-arts-tot'); if (t0) t0.style.display = 'none';
     return;
   }
+  // Un número para meter en un value=. Sin comillas ni nada que escapar; lo que
+  // no sea un número se descarta antes de llegar al HTML.
+  var _n = function(v){
+    if (v === '' || v == null) return '';
+    var x = Number(v);
+    return isNaN(x) ? '' : x;
+  };
   var calOpts = function(v){
     return ['', 'primera', 'segunda', 'tercera'].map(function(c){
       return '<option value="' + c + '"' + (c === (v || '') ? ' selected' : '') + '>' + (c || '(calidad)') + '</option>';
@@ -5291,14 +5315,19 @@ function sgRecRenderArts(){
         + (esperado.length ? ' <span style="text-transform:none;letter-spacing:0;font-weight:400">— la orden dice ' + esc(esperado.join(' · ')) + '</span>' : '')
         + '</div>'
       + '<div class="sg-rec-grid">'
+        // OJO: acá NO se puede usar esc(). El esc() del panel hace
+        // (s||'').replace(...) y revienta con un número — y los kilos vienen de
+        // la orden como número. Eso mataba el render y el paso 2 quedaba con el
+        // cartel de "elegí una orden" aunque la orden estuviera elegida.
+        // Son valores numéricos de un <input type=number>: no hay nada que escapar.
         + '<div class="fl"><label>Pallets</label>'
-          + '<input type="number" min="0" value="' + esc(it.pallets == null ? '' : it.pallets) + '" placeholder="0"'
+          + '<input type="number" min="0" value="' + _n(it.pallets) + '" placeholder="0"'
           + ' oninput="sgRecArtUpd(' + i + ',\'pallets\',this.value)"></div>'
         + '<div class="fl"><label>Bultos <span style="color:var(--err)">*</span></label>'
-          + '<input type="number" min="0" value="' + esc(it.bultos == null ? '' : it.bultos) + '" placeholder="contalos"'
+          + '<input type="number" min="0" value="' + _n(it.bultos) + '" placeholder="contalos"'
           + ' oninput="sgRecArtUpd(' + i + ',\'bultos\',this.value)"></div>'
         + '<div class="fl"><label>Kg recibidos</label>'
-          + '<input type="number" min="0" step="0.01" value="' + esc(kg || '') + '" placeholder="0"'
+          + '<input type="number" min="0" step="0.01" value="' + _n(kg) + '" placeholder="0"'
           + ' oninput="sgRecArtUpd(' + i + ',\'kg\',this.value)"></div>'
         + '<div class="fl"><label>Calidad</label>'
           + '<select onchange="sgRecArtUpd(' + i + ',\'calidad\',this.value)">' + calOpts((it.lotes[0] || {}).calidad) + '</select></div>'
