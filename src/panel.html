@@ -3031,8 +3031,9 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
            como llega el camión. -->
       <div class="sg-rec-paso" data-paso="2">
         <div class="sg-rec-tit">📦 Artículos recibidos</div>
-        <div class="sg-rec-sub">Lo que entró de cada producto de la orden. Los bultos los cuenta y los
-          escribe el que recibe: no se proponen desde la orden, porque el punto es que alguien los mire.</div>
+        <div class="sg-rec-sub">Lo que se cuenta mirando el camión: pallets y bultos de cada producto.
+          Los bultos los cuenta y los escribe el que recibe — no se proponen desde la orden, porque el punto
+          es que alguien los mire. Los kilos salen de la balanza (paso 4) o del peso por bulto de la orden.</div>
         <div id="sg-rec-arts"><div class="emp">Elegí una orden de compra en el paso 1.</div></div>
         <div id="sg-rec-arts-tot" class="sg-rec-cmp" style="display:none"></div>
       </div>
@@ -4957,6 +4958,16 @@ function sgRecFaltaEn(p){
   return f;
 }
 
+// Los kilos de un artículo: el peso de la balanza si se pesó, y si no lo que
+// dan los bultos por el factor de la orden. Es la misma cuenta que hace el
+// backend al crear el lote — acá sólo se muestra.
+function sgRecKgArt(it){
+  var peso = Number(it.peso) || 0;
+  if (peso > 0) return peso;
+  var kpb = Number(it.kg_por_bulto) || 0, b = Number(it.bultos) || 0;
+  return (kpb > 0 && b > 0) ? b * kpb : 0;
+}
+
 // EN QUÉ NO DA. Compara artículo por artículo lo contado contra lo que dice la
 // orden. Es la lista que decide si el operador puede contestar "coincide": si
 // acá hay algo, no puede.
@@ -4970,10 +4981,12 @@ function sgRecDifieren(){
     if (bultosOC && bultos != null && bultos !== bultosOC) {
       out.push(nom + ': ' + nr(bultos) + ' bultos contra ' + nr(bultosOC) + ' de la orden');
     }
+    // El peso sólo se compara si se pesó. Los kilos derivados de los bultos no
+    // son una medición: compararlos contra la orden daría "diferencia" en cada
+    // recepción y obligaría a justificar algo que nadie observó.
     var kgOC = Number(it.kg_estimados) || 0;
-    var kg = (it.lotes || []).reduce(function(a, l){ return a + (Number(l.kg_reales) || 0); }, 0);
-    // Un kilo de diferencia en una balanza de camión no es una diferencia.
-    if (kgOC && Math.abs(kg - kgOC) > 1) {
+    var kg = sgRecKgArt(it);
+    if (kgOC && kg > 0 && Math.abs(kg - kgOC) > 1) {
       out.push(nom + ': ' + nr(kg) + ' kg contra ' + nr(kgOC) + ' de la orden');
     }
   });
@@ -5121,7 +5134,9 @@ function sgRecOcChange(){
                // Lo que la orden dice de ESTE artículo, para poder contrastar.
                // Los bultos arrancan VACÍOS: los cuenta el que recibe.
                bultos_oc: Number(it.cantidad_estimada_presentaciones) || 0,
-               bultos: '', pallets: '',
+               // El factor con el que se sacan los kilos sin pesar.
+               kg_por_bulto: it.kg_por_bulto,
+               bultos: '', pallets: '', peso: '',
                lotes:[{kg_reales:pend||'',calidad:'',bultos:''}] };
     });
     // Cómo venía la orden, para poder volver acá si el operador se arrepiente
@@ -5300,16 +5315,10 @@ function sgRecRenderArts(){
     var x = Number(v);
     return isNaN(x) ? '' : x;
   };
-  var calOpts = function(v){
-    return ['', 'primera', 'segunda', 'tercera'].map(function(c){
-      return '<option value="' + c + '"' + (c === (v || '') ? ' selected' : '') + '>' + (c || '(calidad)') + '</option>';
-    }).join('');
-  };
   cont.innerHTML = SG.recItems.map(function(it, i){
     var esperado = [];
     if (Number(it.bultos_oc)) esperado.push(nr(it.bultos_oc) + ' bultos');
     if (Number(it.kg_estimados)) esperado.push(nr(it.kg_estimados) + ' kg');
-    var kg = (it.lotes || []).reduce(function(a, l){ return a + (Number(l.kg_reales) || 0); }, 0);
     return '<div class="sg-oc-box">'
       + '<div class="sg-oc-box-tit">' + esc(it.producto_nombre || ('Artículo ' + (i + 1)))
         + (esperado.length ? ' <span style="text-transform:none;letter-spacing:0;font-weight:400">— la orden dice ' + esc(esperado.join(' · ')) + '</span>' : '')
@@ -5326,11 +5335,6 @@ function sgRecRenderArts(){
         + '<div class="fl"><label>Bultos <span style="color:var(--err)">*</span></label>'
           + '<input type="number" min="0" value="' + _n(it.bultos) + '" placeholder="contalos"'
           + ' oninput="sgRecArtUpd(' + i + ',\'bultos\',this.value)"></div>'
-        + '<div class="fl"><label>Kg recibidos</label>'
-          + '<input type="number" min="0" step="0.01" value="' + _n(kg) + '" placeholder="0"'
-          + ' oninput="sgRecArtUpd(' + i + ',\'kg\',this.value)"></div>'
-        + '<div class="fl"><label>Calidad</label>'
-          + '<select onchange="sgRecArtUpd(' + i + ',\'calidad\',this.value)">' + calOpts((it.lotes[0] || {}).calidad) + '</select></div>'
       + '</div></div>';
   }).join('');
   sgRecArtsTotales();
@@ -5344,7 +5348,7 @@ function sgRecArtsTotales(){
   (SG.recItems || []).forEach(function(it){
     if (it.bultos === '' || it.bultos == null) faltan++; else b += Number(it.bultos) || 0;
     p += Number(it.pallets) || 0;
-    k += (it.lotes || []).reduce(function(a, l){ return a + (Number(l.kg_reales) || 0); }, 0);
+    k += sgRecKgArt(it);
   });
   var dif = sgRecDifieren();
   el.style.display = '';
@@ -5357,11 +5361,13 @@ function sgRecArtsTotales(){
 
 function sgRecArtUpd(i, campo, v){
   var it = SG.recItems[i]; if (!it) return;
-  if (campo === 'kg') { it.lotes[0] = it.lotes[0] || {}; it.lotes[0].kg_reales = v; }
-  else if (campo === 'calidad') { it.lotes[0] = it.lotes[0] || {}; it.lotes[0].calidad = v; }
-  else it[campo] = v;
-  // Los bultos del lote son los del artículo: es el mismo número.
-  if (campo === 'bultos') { it.lotes[0] = it.lotes[0] || {}; it.lotes[0].bultos = v; }
+  it[campo] = v;
+  // Los bultos del lote son los del artículo: es el mismo número. Y el peso, si
+  // se pesó, también manda sobre el lote — si no, el backend lo saca de
+  // bultos × kg por bulto.
+  it.lotes[0] = it.lotes[0] || {};
+  if (campo === 'bultos') it.lotes[0].bultos = v;
+  if (campo === 'peso') it.lotes[0].kg_reales = v;
   sgRecArtsTotales();
   sgRecValidar();
 }
@@ -5449,7 +5455,14 @@ function sgRecBuildBody(requireItems){
   var items=[];
   for(var i=0;i<SG.recItems.length;i++){
     var it=SG.recItems[i];
-    var lotes=it.lotes.filter(function(l){return Number(l.kg_reales)>0;});
+    // Un artículo entra si se contaron sus bultos O si se lo pesó. Antes el
+    // filtro era por kg, y sin el campo de kg no habría entrado ninguno.
+    var kgArt = SG.recSinOc ? Number((it.lotes[0]||{}).kg_reales)||0 : sgRecKgArt(it);
+    var tieneBultos = it.bultos !== '' && it.bultos != null && Number(it.bultos) > 0;
+    if(!tieneBultos && !(kgArt>0)) continue;
+    var lotes = it.lotes.filter(function(l){
+      return Number(l.kg_reales)>0 || Number(l.bultos)>0;
+    });
     if(!lotes.length) continue;
     if(sinOc && !it.producto_id) continue;
     var suma=lotes.reduce(function(a,l){return a+Number(l.kg_reales);},0);
@@ -5459,7 +5472,13 @@ function sgRecBuildBody(requireItems){
       // arma sumándolos, no al revés.
       bultos:(it.bultos===''||it.bultos==null)?null:Number(it.bultos),
       pallets:(it.pallets===''||it.pallets==null)?null:Number(it.pallets),
-      lotes:lotes.map(function(l){return {kg_reales:Number(l.kg_reales),calidad:l.calidad||null,
+      // kg_reales sólo si se pesó de verdad; si no va null y el backend lo saca
+      // de bultos × kg por bulto. kg_por_bulto viaja como respaldo por si el
+      // ítem de la orden no lo tuviera.
+      lotes:lotes.map(function(l){return {
+        kg_reales:(Number(l.kg_reales)>0)?Number(l.kg_reales):null,
+        calidad:l.calidad||null,
+        kg_por_bulto:(it.kg_por_bulto!=null&&it.kg_por_bulto!=='')?Number(it.kg_por_bulto):null,
         bultos:(l.bultos===''||l.bultos==null)?null:Number(l.bultos)};}) };
     if(sinOc) item.producto_id=Number(it.producto_id); else item.oc_item_id=it.oc_item_id;
     items.push(item);
@@ -5508,15 +5527,18 @@ function sgRecGuardar(){
   // los kg del paso 5 están bloqueados: si los borró, los tiene que volver a
   // poner en el paso 6, que es donde están editables. Mandarlo al 5 lo dejaría
   // mirando campos grises sin poder hacer nada.
+  // Un artículo cuenta si tiene bultos contados o peso: los kilos ya no se
+  // tipean, salen de la balanza o del factor de la orden.
   var hayKg = (SG.recItems || []).some(function(it){
-    return (!SG.recSinOc || it.producto_id) && (it.lotes || []).some(function(l){ return Number(l.kg_reales) > 0; });
+    if (SG.recSinOc) return it.producto_id && (it.lotes || []).some(function(l){ return Number(l.kg_reales) > 0; });
+    return Number(it.bultos) > 0 || sgRecKgArt(it) > 0;
   });
   if (!hayKg) {
-    sgRecVerPaso(SG.recSinOc ? 5 : 6);
+    sgRecVerPaso(SG.recSinOc ? 5 : 2);
     if (!SG.recSinOc) {
       var si = document.querySelector('input[name="sg-rec-variaciones"][value="si"]');
       if (si && !si.checked) { si.checked = true; sgRecVariaciones(); }
-      toast('No quedaron kg cargados: corregilos acá y explicá la diferencia.', 'er');
+      toast('No quedaron artículos con bultos ni peso: cargalos en el paso 2.', 'er');
     } else {
       toast('Cargá producto y kg en al menos una línea.', 'er');
     }

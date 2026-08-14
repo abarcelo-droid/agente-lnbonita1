@@ -750,6 +750,10 @@ try { db.exec("ALTER TABLE sg_oc ADD COLUMN flete_con_iva INTEGER"); } catch (_)
 // cada una — el remito, la mercadería, la balanza, o lo que justifica una
 // diferencia. Un montón de fotos sin decir qué muestran no sirve para nada
 // cuando hay que reclamarle a un proveedor tres semanas después.
+// (La columna está TAMBIÉN en el CREATE TABLE de más abajo. Este ALTER es para
+// las bases que ya existían: en una base nueva corría ANTES del CREATE, fallaba
+// en silencio, la tabla nacía sin la columna y NINGUNA recepción se podía
+// guardar hasta el segundo arranque.)
 try { db.exec("ALTER TABLE sg_recepcion_fotos ADD COLUMN categoria TEXT"); } catch (_) {}
 
 // La descarga se pregunta SÍ O NO. Antes el único indicio era si se había
@@ -1090,10 +1094,28 @@ try {
       recepcion_id    INTEGER NOT NULL REFERENCES sg_recepciones(id),
       ruta            TEXT NOT NULL,
       nombre_original TEXT,
+      -- De qué es la foto: documentacion | mercaderia | peso | variacion | calidad.
+      categoria       TEXT,
+      -- De qué ARTÍCULO de la orden. La foto de la balanza es de UN producto, no
+      -- de la recepción entera. NULL para las que son de toda la entrada (el
+      -- remito) y para lo que entra sin orden, que no tiene ítems.
+      oc_item_id      INTEGER REFERENCES sg_oc_items(id),
       creado_en       TEXT DEFAULT (datetime('now','localtime')),
       creado_por      INTEGER
     );
     CREATE INDEX IF NOT EXISTS idx_sg_recepcion_fotos_rec ON sg_recepcion_fotos(recepcion_id);`);
+  // El índice de oc_item_id va abajo, con el ALTER: en una base que YA tenía
+  // la tabla, el CREATE TABLE es no-op y crear el índice acá fallaba sobre una
+  // columna todavía inexistente — reventaba el exec entero y el ALTER nunca corría.
+  // Para las bases que ya tenían la tabla. Va DESPUÉS del CREATE a propósito:
+  // el de `categoria` está antes y por eso rompía las instalaciones nuevas.
+  const _cf = db.prepare('PRAGMA table_info(sg_recepcion_fotos)').all().map((c) => c.name);
+  if (!_cf.includes('categoria')) db.exec('ALTER TABLE sg_recepcion_fotos ADD COLUMN categoria TEXT');
+  if (!_cf.includes('oc_item_id')) {
+    db.exec('ALTER TABLE sg_recepcion_fotos ADD COLUMN oc_item_id INTEGER REFERENCES sg_oc_items(id)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_sg_recepcion_fotos_item ON sg_recepcion_fotos(oc_item_id)');
+    console.log('[DB] SG sg_recepcion_fotos.oc_item_id agregado');
+  }
 } catch (e) {
   console.error('[DB] SG sg_recepcion_fotos:', e.message);
 }
@@ -1501,6 +1523,51 @@ try {
   db.prepare('INSERT OR IGNORE INTO sg_afip_config (id, cuit, ambiente, razon_social) VALUES (1, ?, ?, ?)').run(_cuit, _amb, _rs);
   db.prepare("UPDATE sg_afip_config SET cuit=COALESCE(?,cuit), ambiente=COALESCE(?,ambiente), modificado_en=datetime('now','localtime') WHERE id=1").run(_cuit, _amb);
 } catch (e) { console.error('[DB] SG seed sg_afip_config:', e.message); }
+
+// ── EL CATÁLOGO DE COOPERATIVAS ─────────────────────────────────────────────
+// Hasta ahora "la cooperativa" era cualquier proveedor con el flag es_servicio,
+// elegido de una lista donde también están los fleteros. Ahora se dan de alta
+// acá, y SIEMPRE atadas a un proveedor: la cooperativa es la cuadrilla que
+// descarga, el proveedor es a quién se le paga. Sin esa atadura una descarga
+// cargada no se puede liquidar y termina siendo un dato que no sirve.
+try {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS sg_cooperativas (
+      id               INTEGER PRIMARY KEY AUTOINCREMENT,
+      nombre           TEXT NOT NULL,
+      -- OBLIGATORIO. A quién se le factura el trabajo de esta cuadrilla.
+      proveedor_id     INTEGER NOT NULL REFERENCES sg_proveedores(id),
+      contacto         TEXT,
+      notas            TEXT,
+      activo           INTEGER NOT NULL DEFAULT 1,
+      creado_en        TEXT DEFAULT (datetime('now','localtime')),
+      creado_por       INTEGER,
+      modificado_en    TEXT,
+      modificado_por   INTEGER,
+      eliminado_en     TEXT,
+      eliminado_por_id INTEGER
+    );
+    CREATE INDEX IF NOT EXISTS idx_sg_coop_proveedor ON sg_cooperativas(proveedor_id);
+  `);
+  // Dos cooperativas activas con el mismo nombre son la misma cooperativa
+  // cargada dos veces, y después no se sabe a cuál se le pagó.
+  db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_sg_coop_nombre ON sg_cooperativas(nombre COLLATE NOCASE) WHERE activo=1");
+} catch (e) { console.error('[DB] SG sg_cooperativas:', e.message); }
+
+// Qué cuadrilla hizo la descarga. El gasto sigue apuntando al PROVEEDOR
+// (proveedor_servicio_id) porque es a quien se le paga y de ahí cuelga toda la
+// valorización; esta columna dice quién trabajó. Las descargas ya cargadas
+// quedan sin cooperativa: no se inventa una para atrás.
+try {
+  const _cg = db.prepare('PRAGMA table_info(sg_gastos_directos)').all().map((c) => c.name);
+  if (!_cg.includes('cooperativa_id')) {
+    db.exec('ALTER TABLE sg_gastos_directos ADD COLUMN cooperativa_id INTEGER REFERENCES sg_cooperativas(id)');
+    console.log('[DB] SG sg_gastos_directos.cooperativa_id agregado');
+  }
+  // El índice existente es (proveedor_servicio_id, estado): sin éste, contar las
+  // descargas de una cooperativa recorre la tabla entera por cada fila.
+  db.exec('CREATE INDEX IF NOT EXISTS idx_sg_gd_coop ON sg_gastos_directos(cooperativa_id)');
+} catch (e) { console.error('[DB] SG cooperativa_id en gastos:', e.message); }
 
 console.log('[DB] Módulo San Gerónimo (sg_*) inicializado');
 
