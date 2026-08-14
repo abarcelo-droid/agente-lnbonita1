@@ -744,6 +744,24 @@ try { db.exec("ALTER TABLE sg_oc ADD COLUMN flete_cantidad REAL"); } catch (_) {
 try { db.exec("ALTER TABLE sg_oc ADD COLUMN flete_precio_unit REAL"); } catch (_) {}
 try { db.exec("ALTER TABLE sg_oc ADD COLUMN flete_con_iva INTEGER"); } catch (_) {}
 
+// ── CUÁNDO SE DA POR TERMINADA UNA ORDEN ──────────────────────────────────
+// El estado se recalculaba solo, comparando kilos recibidos contra pedidos, y
+// no había forma de decir "esto ya está". Una orden de 1188 kg de la que
+// entraron 38 quedaba en 'recibida_parcial' PARA SIEMPRE: seguía en la bandeja
+// de pendientes y sus 1150 kg se seguían ofreciendo como mercadería en camino
+// al armar pedidos.
+//
+// cerrada_en es EL CERROJO, no un dato de auditoría: mientras tenga fecha,
+// actualizarEstadoOC() no recalcula. Sin eso, la primera recepción que llegara
+// después —o el vincular una recepción huérfana— devolvía la orden a
+// 'recibida_parcial' y reaparecía en la bandeja sin que nadie entienda por qué.
+//
+// El motivo es obligatorio cuando se cierra con saldo: la orden queda diciendo
+// que faltaron 1150 kg y alguien tiene que poder leer por qué no van a venir.
+try { db.exec("ALTER TABLE sg_oc ADD COLUMN cerrada_en TEXT"); } catch (_) {}
+try { db.exec("ALTER TABLE sg_oc ADD COLUMN cerrada_por INTEGER"); } catch (_) {}
+try { db.exec("ALTER TABLE sg_oc ADD COLUMN cierre_motivo TEXT"); } catch (_) {}
+
 // ── LA RECEPCIÓN GUARDA MÁS QUE NÚMEROS ───────────────────────────────────
 // Las fotos existían pero se guardaban SÓLO si la recepción salía observada:
 // eran las del informe de calidad. Ahora se guardan siempre y se sabe DE QUÉ es

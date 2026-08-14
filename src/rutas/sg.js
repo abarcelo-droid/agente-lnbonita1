@@ -1352,15 +1352,31 @@ function crearLoteHijo(db, { madre, reprocesoId, productoId, kg, costoAsignado, 
 }
 
 // Actualiza estado de la OC según kg recibidos vs estimados.
+//
+// SALVO QUE YA ESTÉ CONFIRMADA. Cuando alguien da la orden por terminada, esa
+// decisión gana sobre la cuenta de kilos: si no, la próxima recepción contra esa
+// orden —o el vincular una recepción huérfana— recalcularía desde cero y la
+// devolvería a 'recibida_parcial'. La orden reaparecería en la bandeja de
+// pendientes sin que nadie haya hecho nada, que es el peor final posible para un
+// botón que dice "Terminada". Para volver a recibir hay que reabrirla, y ahí sí
+// se recalcula.
 function actualizarEstadoOC(db, ocId) {
+  const cerrojo = db.prepare('SELECT cerrada_en FROM sg_oc WHERE id=?').get(ocId);
+  if (cerrojo && cerrojo.cerrada_en) return;
   const items = db.prepare('SELECT id, kg_estimados FROM sg_oc_items WHERE oc_id=?').all(ocId);
   if (!items.length) return;
-  let completos = 0;
+  let completos = 0, algoEntro = false;
   for (const it of items) {
     const recibido = db.prepare('SELECT COALESCE(SUM(kg_reales),0) s FROM sg_lotes WHERE oc_item_id=? AND activo=1').get(it.id).s;
+    if (recibido > 0.01) algoEntro = true;
     if (recibido >= (it.kg_estimados || 0) - 0.01) completos++;
   }
-  const estado = completos === 0 ? 'abierta' : (completos === items.length ? 'recibida_total' : 'recibida_parcial');
+  // "Parcial" es que entró ALGO y falta el resto. Antes se contaban sólo los
+  // ítems COMPLETOS, así que una orden de un solo producto que recibió 38 de
+  // 1188 kg figuraba como 'abierta' — igual que si no hubiera llegado nada. La
+  // mercadería estaba en el depósito y la orden decía que no había pasado nada.
+  const estado = completos === items.length ? 'recibida_total'
+    : (completos > 0 || algoEntro ? 'recibida_parcial' : 'abierta');
   db.prepare("UPDATE sg_oc SET estado=?, modificado_en=datetime('now','localtime') WHERE id=?").run(estado, ocId);
 }
 
@@ -1579,7 +1595,12 @@ router.get('/oc', requireAuth, (req, res) => {
 router.get('/oc/:id', requireAuth, (req, res) => {
   const db = getDb();
   try {
-    const oc = db.prepare(`SELECT o.*, p.razon_social AS proveedor_nombre FROM sg_oc o
+    const oc = db.prepare(`SELECT o.*, p.razon_social AS proveedor_nombre,
+      -- En cuántas veces entró mercadería por esta orden. La bandeja de
+      -- pendientes lo necesita para saber si la orden ya recibió algo: una que
+      -- no recibió nada se anula, no se da por terminada.
+      (SELECT COUNT(*) FROM sg_recepciones r WHERE r.oc_id=o.id AND r.activo=1) AS entradas
+      FROM sg_oc o
       LEFT JOIN sg_proveedores p ON p.id=o.proveedor_id WHERE o.id=?`).get(req.params.id);
     if (!oc) return res.status(404).json({ ok: false, error: 'No encontrado' });
     oc.items = db.prepare(`SELECT i.*, pr.nombre AS producto_nombre, ps.nombre AS presentacion_nombre,
@@ -1671,6 +1692,104 @@ router.post('/oc/:id/anular', requireAdmin, (req, res) => {
   } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
 });
 
+// ── DAR POR TERMINADA UNA ORDEN ──────────────────────────────────────────────
+// El estado se recalculaba solo, por kilos, y no había forma de decir "esto ya
+// está". Una orden de 1188 kg de la que entraron 38 quedaba en 'recibida_parcial'
+// para siempre: seguía en la bandeja de pendientes y sus 1150 kg se seguían
+// ofreciendo como mercadería en camino cada vez que alguien armaba un pedido.
+//
+// El estado que se escribe es 'cerrada', que ya existía en el CHECK de la tabla,
+// ya tenía badge y ya estaba en el filtro de OC recibidas, pero no lo escribía
+// nadie. Se muestra como "Confirmada". Marcarla 'recibida_total' hubiera sido
+// mentir en tres pantallas: 'Recibida total' sobre 38 de 1188 kg.
+router.post('/oc/:id/cerrar', requireAdmin, (req, res) => {
+  const db = getDb();
+  try {
+    const oc = db.prepare('SELECT id, estado, cerrada_en FROM sg_oc WHERE id=? AND activo=1').get(req.params.id);
+    if (!oc) return res.status(404).json({ ok: false, error: 'No encontrada' });
+    if (oc.estado === 'anulada') return res.status(400).json({ ok: false, error: 'La orden está anulada' });
+    if (oc.cerrada_en) return res.status(400).json({ ok: false, error: 'La orden ya está confirmada' });
+
+    // Sin una sola recepción no hay nada que confirmar: una orden que no recibió
+    // NADA se anula, no se da por terminada. Cerrarla dejaría su deuda estimada
+    // en la cuenta del proveedor como si la mercadería hubiera entrado.
+    const entradas = db.prepare('SELECT COUNT(*) c FROM sg_recepciones WHERE oc_id=? AND activo=1').get(oc.id).c;
+    if (!entradas) {
+      return res.status(400).json({ ok: false,
+        error: 'Esta orden todavía no recibió nada. Si no va a entrar, anulala en vez de confirmarla.' });
+    }
+
+    // ¿Quedó saldo? Se mide por ítem, igual que el estado.
+    const items = db.prepare(`SELECT i.id, i.kg_estimados,
+      (SELECT COALESCE(SUM(kg_reales),0) FROM sg_lotes WHERE oc_item_id=i.id AND activo=1) AS recibido
+      FROM sg_oc_items i WHERE i.oc_id=?`).all(oc.id);
+    const falta = items.reduce((a, it) => a + Math.max(0, (it.kg_estimados || 0) - it.recibido), 0);
+    const motivo = val(req.body && req.body.motivo);
+    // Con saldo, el motivo es obligatorio: la orden va a quedar diciendo que
+    // faltaron kilos y alguien tiene que poder leer por qué no van a venir.
+    if (falta > 0.01 && !motivo) {
+      return res.status(400).json({ ok: false,
+        error: 'Faltan ' + Math.round(falta) + ' kg de esta orden: escribí por qué se da por terminada.' });
+    }
+
+    // Los lotes de pizarra sin precio cerrado se AVISAN, no se bloquean. Una
+    // compra de liquidación se cierra cuando se vende la mercadería, y eso puede
+    // ser semanas después de recibirla: exigir el precio para dar la orden por
+    // terminada mezclaría terminar de RECIBIR con terminar de LIQUIDAR. Y no hay
+    // nada que se pierda: POST /lotes/:id/cerrar-precio no mira el estado de la
+    // orden, así que el precio se sigue pudiendo cerrar después.
+    const sinPrecio = db.prepare(`SELECT l.codigo_lote FROM sg_lotes l
+      JOIN sg_oc_items i ON i.id=l.oc_item_id
+      WHERE i.oc_id=? AND l.activo=1 AND l.precio_unitario_kg IS NULL`).all(oc.id).map(x => x.codigo_lote);
+
+    // Las reservas en tránsito contra esta orden se cancelan, igual que al anular:
+    // la mercadería que se decidió que no llega no puede seguir comprometida con
+    // un cliente. Es la doctrina que el módulo ya tenía escrita (D2).
+    const itemIds = items.map(x => x.id);
+    let pedidosAfectados = [];
+    db.transaction(() => {
+      db.prepare(`UPDATE sg_oc SET estado='cerrada', cerrada_en=datetime('now','localtime'),
+        cerrada_por=?, cierre_motivo=?, modificado_en=datetime('now','localtime'), modificado_por=?
+        WHERE id=?`).run(uid(req), motivo, uid(req), oc.id);
+      if (itemIds.length) {
+        const ph = itemIds.map(() => '?').join(',');
+        pedidosAfectados = db.prepare(`SELECT DISTINCT pe.numero FROM sg_reservas rs
+          JOIN sg_pedido_items pi ON pi.id=rs.pedido_item_id JOIN sg_pedidos pe ON pe.id=pi.pedido_id
+          WHERE rs.oc_item_id IN (${ph}) AND rs.tipo='oc_item' AND rs.estado='activa'`).all(...itemIds).map(x => x.numero);
+        db.prepare(`UPDATE sg_reservas SET estado='cancelada'
+          WHERE oc_item_id IN (${ph}) AND tipo='oc_item' AND estado='activa'`).run(...itemIds);
+      }
+    })();
+    if (pedidosAfectados.length) {
+      console.warn(`[SG] OC ${oc.id} confirmada — reservas en tránsito canceladas. Pedidos afectados: ${pedidosAfectados.join(', ')}`);
+    }
+    res.json({ ok: true, data: { id: Number(oc.id), kg_faltantes: +falta.toFixed(2),
+      pedidos_afectados: pedidosAfectados, lotes_sin_precio: sinPrecio } });
+  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+
+// Reabrir: la mercadería que se daba por perdida apareció. Se saca el cerrojo y
+// el estado vuelve a salir de la cuenta de kilos.
+//
+// LAS RESERVAS CANCELADAS NO VUELVEN. Cancelar es definitivo —el comercial ya
+// rearmó el pedido con otra mercadería— y resucitarlas comprometería kilos que
+// hoy pueden estar prometidos a otro cliente. Hay que volver a reservar a mano.
+router.post('/oc/:id/reabrir', requireAdmin, (req, res) => {
+  const db = getDb();
+  try {
+    const oc = db.prepare('SELECT id, cerrada_en FROM sg_oc WHERE id=? AND activo=1').get(req.params.id);
+    if (!oc) return res.status(404).json({ ok: false, error: 'No encontrada' });
+    if (!oc.cerrada_en) return res.status(400).json({ ok: false, error: 'La orden no está confirmada' });
+    db.transaction(() => {
+      db.prepare(`UPDATE sg_oc SET cerrada_en=NULL, cerrada_por=NULL, cierre_motivo=NULL,
+        modificado_en=datetime('now','localtime'), modificado_por=? WHERE id=?`).run(uid(req), oc.id);
+      actualizarEstadoOC(db, oc.id);       // ya sin cerrojo: recalcula por kilos
+    })();
+    const est = db.prepare('SELECT estado FROM sg_oc WHERE id=?').get(oc.id).estado;
+    res.json({ ok: true, data: { id: Number(oc.id), estado: est } });
+  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+
 // ── RECEPCIONES ──────────────────────────────────────────────────────────────
 
 // Recibir mercadería: crea recepción + lotes (con división por calidad), recalcula costos y vencimientos.
@@ -1689,6 +1808,14 @@ router.post('/recepciones', sgUpload.array('fotos', 40), requireAdmin, (req, res
       oc = db.prepare('SELECT * FROM sg_oc WHERE id=? AND activo=1').get(b.oc_id);
       if (!oc) return res.status(400).json({ ok: false, error: 'OC inexistente' });
       if (oc.estado === 'anulada') return res.status(400).json({ ok: false, error: 'OC anulada' });
+      // Confirmada = alguien dijo que esta orden terminó. Si igual apareció
+      // mercadería, primero se reabre: recibir con el cerrojo puesto grabaría
+      // los lotes sin que el estado se entere, y la orden quedaría diciendo que
+      // recibió menos de lo que tiene adentro.
+      if (oc.cerrada_en) {
+        return res.status(400).json({ ok: false,
+          error: 'La orden está confirmada. Reabrila desde OC recibidas para poder recibir.' });
+      }
     }
     const items = Array.isArray(b.items) ? b.items : [];
     if (!items.length) return res.status(400).json({ ok: false, error: 'Sin items para recibir' });
@@ -1860,6 +1987,12 @@ router.post('/recepciones/:id/vincular-oc', requireAdmin, (req, res) => {
     const oc = ocId ? db.prepare('SELECT * FROM sg_oc WHERE id=? AND activo=1').get(ocId) : null;
     if (!oc) return res.status(400).json({ ok: false, error: 'OC inexistente' });
     if (oc.estado === 'anulada') return res.status(400).json({ ok: false, error: 'OC anulada' });
+    // Mismo motivo que al recibir: con el cerrojo puesto los lotes entrarían sin
+    // que el estado de la orden se entere.
+    if (oc.cerrada_en) {
+      return res.status(400).json({ ok: false,
+        error: 'La orden está confirmada. Reabrila desde OC recibidas para poder vincularle esta recepción.' });
+    }
 
     const out = db.transaction(() => {
       db.prepare("UPDATE sg_recepciones SET oc_id=?, oc_pendiente=0, modificado_en=datetime('now','localtime'), modificado_por=? WHERE id=?")
@@ -2767,6 +2900,16 @@ router.post('/pedidos', requireAdmin, (req, res) => {
             }
           } else if (rv.tipo === 'oc_item' && rv.oc_item_id) {
             const ocItemId = Number(rv.oc_item_id);
+            // NO SE RESERVA CONTRA UNA ORDEN TERMINADA. Los caminos de lectura
+            // (/oferta y /disponibilidad) ya filtran por estado, pero este es el
+            // único de ESCRITURA y no miraba nada: con la pantalla abierta de
+            // antes, o llamando derecho a la API, se podían comprometer con un
+            // cliente los kilos que se acaban de dar por perdidos.
+            const ocRv = db.prepare(`SELECT o.estado, o.cerrada_en FROM sg_oc_items i
+              JOIN sg_oc o ON o.id=i.oc_id WHERE i.id=?`).get(ocItemId);
+            if (ocRv && (ocRv.cerrada_en || ['cerrada', 'anulada', 'recibida_total'].includes(ocRv.estado))) {
+              throw new Error('Esa orden de compra ya no tiene mercadería en camino: no se puede reservar contra ella');
+            }
             const oi = db.prepare(`SELECT oi.cantidad_estimada_presentaciones, oi.presentacion_id, ps.factor_conversion AS kg_por_bulto
               FROM sg_oc_items oi LEFT JOIN sg_presentaciones ps ON ps.id=oi.presentacion_id WHERE oi.id=?`).get(ocItemId);
             const kpb = (oi && oi.presentacion_id != null && oi.kg_por_bulto != null && Number(oi.kg_por_bulto) > 0) ? Number(oi.kg_por_bulto) : null;
