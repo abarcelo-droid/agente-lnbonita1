@@ -1755,6 +1755,21 @@ router.post('/recepciones', sgUpload.array('fotos', 40), requireAdmin, (req, res
           (recepcion_id, ruta, nombre_original, creado_por, categoria, oc_item_id) VALUES (?,?,?,?,?,?)`)
           .run(recId, '/data/sg/' + f.filename, f.originalname || null, uid(req), cat, it);
       });
+      // EL INFORME DE CALIDAD, PRODUCTO POR PRODUCTO. Se ata al ítem de la
+      // ORDEN porque los lotes todavía no existen y un ítem puede dar varios.
+      // Sólo se guarda la línea del producto que vino observado: guardar una
+      // fila vacía por cada producto sano llenaría la tabla de nada.
+      for (const c of (Array.isArray(b.calidad_items) ? b.calidad_items : [])) {
+        if (!c || !c.observada) continue;
+        const itemOk = items.some((it) => Number(it.oc_item_id) === Number(c.oc_item_id));
+        db.prepare(`INSERT INTO sg_recepcion_calidad
+          (recepcion_id, oc_item_id, producto_id, observada, estado_general, defectos, pct_afectado, observaciones, creado_por)
+          VALUES (?,?,?,1,?,?,?,?,?)`).run(
+            recId, itemOk ? Number(c.oc_item_id) : null,
+            c.producto_id ? Number(c.producto_id) : null,
+            val(c.estado_general), val(c.defectos), numN(c.pct_afectado), val(c.observaciones), uid(req));
+      }
+
       // FASE 2 — si se asignó cooperativa, queda una DESCARGA DE INGRESO pendiente. La unidad
       // (bulto/pallet) define la cantidad: bultos_recibidos o pallets_recibidos de la recepción.
       // La cooperativa se elige del catálogo (Control Cooperativa) y de ahí sale
@@ -1819,6 +1834,11 @@ router.get('/recepciones/:id', requireAuth, (req, res) => {
     const rec = db.prepare(`SELECT r.*, o.numero AS oc_numero, o.trazabilidad AS partida
       FROM sg_recepciones r LEFT JOIN sg_oc o ON o.id=r.oc_id WHERE r.id=?`).get(req.params.id);
     if (!rec) return res.status(404).json({ ok: false, error: 'No encontrado' });
+    // El informe de calidad POR PRODUCTO, para la pantalla y para el PDF.
+    rec.calidad = db.prepare(`SELECT c.*, p.nombre AS producto_nombre
+      FROM sg_recepcion_calidad c
+      LEFT JOIN sg_productos p ON p.id = c.producto_id
+      WHERE c.recepcion_id = ? ORDER BY c.id`).all(req.params.id);
     rec.lotes = db.prepare(`SELECT l.*, pr.nombre AS producto_nombre FROM sg_lotes l
       LEFT JOIN sg_productos pr ON pr.id=l.producto_id WHERE l.recepcion_id=? AND l.activo=1`).all(req.params.id);
     // BLOQUE B — fotos del informe de calidad asociadas a la recepción.

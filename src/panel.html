@@ -3140,36 +3140,19 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       </div>
 
       <!-- ════════ 6 · CONTROL DE CALIDAD ════════ -->
+      <!-- El control de calidad es POR PRODUCTO. Con dos productos en el mismo
+           camión, un solo "estado general" no describe a ninguno — y el reclamo
+           al proveedor se hace por producto. -->
       <div class="sg-rec-paso" data-paso="6">
         <div class="sg-rec-tit">⚠️ Control de calidad</div>
-        <div class="sg-rec-sub">Sólo si la mercadería entró con problemas.</div>
-        <div style="border:1px solid #e0a72e;background:rgba(224,167,46,.12);border-radius:10px;padding:14px">
-          <label style="display:flex;align-items:center;gap:10px;cursor:pointer;font-weight:700;font-size:13px">
-            <input type="checkbox" id="sg-rec-observada" onchange="sgRecToggleObs()" style="width:auto;margin:0"> ⚠️ Mercadería observada — generar informe de calidad con fotos y PDF
-          </label>
-          <div style="font-size:12px;color:var(--mut);margin-top:8px">Si la mercadería entró sin problemas, dejá esto apagado y confirmá la recepción directamente.</div>
-        </div>
-
-        <div id="sg-rec-calidad" style="display:none;margin-top:12px;border:1px solid var(--bor);border-radius:10px;padding:14px">
-          <div class="sg-rec-grid">
-            <div class="fl" style="grid-column:span 2"><label>Estado general</label><input id="sg-rec-cal-estado" placeholder="ej. regular, con deterioro…"></div>
-            <div class="fl"><label>% afectado</label><input type="number" min="0" max="100" id="sg-rec-cal-pct" placeholder="0–100"></div>
-            <div class="fl" style="grid-column:span 3"><label>Defectos detectados</label><input id="sg-rec-cal-defectos" placeholder="ej. golpes, pudrición, sobremaduro…"></div>
-          </div>
-          <div class="fl ff" style="margin-top:10px"><label>Observaciones del informe</label><textarea id="sg-rec-cal-obs" rows="2"></textarea></div>
-          <div class="fl ff" style="margin-top:10px"><label>Fotos del informe</label>
-          <div style="display:flex;gap:8px;flex-wrap:wrap">
-            <button class="btn bb bs" type="button" onclick="eid('sg-rec-fotos-cam').click()">📷 Cámara</button>
-            <button class="btn bo bs" type="button" onclick="eid('sg-rec-fotos').click()">🖼️ Galería</button>
-          </div>
-          <input type="file" accept="image/*" multiple capture="environment" id="sg-rec-fotos-cam" style="display:none" onchange="sgRecAddFotos(this,'calidad')">
-          <input type="file" accept="image/*" multiple id="sg-rec-fotos" style="display:none" onchange="sgRecAddFotos(this,'calidad')">
-            <div id="sg-rec-prev-calidad" class="sg-rec-prev"></div>
-          </div>
-        </div>
+        <div class="sg-rec-sub">Marcá sólo los productos que entraron con problemas. Los que están bien
+          se dejan como están y la recepción se confirma directamente.</div>
+        <div id="sg-rec-calidad"><div class="emp">Elegí una orden de compra en el paso 1.</div></div>
       </div>
 
     </div>
+
+    <!-- ── PIE FIJO    </div>
 
     <!-- ── PIE FIJO ────────────────────────────────────────────────────── -->
     <div class="sg-rec-foot">
@@ -5097,6 +5080,74 @@ function sgRecRenderResumen(){
     : 'Lo que pidió la orden contra lo que entró. Confirmá uno por uno: después de guardar no hay forma de corregir las cantidades.';
 }
 
+// PASO 6 — EL CONTROL DE CALIDAD, PRODUCTO POR PRODUCTO. Cada uno se marca
+// observado o no; los campos aparecen sólo para el que lo está. Un informe
+// general para todo el camión no le sirve a nadie cuando hay que reclamar.
+function sgRecRenderCalidad(){
+  var cont = eid('sg-rec-calidad'); if (!cont) return;
+  if (!(SG.recItems || []).length) {
+    cont.innerHTML = '<div class="emp">Elegí una orden de compra en el paso 1.</div>';
+    return;
+  }
+  cont.innerHTML = SG.recItems.map(function(it, i){
+    var c = it.calidad || (it.calidad = {});
+    var obs = !!c.observada;
+    var fotos = (SG._recFotos || []).filter(function(x){
+      return x.categoria === 'calidad' && String(x.art) === String(i);
+    }).length;
+    return '<div class="sg-oc-box" style="' + (obs ? 'border-color:#e0a72e;background:rgba(224,167,46,.10)' : '') + '">'
+      + '<label style="display:flex;align-items:center;gap:10px;cursor:pointer;font-weight:700;font-size:13.5px;text-transform:none;letter-spacing:0;min-height:0">'
+        + '<input type="checkbox"' + (obs ? ' checked' : '') + ' style="width:auto;margin:0"'
+        + ' onchange="sgRecCalUpd(' + i + ',\'observada\',this.checked)"> '
+        + '⚠️ ' + esc(it.producto_nombre || ('Artículo ' + (i + 1))) + ' — entró con problemas'
+      + '</label>'
+      + (obs ? ('<div class="sg-rec-grid" style="margin-top:12px">'
+          + '<div class="fl"><label>Estado general</label>'
+            + '<input value="' + esc(c.estado_general || '') + '" placeholder="ej. regular, con deterioro…"'
+            + ' oninput="sgRecCalUpd(' + i + ',\'estado_general\',this.value)"></div>'
+          + '<div class="fl"><label>% afectado</label>'
+            + '<input type="number" min="0" max="100" value="' + _sgN(c.pct_afectado) + '" placeholder="0–100"'
+            + ' oninput="sgRecCalUpd(' + i + ',\'pct_afectado\',this.value)"></div>'
+          + '<div class="fl" style="grid-column:span 2"><label>Defectos detectados</label>'
+            + '<input value="' + esc(c.defectos || '') + '" placeholder="ej. golpes, pudrición, sobremaduro…"'
+            + ' oninput="sgRecCalUpd(' + i + ',\'defectos\',this.value)"></div>'
+        + '</div>'
+        + '<div class="fl ff" style="margin-top:10px"><label>Observaciones</label>'
+          + '<textarea rows="2" oninput="sgRecCalUpd(' + i + ',\'observaciones\',this.value)">' + esc(c.observaciones || '') + '</textarea></div>'
+        + '<div class="fl ff" style="margin-top:10px"><label>Fotos que lo respaldan</label>'
+          + '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">'
+            + '<button class="btn bb bs" type="button" onclick="eid(\'sg-rec-cal-' + i + '-cam\').click()">📷 Cámara</button>'
+            + '<button class="btn bo bs" type="button" onclick="eid(\'sg-rec-cal-' + i + '\').click()">🖼️ Galería</button>'
+            + (fotos ? ('<span style="font-size:12px;color:#166534">✓ ' + fotos + '</span>') : '')
+          + '</div>'
+          + '<input type="file" accept="image/*" multiple capture="environment" id="sg-rec-cal-' + i + '-cam" style="display:none"'
+            + ' onchange="sgRecAddFotos(this,\'calidad\',' + i + ')">'
+          + '<input type="file" accept="image/*" multiple id="sg-rec-cal-' + i + '" style="display:none"'
+            + ' onchange="sgRecAddFotos(this,\'calidad\',' + i + ')">'
+          + '<div id="sg-rec-prev-cal-' + i + '" class="sg-rec-prev"></div>'
+        + '</div>') : '')
+      + '</div>';
+  }).join('');
+  sgRecRenderFotos();
+  // El botón de vista previa del PDF sólo tiene sentido si hay algo que informar.
+  var prev = eid('sg-rec-preview-btn');
+  if (prev) prev.style.display = sgRecHayObservada() ? '' : 'none';
+}
+
+function sgRecCalUpd(i, campo, v){
+  var it = SG.recItems[i]; if (!it) return;
+  it.calidad = it.calidad || {};
+  it.calidad[campo] = v;
+  sgRecRenderCalidad();
+  sgRecValidar();
+}
+
+// ¿Algún producto entró observado? Es lo que decide si la recepción sale
+// marcada y si el informe en PDF tiene sentido.
+function sgRecHayObservada(){
+  return (SG.recItems || []).some(function(it){ return it.calidad && it.calidad.observada; });
+}
+
 function sgRecConfirmar(i){
   SG._recOk = SG._recOk || {};
   SG._recOk[i] = !SG._recOk[i];
@@ -5156,8 +5207,8 @@ function sgRecValidar(){
   if (guardar) guardar.style.display = (p === SG_REC_ULT) ? '' : 'none';
   // El pie es uno solo para los siete pasos: la vista previa del informe sólo
   // tiene sentido parado en el paso de calidad y con el informe pedido.
-  var prev = eid('sg-rec-preview-btn'), obs = eid('sg-rec-observada');
-  if (prev) prev.style.display = (p === SG_REC_ULT && obs && obs.checked) ? '' : 'none';
+  var prev = eid('sg-rec-preview-btn');
+  if (prev) prev.style.display = (p === SG_REC_ULT && sgRecHayObservada()) ? '' : 'none';
   sgRecRail();
   return faltan.length === 0;
 }
@@ -5209,6 +5260,7 @@ function sgRecPintarPaso(){
   if (act === 2) sgRecRenderArts();
   if (act === 4) sgRecRenderPesos();
   if (act === 5) sgRecRenderResumen();
+  if (act === 6) sgRecRenderCalidad();
   var body = document.querySelector('#sg-rec-modal .sg-rec-body');
   if (body) body.scrollTop = 0;
 }
@@ -5236,9 +5288,8 @@ function sgRecOpen(ocId){
       if(eleg) sel.value=eleg;   // la lista llega por AJAX: no puede borrar lo que ya eligió
       sgRecValidar(); });
     // Informe de calidad
-    eid('sg-rec-observada').checked=false; eid('sg-rec-calidad').style.display='none'; eid('sg-rec-preview-btn').style.display='none';
-    eid('sg-rec-cal-estado').value=''; eid('sg-rec-cal-pct').value=''; eid('sg-rec-cal-defectos').value=''; eid('sg-rec-cal-obs').value='';
-    eid('sg-rec-fotos').value='';
+    // El informe de calidad es por producto: se limpia junto con los artículos.
+    eid('sg-rec-preview-btn').style.display='none';
     sgRecTraza(null); sgRecRenderArts(); sgRecDescarga(); sgRecVariaciones(); sgRecRenderFotos();
     sgRecPintarPaso(); sgRecValidar();
     if(ocId){
@@ -5313,12 +5364,8 @@ function sgRecTraza(oc){
     +'<span style="color:var(--mut);font-size:12px;margin-left:10px">'+esc(oc.proveedor_nombre||'')+'</span>';
 }
 
-// Informe de calidad: muestra/oculta campos + botón de preview PDF.
-function sgRecToggleObs(){
-  var on=eid('sg-rec-observada').checked;
-  eid('sg-rec-calidad').style.display=on?'block':'none';
-  eid('sg-rec-preview-btn').style.display=on?'inline-flex':'none';
-}
+// (El toggle único del informe se fue con el informe único: ahora cada producto
+// tiene el suyo, y el botón de vista previa lo maneja sgRecRenderCalidad.)
 
 // ── LAS FOTOS DE LA RECEPCIÓN, ROTULADAS ──────────────────────────────────
 // Cada foto sabe de qué es —el remito, la mercadería, la balanza, lo que
@@ -5349,15 +5396,19 @@ async function sgRecAddFotos(input, categoria, art){
 function sgRecDelFoto(i){ SG._recFotos.splice(i, 1); sgRecRenderFotos(); }
 
 function sgRecRenderFotos(){
-  // Las de balanza tienen un contenedor por artículo; el resto, uno por categoría.
+  // Las de balanza y las de calidad tienen un contenedor por artículo; el resto,
+  // uno por categoría.
   (SG.recItems || []).forEach(function(_, i){
-    var c = eid('sg-rec-prev-peso-' + i);
-    if (!c) return;
-    c.innerHTML = (SG._recFotos || []).map(function(f, k){
-      if (f.categoria !== 'peso' || String(f.art) !== String(i)) return '';
-      return '<div class="sg-rec-thumb"><img src="' + URL.createObjectURL(f.file) + '" alt="">'
-        + '<button type="button" onclick="sgRecDelFoto(' + k + ')" title="Quitar">×</button></div>';
-    }).join('');
+    ['peso','cal'].forEach(function(pref){
+      var cat = pref === 'peso' ? 'peso' : 'calidad';
+      var c = eid('sg-rec-prev-' + pref + '-' + i);
+      if (!c) return;
+      c.innerHTML = (SG._recFotos || []).map(function(f, k){
+        if (f.categoria !== cat || String(f.art) !== String(i)) return '';
+        return '<div class="sg-rec-thumb"><img src="' + URL.createObjectURL(f.file) + '" alt="">'
+          + '<button type="button" onclick="sgRecDelFoto(' + k + ')" title="Quitar">×</button></div>';
+      }).join('');
+    });
   });
   ['documentacion', 'mercaderia', 'variacion', 'calidad'].forEach(function(cat){
     var cont = eid('sg-rec-prev-' + cat);
@@ -5585,7 +5636,7 @@ function sgRecBuildBody(requireItems){
   }
   if(requireItems!==false && !items.length){ toast(sinOc?'Cargá producto y kg en al menos una línea':'Cargá kg en al menos un item','er'); return null; }
   var num=function(id){ var v=eid(id).value; return v===''?null:Number(v); };
-  var observada=eid('sg-rec-observada').checked;
+
   return { oc_id: sinOc?null:Number(ocVal), fecha_recepcion:eid('sg-rec-fecha').value,
     numero_remito_proveedor:eid('sg-rec-remito').value, observaciones:eid('sg-rec-obs').value,
     factura_numero:eid('sg-rec-factura').value, dtv_codigo:eid('sg-rec-dtv').value,           // PASO 1 · documentación
@@ -5598,11 +5649,17 @@ function sgRecBuildBody(requireItems){
     // tranquera con el camión esperando.
     cooperativa_catalogo_id: sgRecCoopId(),                                                   // FASE 2 · descarga
     cooperativa_unidad: (document.querySelector('input[name="sg-rec-coop-unidad"]:checked')||{}).value||'bulto',
-    observada:observada,                                                                       // PASO 2 · informe de calidad
-    calidad_estado_general:observada?eid('sg-rec-cal-estado').value:null,
-    calidad_defectos:observada?eid('sg-rec-cal-defectos').value:null,
-    calidad_pct_afectado:observada?num('sg-rec-cal-pct'):null,
-    calidad_observaciones:observada?eid('sg-rec-cal-obs').value:null,
+    // La recepción queda marcada si CUALQUIER producto entró observado. Los
+    // campos generales quedan en null: el informe ahora es por producto.
+    observada: sgRecHayObservada() ? 1 : 0,
+    calidad_items: (SG.recItems || []).map(function(it){
+      var c = it.calidad || {};
+      return { oc_item_id: it.oc_item_id || null, producto_id: it.producto_id || null,
+               observada: c.observada ? 1 : 0, estado_general: c.estado_general || null,
+               defectos: c.defectos || null,
+               pct_afectado: (c.pct_afectado === '' || c.pct_afectado == null) ? null : Number(c.pct_afectado),
+               observaciones: c.observaciones || null };
+    }).filter(function(c){ return c.observada; }),
     // Lo que se agregó en el paso 1: el peso de la balanza, si hubo descarga, y
     // si lo recibido coincide con lo pedido.
     // El peso de la recepción es la suma de lo que se pesó por producto. El

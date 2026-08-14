@@ -99,11 +99,28 @@ export async function generarRecepcionCalidadPDF(rec, fotos = []) {
   }
 
   // ── Informe de calidad ─────────────────────────────────────────────────
-  seccion("Informe de calidad" + (rec.observada ? "  —  MERCADERÍA OBSERVADA" : ""));
-  row("Estado general", rec.calidad_estado_general);
-  row("Defectos detectados", rec.calidad_defectos);
-  row("% afectado", rec.calidad_pct_afectado != null ? (rec.calidad_pct_afectado + " %") : "—");
-  row("Observaciones", rec.calidad_observaciones || rec.observaciones);
+  // Una sección POR PRODUCTO: el reclamo al proveedor se hace por producto, no
+  // por camión. Las recepciones viejas tienen un solo informe general y se
+  // siguen imprimiendo como antes.
+  const porProducto = Array.isArray(rec.calidad) ? rec.calidad.filter((c) => c.observada) : [];
+  if (porProducto.length) {
+    seccion("Informe de calidad  —  MERCADERÍA OBSERVADA");
+    for (const c of porProducto) {
+      row("Producto", c.producto_nombre || "—");
+      row("Estado general", c.estado_general);
+      row("Defectos detectados", c.defectos);
+      row("% afectado", c.pct_afectado != null ? (c.pct_afectado + " %") : "—");
+      row("Observaciones", c.observaciones);
+      y += 3;
+    }
+    if (rec.observaciones) row("Observaciones de la recepción", rec.observaciones);
+  } else {
+    seccion("Informe de calidad" + (rec.observada ? "  —  MERCADERÍA OBSERVADA" : ""));
+    row("Estado general", rec.calidad_estado_general);
+    row("Defectos detectados", rec.calidad_defectos);
+    row("% afectado", rec.calidad_pct_afectado != null ? (rec.calidad_pct_afectado + " %") : "—");
+    row("Observaciones", rec.calidad_observaciones || rec.observaciones);
+  }
 
   // ── Fotos adjuntas ─────────────────────────────────────────────────────
   if (fotos.length) {
