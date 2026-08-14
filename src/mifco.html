@@ -341,7 +341,7 @@ body{padding-bottom:env(safe-area-inset-bottom)}
     </select>
   </div>
   <div id="cs-foto-prev" class="foto-prev" style="display:none;margin-bottom:12px"><img alt="Foto"></div>
-  <button class="btn bb full lg" onclick="confirmarSellado()">✓ Confirmar sellado</button>
+  <button id="btn-confirmar-sellado" class="btn bb full lg" onclick="confirmarSellado()">✓ Confirmar sellado</button>
 </div>
 
 <!-- Pantalla CREAR + SELLAR (no hay match, todo de una) -->
@@ -407,7 +407,7 @@ body{padding-bottom:env(safe-area-inset-bottom)}
     </div>
   </div>
   <div id="ns-foto-prev" class="foto-prev" style="display:none;margin-bottom:12px"><img alt="Foto"></div>
-  <button class="btn bb full lg" onclick="confirmarCrearSellado()">✓ Crear y sellar</button>
+  <button id="btn-crear-sellado" class="btn bb full lg" onclick="confirmarCrearSellado()">✓ Crear y sellar</button>
 </div>
 
 <!-- Pantalla CONFIRMAR DESPACHO (flujo despacho normal, sin sellado) -->
@@ -917,7 +917,9 @@ async function confirmarSellado() {
   if (recib < 0 || rech < 0) return alert('Cantidades inválidas');
   const desp = parseInt(S.matchData.cantidad_despachada);
   if (recib + rech > desp) return alert('Recibida + rechazada superan la cantidad despachada ('+desp+')');
-  const btn = event.target;
+  // Por id, no por event.target: `event` es el global implícito y la vista es DOM persistente,
+  // así que el nodo tiene que resolverse siempre al mismo botón.
+  const btn = $('btn-confirmar-sellado');
   btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>Guardando…';
   try {
     const fd = new FormData();
@@ -933,6 +935,9 @@ async function confirmarSellado() {
     showOk('✓ Remito sellado', S.matchData.n_remito_ifco + ' — ' + (S.matchData.empresa||''));
   } catch(e) {
     showError('No se pudo guardar', e.message, '⚠️');
+  } finally {
+    // Re-habilitar SIEMPRE (éxito, error o timeout). Sin esto, tras un guardado OK el botón queda
+    // disabled con "Guardando…", y el 2do sellado llega a esta misma vista con el botón trabado.
     btn.disabled = false; btn.innerHTML = '✓ Confirmar sellado';
   }
 }
@@ -965,7 +970,9 @@ async function confirmarCrearSellado() {
     provId = parseInt($('ns-prov').value || '0');
     if (!provId) return alert('Seleccioná el proveedor de origen');
   }
-  const btn = event.target;
+  // Por id, no por event.target: `event` es el global implícito y la vista es DOM persistente,
+  // así que el nodo tiene que resolverse siempre al mismo botón.
+  const btn = $('btn-crear-sellado');
   btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>Guardando…';
   try {
     const fd = new FormData();
@@ -989,6 +996,9 @@ async function confirmarCrearSellado() {
     showOk('✓ Remito creado y sellado', numero + ' — ' + cadena);
   } catch(e) {
     showError('No se pudo guardar', e.message, '⚠️');
+  } finally {
+    // Re-habilitar SIEMPRE (éxito, error o timeout). Sin esto, tras un guardado OK el botón queda
+    // disabled con "Guardando…", y el 2do sellado llega a esta misma vista con el botón trabado.
     btn.disabled = false; btn.innerHTML = '✓ Crear y sellar';
   }
 }
