@@ -1524,6 +1524,31 @@ try {
   db.prepare("UPDATE sg_afip_config SET cuit=COALESCE(?,cuit), ambiente=COALESCE(?,ambiente), modificado_en=datetime('now','localtime') WHERE id=1").run(_cuit, _amb);
 } catch (e) { console.error('[DB] SG seed sg_afip_config:', e.message); }
 
+// ── EL CONTROL DE CALIDAD, PRODUCTO POR PRODUCTO ────────────────────────────
+// Antes el informe era UNO para toda la recepción: un estado general, un % y un
+// texto. Con dos productos en el mismo camión eso no describe a ninguno — y el
+// reclamo al proveedor se hace por producto, no por camión.
+//
+// Se ata al ítem de la ORDEN, no al lote: el informe se llena antes de que los
+// lotes existan, y un ítem puede terminar en varios lotes.
+try {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS sg_recepcion_calidad (
+      id              INTEGER PRIMARY KEY AUTOINCREMENT,
+      recepcion_id    INTEGER NOT NULL REFERENCES sg_recepciones(id),
+      oc_item_id      INTEGER REFERENCES sg_oc_items(id),
+      producto_id     INTEGER REFERENCES sg_productos(id),
+      observada       INTEGER NOT NULL DEFAULT 0,
+      estado_general  TEXT,
+      defectos        TEXT,
+      pct_afectado    REAL,
+      observaciones   TEXT,
+      creado_en       TEXT DEFAULT (datetime('now','localtime')),
+      creado_por      INTEGER
+    );
+    CREATE INDEX IF NOT EXISTS idx_sg_rec_calidad_rec ON sg_recepcion_calidad(recepcion_id);`);
+} catch (e) { console.error('[DB] SG sg_recepcion_calidad:', e.message); }
+
 // ── EL CATÁLOGO DE COOPERATIVAS ─────────────────────────────────────────────
 // Hasta ahora "la cooperativa" era cualquier proveedor con el flag es_servicio,
 // elegido de una lista donde también están los fleteros. Ahora se dan de alta
