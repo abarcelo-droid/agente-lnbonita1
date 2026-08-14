@@ -66,10 +66,22 @@ try {
 try {
   const cols = db.prepare('PRAGMA table_info(sg_oc)').all().map(c => c.name);
   if (cols.includes('trazabilidad')) {
+    // LA FECHA DE LA QUE NO TIENE FECHA. Antes, una orden sin fecha_oc se
+    // salteaba y quedaba sin partida PARA SIEMPRE: el backfill la volvía a
+    // saltear en cada arranque, y cada recepción contra ella seguía generando
+    // lotes con el número viejo, en silencio y sin error. Una orden sin partida
+    // es una partida que no se puede rastrear, que es justo lo que el código
+    // existe para evitar.
+    //
+    // Se usa la fecha en que se cargó, que es el dato más cercano que hay. Si
+    // tampoco está, la de hoy: un código con una fecha aproximada rastrea; sin
+    // código no se rastrea nada.
     const sinCodigo = db.prepare(`
-      SELECT id, proveedor_id, fecha_oc FROM sg_oc
+      SELECT id, proveedor_id,
+             COALESCE(NULLIF(fecha_oc,''), date(creado_en), date('now','localtime')) AS fecha_oc
+        FROM sg_oc
        WHERE (trazabilidad IS NULL OR trazabilidad = '')
-       ORDER BY date(fecha_oc), id`).all();
+       ORDER BY date(COALESCE(NULLIF(fecha_oc,''), creado_en)), id`).all();
 
     // El número que sigue sale del MÁXIMO YA ASIGNADO de cada día, leyendo el
     // propio código. Antes esto contaba filas mientras el alta contaba otra cosa:
@@ -104,8 +116,8 @@ try {
       if (n) console.log(`[SG] Trazabilidad: se le calculó el código a ${n} orden(es) de compra ya cargada(s).`);
       const sinFecha = sinCodigo.length - n;
       if (sinFecha) {
-        console.warn(`[SG] ${sinFecha} orden(es) quedaron sin código porque no tienen fecha. ` +
-                     'Se las sigue identificando con su número interno.');
+        console.warn(`[SG] ${sinFecha} orden(es) siguen sin código: no tienen fecha de orden, ni de carga, ` +
+                     'ni se pudo leer la de hoy. Sus lotes van a seguir con el número viejo.');
       }
     }
 
