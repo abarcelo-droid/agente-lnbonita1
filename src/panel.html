@@ -2176,7 +2176,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     </style>
     <div style="display:inline-flex;gap:2px;background:var(--bg);border:1px solid var(--bor);border-radius:8px;padding:3px;margin-bottom:16px;flex-wrap:wrap">
       <div class="sgc-subtab on" data-sub="oc"        onclick="sgComSub('oc')">📋 Órdenes de compra</div>
-      <div class="sgc-subtab" data-sub="recepciones"  onclick="sgComSub('recepciones')">📥 Recepciones</div>
+      <div class="sgc-subtab" data-sub="recepciones"  onclick="sgComSub('recepciones')">⏳ Recepciones pendientes</div>
       <div class="sgc-subtab" data-sub="ocrecibidas" onclick="sgComSub('ocrecibidas')">✅ OC recibidas</div>
       <div class="sgc-subtab" data-sub="gdirectos"    onclick="sgComSub('gdirectos')">🧾 Gastos directos</div>
       <div class="sgc-subtab" data-sub="ccprov"       onclick="sgComSub('ccprov')">💳 CC proveedores</div>
@@ -2222,23 +2222,30 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
         <tbody id="sg-tb-pendientes"><tr><td colspan="8" class="emp">Cargando…</td></tr></tbody>
       </table></div>
 
-      <div style="font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--mut);margin-bottom:8px">
-        📥 Recepciones hechas
-      </div>
-      <div class="ab-table-wrap"><table class="pa-tbl">
-        <thead><tr><th>N° recepción</th><th>Fecha</th><th>OC</th><th>Proveedor</th><th>Remito prov.</th><th style="text-align:right">Lotes</th><th></th></tr></thead>
-        <tbody id="sg-tb-recepciones"><tr><td colspan="7" class="emp">Cargando…</td></tr></tbody>
-      </table></div>
     </div>
 
-    <!-- Órdenes ya recibidas: lo cerrado, para consultar sin ensuciar la
-         bandeja de lo que falta hacer. -->
+    <!-- Lo ya recibido, todo junto: las órdenes cerradas arriba y, debajo, cada
+         entrada de mercadería. Antes las entradas colgaban de la solapa de
+         pendientes, que es la bandeja de lo que FALTA hacer: lo hecho y lo que
+         falta en la misma pantalla es la forma más rápida de no ver ninguno de
+         los dos. -->
     <div class="sgc-sub" id="sgc-sub-ocrecibidas">
-      <div class="ab-table-wrap"><table class="pa-tbl">
+      <div style="font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--mut);margin-bottom:8px">
+        ✅ Órdenes recibidas por completo
+      </div>
+      <div class="ab-table-wrap" style="margin-bottom:22px"><table class="pa-tbl">
         <thead><tr><th>Partida</th><th>Fecha</th><th>Proveedor</th>
           <th style="text-align:right">Kg pedidos</th><th style="text-align:right">Kg recibidos</th>
           <th style="text-align:center">Estado</th><th></th></tr></thead>
         <tbody id="sg-tb-ocrecibidas"><tr><td colspan="7" class="emp">Cargando…</td></tr></tbody>
+      </table></div>
+
+      <div style="font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--mut);margin-bottom:8px">
+        📥 Entradas de mercadería <span style="font-weight:400;text-transform:none;letter-spacing:0">· incluye las entregas parciales</span>
+      </div>
+      <div class="ab-table-wrap"><table class="pa-tbl">
+        <thead><tr><th>Partida</th><th>Fecha</th><th>Proveedor</th><th>Remito prov.</th><th style="text-align:right">Lotes</th><th></th></tr></thead>
+        <tbody id="sg-tb-recepciones"><tr><td colspan="6" class="emp">Cargando…</td></tr></tbody>
       </table></div>
     </div>
 
@@ -4196,8 +4203,8 @@ function sgComSub(s){
   document.querySelectorAll('.sg-mod .sgc-subtab').forEach(function(el){ el.classList.toggle('on', el.dataset.sub===s); });
   document.querySelectorAll('.sg-mod .sgc-sub').forEach(function(el){ el.classList.toggle('on', el.id==='sgc-sub-'+s); });
   if (s==='oc') sgLoadOC();
-  else if (s==='recepciones') { sgLoadPendientesRecibir(); sgLoadRecepciones(); }
-  else if (s==='ocrecibidas') sgLoadOcRecibidas();
+  else if (s==='recepciones') sgLoadPendientesRecibir();
+  else if (s==='ocrecibidas') { sgLoadOcRecibidas(); sgLoadRecepciones(); }
   else if (s==='gdirectos') sgLoadGDirectos();
   else if (s==='ccprov') sgLoadCcProv();
 }
@@ -4825,15 +4832,17 @@ function sgLoadRecepciones(){
       // BLOQUE B — si entró observada, link directo al informe de calidad en PDF.
       var pdf = x.observada ? ' <a class="btn bo bs" href="/api/sg/recepciones/'+x.id+'/calidad.pdf" target="_blank" title="Informe de calidad PDF">📄</a>' : '';
       var obs = x.observada ? ' <span title="Mercadería observada" style="color:var(--err)">⚠</span>' : '';
-      // RECEPCIÓN SIN OC: badge "OC pendiente" en la columna OC + botón para vincular.
-      var ocCol = x.oc_pendiente ? '<span class="bdg bpe" title="Recibida sin OC — falta regularizar">OC pendiente</span>' : esc(x.oc_numero||'—');
+      // RECEPCIÓN SIN OC: todavía no tiene partida, así que se la marca y se
+      // ofrece vincularla. Es el único caso en que la columna no lleva un código.
       var vinc = x.oc_pendiente ? ' <button class="btn bb bs" onclick="sgRecVincularOpen('+x.id+',\''+esc(x.numero_recepcion||'')+'\')" title="Vincular a una OC">🔗</button>' : '';
-      // UN SOLO NÚMERO EN TODO EL RECORRIDO: el de la partida, que es el de la
-      // orden de compra. El número interno de recepción sigue existiendo en la
-      // base pero no se muestra: dos formas de nombrar la misma mercadería es
-      // exactamente lo que había que sacar.
-      return '<tr><td><code>'+esc(x.partida||x.numero_recepcion||'')+'</code>'+obs+'</td><td>'+(x.fecha_recepcion||'—')+'</td><td>'+ocCol+'</td><td>'+esc(x.proveedor_nombre||'—')+'</td><td>'+esc(x.numero_remito_proveedor||'—')+'</td><td style="text-align:right">'+x.lotes+'</td><td style="text-align:right;white-space:nowrap"><button class="btn bo bs" onclick="sgRecVer('+x.id+')">👁</button>'+pdf+vinc+'</td></tr>';
-    }).join('') : '<tr><td colspan="7" class="emp">Sin recepciones.</td></tr>';
+      // UN SOLO NÚMERO EN TODO EL RECORRIDO: la partida. Antes esta fila tenía
+      // DOS columnas para lo mismo —el número de recepción y el de la orden— que
+      // es justo lo que había que sacar.
+      var id = x.oc_pendiente
+        ? '<span class="bdg bpe" title="Recibida sin OC — falta regularizar">sin partida</span>'
+        : '<code>'+esc(x.partida||x.numero_recepcion||'—')+'</code>';
+      return '<tr><td>'+id+obs+'</td><td>'+(x.fecha_recepcion||'—')+'</td><td>'+esc(x.proveedor_nombre||'—')+'</td><td>'+esc(x.numero_remito_proveedor||'—')+'</td><td style="text-align:right">'+x.lotes+'</td><td style="text-align:right;white-space:nowrap"><button class="btn bo bs" onclick="sgRecVer('+x.id+')">👁</button>'+pdf+vinc+'</td></tr>';
+    }).join('') : '<tr><td colspan="6" class="emp">Todavía no entró mercadería.</td></tr>';
   });
 }
 function sgRecVer(id){
@@ -5497,7 +5506,9 @@ function sgRecGuardar(){
   fetch('/api/sg/recepciones',{method:'POST',credentials:'include',body:fd})
     .then(function(resp){return resp.json();})
     .then(function(r){
-      if(r&&r.ok){ toast('Recepción registrada ('+r.data.lotes+' lotes)','ok'); closeMB('sg-rec-modal'); sgLoadRecepciones(); sgLoadOC(); }
+      // Al terminar se vuelve a la bandeja de pendientes, que es donde estaba:
+      // recargar la tabla de recibidas dejaba la pantalla igual que antes.
+      if(r&&r.ok){ toast('Recepción registrada ('+r.data.lotes+' lotes)','ok'); closeMB('sg-rec-modal'); sgLoadPendientesRecibir(); sgLoadOC(); }
       else toast((r&&r.error)||'Error','er');
     }).catch(function(){ toast('Error de red','er'); });
 }
@@ -5577,7 +5588,7 @@ function sgRetroGuardar(){
   if(!items.length){ toast('Cargá un item con lote','er'); return; }
   var body={ proveedor_id:Number(prov), tipo_precio:sgRetroPrecio(), condicion_pago_id:eid('sg-retro-cond').value?Number(eid('sg-retro-cond').value):null, fecha:eid('sg-retro-fecha').value, numero_remito_proveedor:eid('sg-retro-remito').value, observaciones:eid('sg-retro-obs').value, items:items };
   api('/api/sg/compra-retroactiva','POST',body).then(function(r){
-    if(r&&r.ok){ toast('Compra registrada','ok'); closeMB('sg-retro-modal'); sgLoadOC(); sgLoadRecepciones(); }
+    if(r&&r.ok){ toast('Compra registrada','ok'); closeMB('sg-retro-modal'); sgLoadOC(); sgLoadPendientesRecibir(); }
     else toast((r&&r.error)||'Error','er');
   });
 }
