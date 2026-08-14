@@ -1392,24 +1392,52 @@ function crearLoteHijo(db, { madre, reprocesoId, productoId, kg, costoAsignado, 
 // pendientes sin que nadie haya hecho nada, que es el peor final posible para un
 // botón que dice "Terminada". Para volver a recibir hay que reabrirla, y ahí sí
 // se recalcula.
+// ── LA ORDEN SE RECIBE UNA SOLA VEZ, Y LO QUE ENTRÓ ES LO QUE VALE ────────
+//
+// Antes el estado salía de comparar kilos recibidos contra pedidos, y la orden
+// podía recibirse de a pedazos: una compra de 1188 kg terminaba partida en cinco
+// lotes de 18 y 20 kg, con la orden colgada en la bandeja de pendientes para
+// siempre. La regla ahora es la del negocio: el camión llega, se cuenta, se pesa,
+// y con eso la orden QUEDA FIRME por las cantidades que entraron de verdad.
+//
+// No se pisa lo pactado. kg_estimados y cantidad_estimada_presentaciones quedan
+// como se compraron: son la prueba de lo que se acordó con el productor y lo que
+// permite mostrar la diferencia para ajustar el precio. Lo recibido vive en los
+// lotes, que es donde siempre vivió. "Firme" es que la orden ya no espera nada
+// más, no que se borre lo que se había pactado.
 function actualizarEstadoOC(db, ocId) {
   const cerrojo = db.prepare('SELECT cerrada_en FROM sg_oc WHERE id=?').get(ocId);
   if (cerrojo && cerrojo.cerrada_en) return;
-  const items = db.prepare('SELECT id, kg_estimados FROM sg_oc_items WHERE oc_id=?').all(ocId);
+  const items = db.prepare('SELECT id FROM sg_oc_items WHERE oc_id=?').all(ocId);
   if (!items.length) return;
-  let completos = 0, algoEntro = false;
-  for (const it of items) {
-    const recibido = db.prepare('SELECT COALESCE(SUM(kg_reales),0) s FROM sg_lotes WHERE oc_item_id=? AND activo=1').get(it.id).s;
-    if (recibido > 0.01) algoEntro = true;
-    if (recibido >= (it.kg_estimados || 0) - 0.01) completos++;
-  }
-  // "Parcial" es que entró ALGO y falta el resto. Antes se contaban sólo los
-  // ítems COMPLETOS, así que una orden de un solo producto que recibió 38 de
-  // 1188 kg figuraba como 'abierta' — igual que si no hubiera llegado nada. La
-  // mercadería estaba en el depósito y la orden decía que no había pasado nada.
-  const estado = completos === items.length ? 'recibida_total'
-    : (completos > 0 || algoEntro ? 'recibida_parcial' : 'abierta');
+  // Con una recepción alcanza: la orden se recibe entera de una vez.
+  const entradas = db.prepare('SELECT COUNT(*) c FROM sg_recepciones WHERE oc_id=? AND activo=1').get(ocId).c;
+  const estado = entradas > 0 ? 'recibida_total' : 'abierta';
   db.prepare("UPDATE sg_oc SET estado=?, modificado_en=datetime('now','localtime') WHERE id=?").run(estado, ocId);
+}
+
+// Lo pactado contra lo que entró, por ítem. Es lo que dibuja la tabla de la
+// orden recibida y lo que dispara la alerta de diferencia: el comprador la ve y
+// decide si ajusta el precio.
+function diferenciasDeOC(db, ocId) {
+  const items = db.prepare(`SELECT i.id, i.kg_estimados, i.cantidad_estimada_presentaciones,
+      i.kg_por_bulto, i.presentacion_id, pr.nombre AS producto_nombre,
+      (SELECT COALESCE(SUM(kg_reales),0) FROM sg_lotes WHERE oc_item_id=i.id AND activo=1) AS kg_recibidos,
+      (SELECT COALESCE(SUM(bultos),0)    FROM sg_lotes WHERE oc_item_id=i.id AND activo=1) AS bultos_recibidos
+    FROM sg_oc_items i LEFT JOIN sg_productos pr ON pr.id=i.producto_id
+    WHERE i.oc_id=?`).all(ocId);
+  const out = [];
+  for (const it of items) {
+    const difKg = +(it.kg_recibidos - (it.kg_estimados || 0)).toFixed(2);
+    const difBultos = Math.round(it.bultos_recibidos - (it.cantidad_estimada_presentaciones || 0));
+    // Un kilo de más o de menos en una balanza de camión no es una diferencia.
+    if (Math.abs(difKg) <= 1 && difBultos === 0) continue;
+    out.push({ oc_item_id: it.id, producto_nombre: it.producto_nombre,
+      kg_pactados: it.kg_estimados || 0, kg_recibidos: it.kg_recibidos, dif_kg: difKg,
+      bultos_pactados: it.cantidad_estimada_presentaciones || 0,
+      bultos_recibidos: it.bultos_recibidos, dif_bultos: difBultos });
+  }
+  return out;
 }
 
 // ── ÓRDENES DE COMPRA ────────────────────────────────────────────────────────
@@ -1589,6 +1617,85 @@ router.post('/oc', requireAdmin, (req, res) => {
   } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
 });
 
+// ── LA PARTIDA RECIBIDA, ¿A DÓNDE VA? ────────────────────────────────────
+// Una vez que la mercadería entró, la orden todavía tiene algo pendiente, y
+// depende de cómo se pactó el precio:
+//
+//   Liquidación de Venta (pizarra) → hay que LIQUIDARLA: el precio se define
+//     cuando se vende, cerrando el precio de cada lote.
+//   Precio Cerrado (firme)         → hay que cargarle la FACTURA del proveedor.
+//
+// Son dos bandejas de trabajo distintas, para dos personas distintas, y hasta
+// ahora no existía ninguna: la orden se recibía y desaparecía del circuito.
+//
+// El criterio de "pendiente" sale de datos que ya existen, sin tabla nueva:
+//   pendiente de liquidar  = tiene lotes sin precio cerrado (precio_unitario_kg NULL)
+//   pendiente de facturar  = ninguna de sus recepciones tiene número de factura
+function partidasRecibidas(db, tipoPrecio) {
+  return db.prepare(`
+    SELECT o.id, o.numero, o.trazabilidad, o.fecha_oc, o.tipo_precio, o.estado,
+           o.cerrada_en, o.total_estimado_kg,
+           p.razon_social AS proveedor_nombre,
+           (SELECT COALESCE(SUM(l.kg_reales),0) FROM sg_lotes l
+              JOIN sg_oc_items i ON i.id = l.oc_item_id
+             WHERE i.oc_id = o.id AND l.activo = 1) AS kg_recibidos,
+           (SELECT COALESCE(SUM(l.bultos),0) FROM sg_lotes l
+              JOIN sg_oc_items i ON i.id = l.oc_item_id
+             WHERE i.oc_id = o.id AND l.activo = 1) AS bultos_recibidos,
+           (SELECT COUNT(*) FROM sg_lotes l
+              JOIN sg_oc_items i ON i.id = l.oc_item_id
+             WHERE i.oc_id = o.id AND l.activo = 1) AS lotes,
+           (SELECT COUNT(*) FROM sg_lotes l
+              JOIN sg_oc_items i ON i.id = l.oc_item_id
+             WHERE i.oc_id = o.id AND l.activo = 1 AND l.precio_unitario_kg IS NULL) AS lotes_sin_precio,
+           (SELECT GROUP_CONCAT(r.factura_numero, ' · ') FROM sg_recepciones r
+             WHERE r.oc_id = o.id AND r.activo = 1
+               AND r.factura_numero IS NOT NULL AND r.factura_numero <> '') AS facturas,
+           (SELECT MAX(r.fecha_recepcion) FROM sg_recepciones r
+             WHERE r.oc_id = o.id AND r.activo = 1) AS fecha_recepcion
+      FROM sg_oc o LEFT JOIN sg_proveedores p ON p.id = o.proveedor_id
+     WHERE o.activo = 1 AND o.tipo_precio = ?
+       AND o.estado IN ('recibida_total','cerrada')
+     ORDER BY o.id DESC`).all(tipoPrecio);
+}
+
+// Partidas de liquidación que todavía no se liquidaron: les falta cerrar el
+// precio de algún lote.
+router.get('/partidas-a-liquidar', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const rows = partidasRecibidas(db, 'pizarra').filter((r) => r.lotes_sin_precio > 0);
+    res.json({ ok: true, data: rows });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// Partidas de precio cerrado a las que todavía no se les cargó la factura del
+// proveedor. El número de factura se carga en el paso 1 de la recepción.
+router.get('/partidas-a-facturar', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const rows = partidasRecibidas(db, 'firme').filter((r) => !r.facturas);
+    res.json({ ok: true, data: rows });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// Cargar la factura del proveedor sobre una partida ya recibida. Se guarda en su
+// recepción, que es donde vive el resto de la documentación del camión.
+router.post('/oc/:id/factura', requireAdmin, (req, res) => {
+  const db = getDb();
+  try {
+    const numero = val(req.body && req.body.factura_numero);
+    if (!numero) return res.status(400).json({ ok: false, error: 'Escribí el número de factura' });
+    const rec = db.prepare(`SELECT id FROM sg_recepciones
+      WHERE oc_id=? AND activo=1 ORDER BY id DESC LIMIT 1`).get(req.params.id);
+    if (!rec) return res.status(400).json({ ok: false, error: 'Esa orden todavía no recibió mercadería' });
+    db.prepare(`UPDATE sg_recepciones SET factura_numero=?,
+      modificado_en=datetime('now','localtime'), modificado_por=? WHERE id=?`)
+      .run(numero, uid(req), rec.id);
+    res.json({ ok: true, data: { id: Number(req.params.id), factura_numero: numero } });
+  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+
 // Listar OC con filtros
 router.get('/oc', requireAuth, (req, res) => {
   const db = getDb();
@@ -1641,12 +1748,18 @@ router.get('/oc/:id', requireAuth, (req, res) => {
       -- presentación. Sin esto el asistente muestra 0 kg y el operador cree que
       -- tiene que pesar sí o sí.
       COALESCE(i.kg_por_bulto, ps.factor_conversion) AS kg_por_bulto_efectivo,
-      (SELECT COALESCE(SUM(kg_reales),0) FROM sg_lotes WHERE oc_item_id=i.id AND activo=1) AS kg_recibidos
+      (SELECT COALESCE(SUM(kg_reales),0) FROM sg_lotes WHERE oc_item_id=i.id AND activo=1) AS kg_recibidos,
+      -- Los BULTOS que entraron de verdad. La orden se pacta en bultos y se
+      -- controla en bultos: es la columna que mira el comprador contra el remito.
+      (SELECT COALESCE(SUM(bultos),0) FROM sg_lotes WHERE oc_item_id=i.id AND activo=1) AS bultos_recibidos
       FROM sg_oc_items i
       LEFT JOIN sg_productos pr ON pr.id=i.producto_id
       LEFT JOIN sg_presentaciones ps ON ps.id=i.presentacion_id
       WHERE i.oc_id=?`).all(req.params.id);
     oc.vencimientos = db.prepare('SELECT * FROM sg_oc_vencimientos WHERE oc_id=? ORDER BY cuota_orden').all(req.params.id);
+    // Lo pactado contra lo que entró. Si algo no da, la orden recibida lo avisa
+    // arriba de todo para que el comprador pueda ajustar el precio.
+    oc.diferencias = diferenciasDeOC(db, req.params.id);
     res.json({ ok: true, data: oc });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
@@ -1817,10 +1930,13 @@ router.post('/oc/:id/reabrir', requireAdmin, (req, res) => {
     const oc = db.prepare('SELECT id, cerrada_en FROM sg_oc WHERE id=? AND activo=1').get(req.params.id);
     if (!oc) return res.status(404).json({ ok: false, error: 'No encontrada' });
     if (!oc.cerrada_en) return res.status(400).json({ ok: false, error: 'La orden no está confirmada' });
+    // Vuelve a 'abierta', no a lo que digan los kilos: reabrir es decir "esta
+    // orden espera mercadería otra vez". Recalculando, una orden que ya recibió
+    // algo volvería a quedar 'recibida_total' y no podría recibir nada — reabrir
+    // no serviría para nada.
     db.transaction(() => {
-      db.prepare(`UPDATE sg_oc SET cerrada_en=NULL, cerrada_por=NULL, cierre_motivo=NULL,
+      db.prepare(`UPDATE sg_oc SET estado='abierta', cerrada_en=NULL, cerrada_por=NULL, cierre_motivo=NULL,
         modificado_en=datetime('now','localtime'), modificado_por=? WHERE id=?`).run(uid(req), oc.id);
-      actualizarEstadoOC(db, oc.id);       // ya sin cerrojo: recalcula por kilos
     })();
     const est = db.prepare('SELECT estado FROM sg_oc WHERE id=?').get(oc.id).estado;
     res.json({ ok: true, data: { id: Number(oc.id), estado: est } });
@@ -1852,6 +1968,20 @@ router.post('/recepciones', sgUpload.array('fotos', 40), requireAdmin, (req, res
       if (oc.cerrada_en) {
         return res.status(400).json({ ok: false,
           error: 'La orden está confirmada. Reabrila desde OC recibidas para poder recibir.' });
+      }
+      // UNA ORDEN SE RECIBE UNA SOLA VEZ. El camión llega, se cuenta, se pesa, y
+      // con eso la orden queda firme por lo que entró. Recibir de a pedazos
+      // partía la partida en lotes sueltos y dejaba la orden colgada en la
+      // bandeja de pendientes para siempre.
+      //
+      // Se mira el ESTADO y no la cantidad de recepciones, porque reabrir una
+      // orden es la excepción deliberada: la vuelve a poner en 'abierta' y con
+      // eso vuelve a aceptar mercadería. Contando recepciones, reabrir no habría
+      // servido para nada — que es de lo único que sirve.
+      if (oc.estado === 'recibida_total' || oc.estado === 'cerrada') {
+        return res.status(400).json({ ok: false,
+          error: 'Esta orden ya se recibió. La mercadería de una orden entra de una sola vez: '
+               + 'si llegó algo más, reabrila desde OC recibidas, o hacé una orden nueva.' });
       }
     }
     const items = Array.isArray(b.items) ? b.items : [];

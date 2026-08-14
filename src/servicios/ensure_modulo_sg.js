@@ -31,6 +31,11 @@ const MODULOS_SG = [
   // acumuladas por cooperativa y por período. Se alimenta sola desde el paso de
   // descarga de la recepción; acá no se carga nada, sólo se controla.
   ["sg-control-coop", "🚜 Control Cooperativa", 662],
+  // Facturas por mercadería: las partidas ya recibidas, de compras a Precio
+  // Cerrado, a las que todavía no se les cargó la factura del proveedor. Es la
+  // otra mitad de lo que pasa después de recibir — la de Liquidación de Venta va
+  // a su pestaña dentro de Liquidaciones.
+  ["sg-facturas-merc", "🧾 Facturas por mercadería", 669],
 ];
 
 try {
@@ -82,6 +87,7 @@ try {
   db.prepare("UPDATE modulos_config SET label='💸 Gastos Fijos' WHERE modulo='sg-gvariables'").run();
   db.prepare("UPDATE modulos_config SET label='🧾 Gastos Directos'  WHERE modulo='sg-gastos-directos'").run();
   db.prepare("UPDATE modulos_config SET label='🚜 Control Cooperativa' WHERE modulo='sg-control-coop'").run();
+  db.prepare("UPDATE modulos_config SET label='🧾 Facturas por mercadería' WHERE modulo='sg-facturas-merc'").run();
   db.prepare("UPDATE modulos_config SET label='📄 Liquidaciones'      WHERE modulo='ab-liquidaciones'").run();
   // ── EL MENÚ DE SAN GERÓNIMO, ORDENADO POR CÓMO SE TRABAJA ────────────────
   // Antes había un solo grupo, "Abasto SG", con once pantallas apiladas en el
@@ -127,6 +133,9 @@ try {
     ['Administración de Compras',     665,  'sg-gastos-directos'],
     ['Administración de Compras',     666,  'sg-reprocesos'],
     ['Administración de Compras',     667,  'ab-liquidaciones'],
+    // Pegada a Liquidaciones: son las dos bandejas de lo que queda pendiente
+    // después de recibir, una por cada condición comercial.
+    ['Administración de Compras',     669,  'sg-facturas-merc'],
     ['Administración de Compras',     668,  'sp-pagos'],
 
     ['Informes',                      670,  'sg-dashboard'],

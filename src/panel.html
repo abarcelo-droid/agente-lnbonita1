@@ -299,6 +299,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   <div class="ni" data-sec="sg-catalogo" data-admin-only="1"></div>
   <div class="ni" data-sec="sg-reportes" data-admin-only="1"></div>
   <div class="ni" data-sec="sg-control-coop" data-admin-only="1"></div>
+  <div class="ni" data-sec="sg-facturas-merc" data-admin-only="1"></div>
 
   <!-- Contabilidad San Gerónimo — mismo criterio que los .ni de Abasto SG de arriba:
        el sidebar VISIBLE lo arma sidebar-v2.js desde modulos_config (ver
@@ -765,6 +766,29 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     </div>
     <button class="btn bb" onclick="liqAbrirNueva()">+ Nueva liquidación</button>
   </div>
+  <!-- ── LAS PARTIDAS QUE ESPERAN QUE SE LES CIERRE EL PRECIO ─────────────
+       Una compra de Liquidación de Venta se recibe y ahí queda: el precio se
+       define cuando la mercadería se vende. Hasta ahora la orden se recibía y
+       desaparecía del circuito, sin ninguna bandeja que dijera "a estas les
+       falta liquidar". -->
+  <div style="display:inline-flex;gap:2px;background:var(--bg);border:1px solid var(--bor);border-radius:8px;padding:3px;margin-bottom:16px;flex-wrap:wrap">
+    <div class="sgc-subtab on" data-sub="liqs" onclick="liqSub('liqs')">📄 Liquidaciones</div>
+    <div class="sgc-subtab" data-sub="partidas" onclick="liqSub('partidas')">🍅 Partidas pendientes de liquidar</div>
+  </div>
+
+  <div class="sgc-sub" id="liq-sub-partidas" style="display:none">
+    <div style="font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--mut);margin-bottom:8px">
+      🍅 Pendientes de liquidar <span id="liq-part-n" style="font-weight:400;text-transform:none;letter-spacing:0"></span>
+    </div>
+    <div class="ab-table-wrap"><table class="pa-tbl">
+      <thead><tr><th>Partida</th><th>Recibida</th><th>Proveedor</th>
+        <th style="text-align:right">Bultos</th><th style="text-align:right">Kg</th>
+        <th style="text-align:center">Lotes sin precio</th><th></th></tr></thead>
+      <tbody id="liq-tb-partidas"><tr><td colspan="7" class="emp">Cargando…</td></tr></tbody>
+    </table></div>
+  </div>
+
+  <div class="sgc-sub on" id="liq-sub-liqs">
   <div class="ab-card">
     <div class="ab-table-wrap">
       <table class="ab-table">
@@ -775,6 +799,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
         <tbody id="liq-tbody"><tr><td colspan="6"><div class="ab-empty">Cargando...</div></td></tr></tbody>
       </table>
     </div>
+  </div>
   </div>
 </div>
 
@@ -2591,6 +2616,32 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
        una recepción contesta "con descarga" en el paso 3, la descarga entra
        acá. Antes esto sólo se veía dentro de Gastos Directos, mezclado con las
        cargas de salida y sin filtro por fecha. -->
+  <!-- ── FACTURAS POR MERCADERÍA ──────────────────────────────────────────
+       La otra mitad de lo que pasa después de recibir. Una compra a Precio
+       Cerrado ya tiene el precio pactado: lo que falta es que llegue la factura
+       del proveedor. Hasta ahora la orden se recibía y salía del circuito, sin
+       ninguna bandeja que dijera "a estas les falta la factura". -->
+  <div class="sec sg-mod" id="sec-sg-facturas-merc">
+    <div class="ph">
+      <div><div class="ph-t">🧾 San Gerónimo · Facturas por mercadería</div>
+        <div class="ph-s">Partidas recibidas a Precio Cerrado, esperando la factura del proveedor</div></div>
+      <button class="btn bo" onclick="sgFmLoad()">↻ Actualizar</button>
+    </div>
+    <div style="display:inline-flex;gap:2px;background:var(--bg);border:1px solid var(--bor);border-radius:8px;padding:3px;margin-bottom:16px">
+      <div class="sgc-subtab on" data-sub="pendientes" onclick="sgFmSub('pendientes')">⏳ Partidas pendientes de facturar</div>
+    </div>
+    <div class="sgc-sub on" id="sgfm-sub-pendientes">
+      <div style="font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--mut);margin-bottom:8px">
+        ⏳ Pendientes de facturar <span id="sgfm-n" style="font-weight:400;text-transform:none;letter-spacing:0"></span>
+      </div>
+      <div class="ab-table-wrap"><table class="pa-tbl">
+        <thead><tr><th>Partida</th><th>Recibida</th><th>Proveedor</th>
+          <th style="text-align:right">Bultos</th><th style="text-align:right">Kg</th><th></th></tr></thead>
+        <tbody id="sgfm-tb"><tr><td colspan="6" class="emp">Cargando…</td></tr></tbody>
+      </table></div>
+    </div>
+  </div>
+
   <div class="sec sg-mod" id="sec-sg-control-coop">
     <div class="ph">
       <div><div class="ph-t">🤝 San Gerónimo · Control Cooperativa</div>
@@ -4713,9 +4764,37 @@ function sgOcVer(id){
       + '</div>';
     // La tabla arranca con su propio rótulo y separada de la ficha: pegada
     // arriba, el encabezado se leía como parte de los datos de la orden.
+    // ── LO QUE NO DIO CONTRA LA ORDEN ─────────────────────────────────────
+    // Va ARRIBA de los productos y no adentro de la tabla: es lo primero que
+    // tiene que ver el comprador, porque de eso depende si le ajusta el precio
+    // al productor. La orden ya quedó firme por lo que entró; esto dice cuánto
+    // menos (o más) entró contra lo que se había pactado.
+    var difs = o.diferencias || [];
+    if (difs.length) {
+      h += '<div style="border:1.5px solid #e0a72e;background:rgba(224,167,46,.10);border-radius:10px;'
+        + 'padding:12px 14px;margin-bottom:14px">'
+        + '<div style="font-weight:700;font-size:13px;color:#9a3412;margin-bottom:6px">'
+        + '⚠️ Lo recibido no coincide con lo pactado</div>'
+        + '<div style="font-size:12.5px;color:var(--tx);line-height:1.7">';
+      difs.forEach(function(d){
+        var partes = [];
+        if (d.dif_bultos) {
+          partes.push('<b>' + (d.dif_bultos > 0 ? '+' : '') + nr(d.dif_bultos) + ' bultos</b>'
+            + ' (' + nr(d.bultos_pactados) + ' → ' + nr(d.bultos_recibidos) + ')');
+        }
+        if (Math.abs(Number(d.dif_kg) || 0) > 1) {
+          partes.push('<b>' + (d.dif_kg > 0 ? '+' : '') + nr(d.dif_kg) + ' kg</b>'
+            + ' (' + nr(d.kg_pactados) + ' → ' + nr(d.kg_recibidos) + ')');
+        }
+        h += '• ' + escH(d.producto_nombre || 'Un artículo') + ': ' + partes.join(' · ') + '<br>';
+      });
+      h += '</div><div style="font-size:11.5px;color:var(--mut);margin-top:6px">'
+        + 'La orden quedó firme por lo que entró. Si corresponde ajustar el precio, hacelo antes de liquidar o facturar.'
+        + '</div></div>';
+    }
     h+='<div style="border-top:1px solid var(--bor);padding-top:12px">'
       +'<div style="font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--mut);margin-bottom:8px">📦 Productos</div>';
-    h+='<table class="pa-tbl" style="margin-bottom:12px"><thead><tr><th style="padding-top:10px;padding-bottom:10px">Producto</th><th>Present.</th><th style="text-align:right">Pactado</th><th style="text-align:right">Precio</th><th style="text-align:right">Kg est.</th><th style="text-align:right">Kg recibidos</th></tr></thead><tbody>';
+    h+='<table class="pa-tbl" style="margin-bottom:12px"><thead><tr><th style="padding-top:10px;padding-bottom:10px">Producto</th><th>Present.</th><th style="text-align:right">Pactado</th><th style="text-align:right">Precio</th><th style="text-align:right">Bultos recibidos</th></tr></thead><tbody>';
     // ── LA COMPRA, COMO SE PACTÓ ──────────────────────────────────────────
     // La tabla mostraba sólo kg y $/kg, que es la unidad en la que el sistema
     // costea. Pero la compra se pactó en bultos y a tanto el bulto: al abrir la
@@ -4747,12 +4826,22 @@ function sgOcVer(id){
             : '—')
         : (precioKg != null ? sgMoney(precioKg) + ' /kg' : '—');
 
+      // LO QUE ENTRÓ, EN BULTOS. La compra se pacta en bultos y se controla en
+      // bultos contra el remito: es la cuenta que hace el que recibe. Los kilos
+      // no desaparecen — abajo están los lotes con su peso, y si no dan contra
+      // lo pactado la alerta de arriba lo dice con todas las letras.
+      var bultosRec = Number(it.bultos_recibidos) || 0;
+      var kgRec = Number(it.kg_recibidos) || 0;
+      var recibido = bultosRec > 0
+        ? '<strong>' + nr(bultosRec) + '</strong>'
+          + (kgRec > 0 ? '<div class="sg-oc-sub">' + nr(kgRec) + ' kg</div>' : '')
+        : (kgRec > 0 ? '<strong>' + nr(kgRec) + ' kg</strong>' : '—');
+
       h += '<tr><td>' + esc(it.producto_nombre || '') + '</td>'
         + '<td>' + esc(it.presentacion_nombre || '—') + '</td>'
         + '<td style="text-align:right"><strong>' + pactado + '</strong></td>'
         + '<td style="text-align:right"><strong>' + precio + '</strong></td>'
-        + '<td style="text-align:right">' + nr(it.kg_estimados) + '</td>'
-        + '<td style="text-align:right">' + nr(it.kg_recibidos) + '</td></tr>';
+        + '<td style="text-align:right">' + recibido + '</td></tr>';
     });
     h+='</tbody></table></div>';
     if(lotes.length){
@@ -4894,6 +4983,76 @@ function sgLoadOcRecibidas(){
               : '')
         + '</td></tr>';
     }).join('') : '<tr><td colspan="9" class="emp">Todavía no se recibió ninguna orden.</td></tr>';
+  });
+}
+
+// ── DESPUÉS DE RECIBIR, LA PARTIDA TODAVÍA TIENE ALGO PENDIENTE ─────────
+// Y depende de cómo se pactó el precio: la de Liquidación de Venta hay que
+// liquidarla (cerrar el precio de cada lote), la de Precio Cerrado hay que
+// facturarla. Son dos bandejas distintas para dos trabajos distintos.
+
+// La fila es la misma en las dos: la partida, cuándo entró, de quién, y cuánto.
+function sgPartFila(p, extra){
+  return '<tr>'
+    + '<td><code>' + esc(p.trazabilidad || p.numero || '—') + '</code></td>'
+    + '<td>' + esc(p.fecha_recepcion || p.fecha_oc || '—') + '</td>'
+    + '<td>' + esc(p.proveedor_nombre || '—') + '</td>'
+    + '<td style="text-align:right">' + (Number(p.bultos_recibidos) > 0 ? nr(p.bultos_recibidos) : '—') + '</td>'
+    + '<td style="text-align:right">' + nr(p.kg_recibidos) + '</td>'
+    + extra + '</tr>';
+}
+
+function liqSub(cual){
+  var tabs = document.querySelectorAll('#sec-ab-liquidaciones .sgc-subtab');
+  for (var i = 0; i < tabs.length; i++) {
+    tabs[i].classList.toggle('on', tabs[i].getAttribute('data-sub') === cual);
+  }
+  var a = eid('liq-sub-liqs'), b = eid('liq-sub-partidas');
+  if (a) a.style.display = (cual === 'liqs') ? '' : 'none';
+  if (b) b.style.display = (cual === 'partidas') ? '' : 'none';
+  if (cual === 'partidas') sgLiqPartidasLoad();
+}
+
+function sgLiqPartidasLoad(){
+  api('/api/sg/partidas-a-liquidar').then(function(r){
+    var rows = (r && r.ok) ? r.data : [];
+    var tb = eid('liq-tb-partidas'); if (!tb) return;
+    var n = eid('liq-part-n');
+    if (n) n.textContent = rows.length ? ('· ' + rows.length + (rows.length === 1 ? ' partida' : ' partidas')) : '';
+    tb.innerHTML = rows.length ? rows.map(function(p){
+      return sgPartFila(p,
+        '<td style="text-align:center"><b>' + nr(p.lotes_sin_precio) + '</b> de ' + nr(p.lotes) + '</td>'
+        + '<td style="text-align:right"><button class="btn bo bs" onclick="sgOcVer(' + p.id + ')">Ver y liquidar</button></td>');
+    }).join('') : '<tr><td colspan="7" class="emp">No hay partidas esperando liquidación.</td></tr>';
+  });
+}
+
+function sgFmSub(){ /* una sola solapa por ahora; existe para que el patrón no cambie después */ }
+
+function sgFmLoad(){
+  api('/api/sg/partidas-a-facturar').then(function(r){
+    var rows = (r && r.ok) ? r.data : [];
+    var tb = eid('sgfm-tb'); if (!tb) return;
+    var n = eid('sgfm-n');
+    if (n) n.textContent = rows.length ? ('· ' + rows.length + (rows.length === 1 ? ' partida' : ' partidas')) : '';
+    tb.innerHTML = rows.length ? rows.map(function(p){
+      return sgPartFila(p,
+        '<td style="text-align:right;white-space:nowrap">'
+        + '<button class="btn bo bs" onclick="sgOcVer(' + p.id + ')">Ver</button> '
+        + '<button class="btn bb bs" onclick="sgFmFactura(' + p.id + ',\'' + esc(p.trazabilidad || '') + '\')">🧾 Cargar factura</button>'
+        + '</td>');
+    }).join('') : '<tr><td colspan="6" class="emp">No hay partidas esperando factura.</td></tr>';
+  });
+}
+
+function sgFmFactura(id, partida){
+  var nro = prompt('Número de factura del proveedor para la partida ' + partida + ':');
+  if (nro === null) return;
+  if (!String(nro).trim()) { toast('Escribí el número de factura', 'er'); return; }
+  api('/api/sg/oc/' + id + '/factura', 'POST', { factura_numero: nro }).then(function(r){
+    if (!r || !r.ok) { toast((r && r.error) || 'No se pudo guardar', 'er'); return; }
+    toast('Factura ' + nro + ' cargada', 'ok');
+    sgFmLoad();
   });
 }
 
@@ -14484,6 +14643,7 @@ function loadSec(s) {
     'sg-ventas':     function(){ sgVenInit(); },
     'sg-gastos-directos': function(){ sgGdsInit(); },
     'sg-control-coop': function(){ sgCcoopInit(); },
+    'sg-facturas-merc': function(){ sgFmLoad(); },
     'sg-importacion': function(){ sgImpInit(); },
     'sg-catalogo':   function(){ sgLoadCaches(function(){ sgCatSub('productos'); }); },
     'sg-reportes':   function(){ sgRepInit(); },
