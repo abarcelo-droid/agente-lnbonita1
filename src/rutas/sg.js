@@ -1967,12 +1967,20 @@ router.post('/compra-retroactiva', requireAdmin, (req, res) => {
 
     const tx = db.transaction(() => {
       const numeroOC = nextNumero(db, 'SG-OC', 'sg_oc', 'numero');
+      // EL NÚMERO DE PARTIDA, TAMBIÉN ACÁ. La compra retroactiva nacía sin él, y
+      // eso se veía dos pantallas más adelante: sin trazabilidad en la orden,
+      // codigoLoteDePartida() no tiene de dónde sacar el código y el lote caía al
+      // numerador viejo (SG-LT-AAAAMMDD-NNNN). Después el backfill del arranque le
+      // ponía la partida a la orden, pero el lote ya había nacido con otro número:
+      // la cabecera decía 0034.12.08.2026.03 y el lote de abajo, SG-LT-20260812-0001.
+      // Se calcula adentro de la transacción, igual que en el alta normal.
+      const trazaRetro = codigoTrazabilidad(db, b.proveedor_id, fechaIngreso).codigo;
       const ocInfo = db.prepare(`INSERT INTO sg_oc
         (numero, modalidad, proveedor_id, tipo_fiscal, tipo_precio, condicion_pago_id, fecha_oc, fecha_recepcion_estimada,
-         comercial_id, estado, observaciones, total_estimado_kg, total_estimado_monto, creado_por)
-        VALUES (?, 'retroactiva', ?,?,?,?,?,?,?, 'recibida_total', ?, 0, 0, ?)`).run(
+         comercial_id, estado, observaciones, total_estimado_kg, total_estimado_monto, creado_por, trazabilidad)
+        VALUES (?, 'retroactiva', ?,?,?,?,?,?,?, 'recibida_total', ?, 0, 0, ?, ?)`).run(
         numeroOC, b.proveedor_id || null, dft.tipo_fiscal, tipoPrecio, dft.condicion_pago_id,
-        fechaIngreso, fechaIngreso, b.comercial_id || null, val(b.observaciones), uid(req));
+        fechaIngreso, fechaIngreso, b.comercial_id || null, val(b.observaciones), uid(req), trazaRetro);
       const ocId = ocInfo.lastInsertRowid;
 
       const numeroRec = nextNumero(db, 'SG-REC', 'sg_recepciones', 'numero_recepcion');

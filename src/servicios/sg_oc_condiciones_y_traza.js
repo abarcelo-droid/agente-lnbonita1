@@ -151,4 +151,83 @@ try {
   console.error('[SG] Error calculando la trazabilidad de las órdenes viejas:', e.message);
 }
 
+// ── 3) LOS LOTES SE LLAMAN COMO SU PARTIDA ────────────────────────────────
+// La regla es que la partida se identifica con el número de la orden de compra y
+// con nada más. Pero quedaron lotes con el número viejo (SG-LT-AAAAMMDD-NNNN) y
+// se ven al lado de la partida, como si fueran dos identidades de lo mismo:
+//
+//   - todos los lotes cargados antes de que existiera el código de partida;
+//   - los de las compras retroactivas, que nacían sin partida en la orden (el
+//     alta no la asignaba) y por eso caían al numerador viejo. Después este
+//     mismo archivo le ponía la partida a la orden, y el lote quedaba huérfano.
+//
+// Se renumeran acá y no en una migración aparte porque tiene que correr DESPUÉS
+// del bloque 2: primero la orden tiene que tener su partida.
+//
+// SE PUEDE RENUMERAR SIN ROMPER NADA: codigo_lote existe en una sola columna de
+// una sola tabla (sg_lotes.codigo_lote, TEXT NOT NULL UNIQUE). Todo lo demás
+// —despachos, gastos, decomisos, transformaciones, reprocesos, PDFs— lo lee con
+// un JOIN por lote_id, así que pasan a mostrar el código nuevo solos. No hay
+// ninguna tabla que guarde el código copiado como texto.
+//
+// El dígito final cuenta los lotes de la orden POR id, que es el mismo criterio
+// que usa codigoLoteDePartida() al crearlos: el primero que entró es el .1.
+try {
+  const colsOc = db.prepare('PRAGMA table_info(sg_oc)').all().map(c => c.name);
+  if (colsOc.includes('trazabilidad')) {
+    // Los que cuelgan de una orden CON partida y no se llaman como ella. Un lote
+    // sin orden (apertura de inventario, reproceso, transformación, importación,
+    // recepción sin OC todavía) no tiene partida de la cual colgar: no se toca.
+    const desalineados = db.prepare(`
+      SELECT l.id, l.codigo_lote, o.id AS oc_id, o.trazabilidad
+        FROM sg_lotes l
+        JOIN sg_oc_items i ON i.id = l.oc_item_id
+        JOIN sg_oc o ON o.id = i.oc_id
+       WHERE o.trazabilidad IS NOT NULL AND o.trazabilidad <> ''
+         AND l.codigo_lote NOT LIKE o.trazabilidad || '.%'
+       ORDER BY o.id, l.id`).all();
+
+    if (desalineados.length) {
+      const ocupado = db.prepare('SELECT 1 FROM sg_lotes WHERE codigo_lote = ? AND id <> ?');
+      const renombrar = db.prepare('UPDATE sg_lotes SET codigo_lote = ? WHERE id = ?');
+      // Por orden: el orden de los lotes de cada una decide el dígito.
+      const porOc = new Map();
+      for (const l of desalineados) {
+        if (!porOc.has(l.oc_id)) porOc.set(l.oc_id, []);
+        porOc.get(l.oc_id).push(l);
+      }
+      let n = 0, trabados = 0;
+      db.transaction(() => {
+        for (const [ocId, lotes] of porOc) {
+          const traza = lotes[0].trazabilidad;
+          // Todos los lotes de la orden, no sólo los desalineados: si alguno ya
+          // se llama .1, el que se renumera tiene que ser el .2.
+          const todos = db.prepare(`SELECT l.id, l.codigo_lote FROM sg_lotes l
+             JOIN sg_oc_items i ON i.id = l.oc_item_id
+            WHERE i.oc_id = ? ORDER BY l.id`).all(ocId);
+          let d = 0;
+          for (const l of todos) {
+            d++;
+            const nuevo = `${traza}.${d}`;
+            if (l.codigo_lote === nuevo) continue;              // ya estaba bien
+            // codigo_lote es UNIQUE. Si el número que toca lo tiene otro lote
+            // —de otra orden, por un código repetido de antes— se saltea en vez
+            // de reventar el arranque entero del servidor.
+            if (ocupado.get(nuevo, l.id)) { trabados++; continue; }
+            renombrar.run(nuevo, l.id);
+            n++;
+          }
+        }
+      })();
+      if (n) console.log(`[SG] Partida: se renumeraron ${n} lote(s) para que se llamen como su orden de compra.`);
+      if (trabados) {
+        console.warn(`[SG] ${trabados} lote(s) no se pudieron renumerar porque el código que les tocaba ` +
+                     'ya lo tenía otro lote. Conservan el suyo.');
+      }
+    }
+  }
+} catch (e) {
+  console.error('[SG] Error alineando los códigos de lote con su partida:', e.message);
+}
+
 export default db;
