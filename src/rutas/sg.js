@@ -982,11 +982,31 @@ router.delete('/condiciones-pago/:id', requireAdmin, (req, res) => {
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 // Numerador correlativo por día: PREFIJO-YYYYMMDD-NNNN
+// EL NÚMERO QUE SIGUE SALE DEL MÁS ALTO YA USADO, no de contar filas.
+//
+// Contar filas da el número equivocado apenas falta uno del medio, y entonces
+// propone un número que YA EXISTE. codigo_lote y numero son UNIQUE: eso no da un
+// número feo, tira una excepción y voltea la transacción entera — la recepción
+// no se guarda y el operador ve un error sin sentido con el camión en la puerta.
+//
+// Los huecos aparecen solos: la migración que renumera los lotes viejos para que
+// se llamen como su partida libera números de la serie SG-LT, y cualquier borrado
+// hace lo mismo. Es el mismo problema que ya se había arreglado en el código de
+// partida de las órdenes (ver maxSecuenciaDelDia): dos formas de contar lo mismo
+// que se desincronizan.
+//
+// Tomar el máximo no reusa nunca un número, y un número que existió no vuelve a
+// existir con otra mercadería adentro.
 function nextNumero(db, prefijo, tabla, col) {
   const fecha = db.prepare("SELECT strftime('%Y%m%d','now','localtime') d").get().d;
-  const like = `${prefijo}-${fecha}-%`;
-  const n = db.prepare(`SELECT COUNT(*) c FROM ${tabla} WHERE ${col} LIKE ?`).get(like).c;
-  return `${prefijo}-${fecha}-${String(n + 1).padStart(4, '0')}`;
+  const pre = `${prefijo}-${fecha}-`;
+  const filas = db.prepare(`SELECT ${col} v FROM ${tabla} WHERE ${col} LIKE ?`).all(pre + '%');
+  let max = 0;
+  for (const f of filas) {
+    const n = parseInt(String(f.v).slice(pre.length), 10);
+    if (!isNaN(n) && n > max) max = n;
+  }
+  return `${prefijo}-${fecha}-${String(max + 1).padStart(4, '0')}`;
 }
 
 // Recalcula costo_final de un lote = costo_base + gastos directos del lote + descarga de ingreso
@@ -1997,15 +2017,28 @@ router.post('/recepciones/:id/vincular-oc', requireAdmin, (req, res) => {
     const out = db.transaction(() => {
       db.prepare("UPDATE sg_recepciones SET oc_id=?, oc_pendiente=0, modificado_en=datetime('now','localtime'), modificado_por=? WHERE id=?")
         .run(ocId, uid(req), req.params.id);
-      const lotes = db.prepare('SELECT id, producto_id, kg_reales FROM sg_lotes WHERE recepcion_id=? AND activo=1').all(req.params.id);
+      const lotes = db.prepare('SELECT id, producto_id, kg_reales, codigo_lote FROM sg_lotes WHERE recepcion_id=? AND activo=1').all(req.params.id);
       let conPrecio = 0;
       for (const l of lotes) {
         const ocItem = db.prepare('SELECT id, precio_estimado_por_kg FROM sg_oc_items WHERE oc_id=? AND producto_id=? ORDER BY id LIMIT 1').get(ocId, l.producto_id);
         if (!ocItem) continue; // producto no está en la OC → el lote queda pendiente
         const precio = (oc.tipo_precio === 'firme' && ocItem.precio_estimado_por_kg != null) ? Number(ocItem.precio_estimado_por_kg) : null;
         const costoBase = precio != null ? l.kg_reales * precio : 0;
-        db.prepare("UPDATE sg_lotes SET oc_item_id=?, precio_unitario_kg=?, costo_base=?, modificado_en=datetime('now','localtime'), modificado_por=? WHERE id=?")
-          .run(ocItem.id, precio, costoBase, uid(req), l.id);
+        // Y AHORA EL LOTE SE LLAMA COMO LA PARTIDA. Este es el camino del camión
+        // que llega sin la orden cargada: la recepción entra sin OC y sus lotes
+        // nacen con el número viejo, que ahí es lo correcto porque todavía no hay
+        // partida de la cual colgar. Al vincularla, esa mercadería SÍ pasa a
+        // tener número de orden — y si no se renumera acá, queda para siempre
+        // identificada con un número paralelo.
+        //
+        // El código se calcula ANTES de atar el lote al ítem: codigoLoteDePartida
+        // cuenta los lotes que ya cuelgan de la orden, y si este ya estuviera
+        // atado se contaría a sí mismo. El primero saldría .2 y el .1 no
+        // existiría nunca — un lote que parece perdido al rastrear el remito.
+        const codigoNuevo = codigoLoteDePartida(db, ocItem.id) || l.codigo_lote;
+        db.prepare(`UPDATE sg_lotes SET oc_item_id=?, codigo_lote=?, precio_unitario_kg=?, costo_base=?,
+          modificado_en=datetime('now','localtime'), modificado_por=? WHERE id=?`)
+          .run(ocItem.id, codigoNuevo, precio, costoBase, uid(req), l.id);
         recalcCostoLote(db, l.id);
         if (precio != null) conPrecio++;
       }
