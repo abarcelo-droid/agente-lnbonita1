@@ -758,6 +758,17 @@ try { db.exec("ALTER TABLE sg_oc ADD COLUMN flete_con_iva INTEGER"); } catch (_)
 //
 // El motivo es obligatorio cuando se cierra con saldo: la orden queda diciendo
 // que faltaron 1150 kg y alguien tiene que poder leer por qué no van a venir.
+// ── LA JURISDICCIÓN DE UNA PERCEPCIÓN DE INGRESOS BRUTOS ──────────────────
+// Ingresos Brutos es provincial: la percepción de Buenos Aires no es la misma
+// cuenta que la de Santa Fe, y al cierre hay que poder decir cuánto se pagó en
+// cada una. Por eso la jurisdicción va en la LÍNEA del asiento modelo: se carga
+// una línea de percepción IIBB por provincia, cada una con su cuenta, y al
+// cargar la factura se elige contra cuál se imputa.
+//
+// Sirve igual para cualquier otro concepto que se abra por jurisdicción; hoy
+// sólo IIBB lo necesita.
+try { db.exec("ALTER TABLE sg_asientos_modelo_lineas ADD COLUMN jurisdiccion TEXT"); } catch (_) {}
+
 // ── LA FACTURA DE COMPRA DE MERCADERÍA ────────────────────────────────────
 // El comprobante que manda el proveedor por una partida ya recibida. Guarda el
 // PDF y los datos fiscales que se le leen: con eso se arma el asiento contable
@@ -788,6 +799,9 @@ try {
       percepcion_iibb   REAL,
       percepcion_ganancias REAL,
       otros_conceptos   REAL,
+      -- Contra qué provincia se percibió Ingresos Brutos. Sin esto, al cierre
+      -- no se puede decir cuánto se pagó en cada jurisdicción.
+      iibb_jurisdiccion TEXT,
       total             REAL,
       cae               TEXT,
       cae_vencimiento   TEXT,
@@ -806,6 +820,8 @@ try {
     );
   `);
   db.exec('CREATE INDEX IF NOT EXISTS idx_sg_fact_oc ON sg_facturas_compra(oc_id)');
+  // Para las bases que ya crearon la tabla sin esta columna.
+  try { db.exec('ALTER TABLE sg_facturas_compra ADD COLUMN iibb_jurisdiccion TEXT'); } catch (_) {}
 } catch (e) { console.error('[DB] SG sg_facturas_compra:', e.message); }
 
 try { db.exec("ALTER TABLE sg_oc ADD COLUMN cerrada_en TEXT"); } catch (_) {}
