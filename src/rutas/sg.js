@@ -1669,6 +1669,74 @@ router.get('/partidas-a-liquidar', requireAuth, (req, res) => {
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
+// ── EL ASIENTO CON EL QUE SE CONTABILIZA UNA FACTURA DE MERCADERÍA ───────
+//
+// Todas las facturas de mercadería se contabilizan IGUAL, así que el modelo se
+// elige UNA vez y queda parametrizado para el módulo. No se elige factura por
+// factura: eso abriría la puerta a que dos compras iguales entren con asientos
+// distintos según quién las cargó, y a los tres meses el mayor no cierra y nadie
+// sabe por qué.
+//
+// La clave vive en sg_config, que es donde ya viven los otros parámetros del
+// módulo. Sin tabla nueva.
+const CLAVE_MODELO_FACT = 'asiento_modelo_factura_mercaderia';
+
+// El modelo elegido, con sus líneas y con la verificación de que sirve. Lo lee
+// la pantalla de Facturas por mercadería para mostrar contra qué se va a
+// contabilizar antes de cargar nada.
+router.get('/factura-mercaderia/modelo', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const id = db.prepare('SELECT valor FROM sg_config WHERE clave=?').get(CLAVE_MODELO_FACT);
+    const modeloId = id && id.valor ? Number(id.valor) : null;
+    if (!modeloId) return res.json({ ok: true, data: { modelo: null } });
+
+    const m = db.prepare('SELECT * FROM sg_asientos_modelo WHERE id=? AND activo=1').get(modeloId);
+    if (!m) {
+      // El modelo parametrizado se dio de baja: hay que avisar, no devolver
+      // null como si nunca se hubiera elegido uno.
+      return res.json({ ok: true, data: { modelo: null, id_perdido: modeloId } });
+    }
+    m.lineas = db.prepare(`SELECT l.*, c.codigo AS cuenta_codigo, c.nombre AS cuenta_nombre
+      FROM sg_asientos_modelo_lineas l
+      LEFT JOIN sg_cuentas c ON c.id = l.cuenta_id
+      WHERE l.modelo_id=? ORDER BY l.orden, l.id`).all(m.id);
+
+    // Qué le falta al modelo para poder contabilizar una compra. Se avisa acá y
+    // no cuando ya está la factura cargada y el operador esperando.
+    const faltan = [];
+    if (!m.lineas.length) faltan.push('no tiene ninguna línea');
+    if (!m.lineas.some((l) => l.tipo_linea === 'proveedores')) {
+      faltan.push('no tiene la línea de Proveedores, que es el haber de la compra');
+    }
+    if (!m.lineas.some((l) => l.lado === 'debe')) faltan.push('no tiene ninguna línea en el debe');
+    if (!m.lineas.some((l) => l.lado === 'haber')) faltan.push('no tiene ninguna línea en el haber');
+    const sinCuenta = m.lineas.filter((l) => !l.cuenta_codigo).length;
+    if (sinCuenta) faltan.push(sinCuenta + ' línea(s) apuntan a una cuenta que ya no existe');
+
+    res.json({ ok: true, data: { modelo: m, faltan } });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// Elegir con qué modelo se contabilizan. Sólo admin: define cómo entra la plata
+// de todas las compras de mercadería.
+router.put('/factura-mercaderia/modelo', requireAdmin, (req, res) => {
+  const db = getDb();
+  try {
+    const modeloId = req.body && req.body.modelo_id ? Number(req.body.modelo_id) : null;
+    if (modeloId) {
+      const m = db.prepare('SELECT id FROM sg_asientos_modelo WHERE id=? AND activo=1').get(modeloId);
+      if (!m) return res.status(400).json({ ok: false, error: 'Ese asiento modelo no existe o está dado de baja' });
+    }
+    db.prepare(`INSERT INTO sg_config (clave, valor, modificado_en, modificado_por)
+      VALUES (?,?,datetime('now','localtime'),?)
+      ON CONFLICT(clave) DO UPDATE SET valor=excluded.valor,
+        modificado_en=excluded.modificado_en, modificado_por=excluded.modificado_por`)
+      .run(CLAVE_MODELO_FACT, modeloId == null ? null : String(modeloId), uid(req));
+    res.json({ ok: true, data: { modelo_id: modeloId } });
+  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+
 // Partidas de precio cerrado a las que todavía no se les cargó la factura del
 // proveedor. El número de factura se carga en el paso 1 de la recepción.
 router.get('/partidas-a-facturar', requireAuth, (req, res) => {
