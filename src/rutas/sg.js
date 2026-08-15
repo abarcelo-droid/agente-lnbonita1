@@ -18,6 +18,8 @@ import '../servicios/db_sg.js'; // corre el DDL sg_* al importarse
 // de las órdenes que se cargaron antes de que existiera.
 import '../servicios/sg_oc_condiciones_y_traza.js';
 import { detectarDuplicado } from '../servicios/dedup.js';
+// El model ID sale SIEMPRE de config/ia.js: es la fuente única del repo.
+import { MODELO_CHAT } from '../config/ia.js';
 import { generarOcPDF } from '../servicios/ocPDF.js';
 import { generarRecepcionCalidadPDF } from '../servicios/recepcionCalidadPDF.js';
 import { autenticar as afipAutenticar, ambienteActual as afipAmbiente } from '../servicios/afip-wsaa.js';
@@ -1829,6 +1831,105 @@ router.post('/oc/:id/factura-completa', facturaUpload.single('archivo'), require
     })();
     res.json({ ok: true, data: { id: Number(id), archivo_ruta: ruta } });
   } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+
+// ── LEERLE LOS DATOS FISCALES AL COMPROBANTE ─────────────────────────────
+// Copia el patrón de /api/factura/analizar (buscar.js), que es el único del
+// repo que acepta PDF: bloque 'document' para PDF y 'image' para una foto.
+//
+// LO QUE DEVUELVE ES UNA PROPUESTA, NO UN DATO. De acá sale el primer asiento
+// contable de la mercadería: nada se guarda sin que una persona lo mire. La
+// pantalla llena los campos y el operador confirma.
+//
+// Va con requireAdmin — el de buscar.js quedó sin auth y gasta la API key.
+router.post('/factura-mercaderia/leer', requireAdmin, async (req, res) => {
+  try {
+    const { base64, mediaType, oc_id } = req.body || {};
+    if (!base64 || !mediaType) return res.status(400).json({ ok: false, error: 'Falta el archivo' });
+    if (!process.env.ANTHROPIC_API_KEY) {
+      return res.status(503).json({ ok: false, error: 'La lectura automática no está configurada en este servidor' });
+    }
+    const db = getDb();
+
+    // A quién le compramos, según la orden. Sirve para que la lectura pueda
+    // contrastar el CUIT del comprobante contra el del proveedor: si no dan,
+    // la factura puede ser de otro y eso hay que verlo ANTES de contabilizar.
+    let prov = null;
+    if (oc_id) {
+      prov = db.prepare(`SELECT p.razon_social, p.cuit FROM sg_oc o
+        LEFT JOIN sg_proveedores p ON p.id=o.proveedor_id WHERE o.id=?`).get(oc_id);
+    }
+
+    const esPDF = mediaType === 'application/pdf';
+    const contenido = esPDF
+      ? { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: base64 } }
+      : { type: 'image', source: { type: 'base64', media_type: mediaType, data: base64 } };
+
+    const prompt = `Sos un asistente contable argentino. Leé esta factura de compra de mercadería y extraé
+sus datos fiscales. Respondé ÚNICAMENTE un JSON válido, sin markdown ni backticks, con estas claves:
+
+{"tipo_comprobante":"factura_a|factura_b|liquidacion","punto_venta":"","numero":"","fecha_emision":"AAAA-MM-DD",
+ "cuit_emisor":"","razon_social_emisor":"","neto":0,"iva_alicuota":0,"iva_monto":0,
+ "percepcion_iva":0,"percepcion_iibb":0,"percepcion_ganancias":0,"otros_conceptos":0,"total":0,
+ "cae":"","cae_vencimiento":"AAAA-MM-DD","confianza":"alta|media|baja","observaciones":""}
+
+REGLAS:
+- Los montos son NÚMEROS en pesos, sin separador de miles. iva_alicuota es el PORCENTAJE (21, 10.5) y
+  iva_monto es el MONTO en pesos. No los confundas.
+- El punto de venta y el número van por separado. En "0001-00012345", punto_venta es "0001" y numero
+  "00012345".
+- Las percepciones son las que figuran discriminadas (IVA, Ingresos Brutos, Ganancias). Si no hay, 0.
+- Lo que no puedas leer con seguridad va en null, NUNCA inventado. Si dudás de un monto, poné
+  confianza "baja" y explicá qué no se lee en observaciones.
+- neto + iva_monto + percepciones + otros_conceptos tiene que dar total. Si no da, decilo en
+  observaciones en vez de forzar los números.${prov && prov.cuit ? `
+- La orden es del proveedor "${prov.razon_social}", CUIT ${prov.cuit}. Si el CUIT del comprobante NO
+  coincide, dejá igual el que leíste y avisalo en observaciones: puede ser una factura de otro.` : ''}`;
+
+    const headers = {
+      'Content-Type': 'application/json',
+      'x-api-key': process.env.ANTHROPIC_API_KEY,
+      'anthropic-version': '2023-06-01',
+    };
+    if (esPDF) headers['anthropic-beta'] = 'pdfs-2024-09-25';
+
+    const resp = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST', headers,
+      body: JSON.stringify({ model: MODELO_CHAT, max_tokens: 1500,
+        messages: [{ role: 'user', content: [contenido, { type: 'text', text: prompt }] }] }),
+    });
+    const data = await resp.json();
+    const txt = (data.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('\n');
+    if (!txt) return res.status(502).json({ ok: false, error: 'La lectura no devolvió nada' });
+
+    let leido;
+    try {
+      leido = JSON.parse(txt.replace(/```json|```/g, '').trim());
+    } catch (_) {
+      // El 422 con el texto crudo deja ver QUÉ contestó cuando no parsea. Un 500
+      // pelado esconde el problema.
+      return res.status(422).json({ ok: false, error: 'No se pudo interpretar la lectura', raw: txt.slice(0, 800) });
+    }
+
+    // El control de suma se hace ACÁ y viaja con la propuesta: que el operador
+    // vea de entrada si los números que se leyeron cierran entre sí.
+    const n = (v) => (v != null && !isNaN(Number(v))) ? Number(v) : 0;
+    const suma = +(n(leido.neto) + n(leido.iva_monto) + n(leido.percepcion_iva)
+      + n(leido.percepcion_iibb) + n(leido.percepcion_ganancias) + n(leido.otros_conceptos)).toFixed(2);
+    const cierra = leido.total == null || Math.abs(n(leido.total) - suma) < 0.01;
+
+    res.json({ ok: true, data: {
+      leido,
+      suma_desglose: suma,
+      cierra,
+      proveedor_oc: prov || null,
+      cuit_coincide: !!(prov && prov.cuit && leido.cuit_emisor
+        && String(prov.cuit).replace(/\D/g, '') === String(leido.cuit_emisor).replace(/\D/g, '')),
+    } });
+  } catch (e) {
+    console.error('[SG] Lectura de factura:', e.message);
+    res.status(500).json({ ok: false, error: e.message });
+  }
 });
 
 // Partidas de precio cerrado a las que todavía no se les cargó la factura del

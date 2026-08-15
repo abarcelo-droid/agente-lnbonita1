@@ -2725,6 +2725,10 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
             <button class="btn bo bs" type="button" id="sgfm-leer" style="display:none" onclick="sgFmLeerPdf()">🔍 Leer datos de la factura</button>
           </div>
           <div style="font-size:11.5px;color:var(--mut)">El PDF queda archivado con la partida. La lectura PROPONE los datos; se confirman a mano antes de contabilizar.</div>
+          <!-- Lo que la lectura no pudo leer bien, o lo que no cierra. Va acá
+               arriba y no en un toast que se va solo. -->
+          <div id="sgfm-aviso-lectura" style="display:none;border:1.5px solid #e0a72e;background:rgba(224,167,46,.10);
+               border-radius:8px;padding:10px 12px;margin-top:10px;font-size:12.5px;color:#9a3412;line-height:1.6"></div>
         </div>
 
         <div class="sg-oc-box" style="margin-top:12px">
@@ -5432,9 +5436,62 @@ function sgFmAsientoPintar(imp){
   cont.innerHTML = sgFmAsientoTabla(m.lineas, importes);
 }
 
+// LEERLE LOS DATOS AL COMPROBANTE. Lo que vuelve es una PROPUESTA: llena los
+// campos y el operador los mira y corrige. De acá sale el primer asiento de la
+// mercadería, así que nada se guarda sin que alguien lo confirme.
 function sgFmLeerPdf(){
-  toast('La lectura automática del PDF se conecta en el paso siguiente. '
-    + 'Por ahora cargá los datos a mano: el asiento de abajo se arma igual.', 'ok');
+  var f = SGFMF.archivo;
+  if (!f) { toast('Adjuntá primero el comprobante', 'er'); return; }
+  var btn = eid('sgfm-leer');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Leyendo…'; }
+  var listo = function(){ if (btn) { btn.disabled = false; btn.textContent = '🔍 Leer datos de la factura'; } };
+
+  var fr = new FileReader();
+  fr.onload = function(){
+    // Sin comprimir: un PDF pasado por canvas se rompe, y una factura
+    // recomprimida pierde justo los números chicos.
+    var b64 = String(fr.result).split(',')[1];
+    api('/api/sg/factura-mercaderia/leer', 'POST',
+        { base64: b64, mediaType: f.type || 'application/pdf', oc_id: SGFMF.ocId })
+      .then(function(r){
+        listo();
+        if (!r || !r.ok) { toast((r && r.error) || 'No se pudo leer el comprobante', 'er'); return; }
+        var d = r.data, L = d.leido || {};
+        var poner = function(id, v){ var el = eid(id); if (el && v != null && v !== '') el.value = v; };
+        poner('sgfm-f-tipo', L.tipo_comprobante);
+        poner('sgfm-f-pv', L.punto_venta); poner('sgfm-f-nro', L.numero);
+        poner('sgfm-f-fecha', L.fecha_emision); poner('sgfm-f-cuit', L.cuit_emisor);
+        poner('sgfm-f-cae', L.cae);
+        poner('sgfm-f-neto', L.neto); poner('sgfm-f-alic', L.iva_alicuota); poner('sgfm-f-iva', L.iva_monto);
+        poner('sgfm-f-piva', L.percepcion_iva); poner('sgfm-f-piibb', L.percepcion_iibb);
+        poner('sgfm-f-pgan', L.percepcion_ganancias); poner('sgfm-f-otros', L.otros_conceptos);
+        poner('sgfm-f-total', L.total);
+        sgFmRecalc();
+
+        // Lo que hay que MIRAR antes de dar por buena la lectura.
+        var avisos = [];
+        if (L.confianza === 'baja') avisos.push('la lectura dice que no está segura');
+        if (L.observaciones) avisos.push(escH(L.observaciones));
+        if (!d.cierra) avisos.push('los números leídos no cierran entre sí (desglose: ' + sgMoney(d.suma_desglose) + ')');
+        if (d.proveedor_oc && d.proveedor_oc.cuit && L.cuit_emisor && !d.cuit_coincide) {
+          avisos.push('el CUIT del comprobante NO es el de ' + escH(d.proveedor_oc.razon_social)
+            + ': puede ser una factura de otro proveedor');
+        }
+        var cont = eid('sgfm-aviso-lectura');
+        if (cont) {
+          cont.style.display = avisos.length ? '' : 'none';
+          cont.innerHTML = avisos.length
+            ? '<b>⚠️ Revisá antes de guardar:</b><br>• ' + avisos.join('<br>• ')
+            : '';
+        }
+        toast(avisos.length
+          ? 'Datos leídos — hay cosas para revisar'
+          : 'Datos leídos. Revisalos y corregí lo que haga falta antes de guardar.', 'ok');
+      })
+      .catch(function(){ listo(); toast('No se pudo leer el comprobante', 'er'); });
+  };
+  fr.onerror = function(){ listo(); toast('No se pudo abrir el archivo', 'er'); };
+  fr.readAsDataURL(f);
 }
 
 function sgFmGuardar(){

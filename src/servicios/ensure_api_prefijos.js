@@ -137,8 +137,9 @@ const PREFIJOS = [
   // Facturas por mercadería: las partidas de Precio Cerrado ya recibidas a las
   // que falta cargarles la factura del proveedor. La factura se guarda en la
   // recepción, así que la escritura va por sg/oc (…/factura).
-  // 'sg/factura-mercaderia' cubre la parametrización del asiento con el que se
-  // contabilizan: es admin y define cómo entra la plata de TODAS las compras.
+  // 'sg/factura-mercaderia' cubre dos cosas: la parametrización del asiento con
+  // el que se contabilizan —define cómo entra la plata de TODAS las compras— y
+  // la lectura del comprobante con IA, que gasta la API key.
   ['sg-facturas-merc',   'sg/partidas-a-facturar,sg/factura-mercaderia'],
 
   // ═══════════════════════════════════════════════════════════════════════
