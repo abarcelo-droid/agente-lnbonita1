@@ -1737,6 +1737,100 @@ router.put('/factura-mercaderia/modelo', requireAdmin, (req, res) => {
   } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
 });
 
+// ── SUBIR LA FACTURA DEL PROVEEDOR ───────────────────────────────────────
+// El PDF se guarda en data/sg/ como cualquier otro adjunto del módulo, y los
+// datos fiscales quedan desglosados: cada uno va a una línea distinta del
+// asiento. Un total no se puede imputar.
+const facturaStorage = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, SG_UPLOAD_DIR),
+  filename: (req, file, cb) => {
+    const ext = (path.extname(file.originalname || '') || '.pdf').toLowerCase();
+    cb(null, 'factura_' + (req.params.id || 'x') + '_' + Date.now() + '_' + Math.floor(Math.random() * 1e6) + ext);
+  },
+});
+const facturaUpload = multer({ storage: facturaStorage, limits: { fileSize: 15 * 1024 * 1024 } });
+
+const numF = (v) => (v != null && v !== '' && !isNaN(Number(v))) ? Number(v) : null;
+
+// Lo que ya se cargó de una partida. La pantalla lo usa para no pedir dos veces
+// lo mismo y para mostrar el asiento con los importes reales.
+router.get('/oc/:id/factura', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const f = db.prepare(`SELECT * FROM sg_facturas_compra
+      WHERE oc_id=? AND activo=1 ORDER BY id DESC LIMIT 1`).get(req.params.id);
+    res.json({ ok: true, data: f || null });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// Guardar la factura: el PDF y sus datos fiscales. multipart, igual que las
+// fotos de la recepción — el archivo en disco, en la base sólo la ruta.
+router.post('/oc/:id/factura-completa', facturaUpload.single('archivo'), requireAdmin, (req, res) => {
+  const db = getDb();
+  try {
+    const b = req.body && req.body.payload ? JSON.parse(req.body.payload) : (req.body || {});
+    const oc = db.prepare('SELECT id, proveedor_id, estado FROM sg_oc WHERE id=? AND activo=1').get(req.params.id);
+    if (!oc) return res.status(404).json({ ok: false, error: 'Orden no encontrada' });
+    if (!(oc.estado === 'recibida_total' || oc.estado === 'cerrada')) {
+      return res.status(400).json({ ok: false,
+        error: 'Esa orden todavía no recibió la mercadería: no se le puede cargar la factura.' });
+    }
+    if (!val(b.numero)) return res.status(400).json({ ok: false, error: 'Falta el número de la factura' });
+
+    // El total tiene que dar contra el desglose, o el asiento no va a balancear
+    // nunca. Se controla ACÁ y no después: es más barato que descubrirlo con el
+    // asiento a medio armar.
+    const neto = numF(b.neto) || 0, iva = numF(b.iva_monto) || 0;
+    const pIva = numF(b.percepcion_iva) || 0, pIibb = numF(b.percepcion_iibb) || 0;
+    const pGan = numF(b.percepcion_ganancias) || 0, otros = numF(b.otros_conceptos) || 0;
+    const total = numF(b.total);
+    const suma = +(neto + iva + pIva + pIibb + pGan + otros).toFixed(2);
+    if (total != null && Math.abs(total - suma) > 0.01) {
+      return res.status(400).json({ ok: false,
+        error: 'El total (' + total + ') no da contra el desglose (' + suma + '). '
+             + 'Revisá neto, IVA, percepciones y otros conceptos antes de guardar.' });
+    }
+
+    const prev = db.prepare('SELECT id, archivo_ruta FROM sg_facturas_compra WHERE oc_id=? AND activo=1').get(oc.id);
+    const ruta = req.file ? ('/data/sg/' + req.file.filename) : (prev ? prev.archivo_ruta : null);
+    const nombre = req.file ? (req.file.originalname || null) : null;
+
+    const campos = [oc.id, oc.proveedor_id || null, val(b.tipo_comprobante), val(b.punto_venta),
+      val(b.numero), val(b.fecha_emision), val(b.cuit_emisor), neto, numF(b.iva_alicuota), iva,
+      pIva, pIibb, pGan, otros, total != null ? total : suma, val(b.cae), val(b.cae_vencimiento),
+      ruta, nombre, b.leido_por_ia ? 1 : 0, val(b.observaciones), uid(req)];
+
+    let id;
+    db.transaction(() => {
+      if (prev) {
+        db.prepare(`UPDATE sg_facturas_compra SET proveedor_id=?, tipo_comprobante=?, punto_venta=?,
+          numero=?, fecha_emision=?, cuit_emisor=?, neto=?, iva_alicuota=?, iva_monto=?,
+          percepcion_iva=?, percepcion_iibb=?, percepcion_ganancias=?, otros_conceptos=?, total=?,
+          cae=?, cae_vencimiento=?, archivo_ruta=?, archivo_nombre=?, leido_por_ia=?, observaciones=?,
+          modificado_en=datetime('now','localtime'), modificado_por=? WHERE id=?`)
+          .run(...campos.slice(1), prev.id);
+        id = prev.id;
+      } else {
+        id = db.prepare(`INSERT INTO sg_facturas_compra
+          (oc_id, proveedor_id, tipo_comprobante, punto_venta, numero, fecha_emision, cuit_emisor,
+           neto, iva_alicuota, iva_monto, percepcion_iva, percepcion_iibb, percepcion_ganancias,
+           otros_conceptos, total, cae, cae_vencimiento, archivo_ruta, archivo_nombre, leido_por_ia,
+           observaciones, creado_por)
+          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(...campos).lastInsertRowid;
+      }
+      // El número también queda en la recepción, que es de donde lo lee la
+      // bandeja para saber que esta partida ya no está pendiente.
+      const rec = db.prepare('SELECT id FROM sg_recepciones WHERE oc_id=? AND activo=1 ORDER BY id DESC LIMIT 1').get(oc.id);
+      if (rec) {
+        const nro = (val(b.punto_venta) ? val(b.punto_venta) + '-' : '') + val(b.numero);
+        db.prepare(`UPDATE sg_recepciones SET factura_numero=?,
+          modificado_en=datetime('now','localtime'), modificado_por=? WHERE id=?`).run(nro, uid(req), rec.id);
+      }
+    })();
+    res.json({ ok: true, data: { id: Number(id), archivo_ruta: ruta } });
+  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+
 // Partidas de precio cerrado a las que todavía no se les cargó la factura del
 // proveedor. El número de factura se carga en el paso 1 de la recepción.
 router.get('/partidas-a-facturar', requireAuth, (req, res) => {

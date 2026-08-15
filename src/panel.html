@@ -779,19 +779,41 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
        cuánto hay sin que haya que entrar a mirar. Y la de pendientes va primera
        y arranca abierta, porque es la que se usa todos los días. -->
   <style>
+    /* ── LAS SOLAPAS DE ESTA PANTALLA ──────────────────────────────────
+       El estilo de .sgc-subtab está escrito como ".sg-mod .sgc-subtab", y
+       #sec-ab-liquidaciones NO tiene la clase sg-mod (viene de Abasto, no de
+       los módulos de San Gerónimo). Resultado: las dos solapas se dibujaban
+       SIN NINGÚN ESTILO — texto plano pegado, sin padding, y sin forma de ver
+       cuál estaba abierta. Se le da estilo propio a las dos pantallas nuevas. */
+    #sec-ab-liquidaciones .sgc-subtab,
+    #sec-sg-facturas-merc .sgc-subtab{padding:8px 16px;cursor:pointer;font-size:12.5px;font-weight:600;
+      border-radius:7px;color:var(--mut);white-space:nowrap;transition:background .12s,color .12s;
+      display:inline-flex;align-items:center;line-height:1}
+    #sec-ab-liquidaciones .sgc-subtab:hover,
+    #sec-sg-facturas-merc .sgc-subtab:hover{background:var(--bor);color:var(--tx)}
+    #sec-ab-liquidaciones .sgc-subtab.on,
+    #sec-sg-facturas-merc .sgc-subtab.on{background:var(--burg);color:#fff}
+    #sec-ab-liquidaciones .sgc-subtab.on:hover,
+    #sec-sg-facturas-merc .sgc-subtab.on:hover{background:var(--burg);color:#fff}
+
     /* El contador de las dos bandejas de trabajo — la de liquidar y la de
        facturar. Ámbar cuando hay algo esperando: se tiene que ver sin entrar. */
     #sec-ab-liquidaciones .liq-cnt,
-    #sec-sg-facturas-merc .liq-cnt{display:inline-block;min-width:18px;padding:1px 6px;margin-left:6px;
-      border-radius:9px;font-size:11px;font-weight:700;background:var(--bor);color:var(--tx);vertical-align:1px}
+    #sec-sg-facturas-merc .liq-cnt{display:inline-block;min-width:18px;text-align:center;padding:2px 7px;margin-left:8px;
+      border-radius:9px;font-size:11px;font-weight:700;background:var(--bor);color:var(--tx)}
     #sec-ab-liquidaciones .sgc-subtab.on .liq-cnt,
     #sec-sg-facturas-merc .sgc-subtab.on .liq-cnt{background:rgba(255,255,255,.25);color:#fff}
     #sec-ab-liquidaciones .liq-cnt.hay,
     #sec-sg-facturas-merc .liq-cnt.hay{background:#e0a72e;color:#3a2a00}
     #sec-ab-liquidaciones .sgc-subtab.on .liq-cnt.hay,
     #sec-sg-facturas-merc .sgc-subtab.on .liq-cnt.hay{background:#ffd77a;color:#3a2a00}
+
+    /* Y el contenedor de las solapas, que tampoco tenía nada. */
+    #sec-ab-liquidaciones .sgc-tabs,
+    #sec-sg-facturas-merc .sgc-tabs{display:inline-flex;gap:4px;background:var(--bg);
+      border:1px solid var(--bor);border-radius:10px;padding:4px;margin-bottom:18px;flex-wrap:wrap}
   </style>
-  <div style="display:inline-flex;gap:2px;background:var(--bg);border:1px solid var(--bor);border-radius:8px;padding:3px;margin-bottom:16px;flex-wrap:wrap">
+  <div class="sgc-tabs">
     <div class="sgc-subtab on" data-sub="partidas" onclick="liqSub('partidas')">⏳ Partidas pendientes de liquidar<span class="liq-cnt" id="liq-cnt-part">·</span></div>
     <div class="sgc-subtab" data-sub="liqs" onclick="liqSub('liqs')">📄 Liquidaciones emitidas<span class="liq-cnt" id="liq-cnt-emi">·</span></div>
   </div>
@@ -2664,7 +2686,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       <div id="sgfm-modelo-cuerpo" style="font-size:13px">Cargando…</div>
     </div>
 
-    <div style="display:inline-flex;gap:2px;background:var(--bg);border:1px solid var(--bor);border-radius:8px;padding:3px;margin-bottom:16px">
+    <div class="sgc-tabs">
       <div class="sgc-subtab on" data-sub="pendientes" onclick="sgFmSub('pendientes')">⏳ Partidas pendientes de facturar<span class="liq-cnt" id="sgfm-cnt">·</span></div>
     </div>
     <div class="sgc-sub on" id="sgfm-sub-pendientes">
@@ -2676,6 +2698,75 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
           <th style="text-align:right">Bultos</th><th style="text-align:right">Kg</th><th></th></tr></thead>
         <tbody id="sgfm-tb"><tr><td colspan="6" class="emp">Cargando…</td></tr></tbody>
       </table></div>
+    </div>
+  </div>
+
+  <!-- ── CARGAR LA FACTURA DE UNA PARTIDA ─────────────────────────────────
+       Acá se contabiliza: el PDF, los datos fiscales desglosados, y abajo el
+       asiento que se va a generar con el control de que balancee. El desglose
+       no es burocracia — cada número va a una línea distinta del asiento, y un
+       total no se puede imputar. -->
+  <div class="ab-modal-overlay" id="sgfm-modal">
+    <div class="ab-modal" style="width:980px;max-width:96vw;max-height:92vh;display:flex;flex-direction:column">
+      <div class="mhd">
+        <div class="mht">🧾 Cargar factura de mercadería</div>
+        <button class="mcl" onclick="closeMB('sgfm-modal')">×</button>
+      </div>
+      <div id="sgfm-part-cab" style="background:rgba(224,167,46,.12);border:1px solid #e0a72e;
+           border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:13px;font-weight:600"></div>
+
+      <div style="flex:1;overflow-y:auto;padding-right:6px">
+        <div class="sg-oc-box">
+          <div class="sg-oc-box-tit">El comprobante</div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:6px">
+            <button class="btn bb bs" type="button" onclick="eid('sgfm-pdf').click()">📎 Adjuntar PDF</button>
+            <input type="file" accept="application/pdf,image/*" id="sgfm-pdf" style="display:none" onchange="sgFmPdfElegido(this)">
+            <span id="sgfm-pdf-nom" style="font-size:12.5px;color:var(--mut)">Ningún archivo</span>
+            <button class="btn bo bs" type="button" id="sgfm-leer" style="display:none" onclick="sgFmLeerPdf()">🔍 Leer datos de la factura</button>
+          </div>
+          <div style="font-size:11.5px;color:var(--mut)">El PDF queda archivado con la partida. La lectura PROPONE los datos; se confirman a mano antes de contabilizar.</div>
+        </div>
+
+        <div class="sg-oc-box" style="margin-top:12px">
+          <div class="sg-oc-box-tit">Datos fiscales</div>
+          <div class="sg-rec-grid">
+            <div class="fl"><label>Tipo</label>
+              <select id="sgfm-f-tipo"><option value="factura_a">Factura A</option><option value="factura_b">Factura B</option><option value="liquidacion">Liquidación</option></select></div>
+            <div class="fl"><label>Punto de venta</label><input id="sgfm-f-pv" placeholder="0001"></div>
+            <div class="fl"><label>Número <span style="color:var(--err)">*</span></label><input id="sgfm-f-nro" placeholder="00012345"></div>
+            <div class="fl"><label>Fecha de emisión</label><input type="date" id="sgfm-f-fecha"></div>
+            <div class="fl"><label>CUIT del emisor</label><input id="sgfm-f-cuit" placeholder="30-12345678-9"></div>
+            <div class="fl"><label>CAE</label><input id="sgfm-f-cae"></div>
+          </div>
+        </div>
+
+        <div class="sg-oc-box" style="margin-top:12px">
+          <div class="sg-oc-box-tit">Importes</div>
+          <div class="sg-rec-grid">
+            <div class="fl"><label>Neto gravado</label><input type="number" step="0.01" id="sgfm-f-neto" oninput="sgFmRecalc()"></div>
+            <div class="fl"><label>IVA %</label><input type="number" step="0.01" id="sgfm-f-alic" value="21" oninput="sgFmRecalc()"></div>
+            <div class="fl"><label>IVA</label><input type="number" step="0.01" id="sgfm-f-iva" oninput="sgFmRecalc()"></div>
+            <div class="fl"><label>Percepción IVA</label><input type="number" step="0.01" id="sgfm-f-piva" oninput="sgFmRecalc()"></div>
+            <div class="fl"><label>Percepción IIBB</label><input type="number" step="0.01" id="sgfm-f-piibb" oninput="sgFmRecalc()"></div>
+            <div class="fl"><label>Percepción Ganancias</label><input type="number" step="0.01" id="sgfm-f-pgan" oninput="sgFmRecalc()"></div>
+            <div class="fl"><label>Otros conceptos</label><input type="number" step="0.01" id="sgfm-f-otros" oninput="sgFmRecalc()"></div>
+            <div class="fl"><label>TOTAL</label><input type="number" step="0.01" id="sgfm-f-total" oninput="sgFmRecalc()"></div>
+          </div>
+          <div id="sgfm-suma" style="font-size:12.5px;margin-top:8px"></div>
+        </div>
+
+        <!-- EL ASIENTO. Lo que de verdad importa: contra qué se imputa cada
+             número y si cierra. -->
+        <div class="sg-oc-box" style="margin-top:12px">
+          <div class="sg-oc-box-tit">Asiento contable</div>
+          <div id="sgfm-asiento">Elegí el asiento modelo en la pantalla de Facturas por mercadería.</div>
+        </div>
+      </div>
+
+      <div style="display:flex;justify-content:space-between;gap:10px;padding-top:12px;border-top:1px solid var(--bor);margin-top:10px">
+        <button class="btn bo" onclick="closeMB('sgfm-modal')">Cancelar</button>
+        <button class="btn bb" onclick="sgFmGuardar()">Guardar factura</button>
+      </div>
     </div>
   </div>
 
@@ -5237,20 +5328,143 @@ function sgFmLoad(){
   });
 }
 
-// CARGAR LA FACTURA. Hoy pide el número y lo guarda con la documentación del
-// camión. El circuito completo —subir el PDF, leerle los datos fiscales y armar
-// con eso el asiento contable de compra— se construye aparte: es el primer
-// asiento de la mercadería y no puede salir de un campo tipeado a mano.
+// ── CARGAR LA FACTURA DE UNA PARTIDA ────────────────────────────────────
+// Acá se contabiliza. El PDF queda archivado con la partida, los datos fiscales
+// van desglosados —cada uno a una línea distinta del asiento— y abajo se ve el
+// asiento que se va a generar, con el control de que balancee.
+var SGFMF = { ocId: null, partida: '', archivo: null };
+
 function sgFmFactura(id, partida, proveedor){
-  var nro = prompt('Número de factura de ' + (proveedor || 'el proveedor')
-    + '\npara la partida ' + partida + ':');
-  if (nro === null) return;
-  if (!String(nro).trim()) { toast('Escribí el número de factura', 'er'); return; }
-  api('/api/sg/oc/' + id + '/factura', 'POST', { factura_numero: nro }).then(function(r){
-    if (!r || !r.ok) { toast((r && r.error) || 'No se pudo guardar', 'er'); return; }
-    toast('Factura ' + nro + ' cargada', 'ok');
-    sgFmLoad();
+  SGFMF = { ocId: id, partida: partida, archivo: null };
+  var cab = eid('sgfm-part-cab');
+  if (cab) cab.innerHTML = '🍅 Partida <code>' + escH(partida) + '</code>'
+    + (proveedor ? ' · ' + escH(proveedor) : '');
+  ['tipo','pv','nro','fecha','cuit','cae','neto','iva','piva','piibb','pgan','otros','total']
+    .forEach(function(k){ var el = eid('sgfm-f-' + k); if (el) el.value = ''; });
+  var alic = eid('sgfm-f-alic'); if (alic) alic.value = '21';
+  var nom = eid('sgfm-pdf-nom'); if (nom) nom.textContent = 'Ningún archivo';
+  var leer = eid('sgfm-leer'); if (leer) leer.style.display = 'none';
+
+  // Si ya se había cargado algo de esta partida, se trae para editarlo en vez
+  // de pedirlo de nuevo.
+  api('/api/sg/oc/' + id + '/factura').then(function(r){
+    var f = (r && r.ok) ? r.data : null;
+    if (f) {
+      var m = { tipo:'tipo_comprobante', pv:'punto_venta', nro:'numero', fecha:'fecha_emision',
+                cuit:'cuit_emisor', cae:'cae', neto:'neto', alic:'iva_alicuota', iva:'iva_monto',
+                piva:'percepcion_iva', piibb:'percepcion_iibb', pgan:'percepcion_ganancias',
+                otros:'otros_conceptos', total:'total' };
+      Object.keys(m).forEach(function(k){
+        var el = eid('sgfm-f-' + k); if (el && f[m[k]] != null) el.value = f[m[k]];
+      });
+      if (f.archivo_nombre) { var n2 = eid('sgfm-pdf-nom'); if (n2) n2.textContent = f.archivo_nombre + ' (ya cargado)'; }
+    }
+    sgFmRecalc();
   });
+  eid('sgfm-modal').classList.add('on');
+}
+
+function sgFmPdfElegido(input){
+  var f = input.files && input.files[0];
+  SGFMF.archivo = f || null;
+  var nom = eid('sgfm-pdf-nom');
+  if (nom) nom.textContent = f ? f.name : 'Ningún archivo';
+  var leer = eid('sgfm-leer');
+  if (leer) leer.style.display = f ? '' : 'none';
+}
+
+function _sgfmN(id){ var v = (eid(id) || {}).value; return (v === '' || v == null) ? 0 : (Number(v) || 0); }
+
+// El IVA se calcula solo del neto y la alícuota mientras nadie lo pise a mano:
+// es la cuenta que hace cualquiera, y equivocarse ahí desbalancea el asiento.
+function sgFmRecalc(){
+  var neto = _sgfmN('sgfm-f-neto'), alic = _sgfmN('sgfm-f-alic');
+  var ivaEl = eid('sgfm-f-iva');
+  if (ivaEl && document.activeElement !== ivaEl && neto > 0 && alic > 0) {
+    ivaEl.value = (Math.round(neto * alic) / 100).toFixed(2);
+  }
+  var iva = _sgfmN('sgfm-f-iva');
+  var pIva = _sgfmN('sgfm-f-piva'), pIibb = _sgfmN('sgfm-f-piibb');
+  var pGan = _sgfmN('sgfm-f-pgan'), otros = _sgfmN('sgfm-f-otros');
+  var suma = Math.round((neto + iva + pIva + pIibb + pGan + otros) * 100) / 100;
+
+  var totEl = eid('sgfm-f-total');
+  if (totEl && document.activeElement !== totEl && suma > 0) totEl.value = suma.toFixed(2);
+  var total = _sgfmN('sgfm-f-total');
+
+  var av = eid('sgfm-suma');
+  if (av) {
+    if (suma <= 0) av.innerHTML = '';
+    else if (Math.abs(total - suma) < 0.01) {
+      av.innerHTML = '<span style="color:#166534;font-weight:700">✓ El total da contra el desglose: ' + sgMoney(suma) + '</span>';
+    } else {
+      av.innerHTML = '<span style="color:var(--err);font-weight:700">✗ El total dice ' + sgMoney(total)
+        + ' y el desglose suma ' + sgMoney(suma) + '</span>';
+    }
+  }
+  sgFmAsientoPintar({ neto: neto, iva: iva, piva: pIva, piibb: pIibb, pgan: pGan, otros: otros, total: total || suma });
+}
+
+// El asiento con los importes de esta factura. Cada número va a la línea del
+// modelo que le corresponde por su TIPO: el IVA a la línea 'iva', cada
+// percepción a la suya, y el total a Proveedores, que es lo que se le debe.
+function sgFmAsientoPintar(imp){
+  var cont = eid('sgfm-asiento'); if (!cont) return;
+  var m = SGFM.modelo;
+  if (!m || !(m.lineas || []).length) {
+    cont.innerHTML = '<div style="color:#9a3412;font-weight:600">⚠️ No hay asiento modelo parametrizado. '
+      + 'Elegilo arriba, en la pantalla de Facturas por mercadería, antes de contabilizar.</div>';
+    return;
+  }
+  var porTipo = {
+    iva: imp.iva, percepcion_iva: imp.piva, percepcion_iibb: imp.piibb,
+    percepcion_ganancias: imp.pgan, proveedores: imp.total,
+  };
+  var importes = {}, sobra = 0;
+  (m.lineas || []).forEach(function(l){
+    if (porTipo[l.tipo_linea] != null) { importes[l.id] = porTipo[l.tipo_linea]; return; }
+    // La línea de gasto —la que no es ni IVA ni percepción ni proveedores— se
+    // lleva el neto. Si hay más de una, la primera: el resto queda en cero y el
+    // desbalance lo va a mostrar el control de abajo.
+    if (l.lado === 'debe' && !sobra) { importes[l.id] = imp.neto; sobra = 1; return; }
+    importes[l.id] = 0;
+  });
+  cont.innerHTML = sgFmAsientoTabla(m.lineas, importes);
+}
+
+function sgFmLeerPdf(){
+  toast('La lectura automática del PDF se conecta en el paso siguiente. '
+    + 'Por ahora cargá los datos a mano: el asiento de abajo se arma igual.', 'ok');
+}
+
+function sgFmGuardar(){
+  if (!SGFMF.ocId) return;
+  var nro = (eid('sgfm-f-nro') || {}).value;
+  if (!String(nro || '').trim()) { toast('Falta el número de la factura', 'er'); return; }
+  var payload = {
+    tipo_comprobante: (eid('sgfm-f-tipo') || {}).value || null,
+    punto_venta: (eid('sgfm-f-pv') || {}).value || null,
+    numero: nro,
+    fecha_emision: (eid('sgfm-f-fecha') || {}).value || null,
+    cuit_emisor: (eid('sgfm-f-cuit') || {}).value || null,
+    cae: (eid('sgfm-f-cae') || {}).value || null,
+    neto: _sgfmN('sgfm-f-neto'), iva_alicuota: _sgfmN('sgfm-f-alic'), iva_monto: _sgfmN('sgfm-f-iva'),
+    percepcion_iva: _sgfmN('sgfm-f-piva'), percepcion_iibb: _sgfmN('sgfm-f-piibb'),
+    percepcion_ganancias: _sgfmN('sgfm-f-pgan'), otros_conceptos: _sgfmN('sgfm-f-otros'),
+    total: _sgfmN('sgfm-f-total'),
+  };
+  var fd = new FormData();
+  fd.set('payload', JSON.stringify(payload));
+  if (SGFMF.archivo) fd.append('archivo', SGFMF.archivo);
+  fetch('/api/sg/oc/' + SGFMF.ocId + '/factura-completa', { method: 'POST', credentials: 'same-origin', body: fd })
+    .then(function(r){ return r.json(); })
+    .then(function(r){
+      if (!r || !r.ok) { toast((r && r.error) || 'No se pudo guardar', 'er'); return; }
+      toast('Factura guardada', 'ok');
+      closeMB('sgfm-modal');
+      sgFmLoad();
+    })
+    .catch(function(){ toast('No se pudo guardar', 'er'); });
 }
 
 // DAR LA ORDEN POR TERMINADA. El motivo se pide sólo si quedó saldo: si entró
