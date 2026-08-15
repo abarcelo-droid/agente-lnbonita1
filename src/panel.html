@@ -762,23 +762,43 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   <div class="ab-section-header">
     <div>
       <div class="ab-section-title">📄 Liquidaciones</div>
-      <div style="font-size:12px;color:var(--mut)">Pegá el texto de una liquidación, la IA la parsea, generás el PDF.</div>
+      <div style="font-size:12px;color:var(--mut)">Las partidas recibidas que esperan liquidación, y las que ya se emitieron.</div>
     </div>
-    <button class="btn bb" onclick="liqAbrirNueva()">+ Nueva liquidación</button>
+    <!-- NO HAY "+ Nueva liquidación". Una liquidación no nace de la nada: nace
+         de una PARTIDA que entró y todavía no tiene precio. El botón suelto
+         dejaba emitir una liquidación sin partida detrás, sin nada contra qué
+         controlarla. Se liquida desde la bandeja de la izquierda, fila por fila. -->
+    <button class="btn bo" onclick="liqSub('partidas')">↻ Actualizar</button>
   </div>
   <!-- ── LAS PARTIDAS QUE ESPERAN QUE SE LES CIERRE EL PRECIO ─────────────
        Una compra de Liquidación de Venta se recibe y ahí queda: el precio se
        define cuando la mercadería se vende. Hasta ahora la orden se recibía y
        desaparecía del circuito, sin ninguna bandeja que dijera "a estas les
        falta liquidar". -->
+  <!-- Las dos solapas llevan CONTADOR: la bandeja de trabajo tiene que decir
+       cuánto hay sin que haya que entrar a mirar. Y la de pendientes va primera
+       y arranca abierta, porque es la que se usa todos los días. -->
+  <style>
+    /* El contador de las dos bandejas de trabajo — la de liquidar y la de
+       facturar. Ámbar cuando hay algo esperando: se tiene que ver sin entrar. */
+    #sec-ab-liquidaciones .liq-cnt,
+    #sec-sg-facturas-merc .liq-cnt{display:inline-block;min-width:18px;padding:1px 6px;margin-left:6px;
+      border-radius:9px;font-size:11px;font-weight:700;background:var(--bor);color:var(--tx);vertical-align:1px}
+    #sec-ab-liquidaciones .sgc-subtab.on .liq-cnt,
+    #sec-sg-facturas-merc .sgc-subtab.on .liq-cnt{background:rgba(255,255,255,.25);color:#fff}
+    #sec-ab-liquidaciones .liq-cnt.hay,
+    #sec-sg-facturas-merc .liq-cnt.hay{background:#e0a72e;color:#3a2a00}
+    #sec-ab-liquidaciones .sgc-subtab.on .liq-cnt.hay,
+    #sec-sg-facturas-merc .sgc-subtab.on .liq-cnt.hay{background:#ffd77a;color:#3a2a00}
+  </style>
   <div style="display:inline-flex;gap:2px;background:var(--bg);border:1px solid var(--bor);border-radius:8px;padding:3px;margin-bottom:16px;flex-wrap:wrap">
-    <div class="sgc-subtab on" data-sub="liqs" onclick="liqSub('liqs')">📄 Liquidaciones</div>
-    <div class="sgc-subtab" data-sub="partidas" onclick="liqSub('partidas')">🍅 Partidas pendientes de liquidar</div>
+    <div class="sgc-subtab on" data-sub="partidas" onclick="liqSub('partidas')">⏳ Partidas pendientes de liquidar<span class="liq-cnt" id="liq-cnt-part">·</span></div>
+    <div class="sgc-subtab" data-sub="liqs" onclick="liqSub('liqs')">📄 Liquidaciones emitidas<span class="liq-cnt" id="liq-cnt-emi">·</span></div>
   </div>
 
-  <div class="sgc-sub" id="liq-sub-partidas" style="display:none">
+  <div class="sgc-sub on" id="liq-sub-partidas">
     <div style="font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--mut);margin-bottom:8px">
-      🍅 Pendientes de liquidar <span id="liq-part-n" style="font-weight:400;text-transform:none;letter-spacing:0"></span>
+      ⏳ Pendientes de liquidar <span id="liq-part-n" style="font-weight:400;text-transform:none;letter-spacing:0"></span>
     </div>
     <div class="ab-table-wrap"><table class="pa-tbl">
       <thead><tr><th>Partida</th><th>Recibida</th><th>Proveedor</th>
@@ -788,7 +808,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     </table></div>
   </div>
 
-  <div class="sgc-sub on" id="liq-sub-liqs">
+  <div class="sgc-sub" id="liq-sub-liqs" style="display:none">
   <div class="ab-card">
     <div class="ab-table-wrap">
       <table class="ab-table">
@@ -811,6 +831,10 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       <button class="mcl" onclick="document.getElementById('liq-modal').classList.remove('on')">×</button>
     </div>
     <div style="flex:1;overflow-y:auto;padding-right:6px">
+      <!-- De qué partida se está hablando. El modal arrancaba en blanco y el que
+           pegaba el texto no tenía contra qué controlarlo. -->
+      <div id="liq-partida-cab" style="display:none;background:rgba(224,167,46,.12);border:1px solid #e0a72e;
+           border-radius:8px;padding:10px 14px;margin-bottom:12px;font-size:13px;font-weight:600"></div>
       <!-- Paso 1: pegar texto -->
       <div id="liq-step1">
         <div style="background:var(--bg);border-radius:8px;padding:14px 16px;margin-bottom:12px;font-size:13px;line-height:1.5">
@@ -2628,7 +2652,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       <button class="btn bo" onclick="sgFmLoad()">↻ Actualizar</button>
     </div>
     <div style="display:inline-flex;gap:2px;background:var(--bg);border:1px solid var(--bor);border-radius:8px;padding:3px;margin-bottom:16px">
-      <div class="sgc-subtab on" data-sub="pendientes" onclick="sgFmSub('pendientes')">⏳ Partidas pendientes de facturar</div>
+      <div class="sgc-subtab on" data-sub="pendientes" onclick="sgFmSub('pendientes')">⏳ Partidas pendientes de facturar<span class="liq-cnt" id="sgfm-cnt">·</span></div>
     </div>
     <div class="sgc-sub on" id="sgfm-sub-pendientes">
       <div style="font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--mut);margin-bottom:8px">
@@ -5010,21 +5034,53 @@ function liqSub(cual){
   var a = eid('liq-sub-liqs'), b = eid('liq-sub-partidas');
   if (a) a.style.display = (cual === 'liqs') ? '' : 'none';
   if (b) b.style.display = (cual === 'partidas') ? '' : 'none';
-  if (cual === 'partidas') sgLiqPartidasLoad();
+  // Las dos se recargan al entrar: los contadores de las solapas tienen que
+  // decir la verdad, y liquidar una partida mueve las dos listas a la vez.
+  if (cual === 'partidas') sgLiqPartidasLoad(); else liqCargar();
+}
+
+// El número que va en la solapa. Se pinta ámbar cuando hay algo esperando: la
+// bandeja tiene que verse desde el menú, sin entrar.
+function liqCnt(id, n){
+  var el = eid(id); if (!el) return;
+  el.textContent = n;
+  el.classList.toggle('hay', n > 0 && id === 'liq-cnt-part');
 }
 
 function sgLiqPartidasLoad(){
   api('/api/sg/partidas-a-liquidar').then(function(r){
     var rows = (r && r.ok) ? r.data : [];
     var tb = eid('liq-tb-partidas'); if (!tb) return;
+    liqCnt('liq-cnt-part', rows.length);
     var n = eid('liq-part-n');
     if (n) n.textContent = rows.length ? ('· ' + rows.length + (rows.length === 1 ? ' partida' : ' partidas')) : '';
     tb.innerHTML = rows.length ? rows.map(function(p){
       return sgPartFila(p,
         '<td style="text-align:center"><b>' + nr(p.lotes_sin_precio) + '</b> de ' + nr(p.lotes) + '</td>'
-        + '<td style="text-align:right"><button class="btn bo bs" onclick="sgOcVer(' + p.id + ')">Ver y liquidar</button></td>');
-    }).join('') : '<tr><td colspan="7" class="emp">No hay partidas esperando liquidación.</td></tr>';
+        + '<td style="text-align:right;white-space:nowrap">'
+          + '<button class="btn bo bs" onclick="sgOcVer(' + p.id + ')">Ver</button> '
+          // ACÁ EMPIEZA UNA LIQUIDACIÓN, y sólo acá: sobre una partida que entró
+          // y todavía no tiene precio.
+          + '<button class="btn bb bs" onclick="liqDePartida(' + p.id + ',\'' + esc(p.trazabilidad || '') + '\',\''
+            + esc(p.proveedor_nombre || '') + '\')">💲 Liquidar</button>'
+        + '</td>');
+    }).join('') : '<tr><td colspan="7" class="emp">No hay partidas esperando liquidación. '
+        + 'Las partidas de Liquidación de Venta aparecen acá apenas se reciben.</td></tr>';
   });
+}
+
+// Liquidar ESTA partida. El modal es el mismo de siempre, pero ya no arranca en
+// blanco: sabe de qué partida se está hablando y lo dice arriba, así el que pega
+// el texto puede controlarlo contra la mercadería que entró.
+function liqDePartida(ocId, partida, proveedor){
+  LIQ.partida = { oc_id: ocId, codigo: partida, proveedor: proveedor };
+  liqAbrirNueva();
+  var cab = eid('liq-partida-cab');
+  if (cab) {
+    cab.style.display = '';
+    cab.innerHTML = '🍅 Liquidando la partida <code>' + escH(partida) + '</code>'
+      + (proveedor ? ' · ' + escH(proveedor) : '');
+  }
 }
 
 function sgFmSub(){ /* una sola solapa por ahora; existe para que el patrón no cambie después */ }
@@ -5033,20 +5089,29 @@ function sgFmLoad(){
   api('/api/sg/partidas-a-facturar').then(function(r){
     var rows = (r && r.ok) ? r.data : [];
     var tb = eid('sgfm-tb'); if (!tb) return;
+    var cnt = eid('sgfm-cnt');
+    if (cnt) { cnt.textContent = rows.length; cnt.classList.toggle('hay', rows.length > 0); }
     var n = eid('sgfm-n');
     if (n) n.textContent = rows.length ? ('· ' + rows.length + (rows.length === 1 ? ' partida' : ' partidas')) : '';
     tb.innerHTML = rows.length ? rows.map(function(p){
       return sgPartFila(p,
         '<td style="text-align:right;white-space:nowrap">'
         + '<button class="btn bo bs" onclick="sgOcVer(' + p.id + ')">Ver</button> '
-        + '<button class="btn bb bs" onclick="sgFmFactura(' + p.id + ',\'' + esc(p.trazabilidad || '') + '\')">🧾 Cargar factura</button>'
+        + '<button class="btn bb bs" onclick="sgFmFactura(' + p.id + ',\'' + esc(p.trazabilidad || '') + '\',\''
+          + esc(p.proveedor_nombre || '') + '\')">🧾 Cargar factura</button>'
         + '</td>');
-    }).join('') : '<tr><td colspan="6" class="emp">No hay partidas esperando factura.</td></tr>';
+    }).join('') : '<tr><td colspan="6" class="emp">No hay partidas esperando factura. '
+        + 'Las partidas de Precio Cerrado aparecen acá apenas se reciben.</td></tr>';
   });
 }
 
-function sgFmFactura(id, partida){
-  var nro = prompt('Número de factura del proveedor para la partida ' + partida + ':');
+// CARGAR LA FACTURA. Hoy pide el número y lo guarda con la documentación del
+// camión. El circuito completo —subir el PDF, leerle los datos fiscales y armar
+// con eso el asiento contable de compra— se construye aparte: es el primer
+// asiento de la mercadería y no puede salir de un campo tipeado a mano.
+function sgFmFactura(id, partida, proveedor){
+  var nro = prompt('Número de factura de ' + (proveedor || 'el proveedor')
+    + '\npara la partida ' + partida + ':');
   if (nro === null) return;
   if (!String(nro).trim()) { toast('Escribí el número de factura', 'er'); return; }
   api('/api/sg/oc/' + id + '/factura', 'POST', { factura_numero: nro }).then(function(r){
@@ -14623,7 +14688,9 @@ function loadSec(s) {
     'ab-ifcos': function(){ if (window.IFCO2) IFCO2.init(); else ifcoCargar(); },
     'ab-mandata': mdCargar,
     'ab-gastos': abCargarGastos,
-    'ab-liquidaciones': liqCargar,
+    // Arranca en la bandeja de partidas pendientes, que es el trabajo del día.
+    // Las emitidas son el archivo: se consultan, no se cargan.
+    'ab-liquidaciones': function(){ liqSub('partidas'); liqCargar(); },
     'pa-dashboard':  function(){ paLoadDash(); },
     'pa-clima':      function(){ paLoadClimaSeccion(); },
     'pa-calendario': function(){ paCalAbrir(); },
@@ -18539,7 +18606,8 @@ function _liqFecha(s){ if(!s)return''; var p=String(s).split('-'); return p.leng
 function liqCargar() {
   fetch('/api/liquidaciones', { credentials:'include' }).then(r=>r.json()).then(function(rows){
     var tb = document.getElementById('liq-tbody');
-    if (!rows || !rows.length) { tb.innerHTML = '<tr><td colspan="6"><div class="ab-empty"><div class="ab-empty-icon">📄</div>Sin liquidaciones</div></td></tr>'; return; }
+    if (typeof liqCnt === 'function') liqCnt('liq-cnt-emi', (rows && rows.length) || 0);
+    if (!rows || !rows.length) { tb.innerHTML = '<tr><td colspan="6"><div class="ab-empty"><div class="ab-empty-icon">📄</div>Sin liquidaciones emitidas. Se emiten desde una partida pendiente.</div></td></tr>'; return; }
     tb.innerHTML = rows.map(function(r){
       return '<tr>' +
         '<td style="font-family:monospace"><b>'+_liqEsc(r.n_liquidacion)+'</b></td>' +
