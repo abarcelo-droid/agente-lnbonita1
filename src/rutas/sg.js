@@ -1753,6 +1753,103 @@ const facturaStorage = multer.diskStorage({
 const facturaUpload = multer({ storage: facturaStorage, limits: { fileSize: 15 * 1024 * 1024 } });
 
 const numF = (v) => (v != null && v !== '' && !isNaN(Number(v))) ? Number(v) : null;
+const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
+
+// ── EL ASIENTO DE UNA FACTURA DE MERCADERÍA ──────────────────────────────
+// Reparte los importes de la factura entre las líneas del asiento modelo, cada
+// uno según el TIPO de línea. Es la MISMA cuenta que hace la pantalla: si las
+// dos no dan igual, lo que se ve no es lo que se graba.
+//
+// La percepción de Ingresos Brutos va a la línea de SU JURISDICCIÓN. El modelo
+// puede tener una línea por provincia; si no se elige jurisdicción, o la elegida
+// no está en el modelo, la percepción no tiene dónde imputarse y el asiento no
+// va a balancear — que es exactamente lo que tiene que pasar.
+function armarAsientoFactura(lineas, fac) {
+  const juris = (fac.iibb_jurisdiccion || '').trim();
+  const lineasIibb = lineas.filter((l) => l.tipo_linea === 'percepcion_iibb');
+  const lineaIibb = juris
+    ? lineasIibb.find((l) => (l.jurisdiccion || '').trim().toLowerCase() === juris.toLowerCase())
+    : (lineasIibb.length === 1 && !lineasIibb[0].jurisdiccion ? lineasIibb[0] : null);
+
+  const porTipo = {
+    iva: r2(fac.iva_monto),
+    percepcion_iva: r2(fac.percepcion_iva),
+    percepcion_ganancias: r2(fac.percepcion_ganancias),
+    proveedores: r2(fac.total),
+  };
+
+  let gastoPuesto = false;
+  const out = [];
+  for (const l of lineas) {
+    let monto = 0;
+    if (l.tipo_linea === 'percepcion_iibb') {
+      monto = (lineaIibb && l.id === lineaIibb.id) ? r2(fac.percepcion_iibb) : 0;
+    } else if (porTipo[l.tipo_linea] != null) {
+      monto = porTipo[l.tipo_linea];
+    } else if (l.lado === 'debe' && !gastoPuesto) {
+      // La línea de gasto —ni IVA, ni percepción, ni proveedores— se lleva el
+      // neto de la mercadería. Es la única que no se deduce de un tipo.
+      monto = r2(fac.neto);
+      gastoPuesto = true;
+    }
+    out.push({ linea_id: l.id, cuenta_id: l.cuenta_id, cuenta_codigo: l.cuenta_codigo,
+      cuenta_nombre: l.cuenta_nombre, lado: l.lado, tipo_linea: l.tipo_linea,
+      jurisdiccion: l.jurisdiccion || null, descripcion: l.descripcion, monto });
+  }
+  const debe = r2(out.filter((x) => x.lado === 'debe').reduce((a, x) => a + x.monto, 0));
+  const haber = r2(out.filter((x) => x.lado === 'haber').reduce((a, x) => a + x.monto, 0));
+  return { lineas: out, debe, haber, diferencia: r2(debe - haber), balancea: Math.abs(r2(debe - haber)) < 0.01 };
+}
+
+// Las líneas del modelo parametrizado, con su cuenta. null si no hay modelo.
+function lineasModeloFactura(db) {
+  const cfg = db.prepare('SELECT valor FROM sg_config WHERE clave=?').get(CLAVE_MODELO_FACT);
+  const id = cfg && cfg.valor ? Number(cfg.valor) : null;
+  if (!id) return null;
+  const m = db.prepare('SELECT id FROM sg_asientos_modelo WHERE id=? AND activo=1').get(id);
+  if (!m) return null;
+  return db.prepare(`SELECT l.*, c.codigo AS cuenta_codigo, c.nombre AS cuenta_nombre
+    FROM sg_asientos_modelo_lineas l
+    LEFT JOIN sg_cuentas c ON c.id = l.cuenta_id
+    WHERE l.modelo_id=? ORDER BY l.orden, l.id`).all(id);
+}
+
+// ── LO QUE SE COMPRÓ, PARA CONTROLAR LA FACTURA ──────────────────────────
+// Producto, lo que ENTRÓ DE VERDAD y el precio que acordó el comprador. Las
+// cantidades salen de la RECEPCIÓN, no de la orden: la orden es lo que se pidió
+// y puede diferir de lo que bajó del camión. Lo que se paga es lo que entró.
+//
+// El total que sale de acá es contra el que se controla la factura del
+// proveedor: si no dan iguales, el costo de la partida deja de ser el que se
+// acordó y el margen de esa mercadería queda mal para siempre.
+router.get('/oc/:id/para-facturar', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const oc = db.prepare(`SELECT o.id, o.trazabilidad, o.numero, o.tipo_precio, o.estado,
+        p.razon_social AS proveedor_nombre, p.cuit AS proveedor_cuit
+      FROM sg_oc o LEFT JOIN sg_proveedores p ON p.id=o.proveedor_id
+      WHERE o.id=? AND o.activo=1`).get(req.params.id);
+    if (!oc) return res.status(404).json({ ok: false, error: 'Orden no encontrada' });
+
+    const items = db.prepare(`SELECT i.id, i.precio_estimado_por_kg, i.kg_estimados,
+        i.cantidad_estimada_presentaciones, pr.nombre AS producto_nombre,
+        (SELECT COALESCE(SUM(kg_reales),0) FROM sg_lotes WHERE oc_item_id=i.id AND activo=1) AS kg_recibidos,
+        (SELECT COALESCE(SUM(bultos),0)    FROM sg_lotes WHERE oc_item_id=i.id AND activo=1) AS bultos_recibidos
+      FROM sg_oc_items i LEFT JOIN sg_productos pr ON pr.id=i.producto_id
+      WHERE i.oc_id=? ORDER BY i.id`).all(oc.id);
+
+    let total = 0;
+    for (const it of items) {
+      // Lo que corresponde pagar por ESTE producto: lo que entró por el precio
+      // acordado. En pizarra no hay precio todavía, así que no hay total.
+      it.importe = (it.precio_estimado_por_kg != null)
+        ? r2(it.kg_recibidos * Number(it.precio_estimado_por_kg)) : null;
+      if (it.importe != null) total = r2(total + it.importe);
+    }
+    res.json({ ok: true, data: { oc, items,
+      total_acordado: oc.tipo_precio === 'pizarra' ? null : total } });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
 
 // Lo que ya se cargó de una partida. La pantalla lo usa para no pedir dos veces
 // lo mismo y para mostrar el asiento con los importes reales.
@@ -1778,6 +1875,13 @@ router.post('/oc/:id/factura-completa', facturaUpload.single('archivo'), require
         error: 'Esa orden todavía no recibió la mercadería: no se le puede cargar la factura.' });
     }
     if (!val(b.numero)) return res.status(400).json({ ok: false, error: 'Falta el número de la factura' });
+    // Sólo A o B. Una liquidación NO es una factura de compra: es el
+    // comprobante de una venta por cuenta y orden, y se contabiliza distinto.
+    const TIPOS_OK = ['factura_a', 'factura_b'];
+    if (!TIPOS_OK.includes(val(b.tipo_comprobante))) {
+      return res.status(400).json({ ok: false,
+        error: 'La factura de compra de mercadería tiene que ser A o B.' });
+    }
 
     // El total tiene que dar contra el desglose, o el asiento no va a balancear
     // nunca. Se controla ACÁ y no después: es más barato que descubrirlo con el
@@ -1793,13 +1897,75 @@ router.post('/oc/:id/factura-completa', facturaUpload.single('archivo'), require
              + 'Revisá neto, IVA, percepciones y otros conceptos antes de guardar.' });
     }
 
+    // ── LA FACTURA CONTRA LO QUE SE ACORDÓ ───────────────────────────────
+    // El NETO de la factura tiene que dar contra lo que entró por el precio
+    // pactado. Si no da, el costo de esa partida deja de ser el que acordó el
+    // comprador y el margen de esa mercadería queda mal para siempre.
+    //
+    // Se compara el neto y no el total: el IVA y las percepciones no son costo
+    // de la mercadería, son crédito fiscal y pagos a cuenta.
+    //
+    // Es un AVISO, no un bloqueo: puede haber una diferencia legítima (un ajuste
+    // de precio por la calidad que entró, un flete facturado aparte) y quien
+    // carga la factura es el que sabe. Lo que no puede es pasar sin verse.
+    let avisoAcordado = null;
+    const itsOc = db.prepare(`SELECT i.precio_estimado_por_kg,
+        (SELECT COALESCE(SUM(kg_reales),0) FROM sg_lotes WHERE oc_item_id=i.id AND activo=1) AS kg
+      FROM sg_oc_items i WHERE i.oc_id=?`).all(oc.id);
+    const acordado = itsOc.reduce((a, it) => (it.precio_estimado_por_kg != null)
+      ? r2(a + it.kg * Number(it.precio_estimado_por_kg)) : a, 0);
+    if (acordado > 0 && Math.abs(r2(neto - acordado)) > 0.01) {
+      avisoAcordado = 'El neto de la factura (' + r2(neto) + ') no da contra lo acordado por lo que entró ('
+        + acordado + '). Diferencia: ' + r2(neto - acordado) + '.';
+    }
+
+    // ── LA REGLA: SI EL ASIENTO NO BALANCEA, NO SE GRABA ─────────────────
+    // Un asiento que no cierra no es un asiento: es un error esperando a que
+    // alguien lo encuentre tres meses después conciliando el mayor. Se corta
+    // acá, con el mensaje de qué falta.
+    const lineasMod = lineasModeloFactura(db);
+    if (!lineasMod || !lineasMod.length) {
+      return res.status(400).json({ ok: false,
+        error: 'Todavía no se eligió el asiento modelo con el que se contabilizan las facturas de mercadería. '
+             + 'Configuralo arriba, en Facturas por mercadería.' });
+    }
+    const asiento = armarAsientoFactura(lineasMod, {
+      neto, iva_monto: iva, percepcion_iva: pIva, percepcion_iibb: pIibb,
+      percepcion_ganancias: pGan, total: total != null ? total : suma,
+      iibb_jurisdiccion: val(b.iibb_jurisdiccion),
+    });
+    if (!asiento.balancea) {
+      // Por qué no cierra, en criollo. El caso más común es una percepción que
+      // no tiene línea en el modelo: el importe queda afuera del asiento.
+      const pistas = [];
+      if (pIibb > 0 && !asiento.lineas.some((l) => l.tipo_linea === 'percepcion_iibb' && l.monto > 0)) {
+        pistas.push('la percepción de Ingresos Brutos no tiene línea en el modelo'
+          + (val(b.iibb_jurisdiccion) ? ' para la jurisdicción ' + val(b.iibb_jurisdiccion) : ' (elegí la jurisdicción)'));
+      }
+      if (pIva > 0 && !asiento.lineas.some((l) => l.tipo_linea === 'percepcion_iva')) {
+        pistas.push('la percepción de IVA no tiene línea en el modelo');
+      }
+      if (pGan > 0 && !asiento.lineas.some((l) => l.tipo_linea === 'percepcion_ganancias')) {
+        pistas.push('la percepción de Ganancias no tiene línea en el modelo');
+      }
+      if (iva > 0 && !asiento.lineas.some((l) => l.tipo_linea === 'iva')) {
+        pistas.push('el IVA no tiene línea en el modelo');
+      }
+      if (otros > 0) pistas.push('"otros conceptos" no tiene dónde imputarse: agregale una línea al modelo');
+      return res.status(400).json({ ok: false,
+        error: 'El asiento no balancea (debe ' + asiento.debe + ' contra haber ' + asiento.haber
+             + ', diferencia ' + asiento.diferencia + '). No se graba.'
+             + (pistas.length ? ' ' + pistas.join('. ') + '.' : ''),
+        asiento });
+    }
+
     const prev = db.prepare('SELECT id, archivo_ruta FROM sg_facturas_compra WHERE oc_id=? AND activo=1').get(oc.id);
     const ruta = req.file ? ('/data/sg/' + req.file.filename) : (prev ? prev.archivo_ruta : null);
     const nombre = req.file ? (req.file.originalname || null) : null;
 
     const campos = [oc.id, oc.proveedor_id || null, val(b.tipo_comprobante), val(b.punto_venta),
       val(b.numero), val(b.fecha_emision), val(b.cuit_emisor), neto, numF(b.iva_alicuota), iva,
-      pIva, pIibb, pGan, otros, total != null ? total : suma, val(b.cae), val(b.cae_vencimiento),
+      pIva, pIibb, pGan, otros, val(b.iibb_jurisdiccion), total != null ? total : suma, val(b.cae), val(b.cae_vencimiento),
       ruta, nombre, b.leido_por_ia ? 1 : 0, val(b.observaciones), uid(req)];
 
     let id;
@@ -1807,7 +1973,7 @@ router.post('/oc/:id/factura-completa', facturaUpload.single('archivo'), require
       if (prev) {
         db.prepare(`UPDATE sg_facturas_compra SET proveedor_id=?, tipo_comprobante=?, punto_venta=?,
           numero=?, fecha_emision=?, cuit_emisor=?, neto=?, iva_alicuota=?, iva_monto=?,
-          percepcion_iva=?, percepcion_iibb=?, percepcion_ganancias=?, otros_conceptos=?, total=?,
+          percepcion_iva=?, percepcion_iibb=?, percepcion_ganancias=?, otros_conceptos=?, iibb_jurisdiccion=?, total=?,
           cae=?, cae_vencimiento=?, archivo_ruta=?, archivo_nombre=?, leido_por_ia=?, observaciones=?,
           modificado_en=datetime('now','localtime'), modificado_por=? WHERE id=?`)
           .run(...campos.slice(1), prev.id);
@@ -1816,9 +1982,9 @@ router.post('/oc/:id/factura-completa', facturaUpload.single('archivo'), require
         id = db.prepare(`INSERT INTO sg_facturas_compra
           (oc_id, proveedor_id, tipo_comprobante, punto_venta, numero, fecha_emision, cuit_emisor,
            neto, iva_alicuota, iva_monto, percepcion_iva, percepcion_iibb, percepcion_ganancias,
-           otros_conceptos, total, cae, cae_vencimiento, archivo_ruta, archivo_nombre, leido_por_ia,
-           observaciones, creado_por)
-          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(...campos).lastInsertRowid;
+           otros_conceptos, iibb_jurisdiccion, total, cae, cae_vencimiento, archivo_ruta, archivo_nombre,
+           leido_por_ia, observaciones, creado_por)
+          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(...campos).lastInsertRowid;
       }
       // El número también queda en la recepción, que es de donde lo lee la
       // bandeja para saber que esta partida ya no está pendiente.
@@ -1829,7 +1995,8 @@ router.post('/oc/:id/factura-completa', facturaUpload.single('archivo'), require
           modificado_en=datetime('now','localtime'), modificado_por=? WHERE id=?`).run(nro, uid(req), rec.id);
       }
     })();
-    res.json({ ok: true, data: { id: Number(id), archivo_ruta: ruta } });
+    res.json({ ok: true, data: { id: Number(id), archivo_ruta: ruta,
+      asiento, aviso_acordado: avisoAcordado } });
   } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
 });
 

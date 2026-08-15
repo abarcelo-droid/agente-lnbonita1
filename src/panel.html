@@ -2714,6 +2714,11 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       </div>
       <div id="sgfm-part-cab" style="background:rgba(224,167,46,.12);border:1px solid #e0a72e;
            border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:13px;font-weight:600"></div>
+      <!-- QUÉ SE COMPRÓ Y CUÁNTO SE ACORDÓ PAGAR. Las cantidades salen de la
+           RECEPCIÓN, no de la orden: la orden es lo que se pidió, y lo que se
+           paga es lo que bajó del camión. El total es contra el que se controla
+           la factura. -->
+      <div id="sgfm-partida-detalle" style="margin-bottom:14px"></div>
 
       <div style="flex:1;overflow-y:auto;padding-right:6px">
         <div class="sg-oc-box">
@@ -2734,8 +2739,10 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
         <div class="sg-oc-box" style="margin-top:12px">
           <div class="sg-oc-box-tit">Datos fiscales</div>
           <div class="sg-rec-grid">
+            <!-- Sólo A o B. Una liquidación NO es una factura de compra: es el
+                 comprobante de una venta por cuenta y orden. -->
             <div class="fl"><label>Tipo</label>
-              <select id="sgfm-f-tipo"><option value="factura_a">Factura A</option><option value="factura_b">Factura B</option><option value="liquidacion">Liquidación</option></select></div>
+              <select id="sgfm-f-tipo"><option value="factura_a">Factura A</option><option value="factura_b">Factura B</option></select></div>
             <div class="fl"><label>Punto de venta</label><input id="sgfm-f-pv" placeholder="0001"></div>
             <div class="fl"><label>Número <span style="color:var(--err)">*</span></label><input id="sgfm-f-nro" placeholder="00012345"></div>
             <div class="fl"><label>Fecha de emisión</label><input type="date" id="sgfm-f-fecha"></div>
@@ -2752,6 +2759,12 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
             <div class="fl"><label>IVA</label><input type="number" step="0.01" id="sgfm-f-iva" oninput="sgFmRecalc()"></div>
             <div class="fl"><label>Percepción IVA</label><input type="number" step="0.01" id="sgfm-f-piva" oninput="sgFmRecalc()"></div>
             <div class="fl"><label>Percepción IIBB</label><input type="number" step="0.01" id="sgfm-f-piibb" oninput="sgFmRecalc()"></div>
+            <!-- Ingresos Brutos es PROVINCIAL: la percepción de una jurisdicción
+                 no es la misma cuenta que la de otra, y al cierre hay que poder
+                 decir cuánto se pagó en cada una. Las opciones salen de las
+                 líneas del asiento modelo: se carga una por provincia. -->
+            <div class="fl"><label>Jurisdicción IIBB</label>
+              <select id="sgfm-f-juris" onchange="sgFmRecalc()"><option value="">—</option></select></div>
             <div class="fl"><label>Percepción Ganancias</label><input type="number" step="0.01" id="sgfm-f-pgan" oninput="sgFmRecalc()"></div>
             <div class="fl"><label>Otros conceptos</label><input type="number" step="0.01" id="sgfm-f-otros" oninput="sgFmRecalc()"></div>
             <div class="fl"><label>TOTAL</label><input type="number" step="0.01" id="sgfm-f-total" oninput="sgFmRecalc()"></div>
@@ -2769,7 +2782,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
 
       <div style="display:flex;justify-content:space-between;gap:10px;padding-top:12px;border-top:1px solid var(--bor);margin-top:10px">
         <button class="btn bo" onclick="closeMB('sgfm-modal')">Cancelar</button>
-        <button class="btn bb" onclick="sgFmGuardar()">Guardar factura</button>
+        <button class="btn bb" id="sgfm-guardar" onclick="sgFmGuardar()">Guardar factura</button>
       </div>
     </div>
   </div>
@@ -5336,10 +5349,43 @@ function sgFmLoad(){
 // Acá se contabiliza. El PDF queda archivado con la partida, los datos fiscales
 // van desglosados —cada uno a una línea distinta del asiento— y abajo se ve el
 // asiento que se va a generar, con el control de que balancee.
-var SGFMF = { ocId: null, partida: '', archivo: null };
+var SGFMF = { ocId: null, partida: '', archivo: null, acordado: null, balancea: false };
+
+// Lo que se compró y cuánto se acordó pagar. Va arriba de todo: es contra esto
+// que se controla la factura del proveedor.
+function sgFmPartidaDetalle(id){
+  var cont = eid('sgfm-partida-detalle'); if (!cont) return;
+  cont.innerHTML = '';
+  api('/api/sg/oc/' + id + '/para-facturar').then(function(r){
+    if (!r || !r.ok) return;
+    var d = r.data;
+    SGFMF.acordado = d.total_acordado;
+    var filas = (d.items || []).map(function(it){
+      return '<tr><td>' + escH(it.producto_nombre || '—') + '</td>'
+        + '<td style="text-align:right">' + (Number(it.bultos_recibidos) > 0 ? nr(it.bultos_recibidos) : '—') + '</td>'
+        + '<td style="text-align:right">' + nr(it.kg_recibidos) + '</td>'
+        + '<td style="text-align:right">' + (it.precio_estimado_por_kg != null ? sgMoney(it.precio_estimado_por_kg) : '—') + '</td>'
+        + '<td style="text-align:right"><b>' + (it.importe != null ? sgMoney(it.importe) : '—') + '</b></td></tr>';
+    }).join('');
+    cont.innerHTML = '<div style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut);margin-bottom:6px">'
+        + 'Lo que entró y lo que se acordó pagar</div>'
+      + '<div class="ab-table-wrap"><table class="pa-tbl">'
+      + '<thead><tr><th>Producto</th><th style="text-align:right">Bultos recibidos</th>'
+      + '<th style="text-align:right">Kg recibidos</th><th style="text-align:right">Precio acordado</th>'
+      + '<th style="text-align:right">Importe</th></tr></thead><tbody>' + filas
+      + (d.total_acordado != null
+          ? '<tr style="border-top:2px solid var(--bor);font-weight:700"><td colspan="4">Total acordado</td>'
+            + '<td style="text-align:right">' + sgMoney(d.total_acordado) + '</td></tr>'
+          : '<tr><td colspan="5" style="font-size:12px;color:var(--mut)">Compra de liquidación: el precio se define al liquidar.</td></tr>')
+      + '</tbody></table></div>'
+      + '<div id="sgfm-vs-acordado" style="font-size:12.5px;margin-top:6px"></div>';
+    sgFmRecalc();
+  });
+}
 
 function sgFmFactura(id, partida, proveedor){
-  SGFMF = { ocId: id, partida: partida, archivo: null };
+  SGFMF = { ocId: id, partida: partida, archivo: null, acordado: null, balancea: false };
+  sgFmPartidaDetalle(id);
   var cab = eid('sgfm-part-cab');
   if (cab) cab.innerHTML = '🍅 Partida <code>' + escH(partida) + '</code>'
     + (proveedor ? ' · ' + escH(proveedor) : '');
@@ -5365,6 +5411,7 @@ function sgFmFactura(id, partida, proveedor){
     }
     sgFmRecalc();
   });
+  sgFmJurisPoblar();
   eid('sgfm-modal').classList.add('on');
 }
 
@@ -5406,34 +5453,95 @@ function sgFmRecalc(){
         + ' y el desglose suma ' + sgMoney(suma) + '</span>';
     }
   }
+  // La factura contra lo que se acordó pagar por lo que entró. Se compara el
+  // NETO: el IVA y las percepciones no son costo de la mercadería.
+  var vs = eid('sgfm-vs-acordado');
+  if (vs) {
+    if (SGFMF.acordado == null || !(neto > 0)) vs.innerHTML = '';
+    else if (Math.abs(paRound2Fm(neto - SGFMF.acordado)) < 0.01) {
+      vs.innerHTML = '<span style="color:#166534;font-weight:700">✓ El neto de la factura da contra lo acordado</span>';
+    } else {
+      vs.innerHTML = '<span style="color:#9a3412;font-weight:700">⚠️ El neto de la factura ('
+        + sgMoney(neto) + ') no da contra lo acordado (' + sgMoney(SGFMF.acordado) + '). '
+        + 'Diferencia: ' + sgMoney(paRound2Fm(neto - SGFMF.acordado)) + '</span>'
+        + '<div style="color:var(--mut);font-size:11.5px;margin-top:2px">'
+        + 'Si es un ajuste convenido está bien; si no, el costo de la partida va a quedar distinto del que se pactó.</div>';
+    }
+  }
   sgFmAsientoPintar({ neto: neto, iva: iva, piva: pIva, piibb: pIibb, pgan: pGan, otros: otros, total: total || suma });
 }
 
 // El asiento con los importes de esta factura. Cada número va a la línea del
 // modelo que le corresponde por su TIPO: el IVA a la línea 'iva', cada
 // percepción a la suya, y el total a Proveedores, que es lo que se le debe.
+// EL ASIENTO. Tiene que hacer la MISMA cuenta que el backend: si las dos no dan
+// igual, lo que se ve no es lo que se graba.
 function sgFmAsientoPintar(imp){
   var cont = eid('sgfm-asiento'); if (!cont) return;
   var m = SGFM.modelo;
   if (!m || !(m.lineas || []).length) {
+    SGFMF.balancea = false;
     cont.innerHTML = '<div style="color:#9a3412;font-weight:600">⚠️ No hay asiento modelo parametrizado. '
       + 'Elegilo arriba, en la pantalla de Facturas por mercadería, antes de contabilizar.</div>';
+    sgFmBotonGuardar();
     return;
   }
-  var porTipo = {
-    iva: imp.iva, percepcion_iva: imp.piva, percepcion_iibb: imp.piibb,
-    percepcion_ganancias: imp.pgan, proveedores: imp.total,
-  };
-  var importes = {}, sobra = 0;
+  // La percepción de IIBB va a la línea de SU jurisdicción. Si no se eligió, o
+  // el modelo no la tiene, el importe queda afuera y el asiento no cierra — que
+  // es exactamente lo que tiene que pasar.
+  var juris = String((eid('sgfm-f-juris') || {}).value || '').trim().toLowerCase();
+  var lineasIibb = (m.lineas || []).filter(function(l){ return l.tipo_linea === 'percepcion_iibb'; });
+  var lineaIibb = juris
+    ? lineasIibb.filter(function(l){ return String(l.jurisdiccion || '').trim().toLowerCase() === juris; })[0]
+    : ((lineasIibb.length === 1 && !lineasIibb[0].jurisdiccion) ? lineasIibb[0] : null);
+
+  var porTipo = { iva: imp.iva, percepcion_iva: imp.piva,
+                  percepcion_ganancias: imp.pgan, proveedores: imp.total };
+  var importes = {}, gastoPuesto = false;
   (m.lineas || []).forEach(function(l){
-    if (porTipo[l.tipo_linea] != null) { importes[l.id] = porTipo[l.tipo_linea]; return; }
-    // La línea de gasto —la que no es ni IVA ni percepción ni proveedores— se
-    // lleva el neto. Si hay más de una, la primera: el resto queda en cero y el
-    // desbalance lo va a mostrar el control de abajo.
-    if (l.lado === 'debe' && !sobra) { importes[l.id] = imp.neto; sobra = 1; return; }
-    importes[l.id] = 0;
+    if (l.tipo_linea === 'percepcion_iibb') {
+      importes[l.id] = (lineaIibb && l.id === lineaIibb.id) ? imp.piibb : 0;
+    } else if (porTipo[l.tipo_linea] != null) {
+      importes[l.id] = porTipo[l.tipo_linea];
+    } else if (l.lado === 'debe' && !gastoPuesto) {
+      importes[l.id] = imp.neto; gastoPuesto = true;
+    } else { importes[l.id] = 0; }
   });
   cont.innerHTML = sgFmAsientoTabla(m.lineas, importes);
+
+  // ¿Balancea? De esto depende que se pueda grabar.
+  var d = 0, h = 0;
+  (m.lineas || []).forEach(function(l){
+    var v = Number(importes[l.id]) || 0;
+    if (l.lado === 'debe') d += v; else h += v;
+  });
+  SGFMF.balancea = Math.abs(paRound2Fm(d - h)) < 0.01;
+  sgFmBotonGuardar();
+}
+
+// SI EL ASIENTO NO BALANCEA NO SE GRABA. El botón lo dice antes de que el
+// operador lo apriete; el backend lo vuelve a controlar igual.
+function sgFmBotonGuardar(){
+  var btn = eid('sgfm-guardar'); if (!btn) return;
+  var listo = SGFMF.balancea;
+  btn.disabled = !listo;
+  btn.style.opacity = listo ? '' : '.55';
+  btn.style.cursor = listo ? '' : 'not-allowed';
+  btn.textContent = listo ? 'Guardar factura' : 'El asiento no balancea';
+}
+
+// Las jurisdicciones que el asiento modelo tiene cargadas. Si el modelo no tiene
+// ninguna línea de IIBB por provincia, el selector queda vacío y lo dice.
+function sgFmJurisPoblar(){
+  var sel = eid('sgfm-f-juris'); if (!sel) return;
+  var m = SGFM.modelo;
+  var js = ((m && m.lineas) || [])
+    .filter(function(l){ return l.tipo_linea === 'percepcion_iibb' && l.jurisdiccion; })
+    .map(function(l){ return l.jurisdiccion; });
+  var actual = sel.value;
+  sel.innerHTML = '<option value="">' + (js.length ? '— Elegí la jurisdicción —' : '(el modelo no tiene jurisdicciones)')
+    + '</option>' + js.map(function(j){ return '<option value="' + escH(j) + '">' + escH(j) + '</option>'; }).join('');
+  if (actual) sel.value = actual;
 }
 
 // LEERLE LOS DATOS AL COMPROBANTE. Lo que vuelve es una PROPUESTA: llena los
@@ -5508,6 +5616,7 @@ function sgFmGuardar(){
     neto: _sgfmN('sgfm-f-neto'), iva_alicuota: _sgfmN('sgfm-f-alic'), iva_monto: _sgfmN('sgfm-f-iva'),
     percepcion_iva: _sgfmN('sgfm-f-piva'), percepcion_iibb: _sgfmN('sgfm-f-piibb'),
     percepcion_ganancias: _sgfmN('sgfm-f-pgan'), otros_conceptos: _sgfmN('sgfm-f-otros'),
+    iibb_jurisdiccion: (eid('sgfm-f-juris')||{}).value || null,
     total: _sgfmN('sgfm-f-total'),
   };
   var fd = new FormData();
