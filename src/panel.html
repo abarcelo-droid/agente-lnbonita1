@@ -3910,6 +3910,76 @@ function sgPresDe(prodId){ return SG.cachePres.filter(function(p){ return String
 function sgFactor(presId){ var p = SG.cachePres.find(function(x){ return String(x.id)===String(presId); }); return p ? Number(p.factor_conversion) : 1; }
 function sgMoney(n){ return '$'+nr(n); }
 
+// ── UN BUSCADOR ADENTRO DE LA LISTA DESPLEGABLE ─────────────────────────
+// El plan de cuentas tiene cientos de rubros. Buscar "BANCO GALICIA" bajando
+// con la rueda del mouse por una lista de 400 no es trabajo de nadie.
+//
+// Se le pone un campo de texto ARRIBA del select y se filtran las opciones al
+// escribir. El select sigue siendo un <select> de verdad: el código que lo lee
+// con .value, o que le asigna un valor, no se entera de nada. Por eso se puede
+// aplicar a los selects que ya existen sin tocar lo que los rodea.
+//
+// Idempotente: llamarlo dos veces sobre el mismo select no duplica el buscador.
+function sgSelBuscable(sel, placeholder){
+  if (typeof sel === 'string') sel = eid(sel);
+  if (!sel || sel._buscable) return;
+  sel._buscable = true;
+
+  var caja = document.createElement('div');
+  caja.style.position = 'relative';
+  sel.parentNode.insertBefore(caja, sel);
+
+  var inp = document.createElement('input');
+  inp.type = 'text';
+  inp.placeholder = placeholder || 'Escribí para buscar…';
+  inp.setAttribute('autocomplete', 'off');
+  inp.style.cssText = 'width:100%;box-sizing:border-box;margin-bottom:4px;padding:6px 8px;'
+    + 'border:1px solid var(--bor);border-radius:6px;font-size:12.5px;background:var(--pan)';
+  caja.appendChild(inp);
+  caja.appendChild(sel);
+
+  // La lista completa se guarda una sola vez. Si el select se repuebla después
+  // (otra empresa, cuentas nuevas), hay que volver a llamar a sgSelRefrescar.
+  sgSelGuardarOpciones(sel);
+
+  var filtrar = function(){
+    var q = inp.value.trim().toLowerCase();
+    var elegido = sel.value;
+    var partes = q.split(/\s+/).filter(Boolean);
+    var visibles = (sel._todas || []).filter(function(o){
+      if (!o.value) return true;                       // el "— Sin asignar —" no se filtra
+      var t = (o.text || '').toLowerCase();
+      // Todas las palabras tienen que estar, en cualquier orden: "galicia banco"
+      // encuentra "BANCO GALICIA" igual que "banco galicia".
+      return partes.every(function(p){ return t.indexOf(p) >= 0; });
+    });
+    sel.innerHTML = visibles.map(function(o){
+      return '<option value="' + escH(o.value) + '">' + escH(o.text) + '</option>';
+    }).join('');
+    // Si lo que estaba elegido sobrevive al filtro, se mantiene.
+    if (elegido && visibles.some(function(o){ return o.value === elegido; })) sel.value = elegido;
+    if (!visibles.some(function(o){ return o.value; }) && q) {
+      sel.innerHTML = '<option value="">(no hay ningún rubro que diga "' + escH(q) + '")</option>';
+    }
+  };
+  inp.oninput = filtrar;
+  // Enter no manda el formulario: abre la lista con lo filtrado.
+  inp.onkeydown = function(e){ if (e.key === 'Enter') { e.preventDefault(); sel.focus(); } };
+}
+
+function sgSelGuardarOpciones(sel){
+  if (typeof sel === 'string') sel = eid(sel);
+  if (!sel) return;
+  sel._todas = [];
+  for (var i = 0; i < sel.options.length; i++) {
+    sel._todas.push({ value: sel.options[i].value, text: sel.options[i].text });
+  }
+}
+
+// Después de repoblar un select buscable hay que avisarle, o el buscador sigue
+// filtrando sobre la lista vieja.
+function sgSelRefrescar(sel){ sgSelGuardarOpciones(sel); }
+
 function sgProdNombre(id){ var p = SG.cacheProd.find(function(x){ return x.id===id; }); return p ? p.nombre : ('#'+id); }
 // Nombre de envase desde cache (para el listado de presentaciones).
 function sgEnvNombre(id){ if(!id) return '—'; var e = (SG.cacheEnv||[]).find(function(x){ return String(x.id)===String(id); }); return e ? e.nombre : ('#'+id); }
@@ -47267,7 +47337,13 @@ function sgctCargarConfigImp() {
         }).join('');
     ['iva_credito_fiscal','iva_debito_fiscal','percepcion_iva','percepcion_iibb','percepcion_ganancias','retencion'].forEach(function(clave) {
       var sel = document.getElementById('sgct-cfg-imp-'+clave);
-      if (sel) sel.innerHTML = opts;
+      if (sel) {
+        sel.innerHTML = opts;
+        // El plan de cuentas tiene cientos de rubros: sin buscador hay que
+        // bajar con la rueda hasta encontrarlo.
+        sgSelBuscable(sel, 'Buscar rubro…');
+        sgSelRefrescar(sel);
+      }
     });
     // Cargar valores actuales
     sgctModApi('/config-impositiva').then(function(r) {
