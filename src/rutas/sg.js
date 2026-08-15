@@ -18,6 +18,8 @@ import '../servicios/db_sg.js'; // corre el DDL sg_* al importarse
 // de las órdenes que se cargaron antes de que existiera.
 import '../servicios/sg_oc_condiciones_y_traza.js';
 import { detectarDuplicado } from '../servicios/dedup.js';
+// El model ID sale SIEMPRE de config/ia.js: es la fuente única del repo.
+import { MODELO_CHAT } from '../config/ia.js';
 import { generarOcPDF } from '../servicios/ocPDF.js';
 import { generarRecepcionCalidadPDF } from '../servicios/recepcionCalidadPDF.js';
 import { autenticar as afipAutenticar, ambienteActual as afipAmbiente } from '../servicios/afip-wsaa.js';
@@ -1735,6 +1737,199 @@ router.put('/factura-mercaderia/modelo', requireAdmin, (req, res) => {
       .run(CLAVE_MODELO_FACT, modeloId == null ? null : String(modeloId), uid(req));
     res.json({ ok: true, data: { modelo_id: modeloId } });
   } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+
+// ── SUBIR LA FACTURA DEL PROVEEDOR ───────────────────────────────────────
+// El PDF se guarda en data/sg/ como cualquier otro adjunto del módulo, y los
+// datos fiscales quedan desglosados: cada uno va a una línea distinta del
+// asiento. Un total no se puede imputar.
+const facturaStorage = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, SG_UPLOAD_DIR),
+  filename: (req, file, cb) => {
+    const ext = (path.extname(file.originalname || '') || '.pdf').toLowerCase();
+    cb(null, 'factura_' + (req.params.id || 'x') + '_' + Date.now() + '_' + Math.floor(Math.random() * 1e6) + ext);
+  },
+});
+const facturaUpload = multer({ storage: facturaStorage, limits: { fileSize: 15 * 1024 * 1024 } });
+
+const numF = (v) => (v != null && v !== '' && !isNaN(Number(v))) ? Number(v) : null;
+
+// Lo que ya se cargó de una partida. La pantalla lo usa para no pedir dos veces
+// lo mismo y para mostrar el asiento con los importes reales.
+router.get('/oc/:id/factura', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const f = db.prepare(`SELECT * FROM sg_facturas_compra
+      WHERE oc_id=? AND activo=1 ORDER BY id DESC LIMIT 1`).get(req.params.id);
+    res.json({ ok: true, data: f || null });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// Guardar la factura: el PDF y sus datos fiscales. multipart, igual que las
+// fotos de la recepción — el archivo en disco, en la base sólo la ruta.
+router.post('/oc/:id/factura-completa', facturaUpload.single('archivo'), requireAdmin, (req, res) => {
+  const db = getDb();
+  try {
+    const b = req.body && req.body.payload ? JSON.parse(req.body.payload) : (req.body || {});
+    const oc = db.prepare('SELECT id, proveedor_id, estado FROM sg_oc WHERE id=? AND activo=1').get(req.params.id);
+    if (!oc) return res.status(404).json({ ok: false, error: 'Orden no encontrada' });
+    if (!(oc.estado === 'recibida_total' || oc.estado === 'cerrada')) {
+      return res.status(400).json({ ok: false,
+        error: 'Esa orden todavía no recibió la mercadería: no se le puede cargar la factura.' });
+    }
+    if (!val(b.numero)) return res.status(400).json({ ok: false, error: 'Falta el número de la factura' });
+
+    // El total tiene que dar contra el desglose, o el asiento no va a balancear
+    // nunca. Se controla ACÁ y no después: es más barato que descubrirlo con el
+    // asiento a medio armar.
+    const neto = numF(b.neto) || 0, iva = numF(b.iva_monto) || 0;
+    const pIva = numF(b.percepcion_iva) || 0, pIibb = numF(b.percepcion_iibb) || 0;
+    const pGan = numF(b.percepcion_ganancias) || 0, otros = numF(b.otros_conceptos) || 0;
+    const total = numF(b.total);
+    const suma = +(neto + iva + pIva + pIibb + pGan + otros).toFixed(2);
+    if (total != null && Math.abs(total - suma) > 0.01) {
+      return res.status(400).json({ ok: false,
+        error: 'El total (' + total + ') no da contra el desglose (' + suma + '). '
+             + 'Revisá neto, IVA, percepciones y otros conceptos antes de guardar.' });
+    }
+
+    const prev = db.prepare('SELECT id, archivo_ruta FROM sg_facturas_compra WHERE oc_id=? AND activo=1').get(oc.id);
+    const ruta = req.file ? ('/data/sg/' + req.file.filename) : (prev ? prev.archivo_ruta : null);
+    const nombre = req.file ? (req.file.originalname || null) : null;
+
+    const campos = [oc.id, oc.proveedor_id || null, val(b.tipo_comprobante), val(b.punto_venta),
+      val(b.numero), val(b.fecha_emision), val(b.cuit_emisor), neto, numF(b.iva_alicuota), iva,
+      pIva, pIibb, pGan, otros, total != null ? total : suma, val(b.cae), val(b.cae_vencimiento),
+      ruta, nombre, b.leido_por_ia ? 1 : 0, val(b.observaciones), uid(req)];
+
+    let id;
+    db.transaction(() => {
+      if (prev) {
+        db.prepare(`UPDATE sg_facturas_compra SET proveedor_id=?, tipo_comprobante=?, punto_venta=?,
+          numero=?, fecha_emision=?, cuit_emisor=?, neto=?, iva_alicuota=?, iva_monto=?,
+          percepcion_iva=?, percepcion_iibb=?, percepcion_ganancias=?, otros_conceptos=?, total=?,
+          cae=?, cae_vencimiento=?, archivo_ruta=?, archivo_nombre=?, leido_por_ia=?, observaciones=?,
+          modificado_en=datetime('now','localtime'), modificado_por=? WHERE id=?`)
+          .run(...campos.slice(1), prev.id);
+        id = prev.id;
+      } else {
+        id = db.prepare(`INSERT INTO sg_facturas_compra
+          (oc_id, proveedor_id, tipo_comprobante, punto_venta, numero, fecha_emision, cuit_emisor,
+           neto, iva_alicuota, iva_monto, percepcion_iva, percepcion_iibb, percepcion_ganancias,
+           otros_conceptos, total, cae, cae_vencimiento, archivo_ruta, archivo_nombre, leido_por_ia,
+           observaciones, creado_por)
+          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(...campos).lastInsertRowid;
+      }
+      // El número también queda en la recepción, que es de donde lo lee la
+      // bandeja para saber que esta partida ya no está pendiente.
+      const rec = db.prepare('SELECT id FROM sg_recepciones WHERE oc_id=? AND activo=1 ORDER BY id DESC LIMIT 1').get(oc.id);
+      if (rec) {
+        const nro = (val(b.punto_venta) ? val(b.punto_venta) + '-' : '') + val(b.numero);
+        db.prepare(`UPDATE sg_recepciones SET factura_numero=?,
+          modificado_en=datetime('now','localtime'), modificado_por=? WHERE id=?`).run(nro, uid(req), rec.id);
+      }
+    })();
+    res.json({ ok: true, data: { id: Number(id), archivo_ruta: ruta } });
+  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+
+// ── LEERLE LOS DATOS FISCALES AL COMPROBANTE ─────────────────────────────
+// Copia el patrón de /api/factura/analizar (buscar.js), que es el único del
+// repo que acepta PDF: bloque 'document' para PDF y 'image' para una foto.
+//
+// LO QUE DEVUELVE ES UNA PROPUESTA, NO UN DATO. De acá sale el primer asiento
+// contable de la mercadería: nada se guarda sin que una persona lo mire. La
+// pantalla llena los campos y el operador confirma.
+//
+// Va con requireAdmin — el de buscar.js quedó sin auth y gasta la API key.
+router.post('/factura-mercaderia/leer', requireAdmin, async (req, res) => {
+  try {
+    const { base64, mediaType, oc_id } = req.body || {};
+    if (!base64 || !mediaType) return res.status(400).json({ ok: false, error: 'Falta el archivo' });
+    if (!process.env.ANTHROPIC_API_KEY) {
+      return res.status(503).json({ ok: false, error: 'La lectura automática no está configurada en este servidor' });
+    }
+    const db = getDb();
+
+    // A quién le compramos, según la orden. Sirve para que la lectura pueda
+    // contrastar el CUIT del comprobante contra el del proveedor: si no dan,
+    // la factura puede ser de otro y eso hay que verlo ANTES de contabilizar.
+    let prov = null;
+    if (oc_id) {
+      prov = db.prepare(`SELECT p.razon_social, p.cuit FROM sg_oc o
+        LEFT JOIN sg_proveedores p ON p.id=o.proveedor_id WHERE o.id=?`).get(oc_id);
+    }
+
+    const esPDF = mediaType === 'application/pdf';
+    const contenido = esPDF
+      ? { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: base64 } }
+      : { type: 'image', source: { type: 'base64', media_type: mediaType, data: base64 } };
+
+    const prompt = `Sos un asistente contable argentino. Leé esta factura de compra de mercadería y extraé
+sus datos fiscales. Respondé ÚNICAMENTE un JSON válido, sin markdown ni backticks, con estas claves:
+
+{"tipo_comprobante":"factura_a|factura_b|liquidacion","punto_venta":"","numero":"","fecha_emision":"AAAA-MM-DD",
+ "cuit_emisor":"","razon_social_emisor":"","neto":0,"iva_alicuota":0,"iva_monto":0,
+ "percepcion_iva":0,"percepcion_iibb":0,"percepcion_ganancias":0,"otros_conceptos":0,"total":0,
+ "cae":"","cae_vencimiento":"AAAA-MM-DD","confianza":"alta|media|baja","observaciones":""}
+
+REGLAS:
+- Los montos son NÚMEROS en pesos, sin separador de miles. iva_alicuota es el PORCENTAJE (21, 10.5) y
+  iva_monto es el MONTO en pesos. No los confundas.
+- El punto de venta y el número van por separado. En "0001-00012345", punto_venta es "0001" y numero
+  "00012345".
+- Las percepciones son las que figuran discriminadas (IVA, Ingresos Brutos, Ganancias). Si no hay, 0.
+- Lo que no puedas leer con seguridad va en null, NUNCA inventado. Si dudás de un monto, poné
+  confianza "baja" y explicá qué no se lee en observaciones.
+- neto + iva_monto + percepciones + otros_conceptos tiene que dar total. Si no da, decilo en
+  observaciones en vez de forzar los números.${prov && prov.cuit ? `
+- La orden es del proveedor "${prov.razon_social}", CUIT ${prov.cuit}. Si el CUIT del comprobante NO
+  coincide, dejá igual el que leíste y avisalo en observaciones: puede ser una factura de otro.` : ''}`;
+
+    const headers = {
+      'Content-Type': 'application/json',
+      'x-api-key': process.env.ANTHROPIC_API_KEY,
+      'anthropic-version': '2023-06-01',
+    };
+    if (esPDF) headers['anthropic-beta'] = 'pdfs-2024-09-25';
+
+    const resp = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST', headers,
+      body: JSON.stringify({ model: MODELO_CHAT, max_tokens: 1500,
+        messages: [{ role: 'user', content: [contenido, { type: 'text', text: prompt }] }] }),
+    });
+    const data = await resp.json();
+    const txt = (data.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('\n');
+    if (!txt) return res.status(502).json({ ok: false, error: 'La lectura no devolvió nada' });
+
+    let leido;
+    try {
+      leido = JSON.parse(txt.replace(/```json|```/g, '').trim());
+    } catch (_) {
+      // El 422 con el texto crudo deja ver QUÉ contestó cuando no parsea. Un 500
+      // pelado esconde el problema.
+      return res.status(422).json({ ok: false, error: 'No se pudo interpretar la lectura', raw: txt.slice(0, 800) });
+    }
+
+    // El control de suma se hace ACÁ y viaja con la propuesta: que el operador
+    // vea de entrada si los números que se leyeron cierran entre sí.
+    const n = (v) => (v != null && !isNaN(Number(v))) ? Number(v) : 0;
+    const suma = +(n(leido.neto) + n(leido.iva_monto) + n(leido.percepcion_iva)
+      + n(leido.percepcion_iibb) + n(leido.percepcion_ganancias) + n(leido.otros_conceptos)).toFixed(2);
+    const cierra = leido.total == null || Math.abs(n(leido.total) - suma) < 0.01;
+
+    res.json({ ok: true, data: {
+      leido,
+      suma_desglose: suma,
+      cierra,
+      proveedor_oc: prov || null,
+      cuit_coincide: !!(prov && prov.cuit && leido.cuit_emisor
+        && String(prov.cuit).replace(/\D/g, '') === String(leido.cuit_emisor).replace(/\D/g, '')),
+    } });
+  } catch (e) {
+    console.error('[SG] Lectura de factura:', e.message);
+    res.status(500).json({ ok: false, error: e.message });
+  }
 });
 
 // Partidas de precio cerrado a las que todavía no se les cargó la factura del

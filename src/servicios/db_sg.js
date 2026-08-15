@@ -758,6 +758,56 @@ try { db.exec("ALTER TABLE sg_oc ADD COLUMN flete_con_iva INTEGER"); } catch (_)
 //
 // El motivo es obligatorio cuando se cierra con saldo: la orden queda diciendo
 // que faltaron 1150 kg y alguien tiene que poder leer por qué no van a venir.
+// ── LA FACTURA DE COMPRA DE MERCADERÍA ────────────────────────────────────
+// El comprobante que manda el proveedor por una partida ya recibida. Guarda el
+// PDF y los datos fiscales que se le leen: con eso se arma el asiento contable
+// de la compra, que es el PRIMER asiento de esa mercadería.
+//
+// Los datos fiscales van desglosados y NO como un total, porque cada uno va a
+// una línea distinta del asiento: el neto a mercadería, el IVA a crédito fiscal,
+// cada percepción y cada retención a la suya. Un total no se puede imputar.
+//
+// leido_por_ia + confirmada: lo que propone la lectura del PDF no es lo mismo
+// que lo que una persona miró y dio por bueno. Un asiento no puede salir de un
+// dato que nadie confirmó.
+try {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS sg_facturas_compra (
+      id                INTEGER PRIMARY KEY AUTOINCREMENT,
+      oc_id             INTEGER NOT NULL REFERENCES sg_oc(id),
+      proveedor_id      INTEGER REFERENCES sg_proveedores(id),
+      tipo_comprobante  TEXT,               -- factura_a | factura_b | liquidacion
+      punto_venta       TEXT,
+      numero            TEXT,
+      fecha_emision     TEXT,
+      cuit_emisor       TEXT,
+      neto              REAL,
+      iva_alicuota      REAL,
+      iva_monto         REAL,
+      percepcion_iva    REAL,
+      percepcion_iibb   REAL,
+      percepcion_ganancias REAL,
+      otros_conceptos   REAL,
+      total             REAL,
+      cae               TEXT,
+      cae_vencimiento   TEXT,
+      archivo_ruta      TEXT,               -- el PDF, en data/sg/
+      archivo_nombre    TEXT,
+      leido_por_ia      INTEGER NOT NULL DEFAULT 0,
+      confirmada_en     TEXT,
+      confirmada_por    INTEGER,
+      asiento_id        INTEGER,            -- el asiento que se generó, cuando se genere
+      observaciones     TEXT,
+      activo            INTEGER NOT NULL DEFAULT 1,
+      creado_en         TEXT DEFAULT (datetime('now','localtime')),
+      creado_por        INTEGER,
+      modificado_en     TEXT,
+      modificado_por    INTEGER
+    );
+  `);
+  db.exec('CREATE INDEX IF NOT EXISTS idx_sg_fact_oc ON sg_facturas_compra(oc_id)');
+} catch (e) { console.error('[DB] SG sg_facturas_compra:', e.message); }
+
 try { db.exec("ALTER TABLE sg_oc ADD COLUMN cerrada_en TEXT"); } catch (_) {}
 try { db.exec("ALTER TABLE sg_oc ADD COLUMN cerrada_por INTEGER"); } catch (_) {}
 try { db.exec("ALTER TABLE sg_oc ADD COLUMN cierre_motivo TEXT"); } catch (_) {}
