@@ -137,7 +137,9 @@ const PREFIJOS = [
   // Facturas por mercadería: las partidas de Precio Cerrado ya recibidas a las
   // que falta cargarles la factura del proveedor. La factura se guarda en la
   // recepción, así que la escritura va por sg/oc (…/factura).
-  ['sg-facturas-merc',   'sg/partidas-a-facturar'],
+  // 'sg/factura-mercaderia' cubre la parametrización del asiento con el que se
+  // contabilizan: es admin y define cómo entra la plata de TODAS las compras.
+  ['sg-facturas-merc',   'sg/partidas-a-facturar,sg/factura-mercaderia'],
 
   // ═══════════════════════════════════════════════════════════════════════
   // LAS QUE FALTABAN. Se declaran POR QUIÉN ESCRIBE, no por quién llama.

@@ -2651,6 +2651,19 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
         <div class="ph-s">Partidas recibidas a Precio Cerrado, esperando la factura del proveedor</div></div>
       <button class="btn bo" onclick="sgFmLoad()">↻ Actualizar</button>
     </div>
+    <!-- ── CON QUÉ ASIENTO SE CONTABILIZAN ──────────────────────────────
+         Cargar la factura no es anotar un número: es el primer asiento
+         contable de esa mercadería. Todas se contabilizan igual, así que el
+         modelo se elige UNA vez, acá, y queda parametrizado para el módulo.
+         Elegirlo factura por factura dejaría dos compras iguales entrando con
+         asientos distintos según quién las cargó. -->
+    <div id="sgfm-modelo-box" style="border:1px solid var(--bor);border-radius:10px;padding:12px 14px;margin-bottom:16px;background:var(--bg)">
+      <div style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut);margin-bottom:6px">
+        Asiento contable de compra de mercadería
+      </div>
+      <div id="sgfm-modelo-cuerpo" style="font-size:13px">Cargando…</div>
+    </div>
+
     <div style="display:inline-flex;gap:2px;background:var(--bg);border:1px solid var(--bor);border-radius:8px;padding:3px;margin-bottom:16px">
       <div class="sgc-subtab on" data-sub="pendientes" onclick="sgFmSub('pendientes')">⏳ Partidas pendientes de facturar<span class="liq-cnt" id="sgfm-cnt">·</span></div>
     </div>
@@ -5084,6 +5097,125 @@ function liqDePartida(ocId, partida, proveedor){
 }
 
 function sgFmSub(){ /* una sola solapa por ahora; existe para que el patrón no cambie después */ }
+
+// ── EL ASIENTO CON EL QUE SE CONTABILIZA ────────────────────────────────
+// Se muestra siempre, arriba de la bandeja: antes de cargar una factura hay que
+// poder ver contra qué se va a imputar. Si el modelo no sirve —le falta la línea
+// de Proveedores, apunta a una cuenta borrada— se dice acá, no cuando el
+// operador ya cargó todo.
+var SGFM = { modelo: null };
+
+function sgFmModeloCargar(){
+  var box = eid('sgfm-modelo-cuerpo'); if (!box) return;
+  Promise.all([
+    api('/api/sg/factura-mercaderia/modelo'),
+    api('/api/sg/contable/modelos'),
+  ]).then(function(res){
+    var r = res[0], lista = (res[1] && res[1].ok) ? res[1].data : [];
+    var m = (r && r.ok) ? r.data.modelo : null;
+    var faltan = (r && r.ok) ? (r.data.faltan || []) : [];
+    SGFM.modelo = m;
+    var esAdmin = sgFmEsAdmin();
+
+    var sel = '';
+    if (esAdmin) {
+      sel = '<select id="sgfm-modelo-sel" onchange="sgFmModeloGuardar()" style="padding:6px 8px;border-radius:6px;border:1px solid var(--bor);background:var(--pan);min-width:260px">'
+        + '<option value="">— Elegí el asiento modelo —</option>'
+        + lista.map(function(x){
+            return '<option value="' + x.id + '"' + (m && x.id === m.id ? ' selected' : '') + '>'
+              + escH(x.nombre) + (x.tiene_linea_proveedores ? '' : ' (sin línea de Proveedores)') + '</option>';
+          }).join('')
+        + '</select>';
+    }
+
+    if (!m) {
+      box.innerHTML = '<div style="color:#9a3412;font-weight:600;margin-bottom:8px">'
+        + '⚠️ Todavía no se eligió con qué asiento se contabilizan las facturas de mercadería.'
+        + (r && r.ok && r.data.id_perdido ? ' (El que estaba elegido se dio de baja.)' : '')
+        + '</div>'
+        + (esAdmin ? sel
+                   : '<div style="font-size:12px;color:var(--mut)">Pedile a un administrador que lo configure.</div>');
+      return;
+    }
+
+    box.innerHTML = '<div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:10px">'
+        + '<div style="font-weight:700;font-size:14px">' + escH(m.nombre) + '</div>'
+        + sel
+      + '</div>'
+      + (faltan.length
+          ? '<div style="border:1.5px solid #e0a72e;background:rgba(224,167,46,.10);border-radius:8px;padding:9px 12px;margin-bottom:10px;font-size:12.5px;color:#9a3412">'
+            + '⚠️ Este modelo todavía no sirve para contabilizar: ' + faltan.map(escH).join(' · ') + '</div>'
+          : '')
+      + sgFmAsientoTabla(m.lineas || []);
+  });
+}
+
+// El resumen del asiento, igual que en Puente Cordón: cada línea con su cuenta,
+// de qué lado va, y abajo los totales con el control de que BALANCEE. Mientras
+// no hay importes —todavía no se leyó ninguna factura— muestra la estructura:
+// qué cuentas se van a tocar y en qué lado.
+function sgFmAsientoTabla(lineas, importes){
+  if (!lineas.length) return '<div style="font-size:12.5px;color:var(--mut)">El modelo no tiene líneas.</div>';
+  var totD = 0, totH = 0;
+  var filas = lineas.map(function(l){
+    var monto = importes ? (Number(importes[l.id]) || 0) : null;
+    if (monto != null) { if (l.lado === 'debe') totD += monto; else totH += monto; }
+    var val = monto != null ? sgMoney(monto) : '<span style="color:var(--mut)">—</span>';
+    return '<tr>'
+      + '<td style="font-family:monospace;font-size:12px">' + escH(l.cuenta_codigo || '—') + '</td>'
+      + '<td>' + escH(l.cuenta_nombre || '(cuenta borrada)') + '</td>'
+      + '<td style="font-size:11.5px;color:var(--mut)">' + escH(l.tipo_linea || 'libre') + '</td>'
+      + '<td style="text-align:right">' + (l.lado === 'debe' ? val : '') + '</td>'
+      + '<td style="text-align:right">' + (l.lado === 'haber' ? val : '') + '</td>'
+      + '</tr>';
+  }).join('');
+
+  var pie = '';
+  if (importes) {
+    var dif = paRound2Fm(totD - totH);
+    var ok = Math.abs(dif) < 0.01;
+    pie = '<tr style="border-top:2px solid var(--bor);font-weight:700">'
+      + '<td colspan="3">Totales</td>'
+      + '<td style="text-align:right">' + sgMoney(totD) + '</td>'
+      + '<td style="text-align:right">' + sgMoney(totH) + '</td></tr>'
+      + '<tr><td colspan="5" style="padding-top:8px">'
+        + (ok
+            ? '<span style="color:#166534;font-weight:700">✓ El asiento balancea</span>'
+            : '<span style="color:var(--err);font-weight:700">✗ NO balancea — diferencia de '
+              + sgMoney(Math.abs(dif)) + '</span>')
+      + '</td></tr>';
+  } else {
+    pie = '<tr><td colspan="5" style="padding-top:8px;font-size:12px;color:var(--mut)">'
+      + 'Los importes salen de la factura. Al cargarla se muestran acá y se controla que el asiento balancee.'
+      + '</td></tr>';
+  }
+
+  return '<div class="ab-table-wrap"><table class="pa-tbl">'
+    + '<thead><tr><th>Código</th><th>Cuenta</th><th>Tipo</th>'
+    + '<th style="text-align:right">Debe</th><th style="text-align:right">Haber</th></tr></thead>'
+    + '<tbody>' + filas + pie + '</tbody></table></div>';
+}
+
+function paRound2Fm(n){ return Math.round((Number(n) || 0) * 100) / 100; }
+
+// ¿Es admin? El selector sólo lo ve quien puede cambiarlo; el resto ve contra
+// qué se contabiliza, que igual le sirve para controlar.
+function sgFmEsAdmin(){
+  try {
+    var raw = document.cookie.split('; ').find(function(x){ return x.indexOf('lnb_user=') === 0; });
+    if (!raw) return false;
+    return JSON.parse(decodeURIComponent(raw.split('=').slice(1).join('='))).rol === 'admin';
+  } catch(_) { return false; }
+}
+
+function sgFmModeloGuardar(){
+  var sel = eid('sgfm-modelo-sel'); if (!sel) return;
+  api('/api/sg/factura-mercaderia/modelo', 'PUT', { modelo_id: sel.value || null }).then(function(r){
+    if (!r || !r.ok) { toast((r && r.error) || 'No se pudo guardar', 'er'); return; }
+    toast(sel.value ? 'Asiento modelo parametrizado' : 'Se quitó el asiento modelo', 'ok');
+    sgFmModeloCargar();
+  });
+}
 
 function sgFmLoad(){
   api('/api/sg/partidas-a-facturar').then(function(r){
@@ -14710,7 +14842,7 @@ function loadSec(s) {
     'sg-ventas':     function(){ sgVenInit(); },
     'sg-gastos-directos': function(){ sgGdsInit(); },
     'sg-control-coop': function(){ sgCcoopInit(); },
-    'sg-facturas-merc': function(){ sgFmLoad(); },
+    'sg-facturas-merc': function(){ sgFmModeloCargar(); sgFmLoad(); },
     'sg-importacion': function(){ sgImpInit(); },
     'sg-catalogo':   function(){ sgLoadCaches(function(){ sgCatSub('productos'); }); },
     'sg-reportes':   function(){ sgRepInit(); },
