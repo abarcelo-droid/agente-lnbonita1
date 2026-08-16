@@ -813,6 +813,23 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     #sec-ab-liquidaciones .sgc-tabs,
     #sec-sg-facturas-merc .sgc-tabs{display:inline-flex;gap:4px;background:var(--bg);
       border:1px solid var(--bor);border-radius:10px;padding:4px;margin-bottom:18px;flex-wrap:wrap}
+
+    /* ── LA VENTANA DE CARGA DE FACTURA ─────────────────────────────────
+       Todo a la vista de una: a la izquierda lo que se carga, a la derecha lo
+       que hay que controlar. Antes era una columna larga y había que bajar
+       para cargar y volver a subir para mirar el asiento. */
+    #sgfm-modal .sgfm-shell{width:1320px;max-width:97vw;max-height:94vh;display:flex;flex-direction:column}
+    #sgfm-modal .sgfm-cols{display:grid;grid-template-columns:1.05fr 1fr;gap:14px;align-items:start;
+      flex:1;min-height:0;overflow-y:auto;padding-right:4px}
+    #sgfm-modal .sgfm-col{min-width:0}
+    /* Los campos, en grilla. Sin esto salían apilados a ancho completo. */
+    #sgfm-modal .sgfm-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
+    #sgfm-modal .sgfm-grid .fl{margin:0}
+    #sgfm-modal .sg-oc-box{padding:11px 13px}
+    #sgfm-modal .pa-tbl td,#sgfm-modal .pa-tbl th{padding:5px 7px;font-size:12px}
+    /* En una pantalla angosta vuelven a ser una sola columna: dos de 150px no
+       entran, y es peor verlas apretadas que una abajo de la otra. */
+    @media (max-width:1100px){ #sgfm-modal .sgfm-cols{grid-template-columns:1fr} }
   </style>
   <div class="sgc-tabs">
     <div class="sgc-subtab on" data-sub="partidas" onclick="liqSub('partidas')">⏳ Partidas pendientes de liquidar<span class="liq-cnt" id="liq-cnt-part">·</span></div>
@@ -2707,87 +2724,98 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
        asiento que se va a generar con el control de que balancee. El desglose
        no es burocracia — cada número va a una línea distinta del asiento, y un
        total no se puede imputar. -->
+  <!-- ── CARGAR LA FACTURA DE UNA PARTIDA ─────────────────────────────────
+       TODO A LA VISTA DE UNA. Antes era una columna larga: había que bajar
+       para cargar y volver a subir para mirar el asiento, y a mitad de camino
+       ya no se sabía qué se había puesto. Ahora son DOS COLUMNAS —a la
+       izquierda lo que se carga, a la derecha lo que hay que controlar— y la
+       ventana ocupa el ancho de la pantalla.
+
+       Los campos van en grilla propia: .sg-rec-grid está scopeada al modal de
+       recepción, así que acá no aplicaba nada y salían apilados a ancho
+       completo, uno por renglón. -->
   <div class="ab-modal-overlay" id="sgfm-modal">
-    <div class="ab-modal" style="width:980px;max-width:96vw;max-height:92vh;display:flex;flex-direction:column">
+    <div class="ab-modal sgfm-shell">
       <div class="mhd">
         <div class="mht">🧾 Cargar factura de mercadería</div>
         <button class="mcl" onclick="closeMB('sgfm-modal')">×</button>
       </div>
       <div id="sgfm-part-cab" style="background:rgba(224,167,46,.12);border:1px solid #e0a72e;
-           border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:13px;font-weight:600"></div>
-      <!-- QUÉ SE COMPRÓ Y CUÁNTO SE ACORDÓ PAGAR. Las cantidades salen de la
-           RECEPCIÓN, no de la orden: la orden es lo que se pidió, y lo que se
-           paga es lo que bajó del camión. El total es contra el que se controla
-           la factura. -->
-      <div id="sgfm-partida-detalle" style="margin-bottom:14px"></div>
+           border-radius:8px;padding:8px 14px;margin-bottom:10px;font-size:13px;font-weight:600"></div>
 
-      <div style="flex:1;overflow-y:auto;padding-right:6px">
-        <div class="sg-oc-box">
-          <div class="sg-oc-box-tit">El comprobante</div>
-          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:6px">
-            <button class="btn bb bs" type="button" onclick="eid('sgfm-pdf').click()">📎 Adjuntar PDF</button>
-            <input type="file" accept="application/pdf,image/*" id="sgfm-pdf" style="display:none" onchange="sgFmPdfElegido(this)">
-            <span id="sgfm-pdf-nom" style="font-size:12.5px;color:var(--mut)">Ningún archivo</span>
-            <button class="btn bo bs" type="button" id="sgfm-leer" style="display:none" onclick="sgFmLeerPdf()">🔍 Leer datos de la factura</button>
-          </div>
-          <div style="font-size:11.5px;color:var(--mut)">El PDF queda archivado con la partida. La lectura PROPONE los datos; se confirman a mano antes de contabilizar.</div>
-          <!-- Lo que la lectura no pudo leer bien, o lo que no cierra. Va acá
-               arriba y no en un toast que se va solo. -->
-          <div id="sgfm-aviso-lectura" style="display:none;border:1.5px solid #e0a72e;background:rgba(224,167,46,.10);
-               border-radius:8px;padding:10px 12px;margin-top:10px;font-size:12.5px;color:#9a3412;line-height:1.6"></div>
-        </div>
-
-        <div class="sg-oc-box" style="margin-top:12px">
-          <div class="sg-oc-box-tit">Datos fiscales</div>
-          <div class="sg-rec-grid">
-            <!-- Sólo A o B. Una liquidación NO es una factura de compra: es el
-                 comprobante de una venta por cuenta y orden. -->
-            <div class="fl"><label>Tipo</label>
-              <select id="sgfm-f-tipo"><option value="factura_a">Factura A</option><option value="factura_b">Factura B</option></select></div>
-            <div class="fl"><label>Punto de venta</label><input id="sgfm-f-pv" placeholder="0001"></div>
-            <div class="fl"><label>Número <span style="color:var(--err)">*</span></label><input id="sgfm-f-nro" placeholder="00012345"></div>
-            <div class="fl"><label>Fecha de emisión</label><input type="date" id="sgfm-f-fecha"></div>
-            <div class="fl"><label>CUIT del emisor</label><input id="sgfm-f-cuit" placeholder="30-12345678-9"></div>
-            <div class="fl"><label>CAE</label><input id="sgfm-f-cae"></div>
-          </div>
-        </div>
-
-        <div class="sg-oc-box" style="margin-top:12px">
-          <div class="sg-oc-box-tit">Importes</div>
-          <div class="sg-rec-grid">
-            <div class="fl"><label>Neto gravado</label><input type="number" step="0.01" id="sgfm-f-neto" oninput="sgFmRecalc()"></div>
-            <div class="fl"><label>IVA %</label><input type="number" step="0.01" id="sgfm-f-alic" value="21" oninput="sgFmRecalc()"></div>
-            <div class="fl"><label>IVA</label><input type="number" step="0.01" id="sgfm-f-iva" oninput="sgFmRecalc()"></div>
-            <div class="fl"><label>Percepción IVA</label><input type="number" step="0.01" id="sgfm-f-piva" oninput="sgFmRecalc()"></div>
-            <div class="fl"><label>Percepción Ganancias</label><input type="number" step="0.01" id="sgfm-f-pgan" oninput="sgFmRecalc()"></div>
-            <div class="fl"><label>Otros conceptos</label><input type="number" step="0.01" id="sgfm-f-otros" oninput="sgFmRecalc()"></div>
-            <div class="fl"><label>TOTAL</label><input type="number" step="0.01" id="sgfm-f-total" oninput="sgFmRecalc()"></div>
-          </div>
-          <!-- ── PERCEPCIÓN DE INGRESOS BRUTOS, POR JURISDICCIÓN ──────────
-               IIBB es provincial: una misma factura puede traer percepción de
-               dos o tres provincias, y cada una va a la cuenta de la suya. Hasta
-               tres, que ya es un caso raro. Las provincias salen de las líneas
-               del asiento modelo: parametrizar una es cargarle la línea. -->
-          <div style="margin-top:12px;border-top:1px solid var(--bor);padding-top:10px">
-            <div style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut);margin-bottom:6px">
-              Percepción Ingresos Brutos
+      <div class="sgfm-cols">
+        <!-- IZQUIERDA: lo que se carga ─────────────────────────────────── -->
+        <div class="sgfm-col">
+          <div class="sg-oc-box">
+            <div class="sg-oc-box-tit">El comprobante</div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:6px">
+              <button class="btn bb bs" type="button" onclick="eid('sgfm-pdf').click()">📎 Adjuntar PDF</button>
+              <input type="file" accept="application/pdf,image/*" id="sgfm-pdf" style="display:none" onchange="sgFmPdfElegido(this)">
+              <span id="sgfm-pdf-nom" style="font-size:12.5px;color:var(--mut)">Ningún archivo</span>
+              <button class="btn bo bs" type="button" id="sgfm-leer" style="display:none" onclick="sgFmLeerPdf()">🔍 Leer datos</button>
             </div>
-            <div id="sgfm-iibb-filas"></div>
-            <button class="btn bo bs" type="button" id="sgfm-iibb-mas" onclick="sgFmIibbAgregar()"
-                    style="margin-top:6px">+ Otra jurisdicción</button>
+            <div style="font-size:11.5px;color:var(--mut)">El PDF queda archivado con la partida. La lectura PROPONE los datos; se confirman a mano.</div>
+            <div id="sgfm-aviso-lectura" style="display:none;border:1.5px solid #e0a72e;background:rgba(224,167,46,.10);
+                 border-radius:8px;padding:9px 11px;margin-top:9px;font-size:12.5px;color:#9a3412;line-height:1.55"></div>
           </div>
-          <div id="sgfm-suma" style="font-size:12.5px;margin-top:8px"></div>
+
+          <div class="sg-oc-box" style="margin-top:10px">
+            <div class="sg-oc-box-tit">Datos fiscales</div>
+            <div class="sgfm-grid">
+              <div class="fl"><label>Tipo</label>
+                <select id="sgfm-f-tipo"><option value="factura_a">Factura A</option><option value="factura_b">Factura B</option></select></div>
+              <div class="fl"><label>Punto de venta</label><input id="sgfm-f-pv" placeholder="0001"></div>
+              <div class="fl"><label>Número <span style="color:var(--err)">*</span></label><input id="sgfm-f-nro" placeholder="00012345"></div>
+              <div class="fl"><label>Fecha de emisión</label><input type="date" id="sgfm-f-fecha"></div>
+              <div class="fl"><label>CUIT del emisor</label><input id="sgfm-f-cuit" placeholder="30-12345678-9"></div>
+              <div class="fl"><label>CAE</label><input id="sgfm-f-cae"></div>
+            </div>
+          </div>
+
+          <div class="sg-oc-box" style="margin-top:10px">
+            <div class="sg-oc-box-tit">Importes</div>
+            <div class="sgfm-grid">
+              <div class="fl"><label>Neto gravado</label><input type="number" step="0.01" id="sgfm-f-neto" oninput="sgFmRecalc()"></div>
+              <div class="fl"><label>IVA %</label><input type="number" step="0.01" id="sgfm-f-alic" value="21" oninput="sgFmRecalc()"></div>
+              <div class="fl"><label>IVA</label><input type="number" step="0.01" id="sgfm-f-iva" oninput="sgFmRecalc()"></div>
+              <div class="fl"><label>Percepción IVA</label><input type="number" step="0.01" id="sgfm-f-piva" oninput="sgFmRecalc()"></div>
+              <div class="fl"><label>Percepción Ganancias</label><input type="number" step="0.01" id="sgfm-f-pgan" oninput="sgFmRecalc()"></div>
+              <div class="fl"><label>Otros conceptos</label><input type="number" step="0.01" id="sgfm-f-otros" oninput="sgFmRecalc()"></div>
+            </div>
+            <!-- ── PERCEPCIÓN DE INGRESOS BRUTOS, POR JURISDICCIÓN ────────
+                 IIBB es provincial: una misma factura puede traer percepción de
+                 dos o tres provincias, y cada una va a la cuenta de la suya.
+                 Las provincias salen de las líneas del asiento modelo. -->
+            <div style="margin-top:10px;border-top:1px solid var(--bor);padding-top:9px">
+              <div style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut);margin-bottom:6px">
+                Percepción Ingresos Brutos
+              </div>
+              <div id="sgfm-iibb-filas"></div>
+              <button class="btn bo bs" type="button" id="sgfm-iibb-mas" onclick="sgFmIibbAgregar()"
+                      style="margin-top:4px">+ Otra jurisdicción</button>
+            </div>
+            <div class="sgfm-grid" style="margin-top:10px;border-top:1px solid var(--bor);padding-top:9px">
+              <div class="fl" style="grid-column:span 2"><label>TOTAL de la factura</label>
+                <input type="number" step="0.01" id="sgfm-f-total" oninput="sgFmRecalc()" style="font-weight:700"></div>
+            </div>
+            <div id="sgfm-suma" style="font-size:12.5px;margin-top:8px"></div>
+          </div>
         </div>
 
-        <!-- EL ASIENTO. Lo que de verdad importa: contra qué se imputa cada
-             número y si cierra. -->
-        <div class="sg-oc-box" style="margin-top:12px">
-          <div class="sg-oc-box-tit">Asiento contable</div>
-          <div id="sgfm-asiento">Elegí el asiento modelo en la pantalla de Facturas por mercadería.</div>
+        <!-- DERECHA: lo que hay que controlar ───────────────────────────── -->
+        <div class="sgfm-col">
+          <!-- QUÉ SE COMPRÓ Y CUÁNTO SE ACORDÓ PAGAR. Las cantidades salen de
+               la RECEPCIÓN, no de la orden: la orden es lo que se pidió, y lo
+               que se paga es lo que bajó del camión. -->
+          <div id="sgfm-partida-detalle"></div>
+          <div class="sg-oc-box" style="margin-top:10px">
+            <div class="sg-oc-box-tit">Asiento contable</div>
+            <div id="sgfm-asiento">Elegí el asiento modelo en la pantalla de Facturas por mercadería.</div>
+          </div>
         </div>
       </div>
 
-      <div style="display:flex;justify-content:space-between;gap:10px;padding-top:12px;border-top:1px solid var(--bor);margin-top:10px">
+      <div style="display:flex;justify-content:space-between;gap:10px;padding-top:10px;border-top:1px solid var(--bor);margin-top:8px">
         <button class="btn bo" onclick="closeMB('sgfm-modal')">Cancelar</button>
         <button class="btn bb" id="sgfm-guardar" onclick="sgFmGuardar()">Guardar factura</button>
       </div>
@@ -5513,8 +5541,7 @@ function sgFmPartidaDetalle(id){
         + '<td style="text-align:right"><b>' + (it.importe != null ? sgMoney(it.importe) : '—') + '</b></td></tr>';
     }).join('');
     cont.innerHTML = '<div id="sgfm-agrupar"></div>'
-      + '<div style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut);margin-bottom:6px">'
-        + 'Lo que entró y lo que se acordó pagar</div>'
+      + '<div class="sg-oc-box"><div class="sg-oc-box-tit">Lo que entró y lo que se acordó pagar</div>'
       + '<div class="ab-table-wrap"><table class="pa-tbl">'
       + '<thead><tr><th>Producto</th><th style="text-align:right">Bultos recibidos</th>'
       + '<th style="text-align:right">Kg recibidos</th><th style="text-align:right">Precio acordado</th>'
@@ -5524,7 +5551,7 @@ function sgFmPartidaDetalle(id){
             + '<td style="text-align:right" id="sgfm-total-acordado">' + sgMoney(d.total_acordado) + '</td></tr>'
           : '<tr><td colspan="5" style="font-size:12px;color:var(--mut)">Compra de liquidación: el precio se define al liquidar.</td></tr>')
       + '</tbody></table></div>'
-      + '<div id="sgfm-vs-acordado" style="font-size:12.5px;margin-top:6px"></div>';
+      + '<div id="sgfm-vs-acordado" style="font-size:12.5px;margin-top:6px"></div></div>';
     sgFmAgrupables();
     sgFmRecalc();
   });
