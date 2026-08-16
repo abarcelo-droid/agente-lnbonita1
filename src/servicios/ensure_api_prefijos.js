@@ -80,6 +80,9 @@ const PREFIJOS = [
   // cuentas entero de San Gerónimo. Las tres direcciones más largas de abajo le
   // ganan igual, porque gana el prefijo MÁS LARGO.
   ['sgct-asientos',      'sg/contable/asientos'],
+  // El libro de IVA compras y la anulación de un asiento. La anulación además
+  // pide la clave del que la hace: mueve la contabilidad.
+  ['sgct-iva-compras',   'sg/diario-iva-compras,sg/asientos'],
   ['sgct-plan-cuentas',  'sg/contable,sg/contable/secciones,sg/contable/titulos,sg/contable/config-impositiva'],
   ['sgct-modelos',       'sg/contable/modelos'],
 

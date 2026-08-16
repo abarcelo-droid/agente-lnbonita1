@@ -2294,6 +2294,184 @@ REGLAS:
   }
 });
 
+// ── CONTABILIZAR LA FACTURA ──────────────────────────────────────────────
+// Acá se escribe en la contabilidad. Hasta este punto todo era preparar el
+// asiento; esto lo graba.
+//
+// LA FECHA ES LA DE LA FACTURA, no la de hoy ni la de la recepción: el hecho
+// imponible es la emisión del comprobante, y de eso dependen el período de IVA
+// y el libro donde cae.
+//
+// UN ASIENTO NO SE BORRA NUNCA. Si está mal, se ANULA —queda a la vista, con
+// quién y cuándo— y se hace uno nuevo. Un asiento borrado es un agujero en el
+// libro que nadie puede explicar después.
+router.post('/oc/:id/contabilizar', requireAdmin, (req, res) => {
+  const db = getDb();
+  try {
+    const fac = db.prepare(`SELECT * FROM sg_facturas_compra
+      WHERE oc_id=? AND activo=1 ORDER BY id DESC LIMIT 1`).get(req.params.id);
+    if (!fac) return res.status(400).json({ ok: false, error: 'Esa partida todavía no tiene factura cargada' });
+    if (fac.asiento_id) {
+      const a = db.prepare('SELECT id, anulado FROM sg_asientos WHERE id=?').get(fac.asiento_id);
+      if (a && !a.anulado) {
+        return res.status(400).json({ ok: false,
+          error: 'Esta factura ya está contabilizada en el asiento ' + a.id + '. Si está mal, anulalo.' });
+      }
+    }
+    if (!val(fac.fecha_emision)) {
+      return res.status(400).json({ ok: false,
+        error: 'La factura no tiene fecha de emisión, y el asiento va con esa fecha.' });
+    }
+
+    const lineasMod = lineasModeloFactura(db);
+    if (!lineasMod || !lineasMod.length) {
+      return res.status(400).json({ ok: false, error: 'No hay asiento modelo parametrizado' });
+    }
+    const percs = db.prepare(`SELECT jurisdiccion, monto FROM sg_factura_percepciones
+      WHERE factura_id=? AND tipo='percepcion_iibb'`).all(fac.id);
+    const asiento = armarAsientoFactura(lineasMod, {
+      neto: fac.neto, iva_monto: fac.iva_monto, percepcion_iva: fac.percepcion_iva,
+      percepcion_ganancias: fac.percepcion_ganancias, total: fac.total,
+      percepciones_iibb: percs.length ? percs
+        : (fac.percepcion_iibb ? [{ jurisdiccion: fac.iibb_jurisdiccion, monto: fac.percepcion_iibb }] : []),
+    });
+    // La regla otra vez, acá donde de verdad importa: es lo último antes de
+    // escribir en la contabilidad.
+    if (!asiento.balancea) {
+      return res.status(400).json({ ok: false,
+        error: 'El asiento no balancea (debe ' + asiento.debe + ' contra haber ' + asiento.haber
+             + '). No se contabiliza.', asiento });
+    }
+    const conCuenta = asiento.lineas.filter((l) => l.monto > 0);
+    if (conCuenta.some((l) => !l.cuenta_id)) {
+      return res.status(400).json({ ok: false, error: 'Hay líneas con importe que no tienen cuenta' });
+    }
+
+    const partidas = db.prepare(`SELECT o.trazabilidad FROM sg_factura_compra_ocs fo
+      JOIN sg_oc o ON o.id=fo.oc_id WHERE fo.factura_id=?`).all(fac.id).map((x) => x.trazabilidad);
+    const nroFac = (fac.punto_venta ? fac.punto_venta + '-' : '') + (fac.numero || '');
+    const desc = 'Compra de mercadería — Factura ' + nroFac
+      + (partidas.length ? ' — Partida' + (partidas.length > 1 ? 's ' : ' ') + partidas.join(', ') : '');
+
+    let asientoId;
+    db.transaction(() => {
+      asientoId = db.prepare(`INSERT INTO sg_asientos (fecha, descripcion, usuario_id, ref_compra_id, ref_codigo)
+        VALUES (?,?,?,?,?)`).run(fac.fecha_emision, desc, uid(req), fac.id, nroFac).lastInsertRowid;
+
+      // El asiento va a sg_asientos_lineas, que es de donde el módulo contable
+      // arma el mayor y el balance. sg_movimientos_contables existe pero no la
+      // lee nadie —se creó "por paridad estructural" con Puente Cordón—, así
+      // que escribir ahí sería inventar un segundo lugar para lo mismo y que
+      // dentro de un año no se sepa cuál de los dos manda.
+      const insL = db.prepare(`INSERT INTO sg_asientos_lineas (asiento_id, cuenta_id, debe, haber, descripcion)
+        VALUES (?,?,?,?,?)`);
+      for (const l of conCuenta) {
+        insL.run(asientoId, l.cuenta_id,
+          l.lado === 'debe' ? l.monto : 0,
+          l.lado === 'haber' ? l.monto : 0,
+          l.descripcion || null);
+      }
+      db.prepare(`UPDATE sg_facturas_compra SET asiento_id=?, confirmada_en=datetime('now','localtime'),
+        confirmada_por=?, modificado_en=datetime('now','localtime'), modificado_por=? WHERE id=?`)
+        .run(asientoId, uid(req), uid(req), fac.id);
+    })();
+    res.json({ ok: true, data: { asiento_id: Number(asientoId), fecha: fac.fecha_emision, asiento } });
+  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+
+// ANULAR un asiento. Con la clave del administrador: no se borra, queda a la
+// vista con quién lo anuló y cuándo, y la factura vuelve a poder contabilizarse.
+router.post('/asientos/:id/anular', requireAdmin, async (req, res) => {
+  const db = getDb();
+  try {
+    const motivo = val(req.body && req.body.motivo);
+    const password = (req.body && req.body.password) || '';
+    if (!motivo) return res.status(400).json({ ok: false, error: 'Escribí por qué se anula: queda en el libro' });
+    if (!password) return res.status(400).json({ ok: false, error: 'Falta la clave del administrador' });
+
+    // La clave del que está anulando. Anular un asiento mueve la contabilidad:
+    // no puede salir de una sesión abierta y olvidada.
+    const u = db.prepare('SELECT id, password_hash FROM usuarios WHERE id=?').get(uid(req));
+    if (!u || !u.password_hash) {
+      return res.status(400).json({ ok: false, error: 'Tu usuario no tiene clave configurada' });
+    }
+    const bcrypt = (await import('bcrypt')).default;
+    if (!(await bcrypt.compare(String(password), u.password_hash))) {
+      return res.status(403).json({ ok: false, error: 'La clave no es correcta' });
+    }
+
+    const a = db.prepare('SELECT id, anulado FROM sg_asientos WHERE id=?').get(req.params.id);
+    if (!a) return res.status(404).json({ ok: false, error: 'Asiento no encontrado' });
+    if (a.anulado) return res.status(400).json({ ok: false, error: 'Ese asiento ya está anulado' });
+
+    db.transaction(() => {
+      // El asiento NO se borra: queda con su marca de anulado, quién y cuándo,
+      // y el motivo pegado a la descripción para que se lea en el libro.
+      db.prepare(`UPDATE sg_asientos SET anulado=1, anulado_por=?, anulado_en=datetime('now','localtime'),
+        descripcion = descripcion || ' — ANULADO: ' || ? WHERE id=?`).run(uid(req), motivo, a.id);
+      // Las líneas se dejan: son la prueba de qué decía el asiento que se anuló.
+      // El módulo contable ya filtra por sg_asientos.anulado.
+      // La factura vuelve a quedar sin contabilizar, para poder rehacerla.
+      db.prepare('UPDATE sg_facturas_compra SET asiento_id=NULL WHERE asiento_id=?').run(a.id);
+    })();
+    res.json({ ok: true, data: { id: Number(a.id) } });
+  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+
+// ── DIARIO IVA COMPRAS ───────────────────────────────────────────────────
+// Todas las facturas de compra CONTABILIZADAS, vengan de donde vengan. Es el
+// libro que se mira para el IVA del período y del que salen los datos que pide
+// AFIP: fecha, comprobante, CUIT, neto, IVA discriminado y percepciones.
+//
+// Las anuladas se listan igual, marcadas: un libro con agujeros no se puede
+// explicar. Por eso también se ven las que perdieron su asiento.
+router.get('/diario-iva-compras', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    // Al anular, la factura pierde su asiento_id: por eso "incluir anulados" es
+    // dejar de exigir que lo tenga, y el asiento anulado se encuentra por su
+    // ref_compra_id. Antes esto hacía where.pop(), que con fechas se llevaba el
+    // filtro de "hasta" y dejaba un parámetro suelto.
+    const verAnulados = req.query.incluir_anulados === '1';
+    const where = ['f.activo=1'], params = [];
+    if (!verAnulados) where.push('f.asiento_id IS NOT NULL');
+    else where.push(`(f.asiento_id IS NOT NULL
+      OR EXISTS (SELECT 1 FROM sg_asientos an WHERE an.ref_compra_id = f.id AND an.anulado = 1))`);
+    if (req.query.desde) { where.push('f.fecha_emision >= ?'); params.push(req.query.desde); }
+    if (req.query.hasta) { where.push('f.fecha_emision <= ?'); params.push(req.query.hasta); }
+    const rows = db.prepare(`
+      SELECT f.id, f.fecha_emision, f.tipo_comprobante, f.punto_venta, f.numero, f.cuit_emisor,
+             f.neto, f.iva_alicuota, f.iva_monto, f.percepcion_iva, f.percepcion_iibb,
+             f.percepcion_ganancias, f.otros_conceptos, f.total, f.cae, f.asiento_id,
+             p.razon_social AS proveedor_nombre,
+             -- El asiento vigente si lo tiene; si se anuló, el anulado, que es
+             -- el que hay que mostrar tachado.
+             COALESCE(a.anulado, an.anulado) AS anulado,
+             COALESCE(a.anulado_en, an.anulado_en) AS anulado_en,
+             COALESCE(f.asiento_id, an.id) AS asiento_ref,
+             (SELECT GROUP_CONCAT(o.trazabilidad, ' · ') FROM sg_factura_compra_ocs fo
+                JOIN sg_oc o ON o.id=fo.oc_id WHERE fo.factura_id=f.id) AS partidas
+        FROM sg_facturas_compra f
+        LEFT JOIN sg_proveedores p ON p.id = f.proveedor_id
+        LEFT JOIN sg_asientos a ON a.id = f.asiento_id
+        LEFT JOIN sg_asientos an ON an.ref_compra_id = f.id AND an.anulado = 1
+       WHERE ${where.join(' AND ')}
+       ORDER BY f.fecha_emision DESC, f.id DESC`).all(...params);
+
+    // Los totales del período: es lo que se compara contra la declaración.
+    const t = { neto: 0, iva: 0, percepciones: 0, total: 0 };
+    for (const x of rows) {
+      if (x.anulado) continue;                    // lo anulado no suma
+      t.neto = r2(t.neto + (x.neto || 0));
+      t.iva = r2(t.iva + (x.iva_monto || 0));
+      t.percepciones = r2(t.percepciones + (x.percepcion_iva || 0) + (x.percepcion_iibb || 0)
+        + (x.percepcion_ganancias || 0));
+      t.total = r2(t.total + (x.total || 0));
+    }
+    res.json({ ok: true, data: { filas: rows, totales: t } });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
 // Partidas de precio cerrado a las que todavía no se les cargó la factura del
 // proveedor. El número de factura se carga en el paso 1 de la recepción.
 router.get('/partidas-a-facturar', requireAuth, (req, res) => {
