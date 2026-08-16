@@ -5016,6 +5016,8 @@ function sgOcVer(id){
   Promise.all([api('/api/sg/oc/'+id), api('/api/sg/lotes?oc_id='+id)]).then(function(res){
     var r=res[0]; if(!r||!r.ok){ toast('Error','er'); return; }
     var o=r.data; var lotes=(res[1]&&res[1].ok)?res[1].data:[];
+    // Los lotes quedan a mano: el botón de corregir pasa sólo el id y los busca acá.
+    SG.ocVerLotes = lotes;
     eid('sg-ocver-tit').textContent='Orden de compra  '+sgOcId(o);
     // ── LA FICHA DE LA ORDEN ──────────────────────────────────────────────
     // Antes era un renglón corrido: "Proveedor: X · Abierta · Liquidación de
@@ -5217,7 +5219,12 @@ function sgOcVer(id){
           + '<td style="text-align:right;white-space:nowrap">'+btn
           + (sgFmEsAdmin()
               ? ' <button class="btn bo bs" title="Corregir lo que se cargó mal"'
-                + ' onclick="sgLoteEditarOpen(' + JSON.stringify(l).replace(/"/g,'&quot;') + ')">✏️</button>'
+                // Se pasa SÓLO el id. Meter el lote entero serializado dentro de
+                // un atributo HTML es frágil por diseño: cualquier comilla,
+                // salto de línea o carácter raro en un campo de texto libre
+                // —observaciones, calidad— rompe el atributo y el botón deja de
+                // responder, sin ningún error visible.
+                + ' onclick="sgLoteEditarOpen(' + l.id + ')">✏️</button>'
               : '')
           + '</td></tr>';
       });
@@ -7098,6 +7105,23 @@ function sgRetroGuardar(){
 }
 
 // ── Cerrar precio (pizarra) ──
+// ── ABRIR UN MODAL QUE SE ABRE DESDE OTRO MODAL ─────────────────────────
+// Todos los overlays comparten z-index:100, y con el mismo z-index gana el que
+// está DESPUÉS en el HTML. Los modales que se abren desde la ficha de la orden
+// —corregir una partida, cerrar el precio de un lote— están más ARRIBA en el
+// archivo que la ficha, así que aparecían DETRÁS de ella: el usuario hacía
+// click y "no pasaba nada", cuando en realidad el modal se había abierto,
+// tapado por el fondo oscuro del otro.
+//
+// En vez de acordarse de un z-index por cada uno, se cuenta cuántos hay
+// abiertos y el nuevo se pone por encima. Sirve igual para el que venga.
+function sgModalArriba(id){
+  var el = eid(id); if (!el) return;
+  var abiertos = document.querySelectorAll('.ab-modal-overlay.on').length;
+  el.style.zIndex = String(100 + (abiertos + 1) * 10);
+  el.classList.add('on');
+}
+
 // ── CORREGIR UN LOTE ────────────────────────────────────────────────────
 // Sólo lo ve un administrador. Se corrige lo que se cargó mal —un bulto mal
 // contado, un peso mal tipeado, un precio con un cero de más— y queda registrado
@@ -7105,8 +7129,12 @@ function sgRetroGuardar(){
 //
 // El servidor tiene los frenos: no deja corregir una partida ya contabilizada
 // (primero se anula el asiento), ni una de la que ya se despachó mercadería.
-function sgLoteEditarOpen(l){
+function sgLoteEditarOpen(loteId){
   if (!sgFmEsAdmin()) { toast('Sólo un administrador puede corregir', 'er'); return; }
+  // El lote sale de lo que ya trajo la ficha: no hace falta volver a pedirlo ni
+  // arrastrarlo por el atributo del botón.
+  var l = (SG.ocVerLotes || []).filter(function(x){ return String(x.id) === String(loteId); })[0];
+  if (!l) { toast('No se encontró esa partida — actualizá la pantalla', 'er'); return; }
   SG.loteEdit = l;
   eid('sg-loteed-info').innerHTML = 'Partida <code>' + escH(l.codigo_lote) + '</code>'
     + (l.producto_nombre ? ' · ' + escH(l.producto_nombre) : '');
@@ -7115,7 +7143,7 @@ function sgLoteEditarOpen(l){
   eid('sg-loteed-calidad').value = l.calidad || '';
   eid('sg-loteed-precio').value = l.precio_unitario_kg != null ? l.precio_unitario_kg : '';
   eid('sg-loteed-motivo').value = '';
-  eid('sg-loteed-modal').classList.add('on');
+  sgModalArriba('sg-loteed-modal');
 }
 
 function sgLoteEditarGuardar(){
@@ -7141,7 +7169,7 @@ function sgPrecioOpen(loteId, codigo, kg){
   eid('sg-precio-info').innerHTML='Lote <b>'+esc(codigo)+'</b> · '+nr(kg)+' kg';
   eid('sg-precio-valor').value=''; eid('sg-precio-calc').textContent='';
   eid('sg-precio-valor').oninput=function(){ var p=Number(this.value)||0; eid('sg-precio-calc').textContent='Costo base = '+sgMoney(p*kg); };
-  eid('sg-precio-modal').classList.add('on');
+  sgModalArriba('sg-precio-modal');
 }
 function sgPrecioGuardar(){
   var p=Number(eid('sg-precio-valor').value);
