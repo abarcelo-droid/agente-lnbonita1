@@ -1653,7 +1653,7 @@ router.post('/oc', requireAdmin, (req, res) => {
 //   pendiente de facturar  = ninguna de sus recepciones tiene número de factura
 function partidasRecibidas(db, tipoPrecio) {
   return db.prepare(`
-    SELECT o.id, o.numero, o.trazabilidad, o.fecha_oc, o.tipo_precio, o.estado,
+    SELECT o.id, o.numero, o.trazabilidad, o.fecha_oc, o.tipo_precio, o.tipo_fiscal, o.estado,
            o.cerrada_en, o.total_estimado_kg,
            p.razon_social AS proveedor_nombre,
            (SELECT COALESCE(SUM(l.kg_reales),0) FROM sg_lotes l
