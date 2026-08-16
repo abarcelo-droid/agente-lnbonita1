@@ -32,6 +32,10 @@ const MODULOS_SGCT = [
   ["sgct-plan-cuentas", "📗 Plan de Cuentas SG", 670],
   ["sgct-asientos",     "📘 Asientos SG",        671],
   ["sgct-modelos",      "📐 Asientos Modelo SG", 672],
+  // El libro de IVA compras: todas las facturas de compra contabilizadas,
+  // vengan de donde vengan. Es de donde salen los datos del período y lo que
+  // después hay que informar.
+  ["sgct-iva-compras",  "🧾 Diario IVA Compras SG", 673],
 ];
 
 try {

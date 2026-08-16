@@ -309,6 +309,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   <div class="ni" data-sec="sgct-plan-cuentas" data-admin-only="1"></div>
   <div class="ni" data-sec="sgct-asientos" data-admin-only="1"></div>
   <div class="ni" data-sec="sgct-modelos" data-admin-only="1"></div>
+  <div class="ni" data-sec="sgct-iva-compras" data-admin-only="1"></div>
 
   <div class="ng" style="margin-top:8px">General</div>
   <div class="ni on" data-sec="inicio"><span class="dot"></span>Inicio</div>
@@ -5282,6 +5283,73 @@ function liqDePartida(ocId, partida, proveedor){
 
 function sgFmSub(){ /* una sola solapa por ahora; existe para que el patrón no cambie después */ }
 
+// ── DIARIO IVA COMPRAS ──────────────────────────────────────────────────
+// Las facturas de compra ya contabilizadas. Arranca en el mes en curso, que es
+// el período que se está armando.
+function sgIvaInit(){
+  var d = eid('sgiva-desde'), h = eid('sgiva-hasta');
+  if (d && !d.value) {
+    var hoy = new Date();
+    d.value = hoy.getFullYear() + '-' + String(hoy.getMonth() + 1).padStart(2, '0') + '-01';
+    if (h) h.value = hoy.toISOString().slice(0, 10);
+  }
+  sgIvaLoad();
+}
+
+function sgIvaLoad(){
+  var q = [];
+  var d = (eid('sgiva-desde') || {}).value, h = (eid('sgiva-hasta') || {}).value;
+  if (d) q.push('desde=' + d);
+  if (h) q.push('hasta=' + h);
+  if ((eid('sgiva-anulados') || {}).checked) q.push('incluir_anulados=1');
+  api('/api/sg/diario-iva-compras' + (q.length ? '?' + q.join('&') : '')).then(function(r){
+    var tb = eid('sgiva-tb'); if (!tb) return;
+    if (!r || !r.ok) { tb.innerHTML = '<tr><td colspan="10" class="emp">No se pudo cargar.</td></tr>'; return; }
+    var filas = r.data.filas || [], t = r.data.totales || {};
+
+    var tot = eid('sgiva-totales');
+    if (tot) {
+      tot.innerHTML = filas.length
+        ? '<div style="display:flex;gap:22px;flex-wrap:wrap;border:1px solid var(--bor);border-radius:10px;padding:12px 16px;background:var(--bg)">'
+          + [['Comprobantes', filas.filter(function(x){ return !x.anulado; }).length],
+             ['Neto', sgMoney(t.neto)], ['IVA', sgMoney(t.iva)],
+             ['Percepciones', sgMoney(t.percepciones)], ['Total', sgMoney(t.total)]]
+            .map(function(p){
+              return '<div><div style="font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut)">'
+                + p[0] + '</div><div style="font-size:15px;font-weight:700">' + p[1] + '</div></div>';
+            }).join('')
+          + '</div>'
+        : '';
+    }
+
+    var TIPO = { factura_a: 'FA A', factura_b: 'FA B', liquidacion: 'LIQ' };
+    tb.innerHTML = filas.length ? filas.map(function(x){
+      var nro = (x.punto_venta ? x.punto_venta + '-' : '') + (x.numero || '');
+      var perc = (Number(x.percepcion_iva) || 0) + (Number(x.percepcion_iibb) || 0)
+        + (Number(x.percepcion_ganancias) || 0);
+      var anul = x.anulado
+        ? ' style="opacity:.55;text-decoration:line-through"'
+        : '';
+      return '<tr' + anul + '>'
+        + '<td>' + escH(x.fecha_emision || '—') + '</td>'
+        + '<td>' + escH(TIPO[x.tipo_comprobante] || x.tipo_comprobante || '—') + ' <code>' + escH(nro) + '</code></td>'
+        + '<td>' + escH(x.proveedor_nombre || '—') + '</td>'
+        + '<td style="font-family:monospace;font-size:12px">' + escH(x.cuit_emisor || '—') + '</td>'
+        + '<td style="text-align:right">' + sgMoney(x.neto) + '</td>'
+        + '<td style="text-align:right">' + sgMoney(x.iva_monto)
+          + (x.iva_alicuota ? '<div class="sg-oc-sub">' + nr(x.iva_alicuota) + '%</div>' : '') + '</td>'
+        + '<td style="text-align:right">' + (perc > 0 ? sgMoney(perc) : '—') + '</td>'
+        + '<td style="text-align:right"><b>' + sgMoney(x.total) + '</b></td>'
+        + '<td style="font-family:monospace;font-size:11.5px">' + escH(x.partidas || '—') + '</td>'
+        + '<td style="text-align:center">'
+          + (x.anulado
+              ? '<span class="bdg ber">ANULADO</span>'
+              : '<code>' + (x.asiento_id || '—') + '</code>')
+        + '</td></tr>';
+    }).join('') : '<tr><td colspan="10" class="emp">No hay facturas contabilizadas en este período.</td></tr>';
+  });
+}
+
 // ── EL ASIENTO CON EL QUE SE CONTABILIZA ────────────────────────────────
 // Se muestra siempre, arriba de la bandeja: antes de cargar una factura hay que
 // poder ver contra qué se va a imputar. Si el modelo no sirve —le falta la línea
@@ -5803,7 +5871,23 @@ function sgFmGuardar(){
     .then(function(r){ return r.json(); })
     .then(function(r){
       if (!r || !r.ok) { toast((r && r.error) || 'No se pudo guardar', 'er'); return; }
-      toast('Factura guardada', 'ok');
+      var av = r.data && r.data.aviso_acordado;
+      // GUARDAR NO ES CONTABILIZAR. Se pregunta aparte porque escribir en la
+      // contabilidad es lo único que después no se deshace: se anula, con clave
+      // de administrador, y queda a la vista.
+      var msg = 'Factura guardada.' + (av ? '\n\n⚠️ ' + av : '')
+        + '\n\n¿Contabilizarla ahora?\n\nEl asiento se graba con fecha ' + (payload.fecha_emision || 'de la factura')
+        + '. Un asiento no se borra: si está mal, se anula con clave de administrador y queda registrado.';
+      if (confirm(msg)) {
+        api('/api/sg/oc/' + SGFMF.ocId + '/contabilizar', 'POST', {}).then(function(r2){
+          if (!r2 || !r2.ok) { toast((r2 && r2.error) || 'No se pudo contabilizar', 'er'); return; }
+          toast('Contabilizada — asiento ' + r2.data.asiento_id + ' del ' + r2.data.fecha, 'ok');
+          closeMB('sgfm-modal');
+          sgFmLoad();
+        });
+        return;
+      }
+      toast('Factura guardada, sin contabilizar', 'ok');
       closeMB('sgfm-modal');
       sgFmLoad();
     })
@@ -10751,6 +10835,36 @@ function sgRepExport(){
   <div class="emp">Seleccioná un grupo para ver las cuentas</div>
 </div>
 </div>
+<!-- ── DIARIO IVA COMPRAS ────────────────────────────────────────────────
+     Todas las facturas de compra CONTABILIZADAS, vengan de donde vengan. Es el
+     libro que se mira para el IVA del período. Las anuladas se listan igual,
+     marcadas: un libro con agujeros no se puede explicar. -->
+<div class="sec" id="sec-sgct-iva-compras">
+  <div class="ph">
+    <div>
+      <div class="ph-t">🧾 Diario IVA Compras · San Gerónimo</div>
+      <div class="ph-s">Las facturas de compra contabilizadas, con su IVA discriminado</div>
+    </div>
+    <button class="btn bo" onclick="sgIvaLoad()">↻ Actualizar</button>
+  </div>
+  <div style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap;margin-bottom:14px">
+    <div class="fl"><label>Desde</label><input type="date" id="sgiva-desde" onchange="sgIvaLoad()"></div>
+    <div class="fl"><label>Hasta</label><input type="date" id="sgiva-hasta" onchange="sgIvaLoad()"></div>
+    <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;text-transform:none;letter-spacing:0;cursor:pointer;min-height:0">
+      <input type="checkbox" id="sgiva-anulados" style="width:auto;margin:0" onchange="sgIvaLoad()">
+      Mostrar también los anulados
+    </label>
+  </div>
+  <div id="sgiva-totales" style="margin-bottom:12px"></div>
+  <div class="ab-table-wrap"><table class="pa-tbl">
+    <thead><tr><th>Fecha</th><th>Comprobante</th><th>Proveedor</th><th>CUIT</th>
+      <th style="text-align:right">Neto</th><th style="text-align:right">IVA</th>
+      <th style="text-align:right">Percepciones</th><th style="text-align:right">Total</th>
+      <th>Partida</th><th style="text-align:center">Asiento</th></tr></thead>
+    <tbody id="sgiva-tb"><tr><td colspan="10" class="emp">Cargando…</td></tr></tbody>
+  </table></div>
+</div>
+
 <div class="sec" id="sec-sgct-asientos">
 <div class="ph">
   <div>
@@ -47756,6 +47870,7 @@ function sgctExportarAsientos(){
     }
     if (s === 'sgct-asientos') { sgctCargarCuentas(); sgctLoadAsientos(); return; }
     if (s === 'sgct-modelos')  { sgctModCargarCuentas(function(){ sgctModCargar(); }); sgctCargarConfigImp(); return; }
+    if (s === 'sgct-iva-compras') { sgIvaInit(); return; }
     return anterior(s);
   };
 })();
