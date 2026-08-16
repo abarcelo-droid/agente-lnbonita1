@@ -758,6 +758,41 @@ try { db.exec("ALTER TABLE sg_oc ADD COLUMN flete_con_iva INTEGER"); } catch (_)
 //
 // El motivo es obligatorio cuando se cierra con saldo: la orden queda diciendo
 // que faltaron 1150 kg y alguien tiene que poder leer por qué no van a venir.
+// ── QUIÉN CAMBIÓ QUÉ ──────────────────────────────────────────────────────
+// Un administrador puede corregir lo que ya se cargó: un bulto mal contado, un
+// peso mal tipeado, un precio con un cero de más. Eso está bien —el error existe
+// y hay que poder arreglarlo— pero tiene que quedar registro.
+//
+// Se guarda el valor ANTERIOR, no sólo quién tocó. Las columnas modificado_por /
+// modificado_en que ya tienen las tablas dicen que alguien cambió algo, pero no
+// QUÉ decía antes: con eso no se puede reconstruir por qué el costo de una
+// partida es distinto del que se calculó en su momento.
+//
+// Es una sola tabla para todo el módulo —tabla, id, campo— y no una por cada
+// cosa editable: agregar un campo nuevo a la lista no debería pedir otra tabla.
+// Mismo espíritu que sg_lote_semaforo_historial, que ya guarda color_anterior.
+try {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS sg_ediciones (
+      id            INTEGER PRIMARY KEY AUTOINCREMENT,
+      tabla         TEXT NOT NULL,          -- sg_lotes | sg_recepciones | sg_oc_items…
+      registro_id   INTEGER NOT NULL,
+      campo         TEXT NOT NULL,
+      valor_anterior TEXT,
+      valor_nuevo   TEXT,
+      motivo        TEXT,
+      -- Para poder listar todo lo que se tocó de una partida sin recorrer cada
+      -- tabla: la orden a la que pertenece el registro editado.
+      oc_id         INTEGER,
+      usuario_id    INTEGER,
+      fecha         TEXT DEFAULT (datetime('now','localtime'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_sg_edic_reg ON sg_ediciones(tabla, registro_id);
+    CREATE INDEX IF NOT EXISTS idx_sg_edic_oc  ON sg_ediciones(oc_id);
+    CREATE INDEX IF NOT EXISTS idx_sg_edic_fecha ON sg_ediciones(fecha);
+  `);
+} catch (e) { console.error('[DB] SG sg_ediciones:', e.message); }
+
 // ── LA JURISDICCIÓN DE UNA PERCEPCIÓN DE INGRESOS BRUTOS ──────────────────
 // Ingresos Brutos es provincial: la percepción de Buenos Aires no es la misma
 // cuenta que la de Santa Fe, y al cierre hay que poder decir cuánto se pagó en
