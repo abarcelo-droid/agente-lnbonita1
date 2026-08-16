@@ -800,7 +800,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     /* El contador de las dos bandejas de trabajo — la de liquidar y la de
        facturar. Ámbar cuando hay algo esperando: se tiene que ver sin entrar. */
     #sec-ab-liquidaciones .liq-cnt,
-    #sec-sg-facturas-merc .liq-cnt{display:inline-block;min-width:18px;text-align:center;padding:2px 7px;margin-left:8px;
+    #sec-sg-facturas-merc .liq-cnt{display:inline-block;min-width:18px;text-align:center;padding:2px 7px;
       border-radius:9px;font-size:11px;font-weight:700;background:var(--bor);color:var(--tx)}
     #sec-ab-liquidaciones .sgc-subtab.on .liq-cnt,
     #sec-sg-facturas-merc .sgc-subtab.on .liq-cnt{background:rgba(255,255,255,.25);color:#fff}
@@ -2711,12 +2711,17 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       <div id="sgfm-modelo-cuerpo" style="font-size:13px">Cargando…</div>
     </div>
 
-    <div class="sgc-tabs">
-      <div class="sgc-subtab on" data-sub="pendientes" onclick="sgFmSub('pendientes')">⏳ Partidas pendientes de facturar<span class="liq-cnt" id="sgfm-cnt">·</span></div>
-    </div>
-    <div class="sgc-sub on" id="sgfm-sub-pendientes">
-      <div style="font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--mut);margin-bottom:8px">
-        ⏳ Pendientes de facturar <span id="sgfm-n" style="font-weight:400;text-transform:none;letter-spacing:0"></span>
+    <!-- SIN SOLAPAS. Hay UNA sola lista: envolverla en el mecanismo de solapas
+         —que muestra y esconde según una clase— agregaba la única pieza capaz
+         de dejar la tabla invisible, a cambio de nada. El título dice lo mismo
+         que decía la solapa, y el contador va al lado. -->
+    <div id="sgfm-sub-pendientes">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+        <div style="font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--mut)">
+          ⏳ Partidas pendientes de facturar
+        </div>
+        <span class="liq-cnt" id="sgfm-cnt">·</span>
+        <span id="sgfm-n" style="font-size:12px;color:var(--mut)"></span>
       </div>
       <div class="ab-table-wrap"><table class="pa-tbl">
         <thead><tr><th>Partida</th><th>Recibida</th><th>Proveedor</th>
@@ -2741,6 +2746,37 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
        Los campos van en grilla propia: .sg-rec-grid está scopeada al modal de
        recepción, así que acá no aplicaba nada y salían apilados a ancho
        completo, uno por renglón. -->
+  <!-- ── CORREGIR UNA PARTIDA ─────────────────────────────────────────────
+       Sólo para administradores. El error existe y hay que poder arreglarlo,
+       pero queda registrado QUÉ decía antes, no sólo quién lo tocó. Los frenos
+       están en el servidor: una partida ya contabilizada, o de la que ya se
+       despachó mercadería, no se corrige acá. -->
+  <div class="ab-modal-overlay" id="sg-loteed-modal">
+    <div class="ab-modal" style="width:520px;max-width:95vw">
+      <div class="mhd">
+        <div class="mht">✏️ Corregir la partida</div>
+        <button class="mcl" onclick="closeMB('sg-loteed-modal')">×</button>
+      </div>
+      <div id="sg-loteed-info" style="background:var(--bg);border-radius:8px;padding:9px 12px;
+           margin-bottom:12px;font-size:13px"></div>
+      <div class="sg-rec-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div class="fl"><label>Kilos</label><input type="number" step="0.01" id="sg-loteed-kg"></div>
+        <div class="fl"><label>Bultos</label><input type="number" id="sg-loteed-bultos"></div>
+        <div class="fl"><label>Calidad</label><input id="sg-loteed-calidad" placeholder="primera, segunda…"></div>
+        <div class="fl"><label>Precio por kg</label><input type="number" step="0.01" id="sg-loteed-precio"></div>
+      </div>
+      <div class="fl ff" style="margin-top:10px"><label>Por qué se corrige <span style="color:var(--err)">*</span></label>
+        <textarea id="sg-loteed-motivo" rows="2" placeholder="ej. se habían contado 100 bultos y eran 90"></textarea></div>
+      <div style="font-size:11.5px;color:var(--mut);margin-top:6px">
+        Queda registrado tu usuario, la fecha y qué decía cada campo antes.
+      </div>
+      <div style="display:flex;justify-content:space-between;gap:10px;margin-top:14px">
+        <button class="btn bo" onclick="closeMB('sg-loteed-modal')">Cancelar</button>
+        <button class="btn bb" onclick="sgLoteEditarGuardar()">Guardar corrección</button>
+      </div>
+    </div>
+  </div>
+
   <div class="ab-modal-overlay" id="sgfm-modal">
     <div class="ab-modal sgfm-shell">
       <div class="mhd">
@@ -4967,6 +5003,7 @@ function sgOcAnular(id){
   api('/api/sg/oc/'+id+'/anular','POST').then(function(r){ if(r&&r.ok){toast('OC anulada','ok');sgLoadOC();} else toast((r&&r.error)||'Error','er'); });
 }
 function sgOcVer(id){
+  SG.ocVerId = id;
   // Las condiciones de pago, si no están cargadas. Abierto desde Ingresos el
   // caché ya existe y la ficha dice "30 días"; abierto desde Facturas por
   // mercadería —otra sección, que nunca lo cargó— decía "#3", el id pelado.
@@ -5177,7 +5214,12 @@ function sgOcVer(id){
             + (l.precio_unitario_kg!=null
                 ? '<div class="sg-oc-sub">'+sgMoney(l.precio_unitario_kg)+' /kg</div>'
                 : '<div class="sg-oc-sub"><span class="bdg bpe">pizarra</span></div>')+'</td>'
-          + '<td style="text-align:right">'+btn+'</td></tr>';
+          + '<td style="text-align:right;white-space:nowrap">'+btn
+          + (sgFmEsAdmin()
+              ? ' <button class="btn bo bs" title="Corregir lo que se cargó mal"'
+                + ' onclick="sgLoteEditarOpen(' + JSON.stringify(l).replace(/"/g,'&quot;') + ')">✏️</button>'
+              : '')
+          + '</td></tr>';
       });
       h+='</tbody></table>';
     }
@@ -7056,6 +7098,44 @@ function sgRetroGuardar(){
 }
 
 // ── Cerrar precio (pizarra) ──
+// ── CORREGIR UN LOTE ────────────────────────────────────────────────────
+// Sólo lo ve un administrador. Se corrige lo que se cargó mal —un bulto mal
+// contado, un peso mal tipeado, un precio con un cero de más— y queda registrado
+// qué decía antes, no sólo quién lo tocó.
+//
+// El servidor tiene los frenos: no deja corregir una partida ya contabilizada
+// (primero se anula el asiento), ni una de la que ya se despachó mercadería.
+function sgLoteEditarOpen(l){
+  if (!sgFmEsAdmin()) { toast('Sólo un administrador puede corregir', 'er'); return; }
+  SG.loteEdit = l;
+  eid('sg-loteed-info').innerHTML = 'Partida <code>' + escH(l.codigo_lote) + '</code>'
+    + (l.producto_nombre ? ' · ' + escH(l.producto_nombre) : '');
+  eid('sg-loteed-kg').value = l.kg_reales != null ? l.kg_reales : '';
+  eid('sg-loteed-bultos').value = l.bultos != null ? l.bultos : '';
+  eid('sg-loteed-calidad').value = l.calidad || '';
+  eid('sg-loteed-precio').value = l.precio_unitario_kg != null ? l.precio_unitario_kg : '';
+  eid('sg-loteed-motivo').value = '';
+  eid('sg-loteed-modal').classList.add('on');
+}
+
+function sgLoteEditarGuardar(){
+  var l = SG.loteEdit; if (!l) return;
+  var motivo = String((eid('sg-loteed-motivo') || {}).value || '').trim();
+  if (!motivo) { toast('Escribí por qué se corrige: queda registrado', 'er'); return; }
+  var v = function(id){ var x = (eid(id) || {}).value; return x === '' ? null : x; };
+  api('/api/sg/lotes/' + l.id + '/corregir', 'PUT', {
+    motivo: motivo,
+    kg_reales: v('sg-loteed-kg'), bultos: v('sg-loteed-bultos'),
+    calidad: v('sg-loteed-calidad'), precio_unitario_kg: v('sg-loteed-precio'),
+  }).then(function(r){
+    if (!r || !r.ok) { toast((r && r.error) || 'No se pudo corregir', 'er'); return; }
+    toast('Corregido — queda registrado quién y qué cambió', 'ok');
+    closeMB('sg-loteed-modal');
+    // La ficha se vuelve a abrir para que se vean los números nuevos.
+    if (SG.ocVerId) sgOcVer(SG.ocVerId);
+  });
+}
+
 function sgPrecioOpen(loteId, codigo, kg){
   SG.precioLote={id:loteId, kg:kg};
   eid('sg-precio-info').innerHTML='Lote <b>'+esc(codigo)+'</b> · '+nr(kg)+' kg';

@@ -2353,6 +2353,115 @@ REGLAS:
   }
 });
 
+// ── CORREGIR LO QUE YA SE CARGÓ ──────────────────────────────────────────
+// Un bulto mal contado, un peso mal tipeado, un precio con un cero de más. El
+// error existe y hay que poder arreglarlo — pero queda registrado QUÉ decía
+// antes, no sólo quién lo tocó.
+//
+// Los tres frenos, en orden de gravedad:
+//   1. La partida YA ESTÁ CONTABILIZADA. El asiento en el libro dice 1.500.000
+//      porque los kilos decían 2.000: cambiarlos deja el asiento mintiendo.
+//      Primero se anula el asiento, después se corrige.
+//   2. La mercadería YA SE DESPACHÓ. Bajarle los kilos a un lote del que ya
+//      salieron 1.800 dejaría stock negativo, y el costo del cliente calculado
+//      sobre un número que ya no existe.
+//   3. El lote se TRANSFORMÓ o se REPROCESÓ: su costo ya viajó a otro lote.
+function frenosDeEdicionLote(db, loteId) {
+  const l = db.prepare(`SELECT l.id, l.kg_reales, l.transformado_de, l.reproceso_id, i.oc_id
+    FROM sg_lotes l LEFT JOIN sg_oc_items i ON i.id = l.oc_item_id
+    WHERE l.id=? AND l.activo=1`).get(loteId);
+  if (!l) return { error: 'Lote no encontrado' };
+
+  if (l.oc_id) {
+    const fac = db.prepare(`SELECT f.id, f.asiento_id, a.anulado FROM sg_facturas_compra f
+      LEFT JOIN sg_asientos a ON a.id = f.asiento_id
+      WHERE f.oc_id=? AND f.activo=1 AND f.asiento_id IS NOT NULL`).get(l.oc_id);
+    if (fac && !fac.anulado) {
+      return { error: 'Esta partida ya está contabilizada en el asiento ' + fac.asiento_id
+        + '. Anulá el asiento primero: si se corrigen los kilos o el precio, el asiento que está en el '
+        + 'libro deja de corresponder con el dato.' };
+    }
+  }
+  const desp = db.prepare(`SELECT COALESCE(SUM(di.kg_despachados),0) s FROM sg_despacho_items di
+    JOIN sg_despachos d ON d.id=di.despacho_id AND d.activo=1 WHERE di.lote_id=?`).get(loteId).s;
+  if (desp > 0) {
+    return { error: 'De este lote ya se despacharon ' + r2(desp) + ' kg. No se pueden corregir sus '
+      + 'cantidades: el stock y el costo del cliente ya salieron con el número viejo.' };
+  }
+  if (l.transformado_de != null || l.reproceso_id != null) {
+    return { error: 'Este lote vino de una transformación o un reproceso: su costo se calculó a partir '
+      + 'de otro lote y no se corrige acá.' };
+  }
+  return { ok: true, lote: l };
+}
+
+// Deja constancia del cambio. Se llama DENTRO de la transacción que edita, para
+// que no pueda quedar el cambio sin registro ni el registro sin cambio.
+function anotarEdicion(db, { tabla, registroId, campo, antes, despues, motivo, ocId, userId }) {
+  if (String(antes == null ? '' : antes) === String(despues == null ? '' : despues)) return;
+  db.prepare(`INSERT INTO sg_ediciones
+    (tabla, registro_id, campo, valor_anterior, valor_nuevo, motivo, oc_id, usuario_id)
+    VALUES (?,?,?,?,?,?,?,?)`).run(tabla, registroId, campo,
+      antes == null ? null : String(antes), despues == null ? null : String(despues),
+      motivo || null, ocId || null, userId || null);
+}
+
+// Corregir un lote: kilos, bultos, calidad y precio. Sólo admin.
+router.put('/lotes/:id/corregir', requireAdmin, (req, res) => {
+  const db = getDb();
+  try {
+    const b = req.body || {};
+    const motivo = val(b.motivo);
+    if (!motivo) return res.status(400).json({ ok: false, error: 'Escribí por qué se corrige: queda registrado' });
+
+    const chk = frenosDeEdicionLote(db, req.params.id);
+    if (chk.error) return res.status(400).json({ ok: false, error: chk.error });
+
+    const prev = db.prepare('SELECT * FROM sg_lotes WHERE id=?').get(req.params.id);
+    const nuevo = {
+      kg_reales: numF(b.kg_reales) != null ? numF(b.kg_reales) : prev.kg_reales,
+      bultos: (b.bultos === '' || b.bultos == null) ? prev.bultos : Math.round(Number(b.bultos)),
+      calidad: b.calidad !== undefined ? val(b.calidad) : prev.calidad,
+      precio_unitario_kg: b.precio_unitario_kg !== undefined
+        ? numF(b.precio_unitario_kg) : prev.precio_unitario_kg,
+    };
+    if (!(nuevo.kg_reales > 0)) {
+      return res.status(400).json({ ok: false, error: 'Los kilos tienen que ser mayores a cero' });
+    }
+
+    db.transaction(() => {
+      for (const campo of ['kg_reales', 'bultos', 'calidad', 'precio_unitario_kg']) {
+        anotarEdicion(db, { tabla: 'sg_lotes', registroId: prev.id, campo,
+          antes: prev[campo], despues: nuevo[campo], motivo, ocId: chk.lote.oc_id, userId: uid(req) });
+      }
+      // El costo base sale de los kilos por el precio: si cambia cualquiera de
+      // los dos, hay que rehacerlo antes de recalcular.
+      const costoBase = nuevo.precio_unitario_kg != null
+        ? r2(nuevo.kg_reales * nuevo.precio_unitario_kg) : 0;
+      db.prepare(`UPDATE sg_lotes SET kg_reales=?, bultos=?, calidad=?, precio_unitario_kg=?,
+        costo_base=?, modificado_en=datetime('now','localtime'), modificado_por=? WHERE id=?`)
+        .run(nuevo.kg_reales, nuevo.bultos, nuevo.calidad, nuevo.precio_unitario_kg,
+             costoBase, uid(req), prev.id);
+      // Y lo que cuelga de esos kilos: el costo con sus gastos, y el período.
+      recalcCostoLote(db, prev.id);
+      if (prev.fecha_ingreso) recalcPeriodo(db, String(prev.fecha_ingreso).slice(0, 7));
+    })();
+    const l = db.prepare('SELECT * FROM sg_lotes WHERE id=?').get(prev.id);
+    res.json({ ok: true, data: l });
+  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+
+// Lo que se corrigió de una partida: quién, cuándo, qué decía antes.
+router.get('/oc/:id/ediciones', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const rows = db.prepare(`SELECT e.*, u.nombre AS usuario_nombre
+      FROM sg_ediciones e LEFT JOIN usuarios u ON u.id = e.usuario_id
+      WHERE e.oc_id = ? ORDER BY e.id DESC`).all(req.params.id);
+    res.json({ ok: true, data: rows });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
 // ── CONTABILIZAR LA FACTURA ──────────────────────────────────────────────
 // Acá se escribe en la contabilidad. Hasta este punto todo era preparar el
 // asiento; esto lo graba.
