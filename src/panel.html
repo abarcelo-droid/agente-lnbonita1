@@ -4967,6 +4967,15 @@ function sgOcAnular(id){
   api('/api/sg/oc/'+id+'/anular','POST').then(function(r){ if(r&&r.ok){toast('OC anulada','ok');sgLoadOC();} else toast((r&&r.error)||'Error','er'); });
 }
 function sgOcVer(id){
+  // Las condiciones de pago, si no están cargadas. Abierto desde Ingresos el
+  // caché ya existe y la ficha dice "30 días"; abierto desde Facturas por
+  // mercadería —otra sección, que nunca lo cargó— decía "#3", el id pelado.
+  var cond = (SG.cacheCond && SG.cacheCond.length)
+    ? Promise.resolve(null)
+    : api('/api/sg/condiciones-pago').then(function(rc){
+        if (rc && rc.ok) SG.cacheCond = rc.data || [];
+      });
+  cond.then(function(){
   Promise.all([api('/api/sg/oc/'+id), api('/api/sg/lotes?oc_id='+id)]).then(function(res){
     var r=res[0]; if(!r||!r.ok){ toast('Error','er'); return; }
     var o=r.data; var lotes=(res[1]&&res[1].ok)?res[1].data:[];
@@ -5135,12 +5144,40 @@ function sgOcVer(id){
         + '<td style="text-align:right">' + recibido + '</td></tr>';
     });
     h+='</tbody></table></div>';
+    // ── UNA SOLA TABLA: EL PRODUCTO Y SU LOTE ─────────────────────────────
+    // Antes eran dos, "Productos" y "Lotes", y con una orden de un producto —que
+    // es el caso normal— decían lo mismo dos veces: el mismo tomate, los mismos
+    // 2.000 kg, el mismo precio. Lo único que la segunda agregaba era el código
+    // de la partida, la calidad y el costo, que ahora van como sub-línea del
+    // producto al que pertenecen.
     if(lotes.length){
-      h+='<div style="font-weight:700;font-size:12px;text-transform:uppercase;color:var(--mut);margin-bottom:6px">Lotes</div>';
-      h+='<table class="pa-tbl" style="margin-bottom:12px"><thead><tr><th>Código</th><th style="text-align:right">Kg</th><th>Calidad</th><th style="text-align:right">$/kg</th><th style="text-align:right">Costo final</th><th></th></tr></thead><tbody>';
+      var porItem = {};
+      lotes.forEach(function(l){
+        var k = l.oc_item_id != null ? String(l.oc_item_id) : '_';
+        (porItem[k] = porItem[k] || []).push(l);
+      });
+      h+='<div style="font-weight:700;font-size:12px;text-transform:uppercase;color:var(--mut);margin-bottom:6px">'
+        + 'Partidas que entraron</div>';
+      h+='<table class="pa-tbl" style="margin-bottom:12px"><thead><tr><th>Partida</th>'
+        + '<th style="text-align:right">Entró</th><th>Calidad</th>'
+        + '<th style="text-align:right">Costo</th><th></th></tr></thead><tbody>';
       lotes.forEach(function(l){
         var btn = (l.precio_unitario_kg==null) ? '<button class="btn bb bs" onclick="sgPrecioOpen('+l.id+',\''+esc(l.codigo_lote)+'\','+l.kg_reales+')">💲 cerrar precio</button>' : '';
-        h+='<tr><td><code>'+esc(l.codigo_lote)+'</code></td><td style="text-align:right">'+nr(l.kg_reales)+'</td><td>'+(l.calidad||'—')+'</td><td style="text-align:right">'+(l.precio_unitario_kg!=null?sgMoney(l.precio_unitario_kg):'<span class="bdg bpe">pizarra</span>')+'</td><td style="text-align:right">'+sgMoney(l.costo_final)+'</td><td style="text-align:right">'+btn+'</td></tr>';
+        // La cantidad, en la unidad en que se pactó: bultos arriba y kilos en
+        // chico. Antes acá sólo había kilos.
+        var blt = Number(l.bultos) || 0, kg = Number(l.kg_reales) || 0;
+        var cant = blt > 0
+          ? '<b>' + nr(blt) + '</b> bultos<div class="sg-oc-sub">' + nr(kg) + ' kg</div>'
+          : '<b>' + nr(kg) + '</b> kg<div class="sg-oc-sub">sin contar bultos</div>';
+        h+='<tr><td><code>'+esc(l.codigo_lote)+'</code>'
+          + '<div class="sg-oc-sub">' + esc(l.producto_nombre || '') + '</div></td>'
+          + '<td style="text-align:right">'+cant+'</td>'
+          + '<td>'+(l.calidad||'—')+'</td>'
+          + '<td style="text-align:right"><b>'+sgMoney(l.costo_final)+'</b>'
+            + (l.precio_unitario_kg!=null
+                ? '<div class="sg-oc-sub">'+sgMoney(l.precio_unitario_kg)+' /kg</div>'
+                : '<div class="sg-oc-sub"><span class="bdg bpe">pizarra</span></div>')+'</td>'
+          + '<td style="text-align:right">'+btn+'</td></tr>';
       });
       h+='</tbody></table>';
     }
@@ -5152,6 +5189,7 @@ function sgOcVer(id){
     } else { h+='<div style="font-size:12px;color:var(--mut)">Sin vencimientos'+(o.tipo_precio==='pizarra'?' (pizarra: se generan al cerrar el precio de todos los lotes).':'.')+'</div>'; }
     eid('sg-ocver-body').innerHTML=h;
     eid('sg-ocver-modal').classList.add('on');
+  });
   });
 }
 
@@ -5565,11 +5603,20 @@ function sgFmLoad(){
     var n = eid('sgfm-n');
     if (n) n.textContent = rows.length ? ('· ' + rows.length + (rows.length === 1 ? ' partida' : ' partidas')) : '';
     tb.innerHTML = rows.length ? rows.map(function(p){
+      // LA ORDEN DICE QUÉ COMPROBANTE VA A LLEGAR. Si declara Liquidación, acá
+      // no se puede cargar: esta pantalla contabiliza compras con Factura A o B.
+      // Sin este aviso la partida quedaba en la bandeja para siempre — se
+      // abría la ventana, se elegía el tipo, y ninguno de los dos era el que
+      // dice la orden.
+      var esLiq = p.tipo_fiscal === 'liquidacion';
       return sgPartFila(p,
         '<td style="text-align:right;white-space:nowrap">'
         + '<button class="btn bo bs" onclick="sgOcVer(' + p.id + ')">Ver</button> '
-        + '<button class="btn bb bs" onclick="sgFmFactura(' + p.id + ',\'' + esc(p.trazabilidad || '') + '\',\''
-          + esc(p.proveedor_nombre || '') + '\')">🧾 Cargar factura</button>'
+        + (esLiq
+            ? '<span title="La orden declara que el comprobante es una Liquidación, y acá se cargan Facturas A o B"'
+              + ' style="font-size:12px;color:#9a3412;font-weight:600">⚠️ declara Liquidación</span>'
+            : '<button class="btn bb bs" onclick="sgFmFactura(' + p.id + ',\'' + esc(p.trazabilidad || '') + '\',\''
+              + esc(p.proveedor_nombre || '') + '\')">🧾 Cargar factura</button>')
         + '</td>');
     }).join('') : '<tr><td colspan="6" class="emp">No hay partidas esperando factura. '
         + 'Las partidas de Precio Cerrado aparecen acá apenas se reciben.</td></tr>';
