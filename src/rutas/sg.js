@@ -1430,14 +1430,32 @@ function diferenciasDeOC(db, ocId) {
     WHERE i.oc_id=?`).all(ocId);
   const out = [];
   for (const it of items) {
-    const difKg = +(it.kg_recibidos - (it.kg_estimados || 0)).toFixed(2);
-    const difBultos = Math.round(it.bultos_recibidos - (it.cantidad_estimada_presentaciones || 0));
+    const bultosPact = it.cantidad_estimada_presentaciones || 0;
+    const bultosRec = Number(it.bultos_recibidos) || 0;
+    const kgPact = it.kg_estimados || 0;
+    const kgRec = Number(it.kg_recibidos) || 0;
+
+    // ── NO SE CUENTAN BULTOS QUE NADIE CONTÓ ───────────────────────────
+    // Si la mercadería entró PESADA y sin contar cajones, bultos_recibidos es
+    // 0 — y comparar 100 pactados contra ese 0 decía "faltan 100 bultos"
+    // cuando en realidad entró todo. No faltaban: nadie los contó.
+    //
+    // Ese caso no es una diferencia, es una forma distinta de haber recibido, y
+    // se avisa aparte: los kilos son los que mandan y contra esos se compara.
+    const seContaron = bultosRec > 0;
+    const difBultos = seContaron ? Math.round(bultosRec - bultosPact) : 0;
+    const difKg = +(kgRec - kgPact).toFixed(2);
+
     // Un kilo de más o de menos en una balanza de camión no es una diferencia.
-    if (Math.abs(difKg) <= 1 && difBultos === 0) continue;
+    const hayDifKg = Math.abs(difKg) > 1;
+    const sinContar = !seContaron && bultosPact > 0 && kgRec > 0;
+    if (!hayDifKg && !difBultos && !sinContar) continue;
+
     out.push({ oc_item_id: it.id, producto_nombre: it.producto_nombre,
-      kg_pactados: it.kg_estimados || 0, kg_recibidos: it.kg_recibidos, dif_kg: difKg,
-      bultos_pactados: it.cantidad_estimada_presentaciones || 0,
-      bultos_recibidos: it.bultos_recibidos, dif_bultos: difBultos });
+      kg_pactados: kgPact, kg_recibidos: kgRec, dif_kg: hayDifKg ? difKg : 0,
+      bultos_pactados: bultosPact, bultos_recibidos: bultosRec, dif_bultos: difBultos,
+      // Entró pesado, sin contar cajones: no es que falten bultos.
+      sin_contar_bultos: sinContar });
   }
   return out;
 }
@@ -1756,6 +1774,45 @@ const facturaUpload = multer({ storage: facturaStorage, limits: { fileSize: 15 *
 const numF = (v) => (v != null && v !== '' && !isNaN(Number(v))) ? Number(v) : null;
 const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 
+// ── CUÁNTO SE ACORDÓ PAGAR POR UNA PARTIDA ───────────────────────────────
+// LA CUENTA SE HACE EN BULTOS. La compra se pacta en bultos y a tanto el bulto
+// —"100 cajones a $15.000"— y así la controla el comprador contra la factura,
+// no multiplicando kilos por $/kg. El sistema costea en kilos, pero eso es
+// asunto suyo: acá manda la unidad en la que se cerró el trato.
+//
+// Si la mercadería entró pesada y sin contar bultos, no hay con qué: ahí se cae
+// a kilos. Cada ítem dice cuál de las dos cuentas se le hizo.
+//
+// Está en UNA sola función porque la usan tres lugares —la pantalla de carga, el
+// control contra la factura y el listado de partidas agrupables— y si cada uno
+// la calculara por su cuenta, alcanzaría con tocar una para que el aviso de "no
+// da contra lo acordado" empezara a mentir.
+function acordadoDeOC(db, ocId) {
+  const its = db.prepare(`SELECT i.id, i.precio_estimado_por_kg,
+      COALESCE(i.kg_por_bulto, ps.factor_conversion) AS kg_por_bulto,
+      (SELECT COALESCE(SUM(kg_reales),0) FROM sg_lotes WHERE oc_item_id=i.id AND activo=1) AS kg_recibidos,
+      (SELECT COALESCE(SUM(bultos),0)    FROM sg_lotes WHERE oc_item_id=i.id AND activo=1) AS bultos_recibidos
+    FROM sg_oc_items i
+    LEFT JOIN sg_presentaciones ps ON ps.id=i.presentacion_id
+    WHERE i.oc_id=?`).all(ocId);
+  let total = 0;
+  const detalle = [];
+  for (const it of its) {
+    const pk = it.precio_estimado_por_kg != null ? Number(it.precio_estimado_por_kg) : null;
+    const kpb = Number(it.kg_por_bulto) || 0;
+    const bultos = Number(it.bultos_recibidos) || 0;
+    const precioBulto = (pk != null && kpb > 0) ? r2(pk * kpb) : null;
+    let importe = null, base = null;
+    if (pk != null) {
+      if (bultos > 0 && precioBulto != null) { importe = r2(bultos * precioBulto); base = 'bulto'; }
+      else { importe = r2(it.kg_recibidos * pk); base = 'kilo'; }
+      total = r2(total + importe);
+    }
+    detalle.push({ oc_item_id: it.id, precio_por_bulto: precioBulto, importe, base });
+  }
+  return { total, detalle };
+}
+
 // ── EL ASIENTO DE UNA FACTURA DE MERCADERÍA ──────────────────────────────
 // Reparte los importes de la factura entre las líneas del asiento modelo, cada
 // uno según el TIPO de línea. Es la MISMA cuenta que hace la pantalla: si las
@@ -1894,20 +1951,29 @@ router.get('/oc/:id/para-facturar', requireAuth, (req, res) => {
     if (!oc) return res.status(404).json({ ok: false, error: 'Orden no encontrada' });
 
     const items = db.prepare(`SELECT i.id, i.precio_estimado_por_kg, i.kg_estimados,
-        i.cantidad_estimada_presentaciones, pr.nombre AS producto_nombre,
+        i.cantidad_estimada_presentaciones, i.modo_carga, pr.nombre AS producto_nombre,
+        -- Los kilos que entran en un bulto: del ítem o, si no lo tiene (las
+        -- órdenes viejas), de su presentación.
+        COALESCE(i.kg_por_bulto, ps.factor_conversion) AS kg_por_bulto,
         (SELECT COALESCE(SUM(kg_reales),0) FROM sg_lotes WHERE oc_item_id=i.id AND activo=1) AS kg_recibidos,
         (SELECT COALESCE(SUM(bultos),0)    FROM sg_lotes WHERE oc_item_id=i.id AND activo=1) AS bultos_recibidos
-      FROM sg_oc_items i LEFT JOIN sg_productos pr ON pr.id=i.producto_id
+      FROM sg_oc_items i
+      LEFT JOIN sg_productos pr ON pr.id=i.producto_id
+      LEFT JOIN sg_presentaciones ps ON ps.id=i.presentacion_id
       WHERE i.oc_id=? ORDER BY i.id`).all(oc.id);
 
-    let total = 0;
+    // La cuenta la hace acordadoDeOC: en BULTOS por el precio del bulto, que es
+    // como se pactó. Una sola función para los tres lugares que la necesitan.
+    const ac = acordadoDeOC(db, oc.id);
+    const porItem = {};
+    for (const d of ac.detalle) porItem[d.oc_item_id] = d;
     for (const it of items) {
-      // Lo que corresponde pagar por ESTE producto: lo que entró por el precio
-      // acordado. En pizarra no hay precio todavía, así que no hay total.
-      it.importe = (it.precio_estimado_por_kg != null)
-        ? r2(it.kg_recibidos * Number(it.precio_estimado_por_kg)) : null;
-      if (it.importe != null) total = r2(total + it.importe);
+      const d = porItem[it.id] || {};
+      it.precio_por_bulto = d.precio_por_bulto != null ? d.precio_por_bulto : null;
+      it.importe = d.importe != null ? d.importe : null;
+      it.base = d.base || null;
     }
+    const total = ac.total;
     res.json({ ok: true, data: { oc, items,
       total_acordado: oc.tipo_precio === 'pizarra' ? null : total } });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
@@ -1938,11 +2004,7 @@ router.get('/oc/:id/agrupables', requireAuth, (req, res) => {
 
     // Cuánto se acordó por cada una, que es lo que hay que sumar al total.
     for (const r0 of rows) {
-      const its = db.prepare(`SELECT i.precio_estimado_por_kg,
-          (SELECT COALESCE(SUM(kg_reales),0) FROM sg_lotes WHERE oc_item_id=i.id AND activo=1) AS kg
-        FROM sg_oc_items i WHERE i.oc_id=?`).all(r0.id);
-      r0.total_acordado = its.reduce((a, it) => (it.precio_estimado_por_kg != null)
-        ? r2(a + it.kg * Number(it.precio_estimado_por_kg)) : a, 0);
+      r0.total_acordado = acordadoDeOC(db, r0.id).total;
     }
     res.json({ ok: true, data: rows });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
@@ -2058,15 +2120,12 @@ router.post('/oc/:id/factura-completa', facturaUpload.single('archivo'), require
     // carga la factura es el que sabe. Lo que no puede es pasar sin verse.
     // Con varias partidas, lo acordado es la SUMA de todas: la factura las
     // cubre a todas juntas.
+    // La misma cuenta que muestra la pantalla: BULTOS por el precio del bulto,
+    // que es como se pactó y como el comprador la controla. A kilos sólo se cae
+    // cuando la mercadería entró pesada, sin contar bultos.
     let avisoAcordado = null;
     const acordadoPorOc = {};
-    for (const id of ocIds) {
-      const its = db.prepare(`SELECT i.precio_estimado_por_kg,
-          (SELECT COALESCE(SUM(kg_reales),0) FROM sg_lotes WHERE oc_item_id=i.id AND activo=1) AS kg
-        FROM sg_oc_items i WHERE i.oc_id=?`).all(id);
-      acordadoPorOc[id] = its.reduce((a, it) => (it.precio_estimado_por_kg != null)
-        ? r2(a + it.kg * Number(it.precio_estimado_por_kg)) : a, 0);
-    }
+    for (const id of ocIds) acordadoPorOc[id] = acordadoDeOC(db, id).total;
     const acordado = r2(Object.values(acordadoPorOc).reduce((a, x) => a + x, 0));
     if (acordado > 0 && Math.abs(r2(neto - acordado)) > 0.01) {
       avisoAcordado = 'El neto de la factura (' + r2(neto) + ') no da contra lo acordado por lo que entró ('

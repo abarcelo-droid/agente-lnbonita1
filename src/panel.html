@@ -813,6 +813,13 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     #sec-ab-liquidaciones .sgc-tabs,
     #sec-sg-facturas-merc .sgc-tabs{display:inline-flex;gap:4px;background:var(--bg);
       border:1px solid var(--bor);border-radius:10px;padding:4px;margin-bottom:18px;flex-wrap:wrap}
+    /* El contenido de la solapa. Estaba sólo en ".sg-mod .sgc-sub", una regla
+       escrita para otra pantalla: si mañana esta sección pierde la clase sg-mod
+       —o alguien reordena ese bloque— el contenido desaparece sin error. */
+    #sec-ab-liquidaciones .sgc-sub,
+    #sec-sg-facturas-merc .sgc-sub{display:none}
+    #sec-ab-liquidaciones .sgc-sub.on,
+    #sec-sg-facturas-merc .sgc-sub.on{display:block}
 
     /* ── LA VENTANA DE CARGA DE FACTURA ─────────────────────────────────
        Todo a la vista de una: a la izquierda lo que se carga, a la derecha lo
@@ -5021,26 +5028,54 @@ function sgOcVer(id){
     // menos (o más) entró contra lo que se había pactado.
     var difs = o.diferencias || [];
     if (difs.length) {
-      h += '<div style="border:1.5px solid #e0a72e;background:rgba(224,167,46,.10);border-radius:10px;'
-        + 'padding:12px 14px;margin-bottom:14px">'
-        + '<div style="font-weight:700;font-size:13px;color:#9a3412;margin-bottom:6px">'
-        + '⚠️ Lo recibido no coincide con lo pactado</div>'
-        + '<div style="font-size:12.5px;color:var(--tx);line-height:1.7">';
-      difs.forEach(function(d){
-        var partes = [];
-        if (d.dif_bultos) {
-          partes.push('<b>' + (d.dif_bultos > 0 ? '+' : '') + nr(d.dif_bultos) + ' bultos</b>'
-            + ' (' + nr(d.bultos_pactados) + ' → ' + nr(d.bultos_recibidos) + ')');
-        }
-        if (Math.abs(Number(d.dif_kg) || 0) > 1) {
-          partes.push('<b>' + (d.dif_kg > 0 ? '+' : '') + nr(d.dif_kg) + ' kg</b>'
-            + ' (' + nr(d.kg_pactados) + ' → ' + nr(d.kg_recibidos) + ')');
-        }
-        h += '• ' + escH(d.producto_nombre || 'Un artículo') + ': ' + partes.join(' · ') + '<br>';
+      // Sólo son "diferencias" las de verdad. Si entró pesado sin contar
+      // cajones, eso no es que falte mercadería: es otra forma de recibir, y se
+      // dice aparte para no asustar con un faltante que no existe.
+      var reales = difs.filter(function(d){ return d.dif_bultos || Math.abs(Number(d.dif_kg) || 0) > 1; });
+      var soloPeso = difs.filter(function(d){
+        return d.sin_contar_bultos && !d.dif_bultos && Math.abs(Number(d.dif_kg) || 0) <= 1;
       });
-      h += '</div><div style="font-size:11.5px;color:var(--mut);margin-top:6px">'
-        + 'La orden quedó firme por lo que entró. Si corresponde ajustar el precio, hacelo antes de liquidar o facturar.'
-        + '</div></div>';
+
+      if (reales.length) {
+        h += '<div style="border:1.5px solid #e0a72e;background:rgba(224,167,46,.10);border-radius:10px;'
+          + 'padding:12px 14px;margin-bottom:14px">'
+          + '<div style="font-weight:700;font-size:13px;color:#9a3412;margin-bottom:8px">'
+          + '⚠️ Entró distinto de lo que se había pedido</div>'
+          + '<table style="font-size:12.5px;width:100%;border-collapse:collapse">'
+          + '<thead><tr style="color:var(--mut);font-size:11px;text-transform:uppercase;letter-spacing:.04em">'
+          + '<th style="text-align:left;padding-bottom:4px">Producto</th>'
+          + '<th style="text-align:right">Se pidió</th><th style="text-align:right">Entró</th>'
+          + '<th style="text-align:right">Diferencia</th></tr></thead><tbody>';
+        reales.forEach(function(d){
+          // Una fila por unidad, con las dos cantidades a la vista: pedido y
+          // recibido. "-100 bultos (100 → 0)" no se entendía.
+          var fila = function(unidad, pact, rec, dif){
+            return '<tr><td style="padding:2px 0">' + escH(d.producto_nombre || 'Un artículo') + '</td>'
+              + '<td style="text-align:right">' + nr(pact) + ' ' + unidad + '</td>'
+              + '<td style="text-align:right">' + nr(rec) + ' ' + unidad + '</td>'
+              + '<td style="text-align:right;font-weight:700;color:' + (dif < 0 ? 'var(--err)' : '#9a3412') + '">'
+                + (dif > 0 ? '+' : '') + nr(dif) + ' ' + unidad + '</td></tr>';
+          };
+          if (d.dif_bultos) h += fila('bultos', d.bultos_pactados, d.bultos_recibidos, d.dif_bultos);
+          if (Math.abs(Number(d.dif_kg) || 0) > 1) h += fila('kg', d.kg_pactados, d.kg_recibidos, d.dif_kg);
+        });
+        h += '</tbody></table>'
+          + '<div style="font-size:11.5px;color:var(--mut);margin-top:8px">'
+          + 'La orden quedó firme por lo que entró. Si corresponde ajustar el precio, hacelo antes de liquidar o facturar.'
+          + '</div></div>';
+      }
+
+      if (soloPeso.length) {
+        h += '<div style="border:1px solid var(--bor);border-radius:10px;padding:10px 14px;margin-bottom:14px;'
+          + 'background:var(--bg);font-size:12.5px;line-height:1.6">'
+          + '<b>La mercadería entró pesada, sin contar bultos.</b> '
+          + soloPeso.map(function(d){
+              return escH(d.producto_nombre || 'Un artículo') + ': se pidieron ' + nr(d.bultos_pactados)
+                + ' bultos y entraron ' + nr(d.kg_recibidos) + ' kg';
+            }).join(' · ')
+          + '.<div style="color:var(--mut);margin-top:3px">No falta nada: los kilos dan contra lo pedido. '
+          + 'Como no se contaron bultos, la cuenta se hace por kilo.</div></div>';
+      }
     }
     h+='<div style="border-top:1px solid var(--bor);padding-top:12px">'
       +'<div style="font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--mut);margin-bottom:8px">📦 Productos</div>';
@@ -5082,10 +5117,16 @@ function sgOcVer(id){
       // lo pactado la alerta de arriba lo dice con todas las letras.
       var bultosRec = Number(it.bultos_recibidos) || 0;
       var kgRec = Number(it.kg_recibidos) || 0;
+      // Si no se contaron bultos, se dice — antes acá aparecía "2.000 kg" bajo
+      // el título "Bultos recibidos", que se lee como si hubieran entrado 2.000
+      // cajones.
       var recibido = bultosRec > 0
         ? '<strong>' + nr(bultosRec) + '</strong>'
           + (kgRec > 0 ? '<div class="sg-oc-sub">' + nr(kgRec) + ' kg</div>' : '')
-        : (kgRec > 0 ? '<strong>' + nr(kgRec) + ' kg</strong>' : '—');
+        : (kgRec > 0
+            ? '<span style="color:var(--mut)">sin contar</span>'
+              + '<div class="sg-oc-sub"><b>' + nr(kgRec) + ' kg</b> pesados</div>'
+            : '—');
 
       h += '<tr><td>' + esc(it.producto_nombre || '') + '</td>'
         + '<td>' + esc(it.presentacion_nombre || '—') + '</td>'
@@ -5418,16 +5459,34 @@ function sgFmModeloCargar(){
       return;
     }
 
-    box.innerHTML = '<div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:10px">'
+    // ACÁ EL ASIENTO ES INFORMATIVO: se muestra CONTRA QUÉ se contabiliza, en
+    // una línea. La tabla entera ocupaba media pantalla arriba de la bandeja de
+    // trabajo, todos los importes en "—" porque todavía no hay factura. El
+    // detalle sí importa cuando se está cargando una, y ahí está.
+    var cuentas = (m.lineas || []).map(function(l){
+      return escH(l.cuenta_codigo || '?') + ' ' + escH(l.cuenta_nombre || '');
+    });
+    box.innerHTML = '<div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">'
         + '<div style="font-weight:700;font-size:14px">' + escH(m.nombre) + '</div>'
+        + '<span style="font-size:12px;color:var(--mut)">' + cuentas.length + ' cuentas</span>'
+        + '<button class="btn bo bs" type="button" onclick="sgFmModeloDetalle()">Ver detalle</button>'
         + sel
       + '</div>'
       + (faltan.length
-          ? '<div style="border:1.5px solid #e0a72e;background:rgba(224,167,46,.10);border-radius:8px;padding:9px 12px;margin-bottom:10px;font-size:12.5px;color:#9a3412">'
+          ? '<div style="border:1.5px solid #e0a72e;background:rgba(224,167,46,.10);border-radius:8px;padding:9px 12px;margin-top:9px;font-size:12.5px;color:#9a3412">'
             + '⚠️ Este modelo todavía no sirve para contabilizar: ' + faltan.map(escH).join(' · ') + '</div>'
-          : '')
-      + sgFmAsientoTabla(m.lineas || []);
+          : '<div style="font-size:12px;color:var(--mut);margin-top:6px">' + cuentas.join(' · ') + '</div>')
+      + '<div id="sgfm-modelo-det" style="display:none;margin-top:10px"></div>';
   });
+}
+
+// El detalle completo, cuando alguien lo pide. Arriba de la bandeja no hace
+// falta: lo que importa ahí es contra qué se contabiliza, no cada línea.
+function sgFmModeloDetalle(){
+  var d = eid('sgfm-modelo-det'); if (!d || !SGFM.modelo) return;
+  var abierto = d.style.display !== 'none';
+  d.style.display = abierto ? 'none' : '';
+  d.innerHTML = abierto ? '' : sgFmAsientoTabla(SGFM.modelo.lineas || []);
 }
 
 // El resumen del asiento, igual que en Puente Cordón: cada línea con su cuenta,
@@ -5533,23 +5592,36 @@ function sgFmPartidaDetalle(id){
     var d = r.data;
     SGFMF.acordado = d.total_acordado;
     SGFMF.acordadoBase = d.total_acordado;   // sin las partidas agrupadas
+    // LA CUENTA, EN BULTOS. Se muestra la multiplicación que se hizo —"100 ×
+    // $15.000"— porque es la que el comprador rehace de memoria para controlar
+    // la factura. Cuando la mercadería entró pesada y sin contar cajones se cae
+    // a kilos, y se dice.
     var filas = (d.items || []).map(function(it){
+      var esBulto = it.base === 'bulto';
+      var cant = esBulto ? Number(it.bultos_recibidos) : Number(it.kg_recibidos);
+      var precio = esBulto ? it.precio_por_bulto : it.precio_estimado_por_kg;
       return '<tr><td>' + escH(it.producto_nombre || '—') + '</td>'
-        + '<td style="text-align:right">' + (Number(it.bultos_recibidos) > 0 ? nr(it.bultos_recibidos) : '—') + '</td>'
-        + '<td style="text-align:right">' + nr(it.kg_recibidos) + '</td>'
-        + '<td style="text-align:right">' + (it.precio_estimado_por_kg != null ? sgMoney(it.precio_estimado_por_kg) : '—') + '</td>'
+        + '<td style="text-align:right"><b>' + nr(cant) + '</b> '
+          + (esBulto ? 'bultos' : 'kg')
+          + (esBulto && Number(it.kg_recibidos) > 0
+              ? '<div class="sg-oc-sub">' + nr(it.kg_recibidos) + ' kg</div>' : '')
+          + (!esBulto && Number(it.cantidad_estimada_presentaciones) > 0
+              ? '<div class="sg-oc-sub">sin contar bultos</div>' : '')
+        + '</td>'
+        + '<td style="text-align:right">' + (precio != null ? sgMoney(precio) : '—')
+          + '<div class="sg-oc-sub">' + (esBulto ? 'por bulto' : 'por kg') + '</div></td>'
         + '<td style="text-align:right"><b>' + (it.importe != null ? sgMoney(it.importe) : '—') + '</b></td></tr>';
     }).join('');
     cont.innerHTML = '<div id="sgfm-agrupar"></div>'
       + '<div class="sg-oc-box"><div class="sg-oc-box-tit">Lo que entró y lo que se acordó pagar</div>'
       + '<div class="ab-table-wrap"><table class="pa-tbl">'
-      + '<thead><tr><th>Producto</th><th style="text-align:right">Bultos recibidos</th>'
-      + '<th style="text-align:right">Kg recibidos</th><th style="text-align:right">Precio acordado</th>'
+      + '<thead><tr><th>Producto</th><th style="text-align:right">Entró</th>'
+      + '<th style="text-align:right">Precio acordado</th>'
       + '<th style="text-align:right">Importe</th></tr></thead><tbody>' + filas
       + (d.total_acordado != null
-          ? '<tr style="border-top:2px solid var(--bor);font-weight:700"><td colspan="4">Total acordado</td>'
+          ? '<tr style="border-top:2px solid var(--bor);font-weight:700"><td colspan="3">Total acordado</td>'
             + '<td style="text-align:right" id="sgfm-total-acordado">' + sgMoney(d.total_acordado) + '</td></tr>'
-          : '<tr><td colspan="5" style="font-size:12px;color:var(--mut)">Compra de liquidación: el precio se define al liquidar.</td></tr>')
+          : '<tr><td colspan="4" style="font-size:12px;color:var(--mut)">Compra de liquidación: el precio se define al liquidar.</td></tr>')
       + '</tbody></table></div>'
       + '<div id="sgfm-vs-acordado" style="font-size:12.5px;margin-top:6px"></div></div>';
     sgFmAgrupables();
