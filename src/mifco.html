@@ -929,9 +929,16 @@ async function confirmarSellado() {
     if (rech > 0) fd.append('rechazo_destino', $('cs-rech-dest').value || 'san_geronimo');
     if (S.fotoFile) fd.append('escaneo', S.fotoFile);
     else if (S.escaneoPath) fd.append('escaneo_path', S.escaneoPath);
-    const r = await _fetchConFeedback('/api/ifco/remitos/'+S.matchRemitoId+'/sellar', { method:'POST', credentials:'include', body:fd }, { mensaje:'Guardando el sellado…' });
-    const d = await r.json();
-    if (!r.ok) throw new Error(d.error || 'Error '+r.status);
+    // PATCH, no POST: la ruta está registrada como router.patch en rutas/ifco.js. Con POST caía
+    // en el 404 de Express, que responde HTML, y r.json() reventaba con "Unexpected token '<'".
+    const r = await _fetchConFeedback('/api/ifco/remitos/'+S.matchRemitoId+'/sellar', { method:'PATCH', credentials:'include', body:fd }, { mensaje:'Guardando el sellado…' });
+    // Parsear defensivo: si el server devuelve HTML (404/500/proxy), r.json() tira
+    // "Unexpected token '<'" y el operario no entiende nada.
+    const txt = await r.text();
+    let d = null;
+    try { d = txt ? JSON.parse(txt) : null; } catch(_) {}
+    if (!r.ok) throw new Error((d && d.error) || 'El servidor respondió ' + r.status + '. Reintentá.');
+    if (!d)    throw new Error('Respuesta inesperada del servidor. Reintentá.');
     showOk('✓ Remito sellado', S.matchData.n_remito_ifco + ' — ' + (S.matchData.empresa||''));
   } catch(e) {
     showError('No se pudo guardar', e.message, '⚠️');
@@ -991,8 +998,13 @@ async function confirmarCrearSellado() {
     if (S.fotoFile) fd.append('escaneo', S.fotoFile);
     else if (S.escaneoPath) fd.append('escaneo_path', S.escaneoPath);
     const r = await _fetchConFeedback('/api/ifco/remitos/sellado-directo', { method:'POST', credentials:'include', body:fd }, { mensaje:'Guardando el remito sellado…' });
-    const d = await r.json();
-    if (!r.ok) throw new Error(d.error || 'Error '+r.status);
+    // Parsear defensivo: si el server devuelve HTML (404/500/proxy), r.json() tira
+    // "Unexpected token '<'" y el operario no entiende nada.
+    const txt = await r.text();
+    let d = null;
+    try { d = txt ? JSON.parse(txt) : null; } catch(_) {}
+    if (!r.ok) throw new Error((d && d.error) || 'El servidor respondió ' + r.status + '. Reintentá.');
+    if (!d)    throw new Error('Respuesta inesperada del servidor. Reintentá.');
     showOk('✓ Remito creado y sellado', numero + ' — ' + cadena);
   } catch(e) {
     showError('No se pudo guardar', e.message, '⚠️');
