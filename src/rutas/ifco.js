@@ -2100,77 +2100,82 @@ router.post('/remitos/sellado-directo', upload.single('escaneo'), function(req, 
 });
 
 router.patch('/remitos/:id/sellar', upload.single('escaneo'), function(req, res) {
-  const id = req.params.id;
-  const r = db.prepare("SELECT * FROM ifco_remitos_super WHERE id = ?").get(id);
-  if (!r) return res.status(404).json({ error: 'No encontrado' });
-  if (r.estado !== 'despachado' && r.estado !== 'sellado') {
-    return res.status(400).json({ error: 'No se puede sellar un remito en estado ' + r.estado });
-  }
-  const d = req.body || {};
-  if (!d.fecha_sellado) return res.status(400).json({ error: 'Fecha de sellado requerida' });
-
-  const recibida  = d.cantidad_recibida  != null ? parseInt(d.cantidad_recibida)  : r.cantidad_despachada;
-  const rechazada = d.cantidad_rechazada != null ? parseInt(d.cantidad_rechazada) : 0;
-  if (recibida < 0 || rechazada < 0) {
-    return res.status(400).json({ error: 'Cantidades no pueden ser negativas' });
-  }
-  if (recibida + rechazada > r.cantidad_despachada) {
-    return res.status(400).json({ error: 'Recibida + rechazada superan la cantidad despachada' });
-  }
-
-  let escaneo_path = r.escaneo_path;
-  if (req.file) {
-    escaneo_path = '/data/ifco/' + req.file.filename;
-  } else if (d.escaneo_path && /^\/data\/ifco\//.test(d.escaneo_path)) {
-    escaneo_path = d.escaneo_path;
-  }
-
-  // Destino del rechazo: si hay rechazo > 0, debe especificarse
-  let rechazo_destino = null;
-  if (rechazada > 0) {
-    rechazo_destino = d.rechazo_destino || 'san_geronimo';
-    if (['san_geronimo','proveedor'].indexOf(rechazo_destino) < 0) {
-      return res.status(400).json({ error: 'rechazo_destino debe ser "san_geronimo" o "proveedor"' });
+  try {
+    const id = req.params.id;
+    const r = db.prepare("SELECT * FROM ifco_remitos_super WHERE id = ?").get(id);
+    if (!r) return res.status(404).json({ error: 'No encontrado' });
+    if (r.estado !== 'despachado' && r.estado !== 'sellado') {
+      return res.status(400).json({ error: 'No se puede sellar un remito en estado ' + r.estado });
     }
+    const d = req.body || {};
+    if (!d.fecha_sellado) return res.status(400).json({ error: 'Fecha de sellado requerida' });
+
+    const recibida  = d.cantidad_recibida  != null ? parseInt(d.cantidad_recibida)  : r.cantidad_despachada;
+    const rechazada = d.cantidad_rechazada != null ? parseInt(d.cantidad_rechazada) : 0;
+    if (recibida < 0 || rechazada < 0) {
+      return res.status(400).json({ error: 'Cantidades no pueden ser negativas' });
+    }
+    if (recibida + rechazada > r.cantidad_despachada) {
+      return res.status(400).json({ error: 'Recibida + rechazada superan la cantidad despachada' });
+    }
+
+    let escaneo_path = r.escaneo_path;
+    if (req.file) {
+      escaneo_path = '/data/ifco/' + req.file.filename;
+    } else if (d.escaneo_path && /^\/data\/ifco\//.test(d.escaneo_path)) {
+      escaneo_path = d.escaneo_path;
+    }
+
+    // Destino del rechazo: si hay rechazo > 0, debe especificarse
+    let rechazo_destino = null;
+    if (rechazada > 0) {
+      rechazo_destino = d.rechazo_destino || 'san_geronimo';
+      if (['san_geronimo','proveedor'].indexOf(rechazo_destino) < 0) {
+        return res.status(400).json({ error: 'rechazo_destino debe ser "san_geronimo" o "proveedor"' });
+      }
+    }
+
+    // Si TODO lo despachado fue rechazado, no hay nada que presentar a IFCO:
+    // pasa directamente a estado 'presentado' con fecha_presentado = hoy.
+    // (Los cajones físicamente vuelven a SG/proveedor según rechazo_destino, pero
+    // contablemente el remito queda cerrado.)
+    const todoRechazado = (rechazada > 0 && rechazada >= r.cantidad_despachada);
+    const estadoFinal      = todoRechazado ? 'presentado' : 'sellado';
+    const fechaPresentadoF = todoRechazado ? new Date().toISOString().slice(0,10) : null;
+
+    db.prepare(`
+      UPDATE ifco_remitos_super SET
+        estado = @estado,
+        fecha_sellado = @fecha_sellado,
+        fecha_presentado = COALESCE(@fecha_presentado, fecha_presentado),
+        encargado_super_apellido = @encargado_super_apellido,
+        encargado_super_nombre   = @encargado_super_nombre,
+        encargado_super_dni      = @encargado_super_dni,
+        cantidad_recibida        = @cantidad_recibida,
+        cantidad_rechazada       = @cantidad_rechazada,
+        rechazo_destino          = @rechazo_destino,
+        escaneo_path             = @escaneo_path,
+        actualizado_en           = datetime('now','localtime')
+      WHERE id = @id
+    `).run({
+      id: id,
+      estado:                   estadoFinal,
+      fecha_sellado:            d.fecha_sellado,
+      fecha_presentado:         fechaPresentadoF,
+      encargado_super_apellido: d.encargado_super_apellido || null,
+      encargado_super_nombre:   d.encargado_super_nombre   || null,
+      encargado_super_dni:      d.encargado_super_dni      || null,
+      cantidad_recibida:        recibida,
+      cantidad_rechazada:       rechazada,
+      rechazo_destino:          rechazo_destino,
+      escaneo_path:             escaneo_path
+    });
+
+    res.json({ ok: true, escaneo_path: escaneo_path, estado: estadoFinal, todo_rechazado: todoRechazado });
+  } catch(e) {
+    console.error('[IFCO][sellar]', e);
+    res.status(500).json({ error: 'No se pudo guardar el sellado: ' + e.message });
   }
-
-  // Si TODO lo despachado fue rechazado, no hay nada que presentar a IFCO:
-  // pasa directamente a estado 'presentado' con fecha_presentado = hoy.
-  // (Los cajones físicamente vuelven a SG/proveedor según rechazo_destino, pero
-  // contablemente el remito queda cerrado.)
-  const todoRechazado = (rechazada > 0 && rechazada >= r.cantidad_despachada);
-  const estadoFinal      = todoRechazado ? 'presentado' : 'sellado';
-  const fechaPresentadoF = todoRechazado ? new Date().toISOString().slice(0,10) : null;
-
-  db.prepare(`
-    UPDATE ifco_remitos_super SET
-      estado = @estado,
-      fecha_sellado = @fecha_sellado,
-      fecha_presentado = COALESCE(@fecha_presentado, fecha_presentado),
-      encargado_super_apellido = @encargado_super_apellido,
-      encargado_super_nombre   = @encargado_super_nombre,
-      encargado_super_dni      = @encargado_super_dni,
-      cantidad_recibida        = @cantidad_recibida,
-      cantidad_rechazada       = @cantidad_rechazada,
-      rechazo_destino          = @rechazo_destino,
-      escaneo_path             = @escaneo_path,
-      actualizado_en           = datetime('now','localtime')
-    WHERE id = @id
-  `).run({
-    id: id,
-    estado:                   estadoFinal,
-    fecha_sellado:            d.fecha_sellado,
-    fecha_presentado:         fechaPresentadoF,
-    encargado_super_apellido: d.encargado_super_apellido || null,
-    encargado_super_nombre:   d.encargado_super_nombre   || null,
-    encargado_super_dni:      d.encargado_super_dni      || null,
-    cantidad_recibida:        recibida,
-    cantidad_rechazada:       rechazada,
-    rechazo_destino:          rechazo_destino,
-    escaneo_path:             escaneo_path
-  });
-
-  res.json({ ok: true, escaneo_path: escaneo_path, estado: estadoFinal, todo_rechazado: todoRechazado });
 });
 
 // Marcar varios remitos sellados como presentados (al hacer mailto)
