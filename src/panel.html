@@ -850,7 +850,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     <div class="ab-table-wrap"><table class="pa-tbl">
       <thead><tr><th>Partida</th><th>Recibida</th><th>Proveedor</th>
         <th style="text-align:right">Bultos</th><th style="text-align:right">Kg</th>
-        <th style="text-align:center">Lotes sin precio</th><th></th></tr></thead>
+        <th style="text-align:center">Precio</th><th></th></tr></thead>
       <tbody id="liq-tb-partidas"><tr><td colspan="7" class="emp">Cargando…</td></tr></tbody>
     </table></div>
   </div>
@@ -3182,9 +3182,21 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       <div class="sg-oc-box">
         <div class="sg-oc-box-tit">🧑‍🌾 Proveedor y comprobante</div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+          <!-- ── LO PRIMERO: ¿LIQUIDAMOS O RECIBIMOS FACTURA? ──────────────
+               Va ARRIBA de todo porque de esta respuesta sale el resto: el
+               comprobante, si el precio puede ser de pizarra, y a qué bandeja va
+               la partida después de recibirse. Estaba abajo del comprobante y se
+               leía al revés — primero el efecto, después la causa. -->
+          <div class="fl" style="grid-column:span 2"><label>¿Cómo se documenta esta compra? <span style="color:var(--err)">*</span></label>
+            <div class="sg-seg" role="radiogroup" style="margin-top:2px;flex-wrap:wrap">
+              <label class="sg-seg-btn"><input type="radio" name="sg-oc-doc" value="factura" checked onchange="sgOcDocChange()"> 🧾 Recibimos factura de compra</label>
+              <label class="sg-seg-btn"><input type="radio" name="sg-oc-doc" value="liquidacion" onchange="sgOcDocChange()"> 📄 Emitimos liquidación</label>
+            </div>
+            <div id="sg-oc-doc-ayuda" style="font-size:11.5px;color:var(--mut);margin-top:4px"></div>
+          </div>
           <div class="fl"><label>Proveedor <span style="color:var(--err)">*</span></label><select id="sg-oc-prov" onchange="sgOcProvChange()"></select></div>
           <div class="fl"><label>Comprobante Fiscal</label><select id="sg-oc-fiscal" onchange="sgOcFiscalChange()"></select></div>
-          <div class="fl"><label>Condiciones Comerciales</label>
+          <div class="fl" id="sg-oc-cond-com"><label>Condiciones Comerciales</label>
             <div class="sg-seg" role="radiogroup" style="margin-top:2px;flex-wrap:wrap">
               <label class="sg-seg-btn"><input type="radio" name="sg-oc-precio" value="firme" checked onchange="sgOcPrecioChange()"> Precio Cerrado</label>
               <label class="sg-seg-btn"><input type="radio" name="sg-oc-precio" value="pizarra" onchange="sgOcPrecioChange()"> Liquidación de Venta</label>
@@ -4635,6 +4647,9 @@ function sgOcOpen(){
   sgOcFleteModo();
   document.querySelector('input[name="sg-oc-mod"][value="normal"]').checked=true;
   document.querySelector('input[name="sg-oc-precio"][value="firme"]').checked=true;
+  var docF=document.querySelector('input[name="sg-oc-doc"][value="factura"]');
+  if(docF) docF.checked=true;
+  sgOcDocChange();
   document.querySelector('input[name="sg-oc-inciva"][value="si"]').checked=true; // IVA Fase 2
   sgOcFiscalOpts();
   sgOcAddItem();
@@ -4680,32 +4695,64 @@ function sgOcProvChange(){
   sgOcUpdIvaBox(); sgOcTotales();   // el comprobante del proveedor puede activar/desactivar IVA
 }
 function sgOcPrecio(){ return document.querySelector('input[name="sg-oc-precio"]:checked').value; }
-// ── EL COMPROBANTE SALE DE LA CONDICIÓN COMERCIAL ─────────────────────────
-// Precio cerrado se factura: Factura A o Factura B, según el proveedor.
-// Liquidación de venta NO se factura, se liquida: el comprobante es Liquidación
-// y no hay otra opción. Ofrecer las tres siempre dejaba armar combinaciones que
-// no existen —una liquidación con Factura A— y el error aparecía después, al
-// querer registrarla.
+
+// ── ¿LIQUIDAMOS O RECIBIMOS FACTURA? ────────────────────────────────────
+// Es lo primero que se define y de ahí sale todo: si se recibe factura, la
+// condición es SIEMPRE precio cerrado —no hay factura de compra a precio de
+// pizarra— y la partida va a "pendiente de facturar". Si se liquida, puede ser
+// a precio cerrado o de pizarra, y va a "pendiente de liquidar".
+function sgOcDoc(){
+  var el = document.querySelector('input[name="sg-oc-doc"]:checked');
+  return el ? el.value : 'factura';
+}
+
+function sgOcDocChange(){
+  var doc = sgOcDoc();
+  var caja = eid('sg-oc-cond-com');
+  var ayuda = eid('sg-oc-doc-ayuda');
+  if (doc === 'factura') {
+    // Con factura no hay elección: precio cerrado. Se muestra igual, para que
+    // se vea con qué queda, pero no se puede tocar.
+    var firme = document.querySelector('input[name="sg-oc-precio"][value="firme"]');
+    if (firme) firme.checked = true;
+    if (caja) caja.style.opacity = '.55';
+    document.querySelectorAll('input[name="sg-oc-precio"]').forEach(function(r){ r.disabled = true; });
+    if (ayuda) ayuda.textContent = 'Con factura de compra la condición es siempre Precio Cerrado. '
+      + 'Al recibirse, la partida va a Facturas por mercadería.';
+  } else {
+    if (caja) caja.style.opacity = '';
+    document.querySelectorAll('input[name="sg-oc-precio"]').forEach(function(r){ r.disabled = false; });
+    if (ayuda) ayuda.textContent = 'Al recibirse, la partida va a Partidas pendientes de liquidar. '
+      + 'La liquidación puede ser a Precio Cerrado o a Precio de Pizarra.';
+  }
+  sgOcPrecioChange();
+}
+// ── EL COMPROBANTE SALE DE CÓMO SE DOCUMENTA LA COMPRA ────────────────────
+// Antes salía de la CONDICIÓN COMERCIAL, y ahí estaba la ambigüedad: Precio
+// Cerrado ofrecía las tres opciones —Factura A, Factura B y Liquidación— así que
+// se podía dejar una compra que decía "precio cerrado" con comprobante
+// Liquidación. Esa combinación se iba a la bandeja de facturas, donde sólo se
+// cargan A o B, y quedaba trabada.
+//
+// Ahora lo decide el selector de arriba: si recibimos factura, el comprobante es
+// una factura; si emitimos liquidación, es una liquidación. Una sola pregunta.
 function sgOcFiscalOpts(){
-  var esLiquidacion = sgOcPrecio() === 'pizarra';
   var sel = eid('sg-oc-fiscal');
   if (!sel) return;
+  var esLiquidacion = sgOcDoc() === 'liquidacion';
   var antes = sel.value;
-  // Precio cerrado se puede documentar de las tres formas —hay productores que
-  // facturan y otros que liquidan—. Lo que NO existe es una liquidación de venta
-  // documentada con factura: ahí el comprobante es Liquidación y punto.
   var opciones = esLiquidacion
     ? [['liquidacion','Liquidación']]
-    : [['factura_a','Factura A'], ['factura_b','Factura B'], ['liquidacion','Liquidación']];
+    : [['factura_a','Factura A'], ['factura_b','Factura B']];
   sel.innerHTML = opciones.map(function(o){ return '<option value="'+o[0]+'">'+o[1]+'</option>'; }).join('');
   // Se conserva lo elegido si sigue siendo válido; si no, queda la primera.
   sel.value = opciones.some(function(o){ return o[0] === antes; }) ? antes : opciones[0][0];
   // Con una sola opción el desplegable no decide nada: se muestra apagado para
-  // que se entienda que es consecuencia de la condición comercial.
+  // que se entienda que es consecuencia de lo de arriba.
   sel.disabled = opciones.length === 1;
   sel.title = esLiquidacion
-    ? 'Una liquidación de venta no se factura: el comprobante es Liquidación.'
-    : '';
+    ? 'Se emite una liquidación: el comprobante es Liquidación.'
+    : 'Se recibe una factura de compra: A o B, según el proveedor.';
 }
 
 // ── EL FLETE: TOTAL, POR BULTO O POR PALLET ───────────────────────────────
@@ -4966,7 +5013,7 @@ function sgOcGuardar(){
   if(!items.length){ toast('Agregá un item con cantidad','er'); return; }
   var firme=sgOcPrecio()==='firme';
   var body={ modalidad:document.querySelector('input[name="sg-oc-mod"]:checked').value, proveedor_id:Number(prov),
-    tipo_fiscal:eid('sg-oc-fiscal').value, tipo_precio:sgOcPrecio(), condicion_pago_id:eid('sg-oc-cond').value?Number(eid('sg-oc-cond').value):null,
+    tipo_fiscal:eid('sg-oc-fiscal').value, tipo_precio:sgOcPrecio(), documenta:sgOcDoc(), condicion_pago_id:eid('sg-oc-cond').value?Number(eid('sg-oc-cond').value):null,
     fecha_oc:eid('sg-oc-fecha').value, fecha_recepcion_estimada:eid('sg-oc-fecharec').value, observaciones:eid('sg-oc-obs').value,
     flete_a_cargo:eid('sg-oc-flete-cargo').value||null,
     flete_monto:(eid('sg-oc-flete-monto').value!==''?Number(eid('sg-oc-flete-monto').value):null),
@@ -5046,6 +5093,19 @@ function sgOcVer(id){
                   + esc(String(o.cerrada_en).slice(0, 10))
                   + (o.cierre_motivo ? ' · ' + escH(o.cierre_motivo) : '') + '</div>'
                 : ''), 95)
+        // Cómo se documenta la compra: es lo que decide a qué bandeja va la
+        // partida después de recibirse. Un admin lo puede corregir si el
+        // comprador se equivocó al cargar la orden.
+        + ficha('Se documenta con', (function(){
+            var d = o.documenta
+              || ((o.tipo_precio === 'pizarra' || o.tipo_fiscal === 'liquidacion') ? 'liquidacion' : 'factura');
+            return (d === 'liquidacion' ? '📄 Liquidación' : '🧾 Factura de compra')
+              + (sgFmEsAdmin()
+                  ? ' <button class="btn bo bs" style="padding:1px 6px;font-size:11px"'
+                    + ' title="Cambiar a qué circuito va esta partida"'
+                    + ' onclick="sgOcDocEditar(' + o.id + ',\'' + d + '\')">✏️</button>'
+                  : '');
+          })(), 165)
         + ficha('Condición comercial', (o.tipo_precio === 'pizarra' ? 'Liquidación de Venta' : 'Precio Cerrado'), 150)
         + ficha('Comprobante', esc(sgLbl(SG_FISCAL, o.tipo_fiscal) || '—'), 110)
         + ficha('Condición de pago', esc(sgCondNombre(o.condicion_pago_id)), 140)
@@ -5236,8 +5296,15 @@ function sgOcVer(id){
       o.vencimientos.forEach(function(v){ h+='<tr><td>'+v.cuota_orden+'</td><td style="text-align:right">'+v.porcentaje+'%</td><td style="text-align:right">'+sgMoney(v.monto)+'</td><td>'+(v.fecha_vencimiento||'—')+'</td><td style="text-align:center">'+(v.pagado?'✅':'—')+'</td></tr>'; });
       h+='</tbody></table>';
     } else { h+='<div style="font-size:12px;color:var(--mut)">Sin vencimientos'+(o.tipo_precio==='pizarra'?' (pizarra: se generan al cerrar el precio de todos los lotes).':'.')+'</div>'; }
+    // ── LO QUE SE CORRIGIÓ ────────────────────────────────────────────────
+    // El registro de correcciones se venía guardando desde que los admin pueden
+    // editar, pero no había dónde leerlo: quedaba en la base, invisible. Un
+    // registro que nadie puede ver no sirve para lo que se pidió, que es poder
+    // mirar después quién cambió qué.
+    h+='<div id="sg-ocver-ed"></div>';
     eid('sg-ocver-body').innerHTML=h;
     eid('sg-ocver-modal').classList.add('on');
+    sgOcEdiciones(id);
   });
   });
 }
@@ -5409,8 +5476,15 @@ function sgLiqPartidasLoad(){
     var n = eid('liq-part-n');
     if (n) n.textContent = rows.length ? ('· ' + rows.length + (rows.length === 1 ? ' partida' : ' partidas')) : '';
     tb.innerHTML = rows.length ? rows.map(function(p){
+      // El precio es un DATO de la partida, no el motivo por el que está acá:
+      // una compra a Precio Cerrado que se documenta con liquidación llega con
+      // el precio puesto y también espera su liquidación.
       return sgPartFila(p,
-        '<td style="text-align:center"><b>' + nr(p.lotes_sin_precio) + '</b> de ' + nr(p.lotes) + '</td>'
+        '<td style="text-align:center">'
+        + (p.lotes_sin_precio > 0
+            ? '<b>' + nr(p.lotes_sin_precio) + '</b> de ' + nr(p.lotes) + ' sin cerrar'
+            : '<span class="bdg bok">cerrado</span>')
+        + '</td>'
         + '<td style="text-align:right;white-space:nowrap">'
           + '<button class="btn bo bs" onclick="sgOcVer(' + p.id + ')">Ver</button> '
           // ACÁ EMPIEZA UNA LIQUIDACIÓN, y sólo acá: sobre una partida que entró
@@ -5419,7 +5493,8 @@ function sgLiqPartidasLoad(){
             + esc(p.proveedor_nombre || '') + '\')">💲 Liquidar</button>'
         + '</td>');
     }).join('') : '<tr><td colspan="7" class="emp">No hay partidas esperando liquidación. '
-        + 'Las partidas de Liquidación de Venta aparecen acá apenas se reciben.</td></tr>';
+        + 'Las que se documentan con liquidación aparecen acá apenas se reciben, '
+        + 'y salen cuando se les carga la liquidación.</td></tr>';
   });
 }
 
@@ -5427,8 +5502,11 @@ function sgLiqPartidasLoad(){
 // blanco: sabe de qué partida se está hablando y lo dice arriba, así el que pega
 // el texto puede controlarlo contra la mercadería que entró.
 function liqDePartida(ocId, partida, proveedor){
-  LIQ.partida = { oc_id: ocId, codigo: partida, proveedor: proveedor };
   liqAbrirNueva();
+  // DESPUÉS de abrir: liqAbrirNueva limpia la partida para el caso del botón
+  // suelto, así que si se asignara antes se perdería y la liquidación no
+  // quedaría vinculada a la partida (y la bandeja no se vaciaría nunca).
+  LIQ.partida = { oc_id: ocId, codigo: partida, proveedor: proveedor };
   var cab = eid('liq-partida-cab');
   if (cab) {
     cab.style.display = '';
@@ -5668,7 +5746,7 @@ function sgFmLoad(){
               + esc(p.proveedor_nombre || '') + '\')">🧾 Cargar factura</button>')
         + '</td>');
     }).join('') : '<tr><td colspan="6" class="emp">No hay partidas esperando factura. '
-        + 'Las partidas de Precio Cerrado aparecen acá apenas se reciben.</td></tr>';
+        + 'Las que se documentan con factura de compra aparecen acá apenas se reciben.</td></tr>';
   });
 }
 
@@ -7120,6 +7198,65 @@ function sgModalArriba(id){
   var abiertos = document.querySelectorAll('.ab-modal-overlay.on').length;
   el.style.zIndex = String(100 + (abiertos + 1) * 10);
   el.classList.add('on');
+}
+
+// Lo que se corrigió de esta partida: qué campo, qué decía antes, quién y por
+// qué. Se carga aparte de la ficha para no demorarla, y si no hay nada no
+// aparece: una orden sin correcciones no tiene por qué mostrar una tabla vacía.
+var SG_ED_CAMPO = {
+  kg_reales: 'Kilos', bultos: 'Bultos', calidad: 'Calidad',
+  precio_unitario_kg: 'Precio por kg', documenta: 'Se documenta con',
+  tipo_precio: 'Condición comercial', tipo_fiscal: 'Comprobante'
+};
+function sgEdValor(campo, v){
+  if (v === null || v === undefined || v === '') return '—';
+  if (campo === 'documenta') return v === 'liquidacion' ? 'Liquidación' : 'Factura de compra';
+  if (campo === 'tipo_precio') return v === 'pizarra' ? 'Liquidación de Venta' : 'Precio Cerrado';
+  if (campo === 'tipo_fiscal') return sgLbl(SG_FISCAL, v) || String(v);
+  return String(v);
+}
+function sgOcEdiciones(ocId){
+  api('/api/sg/oc/' + ocId + '/ediciones').then(function(r){
+    var caja = eid('sg-ocver-ed');
+    if (!caja) return;
+    var rows = (r && r.ok) ? r.data : [];
+    if (!rows.length) { caja.innerHTML = ''; return; }
+    caja.innerHTML = '<div style="font-weight:700;font-size:12px;text-transform:uppercase;'
+      + 'color:var(--mut);margin:14px 0 6px">✏️ Correcciones</div>'
+      + '<table class="pa-tbl"><thead><tr><th>Cuándo</th><th>Qué</th><th>Decía</th>'
+      + '<th>Quedó</th><th>Por qué</th><th>Quién</th></tr></thead><tbody>'
+      + rows.map(function(e){
+          return '<tr><td style="white-space:nowrap">' + escH(String(e.fecha || '').slice(0, 16)) + '</td>'
+            + '<td>' + escH(SG_ED_CAMPO[e.campo] || e.campo) + '</td>'
+            + '<td>' + escH(sgEdValor(e.campo, e.valor_anterior)) + '</td>'
+            + '<td><b>' + escH(sgEdValor(e.campo, e.valor_nuevo)) + '</b></td>'
+            + '<td>' + escH(e.motivo || '—') + '</td>'
+            + '<td>' + escH(e.usuario_nombre || '—') + '</td></tr>';
+        }).join('')
+      + '</tbody></table>';
+  });
+}
+
+// Cambiar de circuito una partida: de facturar a liquidar o al revés. Pasa
+// cuando el comprador se equivoca al cargar la orden. Sólo admin, con motivo,
+// y queda registrado como cualquier otra corrección.
+function sgOcDocEditar(ocId, actual){
+  var otro = actual === 'liquidacion' ? 'factura' : 'liquidacion';
+  var nombre = function(d){ return d === 'liquidacion' ? 'emitimos LIQUIDACIÓN' : 'recibimos FACTURA de compra'; };
+  if (!confirm('Esta partida está como "' + nombre(actual) + '".\n\n'
+    + '¿Pasarla a "' + nombre(otro) + '"?\n\n'
+    + (otro === 'factura'
+        ? 'Va a quedar a Precio Cerrado y pasa a Facturas por mercadería.'
+        : 'Pasa a Partidas pendientes de liquidar.'))) return;
+  var motivo = prompt('¿Por qué se cambia? (queda registrado)');
+  if (motivo === null) return;
+  if (!String(motivo).trim()) { toast('Escribí por qué se cambia', 'er'); return; }
+  api('/api/sg/oc/' + ocId + '/documenta', 'PUT', { documenta: otro, motivo: motivo }).then(function(r){
+    if (!r || !r.ok) { toast((r && r.error) || 'No se pudo cambiar', 'er'); return; }
+    toast('Ahora ' + nombre(otro), 'ok');
+    sgOcVer(ocId);
+    sgLoadOC();
+  });
 }
 
 // ── CORREGIR UN LOTE ────────────────────────────────────────────────────
@@ -19693,6 +19830,12 @@ async function liqAbrirNueva() {
   document.getElementById('liq-step2').style.display = 'none';
   document.getElementById('liq-texto').value = '';
   LIQ.datos = null;
+  // Arranca SIN partida. Si se entra desde la bandeja, liqDePartida la pone
+  // después; si se entra por el botón de siempre, no puede quedar pegada la
+  // partida de la vez anterior y liquidarle la liquidación equivocada.
+  LIQ.partida = null;
+  var cab = eid('liq-partida-cab');
+  if (cab) { cab.style.display = 'none'; cab.innerHTML = ''; }
   document.getElementById('liq-modal').classList.add('on');
 }
 
@@ -19836,7 +19979,10 @@ async function liqGuardar() {
     conceptos:            _liqLeerConc(),
     neto:                 parseFloat(document.getElementById('liq-neto').value)  || 0,
     total:                parseFloat(document.getElementById('liq-total').value) || 0,
-    texto_original:       (LIQ.datos && LIQ.datos._textoOriginal) || ''
+    texto_original:       (LIQ.datos && LIQ.datos._textoOriginal) || '',
+    // De qué partida es. Sólo viaja si la liquidación se abrió desde la bandeja;
+    // es lo que después saca a la partida de "pendientes de liquidar".
+    oc_id:                (LIQ.partida && LIQ.partida.oc_id) || null
   };
   if (!body.n_liquidacion) { alert('Falta el N° de liquidación'); return; }
   if (!body.fecha)         { alert('Falta la fecha'); return; }
