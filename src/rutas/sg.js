@@ -2367,15 +2367,21 @@ REGLAS:
 //      sobre un número que ya no existe.
 //   3. El lote se TRANSFORMÓ o se REPROCESÓ: su costo ya viajó a otro lote.
 function frenosDeEdicionLote(db, loteId) {
-  const l = db.prepare(`SELECT l.id, l.kg_reales, l.transformado_de, l.reproceso_id, i.oc_id
+  const l = db.prepare(`SELECT l.id, l.kg_reales, l.bultos, l.kg_por_bulto, l.presentacion_id,
+      l.transformado_de, l.reproceso_id, i.oc_id
     FROM sg_lotes l LEFT JOIN sg_oc_items i ON i.id = l.oc_item_id
     WHERE l.id=? AND l.activo=1`).get(loteId);
   if (!l) return { error: 'Lote no encontrado' };
 
   if (l.oc_id) {
+    // La factura puede cubrir VARIAS partidas: si sólo se mira f.oc_id, las que
+    // entraron como secundarias —las que viven en sg_factura_compra_ocs— quedan
+    // editables aunque su asiento ya esté en el libro.
     const fac = db.prepare(`SELECT f.id, f.asiento_id, a.anulado FROM sg_facturas_compra f
       LEFT JOIN sg_asientos a ON a.id = f.asiento_id
-      WHERE f.oc_id=? AND f.activo=1 AND f.asiento_id IS NOT NULL`).get(l.oc_id);
+      WHERE f.activo=1 AND f.asiento_id IS NOT NULL
+        AND (f.oc_id = ? OR EXISTS (SELECT 1 FROM sg_factura_compra_ocs fo
+                                     WHERE fo.factura_id = f.id AND fo.oc_id = ?))`).get(l.oc_id, l.oc_id);
     if (fac && !fac.anulado) {
       return { error: 'Esta partida ya está contabilizada en el asiento ' + fac.asiento_id
         + '. Anulá el asiento primero: si se corrigen los kilos o el precio, el asiento que está en el '
@@ -2387,6 +2393,22 @@ function frenosDeEdicionLote(db, loteId) {
   if (desp > 0) {
     return { error: 'De este lote ya se despacharon ' + r2(desp) + ' kg. No se pueden corregir sus '
       + 'cantidades: el stock y el costo del cliente ya salieron con el número viejo.' };
+  }
+
+  // ── EL LOTE CUYO COSTO YA VIAJÓ A OTRO ───────────────────────────────
+  // transformado_de y reproceso_id los lleva el lote HIJO —se escriben con el
+  // id del origen al crearlo—, así que preguntar por ellos bloqueaba al hijo y
+  // dejaba libre al PADRE, que es justo el que hay que proteger: su costo se
+  // repartió a otro lote con un snapshot congelado (costo_transferido,
+  // costo_madre_consumido) que no se recalcula nunca. Bajarle los kilos deja la
+  // plata mal contada de los dos lados a la vez.
+  const dioCosto = db.prepare(`SELECT
+      (SELECT COUNT(*) FROM sg_transformaciones WHERE lote_origen_id=?) +
+      (SELECT COUNT(*) FROM sg_reprocesos WHERE lote_madre_id=? AND estado='activo') AS c`)
+    .get(loteId, loteId).c;
+  if (dioCosto > 0) {
+    return { error: 'De este lote salió mercadería a una transformación o un reproceso: parte de su '
+      + 'costo ya viajó a otro lote. Corregirlo dejaría la plata contada mal en los dos lados.' };
   }
   if (l.transformado_de != null || l.reproceso_id != null) {
     return { error: 'Este lote vino de una transformación o un reproceso: su costo se calculó a partir '
@@ -2429,6 +2451,37 @@ router.put('/lotes/:id/corregir', requireAdmin, (req, res) => {
       return res.status(400).json({ ok: false, error: 'Los kilos tienen que ser mayores a cero' });
     }
 
+    // ── LOS KILOS Y LOS BULTOS TIENEN QUE SEGUIR SIENDO EL MISMO LOTE ────
+    // El módulo corre sobre DOS unidades: el despacho y las reservas validan en
+    // BULTOS y derivan los kilos (bultos × kg por bulto); el costo, el margen y
+    // lo que se le debe al proveedor corren sobre kg_reales.
+    //
+    // Corregir sólo el peso —que es lo más probable: alguien tipeó mal la
+    // balanza— rompía esa correspondencia en silencio, y después se podían
+    // despachar 100 cajones de 20 kg, o sea 2.000 kg, de un lote que decía
+    // 1.800. El stock en kilos se iba a negativo mientras el de cajones decía
+    // cero, con los dos números saliendo del mismo lote.
+    //
+    // Si el lote se maneja por bultos, los dos números tienen que cerrar entre
+    // sí. Se admite un kilo de diferencia: es una balanza de camión.
+    const kpb = (prev.kg_por_bulto != null && prev.kg_por_bulto > 0)
+      ? Number(prev.kg_por_bulto)
+      : (prev.presentacion_id
+          ? (db.prepare('SELECT factor_conversion f FROM sg_presentaciones WHERE id=?')
+               .get(prev.presentacion_id) || {}).f
+          : null);
+    if (nuevo.bultos > 0 && kpb > 0) {
+      const kgQueDanLosBultos = r2(nuevo.bultos * kpb);
+      if (Math.abs(r2(nuevo.kg_reales - kgQueDanLosBultos)) > 1) {
+        return res.status(400).json({ ok: false,
+          error: nuevo.bultos + ' bultos de ' + kpb + ' kg dan ' + kgQueDanLosBultos + ' kg, y estás '
+               + 'poniendo ' + nuevo.kg_reales + '. Corregí los dos: el despacho descuenta por bultos '
+               + 'y el costo por kilos, y si no cierran entre sí el stock queda mal.',
+          kg_sugeridos: kgQueDanLosBultos,
+          bultos_sugeridos: Math.round(nuevo.kg_reales / kpb) });
+      }
+    }
+
     db.transaction(() => {
       for (const campo of ['kg_reales', 'bultos', 'calidad', 'precio_unitario_kg']) {
         anotarEdicion(db, { tabla: 'sg_lotes', registroId: prev.id, campo,
@@ -2445,6 +2498,12 @@ router.put('/lotes/:id/corregir', requireAdmin, (req, res) => {
       // Y lo que cuelga de esos kilos: el costo con sus gastos, y el período.
       recalcCostoLote(db, prev.id);
       if (prev.fecha_ingreso) recalcPeriodo(db, String(prev.fecha_ingreso).slice(0, 7));
+      // Y lo que se le debe al proveedor. El cronograma de pago se arma con la
+      // suma de los costos de los lotes de la orden: si se corrigen los kilos y
+      // no se regenera, se le termina pagando por mercadería que no entró.
+      // Se llama desde los otros siete lugares donde cambia lo que se debe;
+      // faltaba acá.
+      if (chk.lote.oc_id) generarVencimientos(db, chk.lote.oc_id);
     })();
     const l = db.prepare('SELECT * FROM sg_lotes WHERE id=?').get(prev.id);
     res.json({ ok: true, data: l });
