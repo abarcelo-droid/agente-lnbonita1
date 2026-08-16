@@ -822,6 +822,43 @@ try {
   db.exec('CREATE INDEX IF NOT EXISTS idx_sg_fact_oc ON sg_facturas_compra(oc_id)');
   // Para las bases que ya crearon la tabla sin esta columna.
   try { db.exec('ALTER TABLE sg_facturas_compra ADD COLUMN iibb_jurisdiccion TEXT'); } catch (_) {}
+
+  // ── UNA FACTURA PUEDE CUBRIR VARIAS PARTIDAS ─────────────────────────
+  // El proveedor junta dos o tres camiones en un solo comprobante. La columna
+  // oc_id de la factura se queda con la PRIMERA —para no romper lo que ya la
+  // lee— y acá se listan todas, incluida esa.
+  //
+  // El importe de cada partida se guarda: una factura que cubre tres camiones
+  // tiene que poder decir cuánto le tocó a cada uno, o el costo de cada partida
+  // queda inventado.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS sg_factura_compra_ocs (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      factura_id INTEGER NOT NULL REFERENCES sg_facturas_compra(id) ON DELETE CASCADE,
+      oc_id      INTEGER NOT NULL REFERENCES sg_oc(id),
+      neto       REAL
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_sg_fact_ocs ON sg_factura_compra_ocs(factura_id, oc_id);
+    CREATE INDEX IF NOT EXISTS idx_sg_fact_ocs_oc ON sg_factura_compra_ocs(oc_id);
+  `);
+
+  // ── LAS PERCEPCIONES, UNA FILA POR JURISDICCIÓN ──────────────────────
+  // Una misma factura puede traer percepción de Ingresos Brutos de más de una
+  // provincia, y cada una va a la cuenta de SU jurisdicción. Con un solo campo
+  // no entran: hace falta una fila por percepción.
+  //
+  // Se guardan acá TODAS las percepciones y no sólo las de IIBB, para que
+  // agregar un impuesto nuevo no vuelva a pedir una columna.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS sg_factura_percepciones (
+      id           INTEGER PRIMARY KEY AUTOINCREMENT,
+      factura_id   INTEGER NOT NULL REFERENCES sg_facturas_compra(id) ON DELETE CASCADE,
+      tipo         TEXT NOT NULL,        -- percepcion_iibb | percepcion_iva | percepcion_ganancias
+      jurisdiccion TEXT,                 -- sólo IIBB: la provincia
+      monto        REAL NOT NULL DEFAULT 0
+    );
+    CREATE INDEX IF NOT EXISTS idx_sg_fact_perc ON sg_factura_percepciones(factura_id);
+  `);
 } catch (e) { console.error('[DB] SG sg_facturas_compra:', e.message); }
 
 try { db.exec("ALTER TABLE sg_oc ADD COLUMN cerrada_en TEXT"); } catch (_) {}

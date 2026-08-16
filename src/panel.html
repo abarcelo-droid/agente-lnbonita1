@@ -2758,16 +2758,22 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
             <div class="fl"><label>IVA %</label><input type="number" step="0.01" id="sgfm-f-alic" value="21" oninput="sgFmRecalc()"></div>
             <div class="fl"><label>IVA</label><input type="number" step="0.01" id="sgfm-f-iva" oninput="sgFmRecalc()"></div>
             <div class="fl"><label>Percepción IVA</label><input type="number" step="0.01" id="sgfm-f-piva" oninput="sgFmRecalc()"></div>
-            <div class="fl"><label>Percepción IIBB</label><input type="number" step="0.01" id="sgfm-f-piibb" oninput="sgFmRecalc()"></div>
-            <!-- Ingresos Brutos es PROVINCIAL: la percepción de una jurisdicción
-                 no es la misma cuenta que la de otra, y al cierre hay que poder
-                 decir cuánto se pagó en cada una. Las opciones salen de las
-                 líneas del asiento modelo: se carga una por provincia. -->
-            <div class="fl"><label>Jurisdicción IIBB</label>
-              <select id="sgfm-f-juris" onchange="sgFmRecalc()"><option value="">—</option></select></div>
             <div class="fl"><label>Percepción Ganancias</label><input type="number" step="0.01" id="sgfm-f-pgan" oninput="sgFmRecalc()"></div>
             <div class="fl"><label>Otros conceptos</label><input type="number" step="0.01" id="sgfm-f-otros" oninput="sgFmRecalc()"></div>
             <div class="fl"><label>TOTAL</label><input type="number" step="0.01" id="sgfm-f-total" oninput="sgFmRecalc()"></div>
+          </div>
+          <!-- ── PERCEPCIÓN DE INGRESOS BRUTOS, POR JURISDICCIÓN ──────────
+               IIBB es provincial: una misma factura puede traer percepción de
+               dos o tres provincias, y cada una va a la cuenta de la suya. Hasta
+               tres, que ya es un caso raro. Las provincias salen de las líneas
+               del asiento modelo: parametrizar una es cargarle la línea. -->
+          <div style="margin-top:12px;border-top:1px solid var(--bor);padding-top:10px">
+            <div style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut);margin-bottom:6px">
+              Percepción Ingresos Brutos
+            </div>
+            <div id="sgfm-iibb-filas"></div>
+            <button class="btn bo bs" type="button" id="sgfm-iibb-mas" onclick="sgFmIibbAgregar()"
+                    style="margin-top:6px">+ Otra jurisdicción</button>
           </div>
           <div id="sgfm-suma" style="font-size:12.5px;margin-top:8px"></div>
         </div>
@@ -5430,6 +5436,7 @@ function sgFmPartidaDetalle(id){
     if (!r || !r.ok) return;
     var d = r.data;
     SGFMF.acordado = d.total_acordado;
+    SGFMF.acordadoBase = d.total_acordado;   // sin las partidas agrupadas
     var filas = (d.items || []).map(function(it){
       return '<tr><td>' + escH(it.producto_nombre || '—') + '</td>'
         + '<td style="text-align:right">' + (Number(it.bultos_recibidos) > 0 ? nr(it.bultos_recibidos) : '—') + '</td>'
@@ -5437,7 +5444,8 @@ function sgFmPartidaDetalle(id){
         + '<td style="text-align:right">' + (it.precio_estimado_por_kg != null ? sgMoney(it.precio_estimado_por_kg) : '—') + '</td>'
         + '<td style="text-align:right"><b>' + (it.importe != null ? sgMoney(it.importe) : '—') + '</b></td></tr>';
     }).join('');
-    cont.innerHTML = '<div style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut);margin-bottom:6px">'
+    cont.innerHTML = '<div id="sgfm-agrupar"></div>'
+      + '<div style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut);margin-bottom:6px">'
         + 'Lo que entró y lo que se acordó pagar</div>'
       + '<div class="ab-table-wrap"><table class="pa-tbl">'
       + '<thead><tr><th>Producto</th><th style="text-align:right">Bultos recibidos</th>'
@@ -5445,16 +5453,60 @@ function sgFmPartidaDetalle(id){
       + '<th style="text-align:right">Importe</th></tr></thead><tbody>' + filas
       + (d.total_acordado != null
           ? '<tr style="border-top:2px solid var(--bor);font-weight:700"><td colspan="4">Total acordado</td>'
-            + '<td style="text-align:right">' + sgMoney(d.total_acordado) + '</td></tr>'
+            + '<td style="text-align:right" id="sgfm-total-acordado">' + sgMoney(d.total_acordado) + '</td></tr>'
           : '<tr><td colspan="5" style="font-size:12px;color:var(--mut)">Compra de liquidación: el precio se define al liquidar.</td></tr>')
       + '</tbody></table></div>'
       + '<div id="sgfm-vs-acordado" style="font-size:12.5px;margin-top:6px"></div>';
+    sgFmAgrupables();
     sgFmRecalc();
   });
 }
 
+// ── OTRAS PARTIDAS EN LA MISMA FACTURA ──────────────────────────────────
+// El proveedor junta dos o tres camiones en un solo comprobante. Se muestran las
+// otras partidas suyas que también esperan factura; al tildarlas, el total
+// acordado pasa a ser la suma de todas.
+function sgFmAgrupables(){
+  var cont = eid('sgfm-agrupar'); if (!cont || !SGFMF.ocId) return;
+  api('/api/sg/oc/' + SGFMF.ocId + '/agrupables').then(function(r){
+    var rows = (r && r.ok) ? r.data : [];
+    SGFMF.agrupables = rows;
+    if (!rows.length) { cont.innerHTML = ''; return; }
+    cont.innerHTML = '<div style="border:1px solid var(--bor);border-radius:8px;padding:10px 12px;margin-bottom:12px;background:var(--bg)">'
+      + '<div style="font-size:12.5px;font-weight:600;margin-bottom:6px">'
+        + '📦 Este proveedor tiene ' + rows.length + ' partida' + (rows.length === 1 ? '' : 's')
+        + ' más esperando factura. Si vienen en este mismo comprobante, tildalas:</div>'
+      + rows.map(function(p, i){
+          return '<label style="display:flex;align-items:center;gap:8px;font-size:12.5px;padding:3px 0;cursor:pointer;text-transform:none;letter-spacing:0;min-height:0">'
+            + '<input type="checkbox" style="width:auto;margin:0" onchange="sgFmAgruparTogg(' + i + ',this.checked)"> '
+            + '<code>' + escH(p.trazabilidad || p.numero || '') + '</code>'
+            + '<span style="color:var(--mut)">' + escH(p.fecha_recepcion || '') + '</span>'
+            + '<span style="margin-left:auto;font-weight:700">' + sgMoney(p.total_acordado) + '</span>'
+            + '</label>';
+        }).join('')
+      + '</div>';
+  });
+}
+
+function sgFmAgruparTogg(i, on){
+  var p = (SGFMF.agrupables || [])[i]; if (!p) return;
+  SGFMF.ocs = SGFMF.ocs || [];
+  var pos = SGFMF.ocs.indexOf(p.id);
+  if (on && pos < 0) SGFMF.ocs.push(p.id);
+  if (!on && pos >= 0) SGFMF.ocs.splice(pos, 1);
+  // El total acordado ahora es el de esta partida más el de las tildadas.
+  var extra = (SGFMF.agrupables || []).reduce(function(a, x){
+    return SGFMF.ocs.indexOf(x.id) >= 0 ? a + (Number(x.total_acordado) || 0) : a;
+  }, 0);
+  SGFMF.acordado = paRound2Fm((SGFMF.acordadoBase || 0) + extra);
+  var t = eid('sgfm-total-acordado');
+  if (t) t.textContent = sgMoney(SGFMF.acordado);
+  sgFmRecalc();
+}
+
 function sgFmFactura(id, partida, proveedor){
-  SGFMF = { ocId: id, partida: partida, archivo: null, acordado: null, balancea: false };
+  SGFMF = { ocId: id, partida: partida, archivo: null, acordado: null, balancea: false,
+             ocs: [], agrupables: [], iibb: [{ jurisdiccion: '', monto: '' }] };
   sgFmPartidaDetalle(id);
   var cab = eid('sgfm-part-cab');
   if (cab) cab.innerHTML = '🍅 Partida <code>' + escH(partida) + '</code>'
@@ -5481,7 +5533,8 @@ function sgFmFactura(id, partida, proveedor){
     }
     sgFmRecalc();
   });
-  sgFmJurisPoblar();
+  SGFMF.iibb = [{ jurisdiccion: '', monto: '' }];
+  sgFmIibbPintar();
   eid('sgfm-modal').classList.add('on');
 }
 
@@ -5505,7 +5558,7 @@ function sgFmRecalc(){
     ivaEl.value = (Math.round(neto * alic) / 100).toFixed(2);
   }
   var iva = _sgfmN('sgfm-f-iva');
-  var pIva = _sgfmN('sgfm-f-piva'), pIibb = _sgfmN('sgfm-f-piibb');
+  var pIva = _sgfmN('sgfm-f-piva'), pIibb = sgFmIibbTotal();
   var pGan = _sgfmN('sgfm-f-pgan'), otros = _sgfmN('sgfm-f-otros');
   var suma = Math.round((neto + iva + pIva + pIibb + pGan + otros) * 100) / 100;
 
@@ -5559,18 +5612,25 @@ function sgFmAsientoPintar(imp){
   // La percepción de IIBB va a la línea de SU jurisdicción. Si no se eligió, o
   // el modelo no la tiene, el importe queda afuera y el asiento no cierra — que
   // es exactamente lo que tiene que pasar.
-  var juris = String((eid('sgfm-f-juris') || {}).value || '').trim().toLowerCase();
+  // Cada percepción a la línea de SU provincia. Dos en la misma se suman.
   var lineasIibb = (m.lineas || []).filter(function(l){ return l.tipo_linea === 'percepcion_iibb'; });
-  var lineaIibb = juris
-    ? lineasIibb.filter(function(l){ return String(l.jurisdiccion || '').trim().toLowerCase() === juris; })[0]
-    : ((lineasIibb.length === 1 && !lineasIibb[0].jurisdiccion) ? lineasIibb[0] : null);
+  var porLinea = {};
+  (SGFMF.iibb || []).forEach(function(p){
+    var monto = Number(p.monto) || 0;
+    if (!(monto > 0)) return;
+    var j = String(p.jurisdiccion || '').trim().toLowerCase();
+    var l = j ? lineasIibb.filter(function(x){ return String(x.jurisdiccion || '').trim().toLowerCase() === j; })[0]
+              : ((lineasIibb.length === 1 && !lineasIibb[0].jurisdiccion) ? lineasIibb[0] : null);
+    if (!l) return;
+    porLinea[l.id] = (porLinea[l.id] || 0) + monto;
+  });
 
   var porTipo = { iva: imp.iva, percepcion_iva: imp.piva,
                   percepcion_ganancias: imp.pgan, proveedores: imp.total };
   var importes = {}, gastoPuesto = false;
   (m.lineas || []).forEach(function(l){
     if (l.tipo_linea === 'percepcion_iibb') {
-      importes[l.id] = (lineaIibb && l.id === lineaIibb.id) ? imp.piibb : 0;
+      importes[l.id] = porLinea[l.id] || 0;
     } else if (porTipo[l.tipo_linea] != null) {
       importes[l.id] = porTipo[l.tipo_linea];
     } else if (l.lado === 'debe' && !gastoPuesto) {
@@ -5600,18 +5660,64 @@ function sgFmBotonGuardar(){
   btn.textContent = listo ? 'Guardar factura' : 'El asiento no balancea';
 }
 
-// Las jurisdicciones que el asiento modelo tiene cargadas. Si el modelo no tiene
-// ninguna línea de IIBB por provincia, el selector queda vacío y lo dice.
-function sgFmJurisPoblar(){
-  var sel = eid('sgfm-f-juris'); if (!sel) return;
-  var m = SGFM.modelo;
-  var js = ((m && m.lineas) || [])
+// ── LAS PERCEPCIONES DE IIBB, HASTA TRES ────────────────────────────────
+// Ingresos Brutos es provincial: una misma factura puede traer percepción de dos
+// o tres provincias, y cada una va a la cuenta de la suya. Las provincias salen
+// de las líneas del asiento modelo — parametrizar una es cargarle la línea.
+var SGFM_IIBB_MAX = 3;
+
+function sgFmJurisOpts(elegida){
+  var js = ((SGFM.modelo && SGFM.modelo.lineas) || [])
     .filter(function(l){ return l.tipo_linea === 'percepcion_iibb' && l.jurisdiccion; })
     .map(function(l){ return l.jurisdiccion; });
-  var actual = sel.value;
-  sel.innerHTML = '<option value="">' + (js.length ? '— Elegí la jurisdicción —' : '(el modelo no tiene jurisdicciones)')
-    + '</option>' + js.map(function(j){ return '<option value="' + escH(j) + '">' + escH(j) + '</option>'; }).join('');
-  if (actual) sel.value = actual;
+  var hay = js.length > 0;
+  return '<option value="">' + (hay ? '— Elegí la provincia —' : '(sin provincias en el modelo)') + '</option>'
+    + js.map(function(j){
+        return '<option value="' + escH(j) + '"' + (j === elegida ? ' selected' : '') + '>' + escH(j) + '</option>';
+      }).join('');
+}
+
+function sgFmIibbPintar(filas){
+  var cont = eid('sgfm-iibb-filas'); if (!cont) return;
+  SGFMF.iibb = filas || SGFMF.iibb || [{ jurisdiccion: '', monto: '' }];
+  cont.innerHTML = SGFMF.iibb.map(function(p, i){
+    return '<div style="display:flex;gap:8px;align-items:flex-end;margin-bottom:6px">'
+      + '<div class="fl" style="flex:1;margin:0"><label>Provincia</label>'
+        + '<select onchange="sgFmIibbUpd(' + i + ',\'jurisdiccion\',this.value)">' + sgFmJurisOpts(p.jurisdiccion) + '</select></div>'
+      + '<div class="fl" style="flex:1;margin:0"><label>Monto</label>'
+        + '<input type="number" step="0.01" value="' + _sgN(p.monto) + '"'
+        + ' oninput="sgFmIibbUpd(' + i + ',\'monto\',this.value)"></div>'
+      + (SGFMF.iibb.length > 1
+          ? '<button class="btn bd bs" type="button" onclick="sgFmIibbSacar(' + i + ')" title="Sacar">×</button>'
+          : '<span style="width:0"></span>')
+      + '</div>';
+  }).join('');
+  var mas = eid('sgfm-iibb-mas');
+  if (mas) mas.style.display = SGFMF.iibb.length >= SGFM_IIBB_MAX ? 'none' : '';
+}
+
+function sgFmIibbAgregar(){
+  SGFMF.iibb = SGFMF.iibb || [];
+  if (SGFMF.iibb.length >= SGFM_IIBB_MAX) return;
+  SGFMF.iibb.push({ jurisdiccion: '', monto: '' });
+  sgFmIibbPintar();
+  sgFmRecalc();
+}
+function sgFmIibbSacar(i){
+  SGFMF.iibb.splice(i, 1);
+  if (!SGFMF.iibb.length) SGFMF.iibb = [{ jurisdiccion: '', monto: '' }];
+  sgFmIibbPintar();
+  sgFmRecalc();
+}
+function sgFmIibbUpd(i, campo, v){
+  if (!SGFMF.iibb || !SGFMF.iibb[i]) return;
+  SGFMF.iibb[i][campo] = v;
+  // No se repinta: perdería el foco del campo que se está tipeando.
+  sgFmRecalc();
+}
+// El total de IIBB es la suma de las tres.
+function sgFmIibbTotal(){
+  return (SGFMF.iibb || []).reduce(function(a, p){ return a + (Number(p.monto) || 0); }, 0);
 }
 
 // LEERLE LOS DATOS AL COMPROBANTE. Lo que vuelve es una PROPUESTA: llena los
@@ -5686,7 +5792,8 @@ function sgFmGuardar(){
     neto: _sgfmN('sgfm-f-neto'), iva_alicuota: _sgfmN('sgfm-f-alic'), iva_monto: _sgfmN('sgfm-f-iva'),
     percepcion_iva: _sgfmN('sgfm-f-piva'), percepcion_iibb: _sgfmN('sgfm-f-piibb'),
     percepcion_ganancias: _sgfmN('sgfm-f-pgan'), otros_conceptos: _sgfmN('sgfm-f-otros'),
-    iibb_jurisdiccion: (eid('sgfm-f-juris')||{}).value || null,
+    percepciones_iibb: (SGFMF.iibb || []).filter(function(p){ return Number(p.monto) > 0; }),
+    ocs: SGFMF.ocs || [],
     total: _sgfmN('sgfm-f-total'),
   };
   var fd = new FormData();
