@@ -5196,13 +5196,17 @@ function sgPagoCuentasPintar(){
   var sel = eid('sg-pago-cuenta'); if (!sel) return;
   var previo = sel.value;
   var cts = sgPagoCuentasDe(SG_PAGO.forma);
-  // Sin cuenta contable el pago no puede entrar al libro: se muestra, pero
-  // avisando, en vez de dejar elegirla y fallar recién al guardar.
-  var usables = cts.filter(function(c){ return c.cuenta_contable_id; });
+  // Sin cuenta contable el pago no puede entrar al libro; y si la cuenta tiene
+  // dueño y no sos vos, tampoco. Se muestran igual, deshabilitadas y diciendo
+  // por qué: esconderlas se lee como "no hay caja cargada" y termina en que
+  // alguien crea una segunda caja que ya existía.
+  var usables = cts.filter(function(c){ return c.cuenta_contable_id && c.puedo !== 0; });
   sel.innerHTML = cts.length
     ? cts.map(function(c){
-        return '<option value="' + c.id + '"' + (c.cuenta_contable_id ? '' : ' disabled')
-          + '>' + esc(c.nombre) + (c.cuenta_contable_id ? '' : ' — sin cuenta contable') + '</option>';
+        var mal = !c.cuenta_contable_id ? ' — sin cuenta contable'
+                : (c.puedo === 0 ? ' — no es tuya' : '');
+        return '<option value="' + c.id + '"' + (mal ? ' disabled' : '')
+          + '>' + esc(c.nombre) + mal + '</option>';
       }).join('')
     : '<option value="">— no hay cuentas para esta forma de pago —</option>';
   if (previo && sel.querySelector('option[value="' + previo + '"]')) sel.value = previo;
@@ -5223,8 +5227,11 @@ function sgPagoCuentasPintar(){
               + 'cargale el talonario.'
             : '⚠️ No hay ninguna cuenta bancaria cargada en Caja y Bancos.');
     } else if (!usables.length) {
-      falta = '⚠️ Ninguna de esas cuentas tiene cuenta contable asignada. Sin eso el pago no puede '
-            + 'entrar al libro: asignásela en Caja y Bancos.';
+      falta = cts.some(function(c){ return c.cuenta_contable_id; })
+        ? '⚠️ Ninguna de esas cuentas es tuya: todas tienen usuarios asignados y no estás entre '
+          + 'ellos. Que te agreguen desde Caja y Bancos.'
+        : '⚠️ Ninguna de esas cuentas tiene cuenta contable asignada. Sin eso el pago no puede '
+          + 'entrar al libro: asignásela en Caja y Bancos.';
     }
     av.innerHTML = falta
       ? '<div style="border:1.5px solid #e0a72e;background:rgba(224,167,46,.10);border-radius:8px;'
@@ -5665,7 +5672,12 @@ function sgCbDetallePintar(){
     + '<div><div class="ph-t" style="font-size:17px">' + escH(c.nombre) + '</div>'
     + '<div class="ph-s">Saldo ' + sgMoney(c.saldo_actual) + '</div></div>'
     + '<div style="display:flex;gap:8px;flex-wrap:wrap">'
-    + '<button class="btn bb bs" onclick="sgCbMovOpen()">+ Movimiento</button>'
+    // Sin permiso sobre ESTA cuenta no se ofrece cargarle nada: el botón iba a
+    // contestar 403 y el que lo aprieta cree que rompió algo.
+    + (c.puedo === 0
+        ? '<span style="font-size:11.5px;color:var(--mut);align-self:center">'
+          + 'Esta cuenta tiene usuarios asignados y no estás entre ellos</span>'
+        : '<button class="btn bb bs" onclick="sgCbMovOpen()">+ Movimiento</button>')
     + (!sgCbEsCaja(c) && c.tiene_chequera
         ? '<button class="btn bo bs" onclick="sgCbChqOpen()">+ Chequera</button>' : '')
     + '<button class="btn bo bs" onclick="sgCbCerrarDetalle()">Cerrar</button>'

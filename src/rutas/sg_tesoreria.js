@@ -75,7 +75,10 @@ router.get('/cuentas', (req, res) => {
       WHERE c.activo = 1
       ORDER BY c.tipo, c.nombre
     `).all();
-    res.json({ ok: true, data: cuentas });
+    // Cuál puede mover EL QUE PREGUNTA: la pantalla ofrece "+ Movimiento" sólo
+    // donde va a poder, en vez de dejar que lo apriete y coma un 403.
+    const u = getUser(req);
+    res.json({ ok: true, data: cuentas.map((c) => ({ ...c, puedo: puedeMoverCuenta(u, c.id) ? 1 : 0 })) });
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
@@ -183,14 +186,25 @@ router.put('/cuentas/:id/usuarios', requireAdmin, (req, res) => {
 });
 
 // SI ESTA PERSONA PUEDE MOVER ESTA CUENTA.
-// La asignación HABILITA, no restringe: hasta hoy mover una caja era sólo de
-// admin, así que el cajero de planta no podía cargar ni su propio arqueo y
-// terminaba pidiéndoselo a administración. Asignarlo a su caja es lo que le
-// abre esa caja Y NINGUNA OTRA. Sin asignar a nadie, la caja queda como estaba:
-// sólo admin. Por eso agregar esto no le saca el acceso a nadie.
+//
+// UNA SOLA REGLA, en toda la aplicación: si la cuenta tiene gente asignada, la
+// tocan SOLO ellos; si no tiene a nadie, la toca cualquiera que tenga permiso
+// en el módulo. Nada más.
+//
+// Antes acá había otra regla —"sin lista, sólo admin"— y no era lo que se pidió.
+// Se pidió "la caja XXX la tocan nada más que YYY y ZZZ": eso es una
+// RESTRICCIÓN sobre cuentas con dueño, no un candado sobre las que no lo tienen.
+// Con la regla vieja, el de cuentas a pagar no podía pagar desde el banco de la
+// empresa —que no es de nadie en particular— y todo volvía a depender de un
+// admin, que es justo lo que había que sacar del medio.
+//
+// El nivel del módulo sigue decidiendo aparte: sin "operar" en el módulo, ni
+// llega hasta acá (exigirNivel corta antes, en index.js).
 export function puedeMoverCuenta(u, cuentaId) {
   if (!u) return false;
   if (u.rol === 'admin') return true;
+  const n = db.prepare('SELECT COUNT(*) c FROM sg_fin_cuenta_usuarios WHERE cuenta_id=?').get(cuentaId).c;
+  if (!n) return true;              // sin dueño: la usa cualquiera con permiso
   return !!db.prepare('SELECT 1 FROM sg_fin_cuenta_usuarios WHERE cuenta_id=? AND usuario_id=?')
     .get(cuentaId, u.id);
 }
@@ -205,7 +219,7 @@ function requireCuenta(leerId) {
     if (!cuentaId) return res.status(400).json({ ok: false, error: 'Falta la cuenta' });
     if (!puedeMoverCuenta(u, cuentaId)) {
       return res.status(403).json({ ok: false,
-        error: 'Esta caja no es tuya: sólo la mueven los usuarios asignados a ella.' });
+        error: 'Esta cuenta tiene usuarios asignados y no estás entre ellos.' });
     }
     req._user = u;
     next();
