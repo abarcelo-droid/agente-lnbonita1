@@ -2706,13 +2706,34 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       queda por pagar de sus órdenes. Cuando la partida tiene factura cargada, la
       deuda es la que dice el comprobante — con IVA y percepciones.
     </div>
+    <!-- Van a figurar TODOS los proveedores: sin buscador, encontrar uno es
+         recorrer la lista con el dedo. Filtra mientras se escribe, sin ir al
+         servidor: la lista ya está entera en la pantalla. -->
+    <div class="sg-oc-search" style="max-width:340px;margin-bottom:10px">
+      <input id="sg-ccprov-q" placeholder="🔎 Buscar proveedor…" oninput="sgCcProvPintar()"
+             style="width:100%;box-sizing:border-box">
+    </div>
     <div class="ab-table-wrap"><table class="pa-tbl">
       <thead><tr><th>Proveedor</th><th style="text-align:right">Saldo apertura</th>
         <th style="text-align:right">Facturado</th>
         <th style="text-align:right">Sin factura</th>
-        <th style="text-align:right">Saldo total</th></tr></thead>
-      <tbody id="sg-tb-ccprov"><tr><td colspan="5" class="emp">Cargando…</td></tr></tbody>
+        <th style="text-align:right">Saldo total</th><th></th></tr></thead>
+      <tbody id="sg-tb-ccprov"><tr><td colspan="6" class="emp">Cargando…</td></tr></tbody>
     </table></div>
+    <div id="sg-ccprov-n" style="font-size:11.5px;color:var(--mut);margin-top:6px"></div>
+  </div>
+
+  <!-- ── LA FICHA DEL PROVEEDOR ──────────────────────────────────────────
+       El listado dice cuánto se le debe; esto dice por qué. Cada comprobante
+       con su fecha, su partida y el saldo corriendo, que es como se lee una
+       cuenta corriente. Se muestra todo el histórico, no sólo lo pendiente:
+       para discutir un saldo hace falta ver también lo que ya se pagó. -->
+  <div class="ab-modal-overlay" id="sg-ccficha-modal">
+    <div class="ab-modal" style="max-width:1000px">
+      <div class="mhd"><div class="mht" id="sg-ccficha-tit">Cuenta corriente</div>
+        <button class="mcl" onclick="closeMB('sg-ccficha-modal')">×</button></div>
+      <div class="mbd" id="sg-ccficha-body"></div>
+    </div>
   </div>
 
   <!-- ── FACTURAS POR MERCADERÍA ──────────────────────────────────────────
@@ -4629,10 +4650,29 @@ function sgComSub(s){
 
 }
 // BRIEF 10 — CC proveedores: saldo apertura + vencimientos pendientes.
+var SG_CCPROV = [];
 function sgLoadCcProv(){
   api('/api/sg/cc-proveedores').then(function(r){
-    var rows=(r&&r.ok)?r.data:[];
-    eid('sg-tb-ccprov').innerHTML = rows.length ? rows.map(function(p){
+    SG_CCPROV = (r && r.ok) ? r.data : [];
+    sgCcProvPintar();
+  });
+}
+
+function sgCcProvPintar(){
+  var q = String((eid('sg-ccprov-q') || {}).value || '').trim().toLowerCase();
+  // Palabra por palabra y sin importar el orden: "agrot sa" encuentra
+  // "AGROT S.A" igual que "sa agrot".
+  var pal = q ? q.split(/\s+/) : [];
+  var rows = SG_CCPROV.filter(function(p){
+    if (!pal.length) return true;
+    var t = String(p.razon_social || '').toLowerCase();
+    return pal.every(function(w){ return t.indexOf(w) >= 0; });
+  });
+  var n = eid('sg-ccprov-n');
+  if (n) n.textContent = rows.length === SG_CCPROV.length
+    ? (SG_CCPROV.length ? SG_CCPROV.length + ' proveedor' + (SG_CCPROV.length === 1 ? '' : 'es') : '')
+    : rows.length + ' de ' + SG_CCPROV.length;
+  eid('sg-tb-ccprov').innerHTML = rows.length ? rows.map(function(p){
       var ap=Number(p.saldo_inicial)||0;
       var fac=Number(p.facturado)||0, sf=Number(p.sin_factura)||0;
       var cero=function(n){ return n ? sgMoney(n) : '<span style="color:var(--mut)">—</span>'; };
@@ -4646,8 +4686,55 @@ function sgLoadCcProv(){
               ? '<div class="sg-oc-sub">'+nr(p.sin_contabilizar)+' sin contabilizar</div>' : '')
           +'</td>'
         +'<td style="text-align:right">'+cero(sf)+'</td>'
-        +'<td style="text-align:right;font-weight:700">'+sgMoney(p.saldo)+'</td></tr>';
-    }).join('') : '<tr><td colspan="5" class="emp">Sin saldos ni deuda pendiente.</td></tr>';
+        +'<td style="text-align:right;font-weight:700">'+sgMoney(p.saldo)+'</td>'
+        +'<td style="text-align:right;white-space:nowrap">'
+          +'<button class="btn bo bs" onclick="sgCcFicha('+p.id+')">👁 Ver</button></td></tr>';
+    }).join('') : ('<tr><td colspan="6" class="emp">'
+        + (q ? 'Ningún proveedor con ese nombre.' : 'Sin saldos ni deuda pendiente.') + '</td></tr>');
+}
+
+// ── LA FICHA: TODOS LOS MOVIMIENTOS DE ESE PROVEEDOR ────────────────────
+function sgCcFicha(provId){
+  api('/api/sg/cc-proveedores/' + provId).then(function(r){
+    if (!r || !r.ok) { toast((r && r.error) || 'No se pudo abrir la ficha', 'er'); return; }
+    var d = r.data, p = d.proveedor || {}, movs = d.movimientos || [];
+    var t = eid('sg-ccficha-tit');
+    if (t) t.textContent = 'Cuenta corriente — ' + (p.razon_social || '');
+
+    var ROT = { apertura: 'Apertura', factura: 'Factura', pago: 'Pago',
+                sin_factura: 'Sin factura' };
+    var CHIP = { contabilizada: 'bok', 'sin contabilizar': 'bfs', 'esperando comprobante': 'bpe' };
+    var h = '<div style="display:flex;gap:22px;flex-wrap:wrap;margin-bottom:12px">'
+      + '<div><div style="font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut)">CUIT</div>'
+        + '<div style="font-size:13px;font-weight:600;font-family:monospace">' + escH(p.cuit || '—') + '</div></div>'
+      + '<div><div style="font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut)">Saldo</div>'
+        + '<div style="font-size:16px;font-weight:700">' + sgMoney(d.saldo) + '</div></div>'
+      + '</div>';
+
+    h += '<div class="ab-table-wrap"><table class="pa-tbl"><thead><tr>'
+      + '<th>Fecha</th><th>Concepto</th><th>Comprobante</th><th>Partida</th>'
+      + '<th style="text-align:right">Debe</th><th style="text-align:right">Haber</th>'
+      + '<th style="text-align:right">Saldo</th></tr></thead><tbody>';
+    h += movs.length ? movs.map(function(m){
+      return '<tr><td style="white-space:nowrap">' + escH(m.fecha || '—') + '</td>'
+        + '<td>' + escH(ROT[m.tipo] || m.tipo)
+          + (m.estado ? ' <span class="bdg ' + (CHIP[m.estado] || 'bcc') + '">' + escH(m.estado) + '</span>' : '')
+          + (m.detalle && m.tipo !== 'factura' && m.tipo !== 'pago'
+              ? '<div class="sg-oc-sub">' + escH(m.detalle) + '</div>' : '')
+          + '</td>'
+        + '<td style="font-family:monospace;font-size:12px">' + escH(m.comprobante || '—') + '</td>'
+        + '<td style="font-family:monospace;font-size:11.5px">' + escH(m.partidas || '—') + '</td>'
+        + '<td style="text-align:right">' + (m.debe ? sgMoney(m.debe) : '—') + '</td>'
+        + '<td style="text-align:right">' + (m.haber ? sgMoney(m.haber) : '—') + '</td>'
+        + '<td style="text-align:right;font-weight:700">' + sgMoney(m.saldo) + '</td></tr>';
+    }).join('') : '<tr><td colspan="7" class="emp">Este proveedor no tiene movimientos.</td></tr>';
+    h += '</tbody></table></div>';
+    h += '<div style="font-size:11.5px;color:var(--mut);margin-top:8px">'
+      + 'HABER es lo que se le debe (su comprobante); DEBE es lo que se le pagó. '
+      + 'La mercadería recibida sin factura figura por lo que se pactó, hasta que llegue el comprobante.</div>';
+
+    eid('sg-ccficha-body').innerHTML = h;
+    sgModalArriba('sg-ccficha-modal');
   });
 }
 // "Confirmada" es el estado 'cerrada' de la base. Se lo llama así en pantalla
@@ -5384,6 +5471,12 @@ function sgOcVer(id){
             // de responder, sin ningún error visible.
             ? ' <button class="btn bo bs" title="Corregir lo que se cargó mal"'
               + ' onclick="sgLoteEditarOpen(' + l.id + ')">✏️</button>'
+              // LA QUE SE CARGÓ DE MÁS. Pasa que la recepción se carga dos
+              // veces y la misma partida queda repetida: hasta ahora no había
+              // forma de sacarla y quedaba sumando en el stock, en el costo del
+              // período y en lo que se le debe al proveedor.
+              + ' <button class="btn bd bs" title="Eliminar esta partida"'
+              + ' onclick="sgLoteEliminar(' + l.id + ',\'' + esc(l.codigo_lote) + '\')">🗑</button>'
             : '');
     };
 
@@ -7448,6 +7541,25 @@ function sgModalArriba(id){
   var abiertos = document.querySelectorAll('.ab-modal-overlay.on').length;
   el.style.zIndex = String(100 + (abiertos + 1) * 10);
   el.classList.add('on');
+}
+
+// Eliminar una partida que se cargó de más. No se borra el renglón: se da de
+// baja, y con eso sale del stock, del costo del período y de lo que se le debe
+// al proveedor — que es todo lo que estaba sumando de más.
+function sgLoteEliminar(loteId, codigo){
+  if (!confirm('¿Eliminar la partida ' + codigo + '?\n\n'
+    + 'Sale del stock, del costo del período y de lo que se le debe al proveedor.\n'
+    + 'Usalo cuando se cargó de más, no para dar de baja mercadería que sí entró.')) return;
+  var motivo = prompt('¿Por qué se elimina? (queda registrado)');
+  if (motivo === null) return;
+  if (!String(motivo).trim()) { toast('Escribí por qué se elimina', 'er'); return; }
+  api('/api/sg/lotes/' + loteId, 'DELETE', { motivo: motivo }).then(function(r){
+    if (!r || !r.ok) { toast((r && r.error) || 'No se pudo eliminar', 'er'); return; }
+    var ped = (r.data && r.data.pedidos_afectados) || [];
+    toast('Partida eliminada' + (ped.length ? ' — se liberaron reservas de ' + ped.join(', ') : ''), 'ok');
+    if (SG.ocVerId) sgOcVer(SG.ocVerId);
+    sgLoadOC();
+  });
 }
 
 // Lo que se corrigió de esta partida: qué campo, qué decía antes, quién y por

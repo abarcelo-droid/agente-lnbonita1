@@ -2601,6 +2601,59 @@ function anotarEdicion(db, { tabla, registroId, campo, antes, despues, motivo, o
       motivo || null, ocId || null, userId || null);
 }
 
+// ── ELIMINAR UNA PARTIDA QUE SE CARGÓ DE MÁS ─────────────────────────────
+// Pasa: se carga la recepción, la pantalla no confirma, se vuelve a cargar, y la
+// misma partida de tomate queda cinco veces. Hasta ahora no había forma de
+// sacarla: quedaba en el stock, en el costo del período y en lo que se le debe
+// al proveedor, y la alerta de la orden decía que habían entrado 236 bultos de
+// los 66 que se pidieron.
+//
+// NO SE BORRA LA FILA: se da de baja (activo=0). Todo el stock del módulo se
+// calcula sobre los lotes activos, así que darla de baja la saca del stock, del
+// costo y de la deuda — que es exactamente lo que tiene que pasar—, y el
+// registro de que existió queda.
+//
+// Los frenos son los MISMOS que para corregirla: si de ese lote ya salió
+// mercadería, o su costo viajó a otro lote, o ya está contabilizado, borrarlo
+// dejaría la plata mal contada en otro lado.
+router.delete('/lotes/:id', requireAdmin, (req, res) => {
+  const db = getDb();
+  try {
+    const motivo = val(req.body && req.body.motivo);
+    if (!motivo) return res.status(400).json({ ok: false, error: 'Escribí por qué se elimina: queda registrado' });
+    const chk = frenosDeEdicionLote(db, req.params.id);
+    if (chk.error) return res.status(400).json({ ok: false, error: chk.error });
+
+    const l = db.prepare('SELECT * FROM sg_lotes WHERE id=?').get(req.params.id);
+    // Una reserva contra este lote es mercadería comprometida con un cliente: si
+    // el lote no existía, esa reserva tampoco puede seguir en pie.
+    const reservas = db.prepare(`SELECT rs.id, pe.numero FROM sg_reservas rs
+      JOIN sg_pedido_items pi ON pi.id = rs.pedido_item_id
+      JOIN sg_pedidos pe ON pe.id = pi.pedido_id
+      WHERE rs.lote_id = ? AND rs.estado = 'activa'`).all(l.id);
+
+    db.transaction(() => {
+      anotarEdicion(db, { tabla: 'sg_lotes', registroId: l.id, campo: 'eliminada',
+        antes: r2(l.kg_reales) + ' kg' + (l.bultos ? ' / ' + l.bultos + ' bultos' : ''),
+        despues: 'eliminada', motivo, ocId: chk.lote.oc_id, userId: uid(req) });
+      db.prepare(`UPDATE sg_lotes SET activo=0,
+        modificado_en=datetime('now','localtime'), modificado_por=? WHERE id=?`).run(uid(req), l.id);
+      if (reservas.length) {
+        db.prepare(`UPDATE sg_reservas SET estado='cancelada' WHERE lote_id=? AND estado='activa'`).run(l.id);
+      }
+      // Y todo lo que colgaba de esos kilos: el período y lo que se le debe al
+      // proveedor. El stock no hace falta tocarlo — sale de los lotes activos.
+      if (l.fecha_ingreso) recalcPeriodo(db, String(l.fecha_ingreso).slice(0, 7));
+      if (chk.lote.oc_id) {
+        generarVencimientos(db, chk.lote.oc_id);
+        actualizarEstadoOC(db, chk.lote.oc_id);
+      }
+    })();
+    res.json({ ok: true, data: { id: Number(l.id),
+      pedidos_afectados: reservas.map((r) => r.numero) } });
+  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+
 // Corregir un lote: kilos, bultos, calidad y precio. Sólo admin.
 router.put('/lotes/:id/corregir', requireAdmin, (req, res) => {
   const db = getDb();
@@ -5276,9 +5329,19 @@ router.get('/cc-proveedores', requireAuth, (req, res) => {
         COALESCE((SELECT SUM(COALESCE(f.total,0) - COALESCE(f.saldo_pagado,0))
                     FROM sg_facturas_compra f
                    WHERE f.proveedor_id = p.id AND f.activo = 1),0) AS facturado,
-        COALESCE((SELECT SUM(v.monto) FROM sg_oc_vencimientos v
-          JOIN sg_oc o ON o.id=v.oc_id
-          WHERE o.proveedor_id=p.id AND o.activo=1 AND o.estado<>'anulada' AND v.pagado=0
+        -- LO QUE ENTRÓ Y TODAVÍA NO TIENE COMPROBANTE. Sale del cronograma
+        -- de pago de la orden; y si la orden no tiene condición de pago
+        -- cargada —que es lo normal cuando se compra al contado— no hay
+        -- cronograma y la deuda no aparecía en ningún lado: el proveedor
+        -- quedaba con saldo cero teniendo la mercadería adentro. Ahí se cae al
+        -- costo de lo que entró, que es lo que se le va a pagar.
+        COALESCE((SELECT SUM(COALESCE(venc.m, lot.m, 0)) FROM sg_oc o
+          LEFT JOIN (SELECT oc_id, SUM(monto) m FROM sg_oc_vencimientos
+                      WHERE pagado=0 GROUP BY oc_id) venc ON venc.oc_id = o.id
+          LEFT JOIN (SELECT i.oc_id, SUM(l.costo_base) m FROM sg_lotes l
+                       JOIN sg_oc_items i ON i.id = l.oc_item_id
+                      WHERE l.activo=1 GROUP BY i.oc_id) lot ON lot.oc_id = o.id
+          WHERE o.proveedor_id=p.id AND o.activo=1 AND o.estado<>'anulada'
             AND NOT EXISTS (SELECT 1 FROM sg_facturas_compra f2
                              WHERE f2.activo=1
                                AND (f2.oc_id = o.id
@@ -5297,6 +5360,94 @@ router.get('/cc-proveedores', requireAuth, (req, res) => {
       .filter((r) => r.saldo !== 0 || r.saldo_inicial !== 0)
       .sort((a, b) => b.saldo - a.saldo);
     res.json({ ok: true, data });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// ── LA FICHA DE UN PROVEEDOR: TODOS SUS MOVIMIENTOS ──────────────────────
+// El listado dice cuánto se le debe; acá se ve POR QUÉ. Cada comprobante con su
+// fecha, su número, la partida que cubre y el saldo corriendo, que es como se
+// lee una cuenta corriente: renglón por renglón hasta llegar al total.
+//
+// Se muestra TODO el histórico, no sólo lo pendiente: para discutir un saldo con
+// el proveedor hace falta ver también lo que ya se pagó.
+router.get('/cc-proveedores/:id', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const p = db.prepare(`SELECT id, razon_social, cuit, COALESCE(saldo_inicial,0) AS saldo_inicial,
+        tipo_fiscal_habitual, condicion_pago_habitual_id, activo
+      FROM sg_proveedores WHERE id=?`).get(req.params.id);
+    if (!p) return res.status(404).json({ ok: false, error: 'Proveedor no encontrado' });
+
+    const movs = [];
+    // El punto de partida. Va primero y sin fecha: es lo que se le debía cuando
+    // arrancó el sistema.
+    if (p.saldo_inicial) {
+      movs.push({ tipo: 'apertura', fecha: null, detalle: 'Saldo de apertura',
+        comprobante: null, partidas: null, debe: 0, haber: r2(p.saldo_inicial), estado: null });
+    }
+
+    // Las facturas de compra: el comprobante que emitió, con lo que se le pagó.
+    const facturas = db.prepare(`SELECT f.id, f.fecha_emision, f.tipo_comprobante, f.punto_venta,
+        f.numero, f.neto, f.iva_monto, f.total, COALESCE(f.saldo_pagado,0) AS pagado,
+        f.asiento_id, a.anulado AS asiento_anulado,
+        (SELECT GROUP_CONCAT(o.trazabilidad, ' · ') FROM sg_factura_compra_ocs fo
+           JOIN sg_oc o ON o.id = fo.oc_id WHERE fo.factura_id = f.id) AS partidas
+      FROM sg_facturas_compra f
+      LEFT JOIN sg_asientos a ON a.id = f.asiento_id
+      WHERE f.proveedor_id = ? AND f.activo = 1
+      ORDER BY f.fecha_emision, f.id`).all(p.id);
+    const TIPO = { factura_a: 'Factura A', factura_b: 'Factura B', liquidacion: 'Liquidación' };
+    for (const f of facturas) {
+      movs.push({ tipo: 'factura', fecha: f.fecha_emision,
+        detalle: TIPO[f.tipo_comprobante] || f.tipo_comprobante || 'Comprobante',
+        comprobante: (f.punto_venta ? f.punto_venta + '-' : '') + (f.numero || ''),
+        partidas: f.partidas, neto: f.neto, iva: f.iva_monto,
+        debe: 0, haber: r2(f.total), pagado: r2(f.pagado),
+        asiento_id: f.asiento_id, asiento_anulado: f.asiento_anulado ? 1 : 0,
+        estado: f.asiento_id && !f.asiento_anulado ? 'contabilizada' : 'sin contabilizar' });
+      if (f.pagado) {
+        movs.push({ tipo: 'pago', fecha: f.fecha_emision, detalle: 'Pago',
+          comprobante: (f.punto_venta ? f.punto_venta + '-' : '') + (f.numero || ''),
+          partidas: null, debe: r2(f.pagado), haber: 0, estado: null });
+      }
+    }
+
+    // Y lo que entró pero todavía no tiene comprobante: no es deuda documentada,
+    // pero se le debe igual y por eso está en el saldo. Mismo criterio que el
+    // listado: sólo las órdenes SIN factura activa.
+    // Mismo criterio que el listado: el cronograma si existe, y si no el costo
+    // de lo que entró — una orden sin condición de pago no tiene cronograma, y
+    // sin esto su deuda no aparecía en ninguna parte.
+    const sinFactura = db.prepare(`SELECT o.id, o.trazabilidad, o.numero, o.fecha_oc,
+        COALESCE(venc.m, lot.m, 0) AS monto,
+        COALESCE(venc.vence, (SELECT MAX(r.fecha_recepcion) FROM sg_recepciones r
+                               WHERE r.oc_id = o.id AND r.activo = 1), o.fecha_oc) AS vence
+      FROM sg_oc o
+      LEFT JOIN (SELECT oc_id, SUM(monto) m, MIN(fecha_vencimiento) vence
+                   FROM sg_oc_vencimientos WHERE pagado=0 GROUP BY oc_id) venc ON venc.oc_id = o.id
+      LEFT JOIN (SELECT i.oc_id, SUM(l.costo_base) m FROM sg_lotes l
+                   JOIN sg_oc_items i ON i.id = l.oc_item_id
+                  WHERE l.activo=1 GROUP BY i.oc_id) lot ON lot.oc_id = o.id
+      WHERE o.proveedor_id = ? AND o.activo = 1 AND o.estado <> 'anulada'
+        AND COALESCE(venc.m, lot.m, 0) > 0
+        AND NOT EXISTS (SELECT 1 FROM sg_facturas_compra f2
+                         WHERE f2.activo = 1
+                           AND (f2.oc_id = o.id
+                                OR EXISTS (SELECT 1 FROM sg_factura_compra_ocs fo
+                                            WHERE fo.factura_id = f2.id AND fo.oc_id = o.id)))
+      ORDER BY vence, o.id`).all(p.id);
+    for (const o of sinFactura) {
+      movs.push({ tipo: 'sin_factura', fecha: o.vence, detalle: 'Mercadería recibida sin factura',
+        comprobante: null, partidas: o.trazabilidad || o.numero,
+        debe: 0, haber: r2(o.monto), estado: 'esperando comprobante' });
+    }
+
+    // El saldo corriendo. Los sin fecha (la apertura) van primero.
+    movs.sort((a, b) => String(a.fecha || '').localeCompare(String(b.fecha || '')));
+    let saldo = 0;
+    for (const m of movs) { saldo = r2(saldo + (m.haber || 0) - (m.debe || 0)); m.saldo = saldo; }
+
+    res.json({ ok: true, data: { proveedor: p, movimientos: movs, saldo } });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
