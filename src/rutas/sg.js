@@ -5410,6 +5410,15 @@ router.get('/cc-proveedores', requireAuth, (req, res) => {
         -- saldo: la cuenta corriente refleja la contabilidad, y hasta que no
         -- hay asiento no hay deuda registrada. Se muestra igual para que el que
         -- mira sepa que hay comprobantes esperando entrar.
+        -- LO ENTREGADO A CUENTA que todavía no canceló ninguna factura. Es
+        -- plata que ya salió: baja el saldo aunque no haya comprobante contra
+        -- qué imputarla.
+        COALESCE((SELECT SUM(ROUND(pg.monto - COALESCE((SELECT SUM(pc.monto) FROM sg_pagos_compras pc
+                                                         WHERE pc.pago_id = pg.id), 0), 2))
+                    FROM sg_pagos_proveedores pg
+                   WHERE pg.proveedor_id = p.id AND COALESCE(pg.anulado,0) = 0
+                     AND ROUND(pg.monto - COALESCE((SELECT SUM(pc.monto) FROM sg_pagos_compras pc
+                                                     WHERE pc.pago_id = pg.id), 0), 2) > 0),0) AS a_cuenta,
         (SELECT COUNT(*) FROM sg_facturas_compra f3
           WHERE f3.proveedor_id = p.id AND f3.activo = 1
             AND (f3.asiento_id IS NULL
@@ -5424,9 +5433,10 @@ router.get('/cc-proveedores', requireAuth, (req, res) => {
     const data = rows.map((r) => ({
         ...r,
         total_pendiente: r2(r.facturado || 0),
-        saldo: r2((r.saldo_inicial || 0) + (r.facturado || 0)),
+        // El anticipo RESTA: se le entregó plata que todavía no canceló nada.
+        saldo: r2((r.saldo_inicial || 0) + (r.facturado || 0) - (r.a_cuenta || 0)),
       }))
-      .filter((r) => r.saldo !== 0 || r.saldo_inicial !== 0 || r.sin_contabilizar > 0)
+      .filter((r) => r.saldo !== 0 || r.saldo_inicial !== 0 || r.sin_contabilizar > 0 || r.a_cuenta > 0)
       .sort((a, b) => b.saldo - a.saldo);
     res.json({ ok: true, data });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
@@ -5524,11 +5534,18 @@ router.post('/pagos', requireAdmin, (req, res) => {
     const imputaciones = (Array.isArray(b.imputaciones) ? b.imputaciones : [])
       .map((x) => ({ factura_id: Number(x.factura_id), monto: r2(x.monto) }))
       .filter((x) => x.factura_id && x.monto > 0);
-    if (!imputaciones.length) {
+    // ── EL ANTICIPO ──────────────────────────────────────────────────────
+    // Plata que sale ANTES de que exista la factura: la seña que pide el
+    // productor para largar el camión. No se puede imputar a nada todavía, así
+    // que queda a cuenta y baja el saldo igual — se le entregó plata.
+    // Después, cuando llega la factura, se aplica.
+    const aCuenta = r2(b.a_cuenta);
+    const imputado = r2(imputaciones.reduce((a, x) => a + x.monto, 0));
+    const total = r2(imputado + (aCuenta > 0 ? aCuenta : 0));
+    if (!(total > 0)) {
       return res.status(400).json({ ok: false,
-        error: 'Un pago se imputa a facturas: elegí a cuáles y por cuánto. Sin eso es plata que sale y no se sabe qué canceló.' });
+        error: 'Poné cuánto se paga: imputado a facturas, a cuenta, o las dos cosas.' });
     }
-    const total = r2(imputaciones.reduce((a, x) => a + x.monto, 0));
 
     // La plata sale de algún lado, y ese lado tiene que tener cuenta contable:
     // sin ella el asiento no se puede armar.
@@ -5594,9 +5611,11 @@ router.post('/pagos', requireAdmin, (req, res) => {
       // EL ASIENTO. Proveedores al debe —se cancela deuda— contra la cuenta del
       // banco o la caja de donde salió la plata.
       const prov = db.prepare('SELECT razon_social FROM sg_proveedores WHERE id=?').get(proveedorId);
-      const desc = 'Pago a ' + ((prov && prov.razon_social) || 'proveedor')
+      const desc = (facturas.length ? 'Pago a ' : 'Anticipo a ')
+        + ((prov && prov.razon_social) || 'proveedor')
         + (nro ? ' — ' + nro : '')
-        + ' — ' + facturas.map((x) => x.f.numero).join(', ');
+        + (facturas.length ? ' — ' + facturas.map((x) => x.f.numero).join(', ') : '')
+        + (facturas.length && aCuenta > 0 ? ' (+ ' + aCuenta + ' a cuenta)' : '');
       asientoId = db.prepare(`INSERT INTO sg_asientos (fecha, descripcion, usuario_id, ref_codigo)
         VALUES (?,?,?,?)`).run(fecha, desc, uid(req), nro || null).lastInsertRowid;
       const insL = db.prepare(`INSERT INTO sg_asientos_lineas (asiento_id, cuenta_id, debe, haber, descripcion)
@@ -5606,6 +5625,84 @@ router.post('/pagos', requireAdmin, (req, res) => {
       db.prepare('UPDATE sg_pagos_proveedores SET asiento_id=? WHERE id=?').run(asientoId, pagoId);
     })();
     res.json({ ok: true, data: { id: Number(pagoId), asiento_id: Number(asientoId), total } });
+  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+
+// Lo que quedó a cuenta de cada pago: lo entregado menos lo que ya se imputó.
+// Es plata del proveedor que todavía no canceló ninguna factura.
+function aCuentaDePago(db, pagoId) {
+  const p = db.prepare('SELECT monto FROM sg_pagos_proveedores WHERE id=?').get(pagoId);
+  if (!p) return 0;
+  const imp = db.prepare('SELECT COALESCE(SUM(monto),0) s FROM sg_pagos_compras WHERE pago_id=?').get(pagoId).s;
+  return r2((p.monto || 0) - (imp || 0));
+}
+
+// Los anticipos con saldo, para aplicarlos cuando llega la factura.
+router.get('/pagos/anticipos/:proveedorId', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const rows = db.prepare(`SELECT p.id, p.fecha, p.monto, p.referencia, fc.nombre AS cuenta_nombre,
+        ROUND(p.monto - COALESCE((SELECT SUM(pc.monto) FROM sg_pagos_compras pc
+                                   WHERE pc.pago_id = p.id), 0), 2) AS disponible
+      FROM sg_pagos_proveedores p
+      LEFT JOIN sg_fin_cuentas fc ON fc.id = p.cuenta_fin_id
+      WHERE p.proveedor_id = ? AND COALESCE(p.anulado,0) = 0
+      ORDER BY p.fecha, p.id`).all(req.params.proveedorId);
+    res.json({ ok: true, data: rows.filter((r) => r.disponible > 0) });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// APLICAR un anticipo a facturas. No sale plata: la plata ya salió cuando se
+// entregó el anticipo. Esto sólo dice a qué factura se imputa, así que NO
+// genera asiento — el asiento se hizo con el pago.
+router.post('/pagos/:id/aplicar', requireAdmin, (req, res) => {
+  const db = getDb();
+  try {
+    const p = db.prepare('SELECT * FROM sg_pagos_proveedores WHERE id=?').get(req.params.id);
+    if (!p) return res.status(404).json({ ok: false, error: 'Pago no encontrado' });
+    if (p.anulado) return res.status(400).json({ ok: false, error: 'Ese pago está anulado' });
+    const disp = aCuentaDePago(db, p.id);
+    if (!(disp > 0)) return res.status(400).json({ ok: false, error: 'Ese pago no tiene saldo a cuenta' });
+
+    const imputaciones = (Array.isArray(req.body && req.body.imputaciones) ? req.body.imputaciones : [])
+      .map((x) => ({ factura_id: Number(x.factura_id), monto: r2(x.monto) }))
+      .filter((x) => x.factura_id && x.monto > 0);
+    if (!imputaciones.length) return res.status(400).json({ ok: false, error: 'Elegí a qué factura se aplica' });
+    const suma = r2(imputaciones.reduce((a, x) => a + x.monto, 0));
+    if (suma > disp + 0.01) {
+      return res.status(400).json({ ok: false,
+        error: 'Ese anticipo tiene ' + disp + ' a cuenta y estás aplicando ' + suma + '.' });
+    }
+
+    const facturas = [];
+    for (const im of imputaciones) {
+      const f = db.prepare(`SELECT f.*, a.anulado AS asiento_anulado FROM sg_facturas_compra f
+        LEFT JOIN sg_asientos a ON a.id = f.asiento_id
+        WHERE f.id=? AND f.activo=1`).get(im.factura_id);
+      if (!f) return res.status(400).json({ ok: false, error: 'Una de las facturas no existe' });
+      if (Number(f.proveedor_id) !== Number(p.proveedor_id)) {
+        return res.status(400).json({ ok: false, error: 'La factura ' + f.numero + ' es de otro proveedor' });
+      }
+      if (!f.asiento_id || f.asiento_anulado) {
+        return res.status(400).json({ ok: false,
+          error: 'La factura ' + f.numero + ' todavía no está contabilizada.' });
+      }
+      const pend = r2((f.total || 0) - (f.saldo_pagado || 0));
+      if (im.monto > pend + 0.01) {
+        return res.status(400).json({ ok: false,
+          error: 'A la factura ' + f.numero + ' le quedan ' + pend + ' y le estás aplicando ' + im.monto + '.' });
+      }
+      facturas.push({ f, monto: im.monto });
+    }
+
+    db.transaction(() => {
+      const insImp = db.prepare('INSERT INTO sg_pagos_compras (pago_id, compra_id, monto) VALUES (?,?,?)');
+      const sube = db.prepare(`UPDATE sg_facturas_compra
+        SET saldo_pagado = ROUND(COALESCE(saldo_pagado,0) + ?, 2),
+            modificado_en=datetime('now','localtime'), modificado_por=? WHERE id=?`);
+      for (const x of facturas) { insImp.run(p.id, x.f.id, x.monto); sube.run(x.monto, uid(req), x.f.id); }
+    })();
+    res.json({ ok: true, data: { id: Number(p.id), aplicado: suma, disponible: aCuentaDePago(db, p.id) } });
   } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
 });
 
@@ -5694,6 +5791,7 @@ router.get('/cc-proveedores/:id', requireAuth, (req, res) => {
     // que la compra.
     const pagos = db.prepare(`SELECT p.id, p.fecha, p.monto, p.forma_pago, p.referencia,
         fc.nombre AS cuenta_nombre,
+        COALESCE((SELECT SUM(pc.monto) FROM sg_pagos_compras pc WHERE pc.pago_id = p.id), 0) AS imputado,
         (SELECT GROUP_CONCAT((CASE WHEN f.punto_venta IS NOT NULL AND f.punto_venta <> ''
                                    THEN f.punto_venta || '-' ELSE '' END) || f.numero, ' · ')
            FROM sg_pagos_compras pc JOIN sg_facturas_compra f ON f.id = pc.compra_id
@@ -5703,10 +5801,14 @@ router.get('/cc-proveedores/:id', requireAuth, (req, res) => {
       WHERE p.proveedor_id = ? AND COALESCE(p.anulado,0) = 0
       ORDER BY p.fecha, p.id`).all(p.id);
     for (const pg of pagos) {
-      movs.push({ tipo: 'pago', fecha: pg.fecha,
-        detalle: 'Pago' + (pg.cuenta_nombre ? ' · ' + pg.cuenta_nombre : ''),
-        comprobante: pg.referencia || null, partidas: pg.facturas,
-        debe: r2(pg.monto), haber: 0, estado: null });
+      const aCta = r2((pg.monto || 0) - (pg.imputado || 0));
+      movs.push({ tipo: aCta > 0 && !pg.facturas ? 'anticipo' : 'pago', fecha: pg.fecha,
+        detalle: (aCta > 0 && !pg.facturas ? 'Anticipo' : 'Pago')
+          + (pg.cuenta_nombre ? ' · ' + pg.cuenta_nombre : ''),
+        comprobante: pg.referencia || null,
+        partidas: pg.facturas || (aCta > 0 ? 'a cuenta' : null),
+        pago_id: pg.id, a_cuenta: aCta > 0 ? aCta : 0,
+        debe: r2(pg.monto), haber: 0, estado: aCta > 0 ? 'a cuenta' : null });
     }
 
     // ── LO QUE ESTÁ ESPERANDO ENTRAR AL LIBRO ────────────────────────────
