@@ -143,7 +143,7 @@ const PREFIJOS = [
   // 'sg/factura-mercaderia' cubre dos cosas: la parametrización del asiento con
   // el que se contabilizan —define cómo entra la plata de TODAS las compras— y
   // la lectura del comprobante con IA, que gasta la API key.
-  ['sg-facturas-merc',   'sg/partidas-a-facturar,sg/factura-mercaderia'],
+  ['sg-facturas-merc',   'sg/partidas-a-facturar,sg/factura-mercaderia,sg/facturas-sin-contabilizar'],
   ['sg-cc-proveedores',  'sg/cc-proveedores'],
 
   // ═══════════════════════════════════════════════════════════════════════
