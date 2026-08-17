@@ -27,7 +27,7 @@ import { feDummy as afipFeDummy, ultimoComprobante as afipUltimoCbte, tiposCbte 
 import { emitir as afipEmitir } from '../servicios/afip-wsfe-emision.js';
 import { exigirEmpresa, SAN_GERONIMO } from '../servicios/sociedad_modulo.js';
 
-import { chequeUsado } from './sg_tesoreria.js';
+import { chequeUsado, puedeMoverCuenta } from './sg_tesoreria.js';
 
 const router = express.Router();
 
@@ -5500,7 +5500,14 @@ router.get('/pagos/cuentas', requireAuth, (req, res) => {
       FROM sg_fin_cuentas c
       LEFT JOIN sg_cuentas cc ON cc.id = c.cuenta_contable_id
       WHERE c.activo = 1 ORDER BY c.tipo, c.nombre`).all();
-    res.json({ ok: true, data: rows });
+    // Cuál puede usar EL QUE PREGUNTA. Se manda el dato en vez de esconder la
+    // cuenta: que no aparezca se lee como "no hay caja cargada" y manda a
+    // alguien a crear una segunda caja que ya existe.
+    const conDueno = rows.map((c) => ({
+      ...c,
+      puedo: puedeMoverCuenta(req.user, c.id) ? 1 : 0,
+    }));
+    res.json({ ok: true, data: conDueno });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
@@ -5527,7 +5534,18 @@ router.get('/pagos', requireAuth, (req, res) => {
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
-router.post('/pagos', requireAdmin, (req, res) => {
+// ── PAGARLE A UN PROVEEDOR ES OPERAR, NO SER ADMIN ────────────────────────
+// Estaba en requireAdmin, y eso obligaba a que cada pago del día lo cargara el
+// dueño: el cajero que entrega el efectivo y la persona de cuentas a pagar
+// tenían que pedírselo. Firmar el cheque en el banco es otra cosa, y no pasa por
+// acá — acá se REGISTRA que se pagó.
+//
+// Quedan tres controles, y son los que corresponden:
+//  · exigirNivel pide nivel "operar" en el módulo (index.js, por la URL).
+//  · si la cuenta de donde sale la plata tiene usuarios asignados, tiene que
+//    estar entre ellos: la caja de planta no la paga administración.
+//  · anular sigue pidiendo nivel "anular", que es un permiso aparte.
+router.post('/pagos', requireAuth, (req, res) => {
   const db = getDb();
   try {
     const b = req.body || {};
@@ -5575,6 +5593,10 @@ router.post('/pagos', requireAdmin, (req, res) => {
         LEFT JOIN sg_cuentas cc ON cc.id = c.cuenta_contable_id
         WHERE c.id=? AND c.activo=1`).get(b.cuenta_fin_id);
       if (!cuenta) return res.status(400).json({ ok: false, error: 'Elegí de qué cuenta sale la plata' });
+      if (!puedeMoverCuenta(req.user, cuenta.id)) {
+        return res.status(403).json({ ok: false,
+          error: 'La cuenta "' + cuenta.nombre + '" tiene usuarios asignados y no estás entre ellos.' });
+      }
       if (!cuenta.cta) {
         return res.status(400).json({ ok: false,
           error: 'La cuenta "' + cuenta.nombre + '" no tiene cuenta contable asociada, así que el pago no '
@@ -5785,8 +5807,9 @@ router.get('/pagos/anticipos/:proveedorId', requireAuth, (req, res) => {
 
 // APLICAR un anticipo a facturas. No sale plata: la plata ya salió cuando se
 // entregó el anticipo. Esto sólo dice a qué factura se imputa, así que NO
-// genera asiento — el asiento se hizo con el pago.
-router.post('/pagos/:id/aplicar', requireAdmin, (req, res) => {
+// genera asiento — el asiento se hizo con el pago. Y como no mueve ninguna
+// cuenta, alcanza con el nivel "operar" del módulo.
+router.post('/pagos/:id/aplicar', requireAuth, (req, res) => {
   const db = getDb();
   try {
     const p = db.prepare('SELECT * FROM sg_pagos_proveedores WHERE id=?').get(req.params.id);
@@ -5839,7 +5862,12 @@ router.post('/pagos/:id/aplicar', requireAdmin, (req, res) => {
 
 // Anular un pago: devuelve el saldo a las facturas y anula su asiento. El pago
 // no se borra — igual que todo lo que ya tocó la contabilidad.
-router.post('/pagos/:id/anular', requireAdmin, (req, res) => {
+//
+// NO va con requireAdmin y no es un descuido: exigirNivel reconoce la anulación
+// por la URL y exige nivel "anular" en el módulo, que es un permiso aparte del
+// de operar. Quien carga pagos todo el día no anula ninguno salvo que se lo
+// hayan dado expresamente.
+router.post('/pagos/:id/anular', requireAuth, (req, res) => {
   const db = getDb();
   try {
     const motivo = val(req.body && req.body.motivo);

@@ -57,6 +57,22 @@ Y la anulación necesita su PROPIA dirección (`POST .../:id/anular`), porque
 `exigirNivel` la reconoce por la URL. Un `PATCH .../:id/estado` que aceptara
 `estado='anulado'` es una puerta lateral: quien sólo puede operar, anula.
 
+### OPERAR NO ES SER ADMIN
+`requireAdmin` sirve para PARAMETRIZAR (dar de alta una cuenta bancaria, una
+caja, decidir quién la toca, tocar el asiento modelo). El trabajo del día
+—registrar un pago, cargar un movimiento de caja— va con `requireAuth`, y el
+nivel lo decide `exigirNivel` mirando la URL contra `ensure_api_prefijos.js`.
+
+Poner `requireAdmin` en una acción operativa parece prudente y no lo es: obliga
+a que todo lo cargue el dueño, y el que hace el trabajo termina dictándoselo.
+
+Y una cuenta de `sg_fin_cuentas` puede tener dueño (`sg_fin_cuenta_usuarios`).
+UNA sola regla, en todos lados: **si tiene gente asignada la tocan sólo ellos;
+si no tiene a nadie, la toca cualquiera que tenga permiso en el módulo.** Está
+en `puedeMoverCuenta()` (`rutas/sg_tesoreria.js`) y la usan tanto la tesorería
+como el circuito de pagos. Los GET devuelven `puedo` (1/0) para que la pantalla
+no ofrezca lo que va a rebotar.
+
 - Usuario admin tiene rol `'admin'`. Hay flag `solo_lectura` que NO aplica a admin.
 - Auth por cookie `lnb_user` (JSON con id, nombre, rol, etc)
 - Las acciones de cambio (POST/PUT/PATCH/DELETE) van con `requireAuth`
