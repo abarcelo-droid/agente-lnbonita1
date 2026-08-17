@@ -129,6 +129,8 @@
       var env = (al.envios_vencidos || []);
       if (env.length) controles.push({ ai: 'warn', icon: 'send', t: 'Salidas a proveedor sin recepcionar', s: env.length + ' salidas · +15 días sin confirmar', v: env.reduce(function (a, x) { return a + (x.cantidad_enviada || 0); }, 0), u: 'cajones', go: 'salidas' });
       if (sinContar.length) controles.push({ ai: 'warn', icon: 'clipboard-list', t: 'Conteos físicos sin cargar', s: sinContar.map(function (c) { return c.nombre; }).slice(0, 3).join(' · '), v: sinContar.length, u: 'depósitos', go: 'conteo' });
+      var difs = (R.diferencias_pendientes || []);
+      if (difs.length) controles.push({ ai: 'crit', icon: 'package-x', t: 'Diferencias de recepción sin resolver', s: difs.length + ' envíos · el galpón confirmó menos de lo despachado', v: s.dif_pendientes || 0, u: 'cajones', go: 'salidas' });
       if (al.talonario) controles.push({ ai: 'crit', icon: 'book-marked', t: 'Talonario ' + (al.talonario.serie || '') + (al.talonario.razon === 'cai_vence' ? ' — CAI por vencer' : ' con pocos remitos'), s: (al.talonario.disponibles != null ? al.talonario.disponibles + ' disponibles' : '') + (al.talonario.dias_cai != null ? ' · CAI en ' + al.talonario.dias_cai + ' d' : ''), v: al.talonario.disponibles != null ? al.talonario.disponibles : '—', u: 'disp.', go: 'talonarios' });
 
       var controlesHtml = controles.length ? controles.map(function (a) {
@@ -175,7 +177,8 @@
         + '<div><div class="l">Real contado</div><div class="v tnum">' + nf(tvReal) + '</div></div>'
         + '<div><div class="l">Diferencia</div><div class="v tnum ' + (tvReal - tvTeo < 0 ? 'num-neg' : '') + '">' + (tvReal - tvTeo) + '</div></div></div>'
         + '<div class="sectlabel">Composición — bajo responsabilidad</div>'
-        + [['Piso San Gerónimo', s.piso, 'var(--i-navy-600)'], ['En proveedores', s.en_proveedores, 'var(--i-slate)'], ['En tránsito a súper', s.en_transito, 'var(--i-warn)']].map(function (x) {
+        + [['Piso San Gerónimo', s.piso, 'var(--i-navy-600)'], ['En proveedores', s.en_proveedores, 'var(--i-slate)'], ['En tránsito a súper', s.en_transito, 'var(--i-warn)']]
+          .concat(s.dif_pendientes ? [['Pendiente de revisión', s.dif_pendientes, 'var(--i-err)']] : []).map(function (x) {
           var pct = s.bajo_responsabilidad ? Math.round((x[1] || 0) / s.bajo_responsabilidad * 100) : 0;
           return '<div style="display:flex;align-items:center;gap:9px;margin-bottom:8px"><span style="font-size:12px;flex:1">' + x[0] + '</span>'
             + '<span class="tnum num-strong" style="font-size:12.5px">' + nf(x[1]) + '</span><div class="mbar" style="width:90px"><i style="width:' + pct + '%;background:' + x[2] + '"></i></div></div>';
@@ -431,6 +434,18 @@
       .catch(function () { toast('Error de red al completar', 'er'); });
   };
 
+  // Cerrar una diferencia de recepción parcial. NO mueve stock: solo saca los cajones del
+  // bucket "pendiente de revisión". Si fue una pérdida real hay que cargarla aparte.
+  window.__ifco2ResolverDif = function (id, cant) {
+    var txt = prompt('¿Qué pasó con esos ' + cant + ' cajones?\n\nNo se mueve stock: solo dejan de figurar como pendientes.\nSi se perdieron, cargá además la pérdida en Retiros.');
+    if (txt === null) return;
+    if (!String(txt).trim() || String(txt).trim().length < 3) { toast('Contá en una línea qué pasó', 'er'); return; }
+    fetch(API + '/envios/' + id + '/resolver-diferencia', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ resolucion: String(txt).trim() }) })
+      .then(function (r) { return r.json(); })
+      .then(function (d) { if (d && d.ok) { toast('✓ Diferencia resuelta (' + d.diferencia + ' caj.)', 'ok'); nav('salidas'); } else { toast((d && d.error) || 'Error al resolver', 'er'); } })
+      .catch(function () { toast('Error de red al resolver', 'er'); });
+  };
+
   // =========================================================================
   // 4) TALONARIOS
   // =========================================================================
@@ -575,6 +590,9 @@
       var rowsHtml = Ef.length ? Ef.map(function (e) {
         var env = e.cantidad_enviada || 0, rec = e.cantidad_recibida || 0, pend = env - rec;
         var occ = env ? Math.round(rec / env * 100) : 0;
+        // Diferencia sin resolver: el galpón confirmó menos de lo que salió de SG. Esos
+        // cajones no están en ningún piso pero se los debemos a IFCO igual.
+        var difPend = e.estado === 'parcial' && !e.diferencia_resuelta_en && env > rec;
         var dias = diasDesde(e.fecha_envio);
         var aceptado = !!e.aceptado_en;
         // Un envío aceptado por link ya no está "atrasado": la antigüedad no debe alarmar (rojo).
@@ -587,22 +605,32 @@
                       : '<div style="display:flex;align-items:center;gap:8px"><div class="mbar" style="width:80px"><i style="width:0%"></i></div><span class="sub2 tnum">0%</span></div>');
         var linkBtn = e.aceptacion_token ? '<button class="btn btn-ghost btn-sm" title="Copiar link de aceptación para mandar al galpón por WhatsApp" onclick="__ifco2Legacy(\'ifcoCopiarLinkEnvio\',\'' + esc(e.n_remito_interno || '') + '\',\'' + esc(e.aceptacion_token) + '\')">' + ic('link') + ' Link</button>' : '';
         return '<tr><td class="mono lead">' + esc(e.n_remito_interno || '—') + '</td><td>' + fdate(e.fecha_envio) + '</td><td class="lead">' + esc(e.proveedor_nombre || '—') + '</td>'
-          + '<td class="r num-strong">' + nf(env) + '</td><td class="r">' + nf(rec) + '</td><td class="r ' + (pend > 0 ? '' : 'muted') + '">' + (pend > 0 ? nf(pend) : '0') + '</td>'
+          + '<td class="r num-strong">' + nf(env) + '</td><td class="r">' + nf(rec) + '</td>'
+          + '<td class="r ' + (pend > 0 ? '' : 'muted') + '">'
+          + (difPend
+              ? '<span class="tag" style="background:var(--i-err-bg);color:var(--i-err);border-color:var(--i-err-line)" title="El galpón confirmó ' + nf(rec) + ' de los ' + nf(env) + ' que salieron de SG. Esos ' + nf(pend) + ' no están en ningún piso: hay que resolverlos.">' + nf(pend) + ' sin resolver</span>'
+              : (pend > 0 ? nf(pend) : '0'))
+          + '</td>'
           + '<td>' + recepCell + '</td>'
           + '<td>' + badge(e.estado) + '</td><td>' + (aceptBadge(e) || '<span class="muted">—</span>') + '</td><td class="c">' + dchip + '</td>'
           + '<td class="c">' + uav(e.usuario_creador_nombre) + '</td>'
-          + '<td><div class="rowact">' + (e.estado !== 'recibido' ? '<button class="btn btn-pri btn-sm" onclick="__ifco2Legacy(\'ifcoAbrirRecepcion\',' + e.id + ')">' + ic('package-check') + ' Recepcionar</button>' : '') + linkBtn + '<button class="btn-icon btn-ghost" onclick="__ifco2MenuEnvio(event,' + e.id + ',\'' + esc(e.n_remito_interno || '') + '\')">' + ic('more-horizontal') + '</button></div></td></tr>';
+          + '<td><div class="rowact">' + (e.estado !== 'recibido' ? '<button class="btn btn-pri btn-sm" onclick="__ifco2Legacy(\'ifcoAbrirRecepcion\',' + e.id + ')">' + ic('package-check') + ' Recepcionar</button>' : '')
+          + (difPend ? '<button class="btn btn-sm" style="border-color:var(--i-err-line);color:var(--i-err)" title="Cerrar la diferencia de ' + nf(pend) + ' cajones" onclick="__ifco2ResolverDif(' + e.id + ',' + pend + ')">' + ic('clipboard-check') + ' Resolver</button>' : '')
+          + linkBtn + '<button class="btn-icon btn-ghost" onclick="__ifco2MenuEnvio(event,' + e.id + ',\'' + esc(e.n_remito_interno || '') + '\')">' + ic('more-horizontal') + '</button></div></td></tr>';
       }).join('') : '<tr><td colspan="12">' + empty('Sin envíos') + '</td></tr>';
       var totEnv = E.reduce(function (a, e) { return a + (e.cantidad_enviada || 0); }, 0);
       var totRec = E.reduce(function (a, e) { return a + (e.cantidad_recibida || 0); }, 0);
       // "Atrasado" = enviado, +15 días, y NI recepcionado a mano NI aceptado por link. Sin el chequeo
       // de aceptado_en, los envíos que el galpón ya confirmó digitalmente aparecían como vencidos.
       var venc = E.filter(function (e) { return e.estado === 'enviado' && diasDesde(e.fecha_envio) >= 15 && !e.aceptado_en; });
+      var difs = E.filter(function (e) { return e.estado === 'parcial' && !e.diferencia_resuelta_en && (e.cantidad_enviada || 0) > (e.cantidad_recibida || 0); });
+      var difTot = difs.reduce(function (a, e) { return a + ((e.cantidad_enviada || 0) - (e.cantidad_recibida || 0)); }, 0);
       var aceptDigital = E.filter(function (e) { return e.aceptado_en && e.estado !== 'recibido'; }).length;
       h.innerHTML =
         '<div class="vh"><div><h2>' + ic('log-out') + ' Salidas a proveedor</h2><div class="vh-sub">Cajones vacíos que San Gerónimo entrega a cada galpón (otros depósitos) para llenar con producto</div></div>'
         + '<div class="actions"><button class="btn btn-pri btn-sm" onclick="__ifco2Reuse(\'ifcoAbrirNuevoEnvio\')">' + ic('plus') + ' Nueva salida</button></div></div>'
         + (venc.length ? '<div class="banner warn">' + ic('clock') + '<div><b>' + venc.length + ' envíos sin recepcionar ni aceptar hace +15 días.</b> El proveedor debe confirmar la recepción (a mano o por el link) para que los cajones queden a su cargo.</div></div>' : '')
+        + (difs.length ? '<div class="banner err">' + ic('package-x') + '<div><b>' + difs.length + ' recepciones con diferencia sin resolver</b> — <b class="tnum">' + nf(difTot) + ' cajones</b> que salieron de SG y el galpón nunca confirmó. No están en ningún piso, pero IFCO nos los sigue contando: resolvelos uno por uno.</div></div>' : '')
         + '<div class="filters"><div class="seg">' + [['', 'Todos', E.length], ['enviado', 'Enviados', E.filter(function (e) { return e.estado === 'enviado'; }).length], ['parcial', 'Parciales', E.filter(function (e) { return e.estado === 'parcial'; }).length], ['recibido', 'Recibidos', E.filter(function (e) { return e.estado === 'recibido'; }).length]].map(function (s) { return '<button class="' + (salFil === s[0] ? 'on' : '') + '" onclick="__ifco2SegV(\'salFiltro\',\'salidas\',\'' + s[0] + '\')">' + s[1] + '<span class="n">' + s[2] + '</span></button>'; }).join('') + '</div>'
         + '<span class="chip-count"><b>' + E.length + '</b> envíos · <b>' + nf(totEnv - totRec) + '</b> caj. pendientes' + (aceptDigital ? ' · <b style="color:var(--i-ok)">' + aceptDigital + '</b> aceptados por link' : '') + '</span></div>'
         + '<div class="card"><div class="card-b flush"><div class="tbl-wrap"><table class="dt"><thead><tr><th>N° envío</th><th>Fecha</th><th>Proveedor</th><th class="r">Enviado</th><th class="r">Recib.</th><th class="r">Pend.</th><th>Recepción</th><th>Estado</th><th>Aceptación</th><th class="c">Antig.</th><th class="c">Usuario</th><th></th></tr></thead><tbody>' + rowsHtml + '</tbody>'
