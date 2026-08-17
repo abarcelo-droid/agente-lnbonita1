@@ -2265,7 +2265,14 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       .sg-oc-search{position:relative}
       .sg-oc-search input{width:100%;box-sizing:border-box}
       .sg-oc-res-it:hover{background:var(--bg)}
-      .sg-oc-sub{margin-left:auto;font-weight:700;font-size:13px;white-space:nowrap;color:var(--tx)}
+      /* El subtotal del ítem, a la derecha de su renglón en el alta de la orden.
+         SE LLAMABA .sg-oc-sub, igual que la sub-línea chiquita y gris de las
+         tablas, en el mismo bloque de estilos y con la misma especificidad: como
+         ésta va después, ganaba siempre. Todo lo que se escribía "abajo en
+         chico" —los kilos bajo los bultos, "estimado", "sin contar bultos"—
+         salía en negrita, del mismo tamaño que el número principal y corrido a
+         la derecha. Justo la jerarquía que esas sub-líneas venían a crear. */
+      .sg-oc-monto{margin-left:auto;font-weight:700;font-size:13px;white-space:nowrap;color:var(--tx)}
       .sg-oc-add{width:100%;border:1.5px dashed var(--bor);background:transparent;color:var(--mut);border-radius:9px;padding:10px;font-size:13px;font-weight:600;cursor:pointer;margin-top:4px}
       .sg-oc-add:hover{border-color:var(--burg);color:var(--burg)}
       @media(max-width:560px){.sg-oc-card-top{grid-template-columns:1fr}.sg-oc-card-bot input{width:100%}}
@@ -2293,8 +2300,10 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
         </div>
       </div>
       <div class="ab-table-wrap"><table class="pa-tbl">
-        <thead><tr><th>N°</th><th>Fecha</th><th>Proveedor</th><th>Modalidad</th><th>Precio</th><th style="text-align:right">Kg est.</th><th style="text-align:right">Monto est.</th><th style="text-align:center">Estado</th><th></th></tr></thead>
-        <tbody id="sg-tb-oc"><tr><td colspan="9" class="emp">Cargando…</td></tr></tbody>
+        <!-- Primero lo que se compró: BULTOS e IMPORTE. Después con qué se pactó,
+             y al final la única columna con color: qué está esperando la partida. -->
+        <thead><tr><th>Partida</th><th>Fecha</th><th>Proveedor</th><th style="text-align:right">Bultos</th><th style="text-align:right">Importe</th><th>Condición comercial</th><th style="text-align:center">Situación</th><th></th></tr></thead>
+        <tbody id="sg-tb-oc"><tr><td colspan="8" class="emp">Cargando…</td></tr></tbody>
       </table></div>
     </div>
 
@@ -3760,6 +3769,9 @@ var SG_FISCAL_LBL = SG_FISCAL.concat([['invoice','Invoice']]);
 // 23 provincias argentinas + CABA (orden alfabético).
 var SG_PROVINCIAS = ['Buenos Aires','CABA','Catamarca','Chaco','Chubut','Córdoba','Corrientes','Entre Ríos','Formosa','Jujuy','La Pampa','La Rioja','Mendoza','Misiones','Neuquén','Río Negro','Salta','San Juan','San Luis','Santa Cruz','Santa Fe','Santiago del Estero','Tierra del Fuego','Tucumán'];
 var SG_MODPED  = [['con_pedido','Con pedido'],['sobre_stock','Sobre stock'],['mixto','Mixto']];
+// Cómo nació la compra. Son los cuatro valores que acepta sg_oc.modalidad; se
+// mostraba el valor crudo de la base ("finca_propia") en el listado.
+var SG_OCMOD   = [['normal','Normal'],['rapida','Rápida'],['retroactiva','Retroactiva'],['finca_propia','Finca propia']];
 var SG_BASECAL = [['fecha_oc','Fecha OC'],['fecha_recepcion','Fecha recepción'],['fecha_factura','Fecha factura'],['al_pedido','Al pedido']];
 
 // Esquema de campos por entidad (k=columna, t=tipo, o=opciones, req, ph=placeholder, src=cache)
@@ -4615,6 +4627,37 @@ function sgOcBadge(e){
 }
 
 // ── Órdenes de compra ──
+// ── QUÉ ESTÁ ESPERANDO ESTA PARTIDA ─────────────────────────────────────
+// UNA sola columna con color, y es la que contesta la pregunta con la que se
+// mira esta pantalla: ¿qué falta hacer acá?
+//
+// Antes había dos columnas y ninguna lo decía. "Modalidad" mostraba
+// normal/retroactiva —que dice "normal" en el 99% de las órdenes y no le
+// importa a nadie— y "Estado" decía "Rec. total", que es sobre la mercadería:
+// una partida podía estar esperando la factura desde hacía tres semanas y la
+// lista se veía igual que una ya facturada.
+//
+// Naranja = falta hacer algo. Verde = está resuelto. Amarillo = todavía no
+// llegó la mercadería, que no es un pendiente de nadie acá.
+function sgOcSituacion(o){
+  if (o.estado === 'anulada')          return ['ber', 'Anulada'];
+  if (o.estado === 'borrador')         return ['bpe', 'Borrador'];
+  if (o.estado === 'abierta') {
+    // Una orden abierta CON mercadería adentro es una que se reabrió. Decir
+    // "esperando mercadería" al lado de 100 bultos y $1.500.000 es la fila
+    // contradiciéndose sola.
+    var entro = (Number(o.bultos_recibidos_total) || 0) > 0
+      || (Number(o.kg_recibidos_total) || 0) > 0;
+    return entro ? ['bcc', 'Reabierta'] : ['bpe', 'Esperando mercadería'];
+  }
+  if (o.estado === 'recibida_parcial') return ['bcc', 'Entró a medias'];
+  // Ya entró todo: lo que falta es el papel, y cuál depende del circuito.
+  if ((o.documenta_calc || 'factura') === 'liquidacion') {
+    return o.liquidada ? ['bok', '📄 Liquidada'] : ['bfs', '📄 Falta liquidar'];
+  }
+  return o.con_factura ? ['bok', '🧾 Facturada'] : ['bfs', '🧾 Falta la factura'];
+}
+
 function sgLoadOC(){
   var est=eid('sg-oc-filtro')?eid('sg-oc-filtro').value:'';
   api('/api/sg/oc'+(est?('?estado='+est):'')).then(function(r){
@@ -4623,8 +4666,71 @@ function sgLoadOC(){
       var acc='<button class="btn bo bs" onclick="sgOcVer('+o.id+')">👁</button> ';
       if(o.estado==='abierta'||o.estado==='recibida_parcial') acc+='<button class="btn bo bs" onclick="sgRecOpen('+o.id+')">📥</button> ';
       if(o.estado==='abierta') acc+='<button class="btn bd bs" onclick="sgOcAnular('+o.id+')">✖</button>';
-      return '<tr><td><code>'+esc(sgOcId(o))+'</code></td><td>'+(o.fecha_oc||'—')+'</td><td>'+esc(o.proveedor_nombre||'—')+'</td><td>'+esc(o.modalidad)+'</td><td>'+(o.tipo_precio==='pizarra'?'<span class="bdg bpe">Liquidación de Venta</span>':'Precio Cerrado')+'</td><td style="text-align:right">'+nr(o.total_estimado_kg)+'</td><td style="text-align:right">'+sgMoney(o.total_estimado_monto)+'</td><td style="text-align:center">'+sgOcBadge(o.estado)+'</td><td style="text-align:right;white-space:nowrap">'+acc+'</td></tr>';
-    }).join('') : '<tr><td colspan="9" class="emp">Sin órdenes. Creá una nueva.</td></tr>';
+
+      // ── LOS BULTOS, QUE ES COMO SE COMPRA ─────────────────────────────
+      // Si ya entró, lo que entró; si no, lo que se espera. Los kilos van
+      // abajo en chico: siguen siendo los que mandan para el costo, pero no
+      // son el número con el que se controla contra el proveedor.
+      var blt = Number(o.bultos_recibidos_total) || 0;
+      var kg  = Number(o.kg_recibidos_total) || 0;
+      var bltEst = Number(o.bultos_estimados) || 0;
+      var kgEst  = Number(o.total_estimado_kg) || 0;
+      var cant;
+      if (blt > 0) {
+        // Si además entraron lotes pesados sin contar, el total de bultos NO es
+        // toda la mercadería: se aclara, porque "60" al lado de "2.000 kg" se
+        // lee como que los 2.000 kg vinieron en 60 cajones.
+        cant = '<b>' + nr(blt) + '</b>'
+          + '<div class="sg-oc-sub">' + nr(kg) + ' kg'
+          + (o.lotes_sin_contar > 0 ? ' · parte pesada' : '') + '</div>';
+      } else if (kg > 0) {
+        // Entró pesada. Poner los kilos pelados bajo el título "Bultos" se lee
+        // como si hubieran entrado 2.000 cajones.
+        cant = '<b>' + nr(kg) + '</b> kg<div class="sg-oc-sub">sin contar bultos</div>';
+      } else if (o.items_por_bulto > 0 && bltEst > 0) {
+        // Sólo si la compra se pactó EN BULTOS. Cargada por kilo, el "estimado"
+        // sale de dividir kilos por el factor y da cajones que nadie pactó.
+        cant = '<span style="color:var(--mut)">' + nr(bltEst) + '</span><div class="sg-oc-sub">a recibir</div>';
+      } else if (kgEst > 0) {
+        cant = '<span style="color:var(--mut)">' + nr(kgEst) + ' kg</span><div class="sg-oc-sub">a recibir</div>';
+      } else { cant = '—'; }
+
+      // ── EL IMPORTE ────────────────────────────────────────────────────
+      // Lo acordado por lo que entró, que es la cuenta que se controla contra
+      // el proveedor. Mientras no entró nada, el estimado, y se aclara. En una
+      // liquidación de pizarra no hay importe todavía: decía "$0", que se lee
+      // como que la compra no vale nada.
+      var imp;
+      if (Number(o.importe) > 0) {
+        imp = '<b>' + sgMoney(o.importe) + '</b>'
+          + (o.importe_es_estimado ? '<div class="sg-oc-sub">estimado</div>' : '');
+      } else if (o.tipo_precio === 'pizarra') {
+        imp = '<span style="color:var(--mut)">a liquidar</span>';
+      } else { imp = '<span style="color:var(--mut)">—</span>'; }
+
+      // Cómo se pactó el precio. Lo que no es una compra normal —rápida, finca
+      // propia, retroactiva— se aclara acá abajo: es una rareza que conviene
+      // ver, pero no merecía una columna propia diciendo "normal" en todas las
+      // filas. Y con su nombre, no con el valor crudo de la base.
+      var mod = (o.tipo_precio === 'pizarra' ? 'Liquidación de Venta' : 'Precio Cerrado')
+        + (o.modalidad && o.modalidad !== 'normal'
+            ? '<div class="sg-oc-sub">' + esc(sgLbl(SG_OCMOD, o.modalidad)) + '</div>' : '');
+
+      var sit = sgOcSituacion(o);
+      return '<tr>'
+        + '<td><code>' + esc(sgOcId(o)) + '</code></td>'
+        + '<td>' + (o.fecha_oc || '—') + '</td>'
+        + '<td>' + esc(o.proveedor_nombre || '—') + '</td>'
+        + '<td style="text-align:right">' + cant + '</td>'
+        + '<td style="text-align:right">' + imp + '</td>'
+        + '<td>' + mod + '</td>'
+        + '<td style="text-align:center"><span class="bdg ' + sit[0] + '">' + sit[1] + '</span>'
+          // Que un admin la haya dado por terminada no es lo mismo que haber
+          // entrado completa, y en la lista se perdía.
+          + (o.cerrada_en ? '<div class="sg-oc-sub">confirmada</div>' : '')
+          + '</td>'
+        + '<td style="text-align:right;white-space:nowrap">' + acc + '</td></tr>';
+    }).join('') : '<tr><td colspan="8" class="emp">Sin órdenes. Creá una nueva.</td></tr>';
   });
 }
 // OC de mercadería: el proveedor debe ser de categoría "Mercaderia Nacional" o "Mercaderia
@@ -4964,7 +5070,7 @@ function sgOcRenderItems(){
         +modoBtns
         +'<input type="text" inputmode="numeric" placeholder="'+cantPh+'" value="'+sgMilShow(it.cantidad)+'" oninput="sgOcMilInput(this,'+i+',\'cantidad\')">'
         +(firme?'<input type="text" inputmode="numeric" placeholder="'+precioPh+'" value="'+sgMilShow(it.precio)+'" oninput="sgOcMilInput(this,'+i+',\'precio\')">':'<span style="font-size:11px;color:var(--mut)">pizarra</span>')
-        +'<span class="sg-oc-sub" id="sg-oc-sub-'+i+'"></span>'
+        +'<span class="sg-oc-monto" id="sg-oc-sub-'+i+'"></span>'
       +'</div>'
     +'</div>';
   }).join('');
@@ -5174,122 +5280,124 @@ function sgOcVer(id){
       }
 
       if (soloPeso.length) {
-        h += '<div style="border:1px solid var(--bor);border-radius:10px;padding:10px 14px;margin-bottom:14px;'
-          + 'background:var(--bg);font-size:12.5px;line-height:1.6">'
-          + '<b>La mercadería entró pesada, sin contar bultos.</b> '
-          + soloPeso.map(function(d){
-              return escH(d.producto_nombre || 'Un artículo') + ': se pidieron ' + nr(d.bultos_pactados)
-                + ' bultos y entraron ' + nr(d.kg_recibidos) + ' kg';
-            }).join(' · ')
-          + '.<div style="color:var(--mut);margin-top:3px">No falta nada: los kilos dan contra lo pedido. '
-          + 'Como no se contaron bultos, la cuenta se hace por kilo.</div></div>';
+        // UN RENGLÓN, NO UN CARTEL. Antes repetía acá los kilos pedidos y los
+        // recibidos, que son los mismos números que están dos centímetros más
+        // abajo en la tabla. Lo único que la tabla no dice es que eso NO es un
+        // faltante, así que es lo único que queda.
+        h += '<div style="font-size:12px;color:var(--mut);margin-bottom:12px">'
+          + 'Entró pesada, sin contar bultos: los kilos dan contra lo pedido, '
+          + 'así que no falta nada y la cuenta se hace por kilo.</div>';
       }
     }
-    h+='<div style="border-top:1px solid var(--bor);padding-top:12px">'
-      +'<div style="font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--mut);margin-bottom:8px">📦 Productos</div>';
-    h+='<table class="pa-tbl" style="margin-bottom:12px"><thead><tr><th style="padding-top:10px;padding-bottom:10px">Producto</th><th>Present.</th><th style="text-align:right">Pactado</th><th style="text-align:right">Precio</th><th style="text-align:right">Bultos recibidos</th></tr></thead><tbody>';
-    // ── LA COMPRA, COMO SE PACTÓ ──────────────────────────────────────────
-    // La tabla mostraba sólo kg y $/kg, que es la unidad en la que el sistema
-    // costea. Pero la compra se pactó en bultos y a tanto el bulto: al abrir la
-    // orden para verificarla contra lo que se habló, había que hacer la cuenta
-    // al revés y a mano.
+    // ── UNA SOLA TABLA: LO QUE SE PACTÓ Y LO QUE ENTRÓ ────────────────────
+    // Eran DOS tablas, "Productos" y "Partidas que entraron", y con una orden de
+    // un producto —que es el caso normal— decían lo mismo dos veces: el mismo
+    // tomate, los mismos 2.000 kg, el mismo $750 el kilo. Había que leer dos
+    // veces para enterarse de una sola cosa.
     //
-    // Ahora se muestran las dos: primero la unidad EN QUE SE PACTÓ —que es la
-    // que se controla contra el proveedor— y debajo, en chico, la que usa el
-    // sistema. Los kilos no se van: son los que mandan para el stock y el costo.
+    // Ahora es una sola: cada renglón es UNA partida, y a la izquierda queda lo
+    // que se había pactado para ese producto. Si un producto entró en varias
+    // partidas, lo pactado se escribe una sola vez, en el primer renglón: es del
+    // producto, no de cada partida.
+    var porItem = {};
+    lotes.forEach(function(l){
+      var k = l.oc_item_id != null ? String(l.oc_item_id) : '_';
+      (porItem[k] = porItem[k] || []).push(l);
+    });
+    h+='<div style="border-top:1px solid var(--bor);padding-top:12px">'
+      +'<div style="font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--mut);margin-bottom:8px">📦 Lo que se pactó y lo que entró</div>';
+    h+='<table class="pa-tbl" style="margin-bottom:12px"><thead><tr>'
+      + '<th style="padding-top:10px;padding-bottom:10px">Producto</th>'
+      + '<th style="text-align:right">Pactado</th>'
+      + '<th style="text-align:right">Entró</th>'
+      + '<th>Calidad</th>'
+      + '<th style="text-align:right">Costo</th><th></th></tr></thead><tbody>';
+
+    // Lo que entró, en la unidad en que se cuenta: bultos arriba y kilos abajo
+    // en chico. Si no se contaron bultos se dice, porque "2.000" bajo el título
+    // de bultos se lee como si hubieran entrado 2.000 cajones.
+    var entroDe = function(blt, kg){
+      blt = Number(blt) || 0; kg = Number(kg) || 0;
+      if (blt > 0) return '<b>' + nr(blt) + '</b> bultos'
+        + (kg > 0 ? '<div class="sg-oc-sub">' + nr(kg) + ' kg</div>' : '');
+      if (kg > 0) return '<b>' + nr(kg) + '</b> kg<div class="sg-oc-sub">sin contar bultos</div>';
+      return '—';
+    };
+    // Sin precio cerrado no hay costo: mostrar "$0" en negrita hace parecer que
+    // esa mercadería no vale nada, cuando lo que pasa es que todavía no se
+    // liquidó. Es el mismo error que el listado tenía en la columna de importe.
+    var costoDe = function(l){
+      if (l.precio_unitario_kg == null) {
+        return '<span class="bdg bpe">a liquidar</span>';
+      }
+      return '<b>' + sgMoney(l.costo_final) + '</b>'
+        + '<div class="sg-oc-sub">' + sgMoney(l.precio_unitario_kg) + ' /kg</div>';
+    };
+    var accionesDe = function(l){
+      return (l.precio_unitario_kg == null
+        ? '<button class="btn bb bs" onclick="sgPrecioOpen('+l.id+',\'' + esc(l.codigo_lote) + '\','+l.kg_reales+')">💲 cerrar precio</button>'
+        : '')
+        + (sgFmEsAdmin()
+            // Se pasa SÓLO el id. Meter el lote entero serializado dentro de un
+            // atributo HTML es frágil por diseño: cualquier comilla o salto de
+            // línea en un campo de texto libre rompe el atributo y el botón deja
+            // de responder, sin ningún error visible.
+            ? ' <button class="btn bo bs" title="Corregir lo que se cargó mal"'
+              + ' onclick="sgLoteEditarOpen(' + l.id + ')">✏️</button>'
+            : '');
+    };
+
     (o.items || []).forEach(function(it) {
+      // ── LA COMPRA, COMO SE PACTÓ ────────────────────────────────────────
+      // Primero la unidad EN QUE SE PACTÓ —que es la que se controla contra el
+      // proveedor— y debajo, en chico, la que usa el sistema para costear.
       var porBulto = it.modo_carga === 'bulto';
-      // Kilos que entran en un bulto. Si no quedó guardado, se deduce de lo
-      // cargado; sin eso no se puede pasar de $/kg a $/bulto.
       var kgBulto = (it.kg_por_bulto != null && it.kg_por_bulto > 0)
         ? Number(it.kg_por_bulto)
         : ((it.cantidad_estimada_presentaciones > 0 && it.kg_estimados > 0)
             ? it.kg_estimados / it.cantidad_estimada_presentaciones : null);
       var precioKg = it.precio_estimado_por_kg;
       var precioBulto = (precioKg != null && kgBulto) ? precioKg * kgBulto : null;
-
       var pactado = porBulto
-        ? nr(it.cantidad_estimada_presentaciones) + ' bultos'
-          + (kgBulto ? '<div class="sg-oc-sub">de ' + nr(kgBulto) + ' kg</div>' : '')
-        : nr(it.kg_estimados) + ' kg';
-      var precio = porBulto
-        ? (precioBulto != null
-            ? sgMoney(precioBulto) + ' /bulto'
-              + (precioKg != null ? '<div class="sg-oc-sub">' + sgMoney(precioKg) + ' /kg</div>' : '')
-            : '—')
-        : (precioKg != null ? sgMoney(precioKg) + ' /kg' : '—');
+        ? '<b>' + nr(it.cantidad_estimada_presentaciones) + '</b> bultos'
+          + '<div class="sg-oc-sub">'
+          + (kgBulto ? 'de ' + nr(kgBulto) + ' kg' : '')
+          + (precioBulto != null ? (kgBulto ? ' · ' : '') + sgMoney(precioBulto) + ' /bulto' : '')
+          + '</div>'
+        : '<b>' + nr(it.kg_estimados) + '</b> kg'
+          + (precioKg != null ? '<div class="sg-oc-sub">' + sgMoney(precioKg) + ' /kg</div>' : '');
 
-      // LO QUE ENTRÓ, EN BULTOS. La compra se pacta en bultos y se controla en
-      // bultos contra el remito: es la cuenta que hace el que recibe. Los kilos
-      // no desaparecen — abajo están los lotes con su peso, y si no dan contra
-      // lo pactado la alerta de arriba lo dice con todas las letras.
-      var bultosRec = Number(it.bultos_recibidos) || 0;
-      var kgRec = Number(it.kg_recibidos) || 0;
-      // Si no se contaron bultos, se dice — antes acá aparecía "2.000 kg" bajo
-      // el título "Bultos recibidos", que se lee como si hubieran entrado 2.000
-      // cajones.
-      var recibido = bultosRec > 0
-        ? '<strong>' + nr(bultosRec) + '</strong>'
-          + (kgRec > 0 ? '<div class="sg-oc-sub">' + nr(kgRec) + ' kg</div>' : '')
-        : (kgRec > 0
-            ? '<span style="color:var(--mut)">sin contar</span>'
-              + '<div class="sg-oc-sub"><b>' + nr(kgRec) + ' kg</b> pesados</div>'
-            : '—');
-
-      h += '<tr><td>' + esc(it.producto_nombre || '') + '</td>'
-        + '<td>' + esc(it.presentacion_nombre || '—') + '</td>'
-        + '<td style="text-align:right"><strong>' + pactado + '</strong></td>'
-        + '<td style="text-align:right"><strong>' + precio + '</strong></td>'
-        + '<td style="text-align:right">' + recibido + '</td></tr>';
+      var mios = porItem[String(it.id)] || [];
+      if (!mios.length) {
+        h += '<tr><td>' + esc(it.producto_nombre || '') + '</td>'
+          + '<td style="text-align:right">' + pactado + '</td>'
+          + '<td style="text-align:right;color:var(--mut)">todavía no entró</td>'
+          + '<td>—</td><td style="text-align:right">—</td><td></td></tr>';
+        return;
+      }
+      mios.forEach(function(l, k) {
+        h += '<tr><td>' + esc(it.producto_nombre || l.producto_nombre || '')
+            + '<div class="sg-oc-sub"><code>' + esc(l.codigo_lote) + '</code></div></td>'
+          // Lo pactado es del PRODUCTO: se escribe una vez, en el primer renglón.
+          + '<td style="text-align:right">' + (k === 0 ? pactado : '') + '</td>'
+          + '<td style="text-align:right">' + entroDe(l.bultos, l.kg_reales) + '</td>'
+          + '<td>' + (l.calidad || '—') + '</td>'
+          + '<td style="text-align:right">' + costoDe(l) + '</td>'
+          + '<td style="text-align:right;white-space:nowrap">' + accionesDe(l) + '</td></tr>';
+      });
+    });
+    // Partidas sin ítem de orden: las de una recepción que se vinculó después.
+    // No tienen contra qué comparar, pero no se pueden esconder.
+    (porItem['_'] || []).forEach(function(l) {
+      h += '<tr><td>' + esc(l.producto_nombre || '')
+          + '<div class="sg-oc-sub"><code>' + esc(l.codigo_lote) + '</code></div></td>'
+        + '<td style="text-align:right;color:var(--mut)">sin ítem en la orden</td>'
+        + '<td style="text-align:right">' + entroDe(l.bultos, l.kg_reales) + '</td>'
+        + '<td>' + (l.calidad || '—') + '</td>'
+        + '<td style="text-align:right">' + costoDe(l) + '</td>'
+        + '<td style="text-align:right;white-space:nowrap">' + accionesDe(l) + '</td></tr>';
     });
     h+='</tbody></table></div>';
-    // ── UNA SOLA TABLA: EL PRODUCTO Y SU LOTE ─────────────────────────────
-    // Antes eran dos, "Productos" y "Lotes", y con una orden de un producto —que
-    // es el caso normal— decían lo mismo dos veces: el mismo tomate, los mismos
-    // 2.000 kg, el mismo precio. Lo único que la segunda agregaba era el código
-    // de la partida, la calidad y el costo, que ahora van como sub-línea del
-    // producto al que pertenecen.
-    if(lotes.length){
-      var porItem = {};
-      lotes.forEach(function(l){
-        var k = l.oc_item_id != null ? String(l.oc_item_id) : '_';
-        (porItem[k] = porItem[k] || []).push(l);
-      });
-      h+='<div style="font-weight:700;font-size:12px;text-transform:uppercase;color:var(--mut);margin-bottom:6px">'
-        + 'Partidas que entraron</div>';
-      h+='<table class="pa-tbl" style="margin-bottom:12px"><thead><tr><th>Partida</th>'
-        + '<th style="text-align:right">Entró</th><th>Calidad</th>'
-        + '<th style="text-align:right">Costo</th><th></th></tr></thead><tbody>';
-      lotes.forEach(function(l){
-        var btn = (l.precio_unitario_kg==null) ? '<button class="btn bb bs" onclick="sgPrecioOpen('+l.id+',\''+esc(l.codigo_lote)+'\','+l.kg_reales+')">💲 cerrar precio</button>' : '';
-        // La cantidad, en la unidad en que se pactó: bultos arriba y kilos en
-        // chico. Antes acá sólo había kilos.
-        var blt = Number(l.bultos) || 0, kg = Number(l.kg_reales) || 0;
-        var cant = blt > 0
-          ? '<b>' + nr(blt) + '</b> bultos<div class="sg-oc-sub">' + nr(kg) + ' kg</div>'
-          : '<b>' + nr(kg) + '</b> kg<div class="sg-oc-sub">sin contar bultos</div>';
-        h+='<tr><td><code>'+esc(l.codigo_lote)+'</code>'
-          + '<div class="sg-oc-sub">' + esc(l.producto_nombre || '') + '</div></td>'
-          + '<td style="text-align:right">'+cant+'</td>'
-          + '<td>'+(l.calidad||'—')+'</td>'
-          + '<td style="text-align:right"><b>'+sgMoney(l.costo_final)+'</b>'
-            + (l.precio_unitario_kg!=null
-                ? '<div class="sg-oc-sub">'+sgMoney(l.precio_unitario_kg)+' /kg</div>'
-                : '<div class="sg-oc-sub"><span class="bdg bpe">pizarra</span></div>')+'</td>'
-          + '<td style="text-align:right;white-space:nowrap">'+btn
-          + (sgFmEsAdmin()
-              ? ' <button class="btn bo bs" title="Corregir lo que se cargó mal"'
-                // Se pasa SÓLO el id. Meter el lote entero serializado dentro de
-                // un atributo HTML es frágil por diseño: cualquier comilla,
-                // salto de línea o carácter raro en un campo de texto libre
-                // —observaciones, calidad— rompe el atributo y el botón deja de
-                // responder, sin ningún error visible.
-                + ' onclick="sgLoteEditarOpen(' + l.id + ')">✏️</button>'
-              : '')
-          + '</td></tr>';
-      });
-      h+='</tbody></table>';
-    }
     if((o.vencimientos||[]).length){
       h+='<div style="font-weight:700;font-size:12px;text-transform:uppercase;color:var(--mut);margin-bottom:6px">Vencimientos</div>';
       h+='<table class="pa-tbl"><thead><tr><th>Cuota</th><th style="text-align:right">%</th><th style="text-align:right">Monto</th><th>Vence</th><th style="text-align:center">Pagado</th></tr></thead><tbody>';
@@ -5491,10 +5599,33 @@ function sgLiqPartidasLoad(){
           // y todavía no tiene precio.
           + '<button class="btn bb bs" onclick="liqDePartida(' + p.id + ',\'' + esc(p.trazabilidad || '') + '\',\''
             + esc(p.proveedor_nombre || '') + '\')">💲 Liquidar</button>'
+          // LA SALIDA DE EMERGENCIA. Si la liquidación se emitió fuera del
+          // sistema, o se cargó por el botón suelto sin decir de qué partida
+          // era, esta partida no tiene forma de salir de la bandeja: se queda
+          // acá para siempre. Sólo admin y con motivo.
+          + (sgFmEsAdmin()
+              ? ' <button class="btn bo bs" title="Ya se liquidó y no hace falta cargarla acá"'
+                + ' onclick="sgLiqYaEsta(' + p.id + ',\'' + esc(p.trazabilidad || '') + '\')">✔</button>'
+              : '')
         + '</td>');
     }).join('') : '<tr><td colspan="7" class="emp">No hay partidas esperando liquidación. '
         + 'Las que se documentan con liquidación aparecen acá apenas se reciben, '
         + 'y salen cuando se les carga la liquidación.</td></tr>';
+  });
+}
+
+// Dar una partida por liquidada sin cargarle la liquidación acá. Es para la que
+// se liquidó fuera del sistema: sin esto se queda en la bandeja para siempre.
+function sgLiqYaEsta(ocId, partida){
+  if (!confirm('¿Dar por liquidada la partida ' + partida + '?\n\n'
+    + 'Sale de esta bandeja. Usalo sólo si la liquidación ya se emitió y no se va a cargar acá.')) return;
+  var motivo = prompt('¿Por qué? (queda registrado)');
+  if (motivo === null) return;
+  if (!String(motivo).trim()) { toast('Escribí por qué', 'er'); return; }
+  api('/api/sg/oc/' + ocId + '/liquidada', 'POST', { motivo: motivo }).then(function(r){
+    if (!r || !r.ok) { toast((r && r.error) || 'No se pudo', 'er'); return; }
+    toast('Partida dada por liquidada', 'ok');
+    sgLiqPartidasLoad();
   });
 }
 

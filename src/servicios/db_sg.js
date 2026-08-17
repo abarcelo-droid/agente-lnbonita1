@@ -790,6 +790,41 @@ try {
   if (n) console.log(`[DB] SG: se les calculó "liquidamos o facturamos" a ${n} orden(es) ya cargada(s).`);
 } catch (e) { console.error('[DB] SG documenta:', e.message); }
 
+// ── CUÁNDO UNA PARTIDA DEJA DE ESPERAR SU LIQUIDACIÓN ─────────────────────
+// La bandeja saca una partida cuando se le carga la liquidación desde ahí, que
+// es lo que deja el vínculo (liquidaciones.oc_id). Pero eso sólo puede saberlo
+// de las liquidaciones cargadas DESPUÉS de que el vínculo existe: las que ya
+// estaban tienen oc_id en NULL, y sin esto TODAS las partidas viejas del
+// circuito de liquidación volverían a la bandeja el día del despliegue, sin
+// ninguna forma de sacarlas.
+//
+// liquidada_en es esa marca. Y el backfill aplica UNA VEZ el criterio VIEJO
+// —"ya no le falta cerrar el precio de ningún lote"— así que ninguna partida
+// que ya había salido de la bandeja reaparece. De ahí en adelante manda el
+// criterio nuevo.
+try { db.exec("ALTER TABLE sg_oc ADD COLUMN liquidada_en TEXT"); } catch (_) {}
+try { db.exec("ALTER TABLE sg_oc ADD COLUMN liquidada_por INTEGER"); } catch (_) {}
+try {
+  const yaEstaba = db.prepare("SELECT COUNT(*) c FROM sg_oc WHERE liquidada_en IS NOT NULL").get().c;
+  if (!yaEstaba) {
+    const n = db.prepare(`UPDATE sg_oc SET liquidada_en = datetime('now','localtime')
+      WHERE activo = 1
+        AND estado IN ('recibida_total','cerrada')
+        AND COALESCE(documenta, CASE
+              WHEN tipo_precio = 'pizarra' THEN 'liquidacion'
+              WHEN tipo_fiscal = 'liquidacion' THEN 'liquidacion'
+              ELSE 'factura' END) = 'liquidacion'
+        AND liquidada_en IS NULL
+        -- El criterio viejo: sin lotes esperando precio, la partida no estaba
+        -- en la bandeja. Se respeta tal cual para no resucitar trabajo hecho.
+        AND NOT EXISTS (SELECT 1 FROM sg_lotes l
+                          JOIN sg_oc_items i ON i.id = l.oc_item_id
+                         WHERE i.oc_id = sg_oc.id AND l.activo = 1
+                           AND l.precio_unitario_kg IS NULL)`).run().changes;
+    if (n) console.log(`[DB] SG: ${n} partida(s) de liquidación ya resueltas quedaron marcadas como liquidadas.`);
+  }
+} catch (e) { console.error('[DB] SG liquidada_en:', e.message); }
+
 // ── QUIÉN CAMBIÓ QUÉ ──────────────────────────────────────────────────────
 // Un administrador puede corregir lo que ya se cargó: un bulto mal contado, un
 // peso mal tipeado, un precio con un cero de más. Eso está bien —el error existe
