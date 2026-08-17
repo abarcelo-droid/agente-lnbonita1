@@ -1099,13 +1099,40 @@ function generarVencimientos(db, ocId) {
   const cuotas = db.prepare('SELECT * FROM sg_condiciones_pago_cuotas WHERE condicion_pago_id=? ORDER BY orden').all(oc.condicion_pago_id);
   if (!cuotas.length) return;
 
+  // ── SI YA HAY FACTURA, MANDA LA FACTURA ─────────────────────────────────
+  // Lo que se le debe al proveedor es lo que dice su comprobante: el TOTAL, con
+  // IVA y percepciones adentro. El costo de los lotes es otra cosa —es neto, y
+  // es lo que vale la mercadería para el stock—, y usarlo como deuda dejaba la
+  // cuenta corriente corta justo por el IVA.
+  //
+  // Cuando la factura cubre varias partidas, a cada una le toca su parte, en la
+  // proporción de su neto: la deuda es una sola y no se puede contar entera en
+  // cada partida.
+  const fac = db.prepare(`SELECT f.id, f.total, f.neto, f.fecha_emision
+      FROM sg_facturas_compra f
+     WHERE f.activo = 1
+       AND (f.oc_id = ? OR EXISTS (SELECT 1 FROM sg_factura_compra_ocs fo
+                                    WHERE fo.factura_id = f.id AND fo.oc_id = ?))
+     ORDER BY f.id DESC LIMIT 1`).get(ocId, ocId);
+  let montoFactura = null;
+  if (fac && Number(fac.total) > 0) {
+    const partes = db.prepare('SELECT oc_id, neto FROM sg_factura_compra_ocs WHERE factura_id=?').all(fac.id);
+    const sumaNetos = partes.reduce((a, p) => a + (Number(p.neto) || 0), 0);
+    const mio = partes.find((p) => Number(p.oc_id) === Number(ocId));
+    montoFactura = (partes.length > 1 && sumaNetos > 0 && mio)
+      ? r2(Number(fac.total) * (Number(mio.neto) || 0) / sumaNetos)
+      : r2(Number(fac.total));
+  }
+
   const real = db.prepare(`
     SELECT COALESCE(SUM(l.costo_base),0) s, COUNT(*) n,
            SUM(CASE WHEN l.precio_unitario_kg IS NULL THEN 1 ELSE 0 END) sinprecio
     FROM sg_lotes l JOIN sg_oc_items i ON l.oc_item_id=i.id
     WHERE i.oc_id=? AND l.activo=1`).get(ocId);
   let monto;
-  if (real.n > 0) {
+  if (montoFactura != null) {
+    monto = montoFactura;
+  } else if (real.n > 0) {
     if (real.sinprecio > 0) return; // pizarra con precios pendientes → no generar todavía
     monto = real.s;
   } else {
@@ -1116,7 +1143,9 @@ function generarVencimientos(db, ocId) {
   const ultRec = db.prepare('SELECT MAX(fecha_recepcion) f FROM sg_recepciones WHERE oc_id=? AND activo=1').get(ocId).f;
   const fechaBase = (bc) => {
     if (bc === 'fecha_recepcion') return ultRec || oc.fecha_recepcion_estimada || oc.fecha_oc;
-    if (bc === 'fecha_factura') return ultRec || oc.fecha_oc; // sin factura en V1 (aprox)
+    // "A tantos días de la factura" ahora es de verdad la fecha de la factura.
+    // Antes se aproximaba con la de recepción porque no había comprobante.
+    if (bc === 'fecha_factura') return (fac && fac.fecha_emision) || ultRec || oc.fecha_oc;
     return oc.fecha_oc; // fecha_oc / al_pedido
   };
 
@@ -2068,8 +2097,21 @@ router.get('/oc/:id/para-facturar', requireAuth, (req, res) => {
       it.base = d.base || null;
     }
     const total = ac.total;
+    // ── ¿EL PRECIO PACTADO INCLUÍA EL IVA? ───────────────────────────────
+    // La pantalla compara el neto de la factura contra lo acordado. Si el precio
+    // se pactó CON IVA, ese total es bruto y la comparación enfrenta dos cosas
+    // distintas: avisaba "no da contra lo acordado, diferencia $143.000" sobre
+    // una factura perfecta, que es exactamente el 10,5% de IVA.
+    const alicOC = (oc.iva_alicuota_oc != null && oc.iva_alicuota_oc !== '')
+      ? Number(oc.iva_alicuota_oc)
+      : (db.prepare(`SELECT f.iva_alicuota a FROM sg_oc_items i
+           LEFT JOIN sg_productos p ON p.id = i.producto_id
+           LEFT JOIN sg_familias f ON f.id = p.familia_id
+          WHERE i.oc_id = ? AND f.iva_alicuota IS NOT NULL LIMIT 1`).get(oc.id) || {}).a;
     res.json({ ok: true, data: { oc, items,
-      total_acordado: oc.tipo_precio === 'pizarra' ? null : total } });
+      total_acordado: oc.tipo_precio === 'pizarra' ? null : total,
+      acordado_incluye_iva: oc.precio_incluye_iva == null ? null : (oc.precio_incluye_iva ? 1 : 0),
+      acordado_alicuota: alicOC != null ? Number(alicOC) : null } });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
@@ -2135,6 +2177,12 @@ router.post('/oc/:id/factura-completa', facturaUpload.single('archivo'), require
         error: 'Esa orden todavía no recibió la mercadería: no se le puede cargar la factura.' });
     }
     if (!val(b.numero)) return res.status(400).json({ ok: false, error: 'Falta el número de la factura' });
+    // Sin proveedor la factura no entra en ninguna cuenta corriente, y eso no se
+    // descubre hasta que alguien busca por qué no le cierra el saldo.
+    if (!oc.proveedor_id) {
+      return res.status(400).json({ ok: false,
+        error: 'La partida no tiene proveedor: sin eso la factura no puede ir a la cuenta corriente.' });
+    }
     // Sólo A o B. Una liquidación NO es una factura de compra: es el
     // comprobante de una venta por cuenta y orden, y se contabiliza distinto.
     const TIPOS_OK = ['factura_a', 'factura_b'];
@@ -2366,6 +2414,13 @@ router.post('/oc/:id/factura-completa', facturaUpload.single('archivo'), require
         db.prepare(`UPDATE sg_recepciones SET factura_numero=?,
           modificado_en=datetime('now','localtime'), modificado_por=? WHERE id=?`).run(nro, uid(req), rec.id);
       }
+      // ── Y LA DEUDA CON EL PROVEEDOR ────────────────────────────────────
+      // La cuenta corriente sale de los vencimientos de la orden, y hasta acá
+      // se calculaban sobre el costo de la mercadería. Con la factura cargada,
+      // la deuda es la que dice el comprobante: se rehacen. Sin esto, cargar
+      // una factura de un millón y medio no movía un peso en la cuenta del
+      // proveedor.
+      for (const ocId of ocIds) generarVencimientos(db, Number(ocId));
     })();
     res.json({ ok: true, data: { id: Number(id), archivo_ruta: ruta,
       asiento, aviso_acordado: avisoAcordado } });
@@ -2928,7 +2983,17 @@ router.get('/diario-iva-compras', requireAuth, (req, res) => {
         + (x.percepcion_ganancias || 0));
       t.total = r2(t.total + (x.total || 0));
     }
-    res.json({ ok: true, data: { filas: rows, totales: t } });
+    // SI NO HAY NADA EN EL PERÍODO, ¿HAY ALGO AFUERA? Una factura contabilizada
+    // con fecha fuera del rango deja la pantalla vacía, y "no hay facturas
+    // contabilizadas" se lee como que el asiento no se generó. Con esto la
+    // pantalla puede decir "hay 3 fuera de este período" y dejar de asustar.
+    let fuera = 0, primera = null, ultima = null;
+    if (!rows.length) {
+      const o = db.prepare(`SELECT COUNT(*) c, MIN(fecha_emision) p, MAX(fecha_emision) u
+        FROM sg_facturas_compra f WHERE f.activo=1 AND f.asiento_id IS NOT NULL`).get();
+      fuera = o.c || 0; primera = o.p; ultima = o.u;
+    }
+    res.json({ ok: true, data: { filas: rows, totales: t, fuera_del_periodo: fuera, primera, ultima } });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
@@ -3010,6 +3075,21 @@ router.get('/oc', requireAuth, (req, res) => {
                 JOIN sg_oc_items i ON i.id = l.oc_item_id
                WHERE i.oc_id = o.id AND l.activo = 1
                  AND COALESCE(l.bultos, 0) = 0 AND l.kg_reales > 0) AS lotes_sin_contar,
+             -- ── LOS BULTOS QUE ENTRARON, AUNQUE NO SE HAYAN CONTADO ───────
+             -- Una compra pactada en cajones se mira en cajones. Si el camión
+             -- se pesó sin contarlos, los cajones salen del peso: la orden ya
+             -- dice cuántos kilos entran en cada uno. Antes la columna "Bultos"
+             -- mostraba kilos en esos casos, que es cambiar de unidad en el
+             -- medio de la misma columna.
+             (SELECT COALESCE(SUM(
+                  CASE WHEN COALESCE(l.bultos, 0) > 0 THEN l.bultos
+                       WHEN COALESCE(i.kg_por_bulto, ps.factor_conversion) > 0
+                         THEN l.kg_reales / COALESCE(i.kg_por_bulto, ps.factor_conversion)
+                       ELSE 0 END), 0)
+                FROM sg_lotes l
+                JOIN sg_oc_items i ON i.id = l.oc_item_id
+                LEFT JOIN sg_presentaciones ps ON ps.id = i.presentacion_id
+               WHERE i.oc_id = o.id AND l.activo = 1) AS bultos_equivalentes,
              -- Y para decir QUÉ FALTA: con qué se documenta, y si ese papel ya
              -- llegó. Sin esto el listado dice "Rec. total" y no se sabe si la
              -- partida está esperando la factura desde hace tres semanas.
@@ -5178,14 +5258,43 @@ router.get('/cc-clientes', requireAuth, (req, res) => {
 router.get('/cc-proveedores', requireAuth, (req, res) => {
   const db = getDb();
   try {
+    // ── LO QUE SE LE DEBE A CADA PROVEEDOR ───────────────────────────────
+    //
+    //   saldo de apertura
+    // + lo FACTURADO y no pagado          ← el comprobante que emitió
+    // + lo que está por vencer de órdenes SIN factura   ← todavía no llegó
+    //
+    // Antes era sólo la segunda línea, calculada sobre el COSTO de la
+    // mercadería: cargar una factura de un millón y medio no movía un peso en
+    // la cuenta del proveedor, y lo que sí figuraba estaba corto justo por el
+    // IVA y las percepciones, que son parte de lo que hay que pagarle.
+    //
+    // El NOT EXISTS de la segunda línea es todo el asunto: sin él, una partida
+    // ya facturada suma dos veces —su estimado y su factura—.
     const rows = db.prepare(`
       SELECT p.id, p.razon_social, COALESCE(p.saldo_inicial,0) AS saldo_inicial,
+        COALESCE((SELECT SUM(COALESCE(f.total,0) - COALESCE(f.saldo_pagado,0))
+                    FROM sg_facturas_compra f
+                   WHERE f.proveedor_id = p.id AND f.activo = 1),0) AS facturado,
         COALESCE((SELECT SUM(v.monto) FROM sg_oc_vencimientos v
           JOIN sg_oc o ON o.id=v.oc_id
-          WHERE o.proveedor_id=p.id AND o.activo=1 AND o.estado<>'anulada' AND v.pagado=0),0) AS total_pendiente
+          WHERE o.proveedor_id=p.id AND o.activo=1 AND o.estado<>'anulada' AND v.pagado=0
+            AND NOT EXISTS (SELECT 1 FROM sg_facturas_compra f2
+                             WHERE f2.activo=1
+                               AND (f2.oc_id = o.id
+                                    OR EXISTS (SELECT 1 FROM sg_factura_compra_ocs fo
+                                                WHERE fo.factura_id = f2.id AND fo.oc_id = o.id)))
+          ),0) AS sin_factura,
+        (SELECT COUNT(*) FROM sg_facturas_compra f3
+          WHERE f3.proveedor_id = p.id AND f3.activo = 1 AND f3.asiento_id IS NULL) AS sin_contabilizar
       FROM sg_proveedores p WHERE p.activo=1`).all();
-    const data = rows.map(r => ({ ...r, saldo: (r.saldo_inicial || 0) + (r.total_pendiente || 0) }))
-      .filter(r => r.total_pendiente !== 0 || r.saldo_inicial !== 0)
+    const data = rows.map((r) => ({
+        ...r,
+        // Se mantiene el nombre viejo para no romper a nadie que lo lea.
+        total_pendiente: r2((r.facturado || 0) + (r.sin_factura || 0)),
+        saldo: r2((r.saldo_inicial || 0) + (r.facturado || 0) + (r.sin_factura || 0)),
+      }))
+      .filter((r) => r.saldo !== 0 || r.saldo_inicial !== 0)
       .sort((a, b) => b.saldo - a.saldo);
     res.json({ ok: true, data });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }

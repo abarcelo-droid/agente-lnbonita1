@@ -300,6 +300,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   <div class="ni" data-sec="sg-reportes" data-admin-only="1"></div>
   <div class="ni" data-sec="sg-control-coop" data-admin-only="1"></div>
   <div class="ni" data-sec="sg-facturas-merc" data-admin-only="1"></div>
+  <div class="ni" data-sec="sg-cc-proveedores" data-admin-only="1"></div>
 
   <!-- Contabilidad San Gerónimo — mismo criterio que los .ni de Abasto SG de arriba:
        el sidebar VISIBLE lo arma sidebar-v2.js desde modulos_config (ver
@@ -2282,7 +2283,6 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       <div class="sgc-subtab" data-sub="recepciones"  onclick="sgComSub('recepciones')">⏳ Recepciones pendientes</div>
       <div class="sgc-subtab" data-sub="ocrecibidas" onclick="sgComSub('ocrecibidas')">✅ OC recibidas</div>
       <div class="sgc-subtab" data-sub="gdirectos"    onclick="sgComSub('gdirectos')">🧾 Gastos directos</div>
-      <div class="sgc-subtab" data-sub="ccprov"       onclick="sgComSub('ccprov')">💳 CC proveedores</div>
     </div>
 
     <!-- Órdenes de compra -->
@@ -2375,14 +2375,6 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       </table></div>
     </div>
 
-    <!-- CC proveedores: saldo de apertura (al 30/6) + vencimientos de OC no pagados -->
-    <div class="sgc-sub" id="sgc-sub-ccprov">
-      <div style="font-size:12px;color:var(--mut);margin-bottom:8px">💡 Saldo = saldo de apertura (al 30/6, se carga en la ficha del proveedor) + vencimientos de OC pendientes de pago. No incluye la contabilidad (asientos) — eso es aparte.</div>
-      <div class="ab-table-wrap"><table class="pa-tbl">
-        <thead><tr><th>Proveedor</th><th style="text-align:right">Saldo apertura</th><th style="text-align:right">Vencimientos pendientes</th><th style="text-align:right">Saldo total</th></tr></thead>
-        <tbody id="sg-tb-ccprov"><tr><td colspan="4" class="emp">Cargando…</td></tr></tbody>
-      </table></div>
-    </div>
 
   </div>
 
@@ -2696,6 +2688,33 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
        una recepción contesta "con descarga" en el paso 3, la descarga entra
        acá. Antes esto sólo se veía dentro de Gastos Directos, mezclado con las
        cargas de salida y sin filtro por fecha. -->
+  <!-- ── CUENTA CORRIENTE DE PROVEEDORES ──────────────────────────────────
+       Cuánto se le debe a cada proveedor. El saldo sale del saldo de apertura
+       más los vencimientos impagos de sus órdenes; una factura cargada rehace
+       esos vencimientos por lo que dice el comprobante, así que se ve acá.
+
+       No lleva clase sgc-sub: sgComSub() apaga TODOS los ".sg-mod .sgc-sub" del
+       documento al navegar por Ingresos, y esta pantalla desaparecería. -->
+  <div class="sec sg-mod" id="sec-sg-cc-proveedores">
+    <div class="ph">
+      <div><div class="ph-t">💳 San Gerónimo · Cuenta corriente de proveedores</div>
+        <div class="ph-s">Cuánto se le debe a cada uno</div></div>
+      <button class="btn bo" onclick="sgLoadCcProv()">↻ Actualizar</button>
+    </div>
+    <div style="font-size:12px;color:var(--mut);margin-bottom:10px">
+      Saldo = saldo de apertura (se carga en la ficha del proveedor) + lo que
+      queda por pagar de sus órdenes. Cuando la partida tiene factura cargada, la
+      deuda es la que dice el comprobante — con IVA y percepciones.
+    </div>
+    <div class="ab-table-wrap"><table class="pa-tbl">
+      <thead><tr><th>Proveedor</th><th style="text-align:right">Saldo apertura</th>
+        <th style="text-align:right">Facturado</th>
+        <th style="text-align:right">Sin factura</th>
+        <th style="text-align:right">Saldo total</th></tr></thead>
+      <tbody id="sg-tb-ccprov"><tr><td colspan="5" class="emp">Cargando…</td></tr></tbody>
+    </table></div>
+  </div>
+
   <!-- ── FACTURAS POR MERCADERÍA ──────────────────────────────────────────
        La otra mitad de lo que pasa después de recibir. Una compra a Precio
        Cerrado ya tiene el precio pactado: lo que falta es que llegue la factura
@@ -2819,7 +2838,13 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
               <div class="fl"><label>Punto de venta</label><input id="sgfm-f-pv" placeholder="0001"></div>
               <div class="fl"><label>Número <span style="color:var(--err)">*</span></label><input id="sgfm-f-nro" placeholder="00012345"></div>
               <div class="fl"><label>Fecha de emisión</label><input type="date" id="sgfm-f-fecha"></div>
-              <div class="fl"><label>CUIT del emisor</label><input id="sgfm-f-cuit" placeholder="30-12345678-9"></div>
+              <!-- El CUIT se valida con el dígito verificador de AFIP, no sólo
+                   contando dígitos: el que estaba dejaba guardar "30-1234569782-42",
+                   que no es un CUIT, y así llega al libro de IVA. -->
+              <div class="fl"><label>CUIT del emisor</label>
+                <input id="sgfm-f-cuit" placeholder="30-12345678-9" maxlength="13"
+                       oninput="cuitValidarInput('sgfm-f-cuit','sgfm-f-cuit-ok')">
+                <div id="sgfm-f-cuit-ok" style="font-size:11px;margin-top:2px"></div></div>
               <div class="fl"><label>CAE</label><input id="sgfm-f-cae"></div>
             </div>
           </div>
@@ -2827,12 +2852,12 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
           <div class="sg-oc-box" style="margin-top:10px">
             <div class="sg-oc-box-tit">Importes</div>
             <div class="sgfm-grid">
-              <div class="fl"><label>Neto gravado</label><input type="number" step="0.01" id="sgfm-f-neto" oninput="sgFmRecalc()"></div>
+              <div class="fl"><label>Neto gravado</label><input type="text" inputmode="decimal" id="sgfm-f-neto" placeholder="$ 0" oninput="sgFmMil(this)"></div>
               <div class="fl"><label>IVA %</label><input type="number" step="0.01" id="sgfm-f-alic" value="21" oninput="sgFmRecalc()"></div>
-              <div class="fl"><label>IVA</label><input type="number" step="0.01" id="sgfm-f-iva" oninput="sgFmRecalc()"></div>
-              <div class="fl"><label>Percepción IVA</label><input type="number" step="0.01" id="sgfm-f-piva" oninput="sgFmRecalc()"></div>
-              <div class="fl"><label>Percepción Ganancias</label><input type="number" step="0.01" id="sgfm-f-pgan" oninput="sgFmRecalc()"></div>
-              <div class="fl"><label>Otros conceptos</label><input type="number" step="0.01" id="sgfm-f-otros" oninput="sgFmRecalc()"></div>
+              <div class="fl"><label>IVA</label><input type="text" inputmode="decimal" id="sgfm-f-iva" placeholder="$ 0" oninput="sgFmMil(this)"></div>
+              <div class="fl"><label>Percepción IVA</label><input type="text" inputmode="decimal" id="sgfm-f-piva" placeholder="$ 0" oninput="sgFmMil(this)"></div>
+              <div class="fl"><label>Percepción Ganancias</label><input type="text" inputmode="decimal" id="sgfm-f-pgan" placeholder="$ 0" oninput="sgFmMil(this)"></div>
+              <div class="fl"><label>Otros conceptos</label><input type="text" inputmode="decimal" id="sgfm-f-otros" placeholder="$ 0" oninput="sgFmMil(this)"></div>
             </div>
             <!-- ── PERCEPCIÓN DE INGRESOS BRUTOS, POR JURISDICCIÓN ────────
                  IIBB es provincial: una misma factura puede traer percepción de
@@ -2848,7 +2873,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
             </div>
             <div class="sgfm-grid" style="margin-top:10px;border-top:1px solid var(--bor);padding-top:9px">
               <div class="fl" style="grid-column:span 2"><label>TOTAL de la factura</label>
-                <input type="number" step="0.01" id="sgfm-f-total" oninput="sgFmRecalc()" style="font-weight:700"></div>
+                <input type="text" inputmode="decimal" id="sgfm-f-total" placeholder="$ 0" oninput="sgFmMil(this)" style="font-weight:700"></div>
             </div>
             <div id="sgfm-suma" style="font-size:12.5px;margin-top:8px"></div>
           </div>
@@ -4601,7 +4626,7 @@ function sgComSub(s){
   else if (s==='recepciones') sgLoadPendientesRecibir();
   else if (s==='ocrecibidas') { sgLoadOcRecibidas(); sgLoadRecepciones(); }
   else if (s==='gdirectos') sgLoadGDirectos();
-  else if (s==='ccprov') sgLoadCcProv();
+
 }
 // BRIEF 10 — CC proveedores: saldo apertura + vencimientos pendientes.
 function sgLoadCcProv(){
@@ -4609,11 +4634,20 @@ function sgLoadCcProv(){
     var rows=(r&&r.ok)?r.data:[];
     eid('sg-tb-ccprov').innerHTML = rows.length ? rows.map(function(p){
       var ap=Number(p.saldo_inicial)||0;
+      var fac=Number(p.facturado)||0, sf=Number(p.sin_factura)||0;
+      var cero=function(n){ return n ? sgMoney(n) : '<span style="color:var(--mut)">—</span>'; };
       return '<tr><td>'+esc(p.razon_social)+'</td>'
-        +'<td style="text-align:right'+(ap?'':';color:var(--mut)')+'">'+(ap?sgMoney(ap):'—')+'</td>'
-        +'<td style="text-align:right">'+sgMoney(p.total_pendiente)+'</td>'
+        +'<td style="text-align:right">'+cero(ap)+'</td>'
+        // Lo que ya tiene comprobante y lo que todavía no son dos cosas
+        // distintas: lo primero es deuda cierta, lo segundo es lo que se
+        // espera facturar. Antes iban sumadas en una sola columna.
+        +'<td style="text-align:right">'+cero(fac)
+          +(p.sin_contabilizar > 0
+              ? '<div class="sg-oc-sub">'+nr(p.sin_contabilizar)+' sin contabilizar</div>' : '')
+          +'</td>'
+        +'<td style="text-align:right">'+cero(sf)+'</td>'
         +'<td style="text-align:right;font-weight:700">'+sgMoney(p.saldo)+'</td></tr>';
-    }).join('') : '<tr><td colspan="4" class="emp">Sin saldos ni vencimientos pendientes.</td></tr>';
+    }).join('') : '<tr><td colspan="5" class="emp">Sin saldos ni deuda pendiente.</td></tr>';
   });
 }
 // "Confirmada" es el estado 'cerrada' de la base. Se lo llama así en pantalla
@@ -4675,21 +4709,27 @@ function sgLoadOC(){
       var kg  = Number(o.kg_recibidos_total) || 0;
       var bltEst = Number(o.bultos_estimados) || 0;
       var kgEst  = Number(o.total_estimado_kg) || 0;
+      // LA COLUMNA NO CAMBIA DE UNIDAD A MITAD DE CAMINO. Si la compra se pactó
+      // en cajones, se mira en cajones — aunque el camión se haya pesado sin
+      // contarlos: la orden dice cuántos kilos entran en cada uno, y de ahí
+      // salen. Antes esta misma columna mostraba "2.000 kg" en una fila y "180"
+      // en la de abajo, bajo el título "Bultos".
+      var porBultos = Number(o.items_por_bulto) > 0;
+      var bltEq = Math.round(Number(o.bultos_equivalentes) || 0);
       var cant;
-      if (blt > 0) {
-        // Si además entraron lotes pesados sin contar, el total de bultos NO es
-        // toda la mercadería: se aclara, porque "60" al lado de "2.000 kg" se
-        // lee como que los 2.000 kg vinieron en 60 cajones.
-        cant = '<b>' + nr(blt) + '</b>'
+      if (porBultos && bltEq > 0) {
+        cant = '<b>' + nr(bltEq) + '</b>'
           + '<div class="sg-oc-sub">' + nr(kg) + ' kg'
-          + (o.lotes_sin_contar > 0 ? ' · parte pesada' : '') + '</div>';
+          // De dónde salió el número: contados en la playa, o sacados del peso.
+          // Sin esto, un cajón contado y un cajón calculado se ven igual.
+          + (o.lotes_sin_contar > 0 ? (blt > 0 ? ' · parte por peso' : ' · por peso') : '')
+          + '</div>';
       } else if (kg > 0) {
-        // Entró pesada. Poner los kilos pelados bajo el título "Bultos" se lee
-        // como si hubieran entrado 2.000 cajones.
-        cant = '<b>' + nr(kg) + '</b> kg<div class="sg-oc-sub">sin contar bultos</div>';
-      } else if (o.items_por_bulto > 0 && bltEst > 0) {
-        // Sólo si la compra se pactó EN BULTOS. Cargada por kilo, el "estimado"
-        // sale de dividir kilos por el factor y da cajones que nadie pactó.
+        // Pactada por kilo: se muestra en kilos, que es como se compró.
+        cant = '<b>' + nr(kg) + '</b> kg';
+      } else if (porBultos && bltEst > 0) {
+        // Todavía no entró. El estimado en cajones sólo vale si se pactó así:
+        // cargada por kilo, ese número sale de una división y nadie lo pactó.
         cant = '<span style="color:var(--mut)">' + nr(bltEst) + '</span><div class="sg-oc-sub">a recibir</div>';
       } else if (kgEst > 0) {
         cant = '<span style="color:var(--mut)">' + nr(kgEst) + ' kg</span><div class="sg-oc-sub">a recibir</div>';
@@ -5651,12 +5691,20 @@ function sgFmSub(){ /* una sola solapa por ahora; existe para que el patrón no 
 // ── DIARIO IVA COMPRAS ──────────────────────────────────────────────────
 // Las facturas de compra ya contabilizadas. Arranca en el mes en curso, que es
 // el período que se está armando.
+// EL PERÍODO ES EL MES ENTERO, no "del 1 hasta hoy". Se declara por mes, y
+// cortar en hoy escondía las facturas con fecha posterior —que existen: se
+// carga el lunes la factura que el proveedor emitió con fecha del martes—. El
+// comprobante se contabilizaba bien y esta pantalla decía "No hay facturas
+// contabilizadas en este período", que se lee como que el asiento no se generó.
 function sgIvaInit(){
   var d = eid('sgiva-desde'), h = eid('sgiva-hasta');
   if (d && !d.value) {
     var hoy = new Date();
-    d.value = hoy.getFullYear() + '-' + String(hoy.getMonth() + 1).padStart(2, '0') + '-01';
-    if (h) h.value = hoy.toISOString().slice(0, 10);
+    var y = hoy.getFullYear(), m = hoy.getMonth();
+    var dosDig = function(n){ return String(n).padStart(2, '0'); };
+    d.value = y + '-' + dosDig(m + 1) + '-01';
+    var fin = new Date(y, m + 1, 0);           // el 0 del mes que viene = último día de éste
+    if (h) h.value = fin.getFullYear() + '-' + dosDig(fin.getMonth() + 1) + '-' + dosDig(fin.getDate());
   }
   sgIvaLoad();
 }
@@ -5711,8 +5759,28 @@ function sgIvaLoad(){
               ? '<span class="bdg ber">ANULADO</span>'
               : '<code>' + (x.asiento_id || '—') + '</code>')
         + '</td></tr>';
-    }).join('') : '<tr><td colspan="10" class="emp">No hay facturas contabilizadas en este período.</td></tr>';
+    }).join('')
+      // VACÍO NO ES LO MISMO QUE "NO SE CONTABILIZÓ". Si hay comprobantes fuera
+      // del rango, se dice y se ofrece el período donde están: sin eso, cargar
+      // una factura y ver la pantalla vacía se lee como que el asiento no se
+      // generó, y se termina cargando la misma factura dos veces.
+      : '<tr><td colspan="10" class="emp">No hay facturas contabilizadas en este período.'
+        + (r.data.fuera_del_periodo > 0
+            ? '<div style="margin-top:6px">Hay <b>' + nr(r.data.fuera_del_periodo) + '</b> con fecha fuera del rango'
+              + (r.data.primera ? ' (entre ' + escH(r.data.primera) + ' y ' + escH(r.data.ultima) + ')' : '')
+              + '. <button class="btn bo bs" onclick="sgIvaTodo(\'' + escH(r.data.primera || '')
+              + '\',\'' + escH(r.data.ultima || '') + '\')">Mostrarlas</button></div>'
+            : '')
+        + '</td></tr>';
   });
+}
+
+// Llevar el filtro al período donde están las facturas que hay.
+function sgIvaTodo(desde, hasta){
+  var d = eid('sgiva-desde'), h = eid('sgiva-hasta');
+  if (d && desde) d.value = desde;
+  if (h && hasta) h.value = hasta;
+  sgIvaLoad();
 }
 
 // ── EL ASIENTO CON EL QUE SE CONTABILIZA ────────────────────────────────
@@ -5897,6 +5965,9 @@ function sgFmPartidaDetalle(id){
     var d = r.data;
     SGFMF.acordado = d.total_acordado;
     SGFMF.acordadoBase = d.total_acordado;   // sin las partidas agrupadas
+    // ¿Ese total lleva el IVA adentro? Es lo que decide contra qué se compara.
+    SGFMF.acordadoConIva = d.acordado_incluye_iva;
+    SGFMF.acordadoAlic = d.acordado_alicuota;
     // LA CUENTA, EN BULTOS. Se muestra la multiplicación que se hizo —"100 ×
     // $15.000"— porque es la que el comprador rehace de memoria para controlar
     // la factura. Cuando la mercadería entró pesada y sin contar cajones se cae
@@ -5924,7 +5995,16 @@ function sgFmPartidaDetalle(id){
       + '<th style="text-align:right">Precio acordado</th>'
       + '<th style="text-align:right">Importe</th></tr></thead><tbody>' + filas
       + (d.total_acordado != null
-          ? '<tr style="border-top:2px solid var(--bor);font-weight:700"><td colspan="3">Total acordado</td>'
+          ? '<tr style="border-top:2px solid var(--bor);font-weight:700"><td colspan="3">Total acordado'
+            // CON IVA O SIN IVA. El mismo número quiere decir dos cosas
+            // distintas, y de eso depende contra qué se controla la factura.
+            + (d.acordado_incluye_iva === 1
+                ? '<div class="sg-oc-sub">IVA incluido'
+                  + (d.acordado_alicuota ? ' (' + nr(d.acordado_alicuota) + '%)' : '') + '</div>'
+                : d.acordado_incluye_iva === 0
+                  ? '<div class="sg-oc-sub">sin IVA</div>'
+                  : '<div class="sg-oc-sub">la orden no aclara si lleva IVA</div>')
+            + '</td>'
             + '<td style="text-align:right" id="sgfm-total-acordado">' + sgMoney(d.total_acordado) + '</td></tr>'
           : '<tr><td colspan="4" style="font-size:12px;color:var(--mut)">Compra de liquidación: el precio se define al liquidar.</td></tr>')
       + '</tbody></table></div>'
@@ -6019,15 +6099,25 @@ function sgFmPdfElegido(input){
   if (leer) leer.style.display = f ? '' : 'none';
 }
 
-function _sgfmN(id){ var v = (eid(id) || {}).value; return (v === '' || v == null) ? 0 : (Number(v) || 0); }
+// LOS CAMPOS DE PLATA SE ESCRIBEN CON PUNTOS DE MIL. "1357000" en la pantalla
+// es un número que nadie puede leer de un vistazo, y en una factura de un millón
+// y medio un cero de más no se ve. Se usa el mismo helper que el alta de la
+// orden: se formatea mientras se tipea y se parsea al leer.
+function _sgfmN(id){
+  var n = sgMilParse((eid(id) || {}).value);
+  return n == null ? 0 : n;
+}
+// El alícuota de IVA NO es plata: es un porcentaje y sigue siendo un number.
+function _sgfmPct(id){ var v = (eid(id) || {}).value; return (v === '' || v == null) ? 0 : (Number(v) || 0); }
+function sgFmMil(el){ el.value = sgMilFmtLive(el.value); sgFmRecalc(); }
 
 // El IVA se calcula solo del neto y la alícuota mientras nadie lo pise a mano:
 // es la cuenta que hace cualquiera, y equivocarse ahí desbalancea el asiento.
 function sgFmRecalc(){
-  var neto = _sgfmN('sgfm-f-neto'), alic = _sgfmN('sgfm-f-alic');
+  var neto = _sgfmN('sgfm-f-neto'), alic = _sgfmPct('sgfm-f-alic');
   var ivaEl = eid('sgfm-f-iva');
   if (ivaEl && document.activeElement !== ivaEl && neto > 0 && alic > 0) {
-    ivaEl.value = (Math.round(neto * alic) / 100).toFixed(2);
+    ivaEl.value = sgMilShow(Math.round(neto * alic) / 100);
   }
   var iva = _sgfmN('sgfm-f-iva');
   var pIva = _sgfmN('sgfm-f-piva'), pIibb = sgFmIibbTotal();
@@ -6035,7 +6125,7 @@ function sgFmRecalc(){
   var suma = Math.round((neto + iva + pIva + pIibb + pGan + otros) * 100) / 100;
 
   var totEl = eid('sgfm-f-total');
-  if (totEl && document.activeElement !== totEl && suma > 0) totEl.value = suma.toFixed(2);
+  if (totEl && document.activeElement !== totEl && suma > 0) totEl.value = sgMilShow(suma);
   var total = _sgfmN('sgfm-f-total');
 
   var av = eid('sgfm-suma');
@@ -6052,13 +6142,31 @@ function sgFmRecalc(){
   // NETO: el IVA y las percepciones no son costo de la mercadería.
   var vs = eid('sgfm-vs-acordado');
   if (vs) {
-    if (SGFMF.acordado == null || !(neto > 0)) vs.innerHTML = '';
-    else if (Math.abs(paRound2Fm(neto - SGFMF.acordado)) < 0.01) {
-      vs.innerHTML = '<span style="color:#166534;font-weight:700">✓ El neto de la factura da contra lo acordado</span>';
+    // ── LOS DOS NÚMEROS, EN LA MISMA BASE ─────────────────────────────────
+    // Si el precio se pactó CON IVA incluido, lo acordado es bruto y el neto de
+    // la factura no se le puede restar: la resta daba justo el IVA y la pantalla
+    // avisaba "no da contra lo acordado" sobre una factura correcta. Se le saca
+    // el IVA con la alícuota de la propia factura, que es la que corresponde.
+    var acordadoNeto = SGFMF.acordado;
+    var seDescontoIva = false;
+    if (acordadoNeto != null && SGFMF.acordadoConIva === 1) {
+      var a = (alic > 0 ? alic : (Number(SGFMF.acordadoAlic) || 0));
+      if (a > 0) { acordadoNeto = paRound2Fm(SGFMF.acordado / (1 + a / 100)); seDescontoIva = true; }
+    }
+    var comoSeCompara = seDescontoIva
+      ? '<div style="color:var(--mut);font-size:11.5px;margin-top:2px">'
+        + 'Lo acordado (' + sgMoney(SGFMF.acordado) + ') se pactó con IVA incluido: '
+        + 'sin IVA son ' + sgMoney(acordadoNeto) + ', que es contra lo que se compara el neto.</div>'
+      : '';
+    if (acordadoNeto == null || !(neto > 0)) vs.innerHTML = '';
+    else if (Math.abs(paRound2Fm(neto - acordadoNeto)) < 0.01) {
+      vs.innerHTML = '<span style="color:#166534;font-weight:700">✓ El neto de la factura da contra lo acordado</span>'
+        + comoSeCompara;
     } else {
       vs.innerHTML = '<span style="color:#9a3412;font-weight:700">⚠️ El neto de la factura ('
-        + sgMoney(neto) + ') no da contra lo acordado (' + sgMoney(SGFMF.acordado) + '). '
-        + 'Diferencia: ' + sgMoney(paRound2Fm(neto - SGFMF.acordado)) + '</span>'
+        + sgMoney(neto) + ') no da contra lo acordado (' + sgMoney(acordadoNeto) + '). '
+        + 'Diferencia: ' + sgMoney(paRound2Fm(neto - acordadoNeto)) + '</span>'
+        + comoSeCompara
         + '<div style="color:var(--mut);font-size:11.5px;margin-top:2px">'
         + 'Si es un ajuste convenido está bien; si no, el costo de la partida va a quedar distinto del que se pactó.</div>';
     }
@@ -6157,8 +6265,8 @@ function sgFmIibbPintar(filas){
       + '<div class="fl" style="flex:1;margin:0"><label>Provincia</label>'
         + '<select onchange="sgFmIibbUpd(' + i + ',\'jurisdiccion\',this.value)">' + sgFmJurisOpts(p.jurisdiccion) + '</select></div>'
       + '<div class="fl" style="flex:1;margin:0"><label>Monto</label>'
-        + '<input type="number" step="0.01" value="' + _sgN(p.monto) + '"'
-        + ' oninput="sgFmIibbUpd(' + i + ',\'monto\',this.value)"></div>'
+        + '<input type="text" inputmode="decimal" placeholder="$ 0" value="' + sgMilShow(p.monto) + '"'
+        + ' oninput="this.value=sgMilFmtLive(this.value);sgFmIibbUpd(' + i + ',\'monto\',sgMilParse(this.value))"></div>'
       + (SGFMF.iibb.length > 1
           ? '<button class="btn bd bs" type="button" onclick="sgFmIibbSacar(' + i + ')" title="Sacar">×</button>'
           : '<span style="width:0"></span>')
@@ -6214,14 +6322,18 @@ function sgFmLeerPdf(){
         if (!r || !r.ok) { toast((r && r.error) || 'No se pudo leer el comprobante', 'er'); return; }
         var d = r.data, L = d.leido || {};
         var poner = function(id, v){ var el = eid(id); if (el && v != null && v !== '') el.value = v; };
+        var ponerMonto = function(id, v){
+          var el = eid(id); if (el && v != null && v !== '') el.value = sgMilShow(v);
+        };
         poner('sgfm-f-tipo', L.tipo_comprobante);
         poner('sgfm-f-pv', L.punto_venta); poner('sgfm-f-nro', L.numero);
         poner('sgfm-f-fecha', L.fecha_emision); poner('sgfm-f-cuit', L.cuit_emisor);
         poner('sgfm-f-cae', L.cae);
-        poner('sgfm-f-neto', L.neto); poner('sgfm-f-alic', L.iva_alicuota); poner('sgfm-f-iva', L.iva_monto);
-        poner('sgfm-f-piva', L.percepcion_iva); poner('sgfm-f-piibb', L.percepcion_iibb);
-        poner('sgfm-f-pgan', L.percepcion_ganancias); poner('sgfm-f-otros', L.otros_conceptos);
-        poner('sgfm-f-total', L.total);
+        ponerMonto('sgfm-f-neto', L.neto); poner('sgfm-f-alic', L.iva_alicuota);
+        ponerMonto('sgfm-f-iva', L.iva_monto);
+        ponerMonto('sgfm-f-piva', L.percepcion_iva); ponerMonto('sgfm-f-piibb', L.percepcion_iibb);
+        ponerMonto('sgfm-f-pgan', L.percepcion_ganancias); ponerMonto('sgfm-f-otros', L.otros_conceptos);
+        ponerMonto('sgfm-f-total', L.total);
         sgFmRecalc();
 
         // Lo que hay que MIRAR antes de dar por buena la lectura.
@@ -6254,6 +6366,13 @@ function sgFmGuardar(){
   if (!SGFMF.ocId) return;
   var nro = (eid('sgfm-f-nro') || {}).value;
   if (!String(nro || '').trim()) { toast('Falta el número de la factura', 'er'); return; }
+  // EL CUIT, ANTES DE GUARDAR. Va al libro de IVA y de ahí a la declaración: un
+  // CUIT que no existe se descubre meses después, cuando AFIP lo rechaza.
+  var cuitTx = String((eid('sgfm-f-cuit') || {}).value || '').trim();
+  if (cuitTx) {
+    var vc = validarCuit(cuitTx);
+    if (!vc.valido) { toast('CUIT del emisor: ' + vc.msg, 'er'); return; }
+  }
   var payload = {
     tipo_comprobante: (eid('sgfm-f-tipo') || {}).value || null,
     punto_venta: (eid('sgfm-f-pv') || {}).value || null,
@@ -6261,7 +6380,7 @@ function sgFmGuardar(){
     fecha_emision: (eid('sgfm-f-fecha') || {}).value || null,
     cuit_emisor: (eid('sgfm-f-cuit') || {}).value || null,
     cae: (eid('sgfm-f-cae') || {}).value || null,
-    neto: _sgfmN('sgfm-f-neto'), iva_alicuota: _sgfmN('sgfm-f-alic'), iva_monto: _sgfmN('sgfm-f-iva'),
+    neto: _sgfmN('sgfm-f-neto'), iva_alicuota: _sgfmPct('sgfm-f-alic'), iva_monto: _sgfmN('sgfm-f-iva'),
     percepcion_iva: _sgfmN('sgfm-f-piva'), percepcion_iibb: _sgfmN('sgfm-f-piibb'),
     percepcion_ganancias: _sgfmN('sgfm-f-pgan'), otros_conceptos: _sgfmN('sgfm-f-otros'),
     percepciones_iibb: (SGFMF.iibb || []).filter(function(p){ return Number(p.monto) > 0; }),
@@ -16036,6 +16155,7 @@ function loadSec(s) {
     'sg-gastos-directos': function(){ sgGdsInit(); },
     'sg-control-coop': function(){ sgCcoopInit(); },
     'sg-facturas-merc': function(){ sgFmModeloCargar(); sgFmLoad(); },
+    'sg-cc-proveedores': function(){ sgLoadCcProv(); },
     'sg-importacion': function(){ sgImpInit(); },
     'sg-catalogo':   function(){ sgLoadCaches(function(){ sgCatSub('productos'); }); },
     'sg-reportes':   function(){ sgRepInit(); },
