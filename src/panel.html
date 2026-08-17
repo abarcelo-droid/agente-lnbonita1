@@ -2365,10 +2365,13 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
         ✅ Órdenes recibidas
       </div>
       <div class="ab-table-wrap"><table class="pa-tbl">
+        <!-- Las mismas columnas que el listado de órdenes: es la misma partida
+             y no puede contarse de dos maneras. Lo que esta pantalla agrega es
+             el remito y en cuántas veces entró. -->
         <thead><tr><th>Partida</th><th>Fecha</th><th>Proveedor</th>
-          <th style="text-align:right">Kg pedidos</th><th style="text-align:right">Kg recibidos</th>
+          <th style="text-align:right">Bultos</th><th style="text-align:right">Importe</th>
           <th>Remito prov.</th><th style="text-align:center">Entradas</th>
-          <th style="text-align:center">Estado</th><th></th></tr></thead>
+          <th style="text-align:center">Situación</th><th></th></tr></thead>
         <tbody id="sg-tb-ocrecibidas"><tr><td colspan="9" class="emp">Cargando…</td></tr></tbody>
       </table></div>
 
@@ -2763,10 +2766,24 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
        "le pagué la factura 1-23". Es lo que después permite discutir un saldo
        renglón por renglón. -->
   <div class="ab-modal-overlay" id="sg-pago-modal">
-    <div class="ab-modal" style="max-width:820px">
+    <style>
+      /* NADA DE BARRAS LATERALES — convención del proyecto (ver CLAUDE.md).
+         .ab-table-wrap trae su propio overflow-x:auto desde la clase, así que
+         hace falta el !important para ganarle. */
+      #sg-pago-modal .ab-modal{max-width:min(1150px, 96vw);width:96vw}
+      #sg-pago-modal .pa-tbl{width:100%;table-layout:fixed}
+      #sg-pago-modal .pa-tbl th,#sg-pago-modal .pa-tbl td{
+        padding:6px 9px;font-size:12.5px;white-space:nowrap;
+        overflow:hidden;text-overflow:ellipsis}
+      #sg-pago-modal .pa-tbl td.pg-partida{white-space:normal;word-break:break-word}
+      #sg-pago-modal .ab-table-wrap{overflow-x:hidden !important}
+      @media(max-width:900px){ #sg-pago-modal .ab-table-wrap{overflow-x:auto !important} }
+    </style>
+    <div class="ab-modal">
       <div class="mhd"><div class="mht" id="sg-pago-tit">Registrar pago</div>
         <button class="mcl" onclick="closeMB('sg-pago-modal')">×</button></div>
       <div class="mbd">
+        <div id="sg-pago-aviso"></div>
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px">
           <div class="fl"><label>Fecha</label><input type="date" id="sg-pago-fecha"></div>
           <div class="fl"><label>De qué cuenta sale</label><select id="sg-pago-cuenta"></select></div>
@@ -2782,11 +2799,31 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
         <div style="font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:.04em;
              color:var(--mut);margin:14px 0 6px">Qué facturas cancela</div>
         <div class="ab-table-wrap"><table class="pa-tbl">
-          <thead><tr><th>Fecha</th><th>Comprobante</th><th>Partida</th>
-            <th style="text-align:right">Total</th><th style="text-align:right">Pendiente</th>
-            <th style="text-align:right;width:150px">Se imputa</th></tr></thead>
+          <thead><tr><th style="width:96px">Fecha</th><th style="width:130px">Comprobante</th>
+            <th>Partida</th>
+            <th style="width:130px;text-align:right">Total</th>
+            <th style="width:130px;text-align:right">Pendiente</th>
+            <th style="width:190px;text-align:right">Se imputa</th></tr></thead>
           <tbody id="sg-pago-tb"><tr><td colspan="6" class="emp">Cargando…</td></tr></tbody>
         </table></div>
+        <!-- ── EL ANTICIPO ────────────────────────────────────────────────
+             La seña que pide el productor para largar el camión: sale plata
+             antes de que exista la factura, así que no hay a qué imputarla.
+             Queda a cuenta —baja el saldo igual, se le entregó plata— y se
+             aplica cuando llega el comprobante. -->
+        <div class="sg-oc-box" style="margin-top:12px">
+          <div class="sg-oc-box-tit">A cuenta (anticipo)</div>
+          <div style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap">
+            <div class="fl" style="margin:0"><label>Importe sin imputar</label>
+              <input type="text" inputmode="decimal" id="sg-pago-acuenta" placeholder="$ 0"
+                     style="width:180px;text-align:right"
+                     oninput="this.value=sgMilFmtLive(this.value);sgPagoTotal()"></div>
+            <div style="font-size:11.5px;color:var(--mut);flex:1;min-width:220px">
+              Para cuando se paga antes de tener la factura. Baja el saldo del
+              proveedor y queda disponible para aplicar después.
+            </div>
+          </div>
+        </div>
         <div id="sg-pago-total" style="text-align:right;font-size:15px;font-weight:700;margin-top:10px"></div>
         <div class="fl" style="margin-top:8px"><label>Notas</label><input id="sg-pago-notas"></div>
         <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px">
@@ -4919,19 +4956,36 @@ function sgPagoOpen(provId, nombre){
   SG_PAGO = { provId: provId, facturas: [] };
   var t = eid('sg-pago-tit'); if (t) t.textContent = 'Registrar pago — ' + nombre;
   var f = eid('sg-pago-fecha'); if (f) f.value = new Date().toISOString().slice(0, 10);
-  ['sg-pago-ref', 'sg-pago-notas'].forEach(function(id){ var el = eid(id); if (el) el.value = ''; });
+  ['sg-pago-ref', 'sg-pago-notas', 'sg-pago-acuenta'].forEach(function(id){
+    var el = eid(id); if (el) el.value = '';
+  });
 
   api('/api/sg/pagos/cuentas').then(function(r){
     var cts = (r && r.ok) ? r.data : [];
     var sel = eid('sg-pago-cuenta'); if (!sel) return;
     // Sin cuenta contable el pago no puede entrar al libro: se muestra, pero
     // avisando, en vez de dejar elegirla y fallar recién al guardar.
+    var usables = cts.filter(function(c){ return c.cuenta_contable_id; });
     sel.innerHTML = cts.length
       ? cts.map(function(c){
           return '<option value="' + c.id + '"' + (c.cuenta_contable_id ? '' : ' disabled')
             + '>' + esc(c.nombre) + (c.cuenta_contable_id ? '' : ' — sin cuenta contable') + '</option>';
         }).join('')
-      : '<option value="">No hay cuentas cargadas en Caja y Bancos</option>';
+      : '<option value="">— no hay cuentas cargadas —</option>';
+    // SIN CUENTA NO HAY PAGO, y el desplegable solo no lo explica: se dice qué
+    // falta y dónde se arregla, en vez de dejar el botón fallando.
+    var av = eid('sg-pago-aviso');
+    if (av) {
+      av.innerHTML = usables.length ? '' :
+        '<div style="border:1.5px solid #e0a72e;background:rgba(224,167,46,.10);border-radius:8px;'
+        + 'padding:9px 11px;margin-bottom:10px;font-size:12.5px;color:#9a3412">'
+        + (cts.length
+            ? '⚠️ Ninguna de las cuentas de Caja y Bancos tiene cuenta contable asignada. '
+              + 'Sin eso el pago no puede entrar al libro: asignásela en Caja y Bancos.'
+            : '⚠️ Todavía no hay ninguna cuenta cargada en Caja y Bancos. Cargá el banco o la caja '
+              + 'de donde sale la plata, con su cuenta contable, y volvé acá.')
+        + '</div>';
+    }
   });
 
   api('/api/sg/pagos/pendientes/' + provId).then(function(r){
@@ -4948,13 +5002,18 @@ function sgPagoPintar(){
     var nro = (f.punto_venta ? f.punto_venta + '-' : '') + (f.numero || '');
     return '<tr><td>' + escH(f.fecha_emision || '—') + '</td>'
       + '<td>' + escH(TIPO[f.tipo_comprobante] || f.tipo_comprobante || '') + ' <code>' + escH(nro) + '</code></td>'
-      + '<td style="font-family:monospace;font-size:11.5px">' + escH(f.partida || '—') + '</td>'
+      + '<td class="pg-partida" style="font-family:monospace;font-size:11.5px">'
+        + escH(f.partida || '—') + '</td>'
       + '<td style="text-align:right">' + sgMoney(f.total) + '</td>'
       + '<td style="text-align:right"><b>' + sgMoney(f.pendiente) + '</b></td>'
-      + '<td style="text-align:right">'
+      + '<td style="text-align:right;white-space:nowrap">'
         + '<input type="text" inputmode="decimal" id="sg-pago-imp-' + i + '" placeholder="$ 0"'
-        + ' style="width:130px;text-align:right"'
-        + ' oninput="this.value=sgMilFmtLive(this.value);sgPagoTotal()"></td></tr>';
+        + ' style="width:120px;text-align:right"'
+        + ' oninput="this.value=sgMilFmtLive(this.value);sgPagoTotal()">'
+        // Pagar la factura entera es el caso normal; escribir el número a mano
+        // es la excepción. El pago parcial sigue siendo escribir menos.
+        + ' <button class="btn bo bs" type="button" title="Imputar todo lo pendiente"'
+        + ' onclick="sgPagoTodo(' + i + ')">todo</button></td></tr>';
   }).join('')
     // Sin facturas contabilizadas no hay a qué imputar: se dice por qué, que es
     // distinto de "no debe nada".
@@ -4963,17 +5022,34 @@ function sgPagoPintar(){
   sgPagoTotal();
 }
 
-// El botón "todo" de cada fila sería lindo, pero lo que hace falta primero es
-// ver cuánto suma lo que se está imputando contra lo que se va a pagar.
+// Imputar todo lo que le queda a esa factura. El pago parcial es escribir menos.
+function sgPagoTodo(i){
+  var f = SG_PAGO.facturas[i]; if (!f) return;
+  var el = eid('sg-pago-imp-' + i);
+  if (el) { el.value = sgMilShow(f.pendiente); sgPagoTotal(); }
+}
+
+// Lo imputado a facturas más lo que va a cuenta. Se muestra desglosado: son dos
+// cosas distintas y de eso depende qué queda disponible después.
 function sgPagoTotal(){
-  var t = 0;
+  var imp = 0;
   SG_PAGO.facturas.forEach(function(_, i){
     var v = sgMilParse((eid('sg-pago-imp-' + i) || {}).value);
-    if (v) t += v;
+    if (v) imp += v;
   });
+  var ac = sgMilParse((eid('sg-pago-acuenta') || {}).value) || 0;
+  var t = Math.round((imp + ac) * 100) / 100;
   var el = eid('sg-pago-total');
-  if (el) el.innerHTML = t > 0 ? 'Total del pago: ' + sgMoney(t) : '';
-  return Math.round(t * 100) / 100;
+  if (el) {
+    el.innerHTML = t > 0
+      ? ((imp > 0 && ac > 0)
+          ? '<span style="font-size:12px;font-weight:400;color:var(--mut)">'
+            + sgMoney(imp) + ' a facturas + ' + sgMoney(ac) + ' a cuenta</span><br>'
+            + 'Total del pago: ' + sgMoney(t)
+          : 'Total del pago: ' + sgMoney(t))
+      : '';
+  }
+  return t;
 }
 
 function sgPagoGuardar(){
@@ -4982,7 +5058,10 @@ function sgPagoGuardar(){
     var v = sgMilParse((eid('sg-pago-imp-' + i) || {}).value);
     if (v > 0) imputaciones.push({ factura_id: f.id, monto: v });
   });
-  if (!imputaciones.length) { toast('Poné cuánto se le imputa a cada factura', 'er'); return; }
+  var aCuenta = sgMilParse((eid('sg-pago-acuenta') || {}).value) || 0;
+  if (!imputaciones.length && !(aCuenta > 0)) {
+    toast('Poné cuánto se imputa a las facturas, o cuánto va a cuenta', 'er'); return;
+  }
   var cuenta = (eid('sg-pago-cuenta') || {}).value;
   if (!cuenta) { toast('Elegí de qué cuenta sale la plata', 'er'); return; }
   api('/api/sg/pagos', 'POST', {
@@ -4992,6 +5071,7 @@ function sgPagoGuardar(){
     forma_pago: (eid('sg-pago-forma') || {}).value,
     referencia: (eid('sg-pago-ref') || {}).value,
     notas: (eid('sg-pago-notas') || {}).value,
+    a_cuenta: aCuenta,
     imputaciones: imputaciones
   }).then(function(r){
     if (!r || !r.ok) { toast((r && r.error) || 'No se pudo registrar el pago', 'er'); return; }
@@ -5133,6 +5213,50 @@ function sgOcBadge(e){
 }
 
 // ── Órdenes de compra ──
+// ── CÓMO SE CUENTA UNA PARTIDA ──────────────────────────────────────────
+// Las dos pantallas que listan partidas —Órdenes de compra y OC recibidas— la
+// cuentan igual. Estaban cada una con su criterio: una en bultos con el importe
+// acordado, la otra en kilos pedidos contra recibidos, y eran la misma compra.
+//
+// LA COLUMNA NO CAMBIA DE UNIDAD A MITAD DE CAMINO. Si la compra se pactó en
+// cajones se mira en cajones, aunque el camión se haya pesado sin contarlos: la
+// orden dice cuántos kilos entran en cada uno y de ahí salen.
+function sgOcCantidad(o){
+  var blt = Number(o.bultos_recibidos_total) || 0;
+  var kg  = Number(o.kg_recibidos_total) || 0;
+  var bltEst = Number(o.bultos_estimados) || 0;
+  var kgEst  = Number(o.total_estimado_kg) || 0;
+  var porBultos = Number(o.items_por_bulto) > 0;
+  var bltEq = Math.round(Number(o.bultos_equivalentes) || 0);
+  if (porBultos && bltEq > 0) {
+    return '<b>' + nr(bltEq) + '</b>'
+      + '<div class="sg-oc-sub">' + nr(kg) + ' kg'
+      // De dónde salió el número: contados en la playa, o sacados del peso.
+      + (o.lotes_sin_contar > 0 ? (blt > 0 ? ' · parte por peso' : ' · por peso') : '')
+      + '</div>';
+  }
+  if (kg > 0) return '<b>' + nr(kg) + '</b> kg';
+  if (porBultos && bltEst > 0) {
+    return '<span style="color:var(--mut)">' + nr(bltEst) + '</span><div class="sg-oc-sub">a recibir</div>';
+  }
+  if (kgEst > 0) {
+    return '<span style="color:var(--mut)">' + nr(kgEst) + ' kg</span><div class="sg-oc-sub">a recibir</div>';
+  }
+  return '—';
+}
+
+// Lo acordado por lo que entró, o el estimado mientras no entró nada. En una
+// liquidación de pizarra sin precio no hay importe: decía "$0", que se lee como
+// que la compra no vale nada.
+function sgOcImporte(o){
+  if (Number(o.importe) > 0) {
+    return '<b>' + sgMoney(o.importe) + '</b>'
+      + (o.importe_es_estimado ? '<div class="sg-oc-sub">estimado</div>' : '');
+  }
+  if (o.tipo_precio === 'pizarra') return '<span style="color:var(--mut)">a liquidar</span>';
+  return '<span style="color:var(--mut)">—</span>';
+}
+
 // ── QUÉ ESTÁ ESPERANDO ESTA PARTIDA ─────────────────────────────────────
 // UNA sola columna con color, y es la que contesta la pregunta con la que se
 // mira esta pantalla: ¿qué falta hacer acá?
@@ -5214,52 +5338,9 @@ function sgOcPintar(){
       if(o.estado==='abierta'||o.estado==='recibida_parcial') acc+='<button class="btn bo bs" onclick="sgRecOpen('+o.id+')">📥</button> ';
       if(o.estado==='abierta') acc+='<button class="btn bd bs" onclick="sgOcAnular('+o.id+')">✖</button>';
 
-      // ── LOS BULTOS, QUE ES COMO SE COMPRA ─────────────────────────────
-      // Si ya entró, lo que entró; si no, lo que se espera. Los kilos van
-      // abajo en chico: siguen siendo los que mandan para el costo, pero no
-      // son el número con el que se controla contra el proveedor.
-      var blt = Number(o.bultos_recibidos_total) || 0;
-      var kg  = Number(o.kg_recibidos_total) || 0;
-      var bltEst = Number(o.bultos_estimados) || 0;
-      var kgEst  = Number(o.total_estimado_kg) || 0;
-      // LA COLUMNA NO CAMBIA DE UNIDAD A MITAD DE CAMINO. Si la compra se pactó
-      // en cajones, se mira en cajones — aunque el camión se haya pesado sin
-      // contarlos: la orden dice cuántos kilos entran en cada uno, y de ahí
-      // salen. Antes esta misma columna mostraba "2.000 kg" en una fila y "180"
-      // en la de abajo, bajo el título "Bultos".
-      var porBultos = Number(o.items_por_bulto) > 0;
-      var bltEq = Math.round(Number(o.bultos_equivalentes) || 0);
-      var cant;
-      if (porBultos && bltEq > 0) {
-        cant = '<b>' + nr(bltEq) + '</b>'
-          + '<div class="sg-oc-sub">' + nr(kg) + ' kg'
-          // De dónde salió el número: contados en la playa, o sacados del peso.
-          // Sin esto, un cajón contado y un cajón calculado se ven igual.
-          + (o.lotes_sin_contar > 0 ? (blt > 0 ? ' · parte por peso' : ' · por peso') : '')
-          + '</div>';
-      } else if (kg > 0) {
-        // Pactada por kilo: se muestra en kilos, que es como se compró.
-        cant = '<b>' + nr(kg) + '</b> kg';
-      } else if (porBultos && bltEst > 0) {
-        // Todavía no entró. El estimado en cajones sólo vale si se pactó así:
-        // cargada por kilo, ese número sale de una división y nadie lo pactó.
-        cant = '<span style="color:var(--mut)">' + nr(bltEst) + '</span><div class="sg-oc-sub">a recibir</div>';
-      } else if (kgEst > 0) {
-        cant = '<span style="color:var(--mut)">' + nr(kgEst) + ' kg</span><div class="sg-oc-sub">a recibir</div>';
-      } else { cant = '—'; }
 
-      // ── EL IMPORTE ────────────────────────────────────────────────────
-      // Lo acordado por lo que entró, que es la cuenta que se controla contra
-      // el proveedor. Mientras no entró nada, el estimado, y se aclara. En una
-      // liquidación de pizarra no hay importe todavía: decía "$0", que se lee
-      // como que la compra no vale nada.
-      var imp;
-      if (Number(o.importe) > 0) {
-        imp = '<b>' + sgMoney(o.importe) + '</b>'
-          + (o.importe_es_estimado ? '<div class="sg-oc-sub">estimado</div>' : '');
-      } else if (o.tipo_precio === 'pizarra') {
-        imp = '<span style="color:var(--mut)">a liquidar</span>';
-      } else { imp = '<span style="color:var(--mut)">—</span>'; }
+      var cant = sgOcCantidad(o);
+      var imp = sgOcImporte(o);
 
       // Cómo se pactó el precio. Lo que no es una compra normal —rápida, finca
       // propia, retroactiva— se aclara acá abajo: es una rareza que conviene
@@ -6101,15 +6182,21 @@ function sgLoadOcRecibidas(){
       var entradas = n > 1
         ? '<b title="Entró en ' + n + ' veces">' + n + '</b>'
         : (n === 1 ? '1' : '—');
+      // LA MISMA PARTIDA NO SE CUENTA DE DOS MANERAS. Esta pantalla mostraba
+      // kilos pedidos contra kilos recibidos y el estado de la mercadería,
+      // mientras el listado de órdenes ya hablaba en bultos, con el importe y
+      // con lo que falta hacer. Eran dos lecturas distintas de lo mismo.
+      var sit = sgOcSituacion(o);
       return '<tr>'
         + '<td><code>' + esc(sgOcId(o)) + '</code></td>'
         + '<td>' + esc(o.fecha_oc || '—') + '</td>'
         + '<td>' + esc(o.proveedor_nombre || '—') + '</td>'
-        + '<td style="text-align:right">' + nr(o.total_estimado_kg) + '</td>'
-        + '<td style="text-align:right">' + nr(o.kg_recibidos_total) + '</td>'
+        + '<td style="text-align:right">' + sgOcCantidad(o) + '</td>'
+        + '<td style="text-align:right">' + sgOcImporte(o) + '</td>'
         + '<td>' + esc(o.remitos_proveedor || '—') + '</td>'
         + '<td style="text-align:center">' + entradas + '</td>'
-        + '<td style="text-align:center">' + sgOcBadge(o.estado) + '</td>'
+        + '<td style="text-align:center"><span class="bdg ' + sit[0] + '">' + sit[1] + '</span>'
+          + (o.cerrada_en ? '<div class="sg-oc-sub">confirmada</div>' : '') + '</td>'
         + '<td style="text-align:right;white-space:nowrap">'
           + '<button class="btn bo bs" onclick="sgOcVer(' + o.id + ')">Ver</button>'
           // La mercadería que se daba por perdida apareció: se reabre y vuelve a

@@ -29,6 +29,21 @@
 - `src/servicios/` — DB, mail, OCR, helpers
 
 ## Convenciones
+
+### NADA DE BARRAS DE DESPLAZAMIENTO LATERAL
+En ninguna pantalla ni modal del proyecto. Si una tabla no entra, se usa el
+ancho disponible (`max-width:98vw`), se fijan anchos por columna con
+`table-layout:fixed`, se deja partir sólo lo de largo variable (concepto,
+descripción) y el resto se trunca con `text-overflow:ellipsis`.
+
+El `.ab-table-wrap` trae su propio `overflow-x:auto` desde la clase, así que
+hace falta `overflow-x:hidden !important` para ganarle. Se deja `auto` sólo bajo
+`@media(max-width:900px)`, que es un teléfono. Hay dos ejemplos hechos en
+`panel.html`: `#sg-ccficha-modal` y `#sg-pago-modal`.
+
+Por qué: para leer un saldo o un total había que arrastrar la tabla, y el número
+que importa suele ser el de la última columna.
+
 - Usuario admin tiene rol `'admin'`. Hay flag `solo_lectura` que NO aplica a admin.
 - Auth por cookie `lnb_user` (JSON con id, nombre, rol, etc)
 - Las acciones de cambio (POST/PUT/PATCH/DELETE) van con `requireAuth`
