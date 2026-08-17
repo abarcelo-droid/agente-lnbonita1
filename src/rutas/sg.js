@@ -1689,10 +1689,22 @@ router.post('/oc', requireAdmin, (req, res) => {
 // que hizo la migración de arranque, así una fila sin migrar no cambia de lado.
 //   pendiente de liquidar  = todavía no tiene su liquidación cargada
 //   pendiente de facturar  = ninguna de sus recepciones tiene número de factura
+// Las partidas que ya tienen su liquidación cargada. En UNA consulta para todas:
+// preguntarlo por fila serían N consultas para pintar una lista. La tabla es del
+// módulo de Abasto, así que si por orden de carga todavía no existe se sigue sin
+// ella en vez de romper la pantalla entera.
+function partidasConLiquidacion(db) {
+  try {
+    return new Set(db.prepare(
+      'SELECT DISTINCT oc_id FROM liquidaciones WHERE oc_id IS NOT NULL AND eliminado_en IS NULL')
+      .all().map((r) => Number(r.oc_id)));
+  } catch (_) { return new Set(); }
+}
+
 function partidasRecibidas(db, comoSeDocumenta) {
   return db.prepare(`
     SELECT o.id, o.numero, o.trazabilidad, o.fecha_oc, o.tipo_precio, o.tipo_fiscal, o.estado,
-           o.cerrada_en, o.total_estimado_kg,
+           o.cerrada_en, o.liquidada_en, o.total_estimado_kg,
            p.razon_social AS proveedor_nombre,
            (SELECT COALESCE(SUM(l.kg_reales),0) FROM sg_lotes l
               JOIN sg_oc_items i ON i.id = l.oc_item_id
@@ -1738,13 +1750,11 @@ router.get('/partidas-a-liquidar', requireAuth, (req, res) => {
     // La tabla de liquidaciones la crea el módulo de Abasto al arrancar. Si por
     // orden de carga todavía no existe, la bandeja muestra todo antes que
     // romperse: es preferible una partida de más a una pantalla en error.
-    let conLiq = new Set();
-    try {
-      conLiq = new Set(db.prepare(
-        'SELECT DISTINCT oc_id FROM liquidaciones WHERE oc_id IS NOT NULL AND eliminado_en IS NULL')
-        .all().map((r) => Number(r.oc_id)));
-    } catch (_) { /* sin tabla todavía */ }
-    const rows = partidasRecibidas(db, 'liquidacion').filter((r) => !conLiq.has(Number(r.id)));
+    const conLiq = partidasConLiquidacion(db);
+    // liquidada_en: la marca de "esto ya está", sea porque se le cargó la
+    // liquidación desde acá o porque un admin la dio por liquidada a mano.
+    const rows = partidasRecibidas(db, 'liquidacion')
+      .filter((r) => !r.liquidada_en && !conLiq.has(Number(r.id)));
     res.json({ ok: true, data: rows });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
@@ -1847,14 +1857,23 @@ const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 // control contra la factura y el listado de partidas agrupables— y si cada uno
 // la calculara por su cuenta, alcanzaría con tocar una para que el aviso de "no
 // da contra lo acordado" empezara a mentir.
+// La consulta se compila UNA vez por base y se reusa: el listado de órdenes la
+// llama una vez por fila, y compilar la misma sentencia doscientas veces para
+// pintar una pantalla es trabajo que no hace falta.
+const _stmtAcordado = new WeakMap();
 function acordadoDeOC(db, ocId) {
-  const its = db.prepare(`SELECT i.id, i.precio_estimado_por_kg,
+  if (!_stmtAcordado.has(db)) _stmtAcordado.set(db, db.prepare(`SELECT i.id, i.precio_estimado_por_kg,
       COALESCE(i.kg_por_bulto, ps.factor_conversion) AS kg_por_bulto,
       (SELECT COALESCE(SUM(kg_reales),0) FROM sg_lotes WHERE oc_item_id=i.id AND activo=1) AS kg_recibidos,
-      (SELECT COALESCE(SUM(bultos),0)    FROM sg_lotes WHERE oc_item_id=i.id AND activo=1) AS bultos_recibidos
+      (SELECT COALESCE(SUM(bultos),0)    FROM sg_lotes WHERE oc_item_id=i.id AND activo=1) AS bultos_recibidos,
+      -- LOS KILOS DE LOS BULTOS QUE SÍ SE CONTARON, aparte. Es lo que separa un
+      -- ítem que entró todo contado de uno que entró mitad y mitad.
+      (SELECT COALESCE(SUM(kg_reales),0) FROM sg_lotes
+        WHERE oc_item_id=i.id AND activo=1 AND bultos IS NOT NULL AND bultos > 0) AS kg_con_bultos
     FROM sg_oc_items i
     LEFT JOIN sg_presentaciones ps ON ps.id=i.presentacion_id
-    WHERE i.oc_id=?`).all(ocId);
+    WHERE i.oc_id=?`));
+  const its = _stmtAcordado.get(db).all(ocId);
   let total = 0;
   const detalle = [];
   for (const it of its) {
@@ -1864,8 +1883,23 @@ function acordadoDeOC(db, ocId) {
     const precioBulto = (pk != null && kpb > 0) ? r2(pk * kpb) : null;
     let importe = null, base = null;
     if (pk != null) {
-      if (bultos > 0 && precioBulto != null) { importe = r2(bultos * precioBulto); base = 'bulto'; }
-      else { importe = r2(it.kg_recibidos * pk); base = 'kilo'; }
+      // ── CADA LOTE SE PAGA CON LA BASE QUE LE CORRESPONDE ────────────────
+      // Antes la base se elegía UNA vez por ítem: si había aunque fuera un
+      // bulto contado, se cobraba TODO por bulto y los lotes que entraron
+      // pesados —sin contar cajones— no se pagaban. Un camión que descarga 60
+      // cajones y después 800 kg a granel del mismo producto se liquidaba por
+      // los 60 cajones y los 800 kg desaparecían de la cuenta.
+      //
+      // Ahora los cajones se pagan por cajón y el resto por kilo, que es
+      // exactamente como se pactó cada parte.
+      const kgSueltos = Math.max(0, r2(Number(it.kg_recibidos) - Number(it.kg_con_bultos)));
+      if (bultos > 0 && precioBulto != null) {
+        importe = r2(bultos * precioBulto + kgSueltos * pk);
+        base = kgSueltos > 0 ? 'mixto' : 'bulto';
+      } else {
+        importe = r2(it.kg_recibidos * pk);
+        base = 'kilo';
+      }
       total = r2(total + importe);
     }
     detalle.push({ oc_item_id: it.id, precio_por_bulto: precioBulto, importe, base });
@@ -2594,6 +2628,40 @@ router.put('/lotes/:id/corregir', requireAdmin, (req, res) => {
   } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
 });
 
+// ── DAR UNA PARTIDA POR LIQUIDADA ────────────────────────────────────────
+// La forma normal de sacar una partida de la bandeja es cargarle la liquidación
+// desde ahí. Pero hay dos casos que quedarían trabados para siempre: la
+// liquidación que se cargó por el botón suelto (sin decir de qué partida es) y
+// la que se emitió fuera del sistema. Sin esta salida, esas partidas se
+// acumulan en la bandeja sin que nadie pueda hacer nada.
+//
+// Sólo admin y con motivo, como todo lo que se corrige a mano.
+router.post('/oc/:id/liquidada', requireAdmin, (req, res) => {
+  const db = getDb();
+  try {
+    const motivo = val(req.body && req.body.motivo);
+    if (!motivo) return res.status(400).json({ ok: false, error: 'Escribí por qué se da por liquidada' });
+    const oc = db.prepare('SELECT * FROM sg_oc WHERE id=? AND activo=1').get(req.params.id);
+    if (!oc) return res.status(404).json({ ok: false, error: 'Orden no encontrada' });
+    const doc = oc.documenta
+      || (oc.tipo_precio === 'pizarra' || oc.tipo_fiscal === 'liquidacion' ? 'liquidacion' : 'factura');
+    if (doc !== 'liquidacion') {
+      return res.status(400).json({ ok: false,
+        error: 'Esta partida se documenta con factura de compra, no con liquidación.' });
+    }
+    if (oc.liquidada_en) return res.status(400).json({ ok: false, error: 'Ya estaba dada por liquidada' });
+
+    db.transaction(() => {
+      anotarEdicion(db, { tabla: 'sg_oc', registroId: oc.id, campo: 'liquidada_en',
+        antes: null, despues: 'liquidada', motivo, ocId: oc.id, userId: uid(req) });
+      db.prepare(`UPDATE sg_oc SET liquidada_en=datetime('now','localtime'), liquidada_por=?,
+        modificado_en=datetime('now','localtime'), modificado_por=? WHERE id=?`)
+        .run(uid(req), uid(req), oc.id);
+    })();
+    res.json({ ok: true, data: { id: Number(oc.id) } });
+  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+
 // ── CAMBIAR SI LA PARTIDA SE LIQUIDA O SE FACTURA ────────────────────────
 // El comprador se equivoca al cargar la orden y la partida termina en la
 // bandeja que no es. Sólo admin, con motivo, y queda registrado — igual que
@@ -2648,6 +2716,27 @@ router.put('/oc/:id/documenta', requireAdmin, (req, res) => {
       db.prepare(`UPDATE sg_oc SET documenta=?, tipo_precio=?, tipo_fiscal=?,
         modificado_en=datetime('now','localtime'), modificado_por=? WHERE id=?`)
         .run(destino, precioNuevo, fiscalNuevo, uid(req), oc.id);
+      // Y SE DA DE BAJA EL COMPROBANTE DEL OTRO CIRCUITO. Si esta partida tenía
+      // una factura de compra cargada —con su asiento ya anulado, que es lo
+      // único que el freno de arriba deja pasar— y ahora se documenta con
+      // liquidación, esa factura no puede quedar viva: la partida terminaría con
+      // dos comprobantes por el mismo importe y nada avisándolo.
+      if (destino === 'liquidacion') {
+        const bajas = db.prepare(`UPDATE sg_facturas_compra SET activo=0,
+            modificado_en=datetime('now','localtime'), modificado_por=?
+          WHERE activo=1 AND (oc_id = ?
+             OR id IN (SELECT fo.factura_id FROM sg_factura_compra_ocs fo WHERE fo.oc_id = ?))`)
+          .run(uid(req), oc.id, oc.id).changes;
+        if (bajas) {
+          anotarEdicion(db, { tabla: 'sg_oc', registroId: oc.id, campo: 'factura_compra',
+            antes: 'cargada', despues: 'dada de baja', motivo, ocId: oc.id, userId: uid(req) });
+        }
+        // Y el número que quedó anotado en la recepción, que es de donde la
+        // bandeja de facturas lee que la partida ya no está pendiente.
+        db.prepare(`UPDATE sg_recepciones SET factura_numero=NULL,
+          modificado_en=datetime('now','localtime'), modificado_por=?
+          WHERE oc_id=? AND activo=1 AND factura_numero IS NOT NULL`).run(uid(req), oc.id);
+      }
     })();
     res.json({ ok: true,
       data: { id: Number(oc.id), documenta: destino, tipo_precio: precioNuevo, tipo_fiscal: fiscalNuevo } });
@@ -2908,6 +2997,19 @@ router.get('/oc', requireAuth, (req, res) => {
                WHERE i.oc_id = o.id AND l.activo = 1) AS bultos_recibidos_total,
              (SELECT COALESCE(SUM(i.cantidad_estimada_presentaciones), 0)
                 FROM sg_oc_items i WHERE i.oc_id = o.id) AS bultos_estimados,
+             -- ¿La compra se pactó EN BULTOS? Cuando se carga por kilo, los
+             -- "bultos estimados" salen de dividir kilos por el factor y dan
+             -- números que nadie pactó (1.000 kg / 18 = 55,5 cajones). Ese
+             -- número no se muestra: no existe.
+             (SELECT COUNT(*) FROM sg_oc_items i
+               WHERE i.oc_id = o.id AND i.modo_carga = 'bulto') AS items_por_bulto,
+             -- Y si ENTRÓ mitad contada y mitad pesada, el total de bultos no
+             -- cuenta toda la mercadería: hay que decirlo, no mostrar 60 al
+             -- lado de 2.000 kg como si fueran lo mismo.
+             (SELECT COUNT(*) FROM sg_lotes l
+                JOIN sg_oc_items i ON i.id = l.oc_item_id
+               WHERE i.oc_id = o.id AND l.activo = 1
+                 AND COALESCE(l.bultos, 0) = 0 AND l.kg_reales > 0) AS lotes_sin_contar,
              -- Y para decir QUÉ FALTA: con qué se documenta, y si ese papel ya
              -- llegó. Sin esto el listado dice "Rec. total" y no se sabe si la
              -- partida está esperando la factura desde hace tres semanas.
@@ -2921,19 +3023,10 @@ router.get('/oc', requireAuth, (req, res) => {
       FROM sg_oc o LEFT JOIN sg_proveedores p ON p.id=o.proveedor_id
       WHERE ${where.join(' AND ')} ORDER BY o.id DESC`).all(...params);
 
-    // Las que ya tienen su liquidación cargada. Se resuelve en una consulta para
-    // todas juntas: preguntarlo por fila serían N consultas para pintar una
-    // lista. La tabla es del módulo de Abasto, así que si todavía no existe se
-    // sigue sin ella en vez de romper el listado entero.
-    let conLiq = new Set();
-    try {
-      conLiq = new Set(db.prepare(
-        'SELECT DISTINCT oc_id FROM liquidaciones WHERE oc_id IS NOT NULL AND eliminado_en IS NULL')
-        .all().map((r) => Number(r.oc_id)));
-    } catch (_) { /* sin tabla todavía */ }
+    const conLiq = partidasConLiquidacion(db);
 
     for (const o of rows) {
-      o.liquidada = conLiq.has(Number(o.id)) ? 1 : 0;
+      o.liquidada = (o.liquidada_en || conLiq.has(Number(o.id))) ? 1 : 0;
       // EL IMPORTE DE LA ORDEN. Si ya entró mercadería, lo que vale es lo que
       // se acordó por lo que ENTRÓ —la misma cuenta que hace la pantalla de
       // facturas, en bultos por el precio del bulto—, no el estimado con el que
@@ -2941,8 +3034,26 @@ router.get('/oc', requireAuth, (req, res) => {
       // hay, y el listado lo dice.
       const entro = (Number(o.kg_recibidos_total) || 0) > 0
         || (Number(o.bultos_recibidos_total) || 0) > 0;
-      o.importe = entro ? acordadoDeOC(db, o.id).total : (Number(o.total_estimado_monto) || 0);
+      // SIEMPRE NETO, entre o no entre la mercadería. total_estimado_monto trae
+      // el IVA sumado cuando la orden lo discrimina, y acordadoDeOC es neto: el
+      // importe daba un salto al recibirse que no era ni un descuento ni un
+      // error de carga, sólo dos bases distintas en la misma columna.
+      const estimado = (o.total_neto != null && o.total_neto !== '')
+        ? Number(o.total_neto) : (Number(o.total_estimado_monto) || 0);
+      o.importe = entro ? acordadoDeOC(db, o.id).total : estimado;
       o.importe_es_estimado = entro ? 0 : 1;
+      // LA DE PIZARRA, UNA VEZ QUE SE LE CERRÓ EL PRECIO. acordadoDeOC sale del
+      // precio pactado en la orden, y una liquidación de venta nace sin precio:
+      // devuelve 0 siempre. Pero cuando se le cierra el precio a los lotes la
+      // mercadería YA está valorizada, y el listado seguía diciendo "a liquidar"
+      // sobre una partida de un millón y medio. Ahí el importe son los lotes.
+      if (entro && !o.importe) {
+        const c = db.prepare(`SELECT COALESCE(SUM(l.costo_base), 0) t,
+            COUNT(*) n, SUM(CASE WHEN l.precio_unitario_kg IS NULL THEN 1 ELSE 0 END) sinprecio
+          FROM sg_lotes l JOIN sg_oc_items i ON i.id = l.oc_item_id
+          WHERE i.oc_id = ? AND l.activo = 1`).get(o.id);
+        if (c && c.n > 0 && !c.sinprecio) o.importe = r2(c.t);
+      }
     }
     res.json({ ok: true, data: rows });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
@@ -3556,7 +3667,15 @@ router.get('/lotes', requireAuth, (req, res) => {
     if (req.query.semaforo) { where.push('l.semaforo=?'); params.push(req.query.semaforo); }       // filtro planilla de stock
     if (req.query.familia) { where.push('pr.familia=?'); params.push(req.query.familia); }           // categoría = familia del producto
     if (req.query.recepcion_id) { where.push('l.recepcion_id=?'); params.push(req.query.recepcion_id); }
-    if (req.query.oc_id) { where.push('l.oc_item_id IN (SELECT id FROM sg_oc_items WHERE oc_id=?)'); params.push(req.query.oc_id); }
+    // TAMBIÉN LOS QUE ENTRARON POR UNA RECEPCIÓN DE ESTA ORDEN sin quedar
+    // colgados de un ítem. Pasa cuando se vincula después una recepción que
+    // llegó suelta: el lote existe, tiene su costo y su stock, pero su
+    // oc_item_id quedó en NULL y no entraba por el filtro de ítems. La ficha de
+    // la orden mostraba esa mercadería como si no hubiera entrado nunca.
+    if (req.query.oc_id) {
+      where.push('(l.oc_item_id IN (SELECT id FROM sg_oc_items WHERE oc_id=?) OR r.oc_id = ?)');
+      params.push(req.query.oc_id, req.query.oc_id);
+    }
     if (req.query.sin_precio === '1') where.push('l.precio_unitario_kg IS NULL');
     if (req.query.ingreso_desde) { where.push('l.fecha_ingreso>=?'); params.push(req.query.ingreso_desde); }
     if (req.query.ingreso_hasta) { where.push('l.fecha_ingreso<=?'); params.push(req.query.ingreso_hasta); }

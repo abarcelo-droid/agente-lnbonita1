@@ -2265,7 +2265,14 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       .sg-oc-search{position:relative}
       .sg-oc-search input{width:100%;box-sizing:border-box}
       .sg-oc-res-it:hover{background:var(--bg)}
-      .sg-oc-sub{margin-left:auto;font-weight:700;font-size:13px;white-space:nowrap;color:var(--tx)}
+      /* El subtotal del ítem, a la derecha de su renglón en el alta de la orden.
+         SE LLAMABA .sg-oc-sub, igual que la sub-línea chiquita y gris de las
+         tablas, en el mismo bloque de estilos y con la misma especificidad: como
+         ésta va después, ganaba siempre. Todo lo que se escribía "abajo en
+         chico" —los kilos bajo los bultos, "estimado", "sin contar bultos"—
+         salía en negrita, del mismo tamaño que el número principal y corrido a
+         la derecha. Justo la jerarquía que esas sub-líneas venían a crear. */
+      .sg-oc-monto{margin-left:auto;font-weight:700;font-size:13px;white-space:nowrap;color:var(--tx)}
       .sg-oc-add{width:100%;border:1.5px dashed var(--bor);background:transparent;color:var(--mut);border-radius:9px;padding:10px;font-size:13px;font-weight:600;cursor:pointer;margin-top:4px}
       .sg-oc-add:hover{border-color:var(--burg);color:var(--burg)}
       @media(max-width:560px){.sg-oc-card-top{grid-template-columns:1fr}.sg-oc-card-bot input{width:100%}}
@@ -2295,7 +2302,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       <div class="ab-table-wrap"><table class="pa-tbl">
         <!-- Primero lo que se compró: BULTOS e IMPORTE. Después con qué se pactó,
              y al final la única columna con color: qué está esperando la partida. -->
-        <thead><tr><th>Partida</th><th>Fecha</th><th>Proveedor</th><th style="text-align:right">Bultos</th><th style="text-align:right">Importe</th><th>Modalidad</th><th style="text-align:center">Situación</th><th></th></tr></thead>
+        <thead><tr><th>Partida</th><th>Fecha</th><th>Proveedor</th><th style="text-align:right">Bultos</th><th style="text-align:right">Importe</th><th>Condición comercial</th><th style="text-align:center">Situación</th><th></th></tr></thead>
         <tbody id="sg-tb-oc"><tr><td colspan="8" class="emp">Cargando…</td></tr></tbody>
       </table></div>
     </div>
@@ -4635,7 +4642,14 @@ function sgOcBadge(e){
 function sgOcSituacion(o){
   if (o.estado === 'anulada')          return ['ber', 'Anulada'];
   if (o.estado === 'borrador')         return ['bpe', 'Borrador'];
-  if (o.estado === 'abierta')          return ['bpe', 'Esperando mercadería'];
+  if (o.estado === 'abierta') {
+    // Una orden abierta CON mercadería adentro es una que se reabrió. Decir
+    // "esperando mercadería" al lado de 100 bultos y $1.500.000 es la fila
+    // contradiciéndose sola.
+    var entro = (Number(o.bultos_recibidos_total) || 0) > 0
+      || (Number(o.kg_recibidos_total) || 0) > 0;
+    return entro ? ['bcc', 'Reabierta'] : ['bpe', 'Esperando mercadería'];
+  }
   if (o.estado === 'recibida_parcial') return ['bcc', 'Entró a medias'];
   // Ya entró todo: lo que falta es el papel, y cuál depende del circuito.
   if ((o.documenta_calc || 'factura') === 'liquidacion') {
@@ -4663,12 +4677,19 @@ function sgLoadOC(){
       var kgEst  = Number(o.total_estimado_kg) || 0;
       var cant;
       if (blt > 0) {
-        cant = '<b>' + nr(blt) + '</b>' + (kg > 0 ? '<div class="sg-oc-sub">' + nr(kg) + ' kg</div>' : '');
+        // Si además entraron lotes pesados sin contar, el total de bultos NO es
+        // toda la mercadería: se aclara, porque "60" al lado de "2.000 kg" se
+        // lee como que los 2.000 kg vinieron en 60 cajones.
+        cant = '<b>' + nr(blt) + '</b>'
+          + '<div class="sg-oc-sub">' + nr(kg) + ' kg'
+          + (o.lotes_sin_contar > 0 ? ' · parte pesada' : '') + '</div>';
       } else if (kg > 0) {
         // Entró pesada. Poner los kilos pelados bajo el título "Bultos" se lee
         // como si hubieran entrado 2.000 cajones.
         cant = '<b>' + nr(kg) + '</b> kg<div class="sg-oc-sub">sin contar bultos</div>';
-      } else if (bltEst > 0) {
+      } else if (o.items_por_bulto > 0 && bltEst > 0) {
+        // Sólo si la compra se pactó EN BULTOS. Cargada por kilo, el "estimado"
+        // sale de dividir kilos por el factor y da cajones que nadie pactó.
         cant = '<span style="color:var(--mut)">' + nr(bltEst) + '</span><div class="sg-oc-sub">a recibir</div>';
       } else if (kgEst > 0) {
         cant = '<span style="color:var(--mut)">' + nr(kgEst) + ' kg</span><div class="sg-oc-sub">a recibir</div>';
@@ -5049,7 +5070,7 @@ function sgOcRenderItems(){
         +modoBtns
         +'<input type="text" inputmode="numeric" placeholder="'+cantPh+'" value="'+sgMilShow(it.cantidad)+'" oninput="sgOcMilInput(this,'+i+',\'cantidad\')">'
         +(firme?'<input type="text" inputmode="numeric" placeholder="'+precioPh+'" value="'+sgMilShow(it.precio)+'" oninput="sgOcMilInput(this,'+i+',\'precio\')">':'<span style="font-size:11px;color:var(--mut)">pizarra</span>')
-        +'<span class="sg-oc-sub" id="sg-oc-sub-'+i+'"></span>'
+        +'<span class="sg-oc-monto" id="sg-oc-sub-'+i+'"></span>'
       +'</div>'
     +'</div>';
   }).join('');
@@ -5302,11 +5323,15 @@ function sgOcVer(id){
       if (kg > 0) return '<b>' + nr(kg) + '</b> kg<div class="sg-oc-sub">sin contar bultos</div>';
       return '—';
     };
+    // Sin precio cerrado no hay costo: mostrar "$0" en negrita hace parecer que
+    // esa mercadería no vale nada, cuando lo que pasa es que todavía no se
+    // liquidó. Es el mismo error que el listado tenía en la columna de importe.
     var costoDe = function(l){
+      if (l.precio_unitario_kg == null) {
+        return '<span class="bdg bpe">a liquidar</span>';
+      }
       return '<b>' + sgMoney(l.costo_final) + '</b>'
-        + (l.precio_unitario_kg != null
-            ? '<div class="sg-oc-sub">' + sgMoney(l.precio_unitario_kg) + ' /kg</div>'
-            : '<div class="sg-oc-sub"><span class="bdg bpe">pizarra</span></div>');
+        + '<div class="sg-oc-sub">' + sgMoney(l.precio_unitario_kg) + ' /kg</div>';
     };
     var accionesDe = function(l){
       return (l.precio_unitario_kg == null
@@ -5574,10 +5599,33 @@ function sgLiqPartidasLoad(){
           // y todavía no tiene precio.
           + '<button class="btn bb bs" onclick="liqDePartida(' + p.id + ',\'' + esc(p.trazabilidad || '') + '\',\''
             + esc(p.proveedor_nombre || '') + '\')">💲 Liquidar</button>'
+          // LA SALIDA DE EMERGENCIA. Si la liquidación se emitió fuera del
+          // sistema, o se cargó por el botón suelto sin decir de qué partida
+          // era, esta partida no tiene forma de salir de la bandeja: se queda
+          // acá para siempre. Sólo admin y con motivo.
+          + (sgFmEsAdmin()
+              ? ' <button class="btn bo bs" title="Ya se liquidó y no hace falta cargarla acá"'
+                + ' onclick="sgLiqYaEsta(' + p.id + ',\'' + esc(p.trazabilidad || '') + '\')">✔</button>'
+              : '')
         + '</td>');
     }).join('') : '<tr><td colspan="7" class="emp">No hay partidas esperando liquidación. '
         + 'Las que se documentan con liquidación aparecen acá apenas se reciben, '
         + 'y salen cuando se les carga la liquidación.</td></tr>';
+  });
+}
+
+// Dar una partida por liquidada sin cargarle la liquidación acá. Es para la que
+// se liquidó fuera del sistema: sin esto se queda en la bandeja para siempre.
+function sgLiqYaEsta(ocId, partida){
+  if (!confirm('¿Dar por liquidada la partida ' + partida + '?\n\n'
+    + 'Sale de esta bandeja. Usalo sólo si la liquidación ya se emitió y no se va a cargar acá.')) return;
+  var motivo = prompt('¿Por qué? (queda registrado)');
+  if (motivo === null) return;
+  if (!String(motivo).trim()) { toast('Escribí por qué', 'er'); return; }
+  api('/api/sg/oc/' + ocId + '/liquidada', 'POST', { motivo: motivo }).then(function(r){
+    if (!r || !r.ok) { toast((r && r.error) || 'No se pudo', 'er'); return; }
+    toast('Partida dada por liquidada', 'ok');
+    sgLiqPartidasLoad();
   });
 }
 
