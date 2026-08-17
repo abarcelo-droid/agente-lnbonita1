@@ -2897,9 +2897,53 @@ router.get('/oc', requireAuth, (req, res) => {
                 FROM sg_recepciones r
                WHERE r.oc_id = o.id AND r.activo = 1
                  AND r.numero_remito_proveedor IS NOT NULL
-                 AND r.numero_remito_proveedor <> '') AS remitos_proveedor
+                 AND r.numero_remito_proveedor <> '') AS remitos_proveedor,
+             -- ── LO QUE EL LISTADO NECESITA PARA HABLAR EN BULTOS ──────────
+             -- La compra se pacta y se controla en BULTOS. El listado sólo
+             -- tenía kilos, así que el comprador tenía que abrir cada orden
+             -- para saber cuántos cajones eran.
+             (SELECT COALESCE(SUM(l.bultos), 0)
+                FROM sg_lotes l
+                JOIN sg_oc_items i ON i.id = l.oc_item_id
+               WHERE i.oc_id = o.id AND l.activo = 1) AS bultos_recibidos_total,
+             (SELECT COALESCE(SUM(i.cantidad_estimada_presentaciones), 0)
+                FROM sg_oc_items i WHERE i.oc_id = o.id) AS bultos_estimados,
+             -- Y para decir QUÉ FALTA: con qué se documenta, y si ese papel ya
+             -- llegó. Sin esto el listado dice "Rec. total" y no se sabe si la
+             -- partida está esperando la factura desde hace tres semanas.
+             COALESCE(o.documenta, CASE
+                WHEN o.tipo_precio = 'pizarra' THEN 'liquidacion'
+                WHEN o.tipo_fiscal = 'liquidacion' THEN 'liquidacion'
+                ELSE 'factura' END) AS documenta_calc,
+             (SELECT COUNT(*) FROM sg_recepciones r
+               WHERE r.oc_id = o.id AND r.activo = 1
+                 AND r.factura_numero IS NOT NULL AND r.factura_numero <> '') AS con_factura
       FROM sg_oc o LEFT JOIN sg_proveedores p ON p.id=o.proveedor_id
       WHERE ${where.join(' AND ')} ORDER BY o.id DESC`).all(...params);
+
+    // Las que ya tienen su liquidación cargada. Se resuelve en una consulta para
+    // todas juntas: preguntarlo por fila serían N consultas para pintar una
+    // lista. La tabla es del módulo de Abasto, así que si todavía no existe se
+    // sigue sin ella en vez de romper el listado entero.
+    let conLiq = new Set();
+    try {
+      conLiq = new Set(db.prepare(
+        'SELECT DISTINCT oc_id FROM liquidaciones WHERE oc_id IS NOT NULL AND eliminado_en IS NULL')
+        .all().map((r) => Number(r.oc_id)));
+    } catch (_) { /* sin tabla todavía */ }
+
+    for (const o of rows) {
+      o.liquidada = conLiq.has(Number(o.id)) ? 1 : 0;
+      // EL IMPORTE DE LA ORDEN. Si ya entró mercadería, lo que vale es lo que
+      // se acordó por lo que ENTRÓ —la misma cuenta que hace la pantalla de
+      // facturas, en bultos por el precio del bulto—, no el estimado con el que
+      // nació la orden. Si todavía no entró nada, el estimado es lo único que
+      // hay, y el listado lo dice.
+      const entro = (Number(o.kg_recibidos_total) || 0) > 0
+        || (Number(o.bultos_recibidos_total) || 0) > 0;
+      o.importe = entro ? acordadoDeOC(db, o.id).total : (Number(o.total_estimado_monto) || 0);
+      o.importe_es_estimado = entro ? 0 : 1;
+    }
     res.json({ ok: true, data: rows });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
