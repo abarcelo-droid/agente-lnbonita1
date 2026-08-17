@@ -2699,12 +2699,16 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     <div class="ph">
       <div><div class="ph-t">💳 San Gerónimo · Cuenta corriente de proveedores</div>
         <div class="ph-s">Cuánto se le debe a cada uno</div></div>
-      <button class="btn bo" onclick="sgLoadCcProv()">↻ Actualizar</button>
+      <div style="display:flex;gap:8px">
+        <button class="btn bo" onclick="sgCcExportar('excel')">📗 Excel</button>
+        <button class="btn bo" onclick="sgCcExportar('pdf')">🖨 PDF</button>
+        <button class="btn bo" onclick="sgLoadCcProv()">↻ Actualizar</button>
+      </div>
     </div>
     <div style="font-size:12px;color:var(--mut);margin-bottom:10px">
-      Saldo = saldo de apertura (se carga en la ficha del proveedor) + lo que
-      queda por pagar de sus órdenes. Cuando la partida tiene factura cargada, la
-      deuda es la que dice el comprobante — con IVA y percepciones.
+      El saldo es lo que dice la CONTABILIDAD: saldo de apertura + las facturas
+      que ya tienen su asiento, menos lo pagado. Una factura cargada y todavía
+      sin contabilizar no mueve el saldo — se avisa aparte.
     </div>
     <!-- Van a figurar TODOS los proveedores: sin buscador, encontrar uno es
          recorrer la lista con el dedo. Filtra mientras se escribe, sin ir al
@@ -2714,10 +2718,10 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
              style="width:100%;box-sizing:border-box">
     </div>
     <div class="ab-table-wrap"><table class="pa-tbl">
-      <thead><tr><th>Proveedor</th><th style="text-align:right">Saldo apertura</th>
-        <th style="text-align:right">Facturado</th>
-        <th style="text-align:right">Sin factura</th>
-        <th style="text-align:right">Saldo total</th><th></th></tr></thead>
+      <thead><tr><th>Proveedor</th><th style="text-align:right">Apertura</th>
+        <th style="text-align:right">Contabilizado</th>
+        <th style="text-align:right">Saldo</th>
+        <th style="text-align:center">Esperando el libro</th><th></th></tr></thead>
       <tbody id="sg-tb-ccprov"><tr><td colspan="6" class="emp">Cargando…</td></tr></tbody>
     </table></div>
     <div id="sg-ccprov-n" style="font-size:11.5px;color:var(--mut);margin-top:6px"></div>
@@ -2729,7 +2733,20 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
        cuenta corriente. Se muestra todo el histórico, no sólo lo pendiente:
        para discutir un saldo hace falta ver también lo que ya se pagó. -->
   <div class="ab-modal-overlay" id="sg-ccficha-modal">
-    <div class="ab-modal" style="max-width:1000px">
+    <style>
+      /* SIN BARRA LATERAL. La tabla entraba en 1.000px sólo con scroll
+         horizontal: para leer el saldo había que arrastrar. Se le da el ancho
+         de la pantalla, la fecha y los importes no se parten, y el concepto
+         —lo único de largo variable— se achica. */
+      #sg-ccficha-modal .ab-modal{max-width:min(1500px, 96vw)}
+      #sg-ccficha-modal .pa-tbl{width:100%;table-layout:auto}
+      #sg-ccficha-modal .pa-tbl th,#sg-ccficha-modal .pa-tbl td{
+        padding:6px 9px;font-size:12.5px;white-space:nowrap}
+      #sg-ccficha-modal .pa-tbl td.cc-concepto{white-space:normal;min-width:150px}
+      #sg-ccficha-modal .ab-table-wrap{overflow-x:visible}
+      @media(max-width:900px){ #sg-ccficha-modal .ab-table-wrap{overflow-x:auto} }
+    </style>
+    <div class="ab-modal">
       <div class="mhd"><div class="mht" id="sg-ccficha-tit">Cuenta corriente</div>
         <button class="mcl" onclick="closeMB('sg-ccficha-modal')">×</button></div>
       <div class="mbd" id="sg-ccficha-body"></div>
@@ -4700,21 +4717,26 @@ function sgCcProvPintar(){
     : rows.length + ' de ' + SG_CCPROV.length;
   eid('sg-tb-ccprov').innerHTML = rows.length ? rows.map(function(p){
       var ap=Number(p.saldo_inicial)||0;
-      var fac=Number(p.facturado)||0, sf=Number(p.sin_factura)||0;
+      var fac=Number(p.facturado)||0;
       var cero=function(n){ return n ? sgMoney(n) : '<span style="color:var(--mut)">—</span>'; };
-      return '<tr><td>'+esc(p.razon_social)+'</td>'
+      // Lo que está cargado y todavía no entró al libro no suma al saldo, pero
+      // se avisa: sin esto, el que mira la cuenta cree que no se le debe nada.
+      var esp = Number(p.sin_contabilizar) || 0;
+      return '<tr style="cursor:pointer" onclick="sgCcFicha('+p.id+')">'
+        +'<td><b>'+esc(p.razon_social)+'</b></td>'
         +'<td style="text-align:right">'+cero(ap)+'</td>'
-        // Lo que ya tiene comprobante y lo que todavía no son dos cosas
-        // distintas: lo primero es deuda cierta, lo segundo es lo que se
-        // espera facturar. Antes iban sumadas en una sola columna.
-        +'<td style="text-align:right">'+cero(fac)
-          +(p.sin_contabilizar > 0
-              ? '<div class="sg-oc-sub">'+nr(p.sin_contabilizar)+' sin contabilizar</div>' : '')
+        +'<td style="text-align:right">'+cero(fac)+'</td>'
+        +'<td style="text-align:right;font-weight:700;font-size:14px">'+sgMoney(p.saldo)+'</td>'
+        +'<td style="text-align:center">'
+          +(esp > 0
+              ? '<span class="bdg bpe" title="Facturas cargadas sin asiento: no suman al saldo">'
+                + nr(esp) + ' factura' + (esp === 1 ? '' : 's') + '</span>'
+                + (p.monto_sin_contabilizar
+                    ? '<div class="sg-oc-sub">'+sgMoney(p.monto_sin_contabilizar)+'</div>' : '')
+              : '<span style="color:var(--mut)">—</span>')
           +'</td>'
-        +'<td style="text-align:right">'+cero(sf)+'</td>'
-        +'<td style="text-align:right;font-weight:700">'+sgMoney(p.saldo)+'</td>'
         +'<td style="text-align:right;white-space:nowrap">'
-          +'<button class="btn bo bs" onclick="sgCcFicha('+p.id+')">👁 Ver</button></td></tr>';
+          +'<button class="btn bo bs" onclick="event.stopPropagation();sgCcFicha('+p.id+')">👁 Ver</button></td></tr>';
     }).join('') : ('<tr><td colspan="6" class="emp">'
         + (q ? 'Ningún proveedor con ese nombre.' : 'Sin saldos ni deuda pendiente.') + '</td></tr>');
 }
@@ -4723,45 +4745,206 @@ function sgCcProvPintar(){
 function sgCcFicha(provId){
   api('/api/sg/cc-proveedores/' + provId).then(function(r){
     if (!r || !r.ok) { toast((r && r.error) || 'No se pudo abrir la ficha', 'er'); return; }
+    SG_CCFICHA = r.data;
     var d = r.data, p = d.proveedor || {}, movs = d.movimientos || [];
     var t = eid('sg-ccficha-tit');
     if (t) t.textContent = 'Cuenta corriente — ' + (p.razon_social || '');
 
-    var ROT = { apertura: 'Apertura', factura: 'Factura', pago: 'Pago',
-                sin_factura: 'Sin factura' };
-    var CHIP = { contabilizada: 'bok', 'sin contabilizar': 'bfs', 'esperando comprobante': 'bpe' };
-    var h = '<div style="display:flex;gap:22px;flex-wrap:wrap;margin-bottom:12px">'
-      + '<div><div style="font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut)">CUIT</div>'
-        + '<div style="font-size:13px;font-weight:600;font-family:monospace">' + escH(p.cuit || '—') + '</div></div>'
-      + '<div><div style="font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut)">Saldo</div>'
-        + '<div style="font-size:16px;font-weight:700">' + sgMoney(d.saldo) + '</div></div>'
-      + '</div>';
+    // ── LO QUE SE MIRA PRIMERO, ARRIBA Y GRANDE ───────────────────────────
+    // El saldo es el número por el que se abre esta ventana. Después el CUIT
+    // —para el que llama al proveedor— y, si hay, el aviso de lo que está
+    // esperando entrar al libro.
+    var dato = function(rot, val, chico){
+      return '<div><div style="font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut)">'
+        + rot + '</div><div style="font-size:' + (chico ? '13px' : '19px')
+        + ';font-weight:700;line-height:1.25">' + val + '</div></div>';
+    };
+    var h = '<div style="display:flex;gap:30px;flex-wrap:wrap;align-items:flex-start;'
+      + 'border:1px solid var(--bor);border-radius:10px;padding:12px 16px;background:var(--bg);margin-bottom:12px">'
+      + dato('Saldo', sgMoney(d.saldo))
+      + dato('CUIT', '<span style="font-family:monospace">' + escH(p.cuit || '—') + '</span>', true)
+      + dato('Movimientos', nr(movs.length), true)
+      + (d.esperando_contabilizar && d.esperando_contabilizar.length
+          ? dato('Esperando el libro',
+              '<span style="color:#9a3412">' + sgMoney(d.total_esperando) + '</span>'
+              + '<div class="sg-oc-sub">' + nr(d.esperando_contabilizar.length) + ' factura'
+              + (d.esperando_contabilizar.length === 1 ? '' : 's') + ' sin asiento</div>', true)
+          : '')
+      + '<div style="margin-left:auto;display:flex;gap:8px;align-self:center">'
+        + '<button class="btn bo bs" onclick="sgCcFichaExportar(\'excel\')">📗 Excel</button>'
+        + '<button class="btn bo bs" onclick="sgCcFichaExportar(\'pdf\')">🖨 PDF</button>'
+      + '</div></div>';
 
+    var ROT = { apertura: 'Saldo de apertura', factura: 'Factura', pago: 'Pago' };
     h += '<div class="ab-table-wrap"><table class="pa-tbl"><thead><tr>'
       + '<th>Fecha</th><th>Concepto</th><th>Comprobante</th><th>Partida</th>'
       + '<th style="text-align:right">Debe</th><th style="text-align:right">Haber</th>'
       + '<th style="text-align:right">Saldo</th></tr></thead><tbody>';
     h += movs.length ? movs.map(function(m){
-      return '<tr><td style="white-space:nowrap">' + escH(m.fecha || '—') + '</td>'
-        + '<td>' + escH(ROT[m.tipo] || m.tipo)
-          + (m.estado ? ' <span class="bdg ' + (CHIP[m.estado] || 'bcc') + '">' + escH(m.estado) + '</span>' : '')
-          + (m.detalle && m.tipo !== 'factura' && m.tipo !== 'pago'
-              ? '<div class="sg-oc-sub">' + escH(m.detalle) + '</div>' : '')
-          + '</td>'
-        + '<td style="font-family:monospace;font-size:12px">' + escH(m.comprobante || '—') + '</td>'
+      return '<tr><td>' + escH(m.fecha || '—') + '</td>'
+        + '<td class="cc-concepto">' + escH(ROT[m.tipo] || m.detalle || m.tipo) + '</td>'
+        + '<td style="font-family:monospace">' + escH(m.comprobante || '—') + '</td>'
         + '<td style="font-family:monospace;font-size:11.5px">' + escH(m.partidas || '—') + '</td>'
         + '<td style="text-align:right">' + (m.debe ? sgMoney(m.debe) : '—') + '</td>'
         + '<td style="text-align:right">' + (m.haber ? sgMoney(m.haber) : '—') + '</td>'
         + '<td style="text-align:right;font-weight:700">' + sgMoney(m.saldo) + '</td></tr>';
-    }).join('') : '<tr><td colspan="7" class="emp">Este proveedor no tiene movimientos.</td></tr>';
+    }).join('')
+      : '<tr><td colspan="7" class="emp">Sin movimientos en la contabilidad.</td></tr>';
     h += '</tbody></table></div>';
-    h += '<div style="font-size:11.5px;color:var(--mut);margin-top:8px">'
-      + 'HABER es lo que se le debe (su comprobante); DEBE es lo que se le pagó. '
-      + 'La mercadería recibida sin factura figura por lo que se pactó, hasta que llegue el comprobante.</div>';
+
+    // Lo que está cargado y todavía no entró al libro. No son movimientos —no
+    // hay asiento, no hay deuda registrada— pero el que mira el saldo tiene que
+    // saber que están, o se va creyendo que no se le debe nada.
+    var esp = d.esperando_contabilizar || [];
+    if (esp.length) {
+      h += '<div style="margin-top:14px;border:1.5px solid #e0a72e;background:rgba(224,167,46,.10);'
+        + 'border-radius:10px;padding:11px 14px">'
+        + '<div style="font-weight:700;font-size:12.5px;color:#9a3412;margin-bottom:6px">'
+        + '⚠️ Facturas cargadas que todavía no entraron al libro — no suman al saldo</div>'
+        + '<table class="pa-tbl" style="background:transparent"><thead><tr><th>Fecha</th>'
+        + '<th>Comprobante</th><th>Partida</th><th style="text-align:right">Total</th>'
+        + '<th style="text-align:center">Estado</th></tr></thead><tbody>'
+        + esp.map(function(x){
+            var nro = (x.punto_venta ? x.punto_venta + '-' : '') + (x.numero || '');
+            return '<tr><td>' + escH(x.fecha_emision || '—') + '</td>'
+              + '<td style="font-family:monospace">' + escH(nro) + '</td>'
+              + '<td style="font-family:monospace;font-size:11.5px">' + escH(x.partida || '—') + '</td>'
+              + '<td style="text-align:right">' + sgMoney(x.total) + '</td>'
+              + '<td style="text-align:center">'
+                + (x.anulado_en ? '<span class="bdg ber">asiento anulado</span>'
+                                : '<span class="bdg bpe">sin contabilizar</span>') + '</td></tr>';
+          }).join('')
+        + '</tbody></table></div>';
+    }
+
+    h += '<div style="font-size:11.5px;color:var(--mut);margin-top:10px">'
+      + 'HABER es lo que se le debe; DEBE es lo que se le pagó. Sólo entran las facturas '
+      + 'con asiento contable: hasta que el comprobante no está en el libro, no mueve la cuenta.</div>';
 
     eid('sg-ccficha-body').innerHTML = h;
     sgModalArriba('sg-ccficha-modal');
   });
+}
+
+// ── LLEVARSE LA CUENTA CORRIENTE ────────────────────────────────────────
+// Excel: un CSV con punto y coma, que es lo que abre el Excel en español sin
+// preguntar nada. PDF: la ventana de impresión del navegador sobre una hoja
+// armada — sin librerías, y sale igual en cualquier máquina.
+var SG_CCFICHA = null;
+
+function _ccCsv(filas){
+  // El BOM es lo que hace que el Excel lea los acentos; sin él, "Gerónimo"
+  // llega como "GerÃ³nimo".
+  var txt = '\ufeff' + filas.map(function(f){
+    return f.map(function(c){
+      var v = String(c == null ? '' : c);
+      return /[";\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
+    }).join(';');
+  }).join('\r\n');
+  return new Blob([txt], { type: 'text/csv;charset=utf-8;' });
+}
+function _ccBajar(blob, nombre){
+  var a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = nombre;
+  document.body.appendChild(a); a.click();
+  setTimeout(function(){ URL.revokeObjectURL(a.href); a.remove(); }, 0);
+}
+function _ccImprimir(titulo, html){
+  var w = window.open('', '_blank');
+  if (!w) { toast('El navegador bloqueó la ventana de impresión', 'er'); return; }
+  w.document.write('<!doctype html><html><head><meta charset="utf-8"><title>' + titulo + '</title>'
+    + '<style>body{font-family:system-ui,Segoe UI,sans-serif;margin:26px;color:#111}'
+    + 'h1{font-size:17px;margin:0 0 2px}h2{font-size:12px;font-weight:400;color:#555;margin:0 0 16px}'
+    + 'table{width:100%;border-collapse:collapse;font-size:11.5px}'
+    + 'th{text-align:left;border-bottom:1.5px solid #333;padding:5px 6px;font-size:10px;'
+    + 'text-transform:uppercase;letter-spacing:.04em;color:#444}'
+    + 'td{border-bottom:1px solid #ddd;padding:5px 6px}'
+    + '.d{text-align:right}.tot{font-weight:700}'
+    + '@media print{@page{margin:14mm}}</style></head><body>' + html + '</body></html>');
+  w.document.close();
+  w.focus();
+  setTimeout(function(){ w.print(); }, 250);
+}
+function _ccHoy(){ return new Date().toISOString().slice(0, 10); }
+
+// El listado entero, tal como se está viendo (respeta el buscador).
+function sgCcExportar(como){
+  var q = String((eid('sg-ccprov-q') || {}).value || '').trim().toLowerCase();
+  var pal = q ? q.split(/\s+/) : [];
+  var rows = SG_CCPROV.filter(function(p){
+    if (!pal.length) return true;
+    var t = String(p.razon_social || '').toLowerCase();
+    return pal.every(function(w){ return t.indexOf(w) >= 0; });
+  });
+  if (!rows.length) { toast('No hay nada para exportar', 'er'); return; }
+  var tot = rows.reduce(function(a, p){ return a + (Number(p.saldo) || 0); }, 0);
+
+  if (como === 'excel') {
+    var filas = [['Proveedor', 'Apertura', 'Contabilizado', 'Saldo', 'Facturas sin contabilizar']];
+    rows.forEach(function(p){
+      filas.push([p.razon_social, p.saldo_inicial || 0, p.facturado || 0, p.saldo || 0,
+                  p.sin_contabilizar || 0]);
+    });
+    filas.push(['TOTAL', '', '', tot, '']);
+    _ccBajar(_ccCsv(filas), 'cuenta-corriente-proveedores-' + _ccHoy() + '.csv');
+    return;
+  }
+  _ccImprimir('Cuenta corriente de proveedores',
+    '<h1>San Gerónimo · Cuenta corriente de proveedores</h1>'
+    + '<h2>Al ' + _ccHoy() + (q ? ' · filtrado por "' + escH(q) + '"' : '') + '</h2>'
+    + '<table><thead><tr><th>Proveedor</th><th class="d">Apertura</th>'
+    + '<th class="d">Contabilizado</th><th class="d">Saldo</th></tr></thead><tbody>'
+    + rows.map(function(p){
+        return '<tr><td>' + escH(p.razon_social) + '</td>'
+          + '<td class="d">' + sgMoney(p.saldo_inicial || 0) + '</td>'
+          + '<td class="d">' + sgMoney(p.facturado || 0) + '</td>'
+          + '<td class="d tot">' + sgMoney(p.saldo) + '</td></tr>';
+      }).join('')
+    + '<tr><td class="tot">TOTAL</td><td></td><td></td><td class="d tot">' + sgMoney(tot) + '</td></tr>'
+    + '</tbody></table>');
+}
+
+// La ficha del proveedor abierto, con sus movimientos.
+function sgCcFichaExportar(como){
+  var d = SG_CCFICHA; if (!d) return;
+  var p = d.proveedor || {}, movs = d.movimientos || [];
+  var nom = String(p.razon_social || 'proveedor').replace(/[^\w\s-]/g, '').trim().replace(/\s+/g, '-');
+
+  if (como === 'excel') {
+    var filas = [['Cuenta corriente', p.razon_social || ''], ['CUIT', p.cuit || ''],
+                 ['Al', _ccHoy()], [],
+                 ['Fecha', 'Concepto', 'Comprobante', 'Partida', 'Debe', 'Haber', 'Saldo']];
+    movs.forEach(function(m){
+      filas.push([m.fecha || '', m.detalle || m.tipo, m.comprobante || '', m.partidas || '',
+                  m.debe || 0, m.haber || 0, m.saldo || 0]);
+    });
+    filas.push([], ['SALDO', '', '', '', '', '', d.saldo || 0]);
+    (d.esperando_contabilizar || []).forEach(function(x, i){
+      if (!i) filas.push([], ['Facturas cargadas sin contabilizar (no suman al saldo)'],
+                         ['Fecha', 'Comprobante', 'Partida', 'Total']);
+      filas.push([x.fecha_emision || '', (x.punto_venta ? x.punto_venta + '-' : '') + (x.numero || ''),
+                  x.partida || '', x.total || 0]);
+    });
+    _ccBajar(_ccCsv(filas), 'cc-' + nom + '-' + _ccHoy() + '.csv');
+    return;
+  }
+  _ccImprimir('Cuenta corriente — ' + (p.razon_social || ''),
+    '<h1>Cuenta corriente — ' + escH(p.razon_social || '') + '</h1>'
+    + '<h2>CUIT ' + escH(p.cuit || '—') + ' · Al ' + _ccHoy()
+    + ' · Saldo ' + sgMoney(d.saldo) + '</h2>'
+    + '<table><thead><tr><th>Fecha</th><th>Concepto</th><th>Comprobante</th><th>Partida</th>'
+    + '<th class="d">Debe</th><th class="d">Haber</th><th class="d">Saldo</th></tr></thead><tbody>'
+    + movs.map(function(m){
+        return '<tr><td>' + escH(m.fecha || '') + '</td>'
+          + '<td>' + escH(m.detalle || m.tipo) + '</td>'
+          + '<td>' + escH(m.comprobante || '') + '</td>'
+          + '<td>' + escH(m.partidas || '') + '</td>'
+          + '<td class="d">' + (m.debe ? sgMoney(m.debe) : '') + '</td>'
+          + '<td class="d">' + (m.haber ? sgMoney(m.haber) : '') + '</td>'
+          + '<td class="d tot">' + sgMoney(m.saldo) + '</td></tr>';
+      }).join('')
+    + '</tbody></table>');
 }
 // "Confirmada" es el estado 'cerrada' de la base. Se lo llama así en pantalla
 // porque es la palabra con la que se pidió: la orden que alguien dio por
