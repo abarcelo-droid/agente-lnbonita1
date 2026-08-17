@@ -3052,6 +3052,43 @@ router.get('/diario-iva-compras', requireAuth, (req, res) => {
 
 // Partidas de precio cerrado a las que todavía no se les cargó la factura del
 // proveedor. El número de factura se carga en el paso 1 de la recepción.
+// ── LAS FACTURAS CARGADAS QUE TODAVÍA NO ESTÁN EN EL LIBRO ───────────────
+//
+// Guardar la factura y contabilizarla son dos pasos: se puede guardar hoy y
+// contabilizar mañana, y ANULAR un asiento devuelve la factura a este estado,
+// que es justo para lo que sirve anularlo — corregir y rehacer.
+//
+// Pero no había ninguna pantalla donde vieras estas facturas. La partida ya no
+// vuelve a "Facturas por mercadería" —su comprobante está cargado— y el listado
+// de órdenes la mostraba en verde como si estuviera resuelta. Anulabas para
+// corregir y te quedabas sin lugar desde donde rehacerla.
+router.get('/facturas-sin-contabilizar', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const rows = db.prepare(`
+      SELECT f.id, f.oc_id, f.fecha_emision, f.tipo_comprobante, f.punto_venta, f.numero,
+             f.neto, f.iva_monto, f.total, f.creado_en,
+             p.razon_social AS proveedor_nombre,
+             o.trazabilidad, o.numero AS oc_numero,
+             -- Si tuvo un asiento y se anuló, se dice: no es lo mismo "todavía
+             -- no se contabilizó" que "se anuló y hay que rehacerla".
+             (SELECT an.id FROM sg_asientos an
+               WHERE an.ref_compra_id = f.id AND an.anulado = 1
+               ORDER BY an.id DESC LIMIT 1) AS asiento_anulado_id,
+             (SELECT an.anulado_en FROM sg_asientos an
+               WHERE an.ref_compra_id = f.id AND an.anulado = 1
+               ORDER BY an.id DESC LIMIT 1) AS anulado_en,
+             (SELECT GROUP_CONCAT(o2.trazabilidad, ' · ') FROM sg_factura_compra_ocs fo
+                JOIN sg_oc o2 ON o2.id = fo.oc_id WHERE fo.factura_id = f.id) AS partidas
+        FROM sg_facturas_compra f
+        LEFT JOIN sg_proveedores p ON p.id = f.proveedor_id
+        LEFT JOIN sg_oc o ON o.id = f.oc_id
+       WHERE f.activo = 1 AND f.asiento_id IS NULL
+       ORDER BY f.fecha_emision DESC, f.id DESC`).all();
+    res.json({ ok: true, data: rows });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
 router.get('/partidas-a-facturar', requireAuth, (req, res) => {
   const db = getDb();
   try {
@@ -3152,7 +3189,16 @@ router.get('/oc', requireAuth, (req, res) => {
                 ELSE 'factura' END) AS documenta_calc,
              (SELECT COUNT(*) FROM sg_recepciones r
                WHERE r.oc_id = o.id AND r.activo = 1
-                 AND r.factura_numero IS NOT NULL AND r.factura_numero <> '') AS con_factura
+                 AND r.factura_numero IS NOT NULL AND r.factura_numero <> '') AS con_factura,
+             -- Y si esa factura está en el libro o no. Anular el asiento deja la
+             -- factura cargada pero fuera de la contabilidad: el listado la
+             -- mostraba igual que una resuelta, en verde, y no había desde
+             -- dónde rehacerla.
+             (SELECT COUNT(*) FROM sg_facturas_compra f
+               WHERE f.activo = 1 AND f.asiento_id IS NULL
+                 AND (f.oc_id = o.id
+                      OR EXISTS (SELECT 1 FROM sg_factura_compra_ocs fo
+                                  WHERE fo.factura_id = f.id AND fo.oc_id = o.id))) AS facturas_sin_asiento
       FROM sg_oc o LEFT JOIN sg_proveedores p ON p.id=o.proveedor_id
       WHERE ${where.join(' AND ')} ORDER BY o.id DESC`).all(...params);
 

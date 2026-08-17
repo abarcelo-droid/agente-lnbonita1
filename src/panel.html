@@ -2778,6 +2778,32 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
         <tbody id="sgfm-tb"><tr><td colspan="6" class="emp">Cargando…</td></tr></tbody>
       </table></div>
     </div>
+
+    <!-- ── LO QUE QUEDÓ A MEDIO CAMINO ────────────────────────────────────
+         Guardar la factura y contabilizarla son dos pasos, y anular un asiento
+         devuelve la factura a este estado — que es justo para lo que sirve
+         anularlo: corregir y rehacer. Pero no había dónde ver estas facturas:
+         la partida ya no vuelve a la lista de arriba (su comprobante está
+         cargado) y el listado de órdenes la mostraba en verde, resuelta.
+         Se esconde sola cuando no hay ninguna. -->
+    <div id="sgfm-sincont" style="display:none;margin-top:22px;border-top:1px solid var(--bor);padding-top:16px">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px">
+        <div style="font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--mut)">
+          📘 Facturas cargadas sin contabilizar
+        </div>
+        <span class="liq-cnt" id="sgfm-sc-cnt">·</span>
+      </div>
+      <div style="font-size:11.5px;color:var(--mut);margin-bottom:8px">
+        El comprobante está cargado pero todavía no entró al libro. Las que
+        tienen el asiento anulado se rehacen desde acá.
+      </div>
+      <div class="ab-table-wrap"><table class="pa-tbl">
+        <thead><tr><th>Fecha</th><th>Comprobante</th><th>Proveedor</th><th>Partida</th>
+          <th style="text-align:right">Neto</th><th style="text-align:right">Total</th>
+          <th style="text-align:center">Estado</th><th></th></tr></thead>
+        <tbody id="sgfm-sc-tb"></tbody>
+      </table></div>
+    </div>
   </div>
 
   <!-- ── CARGAR LA FACTURA DE UNA PARTIDA ─────────────────────────────────
@@ -4776,7 +4802,12 @@ function sgOcSituacion(o){
   if ((o.documenta_calc || 'factura') === 'liquidacion') {
     return o.liquidada ? ['bok', '📄 Liquidada'] : ['bfs', '📄 Falta liquidar'];
   }
-  return o.con_factura ? ['bok', '🧾 Facturada'] : ['bfs', '🧾 Falta la factura'];
+  if (!o.con_factura) return ['bfs', '🧾 Falta la factura'];
+  // FACTURADA NO ES LO MISMO QUE CONTABILIZADA. Anular el asiento deja la
+  // factura cargada pero fuera del libro, y la fila se veía igual que una
+  // resuelta: verde, sin nada que dijera que había quedado a medio camino.
+  if (o.facturas_sin_asiento > 0) return ['bcc', '🧾 Falta contabilizar'];
+  return ['bok', '🧾 Facturada'];
 }
 
 function sgLoadOC(){
@@ -6039,6 +6070,59 @@ function sgFmLoad(){
         + '</td>');
     }).join('') : '<tr><td colspan="6" class="emp">No hay partidas esperando factura. '
         + 'Las que se documentan con factura de compra aparecen acá apenas se reciben.</td></tr>';
+  });
+}
+
+// ── LAS FACTURAS QUE QUEDARON FUERA DEL LIBRO ───────────────────────────
+// Cargadas pero sin asiento: o todavía no se contabilizaron, o su asiento se
+// anuló para corregirlas. Sin esta lista, anular era un camino sin vuelta:
+// la partida salía de la bandeja de pendientes y no aparecía en ningún lado.
+function sgFmSinContabilizar(){
+  api('/api/sg/facturas-sin-contabilizar').then(function(r){
+    var rows = (r && r.ok) ? r.data : [];
+    var caja = eid('sgfm-sincont'); if (!caja) return;
+    caja.style.display = rows.length ? '' : 'none';
+    var cnt = eid('sgfm-sc-cnt');
+    if (cnt) { cnt.textContent = rows.length; cnt.classList.toggle('hay', rows.length > 0); }
+    var tb = eid('sgfm-sc-tb'); if (!tb) return;
+    var TIPO = { factura_a: 'FA A', factura_b: 'FA B', liquidacion: 'LIQ' };
+    tb.innerHTML = rows.map(function(x){
+      var nro = (x.punto_venta ? x.punto_venta + '-' : '') + (x.numero || '');
+      // Anulada y sin rehacer no es lo mismo que "todavía no se cargó al libro".
+      var anul = !!x.asiento_anulado_id;
+      return '<tr><td style="white-space:nowrap">' + escH(x.fecha_emision || '—') + '</td>'
+        + '<td>' + escH(TIPO[x.tipo_comprobante] || x.tipo_comprobante || '—')
+          + ' <code>' + escH(nro) + '</code></td>'
+        + '<td>' + escH(x.proveedor_nombre || '—') + '</td>'
+        + '<td style="font-family:monospace;font-size:11.5px">'
+          + escH(x.partidas || x.trazabilidad || x.oc_numero || '—') + '</td>'
+        + '<td style="text-align:right">' + sgMoney(x.neto) + '</td>'
+        + '<td style="text-align:right"><b>' + sgMoney(x.total) + '</b></td>'
+        + '<td style="text-align:center">'
+          + (anul
+              ? '<span class="bdg ber">asiento anulado</span>'
+                + '<div class="sg-oc-sub">' + escH(String(x.anulado_en || '').slice(0, 10)) + '</div>'
+              : '<span class="bdg bpe">sin contabilizar</span>')
+          + '</td>'
+        + '<td style="text-align:right;white-space:nowrap">'
+          + '<button class="btn bo bs" onclick="sgOcVer(' + x.oc_id + ')">👁</button> '
+          + '<button class="btn bb bs" onclick="sgFmContabilizar(' + x.oc_id + ',\'' + esc(nro) + '\')">'
+            + '📘 ' + (anul ? 'Rehacer' : 'Contabilizar') + '</button></td></tr>';
+    }).join('');
+  });
+}
+
+// Meterla al libro. Es el mismo paso que ofrece la ventana al guardar; acá se
+// puede hacer después, que es lo que hacía falta para poder rehacer una anulada.
+function sgFmContabilizar(ocId, nro){
+  if (!confirm('¿Contabilizar la factura ' + nro + '?\n\n'
+    + 'Se graba el asiento con la fecha de la factura. Un asiento no se borra: '
+    + 'si está mal, se anula con clave de administrador y queda registrado.')) return;
+  api('/api/sg/oc/' + ocId + '/contabilizar', 'POST', {}).then(function(r){
+    if (!r || !r.ok) { toast((r && r.error) || 'No se pudo contabilizar', 'er'); return; }
+    toast('Contabilizada — asiento ' + r.data.asiento_id + ' del ' + r.data.fecha, 'ok');
+    sgFmSinContabilizar();
+    sgFmLoad();
   });
 }
 
@@ -16266,7 +16350,7 @@ function loadSec(s) {
     'sg-ventas':     function(){ sgVenInit(); },
     'sg-gastos-directos': function(){ sgGdsInit(); },
     'sg-control-coop': function(){ sgCcoopInit(); },
-    'sg-facturas-merc': function(){ sgFmModeloCargar(); sgFmLoad(); },
+    'sg-facturas-merc': function(){ sgFmModeloCargar(); sgFmLoad(); sgFmSinContabilizar(); },
     'sg-cc-proveedores': function(){ sgLoadCcProv(); },
     'sg-importacion': function(){ sgImpInit(); },
     'sg-catalogo':   function(){ sgLoadCaches(function(){ sgCatSub('productos'); }); },
