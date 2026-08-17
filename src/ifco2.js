@@ -370,17 +370,33 @@
     return Promise.all([fetchJSON(API + '/movimientos'), fetchJSON(API + '/autorizaciones-retiro')]).then(function (res) {
       var M = res[0] || [], AU = res[1] || [];
       var movFil = st.movFiltro || '';
-      var Mf = movFil ? M.filter(function (m) { return m.tipo === movFil; }) : M;
+      var esPend = function (m) { return m.tipo === 'retiro' && !!m.pendiente; };
+      var Mf = movFil === 'pendiente' ? M.filter(esPend)
+             : movFil ? M.filter(function (m) { return m.tipo === movFil; }) : M;
       var rowsHtml = Mf.length ? Mf.map(function (m) {
         var consol = !!m.consolidado_en;
+        var pend = esPend(m);
+        // Un retiro pendiente todavía no cuenta en el stock: la cantidad va apagada para que
+        // no se lea como si ya hubiera entrado.
+        var estadoCell = pend
+          ? '<span class="tag" style="background:var(--i-err-bg);color:var(--i-err);border-color:var(--i-err-line)" title="Este retiro no está contando en el stock hasta que lo confirmes con el remito de IFCO">' + ic('clock') + ' pendiente</span>'
+          : (consol ? '<span class="tag consol">' + ic('check') + ' consolidado</span>' : '<span class="tag" style="background:var(--i-warn-bg);color:var(--i-warn);border-color:var(--i-warn-line)">sin consolidar</span>');
+        var acciones = pend
+          ? '<button class="btn btn-pri btn-sm" onclick="__ifco2ConfirmarRetiro(' + m.id + ',' + (m.cantidad || 0) + ')">' + ic('clipboard-check') + ' Confirmar</button>'
+          : (consol ? '<button class="btn-icon btn-ghost" title="Bloqueado: consolidado">' + ic('lock') + '</button>'
+                    : '<button class="btn-icon btn-ghost" title="Editar" onclick="__ifco2Legacy(\'ifcoAbrirEditarMovimiento\',' + m.id + ')">' + ic('pencil') + '</button><button class="btn-icon btn-ghost" title="Eliminar" onclick="__ifco2SoftDelete(\'movimientos\',' + m.id + ',\'' + esc(m.n_remito || ('MOV-' + m.id)) + '\',\'retiros\')">' + ic('trash-2') + '</button>');
         return '<tr><td>' + fdate(m.fecha) + '</td><td>' + badge(m.tipo) + '</td>'
-          + '<td class="r num-strong ' + (m.tipo === 'perdida' ? 'num-neg' : '') + '">' + (m.tipo === 'perdida' ? '−' : '+') + nf(m.cantidad) + '</td>'
+          + '<td class="r ' + (pend ? 'muted' : 'num-strong') + ' ' + (m.tipo === 'perdida' ? 'num-neg' : '') + '">' + (m.tipo === 'perdida' ? '−' : '+') + nf(m.cantidad)
+          + (pend ? '<div class="sub2 muted">estimado, no cuenta</div>' : '') + '</td>'
           + '<td>' + esc(m.notas || m.n_remito || '—') + '</td>'
-          + '<td>' + (consol ? '<span class="tag consol">' + ic('check') + ' consolidado</span>' : '<span class="tag" style="background:var(--i-warn-bg);color:var(--i-warn);border-color:var(--i-warn-line)">sin consolidar</span>') + '</td>'
+          + '<td>' + estadoCell + '</td>'
           + '<td class="c">' + uav(m.usuario_creador_nombre) + '</td>'
-          + '<td><div class="rowact">' + (consol ? '<button class="btn-icon btn-ghost" title="Bloqueado: consolidado">' + ic('lock') + '</button>' : '<button class="btn-icon btn-ghost" title="Editar" onclick="__ifco2Legacy(\'ifcoAbrirEditarMovimiento\',' + m.id + ')">' + ic('pencil') + '</button><button class="btn-icon btn-ghost" title="Eliminar" onclick="__ifco2SoftDelete(\'movimientos\',' + m.id + ',\'' + esc(m.n_remito || ('MOV-' + m.id)) + '\',\'retiros\')">' + ic('trash-2') + '</button>') + '</div></td></tr>';
+          + '<td><div class="rowact">' + acciones + '</div></td></tr>';
       }).join('') : '<tr><td colspan="7">' + empty('Sin movimientos') + '</td></tr>';
-      var retir = M.filter(function (m) { return m.tipo === 'retiro'; }).reduce(function (a, m) { return a + (m.cantidad || 0); }, 0);
+      // Los pendientes quedan fuera del neto: no impactan el stock hasta confirmarse.
+      var pendientes = M.filter(esPend);
+      var pendTot = pendientes.reduce(function (a, m) { return a + (m.cantidad || 0); }, 0);
+      var retir = M.filter(function (m) { return m.tipo === 'retiro' && !m.pendiente; }).reduce(function (a, m) { return a + (m.cantidad || 0); }, 0);
       var perd = M.filter(function (m) { return m.tipo === 'perdida'; }).reduce(function (a, m) { return a + (m.cantidad || 0); }, 0);
 
       // Autorizaciones de retiro a IFCO (flujo de mail)
@@ -405,13 +421,14 @@
       h.innerHTML =
         '<div class="vh"><div><h2>' + ic('package-minus') + ' Retiros y pérdidas</h2><div class="vh-sub">Retiros del pool IFCO (altas de cajones vacíos) y pérdidas registradas</div></div>'
         + '<div class="actions"><button class="btn btn-ghost btn-sm" style="color:var(--i-err)" onclick="__ifco2Reuse(\'ifcoAbrirNuevoMovimiento\',\'perdida\')">' + ic('minus') + ' Registrar pérdida</button><button class="btn btn-ghost btn-sm" onclick="__ifco2Reuse(\'ifcoAbrirNuevoMovimiento\',\'retiro\')">' + ic('plus') + ' Registrar retiro</button><button class="btn btn-pri btn-sm" onclick="__ifco2Reuse(\'ifcoAbrirAutorizacion\')">' + ic('mail') + ' Autorizar retiro a IFCO</button></div></div>'
-        + '<div class="filters"><div class="seg">' + [['', 'Todos', M.length], ['retiro', 'Retiros', M.filter(function (m) { return m.tipo === 'retiro'; }).length], ['perdida', 'Pérdidas', M.filter(function (m) { return m.tipo === 'perdida'; }).length]].map(function (s) { return '<button class="' + (movFil === s[0] ? 'on' : '') + '" onclick="__ifco2SegV(\'movFiltro\',\'retiros\',\'' + s[0] + '\')">' + s[1] + '<span class="n">' + s[2] + '</span></button>'; }).join('') + '</div>'
-        + '<span class="chip-count">Neto del mes: <b class="tnum">+' + nf(retir - perd) + '</b> cajones</span></div>'
+        + (pendientes.length ? '<div class="banner err">' + ic('clock') + '<div><b>' + pendientes.length + ' retiros pendientes de confirmar</b> — <b class="tnum">' + nf(pendTot) + ' cajones</b> que IFCO ya te entregó pero que <b>no están contando en el stock</b>. Confirmá cada uno con su N° de remito de IFCO.</div><button class="btn btn-ghost btn-sm" style="margin-left:auto" onclick="__ifco2SegV(\'movFiltro\',\'retiros\',\'pendiente\')">Ver solo pendientes ' + ic('arrow-right') + '</button></div>' : '')
+        + '<div class="filters"><div class="seg">' + [['', 'Todos', M.length], ['retiro', 'Retiros', M.filter(function (m) { return m.tipo === 'retiro'; }).length], ['perdida', 'Pérdidas', M.filter(function (m) { return m.tipo === 'perdida'; }).length], ['pendiente', 'Pendientes', pendientes.length]].map(function (s) { return '<button class="' + (movFil === s[0] ? 'on' : '') + '" onclick="__ifco2SegV(\'movFiltro\',\'retiros\',\'' + s[0] + '\')">' + s[1] + '<span class="n">' + s[2] + '</span></button>'; }).join('') + '</div>'
+        + '<span class="chip-count">Neto confirmado: <b class="tnum">+' + nf(retir - perd) + '</b> cajones' + (pendTot ? ' · <b class="tnum" style="color:var(--i-err)">' + nf(pendTot) + '</b> sin confirmar' : '') + '</span></div>'
         + '<div class="card"><div class="card-b flush"><div class="tbl-wrap"><table class="dt"><thead><tr><th>Fecha</th><th>Tipo</th><th class="r">Cantidad</th><th>Detalle / OT</th><th>Consolidación</th><th class="c">Usuario</th><th></th></tr></thead><tbody>' + rowsHtml + '</tbody></table></div></div></div>'
         + '<div class="foot-note">' + ic('lock') + ' Los movimientos consolidados quedan bloqueados: ya fueron verificados contra el archivo oficial de IFCO y no se pueden editar ni borrar.</div>'
         + '<div class="card" style="margin-top:16px"><div class="card-h"><h3>' + ic('mail') + ' Autorizaciones de retiro a IFCO</h3><span class="muted" style="font-size:11px">autorización al transportista · mail a ifco@lnbonita.com.ar</span></div>'
         + '<div class="card-b flush"><div class="tbl-wrap"><table class="dt"><thead><tr><th>Fecha autorizada</th><th>Transportista</th><th class="r">Cantidad</th><th>Estado</th><th>Mail a</th><th class="c">Usuario</th><th></th></tr></thead><tbody>' + autRows + '</tbody></table></div></div></div>'
-        + '<div class="foot-note">' + ic('info') + ' “Enviar” previsualiza y manda el mail de autorización a IFCO; “Completar” registra la cantidad real retirada + N° de remito (confirma el movimiento de stock). Cancelar/eliminar: follow-up.</div>';
+        + '<div class="foot-note">' + ic('info') + ' “Enviar” previsualiza y manda el mail de autorización a IFCO; “Completar” hace lo mismo que “Confirmar” en la tabla de arriba: registra la cantidad real retirada + N° de remito y recién ahí el retiro entra al stock.</div>';
     });
   };
   // Acciones del flujo "Autorizar retiro a IFCO" (lista en Retiros)
@@ -434,6 +451,29 @@
       .then(function (r) { return r.json(); })
       .then(function (d) { if (d && d.ok) { toast('✓ Retiro completado (' + d.cantidad_real + ' caj.)', 'ok'); nav('retiros'); } else { toast((d && d.error) || 'Error al completar', 'er'); } })
       .catch(function () { toast('Error de red al completar', 'er'); });
+  };
+
+  // Confirmar un retiro pendiente. El N° de remito de IFCO es obligatorio: es el comprobante
+  // de la entrega y la clave con la que después se consolida contra el archivo de IFCO.
+  window.__ifco2ConfirmarRetiro = function (id, estimada) {
+    var rem = prompt('N° de remito de IFCO (obligatorio):\n\nEs el remito con el que IFCO entregó los cajones.\nSin él el retiro no se puede consolidar después.');
+    if (rem === null) return;
+    rem = String(rem).trim();
+    if (!rem) { toast('Sin N° de remito no se puede confirmar', 'er'); return; }
+    var cant = prompt('Cantidad REAL de cajones que entregó IFCO:', estimada || '');
+    if (cant === null) return;
+    var n = parseInt(cant, 10);
+    if (isNaN(n) || n <= 0) { toast('Cantidad inválida', 'er'); return; }
+    fetch(API + '/movimientos/' + id + '/confirmar', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ n_remito: rem, cantidad: n }) })
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (d && d.ok) {
+          var dif = d.diferencia;
+          toast('✓ Retiro confirmado: ' + nf(d.cantidad) + ' caj. · remito ' + d.n_remito + (dif ? ' (' + (dif > 0 ? '+' : '') + dif + ' vs. lo estimado)' : ''), 'ok');
+          nav('retiros');
+        } else { toast((d && d.error) || 'Error al confirmar', 'er'); }
+      })
+      .catch(function () { toast('Error de red al confirmar', 'er'); });
   };
 
   // Drill-down de un KPI del Resumen: de dónde sale ese número, término por término.
