@@ -2706,6 +2706,61 @@ router.get('/movimientos', function(req, res) {
   res.json(db.prepare(q).all(...p));
 });
 
+// POST /movimientos/:id/confirmar — confirmar un retiro que está pendiente.
+// Un retiro pendiente (pendiente=1) NO cuenta en el stock: se crea al autorizar el retiro,
+// cuando todavía no se sabe qué entregó IFCO ni con qué remito. Esto lo confirma.
+//
+// El N° de remito de IFCO es OBLIGATORIO: es el comprobante de que la entrega existió y la
+// clave con la que después la consolidación cruza el movimiento contra el archivo de IFCO.
+// Sin número, el retiro no se puede consolidar nunca y el stock queda sin respaldo.
+router.post('/movimientos/:id/confirmar', express.json(), function(req, res) {
+  try {
+    const d = req.body || {};
+    const n_remito = d.n_remito != null ? String(d.n_remito).trim() : '';
+    if (!n_remito) return res.status(400).json({ error: 'El N° de remito de IFCO es obligatorio para confirmar el retiro' });
+
+    const m = db.prepare("SELECT * FROM ifco_movimientos WHERE id = ? AND eliminado_en IS NULL AND tipo = 'retiro'").get(req.params.id);
+    if (!m) return res.status(404).json({ error: 'Retiro no encontrado' });
+    if (!m.pendiente) return res.status(400).json({ error: 'Este retiro ya está confirmado' });
+
+    // Un mismo remito de IFCO no puede entrar dos veces: sería stock inflado sin rastro.
+    const dup = db.prepare("SELECT id FROM ifco_movimientos WHERE n_remito = ? AND tipo = 'retiro' AND eliminado_en IS NULL AND id <> ?").get(n_remito, m.id);
+    if (dup) return res.status(409).json({ error: 'Ya hay un retiro cargado con el remito ' + n_remito + ' (movimiento #' + dup.id + ')' });
+
+    const cantidad = (d.cantidad != null && d.cantidad !== '') ? parseInt(d.cantidad) : m.cantidad;
+    if (isNaN(cantidad) || cantidad <= 0) return res.status(400).json({ error: 'La cantidad real tiene que ser un número mayor a cero' });
+    const fecha = (d.fecha && String(d.fecha).trim()) || m.fecha;
+    const userId = (req.user && req.user.id) || null;
+
+    // El sufijo se arma en JS y se bindea como texto: concatenar el número dentro del SQL
+    // deja la conversión a criterio del driver y puede escribir "480.0" en vez de "480".
+    const rastro = ' [Confirmado: ' + cantidad + ' cajones reales | Remito: ' + n_remito + ']';
+    const tx = db.transaction(function() {
+      db.prepare(`
+        UPDATE ifco_movimientos
+        SET cantidad = ?, n_remito = ?, fecha = ?, pendiente = 0,
+            notas = COALESCE(notas, '') || ?
+        WHERE id = ?
+      `).run(cantidad, n_remito, fecha, rastro, m.id);
+      // Si vino de una autorización, cerrarla también: si no, queda "enviada" para siempre.
+      db.prepare(`
+        UPDATE ifco_autorizaciones_retiro
+        SET estado = 'completada', cantidad_real = ?,
+            completada_en = datetime('now','localtime'), completada_por_id = ?
+        WHERE movimiento_pendiente_id = ? AND eliminado_en IS NULL
+          AND estado IN ('pendiente_envio','enviada')
+      `).run(cantidad, userId, m.id);
+    });
+    tx();
+
+    res.json({ ok: true, id: m.id, cantidad: cantidad, n_remito: n_remito, fecha: fecha,
+               diferencia: cantidad - (m.cantidad || 0) });
+  } catch(e) {
+    console.error('[IFCO][movimientos/confirmar]', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 router.get('/movimientos/:id', function(req, res) {
   const m = db.prepare("SELECT * FROM ifco_movimientos WHERE id = ?").get(req.params.id);
   if (!m) return res.status(404).json({ error: 'No encontrado' });
