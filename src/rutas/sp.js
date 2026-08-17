@@ -280,16 +280,56 @@ function ctxDevolucion(solicitudId) {
   return { confeccionadoPor: c ? { id: c.actor_id, nombre: c.actor_nombre } : null };
 }
 
+// ── EL AVISO NO PUEDE DEPENDER DE LA CONFIGURACIÓN ────────────────────────
+// Las plantillas viven en el flujo, y el flujo se congela en la solicitud al
+// nacer. Una solicitud creada antes de que existiera una plantilla, o con un
+// flujo que alguien armó sin cargarlas, se quedaba SIN AVISO Y SIN RASTRO: la
+// función salía en silencio y el solicitante nunca se enteraba de que su pago se
+// había movido, aprobado o rechazado.
+//
+// Estos textos son el piso. Si el flujo trae su plantilla, manda la del flujo;
+// si no, sale este. Nadie tiene que acordarse de cargar nada para que el aviso
+// llegue.
+const AVISO_BASE = {
+  devuelto: { asunto: 'Te devolvieron la solicitud {{numero}}',
+    cuerpo: 'Hola {{destinatario}},\n\n{{actor}} devolvió tu solicitud de pago a {{proveedor}} '
+      + 'por {{monto}}.\n\nVolvió desde: {{paso_origen}}\nMotivo: {{comentario}}\n\n{{link}}\n' },
+  rechazado: { asunto: 'Rechazaron la solicitud {{numero}}',
+    cuerpo: 'Hola {{destinatario}},\n\n{{actor}} rechazó tu solicitud de pago a {{proveedor}} '
+      + 'por {{monto}}.\n\nMotivo: {{comentario}}\n\n{{link}}\n' },
+  fecha_confirmada: { asunto: 'Ya hay fecha de pago · {{numero}} · {{proveedor}}',
+    cuerpo: 'Hola {{destinatario}},\n\nEl pago a {{proveedor}} por {{monto}} tiene fecha: '
+      + '{{fecha_pago}}.\n\nYa se lo podés confirmar al proveedor.\n\n{{link}}\n' },
+  firmado: { asunto: 'Orden firmada · {{numero}} · {{proveedor}}',
+    cuerpo: 'Hola {{destinatario}},\n\n{{actor}} firmó la orden de pago a {{proveedor}} '
+      + 'por {{monto}}.\n\nEl pago ya está resuelto: podés cerrar el seguimiento con el '
+      + 'proveedor.\n\n{{link}}\n' },
+  cerrado: { asunto: 'Pago completado · {{numero}} · {{proveedor}}',
+    cuerpo: 'Hola {{destinatario}},\n\nSe completó el circuito del pago a {{proveedor}} '
+      + 'por {{monto}}.\n\n{{link}}\n' },
+  movimiento: { asunto: 'Avanzó tu solicitud {{numero}} · {{proveedor}}',
+    cuerpo: 'Hola {{destinatario}},\n\n{{actor}} movió tu solicitud de pago a {{proveedor}} '
+      + 'por {{monto}}.\n\nDe: {{paso_origen}}\nA: {{paso}}\n{{comentario}}\n\n{{link}}\n' },
+  editada: { asunto: 'Editaron tu solicitud {{numero}} · {{proveedor}}',
+    cuerpo: 'Hola {{destinatario}},\n\n{{actor}} modificó tu solicitud de pago.\n\n'
+      + 'Qué cambió:\n{{cambios}}\n\nSi no corresponde, avisale antes de que salga a autorizar.'
+      + '\n\n{{link}}\n' },
+};
+
 function avisarSolicitante(def, sol, evento, eventoId, extra) {
+  // La del flujo primero —es la que el usuario puede escribir a su gusto— y si
+  // no hay, la de código. Nunca se sale sin avisar.
+  const pl = plantillaDe(def, 'evento:' + evento) || AVISO_BASE[evento] || AVISO_BASE.movimiento;
   const u = db.prepare('SELECT nombre, email FROM usuarios WHERE id=?').get(sol.solicitante_id);
-  if (!u || !u.email) return;
-  const pl = plantillaDe(def, 'evento:' + evento);
-  if (!pl) return;
-  const vars = varsDe(sol, { destinatario: u.nombre, ...(extra || {}) });
+  const vars = varsDe(sol, {
+    destinatario: (u && u.nombre) || sol.solicitante_nombre || '', ...(extra || {}) });
+  // SIN MAIL CARGADO NO SE SALE EN SILENCIO. Se encola igual, sin destinatario:
+  // el outbox lo deja como descartado con el motivo, y eso es lo que después
+  // explica por qué el solicitante no se enteró. Antes no quedaba ni el rastro.
   encolar({
     solicitudId: sol.id, eventoId,
     dedupKey: `sol:${sol.id}:${evento}:${eventoId}`,
-    destinatarios: [u.email],
+    destinatarios: (u && u.email) ? [u.email] : [],
     asunto: render(pl.asunto, vars), cuerpo: render(pl.cuerpo, vars)
   });
 }
@@ -1149,11 +1189,31 @@ router.patch('/solicitudes/:id', wrap((req, res) => {
     vCondicion(b.condicion_pago === undefined ? s.condicion_pago : b.condicion_pago),
     s.id
   );
-  registrarEvento(s.id, {
+  const evId = registrarEvento(s.id, {
     paso_desde: s.paso_actual_clave, paso_hasta: s.paso_actual_clave, accion: 'editar',
     actor_id: req.user.id, actor_nombre: req.user.nombre, actor_rol: req.user.rol,
     datos_json: { antes: { monto: s.monto, proveedor: s.proveedor_texto, cuenta: s.cuenta_texto } }
   });
+  // SI SE LA EDITÓ OTRO, EL SOLICITANTE TIENE QUE ENTERARSE. Un admin puede
+  // corregir el monto, el proveedor o la cuenta de una solicitud ajena, y el que
+  // la pidió es el que le da la cara al proveedor: se enteraba sólo si volvía a
+  // abrir la pantalla y comparaba de memoria.
+  if (req.user.id !== s.solicitante_id) {
+    const nueva = db.prepare('SELECT * FROM sp_solicitudes WHERE id=?').get(s.id);
+    const cambios = [
+      ['Proveedor', s.proveedor_texto, nueva.proveedor_texto],
+      ['Cuenta', s.cuenta_texto, nueva.cuenta_texto],
+      ['Concepto', s.concepto, nueva.concepto],
+      ['Monto', money(s.monto, s.moneda), money(nueva.monto, nueva.moneda)],
+      ['Condición de pago', s.condicion_pago, nueva.condicion_pago],
+    ].filter((c) => String(c[1] == null ? '' : c[1]) !== String(c[2] == null ? '' : c[2]))
+     .map((c) => '· ' + c[0] + ': ' + (c[1] || '—') + '  →  ' + (c[2] || '—'));
+    if (cambios.length) {
+      avisarSolicitante(def, nueva, 'editada', evId,
+        { actor: req.user.nombre, cambios: cambios.join('\n') });
+      procesarEnBackground();
+    }
+  }
   res.json({ ok: true });
 }));
 
