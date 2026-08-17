@@ -36,6 +36,11 @@ const MODULOS_SG = [
   // otra mitad de lo que pasa después de recibir — la de Liquidación de Venta va
   // a su pestaña dentro de Liquidaciones.
   ["sg-facturas-merc", "🧾 Facturas por mercadería", 669],
+  // Cuenta corriente de proveedores. Era una solapa adentro de Ingresos, que es
+  // la pantalla donde se CARGA la compra: el que mira cuánto se le debe a un
+  // proveedor no está cargando órdenes, y tenía que entrar a Ingresos para
+  // llegar. Va como pantalla propia, en el mismo grupo.
+  ["sg-cc-proveedores", "💳 CC proveedores", 670],
 ];
 
 try {
@@ -88,6 +93,7 @@ try {
   db.prepare("UPDATE modulos_config SET label='🧾 Gastos Directos'  WHERE modulo='sg-gastos-directos'").run();
   db.prepare("UPDATE modulos_config SET label='🚜 Control Cooperativa' WHERE modulo='sg-control-coop'").run();
   db.prepare("UPDATE modulos_config SET label='🧾 Facturas por mercadería' WHERE modulo='sg-facturas-merc'").run();
+  db.prepare("UPDATE modulos_config SET label='💳 CC proveedores' WHERE modulo='sg-cc-proveedores'").run();
   db.prepare("UPDATE modulos_config SET label='📄 Liquidaciones'      WHERE modulo='ab-liquidaciones'").run();
   // ── EL MENÚ DE SAN GERÓNIMO, ORDENADO POR CÓMO SE TRABAJA ────────────────
   // Antes había un solo grupo, "Abasto SG", con once pantallas apiladas en el
@@ -136,6 +142,7 @@ try {
     // Pegada a Liquidaciones: son las dos bandejas de lo que queda pendiente
     // después de recibir, una por cada condición comercial.
     ['Administración de Compras',     669,  'sg-facturas-merc'],
+    ['Administración de Compras',     670,  'sg-cc-proveedores'],
     ['Administración de Compras',     668,  'sp-pagos'],
 
     ['Informes',                      670,  'sg-dashboard'],

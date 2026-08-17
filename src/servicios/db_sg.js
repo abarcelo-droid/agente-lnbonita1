@@ -798,32 +798,64 @@ try {
 // circuito de liquidación volverían a la bandeja el día del despliegue, sin
 // ninguna forma de sacarlas.
 //
-// liquidada_en es esa marca. Y el backfill aplica UNA VEZ el criterio VIEJO
-// —"ya no le falta cerrar el precio de ningún lote"— así que ninguna partida
-// que ya había salido de la bandeja reaparece. De ahí en adelante manda el
-// criterio nuevo.
+// liquidada_en es esa marca. La pone un admin a mano (y ahí queda liquidada_por)
+// o la puso el backfill de una sola corrida.
 try { db.exec("ALTER TABLE sg_oc ADD COLUMN liquidada_en TEXT"); } catch (_) {}
 try { db.exec("ALTER TABLE sg_oc ADD COLUMN liquidada_por INTEGER"); } catch (_) {}
 try {
   const yaEstaba = db.prepare("SELECT COUNT(*) c FROM sg_oc WHERE liquidada_en IS NOT NULL").get().c;
   if (!yaEstaba) {
+    // SÓLO LAS DE PIZARRA. En una liquidación de precio de pizarra, "no le falta
+    // cerrar el precio de ningún lote" sí quiere decir que se resolvió: el
+    // precio se cierra cuando se vende, y eso es el trabajo de liquidar.
+    //
+    // En una de PRECIO CERRADO no quiere decir nada: el lote nace con el precio
+    // puesto desde la recepción, así que la condición se cumple sola apenas
+    // entra el camión. Marcarlas era decir "Liquidada" sobre una partida que
+    // recién llegaba y a la que no se le emitió ninguna liquidación.
     const n = db.prepare(`UPDATE sg_oc SET liquidada_en = datetime('now','localtime')
       WHERE activo = 1
         AND estado IN ('recibida_total','cerrada')
-        AND COALESCE(documenta, CASE
-              WHEN tipo_precio = 'pizarra' THEN 'liquidacion'
-              WHEN tipo_fiscal = 'liquidacion' THEN 'liquidacion'
-              ELSE 'factura' END) = 'liquidacion'
+        AND tipo_precio = 'pizarra'
         AND liquidada_en IS NULL
-        -- El criterio viejo: sin lotes esperando precio, la partida no estaba
-        -- en la bandeja. Se respeta tal cual para no resucitar trabajo hecho.
         AND NOT EXISTS (SELECT 1 FROM sg_lotes l
                           JOIN sg_oc_items i ON i.id = l.oc_item_id
                          WHERE i.oc_id = sg_oc.id AND l.activo = 1
                            AND l.precio_unitario_kg IS NULL)`).run().changes;
-    if (n) console.log(`[DB] SG: ${n} partida(s) de liquidación ya resueltas quedaron marcadas como liquidadas.`);
+    if (n) console.log(`[DB] SG: ${n} partida(s) de pizarra ya liquidadas quedaron marcadas.`);
   }
 } catch (e) { console.error('[DB] SG liquidada_en:', e.message); }
+
+// ── Y SE DESHACE LO QUE EL BACKFILL MARCÓ DE MÁS ──────────────────────────
+// La primera versión del backfill marcaba también las de precio cerrado, que
+// cumplen la condición desde el momento en que entra la mercadería. Quedaron
+// diciendo "Liquidada" partidas a las que no se les emitió nada.
+//
+// Se distingue por liquidada_por: cuando la marca la puso una persona, queda su
+// usuario; el backfill lo deja en NULL. Sólo se deshace lo automático.
+try {
+  const n = db.prepare(`UPDATE sg_oc SET liquidada_en = NULL
+    WHERE liquidada_en IS NOT NULL AND liquidada_por IS NULL AND tipo_precio <> 'pizarra'`).run().changes;
+  if (n) console.log(`[DB] SG: se corrigió la marca de liquidada en ${n} partida(s) de precio cerrado.`);
+} catch (e) { console.error('[DB] SG liquidada_en (corrección):', e.message); }
+
+// ── LA FACTURA DE COMPRA ES LA DEUDA CON EL PROVEEDOR ─────────────────────
+// saldo_pagado va desnormalizado en el propio comprobante, igual que en el
+// módulo contable de Puente Cordón (pa_compras.saldo_pagado): la cuenta
+// corriente es "total − pagado" documento por documento. Hoy siempre es 0
+// —el circuito de pagos de SG todavía no escribe— pero la columna va ahora
+// para no tener que reescribir la fórmula, y todas las pantallas que la lean,
+// el día que se carguen los pagos.
+try { db.exec("ALTER TABLE sg_facturas_compra ADD COLUMN saldo_pagado REAL DEFAULT 0"); } catch (_) {}
+try { db.exec("CREATE INDEX IF NOT EXISTS idx_sg_fact_prov ON sg_facturas_compra(proveedor_id, activo)"); } catch (_) {}
+// Sin proveedor, una factura no entra en ninguna cuenta corriente y nadie se
+// entera. Las que ya están cargadas lo heredan de su orden.
+try {
+  const n = db.prepare(`UPDATE sg_facturas_compra SET proveedor_id =
+      (SELECT o.proveedor_id FROM sg_oc o WHERE o.id = sg_facturas_compra.oc_id)
+    WHERE proveedor_id IS NULL`).run().changes;
+  if (n) console.log(`[DB] SG: ${n} factura(s) de compra recuperaron su proveedor.`);
+} catch (e) { console.error('[DB] SG factura proveedor_id:', e.message); }
 
 // ── QUIÉN CAMBIÓ QUÉ ──────────────────────────────────────────────────────
 // Un administrador puede corregir lo que ya se cargó: un bulto mal contado, un

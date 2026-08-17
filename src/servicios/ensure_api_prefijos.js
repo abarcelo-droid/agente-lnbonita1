@@ -144,6 +144,7 @@ const PREFIJOS = [
   // el que se contabilizan —define cómo entra la plata de TODAS las compras— y
   // la lectura del comprobante con IA, que gasta la API key.
   ['sg-facturas-merc',   'sg/partidas-a-facturar,sg/factura-mercaderia'],
+  ['sg-cc-proveedores',  'sg/cc-proveedores'],
 
   // ═══════════════════════════════════════════════════════════════════════
   // LAS QUE FALTABAN. Se declaran POR QUIÉN ESCRIBE, no por quién llama.
