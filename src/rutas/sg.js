@@ -27,6 +27,8 @@ import { feDummy as afipFeDummy, ultimoComprobante as afipUltimoCbte, tiposCbte 
 import { emitir as afipEmitir } from '../servicios/afip-wsfe-emision.js';
 import { exigirEmpresa, SAN_GERONIMO } from '../servicios/sociedad_modulo.js';
 
+import { chequeUsado } from './sg_tesoreria.js';
+
 const router = express.Router();
 
 // ── EL CERROJO DE EMPRESA, CONECTADO ──────────────────────────────────────
@@ -5493,6 +5495,7 @@ router.get('/pagos/cuentas', requireAuth, (req, res) => {
   const db = getDb();
   try {
     const rows = db.prepare(`SELECT c.id, c.nombre, c.tipo, c.banco, c.ambito,
+        COALESCE(c.tiene_chequera,0) AS tiene_chequera,
         c.cuenta_contable_id, cc.codigo AS cuenta_codigo, cc.nombre AS cuenta_nombre
       FROM sg_fin_cuentas c
       LEFT JOIN sg_cuentas cc ON cc.id = c.cuenta_contable_id
@@ -5531,9 +5534,16 @@ router.post('/pagos', requireAdmin, (req, res) => {
     const proveedorId = Number(b.proveedor_id);
     if (!proveedorId) return res.status(400).json({ ok: false, error: 'Elegí el proveedor' });
     const fecha = val(b.fecha) || db.prepare("SELECT date('now','localtime') d").get().d;
+    // Cada línea puede cancelar con DOS platas distintas: la que sale hoy del
+    // banco (monto) y la que ya se le había entregado y quedó a cuenta
+    // (desde_a_cuenta). La segunda no vuelve a salir de ningún lado.
     const imputaciones = (Array.isArray(b.imputaciones) ? b.imputaciones : [])
-      .map((x) => ({ factura_id: Number(x.factura_id), monto: r2(x.monto) }))
-      .filter((x) => x.factura_id && x.monto > 0);
+      .map((x) => ({
+        factura_id: Number(x.factura_id),
+        monto: r2(x.monto),
+        desdeACuenta: r2(x.desde_a_cuenta),
+      }))
+      .filter((x) => x.factura_id && (x.monto > 0 || x.desdeACuenta > 0));
     // ── EL ANTICIPO ──────────────────────────────────────────────────────
     // Plata que sale ANTES de que exista la factura: la seña que pide el
     // productor para largar el camión. No se puede imputar a nada todavía, así
@@ -5541,28 +5551,91 @@ router.post('/pagos', requireAdmin, (req, res) => {
     // Después, cuando llega la factura, se aplica.
     const aCuenta = r2(b.a_cuenta);
     const imputado = r2(imputaciones.reduce((a, x) => a + x.monto, 0));
+    // EL TOTAL DEL PAGO ES SÓLO LA PLATA NUEVA. Lo que se cancela con un
+    // anticipo ya salió el día del anticipo, ya tiene su asiento y ya bajó el
+    // saldo del proveedor: contarlo otra vez acá sería cobrarle dos veces.
+    const usaACuenta = r2(imputaciones.reduce((a, x) => a + x.desdeACuenta, 0));
     const total = r2(imputado + (aCuenta > 0 ? aCuenta : 0));
-    if (!(total > 0)) {
+    if (!(total > 0) && !(usaACuenta > 0)) {
       return res.status(400).json({ ok: false,
         error: 'Poné cuánto se paga: imputado a facturas, a cuenta, o las dos cosas.' });
     }
-
-    // La plata sale de algún lado, y ese lado tiene que tener cuenta contable:
-    // sin ella el asiento no se puede armar.
-    const cuenta = db.prepare(`SELECT c.*, cc.id AS cta FROM sg_fin_cuentas c
-      LEFT JOIN sg_cuentas cc ON cc.id = c.cuenta_contable_id
-      WHERE c.id=? AND c.activo=1`).get(b.cuenta_fin_id);
-    if (!cuenta) return res.status(400).json({ ok: false, error: 'Elegí de qué cuenta sale la plata' });
-    if (!cuenta.cta) {
+    if (aCuenta > 0 && usaACuenta > 0) {
       return res.status(400).json({ ok: false,
-        error: 'La cuenta "' + cuenta.nombre + '" no tiene cuenta contable asociada, así que el pago no '
-             + 'puede entrar al libro. Asignásela en Caja y Bancos.' });
+        error: 'O dejás plata a cuenta, o usás la que ya estaba a cuenta. Las dos cosas en el mismo '
+             + 'movimiento no tienen sentido: entregarías una seña y la aplicarías en el mismo acto.' });
     }
-    const ctaProv = cuentaProveedoresDeModelo(db);
-    if (!ctaProv) {
+
+    // Con plata nueva sale de algún lado, y ese lado tiene que tener cuenta
+    // contable: sin ella el asiento no se puede armar. Si se cancela SÓLO con
+    // saldo a cuenta no sale plata de ninguna parte, así que no se pide cuenta.
+    let cuenta = null, ctaProv = null;
+    if (total > 0) {
+      cuenta = db.prepare(`SELECT c.*, cc.id AS cta FROM sg_fin_cuentas c
+        LEFT JOIN sg_cuentas cc ON cc.id = c.cuenta_contable_id
+        WHERE c.id=? AND c.activo=1`).get(b.cuenta_fin_id);
+      if (!cuenta) return res.status(400).json({ ok: false, error: 'Elegí de qué cuenta sale la plata' });
+      if (!cuenta.cta) {
+        return res.status(400).json({ ok: false,
+          error: 'La cuenta "' + cuenta.nombre + '" no tiene cuenta contable asociada, así que el pago no '
+               + 'puede entrar al libro. Asignásela en Caja y Bancos.' });
+      }
+      ctaProv = cuentaProveedoresDeModelo(db);
+      if (!ctaProv) {
+        return res.status(400).json({ ok: false,
+          error: 'El asiento modelo de las facturas no tiene línea de Proveedores: sin esa cuenta no se '
+               + 'sabe contra qué cancelar el pago.' });
+      }
+    }
+
+    // ── SI SE PAGA CON CHEQUE, SE ANOTA EL CHEQUE ─────────────────────────
+    // Hasta hoy el número de cheque se escribía en "referencia": texto libre que
+    // no lo controlaba nadie. Dos cheques con el mismo número en la misma cuenta
+    // es la misma orden librada dos veces, y eso no se descubre acá, se descubre
+    // en el banco cuando presentan el segundo.
+    const formaPago = val(b.forma_pago) || 'transferencia';
+    let cheque = null;
+    if (total > 0 && formaPago === 'cheque') {
+      const chequeraId = Number(b.chequera_id);
+      const nroCheque = Number(b.nro_cheque);
+      if (!chequeraId || !nroCheque) {
+        return res.status(400).json({ ok: false,
+          error: 'Pagando con cheque hay que decir de qué chequera sale y con qué número.' });
+      }
+      const ch = db.prepare('SELECT * FROM sg_fin_chequeras WHERE id=? AND activo=1').get(chequeraId);
+      if (!ch) return res.status(400).json({ ok: false, error: 'Esa chequera no existe o está dada de baja' });
+      if (Number(ch.cuenta_id) !== Number(cuenta.id)) {
+        return res.status(400).json({ ok: false,
+          error: 'Esa chequera no es de la cuenta "' + cuenta.nombre + '"' });
+      }
+      if (nroCheque < ch.desde || nroCheque > ch.hasta) {
+        return res.status(400).json({ ok: false,
+          error: 'El cheque ' + nroCheque + ' no pertenece a esa chequera: va del ' + ch.desde
+               + ' al ' + ch.hasta });
+      }
+      const usado = chequeUsado(db, ch.cuenta_id, nroCheque, null);
+      if (usado) {
+        return res.status(400).json({ ok: false,
+          error: 'El cheque N° ' + nroCheque + ' YA SE EMITIÓ el ' + (usado.fecha_emision || 's/f')
+               + (usado.beneficiario ? ' a ' + usado.beneficiario : '') + ' (' + usado.estado + '). '
+               + 'Un número de cheque no se usa dos veces.' });
+      }
+      cheque = { chequera_id: ch.id, nro: nroCheque, fecha_vto: val(b.cheque_vto) || null };
+    }
+
+    // Lo que hay a cuenta, anticipo por anticipo y del más viejo al más nuevo:
+    // se consume en ese orden para que la seña vieja no quede eternamente
+    // colgada mientras se aplican las nuevas.
+    const anticipos = usaACuenta > 0 ? db.prepare(`SELECT p.id,
+        ROUND(p.monto - COALESCE((SELECT SUM(pc.monto) FROM sg_pagos_compras pc
+                                   WHERE pc.pago_id = p.id), 0), 2) AS disponible
+      FROM sg_pagos_proveedores p
+      WHERE p.proveedor_id = ? AND COALESCE(p.anulado,0) = 0
+      ORDER BY p.fecha, p.id`).all(proveedorId).filter((a) => a.disponible > 0) : [];
+    const dispTotal = r2(anticipos.reduce((a, x) => a + x.disponible, 0));
+    if (usaACuenta > dispTotal + 0.01) {
       return res.status(400).json({ ok: false,
-        error: 'El asiento modelo de las facturas no tiene línea de Proveedores: sin esa cuenta no se '
-             + 'sabe contra qué cancelar el pago.' });
+        error: 'El proveedor tiene ' + dispTotal + ' a cuenta y estás aplicando ' + usaACuenta + '.' });
     }
 
     // Cada imputación contra una factura de verdad, contabilizada, del mismo
@@ -5582,49 +5655,107 @@ router.post('/pagos', requireAdmin, (req, res) => {
                + 'no se le puede imputar un pago.' });
       }
       const pendiente = r2((f.total || 0) - (f.saldo_pagado || 0));
-      if (im.monto > pendiente + 0.01) {
+      const cancela = r2(im.monto + im.desdeACuenta);
+      if (cancela > pendiente + 0.01) {
         return res.status(400).json({ ok: false,
           error: 'A la factura ' + f.numero + ' le quedan ' + pendiente + ' y le estás imputando '
-               + im.monto + '.' });
+               + cancela + '.' });
       }
-      facturas.push({ f, monto: im.monto });
+      facturas.push({ f, monto: im.monto, desdeACuenta: im.desdeACuenta });
     }
 
     const nro = (val(b.referencia) || '').trim();
     let pagoId = null, asientoId = null;
     db.transaction(() => {
-      pagoId = db.prepare(`INSERT INTO sg_pagos_proveedores
-        (fecha, proveedor_id, monto, forma_pago, banco, referencia, notas, usuario_id, cuenta_fin_id)
-        VALUES (?,?,?,?,?,?,?,?,?)`).run(
-        fecha, proveedorId, total, val(b.forma_pago) || 'transferencia',
-        cuenta.banco || null, nro || null, val(b.notas), uid(req), cuenta.id).lastInsertRowid;
-
       const insImp = db.prepare('INSERT INTO sg_pagos_compras (pago_id, compra_id, monto) VALUES (?,?,?)');
       const subeSaldo = db.prepare(`UPDATE sg_facturas_compra
         SET saldo_pagado = ROUND(COALESCE(saldo_pagado,0) + ?, 2),
             modificado_en=datetime('now','localtime'), modificado_por=? WHERE id=?`);
+
+      if (total > 0) {
+        pagoId = db.prepare(`INSERT INTO sg_pagos_proveedores
+          (fecha, proveedor_id, monto, forma_pago, banco, referencia, notas, usuario_id, cuenta_fin_id)
+          VALUES (?,?,?,?,?,?,?,?,?)`).run(
+          fecha, proveedorId, total, formaPago,
+          cuenta.banco || null, nro || null, val(b.notas), uid(req), cuenta.id).lastInsertRowid;
+        for (const x of facturas) {
+          if (x.monto > 0) insImp.run(pagoId, x.f.id, x.monto);
+        }
+      }
+
+      // ── SE CANCELA CON LO QUE YA ESTABA A CUENTA ──────────────────────
+      // La imputación cuelga del ANTICIPO, no de este pago: así el anticipo
+      // deja de tener saldo disponible y la factura queda cancelada, sin que
+      // salga plata de ningún lado ni se genere un segundo asiento.
       for (const x of facturas) {
-        insImp.run(pagoId, x.f.id, x.monto);
-        subeSaldo.run(x.monto, uid(req), x.f.id);
+        let falta = x.desdeACuenta;
+        for (const a of anticipos) {
+          if (falta <= 0.001) break;
+          if (a.disponible <= 0.001) continue;
+          const usa = r2(Math.min(a.disponible, falta));
+          insImp.run(a.id, x.f.id, usa);
+          a.disponible = r2(a.disponible - usa);
+          falta = r2(falta - usa);
+        }
+        if (falta > 0.01) throw new Error('No alcanzó el saldo a cuenta para la factura ' + x.f.numero);
+      }
+
+      for (const x of facturas) {
+        const cancela = r2(x.monto + x.desdeACuenta);
+        if (cancela > 0) subeSaldo.run(cancela, uid(req), x.f.id);
       }
 
       // EL ASIENTO. Proveedores al debe —se cancela deuda— contra la cuenta del
-      // banco o la caja de donde salió la plata.
-      const prov = db.prepare('SELECT razon_social FROM sg_proveedores WHERE id=?').get(proveedorId);
-      const desc = (facturas.length ? 'Pago a ' : 'Anticipo a ')
-        + ((prov && prov.razon_social) || 'proveedor')
-        + (nro ? ' — ' + nro : '')
-        + (facturas.length ? ' — ' + facturas.map((x) => x.f.numero).join(', ') : '')
-        + (facturas.length && aCuenta > 0 ? ' (+ ' + aCuenta + ' a cuenta)' : '');
-      asientoId = db.prepare(`INSERT INTO sg_asientos (fecha, descripcion, usuario_id, ref_codigo)
-        VALUES (?,?,?,?)`).run(fecha, desc, uid(req), nro || null).lastInsertRowid;
-      const insL = db.prepare(`INSERT INTO sg_asientos_lineas (asiento_id, cuenta_id, debe, haber, descripcion)
-        VALUES (?,?,?,?,?)`);
-      insL.run(asientoId, ctaProv, total, 0, 'Proveedores');
-      insL.run(asientoId, cuenta.cta, 0, total, cuenta.nombre);
-      db.prepare('UPDATE sg_pagos_proveedores SET asiento_id=? WHERE id=?').run(asientoId, pagoId);
+      // banco o la caja de donde salió la plata. Sólo si salió plata: aplicar un
+      // anticipo no mueve un peso, ya se asentó cuando se entregó.
+      if (total > 0) {
+        const prov = db.prepare('SELECT razon_social FROM sg_proveedores WHERE id=?').get(proveedorId);
+        const conNueva = facturas.filter((x) => x.monto > 0);
+        const desc = (conNueva.length ? 'Pago a ' : 'Anticipo a ')
+          + ((prov && prov.razon_social) || 'proveedor')
+          + (nro ? ' — ' + nro : '')
+          + (conNueva.length ? ' — ' + conNueva.map((x) => x.f.numero).join(', ') : '')
+          + (conNueva.length && aCuenta > 0 ? ' (+ ' + aCuenta + ' a cuenta)' : '');
+        asientoId = db.prepare(`INSERT INTO sg_asientos (fecha, descripcion, usuario_id, ref_codigo)
+          VALUES (?,?,?,?)`).run(fecha, desc, uid(req), nro || null).lastInsertRowid;
+        const insL = db.prepare(`INSERT INTO sg_asientos_lineas (asiento_id, cuenta_id, debe, haber, descripcion)
+          VALUES (?,?,?,?,?)`);
+        insL.run(asientoId, ctaProv, total, 0, 'Proveedores');
+        insL.run(asientoId, cuenta.cta, 0, total, cuenta.nombre);
+        db.prepare('UPDATE sg_pagos_proveedores SET asiento_id=? WHERE id=?').run(asientoId, pagoId);
+      }
+
+      // El cheque queda emitido y colgado del pago: desde Caja y Bancos se ve
+      // que salió, a quién y por cuánto, y su número queda quemado para siempre.
+      let chequeId = null;
+      if (cheque) {
+        const prov2 = db.prepare('SELECT razon_social FROM sg_proveedores WHERE id=?').get(proveedorId);
+        chequeId = db.prepare(`INSERT INTO sg_fin_cheques_propios
+          (chequera_id, nro_cheque, monto, beneficiario, fecha_emision, fecha_vto, pago_id)
+          VALUES (?,?,?,?,?,?,?)`).run(cheque.chequera_id, cheque.nro, total,
+          (prov2 && prov2.razon_social) || null, fecha, cheque.fecha_vto, pagoId).lastInsertRowid;
+      }
+
+      // ── Y LA CAJA (O EL BANCO) BAJA ───────────────────────────────────
+      // Sin esto, pagabas 1.500 desde el Galicia y Caja y Bancos seguía
+      // mostrando el saldo de antes: el asiento existía, pero el saldo de la
+      // pantalla se calcula con los movimientos, no con el libro. La plata
+      // salió de una cuenta concreta y tiene que verse ahí.
+      if (total > 0) {
+        const prov3 = db.prepare('SELECT razon_social FROM sg_proveedores WHERE id=?').get(proveedorId);
+        db.prepare(`INSERT INTO sg_fin_movimientos
+          (cuenta_id, fecha, tipo, concepto, monto, referencia, pago_id, cheque_id, usuario_id)
+          VALUES (?,?, 'egreso', ?,?,?,?,?,?)`).run(cuenta.id, fecha,
+          'Pago a ' + ((prov3 && prov3.razon_social) || 'proveedor')
+            + (cheque ? ' — cheque N° ' + cheque.nro : ''),
+          total, nro || null, pagoId, chequeId, uid(req));
+      }
     })();
-    res.json({ ok: true, data: { id: Number(pagoId), asiento_id: Number(asientoId), total } });
+    res.json({ ok: true, data: {
+      id: pagoId ? Number(pagoId) : null,
+      asiento_id: asientoId ? Number(asientoId) : null,
+      total, aplicado_a_cuenta: usaACuenta,
+    } });
   } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
 });
 
@@ -5729,6 +5860,16 @@ router.post('/pagos/:id/anular', requireAdmin, (req, res) => {
         db.prepare(`UPDATE sg_asientos SET anulado=1, anulado_por=?, anulado_en=datetime('now','localtime'),
           descripcion = descripcion || ' — ANULADO: ' || ? WHERE id=?`).run(uid(req), motivo, p.asiento_id);
       }
+      // La plata vuelve a la cuenta. El movimiento se BORRA en vez de marcarse:
+      // el saldo de Caja y Bancos se calcula sumando movimientos, así que uno
+      // "anulado" que siguiera ahí seguiría restando. El pago queda con su
+      // motivo y su asiento anulado, que es donde vive el registro de lo pasado.
+      db.prepare('DELETE FROM sg_fin_movimientos WHERE pago_id=?').run(p.id);
+      // Y el cheque que salió con ese pago queda anulado: su número NO vuelve al
+      // talonario, un cheque librado y roto está roto.
+      db.prepare(`UPDATE sg_fin_cheques_propios SET estado='anulado',
+        notas = TRIM(COALESCE(notas,'') || ' [ANULADO con el pago: ' || ? || ']')
+        WHERE pago_id=? AND estado <> 'cobrado'`).run(motivo, p.id);
     })();
     res.json({ ok: true, data: { id: Number(p.id) } });
   } catch (e) { res.status(400).json({ ok: false, error: e.message }); }

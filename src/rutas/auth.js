@@ -357,6 +357,12 @@ router.get('/me', (req, res) => {
     // lista completa: si alguien no ve la empresa en el selector, no la pide, y si
     // igual la pidiera el servidor la rechaza (ver servicios/permisos.js).
     user.sociedades = sociedadesConNombreDe(user);
+    // EL NIVEL POR MÓDULO, para que la pantalla no ofrezca lo que el servidor va
+    // a rechazar. El botón Anular sólo se muestra a quien tiene nivel "anular"
+    // (o "borrar", que en el orden de niveles pesa lo mismo); el resto ni lo ve.
+    // Esto NO reemplaza al control: exigirNivel sigue decidiendo en el servidor.
+    // Admin no lleva mapa: para él es siempre el nivel máximo.
+    user.niveles = user.rol === 'admin' ? {} : permisosDe(user);
     res.json({ ok: true, user });
   } catch(e) { limpiarSesion(res); res.status(401).json({ ok: false, error: 'Sesión inválida' }); }
 });

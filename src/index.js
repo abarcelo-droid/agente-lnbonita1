@@ -86,7 +86,20 @@ app.use(cookieParser(cookieSecret()));
 // entera del servidor —servicios/, rutas/, index.js, panel.html— a cualquiera
 // sin sesión. El por qué de cada regla está en el servicio.
 app.use("/static", estaticosPublicos);
-app.use("/static",       express.static(path.join(__dirname, ".")));
+// ── EL DEPLOY NUEVO SE TIENE QUE VER ──────────────────────────────────────
+// sidebar-v2.js lleva el número de versión, que existe justo para saber si lo
+// que estás mirando ya es el cambio que se mergeó. Pero el navegador se guardaba
+// el archivo y seguía mostrando el número viejo: el cartel que vino a evitar el
+// "no funciona" que en realidad era un Ctrl+F5 lo estaba causando.
+//
+// no-cache NO quiere decir "no lo guardes": quiere decir "preguntá antes de
+// usarlo". Con el ETag que express.static ya manda, la respuesta normal es un
+// 304 sin cuerpo — cuesta lo mismo que antes y nunca sirve una versión vieja.
+app.use("/static", express.static(path.join(__dirname, "."), {
+  setHeaders: (res, ruta) => {
+    if (/\.(js|css|html)$/i.test(ruta)) res.setHeader("Cache-Control", "no-cache");
+  },
+}));
 app.use("/data/uploads", express.static(path.join(__dirname, "../data/uploads")));
 app.use("/data/conformados", express.static(path.join(__dirname, "../data/conformados")));
 app.use("/data/fichas",      express.static(path.join(__dirname, "../data/fichas")));
@@ -145,6 +158,10 @@ app.get("/panel", (req, res) => {
     // Usuarios de campo solo pueden ir al Scout
     if (user.rol === 'campo') return res.redirect('/scout');
   } catch(e) {}
+  // El panel entero es la aplicación: si el navegador se queda con la copia
+  // vieja, el cambio que se acaba de mergear no se ve por más que el servidor lo
+  // tenga. Se revalida siempre (304 cuando no cambió).
+  res.setHeader("Cache-Control", "no-cache");
   res.sendFile(path.join(__dirname, "panel.html"));
 });
 

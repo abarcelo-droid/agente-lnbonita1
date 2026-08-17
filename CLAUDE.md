@@ -44,6 +44,19 @@ hace falta `overflow-x:hidden !important` para ganarle. Se deja `auto` sólo baj
 Por qué: para leer un saldo o un total había que arrastrar la tabla, y el número
 que importa suele ser el de la última columna.
 
+### EL BOTÓN ANULAR SE MUESTRA POR NIVEL, NO A CUALQUIERA
+`/api/auth/me` devuelve `user.niveles` (módulo → nivel). En el panel se mira con
+`lnbPuedeAnular('<modulo>')`, que usa la MISMA regla que el servidor: `anular` y
+`borrar` pesan igual (ver `ORDEN_NIVEL` en `servicios/permisos.js`). Admin
+siempre puede.
+
+Esto NO reemplaza el control: `exigirNivel` sigue decidiendo. Es para no ofrecer
+un botón que va a contestar 403 — el que lo aprieta cree que rompió algo.
+
+Y la anulación necesita su PROPIA dirección (`POST .../:id/anular`), porque
+`exigirNivel` la reconoce por la URL. Un `PATCH .../:id/estado` que aceptara
+`estado='anulado'` es una puerta lateral: quien sólo puede operar, anula.
+
 - Usuario admin tiene rol `'admin'`. Hay flag `solo_lectura` que NO aplica a admin.
 - Auth por cookie `lnb_user` (JSON con id, nombre, rol, etc)
 - Las acciones de cambio (POST/PUT/PATCH/DELETE) van con `requireAuth`
