@@ -131,6 +131,17 @@ try { db.exec("ALTER TABLE ifco_envios_proveedor ADD COLUMN aceptado_user_agent 
 // firmando con DNI. La fórmula del piso SG ignora estos envíos.
 try { db.exec("ALTER TABLE ifco_envios_proveedor ADD COLUMN origen_proveedor_id INTEGER"); } catch(_){}
 
+// Diferencia de recepción parcial: cuando el galpón confirma MENOS cajones de los que SG
+// despachó, esos cajones no están en ningún piso (salieron de SG y nunca llegaron al galpón)
+// pero siguen siendo responsabilidad nuestra frente a IFCO. Quedan "pendientes de revisión":
+// no entran al piso de SG ni al saldo del galpón hasta que alguien los resuelva a mano
+// (registrando la pérdida, corrigiendo la cantidad, o marcándolos revisados).
+// El pendiente se DERIVA (cantidad_enviada - cantidad_recibida); estas columnas solo marcan
+// que ya se resolvió, para que deje de contarse.
+try { db.exec("ALTER TABLE ifco_envios_proveedor ADD COLUMN diferencia_resuelta_en TEXT"); } catch(_){}
+try { db.exec("ALTER TABLE ifco_envios_proveedor ADD COLUMN diferencia_resolucion TEXT"); } catch(_){}
+try { db.exec("ALTER TABLE ifco_envios_proveedor ADD COLUMN diferencia_resuelta_por_id INTEGER"); } catch(_){}
+
 // Backfill: tokens para envíos viejos que no tengan
 try {
   const sinToken = db.prepare("SELECT id FROM ifco_envios_proveedor WHERE aceptacion_token IS NULL OR aceptacion_token = ''").all();
@@ -2579,16 +2590,52 @@ router.patch('/envios/:id/recepcionar', upload.single('escaneo_recepcion'), func
   let escaneo_recepcion_path = e.escaneo_recepcion_path;
   if (req.file) escaneo_recepcion_path = '/data/ifco/' + req.file.filename;
 
+  // Se limpia la resolución de la diferencia: si vuelven a cargar la recepción, la
+  // diferencia nueva tiene que volver a aparecer como pendiente (y si ahora coincide,
+  // el estado pasa a 'recibido' y deja de contarse solo).
   db.prepare(`
     UPDATE ifco_envios_proveedor SET
       estado = ?, fecha_recepcion = ?, cantidad_recibida = ?,
       notas = COALESCE(?, notas),
       escaneo_recepcion_path = ?,
+      diferencia_resuelta_en = NULL,
+      diferencia_resolucion = NULL,
+      diferencia_resuelta_por_id = NULL,
       actualizado_en = datetime('now','localtime')
     WHERE id = ?
   `).run(estado, d.fecha_recepcion, recib, d.notas || null, escaneo_recepcion_path, req.params.id);
 
   res.json({ ok: true, estado: estado, cantidad_recibida: recib, escaneo_recepcion_path: escaneo_recepcion_path });
+});
+
+// POST /envios/:id/resolver-diferencia — cerrar una diferencia de recepción parcial.
+// No mueve stock: solo saca los cajones del bucket "pendiente de revisión". Si lo que
+// pasó fue una pérdida real, hay que cargarla aparte como movimiento tipo='perdida'.
+router.post('/envios/:id/resolver-diferencia', express.json(), function(req, res) {
+  const resolucion = req.body && req.body.resolucion ? String(req.body.resolucion).trim() : '';
+  if (resolucion.length < 3) {
+    return res.status(400).json({ error: 'Contá en una línea qué pasó con esos cajones' });
+  }
+  try {
+    const e = db.prepare("SELECT id, estado, cantidad_enviada, cantidad_recibida, diferencia_resuelta_en FROM ifco_envios_proveedor WHERE id = ? AND eliminado_en IS NULL").get(req.params.id);
+    if (!e) return res.status(404).json({ error: 'No encontrado' });
+    if (e.diferencia_resuelta_en) return res.status(400).json({ error: 'Esta diferencia ya fue resuelta' });
+    if (e.estado !== 'parcial' || e.cantidad_enviada <= (e.cantidad_recibida || 0)) {
+      return res.status(400).json({ error: 'Este envío no tiene diferencia pendiente' });
+    }
+    db.prepare(`
+      UPDATE ifco_envios_proveedor SET
+        diferencia_resuelta_en = datetime('now','localtime'),
+        diferencia_resolucion = ?,
+        diferencia_resuelta_por_id = ?,
+        actualizado_en = datetime('now','localtime')
+      WHERE id = ?
+    `).run(resolucion, (req.user && req.user.id) || null, e.id);
+    res.json({ ok: true, diferencia: e.cantidad_enviada - (e.cantidad_recibida || 0) });
+  } catch(err) {
+    console.error('[IFCO][resolver-diferencia]', err);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // PATCH /envios/:id — editar (solo si estado='enviado', no parcial/recibido)
@@ -3111,47 +3158,25 @@ router.get('/resumen', function(req, res) {
   const retirado = get("SELECT COALESCE(SUM(cantidad),0) AS total FROM ifco_movimientos WHERE tipo='retiro' AND eliminado_en IS NULL AND pendiente=0");
   const perdido  = get("SELECT COALESCE(SUM(cantidad),0) AS total FROM ifco_movimientos WHERE tipo='perdida' AND eliminado_en IS NULL AND pendiente=0");
 
-  // Envíos a proveedor — totales y pendientes (excluyendo eliminados)
-  const envios_totales = get(`
-    SELECT COALESCE(SUM(cantidad_enviada),0) AS total
-    FROM ifco_envios_proveedor
-    WHERE estado IN ('enviado','parcial','recibido') AND eliminado_en IS NULL
-  `);
-  const recepciones_envios = get(`
-    SELECT COALESCE(SUM(cantidad_recibida),0) AS total
-    FROM ifco_envios_proveedor
-    WHERE estado IN ('recibido','parcial') AND eliminado_en IS NULL
-  `);
-  // Recepciones de mercadería (cajones que vuelven con producto, entidad nueva)
-  // Solo cuentan las CONFIRMADAS por SG. Las en_viaje no impactan stock todavía.
-  const recepciones_merc = get(`
-    SELECT COALESCE(SUM(cantidad),0) AS total
-    FROM ifco_recepciones_proveedor
-    WHERE eliminado_en IS NULL
-      AND (estado IS NULL OR estado = 'recibido')
-  `);
-  const en_proveedores = get(`
-    SELECT COALESCE(SUM(cantidad_enviada - COALESCE(cantidad_recibida,0)),0) AS total
-    FROM ifco_envios_proveedor
-    WHERE estado IN ('enviado','parcial') AND eliminado_en IS NULL
-  `) - recepciones_merc;  // los que volvieron físicamente bajan el saldo
+  // Saldo de cada galpón, con el cálculo unificado (_calcSaldoProveedor). Se calcula una
+  // sola vez y sirve para dos cosas: el KPI "En proveedores" (la suma) y la tabla de saldos
+  // (los > 0). Antes el KPI hacía su propia agregación y no coincidía con la tabla de al
+  // lado: contaba doble los traspasos entre galpones, restaba las recepciones R22 (que no
+  // bajan el saldo del proveedor) y no restaba los despachos directos ya sellados.
+  // Los saldos negativos se suman crudos, a propósito: son errores de carga y el KPI no
+  // tiene que taparlos.
+  const saldos_proveedores = db.prepare(`
+    SELECT id, nombre AS proveedor_nombre FROM proveedores
+  `).all().map(function(p){
+    return { proveedor_id: p.id, proveedor_nombre: p.proveedor_nombre, pendiente: _calcSaldoProveedor(p.id) };
+  });
+  const en_proveedores = saldos_proveedores.reduce(function(a, p){ return a + p.pendiente; }, 0);
 
-  // Despachos a súper — totales y rechazos vueltos. Solo despachos origen=SG cuentan
-  // contra el stock SG. Los "directo desde proveedor" no salieron del piso de SG.
-  const despachos_sg = get(`
-    SELECT COALESCE(SUM(cantidad_despachada),0) AS total
-    FROM ifco_remitos_super
-    WHERE estado IN ('despachado','sellado','enviado','presentado')
-      AND origen = 'san_geronimo'
-      AND eliminado_en IS NULL
-  `);
-  const rechazos_vueltos_sg = get(`
-    SELECT COALESCE(SUM(cantidad_rechazada),0) AS total
-    FROM ifco_remitos_super
-    WHERE estado IN ('sellado','enviado','presentado')
-      AND rechazo_destino = 'san_geronimo'
-      AND eliminado_en IS NULL
-  `);
+  // Cajones que SG despachó a un galpón y el galpón nunca confirmó haber recibido
+  // (recepciones parciales sin resolver). No están en ningún piso pero siguen siendo
+  // nuestros frente a IFCO, así que van aparte para que el total cierre.
+  const dif_pendientes = _diferenciasEnvioPendientes();
+
   const en_transito_sg = get(`
     SELECT COALESCE(SUM(cantidad_despachada),0) AS total
     FROM ifco_remitos_super
@@ -3164,7 +3189,9 @@ router.get('/resumen', function(req, res) {
   // (los faltantes manuales históricos ya NO se restan; la fuente oficial de
   // diferencias es la consolidación semanal contra IFCO)
   const piso = _calcStockSG();
-  const bajo_responsabilidad = piso + en_proveedores + en_transito_sg;
+  // Total a rendir a IFCO: los dos pisos + lo que está viajando + las diferencias sin
+  // resolver (que no están en ningún piso, pero IFCO nos las sigue contando).
+  const bajo_responsabilidad = piso + en_proveedores + en_transito_sg + dif_pendientes.total;
 
   // Alertas — sellados >= 25 días sin presentar
   const urgentes_presentar = db.prepare(`
@@ -3242,13 +3269,9 @@ router.get('/resumen', function(req, res) {
     ORDER BY en_transito DESC, sellados_pendientes_count DESC
   `).all();
 
-  // Saldos por proveedor — usa el cálculo unificado
-  const por_proveedor = db.prepare(`
-    SELECT id, nombre AS proveedor_nombre FROM proveedores
-  `).all().map(function(p){
-    const pendiente = _calcSaldoProveedor(p.id);
-    return { proveedor_id: p.id, proveedor_nombre: p.proveedor_nombre, pendiente: pendiente };
-  }).filter(function(x){ return x.pendiente > 0; })
+  // Saldos por proveedor — los mismos que ya sumó el KPI, solo los que tienen cajones
+  const por_proveedor = saldos_proveedores
+    .filter(function(x){ return x.pendiente > 0; })
     .sort(function(a,b){ return b.pendiente - a.pendiente; });
 
   res.json({
@@ -3256,6 +3279,7 @@ router.get('/resumen', function(req, res) {
       piso: piso,
       en_proveedores: en_proveedores,
       en_transito: en_transito_sg,
+      dif_pendientes: dif_pendientes.total,
       bajo_responsabilidad: bajo_responsabilidad,
       perdidas_acumuladas: perdido,
       retirado_total: retirado
@@ -3270,6 +3294,7 @@ router.get('/resumen', function(req, res) {
       por_cliente: por_cliente,
       por_proveedor: por_proveedor
     },
+    diferencias_pendientes: dif_pendientes.items,
     talonario: talonario_info
   });
 });
@@ -3425,7 +3450,7 @@ router.get('/clientes-dedicados', function(req, res) {
 // ════════════════════════════════════════════════════════════════════════════
 
 // Saldo del proveedor:
-//   + cajones que SG envió al proveedor (pendientes de devolución, vía envíos parcial/enviado)
+//   + cajones que SG envió al proveedor (envío entero; en recepción parcial, lo confirmado)
 //   - cajones que SG recibió del proveedor en su depósito (recepciones de mercadería)
 //   - cajones despachados a súper como "directo desde este proveedor" Y SELLADOS
 //
@@ -3433,11 +3458,25 @@ router.get('/clientes-dedicados', function(req, res) {
 function _calcSaldoProveedor(provId) {
   // Cajones que tiene en su galpón (saldo positivo):
   // = lo que SG le envió + lo que recibió de traspasos (es destino)
+  //
+  // Se cuenta el envío ENTERO, no `cantidad_enviada - cantidad_recibida`: cantidad_recibida
+  // es el ACUSE DE RECIBO del galpón (cuántos cajones confirmó que le llegaron), no cajones
+  // devueltos a SG. Restarla hacía que un envío confirmado se cancelara solo, y que el
+  // estado 'recibido' quedara afuera del saldo: el galpón confirmaba 500 cajones y su saldo
+  // daba 0. Es el mismo criterio que la columna oficial de la cuenta corriente
+  // (_cuentaCorrienteProveedor: "el envío entero suma al proveedor").
+  //
+  // Única excepción, la recepción PARCIAL: el galpón se hace cargo solo de lo que confirmó.
+  // La diferencia no es suya ni de SG (salió de SG y nunca llegó al galpón) → queda pendiente
+  // de revisión, ver _diferenciasEnvioPendientes(). Por eso COALESCE(recibida, enviada):
+  //   'enviado'  → recibida IS NULL      → cuenta cantidad_enviada
+  //   'recibido' → recibida = enviada    → cuenta lo mismo
+  //   'parcial'  → recibida < enviada    → cuenta solo lo confirmado
   const enviado = db.prepare(`
-    SELECT COALESCE(SUM(cantidad_enviada - COALESCE(cantidad_recibida,0)), 0) AS total
+    SELECT COALESCE(SUM(COALESCE(cantidad_recibida, cantidad_enviada)), 0) AS total
     FROM ifco_envios_proveedor
     WHERE proveedor_id = ? AND eliminado_en IS NULL
-      AND estado IN ('enviado','parcial')
+      AND estado IN ('enviado','parcial','recibido')
   `).get(provId).total || 0;
 
   // Cajones que devolvió con mercadería a SG (resta)
@@ -3472,6 +3511,43 @@ function _calcSaldoProveedor(provId) {
   `).get(provId).total || 0;
 
   return enviado - recibidoEnSG - directosSellados - traspasosEnviados;
+}
+
+// ── Diferencias de recepción pendientes de revisión ────────────────────────────
+// Cuando el galpón confirma MENOS cajones de los que SG despachó (estado='parcial'),
+// esos cajones no están en ningún piso: salieron de SG (el piso ya los restó) y nunca
+// llegaron al galpón (su saldo solo cuenta lo confirmado). Pero siguen siendo
+// responsabilidad nuestra frente a IFCO, así que se muestran como un tercer bucket
+// hasta que alguien los resuelva: registrando la pérdida, corrigiendo la cantidad,
+// o marcándolos revisados (las tres escriben diferencia_resuelta_en).
+//
+// No se guarda nada: la diferencia se deriva de las cantidades del propio envío.
+// provId opcional — sin él, devuelve el total de todos los galpones.
+function _diferenciasEnvioPendientes(provId) {
+  const where = provId ? 'AND e.proveedor_id = ?' : '';
+  const params = provId ? [provId] : [];
+  try {
+    const items = db.prepare(`
+      SELECT e.id, e.n_remito_interno, e.fecha_envio, e.fecha_recepcion,
+             e.proveedor_id, p.nombre AS proveedor_nombre,
+             e.cantidad_enviada, e.cantidad_recibida,
+             (e.cantidad_enviada - COALESCE(e.cantidad_recibida,0)) AS diferencia,
+             e.notas
+      FROM ifco_envios_proveedor e
+      LEFT JOIN proveedores p ON p.id = e.proveedor_id
+      WHERE e.estado = 'parcial'
+        AND e.eliminado_en IS NULL
+        AND e.diferencia_resuelta_en IS NULL
+        AND e.cantidad_enviada > COALESCE(e.cantidad_recibida, 0)
+        ${where}
+      ORDER BY e.fecha_envio DESC
+    `).all(...params);
+    const total = items.reduce(function(a, x){ return a + (x.diferencia || 0); }, 0);
+    return { total: total, items: items };
+  } catch(e) {
+    console.error('[IFCO][_diferenciasEnvioPendientes]', e.message);
+    return { total: 0, items: [] };
+  }
 }
 
 // Stock FÍSICO actual del proveedor: lo que debería estar en su depósito ahora.
@@ -3576,12 +3652,17 @@ function _movimientosProveedor(provId, desde, hasta) {
     let delta = 0;
     let delta_fisico = 0;
     if (m.tipo === 'envio') {
-      // Cant. (oficial): el envío entero suma al proveedor.
+      // Cant. (visible): lo que SG despachó en ese remito, tal cual.
       delta = +m.cantidad;
-      // Físico: solo cuentan los envíos activos y netos de los vacíos ya devueltos.
-      //   Estados ≠ enviado/parcial no están físicamente en el galpón.
-      delta_fisico = (m.estado === 'enviado' || m.estado === 'parcial')
-        ? (m.cantidad - (m.cantidad_recibida || 0))
+      // Saldo: mismo criterio que _calcSaldoProveedor — el envío entero queda a cargo del
+      // galpón, salvo en recepción parcial, donde solo se hace cargo de lo que confirmó
+      // (la diferencia no es suya: queda pendiente de revisión, no entra a ningún piso).
+      //   'enviado'  → recibida IS NULL   → cantidad enviada
+      //   'recibido' → recibida = enviada → lo mismo
+      //   'parcial'  → solo lo confirmado
+      //   'anulado'  → no llegó a salir
+      delta_fisico = (m.estado === 'enviado' || m.estado === 'parcial' || m.estado === 'recibido')
+        ? (m.cantidad_recibida != null ? m.cantidad_recibida : m.cantidad)
         : 0;
     } else if (m.tipo === 'recepcion') {
       delta = -m.cantidad;
@@ -5721,7 +5802,6 @@ function _stockTeoricoDeposito(deposito_tipo, proveedor_id) {
 //   - despachos a súper, SOLO origen='san_geronimo' (los directos de proveedor
 //     no salieron del piso de SG)
 //   - envíos a proveedor (cantidad_enviada, estados activos)
-//   + cantidad recibida en envíos a proveedor (cajones que volvieron al galpón)
 //   + recepciones de mercadería confirmadas (cajones con producto que llegan)
 //   + rechazos vueltos al SG (cajones rechazados por la cadena que volvieron)
 //   - faltantes SG declarados manualmente
@@ -5740,7 +5820,6 @@ function _calcStockSG() {
   const perdidas            = get('perdidas',           "SELECT COALESCE(SUM(cantidad),0) AS total FROM ifco_movimientos WHERE tipo='perdida' AND eliminado_en IS NULL AND pendiente=0");
   const despachos_sg        = get('despachos_sg',       "SELECT COALESCE(SUM(cantidad_despachada),0) AS total FROM ifco_remitos_super WHERE estado IN ('despachado','sellado','enviado','presentado') AND origen='san_geronimo' AND eliminado_en IS NULL");
   const envios_totales      = get('envios_totales',     "SELECT COALESCE(SUM(cantidad_enviada),0) AS total FROM ifco_envios_proveedor WHERE estado IN ('enviado','parcial','recibido') AND eliminado_en IS NULL AND origen_proveedor_id IS NULL");
-  const recepciones_envios  = get('recepciones_envios', "SELECT COALESCE(SUM(cantidad_recibida),0) AS total FROM ifco_envios_proveedor WHERE estado IN ('recibido','parcial') AND eliminado_en IS NULL AND origen_proveedor_id IS NULL");
   const recepciones_merc    = get('recepciones_merc',   "SELECT COALESCE(SUM(cantidad),0) AS total FROM ifco_recepciones_proveedor WHERE eliminado_en IS NULL AND (estado IS NULL OR estado='recibido')");
   const rechazos_vueltos_sg = get('rechazos_sg',        "SELECT COALESCE(SUM(cantidad_rechazada),0) AS total FROM ifco_remitos_super WHERE estado IN ('sellado','enviado','presentado') AND rechazo_destino='san_geronimo' AND eliminado_en IS NULL");
 
@@ -5749,11 +5828,16 @@ function _calcStockSG() {
   // semanal contra IFCO, las diferencias reales surgen de ahí (que es la fuente oficial).
   // Los faltantes manuales históricos siguen en la base pero no afectan el cálculo.
 
+  // NOTA 2: acá NO se suma `cantidad_recibida` de los envíos. Esa columna es el acuse de
+  // recibo del PROVEEDOR (cuántos cajones confirmó que le llegaron al galpón), no cajones
+  // que volvieron a SG. Sumarla cancelaba el envío contra sí mismo y dejaba el piso de SG
+  // contando cajones que están físicamente en el galpón. El retorno real de cajones entra
+  // por `recepciones_merc` (ifco_recepciones_proveedor), que es la entidad hecha para eso.
+
   return retirado
        - perdidas
        - despachos_sg
        - envios_totales
-       + recepciones_envios
        + recepciones_merc
        + rechazos_vueltos_sg;
 }
@@ -5774,8 +5858,6 @@ router.get('/diagnostico-stock-sg', function(req, res) {
         ayuda: 'Cajones que salieron de SG con destino cadena (despachados o sellados o presentados).' },
       { signo: '-', label: 'Envíos a galpones de proveedores', valor: get("SELECT COALESCE(SUM(cantidad_enviada),0) AS total FROM ifco_envios_proveedor WHERE estado IN ('enviado','parcial','recibido') AND eliminado_en IS NULL AND origen_proveedor_id IS NULL"),
         ayuda: 'Cajones que SG envió a un galpón de proveedor (no incluye traspasos entre galpones).' },
-      { signo: '+', label: 'Recepciones de envíos (vueltos)', valor: get("SELECT COALESCE(SUM(cantidad_recibida),0) AS total FROM ifco_envios_proveedor WHERE estado IN ('recibido','parcial') AND eliminado_en IS NULL AND origen_proveedor_id IS NULL"),
-        ayuda: 'Envíos a proveedor que volvieron (ej. cajones llenos con producto que retornan).' },
       { signo: '+', label: 'Recepciones de mercadería',  valor: get("SELECT COALESCE(SUM(cantidad),0) AS total FROM ifco_recepciones_proveedor WHERE eliminado_en IS NULL AND (estado IS NULL OR estado='recibido')"),
         ayuda: 'Cajones con mercadería que el proveedor envió a SG.' },
       { signo: '+', label: 'Rechazos vueltos a SG',     valor: get("SELECT COALESCE(SUM(cantidad_rechazada),0) AS total FROM ifco_remitos_super WHERE estado IN ('sellado','enviado','presentado') AND rechazo_destino='san_geronimo' AND eliminado_en IS NULL"),

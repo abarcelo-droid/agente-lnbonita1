@@ -199,6 +199,7 @@
 .ifco2 .banner.warn{background:var(--i-warn-bg);border-color:var(--i-warn-line);color:var(--i-warn)}
 .ifco2 .banner.info{background:var(--i-info-bg);border-color:var(--i-info-line);color:var(--i-info)}
 .ifco2 .banner.ok{background:var(--i-ok-bg);border-color:var(--i-ok-line);color:var(--i-ok)}
+.ifco2 .banner.err{background:var(--i-err-bg);border-color:var(--i-err-line);color:var(--i-err)}
 
 /* ===== Filtros ===== */
 .ifco2 .filters{display:flex;gap:9px;align-items:center;flex-wrap:wrap;margin-bottom:13px}
