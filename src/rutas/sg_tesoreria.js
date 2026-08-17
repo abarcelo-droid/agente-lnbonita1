@@ -61,10 +61,17 @@ router.get('/cuentas', (req, res) => {
   try {
     const cuentas = db.prepare(`
       SELECT c.*,
+        (SELECT GROUP_CONCAT(u.nombre, ' · ') FROM sg_fin_cuenta_usuarios cu
+           JOIN usuarios u ON u.id = cu.usuario_id
+          WHERE cu.cuenta_id = c.id) AS usuarios_nombres,
+        (SELECT COUNT(*) FROM sg_fin_cuenta_usuarios cu WHERE cu.cuenta_id = c.id) AS usuarios_n,
+        (SELECT COUNT(*) FROM sg_fin_chequeras q WHERE q.cuenta_id = c.id AND q.activo = 1) AS chequeras_n,
+        cc.codigo AS cuenta_codigo, cc.nombre AS cuenta_nombre,
         COALESCE(c.saldo_inicial, 0) +
         COALESCE((SELECT SUM(CASE WHEN tipo='ingreso' THEN monto ELSE -monto END)
                   FROM sg_fin_movimientos WHERE cuenta_id = c.id), 0) AS saldo_actual
       FROM sg_fin_cuentas c
+      LEFT JOIN sg_cuentas cc ON cc.id = c.cuenta_contable_id
       WHERE c.activo = 1
       ORDER BY c.tipo, c.nombre
     `).all();
@@ -87,28 +94,53 @@ router.get('/cuentas/:id', (req, res) => {
 });
 
 router.post('/cuentas', requireAdmin, (req, res) => {
-  const { nombre, tipo, banco, nro_cuenta, cbu, alias, moneda, saldo_inicial, cuenta_contable_id, ambito } = req.body || {};
+  const { nombre, tipo, banco, nro_cuenta, cbu, alias, moneda, saldo_inicial, cuenta_contable_id, ambito, tiene_chequera } = req.body || {};
   if (!nombre) return res.status(400).json({ ok: false, error: 'Nombre requerido' });
   const ambitoFinal = (tipo === 'caja' && ambito === 'interno') ? 'interno' : 'fiscal';
+  // Una caja de efectivo no tiene chequera ni por asomo: la marca es de banco.
+  const chq = (tipo !== 'caja' && tiene_chequera) ? 1 : 0;
   try {
     const r = db.prepare(`
-      INSERT INTO sg_fin_cuentas (nombre, tipo, banco, nro_cuenta, cbu, alias, moneda, saldo_inicial, cuenta_contable_id, ambito)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(nombre.trim(), tipo||'cuenta_corriente', banco||null, nro_cuenta||null, cbu||null, alias||null, moneda||'ARS', parseFloat(saldo_inicial||0), cuenta_contable_id?parseInt(cuenta_contable_id):null, ambitoFinal);
+      INSERT INTO sg_fin_cuentas (nombre, tipo, banco, nro_cuenta, cbu, alias, moneda, saldo_inicial, cuenta_contable_id, ambito, tiene_chequera)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(nombre.trim(), tipo||'cuenta_corriente', banco||null, nro_cuenta||null, cbu||null, alias||null, moneda||'ARS', parseFloat(saldo_inicial||0), cuenta_contable_id?parseInt(cuenta_contable_id):null, ambitoFinal, chq);
     res.json({ ok: true, id: r.lastInsertRowid });
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
 router.put('/cuentas/:id', requireAdmin, (req, res) => {
-  const { nombre, tipo, banco, nro_cuenta, cbu, alias, moneda, saldo_inicial, cuenta_contable_id, ambito } = req.body || {};
+  const { nombre, tipo, banco, nro_cuenta, cbu, alias, moneda, saldo_inicial, cuenta_contable_id, ambito, tiene_chequera } = req.body || {};
   try {
     const actual = db.prepare('SELECT * FROM sg_fin_cuentas WHERE id=?').get(req.params.id);
     if (!actual) return res.status(404).json({ ok: false, error: 'Cuenta no encontrada' });
     const tipoFinal = tipo||actual.tipo;
     const ambitoFinal = (tipoFinal === 'caja' && (ambito||actual.ambito) === 'interno') ? 'interno' : 'fiscal';
+    const quiereChq = (tiene_chequera === undefined) ? !!actual.tiene_chequera : !!tiene_chequera;
+    const chq = (tipoFinal !== 'caja' && quiereChq) ? 1 : 0;
+    // DESTILDAR "tiene chequera" con talonarios cargados dejaría los cheques
+    // colgando de una cuenta que dice no tenerlos: se avisa en vez de romperlo.
+    if (!chq && actual.tiene_chequera) {
+      const n = db.prepare('SELECT COUNT(*) c FROM sg_fin_chequeras WHERE cuenta_id=? AND activo=1')
+        .get(actual.id).c;
+      if (n) {
+        return res.status(400).json({ ok: false,
+          error: 'Esta cuenta tiene ' + n + ' chequera(s) cargadas: no se puede marcar como sin chequera.' });
+      }
+    }
+    // LO QUE NO VIENE EN EL PEDIDO, NO SE TOCA.
+    // Antes cada campo ausente se guardaba como NULL: un PUT que sólo quería
+    // marcar la chequera le borraba a la cuenta el banco, el CBU y —peor— la
+    // cuenta contable, y el siguiente pago desde ella fallaba con "no tiene
+    // cuenta contable asociada" sin que nadie hubiera tocado eso. Mandar el
+    // campo vacío A PROPÓSITO sí lo borra: es la forma de sacarle un dato.
+    const q = (v, previo) => (v === undefined ? previo : (v === '' || v === null ? null : v));
     db.prepare(`
-      UPDATE sg_fin_cuentas SET nombre=?, tipo=?, banco=?, nro_cuenta=?, cbu=?, alias=?, moneda=?, saldo_inicial=?, cuenta_contable_id=?, ambito=? WHERE id=?
-    `).run(nombre||actual.nombre, tipoFinal, banco||null, nro_cuenta||null, cbu||null, alias||null, moneda||actual.moneda, parseFloat(saldo_inicial??actual.saldo_inicial), cuenta_contable_id?parseInt(cuenta_contable_id):null, ambitoFinal, req.params.id);
+      UPDATE sg_fin_cuentas SET nombre=?, tipo=?, banco=?, nro_cuenta=?, cbu=?, alias=?, moneda=?, saldo_inicial=?, cuenta_contable_id=?, ambito=?, tiene_chequera=? WHERE id=?
+    `).run(nombre||actual.nombre, tipoFinal, q(banco, actual.banco), q(nro_cuenta, actual.nro_cuenta),
+      q(cbu, actual.cbu), q(alias, actual.alias), moneda||actual.moneda,
+      parseFloat(saldo_inicial??actual.saldo_inicial),
+      (() => { const c = q(cuenta_contable_id, actual.cuenta_contable_id); return c ? parseInt(c) : null; })(),
+      ambitoFinal, chq, req.params.id);
     res.json({ ok: true });
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
@@ -119,6 +151,66 @@ router.delete('/cuentas/:id', requireAdmin, (req, res) => {
     res.json({ ok: true });
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
+
+// ── QUIÉNES TOCAN ESTA CAJA ─────────────────────────────────────────────
+// Sin nadie asignado la abren todos: agregar esta lista no le saca el acceso a
+// nadie de un día para el otro. Apenas se asigna a alguien, la caja pasa a ser
+// de esa gente.
+router.get('/cuentas/:id/usuarios', (req, res) => {
+  try {
+    const asignados = db.prepare(`SELECT cu.usuario_id, u.nombre, u.email, u.rol
+      FROM sg_fin_cuenta_usuarios cu JOIN usuarios u ON u.id = cu.usuario_id
+      WHERE cu.cuenta_id = ? ORDER BY u.nombre`).all(req.params.id);
+    const todos = db.prepare(`SELECT id, nombre, email, rol FROM usuarios
+      WHERE COALESCE(activo,1)=1 ORDER BY nombre`).all();
+    res.json({ ok: true, data: { asignados, todos } });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+router.put('/cuentas/:id/usuarios', requireAdmin, (req, res) => {
+  try {
+    const ids = (Array.isArray(req.body && req.body.usuarios) ? req.body.usuarios : [])
+      .map(Number).filter(Boolean);
+    const c = db.prepare('SELECT id FROM sg_fin_cuentas WHERE id=?').get(req.params.id);
+    if (!c) return res.status(404).json({ ok: false, error: 'Cuenta no encontrada' });
+    db.transaction(() => {
+      db.prepare('DELETE FROM sg_fin_cuenta_usuarios WHERE cuenta_id=?').run(c.id);
+      const ins = db.prepare('INSERT OR IGNORE INTO sg_fin_cuenta_usuarios (cuenta_id, usuario_id) VALUES (?,?)');
+      for (const u of ids) ins.run(c.id, u);
+    })();
+    res.json({ ok: true, data: { cuenta_id: Number(c.id), usuarios: ids.length } });
+  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+
+// SI ESTA PERSONA PUEDE MOVER ESTA CUENTA.
+// La asignación HABILITA, no restringe: hasta hoy mover una caja era sólo de
+// admin, así que el cajero de planta no podía cargar ni su propio arqueo y
+// terminaba pidiéndoselo a administración. Asignarlo a su caja es lo que le
+// abre esa caja Y NINGUNA OTRA. Sin asignar a nadie, la caja queda como estaba:
+// sólo admin. Por eso agregar esto no le saca el acceso a nadie.
+export function puedeMoverCuenta(u, cuentaId) {
+  if (!u) return false;
+  if (u.rol === 'admin') return true;
+  return !!db.prepare('SELECT 1 FROM sg_fin_cuenta_usuarios WHERE cuenta_id=? AND usuario_id=?')
+    .get(cuentaId, u.id);
+}
+
+// Admin, o asignado a ESA cuenta. Lee la cuenta del cuerpo o de la fila que se
+// está por tocar, según el verbo.
+function requireCuenta(leerId) {
+  return (req, res, next) => {
+    const u = getUser(req);
+    if (!u) return res.status(403).json({ ok: false, error: 'solo admin' });
+    const cuentaId = leerId(req);
+    if (!cuentaId) return res.status(400).json({ ok: false, error: 'Falta la cuenta' });
+    if (!puedeMoverCuenta(u, cuentaId)) {
+      return res.status(403).json({ ok: false,
+        error: 'Esta caja no es tuya: sólo la mueven los usuarios asignados a ella.' });
+    }
+    req._user = u;
+    next();
+  };
+}
 
 // ────────────────────────────────────────────────────────────────────────────
 // CHEQUERAS
@@ -139,14 +231,45 @@ router.post('/chequeras', requireAdmin, (req, res) => {
   const { cuenta_id, nro_chequera, desde, hasta } = req.body || {};
   if (!cuenta_id || !desde || !hasta) return res.status(400).json({ ok: false, error: 'cuenta_id, desde y hasta son requeridos' });
   try {
+    const c = db.prepare('SELECT * FROM sg_fin_cuentas WHERE id=? AND activo=1').get(parseInt(cuenta_id));
+    if (!c) return res.status(400).json({ ok: false, error: 'La cuenta no existe' });
+    // La chequera es de la CUENTA, no del cheque: hay cuentas corrientes sin
+    // chequera y cajas de ahorro que nunca la tienen. Se marca en la cuenta.
+    if (!c.tiene_chequera) {
+      return res.status(400).json({ ok: false,
+        error: 'La cuenta "' + c.nombre + '" está marcada como SIN chequera. Marcale "tiene chequera" '
+             + 'antes de cargarle uno.' });
+    }
+    const d = parseInt(desde), h = parseInt(hasta);
+    if (!(d > 0) || !(h > 0) || h < d) {
+      return res.status(400).json({ ok: false, error: 'El rango de la chequera está al revés o vacío' });
+    }
+    // DOS CHEQUERAS NO SE PUEDEN PISAR. Si se solapan, el mismo número existe
+    // dos veces en la misma cuenta y el control de "número único" se vuelve
+    // discutible: cuál de las dos era.
+    const choca = db.prepare(`SELECT * FROM sg_fin_chequeras
+      WHERE cuenta_id=? AND activo=1 AND desde <= ? AND hasta >= ?`).get(c.id, h, d);
+    if (choca) {
+      return res.status(400).json({ ok: false,
+        error: 'Ese rango se pisa con la chequera ' + (choca.nro_chequera || '#' + choca.id)
+             + ' (' + choca.desde + ' a ' + choca.hasta + ')' });
+    }
     const r = db.prepare(`INSERT INTO sg_fin_chequeras (cuenta_id, nro_chequera, desde, hasta) VALUES (?,?,?,?)`)
-      .run(parseInt(cuenta_id), nro_chequera||null, parseInt(desde), parseInt(hasta));
+      .run(c.id, nro_chequera||null, d, h);
     res.json({ ok: true, id: r.lastInsertRowid });
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
 router.delete('/chequeras/:id', requireAdmin, (req, res) => {
   try {
+    // Con cheques emitidos no se da de baja: quedarían colgados de una chequera
+    // que "no existe" y el control de número único dejaría de verlos.
+    const n = db.prepare('SELECT COUNT(*) c FROM sg_fin_cheques_propios WHERE chequera_id=?')
+      .get(req.params.id).c;
+    if (n) {
+      return res.status(400).json({ ok: false,
+        error: 'Esta chequera ya tiene ' + n + ' cheque(s) emitidos: no se puede dar de baja.' });
+    }
     db.prepare('UPDATE sg_fin_chequeras SET activo=0 WHERE id=?').run(req.params.id);
     res.json({ ok: true });
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
@@ -168,23 +291,107 @@ router.get('/cheques-propios', (req, res) => {
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
+// EL NÚMERO DE CHEQUE NO SE REPITE NUNCA.
+// Dos cheques con el mismo número en la misma cuenta bancaria es la misma orden
+// de pago librada dos veces, y eso no se descubre acá: se descubre en el banco,
+// cuando presentan el segundo. Se controla contra TODA la cuenta —no contra la
+// chequera— porque el número que ve el banco es el de la cuenta, y se cuentan
+// también los anulados: un número usado queda quemado para siempre.
+export function chequeUsado(db_, cuentaId, nro, exceptoId) {
+  let sql = `SELECT cp.id, cp.estado, cp.beneficiario, cp.fecha_emision
+    FROM sg_fin_cheques_propios cp
+    JOIN sg_fin_chequeras ch ON ch.id = cp.chequera_id
+    WHERE ch.cuenta_id = ? AND cp.nro_cheque = ?`;
+  const p = [cuentaId, nro];
+  if (exceptoId) { sql += ' AND cp.id <> ?'; p.push(exceptoId); }
+  return db_.prepare(sql).get(...p) || null;
+}
+
 router.post('/cheques-propios', requireAdmin, (req, res) => {
   const { chequera_id, nro_cheque, monto, beneficiario, fecha_emision, fecha_vto, notas, pago_id } = req.body || {};
   if (!chequera_id || !nro_cheque || !monto) return res.status(400).json({ ok: false, error: 'chequera_id, nro_cheque y monto son requeridos' });
   try {
+    const ch = db.prepare('SELECT * FROM sg_fin_chequeras WHERE id=? AND activo=1').get(parseInt(chequera_id));
+    if (!ch) return res.status(400).json({ ok: false, error: 'La chequera no existe o está dada de baja' });
+    const nro = parseInt(nro_cheque);
+    if (!(nro > 0)) return res.status(400).json({ ok: false, error: 'El número de cheque no es un número' });
+    if (nro < ch.desde || nro > ch.hasta) {
+      return res.status(400).json({ ok: false,
+        error: 'El cheque ' + nro + ' no pertenece a esta chequera: va del ' + ch.desde + ' al ' + ch.hasta });
+    }
+    const usado = chequeUsado(db, ch.cuenta_id, nro, null);
+    if (usado) {
+      return res.status(400).json({ ok: false,
+        error: 'El cheque N° ' + nro + ' YA SE EMITIÓ el ' + (usado.fecha_emision || 's/f')
+             + (usado.beneficiario ? ' a ' + usado.beneficiario : '') + ' (' + usado.estado + '). '
+             + 'Un número de cheque no se usa dos veces.' });
+    }
     const r = db.prepare(`INSERT INTO sg_fin_cheques_propios (chequera_id, nro_cheque, monto, beneficiario, fecha_emision, fecha_vto, notas, pago_id)
       VALUES (?,?,?,?,?,?,?,?)`)
-      .run(parseInt(chequera_id), parseInt(nro_cheque), parseFloat(monto), beneficiario||null,
+      .run(ch.id, nro, parseFloat(monto), beneficiario||null,
            fecha_emision||new Date().toISOString().split('T')[0], fecha_vto||null, notas||null, pago_id?parseInt(pago_id):null);
     res.json({ ok: true, id: r.lastInsertRowid });
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
+// El próximo número libre de la chequera: lo que hay que ofrecer para que nadie
+// tenga que ir a mirar el talonario.
+router.get('/chequeras/:id/proximo', (req, res) => {
+  try {
+    const ch = db.prepare('SELECT * FROM sg_fin_chequeras WHERE id=?').get(req.params.id);
+    if (!ch) return res.status(404).json({ ok: false, error: 'Chequera no encontrada' });
+    let n = ch.desde;
+    while (n <= ch.hasta && chequeUsado(db, ch.cuenta_id, n, null)) n++;
+    res.json({ ok: true, data: {
+      chequera_id: ch.id, desde: ch.desde, hasta: ch.hasta,
+      proximo: n <= ch.hasta ? n : null,
+      agotada: n > ch.hasta,
+    } });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// ANULAR UN CHEQUE. Va por su propia dirección —y no por /estado— porque el
+// control de niveles reconoce la anulación por la URL: con /estado, alguien con
+// nivel "operar" anulaba un cheque igual que si lo estuviera editando.
+// El número NO se libera: un cheque roto no vuelve al talonario.
+router.post('/cheques-propios/:id/anular', requireAdmin, (req, res) => {
+  try {
+    const c = db.prepare('SELECT * FROM sg_fin_cheques_propios WHERE id=?').get(req.params.id);
+    if (!c) return res.status(404).json({ ok: false, error: 'Cheque no encontrado' });
+    if (c.estado === 'anulado') return res.status(400).json({ ok: false, error: 'Ya estaba anulado' });
+    if (c.estado === 'cobrado') {
+      return res.status(400).json({ ok: false,
+        error: 'Ese cheque ya se cobró: no se anula, se registra la contrapartida.' });
+    }
+    if (c.pago_id) {
+      return res.status(400).json({ ok: false,
+        error: 'Ese cheque salió de un pago a proveedor. Anulá el pago —así vuelve el saldo a la '
+             + 'factura y se anula el asiento— y el cheque se anula con él.' });
+    }
+    const motivo = (req.body && req.body.motivo ? String(req.body.motivo) : '').trim();
+    db.prepare(`UPDATE sg_fin_cheques_propios SET estado='anulado',
+      notas = TRIM(COALESCE(notas,'') || ' [ANULADO' || ? || ']') WHERE id=?`)
+      .run(motivo ? ': ' + motivo : '', c.id);
+    res.json({ ok: true, data: { id: Number(c.id), nro_cheque: c.nro_cheque } });
+  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+
 router.patch('/cheques-propios/:id/estado', requireAdmin, (req, res) => {
   const { estado } = req.body || {};
-  const estados = ['emitido','cobrado','rechazado','anulado'];
-  if (!estados.includes(estado)) return res.status(400).json({ ok: false, error: 'Estado inválido' });
+  // 'anulado' NO está: si estuviera, esta dirección sería una puerta lateral para
+  // anular sin pasar por el control de niveles, que mira la URL.
+  const estados = ['emitido','cobrado','rechazado'];
+  if (!estados.includes(estado)) {
+    return res.status(400).json({ ok: false, error: estado === 'anulado'
+      ? 'Para anular un cheque está el botón Anular, que pide el permiso correspondiente.'
+      : 'Estado inválido' });
+  }
   try {
+    const c = db.prepare('SELECT estado FROM sg_fin_cheques_propios WHERE id=?').get(req.params.id);
+    if (!c) return res.status(404).json({ ok: false, error: 'Cheque no encontrado' });
+    if (c.estado === 'anulado') {
+      return res.status(400).json({ ok: false, error: 'Ese cheque está anulado: no se le cambia el estado.' });
+    }
     db.prepare('UPDATE sg_fin_cheques_propios SET estado=? WHERE id=?').run(estado, req.params.id);
     res.json({ ok: true });
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
@@ -246,7 +453,7 @@ router.get('/movimientos', (req, res) => {
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
-router.post('/movimientos', requireAdmin, (req, res) => {
+router.post('/movimientos', requireCuenta((req) => Number((req.body || {}).cuenta_id)), (req, res) => {
   const u = getUser(req);
   const { cuenta_id, fecha, tipo, concepto, monto, referencia, pago_id } = req.body || {};
   if (!cuenta_id || !tipo || !concepto || !monto) return res.status(400).json({ ok: false, error: 'Faltan campos requeridos' });
@@ -259,7 +466,12 @@ router.post('/movimientos', requireAdmin, (req, res) => {
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
-router.delete('/movimientos/:id', requireAdmin, (req, res) => {
+const cuentaDelMovimiento = (req) => {
+  const m = db.prepare('SELECT cuenta_id FROM sg_fin_movimientos WHERE id=?').get(req.params.id);
+  return m ? Number(m.cuenta_id) : 0;
+};
+
+router.delete('/movimientos/:id', requireCuenta(cuentaDelMovimiento), (req, res) => {
   try {
     db.prepare('DELETE FROM sg_fin_movimientos WHERE id=?').run(req.params.id);
     res.json({ ok: true });

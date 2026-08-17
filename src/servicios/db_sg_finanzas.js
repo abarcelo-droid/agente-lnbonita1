@@ -409,6 +409,36 @@ db.exec(`
   );
 `);
 
+// ── QUIÉN TOCA CADA CAJA ──────────────────────────────────────────────────
+// Una caja de efectivo la maneja una persona, no "la empresa": la de la planta
+// la toca el encargado de planta y la de administración, administración. Sin
+// esto, cualquiera con acceso a la pantalla podía mover cualquier caja, y
+// después no había a quién preguntarle por una diferencia de arqueo.
+//
+// Sin filas para una cuenta = sin restricción (la abren todos). Es lo que hace
+// que agregar la tabla no le saque el acceso a nadie de un día para el otro.
+try {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS sg_fin_cuenta_usuarios (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      cuenta_id   INTEGER NOT NULL REFERENCES sg_fin_cuentas(id),
+      usuario_id  INTEGER NOT NULL,
+      creado_en   TEXT DEFAULT (datetime('now','localtime'))
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_sg_fincta_usr ON sg_fin_cuenta_usuarios(cuenta_id, usuario_id);
+  `);
+} catch (e) { console.error('[SG] sg_fin_cuenta_usuarios:', e.message); }
+
+// Si la cuenta tiene chequera. Es del banco, no del cheque: hay cuentas
+// corrientes sin chequera y cajas de ahorro que nunca la tienen.
+try { db.exec("ALTER TABLE sg_fin_cuentas ADD COLUMN tiene_chequera INTEGER NOT NULL DEFAULT 0"); } catch (_) {}
+
+// EL NÚMERO DE CHEQUE NO SE REPITE NUNCA. Dos cheques con el mismo número en la
+// misma chequera es un cheque que se paga dos veces, y se descubre en el banco.
+try { db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_sg_cheque_nro ON sg_fin_cheques_propios(chequera_id, nro_cheque)"); } catch (e) {
+  console.error('[SG] cheques propios duplicados, no se pudo crear el índice único:', e.message);
+}
+
 // ── EL PAGO AL PROVEEDOR ──────────────────────────────────────────────────
 // La tabla se creó "por paridad estructural" con Puente Cordón y quedó sin usar,
 // así que le faltan las columnas del circuito real: de qué cuenta salió la

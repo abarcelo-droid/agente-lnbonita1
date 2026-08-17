@@ -41,6 +41,12 @@ const MODULOS_SG = [
   // proveedor no está cargando órdenes, y tenía que entrar a Ingresos para
   // llegar. Va como pantalla propia, en el mismo grupo.
   ["sg-cc-proveedores", "💳 CC proveedores", 670],
+  // Caja y Bancos de San Gerónimo. El backend ya existía entero
+  // —/api/sg/tesoreria sobre las tablas sg_fin_*— pero no había pantalla: la
+  // única "Caja y Bancos" del panel es la de Puente Cordón, que corre sobre
+  // tablas fin_* y está asignada a esa empresa. Sin esta pantalla no había
+  // dónde cargar la caja o el banco de donde sale la plata de un pago.
+  ["sg-caja-bancos", "🏦 Caja y Bancos", 680],
 ];
 
 try {
@@ -94,6 +100,7 @@ try {
   db.prepare("UPDATE modulos_config SET label='🚜 Control Cooperativa' WHERE modulo='sg-control-coop'").run();
   db.prepare("UPDATE modulos_config SET label='🧾 Facturas por mercadería' WHERE modulo='sg-facturas-merc'").run();
   db.prepare("UPDATE modulos_config SET label='💳 CC proveedores' WHERE modulo='sg-cc-proveedores'").run();
+  db.prepare("UPDATE modulos_config SET label='🏦 Caja y Bancos' WHERE modulo='sg-caja-bancos'").run();
   db.prepare("UPDATE modulos_config SET label='📄 Liquidaciones'      WHERE modulo='ab-liquidaciones'").run();
   // ── EL MENÚ DE SAN GERÓNIMO, ORDENADO POR CÓMO SE TRABAJA ────────────────
   // Antes había un solo grupo, "Abasto SG", con once pantallas apiladas en el
@@ -129,24 +136,31 @@ try {
     ['Administración de Ventas',      650,  'sg-stock'],
     ['Administración de Ventas',      651,  'sg-ventas'],
 
-    ['Administración de Compras',     660,  'sg-catalogo'],
-    ['Administración de Compras',     661,  'sg-compras'],
+    // ── INGRESOS: LA MERCADERÍA QUE ENTRA ────────────────────────────
+    // Todo lo que pasa desde que se pacta la compra hasta que la mercadería
+    // está adentro. Estaba mezclado con la parte administrativa —facturas,
+    // liquidaciones, pagos, cuenta corriente— en un solo grupo de once
+    // pantallas donde el que recibe camiones y el que paga facturas buscaban
+    // en la misma lista.
+    ['Ingresos',                      660,  'sg-catalogo'],
+    ['Ingresos',                      661,  'sg-compras'],
     // Control Cooperativa va pegado a Ingresos porque se alimenta de ahí: cada
     // recepción que contesta "con descarga" cae en esta pantalla.
-    ['Administración de Compras',     662,  'sg-control-coop'],
-    ['Administración de Compras',     663,  'sg-importacion'],
-    ['Administración de Compras',     664,  'sg-gvariables'],
-    ['Administración de Compras',     665,  'sg-gastos-directos'],
-    ['Administración de Compras',     666,  'sg-reprocesos'],
-    ['Administración de Compras',     667,  'ab-liquidaciones'],
-    // Pegada a Liquidaciones: son las dos bandejas de lo que queda pendiente
-    // después de recibir, una por cada condición comercial.
-    ['Administración de Compras',     669,  'sg-facturas-merc'],
-    ['Administración de Compras',     670,  'sg-cc-proveedores'],
-    ['Administración de Compras',     668,  'sp-pagos'],
+    ['Ingresos',                      662,  'sg-control-coop'],
+    ['Ingresos',                      663,  'sg-importacion'],
+    ['Ingresos',                      664,  'sg-gastos-directos'],
+    ['Ingresos',                      665,  'sg-reprocesos'],
 
-    ['Informes',                      670,  'sg-dashboard'],
-    ['Informes',                      671,  'sg-reportes'],
+    // ── ADMINISTRACIÓN DE COMPRAS: EL PAPEL Y LA PLATA ───────────────
+    ['Administración de Compras',     670,  'ab-liquidaciones'],
+    ['Administración de Compras',     671,  'sg-facturas-merc'],
+    ['Administración de Compras',     672,  'sg-cc-proveedores'],
+    ['Administración de Compras',     673,  'sp-pagos'],
+    ['Administración de Compras',     674,  'sg-gvariables'],
+    ['Administración de Compras',     675,  'sg-caja-bancos'],
+
+    ['Informes',                      680,  'sg-dashboard'],
+    ['Informes',                      681,  'sg-reportes'],
   ];
   const mover = db.prepare('UPDATE modulos_config SET grupo = ?, orden = ? WHERE modulo = ?');
   let movidos = 0;
