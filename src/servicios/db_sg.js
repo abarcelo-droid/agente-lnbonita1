@@ -758,6 +758,38 @@ try { db.exec("ALTER TABLE sg_oc ADD COLUMN flete_con_iva INTEGER"); } catch (_)
 //
 // El motivo es obligatorio cuando se cierra con saldo: la orden queda diciendo
 // que faltaron 1150 kg y alguien tiene que poder leer por qué no van a venir.
+// (Las columnas del cerrojo se crean más abajo, junto al resto de sg_oc.)
+
+// ── ¿LIQUIDAMOS O RECIBIMOS FACTURA? ──────────────────────────────────────
+// Es la pregunta que define todo el circuito de una compra, y hasta ahora no se
+// hacía: se deducía de la condición comercial, y eso era ambiguo.
+//
+//   RECIBIMOS FACTURA → la condición es siempre Precio Cerrado. La partida va a
+//     "pendiente de recibir factura", se carga el comprobante y se contabiliza.
+//   EMITIMOS LIQUIDACIÓN → la partida va a "pendiente de liquidar". Puede ser a
+//     Precio Cerrado o a Precio de Pizarra; esas dos modalidades se diseñan más
+//     adelante.
+//
+// Antes el ruteo lo hacía tipo_precio, y por eso una orden de Precio Cerrado que
+// declaraba Liquidación como comprobante caía en la bandeja de facturas y
+// quedaba trabada: ninguno de los tipos que esa pantalla acepta —A o B— era el
+// que decía la orden.
+try { db.exec("ALTER TABLE sg_oc ADD COLUMN documenta TEXT"); } catch (_) {}
+
+// Las órdenes que ya existen. El criterio sale de lo que ya declararon:
+//   · pizarra                    → se liquida (el precio se define al vender)
+//   · comprobante = liquidacion  → se liquida (lo dice el propio comprobante)
+//   · el resto                   → se factura
+// Idempotente: sólo toca las que todavía no tienen respuesta.
+try {
+  const n = db.prepare(`UPDATE sg_oc SET documenta = CASE
+      WHEN tipo_precio = 'pizarra' THEN 'liquidacion'
+      WHEN tipo_fiscal = 'liquidacion' THEN 'liquidacion'
+      ELSE 'factura' END
+    WHERE documenta IS NULL`).run().changes;
+  if (n) console.log(`[DB] SG: se les calculó "liquidamos o facturamos" a ${n} orden(es) ya cargada(s).`);
+} catch (e) { console.error('[DB] SG documenta:', e.message); }
+
 // ── QUIÉN CAMBIÓ QUÉ ──────────────────────────────────────────────────────
 // Un administrador puede corregir lo que ya se cargó: un bulto mal contado, un
 // peso mal tipeado, un precio con un cero de más. Eso está bien —el error existe

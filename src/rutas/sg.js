@@ -1150,6 +1150,38 @@ function defaultsProveedor(db, proveedorId, body) {
   };
 }
 
+// ── ¿LIQUIDAMOS O RECIBIMOS FACTURA DE COMPRA? ────────────────────────────────
+// Es lo primero que se define en una compra, y de ahí sale el resto: a qué
+// bandeja va la partida cuando se reciba, con qué comprobante, y si el precio
+// puede ser de pizarra.
+//
+// Antes esto se DEDUCÍA de la condición comercial y quedaba ambiguo: Precio
+// Cerrado podía ser con factura o con liquidación, y la partida caía en la
+// bandeja equivocada — la de facturas, que sólo acepta A o B — y ahí se trababa.
+// Ahora se pregunta.
+//
+// Si no se preguntó (una carga vieja, o un llamado que no manda el campo) se
+// deduce igual que la migración de arranque, para no cambiarle el circuito a
+// nada que ya estaba cargado.
+function circuitoDeCompra(b, tipoFiscalDefault) {
+  let doc = (b.documenta === 'liquidacion' || b.documenta === 'factura') ? b.documenta : null;
+  if (!doc) {
+    doc = (val(b.tipo_precio) === 'pizarra' || tipoFiscalDefault === 'liquidacion')
+      ? 'liquidacion' : 'factura';
+  }
+  // Con factura NO hay precio de pizarra: la factura llega con el precio hecho.
+  const tipoPrecio = doc === 'factura' ? 'firme'
+    : (val(b.tipo_precio) === 'pizarra' ? 'pizarra' : 'firme');
+  // Y el comprobante tiene que decir lo mismo que el circuito. El habitual del
+  // proveedor entra por atrás y si no se corrige queda la combinación imposible
+  // guardada: una compra que se documenta con factura y dice comprobante
+  // "liquidación", o al revés.
+  let tipoFiscal = tipoFiscalDefault;
+  if (doc === 'liquidacion') tipoFiscal = 'liquidacion';
+  else if (tipoFiscal === 'liquidacion') tipoFiscal = 'factura_a';
+  return { documenta: doc, tipoPrecio, tipoFiscal };
+}
+
 // Crea los lotes de un item de recepción. Devuelve cantidad creada.
 // #reproceso item 3: si la recepción está observada (observada=1), el lote nace en 'amarillo'
 // con origen='observado' y se registra en el historial. Solo suma el seteo del semáforo; no
@@ -1542,7 +1574,6 @@ router.post('/oc', requireAdmin, (req, res) => {
     const b = req.body;
     const items = Array.isArray(b.items) ? b.items : [];
     if (!items.length) return res.status(400).json({ ok: false, error: 'La OC necesita al menos un item' });
-    const tipoPrecio = b.tipo_precio === 'pizarra' ? 'pizarra' : 'firme';
     // Flete INFORMATIVO: se guarda quién paga + el monto que carga el comercial, pero
     // NO entra al total (el total sigue saliendo solo del loop de items, más abajo).
     const fleteCargo = (b.flete_a_cargo === 'comprador' || b.flete_a_cargo === 'vendedor') ? b.flete_a_cargo : null;
@@ -1566,11 +1597,12 @@ router.post('/oc', requireAdmin, (req, res) => {
     const fleteConIva = (b.flete_con_iva === undefined || b.flete_con_iva === null || b.flete_con_iva === '')
       ? null : (b.flete_con_iva ? 1 : 0);
     const dft = defaultsProveedor(db, b.proveedor_id, b);
+    const { documenta, tipoPrecio, tipoFiscal } = circuitoDeCompra(b, dft.tipo_fiscal);
     // ── IVA Fase 2 — la OC discrimina IVA solo con Factura A + precio firme. En Liquidación
     // (o pizarra) NO se discrimina (el IVA se resuelve después). precio_incluye_iva: el
     // comercial define si el $/kg ya trae IVA o si se le adiciona. iva_alicuota_oc: override
     // opcional; si es null, la alícuota sale de la familia de cada item.
-    const discrimina = (dft.tipo_fiscal === 'factura_a') && (tipoPrecio === 'firme');
+    const discrimina = (tipoFiscal === 'factura_a') && (tipoPrecio === 'firme');
     const incluyeIva = b.precio_incluye_iva ? 1 : 0;
     const alicOverride = (b.iva_alicuota_oc != null && b.iva_alicuota_oc !== '') ? Number(b.iva_alicuota_oc) : null;
     const alicFamStmt = db.prepare('SELECT f.iva_alicuota AS a FROM sg_productos p LEFT JOIN sg_familias f ON f.id=p.familia_id WHERE p.id=?');
@@ -1585,12 +1617,12 @@ router.post('/oc', requireAdmin, (req, res) => {
         (numero, modalidad, proveedor_id, tipo_fiscal, tipo_precio, condicion_pago_id, fecha_oc,
          fecha_recepcion_estimada, comercial_id, estado, observaciones, flete_a_cargo, flete_monto,
          precio_incluye_iva, iva_alicuota_oc, total_estimado_kg, total_estimado_monto, creado_por,
-         trazabilidad, flete_modalidad, flete_cantidad, flete_precio_unit, flete_con_iva)
-        VALUES (?,?,?,?,?,?,?,?,?, 'abierta', ?,?,?, ?,?, 0, 0, ?, ?, ?,?,?,?)`).run(
-        numero, val(b.modalidad) || 'normal', b.proveedor_id || null, dft.tipo_fiscal, tipoPrecio,
+         trazabilidad, flete_modalidad, flete_cantidad, flete_precio_unit, flete_con_iva, documenta)
+        VALUES (?,?,?,?,?,?,?,?,?, 'abierta', ?,?,?, ?,?, 0, 0, ?, ?, ?,?,?,?,?)`).run(
+        numero, val(b.modalidad) || 'normal', b.proveedor_id || null, tipoFiscal, tipoPrecio,
         dft.condicion_pago_id, val(b.fecha_oc), val(b.fecha_recepcion_estimada), b.comercial_id || null,
         val(b.observaciones), fleteCargo, fleteMonto, (discrimina ? incluyeIva : null), alicOverride, uid(req),
-        traza, fleteModalidad, fleteCantidad, fletePrecioUnit, fleteConIva);
+        traza, fleteModalidad, fleteCantidad, fletePrecioUnit, fleteConIva, documenta);
       const ocId = ocInfo.lastInsertRowid;
 
       const insItem = db.prepare(`INSERT INTO sg_oc_items
@@ -1638,20 +1670,26 @@ router.post('/oc', requireAdmin, (req, res) => {
 });
 
 // ── LA PARTIDA RECIBIDA, ¿A DÓNDE VA? ────────────────────────────────────
-// Una vez que la mercadería entró, la orden todavía tiene algo pendiente, y
-// depende de cómo se pactó el precio:
+// Una vez que la mercadería entró, la orden todavía tiene algo pendiente: el
+// papel. Y lo decide 'documenta', que es lo que se contestó al cargar la compra:
 //
-//   Liquidación de Venta (pizarra) → hay que LIQUIDARLA: el precio se define
-//     cuando se vende, cerrando el precio de cada lote.
-//   Precio Cerrado (firme)         → hay que cargarle la FACTURA del proveedor.
+//   Emitimos liquidación      → hay que LIQUIDARLA.
+//   Recibimos factura         → hay que cargarle la FACTURA del proveedor.
 //
 // Son dos bandejas de trabajo distintas, para dos personas distintas, y hasta
 // ahora no existía ninguna: la orden se recibía y desaparecía del circuito.
 //
-// El criterio de "pendiente" sale de datos que ya existen, sin tabla nueva:
-//   pendiente de liquidar  = tiene lotes sin precio cerrado (precio_unitario_kg NULL)
+// ANTES LO DECIDÍA LA CONDICIÓN COMERCIAL, y ahí estaba el error: una compra a
+// Precio Cerrado cuyo comprobante era una Liquidación caía en la bandeja de
+// facturas y quedaba trabada — esa pantalla sólo carga Factura A o B, y ninguna
+// de las dos era la que declaraba la orden. Precio Cerrado y Liquidación no son
+// lo mismo: se puede comprar a precio cerrado y documentarlo con liquidación.
+//
+// El COALESCE es para las órdenes anteriores a la pregunta: se deduce lo mismo
+// que hizo la migración de arranque, así una fila sin migrar no cambia de lado.
+//   pendiente de liquidar  = todavía no tiene su liquidación cargada
 //   pendiente de facturar  = ninguna de sus recepciones tiene número de factura
-function partidasRecibidas(db, tipoPrecio) {
+function partidasRecibidas(db, comoSeDocumenta) {
   return db.prepare(`
     SELECT o.id, o.numero, o.trazabilidad, o.fecha_oc, o.tipo_precio, o.tipo_fiscal, o.estado,
            o.cerrada_en, o.total_estimado_kg,
@@ -1674,17 +1712,39 @@ function partidasRecibidas(db, tipoPrecio) {
            (SELECT MAX(r.fecha_recepcion) FROM sg_recepciones r
              WHERE r.oc_id = o.id AND r.activo = 1) AS fecha_recepcion
       FROM sg_oc o LEFT JOIN sg_proveedores p ON p.id = o.proveedor_id
-     WHERE o.activo = 1 AND o.tipo_precio = ?
+     WHERE o.activo = 1 AND COALESCE(o.documenta, CASE
+            WHEN o.tipo_precio = 'pizarra' THEN 'liquidacion'
+            WHEN o.tipo_fiscal = 'liquidacion' THEN 'liquidacion'
+            ELSE 'factura' END) = ?
        AND o.estado IN ('recibida_total','cerrada')
-     ORDER BY o.id DESC`).all(tipoPrecio);
+     ORDER BY o.id DESC`).all(comoSeDocumenta);
 }
 
-// Partidas de liquidación que todavía no se liquidaron: les falta cerrar el
-// precio de algún lote.
+// ── PARTIDAS QUE TODAVÍA NO SE LIQUIDARON ───────────────────────────────
+//
+// UNA PARTIDA SALE DE LA BANDEJA CUANDO SE LE CARGA SU LIQUIDACIÓN, y no antes.
+// El criterio de antes era "tiene lotes sin precio cerrado", y dejaba afuera
+// justo la mitad del circuito: una compra a Precio Cerrado que se documenta con
+// liquidación llega con el precio ya puesto desde la recepción, así que nunca
+// aparecía acá y la liquidación quedaba sin emitir sin que nadie lo viera.
+// Al revés también fallaba: la de pizarra se iba de la bandeja apenas alguien
+// cerraba el precio a mano, con la liquidación todavía sin cargar.
+//
+// El precio sigue mostrándose en la lista (lotes_sin_precio), pero como dato de
+// la partida, no como criterio.
 router.get('/partidas-a-liquidar', requireAuth, (req, res) => {
   const db = getDb();
   try {
-    const rows = partidasRecibidas(db, 'pizarra').filter((r) => r.lotes_sin_precio > 0);
+    // La tabla de liquidaciones la crea el módulo de Abasto al arrancar. Si por
+    // orden de carga todavía no existe, la bandeja muestra todo antes que
+    // romperse: es preferible una partida de más a una pantalla en error.
+    let conLiq = new Set();
+    try {
+      conLiq = new Set(db.prepare(
+        'SELECT DISTINCT oc_id FROM liquidaciones WHERE oc_id IS NOT NULL AND eliminado_en IS NULL')
+        .all().map((r) => Number(r.oc_id)));
+    } catch (_) { /* sin tabla todavía */ }
+    const rows = partidasRecibidas(db, 'liquidacion').filter((r) => !conLiq.has(Number(r.id)));
     res.json({ ok: true, data: rows });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
@@ -1994,7 +2054,14 @@ router.get('/oc/:id/agrupables', requireAuth, (req, res) => {
                 JOIN sg_oc_items i ON i.id=l.oc_item_id WHERE i.oc_id=o.id AND l.activo=1) AS kg_recibidos
         FROM sg_oc o
        WHERE o.activo=1 AND o.proveedor_id = ? AND o.id <> ?
-         AND o.tipo_precio = 'firme'
+         -- Sólo las que se documentan con FACTURA. Antes decía tipo_precio='firme',
+         -- que no es lo mismo: una compra a precio cerrado que se documenta con
+         -- liquidación entraba en la lista y se podía meter en una factura de
+         -- la que no forma parte.
+         AND COALESCE(o.documenta, CASE
+               WHEN o.tipo_precio = 'pizarra' THEN 'liquidacion'
+               WHEN o.tipo_fiscal = 'liquidacion' THEN 'liquidacion'
+               ELSE 'factura' END) = 'factura'
          AND o.estado IN ('recibida_total','cerrada')
          -- Sin factura todavía: una partida no puede estar en dos facturas.
          AND NOT EXISTS (SELECT 1 FROM sg_recepciones r
@@ -2050,6 +2117,23 @@ router.post('/oc/:id/factura-completa', facturaUpload.single('archivo'), require
     for (const x of (Array.isArray(b.ocs) ? b.ocs : [])) {
       const n = Number(x);
       if (n && !ocIds.includes(n)) ocIds.push(n);
+    }
+    // Y TIENEN QUE SER DEL CIRCUITO DE FACTURA. Una partida que se documenta con
+    // liquidación no se factura: la pantalla ya no la ofrece, pero el que decide
+    // acá es el backend. Sin esto, cambiar una partida de circuito con la ventana
+    // abierta la dejaba entrar igual.
+    {
+      const ph = ocIds.map(() => '?').join(',');
+      const ajena = db.prepare(`SELECT trazabilidad, id FROM sg_oc
+        WHERE id IN (${ph}) AND COALESCE(documenta, CASE
+              WHEN tipo_precio = 'pizarra' THEN 'liquidacion'
+              WHEN tipo_fiscal = 'liquidacion' THEN 'liquidacion'
+              ELSE 'factura' END) <> 'factura'`).get(...ocIds);
+      if (ajena) {
+        return res.status(400).json({ ok: false,
+          error: 'La partida ' + (ajena.trazabilidad || ajena.id) + ' se documenta con liquidación, '
+               + 'no con factura de compra. Si es un error, cambiale el circuito desde la ficha.' });
+      }
     }
     if (ocIds.length > 1) {
       const ph = ocIds.map(() => '?').join(',');
@@ -2510,6 +2594,66 @@ router.put('/lotes/:id/corregir', requireAdmin, (req, res) => {
   } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
 });
 
+// ── CAMBIAR SI LA PARTIDA SE LIQUIDA O SE FACTURA ────────────────────────
+// El comprador se equivoca al cargar la orden y la partida termina en la
+// bandeja que no es. Sólo admin, con motivo, y queda registrado — igual que
+// cualquier otra corrección.
+router.put('/oc/:id/documenta', requireAdmin, (req, res) => {
+  const db = getDb();
+  try {
+    const destino = req.body && req.body.documenta;
+    const motivo = val(req.body && req.body.motivo);
+    if (!['factura', 'liquidacion'].includes(destino)) {
+      return res.status(400).json({ ok: false, error: 'Elegí si se factura o se liquida' });
+    }
+    if (!motivo) return res.status(400).json({ ok: false, error: 'Escribí por qué se cambia: queda registrado' });
+
+    const oc = db.prepare('SELECT * FROM sg_oc WHERE id=? AND activo=1').get(req.params.id);
+    if (!oc) return res.status(404).json({ ok: false, error: 'Orden no encontrada' });
+
+    // Si ya se contabilizó, esto define de dónde salió el asiento: no se mueve
+    // sin anularlo primero.
+    const fac = db.prepare(`SELECT f.asiento_id, a.anulado FROM sg_facturas_compra f
+      LEFT JOIN sg_asientos a ON a.id = f.asiento_id
+      WHERE f.activo=1 AND f.asiento_id IS NOT NULL
+        AND (f.oc_id = ? OR EXISTS (SELECT 1 FROM sg_factura_compra_ocs fo
+                                     WHERE fo.factura_id = f.id AND fo.oc_id = ?))`).get(oc.id, oc.id);
+    if (fac && !fac.anulado) {
+      return res.status(400).json({ ok: false,
+        error: 'Esta partida ya está contabilizada en el asiento ' + fac.asiento_id
+             + '. Anulá el asiento antes de cambiarla de circuito.' });
+    }
+
+    const antes = oc.documenta
+      || (oc.tipo_precio === 'pizarra' || oc.tipo_fiscal === 'liquidacion' ? 'liquidacion' : 'factura');
+    // Si pasa a factura, la condición vuelve a ser precio cerrado: no hay
+    // factura de compra a precio de pizarra.
+    const precioNuevo = destino === 'factura' ? 'firme' : oc.tipo_precio;
+    // Y EL COMPROBANTE TIENE QUE ACOMPAÑAR. Cambiar sólo el circuito y dejar el
+    // comprobante como estaba deja la partida trabada del otro lado: llega a la
+    // bandeja de facturas diciendo que su comprobante es una Liquidación, y esa
+    // pantalla sólo carga Factura A o B. Es el mismo problema que este cambio
+    // vino a arreglar, movido de lugar.
+    const fiscalNuevo = destino === 'liquidacion'
+      ? 'liquidacion'
+      : (oc.tipo_fiscal === 'liquidacion' ? 'factura_a' : oc.tipo_fiscal);
+
+    db.transaction(() => {
+      anotarEdicion(db, { tabla: 'sg_oc', registroId: oc.id, campo: 'documenta',
+        antes, despues: destino, motivo, ocId: oc.id, userId: uid(req) });
+      anotarEdicion(db, { tabla: 'sg_oc', registroId: oc.id, campo: 'tipo_precio',
+        antes: oc.tipo_precio, despues: precioNuevo, motivo, ocId: oc.id, userId: uid(req) });
+      anotarEdicion(db, { tabla: 'sg_oc', registroId: oc.id, campo: 'tipo_fiscal',
+        antes: oc.tipo_fiscal, despues: fiscalNuevo, motivo, ocId: oc.id, userId: uid(req) });
+      db.prepare(`UPDATE sg_oc SET documenta=?, tipo_precio=?, tipo_fiscal=?,
+        modificado_en=datetime('now','localtime'), modificado_por=? WHERE id=?`)
+        .run(destino, precioNuevo, fiscalNuevo, uid(req), oc.id);
+    })();
+    res.json({ ok: true,
+      data: { id: Number(oc.id), documenta: destino, tipo_precio: precioNuevo, tipo_fiscal: fiscalNuevo } });
+  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+
 // Lo que se corrigió de una partida: quién, cuándo, qué decía antes.
 router.get('/oc/:id/ediciones', requireAuth, (req, res) => {
   const db = getDb();
@@ -2704,7 +2848,7 @@ router.get('/diario-iva-compras', requireAuth, (req, res) => {
 router.get('/partidas-a-facturar', requireAuth, (req, res) => {
   const db = getDb();
   try {
-    const rows = partidasRecibidas(db, 'firme').filter((r) => !r.facturas);
+    const rows = partidasRecibidas(db, 'factura').filter((r) => !r.facturas);
     res.json({ ok: true, data: rows });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
@@ -3304,8 +3448,8 @@ router.post('/compra-retroactiva', requireAdmin, (req, res) => {
     const b = req.body;
     const items = Array.isArray(b.items) ? b.items : [];
     if (!items.length) return res.status(400).json({ ok: false, error: 'Sin items' });
-    const tipoPrecio = b.tipo_precio === 'pizarra' ? 'pizarra' : 'firme';
     const dft = defaultsProveedor(db, b.proveedor_id, b);
+    const { documenta, tipoPrecio, tipoFiscal } = circuitoDeCompra(b, dft.tipo_fiscal);
     const fechaIngreso = val(b.fecha) || db.prepare("SELECT date('now','localtime') d").get().d;
 
     const tx = db.transaction(() => {
@@ -3320,10 +3464,10 @@ router.post('/compra-retroactiva', requireAdmin, (req, res) => {
       const trazaRetro = codigoTrazabilidad(db, b.proveedor_id, fechaIngreso).codigo;
       const ocInfo = db.prepare(`INSERT INTO sg_oc
         (numero, modalidad, proveedor_id, tipo_fiscal, tipo_precio, condicion_pago_id, fecha_oc, fecha_recepcion_estimada,
-         comercial_id, estado, observaciones, total_estimado_kg, total_estimado_monto, creado_por, trazabilidad)
-        VALUES (?, 'retroactiva', ?,?,?,?,?,?,?, 'recibida_total', ?, 0, 0, ?, ?)`).run(
-        numeroOC, b.proveedor_id || null, dft.tipo_fiscal, tipoPrecio, dft.condicion_pago_id,
-        fechaIngreso, fechaIngreso, b.comercial_id || null, val(b.observaciones), uid(req), trazaRetro);
+         comercial_id, estado, observaciones, total_estimado_kg, total_estimado_monto, creado_por, trazabilidad, documenta)
+        VALUES (?, 'retroactiva', ?,?,?,?,?,?,?, 'recibida_total', ?, 0, 0, ?, ?, ?)`).run(
+        numeroOC, b.proveedor_id || null, tipoFiscal, tipoPrecio, dft.condicion_pago_id,
+        fechaIngreso, fechaIngreso, b.comercial_id || null, val(b.observaciones), uid(req), trazaRetro, documenta);
       const ocId = ocInfo.lastInsertRowid;
 
       const numeroRec = nextNumero(db, 'SG-REC', 'sg_recepciones', 'numero_recepcion');
