@@ -101,6 +101,12 @@
 .ifco2 .kpi .k-val .u{font-size:13px;color:var(--i-mut);font-weight:500;margin-left:3px}
 .ifco2 .kpi .k-sub{font-size:11px;color:var(--i-mut);margin-top:4px;display:flex;align-items:center;gap:5px}
 .ifco2 .kpi .k-sub svg{width:12px;height:12px}
+/* KPI con drill-down: la tarjeta entera abre el desglose de cómo se calculó */
+.ifco2 .kpi-drill{cursor:pointer;transition:border-color .15s,box-shadow .15s}
+.ifco2 .kpi-drill:hover{border-color:var(--i-navy-300,var(--i-navy-700));box-shadow:var(--i-sh-md,0 2px 8px rgba(11,29,51,.09))}
+.ifco2 .kpi-drill:focus-visible{outline:2px solid var(--i-navy-700);outline-offset:2px}
+.ifco2 .kpi-drill .k-drill{margin-left:auto;display:inline-flex;align-items:center;gap:4px;color:var(--i-navy-700);font-weight:600;opacity:0;transition:opacity .15s}
+.ifco2 .kpi-drill:hover .k-drill,.ifco2 .kpi-drill:focus-visible .k-drill{opacity:1}
 .ifco2 .delta{display:inline-flex;align-items:center;gap:2px;font-weight:600;font-size:11px}
 .ifco2 .delta.up{color:var(--i-ok)}.ifco2 .delta.down{color:var(--i-err)}.ifco2 .delta.flat{color:var(--i-mut)}
 

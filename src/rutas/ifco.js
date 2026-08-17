@@ -5842,32 +5842,112 @@ function _calcStockSG() {
        + rechazos_vueltos_sg;
 }
 
+// Desglose término a término del piso SG. Espeja _calcStockSG() y es la fuente del
+// drill-down del KPI "Piso San Gerónimo" y de /diagnostico-stock-sg.
+function _desglosePisoSG() {
+  const get = function(q) {
+    try { const r = db.prepare(q).get(); return r ? (r.total || 0) : 0; } catch(e) { return 0; }
+  };
+  const componentes = [
+    { signo: '+', label: 'Retiros confirmados',       valor: get("SELECT COALESCE(SUM(cantidad),0) AS total FROM ifco_movimientos WHERE tipo='retiro' AND eliminado_en IS NULL AND pendiente=0"),
+      ayuda: 'Cajones que IFCO entregó (autorizaciones completadas). Solo cuenta los pendiente=0.' },
+    { signo: '-', label: 'Pérdidas',                  valor: get("SELECT COALESCE(SUM(cantidad),0) AS total FROM ifco_movimientos WHERE tipo='perdida' AND eliminado_en IS NULL AND pendiente=0"),
+      ayuda: 'Cajones rotos, perdidos, devueltos a IFCO.' },
+    { signo: '-', label: 'Despachos a cadenas desde SG', valor: get("SELECT COALESCE(SUM(cantidad_despachada),0) AS total FROM ifco_remitos_super WHERE estado IN ('despachado','sellado','enviado','presentado') AND origen='san_geronimo' AND eliminado_en IS NULL"),
+      ayuda: 'Cajones que salieron de SG con destino cadena (despachados o sellados o presentados).' },
+    { signo: '-', label: 'Envíos a galpones de proveedores', valor: get("SELECT COALESCE(SUM(cantidad_enviada),0) AS total FROM ifco_envios_proveedor WHERE estado IN ('enviado','parcial','recibido') AND eliminado_en IS NULL AND origen_proveedor_id IS NULL"),
+      ayuda: 'Cajones que SG envió a un galpón de proveedor (no incluye traspasos entre galpones).' },
+    { signo: '+', label: 'Recepciones de mercadería',  valor: get("SELECT COALESCE(SUM(cantidad),0) AS total FROM ifco_recepciones_proveedor WHERE eliminado_en IS NULL AND (estado IS NULL OR estado='recibido')"),
+      ayuda: 'Cajones con mercadería que el proveedor envió a SG.' },
+    { signo: '+', label: 'Rechazos vueltos a SG',     valor: get("SELECT COALESCE(SUM(cantidad_rechazada),0) AS total FROM ifco_remitos_super WHERE estado IN ('sellado','enviado','presentado') AND rechazo_destino='san_geronimo' AND eliminado_en IS NULL"),
+      ayuda: 'Cajones que la cadena rechazó y volvieron a SG (no a proveedor).' }
+  ];
+  let total = 0;
+  componentes.forEach(function(c){ total += (c.signo === '+' ? c.valor : -c.valor); });
+  return { total: total, componentes: componentes };
+}
+
 // GET /diagnostico-stock-sg — desglose detallado del cálculo del piso SG
 // para diagnosticar diferencias o stocks negativos
 router.get('/diagnostico-stock-sg', function(req, res) {
   try {
-    const get = function(q) {
-      try { const r = db.prepare(q).get(); return r ? (r.total || 0) : 0; } catch(e) { return 0; }
-    };
-    const componentes = [
-      { signo: '+', label: 'Retiros confirmados',       valor: get("SELECT COALESCE(SUM(cantidad),0) AS total FROM ifco_movimientos WHERE tipo='retiro' AND eliminado_en IS NULL AND pendiente=0"),
-        ayuda: 'Cajones que IFCO entregó (autorizaciones completadas). Solo cuenta los pendiente=0.' },
-      { signo: '-', label: 'Pérdidas',                  valor: get("SELECT COALESCE(SUM(cantidad),0) AS total FROM ifco_movimientos WHERE tipo='perdida' AND eliminado_en IS NULL AND pendiente=0"),
-        ayuda: 'Cajones rotos, perdidos, devueltos a IFCO.' },
-      { signo: '-', label: 'Despachos a cadenas desde SG', valor: get("SELECT COALESCE(SUM(cantidad_despachada),0) AS total FROM ifco_remitos_super WHERE estado IN ('despachado','sellado','enviado','presentado') AND origen='san_geronimo' AND eliminado_en IS NULL"),
-        ayuda: 'Cajones que salieron de SG con destino cadena (despachados o sellados o presentados).' },
-      { signo: '-', label: 'Envíos a galpones de proveedores', valor: get("SELECT COALESCE(SUM(cantidad_enviada),0) AS total FROM ifco_envios_proveedor WHERE estado IN ('enviado','parcial','recibido') AND eliminado_en IS NULL AND origen_proveedor_id IS NULL"),
-        ayuda: 'Cajones que SG envió a un galpón de proveedor (no incluye traspasos entre galpones).' },
-      { signo: '+', label: 'Recepciones de mercadería',  valor: get("SELECT COALESCE(SUM(cantidad),0) AS total FROM ifco_recepciones_proveedor WHERE eliminado_en IS NULL AND (estado IS NULL OR estado='recibido')"),
-        ayuda: 'Cajones con mercadería que el proveedor envió a SG.' },
-      { signo: '+', label: 'Rechazos vueltos a SG',     valor: get("SELECT COALESCE(SUM(cantidad_rechazada),0) AS total FROM ifco_remitos_super WHERE estado IN ('sellado','enviado','presentado') AND rechazo_destino='san_geronimo' AND eliminado_en IS NULL"),
-        ayuda: 'Cajones que la cadena rechazó y volvieron a SG (no a proveedor).' }
-    ];
-    let total = 0;
-    componentes.forEach(function(c){ total += (c.signo === '+' ? c.valor : -c.valor); });
-    res.json({ total: total, componentes: componentes });
+    res.json(_desglosePisoSG());
   } catch(e) {
     console.error('[IFCO][diagnostico-stock-sg]', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Desglose del total en galpones. Los componentes son la versión agregada de los cuatro
+// términos de _calcSaldoProveedor(), acotados a los proveedores que existen para que el
+// total del desglose coincida exactamente con la suma que muestra el KPI.
+function _desgloseProveedores() {
+  const get = function(q) {
+    try { const r = db.prepare(q).get(); return r ? (r.total || 0) : 0; } catch(e) { return 0; }
+  };
+  const componentes = [
+    { signo: '+', label: 'A cargo de los galpones', valor: get("SELECT COALESCE(SUM(COALESCE(cantidad_recibida, cantidad_enviada)),0) AS total FROM ifco_envios_proveedor WHERE estado IN ('enviado','parcial','recibido') AND eliminado_en IS NULL AND proveedor_id IN (SELECT id FROM proveedores)"),
+      ayuda: 'Todo lo que SG mandó a un galpón (más los traspasos que recibió de otro). En recepción parcial cuenta solo lo que el galpón confirmó: la diferencia queda pendiente de revisión.' },
+    { signo: '-', label: 'Devuelto con mercadería', valor: get("SELECT COALESCE(SUM(cantidad),0) AS total FROM ifco_recepciones_proveedor WHERE eliminado_en IS NULL AND (es_r22 IS NULL OR es_r22 = 0) AND (estado IS NULL OR estado='recibido') AND proveedor_id IN (SELECT id FROM proveedores)"),
+      ayuda: 'Cajones que volvieron a SG con producto. No incluye las altas R22 (cajones nuevos que el galpón le compró a IFCO), que no bajan su saldo.' },
+    { signo: '-', label: 'Despachado directo a cadenas', valor: get("SELECT COALESCE(SUM(COALESCE(cantidad_recibida, cantidad_despachada) + CASE WHEN rechazo_destino='san_geronimo' THEN COALESCE(cantidad_rechazada,0) ELSE 0 END),0) AS total FROM ifco_remitos_super WHERE origen='proveedor_directo' AND estado IN ('sellado','enviado','presentado') AND eliminado_en IS NULL AND proveedor_origen_id IN (SELECT id FROM proveedores)"),
+      ayuda: 'Cajones que salieron del galpón directo a una cadena y ya están sellados.' },
+    { signo: '-', label: 'Traspasado a otro galpón', valor: get("SELECT COALESCE(SUM(cantidad_enviada),0) AS total FROM ifco_envios_proveedor WHERE origen_proveedor_id IS NOT NULL AND eliminado_en IS NULL AND estado IN ('enviado','parcial','recibido') AND origen_proveedor_id IN (SELECT id FROM proveedores)"),
+      ayuda: 'Cajones que un galpón le pasó a otro. Salen del origen y entran al destino, así que en el total se compensan.' }
+  ];
+  let total = 0;
+  componentes.forEach(function(c){ total += (c.signo === '+' ? c.valor : -c.valor); });
+
+  const items = db.prepare("SELECT id, nombre FROM proveedores ORDER BY nombre").all()
+    .map(function(p){ return { id: p.id, label: p.nombre, valor: _calcSaldoProveedor(p.id) }; })
+    .filter(function(x){ return x.valor !== 0; })
+    .sort(function(a,b){ return b.valor - a.valor; });
+
+  return { total: total, componentes: componentes, items: items, items_titulo: 'Galpón por galpón' };
+}
+
+// Desglose de los cajones en tránsito a las cadenas: remitos despachados desde SG que
+// todavía no fueron sellados por el súper.
+function _desgloseTransito() {
+  const items = db.prepare(`
+    SELECT id, n_remito_ifco, fecha_emision, empresa, sucursal, cantidad_despachada,
+           CAST(julianday('now','localtime') - julianday(fecha_emision) AS INTEGER) AS dias
+    FROM ifco_remitos_super
+    WHERE estado = 'despachado' AND origen = 'san_geronimo' AND eliminado_en IS NULL
+    ORDER BY fecha_emision ASC
+  `).all();
+  const total = items.reduce(function(a, r){ return a + (r.cantidad_despachada || 0); }, 0);
+  return {
+    total: total,
+    componentes: [
+      { signo: '+', label: 'Despachados sin sellar', valor: total,
+        ayuda: 'Remitos emitidos desde SG que la cadena todavía no selló. Ya salieron del piso pero siguen siendo nuestros hasta que se presenten a IFCO.' }
+    ],
+    items: items.map(function(r){
+      return {
+        id: r.id,
+        label: (r.n_remito_ifco || '—') + ' → ' + (r.empresa || '?') + (r.sucursal ? ' (' + r.sucursal + ')' : ''),
+        sub: r.dias + ' días sin sellar',
+        valor: r.cantidad_despachada || 0
+      };
+    }),
+    items_titulo: 'Remito por remito'
+  };
+}
+
+// GET /kpi-detalle/:kpi — de dónde sale cada KPI del Resumen (drill-down de la tarjeta).
+// Devuelve siempre { total, componentes:[{signo,label,valor,ayuda}], items:[] }.
+router.get('/kpi-detalle/:kpi', function(req, res) {
+  try {
+    const kpi = String(req.params.kpi || '');
+    let data;
+    if      (kpi === 'piso')         data = _desglosePisoSG();
+    else if (kpi === 'proveedores')  data = _desgloseProveedores();
+    else if (kpi === 'transito')     data = _desgloseTransito();
+    else return res.status(400).json({ error: 'KPI desconocido: ' + kpi });
+    res.json(Object.assign({ kpi: kpi }, data));
+  } catch(e) {
+    console.error('[IFCO][kpi-detalle]', e);
     res.status(500).json({ error: e.message });
   }
 });
