@@ -409,6 +409,19 @@ db.exec(`
   );
 `);
 
+// ── EL PAGO AL PROVEEDOR ──────────────────────────────────────────────────
+// La tabla se creó "por paridad estructural" con Puente Cordón y quedó sin usar,
+// así que le faltan las columnas del circuito real: de qué cuenta salió la
+// plata, con qué asiento entró al libro, y quién la anuló.
+try { db.exec("ALTER TABLE sg_pagos_proveedores ADD COLUMN cuenta_fin_id INTEGER"); } catch (_) {}
+try { db.exec("ALTER TABLE sg_pagos_proveedores ADD COLUMN asiento_id INTEGER"); } catch (_) {}
+try { db.exec("ALTER TABLE sg_pagos_proveedores ADD COLUMN anulado_en TEXT"); } catch (_) {}
+try { db.exec("ALTER TABLE sg_pagos_proveedores ADD COLUMN anulado_por INTEGER"); } catch (_) {}
+try { db.exec("ALTER TABLE sg_pagos_proveedores ADD COLUMN anulado_motivo TEXT"); } catch (_) {}
+try { db.exec("CREATE INDEX IF NOT EXISTS idx_sg_pagos_prov ON sg_pagos_proveedores(proveedor_id, anulado)"); } catch (_) {}
+try { db.exec("CREATE INDEX IF NOT EXISTS idx_sg_pagos_compras ON sg_pagos_compras(compra_id)"); } catch (_) {}
+
+
 // Scaffolding estructural de la config impositiva (claves, sin mapeo a cuenta).
 // NO son datos de PC: son las 4 claves fiscales que la pantalla espera existir.
 // SG arranca con cuenta_id = NULL (sin mapear) y las asigna a sus propias cuentas.

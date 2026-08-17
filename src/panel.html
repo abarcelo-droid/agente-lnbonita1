@@ -2288,6 +2288,31 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     <!-- Órdenes de compra -->
     <div class="sgc-sub on" id="sgc-sub-oc">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;gap:10px;flex-wrap:wrap">
+        <!-- ── RASTREAR UNA PARTIDA ────────────────────────────────────
+             Con el número de partida, el proveedor, el producto o una fecha:
+             lo que se tenga a mano. Filtra en la pantalla, sin ir al servidor,
+             así responde mientras se escribe. -->
+        <label style="font-size:12px;color:var(--mut)">Buscar
+          <input id="sg-oc-q" placeholder="🔎 partida, proveedor, producto…" oninput="sgOcPintar()"
+                 style="padding:5px 8px;border-radius:6px;border:1px solid var(--bor);background:var(--bg);width:260px">
+        </label>
+        <label style="font-size:12px;color:var(--mut)">Desde
+          <input type="date" id="sg-oc-desde" onchange="sgOcPintar()"
+                 style="padding:5px 8px;border-radius:6px;border:1px solid var(--bor);background:var(--bg)">
+        </label>
+        <label style="font-size:12px;color:var(--mut)">Hasta
+          <input type="date" id="sg-oc-hasta" onchange="sgOcPintar()"
+                 style="padding:5px 8px;border-radius:6px;border:1px solid var(--bor);background:var(--bg)">
+        </label>
+        <label style="font-size:12px;color:var(--mut)">Situación
+          <select id="sg-oc-sit" onchange="sgOcPintar()" style="padding:5px 8px;border-radius:6px;border:1px solid var(--bor);background:var(--bg)">
+            <option value="">Todas</option>
+            <option value="falta_factura">Falta la factura</option>
+            <option value="falta_contabilizar">Falta contabilizar</option>
+            <option value="falta_liquidar">Falta liquidar</option>
+            <option value="resueltas">Ya resueltas</option>
+          </select>
+        </label>
         <label style="font-size:12px;color:var(--mut)">Estado
           <select id="sg-oc-filtro" onchange="sgLoadOC()" style="padding:5px 8px;border-radius:6px;border:1px solid var(--bor);background:var(--bg)">
             <option value="">Todas</option><option value="abierta">Abierta</option><option value="recibida_parcial">Recibida parcial</option>
@@ -2305,6 +2330,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
         <thead><tr><th>Partida</th><th>Fecha</th><th>Proveedor</th><th style="text-align:right">Bultos</th><th style="text-align:right">Importe</th><th>Condición comercial</th><th style="text-align:center">Situación</th><th></th></tr></thead>
         <tbody id="sg-tb-oc"><tr><td colspan="8" class="emp">Cargando…</td></tr></tbody>
       </table></div>
+      <div id="sg-oc-n" style="font-size:11.5px;color:var(--mut);margin-top:6px"></div>
     </div>
 
     <!-- Recepciones -->
@@ -2732,19 +2758,65 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
        con su fecha, su partida y el saldo corriendo, que es como se lee una
        cuenta corriente. Se muestra todo el histórico, no sólo lo pendiente:
        para discutir un saldo hace falta ver también lo que ya se pagó. -->
+  <!-- ── REGISTRAR UN PAGO ────────────────────────────────────────────────
+       Un pago se imputa a facturas concretas: no es "le pagué un millón", es
+       "le pagué la factura 1-23". Es lo que después permite discutir un saldo
+       renglón por renglón. -->
+  <div class="ab-modal-overlay" id="sg-pago-modal">
+    <div class="ab-modal" style="max-width:820px">
+      <div class="mhd"><div class="mht" id="sg-pago-tit">Registrar pago</div>
+        <button class="mcl" onclick="closeMB('sg-pago-modal')">×</button></div>
+      <div class="mbd">
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px">
+          <div class="fl"><label>Fecha</label><input type="date" id="sg-pago-fecha"></div>
+          <div class="fl"><label>De qué cuenta sale</label><select id="sg-pago-cuenta"></select></div>
+          <div class="fl"><label>Forma de pago</label>
+            <select id="sg-pago-forma">
+              <option value="transferencia">Transferencia</option>
+              <option value="cheque">Cheque</option>
+              <option value="efectivo">Efectivo</option>
+            </select></div>
+          <div class="fl"><label>Referencia</label>
+            <input id="sg-pago-ref" placeholder="N° de transferencia, cheque…"></div>
+        </div>
+        <div style="font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:.04em;
+             color:var(--mut);margin:14px 0 6px">Qué facturas cancela</div>
+        <div class="ab-table-wrap"><table class="pa-tbl">
+          <thead><tr><th>Fecha</th><th>Comprobante</th><th>Partida</th>
+            <th style="text-align:right">Total</th><th style="text-align:right">Pendiente</th>
+            <th style="text-align:right;width:150px">Se imputa</th></tr></thead>
+          <tbody id="sg-pago-tb"><tr><td colspan="6" class="emp">Cargando…</td></tr></tbody>
+        </table></div>
+        <div id="sg-pago-total" style="text-align:right;font-size:15px;font-weight:700;margin-top:10px"></div>
+        <div class="fl" style="margin-top:8px"><label>Notas</label><input id="sg-pago-notas"></div>
+        <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px">
+          <button class="btn bo" onclick="closeMB('sg-pago-modal')">Cancelar</button>
+          <button class="btn bb" onclick="sgPagoGuardar()">Registrar el pago</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <div class="ab-modal-overlay" id="sg-ccficha-modal">
     <style>
       /* SIN BARRA LATERAL. La tabla entraba en 1.000px sólo con scroll
          horizontal: para leer el saldo había que arrastrar. Se le da el ancho
          de la pantalla, la fecha y los importes no se parten, y el concepto
          —lo único de largo variable— se achica. */
-      #sg-ccficha-modal .ab-modal{max-width:min(1500px, 96vw)}
-      #sg-ccficha-modal .pa-tbl{width:100%;table-layout:auto}
+      /* EL ANCHO DE LA VENTANA, NO EL DEL MODAL. La ficha entraba en 1000px
+         sólo con scroll horizontal: para llegar al saldo había que arrastrar.
+         El !important es porque .ab-table-wrap trae su propio overflow-x:auto
+         desde la clase, y sin eso la barra volvía igual. */
+      #sg-ccficha-modal .ab-modal{max-width:98vw;width:98vw}
+      #sg-ccficha-modal .pa-tbl{width:100%;table-layout:fixed}
       #sg-ccficha-modal .pa-tbl th,#sg-ccficha-modal .pa-tbl td{
-        padding:6px 9px;font-size:12.5px;white-space:nowrap}
-      #sg-ccficha-modal .pa-tbl td.cc-concepto{white-space:normal;min-width:150px}
-      #sg-ccficha-modal .ab-table-wrap{overflow-x:visible}
-      @media(max-width:900px){ #sg-ccficha-modal .ab-table-wrap{overflow-x:auto} }
+        padding:6px 9px;font-size:12.5px;white-space:nowrap;
+        overflow:hidden;text-overflow:ellipsis}
+      /* El concepto y la partida son lo único de largo variable: se parten. */
+      #sg-ccficha-modal .pa-tbl td.cc-concepto,
+      #sg-ccficha-modal .pa-tbl td.cc-partida{white-space:normal;word-break:break-word}
+      #sg-ccficha-modal .ab-table-wrap{overflow-x:hidden !important}
+      @media(max-width:900px){ #sg-ccficha-modal .ab-table-wrap{overflow-x:auto !important} }
     </style>
     <div class="ab-modal">
       <div class="mhd"><div class="mht" id="sg-ccficha-tit">Cuenta corriente</div>
@@ -2917,7 +2989,10 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
             <div class="sg-oc-box-tit">Importes</div>
             <div class="sgfm-grid">
               <div class="fl"><label>Neto gravado</label><input type="text" inputmode="decimal" id="sgfm-f-neto" placeholder="$ 0" oninput="sgFmMil(this)"></div>
-              <div class="fl"><label>IVA %</label><input type="number" step="0.01" id="sgfm-f-alic" value="21" oninput="sgFmRecalc()"></div>
+              <!-- 10,5 % es la alícuota de la fruta y la verdura, que es lo que
+                   se compra acá. Arrancaba en 21 y había que corregirla en
+                   todas. -->
+              <div class="fl"><label>IVA %</label><input type="number" step="0.1" id="sgfm-f-alic" value="10.5" oninput="sgFmRecalc()"></div>
               <div class="fl"><label>IVA</label><input type="text" inputmode="decimal" id="sgfm-f-iva" placeholder="$ 0" oninput="sgFmMil(this)"></div>
               <div class="fl"><label>Percepción IVA</label><input type="text" inputmode="decimal" id="sgfm-f-piva" placeholder="$ 0" oninput="sgFmMil(this)"></div>
               <div class="fl"><label>Percepción Ganancias</label><input type="text" inputmode="decimal" id="sgfm-f-pgan" placeholder="$ 0" oninput="sgFmMil(this)"></div>
@@ -3332,7 +3407,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
             </select>
           </div>
           <div class="fl" id="sg-oc-flete-total-wrap"><label>Monto de flete ($)</label><input type="number" id="sg-oc-flete-monto" min="0" step="0.01" placeholder="informativo" oninput="sgOcFleteCalc()"></div>
-          <div class="fl" id="sg-oc-flete-cant-wrap" style="display:none"><label id="sg-oc-flete-cant-lbl">Bultos</label><input type="number" id="sg-oc-flete-cant" min="0" step="1" oninput="SG._fleteCantManual=true;sgOcFleteCalc()"><div id="sg-oc-flete-cant-sub" style="font-size:11px;color:var(--mut);margin-top:3px"></div></div>
+          <div class="fl" id="sg-oc-flete-cant-wrap" style="display:none"><label id="sg-oc-flete-cant-lbl">Bultos</label><input type="number" id="sg-oc-flete-cant" min="0" step="1" oninput="sgOcFleteCantManual(this)"><div id="sg-oc-flete-cant-sub" style="font-size:11px;color:var(--mut);margin-top:3px"></div></div>
           <div class="fl" id="sg-oc-flete-pu-wrap" style="display:none"><label id="sg-oc-flete-pu-lbl">$ por bulto</label><input type="number" id="sg-oc-flete-pu" min="0" step="0.01" oninput="sgOcFleteCalc()"></div>
           <div class="fl ff" style="display:flex;flex-direction:row;gap:16px;align-items:center;flex-wrap:wrap">
             <label style="text-transform:none;letter-spacing:0;font-size:12.5px;display:inline-flex;align-items:center;gap:5px;min-height:0"><input type="radio" name="sg-oc-flete-iva" value="si" style="width:auto"> Con IVA</label>
@@ -3469,9 +3544,10 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
            ninguno de los dos productos que trae: no sirve para costear ni para
            reclamar. Cada artículo de la orden tiene acá su balanza y su foto. -->
       <div class="sg-rec-paso" data-paso="4">
-        <div class="sg-rec-tit">⚖️ Peso por producto</div>
-        <div class="sg-rec-sub">Lo que marcó la balanza para cada artículo de la orden, con su foto.
-          Si un producto no se pesa, sus kilos salen de los bultos contados por el peso por bulto de la orden.</div>
+        <div class="sg-rec-tit">⚖️ Peso por bulto</div>
+        <div class="sg-rec-sub">Se pesa UN bulto y se anota lo que marcó la balanza: los kilos de la
+          partida salen de multiplicarlo por los bultos contados en el paso 2. Si un producto no se
+          pesa, se usa el peso por bulto que dice la orden.</div>
         <div id="sg-rec-pesos"><div class="emp">Elegí una orden de compra en el paso 1.</div></div>
         <div class="sg-oc-box">
           <div class="sg-oc-box-tit">📷 Fotos generales de la mercadería <span style="text-transform:none;letter-spacing:0;font-weight:400">(opcional — lo que no es de un producto en particular)</span></div>
@@ -4771,20 +4847,26 @@ function sgCcFicha(provId){
               + (d.esperando_contabilizar.length === 1 ? '' : 's') + ' sin asiento</div>', true)
           : '')
       + '<div style="margin-left:auto;display:flex;gap:8px;align-self:center">'
+        + (sgFmEsAdmin()
+            ? '<button class="btn bb bs" onclick="sgPagoOpen(' + p.id + ',\''
+              + esc(p.razon_social || '') + '\')">💵 Registrar pago</button>' : '')
         + '<button class="btn bo bs" onclick="sgCcFichaExportar(\'excel\')">📗 Excel</button>'
         + '<button class="btn bo bs" onclick="sgCcFichaExportar(\'pdf\')">🖨 PDF</button>'
       + '</div></div>';
 
     var ROT = { apertura: 'Saldo de apertura', factura: 'Factura', pago: 'Pago' };
     h += '<div class="ab-table-wrap"><table class="pa-tbl"><thead><tr>'
-      + '<th>Fecha</th><th>Concepto</th><th>Comprobante</th><th>Partida</th>'
-      + '<th style="text-align:right">Debe</th><th style="text-align:right">Haber</th>'
-      + '<th style="text-align:right">Saldo</th></tr></thead><tbody>';
+      + '<th style="width:96px">Fecha</th><th>Concepto</th>'
+      + '<th style="width:120px">Comprobante</th><th style="width:20%">Partida</th>'
+      + '<th style="width:130px;text-align:right">Debe</th>'
+      + '<th style="width:130px;text-align:right">Haber</th>'
+      + '<th style="width:140px;text-align:right">Saldo</th></tr></thead><tbody>';
     h += movs.length ? movs.map(function(m){
       return '<tr><td>' + escH(m.fecha || '—') + '</td>'
         + '<td class="cc-concepto">' + escH(ROT[m.tipo] || m.detalle || m.tipo) + '</td>'
         + '<td style="font-family:monospace">' + escH(m.comprobante || '—') + '</td>'
-        + '<td style="font-family:monospace;font-size:11.5px">' + escH(m.partidas || '—') + '</td>'
+        + '<td class="cc-partida" style="font-family:monospace;font-size:11.5px">'
+          + escH(m.partidas || '—') + '</td>'
         + '<td style="text-align:right">' + (m.debe ? sgMoney(m.debe) : '—') + '</td>'
         + '<td style="text-align:right">' + (m.haber ? sgMoney(m.haber) : '—') + '</td>'
         + '<td style="text-align:right;font-weight:700">' + sgMoney(m.saldo) + '</td></tr>';
@@ -4823,6 +4905,100 @@ function sgCcFicha(provId){
 
     eid('sg-ccficha-body').innerHTML = h;
     sgModalArriba('sg-ccficha-modal');
+  });
+}
+
+// ── REGISTRAR UN PAGO ───────────────────────────────────────────────────
+// La cuenta corriente sólo subía: se cargaba la factura, se contabilizaba, el
+// saldo crecía, y no había forma de bajarlo. Un pago se imputa a facturas
+// concretas —no es "le pagué un millón", es "le pagué la factura 1-23"— y entra
+// al libro con su asiento, igual que la factura.
+var SG_PAGO = { provId: null, facturas: [] };
+
+function sgPagoOpen(provId, nombre){
+  SG_PAGO = { provId: provId, facturas: [] };
+  var t = eid('sg-pago-tit'); if (t) t.textContent = 'Registrar pago — ' + nombre;
+  var f = eid('sg-pago-fecha'); if (f) f.value = new Date().toISOString().slice(0, 10);
+  ['sg-pago-ref', 'sg-pago-notas'].forEach(function(id){ var el = eid(id); if (el) el.value = ''; });
+
+  api('/api/sg/pagos/cuentas').then(function(r){
+    var cts = (r && r.ok) ? r.data : [];
+    var sel = eid('sg-pago-cuenta'); if (!sel) return;
+    // Sin cuenta contable el pago no puede entrar al libro: se muestra, pero
+    // avisando, en vez de dejar elegirla y fallar recién al guardar.
+    sel.innerHTML = cts.length
+      ? cts.map(function(c){
+          return '<option value="' + c.id + '"' + (c.cuenta_contable_id ? '' : ' disabled')
+            + '>' + esc(c.nombre) + (c.cuenta_contable_id ? '' : ' — sin cuenta contable') + '</option>';
+        }).join('')
+      : '<option value="">No hay cuentas cargadas en Caja y Bancos</option>';
+  });
+
+  api('/api/sg/pagos/pendientes/' + provId).then(function(r){
+    SG_PAGO.facturas = (r && r.ok) ? r.data : [];
+    sgPagoPintar();
+    sgModalArriba('sg-pago-modal');
+  });
+}
+
+function sgPagoPintar(){
+  var tb = eid('sg-pago-tb'); if (!tb) return;
+  var TIPO = { factura_a: 'FA A', factura_b: 'FA B', liquidacion: 'LIQ' };
+  tb.innerHTML = SG_PAGO.facturas.length ? SG_PAGO.facturas.map(function(f, i){
+    var nro = (f.punto_venta ? f.punto_venta + '-' : '') + (f.numero || '');
+    return '<tr><td>' + escH(f.fecha_emision || '—') + '</td>'
+      + '<td>' + escH(TIPO[f.tipo_comprobante] || f.tipo_comprobante || '') + ' <code>' + escH(nro) + '</code></td>'
+      + '<td style="font-family:monospace;font-size:11.5px">' + escH(f.partida || '—') + '</td>'
+      + '<td style="text-align:right">' + sgMoney(f.total) + '</td>'
+      + '<td style="text-align:right"><b>' + sgMoney(f.pendiente) + '</b></td>'
+      + '<td style="text-align:right">'
+        + '<input type="text" inputmode="decimal" id="sg-pago-imp-' + i + '" placeholder="$ 0"'
+        + ' style="width:130px;text-align:right"'
+        + ' oninput="this.value=sgMilFmtLive(this.value);sgPagoTotal()"></td></tr>';
+  }).join('')
+    // Sin facturas contabilizadas no hay a qué imputar: se dice por qué, que es
+    // distinto de "no debe nada".
+    : '<tr><td colspan="6" class="emp">Este proveedor no tiene facturas contabilizadas '
+      + 'pendientes de pago. Si cargaste una factura, primero contabilizala.</td></tr>';
+  sgPagoTotal();
+}
+
+// El botón "todo" de cada fila sería lindo, pero lo que hace falta primero es
+// ver cuánto suma lo que se está imputando contra lo que se va a pagar.
+function sgPagoTotal(){
+  var t = 0;
+  SG_PAGO.facturas.forEach(function(_, i){
+    var v = sgMilParse((eid('sg-pago-imp-' + i) || {}).value);
+    if (v) t += v;
+  });
+  var el = eid('sg-pago-total');
+  if (el) el.innerHTML = t > 0 ? 'Total del pago: ' + sgMoney(t) : '';
+  return Math.round(t * 100) / 100;
+}
+
+function sgPagoGuardar(){
+  var imputaciones = [];
+  SG_PAGO.facturas.forEach(function(f, i){
+    var v = sgMilParse((eid('sg-pago-imp-' + i) || {}).value);
+    if (v > 0) imputaciones.push({ factura_id: f.id, monto: v });
+  });
+  if (!imputaciones.length) { toast('Poné cuánto se le imputa a cada factura', 'er'); return; }
+  var cuenta = (eid('sg-pago-cuenta') || {}).value;
+  if (!cuenta) { toast('Elegí de qué cuenta sale la plata', 'er'); return; }
+  api('/api/sg/pagos', 'POST', {
+    proveedor_id: SG_PAGO.provId,
+    fecha: (eid('sg-pago-fecha') || {}).value,
+    cuenta_fin_id: Number(cuenta),
+    forma_pago: (eid('sg-pago-forma') || {}).value,
+    referencia: (eid('sg-pago-ref') || {}).value,
+    notas: (eid('sg-pago-notas') || {}).value,
+    imputaciones: imputaciones
+  }).then(function(r){
+    if (!r || !r.ok) { toast((r && r.error) || 'No se pudo registrar el pago', 'er'); return; }
+    toast('Pago registrado — asiento ' + r.data.asiento_id, 'ok');
+    closeMB('sg-pago-modal');
+    sgCcFicha(SG_PAGO.provId);
+    sgLoadCcProv();
   });
 }
 
@@ -4993,10 +5169,46 @@ function sgOcSituacion(o){
   return ['bok', '🧾 Facturada'];
 }
 
+var SG_OC_ROWS = [];
 function sgLoadOC(){
   var est=eid('sg-oc-filtro')?eid('sg-oc-filtro').value:'';
   api('/api/sg/oc'+(est?('?estado='+est):'')).then(function(r){
-    var rows=(r&&r.ok)?r.data:[];
+    SG_OC_ROWS = (r&&r.ok)?r.data:[];
+    sgOcPintar();
+  });
+}
+
+// Lo que se busca es UNA partida, y el que la busca tiene a mano cualquier cosa:
+// el número, el proveedor, el producto, o más o menos cuándo entró. Se filtra
+// sobre lo que ya está en la pantalla, así contesta mientras se escribe.
+function sgOcPintar(){
+  var q = String((eid('sg-oc-q')||{}).value || '').trim().toLowerCase();
+  var pal = q ? q.split(/\s+/) : [];
+  var desde = (eid('sg-oc-desde')||{}).value || '';
+  var hasta = (eid('sg-oc-hasta')||{}).value || '';
+  var sit = (eid('sg-oc-sit')||{}).value || '';
+  var rows = SG_OC_ROWS.filter(function(o){
+    if (desde && String(o.fecha_oc||'') < desde) return false;
+    if (hasta && String(o.fecha_oc||'') > hasta) return false;
+    if (sit) {
+      var c = sgOcSituacion(o), txt = c[1];
+      if (sit === 'falta_factura'      && !/Falta la factura/.test(txt)) return false;
+      if (sit === 'falta_contabilizar' && !/Falta contabilizar/.test(txt)) return false;
+      if (sit === 'falta_liquidar'     && !/Falta liquidar/.test(txt)) return false;
+      if (sit === 'resueltas'          && c[0] !== 'bok') return false;
+    }
+    if (!pal.length) return true;
+    // El texto donde se busca: todo lo que identifica la partida en la fila.
+    var t = [sgOcId(o), o.proveedor_nombre, o.fecha_oc, o.numero,
+             o.tipo_precio === 'pizarra' ? 'liquidación de venta pizarra' : 'precio cerrado']
+      .join(' ').toLowerCase();
+    return pal.every(function(w){ return t.indexOf(w) >= 0; });
+  });
+  var n = eid('sg-oc-n');
+  if (n) n.textContent = rows.length === SG_OC_ROWS.length
+    ? (SG_OC_ROWS.length ? SG_OC_ROWS.length + ' partida' + (SG_OC_ROWS.length===1?'':'s') : '')
+    : rows.length + ' de ' + SG_OC_ROWS.length;
+  {
     eid('sg-tb-oc').innerHTML = rows.length ? rows.map(function(o){
       var acc='<button class="btn bo bs" onclick="sgOcVer('+o.id+')">👁</button> ';
       if(o.estado==='abierta'||o.estado==='recibida_parcial') acc+='<button class="btn bo bs" onclick="sgRecOpen('+o.id+')">📥</button> ';
@@ -5071,8 +5283,12 @@ function sgLoadOC(){
           + (o.cerrada_en ? '<div class="sg-oc-sub">confirmada</div>' : '')
           + '</td>'
         + '<td style="text-align:right;white-space:nowrap">' + acc + '</td></tr>';
-    }).join('') : '<tr><td colspan="8" class="emp">Sin órdenes. Creá una nueva.</td></tr>';
-  });
+    }).join('')
+      : ('<tr><td colspan="8" class="emp">'
+         + (q || desde || hasta || sit
+              ? 'Ninguna partida con ese filtro.'
+              : 'Sin órdenes. Creá una nueva.') + '</td></tr>');
+  }
 }
 // OC de mercadería: el proveedor debe ser de categoría "Mercaderia Nacional" o "Mercaderia
 // Importada" (categoria_id → sg_proveedor_categorias, expuesto como categoria_nombre). Viáticos,
@@ -5239,6 +5455,24 @@ function sgOcBultosTotales(){
   return t ? Math.round(t) : 0;
 }
 
+// VACIAR EL CAMPO NO ES ESCRIBIRLO. Se respeta lo que tipea una persona —a
+// veces el flete se pacta sobre otra cantidad— pero borrarlo no es una decisión:
+// era el camino por el que el campo quedaba vacío para siempre, sin volver a
+// tomar los bultos de la orden, y el flete no se calculaba nunca más.
+function sgOcFleteCantManual(el){
+  SG._fleteCantManual = String(el.value || '').trim() !== '';
+  if (!SG._fleteCantManual) sgOcFleteSyncBultos();
+  sgOcFleteCalc();
+}
+
+// Volver a los bultos de la orden después de haberlos tocado a mano. Sin esto no
+// había camino de vuelta.
+function sgOcFleteUsarOrden(){
+  SG._fleteCantManual = false;
+  sgOcFleteSyncBultos();
+  sgOcFleteCalc();
+}
+
 // Cuando cambian los ítems, los bultos del flete se ponen al día: son los
 // mismos bultos. Si el usuario los escribió a mano, no se le tocan.
 function sgOcFleteSyncBultos(){
@@ -5253,8 +5487,11 @@ function sgOcFleteCalc(){
   var sub = eid('sg-oc-flete-cant-sub');
   if (sub) {
     var dela = sgOcBultosTotales();
-    sub.textContent = (eid('sg-oc-flete-modo').value === 'bulto' && dela)
-      ? (SG._fleteCantManual ? 'la orden tiene ' + nr(dela) : 'salen de los ítems de la orden')
+    sub.innerHTML = (eid('sg-oc-flete-modo').value === 'bulto' && dela)
+      ? (SG._fleteCantManual
+          ? 'la orden tiene ' + nr(dela)
+            + ' · <a href="#" onclick="event.preventDefault();sgOcFleteUsarOrden()">usar esos</a>'
+          : 'salen de los ítems de la orden')
       : '';
   }
   var modo = eid('sg-oc-flete-modo').value;
@@ -6016,6 +6253,12 @@ function sgIvaInit(){
   sgIvaLoad();
 }
 
+// Una alícuota se escribe con su decimal cuando lo tiene: 10,5 % — nunca 11 %.
+function sgPct(n){
+  var v = Number(n) || 0;
+  return (Math.round(v * 10) / 10).toLocaleString('es-AR', { maximumFractionDigits: 1 }) + '%';
+}
+
 function sgIvaLoad(){
   var q = [];
   var d = (eid('sgiva-desde') || {}).value, h = (eid('sgiva-hasta') || {}).value;
@@ -6057,7 +6300,9 @@ function sgIvaLoad(){
         + '<td style="font-family:monospace;font-size:12px">' + escH(x.cuit_emisor || '—') + '</td>'
         + '<td style="text-align:right">' + sgMoney(x.neto) + '</td>'
         + '<td style="text-align:right">' + sgMoney(x.iva_monto)
-          + (x.iva_alicuota ? '<div class="sg-oc-sub">' + nr(x.iva_alicuota) + '%</div>' : '') + '</td>'
+          // nr() redondea a entero y 10,5 % salía "11 %", que en un libro de IVA
+          // es un número que no existe.
+          + (x.iva_alicuota ? '<div class="sg-oc-sub">' + sgPct(x.iva_alicuota) + '</div>' : '') + '</td>'
         + '<td style="text-align:right">' + (perc > 0 ? sgMoney(perc) : '—') + '</td>'
         + '<td style="text-align:right"><b>' + sgMoney(x.total) + '</b></td>'
         + '<td style="font-family:monospace;font-size:11.5px">' + escH(x.partidas || '—') + '</td>'
@@ -6425,7 +6670,7 @@ function sgFmFactura(id, partida, proveedor){
     + (proveedor ? ' · ' + escH(proveedor) : '');
   ['tipo','pv','nro','fecha','cuit','cae','neto','iva','piva','piibb','pgan','otros','total']
     .forEach(function(k){ var el = eid('sgfm-f-' + k); if (el) el.value = ''; });
-  var alic = eid('sgfm-f-alic'); if (alic) alic.value = '21';
+  var alic = eid('sgfm-f-alic'); if (alic) alic.value = '10.5';
   var nom = eid('sgfm-pdf-nom'); if (nom) nom.textContent = 'Ningún archivo';
   var leer = eid('sgfm-leer'); if (leer) leer.style.display = 'none';
 
@@ -6973,10 +7218,21 @@ function sgRecRenderPesos(){
         + (derivado ? (' · sin pesar serían ' + nr(derivado) + ' kg') : '')
         + '</span></div>'
       + '<div class="sg-rec-grid">'
-        + '<div class="fl"><label>Peso de balanza (kg)</label>'
-          + '<input type="number" min="0" step="0.01" value="' + _sgN(it.peso) + '"'
-          + ' placeholder="' + (derivado ? ('sin pesar: ' + nr(derivado)) : 'el de la balanza') + '"'
-          + ' oninput="sgRecArtUpd(' + i + ',\'peso\',this.value)"></div>'
+        // EL PESO ES POR BULTO, NO EL TOTAL. Es lo que hace el que recibe: pone
+        // un cajón en la balanza y anota lo que marca. Antes el rótulo decía
+        // "peso de balanza" a secas y se guardaba como el peso de TODA la
+        // partida: quien anotaba los 10 kg de un cajón dejaba 90 cajones
+        // pesando 10 kg en total.
+        + '<div class="fl"><label>Peso de UN bulto (kg)</label>'
+          + '<input type="number" min="0" step="0.01" value="' + _sgN(it.peso_bulto) + '"'
+          + ' placeholder="' + (kpb ? ('la orden dice ' + nr(kpb)) : 'lo que marca la balanza') + '"'
+          + ' oninput="sgRecArtUpd(' + i + ',\'peso_bulto\',this.value)">'
+          + '<div style="font-size:11px;color:var(--mut);margin-top:3px">'
+            + (bultos
+                ? ('× ' + nr(bultos) + ' bultos = <b>' + nr(Number(it.peso_bulto) > 0
+                     ? Math.round(bultos * Number(it.peso_bulto)) : derivado) + ' kg</b>')
+                : 'contá los bultos en el paso 2 y acá se hace la cuenta')
+          + '</div></div>'
         + '<div class="fl"><label>Foto de la balanza</label>'
           + '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;padding-top:2px">'
             + '<button class="btn bb bs" type="button" onclick="eid(\'sg-rec-bal-' + i + '-cam\').click()">📷 Cámara</button>'
@@ -7564,7 +7820,14 @@ function sgRecArtUpd(i, campo, v){
   // bultos × kg por bulto.
   it.lotes[0] = it.lotes[0] || {};
   if (campo === 'bultos') it.lotes[0].bultos = v;
-  if (campo === 'peso') it.lotes[0].kg_reales = v;
+  // LOS KILOS SALEN DE LA MULTIPLICACIÓN. Lo que se pesa es un bulto; los kilos
+  // de la partida son ese peso por la cantidad de bultos contados. Si todavía no
+  // se contaron, no hay kilos que calcular.
+  if (campo === 'peso_bulto' || campo === 'bultos') {
+    var pb = Number(it.peso_bulto) || 0, bl = Number(it.bultos) || 0;
+    it.peso = (pb > 0 && bl > 0) ? Math.round(pb * bl * 100) / 100 : '';
+    it.lotes[0].kg_reales = it.peso;
+  }
   // Si cambia el número, el OK que se dio antes era sobre otro número.
   if (SG._recOk) SG._recOk[i] = false;
   sgRecArtsTotales();
@@ -20912,7 +21175,15 @@ function admLoadAsientos() {
       // Extraer nro_factura de la descripción: "FAC-2026-0001 | Proveedor | 0016-00086384"
       var partes = (a.descripcion||'').split('|');
       var ref       = (a.ref_codigo || (partes[0]||'')).trim();
-      var nroFact   = partes.length >= 3 ? partes[partes.length-1].trim() : '—';
+      // EL NUMERO DE FACTURA. Se sacaba partiendo la descripcion por "|", que es
+      // el formato de los asientos de Puente Cordon. Los de San Geronimo se
+      // describen "Compra de mercaderia - Factura 1-23 - Partida 0034...", sin
+      // barras: la columna quedaba con un guion en todas las filas.
+      var nroFact   = partes.length >= 3 ? partes[partes.length-1].trim() : '';
+      if (!nroFact) {
+        var mFac = /Factura\s+([\w./-]+)/i.exec(a.descripcion || '');
+        nroFact = (mFac ? mFac[1] : (a.ref_codigo || '')).trim() || '—';
+      }
       var desc      = partes.length >= 2 ? partes[1].trim() : (a.descripcion||'');
       var estado = a.anulado
         ? '<span class="pa-badge pa-rojo-bg">Anulado</span>'
@@ -48381,7 +48652,15 @@ function sgctLoadAsientos() {
       // Extraer nro_factura de la descripción: "FAC-2026-0001 | Proveedor | 0016-00086384"
       var partes = (a.descripcion||'').split('|');
       var ref       = (a.ref_codigo || (partes[0]||'')).trim();
-      var nroFact   = partes.length >= 3 ? partes[partes.length-1].trim() : '—';
+      // EL NUMERO DE FACTURA. Se sacaba partiendo la descripcion por "|", que es
+      // el formato de los asientos de Puente Cordon. Los de San Geronimo se
+      // describen "Compra de mercaderia - Factura 1-23 - Partida 0034...", sin
+      // barras: la columna quedaba con un guion en todas las filas.
+      var nroFact   = partes.length >= 3 ? partes[partes.length-1].trim() : '';
+      if (!nroFact) {
+        var mFac = /Factura\s+([\w./-]+)/i.exec(a.descripcion || '');
+        nroFact = (mFac ? mFac[1] : (a.ref_codigo || '')).trim() || '—';
+      }
       var desc      = partes.length >= 2 ? partes[1].trim() : (a.descripcion||'');
       var estado = a.anulado
         ? '<span class="pa-badge pa-rojo-bg">Anulado</span>'
