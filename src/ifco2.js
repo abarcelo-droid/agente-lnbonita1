@@ -118,9 +118,14 @@
       var conteos = (S.items || S || []);
       var sinContar = conteos.filter(function (c) { return c.falta_cargar; });
 
-      function kpi(lbl, val, unit, icon, acc, sub) {
-        return '<div class="kpi ' + (acc || '') + '"><div class="k-top"><div class="k-lbl">' + lbl + '</div><div class="k-ic">' + ic(icon) + '</div></div>'
-          + '<div class="k-val">' + nf(val) + '<span class="u">' + unit + '</span></div><div class="k-sub">' + sub + '</div></div>';
+      // drill = clave de /kpi-detalle. Con ella la tarjeta se vuelve clickeable y abre el
+      // desglose de cómo se calculó ese número.
+      function kpi(lbl, val, unit, icon, acc, sub, drill) {
+        return '<div class="kpi ' + (acc || '') + (drill ? ' kpi-drill' : '') + '"'
+          + (drill ? ' role="button" tabindex="0" title="Ver cómo se calcula" onclick="__ifco2KpiDetalle(\'' + drill + '\')" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();__ifco2KpiDetalle(\'' + drill + '\')}"' : '')
+          + '><div class="k-top"><div class="k-lbl">' + lbl + '</div><div class="k-ic">' + ic(icon) + '</div></div>'
+          + '<div class="k-val">' + nf(val) + '<span class="u">' + unit + '</span></div>'
+          + '<div class="k-sub">' + sub + (drill ? '<span class="k-drill">' + ic('search') + ' ver cálculo</span>' : '') + '</div></div>';
       }
 
       var controles = [];
@@ -160,13 +165,10 @@
         '<div class="vh"><div><h2>' + ic('gauge') + ' Resumen operativo</h2><div class="vh-sub">Posición de cajones IFCO y controles pendientes</div></div>'
         + '<div class="actions"><button class="btn btn-ghost btn-sm" onclick="__ifco2Nav(\'conteo\')">' + ic('clipboard-check') + ' Conteo físico</button></div></div>'
         + (sinContar.length ? '<div class="banner warn">' + ic('alert-triangle') + '<div><b>' + sinContar.length + ' conteos físicos sin cargar.</b> Todos los jueves a las 10:00 se pide el conteo de cada depósito para cuadrar el stock teórico contra el real.</div><button class="btn btn-ghost btn-sm" style="margin-left:auto" onclick="__ifco2Nav(\'conteo\')">Ir a conteo ' + ic('arrow-right') + '</button></div>' : '')
-        + '<div class="kpis" style="grid-template-columns:repeat(6,1fr)">'
-        + kpi('Piso San Gerónimo', s.piso, 'caj.', 'warehouse', '', 'en el piso de SG')
-        + kpi('En proveedores', s.en_proveedores, 'caj.', 'factory', 'acc-slate', 'bajo responsabilidad ext.')
-        + kpi('En tránsito a súper', s.en_transito, 'caj.', 'truck', 'acc-warn', 'despachados sin sellar')
-        + kpi('Bajo responsabilidad', s.bajo_responsabilidad, 'caj.', 'shield-check', 'acc-gold', 'total a rendir a IFCO')
-        + kpi('Pérdidas acumuladas', s.perdidas_acumuladas, 'caj.', 'alert-octagon', 'acc-err', 'multa asociada')
-        + kpi('Retirado del pool', s.retirado_total, 'caj.', 'package', 'acc-ok', 'histórico total')
+        + '<div class="kpis" style="grid-template-columns:repeat(3,1fr)">'
+        + kpi('Piso San Gerónimo', s.piso, 'caj.', 'warehouse', '', 'en el piso de SG', 'piso')
+        + kpi('En proveedores', s.en_proveedores, 'caj.', 'factory', 'acc-slate', 'en galpones asociados', 'proveedores')
+        + kpi('En tránsito a súper', s.en_transito, 'caj.', 'truck', 'acc-warn', 'despachados sin sellar', 'transito')
         + '</div>'
         + '<div class="split" style="margin-bottom:14px">'
         + '<div class="card"><div class="card-h"><h3>' + ic('list-checks') + ' Controles pendientes</h3>'
@@ -432,6 +434,59 @@
       .then(function (r) { return r.json(); })
       .then(function (d) { if (d && d.ok) { toast('✓ Retiro completado (' + d.cantidad_real + ' caj.)', 'ok'); nav('retiros'); } else { toast((d && d.error) || 'Error al completar', 'er'); } })
       .catch(function () { toast('Error de red al completar', 'er'); });
+  };
+
+  // Drill-down de un KPI del Resumen: de dónde sale ese número, término por término.
+  // Reusa el drawer de despachos (#dwDespacho), que es genérico.
+  var KPI_META = {
+    piso:        { titulo: 'Piso San Gerónimo',   sub: 'Cajones en el piso de SG',            icon: 'warehouse' },
+    proveedores: { titulo: 'En proveedores',      sub: 'Cajones en los galpones asociados',   icon: 'factory' },
+    transito:    { titulo: 'En tránsito a súper', sub: 'Despachados desde SG y sin sellar',   icon: 'truck' }
+  };
+  window.__ifco2KpiDetalle = function (kpi) {
+    var meta = KPI_META[kpi] || { titulo: kpi, sub: '', icon: 'gauge' };
+    var dw = document.getElementById('dwDespacho'); if (!dw) return;
+    dw.innerHTML = '<div class="detail"><div class="d-head"><div class="dn">' + esc(meta.titulo) + '</div></div>'
+      + '<div style="padding:20px">' + empty('Calculando…') + '</div></div>';
+    dw.classList.add('on'); dw.setAttribute('aria-hidden', 'false');
+    document.getElementById('dwScrim').classList.add('on'); icons();
+
+    fetchJSON(API + '/kpi-detalle/' + kpi).then(function (d) {
+      if (!d || d.error) { dw.querySelector('.detail').innerHTML = '<div style="padding:20px">' + empty(d && d.error ? d.error : 'No se pudo calcular') + '</div>'; return; }
+      // Acumulado corriendo: deja ver en qué término el número se va a donde se va.
+      var acum = 0;
+      var filas = (d.componentes || []).map(function (c) {
+        acum += (c.signo === '+' ? c.valor : -c.valor);
+        return '<div class="di" style="align-items:flex-start">'
+          + '<div class="l" style="display:flex;gap:8px"><span class="tnum" style="font-weight:700;color:' + (c.signo === '+' ? 'var(--i-ok)' : 'var(--i-err)') + '">' + c.signo + '</span>'
+          + '<span>' + esc(c.label) + '<div class="sub2 muted" style="margin-top:3px;max-width:34ch;white-space:normal;line-height:1.35">' + esc(c.ayuda || '') + '</div></span></div>'
+          + '<div class="v tnum" style="text-align:right">' + nf(c.valor)
+          + '<div class="sub2 muted tnum" style="font-weight:400">= ' + nf(acum) + '</div></div></div>';
+      }).join('');
+
+      var items = (d.items || []);
+      var itemsHtml = items.length
+        ? '<div class="sectlabel" style="padding:14px 16px 6px">' + esc(d.items_titulo || 'Detalle') + '</div>'
+          + '<div class="dl">' + items.map(function (it) {
+              return '<div class="di"><div class="l">' + esc(it.label)
+                + (it.sub ? '<div class="sub2 muted">' + esc(it.sub) + '</div>' : '') + '</div>'
+                + '<div class="v tnum ' + (it.valor < 0 ? 'num-neg' : '') + '">' + nf(it.valor) + '</div></div>';
+            }).join('') + '</div>'
+        : '';
+
+      dw.querySelector('.detail').innerHTML =
+        '<div class="d-head"><div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px">'
+        + '<div><div class="dn">' + esc(meta.titulo) + '</div><div class="dm">' + ic(meta.icon) + ' ' + esc(meta.sub) + '</div></div>'
+        + '<button class="btn btn-icon" style="background:rgba(255,255,255,.14);color:#fff;border:0" onclick="__ifco2Close()">' + ic('x') + '</button></div></div>'
+        + '<div style="padding:14px 16px;border-bottom:1px solid var(--i-line);display:flex;align-items:baseline;justify-content:space-between;gap:10px">'
+        + '<span class="muted" style="font-size:12px">Total</span>'
+        + '<b class="tnum ' + (d.total < 0 ? 'num-neg' : '') + '" style="font-size:22px">' + nf(d.total) + ' <span class="muted" style="font-size:12px;font-weight:400">caj.</span></b></div>'
+        + '<div class="sectlabel" style="padding:14px 16px 6px">Cómo se calcula</div>'
+        + '<div class="dl">' + filas + '</div>'
+        + (d.total < 0 ? '<div style="margin:12px 16px" class="banner err">' + ic('alert-triangle') + '<div>Este total da <b>negativo</b>, y físicamente no puede serlo. Casi siempre significa que faltan cargar movimientos de entrada (retiros desde IFCO) o que hay egresos duplicados. Mirá qué término lo empuja.</div></div>' : '')
+        + itemsHtml;
+      icons();
+    });
   };
 
   // Cerrar una diferencia de recepción parcial. NO mueve stock: solo saca los cajones del
