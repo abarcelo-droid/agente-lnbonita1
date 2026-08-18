@@ -6752,7 +6752,7 @@ router.get('/reportes/resultado-periodo', requireAuth, (req, res) => {
 // no toca sg_lotes, recalcCostoLote, OC nacional, despacho ni factura. El USD + tc
 // viven solo acá; la conversión USD→ARS es intra-módulo. Enganche al lote = F2.
 // ══════════════════════════════════════════════════════════════════════════════
-const EMB_CONCEPTOS = ['costo_mercaderia','anticipo_impuesto','gastos_despachante','fletes','diferencia_cotizacion','gastos_bancarios','iva_credito_computable','percepcion_iva_computable','percepcion_iibb'];
+const EMB_CONCEPTOS = ['costo_mercaderia','anticipo_impuesto','gastos_despachante','fletes','gastos_bancarios','iva_credito_computable','percepcion_iva_computable','percepcion_iibb'];
 const EMB_CREDITOS  = new Set(['iva_credito_computable','percepcion_iva_computable','percepcion_iibb']);
 
 // Cálculo del embarque (server-side). Todos los montos se llevan a ARS con tc (real ?? estimado)
@@ -6829,14 +6829,20 @@ function calcEmbarque(emb, costos, soloEstimado) {
   const tc = tc_por_concepto.costo_mercaderia != null ? tc_por_concepto.costo_mercaderia : override;
   const neto  = bruto - creditos;
   const cajas = Number(emb.cantidad_cajas) || 0;
-  const merma = Number(emb.merma_esperada_pct) || 0;
-  const precioRef = emb.precio_referencia != null ? Number(emb.precio_referencia) : null;
   const costo_caja_neto        = cajas > 0 ? neto  / cajas : null;
   const costo_caja_c_impuestos = cajas > 0 ? bruto / cajas : null;
-  const costo_caja_vendible    = (costo_caja_neto != null && merma < 100) ? costo_caja_neto / (1 - merma / 100) : costo_caja_neto;
-  const margen_proyectado_pct  = (precioRef && precioRef > 0 && costo_caja_vendible != null) ? (precioRef - costo_caja_vendible) / precioRef * 100 : null;
-  return { bruto, creditos, neto, costo_caja_neto, costo_caja_c_impuestos, costo_caja_vendible,
-    margen_proyectado_pct, total_estimado, total_real, gap_total, tc_aplicado: tc,
+  // La diferencia de cotización NO se carga como rubro: sale sola. Es el desvío de los
+  // rubros en DÓLARES (pagaste distinto a lo que esperabas porque el dólar se movió); el de
+  // los rubros en pesos es otra cosa —facturaron distinto— y va separado.
+  // No se pueden separar más fino: el real se carga en pesos, así que no sabemos si además
+  // cambió el monto en dólares.
+  let dif_cotizacion = 0, dif_costos = 0;
+  detalle.forEach(d => {
+    if (d.gap == null) return;
+    if ((d.moneda || 'ARS') === 'USD') dif_cotizacion += d.gap; else dif_costos += d.gap;
+  });
+  return { bruto, creditos, neto, costo_caja_neto, costo_caja_c_impuestos,
+    dif_cotizacion, dif_costos, total_estimado, total_real, gap_total, tc_aplicado: tc,
     tc_por_concepto, tc_manual: override != null, detalle };
 }
 
@@ -6908,10 +6914,15 @@ router.get('/embarques', requireAuth, (req, res) => {
     const embs = db.prepare(`SELECT e.*, p.razon_social AS proveedor_nombre
       FROM sg_embarques e LEFT JOIN sg_proveedores p ON p.id=e.proveedor_id
       WHERE e.activo=1 ORDER BY e.id DESC`).all();
+    const kgPorEmb = db.prepare(`SELECT embarque_id, COALESCE(SUM(cajas * COALESCE(kg_por_bulto,0)),0) kg
+      FROM sg_embarque_lineas WHERE activo=1 GROUP BY embarque_id`).all()
+      .reduce((m, r) => { m[r.embarque_id] = r.kg; return m; }, {});
     const data = embs.map(e => {
       const calc = calcEmbarque(e, embCostos(db, e.id));
+      const kg = kgPorEmb[e.id] || 0;
       return { ...e, costo_caja_neto: calc.costo_caja_neto, costo_caja_c_impuestos: calc.costo_caja_c_impuestos,
-        costo_caja_vendible: calc.costo_caja_vendible, margen_proyectado_pct: calc.margen_proyectado_pct,
+        costo_kg_neto: kg > 0 ? calc.neto / kg : null, kg_totales: kg,
+        dif_cotizacion: calc.dif_cotizacion, dif_costos: calc.dif_costos,
         neto: calc.neto, bruto: calc.bruto, creditos: calc.creditos };
     });
     res.json({ ok: true, data });
@@ -7149,7 +7160,7 @@ function embCostosDelBody(body) {
   }));
 }
 
-const EMB_HEADER_COLS = ['nombre','proveedor_id','pais_origen','incoterm','certificado_origen_mercosur','ncm','moneda','tc_estimado','tc_real','estado','cantidad_cajas','merma_esperada_pct','precio_referencia','fecha_etd','fecha_eta','observaciones'];
+const EMB_HEADER_COLS = ['nombre','proveedor_id','pais_origen','incoterm','certificado_origen_mercosur','ncm','moneda','tc_estimado','tc_real','estado','cantidad_cajas','fecha_etd','fecha_eta','observaciones'];
 function embHeaderVals(b) {
   return {
     nombre: val(b.nombre),
@@ -7163,8 +7174,6 @@ function embHeaderVals(b) {
     tc_real: (b.tc_real != null && b.tc_real !== '') ? Number(b.tc_real) : null,
     estado: EMB_ESTADOS.has(b.estado) ? b.estado : 'cotizacion',
     cantidad_cajas: (b.cantidad_cajas != null && b.cantidad_cajas !== '') ? Math.round(Number(b.cantidad_cajas)) : null,
-    merma_esperada_pct: (b.merma_esperada_pct != null && b.merma_esperada_pct !== '') ? Number(b.merma_esperada_pct) : 0,
-    precio_referencia: (b.precio_referencia != null && b.precio_referencia !== '') ? Number(b.precio_referencia) : null,
     fecha_etd: val(b.fecha_etd),
     fecha_eta: val(b.fecha_eta),
     observaciones: val(b.observaciones)
@@ -7185,14 +7194,75 @@ router.post('/embarques', requireAdmin, (req, res) => {
         (${EMB_HEADER_COLS.join(', ')}, creado_por)
         VALUES (${EMB_HEADER_COLS.map(() => '?').join(', ')}, ?)`).run(...EMB_HEADER_COLS.map(k => h[k]), uid(req));
       const embId = info.lastInsertRowid;
+      // Las columnas de pago van también acá: si solo estuvieran en el PUT, un embarque
+      // recién creado perdería su condición de pago hasta el primer guardado.
       const ins = db.prepare(`INSERT INTO sg_embarque_costos
-        (embarque_id, concepto, es_credito, moneda, monto_estimado, monto_real, observaciones, creado_por)
-        VALUES (?,?,?,?,?,?,?,?)`);
-      for (const c of costos) ins.run(embId, c.concepto, c.es_credito, c.moneda, c.monto_estimado, c.monto_real, c.observaciones, uid(req));
+        (embarque_id, concepto, es_credito, moneda, monto_estimado, monto_real,
+         moneda_real, pago_ancla, pago_dias, pago_fecha, observaciones, creado_por)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`);
+      for (const c of costos) ins.run(embId, c.concepto, c.es_credito, c.moneda, c.monto_estimado, c.monto_real,
+        c.moneda_real, c.pago_ancla, c.pago_dias, c.pago_fecha, c.observaciones, uid(req));
       embSyncLineas(db, embId, b, uid(req), h.estado);   // F5 — desglose de productos + cantidad_cajas derivada
       return embId;
     });
     res.json({ ok: true, data: { id: Number(tx()) } });
+  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+
+// POST /embarques/:id/duplicar — arrancar un embarque nuevo desde uno anterior.
+// Muchos camiones se le piden al mismo proveedor con la misma estructura de costos (flete,
+// despachante, condiciones de pago), así que copiarla evita volver a cargarla entera.
+//
+// Se copia la ESTRUCTURA, no la historia: van los montos estimados y las condiciones de
+// pago; NO van los montos reales, las fechas del viaje, el TC real ni el manual, el estado,
+// los documentos ni los lotes. El nuevo nace en cotización, limpio.
+router.post('/embarques/:id/duplicar', requireAdmin, (req, res) => {
+  const db = getDb();
+  try {
+    const orig = db.prepare('SELECT * FROM sg_embarques WHERE id=? AND activo=1').get(req.params.id);
+    if (!orig) return res.status(404).json({ ok: false, error: 'Embarque no encontrado' });
+    const nombre = val(req.body && req.body.nombre) || ((orig.nombre || 'Embarque') + ' (copia)');
+    const conLineas = req.body && req.body.con_lineas !== false;   // por defecto sí
+
+    const tx = db.transaction(() => {
+      const info = db.prepare(`INSERT INTO sg_embarques
+        (nombre, proveedor_id, pais_origen, incoterm, certificado_origen_mercosur, ncm, moneda,
+         estado, creado_por)
+        VALUES (?,?,?,?,?,?,?, 'cotizacion', ?)`)
+        .run(nombre, orig.proveedor_id, orig.pais_origen, orig.incoterm,
+             orig.certificado_origen_mercosur, orig.ncm, orig.moneda, uid(req));
+      const nuevoId = info.lastInsertRowid;
+
+      // Costos: estimado + condición de pago. El real no se copia (es de aquel viaje), y la
+      // fecha fija tampoco: una fecha absoluta del embarque anterior no aplica a este.
+      const cs = db.prepare('SELECT * FROM sg_embarque_costos WHERE embarque_id=? AND activo=1 ORDER BY id').all(orig.id);
+      const insC = db.prepare(`INSERT INTO sg_embarque_costos
+        (embarque_id, concepto, es_credito, moneda, monto_estimado, moneda_real,
+         pago_ancla, pago_dias, observaciones, creado_por)
+        VALUES (?,?,?,?,?,?,?,?,?,?)`);
+      for (const c of cs) {
+        insC.run(nuevoId, c.concepto, c.es_credito, c.moneda, c.monto_estimado, c.moneda_real,
+          c.pago_ancla === 'fija' ? null : c.pago_ancla, c.pago_ancla === 'fija' ? null : c.pago_dias,
+          c.observaciones, uid(req));
+      }
+
+      let lineas = 0;
+      if (conLineas) {
+        const ls = db.prepare('SELECT * FROM sg_embarque_lineas WHERE embarque_id=? AND activo=1 ORDER BY id').all(orig.id);
+        const insL = db.prepare(`INSERT INTO sg_embarque_lineas
+          (embarque_id, producto_id, envase_id, kg_por_bulto, cajas, calidad, calibre, observaciones, precio_unitario_usd, creado_por)
+          VALUES (?,?,?,?,?,?,?,?,?,?)`);
+        for (const l of ls) {
+          insL.run(nuevoId, l.producto_id, l.envase_id, l.kg_por_bulto, l.cajas, l.calidad, l.calibre,
+            l.observaciones, l.precio_unitario_usd, uid(req));
+          lineas++;
+        }
+        if (lineas) db.prepare('UPDATE sg_embarques SET cantidad_cajas=? WHERE id=?')
+          .run(ls.reduce((a, l) => a + (Number(l.cajas) || 0), 0), nuevoId);
+      }
+      return { id: Number(nuevoId), costos: cs.length, lineas };
+    });
+    res.json({ ok: true, data: tx() });
   } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
 });
 
