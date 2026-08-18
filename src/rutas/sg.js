@@ -5507,7 +5507,14 @@ router.get('/pagos/cuentas', requireAuth, (req, res) => {
       ...c,
       puedo: puedeMoverCuenta(req.user, c.id) ? 1 : 0,
     }));
-    res.json({ ok: true, data: conDueno });
+    // La cuenta de Proveedores, para que la pantalla pueda MOSTRAR el asiento
+    // antes de confirmar (ver CLAUDE.md). El asiento lo sigue armando el
+    // backend; esto es para que el preview del front lo espeje y no lo invente.
+    const ctaProv = cuentaProveedoresDeModelo(db);
+    const prov = ctaProv
+      ? db.prepare('SELECT id, codigo, nombre FROM sg_cuentas WHERE id=?').get(ctaProv)
+      : null;
+    res.json({ ok: true, data: conDueno, proveedores: prov || null });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 

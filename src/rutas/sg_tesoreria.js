@@ -46,6 +46,17 @@ function requireAdmin(req, res, next) {
   next();
 }
 
+// OPERAR NO ES SER ADMIN (ver CLAUDE.md). requireAdmin queda para PARAMETRIZAR
+// —dar de alta una cuenta, una chequera, decidir quién toca una caja—. El
+// trabajo del día —recibir un cheque, depositarlo, conciliar— pide sesión, y el
+// nivel lo decide exigirNivel mirando la URL contra ensure_api_prefijos.js.
+function requireAuth(req, res, next) {
+  const u = getUser(req);
+  if (!u || !u.id) return res.status(401).json({ ok: false, error: 'No autenticado' });
+  req._user = u;
+  next();
+}
+
 // Corre ANTES que cualquier endpoint: si el pedido viene con OTRA empresa, corta
 // con 403 y dice cuál esperaba.
 router.use((req, res, next) => {
@@ -418,18 +429,45 @@ router.patch('/cheques-propios/:id/estado', requireAdmin, (req, res) => {
 router.get('/cheques-terceros', (req, res) => {
   try {
     const { estado } = req.query;
-    let sql = `SELECT * FROM sg_fin_cheques_terceros WHERE 1 = 1`;
+    let sql = `SELECT ct.*, c.nombre AS cuenta_destino_nombre
+      FROM sg_fin_cheques_terceros ct
+      LEFT JOIN sg_fin_cuentas c ON c.id = ct.cuenta_destino
+      WHERE 1 = 1`;
     const params = [];
-    if (estado) { sql += ' AND estado=?'; params.push(estado); }
-    sql += ' ORDER BY fecha_vto ASC, id DESC';
-    res.json({ ok: true, data: db.prepare(sql).all(...params) });
+    if (estado) { sql += ' AND ct.estado=?'; params.push(estado); }
+    sql += ' ORDER BY ct.fecha_vto ASC, ct.id DESC';
+    const filas = db.prepare(sql).all(...params);
+    // Un cheque de tercero vale por lo que dice el papel HASTA que vence. Se
+    // marca el que ya venció y sigue en cartera: es plata que había que
+    // depositar y quedó en un cajón.
+    const hoy = db.prepare("SELECT date('now','localtime') d").get().d;
+    res.json({ ok: true, data: filas.map((x) => ({
+      ...x,
+      vencido: (x.estado === 'en_cartera' && x.fecha_vto && x.fecha_vto < hoy) ? 1 : 0,
+    })) });
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
-router.post('/cheques-terceros', requireAdmin, (req, res) => {
+// Recibir un cheque de un cliente es OPERAR: lo hace quien atiende el mostrador,
+// no el dueño. El nivel lo decide exigirNivel por la URL.
+router.post('/cheques-terceros', requireAuth, (req, res) => {
   const { banco, nro_cheque, librador, monto, fecha_recepcion, fecha_vto, notas, cuenta_contable_id } = req.body || {};
   if (!monto) return res.status(400).json({ ok: false, error: 'Monto requerido' });
+  if (!(parseFloat(monto) > 0)) return res.status(400).json({ ok: false, error: 'El importe tiene que ser mayor a cero' });
   try {
+    // EL MISMO CHEQUE NO SE CARGA DOS VECES. Acá el número solo no alcanza —los
+    // libradores son distintos y repiten numeración—, así que la identidad es
+    // banco + número + librador, que es lo que está impreso en el papel.
+    if (nro_cheque && librador) {
+      const ya = db.prepare(`SELECT id, estado, monto FROM sg_fin_cheques_terceros
+        WHERE COALESCE(banco,'')=COALESCE(?,'') AND nro_cheque=? AND librador=?`)
+        .get(banco||null, String(nro_cheque), String(librador));
+      if (ya) {
+        return res.status(400).json({ ok: false,
+          error: 'Ese cheque ya está cargado: N° ' + nro_cheque + ' de ' + librador
+               + ' por ' + ya.monto + ' (' + ya.estado + ').' });
+      }
+    }
     const r = db.prepare(`INSERT INTO sg_fin_cheques_terceros (banco, nro_cheque, librador, monto, fecha_recepcion, fecha_vto, notas, cuenta_contable_id)
       VALUES (?,?,?,?,?,?,?,?)`)
       .run(banco||null, nro_cheque||null, librador||null, parseFloat(monto),
@@ -439,14 +477,97 @@ router.post('/cheques-terceros', requireAdmin, (req, res) => {
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
-router.patch('/cheques-terceros/:id/estado', requireAdmin, (req, res) => {
+router.patch('/cheques-terceros/:id/estado', requireAuth, (req, res) => {
   const { estado } = req.body || {};
-  const estados = ['en_cartera','depositado','endosado','rechazado'];
-  if (!estados.includes(estado)) return res.status(400).json({ ok: false, error: 'Estado inválido' });
+  // 'depositado' NO está: depositar mueve plata a una cuenta, y eso tiene su
+  // propia dirección. Si se pudiera marcar acá, el cheque figuraría depositado
+  // y el banco no se habría movido nunca.
+  const estados = ['en_cartera','endosado','rechazado'];
+  if (!estados.includes(estado)) {
+    return res.status(400).json({ ok: false, error: estado === 'depositado'
+      ? 'Para depositar un cheque está el botón Depositar, que pregunta en qué cuenta entra.'
+      : (estado === 'anulado'
+          ? 'Para anular un cheque está el botón Anular, que pide el permiso correspondiente.'
+          : 'Estado inválido') });
+  }
   try {
-    db.prepare('UPDATE sg_fin_cheques_terceros SET estado=? WHERE id=?').run(estado, req.params.id);
+    const c = db.prepare('SELECT * FROM sg_fin_cheques_terceros WHERE id=?').get(req.params.id);
+    if (!c) return res.status(404).json({ ok: false, error: 'Cheque no encontrado' });
+    if (c.estado === 'anulado') {
+      return res.status(400).json({ ok: false, error: 'Ese cheque está anulado: no se le cambia el estado.' });
+    }
+    if (c.estado === 'depositado' && estado !== 'rechazado') {
+      return res.status(400).json({ ok: false,
+        error: 'Ese cheque ya se depositó. Si el banco lo devolvió, marcalo como rechazado.' });
+    }
+    db.transaction(() => {
+      db.prepare('UPDATE sg_fin_cheques_terceros SET estado=? WHERE id=?').run(estado, c.id);
+      // RECHAZADO DESPUÉS DE DEPOSITADO: el banco devolvió la plata que había
+      // acreditado. Sin sacar el movimiento, el saldo de la cuenta queda
+      // mintiendo con plata que nunca entró.
+      if (estado === 'rechazado' && c.estado === 'depositado') {
+        db.prepare("DELETE FROM sg_fin_movimientos WHERE referencia = ? AND cuenta_id = ?")
+          .run('CHT-' + c.id, c.cuenta_destino);
+        db.prepare('UPDATE sg_fin_cheques_terceros SET cuenta_destino=NULL WHERE id=?').run(c.id);
+      }
+    })();
     res.json({ ok: true });
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// ── DEPOSITAR UN CHEQUE DE TERCEROS ─────────────────────────────────────
+// Marcarlo "depositado" en una lista no hace entrar la plata a ningún lado. Se
+// pregunta EN QUÉ CUENTA entra y se le carga el movimiento, que es lo que hace
+// que el saldo del banco diga la verdad.
+router.post('/cheques-terceros/:id/depositar', requireAuth, (req, res) => {
+  try {
+    const u = getUser(req);
+    const c = db.prepare('SELECT * FROM sg_fin_cheques_terceros WHERE id=?').get(req.params.id);
+    if (!c) return res.status(404).json({ ok: false, error: 'Cheque no encontrado' });
+    if (c.estado !== 'en_cartera') {
+      return res.status(400).json({ ok: false,
+        error: 'Ese cheque no está en cartera: está ' + c.estado + '.' });
+    }
+    const cuenta = db.prepare('SELECT * FROM sg_fin_cuentas WHERE id=? AND activo=1')
+      .get(Number((req.body || {}).cuenta_fin_id));
+    if (!cuenta) return res.status(400).json({ ok: false, error: 'Elegí en qué cuenta se deposita' });
+    if (!puedeMoverCuenta(u, cuenta.id)) {
+      return res.status(403).json({ ok: false,
+        error: 'La cuenta "' + cuenta.nombre + '" tiene usuarios asignados y no estás entre ellos.' });
+    }
+    const fecha = (req.body && req.body.fecha) || db.prepare("SELECT date('now','localtime') d").get().d;
+    db.transaction(() => {
+      db.prepare("UPDATE sg_fin_cheques_terceros SET estado='depositado', cuenta_destino=? WHERE id=?")
+        .run(cuenta.id, c.id);
+      db.prepare(`INSERT INTO sg_fin_movimientos
+        (cuenta_id, fecha, tipo, concepto, monto, referencia, usuario_id)
+        VALUES (?,?, 'ingreso', ?,?,?,?)`).run(cuenta.id, fecha,
+        'Depósito cheque de terceros' + (c.nro_cheque ? ' N° ' + c.nro_cheque : '')
+          + (c.librador ? ' — ' + c.librador : ''),
+        c.monto, 'CHT-' + c.id, u ? u.id : null);
+    })();
+    res.json({ ok: true, data: { id: Number(c.id), cuenta: cuenta.nombre } });
+  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+
+// ANULAR: se cargó mal, o nunca existió. Por su propia dirección, que es la que
+// mira el control de niveles.
+router.post('/cheques-terceros/:id/anular', requireAuth, (req, res) => {
+  try {
+    const c = db.prepare('SELECT * FROM sg_fin_cheques_terceros WHERE id=?').get(req.params.id);
+    if (!c) return res.status(404).json({ ok: false, error: 'Cheque no encontrado' });
+    if (c.estado === 'anulado') return res.status(400).json({ ok: false, error: 'Ya estaba anulado' });
+    if (c.estado === 'depositado') {
+      return res.status(400).json({ ok: false,
+        error: 'Ese cheque ya se depositó y la plata entró a una cuenta. Si el banco lo devolvió, '
+             + 'marcalo como rechazado: eso saca el movimiento y deja el saldo bien.' });
+    }
+    const motivo = (req.body && req.body.motivo ? String(req.body.motivo) : '').trim();
+    db.prepare(`UPDATE sg_fin_cheques_terceros SET estado='anulado',
+      notas = TRIM(COALESCE(notas,'') || ' [ANULADO' || ? || ']') WHERE id=?`)
+      .run(motivo ? ': ' + motivo : '', c.id);
+    res.json({ ok: true, data: { id: Number(c.id) } });
+  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
 });
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -523,7 +644,18 @@ router.get('/conciliacion', (req, res) => {
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
-router.post('/conciliacion/extracto', requireAdmin, (req, res) => {
+// ── CONCILIAR ES OPERAR ───────────────────────────────────────────────────
+// Cruzar el extracto con el libro lo hace administración todos los meses. Con
+// requireAdmin, cada cierre dependía del dueño. El nivel del módulo decide, y
+// además la cuenta tiene que ser suya si tiene dueño.
+const cuentaDelCuerpo = (req) => Number((req.body || {}).cuenta_id);
+const cuentaDeLaLinea = (req) => {
+  const l = db.prepare('SELECT cuenta_id FROM sg_fin_extracto_lineas WHERE id=?')
+    .get(req.params.id || (req.body || {}).extracto_id);
+  return l ? Number(l.cuenta_id) : 0;
+};
+
+router.post('/conciliacion/extracto', requireCuenta(cuentaDelCuerpo), (req, res) => {
   const { cuenta_id, periodo, lineas } = req.body || {};
   if (!cuenta_id || !lineas?.length) return res.status(400).json({ ok: false, error: 'cuenta_id y lineas requeridos' });
   try {
@@ -541,7 +673,7 @@ router.post('/conciliacion/extracto', requireAdmin, (req, res) => {
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
-router.patch('/conciliacion/conciliar', requireAdmin, (req, res) => {
+router.patch('/conciliacion/conciliar', requireCuenta(cuentaDeLaLinea), (req, res) => {
   const { extracto_id, movimiento_id } = req.body || {};
   if (!extracto_id) return res.status(400).json({ ok: false, error: 'extracto_id requerido' });
   try {
@@ -554,7 +686,7 @@ router.patch('/conciliacion/conciliar', requireAdmin, (req, res) => {
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
-router.patch('/conciliacion/desconciliar', requireAdmin, (req, res) => {
+router.patch('/conciliacion/desconciliar', requireCuenta(cuentaDeLaLinea), (req, res) => {
   const { extracto_id } = req.body || {};
   if (!extracto_id) return res.status(400).json({ ok: false, error: 'extracto_id requerido' });
   try {
@@ -567,7 +699,7 @@ router.patch('/conciliacion/desconciliar', requireAdmin, (req, res) => {
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
-router.delete('/conciliacion/extracto/:id', requireAdmin, (req, res) => {
+router.delete('/conciliacion/extracto/:id', requireCuenta(cuentaDeLaLinea), (req, res) => {
   try {
     const linea = db.prepare('SELECT * FROM sg_fin_extracto_lineas WHERE id=?').get(req.params.id);
     if (linea?.movimiento_id) {
@@ -578,7 +710,7 @@ router.delete('/conciliacion/extracto/:id', requireAdmin, (req, res) => {
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
-router.post('/conciliacion/auto-match', requireAdmin, (req, res) => {
+router.post('/conciliacion/auto-match', requireCuenta(cuentaDelCuerpo), (req, res) => {
   const { cuenta_id, periodo } = req.body || {};
   if (!cuenta_id) return res.status(400).json({ ok:false, error:'cuenta_id requerido' });
   try {
